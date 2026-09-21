@@ -21,9 +21,14 @@ test('stdio MCP initializes, lists tools, and invokes offline discovery', async 
   try {
     await client.connect(transport);
     const listed = await client.listTools();
-    assert.equal(listed.tools.length, 11);
+    assert.equal(listed.tools.length, 12);
     assert.ok(listed.tools.some((tool) => tool.name === 'pcbpilot_pcb'));
     assert.ok(!listed.tools.some((tool) => tool.name === 'pcbpilot_debug'));
+
+    assert.ok(listed.tools.some((tool) => tool.name === 'pcbpilot_project_transfer'));
+    const rejectedOpen = await client.callTool({ name: 'pcbpilot_project_transfer', arguments: { operation: 'open', window: 'w', projectUuid: 'p' } });
+    assert.equal(rejectedOpen.isError, true);
+    assert.match(rejectedOpen.content[0].text, /acknowledge/);
 
     const allActions = await client.callTool({
       name: 'pcbpilot_actions',

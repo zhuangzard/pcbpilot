@@ -8,6 +8,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import {
   buildBlocksArgs,
+  buildProjectTransferArgs,
   buildActionCallArgs,
   buildWorkflowArgs,
   DOMAIN_NAMES,
@@ -87,6 +88,25 @@ function domainTool(domain) {
 
 const tools = [
   {
+    name: 'pcbpilot_project_transfer',
+    title: 'Open or export a native EasyEDA project',
+    description: 'Project-level operations through fixed official-API adapters. Open can discard unsaved data: save all documents and acknowledge explicitly. Export requires the expected project already active; writes a new epro2 archive with ZIP integrity and hash, never overwrites. No document routing required.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        operation: { type: 'string', enum: ['open', 'export'] },
+        window: { type: 'string', minLength: 1 },
+        projectUuid: { type: 'string', minLength: 1 },
+        pageUuid: { type: 'string', minLength: 1, description: 'For open only: wait for and open this schematic page, then verify both identities.' },
+        allowDiscardUnsaved: { type: 'boolean', description: 'For open only: explicit acknowledgement after saving all documents.' },
+        out: { type: 'string', description: 'For export only: new local .epro2 path, never overwritten.' },
+      },
+      required: ['operation', 'window', 'projectUuid'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+  },
+  {
     name: 'pcbpilot_health',
     title: 'EasyEDA connection health',
     description: 'Check the local daemon and connected EasyEDA Pro windows.',
@@ -155,6 +175,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: input = {} } = request.params;
   try {
+    if (name === 'pcbpilot_project_transfer') {
+      return toMcpResult(await runEasyeda(buildProjectTransferArgs(input), 90_000));
+    }
     if (name === 'pcbpilot_health') {
       return toMcpResult(await runEasyeda(['daemon', 'health'], 30_000));
     }

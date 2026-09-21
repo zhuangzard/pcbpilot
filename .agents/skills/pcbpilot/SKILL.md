@@ -63,6 +63,8 @@ metadata:
 先查状态，不盲目重复创建。返回 `UNKNOWN_ACTION` 时检查连接器是否实现此动作；健康检查的
 版本兼容不能证明 handler 存在。其他 MCP 写操作仍要求真实 `project` 和 `doc`；不得推广此例外。
 
+工程级跨项目打开及原生 `.epro2` 导出见 [工程操作](references/project-import.md#工程级打开与原生导出)；页面打开不替代工程切换。
+
 ## 按任务加载
 
 | 任务 | 读取 |

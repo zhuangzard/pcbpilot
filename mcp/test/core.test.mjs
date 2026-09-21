@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildBlocksArgs,
+  buildProjectTransferArgs,
   buildCallArgs,
   buildActionCallArgs,
   buildWorkflowArgs,
@@ -80,4 +81,14 @@ test('other mutations still require both existing targets; reads preserve routin
   }
   assert.deepEqual(buildActionCallArgs({ name: 'project.current', mutates: false }, { window: 'W' }),
     ['call', 'project.current', '--window', 'W']);
+});
+
+test('project transfer preserves project identity and requires explicit discard acknowledgement', () => {
+  const input = { operation: 'open', window: 'w', projectUuid: 'p' };
+  assert.throws(() => buildProjectTransferArgs(input), /acknowledge/);
+  assert.deepEqual(buildProjectTransferArgs({ ...input, allowDiscardUnsaved: true }), ['project','open','--window','w','--project-uuid','p','--allow-discard-unsaved']);
+  assert.deepEqual(buildProjectTransferArgs({ ...input, operation:'export', out:'test project.epro2' }), ['project','export','--window','w','--project-uuid','p','--out','test project.epro2']);
+  assert.throws(() => buildProjectTransferArgs({ ...input, operation:'export', out:'wrong.zip' }), /epro2/);
+  assert.throws(() => buildProjectTransferArgs({ ...input, project:'wrong', allowDiscardUnsaved:true }), /routing/);
+  assert.throws(() => buildProjectTransferArgs({ ...input, window:' ', allowDiscardUnsaved:true }), /window/);
 });

@@ -159,3 +159,24 @@ export function toMcpResult(execution) {
   }
   return result;
 }
+
+// Project-level transfer has no existing-document routing prerequisite.
+export function buildProjectTransferArgs(input = {}) {
+  for (const key of ['window', 'projectUuid']) {
+    if (typeof input[key] !== 'string' || !input[key].trim()) throw new Error(`${key} is required`);
+  }
+  if (input.project || input.doc) throw new Error('Use projectUuid/window, not project/doc routing');
+  const args = ['project', input.operation, '--window', input.window, '--project-uuid', input.projectUuid];
+  if (input.operation === 'open') {
+    if (input.allowDiscardUnsaved !== true) throw new Error('Save all documents first and explicitly acknowledge allowDiscardUnsaved');
+    if (input.out) throw new Error('out applies only to export');
+    args.push('--allow-discard-unsaved');
+    if (input.pageUuid) args.push('--page-uuid', input.pageUuid);
+  } else if (input.operation === 'export') {
+    if (typeof input.out !== 'string' || !input.out.toLowerCase().endsWith('.epro2')) throw new Error('out must be a new .epro2 file');
+    if (input.pageUuid) throw new Error('pageUuid applies only to open');
+    if (input.allowDiscardUnsaved) throw new Error('allowDiscardUnsaved applies only to open');
+    args.push('--out', input.out);
+  } else throw new Error('operation must be open or export');
+  return args;
+}
