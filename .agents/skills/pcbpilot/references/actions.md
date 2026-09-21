@@ -246,6 +246,15 @@ EasyEDA 交互界面兜底。能力边界与未来 typed 验收见 [project-impo
 删除旧支路、创建新支路并回读；目标 finding 必须消失，范围外对象与旧 finding 必须不变。
 部分写入如实返回，不能重试或声称回滚。只由 `sch layout-edit --playbook` 生成；普通修线不手写。
 
+## 工程打开与原生导出
+
+| Action | 输入 | 结果与约束 |
+|---|---|---|
+| `project.open` | `projectUuid`、`allowDiscardUnsaved:true`，可选 `pageUuid` | 官方打开后核对工程；指定原理图页时等待树就绪并核对页面；先保存所有文档 |
+| `project.export` | `projectUuid` | 仅导出当前匹配工程，前后核对身份；返回 `uuid/format/size/base64`，最大 16 MiB |
+
+CLI `project open --project-uuid` 与 `project export` 封装上述 action；导出 CLI 负责 ZIP/CRC 校验、禁止覆盖与 SHA-256。MCP 使用 `pcbpilot_project_transfer`。需要包含 handler 的连接器，无调试脚本回退；具体参数与恢复验证边界见 [project-import.md](project-import.md)。
+
 ## 原生原理图 DRC 的判定与覆盖
 
 `schematic.drc.check` 的 `passed` / `nativePassed` 采用宿主布尔重载在指定 `strict` 下的判定。详细模式另取统计，两次 SDK 读取不是原子快照；检查期间不要并发修改工程。非严格通过并不代表零告警。

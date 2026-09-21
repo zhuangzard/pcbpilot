@@ -64,6 +64,21 @@ func AllActions() []ActionSpec {
 			Outputs:     []string{"uuid", "friendlyName", "projectName", "created", "opened", "partial when creation succeeded but requested open failed"},
 		},
 		{
+			Name: "project.open", Domain: DomainProject, Phase: 1,
+			Mutates: true, NeedsWindow: true, NeedsConfirm: true,
+			Description: "Open a project through the official API and verify its identity. Can discard unsaved data: save all documents first and pass allowDiscardUnsaved:true. Optional schematic page waits for tree readiness and verifies page/project identity. No debug fallback.",
+			Inputs:      []string{"projectUuid", "allowDiscardUnsaved (required true)", "pageUuid optional"},
+			Outputs:     []string{"uuid", "friendlyName", "opened", "verified", "documentUuid optional", "documentVerified optional"},
+			VerifyWith:  []string{"project.current", "document.current"},
+		},
+		{
+			Name: "project.export", Domain: DomainProject, Phase: 1, NeedsWindow: true,
+			Description: "Export the active project as native epro2 bytes; checks project identity before and after export, bounds payload to 16 MiB. Save first. CLI validates ZIP/CRC and writes a new file; export does not verify restore.",
+			Inputs:      []string{"projectUuid"},
+			Outputs:     []string{"uuid", "format", "size", "base64"},
+			VerifyWith:  []string{"project.current"},
+		},
+		{
 			Name:        "document.current",
 			Domain:      DomainDocument,
 			Phase:       1,

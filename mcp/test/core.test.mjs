@@ -92,3 +92,13 @@ test('project transfer preserves project identity and requires explicit discard 
   assert.throws(() => buildProjectTransferArgs({ ...input, project:'wrong', allowDiscardUnsaved:true }), /routing/);
   assert.throws(() => buildProjectTransferArgs({ ...input, window:' ', allowDiscardUnsaved:true }), /window/);
 });
+
+test('catalogued project transfers enforce window, identity and acknowledgement', () => {
+  for (const name of ['project.open', 'project.export']) {
+    const action = { name, mutates: name === 'project.open' };
+    const input = { window: 'w', payload: { projectUuid: 'p', allowDiscardUnsaved: true } };
+    assert.ok(buildActionCallArgs(action, input).includes(name));
+    for (const bad of [{}, { ...input, window: '' }, { ...input, project: 'old' }, { ...input, doc: 'old' }, { window: 'w', payload: {} }]) assert.throws(() => buildActionCallArgs(action, bad));
+  }
+  assert.throws(() => buildActionCallArgs({ name: 'project.open', mutates: true }, { window: 'w', payload: { projectUuid: 'p', allowDiscardUnsaved: 'true' } }));
+});

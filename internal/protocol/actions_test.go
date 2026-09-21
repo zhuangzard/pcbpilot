@@ -143,3 +143,23 @@ func TestPcbOutlineAndOriginContracts(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectTransferCatalog(t *testing.T) {
+	found := map[string]ActionSpec{}
+	for _, a := range AllActions() {
+		if a.Name == "project.open" || a.Name == "project.export" {
+			found[a.Name] = a
+		}
+	}
+	if len(found) != 2 {
+		t.Fatal("missing project transfer actions")
+	}
+	for _, a := range found {
+		if a.Domain != DomainProject || !a.NeedsWindow {
+			t.Fatalf("bad routing: %+v", a)
+		}
+	}
+	if !found["project.open"].NeedsConfirm || !found["project.open"].Mutates || found["project.export"].Mutates {
+		t.Fatal("incorrect side-effect metadata")
+	}
+}

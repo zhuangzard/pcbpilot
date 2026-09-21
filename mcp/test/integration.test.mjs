@@ -36,6 +36,7 @@ test('stdio MCP initializes, lists tools, and invokes offline discovery', async 
     });
     assert.equal(allActions.isError, false);
     assert.ok(!allActions.structuredContent.actions.some((action) => action.domain === 'debug'));
+    for (const name of ['project.open', 'project.export']) assert.ok(allActions.structuredContent.actions.some(action => action.name === name));
 
     const discovered = await client.callTool({
       name: 'pcbpilot_actions',

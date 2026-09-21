@@ -59,7 +59,8 @@ pcbpilot project export --window <window-id> --project-uuid <project-uuid> --out
 导出使用官方 `sys_FileManager.getProjectFile`，要求目标工程已激活，前后检查 UUID，
 拒绝覆盖文件，校验原生 ZIP 完整性并输出字节数/SHA-256。输出 `restoreVerified=false`：
 ZIP 校验和导出成功不代表重新导入验证通过。请在导出前显式保存所有文档。
-当前固定兼容适配通过已发布连接器的传输通道调用官方 API，无需 Agent 提供任意 JS。
+底层调用正式 typed action `project.open` / `project.export`，需要包含这两个 handler 的新版连接器。旧连接器返回 UNKNOWN_ACTION 时停止并升级；禁止回退到 debug.exec_js。
+直接调用 `project.open` 同样必须传 `allowDiscardUnsaved:true`；`project.export` 不接受页面路由。
 限制：归档最大 16 MiB，解压验证上限 128 MiB，超限明确失败。
 
 MCP 使用 `pcbpilot_project_transfer`，`operation` 为 `open` 或 `export`，均需 `window`、

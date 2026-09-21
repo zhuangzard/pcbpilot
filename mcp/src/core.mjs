@@ -68,7 +68,7 @@ export function filterActions(actions, { domain, search, mutates } = {}) {
 }
 
 // Project creation targets a connector window, not a document that does not exist yet.
-// Keep this exception exact: all other mutations retain project/document pinning.
+// Project transfer uses explicit window/UUID guards; other mutations retain document pinning.
 export function buildActionCallArgs(action, input = {}) {
   if (action.name === 'project.create') {
     if (typeof input.window !== 'string' || !input.window.trim()) {
@@ -76,6 +76,17 @@ export function buildActionCallArgs(action, input = {}) {
     }
     if (input.project || input.doc) {
       throw new Error('project.create does not accept project or doc routing; use payload.friendlyName for the new project');
+    }
+  }
+  else if (action.name === 'project.open' || action.name === 'project.export') {
+    if (typeof input.window !== 'string' || !input.window.trim() || input.project || input.doc) {
+      throw new Error('Project transfer requires an explicit window and payload.projectUuid; omit project/doc routing');
+    }
+    if (typeof input.payload?.projectUuid !== 'string' || !input.payload.projectUuid.trim()) {
+      throw new Error('payload.projectUuid is required');
+    }
+    if (action.name === 'project.open' && input.payload.allowDiscardUnsaved !== true) {
+      throw new Error('Save documents first; payload.allowDiscardUnsaved must be true');
     }
   }
   else if (action.mutates && (!input.project || !input.doc)) {

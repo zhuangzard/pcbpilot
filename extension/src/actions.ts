@@ -1,3 +1,4 @@
+import { projectOpen, projectExport } from './project-transfer';
 /**
  * Typed-action dispatch. Each action maps to exactly one (occasionally a small
  * cluster of) `eda.*` call(s), serializes the result to plain JSON, and returns
@@ -13717,6 +13718,8 @@ const debugExecJs: Handler = async (payload) => {
 const HANDLERS: Record<string, Handler> = {
 	'project.current': projectCurrent,
 	'project.create': projectCreate,
+	'project.open': projectOpen,
+	'project.export': projectExport,
 	'document.current': documentCurrent,
 	'document.open': documentOpen,
 	'document.close': documentClose,
