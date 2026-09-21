@@ -84,4 +84,4 @@ validates ZIP integrity and reports SHA-256 without overwriting an existing file
 These commands require the matching CLI build. Fixed official-API adapters support
 released connectors without exposing arbitrary JavaScript to the MCP caller.
 
-Project transfer requires connector handlers `project.open` and `project.export` and the matching CLI. Both are catalogued; prefer `easyeda_project_transfer` for native export because the CLI validates and writes the archive. Old connectors return UNKNOWN_ACTION; no debug.exec_js fallback.
+Project transfer requires connector handlers `project.open` and `project.export` and the matching CLI/daemon catalog. Both are catalogued; prefer `easyeda_project_transfer` for native export because the CLI validates and writes the archive. Old daemons/connectors reject unknown actions; no debug.exec_js fallback.

@@ -49,3 +49,5 @@ remain. Connector typecheck, all 419 tests and package build passed.
 A matching rebuilt connector is required; installed 1.5.2 lacks these handlers.
 New-build live verification and the prescribed whole-board ESP32 regression are
 pending installation, not implied by old probes or offline tests. No release.
+
+A read-only compatibility probe against the installed 1.5.2 daemon rejected `project.export` as unknown before connector dispatch; no file was written. Deployment requires the updated daemon catalog as well as CLI/MCP and connector, not a connector-only update.
