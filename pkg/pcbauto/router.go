@@ -1,0 +1,1210 @@
+package pcbauto
+
+import (
+	"context"
+	"math"
+	"os"
+	"sort"
+	"time"
+)
+
+// Track is a routed copper segment.
+type Track struct {
+	Net   string  `json:"net"`
+	Layer int     `json:"layer"`
+	A     Point   `json:"a"`
+	B     Point   `json:"b"`
+	Width float64 `json:"width"`
+	Kind  string  `json:"kind,omitempty"` // route | fanout | stub
+}
+
+// Via is a through via.
+type Via struct {
+	Net   string  `json:"net"`
+	C     Point   `json:"c"`
+	Drill float64 `json:"drill"`
+	Dia   float64 `json:"dia"`
+	Kind  string  `json:"kind,omitempty"` // route | fanout
+}
+
+// Unrouted describes a connection the router could not complete.
+type Unrouted struct {
+	Net    string   `json:"net"`
+	Pads   []string `json:"pads"`
+	Reason string   `json:"reason"`
+}
+
+// RouteOptions tune the router. Zero values pick defaults.
+type RouteOptions struct {
+	GridMil      float64       `json:"gridMil"`
+	MaxIters     int           `json:"maxIters"`
+	ViaCostMil   float64       `json:"viaCostMil"`
+	WrongDirCost float64       `json:"wrongDirCost"` // multiplier for off-preferred moves
+	Timeout      time.Duration `json:"-"`
+	// Nets limits routing to these nets (others stay as obstacles).
+	Nets []string `json:"nets,omitempty"`
+	// NoFanout skips plane fan-out (e.g. when planes are handled elsewhere).
+	NoFanout bool `json:"noFanout,omitempty"`
+	// NoRepair skips the exact-DRC repair loop (diagnostics only).
+	NoRepair bool `json:"noRepair,omitempty"`
+}
+
+// RouteStats summarises a routing run.
+type RouteStats struct {
+	Nets                int     `json:"nets"`
+	Connections         int     `json:"connections"`
+	Routed              int     `json:"routed"`
+	Unrouted            int     `json:"unrouted"`
+	Completion          float64 `json:"completion"`
+	Vias                int     `json:"vias"`
+	FanoutVias          int     `json:"fanoutVias"`
+	WireLengthIn        float64 `json:"wireLengthIn"`
+	Iterations          int     `json:"iterations"`
+	Conflicts           int     `json:"conflictsLeft"`
+	Repaired            int     `json:"repairedNets"`
+	PreRepairViolations int     `json:"preRepairViolations"`
+	ConflictTrace       []int   `json:"conflictTrace,omitempty"`
+	GridMil             float64 `json:"gridMil"`
+	Millis              int64   `json:"millis"`
+}
+
+// RouteResult is the router output.
+type RouteResult struct {
+	Tracks   []Track       `json:"tracks"`
+	Vias     []Via         `json:"vias"`
+	Unrouted []Unrouted    `json:"unrouted,omitempty"`
+	Planes   []PlaneRegion `json:"planes,omitempty"`
+	Stats    RouteStats    `json:"stats"`
+	Notes    []string      `json:"notes,omitempty"`
+}
+
+// rnet is the router's per-net state.
+type rnet struct {
+	id        int32
+	name      string
+	plan      *NetPlan
+	width     float64
+	share     float64 // clearance share each side
+	radius    float64 // claim radius = width/2 + share
+	viaR      float64 // via claim radius = viaDia/2 + share
+	onPlane   bool    // delivered by a plane layer: pads fan out, groups joined by the plane
+	poured    bool    // 2-layer pour net
+	groups    [][]*Pad
+	route     bool
+	fixed     []int32 // fan-out claims (never ripped)
+	claims    []int32 // routed claims
+	paths     []rpath
+	fanTracks []Track
+	fanVias   []Via
+	failed    []Unrouted
+	conflict  bool
+	neckW     float64        // pad-entry width when the full width does not fit
+	neckR     float64        // claim radius at neck width
+	neck      map[int32]bool // columns near own pads where necking is allowed
+}
+
+type rpath struct {
+	nodes          []int32 // grid indices (layer-aware)
+	from           Point   // exact pad centre at the start (for stubs)
+	to             Point
+	fromPad, toPad bool
+}
+
+// router holds all state for one run.
+type router struct {
+	b      *Board
+	st     *Stackup
+	an     *Analysis
+	gr     *grid
+	opt    RouteOptions
+	nets   []*rnet
+	byName map[string]*rnet
+	// A* scratch
+	gcost      []float32
+	parent     []int32
+	dir        []int8
+	stamp      []int32
+	closed     []int32
+	cur        int32
+	nodeC      []float32 // cached node cost for the current search (NaN = unknown)
+	nodeS      []int32
+	claimStamp []int32
+	claimCur   int32
+	presFac    float64
+	strict     bool
+	deadline   time.Time
+	split      map[int]*coarse // split-plane labelling per layer id
+	pbuckets   [][]padEntry
+	pbW, pbH   int
+	viaS       []int32
+	statics    map[int][]uint8
+	viaC       []float64
+}
+
+// auditHook lets tests observe router state between phases.
+var auditHook func(phase string, r *router)
+
+var dirs8 = [8][2]int{{1, 0}, {1, 1}, {0, 1}, {-1, 1}, {-1, 0}, {-1, -1}, {0, -1}, {1, -1}}
+
+// Route runs fan-out, plane splitting and negotiated-congestion routing.
+func Route(ctx context.Context, b *Board, st *Stackup, an *Analysis, opt RouteOptions) (*RouteResult, error) {
+	start := time.Now()
+	if opt.GridMil <= 0 {
+		opt.GridMil = defaultGrid(b.Rules)
+	}
+	if opt.MaxIters <= 0 {
+		opt.MaxIters = 40
+	}
+	if opt.ViaCostMil <= 0 {
+		opt.ViaCostMil = 60
+	}
+	if opt.WrongDirCost <= 0 {
+		opt.WrongDirCost = 1.6
+	}
+	if opt.Timeout <= 0 {
+		opt.Timeout = 3 * time.Minute
+	}
+	gr, err := newGrid(b, st, opt.GridMil)
+	if err != nil {
+		return nil, err
+	}
+	r := &router{b: b, st: st, an: an, gr: gr, opt: opt, byName: map[string]*rnet{}}
+	r.deadline = start.Add(opt.Timeout)
+	n := len(gr.flags)
+	r.gcost = make([]float32, n)
+	r.parent = make([]int32, n)
+	r.dir = make([]int8, n)
+	r.stamp = make([]int32, n)
+	r.closed = make([]int32, n)
+	r.nodeC = make([]float32, n)
+	r.nodeS = make([]int32, n)
+	r.claimStamp = make([]int32, n)
+	r.viaS = make([]int32, gr.W*gr.H)
+	r.viaC = make([]float64, gr.W*gr.H)
+
+	res := &RouteResult{}
+	r.setupNets()
+	r.rasterise()
+	if !opt.NoFanout {
+		r.fanout(res)
+	}
+	if auditHook != nil {
+		auditHook("fanout", r)
+	}
+	res.Planes = r.splitPlanes()
+	r.planeGroups(res)
+	if err := r.negotiate(ctx, res); err != nil {
+		return nil, err
+	}
+	if auditHook != nil {
+		auditHook("negotiate", r)
+	}
+	r.pourRepair(ctx, res)
+	if auditHook != nil {
+		auditHook("pourRepair", r)
+	}
+	r.emit(res)
+	res.Stats.GridMil = opt.GridMil
+	res.Stats.Millis = time.Since(start).Milliseconds()
+	return res, nil
+}
+
+// defaultGrid picks a pitch that resolves the tightest track/clearance.
+//
+// The pitch is derived from the dominant signal class so that its claim
+// radius (w/2 + c/2) is exactly m+½ cells: two such tracks then never share a
+// cell iff their centres are ≥ 2m+1 cells = w + c apart, i.e. the grid test
+// is exact for the class that fills most of the board (a 10/6 rule gives
+// 3.2 mil, where a naive 3 mil grid would allow a 15 mil pitch for a 16 mil
+// requirement).
+func defaultGrid(ru Rules) float64 {
+	ra := ru.TrackWidth/2 + ru.Clearance/2
+	best, bestErr := 3.0, math.Inf(1)
+	for m := 1; m <= 8; m++ {
+		g := ra / (float64(m) + 0.5)
+		if g < 2 || g > 5 {
+			continue
+		}
+		if e := math.Abs(g - 3); e < bestErr {
+			best, bestErr = g, e
+		}
+	}
+	return best
+}
+
+func (r *router) setupNets() {
+	allow := map[string]bool{}
+	for _, n := range r.opt.Nets {
+		allow[n] = true
+	}
+	base := r.b.Rules.Clearance
+	for i, n := range r.b.Nets() {
+		plan := r.an.Plan(n.Name, r.b.Rules)
+		rn := &rnet{id: int32(i), name: n.Name, plan: plan}
+		rn.width = plan.WidthMil
+		if rn.width <= 0 {
+			rn.width = r.b.Rules.TrackWidth
+		}
+		// Clearance share: base nets c/2; high-voltage nets take the excess.
+		rn.share = base / 2
+		if plan.ClearanceMil > base {
+			rn.share = plan.ClearanceMil - base/2
+		}
+		rn.radius = rn.width/2 + rn.share
+		rn.viaR = r.b.Rules.ViaDia/2 + rn.share
+		rn.neckW, rn.neckR = rn.width, rn.radius
+		if nw := r.b.Rules.MinTrack; nw < rn.width { // fine-pitch escape: neck to the process minimum
+			rn.neckW, rn.neckR = nw, nw/2+rn.share
+		}
+		if _, ok := r.st.PlaneFor(n.Name); ok {
+			rn.onPlane = true
+		}
+		for _, l := range r.st.Stack {
+			for _, pn := range l.PourNets {
+				if pn == n.Name && !rn.onPlane {
+					rn.poured = true
+				}
+			}
+		}
+		rn.route = len(allow) == 0 || allow[n.Name]
+		for _, pd := range n.Pads {
+			rn.groups = append(rn.groups, []*Pad{pd})
+		}
+		r.nets = append(r.nets, rn)
+		r.byName[n.Name] = rn
+	}
+}
+
+func (r *router) rasterise() {
+	gr := r.gr
+	// Pad buckets for exact checks: a pad is listed in every 50-mil bucket
+	// its copper plus the largest possible reach (clearance + half via) touches.
+	// Pad buckets for exact checks: a pad is listed in every bucket its
+	// copper plus the largest possible reach (clearance + half via) touches,
+	// so a lookup only needs the query point's own bucket.
+	reach := r.b.Rules.ViaDia/2 + r.b.Rules.Clearance
+	for _, rn := range r.nets {
+		reach = math.Max(reach, rn.plan.ClearanceMil+rn.width/2)
+	}
+	reach += 2 * gr.g
+	r.pbW = int(float64(gr.W)*gr.g/padBucket) + 1
+	r.pbH = int(float64(gr.H)*gr.g/padBucket) + 1
+	r.pbuckets = make([][]padEntry, r.pbW*r.pbH)
+	for _, p := range r.b.Parts {
+		for _, pd := range p.Pads {
+			e := padEntry{pd: pd, net: -2, clr: r.b.Rules.Clearance}
+			if rn := r.byName[pd.Net]; rn != nil {
+				e.net, e.clr = rn.id, math.Max(e.clr, rn.plan.ClearanceMil)
+			}
+			bb := pd.Box.Bounds().Expand(reach)
+			for bx := max(int((bb.MinX-gr.ox)/padBucket), 0); bx <= min(int((bb.MaxX-gr.ox)/padBucket), r.pbW-1); bx++ {
+				for by := max(int((bb.MinY-gr.oy)/padBucket), 0); by <= min(int((bb.MaxY-gr.oy)/padBucket), r.pbH-1); by++ {
+					r.pbuckets[by*r.pbW+bx] = append(r.pbuckets[by*r.pbW+bx], e)
+				}
+			}
+		}
+	}
+	gr.markEdge(r.b.Outline, r.b.Rules.EdgeClearance)
+	for _, k := range r.b.Keepouts {
+		gr.markKeepout(k)
+	}
+	for _, h := range r.b.Holes {
+		gr.markHole(h)
+	}
+	viaR := r.b.Rules.ViaDia / 2
+	for _, p := range r.b.Parts {
+		for _, pd := range p.Pads {
+			id := int32(-2) // netless pad: hard for everyone
+			share := r.b.Rules.Clearance / 2
+			if rn := r.byName[pd.Net]; rn != nil {
+				id, share = rn.id, rn.share
+			}
+			gr.markPad(pd, id, share, viaR)
+		}
+	}
+}
+
+// ---- claims ---------------------------------------------------------------
+
+// nodeOK reports whether net n may place copper of claim radius rad at a
+// node. The grid test covers the claim disk; when another net's pad claim
+// lies in the ring just outside it (where discretisation can hide a
+// violation), the exact pad distance decides.
+func (r *router) nodeOK(n *rnet, l, x, y int, rad float64) bool {
+	gr := r.gr
+	switch r.static(rad)[gr.idx(l, x, y)] {
+	case staticClear:
+		return true
+	case staticBlocked:
+		return false
+	}
+	offs, inner := gr.ring(rad)
+	near := false
+	for k, o := range offs {
+		xx, yy := x+o[0], y+o[1]
+		if !gr.in(xx, yy) {
+			if k < inner {
+				return false
+			}
+			continue
+		}
+		j := gr.idx(l, xx, yy)
+		p := gr.pad[j]
+		if k < inner {
+			if gr.flags[j]&flagHard != 0 || p != -1 && p != n.id {
+				return false
+			}
+		} else if p != -1 && p != n.id {
+			near = true
+			break
+		}
+	}
+	if near {
+		return r.padsClear(n, gr.layers[l], gr.center(x, y), rad-n.share)
+	}
+	return true
+}
+
+const (
+	staticUnknown uint8 = iota
+	staticClear         // no hard cell in the disk and no pad claim in disk+ring: legal for every net
+	staticBlocked       // a hard cell (edge, keepout, hole, netless pad) in the disk: illegal for every net
+	staticPads          // pad claims nearby: decide per net
+)
+
+// static returns the net-independent legality map for claim radius rad,
+// computed once per distinct radius. It turns most node checks into a
+// single byte read; only cells near pads fall back to the per-net test.
+func (r *router) static(rad float64) []uint8 {
+	gr := r.gr
+	key := int(math.Round(rad * 100))
+	if m, ok := r.statics[key]; ok {
+		return m
+	}
+	m := make([]uint8, len(gr.flags))
+	offs, inner := gr.ring(rad)
+	for l := range gr.layers {
+		for y := 0; y < gr.H; y++ {
+			for x := 0; x < gr.W; x++ {
+				v := staticClear
+				for k, o := range offs {
+					xx, yy := x+o[0], y+o[1]
+					if !gr.in(xx, yy) {
+						if k < inner {
+							v = staticBlocked
+							break
+						}
+						continue
+					}
+					j := gr.idx(l, xx, yy)
+					p := gr.pad[j]
+					if k < inner && (gr.flags[j]&flagHard != 0 || p == -2) {
+						v = staticBlocked
+						break
+					}
+					if p != -1 {
+						v = staticPads
+					}
+				}
+				m[gr.idx(l, x, y)] = v
+			}
+		}
+	}
+	if r.statics == nil {
+		r.statics = map[int][]uint8{}
+	}
+	r.statics[key] = m
+	return m
+}
+
+// nodeRadius returns the claim radius net n uses at a node: full width when
+// it fits, the neck width near n's own pads, or -1 when neither is legal.
+// It depends only on static obstacles, so it is stable across searches.
+func (r *router) nodeRadius(n *rnet, l, x, y int) float64 {
+	if r.nodeOK(n, l, x, y, n.radius) {
+		return n.radius
+	}
+	if n.neckR < n.radius && r.inNeck(n, x, y) && r.nodeOK(n, l, x, y, n.neckR) {
+		return n.neckR
+	}
+	return -1
+}
+
+// padsClear is the exact (non-grid) check of copper of half-size hw centred
+// at p against other nets' pads on layer id (LayerMulti = every layer).
+// It removes the grid's discretisation error where it matters most.
+func (r *router) padsClear(n *rnet, id int, p Point, hw float64) bool {
+	bx := int((p.X - r.gr.ox) / padBucket)
+	by := int((p.Y - r.gr.oy) / padBucket)
+	if bx < 0 || by < 0 || bx >= r.pbW || by >= r.pbH {
+		return true
+	}
+	for _, e := range r.pbuckets[by*r.pbW+bx] {
+		if e.net == n.id && e.net >= 0 {
+			continue
+		}
+		if id != LayerMulti && !e.pd.OnLayer(id) {
+			continue
+		}
+		if e.pd.Box.Dist(p) < hw+math.Max(e.clr, n.plan.ClearanceMil) {
+			return false
+		}
+	}
+	return true
+}
+
+// inNeck reports whether column (x,y) is close enough to one of n's pads for
+// the track to neck down (within max(3 widths, 30 mil) of the pad copper).
+func (r *router) inNeck(n *rnet, x, y int) bool {
+	if n.neck == nil {
+		n.neck = map[int32]bool{}
+		gr := r.gr
+		reach := math.Max(3*n.width, 30)
+		for _, g := range n.groups {
+			for _, pd := range g {
+				gr.forCellsNear(pd.Box.Bounds(), reach, pd.Box.Dist, func(xx, yy int) {
+					n.neck[int32(yy*gr.W+xx)] = true
+				})
+			}
+		}
+	}
+	return n.neck[int32(y*r.gr.W+x)]
+}
+
+// nodeCong sums other nets' claims inside the disk.
+func (r *router) nodeCong(l, x, y int, rad float64) (occ float64, hist float64) {
+	gr := r.gr
+	for _, o := range gr.disk(rad) {
+		j := gr.idx(l, x+o[0], y+o[1])
+		if u := gr.use[j]; u > 0 {
+			occ += float64(u)
+		}
+		hist += float64(gr.hist[j])
+	}
+	return
+}
+
+// cost returns the congestion-weighted cost factor of occupying cell i for
+// net n, or +Inf when illegal. Cached per search.
+func (r *router) cost(n *rnet, i int) float32 {
+	if r.nodeS[i] == r.cur {
+		return r.nodeC[i]
+	}
+	gr := r.gr
+	l, x, y := gr.xy(i)
+	var c float32
+	if rad := r.nodeRadius(n, l, x, y); rad < 0 {
+		c = float32(math.Inf(1))
+	} else {
+		occ, hist := r.nodeCong(l, x, y, rad)
+		if r.strict && occ > 0 {
+			c = float32(math.Inf(1))
+		} else {
+			area := float64(len(gr.disk(n.radius)))
+			c = float32((1 + hist/area) * (1 + r.presFac*occ))
+		}
+	}
+	r.nodeS[i], r.nodeC[i] = r.cur, c
+	return c
+}
+
+// viaCost returns the cost factor of a via at column (x,y), or +Inf.
+func (r *router) viaCost(n *rnet, x, y int) float64 {
+	gr := r.gr
+	col := y*gr.W + x
+	if r.viaS[col] == r.cur {
+		return r.viaC[col]
+	}
+	v := r.viaCostUncached(n, x, y)
+	r.viaS[col], r.viaC[col] = r.cur, v
+	return v
+}
+
+func (r *router) viaCostUncached(n *rnet, x, y int) float64 {
+	gr := r.gr
+	if gr.noVia[y*gr.W+x] {
+		return math.Inf(1)
+	}
+	total := 1.0
+	for l := range gr.layers {
+		// Vias perforate plane layers too, but planes retreat (anti-pad);
+		// only the signal layers and hard/pad claims constrain placement.
+		if !r.nodeOK(n, l, x, y, n.viaR) {
+			return math.Inf(1)
+		}
+		if gr.routable[l] {
+			occ, _ := r.nodeCong(l, x, y, n.viaR)
+			if r.strict && occ > 0 {
+				return math.Inf(1)
+			}
+			total += r.presFac * occ
+		}
+	}
+	return total
+}
+
+// stampClaims adds (sign=+1) or removes (-1) a claim list.
+func (r *router) applyClaims(list []int32, sign int) {
+	for _, i := range list {
+		if sign > 0 {
+			r.gr.use[i]++
+		} else if r.gr.use[i] > 0 {
+			r.gr.use[i]--
+		}
+	}
+}
+
+// claimPath collects the unique cells claimed by a path of nodes (and vias).
+func (r *router) claimNodes(n *rnet, nodes []int32, out []int32) []int32 {
+	gr := r.gr
+	r.claimCur++
+	add := func(l, x, y int, rad float64) {
+		for _, o := range gr.disk(rad) {
+			xx, yy := x+o[0], y+o[1]
+			if !gr.in(xx, yy) {
+				continue
+			}
+			j := gr.idx(l, xx, yy)
+			if r.claimStamp[j] != r.claimCur {
+				r.claimStamp[j] = r.claimCur
+				out = append(out, int32(j))
+			}
+		}
+	}
+	for k, i := range nodes {
+		l, x, y := gr.xy(int(i))
+		if rad := r.nodeRadius(n, l, x, y); rad > 0 {
+			add(l, x, y, rad)
+		}
+		if k > 0 {
+			pl, px, py := gr.xy(int(nodes[k-1]))
+			if pl != l && px == x && py == y {
+				for ll := range gr.layers {
+					add(ll, x, y, n.viaR)
+				}
+			}
+		}
+	}
+	return out
+}
+
+// claimSegment claims cells along an exact segment (for fan-out stubs).
+func (r *router) claimSegment(n *rnet, l int, a, b Point, width float64, out []int32) []int32 {
+	gr := r.gr
+	rad := width/2 + n.share
+	r.claimCur++
+	steps := int(math.Ceil(a.Dist(b)/(gr.g/2))) + 1
+	for s := 0; s <= steps; s++ {
+		p := a.Add(b.Sub(a).Scale(float64(s) / float64(steps)))
+		cx, cy := gr.cellOf(p)
+		for _, o := range gr.disk(rad) {
+			xx, yy := cx+o[0], cy+o[1]
+			if !gr.in(xx, yy) {
+				continue
+			}
+			j := gr.idx(l, xx, yy)
+			if r.claimStamp[j] != r.claimCur {
+				r.claimStamp[j] = r.claimCur
+				out = append(out, int32(j))
+			}
+		}
+	}
+	return out
+}
+
+// segmentOK checks an exact straight segment for net n on layer l.
+func (r *router) segmentOK(n *rnet, l int, a, b Point, width float64, strict bool) bool {
+	gr := r.gr
+	rad := width/2 + n.share
+	steps := int(math.Ceil(a.Dist(b)/(gr.g/2))) + 1
+	for s := 0; s <= steps; s++ {
+		p := a.Add(b.Sub(a).Scale(float64(s) / float64(steps)))
+		x, y := gr.cellOf(p)
+		if !gr.in(x, y) || !r.nodeOK(n, l, x, y, rad) {
+			return false
+		}
+		// Off-grid sample: judge pads at the true point, not the cell centre.
+		if r.static(rad)[gr.idx(l, x, y)] == staticPads && !r.padsClear(n, gr.layers[l], p, width/2) {
+			return false
+		}
+		if strict {
+			if occ, _ := r.nodeCong(l, x, y, rad); occ > 0 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// ---- pad access -----------------------------------------------------------
+
+// access returns grid nodes inside the pad copper usable by net n, nearest
+// to the pad centre first (at most 9 per layer).
+func (r *router) access(n *rnet, pd *Pad) []int32 {
+	gr := r.gr
+	var out []int32
+	for l, id := range gr.layers {
+		if !gr.routable[l] || !pd.OnLayer(id) {
+			continue
+		}
+		type cand struct {
+			i int32
+			d float64
+		}
+		var cs []cand
+		bb := pd.Box.Bounds()
+		x0, y0 := gr.cellOf(Point{bb.MinX, bb.MinY})
+		x1, y1 := gr.cellOf(Point{bb.MaxX, bb.MaxY})
+		for y := y0; y <= y1; y++ {
+			for x := x0; x <= x1; x++ {
+				if !gr.in(x, y) {
+					continue
+				}
+				c := gr.center(x, y)
+				if pd.Box.Dist(c) > 0 {
+					continue
+				}
+				if r.nodeRadius(n, l, x, y) > 0 {
+					cs = append(cs, cand{int32(gr.idx(l, x, y)), c.Dist(pd.Box.C)})
+				}
+			}
+		}
+		if len(cs) == 0 {
+			// Pad smaller than a cell: the nearest node, if legal.
+			x, y := gr.cellOf(pd.Box.C)
+			for _, o := range gr.disk(gr.g * 1.5) {
+				xx, yy := x+o[0], y+o[1]
+				if gr.in(xx, yy) && r.nodeRadius(n, l, xx, yy) > 0 {
+					cs = append(cs, cand{int32(gr.idx(l, xx, yy)), gr.center(xx, yy).Dist(pd.Box.C)})
+				}
+			}
+		}
+		sort.Slice(cs, func(i, j int) bool {
+			if cs[i].d != cs[j].d {
+				return cs[i].d < cs[j].d
+			}
+			return cs[i].i < cs[j].i
+		})
+		for k := 0; k < len(cs) && k < 9; k++ {
+			out = append(out, cs[k].i)
+		}
+	}
+	return out
+}
+
+// ---- A* -------------------------------------------------------------------
+
+type pqItem struct {
+	i int32
+	f float32
+}
+type pq []pqItem
+
+func (q pq) Len() int { return len(q) }
+func (q pq) less(a, b int) bool {
+	return q[a].f < q[b].f || q[a].f == q[b].f && q[a].i < q[b].i
+}
+
+// push/pop are a monomorphic binary heap (container/heap boxes every item).
+func (q *pq) push(it pqItem) {
+	*q = append(*q, it)
+	h := *q
+	i := len(h) - 1
+	for i > 0 {
+		p := (i - 1) / 2
+		if !h.less(i, p) {
+			break
+		}
+		h[i], h[p] = h[p], h[i]
+		i = p
+	}
+}
+
+func (q *pq) pop() pqItem {
+	h := *q
+	top := h[0]
+	n := len(h) - 1
+	h[0] = h[n]
+	h = h[:n]
+	i := 0
+	for {
+		l, m := 2*i+1, i
+		if l < n && h.less(l, m) {
+			m = l
+		}
+		if l+1 < n && h.less(l+1, m) {
+			m = l + 1
+		}
+		if m == i {
+			break
+		}
+		h[i], h[m] = h[m], h[i]
+		i = m
+	}
+	*q = h
+	return top
+}
+
+// search finds a path from any source node to any target node for net n,
+// restricted to bounds (cell rect). Returns the node list source→target.
+func (r *router) search(n *rnet, sources []int32, targets map[int32]bool, bounds [4]int) []int32 {
+	gr := r.gr
+	r.cur++
+	if r.cur == math.MaxInt32 {
+		for i := range r.stamp {
+			r.stamp[i], r.closed[i], r.nodeS[i] = 0, 0, 0
+		}
+		for i := range r.viaS {
+			r.viaS[i] = 0
+		}
+		r.cur = 1
+	}
+	// Heuristic: octile distance to the targets' bounding box.
+	tb := [4]int{math.MaxInt32, math.MaxInt32, -1, -1}
+	for t := range targets {
+		_, x, y := gr.xy(int(t))
+		tb = [4]int{min(tb[0], x), min(tb[1], y), max(tb[2], x), max(tb[3], y)}
+	}
+	g := float32(gr.g)
+	h := func(x, y int) float32 {
+		dx := max(tb[0]-x, 0, x-tb[2])
+		dy := max(tb[1]-y, 0, y-tb[3])
+		mn, mx := min(dx, dy), max(dx, dy)
+		return g * (float32(mx-mn) + 1.4142*float32(mn))
+	}
+	q := &pq{}
+	for _, s := range sources {
+		c := r.cost(n, int(s))
+		if math.IsInf(float64(c), 1) && !targets[s] {
+			continue
+		}
+		r.stamp[s], r.gcost[s], r.parent[s], r.dir[s] = r.cur, 0, -1, -1
+		_, x, y := gr.xy(int(s))
+		q.push(pqItem{s, h(x, y)})
+	}
+	nl := len(gr.layers)
+	viaCost := float32(r.opt.ViaCostMil)
+	expansions := 0
+	for q.Len() > 0 {
+		it := q.pop()
+		i := it.i
+		if r.closed[i] == r.cur {
+			continue
+		}
+		r.closed[i] = r.cur
+		if targets[i] {
+			var path []int32
+			for k := i; k >= 0; k = r.parent[k] {
+				path = append(path, k)
+			}
+			for a, b := 0, len(path)-1; a < b; a, b = a+1, b-1 {
+				path[a], path[b] = path[b], path[a]
+			}
+			return path
+		}
+		expansions++
+		if expansions&0xfff == 0 && time.Now().After(r.deadline) {
+			return nil
+		}
+		l, x, y := gr.xy(int(i))
+		gi := r.gcost[i]
+		pd := r.dir[i]
+		pref := r.st.Stack[l].Dir
+		for d := 0; d < 8; d++ {
+			if pd >= 0 {
+				turn := (d - int(pd) + 8) % 8
+				if turn == 3 || turn == 5 || turn == 4 {
+					continue // no acute turns, no reversal
+				}
+			}
+			xx, yy := x+dirs8[d][0], y+dirs8[d][1]
+			if xx < bounds[0] || yy < bounds[1] || xx > bounds[2] || yy > bounds[3] {
+				continue
+			}
+			j := int32(gr.idx(l, xx, yy))
+			if r.closed[j] == r.cur {
+				continue
+			}
+			c := r.cost(n, int(j))
+			if math.IsInf(float64(c), 1) {
+				continue
+			}
+			step := g
+			if d%2 == 1 {
+				step *= 1.4142
+				if pref != "" {
+					step *= 1.15
+				}
+			} else if (pref == "h" && d%4 == 2) || (pref == "v" && d%4 == 0) {
+				step *= float32(r.opt.WrongDirCost)
+			}
+			if pd >= 0 && int(pd) != d {
+				if (d-int(pd)+8)%8 == 2 || (d-int(pd)+8)%8 == 6 {
+					step += 2 * g // 90° bend
+				} else {
+					step += 0.4 * g // 45° bend
+				}
+			}
+			ng := gi + step*c
+			if r.stamp[j] != r.cur || ng < r.gcost[j] {
+				r.stamp[j], r.gcost[j], r.parent[j], r.dir[j] = r.cur, ng, i, int8(d)
+				q.push(pqItem{j, ng + h(xx, yy)})
+			}
+		}
+		// Layer change through a via.
+		if nl > 1 {
+			vc := float32(-1)
+			for ll := 0; ll < nl; ll++ {
+				if ll == l || !gr.routable[ll] {
+					continue
+				}
+				j := int32(gr.idx(ll, x, y))
+				if r.closed[j] == r.cur {
+					continue
+				}
+				if vc < 0 {
+					v := r.viaCost(n, x, y)
+					if math.IsInf(v, 1) {
+						break
+					}
+					vc = float32(v)
+				}
+				c := r.cost(n, int(j))
+				if math.IsInf(float64(c), 1) {
+					continue
+				}
+				ng := gi + viaCost*vc
+				if r.stamp[j] != r.cur || ng < r.gcost[j] {
+					r.stamp[j], r.gcost[j], r.parent[j], r.dir[j] = r.cur, ng, i, -1
+					q.push(pqItem{j, ng + h(x, y)})
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// ---- per-net routing ------------------------------------------------------
+
+func padKeys(ps []*Pad) []string {
+	out := make([]string, len(ps))
+	for i, p := range ps {
+		out[i] = p.Key()
+	}
+	return out
+}
+
+// ripUp removes net n's claims (routed and optionally fixed) from the grid.
+func (r *router) ripUp(n *rnet, fixed bool) {
+	r.applyClaims(n.claims, -1)
+	n.claims, n.paths = nil, nil
+	if fixed {
+		r.applyClaims(n.fixed, -1)
+	}
+}
+
+// routeNet connects all terminal groups of n with a Steiner-like tree.
+func (r *router) routeNet(n *rnet) bool { return r.routeNetKeep(n, false) }
+
+// routeNetKeep routes n's terminal groups. With keep, existing paths stay and
+// the new connections are appended (used to bridge plane/pour islands).
+func (r *router) routeNetKeep(n *rnet, keep bool) bool {
+	old := n.paths
+	r.ripUp(n, true)
+	defer r.applyClaims(n.fixed, +1)
+	n.failed = nil
+	if keep {
+		n.paths = old
+	}
+	if len(n.groups) < 2 {
+		return true
+	}
+	gr := r.gr
+	// Tree sources: every access node of the first group plus fan-out copper.
+	type term struct {
+		nodes []int32
+		pads  []*Pad
+	}
+	terms := make([]term, 0, len(n.groups))
+	for _, g := range n.groups {
+		t := term{pads: g}
+		for _, pd := range g {
+			t.nodes = append(t.nodes, r.access(n, pd)...)
+		}
+		terms = append(terms, t)
+	}
+	// Start from the group nearest the net's centroid for balanced trees.
+	var cen Point
+	cnt := 0.0
+	for _, t := range terms {
+		for _, pd := range t.pads {
+			cen = cen.Add(pd.Box.C)
+			cnt++
+		}
+	}
+	cen = cen.Scale(1 / cnt)
+	best := 0
+	for k, t := range terms {
+		if t.pads[0].Box.C.Dist(cen) < terms[best].pads[0].Box.C.Dist(cen) && len(t.nodes) > 0 {
+			best = k
+		}
+	}
+	terms[0], terms[best] = terms[best], terms[0]
+	if len(terms[0].nodes) == 0 {
+		for _, t := range terms {
+			n.failed = append(n.failed, Unrouted{Net: n.name, Pads: padKeys(t.pads), Reason: "pad-inaccessible"})
+		}
+		return false
+	}
+	tree := append([]int32(nil), terms[0].nodes...)
+	treePads := map[int32]*Pad{}
+	for _, pd := range terms[0].pads {
+		for _, a := range r.access(n, pd) {
+			treePads[a] = pd
+		}
+	}
+	remaining := terms[1:]
+	ok := true
+	for len(remaining) > 0 {
+		targets := map[int32]bool{}
+		owner := map[int32]int{}
+		for k, t := range remaining {
+			for _, a := range t.nodes {
+				targets[a] = true
+				owner[a] = k
+			}
+		}
+		if len(targets) == 0 {
+			for _, t := range remaining {
+				n.failed = append(n.failed, Unrouted{Net: n.name, Pads: padKeys(t.pads), Reason: "pad-inaccessible"})
+			}
+			// Paths found so far must still be claimed below.
+			ok = false
+			break
+		}
+		var path []int32
+		// Growing search windows: tight bbox first, whole board last.
+		bb := [4]int{math.MaxInt32, math.MaxInt32, -1, -1}
+		for _, s := range tree {
+			_, x, y := gr.xy(int(s))
+			bb = [4]int{min(bb[0], x), min(bb[1], y), max(bb[2], x), max(bb[3], y)}
+		}
+		for t := range targets {
+			_, x, y := gr.xy(int(t))
+			bb = [4]int{min(bb[0], x), min(bb[1], y), max(bb[2], x), max(bb[3], y)}
+		}
+		for _, grow := range []int{int(120 / gr.g), int(400 / gr.g), 1 << 20} {
+			m := grow + (bb[2]-bb[0]+bb[3]-bb[1])/4
+			w := [4]int{max(bb[0]-m, 0), max(bb[1]-m, 0), min(bb[2]+m, gr.W-1), min(bb[3]+m, gr.H-1)}
+			if path = r.search(n, tree, targets, w); path != nil {
+				break
+			}
+			if time.Now().After(r.deadline) {
+				break
+			}
+		}
+		if path == nil {
+			// Nearest remaining group fails; report it and continue with others.
+			k := 0
+			for kk, t := range remaining {
+				if len(t.nodes) > 0 {
+					k = kk
+					break
+				}
+			}
+			n.failed = append(n.failed, Unrouted{Net: n.name, Pads: padKeys(remaining[k].pads), Reason: r.failReason()})
+			remaining = append(remaining[:k], remaining[k+1:]...)
+			ok = false
+			continue
+		}
+		end := path[len(path)-1]
+		k := owner[end]
+		rp := rpath{nodes: path}
+		if pd, ok := treePads[path[0]]; ok {
+			rp.from, rp.fromPad = pd.Box.C, true
+		}
+		for _, pd := range remaining[k].pads {
+			if pd.Box.Dist(gr.center(xyOf(gr, end))) == 0 || contains(r.access(n, pd), end) {
+				rp.to, rp.toPad = pd.Box.C, true
+				break
+			}
+		}
+		n.paths = append(n.paths, rp)
+		tree = append(tree, path...)
+		for _, pd := range remaining[k].pads {
+			for _, a := range r.access(n, pd) {
+				tree = append(tree, a)
+				treePads[a] = pd
+			}
+		}
+		remaining = append(remaining[:k], remaining[k+1:]...)
+	}
+	// Claim everything routed; each path separately so vias register.
+	n.claims = n.claims[:0]
+	for _, p := range n.paths {
+		n.claims = r.claimNodes(n, p.nodes, n.claims)
+	}
+	n.claims = r.minusFixed(n, dedup(n.claims))
+	r.applyClaims(n.claims, +1)
+	return ok
+}
+
+func (r *router) failReason() string {
+	if time.Now().After(r.deadline) {
+		return "timeout"
+	}
+	if r.strict {
+		return "no-legal-path"
+	}
+	return "blocked"
+}
+
+func xyOf(gr *grid, i int32) (int, int) {
+	_, x, y := gr.xy(int(i))
+	return x, y
+}
+
+func contains(xs []int32, v int32) bool {
+	for _, x := range xs {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
+func dedup(xs []int32) []int32 {
+	sort.Slice(xs, func(i, j int) bool { return xs[i] < xs[j] })
+	out := xs[:0]
+	for i, x := range xs {
+		if i == 0 || x != xs[i-1] {
+			out = append(out, x)
+		}
+	}
+	return out
+}
+
+// conflicts marks nets whose claims overlap another net's claims.
+func (r *router) conflicts() int {
+	total := 0
+	for _, n := range r.nets {
+		n.conflict = false
+		for _, i := range n.claims {
+			if r.gr.use[i] > 1 {
+				n.conflict = true
+				break
+			}
+		}
+		if n.conflict {
+			total++
+		}
+	}
+	return total
+}
+
+func (r *router) routeOrder() []*rnet {
+	var out []*rnet
+	for _, n := range r.nets {
+		if n.route && len(n.groups) > 1 {
+			out = append(out, n)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.plan.Priority != b.plan.Priority {
+			return a.plan.Priority < b.plan.Priority
+		}
+		// Short nets first: they have the fewest alternatives.
+		return netSpan(a) < netSpan(b)
+	})
+	return out
+}
+
+func netSpan(n *rnet) float64 {
+	r := EmptyRect()
+	for _, g := range n.groups {
+		for _, p := range g {
+			r = r.AddPoint(p.Box.C)
+		}
+	}
+	return r.W() + r.H()
+}
+
+// negotiate is the PathFinder loop: route everything allowing overlap at a
+// rising price, rip up only nets still in conflict, accumulate history on
+// contested cells. Leftover conflicts are resolved strictly at the end.
+func (r *router) negotiate(ctx context.Context, res *RouteResult) error {
+	order := r.routeOrder()
+	res.Stats.Nets = len(order)
+	r.presFac = 0.6
+	for _, n := range order {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		r.routeNet(n)
+		if auditHook != nil && os.Getenv("PCBAUTO_AUDIT_EACH") != "" {
+			if _, m := r.audit(); m > 0 {
+				auditHook("first-bad:"+n.name, r)
+				auditHook = nil
+			}
+		}
+	}
+	if auditHook != nil {
+		auditHook("initial", r)
+	}
+	it := 1
+	for ; it < r.opt.MaxIters; it++ {
+		c := r.conflicts()
+		res.Stats.ConflictTrace = append(res.Stats.ConflictTrace, c)
+		if c == 0 || time.Now().After(r.deadline) {
+			break
+		}
+		// History: every over-used cell becomes more expensive for good.
+		for i, u := range r.gr.use {
+			if u > 1 {
+				r.gr.hist[i] += 0.5 * float32(u-1)
+			}
+		}
+		r.presFac *= 1.6
+		for _, n := range order {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if n.conflict {
+				r.routeNet(n)
+			}
+		}
+	}
+	res.Stats.Iterations = it
+	// Strict legalisation: lowest-priority conflicting nets are re-routed with
+	// overlap forbidden; if impossible they are left unrouted (never shorted).
+	r.strict = true
+	for pass := 0; pass < 3 && r.conflicts() > 0; pass++ {
+		victims := []*rnet{}
+		for k := len(order) - 1; k >= 0; k-- {
+			if order[k].conflict {
+				victims = append(victims, order[k])
+			}
+		}
+		for _, n := range victims {
+			if !n.conflict {
+				continue
+			}
+			r.repairPartial(n, true)
+			r.conflicts()
+		}
+	}
+	// Anything still conflicting is removed entirely: an unrouted net is
+	// honest, a short is not.
+	for _, n := range order {
+		if r.conflicts() == 0 {
+			break
+		}
+		if n.conflict {
+			r.repairPartial(n, false)
+		}
+	}
+	res.Stats.Conflicts = r.conflicts()
+	r.strict = false
+	return nil
+}
