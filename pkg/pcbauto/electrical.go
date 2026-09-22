@@ -260,21 +260,20 @@ func SolveWidthForZ0(target, h, t, er float64) float64 {
 	return (lo + hi) / 2
 }
 
-// SolveDiff finds (width, gap) for a target differential impedance with the
-// gap fixed at max(minGap, width) — the common "gap ≈ width" coupled pair.
+// SolveDiff finds (width, gap) for a target differential impedance as a
+// tightly coupled pair: the gap is the process minimum (tight coupling keeps
+// the pair narrow and its common-mode noise low) and the width is solved.
 func SolveDiff(target, h, t, er, minGap float64) (w, s float64) {
 	lo, hi := 2.0, 100.0
 	for i := 0; i < 60; i++ {
 		m := (lo + hi) / 2
-		g := math.Max(minGap, m)
-		if DiffZ(m, g, h, t, er) > target {
+		if DiffZ(m, minGap, h, t, er) > target {
 			lo = m
 		} else {
 			hi = m
 		}
 	}
-	w = (lo + hi) / 2
-	return w, math.Max(minGap, w)
+	return (lo + hi) / 2, minGap
 }
 
 // pairPartner finds the P/N partner of a net in a name set.
@@ -406,19 +405,31 @@ func Analyze(b *Board, spec PowerSpec, stack *Stackup) *Analysis {
 		}
 	}
 	a.TotalCurrentA = total
+	// Ground is a plane/pour; a ground *track* (a pour bridge, a return
+	// branch) only carries one rail's return, never the board total.
+	maxRail := 0.0
+	for _, np := range a.Nets {
+		if np.Role == RolePower {
+			maxRail = math.Max(maxRail, np.CurrentA)
+		}
+	}
 	for _, np := range a.Nets {
 		if np.Role == RoleGround {
-			np.CurrentA = math.Max(total, 0.5)
-			np.Source = "sum-of-rails"
+			np.CurrentA = math.Max(maxRail, 0.5)
+			np.Source = "largest-rail-return"
+			np.Why = append(np.Why, whyf("plane net: total return %.2fA flows in the plane; tracks sized for the largest branch", total))
 		}
 	}
 
 	oz := r.CopperOz
 	inOz := r.InnerCopperOz
 	for _, np := range a.Nets {
+		// IPC-2152: an internal conductor carries about what an external one
+		// of the same cross-section does (the IPC-2221 internal curve is the
+		// 1950s over-derated one), so inner widths scale with copper weight.
 		w := TraceWidthForCurrent(np.CurrentA, spec.TempRiseC, oz, false)
-		wi := TraceWidthForCurrent(np.CurrentA, spec.TempRiseC, inOz, true)
-		np.Why = append(np.Why, whyf("IPC-2221 %.2fA/ΔT%.0f°C → %.1fmil outer, %.1fmil inner", np.CurrentA, spec.TempRiseC, w, wi))
+		wi := TraceWidthForCurrent(np.CurrentA, spec.TempRiseC, inOz, false)
+		np.Why = append(np.Why, whyf("IPC-2221/2152 %.2fA ΔT%.0f°C → %.1fmil outer (%.1foz), %.1fmil inner (%.1foz)", np.CurrentA, spec.TempRiseC, w, oz, wi, inOz))
 		minW := r.TrackWidth
 		switch np.Role {
 		case RolePower, RoleGround:

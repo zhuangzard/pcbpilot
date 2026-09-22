@@ -112,6 +112,25 @@ func TestDebugPreRepair(t *testing.T) {
 	}
 }
 
+func TestDebugOverlaps(t *testing.T) {
+	if os.Getenv("PCBAUTO_DEBUG") == "" {
+		t.Skip()
+	}
+	b := loadFixture(t, os.Getenv("PCBAUTO_DEBUG"))
+	an := Analyze(b, PowerSpec{}, nil)
+	c := Understand(b, an)
+	if _, err := Place(b, an, c, nil, PlaceOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	for i, p := range b.Parts {
+		for _, q := range b.Parts[i+1:] {
+			if collide(p, q) && p.Body().OverlapArea(q.Body()) > 1 {
+				t.Logf("overlap %s(fixed=%v side=%d) %s(fixed=%v side=%d) area=%.0f", p.Ref, p.Fixed, p.Side, q.Ref, q.Fixed, q.Side, p.Body().OverlapArea(q.Body()))
+			}
+		}
+	}
+}
+
 func TestDebugStuck(t *testing.T) {
 	if os.Getenv("PCBAUTO_DEBUG") == "" {
 		t.Skip()

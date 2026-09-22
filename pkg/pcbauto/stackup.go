@@ -52,6 +52,7 @@ type StackMetrics struct {
 	FinestPitchMil   float64 `json:"finestPitchMil"`
 	BGARings         int     `json:"bgaRings"`
 	DiffPairs        int     `json:"diffPairs"`
+	HSPairs          int     `json:"highSpeedPairs"`
 	PowerRails       int     `json:"powerRails"`
 	HighCurrentRails int     `json:"highCurrentRails"`
 	RFNets           int     `json:"rfNets"`
@@ -209,6 +210,9 @@ func DecideStackup(b *Board, a *Analysis, opt StackOptions) *Stackup {
 			continue
 		case RoleDiff:
 			m.DiffPairs++
+			if hc := ClassifyHS(np); hc != nil && hc.Name != "USB2" && hc.Name != "CAN/RS-485" {
+				m.HSPairs++
+			}
 		case RoleRF:
 			m.RFNets++
 		}
@@ -234,6 +238,7 @@ func DecideStackup(b *Board, a *Analysis, opt StackOptions) *Stackup {
 		m.DemandAreaIn2 += 1.3 * l * (w + np.ClearanceMil) / 1e6
 	}
 	m.DiffPairs /= 2
+	m.HSPairs /= 2
 	m.PowerRails = len(rails)
 	m.LayerCapacityIn2 = m.AreaIn2 * opt.Utilisation
 	if m.LayerCapacityIn2 > 0 {
@@ -253,9 +258,11 @@ func DecideStackup(b *Board, a *Analysis, opt StackOptions) *Stackup {
 		needPlanes = true
 		why("demand exceeds what 2 layers route while keeping a ground return")
 	}
-	if m.DiffPairs > 0 {
+	if m.HSPairs > 0 {
 		needPlanes = true
-		why("%d differential pair(s) need a continuous reference plane for impedance control", m.DiffPairs)
+		why("%d high-speed differential pair(s) (MIPI/HDMI/USB3/PCIe/Ethernet/LVDS) need an adjacent reference plane for impedance control", m.HSPairs)
+	} else if m.DiffPairs > 0 {
+		why("%d low-speed differential pair(s) (USB2 full-speed/CAN/RS-485) route fine as coupled pairs on 2 layers", m.DiffPairs)
 	}
 	if m.RFNets > 0 {
 		needPlanes = true
@@ -269,9 +276,9 @@ func DecideStackup(b *Board, a *Analysis, opt StackOptions) *Stackup {
 		needPlanes = true
 		why("fine pitch %.1f mil at %.0f pins/in²", m.FinestPitchMil, m.PinDensity)
 	}
-	if m.PowerRails >= 3 {
+	if m.PowerRails >= 3 && m.SignalLayersNeed > 1.0 {
 		needPlanes = true
-		why("%d supply rails — a split power plane beats tracks for IR drop and routing space", m.PowerRails)
+		why("%d supply rails on a board already short of routing room — a split power plane frees the signal layers", m.PowerRails)
 	}
 	if needPlanes {
 		layers = 4

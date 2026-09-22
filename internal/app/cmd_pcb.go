@@ -2861,6 +2861,8 @@ external router (Freerouting) would route under the antenna. The result reports
 	pcb.AddCommand(newPcbModuleOwnedCmd(stdout, stderr))
 	// ── refine: 打分驱动的精修环（默认 dry-run，按步回滚）──────────────────────
 	pcb.AddCommand(newPcbRefineCmd(cfg, &window, stdout, stderr))
+	// ── auto: offline electrical-aware engine (pkg/pcbauto) → apply playbook ──
+	pcb.AddCommand(newPcbAutoCmd(cfg, &window, stdout, stderr))
 	// ── autoroute: one-command Freerouting round-trip ────────────────────────
 	// export DSN → run an external Freerouting engine → import the routed SES → DRC.
 	// The engine is external (Freerouting needs Java 17+); decoupled via a command

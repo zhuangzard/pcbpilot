@@ -356,7 +356,7 @@ func (pl *placer) partCost(p *Part) float64 {
 	// Overlap with neighbours (bucketed).
 	seen := map[*Part]bool{}
 	pl.forBuckets(bx, func(q *Part) {
-		if q == p || seen[q] {
+		if q == p || seen[q] || !collide(p, q) {
 			return
 		}
 		seen[q] = true
@@ -669,30 +669,41 @@ func (pl *placer) hardCost(p *Part) float64 {
 }
 
 func (pl *placer) spiral(p *Part) bool {
-	orig, rot := p.Body().Center(), p.Rotation
-	best, bestCost := orig, pl.hardCost(p)
+	orig, rot0 := p.Body().Center(), p.Rotation
+	best, bestRot, bestCost := orig, rot0, pl.hardCost(p)
 	step := math.Max(pl.spacing, 10)
 	pl.bucketOp(p, false)
-	for ring := 1; ring < 400 && bestCost > 1e-6; ring++ {
-		r := float64(ring) * step
-		n := 8 * ring
-		for k := 0; k < n; k++ {
-			a := 2 * math.Pi * float64(k) / float64(n)
-			c := orig.Add(Point{r * math.Cos(a), r * math.Sin(a)})
-			movePartCentre(p, c, rot)
-			pl.boxes[p] = pl.box(p)
-			if cost := pl.hardCost(p); cost < bestCost-1e-6 {
-				best, bestCost = c, cost
-				if cost <= 1e-6 {
-					break
+	// Current orientation first; the other three only if it finds no
+	// violation-free spot (a long part may only fit turned).
+	rots := []float64{rot0}
+	if !pl.opt.NoRotate {
+		rots = append(rots, normDeg(rot0+90), normDeg(rot0+180), normDeg(rot0+270))
+	}
+	for _, rot := range rots {
+		if bestCost <= 1e-6 {
+			break
+		}
+		for ring := 0; ring < 400 && bestCost > 1e-6; ring++ {
+			r := float64(ring) * step
+			n := max(8*ring, 1)
+			for k := 0; k < n; k++ {
+				a := 2 * math.Pi * float64(k) / float64(n)
+				c := orig.Add(Point{r * math.Cos(a), r * math.Sin(a)})
+				movePartCentre(p, c, rot)
+				pl.boxes[p] = pl.box(p)
+				if cost := pl.hardCost(p); cost < bestCost-1e-6 {
+					best, bestRot, bestCost = c, rot, cost
+					if cost <= 1e-6 {
+						break
+					}
 				}
 			}
 		}
 	}
-	movePartCentre(p, best, rot)
+	movePartCentre(p, best, bestRot)
 	pl.boxes[p] = pl.box(p)
 	pl.bucketOp(p, true)
-	return best != orig
+	return best != orig || bestRot != rot0
 }
 
 // ---- annealing ----------------------------------------------------------------
@@ -852,7 +863,7 @@ func (pl *placer) metrics(res *PlaceResult) {
 		bi := p.Body()
 		m.PartAreaIn2 += bi.Area() / 1e6
 		for _, q := range parts[i+1:] {
-			if bi.OverlapArea(q.Body()) > 1 {
+			if collide(p, q) && bi.OverlapArea(q.Body()) > 1 {
 				m.Overlaps++
 			}
 		}
@@ -891,4 +902,19 @@ func (pl *placer) metrics(res *PlaceResult) {
 	if m.BoardAreaIn2 > 0 {
 		m.Utilisation = math.Round(m.PartAreaIn2/m.BoardAreaIn2*1000) / 10
 	}
+}
+
+// collide reports whether two parts compete for the same board surface:
+// same side, or either has through-hole leads (present on both sides).
+func collide(p, q *Part) bool {
+	return p.Side == q.Side || hasTHT(p) || hasTHT(q)
+}
+
+func hasTHT(p *Part) bool {
+	for _, pd := range p.Pads {
+		if pd.Layer == LayerMulti {
+			return true
+		}
+	}
+	return false
 }
