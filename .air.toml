@@ -18,7 +18,7 @@ tmp_dir = "tmp"
   args_bin = ["daemon","start","--auto-update-skill=false"]
   # only watch Go sources of the daemon/CLI; ignore the connector, tools, docs
   include_ext = ["go"]
-  include_dir = ["cmd", "internal"]
+  include_dir = ["cmd", "internal", "pkg"]
   exclude_dir = ["bin", "tmp", "testdata", "extension", "tools", "docs", "skills"]
   exclude_regex = ["_test\\.go"]
   # debounce a burst of saves; SIGINT for graceful shutdown (daemon handles it),
