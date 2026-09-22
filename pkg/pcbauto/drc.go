@@ -231,7 +231,24 @@ func CheckDRC(b *Board, an *Analysis, st *Stackup, tracks []Track, vias []Via) *
 	for _, v := range rep.Violations {
 		rep.ByKind[v.Kind]++
 	}
-	sort.SliceStable(rep.Violations, func(i, j int) bool { return rep.Violations[i].Gap < rep.Violations[j].Gap })
+	// Total order (bucket iteration is map-ordered): the repair loop consumes
+	// this list, and runs must be reproducible.
+	sort.Slice(rep.Violations, func(i, j int) bool {
+		a, b := rep.Violations[i], rep.Violations[j]
+		switch {
+		case a.Gap != b.Gap:
+			return a.Gap < b.Gap
+		case a.Kind != b.Kind:
+			return a.Kind < b.Kind
+		case a.NetA != b.NetA:
+			return a.NetA < b.NetA
+		case a.NetB != b.NetB:
+			return a.NetB < b.NetB
+		case a.At.X != b.At.X:
+			return a.At.X < b.At.X
+		}
+		return a.At.Y < b.At.Y
+	})
 	rep.Disconnected = checkConnectivity(b, st, items)
 	return rep
 }

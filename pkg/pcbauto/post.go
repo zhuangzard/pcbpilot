@@ -82,6 +82,8 @@ func (r *router) emit(res *RouteResult) {
 		}
 		r.strict = false
 	}
+	// High-speed pairs: equalise intra-pair length before the final gate.
+	r.tuneLengths(outs, res)
 	// Final gate: drop any net still in violation.
 	ts, vs := collect()
 	var final []Violation

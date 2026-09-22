@@ -75,6 +75,7 @@ var (
 	reSwitch   = regexp.MustCompile(`(?i)^(SW|LX|PH)[0-9_]*$|_SW$|_LX$`)
 	reAnalog   = regexp.MustCompile(`(?i)(ADC|AIN|VREF|MIC|AUDIO|SENSE)`)
 	rePairBase = regexp.MustCompile(`(?i)^(.*?)(_?)(D|DP|DM|DN|P|N|\+|-)$`)
+	reUSBData  = regexp.MustCompile(`(?i)(^|[_\-])(USB[0-9]*[_\-]?)?D[+-]$`)
 )
 
 // InferVoltage extracts a rail voltage from a net name (0 when unknown).
@@ -306,12 +307,10 @@ func looksDiffName(name string) bool {
 		if !strings.Contains(n, k) {
 			continue
 		}
-		// "D+"/"D-" alone count only as USB-style data pins (USB_D+, D+).
-		if (k == "D+" || k == "D-") && !strings.HasSuffix(n, k) {
-			continue
-		}
+		// A "+/-" suffix is a pair only as a USB-style data pin (D+, USB_D-);
+		// LED+/BAT- end in "D+"/"T-" too but are polarity.
 		if strings.HasSuffix(n, "+") || strings.HasSuffix(n, "-") {
-			return strings.HasSuffix(n, "D+") || strings.HasSuffix(n, "D-")
+			return reUSBData.MatchString(n)
 		}
 		return true
 	}

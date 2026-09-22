@@ -99,3 +99,18 @@ func TestUnderstandRealBoard(t *testing.T) {
 		t.Fatalf("too few blocks")
 	}
 }
+
+func TestDiffPairNames(t *testing.T) {
+	names := map[string]bool{"USB_D+": true, "USB_D-": true, "D+": true, "D-": true, "BACK_LED+": true, "BACK_LED-": true,
+		"MIPI_DSI_0P": true, "MIPI_DSI_0N": true, "I2C_DSI_VCC_LED+": true, "I2C_DSI_VCC_LED-": true, "USB1_DP": true, "USB1_DM": true}
+	want := map[string]bool{"USB_D+": true, "D+": true, "MIPI_DSI_0P": true, "USB1_DP": true}
+	for n := range names {
+		got := looksDiffName(n) && pairPartner(n, names) != ""
+		if want[n] && !got {
+			t.Errorf("%s should pair", n)
+		}
+		if !want[n] && got && (n == "BACK_LED+" || n == "I2C_DSI_VCC_LED+" || n == "BACK_LED-" || n == "I2C_DSI_VCC_LED-") {
+			t.Errorf("%s is polarity, not a pair", n)
+		}
+	}
+}

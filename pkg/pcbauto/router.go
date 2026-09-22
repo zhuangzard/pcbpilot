@@ -62,6 +62,7 @@ type RouteStats struct {
 	Iterations          int     `json:"iterations"`
 	Conflicts           int     `json:"conflictsLeft"`
 	Repaired            int     `json:"repairedNets"`
+	Tuned               int     `json:"lengthTunedNets"`
 	PreRepairViolations int     `json:"preRepairViolations"`
 	ConflictTrace       []int   `json:"conflictTrace,omitempty"`
 	GridMil             float64 `json:"gridMil"`
@@ -136,6 +137,7 @@ type router struct {
 	strict     bool
 	deadline   time.Time
 	split      map[int]*coarse // split-plane labelling per layer id
+	pairField  map[int32]float32
 	pbuckets   [][]padEntry
 	pbW, pbH   int
 	viaS       []int32
@@ -504,6 +506,11 @@ func (r *router) cost(n *rnet, i int) float32 {
 		} else {
 			area := float64(len(gr.disk(n.radius)))
 			c = float32((1 + hist/area) * (1 + r.presFac*occ))
+			if r.pairField != nil {
+				if f, ok := r.pairField[int32(i)]; ok {
+					c *= f // run alongside the routed partner at the pair pitch
+				}
+			}
 		}
 	}
 	r.nodeS[i], r.nodeC[i] = r.cur, c
@@ -914,6 +921,8 @@ func (r *router) routeNetKeep(n *rnet, keep bool) bool {
 	old := n.paths
 	r.ripUp(n, true)
 	defer r.applyClaims(n.fixed, +1)
+	r.pairField = r.buildPairField(n)
+	defer func() { r.pairField = nil }()
 	n.failed = nil
 	if keep {
 		n.paths = old
@@ -1119,7 +1128,60 @@ func (r *router) routeOrder() []*rnet {
 		// Short nets first: they have the fewest alternatives.
 		return netSpan(a) < netSpan(b)
 	})
-	return out
+	// Differential partners route back to back so the second can hug the first.
+	placed := map[*rnet]bool{}
+	var paired []*rnet
+	for _, n := range out {
+		if placed[n] {
+			continue
+		}
+		placed[n] = true
+		paired = append(paired, n)
+		if p := r.byName[n.plan.PairWith]; p != nil && !placed[p] && p.route && len(p.groups) > 1 {
+			placed[p] = true
+			paired = append(paired, p)
+		}
+	}
+	return paired
+}
+
+// buildPairField marks, for net n, the cells lying exactly one pair pitch
+// (width + gap) from its routed partner's centreline on the same layer: the
+// search makes them cheaper, so the pair is routed coupled.
+func (r *router) buildPairField(n *rnet) map[int32]float32 {
+	p := r.byName[n.plan.PairWith]
+	if p == nil || len(p.paths) == 0 {
+		return nil
+	}
+	gr := r.gr
+	gap := n.plan.PairGapMil
+	if gap <= 0 {
+		gap = r.b.Rules.Clearance
+	}
+	pitch := (n.width+p.width)/2 + gap
+	lo, hi := pitch/gr.g-0.5, pitch/gr.g+0.7
+	k := int(math.Ceil(hi))
+	var ring [][2]int
+	for dy := -k; dy <= k; dy++ {
+		for dx := -k; dx <= k; dx++ {
+			d := math.Hypot(float64(dx), float64(dy))
+			if d >= lo && d <= hi {
+				ring = append(ring, [2]int{dx, dy})
+			}
+		}
+	}
+	f := map[int32]float32{}
+	for _, path := range p.paths {
+		for _, node := range path.nodes {
+			l, x, y := gr.xy(int(node))
+			for _, o := range ring {
+				if xx, yy := x+o[0], y+o[1]; gr.in(xx, yy) {
+					f[int32(gr.idx(l, xx, yy))] = 0.55
+				}
+			}
+		}
+	}
+	return f
 }
 
 func netSpan(n *rnet) float64 {
