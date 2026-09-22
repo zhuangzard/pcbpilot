@@ -77,6 +77,9 @@ func (r *router) repairPartial(n *rnet, reroute bool) {
 	}
 	r.applyClaims(n.claims, -1)
 	n.claims, n.paths = nil, keep
+	if reroute {
+		r.dropBlockingFanouts(n, bad)
+	}
 	groups := r.pathGroups(n)
 	if reroute && len(groups) > 1 {
 		saved := n.groups
@@ -159,4 +162,66 @@ func (r *router) pathGroups(n *rnet) [][]*Pad {
 		out = append(out, byRoot[rt])
 	}
 	return out
+}
+
+// dropBlockingFanouts removes other nets' fan-out vias whose copper sits on
+// cells n was fighting for. Fan-outs only serve plane/pour nets, whose pads
+// keep the pour (or get a bridging track from pourRepair); a signal has no
+// such fallback, so in a dead-lock the fan-out yields.
+func (r *router) dropBlockingFanouts(n *rnet, bad map[int32]bool) {
+	if len(bad) == 0 {
+		return
+	}
+	for _, m := range r.nets {
+		if m == n || len(m.fanFull) == 0 || !(m.poured || m.onPlane) {
+			continue
+		}
+		var keep []int
+		dropped := false
+		for k, full := range m.fanFull {
+			hit := false
+			for _, i := range full {
+				if bad[i] {
+					hit = true
+					break
+				}
+			}
+			if hit {
+				dropped = true
+				continue
+			}
+			keep = append(keep, k)
+		}
+		if !dropped {
+			continue
+		}
+		r.applyClaims(m.fixed, -1)
+		var vias []Via
+		var full [][]int32
+		var tidx []int
+		var tracks []Track
+		var fixed []int32
+		for _, k := range keep {
+			vias = append(vias, m.fanVias[k])
+			full = append(full, m.fanFull[k])
+			ti := -1
+			if m.fanTrack[k] >= 0 {
+				ti = len(tracks)
+				tracks = append(tracks, m.fanTracks[m.fanTrack[k]])
+			}
+			tidx = append(tidx, ti)
+			fixed = append(fixed, m.fanFull[k]...)
+		}
+		m.fanVias, m.fanFull, m.fanTrack, m.fanTracks = vias, full, tidx, tracks
+		m.fixed = dedup(fixed)
+		// Routed claims of m must not double-count cells now in fixed.
+		r.applyClaims(m.claims, -1)
+		m.claims = nil
+		for _, p := range m.paths {
+			m.claims = r.claimNodes(m, p.nodes, m.claims)
+		}
+		m.claims = r.minusFixed(m, dedup(m.claims))
+		r.applyClaims(m.claims, +1)
+		r.applyClaims(m.fixed, +1)
+	}
 }

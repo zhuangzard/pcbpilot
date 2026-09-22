@@ -167,8 +167,10 @@ func (r *router) placeFanoutVias(n *rnet, pd *Pad, li, need int, stubW float64, 
 			}
 		}
 		var cl []int32
+		trackIdx := -1
 		if !inside {
 			cl = r.claimSegment(n, li, pd.Box.C, c.c, stubW, cl)
+			trackIdx = len(n.fanTracks)
 			n.fanTracks = append(n.fanTracks, Track{Net: n.name, Layer: gr.layers[li], A: pd.Box.C, B: c.c, Width: stubW, Kind: "fanout"})
 		}
 		r.claimCur++
@@ -183,6 +185,8 @@ func (r *router) placeFanoutVias(n *rnet, pd *Pad, li, need int, stubW float64, 
 		// Only cells this net does not already claim: two fan-out vias of the
 		// same net overlap, and a cell must count once per net.
 		cl = dedup(cl)
+		n.fanFull = append(n.fanFull, append([]int32(nil), cl...))
+		n.fanTrack = append(n.fanTrack, trackIdx)
 		r.claimCur++
 		for _, i := range n.fixed {
 			r.claimStamp[i] = r.claimCur

@@ -68,7 +68,7 @@ type NetPlan struct {
 var (
 	reVolt     = regexp.MustCompile(`(?i)(?:^|[^0-9])([0-9]+)V([0-9]+)(?:$|[^0-9])`)             // 3V3, 1V8
 	reVoltDec  = regexp.MustCompile(`(?i)(?:^|[^0-9.])([0-9]+(?:\.[0-9]+)?)\s*V(?:$|[^0-9A-Z])`) // 3.3V, +5V, 12V
-	reGround   = regexp.MustCompile(`(?i)^(A|D|P|S|C)?GND[A-Z0-9_]*$|^VSS[A-Z0-9_]*$|^GROUND$|^EARTH$|^0V$`)
+	reGround   = regexp.MustCompile(`(?i)^([A-Z0-9]+_)?(A|D|P|S|C|E)?GND[A-Z0-9_]*$|^VSS[A-Z0-9_]*$|^GROUND$|^EARTH$|^0V$`)
 	rePower    = regexp.MustCompile(`(?i)^\+?(VCC|VDD|VBUS|VIN|VBAT|VSYS|VOUT|VCORE|VIO|VREF|AVDD|DVDD|PVDD|V[0-9]|[0-9]+V[0-9]*|\+)`)
 	reClock    = regexp.MustCompile(`(?i)(XTAL|XIN|XOUT|OSC|XI$|XO$|CLK|MCLK|SCLK|BCLK)`)
 	reRF       = regexp.MustCompile(`(?i)(ANT|RF_|_RF|LNA)`)

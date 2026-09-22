@@ -111,3 +111,26 @@ func TestDebugPreRepair(t *testing.T) {
 		}
 	}
 }
+
+func TestDebugStuck(t *testing.T) {
+	if os.Getenv("PCBAUTO_DEBUG") == "" {
+		t.Skip()
+	}
+	b := loadFixture(t, os.Getenv("PCBAUTO_DEBUG"))
+	out, _ := Run(t.Context(), b, Options{Stack: StackOptions{Force: b.CopperLayers}, Route: RouteOptions{Timeout: time.Minute}})
+	for _, u := range out.Route.Unrouted {
+		t.Logf("unrouted %+v", u)
+		for _, k := range u.Pads {
+			for _, p := range b.Parts {
+				for _, pd := range p.Pads {
+					if pd.Key() == k {
+						t.Logf("  pad %s layer=%d box=%+v", k, pd.Layer, pd.Box)
+					}
+				}
+			}
+		}
+	}
+	for _, n := range out.Route.Notes {
+		t.Logf("note %s", n)
+	}
+}

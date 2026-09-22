@@ -96,6 +96,8 @@ type rnet struct {
 	paths     []rpath
 	fanTracks []Track
 	fanVias   []Via
+	fanFull   [][]int32 // full claim set of each fan-out via (+ its stub)
+	fanTrack  []int     // index into fanTracks, -1 for in-pad thermal vias
 	failed    []Unrouted
 	conflict  bool
 	neckW     float64        // pad-entry width when the full width does not fit
