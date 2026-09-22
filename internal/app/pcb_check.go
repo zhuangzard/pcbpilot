@@ -258,14 +258,14 @@ type pcbCheckReport struct {
 // analyzePcbCheck is the copper-only DFM core (no silkscreen). Thin wrapper over
 // analyzePcbCheckFull; kept for the many unit tests that don't exercise silk.
 func analyzePcbCheck(pads []pcbPadP, tracks []pcbTrack, vias []pcbViaP, couplingW float64) pcbCheckReport {
-	return analyzePcbCheckFull(pads, tracks, vias, nil, nil, couplingW)
+	return analyzePcbCheckFull(pads, tracks, vias, nil, nil, couplingW, nil)
 }
 
 // analyzePcbCheckFull is the pure DFM core over placed primitives. couplingW is the
 // 3W-rule center-spacing factor (≤0 → default pcbCouplingW). silk feeds the
 // silkscreen-orientation rule (flipped/back-side labels); arcs (beautify's rounded
 // corners) anchor track endpoints so rounding doesn't fabricate dangling stubs.
-func analyzePcbCheckFull(pads []pcbPadP, tracks []pcbTrack, vias []pcbViaP, arcs []pcbArc, silk []pcbSilkText, couplingW float64) pcbCheckReport {
+func analyzePcbCheckFull(pads []pcbPadP, tracks []pcbTrack, vias []pcbViaP, arcs []pcbArc, silk []pcbSilkText, couplingW float64, diffPairs []pcbDiffPair) pcbCheckReport {
 	rep := pcbCheckReport{TrackCount: len(tracks), ViaCount: len(vias), PadCount: len(pads)}
 	legacyPadGeometry, unknownPadGeometry := 0, 0
 	for _, p := range pads {
@@ -305,7 +305,7 @@ func analyzePcbCheckFull(pads []pcbPadP, tracks []pcbTrack, vias []pcbViaP, arcs
 	rep.Findings = append(rep.Findings, findViaIssues(tracks, vias)...)
 	rep.Findings = append(rep.Findings, findWidthMismatch(tracks, pads)...)
 	rep.Findings = append(rep.Findings, findDuplicateSegments(tracks)...)
-	rep.Findings = append(rep.Findings, findParallelCoupling(tracks, couplingW)...)
+	rep.Findings = append(rep.Findings, findParallelCoupling(tracks, couplingW, diffPairs)...)
 	rep.Findings = append(rep.Findings, findSilkscreenFlipped(silk)...)
 	rep.Findings = append(rep.Findings, findSilkOverPad(silk, pads)...)
 	rep.Findings = append(rep.Findings, findDecapTooFar(pads)...)
@@ -1065,7 +1065,14 @@ func collinearOverlap(a, b pcbTrack) (float64, bool) {
 // center-to-center gap below couplingW×maxWidth, over a meaningful overlap, are
 // a crosstalk / manufacturing-spacing risk (the classic 3W rule). Same-net pairs
 // (intentional) and power/GND (poured, not coupled tracks) are skipped.
-func findParallelCoupling(tracks []pcbTrack, couplingW float64) []pcbCheckFinding {
+//
+// So are the two members of a DECLARED differential pair: running them tightly
+// coupled is the entire point of a pair, and the 3W rule is about a pair (or a
+// single net) against OTHER nets — never about the gap inside one pair. Without
+// this, a correctly routed pair is told to un-route exactly what the constraint
+// asked for, and no legal layout can clear the warning. Pair members are still
+// checked against every other net.
+func findParallelCoupling(tracks []pcbTrack, couplingW float64, diffPairs []pcbDiffPair) []pcbCheckFinding {
 	var out []pcbCheckFinding
 	for i := 0; i < len(tracks); i++ {
 		a := tracks[i]
@@ -1076,6 +1083,9 @@ func findParallelCoupling(tracks []pcbTrack, couplingW float64) []pcbCheckFindin
 			b := tracks[j]
 			if a.Net == b.Net || a.Layer != b.Layer || isGlobalNet(b.Net) {
 				continue
+			}
+			if isDeclaredDiffPair(a.Net, b.Net, diffPairs) {
+				continue // intra-pair coupling is the design intent, not a defect
 			}
 			gap, ovlp, ok := parallelGap(a, b)
 			if !ok || ovlp < pcbCouplingMinOvlp {
@@ -1819,8 +1829,16 @@ func gatherPcbCheckReport(cfg *appConfig, window string, couplingW float64, chec
 		fmt.Fprintf(stderr, "warning: silkscreen-flipped check skipped (%v) — update the connector to enable it\n", err)
 		silk = nil
 	}
+	// Declared differential pairs (#176) tell the 3W rule which tight coupling is
+	// intentional. Best-effort, like arcs and silk: an older connector without
+	// pcb.constraint.list just loses pair-awareness — the previous behaviour.
+	diffPairs, derr := fetchPcbDiffPairs(cfg, window)
+	if derr != nil {
+		fmt.Fprintf(stderr, "warning: differential-pair constraints unavailable (%v) — the 3W rule cannot tell an intentional pair from crosstalk\n", derr)
+		diffPairs = nil
+	}
 
-	rep := analyzePcbCheckFull(pads, tracks, vias, arcs, silk, couplingW)
+	rep := analyzePcbCheckFull(pads, tracks, vias, arcs, silk, couplingW, diffPairs)
 
 	// Clearance is a LIVE rule — it needs the board's live spacing value. Flags
 	// copper running under the spacing rule against another net's pad/via/track
@@ -2347,4 +2365,47 @@ func renderPcbCheckReport(rep pcbCheckReport, w io.Writer) {
 		}
 		fmt.Fprintf(w, "  %-5s %-17s %s%s  [%s]\n", f.Level, f.Type, f.Message, loc, net)
 	}
+}
+
+// ── differential pairs (#176 constraints) feeding the 3W rule ───────────────
+
+// pcbDiffPair is one DECLARED differential pair, as `pcb diff-pair create`
+// stores it on the board. The 3W rule needs it because the two members of a
+// pair are *supposed* to run tightly coupled — that is what makes them a pair.
+type pcbDiffPair struct{ Positive, Negative string }
+
+// fetchPcbDiffPairs reads the board's declared length constraints. Best-effort,
+// like arcs and silk: an older connector without pcb.constraint.list just means
+// the coupling rule loses pair-awareness, which is the behaviour it had before.
+func fetchPcbDiffPairs(cfg *appConfig, window string) ([]pcbDiffPair, error) {
+	res, err := requestAction(cfg, "pcb.constraint.list", window, nil)
+	if err != nil {
+		return nil, err
+	}
+	raw, _ := mnav(res.Result, "differentialPairs").([]any)
+	var out []pcbDiffPair
+	for _, it := range raw {
+		m, ok := it.(map[string]any)
+		if !ok {
+			continue
+		}
+		p, _ := m["positiveNet"].(string)
+		n, _ := m["negativeNet"].(string)
+		if p != "" && n != "" {
+			out = append(out, pcbDiffPair{Positive: p, Negative: n})
+		}
+	}
+	return out, nil
+}
+
+// isDeclaredDiffPair reports whether these two nets are the two members of one
+// declared pair. Order-independent: the caller has already sorted the names for
+// the finding message, so it must not depend on which is positive.
+func isDeclaredDiffPair(a, b string, pairs []pcbDiffPair) bool {
+	for _, p := range pairs {
+		if (a == p.Positive && b == p.Negative) || (a == p.Negative && b == p.Positive) {
+			return true
+		}
+	}
+	return false
 }

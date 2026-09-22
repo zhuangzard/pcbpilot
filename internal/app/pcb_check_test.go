@@ -243,14 +243,14 @@ func TestPcbCheck_SilkscreenFlipped(t *testing.T) {
 	sideMismatch := []pcbSilkText{
 		{ID: "a1", Kind: "attribute", Text: "R1", Layer: 4, Mirror: true, CompID: "c1", CompLayer: 1},
 	}
-	if got := countType(analyzePcbCheckFull(nil, nil, nil, nil, sideMismatch, 0), "silkscreen-flipped"); got != 1 {
+	if got := countType(analyzePcbCheckFull(nil, nil, nil, nil, sideMismatch, 0, nil), "silkscreen-flipped"); got != 1 {
 		t.Fatalf("side-mismatch = %d, want 1", got)
 	}
 	// Free label on TOP silk but mirrored → reads backwards.
 	backwards := []pcbSilkText{
 		{ID: "s1", Kind: "string", Text: "REV A", Layer: 3, Mirror: true},
 	}
-	if got := countType(analyzePcbCheckFull(nil, nil, nil, nil, backwards, 0), "silkscreen-flipped"); got != 1 {
+	if got := countType(analyzePcbCheckFull(nil, nil, nil, nil, backwards, 0, nil), "silkscreen-flipped"); got != 1 {
 		t.Fatalf("mirrored-top = %d, want 1", got)
 	}
 	// Bottom-side mirror is NOT judged — neither polarity is a finding, so the
@@ -259,7 +259,7 @@ func TestPcbCheck_SilkscreenFlipped(t *testing.T) {
 		{ID: "a3", Kind: "attribute", Text: "U3", Layer: 4, Mirror: true, CompID: "c3", CompLayer: 2},
 		{ID: "a4", Kind: "attribute", Text: "U4", Layer: 4, Mirror: false, CompID: "c4", CompLayer: 2},
 	}
-	if got := countType(analyzePcbCheckFull(nil, nil, nil, nil, bottomEither, 0), "silkscreen-flipped"); got != 0 {
+	if got := countType(analyzePcbCheckFull(nil, nil, nil, nil, bottomEither, 0, nil), "silkscreen-flipped"); got != 0 {
 		t.Fatalf("bottom mirror (either polarity) = %d, want 0", got)
 	}
 	// Correct states: top part / top silk; bottom part / bottom silk; free strings on
@@ -270,7 +270,7 @@ func TestPcbCheck_SilkscreenFlipped(t *testing.T) {
 		{ID: "s1", Kind: "string", Text: "LOGO", Layer: 3, Mirror: false},
 		{ID: "s2", Kind: "string", Text: "SN", Layer: 4, Mirror: false},
 	}
-	rep := analyzePcbCheckFull(nil, nil, nil, nil, ok, 0)
+	rep := analyzePcbCheckFull(nil, nil, nil, nil, ok, 0, nil)
 	if got := countType(rep, "silkscreen-flipped"); got != 0 {
 		t.Fatalf("correct silk = %d, want 0 (findings: %+v)", got, rep.Findings)
 	}
@@ -288,7 +288,7 @@ func TestPcbCheck_SilkMirrorAndReverse(t *testing.T) {
 		{"top-reversed", pcbSilkText{ID: "a2", Kind: "attribute", Key: "Designator", Text: "R9", Layer: 3, Reverse: true, CompID: "c2", CompLayer: 1}},
 		{"bottom-reversed", pcbSilkText{ID: "s2", Kind: "string", Text: "SN", Layer: 4, Reverse: true}},
 	} {
-		rep := analyzePcbCheckFull(nil, nil, nil, nil, []pcbSilkText{tc.s}, 0)
+		rep := analyzePcbCheckFull(nil, nil, nil, nil, []pcbSilkText{tc.s}, 0, nil)
 		if got := countType(rep, "silkscreen-flipped"); got != 1 {
 			t.Fatalf("%s: silkscreen-flipped = %d, want 1 (findings: %+v)", tc.name, got, rep.Findings)
 		}
@@ -328,7 +328,7 @@ func TestPcbCheck_OfficialBoardsNoSilkFalsePositive(t *testing.T) {
 		if len(snap.Silk) == 0 {
 			t.Fatalf("%s has no silkscreen texts — the fixture stopped exercising this rule", file)
 		}
-		rep := analyzePcbCheckFull(nil, nil, nil, nil, snap.Silk, 0)
+		rep := analyzePcbCheckFull(nil, nil, nil, nil, snap.Silk, 0, nil)
 		errs := 0
 		for _, f := range rep.Findings {
 			if f.Type == "silkscreen-flipped" && f.Level == "ERROR" {
@@ -454,7 +454,7 @@ func TestPcbCheck_SilkDesignatorOrientation(t *testing.T) {
 		{ID: "s3", Kind: "attribute", Key: "Designator", Text: "U1", Layer: silkTopLayer, Rotation: 0},     // upright OK
 		{ID: "s4", Kind: "attribute", Key: "Footprint", Text: "C0402", Layer: silkTopLayer, Rotation: 180}, // not a RefDes → ignore
 	}
-	rep := analyzePcbCheckFull(nil, nil, nil, nil, silk, 0)
+	rep := analyzePcbCheckFull(nil, nil, nil, nil, silk, 0, nil)
 	if got := countType(rep, "silkscreen-flipped"); got != 2 {
 		t.Fatalf("silk orientation = %d, want 2 (C1 180° + LED1 90°; upright + footprint ignored): %+v", got, rep.Findings)
 	}
@@ -465,7 +465,7 @@ func TestPcbCheck_SilkReversed(t *testing.T) {
 	silk := []pcbSilkText{
 		{ID: "s1", Kind: "attribute", Key: "Designator", Text: "R9", Layer: silkTopLayer, Reverse: true},
 	}
-	rep := analyzePcbCheckFull(nil, nil, nil, nil, silk, 0)
+	rep := analyzePcbCheckFull(nil, nil, nil, nil, silk, 0, nil)
 	if got := countType(rep, "silkscreen-flipped"); got != 1 {
 		t.Fatalf("reversed top-silk = %d, want 1 (reads backwards)", got)
 	}
