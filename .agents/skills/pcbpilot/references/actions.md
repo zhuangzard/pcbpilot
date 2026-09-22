@@ -245,3 +245,8 @@ EasyEDA 交互界面兜底。能力边界与未来 typed 验收见 [project-impo
 目标 kind/net/direction/offset 和源快照哈希。daemon 在同一互斥区间内读取基线、验证旧对象，
 删除旧支路、创建新支路并回读；目标 finding 必须消失，范围外对象与旧 finding 必须不变。
 部分写入如实返回，不能重试或声称回滚。只由 `sch layout-edit --playbook` 生成；普通修线不手写。
+
+## 原生原理图 DRC 的判定与覆盖
+
+`schematic.drc.check` 的 `passed` / `nativePassed` 采用宿主布尔重载在指定 `strict` 下的判定。详细模式另取统计，两次 SDK 读取不是原子快照；检查期间不要并发修改工程。非严格通过并不代表零告警。
+`countsAvailable` / `detailsAvailable` 区分统计和逐项明细；仅布尔结果的 `summary` / `fatal` 为 null，不能把未知填成零。聚合 count/type 不能用来猜规则或对象，`schematic.check` 不替代原生规则。调用失败不能作为通过。

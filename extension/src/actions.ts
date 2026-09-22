@@ -3194,45 +3194,37 @@ function normalizeDrc(raw: unknown): {
 
 const schematicDrcCheck: Handler = async (payload) => {
 	const strict = optionalBoolean(payload, 'strict') === true;
-	// `includeVerboseError` selects the SDK overload: the literal `true` overload
-	// returns the violations array (what we normalize); the literal `false` one
-	// returns a bare boolean. Default true so we always get detail — and ACTUALLY
-	// read the payload field (it used to be hardcoded `true`, so the CLI flag was
-	// silently ignored). The overloads demand a literal arg, hence two branches.
-	// issue #7
 	const includeVerbose = optionalBoolean(payload, 'includeVerboseError') !== false;
-	if (!includeVerbose) {
-		// Non-verbose overload: a bare boolean with no per-item detail. Returned
-		// verbatim as `passed` (raw debug callers only — the CLI always asks for
-		// the verbose/array form).
-		let ok: boolean;
-		try {
-			ok = await eda.sch_Drc.check(strict, false, false);
-		}
-		catch (err) {
-			throw edaError(err, 'Failed to run DRC.');
-		}
-		return {
-			result: {
-				passed: ok,
-				fatal: 0,
-				summary: { fatal: 0, error: 0, warn: 0, info: 0, unknown: 0, total: 0 },
-				violations: [],
-				raw: ok,
-			},
-		};
-	}
-	let violations: unknown;
+	let raw: unknown;
+	let nativePassed: boolean;
 	try {
-		violations = await eda.sch_Drc.check(strict, false, true);
+		if (includeVerbose) raw = await eda.sch_Drc.check(strict, false, true);
+		// Only the boolean overload supplies the host's strict-mode verdict.
+		// Aggregate warnings must not silently turn non-strict success into failure.
+		nativePassed = await eda.sch_Drc.check(strict, false, false);
 	}
 	catch (err) {
 		throw edaError(err, 'Failed to run DRC.');
 	}
-	// Normalize: expand each violation to {level, rule, message, ids, x, y} +
-	// a severity summary so callers can locate issues and gate on fatal count,
-	// instead of seeing only the SDK's aggregate `{count, type}` groups. issue #7
-	return { result: normalizeDrc(violations) };
+	if (typeof nativePassed !== 'boolean') {
+		throw new ActionError(ErrorCodes.EDA_CALL_FAILED, 'DRC returned no boolean verdict.');
+	}
+	if (!includeVerbose || typeof raw === 'boolean') {
+		return { result: { passed: nativePassed, nativePassed, strict,
+			fatal: null, summary: null, violations: [],
+			countsAvailable: false, detailsAvailable: false,
+			raw: includeVerbose ? raw : nativePassed } };
+	}
+	if (!Array.isArray(raw)) {
+		throw new ActionError(ErrorCodes.EDA_CALL_FAILED, 'DRC returned an unsupported detailed result; counts are unavailable.');
+	}
+	const normalized = normalizeDrc(raw);
+	return { result: { ...normalized, passed: nativePassed, nativePassed, strict,
+		countsAvailable: true,
+		detailsAvailable: raw.length === 0 || (normalized.violations.length > 0 && normalized.violations.every(v => v.count === undefined)),
+		// These are two sequential SDK reads, not an atomic snapshot.
+		verdictSource: 'boolean-overload',
+	} };
 };
 
 // ─── Design check (reconstructed detail the SDK DRC can't expose) ────────────
