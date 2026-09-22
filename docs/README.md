@@ -13,6 +13,7 @@
 | 找到可改参数的相近案例 | [样例索引](../.agents/skills/easyeda-agent/references/examples/index.md) | 具体样例的来源、参数及回读 |
 | 确认能做什么、不能做什么 | [FEATURES.md](FEATURES.md) | [cli/README.md](cli/README.md) |
 | 理解概念与职责 | [concepts.md](concepts.md)、[architecture.md](architecture.md) | [schematic-connectivity-model.md](schematic-connectivity-model.md) |
+| 整板自动设计引擎的算法、证据与路线图 | [pcbauto.md](pcbauto.md) | Skill 操作页 [pcb-auto.md](../.agents/skills/easyeda-agent/references/pcb-auto.md) |
 | 新增或修复工具能力 | [cli-design.md](cli-design.md)、[protocol.md](protocol.md) | [connector-contract.md](connector-contract.md)、[ecosystem-survey.md](ecosystem-survey.md) |
 | 维护 Skill 和知识 | [skill-design.md](skill-design.md)、[编写约定](../.agents/skills/README.md) | [Agent 协作设计](agent-collaboration.md) |
 | 准备已获批准的版本发布 | [release-workflow.md](release-workflow.md) | [仓库发布授权规则](../AGENTS.md) |

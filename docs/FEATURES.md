@@ -64,6 +64,22 @@
 执行许可已从版本、workflow stage、布局 tier 和 stale-read 状态中移除。旧接口继续返回
 `compatibilityOnly` 或 `staleRisk` 供诊断；权威批次使用 save → reload → readback。
 
+## 电气感知整板自动设计（`pcb auto`，离线验证）
+
+`easyeda pcb auto analyze|run` 调用离线引擎 [`pkg/pcbauto`](../pkg/pcbauto)，状态 `offline-verified`：
+剧本通过 `easyeda apply --dry-run` 预检，尚未在现场执行并回读。设计理由与证据见 [pcbauto.md](pcbauto.md)。
+
+| 能力 | 语义 |
+|---|---|
+| 电路理解 | 器件分类、功能块（核心 + 专属外围、去耦按电源脚分配）、块间链路（I2C/SPI/UART/USB/I2S/差分/时钟）、按地网划分电压域、识别跨域隔离器件 |
+| 电气规则推导 | 逐网电压/电流 → IPC-2221 外层线宽、IPC-2152 内层线宽、IPC-2221B 电压间距、换层过孔数、差分/RF 阻抗线宽（无参考平面时拒绝不可制造的宽度） |
+| 隔离 | 危险电压域 ↔ SELV 加强绝缘，按工作电压给爬电距离/电气间隙（工程默认值，需按产品标准确认），桥接器件排距不足时建议开槽 |
+| 层数与平面 | 2/4/6 层决策并给理由；GND 平面、电源分割平面（Voronoi 多边形）；外层布不通时自动升混合层并择优 |
+| 机械约束 | 板框/圆角/自动收缩、M2–M4 角孔、固定件、板边接口自动朝外、禁布区、限高区、指定分区 |
+| 布局 | 电压域分区 + 隔离禁铜带、功能块力导向、外围贴引脚、退火优化（加权线长、去耦距离、约束罚项）、合法化 |
+| 布线 | 平面扇出、多层拥塞协商、网级线宽间距、缩颈、铺铜连通仿真补线、精确 DRC 修复环、差分贴线、蛇形/45° 等长 |
+| 检查与输出 | 精确几何 DRC、连通性、SI（长度、过孔、对内长度差、跨分割）；`report.md` / `plan.json` / `preview.svg` / `playbook.json` |
+
 ## 已知不支持：Altium Designer 工程自动导入
 
 - `.SchDoc` / `.PcbDoc` 当前没有 typed action 或 CLI 导入入口；使用 EasyEDA Pro 的

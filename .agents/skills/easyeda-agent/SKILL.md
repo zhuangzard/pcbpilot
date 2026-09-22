@@ -73,6 +73,7 @@ metadata:
 | 已有原理图检查或小修 | [schematic.md](references/schematic.md)、[schematic-wiring.md](references/schematic-wiring.md) |
 | PCB 布局 | [pcb.md](references/pcb.md)、[pcb-layout.md](references/pcb-layout.md) |
 | PCB 布线、铺铜、禁布区 | [pcb-routing.md](references/pcb-routing.md) |
+| 整板电气感知自动设计：电流/电压→线宽间距、层数与平面、高低压隔离、机械约束布局、自动布线与等长 | [pcb-auto.md](references/pcb-auto.md) |
 | EDA 配置、考试设计规则、PWR 网络类绑定 | [pcb-config.md](references/pcb-config.md) |
 | 从需求到整板 | [design-flow.md](references/design-flow.md)、[design-decisions.md](references/design-decisions.md) |
 | 选型、标准电路、库器件 | [part-selection.md](references/part-selection.md)、[library-authoring.md](references/library-authoring.md)、[standard-parts.json](references/standard-parts.json) |
