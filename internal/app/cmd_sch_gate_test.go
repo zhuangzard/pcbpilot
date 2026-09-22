@@ -300,7 +300,10 @@ func TestFormatTypeTallyIsDeterministicAndMostFrequentFirst(t *testing.T) {
 // 测试自己的逻辑,被测代码改坏了照样绿。
 func TestDrcBlockingReasons_MatchesDocumentedContract(t *testing.T) {
 	mk := func(fatal, errs, warns, infos int) drcReport {
-		r := drcReport{Fatal: fatal}
+		r := drcReport{
+			Passed: true, NativePassed: true, Fatal: intp(fatal),
+			Summary: &drcSummary{}, CountsAvailable: true,
+		}
 		r.Summary.Fatal, r.Summary.Error, r.Summary.Warn, r.Summary.Info = fatal, errs, warns, infos
 		return r
 	}
@@ -318,6 +321,7 @@ func TestDrcBlockingReasons_MatchesDocumentedContract(t *testing.T) {
 		{"warn 默认不阻塞", mk(0, 0, 3, 0), false, false, ""},
 		{"warn 在 strict 下阻塞(--help 的承诺)", mk(0, 0, 3, 0), true, true, "DRC 面板"},
 		{"info 即便 strict 也不阻塞", mk(0, 0, 0, 5), true, false, ""},
+		{"计数未知时宿主失败仍阻塞", drcReport{Passed: false, NativePassed: false, Strict: true}, true, true, "native DRC verdict failed"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -340,8 +344,7 @@ func TestDrcBlockingReasons_WarnBlockSaysWhereToLook(t *testing.T) {
 	// 平台只回聚合计数,逐条明细没有 API —— 所以这条阻塞如果不写明「去 EasyEDA 的
 	// DRC 面板看」,它就是一条无法行动的阻塞,会被直接绕过,连它以后报的真问题
 	// 一起绕过。
-	var rep drcReport
-	rep.Summary.Warn = 1
+	rep := drcReport{Passed: true, NativePassed: true, Fatal: intp(0), Summary: &drcSummary{Warn: 1}, CountsAvailable: true}
 	got := drcBlockingReasons(rep, true)
 	if len(got) != 1 {
 		t.Fatalf("want 1 reason, got %v", got)

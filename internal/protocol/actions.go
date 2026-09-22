@@ -602,7 +602,7 @@ func AllActions() []ActionSpec {
 			NeedsWindow: true,
 			Description: "Run schematic DRC; passed/nativePassed use the boolean SDK verdict under the requested strict mode. Detailed mode makes a separate SDK read (not atomic). countsAvailable/detailsAvailable describe coverage; boolean-only summary/fatal are null, never fabricated zeros. Normalize available detail. Each violation carries {level, rule, message, primitiveIds, designators, x, y} (best-effort projection over the SDK shape, raw kept) plus a severity `summary` and a `fatal` count (error+fatal severities) for the design-flow S5 gate. `includeVerboseError` (default true) selects the detailed/array SDK overload. NOTE: the EDA schematic DRC API only returns an aggregate {count,type} (no per-item detail) — for the itemized findings the UI panel shows (which pins float, etc.), use schematic.check.",
 			Inputs:      []string{"strict", "includeVerboseError"},
-			Outputs:     []string{"passed", "fatal", "summary", "violations"},
+			Outputs:     []string{"passed", "nativePassed", "strict", "fatal nullable", "summary nullable", "violations", "countsAvailable", "detailsAvailable", "verdictSource optional"},
 		},
 		{
 			Name:        "schematic.check",

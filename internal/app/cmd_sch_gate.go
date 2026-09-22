@@ -451,10 +451,16 @@ func gateDrcStage(cfg *appConfig, window string, strict bool) gateStage {
 		return st
 	}
 	st.Detail = rep
-	st.Errors = rep.Fatal + rep.Summary.Error
-	st.Warnings = rep.Summary.Warn
-	st.Summary = fmt.Sprintf("%d fatal, %d error, %d warn, %d info (total %d)",
-		rep.Summary.Fatal, rep.Summary.Error, rep.Summary.Warn, rep.Summary.Info, rep.Summary.Total)
+	if rep.Summary == nil {
+		st.Summary = fmt.Sprintf("native verdict %s (strict=%t); counts unavailable",
+			drcVerdictLabel(rep.Passed), rep.Strict)
+	} else {
+		st.Errors = rep.Summary.Fatal + rep.Summary.Error
+		st.Warnings = rep.Summary.Warn
+		st.Summary = fmt.Sprintf("%d fatal, %d error, %d warn, %d info (total %d); native verdict %s",
+			rep.Summary.Fatal, rep.Summary.Error, rep.Summary.Warn, rep.Summary.Info, rep.Summary.Total,
+			drcVerdictLabel(rep.Passed))
+	}
 	st.BlockingReasons = append(st.BlockingReasons, drcBlockingReasons(rep, strict)...)
 	if len(st.BlockingReasons) > 0 {
 		st.Status = gateStatusFail
@@ -477,8 +483,14 @@ func gateDrcStage(cfg *appConfig, window string, strict bool) gateStage {
 // 方向还是「你以为管住了」(2026-08-16 回归测试翻出)。
 func drcBlockingReasons(rep drcReport, strict bool) []string {
 	var out []string
-	if rep.Fatal > 0 {
-		out = append(out, fmt.Sprintf("%d fatal DRC violation", rep.Fatal))
+	if !rep.Passed {
+		out = append(out, fmt.Sprintf("native DRC verdict failed (strict=%t; inspect EasyEDA DRC 面板)", strict))
+	}
+	if rep.Summary == nil {
+		return out
+	}
+	if rep.Fatal != nil && *rep.Fatal > 0 {
+		out = append(out, fmt.Sprintf("%d fatal DRC violation", *rep.Fatal))
 	}
 	if rep.Summary.Error > 0 {
 		out = append(out, fmt.Sprintf("%d error-level DRC violation", rep.Summary.Error))

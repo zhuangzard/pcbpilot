@@ -40,10 +40,14 @@ type drcSummary struct {
 
 // drcReport is the normalized DRC result the connector returns.
 type drcReport struct {
-	Passed     bool           `json:"passed"`
-	Fatal      int            `json:"fatal"`
-	Summary    drcSummary     `json:"summary"`
-	Violations []drcViolation `json:"violations"`
+	Passed           bool           `json:"passed"`
+	NativePassed     bool           `json:"nativePassed"`
+	Strict           bool           `json:"strict"`
+	Fatal            *int           `json:"fatal"`
+	Summary          *drcSummary    `json:"summary"`
+	Violations       []drcViolation `json:"violations"`
+	CountsAvailable  bool           `json:"countsAvailable"`
+	DetailsAvailable bool           `json:"detailsAvailable"`
 }
 
 // runSchDrc runs schematic DRC, renders the normalized violations, and returns a
@@ -84,8 +88,11 @@ func runSchDrc(cfg *appConfig, window string, strict, verbose, asJSON bool, stdo
 		renderDrcReport(rep, verbose, stdout)
 	}
 
-	if rep.Fatal > 0 {
-		return fmt.Errorf("sch drc: %d fatal violation(s)", rep.Fatal)
+	if !rep.Passed {
+		if rep.Fatal != nil && *rep.Fatal > 0 {
+			return fmt.Errorf("sch drc: native verdict failed with %d fatal violation(s)", *rep.Fatal)
+		}
+		return fmt.Errorf("sch drc: native verdict failed (strict=%t)", rep.Strict)
 	}
 	return nil
 }
@@ -96,12 +103,27 @@ func parseDrcReport(result map[string]any) (drcReport, error) {
 	if result == nil {
 		return rep, fmt.Errorf("empty DRC result")
 	}
+	for _, key := range []string{"passed", "nativePassed", "strict", "countsAvailable", "detailsAvailable"} {
+		if _, ok := result[key].(bool); !ok {
+			return rep, fmt.Errorf("DRC result has no boolean %s field", key)
+		}
+	}
 	b, err := json.Marshal(result)
 	if err != nil {
 		return rep, err
 	}
 	if err := json.Unmarshal(b, &rep); err != nil {
 		return rep, fmt.Errorf("unexpected DRC result shape: %w", err)
+	}
+	if rep.Passed != rep.NativePassed {
+		return rep, fmt.Errorf("DRC passed/nativePassed verdict mismatch")
+	}
+	if rep.CountsAvailable {
+		if rep.Fatal == nil || rep.Summary == nil {
+			return rep, fmt.Errorf("DRC claimed countsAvailable without fatal/summary counts")
+		}
+	} else if rep.Fatal != nil || rep.Summary != nil {
+		return rep, fmt.Errorf("DRC returned counts while countsAvailable=false")
 	}
 	return rep, nil
 }
@@ -124,9 +146,14 @@ func drcLevelTag(level string) string {
 
 // renderDrcReport prints a compact, per-violation human summary.
 func renderDrcReport(rep drcReport, verbose bool, w io.Writer) {
-	s := rep.Summary
-	fmt.Fprintf(w, "sch drc: %d violation(s) — %d fatal, %d error, %d warn, %d info\n",
-		s.Total, s.Fatal, s.Error, s.Warn, s.Info)
+	if rep.Summary == nil {
+		fmt.Fprintf(w, "sch drc: native verdict %s (strict=%t) — counts unavailable\n",
+			drcVerdictLabel(rep.Passed), rep.Strict)
+	} else {
+		s := rep.Summary
+		fmt.Fprintf(w, "sch drc: %d reported violation(s) — %d fatal, %d error, %d warn, %d info\n",
+			s.Total, s.Fatal, s.Error, s.Warn, s.Info)
+	}
 
 	for _, v := range rep.Violations {
 		tag := drcLevelTag(v.Level)
@@ -161,10 +188,25 @@ func renderDrcReport(rep drcReport, verbose bool, w io.Writer) {
 	}
 
 	if rep.Passed {
-		fmt.Fprintln(w, "✓ DRC clean — no violations")
-	} else if rep.Fatal == 0 {
-		fmt.Fprintf(w, "✓ 0 fatal, %d warning(s) — gate passes (warnings should still be reviewed)\n", s.Warn+s.Info+s.Unknown)
-	} else {
-		fmt.Fprintf(w, "✗ %d fatal violation(s) — must be fixed before the S5 gate passes\n", rep.Fatal)
+		if rep.Summary == nil {
+			fmt.Fprintln(w, "✓ Native DRC passed; warning/error counts are unavailable")
+		} else if rep.Summary.Total == 0 {
+			fmt.Fprintln(w, "✓ Native DRC passed — 0 reported violations")
+		} else {
+			fmt.Fprintf(w, "✓ Native DRC passed — %d reported item(s) remain advisory in this mode\n", rep.Summary.Total)
+		}
+		return
 	}
+	if rep.Fatal != nil && *rep.Fatal > 0 {
+		fmt.Fprintf(w, "✗ Native DRC failed with %d fatal violation(s)\n", *rep.Fatal)
+	} else {
+		fmt.Fprintf(w, "✗ Native DRC failed (strict=%t); review the EasyEDA DRC panel\n", rep.Strict)
+	}
+}
+
+func drcVerdictLabel(passed bool) string {
+	if passed {
+		return "PASS"
+	}
+	return "FAIL"
 }
