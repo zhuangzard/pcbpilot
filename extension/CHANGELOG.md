@@ -21,6 +21,11 @@ thanks to the original author and contributors, whose history is preserved.
   checks; emits an `apply` playbook, preview SVG and Chinese report.
   Status: offline-verified. Known defect R-0: under routing timeout the final
   DRC gate does not remove violating fan-out vias (seen on BGA boards).
+- Skill: precise-instruction recipes (schematic→PCB handoff, power.json,
+  mech.json, HV/LV isolation, high-speed, pcb auto run/review/apply), the
+  collaboration workflow (PCB check-only by default), and
+  `scripts/pad-net-diff.py` pad-by-pad schematic↔PCB net reconciliation.
+- `HV_*` / `+HV` net names are no longer treated as mains.
 - The connector runtime is unchanged apart from its identity and port range;
   it must be imported as a new extension (it does not replace upstream's).
 
