@@ -36,6 +36,8 @@ type Stackup struct {
 	Er           float64      `json:"er"`
 	Reasons      []string     `json:"reasons"`
 	Metrics      StackMetrics `json:"metrics"`
+	// Feasibility is the stage-0 assessment the layer count came from.
+	Feasibility *Feasibility `json:"feasibility,omitempty"`
 }
 
 // StackMetrics are the quantities the decision was based on.
@@ -68,6 +70,11 @@ type StackOptions struct {
 	// Utilisation is the fraction of a signal layer's area usable for tracks
 	// after pads, vias and clearances (default 0.28).
 	Utilisation float64
+	// Barriers are the isolation barriers stage 0 must fit on the board.
+	Barriers []*Barrier
+	// MinLayers keeps a later decision from undercutting an earlier one
+	// (the post-placement check may add layers, never remove them).
+	MinLayers int
 }
 
 // looksPlaced reports whether parts occupy distinct positions (vs a fresh
@@ -87,6 +94,10 @@ func looksPlaced(b *Board) bool {
 	}
 	for i := range bodies {
 		for j := i + 1; j < len(bodies) && j < i+40; j++ {
+			// Opposite sides may overlap by design (bottom decaps under a BGA).
+			if !collide(b.Parts[i], b.Parts[j]) {
+				continue
+			}
 			if bodies[i].OverlapArea(bodies[j]) > 0.5*math.Min(bodies[i].Area(), bodies[j].Area()) {
 				overlap++
 			}
@@ -290,6 +301,21 @@ func DecideStackup(b *Board, a *Analysis, opt StackOptions) *Stackup {
 	} else {
 		why("2 layers suffice: low demand, no impedance-controlled or RF nets")
 	}
+	// Stage 0 decides: measured occupancy, routing demand against per-layer
+	// capacity, BGA escape and via technology (feasibility.go). The rules
+	// above remain as supporting reasons.
+	fe := AssessFeasibility(b, a, opt.MaxLayers, FeasibilityOptions{MaxLayers: opt.MaxLayers, Barriers: opt.Barriers})
+	s.Feasibility = fe
+	if fe.Choice > 0 {
+		if fe.Choice != layers {
+			why("stage 0 (physical feasibility) sets %d layers where the rule of thumb said %d", fe.Choice, layers)
+		}
+		layers = fe.Choice
+	}
+	if opt.MinLayers > layers {
+		why("kept at %d layers decided before placement (the placed board alone would take %d)", opt.MinLayers, layers)
+		layers = opt.MinLayers
+	}
 	if layers > opt.MaxLayers {
 		why("capped at %d layers by cost tier (wanted %d)", opt.MaxLayers, layers)
 		layers = opt.MaxLayers
@@ -302,6 +328,9 @@ func DecideStackup(b *Board, a *Analysis, opt StackOptions) *Stackup {
 	}
 	s.Layers = layers
 	s.buildStack(rails, b)
+	if opt.Force == 0 && layers == 4 && fe.ChoiceMixed && s.MixedPower() {
+		s.Reasons = append(s.Reasons, "stage 0 chose the mixed 4-layer stack (TOP/GND/SIG+PWR/BOTTOM): three routing layers at the 4-layer price")
+	}
 	return s
 }
 
@@ -345,6 +374,20 @@ func (s *Stackup) buildStack(rails []*NetPlan, b *Board) {
 		}
 		s.JLCStackup = "JLC04161H-7628"
 		s.RefHeightMil, s.Er = 8.28, 4.4
+	case 8:
+		// SIG/GND/SIG/PWR/GND/SIG/GND/SIG: four routing layers, each next to a plane.
+		s.Stack = []StackLayer{
+			{ID: LayerTop, Name: "TOP", Kind: KindSignal, Dir: "h", Outer: true},
+			{ID: LayerInner1, Name: "IN1-GND", Kind: KindPlane, Nets: planeGnds},
+			{ID: LayerInner1 + 1, Name: "IN2-SIG", Kind: KindSignal, Dir: "v"},
+			{ID: LayerInner1 + 2, Name: "IN3-PWR", Kind: KindPlane, Nets: railNames},
+			{ID: LayerInner1 + 3, Name: "IN4-GND", Kind: KindPlane, Nets: planeGnds},
+			{ID: LayerInner1 + 4, Name: "IN5-SIG", Kind: KindSignal, Dir: "h"},
+			{ID: LayerInner1 + 5, Name: "IN6-GND", Kind: KindPlane, Nets: planeGnds},
+			{ID: LayerBottom, Name: "BOTTOM", Kind: KindSignal, Dir: "v", Outer: true},
+		}
+		s.JLCStackup = "JLC08161H-3313"
+		s.RefHeightMil, s.Er = 4.4, 4.2
 	default:
 		s.Layers = 6
 		// SIG / GND / SIG / PWR / GND / SIG: every signal layer adjacent to a plane.

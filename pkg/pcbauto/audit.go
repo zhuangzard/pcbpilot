@@ -195,35 +195,42 @@ func (r *router) dropBlockingFanouts(n *rnet, bad map[int32]bool) {
 		if !dropped {
 			continue
 		}
-		r.applyClaims(m.fixed, -1)
-		var vias []Via
-		var full [][]int32
-		var tidx []int
-		var tracks []Track
-		var fixed []int32
-		var pinned []bool
-		for _, k := range keep {
-			vias = append(vias, m.fanVias[k])
-			full = append(full, m.fanFull[k])
-			pinned = append(pinned, k < len(m.fanPinned) && m.fanPinned[k])
-			ti := -1
-			if m.fanTrack[k] >= 0 {
-				ti = len(tracks)
-				tracks = append(tracks, m.fanTracks[m.fanTrack[k]])
-			}
-			tidx = append(tidx, ti)
-			fixed = append(fixed, m.fanFull[k]...)
-		}
-		m.fanVias, m.fanFull, m.fanTrack, m.fanTracks, m.fanPinned = vias, full, tidx, tracks, pinned
-		m.fixed = dedup(fixed)
-		// Routed claims of m must not double-count cells now in fixed.
-		r.applyClaims(m.claims, -1)
-		m.claims = nil
-		for _, p := range m.paths {
-			m.claims = r.claimNodes(m, p.nodes, m.claims)
-		}
-		m.claims = r.minusFixed(m, dedup(m.claims))
-		r.applyClaims(m.claims, +1)
-		r.applyClaims(m.fixed, +1)
+		r.keepFanouts(m, keep)
 	}
+}
+
+// keepFanouts rebuilds m's fan-out state keeping only the listed entries,
+// releasing the claims of the others and re-deriving routed claims so no
+// cell is counted twice.
+func (r *router) keepFanouts(m *rnet, keep []int) {
+	r.applyClaims(m.fixed, -1)
+	var vias []Via
+	var full [][]int32
+	var tidx []int
+	var tracks []Track
+	var fixed []int32
+	var pinned []bool
+	for _, k := range keep {
+		vias = append(vias, m.fanVias[k])
+		full = append(full, m.fanFull[k])
+		pinned = append(pinned, k < len(m.fanPinned) && m.fanPinned[k])
+		ti := -1
+		if m.fanTrack[k] >= 0 {
+			ti = len(tracks)
+			tracks = append(tracks, m.fanTracks[m.fanTrack[k]])
+		}
+		tidx = append(tidx, ti)
+		fixed = append(fixed, m.fanFull[k]...)
+	}
+	m.fanVias, m.fanFull, m.fanTrack, m.fanTracks, m.fanPinned = vias, full, tidx, tracks, pinned
+	m.fixed = dedup(fixed)
+	// Routed claims of m must not double-count cells now in fixed.
+	r.applyClaims(m.claims, -1)
+	m.claims = nil
+	for _, p := range m.paths {
+		m.claims = r.claimNodes(m, p.nodes, m.claims)
+	}
+	m.claims = r.minusFixed(m, dedup(m.claims))
+	r.applyClaims(m.claims, +1)
+	r.applyClaims(m.fixed, +1)
 }

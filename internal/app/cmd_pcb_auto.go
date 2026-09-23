@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -178,6 +179,21 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 				}
 				ctx, cancel := context.WithTimeout(cmd.Context(), budget)
 				defer cancel()
+				// Stage 0 — physical feasibility and stackup before placement:
+				// the placer works inside the decision, the post-placement check
+				// may only add layers.
+				if place && in.layers == 0 {
+					stage := pcbauto.DecideStackup(b, pre, pcbauto.StackOptions{MaxLayers: in.maxLayers, Barriers: rep.Circuit.Barriers})
+					rep.Stage0 = stage.Feasibility
+					if b.CopperLayers == 0 {
+						b.CopperLayers = stage.Layers
+					}
+					opts.Stack.MinLayers = stage.Layers
+					fmt.Fprintf(stderr, "stage 0: %d layers (%s)\n", stage.Layers, strings.Join(stage.Feasibility.Reasons[len(stage.Feasibility.Reasons)-1:], ""))
+					for _, n := range stage.Feasibility.Negotiation {
+						fmt.Fprintf(stderr, "stage 0 negotiation: %s\n", n)
+					}
+				}
 				looped := false
 				if place && !noRoute && loops > 0 {
 					lr, err := pcbauto.PlaceRoute(ctx, b, pre, rep.Circuit, mc, pcbauto.PlaceOptions{Seed: seed, Refine: refine}, opts, pcbauto.LoopOptions{Passes: loops, Budget: in.timeout * time.Duration(loops+1)})

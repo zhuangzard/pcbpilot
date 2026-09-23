@@ -15,7 +15,9 @@ type Report struct {
 	SI        *SIReport    `json:"si,omitempty"`
 	Mechanics *Mechanics   `json:"mechanics,omitempty"`
 	Joint     *JointScore  `json:"joint,omitempty"`
-	Loop      []LoopPass   `json:"loop,omitempty"`
+	// Stage0 is the physical-feasibility assessment made before placement.
+	Stage0 *Feasibility `json:"stage0,omitempty"`
+	Loop   []LoopPass   `json:"loop,omitempty"`
 }
 
 // WriteMarkdown renders the report in Chinese for the designer to review.
@@ -29,6 +31,7 @@ func (r *Report) WriteMarkdown(w io.Writer) {
 	p("最终以 EasyEDA 原生 DRC 与保存重载后的回读为准。\n\n")
 
 	if st := res.Stackup; st != nil {
+		writeStage0(p, r)
 		p("## 1. 层数与叠层决策\n\n**%d 层**（%s）\n\n| 层 | 名称 | 类型 | 网络 | 走线方向 |\n|---|---|---|---|---|\n", st.Layers, st.JLCStackup)
 		for _, l := range st.Stack {
 			nets := strings.Join(append(append([]string{}, l.Nets...), l.PourNets...), ", ")
@@ -293,3 +296,53 @@ func writeJoint(p func(string, ...any), r *Report) {
 	}
 	p("\n")
 }
+
+// writeStage0 renders the physical-feasibility stage: what the board must
+// hold, what each stackup offers, BGA escape, and what to negotiate.
+func writeStage0(p func(string, ...any), r *Report) {
+	f := r.Stage0
+	if f == nil && r.Result != nil && r.Result.Stackup != nil {
+		f = r.Result.Stackup.Feasibility
+	}
+	if f == nil {
+		return
+	}
+	p("## 0. 物理可行性与叠层决策\n\n先算物理约束，再定层数和过孔工艺，最后才布局布线。\n\n")
+	p("| 项 | 数值 |\n|---|---|\n| 板面积 | %.2f in² |\n| 器件占地（顶 / 底） | %.0f%% / %.0f%% |\n| 信号连接 | %d 条 |\n| 估算走线总长 | %.1f m |\n| 布线需求（标准线宽折算） | %.0f in（电源走线另计 %.0f in） |\n| 布线效率 η | %.2f（按 7 块已量产真板标定） |\n\n",
+		f.BoardAreaIn2, 100*f.TopOccupancy, 100*f.BotOccupancy, f.Connections, f.WireLengthM, f.SignalDemand, f.PowerDemand, f.Efficiency)
+	p("| 方案 | 信号层 | 容量 in | 需求 in | 利用率 | 结论 | 说明 |\n|---|---|---|---|---|---|---|\n")
+	for _, o := range f.Options {
+		name := fmt.Sprintf("%d 层", o.Layers)
+		if o.Mixed {
+			name += "（混合）"
+		}
+		mark := ""
+		if o.Layers == f.Choice && o.Mixed == f.ChoiceMixed {
+			mark = " **←**"
+		}
+		p("| %s%s | %d | %.0f | %.0f | %.0f%% | %s | %s |\n", name, mark, o.SignalLayers, o.CapacityIn, o.DemandIn, 100*o.Utilisation, verdictCN[o.Verdict], strings.Join(o.Why, "；"))
+	}
+	if len(f.BGAs) > 0 {
+		p("\n| BGA | 球距 | 信号球 | 表层逃逸圈 | 每内层圈 | 需信号层 | 过孔工艺 |\n|---|---|---|---|---|---|---|\n")
+		for _, g := range f.sortedBGAs() {
+			layers := fmt.Sprint(g.SignalLayers)
+			if g.SignalLayers >= 99 {
+				layers = "无法逃逸"
+			}
+			tech := g.ViaTech
+			if g.RegionRule != "" {
+				tech += "；" + g.RegionRule
+			}
+			p("| %s | %.2f mm | %d | %d | %d | %s | %s |\n", g.Ref, g.PitchMil*0.0254, g.SignalBalls, g.TopRings, g.InnerRings, layers, tech)
+		}
+	}
+	if len(f.Negotiation) > 0 {
+		p("\n**需要与机械 / 客户协商：**\n\n")
+		for _, n := range f.Negotiation {
+			p("- %s\n", n)
+		}
+	}
+	p("\n")
+}
+
+var verdictCN = map[string]string{"ok": "宽裕", "tight": "偏紧", "insufficient": "不足", "excluded": "排除"}

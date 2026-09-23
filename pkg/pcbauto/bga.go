@@ -307,14 +307,29 @@ func bgaViaClass(g *bgaPart, rules Rules) (drill, dia float64, why string) {
 	ballR := g.part.Pads[0].Box.W / 2
 	void := bgaVoidDist(g)
 	maxDia := math.Floor(2*(void-ballR-rules.Clearance)*10) / 10
-	if rules.ViaDia <= maxDia {
+	// A sparse array measures a large void; a via is still never wider than
+	// 80 % of the pitch.
+	maxDia = math.Min(maxDia, math.Floor(0.8*g.pitch*10)/10)
+	// A via that leaves one routing channel between neighbouring vias: inner
+	// layers escape through those channels, so the largest via that merely
+	// fits is the wrong choice.
+	w := math.Max(rules.MinTrack, 3)
+	channel := math.Floor((g.pitch-w-2*rules.Clearance)*10) / 10
+	target := math.Min(maxDia, channel)
+	minDia := jlcMinDrillMil + 2*jlcMinAnnularMil
+	if rules.ViaDia <= target {
 		return rules.ViaDrill, rules.ViaDia, ""
 	}
-	minDia := jlcMinDrillMil + 2*jlcMinAnnularMil
-	if maxDia < minDia {
-		return 0, 0, sprintf("voids %.1f mil from the balls fit a via of at most %.1f mil, below the %.1f mil process minimum", void, maxDia, minDia)
+	pick := func(d float64, note string) (float64, float64, string) {
+		dr := math.Max(jlcMinDrillMil, math.Min(rules.ViaDrill, d-2*jlcMinAnnularMil))
+		return dr, d, sprintf("board via %.1f/%.1f mil %s; fan-out uses a BGA via class %.1f/%.1f mil (JLC ≥0.15 mm drill, 0.05 mm ring; 4+ layers) — confirm with the fab",
+			rules.ViaDrill, rules.ViaDia, note, dr, d)
 	}
-	dia = maxDia
-	drill = math.Max(jlcMinDrillMil, math.Min(rules.ViaDrill, dia-2*jlcMinAnnularMil))
-	return drill, dia, sprintf("board via %.1f/%.1f mil does not fit the %.1f mil voids; fan-out uses a BGA via class %.1f/%.1f mil (JLC ≥0.15 mm drill, 0.05 mm ring; 4+ layers) — confirm with the fab", rules.ViaDrill, rules.ViaDia, void, drill, dia)
+	if target >= minDia {
+		return pick(target, sprintf("leaves no routing channel between vias at %.1f mil pitch", g.pitch))
+	}
+	if maxDia >= minDia {
+		return pick(maxDia, sprintf("does not fit the %.1f mil voids (no channel between vias even at the process minimum)", void))
+	}
+	return 0, 0, sprintf("voids %.1f mil from the balls fit a via of at most %.1f mil, below the %.1f mil process minimum", void, maxDia, minDia)
 }

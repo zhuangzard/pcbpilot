@@ -212,7 +212,14 @@ func Route(ctx context.Context, b *Board, st *Stackup, an *Analysis, opt RouteOp
 	if auditHook != nil {
 		auditHook("negotiate", r)
 	}
-	r.pourRepair(ctx, res)
+	// Correctness steps get their own time: bridging plane/pour islands and
+	// the DRC repair searches used to inherit an exhausted deadline, so every
+	// search returned "timeout" at once (K230 with a poured power layer: 548
+	// of 549 plane connections left open).
+	r.deadline = time.Now().Add(postBudget(opt.Timeout))
+	pctx, pcancel := context.WithTimeout(context.WithoutCancel(ctx), postBudget(opt.Timeout)+5*time.Second)
+	defer pcancel()
+	r.pourRepair(pctx, res)
 	if auditHook != nil {
 		auditHook("pourRepair", r)
 	}
@@ -220,6 +227,15 @@ func Route(ctx context.Context, b *Board, st *Stackup, an *Analysis, opt RouteOp
 	res.Stats.GridMil = opt.GridMil
 	res.Stats.Millis = time.Since(start).Milliseconds()
 	return res, nil
+}
+
+// postBudget is the time reserved after negotiation for pour bridging and
+// the exact-DRC repair: a sixth of the routing budget, at least 20 s.
+func postBudget(t time.Duration) time.Duration {
+	if b := t / 6; b > 20*time.Second {
+		return b
+	}
+	return 20 * time.Second
 }
 
 // defaultGrid picks a pitch that resolves the tightest track/clearance.

@@ -90,22 +90,40 @@ func (r *router) emit(res *RouteResult) {
 	}
 	// High-speed pairs: equalise intra-pair length before the final gate.
 	r.tuneLengths(outs, res)
-	// Final gate: drop any net still in violation.
-	ts, vs := collect()
-	var final []Violation
-	if !r.opt.NoRepair {
-		final = CheckDRC(r.b, r.an, r.st, ts, vs).Violations
-	}
-	for _, v := range final {
-		for _, n := range routedOnly(v) {
-			r.applyClaims(n.claims, -1)
-			n.claims, n.paths = nil, nil
-			outs[n] = &netOut{}
-			var pads []string
-			for _, g := range n.groups {
-				pads = append(pads, padKeys(g)...)
+	// Final gate: nothing that violates DRC is shipped. A violation with a
+	// routed party drops that net's routing; one with none — two fan-out vias,
+	// a fan-out via and the board edge — drops the offending fan-out (R-0: the
+	// old gate skipped those, so timed-out BGA boards shipped via-via
+	// violations). Repeat until clean.
+	for pass := 0; pass < 4 && !r.opt.NoRepair; pass++ {
+		ts, vs := collect()
+		final := CheckDRC(r.b, r.an, r.st, ts, vs).Violations
+		if len(final) == 0 {
+			break
+		}
+		changed := false
+		for _, v := range final {
+			if nets := routedOnly(v); len(nets) > 0 {
+				for _, n := range nets {
+					r.applyClaims(n.claims, -1)
+					n.claims, n.paths = nil, nil
+					outs[n] = &netOut{}
+					var pads []string
+					for _, g := range n.groups {
+						pads = append(pads, padKeys(g)...)
+					}
+					n.failed = []Unrouted{{Net: n.name, Pads: pads, Reason: "drc-unrepairable"}}
+					changed = true
+				}
+				continue
 			}
-			n.failed = []Unrouted{{Net: n.name, Pads: pads, Reason: "drc-unrepairable"}}
+			if r.dropFanoutAt(v) {
+				changed = true
+			}
+		}
+		if !changed {
+			res.Notes = append(res.Notes, sprintf("final gate: %d violation(s) with no removable party", len(final)))
+			break
 		}
 	}
 
@@ -362,4 +380,75 @@ func (r *router) chamfer(n *rnet, li int, pts []Point, width float64) []Point {
 		}
 	}
 	return append(out, pts[len(pts)-1])
+}
+
+// dropFanoutAt removes the fan-out via (or stub) of NetA/NetB at violation
+// v: an unpinned one first, then the less important net's. The pad it served
+// is reported (the pour or plane may still reach it; it is not assumed).
+func (r *router) dropFanoutAt(v Violation) bool {
+	type cand struct {
+		n      *rnet
+		k      int
+		pinned bool
+	}
+	var cs []cand
+	for _, name := range []string{v.NetA, v.NetB} {
+		n := r.byName[name]
+		if n == nil {
+			continue
+		}
+		for k, via := range n.fanVias {
+			near := via.C.Dist(v.At) <= via.Dia/2+v.Required+2
+			if !near && n.fanTrack[k] >= 0 {
+				t := n.fanTracks[n.fanTrack[k]]
+				d, _ := segDist(v.At, t.A, t.B)
+				near = d <= t.Width/2+v.Required+2
+			}
+			if near {
+				cs = append(cs, cand{n, k, k < len(n.fanPinned) && n.fanPinned[k]})
+			}
+		}
+	}
+	if len(cs) == 0 {
+		return false
+	}
+	sort.SliceStable(cs, func(i, j int) bool {
+		if cs[i].pinned != cs[j].pinned {
+			return !cs[i].pinned
+		}
+		return cs[i].n.plan.Priority > cs[j].n.plan.Priority
+	})
+	c := cs[0]
+	var keep []int
+	for k := range c.n.fanVias {
+		if k != c.k {
+			keep = append(keep, k)
+		}
+	}
+	// The pad the fan-out served: its stub starts at the pad centre.
+	pad := ""
+	if ti := c.n.fanTrack[c.k]; ti >= 0 {
+		a := c.n.fanTracks[ti].A
+		for _, g := range c.n.groups {
+			for _, pd := range g {
+				if pd.Box.C.Dist(a) < 0.5 {
+					pad = pd.Key()
+				}
+			}
+		}
+	}
+	r.keepFanouts(c.n, keep)
+	// A dog-bone that served a signal ball no longer offers an escape node.
+	for pd, e := range r.escape {
+		if pd.Key() == pad {
+			delete(r.escape, pd)
+			_ = e
+		}
+	}
+	var pads []string
+	if pad != "" {
+		pads = []string{pad}
+	}
+	c.n.failed = append(c.n.failed, Unrouted{Net: c.n.name, Pads: pads, Reason: "fanout-drc"})
+	return true
 }
