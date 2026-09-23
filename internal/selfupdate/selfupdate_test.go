@@ -153,9 +153,9 @@ func TestLatestReleaseVersionFallsBackToWebRedirect(t *testing.T) {
 		switch r.URL.Path {
 		case "/api":
 			http.Error(w, "rate limited", http.StatusForbidden)
-		case "/zhoushoujianwork/easyeda-agent/releases/latest":
-			http.Redirect(w, r, "/zhoushoujianwork/easyeda-agent/releases/tag/v1.4.7", http.StatusFound)
-		case "/zhoushoujianwork/easyeda-agent/releases/tag/v1.4.7":
+		case "/" + Repo() + "/releases/latest":
+			http.Redirect(w, r, "/" + Repo() + "/releases/tag/v1.4.7", http.StatusFound)
+		case "/" + Repo() + "/releases/tag/v1.4.7":
 			_, _ = w.Write([]byte("release"))
 		default:
 			http.NotFound(w, r)
@@ -164,7 +164,7 @@ func TestLatestReleaseVersionFallsBackToWebRedirect(t *testing.T) {
 	defer srv.Close()
 	oldAPI, oldWeb := latestAPIURL, latestWebURL
 	latestAPIURL = func() string { return srv.URL + "/api" }
-	latestWebURL = func() string { return srv.URL + "/zhoushoujianwork/easyeda-agent/releases/latest" }
+	latestWebURL = func() string { return srv.URL + "/" + Repo() + "/releases/latest" }
 	t.Cleanup(func() { latestAPIURL, latestWebURL = oldAPI, oldWeb })
 
 	got, err := LatestReleaseVersion(context.Background())
@@ -328,5 +328,20 @@ func TestFetchSkillTree_TraversalGuard(t *testing.T) {
 		if _, err := os.Stat(p); err == nil {
 			t.Fatalf("path traversal escaped: %s was written", p)
 		}
+	}
+}
+
+func TestRepoEnvOverride(t *testing.T) {
+	t.Setenv(RepoEnv, "")
+	if Repo() != RepoSlug {
+		t.Fatalf("default repo %q, want %q", Repo(), RepoSlug)
+	}
+	t.Setenv(RepoEnv, "someone/fork")
+	if Repo() != "someone/fork" {
+		t.Fatalf("override ignored: %q", Repo())
+	}
+	t.Setenv(RepoEnv, "not-a-slug")
+	if Repo() != RepoSlug {
+		t.Fatalf("malformed override accepted: %q", Repo())
 	}
 }

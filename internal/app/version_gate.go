@@ -167,7 +167,7 @@ const fixDaemonStale = `重启 daemon(它跑的是启动那一刻的构建):
     不需要你先去 kill。
 确认:` + "`easyeda health`" + ` 的 version 应与 ` + "`easyeda version`" + ` 一致。`
 
-const fixConnectorStale = `重装连接器 .eext(跨 major/minor 兼容线时需要):
+var fixConnectorStale = `重装连接器 .eext(跨 major/minor 兼容线时需要):
   1. 下载 latest .eext:https://github.com/` + versionGateRepoSlug + `/releases/latest
   2. EasyEDA「扩展管理 → 已安装」**先卸载旧的**(uuid 相同,不卸载直接导入会静默失败)
   3. 导入新的 .eext
@@ -175,7 +175,7 @@ const fixConnectorStale = `重装连接器 .eext(跨 major/minor 兼容线时需
   (插件市场版可原地自动更新但可能滞后;同 major.minor 的 patch 差异无需处理。)`
 
 // versionGateRepoSlug is the GitHub owner/repo shipping the connector .eext.
-const versionGateRepoSlug = "zhoushoujianwork/easyeda-agent"
+var versionGateRepoSlug = selfupdate.Repo()
 
 // sameMajorMinor reports whether two semver cores share major.minor.
 func sameMajorMinor(a, b string) bool {

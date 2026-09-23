@@ -26,9 +26,28 @@ import (
 	"strings"
 )
 
+// RepoSlug is the GitHub owner/repo this build updates from (release assets,
+// latest-version checks, connector download hints). It is a distribution
+// setting, not the Go module path: a fork sets it at build time with
+//
+//	-X 'github.com/zhoushoujianwork/easyeda-agent/internal/selfupdate.RepoSlug=<owner>/<repo>'
+//
+// (the Makefile passes RELEASE_REPO), and EASYEDA_RELEASE_REPO overrides it
+// at run time. Use Repo() rather than reading the variable.
+var RepoSlug = "zhuangzard/easyeda-agent"
+
+// RepoEnv overrides RepoSlug at run time (e.g. to test another channel).
+const RepoEnv = "EASYEDA_RELEASE_REPO"
+
+// Repo returns the effective release repository.
+func Repo() string {
+	if v := strings.TrimSpace(os.Getenv(RepoEnv)); strings.Count(v, "/") == 1 {
+		return v
+	}
+	return RepoSlug
+}
+
 const (
-	// RepoSlug is the GitHub owner/repo the release assets live under.
-	RepoSlug = "zhoushoujianwork/easyeda-agent"
 	// SkillName is the skill slug (dir name under each client's skills/).
 	SkillName = "easyeda-agent"
 	// versionMarker records the installed skill version inside a skill dir.
@@ -43,13 +62,13 @@ var clientOrder = []string{"claude", "codex", "agents"}
 // Endpoint builders, overridable in tests to point at an httptest server.
 var (
 	tarballURL = func(version string) string {
-		return fmt.Sprintf("https://github.com/%s/releases/download/v%s/skills.tar.gz", RepoSlug, version)
+		return fmt.Sprintf("https://github.com/%s/releases/download/v%s/skills.tar.gz", Repo(), version)
 	}
 	latestAPIURL = func() string {
-		return fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", RepoSlug)
+		return fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", Repo())
 	}
 	latestWebURL = func() string {
-		return fmt.Sprintf("https://github.com/%s/releases/latest", RepoSlug)
+		return fmt.Sprintf("https://github.com/%s/releases/latest", Repo())
 	}
 )
 
@@ -189,7 +208,7 @@ func LatestReleaseVersion(ctx context.Context) (string, error) {
 	if webResp.StatusCode < 200 || webResp.StatusCode >= 400 {
 		return "", fmt.Errorf("%v; github releases/latest fallback: %s", apiErr, webResp.Status)
 	}
-	tag := strings.TrimPrefix(webResp.Request.URL.Path, "/"+RepoSlug+"/releases/tag/")
+	tag := strings.TrimPrefix(webResp.Request.URL.Path, "/"+Repo()+"/releases/tag/")
 	if core := SemverCore(tag); core != "" {
 		return core, nil
 	}

@@ -12,6 +12,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 	"github.com/zhoushoujianwork/easyeda-agent/internal/protocol"
+	"github.com/zhoushoujianwork/easyeda-agent/internal/selfupdate"
 )
 
 // Window is a read-only snapshot of a connected EasyEDA window, used by /health
@@ -597,7 +598,7 @@ func staleConnectorNotice(connector, daemon string) string {
 }
 
 // releaseRepoSlug is the GitHub owner/repo that ships the connector .eext.
-const releaseRepoSlug = "zhoushoujianwork/easyeda-agent"
+var releaseRepoSlug = selfupdate.Repo()
 
 // isCleanRelease reports whether v is a bare release tag (vX.Y.Z with no
 // pre-release/build suffix) — i.e. its semver core is the whole string.

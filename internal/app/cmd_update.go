@@ -468,7 +468,7 @@ func updateNotes(rep updateReport) []string {
 			"connector %s is not compatible with the v%s major.minor line and cannot be updated from here — re-import the .eext "+
 				"(https://github.com/%s/releases/download/v%s/easyeda-agent-connector.eext), "+
 				"then fully quit and relaunch EasyEDA so open windows load it",
-			strings.Join(rep.Connector.Versions, ","), rep.Target, selfupdate.RepoSlug, rep.Target))
+			strings.Join(rep.Connector.Versions, ","), rep.Target, selfupdate.Repo(), rep.Target))
 	}
 	for _, s := range rep.Skills {
 		if s.Status == "preserved" {
