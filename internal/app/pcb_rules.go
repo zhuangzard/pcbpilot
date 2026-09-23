@@ -11,6 +11,19 @@ package app
 
 const mmToMil = 39.37007874
 
+// ruleMil converts a rule value to mil. JLCEDA returns rule values in the
+// project's display unit: mm on most projects, mil on projects set to mil
+// (LCKFB RK3568/K230 boards: clearance 4, track 10, via 0.3/0.4 mm read as
+// 12/15.9). A clearance/width/via value in mm is always < 1.5 (1.5 mm is a
+// 59 mil via) and one in mil is never < 1.5 (below any process), so 1.5
+// separates them cleanly.
+func ruleMil(v float64) float64 {
+	if v > 1.5 {
+		return round2(v)
+	}
+	return round2(v * mmToMil)
+}
+
 // pcbRules is the normalized rule set (all values in mil) the planners consume.
 type pcbRules struct {
 	clearanceMil           float64 // track↔pad/via safe spacing (the binding routing clearance)
@@ -145,22 +158,22 @@ func parsePcbRules(result map[string]any) pcbRules {
 	// Track width (default + min).
 	if d1 := firstDataEntry(mnav(cfg, "Physics", "Track", "copperThickness1oz", "form", "data")); d1 != nil {
 		if v, ok := asFloatOK(d1["defaultValue"]); ok && v > 0 {
-			r.trackWidthMil = round2(v * mmToMil)
+			r.trackWidthMil = ruleMil(v)
 			got = true
 		}
 		if v, ok := asFloatOK(d1["minValue"]); ok && v > 0 {
-			r.trackWidthMinMil = round2(v * mmToMil)
+			r.trackWidthMinMil = ruleMil(v)
 		}
 	}
 
 	// Via drill + diameter.
 	if form := mnav(cfg, "Physics", "Via Size", "viaSize", "form"); form != nil {
 		if v, ok := asFloatOK(mnav(form, "viaInnerdiameterDefault")); ok && v > 0 {
-			r.viaDrillMil = round2(v * mmToMil)
+			r.viaDrillMil = ruleMil(v)
 			got = true
 		}
 		if v, ok := asFloatOK(mnav(form, "viaOuterdiameterDefault")); ok && v > 0 {
-			r.viaDiameterMil = round2(v * mmToMil)
+			r.viaDiameterMil = ruleMil(v)
 		}
 	}
 
@@ -183,11 +196,11 @@ func parsePcbRules(result map[string]any) pcbRules {
 			}
 		}
 		if trackTrack > 0 {
-			r.clearanceTrackTrackMil = round2(trackTrack * mmToMil)
+			r.clearanceTrackTrackMil = ruleMil(trackTrack)
 			got = true
 		}
 		if trackPad > 0 {
-			r.clearanceMil = round2(trackPad * mmToMil)
+			r.clearanceMil = ruleMil(trackPad)
 			got = true
 		} else if trackTrack > 0 {
 			// Older/smaller matrices may expose only Track↔Track. Keep consumers
@@ -208,7 +221,7 @@ func parsePcbRules(result map[string]any) pcbRules {
 		if bo >= 0 && bo < len(content) {
 			if row, ok := content[bo].([]any); ok && cz >= 0 && cz < len(row) {
 				if v, ok := asFloatOK(row[cz]); ok && v > 0 {
-					r.copperToEdgeMil = round2(v * mmToMil)
+					r.copperToEdgeMil = ruleMil(v)
 				}
 			}
 		}

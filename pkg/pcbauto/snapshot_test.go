@@ -43,3 +43,16 @@ func TestExportPlacedSnapshotRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// Snapshot rules multiplied by 39.37 once too often are recovered, not
+// replaced by defaults: the BGA boards' 4 mil clearance and 10 mil vias
+// decide whether dog-bone fan-out fits at 0.65 mm pitch.
+func TestRulesRecoverDoubleConverted(t *testing.T) {
+	r := Rules{Clearance: 157.48, TrackWidth: 185.04, MinTrack: 185.04, ViaDrill: 236.22, ViaDia: 393.7,
+		EdgeClearance: 236.22, CopperOz: 1, InnerCopperOz: 0.5, BoardThickMil: 62.99}
+	r.sanitize()
+	near := func(a, b float64) bool { return a-b < 0.05 && b-a < 0.05 }
+	if !near(r.Clearance, 4) || !near(r.TrackWidth, 4.7) || !near(r.ViaDrill, 6) || !near(r.ViaDia, 10) {
+		t.Fatalf("not recovered: clear %.3f track %.3f drill %.3f dia %.3f", r.Clearance, r.TrackWidth, r.ViaDrill, r.ViaDia)
+	}
+}

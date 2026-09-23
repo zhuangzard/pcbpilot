@@ -96,3 +96,13 @@ func TestParsePcbRules_Fallback(t *testing.T) {
 		t.Errorf("fallback mismatch: %+v vs %+v", r, d)
 	}
 }
+
+// Projects displayed in mil return rule values in mil; they must not be
+// multiplied by 39.37 (LCKFB RK3568: clearance 4 mil read as 157 mil).
+func TestRuleMilUnitDetection(t *testing.T) {
+	for in, want := range map[float64]float64{0.1016: 4, 0.1524: 6, 0.3: 11.81, 4: 4, 10: 10, 12: 12, 15.9: 15.9} {
+		if got := ruleMil(in); !near(got, want) {
+			t.Errorf("ruleMil(%v) = %v, want %v", in, got, want)
+		}
+	}
+}

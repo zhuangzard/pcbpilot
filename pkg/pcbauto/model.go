@@ -235,6 +235,13 @@ func (r *Rules) sanitize() {
 	// Snapshot rules sometimes arrive in the wrong unit (mm*39.37 twice);
 	// anything implausible for a standard process falls back to defaults.
 	fix := func(v *float64, def, lo, hi float64) {
+		if rec := math.Round(*v/39.37007874*100) / 100; *v > hi && rec >= lo && rec <= hi {
+			// A mil value multiplied by 39.37 as if it were mm (projects
+			// displayed in mil): recover it rather than drop the board's
+			// real, often finer, rules.
+			*v = rec
+			return
+		}
 		if *v < lo || *v > hi {
 			*v = def
 		}
@@ -248,8 +255,10 @@ func (r *Rules) sanitize() {
 	fix(&r.CopperOz, d.CopperOz, 0.25, 6)
 	fix(&r.InnerCopperOz, d.InnerCopperOz, 0.25, 6)
 	fix(&r.BoardThickMil, d.BoardThickMil, 10, 250)
-	if r.ViaDia < r.ViaDrill+6 {
-		r.ViaDia = r.ViaDrill + 12
+	// JLC's minimum annular ring is 0.05 mm (2 mil a side): a 0.15/0.25 mm
+	// via (6/10 mil) is legal and is what 0.65 mm-pitch BGAs fan out with.
+	if r.ViaDia < r.ViaDrill+4 {
+		r.ViaDia = r.ViaDrill + 8
 	}
 	if r.MinTrack > r.TrackWidth {
 		r.MinTrack = r.TrackWidth
