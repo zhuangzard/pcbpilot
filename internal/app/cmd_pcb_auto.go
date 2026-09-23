@@ -180,7 +180,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 				defer cancel()
 				looped := false
 				if place && !noRoute && loops > 0 {
-					lr, err := pcbauto.PlaceRoute(ctx, b, pre, rep.Circuit, mc, pcbauto.PlaceOptions{Seed: seed, Refine: refine}, opts, pcbauto.LoopOptions{Passes: loops})
+					lr, err := pcbauto.PlaceRoute(ctx, b, pre, rep.Circuit, mc, pcbauto.PlaceOptions{Seed: seed, Refine: refine}, opts, pcbauto.LoopOptions{Passes: loops, Budget: in.timeout * time.Duration(loops+1)})
 					if err != nil {
 						return err
 					}

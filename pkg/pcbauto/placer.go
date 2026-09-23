@@ -122,6 +122,12 @@ func Place(b *Board, an *Analysis, c *Circuit, m *Mechanics, opt PlaceOptions) (
 		// can only escape around it — the routed MIPI adapter lost 30 % of
 		// its connections at the old 12 mil default with 6/6 rules.
 		opt.SpacingMil = math.Max(12, b.Rules.TrackWidth+2*b.Rules.Clearance)
+		// Dense boards cannot afford a channel beside every part: the
+		// routes there come from vias to inner layers, not gaps. Keep the
+		// courtyards within ~85 % of each side's area.
+		if fit := fitSpacing(b); fit < opt.SpacingMil {
+			opt.SpacingMil = math.Max(intimateGap, fit)
+		}
 	}
 	if opt.Timeout <= 0 {
 		opt.Timeout = 90 * time.Second
@@ -1885,4 +1891,31 @@ func (pl *placer) reserveCost(p *Part) float64 {
 		}
 	}
 	return cost
+}
+
+// fitSpacing is the largest courtyard gap for which every side's parts,
+// each grown by half the gap all round, still fit in 85 % of the board.
+func fitSpacing(b *Board) float64 {
+	board := b.Area()
+	if board <= 0 {
+		return math.Inf(1)
+	}
+	best := math.Inf(1)
+	for _, side := range []int{LayerTop, LayerBottom} {
+		area, perim := 0.0, 0.0
+		for _, p := range b.Parts {
+			if p.Side != side && !hasTHT(p) {
+				continue
+			}
+			bb := p.Body()
+			area += bb.Area()
+			perim += 2 * (bb.W() + bb.H())
+		}
+		if perim == 0 {
+			continue
+		}
+		// area + perim·s/2 ≤ 0.85·board
+		best = math.Min(best, 2*(0.85*board-area)/perim)
+	}
+	return best
 }

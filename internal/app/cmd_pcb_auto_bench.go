@@ -135,7 +135,7 @@ func benchOne(ctx context.Context, name, variant string, raw []byte, seed int64,
 		if loops > 0 && !noRoute {
 			lr, err := pcbauto.PlaceRoute(ctx, b, an, circ, nil, popt,
 				pcbauto.Options{Stack: pcbauto.StackOptions{Force: b.CopperLayers}, Route: pcbauto.RouteOptions{Timeout: timeout}},
-				pcbauto.LoopOptions{Passes: loops})
+				pcbauto.LoopOptions{Passes: loops, Budget: timeout * time.Duration(loops+1)})
 			if err != nil {
 				return row, err
 			}

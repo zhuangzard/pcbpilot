@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"time"
 )
 
 // Place ↔ route closed loop.
@@ -24,6 +25,9 @@ type LoopOptions struct {
 	RadiusMil float64 `json:"radiusMil"`
 	// MaxHaloMil caps the accumulated inflation per part (default 60).
 	MaxHaloMil float64 `json:"maxHaloMil"`
+	// Budget stops the loop from starting a pass that the previous pass's
+	// duration says would overrun it (0 = no limit beyond the context).
+	Budget time.Duration `json:"-"`
 }
 
 // LoopPass records one pass.
@@ -68,10 +72,17 @@ func PlaceRoute(ctx context.Context, b *Board, an *Analysis, c *Circuit, m *Mech
 	res := &LoopResult{Best: -1}
 	var bestPoses map[*Part]pose
 	bestScore := math.Inf(-1)
+	start := time.Now()
+	var lastPass time.Duration
 	for pass := 1; pass <= lopt.Passes; pass++ {
 		if err := ctx.Err(); err != nil {
 			break
 		}
+		if lopt.Budget > 0 && pass > 1 && time.Since(start)+lastPass > lopt.Budget {
+			res.Passes[len(res.Passes)-1].Note += " (budget: no further pass)"
+			break
+		}
+		passStart := time.Now()
 		po := popt
 		po.Halo = map[string]float64{}
 		for k, v := range halo {
@@ -128,6 +139,7 @@ func PlaceRoute(ctx context.Context, b *Board, an *Analysis, c *Circuit, m *Mech
 				}
 			}
 		}
+		lastPass = time.Since(passStart)
 		lp.Inflated = grown
 		if grown == 0 {
 			lp.Note = "nothing left to inflate"
