@@ -239,5 +239,6 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 		c.Flags().Int64Var(&seed, "seed", 0, "placement random seed (runs are reproducible per seed)")
 		group.AddCommand(c)
 	}
+	group.AddCommand(newPcbAutoBenchCmd(stdout, stderr))
 	return group
 }

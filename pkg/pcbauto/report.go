@@ -86,6 +86,7 @@ func (r *Report) WriteMarkdown(w io.Writer) {
 				p("| %s | %s | %s | %d |\n", l.From, l.To, strings.Join(l.Kinds, ", "), len(l.Nets))
 			}
 		}
+		writeLayoutBasis(p, c)
 		p("\n### 电压域与隔离\n\n")
 		for _, d := range c.Domains {
 			tag := ""
@@ -168,4 +169,41 @@ func (r *Report) WriteMarkdown(w io.Writer) {
 	}
 	p("## 7. 执行\n\n```bash\npcbpilot apply playbook.json --project <工程> --dry-run\npcbpilot apply playbook.json --project <工程>\n```\n\n")
 	p("执行后按仓库准则：`pcb save` → `doc reload` → `pcb drc` / `pcb check` 回读确认。\n")
+}
+
+var roleCN = map[string]string{
+	"decap": "去耦", "clock": "晶振", "clock-load": "晶振负载电容", "power-stage": "功率级",
+	"protection": "端口保护", "pull": "上下拉/偏置", "signal": "信号串联/滤波", "chain": "链上器件", "test": "测试点", "unassigned": "未归属",
+}
+
+// writeLayoutBasis lists, per core, which auxiliaries follow it, in what
+// role and to which pin — the reasons the placer pulls each part where it does.
+func writeLayoutBasis(p func(string, ...any), c *Circuit) {
+	p("\n### 布局依据：核心件与辅助件\n\n核心件（IC、模块、连接器、隔离器件）先定位置和朝向；辅助件按角色贴到它服务的那只引脚，拉力从强到弱依次为去耦 → 晶振 → 功率级 → 端口保护 → 上下拉 → 信号串联。\n\n| 核心 | 类型 | 辅助件（角色 → 引脚） |\n|---|---|---|\n")
+	for _, bl := range c.Blocks {
+		if len(bl.Members) == 0 {
+			continue
+		}
+		var parts []string
+		for i, m := range bl.Members {
+			if i >= 12 {
+				parts = append(parts, fmt.Sprintf("…另 %d 个", len(bl.Members)-12))
+				break
+			}
+			r := roleCN[m.Role]
+			if r == "" {
+				r = m.Role
+			}
+			if m.Pin != "" {
+				parts = append(parts, fmt.Sprintf("%s（%s→%s）", m.Ref, r, m.Pin))
+			} else {
+				parts = append(parts, fmt.Sprintf("%s（%s）", m.Ref, r))
+			}
+		}
+		core := bl.Core
+		if core == "" {
+			core = "—"
+		}
+		p("| %s | %s | %s |\n", core, bl.Kind, strings.Join(parts, "、"))
+	}
 }

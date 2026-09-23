@@ -114,12 +114,22 @@ func ClassifyPart(p *Part) PartKind {
 
 // Block is a functional unit: a core part and the parts that serve it.
 type Block struct {
-	ID     string   `json:"id"`
-	Kind   string   `json:"kind"` // mcu | power | interface | analog | rf | isolation | misc
-	Core   string   `json:"core"`
-	Parts  []string `json:"parts"`
-	Domain string   `json:"domain"`
-	Why    []string `json:"why,omitempty"`
+	ID      string   `json:"id"`
+	Kind    string   `json:"kind"` // mcu | power | interface | analog | rf | isolation | logic | misc
+	Core    string   `json:"core"`
+	Parts   []string `json:"parts"`
+	Members []Member `json:"members,omitempty"` // auxiliaries with their role and served pin
+	Domain  string   `json:"domain"`
+	Why     []string `json:"why,omitempty"`
+}
+
+// Member is an auxiliary part of a block: what it does for the core and
+// which core pad it serves (the placer tethers it there).
+type Member struct {
+	Ref  string `json:"ref"`
+	Role string `json:"role"`          // decap | protection | clock | clock-load | power-stage | pull | signal | chain
+	Pin  string `json:"pin,omitempty"` // REF.PAD it serves
+	Why  string `json:"why"`
 }
 
 // Link is the signal traffic between two blocks.
@@ -365,140 +375,6 @@ func containsStr(xs []string, v string) bool {
 
 // ---- blocks -----------------------------------------------------------------
 
-func (c *Circuit) buildBlocks(b *Board, an *Analysis) {
-	cores := []*Part{}
-	for _, p := range b.Parts {
-		switch c.Kinds[p.Ref] {
-		case KindIC, KindModule, KindConnector, KindOpto, KindIsolator, KindIsoPower, KindTransformer, KindRelay:
-			cores = append(cores, p)
-		}
-	}
-	sort.SliceStable(cores, func(i, j int) bool {
-		if len(cores[i].Pads) != len(cores[j].Pads) {
-			return len(cores[i].Pads) > len(cores[j].Pads)
-		}
-		return cores[i].Ref < cores[j].Ref
-	})
-	blockOfCore := map[string]*Block{}
-	for _, p := range cores {
-		bl := &Block{ID: "B-" + p.Ref, Core: p.Ref, Parts: []string{p.Ref}, Domain: c.DomainOf[p.Ref]}
-		bl.Kind = c.coreKind(b, an, p)
-		blockOfCore[p.Ref] = bl
-		c.Blocks = append(c.Blocks, bl)
-		c.BlockOf[p.Ref] = bl.ID
-	}
-	// Signal-net affinity: satellite → core sharing the most non-global nets.
-	netCores := map[string][]string{}
-	for _, p := range cores {
-		for _, pd := range p.Pads {
-			if pd.Net != "" && !isGlobalNet(an, pd.Net, b.Rules) {
-				netCores[pd.Net] = append(netCores[pd.Net], p.Ref)
-			}
-		}
-	}
-	// Power-pin inventory for decoupling assignment: rail → cores (with
-	// the number of pins they have on it).
-	railPins := map[string]map[string]int{}
-	for _, p := range cores {
-		for _, pd := range p.Pads {
-			if pd.Net != "" && an.Plan(pd.Net, b.Rules).Role == RolePower {
-				if railPins[pd.Net] == nil {
-					railPins[pd.Net] = map[string]int{}
-				}
-				railPins[pd.Net][p.Ref]++
-			}
-		}
-	}
-	decapLoad := map[string]int{}
-	var unassigned []*Part
-	for _, p := range b.Parts {
-		if _, ok := blockOfCore[p.Ref]; ok {
-			continue
-		}
-		score := map[string]float64{}
-		for _, pd := range p.Pads {
-			for _, core := range netCores[pd.Net] {
-				score[core] += 1
-			}
-		}
-		// Chains: a passive connected only through another passive (R–C
-		// filters) is resolved in a second pass.
-		best, bestS := "", 0.0
-		for core, s := range score {
-			if s > bestS || s == bestS && core < best {
-				best, bestS = core, s
-			}
-		}
-		if best == "" && c.isDecap(b, an, p) {
-			rail := c.decapRail(b, an, p)
-			// Spread decaps over the cores on that rail in proportion to
-			// their power-pin count (≈ one cap per power pin).
-			bestRatio := math.Inf(1)
-			for core, pins := range railPins[rail] {
-				ratio := float64(decapLoad[core]) / float64(pins)
-				if ratio < bestRatio || ratio == bestRatio && core < best {
-					best, bestRatio = core, ratio
-				}
-			}
-			if best != "" {
-				decapLoad[best]++
-				blockOfCore[best].Why = append(blockOfCore[best].Why, p.Ref+" decouples "+rail)
-			}
-		}
-		if best == "" {
-			unassigned = append(unassigned, p)
-			continue
-		}
-		bl := blockOfCore[best]
-		bl.Parts = append(bl.Parts, p.Ref)
-		c.BlockOf[p.Ref] = bl.ID
-	}
-	// Second pass: attach through already-assigned neighbours.
-	for pass := 0; pass < 3 && len(unassigned) > 0; pass++ {
-		var rest []*Part
-		for _, p := range unassigned {
-			best := ""
-			for _, pd := range p.Pads {
-				if pd.Net == "" || isGlobalNet(an, pd.Net, b.Rules) {
-					continue
-				}
-				for _, q := range b.Parts {
-					if q == p {
-						continue
-					}
-					for _, qd := range q.Pads {
-						if qd.Net == pd.Net && c.BlockOf[q.Ref] != "" {
-							best = c.BlockOf[q.Ref]
-						}
-					}
-				}
-			}
-			if best == "" {
-				rest = append(rest, p)
-				continue
-			}
-			for _, bl := range c.Blocks {
-				if bl.ID == best {
-					bl.Parts = append(bl.Parts, p.Ref)
-				}
-			}
-			c.BlockOf[p.Ref] = best
-		}
-		unassigned = rest
-	}
-	if len(unassigned) > 0 {
-		misc := &Block{ID: "B-MISC", Kind: "misc"}
-		for _, p := range unassigned {
-			misc.Parts = append(misc.Parts, p.Ref)
-			c.BlockOf[p.Ref] = misc.ID
-		}
-		c.Blocks = append(c.Blocks, misc)
-	}
-	for _, bl := range c.Blocks {
-		sort.Strings(bl.Parts[1:])
-	}
-}
-
 func (c *Circuit) isDecap(b *Board, an *Analysis, p *Part) bool {
 	if c.Kinds[p.Ref] != KindCapacitor || len(p.Pads) != 2 {
 		return false
@@ -530,6 +406,7 @@ func (c *Circuit) coreKind(b *Board, an *Analysis, p *Part) string {
 	rails := map[string]bool{}
 	signals := 0
 	hasRF, hasClock := false, false
+	analog := 0
 	for _, pd := range p.Pads {
 		np := an.Plan(pd.Net, b.Rules)
 		switch np.Role {
@@ -540,6 +417,7 @@ func (c *Circuit) coreKind(b *Board, an *Analysis, p *Part) string {
 		case RoleClock:
 			hasClock = true
 		case RoleAnalog:
+			analog++
 		case RoleSwitch:
 			return "power"
 		}
@@ -550,6 +428,8 @@ func (c *Circuit) coreKind(b *Board, an *Analysis, p *Part) string {
 	switch {
 	case hasRF:
 		return "rf"
+	case analog >= 2 && !hasClock && analog*2 >= signals:
+		return "analog" // op-amp / ADC front end: keep away from switchers
 	case len(rails) >= 2 && signals <= 4:
 		return "power" // regulator: input rail → output rail
 	case hasClock || len(p.Pads) >= 24:

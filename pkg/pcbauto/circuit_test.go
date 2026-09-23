@@ -145,3 +145,33 @@ func TestDiffPairNames(t *testing.T) {
 		}
 	}
 }
+
+// TestCoreAuxiliaryMIPI pins the core/auxiliary roles checked by hand on the
+// MIPI adapter: the boost IC U5 owns its inductor and diode (so it is a
+// noise source), C2 decouples U1 pin 8, test points are loose members.
+func TestCoreAuxiliaryMIPI(t *testing.T) {
+	b := loadFixture(t, "lckfb-mipi-3in1-adapter.json")
+	c := Understand(b, Analyze(b, PowerSpec{}, nil))
+	role := map[string]Member{}
+	kind := map[string]string{}
+	for _, bl := range c.Blocks {
+		kind[bl.Core] = bl.Kind
+		for _, m := range bl.Members {
+			role[m.Ref] = m
+		}
+	}
+	if kind["U5"] != "power" {
+		t.Errorf("U5 should be a switching regulator, got %s", kind["U5"])
+	}
+	check := func(ref, r, pin string) {
+		m := role[ref]
+		if m.Role != r || (pin != "" && m.Pin != pin) {
+			t.Errorf("%s: got %s→%s, want %s→%s", ref, m.Role, m.Pin, r, pin)
+		}
+	}
+	check("C2", "decap", "U1.8")
+	check("L1", "power-stage", "")
+	check("D1", "power-stage", "")
+	check("TP1", "test", "")
+	check("R7", "pull", "")
+}

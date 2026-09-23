@@ -268,3 +268,73 @@ func str(v any) string {
 	s, _ := v.(string)
 	return s
 }
+
+// ExportPlacedSnapshot rewrites a `pcb dump` snapshot with the board's current
+// part poses: component anchor/rotation, every pad centre/rotation (width and
+// height swapped on quarter turns) and the rendered bbox moved rigidly with
+// the part. All other fields are preserved, so any snapshot consumer
+// (layout-score, layout-lint, route solve) can judge an engine placement
+// exactly as it judges a real board.
+func ExportPlacedSnapshot(raw []byte, b *Board) ([]byte, error) {
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, fmt.Errorf("snapshot: %w", err)
+	}
+	comps, _ := doc["components"].([]any)
+	for _, ci := range comps {
+		c, ok := ci.(map[string]any)
+		if !ok {
+			continue
+		}
+		p := b.Part(str(c["designator"]))
+		if p == nil {
+			continue
+		}
+		oldPos := Point{num(c["x"]), num(c["y"])}
+		oldRot := normDeg(num(c["rotation"]))
+		delta := normDeg(p.Rotation - oldRot)
+		move := func(q Point) Point { return p.Pos.Add(q.Sub(oldPos).Rotate(delta)) }
+		quarter := int(math.Round(delta/90)) % 2
+		c["x"], c["y"], c["rotation"] = round2(p.Pos.X), round2(p.Pos.Y), p.Rotation
+		if bb, ok := anyBBox(c["bbox"]); ok {
+			nb := EmptyRect()
+			for _, k := range bb.Corners() {
+				nb = nb.AddPoint(move(k))
+			}
+			c["bbox"] = map[string]any{"minX": round2(nb.MinX), "minY": round2(nb.MinY), "maxX": round2(nb.MaxX), "maxY": round2(nb.MaxY)}
+		}
+		pads, _ := c["pads"].([]any)
+		for _, pi := range pads {
+			pd, ok := pi.(map[string]any)
+			if !ok {
+				continue
+			}
+			np := move(Point{num(pd["x"]), num(pd["y"])})
+			pd["x"], pd["y"] = round2(np.X), round2(np.Y)
+			if _, has := pd["rotation"]; has || delta != 0 {
+				pd["rotation"] = normDeg(num(pd["rotation"]) + delta)
+			}
+			if quarter == 1 {
+				if w, ok := pd["width"]; ok {
+					pd["width"], pd["height"] = pd["height"], w
+				}
+			}
+		}
+	}
+	if len(b.Outline) >= 3 {
+		if o, ok := doc["outline"].(map[string]any); ok {
+			bb := PolyBounds(b.Outline)
+			pts := make([][2]float64, len(b.Outline))
+			for i, q := range b.Outline {
+				pts[i] = [2]float64{round2(q.X), round2(q.Y)}
+			}
+			o["points"] = pts
+			o["bbox"] = map[string]any{"minX": bb.MinX, "minY": bb.MinY, "maxX": bb.MaxX, "maxY": bb.MaxY}
+		}
+	}
+	// A moved board is no longer the captured board: drop routed copper so
+	// nobody reads stale tracks against new pad positions.
+	delete(doc, "copper")
+	delete(doc, "semanticSha256")
+	return json.MarshalIndent(doc, "", " ")
+}

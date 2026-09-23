@@ -4,6 +4,7 @@ import (
 	"math"
 	"math/rand"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -66,22 +67,25 @@ type pnet struct {
 }
 
 type placer struct {
-	b       *Board
-	an      *Analysis
-	c       *Circuit
-	m       *Mechanics
-	opt     PlaceOptions
-	rng     *rand.Rand
-	movable []*Part
-	nets    []*pnet
-	partNet map[*Part][]int
-	zoneOf  map[*Part]Rect // allowed centre region
-	region  Rect           // placement region (board inset)
-	decap    map[*Part]*Pad    // decap → the core power pad it serves
+	b        *Board
+	an       *Analysis
+	c        *Circuit
+	m        *Mechanics
+	opt      PlaceOptions
+	rng      *rand.Rand
+	movable  []*Part
+	nets     []*pnet
+	partNet  map[*Part][]int
+	zoneOf   map[*Part]Rect     // allowed centre region
+	region   Rect               // placement region (board inset)
+	decap    map[*Part]*Pad     // decap → the core power pad it serves
 	servedBy map[string][]*Part // core ref → its decaps, in board order
-	spacing float64
-	bucket  map[[2]int][]*Part
-	boxes   map[*Part]Rect
+	tether   map[*Part]*tether  // auxiliary → the core pads it serves, by role
+	hardOnly bool               // partCost: constraint terms only (legalisation)
+	apart    [][2]*Part         // core pairs to keep apart (noisy vs sensitive)
+	spacing  float64
+	bucket   map[[2]int][]*Part
+	boxes    map[*Part]Rect
 }
 
 const placeBucket = 150.0
@@ -112,6 +116,7 @@ func Place(b *Board, an *Analysis, c *Circuit, m *Mechanics, opt PlaceOptions) (
 	pl.legalise()
 	pl.anneal(start.Add(opt.Timeout))
 	pl.legalise()
+	pl.tidy()
 	if m.AutoSize {
 		res.Outline = pl.autosize()
 	}
@@ -183,39 +188,7 @@ func (pl *placer) setup(res *PlaceResult) {
 			}
 		}
 	}
-	// Decoupling: each decap is pulled to the nearest power pad of its core.
-	for _, p := range pl.movable {
-		if !pl.c.isDecap(b, pl.an, p) {
-			continue
-		}
-		rail := pl.c.decapRail(b, pl.an, p)
-		core := b.Part(coreOf(pl.c, p.Ref))
-		if core == nil {
-			continue
-		}
-		var pins []*Pad
-		for _, pd := range core.Pads {
-			if pd.Net == rail {
-				pins = append(pins, pd)
-			}
-		}
-		if len(pins) > 0 {
-			// Spread decaps over the core's power pins round-robin.
-			used := 0
-			for q := range pl.decap {
-				if coreOf(pl.c, q.Ref) == core.Ref {
-					used++
-				}
-			}
-			pl.decap[p] = pins[used%len(pins)]
-		}
-	}
-	pl.servedBy = map[string][]*Part{}
-	for _, p := range pl.movable {
-		if pin := pl.decap[p]; pin != nil {
-			pl.servedBy[pin.Part] = append(pl.servedBy[pin.Part], p)
-		}
-	}
+	pl.setupTethers()
 	pl.zones(res)
 }
 
@@ -400,15 +373,14 @@ func (pl *placer) partCost(p *Part) float64 {
 			cost += 20 * bx.OverlapArea(hz.Rect)
 		}
 	}
-	if pin := pl.decap[p]; pin != nil {
-		// Decap: the power pad of the cap to the IC pin, short loop.
-		best := math.Inf(1)
-		for _, pd := range p.Pads {
-			if pd.Net == pin.Net {
-				best = math.Min(best, pd.Box.C.Dist(pin.Box.C))
+	if !pl.hardOnly {
+		cost += pl.tetherCost(p)
+		for _, pr := range pl.apart {
+			if pr[0] == p || pr[1] == p {
+				d := pr[0].Body().Center().Dist(pr[1].Body().Center())
+				cost += 3 * math.Max(0, keepApartMil-d)
 			}
 		}
-		cost += 6 * best
 	}
 	return cost
 }
@@ -542,6 +514,20 @@ func (pl *placer) construct() {
 				}
 			}
 		}
+		for _, pr := range pl.apart {
+			a, bb := byID["B-"+pr[0].Ref], byID["B-"+pr[1].Ref]
+			if a == nil || bb == nil {
+				continue
+			}
+			d := a.pos.Sub(bb.pos)
+			dist := math.Hypot(d.X, d.Y) + 1e-6
+			need := (a.size+bb.size)/2 + keepApartMil
+			if dist < need {
+				push := d.Scale((need - dist) / dist * 0.3)
+				force[a] = force[a].Add(push)
+				force[bb] = force[bb].Add(push.Scale(-1))
+			}
+		}
 		for _, k := range bs {
 			if k.fix {
 				continue
@@ -559,25 +545,150 @@ func (pl *placer) construct() {
 		}
 		movePartCentre(k.core, k.pos, k.core.Rotation)
 	}
+	// Core orientation: turn each free core so the pins of every link face
+	// the block on the other end (a connector's pins, a regulator's output).
+	anchor := map[string]Point{}
 	for _, k := range bs {
-		for _, ref := range k.bl.Parts {
-			p := b.Part(ref)
+		anchor[k.bl.ID] = k.pos
+	}
+	for _, k := range bs {
+		if k.core != nil && !k.core.Fixed && !pl.opt.NoRotate {
+			pl.orientCore(k.core, k.bl.ID, anchor)
+		}
+	}
+	// Satellites in role order: the tightest loops claim the pin-side
+	// slots first, looser relations stack behind them.
+	for _, k := range bs {
+		members := append([]Member(nil), k.bl.Members...)
+		// Within a role the smallest cap goes first: it serves the highest
+		// band and so owns the slot nearest the pin.
+		sort.SliceStable(members, func(i, j int) bool {
+			ri, rj := roleRank(members[i].Role), roleRank(members[j].Role)
+			if ri != rj {
+				return ri < rj
+			}
+			return capRank(b.Part(members[i].Ref)) < capRank(b.Part(members[j].Ref))
+		})
+		placed := []*Part{}
+		for _, m := range members {
+			p := b.Part(m.Ref)
 			if p == nil || p.Fixed || p == k.core {
 				continue
 			}
-			pl.hug(p, k.core)
+			pl.hug(p, k.core, placed)
+			placed = append(placed, p)
+		}
+		for _, ref := range k.bl.Parts {
+			p := b.Part(ref)
+			if p == nil || p.Fixed || p == k.core || containsPart(placed, p) {
+				continue
+			}
+			pl.hug(p, k.core, placed)
+			placed = append(placed, p)
 		}
 	}
 }
 
+var roleOrder = []string{"decap", "clock", "clock-load", "power-stage", "protection", "pull", "signal", "chain", "test"}
+
+func roleRank(r string) int {
+	for i, x := range roleOrder {
+		if x == r {
+			return i
+		}
+	}
+	return len(roleOrder)
+}
+
+func capRank(p *Part) float64 {
+	if p == nil {
+		return 0
+	}
+	f := CapFarads(p.Device)
+	if f == 0 {
+		return 100e-9
+	}
+	return f
+}
+
+func containsPart(ps []*Part, p *Part) bool {
+	for _, q := range ps {
+		if q == p {
+			return true
+		}
+	}
+	return false
+}
+
+// orientCore picks the rotation whose pads sit closest to the blocks they
+// link to (weighted by net count), so escape routes do not wrap the body.
+func (pl *placer) orientCore(core *Part, id string, anchor map[string]Point) {
+	type pull struct {
+		net string
+		at  Point
+	}
+	var pulls []pull
+	for _, l := range pl.c.Links {
+		other := ""
+		switch id {
+		case l.From:
+			other = l.To
+		case l.To:
+			other = l.From
+		default:
+			continue
+		}
+		at, ok := anchor[other]
+		if !ok {
+			continue
+		}
+		for _, n := range l.Nets {
+			pulls = append(pulls, pull{n, at})
+		}
+	}
+	if len(pulls) == 0 {
+		return
+	}
+	c := core.Body().Center()
+	best, bestRot := math.Inf(1), core.Rotation
+	for _, r := range []float64{0, 90, 180, 270} {
+		movePartCentre(core, c, r)
+		cost := 0.0
+		for _, pu := range pulls {
+			d := math.Inf(1)
+			for _, pd := range core.Pads {
+				if pd.Net == pu.net {
+					d = math.Min(d, pd.Box.C.Dist(pu.at))
+				}
+			}
+			if !math.IsInf(d, 1) {
+				cost += d
+			}
+		}
+		if cost < best-1e-6 {
+			best, bestRot = cost, r
+		}
+	}
+	movePartCentre(core, c, bestRot)
+}
+
 // hug puts a satellite next to the core pin it serves, on the core side that
 // pin sits on, turned so the connecting pad faces the pin.
-func (pl *placer) hug(p, core *Part) {
+func (pl *placer) hug(p, core *Part, placed []*Part) {
 	if core == nil {
 		movePartCentre(p, pl.region.Center(), p.Rotation)
 		return
 	}
-	target := pl.decap[p]
+	var target *Pad
+	if t := pl.tether[p]; t != nil && len(t.pads) > 0 {
+		target = t.pads[0]
+		for _, cp := range t.pads {
+			if cp.Part == core.Ref {
+				target = cp
+				break
+			}
+		}
+	}
 	if target == nil {
 		for _, pd := range p.Pads {
 			for _, cp := range core.Pads {
@@ -591,6 +702,12 @@ func (pl *placer) hug(p, core *Part) {
 	cc := cb.Center()
 	if target == nil {
 		movePartCentre(p, Point{cb.MaxX + p.Body().W(), cc.Y}, p.Rotation)
+		return
+	}
+	if !collide(p, core) {
+		// Opposite side (a BGA's bottom-side decaps): straight under the
+		// pin, spiralling out only past parts already on that side.
+		pl.underPin(p, target, placed)
 		return
 	}
 	d := target.Box.C.Sub(cc)
@@ -637,7 +754,64 @@ func (pl *placer) hug(p, core *Part) {
 		}
 		c = Point{target.Box.C.X, edge + out.Y*(pb.H()/2+pl.spacing)}
 	}
+	// Slide along the edge, then step outward, until clear of the members
+	// already hugging this core.
+	along := Point{-out.Y, out.X}
+	step := math.Max(math.Min(pb.W(), pb.H()), 20) + pl.spacing
+	depth := math.Max(pb.W(), pb.H()) + pl.spacing
+	free := func(at Point) bool {
+		movePartCentre(p, at, rot)
+		box := pl.box(p)
+		for _, q := range placed {
+			if collide(p, q) && box.OverlapArea(pl.box(q)) > 0 {
+				return false
+			}
+		}
+		return box.OverlapArea(pl.box(core)) == 0
+	}
+	for row := 0; row < 6; row++ {
+		for k := 0; k < 12; k++ {
+			off := float64((k+1)/2) * step
+			if k%2 == 1 {
+				off = -off
+			}
+			at := c.Add(along.Scale(off)).Add(out.Scale(float64(row) * depth))
+			if free(at) {
+				return
+			}
+		}
+	}
 	movePartCentre(p, c, rot)
+}
+
+// underPin centres p on target and walks a square spiral until it clears
+// every already-placed part on its own side.
+func (pl *placer) underPin(p *Part, target *Pad, placed []*Part) {
+	rot := p.Rotation
+	step := math.Max(math.Min(p.Body().W(), p.Body().H()), 20)/2 + pl.spacing/2
+	for ring := 0; ring < 24; ring++ {
+		for k := 0; k < max(1, 8*ring); k++ {
+			var off Point
+			if ring > 0 {
+				side, pos := k/(2*ring), float64(k%(2*ring)-ring)
+				r := float64(ring)
+				off = [4]Point{{pos, -r}, {r, pos}, {-pos, r}, {-r, -pos}}[side]
+			}
+			movePartCentre(p, target.Box.C.Add(off.Scale(step)), rot)
+			box := pl.box(p)
+			ok := true
+			for _, q := range placed {
+				if collide(p, q) && box.OverlapArea(pl.box(q)) > 0 {
+					ok = false
+					break
+				}
+			}
+			if ok {
+				return
+			}
+		}
+	}
+	movePartCentre(p, target.Box.C, rot)
 }
 
 // ---- legalisation -----------------------------------------------------------
@@ -666,12 +840,9 @@ func (pl *placer) legalise() {
 
 // hardCost counts only the constraint violations (not decap/length terms).
 func (pl *placer) hardCost(p *Part) float64 {
-	saved := pl.decap[p]
-	delete(pl.decap, p)
+	pl.hardOnly = true
 	c := pl.partCost(p)
-	if saved != nil {
-		pl.decap[p] = saved
-	}
+	pl.hardOnly = false
 	return c
 }
 
@@ -737,11 +908,21 @@ func (pl *placer) anneal(deadline time.Time) {
 	}
 	radius := math.Max(pl.region.W(), pl.region.H()) / 3
 	minR := pl.spacing
+	// Progress is the larger of moves done and time spent, so a run that
+	// hits its deadline still ends cold (greedy) instead of mid-melt.
+	start := time.Now()
+	budget := deadline.Sub(start).Seconds()
+	timeFrac := 0.0
 	for i := 0; i < total; i++ {
-		if i&0x3ff == 0 && time.Now().After(deadline) {
-			break
+		if i&0xff == 0 {
+			if budget > 0 {
+				timeFrac = time.Since(start).Seconds() / budget
+			}
+			if timeFrac >= 1 {
+				break
+			}
 		}
-		frac := float64(i) / float64(total)
+		frac := math.Max(float64(i)/float64(total), timeFrac)
 		// Cool geometrically; the last 15% is greedy descent.
 		t := temp * math.Pow(0.001, frac/0.85)
 		r := math.Max(minR, radius*math.Pow(0.02, frac))
@@ -759,6 +940,13 @@ type savedPose struct {
 	q   *Part
 	qp  Point
 	qr  float64
+	grp []posePart // block move: the satellites that followed p
+}
+
+type posePart struct {
+	p   *Part
+	pos Point
+	rot float64
 }
 
 var lastMove savedPose
@@ -777,8 +965,31 @@ func (pl *placer) tryMove(p *Part, radius float64, keep bool) float64 {
 			kind = 0
 		}
 	}
+	var grp []*Part
+	if kind == 7 && len(pl.servedBy[p.Ref]) > 0 {
+		// Block move: the core carries its auxiliaries rigidly.
+		for _, d := range pl.servedBy[p.Ref] {
+			if !d.Fixed {
+				grp = append(grp, d)
+				lastMove.grp = append(lastMove.grp, posePart{d, d.Pos, d.Rotation})
+			}
+		}
+	} else if kind == 7 {
+		kind = 0
+	}
 	before := pl.localCost(p, q)
+	for _, d := range grp {
+		before += pl.groupCost(d)
+	}
 	switch {
+	case kind == 7:
+		delta := Point{(pl.rng.Float64()*2 - 1) * radius, (pl.rng.Float64()*2 - 1) * radius}
+		for _, d := range append([]*Part{p}, grp...) {
+			pl.bucketOp(d, false)
+			d.MoveTo(d.Pos.Add(delta), d.Rotation)
+			pl.boxes[d] = pl.box(d)
+			pl.bucketOp(d, true)
+		}
 	case kind == 9:
 		lastMove.q, lastMove.qp, lastMove.qr = q, q.Pos, q.Rotation
 		pc, qc := p.Body().Center(), q.Body().Center()
@@ -802,6 +1013,9 @@ func (pl *placer) tryMove(p *Part, radius float64, keep bool) float64 {
 		pl.bucketOp(p, true)
 	}
 	after := pl.localCost(p, q)
+	for _, d := range grp {
+		after += pl.groupCost(d)
+	}
 	if !keep {
 		pl.undo(p)
 	}
@@ -814,6 +1028,12 @@ func (pl *placer) undo(p *Part) {
 	p.MoveTo(s.pos, s.rot)
 	pl.boxes[p] = pl.box(p)
 	pl.bucketOp(p, true)
+	for _, g := range s.grp {
+		pl.bucketOp(g.p, false)
+		g.p.MoveTo(g.pos, g.rot)
+		pl.boxes[g.p] = pl.box(g.p)
+		pl.bucketOp(g.p, true)
+	}
 	if s.q != nil {
 		pl.bucketOp(s.q, false)
 		s.q.MoveTo(s.qp, s.qr)
@@ -846,6 +1066,20 @@ func (pl *placer) localCost(p, q *Part) float64 {
 	if q != nil {
 		for _, d := range pl.servedBy[q.Ref] {
 			cost += pl.partCost(d)
+		}
+	}
+	return cost
+}
+
+// groupCost is a follower's share of a block move: its nets other than the
+// ones it shares with the core (those are already in localCost).
+func (pl *placer) groupCost(d *Part) float64 {
+	nets := append([]int(nil), pl.partNet[d]...)
+	sort.Ints(nets)
+	cost := 0.0
+	for k, i := range nets {
+		if k == 0 || i != nets[k-1] {
+			cost += pl.netCost(i)
 		}
 	}
 	return cost
@@ -931,4 +1165,294 @@ func hasTHT(p *Part) bool {
 		}
 	}
 	return false
+}
+
+// WeightedWirelength is the placer's objective net term (mil) for the board as
+// it stands: Σ weight·HPWL over the nets the placer optimises (ground excluded,
+// rails down-weighted, clock/diff/RF/switch up-weighted). Benchmarks use it to
+// compare a human placement with an engine placement on equal terms.
+func WeightedWirelength(b *Board, an *Analysis, c *Circuit) float64 {
+	pl := &placer{b: b, an: an, c: c, m: &Mechanics{Edge: map[string]MechEdge{}, Fixed: map[string]bool{}},
+		opt: PlaceOptions{SpacingMil: 12}, partNet: map[*Part][]int{}, zoneOf: map[*Part]Rect{}, decap: map[*Part]*Pad{}, spacing: 12}
+	pl.setup(&PlaceResult{})
+	return pl.wirelength()
+}
+
+// DecapDistance returns the mean distance (mil) from every decoupling cap's
+// rail pad to the nearest pin of an IC/module on the same rail — the same
+// yardstick layout-score's protection dimension uses — and the cap count.
+func DecapDistance(b *Board, an *Analysis, c *Circuit) (float64, int) {
+	railPins := map[string][]*Pad{}
+	for _, p := range b.Parts {
+		if k := c.Kinds[p.Ref]; k != KindIC && k != KindModule {
+			continue
+		}
+		for _, pd := range p.Pads {
+			if pd.Net != "" && an.Plan(pd.Net, b.Rules).Role == RolePower {
+				railPins[pd.Net] = append(railPins[pd.Net], pd)
+			}
+		}
+	}
+	sum, n := 0.0, 0
+	for _, p := range b.Parts {
+		if !c.isDecap(b, an, p) {
+			continue
+		}
+		rail := c.decapRail(b, an, p)
+		best := math.Inf(1)
+		for _, pd := range p.Pads {
+			if pd.Net != rail {
+				continue
+			}
+			for _, q := range railPins[rail] {
+				best = math.Min(best, pd.Box.C.Dist(q.Box.C))
+			}
+		}
+		if math.IsInf(best, 1) {
+			continue
+		}
+		sum += best
+		n++
+	}
+	if n == 0 {
+		return 0, 0
+	}
+	return sum / float64(n), n
+}
+
+// symmetricPassive reports two-pad parts whose 180° turn is electrically
+// neutral for tidiness purposes (R, C, L, FB — not polarised caps/diodes).
+func symmetricPassive(p *Part) bool {
+	if len(p.Pads) != 2 {
+		return false
+	}
+	ref := upper(p.Ref)
+	prefix := strings.TrimRightFunc(ref, func(r rune) bool { return r >= '0' && r <= '9' })
+	switch prefix {
+	case "R", "C", "L", "FB":
+		dev := upper(p.Device)
+		return !strings.Contains(dev, "TANT") && !strings.Contains(dev, "ELEC")
+	}
+	return false
+}
+
+// tidy makes the placement look designed: quarter-turns of symmetric
+// passives folded to 0°/90°, each designator group turned to its majority
+// orientation, and every anchor snapped to the 5 mil grid. Each change is
+// kept only when it adds no overlap/zone/keepout violation and costs at most
+// a little wirelength.
+func (pl *placer) tidy() {
+	const grid = 5.0
+	pl.rebuildBuckets()
+	try := func(p *Part, pos Point, rot float64, slack float64) bool {
+		before := pl.localCost(p, nil)
+		oldPos, oldRot := p.Pos, p.Rotation
+		pl.bucketOp(p, false)
+		p.MoveTo(pos, rot)
+		pl.boxes[p] = pl.box(p)
+		pl.bucketOp(p, true)
+		if pl.hardCost(p) <= 1e-6 && pl.localCost(p, nil) <= before*(1+slack)+1 {
+			return true
+		}
+		pl.bucketOp(p, false)
+		p.MoveTo(oldPos, oldRot)
+		pl.boxes[p] = pl.box(p)
+		pl.bucketOp(p, true)
+		return false
+	}
+	// Orientation: fold 180/270 onto 0/90, then align each group's majority.
+	groups := map[string][]*Part{}
+	for _, p := range pl.movable {
+		if !symmetricPassive(p) {
+			continue
+		}
+		if r := normDeg(p.Rotation); r >= 180 {
+			try(p, p.Pos.Add(centreOffset(p)).Sub(pl.offsetAt(p, r-180)), r-180, 0.02)
+		}
+		prefix := strings.TrimRightFunc(upper(p.Ref), func(r rune) bool { return r >= '0' && r <= '9' })
+		groups[prefix] = append(groups[prefix], p)
+	}
+	names := make([]string, 0, len(groups))
+	for k := range groups {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	for _, k := range names {
+		count := map[float64]int{}
+		for _, p := range groups[k] {
+			count[math.Mod(normDeg(p.Rotation), 180)]++
+		}
+		major := 0.0
+		if count[90] > count[0] {
+			major = 90
+		}
+		for _, p := range groups[k] {
+			if math.Mod(normDeg(p.Rotation), 180) != major {
+				try(p, p.Pos.Add(centreOffset(p)).Sub(pl.offsetAt(p, major)), major, 0.05)
+			}
+		}
+	}
+	// Grid: nearest 5 mil point first, then the other three corners of the cell.
+	for _, p := range pl.movable {
+		fx, fy := math.Floor(p.Pos.X/grid)*grid, math.Floor(p.Pos.Y/grid)*grid
+		cands := []Point{{math.Round(p.Pos.X/grid) * grid, math.Round(p.Pos.Y/grid) * grid},
+			{fx, fy}, {fx + grid, fy}, {fx, fy + grid}, {fx + grid, fy + grid}}
+		for _, c := range cands {
+			if math.Abs(c.X-p.Pos.X) < 1e-6 && math.Abs(c.Y-p.Pos.Y) < 1e-6 {
+				break
+			}
+			if try(p, c, p.Rotation, 0.02) {
+				break
+			}
+		}
+	}
+}
+
+// offsetAt is the body-centre offset from the anchor at a given rotation.
+func (pl *placer) offsetAt(p *Part, rot float64) Point {
+	pos, r := p.Pos, p.Rotation
+	p.MoveTo(pos, rot)
+	off := centreOffset(p)
+	p.MoveTo(pos, r)
+	return off
+}
+
+// keepApartMil is the minimum centre distance between a switching power block
+// and an analog/RF block (switch-node noise couples over short distances).
+const keepApartMil = 400
+
+// tether ties an auxiliary to the core pads it serves.
+type tether struct {
+	pads  []*Pad
+	w     float64 // mil-cost per mil beyond slack
+	slack float64 // free distance, mil
+	role  string
+}
+
+// Role weights: how tightly each kind of auxiliary must hug its pin.
+var tetherRoles = map[string][2]float64{ // weight, slack (mil)
+	"decap":       {6, 30},
+	"clock":       {6, 40},
+	"clock-load":  {5, 50},
+	"power-stage": {5, 60},
+	"protection":  {5, 100},
+	"pull":        {2, 120},
+	"signal":      {1.5, 160},
+	"chain":       {0.8, 220},
+	"test":        {0.6, 300},
+}
+
+// setupTethers turns the circuit's core/auxiliary members into placement
+// forces, remembers which auxiliaries follow each core, and records core
+// pairs that must keep their distance.
+func (pl *placer) setupTethers() {
+	b, c := pl.b, pl.c
+	pl.tether = map[*Part]*tether{}
+	pl.servedBy = map[string][]*Part{}
+	padByKey := map[string]*Pad{}
+	for _, p := range b.Parts {
+		for _, pd := range p.Pads {
+			padByKey[pd.Key()] = pd
+		}
+	}
+	movable := map[*Part]bool{}
+	for _, p := range pl.movable {
+		movable[p] = true
+	}
+	for _, bl := range c.Blocks {
+		core := b.Part(bl.Core)
+		for _, m := range bl.Members {
+			p := b.Part(m.Ref)
+			rw, ok := tetherRoles[m.Role]
+			if p == nil || !ok || !movable[p] {
+				continue
+			}
+			t := &tether{w: rw[0], slack: rw[1], role: m.Role}
+			if m.Role == "decap" {
+				_, t.w, t.slack = decapClass(p.Device)
+			}
+			if pd := padByKey[m.Pin]; pd != nil {
+				t.pads = []*Pad{pd}
+			} else if core != nil {
+				// No single pin (clock-load, chain): the core pads on shared nets,
+				// or failing that the pads of whatever part it shares a net with.
+				shared := map[string]bool{}
+				for _, pd := range p.Pads {
+					if pd.Net != "" && pl.an.Plan(pd.Net, b.Rules).Role != RoleGround {
+						shared[pd.Net] = true
+					}
+				}
+				for _, q := range b.Parts {
+					if q == p || c.BlockOf[q.Ref] != bl.ID {
+						continue
+					}
+					for _, qd := range q.Pads {
+						if shared[qd.Net] {
+							t.pads = append(t.pads, qd)
+						}
+					}
+				}
+			}
+			if len(t.pads) == 0 {
+				continue
+			}
+			pl.tether[p] = t
+			if m.Role == "decap" {
+				pl.decap[p] = t.pads[0]
+			}
+			pl.servedBy[bl.Core] = append(pl.servedBy[bl.Core], p)
+		}
+	}
+	// Noisy vs sensitive cores keep apart.
+	noisy, quiet := []*Part{}, []*Part{}
+	for _, bl := range c.Blocks {
+		core := b.Part(bl.Core)
+		if core == nil {
+			continue
+		}
+		stage := false
+		for _, m := range bl.Members {
+			if m.Role == "power-stage" {
+				stage = true
+			}
+		}
+		switch {
+		case stage || bl.Kind == "power":
+			if stage {
+				noisy = append(noisy, core)
+			}
+		case bl.Kind == "rf" || bl.Kind == "analog":
+			quiet = append(quiet, core)
+		}
+	}
+	for _, n := range noisy {
+		for _, q := range quiet {
+			if !n.Fixed || !q.Fixed {
+				pl.apart = append(pl.apart, [2]*Part{n, q})
+			}
+		}
+	}
+}
+
+// tetherCost is the soft pull of an auxiliary toward the pads it serves.
+func (pl *placer) tetherCost(p *Part) float64 {
+	t := pl.tether[p]
+	if t == nil {
+		return 0
+	}
+	best := math.Inf(1)
+	for _, pd := range p.Pads {
+		for _, cp := range t.pads {
+			if pd.Net == cp.Net || t.role == "clock-load" || t.role == "chain" {
+				best = math.Min(best, pd.Box.C.Dist(cp.Box.C))
+			}
+		}
+	}
+	if math.IsInf(best, 1) {
+		// Pads not on a shared net (e.g. crystal body): use the body centre.
+		for _, cp := range t.pads {
+			best = math.Min(best, p.Body().Center().Dist(cp.Box.C))
+		}
+	}
+	return t.w * math.Max(0, best-t.slack)
 }
