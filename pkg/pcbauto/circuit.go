@@ -173,7 +173,10 @@ type Circuit struct {
 	Barriers []*Barrier          `json:"barriers"`
 	BlockOf  map[string]string   `json:"blockOf"`
 	DomainOf map[string]string   `json:"domainOf"`
-	Notes    []string            `json:"notes,omitempty"`
+	// Converters are the recognised switching regulators with their hot
+	// loops, bootstrap and feedback parts.
+	Converters []*Converter `json:"converters,omitempty"`
+	Notes      []string     `json:"notes,omitempty"`
 }
 
 var (
@@ -199,6 +202,7 @@ func Understand(b *Board, an *Analysis) *Circuit {
 	}
 	c.buildDomains(b, an)
 	c.buildBlocks(b, an)
+	c.buildConverters(b, an)
 	c.buildLinks(b, an)
 	c.buildBarriers(b, an)
 	return c

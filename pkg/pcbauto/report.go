@@ -87,6 +87,7 @@ func (r *Report) WriteMarkdown(w io.Writer) {
 			}
 		}
 		writeLayoutBasis(p, c)
+		writeConverters(p, c)
 		p("\n### 电压域与隔离\n\n")
 		for _, d := range c.Domains {
 			tag := ""
@@ -173,7 +174,7 @@ func (r *Report) WriteMarkdown(w io.Writer) {
 
 var roleCN = map[string]string{
 	"decap": "去耦", "clock": "晶振", "clock-load": "晶振负载电容", "power-stage": "功率级",
-	"protection": "端口保护", "pull": "上下拉/偏置", "signal": "信号串联/滤波", "chain": "链上器件", "test": "测试点", "unassigned": "未归属",
+	"protection": "端口保护", "pull": "上下拉/偏置", "signal": "信号串联/滤波", "chain": "链上器件", "test": "测试点", "hot-loop": "热回路", "bootstrap": "自举", "feedback": "反馈分压", "unassigned": "未归属",
 }
 
 // writeLayoutBasis lists, per core, which auxiliaries follow it, in what
@@ -206,4 +207,28 @@ func writeLayoutBasis(p func(string, ...any), c *Circuit) {
 		}
 		p("| %s | %s | %s |\n", core, bl.Kind, strings.Join(parts, "、"))
 	}
+}
+
+// writeConverters lists each switching regulator's topology and the parts
+// that make or break its layout.
+func writeConverters(p func(string, ...any), c *Circuit) {
+	if len(c.Converters) == 0 {
+		return
+	}
+	p("\n### 开关电源\n\n布局第一优先是热回路面积（决定开关节点振铃和辐射）：Buck 的关键是输入电容，Boost 的关键是输出电容。反馈分压电阻贴 FB 脚、远离电感和开关节点。\n\n| 芯片 | 拓扑 | 置信度 | 电感 | 整流/续流管 | 输入 → 输出 | 热回路电容 | 自举 | 反馈 |\n|---|---|---|---|---|---|---|---|---|\n")
+	for _, cv := range c.Converters {
+		d := cv.Diode
+		if d == "" {
+			d = "同步"
+		}
+		p("| %s | %s | %s | %s | %s | %s → %s | %s | %s | %s |\n", cv.Core, cv.Topology, cv.Confidence, cv.Inductor, d,
+			dash(cv.InRail), dash(cv.OutRail), dash(cv.HotCap), dash(cv.Bootstrap), dash(strings.Join(cv.Feedback, "、")))
+	}
+}
+
+func dash(s string) string {
+	if s == "" {
+		return "—"
+	}
+	return s
 }

@@ -358,13 +358,7 @@ func (c *Circuit) buildBlocks(b *Board, an *Analysis) {
 		if len(bl.Parts) > 1 {
 			sort.Strings(bl.Parts[1:])
 		}
-		sort.SliceStable(bl.Members, func(i, j int) bool {
-			ri, rj := roleRank(bl.Members[i].Role), roleRank(bl.Members[j].Role)
-			if ri != rj {
-				return ri < rj
-			}
-			return bl.Members[i].Ref < bl.Members[j].Ref
-		})
+		sortMembers(bl)
 		// An IC driving an inductor through a switch node is a switching
 		// regulator whatever its pin mix says: it is the noise source.
 		for _, m := range bl.Members {
@@ -393,4 +387,15 @@ func stageOwner(p *Part, swOwner map[string]*Pad) *Pad {
 		}
 	}
 	return nil
+}
+
+// sortMembers orders a block's members by role strength, then reference.
+func sortMembers(bl *Block) {
+	sort.SliceStable(bl.Members, func(i, j int) bool {
+		ri, rj := roleRank(bl.Members[i].Role), roleRank(bl.Members[j].Role)
+		if ri != rj {
+			return ri < rj
+		}
+		return bl.Members[i].Ref < bl.Members[j].Ref
+	})
 }

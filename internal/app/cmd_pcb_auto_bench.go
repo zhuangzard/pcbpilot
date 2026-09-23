@@ -24,6 +24,7 @@ type benchRow struct {
 	Dims       map[string]float64 `json:"dimensions"`
 	WLIn       float64            `json:"weightedWirelengthIn"`
 	DecapMil   float64            `json:"decapToPinMil"`
+	HotLoopMil float64            `json:"hotLoopPerimeterMil"`
 	Overlaps   int                `json:"overlaps"`
 	Completion float64            `json:"routeCompletion"`
 	Routed     int                `json:"routed"`
@@ -44,6 +45,7 @@ func newPcbAutoBenchCmd(stdout, stderr io.Writer) *cobra.Command {
 	var seed int64
 	var timeout time.Duration
 	var variants []string
+	var dumpDir string
 	c := &cobra.Command{
 		Use:   "bench <board.json>...",
 		Short: "Benchmark engine placement against the human placement on real boards (layout-score, wirelength, routability)",
@@ -70,13 +72,13 @@ the editor.`,
 				}
 				name := strings.TrimSuffix(filepath.Base(path), ".json")
 				for _, v := range variants {
-					row, err := benchOne(cmd.Context(), name, v, raw, seed, noRoute, timeout)
+					row, err := benchOne(cmd.Context(), name, v, raw, seed, noRoute, timeout, dumpDir)
 					if err != nil {
 						fmt.Fprintf(stderr, "%s/%s: %v\n", name, v, err)
 						continue
 					}
-					fmt.Fprintf(stderr, "%-30s %-6s score %5.1f tidy %3.0f prot %3.0f rout %3.0f  wl %6.1fin  decap %4.0fmil  ovl %d  place %5.1fs  route %5.1f%% vias %d drc %d\n",
-						name, v, row.Score, row.Dims["tidy"], row.Dims["protection"], row.Dims["routable"], row.WLIn, row.DecapMil, row.Overlaps, float64(row.PlaceMs)/1000, row.Completion, row.Vias, row.DRC)
+					fmt.Fprintf(stderr, "%-30s %-6s score %5.1f tidy %3.0f prot %3.0f rout %3.0f  wl %6.1fin  decap %4.0fmil  loop %4.0fmil  ovl %d  place %5.1fs  route %5.1f%% vias %d drc %d\n",
+						name, v, row.Score, row.Dims["tidy"], row.Dims["protection"], row.Dims["routable"], row.WLIn, row.DecapMil, row.HotLoopMil, row.Overlaps, float64(row.PlaceMs)/1000, row.Completion, row.Vias, row.DRC)
 					rows = append(rows, row)
 				}
 			}
@@ -92,11 +94,12 @@ the editor.`,
 	c.Flags().BoolVar(&noRoute, "no-route", false, "placement metrics only (fast)")
 	c.Flags().Int64Var(&seed, "seed", 0, "placement seed")
 	c.Flags().DurationVar(&timeout, "timeout", 3*time.Minute, "routing budget per variant")
+	c.Flags().StringVar(&dumpDir, "dump-dir", "", "write each engine placement as <board>.engine.json (a pcb dump snapshot) for layout-score / inspection")
 	c.Flags().StringSliceVar(&variants, "variants", []string{"human", "engine"}, "which placements to measure")
 	return c
 }
 
-func benchOne(ctx context.Context, name, variant string, raw []byte, seed int64, noRoute bool, timeout time.Duration) (benchRow, error) {
+func benchOne(ctx context.Context, name, variant string, raw []byte, seed int64, noRoute bool, timeout time.Duration, dumpDir string) (benchRow, error) {
 	row := benchRow{Board: name, Variant: variant}
 	b, err := pcbauto.FromSnapshot(raw)
 	if err != nil {
@@ -123,11 +126,17 @@ func benchOne(ctx context.Context, name, variant string, raw []byte, seed int64,
 		if snapRaw, err = pcbauto.ExportPlacedSnapshot(raw, b); err != nil {
 			return row, err
 		}
+		if dumpDir != "" {
+			if err := os.WriteFile(filepath.Join(dumpDir, name+".engine.json"), snapRaw, 0o644); err != nil {
+				return row, err
+			}
+		}
 	default:
 		return row, fmt.Errorf("unknown variant %q", variant)
 	}
 	row.WLIn = pcbauto.WeightedWirelength(b, an, circ) / 1000
 	row.DecapMil, _ = pcbauto.DecapDistance(b, an, circ)
+	row.HotLoopMil, _ = pcbauto.HotLoopStats(b, an, circ)
 	snap, err := loadBoardSnapshotFile(bytes.NewReader(snapRaw))
 	if err != nil {
 		return row, err
@@ -195,8 +204,8 @@ func writeBenchTable(w io.Writer, rows []benchRow) {
 		dl = append(dl, d)
 	}
 	sort.Strings(dl)
-	fmt.Fprintf(w, "| board | placement | score | %s | WL in | decap mil | overlaps | route %% | vias | DRC |\n", strings.Join(dl, " | "))
-	fmt.Fprintf(w, "|---|---|---|%s---|---|---|---|---|---|\n", strings.Repeat("---|", len(dl)))
+	fmt.Fprintf(w, "| board | placement | score | %s | WL in | decap mil | hot loop mil | overlaps | route %% | vias | DRC |\n", strings.Join(dl, " | "))
+	fmt.Fprintf(w, "|---|---|---|%s---|---|---|---|---|---|---|\n", strings.Repeat("---|", len(dl)))
 	for _, r := range rows {
 		var ds []string
 		for _, d := range dl {
@@ -206,7 +215,7 @@ func writeBenchTable(w io.Writer, rows []benchRow) {
 				ds = append(ds, "–")
 			}
 		}
-		fmt.Fprintf(w, "| %s | %s | %.1f | %s | %.1f | %.0f | %d | %.1f | %d | %d |\n",
-			r.Board, r.Variant, r.Score, strings.Join(ds, " | "), r.WLIn, r.DecapMil, r.Overlaps, r.Completion, r.Vias, r.DRC)
+		fmt.Fprintf(w, "| %s | %s | %.1f | %s | %.1f | %.0f | %.0f | %d | %.1f | %d | %d |\n",
+			r.Board, r.Variant, r.Score, strings.Join(ds, " | "), r.WLIn, r.DecapMil, r.HotLoopMil, r.Overlaps, r.Completion, r.Vias, r.DRC)
 	}
 }

@@ -103,10 +103,20 @@ func FromSnapshot(raw []byte) (*Board, error) {
 		if p.Side != LayerBottom {
 			p.Side = LayerTop
 		}
+		sized := true
 		for _, sp := range c.Pads {
 			p.Pads = append(p.Pads, snapPadToPad(sp))
+			if !padSized(sp) {
+				sized = false
+			}
 		}
-		if c.BBox != nil && c.BBox.MaxX > c.BBox.MinX {
+		if c.BBox != nil && c.BBox.MaxX > c.BBox.MinX && !sized {
+			// Pads without a size (mounting hardware, SMT standoffs): the
+			// rendered outline is the only extent we have, and for hardware it
+			// stands for the screw head / washer / tool clearance — keep it
+			// whole, as layout-lint does.
+			p.SetBody(Rect{c.BBox.MinX, c.BBox.MinY, c.BBox.MaxX, c.BBox.MaxY})
+		} else if c.BBox != nil && c.BBox.MaxX > c.BBox.MinX {
 			// The rendered bbox includes silk; shrink toward the pads so the
 			// courtyard is not ~40% oversized.
 			bb := Rect{c.BBox.MinX, c.BBox.MinY, c.BBox.MaxX, c.BBox.MaxY}
@@ -148,6 +158,17 @@ func FromSnapshot(raw []byte) (*Board, error) {
 		return nil, err
 	}
 	return b, nil
+}
+
+// padSized reports whether the snapshot gives the pad a real size.
+func padSized(sp snapPad) bool {
+	if sp.W > 0 && sp.H > 0 {
+		return true
+	}
+	if arr, ok := sp.Shape.([]any); ok && len(arr) >= 3 {
+		return num(arr[1]) > 0 && num(arr[2]) > 0
+	}
+	return false
 }
 
 func snapPadToPad(sp snapPad) *Pad {

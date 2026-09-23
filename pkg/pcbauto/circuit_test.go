@@ -171,7 +171,8 @@ func TestCoreAuxiliaryMIPI(t *testing.T) {
 	}
 	check("C2", "decap", "U1.8")
 	check("L1", "power-stage", "")
-	check("D1", "power-stage", "")
+	check("D1", "hot-loop", "")
+	check("C1", "hot-loop", "")
 	check("TP1", "test", "")
 	check("R7", "pull", "")
 }

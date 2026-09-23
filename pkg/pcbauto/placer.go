@@ -81,8 +81,9 @@ type placer struct {
 	decap    map[*Part]*Pad     // decap → the core power pad it serves
 	servedBy map[string][]*Part // core ref → its decaps, in board order
 	tether   map[*Part]*tether  // auxiliary → the core pads it serves, by role
-	hardOnly bool               // partCost: constraint terms only (legalisation)
-	apart    [][2]*Part         // core pairs to keep apart (noisy vs sensitive)
+	conv     map[*Part]*Converter
+	hardOnly bool       // partCost: constraint terms only (legalisation)
+	apart    [][2]*Part // core pairs to keep apart (noisy vs sensitive)
 	spacing  float64
 	bucket   map[[2]int][]*Part
 	boxes    map[*Part]Rect
@@ -375,6 +376,7 @@ func (pl *placer) partCost(p *Part) float64 {
 	}
 	if !pl.hardOnly {
 		cost += pl.tetherCost(p)
+		cost += pl.converterCost(p)
 		for _, pr := range pl.apart {
 			if pr[0] == p || pr[1] == p {
 				d := pr[0].Body().Center().Dist(pr[1].Body().Center())
@@ -589,7 +591,7 @@ func (pl *placer) construct() {
 	}
 }
 
-var roleOrder = []string{"decap", "clock", "clock-load", "power-stage", "protection", "pull", "signal", "chain", "test"}
+var roleOrder = []string{"hot-loop", "bootstrap", "decap", "clock", "clock-load", "power-stage", "feedback", "protection", "pull", "signal", "chain", "test"}
 
 func roleRank(r string) int {
 	for i, x := range roleOrder {
@@ -1331,6 +1333,9 @@ type tether struct {
 
 // Role weights: how tightly each kind of auxiliary must hug its pin.
 var tetherRoles = map[string][2]float64{ // weight, slack (mil)
+	"hot-loop":    {8, 20},
+	"bootstrap":   {7, 25},
+	"feedback":    {4, 60},
 	"decap":       {6, 30},
 	"clock":       {6, 40},
 	"clock-load":  {5, 50},
@@ -1359,6 +1364,20 @@ func (pl *placer) setupTethers() {
 	for _, p := range pl.movable {
 		movable[p] = true
 	}
+	// The smallest cap on each power pin is that pin's high-frequency
+	// decoupler whatever its value: a lone 4.7 µF must still hug the pin.
+	pinSmallest := map[string]float64{}
+	for _, bl := range c.Blocks {
+		for _, m := range bl.Members {
+			if m.Role != "decap" {
+				continue
+			}
+			v := capRank(b.Part(m.Ref))
+			if cur, ok := pinSmallest[m.Pin]; !ok || v < cur {
+				pinSmallest[m.Pin] = v
+			}
+		}
+	}
 	for _, bl := range c.Blocks {
 		core := b.Part(bl.Core)
 		for _, m := range bl.Members {
@@ -1370,6 +1389,9 @@ func (pl *placer) setupTethers() {
 			t := &tether{w: rw[0], slack: rw[1], role: m.Role}
 			if m.Role == "decap" {
 				_, t.w, t.slack = decapClass(p.Device)
+				if capRank(p) <= pinSmallest[m.Pin] {
+					t.w, t.slack = 7, 25
+				}
 			}
 			if pd := padByKey[m.Pin]; pd != nil {
 				t.pads = []*Pad{pd}
@@ -1401,6 +1423,14 @@ func (pl *placer) setupTethers() {
 				pl.decap[p] = t.pads[0]
 			}
 			pl.servedBy[bl.Core] = append(pl.servedBy[bl.Core], p)
+		}
+	}
+	pl.conv = map[*Part]*Converter{}
+	for _, cv := range c.Converters {
+		for _, ref := range append([]string{cv.HotCap, cv.Diode}, cv.Feedback...) {
+			if p := b.Part(ref); p != nil && movable[p] {
+				pl.conv[p] = cv
+			}
 		}
 	}
 	// Noisy vs sensitive cores keep apart.
@@ -1455,4 +1485,51 @@ func (pl *placer) tetherCost(p *Part) float64 {
 		}
 	}
 	return t.w * math.Max(0, best-t.slack)
+}
+
+// Hot-loop and feedback weights. The loop polygon runs through pad centres,
+// so a tight 0805/SOT-23 layout already measures ~150 mil around.
+const (
+	hotLoopSlackMil = 150
+	fbKeepAwayMil   = 150
+)
+
+// converterCost prices a switcher's layout physics for p: the hot-loop
+// perimeter and area if p is in the loop, the distance from the switch node
+// if p is in the feedback divider.
+func (pl *placer) converterCost(p *Part) float64 {
+	cv := pl.conv[p]
+	if cv == nil {
+		return 0
+	}
+	if p.Ref == cv.HotCap || p.Ref == cv.Diode {
+		if _, perim, area, ok := HotLoop(pl.b, pl.an, cv); ok {
+			return 3*math.Max(0, perim-hotLoopSlackMil) + 2*math.Sqrt(area)
+		}
+		return 0
+	}
+	// Feedback: away from the inductor body and every switch-node pad.
+	c := p.Body().Center()
+	d := math.Inf(1)
+	if l := pl.b.Part(cv.Inductor); l != nil {
+		d = math.Min(d, rectDist(p.Body(), l.Body()))
+	}
+	for _, q := range pl.b.Parts {
+		if q == p {
+			continue
+		}
+		for _, pd := range q.Pads {
+			if pd.Net == cv.SwitchNet {
+				d = math.Min(d, c.Dist(pd.Box.C))
+			}
+		}
+	}
+	return 4 * math.Max(0, fbKeepAwayMil-d)
+}
+
+// rectDist is the gap between two rectangles (0 when they touch or overlap).
+func rectDist(a, b Rect) float64 {
+	dx := math.Max(0, math.Max(a.MinX-b.MaxX, b.MinX-a.MaxX))
+	dy := math.Max(0, math.Max(a.MinY-b.MaxY, b.MinY-a.MaxY))
+	return math.Hypot(dx, dy)
 }
