@@ -4,7 +4,7 @@ description: "通过本地 pcbpilot CLI、daemon 和连接器操作嘉立创EDA�
 license: MIT
 metadata:
   author: zhoushoujianwork
-  version: "1.5.3-dev.6"
+  version: "0.1.0"
   homepage: "https://github.com/zhuangzard/pcbpilot"
 ---
 

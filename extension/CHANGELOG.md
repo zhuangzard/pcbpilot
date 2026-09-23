@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-09-22
+
+First pcbpilot release. pcbpilot is a fork of
+[zhoushoujianwork/easyeda-agent](https://github.com/zhoushoujianwork/easyeda-agent) (MIT);
+thanks to the original author and contributors, whose history is preserved.
+
+- Rebrand to pcbpilot with its own identity so it installs beside upstream
+  easyeda-agent: CLI `pcbpilot`, skills `pcbpilot*`, `~/.pcbpilot`, `PCBPILOT_*`
+  environment variables, daemon/connector ports 61832–61841, connector
+  "PCB Pilot Connector" with a new uuid, release channel `zhuangzard/pcbpilot`.
+  Self-update and skill sync never fall back to upstream.
+- New `pcbpilot pcb auto analyze|run`: offline electrical-aware engine
+  (`pkg/pcbauto`) — circuit understanding (blocks, links, voltage domains,
+  isolation barriers), IPC-based widths/clearances, 2/4/6-layer stackup and
+  split planes, mechanically constrained placement with HV/LV zones,
+  plane-first negotiated-congestion routing, length tuning, exact DRC and SI
+  checks; emits an `apply` playbook, preview SVG and Chinese report.
+  Status: offline-verified. Known defect R-0: under routing timeout the final
+  DRC gate does not remove violating fan-out vias (seen on BGA boards).
+- The connector runtime is unchanged apart from its identity and port range;
+  it must be imported as a new extension (it does not replace upstream's).
+
+The entries below were accumulated on the development line before the fork.
+
 - Add daemon-side `pcb via-fence` for perimeter-only GND/RF stitching around a protected rectangle. It includes each corner once, redistributes every edge so `--pitch` is a maximum spacing, expands outward with `--margin`, uses live via rules for unspecified sizes, and keeps dry-run pure. The AT32F415 crystal example now treats its former TOP/0-via route as verified historical evidence rather than a final design: the replacement `crystal-guard` contract jointly requires controlled MCU spacing, shorter/direct OSC paths, a real TOP GND guard, TOP/BOTTOM `no-pours` regions, and a GND via fence outside the protected envelope.
 - Bootstrap the Connector when EasyEDA evaluates its entry bundle without dispatching `activate()`. Keep one versioned transport controller on the host's shared per-extension `eda` object so repeated bundle evaluations delegate `start`, `stop`, `reconnect`, and status reads instead of registering duplicate sockets. `deactivate()` stops and releases that controller for a subsequent reload. Verified on macOS EasyEDA 3.2.203 with an official 1.5.2 cold-start baseline that did not connect, followed by import-time and fresh-process bootstrap registrations where `activateObserved=false`; this does not establish the behavior of Windows 3.2.149 or a startup path that never evaluates the bundle.
 - Gate on netlist availability, not just pin geometry. `pinsAvailable` proves the PIN API read succeeded; it says nothing about whether the netlist that every pin's `net` comes from was fetched. A muted export leaves every pin's `net` null while `pinsAvailable` stays true, so a downstream reader could not tell "this pin has no net" from "no net could be read". `sch block-apply`'s layout proof and `sch designators plan` now require `netlistAvailable` and report the netlist as the cause when it is missing.
