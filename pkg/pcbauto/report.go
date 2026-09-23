@@ -14,6 +14,8 @@ type Report struct {
 	Placement *PlaceResult `json:"placement,omitempty"`
 	SI        *SIReport    `json:"si,omitempty"`
 	Mechanics *Mechanics   `json:"mechanics,omitempty"`
+	Joint     *JointScore  `json:"joint,omitempty"`
+	Loop      []LoopPass   `json:"loop,omitempty"`
 }
 
 // WriteMarkdown renders the report in Chinese for the designer to review.
@@ -155,6 +157,7 @@ func (r *Report) WriteMarkdown(w io.Writer) {
 		p("\n")
 	}
 
+	writeJoint(p, r)
 	if si := r.SI; si != nil && (len(si.Pairs) > 0 || len(si.Findings) > 0) {
 		p("## 6. 高速信号\n\n")
 		if len(si.Pairs) > 0 {
@@ -251,4 +254,39 @@ func writeChains(p func(string, ...any), c *Circuit) {
 		}
 		p("| %s | %s | %s |\n", strings.Join(ch.Seq(), " → "), strings.Join(ch.Nets, " → "), pair)
 	}
+}
+
+var jointGroupCN = map[string]string{"electrical": "电气（布线后实测）", "efficiency": "布线效率", "placement": "布局装配"}
+
+// writeJoint renders the joint place+route score and the loop history.
+func writeJoint(p func(string, ...any), r *Report) {
+	j := r.Joint
+	if j == nil {
+		return
+	}
+	verdict := "可交付"
+	if !j.Deliverable {
+		verdict = "不可交付"
+	}
+	p("### 综合评分：%.1f（%s）\n\n", j.Overall, verdict)
+	p("综合分 = 门槛 × 布通系数 × 质量分。布通系数 = 布通率² × 0.97^DRC = **%.2f**（布通率 %.1f%%，DRC %d）；质量分 = 各组加权几何平均 = **%.0f**。\n\n",
+		j.CompletionFactor, j.Completion, j.DRC, j.Quality)
+	for _, g := range j.Gates {
+		p("- 门槛未过：%s（总分封顶 40）\n", g)
+	}
+	p("| 组 | 项 | 得分 | 实测 |\n|---|---|---|---|\n")
+	for _, it := range j.Items {
+		g := jointGroupCN[it.Group]
+		if g == "" {
+			g = it.Group
+		}
+		p("| %s | %s | %.0f | %s |\n", g, it.ID, it.Score, it.Detail)
+	}
+	if len(r.Loop) > 0 {
+		p("\n布局↔布线闭环（布不通和 DRC 违规附近的器件每轮加宽半条布线通道后重新布局，取综合分最高的一轮）：\n\n| 轮 | 布通率 | DRC | 综合分 | 加宽器件 | 备注 |\n|---|---|---|---|---|---|\n")
+		for _, lp := range r.Loop {
+			p("| %d | %.1f%% | %d | %.1f | %d | %s |\n", lp.Pass, lp.Completion, lp.DRC, lp.Joint, lp.Inflated, lp.Note)
+		}
+	}
+	p("\n")
 }

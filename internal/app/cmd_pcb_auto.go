@@ -137,6 +137,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 		var outDir string
 		var place, noRoute, refine bool
 		var seed int64
+		var loops int
 		c := &cobra.Command{
 			Use:   "run",
 			Short: "Full pipeline: analyse → stackup → (place) → route → DRC/SI → plan.json + playbook.json + preview.svg + report.md",
@@ -169,7 +170,26 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 				rep := &pcbauto.Report{Mechanics: mc}
 				pre := pcbauto.Analyze(b, power, nil)
 				rep.Circuit = pcbauto.Understand(b, pre)
-				if place {
+				opts := pcbauto.Options{Power: power, Stack: pcbauto.StackOptions{Force: in.layers, MaxLayers: in.maxLayers},
+					Route: pcbauto.RouteOptions{GridMil: in.grid, Timeout: in.timeout}}
+				budget := in.timeout * 3
+				if place && !noRoute && loops > 0 {
+					budget = in.timeout * time.Duration(3*loops)
+				}
+				ctx, cancel := context.WithTimeout(cmd.Context(), budget)
+				defer cancel()
+				looped := false
+				if place && !noRoute && loops > 0 {
+					lr, err := pcbauto.PlaceRoute(ctx, b, pre, rep.Circuit, mc, pcbauto.PlaceOptions{Seed: seed, Refine: refine}, opts, pcbauto.LoopOptions{Passes: loops})
+					if err != nil {
+						return err
+					}
+					rep.Placement, rep.Result, rep.Loop, looped = lr.Place, lr.Result, lr.Passes, true
+					for _, lp := range lr.Passes {
+						fmt.Fprintf(stderr, "loop pass %d: routed %.1f%%, DRC %d, joint %.1f, inflated %d %s\n", lp.Pass, lp.Completion, lp.DRC, lp.Joint, lp.Inflated, lp.Note)
+					}
+					fmt.Fprintf(stderr, "loop: best pass %d\n", lr.Best)
+				} else if place {
 					rep.Placement, err = pcbauto.Place(b, pre, rep.Circuit, mc, pcbauto.PlaceOptions{Seed: seed, Refine: refine})
 					if err != nil {
 						return err
@@ -177,19 +197,24 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 					fmt.Fprintf(stderr, "placement: wirelength %.1f→%.1f in, overlaps %d, out-of-zone %d\n",
 						rep.Placement.Metrics.StartWireIn, rep.Placement.Metrics.WirelengthIn, rep.Placement.Metrics.Overlaps, rep.Placement.Metrics.OutOfZone)
 				}
-				opts := pcbauto.Options{Power: power, Stack: pcbauto.StackOptions{Force: in.layers, MaxLayers: in.maxLayers},
-					Route: pcbauto.RouteOptions{GridMil: in.grid, Timeout: in.timeout}}
-				ctx, cancel := context.WithTimeout(cmd.Context(), in.timeout*3)
-				defer cancel()
 				if noRoute {
 					an := pcbauto.Analyze(b, power, nil)
 					st := pcbauto.DecideStackup(b, an, opts.Stack)
 					rep.Result = &pcbauto.Result{Analysis: pcbauto.Analyze(b, power, st), Stackup: st}
 				} else {
-					if rep.Result, err = pcbauto.Run(ctx, b, opts); err != nil {
-						return err
+					if !looped {
+						if rep.Result, err = pcbauto.Run(ctx, b, opts); err != nil {
+							return err
+						}
 					}
 					rep.SI = pcbauto.CheckSI(b, rep.Result.Analysis, rep.Result.Stackup, rep.Result.Route)
+					overlaps := 0
+					if rep.Placement != nil {
+						overlaps = rep.Placement.Metrics.Overlaps
+					}
+					rep.Joint = pcbauto.Joint(b, rep.Result.Analysis, rep.Circuit, rep.Result.Stackup, rep.Result.Route, rep.Result.DRC,
+						pcbauto.JointOptions{PlacementScore: -1, Overlaps: overlaps})
+					fmt.Fprintf(stderr, "joint score %.1f (completion ×%.2f, quality %.0f)\n", rep.Joint.Overall, rep.Joint.CompletionFactor, rep.Joint.Quality)
 					s := rep.Result.Route.Stats
 					fmt.Fprintf(stderr, "routing: %d layers, %.1f%% (%d/%d), vias %d+%d fan-out, DRC violations %d, %.1fs\n",
 						rep.Result.Stackup.Layers, s.Completion, s.Routed, s.Connections, s.Vias, s.FanoutVias,
@@ -237,6 +262,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 		c.Flags().BoolVar(&refine, "refine", false, "with --place: refine the current placement instead of constructing one")
 		c.Flags().BoolVar(&noRoute, "no-route", false, "stop after placement / stackup")
 		c.Flags().Int64Var(&seed, "seed", 0, "placement random seed (runs are reproducible per seed)")
+		c.Flags().IntVar(&loops, "loops", 3, "with --place: place↔route loop passes — parts near unrouted pads / DRC points are inflated and re-placed; 0 = one placement then route")
 		group.AddCommand(c)
 	}
 	group.AddCommand(newPcbAutoBenchCmd(stdout, stderr))
