@@ -40,3 +40,6 @@ videos/
 *.journal.jsonl
 
 docs/video-material
+
+# installed-skill runtime marker written by `pcbpilot update` (skills symlinked to the repo)
+.agents/skills/*/.version
