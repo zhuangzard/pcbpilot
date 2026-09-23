@@ -77,7 +77,8 @@ type placer struct {
 	partNet map[*Part][]int
 	zoneOf  map[*Part]Rect // allowed centre region
 	region  Rect           // placement region (board inset)
-	decap   map[*Part]*Pad // decap → the core power pad it serves
+	decap    map[*Part]*Pad    // decap → the core power pad it serves
+	servedBy map[string][]*Part // core ref → its decaps, in board order
 	spacing float64
 	bucket  map[[2]int][]*Part
 	boxes   map[*Part]Rect
@@ -207,6 +208,12 @@ func (pl *placer) setup(res *PlaceResult) {
 				}
 			}
 			pl.decap[p] = pins[used%len(pins)]
+		}
+	}
+	pl.servedBy = map[string][]*Part{}
+	for _, p := range pl.movable {
+		if pin := pl.decap[p]; pin != nil {
+			pl.servedBy[pin.Part] = append(pl.servedBy[pin.Part], p)
 		}
 	}
 	pl.zones(res)
@@ -818,23 +825,26 @@ func (pl *placer) undo(p *Part) {
 // localCost is the cost affected by moving p (and q): their nets plus their
 // constraint terms, with pairwise overlap counted from both sides.
 func (pl *placer) localCost(p, q *Part) float64 {
-	nets := map[int]bool{}
-	for _, i := range pl.partNet[p] {
-		nets[i] = true
-	}
+	// Sum in a fixed order: float addition is not associative, and map order
+	// would make accept/reject decisions (and so whole runs) irreproducible.
+	nets := append([]int(nil), pl.partNet[p]...)
 	cost := pl.partCost(p)
 	if q != nil {
-		for _, i := range pl.partNet[q] {
-			nets[i] = true
-		}
+		nets = append(nets, pl.partNet[q]...)
 		cost += pl.partCost(q)
 	}
-	for i := range nets {
-		cost += pl.netCost(i)
+	sort.Ints(nets)
+	for k, i := range nets {
+		if k == 0 || i != nets[k-1] {
+			cost += pl.netCost(i)
+		}
 	}
-	// Decaps that serve p's pins move with p's pins.
-	for d, pin := range pl.decap {
-		if pin.Part == p.Ref || q != nil && pin.Part == q.Ref {
+	// Decaps that serve p's (or q's) pins move with those pins.
+	for _, d := range pl.servedBy[p.Ref] {
+		cost += pl.partCost(d)
+	}
+	if q != nil {
+		for _, d := range pl.servedBy[q.Ref] {
 			cost += pl.partCost(d)
 		}
 	}
@@ -885,7 +895,11 @@ func (pl *placer) metrics(res *PlaceResult) {
 		}
 	}
 	n, sum := 0, 0.0
-	for d, pin := range pl.decap {
+	for _, d := range pl.movable {
+		pin := pl.decap[d]
+		if pin == nil {
+			continue
+		}
 		best := math.Inf(1)
 		for _, pd := range d.Pads {
 			if pd.Net == pin.Net {

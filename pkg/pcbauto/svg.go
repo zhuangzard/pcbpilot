@@ -29,7 +29,7 @@ func RenderSVG(w io.Writer, b *Board, c *Circuit, st *Stackup, rr *RouteResult) 
 		return sb.String()
 	}
 	p := func(format string, args ...any) { fmt.Fprintf(w, format, args...) }
-	p(`<svg xmlns="http://www.w3.org/2000/svg" width="%.0f" height="%.0f" viewBox="0 0 %.0f %.0f" font-family="sans-serif">`+"\n", W, H+40, W, H+40)
+	p(`<svg xmlns="http://www.w3.org/2000/svg" width="%.0f" height="%.0f" viewBox="0 0 %.0f %.0f" font-family="sans-serif">`+"\n", W, H+60, W, H+60)
 	p(`<rect width="100%%" height="100%%" fill="#10141a"/>` + "\n")
 	if len(b.Outline) >= 3 {
 		p(`<polygon points="%s" fill="#1d3b2a" stroke="#e5d27a" stroke-width="2"/>`+"\n", pts(b.Outline))
@@ -143,7 +143,7 @@ func RenderSVG(w io.Writer, b *Board, c *Circuit, st *Stackup, rr *RouteResult) 
 		}
 	}
 	if rr != nil {
-		p(`<text x="%.0f" y="%.0f">routed %.1f%%  vias %d  unrouted %d</text>`, lx, H+24, rr.Stats.Completion, rr.Stats.Vias+rr.Stats.FanoutVias, len(rr.Unrouted))
+		p(`<text x="10" y="%.0f">routed %.1f%%  vias %d  unrouted %d</text>`, H+48, rr.Stats.Completion, rr.Stats.Vias+rr.Stats.FanoutVias, len(rr.Unrouted))
 	}
 	p("</g>\n</svg>\n")
 	return nil

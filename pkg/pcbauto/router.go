@@ -3,7 +3,6 @@ package pcbauto
 import (
 	"context"
 	"math"
-	"os"
 	"sort"
 	"time"
 )
@@ -1206,12 +1205,6 @@ func (r *router) negotiate(ctx context.Context, res *RouteResult) error {
 			return err
 		}
 		r.routeNet(n)
-		if auditHook != nil && os.Getenv("PCBAUTO_AUDIT_EACH") != "" {
-			if _, m := r.audit(); m > 0 {
-				auditHook("first-bad:"+n.name, r)
-				auditHook = nil
-			}
-		}
 	}
 	if auditHook != nil {
 		auditHook("initial", r)

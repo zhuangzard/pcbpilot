@@ -76,7 +76,13 @@ func (r *router) emit(res *RouteResult) {
 		for _, n := range order {
 			r.applyClaims(n.claims, -1)
 			n.claims, n.paths = nil, nil
-			r.inflate(n, r.gr.g/2)
+			// Grow the margin gently: a quarter cell first (most misses are
+			// sub-cell), more only if the net violates again.
+			if round == 0 {
+				r.inflate(n, r.gr.g/4)
+			} else {
+				r.inflate(n, r.gr.g/2)
+			}
 			r.routeNet(n)
 			outs[n] = r.emitNet(n)
 		}
