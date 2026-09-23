@@ -1,9 +1,9 @@
-# EDA Agent Connector
+# PCB Pilot Connector
 
 **让 AI Agent 替你画板子。** 这是 pcbpilot 系统在 EasyEDA(嘉立创EDA专业版)内的社区连接器:配合本地 `pcbpilot` CLI/daemon 与 Agent Skill,通过官方 API 在真实编辑器里完成选型、放置、连线、方框标注与校验。
 
 ```text
-Skill / CLI -> Go daemon -> EDA Agent Connector -> 官方 eda.* API
+Skill / CLI -> Go daemon -> PCB Pilot Connector -> 官方 eda.* API
 ```
 
 一行看懂:Skill 描述专家工作流,Go CLI/daemon 提供有类型、可观测的动作与校验,本连接器把这些 typed actions 桥接到官方 `eda.*` API——它是整个系统中**唯一直接调用 `eda.*` 的组件**,每一步操作最终都落在嘉立创自己开放的插件能力上。
@@ -122,9 +122,12 @@ CLI/daemon、连接器与 Skill 遵循**同一版本号**。三者需配套安�
 
 完整上手、版本对齐与升级注意事项见 [快速开始](https://github.com/zhuangzard/pcbpilot/blob/main/docs/quick-start.md)。
 
-## 更名说明(2026-08)
+## 来源与并装说明
 
-应市场管理规范要求,本插件**显示名**改为 **EDA Agent Connector**。内部包名与 uuid 均保持不变,同一条目重新上传——已装用户的原地自动更新不受影响,无需任何操作。
+PCB Pilot Connector 是 pcbpilot 的连接器,由 [easyeda-agent](https://github.com/zhoushoujianwork/easyeda-agent)
+的 “EDA Agent Connector” 分叉而来(MIT,感谢原作者)。两者 uuid 不同、端口段不同
+(pcbpilot 61832–61841,原版 60832–60841),可在同一个 EasyEDA 中同时安装、同时启用,
+各自只连接自己的 daemon。本插件仅通过 GitHub Release 分发,不在立创插件市场上架。
 
 ## 链接
 

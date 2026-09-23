@@ -3,12 +3,12 @@ name: pcbpilot
 description: "通过本地 pcbpilot CLI、daemon 和连接器操作嘉立创EDA专业版（EasyEDA Pro）：用可迁移样例和参数化数据构建或修复原理图、布局布线 PCB，并回读连接、几何、DRC 与保存结果。适用于已有工程操作及数据驱动电路设计。"
 license: MIT
 metadata:
-  author: zhoushoujianwork
+  author: "zhuangzard (pcbpilot); original easyeda-agent by zhoushoujianwork"
   version: "0.1.0"
   homepage: "https://github.com/zhuangzard/pcbpilot"
 ---
 
-# EasyEDA Agent
+# pcbpilot
 
 用 typed CLI 经 WebSocket 调用 EasyEDA Pro 官方 `eda.*` API。工作方式是：找到相近样例，
 理解其电气或机械理由，替换项目参数，执行，读取实际结果，再修正。样例提供起点，不是完成态
@@ -73,7 +73,14 @@ metadata:
 | 已有原理图检查或小修 | [schematic.md](references/schematic.md)、[schematic-wiring.md](references/schematic-wiring.md) |
 | PCB 布局 | [pcb.md](references/pcb.md)、[pcb-layout.md](references/pcb-layout.md) |
 | PCB 布线、铺铜、禁布区 | [pcb-routing.md](references/pcb-routing.md) |
-| 整板电气感知自动设计：电流/电压→线宽间距、层数与平面、高低压隔离、机械约束布局、自动布线与等长 | [pcb-auto.md](references/pcb-auto.md) |
+| 协作边界：原理图深入、PCB 默认只检查、精确版本门禁、WARN 判定（**每个 EDA 会话先读**） | [collaboration-workflow.md](references/collaboration-workflow.md) |
+| 把一句需求翻译成精确的数据文件与命令（契约：单位/坐标/锚点/层号/溯源） | [recipes/index.md](references/recipes/index.md) |
+| 原理图 → PCB 交接与逐焊盘对账 | [recipes/schematic-to-pcb.md](references/recipes/schematic-to-pcb.md)、[`scripts/pad-net-diff.py`](scripts/pad-net-diff.py) |
+| 电源预算 → 线宽/间距/过孔（`power.json`） | [recipes/power-spec.md](references/recipes/power-spec.md) |
+| 机械要求 → 板框/孔/接口/禁布区（`mech.json`） | [recipes/mech-spec.md](references/recipes/mech-spec.md) |
+| 高压/低压分区与隔离、爬电距离 | [recipes/hv-isolation.md](references/recipes/hv-isolation.md) |
+| 高速：差分、阻抗、等长、参考平面 | [recipes/high-speed.md](references/recipes/high-speed.md) |
+| 整板电气感知自动设计：执行、判读、迭代、落地 | [pcb-auto.md](references/pcb-auto.md)、[recipes/pcb-auto-run.md](references/recipes/pcb-auto-run.md) |
 | EDA 配置、考试设计规则、PWR 网络类绑定 | [pcb-config.md](references/pcb-config.md) |
 | 从需求到整板 | [design-flow.md](references/design-flow.md)、[design-decisions.md](references/design-decisions.md) |
 | 选型、标准电路、库器件 | [part-selection.md](references/part-selection.md)、[library-authoring.md](references/library-authoring.md)、[standard-parts.json](references/standard-parts.json) |
@@ -81,6 +88,7 @@ metadata:
 
 常用辅助脚本（在 Skill 根目录运行，Windows 用 `python`）：
 [`scripts/lint.sh`](scripts/lint.sh) 原理图 lint、
+[`scripts/pad-net-diff.py`](scripts/pad-net-diff.py) 原理图↔PCB 逐焊盘网络对账、
 [`scripts/parts-select.py`](scripts/parts-select.py) 选型、
 [`scripts/bom-enrich.py`](scripts/bom-enrich.py) BOM 补 LCSC C 号、
 [`scripts/blocks-pin-audit.py`](scripts/blocks-pin-audit.py) 块引脚审计、

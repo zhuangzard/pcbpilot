@@ -14,6 +14,8 @@
 | 确认能做什么、不能做什么 | [FEATURES.md](FEATURES.md) | [cli/README.md](cli/README.md) |
 | 理解概念与职责 | [concepts.md](concepts.md)、[architecture.md](architecture.md) | [schematic-connectivity-model.md](schematic-connectivity-model.md) |
 | 整板自动设计引擎的算法、证据与路线图 | [pcbauto.md](pcbauto.md) | Skill 操作页 [pcb-auto.md](../.agents/skills/pcbpilot/references/pcb-auto.md) |
+| MCP 是什么、怎么接、与 Skill/CLI 的关系 | [mcp.md](mcp.md) | [mcp/README.md](../mcp/README.md) |
+| 与原版 easyeda-agent 的关系、并装约定 | [ADR 0002](adr/0002-fork-as-pcbpilot.md) | [NOTICE](../NOTICE) |
 | 新增或修复工具能力 | [cli-design.md](cli-design.md)、[protocol.md](protocol.md) | [connector-contract.md](connector-contract.md)、[ecosystem-survey.md](ecosystem-survey.md) |
 | 维护 Skill 和知识 | [skill-design.md](skill-design.md)、[编写约定](../.agents/skills/README.md) | [Agent 协作设计](agent-collaboration.md) |
 | 准备已获批准的版本发布 | [release-workflow.md](release-workflow.md) | [仓库发布授权规则](../AGENTS.md) |

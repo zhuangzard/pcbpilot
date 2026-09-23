@@ -167,7 +167,11 @@ type Circuit struct {
 }
 
 var (
-	reMains = regexp.MustCompile(`(?i)^(AC_?L|AC_?N|L_?IN|N_?IN|LINE|NEUTRAL|MAINS|AC\d*|~|220V|230V|110V|120V|VAC|HV.*|L|N|PE)$`)
+	// Mains is recognised only by unambiguous names. An "HV_" prefix is NOT
+	// mains: boards name the feed of an on-board HV converter HV_N5 or the
+	// ±24 V pulser rail +HV (real case: pic0rick, A0524S). DC high voltage is
+	// judged by its value (parsed from the name or declared in power.json).
+	reMains = regexp.MustCompile(`(?i)^(AC_?L|AC_?N|L_?IN|N_?IN|LINE|NEUTRAL|MAINS|AC\d*|~|220V|230V|110V|120V|VAC|L|N|PE)$`)
 )
 
 // isGlobalNet marks nets that connect everything and carry no "belonging".

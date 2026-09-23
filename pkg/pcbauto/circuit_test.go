@@ -66,6 +66,37 @@ func TestUnderstandIsolation(t *testing.T) {
 	t.Logf("barrier %+v", br)
 }
 
+// TestHVConverterIsNotMains replays a real miss (pic0rick PCB1): an
+// isolated 5 V → ±24 V DC-DC (A0524S) whose input filter net is HV_N5 and
+// whose output common is tied to GND. Nothing here is mains or hazardous,
+// so there must be one domain and no isolation barrier.
+func TestHVConverterIsNotMains(t *testing.T) {
+	pad := func(n, net string, x float64) *Pad {
+		return &Pad{Number: n, Net: net, Layer: LayerTop, Box: OrientedBox{C: Point{x, 100}, W: 40, H: 60}}
+	}
+	b := &Board{Rules: DefaultRules(), Outline: Rect{0, 0, 3000, 2000}.Corners()}
+	b.Parts = []*Part{
+		{Ref: "L1", Device: "SLW4010S6R8MST", Pads: []*Pad{pad("1", "+5V", 100), pad("2", "HV_N5", 200)}},
+		{Ref: "C40", Device: "CL31B475KAHNNNE", Pads: []*Pad{pad("1", "HV_N5", 300), pad("2", "GND", 400)}},
+		{Ref: "U13", Device: "A0524S-1WR3", Pads: []*Pad{pad("1", "GND", 500), pad("2", "HV_N5", 600), pad("3", "+HV", 700), pad("4", "-HV", 800), pad("5", "GND", 900)}},
+		{Ref: "C41", Device: "10uF", Pads: []*Pad{pad("1", "+HV", 1000), pad("2", "GND", 1100)}},
+		{Ref: "U2", Device: "RP2040", Pads: []*Pad{pad("1", "+5V", 1200), pad("2", "GND", 1300), pad("3", "SDA", 1400), pad("4", "SCL", 1500), pad("5", "X1", 1600), pad("6", "X2", 1700)}},
+	}
+	_ = b.Index()
+	c := Understand(b, Analyze(b, PowerSpec{}, nil))
+	if c.Kinds["U13"] != KindIsoPower {
+		t.Fatalf("U13 should be iso-power, got %s", c.Kinds["U13"])
+	}
+	for _, d := range c.Domains {
+		if d.Mains || d.Hazardous {
+			t.Errorf("domain %s wrongly hazardous/mains: %+v", d.ID, d)
+		}
+	}
+	if len(c.Barriers) != 0 {
+		t.Errorf("no barrier expected, got %+v", c.Barriers)
+	}
+}
+
 func TestInsulationTable(t *testing.T) {
 	cr, cl := InsulationDistances(250, "basic")
 	if cr != 2.5 || cl != 2.0 {
