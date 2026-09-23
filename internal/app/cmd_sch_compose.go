@@ -31,6 +31,7 @@ type schCompositionSource struct {
 	Sheet         layoutBBox             `json:"sheet"`
 	SheetBorder   *layoutBBox            `json:"sheetBorder,omitempty"`
 	Keepouts      []layoutBBox           `json:"keepouts"`
+	TitleBlock    map[string]string      `json:"titleBlock,omitempty"`
 	Modules       []schCompositionModule `json:"modules"`
 }
 type schCompositionPlan struct {
@@ -41,6 +42,7 @@ type schCompositionPlan struct {
 	PlacementBoundarySource string                `json:"placementBoundarySource"`
 	UsableBounds            layoutBBox            `json:"usableBounds"`
 	Keepouts                []layoutBBox          `json:"keepouts"`
+	TitleBlock              map[string]string     `json:"titleBlock,omitempty"`
 	Layout                  powerLayoutPlan       `json:"layout"`
 	Rows                    int                   `json:"rows"`
 	RowHeight               float64               `json:"rowHeight"`
@@ -49,11 +51,42 @@ type schCompositionPlan struct {
 	ModuleGap               float64               `json:"moduleGap"`
 }
 
+// The title block belongs to one target page, not to a placement zone. Keep
+// document structure and host-derived values out of source data and the Apply.
+var schCompositionTitleBlockStructural = map[string]bool{
+	"Device": true, "Symbol": true, "ID": true,
+	"Size": true, "Page Size": true, "Width": true, "Height": true,
+	"Blade Width": true, "Region Start": true, "X Region Count": true,
+	"Y Region Count": true, "Title Block Position": true,
+	"Border": true, "Title Block": true, "Color": true,
+}
+
+func validateSchCompositionTitleBlock(fields map[string]string) error {
+	if fields == nil {
+		return nil // older sources do not touch the current title block
+	}
+	if len(fields) == 0 {
+		return fmt.Errorf("titleBlock must contain at least one editable text field")
+	}
+	for key, value := range fields {
+		if key == "" || strings.TrimSpace(key) != key || strings.HasPrefix(key, "@") || schCompositionTitleBlockStructural[key] {
+			return fmt.Errorf("titleBlock field %q is not an editable text item", key)
+		}
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("titleBlock field %q needs a nonempty value", key)
+		}
+	}
+	return nil
+}
+
 func newSchComposeCmd(stdout, stderr io.Writer) *cobra.Command {
 	var from, out, before, playbookOut, layoutPage string
 	var replace, preserveInstances bool
 	c := &cobra.Command{Use: "compose", Short: "Compose authored Lib circuits onto one sheet and compile a guarded SCH Apply", Long: `Read schemaVersion:1 composition data containing connectivity (complete 1.4 IR),
-sheet, keepouts and ordered modules (id/title/placements/wires/flags/terminals).
+sheet, keepouts, optional per-page titleBlock text and ordered modules
+(id/title/placements/wires/flags/terminals). Discover titleBlock keys with
+sch titleblock-get on the target page. Only nonempty editable text fields are
+accepted; title-block structure, paper geometry and @derived fields are refused.
 Optional sheetBorder is the explicit inner drawing-border bbox, separate from
 the full sheet bbox retained for Apply verification. Frames leave at least
 10 raw clearance inside that border, including their half-unit stroke; bounds
@@ -182,6 +215,9 @@ func planSchComposition(src schCompositionSource) (*schCompositionPlan, error) {
 }
 
 func planSchCompositionWithPage(src schCompositionSource, page *SchematicRenderInput) (*schCompositionPlan, error) {
+	if err := validateSchCompositionTitleBlock(src.TitleBlock); err != nil {
+		return nil, err
+	}
 	// Never mutate the caller's canonical input through slices/pointers.
 	raw, _ := json.Marshal(src)
 	var cloned schCompositionSource
@@ -247,7 +283,7 @@ func planSchCompositionWithPage(src schCompositionSource, page *SchematicRenderI
 			members[m.ID][id] = true
 		}
 	}
-	result := &schCompositionPlan{SchemaVersion: 1, Connectivity: d, Sheet: src.Sheet, SheetBorder: src.SheetBorder, PlacementBoundarySource: boundarySource, UsableBounds: usable, Keepouts: src.Keepouts, PageMargin: schModulePageMargin, ModuleGap: schModuleGap, Layout: powerLayoutPlan{SchemaVersion: 1, DocumentID: d.DocumentID, ExpectedPinNets: pinNet}}
+	result := &schCompositionPlan{SchemaVersion: 1, Connectivity: d, Sheet: src.Sheet, SheetBorder: src.SheetBorder, PlacementBoundarySource: boundarySource, UsableBounds: usable, Keepouts: src.Keepouts, TitleBlock: src.TitleBlock, PageMargin: schModulePageMargin, ModuleGap: schModuleGap, Layout: powerLayoutPlan{SchemaVersion: 1, DocumentID: d.DocumentID, ExpectedPinNets: pinNet}}
 	if page != nil {
 		resolved, _ := resolveSchematicRenderSpacing(*page)
 		usable = sheetPreviewUsable(*resolved.Sheet)
@@ -560,6 +596,9 @@ func projectDesignatorGuardStep(source *schematicStateExpectation) playbookStep 
 }
 
 func schCompositionPlaybook(p *schCompositionPlan, before []byte, replace bool, preserveMode ...bool) (*playbook, error) {
+	if err := validateSchCompositionTitleBlock(p.TitleBlock); err != nil {
+		return nil, err
+	}
 	preserve := len(preserveMode) > 0 && preserveMode[0]
 	if preserve && !replace {
 		return nil, fmt.Errorf("--preserve-instances requires --replace")
@@ -801,6 +840,17 @@ func schCompositionPlaybook(p *schCompositionPlan, before []byte, replace bool, 
 		return nil, err
 	}
 	pb.Steps = append(pb.Steps, frames...)
+	if len(p.TitleBlock) > 0 {
+		patch := make(map[string]map[string]string, len(p.TitleBlock))
+		for key, value := range p.TitleBlock {
+			patch[key] = map[string]string{"value": value}
+		}
+		data, err := json.Marshal(patch)
+		if err != nil {
+			return nil, fmt.Errorf("encode titleBlock: %w", err)
+		}
+		pb.Steps = append(pb.Steps, playbookStep{ID: "apply-page-titleblock", Run: "sch titleblock", Flags: map[string]any{"data": string(data)}})
+	}
 	pb.Steps = append(pb.Steps, playbookStep{ID: "verify-all-pins-nets-nc", Action: "schematic.components.list", Payload: read, ExpectSchematic: final}, playbookStep{ID: "electrical-check", Action: "schematic.check", Assert: map[string]string{"$.passed": "true"}}, playbookStep{ID: "wire-tree-check", Action: "schematic.bridgeCheck", Assert: map[string]string{"$.passed": "true"}}, playbookStep{ID: "strict-schematic-gate", Run: "sch gate", Flags: map[string]any{"strict": true, "json": true}}, playbookStep{ID: "save-composition", Action: "schematic.save", Assert: map[string]string{"$.saved": "true"}})
 	if preserved != nil {
 		pb.Steps = append(pb.Steps, playbookStep{ID: "verify-saved-instance-preservation", Action: "schematic.components.list", Payload: read, ExpectSchematic: final})

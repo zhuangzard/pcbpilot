@@ -48,7 +48,7 @@ typed CLI 操作嘉立创EDA专业版的原理图——每个动作可观测、�
 | 核心移动/单脚标签修复 | `sch layout-edit --source ... --page ... --snapshot ... (--move-core ID --to X,Y \| --repair-pin ID:PIN) --out ... [--playbook ...]` | 从保留源与新鲜快照生成目标；不直接写页面。核心固定目标后可重算本区，单脚修复生成作用域 playbook |
 | 完整区域合页 | `sch layout-sheet-plan --from ... --out ...` | 只选择/平移合法完整候选，统一 spacing、Z 型流和同页约束，不拆外围 |
 | 固定数据渲染 | `sch layout-render --from ... --out ...` | 校验并转译同一目标，不补线、不改坐标；不证明现场已 Apply |
-| 已选页固定转换 | `sch compose --layout-page page.json --from ... --before ... --playbook ...` | 保持已确认的区内/整页几何及 spacing，生成受保护队列 |
+| 已选页固定转换 | `sch compose --layout-page page.json --from ... --before ... --playbook ...` | 保持已确认的区内/整页几何及 spacing；本页源 `titleBlock` 文本经 typed 命令写入并回读，再过 strict gate |
 | 通用求解诊断 | `sch layout-plan --from input.json --out layout.json --report report.json [--zones]` | 源哈希、算法版本、阶段及结构化冲突；失败非零、不输出半计划，有限搜索失败不称全局无解 |
 | 已有实例无损重排（dev.6 开发验证） | `sch compose --replace --preserve-instances --layout-page page.json --from ... --before ... --playbook ...` | 保留原 primitiveId/uniqueId/参数；只重算绘制内容，源身份/属性与末态均检查；开发能力不等于现场验收通过 |
 | Lib 内部计算 | `sch lib-layout --from ... --out ...` | 既定电路图与实测姿态→局部位置、短线和电源地；有界搜索，输出compose输入 |

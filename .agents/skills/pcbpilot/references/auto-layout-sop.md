@@ -66,6 +66,9 @@ direct 放置前沿、整网撤线重布和阻挡器件/attachment 刚体迁移�
 补齐同页 canonical 连接核心与新鲜身份/纸张证据；使用下列固定转换入口，不再次求解。
 page.json 是 pages[] 中的一页，不含候选包；间距、框、标题、位置均必须与预览一致。
 新鲜纸张或现场连接改变时先处理差异，不能改快照来匹配旧预览。
+每页还应从该页 `sch titleblock-get` 取得可写字段名，把图签文本放入本页
+composition.json 的 `titleBlock`；转换器在 strict gate 前生成 typed 写入和回读步骤，
+不在生成后的 apply.json 里手插图签命令。
 
 ```bash
 pcbpilot sch compose --from composition.json --layout-page page.json --out plan.json \

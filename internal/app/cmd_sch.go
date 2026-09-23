@@ -281,6 +281,9 @@ and Size / Width / Height / "Page Size" are not title-block items. Run
 				if err != nil {
 					return err
 				}
+				if verified, present := res.Result["verified"].(bool); present && !verified {
+					return fmt.Errorf("图签写入后未能回读验证(verified:false)；停止当前队列，重新读取本页图签和图框")
+				}
 				// 部分应用退出码约定与 `sch modify` 对齐(#151)。明细表这条另有
 				// unknownKeys:平台对不认识的明细项静默忽略并回 true,单独点名
 				// 让调用方知道该换 key 而不是重试。
@@ -303,6 +306,11 @@ and Size / Width / Height / "Page Size" are not title-block items. Run
 						msg += fmt.Sprintf(" — %s are not title-block items on this page (the title block cannot set paper size; run `pcbpilot sch titleblock-get` for the available keys)", strings.Join(names, ", "))
 					}
 					return fmt.Errorf("%s", msg)
+				}
+				if userPatch != nil {
+					if landed, missing := tbPatchLanded(cfg, window, userPatch); !landed {
+						return fmt.Errorf("图签写入后新鲜回读不可用或未证实请求的字段: %s", strings.Join(missing, ", "))
+					}
 				}
 				return nil
 			},
