@@ -136,11 +136,11 @@ func libPlacePeripheralPairsWithRouting(current powerLayoutPlan, measured powerL
 		finishBest := func() *powerLayoutPlan {
 			if best != nil {
 				if cursor != nil {
-					// A checkpoint's next alternative must leave the shell whose
-					// complete candidate set was already scored. Re-entering the same
-					// shell merely returns a near-duplicate XY and can spend all three
-					// relocation slots without opening a blocked pin corridor.
-					*cursor = cost + 5
+					// A legal position in this shell can block a dependent part while
+					// another position at the same cost leaves its exit open. The
+					// checkpoint's rejected XY set prevents replay; its three-choice
+					// limit and the shared candidate budget still bound this search.
+					*cursor = cost
 				}
 				best.Wires = bestRouting
 				best.Flags = nil
@@ -157,14 +157,6 @@ func libPlacePeripheralPairsWithRouting(current powerLayoutPlan, measured powerL
 					continue
 				}
 				for _, pair := range pairs {
-					if *budget <= 0 {
-						if best != nil {
-							return finishBest(), nil
-						}
-						return nil, conflict.finish("candidate-budget", errLibLayoutBudget)
-					}
-					*budget -= 1
-					conflict.candidates++
 					x, y := endpointFor(pair.host.X, pair.host.Y, distance, pair.side)
 					if pair.side == "left" || pair.side == "right" {
 						y += sign * lateral
@@ -175,6 +167,14 @@ func libPlacePeripheralPairsWithRouting(current powerLayoutPlan, measured powerL
 					if rejected[[2]float64{c.X, c.Y}] {
 						continue
 					}
+					if *budget <= 0 {
+						if best != nil {
+							return finishBest(), nil
+						}
+						return nil, conflict.finish("candidate-budget", errLibLayoutBudget)
+					}
+					*budget -= 1
+					conflict.candidates++
 					trial := current
 					trial.Placements = append(append([]powerLayoutPlacement{}, current.Placements...), c)
 					if lastErr = validateLibGeometry(&trial); lastErr != nil {
