@@ -188,6 +188,7 @@ func (r *router) dropBlockingFanouts(n *rnet, bad map[int32]bool) {
 			}
 			if hit && !(k < len(m.fanPinned) && m.fanPinned[k]) {
 				dropped = true
+				r.yielded++
 				continue
 			}
 			keep = append(keep, k)

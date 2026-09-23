@@ -67,6 +67,7 @@ type RouteStats struct {
 	Repaired            int     `json:"repairedNets"`
 	Tuned               int     `json:"lengthTunedNets"`
 	EscapesReleased     int     `json:"escapesReleased,omitempty"`
+	KeptOnTimeout       int     `json:"keptOnTimeout,omitempty"`
 	PreRepairViolations int     `json:"preRepairViolations"`
 	ConflictTrace       []int   `json:"conflictTrace,omitempty"`
 	GridMil             float64 `json:"gridMil"`
@@ -133,8 +134,9 @@ type router struct {
 	// they belong to: a net with a ball there may neck down anywhere inside.
 	bgaZones []bgaZone
 	// escOf is each pre-escaped ball's escape (its exit is the access node).
-	escOf  map[*Pad]*bgaEsc
-	escIdx *escIndex // exact fixed-copper index while escapes are planned
+	escOf   map[*Pad]*bgaEsc
+	escIdx  *escIndex // exact fixed-copper index while escapes are planned
+	yielded int       // plane fan-outs dropped for a blocked signal
 
 	b      *Board
 	st     *Stackup
@@ -1031,6 +1033,14 @@ func (r *router) routeNetKeep(n *rnet, keep bool) bool {
 			best = k
 		}
 	}
+	// Bridging islands (plane nets, partial repairs): the largest island is
+	// the root — it is the body of the net, reachable from everywhere. The
+	// group nearest the centroid can be a lone pad walled in by signals, and
+	// every island then failed against it (K230 GND: 170 of 170).
+	bridging := false
+	if big := largestGroup(terms, func(t term) int { return len(t.pads) }, func(t term) bool { return len(t.nodes) > 0 }); big >= 0 && len(terms[big].pads) > 1 {
+		best, bridging = big, true
+	}
 	terms[0], terms[best] = terms[best], terms[0]
 	if len(terms[0].nodes) == 0 {
 		for _, t := range terms {
@@ -1046,6 +1056,8 @@ func (r *router) routeNetKeep(n *rnet, keep bool) bool {
 		}
 	}
 	remaining := terms[1:]
+	rootPads := terms[0].pads
+	grown := false
 	ok := true
 	for len(remaining) > 0 {
 		targets := map[int32]bool{}
@@ -1085,6 +1097,28 @@ func (r *router) routeNetKeep(n *rnet, keep bool) bool {
 				break
 			}
 		}
+		if path == nil && bridging && !grown && len(remaining) > 1 && !time.Now().After(r.deadline) {
+			// Nothing reached from the root: the root is the likely culprit
+			// (walled in), not the group it failed to reach. It is the root
+			// that is reported; routing restarts from the largest remaining
+			// group.
+			n.failed = append(n.failed, Unrouted{Net: n.name, Pads: padKeys(rootPads), Reason: r.failReason()})
+			ok = false
+			k := largestGroup(remaining, func(t term) int { return len(t.pads) }, func(t term) bool { return len(t.nodes) > 0 })
+			if k < 0 {
+				k = 0
+			}
+			tree = append([]int32(nil), remaining[k].nodes...)
+			treePads = map[int32]*Pad{}
+			for _, pd := range remaining[k].pads {
+				for _, a := range r.access(n, pd) {
+					treePads[a] = pd
+				}
+			}
+			rootPads = remaining[k].pads
+			remaining = append(remaining[:k], remaining[k+1:]...)
+			continue
+		}
 		if path == nil {
 			// Nearest remaining group fails; report it and continue with others.
 			k := 0
@@ -1112,6 +1146,7 @@ func (r *router) routeNetKeep(n *rnet, keep bool) bool {
 			}
 		}
 		n.paths = append(n.paths, rp)
+		grown = true
 		tree = append(tree, path...)
 		for _, pd := range remaining[k].pads {
 			for _, a := range r.access(n, pd) {
@@ -1129,6 +1164,18 @@ func (r *router) routeNetKeep(n *rnet, keep bool) bool {
 	n.claims = r.minusFixed(n, dedup(n.claims))
 	r.applyClaims(n.claims, +1)
 	return ok
+}
+
+// largestGroup returns the index of the largest element by size among
+// those passing ok, or -1.
+func largestGroup[T any](xs []T, size func(T) int, ok func(T) bool) int {
+	best := -1
+	for k, x := range xs {
+		if ok(x) && (best < 0 || size(x) > size(xs[best])) {
+			best = k
+		}
+	}
+	return best
 }
 
 func (r *router) failReason() string {
@@ -1299,8 +1346,15 @@ func (r *router) negotiate(ctx context.Context, res *RouteResult) error {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
+			// Out of time: stop, do not rip up. Ripping up a net whose search
+			// then returns "timeout" at once loses all its paths — the loop
+			// used to do that to every conflicting net left in the iteration
+			// (RK3568: 42.1 % → 45.4 % once it stopped).
+			if time.Now().After(r.deadline) {
+				break
+			}
 			if n.conflict {
-				r.routeNet(n)
+				r.rerouteKeepOnTimeout(n, res)
 			}
 		}
 	}
@@ -1335,5 +1389,31 @@ func (r *router) negotiate(ctx context.Context, res *RouteResult) error {
 	}
 	res.Stats.Conflicts = r.conflicts()
 	r.strict = false
+	res.Notes = append(res.Notes, sprintf("negotiation: legalisation dropped %d plane fan-outs that blocked signals", r.yielded))
 	return nil
+}
+
+// negotiateNoKeep disables rerouteKeepOnTimeout (A/B diagnostics).
+var negotiateNoKeep bool
+
+// rerouteKeepOnTimeout rips up and re-routes a conflicting net; when the
+// deadline cuts the new search short and it connects less than before, the
+// previous (conflicting) paths come back — legalisation can repair a
+// conflict, but a ripped-up net that timed out is simply lost.
+func (r *router) rerouteKeepOnTimeout(n *rnet, res *RouteResult) {
+	if negotiateNoKeep {
+		r.routeNet(n)
+		return
+	}
+	paths := append([]rpath(nil), n.paths...)
+	claims := append([]int32(nil), n.claims...)
+	failed := append([]Unrouted(nil), n.failed...)
+	r.routeNet(n)
+	if !time.Now().After(r.deadline) || len(n.paths) >= len(paths) {
+		return
+	}
+	r.applyClaims(n.claims, -1)
+	n.paths, n.claims, n.failed = paths, claims, failed
+	r.applyClaims(n.claims, +1)
+	res.Stats.KeptOnTimeout++
 }
