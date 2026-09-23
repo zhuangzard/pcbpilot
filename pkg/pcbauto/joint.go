@@ -14,7 +14,7 @@ import (
 //
 //	overall = gate × completion factor × quality
 //	  gate              shorts or part overlaps → "not deliverable", capped at 40
-//	  completion factor (completion/100)² × 0.97^DRC — the last 5 % of
+//	  completion factor (completion/100)² × (plane pads tied)² × 0.97^DRC — the last 5 % of
 //	                    unrouted connections costs a disproportionate share
 //	                    of manual work, so completion is squared
 //	  quality           weighted geometric mean of three groups, so no group can
@@ -38,10 +38,16 @@ type JointItem struct {
 
 // JointScore is the combined verdict for one placed-and-routed board.
 type JointScore struct {
-	Overall          float64            `json:"overall"`
-	Deliverable      bool               `json:"deliverable"`
-	Gates            []string           `json:"gates,omitempty"`
-	Completion       float64            `json:"completion"`
+	Overall     float64  `json:"overall"`
+	Deliverable bool     `json:"deliverable"`
+	Gates       []string `json:"gates,omitempty"`
+	Completion  float64  `json:"completion"`
+	// PlanePads / PlaneOpen: pads of plane-delivered nets and how many of
+	// them the router could not tie to their plane or pour. Completion counts
+	// signal connections only, so without this a board whose ground pads are
+	// floating would still score as complete.
+	PlanePads        int                `json:"planePads"`
+	PlaneOpen        int                `json:"planeOpen"`
 	DRC              int                `json:"drc"`
 	CompletionFactor float64            `json:"completionFactor"`
 	Quality          float64            `json:"quality"`
@@ -80,8 +86,20 @@ func Joint(b *Board, an *Analysis, c *Circuit, st *Stackup, rr *RouteResult, drc
 	if opt.Overlaps > 0 {
 		js.Gates = append(js.Gates, fmt.Sprintf("%d part overlaps", opt.Overlaps))
 	}
-	js.CompletionFactor = math.Pow(js.Completion/100, 2) * math.Pow(0.97, float64(js.DRC))
 	cg := newCopperGraph(b, an, st, rr)
+	for net := range cg.plane {
+		js.PlanePads += len(cg.pads[net])
+	}
+	for _, u := range rr.Unrouted {
+		if cg.plane[u.Net] || an.Plan(u.Net, b.Rules).Role == RoleGround {
+			js.PlaneOpen += len(u.Pads)
+		}
+	}
+	planeOK := 1.0
+	if js.PlanePads > 0 {
+		planeOK = math.Max(0, 1-float64(js.PlaneOpen)/float64(js.PlanePads))
+	}
+	js.CompletionFactor = math.Pow(js.Completion/100, 2) * math.Pow(planeOK, 2) * math.Pow(0.97, float64(js.DRC))
 
 	// ---- electrical ----
 	add := func(group, id string, score, w float64, detail string) {
@@ -285,7 +303,7 @@ func Joint(b *Board, an *Analysis, c *Circuit, st *Stackup, rr *RouteResult, drc
 		js.Quality = 100 * math.Exp(logSum/wTot)
 	}
 	js.Overall = js.CompletionFactor * js.Quality
-	js.Deliverable = len(js.Gates) == 0 && js.Completion >= 100 && js.DRC == 0
+	js.Deliverable = len(js.Gates) == 0 && js.Completion >= 100 && js.DRC == 0 && js.PlaneOpen == 0
 	if len(js.Gates) > 0 {
 		js.Overall = math.Min(js.Overall, 40)
 	}

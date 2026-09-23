@@ -323,6 +323,11 @@ func (s *Stackup) buildStack(rails []*NetPlan, b *Board) {
 	if gnd != "" {
 		gnds = []string{gnd}
 	}
+	// Functional split grounds (starGrounds) are NOT put on the ground plane
+	// yet: the Voronoi split grows their region from fan-out seeds and swallowed
+	// main-ground pads (ESP32-S3: GND pad failures 8 → 111). Planned: region =
+	// the split ground's pad envelope, background = main ground.
+	planeGnds := gnds
 	switch s.Layers {
 	case 2:
 		s.Stack = []StackLayer{
@@ -334,7 +339,7 @@ func (s *Stackup) buildStack(rails []*NetPlan, b *Board) {
 	case 4:
 		s.Stack = []StackLayer{
 			{ID: LayerTop, Name: "TOP", Kind: KindSignal, Dir: "h", Outer: true},
-			{ID: LayerInner1, Name: "IN1-GND", Kind: KindPlane, Nets: gnds},
+			{ID: LayerInner1, Name: "IN1-GND", Kind: KindPlane, Nets: planeGnds},
 			{ID: LayerInner1 + 1, Name: "IN2-PWR", Kind: KindPlane, Nets: railNames},
 			{ID: LayerBottom, Name: "BOTTOM", Kind: KindSignal, Dir: "v", Outer: true, PourNets: gnds},
 		}
@@ -345,10 +350,10 @@ func (s *Stackup) buildStack(rails []*NetPlan, b *Board) {
 		// SIG / GND / SIG / PWR / GND / SIG: every signal layer adjacent to a plane.
 		s.Stack = []StackLayer{
 			{ID: LayerTop, Name: "TOP", Kind: KindSignal, Dir: "h", Outer: true},
-			{ID: LayerInner1, Name: "IN1-GND", Kind: KindPlane, Nets: gnds},
+			{ID: LayerInner1, Name: "IN1-GND", Kind: KindPlane, Nets: planeGnds},
 			{ID: LayerInner1 + 1, Name: "IN2-SIG", Kind: KindSignal, Dir: "v"},
 			{ID: LayerInner1 + 2, Name: "IN3-PWR", Kind: KindPlane, Nets: railNames},
-			{ID: LayerInner1 + 3, Name: "IN4-GND", Kind: KindPlane, Nets: gnds},
+			{ID: LayerInner1 + 3, Name: "IN4-GND", Kind: KindPlane, Nets: planeGnds},
 			{ID: LayerBottom, Name: "BOTTOM", Kind: KindSignal, Dir: "v", Outer: true},
 		}
 		s.JLCStackup = "JLC06161H-2116"
@@ -358,11 +363,49 @@ func (s *Stackup) buildStack(rails []*NetPlan, b *Board) {
 		// No rails: the power plane becomes a second ground plane.
 		for i := range s.Stack {
 			if s.Stack[i].Kind == KindPlane && len(s.Stack[i].Nets) == 0 {
-				s.Stack[i].Nets = gnds
+				s.Stack[i].Nets = planeGnds
 				s.Stack[i].Name = fmt.Sprintf("IN%d-GND", i)
 			}
 		}
 	}
+}
+
+// starGrounds are the functional split grounds: ground-named nets with at
+// least three pads that meet the main ground through one two-pad tie (0 Ω
+// resistor, ferrite bead, inductor or net tie) — the star point. An isolated
+// ground has no such tie and is left off the main ground's plane layer, where
+// a split gap could never meet its creepage distance.
+func starGrounds(b *Board, gnd string) []string {
+	if gnd == "" {
+		return nil
+	}
+	tied := map[string]bool{}
+	for _, p := range b.Parts {
+		if len(p.Pads) != 2 {
+			continue
+		}
+		prefix := strings.TrimRightFunc(upper(p.Ref), func(r rune) bool { return r >= '0' && r <= '9' })
+		switch prefix {
+		case "R", "L", "FB", "NT", "J", "JP":
+		default:
+			continue
+		}
+		a, c := p.Pads[0].Net, p.Pads[1].Net
+		if a == gnd && c != gnd && reGround.MatchString(upper(c)) {
+			tied[c] = true
+		}
+		if c == gnd && a != gnd && reGround.MatchString(upper(a)) {
+			tied[a] = true
+		}
+	}
+	var out []string
+	for _, n := range b.Nets() {
+		if tied[n.Name] && len(n.Pads) >= 3 {
+			out = append(out, n.Name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // groundNet picks the main ground net (most pads among ground-named nets).

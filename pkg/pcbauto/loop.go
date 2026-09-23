@@ -20,9 +20,6 @@ import (
 // LoopOptions tune the place/route loop.
 type LoopOptions struct {
 	Passes int `json:"passes"` // maximum passes (default 3)
-	// RadiusMil: parts with a body within this distance of a failure point
-	// are inflated (default 150).
-	RadiusMil float64 `json:"radiusMil"`
 	// MaxHaloMil caps the accumulated inflation per part (default 60).
 	MaxHaloMil float64 `json:"maxHaloMil"`
 	// Budget stops the loop from starting a pass that the previous pass's
@@ -53,9 +50,6 @@ type LoopResult struct {
 func PlaceRoute(ctx context.Context, b *Board, an *Analysis, c *Circuit, m *Mechanics, popt PlaceOptions, ropt Options, lopt LoopOptions) (*LoopResult, error) {
 	if lopt.Passes <= 0 {
 		lopt.Passes = 3
-	}
-	if lopt.RadiusMil <= 0 {
-		lopt.RadiusMil = 150
 	}
 	if lopt.MaxHaloMil <= 0 {
 		lopt.MaxHaloMil = 60
@@ -111,32 +105,42 @@ func PlaceRoute(ctx context.Context, b *Board, an *Analysis, c *Circuit, m *Mech
 			res.Passes = append(res.Passes, lp)
 			break
 		}
-		// Failure points: unrouted pads and DRC violation locations.
-		var pts []Point
+		// Targets: parts owning unrouted pads, and parts within 30 mil of a
+		// DRC violation. A wide radius inflated whole neighbourhoods and made
+		// every measured board worse (bbclaw 99.1 → 97.4 %, K230 22.6 → 10.1 %).
+		targets := map[*Part]bool{}
 		for _, u := range out.Route.Unrouted {
 			for _, key := range u.Pads {
 				if pd := padAt(b, key); pd != nil {
-					pts = append(pts, pd.Box.C)
+					if p := b.Part(pd.Part); p != nil && !p.Fixed {
+						targets[p] = true
+					}
 				}
 			}
 		}
 		for _, v := range out.DRC.Violations {
-			pts = append(pts, v.At)
+			for _, p := range b.Parts {
+				if !p.Fixed && distToRect(v.At, p.Body()) <= 30 {
+					targets[p] = true
+				}
+			}
+		}
+		movable := 0
+		for _, p := range b.Parts {
+			if !p.Fixed {
+				movable++
+			}
 		}
 		grown := 0
-		for _, p := range b.Parts {
-			if p.Fixed {
-				continue
-			}
-			body := p.Body()
-			for _, pt := range pts {
-				if distToRect(pt, body) <= lopt.RadiusMil {
-					if halo[p.Ref] < lopt.MaxHaloMil {
-						halo[p.Ref] = math.Min(lopt.MaxHaloMil, halo[p.Ref]+channel/2)
-						grown++
-					}
-					break
-				}
+		if movable > 0 && float64(len(targets)) > 0.2*float64(movable) {
+			lp.Note = fmt.Sprintf("failures touch %d of %d movable parts: global (escape/stackup), not local spacing — loop stops", len(targets), movable)
+			res.Passes = append(res.Passes, lp)
+			break
+		}
+		for p := range targets {
+			if halo[p.Ref] < lopt.MaxHaloMil {
+				halo[p.Ref] = math.Min(lopt.MaxHaloMil, halo[p.Ref]+channel/2)
+				grown++
 			}
 		}
 		lastPass = time.Since(passStart)
