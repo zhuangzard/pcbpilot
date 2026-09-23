@@ -242,6 +242,21 @@ lands at IndexedDB key `<uuid>|dist/index.js`. Mind that offset.
   IndexedDB hot-reload (section 5, needs the connector enabled and connected),
   a fresh-uuid import (`make eext-fresh`) with the old entry left disabled, or
   a clean install in the web editor.
+- **What finally worked (same machine, same day)** — the user uninstalled the
+  old entry by hand; EasyEDA was then fully quit and relaunched (until then
+  the uninstalled 0.1.0 kept running in memory and stayed connected); the new
+  `.eext` was picked by clicking it in the file dialog; then 配置 → "Allow
+  interactive with external" (and "Show at header menu") was ticked, after
+  which `health` reported `connectorVersion: 0.2.1`, `connectorVersionOk: true`.
+  Imports that failed silently along the way, cause not isolated: a
+  `0.2.1-dev.1` build (the manifest spec requires `major.minor.patch`, so
+  `-dev.N` versions can only be loaded through the IndexedDB hot-reload, never
+  imported); a `0.2.1` build that still carried `images/logo.svg` and a stray
+  `.DS_Store`; and the clean `0.2.1` build chosen through the ⌘⇧G path sheet
+  before the relaunch. The package now excludes `.DS_Store` (`.edaignore`) and
+  the logo source lives in `docs/brand/`, so the `.eext` holds only the files
+  the 0.1.0 package that imported fine held. The v0.2.0 release asset still
+  contains `images/logo.svg`; whether that blocks its import is unverified.
 - **`fetch` to the daemon/localhost fails in the editor** — expected;
   HTTPS→HTTP mixed content is blocked. Use `ws://127.0.0.1` (the connector and
   the hot-reload transport both rely on this being allowed).

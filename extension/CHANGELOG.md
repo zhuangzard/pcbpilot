@@ -6,6 +6,10 @@
   de-duplicates header menus by id, so sharing upstream's "EDA Agent" id made
   the two connectors' menus collide when both are installed. The About dialog
   now names the PCB Pilot Connector. Requires re-importing the connector.
+- Package hygiene: `.DS_Store` is excluded from the `.eext`, and the logo SVG
+  source moved to `docs/brand/pcbpilot-logo.svg` so the package carries only
+  `images/logo.jpg` (EasyEDA imports rejected packages silently while it was
+  present; the cause was not isolated).
 
 ## [0.2.0] — 2026-09-23
 

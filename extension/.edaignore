@@ -16,3 +16,4 @@
 .eslintcache
 debug.log
 ws-file-server.mjs
+.DS_Store
