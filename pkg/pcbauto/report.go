@@ -88,6 +88,7 @@ func (r *Report) WriteMarkdown(w io.Writer) {
 		}
 		writeLayoutBasis(p, c)
 		writeConverters(p, c)
+		writeChains(p, c)
 		p("\n### 电压域与隔离\n\n")
 		for _, d := range c.Domains {
 			tag := ""
@@ -231,4 +232,23 @@ func dash(s string) string {
 		return "—"
 	}
 	return s
+}
+
+// writeChains lists interface signal chains in their required order.
+func writeChains(p func(string, ...any), c *Circuit) {
+	if len(c.Chains) == 0 {
+		return
+	}
+	p("\n### 接口信号链\n\n外部信号进板后必须先遇到 ESD/TVS（在走线上、不挂支线），再经共模电感、串阻/AC 耦合电容到芯片；差分对两侧同一级器件并排。\n\n| 顺序 | 网络 | 差分 |\n|---|---|---|\n")
+	for i, ch := range c.Chains {
+		if i >= 30 {
+			p("| …另 %d 条 | | |\n", len(c.Chains)-30)
+			break
+		}
+		pair := ""
+		if ch.Pair != nil {
+			pair = "是"
+		}
+		p("| %s | %s | %s |\n", strings.Join(ch.Seq(), " → "), strings.Join(ch.Nets, " → "), pair)
+	}
 }

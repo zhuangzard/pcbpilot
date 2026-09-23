@@ -10,7 +10,8 @@ import (
 
 // PlaceOptions tune the placer.
 type PlaceOptions struct {
-	// Moves is the annealing budget per movable part (default 1500).
+	// Moves is the annealing budget per movable part (default 6000; the
+	// deadline still bounds it, cooling tracks wall time).
 	Moves int `json:"moves"`
 	// Seed makes runs reproducible.
 	Seed int64 `json:"seed"`
@@ -82,8 +83,12 @@ type placer struct {
 	servedBy map[string][]*Part // core ref → its decaps, in board order
 	tether   map[*Part]*tether  // auxiliary → the core pads it serves, by role
 	conv     map[*Part]*Converter
-	hardOnly bool       // partCost: constraint terms only (legalisation)
-	apart    [][2]*Part // core pairs to keep apart (noisy vs sensitive)
+	swPads   map[*Converter][]*Pad // switch-node pads, resolved once
+	chains   map[*Part][]*SignalChain
+	reserve  []portReserve // connector pin-side strips kept for the port's own parts
+	pairOf   map[*Part]*Part // same step of the other half of a diff pair
+	hardOnly bool            // partCost: constraint terms only (legalisation)
+	apart    [][2]*Part      // core pairs to keep apart (noisy vs sensitive)
 	spacing  float64
 	bucket   map[[2]int][]*Part
 	boxes    map[*Part]Rect
@@ -95,7 +100,7 @@ const placeBucket = 150.0
 func Place(b *Board, an *Analysis, c *Circuit, m *Mechanics, opt PlaceOptions) (*PlaceResult, error) {
 	start := time.Now()
 	if opt.Moves <= 0 {
-		opt.Moves = 1500
+		opt.Moves = 6000
 	}
 	if opt.SpacingMil <= 0 {
 		opt.SpacingMil = 12
@@ -117,6 +122,7 @@ func Place(b *Board, an *Analysis, c *Circuit, m *Mechanics, opt PlaceOptions) (
 	pl.legalise()
 	pl.anneal(start.Add(opt.Timeout))
 	pl.legalise()
+	pl.polish()
 	pl.tidy()
 	if m.AutoSize {
 		res.Outline = pl.autosize()
@@ -377,6 +383,8 @@ func (pl *placer) partCost(p *Part) float64 {
 	if !pl.hardOnly {
 		cost += pl.tetherCost(p)
 		cost += pl.converterCost(p)
+		cost += pl.chainCost(p)
+		cost += pl.reserveCost(p)
 		for _, pr := range pl.apart {
 			if pr[0] == p || pr[1] == p {
 				d := pr[0].Body().Center().Dist(pr[1].Body().Center())
@@ -495,10 +503,20 @@ func (pl *placer) construct() {
 				continue
 			}
 			w := math.Min(float64(len(l.Nets)), 12)
+			if len(l.Kinds) == 1 && l.Kinds[0] == "power" {
+				// Sharing a rail says nothing about adjacency: planes deliver
+				// power. Only signals pull blocks together.
+				w = 0.4
+			}
 			for _, kind := range l.Kinds {
 				if kind == "clock" || kind == "usb" || kind == "diff" || kind == "rf" {
 					w *= 2
 				}
+			}
+			if a.bl.Kind == "rf" || bb.bl.Kind == "rf" {
+				// A radio and its antenna/RF port: every mil of feed costs
+				// loss and detuning; this pair outranks any bus.
+				w = math.Max(w, 6) * 4
 			}
 			d := bb.pos.Sub(a.pos)
 			force[a] = force[a].Add(d.Scale(0.02 * w))
@@ -712,13 +730,25 @@ func (pl *placer) hug(p, core *Part, placed []*Part) {
 		pl.underPin(p, target, placed)
 		return
 	}
-	d := target.Box.C.Sub(cc)
-	var out Point
-	if math.Abs(d.X)/math.Max(cb.W(), 1) > math.Abs(d.Y)/math.Max(cb.H(), 1) {
-		out = Point{math.Copysign(1, d.X), 0}
-	} else {
-		out = Point{0, math.Copysign(1, d.Y)}
+	// The pin's side is the body edge nearest to it: a pin at the bottom of
+	// a long left-hand column is on the left edge, even though it is far
+	// below the centre.
+	tc := target.Box.C
+	edges := []struct {
+		d   float64
+		out Point
+	}{
+		{tc.X - cb.MinX, Point{-1, 0}}, {cb.MaxX - tc.X, Point{1, 0}},
+		{tc.Y - cb.MinY, Point{0, -1}}, {cb.MaxY - tc.Y, Point{0, 1}},
 	}
+	out := edges[0].out
+	best := edges[0].d
+	for _, e := range edges[1:] {
+		if e.d < best-1e-6 {
+			best, out = e.d, e.out
+		}
+	}
+	_ = cc
 	// Orient: 2-pad parts along the outward normal so one pad faces the pin.
 	rot := p.Rotation
 	if len(p.Pads) == 2 && !pl.opt.NoRotate {
@@ -1426,13 +1456,38 @@ func (pl *placer) setupTethers() {
 		}
 	}
 	pl.conv = map[*Part]*Converter{}
+	pl.swPads = map[*Converter][]*Pad{}
 	for _, cv := range c.Converters {
+		for _, q := range b.Parts {
+			for _, pd := range q.Pads {
+				if pd.Net == cv.SwitchNet {
+					pl.swPads[cv] = append(pl.swPads[cv], pd)
+				}
+			}
+		}
 		for _, ref := range append([]string{cv.HotCap, cv.Diode}, cv.Feedback...) {
 			if p := b.Part(ref); p != nil && movable[p] {
 				pl.conv[p] = cv
 			}
 		}
 	}
+	pl.chains = map[*Part][]*SignalChain{}
+	pl.pairOf = map[*Part]*Part{}
+	for _, ch := range c.Chains {
+		for i, n := range ch.Nodes {
+			p := b.Part(n.Ref)
+			if p == nil || !movable[p] {
+				continue
+			}
+			pl.chains[p] = append(pl.chains[p], ch)
+			if ch.Pair != nil && i < len(ch.Pair.Nodes) {
+				if q := b.Part(ch.Pair.Nodes[i].Ref); q != nil && q != p && movable[q] {
+					pl.pairOf[p] = q
+				}
+			}
+		}
+	}
+	pl.setupReserves()
 	// Noisy vs sensitive cores keep apart.
 	noisy, quiet := []*Part{}, []*Part{}
 	for _, bl := range c.Blocks {
@@ -1469,6 +1524,16 @@ func (pl *placer) tetherCost(p *Part) float64 {
 	t := pl.tether[p]
 	if t == nil {
 		return 0
+	}
+	if t.role == "hot-loop" {
+		// The loop polygon is the whole truth for these parts; a second
+		// pull toward one pin would fight it (it refused the 180° flip that
+		// shrinks the loop). The tether stays only as the fallback.
+		if cv := pl.conv[p]; cv != nil {
+			if _, _, _, ok := HotLoop(pl.b, pl.an, cv); ok {
+				return 0
+			}
+		}
 	}
 	best := math.Inf(1)
 	for _, pd := range p.Pads {
@@ -1514,14 +1579,9 @@ func (pl *placer) converterCost(p *Part) float64 {
 	if l := pl.b.Part(cv.Inductor); l != nil {
 		d = math.Min(d, rectDist(p.Body(), l.Body()))
 	}
-	for _, q := range pl.b.Parts {
-		if q == p {
-			continue
-		}
-		for _, pd := range q.Pads {
-			if pd.Net == cv.SwitchNet {
-				d = math.Min(d, c.Dist(pd.Box.C))
-			}
+	for _, pd := range pl.swPads[cv] {
+		if pd.Part != p.Ref {
+			d = math.Min(d, c.Dist(pd.Box.C))
 		}
 	}
 	return 4 * math.Max(0, fbKeepAwayMil-d)
@@ -1532,4 +1592,178 @@ func rectDist(a, b Rect) float64 {
 	dx := math.Max(0, math.Max(a.MinX-b.MaxX, b.MinX-a.MaxX))
 	dy := math.Max(0, math.Max(a.MinY-b.MaxY, b.MinY-a.MaxY))
 	return math.Hypot(dx, dy)
+}
+
+// chainCost prices interface order for p: the detour of every chain p sits
+// on, and for a diff-pair part the gap to its partner beyond side-by-side.
+func (pl *placer) chainCost(p *Part) float64 {
+	cost := 0.0
+	for _, ch := range pl.chains[p] {
+		if ex, _, ok := ChainCost(pl.b, pl.c, ch); ok {
+			cost += 1.5 * ch.Weight * ex
+		}
+	}
+	if q := pl.pairOf[p]; q != nil {
+		pb, qb := p.Body(), q.Body()
+		side := (math.Min(pb.W(), pb.H())+math.Min(qb.W(), qb.H()))/2 + pl.spacing
+		cost += 3 * math.Max(0, pb.Center().Dist(qb.Center())-side)
+	}
+	return cost
+}
+
+// polishRoles are the parts whose last few mils decide the electrical
+// result; annealing gets them close, polish makes them exact.
+var polishRoles = map[string]bool{"hot-loop": true, "bootstrap": true, "decap": true, "clock": true, "clock-load": true, "protection": true, "feedback": true}
+
+// polish is a deterministic exhaustive local search for critical auxiliaries:
+// every 15 mil grid point within 180 mil of the target pad, four rotations,
+// keeping only overlap-free poses that lower the local cost. Critical parts
+// go first (hot loop before decaps before protection), and each part sees
+// the already-polished ones as obstacles.
+func (pl *placer) polish() {
+	type item struct {
+		p    *Part
+		rank int
+		key  float64
+	}
+	var items []item
+	for p, t := range pl.tether {
+		if p.Fixed || !polishRoles[t.role] || len(t.pads) == 0 {
+			continue
+		}
+		if t.role == "decap" && t.slack > 30 {
+			continue // bulk caps do not need exact placement
+		}
+		items = append(items, item{p, roleRank(t.role), capRank(p)})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].rank != items[j].rank {
+			return items[i].rank < items[j].rank
+		}
+		if items[i].key != items[j].key {
+			return items[i].key < items[j].key
+		}
+		return items[i].p.Ref < items[j].p.Ref
+	})
+	const maxPolish = 400
+	if len(items) > maxPolish {
+		items = items[:maxPolish]
+	}
+	pl.rebuildBuckets()
+	const step, radius = 15.0, 180.0
+	rots := []float64{0, 90, 180, 270}
+	if pl.opt.NoRotate {
+		rots = nil
+	}
+	for _, it := range items {
+		p := it.p
+		target := pl.tether[p].pads[0].Box.C
+		bestPos, bestRot := p.Pos, p.Rotation
+		best := pl.localCost(p, nil)
+		if pl.hardCost(p) > 1e-6 {
+			best = math.Inf(1)
+		}
+		centre := p.Body().Center()
+		try := func(c Point, r float64) {
+			pl.bucketOp(p, false)
+			movePartCentre(p, c, r)
+			pl.boxes[p] = pl.box(p)
+			pl.bucketOp(p, true)
+			if pl.hardCost(p) <= 1e-6 {
+				if cost := pl.localCost(p, nil); cost < best-1e-6 {
+					best, bestPos, bestRot = cost, p.Pos, p.Rotation
+				}
+			}
+		}
+		rs := rots
+		if rs == nil {
+			rs = []float64{p.Rotation}
+		}
+		for _, r := range rs {
+			for dy := -radius; dy <= radius; dy += step {
+				for dx := -radius; dx <= radius; dx += step {
+					try(Point{target.X + dx, target.Y + dy}, r)
+				}
+			}
+		}
+		_ = centre
+		pl.bucketOp(p, false)
+		p.MoveTo(bestPos, bestRot)
+		pl.boxes[p] = pl.box(p)
+		pl.bucketOp(p, true)
+	}
+}
+
+// portReserve is the strip along a connector's protected pins that belongs
+// to that port's protection and filter parts. A buck inductor or an audio
+// filter cap parked there pushes the ESD array away from the pins it guards.
+type portReserve struct {
+	r     Rect
+	block string
+	side  int
+}
+
+func (pl *placer) setupReserves() {
+	b, c := pl.b, pl.c
+	for _, bl := range c.Blocks {
+		conn := b.Part(bl.Core)
+		if conn == nil || c.Kinds[conn.Ref] != KindConnector && c.Kinds[conn.Ref] != KindAntenna {
+			continue
+		}
+		var pins []*Pad
+		depth, side := 0.0, 0
+		for _, m := range bl.Members {
+			if m.Role != "protection" {
+				continue
+			}
+			p := b.Part(m.Ref)
+			if pd := padAt(b, m.Pin); pd != nil && p != nil {
+				pins = append(pins, pd)
+				bb := p.Body()
+				depth = math.Max(depth, math.Max(bb.W(), bb.H()))
+				side = p.Side
+			}
+		}
+		if len(pins) == 0 {
+			continue
+		}
+		cb := conn.Body()
+		ext := EmptyRect()
+		for _, pd := range pins {
+			ext = ext.Union(pd.Box.Bounds())
+		}
+		ctr := ext.Center()
+		depth += 2 * pl.spacing
+		// The protected pins' side: the body edge nearest their centroid.
+		dl, dr, dd, du := ctr.X-cb.MinX, cb.MaxX-ctr.X, ctr.Y-cb.MinY, cb.MaxY-ctr.Y
+		var r Rect
+		switch m := math.Min(math.Min(dl, dr), math.Min(dd, du)); m {
+		case dl:
+			r = Rect{cb.MinX - depth, ext.MinY - pl.spacing, cb.MinX, ext.MaxY + pl.spacing}
+		case dr:
+			r = Rect{cb.MaxX, ext.MinY - pl.spacing, cb.MaxX + depth, ext.MaxY + pl.spacing}
+		case dd:
+			r = Rect{ext.MinX - pl.spacing, cb.MinY - depth, ext.MaxX + pl.spacing, cb.MinY}
+		default:
+			r = Rect{ext.MinX - pl.spacing, cb.MaxY, ext.MaxX + pl.spacing, cb.MaxY + depth}
+		}
+		pl.reserve = append(pl.reserve, portReserve{r: r, block: bl.ID, side: side})
+	}
+}
+
+func (pl *placer) reserveCost(p *Part) float64 {
+	if len(pl.reserve) == 0 {
+		return 0
+	}
+	cost := 0.0
+	own := pl.c.BlockOf[p.Ref]
+	for _, rs := range pl.reserve {
+		if own == rs.block || p.Side != rs.side && !hasTHT(p) {
+			continue
+		}
+		if ov := pl.boxes[p].OverlapArea(rs.r); ov > 0 {
+			cost += 3 * math.Sqrt(ov)
+		}
+	}
+	return cost
 }

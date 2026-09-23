@@ -14,6 +14,7 @@ package pcbauto
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 )
@@ -59,10 +60,69 @@ type Part struct {
 
 	body    Rect // body bounds relative to anchor at rotation 0
 	hasBody bool
+
+	// Body() cache. A 636-ball BGA re-derived its bounds from every pad on
+	// each call and legalisation spent 90% of its time doing it. The key is
+	// the pose plus the first pad's centre and the pad count, so moves and
+	// direct pad edits both invalidate it.
+	bodyKey   bodyKey
+	bodyCache Rect
+	// Rigid-body shortcut: bounds relative to the anchor, per rotation. A
+	// part is rigid, so a move is a translation of this rect — the spiral
+	// search tries hundreds of poses per part.
+	relBody map[float64]Rect
+}
+
+type bodyKey struct {
+	pos, pad0 Point
+	rot       float64
+	n         int
+	hasBody   bool
+	valid     bool
 }
 
 // Body returns the absolute courtyard of the part (pads ∪ declared body).
 func (p *Part) Body() Rect {
+	k := bodyKey{pos: p.Pos, rot: p.Rotation, n: len(p.Pads), hasBody: p.hasBody, valid: true}
+	if len(p.Pads) > 0 {
+		k.pad0 = p.Pads[0].Box.C
+	}
+	if k == p.bodyKey {
+		return p.bodyCache
+	}
+	var r Rect
+	if p.rigid() {
+		rel, ok := p.relBody[p.Rotation]
+		if !ok {
+			rel = p.body0().Translate(Point{-p.Pos.X, -p.Pos.Y})
+			if p.relBody == nil {
+				p.relBody = map[float64]Rect{}
+			}
+			p.relBody[p.Rotation] = rel
+		}
+		r = rel.Translate(p.Pos)
+	} else {
+		r = p.body0()
+	}
+	p.bodyKey, p.bodyCache = k, r
+	return r
+}
+
+// rigid reports whether the pads sit where MoveTo would put them (the part
+// was frozen and nobody edited a pad since), so bounds can be translated.
+func (p *Part) rigid() bool {
+	if len(p.Pads) == 0 {
+		return false
+	}
+	pd := p.Pads[0]
+	if pd.rel == (Point{}) && pd.Box.C != p.Pos {
+		return false // never frozen
+	}
+	want := p.Pos.Add(pd.rel.Rotate(p.Rotation))
+	return math.Abs(want.X-pd.Box.C.X) < 1e-6 && math.Abs(want.Y-pd.Box.C.Y) < 1e-6
+}
+
+func (p *Part) body0() Rect {
 	r := EmptyRect()
 	for _, pd := range p.Pads {
 		r = r.Union(pd.Box.Bounds())
@@ -85,10 +145,12 @@ func (p *Part) SetBody(abs Rect) {
 		r = r.AddPoint(c.Sub(p.Pos).Rotate(-p.Rotation))
 	}
 	p.body, p.hasBody = r, true
+	p.bodyKey, p.relBody = bodyKey{}, nil
 }
 
 // freeze stores each pad relative to the anchor so MoveTo can re-pose them.
 func (p *Part) freeze() {
+	p.bodyKey, p.relBody = bodyKey{}, nil
 	for _, pd := range p.Pads {
 		pd.rel = pd.Box.C.Sub(p.Pos).Rotate(-p.Rotation)
 		pd.relRot = pd.Box.Rot - p.Rotation

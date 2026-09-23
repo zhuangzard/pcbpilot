@@ -30,6 +30,7 @@ const (
 	KindTestPoint   PartKind = "testpoint"
 	KindMechanical  PartKind = "mechanical" // mounting hole, fiducial
 	KindModule      PartKind = "module"     // RF / MCU module
+	KindAntenna     PartKind = "antenna"    // chip / PCB / connector-fed antenna: the RF port
 	KindOther       PartKind = "other"
 )
 
@@ -52,6 +53,15 @@ var (
 )
 
 // ClassifyPart infers the functional kind from designator, device and pads.
+// reRFConn matches coaxial RF connectors (U.FL/IPEX/MHF/SMA/MMCX).
+var reRFConn = regexp.MustCompile(`(?i)(IPEX|U\.?FL|MHF|SMA[-_ ]?[KJ]|^SMA|MMCX|BWIPX|W\.?FL)`)
+
+// reAntennaDev matches antenna part numbers (chip antennas, PCB antennas).
+var reAntennaDev = regexp.MustCompile(`(?i)(ANTENNA|^CA-C0\d|2450AT|W3008|AMCA|ANT\d{4})`)
+
+// reESDArray matches ESD/TVS array families (not fuses or PTCs).
+var reESDArray = regexp.MustCompile(`(?i)(ESD|TVS|PESD|USBLC|SRV0|LESD|ULC\d|PRTR|RCLAMP|TPD\d|SMF\d|SMAJ|SMBJ|P6KE|ESDA|IP4220|NUP\d)`)
+
 func ClassifyPart(p *Part) PartKind {
 	ref := upper(p.Ref)
 	dev := upper(p.Device)
@@ -65,6 +75,14 @@ func ClassifyPart(p *Part) PartKind {
 		return KindIsoPower
 	case reModule.MatchString(dev):
 		return KindModule
+	}
+	if prefix == "ANT" || prefix == "AE" || reAntennaDev.MatchString(dev) {
+		return KindAntenna
+	}
+	// ESD/TVS arrays are protection whatever the designer called them:
+	// "U3 USBLC6-2SC6" is not a core IC and must not end a signal chain.
+	if (prefix == "U" || prefix == "IC" || prefix == "D") && reESDArray.MatchString(dev) {
+		return KindDiode
 	}
 	switch prefix {
 	case "R", "RN", "RA", "VR":
@@ -100,7 +118,7 @@ func ClassifyPart(p *Part) PartKind {
 			return KindIC
 		}
 	}
-	if reConnRef.MatchString(ref) || strings.Contains(dev, "USB") && len(p.Pads) >= 4 || strings.Contains(dev, "HEADER") || strings.Contains(dev, "CONN") {
+	if reConnRef.MatchString(ref) || reRFConn.MatchString(dev) || strings.Contains(dev, "USB") && len(p.Pads) >= 4 || strings.Contains(dev, "HEADER") || strings.Contains(dev, "CONN") {
 		return KindConnector
 	}
 	if strings.HasPrefix(dev, "LED") || strings.Contains(dev, "-LED") {
@@ -176,7 +194,9 @@ type Circuit struct {
 	// Converters are the recognised switching regulators with their hot
 	// loops, bootstrap and feedback parts.
 	Converters []*Converter `json:"converters,omitempty"`
-	Notes      []string     `json:"notes,omitempty"`
+	// Chains are connector-to-IC signal paths whose part order matters.
+	Chains []*SignalChain `json:"chains,omitempty"`
+	Notes  []string       `json:"notes,omitempty"`
 }
 
 var (
@@ -203,6 +223,7 @@ func Understand(b *Board, an *Analysis) *Circuit {
 	c.buildDomains(b, an)
 	c.buildBlocks(b, an)
 	c.buildConverters(b, an)
+	c.buildChains(b, an)
 	c.buildLinks(b, an)
 	c.buildBarriers(b, an)
 	return c
@@ -402,6 +423,8 @@ func (c *Circuit) coreKind(b *Board, an *Analysis, p *Part) string {
 	switch c.Kinds[p.Ref] {
 	case KindConnector:
 		return "interface"
+	case KindAntenna:
+		return "rf"
 	case KindOpto, KindIsolator, KindIsoPower, KindTransformer, KindRelay:
 		return "isolation"
 	case KindModule:

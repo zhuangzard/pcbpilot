@@ -100,3 +100,65 @@ func TestPlaceBuckHotLoop(t *testing.T) {
 		}
 	}
 }
+
+// usbBoard: USB-C → ESD array (designated U, as many schematics do) →
+// 22 Ω series resistors → MCU; parts start scattered.
+func usbBoard() *Board {
+	pad := func(n, net string, x, y float64) *Pad {
+		return &Pad{Number: n, Net: net, Layer: LayerTop, Box: OrientedBox{C: Point{x, y}, W: 20, H: 30}}
+	}
+	b := &Board{Rules: DefaultRules(), Outline: Rect{0, 0, 3000, 2000}.Corners()}
+	b.Parts = []*Part{
+		{Ref: "J1", Device: "TYPE-C-16P", Fixed: true, Pads: []*Pad{
+			pad("A6", "USB_CONN_DP", 100, 1000), pad("A7", "USB_CONN_DM", 100, 1040), pad("A1", "GND", 100, 900), pad("A4", "VBUS", 100, 1100)}},
+		{Ref: "U3", Device: "USBLC6-2SC6", Pads: []*Pad{
+			pad("1", "USB_CONN_DP", 2500, 300), pad("2", "GND", 2500, 340), pad("3", "USB_CONN_DM", 2500, 380),
+			pad("4", "USB_CONN_DM", 2560, 380), pad("5", "VBUS", 2560, 340), pad("6", "USB_CONN_DP", 2560, 300)}},
+		{Ref: "R1", Device: "22R", Pads: []*Pad{pad("1", "USB_CONN_DP", 400, 1700), pad("2", "USB_DP", 460, 1700)}},
+		{Ref: "R2", Device: "22R", Pads: []*Pad{pad("1", "USB_CONN_DM", 1400, 200), pad("2", "USB_DM", 1460, 200)}},
+		{Ref: "U1", Device: "STM32F103C8T6", Fixed: true, Pads: []*Pad{
+			pad("1", "USB_DP", 1500, 1000), pad("2", "USB_DM", 1500, 1040), pad("3", "+3V3", 1500, 1080), pad("4", "GND", 1500, 1120),
+			pad("5", "SDA", 1600, 1000), pad("6", "SCL", 1600, 1040)}},
+	}
+	_ = b.Index()
+	return b
+}
+
+func TestUSBChainOrder(t *testing.T) {
+	b := usbBoard()
+	an := Analyze(b, PowerSpec{}, nil)
+	c := Understand(b, an)
+	if c.Kinds["U3"] != KindDiode {
+		t.Fatalf("USBLC6 designated U3 must be protection, got %s", c.Kinds["U3"])
+	}
+	var dp *SignalChain
+	for _, ch := range c.Chains {
+		if ch.Connector == "J1.A6" {
+			dp = ch
+		}
+	}
+	if dp == nil || len(dp.Nodes) != 2 || dp.Nodes[0].Ref != "U3" || dp.Nodes[1].Ref != "R1" || dp.IC != "U1.1" {
+		t.Fatalf("D+ chain wrong: %+v", dp)
+	}
+	if dp.Pair == nil {
+		t.Errorf("D+ and D- chains should pair")
+	}
+	if _, err := Place(b, an, c, nil, PlaceOptions{Seed: 1, Moves: 1500}); err != nil {
+		t.Fatal(err)
+	}
+	inv, excess, n := ChainStats(b, c)
+	t.Logf("chains %d, inversions %d, excess %.0f mil", n, inv, excess)
+	for _, r := range []string{"U3", "R1", "R2"} {
+		t.Logf("%s at %+v", r, b.Part(r).Body().Center())
+	}
+	if inv != 0 {
+		t.Errorf("ESD must be met before the series resistors (%d inversions)", inv)
+	}
+	j := b.Part("J1").Pads[0].Box.C
+	if d := b.Part("U3").Body().Center().Dist(j); d > 400 {
+		t.Errorf("ESD %.0f mil from the connector", d)
+	}
+	if d := b.Part("R1").Body().Center().Dist(b.Part("R2").Body().Center()); d > 120 {
+		t.Errorf("pair series resistors %.0f mil apart; should sit side by side", d)
+	}
+}

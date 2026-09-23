@@ -44,7 +44,7 @@ func isProtectionPart(c *Circuit, p *Part) bool {
 
 func isCore(k PartKind) bool {
 	switch k {
-	case KindIC, KindModule, KindConnector, KindOpto, KindIsolator, KindIsoPower, KindTransformer, KindRelay:
+	case KindIC, KindModule, KindConnector, KindAntenna, KindOpto, KindIsolator, KindIsoPower, KindTransformer, KindRelay:
 		return true
 	}
 	return false

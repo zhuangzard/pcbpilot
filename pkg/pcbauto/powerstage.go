@@ -313,7 +313,12 @@ func (c *Circuit) buildConverters(b *Board, an *Analysis) {
 		}
 		for _, bl := range c.Blocks {
 			if bl.Core == cv.Core {
-				bl.Kind = "power"
+				// A converter IC is a power block; an SoC or radio with an
+				// integrated DC-DC keeps its identity (it is a victim of its
+				// own switcher, not primarily a noise source).
+				if bl.Kind == "logic" || bl.Kind == "power" || len(core.Pads) <= 24 {
+					bl.Kind = "power"
+				}
 				sortMembers(bl)
 			}
 		}
