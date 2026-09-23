@@ -9,7 +9,7 @@ import (
 	"sort"
 
 	"github.com/spf13/cobra"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/connectivity"
+	"github.com/zhuangzard/pcbpilot/internal/connectivity"
 )
 
 // buildSchPlan emits the same version-1 playbook consumed by sch apply.

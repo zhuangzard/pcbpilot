@@ -55,7 +55,7 @@ apply journal, and a fresh 'pcb dump --include-copper'. It verifies component
 poses, generated tracks/vias/regions/pours, materialized poured copper, keepout
 emptiness, and preservation of every non-owned baseline object. Missing geometry
 or an unreadable copper category is incomplete, never an empty/pass result.`,
-		Example: `  easyeda pcb module-check --candidate candidates/candidate-01.json \
+		Example: `  pcbpilot pcb module-check --candidate candidates/candidate-01.json \
     --before before.json --after after.json \
     --journal candidates/candidate-01.apply.json.journal.jsonl --out check.json`,
 		Args: cobra.NoArgs,

@@ -51,7 +51,7 @@ func runPowerPlanes(cfg *appConfig, window string, gndLayer, powerLayer int, gnd
 	targetLayers := liveLayers
 	if liveLayers < 4 {
 		if !allowStackupChange {
-			return fmt.Errorf("power-planes needs >=4 copper layers but the board has %d — refusing to re-stack it; use `easyeda pcb power-pour` for a 2-layer board. If the design explicitly requires an upgrade, use `easyeda pcb power-planes --allow-stackup-change` or `easyeda pcb stackup set --layers 4`", liveLayers)
+			return fmt.Errorf("power-planes needs >=4 copper layers but the board has %d — refusing to re-stack it; use `pcbpilot pcb power-pour` for a 2-layer board. If the design explicitly requires an upgrade, use `pcbpilot pcb power-planes --allow-stackup-change` or `pcbpilot pcb stackup set --layers 4`", liveLayers)
 		}
 		targetLayers = 4
 	}

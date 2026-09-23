@@ -1484,7 +1484,7 @@ func renderTidyPlan(p *tidyPlanned, g *schGroup, w io.Writer) {
 
 // ── cobra 构造函数(主会话统一注册到 `sch group` 下) ────────────────────────
 
-// newSchGroupTidyCommand 返回 `tidy` 子命令(挂在 `sch group` 下 → `easyeda sch
+// newSchGroupTidyCommand 返回 `tidy` 子命令(挂在 `sch group` 下 → `pcbpilot sch
 // group tidy`)。签名与其它 sch 子命令一致:cfg + *window 闭包 + stdout/stderr。
 func newSchGroupTidyCommand(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {
 	var groupRef, pattern string
@@ -1509,9 +1509,9 @@ disconnect → modify(rot 二义两候选)→ settle(double-read + ≥350ms)→ 
 实测 pin 消解候选 → 显式坐标 connect(--rotation 走文字朝外校准表)→ 收尾
 layout-lint + bridge-check 自检,红则按记录的每步前几何逐步回滚。`,
 		Args: cobra.NoArgs,
-		Example: `  easyeda sch group tidy --group g1                 # dry-run 看计划
-  easyeda sch group tidy --group decaps --apply     # 落地
-  easyeda sch group tidy --group g1 --pattern power-updown --spacing 60 --apply`,
+		Example: `  pcbpilot sch group tidy --group g1                 # dry-run 看计划
+  pcbpilot sch group tidy --group decaps --apply     # 落地
+  pcbpilot sch group tidy --group g1 --pattern power-updown --spacing 60 --apply`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if dryRun && apply {
 				return fmt.Errorf("--dry-run 与 --apply 互斥(默认就是 dry-run)")

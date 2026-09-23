@@ -25,7 +25,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/workflow"
+	"github.com/zhuangzard/pcbpilot/internal/workflow"
 )
 
 // refineFakePad 是假器件的一个焊盘。dx/dy 是相对 anchor 的偏移 —— 器件被 modify
@@ -100,13 +100,13 @@ type refineLoopDaemon struct {
 func newRefineLoopDaemon(t *testing.T, comps []*refineFakeComp) (*appConfig, *refineLoopDaemon, func()) {
 	t.Helper()
 	// workflow 状态重定向到临时目录：resolveStageProject/loadPcbStageState 这条
-	// 分支要真跑，但绝不能读写真用户的 ~/.easyeda-agent/workflow。
+	// 分支要真跑，但绝不能读写真用户的 ~/.pcbpilot/workflow。
 	t.Setenv(workflow.EnvDir, t.TempDir())
 
 	d := &refineLoopDaemon{comps: comps}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprint(w, `{"service":"easyeda-agent","status":"ok","windows":[{"windowId":"w1","context":{"projectName":"refinetest"}}]}`)
+		fmt.Fprint(w, `{"service":"pcbpilot","status":"ok","windows":[{"windowId":"w1","context":{"projectName":"refinetest"}}]}`)
 	})
 	mux.HandleFunc("/action", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {

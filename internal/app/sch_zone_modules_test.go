@@ -3,7 +3,7 @@ package app
 import (
 	"testing"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/workflow"
+	"github.com/zhuangzard/pcbpilot/internal/workflow"
 )
 
 // 模块归属只有**一个读入口**(loadSchZoneModules:虚拟组优先、回落 zone 认领)。

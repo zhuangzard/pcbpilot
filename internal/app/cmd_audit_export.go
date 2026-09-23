@@ -4,7 +4,7 @@ package app
 // log) into a replayable playbook (docs/design-apply-playbook.md).
 //
 // The killer loop: run an exploratory session once → export the clean step
-// list → commit it as a regression case for `easyeda apply`.
+// list → commit it as a regression case for `pcbpilot apply`.
 //
 // Capture wiring: the audit log stores each action's payload AND result. When
 // a later payload string equals an earlier result's primitiveId, the exporter
@@ -52,9 +52,9 @@ func newAuditExportCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "export",
 		Short: "Export a recorded session from the audit log as a replayable playbook",
-		Example: `  easyeda audit export --playbook --day 2026-07-03 > replay.json
-  easyeda audit export --playbook --since 14:20 --until 14:40 -o moves.playbook.json
-  easyeda audit export --playbook --window <id> --name esp32-moves --project ceshi`,
+		Example: `  pcbpilot audit export --playbook --day 2026-07-03 > replay.json
+  pcbpilot audit export --playbook --since 14:20 --until 14:40 -o moves.playbook.json
+  pcbpilot audit export --playbook --window <id> --name esp32-moves --project ceshi`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if dir == "" {
 				dir = defaultAuditDir()
@@ -109,7 +109,7 @@ func newAuditExportCmd(stdout, stderr io.Writer) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&dir, "dir", "", "audit log directory (default ~/.easyeda-agent/audit)")
+	cmd.Flags().StringVar(&dir, "dir", "", "audit log directory (default ~/.pcbpilot/audit)")
 	cmd.Flags().StringVar(&day, "day", "", "audit day file YYYY-MM-DD, UTC (default today)")
 	cmd.Flags().StringVar(&since, "since", "", "start time: RFC3339 or HH:MM[:SS] (UTC, on --day)")
 	cmd.Flags().StringVar(&until, "until", "", "end time: RFC3339 or HH:MM[:SS] (UTC, on --day)")
@@ -122,7 +122,7 @@ func newAuditExportCmd(stdout, stderr io.Writer) *cobra.Command {
 	cmd.Flags().BoolVar(&noSquashSaves, "no-squash-saves", false, "keep every save (autosave storm) instead of collapsing runs")
 	// --playbook is the only format today; the flag documents intent and
 	// reserves room for future formats (csv/markdown timeline...).
-	cmd.Flags().Bool("playbook", true, "export as an `easyeda apply` playbook (default and only format)")
+	cmd.Flags().Bool("playbook", true, "export as an `pcbpilot apply` playbook (default and only format)")
 	return cmd
 }
 

@@ -14,7 +14,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/blocks"
+	"github.com/zhuangzard/pcbpilot/internal/blocks"
 )
 
 type blockApplyTestCall struct {
@@ -39,7 +39,7 @@ func newBlockApplyTestDaemon(t *testing.T, responder func(blockApplyTestCall) st
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/health":
-			_, _ = w.Write([]byte(`{"service":"easyeda-agent","windows":[{"windowId":"w1"}]}`))
+			_, _ = w.Write([]byte(`{"service":"pcbpilot","windows":[{"windowId":"w1"}]}`))
 		case "/action":
 			var body struct {
 				Action  string         `json:"action"`

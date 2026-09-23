@@ -3,7 +3,7 @@
 可被其他 Go 项目直接引用的 PCB 局部寻路内核：
 
 ```go
-import "github.com/zhoushoujianwork/easyeda-agent/pkg/pcbrouting"
+import "github.com/zhuangzard/pcbpilot/pkg/pcbrouting"
 
 request := pcbrouting.Request{
     From: pcbrouting.Point{0, 0}, To: pcbrouting.Point{100, 0},
@@ -25,7 +25,7 @@ err = pcbrouting.Check(ctx, request, result.Points, segmentClear)
 测量值；宿主级 DRC 仍是另一层验证。
 
 包仅依赖 Go 标准库，不引用 `internal/app`、Cobra、daemon、Connector 或文件系统。
-当前仓库直接把它嵌入 `easyeda pcb route solve/check`，晶振规划器也引用同一实现；不需要
+当前仓库直接把它嵌入 `pcbpilot pcb route solve/check`，晶振规划器也引用同一实现；不需要
 另装 CLI。该包随仓库 Go module 分发，尚无独立 module 或稳定 v1 API 承诺。
 
 目前支持单层零过孔、八方向网格搜索与最多 45° 转向，以及非网格终点的合法接入。

@@ -7,11 +7,11 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/daemon"
+	"github.com/zhuangzard/pcbpilot/internal/daemon"
 )
 
 func TestWriteVerifyBodyMatchesDaemonContract(t *testing.T) {
-	cfg := &appConfig{host: "127.0.0.1", ports: "60832-60841", project: "ceshi"}
+	cfg := &appConfig{host: "127.0.0.1", ports: "61832-61841", project: "ceshi"}
 	v := writeVerdict{
 		action: "schematic.component.place", source: "sch block-apply",
 		requestID: "req_42", returnedOK: true, landed: 1, notLanded: 5,
@@ -43,7 +43,7 @@ func TestWriteVerifyBodyMatchesDaemonContract(t *testing.T) {
 
 // 没有 windowId 时按 --project 归账(windowId 重连即变,project 才是稳定标识)。
 func TestWriteVerifyBodyFallsBackToProject(t *testing.T) {
-	cfg := &appConfig{host: "127.0.0.1", ports: "60832-60841", project: "ceshi"}
+	cfg := &appConfig{host: "127.0.0.1", ports: "61832-61841", project: "ceshi"}
 	buf, _ := json.Marshal(writeVerifyBody(cfg, "", writeVerdict{
 		action: "schematic.power.connect_pin", returnedOK: false, landed: 1}))
 	var got daemon.WriteVerification
@@ -61,7 +61,7 @@ func TestWriteVerifyBodyFallsBackToProject(t *testing.T) {
 // 纯遥测:没有可归账的目标、或判决为空时,什么都不做(也绝不 panic)。
 func TestReportWriteVerifiedIsInertWithoutATarget(t *testing.T) {
 	reportWriteVerified(nil, "w1", writeVerdict{action: "schematic.component.place", landed: 1})
-	cfg := &appConfig{host: "127.0.0.1", ports: "60832-60841"}
+	cfg := &appConfig{host: "127.0.0.1", ports: "61832-61841"}
 	reportWriteVerified(cfg, "", writeVerdict{action: "schematic.component.place", landed: 1})
 	reportWriteVerified(cfg, "w1", writeVerdict{action: "schematic.component.place"})
 	reportWriteVerified(cfg, "w1", writeVerdict{landed: 1})

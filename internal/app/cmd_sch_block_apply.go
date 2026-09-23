@@ -24,7 +24,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/blocks"
+	"github.com/zhuangzard/pcbpilot/internal/blocks"
 )
 
 // ── the role-id → device bridge ─────────────────────────────────────────────

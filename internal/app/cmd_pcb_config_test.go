@@ -31,7 +31,7 @@ func TestPcbConfigTypedCommands(t *testing.T) {
 			}
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/health" {
-					fmt.Fprint(w, `{"service":"easyeda-agent","windows":[{"windowId":"w1"}]}`)
+					fmt.Fprint(w, `{"service":"pcbpilot","windows":[{"windowId":"w1"}]}`)
 					return
 				}
 				if r.URL.Path != "/action" {

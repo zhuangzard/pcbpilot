@@ -7,21 +7,21 @@
 ## 子命令层级
 
 ```
-easyeda <domain> <action> [flags]
+pcbpilot <domain> <action> [flags]
 ```
 
 | 顶级子命令 | 职责 |
 |---|---|
-| `easyeda sch` | 原理图操作（connectivity / plan / apply / place / wire / drc / save / export …） |
-| `easyeda pcb` | PCB 操作（layout / line / via / import / align …） |
-| `easyeda pcb config` | 当前 PCB 配置：get / clearance / track / via / bind；局部参数修改、单位换算、dry-run 和真实回读 |
-| `easyeda bom` | BOM 导出与补全 |
-| `easyeda lib` | 器件库搜索、符号/封装/Device 资产创建与选型 |
-| `easyeda daemon` | 守护进程管理（start / health） |
-| `easyeda audit` | 操作日志查看 |
-| `easyeda update` | 自更新（别名 `upgrade`）：CLI 二进制 + skill 目录 → latest；连接器只报不改 |
-| `easyeda skill` | skill 目录单独管理（status / sync；`update` 已含其能力） |
-| `easyeda debug` | 逃生舱（exec-js 等开发/调试命令） |
+| `pcbpilot sch` | 原理图操作（connectivity / plan / apply / place / wire / drc / save / export …） |
+| `pcbpilot pcb` | PCB 操作（layout / line / via / import / align …） |
+| `pcbpilot pcb config` | 当前 PCB 配置：get / clearance / track / via / bind；局部参数修改、单位换算、dry-run 和真实回读 |
+| `pcbpilot bom` | BOM 导出与补全 |
+| `pcbpilot lib` | 器件库搜索、符号/封装/Device 资产创建与选型 |
+| `pcbpilot daemon` | 守护进程管理（start / health） |
+| `pcbpilot audit` | 操作日志查看 |
+| `pcbpilot update` | 自更新（别名 `upgrade`）：CLI 二进制 + skill 目录 → latest；连接器只报不改 |
+| `pcbpilot skill` | skill 目录单独管理（status / sync；`update` 已含其能力） |
+| `pcbpilot debug` | 逃生舱（exec-js 等开发/调试命令） |
 
 ## 设计约束
 
@@ -41,15 +41,15 @@ easyeda <domain> <action> [flags]
 
 - **① → ②**：确认 API 行为正确后，在 `internal/protocol/actions.go` 注册 typed action。
 - **② → ③**：功能稳定后，包装成对应的 Cobra 子命令；Skill 描述同步更新。
-- 允许功能停留在 ② 阶段通过 `easyeda call <action>` 裸调，但 ③ 是最终形态。
+- 允许功能停留在 ② 阶段通过 `pcbpilot call <action>` 裸调，但 ③ 是最终形态。
 
 ## 1.4 当前接口
 
 原理图以 `sch connectivity/design-diff/designators/lib-layout/compose/frame/apply` 组织数据、规划与执行，
 PCB 保持在 `pcb` 域。CLI → daemon → connector 是唯一运行链路，不设 Broker 层。
-`easyeda actions` 与各子命令 `--help` 提供当前完整清单，不在文档重复登记数量。
+`pcbpilot actions` 与各子命令 `--help` 提供当前完整清单，不在文档重复登记数量。
 
 数据转换和受保护队列的边界见
-[原理图数据与 SCH Apply](../.agents/skills/easyeda-agent/references/schematic-data.md)。
+[原理图数据与 SCH Apply](../.agents/skills/pcbpilot/references/schematic-data.md)。
 新版本的 Skill、命令示例与实际参数必须一起核对；发布准备见
 [1.4 发布准备](releases/release-1.4.md)。

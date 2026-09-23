@@ -11,7 +11,7 @@ import subprocess
 import tarfile
 from urllib.parse import unquote, urlsplit
 
-SKILL = Path(".agents/skills/easyeda-agent")
+SKILL = Path(".agents/skills/pcbpilot")
 
 
 def tracked_skill_files(repo: Path) -> list[Path]:
@@ -70,9 +70,9 @@ def pack_skill(repo: Path, output: Path) -> int:
                 path = repo / file
                 content = path.read_bytes()
                 # as_posix(): tar member names are always "/"-separated. str() on
-                # Windows yields "easyeda-agent\references\guide.md", which every
+                # Windows yields "pcbpilot\references\guide.md", which every
                 # extractor then treats as one flat filename.
-                entry = tarfile.TarInfo((Path("easyeda-agent") / file.relative_to(SKILL)).as_posix())
+                entry = tarfile.TarInfo((Path("pcbpilot") / file.relative_to(SKILL)).as_posix())
                 entry.size, entry.mtime = len(content), stamp
                 entry.mode = 0o755 if path.stat().st_mode & 0o111 else 0o644
                 archive.addfile(entry, io.BytesIO(content))

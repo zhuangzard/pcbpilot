@@ -1,33 +1,32 @@
 <p align="center">
-  <img src="docs/assets/easyeda-agent-logo.png" width="96" alt="easyeda-agent logo" />
+  <img src="docs/assets/pcbpilot-logo.png" width="96" alt="pcbpilot logo" />
 </p>
 
-<h1 align="center">easyeda-agent</h1>
+<h1 align="center">pcbpilot</h1>
 
 <p align="center">
   AI-native automation layer for EasyEDA.
 </p>
 
 <p align="center">
-  <a href="https://github.com/zhoushoujianwork/easyeda-agent"><b>GitHub</b></a> ·
-  <a href="https://jlc-ext.com/item/zhoushoujian/easyeda-agent-connector"><b>Plugin marketplace</b></a> ·
+  <a href="https://github.com/zhuangzard/pcbpilot"><b>GitHub</b></a> ·
   <a href="README.md">中文</a>
 </p>
 
-![easyeda-agent workflow](docs/assets/easyeda-agent-workflow.svg)
+![pcbpilot workflow](docs/assets/pcbpilot-workflow.svg)
 
 > **Version 1.4.5.** Schematic work starts from component,
 > pin, and connectivity data: design each Lib circuit and its geometry locally,
 > compose one sheet with `sch compose`, then execute and verify with `sch apply`.
 > See [1.4 release and validation](docs/releases/release-1.4.md) for release status and validation limits.
 
-`easyeda-agent` turns the official EasyEDA extension API into a typed, observable, Skill-friendly system. The EasyEDA plugin stays thin: it connects to the local agent and executes approved actions. The Go CLI/daemon owns protocol, state, artifacts, validation, and user-facing workflows.
+`pcbpilot` turns the official EasyEDA extension API into a typed, observable, Skill-friendly system. The EasyEDA plugin stays thin: it connects to the local agent and executes approved actions. The Go CLI/daemon owns protocol, state, artifacts, validation, and user-facing workflows.
 
 ## Why This Exists
 
 The upstream `run-api-gateway` proves the important entry point: code can run inside EasyEDA with access to the official `eda` object. Its rough edge is that it exposes raw JavaScript execution as the main workflow. That is powerful, but brittle for agents.
 
-The connector is real and working: the daemon defaults to a **single fixed port `60832`** (it never spills to the next; a stale easyeda daemon already holding it is taken over automatically), the connector locks onto it, validates a handshake, reconnects, and dispatches typed actions to the official `eda.*` API. `debug.exec_js` remains available for temporary debugging within the task's scope. See [docs/FEATURES.md](docs/FEATURES.md) for the feature/roadmap inventory.
+The connector is real and working: the daemon defaults to a **single fixed port `61832`** (it never spills to the next; a stale pcbpilot daemon already holding it is taken over automatically), the connector locks onto it, validates a handshake, reconnects, and dispatches typed actions to the official `eda.*` API. `debug.exec_js` remains available for temporary debugging within the task's scope. See [docs/FEATURES.md](docs/FEATURES.md) for the feature/roadmap inventory.
 
 This project moves the system into a better shape:
 
@@ -38,9 +37,9 @@ This project moves the system into a better shape:
 
 ## How It Works
 
-`easyeda-agent` keeps the automation surface narrow and observable:
+`pcbpilot` keeps the automation surface narrow and observable:
 
-- A Skill or human runs an `easyeda` command.
+- A Skill or human runs an `pcbpilot` command.
 - The Go CLI validates inputs and submits a typed action to the local daemon.
 - The daemon tracks connected EasyEDA windows, routes each action over WebSocket, and records audit logs, artifacts, and validation results.
 - The connector extension runs inside EasyEDA and calls the official `eda.*` API.
@@ -56,7 +55,7 @@ We don't reinvent the wheel — we stack proven layers so an AI agent can use th
 - **Upstream `run-api-gateway`** — proved the key entry point (code runs inside EasyEDA, reaching the `eda` object);
 - **A mature AI-Agent Skill pattern** — a Skill describes the expert workflow + guardrails, and typed actions make every step **observable, verifiable, and replayable** instead of handing raw JS to the model.
 
-On top of those three, easyeda-agent adds the engineering middle layer: a self-healing connector, a typed action catalog, real-bbox validation, a gated design flow, and the **flagship capability** below — the circuit-block library.
+On top of those three, pcbpilot adds the engineering middle layer: a self-healing connector, a typed action catalog, real-bbox validation, a gated design flow, and the **flagship capability** below — the circuit-block library.
 
 ## Core Capabilities & Highlights
 
@@ -84,9 +83,9 @@ parts point back into the standard-parts library (BOM-ready).
 - **Three dimensions** — parts (with alternatives) + schematic-wiring notes + PCB layout electrical constraints, all in one block;
 - **AI-consumable** — the agent checks the library before hand-wiring a peripheral; on a hit it copies, skipping a whole module's selection + wiring.
 
-> The library is embedded in the CLI: `easyeda blocks ls/show/search` works offline,
+> The library is embedded in the CLI: `pcbpilot blocks ls/show/search` works offline,
 > without a daemon or editor window. Contribution guide:
-> [`standard-blocks-contributing.md`](.agents/skills/easyeda-agent/references/standard-blocks-contributing.md)
+> [`standard-blocks-contributing.md`](.agents/skills/pcbpilot/references/standard-blocks-contributing.md)
 
 ## Install
 
@@ -94,59 +93,57 @@ parts point back into the standard-parts library (BOM-ready).
 > three required parts (CLI / connector `.eext` / Skill), version alignment,
 > starting the daemon, upgrade discipline, and a troubleshooting table. **On
 > upgrade, bump all three (CLI + connector + Skill) to the same version**, or
-> `easyeda daemon health` flags the lagging connector as stale.
+> `pcbpilot daemon health` flags the lagging connector as stale.
 
-Install the `easyeda` CLI/daemon first, then add the EasyEDA connector — two
-channels: import the **strictly CLI-version-locked** GitHub-Release `.eext` whose URL
-the installer prints, or one-click install from the
-[**official 立创EDA marketplace**](https://jlc-ext.com/item/zhoushoujian/easyeda-agent-connector)
-(the platform auto-updates it in place, but the listing can lag the CLI — use the
-Release `.eext` to align CLI, connector, and Skill versions; EasyEDA has its own application version):
+Install the `pcbpilot` CLI/daemon first, then import the **strictly CLI-version-locked**
+GitHub-Release `.eext` whose URL the installer prints. pcbpilot's connector
+("PCB Pilot Connector") is not on the 立创EDA marketplace — the marketplace entry
+"EDA Agent Connector" belongs to the upstream easyeda-agent project. The two can be
+installed side by side (different uuid, ports 61832–61841 vs 60832–60841).
 
-> **ℹ️ Rename notice (2026-08)**: at the marketplace admins' request the extension's
-> **display name** changed to **"EDA Agent Connector"** (no "easyeda" in it). Per the
-> admins the internal package name `easyeda-agent-connector` and the uuid both **stay
-> the same** — the SAME listing is re-uploaded; in-place auto-update for existing
-> installs is unaffected, no action needed.
+> **Attribution**: pcbpilot is a fork of
+> [zhoushoujianwork/easyeda-agent](https://github.com/zhoushoujianwork/easyeda-agent) (MIT).
+> The CLI, daemon, connector, typed actions, skills and most docs come from that project,
+> whose full history is preserved here. Thank you to the original author and contributors.
 
 macOS / Linux:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.sh | bash
 ```
 
 Native Windows (Windows PowerShell 5.1 or PowerShell 7):
 
 ```powershell
-irm https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.ps1 | iex
 ```
 
-The one-line script installs/updates the `easyeda` CLI/daemon, auto-detects
-installed clients and installs/updates the `easyeda-agent` skill into each —
-Codex (`~/.codex/skills/easyeda-agent`) and Claude Code
-(`~/.claude/skills/easyeda-agent`) — and prints the connector `.eext` import URL.
+The one-line script installs/updates the `pcbpilot` CLI/daemon, auto-detects
+installed clients and installs/updates the `pcbpilot` skill into each —
+Codex (`~/.codex/skills/pcbpilot`) and Claude Code
+(`~/.claude/skills/pcbpilot`) — and prints the connector `.eext` import URL.
 Both scripts fetch `checksums.txt` first and verify every asset's SHA-256, the
 CLI `--version` and the skill's `metadata.version` before replacing an installed
 file. Control skill install with env vars:
 
 ```bash
-curl -fsSL .../install.sh | EASYEDA_INSTALL_SKILLS=codex,claude bash  # force targets
-curl -fsSL .../install.sh | EASYEDA_INSTALL_SKILLS=none bash  # skip skills
-curl -fsSL .../install.sh | EASYEDA_SKILL_PRESERVE=1 bash  # keep local edits
-curl -fsSL .../install.sh | EASYEDA_VERSION='<vX.Y.Z>' bash  # pin a release (skips the API)
+curl -fsSL .../install.sh | PCBPILOT_INSTALL_SKILLS=codex,claude bash  # force targets
+curl -fsSL .../install.sh | PCBPILOT_INSTALL_SKILLS=none bash  # skip skills
+curl -fsSL .../install.sh | PCBPILOT_SKILL_PRESERVE=1 bash  # keep local edits
+curl -fsSL .../install.sh | PCBPILOT_VERSION='<vX.Y.Z>' bash  # pin a release (skips the API)
 ```
 
 ```powershell
-$env:EASYEDA_INSTALL_SKILLS = 'codex,claude'   # same knobs on Windows
-$env:EASYEDA_VERSION = '<vX.Y.Z>'              # pin a release (skips the API)
+$env:PCBPILOT_INSTALL_SKILLS = 'codex,claude'   # same knobs on Windows
+$env:PCBPILOT_VERSION = '<vX.Y.Z>'              # pin a release (skips the API)
 irm .../install.ps1 | iex
 ```
 
 `install.ps1` installs to `%USERPROFILE%\.local\bin` and never edits PATH
 silently: if that directory is not on the user PATH it prints the exact command
 to add it, and only changes the user PATH when you pass `-AddToPath` (running it
-as a file) or set `$env:EASYEDA_ADD_TO_PATH=1`. The machine PATH is never
-touched. If `easyeda.exe` is locked by a running daemon, the old file is renamed
+as a file) or set `$env:PCBPILOT_ADD_TO_PATH=1`. The machine PATH is never
+touched. If `pcbpilot.exe` is locked by a running daemon, the old file is renamed
 aside so the upgrade still completes — restart the daemon afterwards.
 
 **Hitting `403` / GitHub API rate limit?** The script calls `api.github.com` once to
@@ -158,18 +155,18 @@ message prints them too):
 export GITHUB_TOKEN=<token>   # GH_TOKEN works too
 gh auth login                 # an authenticated gh CLI is picked up automatically (5000/hour)
 
-curl -fsSL .../install.sh | EASYEDA_VERSION='<vX.Y.Z>' bash   # or pin a tag and skip the API
+curl -fsSL .../install.sh | PCBPILOT_VERSION='<vX.Y.Z>' bash   # or pin a tag and skip the API
 ```
 
-Available tags: [Releases](https://github.com/zhoushoujianwork/easyeda-agent/releases).
+Available tags: [Releases](https://github.com/zhuangzard/pcbpilot/releases).
 
-The published skill slug is `easyeda-agent` (suffix intentional: it distinguishes this
+The published skill slug is `pcbpilot` (suffix intentional: it distinguishes this
 community automation layer from official EasyEDA tooling). To install only the skill
 from a registry:
 
 ```bash
 # ClawHub (published automatically by `make release`, version matches the repo)
-clawhub install easyeda-agent
+clawhub install pcbpilot
 ```
 
 > SkillHub has its own [official CLI](https://skillhub.cn), which is incompatible
@@ -184,21 +181,21 @@ The old split skills (`easyeda-schematic`, `easyeda-pcb`, `easyeda-design-flow`,
 Give the following prompt to the agent together with the actual design request:
 
 ```text
-Use easyeda-agent to complete this EasyEDA Pro task.
+Use pcbpilot to complete this EasyEDA Pro task.
 
 Use EasyEDA Pro V4. Version 4.1.60 or a newer V4 build is recommended; if
-easyeda health reports hostCompatibility=block for V3, stop live writes and
+pcbpilot health reports hostCompatibility=block for V3, stop live writes and
 upgrade the editor first.
 
 Before editing, confirm that these three parts use the same release version:
-1. easyeda CLI/daemon
-2. easyeda-agent Skill
+1. pcbpilot CLI/daemon
+2. pcbpilot Skill
 3. EDA Agent Connector extension
 
-Run easyeda update --check --exit-code. If the CLI or Skill is behind, run easyeda
-update. If the connector is behind, install easyeda-agent-connector.eext from the
+Run pcbpilot update --check --exit-code. If the CLI or Skill is behind, run pcbpilot
+update. If the connector is behind, install pcbpilot-connector.eext from the
 same GitHub Release, save open documents, then fully quit and restart EasyEDA.
-Enable Allow external interaction and run easyeda health to verify the target
+Enable Allow external interaction and run pcbpilot health to verify the target
 project, page, and versions.
 
 For schematic work, first read or create a local canonical connectivity JSON. Treat
@@ -213,15 +210,15 @@ numbers with physical pin numbers, or report unverified/WARN results as passing.
 ### Optional: MCP integration
 
 The repository's [`mcp/`](mcp) directory provides a local stdio MCP adapter for
-agents such as Codex. It reuses the existing `easyeda` CLI/daemon and does not
+agents such as Codex. It reuses the existing `pcbpilot` CLI/daemon and does not
 bypass typed actions, auditing, workflow gates, or the official `eda.*` API. The
 arbitrary-JavaScript `debug.exec_js` domain is intentionally not exposed through
 MCP.
 
 ```bash
 npm --prefix mcp ci --ignore-scripts
-codex mcp add easyeda-agent \
-  --env EASYEDA_BIN="$(command -v easyeda)" \
+codex mcp add pcbpilot \
+  --env PCBPILOT_BIN="$(command -v pcbpilot)" \
   -- node "$(pwd)/mcp/src/server.mjs"
 ```
 
@@ -296,37 +293,37 @@ A few individual steps, each a real before/after on the same board:
 ## Repository Layout
 
 ```text
-cmd/easyeda/                 CLI entrypoint used by humans and Skills
+cmd/pcbpilot/                 CLI entrypoint used by humans and Skills
 internal/app/                CLI command implementation
 internal/daemon/             Local daemon: /health, /eda (connector WS), /action
 internal/protocol/           Typed action protocol shared with connector (actions.go)
 internal/version/            Build/version metadata
 extension/                   EasyEDA connector (.eext) source + build (TypeScript → esbuild)
-.agents/skills/easyeda-agent/        Merged public Skill: workflow, references, scripts, canonical data
+.agents/skills/pcbpilot/        Merged public Skill: workflow, references, scripts, canonical data
 docs/                        Architecture, protocol, features/roadmap, conventions, decisions
 ```
 
 ## Current Commands
 
 ```bash
-go run ./cmd/easyeda version
-go run ./cmd/easyeda actions
-go run ./cmd/easyeda daemon start
-go run ./cmd/easyeda daemon health
-go run ./cmd/easyeda doc ls --project <name>
-go run ./cmd/easyeda sch drc --project <name>
-go run ./cmd/easyeda pcb drc --project <name>
-go run ./cmd/easyeda board list --project <name>
-go run ./cmd/easyeda call system.health
+go run ./cmd/pcbpilot version
+go run ./cmd/pcbpilot actions
+go run ./cmd/pcbpilot daemon start
+go run ./cmd/pcbpilot daemon health
+go run ./cmd/pcbpilot doc ls --project <name>
+go run ./cmd/pcbpilot sch drc --project <name>
+go run ./cmd/pcbpilot pcb drc --project <name>
+go run ./cmd/pcbpilot board list --project <name>
+go run ./cmd/pcbpilot call system.health
 ```
 
-`daemon start` starts the local server. It defaults to a **single fixed port `127.0.0.1:60832`** — never spilling to the next, so the connector always finds it there. A stale easyeda daemon already holding that port is taken over automatically; a foreign process makes it ask (interactive) or refuse (headless). It serves three endpoints, then runs until interrupted (Ctrl-C / SIGTERM):
+`daemon start` starts the local server. It defaults to a **single fixed port `127.0.0.1:61832`** — never spilling to the next, so the connector always finds it there. A stale pcbpilot daemon already holding that port is taken over automatically; a foreign process makes it ask (interactive) or refuse (headless). It serves three endpoints, then runs until interrupted (Ctrl-C / SIGTERM):
 
 - `GET /health` — service identity, version, and connected windows
 - `GET /eda` — WebSocket the EasyEDA connector registers on (daemon sends a `handshake` on connect)
 - `POST /action` — a typed action envelope to forward to a connected window
 
-`daemon health` probes for the local `easyeda-agent` daemon; the daemon and connector use port `60832` by default. With the daemon running it reports `status: found` and lists connected windows; otherwise a clean `not_found` result is expected.
+`daemon health` probes for the local `pcbpilot` daemon; the daemon and connector use port `61832` by default. With the daemon running it reports `status: found` and lists connected windows; otherwise a clean `not_found` result is expected.
 
 `call <action>` finds the running daemon and posts a typed action to it. `system.health` is answered by the daemon itself (no connector required); window-scoped actions need a connected EasyEDA window and return `NO_CONNECTOR` until the connector extension is running.
 
@@ -334,7 +331,7 @@ Both sides of the action protocol are in place and working. The Go daemon owns t
 
 ## Capabilities
 
-Capabilities are exposed through CLI subcommands (`easyeda <domain> <verb>`). Validation completed for version 1.4.5, including its remaining limits, is listed in [1.4 release and validation](docs/releases/release-1.4.md).
+Capabilities are exposed through CLI subcommands (`pcbpilot <domain> <verb>`). Validation completed for version 1.4.5, including its remaining limits, is listed in [1.4 release and validation](docs/releases/release-1.4.md).
 
 **Schematic**
 - Place real library/LCSC parts by uuid, then wire them (`sch` place/wire); power/ground **net-flags** via `connect_pin` (auto-compensates the rotation-store quirk).
@@ -363,8 +360,8 @@ Capabilities are exposed through CLI subcommands (`easyeda <domain> <verb>`). Va
 - **`pcb export-dsn`** (Specctra DSN for external Freerouting, with keep-out injection) / **`pcb import-autoroute`** / **`pcb snapshot`**.
 
 **Infrastructure**
-- Typed action protocol (self-describing `--help`, `easyeda actions` catalog) with parameterized inputs and explicit readback.
-- **`easyeda notify`** — a non-blocking **in-window toast** (info/success/warn/error/question) so the flow can announce each stage live ("routing done, next: pour").
+- Typed action protocol (self-describing `--help`, `pcbpilot actions` catalog) with parameterized inputs and explicit readback.
+- **`pcbpilot notify`** — a non-blocking **in-window toast** (info/success/warn/error/question) so the flow can announce each stage live ("routing done, next: pour").
 - Connector **auto-reconnect watchdog** (survives daemon restarts / window backgrounding) + daemon **debounced autosave**.
 
 ## Not Yet Supported / Platform Walls
@@ -399,7 +396,7 @@ See:
 Huge thanks to **嘉立创EDA / EasyEDA Pro (JLCPCB)** for opening up the extension
 plugin channel and the official `eda.*` API. This entire automation layer is built
 **on top of that open plugin platform** — it simply would not exist without it.
-`easyeda-agent` stays a thin, well-behaved community citizen of the official plugin
+`pcbpilot` stays a thin, well-behaved community citizen of the official plugin
 system, and every capability here ultimately dispatches to JLC's own `eda.*` calls.
 感谢嘉立创开放的 EDA 插件通道,让我们能做出这样一个好用的自动化插件。
 
@@ -429,4 +426,4 @@ compatible — the project as a whole is still yours to use under MIT.
 
 Thanks for every star.
 
-[![Star History Chart](https://api.star-history.com/svg?repos=zhoushoujianwork/easyeda-agent&type=Date)](https://www.star-history.com/#zhoushoujianwork/easyeda-agent&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=zhuangzard/pcbpilot&type=Date)](https://www.star-history.com/#zhuangzard/pcbpilot&Date)

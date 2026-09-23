@@ -1,19 +1,19 @@
 {
-	"name": "easyeda-agent-connector",
-	"uuid": "e60502e753e5211b3c30133bf2348a93",
-	"displayName": "EDA Agent Connector",
+	"name": "pcbpilot-connector",
+	"uuid": "bcd81ca73a874142a2d2b6c1f195d083",
+	"displayName": "PCB Pilot Connector",
 	"description": "Bridges the local agent daemon to the official eda.* API over a local WebSocket, dispatching typed schematic and PCB actions.",
 	"version": "1.5.3-dev.6",
-	"publisher": "zhoushoujian",
+	"publisher": "zhuangzard",
 	"engines": {
 		"eda": "~3.2.0"
 	},
 	"license": "MIT",
 	"repository": {
 		"type": "github",
-		"url": "https://github.com/zhoushoujianwork/easyeda-agent"
+		"url": "https://github.com/zhuangzard/pcbpilot"
 	},
-	"homepage": "https://github.com/zhoushoujianwork/easyeda-agent",
+	"homepage": "https://github.com/zhuangzard/pcbpilot",
 	"categories": "Other",
 	"keywords": [
 		"agent",

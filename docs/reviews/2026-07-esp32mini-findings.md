@@ -2,7 +2,7 @@
 
 > 历史证据说明（2026-09-14）：本文保留当时输入、执行与结果，不重写旧验收事实。
 > 其中现场挪件、旧布局命令、截图判断或“当前/待补”描述不构成现行操作指南。
-> 后续原理图设计/修复统一按 [数据驱动架构基准](../../.agents/skills/easyeda-agent/references/schematic-data.md#数据驱动架构基准)
+> 后续原理图设计/修复统一按 [数据驱动架构基准](../../.agents/skills/pcbpilot/references/schematic-data.md#数据驱动架构基准)
 > 执行：数据发现问题、回源修复重算；位号参与，非位号器件属性文字排除布局碰撞/入框。
 > 历史通过不证明当前源数据、算法版本或现场仍通过。
 
@@ -51,7 +51,7 @@ Clearance 26→**0**、`pcb check` **0**、`layout-lint` **100/100**。残留 1 
 > 守卫负向验证通过)/track-delete/fill delete 精准清场,图元数还原 37/89;**新发现**:
 > 手术增删后同网(GND)大面积 Connection Error 是铺铜连通性失效,`pour-rebuild` 后
 > DRC 11→1(基线,剩 A3 假阳性)。自举流程已沉淀为
-> `.agents/skills/easyeda-agent/references/environment-setup.md`。
+> `.agents/skills/pcbpilot/references/environment-setup.md`。
 
 - [x] `pcb drc --timeout <s>` + **忙时防重入**——**已落地+真机验证(2026-07-07)**:
   CLI `--timeout`(默认 60s)经协议新字段 `timeoutMs` 传导给 daemon,daemon 提前
@@ -96,16 +96,16 @@ Clearance 26→**0**、`pcb check` **0**、`layout-lint` **100/100**。残留 1 
   Netlist Error≤1 且 `netlist-diff` 判定一致时视为通过(直至 A3 修复)。
 - **抄图训练(新增,2026-07-07)**:oshwhub 官方开源板逐 pin netlist 机械对照,
   `training/copy-check.py` 判 100% 一致。首个闭环 XDS110下载器(见
-  `.agents/skills/easyeda-agent/references/copy-training.md`)。
+  `.agents/skills/pcbpilot/references/copy-training.md`)。
 
 ### F. 抄图训练暴露的 CLI/连接器缺口(2026-07-07,XDS110)—— 已开 issue,交 ClawFlow
-- [x] [#49](https://github.com/zhoushoujianwork/easyeda-agent/issues/49) **`lib search` 按 LCSC C 号查询是模糊匹配,不保证精确命中**——
+- [x] [#49](https://github.com/zhuangzard/pcbpilot/issues/49) **`lib search` 按 LCSC C 号查询是模糊匹配,不保证精确命中**——
   `--query "C5665"` 命中了运放芯片而非目标排针。
-- [x] [#50](https://github.com/zhoushoujianwork/easyeda-agent/issues/50) **`sch autoconnect --spec` 对同一 spec 重跑不是幂等的**——
+- [x] [#50](https://github.com/zhuangzard/pcbpilot/issues/50) **`sch autoconnect --spec` 对同一 spec 重跑不是幂等的**——
   已连接 pin 会再叠一份新 flag+stub wire。
-- [x] [#51](https://github.com/zhoushoujianwork/easyeda-agent/issues/51) **删除 netflag/netport 不连带删除 stub wire**,
+- [x] [#51](https://github.com/zhuangzard/pcbpilot/issues/51) **删除 netflag/netport 不连带删除 stub wire**,
   `dangling-wire` 规则也抓不到残留孤儿线。
-- [x] [#52](https://github.com/zhoushoujianwork/easyeda-agent/issues/52) `schematic.components.list` 不暴露器件
+- [x] [#52](https://github.com/zhuangzard/pcbpilot/issues/52) `schematic.components.list` 不暴露器件
   device/symbol uuid(只有 footprint uuid)——同 LCSC C 号可能对应多个 pin 编号
   体系不同的 symbol 变体。**已修复**:`serializeComponent` 新增结构化 `device:{libraryUuid,uuid,name}`
   字段(取自 `getState_Component()`,即 rebind 路径复用的 device-library 身份),
@@ -120,11 +120,11 @@ Clearance 26→**0**、`pcb check` **0**、`layout-lint` **100/100**。残留 1 
 把同一 45 件设计从单张 A3 拆成两张 A4(USB/电源/调试 15 件 + 主控 30 件)验证「多
 页跨页同名网络自动合并」的机制,过程暴露:
 
-- [x] [#53](https://github.com/zhoushoujianwork/easyeda-agent/issues/53) **`sch autoconnect --all-pages` 跨页落笔失败且报错含糊**——
+- [x] [#53](https://github.com/zhuangzard/pcbpilot/issues/53) **`sch autoconnect --all-pages` 跨页落笔失败且报错含糊**——
   应提示切页而非笼统"not placed"。
-- [x] [#54](https://github.com/zhoushoujianwork/easyeda-agent/issues/54) **`sch read` / `sch layout-lint --all-pages` 对非激活页
+- [x] [#54](https://github.com/zhuangzard/pcbpilot/issues/54) **`sch read` / `sch layout-lint --all-pages` 对非激活页
   数据残缺**(pins 空数组 / bbox 被跳过)且无文档说明。
-- [x] [#55](https://github.com/zhoushoujianwork/easyeda-agent/issues/55) **`sch page-rename` 返回 `ok:true` 但 `doc ls` 立即
+- [x] [#55](https://github.com/zhuangzard/pcbpilot/issues/55) **`sch page-rename` 返回 `ok:true` 但 `doc ls` 立即
   读取仍是旧名**,需等待不确定的刷新触发(2026-07-07 现场复现:重命名后 `doc ls`
   读到旧名,跑一次无关的 `sch clear` 后才刷新)。
 - [x] **再次印证 autoconnect 非幂等的代价有多大**:调试期间因为不确定连接是否

@@ -3,11 +3,11 @@
 修复已纳入 v1.4.4。按用户后续要求，#190/#192/#201（以及后续 #202）随发版关闭，
 不等待报告者复验；#191/#173/#43 保留开放。#200 已于 9 月 9 日另行关闭并建议改用
 网页编辑器，本轮未进一步确认其原始根因。发行状态以
-[v1.4.4 Release](https://github.com/zhoushoujianwork/easyeda-agent/releases/tag/v1.4.4)
+[v1.4.4 Release](https://github.com/zhuangzard/pcbpilot/releases/tag/v1.4.4)
 为准；以下是发版前的排查与验证记录。
 
 发版前远端同步状态（2026-09-09）：13 个修复及记录提交已推送到 main（至 d1dc9dd），
-[对应 CI](https://github.com/zhoushoujianwork/easyeda-agent/actions/runs/34250243475)
+[对应 CI](https://github.com/zhuangzard/pcbpilot/actions/runs/34250243475)
 4 个 job 全部通过。PR #199 已按“完整采纳到 main”关闭；已更新 #190、#192、#201、
 #191、#200 的已有进度评论，Issue 仍保留开放。Windows PowerShell 5.1 原生测试已通过，
 完整 Windows DSH 安装及其余宿主/整板验收缺口仍保留。尚未发布新版本。
@@ -17,13 +17,13 @@
 
 | 项目 | 结论及本轮处理 | 后续验收 |
 |---|---|---|
-| [PR #199](https://github.com/zhoushoujianwork/easyeda-agent/pull/199) | 请求体上限从 1 MiB 放宽到 32 MiB，方向合理；补丁可应用到当前 main，独立临时副本中 `go test ./internal/daemon` 通过。未合并。 | 现有测试只覆盖 2 MiB 可通过；建议补超限拒绝测试，Skill 说明 base64 后整个 JSON 的大小限制。3D 模型真实导入未验证。 |
-| [#192](https://github.com/zhoushoujianwork/easyeda-agent/issues/192) | 本地新增 `pcb modify` / `sch modify --patch-file`，兼容 UTF-8 BOM，与 `--patch` 互斥；同步 Skill。 | 命令级模拟 daemon 测试验证 payload 与无效输入不派发；尚未在 Windows PowerShell 5.1 真机执行。发布后可请报告者复验。 |
-| [#191](https://github.com/zhoushoujianwork/easyeda-agent/issues/191) | 仓库 `docs/dev-environment.md` 已有 9 月 5 日的 3.2.186 超时实测；官方接口标注 EDA v4 / BETA，参数签名与当前调用一致。已把兼容性说明补进 Skill。 | 保持开放；受支持宿主上探测并核对连接。不能把换 netport/netflag 当原生 label 已修复。 |
-| [#190](https://github.com/zhoushoujianwork/easyeda-agent/issues/190) | 报错发生在 `--doc PCB1` 解析阶段，未进入器件移动。已有维护者评论索要版本、成功/失败后的文档枚举，尚无新增答复。 | 等待同一会话的 health / doc ls 对照，不重复发送相同问题。 |
-| [#200](https://github.com/zhoushoujianwork/easyeda-agent/issues/200) | 报告为 3.2.149 重启后 PCB getAll 空读；本机为 3.2.186，不能当同版复现。当前打开的是用户原理图工程，本轮未改动页面。 | 需在受影响宿主核对窗口、活动 PCB、文档 UUID 与 getAll / 引擎计数；读数异常时不能把 0 器件算通过或盲写。附带 cmdKey 症状在 `cmd_sch_block_layout_solve.go` 有网表导出影响命令上下文的历史线索，但未证明本票同源；升级 RPC、密集引脚短接需分别复现。 |
-| [#173](https://github.com/zhoushoujianwork/easyeda-agent/issues/173) | 原生 UI 编组 API 未暴露的历史调查已有记录；virtual group 是独立功能开发，需要统一约束全部布局入口。 | 保持开放，不能用只实现 group CRUD 宣称完成。 |
-| [#43](https://github.com/zhoushoujianwork/easyeda-agent/issues/43) | 芯片级 N8R8 实机验收；历史 R2 评论已纠正 `pcb check` 假绿，记录了 2 条短路，不能按曾有 0 ERROR 数字关闭。 | 专门运行真实编辑器整板回归，解决短路、RF / 高速约束后再验收；本轮未执行。 |
+| [PR #199](https://github.com/zhuangzard/pcbpilot/pull/199) | 请求体上限从 1 MiB 放宽到 32 MiB，方向合理；补丁可应用到当前 main，独立临时副本中 `go test ./internal/daemon` 通过。未合并。 | 现有测试只覆盖 2 MiB 可通过；建议补超限拒绝测试，Skill 说明 base64 后整个 JSON 的大小限制。3D 模型真实导入未验证。 |
+| [#192](https://github.com/zhuangzard/pcbpilot/issues/192) | 本地新增 `pcb modify` / `sch modify --patch-file`，兼容 UTF-8 BOM，与 `--patch` 互斥；同步 Skill。 | 命令级模拟 daemon 测试验证 payload 与无效输入不派发；尚未在 Windows PowerShell 5.1 真机执行。发布后可请报告者复验。 |
+| [#191](https://github.com/zhuangzard/pcbpilot/issues/191) | 仓库 `docs/dev-environment.md` 已有 9 月 5 日的 3.2.186 超时实测；官方接口标注 EDA v4 / BETA，参数签名与当前调用一致。已把兼容性说明补进 Skill。 | 保持开放；受支持宿主上探测并核对连接。不能把换 netport/netflag 当原生 label 已修复。 |
+| [#190](https://github.com/zhuangzard/pcbpilot/issues/190) | 报错发生在 `--doc PCB1` 解析阶段，未进入器件移动。已有维护者评论索要版本、成功/失败后的文档枚举，尚无新增答复。 | 等待同一会话的 health / doc ls 对照，不重复发送相同问题。 |
+| [#200](https://github.com/zhuangzard/pcbpilot/issues/200) | 报告为 3.2.149 重启后 PCB getAll 空读；本机为 3.2.186，不能当同版复现。当前打开的是用户原理图工程，本轮未改动页面。 | 需在受影响宿主核对窗口、活动 PCB、文档 UUID 与 getAll / 引擎计数；读数异常时不能把 0 器件算通过或盲写。附带 cmdKey 症状在 `cmd_sch_block_layout_solve.go` 有网表导出影响命令上下文的历史线索，但未证明本票同源；升级 RPC、密集引脚短接需分别复现。 |
+| [#173](https://github.com/zhuangzard/pcbpilot/issues/173) | 原生 UI 编组 API 未暴露的历史调查已有记录；virtual group 是独立功能开发，需要统一约束全部布局入口。 | 保持开放，不能用只实现 group CRUD 宣称完成。 |
+| [#43](https://github.com/zhuangzard/pcbpilot/issues/43) | 芯片级 N8R8 实机验收；历史 R2 评论已纠正 `pcb check` 假绿，记录了 2 条短路，不能按曾有 0 ERROR 数字关闭。 | 专门运行真实编辑器整板回归，解决短路、RF / 高速约束后再验收；本轮未执行。 |
 
 本轮仅修改 CLI 文件输入与 Skill 说明，未改连接器、布局判据或 autosave；离线测试不代表整板端到端验收。
 
@@ -208,12 +208,12 @@ Windows DSH 真机验收。CI 已接入，未推送触发。
 
 ## GitHub 进度同步（2026-09-09）
 
-- [#190](https://github.com/zhoushoujianwork/easyeda-agent/issues/190#issuecomment-5588240718)
-- [#192](https://github.com/zhoushoujianwork/easyeda-agent/issues/192#issuecomment-5588241084)
-- [#201](https://github.com/zhoushoujianwork/easyeda-agent/issues/201#issuecomment-5588241501)
-- [#191](https://github.com/zhoushoujianwork/easyeda-agent/issues/191#issuecomment-5588241883)
-- [#200](https://github.com/zhoushoujianwork/easyeda-agent/issues/200#issuecomment-5588242274)
-- [PR #199](https://github.com/zhoushoujianwork/easyeda-agent/pull/199#issuecomment-5588242636)
+- [#190](https://github.com/zhuangzard/pcbpilot/issues/190#issuecomment-5588240718)
+- [#192](https://github.com/zhuangzard/pcbpilot/issues/192#issuecomment-5588241084)
+- [#201](https://github.com/zhuangzard/pcbpilot/issues/201#issuecomment-5588241501)
+- [#191](https://github.com/zhuangzard/pcbpilot/issues/191#issuecomment-5588241883)
+- [#200](https://github.com/zhuangzard/pcbpilot/issues/200#issuecomment-5588242274)
+- [PR #199](https://github.com/zhuangzard/pcbpilot/pull/199#issuecomment-5588242636)
 
 再次对照 PR #199：原提交 982eaf6 与采用提交 cf36d45 的 dispatch.go 内容完全一致；
 原 2MiB 请求测试保留，本地新增 32MiB 精确边界与多 1 字节拒绝测试，署名保留。
@@ -227,11 +227,11 @@ Windows DSH 真机验收。CI 已接入，未推送触发。
 进入远端 main 且相关 CI 通过后，可关联提交关闭完整采纳的 PR。未解决的 issue 继续开放。
 
 13 个提交已从 ed91d03 推送至 d1dc9dd；
-[CI 34250243475](https://github.com/zhoushoujianwork/easyeda-agent/actions/runs/34250243475)
+[CI 34250243475](https://github.com/zhuangzard/pcbpilot/actions/runs/34250243475)
 对应的 headSha 为 d1dc9dd6ab8305184c3c41b89a53658c57651ed2，4 个 job 全部通过：
 Ubuntu 的 CLI/connector/Skill 全套与 Ubuntu/macOS/Windows 原生 smoke。
 
-- [Windows 日志](https://github.com/zhoushoujianwork/easyeda-agent/actions/runs/34250243475/job/102142525960)
+- [Windows 日志](https://github.com/zhuangzard/pcbpilot/actions/runs/34250243475/job/102142525960)
   明确记录 TestModifyPatchWindowsPowerShell51/sch 与 /pcb PASS；真实 powershell.exe
   硬校验 5.1 后，生成带空格路径的 UTF-8 BOM 文件并调用新编译的 easyeda.exe，核对
   模拟 daemon payload。这补齐 #192 的 Windows 参数解析边界；Windows 编辑器整套
@@ -239,9 +239,9 @@ Ubuntu 的 CLI/connector/Skill 全套与 Ubuntu/macOS/Windows 原生 smoke。
 - Windows DSH 路径测试 7/7 通过，包含特殊字符实际路径的 Node 入口启动与 Skill
   读取。该 Windows 测试使用测试入口文件；完整 DSH loader 的集成测试仍只在 Mac
   完成，不能将此写为 Windows 完整安装验收通过。
-- [PR #199](https://github.com/zhoushoujianwork/easyeda-agent/pull/199)
+- [PR #199](https://github.com/zhuangzard/pcbpilot/pull/199)
   已关闭为“已采纳”，关联远端采用提交
-  [cf36d45](https://github.com/zhoushoujianwork/easyeda-agent/commit/cf36d45e4c554b88cfc0686d4925a536b3373d54)，
+  [cf36d45](https://github.com/zhuangzard/pcbpilot/commit/cf36d45e4c554b88cfc0686d4925a536b3373d54)，
   保留原作者署名。入口与大小边界通过，实际 3D 模型导入未验收。
 - 上节列出的 6 条 GitHub 评论已原位更新，保留各 issue 的实测范围与未完成项。
   #190/#192/#201 继续跟进发布与安装/报告者复验；#191/#200/#173/#43 未解决。

@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/workflow"
+	"github.com/zhuangzard/pcbpilot/internal/workflow"
 )
 
 // qtestSummary 造一份最小可用的质量快照。

@@ -1,6 +1,6 @@
 # EDA Agent Connector
 
-**让 AI Agent 替你画板子。** 这是 easyeda-agent 系统在 EasyEDA(嘉立创EDA专业版)内的社区连接器:配合本地 `easyeda` CLI/daemon 与 Agent Skill,通过官方 API 在真实编辑器里完成选型、放置、连线、方框标注与校验。
+**让 AI Agent 替你画板子。** 这是 pcbpilot 系统在 EasyEDA(嘉立创EDA专业版)内的社区连接器:配合本地 `pcbpilot` CLI/daemon 与 Agent Skill,通过官方 API 在真实编辑器里完成选型、放置、连线、方框标注与校验。
 
 ```text
 Skill / CLI -> Go daemon -> EDA Agent Connector -> 官方 eda.* API
@@ -8,8 +8,8 @@ Skill / CLI -> Go daemon -> EDA Agent Connector -> 官方 eda.* API
 
 一行看懂:Skill 描述专家工作流,Go CLI/daemon 提供有类型、可观测的动作与校验,本连接器把这些 typed actions 桥接到官方 `eda.*` API——它是整个系统中**唯一直接调用 `eda.*` 的组件**,每一步操作最终都落在嘉立创自己开放的插件能力上。
 
-- GitHub 仓库:https://github.com/zhoushoujianwork/easyeda-agent
-- 最新 Release:https://github.com/zhoushoujianwork/easyeda-agent/releases/latest
+- GitHub 仓库:https://github.com/zhuangzard/pcbpilot
+- 最新 Release:https://github.com/zhuangzard/pcbpilot/releases/latest
 
 ## 效果演示
 
@@ -32,9 +32,9 @@ Skill / CLI -> Go daemon -> EDA Agent Connector -> 官方 eda.* API
 ![门禁控制板示例的实际 Apply 阶段捕捉，加速播放](images/access-control-sch-apply.gif)
 
 动图使用电源与 RF 主控页实际 Apply 捕捉的 12 张关键阶段导图，加速播放；静图源自 EasyEDA 官方导图，展示名称已匿名化。
-录制方法见 [Apply 动图捕捉](https://github.com/zhoushoujianwork/easyeda-agent/blob/main/docs/schematic-showcase.md)。
+录制方法见 [Apply 动图捕捉](https://github.com/zhuangzard/pcbpilot/blob/main/docs/schematic-showcase.md)。
 两页布局与连接检查均为 0 错误、0 警告；官方 DRC 仍有 3 WARN，严格门禁未通过，部分文字避让仍待完善。
-验证范围见 [1.4 发布与验证](https://github.com/zhoushoujianwork/easyeda-agent/blob/main/docs/releases/release-1.4.md)。
+验证范围见 [1.4 发布与验证](https://github.com/zhuangzard/pcbpilot/blob/main/docs/releases/release-1.4.md)。
 
 ### 历史 PCB 案例：ESP32-S3 四层板
 
@@ -42,7 +42,7 @@ Skill / CLI -> Go daemon -> EDA Agent Connector -> 官方 eda.* API
 
 ![AI 在 EasyEDA 中完成 PCB 布局、板框和铺铜](images/demo-pcb-layout.gif)
 
-由 agent 驱动 PCB 流程产出的 ESP32-S3 板：自动布局 → 板框贴合 → 规则感知布线 → 4 层电源平面 → 丝印碰撞避让。历史验证记录见 [完整案例](https://github.com/zhoushoujianwork/easyeda-agent/blob/main/docs/showcase-esp32-mini.md)。
+由 agent 驱动 PCB 流程产出的 ESP32-S3 板：自动布局 → 板框贴合 → 规则感知布线 → 4 层电源平面 → 丝印碰撞避让。历史验证记录见 [完整案例](https://github.com/zhuangzard/pcbpilot/blob/main/docs/showcase-esp32-mini.md)。
 
 ![ESP32-S3 成品板:4 层电源平面 + 圆角板框 + 位号对齐](images/demo-esp32-board.png)
 
@@ -54,7 +54,7 @@ Skill / CLI -> Go daemon -> EDA Agent Connector -> 官方 eda.* API
 
 版本与资产以 GitHub Release 为准。组合器使用已设计的模块几何,
 不自动推导任意外围电路、分页或删除源页。构建步骤、已完成验证和未完成项见
-[1.4 发布与验证](https://github.com/zhoushoujianwork/easyeda-agent/blob/main/docs/releases/release-1.4.md)。
+[1.4 发布与验证](https://github.com/zhuangzard/pcbpilot/blob/main/docs/releases/release-1.4.md)。
 
 ## 已支持能力概览
 
@@ -77,50 +77,50 @@ Skill / CLI -> Go daemon -> EDA Agent Connector -> 官方 eda.* API
 - 连接器自愈重连看门狗(daemon 重启/窗口后台都能自动回来)、daemon 防抖自动保存、审计日志、窗口内非阻塞 toast 播报进度。
 - `debug.exec_js` 用于任务范围内的临时调试。
 
-完整能力清单与路线图见 [FEATURES](https://github.com/zhoushoujianwork/easyeda-agent/blob/main/docs/FEATURES.md)。
+完整能力清单与路线图见 [FEATURES](https://github.com/zhuangzard/pcbpilot/blob/main/docs/FEATURES.md)。
 
 ## 连接器本身做什么
 
 这是一个真实可打包、可导入的 EasyEDA Pro 扩展,刻意保持很薄:
 
-- 本地 WebSocket 传输:默认连接固定端口 `60832`、握手、注册、上下文同步、心跳、自愈重连;
+- 本地 WebSocket 传输:默认连接固定端口 `61832`、握手、注册、上下文同步、心跳、自愈重连;
 - typed action 分发:把 daemon 下发的结构化动作映射到官方 `eda.*` 调用;
 - 结果序列化:执行结果、警告、错误、上下文回传 daemon;
 - 产物传输:截图、BOM、网表等二进制结果编码回传。
 
-真正的工作流、校验、确认、产物处理和多步编排都在 Go CLI/daemon 与 Skill 层完成——所以**必须配套本地 `easyeda` CLI/daemon 一起用**,单装本插件没有任何效果。
+真正的工作流、校验、确认、产物处理和多步编排都在 Go CLI/daemon 与 Skill 层完成——所以**必须配套本地 `pcbpilot` CLI/daemon 一起用**,单装本插件没有任何效果。
 
 ## 安装与开始
 
 **1. 装本连接器**(两条通道任选):
 
 - 在本市场页面点击「安装」——平台可原地自动更新,最省心;
-- 或从 GitHub Release(https://github.com/zhoushoujianwork/easyeda-agent/releases/latest)侧载 `easyeda-agent-connector.eext`——与 CLI 严格同版。
+- 或从 GitHub Release(https://github.com/zhuangzard/pcbpilot/releases/latest)侧载 `pcbpilot-connector.eext`——与 CLI 严格同版。
 
 **2. 装 CLI/daemon + Skill**(一行脚本,自动检测 Claude Code / Codex 并装好 Skill):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.sh | bash
 ```
 
 **3. 在 EasyEDA 中确认三件事**:
 
 1. 已安装本连接器(市场安装或 `.eext` 导入);
 2. 已开启「允许外部交互 / Allow external interaction」——否则连接器的 WebSocket 连不上本地 daemon;
-3. 已启动本地 daemon(`easyeda daemon start`),`easyeda health` 能看到已连接窗口。
+3. 已启动本地 daemon(`pcbpilot daemon start`),`pcbpilot health` 能看到已连接窗口。
 
-**之后升级不必再跑脚本**:`easyeda update` 一键升 CLI + Skill;`easyeda update --check` 只读三方(cli / skill / connector)版本对齐表。
+**之后升级不必再跑脚本**:`pcbpilot update` 一键升 CLI + Skill;`pcbpilot update --check` 只读三方(cli / skill / connector)版本对齐表。
 
 ### 版本配套约定
 
-CLI/daemon、连接器与 Skill 遵循**同一版本号**。三者需配套安装,并运行开启外部交互的 EasyEDA Pro;EasyEDA 应用使用自身版本号。落后的连接器会被 `easyeda daemon health` 标成 stale。两条安装通道的取舍:
+CLI/daemon、连接器与 Skill 遵循**同一版本号**。三者需配套安装,并运行开启外部交互的 EasyEDA Pro;EasyEDA 应用使用自身版本号。落后的连接器会被 `pcbpilot daemon health` 标成 stale。两条安装通道的取舍:
 
 - **市场版**:平台可原地自动更新,最省心;但市场无发布 API,每版需人工重新提交,**上架版本可能滞后于 CLI**。
 - **GitHub Release 侧载版**:与 CLI **严格同版**,需严格版本对齐时以它为准;代价是无原地自动更新,升级需手动卸载旧版再导入。
 
 导入更新后需完全退出并重新启动 EasyEDA,已经打开的窗口可能仍运行旧连接器代码。
 
-完整上手、版本对齐与升级注意事项见 [快速开始](https://github.com/zhoushoujianwork/easyeda-agent/blob/main/docs/quick-start.md)。
+完整上手、版本对齐与升级注意事项见 [快速开始](https://github.com/zhuangzard/pcbpilot/blob/main/docs/quick-start.md)。
 
 ## 更名说明(2026-08)
 
@@ -128,8 +128,8 @@ CLI/daemon、连接器与 Skill 遵循**同一版本号**。三者需配套安�
 
 ## 链接
 
-- GitHub 仓库(架构、路线图、能力矩阵、实战案例):https://github.com/zhoushoujianwork/easyeda-agent
-- Releases(严格同版 `.eext` + CLI 各平台二进制):https://github.com/zhoushoujianwork/easyeda-agent/releases
-- [完整实战案例:一份需求文档 → ESP32-S3 四层板](https://github.com/zhoushoujianwork/easyeda-agent/blob/main/docs/showcase-esp32-mini.md)
+- GitHub 仓库(架构、路线图、能力矩阵、实战案例):https://github.com/zhuangzard/pcbpilot
+- Releases(严格同版 `.eext` + CLI 各平台二进制):https://github.com/zhuangzard/pcbpilot/releases
+- [完整实战案例:一份需求文档 → ESP32-S3 四层板](https://github.com/zhuangzard/pcbpilot/blob/main/docs/showcase-esp32-mini.md)
 
 MIT 许可,欢迎 star 与共建电路块库(一次贡献,署名可追,永久收益)。

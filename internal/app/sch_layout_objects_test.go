@@ -15,7 +15,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/workflow"
+	"github.com/zhuangzard/pcbpilot/internal/workflow"
 )
 
 // registryFixture 是 #181 场景的缩影:一页上同时有模块认领(POWER/MCU)、

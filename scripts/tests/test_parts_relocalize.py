@@ -1,4 +1,4 @@
-"""Edition re-localization regressions; offline only, never runs the easyeda CLI.
+"""Edition re-localization regressions; offline only, never runs the pcbpilot CLI.
 
 The live fact this guards: the international edition (easyeda.com) ships the same
 system library uuid as the China edition but DIFFERENT device uuids, so every
@@ -17,7 +17,7 @@ import unittest
 
 
 REPO = Path(__file__).resolve().parents[2]
-SCRIPT = REPO / ".agents/skills/easyeda-agent/scripts/parts-relocalize.py"
+SCRIPT = REPO / ".agents/skills/pcbpilot/scripts/parts-relocalize.py"
 spec = importlib.util.spec_from_file_location("parts_relocalize", SCRIPT)
 relocalizer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(relocalizer)
@@ -147,7 +147,7 @@ class RelocalizeTransformTests(unittest.TestCase):
 
 
 class CliOutputParsingTests(unittest.TestCase):
-    # Shape verified live: `easyeda lib by-lcsc --lcsc C1525 --project <name>`.
+    # Shape verified live: `pcbpilot lib by-lcsc --lcsc C1525 --project <name>`.
     RESPONSE = {
         "ok": True,
         "result": {
@@ -158,7 +158,7 @@ class CliOutputParsingTests(unittest.TestCase):
     }
 
     def test_json_is_extracted_from_noise_before_and_after_it(self):
-        noisy = ("connecting to daemon on 60832...\n"
+        noisy = ("connecting to daemon on 61832...\n"
                  "warning: connector version 1.5.1 vs cli 1.5.2\n"
                  + json.dumps(self.RESPONSE) + "\n"
                  "done in 412ms\n")
@@ -197,11 +197,11 @@ class BatchingTests(unittest.TestCase):
         self.assertEqual([c for chunk in chunks for c in chunk], items)
 
     def test_the_command_passes_project_and_window_through(self):
-        cmd = relocalizer.build_command("easyeda", ["C1", "C2"], project="demo", window="w1")
-        self.assertEqual(cmd, ["easyeda", "lib", "by-lcsc", "--lcsc", "C1,C2",
+        cmd = relocalizer.build_command("pcbpilot", ["C1", "C2"], project="demo", window="w1")
+        self.assertEqual(cmd, ["pcbpilot", "lib", "by-lcsc", "--lcsc", "C1,C2",
                                "--project", "demo", "--window", "w1"])
-        self.assertEqual(relocalizer.build_command("easyeda", ["C1"]),
-                         ["easyeda", "lib", "by-lcsc", "--lcsc", "C1"])
+        self.assertEqual(relocalizer.build_command("pcbpilot", ["C1"]),
+                         ["pcbpilot", "lib", "by-lcsc", "--lcsc", "C1"])
 
 
 if __name__ == "__main__":

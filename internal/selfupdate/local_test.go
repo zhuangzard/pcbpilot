@@ -25,8 +25,8 @@ func localFixture(t *testing.T, v string, evil bool) string {
 	w.Close()
 	asset, _ := AssetName(runtime.GOOS, runtime.GOARCH)
 	files := map[string][]byte{
-		asset:                          []byte("#!/bin/sh\necho 'easyeda-agent v" + v + "'\n"),
-		"easyeda-agent-connector.eext": z.Bytes(),
+		asset:                          []byte("#!/bin/sh\necho 'pcbpilot v" + v + "'\n"),
+		"pcbpilot-connector.eext": z.Bytes(),
 		"skills.tar.gz":                makeVersionedTarball(t, v, map[string]string{"SKILL.md": "guide", "references/test.md": "expected"}, evil),
 	}
 	var sums strings.Builder
@@ -91,10 +91,10 @@ func TestLocalInstallBackupsAndRealBytes(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("CODEX_HOME", "")
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
-	skill := filepath.Join(home, ".agents/skills/easyeda-agent")
+	skill := filepath.Join(home, ".agents/skills/pcbpilot")
 	os.MkdirAll(skill, 0755)
 	os.WriteFile(filepath.Join(skill, "old.md"), []byte("original"), 0644)
-	bin := filepath.Join(home, "easyeda")
+	bin := filepath.Join(home, "pcbpilot")
 	os.WriteFile(bin, []byte("original binary"), 0755)
 	b, e := ReadLocalBundle(localFixture(t, "1.4.9-dev.1", false))
 	if e != nil {
@@ -109,7 +109,7 @@ func TestLocalInstallBackupsAndRealBytes(t *testing.T) {
 	if e = b.CheckSkill(skill); e != nil {
 		t.Fatal(e)
 	}
-	backups, _ := filepath.Glob(filepath.Join(home, ".easyeda-backup-*"))
+	backups, _ := filepath.Glob(filepath.Join(home, ".pcbpilot-backup-*"))
 	if len(backups) != 1 {
 		t.Fatal(backups)
 	}
@@ -117,7 +117,7 @@ func TestLocalInstallBackupsAndRealBytes(t *testing.T) {
 	if string(old) != "original binary" {
 		t.Fatal("lost binary backup")
 	}
-	backups, _ = filepath.Glob(filepath.Join(filepath.Dir(skill), ".easyeda-local-backup-*"))
+	backups, _ = filepath.Glob(filepath.Join(filepath.Dir(skill), ".pcbpilot-local-backup-*"))
 	if len(backups) != 1 {
 		t.Fatal(backups)
 	}
@@ -125,7 +125,7 @@ func TestLocalInstallBackupsAndRealBytes(t *testing.T) {
 	if string(old) != "original" {
 		t.Fatal("lost Skill backup")
 	}
-	b.Binary = []byte("#!/bin/sh\necho 'easyeda-agent v1.4.8'\n")
+	b.Binary = []byte("#!/bin/sh\necho 'pcbpilot v1.4.8'\n")
 	if e = b.Install(bin, io.Discard); e == nil {
 		t.Fatal("installed incorrectly versioned executable")
 	}

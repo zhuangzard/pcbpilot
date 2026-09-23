@@ -1,5 +1,5 @@
 /**
- * Wire protocol shapes shared between the easyeda-agent Go daemon and this
+ * Wire protocol shapes shared between the pcbpilot Go daemon and this
  * connector. Field names MUST match `docs/protocol.md`,
  * `docs/connector-contract.md` and `internal/protocol/envelope.go` exactly.
  */
@@ -10,7 +10,7 @@ declare const __CONNECTOR_VERSION__: string;
 export const CONNECTOR_VERSION =
 	typeof __CONNECTOR_VERSION__ === 'undefined' ? '0.0.0-dev' : __CONNECTOR_VERSION__;
 export const PROTOCOL_VERSION = 'v1';
-export const SERVICE_ID = 'easyeda-agent';
+export const SERVICE_ID = 'pcbpilot';
 export const CAPABILITIES = ['schematic.v1', 'pcb.v1'];
 
 // ─── Daemon → connector frames ───────────────────────────────────────

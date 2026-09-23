@@ -88,7 +88,7 @@ export async function ensureHeaderMenusVisible(config: unknown, delay: DelayFn =
 		}
 		catch (err) {
 			try {
-				eda.sys_Log.add(`[easyeda-agent] header menu registration failed: ${String(err)}`);
+				eda.sys_Log.add(`[pcbpilot] header menu registration failed: ${String(err)}`);
 			}
 			catch { /* log panel unavailable */ }
 			return; // A rejecting host will not start accepting; stop retrying.

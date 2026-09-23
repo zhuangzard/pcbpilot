@@ -38,7 +38,7 @@
 - 考虑散热设计
 - 提供必要的接口和连接器
 
-**Created by**: github:zhoushoujianwork/easyeda-agent
+**Created by**: github:zhuangzard/pcbpilot
 
 ---
 ---
@@ -53,19 +53,19 @@
 
 > **本节只写这个 Demo 特有的东西。** 通用规则（环境自举、铁律、阶段定义、停点、
 > 档位默认、块地图、各命令签名）**正本都在 skill 里**，这里只给指针——照抄一份必然漂移。
-> 入口：[`.agents/skills/easyeda-agent/SKILL.md`](.agents/skills/easyeda-agent/SKILL.md)
+> 入口：[`.agents/skills/pcbpilot/SKILL.md`](.agents/skills/pcbpilot/SKILL.md)
 
 ## 0. 环境（一次性）
 
 三样东西缺一不可：**CLI/daemon**、**EasyEDA 里的连接器插件**、**外部交互权限**。
-安装与版本对账见 [Skill 入口](.agents/skills/easyeda-agent/SKILL.md) 和
-[environment-setup.md](.agents/skills/easyeda-agent/references/environment-setup.md)，不依赖旧章节编号。
+安装与版本对账见 [Skill 入口](.agents/skills/pcbpilot/SKILL.md) 和
+[environment-setup.md](.agents/skills/pcbpilot/references/environment-setup.md)，不依赖旧章节编号。
 
 只强调最容易翻车的一条：**sideload 的 `.eext` 同 uuid 更新必须先卸载旧的**，
 且导入后要**完全退出重启 EasyEDA**——否则已开窗口还在跑旧代码并抢 daemon 的 socket。
 
 ```bash
-easyeda health        # 检查连接与实际运行版本；有窗口不等于现场数据已验证
+pcbpilot health        # 检查连接与实际运行版本；有窗口不等于现场数据已验证
 ```
 
 看到 `windows: []` 就是连接器没附上，回头查权限和重启，**别往下跑**。
@@ -81,14 +81,14 @@ easyeda health        # 检查连接与实际运行版本；有窗口不等于�
 ## 2. 起跑
 
 把**「一、客户原始需求」那一段**交给 agent，并要求它按
-`.agents/skills/easyeda-agent/references/design-flow.md` 的流程脊柱走。一句话就够：
+`.agents/skills/pcbpilot/references/design-flow.md` 的流程脊柱走。一句话就够：
 
 > 按 esp32MiniRequire.md 的客户原始需求，在工程 ceshi 上跑完整的 S0–S6 + P0–P10，
 > 分段验收，每段过门后存盘。
 
 ## 3. 分段验收（**不要追求一次跑通**）
 
-原理图阶段统一遵守 [数据驱动架构基准](.agents/skills/easyeda-agent/references/schematic-data.md#数据驱动架构基准)：
+原理图阶段统一遵守 [数据驱动架构基准](.agents/skills/pcbpilot/references/schematic-data.md#数据驱动架构基准)：
 保留原始快照，目标副本表达连接/核心外围归属/约束，区内及纸张计算后固定转换与 Apply。
 问题由数据检查发现，回改源数据/采集/算法再重算；位号参与、非位号属性文字排除页面布局检查。
 本节仍是给人的 runbook，不进入第一节客户原始需求，也不提供预制器件/网表答案。
@@ -98,9 +98,9 @@ easyeda health        # 检查连接与实际运行版本；有窗口不等于�
 
 | 段 | 验收标准 | 存盘点 |
 |---|---|---|
-| S0 | `easyeda spec validate .easyeda/s0-ceshi.json` 无 ERROR，且方案书经你确认 | spec 落盘 |
+| S0 | `pcbpilot spec validate .pcbpilot/s0-ceshi.json` 无 ERROR，且方案书经你确认 | spec 落盘 |
 | S1–S3 | 原始快照/源目标/参数/版本/哈希齐全；核心外围归属、真实直连、区内/纸张几何数据校验通过 | 保留完整计算输入/输出，不把离线通过当已落图 |
-| S4–S6 | Apply 后逐项数据对账、逐页 `easyeda sch gate --strict --doc <页>` 为 pass；位号/框/标题和生成溯源检查齐全，缺测不放行 | 显式 save 并核实 `saved:true` |
+| S4–S6 | Apply 后逐项数据对账、逐页 `pcbpilot sch gate --strict --doc <页>` 为 pass；位号/框/标题和生成溯源检查齐全，缺测不放行 | 显式 save 并核实 `saved:true` |
 | P0–P6 | 板框 + 四角 M3 孔 + 天线全层 keepout + `pcb layout-lint --gate` 通过 | 每档 `pcb stage confirm-tier`，四档齐后 `confirm-layout` |
 | P7–P10 | 布线 + 4 层电源树 + 铺铜 + `pcb drc` 0 fatal + `pcb check` 无 ERROR | 每步 `pcb save` + `doc reload` |
 
@@ -127,8 +127,8 @@ easyeda health        # 检查连接与实际运行版本；有窗口不等于�
 | P7 · 布线档 | 稠密板要不要停手让你在 EasyEDA 菜单里点原生自动布线 |
 
 已确认选择与授权继续有效，不重复索取；缺失且实质影响设计时再问。
-现行流程见 [design-flow.md](.agents/skills/easyeda-agent/references/design-flow.md)，
-决策依据见 [design-decisions.md](.agents/skills/easyeda-agent/references/design-decisions.md)。
+现行流程见 [design-flow.md](.agents/skills/pcbpilot/references/design-flow.md)，
+决策依据见 [design-decisions.md](.agents/skills/pcbpilot/references/design-decisions.md)。
 表里这几行只是「这块板会撞到哪几个」的索引。
 
 ## 5. 验收（需求条条落实）
@@ -136,19 +136,19 @@ easyeda health        # 检查连接与实际运行版本；有窗口不等于�
 跑完对着原始需求逐条核，**只看数据不看截图**：
 
 ```bash
-easyeda sch nets --all --project ceshi        # 逐网成员：跨页是否真连上
-easyeda sch gate --strict --doc <每一页> --project ceshi
-easyeda pcb layout-lint --gate --project ceshi
-easyeda pcb layers --project ceshi            # 4 层 + 内电层网络
-easyeda pcb drc --project ceshi               # 0 fatal
-easyeda pcb check --project ceshi             # 无 ERROR / power-not-poured / width-under-spec
-easyeda call pcb.silk.list --project ceshi    # LED 旁 +/- 极性标记，且落在器件本体之外
+pcbpilot sch nets --all --project ceshi        # 逐网成员：跨页是否真连上
+pcbpilot sch gate --strict --doc <每一页> --project ceshi
+pcbpilot pcb layout-lint --gate --project ceshi
+pcbpilot pcb layers --project ceshi            # 4 层 + 内电层网络
+pcbpilot pcb drc --project ceshi               # 0 fatal
+pcbpilot pcb check --project ceshi             # 无 ERROR / power-not-poured / width-under-spec
+pcbpilot call pcb.silk.list --project ceshi    # LED 旁 +/- 极性标记，且落在器件本体之外
 ```
 
-> ⚠ 跑 `pcb *` 之前先确认**前台是 PCB**（`easyeda doc switch <pcbUuid> --project ceshi`）。
+> ⚠ 跑 `pcb *` 之前先确认**前台是 PCB**（`pcbpilot doc switch <pcbUuid> --project ceshi`）。
 > 前台停在原理图页时，丝印类动作会报一句毫不相干的
 > `Cannot read properties of null (reading 'map')`，极易被当成连接器崩溃去追。
-> 另：`pcb.silk.list` 目前只有 typed action、没有 Cobra 子命令，所以走 `easyeda call`。
+> 另：`pcb.silk.list` 目前只有 typed action、没有 Cobra 子命令，所以走 `pcbpilot call`。
 
 判据：**0 overlap、0 fatal、网络连通、丝印/极性正确、4 层电源树成立、已落盘**。
 
@@ -182,16 +182,16 @@ S0 阶段就该定一张唯一网名表，之后每次落块显式 `--bind` 到�
 测试工程用完清理还原即可（`ceshi` 是一次性的，可直接清空/删除重建）：
 
 ```bash
-easyeda pcb clear --project ceshi     # 破坏性，会先要确认
-easyeda sch clear --project ceshi
+pcbpilot pcb clear --project ceshi     # 破坏性，会先要确认
+pcbpilot sch clear --project ceshi
 ```
 
 **每跑完一场端到端记一笔成本画像**（墙钟 / daemon 侧机器时间 / 两者之差各自分开）：
 
 ```bash
-easyeda audit cost --day <YYYY-MM-DD> --since HH:MM --until HH:MM \
+pcbpilot audit cost --day <YYYY-MM-DD> --since HH:MM --until HH:MM \
   --label "esp32Mini E2E" --tokens <N> --record
-easyeda audit cost --ledger           # 跨批次对比
+pcbpilot audit cost --ledger           # 跨批次对比
 ```
 
 ## 8. 把路上撞到的问题反馈回仓库（跑完再统一提）
@@ -214,14 +214,14 @@ easyeda audit cost --ledger           # 跨批次对比
 2. **先合并再提**。十几条挂账里多数是同一个根因的不同表现，按根因合并，别一条一单。
 3. **带证据才提得动**。空口「不好用」没法修：贴命令原文、完整回执（含 `error.code` /
   `detail`）、`sch read` / `bridge-check` / `layout-lint` 的相关摘录，以及
-  `easyeda health` 里的 CLI / daemon / connector / EasyEDA 四个版本号。
+  `pcbpilot health` 里的 CLI / daemon / connector / EasyEDA 四个版本号。
 
 **你决定要提之后，提到哪儿**（仓库已有的模板在 `.github/ISSUE_TEMPLATE/`）：
 
 | 撞到什么 | 用哪个 | label |
 |---|---|---|
 | 块用出问题（引脚名与 `sch read` 实测不符 / 拓扑错 / 器件停产 / 约束错） | `block-bug` 模板 | `block-bug` |
-| 需要的块查不到（`easyeda blocks search` 三个维度都没中） | `block-gap` 模板 | `block-gap` |
+| 需要的块查不到（`pcbpilot blocks search` 三个维度都没中） | `block-gap` 模板 | `block-gap` |
 | 自己搭了一块验证过的好电路想投稿 | `block-contribution` 模板 | `block-contribution` |
 | CLI / daemon / 连接器本身的缺陷（命令报错、写了不回滚、报文指错方向、门禁判据不一致…） | 开普通 issue | `bug` |
 
@@ -232,7 +232,7 @@ easyeda audit cost --ledger           # 跨批次对比
 [`docs/reviews/e2e-round-2026-08-25-findings.md`](docs/reviews/e2e-round-2026-08-25-findings.md) 的写法示例）。
 
 ```bash
-gh issue create --repo zhoushoujianwork/easyeda-agent \
+gh issue create --repo zhuangzard/pcbpilot \
   --label bug --title "<现象 + 触发条件>" --body-file <草稿.md>
 ```
 

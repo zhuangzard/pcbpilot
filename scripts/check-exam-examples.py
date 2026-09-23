@@ -14,7 +14,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXAMPLE = ROOT / ".agents/skills/easyeda-agent/references/examples/260919-at32f415"
+EXAMPLE = ROOT / ".agents/skills/pcbpilot/references/examples/260919-at32f415"
 
 
 def load(name: str) -> dict:
@@ -426,7 +426,7 @@ def main() -> None:
         "entries": 36, "SCH": 10, "PCB": 8, "LAY": 6, "RTE": 8, "FIN": 4,
     }
     assert catalog["executionPolicy"] == {
-        "allowed": ["easyeda Cobra subcommand", "typed action", "easyeda apply"],
+        "allowed": ["pcbpilot Cobra subcommand", "typed action", "pcbpilot apply"],
         "forbidden": [
             "GUI/CUA", "mouse/keyboard/canvas", "property panel/project tree",
             "manual design repair", "debug.exec_js design mutation",

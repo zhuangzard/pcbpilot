@@ -94,7 +94,7 @@ deviceUuid/LCSC 全 TBD,待真机 `--probe` 刷符号脚 + `block-apply` 网表�
 ## 验证 TODO(第二轮,真机)
 
 离线草稿已落盘。升 verified 需在实时编辑器(ceshi)逐块跑:
-1. `easyeda lib search` 解析每个新料的 libraryUuid/deviceUuid/LCSC C 号,写回 `standard-parts.json`
+1. `pcbpilot lib search` 解析每个新料的 libraryUuid/deviceUuid/LCSC C 号,写回 `standard-parts.json`
    (当前全 TBD):ES8311 / AW8737A / BMI270 / MSM381 / ST7789-BTB / VSOP38338 / IR928 /
    SY7088 / LGS4056 / CH213K / CJ3439KDW / 2N7002DW / SDMM0806 / ESP32-S3-PICO-1 等。
 2. `blocks-pin-audit.py --probe --project <scratch> --doc <page> --allow-clear` 在专用测量页刷新 `symbol-pins.json` 快照(把新料真实符号脚读回)。

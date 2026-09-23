@@ -57,7 +57,7 @@ func resolveAnchorForCenter(cfg *appConfig, window, primitiveID string, targetCX
 		ax, ay = anchorForCenter(c.x, c.y, c.minX, c.minY, c.maxX, c.maxY, targetCX, targetCY)
 		return ax, ay, nil
 	}
-	return 0, 0, fmt.Errorf("component %q not found on the active PCB (fresh ids: `easyeda pcb list`)", primitiveID)
+	return 0, 0, fmt.Errorf("component %q not found on the active PCB (fresh ids: `pcbpilot pcb list`)", primitiveID)
 }
 
 // injectBBoxCenters post-processes a raw pcb.components.list response: for

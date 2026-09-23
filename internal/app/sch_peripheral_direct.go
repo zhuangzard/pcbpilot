@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/connectivity"
+	"github.com/zhuangzard/pcbpilot/internal/connectivity"
 )
 
 // ValidateSchematicPeripheralDirect validates declared functional ownership

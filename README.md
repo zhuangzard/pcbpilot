@@ -1,23 +1,28 @@
 <p align="center">
-  <img src="docs/assets/easyeda-agent-logo.png" width="96" alt="easyeda-agent logo" />
+  <img src="docs/assets/pcbpilot-logo.png" width="96" alt="pcbpilot logo" />
 </p>
 
-<h1 align="center">easyeda-agent</h1>
+<h1 align="center">pcbpilot</h1>
 
 <p align="center">
   让 AI 直接操作嘉立创 EDA 专业版：读数据手册、画原理图、布局 PCB、整理丝印并完成检查。
 </p>
 
 <p align="center">
-  <a href="https://github.com/zhoushoujianwork/easyeda-agent"><b>GitHub</b></a> ·
-  <a href="https://jlc-ext.com/item/zhoushoujian/easyeda-agent-connector"><b>立创插件市场</b></a> ·
+  <a href="https://github.com/zhuangzard/pcbpilot"><b>GitHub</b></a> ·
   <a href="docs/quick-start.md"><b>快速开始</b></a> ·
   <a href="README.en.md">English</a>
 </p>
 
-![easyeda-agent workflow](docs/assets/easyeda-agent-workflow.svg)
+![pcbpilot workflow](docs/assets/pcbpilot-workflow.svg)
 
-`easyeda-agent` 是 EasyEDA Pro（嘉立创 EDA 专业版）的 AI 自动化层。你可以直接描述想做的
+> **致谢与来源**：pcbpilot 由 [zhoushoujianwork/easyeda-agent](https://github.com/zhoushoujianwork/easyeda-agent)
+> 分叉发展而来。CLI、daemon、连接器、typed action 体系、Skill、块库和大部分文档都出自原项目，
+> 原作者与所有贡献者的提交历史完整保留在本仓库中，许可证为 MIT。衷心感谢原作者的工作。
+> pcbpilot 在此基础上独立演进（首个新增能力是 `pcb auto` 电气感知整板自动设计引擎），
+> 使用独立的命令名、端口段（61832–61841）、插件 uuid 与更新渠道，可与原版同时安装。
+
+`pcbpilot` 是 EasyEDA Pro（嘉立创 EDA 专业版）的 AI 自动化层。你可以直接描述想做的
 电路或要修的问题，Agent 会读取真实工程数据，通过官方 `eda.*` API 完成操作，并在写入前后
 检查器件身份、引脚网络、几何、DRC 和保存状态。
 
@@ -40,26 +45,26 @@
 ## 直接这样告诉 Agent
 
 安装完成后，不需要先学习 CLI。把需求和必要的文件交给支持 Skill 的 Agent，并明确使用
-`easyeda-agent`。
+`pcbpilot`。
 
 ### 用 PDF 创建器件库
 
 ```text
-请使用 easyeda-agent，根据附件 ABC123.pdf 为完整型号 ABC123-QFN 建库。
+请使用 pcbpilot，根据附件 ABC123.pdf 为完整型号 ABC123-QFN 建库。
 先检查 EasyEDA 和 LCSC 库是否已有完全匹配的器件；没有再通读整份数据手册，核对订购
 后缀、引脚表、封装尺寸图和推荐焊盘。自动创建 Symbol、Footprint 和 Device，保留证据页码，
 先运行离线规格校验，再写入个人库。完成后回读 pin↔pad 映射并放置一个实例检查 Pin-1。
 只有手册确实存在多个无法消歧的封装或缺少关键尺寸时再问我。
 ```
 
-这个流程使用 `easyeda lib device validate --spec …` 在打开或修改 EasyEDA 前检查数据手册
+这个流程使用 `pcbpilot lib device validate --spec …` 在打开或修改 EasyEDA 前检查数据手册
 证据、几何和引脚映射，再由 `lib device build` 创建完整资产。规格契约见
-[数据手册驱动的自动建库](.agents/skills/easyeda-agent/references/library-authoring.md)。
+[数据手册驱动的自动建库](.agents/skills/pcbpilot/references/library-authoring.md)。
 
 ### 做一块 ESP32 最小系统板
 
 ```text
-请使用 easyeda-agent，在项目 ceshi 中完成一块 ESP32-S3-WROOM-1 最小系统板：
+请使用 pcbpilot，在项目 ceshi 中完成一块 ESP32-S3-WROOM-1 最小系统板：
 5V 端子输入，降压到 3V3，CH340 USB 下载，BOOT/RESET 按键，一颗 GPIO 控制的 LED，
 四角 M3 固定孔。做 4 层板，GND 内电层，模组天线区域所有层 keepout。
 请自行选型并核对数据手册，从原理图、布局、布线、铺铜、丝印一直做到 DRC 和保存完成。
@@ -71,7 +76,7 @@
 ### 调整当前 PCB 的丝印
 
 ```text
-请使用 easyeda-agent 检查当前 PCB 的全部位号和自由丝印。把压焊盘、超板框、重叠、
+请使用 pcbpilot 检查当前 PCB 的全部位号和自由丝印。把压焊盘、超板框、重叠、
 朝向不一致和底层未镜像的问题整理好；保留 LED 正负极、接口名称和必要板注。
 完成后运行 pcb check 和官方 DRC，导出一张复核图并保存。
 ```
@@ -79,7 +84,7 @@
 ### 标准化原理图器件
 
 ```text
-请使用 easyeda-agent 扫描当前原理图，把无准确料号、非标准符号或封装不一致的器件列出来。
+请使用 pcbpilot 扫描当前原理图，把无准确料号、非标准符号或封装不一致的器件列出来。
 优先匹配标准器件库和准确 LCSC C 号，核对型号、封装及引脚后再替换。
 替换时保留位号、位置和 uniqueId；如果 pinDiff 非空，修复接线并重新运行 sch check、
 bridge-check 和官方 DRC。最后输出替换清单和仍无法确定的器件。
@@ -88,7 +93,7 @@ bridge-check 和官方 DRC。最后输出替换清单和仍无法确定的器件
 ### 检查并修复已有工程
 
 ```text
-请使用 easyeda-agent 全面检查当前原理图和 PCB。先读取真实器件、引脚、网络、板框、叠层和
+请使用 pcbpilot 全面检查当前原理图和 PCB。先读取真实器件、引脚、网络、板框、叠层和
 DRC 规则，再修复可以确定的问题。不要凭截图猜连接；所有修改完成后回读对账、运行连接/几何/DRC 检查、
 保存，并把仍需人工决策的问题单独列出。
 ```
@@ -146,55 +151,54 @@ Agent 先在本地连接数据中核对器件、引脚和网络，再计算模�
 
 ## 安装与开始使用
 
-easyeda-agent 由三部分组成：`easyeda` CLI/daemon、运行在 EasyEDA 内的
-**EDA Agent Connector**，以及安装在 AI 客户端中的 `easyeda-agent` Skill。
+pcbpilot 由三部分组成：`pcbpilot` CLI/daemon、运行在 EasyEDA 内的
+**EDA Agent Connector**，以及安装在 AI 客户端中的 `pcbpilot` Skill。
 
 ### 1. 安装 CLI 和 Skill
 
 macOS / Linux：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.sh | bash
 ```
 
 原生 Windows（Windows PowerShell 5.1 或 PowerShell 7）：
 
 ```powershell
-irm https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.ps1 | iex
 ```
 
 两个脚本行为一致：先取 `checksums.txt`，全部资产校验 SHA-256、核对 CLI `--version`
-与 Skill `metadata.version` 之后才替换已安装文件；环境变量 `EASYEDA_VERSION`、
-`EASYEDA_INSTALL_DIR`、`EASYEDA_INSTALL_SKILLS`、`EASYEDA_SKILL_PRESERVE`、
-`EASYEDA_GITHUB_PROXY` 同样生效。安装器会识别 Codex、Codex Desktop 和 Claude Code，
+与 Skill `metadata.version` 之后才替换已安装文件；环境变量 `PCBPILOT_VERSION`、
+`PCBPILOT_INSTALL_DIR`、`PCBPILOT_INSTALL_SKILLS`、`PCBPILOT_SKILL_PRESERVE`、
+`PCBPILOT_GITHUB_PROXY` 同样生效。安装器会识别 Codex、Codex Desktop 和 Claude Code，
 并打印连接器下载地址。
 
 install.ps1 默认装到 `%USERPROFILE%\.local\bin`，不会自作主张改 PATH：目录不在用户
 PATH 上时只打印添加命令，需要自动添加用 `-AddToPath`（下载成文件运行）或
-`$env:EASYEDA_ADD_TO_PATH=1`（管道运行）；机器级 PATH 始终不动。手工安装步骤见
+`$env:PCBPILOT_ADD_TO_PATH=1`（管道运行）；机器级 PATH 始终不动。手工安装步骤见
 [快速开始](docs/quick-start.md)。
 
 ### 2. 安装连接器
 
-从 [立创插件市场](https://jlc-ext.com/item/zhoushoujian/easyeda-agent-connector) 安装，或从
-[最新 GitHub Release](https://github.com/zhoushoujianwork/easyeda-agent/releases/latest) 下载
-`easyeda-agent-connector.eext` 后在 EasyEDA Pro 的扩展管理器中导入。
+从 [最新 GitHub Release](https://github.com/zhuangzard/pcbpilot/releases/latest) 下载
+`pcbpilot-connector.eext` 后在 EasyEDA Pro 的扩展管理器中导入。
 
 ### 3. 启动并连接
 
 ```bash
-easyeda daemon start
+pcbpilot daemon start
 ```
 
 打开目标 EasyEDA 工程，并启用 **设置 → 允许外部交互**。开始操作前运行健康检查；需要安装对账时再显式运行版本检查：
 
 ```bash
-easyeda health
-easyeda update --check --exit-code  # 可选：安装版本对账
+pcbpilot health
+pcbpilot update --check --exit-code  # 可选：安装版本对账
 ```
 
 项目主线要求 **EasyEDA Pro V4**，推荐升级到已验证的 **V4.1.60 或更新 V4**。
-`easyeda health` 会在 `hostCompatibility` 中单独报告宿主产品版本；V3 环境应先升级再做现场写入。
+`pcbpilot health` 会在 `hostCompatibility` 中单独报告宿主产品版本；V3 环境应先升级再做现场写入。
 V4 适配进度和边界见 [V4 开发台账](docs/v4-development.md)。
 
 版本差异会作为诊断输出，不作为设计动作的许可。Connector 若缺少当前动作或协议不兼容，
@@ -204,7 +208,7 @@ V4 适配进度和边界见 [V4 开发台账](docs/v4-development.md)。
 
 ## 为什么它适合 Agent
 
-直接把任意 JavaScript 丢进编辑器很难审查，也难确认部分失败。easyeda-agent 把常用能力封装成
+直接把任意 JavaScript 丢进编辑器很难审查，也难确认部分失败。pcbpilot 把常用能力封装成
 有明确输入输出的 typed actions，并在工作流中加入：
 
 - 写入前检查目标工程、页面、器件身份和源数据；
@@ -218,7 +222,7 @@ V4 适配进度和边界见 [V4 开发台账](docs/v4-development.md)。
 AI Agent / Skill
        │
        ▼
-easyeda CLI + local daemon
+pcbpilot CLI + local daemon
        │ typed actions / audit / artifacts
        ▼
 EDA Agent Connector (.eext)
@@ -244,8 +248,8 @@ EasyEDA Pro project
 - 文档导航与信息归属：[docs/README.md](docs/README.md)
 - 跨项目查询、维护 Skill 和多客户端兼容：[Agent 协作设计](docs/agent-collaboration.md)
 - 开发环境：[docs/dev-environment.md](docs/dev-environment.md)
-- 电路块贡献：[standard-blocks-contributing.md](.agents/skills/easyeda-agent/references/standard-blocks-contributing.md)
-- Skill 入口：[.agents/skills/easyeda-agent/SKILL.md](.agents/skills/easyeda-agent/SKILL.md)
+- 电路块贡献：[standard-blocks-contributing.md](.agents/skills/pcbpilot/references/standard-blocks-contributing.md)
+- Skill 入口：[.agents/skills/pcbpilot/SKILL.md](.agents/skills/pcbpilot/SKILL.md)
 - 仓库结构与开发约定：[AGENTS.md](AGENTS.md)
 
 感谢嘉立创 EDA 专业版开放扩展接口，也感谢

@@ -141,7 +141,7 @@ func TestAttributionOnValidated(t *testing.T) {
 }
 
 // standardPartsPath is the skill's part library; block parts cross-reference it.
-const standardPartsPath = "../../.agents/skills/easyeda-agent/references/standard-parts.json"
+const standardPartsPath = "../../.agents/skills/pcbpilot/references/standard-parts.json"
 
 // TestPartsExistInStandardParts: every block's parts[].part (and alt[]) must be a
 // real key in standard-parts.json, so BOM/LCSC stays single-sourced.

@@ -25,7 +25,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/workflow"
+	"github.com/zhuangzard/pcbpilot/internal/workflow"
 )
 
 // ── 同一把尺:认框的字符串必须就是画框写下的字符串 ─────────────────────────
@@ -311,7 +311,7 @@ func newPartitionCheckFake(t *testing.T, texts []map[string]any) *appConfig {
 	f := &partitionCheckFake{texts: texts}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprint(w, `{"service":"easyeda-agent","status":"ok","windows":[{"windowId":"w1","context":{"projectName":"parttest"}}]}`)
+		fmt.Fprint(w, `{"service":"pcbpilot","status":"ok","windows":[{"windowId":"w1","context":{"projectName":"parttest"}}]}`)
 	})
 	mux.HandleFunc("/action", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {

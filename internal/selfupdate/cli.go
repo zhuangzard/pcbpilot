@@ -1,8 +1,8 @@
 package selfupdate
 
 // CLI binary self-update. Complements the skill sync in selfupdate.go: the same
-// GitHub release carries the platform binaries (`easyeda_<os>_<arch>`), so
-// `easyeda update` can replace the running CLI in place instead of asking the
+// GitHub release carries the platform binaries (`pcbpilot_<os>_<arch>`), so
+// `pcbpilot update` can replace the running CLI in place instead of asking the
 // user to re-run install.sh.
 //
 // Deliberate non-goals:
@@ -43,7 +43,7 @@ const (
 	// the asset can be checked against a GitHub-sourced SHA-256 manifest.
 	DefaultGitHubProxy = "https://gh-proxy.com/"
 	// GitHubProxyEnv overrides the proxy prefix; "off" disables the fallback.
-	GitHubProxyEnv = "EASYEDA_GITHUB_PROXY"
+	GitHubProxyEnv = "PCBPILOT_GITHUB_PROXY"
 )
 
 // verifyBinary runs the freshly-downloaded binary and checks it reports the
@@ -66,7 +66,7 @@ var verifyBinary = func(ctx context.Context, path, want string) error {
 
 func validVersionOutput(output, want string) bool {
 	got := strings.TrimSpace(output)
-	return got == "easyeda-agent v"+want || got == "easyeda-agent "+want
+	return got == "pcbpilot v"+want || got == "pcbpilot "+want
 }
 
 // AssetName maps a Go platform onto the release asset name published by
@@ -75,14 +75,14 @@ func AssetName(goos, goarch string) (string, error) {
 	switch goos {
 	case "darwin", "linux":
 		if goarch == "amd64" || goarch == "arm64" {
-			return fmt.Sprintf("easyeda_%s_%s", goos, goarch), nil
+			return fmt.Sprintf("pcbpilot_%s_%s", goos, goarch), nil
 		}
 	case "windows":
 		if goarch == "amd64" {
-			return "easyeda_windows_amd64.exe", nil
+			return "pcbpilot_windows_amd64.exe", nil
 		}
 	}
-	return "", fmt.Errorf("no release binary published for %s/%s — build from source (go install ./cmd/easyeda)", goos, goarch)
+	return "", fmt.Errorf("no release binary published for %s/%s — build from source (go install ./cmd/pcbpilot)", goos, goarch)
 }
 
 // CurrentBinaryPath returns the absolute, symlink-resolved path of the running
@@ -249,10 +249,10 @@ func displayVersion(v string) string {
 // checkWritable reports whether we can create (and thus rename into) dir. The
 // common failure is /usr/local/bin owned by root, so the message says so.
 func checkWritable(dir string) error {
-	f, err := os.CreateTemp(dir, ".easyeda-update-probe-*")
+	f, err := os.CreateTemp(dir, ".pcbpilot-update-probe-*")
 	if err != nil {
 		if os.IsPermission(err) {
-			return fmt.Errorf("%s is not writable — re-run with sudo (sudo easyeda update) "+
+			return fmt.Errorf("%s is not writable — re-run with sudo (sudo pcbpilot update) "+
 				"or install into a user-owned dir (~/.local/bin)", dir)
 		}
 		return err
@@ -278,7 +278,7 @@ func downloadTo(ctx context.Context, url, dir string, mode os.FileMode) (path, s
 		return "", "", fmt.Errorf("GET %s: %s", url, resp.Status)
 	}
 
-	f, err := os.CreateTemp(dir, ".easyeda-update-*")
+	f, err := os.CreateTemp(dir, ".pcbpilot-update-*")
 	if err != nil {
 		return "", "", err
 	}

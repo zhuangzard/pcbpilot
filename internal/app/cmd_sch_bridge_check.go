@@ -222,7 +222,7 @@ func renderBridgeReport(rep bridgeReport, w io.Writer) {
 		ids := toolProbeResidueIDs(rep.ToolProbes)
 		fmt.Fprintf(w, "  NOTE   tool-probe-residue  %d 个**工具自己**的探测残留(不计入上面的问题数):"+
 			"连接器测旋转语义时造的一次性探测旗没删干净(平台删除会撒谎)。\n", len(rep.ToolProbes))
-		fmt.Fprintf(w, "         清掉它:easyeda sch prim-delete --ids %s\n", strings.Join(ids, ","))
+		fmt.Fprintf(w, "         清掉它:pcbpilot sch prim-delete --ids %s\n", strings.Join(ids, ","))
 	}
 
 	if rep.Passed {

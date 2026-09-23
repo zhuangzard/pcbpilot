@@ -18,16 +18,16 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/daemon"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/selfupdate"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/version"
+	"github.com/zhuangzard/pcbpilot/internal/daemon"
+	"github.com/zhuangzard/pcbpilot/internal/selfupdate"
+	"github.com/zhuangzard/pcbpilot/internal/version"
 )
 
 // newDaemonCmd returns the "daemon" subcommand group.
 func newDaemonCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 	d := &cobra.Command{
 		Use:   "daemon",
-		Short: "Manage the easyeda-agent background daemon",
+		Short: "Manage the pcbpilot background daemon",
 	}
 	d.AddCommand(
 		newDaemonStartCmd(cfg, stdout, stderr),
@@ -53,42 +53,42 @@ window once its edits quiesce for the debounce window (a burst coalesces into on
 save). Set to 0 to disable.
 
 Skill auto-update (--auto-update-skill, on by default) keeps your installed
-easyeda-agent skill dirs (CLAUDE_CONFIG_DIR / CODEX_HOME, default ~/.claude / ~/.codex) in sync with this daemon's release on
+pcbpilot skill dirs (CLAUDE_CONFIG_DIR / CODEX_HOME, default ~/.claude / ~/.codex) in sync with this daemon's release on
 startup, so you never hand-copy the skill after a CLI upgrade. It touches only
-dirs that already exist, honors EASYEDA_SKILL_PRESERVE=1, and logs each change.
+dirs that already exist, honors PCBPILOT_SKILL_PRESERVE=1, and logs each change.
 The EasyEDA connector .eext has no sideload auto-update (marketplace-only).
 Patch drift is compatible; a connector behind the daemon's major.minor line is
 only DETECTED and logged with a re-import notice — not swapped.
 
-The daemon binds a SINGLE fixed port (60832, the start of --ports) and never
+The daemon binds a SINGLE fixed port (61832, the start of --ports) and never
 spills to the next one — so at most one daemon ever runs and the connector always
 finds it there, instead of several daemons quietly binding 49621/49622… and the
-connector churning between them. If 60832 is already held by another easyeda
+connector churning between them. If 61832 is already held by another pcbpilot
 daemon it is replaced automatically; if held by a FOREIGN process the daemon asks
 (interactive terminal) or refuses with a clear message (headless) rather than
 starting a second daemon elsewhere.
 
-The connector holds up the other end of that contract: it PINS 60832 and retries
-it with exponential backoff instead of sweeping 60832-60841 (the other nine ports
+The connector holds up the other end of that contract: it PINS 61832 and retries
+it with exponential backoff instead of sweeping 61832-61841 (the other nine ports
 can never hold a daemon, and every dead port costs it a full connect timeout). So
 running the daemon on a different port with --ports also needs the connector's
 escape hatch — set its "daemonPorts" extension user config (see the header of
 extension/src/transport.ts).`,
 		Args: cobra.NoArgs,
-		Example: `  easyeda daemon start
-  easyeda daemon start --autosave-debounce 5s
-  easyeda daemon start --autosave-debounce 0   # disable autosave
-  easyeda daemon start --auto-update-skill=false # don't sync skill on startup`,
+		Example: `  pcbpilot daemon start
+  pcbpilot daemon start --autosave-debounce 5s
+  pcbpilot daemon start --autosave-debounce 0   # disable autosave
+  pcbpilot daemon start --auto-update-skill=false # don't sync skill on startup`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			portStart, _, err := cfg.portRange()
 			if err != nil {
 				return err
 			}
-			// The daemon uses a SINGLE fixed port (the start of the range, 60832) —
+			// The daemon uses a SINGLE fixed port (the start of the range, 61832) —
 			// it never spills to the next port. That guarantees at most one daemon
-			// runs and the connector always finds it on 60832, instead of multiple
+			// runs and the connector always finds it on 61832, instead of multiple
 			// daemons quietly binding 49621/49622… and the connector churning between
-			// them. If 60832 is already held, ensurePortAvailable replaces our own
+			// them. If 61832 is already held, ensurePortAvailable replaces our own
 			// stale daemon automatically, or (for a foreign process) asks / refuses.
 			port := portStart
 			if err := ensurePortAvailable(cfg.host, port, stdout); err != nil {
@@ -138,8 +138,8 @@ func runStartupSkillSync(parent context.Context, log io.Writer) {
 
 // ── daemon health ─────────────────────────────────────────────────────────
 
-// newHealthAliasCmd exposes `easyeda health` at the root as an alias of
-// `easyeda daemon health` — the skill docs mandate it as the preflight check
+// newHealthAliasCmd exposes `pcbpilot health` at the root as an alias of
+// `pcbpilot daemon health` — the skill docs mandate it as the preflight check
 // before any window operation, and the bare form is what they spell (#130).
 func newHealthAliasCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 	h := newDaemonHealthCmd(cfg, stdout, stderr)
@@ -201,13 +201,13 @@ func daemonPIDFile() string {
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".easyeda-agent", "daemon.pid")
+	return filepath.Join(home, ".pcbpilot", "daemon.pid")
 }
 
 // ensurePortAvailable makes the daemon's FIXED port bindable before startup.
 // Behavior (chosen with the user): the daemon uses ONE port and never spills.
 //   - port free                         → proceed.
-//   - held by ANOTHER easyeda daemon    → replace it automatically (safe: it's our
+//   - held by ANOTHER pcbpilot daemon    → replace it automatically (safe: it's our
 //     own stale/duplicate service; this is the reliable, port-based successor to
 //     the old PID-file kill).
 //   - held by a FOREIGN process         → never kill it silently. On an interactive
@@ -219,7 +219,7 @@ func ensurePortAvailable(host string, port int, log io.Writer) error {
 	}
 	pid := listenerPID(port)
 	if daemonOnPort(host, port) {
-		fmt.Fprintf(log, "%s daemon: port %d already held by an easyeda daemon (pid %d) — replacing it\n", daemon.Service, port, pid)
+		fmt.Fprintf(log, "%s daemon: port %d already held by an pcbpilot daemon (pid %d) — replacing it\n", daemon.Service, port, pid)
 		termPID(pid)
 		if waitPortFree(host, port, 3*time.Second) {
 			return nil
@@ -228,7 +228,7 @@ func ensurePortAvailable(host string, port int, log io.Writer) error {
 	}
 	cmdName := pidCommand(pid)
 	if isInteractive() {
-		fmt.Fprintf(log, "⚠ port %d is held by pid %d (%s) — NOT an easyeda daemon.\n  Kill it and take over the port? [y/N]: ", port, pid, cmdName)
+		fmt.Fprintf(log, "⚠ port %d is held by pid %d (%s) — NOT an pcbpilot daemon.\n  Kill it and take over the port? [y/N]: ", port, pid, cmdName)
 		if !readYes() {
 			return fmt.Errorf("port %d busy (pid %d %s) — declined; free it (kill %d) or run with --ports", port, pid, cmdName, pid)
 		}
@@ -238,7 +238,7 @@ func ensurePortAvailable(host string, port int, log io.Writer) error {
 		}
 		return fmt.Errorf("port %d still busy after killing pid %d", port, pid)
 	}
-	return fmt.Errorf("port %d is held by pid %d (%s), not an easyeda daemon — free it (kill %d) or run with --ports; refusing to spawn a second daemon", port, pid, cmdName, pid)
+	return fmt.Errorf("port %d is held by pid %d (%s), not an pcbpilot daemon — free it (kill %d) or run with --ports; refusing to spawn a second daemon", port, pid, cmdName, pid)
 }
 
 // portFree reports whether the daemon can bind host:port right now.
@@ -251,7 +251,7 @@ func portFree(host string, port int) bool {
 	return true
 }
 
-// daemonOnPort reports whether an easyeda daemon answers /health on host:port.
+// daemonOnPort reports whether an pcbpilot daemon answers /health on host:port.
 func daemonOnPort(host string, port int) bool {
 	client := &http.Client{Timeout: time.Second}
 	resp, err := client.Get(fmt.Sprintf("http://%s/health", net.JoinHostPort(host, strconv.Itoa(port))))
@@ -351,11 +351,11 @@ func writeDaemonPID(log io.Writer) func() {
 		return func() {}
 	}
 	if err := os.MkdirAll(filepath.Dir(pidFile), 0755); err != nil {
-		fmt.Fprintf(log, "easyeda-agent: create pid dir: %v\n", err)
+		fmt.Fprintf(log, "pcbpilot: create pid dir: %v\n", err)
 		return func() {}
 	}
 	if err := os.WriteFile(pidFile, fmt.Appendf(nil, "%d\n", os.Getpid()), 0644); err != nil {
-		fmt.Fprintf(log, "easyeda-agent: write pid file: %v\n", err)
+		fmt.Fprintf(log, "pcbpilot: write pid file: %v\n", err)
 		return func() {}
 	}
 	return func() { _ = os.Remove(pidFile) }

@@ -104,7 +104,7 @@ PCB Layout 作为后续教学阶段处理，不把自动布线结果冒充为学
 
 ### 6. 公开维护脱敏复用模块（2026-09-10 修订）
 
-允许在 `.agents/skills/easyeda-agent/library/modules/` 公共维护从多份材料归纳出的功能模块记录，
+允许在 `.agents/skills/pcbpilot/library/modules/` 公共维护从多份材料归纳出的功能模块记录，
 条件是：不记录材料路径、题名、逐题映射、完整 BOM、整板拓扑、指定坐标、评分文本或原始图形；
 来源只保存聚合类别和独立可验证依据。数据按 `draft → topology_ready → compose_ready` 晋级，
 缺库身份、逐脚连接或实测几何时必须停留在较低成熟度。
@@ -118,6 +118,6 @@ Block Template 与公共 Lib Module 分工：前者是参数化拓扑配方，�
 - ADR-0002：前置设计方案书与交互模式；
 - ADR-0003：原理图布局求解；
 - ADR-0004：已连线原理图的安全移动内核；
-- `.agents/skills/easyeda-agent/references/design-flow.md`；
-- `.agents/skills/easyeda-agent/references/schematic.md`；
+- `.agents/skills/pcbpilot/references/design-flow.md`；
+- `.agents/skills/pcbpilot/references/schematic.md`；
 - 用户本地训练材料（不纳入仓库、不记录路径和内容）。

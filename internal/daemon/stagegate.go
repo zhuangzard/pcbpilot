@@ -1,9 +1,9 @@
 package daemon
 
-import "github.com/zhoushoujianwork/easyeda-agent/internal/protocol"
+import "github.com/zhuangzard/pcbpilot/internal/protocol"
 
 // Workflow stage files are retained for historical reporting and compatibility
-// with `easyeda workflow` / `easyeda pcb stage`. They are no longer an
+// with `pcbpilot workflow` / `pcbpilot pcb stage`. They are no longer an
 // authorization mechanism for typed actions. These no-op hooks intentionally
 // remain source-compatible with older integrations while dispatch proceeds from
 // live document evidence.

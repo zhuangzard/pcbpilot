@@ -33,21 +33,21 @@ CLAUDE.md -> AGENTS.md             兼容入口
   memory/                         已有共享经验，保持原记录
   skills/
     README.md                     Skill 维护与分发约定
-    easyeda-agent/                唯一公开设计包（真实目录）
-    easyeda-repo-lookup/           查询实现、样例、证据
-    easyeda-repo-maintain/         修改工具、知识、验证与 Git 贡献
+    pcbpilot/                唯一公开设计包（真实目录）
+    pcbpilot-repo-lookup/           查询实现、样例、证据
+    pcbpilot-repo-maintain/         修改工具、知识、验证与 Git 贡献
 .claude -> .agents                同一套仓库资源
 docs/README.md                    文档导航与归属
 ```
 
-公开设计包继续由 `install.sh`、`easyeda update` 和正式 release 管理；仓库协作 Skill 依赖
+公开设计包继续由 `install.sh`、`pcbpilot update` 和正式 release 管理；仓库协作 Skill 依赖
 源码 checkout，只通过下面的开发安装脚本链接。两条分发路径不会相互覆盖。已有 `.claude`
 目录迁移到 `.agents`，包括本地未提交状态；Git 只收录已审查的共享文件，worktree 和本机设置
 保持忽略。
 
 ## 从其他项目调用
 
-在要共享的 easyeda-agent checkout 中运行（需要 Python 3 和文件系统软链接支持）：
+在要共享的 pcbpilot checkout 中运行（需要 Python 3 和文件系统软链接支持）：
 
 ```bash
 python3 scripts/install-agent-skills.py --dry-run
@@ -66,7 +66,7 @@ python3 scripts/install-agent-skills.py --skills-dir /path/to/skills
 默认目标是 `~/.agents/skills`，遵守 `AGENTS_HOME`；Codex 和 Claude 目标分别遵守
 `CODEX_HOME` / `CLAUDE_HOME`。默认 `--scope repo` 安装仓库协作 Skill；`--scope design`
 选择公开设计 Skill，`--scope all` 选择全部真实 Skill 目录。所有目标先预检，同源链接可重复
-安装。唯一自动修复的旧链接是指向同一 checkout 原 `skills/easyeda-agent` 目录的链接，
+安装。唯一自动修复的旧链接是指向同一 checkout 原 `skills/pcbpilot` 目录的链接，
 即使旧源已随迁移消失也可识别；真实发布版目录、其他断链和其他 checkout 的链接均保留并报错。
 `--dry-run` 不创建目录、不改链接。迁移中失败会恢复本次替换的旧链接。
 
@@ -74,20 +74,20 @@ python3 scripts/install-agent-skills.py --skills-dir /path/to/skills
 对应链接并从新位置重装；安装器不猜测或覆盖其他 checkout。Windows 需要启用软链接支持
 （如开发者模式及 Git `core.symlinks=true`）；未启用时使用规范入口，不复制一份规则冒充同步。
 
-重新加载客户端后，输入 `$easyeda-repo-lookup` 或 `$easyeda-repo-maintain` 选择入口，
+重新加载客户端后，输入 `$pcbpilot-repo-lookup` 或 `$pcbpilot-repo-maintain` 选择入口，
 也可由客户端按任务自动匹配；`@` 通常用于选择文件，不是显式调用 Skill。
 
 例如，在另一个电子项目里请求：
 
-- `使用 $easyeda-repo-lookup 查找 AMS1117 的参数化布局样例，列出实测证据和未验证项。`
-- `使用 $easyeda-repo-maintain 把本次可复用的工具修复回填源码仓库，验证后按当前授权提交。`
-- `使用 $easyeda-agent 按当前项目需求修改原理图，并回读连接和保存结果。`
+- `使用 $pcbpilot-repo-lookup 查找 AMS1117 的参数化布局样例，列出实测证据和未验证项。`
+- `使用 $pcbpilot-repo-maintain 把本次可复用的工具修复回填源码仓库，验证后按当前授权提交。`
+- `使用 $pcbpilot 按当前项目需求修改原理图，并回读连接和保存结果。`
 
 ## 验证与维护
 
 `make agent-check` 验证真实文件与兼容链接、根目录定位、安装预检、幂等性和路径迁移，
 并核对新文档入口链接。CI 同样运行它。它证明仓库协作机制可用，不证明 EDA 现场设计通过。
 公开 Skill 仍使用 `make skill-check`；源码移动后同步更新资源查找、打包与安装测试，不改变
-EDA 设计动作。发布包只含 `easyeda-agent/`，不把整个 `.agents` 目录打包。
-新增协作 Skill 放入 `.agents/skills/easyeda-repo-<职责>/`，写清触发范围与相应归属，安装器
+EDA 设计动作。发布包只含 `pcbpilot/`，不把整个 `.agents` 目录打包。
+新增协作 Skill 放入 `.agents/skills/pcbpilot-repo-<职责>/`，写清触发范围与相应归属，安装器
 自动发现；不要在 `.claude` 再放副本，也不要把仓库依赖打入公开 Skill 包。

@@ -22,9 +22,9 @@ from urllib.parse import unquote, urlsplit
 import zipfile
 
 ASSETS = (
-    "easyeda_darwin_amd64", "easyeda_darwin_arm64", "easyeda_linux_amd64",
-    "easyeda_linux_arm64", "easyeda_windows_amd64.exe",
-    "easyeda-agent-connector.eext", "skills.tar.gz", "install.sh", "install.ps1",
+    "pcbpilot_darwin_amd64", "pcbpilot_darwin_arm64", "pcbpilot_linux_amd64",
+    "pcbpilot_linux_arm64", "pcbpilot_windows_amd64.exe",
+    "pcbpilot-connector.eext", "skills.tar.gz", "install.sh", "install.ps1",
 )
 # These helpers are directly executable in the public package. Other Python
 # helpers are intentionally invoked via python3 and need only read permission.
@@ -69,7 +69,7 @@ def check_connector(path, version):
         require(len(names) == len(set(names)), "duplicate connector ZIP entries")
         manifest = json.loads(archive.read("extension.json"))
         require(isinstance(manifest, dict), "connector manifest must be a JSON object")
-        require(manifest.get("name") == "easyeda-agent-connector", "wrong connector name")
+        require(manifest.get("name") == "pcbpilot-connector", "wrong connector name")
         require(manifest.get("version") == version, "connector version mismatch")
         require(re.fullmatch(r"[0-9a-fA-F]{32}", manifest.get("uuid", "")), "invalid connector UUID")
         require(manifest.get("entry") == "./dist/index", "unexpected connector entry")
@@ -84,7 +84,7 @@ def extract_skill(archive_path, destination):
     with tarfile.open(archive_path, "r:gz") as archive:
         for member in archive:
             path = PurePosixPath(member.name)
-            require(not path.is_absolute() and path.parts and path.parts[0] == "easyeda-agent"
+            require(not path.is_absolute() and path.parts and path.parts[0] == "pcbpilot"
                     and ".." not in path.parts and "\\" not in member.name and ":" not in member.name
                     and path.as_posix() == member.name.rstrip("/"),
                     f"unsafe skill archive path: {member.name}")
@@ -99,7 +99,7 @@ def extract_skill(archive_path, destination):
                 with archive.extractfile(member) as source, target.open("wb") as output:
                     shutil.copyfileobj(source, output)
                 target.chmod(member.mode & 0o777)
-    return destination / "easyeda-agent", modes
+    return destination / "pcbpilot", modes
 
 
 def check_skill(root, version, archive_modes=None):
@@ -129,7 +129,7 @@ def check_skill(root, version, archive_modes=None):
         path = root / relative
         require(path.is_file(), f"missing Skill helper: {relative}")
         require(path.read_bytes().startswith(b"#!"), f"Skill helper has no shebang: {relative}")
-        mode = archive_modes.get(f"easyeda-agent/{relative}") if archive_modes is not None else path.stat().st_mode
+        mode = archive_modes.get(f"pcbpilot/{relative}") if archive_modes is not None else path.stat().st_mode
         if archive_modes is not None or os.name != "nt":
             require(mode is not None and mode & 0o111, f"Skill helper is not executable: {relative}")
     return {"version": version, "files": count, "localLinks": links,
@@ -140,7 +140,7 @@ def native_asset(system=None, machine=None):
     system = (system or platform.system()).lower()
     machine = (machine or platform.machine()).lower()
     arch = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}.get(machine)
-    name = f"easyeda_{system}_{arch}" + (".exe" if system == "windows" else "")
+    name = f"pcbpilot_{system}_{arch}" + (".exe" if system == "windows" else "")
     require(name in ASSETS, f"no native release asset for {system}/{machine}; pass --binary for a native build")
     return name
 
@@ -176,7 +176,7 @@ def smoke_cli(binary, tag, work):
     source_binary = binary.resolve(strict=True)
     # Release downloads do not carry executable mode bits. Reproduce the
     # installer in temporary storage without chmod-ing the downloaded asset.
-    binary = work / ("easyeda.exe" if os.name == "nt" else "easyeda")
+    binary = work / ("pcbpilot.exe" if os.name == "nt" else "pcbpilot")
     shutil.copyfile(source_binary, binary)
     binary.chmod(0o755)
     invocations = []
@@ -195,7 +195,7 @@ def smoke_cli(binary, tag, work):
         invocations.append(label)
         return result.stdout
 
-    require(run("--version").strip() == f"easyeda-agent {tag}", "native CLI version mismatch")
+    require(run("--version").strip() == f"pcbpilot {tag}", "native CLI version mismatch")
     for args in [(), ("sch",), ("sch", "compose"), ("sch", "connectivity"), ("sch", "apply"), ("update",)]:
         require("Usage:" in run(*args, "--help"), f"missing help: {args}")
     actions = json.loads(run("actions"))
@@ -259,7 +259,7 @@ def main():
             if args.assets:
                 assets = args.assets.resolve()
                 report["assetsIntegrityVerified"] = check_assets(assets)
-                report["connector"] = check_connector(assets / "easyeda-agent-connector.eext", args.version[1:])
+                report["connector"] = check_connector(assets / "pcbpilot-connector.eext", args.version[1:])
                 skill, modes = extract_skill(assets / "skills.tar.gz", work / "archive")
                 report["packagedSkill"] = check_skill(skill, args.version[1:], modes)
                 binary = args.binary or assets / native_asset()

@@ -106,7 +106,7 @@ func TestResolvePython(t *testing.T) {
 			wantProbed: []string{stub},
 		},
 		{
-			name:       "EASYEDA_PYTHON wins over the ladder and is never probed",
+			name:       "PCBPILOT_PYTHON wins over the ladder and is never probed",
 			goos:       "windows",
 			env:        map[string]string{envPython: `C:\venv\Scripts\python.exe`},
 			onPath:     map[string]string{`C:\venv\Scripts\python.exe`: `C:\venv\Scripts\python.exe`, "python3": stub},
@@ -114,15 +114,15 @@ func TestResolvePython(t *testing.T) {
 			wantProbed: []string{},
 		},
 		{
-			name:       "EASYEDA_PYTHON pointing nowhere is a hard error, not a fall-through",
+			name:       "PCBPILOT_PYTHON pointing nowhere is a hard error, not a fall-through",
 			goos:       "linux",
 			env:        map[string]string{envPython: "/opt/nope/python"},
 			onPath:     map[string]string{"python3": "/usr/bin/python3"},
-			wantErr:    "EASYEDA_PYTHON=/opt/nope/python is not an executable python",
+			wantErr:    "PCBPILOT_PYTHON=/opt/nope/python is not an executable python",
 			wantProbed: []string{},
 		},
 		{
-			name:       "blank EASYEDA_PYTHON is ignored",
+			name:       "blank PCBPILOT_PYTHON is ignored",
 			goos:       "linux",
 			env:        map[string]string{envPython: "   "},
 			onPath:     map[string]string{"python3": "/usr/bin/python3"},

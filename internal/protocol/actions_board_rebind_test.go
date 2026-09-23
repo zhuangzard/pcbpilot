@@ -3,7 +3,7 @@ package protocol
 import "testing"
 
 // TestBoardRebindRegistered: the connector has handled board.rebind and the
-// CLI has shipped `easyeda board rebind` for a while, but the action was never
+// CLI has shipped `pcbpilot board rebind` for a while, but the action was never
 // added to this catalog — so the daemon's knownActions gate rejected every
 // call with UNKNOWN_ACTION. The catalog entry is the fix; this pins it.
 func TestBoardRebindRegistered(t *testing.T) {
@@ -22,5 +22,5 @@ func TestBoardRebindRegistered(t *testing.T) {
 		}
 		return
 	}
-	t.Fatal("AllActions() is missing board.rebind — the daemon will reject `easyeda board rebind` with UNKNOWN_ACTION")
+	t.Fatal("AllActions() is missing board.rebind — the daemon will reject `pcbpilot board rebind` with UNKNOWN_ACTION")
 }

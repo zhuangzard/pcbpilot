@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/protocol"
+	"github.com/zhuangzard/pcbpilot/internal/protocol"
 )
 
 // 连接器 FIFO 队首堵塞 —— 从「每条命令白烧 18 秒」变成「当场说清楚」。

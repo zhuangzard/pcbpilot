@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/protocol"
+	"github.com/zhuangzard/pcbpilot/internal/protocol"
 )
 
 // TestAudit_EntryCarriesClientID pins the client-attribution field (issue
@@ -72,7 +72,7 @@ func TestAudit_NoClientIDOmitted(t *testing.T) {
 }
 
 // TestAudit_TestRunNeverWritesRealLog pins issue #159: a Server built without
-// an AuditDir must not append to the user's real ~/.easyeda-agent/audit while
+// an AuditDir must not append to the user's real ~/.pcbpilot/audit while
 // under `go test`. Fixture rows (fake windows "w1"/"w2", project "motobox")
 // had been landing there and were later read back as genuine field failures.
 func TestAudit_TestRunNeverWritesRealLog(t *testing.T) {
@@ -86,8 +86,8 @@ func TestAudit_TestRunNeverWritesRealLog(t *testing.T) {
 	}
 	w.Append(auditEntry{Timestamp: time.Now().UTC(), Action: "schematic.components.list"})
 
-	if _, err := os.Stat(filepath.Join(home, ".easyeda-agent")); !os.IsNotExist(err) {
-		t.Fatalf("test run created %s/.easyeda-agent (err=%v), want untouched", home, err)
+	if _, err := os.Stat(filepath.Join(home, ".pcbpilot")); !os.IsNotExist(err) {
+		t.Fatalf("test run created %s/.pcbpilot (err=%v), want untouched", home, err)
 	}
 }
 
@@ -101,13 +101,13 @@ func TestAudit_ServerWithoutAuditDirIsDisabled(t *testing.T) {
 	s := New(Options{})
 	s.audit.Append(auditEntry{Timestamp: time.Now().UTC(), Action: "pcb.via.create", WindowID: "w1"})
 
-	if _, err := os.Stat(filepath.Join(home, ".easyeda-agent")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(home, ".pcbpilot")); !os.IsNotExist(err) {
 		t.Fatalf("New(Options{}) wrote an audit log under %s, want none", home)
 	}
 }
 
-// TestAudit_EnvDirOverride pins EASYEDA_AUDIT_DIR (same convention as
-// EASYEDA_WORKFLOW_DIR), and that an explicit dir still wins over it.
+// TestAudit_EnvDirOverride pins PCBPILOT_AUDIT_DIR (same convention as
+// PCBPILOT_WORKFLOW_DIR), and that an explicit dir still wins over it.
 func TestAudit_EnvDirOverride(t *testing.T) {
 	envDir := t.TempDir()
 	t.Setenv(EnvAuditDir, envDir)

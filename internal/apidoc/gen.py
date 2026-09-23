@@ -9,7 +9,7 @@ blocks and emits one searchable record per method:
       "sig": "createSchematic(boardName?: string): Promise<string | undefined>",
       "summary": "创建原理图", "stability": "beta" }
 
-`easyeda api search/ls` (cmd_api.go) embeds and searches the result. Re-run after
+`pcbpilot api search/ls` (cmd_api.go) embeds and searches the result. Re-run after
 bumping pro-api-types:
 
     python3 internal/apidoc/gen.py            # writes internal/apidoc/api-index.json

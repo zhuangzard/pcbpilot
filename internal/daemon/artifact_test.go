@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/protocol"
+	"github.com/zhuangzard/pcbpilot/internal/protocol"
 )
 
 func TestArtifactFileName(t *testing.T) {
@@ -31,7 +31,7 @@ func TestArtifactFileName(t *testing.T) {
 func TestArtifactDir(t *testing.T) {
 	s := &Server{opts: Options{ArtifactDir: "/cfg/dir"}}
 	// CLI cwd wins → hidden subdir
-	if got := s.artifactDir("/home/me/proj"); got != filepath.Join("/home/me/proj", ".easyeda", "artifacts") {
+	if got := s.artifactDir("/home/me/proj"); got != filepath.Join("/home/me/proj", ".pcbpilot", "artifacts") {
 		t.Errorf("cwd case: %q", got)
 	}
 	// no cwd → configured dir

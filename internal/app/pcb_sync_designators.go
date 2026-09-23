@@ -322,9 +322,9 @@ func newPcbSyncDesignatorsCmd(cfg *appConfig, window *string, stdout, stderr io.
 			"designators are touched: a real designator you set by hand on the PCB is a\n" +
 			"decision, and is never overwritten by the schematic. Every write is verified by\n" +
 			"read-back; repaired boards get an immediate `pcb.save` checkpoint.",
-		Example: "  easyeda pcb sync-designators --project ceshi\n" +
-			"  easyeda pcb sync-designators --dry-run    # 先看会改多少\n" +
-			"  easyeda pcb sync-designators --json",
+		Example: "  pcbpilot pcb sync-designators --project ceshi\n" +
+			"  pcbpilot pcb sync-designators --dry-run    # 先看会改多少\n" +
+			"  pcbpilot pcb sync-designators --json",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			rep, err := runSyncDesignators(cfg, *window, dryRun, stderr)

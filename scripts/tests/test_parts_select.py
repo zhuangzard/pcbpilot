@@ -13,7 +13,7 @@ from unittest import mock
 
 
 REPO = Path(__file__).resolve().parents[2]
-SCRIPT = REPO / ".agents/skills/easyeda-agent/scripts/parts-select.py"
+SCRIPT = REPO / ".agents/skills/pcbpilot/scripts/parts-select.py"
 spec = importlib.util.spec_from_file_location("parts_select", SCRIPT)
 selector = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(selector)

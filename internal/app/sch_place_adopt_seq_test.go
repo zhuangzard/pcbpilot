@@ -256,7 +256,7 @@ func newSeqAdoptDaemon(t *testing.T, comps []map[string]any, seq, abandoned int)
 	calls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/health" {
-			_, _ = w.Write([]byte(`{"service":"easyeda-agent","windows":[]}`))
+			_, _ = w.Write([]byte(`{"service":"pcbpilot","windows":[]}`))
 			return
 		}
 		calls++
@@ -332,7 +332,7 @@ func TestBapAdoptAfterPlaceFailureUncertainWhenTheConnectorAbandonedSomething(t 
 	if !strings.Contains(out, "adopt ?") {
 		t.Fatalf("uncertain must be marked as such on stderr:\n%s", out)
 	}
-	for _, want := range []string{"easyeda sch save", "easyeda sch list", "prim-delete"} {
+	for _, want := range []string{"pcbpilot sch save", "pcbpilot sch list", "prim-delete"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("guidance must stay runnable, got:\n%s", out)
 		}

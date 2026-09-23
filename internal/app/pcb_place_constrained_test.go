@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/blocks"
+	"github.com/zhuangzard/pcbpilot/internal/blocks"
 )
 
 // mkCPNet is mkCP with every pad tagged on `net` and positioned at the component

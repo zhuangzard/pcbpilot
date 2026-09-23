@@ -14,8 +14,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/spec"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/workflow"
+	"github.com/zhuangzard/pcbpilot/internal/spec"
+	"github.com/zhuangzard/pcbpilot/internal/workflow"
 )
 
 // specFixture 是一份"手写风格"的 spec:带未知顶层键、未知模块键、非字母序的键序、

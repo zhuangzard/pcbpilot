@@ -15,7 +15,7 @@
     },
     "component_selection": {
       "status": "passed",
-      "evidence": "easyeda lib search 真机命中并写回 standard-parts.json:INA226AIDGSR=C49851(MSOP-10,deviceUuid c19abc37…)、HoLR2512-1W-10mR-1%-15ppm=C2885415(2512 采样电阻 ±15ppm/℃ 低温漂,deviceUuid 102f328d…)"
+      "evidence": "pcbpilot lib search 真机命中并写回 standard-parts.json:INA226AIDGSR=C49851(MSOP-10,deviceUuid c19abc37…)、HoLR2512-1W-10mR-1%-15ppm=C2885415(2512 采样电阻 ±15ppm/℃ 低温漂,deviceUuid 102f328d…)"
     },
     "pcb_drc": { "status": "not_tested" },
     "bringup": { "status": "not_tested" },

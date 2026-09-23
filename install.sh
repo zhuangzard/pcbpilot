@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
-# easyeda-agent installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | bash
+# pcbpilot installer
+# Usage: curl -fsSL https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.sh | bash
 set -euo pipefail
 
-REPO="zhoushoujianwork/easyeda-agent"
-SKILL_NAME="easyeda-agent"
-# EASYEDA_INSTALL_SKILLS: ""|auto (detect), "none" (skip), or CSV of codex,claude,agents
-INSTALL_SKILLS="${EASYEDA_INSTALL_SKILLS:-}"
-# EASYEDA_SKILL_PRESERVE=1 keeps existing files instead of clean-replacing
-SKILL_PRESERVE="${EASYEDA_SKILL_PRESERVE:-0}"
-# EASYEDA_INSTALL_DIR selects an absolute binary destination.
+REPO="zhuangzard/pcbpilot"
+SKILL_NAME="pcbpilot"
+# PCBPILOT_INSTALL_SKILLS: ""|auto (detect), "none" (skip), or CSV of codex,claude,agents
+INSTALL_SKILLS="${PCBPILOT_INSTALL_SKILLS:-}"
+# PCBPILOT_SKILL_PRESERVE=1 keeps existing files instead of clean-replacing
+SKILL_PRESERVE="${PCBPILOT_SKILL_PRESERVE:-0}"
+# PCBPILOT_INSTALL_DIR selects an absolute binary destination.
 # CODEX_HOME / CLAUDE_CONFIG_DIR select client config roots.
-# EASYEDA_VERSION=v0.18.2 pins the release and skips the GitHub API lookup entirely
-VERSION="${EASYEDA_VERSION:-}"
+# PCBPILOT_VERSION=v0.18.2 pins the release and skips the GitHub API lookup entirely
+VERSION="${PCBPILOT_VERSION:-}"
 
 # ── helpers ──────────────────────────────────────────────────────────────────
-info()  { printf '\033[34m[easyeda-agent]\033[0m %s\n' "$*"; }
+info()  { printf '\033[34m[pcbpilot]\033[0m %s\n' "$*"; }
 ok()    { printf '\033[32m✔\033[0m %s\n' "$*"; }
 warn()  { printf '\033[33m⚠\033[0m %s\n' "$*"; }
 fatal() { printf '\033[31m✘\033[0m %s\n' "$*" >&2; exit 1; }
@@ -24,7 +24,7 @@ fatal() { printf '\033[31m✘\033[0m %s\n' "$*" >&2; exit 1; }
 # api.github.com allows only 60 requests/hour per IP unauthenticated, so a shared
 # office / NAT / CI address can hand back 403 instead of the release JSON. Send a
 # token when we can find one (GITHUB_TOKEN / GH_TOKEN / the gh CLI), and let
-# EASYEDA_VERSION bypass the API completely.
+# PCBPILOT_VERSION bypass the API completely.
 github_token() {
   _tok="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
   if [ -z "$_tok" ] && command -v gh >/dev/null 2>&1; then
@@ -46,7 +46,7 @@ rate_limit_fatal() {
   printf '           export GITHUB_TOKEN=<token>    # GH_TOKEN works too\n' >&2
   printf '           gh auth login                 # gh CLI is picked up automatically\n' >&2
   printf '      2) skip the API by pinning a release tag:\n' >&2
-  printf '           EASYEDA_VERSION=<tag> sh install.sh\n' >&2
+  printf '           PCBPILOT_VERSION=<tag> sh install.sh\n' >&2
   printf '           tags: https://github.com/%s/releases\n' "$REPO" >&2
   exit 1
 }
@@ -69,7 +69,7 @@ if [ -n "$VERSION" ]; then
   case "$VERSION" in
     [0-9]*) VERSION="v${VERSION}" ;;
   esac
-  info "Pinned release: ${VERSION} (EASYEDA_VERSION)"
+  info "Pinned release: ${VERSION} (PCBPILOT_VERSION)"
 else
   info "Fetching latest release..."
   API_TOKEN=$(github_token)
@@ -88,7 +88,7 @@ else
 
   case "$API_CODE" in
     200) ;;
-    401) fatal "GitHub API rejected the token (HTTP 401). Unset GITHUB_TOKEN/GH_TOKEN or run 'gh auth login', or pass EASYEDA_VERSION=<tag>." ;;
+    401) fatal "GitHub API rejected the token (HTTP 401). Unset GITHUB_TOKEN/GH_TOKEN or run 'gh auth login', or pass PCBPILOT_VERSION=<tag>." ;;
     403|429)
       if resolve_latest_web; then
         warn "GitHub API returned HTTP ${API_CODE}; resolved latest from the public release redirect"
@@ -96,15 +96,15 @@ else
         rate_limit_fatal "$API_CODE" "$API_TOKEN"
       fi
       ;;
-    404) fatal "No 'latest' release for ${REPO} (HTTP 404). Pick a tag from https://github.com/${REPO}/releases and pass EASYEDA_VERSION=<tag>." ;;
-    '' | 000) fatal "Could not reach api.github.com (network or proxy issue). Retry, or pass EASYEDA_VERSION=<tag> to skip the API." ;;
-    *) fatal "GitHub API returned HTTP ${API_CODE} while resolving the latest release. Pass EASYEDA_VERSION=<tag> to skip the API." ;;
+    404) fatal "No 'latest' release for ${REPO} (HTTP 404). Pick a tag from https://github.com/${REPO}/releases and pass PCBPILOT_VERSION=<tag>." ;;
+    '' | 000) fatal "Could not reach api.github.com (network or proxy issue). Retry, or pass PCBPILOT_VERSION=<tag> to skip the API." ;;
+    *) fatal "GitHub API returned HTTP ${API_CODE} while resolving the latest release. Pass PCBPILOT_VERSION=<tag> to skip the API." ;;
   esac
 
   if [ -z "${VERSION:-}" ]; then
     VERSION=$(printf '%s\n' "$API_BODY" \
       | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
-    [ -n "$VERSION" ] || fatal "Could not parse a tag_name out of the GitHub API response. Pass EASYEDA_VERSION=<tag> to skip the API."
+    [ -n "$VERSION" ] || fatal "Could not parse a tag_name out of the GitHub API response. Pass PCBPILOT_VERSION=<tag> to skip the API."
   fi
   info "Latest: ${VERSION}"
 fi
@@ -125,12 +125,12 @@ case "$OS" in
   *) fatal "Unsupported OS: $OS (native Windows: run install.ps1 in PowerShell — irm https://raw.githubusercontent.com/${REPO}/main/install.ps1 | iex)" ;;
 esac
 
-BINARY_NAME="easyeda_${OS}_${ARCH}"
+BINARY_NAME="pcbpilot_${OS}_${ARCH}"
 
 # ── choose install dir (no sudo required) ────────────────────────────────────
-if [ -n "${EASYEDA_INSTALL_DIR:-}" ]; then
-  INSTALL_DIR="$EASYEDA_INSTALL_DIR"
-  case "$INSTALL_DIR" in /*) ;; *) fatal "EASYEDA_INSTALL_DIR must be an absolute path" ;; esac
+if [ -n "${PCBPILOT_INSTALL_DIR:-}" ]; then
+  INSTALL_DIR="$PCBPILOT_INSTALL_DIR"
+  case "$INSTALL_DIR" in /*) ;; *) fatal "PCBPILOT_INSTALL_DIR must be an absolute path" ;; esac
 elif [ -w "/usr/local/bin" ]; then
   INSTALL_DIR="/usr/local/bin"
 else
@@ -183,7 +183,7 @@ download_release_asset() {
   # A third-party transport is trusted only for availability. The expected
   # digest must already have come directly from GitHub.
   [ "$SUM_CODE" = 200 ] || fatal "GitHub download failed and no trusted checksum is available; mirror fallback refused"
-  _proxy="${EASYEDA_GITHUB_PROXY-https://gh-proxy.com/}"
+  _proxy="${PCBPILOT_GITHUB_PROXY-https://gh-proxy.com/}"
   case "$_proxy" in
     ''|off|OFF|Off) fatal "download failed: ${_primary} (mirror fallback disabled)" ;;
   esac
@@ -201,15 +201,15 @@ download_release_asset "$BINARY_NAME" "$TMP/binary"
 verify_asset "$BINARY_NAME" "$TMP/binary"
 chmod 0755 "$TMP/binary"
 ACTUAL_VERSION=$("$TMP/binary" --version) || fatal "Downloaded binary cannot run on this host; nothing installed"
-[ "$ACTUAL_VERSION" = "easyeda-agent $VERSION" ] \
+[ "$ACTUAL_VERSION" = "pcbpilot $VERSION" ] \
   || fatal "Downloaded binary version differs: $ACTUAL_VERSION; expected $VERSION"
 
 # ── install skills (Codex + Claude Code + shared Agent root) ──────────────────
-# Repository source: .agents/skills/easyeda-agent. The release packager keeps
-# the archive root as easyeda-agent/, independent of the checkout layout.
+# Repository source: .agents/skills/pcbpilot. The release packager keeps
+# the archive root as pcbpilot/, independent of the checkout layout.
 # Resolve which clients to install for.
-# codex → ~/.codex/skills/easyeda-agent, claude → ~/.claude/skills/easyeda-agent,
-# agents → ~/.agents/skills/easyeda-agent (Codex Desktop shared skill root)
+# codex → ~/.codex/skills/pcbpilot, claude → ~/.claude/skills/pcbpilot,
+# agents → ~/.agents/skills/pcbpilot (Codex Desktop shared skill root)
 detect_targets() {
   # Explicit "none" → skip entirely.
   case "$INSTALL_SKILLS" in
@@ -237,7 +237,7 @@ detect_targets() {
     printf 'agents\n'; found=1
   fi
   # Neither detected → create both by default so the skill is ready when a
-  # client shows up. EASYEDA_INSTALL_SKILLS=none opts out.
+  # client shows up. PCBPILOT_INSTALL_SKILLS=none opts out.
   if [ "$found" = 0 ]; then
     warn "No Codex/Claude Code client detected; creating both skill dirs by default." >&2
     printf 'codex\n'
@@ -309,7 +309,7 @@ for client in $TARGETS; do
   fi
 done
 if [ -z "$TARGETS" ]; then
-  info "Skill install skipped (EASYEDA_INSTALL_SKILLS=none)"
+  info "Skill install skipped (PCBPILOT_INSTALL_SKILLS=none)"
 else
   info "Downloading skills.tar.gz..."
   download_release_asset "skills.tar.gz" "$TMP/skills.tar.gz"
@@ -323,9 +323,9 @@ fi
 BIN_TMP=$(mktemp "${INSTALL_DIR}/.easyeda-download.XXXXXX")
 cp "$TMP/binary" "$BIN_TMP"
 chmod 0755 "$BIN_TMP"
-mv "$BIN_TMP" "${INSTALL_DIR}/easyeda"
+mv "$BIN_TMP" "${INSTALL_DIR}/pcbpilot"
 BIN_TMP=""
-ok "CLI installed → ${INSTALL_DIR}/easyeda"
+ok "CLI installed → ${INSTALL_DIR}/pcbpilot"
 for client in $TARGETS; do
   install_skill_to "$client" "$SRC_SKILL"
 done
@@ -339,25 +339,25 @@ fi
 
 # ── next steps ────────────────────────────────────────────────────────────────
 printf '\n'
-ok "easyeda-agent ${VERSION} installed"
+ok "pcbpilot ${VERSION} installed"
 printf '\n'
 printf 'Next steps:\n'
 printf '  1. Start the daemon:\n'
-printf '       easyeda daemon start\n\n'
+printf '       pcbpilot daemon start\n\n'
 printf '  2. Install the EasyEDA connector extension (either channel):\n'
 printf '     a) Sideload this release (same major.minor compatibility line):\n'
-printf '          Download: %s/easyeda-agent-connector.eext\n' "$BASE_URL"
+printf '          Download: %s/pcbpilot-connector.eext\n' "$BASE_URL"
 printf '          In EasyEDA Pro: 扩展管理 → 导入扩展 → select the .eext file\n'
 printf '     b) 立创官方插件市场 (one-click, auto-updates in place; may lag the CLI):\n'
-printf '          https://jlc-ext.com/item/zhoushoujian/easyeda-agent-connector\n'
-printf '          (renamed from easyeda-agent-connector; same uuid — existing installs\n'
+printf '          https://github.com/zhuangzard/pcbpilot/releases/latest\n'
+printf '          (renamed from pcbpilot-connector; same uuid — existing installs\n'
 printf '           keep auto-updating in place, no action needed)\n\n'
 printf '  3. In EasyEDA Pro: 设置 → 允许外部交互 (Allow external interaction)\n\n'
 printf '  4. Use the skill in your AI client:\n'
-printf '       /easyeda-agent       (schematic + PCB workflow)\n'
+printf '       /pcbpilot       (schematic + PCB workflow)\n'
 printf '       Installed for detected clients: Codex (~/.codex/skills), Codex Desktop shared (~/.agents/skills), and/or Claude Code (~/.claude/skills)\n\n'
 printf 'Upgrading later? No need to re-run this script:\n'
-printf '       easyeda update           # CLI binary + skill dirs → latest\n'
-printf '       easyeda update --check   # report only (cli / skill / connector)\n'
+printf '       pcbpilot update           # CLI binary + skill dirs → latest\n'
+printf '       pcbpilot update --check   # report only (cli / skill / connector)\n'
 printf '     (connector patch drift is compatible; re-import only when `update` reports a major/minor mismatch)\n\n'
 printf 'Full docs: https://github.com/%s\n' "$REPO"

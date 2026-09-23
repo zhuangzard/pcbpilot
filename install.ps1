@@ -1,5 +1,5 @@
-# easyeda-agent installer for native Windows (Windows PowerShell 5.1 and PowerShell 7+)
-# Usage: irm https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.ps1 | iex
+# pcbpilot installer for native Windows (Windows PowerShell 5.1 and PowerShell 7+)
+# Usage: irm https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.ps1 | iex
 #
 # Mirrors install.sh: same env knobs, same "verify everything before touching an
 # installed file" order, same stage-then-swap Skill replace with backup/restore.
@@ -30,14 +30,14 @@ try {
     # Invoke-WebRequest is an order of magnitude slower on 5.1 with the progress bar on.
     $ProgressPreference = 'SilentlyContinue'
 
-    $Repo = 'zhoushoujianwork/easyeda-agent'
-    $SkillName = 'easyeda-agent'
-    $BinaryAsset = 'easyeda_windows_amd64.exe'
+    $Repo = 'zhuangzard/pcbpilot'
+    $SkillName = 'pcbpilot'
+    $BinaryAsset = 'pcbpilot_windows_amd64.exe'
 
     # -- helpers ---------------------------------------------------------------
     function Write-Step {
         param([string]$Message)
-        Write-Host '[easyeda-agent] ' -ForegroundColor Blue -NoNewline
+        Write-Host '[pcbpilot] ' -ForegroundColor Blue -NoNewline
         Write-Host $Message
     }
     function Write-Ok {
@@ -58,7 +58,7 @@ try {
     # the error and keeps the session (never `exit`, which would close the host).
     function Stop-Install {
         param([string]$Message)
-        throw "easyeda-agent install failed: $Message"
+        throw "pcbpilot install failed: $Message"
     }
 
     # Decode \uXXXX escapes so the ASCII-only source can still print CJK labels.
@@ -95,7 +95,7 @@ try {
     function Get-HomeDir {
         $home_ = Get-EnvValue 'USERPROFILE'
         if (-not $home_) { $home_ = Get-EnvValue 'HOME' }
-        if (-not $home_) { Stop-Install 'Neither USERPROFILE nor HOME is set; pass EASYEDA_INSTALL_DIR' }
+        if (-not $home_) { Stop-Install 'Neither USERPROFILE nor HOME is set; pass PCBPILOT_INSTALL_DIR' }
         return $home_.TrimEnd('\', '/')
     }
 
@@ -177,7 +177,7 @@ try {
         Stop-Install 'install.ps1 targets native Windows; use install.sh on macOS/Linux'
     }
     if (-not [Environment]::Is64BitOperatingSystem) {
-        Stop-Install 'Only 64-bit Windows (amd64) is published; no easyeda_windows_arm/386 asset exists'
+        Stop-Install 'Only 64-bit Windows (amd64) is published; no pcbpilot_windows_arm/386 asset exists'
     }
     # 5.1 defaults to SSL3/TLS1.0 on older builds; GitHub only serves TLS 1.2+.
     try {
@@ -188,11 +188,11 @@ try {
     }
 
     # -- options: env vars first, then arguments when run as a file ------------
-    $Version = Get-EnvValue 'EASYEDA_VERSION'
-    $InstallDir = Get-EnvValue 'EASYEDA_INSTALL_DIR'
-    $InstallSkills = Get-EnvValue 'EASYEDA_INSTALL_SKILLS'
-    $SkillPreserve = (Get-EnvValue 'EASYEDA_SKILL_PRESERVE') -eq '1'
-    $AddToPath = (Get-EnvValue 'EASYEDA_ADD_TO_PATH') -eq '1'
+    $Version = Get-EnvValue 'PCBPILOT_VERSION'
+    $InstallDir = Get-EnvValue 'PCBPILOT_INSTALL_DIR'
+    $InstallSkills = Get-EnvValue 'PCBPILOT_INSTALL_SKILLS'
+    $SkillPreserve = (Get-EnvValue 'PCBPILOT_SKILL_PRESERVE') -eq '1'
+    $AddToPath = (Get-EnvValue 'PCBPILOT_ADD_TO_PATH') -eq '1'
 
     $argv = @($EasyEdaInstallerArgv |
         Where-Object { $null -ne $_ -and ([string]$_).Trim() -ne '' } |
@@ -208,8 +208,8 @@ try {
             '^(?i)-{1,2}skills$' { $needsValue = $true }
             '^(?i)-h$|^(?i)-{1,2}help$' {
                 Write-Host 'Usage: install.ps1 [-Version <tag>] [-InstallDir <abs path>] [-Skills auto|none|codex,claude,agents] [-Preserve] [-AddToPath]'
-                Write-Host 'Env:   EASYEDA_VERSION EASYEDA_INSTALL_DIR EASYEDA_INSTALL_SKILLS EASYEDA_SKILL_PRESERVE'
-                Write-Host '       EASYEDA_ADD_TO_PATH EASYEDA_GITHUB_PROXY CODEX_HOME CLAUDE_CONFIG_DIR GITHUB_TOKEN/GH_TOKEN'
+                Write-Host 'Env:   PCBPILOT_VERSION PCBPILOT_INSTALL_DIR PCBPILOT_INSTALL_SKILLS PCBPILOT_SKILL_PRESERVE'
+                Write-Host '       PCBPILOT_ADD_TO_PATH PCBPILOT_GITHUB_PROXY CODEX_HOME CLAUDE_CONFIG_DIR GITHUB_TOKEN/GH_TOKEN'
                 return
             }
             default { Stop-Install "Unknown option: $option (try -Help)" }
@@ -249,7 +249,7 @@ try {
         Write-Detail '       $env:GITHUB_TOKEN = "<token>"   # GH_TOKEN works too'
         Write-Detail '       gh auth login                   # gh CLI is picked up automatically'
         Write-Detail '  2) skip the API by pinning a release tag:'
-        Write-Detail '       $env:EASYEDA_VERSION = "<tag>"; irm .../install.ps1 | iex'
+        Write-Detail '       $env:PCBPILOT_VERSION = "<tag>"; irm .../install.ps1 | iex'
         Write-Detail "       tags: https://github.com/$Repo/releases"
         Stop-Install "GitHub API rate limit (HTTP $Status) - could not resolve the latest release"
     }
@@ -265,7 +265,7 @@ try {
     if ($Version) {
         # Tags are v-prefixed; accept "1.5.2" as well as "v1.5.2".
         if ($Version -match '^[0-9]') { $Version = "v$Version" }
-        Write-Step "Pinned release: $Version (EASYEDA_VERSION)"
+        Write-Step "Pinned release: $Version (PCBPILOT_VERSION)"
     } else {
         Write-Step 'Fetching latest release...'
         $token = Get-GitHubToken
@@ -274,9 +274,9 @@ try {
         $api = Invoke-HttpGet -Uri "https://api.github.com/repos/$Repo/releases/latest" -Headers $headers -TimeoutSec 60
         switch ($api.Status) {
             200 { }
-            401 { Stop-Install 'GitHub API rejected the token (HTTP 401). Clear GITHUB_TOKEN/GH_TOKEN or run "gh auth login", or set EASYEDA_VERSION=<tag>.' }
-            404 { Stop-Install "No 'latest' release for $Repo (HTTP 404). Pick a tag from https://github.com/$Repo/releases and set EASYEDA_VERSION=<tag>." }
-            0 { Stop-Install "Could not reach api.github.com ($($api.Error)). Retry, or set EASYEDA_VERSION=<tag> to skip the API." }
+            401 { Stop-Install 'GitHub API rejected the token (HTTP 401). Clear GITHUB_TOKEN/GH_TOKEN or run "gh auth login", or set PCBPILOT_VERSION=<tag>.' }
+            404 { Stop-Install "No 'latest' release for $Repo (HTTP 404). Pick a tag from https://github.com/$Repo/releases and set PCBPILOT_VERSION=<tag>." }
+            0 { Stop-Install "Could not reach api.github.com ($($api.Error)). Retry, or set PCBPILOT_VERSION=<tag> to skip the API." }
             default {
                 if ($api.Status -eq 403 -or $api.Status -eq 429) {
                     $Version = Resolve-LatestFromWeb
@@ -286,7 +286,7 @@ try {
                         Stop-RateLimited -Status $api.Status -Token $token
                     }
                 } else {
-                    Stop-Install "GitHub API returned HTTP $($api.Status) while resolving the latest release. Set EASYEDA_VERSION=<tag> to skip the API."
+                    Stop-Install "GitHub API returned HTTP $($api.Status) while resolving the latest release. Set PCBPILOT_VERSION=<tag> to skip the API."
                 }
             }
         }
@@ -296,7 +296,7 @@ try {
             } catch {
                 $Version = ''
             }
-            if (-not $Version) { Stop-Install 'Could not parse a tag_name out of the GitHub API response. Set EASYEDA_VERSION=<tag> to skip the API.' }
+            if (-not $Version) { Stop-Install 'Could not parse a tag_name out of the GitHub API response. Set PCBPILOT_VERSION=<tag> to skip the API.' }
         }
         Write-Step "Latest: $Version"
     }
@@ -305,7 +305,7 @@ try {
 
     # -- install dir -----------------------------------------------------------
     if ($InstallDir) {
-        if (-not (Test-AbsolutePath $InstallDir)) { Stop-Install 'EASYEDA_INSTALL_DIR must be an absolute path' }
+        if (-not (Test-AbsolutePath $InstallDir)) { Stop-Install 'PCBPILOT_INSTALL_DIR must be an absolute path' }
         $InstallDir = $InstallDir.TrimEnd('\', '/')
     } else {
         $InstallDir = Join-Path (Get-HomeDir) '.local\bin'
@@ -372,7 +372,7 @@ try {
             if (-not $HaveChecksums) {
                 Stop-Install 'GitHub download failed and no trusted checksum is available; mirror fallback refused'
             }
-            $configured = [Environment]::GetEnvironmentVariable('EASYEDA_GITHUB_PROXY')
+            $configured = [Environment]::GetEnvironmentVariable('PCBPILOT_GITHUB_PROXY')
             if ($null -eq $configured) { $proxy = 'https://gh-proxy.com/' } else { $proxy = $configured.Trim() }
             if (-not $proxy -or $proxy -match '^(?i)off$') {
                 Stop-Install "download failed: $primary (mirror fallback disabled)"
@@ -391,13 +391,13 @@ try {
 
         # -- CLI binary: download, verify, and prove it runs here --------------
         Write-Step "Downloading $BinaryAsset..."
-        $binaryTemp = Join-Path $TempRoot 'easyeda.exe'
+        $binaryTemp = Join-Path $TempRoot 'pcbpilot.exe'
         Get-ReleaseAsset -Name $BinaryAsset -Destination $binaryTemp
         Test-AssetChecksum -Name $BinaryAsset -Path $binaryTemp
         $probe = Invoke-Native -FilePath $binaryTemp -Arguments @('--version')
         if ($probe.ExitCode -ne 0) { Stop-Install 'Downloaded binary cannot run on this host; nothing installed' }
-        if ($probe.Output -ne "easyeda-agent $Version") {
-            Stop-Install "Downloaded binary version differs: $($probe.Output); expected easyeda-agent $Version"
+        if ($probe.Output -ne "pcbpilot $Version") {
+            Stop-Install "Downloaded binary version differs: $($probe.Output); expected pcbpilot $Version"
         }
         Write-Ok "binary reports $($probe.Output)"
 
@@ -437,7 +437,7 @@ try {
             if (Test-Path -LiteralPath (Join-Path (Get-HomeDir) '.agents')) { $found += 'agents' }
             if ($found.Count -eq 0) {
                 # Neither detected -> create both by default so the skill is ready when
-                # a client shows up. EASYEDA_INSTALL_SKILLS=none opts out.
+                # a client shows up. PCBPILOT_INSTALL_SKILLS=none opts out.
                 Write-Warn 'No Codex/Claude Code client detected; creating both skill dirs by default.'
                 $found = @('codex', 'claude')
             }
@@ -454,7 +454,7 @@ try {
 
         $SourceSkill = ''
         if ($Targets.Count -eq 0) {
-            Write-Step 'Skill install skipped (EASYEDA_INSTALL_SKILLS=none)'
+            Write-Step 'Skill install skipped (PCBPILOT_INSTALL_SKILLS=none)'
         } else {
             Write-Step 'Downloading skills.tar.gz...'
             $archive = Join-Path $TempRoot 'skills.tar.gz'
@@ -467,7 +467,7 @@ try {
             if (-not (Test-Path -LiteralPath $tarExe)) {
                 $candidate = Get-Command -Name 'tar.exe' -CommandType Application -ErrorAction SilentlyContinue
                 if ($null -eq $candidate) {
-                    Stop-Install 'tar.exe not found (ships with Windows 10 1803+). Update Windows, or extract skills.tar.gz manually and run "easyeda update --skill-only --create-missing".'
+                    Stop-Install 'tar.exe not found (ships with Windows 10 1803+). Update Windows, or extract skills.tar.gz manually and run "pcbpilot update --skill-only --create-missing".'
                 }
                 $tarExe = (@($candidate)[0]).Source
             }
@@ -485,8 +485,8 @@ try {
             Write-Ok "skill archive metadata.version = $BareVersion"
         }
 
-        # -- install the CLI (handle a running/locked easyeda.exe) -------------
-        $target = Join-Path $InstallDir 'easyeda.exe'
+        # -- install the CLI (handle a running/locked pcbpilot.exe) -------------
+        $target = Join-Path $InstallDir 'pcbpilot.exe'
         $staged = Join-Path $InstallDir ('.easyeda-download-' + [IO.Path]::GetRandomFileName() + '.exe')
         Copy-Item -LiteralPath $binaryTemp -Destination $staged -Force
         $restartNeeded = $false
@@ -500,12 +500,12 @@ try {
                 Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue
                 Stop-Install "Could not write $target ($($_.Exception.Message)); nothing installed"
             }
-            $aside = Join-Path $InstallDir ('.easyeda-old-' + [DateTime]::Now.ToString('yyyyMMddHHmmss') + '.exe')
+            $aside = Join-Path $InstallDir ('.pcbpilot-old-' + [DateTime]::Now.ToString('yyyyMMddHHmmss') + '.exe')
             try {
                 Move-Item -LiteralPath $target -Destination $aside -Force
             } catch {
                 Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue
-                Stop-Install "$target is locked and could not be renamed aside; stop the daemon (easyeda daemon stop) and re-run. Nothing installed."
+                Stop-Install "$target is locked and could not be renamed aside; stop the daemon (pcbpilot daemon stop) and re-run. Nothing installed."
             }
             try {
                 Move-Item -LiteralPath $staged -Destination $target -Force
@@ -520,12 +520,12 @@ try {
         }
         Write-Ok "CLI installed -> $target"
         if ($restartNeeded) {
-            Write-Warn 'The previous easyeda.exe was in use; it was replaced by renaming it aside.'
-            Write-Detail 'Restart the daemon so it runs the new binary: easyeda daemon stop; easyeda daemon start'
+            Write-Warn 'The previous pcbpilot.exe was in use; it was replaced by renaming it aside.'
+            Write-Detail 'Restart the daemon so it runs the new binary: pcbpilot daemon stop; pcbpilot daemon start'
             if ($orphan) { Write-Detail "Delete the old file once the process exits: $orphan" }
         }
         # Best-effort sweep of files an earlier locked upgrade had to leave behind.
-        Get-ChildItem -LiteralPath $InstallDir -Filter '.easyeda-old-*.exe' -Force -ErrorAction SilentlyContinue |
+        Get-ChildItem -LiteralPath $InstallDir -Filter '.pcbpilot-old-*.exe' -Force -ErrorAction SilentlyContinue |
             Where-Object { $_.FullName -ne $orphan } |
             ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
 
@@ -572,7 +572,7 @@ try {
                 }
                 $preserved = $true
             } else {
-                # LF-terminated, byte-identical to what install.sh and `easyeda update` write.
+                # LF-terminated, byte-identical to what install.sh and `pcbpilot update` write.
                 [IO.File]::WriteAllText((Join-Path $stage '.version'), "$BareVersion`n")
             }
             if (Test-Path -LiteralPath $dest) {
@@ -631,7 +631,7 @@ try {
                 Write-Warn "$InstallDir is not in your user PATH"
                 Write-Detail 'Add it (user scope only, no admin needed):'
                 Write-Detail ("  [Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path','User') + ';{0}', 'User')" -f $InstallDir)
-                Write-Detail 'Or re-run this installer with -AddToPath (file) / $env:EASYEDA_ADD_TO_PATH=1 (pipe).'
+                Write-Detail 'Or re-run this installer with -AddToPath (file) / $env:PCBPILOT_ADD_TO_PATH=1 (pipe).'
                 Write-Host ''
             }
         }
@@ -650,18 +650,18 @@ try {
         $Installed = Expand-Unicode '\u5df2\u5b89\u88c5'
 
         Write-Host ''
-        Write-Ok "easyeda-agent $Version installed"
+        Write-Ok "pcbpilot $Version installed"
         Write-Host ''
         Write-Host 'Next steps:'
         Write-Host '  1. Start the daemon:'
-        Write-Host '       easyeda daemon start'
+        Write-Host '       pcbpilot daemon start'
         Write-Host ''
         Write-Host '  2. Install the EasyEDA connector extension (either channel):'
         Write-Host '     a) Sideload this release (same major.minor compatibility line):'
-        Write-Host "          Download: $BaseUrl/easyeda-agent-connector.eext"
+        Write-Host "          Download: $BaseUrl/pcbpilot-connector.eext"
         Write-Host "          In EasyEDA Pro: $ExtManage (Extensions) -> $ImportExt (Import extension) -> pick the .eext"
         Write-Host "     b) $Marketplace (LCEDA marketplace: one-click, auto-updates in place; may lag the CLI):"
-        Write-Host '          https://jlc-ext.com/item/zhoushoujian/easyeda-agent-connector'
+        Write-Host '          https://github.com/zhuangzard/pcbpilot/releases/latest'
         Write-Host ''
         Write-Host "  3. In EasyEDA Pro: enable $AllowExternal (Allow external interaction)"
         Write-Host "       V3.2 desktop: $Advanced (Advanced) -> $ExtManager (Extension manager) -> $Installed (Installed)"
@@ -669,14 +669,14 @@ try {
         Write-Host "       shows Enabled, and the $AllowExternal checkbox lives on that Config tab."
         Write-Host ''
         Write-Host '  4. Use the skill in your AI client:'
-        Write-Host '       /easyeda-agent       (schematic + PCB workflow)'
+        Write-Host '       /pcbpilot       (schematic + PCB workflow)'
         if ($Targets.Count -gt 0) {
             Write-Host "       Installed for: $($Targets -join ', ')"
         }
         Write-Host ''
         Write-Host 'Upgrading later? No need to re-run this script:'
-        Write-Host '       easyeda update           # CLI binary + skill dirs -> latest'
-        Write-Host '       easyeda update --check   # report only (cli / skill / connector)'
+        Write-Host '       pcbpilot update           # CLI binary + skill dirs -> latest'
+        Write-Host '       pcbpilot update --check   # report only (cli / skill / connector)'
         Write-Host '     (connector patch drift is compatible; re-import only when `update` reports a major/minor mismatch)'
         Write-Host ''
         Write-Host "Full docs: https://github.com/$Repo"

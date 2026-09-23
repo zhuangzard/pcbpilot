@@ -1,7 +1,7 @@
 # 里程碑档人工走查 — 脚本与记录(ADR-0002 验收项)
 
-> 交互模式定义:`.agents/skills/easyeda-agent/references/design-flow.md` →「交互模式(Interaction Modes)」;
-> 决策依据:`.agents/skills/easyeda-agent/references/design-decisions.md`;裁决:`docs/adr/0002-*.md`。
+> 交互模式定义:`.agents/skills/pcbpilot/references/design-flow.md` →「交互模式(Interaction Modes)」;
+> 决策依据:`.agents/skills/pcbpilot/references/design-decisions.md`;裁决:`docs/adr/0002-*.md`。
 > 本文是**走查执行脚本 + 记录表**:用户扮演客户,验证里程碑确认模式的交互体验。每次走查在下方追加一节记录。
 
 ## 走查脚本(用户当客户,约 15–30 分钟)

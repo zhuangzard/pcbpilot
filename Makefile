@@ -6,14 +6,14 @@ DIST := dist
 
 # Installed local runtime, not `go run`/git-describe. Restart is a recovery
 # operation: it must remain usable while the full runtime gate is NOT READY.
-LOCAL_EASYEDA ?= easyeda
+LOCAL_EASYEDA ?= pcbpilot
 LOCAL_VERSION ?= $(shell python3 -c 'import json; print(json.load(open("extension/extension.json"))["version"])')
 LOCAL_DIST ?= $(CURDIR)/dist/local-v$(LOCAL_VERSION)
 
 local-daemon-restart: ## restart installed dev daemon in foreground; keep this terminal open (no build/install)
 	@case "$(LOCAL_VERSION)" in *-dev.*) ;; *) echo "Expected a local development version, got $(LOCAL_VERSION)" >&2; exit 1;; esac
-	@test "$$("$(LOCAL_EASYEDA)" --version)" = "easyeda-agent v$(LOCAL_VERSION)" || { echo "Installed CLI does not match v$(LOCAL_VERSION); install the local package first." >&2; exit 1; }
-	@echo "Starting installed v$(LOCAL_VERSION); daemon start safely replaces the old daemon on port 60832."
+	@test "$$("$(LOCAL_EASYEDA)" --version)" = "pcbpilot v$(LOCAL_VERSION)" || { echo "Installed CLI does not match v$(LOCAL_VERSION); install the local package first." >&2; exit 1; }
+	@echo "Starting installed v$(LOCAL_VERSION); daemon start safely replaces the old daemon on port 61832."
 	@echo "No connector import or EDA restart is performed. Check separately with make local-check."
 	@exec "$(LOCAL_EASYEDA)" daemon start --auto-update-skill=false
 
@@ -24,7 +24,7 @@ local-check: ## offline installed CLI/Skill/daemon/connector gate (LOCAL_DIST ov
 .DEFAULT_GOAL := help
 
 help: ## show this cheatsheet
-	@echo "easyeda-agent — make targets"
+	@echo "pcbpilot — make targets"
 	@echo ""
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 		| awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -38,19 +38,19 @@ test: ## go test ./...
 
 mcp-test: build ## install MCP deps and run unit + stdio protocol tests
 	npm --prefix mcp ci --ignore-scripts
-	EASYEDA_BIN="$(CURDIR)/bin/easyeda" npm --prefix mcp test
+	PCBPILOT_BIN="$(CURDIR)/bin/pcbpilot" npm --prefix mcp test
 
 # Rule-trust harness for the schematic linter: orientation-table consistency
 # (orientation.json derives to its frozenTable; matches the connector) +
 # fixture goldens (known-good board stays clean, known-bad cases still fire).
 lint-test: ## linter rule-trust harness (orientation + fixtures)
-	python3 .agents/skills/easyeda-agent/scripts/tests/run.py
+	python3 .agents/skills/pcbpilot/scripts/tests/run.py
 
 blocks-audit: ## check every block pin ref against real symbol pins (offline; --probe to refresh)
-	python3 .agents/skills/easyeda-agent/scripts/blocks-pin-audit.py
+	python3 .agents/skills/pcbpilot/scripts/blocks-pin-audit.py
 
 modules-audit: ## validate the public reusable Lib module catalog (offline)
-	python3 .agents/skills/easyeda-agent/scripts/modules-audit.py
+	python3 .agents/skills/pcbpilot/scripts/modules-audit.py
 
 # 金标准好板回归(#167 第五层)：参考板九维不该掉分,负对照九维必须还会响。
 # 全离线、不连编辑器。改了 pcb_score_*.go 的判据/阈值/权重后先跑这个。
@@ -62,14 +62,14 @@ fmt: ## gofmt cmd + internal
 	gofmt -w cmd internal
 
 actions: ## print the typed action catalog
-	go run ./cmd/easyeda actions
+	go run ./cmd/pcbpilot actions
 
 # ── playbook 回放(esp32-mini 录制样例)────────────────────────────────────
 # PROJECT 可覆写(默认 ceshi);moves.playbook.json 的 s7-s24 是幂等移件区间。
 PROJECT ?= ceshi
 
 replay: ## 回放 esp32-mini 移件 playbook,恢复布局(PROJECT=ceshi)
-	easyeda apply examples/esp32-mini/moves.playbook.json --from 7 --to 24 --project $(PROJECT)
+	pcbpilot apply examples/esp32-mini/moves.playbook.json --from 7 --to 24 --project $(PROJECT)
 
 demo-replay: ## 演示:挪乱4件→观察→逐步回放恢复(PAUSE=30 STEP_DELAY=1.2 可覆写)
 	bash examples/esp32-mini/demo-replay.sh
@@ -77,50 +77,50 @@ demo-replay: ## 演示:挪乱4件→观察→逐步回放恢复(PAUSE=30 STEP_DE
 DOC_SCH ?= P1
 DOC_PCB ?= PCB1
 replay-sch: ## 阶段一:原理图从零全流程回放(PROJECT/DOC_SCH 可覆写)
-	easyeda apply examples/esp32-mini/schematic.playbook.json --project $(PROJECT) --doc $(DOC_SCH) --yes
+	pcbpilot apply examples/esp32-mini/schematic.playbook.json --project $(PROJECT) --doc $(DOC_SCH) --yes
 
 replay-pcb: ## 阶段二:PCB 从零全流程回放(PROJECT/DOC_PCB 可覆写;uniqueId 见 examples/esp32-mini/README)
-	easyeda apply examples/esp32-mini/pcb.playbook.json --project $(PROJECT) --doc $(DOC_PCB) --yes
+	pcbpilot apply examples/esp32-mini/pcb.playbook.json --project $(PROJECT) --doc $(DOC_PCB) --yes
 
 api-index: ## regenerate the embedded eda.* API index (run after bumping pro-api-types)
 	python3 internal/apidoc/gen.py
 
 # Dev version stamp: `git describe` (e.g. v0.5.1-3-g1d7b7c8[-dirty]) so a locally
-# built binary reports a meaningful version via `easyeda -v` instead of "dev".
+# built binary reports a meaningful version via `pcbpilot -v` instead of "dev".
 DEV_VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-DEV_LDFLAGS := -X 'github.com/zhoushoujianwork/easyeda-agent/internal/version.Version=$(DEV_VERSION)'
+DEV_LDFLAGS := -X 'github.com/zhuangzard/pcbpilot/internal/version.Version=$(DEV_VERSION)'
 # Where `make install` drops the binary (matches install.sh's default).
 PREFIX ?= /usr/local
 
-build: ## build bin/easyeda (version-stamped via git describe; embeds block library)
-	go build -ldflags "$(DEV_LDFLAGS)" -o bin/easyeda ./cmd/easyeda
+build: ## build bin/pcbpilot (version-stamped via git describe; embeds block library)
+	go build -ldflags "$(DEV_LDFLAGS)" -o bin/pcbpilot ./cmd/pcbpilot
 
 install: build ## build + install to $(PREFIX)/bin (default /usr/local/bin; may need sudo)
 	@mkdir -p "$(PREFIX)/bin" 2>/dev/null || true
-	@if install -m 0755 bin/easyeda "$(PREFIX)/bin/easyeda" 2>/dev/null; then \
-		printf '✅ installed → %s/bin/easyeda  (%s)\n' "$(PREFIX)" "$(DEV_VERSION)"; \
+	@if install -m 0755 bin/pcbpilot "$(PREFIX)/bin/pcbpilot" 2>/dev/null; then \
+		printf '✅ installed → %s/bin/pcbpilot  (%s)\n' "$(PREFIX)" "$(DEV_VERSION)"; \
 	else \
 		echo "  $(PREFIX)/bin not writable — retrying with sudo…"; \
-		sudo install -m 0755 bin/easyeda "$(PREFIX)/bin/easyeda" && \
-		printf '✅ installed → %s/bin/easyeda  (%s)\n' "$(PREFIX)" "$(DEV_VERSION)"; \
+		sudo install -m 0755 bin/pcbpilot "$(PREFIX)/bin/pcbpilot" && \
+		printf '✅ installed → %s/bin/pcbpilot  (%s)\n' "$(PREFIX)" "$(DEV_VERSION)"; \
 	fi
 
 dev-build: ## (air hook) version-stamped build to bin + best-effort refresh of the PATH CLI
-	@go build -ldflags "$(DEV_LDFLAGS)" -o bin/easyeda ./cmd/easyeda
-	@install -m 0755 bin/easyeda "$(PREFIX)/bin/easyeda" 2>/dev/null \
-		&& printf '  ↻ PATH CLI refreshed → %s/bin/easyeda (%s)\n' "$(PREFIX)" "$(DEV_VERSION)" \
+	@go build -ldflags "$(DEV_LDFLAGS)" -o bin/pcbpilot ./cmd/pcbpilot
+	@install -m 0755 bin/pcbpilot "$(PREFIX)/bin/pcbpilot" 2>/dev/null \
+		&& printf '  ↻ PATH CLI refreshed → %s/bin/pcbpilot (%s)\n' "$(PREFIX)" "$(DEV_VERSION)" \
 		|| printf '  ⚠ PATH CLI NOT refreshed (%s/bin not writable) — run `make install` once with sudo\n' "$(PREFIX)"
 
 daemon: ## one-shot daemon (no reload) — prefer `make dev`
-	go run ./cmd/easyeda daemon
+	go run ./cmd/pcbpilot daemon
 
 # Live-reload the daemon for development (.air.toml): rebuilds + restarts on any
-# .go change; the connector auto-reconnects (it retries 60832 with backoff). Keep
+# .go change; the connector auto-reconnects (it retries 61832 with backoff). Keep
 # this running in a terminal while developing so the daemon is always up.
 dev: ## hot-reload the daemon (air) — mirrors output to tmp/daemon.log (truncated each start)
 	@command -v air >/dev/null 2>&1 || { echo "air not found — install: go install github.com/air-verse/air@latest"; exit 1; }
 	@mkdir -p tmp
-	@# Kill any leftover daemon+watcher from a prior session so we always bind 60832.
+	@# Kill any leftover daemon+watcher from a prior session so we always bind 61832.
 	@pkill -TERM -f '/easyeda daemon' 2>/dev/null || true
 	@sleep 0.4
 	air 2>&1 | tee tmp/daemon.log
@@ -138,7 +138,7 @@ eext: ## bump patch + build importable .eext (STABLE uuid; uninstall old → imp
 	node extension/scripts/bump.mjs patch
 	npm --prefix extension run typecheck
 	npm --prefix extension run build
-	@printf '\n✅ uninstall old in 已安装, then import → extension/build/dist/easyeda-agent-connector_v%s.eext\n' "$$(node -p "require('./extension/extension.json').version")"
+	@printf '\n✅ uninstall old in 已安装, then import → extension/build/dist/pcbpilot-connector_v%s.eext\n' "$$(node -p "require('./extension/extension.json').version")"
 
 # Fallback only: mint a FRESH uuid so it imports as a NEW extension with no
 # uninstall — but it leaves a duplicate "EasyEDA Agent" entry you must delete
@@ -147,7 +147,7 @@ eext-fresh: ## bump patch + FRESH uuid (imports as new entry; delete the old one
 	node extension/scripts/bump.mjs patch --uuid
 	npm --prefix extension run typecheck
 	npm --prefix extension run build
-	@printf '\n✅ fresh-uuid build → import extension/build/dist/easyeda-agent-connector_v%s.eext, then DELETE the old entry\n' "$$(node -p "require('./extension/extension.json').version")"
+	@printf '\n✅ fresh-uuid build → import extension/build/dist/pcbpilot-connector_v%s.eext, then DELETE the old entry\n' "$$(node -p "require('./extension/extension.json').version")"
 
 # ── Release ───────────────────────────────────────────────────────────────────
 # Usage: make release VERSION=v0.2.0
@@ -163,9 +163,16 @@ eext-fresh: ## bump patch + FRESH uuid (imports as new entry; delete the old one
 #   • verifies and copies the exact VERSION .eext from extension/build/dist/
 #   • packages tracked/staged public skill files into skills.tar.gz
 #   • creates a git tag, pushes it, and creates a GitHub Release with all assets
-#   • publishes the skill to ClawHub at the same version (best-effort — a hub
-#     outage won't fail the release; retry with `make publish-skill VERSION=…`)
-_LDFLAGS = -s -w -X 'github.com/zhoushoujianwork/easyeda-agent/internal/version.Version=$(VERSION)'
+#   • does NOT publish to ClawHub/SkillHub unless PUBLISH_HUBS=1: those public
+#     slugs belong to the upstream easyeda-agent project, pcbpilot has none yet
+#
+# RELEASE_REPO is the GitHub repo releases go to AND the channel the built
+# binaries update from (selfupdate.RepoSlug); RELEASE_REMOTE is the git remote
+# pointing at it.
+RELEASE_REPO   ?= zhuangzard/pcbpilot
+RELEASE_REMOTE ?= origin
+PUBLISH_HUBS   ?= 0
+_LDFLAGS = -s -w -X 'github.com/zhuangzard/pcbpilot/internal/version.Version=$(VERSION)' -X 'github.com/zhuangzard/pcbpilot/internal/selfupdate.RepoSlug=$(RELEASE_REPO)'
 
 .PHONY: agent-check
 agent-check: ## validate repository Agent links, discovery and safe Skill installation
@@ -197,15 +204,15 @@ release-assets:
 	mkdir -p "$(DIST)"
 	npm --prefix extension run typecheck
 	npm --prefix extension run build
-	python3 scripts/release-check.py "$(VERSION)" $(LOCAL_CHECK) --connector "extension/build/dist/easyeda-agent-connector_$(VERSION).eext"
+	python3 scripts/release-check.py "$(VERSION)" $(LOCAL_CHECK) --connector "extension/build/dist/pcbpilot-connector_$(VERSION).eext"
 	@echo "  compiling CLI..."
-	GOOS=darwin  GOARCH=amd64  go build -ldflags "$(_LDFLAGS)" -o $(DIST)/easyeda_darwin_amd64      ./cmd/easyeda
-	GOOS=darwin  GOARCH=arm64  go build -ldflags "$(_LDFLAGS)" -o $(DIST)/easyeda_darwin_arm64      ./cmd/easyeda
-	GOOS=linux   GOARCH=amd64  go build -ldflags "$(_LDFLAGS)" -o $(DIST)/easyeda_linux_amd64       ./cmd/easyeda
-	GOOS=linux   GOARCH=arm64  go build -ldflags "$(_LDFLAGS)" -o $(DIST)/easyeda_linux_arm64       ./cmd/easyeda
-	GOOS=windows GOARCH=amd64  go build -ldflags "$(_LDFLAGS)" -o $(DIST)/easyeda_windows_amd64.exe ./cmd/easyeda
+	GOOS=darwin  GOARCH=amd64  go build -ldflags "$(_LDFLAGS)" -o $(DIST)/pcbpilot_darwin_amd64      ./cmd/pcbpilot
+	GOOS=darwin  GOARCH=arm64  go build -ldflags "$(_LDFLAGS)" -o $(DIST)/pcbpilot_darwin_arm64      ./cmd/pcbpilot
+	GOOS=linux   GOARCH=amd64  go build -ldflags "$(_LDFLAGS)" -o $(DIST)/pcbpilot_linux_amd64       ./cmd/pcbpilot
+	GOOS=linux   GOARCH=arm64  go build -ldflags "$(_LDFLAGS)" -o $(DIST)/pcbpilot_linux_arm64       ./cmd/pcbpilot
+	GOOS=windows GOARCH=amd64  go build -ldflags "$(_LDFLAGS)" -o $(DIST)/pcbpilot_windows_amd64.exe ./cmd/pcbpilot
 	@echo "  packaging connector..."
-	cp "extension/build/dist/easyeda-agent-connector_$(VERSION).eext" "$(DIST)/easyeda-agent-connector.eext"
+	cp "extension/build/dist/pcbpilot-connector_$(VERSION).eext" "$(DIST)/pcbpilot-connector.eext"
 	@echo "  packaging skills..."
 	python3 scripts/pack-skill.py --out "$(DIST)/skills.tar.gz"
 	cp install.sh $(DIST)/install.sh
@@ -220,29 +227,31 @@ release: ## build reviewed sources, tag and publish GitHub Release (explicit pub
 	$(MAKE) release-build VERSION="$(VERSION)" DIST="$(DIST)"
 	@echo "  creating GitHub release..."
 	git tag -a $(VERSION) -m "Release $(VERSION)"
-	git push origin $(VERSION)
+	git push $(RELEASE_REMOTE) $(VERSION)
 	@awk '/^## \[$(VERSION:v%=%)\]/{f=1} f&&/^## \[/&&!/^## \[$(VERSION:v%=%)\]/{exit} f' extension/CHANGELOG.md > $(DIST)/changelog-section.md
 	@{ \
 		cat $(DIST)/changelog-section.md; \
-		printf '\n---\n\nAlready installed? Upgrade in place:\n```\neasyeda update          # CLI binary (sha256-verified) + skill dirs\neasyeda update --check  # report only\n```\n\nFirst install (macOS/Linux):\n```\ncurl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | bash\n```\n\nFirst install (native Windows, PowerShell 5.1+):\n```\nirm https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.ps1 | iex\n```\n\nInstalls/updates:\n- easyeda CLI/daemon\n- easyeda-agent skill for Codex (~/.codex/skills), Codex Desktop shared (~/.agents/skills), and/or Claude Code (~/.claude/skills) when detected\n- prints EasyEDA connector .eext import URL\n\nThe connector .eext is never auto-updated for sideloads. Connector patch drift within the same major.minor line is compatible; re-import only when `easyeda update` reports a major/minor mismatch.\n\nSkill targets: set `EASYEDA_INSTALL_SKILLS=codex,agents,claude` to force targets, `none` to skip, or `EASYEDA_SKILL_PRESERVE=1` to keep local edits.\n\n`checksums.txt` lists sha256 for every asset above.\n'; \
+		printf '\n---\n\nAlready installed? Upgrade in place:\n```\npcbpilot update          # CLI binary (sha256-verified) + skill dirs\npcbpilot update --check  # report only\n```\n\nFirst install (macOS/Linux):\n```\ncurl -fsSL https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.sh | bash\n```\n\nFirst install (native Windows, PowerShell 5.1+):\n```\nirm https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.ps1 | iex\n```\n\nInstalls/updates:\n- pcbpilot CLI/daemon\n- pcbpilot skill for Codex (~/.codex/skills), Codex Desktop shared (~/.agents/skills), and/or Claude Code (~/.claude/skills) when detected\n- prints EasyEDA connector .eext import URL\n\nThe connector .eext is never auto-updated for sideloads. Connector patch drift within the same major.minor line is compatible; re-import only when `pcbpilot update` reports a major/minor mismatch.\n\nSkill targets: set `PCBPILOT_INSTALL_SKILLS=codex,agents,claude` to force targets, `none` to skip, or `PCBPILOT_SKILL_PRESERVE=1` to keep local edits.\n\n`checksums.txt` lists sha256 for every asset above.\n'; \
 	} > $(DIST)/release-notes.md
-	gh release create $(VERSION) \
-		$(DIST)/easyeda_darwin_amd64 \
-		$(DIST)/easyeda_darwin_arm64 \
-		$(DIST)/easyeda_linux_amd64 \
-		$(DIST)/easyeda_linux_arm64 \
-		$(DIST)/easyeda_windows_amd64.exe \
-		$(DIST)/easyeda-agent-connector.eext \
+	gh release create $(VERSION) --repo $(RELEASE_REPO) \
+		$(DIST)/pcbpilot_darwin_amd64 \
+		$(DIST)/pcbpilot_darwin_arm64 \
+		$(DIST)/pcbpilot_linux_amd64 \
+		$(DIST)/pcbpilot_linux_arm64 \
+		$(DIST)/pcbpilot_windows_amd64.exe \
+		$(DIST)/pcbpilot-connector.eext \
 		$(DIST)/skills.tar.gz \
 		$(DIST)/install.sh \
 		$(DIST)/install.ps1 \
 		$(DIST)/checksums.txt \
-		--title "easyeda-agent $(VERSION)" \
+		--title "pcbpilot $(VERSION)" \
 		--notes-file $(DIST)/release-notes.md
-	@echo "  publishing skill to ClawHub..."
-	@$(MAKE) publish-skill VERSION=$(VERSION) \
-		|| echo "  ⚠️  ClawHub publish failed — retry with: clawhub login && make publish-skill VERSION=$(VERSION)"
-	@echo "✅ Released: https://github.com/zhoushoujianwork/easyeda-agent/releases/tag/$(VERSION)"
+	@if [ "$(PUBLISH_HUBS)" = "1" ]; then \
+		echo "  publishing skill to ClawHub..."; \
+		$(MAKE) publish-skill VERSION=$(VERSION) \
+			|| echo "  ⚠️  ClawHub publish failed — retry with: clawhub login && make publish-skill VERSION=$(VERSION)"; \
+	else echo "  skipping ClawHub/SkillHub (PUBLISH_HUBS=0)"; fi
+	@echo "✅ Released: https://github.com/$(RELEASE_REPO)/releases/tag/$(VERSION)"
 
 # 单独发布 skill 到 ClawHub(release 失败后重试用)。
 # 注意:必须传临时包的绝对路径 —— clawhub 的 workdir 可能被全局配置(如 ~/clawd)
@@ -255,8 +264,8 @@ release: ## build reviewed sources, tag and publish GitHub Release (explicit pub
 # `clawhub install` 装到旧版。已发布的历史版本无法补挂 tag(CLI 无 tag 子命令,
 # 版本也不可覆盖)——tags 只能随下一次发版生效。纯 ASCII(服务端对中文 tag 的
 # 校验未知,别拿正式发版赌;中文关键词「嘉立创」走 SKILL.md description 供向量搜索)。
-CLAWHUB_TAGS := latest,easyeda,jlceda,jlc,eda,circuit,schematic,pcb,hardware
-publish-skill: ## publish .agents/skills/easyeda-agent to ClawHub  (VERSION=vX.Y.Z required)
+CLAWHUB_TAGS := latest,pcbpilot,jlceda,jlc,eda,circuit,schematic,pcb,hardware
+publish-skill: ## publish .agents/skills/pcbpilot to ClawHub  (VERSION=vX.Y.Z required)
 ifndef VERSION
 	$(error VERSION is required — usage: make publish-skill VERSION=v0.8.2)
 endif
@@ -265,9 +274,9 @@ endif
 	trap 'rm -rf "$$STAGE"' EXIT; \
 	python3 scripts/pack-skill.py --out "$$STAGE/skills.tar.gz"; \
 	tar -xzf "$$STAGE/skills.tar.gz" -C "$$STAGE"; \
-	clawhub publish "$$STAGE/easyeda-agent" --slug easyeda-agent --version $(VERSION:v%=%) \
+	clawhub publish "$$STAGE/pcbpilot" --slug pcbpilot --version $(VERSION:v%=%) \
 		--tags "$(CLAWHUB_TAGS)" \
-		--changelog "easyeda-agent $(VERSION) — https://github.com/zhoushoujianwork/easyeda-agent/releases/tag/$(VERSION)"
+		--changelog "pcbpilot $(VERSION) — https://github.com/zhuangzard/pcbpilot/releases/tag/$(VERSION)"
 
 # ── skillhub.cn ───────────────────────────────────────────────────────────────
 # 正常路径是 CI 自动发:`gh release create`(make release 的一步)发出 release →
@@ -276,7 +285,7 @@ endif
 #     export SKILLHUB_TOKEN=skh_xxx        # 别写进任何文件,别 echo
 #     make publish-skill-hub VERSION=v1.0.3
 #
-# 为什么要 staging 副本而不是直接发 .agents/skills/easyeda-agent:
+# 为什么要 staging 副本而不是直接发 .agents/skills/pcbpilot:
 #   两套规范**互斥**,同一个 SKILL.md 不可能同时满足 ——
 #     • skillhub 硬性要求 frontmatter 顶层有 slug + displayName(缺一个 die)
 #     • 官方 Agent Skills 规范(npx skills-ref validate)**明确拒绝**这两个字段
@@ -293,9 +302,9 @@ endif
 # 幂等性:同 slug 同 version 重复发会被服务端拒(和 ClawHub 一样版本不可覆盖),
 #   补发请升版本号。发布后进 pending_review 审核队列,不是立刻可见。
 SKILLHUB_HOST ?= https://api.skillhub.cn
-# slug 与立创插件市场的连接器条目同名(jlc-ext 的 easyeda-agent-connector,displayName
+# slug 与立创插件市场的连接器条目同名(jlc-ext 的 pcbpilot-connector,displayName
 # "EDA Agent Connector")——品牌统一。**slug 一旦发布就锁死,改不了**,覆盖用
-# `make publish-skill-hub SKILLHUB_SLUG=…`。原 `easyeda-agent` 在 skillhub 上是
+# `make publish-skill-hub SKILLHUB_SLUG=…`。原 `pcbpilot` 在 skillhub 上是
 # 发不进去又查不到的孤儿记录(publish 报 already exists / verify 报 404),故换名。
 SKILLHUB_SLUG ?= eda-agent-connector
 SKILLHUB_DISPLAY_NAME ?= EDA Agent Connector
@@ -423,7 +432,7 @@ export SKILLHUB_INJECT_PY
 # 所以别看 dry-run 绿了就以为能发 —— 这个坑只有真发才踩得到。
 # 删 LICENSE 不影响规范合规:frontmatter 的 `license: MIT` 是许可证**名**而非文件引用
 # (Agent Skills spec 两种都允许),repo 原件也照常带着 LICENSE,只是不进上传包。
-publish-skill-hub: ## publish .agents/skills/easyeda-agent to skillhub.cn  (VERSION=vX.Y.Z required)
+publish-skill-hub: ## publish .agents/skills/pcbpilot to skillhub.cn  (VERSION=vX.Y.Z required)
 ifndef VERSION
 	$(error VERSION is required — usage: make publish-skill-hub VERSION=v1.0.3)
 endif
@@ -441,7 +450,7 @@ endif
 	SH="bash $$STAGE/skillhub-bin"; \
 	python3 scripts/pack-skill.py --out "$$STAGE/skills.tar.gz"; \
 	tar -xzf "$$STAGE/skills.tar.gz" -C "$$STAGE"; \
-	if [ "$(SKILLHUB_SLUG)" != "easyeda-agent" ]; then mv "$$STAGE/easyeda-agent" "$$STAGE/$(SKILLHUB_SLUG)"; fi; \
+	if [ "$(SKILLHUB_SLUG)" != "pcbpilot" ]; then mv "$$STAGE/pcbpilot" "$$STAGE/$(SKILLHUB_SLUG)"; fi; \
 	find "$$STAGE/$(SKILLHUB_SLUG)" -type f ! -name '*.*' -delete 2>/dev/null || true; \
 	python3 -c "$$SKILLHUB_INJECT_PY" "$$STAGE/$(SKILLHUB_SLUG)/SKILL.md" "$(SKILLHUB_SLUG)" "$(SKILLHUB_DISPLAY_NAME)"; \
 	echo "  skillhub dry-run..."; \
@@ -449,4 +458,4 @@ endif
 	if [ -n "$(SKILLHUB_DRY_RUN)" ]; then echo "  SKILLHUB_DRY_RUN=1 — 到此为止,未发布"; exit 0; fi; \
 	echo "  publishing to $(SKILLHUB_HOST)..."; \
 	$$SH publish "$$STAGE/$(SKILLHUB_SLUG)" --version $(VERSION:v%=%) --host $(SKILLHUB_HOST) \
-		--changelog "easyeda-agent $(VERSION) — https://github.com/zhoushoujianwork/easyeda-agent/releases/tag/$(VERSION)"
+		--changelog "pcbpilot $(VERSION) — https://github.com/zhuangzard/pcbpilot/releases/tag/$(VERSION)"

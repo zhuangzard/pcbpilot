@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/protocol"
+	"github.com/zhuangzard/pcbpilot/internal/protocol"
 )
 
 func connWith(windowID, project, docType string) *conn {

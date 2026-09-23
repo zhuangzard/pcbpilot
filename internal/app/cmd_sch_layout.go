@@ -592,7 +592,7 @@ func runLayoutLint(cfg *appConfig, window string, minGap, pinEps float64, allPag
 		return err
 	}
 	if strict && allPages {
-		return fmt.Errorf("layout-lint: --strict cannot be combined with --all-pages: inactive pages expose shallow/cross-page geometry, so lint each page after `easyeda doc switch <page>`")
+		return fmt.Errorf("layout-lint: --strict cannot be combined with --all-pages: inactive pages expose shallow/cross-page geometry, so lint each page after `pcbpilot doc switch <page>`")
 	}
 	if strict && includeNonParts {
 		return fmt.Errorf("layout-lint: --strict cannot be combined with --include-non-parts: sheet frames and net markers are not placement bodies and would create false geometry failures")
@@ -738,7 +738,7 @@ func collectLayoutLintWith(cfg *appConfig, window string, minGap, pinEps float64
 		rep.SheetCheckError = "--all-pages 下各页图纸边框无法与器件一一对应;逐页 lint(`doc switch` 后单页跑)才能判出图"
 	case sheet == nil:
 		rep.SheetCheckStatus = "unavailable"
-		rep.SheetCheckError = "本页读不到图纸边框(sheet)bbox —— 无法判断器件是否越出图纸;`easyeda doc switch` 到该原理图页后重跑"
+		rep.SheetCheckError = "本页读不到图纸边框(sheet)bbox —— 无法判断器件是否越出图纸;`pcbpilot doc switch` 到该原理图页后重跑"
 	default:
 		rep.SheetCheckStatus = "checked"
 		rep.OutOfSheet = detectOutOfSheet(realParts, *sheet, sheetEdgeMinGap)
@@ -957,7 +957,7 @@ func renderLayoutReport(rep layoutReport, w io.Writer) {
 		// 必须在判据自己的输出里说清楚它没看,并指出谁看得见。
 		fmt.Fprintf(w, "  %s  未判定 %d 个非 part 图元(图框 / netflag / netport / 文字)——\n"+
 			"        本命令只判器件本体,**标签之间、标签压器件的重叠不在其中**;\n"+
-			"        跑 `easyeda sch clusters --strict` 才看得到(--include-non-parts 是粗筛,\n"+
+			"        跑 `pcbpilot sch clusters --strict` 才看得到(--include-non-parts 是粗筛,\n"+
 			"        它会把旗和它自己的桩线也算成一处重叠)\n", softSeverity, rep.SkippedNonParts)
 	}
 	if len(rep.NoBBox) > 0 {

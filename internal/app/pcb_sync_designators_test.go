@@ -42,7 +42,7 @@ func newSyncTestDaemon(t *testing.T, pcbComponents []map[string]any, schResp str
 	d := &syncTestDaemon{pcb: pcbComponents, schResp: schResp}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprint(w, `{"service":"easyeda-agent","status":"ok","windows":[{"windowId":"w1","context":{"projectName":"t"}}]}`)
+		fmt.Fprint(w, `{"service":"pcbpilot","status":"ok","windows":[{"windowId":"w1","context":{"projectName":"t"}}]}`)
 	})
 	mux.HandleFunc("/action", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {

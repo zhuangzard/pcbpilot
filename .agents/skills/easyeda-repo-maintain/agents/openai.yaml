@@ -1,4 +1,0 @@
-interface:
-  display_name: "EasyEDA 仓库维护 / Repository Maintenance"
-  short_description: "维护 EasyEDA Skill、工具与文档，验证并回填可复用工程经验"
-  default_prompt: "使用 $easyeda-repo-maintain 在已连接的源码仓库中完成当前改进，同步文档并验证，按本次授权整理 Git 贡献。"

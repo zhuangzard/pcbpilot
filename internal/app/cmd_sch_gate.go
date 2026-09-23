@@ -576,7 +576,7 @@ func runSchGate(cfg *appConfig, window string, allPages, strict, asJSON, failFas
 func collectSchGate(cfg *appConfig, window string, allPages, strict, failFast bool,
 	only, skip string, minGap, pinEps, overlapEps float64, stderr io.Writer) (*gateReport, error) {
 	if strict && allPages {
-		return nil, fmt.Errorf("sch gate: --strict cannot be combined with --all-pages: inactive pages expose shallow geometry (see layout-lint), so gate each page after `easyeda doc switch <page>`")
+		return nil, fmt.Errorf("sch gate: --strict cannot be combined with --all-pages: inactive pages expose shallow geometry (see layout-lint), so gate each page after `pcbpilot doc switch <page>`")
 	}
 	run, skippedNames, err := resolveGateStages(only, skip)
 	if err != nil {
@@ -738,8 +738,8 @@ func renderGateReport(rep gateReport, w io.Writer) {
 			}
 		}
 		if rep.Verdict == "blocked" {
-			fmt.Fprintln(w, "\n  注意:这是「检查器没跑成」,不是「板子有问题」——先 `easyeda health` 确认连接器,")
-			fmt.Fprintln(w, "  再 `easyeda doc ls` / `doc switch <page>` 确认目标页已打开,然后重跑 gate。")
+			fmt.Fprintln(w, "\n  注意:这是「检查器没跑成」,不是「板子有问题」——先 `pcbpilot health` 确认连接器,")
+			fmt.Fprintln(w, "  再 `pcbpilot doc ls` / `doc switch <page>` 确认目标页已打开,然后重跑 gate。")
 		}
 	}
 	if len(rep.Warnings) > 0 {
@@ -747,7 +747,7 @@ func renderGateReport(rep gateReport, w io.Writer) {
 	}
 }
 
-// newSchGateCmd builds the `easyeda sch gate` command.
+// newSchGateCmd builds the `pcbpilot sch gate` command.
 func newSchGateCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {
 	var (
 		allPages, strict, asJSON, failFast bool
@@ -788,12 +788,12 @@ non-fatal DRC items are advisory — --strict promotes them to blocking.
 --json emits every stage's full native report under stages[].detail, so it is a
 superset of the four single commands' JSON: nothing needs a second run.`,
 		Args: cobra.NoArgs,
-		Example: `  easyeda sch gate
-  easyeda sch gate --json
-  easyeda sch gate --strict                 # 告警也阻塞
-  easyeda sch gate --only layout-lint,check # 只跑便宜的两关
-  easyeda sch gate --skip drc               # 窗口不在前台时跳过 DRC
-  easyeda sch gate --fail-fast              # 第一个阻塞失败就停`,
+		Example: `  pcbpilot sch gate
+  pcbpilot sch gate --json
+  pcbpilot sch gate --strict                 # 告警也阻塞
+  pcbpilot sch gate --only layout-lint,check # 只跑便宜的两关
+  pcbpilot sch gate --skip drc               # 窗口不在前台时跳过 DRC
+  pcbpilot sch gate --fail-fast              # 第一个阻塞失败就停`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSchGate(cfg, *window, allPages, strict, asJSON, failFast,
 				only, skip, minGap, pinEps, overlapEps, stdout, stderr)

@@ -26,7 +26,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/spec"
+	"github.com/zhuangzard/pcbpilot/internal/spec"
 )
 
 // Geometry thresholds, all in mil (PCB primitives are native mil — pcb.line.create
@@ -1327,7 +1327,7 @@ func findViaCrossesPlane(vias []pcbViaP, planes []pcbPlaneLayer) []pcbCheckFindi
 			out = append(out, pcbCheckFinding{
 				Type: "via-crosses-plane", Level: "WARN", Net: v.Net, Layer: pl.Layer,
 				Primitives: []string{v.ID}, At: &pcbXY{round2(v.X), round2(v.Y)},
-				Message: fmt.Sprintf("via (net %s) crosses inner PLANE %s (net %s) — a via created after the plane existed gets NO anti-pad (easyeda/pro-api-sdk#32; DRC: Plane Zone to Via / Hole to Plane Zone); prefer removing it and routing on outer layers, or `easyeda doc reload` then `pcb pour-rebuild`, then confirm with `pcb drc`",
+				Message: fmt.Sprintf("via (net %s) crosses inner PLANE %s (net %s) — a via created after the plane existed gets NO anti-pad (easyeda/pro-api-sdk#32; DRC: Plane Zone to Via / Hole to Plane Zone); prefer removing it and routing on outer layers, or `pcbpilot doc reload` then `pcb pour-rebuild`, then confirm with `pcb drc`",
 					vnet, name, strings.Join(pl.Nets, ",")),
 			})
 		}
@@ -1445,7 +1445,7 @@ func findNetlessViaInPad(pads []pcbPadP, vias []pcbViaP) []pcbCheckFinding {
 			Type: "netless-via-in-pad", Level: "WARN", Net: a.Net,
 			Designator: a.Designator, Primitives: []string{a.ViaID},
 			At: &pcbXY{round2(a.X), round2(a.Y)},
-			Message: fmt.Sprintf("netless via inside pad %s.%s (net %s) — an embedded (EPAD thermal) via that never bonds to its plane and trips native DRC; fix `easyeda pcb via-bond` (re-run after every doc reload — the platform re-materializes these netless, live-verified #118)",
+			Message: fmt.Sprintf("netless via inside pad %s.%s (net %s) — an embedded (EPAD thermal) via that never bonds to its plane and trips native DRC; fix `pcbpilot pcb via-bond` (re-run after every doc reload — the platform re-materializes these netless, live-verified #118)",
 				a.Designator, a.PadNumber, a.Net),
 		})
 	}

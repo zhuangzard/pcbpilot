@@ -4,7 +4,7 @@ package app
 //
 // ── 缺陷(2026-08-24 真机 esp32Mini E2E,连跑两轮完全一致)────────────────────
 //
-//	$ easyeda sch zone-draw --project ceshi --doc MCU_IO --mode partition
+//	$ pcbpilot sch zone-draw --project ceshi --doc MCU_IO --mode partition
 //	partition plan has violations {SheetOverflow:0 PartitionOverlap:3 TitleBlockHits:1 …}
 //	  — refusing to draw overlapping/out-of-sheet annotations
 //	  ⚠ 3 对分区框重叠:两个区的成员体积本身就交叠 —— `sch zone-arrange --apply` 重排…

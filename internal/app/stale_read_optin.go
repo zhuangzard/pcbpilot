@@ -35,7 +35,7 @@ func (e *actionError) Is(target error) bool {
 func isStaleRead(err error) bool { return errors.Is(err, errStaleRead) }
 
 func staleReadNextStep(what string) string {
-	return fmt.Sprintf("%s 被旧版 daemon 以 STALE_READ 拒绝；升级 daemon，或保存后运行 `easyeda doc reload` 再回读", what)
+	return fmt.Sprintf("%s 被旧版 daemon 以 STALE_READ 拒绝；升级 daemon，或保存后运行 `pcbpilot doc reload` 再回读", what)
 }
 
 // staleReadOptIn is retained for source compatibility. It deliberately returns

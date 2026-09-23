@@ -9,7 +9,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/connectivity"
+	"github.com/zhuangzard/pcbpilot/internal/connectivity"
 )
 
 // newSchMaterializeCmd turns a fixed 1.4 connectivity snapshot into a

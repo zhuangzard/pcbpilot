@@ -1,9 +1,9 @@
 # Skill 设计
 
-`.agents/skills/easyeda-agent/` 是唯一公开设计入口，CLI、daemon 和 Connector 为它服务。入口保持短小，
+`.agents/skills/pcbpilot/` 是唯一公开设计入口，CLI、daemon 和 Connector 为它服务。入口保持短小，
 负责选择样例、说明参数入口、调用 typed 工具和安排独立验证；具体知识放在按需读取的参考与样例中。
 
-源码仓库另有 `.agents/skills/easyeda-repo-lookup` 与 `easyeda-repo-maintain`，分别提供跨项目
+源码仓库另有 `.agents/skills/pcbpilot-repo-lookup` 与 `pcbpilot-repo-maintain`，分别提供跨项目
 查询与仓库维护，不拆分设计工作流、不随公开 Skill 发布。安装、文档归属与兼容入口见
 [Agent 协作设计](agent-collaboration.md) 和 [文档索引](README.md)。
 
@@ -24,7 +24,7 @@ Agent 按下列循环工作：
 - `SKILL.md` 只保留工作循环、任务路由、不可省略的事实和验证状态定义。
 - 样例索引连接具体功能例；原理图、PCB、选型和 API 参考按任务加载，避免每次读取完整手册。
 - 完整日志、大图和开发历史留在开发资料中；安装包保留参数、可执行步骤、必要局部图与工具依赖。
-- 公共样例使用现有 JSON、typed action、Cobra 子命令和 `easyeda apply`，不新建通用执行 DSL。
+- 公共样例使用现有 JSON、typed action、Cobra 子命令和 `pcbpilot apply`，不新建通用执行 DSL。
 
 入口长度和首次阅读量用真实任务比较，目标约 60–90 行并减少约 60% 首次必要阅读；这些是优化目标，
 不形成新的机械阻断条件。

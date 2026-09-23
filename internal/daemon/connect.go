@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/protocol"
+	"github.com/zhuangzard/pcbpilot/internal/protocol"
 )
 
 // handleConnect accepts the connector WebSocket and runs the read loop until the
@@ -50,7 +50,7 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	// Identify ourselves first so the connector can verify it reached an
-	// easyeda-agent daemon before it registers.
+	// pcbpilot daemon before it registers.
 	if err := c.write(ctx, protocol.Handshake{
 		Type:    protocol.TypeHandshake,
 		Service: Service,

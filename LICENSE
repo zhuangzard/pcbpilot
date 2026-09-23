@@ -1,6 +1,7 @@
 MIT License
 
-Copyright (c) 2026 zhoushoujianwork and contributors
+Copyright (c) 2026 zhoushoujianwork and contributors (original easyeda-agent)
+Copyright (c) 2026 zhuangzard and contributors (pcbpilot)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -34,4 +35,4 @@ under the Apache License 2.0. Their license text is at
 made vs. upstream (per Apache-2.0 §4b) are in the repository `NOTICE` file.
 
 Compiled output of those files is included in the connector extension bundle
-(`easyeda-agent-connector.eext`); see `extension/LICENSE` in that bundle.
+(`pcbpilot-connector.eext`); see `extension/LICENSE` in that bundle.

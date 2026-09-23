@@ -1,6 +1,6 @@
 # 模块框与标题的数据转换
 
-遵守 [数据驱动架构基准](../.agents/skills/easyeda-agent/references/schematic-data.md#数据驱动架构基准)。
+遵守 [数据驱动架构基准](../.agents/skills/pcbpilot/references/schematic-data.md#数据驱动架构基准)。
 框/标题是源数据计算的产物，不在验收末尾靠手工补画；必检文字含位号、网络文字和自由文字，
 型号/参数等非位号器件属性排除碰撞与框包络。旧框也须参与现场检查，但检查范围不等于删除授权。
 
@@ -68,17 +68,17 @@
 ## CLI 与 Apply
 
 ```bash
-easyeda sch frame check --from plan.json --project <project>
-easyeda sch frame apply --from plan.json --project <project>
+pcbpilot sch frame check --from plan.json --project <project>
+pcbpilot sch frame apply --from plan.json --project <project>
 
-easyeda sch power-layout --from geometry.json --out plan.json --playbook apply.json
-easyeda sch apply apply.json --dry-run
-easyeda sch apply apply.json --yes
+pcbpilot sch power-layout --from geometry.json --out plan.json --playbook apply.json
+pcbpilot sch apply apply.json --dry-run
+pcbpilot sch apply apply.json --yes
 
 # 电路位置和网表已正确，只补呈现层；不生成移件、删线或重连操作
-easyeda sch power-layout --from geometry.json --out plan.json \
+pcbpilot sch power-layout --from geometry.json --out plan.json \
   --frames-only --playbook frames-apply.json
-easyeda sch apply frames-apply.json --yes
+pcbpilot sch apply frames-apply.json --yes
 ```
 
 `sch frame apply/check` 也接受 `--data` 内联 JSON，供 Apply 的 `run` 步骤使用。

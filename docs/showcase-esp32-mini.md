@@ -2,7 +2,7 @@
 
 > **输入**是一份 30 行的中文需求([`esp32MiniRequire.md`](../esp32MiniRequire.md)),
 > **输出**是一块过了 DRC 的四层板:原理图 19 器件 13 网络、PCB 布局评审 + 布线 + 内电层 +
-> 铺铜 + 丝印,全程由 [easyeda-agent](https://github.com/zhoushoujianwork/easyeda-agent)
+> 铺铜 + 丝印,全程由 [pcbpilot](https://github.com/zhuangzard/pcbpilot)
 > 驱动 EasyEDA Pro 完成,人只做了两件事:把 EasyEDA 切到前台、目检确认。
 
 ## 需求 → 交付
@@ -56,14 +56,14 @@ BOM               13 行全带 LCSC C 号,直接可下单
 
 ```bash
 # 安装 CLI + 连接器(EasyEDA Pro 开启「允许外部交互」)
-curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.sh | bash
 
 # 核心命令一览
-easyeda daemon health                 # 连上了吗
-easyeda sch place / autoconnect       # 放器件、批量连网络
-easyeda pcb auto-place / route-short  # 布局种子、短线自布
-easyeda pcb power-planes / pour-fit   # 4层电源分配、铺铜
-easyeda pcb drc / check / layout-lint # 三重门禁
+pcbpilot daemon health                 # 连上了吗
+pcbpilot sch place / autoconnect       # 放器件、批量连网络
+pcbpilot pcb auto-place / route-short  # 布局种子、短线自布
+pcbpilot pcb power-planes / pour-fit   # 4层电源分配、铺铜
+pcbpilot pcb drc / check / layout-lint # 三重门禁
 ```
 
 > 测试工程用一次性 `ceshi`;本案例的阶段数据包在 `rec/showcase-final/`

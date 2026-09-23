@@ -7,15 +7,15 @@ import (
 )
 
 // TestStripArtifactNesting: the outputDir sent to the daemon must never point
-// INSIDE a .easyeda/artifacts tree — a drifted cwd used to make the daemon
-// nest .easyeda/artifacts/.easyeda/artifacts/… one level deeper per call.
+// INSIDE a .pcbpilot/artifacts tree — a drifted cwd used to make the daemon
+// nest .pcbpilot/artifacts/.pcbpilot/artifacts/… one level deeper per call.
 // 1-level and 3-level nested inputs must normalize to the SAME target.
 func TestStripArtifactNesting(t *testing.T) {
 	sep := string(filepath.Separator)
 	root := filepath.Join(sep+"home", "me", "proj")
-	one := filepath.Join(root, ".easyeda", "artifacts")
+	one := filepath.Join(root, ".pcbpilot", "artifacts")
 	three := filepath.Join(root,
-		".easyeda", "artifacts", ".easyeda", "artifacts", ".easyeda", "artifacts")
+		".pcbpilot", "artifacts", ".pcbpilot", "artifacts", ".pcbpilot", "artifacts")
 
 	if got := stripArtifactNesting(one); got != root {
 		t.Errorf("1-level nesting: got %q, want %q", got, root)
@@ -32,13 +32,13 @@ func TestStripArtifactNesting(t *testing.T) {
 	if got := stripArtifactNesting(root); got != root {
 		t.Errorf("normal path changed: got %q, want %q", got, root)
 	}
-	// A lone .easyeda (no artifacts child segment) is NOT stripped.
-	cfgDir := filepath.Join(root, ".easyeda")
+	// A lone .pcbpilot (no artifacts child segment) is NOT stripped.
+	cfgDir := filepath.Join(root, ".pcbpilot")
 	if got := stripArtifactNesting(cfgDir); got != cfgDir {
-		t.Errorf(".easyeda without artifacts stripped: got %q, want %q", got, cfgDir)
+		t.Errorf(".pcbpilot without artifacts stripped: got %q, want %q", got, cfgDir)
 	}
 	// Degenerate: the pair at the filesystem root must not panic or return "".
-	if got := stripArtifactNesting(filepath.Join(sep+".easyeda", "artifacts")); got != sep {
+	if got := stripArtifactNesting(filepath.Join(sep+".pcbpilot", "artifacts")); got != sep {
 		t.Errorf("rooted pair: got %q, want %q", got, sep)
 	}
 }
@@ -58,8 +58,8 @@ func TestResolveOutputDir(t *testing.T) {
 	}
 	// cwd inside a nested artifact tree → stripped first, then anchored: the
 	// nested 1-level and 3-level cases land on the SAME directory.
-	one := filepath.Join(projRoot, ".easyeda", "artifacts")
-	three := filepath.Join(projRoot, ".easyeda", "artifacts", ".easyeda", "artifacts", ".easyeda", "artifacts")
+	one := filepath.Join(projRoot, ".pcbpilot", "artifacts")
+	three := filepath.Join(projRoot, ".pcbpilot", "artifacts", ".pcbpilot", "artifacts", ".pcbpilot", "artifacts")
 	g1, g3 := resolveOutputDir(one, isRoot), resolveOutputDir(three, isRoot)
 	if g1 != projRoot || g3 != projRoot || g1 != g3 {
 		t.Errorf("nested: got %q / %q, want both %q", g1, g3, projRoot)
@@ -77,7 +77,7 @@ func TestResolveOutputDir(t *testing.T) {
 
 // TestArtifactOutputDirLive: run against the real repo cwd — this test file
 // lives under the module, so the marker walk-up must find a root that carries
-// .git or go.mod, and the result must never contain a .easyeda/artifacts pair.
+// .git or go.mod, and the result must never contain a .pcbpilot/artifacts pair.
 func TestArtifactOutputDirLive(t *testing.T) {
 	dir, ok := artifactOutputDir()
 	if !ok {
@@ -86,7 +86,7 @@ func TestArtifactOutputDirLive(t *testing.T) {
 	if !dirHasProjectMarker(dir) {
 		t.Errorf("resolved dir %q has no project marker", dir)
 	}
-	if strings.Contains(dir, filepath.Join(".easyeda", "artifacts")) {
+	if strings.Contains(dir, filepath.Join(".pcbpilot", "artifacts")) {
 		t.Errorf("resolved dir %q still inside an artifact tree", dir)
 	}
 }

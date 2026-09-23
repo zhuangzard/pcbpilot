@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/version"
+	"github.com/zhuangzard/pcbpilot/internal/version"
 )
 
 // findingFor returns the finding for component (first match) or a zero value.
@@ -194,7 +194,7 @@ func TestEvaluateVersionGateDedupsConnectors(t *testing.T) {
 }
 
 func TestVersionGateFromHealth(t *testing.T) {
-	raw := []byte(`{"service":"easyeda-agent","version":"1.1.0","windows":[
+	raw := []byte(`{"service":"pcbpilot","version":"1.1.0","windows":[
 	  {"windowId":"w1","connectorVersion":"1.1.0"},
 	  {"windowId":"w2","connectorVersion":"1.1.0"}]}`)
 	rep := versionGateFromHealth(raw)
@@ -217,7 +217,7 @@ func TestVersionGateFromHealth(t *testing.T) {
 
 // healthBody builds a /health payload with the given daemon + connector version.
 func healthBody(daemon, connector string) []byte {
-	body := map[string]any{"service": "easyeda-agent", "version": daemon}
+	body := map[string]any{"service": "pcbpilot", "version": daemon}
 	if connector != "" {
 		body["windows"] = []map[string]any{{"windowId": "w1", "connectorVersion": connector}}
 	}
@@ -242,7 +242,7 @@ func TestRunVersionGateReportsStaleDaemonWithoutRefusing(t *testing.T) {
 		t.Fatalf("version mismatch is diagnostic-only: %v", err)
 	}
 	msg := stderr.String()
-	for _, want := range []string{"daemon", "make dev", "easyeda daemon start", "仅供诊断", "update --check --exit-code"} {
+	for _, want := range []string{"daemon", "make dev", "pcbpilot daemon start", "仅供诊断", "update --check --exit-code"} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("diagnostic missing %q:\n%s", want, msg)
 		}
@@ -253,7 +253,7 @@ func TestPostActionDoesNotConsultVersionDiagnostic(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/health" {
-			fmt.Fprint(w, `{"service":"easyeda-agent","version":"v0.1.0","windows":[{"windowId":"w1","connectorVersion":"0.1.0"}]}`)
+			fmt.Fprint(w, `{"service":"pcbpilot","version":"v0.1.0","windows":[{"windowId":"w1","connectorVersion":"0.1.0"}]}`)
 			return
 		}
 		fmt.Fprint(w, `{"ok":true,"result":{}}`)
@@ -307,7 +307,7 @@ func TestRunVersionGateDevBuildNeverBlocks(t *testing.T) {
 func TestRunVersionGateEscapeHatchIsDeprecatedAndDoesNotAudit(t *testing.T) {
 	withCLIVersion(t, "v1.1.1")
 	dir := t.TempDir()
-	t.Setenv("EASYEDA_AUDIT_DIR", dir)
+	t.Setenv("PCBPILOT_AUDIT_DIR", dir)
 
 	var stderr bytes.Buffer
 	if err := runVersionGate(&appConfig{skipVersionCheck: true}, healthBody("1.1.0", "1.1.1"), &stderr); err != nil {
@@ -325,7 +325,7 @@ func TestRunVersionGateEscapeHatchIsDeprecatedAndDoesNotAudit(t *testing.T) {
 
 func TestRunVersionGateEscapeHatchViaEnv(t *testing.T) {
 	withCLIVersion(t, "v1.1.1")
-	t.Setenv("EASYEDA_AUDIT_DIR", t.TempDir())
+	t.Setenv("PCBPILOT_AUDIT_DIR", t.TempDir())
 	t.Setenv(envSkipVersionCheck, "1")
 	var stderr bytes.Buffer
 	if err := runVersionGate(&appConfig{}, healthBody("1.0.0", "1.1.1"), &stderr); err != nil {

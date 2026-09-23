@@ -1,16 +1,16 @@
 # 原理图功能支持全景(CLI 视角)
 
-`easyeda sch` 域的**当前能力清单 + 待支持路线**。定位:让 AI agent(或人)可以完全通过
+`pcbpilot sch` 域的**当前能力清单 + 待支持路线**。定位:让 AI agent(或人)可以完全通过
 typed CLI 操作嘉立创EDA专业版的原理图——每个动作可观测、可校验；写入不具备事务回滚。
 
 设计、布局、检查和修复统一遵守
-[数据驱动架构基准](../../.agents/skills/easyeda-agent/references/schematic-data.md#数据驱动架构基准)。
+[数据驱动架构基准](../../.agents/skills/pcbpilot/references/schematic-data.md#数据驱动架构基准)。
 下面的存量命令是能力目录，不是要求逐个执行的主流程；fix 建议须回写源数据并重新求解，
 不能照抄现场挪件后就称算法闭环通过。
 
-> 动作目录的机器可读真值是 `make actions` / `easyeda actions`;本文是**人读的功能地图**,
+> 动作目录的机器可读真值是 `make actions` / `pcbpilot actions`;本文是**人读的功能地图**,
 > 按「AI 操作原理图需要什么」组织。设计流程(何时用哪个命令)见
-> [`.agents/skills/easyeda-agent/references/design-flow.md`](../../.agents/skills/easyeda-agent/references/design-flow.md) S0–S6。
+> [`.agents/skills/pcbpilot/references/design-flow.md`](../../.agents/skills/pcbpilot/references/design-flow.md) S0–S6。
 
 ## 一、已支持(按功能域)
 
@@ -88,7 +88,7 @@ typed CLI 操作嘉立创EDA专业版的原理图——每个动作可观测、�
 
 | 能力 | 命令 | 说明 |
 |---|---|---|
-| 浏览/查找 | `easyeda blocks ls/show/search` | 离线,20 块/11 类目;块携带 internal_nets/ports/parts/pcb_layout/silk 多维知识 |
+| 浏览/查找 | `pcbpilot blocks ls/show/search` | 离线,20 块/11 类目;块携带 internal_nets/ports/parts/pcb_layout/silk 多维知识 |
 | 一键实例化 | `sch block-apply` | 放件+内部连线+端口绑定+落位避让+失败补偿回滚;带 `schematic_layout` 模板的块按人审过的几何落。`--spec <s0.json>` 落块后自动回填真实位号;`--max-attempts N`(默认 3)在同一失败签名重复 N 次时**动手之前**停手,组比整页还大时报 `page-too-small`(停手问用户,不自动分页) |
 | 模板反推 | `sch extract-layout` | 真板摆好的实例 → 反向导出块模板 JSON(「摆好一次→固化」数据管线) |
 
@@ -150,7 +150,7 @@ typed CLI 操作嘉立创EDA专业版的原理图——每个动作可观测、�
 ### 3. 框与必检几何
 
 当前 compose/frame 已消费器件、导线、标记、标题占位，不是只算器件 bbox。
-必检范围与现场测量限制以 [Skill 检查覆盖](../../.agents/skills/easyeda-agent/references/schematic.md#检查覆盖边界原理图验收)
+必检范围与现场测量限制以 [Skill 检查覆盖](../../.agents/skills/pcbpilot/references/schematic.md#检查覆盖边界原理图验收)
 为准；不能以预测包络代替真实回读。
 
 ### 4. zone-draw 的 stale bbox

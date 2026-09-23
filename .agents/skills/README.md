@@ -5,19 +5,19 @@
 
 | Skill | 任务 | 分发方式 |
 |---|---|---|
-| [easyeda-agent](easyeda-agent/SKILL.md) | 参数化电路设计、typed 执行与回读 | 唯一公开设计包；Release、ClawHub、SkillHub |
-| [easyeda-repo-lookup](easyeda-repo-lookup/SKILL.md) | 跨项目只读查询实现、样例、证据 | 链接源码 checkout |
-| [easyeda-repo-maintain](easyeda-repo-maintain/SKILL.md) | 修改工具、知识、验证与 Git 贡献 | 链接源码 checkout |
+| [pcbpilot](pcbpilot/SKILL.md) | 参数化电路设计、typed 执行与回读 | 唯一公开设计包；Release、ClawHub、SkillHub |
+| [pcbpilot-repo-lookup](pcbpilot-repo-lookup/SKILL.md) | 跨项目只读查询实现、样例、证据 | 链接源码 checkout |
+| [pcbpilot-repo-maintain](pcbpilot-repo-maintain/SKILL.md) | 修改工具、知识、验证与 Git 贡献 | 链接源码 checkout |
 
 ## 安装与打包
 
-发布版仍通过根目录 `install.sh` 或 `easyeda update` 安装 CLI 与公开设计 Skill。
+发布版仍通过根目录 `install.sh` 或 `pcbpilot update` 安装 CLI 与公开设计 Skill。
 源码链接使用 `python3 scripts/install-agent-skills.py`，默认只安装仓库协作入口；
 `--scope design` 选择公开设计 Skill，`--scope all` 选择全部，`--dry-run` 预览。
 目标选择、旧链接迁移和冲突保护见 [Agent 协作设计](../../docs/agent-collaboration.md)。
 
-`pack-skill.py` 只打包本目录 `easyeda-agent/` 内已跟踪或已暂存的文件，压缩包根仍是
-`easyeda-agent/`。本 README、协作 Skill、memory 和本机状态不进入公开包；公开包中的
+`pack-skill.py` 只打包本目录 `pcbpilot/` 内已跟踪或已暂存的文件，压缩包根仍是
+`pcbpilot/`。本 README、协作 Skill、memory 和本机状态不进入公开包；公开包中的
 相对链接必须在独立解包后成立。发布授权与版本准备见 [发布流程](../../docs/release-workflow.md)。
 
 ## 编写与维护
@@ -31,7 +31,7 @@
 - `SKILL.md` 保留合法 frontmatter 与已有 `metadata.version`，版本行维持两空格缩进。
   name 使用稳定英文 slug；description 清晰区分触发任务，正文语言保持自洽。
 - references 给出明确加载场景；长文提供目录。安装/开发历史不塞进设计入口。
-- 核心电路块先查 `easyeda blocks ls/show/search`；它们来自 CLI 内嵌数据。
+- 核心电路块先查 `pcbpilot blocks ls/show/search`；它们来自 CLI 内嵌数据。
   `library/modules/` 是另一类可复用模块资产，区别见 [概念表](../../docs/concepts.md)。
 - 不提交 `__pycache__`、编译产物、凭据、原始私有日志或机器绝对路径。
 

@@ -1,5 +1,5 @@
 // Package apidoc embeds a searchable index of the official `eda.*` API surface,
-// generated from @jlceda/pro-api-types (see gen.py). It powers `easyeda api
+// generated from @jlceda/pro-api-types (see gen.py). It powers `pcbpilot api
 // search/ls`, the self-discovery loop for "what eda.* call do I need" when
 // scoping a new typed action or a debug.exec_js snippet.
 package apidoc

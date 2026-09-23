@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket/wsjson"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/protocol"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/schguard"
+	"github.com/zhuangzard/pcbpilot/internal/protocol"
+	"github.com/zhuangzard/pcbpilot/internal/schguard"
 )
 
 func geometryFixture(t *testing.T) map[string]any {

@@ -17,7 +17,7 @@
     },
     "component_selection": {
       "status": "passed",
-      "evidence": "deviceUuid/LCSC/footprint 已由 easyeda lib search + by-lcsc 对 ceshi 库解析写回 standard-parts.json(2026-07-23);全库覆盖率 100%。个别封装/变体存疑处(见 standard-parts desc caveat)待 block-apply 核对"
+      "evidence": "deviceUuid/LCSC/footprint 已由 pcbpilot lib search + by-lcsc 对 ceshi 库解析写回 standard-parts.json(2026-07-23);全库覆盖率 100%。个别封装/变体存疑处(见 standard-parts desc caveat)待 block-apply 核对"
     },
     "pcb_drc": {
       "status": "pending"

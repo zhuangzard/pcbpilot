@@ -1,6 +1,6 @@
 package app
 
-// cmd_pcb_refine.go — `easyeda pcb refine`：打分驱动的精修环（#167 ACHIEVE 层）。
+// cmd_pcb_refine.go — `pcbpilot pcb refine`：打分驱动的精修环（#167 ACHIEVE 层）。
 //
 // 环的形状（#167 原文）：
 //
@@ -27,7 +27,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/spec"
+	"github.com/zhuangzard/pcbpilot/internal/spec"
 )
 
 func newPcbRefineCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {
@@ -58,11 +58,11 @@ func newPcbRefineCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *
 			"    既不是原位也不是目标的第三个位置，比不动更糟）\n" +
 			"  · 逐步回滚 —— 按**步**而非按命令回滚，好的步不会被坏的步连累",
 		Example: "  # 先看会动什么（默认就是 dry-run）\n" +
-			"  easyeda pcb refine --project ceshi\n\n" +
+			"  pcbpilot pcb refine --project ceshi\n\n" +
 			"  # 确认后落笔\n" +
-			"  easyeda pcb refine --project ceshi --apply\n\n" +
+			"  pcbpilot pcb refine --project ceshi --apply\n\n" +
 			"  # 收紧位移预算到 2mil（只清亚 mil 漂移）\n" +
-			"  easyeda pcb refine --apply --max-shift 2",
+			"  pcbpilot pcb refine --apply --max-shift 2",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			opts := defaultRefineOpts()

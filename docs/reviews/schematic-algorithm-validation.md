@@ -9,7 +9,7 @@
 dev.14 安装后的下一全新会话又完成了 P1 的全新规划、Web Apply、原始回读与严格验收，
 并对 P2 做了只读严格回归。该结果只覆盖本轮原理图通用算法与 P1/P2 现场验证，不等于
 v1.5.0 发布验收。
-规范唯一来源为 [Skill 数据驱动架构](../../.agents/skills/easyeda-agent/references/schematic-data.md)。
+规范唯一来源为 [Skill 数据驱动架构](../../.agents/skills/pcbpilot/references/schematic-data.md)。
 
 ## 已实现的通用契约
 

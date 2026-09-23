@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/zhoushoujianwork/easyeda-agent/pkg/pcbrouting"
+	"github.com/zhuangzard/pcbpilot/pkg/pcbrouting"
 )
 
 func request() pcbrouting.Request {

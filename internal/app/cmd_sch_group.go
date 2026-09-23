@@ -7,10 +7,10 @@ package app
 // grouping API (api search "group" hits only pcb_Drc-class long names), and a
 // placed sch_PrimitiveComponent instance's 70 methods/properties carry ZERO
 // group/parent fields — native UI groups are completely invisible to
-// extensions. So easyeda-agent persists the relation itself:
+// extensions. So pcbpilot persists the relation itself:
 //
 //   - `sch group create/list/add/remove/ungroup` — CRUD over
-//     workflow.State.GroupsByPage (~/.easyeda-agent/workflow/<project>.json,
+//     workflow.State.GroupsByPage (~/.pcbpilot/workflow/<project>.json,
 //     keyed by documentUuid — the same page-scoped pattern as zones claims);
 //   - `sch group-move --group <id>` — resolves members (designators) to live
 //     primitiveIds, AUTO-DISCOVERS their attachments (stub wires + the
@@ -37,8 +37,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/blocks"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/workflow"
+	"github.com/zhuangzard/pcbpilot/internal/blocks"
+	"github.com/zhuangzard/pcbpilot/internal/workflow"
 )
 
 type schGroup = workflow.Group
@@ -895,8 +895,8 @@ func expandSchGroupForMove(cfg *appConfig, window, groupRef string) (*schGroupMo
 		return nil, fmt.Errorf(`group %s expansion is INCOMPLETE — %d wire(s) lie on a member pin's own line but stop short of it by ≤%g units without attaching (the signature of residue from an earlier half-move):
 %s
 refusing to move — a half-moved group is exactly what groups exist to prevent. Clean up first:
-  easyeda sch prim-delete --ids %s   # remove the stray stub(s)
-  easyeda sch check                  # audit dangling wires / stray flags
+  pcbpilot sch prim-delete --ids %s   # remove the stray stub(s)
+  pcbpilot sch check                  # audit dangling wires / stray flags
 then re-connect the affected pin(s) (`+"`sch connect`"+`) and retry`,
 			describeSchGroup(g), len(set.Expansion.Suspects), schGroupNearTol,
 			strings.Join(lines, "\n"), strings.Join(ids, ","))
@@ -1122,8 +1122,8 @@ func newSchGroupCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *c
 The platform wall (probed live on EasyEDA Pro 3.2.121): ` + "`eda.*`" + ` exposes NO
 grouping API, and a placed component's 70 methods/properties carry zero
 group/parent fields — even native UI groups are invisible to extensions. So
-easyeda-agent persists the relation itself, page-scoped by documentUuid in the
-project workflow state (~/.easyeda-agent/workflow/<project>.json — same store
+pcbpilot persists the relation itself, page-scoped by documentUuid in the
+project workflow state (~/.pcbpilot/workflow/<project>.json — same store
 as zones claims), and layout actions consume it:
 
   - ` + "`sch group-move --group <id>`" + ` moves the whole group rigidly, with the
@@ -1158,10 +1158,10 @@ netlist audit. reconcile needs BOTH --block-id and --roles (role→designator);
 --if-absent requires --name and reuses a same-name group only when the complete
 member set, block-id, instance and roles match. Any conflicting declaration is
 an error; an exact match leaves the registry and its timestamps unchanged.`,
-			Example: `  easyeda sch group create --members R1,C5,U2
-  easyeda sch group create --members U1,C1,C2 --name mcu-core
+			Example: `  pcbpilot sch group create --members R1,C5,U2
+  pcbpilot sch group create --members U1,C1,C2 --name mcu-core
   # 手工恢复块溯源(reconcile 需要 --block-id + --roles):
-  easyeda sch group create --members U3,C11,C12 --name "sy8089(U3)" \
+  pcbpilot sch group create --members U3,C11,C12 --name "sy8089(U3)" \
     --block-id block.sy8089_buck --instance U3 --roles BUCK=U3,CIN=C11,COUT=C12`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				roles, rerr := parseGroupRolesFlag(rolesRaw)
@@ -1189,7 +1189,7 @@ an error; an exact match leaves the registry and its timestamps unchanged.`,
 				}
 				if blockID != "" {
 					if _, ok, berr := blocks.Get(blockID); berr != nil || !ok {
-						fmt.Fprintf(stderr, "warn: 块库里没有 %q(easyeda blocks ls 查可用块)—— 溯源已记录,但 reconcile 会把该组列为「对不了账」\n", blockID)
+						fmt.Fprintf(stderr, "warn: 块库里没有 %q(pcbpilot blocks ls 查可用块)—— 溯源已记录,但 reconcile 会把该组列为「对不了账」\n", blockID)
 					}
 					if len(roles) == 0 {
 						fmt.Fprintln(stderr, "note: 只给了 --block-id 没给 --roles —— `sch reconcile` 还无法对账(它需要 role→位号映射);补上 --roles ROLE=位号,… 才能恢复机械对账")
@@ -1224,9 +1224,9 @@ an error; an exact match leaves the registry and its timestamps unchanged.`,
 			Use:   "list",
 			Short: "List groups on the active page (--all-pages for every page); absent members are marked stale",
 			Args:  cobra.NoArgs,
-			Example: `  easyeda sch group list
-  easyeda sch group list --all-pages
-  easyeda sch group list --json`,
+			Example: `  pcbpilot sch group list
+  pcbpilot sch group list --all-pages
+  pcbpilot sch group list --json`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				pinned, win, docUUID, project, st, groups, err := loadSchGroupsContext(cfg, *window)
 				if err != nil {
@@ -1337,7 +1337,7 @@ an error; an exact match leaves the registry and its timestamps unchanged.`,
 					// 过去只打在 stderr,一进管道就没了 —— 读的人会把一份未经
 					// 校验的清单当成「成员都在」。
 					fmt.Fprintln(stdout, "  ⚠ 本次未能读到画布成员表 —— 上面**没有**做在场校验,"+
-						"stale 成员不会被标出(`easyeda health` 确认连接器后重跑)")
+						"stale 成员不会被标出(`pcbpilot health` 确认连接器后重跑)")
 					fmt.Fprintln(stderr, "note: live presence check unavailable — stale members not marked")
 				}
 				return nil
@@ -1355,7 +1355,7 @@ an error; an exact match leaves the registry and its timestamps unchanged.`,
 			Use:     "add",
 			Short:   "Add members to an existing group",
 			Args:    cobra.NoArgs,
-			Example: `  easyeda sch group add --group g1 --members C6,C7`,
+			Example: `  pcbpilot sch group add --group g1 --members C6,C7`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				_, _, docUUID, _, st, groups, err := loadSchGroupsContext(cfg, *window)
 				if err != nil {
@@ -1386,7 +1386,7 @@ an error; an exact match leaves the registry and its timestamps unchanged.`,
 			Use:     "remove",
 			Short:   "Remove members from a group (an emptied group is deleted)",
 			Args:    cobra.NoArgs,
-			Example: `  easyeda sch group remove --group g1 --members C6`,
+			Example: `  pcbpilot sch group remove --group g1 --members C6`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				_, _, docUUID, _, st, groups, err := loadSchGroupsContext(cfg, *window)
 				if err != nil {
@@ -1421,7 +1421,7 @@ an error; an exact match leaves the registry and its timestamps unchanged.`,
 			Use:     "ungroup",
 			Short:   "Dissolve a group (removes the relation only — no primitive is touched)",
 			Args:    cobra.NoArgs,
-			Example: `  easyeda sch group ungroup --group g1`,
+			Example: `  pcbpilot sch group ungroup --group g1`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				_, _, docUUID, _, st, groups, err := loadSchGroupsContext(cfg, *window)
 				if err != nil {

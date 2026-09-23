@@ -34,7 +34,7 @@ class ReleaseSmokeTests(unittest.TestCase):
             for name in smoke.ASSETS), encoding="utf-8")
 
     def skill(self):
-        root = self.root / "easyeda-agent"
+        root = self.root / "pcbpilot"
         root.mkdir()
         (root / "SKILL.md").write_text('---\nmetadata:\n  version: "1.4.2"\n---\n[guide](references/guide.md)\n', encoding="utf-8")
         (root / "references").mkdir()
@@ -63,7 +63,7 @@ class ReleaseSmokeTests(unittest.TestCase):
     def test_complete_checksums_and_corruption(self):
         self.assets()
         self.assertEqual(smoke.check_assets(self.root), list(smoke.ASSETS))
-        (self.root / "easyeda_windows_amd64.exe").write_bytes(b"corrupted")
+        (self.root / "pcbpilot_windows_amd64.exe").write_bytes(b"corrupted")
         with self.assertRaisesRegex(ValueError, "checksum mismatch"):
             smoke.check_assets(self.root)
 
@@ -80,7 +80,7 @@ class ReleaseSmokeTests(unittest.TestCase):
 
     def test_connector_identity_version_and_entry(self):
         path = self.root / "connector.eext"
-        manifest = {"name": "easyeda-agent-connector", "version": "1.4.2", "uuid": "a" * 32,
+        manifest = {"name": "pcbpilot-connector", "version": "1.4.2", "uuid": "a" * 32,
                     "entry": "./dist/index", "engines": {"eda": "~3.2.0"}}
         for key, bad in [(None, None), ("version", "1.3.2"), ("uuid", ""), ("entry", "missing"), ("name", "other")]:
             with self.subTest(key=key):
@@ -108,16 +108,16 @@ class ReleaseSmokeTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, expected):
                 smoke.check_skill(root, "1.4.2")
         guide.write_text("ok", encoding="utf-8")
-        modes = {f"easyeda-agent/{name}": 0o755 for name in smoke.EXECUTABLE_HELPERS}
-        modes["easyeda-agent/scripts/lint.sh"] = 0o644
+        modes = {f"pcbpilot/{name}": 0o755 for name in smoke.EXECUTABLE_HELPERS}
+        modes["pcbpilot/scripts/lint.sh"] = 0o644
         with self.assertRaisesRegex(ValueError, "not executable"):
             smoke.check_skill(root, "1.4.2", modes)
 
     def test_extract_rejects_paths_links_and_duplicates(self):
-        bad = [[("../outside", "file")], [("easyeda-agent/../../outside", "file")],
-               [("easyeda-agent/escape", "symlink")], [("/easyeda-agent/a", "file")],
-               [("easyeda-agent/a", "file"), ("easyeda-agent/a", "file")],
-               [("easyeda-agent/C:/outside", "file")], [("easyeda-agent/./a", "file")]]
+        bad = [[("../outside", "file")], [("pcbpilot/../../outside", "file")],
+               [("pcbpilot/escape", "symlink")], [("/pcbpilot/a", "file")],
+               [("pcbpilot/a", "file"), ("pcbpilot/a", "file")],
+               [("pcbpilot/C:/outside", "file")], [("pcbpilot/./a", "file")]]
         for entries in bad:
             with self.subTest(entries=entries):
                 with self.assertRaises(ValueError):
@@ -125,27 +125,27 @@ class ReleaseSmokeTests(unittest.TestCase):
         self.assertFalse((self.root / "outside").exists())
 
     def test_extract_preserves_archive_modes(self):
-        root, modes = smoke.extract_skill(self.archive([("easyeda-agent/SKILL.md", "file")]), self.root / "unpack")
+        root, modes = smoke.extract_skill(self.archive([("pcbpilot/SKILL.md", "file")]), self.root / "unpack")
         self.assertEqual((root / "SKILL.md").read_bytes(), b"x")
-        self.assertEqual(modes["easyeda-agent/SKILL.md"], 0o755)
+        self.assertEqual(modes["pcbpilot/SKILL.md"], 0o755)
 
     def test_native_platform_selection_is_explicit(self):
-        self.assertEqual(smoke.native_asset("Windows", "AMD64"), "easyeda_windows_amd64.exe")
-        self.assertEqual(smoke.native_asset("Darwin", "arm64"), "easyeda_darwin_arm64")
-        self.assertEqual(smoke.native_asset("Linux", "aarch64"), "easyeda_linux_arm64")
+        self.assertEqual(smoke.native_asset("Windows", "AMD64"), "pcbpilot_windows_amd64.exe")
+        self.assertEqual(smoke.native_asset("Darwin", "arm64"), "pcbpilot_darwin_arm64")
+        self.assertEqual(smoke.native_asset("Linux", "aarch64"), "pcbpilot_linux_arm64")
         with self.assertRaisesRegex(ValueError, "no native release asset"):
             smoke.native_asset("Windows", "ARM64")
 
     def test_cli_fails_on_wrong_version_before_running_other_commands(self):
         binary = self.root / "downloaded-cli"
         binary.write_bytes(b"test-placeholder")
-        completed = smoke.subprocess.CompletedProcess([], 0, "easyeda-agent v1.3.2\n", "")
+        completed = smoke.subprocess.CompletedProcess([], 0, "pcbpilot v1.3.2\n", "")
         with patch.object(smoke.subprocess, "run", return_value=completed) as run:
             with self.assertRaisesRegex(ValueError, "version mismatch"):
                 smoke.smoke_cli(binary, "v1.4.2", self.root)
             self.assertEqual(run.call_count, 1)
             command = run.call_args.args[0]
-            self.assertEqual(command[0], str(self.root / ("easyeda.exe" if os.name == "nt" else "easyeda")))
+            self.assertEqual(command[0], str(self.root / ("pcbpilot.exe" if os.name == "nt" else "pcbpilot")))
             self.assertEqual(binary.read_bytes(), b"test-placeholder")
             self.assertIn("1-1", command)
             self.assertFalse(run.call_args.kwargs.get("shell", False))

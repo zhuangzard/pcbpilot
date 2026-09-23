@@ -30,7 +30,7 @@ func newFakeSchDaemon(t *testing.T, st *fakeSchState) (*appConfig, func()) {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/health" {
-			_, _ = w.Write([]byte(`{"service":"easyeda-agent","windows":[]}`))
+			_, _ = w.Write([]byte(`{"service":"pcbpilot","windows":[]}`))
 			return
 		}
 		if r.URL.Path != "/action" {

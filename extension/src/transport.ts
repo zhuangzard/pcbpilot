@@ -1,5 +1,5 @@
 /**
- * WebSocket transport between this connector and the easyeda-agent Go daemon.
+ * WebSocket transport between this connector and the pcbpilot Go daemon.
  *
  * Adapted from the proven `eext-run-api-gateway` transport: port-scan +
  * handshake validation + register + heartbeat + auto-reconnect, all over
@@ -7,23 +7,23 @@
  * dispatch (see ./actions).
  *
  *   ┌──────────────┐   WebSocket    ┌──────────────────┐
- *   │ easyeda-agent │ ◄───────────► │  this connector   │
+ *   │ pcbpilot │ ◄───────────► │  this connector   │
  *   │  Go daemon    │ 127.0.0.1     │  (EasyEDA Pro)    │
- *   │               │      :60832   │                   │
+ *   │               │      :61832   │                   │
  *   └──────────────┘                └──────────────────┘
  *
- * **One pinned port, not a sweep.** The daemon binds a SINGLE fixed port, 60832
- * (0xEDA0 — "EDA" spelled in hex), and never spills to the next one: a second
- * daemon on 60832 is replaced, a foreign holder is refused (see
- * `internal/app/cmd_daemon.go`). So 60833-60841 can never hold a daemon, and
+ * **One pinned port, not a sweep.** The daemon binds a SINGLE fixed port, 61832
+ * (0xF188 — pcbpilot's own range, shifted +1000 from upstream easyeda-agent (60832-60841) so both can run side by side), and never spills to the next one: a second
+ * daemon on 61832 is replaced, a foreign holder is refused (see
+ * `internal/app/cmd_daemon.go`). So 61833-61841 can never hold a daemon, and
  * probing them is pure idling — every dead port burns a full
  * CONNECTION_TIMEOUT_MS because `eda.sys_WebSocket.register()` never reports a
  * refused connection. Real logs showed ~7s spent walking dead ports on every
  * reconnect, which under `make dev` (air rebuilds the daemon on each .go edit)
- * is paid over and over. This transport therefore tries 60832 ONLY, with
+ * is paid over and over. This transport therefore tries 61832 ONLY, with
  * exponential backoff (see BACKOFF_*).
  *
- * The rest of 0xEDA0-0xEDA9 (60832-60841) stays RESERVED for us — deliberately
+ * The rest of 0xF188-0xF191 (61832-61841) stays RESERVED for us — deliberately
  * far from 49620-49629, which the OFFICIAL eext-run-api-gateway scans (we
  * originally copied that convention; two ecosystems fighting over one port bind
  * was the result — see docs/ecosystem-survey.md). A non-standard deployment can
@@ -60,7 +60,7 @@ import { describeThrown } from './util';
 const WS_ID_BASE = createWebSocketId();
 // 叠加在 PR #154 的 activation-scoped id 之上:即便每个激活已有独立 id,真机 soak
 // 实测(2026-08-04,停 daemon 45s/60s 各一轮)仍会卡死 —— 第二轮 210s 没能自愈,
-// 60832 上持续报 "closed before the connection is established"。activation-scoped
+// 61832 上持续报 "closed before the connection is established"。activation-scoped
 // 解决的是「多激活互踢」,解决不了「本激活自己的 id 被 EasyEDA 判为 active 后
 // register() 被静默忽略」。连续整轮扫描失败后换一个全新 id 才是逃生口。
 // 阈值从 2 提到 4:一"轮失败"过去是整段 10 端口扫描(~18s),现在是一次 1.7s 的
@@ -72,20 +72,20 @@ let wsId: string = WS_ID_BASE;
 let wsIdGeneration = 0;
 // The one port the daemon binds. Not a range start — the daemon never spills
 // (see the file header).
-export const DAEMON_PORT = 0xeda0; // 60832 — "EDA0" in hex
+export const DAEMON_PORT = 0xf188; // 61832 — first port of the pcbpilot range
 // End of the range we reserve for ourselves. Nothing scans it by default; it is
 // here as the documented bound for the `daemonPorts` override and as the marker
-// that 60833-60841 stay ours (no official-gateway conflict).
-export const RESERVED_PORT_END = 0xeda9; // 60841
+// that 61833-61841 stay ours (no official-gateway conflict).
+export const RESERVED_PORT_END = 0xf191; // 61841
 // ─ Escape hatch ─
 // Pinning is right for the shipped topology (one daemon, one port), NOT a law of
 // physics. A non-standard deployment (several daemons side by side, a port
-// already taken by something else, `easyeda daemon start --ports …`) can point
+// already taken by something else, `pcbpilot daemon start --ports …`) can point
 // the connector elsewhere by setting this extension user-config key:
 //
-//   eda.sys_Storage.setExtensionUserConfig('daemonPorts', '60832-60841')
-//   eda.sys_Storage.setExtensionUserConfig('daemonPorts', '60840,60832')
-//   eda.sys_Storage.setExtensionUserConfig('daemonPorts', 60900)
+//   eda.sys_Storage.setExtensionUserConfig('daemonPorts', '61832-61841')
+//   eda.sys_Storage.setExtensionUserConfig('daemonPorts', '61840,61832')
+//   eda.sys_Storage.setExtensionUserConfig('daemonPorts', 61900)
 //
 // (run it from `debug.exec_js`, or from the editor's script console). It is read
 // at the START of every attempt, so it takes effect on the next retry — no
@@ -310,7 +310,7 @@ function isConnectionSessionActive(sessionId: number): boolean {
  * Parse a `daemonPorts` override into a bounded, de-duplicated port list.
  *
  * Accepts what a human would plausibly type into the config: a number, a
- * `"60832"` / `"60832-60841"` / `"60840,60832"` string, or an array of those.
+ * `"61832"` / `"61832-61841"` / `"61840,61832"` string, or an array of those.
  * Anything unparseable is dropped rather than throwing — this runs on the
  * reconnect path, where a bad config must degrade to the pinned default, never
  * break the transport.
@@ -556,7 +556,7 @@ export function deactivate(): void {
 
 /**
  * Try the daemon port(s), register a WebSocket, and keep the one whose daemon
- * sends a valid `handshake` (service === "easyeda-agent").
+ * sends a valid `handshake` (service === "pcbpilot").
  *
  * @param force - bypass the backoff gate (explicit reconnect, window wake, or a
  *   retry timer firing at its own deadline)
@@ -627,7 +627,7 @@ async function scanAndConnect(force = false): Promise<void> {
 		// dev` is back within a second or two), settling at BACKOFF_MAX_MS so a
 		// genuinely absent daemon is polled quietly instead of hammered. We never
 		// give up — the daemon is usually started AFTER the editor, so a terminal
-		// give-up would strand every fresh `bin/easyeda daemon`.
+		// give-up would strand every fresh `bin/pcbpilot daemon`.
 		const delay = backoffDelayMs(retryCount);
 		nextAttemptAt = Date.now() + delay;
 		scheduleRetry(sessionId, delay);
@@ -697,7 +697,7 @@ function tryConnectToPort(port: number, sessionId: number): Promise<boolean> {
 							msg = JSON.parse(event.data) as InboundFrame;
 						}
 						catch (err) {
-							console.error('[easyeda-agent] Failed to parse frame:', err);
+							console.error('[pcbpilot] Failed to parse frame:', err);
 							return;
 						}
 
@@ -721,13 +721,13 @@ function tryConnectToPort(port: number, sessionId: number): Promise<boolean> {
 								if (!connectionAnnounced) {
 									connectionAnnounced = true;
 									eda.sys_Message.showToastMessage(
-										`${eda.sys_I18n.text('Connected to easyeda-agent')} (port ${port})`,
+										`${eda.sys_I18n.text('Connected to pcbpilot')} (port ${port})`,
 									);
 								}
 								settle(true);
 							}
 							else {
-								console.warn(`[easyeda-agent] Unexpected handshake service "${(msg as { service?: string }).service}"`);
+								console.warn(`[pcbpilot] Unexpected handshake service "${(msg as { service?: string }).service}"`);
 								settle(false);
 							}
 							return;
@@ -744,7 +744,7 @@ function tryConnectToPort(port: number, sessionId: number): Promise<boolean> {
 			}
 			catch (err) {
 				// register() throws when external-interaction permission is disabled.
-				console.error('[easyeda-agent] Failed to register WebSocket:', err);
+				console.error('[pcbpilot] Failed to register WebSocket:', err);
 				settle(false);
 			}
 		};
@@ -780,7 +780,7 @@ function contextSig(frame: ContextFrame): string {
 
 // sendContext pushes the current project/document context to the daemon. With
 // force=true (on connect) it always sends; otherwise (on heartbeat) it sends
-// only when the context changed since the last push — so `easyeda daemon health`
+// only when the context changed since the last push — so `pcbpilot daemon health`
 // reflects a UI tab-switch within one heartbeat (~3s) without flooding the
 // socket every tick.
 async function sendContext(force = false): Promise<void> {
@@ -797,7 +797,7 @@ async function sendContext(force = false): Promise<void> {
 		sendFrame(frame);
 	}
 	catch (err) {
-		console.warn('[easyeda-agent] Failed to build context frame:', err);
+		console.warn('[pcbpilot] Failed to build context frame:', err);
 	}
 }
 
@@ -806,7 +806,7 @@ function sendFrame(frame: unknown): void {
 		eda.sys_WebSocket.send(wsId, JSON.stringify(frame));
 	}
 	catch (err) {
-		console.error('[easyeda-agent] Failed to send frame:', err);
+		console.error('[pcbpilot] Failed to send frame:', err);
 	}
 }
 
@@ -841,7 +841,7 @@ function sendFrame(frame: unknown): void {
  */
 function diag(msg: string): void {
 	try {
-		eda.sys_Log.add(`[easyeda-agent] ${msg}`);
+		eda.sys_Log.add(`[pcbpilot] ${msg}`);
 	}
 	catch { /* log panel unavailable — never let diagnostics break transport */ }
 	try {

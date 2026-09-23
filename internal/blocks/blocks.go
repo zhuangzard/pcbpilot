@@ -1,8 +1,8 @@
 // Package blocks embeds the standard circuit-block library (电路块库) into the
-// binary so `easyeda blocks ls/show/search` works anywhere the CLI is installed —
+// binary so `pcbpilot blocks ls/show/search` works anywhere the CLI is installed —
 // no skill files, no GitHub checkout. The data/ dir IS the single source-of-truth
 // (community contributes one block per file here; go:embed compiles it in). The
-// skill ships no block JSON — it queries via the `easyeda blocks` CLI instead.
+// skill ships no block JSON — it queries via the `pcbpilot blocks` CLI instead.
 package blocks
 
 import (

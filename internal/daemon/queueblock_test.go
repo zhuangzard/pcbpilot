@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/protocol"
+	"github.com/zhuangzard/pcbpilot/internal/protocol"
 )
 
 // clockTracker builds a tracker on a controllable clock so the tests assert the

@@ -14,12 +14,12 @@
     "FILE LAYOUT — one block per file (internal/blocks/data/<id-without-block-prefix>.json).",
     "The filename is the block id minus the `block.` prefix (ch340c_usb_serial.json →",
     "block.ch340c_usb_serial). This file (`_schema.json`, underscore-prefixed) holds the",
-    "shared _doc/_schema/libraryUuid and is NOT a block. `easyeda blocks` (go:embed) compiles this dir into the binary,",
+    "shared _doc/_schema/libraryUuid and is NOT a block. `pcbpilot blocks` (go:embed) compiles this dir into the binary,",
     "skips `_`-prefixed files, and assembles the library — it is the single loader seam, so",
     "consumers (agent, sch block apply) never care that the library is many files. Why per",
     "block: the community model is one-block-per-PR, so a file boundary per block means zero",
     "merge conflicts + clean per-file git-blame attribution. `category` stays a FIELD (filter",
-    "with `easyeda blocks ls --category`), never a directory boundary.",
+    "with `pcbpilot blocks ls --category`), never a directory boundary.",
     "",
     "MACHINE SCHEMA — `_block.schema.json` is the executable JSON Schema for stable fields; this file remains the human-readable field guide.",
     "HARD RULE — a block only enters the library as READY after structured verification marks every production gate passed",
@@ -55,7 +55,7 @@
     "               铁律 clearance=outside-body:每个标记须落在器件本体/courtyard 之外,装配后不被元件或连接器塑料遮住。",
     "Future maps (thermal, emc, clearance-zones…) follow the same shape: a top-level map keyed by",
     "role/net/signal, each record carrying `severity` + `reason`. The go:embed loader keeps the full",
-    "JSON (Raw) so unknown maps pass through untouched (forward-compatible) and `easyeda blocks show`",
+    "JSON (Raw) so unknown maps pass through untouched (forward-compatible) and `pcbpilot blocks show`",
     "prints them; `go test ./internal/blocks/` validates the known maps (placement roles exist in",
     "parts; signals carry a type + nets; silk roles exist in parts; severity ∈ {must,should})."
   ],
@@ -135,7 +135,7 @@
         }
       },
       "keepout": {
-        "_doc": "RF/天线禁铜区(可选,仅带 PCB 天线的模组/器件才列)。由 `easyeda pcb antenna-keepout` 消费:在天线器件长轴上无焊盘的一端(几何确定)生成覆盖全铜层的 no-copper region;深度取本条 end_frac 上限并被无焊盘区裁剪,绝不压到接地焊盘。",
+        "_doc": "RF/天线禁铜区(可选,仅带 PCB 天线的模组/器件才列)。由 `pcbpilot pcb antenna-keepout` 消费:在天线器件长轴上无焊盘的一端(几何确定)生成覆盖全铜层的 no-copper region;深度取本条 end_frac 上限并被无焊盘区裁剪,绝不压到接地焊盘。",
         "role": "antenna",
         "match": "器件名子串(小写包含匹配,如 wroom)——把已放置件按 manufacturerId 映射到本条",
         "end_frac": "0..1 —— 禁铜深度占模组长轴的比例(如 0.3);实际深度 = min(end_frac×长轴, 无焊盘条带)",

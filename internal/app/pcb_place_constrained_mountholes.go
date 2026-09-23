@@ -179,7 +179,7 @@ func runPcbMountHoles(cfg *appConfig, window string, dia, inset, clearance float
 	}
 	r, err := outlineRect(cfg, window, 0)
 	if err != nil {
-		return fmt.Errorf("mount-holes needs a board outline: %v (run `easyeda pcb outline-fit` or `pcb outline set` first)", err)
+		return fmt.Errorf("mount-holes needs a board outline: %v (run `pcbpilot pcb outline-fit` or `pcb outline set` first)", err)
 	}
 	board := cpRect{r[0], r[1], r[2], r[3]}
 

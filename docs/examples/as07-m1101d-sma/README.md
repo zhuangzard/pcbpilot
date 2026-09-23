@@ -52,7 +52,7 @@ v1.5.1、EasyEDA Pro 3.2.186。公开附件已去除个人库、工程和图元 
 | [silkscreen.json](silkscreen.json) | 最终 8 个引脚标签和型号的位置、字号及对齐参数，单位 mil |
 | [verification.json](verification.json) | 现场符号与焊盘回读、最终丝印包围盒及保存结果，移除了私有标识 |
 
-初始资产通过 `easyeda lib device validate` 与 `lib device build` 创建；随后通过官方
+初始资产通过 `pcbpilot lib device validate` 与 `lib device build` 创建；随后通过官方
 `eda.*` API 调试路径修正既有符号、添加和整理封装文字，再保存并回读。
 `device.json` 已同步最终符号几何；`silkscreen.json` 是独立的补充规格，当前
 `lib device build` 不会自动消费它。因此本例证明的是 Agent 完成建库和修正的实际结果，

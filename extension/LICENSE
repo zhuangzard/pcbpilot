@@ -36,6 +36,6 @@ Those files remain under the Apache License 2.0. A verbatim copy of that
 license, the attribution notice, and the list of modifications made vs.
 upstream (per Apache-2.0 §4b) ship with the project sources at:
 
-    https://github.com/zhoushoujianwork/easyeda-agent
+    https://github.com/zhuangzard/pcbpilot
       · NOTICE
       · extension/src/beautify/LICENSE

@@ -1,11 +1,11 @@
 # 单页 Lib 组合与 SCH Apply
 
 本页描述转换器；上游设计与修复遵守
-[数据驱动架构基准](../.agents/skills/easyeda-agent/references/schematic-data.md#数据驱动架构基准)。
+[数据驱动架构基准](../.agents/skills/pcbpilot/references/schematic-data.md#数据驱动架构基准)。
 普通 zone 先走 `layout-plan --zones → layout-sheet-plan → layout-render`；确认的页用
 `compose --layout-page page.json` 固定转换，不能再调用默认重排覆盖选中几何/spacing。
 
-`easyeda sch compose` 把完整的 1.4 电气模型和各 Lib 已设计的局部几何合成一页原理图，
+`pcbpilot sch compose` 把完整的 1.4 电气模型和各 Lib 已设计的局部几何合成一页原理图，
 输出布局 JSON，并可编译顺序执行的 `sch apply` 队列。它负责模块组合和数据转换；
 核心器件与外围电路的连接、局部摆放及朝向必须已在输入中确定。
 
@@ -91,31 +91,31 @@ modules: [
 准备输入后，布局和队列生成均在本地执行：
 
 ```bash
-easyeda sch compose --from composition.json --out composition-plan.json
+pcbpilot sch compose --from composition.json --out composition-plan.json
 
 # 读取目标页最新几何、全部引脚和导线；include-wires 同时读取 connectivitySummary。
-easyeda sch list --project <project-uuid> --page <page-uuid> --stay \
+pcbpilot sch list --project <project-uuid> --page <page-uuid> --stay \
   --include-pins --include-bbox --include-wires --include-device-identity > before.json
 
 # 已批准重建目标页时，编译包含前置状态检查的队列。
-easyeda sch compose --from composition.json --out composition-plan.json \
+pcbpilot sch compose --from composition.json --out composition-plan.json \
   --before before.json --replace --playbook composition-apply.json
-easyeda sch apply composition-apply.json --dry-run
-easyeda sch apply composition-apply.json --yes
+pcbpilot sch apply composition-apply.json --dry-run
+pcbpilot sch apply composition-apply.json --yes
 
 # 使用新回读重新编译，可验证重复执行是否已无需重建。
-easyeda sch list --project <project-uuid> --page <page-uuid> --stay \
+pcbpilot sch list --project <project-uuid> --page <page-uuid> --stay \
   --include-pins --include-bbox --include-wires --include-device-identity > after.json
-easyeda sch compose --from composition.json --out composition-plan.json \
+pcbpilot sch compose --from composition.json --out composition-plan.json \
   --before after.json --playbook verify-apply.json
-easyeda sch apply verify-apply.json --yes
+pcbpilot sch apply verify-apply.json --yes
 ```
 
 `--replace` 允许为不同的目标状态编译恢复/重建队列，执行发生在 `sch apply`。
 已有同一批器件仅改布局时，dev.6 开发路径为 `--replace --preserve-instances`，
 保留原实例及属性；旧破坏性 `--replace` 不作为无损重排入口。源身份/引脚/NC/属性缺失
 或不一致时必须拒绝，不能手工补队列。详见 Skill 的
-[数据架构与实例保全门禁](../.agents/skills/easyeda-agent/references/schematic-data.md)。
+[数据架构与实例保全门禁](../.agents/skills/pcbpilot/references/schematic-data.md)。
 dev.6 安装与现场验证仍须单独完成，不能由本文推定已发布或已通过。
 队列先核对项目/页面、工程内位号唯一性和目标旧状态；新增位号通过 `absentParts`
 检查其他页也未占用。根据新鲜回读选择以下路径：

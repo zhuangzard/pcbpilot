@@ -17,7 +17,7 @@ REPO = Path(__file__).resolve().parents[2]
 @unittest.skipIf(os.name == 'nt', 'Bash installer is for macOS/Linux; Windows uses the native CLI')
 class InstallerTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix='easyeda installer ')
+        self.temp = tempfile.TemporaryDirectory(prefix='pcbpilot installer ')
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.assets = self.root / 'assets'
@@ -25,8 +25,8 @@ class InstallerTests(unittest.TestCase):
         self.assets.mkdir()
         self.shims.mkdir()
         arch = {'x86_64': 'amd64', 'aarch64': 'arm64', 'arm64': 'arm64'}[platform.machine().lower()]
-        self.binary_name = f'easyeda_{platform.system().lower()}_{arch}'
-        (self.assets / self.binary_name).write_text('#!/bin/sh\nprintf "easyeda-agent v1.4.2\\n"\n')
+        self.binary_name = f'pcbpilot_{platform.system().lower()}_{arch}'
+        (self.assets / self.binary_name).write_text('#!/bin/sh\nprintf "pcbpilot v1.4.2\\n"\n')
         self.package()
         self.sums()
         curl = self.shims / 'curl'
@@ -49,20 +49,20 @@ else:
         curl.chmod(0o755)
         self.env = {**os.environ, 'PATH': f'{self.shims}:/usr/bin:/bin',
                     'HOME': str(self.root),
-                    'EASYEDA_VERSION': 'v1.4.2', 'EASYEDA_INSTALL_DIR': str(self.root / 'bin'),
+                    'PCBPILOT_VERSION': 'v1.4.2', 'PCBPILOT_INSTALL_DIR': str(self.root / 'bin'),
                     'CODEX_HOME': str(self.root / 'codex config'),
                     'CLAUDE_CONFIG_DIR': str(self.root / 'claude config'),
-                    'EASYEDA_INSTALL_SKILLS': 'codex,claude', 'EASYEDA_SKILL_PRESERVE': '0',
+                    'PCBPILOT_INSTALL_SKILLS': 'codex,claude', 'PCBPILOT_SKILL_PRESERVE': '0',
                     'FIXTURE_ASSETS': str(self.assets)}
-        self.cli = self.root / 'bin/easyeda'
-        self.skill = self.root / 'codex config/skills/easyeda-agent'
+        self.cli = self.root / 'bin/pcbpilot'
+        self.skill = self.root / 'codex config/skills/pcbpilot'
 
     def package(self, version='1.4.2'):
         with tarfile.open(self.assets / 'skills.tar.gz', 'w:gz') as archive:
-            for name, content in {'SKILL.md': f'---\nname: easyeda-agent\nmetadata:\n  version: "{version}"\n---\n[Guide](references/guide.md)\n',
+            for name, content in {'SKILL.md': f'---\nname: pcbpilot\nmetadata:\n  version: "{version}"\n---\n[Guide](references/guide.md)\n',
                                   'references/guide.md': 'New guide\n'}.items():
                 data = content.encode()
-                item = tarfile.TarInfo('easyeda-agent/' + name)
+                item = tarfile.TarInfo('pcbpilot/' + name)
                 item.size = len(data)
                 item.mode = 0o644
                 archive.addfile(item, io.BytesIO(data))
@@ -94,24 +94,24 @@ else:
         result = self.run_install()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         for client in ('codex', 'claude'):
-            path = self.root / f'{client} config/skills/easyeda-agent'
+            path = self.root / f'{client} config/skills/pcbpilot'
             self.assertEqual((path / '.version').read_text(), '1.4.2\n')
             self.assertTrue((path / 'references/guide.md').is_file())
-        result = subprocess.run(['bash', '--noprofile', '--norc', '-c', 'command -v easyeda && easyeda --version'],
+        result = subprocess.run(['bash', '--noprofile', '--norc', '-c', 'command -v pcbpilot && pcbpilot --version'],
                                 env={**self.env, 'PATH': f'{self.cli.parent}:/usr/bin:/bin'}, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.splitlines(), [str(self.cli), 'easyeda-agent v1.4.2'])
+        self.assertEqual(result.stdout.splitlines(), [str(self.cli), 'pcbpilot v1.4.2'])
 
     def test_shared_agents_skill_root(self):
-        result = self.run_install(EASYEDA_INSTALL_SKILLS='agents')
+        result = self.run_install(PCBPILOT_INSTALL_SKILLS='agents')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        path = self.root / '.agents/skills/easyeda-agent'
+        path = self.root / '.agents/skills/pcbpilot'
         self.assertEqual((path / '.version').read_text(), '1.4.2\n')
         self.assertTrue((path / 'references/guide.md').is_file())
 
     def test_large_asset_falls_back_to_checksum_verified_proxy(self):
         result = self.run_install(FAIL_PRIMARY_ASSET=self.binary_name,
-                                  EASYEDA_GITHUB_PROXY='https://mirror.example/{url}')
+                                  PCBPILOT_GITHUB_PROXY='https://mirror.example/{url}')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('checksum-verified mirror', result.stdout)
         self.assertEqual(self.cli.read_text(), (self.assets / self.binary_name).read_text())
@@ -125,7 +125,7 @@ else:
 
     def test_preserve_keeps_content_and_old_marker(self):
         self.old_install()
-        result = self.run_install(EASYEDA_SKILL_PRESERVE='1')
+        result = self.run_install(PCBPILOT_SKILL_PRESERVE='1')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual((self.skill / '.version').read_text(), '1.4.1\n')
         self.assertEqual((self.skill / 'SKILL.md').read_text(), 'local old skill')
@@ -135,18 +135,18 @@ else:
     def test_preserve_without_marker_stays_unknown(self):
         self.old_install()
         (self.skill / '.version').unlink()
-        result = self.run_install(EASYEDA_SKILL_PRESERVE='1')
+        result = self.run_install(PCBPILOT_SKILL_PRESERVE='1')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse((self.skill / '.version').exists())
 
     def test_skip_skill_does_not_download_skill(self):
-        result = self.run_install(EASYEDA_INSTALL_SKILLS='none', FAIL_ASSET='skills.tar.gz')
+        result = self.run_install(PCBPILOT_INSTALL_SKILLS='none', FAIL_ASSET='skills.tar.gz')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertFalse(self.skill.exists())
 
     def test_unknown_client_rejected_before_changes(self):
         self.old_install()
-        self.assert_failed_unchanged(self.run_install(EASYEDA_INSTALL_SKILLS='codex,typo'))
+        self.assert_failed_unchanged(self.run_install(PCBPILOT_INSTALL_SKILLS='codex,typo'))
 
     def test_bad_download_or_checksum_keeps_old_install(self):
         self.old_install()
@@ -191,13 +191,13 @@ else:
         self.assert_failed_unchanged(self.run_install())
 
     def test_auto_empty_custom_configs_installs_both(self):
-        result = self.run_install(EASYEDA_INSTALL_SKILLS='auto')
+        result = self.run_install(PCBPILOT_INSTALL_SKILLS='auto')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue(self.skill.exists())
-        self.assertTrue((self.root / 'claude config/skills/easyeda-agent/SKILL.md').exists())
+        self.assertTrue((self.root / 'claude config/skills/pcbpilot/SKILL.md').exists())
 
     def test_relative_install_dir_rejected(self):
-        result = self.run_install(EASYEDA_INSTALL_DIR='relative')
+        result = self.run_install(PCBPILOT_INSTALL_DIR='relative')
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(self.cli.exists())
 

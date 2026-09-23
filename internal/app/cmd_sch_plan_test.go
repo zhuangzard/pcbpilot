@@ -2,7 +2,7 @@ package app
 
 import (
 	"encoding/json"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/connectivity"
+	"github.com/zhuangzard/pcbpilot/internal/connectivity"
 	"io"
 	"os"
 	"path/filepath"

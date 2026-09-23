@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/connectivity"
+	"github.com/zhuangzard/pcbpilot/internal/connectivity"
 )
 
 // A selected page is a geometry authority, not another request to pack modules.

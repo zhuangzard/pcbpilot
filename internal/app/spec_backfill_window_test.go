@@ -22,7 +22,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/workflow"
+	"github.com/zhuangzard/pcbpilot/internal/workflow"
 )
 
 // sbwDaemon 是一个最小 daemon 替身:/health 报一个窗口,/action 按动作名回话,
@@ -56,7 +56,7 @@ func newSbwDaemon(t *testing.T, projectResp string) (*appConfig, *sbwDaemon) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/health":
-			_, _ = w.Write([]byte(`{"service":"easyeda-agent","windows":[{"windowId":"w1"}]}`))
+			_, _ = w.Write([]byte(`{"service":"pcbpilot","windows":[{"windowId":"w1"}]}`))
 		case "/action":
 			var body struct {
 				Action string `json:"action"`
@@ -251,12 +251,12 @@ func TestBapBackfillSpec_UnresolvableProjectHintIsRunnable(t *testing.T) {
 // TestSpecBackfillManualHint_NeverEmitsEmptyPlaceholder 是同一条判据的纯函数版:
 // 提示语存在的唯一理由是给人照抄,拼不出真名字就必须换一种说法。
 func TestSpecBackfillManualHint_NeverEmitsEmptyPlaceholder(t *testing.T) {
-	withName := specBackfillManualHint(".easyeda/s0.json", "ceshi")
+	withName := specBackfillManualHint(".pcbpilot/s0.json", "ceshi")
 	if !strings.Contains(withName, "--project ceshi --write") {
 		t.Fatalf("有工程名时该给出可直接照抄的命令:%s", withName)
 	}
 	for _, project := range []string{"", "   "} {
-		got := specBackfillManualHint(".easyeda/s0.json", project)
+		got := specBackfillManualHint(".pcbpilot/s0.json", project)
 		if strings.Contains(got, "--project  ") || strings.Contains(got, "--project --write") ||
 			strings.HasSuffix(strings.TrimSpace(got), "--project") {
 			t.Fatalf("project=%q 时拼出了空占位符:%s", project, got)

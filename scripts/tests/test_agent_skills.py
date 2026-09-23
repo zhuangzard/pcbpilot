@@ -21,7 +21,7 @@ SPEC.loader.exec_module(installer)
 
 class AgentSkillTests(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix="easyeda agent skills ")
+        self.temporary = tempfile.TemporaryDirectory(prefix="pcbpilot agent skills ")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name).resolve()
         self.checkout = self.root / "checkout with spaces"
@@ -61,8 +61,8 @@ class AgentSkillTests(unittest.TestCase):
         result = self.cli()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("already installed", result.stdout)
-        self.assertFalse((self.target / "easyeda-agent").exists())
-        self.assertFalse((self.target / "easyeda-agent").is_symlink())
+        self.assertFalse((self.target / "pcbpilot").exists())
+        self.assertFalse((self.target / "pcbpilot").is_symlink())
 
     def test_every_conflict_is_preflighted_without_partial_install(self):
         names = [source.name for source in installer.skill_sources(self.checkout)]
@@ -98,7 +98,7 @@ class AgentSkillTests(unittest.TestCase):
         self.checkout.rename(moved)
         result = self.cli(checkout=moved)
         self.assertEqual(result.returncode, 0, result.stderr)
-        path = self.target / "easyeda-repo-lookup/scripts/repo-root.py"
+        path = self.target / "pcbpilot-repo-lookup/scripts/repo-root.py"
         result = subprocess.run([sys.executable, str(path)], cwd=self.root, text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(Path(result.stdout.strip()), moved)
@@ -106,16 +106,16 @@ class AgentSkillTests(unittest.TestCase):
     def test_wrong_repository_is_rejected(self):
         (self.checkout / "go.mod").write_text("module example.com/another-project\n")
         result = subprocess.run(
-            [sys.executable, str(self.checkout / ".agents/skills/easyeda-repo-lookup/scripts/repo-root.py")],
+            [sys.executable, str(self.checkout / ".agents/skills/pcbpilot-repo-lookup/scripts/repo-root.py")],
             text=True, capture_output=True,
         )
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("not easyeda-agent", result.stderr)
+        self.assertIn("not pcbpilot", result.stderr)
 
     def test_all_scope_includes_real_public_skill_and_migrates_own_old_link(self):
         self.target.mkdir()
-        destination = self.target / "easyeda-agent"
-        old = self.checkout / "skills/easyeda-agent"
+        destination = self.target / "pcbpilot"
+        old = self.checkout / "skills/pcbpilot"
         destination.symlink_to(old, target_is_directory=True)
         result = self.cli("--scope", "all", "--dry-run")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -123,19 +123,19 @@ class AgentSkillTests(unittest.TestCase):
         self.assertIn("would migrate", result.stdout)
         result = self.cli("--scope", "all")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(destination.resolve(), self.checkout / ".agents/skills/easyeda-agent")
+        self.assertEqual(destination.resolve(), self.checkout / ".agents/skills/pcbpilot")
         self.assertTrue((destination / "references/orientation.json").is_file())
         self.assertEqual(self.cli("--scope", "all").returncode, 0)
 
     def test_design_scope_preserves_release_directory_and_foreign_broken_link(self):
         self.target.mkdir()
-        destination = self.target / "easyeda-agent"
+        destination = self.target / "pcbpilot"
         destination.mkdir()
         (destination / "SKILL.md").write_text("user's release installation")
         self.assertNotEqual(self.cli("--scope", "design").returncode, 0)
         self.assertEqual((destination / "SKILL.md").read_text(), "user's release installation")
         shutil.rmtree(destination)
-        old = self.root / "other-checkout/skills/easyeda-agent"
+        old = self.root / "other-checkout/skills/pcbpilot"
         destination.symlink_to(old, target_is_directory=True)
         self.assertNotEqual(self.cli("--scope", "all").returncode, 0)
         self.assertEqual(os.readlink(destination), str(old))
@@ -143,14 +143,14 @@ class AgentSkillTests(unittest.TestCase):
     def test_failed_migration_restores_old_link(self):
         sources = installer.skill_sources(self.checkout, "all")
         self.target.mkdir()
-        destination = self.target / "easyeda-agent"
-        old = self.checkout / "skills/easyeda-agent"
+        destination = self.target / "pcbpilot"
+        old = self.checkout / "skills/pcbpilot"
         destination.symlink_to(old, target_is_directory=True)
         plan = installer.link_plan(sources, [self.target])
         original = Path.symlink_to
 
         def fail_later(path, target, **kwargs):
-            if path.name == "easyeda-repo-maintain":
+            if path.name == "pcbpilot-repo-maintain":
                 raise OSError("simulated link failure")
             return original(path, target, **kwargs)
 
@@ -210,13 +210,13 @@ class RepositoryContractTests(unittest.TestCase):
             self.assertEqual(os.readlink(path), target)
             self.assertTrue(path.resolve().exists(), name)
         self.assertFalse((REPO / "skills").exists())
-        self.assertFalse((REPO / ".agents/skills/easyeda-agent").is_symlink())
-        self.assertTrue((REPO / ".agents/skills/easyeda-agent/SKILL.md").is_file())
+        self.assertFalse((REPO / ".agents/skills/pcbpilot").is_symlink())
+        self.assertTrue((REPO / ".agents/skills/pcbpilot/SKILL.md").is_file())
 
     def test_collaboration_document_links_resolve(self):
         paths = [REPO / "docs" / name for name in
                  ("README.md", "agent-collaboration.md", "release-workflow.md")]
-        paths += list((REPO / ".agents/skills").glob("easyeda-repo-*/SKILL.md"))
+        paths += list((REPO / ".agents/skills").glob("pcbpilot-repo-*/SKILL.md"))
         for path in paths:
             for link in re.findall(r"\[[^\]]*\]\(([^)]+)\)", path.read_text()):
                 parsed = urlsplit(link)

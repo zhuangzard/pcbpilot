@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/protocol"
+	"github.com/zhuangzard/pcbpilot/internal/protocol"
 )
 
 // Daemon-level debounced autosave.

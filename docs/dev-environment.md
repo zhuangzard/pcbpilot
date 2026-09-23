@@ -18,7 +18,7 @@ develop + regression-test the connector against a LIVE editor, hands-free:
    (chrome-devtools MCP) the agent opens the web editor, opens a project by
    `#id=<projectUuid>`, and waits for the connector to attach — no manual clicks.
    The agent-facing SOP (exact steps, retries, pitfalls) is
-   [`.agents/skills/easyeda-agent/references/environment-setup.md`](../.agents/skills/easyeda-agent/references/environment-setup.md);
+   [`.agents/skills/pcbpilot/references/environment-setup.md`](../.agents/skills/pcbpilot/references/environment-setup.md);
    §1–4 below are the manual equivalent.
 2. **Iterate the connector fast** — edit `extension/src`, `make eext`, then
    **hot-reload** into the running editor via IndexedDB (§5) — no uninstall /
@@ -42,8 +42,8 @@ develop + regression-test the connector against a LIVE editor, hands-free:
 make dev                       # daemon with air hot-reload (rebuilds on .go change)
 # open EasyEDA (desktop or web), open a project, import the .eext once,
 # enable "Allow external interaction"
-easyeda daemon health          # windows[] should list your connected editor
-easyeda project info --project <name>   # first typed action round-trip
+pcbpilot daemon health          # windows[] should list your connected editor
+pcbpilot project info --project <name>   # first typed action round-trip
 ```
 
 ## Prerequisites
@@ -62,11 +62,11 @@ easyeda project info --project <name>   # first typed action round-trip
 ```bash
 make dev                 # air live-reload; leave running in a terminal
 # or one-shot:
-./bin/easyeda daemon start &
-./bin/easyeda daemon health   # status=found; windows[] empty until a connector attaches
+./bin/pcbpilot daemon start &
+./bin/pcbpilot daemon health   # status=found; windows[] empty until a connector attaches
 ```
 
-The daemon listens on `127.0.0.1:60832-60841` (`0xEDA0`-`0xEDA9`) and speaks the handshake in
+The daemon listens on `127.0.0.1:61832-61841` (`0xF188`-`0xF191`) and speaks the handshake in
 [connector-contract.md](connector-contract.md).
 
 ## 2. Open a project (this step is manual)
@@ -82,14 +82,14 @@ project is open in the editor. **The CLI cannot open a not-yet-open project**
 Once open, document switching *is* scriptable:
 
 ```bash
-easyeda doc ls --project <name>            # list pages/PCBs, ★ = active
-easyeda doc switch <page|pcb|uuid> --project <name>
+pcbpilot doc ls --project <name>            # list pages/PCBs, ★ = active
+pcbpilot doc switch <page|pcb|uuid> --project <name>
 ```
 
 ## 3. Import the connector + grant permission (first time per install)
 
 1. **高级(A) → 扩展管理器(E)… → 导入** and pick
-   `dist/easyeda-agent-connector.eext`.
+   `dist/pcbpilot-connector.eext`.
 2. A security prompt appears: external-interaction permission is **disabled
    by default**. Confirm it.
 3. Enable the permission: in the connector's detail page, open the
@@ -102,9 +102,9 @@ no manual Reconnect needed.
 ## 4. Confirm the round-trip
 
 ```bash
-easyeda daemon health          # windows[] now lists connectorVersion / easyedaVersion / context
-easyeda project info --project <name>          # structured data flows back
-easyeda notify --project <name> --message "hi" --type success   # visible toast in the editor
+pcbpilot daemon health          # windows[] now lists connectorVersion / easyedaVersion / context
+pcbpilot project info --project <name>          # structured data flows back
+pcbpilot notify --project <name> --message "hi" --type success   # visible toast in the editor
 ```
 
 Prefer `--project <name>` over `--window <id>`: it routes by project and
@@ -124,7 +124,7 @@ not on disk. This is true for both the web editor and the Electron desktop
 client (the desktop app is a Chromium webview).
 
 - **Database**: `User_<teamUuid>_v6` (the `teamUuid` is the one returned by
-  `easyeda project info`).
+  `pcbpilot project info`).
 - **Object stores**:
   - `extensionsIndex` — one record per extension, keyed by `uuid`. Fields:
     `config` (the parsed `extension.json`), `isEnable`,
@@ -174,14 +174,14 @@ node extension/scripts/hot-reload-server.mjs &     # ws://127.0.0.1:8790
 #    records, verifies the stored result, then schedules the host reload.
 
 # 4. Verify the new code is live.
-easyeda daemon health                       # connectorVersion shows the new version
+pcbpilot daemon health                       # connectorVersion shows the new version
 ```
 
 If the editor has unsaved/open library documents, Chrome may show “重新加载此网站？”
 after step 3. Confirm **重新加载** in the browser; until that dialog is handled the old
 connector's `debug.exec_js` request can remain at the head of its FIFO and later typed
 actions will correctly refuse with `CONNECTOR_QUEUE_BLOCKED`. After reload, wait for a
-new `windowId`/`connectedAt` in `easyeda daemon health` before issuing a write.
+new `windowId`/`connectedAt` in `pcbpilot daemon health` before issuing a write.
 
 The inject script writes the IndexedDB records described above; the server reads
 `extension/dist/index.js` + the version from `extension.json`. The server takes `--port`, `--bundle` and `--keep`; the injector accepts
@@ -198,7 +198,7 @@ For a same-version development build, `make connector` is sufficient; do not
 infer loaded code from the version alone. Compare the stored bundle hash with
 `extension/dist/index.js`, confirm a new window ID / connectedAt after reload,
 and run the changed action through the ordinary CLI. The inject script also
-works via `easyeda --project ceshi debug exec` in the in-app browser (verified
+works via `pcbpilot --project ceshi debug exec` in the in-app browser (verified
 2026-09-08): this avoids browser-control timeouts and manual reinstall. Save
 open schematic and PCB documents first. Prefer this committed workflow before
 asking the user to uninstall/import the connector.
@@ -240,16 +240,16 @@ lands at IndexedDB key `<uuid>|dist/index.js`. Mind that offset.
 - **Network blocks a git host** (e.g. a corporate gateway blocking a mirror) —
   clone from a machine with open egress (a cloud VM) and copy the tree back.
 - **Connector port-scans forever (`WebSocket ... closed before ... established`
-  on every port 60832–60841), `daemon health` shows a daemon but `windows: 0`** —
+  on every port 61832–61841), `daemon health` shows a daemon but `windows: 0`** —
   usually TWO daemons fighting over the port: `air` restarted the daemon after a
   `.go` edit but a previous instance lingered, so `/health` answers on the port
   while the other instance's `/eda` WebSocket never completes the handshake.
   Diagnose + fix:
   ```bash
-  pgrep -fl "easyeda daemon"          # >1 line = orphans fighting
-  lsof -iTCP:60832 -sTCP:LISTEN -n    # which PID owns the port
-  pkill -f "easyeda daemon"; sleep 2  # kill all, then start ONE clean:
-  nohup ./bin/easyeda daemon start > /tmp/easyeda-daemon.log 2>&1 &
+  pgrep -fl "pcbpilot daemon"          # >1 line = orphans fighting
+  lsof -iTCP:61832 -sTCP:LISTEN -n    # which PID owns the port
+  pkill -f "pcbpilot daemon"; sleep 2  # kill all, then start ONE clean:
+  nohup ./bin/pcbpilot daemon start > /tmp/pcbpilot-daemon.log 2>&1 &
   ```
   Then reload the editor page so the connector re-handshakes. (If you run the
   daemon under `make dev`/air, prefer letting air own it — but after a messy
@@ -282,7 +282,7 @@ label as `componentType: "netlabel"`.
 
 When diagnosing this class of issue, follow this order:
 
-1. Run `easyeda health` and record the exact EasyEDA and connector versions.
+1. Run `pcbpilot health` and record the exact EasyEDA and connector versions.
 2. Read the official API page and check its "ADD since"/BETA note before
    changing arguments.
 3. Run a one-pin live probe, then immediately `sch read`/`sch check`; never

@@ -126,7 +126,7 @@ func TestSchStatusNext_PointsAtFirstUnfinishedStage(t *testing.T) {
 	done := []schPageFacts{{Name: "P1_POWER", DocUUID: "u1", Reachable: true, HasSheet: true,
 		NamedWell: true, Parts: 5, Wires: 12, Groups: 5, Frames: 1}}
 	next, _ := schStatusNext(schStageVerdicts(done, schGateSummary{}), done)
-	if next != "easyeda pcb import-changes" {
+	if next != "pcbpilot pcb import-changes" {
 		t.Errorf("S1–S4 全绿时 next = %q, want the PCB handoff", next)
 	}
 	// 页名占位 → 指向改名,并带上真实 uuid(照抄即可执行)。

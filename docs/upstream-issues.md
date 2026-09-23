@@ -75,7 +75,7 @@
 
 | 栏 | 内容 |
 |---|---|
-| 现象 | 社区用户在 **EasyEDA Pro 3.2.174(Windows)** 上:器件/导线/netport 创建成功、`schematic.save` 返回 `saved:true`、几何与桥接检查干净,但 `getNetlistFile()` 返回空 → `sch netlist` 报 `Netlist export returned no file.`,`sch read --no-check` 得 `netCount:0` 且引脚 `net` 全 `null`。换独立 Board、完全重启平台与连接器均可复现(仓库 issue [#184](https://github.com/zhoushoujianwork/easyeda-agent/issues/184))。 |
+| 现象 | 社区用户在 **EasyEDA Pro 3.2.174(Windows)** 上:器件/导线/netport 创建成功、`schematic.save` 返回 `saved:true`、几何与桥接检查干净,但 `getNetlistFile()` 返回空 → `sch netlist` 报 `Netlist export returned no file.`,`sch read --no-check` 得 `netCount:0` 且引脚 `net` 全 `null`。换独立 Board、完全重启平台与连接器均可复现(仓库 issue [#184](https://github.com/zhuangzard/pcbpilot/issues/184))。 |
 | 最小复现 | **⚠️ 用户侧有完整复现步骤(空白 A3 页 + 真实库 R0603 + 两个短桩网),但仍是走我们 CLI 的形态,且我方无 3.2.174 环境。** 上报前需要用户把它压成**纯 `eda.*`** 脚本 —— 这正是本条留在待定区的原因。 |
 | 我方绕行 | 网表读不到时退回 `sch read` / `sch check` / `bridge-check` 的**几何重建**连通性判断(本来就是我们为「平台 DRC 只回聚合数」造的那套)。 |
 | 绕行的残余风险 | 拿不到**平台口径**的网名表:跨页网名审计(`sch nets`)、BOM/网表交付、以及一切以平台网表为准的对账都失效 —— 几何重建能证明「连没连」,不能替代平台网名。 |

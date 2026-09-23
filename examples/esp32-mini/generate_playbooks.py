@@ -6,8 +6,8 @@ Sources:
   - the golden board's copper geometry (track/via dumps passed via --tracks/--vias)
 
 Regenerate:
-  easyeda pcb track-list --project ceshi > /tmp/gt.json
-  easyeda pcb via-list  --project ceshi > /tmp/gv.json
+  pcbpilot pcb track-list --project ceshi > /tmp/gt.json
+  pcbpilot pcb via-list  --project ceshi > /tmp/gv.json
   python3 examples/esp32-mini/generate_playbooks.py --tracks /tmp/gt.json --vias /tmp/gv.json
 """
 import argparse
@@ -237,7 +237,7 @@ def gen_pcb(tracks, vias):
          "flags": {"x": 1440, "y": 1360, "text": "-", "font-size": 40, "line-width": 6}},
         {"id": "silk-credit", "run": "pcb silk-add",
          "flags": {"x": 1150, "y": 1430, "font-size": 45, "line-width": 6,
-                   "text": "ESP32-S3 mini  github:zhoushoujianwork/easyeda-agent"}},
+                   "text": "ESP32-S3 mini  github:zhuangzard/pcbpilot"}},
     ]
 
     # 7) 终门

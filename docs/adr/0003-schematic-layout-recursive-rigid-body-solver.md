@@ -3,7 +3,7 @@
 ## Status
 
 Superseded for the schematic generation workflow (2026-09-14)。现行主链见
-[数据驱动架构基准](../../.agents/skills/easyeda-agent/references/schematic-data.md#数据驱动架构基准)。
+[数据驱动架构基准](../../.agents/skills/pcbpilot/references/schematic-data.md#数据驱动架构基准)。
 下文 Accepted 是历史决策记录；`solveLayer` 三次递归不再定义新设计唯一入口。
 保持完整区域、纯计算和数据校验的原则沿用，生成由区内与纸张两层承担。
 

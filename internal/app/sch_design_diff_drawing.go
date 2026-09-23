@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/connectivity"
+	"github.com/zhuangzard/pcbpilot/internal/connectivity"
 )
 
 type schDesignInput struct {

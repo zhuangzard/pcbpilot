@@ -5,7 +5,7 @@
 在 macOS/zsh 的仓库根目录运行（将工程名换成实际值）：
 
 ```sh
-easyeda --project '工程名' debug exec --timeout 60 --code "$(cat scripts/diagnostics/pcb-empty-read.js)" > pcb-read-evidence.json
+pcbpilot --project '工程名' debug exec --timeout 60 --code "$(cat scripts/diagnostics/pcb-empty-read.js)" > pcb-read-evidence.json
 ```
 
 也可在已授权的 `debug.exec_js` 中执行该文件全文。`getAllPrimitiveId` 是独立的官方

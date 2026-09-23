@@ -28,7 +28,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/blocks"
+	"github.com/zhuangzard/pcbpilot/internal/blocks"
 )
 
 // bapManifest is the command's output: what was built, from which block
@@ -780,7 +780,7 @@ func runBlockApply(cfg *appConfig, window, blockID string, in bapInput, partsPat
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("no such block %q — `easyeda blocks ls` to list", blockID)
+		return fmt.Errorf("no such block %q — `pcbpilot blocks ls` to list", blockID)
 	}
 	in.Block = b
 
@@ -1174,7 +1174,7 @@ func runBlockApply(cfg *appConfig, window, blockID string, in bapInput, partsPat
 	// green per-stub report.
 	liveNets, pinNumbers, rerr := readLiveNets(cfg, window)
 	if rerr != nil {
-		fmt.Fprintf(stderr, "warn: could not read back the netlist to reconcile (%v) — verify with `easyeda sch read` manually\n", rerr)
+		fmt.Fprintf(stderr, "warn: could not read back the netlist to reconcile (%v) — verify with `pcbpilot sch read` manually\n", rerr)
 	} else {
 		diffs := reconcileBlockNets(plan, liveNets, pinNumbers)
 		man.Diffs = diffs
@@ -1248,7 +1248,7 @@ func runBlockApply(cfg *appConfig, window, blockID string, in bapInput, partsPat
 		return err
 	}
 	if len(man.Diffs) > 0 {
-		return fmt.Errorf("block-apply: %d net(s) do not match the plan — run `easyeda sch bridge-check` and fix before trusting this instance", len(man.Diffs))
+		return fmt.Errorf("block-apply: %d net(s) do not match the plan — run `pcbpilot sch bridge-check` and fix before trusting this instance", len(man.Diffs))
 	}
 	if wireErr != nil {
 		return fmt.Errorf("wire: %w (器件与其余连线均已落地,虚拟组已登记 —— 只需重试上面列出的那几个引脚)", wireErr)
@@ -1364,7 +1364,7 @@ func emitBapManifest(m bapManifest, asJSON bool, stdout io.Writer) error {
 		}
 		if len(m.Rollback.SurvivedPrimitiveIDs) > 0 {
 			fmt.Fprintf(stdout, "still on the page: %s\n", strings.Join(m.Rollback.SurvivedPrimitiveIDs, ", "))
-			fmt.Fprintf(stdout, "  easyeda sch prim-delete --ids %s\n",
+			fmt.Fprintf(stdout, "  pcbpilot sch prim-delete --ids %s\n",
 				strings.Join(m.Rollback.SurvivedPrimitiveIDs, ","))
 		}
 	}
@@ -1486,9 +1486,9 @@ still work): ` + "`sch save`" + `, fully restart EasyEDA, then delete.
 Wiring itself is delegated to the ` + "`sch autoconnect`" + ` planner, which IS
 idempotent per pin — an already-connected pin is skipped rather than re-flagged.`,
 		Args: cobra.ExactArgs(1),
-		Example: `  easyeda sch block-apply led_indicator_gpio --dry-run
-  easyeda sch block-apply led_indicator_gpio --at 400,300 --bind CTRL=IO2 --bind GND=GND
-  easyeda sch block-apply block.led_indicator_gpio --instance led2 --at 400,500 --json`,
+		Example: `  pcbpilot sch block-apply led_indicator_gpio --dry-run
+  pcbpilot sch block-apply led_indicator_gpio --at 400,300 --bind CTRL=IO2 --bind GND=GND
+  pcbpilot sch block-apply block.led_indicator_gpio --instance led2 --at 400,500 --json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			bind, err := parseKV(binds, "--bind")
 			if err != nil {
@@ -1528,7 +1528,7 @@ idempotent per pin — an already-connected pin is skipped rather than re-flagge
 	c.Flags().StringVar(&instance, "instance", "", "instance id used to name internal nets (default: the first allocated designator, e.g. LED1 → LED1_N2)")
 	c.Flags().StringVar(&partsPath, "parts", "", "path to standard-parts.json (auto-detected if omitted)")
 	c.Flags().StringVar(&specPath, "spec", "", "落块后把真实位号自动回填进这份 S0 spec 的 modules[].parts"+
-		"(平台会在 create 时重编位号,spec 里的旧位号会让分区判据静默少算模块;等价于事后跑 easyeda spec backfill --write)")
+		"(平台会在 create 时重编位号,spec 里的旧位号会让分区判据静默少算模块;等价于事后跑 pcbpilot spec backfill --write)")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "plan and print without placing or wiring")
 	c.Flags().BoolVar(&asJSON, "json", false, "emit the instance manifest as JSON")
 	c.Flags().BoolVar(&skipDevicePreflight, "skip-device-preflight", false,
@@ -1580,7 +1580,7 @@ func bapRegisterGroup(cfg *appConfig, window string, plan bapPlan, man *bapManif
 	}
 	pinned, win, docUUID, project, st, groups, err := loadSchGroupsContext(cfg, window)
 	if err != nil {
-		fmt.Fprintf(stderr, "warn: 归组跳过(取不到页面分组表:%v)—— 器件与连线均已落地,上层布局会把它们当散件;可手工补登:easyeda sch group create --name %q --members %s\n",
+		fmt.Fprintf(stderr, "warn: 归组跳过(取不到页面分组表:%v)—— 器件与连线均已落地,上层布局会把它们当散件;可手工补登:pcbpilot sch group create --name %q --members %s\n",
 			err, bapGroupName(plan), strings.Join(members, ","))
 		return
 	}
@@ -1632,7 +1632,7 @@ func bapRegisterGroup(cfg *appConfig, window string, plan bapPlan, man *bapManif
 		return
 	}
 	if serr := saveSchGroups(st, docUUID, next); serr != nil {
-		fmt.Fprintf(stderr, "warn: 归组未能落盘(%v)—— 器件与连线均已落地;可手工补登:easyeda sch group create --name %q --members %s\n",
+		fmt.Fprintf(stderr, "warn: 归组未能落盘(%v)—— 器件与连线均已落地;可手工补登:pcbpilot sch group create --name %q --members %s\n",
 			serr, bapGroupName(plan), strings.Join(members, ","))
 		return
 	}

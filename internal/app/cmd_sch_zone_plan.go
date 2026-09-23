@@ -897,7 +897,7 @@ func validatePartitionsWithJudge(plan partitionPlan, modules []partitionModule,
 			v.LabelCollisionDetail = append(v.LabelCollisionDetail, fmt.Sprintf(
 				"区 [%s] 的区名标题带 %s 压住模块 %s 的本体 %s(重叠 %.0f×%.0f)—— "+
 					"标题带恒在框顶,出路二选一:① 把该模块往下让至少 %.0f"+
-					"(`easyeda sch group-move --group %s --dy -%.0f`,y-UP:负值向下);"+
+					"(`pcbpilot sch group-move --group %s --dy -%.0f`,y-UP:负值向下);"+
 					"② 缩小区名字号(`sch zone-draw --font-size <更小>`)让标题带变矮",
 				strings.Join(p.Modules, "+"), bboxText(p.TitleBBox), m.Name, bboxText(core),
 				ox, oy, oy, m.Name, oy))
@@ -920,7 +920,7 @@ func judgeModuleLabels(name string, frame layoutBBox, judge *partitionJudge) []s
 		cb, has := judge.ClusterOf[key]
 		if !has || judge.Scope.untrusted(key) {
 			out = append(out, fmt.Sprintf(
-				"%s/%s:读不到可信的 L1 虚拟组体积(标签范围口径降级)—— 先修数据再谈框:`easyeda sch clusters --members`",
+				"%s/%s:读不到可信的 L1 虚拟组体积(标签范围口径降级)—— 先修数据再谈框:`pcbpilot sch clusters --members`",
 				name, key))
 			continue
 		}
@@ -982,9 +982,9 @@ func zoneMoveStep(need float64) float64 {
 // zoneMoveHint 折出命令行本身。y-UP 在这里必须写出来:正值向上是本仓踩过的坑。
 func zoneMoveHint(zone string, dx, dy float64) string {
 	if dx != 0 {
-		return fmt.Sprintf("`easyeda sch zone move --zone %s --dx %+.0f`", zone, dx)
+		return fmt.Sprintf("`pcbpilot sch zone move --zone %s --dx %+.0f`", zone, dx)
 	}
-	return fmt.Sprintf("`easyeda sch zone move --zone %s --dy %+.0f`(y-UP:正值向上)", zone, dy)
+	return fmt.Sprintf("`pcbpilot sch zone move --zone %s --dy %+.0f`(y-UP:正值向上)", zone, dy)
 }
 
 func shiftBBox(b layoutBBox, dx, dy float64) layoutBBox {
@@ -1338,8 +1338,8 @@ titleBlockHits / moduleOutsideZone / labelCollisions, all should be 0).
 为 true 并点名位号,该模块按「不可信」计入 moduleOutsideZone(验不了不报绿)。
 
 Draw it with ` + "`sch zone-draw --mode partition`" + `.`,
-		Example: `  easyeda sch zones set --spec s0.json --project ceshi
-  easyeda sch zone-plan --project ceshi --json`,
+		Example: `  pcbpilot sch zones set --spec s0.json --project ceshi
+  pcbpilot sch zone-plan --project ceshi --json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pinnedCfg, win, docUUID, err := pinZonePage(cfg, *window)
 			if err != nil {
@@ -1674,7 +1674,7 @@ func labelScopeReason(s schZoneLabelScope) string {
 	if s.UnownedMarkers > 0 {
 		parts = append(parts, fmt.Sprintf("%d 支 marker 无主", s.UnownedMarkers))
 	}
-	parts = append(parts, "核对:`easyeda sch clusters --members`")
+	parts = append(parts, "核对:`pcbpilot sch clusters --members`")
 	return strings.Join(parts, ";")
 }
 
@@ -1766,7 +1766,7 @@ func partitionDrawGate(plan partitionPlan) error {
 		}
 	}
 	if v.SheetOverflow > 0 || v.SheetMarginHits > 0 {
-		why += fmt.Sprintf("\n  ⚠ %d 个分区出纸面 / %d 个贴纸边(< %.0f 单位):内容本体自己贴着图框 —— 把该区往纸面中心挪(`easyeda sch zone move --zone <区> --dx/--dy`)",
+		why += fmt.Sprintf("\n  ⚠ %d 个分区出纸面 / %d 个贴纸边(< %.0f 单位):内容本体自己贴着图框 —— 把该区往纸面中心挪(`pcbpilot sch zone move --zone <区> --dx/--dy`)",
 			v.SheetOverflow, v.SheetMarginHits, sheetEdgeMinGap)
 	}
 	return fmt.Errorf("partition plan has violations %s — refusing to draw overlapping/out-of-sheet annotations%s",

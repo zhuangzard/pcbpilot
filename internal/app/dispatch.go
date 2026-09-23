@@ -15,16 +15,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/protocol"
+	"github.com/zhuangzard/pcbpilot/internal/protocol"
 )
 
 const (
 	defaultHost = "127.0.0.1"
-	// 0xEDA0-0xEDA9 — "EDA" spelled in hex. Deliberately NOT 49620-49629: that
+	// 0xF188-0xF191 — pcbpilot's own range, shifted +1000 from upstream easyeda-agent (60832-60841) so both can run side by side. Deliberately NOT 49620-49629: that
 	// range is what the OFFICIAL eext-run-api-gateway ecosystem scans (we had
 	// copied its convention), so both sides raced to bind the same port.
-	defaultPortStart = 0xeda0 // 60832
-	defaultPortEnd   = 0xeda9 // 60841
+	defaultPortStart = 0xf188 // 61832
+	defaultPortEnd   = 0xf191 // 61841
 )
 
 // defaultActionTimeout bounds how long the CLI waits for a single /action
@@ -42,7 +42,7 @@ var errActionFailed = errors.New("action returned ok=false")
 // flags so they are populated before any RunE executes.
 type appConfig struct {
 	host    string
-	ports   string // "60832-60841"
+	ports   string // "61832-61841"
 	project string // optional stable routing hint (project name/uuid) → windowId
 	// forceReason/forceUnsafe are retained for wire compatibility with older
 	// clients. Routing and stale reads no longer consult them as permission
@@ -370,7 +370,7 @@ func listWindows(cfg *appConfig) ([]healthWindow, error) {
 	defer cancel()
 	scan := scanHealth(ctx, hostPortOptions{host: cfg.host, portStart: portStart, portEnd: portEnd})
 	if scan.Found == nil {
-		return nil, fmt.Errorf("no easyeda-agent daemon found on %s:%s (start it with `easyeda daemon start`)", cfg.host, scan.Ports)
+		return nil, fmt.Errorf("no pcbpilot daemon found on %s:%s (start it with `pcbpilot daemon start`)", cfg.host, scan.Ports)
 	}
 	var parsed struct {
 		Windows []healthWindow `json:"windows"`
@@ -417,7 +417,7 @@ func selectWindow(windows []healthWindow, project, window string) (string, error
 		case 1:
 			return matches[0].WindowID, nil
 		case 0:
-			return "", fmt.Errorf("no connected window for project %q (run `easyeda daemon health`)", project)
+			return "", fmt.Errorf("no connected window for project %q (run `pcbpilot daemon health`)", project)
 		default:
 			// Extension reloads can leave several registrations for the exact same
 			// project/document tab. They are transport duplicates; route to the
@@ -460,12 +460,12 @@ func newestDuplicateWindow(matches []healthWindow) (string, bool) {
 
 // cliClientID identifies this CLI process to the daemon, computed once per
 // process: "<hostname>:<pid>", plus an optional session label from
-// EASYEDA_CLIENT_LABEL (e.g. "mikas-mbp:12345:e2e-regression"). The daemon
+// PCBPILOT_CLIENT_LABEL (e.g. "mikas-mbp:12345:e2e-regression"). The daemon
 // stamps it into every audit entry (pid = precise per-process attribution) and
 // uses it to detect a different client writing to the same window
 // (concurrentWriter advisory, issue #108). NOTE: the advisory compares SESSION
 // identity — hostname+label, or hostname alone when unlabeled — because the
-// pid churns on every one-shot CLI invocation; set EASYEDA_CLIENT_LABEL per
+// pid churns on every one-shot CLI invocation; set PCBPILOT_CLIENT_LABEL per
 // agent/session to make same-host concurrent writers detectable.
 var cliClientID = sync.OnceValue(func() string {
 	host, err := os.Hostname()
@@ -473,7 +473,7 @@ var cliClientID = sync.OnceValue(func() string {
 		host = "unknown-host"
 	}
 	id := fmt.Sprintf("%s:%d", host, os.Getpid())
-	if label := os.Getenv("EASYEDA_CLIENT_LABEL"); label != "" {
+	if label := os.Getenv("PCBPILOT_CLIENT_LABEL"); label != "" {
 		id += ":" + label
 	}
 	return id
@@ -746,7 +746,7 @@ func dryRunGuard(action string) error {
 }
 
 // artifactOutputDir resolves the outputDir sent with every action request (the
-// directory the daemon roots its .easyeda/artifacts tree under). Thin os.Getwd
+// directory the daemon roots its .pcbpilot/artifacts tree under). Thin os.Getwd
 // wrapper around the pure, unit-tested resolveOutputDir.
 func artifactOutputDir() (string, bool) {
 	cwd, err := os.Getwd()
@@ -756,7 +756,7 @@ func artifactOutputDir() (string, bool) {
 	return resolveOutputDir(cwd, dirHasProjectMarker), true
 }
 
-// resolveOutputDir is the pure core: strip any .easyeda/artifacts nesting from
+// resolveOutputDir is the pure core: strip any .pcbpilot/artifacts nesting from
 // cwd (a cwd INSIDE the artifact tree must not seed another level), then anchor
 // to the nearest enclosing project root (isRoot marker walk-up); when no marker
 // is found, fall back to the stripped cwd.
@@ -787,7 +787,7 @@ func dirHasProjectMarker(dir string) bool {
 }
 
 // stripArtifactNesting truncates a path to just BEFORE its first
-// ".easyeda/artifacts" segment pair, so that Join(dir, ".easyeda", "artifacts")
+// ".pcbpilot/artifacts" segment pair, so that Join(dir, ".pcbpilot", "artifacts")
 // is idempotent however deeply the input had already nested. A path without the
 // pair is returned cleaned but otherwise unchanged. The daemon applies the same
 // normalization defensively (internal/daemon dispatch.go) — keep both in sync.
@@ -796,7 +796,7 @@ func stripArtifactNesting(p string) string {
 	sep := string(filepath.Separator)
 	segs := strings.Split(clean, sep)
 	for i := 0; i+1 < len(segs); i++ {
-		if segs[i] == ".easyeda" && segs[i+1] == "artifacts" {
+		if segs[i] == ".pcbpilot" && segs[i+1] == "artifacts" {
 			trimmed := strings.Join(segs[:i], sep)
 			if trimmed == "" {
 				if filepath.IsAbs(clean) {
@@ -850,7 +850,7 @@ func postAction(cfg *appConfig, action, window string, payload any, timeout time
 
 	scan := scanHealth(ctx, hostPortOptions{host: cfg.host, portStart: portStart, portEnd: portEnd})
 	if scan.Found == nil {
-		return nil, fmt.Errorf("no easyeda-agent daemon found on %s:%s (start it with `easyeda daemon start`)", cfg.host, scan.Ports)
+		return nil, fmt.Errorf("no pcbpilot daemon found on %s:%s (start it with `pcbpilot daemon start`)", cfg.host, scan.Ports)
 	}
 
 	body := map[string]any{"action": action}
@@ -876,9 +876,9 @@ func postAction(cfg *appConfig, action, window string, payload any, timeout time
 	}
 	// Tell the daemon where to drop artifacts. Anchored to the project root
 	// (nearest .git/go.mod ancestor), falling back to cwd — and NEVER a path
-	// inside an existing .easyeda/artifacts tree: sending a raw cwd that had
+	// inside an existing .pcbpilot/artifacts tree: sending a raw cwd that had
 	// drifted into the artifact dir made the daemon Join another
-	// .easyeda/artifacts under it, recursively nesting the tree. Best-effort.
+	// .pcbpilot/artifacts under it, recursively nesting the tree. Best-effort.
 	if dir, ok := artifactOutputDir(); ok {
 		body["outputDir"] = dir
 	}
@@ -985,7 +985,7 @@ type daemonHealth struct {
 }
 
 // scanHealth probes each port in [portStart, portEnd] and returns the first
-// port that responds with service=="easyeda-agent".
+// port that responds with service=="pcbpilot".
 func scanHealth(ctx context.Context, opts hostPortOptions) healthResult {
 	result := healthResult{
 		Status: "not_found",
@@ -1034,7 +1034,7 @@ func scanHealth(ctx context.Context, opts hostPortOptions) healthResult {
 		svc := serviceName(body)
 		checked.Status = "ok"
 		result.Checked = append(result.Checked, checked)
-		if svc == "easyeda-agent" {
+		if svc == "pcbpilot" {
 			raw := append(json.RawMessage(nil), body...)
 			result.Status = "found"
 			result.Found = &daemonHealth{Port: port, Service: svc, Raw: raw}

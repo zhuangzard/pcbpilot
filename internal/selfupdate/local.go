@@ -69,11 +69,11 @@ func ReadLocalBundle(dir string) (*LocalBundle, error) {
 		}
 		return b, nil
 	}
-	b := &LocalBundle{Skill: map[string][]byte{}, Connector: filepath.Join(dir, "easyeda-agent-connector.eext")}
+	b := &LocalBundle{Skill: map[string][]byte{}, Connector: filepath.Join(dir, "pcbpilot-connector.eext")}
 	if b.Binary, err = read(asset); err != nil {
 		return nil, err
 	}
-	connector, err := read("easyeda-agent-connector.eext")
+	connector, err := read("pcbpilot-connector.eext")
 	if err != nil {
 		return nil, err
 	}
@@ -231,11 +231,11 @@ func (b *LocalBundle) Install(binary string, log io.Writer) (retErr error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	output, err := exec.CommandContext(ctx, stageName, "--version").Output()
-	if err != nil || strings.TrimSpace(string(output)) != "easyeda-agent v"+b.Version {
+	if err != nil || strings.TrimSpace(string(output)) != "pcbpilot v"+b.Version {
 		return fmt.Errorf("local CLI execution/version check failed: %v", err)
 	}
 	if _, err = os.Stat(binary); err == nil {
-		backup, e := os.CreateTemp(filepath.Dir(binary), ".easyeda-backup-*")
+		backup, e := os.CreateTemp(filepath.Dir(binary), ".pcbpilot-backup-*")
 		if e != nil {
 			return e
 		}
@@ -265,7 +265,7 @@ func (b *LocalBundle) Install(binary string, log io.Writer) (retErr error) {
 		if p, e := filepath.EvalSymlinks(dir); e == nil {
 			dir = p
 		}
-		backup, e := os.MkdirTemp(filepath.Dir(dir), ".easyeda-local-backup-*")
+		backup, e := os.MkdirTemp(filepath.Dir(dir), ".pcbpilot-local-backup-*")
 		if e != nil {
 			return e
 		}

@@ -235,8 +235,8 @@ def prepare(source, out_dir, budget):
     concat_path.write_text(concat_text(frames), encoding="utf-8")
     print(f"Prepared {len(frames)} real-stage capture slots; no EDA action was executed.")
     print(f"Manifest: {manifest_path}")
-    print(shlex.join(["easyeda", "sch", "apply", str(output), "--dry-run"]))
-    print(shlex.join(["easyeda", "sch", "apply", str(output), "--yes"]))
+    print(shlex.join(["pcbpilot", "sch", "apply", str(output), "--dry-run"]))
+    print(shlex.join(["pcbpilot", "sch", "apply", str(output), "--yes"]))
     print("After execution and journal inspection, validate all captures and encode locally:")
     # sys.executable, not "python3": the printed line is meant to be pasted back,
     # and Windows normally has no python3 on PATH (the copy would exit 9009).

@@ -2354,7 +2354,7 @@ const schematicPageClear: Handler = async (payload) => {
 	const remaining = countIds(live);
 	if (remaining > 0) {
 		warnings.push(`page NOT fully cleared: ${remaining} primitive(s) survived ${passes} pass(es) `
-			+ `— they may be locked or platform-protected; inspect with \`easyeda sch list\``);
+			+ `— they may be locked or platform-protected; inspect with \`pcbpilot sch list\``);
 	}
 
 	// deleted/total report what actually went away, per group.
@@ -5621,8 +5621,8 @@ async function componentMissError(primitiveId: string): Promise<ActionError> {
 	const page = (await tagComponentPages()).get(primitiveId);
 	const where = page ? `page "${page.pageName}" (${page.pageUuid})` : 'another page';
 	const fix = page
-		? `easyeda doc switch ${page.pageName}`
-		: 'easyeda doc ls  →  easyeda doc switch <page>';
+		? `pcbpilot doc switch ${page.pageName}`
+		: 'pcbpilot doc ls  →  pcbpilot doc switch <page>';
 	return new ActionError(
 		ErrorCodes.INVALID_STATE,
 		`Component "${primitiveId}" is on ${where}, not the ACTIVE page — this action only reaches the active page. Switch to it first: ${fix}`,
@@ -6423,7 +6423,7 @@ async function loadNativeFootprintInventory(expectedContext?: { projectUuid?: st
 			// The SDK's document-footprint API returns [] in schematic editors.
 			// The official current-project epro2 archive retains DOCHEAD/META.source.
 			if (typeof eda.sys_FileManager?.getProjectFile !== 'function') return { error: `official footprint source inventory unavailable; project export unavailable${documentError ? ` (${documentError})` : ''}` };
-			const archive = await withTimeout(eda.sys_FileManager.getProjectFile('easyeda-agent-identity.epro2', undefined, 'epro2'), 10000, 'identity getProjectFile timed out after 10000ms');
+			const archive = await withTimeout(eda.sys_FileManager.getProjectFile('pcbpilot-identity.epro2', undefined, 'epro2'), 10000, 'identity getProjectFile timed out after 10000ms');
 			if (!archive) return { error: 'official project export did not return a source archive' };
 			entries = await withTimeout(readProjectFootprintSourceArchive(archive, before.documentUuid), 7000, 'identity source archive decoding timed out after 7000ms');
 		}
@@ -9183,7 +9183,7 @@ async function assertNetsExist(nets: Array<string>, what: string): Promise<void>
 	throw new ActionError(
 		ErrorCodes.PRECONDITION_REFUSED,
 		`${what}: net(s) not on this PCB: ${missing.join(', ')}. `
-		+ `Nothing was created. List the board's nets with \`easyeda pcb nets\` and use those exact names `
+		+ `Nothing was created. List the board's nets with \`pcbpilot pcb nets\` and use those exact names `
 		+ `(net names are case-sensitive and come from the schematic).`,
 	);
 }
@@ -9214,7 +9214,7 @@ const pcbDiffPairCreate: Handler = async (payload) => {
 		}
 		throw new ActionError(ErrorCodes.PRECONDITION_REFUSED,
 			`differential pair "${name}" already exists on ${already.positiveNet}/${already.negativeNet}, `
-			+ `not ${positiveNet}/${negativeNet}. Delete it first (\`easyeda pcb diff-pair delete --name ${name}\`) or pick another name.`);
+			+ `not ${positiveNet}/${negativeNet}. Delete it first (\`pcbpilot pcb diff-pair delete --name ${name}\`) or pick another name.`);
 	}
 	await assertNetsExist([positiveNet, negativeNet], `differential pair "${name}"`);
 
@@ -9289,7 +9289,7 @@ const pcbEqGroupCreate: Handler = async (payload) => {
 		if (same) return { result: { name, nets, alreadyExists: true, verified: true } };
 		throw new ActionError(ErrorCodes.PRECONDITION_REFUSED,
 			`equal-length group "${name}" already exists with nets [${(already.nets ?? []).join(', ')}]. `
-			+ `Add to it with \`easyeda pcb eq-group add --name ${name} --nets …\`, or delete it first.`);
+			+ `Add to it with \`pcbpilot pcb eq-group add --name ${name} --nets …\`, or delete it first.`);
 	}
 	await assertNetsExist(nets, `equal-length group "${name}"`);
 
@@ -9316,7 +9316,7 @@ const pcbEqGroupAddNets: Handler = async (payload) => {
 	const before = (await readEqLenGroups()).find(g => g.name === name);
 	if (!before) {
 		throw new ActionError(ErrorCodes.PRECONDITION_REFUSED,
-			`equal-length group "${name}" does not exist — create it first with \`easyeda pcb eq-group create --name ${name} --nets …\`.`);
+			`equal-length group "${name}" does not exist — create it first with \`pcbpilot pcb eq-group create --name ${name} --nets …\`.`);
 	}
 	const fresh = nets.filter(n => !(before.nets ?? []).includes(n));
 	if (!fresh.length) {
@@ -10131,7 +10131,7 @@ const pcbAddComponent: Handler = async (payload) => {
 			if (!schematics.some(s => s.uuid === boundSchUuid)) {
 				warnings.push(
 					`Board "${board?.name}" is bound to schematic ${boundSchUuid}, which is not among the open schematics `
-					+ `— DRC may report a false Netlist Error. Run \`easyeda board rebind --schematic <uuid> --pcb <uuid>\` to repair the binding.`,
+					+ `— DRC may report a false Netlist Error. Run \`pcbpilot board rebind --schematic <uuid> --pcb <uuid>\` to repair the binding.`,
 				);
 			}
 		}
@@ -10165,7 +10165,7 @@ const pcbAddComponent: Handler = async (payload) => {
 // regions back in as Specctra `(keepout (polygon …))`.
 //
 // Transform EasyEDA→DSN is a PURE TRANSLATION, 1:1 mil, no flip (verified against
-// pad coordinates): dsn = easyeda + offset, where offset = DSN-boundary-min −
+// pad coordinates): dsn = pcbpilot + offset, where offset = DSN-boundary-min −
 // outline-bbox-min. (The bbox includes the outline's half-linewidth, so the offset
 // can be off by ≤ that — negligible for a keep-out, which carries margin anyway.)
 
@@ -11069,7 +11069,7 @@ export const pcbPageClear: Handler = async (payload) => {
 	// The cap tripped while a round was still finding primitives: the last round's
 	// deletes went out unverified, so the board may still not be clean.
 	if (!dryRun && rounds >= maxRounds && leftover > 0) {
-		warnings.push(`clear did not converge after ${rounds} round(s) — ${leftover} primitive(s) still enumerated on the last pass; save + \`easyeda doc reload\`, then re-run clear`);
+		warnings.push(`clear did not converge after ${rounds} round(s) — ${leftover} primitive(s) still enumerated on the last pass; save + \`pcbpilot doc reload\`, then re-run clear`);
 	}
 
 	const deleted: Record<string, number> = {};
@@ -11436,7 +11436,7 @@ const pcbDrcCheck: Handler = async (payload) => {
 					schematicName: board.schematic?.name ?? null,
 					pcbUuid: board.pcb?.uuid ?? null,
 					pcbName: board.pcb?.name ?? null,
-					hint: 'Netlist Error is often a stale Board binding — verify the schematic UUID matches the open schematic; if not, run `easyeda board rebind --schematic <uuid> --pcb <uuid>`.',
+					hint: 'Netlist Error is often a stale Board binding — verify the schematic UUID matches the open schematic; if not, run `pcbpilot board rebind --schematic <uuid> --pcb <uuid>`.',
 				};
 			}
 		}
@@ -12793,7 +12793,7 @@ const pcbRouteDelete: Handler = async (payload) => {
 	}
 	if (!removed.length) {
 		if (notDeletable.length) {
-			throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `Nothing deletable: ${notDeletable.length} id(s) are FOOTPRINT-EMBEDDED (e.g. EPAD thermal vias — part of ${notDeletable[0].parentComponent}); the primitive API cannot delete them. To bond them to a net use \`easyeda pcb via-bond\`; to remove them edit the footprint or delete the component.`);
+			throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `Nothing deletable: ${notDeletable.length} id(s) are FOOTPRINT-EMBEDDED (e.g. EPAD thermal vias — part of ${notDeletable[0].parentComponent}); the primitive API cannot delete them. To bond them to a net use \`pcbpilot pcb via-bond\`; to remove them edit the footprint or delete the component.`);
 		}
 		throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `Nothing to delete: ${notFound.length} id(s) not found among routing primitives${skippedLocked.length ? `, ${skippedLocked.length} locked` : ''}. Pull fresh ids from pcb.line.list / pcb.via.list.`);
 	}

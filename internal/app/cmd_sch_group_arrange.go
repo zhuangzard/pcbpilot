@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/blocks"
+	"github.com/zhuangzard/pcbpilot/internal/blocks"
 )
 
 // ── 第二层:组与组之间的排布(ADR-0003)──────────────────────────────────────

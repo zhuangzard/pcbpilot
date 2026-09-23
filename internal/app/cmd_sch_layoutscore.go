@@ -1,6 +1,6 @@
 package app
 
-// cmd_sch_layoutscore.go — `easyeda sch layout-score`:原理图布局质量打分(用户立项)。
+// cmd_sch_layoutscore.go — `pcbpilot sch layout-score`:原理图布局质量打分(用户立项)。
 //
 // 立项背景:原理图侧只有 `sch layout-lint`(重叠/间距硬门)和 `sch check`(电气 +
 // marker 几何),**没有布局质量打分** —— "标签折叠"、"标签背向折返(反向)"、"外围件
@@ -578,7 +578,7 @@ func (s *schScoreScene) fixReconnect(markerIdx int, kind, direction string) stri
 		return ""
 	}
 	pin := s.hostPin[markerIdx]
-	return fmt.Sprintf("easyeda sch disconnect --pin %s:%s && easyeda sch connect --x %g --y %g --kind %s --net %s --direction %s --offset %d",
+	return fmt.Sprintf("pcbpilot sch disconnect --pin %s:%s && pcbpilot sch connect --x %g --y %g --kind %s --net %s --direction %s --offset %d",
 		s.parts[host].Designator, pin.Number, pin.X, pin.Y, kind, m.Net, direction, schScoreConnectOffset)
 }
 
@@ -780,7 +780,7 @@ func scoreProximity(s *schScoreScene) schScoreDimension {
 			At:        &checkPoint{X: round2(p.X), Y: round2(p.Y)},
 			Message: fmt.Sprintf("%s 距核心 %s 边距 %.0f(>%.0f 开始扣分)— 建议移到 %s %s方 (%g,%g) 附近后重连%s",
 				p.Designator, core.Designator, m.dist, schScoreProximityFull, core.Designator, side, tx, ty, caveat),
-			Fix: fmt.Sprintf("easyeda sch modify --id %s --patch '{\"x\":%g,\"y\":%g}'", p.ID, tx, ty),
+			Fix: fmt.Sprintf("pcbpilot sch modify --id %s --patch '{\"x\":%g,\"y\":%g}'", p.ID, tx, ty),
 		})
 	}
 	return d
@@ -968,9 +968,9 @@ func newSchLayoutScoreCmd(cfg *appConfig, window *string, stdout, stderr io.Writ
 			"  frame-fit        现场分区框、自由文字、位号边界与遮挡；型号/参数文字排除；缺测 skipped\n\n" +
 			"每条归因带 fix 字段:已填好真实位号/坐标的可执行命令,照抄运行即可修复。\n" +
 			"无 --min-score 时仅作诊断;显式给了则缺测或综合分低于阈值均非零退出。",
-		Example: "  easyeda sch layout-score\n" +
-			"  easyeda sch layout-score --json\n" +
-			"  easyeda sch layout-score --min-score 75   # 当门用(不建议;门是 layout-lint)",
+		Example: "  pcbpilot sch layout-score\n" +
+			"  pcbpilot sch layout-score --json\n" +
+			"  pcbpilot sch layout-score --min-score 75   # 当门用(不建议;门是 layout-lint)",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			// includeWires:宿主 pin 判定的电气匹配输入(anchor→stub→pin),

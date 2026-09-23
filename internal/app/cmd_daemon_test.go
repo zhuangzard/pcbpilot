@@ -39,7 +39,7 @@ func TestEnsurePortAvailable_FreePort(t *testing.T) {
 	}
 }
 
-// A FOREIGN process on the port (not an easyeda daemon) must be REFUSED headless
+// A FOREIGN process on the port (not an pcbpilot daemon) must be REFUSED headless
 // (go test has no TTY), and must NOT be killed.
 func TestEnsurePortAvailable_ForeignHeadlessRefuses(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

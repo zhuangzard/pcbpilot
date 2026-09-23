@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/spec"
+	"github.com/zhuangzard/pcbpilot/internal/spec"
 )
 
 func edgeIOScore(snap *boardSnapshot, s *spec.Spec) scoreDimension {

@@ -1302,7 +1302,7 @@ func applyZoneTidy(pinned *appConfig, win, docUUID string, rep *zoneTidyReport, 
 		return rollback(fmt.Errorf("post-apply self-check RED (%s)", strings.Join(red, "; ")))
 	}
 	if err := saveAutolayoutDocument(pinned, win, docUUID, "save zone-tidy result"); err != nil {
-		return fmt.Errorf("zone-tidy applied and the self-check is green, but the explicit save failed: %w (the daemon autosave net still applies; run `easyeda sch save` to be sure)", err)
+		return fmt.Errorf("zone-tidy applied and the self-check is green, but the explicit save failed: %w (the daemon autosave net still applies; run `pcbpilot sch save` to be sure)", err)
 	}
 	fmt.Fprintf(stdout, "✓ zone-tidy applied: %d group(s) moved, layout-lint + bridge-check green, schematic saved\n", len(applied))
 	return nil
@@ -1335,9 +1335,9 @@ band 优先取 zone-plan 对应分区 rect(独占分区,扣掉顶部 title band)
 ` + "`sch group-move --group`" + ` 语义),组间 settle;完成后 layout-lint + bridge-check
 自检,红则按逆序把已移组移回。默认(不带 --apply)只算不动。`,
 		Args: cobra.NoArgs,
-		Example: `  easyeda sch zone-tidy --zone POWER              # 只算不动(dry-run)
-  easyeda sch zone-tidy --zone POWER --json
-  easyeda sch zone-tidy --zone POWER --apply      # 逐组刚移 + 自检 + 红则回滚`,
+		Example: `  pcbpilot sch zone-tidy --zone POWER              # 只算不动(dry-run)
+  pcbpilot sch zone-tidy --zone POWER --json
+  pcbpilot sch zone-tidy --zone POWER --apply      # 逐组刚移 + 自检 + 红则回滚`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if apply && dryRun {
 				return fmt.Errorf("--dry-run and --apply are mutually exclusive")

@@ -1,19 +1,19 @@
-# air live-reload config for the easyeda-agent daemon.
+# air live-reload config for the pcbpilot daemon.
 #   make dev   (or: air)
-# Rebuilds bin and restarts `easyeda daemon` on any .go change. The EasyEDA
-# connector reconnects to 60832 in the background, so it auto-reconnects to
+# Rebuilds bin and restarts `pcbpilot daemon` on any .go change. The EasyEDA
+# connector reconnects to 61832 in the background, so it auto-reconnects to
 # the freshly restarted daemon with no manual Reconnect.
 #   install air:  go install github.com/air-verse/air@latest
 root = "."
 tmp_dir = "tmp"
 
 [build]
-  # Version-stamped build to ./bin/easyeda AND best-effort refresh of the PATH
+  # Version-stamped build to ./bin/pcbpilot AND best-effort refresh of the PATH
   # CLI (via `make dev-build`), then run THAT same binary as the daemon. One
-  # build serves both roles, so the `easyeda` you invoke on PATH is never stale
+  # build serves both roles, so the `pcbpilot` you invoke on PATH is never stale
   # relative to the hot-reloaded daemon.
   cmd = "make dev-build"
-  bin = "./bin/easyeda"
+  bin = "./bin/pcbpilot"
   # Development must not overwrite the checked-out Skill with an older release.
   args_bin = ["daemon","start","--auto-update-skill=false"]
   # only watch Go sources of the daemon/CLI; ignore the connector, tools, docs

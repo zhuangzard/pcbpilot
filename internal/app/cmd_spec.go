@@ -1,6 +1,6 @@
 package app
 
-// cmd_spec.go — `easyeda spec`：S0 设计方案书的校验与查看。
+// cmd_spec.go — `pcbpilot spec`：S0 设计方案书的校验与查看。
 //
 // 在此之前 S0 spec 写错是**完全静默**的：只要 modules[].zone/parts 对，
 // `pcb zones set` 就成功，其余字段无人看 —— 磁盘上那份真实 spec 已经把 board 写成
@@ -17,7 +17,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/spec"
+	"github.com/zhuangzard/pcbpilot/internal/spec"
 )
 
 func newSpecCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
@@ -47,9 +47,9 @@ func newSpecValidateCmd(stdout, stderr io.Writer) *cobra.Command {
 			"  INFO   能力降级 —— 接口没写 ref 就钉不到具体器件，连接器规则只能退回\n" +
 			"         启发式（报 INFO 而非 WARN）。\n\n" +
 			"默认只有 ERROR 才非零退出；--strict 让 WARN 也失败。",
-		Example: "  easyeda spec validate .easyeda/s0-ceshi.json\n" +
-			"  easyeda spec validate s0.json --strict   # 交付前用\n" +
-			"  easyeda spec validate s0.json --json",
+		Example: "  pcbpilot spec validate .pcbpilot/s0-ceshi.json\n" +
+			"  pcbpilot spec validate s0.json --strict   # 交付前用\n" +
+			"  pcbpilot spec validate s0.json --json",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			raw, err := os.ReadFile(args[0])

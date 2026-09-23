@@ -15,8 +15,8 @@ package app
 //
 // 默认跑仓库自带的参考 fixture（自包含、可回归）。要量一块真板：
 //
-//	easyeda pcb dump --project <名字> --out /tmp/board.json
-//	EASYEDA_BENCH_BOARD=/tmp/board.json go test ./internal/app/ -run TestLayoutBenchmark -v
+//	pcbpilot pcb dump --project <名字> --out /tmp/board.json
+//	PCBPILOT_BENCH_BOARD=/tmp/board.json go test ./internal/app/ -run TestLayoutBenchmark -v
 //
 // 真板 dump **不入库**（商业设计），所以走环境变量而不是 testdata。
 
@@ -27,7 +27,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/spec"
+	"github.com/zhuangzard/pcbpilot/internal/spec"
 )
 
 // benchSnapshotToCpComps 把板级快照投影成规划器的入参。
@@ -109,10 +109,10 @@ func benchLoadBoards(t *testing.T) []benchBoard {
 	t.Helper()
 	var out []benchBoard
 
-	if p := os.Getenv("EASYEDA_BENCH_BOARD"); p != "" {
+	if p := os.Getenv("PCBPILOT_BENCH_BOARD"); p != "" {
 		f, err := os.Open(p)
 		if err != nil {
-			t.Fatalf("EASYEDA_BENCH_BOARD=%s: %v", p, err)
+			t.Fatalf("PCBPILOT_BENCH_BOARD=%s: %v", p, err)
 		}
 		defer f.Close()
 		snap, err := loadBoardSnapshotFile(f)
@@ -120,10 +120,10 @@ func benchLoadBoards(t *testing.T) []benchBoard {
 			t.Fatalf("parse %s: %v", p, err)
 		}
 		b := benchBoard{name: p, snap: snap}
-		if sp := os.Getenv("EASYEDA_BENCH_SPEC"); sp != "" {
+		if sp := os.Getenv("PCBPILOT_BENCH_SPEC"); sp != "" {
 			raw, rerr := os.ReadFile(sp)
 			if rerr != nil {
-				t.Fatalf("EASYEDA_BENCH_SPEC=%s: %v", sp, rerr)
+				t.Fatalf("PCBPILOT_BENCH_SPEC=%s: %v", sp, rerr)
 			}
 			if b.s0, err = spec.Parse(raw); err != nil {
 				t.Fatalf("parse spec: %v", err)

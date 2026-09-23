@@ -11,8 +11,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/spec"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/workflow"
+	"github.com/zhuangzard/pcbpilot/internal/spec"
+	"github.com/zhuangzard/pcbpilot/internal/workflow"
 )
 
 // cmd_pcb_stage.go — compatibility access to the historical persisted PCB
@@ -78,11 +78,11 @@ invalidates that tier and everything after it, but NOT the earlier tiers.
 claimed by a tier (--force <reason> bypasses that compatibility check). These
 records do not lock parts and are not read by placement or routing commands.`,
 		Args: cobra.ExactArgs(1),
-		Example: `  easyeda pcb stage confirm-tier 1 --parts H1,H2,H3,H4 --note "M3 四角孔"
-  easyeda pcb stage confirm-tier 2 --parts J1,USB1 --note "USB-C 开口朝外,用户已确认"
-  easyeda pcb stage confirm-tier 3 --parts U1,U2 --note "天线 keepout 已留"
-  easyeda pcb stage confirm-tier 4              # 其余全部 = 卫星件
-  easyeda pcb stage confirm-tier 3 --empty --note "无 RF 器件"`,
+		Example: `  pcbpilot pcb stage confirm-tier 1 --parts H1,H2,H3,H4 --note "M3 四角孔"
+  pcbpilot pcb stage confirm-tier 2 --parts J1,USB1 --note "USB-C 开口朝外,用户已确认"
+  pcbpilot pcb stage confirm-tier 3 --parts U1,U2 --note "天线 keepout 已留"
+  pcbpilot pcb stage confirm-tier 4              # 其余全部 = 卫星件
+  pcbpilot pcb stage confirm-tier 3 --empty --note "无 RF 器件"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			n := 0
 			if _, err := fmt.Sscanf(strings.TrimSpace(args[0]), "%d", &n); err != nil || n < 1 || n > workflowTierCount {
@@ -198,7 +198,7 @@ func newPcbStageStatusCmd(cfg *appConfig, window *string, stdout io.Writer) *cob
 		Use:     "status",
 		Short:   "Show deprecated checklist records and their historical readiness calculation",
 		Args:    cobra.NoArgs,
-		Example: `  easyeda pcb stage status --project ceshi`,
+		Example: `  pcbpilot pcb stage status --project ceshi`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			project := stageKeyBestEffort(cfg, *window)
 			st, err := loadPcbStageState(project)
@@ -282,8 +282,8 @@ func newPcbStageSetAssemblyCmd(cfg *appConfig, window *string, stdout, stderr io
 		Use:   "set-assembly",
 		Short: "Persist assembly spacing metadata for compatibility diagnostics",
 		Args:  cobra.NoArgs,
-		Example: `  easyeda pcb stage set-assembly --profile hand-solder --min-gap 40 --large-pad-access 60 --project ceshi
-  easyeda pcb stage set-assembly --profile reflow --project ceshi`,
+		Example: `  pcbpilot pcb stage set-assembly --profile hand-solder --min-gap 40 --large-pad-access 60 --project ceshi
+  pcbpilot pcb stage set-assembly --profile reflow --project ceshi`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			profile = strings.ToLower(strings.TrimSpace(profile))
 			if profile != "hand-solder" && profile != "reflow" {
@@ -352,8 +352,8 @@ and stores a fingerprint of the live placement (designator/x/y/rotation/layer):
 legacy checklist readers can compare it with later geometry. This record does not
 lock parts, authorize routing, or block any PCB command.`,
 		Args: cobra.NoArgs,
-		Example: `  easyeda pcb stage confirm-layout --project ceshi --note "USB-C opening out, antenna at top edge"
-  easyeda pcb stage confirm-layout --force "两件小板无分档必要" --project ceshi`,
+		Example: `  pcbpilot pcb stage confirm-layout --project ceshi --note "USB-C opening out, antenna at top edge"
+  pcbpilot pcb stage confirm-layout --force "两件小板无分档必要" --project ceshi`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runStageConfirmLayoutForced(cfg, *window, note, force, specPath, minScore, stderr)
 		},
@@ -467,7 +467,7 @@ func runStageConfirmLayoutForced(cfg *appConfig, window, note, forceReason, spec
 			for _, line := range weakestQualityLines(quality, 3) {
 				fmt.Fprintf(stderr, "   %s\n", line)
 			}
-			fmt.Fprintln(stderr, "   run `easyeda pcb layout-score --all` for the per-component attribution")
+			fmt.Fprintln(stderr, "   run `pcbpilot pcb layout-score --all` for the per-component attribution")
 			return errActionFailed
 		}
 	}
@@ -572,7 +572,7 @@ since confirm-layout sends you back to P2. Review board dimensions,
 edge-connector protrusion (~0.5–1mm past the edge) and mounting-hole clearance
 before recording. The result does not authorize or block any PCB operation.`,
 		Args:    cobra.NoArgs,
-		Example: `  easyeda pcb stage confirm-outline --project ceshi --note "40×25mm, USB-C 0.8mm proud"`,
+		Example: `  pcbpilot pcb stage confirm-outline --project ceshi --note "40×25mm, USB-C 0.8mm proud"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runStageConfirmOutline(cfg, *window, note, stderr)
 		},
@@ -636,8 +636,8 @@ func newPcbStageResetCmd(cfg *appConfig, window *string, stdout io.Writer) *cobr
 the later entries; --all wipes only the compatibility record back to imported.
 This does not change, reset or unlock the PCB.`,
 		Args: cobra.NoArgs,
-		Example: `  easyeda pcb stage reset --all --project ceshi
-  easyeda pcb stage reset --from placement_confirmed --project ceshi`,
+		Example: `  pcbpilot pcb stage reset --all --project ceshi
+  pcbpilot pcb stage reset --from placement_confirmed --project ceshi`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			st, err := loadPcbStageState(stageKeyBestEffort(cfg, *window))
 			if err != nil {

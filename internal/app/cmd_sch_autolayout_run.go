@@ -501,7 +501,7 @@ func runAutolayout(cfg *appConfig, window string, spec alSpec, rules autolayoutR
 		parts, sheet = parseAutolayoutParts(res.Result)
 	}
 	if apply && sheet == nil {
-		return fmt.Errorf("autolayout: no sheet bbox found; select/create an A4 sheet and verify with 'easyeda sch sheet-geometry' before --apply")
+		return fmt.Errorf("autolayout: no sheet bbox found; select/create an A4 sheet and verify with 'pcbpilot sch sheet-geometry' before --apply")
 	}
 
 	modules := make([]alModuleSpec, 0, len(spec.Modules))
@@ -1045,11 +1045,11 @@ Spec shape:
               "preferVerticalPeripheralPlacement":true}
   }`,
 		Args: cobra.NoArgs,
-		Example: `  easyeda sch autolayout --spec p1-layout.json --dry-run
-  easyeda sch autolayout --spec p1-layout.json --doc P1_MCU_USB_STORAGE --apply
-  easyeda sch autolayout --spec p1-layout.json --json
-  easyeda sch autolayout --engine official --apply             # unwired page: place only
-  easyeda sch autolayout --engine official --apply --rewire    # wired page: layout + rebuild wiring`,
+		Example: `  pcbpilot sch autolayout --spec p1-layout.json --dry-run
+  pcbpilot sch autolayout --spec p1-layout.json --doc P1_MCU_USB_STORAGE --apply
+  pcbpilot sch autolayout --spec p1-layout.json --json
+  pcbpilot sch autolayout --engine official --apply             # unwired page: place only
+  pcbpilot sch autolayout --engine official --apply --rewire    # wired page: layout + rebuild wiring`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if dryRun && apply {
 				return fmt.Errorf("--dry-run and --apply are mutually exclusive")

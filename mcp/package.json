@@ -1,11 +1,11 @@
 {
-  "name": "easyeda-agent-mcp",
+  "name": "pcbpilot-mcp",
   "version": "0.18.3",
   "private": true,
   "type": "module",
-  "description": "Local stdio MCP adapter for easyeda-agent",
+  "description": "Local stdio MCP adapter for pcbpilot",
   "bin": {
-    "easyeda-agent-mcp": "src/server.mjs"
+    "pcbpilot-mcp": "src/server.mjs"
   },
   "scripts": {
     "start": "node src/server.mjs",

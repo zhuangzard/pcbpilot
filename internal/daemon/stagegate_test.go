@@ -3,8 +3,8 @@ package daemon
 import (
 	"testing"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/protocol"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/workflow"
+	"github.com/zhuangzard/pcbpilot/internal/protocol"
+	"github.com/zhuangzard/pcbpilot/internal/workflow"
 )
 
 func TestWorkflowStagesDoNotAuthorizeTypedActions(t *testing.T) {

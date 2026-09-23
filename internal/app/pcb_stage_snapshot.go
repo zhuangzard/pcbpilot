@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// newPcbStageSnapshotCmd builds `easyeda pcb stage-snapshot` — the recording /
+// newPcbStageSnapshotCmd builds `pcbpilot pcb stage-snapshot` — the recording /
 // demo stage capture that issue #32 asked for.
 //
 // WHY a dedicated command: for engineering validation we judge state by DATA
@@ -53,9 +53,9 @@ unavailable instead of falling back to GUI operation. The default --fit-mode
 board uses pcb_Document.zoomToBoardOutline before capture. This is not the editor
 menu's object-level Copy-as-PNG/SVG export, which public eda.* does not expose.`,
 		Args: cobra.NoArgs,
-		Example: `  easyeda pcb stage-snapshot --project ceshi --stage "P7 routing"
-  PREV=$(easyeda pcb stage-snapshot --stage P6 --out ./rec | jq -r .sha256)
-  easyeda pcb stage-snapshot --stage P7 --out ./rec --previous-sha256 "$PREV"`,
+		Example: `  pcbpilot pcb stage-snapshot --project ceshi --stage "P7 routing"
+  PREV=$(pcbpilot pcb stage-snapshot --stage P6 --out ./rec | jq -r .sha256)
+  pcbpilot pcb stage-snapshot --stage P7 --out ./rec --previous-sha256 "$PREV"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(stage) == "" {
 				return fmt.Errorf("--stage is required (e.g. --stage \"P7 routing\")")
@@ -91,7 +91,7 @@ menu's object-level Copy-as-PNG/SVG export, which public eda.* does not expose.`
 			// rather than bank a mismatched frame.
 			if snap.Context != nil && snap.Context.DocumentType != "" && snap.Context.DocumentType != "pcb" {
 				fmt.Fprintf(stderr, "❌ stage %q: the foreground tab is a %s, not a PCB — the capture would be "+
-					"the wrong document. Activate it with `easyeda doc switch <pcb>` and re-run.\n", stage, snap.Context.DocumentType)
+					"the wrong document. Activate it with `pcbpilot doc switch <pcb>` and re-run.\n", stage, snap.Context.DocumentType)
 				return errActionFailed
 			}
 			reportedSHA, _ := snap.Result["sha256"].(string)
@@ -214,7 +214,7 @@ menu's object-level Copy-as-PNG/SVG export, which public eda.* does not expose.`
 		},
 	}
 	c.Flags().StringVar(&stage, "stage", "", "stage label, e.g. \"P7 routing\" (required)")
-	c.Flags().StringVar(&outDir, "out", "", "output root (default ./.easyeda/stages)")
+	c.Flags().StringVar(&outDir, "out", "", "output root (default ./.pcbpilot/stages)")
 	c.Flags().StringVar(&fitMode, "fit-mode", "board", "viewport fit: board | all | none (default board)")
 	c.Flags().BoolVar(&noFit, "no-fit", false, "legacy alias for --fit-mode none")
 	c.Flags().StringVar(&previousSha, "previous-sha256", "", "prior stage's sha256 → detect+gate a stale (non-repainted) frame")
@@ -254,7 +254,7 @@ func outDirOrDefault(out string) string {
 	if strings.TrimSpace(out) != "" {
 		return out
 	}
-	return filepath.Join(".easyeda", "stages")
+	return filepath.Join(".pcbpilot", "stages")
 }
 
 var stageSanitizeRe = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)

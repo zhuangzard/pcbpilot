@@ -8,7 +8,7 @@ import (
 )
 
 // Real geometry pulled from the fixed ESP32-S3 regression board (ceshi):
-// `easyeda pcb list --include-pads --include-bbox`. U1 is the lone main chip;
+// `pcbpilot pcb list --include-pads --include-bbox`. U1 is the lone main chip;
 // the 7 satellites must hug the U1 edge nearest the pad they connect to.
 
 // mkComp builds a component whose bbox is centered on (cx,cy) with size w×h, so

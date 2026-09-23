@@ -18,7 +18,7 @@ import pathlib
 import re
 import sys
 
-SKILL = pathlib.Path(__file__).resolve().parent.parent / ".agents" / "skills" / "easyeda-agent" / "SKILL.md"
+SKILL = pathlib.Path(__file__).resolve().parent.parent / ".agents" / "skills" / "pcbpilot" / "SKILL.md"
 # 只匹配 frontmatter 里 metadata 块下的 version 行(两空格缩进),不会误伤正文。
 PATTERN = re.compile(r'(?m)^(  version:\s*)"([^"]*)"$')
 

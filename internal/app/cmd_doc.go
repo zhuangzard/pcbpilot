@@ -33,10 +33,10 @@ func newDocCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 		Use:   "doc",
 		Short: "Discover and open/switch EasyEDA documents (schematic pages / PCBs)",
 		Long: "Discover every openable document in a window and open or switch between them.\n\n" +
-			"  easyeda doc ls --project <name>                      list all schematic pages + PCBs, ★=active\n" +
-			"  easyeda doc open <name|uuid> --project <name>        open a document (schematic page or PCB)\n" +
-			"  easyeda doc switch <name|uuid> --project <name>      switch to a document (same as open)\n" +
-			"  easyeda doc reload [name|uuid] --project <name>      save, close, and reopen a document\n\n" +
+			"  pcbpilot doc ls --project <name>                      list all schematic pages + PCBs, ★=active\n" +
+			"  pcbpilot doc open <name|uuid> --project <name>        open a document (schematic page or PCB)\n" +
+			"  pcbpilot doc switch <name|uuid> --project <name>      switch to a document (same as open)\n" +
+			"  pcbpilot doc reload [name|uuid] --project <name>      save, close, and reopen a document\n\n" +
 			"Context is read live (not the connect-time snapshot), so the active marker\nand `daemon health` reflect the real foreground document. If the project has\nno active editor tab, `doc ls` still uses project inventories and `doc open`\ncan recover by UUID, then confirms the new active document with a fresh read.",
 	}
 	doc.PersistentFlags().StringVar(&window, "window", "", "EasyEDA window ID (usually prefer --project)")
@@ -68,9 +68,9 @@ func newDocCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 		Use:   "switch <name|uuid>",
 		Short: "Switch the foreground document by page name, PCB name, or uuid",
 		Args:  cobra.ExactArgs(1),
-		Example: "  easyeda doc switch P2 --project motobox2026\n" +
-			"  easyeda doc switch ESP32-S3-V1_0_1 --project motobox2026\n" +
-			"  easyeda doc switch 6b3a2f01-... --project motobox2026",
+		Example: "  pcbpilot doc switch P2 --project motobox2026\n" +
+			"  pcbpilot doc switch ESP32-S3-V1_0_1 --project motobox2026\n" +
+			"  pcbpilot doc switch 6b3a2f01-... --project motobox2026",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := args[0]
 			docs, _, win, err := discoverDocs(cfg, window)
@@ -124,9 +124,9 @@ func newDocCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 		Use:   "open <name|uuid>",
 		Short: "Open a document (schematic page or PCB) by name or uuid",
 		Args:  cobra.ExactArgs(1),
-		Example: "  easyeda doc open PCB1 --project ceshi\n" +
-			"  easyeda doc open P1 --project ceshi\n" +
-			"  easyeda doc open ESP32-mini-v2 --project hardware",
+		Example: "  pcbpilot doc open PCB1 --project ceshi\n" +
+			"  pcbpilot doc open P1 --project ceshi\n" +
+			"  pcbpilot doc open ESP32-mini-v2 --project hardware",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := args[0]
 			docs, _, win, err := discoverDocs(cfg, window)
@@ -194,9 +194,9 @@ page would move the active tab. This command restores the pre-reload active
 document afterward and reports it as "activeRestored", so the ★ does not drift
 (issue #67).`,
 		Args: cobra.MaximumNArgs(1),
-		Example: `  easyeda doc reload                      # reload the active document
-  easyeda doc reload PCB3 --project ceshi # reload a specific PCB
-  easyeda pcb pour-rebuild                # then re-pour under the refreshed rules`,
+		Example: `  pcbpilot doc reload                      # reload the active document
+  pcbpilot doc reload PCB3 --project ceshi # reload a specific PCB
+  pcbpilot pcb pour-rebuild                # then re-pour under the refreshed rules`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			docs, activeUUID, win, err := discoverDocs(cfg, window)
 			if err != nil {
@@ -211,7 +211,7 @@ document afterward and reports it as "activeRestored", so the ★ does not drift
 				target = match.UUID
 			}
 			if target == "" {
-				return fmt.Errorf("no active document to reload (run `easyeda doc ls`)")
+				return fmt.Errorf("no active document to reload (run `pcbpilot doc ls`)")
 			}
 			docType, err := reloadDocumentByUUID(cfg, win, target)
 			if err != nil {
@@ -383,7 +383,7 @@ func resolveDoc(docs []openableDoc, target string) (openableDoc, error) {
 	case 1:
 		return hits[0], nil
 	case 0:
-		return openableDoc{}, fmt.Errorf("no document named or with uuid %q (run `easyeda doc ls` to see options)", target)
+		return openableDoc{}, fmt.Errorf("no document named or with uuid %q (run `pcbpilot doc ls` to see options)", target)
 	default:
 		var names []string
 		for _, h := range hits {

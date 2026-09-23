@@ -29,7 +29,7 @@ func TestNativeDownloadedBinaryVerificationAndReplacement(t *testing.T) {
 import "os"
 func main() {
 	if len(os.Args) != 2 || os.Args[1] != "version" { os.Exit(2) }
-	_, _ = os.Stdout.WriteString("easyeda-agent v1.4.20\n")
+	_, _ = os.Stdout.WriteString("pcbpilot v1.4.20\n")
 }
 `
 	if err := os.WriteFile(source, []byte(program), 0600); err != nil {
@@ -82,7 +82,7 @@ func main() {
 	if err := verifyBinary(ctx, downloaded, "1.4.2"); err == nil || !strings.Contains(err.Error(), "expected version 1.4.2") {
 		t.Fatalf("wrong release was not rejected: %v", err)
 	}
-	destination := filepath.Join(staging, "easyeda.exe")
+	destination := filepath.Join(staging, "pcbpilot.exe")
 	if err := os.WriteFile(destination, []byte("old temporary target"), 0755); err != nil {
 		t.Fatal(err)
 	}

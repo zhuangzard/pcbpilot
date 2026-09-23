@@ -25,7 +25,7 @@ package workflow
 // 三条铁律:
 //
 //   - **绝不自动删**。证明外来只影响「参不参与匹配」,数据一个字节不动;删除只走
-//     用户显式的 `easyeda workflow pages --prune`。自动清会在「工程只是换了个团队
+//     用户显式的 `pcbpilot workflow pages --prune`。自动清会在「工程只是换了个团队
 //     空间(uuid 变了)」时吃掉真状态。
 //   - **证不出来就不收窄**。没戳的页(升级前写的)默认参与 —— 一个用了半年的真实
 //     工程不该因为升级了一个版本就丢掉五页事实来源。
@@ -85,7 +85,7 @@ func (b BindResult) Message(project string) string {
 	if len(b.Foreign) > 0 {
 		sb.WriteString(fmt.Sprintf("已证明外来的 %d 页**不再参与**跨页匹配(回填/分区),数据仍在文件里。", len(b.Foreign)))
 	}
-	sb.WriteString("下一步:`easyeda workflow pages --project " + project + "` 看逐页归属;" +
+	sb.WriteString("下一步:`pcbpilot workflow pages --project " + project + "` 看逐页归属;" +
 		"确认要清掉残留再加 `--prune`(不加就什么都不删)。")
 	return sb.String()
 }
@@ -159,7 +159,7 @@ func (s *State) BoundUUID() string {
 // ScopeUUID 决定跨页读取按哪个 uuid 收窄:显式给的活体 uuid 优先,取不到就退回
 // 文件自己记的 ProjectUUID(「最后绑定的那个工程」)。两个都没有 = 不收窄。
 //
-// 退回 ProjectUUID 让**纯离线**的调用方(`easyeda spec backfill --project X`,
+// 退回 ProjectUUID 让**纯离线**的调用方(`pcbpilot spec backfill --project X`,
 // 它的最大优点就是不需要跑着的 daemon)也能把带戳的死页挡在外面。
 func (s *State) ScopeUUID(explicit string) string {
 	if u := strings.TrimSpace(explicit); u != "" {

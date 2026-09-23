@@ -482,8 +482,8 @@ func newSchZoneRelayoutCommand(cfg *appConfig, window *string, stdout, stderr io
 全程不搬带线的图元——组刚移在暂态叠位时会被平台 merge 共点线再撕出短路
 (实测),placement-first 没有这一类问题。默认 dry-run。`,
 		Args: cobra.NoArgs,
-		Example: `  easyeda sch zone relayout --zone MCU           # dry-run 看每件目标位
-  easyeda sch zone relayout --zone MCU --apply   # sweep → 落位 → 重连 → 自检`,
+		Example: `  pcbpilot sch zone relayout --zone MCU           # dry-run 看每件目标位
+  pcbpilot sch zone relayout --zone MCU --apply   # sweep → 落位 → 重连 → 自检`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if strings.TrimSpace(zone) == "" {
 				return fmt.Errorf("--zone 必填(sch zones status 看认领)")

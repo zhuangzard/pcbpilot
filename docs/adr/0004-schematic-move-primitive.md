@@ -3,7 +3,7 @@
 ## Status
 
 存量移动内核的历史决策；作为主工作流已由
-[数据驱动架构基准](../../.agents/skills/easyeda-agent/references/schematic-data.md#数据驱动架构基准)
+[数据驱动架构基准](../../.agents/skills/pcbpilot/references/schematic-data.md#数据驱动架构基准)
 替代（2026-09-14）。保留数据快照、带线移动、失败回读的安全要求；不将补偿恢复视为事务，
 也不以现场反复移动代替源输入修复、算法重算与可重复验证。以下状态和版本均为当时记录。
 

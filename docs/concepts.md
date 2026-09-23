@@ -1,21 +1,21 @@
 # 核心概念与对象(拉通认知)
 
-> 本文是 easyeda-agent 布局/布线域的**共享词汇表**——把散在代码注释、memory、
+> 本文是 pcbpilot 布局/布线域的**共享词汇表**——把散在代码注释、memory、
 > 对话里的概念统一到项目层,让后续会话、贡献者、Skill 用**同一套心智模型**。
 > 新概念先落这里,再在代码/Skill/memory 里引用。相关:[cli-design.md](./cli-design.md) ·
 > [e2e-automation-acceptance.md](./e2e-automation-acceptance.md) ·
-> `.agents/skills/easyeda-agent/references/design-flow.md`(流程脊柱)。
+> `.agents/skills/pcbpilot/references/design-flow.md`(流程脊柱)。
 
 ---
 
 ## Agent 协作入口与文档归属
 
-**公开设计 Skill** 指 `.agents/skills/easyeda-agent/`，是可独立安装的 EDA 工作流与知识包。
-**仓库协作 Skill** 指 `.agents/skills/easyeda-repo-*/`，通过安装链接定位源码 checkout，
+**公开设计 Skill** 指 `.agents/skills/pcbpilot/`，是可独立安装的 EDA 工作流与知识包。
+**仓库协作 Skill** 指 `.agents/skills/pcbpilot-repo-*/`，通过安装链接定位源码 checkout，
 用于跨项目查询和维护；它依赖仓库内容，不属于公开设计包，也不增加 EDA 执行通道。
 **兼容入口** 只引用同一规范源：`CLAUDE.md → AGENTS.md`、`.claude → .agents`；
 公开设计 Skill 与仓库协作 Skill 都是 `.agents/skills/` 下的真实目录；根目录不再保留第二个
-Skill 目录。源码位置不改变发布包内的 `easyeda-agent/` 根目录或用户级安装位置。
+Skill 目录。源码位置不改变发布包内的 `pcbpilot/` 根目录或用户级安装位置。
 
 **文档归属** 指每类信息有一个维护位置：协作规则、操作知识、架构理由、验证证据分别维护，
 入口和索引只路由到该位置。历史报告说明特定版本发生过什么，不覆盖当前规范，也不证明新版
@@ -23,7 +23,7 @@ Skill 目录。源码位置不改变发布包内的 `easyeda-agent/` 根目录�
 
 ## 原理图架构基准入口
 
-[数据驱动架构基准](../.agents/skills/easyeda-agent/references/schematic-data.md#数据驱动架构基准)
+[数据驱动架构基准](../.agents/skills/pcbpilot/references/schematic-data.md#数据驱动架构基准)
 是设计、检查和修复的统一规范正文；本文定义术语，不另立流程。
 原始观测保留，源目标表达连接/归属/约束，算法生成，数据检查，失败回源重算，Apply 后回读对账。
 新设计使用区内与纸张两层计算，不以旧九宫格、三层 tidy/move 或截图手工修补代替。
@@ -487,7 +487,7 @@ ESP32 双三极管自动下载、SY8089 buck、RS-485、GNSS 前端、microSD…
 稳定字段类型/必填项/枚举,后者检查 standard-parts 外键及 role/port/internal_nets 引用闭合。
 
 ### 消费与贡献
-- **消费**:`easyeda blocks ls/show/search`(go:embed 进二进制,**离线、无需 daemon/窗口**);手工接任何
+- **消费**:`pcbpilot blocks ls/show/search`(go:embed 进二进制,**离线、无需 daemon/窗口**);手工接任何
   已知外围**前先查块**(铁律 8)。
 - **贡献**:手接并端到端验证过的新外围可回流入库,但优先保持核心 manifest 简洁；只有已有或即将实现的
   消费器需要某项约束时才新增结构字段,解释、经验和项目复盘留作文档内容。
@@ -656,9 +656,9 @@ compose 排版验证。固定预览需显示端口占位和真实接点，不能
 
 ## V4 宿主与新数据模型
 
-EasyEDA Pro 产品版本、扩展 API 引擎版本和 easyeda-agent 发布版本是三个独立概念。
+EasyEDA Pro 产品版本、扩展 API 引擎版本和 pcbpilot 发布版本是三个独立概念。
 项目主线宿主从 2026-09-21 起为 EasyEDA Pro V4；`extension.json` 的 `engines.eda: ~3.2.0`
-仍是官方扩展 API 引擎约束，不应随产品版本机械改成 4.x。`easyeda health` 分别报告宿主兼容性
+仍是官方扩展 API 引擎约束，不应随产品版本机械改成 4.x。`pcbpilot health` 分别报告宿主兼容性
 和 CLI/daemon/Connector 一致性，两者都不代替对象级回读。
 
 V4 的多符号、多器件、多封装是“一个逻辑库记录关联多个可选实现”的变体模型，不等同于

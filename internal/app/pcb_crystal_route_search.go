@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/zhoushoujianwork/easyeda-agent/pkg/pcbrouting"
+	"github.com/zhuangzard/pcbpilot/pkg/pcbrouting"
 )
 
 // Exact supported pad geometry; unknown geometry is never treated as free space.

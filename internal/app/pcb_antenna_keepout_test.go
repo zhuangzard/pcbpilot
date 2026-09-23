@@ -3,7 +3,7 @@ package app
 import (
 	"testing"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/blocks"
+	"github.com/zhuangzard/pcbpilot/internal/blocks"
 )
 
 // TestAntennaKeepoutRect: the keep-out must land on the module's PAD-FREE end and

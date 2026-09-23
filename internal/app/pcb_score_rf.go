@@ -31,7 +31,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/spec"
+	"github.com/zhuangzard/pcbpilot/internal/spec"
 )
 
 // ---------------------------------------------------------------------------

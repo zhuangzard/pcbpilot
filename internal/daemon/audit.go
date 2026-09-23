@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/protocol"
+	"github.com/zhuangzard/pcbpilot/internal/protocol"
 )
 
 // auditEntry is one JSONL row appended per dispatched action. The shape is
-// intentionally flat so future `easyeda audit` tooling can pipe it through
+// intentionally flat so future `pcbpilot audit` tooling can pipe it through
 // jq/grep without parsing nested envelopes.
 type auditEntry struct {
 	Timestamp time.Time `json:"ts"`
@@ -39,10 +39,10 @@ type auditEntry struct {
 	ErrorDetail string `json:"errorDetail,omitempty"`
 }
 
-// EnvAuditDir overrides the audit log root, mirroring EASYEDA_WORKFLOW_DIR
+// EnvAuditDir overrides the audit log root, mirroring PCBPILOT_WORKFLOW_DIR
 // (internal/workflow). Set it to keep a run's audit trail out of the user's
 // real log — the daemon's own tests rely on this.
-const EnvAuditDir = "EASYEDA_AUDIT_DIR"
+const EnvAuditDir = "PCBPILOT_AUDIT_DIR"
 
 // auditWriter serializes appends to one JSONL file per UTC day so log files
 // stay rotatable by date without a separate rotation process.
@@ -55,10 +55,10 @@ type auditWriter struct {
 }
 
 // newAuditWriter resolves the audit root: the explicit dir, else
-// EASYEDA_AUDIT_DIR, else ~/.easyeda-agent/audit.
+// PCBPILOT_AUDIT_DIR, else ~/.pcbpilot/audit.
 //
 // The last fallback is DISABLED under `go test` (issue #159). The audit log is
-// a first-class output that `easyeda audit` / audit-baseline.py read to judge
+// a first-class output that `pcbpilot audit` / audit-baseline.py read to judge
 // which actions are failing in the field; a test that constructs a Server
 // without an AuditDir used to append its fixtures — fake windows "w1"/"w2",
 // project "motobox" — straight into the user's real log, manufacturing failure
@@ -76,7 +76,7 @@ func newAuditWriter(dir string) *auditWriter {
 		if err != nil || home == "" {
 			home = os.Getenv("HOME")
 		}
-		dir = filepath.Join(home, ".easyeda-agent", "audit")
+		dir = filepath.Join(home, ".pcbpilot", "audit")
 	}
 	return &auditWriter{dir: dir}
 }

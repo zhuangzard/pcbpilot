@@ -1,7 +1,7 @@
 # 1.4 发布与验证
 
 本页保留 1.4 系列的设计与历史验证记录。当前版本以
-[GitHub Latest Release](https://github.com/zhoushoujianwork/easyeda-agent/releases/latest)
+[GitHub Latest Release](https://github.com/zhuangzard/pcbpilot/releases/latest)
 为准；1.5 的升级说明见 [1.5 发布与验证](release-1.5.md)，变更明细见
 [Changelog](../../extension/CHANGELOG.md)。
 
@@ -40,7 +40,7 @@
 ## 1.4 数据驱动原理图闭环
 
 本节保留 1.4 发行时的描述；后续维护统一遵守
-[数据驱动架构基准](../../.agents/skills/easyeda-agent/references/schematic-data.md#数据驱动架构基准)。
+[数据驱动架构基准](../../.agents/skills/pcbpilot/references/schematic-data.md#数据驱动架构基准)。
 原始快照保留，核心/外围显式归属，两层计算，数据发现问题回源重算；
 位号参与页面检查，非位号器件属性文字排除。历史发行证据不证明当前工程或安装版本已验收。
 
@@ -61,7 +61,7 @@ Agent 先在本地数据上设计功能 Lib、器件 XY/朝向和导线，再用
 ## 安装契约
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.sh | bash
 easyeda update --check --exit-code
 ```
 

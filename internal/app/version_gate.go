@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/selfupdate"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/version"
+	"github.com/zhuangzard/pcbpilot/internal/selfupdate"
+	"github.com/zhuangzard/pcbpilot/internal/version"
 )
 
 // ── 版本一致性门 (issue #181 复盘第 2 条) ──────────────────────────────────
@@ -53,7 +53,7 @@ const (
 
 // envSkipVersionCheck is the environment equivalent of --skip-version-check,
 // for callers that cannot add a flag (scripts, MCP adapters, CI).
-const envSkipVersionCheck = "EASYEDA_SKIP_VERSION_CHECK"
+const envSkipVersionCheck = "PCBPILOT_SKIP_VERSION_CHECK"
 
 // versionFinding is one component's verdict against the running CLI.
 type versionFinding struct {
@@ -65,7 +65,7 @@ type versionFinding struct {
 }
 
 // versionGateReport is the whole three-way diagnostic, also surfaced by
-// `easyeda health` as the legacy-compatible "versionGate" block. A "block"
+// `pcbpilot health` as the legacy-compatible "versionGate" block. A "block"
 // verdict now means incompatible enough to deserve attention, not denied.
 type versionGateReport struct {
 	CLI        string           `json:"cli"`
@@ -163,9 +163,9 @@ func connectorFinding(cli, connector string) versionFinding {
 const fixDaemonStale = `重启 daemon(它跑的是启动那一刻的构建):
   · 开发中(air):切到跑 ` + "`make dev`" + ` 的终端 —— 任何 .go 改动它都会自动重建+重启;
     若它已经退出,重新开一个 ` + "`make dev`" + `。**别手动 kill air 下的 daemon**(会卡死连接器)。
-  · 非开发:直接 ` + "`easyeda daemon start`" + ` —— 它会自动接管 60832 上的旧 easyeda daemon,
+  · 非开发:直接 ` + "`pcbpilot daemon start`" + ` —— 它会自动接管 61832 上的旧 pcbpilot daemon,
     不需要你先去 kill。
-确认:` + "`easyeda health`" + ` 的 version 应与 ` + "`easyeda version`" + ` 一致。`
+确认:` + "`pcbpilot health`" + ` 的 version 应与 ` + "`pcbpilot version`" + ` 一致。`
 
 var fixConnectorStale = `重装连接器 .eext(跨 major/minor 兼容线时需要):
   1. 下载 latest .eext:https://github.com/` + versionGateRepoSlug + `/releases/latest
@@ -282,7 +282,7 @@ func runVersionGate(cfg *appConfig, healthRaw []byte, stderr io.Writer) error {
 		fmt.Fprintf(stderr, "⚠ 版本错位(%s):%s\n%s\n", f.Component, f.Reason, indentFix(f.Fix))
 	}
 	if len(blocking) > 0 {
-		fmt.Fprintln(stderr, "  该结果仅供诊断;普通 action 不再因版本差异被拒绝。需要显式安装对账时运行 `easyeda update --check --exit-code`。")
+		fmt.Fprintln(stderr, "  该结果仅供诊断;普通 action 不再因版本差异被拒绝。需要显式安装对账时运行 `pcbpilot update --check --exit-code`。")
 	}
 	if versionCheckSkipped(cfg) {
 		fmt.Fprintln(stderr, "ℹ --skip-version-check 已无需:版本检查不再作为 action 许可门。")
@@ -315,7 +315,7 @@ func versionCheckSkipped(cfg *appConfig) bool {
 	return true
 }
 
-// versionGateSummary renders the one-line human verdict `easyeda health`
+// versionGateSummary renders the one-line human verdict `pcbpilot health`
 // prints alongside its JSON, so the same judgement is readable without
 // re-deriving it from the report.
 func versionGateSummary(rep versionGateReport) string {

@@ -8,7 +8,7 @@ package app
 // (pcb-layout-conventions.md): signal / power-branch / power-trunk / high-current.
 //
 // Like defaultPcbRules(), the ladder lives inline here as the daemon's authoritative
-// source of truth; .agents/skills/easyeda-agent/references/fab-rules-jlcpcb.json carries a
+// source of truth; .agents/skills/pcbpilot/references/fab-rules-jlcpcb.json carries a
 // mirrored "netClasses" doc section for humans. The board's LIVE rules still seed
 // the signal width and the legal-minimum floor — the ladder only adds the role
 // steps ON TOP of what the live rule already gives.

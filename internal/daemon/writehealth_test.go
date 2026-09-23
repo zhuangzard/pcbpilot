@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/protocol"
+	"github.com/zhuangzard/pcbpilot/internal/protocol"
 )
 
 func okResp(id string) *protocol.Response {
@@ -277,7 +277,7 @@ func TestHealthEndpointExposesWriteHealth(t *testing.T) {
 		s.writeHealth.observe("w9", outcome{Action: "document.open", OK: false})
 	}
 	rec := httptest.NewRecorder()
-	s.routes(60832).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+	s.routes(61832).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
 	var h health
 	if err := json.Unmarshal(rec.Body.Bytes(), &h); err != nil {
 		t.Fatalf("bad health json: %v (%s)", err, rec.Body.String())
@@ -293,7 +293,7 @@ func TestHealthEndpointExposesWriteHealth(t *testing.T) {
 	// 静默 daemon 不带该字段(omitempty)。
 	s2 := New(Options{})
 	rec2 := httptest.NewRecorder()
-	s2.routes(60832).ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/health", nil))
+	s2.routes(61832).ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/health", nil))
 	if strings.Contains(rec2.Body.String(), "writeHealth") {
 		t.Fatalf("quiet daemon must omit writeHealth: %s", rec2.Body.String())
 	}
@@ -608,7 +608,7 @@ func postVerify(t *testing.T, s *Server, body string) *httptest.ResponseRecorder
 	t.Helper()
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/writeverify", strings.NewReader(body))
-	s.routes(60832).ServeHTTP(rec, req)
+	s.routes(61832).ServeHTTP(rec, req)
 	return rec
 }
 
@@ -654,7 +654,7 @@ func TestWriteVerifyEndpoint(t *testing.T) {
 		}
 	}
 	rec = httptest.NewRecorder()
-	s.routes(60832).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/writeverify", nil))
+	s.routes(61832).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/writeverify", nil))
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("GET /writeverify = %d, want 405", rec.Code)
 	}
@@ -668,7 +668,7 @@ func TestHealthEndpointExposesEffectDimensions(t *testing.T) {
 	}
 	s.writeHealth.verify("w9", WriteVerification{Action: "schematic.component.place", Landed: 1, NotLanded: 5})
 	rec := httptest.NewRecorder()
-	s.routes(60832).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+	s.routes(61832).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
 	var h health
 	if err := json.Unmarshal(rec.Body.Bytes(), &h); err != nil {
 		t.Fatalf("bad health json: %v (%s)", err, rec.Body.String())

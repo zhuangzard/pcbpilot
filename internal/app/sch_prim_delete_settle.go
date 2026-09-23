@@ -88,6 +88,6 @@ func primDeleteResidueGuidance(w io.Writer, res *actionResult) {
 		fmt.Fprintf(w, "  still on the page: %s\n", strings.Join(list, ", "))
 	}
 	fmt.Fprintln(w, "  这几乎总是连接器 action 队列 wedge(某个重调用的 promise 永不 resolve,此后写操作")
-	fmt.Fprintln(w, "  整体被吞而轻读照常):先 `easyeda sch save`,完全退出并重启 EasyEDA,再重跑本命令。")
+	fmt.Fprintln(w, "  整体被吞而轻读照常):先 `pcbpilot sch save`,完全退出并重启 EasyEDA,再重跑本命令。")
 	fmt.Fprintln(w, "  若重启后仍在,才是 issue #164 那类平台留件 —— 在 EasyEDA UI 里删。")
 }

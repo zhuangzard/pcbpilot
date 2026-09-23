@@ -14,7 +14,7 @@
 /build-errors.log
 
 # Local runtime state
-/.easyeda-agent/
+/.pcbpilot/
 /artifacts/
 /.agents/worktrees/
 /.agents/settings.local.json
@@ -36,7 +36,7 @@ __pycache__/
 # Videos
 videos/
 # Per-project artifacts (screenshots/exports) written by the CLI cwd
-.easyeda/
+.pcbpilot/
 *.journal.jsonl
 
 docs/video-material

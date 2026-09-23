@@ -40,7 +40,7 @@ jobs:
           make release-script-test
           make agent-check
           make skill-check
-          npx --yes skills-ref@latest validate .agents/skills/easyeda-agent
+          npx --yes skills-ref@latest validate .agents/skills/pcbpilot
       - name: Test and build connector
         run: |
           npm --prefix extension ci --ignore-scripts
@@ -81,6 +81,6 @@ jobs:
           # the Makefile's local-build target does for release-check.py.
           local_dev=""
           case "$smoke_version" in *-dev.*) local_dev="--local-dev" ;; esac
-          go build -ldflags "-X github.com/zhoushoujianwork/easyeda-agent/internal/version.Version=$smoke_version" -o "$RUNNER_TEMP/easyeda-smoke.exe" ./cmd/easyeda
+          go build -ldflags "-X github.com/zhuangzard/pcbpilot/internal/version.Version=$smoke_version" -o "$RUNNER_TEMP/pcbpilot-smoke.exe" ./cmd/pcbpilot
           python -m unittest discover -s scripts/tests -p test_release_smoke.py
-          python scripts/release-smoke.py --version "$smoke_version" $local_dev --binary "$RUNNER_TEMP/easyeda-smoke.exe" --skill-dir .agents/skills/easyeda-agent
+          python scripts/release-smoke.py --version "$smoke_version" $local_dev --binary "$RUNNER_TEMP/pcbpilot-smoke.exe" --skill-dir .agents/skills/pcbpilot

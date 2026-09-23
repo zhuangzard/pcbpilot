@@ -201,7 +201,7 @@
 ### Changed
 
 - Make `easyeda update --check --exit-code` an exact GitHub-latest Agent-session gate for the CLI, installed Skill, running daemon and every connected Connector. Ahead, development, unknown, disconnected and stale states now block; Skill upgrades require ending the loaded Agent session and starting a new one before EDA work resumes.
-- Include Codex Desktop's active shared Skill root (`~/.agents/skills/easyeda-agent`) in installer detection, version reports and atomic Skill updates.
+- Include Codex Desktop's active shared Skill root (`~/.agents/skills/pcbpilot`) in installer detection, version reports and atomic Skill updates.
 
 ## [1.4.5] — 2026-09-09
 
@@ -1494,7 +1494,7 @@ PCB 布局能力重构版(#167/#168/#153):多维打分 → 精修 → 确认门�
 
 ## [0.19.0] - 2026-08-04
 
-> 🙏 感谢 [@NeoSpecies](https://github.com/NeoSpecies) 的 [PR #154](https://github.com/zhoushoujianwork/easyeda-agent/pull/154)
+> 🙏 感谢 [@NeoSpecies](https://github.com/NeoSpecies) 的 [PR #154](https://github.com/zhuangzard/pcbpilot/pull/154)
 > —— 首个外部贡献:定位并修复了「同窗口重复激活互踢 socket」的重连风暴,并带来了 MCP stdio 适配层。
 > 本版连接侧的三层修复(activation-scoped id / 失败轮换 / 端口记忆)正是在这个 PR 的基础上叠加完成的。
 
@@ -1988,7 +1988,7 @@ hopFeasible 硬门(R2 两条真交叉短路的根治),mount-holes 反查既有�
   (共 23 块:20 ready / 3 draft)。
 - **`pcb.components.list --include-pads` 返回焊盘真实铜皮 `width`/`height`**、
   **`pcb.silk.list` 返回 `fontSize`**(0.12.1 起):clearance/DFM/避障从名义常量升级实测值。
-- **PCB 设计规范手册**(`.agents/skills/easyeda-agent/references/pcb-design-rules.md`):13 章,
+- **PCB 设计规范手册**(`.agents/skills/pcbpilot/references/pcb-design-rules.md`):13 章,
   JLC 工艺 + IPC-2221;`pcb check` 报错的 `[规范 §N]` 即指向此手册章节。
 - **`sch bridge-check` 规则类型化**:`wire-bridge`(ERROR)/`orphan-stub`(WARN),
   JSON 可按类型 gate,对齐 `pcb check` 强制力。

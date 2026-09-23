@@ -174,8 +174,8 @@ func newSchSheetTidyCommand(cfg *appConfig, window *string, stdout, stderr io.Wr
 --apply 时对每个非零位移的区执行 zone move(组/器件/桩/旗/登记 note 全部随行,
 区间 settle),全部完成后统一重画分区框。装不下时给最小纸面诊断,不硬塞。`,
 		Args: cobra.NoArgs,
-		Example: `  easyeda sch sheet tidy                 # dry-run 看各区位移
-  easyeda sch sheet tidy --apply         # 执行 + 统一重画框`,
+		Example: `  pcbpilot sch sheet tidy                 # dry-run 看各区位移
+  pcbpilot sch sheet tidy --apply         # 执行 + 统一重画框`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if apply && dryRun {
 				return fmt.Errorf("--dry-run and --apply are mutually exclusive")

@@ -9,7 +9,7 @@ import (
 // ── 关系形态模板校验 V1–V7(issue #180 P1)──────────────────────────────────
 //
 // 用**内存构造**的 Block 测,不落新块文件:TestAllBlocksPassCoreValidation 扫的是
-// 内嵌全库,加测试块会污染 `easyeda blocks ls`。
+// 内嵌全库,加测试块会污染 `pcbpilot blocks ls`。
 
 // relBlock 造一个最小可用的块:U(IC)+ C_VCC/C_V3(去耦)+ R_A/R_B(并列对),
 // 内部网让 C_VCC 与 U.VCC 同网、C_V3 与 U.V3 同网(attach 的电气依据)。

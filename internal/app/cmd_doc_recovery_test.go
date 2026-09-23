@@ -25,7 +25,7 @@ func TestDocGuardRecoversMissingActivePCB(t *testing.T) {
 			var calls []string
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/health" {
-					_, _ = w.Write([]byte(`{"service":"easyeda-agent","windows":[{"windowId":"w1"}]}`))
+					_, _ = w.Write([]byte(`{"service":"pcbpilot","windows":[{"windowId":"w1"}]}`))
 					return
 				}
 				var req struct {
@@ -86,7 +86,7 @@ func TestDocGuardLiveUUIDRequiresMatchingIdentity(t *testing.T) {
 		t.Run(field, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/health" {
-					_, _ = w.Write([]byte(`{"service":"easyeda-agent","windows":[{"windowId":"w1"}]}`))
+					_, _ = w.Write([]byte(`{"service":"pcbpilot","windows":[{"windowId":"w1"}]}`))
 					return
 				}
 				var req struct {

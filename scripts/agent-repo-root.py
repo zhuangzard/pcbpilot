@@ -9,9 +9,9 @@ def main() -> int:
     root = Path(__file__).resolve().parent.parent
     manifest = root / "go.mod"
     if not (root / "AGENTS.md").is_file() or not manifest.is_file():
-        sys.exit("error: Skill is not linked to an easyeda-agent checkout")
-    if "module github.com/zhoushoujianwork/easyeda-agent" not in manifest.read_text():
-        sys.exit("error: linked checkout is not easyeda-agent")
+        sys.exit("error: Skill is not linked to an pcbpilot checkout")
+    if "module github.com/zhuangzard/pcbpilot" not in manifest.read_text():
+        sys.exit("error: linked checkout is not pcbpilot")
     print(root)
     return 0
 

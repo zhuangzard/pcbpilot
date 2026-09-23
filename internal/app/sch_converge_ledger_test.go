@@ -16,7 +16,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/workflow"
+	"github.com/zhuangzard/pcbpilot/internal/workflow"
 )
 
 // isolateConvergeLedger 把台账目录钉到临时目录 —— 单测绝不碰真实 HOME。

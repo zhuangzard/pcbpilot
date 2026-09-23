@@ -1,4 +1,4 @@
-module github.com/zhoushoujianwork/easyeda-agent
+module github.com/zhuangzard/pcbpilot
 
 go 1.26.3
 

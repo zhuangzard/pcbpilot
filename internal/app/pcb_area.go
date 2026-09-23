@@ -71,7 +71,7 @@ func componentBBox(cfg *appConfig, window, ref string) (minX, minY, maxX, maxY f
 		maxY, _ = asFloatOK(bb["maxY"])
 		return minX, minY, maxX, maxY, nil
 	}
-	return 0, 0, 0, 0, fmt.Errorf("component %q not found on the PCB (check `easyeda pcb list`)", ref)
+	return 0, 0, 0, 0, fmt.Errorf("component %q not found on the PCB (check `pcbpilot pcb list`)", ref)
 }
 
 // areaPointsFrom resolves closed-polygon points from exactly one of --points /

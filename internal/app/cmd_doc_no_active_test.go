@@ -14,7 +14,7 @@ func TestDocListAndOpenRecoverWhenProjectHasNoActiveDocument(t *testing.T) {
 	var calls []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/health" {
-			_, _ = w.Write([]byte(`{"service":"easyeda-agent","windows":[{"windowId":"w1","context":{"projectUuid":"project-1","projectName":"target"}}]}`))
+			_, _ = w.Write([]byte(`{"service":"pcbpilot","windows":[{"windowId":"w1","context":{"projectUuid":"project-1","projectName":"target"}}]}`))
 			return
 		}
 		var req struct {
@@ -119,7 +119,7 @@ func TestDiscoverDocsDoesNotMaskOtherDocumentCurrentFailures(t *testing.T) {
 	listed := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/health" {
-			_, _ = w.Write([]byte(`{"service":"easyeda-agent","windows":[{"windowId":"w1","context":{"projectName":"target"}}]}`))
+			_, _ = w.Write([]byte(`{"service":"pcbpilot","windows":[{"windowId":"w1","context":{"projectName":"target"}}]}`))
 			return
 		}
 		var req struct {
@@ -149,7 +149,7 @@ func TestDocOpenRequiresFreshCurrentAfterNoActiveRecovery(t *testing.T) {
 	opened, probed := 0, 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/health" {
-			_, _ = w.Write([]byte(`{"service":"easyeda-agent","windows":[{"windowId":"w1","context":{"projectName":"target"}}]}`))
+			_, _ = w.Write([]byte(`{"service":"pcbpilot","windows":[{"windowId":"w1","context":{"projectName":"target"}}]}`))
 			return
 		}
 		var req struct {

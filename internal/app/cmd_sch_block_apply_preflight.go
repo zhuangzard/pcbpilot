@@ -130,14 +130,14 @@ func bapUnresolvedDevicesError(bad []bapUnresolvedDevice, total int, partsPath s
 	}
 	if len(numbers) > 0 {
 		fmt.Fprintf(&b, "\nResolve these C-numbers against the site you are on and write the returned\n"+
-			"libraryUuid/uuid back into %s:\n  easyeda lib by-lcsc --lcsc %s\n",
+			"libraryUuid/uuid back into %s:\n  pcbpilot lib by-lcsc --lcsc %s\n",
 			bapPartsFileLabel(partsPath), strings.Join(numbers, ","))
 	}
 	if len(noLCSC) > 0 {
-		fmt.Fprintf(&b, "\nNo LCSC number in the parts file for: %s - look those up with `easyeda lib search`\n"+
+		fmt.Fprintf(&b, "\nNo LCSC number in the parts file for: %s - look those up with `pcbpilot lib search`\n"+
 			"and fill in both the LCSC number and the new uuid.\n", strings.Join(noLCSC, ", "))
 	}
-	fmt.Fprintf(&b, "\nThen: easyeda sch block-apply <block> --parts %s\n", bapPartsFileLabel(partsPath))
+	fmt.Fprintf(&b, "\nThen: pcbpilot sch block-apply <block> --parts %s\n", bapPartsFileLabel(partsPath))
 	return fmt.Errorf("%s", strings.TrimRight(b.String(), "\n"))
 }
 

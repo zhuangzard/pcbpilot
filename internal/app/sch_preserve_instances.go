@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/connectivity"
+	"github.com/zhuangzard/pcbpilot/internal/connectivity"
 )
 
 var schInstanceFields = []string{"uniqueId", "name", "subPartName", "addIntoBom", "addIntoPcb", "manufacturer", "manufacturerId", "supplier", "supplierId", "otherProperty", "component", "symbol", "footprint"}

@@ -9,7 +9,7 @@
 1. 安装 CLI + 连接器(仓库 README),EasyEDA Pro 开启「允许外部交互」,`make dev` 起 daemon;
 2. EasyEDA 打开一个**测试工程**(如 `ceshi`),含一个空白原理图页(默认 `P1`)和
    一个绑定的空 PCB(默认 `PCB1`,Board 已关联);
-3. `easyeda daemon health` 确认窗口已连接。
+3. `pcbpilot daemon health` 确认窗口已连接。
 
 ## 阶段一:原理图(47 步,约 3-8 分钟)
 
@@ -17,12 +17,12 @@
 make replay-sch                       # 默认 PROJECT=ceshi DOC=P1
 make replay-sch PROJECT=xx DOC=P2     # 或指定工程/页
 # 等价裸命令:
-easyeda apply examples/esp32-mini/schematic.playbook.json --project xx --doc P2 --yes
+pcbpilot apply examples/esp32-mini/schematic.playbook.json --project xx --doc P2 --yes
 ```
 
 清页(确认门控)→ 19 器件库放置+位号(capture 接线)→ `autoconnect --spec` 落 64 个
 网络标志 → **layout-lint 门 + DRC 门内嵌**,不过即停。完成后可用
-`easyeda sch read` 自验:19 parts / 13 nets(GND=23、+3V3=11、+5V=5…)。
+`pcbpilot sch read` 自验:19 parts / 13 nets(GND=23、+3V3=11、+5V=5…)。
 
 ## 阶段二:PCB(186 步,约 10-20 分钟)
 
@@ -39,14 +39,14 @@ rebuild)→ **`doc reload` + 二次 rebuild**(`reload-pcb`/`pour-rebuild-2` 步,
 [#33](https://github.com/easyeda/pro-api-sdk/issues/33),预期内。
 
 注意:**uniqueId 对齐**:sch↔PCB 关联键。全新工程按放置顺序即 `gge1..gge19`(默认值);
-复用过的工程先 `easyeda sch read` 看真实 uniqueId,再 `--var UID_U1=ggeNN` 逐个覆写。
+复用过的工程先 `pcbpilot sch read` 看真实 uniqueId,再 `--var UID_U1=ggeNN` 逐个覆写。
 
 ## 其他玩法
 
 ```bash
-easyeda apply <playbook> --dry-run          # 只看计划
-easyeda apply <playbook> --resume           # 中断后续跑(含变量恢复)
-easyeda apply <playbook> --step-delay 1     # 逐步慢放(演示/录屏)
+pcbpilot apply <playbook> --dry-run          # 只看计划
+pcbpilot apply <playbook> --resume           # 中断后续跑(含变量恢复)
+pcbpilot apply <playbook> --step-delay 1     # 逐步慢放(演示/录屏)
 make demo-replay                            # 挪乱4件→观察→回放归位 演示
 ```
 
@@ -77,15 +77,15 @@ make demo-replay                            # 挪乱4件→观察→回放归位
 **根因(2026-07-04 探针轮次#3 定位)**:**新建(本次会话内创建、从未重载过的)PCB
 文档,铺铜 reflow 用的是创建时的规则快照** ——之后写规则(读回已生效)、重灌铺铜、
 tab 切走切回,统统不影响 reflow 结果;只有**真正关闭+重开文档**
-(`dmt_EditorControl.closeDocument` + `openDocument`,即 `easyeda doc reload`)后,
+(`dmt_EditorControl.closeDocument` + `openDocument`,即 `pcbpilot doc reload`)后,
 reflow 才按当前规则计算(间距与热焊盘同时恢复正常)。已重载过的文档(如经历过
 EasyEDA 重启的 PCB2)写规则即时生效,无需重载 —— 这解释了此前"同工程两块板行为
 不同"的全部现象。仍属平台缺陷(候选官方 issue:快照不随规则写入失效)。
 
 **已固化的 workaround(playbook 已内置,全新板回放直接过)**:
-1. `rules-pour-margin` 步:`easyeda pcb drc-rules-set --pour-clearance 12`
+1. `rules-pour-margin` 步:`pcbpilot pcb drc-rules-set --pour-clearance 12`
    (raise-only)把 `Plane` 的 `lineClearance` 10→12mil,给打折的 reflow 留余量;
-2. `reload-pcb` 步:`easyeda doc reload`(内部先 save,不丢编辑)刷新规则快照;
+2. `reload-pcb` 步:`pcbpilot doc reload`(内部先 save,不丢编辑)刷新规则快照;
 3. `pour-rebuild-2` 步:重载后二次重灌,此时 reflow 按 12mil + 正常生成热焊盘。
 实测:ceshi/PCB3 全新回放,重载前 DRC 55(21 间距 + 33 开路 + 1 网表),重载+重灌后
 **DRC 1**(仅剩已知 add-component 网表常驻误报 #33)。

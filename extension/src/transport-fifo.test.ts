@@ -73,7 +73,7 @@ test('transport:同 tick 到达的动作按到达顺序串行,响应带顺序证
 	assert.ok(capturedOnMessage, 'transport 从未调用 eda.sys_WebSocket.register()');
 	const onMessage = capturedOnMessage;
 
-	onMessage({ data: JSON.stringify({ type: 'handshake', service: 'easyeda-agent' }) });
+	onMessage({ data: JSON.stringify({ type: 'handshake', service: 'pcbpilot' }) });
 	await sleep(50);
 	sent.length = 0;
 	events.length = 0;

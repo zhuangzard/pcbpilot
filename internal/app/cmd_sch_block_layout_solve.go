@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/blocks"
+	"github.com/zhuangzard/pcbpilot/internal/blocks"
 )
 
 // ── 关系约束布局求解器(issue #180 P2,纯函数层)────────────────────────────

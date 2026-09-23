@@ -3,7 +3,7 @@
 // 与 actions.test.ts 同理,靠上面这行加载 ambient 声明。
 //
 // 钉死端口 + 退避 —— 这两条是「daemon 重启后秒级重连」的全部机制:
-// daemon 只绑 60832 且从不外溢(internal/app/cmd_daemon.go),所以扫 60833-60841
+// daemon 只绑 61832 且从不外溢(internal/app/cmd_daemon.go),所以扫 61833-61841
 // 是纯空转:register() 从不报「连接被拒」,每个死端口都要烧满 CONNECTION_TIMEOUT_MS。
 // 真实日志里那 5 个死端口花了 7 秒,而 `make dev` 每改一次 .go 就要重连一次。
 import assert from 'node:assert/strict';
@@ -13,59 +13,59 @@ import { DAEMON_PORT, RESERVED_PORT_END, backoffDelayMs, parsePorts, resolvePort
 
 // ── 默认:只试一个端口 ──────────────────────────────────────────────────
 
-test('默认就是钉死的 60832,一个端口,绝不横扫', () => {
-	assert.equal(DAEMON_PORT, 60832);
-	assert.deepEqual(resolvePorts(undefined, null), [60832]);
+test('默认就是钉死的 61832,一个端口,绝不横扫', () => {
+	assert.equal(DAEMON_PORT, 61832);
+	assert.deepEqual(resolvePorts(undefined, null), [61832]);
 	// 这条是本次改动的核心:长度必须是 1。长度一旦 >1,每次重连都要为不可能有
 	// daemon 的端口烧掉 CONNECTION_TIMEOUT_MS。
 	assert.equal(resolvePorts(undefined, null).length, 1, '默认端口表长度必须是 1');
 });
 
 test('lastGood 不会把默认表变长,也不会引入别的端口', () => {
-	assert.deepEqual(resolvePorts(undefined, 60840), [60832], '历史值不得让我们回去试别的端口');
-	assert.deepEqual(resolvePorts(null, 60832), [60832]);
+	assert.deepEqual(resolvePorts(undefined, 61840), [61832], '历史值不得让我们回去试别的端口');
+	assert.deepEqual(resolvePorts(null, 61832), [61832]);
 });
 
 test('坏配置一律退回钉死的默认值(重连路径上绝不抛错)', () => {
 	for (const bad of [undefined, null, true, false, '', '   ', 'abc', {}, [], 0, -1, 70000, '0', '65536']) {
-		assert.deepEqual(resolvePorts(bad, null), [60832], `坏配置 ${JSON.stringify(bad)} 应退回默认`);
+		assert.deepEqual(resolvePorts(bad, null), [61832], `坏配置 ${JSON.stringify(bad)} 应退回默认`);
 	}
 });
 
 // ── 逃生口:daemonPorts 覆盖 ────────────────────────────────────────────
 
 test('逃生口:单值 / 列表 / 区间 / 数组都能写', () => {
-	assert.deepEqual(parsePorts(60900), [60900]);
-	assert.deepEqual(parsePorts('60900'), [60900]);
-	assert.deepEqual(parsePorts('60840,60832'), [60840, 60832], '顺序按用户写的来');
-	assert.deepEqual(parsePorts(' 60840 , 60832 '), [60840, 60832], '空白要容忍');
-	assert.deepEqual(parsePorts('60832-60836'), [60832, 60833, 60834, 60835, 60836]);
-	assert.deepEqual(parsePorts([60832, '60900']), [60832, 60900]);
+	assert.deepEqual(parsePorts(61900), [61900]);
+	assert.deepEqual(parsePorts('61900'), [61900]);
+	assert.deepEqual(parsePorts('61840,61832'), [61840, 61832], '顺序按用户写的来');
+	assert.deepEqual(parsePorts(' 61840 , 61832 '), [61840, 61832], '空白要容忍');
+	assert.deepEqual(parsePorts('61832-61836'), [61832, 61833, 61834, 61835, 61836]);
+	assert.deepEqual(parsePorts([61832, '61900']), [61832, 61900]);
 });
 
 test('逃生口能覆盖到我们保留段的全部 10 个口', () => {
 	const ports = parsePorts(`${DAEMON_PORT}-${RESERVED_PORT_END}`);
 	assert.equal(ports.length, 10);
-	assert.equal(ports[0], 60832);
-	assert.equal(ports[9], 60841);
+	assert.equal(ports[0], 61832);
+	assert.equal(ports[9], 61841);
 });
 
 test('覆盖列表去重、且有硬上限(手滑写个 1-65535 不能把重连变成无尽扫描)', () => {
-	assert.deepEqual(parsePorts('60832,60832,60833'), [60832, 60833]);
+	assert.deepEqual(parsePorts('61832,61832,61833'), [61832, 61833]);
 	const huge = parsePorts('1-65535');
 	assert.ok(huge.length <= 12, `覆盖列表必须封顶,实际 ${huge.length}`);
 	assert.equal(huge[0], 1);
 });
 
 test('多端口覆盖时,上次握手成功的端口排最前且不重复', () => {
-	const order = resolvePorts('60832-60836', 60835);
-	assert.equal(order[0], 60835, 'lastGood 优先 —— 多端口下这是省掉整轮超时的唯一手段');
-	assert.deepEqual(order, [60835, 60832, 60833, 60834, 60836]);
+	const order = resolvePorts('61832-61836', 61835);
+	assert.equal(order[0], 61835, 'lastGood 优先 —— 多端口下这是省掉整轮超时的唯一手段');
+	assert.deepEqual(order, [61835, 61832, 61833, 61834, 61836]);
 	assert.equal(new Set(order).size, order.length, '端口不得重复(重复=白烧一个超时)');
 });
 
 test('覆盖列表里没有 lastGood 时,顺序原样不动', () => {
-	assert.deepEqual(resolvePorts('60832-60834', 60900), [60832, 60833, 60834]);
+	assert.deepEqual(resolvePorts('61832-61834', 61900), [61832, 61833, 61834]);
 });
 
 // ── 退避 ────────────────────────────────────────────────────────────────

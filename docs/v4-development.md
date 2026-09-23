@@ -12,7 +12,7 @@
 ## 版本边界
 
 - 用户运行现场 EDA 自动化前必须升级到 V4；推荐使用 4.1.60 或更新的 V4 构建。
-- `easyeda health` 的 `hostCompatibility` 独立检查产品版本：V3 为 `block` 诊断，较老 V4 为
+- `pcbpilot health` 的 `hostCompatibility` 独立检查产品版本：V3 为 `block` 诊断，较老 V4 为
   `warn`，4.1.60+ V4 为 `ok`；它不靠版本号替代动作回读，也不改变普通 action 的许可语义。
 - `extension/extension.json` 的 `engines.eda: ~3.2.0` 是扩展 API 引擎版本。官方 V4 SDK 模板仍
   使用 3.2 API 线，不能把它误改成产品版本 4.x。
@@ -48,7 +48,7 @@ P0 已完成，但不等于 V4 完整兼容。固定 `esp32MiniRequire.md` 整�
 
 - 环境：Web EasyEDA Pro 4.1.60；项目 `ceshi`；PCB `2e719e9419653c72`；Connector 1.5.1；
   CLI/daemon `v1.5.1-12-gd884e13-dirty`（同一 dev stamp）。
-- `easyeda health`：`hostCompatibility.verdict=ok`，baseline 4.0.0，recommended 4.1.60。
+- `pcbpilot health`：`hostCompatibility.verdict=ok`，baseline 4.0.0，recommended 4.1.60。
 - 写前：`pcb origin get` 回读 `offsetX=0, offsetY=0`。
 - 写入：`pcb origin set --x 10 --y 20 --project ceshi --doc 2e719e9419653c72` 返回
   `changed=true, verified=true, affectsGeometry=false`；显式 `pcb save` 后 `doc reload`，再次回读 10/20。

@@ -12,13 +12,13 @@ VERSION="${1:?usage: pack-download.sh vX.Y.Z}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DIST="$ROOT/dist"
 OUT="$ROOT/downloads"
-NAME="easyeda-agent-$VERSION"
+NAME="pcbpilot-$VERSION"
 
 ASSETS=(
-  easyeda_darwin_amd64 easyeda_darwin_arm64
-  easyeda_linux_amd64  easyeda_linux_arm64
-  easyeda_windows_amd64.exe
-  easyeda-agent-connector.eext skills.tar.gz install.sh
+  pcbpilot_darwin_amd64 pcbpilot_darwin_arm64
+  pcbpilot_linux_amd64  pcbpilot_linux_arm64
+  pcbpilot_windows_amd64.exe
+  pcbpilot-connector.eext skills.tar.gz install.sh
 )
 
 for f in "${ASSETS[@]}"; do

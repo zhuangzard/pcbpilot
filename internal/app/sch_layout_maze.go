@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/schguard"
+	"github.com/zhuangzard/pcbpilot/internal/schguard"
 )
 
 const (

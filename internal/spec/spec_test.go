@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// realWorldSpec 是磁盘上那份真实存在的 S0 spec（.easyeda/s0-n8r8-ceshi.json）
+// realWorldSpec 是磁盘上那份真实存在的 S0 spec（.pcbpilot/s0-n8r8-ceshi.json）
 // 的逐字副本。它同时展示了三处已发生的契约漂移：`board` 是字符串而非文档说的
 // 对象、`stackup` 用 inner1/inner2 而非 groundStrategy/innerLayers、`assembly`
 // 在文档里根本不存在。类型化之后这三处都必须继续能读，且不得报 ERROR ——

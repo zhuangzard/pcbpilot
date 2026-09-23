@@ -52,12 +52,12 @@ make release VERSION=vX.Y.Z
 用户安装和升级：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zhoushoujianwork/easyeda-agent/main/install.sh | bash
-easyeda update            # CLI + 已安装 Skill → latest
-easyeda update --check    # 只读 CLI / Skill / connector 版本表
+curl -fsSL https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.sh | bash
+pcbpilot update            # CLI + 已安装 Skill → latest
+pcbpilot update --check    # 只读 CLI / Skill / connector 版本表
 ```
 
-安装变量要传给执行脚本的 `bash`，例如管道右侧 `EASYEDA_INSTALL_SKILLS=codex,claude bash`，
+安装变量要传给执行脚本的 `bash`，例如管道右侧 `PCBPILOT_INSTALL_SKILLS=codex,claude bash`，
 不要只设置在 `curl` 一侧。连接器侧载包仍需卸载旧项后导入新包，保存并重开编辑器加载新运行时。
 
 **版本与自更新契约**：CLI、connector、Skill 发布版本一致。

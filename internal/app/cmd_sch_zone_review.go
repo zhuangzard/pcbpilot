@@ -21,7 +21,7 @@ AI decides whether to retain ownership or edit the source JSON and rerun plannin
 No source edits, splitting, layout solving, daemon calls or Apply.
 Warnings exit 0; malformed input/invalid ownership exits nonzero. No findings
 does not prove correct semantics. JSON goes to stdout or a distinct --report file.`,
-		Example: "  easyeda sch zone-review --from zones.json --report review.json",
+		Example: "  pcbpilot sch zone-review --from zones.json --report review.json",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if from == "" {
 				return fmt.Errorf("--from is required")

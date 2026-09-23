@@ -581,9 +581,9 @@ func newSchClustersCmd(cfg *appConfig, window *string, stdout, stderr io.Writer)
 
 有 ERROR 时非零退出,可以直接当门禁;--strict 连 WARN 一起算失败。`,
 		Args: cobra.NoArgs,
-		Example: `  easyeda sch clusters
-  easyeda sch clusters --strict
-  easyeda sch clusters --json`,
+		Example: `  pcbpilot sch clusters
+  pcbpilot sch clusters --strict
+  pcbpilot sch clusters --json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSchClusters(cfg, *window, minGap, asJSON, strict, showMembers, stdout, stderr)
 		},
@@ -603,12 +603,12 @@ func bapReportClusters(cfg *appConfig, window string, man *bapManifest, stderr i
 	res, err := requestAction(cfg, "schematic.components.list", window,
 		map[string]any{"includeBBox": true, "includePins": true})
 	if err != nil {
-		fmt.Fprintf(stderr, "warn: 虚拟组体检读不到几何(%v)—— 请手动跑 `easyeda sch clusters`\n", err)
+		fmt.Fprintf(stderr, "warn: 虚拟组体检读不到几何(%v)—— 请手动跑 `pcbpilot sch clusters`\n", err)
 		return nil
 	}
 	comps, perr := parseLayoutComps(res.Result)
 	if perr != nil {
-		fmt.Fprintf(stderr, "warn: 虚拟组体检解析失败(%v)—— 请手动跑 `easyeda sch clusters`\n", perr)
+		fmt.Fprintf(stderr, "warn: 虚拟组体检解析失败(%v)—— 请手动跑 `pcbpilot sch clusters`\n", perr)
 		return nil
 	}
 	wires, _ := fetchSchWirePolylines(cfg, window, "") // 读不到就只按 marker 归属算
@@ -653,7 +653,7 @@ func bapReportClusters(cfg *appConfig, window string, man *bapManifest, stderr i
 		man.Warnings = append(man.Warnings, w)
 		fmt.Fprintf(stderr, "clusters ✗ %s\n", w)
 	}
-	fmt.Fprintf(stderr, "clusters: %d 个组、%d 处硬伤 —— 详情与门禁跑 `easyeda sch clusters --strict`\n",
+	fmt.Fprintf(stderr, "clusters: %d 个组、%d 处硬伤 —— 详情与门禁跑 `pcbpilot sch clusters --strict`\n",
 		len(clusters), len(findings))
 	return fit
 }

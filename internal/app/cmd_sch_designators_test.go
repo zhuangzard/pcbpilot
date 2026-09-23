@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/connectivity"
+	"github.com/zhuangzard/pcbpilot/internal/connectivity"
 )
 
 func designatorFixture(t *testing.T) ([]byte, schDesignatorBaseline, connectivity.Document) {

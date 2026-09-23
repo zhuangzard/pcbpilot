@@ -1,6 +1,6 @@
 package app
 
-// cmd_pcb_dump.go — `easyeda pcb dump`：把整块板的只读几何拉成一份自包含 JSON。
+// cmd_pcb_dump.go — `pcbpilot pcb dump`：把整块板的只读几何拉成一份自包含 JSON。
 //
 // 存在理由是**金标准好板回归**(#167 第五层 LEARNING)：拿一块人类公认的好板跑
 // layout-score，它就该得高分；某一维在好板上得低分 → 是度量错了，回去校准。
@@ -10,7 +10,7 @@ package app
 // 注意与 `pcb stage-snapshot` 的区别：那个抓的是 PNG 截图（给人看的把关帧），
 // 这个抓的是结构化几何（给 CLI/单测吃的数据）。两者名字接近但用途不同。
 //
-// dump 出来的文件可以直接喂回：`easyeda pcb layout-score --from board.json`
+// dump 出来的文件可以直接喂回：`pcbpilot pcb layout-score --from board.json`
 // ——不需要连编辑器，CI 里也能跑。
 
 import (
@@ -45,11 +45,11 @@ func newPcbDumpCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *co
 			"returns null otherwise) — the snapshot records that degradation under\n" +
 			"`partial[]` rather than silently pretending the board has no edges.",
 		Example: "  # 抓当前板为 fixture\n" +
-			"  easyeda pcb dump --project ceshi --out /tmp/ceshi-board.json\n\n" +
+			"  pcbpilot pcb dump --project ceshi --out /tmp/ceshi-board.json\n\n" +
 			"  # 只要器件+板框（省两次往返）\n" +
-			"  easyeda pcb dump --no-silk --no-rules --no-layers\n\n" +
+			"  pcbpilot pcb dump --no-silk --no-rules --no-layers\n\n" +
 			"  # 离线重放打分\n" +
-			"  easyeda pcb layout-score --from /tmp/ceshi-board.json",
+			"  pcbpilot pcb layout-score --from /tmp/ceshi-board.json",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			snap, err := fetchBoardSnapshot(cfg, *window, boardSnapshotOpts{

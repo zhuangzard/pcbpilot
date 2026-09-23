@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/workflow"
+	"github.com/zhuangzard/pcbpilot/internal/workflow"
 )
 
 func TestLayoutLintLegacyGateIsDiagnosticOnly(t *testing.T) {
@@ -19,7 +19,7 @@ func TestLayoutLintLegacyGateIsDiagnosticOnly(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/health" {
-			fmt.Fprint(w, `{"service":"easyeda-agent","version":"v0.1.0","windows":[{"windowId":"w1"}]}`)
+			fmt.Fprint(w, `{"service":"pcbpilot","version":"v0.1.0","windows":[{"windowId":"w1"}]}`)
 			return
 		}
 		var req struct {

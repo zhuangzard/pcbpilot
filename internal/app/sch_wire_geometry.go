@@ -2,7 +2,7 @@ package app
 
 import (
 	"encoding/json"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/schguard"
+	"github.com/zhuangzard/pcbpilot/internal/schguard"
 )
 
 // schWireGeometryFindings is the app adapter for the SAME pure guard used by

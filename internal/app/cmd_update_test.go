@@ -14,8 +14,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/selfupdate"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/version"
+	"github.com/zhuangzard/pcbpilot/internal/selfupdate"
+	"github.com/zhuangzard/pcbpilot/internal/version"
 )
 
 func TestCheckCLIVerdicts(t *testing.T) {
@@ -49,7 +49,7 @@ func TestCheckSkillsReadsVersionMarkers(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("CODEX_HOME", "")
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
-	claude := filepath.Join(home, ".claude", "skills", "easyeda-agent")
+	claude := filepath.Join(home, ".claude", "skills", "pcbpilot")
 	if err := os.MkdirAll(claude, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestCheckSkillsRequiresExactVersion(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("CODEX_HOME", "")
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
-	codex := filepath.Join(home, ".codex", "skills", "easyeda-agent")
+	codex := filepath.Join(home, ".codex", "skills", "pcbpilot")
 	if err := os.MkdirAll(codex, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func fakeDaemon(t *testing.T, payload string) (host string, port int) {
 }
 
 func TestProbeConnectorFlagsStaleConnector(t *testing.T) {
-	host, port := fakeDaemon(t, `{"service":"easyeda-agent","version":"v0.26.0","status":"ok",
+	host, port := fakeDaemon(t, `{"service":"pcbpilot","version":"v0.26.0","status":"ok",
 	  "windows":[{"windowId":"w1","connectorVersion":"0.25.1"},{"windowId":"w2","connectorVersion":"0.26.0"}]}`)
 	cfg := &appConfig{host: host, ports: fmt.Sprintf("%d-%d", port, port)}
 
@@ -167,7 +167,7 @@ func TestProbeConnectorFlagsStaleConnector(t *testing.T) {
 }
 
 func TestProbeConnectorAcceptsPatchDriftWithinCompatibilityLine(t *testing.T) {
-	host, port := fakeDaemon(t, `{"service":"easyeda-agent","version":"v1.4.8","status":"ok",
+	host, port := fakeDaemon(t, `{"service":"pcbpilot","version":"v1.4.8","status":"ok",
 	  "windows":[{"windowId":"w1","connectorVersion":"1.4.6"},{"windowId":"w2","connectorVersion":"1.4.8"}]}`)
 	cfg := &appConfig{host: host, ports: fmt.Sprintf("%d-%d", port, port)}
 
@@ -191,7 +191,7 @@ func TestProbeConnectorAcceptsPatchDriftWithinCompatibilityLine(t *testing.T) {
 }
 
 func TestVersionGateBlocksMismatchedDaemonAndAheadConnector(t *testing.T) {
-	host, port := fakeDaemon(t, `{"service":"easyeda-agent","version":"v0.25.0","status":"ok",
+	host, port := fakeDaemon(t, `{"service":"pcbpilot","version":"v0.25.0","status":"ok",
 	  "windows":[{"windowId":"w1","connectorVersion":"0.27.0"}]}`)
 	cfg := &appConfig{host: host, ports: fmt.Sprintf("%d-%d", port, port)}
 	rep := updateReport{
@@ -245,7 +245,7 @@ func TestUpdateCheckExitCodeGate(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("CODEX_HOME", "")
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
-	claude := filepath.Join(home, ".claude", "skills", "easyeda-agent")
+	claude := filepath.Join(home, ".claude", "skills", "pcbpilot")
 	if err := os.MkdirAll(claude, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -322,7 +322,7 @@ func TestUpdateFailedCLIDoesNotUpgradeSkill(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("CODEX_HOME", "")
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
-	dir := filepath.Join(home, ".codex", "skills", "easyeda-agent")
+	dir := filepath.Join(home, ".codex", "skills", "pcbpilot")
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}

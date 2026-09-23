@@ -18,18 +18,18 @@ import {
 
 const catalogExecution = await runEasyeda(['actions'], 30_000);
 if (!catalogExecution.ok || !Array.isArray(catalogExecution.result)) {
-  process.stderr.write(`easyeda-agent-mcp: cannot load action catalog: ${JSON.stringify(catalogExecution)}\n`);
+  process.stderr.write(`pcbpilot-mcp: cannot load action catalog: ${JSON.stringify(catalogExecution)}\n`);
   process.exit(1);
 }
 const actions = catalogExecution.result.filter((action) => DOMAIN_NAMES.includes(action.domain));
 const byName = new Map(actions.map((action) => [action.name, action]));
 
 const server = new Server(
-  { name: 'easyeda-agent-mcp', version: '0.18.3' },
+  { name: 'pcbpilot-mcp', version: '0.18.3' },
   {
     capabilities: { tools: {} },
     instructions: [
-      'Control EasyEDA Pro through easyeda-agent.',
+      'Control EasyEDA Pro through pcbpilot.',
       'For project.create, provide an explicit window and payload.friendlyName, without project/doc routing. For other mutations, provide project and doc.',
       'Inspect before editing and run schematic/PCB checks plus native DRC after editing.',
       'Do not bypass workflow gates or use force-unsafe in real projects.',
@@ -48,11 +48,11 @@ const commonRouteProperties = {
   },
   window: {
     type: 'string',
-    description: 'Connector windowId from easyeda_health. Required for project.create; otherwise use to resolve multi-window ambiguity.',
+    description: 'Connector windowId from pcbpilot_health. Required for project.create; otherwise use to resolve multi-window ambiguity.',
   },
   payload: {
     type: 'object',
-    description: 'Typed action payload. Use easyeda_actions to inspect the action inputs.',
+    description: 'Typed action payload. Use pcbpilot_actions to inspect the action inputs.',
     additionalProperties: true,
   },
 };
@@ -60,9 +60,9 @@ const commonRouteProperties = {
 function domainTool(domain) {
   const domainActions = actions.filter((action) => action.domain === domain);
   return {
-    name: `easyeda_${domain}`,
+    name: `pcbpilot_${domain}`,
     title: `EasyEDA ${domain}`,
-    description: `Run one typed ${domain} action through easyeda-agent. Use easyeda_actions for input guidance.`,
+    description: `Run one typed ${domain} action through pcbpilot. Use pcbpilot_actions for input guidance.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -87,14 +87,14 @@ function domainTool(domain) {
 
 const tools = [
   {
-    name: 'easyeda_health',
+    name: 'pcbpilot_health',
     title: 'EasyEDA connection health',
     description: 'Check the local daemon and connected EasyEDA Pro windows.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
-    name: 'easyeda_actions',
+    name: 'pcbpilot_actions',
     title: 'Discover EasyEDA actions',
     description: `Search the ${actions.length} typed EasyEDA actions and inspect inputs, mutation flags, and confirmation requirements.`,
     inputSchema: {
@@ -110,7 +110,7 @@ const tools = [
   },
   ...DOMAIN_NAMES.map(domainTool),
   {
-    name: 'easyeda_blocks',
+    name: 'pcbpilot_blocks',
     title: 'EasyEDA circuit blocks',
     description: 'List, search, or show an embedded proven circuit block. Does not require a running daemon.',
     inputSchema: {
@@ -126,7 +126,7 @@ const tools = [
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
-    name: 'easyeda_workflow',
+    name: 'pcbpilot_workflow',
     title: 'EasyEDA guarded workflow',
     description: 'Inspect or advance the persisted project design-flow state machine.',
     inputSchema: {
@@ -155,21 +155,21 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: input = {} } = request.params;
   try {
-    if (name === 'easyeda_health') {
+    if (name === 'pcbpilot_health') {
       return toMcpResult(await runEasyeda(['daemon', 'health'], 30_000));
     }
-    if (name === 'easyeda_actions') {
+    if (name === 'pcbpilot_actions') {
       const filtered = filterActions(actions, input);
       return toMcpResult({ ok: true, result: { count: filtered.length, actions: filtered } });
     }
-    if (name === 'easyeda_blocks') {
+    if (name === 'pcbpilot_blocks') {
       return toMcpResult(await runEasyeda(buildBlocksArgs(input), 30_000));
     }
-    if (name === 'easyeda_workflow') {
+    if (name === 'pcbpilot_workflow') {
       return toMcpResult(await runEasyeda(buildWorkflowArgs(input)));
     }
-    if (name.startsWith('easyeda_')) {
-      const domain = name.slice('easyeda_'.length);
+    if (name.startsWith('pcbpilot_')) {
+      const domain = name.slice('pcbpilot_'.length);
       if (!DOMAIN_NAMES.includes(domain)) throw new Error(`unknown EasyEDA domain tool: ${name}`);
       const action = byName.get(input.action);
       if (!action || action.domain !== domain) {

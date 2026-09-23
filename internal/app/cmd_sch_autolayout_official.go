@@ -127,7 +127,7 @@ func runOfficialAutolayout(cfg *appConfig, window string, apply, rewire bool, st
 		if cur.Context != nil {
 			dt = cur.Context.DocumentType
 		}
-		return fmt.Errorf("active document is %q, not a schematic — `easyeda doc switch <page>` to the target schematic page first (the platform lays out whatever page is foreground)", dt)
+		return fmt.Errorf("active document is %q, not a schematic — `pcbpilot doc switch <page>` to the target schematic page first (the platform lays out whatever page is foreground)", dt)
 	}
 	docUUID := cur.Context.DocumentUUID
 	if docUUID == "" {

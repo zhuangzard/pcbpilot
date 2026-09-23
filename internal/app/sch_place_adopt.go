@@ -541,9 +541,9 @@ func schAdoptResidueGuidance(w io.Writer, ids []string) {
 		return
 	}
 	fmt.Fprintf(w, "  残件清理(这些 id 是本命令开跑后才出现的,删它们不会碰到页面原有器件):\n")
-	fmt.Fprintf(w, "    easyeda sch prim-delete --ids %s\n", strings.Join(ids, ","))
+	fmt.Fprintf(w, "    pcbpilot sch prim-delete --ids %s\n", strings.Join(ids, ","))
 	fmt.Fprintln(w, "  删不动时是连接器 action 队列 wedge(此期间 place/delete/document.open 会整体被吞,")
-	fmt.Fprintln(w, "  而轻读照常):先 `easyeda sch save`,完全退出并重启 EasyEDA,再重跑上面的 prim-delete。")
+	fmt.Fprintln(w, "  而轻读照常):先 `pcbpilot sch save`,完全退出并重启 EasyEDA,再重跑上面的 prim-delete。")
 }
 
 // schAdoptUncertainGuidance 打印「回读不可信 → 判不了」时的处方。
@@ -554,11 +554,11 @@ func schAdoptResidueGuidance(w io.Writer, ids []string) {
 // 重启清掉 wedge(否则后面的读还是不可信),然后才查坐标、按结果二选一。
 func schAdoptUncertainGuidance(w io.Writer, req schAdoptRequest, missingProbes []string) {
 	fmt.Fprintln(w, "  判不了时的下一步(按顺序,每条都能直接跑):")
-	fmt.Fprintln(w, "    1) easyeda sch save                 # 先把已经落地的东西钉住")
+	fmt.Fprintln(w, "    1) pcbpilot sch save                 # 先把已经落地的东西钉住")
 	fmt.Fprintln(w, "    2) 完全退出并重启 EasyEDA            # 清掉连接器 action 队列的 wedge,此后回读才可信")
-	fmt.Fprintf(w, "    3) easyeda sch list                 # 看 (%.0f,%.0f) ±%.0f 有没有多出来的器件\n",
+	fmt.Fprintf(w, "    3) pcbpilot sch list                 # 看 (%.0f,%.0f) ±%.0f 有没有多出来的器件\n",
 		req.X, req.Y, schAdoptTolerance)
-	fmt.Fprintln(w, "    4) 有 → easyeda sch prim-delete --ids <那个 id> 清掉再重跑;没有 → 这次 place 确实没落地,直接重跑")
+	fmt.Fprintln(w, "    4) 有 → pcbpilot sch prim-delete --ids <那个 id> 清掉再重跑;没有 → 这次 place 确实没落地,直接重跑")
 	if len(missingProbes) > 0 {
 		fmt.Fprintf(w, "  (回读不可信的证据:本命令此前已落地的 %s 没出现在这次回读里)\n",
 			strings.Join(missingProbes, ", "))

@@ -14,7 +14,7 @@ func TestRunVersion(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("expected exit 0, got %d: %s", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "easyeda-agent") {
+	if !strings.Contains(stdout.String(), "pcbpilot") {
 		t.Fatalf("version output missing project name: %q", stdout.String())
 	}
 }
@@ -33,11 +33,11 @@ func TestRunUnknownCommand(t *testing.T) {
 }
 
 func TestParsePortRange(t *testing.T) {
-	start, end, err := parsePortRange("60832-60841")
+	start, end, err := parsePortRange("61832-61841")
 	if err != nil {
 		t.Fatalf("parsePortRange returned error: %v", err)
 	}
-	if start != 60832 || end != 60841 {
+	if start != 61832 || end != 61841 {
 		t.Fatalf("unexpected range: %d-%d", start, end)
 	}
 }

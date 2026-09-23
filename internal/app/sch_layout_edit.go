@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/connectivity"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/schguard"
+	"github.com/zhuangzard/pcbpilot/internal/connectivity"
+	"github.com/zhuangzard/pcbpilot/internal/schguard"
 )
 
 type schematicLayoutEditContext struct {

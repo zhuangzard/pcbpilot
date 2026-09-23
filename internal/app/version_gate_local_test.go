@@ -7,8 +7,8 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"fmt"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/selfupdate"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/version"
+	"github.com/zhuangzard/pcbpilot/internal/selfupdate"
+	"github.com/zhuangzard/pcbpilot/internal/version"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -27,7 +27,7 @@ func TestLocalUpdateReadyAndUnknownWindow(t *testing.T) {
 	t.Setenv("CODEX_HOME", "")
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	dir := t.TempDir()
-	skill := filepath.Join(home, ".agents/skills/easyeda-agent")
+	skill := filepath.Join(home, ".agents/skills/pcbpilot")
 	os.MkdirAll(skill, 0755)
 	doc := []byte("---\nmetadata:\n  version: \"" + v + "\"\n---\n")
 	os.WriteFile(filepath.Join(skill, "SKILL.md"), doc, 0644)
@@ -35,7 +35,7 @@ func TestLocalUpdateReadyAndUnknownWindow(t *testing.T) {
 	var packed, zipped bytes.Buffer
 	gz := gzip.NewWriter(&packed)
 	tw := tar.NewWriter(gz)
-	tw.WriteHeader(&tar.Header{Name: "easyeda-agent/SKILL.md", Mode: 0644, Size: int64(len(doc)), Typeflag: tar.TypeReg})
+	tw.WriteHeader(&tar.Header{Name: "pcbpilot/SKILL.md", Mode: 0644, Size: int64(len(doc)), Typeflag: tar.TypeReg})
 	tw.Write(doc)
 	tw.Close()
 	gz.Close()
@@ -58,7 +58,7 @@ func TestLocalUpdateReadyAndUnknownWindow(t *testing.T) {
 		t.Fatal(e)
 	}
 	var sums strings.Builder
-	for name, data := range map[string][]byte{asset: bin, "skills.tar.gz": packed.Bytes(), "easyeda-agent-connector.eext": zipped.Bytes()} {
+	for name, data := range map[string][]byte{asset: bin, "skills.tar.gz": packed.Bytes(), "pcbpilot-connector.eext": zipped.Bytes()} {
 		os.WriteFile(filepath.Join(dir, name), data, 0644)
 		fmt.Fprintf(&sums, "%x  %s\n", sha256.Sum256(data), name)
 	}
@@ -68,7 +68,7 @@ func TestLocalUpdateReadyAndUnknownWindow(t *testing.T) {
 		if unknown {
 			windows += `,{"connectorVersion":""}`
 		}
-		host, port := fakeDaemon(t, `{"service":"easyeda-agent","status":"ok","version":"v1.4.9-dev.1","windows":[`+windows+`]}`)
+		host, port := fakeDaemon(t, `{"service":"pcbpilot","status":"ok","version":"v1.4.9-dev.1","windows":[`+windows+`]}`)
 		cfg := &appConfig{host: host, ports: fmt.Sprintf("%d-%d", port, port)}
 		var out bytes.Buffer
 		e := runLocalUpdate(cfg, dir, "", true, true, true, &out)
@@ -115,8 +115,8 @@ func TestLocalRuntimeExactAndReconnect(t *testing.T) {
 func TestLocalUpdateRejectsMixedModesWithoutNetwork(t *testing.T) {
 	for _, args := range [][]string{
 		{"update", "--local-dir", "/missing", "--version", "1.4.8"},
-		{"update", "--local-dir", "/missing", "--check", "--binary", "/tmp/easyeda"},
-		{"update", "--binary", "/tmp/easyeda"},
+		{"update", "--local-dir", "/missing", "--check", "--binary", "/tmp/pcbpilot"},
+		{"update", "--binary", "/tmp/pcbpilot"},
 		{"update", "--local-dir", "/missing", "--client", "agents"},
 	} {
 		var out bytes.Buffer

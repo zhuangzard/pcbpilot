@@ -4,7 +4,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/blocks"
+	"github.com/zhuangzard/pcbpilot/internal/blocks"
 )
 
 // pcb_antenna_keepout.go — auto-generate the all-layer no-copper keep-out for an

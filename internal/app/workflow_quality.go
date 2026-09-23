@@ -23,7 +23,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/workflow"
+	"github.com/zhuangzard/pcbpilot/internal/workflow"
 )
 
 // qualityDropThreshold 是逐维 diff 的告警阈值(分)。5 分挡掉浮点噪声和轻微网格

@@ -26,7 +26,7 @@ type pcbRules struct {
 
 // defaultPcbRules is the daemon's fallback baseline — a sane seed when the live
 // rule is missing or a path can't be read. Values are the DOUBLE-LAYER row of the
-// canonical reference .agents/skills/easyeda-agent/references/fab-rules-jlcpcb.json
+// canonical reference .agents/skills/pcbpilot/references/fab-rules-jlcpcb.json
 // ("boardTypeRulesLive", a real JLCEDA export): clear 6 (track↔pad) / signal 10 /
 // min 5 / via 0.3mm(12mil)/0.6mm(24mil) / copper-to-edge 10 — the real 2-layer
 // default, verified to match ceshi's live rule. NOTE: power is DELIBERATELY wider

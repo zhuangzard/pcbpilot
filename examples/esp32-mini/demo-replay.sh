@@ -15,10 +15,10 @@ STEP_DELAY="${STEP_DELAY:-1.2}" # 回放逐步间隔
 P="--project $PROJECT"
 PB=examples/esp32-mini/moves.playbook.json
 
-N() { easyeda notify --message "$1" --type "$2" $P >/dev/null 2>&1 || true; }
+N() { pcbpilot notify --message "$1" --type "$2" $P >/dev/null 2>&1 || true; }
 
 # 按位号查 primitiveId
-ids=$(easyeda pcb list $P 2>/dev/null | python3 -c '
+ids=$(pcbpilot pcb list $P 2>/dev/null | python3 -c '
 import sys, json
 want = {"LED1": "1900,1300", "SW1": "600,300", "C1": "2450,900", "R1": "1600,1200"}
 d = json.load(sys.stdin)
@@ -36,7 +36,7 @@ N "🎬 回放演示:5 秒后挪乱 LED1 / SW1 / C1 / R1" info
 sleep 5
 while read -r des pid xy; do
   x="${xy%,*}"; y="${xy#*,}"
-  easyeda pcb modify --id "$pid" --patch "{\"x\":$x,\"y\":$y}" $P >/dev/null 2>&1 \
+  pcbpilot pcb modify --id "$pid" --patch "{\"x\":$x,\"y\":$y}" $P >/dev/null 2>&1 \
     && echo "挪乱 $des -> ($x,$y)"
 done <<< "$ids"
 N "💥 已挪乱 —— ${PAUSE} 秒观察期,然后用录制的 playbook 逐步恢复" warning
@@ -44,9 +44,9 @@ sleep "$PAUSE"
 
 N "▶️ 回放开始:18 步移件,每步间隔 ${STEP_DELAY}s" info
 sleep 2
-easyeda apply "$PB" --from 7 --to 24 --step-delay "$STEP_DELAY" $P
+pcbpilot apply "$PB" --from 7 --to 24 --step-delay "$STEP_DELAY" $P
 
-LINT=$(easyeda pcb layout-lint $P 2>&1 | head -1 | grep -o 'score [0-9]*/100' || true)
+LINT=$(pcbpilot pcb layout-lint $P 2>&1 | head -1 | grep -o 'score [0-9]*/100' || true)
 N "✅ 回放完成:${LINT:-lint 见终端},已存盘" success
-easyeda pcb save $P >/dev/null 2>&1
+pcbpilot pcb save $P >/dev/null 2>&1
 echo "✓ 恢复完成 ${LINT:-}"

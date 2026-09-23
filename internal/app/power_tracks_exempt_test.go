@@ -3,7 +3,7 @@ package app
 import (
 	"testing"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/workflow"
+	"github.com/zhuangzard/pcbpilot/internal/workflow"
 )
 
 // TestSplitPowerNotPoured is the #114 gate criterion, table-driven: a power net

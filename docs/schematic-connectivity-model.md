@@ -1,7 +1,7 @@
 # 原理图连接数据模型（1.4）
 
 本页定义电气事实；设计、布局和修复流程统一遵守
-[数据驱动架构基准](../.agents/skills/easyeda-agent/references/schematic-data.md#数据驱动架构基准)。
+[数据驱动架构基准](../.agents/skills/pcbpilot/references/schematic-data.md#数据驱动架构基准)。
 原始快照保留，目标副本明确核心/外围所有权；网表一致不等于归属、真实直连或布局已验证。
 
 1.4 将电气连接事实与图面布局分离。器件、引脚、网络及引脚到网络的关系稳定；坐标、旋转、线段、框线和文字可以重排。

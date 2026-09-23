@@ -48,7 +48,7 @@
 
 ### 决定性证据：官方早有程序化自动布线，故意不走 typed API
 
-`easyeda` 组织里有一整套**专门做自动布线**的仓库，全是外部引擎 + WS/文件往返：
+`pcbpilot` 组织里有一整套**专门做自动布线**的仓库，全是外部引擎 + WS/文件往返：
 
 | 仓库 | 是什么 |
 |---|---|
@@ -117,7 +117,7 @@ pcb_ManufactureData.getDsnFile('design.dsn')   → 导出 Specctra DSN（Freerou
 
 ### POC 落地形态（task #5）
 
-`easyeda pcb autoroute` → daemon：① `pcb.export.dsn` → ② POST `:3579` → ③ 收 SES →
+`pcbpilot pcb autoroute` → daemon：① `pcb.export.dsn` → ② POST `:3579` → ③ 收 SES →
 ④ 解析 → 批量 `pcb.line.create/via.create`(复用) → ⑤ `Drc.check` 验收。
 
 ### 2026-06-29 真机探针（connector 0.5.21 / EasyEDA 3.2.149）—— 路打通

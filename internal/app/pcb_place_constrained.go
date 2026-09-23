@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/blocks"
+	"github.com/zhuangzard/pcbpilot/internal/blocks"
 )
 
 // pcb_place_constrained.go — constraint-driven TIERED placement (daemon-side).

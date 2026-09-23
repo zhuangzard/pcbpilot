@@ -17,8 +17,8 @@ labels: block-gap
 ## 查过什么(证明确实缺)
 
 ```
-easyeda blocks search <关键词1>   → 无命中 / 命中但不适用(说明为什么)
-easyeda blocks search <关键词2>   → ...
+pcbpilot blocks search <关键词1>   → 无命中 / 命中但不适用(说明为什么)
+pcbpilot blocks search <关键词2>   → ...
 ```
 
 ## 期望的块边界(如果已有想法)

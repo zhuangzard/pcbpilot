@@ -573,7 +573,7 @@ func TestMoveKernel_SharedTreeRefusesWithZeroMutation(t *testing.T) {
 
 func TestMoveKernel_DocUnresolvableFailsClosed(t *testing.T) {
 	f := kernelFixture()
-	f.docErr = errors.New(`no document named or with uuid "doc-gone" (run ` + "`easyeda doc ls`" + ` to see options)`)
+	f.docErr = errors.New(`no document named or with uuid "doc-gone" (run ` + "`pcbpilot doc ls`" + ` to see options)`)
 	rep, err := schMoveKernelWith(f, []moveItem{
 		{Designator: "R1", HasTarget: true, X: 200, Y: 100},
 	}, kernelTestOpts())

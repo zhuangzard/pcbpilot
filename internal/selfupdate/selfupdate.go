@@ -1,4 +1,4 @@
-// Package selfupdate keeps the locally-installed easyeda-agent skill directories
+// Package selfupdate keeps the locally-installed pcbpilot skill directories
 // (~/.claude, ~/.codex and the shared ~/.agents skill roots) in sync with a
 // released version, so a user upgrading the CLI never has to hand-copy the skill.
 //
@@ -30,14 +30,14 @@ import (
 // latest-version checks, connector download hints). It is a distribution
 // setting, not the Go module path: a fork sets it at build time with
 //
-//	-X 'github.com/zhoushoujianwork/easyeda-agent/internal/selfupdate.RepoSlug=<owner>/<repo>'
+//	-X 'github.com/zhuangzard/pcbpilot/internal/selfupdate.RepoSlug=<owner>/<repo>'
 //
-// (the Makefile passes RELEASE_REPO), and EASYEDA_RELEASE_REPO overrides it
+// (the Makefile passes RELEASE_REPO), and PCBPILOT_RELEASE_REPO overrides it
 // at run time. Use Repo() rather than reading the variable.
-var RepoSlug = "zhuangzard/easyeda-agent"
+var RepoSlug = "zhuangzard/pcbpilot"
 
 // RepoEnv overrides RepoSlug at run time (e.g. to test another channel).
-const RepoEnv = "EASYEDA_RELEASE_REPO"
+const RepoEnv = "PCBPILOT_RELEASE_REPO"
 
 // Repo returns the effective release repository.
 func Repo() string {
@@ -49,11 +49,11 @@ func Repo() string {
 
 const (
 	// SkillName is the skill slug (dir name under each client's skills/).
-	SkillName = "easyeda-agent"
+	SkillName = "pcbpilot"
 	// versionMarker records the installed skill version inside a skill dir.
 	versionMarker = ".version"
 	// PreserveEnv, when "1", makes a sync keep existing files (local edits win).
-	PreserveEnv = "EASYEDA_SKILL_PRESERVE"
+	PreserveEnv = "PCBPILOT_SKILL_PRESERVE"
 )
 
 // clientOrder is the deterministic client iteration order.
@@ -403,7 +403,7 @@ func checksumHex(body []byte) string {
 }
 
 // fetchSkillTree downloads skills.tar.gz for the version and extracts it to a
-// temp dir, returning the path to the extracted `easyeda-agent/` root plus a
+// temp dir, returning the path to the extracted `pcbpilot/` root plus a
 // cleanup func.
 func fetchSkillTree(ctx context.Context, version string) (root string, cleanup func(), err error) {
 	url := tarballURL(version)
@@ -659,7 +659,7 @@ func copyFile(src, dst string, mode os.FileMode) error {
 	return out.Close()
 }
 
-// PreserveFromEnv reports whether EASYEDA_SKILL_PRESERVE requests preserve mode.
+// PreserveFromEnv reports whether PCBPILOT_SKILL_PRESERVE requests preserve mode.
 func PreserveFromEnv() bool {
 	return os.Getenv(PreserveEnv) == "1"
 }
@@ -744,7 +744,7 @@ func StartupSync(ctx context.Context, daemonVersion string, logf func(string, ..
 	}
 	latest, err := LatestReleaseVersion(ctx)
 	if err == nil && SemverLess(target, latest) {
-		log("update available: CLI v%s < latest v%s — run `easyeda update`, then restart the daemon; "+
-			"the connector .eext still needs a manual re-import (`easyeda update --check` prints the URL)", target, latest)
+		log("update available: CLI v%s < latest v%s — run `pcbpilot update`, then restart the daemon; "+
+			"the connector .eext still needs a manual re-import (`pcbpilot update --check` prints the URL)", target, latest)
 	}
 }

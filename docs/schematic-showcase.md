@@ -1,7 +1,7 @@
 # 原理图展示图片与 Apply 动图
 
 README 展示使用真实原理图的官方导图，对外以“门禁控制板示例”匿名展示。静态图片源自
-`easyeda sch export-image --format png --out <path>`；GIF 使用同一次 SCH Apply
+`pcbpilot sch export-image --format png --out <path>`；GIF 使用同一次 SCH Apply
 在关键阶段导出的图片，按原执行顺序加速播放。播放间隔经过压缩，不代表实际执行耗时。
 
 公开示例不展示真实工程名称。导出前保存目标页图签的显示状态，临时使用
@@ -23,8 +23,8 @@ README 展示使用真实原理图的官方导图，对外以“门禁控制板�
 ```bash
 python3 scripts/capture-sch-apply.py tmp/new-apply.json \
   --out-dir tmp/showcase-capture --frames 12
-easyeda sch apply tmp/showcase-capture/capture-apply.json --dry-run
-easyeda sch apply tmp/showcase-capture/capture-apply.json --yes
+pcbpilot sch apply tmp/showcase-capture/capture-apply.json --dry-run
+pcbpilot sch apply tmp/showcase-capture/capture-apply.json --yes
 ```
 
 脚本只生成文件，不操作 EDA。它保留输入的全部元数据、原步骤、守卫、执行策略与顺序，

@@ -30,7 +30,7 @@ func splitNets(raw string) ([]string, error) {
 		}
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("--nets is empty; pass a comma-separated net list, e.g. --nets A0,A1,A2 (see `easyeda pcb nets`)")
+		return nil, fmt.Errorf("--nets is empty; pass a comma-separated net list, e.g. --nets A0,A1,A2 (see `pcbpilot pcb nets`)")
 	}
 	return out, nil
 }
@@ -43,18 +43,18 @@ func addPcbConstraintCmds(pcb *cobra.Command, cfg *appConfig, window *string, st
 		Use:   "diff-pair",
 		Short: "Differential pair constraints (create/list/rename/delete)",
 		Long: `Bind two nets as a differential pair so EasyEDA's DRC treats them as a pair
-and ` + "`easyeda pcb report`" + ` can measure their skew (|lenP - lenN|).
+and ` + "`pcbpilot pcb report`" + ` can measure their skew (|lenP - lenN|).
 
 Declare pairs BEFORE routing (P7): the constraint is what makes the router and
 DRC aware of the pairing, and what makes the post-route skew number meaningful.
 
 Net names are pre-validated against the board — a pair pointing at a net that
-isn't on this PCB is refused before anything is written (` + "`easyeda pcb nets`" + `
+isn't on this PCB is refused before anything is written (` + "`pcbpilot pcb nets`" + `
 lists the real ones; they are case-sensitive).`,
-		Example: `  easyeda pcb diff-pair create --name USB0 --positive USB_DP --negative USB_DM
-  easyeda pcb diff-pair list
-  easyeda pcb diff-pair rename --name USB0 --to USB
-  easyeda pcb diff-pair delete --name USB`,
+		Example: `  pcbpilot pcb diff-pair create --name USB0 --positive USB_DP --negative USB_DM
+  pcbpilot pcb diff-pair list
+  pcbpilot pcb diff-pair rename --name USB0 --to USB
+  pcbpilot pcb diff-pair delete --name USB`,
 	}
 
 	dp.AddCommand(&cobra.Command{
@@ -132,15 +132,15 @@ which nets it binds, delete it and create it again.`,
 		Use:   "eq-group",
 		Short: "Equal-length net group constraints (create/list/add/delete)",
 		Long: `Group nets that must match in routed length (a parallel bus, a memory
-address group), so ` + "`easyeda pcb report`" + ` can measure the group's spread
+address group), so ` + "`pcbpilot pcb report`" + ` can measure the group's spread
 (max - min across members).
 
 Needs at least 2 nets — a one-net group constrains nothing. Net names are
-pre-validated against the board (` + "`easyeda pcb nets`" + `).`,
-		Example: `  easyeda pcb eq-group create --name DDR_ADDR --nets A0,A1,A2
-  easyeda pcb eq-group add --name DDR_ADDR --nets A3,A4
-  easyeda pcb eq-group list
-  easyeda pcb eq-group delete --name DDR_ADDR`,
+pre-validated against the board (` + "`pcbpilot pcb nets`" + `).`,
+		Example: `  pcbpilot pcb eq-group create --name DDR_ADDR --nets A0,A1,A2
+  pcbpilot pcb eq-group add --name DDR_ADDR --nets A3,A4
+  pcbpilot pcb eq-group list
+  pcbpilot pcb eq-group delete --name DDR_ADDR`,
 	}
 
 	eq.AddCommand(&cobra.Command{

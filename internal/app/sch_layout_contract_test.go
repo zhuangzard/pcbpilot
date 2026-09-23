@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/schguard"
+	"github.com/zhuangzard/pcbpilot/internal/schguard"
 )
 
 // A deliberately tiny synthetic circuit: one measured core, one two-pin

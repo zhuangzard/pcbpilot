@@ -85,7 +85,7 @@ blocks 暂时定位为：
 ### 下一步价值实验
 
 选择 `led_indicator_gpio`、`tactile_boot_reset` 或 `ams1117_ldo_3v3` 中一个简单块，实现最小
-`easyeda sch block-apply` 垂直闭环：
+`pcbpilot sch block-apply` 垂直闭环：
 
 1. 加载 block；
 2. 分配器件位号并按 parts 放置；
@@ -164,7 +164,7 @@ block 的执行器复用程度决定是否继续投资。
 
 ### block-apply 垂直闭环实验 —— 门槛四过一待
 
-按上文「下一步价值实验」在 `ceshi` 真机跑通了最小 `easyeda sch block-apply`
+按上文「下一步价值实验」在 `ceshi` 真机跑通了最小 `pcbpilot sch block-apply`
 (加载 → 放置 → 连线 → 绑端口 → check → 实例 manifest;规划器纯函数 + 7 单测):
 
 | 门槛判据 | 结果 |
@@ -208,5 +208,5 @@ block 的执行器复用程度决定是否继续投资。
   已走实时查询,发现漂移按 block-bug 报,不做后台刷新。
 
 放弃的:反馈率天然低于遥测(刻意接受——「沉默=正常」是明文定义的健康默认态)。
-观察后定:若起草 issue 的路径被真实使用,再加 `easyeda blocks report` 辅助命令
+观察后定:若起草 issue 的路径被真实使用,再加 `pcbpilot blocks report` 辅助命令
 (从 manifest 自动拼 issue 草稿)——判据同 block-apply:看真实使用,不看想象。

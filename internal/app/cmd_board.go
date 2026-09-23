@@ -29,7 +29,7 @@ func newBoardCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 		Use:     "list",
 		Short:   "List all Boards in the current project (name + schematic + pcb)",
 		Args:    cobra.NoArgs,
-		Example: `  easyeda board list`,
+		Example: `  pcbpilot board list`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return dispatch(cfg, "board.list", window, nil, stdout, stderr)
 		},
@@ -41,7 +41,7 @@ func newBoardCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 		Use:     "current",
 		Short:   "Read the current Board (its bound schematic + PCB)",
 		Args:    cobra.NoArgs,
-		Example: `  easyeda board current`,
+		Example: `  pcbpilot board current`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return dispatch(cfg, "board.current", window, nil, stdout, stderr)
 		},
@@ -55,8 +55,8 @@ func newBoardCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 			Use:   "create",
 			Short: "Bind a schematic and/or PCB into a new Board (组合)",
 			Args:  cobra.NoArgs,
-			Example: `  easyeda board create --schematic <schUuid> --pcb <pcbUuid>
-  easyeda board create --schematic <schUuid>`,
+			Example: `  pcbpilot board create --schematic <schUuid> --pcb <pcbUuid>
+  pcbpilot board create --schematic <schUuid>`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if schUuid == "" && pcbUuid == "" {
 					return fmt.Errorf("pass at least one of --schematic / --pcb")
@@ -84,7 +84,7 @@ func newBoardCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 			Use:     "rename",
 			Short:   "Rename a Board by its current name",
 			Args:    cobra.NoArgs,
-			Example: `  easyeda board rename --name "Board1" --new "电源板"`,
+			Example: `  pcbpilot board rename --name "Board1" --new "电源板"`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if name == "" {
 					return fmt.Errorf("--name is required")
@@ -109,7 +109,7 @@ func newBoardCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 			Use:     "copy",
 			Short:   "Copy a Board (its schematic + PCB) into a new Board",
 			Args:    cobra.NoArgs,
-			Example: `  easyeda board copy --name "Board1"`,
+			Example: `  pcbpilot board copy --name "Board1"`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if name == "" {
 					return fmt.Errorf("--name is required")
@@ -130,7 +130,7 @@ func newBoardCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 			Use:     "delete",
 			Short:   "Delete a Board by name (no undo)",
 			Args:    cobra.NoArgs,
-			Example: `  easyeda board delete --name "Board1"`,
+			Example: `  pcbpilot board delete --name "Board1"`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if name == "" {
 					return fmt.Errorf("--name is required")
@@ -158,8 +158,8 @@ func newBoardCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 				"bound to --schematic (+ --pcb), rolling back on failure. A schematic can\n" +
 				"belong to only one Board, so pass --force to move one already bound elsewhere.",
 			Args: cobra.NoArgs,
-			Example: `  easyeda board rebind --schematic <schUuid> --pcb <pcbUuid>
-  easyeda board rebind --name "Board1" --schematic <schUuid> --pcb <pcbUuid>`,
+			Example: `  pcbpilot board rebind --schematic <schUuid> --pcb <pcbUuid>
+  pcbpilot board rebind --name "Board1" --schematic <schUuid> --pcb <pcbUuid>`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if schUuid == "" {
 					return fmt.Errorf("--schematic is required")

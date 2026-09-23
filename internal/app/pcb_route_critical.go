@@ -7,9 +7,9 @@ package app
 // the auto-route tier. That flow used to be hand-assembled from power-planes /
 // manual pcb line / track-lock commands — so it got skipped (#43 R2).
 //
-//	easyeda pcb route-critical            # power → diff → lock
-//	easyeda pcb route-critical --dry-run  # plan + pair identification only
-//	easyeda pcb track-lock --net USB_DP,USB_DM        # standalone lock
+//	pcbpilot pcb route-critical            # power → diff → lock
+//	pcbpilot pcb route-critical --dry-run  # plan + pair identification only
+//	pcbpilot pcb track-lock --net USB_DP,USB_DM        # standalone lock
 //
 // Diff pairs come from TWO sources, deduplicated:
 //   - the circuit-block library's `signals` maps (type=diff_pair — USB_D 90Ω,
@@ -35,8 +35,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/blocks"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/spec"
+	"github.com/zhuangzard/pcbpilot/internal/blocks"
+	"github.com/zhuangzard/pcbpilot/internal/spec"
 )
 
 // ── diff-pair identification ────────────────────────────────────────────────
@@ -323,9 +323,9 @@ auto-route per the P7 ladder). Workflow stage records are informational; live
 stackup and routing evidence drive this command. --dry-run plans and identifies
 without mutating. A missing/stale copper-layer read or a conflict
 with --spec stackup.layers refuses before routing; no default layer count is assumed.`,
-		Example: `  easyeda pcb route-critical --project ceshi --dry-run
-  easyeda pcb route-critical --project ceshi
-  easyeda pcb route-critical --project ceshi --skip-power   # pairs only`,
+		Example: `  pcbpilot pcb route-critical --project ceshi --dry-run
+  pcbpilot pcb route-critical --project ceshi
+  pcbpilot pcb route-critical --project ceshi --skip-power   # pairs only`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// S0 spec 的 stackup.layers(若有)是本次运行的层数**权威**。先读,
@@ -362,7 +362,7 @@ with --spec stackup.layers refuses before routing; no default layer count is ass
 						return fmt.Errorf(
 							"stackup conflict: spec declares %d copper layer(s) but the board reads %d (%s).\n"+
 								"route-critical routes, it does not re-stack a board. Fix one of the two first:\n"+
-								"  board  → easyeda pcb stackup set --layers %d   (changes the PCB!)\n"+
+								"  board  → pcbpilot pcb stackup set --layers %d   (changes the PCB!)\n"+
 								"  spec   → set stackup.layers to %d in %s",
 							declared, copper, copperSrc, declared, copper, specPath)
 					}
@@ -611,11 +611,11 @@ func copperLayerCount(cfg *appConfig, window string) (int, string, error) {
 		if isStaleRead(err) {
 			return 0, "", fmt.Errorf("read copper layers: %w — %s", err, staleReadNextStep("叠层入口读"))
 		}
-		return 0, "", fmt.Errorf("read copper layers: %w — inspect `easyeda pcb layers` before routing", err)
+		return 0, "", fmt.Errorf("read copper layers: %w — inspect `pcbpilot pcb layers` before routing", err)
 	}
 	n, src, ok := copperLayerCountFromResult(res.Result)
 	if !ok {
-		return 0, "", fmt.Errorf("no reliable copper-layer evidence in pcb.layers.list — inspect `easyeda pcb layers` before routing; refusing to assume 2 layers")
+		return 0, "", fmt.Errorf("no reliable copper-layer evidence in pcb.layers.list — inspect `pcbpilot pcb layers` before routing; refusing to assume 2 layers")
 	}
 	return n, src, nil
 }

@@ -2,7 +2,7 @@ package app
 
 import (
 	"fmt"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/connectivity"
+	"github.com/zhuangzard/pcbpilot/internal/connectivity"
 	"reflect"
 )
 

@@ -10,7 +10,7 @@
 - PCB 配置 CLI：`pcb config get/clearance/track/via/bind/net-color`，覆盖考试中的安全间距、线宽规则（含复制新建 PWR）、过孔尺寸、现有网络类绑定和网络 RGB 颜色；支持单位换算、dry-run、保留其余配置及严格写后回读。2026-09-20 已在 Web 3.2.203 的考试 PCB `PCB1_1` 完成实际写入、保存、重载、幂等重放和完整恢复，规则、网络及 69 个组件最终与基线一致。固定 ESP32 回归已验证配置与四层/铜面持久化，但整板 DRC 因启发式走线穿越天线禁区/机械槽、连接错误及内层 PLANE 类型重载回退而未通过，不能记作完整 E2E；网格/吸附等全局偏好仍 unsupported。
 
 - 私有器件库现场佐证：[AS07-M1101D-SMA](examples/as07-m1101d-sma/README.md)。从用户尺寸/引脚图创建 Symbol、Footprint、Device，再按反馈修正符号和框外丝印；保留最终规格、官方渲染和回读数据。额外文字及修正使用官方 API 调试路径，不代表单条 build 已覆盖；未完成实例接线、PCB DRC 或实物装配验证。
-- 原理图统一架构：[数据驱动架构基准](../.agents/skills/easyeda-agent/references/schematic-data.md#数据驱动架构基准)。原始快照保留，源数据驱动计算、检查和修复；不是现场逐件试摆后看图兜底。
+- 原理图统一架构：[数据驱动架构基准](../.agents/skills/pcbpilot/references/schematic-data.md#数据驱动架构基准)。原始快照保留，源数据驱动计算、检查和修复；不是现场逐件试摆后看图兜底。
 - 通用两层布局：`layout-plan --zones` 消费明确核心/外围归属和约束，`layout-sheet-plan` 只选择/平移完整候选；固定 `layout-render` 与 `compose --layout-page` 保留同一目标。任一区失败不能拼半成品。
 - 局部数据编辑：`sch layout-edit` 按稳定 ID 将核心及其唯一归属 zone 作为一个相对坐标系平移；刚体目标碰撞时固定核心目标并仅重算本区。单脚标签修复只沿官方引脚外向轴生成候选，并通过 daemon 作用域 action 逐对象核对、串行替换和回读；普通写线仍按目标连接表和实际回读核对。
 - 检查范围：位号参与遮挡/入框，其他器件属性文字排除页面碰撞和框包络；当前实现/安装版是否覆盖须按真实报告举证，不以规范代替验证。
@@ -20,14 +20,14 @@
 - 固定 LDO 样例：`sch power-layout` 根据实测 pin/bbox 离线计算四器件位置、直连导线及 `sch apply` 队列；`expectSchematic` 校验移动前后几何与完整引脚网表。[验收及范围](reviews/power-layout-validation.md)。
 - 模块呈现：`sch frame apply/check` 将 JSON 转换成粉色虚线框和 0.2 inch 标题,回读样式/实际文字边界并保持重复执行幂等。标题按分项占位选择上下空档压缩框高度,可用实测文字尺寸规划、携带预测包络与障碍物核验。各模块压缩后由共享 Z 字行规划器从左上起排、同行顶齐、各框保留自身高度；相对实测sheetBorder保留最小10 raw净距。[转换契约](schematic-frame-conversion.md)。
 - 单页组合：`sch compose` 以完整 IR 和实测 Lib 几何生成同页位置及严格 Apply 队列；校验实际 bbox、全部 pin/net/NC、导线路径和标记方向。跨页位号须唯一，不自动删除源页。[组合契约](schematic-page-composition.md)。
-- 位号：`sch designators allocate/plan/verify` 按官方库前缀修复非标准名称，保留合法编号与稳定 ID；原地队列核对位置、引脚/网络/NC、导线与全工程位号。[使用合同](../.agents/skills/easyeda-agent/references/schematic-data.md)。
+- 位号：`sch designators allocate/plan/verify` 按官方库前缀修复非标准名称，保留合法编号与稳定 ID；原地队列核对位置、引脚/网络/NC、导线与全工程位号。[使用合同](../.agents/skills/pcbpilot/references/schematic-data.md)。
 - PCB：`layout-lint`、`layout-score`、`pcb check` 与 DRC 分别报告布局、质量、制造和电气事实；它们不授权或拒绝普通 action。
 - PCB 独立求解内核：公开 Go 包 `pkg/pcbrouting` 被晶振规划和 `pcb route solve/check` 共用，
   无额外 CLI 安装；当前为单层零过孔、直线/45°有界寻路与独立路径校验（离线能力）。
   快照适配层处理真实几何/规则，未知数据、圆弧铜及有限搜索失败保持 incomplete；
   每次运行同时生成整板 SVG，覆盖目标层焊盘、铜、开槽、禁线区、搜索边界、候选线宽/净距
   和失败原因。多网整板协调、换层与现场写入尚不属于此命令。
-  [输入与边界](../.agents/skills/easyeda-agent/references/pcb-routing.md#离线单层寻路与独立复验)。
+  [输入与边界](../.agents/skills/pcbpilot/references/pcb-routing.md#离线单层寻路与独立复验)。
 - PCB 模块候选：`pcb layout-plan` 纯本地读取 `pcb dump` 与显式模块/pad 所有权，有限枚举
   `edge`、`pin-satellites`、`rigid` 及 schema-v2 `crystal-guard` 候选，输出事实、局部/整板/
   前后对比 SVG 和 typed Apply；不访问编辑器、不合成总分。带铜候选用
@@ -66,8 +66,8 @@
 
 ## 电气感知整板自动设计（`pcb auto`，离线验证）
 
-`easyeda pcb auto analyze|run` 调用离线引擎 [`pkg/pcbauto`](../pkg/pcbauto)，状态 `offline-verified`：
-剧本通过 `easyeda apply --dry-run` 预检，尚未在现场执行并回读。设计理由与证据见 [pcbauto.md](pcbauto.md)。
+`pcbpilot pcb auto analyze|run` 调用离线引擎 [`pkg/pcbauto`](../pkg/pcbauto)，状态 `offline-verified`：
+剧本通过 `pcbpilot apply --dry-run` 预检，尚未在现场执行并回读。设计理由与证据见 [pcbauto.md](pcbauto.md)。
 
 | 能力 | 语义 |
 |---|---|
@@ -89,7 +89,7 @@
 - `sys_FormatConversion` 只覆盖 Altium 库文件，不覆盖工程文档。未来封装必须把无返回、
   无变化和部分导入明确判失败，并核对连接图、板框、层叠和机械层。
 - 面向 Agent 的操作与验收说明见
-  [`project-import.md`](../.agents/skills/easyeda-agent/references/project-import.md)。
+  [`project-import.md`](../.agents/skills/pcbpilot/references/project-import.md)。
 
 ## Completed
 
@@ -132,10 +132,10 @@ No one-call PCB autorouter exists on this build (A4 blocked — see survey §6).
 | `pcb sync-designators` (CLI orchestration; no new action) | Repair placeholder designators (`U?`/`C?`) from the schematic, matched by `uniqueId` (minted by the platform at first sch→PCB import; ONE namespace across both documents — primitiveId is per-document). Placeholder-only (hand-set designators never overwritten); every write read-back-verified; `pcb.save` checkpoint after repair; schematic-side placeholders classified separately ("annotate the schematic first"). `--dry-run`/`--json`, non-zero exit on any failed write. Auto-runs rear-guard after `pcb import-changes` (after attrs, `--no-sync-designators` opts out). Mutates. |
 | `schematic.select` | Select primitives by id, return the active selection. |
 
-**Discover + switch/open loop (CLI, no new actions):** `easyeda doc ls [--project X]`
+**Discover + switch/open loop (CLI, no new actions):** `pcbpilot doc ls [--project X]`
 aggregates `schematic.pages.list` + `pcb.documents.list` + `document.current`
-into one ★-active document list; `easyeda doc switch <name|uuid> [--project X]`
-(or `easyeda doc open <name|uuid>` for more intuitive naming) resolves a page/PCB name
+into one ★-active document list; `pcbpilot doc switch <name|uuid> [--project X]`
+(or `pcbpilot doc open <name|uuid>` for more intuitive naming) resolves a page/PCB name
 → `document.open` → readback (cross-type PCB↔schematic). With 2+ windows connected,
 `--project`/`--window` is required.
 
@@ -148,7 +148,7 @@ health tracks a UI tab-switch with no command run. `health` also reports
 ### View / navigation (4 actions, `document` domain — schematic + PCB)
 
 Editor canvas view shortcuts via `eda.dmt_EditorControl.*`; act on the focused
-canvas, so they apply to whichever document (schematic or PCB) is active. CLI: `easyeda view …`.
+canvas, so they apply to whichever document (schematic or PCB) is active. CLI: `pcbpilot view …`.
 
 | Action | What |
 |---|---|
@@ -160,7 +160,7 @@ canvas, so they apply to whichever document (schematic or PCB) is active. CLI: `
 ### Sheet / page management + 明细表 (6 actions, `schematic` domain)
 
 Map to `eda.dmt_Schematic.*`. **No set-paper-size (A4/A3) API exists** in EasyEDA
-Pro; the title block (明细表) is the editable "图纸" surface. CLI: `easyeda sch …`.
+Pro; the title block (明细表) is the editable "图纸" surface. CLI: `pcbpilot sch …`.
 
 | Action | What |
 |---|---|
@@ -175,7 +175,7 @@ Pro; the title block (明细表) is the editable "图纸" surface. CLI: `easyeda
 
 A **Board groups one schematic + one PCB** (识别符是 name, not uuid) — the structural
 unit that keeps the two together and that `import_changes` follows. Project tree:
-Workspace → Project → **Board** → schematic + PCB. Map to `eda.dmt_Board.*`. CLI: `easyeda board …`.
+Workspace → Project → **Board** → schematic + PCB. Map to `eda.dmt_Board.*`. CLI: `pcbpilot board …`.
 
 | Action | What |
 |---|---|
@@ -244,7 +244,7 @@ Workspace → Project → **Board** → schematic + PCB. Map to `eda.dmt_Board.*
 - **Go-side CLI planners (pure geometry over real bboxes)** — deterministic,
   unit-testable analysis/placement that runs in the daemon's Go process on a
   single `schematic.components.list` pull, no per-step screenshots:
-  - **`easyeda sch gate`** — **the S5 verification gate, one command**: runs
+  - **`pcbpilot sch gate`** — **the S5 verification gate, one command**: runs
     `layout-lint → check → bridge-check → drc` in a fixed order and returns one
     report. Motivated by the surface-convergence audit
     ([2026-08 审计与验证记录](reviews/2026-08-sch-surface-audit.md)):
@@ -263,7 +263,7 @@ Workspace → Project → **Board** → schematic + PCB. Map to `eda.dmt_Board.*
     superset of the four single commands' JSON); `--only`/`--skip` select a
     subset and reject misspelled stage names rather than silently gating on
     fewer checks; `--fail-fast`. The four single commands stay for spot checks.
-  - **`easyeda sch layout-lint`** — pairwise bbox overlap/pin coincidence
+  - **`pcbpilot sch layout-lint`** — pairwise bbox overlap/pin coincidence
     (ERROR), tight spacing/off-grid/zone violation/**out-of-sheet** (WARN), with
     corrected mm↔0.01-inch conversion and schema-v2 unit metadata. `out-of-sheet`
     (issue #180) catches parts whose **bbox** (not anchor — a body can stick out
@@ -276,10 +276,10 @@ Workspace → Project → **Board** → schematic + PCB. Map to `eda.dmt_Board.*
     unavailable configured zone **or sheet** check, so `0 overlap` can no longer
     stand in for a proven layout. Strict proof is active-page/real-part only and rejects
     `--all-pages` or `--include-non-parts`.
-  - **`easyeda sch autoconnect`** — pin-aware connect planner: score every
+  - **`pcbpilot sch autoconnect`** — pin-aware connect planner: score every
     (direction × offset) candidate against real geometry, pick the lowest cost,
     delegate the mutation to `connect_pin` (issue #24).
-  - **`easyeda sch autolayout`** — legacy module-aware **placement** planner (issue #25),
+  - **`pcbpilot sch autolayout`** — legacy module-aware **placement** planner (issue #25),
     not the current data-driven generation workflow; local maintenance must reconcile source data:
     reads a `--spec` (page, sheet, modules with zone/core/parts, rules),
     partitions the canvas into named zones (`left-top`/`center`/`right`/…), places
@@ -295,7 +295,7 @@ Workspace → Project → **Board** → schematic + PCB. Map to `eda.dmt_Board.*
     by another anchor readback, then saves the rollback.
     There is no template force/rewire override because v1 only **moves
     already-placed parts** (it neither carries wires nor creates missing parts).
-- **`.agents/skills/easyeda-agent/scripts`** — a data-only schematic checker (no screenshots): one
+- **`.agents/skills/pcbpilot/scripts`** — a data-only schematic checker (no screenshots): one
   `getAll` + `wire.getAll` pull returns the full layout, then a geometry/union-find
   pass finds connectivity and orientation problems with exact coordinates (13
   checks: `flag_on_pin`, `dangling_wire`, `floating_pin`, `orientation`,
@@ -308,7 +308,7 @@ Workspace → Project → **Board** → schematic + PCB. Map to `eda.dmt_Board.*
     show only NEW / FIXED / PRE-EXISTING findings plus the changed primitives.
 - **🧩 Standard circuit-block library (电路块库) — topology-template capability.** A
   community-built, credited library of KNOWN-GOOD peripheral subcircuits
-  (`.agents/skills/easyeda-agent/references/blocks/*.json`, one block per file): CH340 USB-serial, ESP32
+  (`.agents/skills/pcbpilot/references/blocks/*.json`, one block per file): CH340 USB-serial, ESP32
   auto-download, button de-bounce, USB-hub, buck… Their internal topology is fixed
   and copy-verbatim; reuse only rebinds the boundary nets (`ports`) and reallocates
   RefDes. It is the **topology tier** above `standard-parts.json` (part tier) and
@@ -326,11 +326,11 @@ Workspace → Project → **Board** → schematic + PCB. Map to `eda.dmt_Board.*
   - **Attribution**: `author`/`contributors` (GitHub @handles, never removed) +
     `added`/`updated` versions — *contribute once, benefit forever*. Contribution
     standard + PR gate: `references/standard-blocks-contributing.md`.
-  - **Tooling**: `easyeda blocks ls/search/show` browses the embedded templates;
+  - **Tooling**: `pcbpilot blocks ls/search/show` browses the embedded templates;
     `make blocks-audit` checks their real symbol pin references. `sch block-apply`
     is the write path. Public instance-level Lib candidates and compose assets live
     separately under the Skill `library/modules/` and are checked by `make modules-audit`.
-- **Connector self-healing reconnect** — the connector port-scans 60832-60841,
+- **Connector self-healing reconnect** — the connector port-scans 61832-61841,
   validates a handshake, and reconnects on liveness loss. It **never permanently
   gives up**: after 5 fast retries it drops to a quiet 10s background poll, so a
   daemon started/restarted later auto-reconnects with no manual action. A
@@ -340,12 +340,12 @@ Workspace → Project → **Board** → schematic + PCB. Map to `eda.dmt_Board.*
   `.eext`. `make eext` keeps the uuid **stable** (update-in-place: uninstall old →
   import); `make eext-fresh` mints a **fresh uuid** (imports as a separate entry,
   no uninstall needed) as the fallback when the installed one won't uninstall.
-- **`easyeda update` (alias `upgrade`) — in-place self-update** for the two pieces
+- **`pcbpilot update` (alias `upgrade`) — in-place self-update** for the two pieces
   that *can* be updated programmatically: the **CLI binary** (downloads this
   platform's release asset, verifies sha256 against the release `checksums.txt`
   when present, runs the download once to confirm it reports the expected
   version, then swaps it in with a same-dir rename) and the **skill dirs** (same
-  machinery as `easyeda skill sync`). The **connector `.eext` is reported, never
+  machinery as `pcbpilot skill sync`). The **connector `.eext` is reported, never
   touched** — sideloads have no in-place update, so `update` prints the version
   it found in each open window plus the re-import URL. `--check` is read-only and
   `--check --exit-code` exits **10** unless the installed CLI/Skill and live
@@ -372,14 +372,14 @@ not just hand-drawn custom symbols.
 
 These are planned and **not implemented** today.
 
-- **🧩 `easyeda sch block apply` — one-shot circuit-block instantiation (phase-2 write path).**
+- **🧩 `pcbpilot sch block apply` — one-shot circuit-block instantiation (phase-2 write path).**
   The block library's read/browse layer ships today (`references/blocks/*.json` +
   `scripts/blocks.py`); the **write path** — materializing a block into the live
   schematic — is the next milestone. Interface designed first (per the CLI-design
   首要准则), implementation to follow:
 
   ```
-  easyeda sch block apply --id block.ch340c_usb_serial \
+  pcbpilot sch block apply --id block.ch340c_usb_serial \
       --bind TXD=MCU_RX,RXD=MCU_TX,VBUS_5V=5V,GND=GND \
       [--prefix U2,R7,...] [--at X,Y] [--page <uuid>] [--dry-run]
   ```
@@ -396,7 +396,7 @@ These are planned and **not implemented** today.
   `place` + `connect_pin` engines, so the new logic is just topology expansion +
   RefDes/port binding. Ships the block library from "agent reads & hand-copies" to
   "agent instantiates in one call".
-- **器件标准化 / standard parts library** — a curated `.agents/skills/easyeda-agent/references/standard-parts.json`
+- **器件标准化 / standard parts library** — a curated `.agents/skills/pcbpilot/references/standard-parts.json`
   mapping category → `{MPN, LCSC C-number, libraryUuid, deviceUuid}` that the
   agent places from **first**, with `schematic.library.search` as the fallback. The
   goal is deterministic, repeatable part choices instead of re-searching every time.
@@ -420,7 +420,7 @@ These are planned and **not implemented** today.
   这也指向 **schematic 侧 mutation-后-stale 的统一修复**(zone-draw / group-move
   / connect 三处已实证,应做 settle/double-read 通用防线)。组内 layout-lint 兜底
   不重叠;组间由分区框隔离 ⇒ 全局无重叠。
-- **🔖 接插件逐脚丝印 / connector per-pin silk — `easyeda pcb silk-pins`(P9,未建).**
+- **🔖 接插件逐脚丝印 / connector per-pin silk — `pcbpilot pcb silk-pins`(P9,未建).**
   端子 / 排针 / 接插件应**逐脚自动标注**电气特性,让用户拿到板一眼知每脚是什么(电源/地/TX/RX…)
   以辅助接线。今天**没有 CLI 自动做**——手工丝印踩过坑:把多脚写成一整行长句
   (`LCD 1:GND 2:3V3…`)、不与焊盘逐一对齐、长句远离焊盘只能读不能辅助接线、字号密度挤器件。
@@ -428,7 +428,7 @@ These are planned and **not implemented** today.
   ③ 优先用**网络简称**(`G`/`3V3`/`5V`/`TX`/`RX`/`SCL`/`SDA`/`RST`/`BL`,从连到该脚的网名取);
   ④ 不写脚号冒号(除非编号有装配意义);⑤ 横向排针→横向逐脚、纵向→纵向,顺序与实物观察方向一致;
   ⑥ 标签对准各自焊盘、在器件外壳遮挡区之外;⑦ 普通器件只留位号;⑧ 不压焊盘/器件/出框、装配后可见(铁律 11)。
-  **实现落点**:新子命令 `easyeda pcb silk-pins`(或扩展 `pcb silk`)从 netlist 取每脚网名简称 + 焊盘坐标/排布方向逐脚落字,
+  **实现落点**:新子命令 `pcbpilot pcb silk-pins`(或扩展 `pcb silk`)从 netlist 取每脚网名简称 + 焊盘坐标/排布方向逐脚落字,
   复用块的 `silk` map(块数据已有逐脚标注,如 LED 阴极 K)。**根本教训**:校验门要**同时查几何(没压焊盘)+ 语义
   (标签数=引脚数、逐脚对齐、无长句)**——上一版只验了几何、漏了语义可用性。归属 design-flow **P9**。
 - **✅ PCB 布局智能补完 — `place-constrained` 4 真缺陷全部 DONE(2026-07-11).** 复评官方
@@ -457,7 +457,7 @@ These are planned and **not implemented** today.
 - **task #34 — ESP32 **模组**开发板 (module dev board).** 拿原始需求
   [`esp32MiniRequire.md`](../esp32MiniRequire.md)(4 层板 + 点灯 + 5V 供电端子 + 降压 3V3 +
   CH340 USB 烧录 + BOOT/RESET 按键 + 四角 M3 固定,**不含 BOM/网表**)从零跑:agent 自己选型 →
-  放置 → 编组 → 布线 → 转 PCB,照 `.agents/skills/easyeda-agent/references/design-flow.md` 的 S0–S6 + P0–P10
+  放置 → 编组 → 布线 → 转 PCB,照 `.agents/skills/pcbpilot/references/design-flow.md` 的 S0–S6 + P0–P10
   脊柱,**收尾必须 `pcb check` 0 ERROR**(含丝印正反、走线压焊盘)。WROOM-1 模组自带天线/晶振/flash,
   keep-out 只需盖模组天线区。
 - **task #35 — ESP32 **芯片级** N8R8 最小系统板 (bare-chip minimal system, no module
@@ -475,7 +475,7 @@ A placed component's `getState_SupplierId()` returns `MPN.1` (e.g.
 the exported BOM, whose "Supplier Part" column is the MPN.1. The component can't be
 fixed at the source: `setState_SupplierId('C440198')` does **not** persist (the
 field is device-bound and reverts on re-pull). So the fix is post-export:
-**`.agents/skills/easyeda-agent/scripts/bom-enrich.py`** joins the C-number in by matching each row's Manufacturer
+**`.agents/skills/pcbpilot/scripts/bom-enrich.py`** joins the C-number in by matching each row's Manufacturer
 Part against `standard-parts.json` (MPN → LCSC) and rewriting "Supplier Part" to the
 real C-number (and filling an empty Value). Verified: 5/5 rows of the ESP32-S3 BOM
 enriched to orderable C-numbers; unmatched MPNs are reported as candidates to add to

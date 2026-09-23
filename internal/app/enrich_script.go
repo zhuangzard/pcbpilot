@@ -7,7 +7,7 @@ package app
 // old resolver only reached the repo checkout by walking up from cwd / the
 // binary, so a run outside the repo died with a bare "bom-enrich.py not found".
 // The installed SKILL dir — the copy every non-repo user actually has, kept
-// current by `easyeda skill sync` — was never probed.
+// current by `pcbpilot skill sync` — was never probed.
 //
 // The search ladder itself now lives in skill_asset.go: standard-parts.json
 // (which `sch block-apply` needs) has the same cwd-independence problem, so the
@@ -22,7 +22,7 @@ const enrichScriptName = "bom-enrich.py"
 var enrichScriptAsset = skillAsset{
 	name: enrichScriptName,
 	rels: []string{
-		"easyeda-agent/scripts/" + enrichScriptName,
+		"pcbpilot/scripts/" + enrichScriptName,
 		"easyeda-schematic/scripts/" + enrichScriptName, // pre-merge skill name
 	},
 	searchPath: true,
@@ -30,7 +30,7 @@ var enrichScriptAsset = skillAsset{
 }
 
 // resolveEnrichScript resolves bom-enrich.py through the shared skill-asset
-// ladder (explicit → $EASYEDA_SKILLS_DIR → installed skill dirs → up from the
+// ladder (explicit → $PCBPILOT_SKILLS_DIR → installed skill dirs → up from the
 // binary → up from cwd → $PATH). See skillAsset.resolve for the full contract.
 func resolveEnrichScript(explicit string) (string, error) {
 	return enrichScriptAsset.resolve(explicit)

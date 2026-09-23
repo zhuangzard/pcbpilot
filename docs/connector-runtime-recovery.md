@@ -3,7 +3,7 @@
 ## 症状
 
 重新导入或升级连接器后，扩展管理器里看起来只剩一个版本，但
-`easyeda health` 仍然可能列出多个窗口或多个连接器版本。典型表现是：
+`pcbpilot health` 仍然可能列出多个窗口或多个连接器版本。典型表现是：
 
 - 同一个 EasyEDA 工程/文档出现多个 `windowId`；
 - 日志里先后出现旧版和新版 `register`；
@@ -36,7 +36,7 @@ EasyEDA 的 `sys_WebSocket` 固定身份和异常关闭状态影响，无法真�
 4. 如果 daemon 在此前的失败请求中留下了旧队列，重启 daemon：
 
    ```bash
-   easyeda daemon start
+   pcbpilot daemon start
    ```
 
    开发环境使用 `make dev` 时，不要手工 kill air 管理的 daemon。
@@ -44,12 +44,12 @@ EasyEDA 的 `sys_WebSocket` 固定身份和异常关闭状态影响，无法真�
 5. 重新打开目标工程和文档，等待连接器完成注册，然后检查：
 
    ```bash
-   easyeda health --project "宏恩门禁底座载板"
+   pcbpilot health --project "宏恩门禁底座载板"
    ```
 
    通过条件是：目标工程只有一个窗口、文档 UUID 正确、
    `connectorVersion` 是期望版本。随后先执行一个读操作（例如
-   `easyeda sch list --doc <doc-uuid>`），读操作正常后再发最小写操作。
+   `pcbpilot sch list --doc <doc-uuid>`），读操作正常后再发最小写操作。
 
 网页版如果 daemon 重启后一直没有重新注册，关闭目标 tab，再用工程 UUID
 重新打开一个 tab；不要反复 reload 同一个 tab。不要为了清理连接器而清空
@@ -71,9 +71,9 @@ JavaScript。因此版本升级后的“完全退出并重启 EasyEDA”仍是�
 恢复后至少记录以下结果：
 
 ```bash
-easyeda health --project "<project>"
-easyeda sch list --doc <doc-uuid>
-easyeda sch check --doc <doc-uuid>
+pcbpilot health --project "<project>"
+pcbpilot sch list --doc <doc-uuid>
+pcbpilot sch check --doc <doc-uuid>
 ```
 
 `health` 应只有一个目标窗口；`sch list` 应能稳定返回同一个文档上下文；
@@ -83,7 +83,7 @@ easyeda sch check --doc <doc-uuid>
 
 ## 本次现场证据
 
-宏恩门禁现场恢复后，60832 只有一个 daemon 监听，`health` 只列出一个窗口，
+宏恩门禁现场恢复后，61832 只有一个 daemon 监听，`health` 只列出一个窗口，
 连接器为 1.4.0，`schematic.components.list` 正常返回。此前同一页面曾同时
 出现 1.3.1、1.3.2 和 1.4.0 的注册，且放置动作在连接器 FIFO 队首超时；这与
 旧页面运行时残留的特征一致。

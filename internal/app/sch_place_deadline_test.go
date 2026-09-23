@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/protocol"
+	"github.com/zhuangzard/pcbpilot/internal/protocol"
 )
 
 func TestPlaceStructuredDeadlinePreservesErrorAndReadbackAdvice(t *testing.T) {

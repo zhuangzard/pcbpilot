@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/selfupdate"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/version"
+	"github.com/zhuangzard/pcbpilot/internal/selfupdate"
+	"github.com/zhuangzard/pcbpilot/internal/version"
 )
 
 // exitCodeUpdatesAvailable is the exit code `update --check --exit-code` uses when
@@ -19,7 +19,7 @@ import (
 // without parsing text (0 = verified and compatible, 1 = check failure).
 const exitCodeUpdatesAvailable = 10
 
-// updateReport is the JSON shape of `easyeda update` / `easyeda update --check`.
+// updateReport is the JSON shape of `pcbpilot update` / `pcbpilot update --check`.
 // The three moving parts of an install are reported side by side: the CLI
 // binary, the skill dirs, and the EasyEDA connector — only the first two can be
 // updated from here (see connectorNote).
@@ -88,9 +88,9 @@ func newUpdateCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 		Long: `Bring this installation up to the latest GitHub release.
 
 Covers the two pieces that CAN be updated programmatically:
-  • the easyeda CLI binary itself (downloaded for this platform, sha256-verified
+  • the pcbpilot CLI binary itself (downloaded for this platform, sha256-verified
     when the release publishes checksums.txt, then atomically swapped in place)
-  • the easyeda-agent skill dirs (~/.claude/skills, ~/.codex/skills,
+  • the pcbpilot skill dirs (~/.claude/skills, ~/.codex/skills,
     and the shared ~/.agents/skills root used by Codex Desktop)
 
 The EasyEDA connector .eext is only REPORTED: a sideloaded extension has no
@@ -100,14 +100,14 @@ in-place auto-update, so a stale connector has to be re-imported by hand
 A dev build (git-describe stamp) is never overwritten without --force.
 If the binary lives in a root-owned dir, re-run with sudo.`,
 		Args: cobra.NoArgs,
-		Example: `  easyeda update                    # CLI + skills → latest
-  easyeda update --check            # report only, change nothing
-  easyeda update --check --exit-code  # exit 10 when explicit install reconciliation finds a difference
-  easyeda update --version 0.25.0   # pin a release
-  easyeda update --skill-only       # leave the binary alone
-  easyeda update --json
-  easyeda update --local-dir ./dist --binary /absolute/path/to/easyeda  # install trusted local dev assets
-  easyeda update --local-dir ./dist --check --exit-code                 # offline, exact local runtime reconciliation`,
+		Example: `  pcbpilot update                    # CLI + skills → latest
+  pcbpilot update --check            # report only, change nothing
+  pcbpilot update --check --exit-code  # exit 10 when explicit install reconciliation finds a difference
+  pcbpilot update --version 0.25.0   # pin a release
+  pcbpilot update --skill-only       # leave the binary alone
+  pcbpilot update --json
+  pcbpilot update --local-dir ./dist --binary /absolute/path/to/pcbpilot  # install trusted local dev assets
+  pcbpilot update --local-dir ./dist --check --exit-code                 # offline, exact local runtime reconciliation`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if localDir != "" {
 				for _, flag := range []string{"version", "cli-only", "skill-only", "client", "preserve", "force", "create-missing"} {
@@ -461,12 +461,12 @@ func updateNotes(rep updateReport) []string {
 	var notes []string
 	if rep.Connector != nil && rep.Connector.DaemonStatus == "mismatch" {
 		notes = append(notes, "daemon is still running a DIFFERENT binary — restart it with v"+rep.Target+
-			" (stop the current `easyeda daemon start`, then start it again)")
+			" (stop the current `pcbpilot daemon start`, then start it again)")
 	}
 	if rep.Connector != nil && (rep.Connector.Status == "behind" || rep.Connector.Status == "mismatch") {
 		notes = append(notes, fmt.Sprintf(
 			"connector %s is not compatible with the v%s major.minor line and cannot be updated from here — re-import the .eext "+
-				"(https://github.com/%s/releases/download/v%s/easyeda-agent-connector.eext), "+
+				"(https://github.com/%s/releases/download/v%s/pcbpilot-connector.eext), "+
 				"then fully quit and relaunch EasyEDA so open windows load it",
 			strings.Join(rep.Connector.Versions, ","), rep.Target, selfupdate.Repo(), rep.Target))
 	}
@@ -475,10 +475,10 @@ func updateNotes(rep updateReport) []string {
 			notes = append(notes, fmt.Sprintf("skill %s kept local content and its previous version marker; release parity is not claimed", s.Client))
 		}
 		if s.Status == "not-installed" {
-			notes = append(notes, fmt.Sprintf("skill not installed for %s — `easyeda update --create-missing` to add %s", s.Client, s.Dir))
+			notes = append(notes, fmt.Sprintf("skill not installed for %s — `pcbpilot update --create-missing` to add %s", s.Client, s.Dir))
 		}
 		if s.Status == "skipped" && s.Err != "" {
-			notes = append(notes, fmt.Sprintf("skill %s skipped (%s) — `easyeda update --create-missing` to install it", s.Client, s.Err))
+			notes = append(notes, fmt.Sprintf("skill %s skipped (%s) — `pcbpilot update --create-missing` to install it", s.Client, s.Err))
 		}
 	}
 	return notes
@@ -489,7 +489,7 @@ func printUpdateReport(w io.Writer, rep updateReport) {
 	if rep.Latest == "" {
 		label = "pinned"
 	}
-	fmt.Fprintf(w, "easyeda-agent %s  →  %s v%s\n\n", rep.CLIVersion, label, rep.Target)
+	fmt.Fprintf(w, "pcbpilot %s  →  %s v%s\n\n", rep.CLIVersion, label, rep.Target)
 
 	// component | status | version(s) | where — one fixed grid so the three
 	// rows line up whatever the client names are.

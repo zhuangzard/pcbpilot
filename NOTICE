@@ -1,5 +1,11 @@
-easyeda-agent
-Copyright (c) zhoushoujianwork and contributors
+pcbpilot
+Copyright (c) zhuangzard and contributors
+
+pcbpilot is a fork of easyeda-agent (https://github.com/zhoushoujianwork/easyeda-agent),
+Copyright (c) zhoushoujianwork and contributors, MIT License. The CLI, daemon,
+connector, typed action catalog, skills, block library and most documentation
+originate from that project; its full commit history is preserved in this
+repository. Our thanks to the original author and every contributor.
 
 This product includes third-party software listed below.
 
@@ -12,7 +18,7 @@ PCB 走线美化(拐角圆弧化 + 差分/等长同心圆弧 + 线宽平滑)算�
   Author:  m-RNA
   License: Apache License 2.0
 
-Absorbed into this project as the `pcb.beautify` typed action / `easyeda pcb
+Absorbed into this project as the `pcb.beautify` typed action / `pcbpilot pcb
 beautify` command. The pure-geometry modules were ported largely verbatim:
 
   extension/src/beautify/math.ts         ← src/lib/math.ts

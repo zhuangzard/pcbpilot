@@ -28,7 +28,10 @@ permissions:
 
 jobs:
   publish:
-    name: Validate and publish easyeda-agent skill
+    name: Validate and publish pcbpilot skill
+    # Off unless the repository variable PUBLISH_HUBS is "1": the public hub
+    # slugs used to belong to upstream easyeda-agent, pcbpilot has none yet.
+    if: vars.PUBLISH_HUBS == '1'
     runs-on: ubuntu-latest
     steps:
       - name: Check out the release commit
@@ -59,7 +62,7 @@ jobs:
       - name: Validate skill against the Agent Skills spec
         run: |
           set -euo pipefail
-          npx -y skills-ref@latest validate ./.agents/skills/easyeda-agent
+          npx -y skills-ref@latest validate ./.agents/skills/pcbpilot
 
       # 官方装法。**不要**改成 `npm i -g skillhub` —— npm 上的同名包是另一个
       # 项目(skills.palebluedot.live),bin 名一样,装上会静默发错地方。
@@ -109,7 +112,7 @@ jobs:
 
           - `401` — token 失效或被撤销。到 https://skillhub.cn/dashboard/keys 重建,更新 secret `SKILLHUB_TOKEN`。
           - `403` — 账号没完成实名认证,平台不放行发布。
-          - `409` — slug `easyeda-agent` 被别人占了,或这个版本号已发过(版本不可覆盖)。
+          - `409` — slug `pcbpilot` 被别人占了,或这个版本号已发过(版本不可覆盖)。
           - `429` — 触发限频,等一分钟后重跑本 workflow。
           - `SKILL.md 缺少 slug/displayName` — frontmatter 注入没生效,检查 Makefile 的 `publish-skill-hub`。
 

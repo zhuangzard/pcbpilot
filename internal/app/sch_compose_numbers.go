@@ -1,6 +1,6 @@
 package app
 
-import "github.com/zhoushoujianwork/easyeda-agent/internal/connectivity"
+import "github.com/zhuangzard/pcbpilot/internal/connectivity"
 
 // Match the design-diff/revision numeric contract at the compile boundary.
 // This removes API arithmetic tails at 1e-9 raw, not at the 5-raw drawing grid.

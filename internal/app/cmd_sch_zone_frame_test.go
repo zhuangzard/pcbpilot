@@ -22,7 +22,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/workflow"
+	"github.com/zhuangzard/pcbpilot/internal/workflow"
 )
 
 // ── 真机 fixture(工程 ceshi / POWER 页,2026-08-20)───────────────────────

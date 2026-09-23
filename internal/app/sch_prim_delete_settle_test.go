@@ -67,7 +67,7 @@ func TestPrimDeleteSettleRecheckKeepsFailingOnRealSurvivors(t *testing.T) {
 	}
 	msg := stderr.String()
 	if !strings.Contains(msg, "pid-1") || !strings.Contains(msg, "wedge") ||
-		!strings.Contains(msg, "easyeda sch save") {
+		!strings.Contains(msg, "pcbpilot sch save") {
 		t.Fatalf("guidance must name the id and give a runnable next step:\n%s", msg)
 	}
 }

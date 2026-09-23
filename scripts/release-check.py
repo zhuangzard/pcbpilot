@@ -12,9 +12,9 @@ import tarfile
 import zipfile
 
 ASSETS = [
-    "easyeda_darwin_amd64", "easyeda_darwin_arm64",
-    "easyeda_linux_amd64", "easyeda_linux_arm64", "easyeda_windows_amd64.exe",
-    "easyeda-agent-connector.eext", "skills.tar.gz", "install.sh", "install.ps1",
+    "pcbpilot_darwin_amd64", "pcbpilot_darwin_arm64",
+    "pcbpilot_linux_amd64", "pcbpilot_linux_arm64", "pcbpilot_windows_amd64.exe",
+    "pcbpilot-connector.eext", "skills.tar.gz", "install.sh", "install.ps1",
 ]
 # Installer scripts are published verbatim; the packaged copy must match the source.
 INSTALLERS = ["install.sh", "install.ps1"]
@@ -41,7 +41,7 @@ def check_sources(repo: Path, tag: str, local_dev: bool = False) -> str:
             raise ValueError(f"{name}: version {data.get('version')!r}, expected {version}")
         if name.endswith("package-lock.json") and data.get("packages", {}).get("", {}).get("version") != version:
             raise ValueError(f"{name}: packages[''].version must also be {version}")
-    if skill_version((repo / ".agents/skills/easyeda-agent/SKILL.md").read_text(encoding="utf-8")) != version:
+    if skill_version((repo / ".agents/skills/pcbpilot/SKILL.md").read_text(encoding="utf-8")) != version:
         raise ValueError(f"SKILL.md version must be {version}; run scripts/sync-skill-version.py {version}")
     changelog = (repo / "extension/CHANGELOG.md").read_text(encoding="utf-8")
     if not re.search(rf"^##\s*\[{re.escape(version)}\]", changelog, re.MULTILINE):
@@ -84,9 +84,9 @@ def check_artifacts(repo: Path, dist: Path, version: str) -> None:
         if hashlib.sha256((dist / name).read_bytes()).hexdigest() != expected[name]:
             raise ValueError(f"checksum mismatch: {name}")
     manifest = json.loads((repo / "extension/extension.json").read_text(encoding="utf-8"))
-    check_connector(dist / "easyeda-agent-connector.eext", version, manifest["uuid"])
+    check_connector(dist / "pcbpilot-connector.eext", version, manifest["uuid"])
     with tarfile.open(dist / "skills.tar.gz", "r:gz") as archive:
-        item = archive.extractfile("easyeda-agent/SKILL.md")
+        item = archive.extractfile("pcbpilot/SKILL.md")
         if item is None or skill_version(item.read().decode()) != version:
             raise ValueError("packaged SKILL.md has the wrong version")
     for name in INSTALLERS:
@@ -100,9 +100,9 @@ def check_artifacts(repo: Path, dist: Path, version: str) -> None:
     os_name = platform.system().lower()
     arch = {"x86_64": "amd64", "aarch64": "arm64", "arm64": "arm64"}.get(platform.machine().lower())
     if arch and os_name in {"darwin", "linux"}:
-        binary = (dist / f"easyeda_{os_name}_{arch}").resolve()
+        binary = (dist / f"pcbpilot_{os_name}_{arch}").resolve()
         actual = subprocess.check_output([str(binary), "--version"], text=True).strip()
-        if actual != f"easyeda-agent v{version}":
+        if actual != f"pcbpilot v{version}":
             raise ValueError(f"native release CLI version mismatch: {actual}")
 
 

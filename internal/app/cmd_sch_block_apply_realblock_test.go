@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/blocks"
+	"github.com/zhuangzard/pcbpilot/internal/blocks"
 )
 
 // ── 真块 origin 回归(issue #180 P0 对抗审查抓到的 blocker)──────────────────

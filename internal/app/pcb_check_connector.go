@@ -24,8 +24,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/blocks"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/spec"
+	"github.com/zhuangzard/pcbpilot/internal/blocks"
+	"github.com/zhuangzard/pcbpilot/internal/spec"
 )
 
 const (

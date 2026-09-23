@@ -1,6 +1,6 @@
 package app
 
-// cmd_sch_status.go — `easyeda sch status`:原理图侧的**进度权威**,S1–S6 逐条从
+// cmd_sch_status.go — `pcbpilot sch status`:原理图侧的**进度权威**,S1–S6 逐条从
 // 活体推导。
 //
 // 立项背景(2026-08-16,esp32Mini E2E 复盘):`workflow status` 把 imported 与
@@ -152,7 +152,7 @@ func schStageVerdicts(pages []schPageFacts, gate schGateSummary) []schStageVerdi
 	s1 := schStageVerdict{Stage: "S1", Title: "图纸/分页"}
 	switch {
 	case reachable == 0:
-		s1.State, s1.Detail = schStageUnknown, "读不到任何页的几何 —— 先 `easyeda health` / `doc switch`"
+		s1.State, s1.Detail = schStageUnknown, "读不到任何页的几何 —— 先 `pcbpilot health` / `doc switch`"
 	case sheeted < reachable:
 		s1.State = schStagePartial
 		s1.Detail = fmt.Sprintf("%d/%d 页有可读图纸 —— 无 sheet 的页不能开始 place", sheeted, reachable)
@@ -289,7 +289,7 @@ func schStatusNext(verdicts []schStageVerdict, pages []schPageFacts) (next, why 
 		}
 	}
 	if len(unreadable) > 0 {
-		return "easyeda health  →  easyeda doc switch <页>",
+		return "pcbpilot health  →  pcbpilot doc switch <页>",
 			fmt.Sprintf("%d 页读不到(%s)—— 判定不完整,先修环境;此时任何「已就绪」都不可信",
 				len(unreadable), strings.Join(unreadable, "/"))
 	}
@@ -302,11 +302,11 @@ func schStatusNext(verdicts []schStageVerdict, pages []schPageFacts) (next, why 
 		case "S1":
 			for _, p := range pages {
 				if p.Reachable && !p.NamedWell {
-					return fmt.Sprintf("easyeda sch page-rename --page %s --name <功能名>", p.DocUUID),
+					return fmt.Sprintf("pcbpilot sch page-rename --page %s --name <功能名>", p.DocUUID),
 						fmt.Sprintf("S1 未完:%q 的页名要等于它的功能", p.Name)
 				}
 			}
-			return "easyeda sch sheet-geometry --json", "S1 未完:" + v.Detail
+			return "pcbpilot sch sheet-geometry --json", "S1 未完:" + v.Detail
 		case "S2":
 			// 空画布上没有框可画 —— 先落块(block-apply 同时完成 S2 归组 + S3 摆放
 			// + S4 块内布线)。首跑真机时这里直接指 zone-plan,而画布上一个器件都
@@ -314,20 +314,20 @@ func schStatusNext(verdicts []schStageVerdict, pages []schPageFacts) (next, why 
 			// 念了一遍。
 			for _, p := range pages {
 				if p.Reachable && p.Parts > 0 {
-					return "easyeda sch zone-plan --json  →  easyeda sch zone-draw", "S2 未完:" + v.Detail
+					return "pcbpilot sch zone-plan --json  →  pcbpilot sch zone-draw", "S2 未完:" + v.Detail
 				}
 			}
-			return "easyeda blocks ls  →  easyeda sch block-apply <块> --instance <名>",
+			return "pcbpilot blocks ls  →  pcbpilot sch block-apply <块> --instance <名>",
 				"S2/S3 未开始:画布还是空的,先落块(block-apply 自动归组 + 摆放 + 块内布线)"
 		case "S3":
-			return "easyeda sch block-apply <块> --instance <名>", "S3 未完:" + v.Detail
+			return "pcbpilot sch block-apply <块> --instance <名>", "S3 未完:" + v.Detail
 		case "S4":
-			return "easyeda sch autoconnect", "S4 未完:" + v.Detail
+			return "pcbpilot sch autoconnect", "S4 未完:" + v.Detail
 		case "S5":
-			return "easyeda sch gate --strict --doc <页>", "S5 未过:" + v.Detail
+			return "pcbpilot sch gate --strict --doc <页>", "S5 未过:" + v.Detail
 		}
 	}
-	return "easyeda pcb import-changes", "原理图侧 S1–S4 已就绪(S5 请用 gate 验) —— 下一步进 PCB(P1)"
+	return "pcbpilot pcb import-changes", "原理图侧 S1–S4 已就绪(S5 请用 gate 验) —— 下一步进 PCB(P1)"
 }
 
 // collectSchPageFacts 拉一页的活体事实。几何只能读**激活页**,所以调用方负责切页;
@@ -570,9 +570,9 @@ func newSchStatusCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *
 
 默认只测激活页(快、不动前台);--all-pages 逐页切过去读完再切回原页。`,
 		Args: cobra.NoArgs,
-		Example: `  easyeda sch status --project ceshi
-  easyeda sch status --project ceshi --all-pages
-  easyeda sch status --project ceshi --all-pages --gate`,
+		Example: `  pcbpilot sch status --project ceshi
+  pcbpilot sch status --project ceshi --all-pages
+  pcbpilot sch status --project ceshi --all-pages --gate`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSchStatus(cfg, *window, allPages, withGate, asJSON, stdout, stderr)
 		},

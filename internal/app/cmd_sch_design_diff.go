@@ -8,7 +8,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/connectivity"
+	"github.com/zhuangzard/pcbpilot/internal/connectivity"
 )
 
 func newSchDesignDiffCmd(stdout, stderr io.Writer) *cobra.Command {
@@ -43,7 +43,7 @@ matches. Use fresh EDA readback and frame check/export-image to verify the edito
 
 Exit codes: 0 comparison completed; 2 different with --exit-code; 3 wrong target
 or incomplete canonical evidence; 1 malformed input or operational error.`,
-		Example: "  easyeda sch design-diff target-plan.json observed-connectivity.json --exit-code\n  easyeda sch design-diff before-plan.json after-plan.json --before fresh.json --playbook frame-diff-apply.json",
+		Example: "  pcbpilot sch design-diff target-plan.json observed-connectivity.json --exit-code\n  pcbpilot sch design-diff before-plan.json after-plan.json --before fresh.json --playbook frame-diff-apply.json",
 		Args:    cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if (playbookPath == "") != (beforePath == "") {

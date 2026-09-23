@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/connectivity"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/protocol"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/schguard"
+	"github.com/zhuangzard/pcbpilot/internal/connectivity"
+	"github.com/zhuangzard/pcbpilot/internal/protocol"
+	"github.com/zhuangzard/pcbpilot/internal/schguard"
 )
 
 const (
@@ -174,7 +174,7 @@ func pinRepairMarkerType(kind string) (string, error) {
 }
 
 // pinRepairStoredRotation mirrors the calibrated stored-rotation truth in
-// .agents/skills/easyeda-agent/references/orientation.json. The generated playbook
+// .agents/skills/pcbpilot/references/orientation.json. The generated playbook
 // already uses this table; the daemon repeats the check so a hand-edited target
 // cannot keep the wire outward while turning the marker body back toward it.
 func pinRepairStoredRotation(kind, direction string) (float64, error) {

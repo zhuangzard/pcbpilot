@@ -229,7 +229,7 @@ func TestSkillSyncRejectsWrongMetadataEvenWithValidChecksum(t *testing.T) {
 	for _, body := range []string{
 		"No metadata",
 		skillDocument("1.4.1", "OLD RELEASE"),
-		"---\nname: easyeda-agent\n---\nmetadata:\n  version: 1.4.2\n",
+		"---\nname: pcbpilot\n---\nmetadata:\n  version: 1.4.2\n",
 		"---\nmetadata:\n  version: 1.4.2\n  version: 1.4.1\n---\n",
 	} {
 		t.Run(body, func(t *testing.T) {

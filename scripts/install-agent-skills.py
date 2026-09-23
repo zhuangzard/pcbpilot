@@ -14,8 +14,8 @@ def skill_sources(repo: Path, scope: str = "repo") -> list[Path]:
         path.resolve()
         for path in sorted((repo / ".agents/skills").glob("*"))
         if not path.is_symlink() and path.is_dir() and (path / "SKILL.md").is_file()
-        and (scope == "all" or (scope == "design" and path.name == "easyeda-agent")
-             or (scope == "repo" and path.name.startswith("easyeda-repo-")))
+        and (scope == "all" or (scope == "design" and path.name == "pcbpilot")
+             or (scope == "repo" and path.name.startswith("pcbpilot-repo-")))
     ]
     if not sources:
         raise ValueError(f"no Skills found for scope {scope}")
@@ -32,9 +32,9 @@ def target_dirs(target: str) -> list[Path]:
 
 def legacy_link(source: Path, destination: Path) -> bool:
     """Only migrate the old public-Skill link belonging to this exact checkout."""
-    if source.name != "easyeda-agent" or not destination.is_symlink():
+    if source.name != "pcbpilot" or not destination.is_symlink():
         return False
-    old_source = source.parents[2] / "skills" / "easyeda-agent"
+    old_source = source.parents[2] / "skills" / "pcbpilot"
     return destination.resolve() == old_source.resolve()
 
 

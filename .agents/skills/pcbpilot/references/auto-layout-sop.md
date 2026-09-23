@@ -1,0 +1,125 @@
+# 原理图数据计算与 Apply 验证流程
+
+新设计与整页重建使用 1.4 数据路径。数据契约见 [schematic-data.md](schematic-data.md)，
+坐标、紧凑标题与存量工具边界见 [schematic-placement.md](schematic-placement.md)。
+本流程遵守 [数据驱动架构基准](schematic-data.md#数据驱动架构基准)，
+不要求先运行 `autolayout` 或按固定分区拆页。检查失败回改源数据/采集/算法后重算，
+不是转为现场逐件试摆；每次恢复先找到源输入和生成记录，不能仅从上次截图继续。
+
+## 1. 准备电路与测量数据
+
+确认工程和目标页，保留完整工程 connectivity 与每页的几何快照：
+
+```bash
+pcbpilot doc ls --project <project> --json
+pcbpilot sch connectivity --all-pages --project <project> > project-connectivity.json
+pcbpilot sch list --project <project> --page <page> --stay \
+  --include-device-identity --include-pins --include-bbox --include-wires > page-before.json
+pcbpilot sch sheet-geometry --project <project> --json
+```
+
+在副本中依据官方典型电路补齐器件、引脚和网络；修复非标准位号后再布局。
+外围要围绕核心引脚并直接接线。已有网络与显式 NC 保持可追溯，不能把缺数据当作悬空或 NC。
+临时输入、计算结果和回读证据保存在项目忽略的目录，原快照保留不覆盖。
+
+## 2. 离线计算模块与单页组合
+
+普通 zones 的本地效果先走固定链路：
+`layout-plan --zones → layout-sheet-plan → layout-render`，所有区完整通过才出效果。
+输入顶层 spacing 统一内边距、框间距和页边距；区内回退只影响本区，整页仅平移区框。
+纸张默认 `--flow z`：输入功能顺序从左到右、同行顶齐，下一行按该行最高框推进；
+不补短框下空洞，不回填旧页。同页集合按最早成员聚拢、成员顺序不变，整体试放或换页。
+旧自由装箱需显式 `--flow compact`，不能为减少页数悄悄改变用户要求的 Z 型阅读流。
+修改阅读流后重新生成 pages，不能直接沿用仅通过碰撞检测的旧 sheetPosition。
+用户只授权预览时止于离线结果，不执行下文 Apply。诊断模式不能替代完整候选；
+保留源数据、参数、源码提交和输出哈希，使相同输入能重现同一图面。
+复杂直连网络在源输入顶层使用可选
+`routing:{"maxExpandedNodes":200000,"maxReroutes":4}`；省略即采用这两个默认值。
+该预算按 zone 隔离，5 raw 方向网格的 40/80/160/320 raw 包络扩展、全部 direct 网络、
+撤线重布和允许姿态尝试共同消费，不能在失败后重置。先保存 `--report`：它必须能重放
+失败局部布局、未连接的指定物理线岛、候选路径摘要与逐边拒绝证据，但诊断数据不能交给
+compose/Apply。报告为预算耗尽或限定范围无路径只表示有界失败；修算法/源约束后从本阶段
+重算。失败命令不得生成或覆盖几何输出。
+direct 放置前沿、整网撤线重布和阻挡器件/attachment 刚体迁移都由同一内核执行；迁移先试
+主轴向外 5/10 raw，再按 5 raw 扩展到 40 raw。已合并线树可从真实中段/T/端点垂直接出
+命名，但命名成功不能反向证明 direct 已连接。检查报告中的指定线岛合并证据仍是进入 Apply 前
+必须核对的连接不变量。
+用户确认拆出完整功能子电路时，先仅修改成员归属与边界绘图策略，保留 pin→net/NC；
+需要相邻阅读时声明 placement.samePageAs 与 preferAdjacent，再走相同完整出图链路。
+若拆分使核心接口同侧留下多个同名信号 `module_port` 引脚，区内求解必须先把它们合成真实
+线树，再在边界命名；不能用逐引脚同名标签代替。源数据仍保留 `module_port`，这一临时提升
+只发生在求解副本，回读时同时核对区内物理线岛合并和跨区网络不变。
+比较拆前/拆后的主区及子区框面积、整页总框面积、总线长、页数与其他区几何不变量。
+拆区成功不代表对称、对齐等软目标已经达成；图面未达到的目标单列，不手填坐标掩盖算法结果。
+
+用户要求方向选择/面积压缩时，在源输入声明 optimization 与外围 allowedRotations，
+由程序计算最多 4 个完整区内候选，再由 Z 型纸张层选择；详见数据契约的有限形态候选。
+每个候选都保持原直连引脚组，不因同名标签仍能联网而接受拆线瘦身。保留原合法基线，
+同时报告尝试数/停止原因、各区宽高面积、线长、最终页数与未改善区域，不只展示最好局部。
+候选几何、框和连接必须整套选择；禁止在渲染脚本里旋转符号、缩框或用其他方案导线拼接。
+每页完整固定渲染与重复计算一致性验证通过后才交付本地效果，不证明 EDA 已 Apply。
+
+已确认 `layout-sheet-plan` 页时，将该页选中几何原样对应为 composition 的 modules，
+补齐同页 canonical 连接核心与新鲜身份/纸张证据；使用下列固定转换入口，不再次求解。
+page.json 是 pages[] 中的一页，不含候选包；间距、框、标题、位置均必须与预览一致。
+新鲜纸张或现场连接改变时先处理差异，不能改快照来匹配旧预览。
+
+```bash
+pcbpilot sch compose --from composition.json --layout-page page.json --out plan.json \
+  --before page-before.json --replace --playbook apply.json
+```
+
+该入口仅离线验证与刚体平移，仍复用可检查的完整 Apply 队列；不自动创建/合并/删除页面。
+转换功能仅在新源码中存在时，可离线编译但不能据此声称安装版已支持；实际执行前须用
+当前版本 CLI 完成队列 dry-run，并以 `--help` 核对安装态命令签名。需要安装对账时显式运行
+`pcbpilot update --check`；版本状态不许可或拒绝普通 Apply，也不强制新开会话。
+
+尚未确认纸张位置的 Lib 可用 `sch lib-layout` 计算局部几何，再用默认 compose 组合；框按各自内容压缩上下空档，
+按功能顺序排 Z 字行，同行顶齐，下一行按上一行最高框推进，不统一拉高。
+提供实测 `sheetBorder` 后，虚线笔画到红色图纸内框最少留 10 raw。
+标题使用粉色 0.2 inch，方框使用粉色虚线；当前不生成 Notes。
+
+```bash
+pcbpilot sch compose --from composition.json --out plan.json \
+  --before page-before.json --playbook apply.json
+```
+
+目标页与计划不同且任务已授权重建时，加 `--replace` 生成带清页守卫的队列；不要先自行
+清空页面来绕过差异检查。已完全匹配时复用电路；器件匹配但尚未布线时由生成器核验是否
+满足复用条件。装不下应修改模块几何或按功能拆页，compose 不自动迁页或删除源页。
+
+## 3. 执行与回读
+
+```bash
+pcbpilot sch apply apply.json --dry-run
+pcbpilot sch apply apply.json --yes
+```
+
+预览应显示正确的工程/页面、预计操作与全部守卫；`--yes` 仅用于已获授权的动作范围。
+生成的保护队列必须完整执行，不能改目标、`--resume` 或 `--from/--to` 跳过验证。
+失败时保留 journal，读取实际结果后重生成计划；已成功的写不会自动回滚。
+
+Apply 负责清页残留检查、放置后 ID/Role 绑定、接线前实测 pin/bbox 检查，以及电气与图形
+回读。超时或 `partial` 先核实实际状态，不能盲目重复 place/connect。若只补框标题，
+用 `sch frame apply/check`；它只操作自己登记的图元。
+
+进入 Apply 前检查 layout 报告的末态分类必须为成功，并确认所有 direct 网络的指定源/目标
+线岛已真实合并、无剩余失败线岛；`data-missing`、`expanded-node-budget-exhausted`、
+`no-path-within-bounds`、`final-validation-failed` 任一存在都停止。dry-run 也不能消费
+diagnostic/blocked/partial 布局；先修复源数据、采集或算法，再重新生成完整受保护队列。
+
+## 4. 验证代码转换效果
+
+1. 对照目标 IR 与实际 connectivity：组件身份、pin→net、NC 必须一致。多页逐页读取，
+   检查迁移后的页面归属和全工程位号；离线 diff 通过不能替代实际写入证明。
+2. 逐页保存 `layout-lint`、`sch check`、`bridge-check` 和 SDK DRC 结果；`sch gate` 可作为旧脚本
+   的聚合显示。`blocked` 表示检查未完成，未执行的项目明确列为待验证。
+3. `sch frame check` 核验矩形、标题、颜色、虚线及必检文字净距；另对实际数据检查
+   核心/外围归属、直连保持、位号入框和遮挡。型号/参数等非位号属性不参与布局检查。
+   `sch export-image` 仅辅助审阅；若发现漏检，先补原始数据采集、规则和回归再重算，
+   不能用人工看图补签缺测项。覆盖不足不得称完整通过。
+4. `sch save` 返回 `saved:true`。保留输入、生成队列、回读和验证报告，报告仍未覆盖的限制。
+
+只整理已有连线的小范围区域时，可按 [schematic-placement.md](schematic-placement.md)
+选带连接的移动工具；先记录源目标与变更，完成后同步源数据并保存前后 topology/NC/几何对照。
+未闭合可重复生成链不能记为算法验收通过。不要用只移动器件的工具替代连接迁移。

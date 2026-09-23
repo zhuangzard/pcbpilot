@@ -183,8 +183,8 @@ func schPageFitAdvice(f schPageFit) string {
 	switch f.Verdict {
 	case schFitNeedsMove:
 		return fmt.Sprintf("%s 的尺寸(%.0f×%.0f)在本页放得下(可用 %.0f×%.0f),"+
-			"只是**位置**压着纸边或图签 —— 挪一挪就能解:`easyeda sch group-move --group <组> --dx … --dy …`,"+
-			"或整页重排 `easyeda sch zone-arrange --apply`。",
+			"只是**位置**压着纸边或图签 —— 挪一挪就能解:`pcbpilot sch group-move --group <组> --dx … --dy …`,"+
+			"或整页重排 `pcbpilot sch zone-arrange --apply`。",
 			who, f.W, f.H, f.UsableW, f.UsableH)
 	case schFitTooBig:
 		gauge := "实测"
@@ -214,9 +214,9 @@ func schPageFitAdvice(f schPageFit) string {
 		return fmt.Sprintf("%s %s %.0f×%.0f —— %s。"+
 			"**这不是摆放问题:再挪、再压 `--per-row`、再调 margin/gutter 都不会让它变小。**"+
 			"三条出路(A4-only,不换纸):"+
-			"① 让它独占一页 —— `easyeda sch page-new --name <页名>` 后在新页 `block-apply`;"+
+			"① 让它独占一页 —— `pcbpilot sch page-new --name <页名>` 后在新页 `block-apply`;"+
 			"② 继续分页 —— 把本页其余模块搬到新页,腾出整幅给它;"+
-			"③ 把组收小 —— `easyeda sch clusters` 看「组高 vs 本体高」,"+
+			"③ 把组收小 —— `pcbpilot sch clusters` 看「组高 vs 本体高」,"+
 			"被自己 marker 撑大的脚用 `sch disconnect --pin X:n` + "+
 			"`sch connect --pin X:n --direction left|right` 改标签朝向"+
 			"(竖排标签能把组撑高数倍:实测本体 21 高的电容,组高 134,改横向后 58)。",

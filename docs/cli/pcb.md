@@ -1,12 +1,12 @@
 # PCB 功能支持全景(CLI 视角)
 
-`easyeda pcb` 域(含兼容用 `workflow` 记录)的**当前能力清单 + 待支持路线**。定位:AI agent
+`pcbpilot pcb` 域(含兼容用 `workflow` 记录)的**当前能力清单 + 待支持路线**。定位:AI agent
 从原理图同步到制造导出,全程 typed CLI 操作,每步可观测、可校验。
 
-> 动作目录真值:`easyeda actions`;流程编排(P0–P10 何时用哪条)见
-> [`design-flow.md`](../../.agents/skills/easyeda-agent/references/design-flow.md);
+> 动作目录真值:`pcbpilot actions`;流程编排(P0–P10 何时用哪条)见
+> [`design-flow.md`](../../.agents/skills/pcbpilot/references/design-flow.md);
 > 设计规范手册(线宽/间距/过孔/铺铜,DRC 报错的 `[规范 §N]` 指向)见
-> [`pcb-design-rules.md`](../../.agents/skills/easyeda-agent/references/pcb-design-rules.md)。
+> [`pcb-design-rules.md`](../../.agents/skills/pcbpilot/references/pcb-design-rules.md)。
 
 ## 一、已支持(按功能域)
 

@@ -47,8 +47,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/spec"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/workflow"
+	"github.com/zhuangzard/pcbpilot/internal/spec"
+	"github.com/zhuangzard/pcbpilot/internal/workflow"
 )
 
 // specBackfillManualHint 拼「手工同步」那一行提示。
@@ -61,12 +61,12 @@ import (
 // (`--window <id>`,与 block-apply 的路由方式一致)。
 func specBackfillManualHint(path, project string) string {
 	if p := strings.TrimSpace(project); p != "" {
-		return fmt.Sprintf("手工同步:easyeda spec backfill %s --project %s --write", path, p)
+		return fmt.Sprintf("手工同步:pcbpilot spec backfill %s --project %s --write", path, p)
 	}
-	return fmt.Sprintf("手工同步:工程名 = `easyeda project info --window <id>` 里的 friendlyName"+
-		"(或 `easyeda health` 里那个窗口的 projectName),拿到后跑 "+
-		"`easyeda spec backfill %s --project <工程名> --write`;"+
-		"也可以直接把窗口给它:`easyeda spec backfill %s --window <id> --write`", path, path)
+	return fmt.Sprintf("手工同步:工程名 = `pcbpilot project info --window <id>` 里的 friendlyName"+
+		"(或 `pcbpilot health` 里那个窗口的 projectName),拿到后跑 "+
+		"`pcbpilot spec backfill %s --project <工程名> --write`;"+
+		"也可以直接把窗口给它:`pcbpilot spec backfill %s --window <id> --write`", path, path)
 }
 
 // specBackfillChange 是一个模块的回填结果。

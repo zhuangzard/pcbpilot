@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-// newCapturingDaemon stands up a fake daemon that identifies as easyeda-agent
+// newCapturingDaemon stands up a fake daemon that identifies as pcbpilot
 // and records the last /action request body, so a command test can assert the
 // exact action + payload the CLI wired.
 func newCapturingDaemon(t *testing.T) (*appConfig, *capturedRequest, func()) {
@@ -21,7 +21,7 @@ func newCapturingDaemon(t *testing.T) (*appConfig, *capturedRequest, func()) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/health":
-			_, _ = w.Write([]byte(`{"service":"easyeda-agent","windows":[{"windowId":"w1"}]}`))
+			_, _ = w.Write([]byte(`{"service":"pcbpilot","windows":[{"windowId":"w1"}]}`))
 		case "/action":
 			var body struct {
 				Action  string         `json:"action"`

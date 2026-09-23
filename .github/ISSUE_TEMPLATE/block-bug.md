@@ -13,7 +13,7 @@ labels: block-bug
 ## 哪个块、哪一版
 
 - 块:`block.<id>`
-- 版本:<!-- 块 JSON 的 updated 字段,或 easyeda version 输出;block-apply manifest 里的 revision 更好 -->
+- 版本:<!-- 块 JSON 的 updated 字段,或 pcbpilot version 输出;block-apply manifest 里的 revision 更好 -->
 
 ## 现象(选一类,删掉其余)
 

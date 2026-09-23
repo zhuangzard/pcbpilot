@@ -1,8 +1,8 @@
 # 架构：数据驱动的设计、计算与执行
 
 现行原理图架构延续 1.4 Connectivity IR。唯一规范正文是随 Skill 发布的
-[数据驱动架构基准](../.agents/skills/easyeda-agent/references/schematic-data.md#数据驱动架构基准)，
-字段见同一手册，操作顺序见 [计算与 Apply SOP](../.agents/skills/easyeda-agent/references/auto-layout-sop.md)。
+[数据驱动架构基准](../.agents/skills/pcbpilot/references/schematic-data.md#数据驱动架构基准)，
+字段见同一手册，操作顺序见 [计算与 Apply SOP](../.agents/skills/pcbpilot/references/auto-layout-sop.md)。
 本页解释职责边界，不维护第二份布局规则。术语由 [concepts.md](concepts.md) 定义。
 
 ## 数据流与职责
@@ -64,8 +64,8 @@ workflow/stage、版本对账、布局评分和 staleRisk 是兼容诊断面，�
 - `incomplete`、缺测、预算耗尽、部分 Apply 与未确认保存不能报告完整通过。
 
 这些是执行/验收契约，不表示所有安装版本已经机械覆盖全部要求。
-当前边界见 [数据基准](../.agents/skills/easyeda-agent/references/schematic-data.md#数据驱动架构基准)
-及 [检查覆盖](../.agents/skills/easyeda-agent/references/schematic.md#检查覆盖边界原理图验收)。
+当前边界见 [数据基准](../.agents/skills/pcbpilot/references/schematic-data.md#数据驱动架构基准)
+及 [检查覆盖](../.agents/skills/pcbpilot/references/schematic.md#检查覆盖边界原理图验收)。
 现场验证、离线测试和正式发布分别举证，文档更新不等于运行时升级。
 
 ## 存量工具与历史设计
@@ -75,4 +75,4 @@ workflow/stage、版本对账、布局评分和 staleRisk 是兼容诊断面，�
 不能覆盖现行数据主链，也不提供事务回滚保证。原理图任务不自动延伸为 PCB。
 
 旧 `stage confirm-*`、`layout-lint --gate`、`--force/--force-unsafe` 与版本 skip 参数为脚本兼容
-保留；新样例不依赖它们授权执行。安装对账使用显式 `easyeda update --check --exit-code`。
+保留；新样例不依赖它们授权执行。安装对账使用显式 `pcbpilot update --check --exit-code`。

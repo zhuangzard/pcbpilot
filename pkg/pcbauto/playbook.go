@@ -19,7 +19,7 @@ type PlaybookInput struct {
 	Name           string
 }
 
-// Step is one `easyeda apply` step.
+// Step is one `pcbpilot apply` step.
 type Step struct {
 	ID      string         `json:"id"`
 	Name    string         `json:"name,omitempty"`
@@ -27,7 +27,7 @@ type Step struct {
 	Payload map[string]any `json:"payload,omitempty"`
 }
 
-// Playbook is an `easyeda apply` document.
+// Playbook is an `pcbpilot apply` document.
 type Playbook struct {
 	Version int            `json:"version"`
 	Meta    map[string]any `json:"meta"`

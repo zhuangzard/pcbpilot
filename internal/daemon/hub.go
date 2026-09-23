@@ -11,8 +11,8 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/protocol"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/selfupdate"
+	"github.com/zhuangzard/pcbpilot/internal/protocol"
+	"github.com/zhuangzard/pcbpilot/internal/selfupdate"
 )
 
 // Window is a read-only snapshot of a connected EasyEDA window, used by /health

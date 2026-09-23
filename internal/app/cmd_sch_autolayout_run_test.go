@@ -38,7 +38,7 @@ func newAutolayoutTestDaemon(t *testing.T, responder func(int, autolayoutTestCal
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/health":
-			_, _ = w.Write([]byte(`{"service":"easyeda-agent","windows":[{"windowId":"w1"}]}`))
+			_, _ = w.Write([]byte(`{"service":"pcbpilot","windows":[{"windowId":"w1"}]}`))
 		case "/action":
 			var body struct {
 				Action    string         `json:"action"`

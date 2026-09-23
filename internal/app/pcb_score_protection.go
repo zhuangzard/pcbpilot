@@ -90,7 +90,7 @@ const (
 var protectStrongDesRe = regexp.MustCompile(`(?i)^(?:PPTC|PTC|FU|F|RV|MOV|TVS|ESD)\d`)
 
 // protectDeviceRe —— 型号关键词。来源有二：
-//   - .agents/skills/easyeda-agent/references/standard-parts.json 里 class=esd/tvs/fuse 的实际
+//   - .agents/skills/pcbpilot/references/standard-parts.json 里 class=esd/tvs/fuse 的实际
 //     选型（USBLC6-2SC6 / ESD9B5.0ST5G / SMAJ5.0A / MF-MSMF050-2500MA / CFS12V6T2R0）；
 //     那个文件在 skill 树里，go:embed 够不到，所以关键词表抄在这里。
 //   - 常见系列前缀（SMAJ/SMBJ/SMCJ/P6SMB/1.5KE 的 TVS 家族，PESD/RCLAMP/SRV05/NUP/

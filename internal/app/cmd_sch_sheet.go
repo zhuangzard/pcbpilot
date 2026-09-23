@@ -83,7 +83,7 @@ var (
 )
 
 // sheetTemplates is the known sheet → title-block ratio table. Mirrored for
-// humans/skills in .agents/skills/easyeda-agent/references/sheet-templates.json;
+// humans/skills in .agents/skills/pcbpilot/references/sheet-templates.json;
 // this Go table is the runtime authority (the CLI is the interface planners use).
 var sheetTemplates = []sheetTemplate{
 	{Name: "a-series-landscape", Aspect: 1.414, AspectTol: 0.06, TitleBlock: defaultTitleBlockRatio},

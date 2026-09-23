@@ -3616,7 +3616,7 @@ test('device identity: schematic empty source API falls back to the official cur
 	const part = await readInstanceIdentity(mock);
 	assert.equal(part.device.uuid, identityDevice);
 	assert.equal(part.deviceResolution.via, 'lcsc-footprint-source');
-	assert.deepEqual(mock.calls[0], ['getProjectFile', 'easyeda-agent-identity.epro2', undefined, 'epro2']);
+	assert.deepEqual(mock.calls[0], ['getProjectFile', 'pcbpilot-identity.epro2', undefined, 'epro2']);
 });
 
 test('device identity: stable exact device name is allowed only when the instance has no MPN', async () => {

@@ -67,10 +67,10 @@ func newLibCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 			Use:   "search",
 			Short: "Search the EasyEDA device library by MPN, value+package, or name",
 			Args:  cobra.NoArgs,
-			Example: `  easyeda lib search --query "ESP32-S3-WROOM-1"
-  easyeda lib search --query "100nF 0402" --limit 5
-  easyeda lib search --query C5665              # exact LCSC match (auto-detected)
-  easyeda lib search --query C5665 --allow-fuzzy # keep the fuzzy ranked results`,
+			Example: `  pcbpilot lib search --query "ESP32-S3-WROOM-1"
+  pcbpilot lib search --query "100nF 0402" --limit 5
+  pcbpilot lib search --query C5665              # exact LCSC match (auto-detected)
+  pcbpilot lib search --query C5665 --allow-fuzzy # keep the fuzzy ranked results`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if query == "" {
 					return fmt.Errorf("--query is required")
@@ -112,9 +112,9 @@ func newLibCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 			Use:   "by-lcsc",
 			Short: "Resolve LCSC C-numbers directly to device-library identity (libraryUuid + uuid)",
 			Args:  cobra.NoArgs,
-			Example: `  easyeda lib by-lcsc --lcsc C6186
-  easyeda lib by-lcsc --lcsc C6186 --lcsc C9900163599
-  easyeda lib by-lcsc --lcsc C6186,C9900163599`,
+			Example: `  pcbpilot lib by-lcsc --lcsc C6186
+  pcbpilot lib by-lcsc --lcsc C6186 --lcsc C9900163599
+  pcbpilot lib by-lcsc --lcsc C6186,C9900163599`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if len(lcsc) == 0 {
 					return fmt.Errorf("--lcsc is required (one or more LCSC C-numbers)")
@@ -182,8 +182,8 @@ func newLibraryFootprintCmd(cfg *appConfig, stdout, stderr io.Writer, window *st
 			Use:   "create",
 			Short: "Create an empty footprint asset and verify it by readback",
 			Args:  cobra.NoArgs,
-			Example: `  easyeda lib footprint create --name MY_SOT23
-  easyeda lib footprint create --name MY_SOT23 --scope project`,
+			Example: `  pcbpilot lib footprint create --name MY_SOT23
+  pcbpilot lib footprint create --name MY_SOT23 --scope project`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if name == "" {
 					return fmt.Errorf("--name is required")
@@ -249,7 +249,7 @@ func newLibraryFootprintCmd(cfg *appConfig, stdout, stderr io.Writer, window *st
 			Use:     "build",
 			Short:   "Author pad/line geometry in an existing footprint from a JSON spec",
 			Args:    cobra.NoArgs,
-			Example: `  easyeda lib footprint build --uuid <fp> --library <lib> --spec footprint.json`,
+			Example: `  pcbpilot lib footprint build --uuid <fp> --library <lib> --spec footprint.json`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if uuid == "" || libraryUUID == "" || specPath == "" {
 					return fmt.Errorf("--uuid, --library and --spec are required")
@@ -281,7 +281,7 @@ func newLibraryFootprintCmd(cfg *appConfig, stdout, stderr io.Writer, window *st
 			Use:   "region",
 			Short: "Add a saved rule/keep-out region inside a writable non-system footprint",
 			Args:  cobra.NoArgs,
-			Example: `  easyeda lib footprint region --uuid <copy> --library <lib> \
+			Example: `  pcbpilot lib footprint region --uuid <copy> --library <lib> \
     --points '[[0,0],[1200,0],[1200,900],[0,900]]' --rule no-components --name LCD_BODY`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if uuid == "" || libraryUUID == "" || pointsJSON == "" {
@@ -488,7 +488,7 @@ func newLibraryDeviceCmd(cfg *appConfig, stdout, stderr io.Writer, window *strin
 		var addBOM, addPCB bool
 		c := &cobra.Command{
 			Use: "create", Short: "Create a Device bound to an existing symbol and optional footprint", Args: cobra.NoArgs,
-			Example: `  easyeda lib device create --name MY_PART \
+			Example: `  pcbpilot lib device create --name MY_PART \
     --symbol-uuid <uuid> --symbol-library <lib> \
     --footprint-uuid <uuid> --footprint-library <lib> --designator U`,
 			RunE: func(cmd *cobra.Command, args []string) error {

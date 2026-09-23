@@ -23,7 +23,7 @@ func (r *Report) WriteMarkdown(w io.Writer) {
 	p := func(format string, args ...any) { fmt.Fprintf(w, format, args...) }
 	res := r.Result
 	p("# PCB 自动设计报告\n\n")
-	p("> 本报告由 pcbauto 离线引擎生成。所有写入以 `playbook.json` 经 `easyeda apply` 执行；")
+	p("> 本报告由 pcbauto 离线引擎生成。所有写入以 `playbook.json` 经 `pcbpilot apply` 执行；")
 	p("最终以 EasyEDA 原生 DRC 与保存重载后的回读为准。\n\n")
 
 	if st := res.Stackup; st != nil {
@@ -166,6 +166,6 @@ func (r *Report) WriteMarkdown(w io.Writer) {
 		}
 		p("\n")
 	}
-	p("## 7. 执行\n\n```bash\neasyeda apply playbook.json --project <工程> --dry-run\neasyeda apply playbook.json --project <工程>\n```\n\n")
+	p("## 7. 执行\n\n```bash\npcbpilot apply playbook.json --project <工程> --dry-run\npcbpilot apply playbook.json --project <工程>\n```\n\n")
 	p("执行后按仓库准则：`pcb save` → `doc reload` → `pcb drc` / `pcb check` 回读确认。\n")
 }

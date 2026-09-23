@@ -1,6 +1,6 @@
 # Vision
 
-`easyeda-agent` follows an AI-native system shape:
+`pcbpilot` follows an AI-native system shape:
 
 ```text
 user goal
@@ -34,7 +34,7 @@ The goal is not to replace EasyEDA. The goal is to make EasyEDA controllable thr
 6. Prefer data-driven closed loops.
    Preserve raw observations, revise source design data, compute and validate, then apply and read back.
    Screenshots aid review but never replace missing machine evidence. Follow the
-   [schematic architecture baseline](../.agents/skills/easyeda-agent/references/schematic-data.md#数据驱动架构基准).
+   [schematic architecture baseline](../.agents/skills/pcbpilot/references/schematic-data.md#数据驱动架构基准).
 
 ## Non-goals
 

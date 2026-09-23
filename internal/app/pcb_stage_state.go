@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/workflow"
+	"github.com/zhuangzard/pcbpilot/internal/workflow"
 )
 
 // pcb_stage_state.go — CLI adapter over historical internal/workflow records.
@@ -15,7 +15,7 @@ import (
 // Stages, persistence, readiness calculations, and fingerprints live in
 // internal/workflow. State is global per project and remains readable by the
 // legacy `workflow` / `pcb stage` commands; it no longer authorizes or blocks
-// typed actions. The old cwd-relative .easyeda/pcb-stage file remains a fallback.
+// typed actions. The old cwd-relative .pcbpilot/pcb-stage file remains a fallback.
 //
 // Explicit stage commands can still compare fingerprints stored at confirm time
 // with live placement/outline geometry for historical reporting.
@@ -93,7 +93,7 @@ func resolveStageProject(cfg *appConfig, window string) (string, error) {
 // than failing. Costs one light `project.current` read — the same probe the
 // daemon uses for liveness — even when --project already pinned the key.
 //
-// Callers that must stay strictly OFFLINE (`easyeda spec backfill --project X`)
+// Callers that must stay strictly OFFLINE (`pcbpilot spec backfill --project X`)
 // keep using resolveStageProject and fall back to State.ProjectUUID for scoping.
 func resolveStageIdentity(cfg *appConfig, window string) (key, uuid string, err error) {
 	if strings.TrimSpace(cfg.project) != "" {
@@ -153,7 +153,7 @@ func warnForeignPages(project string, st *pcbStageState, stderr io.Writer) {
 	}
 	fmt.Fprintf(stderr, "⚠️  工程状态 %q 里有 %d 页属于别的工程(同名重建的残留:%s)——"+
 		"它们**不参与**跨页匹配(spec 回填 / 分区打分),数据一个字节没动。"+
-		"确认要清掉:`easyeda workflow pages --project %s --prune`\n",
+		"确认要清掉:`pcbpilot workflow pages --project %s --prune`\n",
 		project, len(foreign), strings.Join(foreign, ", "), project)
 }
 

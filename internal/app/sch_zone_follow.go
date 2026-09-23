@@ -430,7 +430,7 @@ func zfCheckPassiveOpposed(g zfPlacedGroup) error {
 		"两根桩落在同一条直线上,平台会把相接的导线自动合并成一根,%s 与 %s 当场并成一张网(自短路);"+
 		"这是「同件两旗异向」硬不变式(自短路防线)拦下的唯一情形。**同向本身不违规**:"+
 		"两脚同在本体一条边、%s 相差 > %g 时两根桩平行、永不合并(KF301 这类两脚同侧端子正是如此)。"+
-		"下一步:用 `easyeda sch list --include-pins` 核对这两只引脚的实测坐标 —— "+
+		"下一步:用 `pcbpilot sch list --include-pins` 核对这两只引脚的实测坐标 —— "+
 		"若两脚确实同轴(符号引脚重合 / 同一只脚被折成了两支端子),把其中一支改派到本体另一条边"+
 		"(无源件转竖后由 R3「电源上 / GND 下」自然分开),或换用两脚不同轴的符号",
 		g.Designator, a.Net, b.Net, a.Dir, axis, d, schMarkerOverlapEps,
@@ -678,7 +678,7 @@ func zfCheckTermOverlap(g zfPlacedGroup) error {
 				return fmt.Errorf("%s: 端子标签重叠 %s(%s) × %s(%s),重叠 %.1f×%.1f > 容差 %g —— "+
 					"R5 硬不变式(自短路防线):两支标签叠在一起,平台会把相接的导线合并成一根,两张网当场并成一张。"+
 					"下一步二选一:① 把其中一支改派到本体另一条边(无源件转竖后由 R3「电源上 / GND 下」自然分开);"+
-					"② 若两脚本来就该同侧(KF301 这类端子),用 `easyeda sch list --include-pins` 核对两只引脚的实测坐标 —— "+
+					"② 若两脚本来就该同侧(KF301 这类端子),用 `pcbpilot sch list --include-pins` 核对两只引脚的实测坐标 —— "+
 					"两脚间距足够时标签本不该叠,叠了通常是桩长(offset)取值让它们撞上,减小其中一支的 offset 即可",
 					g.Designator, a.Net, a.Dir, b.Net, b.Dir, ox, oy, schMarkerOverlapEps)
 			}

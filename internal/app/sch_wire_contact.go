@@ -1,6 +1,6 @@
 package app
 
-import "github.com/zhoushoujianwork/easyeda-agent/internal/schguard"
+import "github.com/zhuangzard/pcbpilot/internal/schguard"
 
 // Geometric meeting and physical contact are intentionally separate. The
 // official editor preserves a bare proper X as separate physical wire islands.

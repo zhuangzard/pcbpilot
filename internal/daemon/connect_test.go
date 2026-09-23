@@ -17,7 +17,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/protocol"
+	"github.com/zhuangzard/pcbpilot/internal/protocol"
 )
 
 // startDaemon runs a daemon on a free port and returns its host:port and a
@@ -406,8 +406,8 @@ func TestActionArtifactPersisted(t *testing.T) {
 		t.Fatalf("persisted bytes mismatch: %q", string(got))
 	}
 
-	// Lands in the CLI cwd's hidden .easyeda/artifacts dir...
-	wantDir := filepath.Join(outDir, ".easyeda", "artifacts")
+	// Lands in the CLI cwd's hidden .pcbpilot/artifacts dir...
+	wantDir := filepath.Join(outDir, ".pcbpilot", "artifacts")
 	if dir := filepath.Dir(a.Path); dir != wantDir {
 		t.Fatalf("artifact dir = %s, want %s", dir, wantDir)
 	}

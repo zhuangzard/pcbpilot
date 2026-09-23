@@ -2,8 +2,8 @@
 
 ## 现行原理图验收入口（2026-09-14）
 
-统一遵守 [数据驱动架构基准](../.agents/skills/easyeda-agent/references/schematic-data.md#数据驱动架构基准)
-和 [S0–S6 流程](../.agents/skills/easyeda-agent/references/design-flow.md)。原始客户需求仍为完整回归输入，
+统一遵守 [数据驱动架构基准](../.agents/skills/pcbpilot/references/schematic-data.md#数据驱动架构基准)
+和 [S0–S6 流程](../.agents/skills/pcbpilot/references/design-flow.md)。原始客户需求仍为完整回归输入，
 不能喂预制 BOM/UUID/网表；用户只要求原理图时止于 S6，不宣称 PCB 或整板通过。
 
 - 保留原始快照、源目标的连接/核心外围归属/约束、参数/代码版本、哈希及生成记录。

@@ -9,13 +9,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/connectivity"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/protocol"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/schguard"
+	"github.com/zhuangzard/pcbpilot/internal/connectivity"
+	"github.com/zhuangzard/pcbpilot/internal/protocol"
+	"github.com/zhuangzard/pcbpilot/internal/schguard"
 )
 
 func TestPinRepairStoredRotationMatchesOrientationJSON(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", ".agents", "skills", "easyeda-agent", "references", "orientation.json"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", ".agents", "skills", "pcbpilot", "references", "orientation.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

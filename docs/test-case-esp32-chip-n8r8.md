@@ -46,7 +46,7 @@
 
 ## 跑测流程(复用 PCB 流程脊柱 + 芯片级约束)
 
-沿用 `.agents/skills/easyeda-agent/references/design-flow.md` 的 PCB 脊柱 P0–P10,额外强约束:
+沿用 `.agents/skills/pcbpilot/references/design-flow.md` 的 PCB 脊柱 P0–P10,额外强约束:
 
 | 阶段 | 芯片级额外约束 |
 |---|---|

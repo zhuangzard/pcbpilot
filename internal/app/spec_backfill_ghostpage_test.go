@@ -4,14 +4,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/spec"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/workflow"
+	"github.com/zhuangzard/pcbpilot/internal/spec"
+	"github.com/zhuangzard/pcbpilot/internal/workflow"
 )
 
 // 回归:同一个工程内「页被删掉重建」留下的幽灵组,会把回填写成一份画布上不存在的位号表。
 //
 // 2026-08-26 esp32MiniRequire 端到端实测:`ceshi` 工程被重建过,
-// ~/.easyeda-agent/workflow/ceshi.json 里留着 5 个**已删除页**的虚拟组。
+// ~/.pcbpilot/workflow/ceshi.json 里留着 5 个**已删除页**的虚拟组。
 // 此时只落了 ams1117 一个块(4 件),回填却把另外两个还没动过的模块改写了:
 //
 //	spec ✓ MCU.parts:U2 C4 C5 R1 C6 R2 → C1 C10 C11 C12 C2 C3 R1 R10 R11 R2 U1 U4

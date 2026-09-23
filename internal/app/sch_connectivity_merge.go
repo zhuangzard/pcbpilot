@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"sort"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/connectivity"
+	"github.com/zhuangzard/pcbpilot/internal/connectivity"
 )
 
 // A project-wide snapshot has no single active-page identity. Page IDs remain

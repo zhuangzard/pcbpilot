@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/apidoc"
+	"github.com/zhuangzard/pcbpilot/internal/apidoc"
 )
 
 // newApiCmd is the local `eda.*` API discovery surface — no daemon/connector
@@ -41,9 +41,9 @@ func newApiSearchCmd(stdout io.Writer) *cobra.Command {
 		Use:   "search <query>",
 		Short: "Rank eda.* methods matching all query terms (name/namespace/summary)",
 		Args:  cobra.MinimumNArgs(1),
-		Example: `  easyeda api search dsn
-  easyeda api search netflag create
-  easyeda api search 自动布线 --json`,
+		Example: `  pcbpilot api search dsn
+  pcbpilot api search netflag create
+  pcbpilot api search 自动布线 --json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			hits := apidoc.Search(strings.Join(args, " "), limit)
 			if asJSON {
@@ -71,9 +71,9 @@ func newApiLsCmd(stdout io.Writer) *cobra.Command {
 		Use:   "ls [namespace-filter]",
 		Short: "List eda.* namespaces (optionally filtered by substring)",
 		Args:  cobra.MaximumNArgs(1),
-		Example: `  easyeda api ls
-  easyeda api ls pcb
-  easyeda api ls sch --json`,
+		Example: `  pcbpilot api ls
+  pcbpilot api ls pcb
+  pcbpilot api ls sch --json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			filter := ""
 			if len(args) == 1 {
@@ -100,8 +100,8 @@ func newApiShowCmd(stdout, stderr io.Writer) *cobra.Command {
 		Use:   "show <namespace>",
 		Short: "List all methods of one eda.* namespace",
 		Args:  cobra.ExactArgs(1),
-		Example: `  easyeda api show eda.sch_PrimitiveComponent
-  easyeda api show pcb_ManufactureData`,
+		Example: `  pcbpilot api show eda.sch_PrimitiveComponent
+  pcbpilot api show pcb_ManufactureData`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ns := args[0]
 			if !strings.HasPrefix(ns, "eda.") {
@@ -112,7 +112,7 @@ func newApiShowCmd(stdout, stderr io.Writer) *cobra.Command {
 				return writeJSON(stdout, methods)
 			}
 			if len(methods) == 0 {
-				fmt.Fprintf(stderr, "no namespace %q (try `easyeda api ls`)\n", ns)
+				fmt.Fprintf(stderr, "no namespace %q (try `pcbpilot api ls`)\n", ns)
 				return errActionFailed
 			}
 			fmt.Fprintf(stdout, "%s — %d method(s)\n\n", ns, len(methods))

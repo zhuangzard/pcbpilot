@@ -6,7 +6,7 @@ import (
 	"math"
 	"reflect"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/schguard"
+	"github.com/zhuangzard/pcbpilot/internal/schguard"
 )
 
 // Compare drawn geometry independently of the pin netlist. Collinear wires may

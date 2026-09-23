@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/protocol"
+	"github.com/zhuangzard/pcbpilot/internal/protocol"
 )
 
 // dispatchTimeout bounds how long the daemon waits for a connector to answer a
@@ -150,7 +150,7 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		// ships but the daemon never registered) used to leave NO trace here,
 		// so `audit-baseline` was blind to the exact failures that matter most.
 		started := time.Now().UTC()
-		errResp := errorResponse(req.ID, "UNKNOWN_ACTION", fmt.Sprintf("unknown action: %s", req.Action), "run `easyeda actions` for the supported set")
+		errResp := errorResponse(req.ID, "UNKNOWN_ACTION", fmt.Sprintf("unknown action: %s", req.Action), "run `pcbpilot actions` for the supported set")
 		s.audit.Append(fromResponse(started, &req, &errResp))
 		writeJSON(w, http.StatusBadRequest, errResp)
 		return
@@ -172,14 +172,14 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		id, found, ambiguous := s.hub.windowForProject(req.Project, docTypeForAction(req.Action))
 		if ambiguous {
 			started := time.Now().UTC()
-			errResp := errorResponse(req.ID, "AMBIGUOUS_PROJECT", fmt.Sprintf("multiple connected windows match project %q", req.Project), "pass --window to pick one (see `easyeda health`)")
+			errResp := errorResponse(req.ID, "AMBIGUOUS_PROJECT", fmt.Sprintf("multiple connected windows match project %q", req.Project), "pass --window to pick one (see `pcbpilot health`)")
 			s.audit.Append(fromResponse(started, &req, &errResp))
 			writeJSON(w, http.StatusConflict, errResp)
 			return
 		}
 		if !found {
 			started := time.Now().UTC()
-			errResp := errorResponse(req.ID, "NO_CONNECTOR", fmt.Sprintf("no connected window for project %q", req.Project), "open the project in EasyEDA (connector enabled), or run `easyeda health`")
+			errResp := errorResponse(req.ID, "NO_CONNECTOR", fmt.Sprintf("no connected window for project %q", req.Project), "open the project in EasyEDA (connector enabled), or run `pcbpilot health`")
 			s.audit.Append(fromResponse(started, &req, &errResp))
 			writeJSON(w, http.StatusServiceUnavailable, errResp)
 			return
@@ -223,7 +223,7 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 			message = fmt.Sprintf("window %q is not connected, but %d connector window(s) ARE", req.WindowID, liveCount)
 			detail = fmt.Sprintf("a page refresh mints a new windowId — the connector is fine. Connected now: %s. Route by --project <name> (stable across refreshes) instead of --window.", liveSummary)
 		case req.WindowID != "":
-			detail = fmt.Sprintf("no connector registered for window %q, and no window is connected at all — check `easyeda health`", req.WindowID)
+			detail = fmt.Sprintf("no connector registered for window %q, and no window is connected at all — check `pcbpilot health`", req.WindowID)
 		case liveCount > 1:
 			code = "AMBIGUOUS_WINDOW"
 			message = fmt.Sprintf("%d connector windows are connected; the target is ambiguous", liveCount)
@@ -375,11 +375,11 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 
 // artifactDir picks where to persist artifacts. The CLI sends its own working
 // directory (outputDir) so files land in the user's project under a hidden
-// .easyeda/artifacts dir — not the daemon's cwd. Callers that don't send one
+// .pcbpilot/artifacts dir — not the daemon's cwd. Callers that don't send one
 // (tests, raw HTTP) fall back to the configured ArtifactDir, then "artifacts".
 func (s *Server) artifactDir(outputDir string) string {
 	if outputDir != "" {
-		return filepath.Join(stripArtifactNesting(outputDir), ".easyeda", "artifacts")
+		return filepath.Join(stripArtifactNesting(outputDir), ".pcbpilot", "artifacts")
 	}
 	if s.opts.ArtifactDir != "" {
 		return s.opts.ArtifactDir
@@ -388,9 +388,9 @@ func (s *Server) artifactDir(outputDir string) string {
 }
 
 // stripArtifactNesting truncates a path to just BEFORE its first
-// ".easyeda/artifacts" segment pair, making artifactDir's Join idempotent: an
+// ".pcbpilot/artifacts" segment pair, making artifactDir's Join idempotent: an
 // outputDir that already points INSIDE an artifact tree (a CLI whose cwd
-// drifted there) used to grow .easyeda/artifacts/.easyeda/artifacts/… one
+// drifted there) used to grow .pcbpilot/artifacts/.pcbpilot/artifacts/… one
 // level per call. A path without the pair is returned cleaned but otherwise
 // unchanged. The CLI applies the same normalization before sending outputDir
 // (internal/app dispatch.go) — this is the daemon-side defense for raw
@@ -400,7 +400,7 @@ func stripArtifactNesting(p string) string {
 	sep := string(filepath.Separator)
 	segs := strings.Split(clean, sep)
 	for i := 0; i+1 < len(segs); i++ {
-		if segs[i] == ".easyeda" && segs[i+1] == "artifacts" {
+		if segs[i] == ".pcbpilot" && segs[i+1] == "artifacts" {
 			trimmed := strings.Join(segs[:i], sep)
 			if trimmed == "" {
 				if filepath.IsAbs(clean) {

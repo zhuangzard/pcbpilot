@@ -14,8 +14,8 @@ import (
 )
 
 // Service is the identity string the connector and CLI use to confirm they are
-// talking to an easyeda-agent daemon rather than some other local server.
-const Service = "easyeda-agent"
+// talking to an pcbpilot daemon rather than some other local server.
+const Service = "pcbpilot"
 
 // Options configures a daemon Server.
 type Options struct {
@@ -27,12 +27,12 @@ type Options struct {
 	// ArtifactDir is the FALLBACK directory for inline artifact bytes from the
 	// connector, used only when a request carries no outputDir. The CLI sends its
 	// own working directory as outputDir, so artifacts normally land in
-	// <cwd>/.easyeda/artifacts (see artifactDir). Defaults to "artifacts"
+	// <cwd>/.pcbpilot/artifacts (see artifactDir). Defaults to "artifacts"
 	// (relative to the daemon's working directory) when empty.
 	ArtifactDir string
 
 	// AuditDir is where per-day JSONL action logs are appended. Defaults to
-	// ~/.easyeda-agent/audit/ when empty.
+	// ~/.pcbpilot/audit/ when empty.
 	AuditDir string
 
 	// AutosaveDebounce, when > 0, enables daemon-level debounced autosave: after a

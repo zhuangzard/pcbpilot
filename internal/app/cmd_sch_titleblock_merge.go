@@ -100,7 +100,7 @@ func schTitleBlockMerge(cfg *appConfig, window string, patch map[string]any) (ma
 		out[k] = map[string]any{"showTitle": true, "showValue": true, "value": value}
 	}
 	if len(unknown) > 0 {
-		return nil, false, fmt.Errorf("这些明细项当前页没有:%s —— 先跑 `easyeda sch titleblock-get` 看可用 key(平台对不认识的项会崩或静默忽略)",
+		return nil, false, fmt.Errorf("这些明细项当前页没有:%s —— 先跑 `pcbpilot sch titleblock-get` 看可用 key(平台对不认识的项会崩或静默忽略)",
 			strings.Join(unknown, ", "))
 	}
 	// 只在**当前没显示**时才带 showTitleBlock:图签已经显示还传一次,连接器的
@@ -139,11 +139,11 @@ func warnIfSheetLost(cfg *appConfig, window string, stderr io.Writer) error {
 	// 「图框被写坏了」,而那条提示指向的恰恰是唯一真能写坏图框的操作。
 	if rerr != nil {
 		return fmt.Errorf("写图签后无法回读本页图纸几何(%w)—— **未证实**图框是否还在,不要据此执行整包回传;"+
-			"先用 `easyeda sch sheet-geometry` 单独确认", rerr)
+			"先用 `pcbpilot sch sheet-geometry` 单独确认", rerr)
 	}
 	return fmt.Errorf("写图签后本页找不到图纸边框(sheet 图元的 bbox)—— 图框/明细表很可能被整包回传关掉了。" +
-		"修复:`easyeda sch titleblock --data '{\"Title Block\":{\"value\":1},\"Border\":{\"value\":1}}'`," +
-		"再用 `easyeda sch sheet-geometry` 确认 bbox 回来了")
+		"修复:`pcbpilot sch titleblock --data '{\"Title Block\":{\"value\":1},\"Border\":{\"value\":1}}'`," +
+		"再用 `pcbpilot sch sheet-geometry` 确认 bbox 回来了")
 }
 
 // tbRequestedKeys 从用户的 patch 里取出**他真正要写的**明细项名。

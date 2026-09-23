@@ -1,6 +1,6 @@
 # pcbauto：电气感知的 PCB 自动设计引擎
 
-> 操作指南在 Skill：[pcb-auto.md](../.agents/skills/easyeda-agent/references/pcb-auto.md)。
+> 操作指南在 Skill：[pcb-auto.md](../.agents/skills/pcbpilot/references/pcb-auto.md)。
 > 本页记录设计理由、算法、验证证据和路线图。代码：[`pkg/pcbauto`](../pkg/pcbauto)，
 > CLI：[`internal/app/cmd_pcb_auto.go`](../internal/app/cmd_pcb_auto.go)。
 
@@ -37,7 +37,7 @@ Place（可选）                       │
 Route：扇出 → 分割平面 → 协商布线 → 严格合法化 → 铺铜连通仿真补线 → 拉直/倒角
        → 精确 DRC 修复环 → 等长 → 最终闸门
         ▼
-CheckDRC / CheckSI ─▶ report.md · plan.json · preview.svg · playbook.json ─▶ easyeda apply
+CheckDRC / CheckSI ─▶ report.md · plan.json · preview.svg · playbook.json ─▶ pcbpilot apply
 ```
 
 ## 关键算法与为什么这样选
@@ -96,7 +96,7 @@ MIPI 板加权线长 50.4 in，人工布局 59.1 in（短 15%），0 重叠；�
 **高速**（`TestSIOnMIPIBoard`）：MIPI 数据/时钟差分对自动等长到 2–3 mil（预算 10 mil）；
 一对因周围无空间未达标，如实报告并给出修复建议。
 
-**剧本**：`easyeda apply out/playbook.json --dry-run` 预检通过（1250 步，动作与参数符合协议目录）。
+**剧本**：`pcbpilot apply out/playbook.json --dry-run` 预检通过（1250 步，动作与参数符合协议目录）。
 
 **尚未验证**：剧本在用户 EasyEDA 现场执行、保存重载后的原生 DRC 回读；与 Freerouting 在同一
 DSN 上的正面对比（需要自备 Freerouting 可执行文件，见路线图 R-1）。在这两项完成前，

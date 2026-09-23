@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/version"
+	"github.com/zhuangzard/pcbpilot/internal/version"
 )
 
 type schLayoutReport struct {

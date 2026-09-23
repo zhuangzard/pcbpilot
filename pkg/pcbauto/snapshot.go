@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// Snapshot adapter for `easyeda pcb dump [--include-copper]` JSON (mil, y-up).
+// Snapshot adapter for `pcbpilot pcb dump [--include-copper]` JSON (mil, y-up).
 // Only the fields the engine needs are decoded; unknown fields are ignored so
 // the evolving dump schema stays compatible.
 

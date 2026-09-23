@@ -1,4 +1,4 @@
-const SOCKET_ID_PREFIX = 'easyeda-agent-';
+const SOCKET_ID_PREFIX = 'pcbpilot-';
 
 function randomActivationToken(): string {
 	if (typeof globalThis.crypto?.randomUUID === 'function') {

@@ -55,7 +55,7 @@ func TestIsCleanRelease(t *testing.T) {
 }
 
 // makeTarball builds an in-memory skills.tar.gz whose entries live under
-// easyeda-agent/, plus an optional malicious entry to test the traversal guard.
+// pcbpilot/, plus an optional malicious entry to test the traversal guard.
 func makeTarball(t *testing.T, files map[string]string, withEvil bool) []byte {
 	t.Helper()
 	var buf bytes.Buffer
@@ -85,7 +85,7 @@ func makeTarball(t *testing.T, files map[string]string, withEvil bool) []byte {
 }
 
 func skillDocument(version, body string) string {
-	return "---\nname: easyeda-agent\nmetadata:\n  version: \"" + version + "\"\n---\n" + body
+	return "---\nname: pcbpilot\nmetadata:\n  version: \"" + version + "\"\n---\n" + body
 }
 
 func makeVersionedTarball(t *testing.T, version string, files map[string]string, withEvil bool) []byte {

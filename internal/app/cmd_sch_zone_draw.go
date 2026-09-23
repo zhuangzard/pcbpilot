@@ -23,7 +23,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/workflow"
+	"github.com/zhuangzard/pcbpilot/internal/workflow"
 )
 
 // schZoneFrameInset shrinks each zone rectangle so adjacent frames don't sit
@@ -429,9 +429,9 @@ recorded by document UUID in the project workflow state; re-running redraws
 (old frames verified removed first) and --clear deletes them without touching
 another page or user graphics. Draw/clear explicitly saves the schematic.
 Use the global --doc <page> selector for multi-page projects.`,
-		Example: `  easyeda sch zones set --spec s0.json --project ceshi
-  easyeda sch zone-draw --doc P1_MCU --font-size 14 --project ceshi
-  easyeda sch zone-draw --doc P1_MCU --clear --project ceshi`,
+		Example: `  pcbpilot sch zones set --spec s0.json --project ceshi
+  pcbpilot sch zone-draw --doc P1_MCU --font-size 14 --project ceshi
+  pcbpilot sch zone-draw --doc P1_MCU --clear --project ceshi`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Partition mode (issue #149): whole-sheet data-driven functional partitions
 			// via the planner + per-page frame persistence, instead of the fixed

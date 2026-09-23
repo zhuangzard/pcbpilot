@@ -9,13 +9,13 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/selfupdate"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/version"
+	"github.com/zhuangzard/pcbpilot/internal/selfupdate"
+	"github.com/zhuangzard/pcbpilot/internal/version"
 )
 
 // newSkillCmd returns the "skill" subcommand group — inspect and update the
-// locally-installed easyeda-agent skill dirs (~/.claude/skills/easyeda-agent,
-// ~/.codex/skills/easyeda-agent and ~/.agents/skills/easyeda-agent). The daemon
+// locally-installed pcbpilot skill dirs (~/.claude/skills/pcbpilot,
+// ~/.codex/skills/pcbpilot and ~/.agents/skills/pcbpilot). The daemon
 // runs `skill sync` automatically on startup (daemon start --auto-update-skill,
 // on by default); these commands are
 // the manual, self-describing surface for the same machinery.
@@ -26,14 +26,14 @@ import (
 func newSkillCmd(stdout, stderr io.Writer) *cobra.Command {
 	s := &cobra.Command{
 		Use:   "skill",
-		Short: "Inspect and update the locally-installed easyeda-agent skill dirs",
-		Long: "Inspect and update the easyeda-agent skill installed for your AI clients.\n\n" +
-			"  easyeda skill status                 show installed skill dirs + versions vs latest release\n" +
-			"  easyeda skill sync                   update present skill dirs to the latest release\n" +
-			"  easyeda skill sync --version 0.9.0   pin a specific version\n\n" +
+		Short: "Inspect and update the locally-installed pcbpilot skill dirs",
+		Long: "Inspect and update the pcbpilot skill installed for your AI clients.\n\n" +
+			"  pcbpilot skill status                 show installed skill dirs + versions vs latest release\n" +
+			"  pcbpilot skill sync                   update present skill dirs to the latest release\n" +
+			"  pcbpilot skill sync --version 0.9.0   pin a specific version\n\n" +
 			"The daemon syncs installed Skill dirs to its own version on startup; development builds skip writes.\n" +
 			"CODEX_HOME / CLAUDE_CONFIG_DIR override the default client config roots.\n" +
-			"To update the CLI binary as well, use `easyeda update` (skill sync included).\n" +
+			"To update the CLI binary as well, use `pcbpilot update` (skill sync included).\n" +
 			"The connector .eext is NOT covered here (no sideload auto-update) — the daemon\n" +
 			"logs a re-import notice when it detects a stale connector.",
 	}
@@ -85,7 +85,7 @@ func newSkillStatusCmd(stdout, stderr io.Writer) *cobra.Command {
 			if rep.Latest != "" {
 				fmt.Fprintf(stdout, "Latest: v%s", rep.Latest)
 				if selfupdate.IsCleanRelease(version.Version) && selfupdate.SemverLess(version.Version, rep.Latest) {
-					fmt.Fprint(stdout, "  (CLI behind — run `easyeda update`)")
+					fmt.Fprint(stdout, "  (CLI behind — run `pcbpilot update`)")
 				}
 				fmt.Fprintln(stdout)
 			} else {
@@ -131,10 +131,10 @@ func newSkillSyncCmd(stdout, stderr io.Writer) *cobra.Command {
 			"--preserve to keep local edits and the previous version marker (mixed content), and\n" +
 			"--version to pin a specific release instead of latest.",
 		Args: cobra.NoArgs,
-		Example: `  easyeda skill sync
-  easyeda skill sync --version 0.9.0
-  easyeda skill sync --client claude --preserve
-  easyeda skill sync --create-missing`,
+		Example: `  pcbpilot skill sync
+  pcbpilot skill sync --version 0.9.0
+  pcbpilot skill sync --client claude --preserve
+  pcbpilot skill sync --create-missing`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := selfupdate.ValidateClients(normalizeClients(clients)); err != nil {
 				return err

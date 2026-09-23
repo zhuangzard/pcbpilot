@@ -5,8 +5,8 @@ import (
 	"io"
 	"path/filepath"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/selfupdate"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/version"
+	"github.com/zhuangzard/pcbpilot/internal/selfupdate"
+	"github.com/zhuangzard/pcbpilot/internal/version"
 )
 
 func runLocalUpdate(cfg *appConfig, dir, binary string, check, exitCode, jsonOut bool, out io.Writer) error {
@@ -23,7 +23,7 @@ func runLocalUpdate(cfg *appConfig, dir, binary string, check, exitCode, jsonOut
 			return fmt.Errorf("local installation prints backup paths; --json is check-only")
 		}
 		if binary == "" {
-			return fmt.Errorf("local installation requires --binary /absolute/path/to/easyeda")
+			return fmt.Errorf("local installation requires --binary /absolute/path/to/pcbpilot")
 		}
 		if err := b.Install(binary, out); err != nil {
 			return err

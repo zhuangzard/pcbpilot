@@ -21,13 +21,13 @@ class InstalledSkillTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        self.skill = self.root / "skills/easyeda-agent"
+        self.skill = self.root / "skills/pcbpilot"
         self.scripts = self.skill / "scripts"
         self.refs = self.skill / "references"
         self.scripts.mkdir(parents=True)
         self.refs.mkdir()
         for name in ["blocks-pin-audit.py", "lint.sh"]:
-            shutil.copyfile(REPO / ".agents/skills/easyeda-agent/scripts" / name, self.scripts / name)
+            shutil.copyfile(REPO / ".agents/skills/pcbpilot/scripts" / name, self.scripts / name)
         spec = importlib.util.spec_from_file_location("audit_fixture", self.scripts / "blocks-pin-audit.py")
         self.audit = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(self.audit)
@@ -56,12 +56,12 @@ else:
             self.binary = fake_bin / "easyeda.cmd"
             self.binary.write_text(f'@"{sys.executable}" "%~dp0easyeda-fake.py" %*\n', encoding="utf-8")
         else:
-            self.binary = fake_bin / "easyeda"
+            self.binary = fake_bin / "pcbpilot"
             self.binary.write_text(f"#!{sys.executable}\n" + body, encoding="utf-8")
             self.binary.chmod(0o755)
         (self.refs / "standard-parts.json").write_text(json.dumps({"libraryUuid": "official", "parts": {"test-chip": {"deviceUuid": "a" * 32}}}), encoding="utf-8")
         (self.refs / "symbol-pins.json").write_text('{"parts":{}}', encoding="utf-8")
-        self.env = {"EASYEDA_BIN": str(self.binary), "FAKE_LOG": str(self.log)}
+        self.env = {"PCBPILOT_BIN": str(self.binary), "FAKE_LOG": str(self.log)}
 
     def calls(self):
         return [json.loads(line) for line in self.log.read_text(encoding="utf-8").splitlines()] if self.log.exists() else []
@@ -74,8 +74,8 @@ else:
         self.assertEqual(self.calls(), [["blocks", "ls", "--json"], ["blocks", "show", "block.demo"]])
 
     def test_explicit_bad_cli_does_not_fall_back(self):
-        with mock.patch.dict(os.environ, {**self.env, "EASYEDA_BIN": str(self.root / "missing")}):
-            with self.assertRaisesRegex(RuntimeError, "EASYEDA_BIN is not an executable"):
+        with mock.patch.dict(os.environ, {**self.env, "PCBPILOT_BIN": str(self.root / "missing")}):
+            with self.assertRaisesRegex(RuntimeError, "PCBPILOT_BIN is not an executable"):
                 self.audit.load_refs()
         self.assertEqual(self.calls(), [])
 
@@ -126,34 +126,34 @@ else:
         env = {**os.environ, **self.env, "PATH": f"{self.binary.parent}:/usr/bin:/bin"}
         result = self.run_lint(env)
         self.assertIn(f"run: {self.binary} daemon", result.stderr)
-        env.pop("EASYEDA_BIN")
+        env.pop("PCBPILOT_BIN")
         result = self.run_lint(env)
         self.assertIn(f"run: {self.binary} daemon", result.stderr)
-        env["EASYEDA_BIN"] = str(self.root / "missing")
+        env["PCBPILOT_BIN"] = str(self.root / "missing")
         result = self.run_lint(env)
-        self.assertIn("EASYEDA_BIN is not an executable", result.stderr)
+        self.assertIn("PCBPILOT_BIN is not an executable", result.stderr)
         self.assertEqual(self.calls(), [])
 
     @unittest.skipIf(os.name == 'nt', 'lint.sh is a POSIX shell entry point; Windows uses the native CLI')
     def test_lint_development_fallback_requires_a_repository(self):
-        relocated = self.root / ".agents/skills/easyeda-agent"
+        relocated = self.root / ".agents/skills/pcbpilot"
         relocated.parent.mkdir(parents=True)
         self.skill.rename(relocated)
         self.skill = relocated
         self.scripts = self.skill / "scripts"
         (self.root / "go.mod").write_text("module fixture\n", encoding="utf-8")
-        (self.root / "cmd/easyeda").mkdir(parents=True)
+        (self.root / "cmd/pcbpilot").mkdir(parents=True)
         (self.root / "bin").mkdir()
-        fallback = self.root / "bin/easyeda"
+        fallback = self.root / "bin/pcbpilot"
         shutil.copyfile(self.binary, fallback)
         fallback.chmod(0o755)
         env = {**os.environ, "PATH": "/usr/bin:/bin"}
-        env.pop("EASYEDA_BIN", None)
+        env.pop("PCBPILOT_BIN", None)
         result = self.run_lint(env)
         self.assertIn(f"run: {fallback.resolve()} daemon", result.stderr)
         (self.root / "go.mod").unlink()
         result = self.run_lint(env)
-        self.assertIn("easyeda CLI not found", result.stderr)
+        self.assertIn("pcbpilot CLI not found", result.stderr)
 
 
 if __name__ == "__main__":

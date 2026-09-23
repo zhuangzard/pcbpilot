@@ -22,7 +22,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/blocks"
+	"github.com/zhuangzard/pcbpilot/internal/blocks"
 )
 
 // schReconcileDiff 是一条对账差异。
@@ -259,7 +259,7 @@ func newSchReconcileCmd(cfg *appConfig, window *string, stdout, stderr io.Writer
 有差异时非零退出,可直接当门禁。手工搭的组没有拓扑来源,会如实列出「对不了账」,
 不会假装通过。`,
 		Args:    cobra.NoArgs,
-		Example: `  easyeda sch reconcile\n  easyeda sch reconcile --json`,
+		Example: `  pcbpilot sch reconcile\n  pcbpilot sch reconcile --json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSchReconcile(cfg, *window, asJSON, stdout, stderr)
 		},

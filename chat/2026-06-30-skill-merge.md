@@ -13,7 +13,7 @@
 
 ## 决策
 
-对外只保留一个技能：`easyeda-agent`。
+对外只保留一个技能：`pcbpilot`。
 
 名字加 `-agent` 后缀，原因是：
 
@@ -24,7 +24,7 @@
 旧拆分目录已经合并进：
 
 ```text
-.agents/skills/easyeda-agent/
+.agents/skills/pcbpilot/
   SKILL.md
   agents/openai.yaml
   references/
@@ -47,24 +47,24 @@
 ClawHub 已发布：
 
 ```bash
-clawhub install easyeda-agent
+clawhub install pcbpilot
 ```
 
 国内 SkillHub 安装命令注明为：
 
 ```bash
-skillhub install easyeda-agent --registry https://skillhub.cn
+skillhub install pcbpilot --registry https://skillhub.cn
 ```
 
 国内发布仍需要先登录 `skillhub.cn`：
 
 ```bash
 skillhub login --registry https://skillhub.cn
-skillhub publish .agents/skills/easyeda-agent --registry https://skillhub.cn --visibility public
+skillhub publish .agents/skills/pcbpilot --registry https://skillhub.cn --visibility public
 ```
 
 ## 后续约束
 
-- release 只打包 `.agents/skills/easyeda-agent`。
-- 新文档、新脚本、新规则都落在 `easyeda-agent` 下。
+- release 只打包 `.agents/skills/pcbpilot`。
+- 新文档、新脚本、新规则都落在 `pcbpilot` 下。
 - 不再恢复旧拆分技能目录，除非将来有明确的插件化安装机制支持依赖技能。

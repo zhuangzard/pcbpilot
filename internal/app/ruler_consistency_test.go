@@ -81,7 +81,7 @@ func TestRuler_ConnectPinBudgetExceedsConnectorWorstCase(t *testing.T) {
 // 2026-08-16 zone-arrange --apply 首跑被 D1 的右向 GND 旗拦下,根因是手抄本缺了
 // 横向四值却把缺失说成「契约未校准」。钉死:12 个值逐项等于 frozenTable。
 func TestRuler_TidyLabelRotationMatchesFrozenTable(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", ".agents", "skills", "easyeda-agent", "references", "orientation.json"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", ".agents", "skills", "pcbpilot", "references", "orientation.json"))
 	if err != nil {
 		t.Fatalf("读 orientation.json:%v", err)
 	}

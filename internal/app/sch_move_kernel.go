@@ -404,7 +404,7 @@ func schMoveKernelWith(ops moveKernelOps, items []moveItem, opts moveKernelOpts)
 		}
 	}
 	if partCount == 0 && len(live) == 0 {
-		return rep, fmt.Errorf("%s:页面器件数为 0 且网表为空,与 %d 个待移动成员矛盾 —— 目标页可能已被重建,拒绝操作(画布零改动);`easyeda doc ls` 核对后重跑",
+		return rep, fmt.Errorf("%s:页面器件数为 0 且网表为空,与 %d 个待移动成员矛盾 —— 目标页可能已被重建,拒绝操作(画布零改动);`pcbpilot doc ls` 核对后重跑",
 			label, len(items))
 	}
 	// 桩线快照:成员 pin 移动前的桩几何(preserve 策略原样重建的原料)。必须在
@@ -1093,7 +1093,7 @@ func (o *daemonMoveOps) resolveDoc() error {
 	}
 	if o.docUUID == "" {
 		if activeUUID == "" {
-			return fmt.Errorf("窗口没有激活文档(`easyeda doc ls` 查看)")
+			return fmt.Errorf("窗口没有激活文档(`pcbpilot doc ls` 查看)")
 		}
 		return nil
 	}

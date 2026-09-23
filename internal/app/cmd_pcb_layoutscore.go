@@ -1,6 +1,6 @@
 package app
 
-// cmd_pcb_layoutscore.go — `easyeda pcb layout-score` 的 CLI 层：取数、组装、渲染。
+// cmd_pcb_layoutscore.go — `pcbpilot pcb layout-score` 的 CLI 层：取数、组装、渲染。
 //
 // 纯核在 pcb_layoutscore.go（analyzeLayoutScore），各维实现在 pcb_score_*.go。
 // 这一层只做三件事：把板拉成快照（或从文件读回）、把 S0 spec 读进来、把报告渲染成
@@ -19,7 +19,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/spec"
+	"github.com/zhuangzard/pcbpilot/internal/spec"
 )
 
 func newPcbLayoutScoreCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {
@@ -50,16 +50,16 @@ func newPcbLayoutScoreCmd(cfg *appConfig, window *string, stdout, stderr io.Writ
 			"意图类维度（flow-order / edge-io 的 internal 判定）需要 --spec；没给就标\n" +
 			"skipped 而不是给满分 —— 「没测」和「测了满分」在报告里必须可区分。",
 		Example: "  # 给当前板打分\n" +
-			"  easyeda pcb layout-score --project ceshi\n\n" +
+			"  pcbpilot pcb layout-score --project ceshi\n\n" +
 			"  # 带 S0 意图（解锁 flow-order 与 internal 连接器判定）\n" +
-			"  easyeda pcb layout-score --spec .easyeda/s0-ceshi.json\n\n" +
+			"  pcbpilot pcb layout-score --spec .pcbpilot/s0-ceshi.json\n\n" +
 			"  # 只看最弱的两维，带完整归因\n" +
-			"  easyeda pcb layout-score --only tidy,compact --all\n\n" +
+			"  pcbpilot pcb layout-score --only tidy,compact --all\n\n" +
 			"  # 离线重放一块已 dump 的板（CI / 金标准回归）\n" +
-			"  easyeda pcb dump --out board.json\n" +
-			"  easyeda pcb layout-score --from board.json --json\n\n" +
+			"  pcbpilot pcb dump --out board.json\n" +
+			"  pcbpilot pcb layout-score --from board.json --json\n\n" +
 			"  # 当门用（综合分不达标则非零退出）\n" +
-			"  easyeda pcb layout-score --min-score 75",
+			"  pcbpilot pcb layout-score --min-score 75",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			opts := layoutScoreOpts{
@@ -117,7 +117,7 @@ func newPcbLayoutScoreCmd(cfg *appConfig, window *string, stdout, stderr io.Writ
 							fmt.Fprintf(stderr, "❌ spec %s: %s\n", i.Field, i.Message)
 						}
 					}
-					return fmt.Errorf("S0 spec has errors; fix it or run `easyeda spec validate %s`", specPath)
+					return fmt.Errorf("S0 spec has errors; fix it or run `pcbpilot spec validate %s`", specPath)
 				}
 				for _, i := range issues {
 					if i.Level == "WARN" {

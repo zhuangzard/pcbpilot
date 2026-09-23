@@ -158,7 +158,7 @@
     "match": "wroom",
     "end_frac": 0.3,
     "layers": "all",
-    "reason": "WROOM PCB 天线区:天线端(模组无焊盘的那一头)全层禁铜/禁地/禁走线,避免失谐。生成器取模组长轴上无焊盘的一端(几何确定),深度按 end_frac 上限、并被无焊盘区裁剪以绝不压到接地焊盘。由 `easyeda pcb antenna-keepout` 消费。"
+    "reason": "WROOM PCB 天线区:天线端(模组无焊盘的那一头)全层禁铜/禁地/禁走线,避免失谐。生成器取模组长轴上无焊盘的一端(几何确定),深度按 end_frac 上限、并被无焊盘区裁剪以绝不压到接地焊盘。由 `pcbpilot pcb antenna-keepout` 消费。"
   },
   "bom_note": "1× ESP32-S3-WROOM-1 模组(扩展料,含 flash)+ 10uF/1uF/100nF + 2× 10k 0402;约 5 种料。模组把晶振/flash/RF 全省了。"
 }

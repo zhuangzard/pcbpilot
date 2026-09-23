@@ -7,7 +7,7 @@ labels: block-contribution
 
 <!--
   两条路都欢迎:
-  ① 会提 PR:直接按 .agents/skills/easyeda-agent/references/standard-blocks-contributing.md 走,不用开这个 issue;
+  ① 会提 PR:直接按 .agents/skills/pcbpilot/references/standard-blocks-contributing.md 走,不用开这个 issue;
   ② 不方便提 PR:填这份 issue,维护者(或 AI)代为落库 —— author 署名仍然是你,永不删除。
   AI agent 也可以在用户做出一块好电路后,起草这份 issue、经用户确认后投稿。
 -->

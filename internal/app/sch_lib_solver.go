@@ -6,7 +6,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/connectivity"
+	"github.com/zhuangzard/pcbpilot/internal/connectivity"
 )
 
 // The electrical graph and measured poses are immutable. Only translations,

@@ -3,7 +3,7 @@
     "cli": "1.5.1",
     "daemon": "1.5.1",
     "connector": "1.5.1",
-    "easyeda": "3.2.186"
+    "pcbpilot": "3.2.186"
   },
   "symbol": {
     "circles": [

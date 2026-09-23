@@ -1,6 +1,6 @@
 package app
 
-// cmd_audit_cost.go — `easyeda audit cost`:一次设计跑了多久、花了多少次调用、
+// cmd_audit_cost.go — `pcbpilot audit cost`:一次设计跑了多久、花了多少次调用、
 // 其中多少是白花的。用户立项(2026-08-16):「耗时和 token 以后都要记录,用以改善」。
 //
 // 为什么值得单独做一条命令:一整场跑的形状,在单条命令的视角下完全看不见。
@@ -32,7 +32,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/protocol"
+	"github.com/zhuangzard/pcbpilot/internal/protocol"
 )
 
 // auditProbeActions 是上下文探测 —— CLI 每次启动 resolve 窗口/工程时打的那几发。
@@ -331,9 +331,9 @@ esp32Mini 原理图 E2E:5466 次调用里 3527 次(65%)是它们 —— 这种�
 token 不在审计日志里(那是 agent 侧的账),用 --tokens 自报;不给就记「未记录」,
 **不估算冒充实测**。`,
 		Args: cobra.NoArgs,
-		Example: `  easyeda audit cost --day 2026-08-15 --since 14:12 --until 15:50
-  easyeda audit cost --since 14:12 --until 15:50 --label "esp32Mini 原理图 E2E" --tokens 1200000 --record
-  easyeda audit cost --ledger`,
+		Example: `  pcbpilot audit cost --day 2026-08-15 --since 14:12 --until 15:50
+  pcbpilot audit cost --since 14:12 --until 15:50 --label "esp32Mini 原理图 E2E" --tokens 1200000 --record
+  pcbpilot audit cost --ledger`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if ledger {
 				entries, err := readCostLedger()
@@ -406,7 +406,7 @@ token 不在审计日志里(那是 agent 侧的账),用 --tokens 自报;不给�
 			return nil
 		},
 	}
-	c.Flags().StringVar(&dir, "dir", "", "audit log directory (default ~/.easyeda-agent/audit)")
+	c.Flags().StringVar(&dir, "dir", "", "audit log directory (default ~/.pcbpilot/audit)")
 	c.Flags().StringVar(&day, "day", "", "day to read, YYYY-MM-DD (default today, UTC)")
 	c.Flags().StringVar(&since, "since", "", "start time HH:MM or HH:MM:SS (UTC)")
 	c.Flags().StringVar(&until, "until", "", "end time HH:MM or HH:MM:SS (UTC)")

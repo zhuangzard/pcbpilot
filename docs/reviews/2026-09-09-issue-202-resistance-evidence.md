@@ -1,6 +1,6 @@
 # Issue #202：电阻参数误读与选型误匹配
 
-报告：[通过 skill 读取元器件 datasheet 理解错误](https://github.com/zhoushoujianwork/easyeda-agent/issues/202)。
+报告：[通过 skill 读取元器件 datasheet 理解错误](https://github.com/zhuangzard/pcbpilot/issues/202)。
 `0805W8F330LT5E` / C52548 的正确阻值为 **330mΩ = 0.33Ω，±1%**；报告中的 33Ω
 大了 100 倍。报告附带的模型回答承认从 MPN 的 `330` 猜三位电阻码。仓库没有实现这种
 厂家料号解码，不能声称已证明该模型回答是由某段脚本产生。

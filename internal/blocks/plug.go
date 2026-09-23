@@ -3,7 +3,7 @@ package blocks
 // plug.go —— 连接器「插拔包络宽」查找表的 loader（#168② connector-plug-clearance）。
 //
 // 为什么这张表要放在 blocks/data 而不是 skill 树：go:embed 够不到 `..`，
-// .agents/skills/easyeda-agent/references/standard-parts.json 编不进二进制（PlacementIndex
+// .agents/skills/pcbpilot/references/standard-parts.json 编不进二进制（PlacementIndex
 // 的注释里已经记过这条硬约束）。blocks/data 是唯一能 embed 的数据目录，`_` 前缀
 // 又刚好被块加载器跳过 —— 与既有 _schema.json 同例。
 //

@@ -23,7 +23,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/spec"
+	"github.com/zhuangzard/pcbpilot/internal/spec"
 )
 
 // floorplanBand 是一条功能带：flow 里的一个阶段在板面上分到的矩形。

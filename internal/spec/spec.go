@@ -7,7 +7,7 @@
 // 读），字段集已经不一致；stackup/rf/board/interfaces/pages/costTier 这些文档里
 // 写着的字段**零代码消费**，全靠 agent 读文本自己执行。
 //
-// 后果是契约松到已经漂移：磁盘上唯一那份真实 spec（.easyeda/s0-n8r8-ceshi.json）
+// 后果是契约松到已经漂移：磁盘上唯一那份真实 spec（.pcbpilot/s0-n8r8-ceshi.json）
 // 把 `board` 写成字符串而不是文档说的对象、`stackup` 用 inner1/inner2 而不是
 // groundStrategy/innerLayers、还多出一个文档里根本没有的 `assembly` —— 而这些
 // 全部静默通过，因为没有任何东西在看。

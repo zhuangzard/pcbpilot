@@ -8,8 +8,8 @@ import (
 	"io"
 
 	"github.com/spf13/cobra"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/protocol"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/version"
+	"github.com/zhuangzard/pcbpilot/internal/protocol"
+	"github.com/zhuangzard/pcbpilot/internal/version"
 )
 
 // Run is the main entry point called by main.go.
@@ -54,7 +54,7 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 	}
 
 	root := &cobra.Command{
-		Use:   "easyeda",
+		Use:   "pcbpilot",
 		Short: version.Name + " — AI-native EasyEDA Pro automation layer",
 		// SilenceUsage: don't dump usage on every error.
 		// SilenceErrors: we handle printing ourselves so we can suppress
@@ -139,8 +139,8 @@ func newNotifyCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 as each stage passes so the user can watch progress live — "完成 X,下一步 Y".
 type ∈ info | success | warn | error | question.`,
 		Args: cobra.NoArgs,
-		Example: `  easyeda notify --message "完成 布局,下一步 布线" --type success
-  easyeda notify --message "DRC 未通过,需修复" --type error --duration 5`,
+		Example: `  pcbpilot notify --message "完成 布局,下一步 布线" --type success
+  pcbpilot notify --message "DRC 未通过,需修复" --type error --duration 5`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			payload := map[string]any{"message": message}
 			if typ != "" {
@@ -184,9 +184,9 @@ func newCallCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 		Use:   "call <action>",
 		Short: "Generic escape hatch: call any typed action directly",
 		Args:  cobra.ExactArgs(1),
-		Example: `  easyeda call system.health
-  easyeda call schematic.components.list --window win-1
-  easyeda call schematic.component.place --payload '{"libraryUuid":"...","uuid":"...","x":100,"y":200}'`,
+		Example: `  pcbpilot call system.health
+  pcbpilot call schematic.components.list --window win-1
+  pcbpilot call schematic.component.place --payload '{"libraryUuid":"...","uuid":"...","x":100,"y":200}'`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			action := args[0]
 

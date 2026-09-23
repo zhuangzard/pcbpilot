@@ -13,13 +13,13 @@ export const DOMAIN_NAMES = [
   'system',
 ];
 
-export function easyedaBinary() {
-  return process.env.EASYEDA_BIN || 'easyeda';
+export function pcbpilotBinary() {
+  return process.env.PCBPILOT_BIN || 'pcbpilot';
 }
 
 export async function runEasyeda(args, timeoutMs = 300_000) {
   try {
-    const { stdout, stderr } = await execFileAsync(easyedaBinary(), args, {
+    const { stdout, stderr } = await execFileAsync(pcbpilotBinary(), args, {
       encoding: 'utf8',
       maxBuffer: 32 * 1024 * 1024,
       timeout: timeoutMs,
@@ -72,7 +72,7 @@ export function filterActions(actions, { domain, search, mutates } = {}) {
 export function buildActionCallArgs(action, input = {}) {
   if (action.name === 'project.create') {
     if (typeof input.window !== 'string' || !input.window.trim()) {
-      throw new Error('project.create requires an explicit window from easyeda_health');
+      throw new Error('project.create requires an explicit window from pcbpilot_health');
     }
     if (input.project || input.doc) {
       throw new Error('project.create does not accept project or doc routing; use payload.friendlyName for the new project');

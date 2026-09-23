@@ -2,7 +2,7 @@ package app
 
 import (
 	"fmt"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/schguard"
+	"github.com/zhuangzard/pcbpilot/internal/schguard"
 	"math"
 	"sort"
 )

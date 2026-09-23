@@ -20,7 +20,7 @@ const (
 )
 
 // Handshake is sent by the daemon immediately after a connector connects, so the
-// connector can confirm it reached an easyeda-agent daemon (not some other local
+// connector can confirm it reached an pcbpilot daemon (not some other local
 // service) before registering.
 type Handshake struct {
 	Type    string `json:"type"`

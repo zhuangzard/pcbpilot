@@ -7,13 +7,13 @@ import (
 	"io"
 
 	"github.com/spf13/cobra"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/blocks"
+	"github.com/zhuangzard/pcbpilot/internal/blocks"
 )
 
 // newBlocksCmd returns the "blocks" subcommand group — offline query of the
 // embedded circuit-block library (电路块库). No daemon, no window, no skill
 // files: the block data rides inside the binary (go:embed), so an agent running
-// anywhere `easyeda` is installed can look up a known-good peripheral subcircuit
+// anywhere `pcbpilot` is installed can look up a known-good peripheral subcircuit
 // without a GitHub checkout.
 func newBlocksCmd(stdout, stderr io.Writer) *cobra.Command {
 	b := &cobra.Command{
@@ -25,7 +25,7 @@ microSD…) whose internal topology is fixed and can be copied verbatim; only th
 boundary nets (ports) get rebound to the host design.
 
 The library is EMBEDDED in the binary, so these commands need no daemon, no open
-EasyEDA window, and no skill files — a bare 'easyeda' install can look blocks up.`,
+EasyEDA window, and no skill files — a bare 'pcbpilot' install can look blocks up.`,
 	}
 	b.AddCommand(
 		newBlocksLsCmd(stdout, stderr),
@@ -47,7 +47,7 @@ func printBlocksTable(w io.Writer, list []blocks.Block) {
 		}
 		fmt.Fprintf(w, "%-32s %-8s %-12s %-18s %s\n", blk.ID, status, blk.Category, blk.Author, blk.Desc)
 	}
-	fmt.Fprintf(w, "\n%d block(s): %d ready, %d verified, %d draft. `easyeda blocks show <id>` for detail.\n",
+	fmt.Fprintf(w, "\n%d block(s): %d ready, %d verified, %d draft. `pcbpilot blocks show <id>` for detail.\n",
 		len(list), ready, verified, len(list)-ready-verified)
 }
 
@@ -97,15 +97,15 @@ func newBlocksShowCmd(stdout, stderr io.Writer) *cobra.Command {
 		Use:   "show <block.id>",
 		Short: "Print a block's full JSON (parts, internal_nets, ports, notes)",
 		Args:  cobra.ExactArgs(1),
-		Example: `  easyeda blocks show block.xl1509_buck_12v_5v
-  easyeda blocks show cc1101_433m_balun_ipex   # block. prefix optional`,
+		Example: `  pcbpilot blocks show block.xl1509_buck_12v_5v
+  pcbpilot blocks show cc1101_433m_balun_ipex   # block. prefix optional`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			blk, ok, err := blocks.Get(args[0])
 			if err != nil {
 				return err
 			}
 			if !ok {
-				return fmt.Errorf("no block %q — run `easyeda blocks ls`", args[0])
+				return fmt.Errorf("no block %q — run `pcbpilot blocks ls`", args[0])
 			}
 			var pretty bytes.Buffer
 			if err := json.Indent(&pretty, blk.Raw, "", "  "); err != nil {
@@ -124,7 +124,7 @@ func newBlocksSearchCmd(stdout, stderr io.Writer) *cobra.Command {
 		Use:     "search <query>",
 		Short:   "Find blocks by id/desc/category/port/part (case-insensitive)",
 		Args:    cobra.ExactArgs(1),
-		Example: `  easyeda blocks search rs485` + "\n  easyeda blocks search buck",
+		Example: `  pcbpilot blocks search rs485` + "\n  pcbpilot blocks search buck",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			list, err := blocks.Search(args[0])
 			if err != nil {

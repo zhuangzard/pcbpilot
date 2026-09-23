@@ -241,7 +241,7 @@ func TestSchAdoptUncertainGuidanceIsRunnable(t *testing.T) {
 	var b strings.Builder
 	schAdoptUncertainGuidance(&b, schAdoptRequest{Designator: "C8", X: 440, Y: 535}, []string{"u3-id"})
 	out := b.String()
-	for _, want := range []string{"easyeda sch save", "easyeda sch list", "easyeda sch prim-delete --ids", "(440,535)", "u3-id"} {
+	for _, want := range []string{"pcbpilot sch save", "pcbpilot sch list", "pcbpilot sch prim-delete --ids", "(440,535)", "u3-id"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("guidance must contain %q:\n%s", want, out)
 		}
@@ -251,7 +251,7 @@ func TestSchAdoptUncertainGuidanceIsRunnable(t *testing.T) {
 	if strings.Contains(noEvidence.String(), "证据") {
 		t.Fatalf("no missing probe → no evidence line:\n%s", noEvidence.String())
 	}
-	if !strings.Contains(noEvidence.String(), "easyeda sch list") {
+	if !strings.Contains(noEvidence.String(), "pcbpilot sch list") {
 		t.Fatalf("the runnable steps must still be printed:\n%s", noEvidence.String())
 	}
 }
@@ -269,7 +269,7 @@ func newFakeAdoptDaemon(t *testing.T, frames [][]map[string]any) (*appConfig, fu
 	calls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/health" {
-			_, _ = w.Write([]byte(`{"service":"easyeda-agent","windows":[]}`))
+			_, _ = w.Write([]byte(`{"service":"pcbpilot","windows":[]}`))
 			return
 		}
 		i := calls
@@ -327,7 +327,7 @@ func TestBapAdoptAfterPlaceFailureStaysUncertainOnAPersistentlyStaleRead(t *test
 	if !strings.Contains(out, "adopt ?") {
 		t.Fatalf("uncertain must be marked as such on stderr:\n%s", out)
 	}
-	for _, want := range []string{"easyeda sch save", "easyeda sch list", "prim-delete", "u3-id"} {
+	for _, want := range []string{"pcbpilot sch save", "pcbpilot sch list", "prim-delete", "u3-id"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("guidance must contain %q:\n%s", want, out)
 		}
@@ -363,7 +363,7 @@ func TestSchAdoptResidueGuidanceIsRunnable(t *testing.T) {
 	var b strings.Builder
 	schAdoptResidueGuidance(&b, []string{"id-1", "id-2"})
 	out := b.String()
-	if !strings.Contains(out, "easyeda sch prim-delete --ids id-1,id-2") {
+	if !strings.Contains(out, "pcbpilot sch prim-delete --ids id-1,id-2") {
 		t.Fatalf("guidance must carry a runnable command:\n%s", out)
 	}
 	if !strings.Contains(out, "wedge") {

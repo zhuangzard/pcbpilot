@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/workflow"
+	"github.com/zhuangzard/pcbpilot/internal/workflow"
 )
 
 const threeLineNoteH = 3 * schNoteDefaultFontSize * 1.3 // 39:3 行默认字号说明

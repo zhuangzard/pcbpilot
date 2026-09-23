@@ -16,11 +16,11 @@ import (
 
 func TestAssetName(t *testing.T) {
 	cases := map[[2]string]string{
-		{"darwin", "arm64"}:  "easyeda_darwin_arm64",
-		{"darwin", "amd64"}:  "easyeda_darwin_amd64",
-		{"linux", "amd64"}:   "easyeda_linux_amd64",
-		{"linux", "arm64"}:   "easyeda_linux_arm64",
-		{"windows", "amd64"}: "easyeda_windows_amd64.exe",
+		{"darwin", "arm64"}:  "pcbpilot_darwin_arm64",
+		{"darwin", "amd64"}:  "pcbpilot_darwin_amd64",
+		{"linux", "amd64"}:   "pcbpilot_linux_amd64",
+		{"linux", "arm64"}:   "pcbpilot_linux_arm64",
+		{"windows", "amd64"}: "pcbpilot_windows_amd64.exe",
 	}
 	for in, want := range cases {
 		got, err := AssetName(in[0], in[1])
@@ -83,7 +83,7 @@ func stubVerify(t *testing.T, err error) {
 // installedBinary writes a fake current binary and returns its path.
 func installedBinary(t *testing.T, content string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "easyeda")
+	path := filepath.Join(t.TempDir(), "pcbpilot")
 	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -302,27 +302,27 @@ func TestUpdateCLIBadTargetVersion(t *testing.T) {
 
 func TestFetchChecksumParsesShasumFormat(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprintf(w, "%s  easyeda_linux_amd64\n%s  *easyeda_darwin_arm64\nnot-a-line\n", strings.Repeat("a", 64), strings.Repeat("b", 64))
+		fmt.Fprintf(w, "%s  pcbpilot_linux_amd64\n%s  *pcbpilot_darwin_arm64\nnot-a-line\n", strings.Repeat("a", 64), strings.Repeat("b", 64))
 	}))
 	defer srv.Close()
 	old := checksumsURL
 	checksumsURL = func(string) string { return srv.URL }
 	defer func() { checksumsURL = old }()
 
-	got, err := fetchChecksum(context.Background(), "0.26.0", "easyeda_darwin_arm64")
+	got, err := fetchChecksum(context.Background(), "0.26.0", "pcbpilot_darwin_arm64")
 	if err != nil {
 		t.Fatalf("fetchChecksum: %v", err)
 	}
 	if got != strings.Repeat("b", 64) {
 		t.Errorf("checksum=%q want 64 b characters", got)
 	}
-	if _, err := fetchChecksum(context.Background(), "0.26.0", "easyeda_windows_amd64.exe"); err == nil {
+	if _, err := fetchChecksum(context.Background(), "0.26.0", "pcbpilot_windows_amd64.exe"); err == nil {
 		t.Error("a missing asset entry must fail verification")
 	}
 }
 
 // assertNoLeftovers fails if a partial download survived in the install dir —
-// a stray .easyeda-update-* file next to the binary would be confusing at best.
+// a stray .pcbpilot-update-* file next to the binary would be confusing at best.
 func assertNoLeftovers(t *testing.T, dir string) {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
@@ -341,10 +341,10 @@ func TestVerifyBinaryRequiresExactVersion(t *testing.T) {
 		output string
 		ok     bool
 	}{
-		{"easyeda-agent v1.4.2\n", true}, {"easyeda-agent 1.4.2", true},
-		{"easyeda-agent v1.4.20", false}, {"easyeda-agent v11.4.2", false},
-		{"easyeda-agent v1.4.2-1-g123", false}, {"wrong-app 1.4.2", false},
-		{"old output\neasyeda-agent v1.4.2", false},
+		{"pcbpilot v1.4.2\n", true}, {"pcbpilot 1.4.2", true},
+		{"pcbpilot v1.4.20", false}, {"pcbpilot v11.4.2", false},
+		{"pcbpilot v1.4.2-1-g123", false}, {"wrong-app 1.4.2", false},
+		{"old output\npcbpilot v1.4.2", false},
 	} {
 		if got := validVersionOutput(tc.output, "1.4.2"); got != tc.ok {
 			t.Errorf("output %q: got %v, want %v", tc.output, got, tc.ok)

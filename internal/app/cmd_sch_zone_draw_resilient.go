@@ -29,7 +29,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/workflow"
+	"github.com/zhuangzard/pcbpilot/internal/workflow"
 )
 
 // zoneAnchorEps 是「画布上已有的框是否就是当前 plan 要画的框」的坐标判定容差。

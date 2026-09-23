@@ -13,8 +13,8 @@ const expressions = [...patch.matchAll(/^\s+- !!js ("[^\n]+")\s*$/gm)]
   .map((match) => JSON.parse(match[1]));
 assert.equal(expressions.length, 2, 'expected MCP args and Skill directory expressions');
 const targets = [
-  { expression: expressions[0], relative: 'node_modules/easyeda-agent-dsh/mcp/src/server.mjs' },
-  { expression: expressions[1], relative: 'node_modules/easyeda-agent-dsh/.agents/skills/easyeda-agent' },
+  { expression: expressions[0], relative: 'node_modules/pcbpilot-dsh/mcp/src/server.mjs' },
+  { expression: expressions[1], relative: 'node_modules/pcbpilot-dsh/.agents/skills/pcbpilot' },
 ];
 
 // DSH evaluates !!js in with(ctx), without injecting a CommonJS require.
@@ -70,7 +70,7 @@ test('native profile starts its MCP entry and reads its Skill from encoded paths
   mkdirSync(path.dirname(expectedServer), { recursive: true });
   mkdirSync(expectedSkill, { recursive: true });
   writeFileSync(expectedServer, 'console.log(JSON.stringify({ argv: process.argv.slice(1) }));\n');
-  writeFileSync(path.join(expectedSkill, 'SKILL.md'), '---\nname: easyeda-agent\n---\n');
+  writeFileSync(path.join(expectedSkill, 'SKILL.md'), '---\nname: pcbpilot\n---\n');
   const ctx = { baseUrl: pathToFileURL(profile + path.sep).href };
   const server = evaluate(ctx, targets[0].expression);
   const skill = evaluate(ctx, targets[1].expression);
@@ -82,5 +82,5 @@ test('native profile starts its MCP entry and reads its Skill from encoded paths
   assert.ifError(child.error);
   assert.equal(child.status, 0, child.stderr);
   assert.deepEqual(JSON.parse(child.stdout), { argv: [server, 'argument with space'] });
-  assert.match(readFileSync(path.join(skill, 'SKILL.md'), 'utf8'), /name: easyeda-agent/);
+  assert.match(readFileSync(path.join(skill, 'SKILL.md'), 'utf8'), /name: pcbpilot/);
 });

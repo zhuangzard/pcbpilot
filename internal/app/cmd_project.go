@@ -25,7 +25,7 @@ func newProjectCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 				Use:     "create",
 				Short:   "Create an EasyEDA project container through the official API",
 				Args:    cobra.NoArgs,
-				Example: `  easyeda project create --name "AT32F415 demo" --open`,
+				Example: `  pcbpilot project create --name "AT32F415 demo" --open`,
 				RunE: func(cmd *cobra.Command, args []string) error {
 					if friendlyName == "" {
 						return fmt.Errorf("--name is required")
@@ -82,7 +82,7 @@ func newProjectCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 				Use:     "open",
 				Short:   "Open a document (schematic page or PCB) by UUID",
 				Args:    cobra.NoArgs,
-				Example: `  easyeda project open --uuid 6b3a2f01-...`,
+				Example: `  pcbpilot project open --uuid 6b3a2f01-...`,
 				RunE: func(cmd *cobra.Command, args []string) error {
 					if uuid == "" {
 						return fmt.Errorf("--uuid is required")

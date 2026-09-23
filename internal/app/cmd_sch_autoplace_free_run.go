@@ -20,7 +20,7 @@ func runAutoplaceFree(cfg *appConfig, window string, designators []string, all b
 	}
 	parts, sheet := parseAutolayoutParts(res.Result)
 	if sheet == nil {
-		return fmt.Errorf("autoplace-free: no sheet bbox found; select/create a sheet and verify with 'easyeda sch sheet-geometry' first")
+		return fmt.Errorf("autoplace-free: no sheet bbox found; select/create a sheet and verify with 'pcbpilot sch sheet-geometry' first")
 	}
 
 	usable := freePlaceUsableArea(*sheet, opts.Margin)
@@ -174,12 +174,12 @@ The planner is PURE/deterministic (same page + opts → same coordinates) and
 snaps every anchor to the 5-unit grid. --dry-run (default) proposes coordinates;
 --apply moves them via schematic.component.modify and self-checks with layout-lint.
 
-A sheet bbox is required (verify with 'easyeda sch sheet-geometry').`,
+A sheet bbox is required (verify with 'pcbpilot sch sheet-geometry').`,
 		Args: cobra.NoArgs,
-		Example: `  easyeda sch autoplace-free --dry-run              # auto-pick the messy parts, preview
-  easyeda sch autoplace-free --designators C1,C2,R4 --apply
-  easyeda sch autoplace-free --all --apply          # repack the whole page
-  easyeda sch autoplace-free --margin 60 --gap 30 --dry-run`,
+		Example: `  pcbpilot sch autoplace-free --dry-run              # auto-pick the messy parts, preview
+  pcbpilot sch autoplace-free --designators C1,C2,R4 --apply
+  pcbpilot sch autoplace-free --all --apply          # repack the whole page
+  pcbpilot sch autoplace-free --margin 60 --gap 30 --dry-run`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if dryRun && apply {
 				return fmt.Errorf("--dry-run and --apply are mutually exclusive")

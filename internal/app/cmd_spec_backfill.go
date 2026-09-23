@@ -1,6 +1,6 @@
 package app
 
-// cmd_spec_backfill.go — `easyeda spec backfill`:把落地后的真实位号写回 S0 spec。
+// cmd_spec_backfill.go — `pcbpilot spec backfill`:把落地后的真实位号写回 S0 spec。
 // 纯核与「为什么必须外科手术式写入」在 spec_backfill.go。
 
 import (
@@ -13,8 +13,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/spec"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/workflow"
+	"github.com/zhuangzard/pcbpilot/internal/spec"
+	"github.com/zhuangzard/pcbpilot/internal/workflow"
 )
 
 func newSpecBackfillCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
@@ -44,10 +44,10 @@ remap 之后的真值),所以整条命令**完全离线** —— 不需要连接
 位号被库占位灌成 C? 的事故)。任何一个模块定位不到就整体拒绝写入。
 
 默认只预览(dry-run),--write 才落盘。`,
-		Example: `  easyeda spec backfill .easyeda/s0-ceshi.json --project ceshi
-  easyeda spec backfill .easyeda/s0-ceshi.json --project ceshi --write
-  easyeda spec backfill .easyeda/s0-ceshi.json --window a149acb3-... --write   # 同名多窗口时
-  easyeda spec backfill s0.json --project ceshi --json`,
+		Example: `  pcbpilot spec backfill .pcbpilot/s0-ceshi.json --project ceshi
+  pcbpilot spec backfill .pcbpilot/s0-ceshi.json --project ceshi --write
+  pcbpilot spec backfill .pcbpilot/s0-ceshi.json --window a149acb3-... --write   # 同名多窗口时
+  pcbpilot spec backfill s0.json --project ceshi --json`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(project) == "" {
@@ -85,7 +85,7 @@ remap 之后的真值),所以整条命令**完全离线** —— 不需要连接
 				res.Warnings = append(res.Warnings, fmt.Sprintf(
 					"未做页存活校验(离线或读不到活体页表)—— 若这个工程曾删页重建,"+
 						"状态里的旧页组仍会参与匹配。要校验:开着工程跑 "+
-						"`easyeda workflow pages --project %s --reap`(再 `--prune` 清掉判为外来的)",
+						"`pcbpilot workflow pages --project %s --reap`(再 `--prune` 清掉判为外来的)",
 					project))
 			}
 			if write && len(res.Changes) > 0 {
@@ -211,7 +211,7 @@ func runSpecBackfillLive(path, project, liveUUID string, livePages map[string]bo
 	}
 	if strings.TrimSpace(project) == "" {
 		return specBackfillResult{}, nil, fmt.Errorf(
-			"回填要知道读哪个工程的虚拟组表 —— 加 --project <工程名>(与 `easyeda sch block-apply --project` 同一个名字)," +
+			"回填要知道读哪个工程的虚拟组表 —— 加 --project <工程名>(与 `pcbpilot sch block-apply --project` 同一个名字)," +
 				"或者加 --window <id> 让它反查(同名多窗口时只能走这条)")
 	}
 	st, err := workflow.Load(project)
@@ -232,7 +232,7 @@ func runSpecBackfillLive(path, project, liveUUID string, livePages map[string]bo
 		}
 		res.Warnings = append(res.Warnings, fmt.Sprintf(
 			"跳过 %d 页:%s;页 %s —— 没有被算进回填的分母。要清掉残留:"+
-				"`easyeda workflow pages --project %s --reap` 后 `--prune`",
+				"`pcbpilot workflow pages --project %s --reap` 后 `--prune`",
 			len(skipped), why, strings.Join(skipped, ", "), project))
 	}
 	if len(groups) == 0 {

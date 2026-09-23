@@ -21,7 +21,7 @@
 1. **我们的架构被官方"撞型"验证。** 官方 `eext-run-api-gateway` 的桥接模型和我们**几乎一模一样**:
    扫描端口 `49620-49629`、`/health` 健康检查、WebSocket 握手、自动重连,连身份标识都叫
    `easyeda-bridge`。(⚠这也意味着**端口冲突**:我们最初照抄了同一段,两家的外部工具会
-   抢 49620 绑定;**0.15.0 起本项目已迁至专属段 `60832-60841`,即 `0xEDA0`-`0xEDA9`,
+   抢 49620 绑定;**0.15.0 起本项目已迁至专属段 `61832-61841`,即 `0xF188`-`0xF191`,
    "EDA" 写进十六进制**。)我们当初[自建 connector 而非用官方 gateway](../CLAUDE.md) 的决策方向正确,
    连官方都收敛到同一套模型。
 
@@ -198,16 +198,16 @@ eda.pcb_PrimitiveVia.getAll() + via.getState_Net()            // 每网过孔数
 
 | # | 吸收什么 | API | 落到哪 | 难度 |
 |---|---|---|---|---|
-| **A1** | **在线器件搜索**,把 standard-parts.json 从"唯一来源"降级为"缓存层":未命中则在线搜并自动写回 | `lib_Device.search` / `getByLcscIds` | `easyeda-agent` schematic flow + 新 action `lib.device.search`/`lib.device.by-lcsc`(CLI `easyeda lib …`) + `standard-parts.json` | **低** |
-| **A2** | **真实走线/过孔图元**,补交互式布线缺口(可先做脚本化逐段布线,甚至自研简易布线器直接回写) | `pcb_PrimitiveLine.create` / `pcb_PrimitiveVia.create` / `.delete` | `easyeda-agent` PCB flow + 新 action `pcb.route_segment`/`pcb.place_via`/`pcb.rip_up`(标 `Mutates`) | **低** |
-| **A3** | **PCB 设计报告**:每网长度 / 差分对 skew / 等长偏差(纯读、零风险,design-flow 的天然 DRC 补强) | `pcb_Net.getNetLength` + `pcb_Drc.getAll{NetClasses,DifferentialPairs,EqualLengthNetGroups}` | 新只读 action `pcb.report`(CLI) + `easyeda-agent` design-flow 门禁 | **低** |
-| **A4** | **直调自动布线**(类型声明 @alpha,但 3.2.148 实测仍 undefined → 暂走文件式) | `pcb_Document.autoRouting(props?)` @alpha → `{routedNets, totalNets}` + `clearRouting` | `easyeda-agent` PCB flow + 新 action `pcb.auto_route` | **高**(本 build 未暴露,等平台或用文件式) |
-| **A5** | **真实 DRC 规则值**喂 layout-lint / DRC 门禁(用工程真实线宽/间距/板边判定,替代经验猜测) | `pcb_Drc.getCurrentRuleConfiguration()` | `easyeda-agent` PCB context + design-flow 门禁,只读 action `pcb.drc-rules` | **低-中**(规则 JSON 层级深,键名带空格) |
-| **A6** | **换封装/换符号标准动作**,固化"五步绑定法 + resolveDeviceLibrary"(导入器件 libraryUuid 为空反查) | `lib_Device.modify` + 原始态保存/恢复 | `easyeda-agent` schematic flow + 新 action `sch.rebind-footprint`/`sch.rebind-symbol` | **中**(需端到端验证,挂 ESP32 回归) |
+| **A1** | **在线器件搜索**,把 standard-parts.json 从"唯一来源"降级为"缓存层":未命中则在线搜并自动写回 | `lib_Device.search` / `getByLcscIds` | `pcbpilot` schematic flow + 新 action `lib.device.search`/`lib.device.by-lcsc`(CLI `pcbpilot lib …`) + `standard-parts.json` | **低** |
+| **A2** | **真实走线/过孔图元**,补交互式布线缺口(可先做脚本化逐段布线,甚至自研简易布线器直接回写) | `pcb_PrimitiveLine.create` / `pcb_PrimitiveVia.create` / `.delete` | `pcbpilot` PCB flow + 新 action `pcb.route_segment`/`pcb.place_via`/`pcb.rip_up`(标 `Mutates`) | **低** |
+| **A3** | **PCB 设计报告**:每网长度 / 差分对 skew / 等长偏差(纯读、零风险,design-flow 的天然 DRC 补强) | `pcb_Net.getNetLength` + `pcb_Drc.getAll{NetClasses,DifferentialPairs,EqualLengthNetGroups}` | 新只读 action `pcb.report`(CLI) + `pcbpilot` design-flow 门禁 | **低** |
+| **A4** | **直调自动布线**(类型声明 @alpha,但 3.2.148 实测仍 undefined → 暂走文件式) | `pcb_Document.autoRouting(props?)` @alpha → `{routedNets, totalNets}` + `clearRouting` | `pcbpilot` PCB flow + 新 action `pcb.auto_route` | **高**(本 build 未暴露,等平台或用文件式) |
+| **A5** | **真实 DRC 规则值**喂 layout-lint / DRC 门禁(用工程真实线宽/间距/板边判定,替代经验猜测) | `pcb_Drc.getCurrentRuleConfiguration()` | `pcbpilot` PCB context + design-flow 门禁,只读 action `pcb.drc-rules` | **低-中**(规则 JSON 层级深,键名带空格) |
+| **A6** | **换封装/换符号标准动作**,固化"五步绑定法 + resolveDeviceLibrary"(导入器件 libraryUuid 为空反查) | `lib_Device.modify` + 原始态保存/恢复 | `pcbpilot` schematic flow + 新 action `sch.rebind-footprint`/`sch.rebind-symbol` | **中**(需端到端验证,挂 ESP32 回归) |
 | **A7** | **sch check 加 netlist-JSON 交叉校验**:JSON 权威 pin→net 归属 vs 几何"导线触碰引脚"判定对照,降误报漏报 | 复用 `sch_ManufactureData.getNetlistFile()` | `cmd_sch_check.go` floating-pin 规则加一路 JSON 源 | **中**(需摸清网表 JSON pin 命名→坐标映射) |
-| **A8** | **AI 选型升级**:两段式 prompt(关键词→候选→选 idx)+ 降级链,从规则筛选升级为 LLM+库搜索 | (prompt + `lib_Device.search`) | `scripts/parts-select.py` + `easyeda-agent` part-selection | **低-中** |
+| **A8** | **AI 选型升级**:两段式 prompt(关键词→候选→选 idx)+ 降级链,从规则筛选升级为 LLM+库搜索 | (prompt + `lib_Device.search`) | `scripts/parts-select.py` + `pcbpilot` part-selection | **低-中** |
 | **A9** | ~~**铺铜/填充**(源码注入)~~ **已被 typed API 取代**——`pcb.fill.create`/`pcb.pour.create`(#17/#28)直接建 FILL/POUR,无需源码注入 | `pcb_PrimitiveFill.create` / `pcb_PrimitivePour.create` | ✅ 已落地 | 已完成 |
-| **A10** | **丝印动态填充 + 障碍避让**([eext-dynamic-fill-region-for-silkscreen](https://github.com/easyeda/eext-dynamic-fill-region-for-silkscreen)):在丝印层(TOP/BOTTOM_SILKSCREEN)建填充区,**自动避开焊盘/位号/过孔/文字/挖槽**(每障碍扩 gap → 多边形布尔差集,带洞)。我们没有(silk-align 只挪位号)。核心=多边形布尔(它用 [polyclip-ts](https://github.com/luizbarboza/polyclip-ts) / Martinez-Rueda-Feito) | `pcb_PrimitiveFill.create`(**已确认支持丝印层**)+ 障碍收集(pad/attribute/via/string getAll)+ 多边形布尔差集 | `easyeda-agent` PCB flow + 新命令 `pcb silk-fill`(daemon 侧算几何 → fill.create) | **中-高**(fill+障碍收集易,布尔差集带洞是核心;Go 侧引入多边形裁剪库或自研) |
+| **A10** | **丝印动态填充 + 障碍避让**([eext-dynamic-fill-region-for-silkscreen](https://github.com/easyeda/eext-dynamic-fill-region-for-silkscreen)):在丝印层(TOP/BOTTOM_SILKSCREEN)建填充区,**自动避开焊盘/位号/过孔/文字/挖槽**(每障碍扩 gap → 多边形布尔差集,带洞)。我们没有(silk-align 只挪位号)。核心=多边形布尔(它用 [polyclip-ts](https://github.com/luizbarboza/polyclip-ts) / Martinez-Rueda-Feito) | `pcb_PrimitiveFill.create`(**已确认支持丝印层**)+ 障碍收集(pad/attribute/via/string getAll)+ 多边形布尔差集 | `pcbpilot` PCB flow + 新命令 `pcb silk-fill`(daemon 侧算几何 → fill.create) | **中-高**(fill+障碍收集易,布尔差集带洞是核心;Go 侧引入多边形裁剪库或自研) |
 
 > **注**:`setTheNumberOfCopperLayers`(旧盲区)已在 #26 吸收(`pcb stackup`);泪滴已确认
 > 平台墙(#31,无 create API)。survey 2026-06-28 版部分条目已过时,下次做市场全量扫描时更新。
@@ -410,7 +410,7 @@ pcbnew.SaveBoard(out, board)
 
 → `kicad-cli pcb drc --format json` 结果（布局坐标是**故意随手摆的**，用来看 DRC 抓不抓得住）：
 
-| 类型 | 数量 | easyeda-agent 侧对应 |
+| 类型 | 数量 | pcbpilot 侧对应 |
 |---|---|---|
 | `shorting_items` | 1 | **❌ 没有**——报出 D2.2[SW1_NODE] 与 C2.1[VBAT_RAW] 重叠**导致两网短路** |
 | `courtyards_overlap` | 7 | ✅ `pcb layout-lint` 的 overlap（但见 9.3） |
@@ -477,7 +477,7 @@ short 与 overlap 同级致命。**短路按焊盘层判而非装配面** ——
 | **可布性预测**（ratsnest MST + 跨网交叉数 + 0–100 分 + easy/hard 判定） | ✅ `pcb layout-lint` | ❌ 完全没有 |
 | **DFM 审查**（酸角 / 悬空铜桩 / 堆叠过孔 / 无效单层过孔 / neck-down） | ✅ `pcb check` | ❌ DRC 不覆盖 |
 | LCSC C 号 / 立创库直取 | ✅ `standard-parts.json` + `bom-enrich.py` | ❌ 得自己贴 |
-| 电路块库（CH340 / ESP32 自动下载 / buck / RS-485…） | ✅ `easyeda blocks` | ❌ |
+| 电路块库（CH340 / ESP32 自动下载 / buck / RS-485…） | ✅ `pcbpilot blocks` | ❌ |
 
 **gate 语义还有个反直觉的坑**：`kicad-cli pcb drc` 报了 44 条违规，**退出码仍是 0**。
 必须显式加 `--exit-code-violations` 才拿到非零（实测退出码 5）。我们的 lint 是**默认非零**——
@@ -523,7 +523,7 @@ agent 写脚本时排障成本比 JS API 的异常高得多。另外 KiCad 10 �
 
 | 探测 | 结果 |
 |---|---|
-| `easyeda api search` 全部 `dmt_Schematic`(17 个方法) | create/copy/delete/rename/reorder/titleBlock,**无尺寸** |
+| `pcbpilot api search` 全部 `dmt_Schematic`(17 个方法) | create/copy/delete/rename/reorder/titleBlock,**无尺寸** |
 | 运行时扫全部 `eda.*` 命名空间,正则 `sheet\|paper\|size\|format\|frame\|border` | 零命中(只有无关的 sys_IFrame / sys_Dialog / placePcbOrder) |
 | `getSchematicPageInfo` 的返回字段 | `itemType / uuid / name / parentSchematicUuid / titleBlockData / showTitleBlock` —— 没有尺寸 |
 | `sheet` 图元(componentType=="sheet")的 setter | 只有通用的 `setState_X/Y/Rotation/Mirror/...`,**尺寸相关 getter 为空**;它的 bbox 是渲染结果,不是可写属性 |
@@ -562,10 +562,10 @@ Connector + 快速迭代 Skill/参考资料”的产品分层；网关本身仍�
 2. **“让 Agent 代装”作为一级入口。** 为 Codex、Claude Code、OpenCode/Cursor 等给出可直接复制的
    一句话提示，同时保留 `install.sh`、Release `skills.tar.gz` 直链和明确的手动解压目标；安装后
    要求重新读取 Skill/新开会话。
-3. **显式 Skill 唤起示例。** 用“使用 easyeda-agent 检查当前原理图/完成某个明确任务”替代模糊的
+3. **显式 Skill 唤起示例。** 用“使用 pcbpilot 检查当前原理图/完成某个明确任务”替代模糊的
    “EDA 启动”；不照搬只在特定客户端成立的 `/easyeda-api skill` 语法。
 4. **把代理与端口身份校验写进用户向排障。** 官方 FAQ 已把网络代理和端口冲突提升为独立条目；
-   我们应继续强调扫描 `60832-60841` 后还要核对服务 identity、版本与窗口，不只检查端口打开。
+   我们应继续强调扫描 `61832-61841` 后还要核对服务 identity、版本与窗口，不只检查端口打开。
 5. **把官方 Skill 作为第二上游数据源。** 除 `pro-api-types` 外，可定期 diff 它的 API reference 和
    `format/` 文档以发现新增/订正；它们仍是声明性证据，最终能力必须经当前 EasyEDA build 实测。
 

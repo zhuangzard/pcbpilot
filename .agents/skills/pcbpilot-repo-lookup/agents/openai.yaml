@@ -1,0 +1,4 @@
+interface:
+  display_name: "EasyEDA 仓库查询 / Repository Lookup"
+  short_description: "跨项目只读查询 EasyEDA 工具实现、参数化样例和验证证据"
+  default_prompt: "使用 $pcbpilot-repo-lookup 查询与当前问题相关的实现、样例和证据，并注明来源及验证边界。"

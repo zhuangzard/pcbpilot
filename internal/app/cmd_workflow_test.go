@@ -10,15 +10,15 @@ func TestWorkflowAdvanceBlocked(t *testing.T) {
 	// Every `next` workflowNext can emit, so a wording change here can't silently
 	// turn a human-sign-off stop back into an exit 0.
 	const (
-		nextSetAssembly    = "easyeda pcb stage set-assembly --profile hand-solder|reflow"
-		nextImport         = "easyeda pcb import-changes"
-		nextLayoutLint     = "easyeda pcb layout-lint --gate"
-		nextConfirmLayout  = "easyeda pcb stage confirm-layout --note \"...\""
-		nextOutlineFit     = "easyeda pcb outline-fit"
-		nextConfirmOutline = "easyeda pcb stage confirm-outline --note \"...\""
-		nextRoute          = "easyeda pcb route-short   (or autoroute)"
-		nextAdvance        = "easyeda workflow advance   (runs the pcb-check gate)"
-		nextDelivery       = "easyeda pcb silk-align && pcb drc && pcb save   (P9/P10 delivery)"
+		nextSetAssembly    = "pcbpilot pcb stage set-assembly --profile hand-solder|reflow"
+		nextImport         = "pcbpilot pcb import-changes"
+		nextLayoutLint     = "pcbpilot pcb layout-lint --gate"
+		nextConfirmLayout  = "pcbpilot pcb stage confirm-layout --note \"...\""
+		nextOutlineFit     = "pcbpilot pcb outline-fit"
+		nextConfirmOutline = "pcbpilot pcb stage confirm-outline --note \"...\""
+		nextRoute          = "pcbpilot pcb route-short   (or autoroute)"
+		nextAdvance        = "pcbpilot workflow advance   (runs the pcb-check gate)"
+		nextDelivery       = "pcbpilot pcb silk-align && pcb drc && pcb save   (P9/P10 delivery)"
 	)
 
 	cases := []struct {

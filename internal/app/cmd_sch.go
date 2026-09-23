@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/protocol"
+	"github.com/zhuangzard/pcbpilot/internal/protocol"
 )
 
 // Preserve an eight-second connector wait plus time to return its response.
@@ -29,8 +29,8 @@ func placeUUIDHint(timeout time.Duration) error {
 	return fmt.Errorf(
 		"placement confirmation timed out (request budget %s). Read back the target page first: the part may already exist; do not blindly place it again.\n"+
 			"Check editor responsiveness and the library UUID. One possible cause is an INSTANCE uuid: the component/symbol/footprint/uniqueId\n"+
-			"fields from `easyeda sch list` are placed-INSTANCE ids and cannot be replayed into `sch place`.\n"+
-			"Get a replayable device uuid first: `easyeda lib search --query \"<part>\"` → use its `uuid` + `libraryUuid`.",
+			"fields from `pcbpilot sch list` are placed-INSTANCE ids and cannot be replayed into `sch place`.\n"+
+			"Get a replayable device uuid first: `pcbpilot lib search --query \"<part>\"` → use its `uuid` + `libraryUuid`.",
 		timeout,
 	)
 }
@@ -63,7 +63,7 @@ func rebindDispatchError(err error) error {
 		return err
 	}
 	return fmt.Errorf(
-		"%w\nrebind confirmation timed out. The handler or an EasyEDA library/create call may still settle late. Do not blindly retry and do not run PCB import-changes. First run a fresh `easyeda sch list --include-device-identity` on the target page and reconcile the original primitiveId, any replacement instance, and the exact uniqueId.",
+		"%w\nrebind confirmation timed out. The handler or an EasyEDA library/create call may still settle late. Do not blindly retry and do not run PCB import-changes. First run a fresh `pcbpilot sch list --include-device-identity` on the target page and reconcile the original primitiveId, any replacement instance, and the exact uniqueId.",
 		err,
 	)
 }
@@ -160,7 +160,7 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 			Use:     "open",
 			Short:   "Open or activate a schematic page by UUID",
 			Args:    cobra.NoArgs,
-			Example: `  easyeda sch open --page 6b3a2f01-...`,
+			Example: `  pcbpilot sch open --page 6b3a2f01-...`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if page == "" {
 					return fmt.Errorf("--page is required")
@@ -181,8 +181,8 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 			Use:   "titleblock-get",
 			Short: "Read a page's 明细表 (title block): show flag + field keys/values",
 			Args:  cobra.NoArgs,
-			Example: `  easyeda sch titleblock-get
-  easyeda sch titleblock-get --page <pageUuid>`,
+			Example: `  pcbpilot sch titleblock-get
+  pcbpilot sch titleblock-get --page <pageUuid>`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				var payload map[string]any
 				if page != "" {
@@ -216,11 +216,11 @@ in result.unknownKeys — for those, fix the key, do not retry.
 
 The title block CANNOT set paper size. EasyEDA Pro exposes no set-paper-size API,
 and Size / Width / Height / "Page Size" are not title-block items. Run
-` + "`easyeda sch titleblock-get`" + ` first to see the keys this page actually has.`,
+` + "`pcbpilot sch titleblock-get`" + ` first to see the keys this page actually has.`,
 			Args: cobra.NoArgs,
-			Example: `  easyeda sch titleblock --show
-  easyeda sch titleblock --hide
-  easyeda sch titleblock --data '{"Title":{"value":"电源模块"},"Designer":{"value":"Mika"}}'`,
+			Example: `  pcbpilot sch titleblock --show
+  pcbpilot sch titleblock --hide
+  pcbpilot sch titleblock --data '{"Title":{"value":"电源模块"},"Designer":{"value":"Mika"}}'`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if show && hide {
 					return fmt.Errorf("--show and --hide are mutually exclusive")
@@ -299,7 +299,7 @@ and Size / Width / Height / "Page Size" are not title-block items. Run
 						for _, k := range uk {
 							names = append(names, fmt.Sprint(k))
 						}
-						msg += fmt.Sprintf(" — %s are not title-block items on this page (the title block cannot set paper size; run `easyeda sch titleblock-get` for the available keys)", strings.Join(names, ", "))
+						msg += fmt.Sprintf(" — %s are not title-block items on this page (the title block cannot set paper size; run `pcbpilot sch titleblock-get` for the available keys)", strings.Join(names, ", "))
 					}
 					return fmt.Errorf("%s", msg)
 				}
@@ -320,7 +320,7 @@ and Size / Width / Height / "Page Size" are not title-block items. Run
 			Use:     "page-new",
 			Short:   "Create a new schematic page under a schematic document",
 			Args:    cobra.NoArgs,
-			Example: `  easyeda sch page-new --schematic <schematicUuid>`,
+			Example: `  pcbpilot sch page-new --schematic <schematicUuid>`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if schUuid == "" {
 					return fmt.Errorf("--schematic is required")
@@ -341,7 +341,7 @@ and Size / Width / Height / "Page Size" are not title-block items. Run
 			Use:     "page-rename",
 			Short:   "Rename a schematic page",
 			Args:    cobra.NoArgs,
-			Example: `  easyeda sch page-rename --page <pageUuid> --name "电源"`,
+			Example: `  pcbpilot sch page-rename --page <pageUuid> --name "电源"`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if page == "" {
 					return fmt.Errorf("--page is required")
@@ -366,7 +366,7 @@ and Size / Width / Height / "Page Size" are not title-block items. Run
 			Use:     "page-delete",
 			Short:   "Delete a schematic page (no undo)",
 			Args:    cobra.NoArgs,
-			Example: `  easyeda sch page-delete --page <pageUuid>`,
+			Example: `  pcbpilot sch page-delete --page <pageUuid>`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if page == "" {
 					return fmt.Errorf("--page is required")
@@ -388,9 +388,9 @@ and Size / Width / Height / "Page Size" are not title-block items. Run
 			Use:   "clear",
 			Short: "Clear the active schematic page (delete all page primitives: components, flags, wires, buses, graphics)",
 			Args:  cobra.NoArgs,
-			Example: `  easyeda sch clear                      # clear the page, keep the sheet/title block (图框)
-  easyeda sch clear --dry-run            # report what would be deleted, delete nothing
-  easyeda sch clear --no-preserve-sheet  # also delete the sheet/title block`,
+			Example: `  pcbpilot sch clear                      # clear the page, keep the sheet/title block (图框)
+  pcbpilot sch clear --dry-run            # report what would be deleted, delete nothing
+  pcbpilot sch clear --no-preserve-sheet  # also delete the sheet/title block`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				var protected []string
 				if preserveParts {
@@ -468,8 +468,8 @@ and Size / Width / Height / "Page Size" are not title-block items. Run
 落位复用已验证的刚体平移(删净→modify→一遍性重连→电气自检),所以排完之后
 网表逐引脚不变。放不下就明确报错(拆页),不硬塞、不溢出图纸。`,
 			Args: cobra.NoArgs,
-			Example: `  easyeda sch group-arrange --dry-run    # 只看计划(耦合强度 + 落位)
-  easyeda sch group-arrange              # 执行`,
+			Example: `  pcbpilot sch group-arrange --dry-run    # 只看计划(耦合强度 + 落位)
+  pcbpilot sch group-arrange              # 执行`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				return runGroupArrange(cfg, window, gap, dryRun, annotate, stdout, stderr)
 			},
@@ -488,7 +488,7 @@ and Size / Width / Height / "Page Size" are not title-block items. Run
 			Use:     "rename",
 			Short:   "Rename a schematic document (the whole sheet, not a single page)",
 			Args:    cobra.NoArgs,
-			Example: `  easyeda sch rename --schematic <schematicUuid> --name "主原理图"`,
+			Example: `  pcbpilot sch rename --schematic <schematicUuid> --name "主原理图"`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if schUuid == "" {
 					return fmt.Errorf("--schematic is required")
@@ -523,10 +523,10 @@ device-library uuid and reports deviceIdentityError if exact identity is unknown
 The component/symbol/footprint/uniqueId fields are instance identifiers and must
 not be replayed as a device-library uuid. Missing identity is unavailable evidence,
 not permission to substitute a similar symbol.`,
-			Example: `  easyeda sch list
-  easyeda sch list --all-pages
-  easyeda sch list --include-bbox
-  easyeda sch list --include-pins`,
+			Example: `  pcbpilot sch list
+  pcbpilot sch list --all-pages
+  pcbpilot sch list --include-bbox
+  pcbpilot sch list --include-pins`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if page != "" && allPages {
 					return fmt.Errorf("--page and --all-pages are mutually exclusive")
@@ -586,9 +586,9 @@ not permission to substitute a similar symbol.`,
 			Args:  cobra.NoArgs,
 			Long: `Place a device/component from the EasyEDA device library at coordinates.
 
---uuid MUST be a device-library uuid (from ` + "`easyeda lib search`" + `), NOT one of
+--uuid MUST be a device-library uuid (from ` + "`pcbpilot lib search`" + `), NOT one of
 the uuid-looking fields ` + "`component`/`symbol`/`footprint`/`uniqueId`" + ` that
-` + "`easyeda sch list`" + ` reports — those are placed-INSTANCE ids and are not valid
+` + "`pcbpilot sch list`" + ` reports — those are placed-INSTANCE ids and are not valid
 ` + "`sch place`" + ` inputs. Passing an instance uuid makes the EasyEDA API hang; this
 command fails fast after a short timeout with a hint instead of stalling.
 
@@ -597,9 +597,9 @@ side right after create, so you skip the place→` + "`sch list`" + `→` + "`sc
 and the coordinate-based primitiveId re-matching that batch placement otherwise
 needs. The response's ` + "`primitiveId`" + ` and ` + "`component.designator`" + ` reflect the
 final placed state.`,
-			Example: `  easyeda sch place --lib <libraryUuid> --uuid <deviceUuid> --x 100 --y 200
-  easyeda sch place --lib <l> --uuid <u> --x 100 --y 200 --rotation 90 --mirror
-  easyeda sch place --lib <l> --uuid <u> --x 100 --y 200 --designator R12`,
+			Example: `  pcbpilot sch place --lib <libraryUuid> --uuid <deviceUuid> --x 100 --y 200
+  pcbpilot sch place --lib <l> --uuid <u> --x 100 --y 200 --rotation 90 --mirror
+  pcbpilot sch place --lib <l> --uuid <u> --x 100 --y 200 --designator R12`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if lib == "" {
 					return fmt.Errorf("--lib is required")
@@ -676,10 +676,10 @@ silently wipe all custom properties. The connector now reads the existing
 custom properties and re-writes them in the same modify call; preserved keys
 come back in result.propertiesPreserved (+propertiesBefore), and any key the
 platform still dropped is reported in result.notApplied (non-zero exit).`,
-			Example: `  easyeda sch modify --id <primitiveId> --x 150 --y 200
-  easyeda sch modify --id <id> --rotation 90 --designator R12
-  easyeda sch modify --id <id> --patch-file patch.json    # PowerShell-safe UTF-8 JSON
-  easyeda sch modify --id <id> --patch '{"customAttributes":{"Value":"10k"}}'`,
+			Example: `  pcbpilot sch modify --id <primitiveId> --x 150 --y 200
+  pcbpilot sch modify --id <id> --rotation 90 --designator R12
+  pcbpilot sch modify --id <id> --patch-file patch.json    # PowerShell-safe UTF-8 JSON
+  pcbpilot sch modify --id <id> --patch '{"customAttributes":{"Value":"10k"}}'`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if id == "" {
 					return fmt.Errorf("--id is required")
@@ -757,11 +757,11 @@ designator/uniqueId/position/props. Imported devices with an empty libraryUuid a
 reverse-looked-up in the project library first.
 
 NOTE: re-placing mints a NEW primitiveId; wires on the old pins may need re-drawing —
-run ` + "`easyeda sch drc`" + ` / ` + "`easyeda sch check`" + ` after to confirm connectivity.
+run ` + "`pcbpilot sch drc`" + ` / ` + "`pcbpilot sch check`" + ` after to confirm connectivity.
 On timeout, do not retry or run PCB import-changes until a fresh schematic read reconciles
 the original, replacement, and exact uniqueId.`,
-			Example: `  easyeda sch rebind-footprint --id <primitiveId> --footprint QFN-32_L5.0-W5.0
-  easyeda sch rebind-footprint --id <id> --footprint-uuid <u> --footprint-lib <l>`,
+			Example: `  pcbpilot sch rebind-footprint --id <primitiveId> --footprint QFN-32_L5.0-W5.0
+  pcbpilot sch rebind-footprint --id <id> --footprint-uuid <u> --footprint-lib <l>`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if id == "" {
 					return fmt.Errorf("--id is required")
@@ -811,11 +811,11 @@ designator/uniqueId/position/props. Imported devices with an empty libraryUuid a
 reverse-looked-up in the project library first.
 
 NOTE: re-placing mints a NEW primitiveId; wires on the old pins may need re-drawing —
-run ` + "`easyeda sch drc`" + ` / ` + "`easyeda sch check`" + ` after to confirm connectivity.
+run ` + "`pcbpilot sch drc`" + ` / ` + "`pcbpilot sch check`" + ` after to confirm connectivity.
 On timeout, do not retry or run PCB import-changes until a fresh schematic read reconciles
 the original, replacement, and exact uniqueId.`,
-			Example: `  easyeda sch rebind-symbol --id <primitiveId> --symbol ESP32-S3
-  easyeda sch rebind-symbol --id <id> --symbol-uuid <u> --symbol-lib <l>`,
+			Example: `  pcbpilot sch rebind-symbol --id <primitiveId> --symbol ESP32-S3
+  pcbpilot sch rebind-symbol --id <id> --symbol-uuid <u> --symbol-lib <l>`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if id == "" {
 					return fmt.Errorf("--id is required")
@@ -872,11 +872,11 @@ full identity.
 
 The result includes a pinDiff (removed/added/moved pins by pinNumber, compared
 at the identical placement pose). A non-empty pinDiff means existing wires will
-NOT line up — re-wire the affected pins, then run ` + "`easyeda sch drc`" + ` /
-` + "`easyeda sch check`" + ` to confirm connectivity.`,
-			Example: `  easyeda sch replace --id <primitiveId> --lcsc C14663
-  easyeda sch replace --id <id> --device-uuid <u> --device-lib <l>
-  easyeda sch replace --id <id> --query "CL05B104KO5NNNC" --keep-properties`,
+NOT line up — re-wire the affected pins, then run ` + "`pcbpilot sch drc`" + ` /
+` + "`pcbpilot sch check`" + ` to confirm connectivity.`,
+			Example: `  pcbpilot sch replace --id <primitiveId> --lcsc C14663
+  pcbpilot sch replace --id <id> --device-uuid <u> --device-lib <l>
+  pcbpilot sch replace --id <id> --query "CL05B104KO5NNNC" --keep-properties`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if id == "" {
 					return fmt.Errorf("--id is required")
@@ -912,7 +912,7 @@ NOT line up — re-wire the affected pins, then run ` + "`easyeda sch drc`" + ` 
 		}
 		c.Flags().StringVar(&id, "id", "", "placed component primitive ID (required)")
 		c.Flags().StringVar(&lcsc, "lcsc", "", "target LCSC C-number (must resolve uniquely, e.g. C14663)")
-		c.Flags().StringVar(&deviceUUID, "device-uuid", "", "target device-library uuid (from `easyeda lib search` / `lib by-lcsc`)")
+		c.Flags().StringVar(&deviceUUID, "device-uuid", "", "target device-library uuid (from `pcbpilot lib search` / `lib by-lcsc`)")
 		c.Flags().StringVar(&deviceLib, "device-lib", "", "target device library UUID (required with --device-uuid)")
 		c.Flags().StringVar(&query, "query", "", "target device name (must match uniquely; ambiguity errors out with candidates)")
 		c.Flags().BoolVar(&keepProperties, "keep-properties", false, "also carry the OLD component's custom attributes (otherProperty) onto the replacement")
@@ -931,8 +931,8 @@ NOT line up — re-wire the affected pins, then run ` + "`easyeda sch drc`" + ` 
 			Use:   "prim-delete",
 			Short: "Delete schematic primitives of ANY type by id (or the current selection if --ids omitted)",
 			Args:  cobra.NoArgs,
-			Example: `  easyeda sch prim-delete --ids id1,id2   # delete these (any primitive type)
-  easyeda sch prim-delete                 # delete the current selection`,
+			Example: `  pcbpilot sch prim-delete --ids id1,id2   # delete these (any primitive type)
+  pcbpilot sch prim-delete                 # delete the current selection`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				payload := map[string]any{}
 				var cascadePlan map[string]string // primitiveId → group-member designator
@@ -1008,10 +1008,10 @@ instead of being silently applied.
 real C# (the platform defaults it to the subPartName, #157) — the one-command
 version of a whole-board supplierId repair. Multi-page projects: run per page
 (--page or doc switch); only the active page is scanned.`,
-			Example: `  easyeda sch resolve-lcsc                 # dry-run report
-  easyeda sch resolve-lcsc --apply         # write resolved C#s back
-  easyeda sch resolve-lcsc --page P2 --apply
-  easyeda sch resolve-lcsc --id <primitiveId>`,
+			Example: `  pcbpilot sch resolve-lcsc                 # dry-run report
+  pcbpilot sch resolve-lcsc --apply         # write resolved C#s back
+  pcbpilot sch resolve-lcsc --page P2 --apply
+  pcbpilot sch resolve-lcsc --id <primitiveId>`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if page != "" {
 					scope, err := switchToPage(cfg, window, page)
@@ -1056,9 +1056,9 @@ zone-draw labels without the ` + "`debug exec`" + ` escape hatch (#156).
 
 Page-lazy-load law: only the active page's texts are returned — pass --page (or
 ` + "`doc switch`" + `) per page to sweep a multi-page project.`,
-			Example: `  easyeda sch text-list
-  easyeda sch text-list --page P2
-  easyeda sch text-list | jq -r '.result.texts[] | "\(.primitiveId)\t\(.content)"'`,
+			Example: `  pcbpilot sch text-list
+  pcbpilot sch text-list --page P2
+  pcbpilot sch text-list | jq -r '.result.texts[] | "\(.primitiveId)\t\(.content)"'`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if page != "" {
 					scope, err := switchToPage(cfg, window, page)
@@ -1102,8 +1102,8 @@ Page-lazy-load law: only the active page's texts are returned — pass --page (o
 			Long: `手工画一条导线折线。**这是逃生口,不是常规布线手段。**
 
 常规布线请走:
-  • ` + "`easyeda sch autoconnect`" + ` — 电源/地/netport 短桩(按真实几何打分选方向+桩长)
-  • ` + "`easyeda sch block-apply`" + ` — 整块落地(自带 netlist 对账门)
+  • ` + "`pcbpilot sch autoconnect`" + ` — 电源/地/netport 短桩(按真实几何打分选方向+桩长)
+  • ` + "`pcbpilot sch block-apply`" + ` — 整块落地(自带 netlist 对账门)
 
 本命令主要用于 ` + "`sch group-move`" + ` 刚体平移半途失败后的残局修复
 (导线无 modify-in-place,只能删除+重建;重建中断就要手工补齐剩余段)。
@@ -1116,11 +1116,11 @@ Page-lazy-load law: only the active page's texts are returned — pass --page (o
 
 所以手工画多网信号线时:每个网分配**独立的竖线通道 x**(互不重叠,避开已有
 netflag 桩线占用的 x),把所有引脚点当作**点障碍**绕行,画完必须跑
-` + "`easyeda sch bridge-check`" + ` + ` + "`easyeda sch read`" + ` 逐网对账。`,
+` + "`pcbpilot sch bridge-check`" + ` + ` + "`pcbpilot sch read`" + ` 逐网对账。`,
 			Args: cobra.NoArgs,
-			Example: `  easyeda sch wire --points '[[100,200],[100,300]]'        # nested pairs
-  easyeda sch wire --points '[100,200,100,300]'            # flat (also accepted)
-  easyeda sch wire --points '[[100,200],[100,300]]' --net VCC`,
+			Example: `  pcbpilot sch wire --points '[[100,200],[100,300]]'        # nested pairs
+  pcbpilot sch wire --points '[100,200,100,300]'            # flat (also accepted)
+  pcbpilot sch wire --points '[[100,200],[100,300]]' --net VCC`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if pointsJSON == "" {
 					return fmt.Errorf("--points is required")
@@ -1146,7 +1146,7 @@ netflag 桩线占用的 x),把所有引脚点当作**点障碍**绕行,画完必
 				// 手画线是合并短路的主要来源(#170):落线成功不等于网络正确,而
 				// `sch check` 抓不到网络归属错误。提示走能抓到的那两个判据。
 				fmt.Fprintln(stderr, "提示: 手工画线可能被 EasyEDA 与共线导线自动合并成多网短路(sch check 不报)。"+
-					"跑 `easyeda sch bridge-check` + `easyeda sch read` 逐网对账确认。")
+					"跑 `pcbpilot sch bridge-check` + `pcbpilot sch read` 逐网对账确认。")
 				return nil
 			},
 		}
@@ -1187,7 +1187,7 @@ unit — internal relative layout is untouched, only the whole assembly shifts b
            not a stub — it is left in place and reported.
 
 There is no EasyEDA grouping API to persist against (probed 3.2.121: zero
-group/parent surface), so --group reads easyeda-agent's own page-scoped store.
+group/parent surface), so --group reads pcbpilot's own page-scoped store.
 
 --group runs a COMPLETENESS PRECHECK and refuses over half-moving: a wire whose
 own LINE passes through a member pin (perpendicular offset ≤1 unit) but whose
@@ -1208,9 +1208,9 @@ Wires have no modify-in-place, so each is deleted and recreated at the shifted
 endpoints (net/color/width/lineType preserved) — a wire's primitiveId CHANGES;
 pull fresh ids before any follow-up mutation on it.`,
 			Args: cobra.NoArgs,
-			Example: `  easyeda sch group-move --ids idComp1,idWire1,idWire2 --dx 200 --dy 0
-  easyeda sch group-move --group g1 --dx 100 --dy 0   # members + stubs + flags auto-expanded
-  easyeda sch group-move --groups g2,g3 --dx 0 --dy -80   # 同块多子组:一次内核调用整体移动`,
+			Example: `  pcbpilot sch group-move --ids idComp1,idWire1,idWire2 --dx 200 --dy 0
+  pcbpilot sch group-move --group g1 --dx 100 --dy 0   # members + stubs + flags auto-expanded
+  pcbpilot sch group-move --groups g2,g3 --dx 0 --dy -80   # 同块多子组:一次内核调用整体移动`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				var groupRefs []string
 				if groupRef != "" {
@@ -1307,8 +1307,8 @@ pull fresh ids before any follow-up mutation on it.`,
 			Use:   "netflag",
 			Short: "Create a power/ground/net flag or port",
 			Args:  cobra.NoArgs,
-			Example: `  easyeda sch netflag --kind power --net VCC --x 100 --y 200
-  easyeda sch netflag --kind gnd --net GND --x 100 --y 100 --rotation 180`,
+			Example: `  pcbpilot sch netflag --kind power --net VCC --x 100 --y 200
+  pcbpilot sch netflag --kind gnd --net GND --x 100 --y 100 --rotation 180`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if kind == "" {
 					return fmt.Errorf("--kind is required")
@@ -1349,8 +1349,8 @@ pull fresh ids before any follow-up mutation on it.`,
 			Use:   "connect",
 			Short: "Stub a wire out of a pin and place a netflag/netport at its far end",
 			Args:  cobra.NoArgs,
-			Example: `  easyeda sch connect --pin U1:5 --kind power --net VCC
-  easyeda sch connect --x 100 --y 200 --kind gnd --net GND --direction down --offset 40`,
+			Example: `  pcbpilot sch connect --pin U1:5 --kind power --net VCC
+  pcbpilot sch connect --x 100 --y 200 --kind gnd --net GND --direction down --offset 40`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if kind == "" {
 					return fmt.Errorf("--kind is required")
@@ -1422,9 +1422,9 @@ pull fresh ids before any follow-up mutation on it.`,
 			Use:   "disconnect",
 			Short: "Remove a pin's stub wire and its netflag/netport together (inverse of connect)",
 			Args:  cobra.NoArgs,
-			Example: `  easyeda sch disconnect --pin U1:5
-  easyeda sch disconnect --flag-id <flagPrimitiveId>
-  easyeda sch disconnect --wire-id <wirePrimitiveId>`,
+			Example: `  pcbpilot sch disconnect --pin U1:5
+  pcbpilot sch disconnect --flag-id <flagPrimitiveId>
+  pcbpilot sch disconnect --wire-id <wirePrimitiveId>`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				payload := map[string]any{}
 				if pin != "" {
@@ -1468,9 +1468,9 @@ pull fresh ids before any follow-up mutation on it.`,
 			Use:   "no-connect",
 			Short: "Mark (or clear) a pin's no-connect flag (非连接标识)",
 			Args:  cobra.NoArgs,
-			Example: `  easyeda sch no-connect --designator U1 --pin 23
-  easyeda sch no-connect --designator U1 --pin 23,24,25
-  easyeda sch no-connect --designator U1 --pin 23 --clear`,
+			Example: `  pcbpilot sch no-connect --designator U1 --pin 23
+  pcbpilot sch no-connect --designator U1 --pin 23,24,25
+  pcbpilot sch no-connect --designator U1 --pin 23 --clear`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if designator == "" {
 					return fmt.Errorf("--designator is required")
@@ -1520,7 +1520,7 @@ pull fresh ids before any follow-up mutation on it.`,
 			Use:     "select",
 			Short:   "Select schematic primitives by ID",
 			Args:    cobra.NoArgs,
-			Example: `  easyeda sch select --ids id1,id2`,
+			Example: `  pcbpilot sch select --ids id1,id2`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if idsRaw == "" {
 					return fmt.Errorf("--ids is required")
@@ -1550,17 +1550,17 @@ Current EasyEDA builds may return only boolean/aggregate data even when the SDK
 type declares verbose per-item detail. The connector normalizes whatever the SDK
 returns, but 'sch drc' must not be treated as the full UI DRC warning list.
 
-Use 'easyeda sch check' for reconstructed per-item warnings such as floating pins
+Use 'pcbpilot sch check' for reconstructed per-item warnings such as floating pins
 and net-marker/wire-name mismatches.
 
 Exit code: non-zero ONLY when the fatal count (error + fatal severities) is > 0.
 Warnings alone exit 0, so the design-flow S5 gate can demand "0 fatal" while
 still surfacing warnings for review.`,
 			Args: cobra.NoArgs,
-			Example: `  easyeda sch drc
-  easyeda sch drc --strict          # treat warnings as errors (SDK strict mode)
-  easyeda sch drc --json            # normalized SDK result
-  easyeda sch check --json          # reconstructed per-item warnings`,
+			Example: `  pcbpilot sch drc
+  pcbpilot sch drc --strict          # treat warnings as errors (SDK strict mode)
+  pcbpilot sch drc --json            # normalized SDK result
+  pcbpilot sch check --json          # reconstructed per-item warnings`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				return runSchDrc(cfg, window, strict, verbose, asJSON, stdout, stderr)
 			},
@@ -1603,9 +1603,9 @@ exits non-zero when there are any findings, to use it as a gate.
 other sch commands emit; the findings are under result.findings (v0.10.0+;
 prior versions emitted a bare {passed,summary,findings}).`,
 			Args: cobra.NoArgs,
-			Example: `  easyeda sch check
-  easyeda sch check --json
-  easyeda sch check --strict      # non-zero exit if any findings`,
+			Example: `  pcbpilot sch check
+  pcbpilot sch check --json
+  pcbpilot sch check --strict      # non-zero exit if any findings`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if page != "" && allPages {
 					return fmt.Errorf("--page and --all-pages are mutually exclusive")
@@ -1673,9 +1673,9 @@ NOTE: --all-pages reads non-active pages shallowly (same limit as 'sch check' /
 'sch list' — pins may be empty), so cross-page trees can be under-reported; switch
 to a page for authoritative results.`,
 			Args: cobra.NoArgs,
-			Example: `  easyeda sch bridge-check
-  easyeda sch bridge-check --json
-  easyeda sch bridge-check --all-pages`,
+			Example: `  pcbpilot sch bridge-check
+  pcbpilot sch bridge-check --json
+  pcbpilot sch bridge-check --all-pages`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				return runSchBridgeCheck(cfg, window, allPages, asJSON, stdout, stderr)
 			},
@@ -1703,9 +1703,9 @@ Pin→net comes from the official manufacture netlist (same source as 'sch check
 so it's authoritative, not geometry-guessed. Use --no-check to skip the design
 check for a faster read.`,
 			Args: cobra.NoArgs,
-			Example: `  easyeda sch read
-  easyeda sch read --all-pages
-  easyeda sch read --no-check`,
+			Example: `  pcbpilot sch read
+  pcbpilot sch read --all-pages
+  pcbpilot sch read --no-check`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if page != "" && allPages {
 					return fmt.Errorf("--page and --all-pages are mutually exclusive")
@@ -1792,10 +1792,10 @@ zone check could not be proven. Strict proof is per active page and real parts:
 combine it with neither --all-pages (inactive-page data is shallow) nor
 --include-non-parts (sheet/markers are not placement bodies).`,
 			Args: cobra.NoArgs,
-			Example: `  easyeda sch layout-lint
-  easyeda sch layout-lint --strict
-  easyeda sch layout-lint --min-gap 5.08
-  easyeda sch layout-lint --all-pages --json`,
+			Example: `  pcbpilot sch layout-lint
+  pcbpilot sch layout-lint --strict
+  pcbpilot sch layout-lint --min-gap 5.08
+  pcbpilot sch layout-lint --all-pages --json`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				return runLayoutLint(cfg, window, minGap, pinEps, allPages, asJSON, includeNonParts, strict, stdout, stderr)
 			},
@@ -1843,8 +1843,8 @@ The result tags provenance (known-template-ratio / fallback-ratio / none) and
 emits warnings instead of false precision when geometry can't be determined.
 The keepouts[] format is what sch autoconnect / autolayout consume.`,
 			Args: cobra.NoArgs,
-			Example: `  easyeda sch sheet-geometry
-  easyeda sch sheet-geometry --json`,
+			Example: `  pcbpilot sch sheet-geometry
+  pcbpilot sch sheet-geometry --json`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				return runSheetGeometry(cfg, window, asJSON, stdout, stderr)
 			},
@@ -1882,8 +1882,8 @@ The keepouts[] format is what sch autoconnect / autolayout consume.`,
 			Use:   "netlist",
 			Short: "Export schematic netlist as an artifact",
 			Args:  cobra.NoArgs,
-			Example: `  easyeda sch netlist
-  easyeda sch netlist --type kicad`,
+			Example: `  pcbpilot sch netlist
+  pcbpilot sch netlist --type kicad`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				var payload map[string]any
 				if netlistType != "" {
@@ -1916,9 +1916,9 @@ dense wiring without resampling a blurry screenshot.
 
 --ids selects those primitives and exports just them (the export box shrinks to
 the selection). Without --ids it exports the whole active page.`,
-			Example: `  easyeda sch export-image --ids id1,id2 --out block.svg
-  easyeda sch export-image --format png --out page.png
-  easyeda sch export-image --scope page --format pdf --page P2 --out p2.pdf`,
+			Example: `  pcbpilot sch export-image --ids id1,id2 --out block.svg
+  pcbpilot sch export-image --format png --out page.png
+  pcbpilot sch export-image --scope page --format pdf --page P2 --out p2.pdf`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if page != "" {
 					scopeRes, err := switchToPage(cfg, window, page)
@@ -1984,7 +1984,7 @@ the selection). Without --ids it exports the whole active page.`,
 	sch.AddCommand(newSchZonePlanCmd(cfg, &window, stdout, stderr))
 	sch.AddCommand(newSchZoneArrangeCmd(cfg, &window, stdout, stderr))
 	// 持久化编组(用户点名;#173 的 sch 侧):平台无编组 API(真机探测坐实),
-	// easyeda-agent 自己按 documentUuid 持久化组关系,group-move / align /
+	// pcbpilot 自己按 documentUuid 持久化组关系,group-move / align /
 	// distribute / autolayout 消费。
 	sch.AddCommand(newSchGroupCmd(cfg, &window, stdout, stderr))
 	// ── 三层布局体系(docs/cli/schematic.md):Zone 层命令族 ──

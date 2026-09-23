@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/zhoushoujianwork/easyeda-agent/internal/blocks/block.schema.json",
+  "$id": "https://github.com/zhuangzard/pcbpilot/internal/blocks/block.schema.json",
   "title": "EasyEDA circuit block",
   "type": "object",
   "required": [

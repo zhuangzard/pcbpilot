@@ -1,7 +1,7 @@
 package app_test
 
 import (
-	"github.com/zhoushoujianwork/easyeda-agent/internal/app"
+	"github.com/zhuangzard/pcbpilot/internal/app"
 	"testing"
 )
 

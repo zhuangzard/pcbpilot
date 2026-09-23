@@ -19,8 +19,8 @@ import (
 func schMoveIDsUnverified(stdout io.Writer, what string, cause error) error {
 	fmt.Fprintf(stdout, "⚠ 平移已执行,但**电气自检没跑成**(%s)—— 本次移动未经验证\n", what)
 	fmt.Fprintln(stdout, "  --ids 只搬点名的图元:器件的桩线/旗不会跟随,断网不会有任何提示。")
-	fmt.Fprintln(stdout, "  下一步:`easyeda sch bridge-check`(抓孤儿桩/孤儿树)+ `easyeda sch check`;")
-	fmt.Fprintln(stdout, "  确认断了就 `easyeda sch autoconnect` 补回受影响的引脚,或改用 `sch group-move --group <id>`。")
+	fmt.Fprintln(stdout, "  下一步:`pcbpilot sch bridge-check`(抓孤儿桩/孤儿树)+ `pcbpilot sch check`;")
+	fmt.Fprintln(stdout, "  确认断了就 `pcbpilot sch autoconnect` 补回受影响的引脚,或改用 `sch group-move --group <id>`。")
 	return fmt.Errorf("group-move --ids 已平移但电气自检未完成(%s:%v)—— "+
 		"移动已落在画布上,请按上面的下一步自行验证;要带桩线+旗一起搬并自动重连,用 `sch group-move --group <id>`",
 		what, cause)

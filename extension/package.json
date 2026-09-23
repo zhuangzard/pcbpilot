@@ -1,8 +1,8 @@
 {
-	"name": "easyeda-agent-connector",
+	"name": "pcbpilot-connector",
 	"version": "1.5.3-dev.6",
-	"description": "EasyEDA Pro extension that bridges the easyeda-agent Go daemon to the official eda.* API over WebSocket.",
-	"author": "easyeda-agent",
+	"description": "EasyEDA Pro extension that bridges the pcbpilot Go daemon to the official eda.* API over WebSocket.",
+	"author": "pcbpilot",
 	"license": "(MIT AND Apache-2.0)",
 	"private": true,
 	"engines": {

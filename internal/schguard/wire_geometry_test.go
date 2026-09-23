@@ -107,7 +107,7 @@ func TestWireGeometryMissingEvidenceFailsClosed(t *testing.T) {
 
 func TestWireGeometryCeshiUSBC1NegativeRegression(t *testing.T) {
 	// Verbatim geometric subset of the official 2026-09-14 P1 snapshot:
-	// /tmp/easyeda-ceshi-p1-usbc1-geometry-dev2-20260914/list-raw.json.
+	// /tmp/pcbpilot-ceshi-p1-usbc1-geometry-dev2-20260914/list-raw.json.
 	// The previous strict check returned zero while both wires crossed USBC1.
 	const raw = `{"components":[{"componentType":"part","primitiveId":"0725fa240d4cac17","designator":"USBC1","rotation":180,"mirror":false,"bbox":{"maxX":580.4999999999999,"maxY":1080.5,"minX":529.4999999999999,"minY":949.5000000000001},"pinsAvailable":true,"pins":[{"pinNumber":"A7","x":589.9999999999999,"y":1020.0000000000001,"rotation":0},{"pinNumber":"B7","x":589.9999999999999,"y":1000.0000000000001,"rotation":0}]}],"wires":[{"primitiveId":"a7-wire","x0":535,"y0":1020,"x1":590,"y1":1020},{"primitiveId":"b7-wire","x0":535,"y0":1000,"x1":590,"y1":1000}]}`
 	var s map[string]any

@@ -31,10 +31,10 @@ package app
 //
 // 当前 fixture **全是合成板**，是照着九维判据手工摆出来的，所以它满分是**同义反复**。
 // 它能证明的只有两件事：(a) 度量在一块摆对了的板上不产生误报；(b) 度量对缺陷仍有
-// 反应。**真正的校准必须用真板**（`easyeda pcb dump` 抓下来放进 testdata/boards/），
+// 反应。**真正的校准必须用真板**（`pcbpilot pcb dump` 抓下来放进 testdata/boards/），
 // 判据见同目录 README.md。
 //
-// 另：#167 原文说把好板「收进 .agents/skills/easyeda-agent/scripts/tests/」是错的 —— 那个
+// 另：#167 原文说把好板「收进 .agents/skills/pcbpilot/scripts/tests/」是错的 —— 那个
 // harness（run.py）是原理图 linter 专用，check_fixtures 会无条件把 fixtures/*.json
 // 喂给 lint.py，塞一份 PCB dump 进去会直接崩。金标准板走 Go 侧 testdata。
 
@@ -48,7 +48,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/spec"
+	"github.com/zhuangzard/pcbpilot/internal/spec"
 )
 
 // goldenBoardsDir 是金标准板 fixture 的家。本仓在此之前**零 testdata 目录**
@@ -62,7 +62,7 @@ const goldenBoardsDir = "testdata/boards"
 // goldenExpect 是一块 fixture 的期望值，住在同名 `.expect.json` 里。
 //
 // 为什么是 sidecar 而不是塞进快照的 `_expect` 字段：fixture 必须与
-// `easyeda pcb dump` 的输出**逐字节同形**，这样「抓一块真板 → 直接落进 testdata」
+// `pcbpilot pcb dump` 的输出**逐字节同形**，这样「抓一块真板 → 直接落进 testdata」
 // 才是一条命令的事，重抓刷新几何时也不会把人工核定的期望值一起覆盖掉。测量数据与
 // 人的判断分开放，也和本仓 snapshot(取数) / analyze(判定) 的既有分法一致。
 //
@@ -137,7 +137,7 @@ func TestLayoutScore_GoldenBoards(t *testing.T) {
 		// 空目录必须失败：fixture 被误删后测试静默变成 no-op，是这类回归最常见的
 		// 死法（跑得飞快、永远绿、什么都没验）。
 		t.Fatalf("%s 下一块 fixture 都没有 —— 金标准回归退化成了空跑。"+
-			"补一块板（`easyeda pcb dump --out %s/<板名>.json`）或删掉这个测试，别留个永远绿的空壳。",
+			"补一块板（`pcbpilot pcb dump --out %s/<板名>.json`）或删掉这个测试，别留个永远绿的空壳。",
 			goldenBoardsDir, goldenBoardsDir)
 	}
 	for _, board := range boards {
@@ -343,7 +343,7 @@ func (c *goldenCtx) fixHint(field string, got, want float64, wantCeiling bool) s
 			"    (a) 本次改动让这一维退化了 —— 修度量（internal/app/pcb_score_*.go）；\n"+
 			"    (b) 判据变了且是有意的 —— 更新 %s.expect.json 的 %s，并在 note 里写清为什么变。\n"+
 			"  别默认选 (b)。人工核定的期望值一旦被随手改松，这条回归就只剩装饰作用。\n"+
-			"  复现：easyeda pcb layout-score --from %s%s --all",
+			"  复现：pcbpilot pcb layout-score --from %s%s --all",
 		kind, consequence, dir, got, want,
 		c.name, field,
 		repoPath(c.path), c.specHintFor(),
@@ -533,7 +533,7 @@ func loadGoldenSnapshot(t *testing.T, path string) *boardSnapshot {
 	snap, err := loadBoardSnapshotFile(f)
 	if err != nil {
 		t.Fatalf("解析 fixture %s 失败：%v\n"+
-			"fixture 就是 `easyeda pcb dump` 的原样输出；这个错误通常意味着 boardSnapshot "+
+			"fixture 就是 `pcbpilot pcb dump` 的原样输出；这个错误通常意味着 boardSnapshot "+
 			"的字段变了而 fixture 没跟着重抓。", path, err)
 	}
 	if len(snap.Components) == 0 {

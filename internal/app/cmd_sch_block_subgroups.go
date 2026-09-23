@@ -18,7 +18,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/blocks"
+	"github.com/zhuangzard/pcbpilot/internal/blocks"
 )
 
 // bslSubgroup 是一个功能子群:一个名字 + 属于它的 role 列表。

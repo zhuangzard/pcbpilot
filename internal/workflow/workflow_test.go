@@ -42,7 +42,7 @@ func TestLegacyCwdFallback(t *testing.T) {
 	defer os.Chdir(cwd)
 
 	// A pre-global state file in the old cwd-relative location.
-	legacyDir := filepath.Join(".easyeda", "pcb-stage")
+	legacyDir := filepath.Join(".pcbpilot", "pcb-stage")
 	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
 		t.Fatal(err)
 	}

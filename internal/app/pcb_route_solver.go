@@ -6,7 +6,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/zhoushoujianwork/easyeda-agent/pkg/pcbrouting"
+	"github.com/zhuangzard/pcbpilot/pkg/pcbrouting"
 )
 
 // PCB identities and units belong to the host adapter, not the search package.

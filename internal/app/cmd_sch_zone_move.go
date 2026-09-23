@@ -53,7 +53,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/zhoushoujianwork/easyeda-agent/internal/workflow"
+	"github.com/zhuangzard/pcbpilot/internal/workflow"
 )
 
 // schZoneMoveTextPad 是判定「区内 note 文本」时,区内容 bbox 向四周外扩的距离
@@ -562,7 +562,7 @@ func runSchZoneMove(cfg *appConfig, window, zoneRef string, dx, dy, textPad floa
 			addMoving(m)
 		}
 		if len(miss) > 0 {
-			return fmt.Errorf("区 %q 的组 %s 有成员不在当前页:%s — 半移预防拒绝移区;`sch group remove --group %s --members %s` 修组,或 `easyeda doc switch` 切到正确页",
+			return fmt.Errorf("区 %q 的组 %s 有成员不在当前页:%s — 半移预防拒绝移区;`sch group remove --group %s --members %s` 修组,或 `pcbpilot doc switch` 切到正确页",
 				zoneName, describeSchGroup(g), strings.Join(miss, ","), g.ID, strings.Join(miss, ","))
 		}
 	}
@@ -577,7 +577,7 @@ func runSchZoneMove(cfg *appConfig, window, zoneRef string, dx, dy, textPad floa
 	//    与组展开同一判据,零容忍硬拒。
 	in, missing := buildZoneMoveExpandInput(movingList, comps, wires)
 	if len(missing) > 0 {
-		return fmt.Errorf("区 %q 认领的散件不在当前页:%s — 半移预防,先补齐/修正认领(`sch zones set`)或切到正确页(`easyeda doc switch`)",
+		return fmt.Errorf("区 %q 认领的散件不在当前页:%s — 半移预防,先补齐/修正认领(`sch zones set`)或切到正确页(`pcbpilot doc switch`)",
 			zoneName, strings.Join(missing, ","))
 	}
 	exp := expandGroupAttachments(in)
@@ -816,9 +816,9 @@ func newSchZoneMoveCommand(cfg *appConfig, window *string, stdout, stderr io.Wri
 坐标为 schematic 单位(0.01 inch),y-UP:+dy 向上。收尾自检建议:
 sch layout-lint + sch bridge-check。`,
 		Args: cobra.NoArgs,
-		Example: `  easyeda sch zone move --zone POWER --dx 0 --dy -200
-  easyeda sch zone move --zone POWER --dx 300 --dy 0 --dry-run
-  easyeda sch zone move --zone USB --dx -150 --dy 0 --redraw-frame=false`,
+		Example: `  pcbpilot sch zone move --zone POWER --dx 0 --dy -200
+  pcbpilot sch zone move --zone POWER --dx 300 --dy 0 --dry-run
+  pcbpilot sch zone move --zone USB --dx -150 --dy 0 --redraw-frame=false`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if !cmd.Flags().Changed("dx") && !cmd.Flags().Changed("dy") {
 				return fmt.Errorf("至少给 --dx / --dy 之一(零位移是 no-op)")

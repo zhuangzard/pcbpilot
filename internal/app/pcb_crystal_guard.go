@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/zhoushoujianwork/easyeda-agent/pkg/pcbrouting"
+	"github.com/zhuangzard/pcbpilot/pkg/pcbrouting"
 )
 
 func validateCrystalGuardSpec(mod pcbLayoutModuleSpec, members, all map[string]boardComp, snap *boardSnapshot) (*pcbCrystalGuardSpec, error) {

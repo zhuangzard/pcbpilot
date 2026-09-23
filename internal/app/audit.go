@@ -13,11 +13,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/daemon"
+	"github.com/zhuangzard/pcbpilot/internal/daemon"
 )
 
 // defaultAuditDir mirrors the daemon's write-side resolution
-// (daemon.EnvAuditDir, else ~/.easyeda-agent/audit) so reads always land where
+// (daemon.EnvAuditDir, else ~/.pcbpilot/audit) so reads always land where
 // the writes went — an env override that only one side honoured would silently
 // show an empty log.
 func defaultAuditDir() string {
@@ -28,7 +28,7 @@ func defaultAuditDir() string {
 	if err != nil || home == "" {
 		home = os.Getenv("HOME")
 	}
-	return filepath.Join(home, ".easyeda-agent", "audit")
+	return filepath.Join(home, ".pcbpilot", "audit")
 }
 
 // newAuditCmd returns the "audit" subcommand group.
@@ -52,9 +52,9 @@ func newAuditTailCmd(stdout, stderr io.Writer) *cobra.Command {
 		Use:   "tail",
 		Short: "Show the most recent dispatches from the JSONL audit log",
 		Args:  cobra.NoArgs,
-		Example: `  easyeda audit tail
-  easyeda audit tail -n 50
-  easyeda audit tail --dir /path/to/audit`,
+		Example: `  pcbpilot audit tail
+  pcbpilot audit tail -n 50
+  pcbpilot audit tail --dir /path/to/audit`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if dir == "" {
 				dir = defaultAuditDir()
@@ -72,7 +72,7 @@ func newAuditTailCmd(stdout, stderr io.Writer) *cobra.Command {
 	}
 
 	cmd.Flags().IntVarP(&n, "lines", "n", 20, "number of lines to show")
-	cmd.Flags().StringVar(&dir, "dir", "", "audit log directory (default ~/.easyeda-agent/audit)")
+	cmd.Flags().StringVar(&dir, "dir", "", "audit log directory (default ~/.pcbpilot/audit)")
 	return cmd
 }
 

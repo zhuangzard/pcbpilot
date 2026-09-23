@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/zhoushoujianwork/easyeda-agent/internal/spec"
+	"github.com/zhuangzard/pcbpilot/internal/spec"
 )
 
 // fpBoard 造一块矩形板的快照。

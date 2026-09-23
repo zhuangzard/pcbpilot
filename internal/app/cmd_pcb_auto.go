@@ -10,12 +10,12 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/zhoushoujianwork/easyeda-agent/pkg/pcbauto"
+	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
 )
 
 // newPcbAutoCmd wires the offline pcbauto engine: circuit understanding,
 // electrical analysis, stackup decision, placement, routing and checks. It
-// never writes the editor; `run` emits an `easyeda apply` playbook.
+// never writes the editor; `run` emits an `pcbpilot apply` playbook.
 func newPcbAutoCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {
 	group := &cobra.Command{
 		Use:   "auto",
@@ -34,7 +34,7 @@ snapshot (--board) or the live editor — plus an optional mechanical spec
     tuning, independent exact DRC and signal-integrity checks
 
 Nothing is written to EasyEDA. 'run' writes plan.json, playbook.json,
-preview.svg and report.md; execute with 'easyeda apply playbook.json'.`,
+preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 	}
 	type inputs struct {
 		board, mech, power string
@@ -100,8 +100,8 @@ preview.svg and report.md; execute with 'easyeda apply playbook.json'.`,
 		c := &cobra.Command{
 			Use:   "analyze",
 			Short: "Understand the circuit and decide widths, clearances, domains and layer count (no placement/routing)",
-			Example: `  easyeda pcb auto analyze --board board.json
-  easyeda pcb auto analyze --board board.json --power power.json --json`,
+			Example: `  pcbpilot pcb auto analyze --board board.json
+  pcbpilot pcb auto analyze --board board.json --power power.json --json`,
 			Args: cobra.NoArgs,
 			RunE: func(cmd *cobra.Command, _ []string) error {
 				b, mech, power, err := load()
@@ -140,9 +140,9 @@ preview.svg and report.md; execute with 'easyeda apply playbook.json'.`,
 		c := &cobra.Command{
 			Use:   "run",
 			Short: "Full pipeline: analyse → stackup → (place) → route → DRC/SI → plan.json + playbook.json + preview.svg + report.md",
-			Example: `  easyeda pcb auto run --board board.json --out-dir out/
-  easyeda pcb auto run --board board.json --mech mech.json --place --out-dir out/
-  easyeda apply out/playbook.json --project demo --dry-run`,
+			Example: `  pcbpilot pcb auto run --board board.json --out-dir out/
+  pcbpilot pcb auto run --board board.json --mech mech.json --place --out-dir out/
+  pcbpilot apply out/playbook.json --project demo --dry-run`,
 			Args: cobra.NoArgs,
 			RunE: func(cmd *cobra.Command, _ []string) error {
 				if outDir == "" {

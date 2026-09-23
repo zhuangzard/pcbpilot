@@ -5,7 +5,7 @@ import type esbuild from 'esbuild';
 
 // Inject the real connector version (from extension.json) at build time so the
 // handshake reports the actual build, not a stale hardcoded constant. This is
-// what `easyeda daemon health` shows per window — load-bearing for diagnosing a
+// what `pcbpilot daemon health` shows per window — load-bearing for diagnosing a
 // stale open EasyEDA window running old connector code. (CommonJS via ts-node,
 // so __dirname, not import.meta.)
 const extJson = JSON.parse(

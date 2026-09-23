@@ -47,9 +47,9 @@ directly orderable — EasyEDA's own export writes <MPN>.1 there, which is not.
 Pass --enrich=false to keep the raw export. Enrichment is csv-only (xlsx is
 binary) and best-effort: if it fails the exported file is left un-enriched and
 a warning is printed, but the export itself still succeeds.`,
-		Example: `  easyeda bom export --type csv
-  easyeda bom export --type csv --enrich=false
-  easyeda bom export --type xlsx --columns '["designator","value","footprint","lcsc"]'`,
+		Example: `  pcbpilot bom export --type csv
+  pcbpilot bom export --type csv --enrich=false
+  pcbpilot bom export --type xlsx --columns '["designator","value","footprint","lcsc"]'`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if fileType == "" {
 				return fmt.Errorf("--type is required (csv or xlsx)")
@@ -139,9 +139,9 @@ func newBomEnrichCmd(stdout, stderr io.Writer) *cobra.Command {
 		Use:   "enrich <bom.tsv>",
 		Short: "Enrich a BOM TSV with LCSC C-numbers via bom-enrich.py",
 		Args:  cobra.ExactArgs(1),
-		Example: `  easyeda bom enrich bom.tsv
-  easyeda bom enrich bom.tsv --out enriched.tsv
-  easyeda bom enrich bom.tsv --script /path/to/bom-enrich.py`,
+		Example: `  pcbpilot bom enrich bom.tsv
+  pcbpilot bom enrich bom.tsv --out enriched.tsv
+  pcbpilot bom enrich bom.tsv --script /path/to/bom-enrich.py`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			script, err := findBomEnrichScript(scriptPath)
 			if err != nil {

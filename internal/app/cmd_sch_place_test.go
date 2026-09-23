@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-// newHangingDaemon stands up a fake daemon: /health identifies as easyeda-agent
+// newHangingDaemon stands up a fake daemon: /health identifies as pcbpilot
 // so scanHealth picks it, while /action blocks past the caller's timeout to
 // emulate the connector hanging on a bad uuid. Returns a cfg pointed at it.
 func newHangingDaemon(t *testing.T) (*appConfig, func()) {
@@ -21,7 +21,7 @@ func newHangingDaemon(t *testing.T) (*appConfig, func()) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/health":
-			_, _ = w.Write([]byte(`{"service":"easyeda-agent","windows":[]}`))
+			_, _ = w.Write([]byte(`{"service":"pcbpilot","windows":[]}`))
 		case "/action":
 			// Block well past the client's timeout so the call fails with a
 			// deadline, but bounded so Close() doesn't stall on a held conn.
