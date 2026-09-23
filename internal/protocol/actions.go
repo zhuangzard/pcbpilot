@@ -248,6 +248,16 @@ func AllActions() []ActionSpec {
 			Outputs:     []string{"component primitives", "designator", "name", "pins", "pinsAvailable", "pinsError on pin-read failure", "bbox", "wires/wiresAvailable/wiresError", "pagePrimitives (all component/graphic IDs and native drawing state; excludes sheet autosave timestamps)", "connectivitySummary {scope,wires,buses,netflags,netports,netlabels,shortSymbols}"},
 		},
 		{
+			Name:        "schematic.attribute.inspect",
+			Domain:      DomainSchematic,
+			Phase:       1,
+			Mutates:     false,
+			NeedsWindow: true,
+			Description: "Read-only diagnostic for one active-page attribute: compare KeyVisible and ValueVisible from getAll(), get(id), and get(id).toAsync().reset(). Report exact types, including unreadable undefined, and current document identity before/after. Never apply or modify attribute state; this does not relax guarded page replacement.",
+			Inputs:      []string{"primitiveId"},
+			Outputs:     []string{"primitiveId", "identityBefore", "identityAfter", "getAll", "get", "reset"},
+		},
+		{
 			Name:        "schematic.designators.list",
 			Domain:      DomainSchematic,
 			Phase:       1,

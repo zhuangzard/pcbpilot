@@ -611,6 +611,30 @@ not permission to substitute a similar symbol.`,
 		sch.AddCommand(c)
 	}
 
+	// ── attribute-inspect ────────────────────────────────────────────────
+	{
+		var primitiveID string
+		c := &cobra.Command{
+			Use:   "attribute-inspect",
+			Short: "Inspect one active-page attribute's visibility through three official read paths",
+			Long: `Read KeyVisible and ValueVisible through sch_PrimitiveAttribute.getAll(),
+get(id), and get(id).toAsync().reset(). The result reports exact types and values;
+undefined is unreadable and does not become a default. Current document identity
+is checked before and after. This diagnostic never modifies the design and does
+not relax guarded page replacement or clear.`,
+			Example: `  pcbpilot sch attribute-inspect --id <primitiveId> --project <project> --doc <page-uuid>`,
+			Args: cobra.NoArgs,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				if strings.TrimSpace(primitiveID) == "" {
+					return fmt.Errorf("--id is required")
+				}
+				return dispatch(cfg, "schematic.attribute.inspect", window, map[string]any{"primitiveId": primitiveID}, stdout, stderr)
+			},
+		}
+		c.Flags().StringVar(&primitiveID, "id", "", "primitive ID of one attribute on the active schematic page (required)")
+		sch.AddCommand(c)
+	}
+
 	// ── place ─────────────────────────────────────────────────────────────
 	// schematic.component.place
 	{

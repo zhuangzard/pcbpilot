@@ -40,6 +40,55 @@ func TestHubPruneStale(t *testing.T) {
 	}
 }
 
+func TestDedupeContextPrefersConnectorVersion(t *testing.T) {
+	now := time.Now().UTC()
+	cases := []struct {
+		name, existingVersion, incomingVersion, wantID string
+		existingAt, incomingAt                         time.Time
+	}{
+		{"old dev runtime reconnects late", "1.6.0-dev.5", "1.6.0-dev.4", "existing", now.Add(-time.Minute), now},
+		{"new dev runtime reconnects late", "1.6.0-dev.4", "1.6.0-dev.5", "incoming", now.Add(-time.Minute), now},
+		{"higher dev runtime wins even if connected earlier", "1.6.0-dev.4", "1.6.0-dev.5", "incoming", now, now.Add(-time.Minute)},
+		{"numeric dev identifiers", "1.6.0-dev.9", "1.6.0-dev.10", "incoming", now, now.Add(-time.Minute)},
+		{"release outranks prerelease", "1.6.0", "1.6.0-dev.10", "existing", now.Add(-time.Minute), now},
+		{"core components compare numerically", "1.9.0", "1.10.0", "incoming", now, now.Add(-time.Minute)},
+		{"same version keeps later connection", "1.6.0-dev.5", "v1.6.0-dev.5", "incoming", now.Add(-time.Minute), now},
+		{"same version keeps existing later connection", "1.6.0-dev.5", "1.6.0-dev.5", "existing", now, now.Add(-time.Minute)},
+		{"build metadata does not affect precedence", "1.6.0+abc", "1.6.0+xyz", "incoming", now.Add(-time.Minute), now},
+		{"unparseable version falls back to arrival", "1.6.0-dev.5", "unknown", "incoming", now.Add(-time.Minute), now},
+		{"invalid semver falls back to arrival", "1.6.0-dev.5", "1.6.0-dev.04", "incoming", now.Add(-time.Minute), now},
+	}
+	newDuplicate := func(id, version string, at time.Time) *conn {
+		c := newConn(nil, at)
+		c.windowID = id
+		c.connVersion = version
+		c.ctx = protocol.Context{ProjectUUID: "project", DocumentUUID: "document", TabID: "tab"}
+		return c
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			existing := newDuplicate("existing", tc.existingVersion, tc.existingAt)
+			incoming := newDuplicate("incoming", tc.incomingVersion, tc.incomingAt)
+			h := newHub()
+			h.add(existing)
+			h.add(incoming)
+			h.dedupeContext(incoming)
+			if len(h.windows) != 1 || h.windows[tc.wantID] == nil {
+				t.Fatalf("remaining windows = %+v, want only %s", h.windows, tc.wantID)
+			}
+			loser := existing
+			if tc.wantID == "existing" {
+				loser = incoming
+			}
+			select {
+			case <-loser.done:
+			default:
+				t.Fatal("retired connector was not disconnected")
+			}
+		})
+	}
+}
+
 func TestRemovedConnectionsRejectDispatch(t *testing.T) {
 	for _, remove := range []struct {
 		name string
@@ -187,6 +236,28 @@ func TestTargetReconnectDuplicateUsesNewest(t *testing.T) {
 	got, ok := h.target("")
 	if !ok || got != newer {
 		t.Fatalf("target duplicate reconnect = (%p,%v), want (%p,true)", got, ok, newer)
+	}
+}
+
+func TestTargetReconnectDuplicatePrefersHigherVersion(t *testing.T) {
+	olderRuntime := connWith("late-old-runtime", "motobox", "pcb")
+	olderRuntime.connectedAt = time.Unix(20, 0)
+	olderRuntime.connVersion = "1.6.0-dev.4"
+	olderRuntime.ctx.ProjectUUID = "project-1"
+	olderRuntime.ctx.DocumentUUID = "pcb-1"
+	olderRuntime.ctx.TabID = "tab-1"
+
+	newerRuntime := connWith("early-new-runtime", "motobox", "pcb")
+	newerRuntime.connectedAt = time.Unix(10, 0)
+	newerRuntime.connVersion = "1.6.0-dev.5"
+	newerRuntime.ctx.ProjectUUID = "project-1"
+	newerRuntime.ctx.DocumentUUID = "pcb-1"
+	newerRuntime.ctx.TabID = "tab-1"
+
+	h := &hub{windows: map[string]*conn{olderRuntime.windowID: olderRuntime, newerRuntime.windowID: newerRuntime}}
+	got, ok := h.target("")
+	if !ok || got != newerRuntime {
+		t.Fatalf("target duplicate reconnect = (%p,%v), want (%p,true)", got, ok, newerRuntime)
 	}
 }
 

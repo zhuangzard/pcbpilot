@@ -283,7 +283,7 @@ func (h *hub) add(c *conn) {
 	h.mu.Unlock()
 }
 
-// dedupeContext retires older transport registrations for the exact same
+// dedupeContext retires duplicate transport registrations for the exact same
 // project/document/tab. A browser reload can leave old extension sockets alive;
 // allowing them to share one EasyEDA document makes writes race in the editor.
 func (h *hub) dedupeContext(current *conn) {
@@ -301,8 +301,8 @@ func (h *hub) dedupeContext(current *conn) {
 		if got.Context.ProjectUUID != want.Context.ProjectUUID || got.Context.DocumentUUID != want.Context.DocumentUUID || got.Context.TabID != want.Context.TabID {
 			continue
 		}
-		// Prefer the higher connector version; when equal, retain the newer socket.
-		keepCurrent := semverCore(want.ConnectorVersion) > semverCore(got.ConnectorVersion) || (semverCore(want.ConnectorVersion) == semverCore(got.ConnectorVersion) && want.ConnectedAt.After(got.ConnectedAt))
+		// A page with an older connector runtime may reconnect after its replacement.
+		keepCurrent := preferConnectorWindow(want, got)
 		if keepCurrent {
 			delete(h.windows, id)
 			closeList = append(closeList, other)
@@ -549,7 +549,7 @@ func (h *hub) windowForProject(project, preferDoc string) (id string, found bool
 	// A connector reconnect briefly leaves the old and new registrations alive
 	// together. EasyEDA 3.2.175 can also activate one extension twice. If every
 	// candidate points at the exact same document tab, they are transport
-	// duplicates rather than distinct user windows; route to the newest one.
+	// duplicates rather than distinct user windows; route to the preferred one.
 	if newest, ok := newestExactDocumentDuplicate(matches); ok {
 		return newest.WindowID, true, false
 	}
@@ -575,7 +575,7 @@ func newestExactDocumentDuplicate(matches []Window) (Window, bool) {
 			w.Context.TabID != first.Context.TabID {
 			return Window{}, false
 		}
-		if w.ConnectedAt.After(newest.ConnectedAt) {
+		if preferConnectorWindow(w, newest) {
 			newest = w
 		}
 	}
@@ -711,6 +711,135 @@ func semverCore(v string) string {
 		}
 	}
 	return v
+}
+
+// preferConnectorWindow compares full SemVer precedence for duplicate transports.
+// A version we cannot parse has no reliable ordering, so arrival time remains
+// the fallback. Build metadata has no SemVer precedence; equal versions also
+// fall back to arrival time.
+func preferConnectorWindow(candidate, incumbent Window) bool {
+	if order, comparable := compareConnectorSemver(candidate.ConnectorVersion, incumbent.ConnectorVersion); comparable && order != 0 {
+		return order > 0
+	}
+	return candidate.ConnectedAt.After(incumbent.ConnectedAt)
+}
+
+type connectorSemver struct {
+	core [3]string
+	pre  []string
+}
+
+// compareConnectorSemver returns -1/0/1 only when both versions are valid
+// SemVer, accepting an optional leading v used by release tags.
+func compareConnectorSemver(a, b string) (int, bool) {
+	left, ok := parseConnectorSemver(a)
+	if !ok {
+		return 0, false
+	}
+	right, ok := parseConnectorSemver(b)
+	if !ok {
+		return 0, false
+	}
+	for i := range left.core {
+		if order := compareDecimal(left.core[i], right.core[i]); order != 0 {
+			return order, true
+		}
+	}
+	if len(left.pre) == 0 && len(right.pre) != 0 {
+		return 1, true
+	}
+	if len(right.pre) == 0 && len(left.pre) != 0 {
+		return -1, true
+	}
+	for i := 0; i < len(left.pre) && i < len(right.pre); i++ {
+		x, y := left.pre[i], right.pre[i]
+		xNumeric, yNumeric := decimalIdentifier(x), decimalIdentifier(y)
+		switch {
+		case xNumeric && yNumeric:
+			if order := compareDecimal(x, y); order != 0 {
+				return order, true
+			}
+		case xNumeric:
+			return -1, true
+		case yNumeric:
+			return 1, true
+		default:
+			if order := strings.Compare(x, y); order != 0 {
+				return order, true
+			}
+		}
+	}
+	switch {
+	case len(left.pre) < len(right.pre):
+		return -1, true
+	case len(left.pre) > len(right.pre):
+		return 1, true
+	default:
+		return 0, true
+	}
+}
+
+func parseConnectorSemver(v string) (connectorSemver, bool) {
+	v = strings.TrimPrefix(v, "v")
+	version, build, hasBuild := strings.Cut(v, "+")
+	if hasBuild && !validSemverIdentifiers(build, false) {
+		return connectorSemver{}, false
+	}
+	core, pre, hasPre := strings.Cut(version, "-")
+	parts := strings.Split(core, ".")
+	if len(parts) != 3 {
+		return connectorSemver{}, false
+	}
+	var parsed connectorSemver
+	for i, part := range parts {
+		if !decimalIdentifier(part) || (len(part) > 1 && part[0] == '0') {
+			return connectorSemver{}, false
+		}
+		parsed.core[i] = part
+	}
+	if hasPre {
+		if !validSemverIdentifiers(pre, true) {
+			return connectorSemver{}, false
+		}
+		parsed.pre = strings.Split(pre, ".")
+	}
+	return parsed, true
+}
+
+func validSemverIdentifiers(s string, prerelease bool) bool {
+	for _, id := range strings.Split(s, ".") {
+		if id == "" || (prerelease && len(id) > 1 && id[0] == '0' && decimalIdentifier(id)) {
+			return false
+		}
+		for _, c := range id {
+			if !((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '-') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func decimalIdentifier(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func compareDecimal(a, b string) int {
+	if len(a) != len(b) {
+		if len(a) < len(b) {
+			return -1
+		}
+		return 1
+	}
+	return strings.Compare(a, b)
 }
 
 func (h *hub) list() []Window {

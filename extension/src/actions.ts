@@ -2136,6 +2136,67 @@ async function schAttributeStateRecord(attribute: SchPrimitiveLike): Promise<Rec
 	}
 }
 
+function attributeVisibilityValue(value: unknown): Record<string, unknown> {
+	if (value === undefined) return { type: 'undefined', readable: false };
+	if (value === null) return { type: 'null', value: null, readable: true };
+	if (typeof value === 'boolean') return { type: 'boolean', value, readable: true };
+	return { type: typeof value, value: typeof value === 'string' || typeof value === 'number' ? value : String(value), readable: false };
+}
+
+function attributeVisibilityRecord(attribute: Awaited<ReturnType<typeof eda.sch_PrimitiveAttribute.getAll>>[number] | undefined): Record<string, unknown> {
+	if (!attribute) return {
+		found: false,
+		KeyVisible: { type: 'unavailable', readable: false },
+		ValueVisible: { type: 'unavailable', readable: false },
+	};
+	return {
+		found: true,
+		primitiveId: attribute.getState_PrimitiveId(),
+		KeyVisible: attributeVisibilityValue(attribute.getState_KeyVisible()),
+		ValueVisible: attributeVisibilityValue(attribute.getState_ValueVisible()),
+	};
+}
+
+async function schematicAttributeInspect(payload: Payload): Promise<ActionResult> {
+	const primitiveId = requireString(payload, 'primitiveId');
+	const identityBefore = await readResponseContext();
+	if (!identityBefore.projectUuid || !identityBefore.documentUuid || identityBefore.documentType !== 'schematic') {
+		throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, 'Current schematic document identity is unavailable.');
+	}
+	const all = await eda.sch_PrimitiveAttribute.getAll();
+	if (!Array.isArray(all)) throw new ActionError(ErrorCodes.EDA_CALL_FAILED, 'Attribute inventory is unavailable.');
+	const matches = all.filter(attribute => attribute.getState_PrimitiveId() === primitiveId);
+	if (matches.length > 1) throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, `Attribute ${primitiveId} appears more than once in the current page inventory.`);
+	const bulkRecord = attributeVisibilityRecord(matches[0]);
+	const direct = await eda.sch_PrimitiveAttribute.get(primitiveId);
+	if (direct && direct.getState_PrimitiveId() !== primitiveId) {
+		throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, `Attribute get(${primitiveId}) returned a different primitive ID.`);
+	}
+	const directRecord = attributeVisibilityRecord(direct);
+	const asyncAttribute = direct?.toAsync();
+	if (asyncAttribute && asyncAttribute.getState_PrimitiveId() !== primitiveId) {
+		throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, `Attribute toAsync(${primitiveId}) returned a different primitive ID.`);
+	}
+	const reset = asyncAttribute ? await asyncAttribute.reset() : undefined;
+	if (reset && reset.getState_PrimitiveId() !== primitiveId) {
+		throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, `Attribute reset(${primitiveId}) returned a different primitive ID.`);
+	}
+	const resetRecord = attributeVisibilityRecord(reset);
+	const identityAfter = await readResponseContext();
+	if (identityAfter.projectUuid !== identityBefore.projectUuid || identityAfter.documentUuid !== identityBefore.documentUuid
+		|| identityAfter.documentType !== identityBefore.documentType || identityAfter.tabId !== identityBefore.tabId) {
+		throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, `Current document identity changed while inspecting attribute ${primitiveId}.`);
+	}
+	return { result: {
+		primitiveId,
+		identityBefore,
+		identityAfter,
+		getAll: bulkRecord,
+		get: directRecord,
+		reset: resetRecord,
+	} };
+}
+
 async function readSchPagePrimitiveState(): Promise<Record<string, Array<Record<string, unknown>>>> {
 	const out: Record<string, Array<Record<string, unknown>>> = {};
 	const components = await eda.sch_PrimitiveComponent.getAll();
@@ -13939,6 +14000,7 @@ const HANDLERS: Record<string, Handler> = {
 	'schematic.titleblock.get': schematicTitleBlockGet,
 	'schematic.titleblock.modify': schematicTitleBlockModify,
 	'schematic.components.list': schematicComponentsList,
+	'schematic.attribute.inspect': schematicAttributeInspect,
 	'schematic.designators.list': schematicDesignatorsList,
 	'schematic.component.place': schematicComponentPlace,
 	'schematic.component.modify': schematicComponentModify,

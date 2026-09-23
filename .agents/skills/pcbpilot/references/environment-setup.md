@@ -206,7 +206,9 @@ libraryUuid 相同但器件 uuid 不同，平台对未知 uuid 不回执，表�
 
 `windowId` 会随重连变化，不作为项目或文档的持久身份。优先用项目和文档 UUID 路由。
 daemon 接收心跳、context 和动作响应来更新窗口信息，过期连接会退休，同一
-project/document/tab 的重复连接会去重；缓存清理不需要手工删历史 windowId。
+project/document/tab 的重复连接会去重：可比较的完整语义版本优先保留较高版（包括
+`-dev.N`），同版或版本无法比较时保留较晚连接。缓存清理不需要手工删历史 windowId。
+去重只处理 daemon 中的连接；升级后仍用 `health` 核对目标页实际运行的 Connector 版本。
 
 `health` 中的连接上下文不能代替目标页的数据快照。切页、重连或 Apply 后，需要
 读取相应文档的新数据；离线文件须记录其来源和采样阶段。要刷新编辑器文档状态时：

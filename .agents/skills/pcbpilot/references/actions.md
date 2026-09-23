@@ -72,6 +72,7 @@ Playbook 使用 `version:1`、`meta` 和有序 `steps`。每步只选一种执�
 |---|---|
 | `doc ls/switch/open/reload`，`document.current/open/close` | 使用工程和页面目标；同名页用 UUID。工程仍在线但没有活动标签时，`doc ls --project` 继续读取工程级原理图页/PCB 清单，`doc open <uuid> --project` 用 typed `document.open` 恢复并以 fresh `document.current` 确认；其他 current/清单错误仍失败关闭。`doc reload` 保存后把 fresh current 的 UUID + tabId 一起交给 typed `document.close`，由官方 API 在关闭前回读身份和 splitScreenId，再用 `document.open` 恢复；禁止以 `debug.exec_js` 关闭标签。CLI 同时核对活动 UUID 与对象枚举 settle；只出现目标标签、但对象仍不可读时失败并要求停止写入、修复 typed reload/open 后复测 |
 | `sch list`，`schematic.components.list` | `includeDeviceIdentity` 为重放解析真正库 UUID；`includePins/BBox/Wires` 取得几何基线。V4 `pins[].otherProperty` 保留引脚文本属性；字段缺失不能当空对象。非激活页可能是浅数据 |
+| `sch attribute-inspect --id <primitiveId>`，`schematic.attribute.inspect` | 只读诊断当前页指定属性的 `KeyVisible`/`ValueVisible`：分别记录全量枚举、按 ID 读取、按 ID 读取后 `toAsync().reset()` 的原值与类型，并核对前后文档身份及图元 ID。`undefined` 为不可读；诊断结果不补默认值，不放宽整页快照或清页守卫。仅调用官方读取接口，不调用 `done`/`modify`。|
 | `sch place`，`schematic.component.place` | 使用库 UUID；自动回填可确定的 C 号与空属性是 best-effort，须检查警告。没有 place 自定义属性输入契约；V4 复数 symbol/device/footprint association 在 canonical selector 完成前写前拒绝，不能取第一项 |
 | `sch modify`，`schematic.component.modify` | `otherProperty`/`customAttributes` 二选一，合并保留原属性。`verified:false` 需要再回读，不能当已验证 |
 | `sch prim-delete/clear` | 删除后按 ID 或完整图元清单验证；默认保护 sheet。未知枚举或幸存图元不能报告清空 |
