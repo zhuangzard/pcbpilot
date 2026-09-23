@@ -85,7 +85,7 @@ type placer struct {
 	conv     map[*Part]*Converter
 	swPads   map[*Converter][]*Pad // switch-node pads, resolved once
 	chains   map[*Part][]*SignalChain
-	reserve  []portReserve // connector pin-side strips kept for the port's own parts
+	reserve  []portReserve   // connector pin-side strips kept for the port's own parts
 	pairOf   map[*Part]*Part // same step of the other half of a diff pair
 	hardOnly bool            // partCost: constraint terms only (legalisation)
 	apart    [][2]*Part      // core pairs to keep apart (noisy vs sensitive)
