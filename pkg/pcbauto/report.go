@@ -272,7 +272,7 @@ func writeJoint(p func(string, ...any), r *Report) {
 	p("综合分 = 门槛 × 布通系数 × 质量分。布通系数 = 布通率² × 0.97^DRC = **%.2f**（布通率 %.1f%%，DRC %d）；质量分 = 各组加权几何平均 = **%.0f**。\n\n",
 		j.CompletionFactor, j.Completion, j.DRC, j.Quality)
 	if j.PlanePads > 0 {
-		p("平面/铺铜网络焊盘：%d 个，其中 **%d 个未接通**（计入布通系数）。\n\n", j.PlanePads, j.PlaneOpen)
+		p("平面/铺铜与地网络连接：%d 条，其中 **%d 条未接通**（计入布通系数）。\n\n", j.PlanePads, j.PlaneOpen)
 	}
 	for _, g := range j.Gates {
 		p("- 门槛未过：%s（总分封顶 40）\n", g)

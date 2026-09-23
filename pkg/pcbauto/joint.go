@@ -42,8 +42,8 @@ type JointScore struct {
 	Deliverable bool     `json:"deliverable"`
 	Gates       []string `json:"gates,omitempty"`
 	Completion  float64  `json:"completion"`
-	// PlanePads / PlaneOpen: pads of plane-delivered nets and how many of
-	// them the router could not tie to their plane or pour. Completion counts
+	// PlanePads / PlaneOpen: connections of plane-delivered and ground nets
+	// (pads − 1 per net) and how many failed to close. Completion counts
 	// signal connections only, so without this a board whose ground pads are
 	// floating would still score as complete.
 	PlanePads        int                `json:"planePads"`
@@ -98,21 +98,18 @@ func Joint(b *Board, an *Analysis, c *Circuit, st *Stackup, rr *RouteResult, drc
 			planeSet[net] = true
 		}
 	}
+	// Counted in connections, like signal completion: a net of n pads has
+	// n−1; each failure record is one connection that did not close (a
+	// record lists the whole stranded group, which may be a hundred pads).
 	for net := range planeSet {
-		js.PlanePads += len(cg.pads[net])
+		if n := len(cg.pads[net]); n > 1 {
+			js.PlanePads += n - 1
+		}
 	}
 	for _, u := range rr.Unrouted {
-		if !planeSet[u.Net] {
-			continue
-		}
-		if u.Reason == "drc-unrepairable" {
-			// The final DRC gate dropped the net's patch tracks and listed every
-			// pad; its fan-out vias still tie the pads to the plane. Count it
-			// as one open, not the whole net.
+		if planeSet[u.Net] {
 			js.PlaneOpen++
-			continue
 		}
-		js.PlaneOpen += len(u.Pads) // the specific pad group that failed
 	}
 	planeOK := 1.0
 	if js.PlanePads > 0 {
