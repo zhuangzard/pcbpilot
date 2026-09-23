@@ -2109,15 +2109,31 @@ const SCH_PAGE_STATE_FIELDS: Record<string, Array<string>> = {
 };
 
 function schPrimitiveStateRecord(primitive: SchPrimitiveLike, kind: string): Record<string, unknown> {
-	const record: Record<string, unknown> = { primitiveId: primitive.getState_PrimitiveId() };
+	const primitiveId = primitive.getState_PrimitiveId();
+	const record: Record<string, unknown> = { primitiveId };
 	for (const field of SCH_PAGE_STATE_FIELDS[kind]) {
 		const getter = (primitive as unknown as Record<string, unknown>)[`getState_${field}`];
-		if (typeof getter !== 'function') throw new Error(`Page ${kind}.${field} accessor unavailable.`);
+		if (typeof getter !== 'function') throw new Error(`Page ${kind}.${field} accessor unavailable for ${primitiveId}.`);
 		const value = (getter as () => unknown).call(primitive);
-		if (value === undefined || (typeof value === 'number' && !Number.isFinite(value)) || (typeof File !== 'undefined' && value instanceof File)) throw new Error(`Page ${kind}.${field} state unavailable or unsupported.`);
+		if (value === undefined || (typeof value === 'number' && !Number.isFinite(value)) || (typeof File !== 'undefined' && value instanceof File)) throw new Error(`Page ${kind}.${field} state unavailable or unsupported for ${primitiveId}.`);
 		record[field] = value;
 	}
 	return record;
+}
+
+async function schAttributeStateRecord(attribute: SchPrimitiveLike): Promise<Record<string, unknown>> {
+	try { return schPrimitiveStateRecord(attribute, 'attributes'); }
+	catch (firstError) {
+		const id = attribute.getState_PrimitiveId();
+		const reread = await eda.sch_PrimitiveAttribute.get(id);
+		if (!reread || reread.getState_PrimitiveId() !== id) {
+			throw new Error(`Page attribute ${id} cannot be reread after ${describeThrown(firstError)}.`);
+		}
+		try { return schPrimitiveStateRecord(reread, 'attributes'); }
+		catch (rereadError) {
+			throw new Error(`Page attribute ${id} remains unreadable after typed get(id): ${describeThrown(rereadError)}.`);
+		}
+	}
 }
 
 async function readSchPagePrimitiveState(): Promise<Record<string, Array<Record<string, unknown>>>> {
@@ -2167,11 +2183,16 @@ async function readSchPagePrimitiveState(): Promise<Record<string, Array<Record<
 		}
 	}
 	const sheets = new Set(components.filter(c => c.getState_ComponentType() === SCH_SHEET_TYPE).map(c => c.getState_PrimitiveId()));
-	out.attributes = [...attributes.values()].map(attribute => {
-		const record = schPrimitiveStateRecord(attribute, 'attributes');
-		if (sheets.has(String(record.ParentPrimitiveId)) && (record.Key === '@Update Date' || record.Key === '@Update Time')) record.Value = null;
-		return record;
-	});
+	out.attributes = [];
+	const attributeValues = [...attributes.values()];
+	for (let offset = 0; offset < attributeValues.length; offset += 4) {
+		const batch = await Promise.all(attributeValues.slice(offset, offset + 4).map(async attribute => {
+			const record = await schAttributeStateRecord(attribute);
+			if (sheets.has(String(record.ParentPrimitiveId)) && (record.Key === '@Update Date' || record.Key === '@Update Time')) record.Value = null;
+			return record;
+		}));
+		out.attributes.push(...batch);
+	}
 	out.attributes.sort((a, b) => String(a.primitiveId).localeCompare(String(b.primitiveId)));
 	const objects = await eda.sch_PrimitiveObject.getAll();
 	if (!Array.isArray(objects)) throw new Error('Page embedded-object inventory unavailable.');

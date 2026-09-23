@@ -71,6 +71,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -223,7 +224,6 @@ func responseErrorCode(resp *protocol.Response) string {
 	}
 	return resp.Error.Code
 }
-
 
 // ActionWriteHealth is one action's slice of a window's health — the bucket that
 // keeps "this one road is not working" from being averaged away.
@@ -752,7 +752,7 @@ func forwardWithAdaptiveRetry(ctx context.Context, req protocol.Request, dispatc
 	if h.observe != nil {
 		h.observe(outcome{Action: req.Action, RequestID: req.ID, OK: ok, Verdict: effectFromResponse(&req, resp), ErrorCode: responseErrorCode(resp)})
 	}
-	if ok || !retryableOnFailure[req.Action] {
+	if ok || errors.Is(err, errConnectorDisconnected) || !retryableOnFailure[req.Action] {
 		return resp, err, false
 	}
 

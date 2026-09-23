@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -333,10 +334,14 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		// so the NEXT command gets an instant answer instead of another full budget
 		// of silence. See queueblock.go.
 		s.armQueueProbe(target, &req, err)
-		errResp := errorResponse(req.ID, "DISPATCH_FAILED", "connector did not respond", err.Error())
+		message, status := "connector did not respond", http.StatusGatewayTimeout
+		if errors.Is(err, errConnectorDisconnected) {
+			message, status = "connector disconnected before responding", http.StatusBadGateway
+		}
+		errResp := errorResponse(req.ID, "DISPATCH_FAILED", message, err.Error())
 		s.writeHealth.annotateDegraded(&req, &errResp)
 		s.audit.Append(fromResponse(started, &req, &errResp))
-		writeJSON(w, http.StatusGatewayTimeout, errResp)
+		writeJSON(w, status, errResp)
 		return
 	}
 	// The connector echoes id/version/ok/result/context/artifacts but does not

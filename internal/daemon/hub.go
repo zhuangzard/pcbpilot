@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -50,7 +51,11 @@ type conn struct {
 
 	pendingMu sync.Mutex
 	pending   map[string]chan *protocol.Response
+	done      chan struct{}
+	closed    bool
 }
+
+var errConnectorDisconnected = errors.New("connector disconnected before responding")
 
 func newConn(ws *websocket.Conn, now time.Time) *conn {
 	return &conn{
@@ -58,6 +63,7 @@ func newConn(ws *websocket.Conn, now time.Time) *conn {
 		connectedAt: now,
 		lastSeen:    now,
 		pending:     map[string]chan *protocol.Response{},
+		done:        make(chan struct{}),
 	}
 }
 
@@ -148,6 +154,17 @@ func (c *conn) write(ctx context.Context, v any) error {
 func (c *conn) dispatch(ctx context.Context, req protocol.Request) (*protocol.Response, error) {
 	ch := make(chan *protocol.Response, 1)
 	c.pendingMu.Lock()
+	if c.closed {
+		c.pendingMu.Unlock()
+		return nil, errConnectorDisconnected
+	}
+	if c.done == nil {
+		c.done = make(chan struct{})
+	}
+	done := c.done
+	if c.pending == nil {
+		c.pending = map[string]chan *protocol.Response{}
+	}
 	c.pending[req.ID] = ch
 	c.pendingMu.Unlock()
 	defer func() {
@@ -156,16 +173,48 @@ func (c *conn) dispatch(ctx context.Context, req protocol.Request) (*protocol.Re
 		c.pendingMu.Unlock()
 	}()
 
+	select {
+	case <-done:
+		return nil, errConnectorDisconnected
+	default:
+	}
 	if err := c.write(ctx, req); err != nil {
+		select {
+		case <-done:
+			return nil, errConnectorDisconnected
+		default:
+		}
 		return nil, err
 	}
 
 	select {
 	case resp := <-ch:
+		select {
+		case <-done:
+			return nil, errConnectorDisconnected
+		default:
+		}
 		return resp, nil
+	case <-done:
+		return nil, errConnectorDisconnected
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+}
+
+// disconnect ends every in-flight dispatch on this transport. It also prevents
+// a request that selected this connection just before removal from being sent.
+func (c *conn) disconnect() {
+	c.pendingMu.Lock()
+	defer c.pendingMu.Unlock()
+	if c.closed {
+		return
+	}
+	if c.done == nil {
+		c.done = make(chan struct{})
+	}
+	c.closed = true
+	close(c.done)
 }
 
 // deliver routes an inbound response to the goroutine waiting on its id.
@@ -263,6 +312,7 @@ func (h *hub) dedupeContext(current *conn) {
 			h.pruneRetiredLocked()
 			h.mu.Unlock()
 			for _, old := range closeList {
+				old.disconnect()
 				if old.ws != nil {
 					_ = old.ws.Close(websocket.StatusGoingAway, "duplicate connector session")
 				}
@@ -273,6 +323,7 @@ func (h *hub) dedupeContext(current *conn) {
 	h.pruneRetiredLocked()
 	h.mu.Unlock()
 	for _, old := range closeList {
+		old.disconnect()
 		if old.ws != nil {
 			_ = old.ws.Close(websocket.StatusGoingAway, "duplicate connector session")
 		}
@@ -300,6 +351,7 @@ func (h *hub) pruneStale(now time.Time) int {
 	h.pruneRetiredLocked()
 	h.mu.Unlock()
 	for _, c := range stale {
+		c.disconnect()
 		if c.ws != nil {
 			_ = c.ws.Close(websocket.StatusGoingAway, "stale connector session")
 		}
@@ -316,6 +368,7 @@ func (h *hub) remove(windowID string) {
 	// Snapshot the identity BEFORE dropping the connection — after the delete
 	// there is no way to learn what project/document this id stood for.
 	if c, ok := h.windows[windowID]; ok {
+		c.disconnect()
 		w := c.snapshot()
 		h.retired[windowID] = retiredWindow{
 			ProjectUUID:  w.Context.ProjectUUID,

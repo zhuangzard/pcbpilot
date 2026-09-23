@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -35,6 +37,31 @@ func TestHubPruneStale(t *testing.T) {
 	}
 	if _, ok := h.retired["stale"]; !ok {
 		t.Fatal("stale identity was not retained for reconnect routing")
+	}
+}
+
+func TestRemovedConnectionsRejectDispatch(t *testing.T) {
+	for _, remove := range []struct {
+		name string
+		fn   func(*hub, *conn)
+	}{
+		{"remove", func(h *hub, c *conn) { h.remove(c.id()) }},
+		{"prune stale", func(h *hub, c *conn) {
+			c.lastSeen = time.Now().UTC().Add(-connectorTTL - time.Second)
+			h.pruneStale(time.Now().UTC())
+		}},
+	} {
+		t.Run(remove.name, func(t *testing.T) {
+			c := newConn(nil, time.Now().UTC())
+			c.applyRegister(protocol.Register{WindowID: "removed"}, time.Now().UTC())
+			h := newHub()
+			h.add(c)
+			remove.fn(h, c)
+			resp, err := c.dispatch(context.Background(), protocol.Request{})
+			if resp != nil || !errors.Is(err, errConnectorDisconnected) {
+				t.Fatalf("dispatch on removed connection = (%+v, %v), want disconnect error", resp, err)
+			}
+		})
 	}
 }
 

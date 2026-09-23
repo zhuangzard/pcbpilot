@@ -195,6 +195,62 @@ func TestActionDispatchToConnector(t *testing.T) {
 	}
 }
 
+func TestActionFailsPromptlyWhenConnectorDisconnectsMidRequest(t *testing.T) {
+	base, cleanup := startDaemon(t)
+	defer cleanup()
+
+	c := dialConnector(t, base, "win-disconnect")
+	defer c.CloseNow()
+	waitForWindow(t, base, "win-disconnect")
+
+	type actionResult struct {
+		status int
+		resp   protocol.Response
+		err    error
+	}
+	resultCh := make(chan actionResult, 1)
+	go func() {
+		httpResp, err := http.Post("http://"+base+"/action", "application/json",
+			strings.NewReader(`{"action":"schematic.components.list","windowId":"win-disconnect","timeoutMs":150000}`))
+		if err != nil {
+			resultCh <- actionResult{err: err}
+			return
+		}
+		defer httpResp.Body.Close()
+		var resp protocol.Response
+		err = json.NewDecoder(httpResp.Body).Decode(&resp)
+		resultCh <- actionResult{status: httpResp.StatusCode, resp: resp, err: err}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	for {
+		var typed protocol.Typed
+		if err := wsjson.Read(ctx, c, &typed); err != nil {
+			t.Fatalf("read forwarded request: %v", err)
+		}
+		if typed.Type == protocol.TypeRequest {
+			break
+		}
+	}
+	if err := c.CloseNow(); err != nil {
+		t.Fatalf("disconnect connector: %v", err)
+	}
+
+	select {
+	case result := <-resultCh:
+		if result.err != nil {
+			t.Fatalf("action HTTP call: %v", result.err)
+		}
+		if result.status != http.StatusBadGateway || result.resp.OK || result.resp.Error == nil ||
+			result.resp.Error.Code != "DISPATCH_FAILED" || !strings.Contains(result.resp.Error.Message, "disconnected") {
+			t.Fatalf("want prompt disconnect failure, got HTTP %d %+v", result.status, result.resp)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("action still waiting after connector disconnected")
+	}
+}
+
 func TestSystemHealthActionNeedsNoConnector(t *testing.T) {
 	base, cleanup := startDaemon(t)
 	defer cleanup()

@@ -109,6 +109,9 @@ pcbpilot sch compose --from composition.json --out plan.json \
 任一枚举失败、缺项或现场变化都停止，重新采集快照和生成队列，不能只凭相同器件集合继续清页。
 普通整页 clear 遇到独立嵌入对象或孤儿属性会在写前拒绝；属性全局枚举与逐父枚举
 对不上、嵌入文件内容无法可靠读取时也拒绝。此时先补 typed 能力，不把空清单当作完整证据。
+某些宿主的属性全量枚举会返回 `KeyVisible` 等状态为 `undefined`。采集器须按属性 ID
+通过官方 typed `sch_PrimitiveAttribute.get(id)` 复读；复读仍非官方允许的值时拒绝快照和清页，
+不能把 `undefined` 改写成 `null`、省略可见性或按默认值猜测。
 
 ## 3. 执行与回读
 

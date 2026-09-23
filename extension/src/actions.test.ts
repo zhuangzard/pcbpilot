@@ -2613,6 +2613,42 @@ test('guarded schematic clear refuses changed wire, flag and graphic before dele
 	finally { delete (globalThis as any).eda; }
 });
 
+test('page primitive attribute state uses typed get(id) when bulk getter is incomplete', async () => {
+	const state: Record<string, unknown> = {
+		PrimitiveId: 'attr-1', X: 0, Y: 0, Rotation: 0, Color: null, FontName: null,
+		FontSize: null, Bold: null, Italic: null, UnderLine: null, AlignMode: null,
+		FillColor: null, Key: 'Label', Value: 'old', KeyVisible: true,
+		ValueVisible: true, ParentPrimitiveId: 'orphan-parent',
+	};
+	let directKeyVisible: boolean | undefined = true;
+	let deletes = 0;
+	const attribute = (bulk: boolean) => new Proxy({}, { get: (_target, prop) => {
+		if (typeof prop === 'string' && prop.startsWith('getState_')) return () =>
+			prop === 'getState_KeyVisible' ? (bulk ? undefined : directKeyVisible) : state[prop.slice(9)];
+		return undefined;
+	}});
+	const klass = () => ({ getAll: async () => [], delete: async () => { deletes++; return true; } });
+	(globalThis as any).eda = {
+		sch_PrimitiveComponent: klass(), sch_PrimitiveWire: klass(), sch_PrimitiveBus: klass(),
+		sch_PrimitiveArc: klass(), sch_PrimitiveCircle: klass(), sch_PrimitiveRectangle: klass(),
+		sch_PrimitivePolygon: klass(), sch_PrimitiveText: klass(), sch_PrimitiveObject: klass(),
+		sch_PrimitiveAttribute: {
+			getAll: async () => [attribute(true)], getAllPrimitiveId: async () => ['attr-1'],
+			get: async () => attribute(false),
+		},
+	};
+	try {
+		const read: any = await runAction('schematic.components.list', { includePagePrimitives: true });
+		assert.equal(read.result.pagePrimitives.attributes[0].KeyVisible, true);
+		const expectedPagePrimitives = JSON.stringify(read.result.pagePrimitives);
+		directKeyVisible = undefined;
+		await assert.rejects(() => runAction('schematic.page.clear', { expectedPagePrimitives }),
+			/Page attribute attr-1 remains unreadable after typed get\(id\)/);
+		assert.equal(deletes, 0);
+	}
+	finally { delete (globalThis as any).eda; }
+});
+
 // ─── schematic.component.delete cascade (ADR-0004 Decision 5) ────────────────
 // Deleting a part must also remove its EXCLUSIVE stub-wire trees + the netflags
 // riding them (the residue is a ghost-connection boobytrap: the next part placed

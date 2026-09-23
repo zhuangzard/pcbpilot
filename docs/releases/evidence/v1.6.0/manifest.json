@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "version": "v1.6.0",
+  "result": "in-progress",
+  "independentReview": "in-progress",
+  "sha256": {
+    "test-report.md": "e4358c8e2afc7d1ef8edc8f071d50fe4ceff3488d763e6b8fd320cdf615cdf86",
+    "baseline.md": "d5c2aa58927b2e8ab48023cfa61bdf7bc5fa61735520c8cc38238e96d5f82e47",
+    "test-cases.md": "002a02d0a7ea2e51b1cdd49865f1ba780f80fb83d14f2ad5fd21361f4ba92522"
+  }
+}

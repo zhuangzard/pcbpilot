@@ -22,6 +22,19 @@ func okResp(id string) *protocol.Response {
 	return &protocol.Response{Envelope: protocol.Envelope{ID: id}, OK: true}
 }
 
+func TestAdaptiveRetrySkipsProbeAfterDisconnect(t *testing.T) {
+	calls := 0
+	request := protocol.Request{Action: "document.open"}
+	_, err, retried := forwardWithAdaptiveRetry(context.Background(), request,
+		func(context.Context, protocol.Request) (*protocol.Response, error) {
+			calls++
+			return nil, errConnectorDisconnected
+		}, adaptiveHooks{})
+	if !errors.Is(err, errConnectorDisconnected) || retried || calls != 1 {
+		t.Fatalf("disconnect caused %d dispatches, retried=%v, err=%v", calls, retried, err)
+	}
+}
+
 func failResp(id, code string) *protocol.Response {
 	return &protocol.Response{Envelope: protocol.Envelope{ID: id}, OK: false,
 		Error: &protocol.ErrorInfo{Code: code, Message: code}}

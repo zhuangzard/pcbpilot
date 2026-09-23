@@ -41,6 +41,7 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	ua := r.Header.Get("User-Agent")
 	s.logf("connector %s upgraded (origin=%q ua=%q)", remote, origin, ua)
 	defer func() {
+		c.disconnect()
 		s.hub.remove(c.id())
 		// A reconnected window starts with clean rolling write health (same
 		// lifetime rule as the stale-read guard: a reload IS the recovery).
