@@ -67,7 +67,7 @@ func TestProjectTransferDispatchesTypedActions(t *testing.T) {
 				calls := 0
 				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					if r.URL.Path == "/health" {
-						w.Write([]byte(`{"service":"easyeda-agent","windows":[{"windowId":"w"}]}`))
+						w.Write([]byte(`{"service":"pcbpilot","windows":[{"windowId":"w"}]}`))
 						return
 					}
 					var req struct {

@@ -50,6 +50,10 @@ func TestDaemonLifecycleHelper(t *testing.T) {
 		switch mode {
 		case "foreign":
 			fmt.Fprint(w, `{"service":"other"}`)
+		case "upstream":
+			// The upstream easyeda-agent daemon runs side by side on its own
+			// ports; pcbpilot must never stop it, even with a live PID.
+			fmt.Fprintf(w, `{"service":"easyeda-agent","pid":%d}`, os.Getpid())
 		case "unknown":
 			fmt.Fprint(w, `{"service":"pcbpilot","pid":-1}`)
 		case "old":
@@ -64,7 +68,7 @@ func TestDaemonLifecycleHelper(t *testing.T) {
 }
 
 func TestDaemonLifecycleStopsOnlyIdentifiedProcess(t *testing.T) {
-	for _, mode := range []string{"current", "old", "foreign", "unknown"} {
+	for _, mode := range []string{"current", "old", "foreign", "upstream", "unknown"} {
 		t.Run(mode, func(t *testing.T) {
 			port := freeTCPPort(t)
 			cmd := exec.Command(os.Args[0], "-test.run=^TestDaemonLifecycleHelper$")
