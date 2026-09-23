@@ -2,6 +2,39 @@
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-09-23
+
+Placement engine release: `pcb auto` now places parts the way an experienced
+layout engineer does — cores first, then each auxiliary at the pin it serves —
+and models the physics that decide a board's EMI and robustness.
+
+- Core/auxiliary understanding: every passive gets an owner core, a role
+  (hot-loop, bootstrap, decap, clock, power-stage, feedback, protection, pull,
+  signal, chain, test) and a target pin, reported in `report.md` 「布局依据」.
+- Switching converters: buck/boost recognition with confidence (rectifier
+  diode = certain; PMIC, input-named rail, buck prior = likely), per-channel
+  input rail, hot-loop capacitor (buck input / boost output), bootstrap and
+  feedback divider; placement minimises the hot-loop polygon and keeps
+  feedback off the inductor and switch node.
+- Interface signal chains: connector/antenna/RF connector → ESD → series
+  parts → IC in schematic order; ESD first and on the trace, diff-pair parts
+  side by side, antenna feeds priced by full length and marked RF; port
+  reserve strips keep other blocks off protected connector edges.
+- Decaps graded by value; the smallest cap on each power pin is treated as
+  its high-frequency decoupler. ESD arrays designated `U`, chip antennas and
+  coax RF connectors are classified correctly.
+- Deterministic polish of critical parts after annealing; cooling tracks wall
+  time; `Part.Body` rigid-bounds cache (large BGA boards place in ~17 s).
+- `pcbpilot pcb auto bench`: human vs engine placement on the same yardsticks
+  (layout-score, wirelength, decap distance, hot-loop perimeter, chain order),
+  with `--dump-dir` and `--moves`. On the six real fixture boards the engine
+  placement now scores above the human one (offline, no routing compared).
+- New PCB Pilot connector logo. The connector runtime is otherwise unchanged
+  from 0.1.0; re-import only to pick up the new version/logo.
+
+Status: offline-verified. Not yet live-verified in EasyEDA; routed comparison
+of engine placements and the R-0 fan-out DRC gate defect remain open.
+
 ## [0.1.0] — 2026-09-22
 
 First pcbpilot release. pcbpilot is a fork of

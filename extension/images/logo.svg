@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- PCBPilot connector logo: a paper plane (the pilot) flying off a board,
+       trailing 45° copper traces that end in vias. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0E2433"/>
+      <stop offset="1" stop-color="#050E16"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.68" cy="0.3" r="0.6">
+      <stop offset="0" stop-color="#2BD9C5" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#2BD9C5" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="wing" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#7CF7E4"/>
+      <stop offset="1" stop-color="#2BD9C5"/>
+    </linearGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1FA3E0"/>
+      <stop offset="1" stop-color="#1668C4"/>
+    </linearGradient>
+    <linearGradient id="copper" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F6C56B"/>
+      <stop offset="1" stop-color="#D9893A"/>
+    </linearGradient>
+    <pattern id="grid" width="16" height="16" patternUnits="userSpaceOnUse">
+      <circle cx="8" cy="8" r="1" fill="#1D3B4E"/>
+    </pattern>
+  </defs>
+
+  <!-- board -->
+  <rect x="8" y="8" width="240" height="240" rx="48" fill="url(#bg)"/>
+  <rect x="8" y="8" width="240" height="240" rx="48" fill="url(#grid)"/>
+  <rect x="8" y="8" width="240" height="240" rx="48" fill="url(#glow)"/>
+  <rect x="14" y="14" width="228" height="228" rx="42" fill="none" stroke="#2BD9C5" stroke-opacity="0.35" stroke-width="2"/>
+
+  <!-- copper traces: the flight path, routed at 45° like real tracks -->
+  <g fill="none" stroke="url(#copper)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M116 156 L84 188 L50 188"/>
+    <path d="M125 177 L97 205 L76 205"/>
+    <path d="M134 198 L120 212 L120 224"/>
+  </g>
+  <g fill="#0B1D2A" stroke="url(#copper)" stroke-width="5">
+    <circle cx="42" cy="188" r="8"/>
+    <circle cx="68" cy="205" r="8"/>
+    <circle cx="120" cy="231" r="7"/>
+  </g>
+
+  <!-- paper plane -->
+  <polygon points="214,48 44,120 112,146" fill="url(#wing)"/>
+  <polygon points="214,48 112,146 140,210" fill="url(#body)"/>
+  <polygon points="112,146 128,176 140,210" fill="#0F4C8A"/>
+  <polyline points="214,48 112,146" fill="none" stroke="#E9FFFB" stroke-opacity="0.55" stroke-width="2"/>
+
+  <!-- a pad on the nose: the pilot is a PCB tool -->
+  <circle cx="214" cy="48" r="5" fill="#F6C56B"/>
+</svg>
