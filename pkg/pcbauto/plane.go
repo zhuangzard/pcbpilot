@@ -27,6 +27,7 @@ func (r *router) fanout(res *RouteResult) {
 	gr := r.gr
 	r.strict = true
 	defer func() { r.strict = false }()
+	r.bgaFanout(res)
 	var pads []*Pad
 	for _, n := range r.nets {
 		if !n.onPlane && !n.poured {
@@ -34,7 +35,7 @@ func (r *router) fanout(res *RouteResult) {
 		}
 		for _, g := range n.groups {
 			for _, pd := range g {
-				if pd.Layer != LayerMulti {
+				if pd.Layer != LayerMulti && !r.bgaDone[pd] {
 					pads = append(pads, pd)
 				}
 			}
@@ -166,44 +167,113 @@ func (r *router) placeFanoutVias(n *rnet, pd *Pad, li, need int, stubW float64, 
 				continue
 			}
 		}
-		var cl []int32
-		trackIdx := -1
-		if !inside {
-			cl = r.claimSegment(n, li, pd.Box.C, c.c, stubW, cl)
-			trackIdx = len(n.fanTracks)
-			n.fanTracks = append(n.fanTracks, Track{Net: n.name, Layer: gr.layers[li], A: pd.Box.C, B: c.c, Width: stubW, Kind: "fanout"})
-		}
-		r.claimCur++
-		for l := range gr.layers {
-			for _, o := range gr.disk(n.viaR) {
-				xx, yy := c.x+o[0], c.y+o[1]
-				if gr.in(xx, yy) {
-					cl = append(cl, int32(gr.idx(l, xx, yy)))
-				}
-			}
-		}
-		// Only cells this net does not already claim: two fan-out vias of the
-		// same net overlap, and a cell must count once per net.
-		cl = dedup(cl)
-		n.fanFull = append(n.fanFull, append([]int32(nil), cl...))
-		n.fanTrack = append(n.fanTrack, trackIdx)
-		r.claimCur++
-		for _, i := range n.fixed {
-			r.claimStamp[i] = r.claimCur
-		}
-		fresh := cl[:0]
-		for _, i := range cl {
-			if r.claimStamp[i] != r.claimCur {
-				fresh = append(fresh, i)
-			}
-		}
-		r.applyClaims(fresh, +1)
-		n.fixed = dedup(append(n.fixed, fresh...))
-		n.fanVias = append(n.fanVias, Via{Net: n.name, C: c.c, Drill: r.b.Rules.ViaDrill, Dia: r.b.Rules.ViaDia, Kind: "fanout"})
+		r.commitFanout(n, pd, li, c.x, c.y, c.c, stubW, inside, false)
 		res.Stats.FanoutVias++
 		placed++
 	}
 	return placed
+}
+
+// commitFanout claims a fan-out via at grid cell (x, y) — centre c — plus the
+// stub from pd on layer li (none for a via inside the pad), records it as
+// fixed copper of n, and emits the track and via.
+func (r *router) commitFanout(n *rnet, pd *Pad, li, x, y int, c Point, stubW float64, inside, pinned bool, via ...float64) {
+	drill, dia, rad := r.b.Rules.ViaDrill, r.b.Rules.ViaDia, n.viaR
+	if len(via) == 2 {
+		// A via class other than the board default (BGA fan-out).
+		drill, dia = via[0], via[1]
+		rad = dia/2 + n.share
+	}
+	gr := r.gr
+	var cl []int32
+	trackIdx := -1
+	if !inside {
+		cl = r.claimSegment(n, li, pd.Box.C, c, stubW, cl)
+		trackIdx = len(n.fanTracks)
+		n.fanTracks = append(n.fanTracks, Track{Net: n.name, Layer: gr.layers[li], A: pd.Box.C, B: c, Width: stubW, Kind: "fanout"})
+	}
+	r.claimCur++
+	for l := range gr.layers {
+		for _, o := range gr.disk(rad) {
+			xx, yy := x+o[0], y+o[1]
+			if gr.in(xx, yy) {
+				cl = append(cl, int32(gr.idx(l, xx, yy)))
+			}
+		}
+	}
+	// Only cells this net does not already claim: two fan-out vias of the
+	// same net overlap, and a cell must count once per net.
+	cl = dedup(cl)
+	n.fanFull = append(n.fanFull, append([]int32(nil), cl...))
+	n.fanTrack = append(n.fanTrack, trackIdx)
+	n.fanPinned = append(n.fanPinned, pinned)
+	r.claimCur++
+	for _, i := range n.fixed {
+		r.claimStamp[i] = r.claimCur
+	}
+	fresh := cl[:0]
+	for _, i := range cl {
+		if r.claimStamp[i] != r.claimCur {
+			fresh = append(fresh, i)
+		}
+	}
+	r.applyClaims(fresh, +1)
+	n.fixed = dedup(append(n.fixed, fresh...))
+	n.fanVias = append(n.fanVias, Via{Net: n.name, C: c, Drill: drill, Dia: dia, Kind: "fanout"})
+}
+
+// antipadMask marks the cells inside the antipad of every via and
+// through-hole pad not belonging to n: centre closer than its copper radius
+// plus the clearance.
+func (r *router) antipadMask(n *rnet) []bool {
+	gr := r.gr
+	m := make([]bool, gr.W*gr.H)
+	clr := r.b.Rules.Clearance
+	mark := func(c Point, rad float64) {
+		cx, cy := gr.cellOf(c)
+		rc := int(math.Ceil(rad/gr.g)) + 1
+		for dy := -rc; dy <= rc; dy++ {
+			for dx := -rc; dx <= rc; dx++ {
+				x, y := cx+dx, cy+dy
+				if gr.in(x, y) && gr.center(x, y).Dist(c) < rad {
+					m[y*gr.W+x] = true
+				}
+			}
+		}
+	}
+	for _, o := range r.nets {
+		if o == n {
+			continue
+		}
+		for _, v := range o.fanVias {
+			mark(v.C, v.Dia/2+clr)
+		}
+		for _, p := range o.paths {
+			for k := 1; k < len(p.nodes); k++ {
+				pl, px, py := gr.xy(int(p.nodes[k-1]))
+				l, x, y := gr.xy(int(p.nodes[k]))
+				if pl != l && px == x && py == y {
+					mark(gr.center(x, y), r.b.Rules.ViaDia/2+clr)
+				}
+			}
+		}
+		for _, g := range o.groups {
+			for _, pd := range g {
+				if pd.Layer == LayerMulti {
+					mark(pd.Box.C, math.Max(pd.Box.W, pd.Box.H)/2+clr)
+				}
+			}
+		}
+	}
+	// Through-hole pads of parts on no routed net still cut the plane.
+	for _, p := range r.b.Parts {
+		for _, pd := range p.Pads {
+			if pd.Layer == LayerMulti && pd.Net == "" {
+				mark(pd.Box.C, math.Max(pd.Box.W, pd.Box.H)/2+clr)
+			}
+		}
+	}
+	return m
 }
 
 // ---- split planes ---------------------------------------------------------
@@ -622,6 +692,23 @@ func (r *router) simulate(n *rnet) [][]*Pad {
 			}
 		}
 	}
+	// Plane layers: foreign vias and through-hole pads cut an antipad of
+	// exactly (radius + clearance). Claimed cells overstate it (radius share
+	// plus grid rounding) and closed the real 7.6 mil webs of a 0.65 mm BGA
+	// via field, islanding every ground via — measure the antipads exactly.
+	antipad := make([][]bool, len(gr.layers))
+	for li := range gr.layers {
+		if floods[li] && r.st.Stack[li].Kind == KindPlane {
+			antipad[li] = r.antipadMask(n)
+			// One mask serves every plane layer (through vias cut them all).
+			for lj := li + 1; lj < len(gr.layers); lj++ {
+				if floods[lj] && r.st.Stack[lj].Kind == KindPlane {
+					antipad[lj] = antipad[li]
+				}
+			}
+			break
+		}
+	}
 	// A cell is copper of n if: own pad copper, own track centreline/via
 	// (claims approximate this), or flooded plane/pour not claimed by others.
 	isCopper := func(li, x, y int) bool {
@@ -643,7 +730,11 @@ func (r *router) simulate(n *rnet) [][]*Pad {
 		if !floods[li] {
 			return false
 		}
-		if otherUse > 0 {
+		if m := antipad[li]; m != nil {
+			if m[y*gr.W+x] {
+				return false
+			}
+		} else if otherUse > 0 {
 			return false
 		}
 		if c := r.split[gr.layers[li]]; c != nil {

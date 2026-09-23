@@ -257,7 +257,8 @@ func (r *Rules) sanitize() {
 	fix(&r.BoardThickMil, d.BoardThickMil, 10, 250)
 	// JLC's minimum annular ring is 0.05 mm (2 mil a side): a 0.15/0.25 mm
 	// via (6/10 mil) is legal and is what 0.65 mm-pitch BGAs fan out with.
-	if r.ViaDia < r.ViaDrill+4 {
+	// 0.2 mil of slack: 0.3/0.4 mm is 11.81/15.75 mil, a 1.97 mil ring.
+	if r.ViaDia < r.ViaDrill+4-0.2 {
 		r.ViaDia = r.ViaDrill + 8
 	}
 	if r.MinTrack > r.TrackWidth {

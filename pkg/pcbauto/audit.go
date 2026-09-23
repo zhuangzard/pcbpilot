@@ -186,7 +186,7 @@ func (r *router) dropBlockingFanouts(n *rnet, bad map[int32]bool) {
 					break
 				}
 			}
-			if hit {
+			if hit && !(k < len(m.fanPinned) && m.fanPinned[k]) {
 				dropped = true
 				continue
 			}
@@ -201,9 +201,11 @@ func (r *router) dropBlockingFanouts(n *rnet, bad map[int32]bool) {
 		var tidx []int
 		var tracks []Track
 		var fixed []int32
+		var pinned []bool
 		for _, k := range keep {
 			vias = append(vias, m.fanVias[k])
 			full = append(full, m.fanFull[k])
+			pinned = append(pinned, k < len(m.fanPinned) && m.fanPinned[k])
 			ti := -1
 			if m.fanTrack[k] >= 0 {
 				ti = len(tracks)
@@ -212,7 +214,7 @@ func (r *router) dropBlockingFanouts(n *rnet, bad map[int32]bool) {
 			tidx = append(tidx, ti)
 			fixed = append(fixed, m.fanFull[k]...)
 		}
-		m.fanVias, m.fanFull, m.fanTrack, m.fanTracks = vias, full, tidx, tracks
+		m.fanVias, m.fanFull, m.fanTrack, m.fanTracks, m.fanPinned = vias, full, tidx, tracks, pinned
 		m.fixed = dedup(fixed)
 		// Routed claims of m must not double-count cells now in fixed.
 		r.applyClaims(m.claims, -1)

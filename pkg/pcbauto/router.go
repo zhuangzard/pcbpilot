@@ -44,6 +44,10 @@ type RouteOptions struct {
 	Nets []string `json:"nets,omitempty"`
 	// NoFanout skips plane fan-out (e.g. when planes are handled elsewhere).
 	NoFanout bool `json:"noFanout,omitempty"`
+	// BGA enables the BGA dog-bone fan-out. Off by default until it beats the
+	// generic fan-out on the real BGA boards (2026-09-23: K230 50.2 → 48.5 %,
+	// RK3568 41.2 → 39.8 %; most balls had no legal site with the board via).
+	BGA bool `json:"bga,omitempty"`
 	// NoRepair skips the exact-DRC repair loop (diagnostics only).
 	NoRepair bool `json:"noRepair,omitempty"`
 }
@@ -98,6 +102,7 @@ type rnet struct {
 	fanVias   []Via
 	fanFull   [][]int32 // full claim set of each fan-out via (+ its stub)
 	fanTrack  []int     // index into fanTracks, -1 for in-pad thermal vias
+	fanPinned []bool    // fan-outs that never yield (BGA dog-bones: no fallback inside a ball field)
 	failed    []Unrouted
 	conflict  bool
 	neckW     float64        // pad-entry width when the full width does not fit
@@ -114,6 +119,11 @@ type rpath struct {
 
 // router holds all state for one run.
 type router struct {
+	// BGA dog-bone state: balls fanned out by bgaFanout, and the via cell of
+	// each signal ball's escape (an extra access node on every layer).
+	bgaDone map[*Pad]bool
+	escape  map[*Pad][2]int
+
 	b      *Board
 	st     *Stackup
 	an     *Analysis
@@ -529,6 +539,12 @@ func (r *router) viaCost(n *rnet, x, y int) float64 {
 }
 
 func (r *router) viaCostUncached(n *rnet, x, y int) float64 {
+	return r.viaCostR(n, x, y, n.viaR)
+}
+
+// viaCostR is viaCostUncached for a via of claim radius rad (a BGA via class
+// may be smaller than the board default).
+func (r *router) viaCostR(n *rnet, x, y int, rad float64) float64 {
 	gr := r.gr
 	if gr.noVia[y*gr.W+x] {
 		return math.Inf(1)
@@ -537,11 +553,11 @@ func (r *router) viaCostUncached(n *rnet, x, y int) float64 {
 	for l := range gr.layers {
 		// Vias perforate plane layers too, but planes retreat (anti-pad);
 		// only the signal layers and hard/pad claims constrain placement.
-		if !r.nodeOK(n, l, x, y, n.viaR) {
+		if !r.nodeOK(n, l, x, y, rad) {
 			return math.Inf(1)
 		}
 		if gr.routable[l] {
-			occ, _ := r.nodeCong(l, x, y, n.viaR)
+			occ, _ := r.nodeCong(l, x, y, rad)
 			if r.strict && occ > 0 {
 				return math.Inf(1)
 			}
@@ -651,6 +667,14 @@ func (r *router) segmentOK(n *rnet, l int, a, b Point, width float64, strict boo
 func (r *router) access(n *rnet, pd *Pad) []int32 {
 	gr := r.gr
 	var out []int32
+	if e, ok := r.escape[pd]; ok {
+		// A dog-bone escape: the via is reachable on every routable layer.
+		for l := range gr.layers {
+			if gr.routable[l] {
+				out = append(out, int32(gr.idx(l, e[0], e[1])))
+			}
+		}
+	}
 	for l, id := range gr.layers {
 		if !gr.routable[l] || !pd.OnLayer(id) {
 			continue
