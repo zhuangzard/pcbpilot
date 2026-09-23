@@ -64,7 +64,7 @@ func TestLayoutPlanMachineReportPreservesFailureContract(t *testing.T) {
 				if r.Phase != wantPhase {
 					t.Fatalf("phase=%s want=%s", r.Phase, wantPhase)
 				}
-				wantClass := "final-validation-failed"
+				wantClass := "candidate-budget-exhausted"
 				if scenario == "decode-failure" {
 					wantClass = "data-missing"
 				}

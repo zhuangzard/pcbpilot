@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -106,6 +108,261 @@ func TestRepairBranchLimitUsesSharedCandidateAllowance(t *testing.T) {
 	search = newSchematicRepairSearch(in, measured, members, nil, &budget)
 	if search.diagnostics.BranchLimit != 128 {
 		t.Fatalf("tiny-budget secondary guard changed: got %d want 128", search.diagnostics.BranchLimit)
+	}
+}
+
+func TestCandidateReserveRequiresMovableAttributedTerminalBlocker(t *testing.T) {
+	core := powerLayoutPlacement{Designator: "U1", BBox: layoutBBox{-10, -10, 10, 10}}
+	blocker := powerLayoutPlacement{Designator: "C1", X: 50, BBox: layoutBBox{45, -5, 55, 5}}
+	p := powerLayoutPlan{Placements: []powerLayoutPlacement{core, blocker}}
+	newSearch := func(cause error) *schematicRepairSearch {
+		budget := 10
+		s := newSchematicRepairSearch(SchematicLayoutInput{CoreComponentID: "core"}, map[string]powerLayoutPlacement{
+			"core": core, "blocker": blocker,
+		}, []string{"core", "blocker"}, nil, &budget)
+		s.initial = 1000 // reserve=512, well above the remaining 10 candidates.
+		s.lastTerminal, s.lastTerminalErr = p, cause
+		return s
+	}
+	for name, cause := range map[string]error{
+		"naming":  errors.New("no safe naming lead"),
+		"unknown": &schematicRouteConflict{blockers: map[string]bool{"X1": true}, ownersComplete: true},
+		"core":    &schematicRouteConflict{blockers: map[string]bool{"U1": true}, ownersComplete: true},
+		"opaque":  &schematicRouteConflict{blockers: map[string]bool{"C1": true}, ownersComplete: false},
+	} {
+		s := newSearch(cause)
+		if s.canTargetedTerminalRelocation() {
+			t.Fatalf("%s reserved for an unusable target", name)
+		}
+		if _, err := s.search(p, nil); errors.Is(err, errSchematicCandidateReserve) {
+			t.Fatalf("%s stopped with an unusable reserve: %v", name, err)
+		}
+	}
+	s := newSearch(&schematicRouteConflict{blockers: map[string]bool{"C1": true}, ownersComplete: true})
+	if !s.canTargetedTerminalRelocation() {
+		t.Fatal("movable measured blocker was not eligible")
+	}
+	if _, err := s.search(p, nil); !errors.Is(err, errSchematicCandidateReserve) {
+		t.Fatalf("eligible blocker lost its candidate reserve: %v", err)
+	}
+}
+
+func TestNamingIslandTargetsIncludeOnlyExplicitSameNetAttachments(t *testing.T) {
+	core := powerLayoutPlacement{Designator: "U1", Pins: []powerLayoutPin{{Number: "4", Net: "SUPPLY"}, {Number: "5", Net: "FB"}}}
+	child := powerLayoutPlacement{Designator: "C1", Pins: []powerLayoutPin{{Number: "1", Net: "SUPPLY"}}}
+	other := powerLayoutPlacement{Designator: "R1", Pins: []powerLayoutPin{{Number: "1", Net: "FB"}}}
+	s := schematicRepairSearch{input: SchematicLayoutInput{CoreComponentID: "core"}, measured: map[string]powerLayoutPlacement{
+		"core": core, "child": child, "other": other,
+	}, hints: map[string]SchematicLayoutPeripheral{
+		"child": {ComponentID: "child", PinNumber: "1", AttachTo: &SchematicLayoutAttach{ComponentID: "core", PinNumber: "4"}},
+		"other": {ComponentID: "other", PinNumber: "1", AttachTo: &SchematicLayoutAttach{ComponentID: "core", PinNumber: "5"}},
+	}}
+	p := powerLayoutPlan{Placements: []powerLayoutPlacement{core, child, other}}
+	conflict := &schematicNamingConflict{net: "SUPPLY", endpointOwners: map[string]bool{"U1": true}, ownersComplete: true}
+	if got := s.namingIslandTargets(&p, conflict); !reflect.DeepEqual(got, []string{"C1"}) {
+		t.Fatalf("isolated core island lost exact owned peripheral: %v", got)
+	}
+	conflict.ownersComplete = false
+	if got := s.namingIslandTargets(&p, conflict); len(got) != 0 {
+		t.Fatalf("incomplete owner evidence selected a target: %v", got)
+	}
+}
+
+func TestBudgetStopRetainsConcreteTerminalConflict(t *testing.T) {
+	budget := 0
+	s := newSchematicRepairSearch(SchematicLayoutInput{}, nil, nil, nil, &budget)
+	s.lastErr = errSchematicCandidateReserve // Ancestor recursion must not duplicate this sentinel.
+	s.lastTerminalErr = &schematicTerminalFailure{cause: schObstruction("wire-text", errors.New("3V3 wire touches C6 Designator"), "C6")}
+	_, err := s.solve(powerLayoutPlan{}, nil)
+	if err == nil || !errors.Is(err, errLibLayoutBudget) || !strings.Contains(err.Error(), "3V3 wire touches C6 Designator") || strings.Contains(err.Error(), "reserved for terminal blocker relocation") {
+		t.Fatalf("resource stop hid its concrete cause: %v", err)
+	}
+	raw, _ := json.Marshal(schLayoutFailureDiagnostics(err))
+	if !bytes.Contains(raw, []byte(`"kind":"terminal-conflict"`)) || !bytes.Contains(raw, []byte(`"obstructionKind":"wire-text"`)) || !bytes.Contains(raw, []byte(`"blockerRefs":["C6"]`)) {
+		t.Fatalf("terminal blocker absent from structured report: %s", raw)
+	}
+	if got := schLayoutFailureClass(err, "solve"); got != "candidate-budget-exhausted" {
+		t.Fatalf("bounded failure misclassified as %s", got)
+	}
+}
+
+// A source pin with a valid 5-raw exit before a wall has no outward naming
+// lead: every candidate must first cross the wall. This keeps the two budget
+// boundary tests on the real terminal naming path rather than a mocked error.
+func namingBudgetBoundaryFixture() (powerLayoutPlan, SchematicLayoutInput, map[string]powerLayoutPlacement) {
+	core := powerLayoutPlacement{Designator: "U1", BBox: layoutBBox{-10, -200, 10, 200}, TextBBoxes: []layoutBBox{{-10, 205, -5, 213}}}
+	policies := map[string]string{}
+	for i, y := range []float64{-175, -125, -75, -25, 25, 75, 125, 175} {
+		net := fmt.Sprintf("N%d", i)
+		core.Pins = append(core.Pins, powerLayoutPin{Number: fmt.Sprint(i + 1), Net: net, X: 20, Y: y, Rotation: directionNumber(0)})
+		policies[net] = "module_port"
+	}
+	wall := powerLayoutPlacement{Designator: "W1", BBox: layoutBBox{30, -500, 200, 500}, TextBBoxes: []layoutBBox{{205, 505, 215, 513}}}
+	return powerLayoutPlan{Placements: []powerLayoutPlacement{core, wall}}, SchematicLayoutInput{CoreComponentID: "core", NetPolicies: policies}, map[string]powerLayoutPlacement{"core": core, "wall": wall}
+}
+
+func TestSharedNamingBudgetExhaustionDoesNotInventTerminalConflict(t *testing.T) {
+	p, input, measured := namingBudgetBoundaryFixture()
+	if err := validateLibGeometry(&p); err != nil {
+		t.Fatalf("invalid boundary fixture: %v", err)
+	}
+	budget := 1
+	s := newSchematicRepairSearch(input, measured, []string{"core", "wall"}, nil, &budget)
+	out, err := s.solve(p, nil)
+	if out != nil || err == nil || budget != 0 || !errors.Is(err, errLibLayoutBudget) || s.lastTerminalErr != nil {
+		t.Fatalf("shared boundary invented a conflict or result: out=%v budget=%d err=%v", out, budget, err)
+	}
+	var naming *schematicNamingConflict
+	if errors.As(err, &naming) || schLayoutFailureClass(err, "solve") != "candidate-budget-exhausted" {
+		t.Fatalf("unsearched naming candidates were called infeasible: %v", err)
+	}
+	raw, _ := json.Marshal(schLayoutFailureDiagnostics(err))
+	if bytes.Contains(raw, []byte(`"terminal-conflict"`)) || bytes.Contains(raw, []byte(`"naming-conflict"`)) {
+		t.Fatalf("resource-only report fabricated a terminal diagnosis: %s", raw)
+	}
+}
+
+func TestLocalNamingSliceExhaustionKeepsLastObservedTerminalConflict(t *testing.T) {
+	p, input, measured := namingBudgetBoundaryFixture()
+	// Establish a concrete completed naming failure first. The later bounded
+	// naming call must preserve this observation, without claiming its own
+	// unfinished slice proved there is no safe lead.
+	observed := wireTreeNamingFixture()
+	observed.Wires = append(observed.Wires,
+		powerLayoutWire{Net: "X", Points: [][2]float64{{100, 10}, {130, 10}}},
+		powerLayoutWire{Net: "Y", Points: [][2]float64{{100, -10}, {130, -10}}},
+	)
+	concrete := libNameIslands(&observed, map[string]string{"N": "module_port"})
+	var naming *schematicNamingConflict
+	if !errors.As(concrete, &naming) || naming.net != "N" {
+		t.Fatalf("fixture did not establish a concrete naming conflict: %v", concrete)
+	}
+	budget := 1000 // local slice=512; shared balance remains positive.
+	s := newSchematicRepairSearch(input, measured, []string{"core", "wall"}, nil, &budget)
+	lastObserved := &schematicTerminalFailure{cause: concrete, preRegenerationLayout: &observed}
+	s.lastTerminalErr = lastObserved
+	s.lastTerminal = p
+	_, err := s.search(p, nil)
+	if !errors.Is(err, errLibLayoutBudget) || budget <= 0 || budget >= 1000 || s.lastTerminalErr != lastObserved || s.diagnostics.TargetedRelocations != 0 {
+		t.Fatalf("local slice lost last observed conflict: budget=%d err=%v last=%v", budget, err, s.lastTerminalErr)
+	}
+	_, err = s.solve(p, nil)
+	if err == nil || !errors.Is(err, errLibLayoutBudget) || !errors.As(err, &naming) || schLayoutFailureClass(err, "solve") != "candidate-budget-exhausted" {
+		t.Fatalf("resource stop and prior concrete cause were not separate facts: %v", err)
+	}
+	if !strings.Contains(err.Error(), "last observed terminal conflict") {
+		t.Fatalf("prior conflict was mislabeled as the final attempt: %v", err)
+	}
+	raw, _ := json.Marshal(schLayoutFailureDiagnostics(err))
+	if !bytes.Contains(raw, []byte(`"preRegenerationLayout"`)) || bytes.Contains(raw, []byte(`"localLayout"`)) || !bytes.Contains(raw, []byte(`"naming-conflict"`)) {
+		t.Fatalf("terminal checkpoint mislabeled or omitted: %s", raw)
+	}
+}
+
+// Distilled from the measured buck source: the old 3V3 rail crosses C6's
+// official Designator. A fixed-placement detour exists, so this collision must
+// stay a hard geometry rejection without being mistaken for no layout capacity.
+func TestMeasuredBuckDesignatorBlocksOldRailButAllowsFixedPlacementDetour(t *testing.T) {
+	left := directionNumber(180)
+	c6 := powerLayoutPlacement{Designator: "C6", X: 15, Y: -85,
+		BBox: layoutBBox{4.5, -93.5, 25.5, -76.5}, TextBBoxes: []layoutBBox{{5, -75, 13.9482421875, -67}},
+		Pins: []powerLayoutPin{{Number: "1", Net: "3V3", X: -5, Y: -85, Rotation: left}, {Number: "2", Net: "GND", X: 35, Y: -85}}}
+	c7 := powerLayoutPlacement{Designator: "C7", X: 75, Y: -70,
+		BBox: layoutBBox{64.5, -78.5, 85.5, -61.5}, TextBBoxes: []layoutBBox{{65, -60, 73.9482421875, -52}},
+		Pins: []powerLayoutPin{{Number: "1", Net: "3V3", X: 55, Y: -70, Rotation: left}, {Number: "2", Net: "GND", X: 95, Y: -70}}}
+	old := powerLayoutPlan{Placements: []powerLayoutPlacement{c6, c7}, Wires: []powerLayoutWire{
+		{Net: "3V3", Points: [][2]float64{{-5, -85}, {-5, -70}}},
+		{Net: "3V3", Points: [][2]float64{{-5, -70}, {55, -70}}},
+	}}
+	var obstruction *schGeometryObstruction
+	if err := validateLibGeometry(&old); !errors.As(err, &obstruction) || obstruction.kind != "wire-text" || !slices.Contains(obstruction.blockers, "C6") {
+		t.Fatalf("old rail was not rejected by measured C6 text: %v", err)
+	}
+	detour := powerLayoutPlan{Placements: old.Placements, Wires: []powerLayoutWire{
+		{Net: "3V3", Points: [][2]float64{{-5, -85}, {-10, -85}}},
+		{Net: "3V3", Points: [][2]float64{{-10, -85}, {-10, -65}}},
+		{Net: "3V3", Points: [][2]float64{{-10, -65}, {50, -65}}},
+		{Net: "3V3", Points: [][2]float64{{50, -65}, {50, -70}}},
+		{Net: "3V3", Points: [][2]float64{{50, -70}, {55, -70}}},
+	}}
+	if err := validateLibGeometry(&detour); err != nil || !libPinsShareIsland(&detour, c6.Pins[0], c7.Pins[0]) {
+		t.Fatalf("fixed-placement text-safe rail failed geometry/connectivity: %v", err)
+	}
+}
+
+// The current failed terminal candidate places C5 only 10 raw from U3.IN.
+// Its VIN_OR tree has no room for a marker between the bodies and nearby pin
+// exits. A larger attachment shell opens that corridor without changing the
+// measured symbols or bypassing marker/Designator geometry checks.
+func TestBuckNamingCorridorOpensAtLaterAttachmentShell(t *testing.T) {
+	right, left := directionNumber(0), directionNumber(180)
+	core := powerLayoutPlacement{Designator: "U3", BBox: layoutBBox{-25.5, -20.5, 25.5, 20.5},
+		TextBBoxes: []layoutBBox{{-25, 20, -16.0517578125, 28}}, Pins: []powerLayoutPin{
+			{Number: "4", Net: "VIN_OR", X: 35, Y: -10, Rotation: right},
+			{Number: "5", Net: "FB", X: 35, Y: 10, Rotation: right},
+		}}
+	c6 := powerLayoutPlacement{Designator: "C6", X: 20, Y: -45, BBox: layoutBBox{9.5, -53.5, 30.5, -36.5},
+		TextBBoxes: []layoutBBox{{10, -35, 18.9482421875, -27}}, Pins: []powerLayoutPin{{Number: "2", Net: "GND", X: 40, Y: -45, Rotation: right}}}
+	c7 := powerLayoutPlacement{Designator: "C7", X: 25, Y: -80, BBox: layoutBBox{14.5, -88.5, 35.5, -71.5},
+		TextBBoxes: []layoutBBox{{15, -70, 23.9482421875, -62}}, Pins: []powerLayoutPin{{Number: "2", Net: "GND", X: 45, Y: -80, Rotation: right}}}
+	for _, c5X := range []float64{65, 75} {
+		c5 := powerLayoutPlacement{Designator: "C5", X: c5X, Y: -10,
+			BBox:       layoutBBox{c5X - 10.5, -18.5, c5X + 10.5, -1.5},
+			TextBBoxes: []layoutBBox{{c5X - 10, 0, c5X - 1.0517578125, 8}},
+			Pins:       []powerLayoutPin{{Number: "1", Net: "VIN_OR", X: c5X - 20, Y: -10, Rotation: left}, {Number: "2", Net: "GND", X: c5X + 20, Y: -10, Rotation: right}}}
+		p := powerLayoutPlan{Placements: []powerLayoutPlacement{core, c5, c6, c7}, Wires: []powerLayoutWire{{Net: "VIN_OR", Points: [][2]float64{{35, -10}, {c5X - 20, -10}}}}}
+		initial := p
+		if err := validateLibGeometry(&p); err != nil {
+			t.Fatalf("C5 x=%g fixture geometry invalid: %v", c5X, err)
+		}
+		var island *libIsland
+		for _, candidate := range libIslands(&p) {
+			if candidate.net == "VIN_OR" {
+				island = &candidate
+				break
+			}
+		}
+		if island == nil {
+			t.Fatal("missing VIN_OR island")
+		}
+		budget := 10000
+		placed := libPlaceWireTreeMarker(&p, *island, "net_port_bi", &budget)
+		if placed != (c5X == 75) {
+			t.Fatalf("C5 x=%g marker placement=%v, expected later-shell clearance", c5X, placed)
+		}
+		if placed {
+			if err := validateLibGeometry(&p); err != nil {
+				t.Fatalf("later-shell marker violates geometry: %v", err)
+			}
+		}
+		if c5X == 65 {
+			measured := map[string]powerLayoutPlacement{"core": core, "child": c5, "other-a": c6, "other-b": c7}
+			hints := map[string]SchematicLayoutPeripheral{"child": {ComponentID: "child", PinNumber: "1", AttachTo: &SchematicLayoutAttach{ComponentID: "core", PinNumber: "4"}}}
+			input := SchematicLayoutInput{CoreComponentID: "core", NetPolicies: map[string]string{"VIN_OR": "module_port", "FB": "module_port", "GND": "local_ground"}}
+			probe := func(h map[string]SchematicLayoutPeripheral, allowance int) (*powerLayoutPlan, *schematicRepairSearch) {
+				budget := allowance
+				s := newSchematicRepairSearch(input, measured, []string{"core", "child", "other-a", "other-b"}, h, &budget)
+				out, ok := s.tryNamingIslandRelocation(initial, &schematicNamingConflict{net: "VIN_OR", endpointOwners: map[string]bool{"U3": true}, ownersComplete: true})
+				if ok != (out != nil) || budget < 0 || budget > allowance {
+					t.Fatalf("invalid naming relocation result/budget: ok=%v budget=%d", ok, budget)
+				}
+				return out, s
+			}
+			if out, s := probe(nil, 10000); out != nil || s.diagnostics.TargetedRelocations != 0 {
+				t.Fatal("unowned same-net member became a naming relocation target")
+			}
+			first, a := probe(hints, 10000)
+			second, b := probe(hints, 10000)
+			if first == nil || !reflect.DeepEqual(first, second) || !reflect.DeepEqual(a.diagnostics.RelocationAttempts, b.diagnostics.RelocationAttempts) || len(a.diagnostics.RelocationAttempts) != 1 || a.diagnostics.RelocationAttempts[0].Result != "accepted" {
+				t.Fatalf("attached naming relocation was not deterministic: first=%v second=%v attempts=%+v", first != nil, second != nil, a.diagnostics.RelocationAttempts)
+			}
+			if out, s := probe(hints, 1); out != nil || s.diagnostics.TargetedRelocations > 1 {
+				t.Fatal("tiny shared budget accepted unverified naming relocation")
+			}
+			if err := validateLibGeometry(first); err != nil {
+				t.Fatalf("accepted naming relocation has invalid geometry: %v", err)
+			}
+		}
 	}
 }
 

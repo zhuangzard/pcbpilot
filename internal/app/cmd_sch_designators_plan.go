@@ -394,6 +394,9 @@ func schDesignatorScene(result map[string]any) (map[string]any, error) {
 		wireValues[i] = wire
 	}
 	out["wires"], out["connectivitySummary"] = wireValues, result["connectivitySummary"]
+	if page, present := result["pagePrimitives"]; present {
+		out["pagePrimitives"] = page
+	}
 	return out, nil
 }
 

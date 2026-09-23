@@ -70,7 +70,7 @@ func TestComposePreplacedPreservesTwentyRawSpacingAndGeometry(t *testing.T) {
 	if !bytes.Equal(sourceBefore, sourceAfter) || !bytes.Equal(pageBefore, pageAfter) {
 		t.Fatal("adapter mutated source evidence")
 	}
-	before := map[string]any{"context": map[string]any{"projectUuid": src.Connectivity.ProjectID, "documentUuid": src.Connectivity.DocumentID}, "result": map[string]any{"components": []any{map[string]any{"componentType": "sheet", "primitiveId": "sheet", "bbox": src.Sheet}}, "wires": []any{}, "count": 1, "connectivitySummary": map[string]any{"scope": "activePage", "wires": 0, "buses": 0, "shortSymbols": 0}}}
+	before := composeEmptyPageBefore(plan)
 	pb, err := schCompositionPlaybook(plan, composeApplyBytes(t, before), true)
 	if err != nil || !pb.RequireFullExecution {
 		t.Fatalf("guarded existing writer: %v", err)
@@ -181,7 +181,11 @@ func TestComposePreplacedCLIAndRawEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	beforePath, playbookPath := filepath.Join(dir, "before.json"), filepath.Join(dir, "apply.json")
-	write(beforePath, map[string]any{"context": map[string]any{"projectUuid": src.Connectivity.ProjectID, "documentUuid": src.Connectivity.DocumentID}, "result": map[string]any{"components": []any{map[string]any{"componentType": "sheet", "primitiveId": "sheet", "bbox": src.Sheet}}, "wires": []any{}, "count": 1, "connectivitySummary": map[string]any{"scope": "activePage", "wires": 0, "buses": 0, "shortSymbols": 0}}})
+	plan, err := planSchCompositionWithPage(src, &page)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(beforePath, composeEmptyPageBefore(plan))
 	compile := newSchComposeCmd(&bytes.Buffer{}, &bytes.Buffer{})
 	compile.SetArgs([]string{"--from", from, "--layout-page", selected, "--out", out, "--before", beforePath, "--replace", "--playbook", playbookPath})
 	if err := compile.Execute(); err != nil {

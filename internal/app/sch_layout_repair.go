@@ -29,6 +29,7 @@ type SchematicLayoutSearchDiagnostics struct {
 type SchematicRelocationAttempt struct {
 	ComponentID   string   `json:"componentId"`
 	ComponentRef  string   `json:"componentRef"`
+	Trigger       string   `json:"trigger,omitempty"`
 	Group         []string `json:"group"`
 	DX            float64  `json:"dx"`
 	DY            float64  `json:"dy"`
@@ -45,6 +46,36 @@ type SchematicLayoutSearchFailure struct {
 	RemainingCandidates int                              `json:"remainingCandidates"`
 	Search              SchematicLayoutSearchDiagnostics `json:"search"`
 	cause               error
+}
+
+// A resource stop may retain the last observed concrete terminal failure.
+// preRegenerationLayout is its placement checkpoint, including provisional
+// geometry; it is not the failed regenerated trial.
+type schematicTerminalFailure struct {
+	cause                 error
+	preRegenerationLayout *powerLayoutPlan
+}
+
+func (e *schematicTerminalFailure) Error() string { return e.cause.Error() }
+func (e *schematicTerminalFailure) Unwrap() error { return e.cause }
+func (e *schematicTerminalFailure) FailureDetails() any {
+	result := struct {
+		Kind                  string           `json:"kind"`
+		Reason                string           `json:"reason"`
+		ObstructionKind       string           `json:"obstructionKind,omitempty"`
+		BlockerRefs           []string         `json:"blockerRefs,omitempty"`
+		Nets                  []string         `json:"nets,omitempty"`
+		PreRegenerationLayout *powerLayoutPlan `json:"preRegenerationLayout,omitempty"`
+	}{Kind: "terminal-conflict", Reason: e.cause.Error(), PreRegenerationLayout: e.preRegenerationLayout}
+	var obstruction *schGeometryObstruction
+	if errors.As(e.cause, &obstruction) {
+		result.ObstructionKind = obstruction.kind
+		result.BlockerRefs = append([]string(nil), obstruction.blockers...)
+		result.Nets = append([]string(nil), obstruction.nets...)
+		sort.Strings(result.BlockerRefs)
+		sort.Strings(result.Nets)
+	}
+	return result
 }
 
 func (e *SchematicLayoutSearchFailure) Error() string {
@@ -167,13 +198,14 @@ func (s *schematicRepairSearch) solve(p powerLayoutPlan, pending []string) (*Sch
 		finished, err = s.search(p, pending)
 	}
 	if err != nil {
-		var diagnosed *SchematicPlacementConflict
-		if s.lastErr != nil && !errors.As(err, &diagnosed) && (errors.Is(err, errSchematicRepairBranches) || errors.Is(err, errSchematicRepairFocus) || errors.Is(err, errLibLayoutBudget) || errors.Is(err, errSchematicExpandedBudget) || errors.Is(err, errSchematicCandidateReserve)) {
-			// A hard shared-budget stop can occur at the next recursion boundary,
-			// after the concrete island failure was already recorded. Preserve both
-			// typed causes so the report retains the failed islands/local layout and
-			// still classifies the actual terminating resource correctly.
-			err = fmt.Errorf("%w: %w", err, s.lastErr)
+		if errors.Is(err, errSchematicRepairBranches) || errors.Is(err, errSchematicRepairFocus) || errors.Is(err, errLibLayoutBudget) || errors.Is(err, errSchematicExpandedBudget) || errors.Is(err, errSchematicCandidateReserve) {
+			// Keep the resource stop authoritative while exposing the real final
+			// conflict. A recursive budget sentinel is not itself that conflict.
+			if s.lastTerminalErr != nil {
+				err = fmt.Errorf("%w: last observed terminal conflict: %w", err, s.lastTerminalErr)
+			} else if s.lastErr != nil {
+				err = fmt.Errorf("%w: last placement conflict: %w", err, s.lastErr)
+			}
 		}
 		return nil, &SchematicLayoutSearchFailure{CandidatesUsed: s.initial - *s.budget, RemainingCandidates: *s.budget, Search: s.diagnostics, cause: err}
 	}
@@ -195,7 +227,7 @@ func (s *schematicRepairSearch) search(p powerLayoutPlan, pending []string) (*po
 	if *s.budget <= 0 {
 		return nil, errLibLayoutBudget
 	}
-	if s.lastTerminalErr != nil && *s.budget <= s.candidateReserve() {
+	if s.canTargetedTerminalRelocation() && *s.budget <= s.candidateReserve() {
 		return nil, errSchematicCandidateReserve
 	}
 	if s.routing != nil && s.routing.expanded >= s.routing.options.MaxExpandedNodes {
@@ -212,15 +244,24 @@ func (s *schematicRepairSearch) search(p powerLayoutPlan, pending []string) (*po
 		before := limit
 		out, err := libFinishSchematicLayoutRegenerate(p, s.input.NetPolicies, &limit, s.routing)
 		*s.budget -= before - limit
-		if err != nil && *s.budget > 0 {
+		if err != nil && !isBareSchematicResourceStop(err) {
 			s.lastTerminal = p
 			s.lastTerminal.Placements = append([]powerLayoutPlacement(nil), p.Placements...)
 			s.lastTerminal.Wires = clonePowerLayoutWires(p.Wires)
 			s.lastTerminal.Flags = append([]powerLayoutFlag(nil), p.Flags...)
-			s.lastTerminalErr = err
+			preRegenerationLayout := s.lastTerminal
+			s.lastTerminalErr = &schematicTerminalFailure{cause: err, preRegenerationLayout: &preRegenerationLayout}
+		}
+		if err != nil && *s.budget > 0 && !isSchematicSearchResourceStop(err) {
 			var routingFailure *schematicRoutingFailure
 			if errors.As(err, &routingFailure) && routingFailure.Kind == "relocation-budget-reserved" {
 				if repaired, ok := s.tryTargetedTerminalRelocation(p, err); ok {
+					return repaired, nil
+				}
+			}
+			var namingConflict *schematicNamingConflict
+			if errors.As(err, &namingConflict) {
+				if repaired, ok := s.tryNamingIslandRelocation(p, err); ok {
 					return repaired, nil
 				}
 			}
@@ -312,7 +353,10 @@ func (s *schematicRepairSearch) search(p powerLayoutPlan, pending []string) (*po
 			if errors.Is(childErr, errSchematicRepairBranches) || errors.Is(childErr, errSchematicRepairFocus) {
 				return nil, childErr
 			}
-			lastErr, s.lastErr = childErr, childErr
+			lastErr = childErr
+			if !isSchematicSearchResourceStop(childErr) {
+				s.lastErr = childErr
+			}
 			var placementConflict *SchematicPlacementConflict
 			if errors.As(childErr, &placementConflict) {
 				if !s.placementParticipates(id, placementConflict) {
@@ -360,18 +404,40 @@ func (s *schematicRepairSearch) candidateReserve() int {
 	return value
 }
 
-// After route-order rollback is exhausted, move only blockers proven by
-// rejected search edges. Explicit attachment descendants travel with their
-// host as one rigid group; every generated wire is withdrawn and recomputed.
-// This is still bounded by the same candidate and routing contexts.
-func (s *schematicRepairSearch) tryTargetedTerminalRelocation(p powerLayoutPlan, routeErr error) (*powerLayoutPlan, bool) {
+func isSchematicSearchResourceStop(err error) bool {
+	return errors.Is(err, errSchematicRepairBranches) || errors.Is(err, errSchematicRepairFocus) || errors.Is(err, errLibLayoutBudget) || errors.Is(err, errSchematicExpandedBudget) || errors.Is(err, errSchematicCandidateReserve)
+}
+
+// A bare sentinel contains no terminal geometry evidence. In particular, a
+// naming slice that ran out before trying every lead must not erase an earlier
+// observed conflict or be reported as a proven no-safe-lead result.
+func isBareSchematicResourceStop(err error) bool {
+	return err == errLibLayoutBudget || err == errSchematicExpandedBudget || err == errSchematicCandidateReserve || err == errSchematicRepairBranches || err == errSchematicRepairFocus
+}
+
+// Reserving candidates only helps when the currently stored terminal layout
+// contains a movable, attributed blocker. An unknown owner or a naming error
+// cannot use the targeted stage, so ordinary bounded checkpoint search keeps
+// the remaining candidates in those cases.
+func (s *schematicRepairSearch) targetedTerminalBlockers(p *powerLayoutPlan, routeErr error) []string {
 	var conflict *schematicRouteConflict
 	if !errors.As(routeErr, &conflict) || !conflict.ownersComplete || len(conflict.blockers) == 0 {
-		return nil, false
+		return nil
 	}
+	coreRef := s.measured[s.input.CoreComponentID].Designator
 	refs := make([]string, 0, len(conflict.blockers))
 	for ref, blocks := range conflict.blockers {
-		if blocks {
+		if !blocks || ref == coreRef {
+			continue
+		}
+		known, present := false, false
+		for _, measured := range s.measured {
+			known = known || measured.Designator == ref
+		}
+		for _, placement := range p.Placements {
+			present = present || placement.Designator == ref
+		}
+		if known && present {
 			refs = append(refs, ref)
 		}
 	}
@@ -382,6 +448,79 @@ func (s *schematicRepairSearch) tryTargetedTerminalRelocation(p powerLayoutPlan,
 		}
 		return refs[i] < refs[j]
 	})
+	return refs
+}
+
+func (s *schematicRepairSearch) canTargetedTerminalRelocation() bool {
+	return len(s.targetedTerminalBlockers(&s.lastTerminal, s.lastTerminalErr)) > 0
+}
+
+func (s *schematicRepairSearch) namingIslandTargets(p *powerLayoutPlan, namingErr error) []string {
+	var conflict *schematicNamingConflict
+	if !errors.As(namingErr, &conflict) || !conflict.ownersComplete {
+		return nil
+	}
+	coreRef := s.measured[s.input.CoreComponentID].Designator
+	eligible := map[string]bool{}
+	for ref := range conflict.endpointOwners {
+		eligible[ref] = true
+	}
+	// An isolated core island can still be blocked by the explicitly owned
+	// peripheral that must connect to that very pin. Terminal regeneration may
+	// have withdrawn its provisional wire, so it is not yet an island endpoint.
+	// This source attachment is an exact dependency, unlike a same-net guess.
+	for id, hint := range s.hints {
+		if hint.AttachTo == nil || !conflict.endpointOwners[s.measured[hint.AttachTo.ComponentID].Designator] {
+			continue
+		}
+		hostMatches, ownMatches := false, false
+		for _, pin := range s.measured[hint.AttachTo.ComponentID].Pins {
+			hostMatches = hostMatches || pin.Number == hint.AttachTo.PinNumber && pin.Net == conflict.net
+		}
+		for _, pin := range s.measured[id].Pins {
+			ownMatches = ownMatches || pin.Net == conflict.net && (hint.PinNumber == "" || pin.Number == hint.PinNumber)
+		}
+		if hostMatches && ownMatches {
+			eligible[s.measured[id].Designator] = true
+		}
+	}
+	refs := make([]string, 0, len(eligible))
+	for ref := range eligible {
+		if ref == coreRef {
+			continue
+		}
+		known, present := false, false
+		for _, measured := range s.measured {
+			known = known || measured.Designator == ref
+		}
+		for _, placement := range p.Placements {
+			present = present || placement.Designator == ref
+		}
+		if known && present {
+			refs = append(refs, ref)
+		}
+	}
+	sort.Strings(refs)
+	return refs
+}
+
+// Naming island owners are dependencies rather than proven blockers. Probe
+// their nearest outward grid step immediately. Never reserve candidates or
+// prune other checkpoints on this evidence alone. Every success re-routes and
+// re-names the full island forest under the shared budgets and geometry gate.
+func (s *schematicRepairSearch) tryNamingIslandRelocation(p powerLayoutPlan, namingErr error) (*powerLayoutPlan, bool) {
+	return s.tryTerminalRelocation(p, s.namingIslandTargets(&p, namingErr), "naming-island")
+}
+
+// After route-order rollback is exhausted, move only blockers proven by
+// rejected search edges. Explicit attachment descendants travel with their
+// host as one rigid group; every generated wire is withdrawn and recomputed.
+// This is still bounded by the same candidate and routing contexts.
+func (s *schematicRepairSearch) tryTargetedTerminalRelocation(p powerLayoutPlan, routeErr error) (*powerLayoutPlan, bool) {
+	return s.tryTerminalRelocation(p, s.targetedTerminalBlockers(&p, routeErr), "route-blocker")
+}
+
+func (s *schematicRepairSearch) tryTerminalRelocation(p powerLayoutPlan, refs []string, trigger string) (*powerLayoutPlan, bool) {
 	coreRef := s.measured[s.input.CoreComponentID].Designator
 	for _, ref := range refs {
 		rootID := ""
@@ -401,6 +540,12 @@ func (s *schematicRepairSearch) tryTargetedTerminalRelocation(p powerLayoutPlan,
 		}
 		sort.Strings(groupIDs)
 		deltas := schematicTargetedRelocationDeltas(&p, ref, coreRef)
+		if trigger == "naming-island" {
+			// Island membership is dependency evidence, not a proven obstacle.
+			// Probe only the nearest outward grid shell here; deeper movement
+			// belongs to the ordinary checkpoint search and must keep its budget.
+			deltas = deltas[:1]
+		}
 		for _, delta := range deltas {
 			if *s.budget <= 0 {
 				return nil, false
@@ -425,7 +570,7 @@ func (s *schematicRepairSearch) tryTargetedTerminalRelocation(p powerLayoutPlan,
 					moved = true
 				}
 			}
-			attempt := SchematicRelocationAttempt{ComponentID: rootID, ComponentRef: ref, Group: append([]string(nil), groupIDs...), DX: delta[0], DY: delta[1]}
+			attempt := SchematicRelocationAttempt{ComponentID: rootID, ComponentRef: ref, Trigger: trigger, Group: append([]string(nil), groupIDs...), DX: delta[0], DY: delta[1]}
 			if !moved {
 				attempt.Result = "target-missing"
 				s.diagnostics.RelocationAttempts = append(s.diagnostics.RelocationAttempts, attempt)
@@ -437,6 +582,9 @@ func (s *schematicRepairSearch) tryTargetedTerminalRelocation(p powerLayoutPlan,
 				continue
 			}
 			limit := s.sliceBudget()
+			if trigger == "naming-island" && limit > 4096 {
+				limit = 4096
+			}
 			before := limit
 			expandedBefore := 0
 			if s.routing != nil {

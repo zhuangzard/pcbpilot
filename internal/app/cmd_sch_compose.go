@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -202,7 +203,7 @@ No automatic pagination, symbol scaling or source-page deletion is performed.`, 
 	}}
 	c.Flags().StringVar(&from, "from", "", "authored module composition JSON")
 	c.Flags().StringVar(&out, "out", "", "write computed composition JSON")
-	c.Flags().StringVar(&before, "before", "", "fresh target sch list snapshot with --include-device-identity --include-bbox --include-pins --include-wires")
+	c.Flags().StringVar(&before, "before", "", "fresh target sch list snapshot with --include-device-identity --include-bbox --include-pins --include-wires --include-page-primitives for replacement")
 	c.Flags().StringVar(&playbookOut, "playbook", "", "also write ordered SCH Apply queue")
 	c.Flags().BoolVar(&replace, "replace", false, "compile a guarded reset of a differing target, preserving its sheet")
 	c.Flags().BoolVar(&preserveInstances, "preserve-instances", false, "with --replace, retain exact existing part IDs/properties and rebuild only drawing content")
@@ -709,6 +710,15 @@ func schCompositionPlaybook(p *schCompositionPlan, before []byte, replace bool, 
 		pb.Steps = append(pb.Steps, projectDesignatorGuardStep(&all))
 		pb.Steps = append(pb.Steps, playbookStep{ID: "verify-existing-composition", Action: "schematic.components.list", Payload: read, ExpectSchematic: final})
 	} else {
+		pagePrimitives, err := schComposeProtectedPage(env.Result)
+		if err != nil {
+			return nil, err
+		}
+		read["includePagePrimitives"] = true
+		sourceScene, err := schDesignatorScene(env.Result)
+		if err != nil {
+			return nil, fmt.Errorf("before snapshot scene: %w", err)
+		}
 		baseline := &schematicStateExpectation{ExactParts: true, Parts: map[string]schematicPartExpectation{}}
 		for _, c := range src.Components {
 			if c.ComponentType == "part" {
@@ -737,8 +747,8 @@ func schCompositionPlaybook(p *schCompositionPlan, before []byte, replace bool, 
 		}
 		if preserved != nil {
 			preserved.protect(baseline)
-			baseline.SourceScene = preserved.Scene
 		}
+		baseline.SourceScene = sourceScene
 		if err := baseline.check(env.Result, nil); err != nil {
 			return nil, fmt.Errorf("incomplete before snapshot: %w", err)
 		}
@@ -760,10 +770,16 @@ func schCompositionPlaybook(p *schCompositionPlan, before []byte, replace bool, 
 			baselineAssertions = map[string]string{"$.connectivitySummary.scope": "==activePage", "$.connectivitySummary.wires": "==0", "$.connectivitySummary.buses": "==0"}
 		}
 		pb.Steps = append(pb.Steps, playbookStep{ID: "verify-source-before-reset", Action: "schematic.components.list", Payload: read, ExpectSchematic: baseline, Assert: baselineAssertions})
+		if preserved == nil && !reuseUnwired {
+			if err := schComposeOrdinaryClearable(pagePrimitives); err != nil {
+				return nil, err
+			}
+		}
 
 		if preserved != nil {
 			ids := strings.Join(preserved.IDs, ",")
-			pb.Steps = append(pb.Steps, playbookStep{ID: "reset-drawing-preserving-instances", Run: "sch clear", Flags: map[string]any{"preserve-parts": true, "part-ids": ids}})
+			protected, _ := json.Marshal(pagePrimitives)
+			pb.Steps = append(pb.Steps, playbookStep{ID: "reset-drawing-preserving-instances", Run: "sch clear", Flags: map[string]any{"preserve-parts": true, "part-ids": ids, "expect-page-primitives-b64": base64.StdEncoding.EncodeToString(protected)}})
 			pb.Steps = append(pb.Steps, playbookStep{ID: "verify-no-residual-primitives", Run: "sch clear", Flags: map[string]any{"preserve-parts": true, "part-ids": ids, "dry-run": true, "expect-empty": true}})
 			cleared := cloneSchExpectation(baseline)
 			cleared.SourceScene = nil
@@ -780,7 +796,8 @@ func schCompositionPlaybook(p *schCompositionPlan, before []byte, replace bool, 
 				pb.Steps = append(pb.Steps, playbookStep{ID: fmt.Sprintf("move-preserved-%03d", i), Action: "schematic.component.modify", Payload: map[string]any{"primitiveId": preserved.Parts[c.Designator]["primitiveId"], "patch": preserved.posePatch(c), "preserveInstance": true}, Assert: map[string]string{"$.instancePreserved": "==true"}})
 			}
 		} else if !reuseUnwired {
-			pb.Steps = append(pb.Steps, playbookStep{ID: "reset-target-preserving-sheet", Run: "sch clear"})
+			protected, _ := json.Marshal(pagePrimitives)
+			pb.Steps = append(pb.Steps, playbookStep{ID: "reset-target-preserving-sheet", Run: "sch clear", Flags: map[string]any{"expect-page-primitives-b64": base64.StdEncoding.EncodeToString(protected)}})
 			pb.Steps = append(pb.Steps, playbookStep{ID: "verify-no-residual-primitives", Run: "sch clear", Flags: map[string]any{"dry-run": true, "expect-empty": true}})
 			pb.Steps = append(pb.Steps, playbookStep{ID: "verify-cleared-target", Action: "schematic.components.list", Payload: read, ExpectSchematic: &schematicStateExpectation{ExactParts: true, Parts: map[string]schematicPartExpectation{}}, Assert: map[string]string{"$.count": "==1"}})
 			byRef := map[string]connectivity.Component{}

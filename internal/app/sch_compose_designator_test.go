@@ -53,7 +53,7 @@ func TestComposePreservesOriginalDesignatorSpellingAndDeclarationOrder(t *testin
 	if string(original) != string(after) {
 		t.Fatal("composition rewrote source data")
 	}
-	before := map[string]any{"context": map[string]any{"projectUuid": p.Connectivity.ProjectID, "documentUuid": p.Connectivity.DocumentID}, "result": map[string]any{"components": []any{map[string]any{"componentType": "sheet", "primitiveId": "sheet", "bbox": p.Sheet}}, "wires": []any{}, "count": 1, "connectivitySummary": map[string]any{"scope": "activePage", "wires": 0, "buses": 0, "shortSymbols": 0}}}
+	before := composeEmptyPageBefore(p)
 	pb, err := schCompositionPlaybook(p, composeApplyBytes(t, before), true)
 	if err != nil {
 		t.Fatal(err)

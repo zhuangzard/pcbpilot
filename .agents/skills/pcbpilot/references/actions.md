@@ -27,6 +27,12 @@ compose 生成的全工程位号唯一性步骤使用 `schematic.components.list
 `allPages:true,tagPages:true` 最小清单，只检查位号冲突、既有 primitiveId 和待建位号不存在；
 它不请求慢速 device identity、bbox 或 pins。紧随其后的目标页守卫仍读取完整
 device identity、bbox、pins、wires 与连接摘要，不能用前者替代后者。
+整页 `--replace` 的源快照还要用 `sch list --include-page-primitives` 读取清页涉及的全部
+图元身份与原生状态（标记/端口、导线、总线、文本及其他图形）；`verify-source-before-reset`
+检查完整场景，生成队列的 `sch clear --expect-page-primitives-b64` 在删除前再次核对
+（编码可保留属性中的字面 `${...}`）。缺测或变化时重新采集，
+旧队列不能继续执行。sheet 自动更新时间不参与此比较。普通 clear 遇到孤儿属性或嵌入对象
+会拒绝；官方属性全局枚举漏掉逐父可见对象、嵌入文件内容不可读时也拒绝，不报告为零对象。
 
 ## SCH Apply
 

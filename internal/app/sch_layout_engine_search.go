@@ -13,6 +13,35 @@ type libAttachmentPair struct {
 	rank      int
 }
 
+// Naming can fail even after a complete physical island has been routed. Its
+// measured endpoint owners are candidate placement dependencies, not claimed
+// geometric blockers; a bounded trial must still regenerate and validate the
+// entire terminal plan before it can be accepted.
+type schematicNamingConflict struct {
+	net            string
+	pin            powerLayoutPin
+	endpointOwners map[string]bool
+	ownersComplete bool
+}
+
+func (e *schematicNamingConflict) Error() string {
+	return fmt.Sprintf("net %s has no safe naming lead for island at pin %s (%g,%g)", e.net, e.pin.Number, e.pin.X, e.pin.Y)
+}
+func (e *schematicNamingConflict) FailureDetails() any {
+	refs := make([]string, 0, len(e.endpointOwners))
+	for ref := range e.endpointOwners {
+		refs = append(refs, ref)
+	}
+	sort.Strings(refs)
+	return struct {
+		Kind                      string   `json:"kind"`
+		Net                       string   `json:"net"`
+		EndpointRefs              []string `json:"endpointRefs"`
+		OwnersComplete            bool     `json:"ownersComplete"`
+		GlobalInfeasibilityProven bool     `json:"globalInfeasibilityProven"`
+	}{"naming-conflict", e.net, refs, e.ownersComplete, false}
+}
+
 func libAttachmentPairs(id string, own powerLayoutPlacement, hint SchematicLayoutPeripheral, placed map[string]powerLayoutPlacement, order []string, policies map[string]string) ([]libAttachmentPair, error) {
 	if hint.PinNumber != "" {
 		if _, ok := libPin(own, hint.PinNumber); !ok {
@@ -373,7 +402,18 @@ func libNameOrderedIslands(p *powerLayoutPlan, policies map[string]string, islan
 			}
 		}
 		if best == nil {
-			return fmt.Errorf("net %s has no safe naming lead for island at pin %s (%g,%g)", island.net, island.pins[0].Number, island.pins[0].X, island.pins[0].Y)
+			conflict := &schematicNamingConflict{net: island.net, pin: island.pins[0], endpointOwners: map[string]bool{}, ownersComplete: true}
+			for _, pin := range island.pins {
+				if ref := libExactPinOwner(p, pin); ref != "" {
+					conflict.endpointOwners[ref] = true
+				} else {
+					conflict.ownersComplete = false
+				}
+			}
+			if len(conflict.endpointOwners) == 0 {
+				conflict.ownersComplete = false
+			}
+			return conflict
 		}
 		*p = *best
 	}

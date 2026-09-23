@@ -147,6 +147,11 @@ func validateSchematicExpectationStep(s *playbookStep) error {
 	if s.ExpectSchematic.Drawing != nil && s.Payload["includeConnectivitySummary"] != true {
 		return fmt.Errorf("expectSchematic drawing requires includeConnectivitySummary:true")
 	}
+	if s.ExpectSchematic.SourceScene != nil {
+		if s.Payload["includeWires"] != true || s.Payload["includeConnectivitySummary"] != true || s.Payload["includePagePrimitives"] != true {
+			return fmt.Errorf("expectSchematic sourceScene requires includeWires, includeConnectivitySummary and includePagePrimitives:true")
+		}
+	}
 	return s.ExpectSchematic.validate()
 }
 

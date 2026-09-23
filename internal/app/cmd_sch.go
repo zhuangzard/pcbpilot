@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -392,7 +393,7 @@ and Size / Width / Height / "Page Size" are not title-block items. Run
 	// schematic.page.clear
 	{
 		var noPreserveSheet, dryRun, expectEmpty, preserveParts bool
-		var partIDs string
+		var partIDs, expectedPagePrimitives, expectedPagePrimitivesBase64 string
 		c := &cobra.Command{
 			Use:   "clear",
 			Short: "Clear the active schematic page (delete all page primitives: components, flags, wires, buses, graphics)",
@@ -428,12 +429,30 @@ and Size / Width / Height / "Page Size" are not title-block items. Run
 						docUUID, project = d, pr
 					}
 				}
-				res, err := dispatchCapture(cfg, "schematic.page.clear", window, map[string]any{
-					"preserveSheet":   !noPreserveSheet,
-					"dryRun":          dryRun,
-					"preserveParts":   preserveParts,
-					"preservePartIds": protected,
-				}, stdout)
+				payload := map[string]any{
+					"preserveSheet":            !noPreserveSheet,
+					"dryRun":                   dryRun,
+					"preserveParts":            preserveParts,
+					"preservePartIds":          protected,
+					"requireCompleteInventory": expectEmpty,
+				}
+				if expectedPagePrimitivesBase64 != "" {
+					if expectedPagePrimitives != "" {
+						return fmt.Errorf("use only one expected page primitive flag")
+					}
+					decoded, err := base64.StdEncoding.DecodeString(expectedPagePrimitivesBase64)
+					if err != nil {
+						return fmt.Errorf("--expect-page-primitives-b64 requires base64 JSON: %w", err)
+					}
+					expectedPagePrimitives = string(decoded)
+				}
+				if expectedPagePrimitives != "" {
+					if !json.Valid([]byte(expectedPagePrimitives)) {
+						return fmt.Errorf("--expect-page-primitives requires valid JSON")
+					}
+					payload["expectedPagePrimitives"] = expectedPagePrimitives
+				}
+				res, err := dispatchCapture(cfg, "schematic.page.clear", window, payload, stdout)
 				if err != nil {
 					return err
 				}
@@ -456,6 +475,8 @@ and Size / Width / Height / "Page Size" are not title-block items. Run
 		c.Flags().BoolVar(&noPreserveSheet, "no-preserve-sheet", false, "also delete the sheet/title block (图框); by default it is kept")
 		c.Flags().BoolVar(&preserveParts, "preserve-parts", false, "retain the exact original part instances while clearing drawing content; requires --part-ids")
 		c.Flags().StringVar(&partIDs, "part-ids", "", "complete comma-separated original part primitive IDs required by --preserve-parts")
+		c.Flags().StringVar(&expectedPagePrimitives, "expect-page-primitives", "", "serialized sch list pagePrimitives; reject a changed page inside the clear action before deletion")
+		c.Flags().StringVar(&expectedPagePrimitivesBase64, "expect-page-primitives-b64", "", "base64 JSON pagePrimitives for literal-safe generated apply queues")
 		sch.AddCommand(c)
 	}
 
@@ -517,7 +538,7 @@ and Size / Width / Height / "Page Size" are not title-block items. Run
 	// ── list ─────────────────────────────────────────────────────────────
 	// schematic.components.list
 	{
-		var allPages, includeBBox, includePins, includeWires, includeDeviceIdentity, stay bool
+		var allPages, includeBBox, includePins, includeWires, includePagePrimitives, includeDeviceIdentity, stay bool
 		var page string
 		c := &cobra.Command{
 			Use:   "list",
@@ -558,6 +579,12 @@ not permission to substitute a similar symbol.`,
 					payload["includeWires"] = true
 					payload["includeConnectivitySummary"] = true
 				}
+				if includePagePrimitives {
+					if allPages {
+						return fmt.Errorf("--include-page-primitives requires one active page")
+					}
+					payload["includePagePrimitives"] = true
+				}
 				if includeBBox {
 					payload["includeBBox"] = true
 				}
@@ -577,6 +604,7 @@ not permission to substitute a similar symbol.`,
 		c.Flags().StringVar(&page, "page", "", "switch to this page (name|uuid), wait for it to settle, then list — makes the page an explicit parameter instead of relying on the active tab (issue #67)")
 		c.Flags().BoolVar(&stay, "stay", false, "with --page, stay on the target page after listing instead of switching back")
 		c.Flags().BoolVar(&includeWires, "include-wires", false, "include existing wire segment geometry for composition comparison")
+		c.Flags().BoolVar(&includePagePrimitives, "include-page-primitives", false, "include complete active-page primitive IDs and native drawing state for guarded replacement")
 		c.Flags().BoolVar(&includeDeviceIdentity, "include-device-identity", false, "resolve exact 32-character device-library identity for replay and composition guards (60s request budget)")
 		c.Flags().BoolVar(&includeBBox, "include-bbox", false, "attach each component's rendered extent {minX,minY,maxX,maxY}")
 		c.Flags().BoolVar(&includePins, "include-pins", false, "attach each pin's {pinName,pinNumber,x,y,noConnected,net} — the data plane for routing/connectivity checks (net is the pin's current authoritative net, null when the netlist is unavailable; output grows, esp. with --all-pages)")

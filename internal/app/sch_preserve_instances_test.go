@@ -16,10 +16,6 @@ func preserveComposeFixture(t *testing.T) (*schCompositionPlan, map[string]any) 
 	p, env := composeApplyFixture(t, false)
 	env["ok"] = true
 	result := env["result"].(map[string]any)
-	summary := result["connectivitySummary"].(map[string]any)
-	for _, key := range []string{"netflags", "netports", "netlabels"} {
-		summary[key] = 0.0
-	}
 	for _, v := range result["components"].([]any) {
 		raw := v.(map[string]any)
 		if raw["componentType"] != "part" {

@@ -132,14 +132,21 @@ func schLayoutFailureClass(cause error, phase string) string {
 		// Detect the exact sentinel while using the same bounded traversal as
 		// every other diagnostic. Calling errors.Is on an adversarial cyclic
 		// wrapper can recurse forever before the traversal guard gets a chance.
-		if typ := reflect.TypeOf(err); typ != nil && typ.Comparable() && err == errSchematicExpandedBudget {
-			class, priority = "expanded-node-budget-exhausted", 4
+		if typ := reflect.TypeOf(err); typ != nil && typ.Comparable() {
+			switch err {
+			case errLibLayoutBudget, errSchematicCandidateReserve:
+				if priority < 4 {
+					class, priority = "candidate-budget-exhausted", 4
+				}
+			case errSchematicExpandedBudget:
+				class, priority = "expanded-node-budget-exhausted", 5
+			}
 		}
 		failure, ok := err.(*schematicRoutingFailure)
 		if !ok {
 			return
 		}
-		candidatePriority := map[string]int{"final-validation-failed": 1, "no-path-within-bounds": 2, "data-missing": 3, "expanded-node-budget-exhausted": 4}[failure.Kind]
+		candidatePriority := map[string]int{"final-validation-failed": 1, "no-path-within-bounds": 2, "data-missing": 3, "expanded-node-budget-exhausted": 5}[failure.Kind]
 		if candidatePriority > priority {
 			class, priority = failure.Kind, candidatePriority
 		}

@@ -113,7 +113,7 @@ func TestComposeTerminalDeclarationsCompileToGuardedStraightLeads(t *testing.T) 
 			t.Fatalf("generated lead lost measured pin geometry/net: %+v", f)
 		}
 	}
-	live := map[string]any{"context": map[string]any{"projectUuid": p.Connectivity.ProjectID, "documentUuid": p.Connectivity.DocumentID}, "result": map[string]any{"components": []any{map[string]any{"componentType": "sheet", "primitiveId": "sheet", "bbox": p.Sheet}}, "wires": []any{}, "count": 1, "connectivitySummary": map[string]any{"scope": "activePage", "wires": 0, "buses": 0, "shortSymbols": 0}}}
+	live := composeEmptyPageBefore(p)
 	pb, err := schCompositionPlaybook(p, composeApplyBytes(t, live), true)
 	if err != nil {
 		t.Fatal(err)

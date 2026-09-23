@@ -2556,6 +2556,63 @@ test('prim-delete: a fully successful delete carries no partial flag', async () 
 	}
 });
 
+test('guarded schematic clear refuses changed wire, flag and graphic before deletion', async () => {
+	const state: any = {
+		part: { PrimitiveId: 'part-1', ComponentType: 'part', Designator: 'R1', UniqueId: 'gge1', Name: 'R', SubPartName: 'device.1', AddIntoBom: false, AddIntoPcb: true, Manufacturer: '', ManufacturerId: '', Supplier: '', SupplierId: '', OtherProperty: {}, Component: {}, Symbol: {}, Footprint: {}, X: 0, Y: 0, Rotation: 0, Mirror: false },
+		component: { PrimitiveId: 'flag-1', ComponentType: 'netflag', Net: 'GND', X: 10, Y: 20, Rotation: 0 },
+		sheet: { PrimitiveId: 'sheet-1', ComponentType: 'sheet', OtherProperty: { '@Update Date': 'old', '@Update Time': 'old', Title: 'Circuit' } },
+		wire: { PrimitiveId: 'wire-1', Line: [10, 20, 30, 20], Net: 'GND', Color: '#000', LineWidth: 1, LineType: 0 },
+		text: { PrimitiveId: 'text-1', X: 0, Y: 0, Content: 'A', Rotation: 0, TextColor: '#000', FontName: 'Arial', FontSize: 10, Bold: false, Italic: false, UnderLine: false, AlignMode: 0 },
+		attribute: { PrimitiveId: 'orphan-attr', X: 0, Y: 0, Rotation: 0, Color: '#000', FontName: 'Arial', FontSize: 10, Bold: false, Italic: false, UnderLine: false, AlignMode: 0, FillColor: 'none', Key: 'Label', Value: 'A', KeyVisible: true, ValueVisible: true, ParentPrimitiveId: 'old-parent' },
+		object: { PrimitiveId: 'embedded-1', Content: 'data', StartX: 0, StartY: 0, Width: 10, Height: 10, Rotation: 0, Mirror: false, FileName: 'logo.svg' },
+	};
+	let missingObjectGetter = false;
+	const primitive = (name: string) => new Proxy({}, { get: (_target, prop) => {
+		if (name === 'object' && prop === 'getState_Content' && missingObjectGetter) return undefined;
+		if (typeof prop === 'string' && prop.startsWith('getState_')) return () => state[name][prop.slice(9)];
+		return undefined;
+	}});
+	let deletes = 0;
+	const klass = (name?: string) => ({ getAll: async () => name ? [primitive(name)] : [], delete: async () => { deletes++; return true; } });
+	(globalThis as any).eda = {
+		sch_PrimitiveComponent: { ...klass(), getAll: async () => [primitive('part'), primitive('component'), primitive('sheet')] }, sch_PrimitiveWire: klass('wire'), sch_PrimitiveText: klass('text'),
+		sch_PrimitiveBus: klass(), sch_PrimitiveArc: klass(), sch_PrimitiveCircle: klass(), sch_PrimitiveRectangle: klass(), sch_PrimitivePolygon: klass(),
+		sch_PrimitiveAttribute: { getAll: async (parent?: string) => parent ? [] : [primitive('attribute')], getAllPrimitiveId: async () => ['orphan-attr'], get: async () => primitive('attribute') },
+		sch_PrimitiveObject: { getAll: async () => [primitive('object')] },
+	};
+	try {
+		const before: any = await runAction('schematic.components.list', { includePagePrimitives: true });
+		const expectedPagePrimitives = JSON.stringify(before.result.pagePrimitives);
+		state.sheet.OtherProperty['@Update Date'] = 'new';
+		state.sheet.OtherProperty['@Update Time'] = 'new';
+		const originalState = JSON.parse(JSON.stringify(state));
+		const restore = () => { for (const key of Object.keys(originalState)) state[key] = JSON.parse(JSON.stringify(originalState[key])); };
+		const same: any = await runAction('schematic.page.clear', { preserveParts: true, preservePartIds: ['part-1'], dryRun: true, expectedPagePrimitives });
+		assert.equal(same.result.dryRun, true);
+		await assert.rejects(() => runAction('schematic.page.clear', { expectedPagePrimitives }), /ordinary clear cannot prove removal/);
+		await assert.rejects(() => runAction('schematic.page.clear', { dryRun: true, requireCompleteInventory: true }), /Page is not empty/);
+		assert.equal(deletes, 0);
+		for (const [name, edit] of [
+			['wire', () => { state.wire.LineWidth = 2; }],
+			['flag', () => { state.component.Net = 'CHANGED'; }],
+			['graphic', () => { state.text.Content = 'B'; }],
+			['orphan attribute', () => { state.attribute.Value = 'B'; }],
+			['embedded object', () => { state.object.Content = 'changed payload'; }],
+		] as const) {
+			restore();
+			edit();
+			await assert.rejects(() => runAction('schematic.page.clear', { preserveParts: true, preservePartIds: ['part-1'], expectedPagePrimitives }), /No primitives deleted: page drawing\/object state differs/,
+				`${name} drift must refuse clear`);
+			assert.equal(deletes, 0);
+		}
+		restore();
+		missingObjectGetter = true;
+		await assert.rejects(() => runAction('schematic.page.clear', { preserveParts: true, preservePartIds: ['part-1'], expectedPagePrimitives }), /Page objects.Content accessor unavailable/);
+		assert.equal(deletes, 0);
+	}
+	finally { delete (globalThis as any).eda; }
+});
+
 // ─── schematic.component.delete cascade (ADR-0004 Decision 5) ────────────────
 // Deleting a part must also remove its EXCLUSIVE stub-wire trees + the netflags
 // riding them (the residue is a ghost-connection boobytrap: the next part placed

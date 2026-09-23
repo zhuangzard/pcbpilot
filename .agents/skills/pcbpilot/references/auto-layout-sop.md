@@ -14,7 +14,8 @@
 pcbpilot doc ls --project <project> --json
 pcbpilot sch connectivity --all-pages --project <project> > project-connectivity.json
 pcbpilot sch list --project <project> --page <page> --stay \
-  --include-device-identity --include-pins --include-bbox --include-wires > page-before.json
+  --include-device-identity --include-pins --include-bbox --include-wires \
+  --include-page-primitives > page-before.json
 pcbpilot sch designator-geometry --project <project> --doc <page> --out designators.json
 pcbpilot sch sheet-geometry --project <project> --json
 ```
@@ -43,6 +44,16 @@ pcbpilot sch sheet-geometry --project <project> --json
 失败局部布局、未连接的指定物理线岛、候选路径摘要与逐边拒绝证据，但诊断数据不能交给
 compose/Apply。报告为预算耗尽或限定范围无路径只表示有界失败；修算法/源约束后从本阶段
 重算。失败命令不得生成或覆盖几何输出。
+候选预算报告若给出 `terminal-conflict`，它是最后一次已观察到的具体终端冲突，
+并不一定来自耗尽预算的那次尝试；其 `preRegenerationLayout` 是撤销临时线/标记前的
+搜索检查点，不是命名失败时的完整终局几何。若局部命名候选刚好耗尽，只报告资源停止，
+不凭空断言无安全引线。`candidate-budget-exhausted` 仅表示有界搜索停止。只在已回读到完整归因、且当前候选中
+确有可移动阻挡器件时，为定向迁移保留剩余候选；命名或未知归因失败继续共享预算内的
+保守回溯，不把未使用的预留额度当成布局无解，也不放松实测位号的闭区碰撞。
+命名引线失败时，若具名物理岛的测量端点可归属，求解器先找岛内非核心外围，或
+显式附着在该岛同网引脚上的外围；沿离核心更远的第一个 5 raw 网格试移该外围及其
+附属子组，撤销临时导线和标记后全量重算。此探测只用共享预算中的小额额度；失败
+继续正常回溯，不能把同网但无显式所有权的器件当成阻挡对象。
 direct 放置前沿、整网撤线重布和阻挡器件/attachment 刚体迁移都由同一内核执行；迁移先试
 主轴向外 5/10 raw，再按 5 raw 扩展到 40 raw。已合并线树可从真实中段/T/端点垂直接出
 命名，但命名成功不能反向证明 direct 已连接。检查报告中的指定线岛合并证据仍是进入 Apply 前
@@ -93,6 +104,11 @@ pcbpilot sch compose --from composition.json --out plan.json \
 目标页与计划不同且任务已授权重建时，加 `--replace` 生成带清页守卫的队列；不要先自行
 清空页面来绕过差异检查。已完全匹配时复用电路；器件匹配但尚未布线时由生成器核验是否
 满足复用条件。装不下应修改模块几何或按功能拆页，compose 不自动迁页或删除源页。
+整页替换的 `--before` 必须含新鲜的完整页图元清单。生成器和执行队列核对元件、引脚网络、
+导线几何及网络、标记和其余图形的 ID/状态；`sch clear` 删除前再次核对图元清单。
+任一枚举失败、缺项或现场变化都停止，重新采集快照和生成队列，不能只凭相同器件集合继续清页。
+普通整页 clear 遇到独立嵌入对象或孤儿属性会在写前拒绝；属性全局枚举与逐父枚举
+对不上、嵌入文件内容无法可靠读取时也拒绝。此时先补 typed 能力，不把空清单当作完整证据。
 
 ## 3. 执行与回读
 

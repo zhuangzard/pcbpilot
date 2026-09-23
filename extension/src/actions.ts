@@ -1095,6 +1095,8 @@ export const schematicComponentsList: Handler = async (payload) => {
 	// wire — EasyEDA merges nets at an endpoint-on-wire junction, a silent short the
 	// post-hoc DRC can't catch. See issue #64.
 	const includeWires = optionalBoolean(payload, 'includeWires') === true;
+	const includePagePrimitives = optionalBoolean(payload, 'includePagePrimitives') === true;
+	if (includePagePrimitives && allPages) throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, 'includePagePrimitives requires one active page.');
 	// tagPages attributes each component to its owning page (pageUuid/pageName).
 	// Opt-in because it briefly cycles the active page; autoconnect requests it so
 	// its off-page error can point at the exact `doc switch` target.
@@ -1280,6 +1282,7 @@ export const schematicComponentsList: Handler = async (payload) => {
 			wiresError = describeThrown(err);
 		}
 	}
+	const pagePrimitives = includePagePrimitives ? await readSchPagePrimitiveState() : undefined;
 
 	return {
 		result: {
@@ -1287,6 +1290,7 @@ export const schematicComponentsList: Handler = async (payload) => {
 			count: serialized.length,
 			wires,
 			...(includeWires ? { wiresAvailable, ...(wiresError ? { wiresError } : {}) } : {}),
+			...(includePagePrimitives ? { pagePrimitives } : {}),
 			// Netlist trust flag: without it a caller cannot tell "every pin is
 			// genuinely unconnected" from "the netlist read failed, so every pin's net
 			// is null". Emitted only when the caller asked for pin nets at all.
@@ -2088,6 +2092,113 @@ const SCH_PAGE_PRIMITIVE_KINDS: Array<{
 	{ key: 'texts', getAll: () => eda.sch_PrimitiveText.getAll(), del: ids => eda.sch_PrimitiveText.delete(ids) },
 ];
 
+// The exact state of every class cleared by schematic.page.clear. This is a
+// typed read through the official getState_* accessors, with no editor script.
+// Fixed keys (including empty arrays) make failed/partial enumeration distinct
+// from a genuinely empty class. A missing accessor fails before any deletion.
+const SCH_PAGE_STATE_FIELDS: Record<string, Array<string>> = {
+	wires: ['Line', 'Net', 'Color', 'LineWidth', 'LineType'],
+	buses: ['BusName', 'Line', 'Color', 'LineWidth', 'LineType'],
+	arcs: ['StartX', 'StartY', 'ReferenceX', 'ReferenceY', 'EndX', 'EndY', 'Color', 'FillColor', 'LineWidth', 'LineType'],
+	circles: ['CenterX', 'CenterY', 'Radius', 'Color', 'FillColor', 'LineWidth', 'LineType', 'FillStyle'],
+	rectangles: ['TopLeftX', 'TopLeftY', 'Width', 'Height', 'CornerRadius', 'Rotation', 'Color', 'FillColor', 'LineWidth', 'LineType', 'FillStyle'],
+	polygons: ['Line', 'Color', 'FillColor', 'LineWidth', 'LineType'],
+	texts: ['X', 'Y', 'Content', 'Rotation', 'TextColor', 'FontName', 'FontSize', 'Bold', 'Italic', 'UnderLine', 'AlignMode'],
+	attributes: ['X', 'Y', 'Rotation', 'Color', 'FontName', 'FontSize', 'Bold', 'Italic', 'UnderLine', 'AlignMode', 'FillColor', 'Key', 'Value', 'KeyVisible', 'ValueVisible', 'ParentPrimitiveId'],
+	objects: ['Content', 'StartX', 'StartY', 'Width', 'Height', 'Rotation', 'Mirror', 'FileName'],
+};
+
+function schPrimitiveStateRecord(primitive: SchPrimitiveLike, kind: string): Record<string, unknown> {
+	const record: Record<string, unknown> = { primitiveId: primitive.getState_PrimitiveId() };
+	for (const field of SCH_PAGE_STATE_FIELDS[kind]) {
+		const getter = (primitive as unknown as Record<string, unknown>)[`getState_${field}`];
+		if (typeof getter !== 'function') throw new Error(`Page ${kind}.${field} accessor unavailable.`);
+		const value = (getter as () => unknown).call(primitive);
+		if (value === undefined || (typeof value === 'number' && !Number.isFinite(value)) || (typeof File !== 'undefined' && value instanceof File)) throw new Error(`Page ${kind}.${field} state unavailable or unsupported.`);
+		record[field] = value;
+	}
+	return record;
+}
+
+async function readSchPagePrimitiveState(): Promise<Record<string, Array<Record<string, unknown>>>> {
+	const out: Record<string, Array<Record<string, unknown>>> = {};
+	const components = await eda.sch_PrimitiveComponent.getAll();
+	if (!Array.isArray(components)) throw new Error('Page component inventory unavailable.');
+	out.components = components.map(c => {
+		const record = JSON.parse(JSON.stringify(serializeComponent(c))) as Record<string, unknown>;
+		if (record.componentType === SCH_SHEET_TYPE && record.otherProperty && typeof record.otherProperty === 'object') {
+			const props = record.otherProperty as Record<string, unknown>;
+			delete props['@Update Date'];
+			delete props['@Update Time'];
+		}
+		return record;
+	});
+	for (const kind of SCH_PAGE_PRIMITIVE_KINDS) {
+		const primitives = await kind.getAll();
+		if (!Array.isArray(primitives)) throw new Error(`Page ${kind.key} inventory unavailable.`);
+		out[kind.key] = primitives.map(primitive => schPrimitiveStateRecord(primitive, kind.key));
+		out[kind.key].sort((a, b) => String(a.primitiveId).localeCompare(String(b.primitiveId)));
+	}
+	// preserveParts clear can also delete orphan attributes and embedded objects.
+	// Mirror its global + per-parent inventory so a newly visible orphan cannot
+	// slip into the destructive pass after the snapshot was taken.
+	const attributes = new Map<string, Awaited<ReturnType<typeof eda.sch_PrimitiveAttribute.getAll>>[number]>();
+	const globalAttributes = await eda.sch_PrimitiveAttribute.getAll();
+	if (!Array.isArray(globalAttributes)) throw new Error('Page attribute inventory unavailable.');
+	for (const attribute of globalAttributes) attributes.set(attribute.getState_PrimitiveId(), attribute);
+	const globalAttributeIds = await eda.sch_PrimitiveAttribute.getAllPrimitiveId();
+	if (!Array.isArray(globalAttributeIds)) throw new Error('Page global attribute ID inventory unavailable.');
+	for (const id of globalAttributeIds) {
+		if (typeof id !== 'string' || !id) throw new Error('Page global attribute ID unavailable.');
+		if (!attributes.has(id)) {
+			const attribute = await eda.sch_PrimitiveAttribute.get(id);
+			if (!attribute) throw new Error(`Page attribute ${id} cannot be read.`);
+			attributes.set(id, attribute);
+		}
+	}
+	const globalSet = new Set([...globalAttributes.map(a => a.getState_PrimitiveId()), ...globalAttributeIds]);
+	for (const component of components) {
+		const owned = await eda.sch_PrimitiveAttribute.getAll(component.getState_PrimitiveId());
+		if (!Array.isArray(owned)) throw new Error('Page per-component attribute inventory unavailable.');
+		for (const attribute of owned) {
+			const id = attribute.getState_PrimitiveId();
+			if (!globalSet.has(id)) throw new Error('Page global attribute inventory is incomplete; orphan absence cannot be proven.');
+			attributes.set(id, attribute);
+		}
+	}
+	const sheets = new Set(components.filter(c => c.getState_ComponentType() === SCH_SHEET_TYPE).map(c => c.getState_PrimitiveId()));
+	out.attributes = [...attributes.values()].map(attribute => {
+		const record = schPrimitiveStateRecord(attribute, 'attributes');
+		if (sheets.has(String(record.ParentPrimitiveId)) && (record.Key === '@Update Date' || record.Key === '@Update Time')) record.Value = null;
+		return record;
+	});
+	out.attributes.sort((a, b) => String(a.primitiveId).localeCompare(String(b.primitiveId)));
+	const objects = await eda.sch_PrimitiveObject.getAll();
+	if (!Array.isArray(objects)) throw new Error('Page embedded-object inventory unavailable.');
+	out.objects = objects.map(object => schPrimitiveStateRecord(object, 'objects'));
+	out.objects.sort((a, b) => String(a.primitiveId).localeCompare(String(b.primitiveId)));
+	out.components.sort((a, b) => String(a.primitiveId).localeCompare(String(b.primitiveId)));
+	return out;
+}
+
+function independentSchPagePrimitives(page: Record<string, Array<Record<string, unknown>>>): { orphanAttributes: Array<string>; objects: Array<string> } {
+	const parents = new Set(page.components.map(c => String(c.primitiveId)));
+	return {
+		orphanAttributes: page.attributes.filter(a => !parents.has(String(a.ParentPrimitiveId))).map(a => String(a.primitiveId)),
+		objects: page.objects.map(o => String(o.primitiveId)),
+	};
+}
+
+async function verifyExpectedSchPagePrimitives(payload: Record<string, unknown>): Promise<Record<string, Array<Record<string, unknown>>> | undefined> {
+	if (payload.expectedPagePrimitives === undefined) return undefined;
+	let expected: unknown;
+	try { expected = JSON.parse(requireString(payload, 'expectedPagePrimitives')); }
+	catch { throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, 'Invalid expectedPagePrimitives JSON.'); }
+	const current = await readSchPagePrimitiveState();
+	if (exactJSON(expected) !== exactJSON(current)) throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, 'No primitives deleted: page drawing/object state differs from protected snapshot.');
+	return current;
+}
+
 /** Map a component's getState_ComponentType() to a stable result-count key. */
 const SCH_COMPONENT_TYPE_KEY: Record<string, string> = {
 	part: 'components',
@@ -2317,6 +2428,7 @@ const schematicPageClearPreservingParts: Handler = async (payload) => {
 	let first: Record<string, Array<string>>;
 	try { first = await collect(); }
 	catch (err) { throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, `No primitives deleted: ${describeThrown(err)}`); }
+	await verifyExpectedSchPagePrimitives(payload);
 	let live = first, passes = 0;
 	const warnings: Array<string> = [];
 	if (!dryRun) {
@@ -2361,6 +2473,19 @@ const schematicPageClear: Handler = async (payload) => {
 	const warnings: Array<string> = [];
 
 	const firstPass = await enumerateSchPagePrimitives(preserveSheet, warnings);
+	if (payload.expectedPagePrimitives !== undefined && warnings.length) throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, `No primitives deleted: ${warnings.join('; ')}`);
+	const protectedPage = await verifyExpectedSchPagePrimitives(payload);
+	if (protectedPage) {
+		const independent = independentSchPagePrimitives(protectedPage);
+		if (independent.orphanAttributes.length || independent.objects.length) throw new ActionError(ErrorCodes.PRECONDITION_REFUSED,
+			`No primitives deleted: ordinary clear cannot prove removal of ${independent.orphanAttributes.length} orphan attributes and ${independent.objects.length} embedded objects.`);
+	}
+	if (payload.requireCompleteInventory === true) {
+		const current = protectedPage ?? await readSchPagePrimitiveState();
+		const independent = independentSchPagePrimitives(current);
+		if (independent.orphanAttributes.length || independent.objects.length) throw new ActionError(ErrorCodes.PRECONDITION_REFUSED,
+			`Page is not empty: ${independent.orphanAttributes.length} orphan attributes and ${independent.objects.length} embedded objects remain.`);
+	}
 	const initialTotal = countIds(firstPass);
 
 	if (dryRun) {
