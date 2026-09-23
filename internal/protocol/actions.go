@@ -248,6 +248,15 @@ func AllActions() []ActionSpec {
 			Outputs:     []string{"component primitives", "designator", "name", "pins", "pinsAvailable", "pinsError on pin-read failure", "bbox", "wires/wiresAvailable/wiresError", "connectivitySummary {scope,wires,buses,netflags,netports,netlabels,shortSymbols}"},
 		},
 		{
+			Name:        "schematic.designators.list",
+			Domain:      DomainSchematic,
+			Phase:       1,
+			Mutates:     false,
+			NeedsWindow: true,
+			Description: "Read the active schematic page's part Designator attributes through per-parent sch_PrimitiveAttribute.getAll(parentId), then measure each visible attribute with sch_Primitive.getPrimitivesBBox([attributeId]). Requires exactly one visible, matching, finite positive bbox per part; missing/duplicate/hidden/invalid evidence fails the whole read. Other attributes are excluded. No arbitrary JavaScript or editor mutation.",
+			Outputs:     []string{"documentId", "count", "designators[] {id,parentId,key,value,visible,bbox,source}"},
+		},
+		{
 			Name:        "schematic.component.place",
 			Domain:      DomainSchematic,
 			Phase:       1,

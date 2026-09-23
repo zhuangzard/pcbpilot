@@ -171,16 +171,56 @@ func TestDesignatorObservedFlatSegmentsDoNotInventConnector(t *testing.T) {
 func TestDesignatorDiagonalWire(t *testing.T) {
 	b := layoutBBox{MinX: 0, MinY: 0, MaxX: 10, MaxY: 10}
 	for _, tc := range []struct {
+		name string
 		p    [4]float64
 		want bool
 	}{
-		{[4]float64{-5, -5, 15, 15}, true}, {[4]float64{-5, 15, 15, 35}, false},
-		{[4]float64{-5, 0, 15, 0}, false}, {[4]float64{0, 0, 0, 0}, false},
-		{[4]float64{5, -5, 5, 15}, true}, {[4]float64{2, 2, 8, 8}, true},
+		{"diagonal crossing", [4]float64{-5, -5, 15, 15}, true},
+		{"diagonal misses", [4]float64{-5, 15, 15, 35}, false},
+		{"wire along bottom edge", [4]float64{-5, 0, 15, 0}, true},
+		{"wire along left edge", [4]float64{0, -5, 0, 15}, true},
+		{"wire endpoint on edge", [4]float64{-5, 5, 0, 5}, true},
+		{"wire endpoint on corner", [4]float64{-5, -5, 0, 0}, true},
+		{"diagonal tangent to corner", [4]float64{-5, 5, 5, -5}, true},
+		{"parallel just outside", [4]float64{-5, -0.001, 15, -0.001}, false},
+		{"endpoint outside label", [4]float64{-5, 15, 0, 15}, false},
+		{"zero length inside", [4]float64{5, 5, 5, 5}, false},
+		{"zero length on corner", [4]float64{0, 0, 0, 0}, false},
+		{"vertical crossing", [4]float64{5, -5, 5, 15}, true},
+		{"inside", [4]float64{2, 2, 8, 8}, true},
 	} {
-		if got := schSegmentCrossesBox(tc.p[0], tc.p[1], tc.p[2], tc.p[3], b); got != tc.want {
-			t.Fatalf("%v got %v", tc.p, got)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			if got := schSegmentCrossesBox(tc.p[0], tc.p[1], tc.p[2], tc.p[3], b); got != tc.want {
+				t.Fatalf("%v got %v, want %v", tc.p, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDesignatorWireBoundaryFinding(t *testing.T) {
+	s, c, d := designatorGeometryFixture()
+	for _, tc := range []struct {
+		name string
+		line []float64
+		want bool
+	}{
+		{"touches label corner", []float64{45, 40, 55, 50}, true},
+		{"follows label edge", []float64{55, 50, 65, 50}, true},
+		{"ends at part body away from label", []float64{30, 50, 40, 50}, false},
+		{"zero length within label", []float64{60, 54, 60, 54}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fs := schDesignatorFindings(s, d, c, []schGroupWire{{ID: "wire", Points: tc.line}})
+			found := false
+			for _, f := range fs {
+				if f.Type == "designator-wire-overlap" {
+					found = true
+				}
+			}
+			if found != tc.want {
+				t.Fatalf("line %v finding=%v, want %v: %+v", tc.line, found, tc.want, fs)
+			}
+		})
 	}
 }
 

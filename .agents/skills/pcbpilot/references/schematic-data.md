@@ -94,6 +94,13 @@ CLI 参数以 `pcbpilot sch <command> --help` 为准；电路选型依据具体�
 生产者须从有类型的原始属性筛出位号后填入，并保留对应来源；不能混入型号后让消费者猜测。
 缺少位号或其他必检几何不能当作空集合/零碰撞；估计可用于规划，不能冒充现场完整验证。
 
+布局前对目标当前页运行 `pcbpilot sch designator-geometry --project <project> --doc <page> --out designators.json`。
+此只读命令逐个读取 part 的 `Designator` 属性，要求每件恰有一个可见、值与位号一致且
+拥有有效官方 bbox 的属性；输出属性 ID、parent ID、值、bbox 与测量来源。把对应 bbox
+按 parent ID 写入源测量的 `measurement.textBboxes`，同时保留原始导出文件；型号、参数等
+其他属性不得混入。命令对缺失、重复、隐藏、身份不符或 bbox 缺测非零失败，不用预测文字
+尺寸冒充实测。它只覆盖当前页，不替代导线、框或电气回读。
+
 ### 数据发现、修复与验收证据
 
 问题的主判据必须来自原始数据与可重复检查。官方导图仅辅助审阅：如果看图发现漏检，先把

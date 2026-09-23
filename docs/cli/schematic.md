@@ -44,6 +44,7 @@ typed CLI 操作嘉立创EDA专业版的原理图——每个动作可观测、�
 |---|---|---|
 | 本地设计对账 | `sch design-diff expected.json actual.json --exit-code` | 按稳定ID核对器件、引脚、网、几何；两份完整compose计划还比较导线、框和标题，报告覆盖范围及未验证项 |
 | 显式核心/外围区内求解 | `sch layout-plan --zones --from ... --out ...` | 连接/几何、zone 所有权、attachments 与策略 → 完整区内候选；任一区失败不输出完整结果 |
+| 位号实测几何导出 | `sch designator-geometry --project ... --doc ... [--out ...]` | 只读当前页逐 part 读取唯一可见 Designator 的官方 bbox、parent、值及来源；缺失、重复、隐藏或无效数据即失败，可按 parent 写入源测量 `textBboxes` |
 | 核心移动/单脚标签修复 | `sch layout-edit --source ... --page ... --snapshot ... (--move-core ID --to X,Y \| --repair-pin ID:PIN) --out ... [--playbook ...]` | 从保留源与新鲜快照生成目标；不直接写页面。核心固定目标后可重算本区，单脚修复生成作用域 playbook |
 | 完整区域合页 | `sch layout-sheet-plan --from ... --out ...` | 只选择/平移合法完整候选，统一 spacing、Z 型流和同页约束，不拆外围 |
 | 固定数据渲染 | `sch layout-render --from ... --out ...` | 校验并转译同一目标，不补线、不改坐标；不证明现场已 Apply |

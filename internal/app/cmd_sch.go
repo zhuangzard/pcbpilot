@@ -136,6 +136,7 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 	sch.AddCommand(newSchLayoutRenderCmd(stdout))
 	sch.AddCommand(newSchLayoutSheetPlanCmd(stdout))
 	sch.AddCommand(newSchDesignatorsCmd(cfg, &window, stdout, stderr))
+	sch.AddCommand(newSchDesignatorGeometryCmd(cfg, &window, stdout))
 	// `sch apply` is the schematic-domain entry point for the shared, ordered
 	// playbook executor. The executor itself remains shared so queue semantics
 	// and WebSocket response handling stay identical across domains.

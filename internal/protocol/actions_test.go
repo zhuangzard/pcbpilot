@@ -93,6 +93,24 @@ func TestComponentsListDocumentsReadOnlyPreflightContract(t *testing.T) {
 	}
 }
 
+func TestDesignatorGeometryActionIsReadOnlyAndScoped(t *testing.T) {
+	for _, action := range AllActions() {
+		if action.Name != "schematic.designators.list" {
+			continue
+		}
+		if action.Mutates || !action.NeedsWindow || action.Domain != DomainSchematic {
+			t.Fatalf("Designator geometry must be a current-page read-only schematic action: %+v", action)
+		}
+		for _, phrase := range []string{"active schematic page", "getAll(parentId)", "getPrimitivesBBox", "missing/duplicate/hidden/invalid"} {
+			if !strings.Contains(action.Description, phrase) {
+				t.Fatalf("Designator action contract missing %q: %s", phrase, action.Description)
+			}
+		}
+		return
+	}
+	t.Fatal("schematic.designators.list action missing")
+}
+
 func TestProtectedPinRepairIsCataloguedAsMutatingGeometryAction(t *testing.T) {
 	var found *ActionSpec
 	for _, action := range AllActions() {

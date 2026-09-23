@@ -1012,6 +1012,61 @@ async function tagComponentPages(requireComplete = false): Promise<Map<string, {
 	return byId;
 }
 
+/** Fixed, read-only Designator geometry inventory for schematic source measurements. */
+export const schematicDesignatorsList: Handler = async () => {
+	try {
+		const before = await eda.dmt_SelectControl.getCurrentDocumentInfo();
+		if (!before?.uuid) throw new Error('active schematic page identity unavailable');
+		// The unscoped attribute getAll() can return [] on a populated page.
+		// Enumerate only current-page parts, then query each parent explicitly.
+		const components = await eda.sch_PrimitiveComponent.getAll(undefined, false);
+		if (!Array.isArray(components)) throw new Error('current-page component inventory unavailable');
+		const parts = components.filter(c => String(c.getState_ComponentType()) === 'part');
+		const partIds = new Set<string>();
+		const refs = new Set<string>();
+		const attributeIds = new Set<string>();
+		const designators: Array<Record<string, unknown>> = [];
+		for (const part of parts) {
+			const parentId = part.getState_PrimitiveId();
+			const ref = part.getState_Designator();
+			if (typeof parentId !== 'string' || !parentId.trim() || partIds.has(parentId)) throw new Error(`missing/duplicate part primitiveId: ${String(parentId)}`);
+			if (typeof ref !== 'string' || !ref.trim() || refs.has(ref)) throw new Error(`missing/duplicate part designator: ${String(ref)}`);
+			partIds.add(parentId); refs.add(ref);
+			const attrs = await eda.sch_PrimitiveAttribute.getAll(parentId);
+			if (!Array.isArray(attrs)) throw new Error(`Designator inventory unavailable for ${ref} (${parentId})`);
+			const candidates = attrs.filter(a => a.getState_Key() === 'Designator');
+			if (candidates.length !== 1) throw new Error(`${ref} (${parentId}) requires exactly one Designator attribute, got ${candidates.length}`);
+			const attr = candidates[0];
+			const id = attr.getState_PrimitiveId();
+			const actualParent = attr.getState_ParentPrimitiveId();
+			const value = attr.getState_Value();
+			const visible = attr.getState_ValueVisible();
+			if (typeof id !== 'string' || !id.trim() || attributeIds.has(id)) throw new Error(`${ref} has missing/duplicate Designator attribute ID`);
+			if (actualParent !== parentId) throw new Error(`${ref} Designator parent mismatch: ${String(actualParent)}`);
+			if (value !== ref) throw new Error(`${ref} Designator value mismatch: ${String(value)}`);
+			if (visible !== true) throw new Error(`${ref} Designator is hidden or visibility is unknown`);
+			attributeIds.add(id);
+			const measured = await eda.sch_Primitive.getPrimitivesBBox([id]);
+			const bbox = measured as { minX?: unknown; minY?: unknown; maxX?: unknown; maxY?: unknown } | null;
+			if (!bbox || ![bbox.minX, bbox.minY, bbox.maxX, bbox.maxY].every(n => typeof n === 'number' && Number.isFinite(n))
+				|| (bbox.maxX as number) <= (bbox.minX as number) || (bbox.maxY as number) <= (bbox.minY as number)) {
+				throw new Error(`${ref} Designator has missing or invalid official bbox`);
+			}
+			designators.push({ id, parentId, key: 'Designator', value, visible: true,
+				bbox: { minX: bbox.minX, minY: bbox.minY, maxX: bbox.maxX, maxY: bbox.maxY },
+				source: 'eda.sch_PrimitiveAttribute.getAll(parentId)+eda.sch_Primitive.getPrimitivesBBox([attributeId])' });
+		}
+		const after = await eda.dmt_SelectControl.getCurrentDocumentInfo();
+		if (after?.uuid !== before.uuid) throw new Error('active schematic page changed during Designator measurement');
+		designators.sort((a, b) => String(a.parentId).localeCompare(String(b.parentId)));
+		return { result: { documentId: before.uuid, count: designators.length, designators } };
+	}
+	catch (err) {
+		if (err instanceof ActionError) throw err;
+		throw edaError(err, 'Could not measure every current-page Designator.');
+	}
+};
+
 export const schematicComponentsList: Handler = async (payload) => {
 	const allPages = optionalBoolean(payload, 'allPages') === true;
 	const includePins = optionalBoolean(payload, 'includePins') === true;
@@ -13738,6 +13793,7 @@ const HANDLERS: Record<string, Handler> = {
 	'schematic.titleblock.get': schematicTitleBlockGet,
 	'schematic.titleblock.modify': schematicTitleBlockModify,
 	'schematic.components.list': schematicComponentsList,
+	'schematic.designators.list': schematicDesignatorsList,
 	'schematic.component.place': schematicComponentPlace,
 	'schematic.component.modify': schematicComponentModify,
 	'schematic.component.delete': schematicComponentDelete,

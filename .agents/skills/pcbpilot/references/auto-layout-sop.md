@@ -15,11 +15,14 @@ pcbpilot doc ls --project <project> --json
 pcbpilot sch connectivity --all-pages --project <project> > project-connectivity.json
 pcbpilot sch list --project <project> --page <page> --stay \
   --include-device-identity --include-pins --include-bbox --include-wires > page-before.json
+pcbpilot sch designator-geometry --project <project> --doc <page> --out designators.json
 pcbpilot sch sheet-geometry --project <project> --json
 ```
 
 在副本中依据官方典型电路补齐器件、引脚和网络；修复非标准位号后再布局。
 外围要围绕核心引脚并直接接线。已有网络与显式 NC 保持可追溯，不能把缺数据当作悬空或 NC。
+按导出结果的 parent ID 把可见位号 bbox 放入相应源测量的 `textBboxes`；导出失败先补
+采集能力或数据，不把空数组当作没有位号，也不以文字宽度估计通过最终数据门。
 临时输入、计算结果和回读证据保存在项目忽略的目录，原快照保留不覆盖。
 
 ## 2. 离线计算模块与单页组合

@@ -17,6 +17,7 @@ type schDesignatorGeometry struct {
 	Value    string      `json:"value"`
 	Visible  *bool       `json:"visible"`
 	BBox     *layoutBBox `json:"bbox"`
+	Source   string      `json:"source,omitempty"`
 }
 
 func buildSchVisualSurveyJS(comps []layoutComp) string {
@@ -225,14 +226,19 @@ func schDesignatorWireSegments(w schGroupWire) [][4]float64 {
 	return segments
 }
 
-// Open-box segment intersection, including diagonal wires; a tangent does not
-// obscure the label. Liang–Barsky avoids treating a diagonal as horizontal.
+// Designator text is a closed obstacle: a real wire touching its edge or corner
+// obscures it, including a tangent or an endpoint. This rule is deliberately
+// separate from component-body contacts, where a pin endpoint can be legal.
+// Liang–Barsky handles diagonal segments without inventing a bounding-box hit.
 func schSegmentCrossesBox(x0, y0, x1, y1 float64, b layoutBBox) bool {
+	if x0 == x1 && y0 == y1 {
+		return false // a zero-length record is not a real wire segment
+	}
 	lo, hi := 0.0, 1.0
 	for _, axis := range [][4]float64{{x0, x1, b.MinX, b.MaxX}, {y0, y1, b.MinY, b.MaxY}} {
 		d := axis[1] - axis[0]
 		if d == 0 {
-			if axis[0] <= axis[2] || axis[0] >= axis[3] {
+			if axis[0] < axis[2] || axis[0] > axis[3] {
 				return false
 			}
 			continue
@@ -243,9 +249,9 @@ func schSegmentCrossesBox(x0, y0, x1, y1 float64, b layoutBBox) bool {
 		}
 		lo = math.Max(lo, a)
 		hi = math.Min(hi, z)
-		if lo >= hi {
+		if lo > hi {
 			return false
 		}
 	}
-	return (x0 != x1 || y0 != y1) && lo < hi
+	return lo <= hi
 }
