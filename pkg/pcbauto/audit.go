@@ -223,6 +223,40 @@ func (r *router) keepFanouts(m *rnet, keep []int) {
 		fixed = append(fixed, m.fanFull[k]...)
 	}
 	m.fanVias, m.fanFull, m.fanTrack, m.fanTracks, m.fanPinned = vias, full, tidx, tracks, pinned
+	// Shared stubs survive only while the via they hang on does.
+	var st []Track
+	var sc [][]int32
+	for i, t := range m.shareTracks {
+		alive := false
+		for _, v := range vias {
+			if v.C.Dist(t.B) < 0.5 {
+				alive = true
+			}
+		}
+		if alive {
+			st = append(st, t)
+			sc = append(sc, m.shareClaims[i])
+			fixed = append(fixed, m.shareClaims[i]...)
+		}
+	}
+	m.shareTracks, m.shareClaims = st, sc
+	// Escapes from a dropped via go with it.
+	var es []*bgaEsc
+	for _, e := range m.escs {
+		alive := !e.hasVia
+		for _, v := range vias {
+			if e.hasVia && v.C.Dist(e.via) < 0.5 {
+				alive = true
+			}
+		}
+		if alive {
+			es = append(es, e)
+			fixed = append(fixed, e.claims...)
+		} else {
+			delete(r.escOf, e.pd)
+		}
+	}
+	m.escs = es
 	m.fixed = dedup(fixed)
 	// Routed claims of m must not double-count cells now in fixed.
 	r.applyClaims(m.claims, -1)

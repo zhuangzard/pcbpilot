@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"sort"
+	"time"
 )
 
 // PlaneRegion is copper to pour for a net on a layer (plane or split plane).
@@ -808,7 +809,7 @@ func (r *router) simulate(n *rnet) [][]*Pad {
 		}
 	}
 	// Fan-out stubs and routed paths as chains of own cells.
-	for _, t := range n.fanTracks {
+	for _, t := range append(append([]Track(nil), n.fanTracks...), n.shareTracks...) {
 		li := gr.layerIndex(t.Layer)
 		steps := int(math.Ceil(t.A.Dist(t.B)/(gr.g/2))) + 1
 		var prev int32 = -1
@@ -894,9 +895,24 @@ func (r *router) simulate(n *rnet) [][]*Pad {
 // pourRepair simulates plane/pour connectivity after signal routing and adds
 // strict track connections between islands until each net is one piece.
 func (r *router) pourRepair(ctx context.Context, res *RouteResult) {
+	// Grounds first, then the largest nets: bridging runs against a fixed
+	// budget (it used all 30 s on K230), and when it runs out the nets left
+	// should be small supplies, not GND.
+	nets := append([]*rnet(nil), r.nets...)
+	sort.SliceStable(nets, func(i, j int) bool {
+		gi, gj := nets[i].plan.Role == RoleGround, nets[j].plan.Role == RoleGround
+		if gi != gj {
+			return gi
+		}
+		return len(nets[i].groups) > len(nets[j].groups)
+	})
+	start := time.Now()
+	defer func() {
+		res.Notes = append(res.Notes, sprintf("plane/pour bridging: %.1f s of the post-routing budget", time.Since(start).Seconds()))
+	}()
 	for pass := 0; pass < 2; pass++ {
 		fixedAny := false
-		for _, n := range r.nets {
+		for _, n := range nets {
 			if !(n.onPlane || n.poured) || ctx.Err() != nil {
 				continue
 			}

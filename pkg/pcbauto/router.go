@@ -66,6 +66,7 @@ type RouteStats struct {
 	Conflicts           int     `json:"conflictsLeft"`
 	Repaired            int     `json:"repairedNets"`
 	Tuned               int     `json:"lengthTunedNets"`
+	EscapesReleased     int     `json:"escapesReleased,omitempty"`
 	PreRepairViolations int     `json:"preRepairViolations"`
 	ConflictTrace       []int   `json:"conflictTrace,omitempty"`
 	GridMil             float64 `json:"gridMil"`
@@ -103,11 +104,16 @@ type rnet struct {
 	fanFull   [][]int32 // full claim set of each fan-out via (+ its stub)
 	fanTrack  []int     // index into fanTracks, -1 for in-pad thermal vias
 	fanPinned []bool    // fan-outs that never yield (BGA dog-bones: no fallback inside a ball field)
-	failed    []Unrouted
-	conflict  bool
-	neckW     float64        // pad-entry width when the full width does not fit
-	neckR     float64        // claim radius at neck width
-	neck      map[int32]bool // columns near own pads where necking is allowed
+	// Shared stubs: a plane ball tied to a neighbouring ball's via of the same
+	// net (no via of its own). shareClaims[i] are the cells of shareTracks[i].
+	shareTracks []Track
+	shareClaims [][]int32
+	escs        []*bgaEsc // BGA escapes: fixed copper from a ball to the array boundary
+	failed      []Unrouted
+	conflict    bool
+	neckW       float64        // pad-entry width when the full width does not fit
+	neckR       float64        // claim radius at neck width
+	neck        map[int32]bool // columns near own pads where necking is allowed
 }
 
 type rpath struct {
@@ -123,6 +129,12 @@ type router struct {
 	// each signal ball's escape (an extra access node on every layer).
 	bgaDone map[*Pad]bool
 	escape  map[*Pad][2]int
+	// bgaZones are the ball fields (array bbox + one pitch) with the part
+	// they belong to: a net with a ball there may neck down anywhere inside.
+	bgaZones []bgaZone
+	// escOf is each pre-escaped ball's escape (its exit is the access node).
+	escOf  map[*Pad]*bgaEsc
+	escIdx *escIndex // exact fixed-copper index while escapes are planned
 
 	b      *Board
 	st     *Stackup
@@ -200,6 +212,7 @@ func Route(ctx context.Context, b *Board, st *Stackup, an *Analysis, opt RouteOp
 	r.rasterise()
 	if !opt.NoFanout {
 		r.fanout(res)
+		r.bgaEscape(res)
 	}
 	if auditHook != nil {
 		auditHook("fanout", r)
@@ -494,6 +507,21 @@ func (r *router) inNeck(n *rnet, x, y int) bool {
 				gr.forCellsNear(pd.Box.Bounds(), reach, pd.Box.Dist, func(xx, yy int) {
 					n.neck[int32(yy*gr.W+xx)] = true
 				})
+				// Inside a ball field the whole escape runs between balls and
+				// dog-bone vias, where only the minimum width fits — not just
+				// the first 30 mil from the ball.
+				for _, z := range r.bgaZones {
+					if z.part != pd.Part {
+						continue
+					}
+					x0, y0 := gr.cellOf(Point{z.box.MinX, z.box.MinY})
+					x1, y1 := gr.cellOf(Point{z.box.MaxX, z.box.MaxY})
+					for yy := max(y0, 0); yy <= min(y1, gr.H-1); yy++ {
+						for xx := max(x0, 0); xx <= min(x1, gr.W-1); xx++ {
+							n.neck[int32(yy*gr.W+xx)] = true
+						}
+					}
+				}
 			}
 		}
 	}
@@ -683,6 +711,10 @@ func (r *router) segmentOK(n *rnet, l int, a, b Point, width float64, strict boo
 func (r *router) access(n *rnet, pd *Pad) []int32 {
 	gr := r.gr
 	var out []int32
+	if es := r.escOf[pd]; es != nil {
+		// Pre-escaped ball: the net starts at the array boundary.
+		return []int32{es.end}
+	}
 	if e, ok := r.escape[pd]; ok {
 		// A dog-bone escape: the via is reachable on every routable layer.
 		for l := range gr.layers {
@@ -1071,11 +1103,11 @@ func (r *router) routeNetKeep(n *rnet, keep bool) bool {
 		k := owner[end]
 		rp := rpath{nodes: path}
 		if pd, ok := treePads[path[0]]; ok {
-			rp.from, rp.fromPad = pd.Box.C, true
+			rp.from, rp.fromPad = r.anchor(pd), true
 		}
 		for _, pd := range remaining[k].pads {
 			if pd.Box.Dist(gr.center(xyOf(gr, end))) == 0 || contains(r.access(n, pd), end) {
-				rp.to, rp.toPad = pd.Box.C, true
+				rp.to, rp.toPad = r.anchor(pd), true
 				break
 			}
 		}

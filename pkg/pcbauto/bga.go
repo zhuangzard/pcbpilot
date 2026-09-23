@@ -1,6 +1,7 @@
 package pcbauto
 
 import (
+	"container/heap"
 	"math"
 	"sort"
 )
@@ -26,6 +27,11 @@ import (
 
 // bgaExperiment restricts dog-bones to one kind of ball (diagnostics only).
 var bgaExperiment string
+
+type bgaZone struct {
+	part string
+	box  Rect
+}
 
 // bgaPart describes a detected ball-grid package.
 type bgaPart struct {
@@ -115,7 +121,18 @@ func (r *router) bgaFanout(res *RouteResult) {
 		return
 	}
 	gr := r.gr
-	for _, g := range detectBGAs(r.b) {
+	bgas := detectBGAs(r.b)
+	for _, g := range bgas {
+		bb := EmptyRect()
+		for _, pd := range g.part.Pads {
+			bb = bb.AddPoint(pd.Box.C)
+		}
+		r.bgaZones = append(r.bgaZones, bgaZone{g.part.Ref, bb.Expand(g.pitch)})
+	}
+	for _, n := range r.nets {
+		n.neck = nil // rebuilt lazily with the zones
+	}
+	for _, g := range bgas {
 		ball := g.part.Pads[0].Box.W
 		rings := topEscapeRings(g.pitch, ball, r.b.Rules)
 		drill, dia, why := bgaViaClass(g, r.b.Rules)
@@ -156,36 +173,244 @@ func (r *router) bgaFanout(res *RouteResult) {
 			}
 			return jobs[i].pd.Key() < jobs[j].pd.Key()
 		})
-		placed, missed := 0, 0
-		for _, jb := range jobs {
+		// Global assignment: every ball competes for the voids around it;
+		// a minimum-cost maximum matching gives as many balls as possible a
+		// via (greedy left 146 of RK3568 U4's balls without one), then the
+		// shortest stubs on the preferred side.
+		voids := bgaVoids(g)
+		type site struct {
+			x, y int
+			c    Point
+		}
+		sites := make([]map[int]site, len(jobs))
+		edges := make([][]voidEdge, len(jobs))
+		noVoid, noLegal := 0, 0
+		for i, jb := range jobs {
 			pd, n := jb.pd, jb.n
+			sites[i] = map[int]site{}
 			li := gr.layerIndex(pd.Layer)
 			if li < 0 || !gr.routable[li] {
 				continue
 			}
-			// Plane balls in the top-escape rings point their via inward: the
-			// voids outside them are the signal escape lanes. Outward only if
-			// no inward void is left.
+			out := pd.Box.C.Sub(g.centre)
 			inward := (n.onPlane || n.poured) && g.depth[pd] < rings
-			x, y, c, ok := r.dogboneSite(n, pd, li, g, inward, dia)
-			if !ok && inward {
-				x, y, c, ok = r.dogboneSite(n, pd, li, g, false, dia)
+			stubW := math.Max(r.b.Rules.MinTrack, math.Min(n.width, r.b.Rules.TrackWidth))
+			inRange := 0
+			for vi, v := range voids {
+				d := v.Dist(pd.Box.C)
+				if d > 0.85*g.pitch {
+					continue
+				}
+				inRange++
+				cx, cy := gr.cellOf(v)
+				found := false
+				var st site
+				for _, o := range [][2]int{{0, 0}, {1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {-1, -1}, {1, -1}, {-1, 1}} {
+					x, y := cx+o[0], cy+o[1]
+					if !gr.in(x, y) {
+						continue
+					}
+					c := gr.center(x, y)
+					if pd.Box.Dist(c) == 0 || !r.bgaSiteOK(n, x, y, dia) || !r.segmentOK(n, li, pd.Box.C, c, stubW, true) {
+						continue
+					}
+					st, found = site{x, y, c}, true
+					break
+				}
+				if !found {
+					continue
+				}
+				sites[i][vi] = st
+				cost := d
+				vd := v.Sub(pd.Box.C)
+				outward := vd.X*out.X+vd.Y*out.Y >= 0
+				if outward == inward {
+					cost += 0.5 * g.pitch // wrong side: allowed, not preferred
+				}
+				edges[i] = append(edges[i], voidEdge{vi, cost})
 			}
-			if !ok {
-				missed++
+			if inRange == 0 {
+				noVoid++
+			} else if len(edges[i]) == 0 {
+				noLegal++
+			}
+		}
+		// Signals first: a signal ball without a via cannot escape, a plane
+		// ball can still gang to a neighbour. Match signals alone, then plane
+		// balls over the voids left.
+		match := make([]int, len(jobs))
+		for i := range match {
+			match[i] = -1
+		}
+		for _, planePass := range []bool{false, true} {
+			var idx []int
+			for i, jb := range jobs {
+				if (jb.n.onPlane || jb.n.poured) == planePass {
+					idx = append(idx, i)
+				}
+			}
+			taken := map[int]bool{}
+			for i, m := range match {
+				if m >= 0 {
+					taken[m] = true
+					_ = i
+				}
+			}
+			sub := make([][]voidEdge, len(idx))
+			for k, i := range idx {
+				for _, e := range edges[i] {
+					if !taken[e.v] {
+						sub[k] = append(sub[k], e)
+					}
+				}
+			}
+			for k, m := range assignVoids(len(idx), len(voids), sub) {
+				match[idx[k]] = m
+			}
+		}
+		placed, missed, shared := 0, 0, 0
+		viaAt := map[int]*rnet{} // void index → net whose via sits there
+		var unmatched []int
+		for i, jb := range jobs {
+			pd, n := jb.pd, jb.n
+			li := gr.layerIndex(pd.Layer)
+			st, ok := sites[i][match[i]]
+			if match[i] < 0 || !ok || li < 0 {
+				unmatched = append(unmatched, i)
+				continue
+			}
+			// Re-check: a neighbour committed first may now crowd this site
+			// (staggered arrays put voids closer than a pitch).
+			if !r.bgaSiteOK(n, st.x, st.y, dia) {
+				unmatched = append(unmatched, i)
 				continue
 			}
 			stubW := math.Max(r.b.Rules.MinTrack, math.Min(n.width, r.b.Rules.TrackWidth))
-			r.commitFanout(n, pd, li, x, y, c, stubW, false, true, drill, dia)
+			r.commitFanout(n, pd, li, st.x, st.y, st.c, stubW, false, true, drill, dia)
+			viaAt[match[i]] = n
 			res.Stats.FanoutVias++
 			r.bgaDone[pd] = true
 			if !(n.onPlane || n.poured) {
-				r.escape[pd] = [2]int{x, y}
+				r.escape[pd] = [2]int{st.x, st.y}
 			}
 			placed++
 		}
-		res.Notes = append(res.Notes, sprintf("BGA %s: pitch %.1f mil, %d rings escape on top, %d dog-bone vias, %d balls without a legal site",
-			g.part.Ref, g.pitch, rings, placed, missed))
+		// Via sharing: a plane ball with no void of its own ties to a
+		// neighbouring void already holding a via of its net — standard for
+		// ground and supply balls, and the only way a dense array fits (RK3568
+		// U4: ~513 balls needing a via, 465 usable voids).
+		unPlane, unSignal := 0, 0
+		for _, i := range unmatched {
+			if jobs[i].n.onPlane || jobs[i].n.poured {
+				unPlane++
+			} else {
+				unSignal++
+			}
+		}
+		shareNoVia, shareStub := 0, 0
+		for _, i := range unmatched {
+			pd, n := jobs[i].pd, jobs[i].n
+			li := gr.layerIndex(pd.Layer)
+			done := false
+			sawVia := false
+			if (n.onPlane || n.poured) && li >= 0 {
+				stubW := math.Max(r.b.Rules.MinTrack, math.Min(n.width, r.b.Rules.TrackWidth))
+				for vi, v := range voids {
+					if viaAt[vi] != n || v.Dist(pd.Box.C) > 0.85*g.pitch {
+						continue
+					}
+					var via Point
+					for _, fv := range n.fanVias {
+						if fv.C.Dist(v) < gr.g*1.5 {
+							via = fv.C
+						}
+					}
+					if via == (Point{}) {
+						continue
+					}
+					sawVia = true
+					if !r.gangOK(n, li, pd.Box.C, via, stubW) {
+						continue
+					}
+					cl := dedup(r.claimSegment(n, li, pd.Box.C, via, stubW, nil))
+					r.claimCur++
+					for _, j := range n.fixed {
+						r.claimStamp[j] = r.claimCur
+					}
+					fresh := cl[:0]
+					for _, j := range cl {
+						if r.claimStamp[j] != r.claimCur {
+							fresh = append(fresh, j)
+						}
+					}
+					r.applyClaims(fresh, +1)
+					n.fixed = dedup(append(n.fixed, fresh...))
+					n.shareTracks = append(n.shareTracks, Track{Net: n.name, Layer: pd.Layer, A: pd.Box.C, B: via, Width: stubW, Kind: "fanout"})
+					n.shareClaims = append(n.shareClaims, append([]int32(nil), fresh...))
+					r.bgaDone[pd] = true
+					shared++
+					done = true
+					break
+				}
+			}
+			if !done {
+				missed++
+				if n.onPlane || n.poured {
+					if sawVia {
+						shareStub++
+					} else {
+						shareNoVia++
+					}
+				}
+			}
+		}
+		// Ganging: a plane ball still without a via ties straight to an
+		// adjacent ball of its net that is already connected — nothing sits
+		// between two neighbouring balls. Repeat so chains propagate.
+		for progress := true; progress; {
+			progress = false
+			for _, pd := range g.part.Pads {
+				n := r.byName[pd.Net]
+				if n == nil || r.bgaDone[pd] || !(n.onPlane || n.poured) {
+					continue
+				}
+				li := gr.layerIndex(pd.Layer)
+				if li < 0 {
+					continue
+				}
+				stubW := math.Max(r.b.Rules.MinTrack, math.Min(n.width, r.b.Rules.TrackWidth))
+				for _, q := range g.part.Pads {
+					if q == pd || q.Net != pd.Net || !r.bgaDone[q] || q.Box.C.Dist(pd.Box.C) > 1.1*g.pitch {
+						continue
+					}
+					if !r.gangOK(n, li, pd.Box.C, q.Box.C, stubW) {
+						continue
+					}
+					cl := dedup(r.claimSegment(n, li, pd.Box.C, q.Box.C, stubW, nil))
+					r.claimCur++
+					for _, j := range n.fixed {
+						r.claimStamp[j] = r.claimCur
+					}
+					fresh := cl[:0]
+					for _, j := range cl {
+						if r.claimStamp[j] != r.claimCur {
+							fresh = append(fresh, j)
+						}
+					}
+					r.applyClaims(fresh, +1)
+					n.fixed = dedup(append(n.fixed, fresh...))
+					n.shareTracks = append(n.shareTracks, Track{Net: n.name, Layer: pd.Layer, A: pd.Box.C, B: q.Box.C, Width: stubW, Kind: "fanout"})
+					n.shareClaims = append(n.shareClaims, append([]int32(nil), fresh...))
+					r.bgaDone[pd] = true
+					shared++
+					missed--
+					progress = true
+					break
+				}
+			}
+		}
+		res.Notes = append(res.Notes, sprintf("BGA %s: pitch %.1f mil, %d rings escape on top, %d voids, %d dog-bone vias, %d balls sharing a neighbour's via, %d balls without a legal site (%d with no void in reach, %d with every nearby void blocked; unmatched %d plane / %d signal; share failed: %d no same-net via near, %d stub blocked)",
+			g.part.Ref, g.pitch, rings, len(voids), placed, shared, missed, noVoid, noLegal, unPlane, unSignal, shareNoVia, shareStub))
 	}
 }
 
@@ -332,4 +557,253 @@ func bgaViaClass(g *bgaPart, rules Rules) (drill, dia float64, why string) {
 		return pick(maxDia, sprintf("does not fit the %.1f mil voids (no channel between vias even at the process minimum)", void))
 	}
 	return 0, 0, sprintf("voids %.1f mil from the balls fit a via of at most %.1f mil, below the %.1f mil process minimum", void, maxDia, minDia)
+}
+
+// ---- global void assignment -----------------------------------------------
+
+// bgaVoids lists the via sites of a ball array: the circumcentres of empty
+// triangles of neighbouring balls (quad centres on a square array, triangle
+// centres on a staggered one), plus virtual voids just outside the outer ring.
+func bgaVoids(g *bgaPart) []Point {
+	pads := g.part.Pads
+	nb := make([][]int, len(pads))
+	for i := range pads {
+		for j := range pads {
+			if i != j && pads[i].Box.C.Dist(pads[j].Box.C) <= 1.6*g.pitch {
+				nb[i] = append(nb[i], j)
+			}
+		}
+	}
+	seen := map[[2]int]bool{}
+	var out []Point
+	add := func(p Point) {
+		k := [2]int{int(math.Round(p.X * 2)), int(math.Round(p.Y * 2))}
+		if !seen[k] {
+			seen[k] = true
+			out = append(out, p)
+		}
+	}
+	isNb := func(a, b int) bool {
+		for _, x := range nb[a] {
+			if x == b {
+				return true
+			}
+		}
+		return false
+	}
+	for a := range pads {
+		for _, b := range nb[a] {
+			if b <= a {
+				continue
+			}
+			for _, c := range nb[a] {
+				if c <= b || !isNb(b, c) {
+					continue
+				}
+				cc, rad, ok := circumcentre(pads[a].Box.C, pads[b].Box.C, pads[c].Box.C)
+				if !ok || rad > g.pitch {
+					continue
+				}
+				empty := true
+				for _, d := range append(append(append([]int(nil), nb[a]...), nb[b]...), nb[c]...) {
+					if d != a && d != b && d != c && pads[d].Box.C.Dist(cc) < rad-0.5 {
+						empty = false
+						break
+					}
+				}
+				if empty {
+					add(cc)
+				}
+			}
+		}
+	}
+	bb := EmptyRect()
+	for _, pd := range pads {
+		bb = bb.AddPoint(pd.Box.C)
+	}
+	h := g.pitch / 2
+	for _, pd := range pads {
+		if g.depth[pd] != 0 {
+			continue
+		}
+		for _, d := range []Point{{h, h}, {h, -h}, {-h, h}, {-h, -h}} {
+			p := pd.Box.C.Add(d)
+			if p.X < bb.MinX || p.X > bb.MaxX || p.Y < bb.MinY || p.Y > bb.MaxY {
+				add(p)
+			}
+		}
+	}
+	return out
+}
+
+func circumcentre(a, b, c Point) (Point, float64, bool) {
+	d := 2 * (a.X*(b.Y-c.Y) + b.X*(c.Y-a.Y) + c.X*(a.Y-b.Y))
+	if math.Abs(d) < 1e-9 {
+		return Point{}, 0, false
+	}
+	a2, b2, c2 := a.X*a.X+a.Y*a.Y, b.X*b.X+b.Y*b.Y, c.X*c.X+c.Y*c.Y
+	p := Point{(a2*(b.Y-c.Y) + b2*(c.Y-a.Y) + c2*(a.Y-b.Y)) / d, (a2*(c.X-b.X) + b2*(a.X-c.X) + c2*(b.X-a.X)) / d}
+	return p, p.Dist(a), true
+}
+
+// assignVoids matches balls to voids with a minimum-cost maximum matching:
+// as many balls as possible get a via, then the shortest stubs on the
+// preferred side. cost[i] lists (void, cost) edges of ball i.
+type voidEdge struct {
+	v    int
+	cost float64
+}
+
+func assignVoids(nBalls, nVoids int, edges [][]voidEdge) []int {
+	// Successive shortest paths with potentials on source → balls → voids → sink.
+	N := nBalls + nVoids + 2
+	src, snk := N-2, N-1
+	type arc struct {
+		to, rev int
+		cap     int
+		cost    float64
+	}
+	g := make([][]arc, N)
+	addArc := func(u, v int, cost float64) {
+		g[u] = append(g[u], arc{v, len(g[v]), 1, cost})
+		g[v] = append(g[v], arc{u, len(g[u]) - 1, 0, -cost})
+	}
+	for i := 0; i < nBalls; i++ {
+		addArc(src, i, 0)
+		for _, e := range edges[i] {
+			addArc(i, nBalls+e.v, e.cost)
+		}
+	}
+	for v := 0; v < nVoids; v++ {
+		addArc(nBalls+v, snk, 0)
+	}
+	pot := make([]float64, N)
+	dist := make([]float64, N)
+	prevN := make([]int, N)
+	prevA := make([]int, N)
+	for {
+		for i := range dist {
+			dist[i] = math.Inf(1)
+		}
+		dist[src] = 0
+		h := &jointHeap{}
+		heap.Push(h, jointItem{node: src})
+		for h.Len() > 0 {
+			it := heap.Pop(h).(jointItem)
+			u := it.node
+			if it.cost > dist[u]+1e-9 {
+				continue
+			}
+			for k, a := range g[u] {
+				if a.cap <= 0 {
+					continue
+				}
+				nd := dist[u] + a.cost + pot[u] - pot[a.to]
+				if nd < dist[a.to]-1e-9 {
+					dist[a.to], prevN[a.to], prevA[a.to] = nd, u, k
+					heap.Push(h, jointItem{node: a.to, cost: nd})
+				}
+			}
+		}
+		if math.IsInf(dist[snk], 1) {
+			break
+		}
+		for i := range pot {
+			if !math.IsInf(dist[i], 1) {
+				pot[i] += dist[i]
+			}
+		}
+		for v := snk; v != src; v = prevN[v] {
+			a := &g[prevN[v]][prevA[v]]
+			a.cap--
+			g[v][a.rev].cap++
+		}
+	}
+	match := make([]int, nBalls)
+	for i := range match {
+		match[i] = -1
+		for _, a := range g[i] {
+			if a.to >= nBalls && a.to < nBalls+nVoids && a.cap == 0 {
+				match[i] = a.to - nBalls
+			}
+		}
+	}
+	return match
+}
+
+// bgaSiteOK is an exact legality test for a BGA via of copper diameter dia at
+// cell (x, y): no hard cell (edge, keep-out, hole) under the via on any layer,
+// exact clearance to every other net's pad, and no other net's copper
+// already claimed within the via. The grid test rounds claims to whole cells
+// (±1.4 mil at a 2.8 mil pitch) and refused sites with a real 0.3 mil margin
+// in a 0.65 mm ball field; the exact DRC gate still checks the result.
+func (r *router) bgaSiteOK(n *rnet, x, y int, dia float64) bool {
+	gr := r.gr
+	c := gr.center(x, y)
+	for l := range gr.layers {
+		for _, o := range gr.disk(dia / 2) {
+			xx, yy := x+o[0], y+o[1]
+			if !gr.in(xx, yy) {
+				return false
+			}
+			j := gr.idx(l, xx, yy)
+			if gr.flags[j]&flagHard != 0 {
+				return false
+			}
+			if gr.pad[j] == -1 && gr.use[j] > 0 && !r.ownsCell(n, int32(j)) {
+				return false
+			}
+		}
+		if !r.padsClear(n, gr.layers[l], c, dia/2) {
+			return false
+		}
+	}
+	return true
+}
+
+// ownsCell reports whether n's fixed or routed copper claims cell j.
+func (r *router) ownsCell(n *rnet, j int32) bool {
+	for _, i := range n.fixed {
+		if i == j {
+			return true
+		}
+	}
+	return false
+}
+
+// gangOK is an exact test for a short same-net tie inside a ball field:
+// every sample of the segment keeps the clearance to other nets' pads
+// exactly, and crosses no copper claimed by another net. Own copper (the
+// neighbour ball, its dog-bone) is not an obstacle.
+func (r *router) gangOK(n *rnet, l int, a, b Point, width float64) bool {
+	gr := r.gr
+	steps := int(math.Ceil(a.Dist(b)/(gr.g/2))) + 1
+	own := map[int32]bool{}
+	for _, i := range n.fixed {
+		own[i] = true
+	}
+	for s := 0; s <= steps; s++ {
+		p := a.Add(b.Sub(a).Scale(float64(s) / float64(steps)))
+		if !r.padsClear(n, gr.layers[l], p, width/2) {
+			return false
+		}
+		x, y := gr.cellOf(p)
+		if !gr.in(x, y) {
+			return false
+		}
+		for _, o := range gr.disk(width / 2) {
+			xx, yy := x+o[0], y+o[1]
+			if !gr.in(xx, yy) {
+				return false
+			}
+			j := gr.idx(l, xx, yy)
+			if gr.flags[j]&flagHard != 0 {
+				return false
+			}
+			if gr.pad[j] == -1 && gr.use[j] > 0 && !own[int32(j)] {
+				return false
+			}
+		}
+	}
+	return true
 }

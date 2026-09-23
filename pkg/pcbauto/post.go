@@ -25,6 +25,8 @@ func (r *router) emit(res *RouteResult) {
 		var vs []Via
 		for _, n := range r.nets {
 			ts = append(ts, n.fanTracks...)
+			ts = append(ts, n.shareTracks...)
+			ts = append(ts, escTracks(n)...)
 			vs = append(vs, n.fanVias...)
 			ts = append(ts, outs[n].tracks...)
 			vs = append(vs, outs[n].vias...)
@@ -83,7 +85,27 @@ func (r *router) emit(res *RouteResult) {
 			} else {
 				r.inflate(n, r.gr.g/2)
 			}
-			r.routeNet(n)
+			if n.onPlane || n.poured {
+				// A plane net is not rerouted pad by pad (K230 GND: 878 pads,
+				// every one "timeout"): only its islands are bridged again.
+				saved := n.groups
+				if gs := r.simulate(n); len(gs) > 1 {
+					n.groups = gs
+					r.routeNet(n)
+				}
+				n.groups = saved
+				outs[n] = r.emitNet(n)
+				continue
+			}
+			if !r.routeNet(n) && len(n.escs) > 0 {
+				// Its own fixed escapes may be what walls it in: release
+				// them and route from the vias and pads instead.
+				for len(n.escs) > 0 {
+					r.dropEscape(n, 0)
+					res.Stats.EscapesReleased++
+				}
+				r.routeNet(n)
+			}
 			outs[n] = r.emitNet(n)
 		}
 		r.strict = false
@@ -131,6 +153,8 @@ func (r *router) emit(res *RouteResult) {
 	for _, n := range r.nets {
 		o := outs[n]
 		res.Tracks = append(res.Tracks, n.fanTracks...)
+		res.Tracks = append(res.Tracks, n.shareTracks...)
+		res.Tracks = append(res.Tracks, escTracks(n)...)
 		res.Vias = append(res.Vias, n.fanVias...)
 		res.Tracks = append(res.Tracks, o.tracks...)
 		res.Vias = append(res.Vias, o.vias...)
@@ -392,6 +416,31 @@ func (r *router) dropFanoutAt(v Violation) bool {
 		pinned bool
 	}
 	var cs []cand
+	// A shared stub in violation goes first: dropping it costs one ball's
+	// tie, not a via other balls hang on.
+	for _, name := range []string{v.NetA, v.NetB} {
+		n := r.byName[name]
+		if n == nil {
+			continue
+		}
+		for k, es := range n.escs {
+			for _, t := range es.tracks {
+				if d, _ := segDist(v.At, t.A, t.B); d <= t.Width/2+v.Required+2 {
+					pd := es.pd
+					r.dropEscape(n, k)
+					n.failed = append(n.failed, Unrouted{Net: n.name, Pads: []string{pd.Key()}, Reason: "escape-drc"})
+					return true
+				}
+			}
+		}
+		for k, t := range n.shareTracks {
+			if d, _ := segDist(v.At, t.A, t.B); d <= t.Width/2+v.Required+2 {
+				r.dropShare(n, k)
+				n.failed = append(n.failed, Unrouted{Net: n.name, Reason: "fanout-drc"})
+				return true
+			}
+		}
+	}
 	for _, name := range []string{v.NetA, v.NetB} {
 		n := r.byName[name]
 		if n == nil {
@@ -451,4 +500,23 @@ func (r *router) dropFanoutAt(v Violation) bool {
 	}
 	c.n.failed = append(c.n.failed, Unrouted{Net: c.n.name, Pads: pads, Reason: "fanout-drc"})
 	return true
+}
+
+// dropShare removes shared stub k of n and its claims.
+func (r *router) dropShare(n *rnet, k int) {
+	cl := n.shareClaims[k]
+	r.applyClaims(cl, -1)
+	drop := map[int32]bool{}
+	for _, i := range cl {
+		drop[i] = true
+	}
+	var fixed []int32
+	for _, i := range n.fixed {
+		if !drop[i] {
+			fixed = append(fixed, i)
+		}
+	}
+	n.fixed = fixed
+	n.shareTracks = append(n.shareTracks[:k], n.shareTracks[k+1:]...)
+	n.shareClaims = append(n.shareClaims[:k], n.shareClaims[k+1:]...)
 }
