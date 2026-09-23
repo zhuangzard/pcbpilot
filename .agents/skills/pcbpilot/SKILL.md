@@ -60,7 +60,13 @@ metadata:
 `payload.friendlyName`，可用 `payload.open` 请求打开。此动作只创建工程容器，必须提供
 `window`，不要传 `project` 或 `doc`；拟建名称不是已有工程，首页标签不是原理图页面。
 创建后检查 `created` / `opened` / `partial` 并读回工程身份，再处理文档创建。部分成功时
-先查状态，不盲目重复创建。返回 `UNKNOWN_ACTION` 时检查连接器是否实现此动作；健康检查的
+先用 `pcbpilot project find --window <id> --name <完整友好名称> --team <teamUuid>`
+按友好名称和团队精确查找，不盲目重复创建。它只调用官方项目 UUID 枚举与逐项详情读取；
+`found` 可用于核对已有工程，`unknown`（例如 UUID 清单为空、详情缺失或枚举报错）不能当作
+不存在；只有 `enumeration.complete:true` 且 `presence:"absent"` 才能说明指定团队**根文件夹**内
+没有匹配（SDK 不保证递归子文件夹）。本例未传 `folderUuid`，故先查目标团队根文件夹。
+结果仍需核对 UUID 和团队，不因同名自动打开或重试创建。无 `--team` 的查找仅
+用于发现匹配，不证明全局不存在。返回 `UNKNOWN_ACTION` 时检查连接器是否实现此动作；健康检查的
 版本兼容不能证明 handler 存在。其他 MCP 写操作仍要求真实 `project` 和 `doc`；不得推广此例外。
 
 工程级跨项目打开及原生 `.epro2` 导出见 [工程操作](references/project-import.md#工程级打开与原生导出)；页面打开不替代工程切换。

@@ -19,6 +19,29 @@ func newProjectCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 
 	proj.AddCommand(
 		func() *cobra.Command {
+			var friendlyName, teamUUID string
+			c := &cobra.Command{
+				Use:     "find",
+				Short:   "Find projects by exact friendly name without opening them",
+				Long:    "Read official project UUIDs and project info. With --team, the API inventories that team's root folder only. An empty or incomplete enumeration reports unknown, not absent; absence is only established within a complete team-root inventory.",
+				Args:    cobra.NoArgs,
+				Example: `  pcbpilot project find --window <window-id> --name "AT32F415 demo" --team <team-uuid>`,
+				RunE: func(cmd *cobra.Command, args []string) error {
+					if friendlyName == "" {
+						return fmt.Errorf("--name is required")
+					}
+					payload := map[string]any{"friendlyName": friendlyName}
+					if teamUUID != "" {
+						payload["teamUuid"] = teamUUID
+					}
+					return dispatch(cfg, "project.find", window, payload, stdout, stderr)
+				},
+			}
+			c.Flags().StringVar(&friendlyName, "name", "", "exact project friendly name (required)")
+			c.Flags().StringVar(&teamUUID, "team", "", "exact owning team UUID; scopes inventory to its root folder")
+			return c
+		}(),
+		func() *cobra.Command {
 			var friendlyName, projectName, teamUUID, folderUUID, description string
 			var open bool
 			c := &cobra.Command{

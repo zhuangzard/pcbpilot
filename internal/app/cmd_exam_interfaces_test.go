@@ -49,6 +49,28 @@ func TestProjectCreateWiresExplicitFields(t *testing.T) {
 	}
 }
 
+func TestProjectFindWiresExactIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want map[string]any
+	}{
+		{"team-root", []string{"find", "--name", "Exact Name", "--team", "team-1"}, map[string]any{"friendlyName": "Exact Name", "teamUuid": "team-1"}},
+		{"unscoped", []string{"find", "--name", "Exact Name"}, map[string]any{"friendlyName": "Exact Name"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			captured := executeExamCommand(t, tc.args, func(cfg *appConfig, stdout, stderr *bytes.Buffer) commandExecutor {
+				return newProjectCmd(cfg, stdout, stderr)
+			})
+			captured.mu.Lock()
+			defer captured.mu.Unlock()
+			if captured.action != "project.find" || !reflect.DeepEqual(captured.payload, tc.want) {
+				t.Fatalf("action=%q payload=%#v, want %#v", captured.action, captured.payload, tc.want)
+			}
+		})
+	}
+}
+
 func TestPcbNetClassCreateWiresMembers(t *testing.T) {
 	captured := executeExamCommand(t,
 		[]string{"net-class", "create", "--name", "PWR_Class", "--net", "+5V", "--net", "+3V3,GND"},

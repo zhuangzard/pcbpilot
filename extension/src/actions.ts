@@ -415,6 +415,69 @@ const projectCurrent: Handler = async () => {
 	};
 };
 
+/** Reconcile a possibly partial create using only the official project read APIs. */
+const projectFind: Handler = async (payload) => {
+	const friendlyName = requireString(payload, 'friendlyName');
+	const teamUuid = optionalString(payload, 'teamUuid') || undefined;
+	const scope = teamUuid ? 'team-root' : 'unscoped';
+	const matches: Array<{ uuid: string; friendlyName: string; teamUuid: string; folderUuid: string | null }> = [];
+	const unreadableUuids: string[] = [];
+	let uuids: string[];
+	try {
+		const listed = await eda.dmt_Project.getAllProjectsUuid(teamUuid);
+		if (!Array.isArray(listed) || listed.some(uuid => typeof uuid !== 'string' || !uuid)) {
+			return { result: {
+				friendlyName, teamUuid: teamUuid ?? null, presence: 'unknown', matches,
+				enumeration: { scope, complete: false, reason: 'invalid_uuid_list', uuidCount: 0, readableCount: 0, unreadableUuids },
+			} };
+		}
+		uuids = listed;
+	}
+	catch (err) {
+		return { result: {
+			friendlyName, teamUuid: teamUuid ?? null, presence: 'unknown', matches,
+			enumeration: { scope, complete: false, reason: 'uuid_list_failed', uuidCount: 0, readableCount: 0, unreadableUuids },
+		}, warnings: [`Project UUID enumeration failed: ${describeThrown(err)}`] };
+	}
+
+	const uniqueUuids = [...new Set(uuids)];
+	let readableCount = 0;
+	let teamScopeMismatch = false;
+	for (const uuid of uniqueUuids) {
+		try {
+			const info = await eda.dmt_Project.getProjectInfo(uuid);
+			if (!info || info.uuid !== uuid || typeof info.friendlyName !== 'string' || typeof info.teamUuid !== 'string') {
+				unreadableUuids.push(uuid);
+				continue;
+			}
+			readableCount++;
+			if (teamUuid && info.teamUuid !== teamUuid) {
+				teamScopeMismatch = true;
+				continue;
+			}
+			if (info.friendlyName === friendlyName) {
+				matches.push({ uuid, friendlyName: info.friendlyName, teamUuid: info.teamUuid, folderUuid: info.folderUuid ?? null });
+			}
+		}
+		catch { unreadableUuids.push(uuid); }
+	}
+	// The SDK defaults a team lookup without folderUuid to the team root.
+	// An empty list has historically been returned for populated local workspaces.
+	const reason = uuids.length === 0 ? 'empty_uuid_list'
+		: uuids.length !== uniqueUuids.length ? 'duplicate_uuids'
+		: unreadableUuids.length > 0 ? 'project_info_incomplete'
+		: teamScopeMismatch ? 'team_scope_mismatch'
+		: !teamUuid ? 'team_not_specified'
+		: null;
+	const complete = reason === null;
+	return { result: {
+		friendlyName, teamUuid: teamUuid ?? null,
+		presence: matches.length > 0 ? 'found' : complete ? 'absent' : 'unknown',
+		matches,
+		enumeration: { scope, complete, reason, uuidCount: uuids.length, readableCount, unreadableUuids },
+	} };
+};
+
 /** Create a project through the official project API, with optional immediate open. */
 const projectCreate: Handler = async (payload) => {
 	const friendlyName = requireString(payload, 'friendlyName');
@@ -13979,6 +14042,7 @@ const debugExecJs: Handler = async (payload) => {
 
 const HANDLERS: Record<string, Handler> = {
 	'project.current': projectCurrent,
+	'project.find': projectFind,
 	'project.create': projectCreate,
 	'project.open': projectOpen,
 	'project.export': projectExport,

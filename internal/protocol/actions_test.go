@@ -39,6 +39,22 @@ func TestPhase1ActionsHaveStableNames(t *testing.T) {
 	}
 }
 
+func TestProjectFindIsReadOnlyAndDocumentsScopedAbsence(t *testing.T) {
+	for _, action := range AllActions() {
+		if action.Name != "project.find" {
+			continue
+		}
+		if action.Mutates || !action.NeedsWindow || action.Domain != DomainProject {
+			t.Fatalf("project.find must be a window-scoped read: %+v", action)
+		}
+		if !strings.Contains(action.Description, "root folder") || !strings.Contains(action.Description, "Empty") {
+			t.Fatalf("project.find scope/completeness contract missing: %s", action.Description)
+		}
+		return
+	}
+	t.Fatal("project.find action missing")
+}
+
 func TestConnectPinActionDocumentsYUpContract(t *testing.T) {
 	var description string
 	for _, action := range AllActions() {

@@ -84,6 +84,76 @@ test('project.create reports openProject=false as a created partial outcome', as
 	});
 });
 
+test('project.find matches exact friendlyName and team in the team root inventory', async () => {
+	const calls: unknown[][] = [];
+	await withEda({
+		dmt_Project: {
+			getAllProjectsUuid: async (...args: unknown[]) => { calls.push(args); return ['p1', 'p2', 'p3']; },
+			getProjectInfo: async (uuid: string) => ({
+				uuid, friendlyName: uuid === 'p1' ? 'Exact' : uuid === 'p2' ? 'exact' : 'Exact',
+				teamUuid: uuid === 'p3' ? 'other-team' : 'team-1', folderUuid: 'root',
+			}),
+		},
+	}, async () => {
+		const res: any = await runAction('project.find', { friendlyName: 'Exact', teamUuid: 'team-1' });
+		assert.deepEqual(calls, [['team-1']]);
+		assert.equal(res.result.presence, 'found');
+		assert.deepEqual(res.result.matches, [{ uuid: 'p1', friendlyName: 'Exact', teamUuid: 'team-1', folderUuid: 'root' }]);
+		assert.deepEqual(res.result.enumeration, {
+			scope: 'team-root', complete: false, reason: 'team_scope_mismatch',
+			uuidCount: 3, readableCount: 3, unreadableUuids: [],
+		});
+	});
+});
+
+test('project.find establishes absence only after every nonempty team-root entry is readable', async () => {
+	await withEda({
+		dmt_Project: {
+			getAllProjectsUuid: async () => ['p1', 'p2'],
+			getProjectInfo: async (uuid: string) => ({ uuid, friendlyName: 'Other', teamUuid: 'team-1' }),
+		},
+	}, async () => {
+		const res: any = await runAction('project.find', { friendlyName: 'Exact', teamUuid: 'team-1' });
+		assert.equal(res.result.presence, 'absent');
+		assert.equal(res.result.enumeration.complete, true);
+		assert.equal(res.result.enumeration.scope, 'team-root');
+	});
+});
+
+test('project.find treats empty, unreadable, and unscoped inventories as unknown', async () => {
+	for (const tc of [
+		{ uuids: [], info: async () => undefined, teamUuid: 'team-1', reason: 'empty_uuid_list' },
+		{ uuids: ['p1'], info: async () => undefined, teamUuid: 'team-1', reason: 'project_info_incomplete' },
+		{ uuids: ['p1'], info: async (uuid: string) => ({ uuid, friendlyName: 'Other', teamUuid: 'team-1' }), teamUuid: undefined, reason: 'team_not_specified' },
+	]) {
+		await withEda({
+			dmt_Project: { getAllProjectsUuid: async () => tc.uuids, getProjectInfo: tc.info },
+		}, async () => {
+			const res: any = await runAction('project.find', { friendlyName: 'Exact', teamUuid: tc.teamUuid });
+			assert.equal(res.result.presence, 'unknown');
+			assert.equal(res.result.enumeration.complete, false);
+			assert.equal(res.result.enumeration.reason, tc.reason);
+		});
+	}
+});
+
+test('project.find reports enumeration failure as unknown without retrying or creating', async () => {
+	let count = 0;
+	await withEda({
+		dmt_Project: {
+			getAllProjectsUuid: async () => { count++; throw new Error('unavailable'); },
+			getProjectInfo: async () => { throw new Error('must not read'); },
+			createProject: async () => { throw new Error('must not create'); },
+		},
+	}, async () => {
+		const res: any = await runAction('project.find', { friendlyName: 'Exact', teamUuid: 'team-1' });
+		assert.equal(count, 1);
+		assert.equal(res.result.presence, 'unknown');
+		assert.equal(res.result.enumeration.reason, 'uuid_list_failed');
+		assert.match(res.warnings[0], /unavailable/);
+	});
+});
+
 test('pcb.net_class.create validates live nets, creates once, and verifies membership', async () => {
 	let classes: any[] = [];
 	let createCalls = 0;

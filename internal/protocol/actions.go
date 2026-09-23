@@ -54,6 +54,15 @@ func AllActions() []ActionSpec {
 			Outputs:     []string{"project uuid", "project name", "team/workspace context"},
 		},
 		{
+			Name:        "project.find",
+			Domain:      DomainProject,
+			Phase:       1,
+			NeedsWindow: true,
+			Description: "Read-only exact friendlyName lookup using dmt_Project.getAllProjectsUuid and getProjectInfo. With teamUuid the inventory is the team's root folder, not recursive. Empty, failed, or partially unreadable enumeration is unknown; absence only applies to a complete team-root inventory.",
+			Inputs:      []string{"friendlyName (exact, required)", "teamUuid optional (exact match and team-root scope)"},
+			Outputs:     []string{"presence (found|absent|unknown)", "matches with UUID/friendlyName/teamUuid", "enumeration.scope/complete/reason", "UUID/readability counts"},
+		},
+		{
 			Name:        "project.create",
 			Domain:      DomainProject,
 			Phase:       1,
