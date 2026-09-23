@@ -91,9 +91,17 @@ func Joint(b *Board, an *Analysis, c *Circuit, st *Stackup, rr *RouteResult, drc
 		js.PlanePads += len(cg.pads[net])
 	}
 	for _, u := range rr.Unrouted {
-		if cg.plane[u.Net] || an.Plan(u.Net, b.Rules).Role == RoleGround {
-			js.PlaneOpen += len(u.Pads)
+		if !cg.plane[u.Net] && an.Plan(u.Net, b.Rules).Role != RoleGround {
+			continue
 		}
+		if u.Reason == "drc-unrepairable" {
+			// The final DRC gate dropped the net's patch tracks and listed every
+			// pad; its fan-out vias still tie the pads to the plane. Count it
+			// as one open, not the whole net.
+			js.PlaneOpen++
+			continue
+		}
+		js.PlaneOpen += len(u.Pads) // the specific pad group that failed
 	}
 	planeOK := 1.0
 	if js.PlanePads > 0 {
