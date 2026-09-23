@@ -9,7 +9,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -31,6 +30,8 @@ func newDaemonCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 	}
 	d.AddCommand(
 		newDaemonStartCmd(cfg, stdout, stderr),
+		newDaemonStopCmd(cfg, stdout),
+		newDaemonRestartCmd(cfg, stdout, stderr),
 		newDaemonHealthCmd(cfg, stdout, stderr),
 	)
 	return d
@@ -217,22 +218,25 @@ func ensurePortAvailable(host string, port int, log io.Writer) error {
 	if portFree(host, port) {
 		return nil
 	}
+	if err := requireLocalDaemonHost(host); err != nil {
+		return err
+	}
 	pid := listenerPID(port)
 	if daemonOnPort(host, port) {
-		fmt.Fprintf(log, "%s daemon: port %d already held by an pcbpilot daemon (pid %d) — replacing it\n", daemon.Service, port, pid)
-		termPID(pid)
-		if waitPortFree(host, port, 3*time.Second) {
-			return nil
-		}
-		return fmt.Errorf("port %d still busy after replacing daemon pid %d", port, pid)
+		return stopLocalDaemon(host, port, log)
 	}
 	cmdName := pidCommand(pid)
+	if pid <= 0 || pid == os.Getpid() {
+		return fmt.Errorf("port %d owner PID is unknown or self (%d, %s); health did not identify a daemon; no process was terminated", port, pid, cmdName)
+	}
 	if isInteractive() {
 		fmt.Fprintf(log, "⚠ port %d is held by pid %d (%s) — NOT an pcbpilot daemon.\n  Kill it and take over the port? [y/N]: ", port, pid, cmdName)
 		if !readYes() {
 			return fmt.Errorf("port %d busy (pid %d %s) — declined; free it (kill %d) or run with --ports", port, pid, cmdName, pid)
 		}
-		termPID(pid)
+		if err := termPID(pid); err != nil {
+			return fmt.Errorf("terminate port %d owner pid %d (%s): %w", port, pid, cmdName, err)
+		}
 		if waitPortFree(host, port, 3*time.Second) {
 			return nil
 		}
@@ -266,52 +270,6 @@ func daemonOnPort(host string, port int) bool {
 		return false
 	}
 	return body.Service == daemon.Service
-}
-
-// listenerPID returns the pid LISTENing on the TCP port (0 if unknown). lsof is
-// present on macOS/Linux; a missing lsof just yields 0 (message still useful).
-func listenerPID(port int) int {
-	out, err := exec.Command("lsof", "-nP", fmt.Sprintf("-iTCP:%d", port), "-sTCP:LISTEN", "-t").Output()
-	if err != nil {
-		return 0
-	}
-	for _, f := range strings.Fields(string(out)) {
-		if pid, e := strconv.Atoi(f); e == nil {
-			return pid
-		}
-	}
-	return 0
-}
-
-// pidCommand returns a short command name for a pid (best-effort).
-func pidCommand(pid int) string {
-	if pid <= 0 {
-		return "unknown"
-	}
-	out, err := exec.Command("ps", "-o", "comm=", "-p", strconv.Itoa(pid)).Output()
-	if err != nil || len(strings.TrimSpace(string(out))) == 0 {
-		return "unknown"
-	}
-	return strings.TrimSpace(string(out))
-}
-
-// termPID sends SIGTERM then (after a grace period) SIGKILL.
-func termPID(pid int) {
-	if pid <= 0 {
-		return
-	}
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return
-	}
-	_ = proc.Signal(syscall.SIGTERM)
-	for range 20 {
-		time.Sleep(100 * time.Millisecond)
-		if proc.Signal(syscall.Signal(0)) != nil {
-			return // gone
-		}
-	}
-	_ = proc.Signal(syscall.SIGKILL)
 }
 
 // waitPortFree polls until the port is bindable or the timeout elapses.
@@ -355,7 +313,7 @@ func writeDaemonPID(log io.Writer) func() {
 		return func() {}
 	}
 	if err := os.WriteFile(pidFile, fmt.Appendf(nil, "%d\n", os.Getpid()), 0644); err != nil {
-		fmt.Fprintf(log, "pcbpilot: write pid file: %v\n", err)
+		fmt.Fprintf(log, "pcbpilot: write pid file %s: %v; check ownership/write permission of this file and its parent directory. Lifecycle commands use health/port identity instead.\n", pidFile, err)
 		return func() {}
 	}
 	return func() { _ = os.Remove(pidFile) }

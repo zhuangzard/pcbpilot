@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -157,6 +158,7 @@ func New(opts Options) *Server {
 }
 
 type health struct {
+	PID     int      `json:"pid"`
 	Service string   `json:"service"`
 	Version string   `json:"version"`
 	Status  string   `json:"status"`
@@ -186,6 +188,7 @@ func (s *Server) routes(port int) *http.ServeMux {
 		enc := json.NewEncoder(w)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(health{
+			PID:         os.Getpid(),
 			Service:     Service,
 			Version:     s.opts.Version,
 			Status:      "ok",

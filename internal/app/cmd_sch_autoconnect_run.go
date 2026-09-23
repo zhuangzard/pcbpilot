@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/zhuangzard/pcbpilot/internal/protocol"
 )
 
 // ── autoconnect orchestration (I/O side; the scorer in cmd_sch_autoconnect.go is pure) ──
@@ -382,6 +383,32 @@ func runAutoconnect(cfg *appConfig, window string, conns []acConnSpec, rules aut
 // 让调用方(如 group-move 的失败恢复段)拿到结构化的成败,而不是解析错误文案。
 func runAutoconnectOpts(cfg *appConfig, window string, conns []acConnSpec, rules autoconnectRules, opts acRunOpts, stdout, stderr io.Writer) (acReport, error) {
 	allPages, dryRun, replace, asJSON := opts.AllPages, opts.DryRun, opts.Replace, opts.JSON
+	// Validate the entire batch before creating any stubs, even in --dry-run.
+	// Pin the same window for the capability check and all following actions.
+	for _, c := range conns {
+		kind, _ := resolveNetflagKind(c.Kind)
+		if kind != "net_label" {
+			continue
+		}
+		windows, err := listWindows(cfg)
+		if err != nil {
+			return acReport{}, err
+		}
+		window, err = selectWindow(windows, cfg.project, window)
+		if err != nil {
+			return acReport{}, err
+		}
+		hostVersion := ""
+		for _, w := range windows {
+			if w.WindowID == window {
+				hostVersion = w.EasyEDAVersion
+			}
+		}
+		if err := protocol.NativeNetLabelSupport(hostVersion); err != nil {
+			return acReport{}, fmt.Errorf("HOST_API_UNSUPPORTED: %w", err)
+		}
+		break
+	}
 	// ADR-0004 Decision 4: dry-run 必须纯计算 —— 机械保证,Mutates 派发直接被拒。
 	if dryRun {
 		defer setDispatchDryRun(true)()

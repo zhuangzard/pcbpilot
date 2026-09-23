@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 )
@@ -29,6 +30,9 @@ func TestHealthHandler(t *testing.T) {
 	}
 	if body.Service != Service {
 		t.Fatalf("expected service %q, got %q", Service, body.Service)
+	}
+	if body.PID != os.Getpid() {
+		t.Fatalf("health must expose live process identity, got %d", body.PID)
 	}
 	if body.Port != 61832 {
 		t.Fatalf("expected reported port 61832, got %d", body.Port)

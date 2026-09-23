@@ -17,7 +17,7 @@ pcbpilot <domain> <action> [flags]
 | `pcbpilot pcb config` | 当前 PCB 配置：get / clearance / track / via / bind；局部参数修改、单位换算、dry-run 和真实回读 |
 | `pcbpilot bom` | BOM 导出与补全 |
 | `pcbpilot lib` | 器件库搜索、符号/封装/Device 资产创建与选型 |
-| `pcbpilot daemon` | 守护进程管理（start / health） |
+| `pcbpilot daemon` | 守护进程管理（start / stop / restart / health；restart 与 start 同为前台阻塞） |
 | `pcbpilot audit` | 操作日志查看 |
 | `pcbpilot update` | 自更新（别名 `upgrade`）：CLI 二进制 + skill 目录 → latest；连接器只报不改 |
 | `pcbpilot skill` | skill 目录单独管理（status / sync；`update` 已含其能力） |

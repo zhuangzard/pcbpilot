@@ -241,6 +241,14 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	}
 	req.CreatedAt = time.Now().UTC()
 	req.WindowID = target.id()
+	if protocol.UsesNativeNetLabel(req.Action, req.Payload) {
+		if err := protocol.NativeNetLabelSupport(target.snapshot().EasyEDAVersion); err != nil {
+			resp := errorResponse(req.ID, "HOST_API_UNSUPPORTED", "native net_label is unavailable on this host", err.Error())
+			s.audit.Append(fromResponse(time.Now().UTC(), &req, &resp))
+			writeJSON(w, http.StatusUnprocessableEntity, resp)
+			return
+		}
+	}
 	if schematicGeometrySerializes(&req) {
 		release, acquired := s.acquireExclusive("schematic-geometry-window", req.WindowID)
 		if !acquired {

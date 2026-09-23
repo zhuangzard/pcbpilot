@@ -226,6 +226,14 @@ UUID 变成目标值、但对象仍不可读时，仍视为加载未完成。当
 
 ## 单连接恢复
 
+daemon 生命周期命令：`pcbpilot daemon stop` 停止本机指定端口的已识别 daemon；
+`pcbpilot daemon restart --auto-update-skill=false` 停止后以前台方式启动当前 CLI 版本，
+支持与 `start` 相同的启动参数。先显式保存可读工程；重启 daemon 不能取消宿主尚未结束的写入。
+进程身份不可确认或 `/health` 不可读时拒绝结束进程，并报告端口、PID 和可获取的进程路径。
+Windows 使用系统端口查询和进程终止接口，不依赖 `lsof`。PID 文件不可写时仍可通过
+`health.pid` 和端口所有者管理；按提示修正 `.pcbpilot` 目录权限，不以管理员启动作为默认修法。
+`make dev` 管理的进程由其终端停止，否则热重载管理器可能再次启动它。
+
 同一目标页出现多个版本或 windowId、反复注册或写请求超时时，先暂停 Apply，并保留
 health、journal 和日志。多个真实工程/窗口可以同时存在；要排除的是同一目标的旧运行时。
 

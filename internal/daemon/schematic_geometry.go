@@ -120,15 +120,13 @@ func (s *Server) forwardSchematicGeometry(ctx context.Context, req protocol.Requ
 		return geometryFailure(req, "preflight", false, nil, err.Error()), nil
 	}
 	baseline := schguard.AnalyzeWireGeometry(before.Result)
+	addingWire := req.Action == "schematic.wire.create" || req.Action == "schematic.power.connect_pin"
 	for _, f := range baseline {
 		if strings.Contains(f.Type, "unverified") || strings.Contains(f.Type, "unavailable") {
 			return geometryFailure(req, "preflight", false, baseline, "Required geometry is missing; no mutation was dispatched."), nil
 		}
 	}
-	if req.Action == "schematic.wire.create" || req.Action == "schematic.power.connect_pin" {
-		if len(baseline) != 0 {
-			return geometryFailure(req, "preflight", false, baseline, "The page already violates wire geometry. Remove/replan the invalid source geometry before adding more wires."), nil
-		}
+	if addingWire {
 		wire, e := proposedSchematicWire(req)
 		if e != nil {
 			return geometryFailure(req, "preflight", false, nil, e.Error()), nil
@@ -166,6 +164,9 @@ func (s *Server) forwardSchematicGeometry(ctx context.Context, req protocol.Requ
 		return failed, nil
 	}
 	findings := schguard.AnalyzeWireGeometry(after.Result)
+	if addingWire {
+		findings = schguard.NewGeometryFindings(baseline, findings)
+	}
 	if len(findings) != 0 {
 		failed := geometryFailure(req, "readback", true, findings, "New invalid geometry observed after write. Repair the measured state; API success is not validation success.")
 		failed.Result["actionResult"] = res.Result
@@ -190,6 +191,10 @@ func (s *Server) forwardSchematicGeometry(ctx context.Context, req protocol.Requ
 	res.Result["geometryGuard"] = map[string]any{"passed": true, "phase": "readback", "preexistingFindings": len(baseline), "scope": "pin-exit-direction/wire-through-body"}
 	if req.Action == "schematic.wire.create" || req.Action == "schematic.power.connect_pin" {
 		res.Result["geometryGuard"].(map[string]any)["scope"] = "pin-exit-direction/wire-through-body/wire-coverage/wire-contact-topology"
+		res.Result["geometryGuard"].(map[string]any)["baselineFindings"] = baseline
+		if len(baseline) > 0 {
+			res.Warnings = append(res.Warnings, fmt.Sprintf("%d pre-existing geometry finding(s) retained as diagnostics; this validates the added wire, not the whole page.", len(baseline)))
+		}
 	}
 	return res, nil
 }

@@ -8,11 +8,11 @@ import "fmt"
 // T/connected X without changing its occupied geometric edges. It does not claim
 // that a deliberately requested junction has the correct electrical net name.
 func VerifyWireTopology(before, after, proposed map[string]any) error {
-	old, err := topologySegments(before)
+	old, err := topologySegmentsAllowDegenerate(before, true)
 	if err != nil {
 		return fmt.Errorf("before topology: %w", err)
 	}
-	actual, err := topologySegments(after)
+	actual, err := topologySegmentsAllowDegenerate(after, true)
 	if err != nil {
 		return fmt.Errorf("after topology: %w", err)
 	}
@@ -82,6 +82,13 @@ func compareTopologySegments(expected, actual []segment) error {
 }
 
 func topologySegments(result map[string]any) ([]segment, error) {
+	return topologySegmentsAllowDegenerate(result, false)
+}
+
+// Local additions may preserve old zero-length records. They span nothing and
+// create no contacts; the geometry delta still rejects any NEW such record.
+// Complete-drawing comparisons retain their strict validation.
+func topologySegmentsAllowDegenerate(result map[string]any, allowDegenerate bool) ([]segment, error) {
 	if available, known := result["wiresAvailable"].(bool); known && !available {
 		return nil, fmt.Errorf("wire inventory unavailable")
 	}
@@ -101,6 +108,9 @@ func topologySegments(result map[string]any) ([]segment, error) {
 		}
 		for i := 1; i < len(points); i++ {
 			if same(points[i-1], points[i]) {
+				if allowDegenerate {
+					continue
+				}
 				return nil, fmt.Errorf("zero-length observed wire")
 			}
 			out = append(out, segment{a: points[i-1], b: points[i]})

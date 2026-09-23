@@ -350,6 +350,7 @@ func dispatchCapture(cfg *appConfig, action, window string, payload any, stdout 
 type healthWindow struct {
 	WindowID         string    `json:"windowId"`
 	ConnectorVersion string    `json:"connectorVersion"`
+	EasyEDAVersion   string    `json:"easyedaVersion"`
 	ConnectedAt      time.Time `json:"connectedAt"`
 	Context          struct {
 		ProjectUUID  string `json:"projectUuid"`

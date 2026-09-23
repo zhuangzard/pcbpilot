@@ -151,6 +151,9 @@ EasyEDA 3.2.186 的实测仍会挂起，交互界面存在该功能不代表扩�
 不要通过改参数或连续重试处理此兼容性问题。超时后先回读实际连通和残留图元，
 再按电气语义选择受支持的 netport/netflag；没有等价 typed 能力时标记 `unsupported`。
 升级到支持该接口的宿主后仍须探测，不能只凭版本号宣称已修复。
+daemon 在派发 `net_label` 创建/连接前检查宿主产品版本：V3 或版本不可确认时返回
+`HOST_API_UNSUPPORTED`，不会创建桩线；`autoconnect --dry-run` 使用相同检查，批次含不支持的
+label 时在任何写入前整体拒绝。不会自动替换为电气语义可能不同的 netport。
 历史实测详见仓库 `docs/dev-environment.md` 的 Native net-label compatibility。
 
 ## 检查覆盖边界（原理图验收）
@@ -161,6 +164,9 @@ daemon 对 `schematic.wire.create` / `schematic.power.connect_pin` 自动读取�
 引脚方向、本体与导线，拒绝逆向/垂直出脚、零长/斜线、穿本体及几何缺测等非法输入；
 位姿修改、放件、换件、符号/封装重绑定、整组移动自动做几何前读和后检。这些校验保证
 typed 路径不会写入已知非法几何，不承担阶段许可，也不能替代主动运行事实检查。
+局部新增导线/连接允许保留未改变的历史几何问题，回执列出 `preexistingFindings` 与
+`baselineFindings`；新路径仍完整校验，写后新增或改变的问题仍失败。缺测不作为历史问题豁免。
+旧零长度段不参与新增导线的接触拓扑，但仍保留诊断；本次新增零长度线仍拒绝。
 写后必须有同工程/页及 FIFO 顺序证据；线创建还要证明实际路径覆盖请求路径。
 返回 `SCHEMATIC_GEOMETRY_INVALID`、`partial:true` 时，可能已落地，须回读修源后重新生成，
 不盲重试或当作已撤销。几何输入校验不替代器件身份/位姿命中、电气连通或标记完整性的独立对账。
