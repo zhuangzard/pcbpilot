@@ -332,6 +332,7 @@ func libNameIslands(p *powerLayoutPlan, policies map[string]string, budget ...*i
 	base := *p
 	base.Flags = nil
 	var lastErr error
+	var jointOrder []libIsland
 	for order := 0; order < 5; order++ {
 		trial := base
 		islands := libIslands(&trial)
@@ -360,6 +361,9 @@ func libNameIslands(p *powerLayoutPlan, policies map[string]string, budget ...*i
 				return islands[i].key < islands[j].key
 			}
 		})
+		if order == 0 {
+			jointOrder = append([]libIsland(nil), islands...)
+		}
 		if lastErr = libNameOrderedIslands(&trial, policies, islands, budget...); lastErr == nil {
 			*p = trial
 			return nil
@@ -368,7 +372,135 @@ func libNameIslands(p *powerLayoutPlan, policies map[string]string, budget ...*i
 			return errLibLayoutBudget
 		}
 	}
+	// Fixed order retries cannot revise an earlier legal lead that blocks a
+	// later island. Explore a small set of complete lead alternatives per
+	// island, debiting the same candidate allowance as the greedy passes.
+	jointBudget := 4096
+	if len(budget) == 0 {
+		budget = []*int{&jointBudget}
+	}
+	if joint := libNameIslandsJoint(&base, policies, jointOrder, budget[0]); joint != nil {
+		if *budget[0] <= 0 {
+			return errLibLayoutBudget
+		}
+		// A bounded fallback cannot replace the fully observed greedy conflict
+		// with a weaker diagnostic from a different, truncated branch.
+		return lastErr
+	}
+	*p = base
+	return nil
+}
+
+const libJointNamingChoicesPerIsland = 8
+
+func libNameIslandsJoint(base *powerLayoutPlan, policies map[string]string, islands []libIsland, budget *int) error {
+	return libNameIslandsJointWith(base, policies, islands, budget, libJointNamingOptions)
+}
+
+type libNamingOptionVisitor func(*powerLayoutPlan, libIsland, string, func(*powerLayoutPlan) bool, *int)
+
+func libJointNamingOptions(current *powerLayoutPlan, island libIsland, kind string, accept func(*powerLayoutPlan) bool, budget *int) {
+	choices := 0
+	halt := false
+	limited := func(candidate *powerLayoutPlan) bool {
+		choices++
+		halt = accept(candidate) || choices >= libJointNamingChoicesPerIsland || *budget <= 0
+		return halt
+	}
+	// Give each naming family a chance before a long offset scan consumes all
+	// eight choices on one anchor. The fast path above still keeps its original
+	// shortest-first behavior.
+	familyChoices := 0
+	family := func(candidate *powerLayoutPlan) bool {
+		familyChoices++
+		return limited(candidate) || familyChoices >= 2
+	}
+	libVisitMidpointMarker(current, island, kind, family, budget)
+	if halt || *budget <= 0 {
+		return
+	}
+	familyChoices = 0
+	libVisitWireTreeMarker(current, island, kind, family, budget)
+	if halt || *budget <= 0 {
+		return
+	}
+	for _, pin := range island.pins {
+		if libVisitMarkerLimited(current, pin, kind, 2, limited, budget) || halt || *budget <= 0 {
+			return
+		}
+	}
+}
+
+func libNameIslandsJointWith(base *powerLayoutPlan, policies map[string]string, islands []libIsland, budget *int, options libNamingOptionVisitor) error {
+	var lastErr error
+	var visit func(powerLayoutPlan, int) (*powerLayoutPlan, bool)
+	visit = func(current powerLayoutPlan, index int) (*powerLayoutPlan, bool) {
+		if index == len(islands) {
+			if err := validateLibGeometry(&current); err != nil {
+				lastErr = err
+				return nil, false
+			}
+			if err := validateSchCompositionNets(&current); err != nil {
+				lastErr = err
+				return nil, false
+			}
+			return &current, true
+		}
+		if *budget <= 0 {
+			lastErr = errLibLayoutBudget
+			return nil, false
+		}
+		island := islands[index]
+		kind := "net_port_bi"
+		switch policies[island.net] {
+		case "local_ground":
+			kind = "ground"
+		case "local_power":
+			kind = "power"
+		}
+		var solved *powerLayoutPlan
+		accept := func(candidate *powerLayoutPlan) bool {
+			if result, ok := visit(*candidate, index+1); ok {
+				solved = result
+				return true
+			}
+			return *budget <= 0
+		}
+		options(&current, island, kind, accept, budget)
+		if solved != nil {
+			return solved, true
+		}
+		if *budget <= 0 {
+			lastErr = errLibLayoutBudget
+		} else if lastErr == nil {
+			lastErr = libNamingConflict(&current, island)
+		}
+		return nil, false
+	}
+	if solved, ok := visit(*base, 0); ok {
+		// The caller only observes a complete solution.
+		*base = *solved
+		return nil
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("bounded joint naming found no complete lead assignment")
+	}
 	return lastErr
+}
+
+func libNamingConflict(p *powerLayoutPlan, island libIsland) *schematicNamingConflict {
+	conflict := &schematicNamingConflict{net: island.net, pin: island.pins[0], endpointOwners: map[string]bool{}, ownersComplete: true}
+	for _, pin := range island.pins {
+		if ref := libExactPinOwner(p, pin); ref != "" {
+			conflict.endpointOwners[ref] = true
+		} else {
+			conflict.ownersComplete = false
+		}
+	}
+	if len(conflict.endpointOwners) == 0 {
+		conflict.ownersComplete = false
+	}
+	return conflict
 }
 
 func libNameOrderedIslands(p *powerLayoutPlan, policies map[string]string, islands []libIsland, budget ...*int) error {
@@ -402,18 +534,7 @@ func libNameOrderedIslands(p *powerLayoutPlan, policies map[string]string, islan
 			}
 		}
 		if best == nil {
-			conflict := &schematicNamingConflict{net: island.net, pin: island.pins[0], endpointOwners: map[string]bool{}, ownersComplete: true}
-			for _, pin := range island.pins {
-				if ref := libExactPinOwner(p, pin); ref != "" {
-					conflict.endpointOwners[ref] = true
-				} else {
-					conflict.ownersComplete = false
-				}
-			}
-			if len(conflict.endpointOwners) == 0 {
-				conflict.ownersComplete = false
-			}
-			return conflict
+			return libNamingConflict(p, island)
 		}
 		*p = *best
 	}

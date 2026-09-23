@@ -225,6 +225,20 @@ func libSpendNamingBudget(budget []*int) bool {
 }
 
 func libPlaceMarker(p *powerLayoutPlan, q powerLayoutPin, kind string, budget ...*int) bool {
+	return libVisitMarker(p, q, kind, func(candidate *powerLayoutPlan) bool {
+		*p = *candidate
+		return true
+	}, budget...)
+}
+
+// Visit complete, geometrically legal leads without publishing a rejected
+// choice. The visitor lets the terminal solver reconsider an earlier island
+// when a later island cannot be named.
+func libVisitMarker(p *powerLayoutPlan, q powerLayoutPin, kind string, visit func(*powerLayoutPlan) bool, budget ...*int) bool {
+	return libVisitMarkerLimited(p, q, kind, 0, visit, budget...)
+}
+
+func libVisitMarkerLimited(p *powerLayoutPlan, q powerLayoutPin, kind string, straightLimit int, visit func(*powerLayoutPlan) bool, budget ...*int) bool {
 	var body layoutBBox
 	for _, c := range p.Placements {
 		for _, cp := range c.Pins {
@@ -245,7 +259,14 @@ func libPlaceMarker(p *powerLayoutPlan, q powerLayoutPin, kind string, budget ..
 		directions = []string{"up", side, "left", "right", "down"}
 	}
 	cap := libMarkerOffsetCap(p, q.Net, kind)
-	if libPlaceMarkerAt(p, q, kind, []string{side}, cap, budget...) {
+	straightChoices, accepted := 0, false
+	straightVisit := func(candidate *powerLayoutPlan) bool {
+		straightChoices++
+		accepted = visit(candidate)
+		return accepted || (straightLimit > 0 && straightChoices >= straightLimit)
+	}
+	libVisitMarkerAt(p, q, kind, []string{side}, cap, straightVisit, budget...)
+	if accepted {
 		return true
 	}
 	// A straight lead can be trapped by an adjacent pin's marker. Escape
@@ -276,8 +297,7 @@ func libPlaceMarker(p *powerLayoutPlan, q powerLayoutPin, kind string, budget ..
 					continue
 				}
 				tap := powerLayoutPin{Net: q.Net, X: x, Y: y}
-				if libPlaceMarkerAt(&trial, tap, kind, directions, math.Min(50, cap-shell), budget...) {
-					*p = trial
+				if libVisitMarkerAt(&trial, tap, kind, directions, math.Min(50, cap-shell), visit, budget...) {
 					return true
 				}
 			}
@@ -301,6 +321,13 @@ func libMarkerOffsetCap(p *powerLayoutPlan, net, kind string) float64 {
 }
 
 func libPlaceMarkerAt(p *powerLayoutPlan, q powerLayoutPin, kind string, directions []string, cap float64, budget ...*int) bool {
+	return libVisitMarkerAt(p, q, kind, directions, cap, func(candidate *powerLayoutPlan) bool {
+		*p = *candidate
+		return true
+	}, budget...)
+}
+
+func libVisitMarkerAt(p *powerLayoutPlan, q powerLayoutPin, kind string, directions []string, cap float64, visit func(*powerLayoutPlan) bool, budget ...*int) bool {
 	segments, e := schTerminalSegments(p)
 	if e != nil {
 		return false
@@ -323,8 +350,9 @@ func libPlaceMarkerAt(p *powerLayoutPlan, q powerLayoutPin, kind string, directi
 				candidate := *p
 				candidate.Flags = append(append([]powerLayoutFlag(nil), p.Flags...), f)
 				if validateLibGeometry(&candidate) == nil {
-					p.Flags = candidate.Flags
-					return true
+					if visit(&candidate) {
+						return true
+					}
 				}
 			}
 		}
@@ -394,6 +422,13 @@ func libPlanNetPinCount(p *powerLayoutPlan, net string) int {
 }
 
 func libPlaceMidpointMarker(p *powerLayoutPlan, island libIsland, kind string, budget ...*int) bool {
+	return libVisitMidpointMarker(p, island, kind, func(candidate *powerLayoutPlan) bool {
+		*p = *candidate
+		return true
+	}, budget...)
+}
+
+func libVisitMidpointMarker(p *powerLayoutPlan, island libIsland, kind string, visit func(*powerLayoutPlan) bool, budget ...*int) bool {
 	if kind != "net_port_bi" {
 		return false
 	}
@@ -442,7 +477,7 @@ func libPlaceMidpointMarker(p *powerLayoutPlan, island libIsland, kind string, b
 					if horizontal {
 						dirs = []string{"up", "down"}
 					}
-					if libPlaceMarkerAt(p, q, kind, dirs, 80, budget...) {
+					if libVisitMarkerAt(p, q, kind, dirs, 80, visit, budget...) {
 						return true
 					}
 				}
@@ -465,6 +500,13 @@ type libWireTreeMarkerCandidate struct {
 // must still pass libMarkerRetraces, schTerminalCandidate, and the complete
 // geometry validator in libPlaceMarkerAt.
 func libPlaceWireTreeMarker(p *powerLayoutPlan, island libIsland, kind string, budget ...*int) bool {
+	return libVisitWireTreeMarker(p, island, kind, func(candidate *powerLayoutPlan) bool {
+		*p = *candidate
+		return true
+	}, budget...)
+}
+
+func libVisitWireTreeMarker(p *powerLayoutPlan, island libIsland, kind string, visit func(*powerLayoutPlan) bool, budget ...*int) bool {
 	if !isNetPortKind(kind) || len(island.wireIndices) == 0 {
 		return false
 	}
@@ -539,7 +581,7 @@ func libPlaceWireTreeMarker(p *powerLayoutPlan, island libIsland, kind string, b
 	cap := libMarkerOffsetCap(p, island.net, kind)
 	for _, candidate := range ordered {
 		q := powerLayoutPin{Net: island.net, X: candidate.point[0], Y: candidate.point[1]}
-		if libPlaceMarkerAt(p, q, kind, candidate.directions, cap, budget...) {
+		if libVisitMarkerAt(p, q, kind, candidate.directions, cap, visit, budget...) {
 			return true
 		}
 	}
