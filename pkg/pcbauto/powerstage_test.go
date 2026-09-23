@@ -198,3 +198,31 @@ func TestJointBuck(t *testing.T) {
 		t.Errorf("placement should improve the routed electrical score")
 	}
 }
+
+// The loop keeps the best pass and leaves the board at that placement: the
+// routed result it returns must match a fresh route of the board as left.
+func TestPlaceRouteLoopKeepsBest(t *testing.T) {
+	b := usbBoard()
+	an := Analyze(b, PowerSpec{}, nil)
+	c := Understand(b, an)
+	lr, err := PlaceRoute(context.Background(), b, an, c, nil, PlaceOptions{Seed: 3, Moves: 600},
+		Options{Route: RouteOptions{Timeout: 20 * time.Second}}, LoopOptions{Passes: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lr.Best < 1 || lr.Best > len(lr.Passes) || lr.Joint == nil {
+		t.Fatalf("bad loop result: best %d of %d", lr.Best, len(lr.Passes))
+	}
+	best := lr.Passes[lr.Best-1].Joint
+	for _, p := range lr.Passes {
+		if p.Joint > best+1e-9 {
+			t.Errorf("pass %d scored %.2f above the kept best %.2f", p.Pass, p.Joint, best)
+		}
+	}
+	for _, pl := range lr.Place.Placements {
+		if p := b.Part(pl.Ref); p == nil || p.Pos.Dist(Point{pl.X, pl.Y}) > 0.05 {
+			t.Errorf("%s not left at the best pass's placement", pl.Ref)
+		}
+	}
+	t.Logf("passes %+v, best %d", lr.Passes, lr.Best)
+}
