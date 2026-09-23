@@ -1,5 +1,5 @@
 /**
- * EasyEDA Agent Connector — extension entry point.
+ * PCB Pilot Connector — extension entry point.
  *
  * Bridges the pcbpilot Go daemon to the official `eda.*` API over a local
  * WebSocket. On startup it scans ports 61832-61841 (0xF188-0xF191), validates the daemon
@@ -101,7 +101,7 @@ export function about(): void {
 	}
 
 	eda.sys_Dialog.showInformationMessage(
-		`EasyEDA Agent Connector v${extensionConfig.version}\n${statusLine}`,
+		`PCB Pilot Connector v${extensionConfig.version}\n${statusLine}`,
 		'About',
 	);
 }

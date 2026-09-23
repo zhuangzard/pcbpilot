@@ -229,6 +229,19 @@ lands at IndexedDB key `<uuid>|dist/index.js`. Mind that offset.
 - **Uninstall confirm dialog is flaky to automate** — ticking the "I
   understand" checkbox re-renders the confirm button. Prefer the hot-reload
   path (section 5), which never uninstalls.
+- **Uninstall silently does nothing (desktop 3.2.149, macOS, 2026-09-23)** —
+  three attempts on PCB Pilot Connector 0.1.0 (card button, detail button,
+  and disable-then-uninstall; checkbox ticked, Confirm clicked on the
+  re-rendered button, app fully quit and relaunched in between) all closed the
+  dialog without an error, yet the extension stayed in 已安装 at 0.1.0. A
+  following import of 0.2.0 with the same uuid was then silently de-duplicated.
+  Disable/enable still works. Official recovery for extensions that cannot be
+  removed is the web editor's `safetyMode=true` URL parameter; the
+  `DANGEROUS_OPERATION_DeleteExtensionStorage=true` parameter deletes **every**
+  extension and script and is not an acceptable fix. Remaining options: the
+  IndexedDB hot-reload (section 5, needs the connector enabled and connected),
+  a fresh-uuid import (`make eext-fresh`) with the old entry left disabled, or
+  a clean install in the web editor.
 - **`fetch` to the daemon/localhost fails in the editor** — expected;
   HTTPS→HTTP mixed content is blocked. Use `ws://127.0.0.1` (the connector and
   the hot-reload transport both rely on this being allowed).

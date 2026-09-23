@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- Header menu renamed from "EDA Agent" to "PCB Pilot" (id and title). The host
+  de-duplicates header menus by id, so sharing upstream's "EDA Agent" id made
+  the two connectors' menus collide when both are installed. The About dialog
+  now names the PCB Pilot Connector. Requires re-importing the connector.
+
 ## [0.2.0] — 2026-09-23
 
 Placement engine release: `pcb auto` now places parts the way an experienced

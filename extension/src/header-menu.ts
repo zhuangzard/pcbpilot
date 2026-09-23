@@ -5,7 +5,7 @@
  * ## What breaks
  *
  * With `isShowAtHeaderMenu` on — which is what the connector ships with — the
- * `EDA Agent` menu never appears on EasyEDA Pro 3.2.149, not even while the
+ * `PCB Pilot` menu never appears on EasyEDA Pro 3.2.149, not even while the
  * connector is connected and serving requests. `Reconnect` therefore cannot be
  * clicked, and that is the only recovery path which does not need the daemon —
  * exactly what an operator wants when the connector failed to come up (#221).

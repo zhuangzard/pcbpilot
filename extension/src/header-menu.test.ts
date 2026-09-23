@@ -52,7 +52,7 @@ test('header menu: the manifest entry carries the daemon-free recovery path', as
 		assert.ok(Array.isArray(menus[ctx]) && menus[ctx].length > 0, `${ctx} menus missing`);
 	}
 	const top = menus.pcb[0];
-	assert.equal(top.id, 'EDA Agent');
+	assert.equal(top.id, 'PCB Pilot');
 	assert.ok(top.menuItems.some((i: any) => i.registerFn === 'reconnect'),
 		'Reconnect is the only recovery path that does not need the daemon; it must be in the menu');
 });
