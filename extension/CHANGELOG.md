@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+- Ported from upstream easyeda-agent v1.6.0 (cherry-picked, adapted to
+  pcbpilot names): typed `project.open` / `project.export` handlers
+  (`project-transfer.ts`) for cross-project open with identity checks and
+  native `.epro2` export; `schematic.drc.check` now returns the host's own
+  strict-mode verdict (`nativePassed`) and reports unknown counts as `null`
+  instead of fabricated zeroes. The CLI/daemon side (V3 `net_label` refusal,
+  local-edit finding deltas, `daemon stop/restart`) needs no connector change.
+  Requires re-importing the connector together with the matching CLI/daemon.
+
 - Header menu renamed from "EDA Agent" to "PCB Pilot" (id and title). The host
   de-duplicates header menus by id, so sharing upstream's "EDA Agent" id made
   the two connectors' menus collide when both are installed. The About dialog
