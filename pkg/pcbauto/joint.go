@@ -87,11 +87,22 @@ func Joint(b *Board, an *Analysis, c *Circuit, st *Stackup, rr *RouteResult, drc
 		js.Gates = append(js.Gates, fmt.Sprintf("%d part overlaps", opt.Overlaps))
 	}
 	cg := newCopperGraph(b, an, st, rr)
+	// One net set for numerator and denominator: plane nets plus every
+	// ground net (a split ground off the plane is still a ground).
+	planeSet := map[string]bool{}
 	for net := range cg.plane {
+		planeSet[net] = true
+	}
+	for net := range cg.pads {
+		if an.Plan(net, b.Rules).Role == RoleGround {
+			planeSet[net] = true
+		}
+	}
+	for net := range planeSet {
 		js.PlanePads += len(cg.pads[net])
 	}
 	for _, u := range rr.Unrouted {
-		if !cg.plane[u.Net] && an.Plan(u.Net, b.Rules).Role != RoleGround {
+		if !planeSet[u.Net] {
 			continue
 		}
 		if u.Reason == "drc-unrepairable" {
