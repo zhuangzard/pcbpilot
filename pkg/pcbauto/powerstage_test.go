@@ -1,7 +1,9 @@
 package pcbauto
 
 import (
+	"context"
 	"testing"
+	"time"
 )
 
 // buckBoard: 12 V → 3V3 asynchronous buck (catch diode), bootstrap cap,
@@ -160,5 +162,39 @@ func TestUSBChainOrder(t *testing.T) {
 	}
 	if d := b.Part("R1").Body().Center().Dist(b.Part("R2").Body().Center()); d > 120 {
 		t.Errorf("pair series resistors %.0f mil apart; should sit side by side", d)
+	}
+}
+
+// The joint score on the routed buck board: deterministic, in range, and it
+// prefers the engine's tight hot loop to the scattered start.
+func TestJointBuck(t *testing.T) {
+	score := func(place bool) *JointScore {
+		b := buckBoard()
+		an := Analyze(b, PowerSpec{}, nil)
+		c := Understand(b, an)
+		if place {
+			if _, err := Place(b, an, c, nil, PlaceOptions{Seed: 1, Moves: 800}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		out, err := Run(context.Background(), b, Options{Route: RouteOptions{Timeout: 20 * time.Second}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return Joint(b, out.Analysis, Understand(b, out.Analysis), out.Stackup, out.Route, out.DRC, JointOptions{PlacementScore: 80})
+	}
+	scattered, placed := score(false), score(true)
+	again := score(true)
+	for _, j := range []*JointScore{scattered, placed} {
+		if j.Overall < 0 || j.Overall > 100 || j.Quality < 0 || j.Quality > 100 {
+			t.Fatalf("out of range: %+v", j)
+		}
+	}
+	if again.Overall != placed.Overall {
+		t.Errorf("not deterministic: %.3f vs %.3f", placed.Overall, again.Overall)
+	}
+	t.Logf("scattered %.1f (e%.0f) → placed %.1f (e%.0f)", scattered.Overall, scattered.Groups["electrical"], placed.Overall, placed.Groups["electrical"])
+	if placed.Groups["electrical"] <= scattered.Groups["electrical"] {
+		t.Errorf("placement should improve the routed electrical score")
 	}
 }

@@ -376,9 +376,27 @@ func (c *Circuit) ConverterOf(ref string) *Converter {
 // the current placement, and its perimeter and area. ok is false when the
 // loop cannot be traced (missing cap).
 func HotLoop(b *Board, an *Analysis, cv *Converter) (pts []Point, perim, area float64, ok bool) {
+	pads, ok := hotLoopPads(b, an, cv)
+	if !ok {
+		return nil, 0, 0, false
+	}
+	for _, pd := range pads {
+		pts = append(pts, pd.Box.C)
+	}
+	for i := range pts {
+		j := (i + 1) % len(pts)
+		perim += pts[i].Dist(pts[j])
+		area += pts[i].X*pts[j].Y - pts[j].X*pts[i].Y
+	}
+	return pts, perim, math.Abs(area) / 2, true
+}
+
+// hotLoopPads is the hot loop as an ordered pad sequence on the current
+// placement (the IC pins are the nearest ones to the loop's other members).
+func hotLoopPads(b *Board, an *Analysis, cv *Converter) ([]*Pad, bool) {
 	core, capP := b.Part(cv.Core), b.Part(cv.HotCap)
 	if core == nil || capP == nil {
-		return nil, 0, 0, false
+		return nil, false
 	}
 	isGnd := func(net string) bool { return an.Plan(net, b.Rules).Role == RoleGround }
 	var capHot, capGnd *Pad
@@ -390,7 +408,7 @@ func HotLoop(b *Board, an *Analysis, cv *Converter) (pts []Point, perim, area fl
 		}
 	}
 	if capHot == nil || capGnd == nil {
-		return nil, 0, 0, false
+		return nil, false
 	}
 	nearest := func(part *Part, match func(*Pad) bool, to Point) *Pad {
 		var best *Pad
@@ -404,60 +422,46 @@ func HotLoop(b *Board, an *Analysis, cv *Converter) (pts []Point, perim, area fl
 	gndPin := nearest(core, func(pd *Pad) bool { return isGnd(pd.Net) }, capGnd.Box.C)
 	swPin := nearest(core, func(pd *Pad) bool { return pd.Net == cv.SwitchNet }, capHot.Box.C)
 	if gndPin == nil || swPin == nil {
-		return nil, 0, 0, false
+		return nil, false
 	}
-	var d *Part
+	var dsw, dother *Pad
 	if cv.Diode != "" {
-		d = b.Part(cv.Diode)
-	}
-	diodePads := func() (sw, o *Pad) {
+		d := b.Part(cv.Diode)
+		if d == nil {
+			return nil, false
+		}
 		for _, pd := range d.Pads {
 			if pd.Net == cv.SwitchNet {
-				sw = pd
+				dsw = pd
 			} else {
-				o = pd
+				dother = pd
 			}
 		}
-		return
+		if dsw == nil || dother == nil {
+			return nil, false
+		}
 	}
 	switch cv.Topology {
 	case "buck":
 		vin := nearest(core, func(pd *Pad) bool { return pd.Net == capHot.Net }, capHot.Box.C)
 		if vin == nil {
-			return nil, 0, 0, false
+			return nil, false
 		}
-		if d != nil {
-			dsw, dg := diodePads()
-			if dsw == nil || dg == nil {
-				return nil, 0, 0, false
-			}
-			pts = []Point{capHot.Box.C, vin.Box.C, swPin.Box.C, dsw.Box.C, dg.Box.C, capGnd.Box.C}
-		} else {
-			pts = []Point{capHot.Box.C, vin.Box.C, gndPin.Box.C, capGnd.Box.C}
+		if dsw != nil {
+			return []*Pad{capHot, vin, swPin, dsw, dother, capGnd}, true
 		}
+		return []*Pad{capHot, vin, gndPin, capGnd}, true
 	case "boost":
-		if d != nil {
-			dsw, dout := diodePads()
-			if dsw == nil || dout == nil {
-				return nil, 0, 0, false
-			}
-			pts = []Point{swPin.Box.C, dsw.Box.C, dout.Box.C, capHot.Box.C, capGnd.Box.C, gndPin.Box.C}
-		} else {
-			vout := nearest(core, func(pd *Pad) bool { return pd.Net == capHot.Net }, capHot.Box.C)
-			if vout == nil {
-				return nil, 0, 0, false
-			}
-			pts = []Point{vout.Box.C, capHot.Box.C, capGnd.Box.C, gndPin.Box.C}
+		if dsw != nil {
+			return []*Pad{swPin, dsw, dother, capHot, capGnd, gndPin}, true
 		}
-	default:
-		return nil, 0, 0, false
+		vout := nearest(core, func(pd *Pad) bool { return pd.Net == capHot.Net }, capHot.Box.C)
+		if vout == nil {
+			return nil, false
+		}
+		return []*Pad{vout, capHot, capGnd, gndPin}, true
 	}
-	for i := range pts {
-		j := (i + 1) % len(pts)
-		perim += pts[i].Dist(pts[j])
-		area += pts[i].X*pts[j].Y - pts[j].X*pts[i].Y
-	}
-	return pts, perim, math.Abs(area) / 2, true
+	return nil, false
 }
 
 // HotLoopStats is the mean hot-loop perimeter (mil) over the converters

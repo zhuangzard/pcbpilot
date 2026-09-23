@@ -15,13 +15,20 @@ type PlaceOptions struct {
 	Moves int `json:"moves"`
 	// Seed makes runs reproducible.
 	Seed int64 `json:"seed"`
-	// SpacingMil is the courtyard gap between parts (default 12).
+	// SpacingMil is the courtyard gap between parts (default: one routing
+	// channel, track + 2 × clearance, at least 12).
 	SpacingMil float64 `json:"spacingMil"`
 	// NoRotate keeps rotations.
 	NoRotate bool `json:"noRotate"`
 	// Refine starts from the current placement instead of constructing one.
 	Refine  bool          `json:"refine"`
 	Timeout time.Duration `json:"-"`
+	// Congestion weights the RUDY routing-congestion term during annealing
+	// (0 = default 1, negative disables).
+	Congestion float64 `json:"congestion,omitempty"`
+	// Halo adds keep-clear distance (mil) around named parts — the place/route
+	// loop inflates parts in regions the router failed.
+	Halo map[string]float64 `json:"halo,omitempty"`
 }
 
 // Placement is a part's decided pose (anchor coordinates, like EasyEDA).
@@ -92,7 +99,14 @@ type placer struct {
 	spacing  float64
 	bucket   map[[2]int][]*Part
 	boxes    map[*Part]Rect
+	rudy     *rudy // congestion grid, live during annealing only
+	intimate map[[2]*Part]bool
 }
+
+// intimateGap is the courtyard gap kept between parts that connect directly
+// and must not be split by foreign tracks: a hot-loop cap and its IC, a decap
+// and its pin, a crystal and its loads. Everyone else keeps a routing channel.
+const intimateGap = 12
 
 const placeBucket = 150.0
 
@@ -103,7 +117,11 @@ func Place(b *Board, an *Analysis, c *Circuit, m *Mechanics, opt PlaceOptions) (
 		opt.Moves = 6000
 	}
 	if opt.SpacingMil <= 0 {
-		opt.SpacingMil = 12
+		// One routing channel between neighbours: a track and its clearance
+		// on both sides. Tighter than this and a pad facing into a cluster
+		// can only escape around it — the routed MIPI adapter lost 30 % of
+		// its connections at the old 12 mil default with 6/6 rules.
+		opt.SpacingMil = math.Max(12, b.Rules.TrackWidth+2*b.Rules.Clearance)
 	}
 	if opt.Timeout <= 0 {
 		opt.Timeout = 90 * time.Second
@@ -196,7 +214,84 @@ func (pl *placer) setup(res *PlaceResult) {
 		}
 	}
 	pl.setupTethers()
+	pl.setupIntimate()
+	pl.pinAccessHalo()
 	pl.zones(res)
+}
+
+// pairOverlap is the courtyard overlap of p and q, measured with the tight
+// gap for intimate pairs and the channel gap (plus halos) otherwise.
+func (pl *placer) pairOverlap(p, q *Part) float64 {
+	if pl.intimate[[2]*Part{p, q}] {
+		return p.Body().Expand(intimateGap / 2).OverlapArea(q.Body().Expand(intimateGap / 2))
+	}
+	return pl.boxes[p].OverlapArea(pl.boxes[q])
+}
+
+var intimateRoles = map[string]bool{"hot-loop": true, "bootstrap": true, "decap": true, "clock": true, "clock-load": true, "power-stage": true}
+
+func (pl *placer) setupIntimate() {
+	pl.intimate = map[[2]*Part]bool{}
+	pair := func(a, b *Part) {
+		if a != nil && b != nil && a != b {
+			pl.intimate[[2]*Part{a, b}] = true
+			pl.intimate[[2]*Part{b, a}] = true
+		}
+	}
+	for _, bl := range pl.c.Blocks {
+		core := pl.b.Part(bl.Core)
+		var inner []*Part
+		for _, m := range bl.Members {
+			if intimateRoles[m.Role] {
+				p := pl.b.Part(m.Ref)
+				pair(p, core)
+				inner = append(inner, p)
+			}
+		}
+		// A converter's hot loop, inductor and bootstrap sit on one another.
+		for i, a := range inner {
+			for _, b := range inner[i+1:] {
+				if role(pl, a) != "decap" && role(pl, b) != "decap" {
+					pair(a, b)
+				}
+			}
+		}
+	}
+}
+
+func role(pl *placer, p *Part) string {
+	if t := pl.tether[p]; t != nil {
+		return t.role
+	}
+	return ""
+}
+
+// pinAccessHalo widens the keep-clear of parts whose pads carry nets wider
+// than a default track, so the wider track can still leave the pad: half the
+// extra width on each side. Caller-supplied halos (the place/route loop) add.
+func (pl *placer) pinAccessHalo() {
+	halo := map[string]float64{}
+	for k, v := range pl.opt.Halo {
+		halo[k] = v
+	}
+	base := pl.b.Rules.TrackWidth
+	for _, p := range pl.b.Parts {
+		extra := 0.0
+		for _, pd := range p.Pads {
+			if pd.Net == "" {
+				continue
+			}
+			np := pl.an.Plan(pd.Net, pl.b.Rules)
+			if np.Plane || np.Role == RoleGround {
+				continue // reaches its plane through a fan-out via
+			}
+			extra = math.Max(extra, (np.WidthMil-base)/2)
+		}
+		if extra > 0 {
+			halo[p.Ref] += math.Min(extra, 20)
+		}
+	}
+	pl.opt.Halo = halo
 }
 
 func coreOf(c *Circuit, ref string) string {
@@ -333,7 +428,9 @@ func (pl *placer) wirelength() float64 {
 	return s
 }
 
-func (pl *placer) box(p *Part) Rect { return p.Body().Expand(pl.spacing / 2) }
+func (pl *placer) box(p *Part) Rect {
+	return p.Body().Expand(pl.spacing/2 + pl.opt.Halo[p.Ref])
+}
 
 // partCost is the constraint cost of one part in its current pose,
 // excluding net length (overlap with others, zone, board, keepouts, height).
@@ -347,7 +444,7 @@ func (pl *placer) partCost(p *Part) float64 {
 			return
 		}
 		seen[q] = true
-		cost += 8 * bx.OverlapArea(pl.boxes[q])
+		cost += 8 * pl.pairOverlap(p, q)
 	})
 	// Board / zone containment of the body.
 	z := pl.zoneOf[p]
@@ -923,6 +1020,13 @@ func (pl *placer) anneal(deadline time.Time) {
 		return
 	}
 	pl.rebuildBuckets()
+	if w := pl.opt.Congestion; w >= 0 {
+		if w == 0 {
+			w = 1
+		}
+		pl.rudy = newRudy(pl.b, pl.an, pl.region, w)
+		defer func() { pl.rudy = nil }()
+	}
 	total := pl.opt.Moves * len(pl.movable)
 	// Initial temperature from the median move delta (the mean is dominated
 	// by rare huge overlap penalties and would keep the end state hot).
@@ -962,6 +1066,8 @@ func (pl *placer) anneal(deadline time.Time) {
 		d := pl.tryMove(p, r, true)
 		if d > 0 && (frac > 0.85 || pl.rng.Float64() >= math.Exp(-d/t)) {
 			pl.undo(p)
+		} else if pl.rudy != nil {
+			pl.rudy.done()
 		}
 	}
 }
@@ -1013,6 +1119,13 @@ func (pl *placer) tryMove(p *Part, radius float64, keep bool) float64 {
 	for _, d := range grp {
 		before += pl.groupCost(d)
 	}
+	if pl.rudy != nil {
+		moved := append([]*Part{p}, grp...)
+		if kind == 9 && q != nil {
+			moved = append(moved, q)
+		}
+		pl.rudy.begin(moved)
+	}
 	switch {
 	case kind == 7:
 		delta := Point{(pl.rng.Float64()*2 - 1) * radius, (pl.rng.Float64()*2 - 1) * radius}
@@ -1048,6 +1161,9 @@ func (pl *placer) tryMove(p *Part, radius float64, keep bool) float64 {
 	for _, d := range grp {
 		after += pl.groupCost(d)
 	}
+	if pl.rudy != nil {
+		after += pl.rudy.commit()
+	}
 	if !keep {
 		pl.undo(p)
 	}
@@ -1055,6 +1171,9 @@ func (pl *placer) tryMove(p *Part, radius float64, keep bool) float64 {
 }
 
 func (pl *placer) undo(p *Part) {
+	if pl.rudy != nil {
+		pl.rudy.revert()
+	}
 	s := lastMove
 	pl.bucketOp(p, false)
 	p.MoveTo(s.pos, s.rot)
