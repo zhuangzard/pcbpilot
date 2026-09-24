@@ -786,16 +786,16 @@ func bslGroupNets(nets [][]string, group []string) []string {
 // **实测引脚**求解其余件,把结果写回 plan.Placements(只改 X/Y/Rotation/Source,
 // **绝不重建切片** —— 重建会丢掉 bapRemapDesignators 的结果,导致跨页误连 #144)。
 //
-// 任何一步失败都只降级为「其余件走网格坐标」+ 一条 warning:关系模板是布局优化,
-// 不该因为读不到几何就让整个 apply 失败。
+// 失败时保留未解成员的 relation-seed 并返回诊断;调用方必须通过 bslRequireSolved
+// 后才能继续放置,否则中止 apply 并清理本次新建对象。
 func bslResolveLive(cfg *appConfig, window string, plan *bapPlan, sheet *layoutBBox, stderr io.Writer) (*bslAnchorGeom, []string) {
 	blk, ok, err := blocks.Get(plan.BlockID)
 	if err != nil || !ok {
-		return nil, []string{fmt.Sprintf("关系求解跳过:取不到块 %s(%v)—— 其余件按网格坐标落地", plan.BlockID, err)}
+		return nil, []string{fmt.Sprintf("关系求解跳过:取不到块 %s(%v)—— 中止放置并清理本次新建对象", plan.BlockID, err)}
 	}
 	layout, lerr := blk.SchematicLayout()
 	if lerr != nil {
-		return nil, []string{"关系求解跳过:模板解析失败 —— 其余件按网格坐标落地"}
+		return nil, []string{"关系求解跳过:模板解析失败 —— 中止放置并清理本次新建对象"}
 	}
 	rel, isRel := bslRelationsFrom(layout)
 	if !isRel {
@@ -803,7 +803,7 @@ func bslResolveLive(cfg *appConfig, window string, plan *bapPlan, sheet *layoutB
 	}
 	anchor := plan.Placements[0]
 	if anchor.PrimitiveID == "" {
-		return nil, []string{"关系求解跳过:锚件没有 primitiveId —— 其余件按网格坐标落地"}
+		return nil, []string{"关系求解跳过:锚件没有 primitiveId —— 中止放置并清理本次新建对象"}
 	}
 
 	// 引脚回读天生慢:`includePins` 要给每个引脚定当前网,一颗 81 脚模组的页面实测
@@ -813,11 +813,11 @@ func bslResolveLive(cfg *appConfig, window string, plan *bapPlan, sheet *layoutB
 	res, rerr := requestActionTimed(cfg, "schematic.components.list", window,
 		map[string]any{"includeBBox": true, "includePins": true}, 90*time.Second)
 	if rerr != nil {
-		return nil, []string{fmt.Sprintf("关系求解跳过:回读页面几何失败(%v)—— 其余件按网格坐标落地", rerr)}
+		return nil, []string{fmt.Sprintf("关系求解跳过:回读页面几何失败(%v)—— 中止放置并清理本次新建对象", rerr)}
 	}
 	comps, perr := parseLayoutComps(res.Result)
 	if perr != nil {
-		return nil, []string{"关系求解跳过:几何解析失败 —— 其余件按网格坐标落地"}
+		return nil, []string{"关系求解跳过:几何解析失败 —— 中止放置并清理本次新建对象"}
 	}
 	scene := buildScene(res.Result)
 
@@ -832,7 +832,7 @@ func bslResolveLive(cfg *appConfig, window string, plan *bapPlan, sheet *layoutB
 		}
 	}
 	if !found {
-		return nil, []string{"关系求解跳过:回读里找不到锚件的实测 bbox —— 其余件按网格坐标落地"}
+		return nil, []string{"关系求解跳过:回读里找不到锚件的实测 bbox —— 中止放置并清理本次新建对象"}
 	}
 	// 锚件的实测引脚:名字与编号都建索引(attach 的目标两种写法都该认)。
 	pins := map[string]acPin{}
@@ -848,7 +848,7 @@ func bslResolveLive(cfg *appConfig, window string, plan *bapPlan, sheet *layoutB
 		}
 	}
 	if len(pins) == 0 {
-		return nil, []string{fmt.Sprintf("关系求解跳过:锚件 %s 读不到引脚 —— 其余件按网格坐标落地", anchorDesig)}
+		return nil, []string{fmt.Sprintf("关系求解跳过:锚件 %s 读不到引脚 —— 中止放置并清理本次新建对象", anchorDesig)}
 	}
 
 	// 障碍表:页面上除本块未落地件之外的一切(含刚落地的锚件)。
@@ -906,8 +906,8 @@ func bslDirVec(side string) (dx, dy float64) {
 }
 
 // bslDidSolve reports whether the solver actually consumed the relational
-// template. bslResolveLive 的降级路径一律以「关系求解跳过」开头,那时件是按网格
-// 坐标落的,关系确实没被执行。(名字不叫 bslSolved —— 那是求解出的位姿类型。)
+// template. bslResolveLive 的失败路径一律以「关系求解跳过」开头,关系没有执行,
+// 调用方须中止放置。(名字不叫 bslSolved —— 那是求解出的位姿类型。)
 func bslDidSolve(notes []string) bool {
 	for _, n := range notes {
 		if strings.HasPrefix(n, "关系求解跳过") {
@@ -1648,4 +1648,67 @@ func bslPushSolve(units []bslPushUnit, walls []layoutBBox, usable *layoutBBox,
 		res.Capped = why[res.Head]
 	}
 	return res
+}
+
+// bslSeedOffsets reserves a relation-shaped envelope before any live writes.
+// It deliberately has no pin coordinates: flow/pair can be estimated from the
+// topology, while attach members reserve a separate row until real pins exist.
+// Every source stays *-seed so dry-run never claims measured relation solving.
+func bslSeedOffsets(blk blocks.Block, rel bslRelations, anchor string, roles []string) map[string]bapRoleOffset {
+	nets := bslBlockNets(blk)
+	half := func(r string) float64 { return math.Max(bapRoleHalfExtent(blk.Parts[r].Part), bapPartMargin) }
+	anchorBox := layoutBBox{MinX: -half(anchor), MaxX: half(anchor), MinY: -bapPartMargin, MaxY: bapPartMargin}
+	solved, _ := bslSolveAround(blk, rel, nets, nil, anchor, nil, anchorBox, []layoutBBox{anchorBox}, nil)
+	out := map[string]bapRoleOffset{anchor: {source: "anchor-seed"}}
+	for _, p := range solved {
+		if p.Role != anchor {
+			out[p.Role] = bapRoleOffset{dx: p.X, dy: p.Y, rot: p.Rotation, source: "relation-seed"}
+		}
+	}
+	// Unsolved attach or unclassified members need reserved space too. Sort a
+	// copy: map order and caller-owned ordering must not affect the envelope.
+	ordered := append([]string(nil), roles...)
+	sort.Strings(ordered)
+	var pending []string
+	for _, r := range ordered {
+		if _, ok := out[r]; !ok {
+			pending = append(pending, r)
+		}
+	}
+	width := 0.0
+	for i, r := range pending {
+		width += 2 * half(r)
+		if i > 0 {
+			width += bslPartGap
+		}
+	}
+	x := -width / 2
+	top := float64(bapPartMargin)
+	for _, p := range out {
+		top = math.Max(top, p.dy+bapPartMargin)
+	}
+	for _, r := range pending {
+		x += half(r)
+		out[r] = bapRoleOffset{dx: snapAnchor(x), dy: snapAnchor(top + bslPartGap + bapPartMargin), source: "relation-seed"}
+		x += half(r) + bslPartGap
+	}
+	return out
+}
+
+// Provisional geometry must never become a silent live fallback after a failed
+// read or constrained solve. The caller compensates only its newly created IDs.
+func bslRequireSolved(plan bapPlan, anchor *bslAnchorGeom) error {
+	if anchor == nil {
+		return fmt.Errorf("relational layout incomplete: anchor geometry unavailable; refusing provisional placement")
+	}
+	var pending []string
+	for _, p := range plan.Placements {
+		if p.Role != plan.AnchorRole && strings.HasSuffix(p.Source, "-seed") {
+			pending = append(pending, p.Role)
+		}
+	}
+	if len(pending) > 0 {
+		return fmt.Errorf("relational layout incomplete: unresolved roles %s; enlarge/clear the sheet or repair the relation inputs", strings.Join(pending, ", "))
+	}
+	return nil
 }

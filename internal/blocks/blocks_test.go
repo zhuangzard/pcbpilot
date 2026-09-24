@@ -3,6 +3,7 @@ package blocks
 import (
 	"encoding/json"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -184,6 +185,48 @@ func TestPartsExistInStandardParts(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// The CH340 block once used SM712, an asymmetric RS-485 suppressor, on USB
+// D+/D-. Pin-reference auditing alone could not catch that category error, and
+// the replacement USBLC6-2SC6 has six meaningful pins rather than the old
+// three-pin topology. Keep the selected USB part and all connector/ESD fanout
+// semantics together as one regression contract.
+func TestCH340USBSerialUsesFlowThroughUSBESD(t *testing.T) {
+	b, ok, err := Get("block.ch340c_usb_serial")
+	if err != nil || !ok {
+		t.Fatalf("load block.ch340c_usb_serial: ok=%v err=%v", ok, err)
+	}
+	if got := b.Parts["D_ESD"].Part; got != "esd.usblc6_2sc6" {
+		t.Fatalf("D_ESD part=%q, want low-cap USB ESD esd.usblc6_2sc6", got)
+	}
+	var doc struct {
+		InternalNets [][]string `json:"internal_nets"`
+	}
+	if err := json.Unmarshal(b.Raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	wantNets := [][]string{
+		{"J_USB.VBUS*", "U.VCC", "C_VCC.1", "D_ESD.VBUS", "PORT:VBUS_5V"},
+		{"J_USB.GND*", "J_USB.EP*", "U.GND", "C_VCC.2", "C_V3.2", "D_ESD.GND", "R_CC1.2", "R_CC2.2", "PORT:GND"},
+		{"U.D+", "J_USB.DP1", "J_USB.DP2", "D_ESD.I/O2*"},
+		{"U.D-", "J_USB.DN1", "J_USB.DN2", "D_ESD.I/O1*"},
+	}
+	for _, want := range wantNets {
+		found := false
+		for _, got := range doc.InternalNets {
+			if reflect.DeepEqual(got, want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("missing exact CH340/USB-C/ESD net %v", want)
+		}
+	}
+	if strings.Contains(string(b.Raw), `"part": "tvs.sm712_sot23"`) {
+		t.Error("CH340 USB block still selects the RS-485-only SM712")
 	}
 }
 

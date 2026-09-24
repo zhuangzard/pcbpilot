@@ -967,6 +967,11 @@ func runBlockApply(cfg *appConfig, window, blockID string, in bapInput, partsPat
 		if plan.Relational && i == 1 {
 			geom, notes := bslResolveLive(cfg, window, &plan, sheetBBox, stderr)
 			anchorGeom = geom
+			if err := bslRequireSolved(plan, geom); err != nil {
+				man.Warnings = append(man.Warnings, notes...)
+				return failBlockApplyAfterPlacement(cfg, window, &man, created, nil, nil,
+					err, asJSON, stdout, stderr)
+			}
 			if len(notes) > 0 {
 				plan.Warnings = append(plan.Warnings, notes...)
 				man.Warnings = plan.Warnings
@@ -974,7 +979,7 @@ func runBlockApply(cfg *appConfig, window, blockID string, in bapInput, partsPat
 			// 「NOT applied」这行是诚实性出口,它自己必须诚实:求解器**真的**消费了
 			// flow/attach/pair 时(LAYOUT 列写着 anchor/flow/attach/pair),就不能再
 			// 说没执行 —— 那段文案是 P1 只落数据模型时写的,P2 求解器上线后它反过来
-			// 在撒谎。只有降级回网格坐标时,关系才确实没被执行。
+			// 在撒谎。未求解的关系应保留在 Unconsumed;上面的检查会先中止放置。
 			if bslDidSolve(notes) {
 				man.Unconsumed = bapDropRelationalLayout(man.Unconsumed)
 				if len(man.Unconsumed) == 0 {
@@ -1433,13 +1438,15 @@ standard-parts.json, places the parts with allocated designators, wires the bloc
 internal_nets, binds its boundary ports to host nets, and prints a traceable
 instance manifest.
 
-PLACEMENT GEOMETRY: a block that declares a schematic_layout template places each
-role at its authored offset+rotation from the origin (信号流左入右出、去耦贴芯片
-one-time-reviewed geometry); blocks without one fall back to the legacy
---per-row/--spacing grid. Either way the ORIGIN dodges existing parts: when --at
-is NOT passed explicitly, the block's estimated footprint spiral-searches the
-nearest free region (existing real bboxes as obstacles); an explicit --at is
-honoured verbatim (with a warning if it collides). After placing, the real
+PLACEMENT GEOMETRY: legacy schematic_layout.roles uses authored offsets.
+Relation templates (anchor/flow/attach/pair) first reserve an estimated relation
+envelope, with origin/--at referring to the anchor. Dry-run reports *-seed
+coordinates, never measured pin geometry. On a known sheet the estimated
+envelope must fit inside its usable area. Live execution places the anchor,
+reads its pins, then solves the other roles; unresolved relations abort and
+clean up the new anchor instead of writing provisional seed coordinates.
+Blocks without a template use --per-row/--spacing grid. Existing geometry is
+used for origin avoidance; exact readback remains mandatory. After placing, the real
 rendered bboxes AND pin coordinates are re-read. Read/parse/incomplete-geometry
 failures, bbox overlaps, and pins from different parts sharing one point are hard
 errors BEFORE wiring; a dirty or unverified landing never reaches autoconnect.

@@ -173,7 +173,7 @@ type bapPlacement struct {
 	X           float64 `json:"x"`
 	Y           float64 `json:"y"`
 	Rotation    float64 `json:"rotation,omitempty"`
-	Source      string  `json:"layout,omitempty"` // "template" | "grid"
+	Source      string  `json:"layout,omitempty"` // "template" | "grid" | "anchor-seed" | "relation-seed"
 }
 
 // bapOrigin records where the block actually landed vs where the caller asked,
@@ -259,7 +259,7 @@ type bapInput struct {
 // bapRoleOffset is one role's resolved offset from the block origin.
 type bapRoleOffset struct {
 	dx, dy, rot float64
-	source      string // "template" | "grid"
+	source      string // "template" | "grid" | "anchor-seed" | "relation-seed"
 }
 
 // bapPartMargin approximates half a typical small symbol's rendered extent
@@ -736,6 +736,17 @@ func planBlockApply(in bapInput) (bapPlan, error) {
 	// origin to us (the old blind 4-column grid at 400,300 was a top overlap
 	// source — every second apply landed on the first).
 	offsets := bapRoleOffsets(roles, in.Layout, spacing, perRow, halfOf)
+	// A relational plan's origin is its anchor, not the first alphabetic grid
+	// cell. Reserve the relation envelope before picking a bounded origin.
+	if rel, ok := bslRelationsFrom(in.Layout); ok {
+		anchor, err := bslAnchorRole(in.Block, rel, bslBlockNets(in.Block))
+		if err != nil {
+			return plan, err
+		}
+		plan.Relational, plan.AnchorRole = true, anchor
+		offsets = bslSeedOffsets(in.Block, rel, anchor, roles)
+		plan.Warnings = append(plan.Warnings, "relation-seed: estimated anchor/flow/pair envelope; attach pin positions remain pending until fresh anchor readback. These coordinates are not a verified layout")
+	}
 	// **footprint 估算与网格间距是两件事**,不能共用一把尺:
 	//   - 网格间距回答「调用方想要多宽」——显式 `--spacing` 时就该听调用方的;
 	//   - footprint 回答「这块实际占多大」——物理事实,与 --spacing 无关。
@@ -751,17 +762,20 @@ func planBlockApply(in bapInput) (bapPlan, error) {
 	originX, originY, origin, warns := bapResolveOrigin(in, offsets, half)
 	plan.Origin = origin
 	plan.Warnings = append(plan.Warnings, warns...)
-	// 关系形态:标记出来并选定锚件。规划阶段所有件仍拿网格坐标(它们是**兜底**),
-	// 真正的位姿在 runBlockApply 里放完锚件、回读实测引脚后由求解器算 —— attach
-	// 需要目标引脚的真实坐标,而那只有把宿主放下去才知道。
-	if rel, ok := bslRelationsFrom(in.Layout); ok {
-		nets := bslBlockNets(in.Block)
-		anchor, aerr := bslAnchorRole(in.Block, rel, nets)
-		if aerr != nil {
-			return plan, aerr
+	if plan.Relational && in.Sheet != nil {
+		rect := bapBlockRect(originX, originY, offsets, half)
+		if !boxInside(rect, schUsableArea(*in.Sheet)) {
+			return plan, fmt.Errorf("relational layout preflight: no in-sheet envelope for %s; enlarge the sheet, split the block, or clear space (no parts placed)", in.Block.ID)
 		}
-		plan.Relational = true
-		plan.AnchorRole = anchor
+		obstacles := append([]layoutBBox(nil), in.Obstacles...)
+		if in.TitleBlock != nil {
+			obstacles = append(obstacles, *in.TitleBlock)
+		}
+		for _, obstacle := range obstacles {
+			if boxesGapOverlap(rect, obstacle, bapObstacleGap) {
+				return plan, fmt.Errorf("relational layout preflight: envelope for %s still intersects existing geometry; clear space or choose another sheet (no parts placed)", in.Block.ID)
+			}
+		}
 	}
 	for _, role := range roles {
 		p := in.Block.Parts[role]
@@ -1092,10 +1106,8 @@ func bapUnconsumed(b blocks.Block) []string {
 			out = append(out, k)
 		}
 	}
-	// 关系形态的 schematic_layout(flow/attach/pair)**本版尚未执行** —— 数据模型
-	// 与校验先落地(issue #180 P1),求解器是 P2。块库因此可以先收关系数据而不必
-	// 等求解器,但一落库 agent 就会当真,所以必须在 manifest 里明说"声明了没执行"
-	// (本项目的诚实性铁律:命令绝不能让人以为做到了没做到的事)。
+	// Planning only reserves a provisional envelope. Relations remain unconsumed
+	// until live anchor readback and constrained solving succeed.
 	if layout, err := b.SchematicLayout(); err == nil && layout.IsRelational() {
 		// 单返回值类型断言在失败时会 panic —— 用双返回值形式,块数据是外部输入。
 		if sl, ok := raw["schematic_layout"].(map[string]any); ok {
