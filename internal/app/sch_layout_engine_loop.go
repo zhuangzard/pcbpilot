@@ -6,6 +6,10 @@ import (
 
 var errLibLayoutBudget = errors.New("candidate search budget exhausted")
 
+// schematicSearchDefaultWindow is the candidate search's historical default
+// allowance; fallbacks never shrink the search below it.
+const schematicSearchDefaultWindow = 20000
+
 // annealHook observes the annealer's outcome (diagnostics).
 var annealHook func(error)
 
@@ -42,7 +46,14 @@ func solveSchematicLayout(input SchematicLayoutInput, measured map[string]powerL
 		// many fixtures) on half the budget; if it cannot finish, the annealer
 		// gets the other half (USB-C/CH340C zone, 5 peripherals: the search
 		// exhausted 20 000 candidates on "+3V3 has no safe naming lead").
+		// Two-peripheral zones (added to the fallback later) keep the
+		// search's default 20k window: stress L1 showed ESP32 UART/USB_CONN
+		// failing when the fallback took half of 20k, while 3-5 peripheral
+		// zones (AT32 CAN) need the annealer's half at 20k. Both measured.
 		half := *budget / 2
+		if len(pending) < 3 {
+			half = max(half, min(*budget, schematicSearchDefaultWindow))
+		}
 		rest := *budget - half
 		s := newSchematicRepairSearch(input, measured, members, hints, &half, routing)
 		out, err := s.solve(p, pending)

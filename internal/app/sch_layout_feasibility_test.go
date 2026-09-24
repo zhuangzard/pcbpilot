@@ -240,6 +240,9 @@ func poseMenuOnly() func() {
 }
 
 func TestFeasibilityLeadsWithHalfBudgetOnMeasuredPose(t *testing.T) {
+	old := schematicPoseMenuDefersToAnneal
+	schematicPoseMenuDefersToAnneal = true
+	defer func() { schematicPoseMenuDefersToAnneal = old }()
 	in, measured, allowed := feasibilityFixture(2)
 	budget, calls := 100000, 0
 	_, report, err := runSchematicLayoutFeasibility(in, measured, allowed, &budget, func(_ map[string]powerLayoutPlacement, quota *int) (*SchematicLayoutResult, error) {

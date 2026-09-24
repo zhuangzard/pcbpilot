@@ -119,9 +119,12 @@ func schematicFeasibilityPoses(input SchematicLayoutInput, allowed map[string][]
 // it three quarters of a larger allowance (capped at 150k) before exploring
 // optional rotations. Each fallback still receives a fair share of the same
 // remaining allowance. Unspent quota returns, never resets.
-// schematicPoseMenuDefersToAnneal: zones that get the annealer as a fallback
-// skip the pose menu too; the annealer picks rotations from the same set.
-var schematicPoseMenuDefersToAnneal = true
+// schematicPoseMenuDefersToAnneal leads with a half-budget measured-pose
+// attempt before the pose menu. OFF: stress L1 (36 zones x 4 budgets) made it
+// a net loss - it breaks the menu's 20k source window at small budgets (ESP32
+// UART/USB_CONN 20k -> 200k) and starves menu-only poses at large ones (AT32
+// MICRO_SD unsolved at 800k), for gains on 4 zones. Kept for experiments.
+var schematicPoseMenuDefersToAnneal = false
 
 func runSchematicLayoutFeasibility(input SchematicLayoutInput, measured map[string]powerLayoutPlacement, allowed map[string][]float64, budget *int,
 	run func(map[string]powerLayoutPlacement, *int) (*SchematicLayoutResult, error),
