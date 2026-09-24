@@ -44,7 +44,10 @@ const annealEvalsPerCandidate = 8
 
 // annealFallbackMinPeripherals: zones this size and up (below
 // annealMinPeripherals) get the annealer as a fallback after the search.
-const annealFallbackMinPeripherals = 3
+// Two peripherals qualify: a pin-dense core with two parts (AT32 TYPE_C,
+// USB_UART) needed 200k/50k candidates in the search alone; the fallback
+// solves both within 20k (stress L1, 2026-09-24).
+const annealFallbackMinPeripherals = 2
 
 // annealFallbackMinBudget: below this the budget is too small to split, and
 // the search keeps it whole (its bounded-failure reporting is pinned).
