@@ -25,9 +25,10 @@ func TestDebugKeepBest(t *testing.T) {
 	if v := os.Getenv("PCBAUTO_KB_MODES"); v != "" {
 		modes = strings.Split(v, ",")
 	}
-	defer func() { negotiateNoKeep = false }()
+	defer func() { negotiateNoKeep, negotiateNoStall = false, false }()
 	for _, m := range modes {
 		negotiateNoKeep = m == "old"
+		negotiateNoStall = m == "nostall"
 		var b *Board
 		if f == "synthetic" {
 			b = bgaBoard()

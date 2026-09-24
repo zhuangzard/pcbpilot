@@ -172,9 +172,9 @@ type router struct {
 	pbW, pbH    int
 	viaS        []int32
 	statics     map[int][]uint8
-	staticMRU   [4]staticEntry
+	staticMRU   [8]staticEntry
 	owners      map[int][]uint32 // nodeOK pad-owner summaries per radius key
-	ownerMRU    [4]ownerEntry
+	ownerMRU    [8]ownerEntry
 	viaC        []float64
 }
 
@@ -1528,6 +1528,21 @@ func (r *router) negotiate(ctx context.Context, res *RouteResult) error {
 		if c == 0 || time.Now().After(r.deadline) {
 			break
 		}
+		// Stalled: two iterations without a 3 % gain on the best conflict
+		// count. Negotiating on changes nothing, while legalisation — which
+		// otherwise starts after the deadline and times out on every repair —
+		// gets the time (RK3568: 176 → 177 → 176 → 174 over 3 min, 399
+		// connections lost to timeouts).
+		if tr := res.Stats.ConflictTrace; !negotiateNoStall && len(tr) >= 3 {
+			best := tr[0]
+			for _, v := range tr[:len(tr)-2] {
+				best = min(best, v)
+			}
+			if float64(min(tr[len(tr)-1], tr[len(tr)-2])) > 0.97*float64(best) {
+				res.Notes = append(res.Notes, sprintf("negotiation: stalled at %d conflicts (trace %v); legalising with the remaining time", c, tr))
+				break
+			}
+		}
 		// History: every over-used cell becomes more expensive for good.
 		for i, u := range r.gr.use {
 			if u > 1 {
@@ -1697,6 +1712,9 @@ func (s *searchStats) add(exp int, found []int32) {
 
 // noOwnerCache disables the nodeOK pad-owner summaries (A/B diagnostics).
 var noOwnerCache bool
+
+// negotiateNoStall disables the stall stop (A/B diagnostics).
+var negotiateNoStall bool
 
 // negotiateNoKeep disables rerouteKeepOnTimeout (A/B diagnostics).
 var negotiateNoKeep bool
