@@ -54,13 +54,28 @@ func TestStaleGuard_ReloadClears(t *testing.T) {
 	runStale(g, "pcb.via.create", "w1", true, nil)
 
 	// `doc reload` is a CLI composite; its daemon-visible discriminator is the
-	// debug.exec_js closeDocument step (a doc switch/document.open must NOT clear).
+	// verified document.close step (a doc switch/document.open must NOT clear).
+	runStaleResult(g, "document.close", "w1", true,
+		map[string]any{"uuid": "pcb-1", "tabId": "tab-1"},
+		map[string]any{"closed": true})
+
+	if resp := runStale(g, "pcb.drc.check", "w1", true, nil); resp.StaleRisk != "" {
+		t.Errorf("read after reload: want no staleRisk, got %q", resp.StaleRisk)
+	}
+}
+
+func TestStaleGuard_LegacyReloadCloseClears(t *testing.T) {
+	g := newStaleGuard()
+	runStale(g, "pcb.via.create", "w1", true, nil)
+
+	// Compatibility for older CLI versions that implemented reload through the
+	// generic debug action. New code uses document.close above.
 	runStaleResult(g, "debug.exec_js", "w1", true, map[string]any{
 		"code": `return await eda.dmt_EditorControl.closeDocument("tab-1")`,
 	}, map[string]any{"value": map[string]any{"closed": true}})
 
 	if resp := runStale(g, "pcb.drc.check", "w1", true, nil); resp.StaleRisk != "" {
-		t.Errorf("read after reload: want no staleRisk, got %q", resp.StaleRisk)
+		t.Errorf("read after legacy reload: want no staleRisk, got %q", resp.StaleRisk)
 	}
 }
 
@@ -68,10 +83,10 @@ func TestStaleGuard_FailedCloseDoesNotClear(t *testing.T) {
 	g := newStaleGuard()
 	runStale(g, "pcb.via.create", "w1", true, nil)
 
-	// debug.exec_js itself completed, but the host refused to close the tab.
-	runStaleResult(g, "debug.exec_js", "w1", true, map[string]any{
-		"code": `const closed = await eda.dmt_EditorControl.closeDocument("tab-1"); return {closed};`,
-	}, map[string]any{"value": map[string]any{"closed": false}})
+	// The typed action completed, but its result does not prove the tab closed.
+	runStaleResult(g, "document.close", "w1", true,
+		map[string]any{"uuid": "pcb-1", "tabId": "tab-1"},
+		map[string]any{"closed": false})
 
 	if resp := runStale(g, "pcb.drc.check", "w1", true, nil); resp.StaleRisk == "" {
 		t.Error("closeDocument returning false must preserve the stale mark")

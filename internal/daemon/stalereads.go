@@ -26,12 +26,12 @@ import (
 // State machine (per windowId, in-memory):
 //   SET    — a PCB-domain action with Mutates=true succeeds (catalog-driven,
 //            same source of truth as autosave), except the exempt sets below.
-//   CLEAR  — a `doc reload` completes. Reload is a CLI composite (save → close
-//            via debug.exec_js closeDocument → reopen), so the daemon keys on
-//            its unique discriminator: a successful debug.exec_js whose code
-//            calls closeDocument (a real close resets the per-doc engine
-//            state; a mere `doc switch`/document.open does NOT and must not
-//            clear). pcb.pour.rebuild also clears — it recomputes the pour
+//   CLEAR  — a `doc reload` completes. Reload is a CLI composite (save → typed
+//            document.close → reopen), so a successful close is the daemon-side
+//            proof that the old per-doc engine was discarded. Older clients used
+//            debug.exec_js closeDocument; keep accepting that proof during the
+//            compatibility window. A mere `doc switch`/document.open does NOT
+//            clear. pcb.pour.rebuild also clears — it recomputes the pour
 //            connectivity that goes stale (pour-mediated Connection Errors).
 //   WARN   — a PCB-domain read (Mutates=false) arrives while the flag is set:
 //            the response is returned with staleRisk populated.
@@ -107,13 +107,19 @@ func pcbStaleRead(req *protocol.Request) bool {
 }
 
 // pcbStaleClears reports whether a successful request resets the stale flag.
-// `doc reload` has no single typed action — its unique step is the
-// debug.exec_js closeDocument call (see package comment); pcb.pour.rebuild
-// clears because rebuilding pours is the documented stale-connectivity fix.
+// `doc reload` has no single action — its unique step is document.close (or the
+// legacy debug.exec_js closeDocument call); pcb.pour.rebuild clears because
+// rebuilding pours is the documented stale-connectivity fix.
 func pcbStaleClears(req *protocol.Request, resp *protocol.Response) bool {
 	switch req.Action {
 	case "pcb.pour.rebuild":
 		return true
+	case "document.close":
+		if resp == nil {
+			return false
+		}
+		closed, _ := resp.Result["closed"].(bool)
+		return closed
 	case "debug.exec_js":
 		code, _ := req.Payload["code"].(string)
 		if !strings.Contains(code, "closeDocument") || resp == nil {
