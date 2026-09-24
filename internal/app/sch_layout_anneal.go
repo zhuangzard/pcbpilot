@@ -1,0 +1,497 @@
+package app
+
+import (
+	"errors"
+	"fmt"
+	"hash/fnv"
+	"math"
+	"math/rand"
+	"sort"
+)
+
+// Annealing zone placer.
+//
+// The candidate search (sch_layout_repair.go) places one peripheral at a time
+// and learns about wiring and label space only after every part is down; on
+// dense zones it then backtracks chronologically until the budget runs out
+// (a 10-part WROOM zone: 200 000 candidates, 66 s, "+3V3 has no safe naming
+// lead"; the v1.6.0 live acceptance hit the same wall at 1 000 000). Most
+// terminal failures are one thing: peripherals crowding a pin whose net needs
+// a label or ground symbol there.
+//
+// This placer treats the zone as a whole:
+//   - every peripheral gets a discrete set of slots in front of its host pin
+//     (distance × lateral offset along the host pin's outward direction);
+//   - a greedy seed, then simulated annealing over slot choices with a cheap
+//     placement-only cost: overlap of bodies/designators, a clear outward lead
+//     for every connected pin (longer where a label or ground symbol must
+//     go), and estimated wire length — no routing in the loop;
+//   - the best distinct legal placements go through the unchanged terminal
+//     gate libFinishSchematicLayoutRegenerate (maze routing, naming,
+//     validateLibGeometry, validateSchCompositionNets);
+//   - a naming/route conflict lengthens the leads of the pins involved and
+//     re-anneals; if nothing passes, the caller falls back to the candidate
+//     search with the remaining budget.
+//
+// It is deterministic (seeded from the input) and debits the shared budget:
+// one candidate per cost evaluation, plus whatever the terminal gate spends.
+
+// annealMinPeripherals: smaller zones keep the candidate search, which solves
+// them quickly and whose exact results many fixtures pin.
+const annealMinPeripherals = 6
+
+const annealEvalsPerCandidate = 8
+
+var schematicAnnealDisabled bool
+
+// annealAttemptHook observes each terminal-gate attempt (diagnostics).
+var annealAttemptHook func(round, spent int, err error)
+
+type annealPart struct {
+	id       string
+	measured powerLayoutPlacement
+	hostID   string
+	hostPin  string
+	ownPin   string
+	depth    int
+	slots    [][2]float64 // (distance, lateral) from the host pin
+}
+
+type annealState []int // slot index per part (aligned with parts)
+
+type annealSolver struct {
+	input     SchematicLayoutInput
+	core      powerLayoutPlacement
+	parts     []*annealPart
+	policies  map[string]string
+	budget    *int
+	rng       *rand.Rand
+	leadBoost map[string]float64 // component/pin key → extra lead length
+	evals     int
+}
+
+func solveSchematicLayoutAnneal(input SchematicLayoutInput, measured map[string]powerLayoutPlacement, members []string, hints map[string]SchematicLayoutPeripheral, budget *int, routing *schematicRoutingContext) (*SchematicLayoutResult, error) {
+	core := measured[input.CoreComponentID]
+	core = plTranslate(core, -core.X, -core.Y)
+	s := &annealSolver{input: input, core: core, policies: input.NetPolicies, budget: budget, leadBoost: map[string]float64{}}
+	h := fnv.New64a()
+	for _, id := range members {
+		h.Write([]byte(id))
+	}
+	s.rng = rand.New(rand.NewSource(int64(h.Sum64() & 0x7fffffffffffffff)))
+	if err := s.buildParts(measured, members, hints); err != nil {
+		return nil, err
+	}
+	var lastErr error
+	best := s.seed()
+	for round := 0; round < 3; round++ {
+		// A fixed schedule (~2 500 candidates) so the placement does not
+		// depend on the budget; only tiny budgets shorten it.
+		iters := 20000
+		if *s.budget < 6000 {
+			iters = max(2000, *s.budget*2)
+		}
+		finals := s.anneal(best, iters)
+		if len(finals) == 0 {
+			lastErr = fmt.Errorf("annealing found no overlap-free placement")
+			break
+		}
+		for k, st := range finals {
+			if *s.budget <= 0 {
+				return nil, fmt.Errorf("%w: annealing placer", errLibLayoutBudget)
+			}
+			p := s.plan(st)
+			if validateLibGeometry(&p) != nil {
+				continue
+			}
+			// The best-ranked placement is the likeliest to pass: it gets most
+			// of what is left; the alternatives get smaller slices.
+			slice := min(*s.budget, max(6000, *s.budget/3))
+			if k == 0 {
+				slice = min(*s.budget, max(6000, *s.budget*3/4))
+			}
+			spent := slice
+			done, err := libFinishSchematicLayoutRegenerate(p, s.policies, &slice, routing)
+			*s.budget -= spent - slice
+			if err == nil {
+				return &SchematicLayoutResult{Placements: done.Placements, Wires: done.Wires, Flags: done.Flags, Score: libCandidateScore(done),
+					Search: &SchematicLayoutSearchDiagnostics{Strategy: fmt.Sprintf("anneal-v1 (round %d, %d evaluations)", round+1, s.evals), MovedComponents: []string{}}}, nil
+			}
+			lastErr = err
+			if annealAttemptHook != nil {
+				annealAttemptHook(round, spent-slice, err)
+			}
+			s.learn(err, p)
+		}
+		best = finals[0]
+	}
+	if lastErr == nil {
+		lastErr = errors.New("no candidate passed the terminal gate")
+	}
+	return nil, fmt.Errorf("annealing placer: %w", lastErr)
+}
+
+// buildParts resolves each peripheral's host pin (explicit attachTo, else the
+// first placed same-net pin as the candidate search would pick) and its slots.
+func (s *annealSolver) buildParts(measured map[string]powerLayoutPlacement, members []string, hints map[string]SchematicLayoutPeripheral) error {
+	placed := map[string]powerLayoutPlacement{s.input.CoreComponentID: s.core}
+	order := []string{s.input.CoreComponentID}
+	depth := map[string]int{s.input.CoreComponentID: 0}
+	pending := []string{}
+	for _, id := range members {
+		if id != s.input.CoreComponentID {
+			pending = append(pending, id)
+		}
+	}
+	for len(pending) > 0 {
+		progress := false
+		for i := 0; i < len(pending); i++ {
+			id := pending[i]
+			own := measured[id]
+			pairs, err := libAttachmentPairs(id, own, hints[id], placed, order, s.policies)
+			if err != nil {
+				return err
+			}
+			if len(pairs) == 0 {
+				continue
+			}
+			pair := pairs[0]
+			hostID := ""
+			for hid, hp := range placed {
+				for _, pin := range hp.Pins {
+					if pin == pair.host && hp.Designator != "" {
+						hostID = hid
+					}
+				}
+			}
+			if hostID == "" {
+				continue
+			}
+			part := &annealPart{id: id, measured: own, hostID: hostID, hostPin: pair.host.Number, ownPin: pair.own.Number, depth: depth[hostID] + 1}
+			for d := 15.0; d <= 120; d += 5 {
+				for lat := -60.0; lat <= 60; lat += 5 {
+					part.slots = append(part.slots, [2]float64{d, lat})
+				}
+			}
+			s.parts = append(s.parts, part)
+			// Hosts are placed at their measured pose for pin lookup only; the
+			// real position comes from the state.
+			placed[id] = own
+			order = append(order, id)
+			depth[id] = part.depth
+			pending = append(pending[:i], pending[i+1:]...)
+			i--
+			progress = true
+		}
+		if !progress {
+			return fmt.Errorf("annealing placer: %d peripherals have no connected host (%v)", len(pending), pending)
+		}
+	}
+	return nil
+}
+
+func annealDir(side string) (float64, float64) {
+	switch side {
+	case "left":
+		return -1, 0
+	case "right":
+		return 1, 0
+	case "up":
+		return 0, 1
+	}
+	return 0, -1
+}
+
+func annealSnap(v float64) float64 { return math.Round(v/5) * 5 }
+
+// plan materialises a state: parts in host-before-child order.
+func (s *annealSolver) plan(st annealState) powerLayoutPlan {
+	at := map[string]powerLayoutPlacement{s.input.CoreComponentID: s.core}
+	p := powerLayoutPlan{Placements: []powerLayoutPlacement{s.core}}
+	for i, part := range s.parts {
+		host := at[part.hostID]
+		hp, _ := libPin(host, part.hostPin)
+		side, _ := libPinSide(hp, host.BBox)
+		ux, uy := annealDir(side)
+		slot := part.slots[st[i]]
+		tx := annealSnap(hp.X + ux*slot[0] - uy*slot[1])
+		ty := annealSnap(hp.Y + uy*slot[0] + ux*slot[1])
+		op, _ := libPin(part.measured, part.ownPin)
+		c := plTranslate(part.measured, tx-op.X, ty-op.Y)
+		at[part.id] = c
+		p.Placements = append(p.Placements, c)
+	}
+	return p
+}
+
+func annealRects(c powerLayoutPlacement, pad float64) []layoutBBox {
+	out := []layoutBBox{{c.BBox.MinX - pad, c.BBox.MinY - pad, c.BBox.MaxX + pad, c.BBox.MaxY + pad}}
+	for _, t := range c.TextBBoxes {
+		out = append(out, layoutBBox{t.MinX - pad, t.MinY - pad, t.MaxX + pad, t.MaxY + pad})
+	}
+	return out
+}
+
+func annealOverlap(a, b layoutBBox) float64 {
+	w := math.Min(a.MaxX, b.MaxX) - math.Max(a.MinX, b.MinX)
+	h := math.Min(a.MaxY, b.MaxY) - math.Max(a.MinY, b.MinY)
+	if w <= 0 || h <= 0 {
+		return 0
+	}
+	return w * h
+}
+
+func annealSegHits(x0, y0, x1, y1 float64, r layoutBBox) float64 {
+	minX, maxX := math.Min(x0, x1), math.Max(x0, x1)
+	minY, maxY := math.Min(y0, y1), math.Max(y0, y1)
+	w := math.Min(maxX, r.MaxX) - math.Max(minX, r.MinX)
+	h := math.Min(maxY, r.MaxY) - math.Max(minY, r.MinY)
+	if w < 0 || h < 0 {
+		return 0
+	}
+	return math.Max(w, h) + 1
+}
+
+// cost is the placement-only objective (lower is better); legal reports
+// no overlap and no blocked lead.
+func (s *annealSolver) cost(st annealState) (float64, bool) {
+	// One candidate per annealEvalsPerCandidate evaluations: an evaluation is
+	// placement geometry only (no validateLibGeometry, maze or naming probe),
+	// roughly an order of magnitude cheaper than a search candidate.
+	if s.evals%annealEvalsPerCandidate == 0 {
+		*s.budget--
+	}
+	s.evals++
+	p := s.plan(st)
+	overlap, blocked, wire := 0.0, 0.0, 0.0
+	rects := make([][]layoutBBox, len(p.Placements))
+	for i, c := range p.Placements {
+		rects[i] = annealRects(c, 5)
+	}
+	for i := range p.Placements {
+		for j := i + 1; j < len(p.Placements); j++ {
+			for _, a := range rects[i] {
+				for _, b := range rects[j] {
+					overlap += annealOverlap(a, b)
+				}
+			}
+		}
+	}
+	// Leads: every connected pin keeps its outward stem clear of other parts;
+	// pins whose net needs a label or ground symbol need a longer lead.
+	for i, c := range p.Placements {
+		for _, pin := range c.Pins {
+			if pin.Net == "" {
+				continue
+			}
+			l := 15.0
+			switch s.policies[pin.Net] {
+			case "module_port", "local_ground", "local_power":
+				l = 35
+			}
+			l += s.leadBoost[c.Designator+"."+pin.Number]
+			side, err := libPinSide(pin, c.BBox)
+			if err != nil {
+				continue
+			}
+			ux, uy := annealDir(side)
+			x1, y1 := pin.X+ux*l, pin.Y+uy*l
+			for j, rs := range rects {
+				if j == i {
+					continue
+				}
+				for _, r := range rs {
+					blocked += annealSegHits(pin.X, pin.Y, x1, y1, r)
+				}
+			}
+		}
+	}
+	// Facing: an attached pin should exit towards its host pin; otherwise the
+	// wire has to wrap round the part's own body, which is what exhausts the
+	// terminal router.
+	facing := 0.0
+	at := map[string]powerLayoutPlacement{}
+	for i, c := range p.Placements {
+		if i == 0 {
+			at[s.input.CoreComponentID] = c
+			continue
+		}
+		at[s.parts[i-1].id] = c
+	}
+	for i, part := range s.parts[:len(p.Placements)-1] {
+		c := p.Placements[i+1]
+		op, _ := libPin(c, part.ownPin)
+		hp, _ := libPin(at[part.hostID], part.hostPin)
+		side, err := libPinSide(op, c.BBox)
+		if err != nil {
+			continue
+		}
+		ex, ey := annealDir(side)
+		if ex*(hp.X-op.X)+ey*(hp.Y-op.Y) <= 0 {
+			facing++
+		}
+		hs, err := libPinSide(hp, at[part.hostID].BBox)
+		if err == nil {
+			hx, hy := annealDir(hs)
+			if hx*(op.X-hp.X)+hy*(op.Y-hp.Y) <= 0 {
+				facing++
+			}
+		}
+	}
+	// Wire estimate: HPWL of every routed net over all pins in the zone.
+	nets := map[string]*layoutBBox{}
+	for _, c := range p.Placements {
+		for _, pin := range c.Pins {
+			if pin.Net == "" || s.policies[pin.Net] == "local_ground" {
+				continue
+			}
+			b, ok := nets[pin.Net]
+			if !ok {
+				nets[pin.Net] = &layoutBBox{pin.X, pin.Y, pin.X, pin.Y}
+				continue
+			}
+			b.MinX, b.MinY = math.Min(b.MinX, pin.X), math.Min(b.MinY, pin.Y)
+			b.MaxX, b.MaxY = math.Max(b.MaxX, pin.X), math.Max(b.MaxY, pin.Y)
+		}
+	}
+	for net, b := range nets {
+		w := 1.0
+		if s.policies[net] == "direct" {
+			w = 2
+		}
+		wire += w * (b.MaxX - b.MinX + b.MaxY - b.MinY)
+	}
+	env := layoutBBox{math.Inf(1), math.Inf(1), math.Inf(-1), math.Inf(-1)}
+	for _, c := range p.Placements {
+		env.MinX, env.MinY = math.Min(env.MinX, c.BBox.MinX), math.Min(env.MinY, c.BBox.MinY)
+		env.MaxX, env.MaxY = math.Max(env.MaxX, c.BBox.MaxX), math.Max(env.MaxY, c.BBox.MaxY)
+	}
+	area := (env.MaxX - env.MinX) * (env.MaxY - env.MinY)
+	return 50*overlap + 200*blocked + 150*facing + wire + 0.002*area, overlap == 0 && blocked == 0
+}
+
+// seed places parts greedily in order, each at its cheapest slot given the
+// parts already fixed (later parts at their first slot meanwhile).
+func (s *annealSolver) seed() annealState {
+	st := make(annealState, len(s.parts))
+	for i := range s.parts {
+		bestK, bestC := 0, math.Inf(1)
+		for k := 0; k < len(s.parts[i].slots); k += 3 {
+			st[i] = k
+			if c, _ := s.costPrefix(st, i+1); c < bestC {
+				bestK, bestC = k, c
+			}
+		}
+		st[i] = bestK
+	}
+	return st
+}
+
+// costPrefix evaluates only the first n parts (the rest are not yet placed).
+func (s *annealSolver) costPrefix(st annealState, n int) (float64, bool) {
+	saved := s.parts
+	s.parts = saved[:n]
+	c, ok := s.cost(st[:n])
+	s.parts = saved
+	return c, ok
+}
+
+// anneal returns up to eight distinct legal states, best first.
+func (s *annealSolver) anneal(start annealState, iters int) []annealState {
+	cur := append(annealState(nil), start...)
+	curC, _ := s.cost(cur)
+	type found struct {
+		st annealState
+		c  float64
+	}
+	var legal []found
+	seen := map[string]bool{}
+	record := func(st annealState, c float64) {
+		k := fmt.Sprint(st)
+		if seen[k] {
+			return
+		}
+		seen[k] = true
+		legal = append(legal, found{append(annealState(nil), st...), c})
+	}
+	if _, ok := s.cost(cur); ok {
+		record(cur, curC)
+	}
+	t0, t1 := 400.0, 1.0
+	for it := 0; it < iters && *s.budget > 0; it++ {
+		t := t0 * math.Pow(t1/t0, float64(it)/float64(iters))
+		i := s.rng.Intn(len(s.parts))
+		old := cur[i]
+		n := len(s.parts[i].slots)
+		if s.rng.Float64() < 0.35 {
+			cur[i] = s.rng.Intn(n)
+		} else {
+			// Neighbour slot: one step in distance or lateral offset.
+			per := 25 // lateral steps per distance row (-60..60 by 5)
+			d, l := old/per, old%per
+			switch s.rng.Intn(4) {
+			case 0:
+				d++
+			case 1:
+				d--
+			case 2:
+				l++
+			default:
+				l--
+			}
+			if d < 0 || l < 0 || l >= per || d*per+l >= n {
+				cur[i] = old
+				continue
+			}
+			cur[i] = d*per + l
+		}
+		c, ok := s.cost(cur)
+		if c <= curC || s.rng.Float64() < math.Exp((curC-c)/t) {
+			curC = c
+			if ok {
+				record(cur, c)
+			}
+		} else {
+			cur[i] = old
+		}
+	}
+	sort.SliceStable(legal, func(a, b int) bool { return legal[a].c < legal[b].c })
+	var out []annealState
+	for _, f := range legal {
+		out = append(out, f.st)
+		if len(out) == 8 {
+			break
+		}
+	}
+	return out
+}
+
+// learn lengthens the leads of the pins a terminal conflict names, so the
+// next round keeps more room there.
+func (s *annealSolver) learn(err error, p powerLayoutPlan) {
+	boost := func(net string) {
+		for _, c := range p.Placements {
+			for _, pin := range c.Pins {
+				if pin.Net == net {
+					s.leadBoost[c.Designator+"."+pin.Number] += 15
+				}
+			}
+		}
+	}
+	var nc *schematicNamingConflict
+	if errors.As(err, &nc) {
+		boost(nc.net)
+		return
+	}
+	var rc *schematicRouteConflict
+	if errors.As(err, &rc) {
+		boost(rc.net)
+		return
+	}
+	// Unclassified: widen every lead a little.
+	for _, c := range p.Placements {
+		for _, pin := range c.Pins {
+			s.leadBoost[c.Designator+"."+pin.Number] += 5
+		}
+	}
+}

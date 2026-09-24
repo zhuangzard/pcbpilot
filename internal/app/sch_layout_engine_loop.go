@@ -6,6 +6,9 @@ import (
 
 var errLibLayoutBudget = errors.New("candidate search budget exhausted")
 
+// annealHook observes the annealer's outcome (diagnostics).
+var annealHook func(error)
+
 func solveSchematicLayout(input SchematicLayoutInput, measured map[string]powerLayoutPlacement, members []string, hints map[string]SchematicLayoutPeripheral, budget *int, routing *schematicRoutingContext) (*SchematicLayoutResult, error) {
 	core := measured[input.CoreComponentID]
 	core = plTranslate(core, -core.X, -core.Y)
@@ -15,6 +18,24 @@ func solveSchematicLayout(input SchematicLayoutInput, measured map[string]powerL
 		if id != input.CoreComponentID {
 			pending = append(pending, id)
 		}
+	}
+	if !schematicAnnealDisabled && len(pending) >= annealMinPeripherals {
+		// The annealer may spend at most 60 % of the budget; the rest stays for
+		// the candidate search if it does not converge.
+		share := *budget * 3 / 5
+		local := share
+		out, err := solveSchematicLayoutAnneal(input, measured, members, hints, &local, routing)
+		*budget -= share - max(local, 0)
+		if annealHook != nil {
+			annealHook(err)
+		}
+		if err == nil {
+			return out, nil
+		}
+		if *budget <= 0 {
+			return nil, &SchematicLayoutSearchFailure{CandidatesUsed: 0, RemainingCandidates: 0, cause: errLibLayoutBudget}
+		}
+		// Fall back to the candidate search with what is left.
 	}
 	s := newSchematicRepairSearch(input, measured, members, hints, budget, routing)
 	return s.solve(p, pending)
