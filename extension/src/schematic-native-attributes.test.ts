@@ -38,7 +38,7 @@ for (const [label, source] of [
 	});
 }
 
-function installHost(source: Blob | undefined, mutate?: (state: Record<string, unknown>) => void) {
+function installHost(source: Blob | undefined, mutate?: (state: Record<string, unknown>) => void, readableExtra = false) {
 	const globals = globalThis as any;
 	const previousEda = globals.eda;
 	const previousTypes = globals.EDMT_EditorDocumentType;
@@ -51,10 +51,12 @@ function installHost(source: Blob | undefined, mutate?: (state: Record<string, u
 		ValueVisible: undefined, ParentPrimitiveId: 'part-1',
 	};
 	mutate?.(state);
-	const attribute = new Proxy({}, { get: (_target, prop) => {
-		if (typeof prop === 'string' && prop.startsWith('getState_')) return () => state[prop.slice(9)];
+	const proxy = (record: Record<string, unknown>) => new Proxy({}, { get: (_target, prop) => {
+		if (typeof prop === 'string' && prop.startsWith('getState_')) return () => record[prop.slice(9)];
 		return undefined;
 	} });
+	const attribute = proxy(state);
+	const extra = proxy({ ...state, PrimitiveId: 'attr-2', Key: 'Generated', KeyVisible: false, ValueVisible: true });
 	const empty = () => ({ getAll: async () => [], delete: async () => { deletes++; return true; } });
 	globals.EDMT_EditorDocumentType = { HOME: -1, BLANK: 0, SCHEMATIC_PAGE: 1, PCB: 3 };
 	globals.eda = {
@@ -65,7 +67,9 @@ function installHost(source: Blob | undefined, mutate?: (state: Record<string, u
 		sch_PrimitiveArc: empty(), sch_PrimitiveCircle: empty(), sch_PrimitiveRectangle: empty(),
 		sch_PrimitivePolygon: empty(), sch_PrimitiveText: empty(), sch_PrimitiveObject: empty(),
 		sch_PrimitiveAttribute: {
-			getAll: async () => [attribute], getAllPrimitiveId: async () => ['attr-1'], get: async () => attribute,
+			getAll: async () => readableExtra ? [attribute, extra] : [attribute],
+			getAllPrimitiveId: async () => readableExtra ? ['attr-1', 'attr-2'] : ['attr-1'],
+			get: async (id: string) => id === 'attr-1' ? attribute : readableExtra && id === 'attr-2' ? extra : undefined,
 			delete: async () => { deletes++; return true; },
 		},
 	};
@@ -80,7 +84,7 @@ function installHost(source: Blob | undefined, mutate?: (state: Record<string, u
 }
 
 test('page primitive read uses exact native nulls only for two unreadable visibility getters', async () => {
-	const host = installHost(await archive(head() + attr()));
+	const host = installHost(await archive(head() + attr()), undefined, true);
 	try {
 		const response: any = await runAction('schematic.components.list', { includePagePrimitives: true });
 		const actual = response.result.pagePrimitives.attributes[0];
@@ -88,6 +92,8 @@ test('page primitive read uses exact native nulls only for two unreadable visibi
 		assert.equal(actual.KeyVisible, null);
 		assert.equal(actual.ValueVisible, null);
 		assert.equal(actual.Value, 'gge1');
+		assert.equal(response.result.pagePrimitives.attributes[1].primitiveId, 'attr-2',
+			'a fully readable generated SDK attribute need not be in native source');
 		assert.equal(host.exports(), 1);
 		assert.equal(host.deletes(), 0);
 	}

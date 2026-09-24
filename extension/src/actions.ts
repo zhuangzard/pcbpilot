@@ -2377,10 +2377,10 @@ async function readSchPagePrimitiveState(): Promise<Record<string, Array<Record<
 	out.attributes = [];
 	const attributeValues = [...attributes.values()];
 	let nativePromise: Promise<Map<string, NativeSchematicAttribute>> | undefined;
-	const nativeReader = () => nativePromise ??= readCurrentNativePageAttributes().then(native => {
-		for (const id of attributes.keys()) if (!native.has(id)) throw new Error(`Page attribute ${id} is absent from the current native SCH_PAGE source.`);
-		return native;
-	});
+	// The SDK may expose generated, fully readable attributes absent from the
+	// persisted source. Native source is evidence only for an unreadable getter,
+	// never an alternate inventory of everything the editor exposes.
+	const nativeReader = () => nativePromise ??= readCurrentNativePageAttributes();
 	for (let offset = 0; offset < attributeValues.length; offset += 4) {
 		const batch = await Promise.all(attributeValues.slice(offset, offset + 4).map(async attribute => {
 			const record = await schAttributeStateRecord(attribute, nativeReader);

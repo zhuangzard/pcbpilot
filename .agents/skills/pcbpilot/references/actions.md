@@ -37,6 +37,8 @@ device identity、bbox、pins、wires 与连接摘要，不能用前者替代后
 官方当前工程 `.epro2` 源的目标 `SCH_PAGE` 中找到同 ID、同 key、同 parent、同 value 的
 `ATTR`，且源明确含 `keyVisible`/`valueVisible` 时补齐这两个字段。先后核对工程、文档和
 标签身份；源缺失、字段缺失或状态不符仍拒绝完整快照和清页，不把 `undefined` 猜成 `null`。
+宿主可能暴露未写入工程源的自动生成属性；其字段全由 SDK 正常读取时继续保留在 SDK 清单中，
+不要求这些可读属性出现在 `.epro2` 源里。
 
 ## SCH Apply
 
