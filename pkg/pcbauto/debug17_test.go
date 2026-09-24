@@ -63,6 +63,14 @@ func TestDebugKeepBest(t *testing.T) {
 			t.Logf("   [%s] grid use vs claims: %d cells over, %d under", phase, over, under)
 			t.Logf("   [%s] GND fanVias %d islands %d paths %d fixed %d", phase, len(g.fanVias), len(r.simulate(g)), len(g.paths), len(g.fixed))
 		}
+		if os.Getenv("PCBAUTO_KB_LIST") != "" {
+			drcRepairHook = func(round int, vs []Violation) {
+				for _, v := range vs {
+					t.Logf("   repair round %d: %s %s/%s at %.1f,%.1f need %.2f got %.2f", round, v.Kind, v.NetA, v.NetB, v.At.X, v.At.Y, v.Required, v.Gap)
+				}
+			}
+			defer func() { drcRepairHook = nil }()
+		}
 		res, err := Run(context.Background(), b, Options{Stack: StackOptions{Force: b.CopperLayers}, NoEscalate: true, Route: RouteOptions{Timeout: to}})
 		auditHook = nil
 		if err != nil {
@@ -83,6 +91,12 @@ func TestDebugKeepBest(t *testing.T) {
 			}
 		}
 		t.Logf("   no-legal-path by net %v", topN(nl, 6))
+		if os.Getenv("PCBAUTO_KB_LIST") != "" {
+			t.Logf("   pre-repair violations %d, repaired nets %d", res.Route.Stats.PreRepairViolations, res.Route.Stats.Repaired)
+			for _, u := range res.Route.Unrouted {
+				t.Logf("   unrouted %s %v %s", u.Net, u.Pads, u.Reason)
+			}
+		}
 		for _, n := range res.Route.Notes {
 			if strings.HasPrefix(n, "negotiation") || strings.Contains(n, "bridging") {
 				t.Log("   ", n)

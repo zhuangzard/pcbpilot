@@ -1522,6 +1522,7 @@ func (r *router) negotiate(ctx context.Context, res *RouteResult) error {
 		auditHook("initial", r)
 	}
 	it := 1
+	var lastIter time.Duration
 	for ; it < r.opt.MaxIters; it++ {
 		c := r.conflicts()
 		res.Stats.ConflictTrace = append(res.Stats.ConflictTrace, c)
@@ -1533,7 +1534,11 @@ func (r *router) negotiate(ctx context.Context, res *RouteResult) error {
 		// otherwise starts after the deadline and times out on every repair —
 		// gets the time (RK3568: 176 → 177 → 176 → 174 over 3 min, 399
 		// connections lost to timeouts).
-		if tr := res.Stats.ConflictTrace; !negotiateNoStall && len(tr) >= 3 {
+		// Only when iterations are expensive (the last one took over a tenth of
+		// the budget): cheap iterations keep finding gains after a plateau
+		// (ESP32-S3: 34 conflicts for three rounds, then 30; stopping there
+		// cost 10 points of completion).
+		if tr := res.Stats.ConflictTrace; !negotiateNoStall && len(tr) >= 3 && lastIter > r.opt.Timeout/10 {
 			best := tr[0]
 			for _, v := range tr[:len(tr)-2] {
 				best = min(best, v)
@@ -1553,6 +1558,7 @@ func (r *router) negotiate(ctx context.Context, res *RouteResult) error {
 			}
 		}
 		r.presFac *= 1.6
+		iterStart := time.Now()
 		for _, n := range order {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -1568,6 +1574,7 @@ func (r *router) negotiate(ctx context.Context, res *RouteResult) error {
 				r.rerouteKeepOnTimeout(n, res)
 			}
 		}
+		lastIter = time.Since(iterStart)
 	}
 	res.Stats.Iterations = it
 	// Strict legalisation: lowest-priority conflicting nets are re-routed with

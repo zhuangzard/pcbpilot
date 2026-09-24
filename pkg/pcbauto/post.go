@@ -70,6 +70,9 @@ func (r *router) emit(res *RouteResult) {
 		if round == 0 {
 			res.Stats.PreRepairViolations = len(drc.Violations)
 		}
+		if drcRepairHook != nil {
+			drcRepairHook(round, drc.Violations)
+		}
 		if len(order) == 0 {
 			break
 		}
@@ -501,6 +504,9 @@ func (r *router) dropFanoutAt(v Violation) bool {
 	c.n.failed = append(c.n.failed, Unrouted{Net: c.n.name, Pads: pads, Reason: "fanout-drc"})
 	return true
 }
+
+// drcRepairHook observes each DRC repair round (diagnostics).
+var drcRepairHook func(round int, v []Violation)
 
 // dropShare removes shared stub k of n and its claims.
 func (r *router) dropShare(n *rnet, k int) {
