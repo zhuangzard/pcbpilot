@@ -5,12 +5,15 @@ import (
 	"testing"
 )
 
-func TestEvaluateHostVersionV4Mainline(t *testing.T) {
+func TestEvaluateHostVersionV3AndV4Lines(t *testing.T) {
 	cases := []struct {
 		version string
 		want    string
 	}{
-		{"3.2.203", versionSevBlock},
+		{"2.2.40", versionSevWarn},
+		{"3.1.9", versionSevWarn},
+		{"3.2.149.88089769", versionSevOK},
+		{"3.2.203", versionSevOK},
 		{"4.0.9", versionSevWarn},
 		{"4.1.59", versionSevWarn},
 		{"4.1.60", versionSevOK},
@@ -31,18 +34,24 @@ func TestEvaluateHostVersionV4Mainline(t *testing.T) {
 func TestHostCompatibilityFromHealthWorstWindowWins(t *testing.T) {
 	rep := hostCompatibilityFromHealth([]byte(`{"windows":[
 	  {"windowId":"v4","easyedaVersion":"4.1.60"},
-	  {"windowId":"v3","easyedaVersion":"3.2.203"}]}`))
-	if rep.Verdict != versionSevBlock || len(rep.Findings) != 2 {
+	  {"windowId":"v3","easyedaVersion":"3.2.203"},
+	  {"windowId":"old","easyedaVersion":"4.0.1"}]}`))
+	if rep.Verdict != versionSevWarn || len(rep.Findings) != 3 {
 		t.Fatalf("unexpected report: %+v", rep)
 	}
-	if !strings.Contains(hostCompatibilitySummary(rep), "升级到 V4") {
-		t.Fatalf("summary does not give the required migration: %s", hostCompatibilitySummary(rep))
+	if !strings.Contains(hostCompatibilitySummary(rep), "未处于已验证版本") {
+		t.Fatalf("summary: %s", hostCompatibilitySummary(rep))
+	}
+	for _, f := range rep.Findings {
+		if f.WindowID == "v3" && !strings.Contains(f.Reason, "V3") {
+			t.Fatalf("V3 line must be named for provenance: %+v", f)
+		}
 	}
 }
 
 func TestHostCompatibilityIsSeparateFromExtensionAPIEngine(t *testing.T) {
-	rep := hostCompatibilityFromHealth([]byte(`{"windows":[{"easyedaVersion":"4.1.60"}]}`))
-	if rep.Baseline != "4.0.0" || rep.Recommended != "4.1.60" || rep.Verdict != versionSevOK {
-		t.Fatalf("unexpected V4 declaration: %+v", rep)
+	rep := hostCompatibilityFromHealth([]byte(`{"windows":[{"easyedaVersion":"3.2.149"}]}`))
+	if rep.Baseline != "3.2.0" || rep.Verdict != versionSevOK {
+		t.Fatalf("unexpected host declaration: %+v", rep)
 	}
 }

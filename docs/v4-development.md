@@ -1,7 +1,7 @@
 # EasyEDA Pro V4 适配开发台账
 
-> 主线宿主：EasyEDA Pro V4  
-> 最低基线：4.0.0  
+> pcbpilot 宿主政策（2026-09-24 起）：V3 3.2.x 与 V4 两条宿主线都受支持，本文只记录 V4 侧差异。  
+> V4 最低基线：4.0.0  
 > 推荐并已读验证：4.1.60（2026-09-21）  
 > 当前结论：`read-compatible / targeted-write-verified / full-E2E-pending`
 

@@ -16,7 +16,7 @@ metadata:
 
 ## 硬红线：不手工操作 EDA
 
-- 现场操作使用用户已打开的内置浏览器 Web EDA；禁止启动或切换到 EasyEDA 桌面版。
+- 现场操作使用用户已打开并连接的宿主（桌面或 Web，V3 3.2.x 或 V4 均可）；不自行启动或切换宿主，报告注明宿主形态与版本。
 - 禁止用 CUA、鼠标、键盘、画布、属性面板、工程树或其他 GUI 自动化创建、修复、补齐、
   保存、重载或验证工程；不能把手工编辑当作 typed 工具的兜底。
 - 所有工程写入只允许来自参数化数据，并经 `pcbpilot` Cobra 子命令、typed action 或
@@ -37,8 +37,9 @@ metadata:
    [environment-setup.md](references/environment-setup.md) 并运行显式版本对账。页面已打开不等于
    connector 已连接；`health.windows` 出现目标工程/文档后才访问 EDA。同一窗口的 typed 调用
    串行执行，subagent 只并行做离线分析或在主 Agent 停止访问窗口时做只读核查。
-   项目主线要求 EasyEDA Pro V4；`hostCompatibility` 为 V3/block 时停止现场写入并请用户升级，
-   V4 低于推荐 4.1.60 时提示升级。产品版本与 `engines.eda` API 版本不可混为一谈。
+   支持 EasyEDA Pro V3（3.2.x，已验证 3.2.149）与 V4（已验证 4.1.60）两条宿主线，两者加载同一
+   connector；`hostCompatibility` 只报告宿主线供溯源，不拒绝写入。已知差异在运行时探测或实测
+   （网络标记旋转探针、实测姿态位号框），不按版本号猜。产品版本与 `engines.eda` API 版本不可混为一谈。
 4. 保留原始快照，在副本或参数 JSON 中替换样例参数。先确定连接与功能所有权，再计算几何；
    使用现有 typed action、Cobra 子命令和 `pcbpilot apply`，不另造执行语言。
 5. 可 dry-run 的动作先看计划；写入后读取实际对象与差异。遇部分成功、超时或 stale ID，

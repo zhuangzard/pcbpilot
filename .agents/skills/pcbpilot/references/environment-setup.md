@@ -3,11 +3,15 @@
 仅在首次使用、升级或连接异常时读取。本地 IR 检查和离线规划不需要打开 EasyEDA；
 实际读写、DRC 和原生导图需要已连接的编辑器。
 
-## EasyEDA Pro V4 主线要求
+## 支持的宿主线：V3 3.2.x 与 V4
 
-项目主线宿主为 EasyEDA Pro V4，最低识别基线 4.0.0，推荐使用已验证的 4.1.60 或更新 V4。
-运行 `pcbpilot health` 后检查 `hostCompatibility`：V3 的 `block` 表示停止现场写入并升级；较老
-V4 的 `warn` 表示可读但应优先升级，未经 save→reload→readback 不能宣称写入兼容。宿主产品
+pcbpilot 支持 EasyEDA Pro V3（3.2.x，桌面 3.2.149 与 pro.easyeda.com 已验证）和 V4（Web 4.1.60
+已验证）。这是 pcbpilot 自有规则（2026-09-24），不跟随上游 easyeda-agent 的 V4-only 约定；上游
+也没有列出任何 V3 做不到的能力，其 V4 相关代码均为“有 V4 新特性才生效”的守卫。
+运行 `pcbpilot health` 后检查 `hostCompatibility`：受支持的 V3/V4 为 `ok`（报告注明宿主线）；
+3.2 以前、V4 早于 4.1.60 或未知新大版本为 `warn`，未经 save→reload→readback 不能宣称写入兼容。
+截至 2026-09-24，pro.easyeda.com（国际版线上）仍为 3.2.149；美国网络访问 pro.lceda.cn（V4）实测
+约 2% 请求整段无响应，海外优先用国际版或本机桌面版。宿主产品
 版本不参与 CLI/daemon/Connector 版本对齐；`extension.json` 的 `engines.eda ~3.2.0` 是扩展
 API 引擎版本，官方 V4 SDK 仍使用该 API 线，不得机械改成 4.x。开发状态见
 [`docs/v4-development.md`](https://github.com/zhuangzard/pcbpilot/blob/main/docs/v4-development.md)。

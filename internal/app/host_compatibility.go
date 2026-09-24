@@ -7,13 +7,18 @@ import (
 	"strings"
 )
 
-// EasyEDA Pro V4 is the supported mainline. The editor product version is
+// pcbpilot supports two host lines: EasyEDA Pro V3 (3.2.x, verified on the
+// 3.2.149 desktop and pro.easyeda.com builds) and V4 (4.x, verified on 4.1.60
+// Web). Both load the same connector: the extension API engine is 3.2 on
+// both. Known per-line behavior differences are detected or measured at run
+// time (netflag rotation probe, measured designator poses), so the line is
+// reported for provenance, not used to refuse writes. The editor product version is
 // deliberately kept separate from extension/extension.json's engines.eda:
 // that field describes the extension API engine and is still 3.2 in the
 // official V4 SDK template.
 const (
-	hostBaselineVersion    = "4.0.0"
-	hostRecommendedVersion = "4.1.60"
+	hostBaselineVersion    = "3.2.0"
+	hostRecommendedVersion = "3.2.149 / 4.1.60"
 )
 
 type hostCompatibilityFinding struct {
@@ -57,26 +62,29 @@ func evaluateHostVersion(windowID, raw string) hostCompatibilityFinding {
 	parts, ok := productVersionNumbers(raw)
 	if !ok {
 		f.Severity = versionSevSkipped
-		f.Reason = "宿主未上报可比较的 EasyEDA 产品版本，无法确认 V4 兼容基线"
+		f.Reason = "宿主未上报可比较的 EasyEDA 产品版本，无法确认宿主线"
 		return f
 	}
 	core := fmt.Sprintf("%d.%d.%d", parts[0], parts[1], parts[2])
 	switch {
-	case parts[0] < 4:
-		f.Severity = versionSevBlock
-		f.Reason = fmt.Sprintf("EasyEDA Pro %s 低于项目 V4 主线基线 %s", core, hostBaselineVersion)
-		f.Fix = "升级到 EasyEDA Pro V4；推荐使用当前已验证的 " + hostRecommendedVersion + " 或更新 V4 版本。"
+	case parts[0] < 3 || parts[0] == 3 && parts[1] < 2:
+		f.Severity = versionSevWarn
+		f.Reason = fmt.Sprintf("EasyEDA Pro %s 低于已验证的 V3 3.2 线", core)
+		f.Fix = "升级到 EasyEDA Pro 3.2.149 或 V4 4.1.60；未升级前写入须 save → reload → readback 验收。"
 	case parts[0] > 4:
 		f.Severity = versionSevWarn
-		f.Reason = fmt.Sprintf("EasyEDA Pro %s 高于已声明支持的 V4 主线，需按新大版本重新验收", core)
+		f.Reason = fmt.Sprintf("EasyEDA Pro %s 是未验证的新大版本，需按新大版本重新验收", core)
 		f.Fix = "在完成该大版本的 save → reload → readback 回归前，不要把它当作已验证宿主。"
+	case parts[0] == 3:
+		f.Severity = versionSevOK
+		f.Reason = fmt.Sprintf("EasyEDA Pro %s 属于支持的 V3 线（报告须注明 V3）", core)
 	case compareSemverNumbers(parts, [3]int{4, 1, 60}) < 0:
 		f.Severity = versionSevWarn
-		f.Reason = fmt.Sprintf("EasyEDA Pro %s 属于 V4，但低于推荐且已验证的 %s", core, hostRecommendedVersion)
-		f.Fix = "建议升级到 EasyEDA Pro " + hostRecommendedVersion + " 或更新 V4 版本。"
+		f.Reason = fmt.Sprintf("EasyEDA Pro %s 属于 V4，但低于已验证的 4.1.60", core)
+		f.Fix = "建议升级到 EasyEDA Pro 4.1.60 或更新 V4 版本。"
 	default:
 		f.Severity = versionSevOK
-		f.Reason = fmt.Sprintf("EasyEDA Pro %s 满足 V4 主线基线", core)
+		f.Reason = fmt.Sprintf("EasyEDA Pro %s 属于支持的 V4 线（报告须注明 V4）", core)
 	}
 	return f
 }
@@ -114,11 +122,11 @@ func compareSemverNumbers(a, b [3]int) int {
 func hostCompatibilitySummary(rep hostCompatibilityReport) string {
 	switch rep.Verdict {
 	case versionSevBlock:
-		return "✗ EasyEDA 宿主:低于 V4 主线要求；请升级到 V4，推荐 " + rep.Recommended
+		return "✗ EasyEDA 宿主:不受支持；见 hostCompatibility.findings"
 	case versionSevWarn:
-		return "⚠ EasyEDA 宿主:未处于已验证的 V4 推荐区间；见 hostCompatibility.findings"
+		return "⚠ EasyEDA 宿主:未处于已验证版本（V3 3.2.149 / V4 4.1.60）；见 hostCompatibility.findings"
 	case versionSevOK:
-		return "✓ EasyEDA 宿主:V4 主线（推荐基线 " + rep.Recommended + "）"
+		return "✓ EasyEDA 宿主:受支持（V3 3.2 线或 V4 线；报告注明宿主版本）"
 	default:
 		return "· EasyEDA 宿主:未判定（无窗口或版本不可读）"
 	}
