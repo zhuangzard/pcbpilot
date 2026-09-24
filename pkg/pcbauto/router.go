@@ -135,9 +135,11 @@ type router struct {
 	// they belong to: a net with a ball there may neck down anywhere inside.
 	bgaZones []bgaZone
 	// escOf is each pre-escaped ball's escape (its exit is the access node).
-	escOf   map[*Pad]*bgaEsc
-	escIdx  *escIndex // exact fixed-copper index while escapes are planned
-	yielded int       // plane fan-outs dropped for a blocked signal
+	escOf       map[*Pad]*bgaEsc
+	escIdx      *escIndex      // exact fixed-copper index while escapes are planned
+	yielded     int            // plane fan-outs dropped for a blocked signal
+	yieldedPour int            // pour-net fan-out vias yielded in DRC repair
+	repairStuck map[*rnet]bool // nets that could not move in DRC repair
 
 	b      *Board
 	st     *Stackup

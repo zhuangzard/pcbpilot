@@ -45,6 +45,11 @@ func (r *router) emit(res *RouteResult) {
 		if len(c) == 2 && c[0].plan.Priority < c[1].plan.Priority {
 			c[0], c[1] = c[1], c[0]
 		}
+		// A party that could not move without losing its connection stays;
+		// the other one moves instead.
+		if len(c) == 2 && r.repairStuck[c[0]] && !r.repairStuck[c[1]] {
+			c[0], c[1] = c[1], c[0]
+		}
 		if len(c) > 1 {
 			c = c[:1]
 		}
@@ -58,6 +63,7 @@ func (r *router) emit(res *RouteResult) {
 		ts, vs := collect()
 		drc := CheckDRC(r.b, r.an, r.st, ts, vs)
 		bad := map[*rnet]bool{}
+		at := map[*rnet][]Violation{}
 		var order []*rnet
 		for _, v := range drc.Violations {
 			for _, n := range routedOnly(v) {
@@ -65,6 +71,7 @@ func (r *router) emit(res *RouteResult) {
 					bad[n] = true
 					order = append(order, n)
 				}
+				at[n] = append(at[n], v)
 			}
 		}
 		if round == 0 {
@@ -79,6 +86,10 @@ func (r *router) emit(res *RouteResult) {
 		res.Stats.Repaired += len(order)
 		r.strict = true
 		for _, n := range order {
+			if round < repairLocalRounds && !(n.onPlane || n.poured) && !repairWholeNet && r.repairLocal(n, at[n]) {
+				outs[n] = r.emitNet(n)
+				continue
+			}
 			r.applyClaims(n.claims, -1)
 			n.claims, n.paths = nil, nil
 			// Grow the margin gently: a quarter cell first (most misses are
@@ -113,8 +124,14 @@ func (r *router) emit(res *RouteResult) {
 		}
 		r.strict = false
 	}
+	if auditHook != nil {
+		auditHook("repair", r)
+	}
 	// High-speed pairs: equalise intra-pair length before the final gate.
 	r.tuneLengths(outs, res)
+	if auditHook != nil {
+		auditHook("tune", r)
+	}
 	// Final gate: nothing that violates DRC is shipped. A violation with a
 	// routed party drops that net's routing; one with none — two fan-out vias,
 	// a fan-out via and the board edge — drops the offending fan-out (R-0: the
@@ -503,6 +520,187 @@ func (r *router) dropFanoutAt(v Violation) bool {
 	}
 	c.n.failed = append(c.n.failed, Unrouted{Net: c.n.name, Pads: pads, Reason: "fanout-drc"})
 	return true
+}
+
+// repairWholeNet restores whole-net rerouting in the first repair round
+// (A/B diagnostics).
+var repairWholeNet bool
+
+// repairLocal is the first DRC repair of a signal net: only the connections
+// that pass a violation are ripped and re-routed, with the track body (not
+// the pad-entry neck) widened by a quarter cell. Rerouting the whole net with
+// its clearance inflated everywhere walled fine-pitch pins in: their own
+// access nodes failed at the inflated neck radius and whole connections were
+// dropped (MIPI: FPC1.14, FPC1.5). Returns false when no path is near a
+// violation (the caller then reroutes the whole net as before).
+func (r *router) repairLocal(n *rnet, vs []Violation) bool {
+	gr := r.gr
+	near := func(p rpath) bool {
+		pts := make([]Point, 0, len(p.nodes)+2)
+		if p.fromPad {
+			pts = append(pts, p.from)
+		}
+		for _, i := range p.nodes {
+			_, x, y := gr.xy(int(i))
+			pts = append(pts, gr.center(x, y))
+		}
+		if p.toPad {
+			pts = append(pts, p.to)
+		}
+		for _, v := range vs {
+			// v.At lies on one of the two objects — often the other party's
+			// via centre — so allow a via radius on top of the gap.
+			tol := n.width/2 + v.Required + 2*gr.g
+			if !repairNarrow {
+				tol += r.b.Rules.ViaDia / 2
+			}
+			for k := 1; k < len(pts); k++ {
+				if d, _ := segDist(v.At, pts[k-1], pts[k]); d <= tol {
+					return true
+				}
+			}
+			if len(pts) == 1 && pts[0].Dist(v.At) <= tol {
+				return true
+			}
+		}
+		return false
+	}
+	var keep []rpath
+	hit := 0
+	for _, p := range n.paths {
+		if near(p) {
+			hit++
+		} else {
+			keep = append(keep, p)
+		}
+	}
+	if hit == 0 {
+		if repairLocalHook != nil {
+			best := math.Inf(1)
+			for _, p := range n.paths {
+				for _, i := range p.nodes {
+					_, x, y := gr.xy(int(i))
+					for _, v := range vs {
+						best = math.Min(best, gr.center(x, y).Dist(v.At))
+					}
+				}
+			}
+			repairLocalHook(sprintf("%s (no path near %d violations; %d paths; nearest node %.1f mil; first at %.1f,%.1f %s/%s)", n.name, len(vs), len(n.paths), best, vs[0].At.X, vs[0].At.Y, vs[0].NetA, vs[0].NetB), 0, 0, 0, false, nil)
+		}
+		return false
+	}
+	origPaths := append([]rpath(nil), n.paths...)
+	origClaims := append([]int32(nil), n.claims...)
+	origR, origV := n.radius, n.viaR
+	r.applyClaims(n.claims, -1)
+	n.claims, n.paths = nil, keep
+	// Widen the body only: neckR keeps its clearance so pad entries stay legal.
+	d := gr.g / 4
+	n.radius += d
+	n.viaR += d
+	groups := r.pathGroups(n)
+	if len(groups) > 1 {
+		saved := n.groups
+		n.groups = groups
+		ok := r.routeNetKeep(n, true)
+		n.groups = saved
+		if repairLocalHook != nil {
+			repairLocalHook(n.name, hit, len(keep), len(groups), ok, n.failed)
+		}
+		if !ok && len(n.escs) > 0 {
+			// Its own fixed BGA escapes may be what walls it in: undo and let
+			// the whole-net repair release them (it knows how).
+			r.applyClaims(n.claims, -1)
+			n.paths, n.claims, n.failed = origPaths, origClaims, nil
+			n.radius, n.viaR = origR, origV
+			r.applyClaims(n.claims, +1)
+			return false
+		}
+		if !ok && !repairNoYield {
+			// The connection had no other way. Restore it only when the
+			// violation can be cleared otherwise: a pour-net via it grazed
+			// yields (the pad still reaches the pour), or the other party —
+			// a routed signal net that has not been stuck itself — moves in
+			// the next round. A restored path that nobody clears would take
+			// the whole net down at the final gate, which costs more than
+			// this one connection.
+			yielded := r.yieldPourVias(n, vs)
+			swap := false
+			if !yielded && !repairNoSwap && !r.repairStuck[n] {
+				for _, v := range vs {
+					for _, name := range []string{v.NetA, v.NetB} {
+						if o := r.byName[name]; o != nil && o != n && !o.onPlane && !o.poured && len(o.paths) > 0 && !r.repairStuck[o] {
+							swap = true
+						}
+					}
+				}
+			}
+			if yielded || swap {
+				r.applyClaims(n.claims, -1)
+				n.paths, n.claims, n.failed = origPaths, origClaims, nil
+				n.radius, n.viaR = origR, origV
+				r.applyClaims(n.claims, +1)
+				if swap {
+					if r.repairStuck == nil {
+						r.repairStuck = map[*rnet]bool{}
+					}
+					r.repairStuck[n] = true
+				}
+			}
+		}
+	} else {
+		for _, p := range n.paths {
+			n.claims = r.claimNodes(n, p.nodes, n.claims)
+		}
+		n.claims = r.minusFixed(n, dedup(n.claims))
+		r.applyClaims(n.claims, +1)
+	}
+	return true
+}
+
+// repairLocalHook observes each local repair (diagnostics).
+var repairLocalHook func(net string, hit, kept, groups int, ok bool, failed []Unrouted)
+
+// A/B switches for the local repair (diagnostics).
+var (
+	repairNarrow      bool
+	repairNoSwap      bool
+	repairLocalRounds = 2
+)
+
+// repairNoYield disables yieldPourVias (A/B diagnostics).
+var repairNoYield bool
+
+// yieldPourVias removes the unpinned fan-out vias of poured nets that the
+// violations vs of net n touch. A poured net's pad still reaches its pour
+// without the via, so the via is the cheaper party to lose than n's only
+// connection. Reports whether anything was removed.
+func (r *router) yieldPourVias(n *rnet, vs []Violation) bool {
+	any := false
+	for _, v := range vs {
+		for _, name := range []string{v.NetA, v.NetB} {
+			o := r.byName[name]
+			if o == nil || o == n || !o.poured {
+				continue
+			}
+			var keep []int
+			dropped := false
+			for k, via := range o.fanVias {
+				pinned := k < len(o.fanPinned) && o.fanPinned[k]
+				if !pinned && via.C.Dist(v.At) <= via.Dia/2+v.Required+2 {
+					dropped = true
+					continue
+				}
+				keep = append(keep, k)
+			}
+			if dropped {
+				r.keepFanouts(o, keep)
+				r.yieldedPour++
+				any = true
+			}
+		}
+	}
+	return any
 }
 
 // drcRepairHook observes each DRC repair round (diagnostics).

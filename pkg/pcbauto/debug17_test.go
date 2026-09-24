@@ -25,10 +25,17 @@ func TestDebugKeepBest(t *testing.T) {
 	if v := os.Getenv("PCBAUTO_KB_MODES"); v != "" {
 		modes = strings.Split(v, ",")
 	}
-	defer func() { negotiateNoKeep, negotiateNoStall = false, false }()
+	defer func() { negotiateNoKeep, negotiateNoStall, repairWholeNet = false, false, false }()
 	for _, m := range modes {
 		negotiateNoKeep = m == "old"
 		negotiateNoStall = m == "nostall"
+		repairWholeNet = m == "wholenet"
+		repairNarrow = m == "narrow"
+		repairNoSwap = m == "noswap"
+		repairLocalRounds = 2
+		if m == "round0" {
+			repairLocalRounds = 1
+		}
 		var b *Board
 		if f == "synthetic" {
 			b = bgaBoard()
@@ -63,7 +70,24 @@ func TestDebugKeepBest(t *testing.T) {
 			t.Logf("   [%s] grid use vs claims: %d cells over, %d under", phase, over, under)
 			t.Logf("   [%s] GND fanVias %d islands %d paths %d fixed %d", phase, len(g.fanVias), len(r.simulate(g)), len(g.paths), len(g.fixed))
 		}
+		if nets := os.Getenv("PCBAUTO_KB_WATCH"); nets != "" {
+			auditHook = func(phase string, r *router) {
+				for _, name := range strings.Split(nets, ",") {
+					if n := r.byName[name]; n != nil && name == "GND" {
+						t.Logf("   [%s] GND onPlane=%v poured=%v fanVias=%d", phase, n.onPlane, n.poured, len(n.fanVias))
+					}
+					if n := r.byName[name]; n != nil {
+						t.Logf("   [%s] %s paths %d failed %v", phase, name, len(n.paths), n.failed)
+					}
+				}
+			}
+			defer func() { auditHook = nil }()
+		}
 		if os.Getenv("PCBAUTO_KB_LIST") != "" {
+			repairLocalHook = func(net string, hit, kept, groups int, ok bool, failed []Unrouted) {
+				t.Logf("   local repair %s: ripped %d kept %d groups %d ok=%v failed=%v", net, hit, kept, groups, ok, failed)
+			}
+			defer func() { repairLocalHook = nil }()
 			drcRepairHook = func(round int, vs []Violation) {
 				for _, v := range vs {
 					t.Logf("   repair round %d: %s %s/%s at %.1f,%.1f need %.2f got %.2f", round, v.Kind, v.NetA, v.NetB, v.At.X, v.At.Y, v.Required, v.Gap)
