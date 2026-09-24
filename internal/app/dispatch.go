@@ -152,9 +152,12 @@ type actionContext struct {
 // the persisted file (the daemon fills Path after decoding the connector's
 // inlineBase64). Mirrors protocol.Artifact without importing it here.
 type artifactRef struct {
+	ID       string `json:"id,omitempty"`
 	Path     string `json:"path,omitempty"`
 	FileName string `json:"fileName,omitempty"`
 	MimeType string `json:"mimeType,omitempty"`
+	Size     int64  `json:"size,omitempty"`
+	SHA256   string `json:"sha256,omitempty"`
 }
 
 // saveFirstArtifact copies the response's first persisted artifact to `out`.

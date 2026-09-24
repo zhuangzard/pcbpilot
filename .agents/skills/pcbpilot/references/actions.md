@@ -101,6 +101,14 @@ Playbook 使用 `version:1`、`meta` 和有序 `steps`。每步只选一种执�
 
 ## 图纸与明细表
 
+`lib symbol export-source --uuid <sheet.symbol.uuid> --library <sheet.symbol.libraryUuid>
+[--out source.elibz2]` 经官方 `sys_FileManager.getSymbolFileBySymbolUuid` 导出原始符号包。
+从 `sch list` 的 `componentType:"sheet"` 记录取 **symbol** UUID，不要误用 `component`
+中的器件 UUID。CLI 对导出物大小、落盘路径及 SHA-256 做核对；超过 8 MiB 或权限不足即失败。
+此命令只保留未改写的原始证据，尚无已验证的 `.elibz2` 图框解析器，不能把符号包、纸张
+外 bbox 或图签比例估计称为红色绘图区内框实测。下载库权限和当前宿主是否能导出内置图框
+符号须现场只读验证。
+
 `sch titleblock-get` 先取得实际字段名；`sch titleblock --data` 只传要改的明细项，按
 `--doc` 钉住聚焦页。不要把 get 返回的整包字段写回，尤其 Device/Symbol、几何与 `@` 投影项。
 连接器按字段回读：unknownKeys 应修正键名，partial/notApplied 应检查实际状态，不能盲重试。

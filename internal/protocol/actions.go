@@ -496,6 +496,15 @@ func AllActions() []ActionSpec {
 			Outputs:     []string{"symbol"},
 		},
 		{
+			Name:        "library.symbol.export_source",
+			Domain:      DomainLibrary,
+			Phase:       1,
+			NeedsWindow: true,
+			Description: "Export the exact native .elibz2 symbol archive via sys_FileManager.getSymbolFileBySymbolUuid. Read-only; this does not interpret sheet borders or title-block geometry. The connector refuses missing, empty, or >8 MiB files; the daemon persists the original bytes with SHA-256.",
+			Inputs:      []string{"uuid (symbol UUID, required)", "libraryUuid (required)"},
+			Outputs:     []string{"uuid", "libraryUuid", "fileType=elibz2", "size", "artifact path/size/SHA-256"},
+		},
+		{
 			Name:        "library.symbol.build",
 			Domain:      DomainLibrary,
 			Phase:       1,

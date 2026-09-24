@@ -5476,6 +5476,31 @@ const librarySymbolGet: Handler = async (payload) => {
 	}
 };
 
+// The official symbol-file getter returns the native archive, not rendered
+// geometry. Keep it intact for offline inspection of sheet-symbol internals.
+// 8 MiB becomes < 11 MiB after base64, below the daemon's 32 MiB WS limit.
+const MAX_SYMBOL_SOURCE_BYTES = 8 << 20;
+const librarySymbolExportSource: Handler = async (payload) => {
+	const uuid = requireString(payload, 'uuid');
+	const libraryUuid = requireString(payload, 'libraryUuid');
+	if (typeof eda.sys_FileManager?.getSymbolFileBySymbolUuid !== 'function') {
+		throw new ActionError(ErrorCodes.EDA_API_UNAVAILABLE, 'Official symbol-file getter is unavailable in this EasyEDA build.');
+	}
+	let file: File | undefined;
+	try {
+		file = await eda.sys_FileManager.getSymbolFileBySymbolUuid(uuid, libraryUuid, 'elibz2');
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to export the native symbol file.');
+	}
+	if (!file || !Number.isSafeInteger(file.size) || file.size <= 0 || file.size > MAX_SYMBOL_SOURCE_BYTES) {
+		throw new ActionError(ErrorCodes.INVALID_STATE,
+			`Official symbol file is missing, empty, or exceeds the ${MAX_SYMBOL_SOURCE_BYTES}-byte transfer limit.`);
+	}
+	const artifact = await blobToArtifact(file, 'library_symbol_source', 'symbol-source.elibz2', 'application/octet-stream');
+	return { result: { uuid, libraryUuid, fileType: 'elibz2', size: file.size, artifactId: artifact.id }, artifacts: [artifact] };
+};
+
 type SymbolPinSpec = {
 	x: number; y: number; number: string; name: string; rotation: number;
 	length: number; shape: ESCH_PrimitivePinShape; pinType: ESCH_PrimitivePinType;
@@ -14096,6 +14121,7 @@ const HANDLERS: Record<string, Handler> = {
 	'library.symbol.create': librarySymbolCreate,
 	'library.symbol.build': librarySymbolBuild,
 	'library.symbol.get': librarySymbolGet,
+	'library.symbol.export_source': librarySymbolExportSource,
 	'library.symbol.delete': librarySymbolDelete,
 	'library.model3d.create': libraryModel3DCreate,
 	'library.model3d.get': libraryModel3DGet,

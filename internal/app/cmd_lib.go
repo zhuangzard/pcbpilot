@@ -388,6 +388,7 @@ func newLibrarySymbolCmd(cfg *appConfig, stdout, stderr io.Writer, window *strin
 		group.AddCommand(c)
 	}
 	addLibraryDeleteCmd(group, cfg, stdout, stderr, window, "library.symbol.delete", "symbol")
+	group.AddCommand(newLibrarySymbolExportSourceCmd(cfg, stdout, stderr, window))
 	return group
 }
 

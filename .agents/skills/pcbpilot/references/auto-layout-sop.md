@@ -20,6 +20,13 @@ pcbpilot sch designator-geometry --project <project> --doc <page> --out designat
 pcbpilot sch sheet-geometry --project <project> --json
 ```
 
+纸张门禁需从 typed 官方读取得到**红色绘图区内框**及图签真实占位；只有纸张外尺寸
+或图签 keepout 时，保守内缩矩形只能用于离线探索，不能记为内框入页验收通过。
+缺少精确内框 getter 时保留原响应并标 `unsupported`，先补采集能力再做现场写前门禁。
+如需调查内置图框的原始符号，可由 `sch list` 的 sheet 组件取 `symbol.uuid/libraryUuid`，
+使用 `lib symbol export-source` 保存官方 `.elibz2` 原包；该导出目前仅为 source-only 证据，
+不得将其或 A4 纸张外框直接填成 `sheetBorder`。命令边界见 [actions.md](actions.md#图纸与明细表)。
+
 在副本中依据官方典型电路补齐器件、引脚和网络；修复非标准位号后再布局。
 外围要围绕核心引脚并直接接线。已有网络与显式 NC 保持可追溯，不能把缺数据当作悬空或 NC。
 按导出结果的 parent ID 把可见位号 bbox 放入相应源测量的 `textBboxes`；导出失败先补
