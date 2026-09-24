@@ -21,6 +21,7 @@ type SchematicLayoutSearchDiagnostics struct {
 	ConflictPasses         int                          `json:"conflictPasses"`
 	SkippedCheckpoints     int                          `json:"skippedCheckpoints"`
 	PlacementFailures      int                          `json:"placementFailures"`
+	DependencyShellJumps   int                          `json:"dependencyShellJumps"`
 	BackjumpTargets        []string                     `json:"backjumpTargets,omitempty"`
 	RouteBackjumpTargets   []string                     `json:"routeBackjumpTargets,omitempty"`
 	CheckpointAlternatives map[string]int               `json:"checkpointAlternatives,omitempty"`
@@ -240,7 +241,7 @@ func (s *schematicRepairSearch) search(p powerLayoutPlan, pending []string) (*po
 		return nil, errSchematicRepairFocus
 	}
 	if len(pending) == 0 {
-		limit := s.sliceBudget()
+		limit := s.terminalSliceBudget()
 		before := limit
 		out, err := libFinishSchematicLayoutRegenerate(p, s.input.NetPolicies, &limit, s.routing)
 		*s.budget -= before - limit
@@ -259,6 +260,16 @@ func (s *schematicRepairSearch) search(p powerLayoutPlan, pending []string) (*po
 					return repaired, nil
 				}
 			}
+			var routeConflict *schematicRouteConflict
+			if errors.As(err, &routeConflict) {
+				// A complete placement with a proven movable blocker is worth
+				// one nearest-grid trial before rolling back many unrelated
+				// checkpoints. A failed trial still falls through to bounded
+				// checkpoint search under the same budgets.
+				if repaired, ok := s.tryTerminalRelocation(p, s.targetedTerminalBlockers(&p, err), "route-blocker-near"); ok {
+					return repaired, nil
+				}
+			}
 			var namingConflict *schematicNamingConflict
 			if errors.As(err, &namingConflict) {
 				if repaired, ok := s.tryNamingIslandRelocation(p, err); ok {
@@ -268,30 +279,7 @@ func (s *schematicRepairSearch) search(p powerLayoutPlan, pending []string) (*po
 		}
 		return out, err
 	}
-	pending = append([]string(nil), pending...)
-	sort.SliceStable(pending, func(i, j int) bool {
-		a, b := libPeripheralPriority(s.measured[pending[i]], s.input.NetPolicies), libPeripheralPriority(s.measured[pending[j]], s.input.NetPolicies)
-		if a != b {
-			return a < b
-		}
-		// Place the most constrained symbol before small independent branches.
-		// Otherwise arbitrary source-array order can fill the core neighborhood
-		// with two-pin chains, then force a dense connector and its owned
-		// peripherals into unrelated leftover gaps.
-		a, b = libConnectedPinCount(s.measured[pending[i]]), libConnectedPinCount(s.measured[pending[j]])
-		if a != b {
-			return a > b
-		}
-		// Among equally sized peripherals, reserve dense host fanout before
-		// unrelated chains occupy it. This uses only explicit ownership and
-		// measured connected-pin cardinality; automatic multi-host parts remain
-		// flexible and are therefore considered after pinned attachments.
-		a, b = schematicAttachmentHostPinCount(pending[i], s.measured, s.hints), schematicAttachmentHostPinCount(pending[j], s.measured, s.hints)
-		if a != b {
-			return a > b
-		}
-		return s.depth[pending[i]] > s.depth[pending[j]]
-	})
+	pending = s.orderedPending(p, pending)
 	placed := map[string]powerLayoutPlacement{}
 	for _, c := range p.Placements {
 		for _, id := range s.members {
@@ -364,6 +352,14 @@ func (s *schematicRepairSearch) search(p powerLayoutPlan, pending []string) (*po
 					return nil, childErr
 				}
 				s.diagnostics.BackjumpTargets = append(s.diagnostics.BackjumpTargets, id)
+				if jump := s.dependencyShellJump(id, placementConflict); jump > 0 {
+					// The attached child failed its bounded search at this host
+					// pose. Retry the host at a farther shell sized from
+					// the child's measured body, instead of spending its remaining
+					// two checkpoint choices in the same cramped near shell.
+					cursor += jump
+					s.diagnostics.DependencyShellJumps++
+				}
 			}
 			var conflict *schematicRouteConflict
 			if errors.As(childErr, &conflict) {
@@ -391,6 +387,76 @@ func (s *schematicRepairSearch) search(p powerLayoutPlan, pending []string) (*po
 		lastErr = fmt.Errorf("disconnected or cyclic attachment for %v", pending)
 	}
 	return nil, lastErr
+}
+
+// Keep an explicitly owned child close to its placed host in the search order.
+// Each recursive checkpoint reorders the still-pending members, so a child
+// skipped before its host becomes the next eligible placement after that host.
+func (s *schematicRepairSearch) orderedPending(checkpoint powerLayoutPlan, pending []string) []string {
+	ordered := append([]string(nil), pending...)
+	hostRecency := make(map[string]int, len(checkpoint.Placements))
+	for i, placement := range checkpoint.Placements {
+		hostRecency[placement.Designator] = i + 1
+	}
+	sort.SliceStable(ordered, func(i, j int) bool {
+		a, b := libPeripheralPriority(s.measured[ordered[i]], s.input.NetPolicies), libPeripheralPriority(s.measured[ordered[j]], s.input.NetPolicies)
+		if a != b {
+			return a < b
+		}
+		// Reserve space for constrained multi-pin hosts first. Once those hosts
+		// are placed, finish their explicit children before equally sized core
+		// siblings occupy the outward attachment corridor.
+		a, b = libConnectedPinCount(s.measured[ordered[i]]), libConnectedPinCount(s.measured[ordered[j]])
+		if a != b {
+			return a > b
+		}
+		a, b = s.depth[ordered[i]], s.depth[ordered[j]]
+		if a != b {
+			return a > b
+		}
+		// At equal constraint depth, test the newly placed host's owned child
+		// before returning to an older branch. A child conflict can then
+		// relocate its actual host while the candidate allowance remains.
+		recency := func(id string) int {
+			if hint := s.hints[id]; hint.AttachTo != nil {
+				return hostRecency[s.measured[hint.AttachTo.ComponentID].Designator]
+			}
+			return 0
+		}
+		a, b = recency(ordered[i]), recency(ordered[j])
+		if a != b {
+			return a > b
+		}
+		a, b = schematicAttachmentHostPinCount(ordered[i], s.measured, s.hints), schematicAttachmentHostPinCount(ordered[j], s.measured, s.hints)
+		return a > b
+	})
+	return ordered
+}
+
+func (s *schematicRepairSearch) dependencyShellJump(hostID string, conflict *SchematicPlacementConflict) float64 {
+	if conflict == nil || (conflict.SearchExhaustion != "coordinate-window" && conflict.SearchExhaustion != "candidate-budget") || conflict.FutureHostsPossible {
+		return 0
+	}
+	hint := s.hints[conflict.ComponentID]
+	if hint.AttachTo == nil || hint.AttachTo.ComponentID != hostID {
+		return 0
+	}
+	foundHost := false
+	for _, id := range conflict.AttachmentHosts {
+		foundHost = foundHost || id == hostID
+	}
+	if !foundHost {
+		return 0
+	}
+	child, ok := s.measured[conflict.ComponentID]
+	if !ok {
+		return 0
+	}
+	span := math.Max(child.BBox.MaxX-child.BBox.MinX, child.BBox.MaxY-child.BBox.MinY)
+	if !plFinite(span) || span <= 0 {
+		return 0
+	}
+	return math.Ceil((span+schAnchorGrid)/schAnchorGrid) * schAnchorGrid
 }
 
 func (s *schematicRepairSearch) candidateReserve() int {
@@ -505,11 +571,10 @@ func (s *schematicRepairSearch) namingIslandTargets(p *powerLayoutPlan, namingEr
 }
 
 // Naming island owners are dependencies rather than proven blockers. Probe
-// their nearest outward grid step immediately. Never reserve candidates or
-// prune other checkpoints on this evidence alone. Every success re-routes and
-// re-names the full island forest under the shared budgets and geometry gate.
+// outward grid shells while sharing the same candidate and route allowances.
+// Every accepted trial re-routes and re-names the full island forest.
 func (s *schematicRepairSearch) tryNamingIslandRelocation(p powerLayoutPlan, namingErr error) (*powerLayoutPlan, bool) {
-	return s.tryTerminalRelocation(p, s.namingIslandTargets(&p, namingErr), "naming-island")
+	return s.tryTerminalRelocation(p, s.namingIslandTargets(&p, namingErr), "naming-island", namingErr)
 }
 
 // After route-order rollback is exhausted, move only blockers proven by
@@ -520,9 +585,21 @@ func (s *schematicRepairSearch) tryTargetedTerminalRelocation(p powerLayoutPlan,
 	return s.tryTerminalRelocation(p, s.targetedTerminalBlockers(&p, routeErr), "route-blocker")
 }
 
-func (s *schematicRepairSearch) tryTerminalRelocation(p powerLayoutPlan, refs []string, trigger string) (*powerLayoutPlan, bool) {
+func (s *schematicRepairSearch) tryTerminalRelocation(p powerLayoutPlan, refs []string, trigger string, namingErrors ...error) (*powerLayoutPlan, bool) {
 	coreRef := s.measured[s.input.CoreComponentID].Designator
-	for _, ref := range refs {
+	var namingConflict *schematicNamingConflict
+	if len(namingErrors) > 0 {
+		errors.As(namingErrors[0], &namingConflict)
+	}
+	for targetIndex, ref := range refs {
+		targetAllowance := *s.budget
+		if trigger == "naming-island" {
+			targetAllowance /= len(refs) - targetIndex
+			if targetAllowance > 32768 {
+				targetAllowance = 32768
+			}
+		}
+		targetSpent := 0
 		rootID := ""
 		for id, measured := range s.measured {
 			if measured.Designator == ref {
@@ -540,17 +617,21 @@ func (s *schematicRepairSearch) tryTerminalRelocation(p powerLayoutPlan, refs []
 		}
 		sort.Strings(groupIDs)
 		deltas := schematicTargetedRelocationDeltas(&p, ref, coreRef)
-		if trigger == "naming-island" {
-			// Island membership is dependency evidence, not a proven obstacle.
-			// Probe only the nearest outward grid shell here; deeper movement
-			// belongs to the ordinary checkpoint search and must keep its budget.
+		if trigger == "route-blocker-near" {
+			// Probe only the nearest outward grid shell during an immediate
+			// terminal trial. Deeper movement belongs to bounded rollback or
+			// the reserved relocation stage and must keep its budget.
 			deltas = deltas[:1]
 		}
 		for _, delta := range deltas {
 			if *s.budget <= 0 {
 				return nil, false
 			}
+			if trigger == "naming-island" && targetSpent >= targetAllowance {
+				break
+			}
 			*s.budget--
+			targetSpent++
 			s.diagnostics.TargetedRelocations++
 			trial := p
 			trial.Placements = append([]powerLayoutPlacement(nil), p.Placements...)
@@ -581,9 +662,48 @@ func (s *schematicRepairSearch) tryTerminalRelocation(p powerLayoutPlan, refs []
 				s.diagnostics.RelocationAttempts = append(s.diagnostics.RelocationAttempts, attempt)
 				continue
 			}
+			// For a singleton source net, a marker lead must already exist in
+			// placement-only geometry. This cheap necessary check skips nearby
+			// moves that cannot possibly fix the observed naming conflict.
+			if trigger == "naming-island" && namingConflict != nil && s.routing != nil && s.routing.netPins[namingConflict.net] == 1 {
+				var pin powerLayoutPin
+				found := false
+				for _, component := range trial.Placements {
+					for _, candidate := range component.Pins {
+						if candidate.Net == namingConflict.net {
+							pin, found = candidate, true
+						}
+					}
+				}
+				if found {
+					probe := 2048
+					if probe > *s.budget {
+						probe = *s.budget
+					}
+					if probe > targetAllowance-targetSpent {
+						probe = targetAllowance - targetSpent
+					}
+					beforeProbe := probe
+					reachable, complete := libNamingFrontier(&trial, libIsland{net: pin.Net, pins: []powerLayoutPin{pin}}, "module_port", &probe)
+					spent := beforeProbe - probe
+					*s.budget -= spent
+					targetSpent += spent
+					if !reachable && complete {
+						attempt.Result = "naming-frontier-sealed"
+						s.diagnostics.RelocationAttempts = append(s.diagnostics.RelocationAttempts, attempt)
+						continue
+					}
+				}
+			}
 			limit := s.sliceBudget()
 			if trigger == "naming-island" && limit > 4096 {
 				limit = 4096
+			}
+			if trigger == "naming-island" && limit > targetAllowance-targetSpent {
+				limit = targetAllowance - targetSpent
+			}
+			if limit <= 0 {
+				break
 			}
 			before := limit
 			expandedBefore := 0
@@ -596,6 +716,9 @@ func (s *schematicRepairSearch) tryTerminalRelocation(p powerLayoutPlan, refs []
 				s.routing.relocation--
 			}
 			*s.budget -= before - limit
+			if trigger == "naming-island" {
+				targetSpent += before - limit
+			}
 			if s.routing != nil {
 				attempt.ExpandedNodes = s.routing.expanded - expandedBefore
 			}
@@ -742,4 +865,16 @@ func (s *schematicRepairSearch) sliceBudget() int {
 		quota = *s.budget
 	}
 	return quota
+}
+
+// A small total allowance can be smaller than one complete terminal naming
+// pass. Splitting it into 512-candidate slices would reject a valid first
+// checkpoint, then spend the remaining shared allowance retrying placements.
+// Give that checkpoint the actual remainder; larger searches keep checkpoint
+// slices so independent placement alternatives remain explorable.
+func (s *schematicRepairSearch) terminalSliceBudget() int {
+	if s.initial <= 4096 {
+		return *s.budget
+	}
+	return s.sliceBudget()
 }

@@ -146,7 +146,15 @@ func schLayoutFailureClass(cause error, phase string) string {
 		if !ok {
 			return
 		}
-		candidatePriority := map[string]int{"final-validation-failed": 1, "no-path-within-bounds": 2, "data-missing": 3, "expanded-node-budget-exhausted": 5}[failure.Kind]
+		candidatePriority := map[string]int{
+			"final-validation-failed":        1,
+			"no-path-within-bounds":          2,
+			"terminal-frontier-rejected":     2,
+			"data-missing":                   3,
+			"route-attempt-node-limit":       4,
+			"relocation-budget-reserved":     4,
+			"expanded-node-budget-exhausted": 5,
+		}[failure.Kind]
 		if candidatePriority > priority {
 			class, priority = failure.Kind, candidatePriority
 		}

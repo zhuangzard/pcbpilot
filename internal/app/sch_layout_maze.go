@@ -64,21 +64,23 @@ type SchematicRoutingDiagnostics struct {
 }
 
 type schematicRoutingContext struct {
-	options      SchematicRoutingOptions
-	expanded     int
-	reroutes     int
-	completed    int
-	components   map[string]string
-	netPins      map[string]int
-	policies     map[string]string
-	rejections   map[string]*SchematicRoutingRejection
-	boundaries   []SchematicRoutingBoundaryAttempt
-	candidates   []SchematicRoutingCandidateSummary
-	cache        map[string]schematicMazeCacheEntry
-	templates    map[string][][]powerLayoutWire
-	templateHits int
-	duration     time.Duration
-	relocation   int
+	options         SchematicRoutingOptions
+	expanded        int
+	reroutes        int
+	completed       int
+	components      map[string]string
+	netPins         map[string]int
+	policies        map[string]string
+	rejections      map[string]*SchematicRoutingRejection
+	boundaries      []SchematicRoutingBoundaryAttempt
+	candidates      []SchematicRoutingCandidateSummary
+	cache           map[string]schematicMazeCacheEntry
+	templates       map[string][][]powerLayoutWire
+	templateHits    int
+	duration        time.Duration
+	relocation      int
+	candidateBudget *int
+	namingReserve   int
 }
 
 func (c *schematicRoutingContext) beginReroute() bool {
@@ -674,6 +676,15 @@ func libIslandMergeCanContinue(p *powerLayoutPlan, a, b powerLayoutPin) bool {
 }
 
 func libMazeRoute(p *powerLayoutPlan, source, target libIsland, routing *schematicRoutingContext) ([]powerLayoutWire, error) {
+	return libMazeRouteAccepted(p, source, target, routing, nil)
+}
+
+// accept can reject a geometrically valid route for a downstream obligation,
+// such as preserving a completed island's marker frontier. The search then
+// tries other reachable goal states within the same node allowance. A* keeps
+// only one cost per (point, direction), so this is not an exhaustive search of
+// all geometrically possible paths to the same goal state.
+func libMazeRouteAccepted(p *powerLayoutPlan, source, target libIsland, routing *schematicRoutingContext, accept func(*powerLayoutPlan) bool) ([]powerLayoutWire, error) {
 	if routing == nil {
 		return nil, fmt.Errorf("routing context missing")
 	}
@@ -698,12 +709,21 @@ func libMazeRoute(p *powerLayoutPlan, source, target libIsland, routing *schemat
 	}{cacheSource, cacheTarget, p.Placements, p.Wires, p.Flags})
 	cacheKey := string(cacheRaw)
 	templateKey := cacheSource + "\x00" + cacheTarget
+	acceptRejected := false
 	failure := func(kind string, cause error, cached ...schematicMazeCacheEntry) error {
 		evidence, ownersComplete := routing.rejectionsSince(rejectionsBefore)
 		if len(cached) > 0 {
 			evidence = append([]SchematicRoutingRejection(nil), cached[0].evidence...)
 			ownersComplete = cached[0].ownersComplete
-		} else if schematicMazeFailureCacheable(kind) {
+		}
+		// A callback checks complete terminal obligations, not just edges. Even
+		// when every geometric rejection has an exact owner, those owners do
+		// not explain why a joined route failed naming. This remains true if
+		// A* later stops at its node limit rather than exhausting the queue.
+		if acceptRejected {
+			ownersComplete = false
+		}
+		if len(cached) == 0 && !acceptRejected && schematicMazeFailureCacheable(kind) {
 			routing.cache[cacheKey] = schematicMazeCacheEntry{kind: kind, message: cause.Error(), evidence: append([]SchematicRoutingRejection(nil), evidence...), ownersComplete: ownersComplete}
 		}
 		layout := *p
@@ -724,7 +744,12 @@ func libMazeRoute(p *powerLayoutPlan, source, target libIsland, routing *schemat
 		for i := range route {
 			route[i].Points = append([][2]float64(nil), route[i].Points...)
 		}
-		return route, nil
+		trial := *p
+		trial.Wires = libAppendRoute(p.Wires, route)
+		if accept == nil || accept(&trial) {
+			return route, nil
+		}
+		acceptRejected = true
 	}
 	if source.net == "" || source.net != target.net || len(source.pins) == 0 || len(target.pins) == 0 {
 		return nil, failure("data-missing", fmt.Errorf("source/target island evidence incomplete"))
@@ -733,13 +758,18 @@ func libMazeRoute(p *powerLayoutPlan, source, target libIsland, routing *schemat
 		route := clonePowerLayoutWires(template)
 		trial := *p
 		trial.Wires = libAppendRoute(p.Wires, route)
-		if err := validateLibGeometry(&trial); err == nil && libPinsShareIsland(&trial, source.pins[0], target.pins[0]) {
+		err := validateLibGeometry(&trial)
+		merged := err == nil && libPinsShareIsland(&trial, source.pins[0], target.pins[0])
+		accepted := merged && (accept == nil || accept(&trial))
+		if accepted {
 			routing.completed++
 			routing.templateHits++
 			routing.candidates = append(routing.candidates, SchematicRoutingCandidateSummary{Net: source.net, SourceIsland: sourceID, TargetIsland: targetID, Result: "template-reused"})
 			return route, nil
 		} else if err != nil {
 			routing.observe(err)
+		} else if merged {
+			acceptRejected = true
 		}
 	}
 	searchSource, searchTarget := source, target
@@ -820,7 +850,13 @@ func libMazeRoute(p *powerLayoutPlan, source, target libIsland, routing *schemat
 				route := libPointsRoute(source.net, points...)
 				trial := *p
 				trial.Wires = libAppendRoute(p.Wires, route)
-				if err := validateLibGeometry(&trial); err == nil && libPinsShareIsland(&trial, source.pins[0], target.pins[0]) {
+				err := validateLibGeometry(&trial)
+				merged := err == nil && libPinsShareIsland(&trial, source.pins[0], target.pins[0])
+				accepted := merged && (accept == nil || accept(&trial))
+				if merged && !accepted {
+					acceptRejected = true
+				}
+				if accepted {
 					routing.completed++
 					routing.candidates = append(routing.candidates, SchematicRoutingCandidateSummary{Net: source.net, SourceIsland: sourceID, TargetIsland: targetID, Points: points, Result: "merged"})
 					result = "merged"
@@ -837,10 +873,16 @@ func libMazeRoute(p *powerLayoutPlan, source, target libIsland, routing *schemat
 				} else if err != nil {
 					routing.observe(err)
 					lastErr = err
+				} else if merged {
+					lastErr = fmt.Errorf("route reaches the target but closes a required terminal frontier")
 				} else {
 					lastErr = fmt.Errorf("candidate did not merge the specified islands")
 				}
-				routing.candidates = append(routing.candidates, SchematicRoutingCandidateSummary{Net: source.net, SourceIsland: sourceID, TargetIsland: targetID, Points: points, Result: "final-validation-failed"})
+				result := "final-validation-failed"
+				if merged {
+					result = "terminal-frontier-rejected"
+				}
+				routing.candidates = append(routing.candidates, SchematicRoutingCandidateSummary{Net: source.net, SourceIsland: sourceID, TargetIsland: targetID, Points: points, Result: result})
 				continue
 			}
 			for direction := 1; direction <= 4; direction++ {
@@ -882,8 +924,14 @@ func libMazeRoute(p *powerLayoutPlan, source, target libIsland, routing *schemat
 			return nil, failure(result, fmt.Errorf("island-pair attempt expanded %d nodes; preserving the shared %d-node zone budget for reroute/relocation", routing.expanded-callStart, routing.options.MaxExpandedNodes))
 		}
 		if !touchedBoundary {
+			if acceptRejected {
+				return nil, failure("terminal-frontier-rejected", fmt.Errorf("bounded A* found a geometric join but no accepted alternative goal state"))
+			}
 			return nil, failure("no-path-within-bounds", fmt.Errorf("reachable component from %s is enclosed inside the %g raw envelope", libIslandStableID(activeSource), expansion))
 		}
+	}
+	if acceptRejected {
+		return nil, failure("terminal-frontier-rejected", fmt.Errorf("bounded A* found a geometric join but no accepted alternative goal state"))
 	}
 	if lastErr != nil {
 		return nil, failure("final-validation-failed", lastErr)
@@ -893,7 +941,7 @@ func libMazeRoute(p *powerLayoutPlan, source, target libIsland, routing *schemat
 
 func schematicMazeFailureCacheable(kind string) bool {
 	switch kind {
-	case "expanded-node-budget-exhausted", "relocation-budget-reserved", "route-attempt-node-limit":
+	case "expanded-node-budget-exhausted", "relocation-budget-reserved", "route-attempt-node-limit", "terminal-frontier-rejected":
 		return false
 	default:
 		return true

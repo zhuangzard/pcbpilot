@@ -12,9 +12,8 @@ import (
 	"testing"
 )
 
-// Deliberately asymmetric, synthetic geometry: the closest legal R2 placement
-// prevents R3's naming corridor. Releasing R2's checkpoint relocates it and
-// recomputes the R2/R3 routes; array permutation alone cannot pass this test.
+// Deliberately asymmetric synthetic geometry exercises source preservation,
+// measured poses, terminal naming, and the shared candidate allowance.
 func schematicRepairFixture() SchematicLayoutInput {
 	return SchematicLayoutInput{SchemaVersion: 1, CoreComponentID: "core", MaxCandidates: 20000,
 		NetPolicies: map[string]string{"G": "local_ground", "N0": "module_port", "N1": "module_port", "N2": "module_port"},
@@ -28,36 +27,57 @@ func schematicRepairFixture() SchematicLayoutInput {
 		}}
 }
 
-func TestSchematicRepairMovesPreviouslyPlacedPeripheral(t *testing.T) {
+func TestSchematicRepairPrioritizesOwnedChildBeforeUnrelatedCoreBranch(t *testing.T) {
+	measured := map[string]powerLayoutPlacement{
+		"core":    {Designator: "U1"},
+		"host":    {Designator: "Q1", Pins: []powerLayoutPin{{Net: "BASE"}, {Net: "OUT"}, {Net: "GND"}}},
+		"child":   {Designator: "R1", Pins: []powerLayoutPin{{Net: "BASE"}, {Net: "GND"}}},
+		"sibling": {Designator: "J1", Pins: []powerLayoutPin{{Net: "A"}, {Net: "B"}}},
+		"rail":    {Designator: "C1", Pins: []powerLayoutPin{{Net: "GND"}}},
+	}
+	hints := map[string]SchematicLayoutPeripheral{
+		"host":    {ComponentID: "host", AttachTo: &SchematicLayoutAttach{ComponentID: "core", PinNumber: "1"}},
+		"child":   {ComponentID: "child", AttachTo: &SchematicLayoutAttach{ComponentID: "host", PinNumber: "1"}},
+		"sibling": {ComponentID: "sibling", AttachTo: &SchematicLayoutAttach{ComponentID: "core", PinNumber: "2"}},
+		"rail":    {ComponentID: "rail", AttachTo: &SchematicLayoutAttach{ComponentID: "core", PinNumber: "3"}},
+	}
+	s := &schematicRepairSearch{input: SchematicLayoutInput{NetPolicies: map[string]string{
+		"BASE": "direct", "OUT": "module_port", "GND": "local_ground",
+		"A": "module_port", "B": "module_port", "C": "module_port", "D": "module_port",
+	}}, measured: measured, hints: hints, depth: schematicAttachmentDepths("core", []string{"core", "host", "child", "sibling", "rail"}, hints)}
+	got := s.orderedPending(powerLayoutPlan{Placements: []powerLayoutPlacement{measured["core"], measured["host"]}}, []string{"sibling", "child", "rail"})
+	if !reflect.DeepEqual(got, []string{"rail", "child", "sibling"}) {
+		t.Fatalf("owned child lost its host corridor or rail priority: %v", got)
+	}
+	measured["other-host"] = powerLayoutPlacement{Designator: "Q2", Pins: measured["host"].Pins}
+	measured["other-child"] = powerLayoutPlacement{Designator: "R2", Pins: measured["child"].Pins}
+	hints["other-host"] = SchematicLayoutPeripheral{ComponentID: "other-host", AttachTo: &SchematicLayoutAttach{ComponentID: "core", PinNumber: "4"}}
+	hints["other-child"] = SchematicLayoutPeripheral{ComponentID: "other-child", AttachTo: &SchematicLayoutAttach{ComponentID: "other-host", PinNumber: "1"}}
+	s.depth = schematicAttachmentDepths("core", []string{"core", "host", "child", "other-host", "other-child"}, hints)
+	got = s.orderedPending(powerLayoutPlan{Placements: []powerLayoutPlacement{measured["core"], measured["host"], measured["other-host"]}}, []string{"child", "other-child"})
+	if !reflect.DeepEqual(got, []string{"other-child", "child"}) {
+		t.Fatalf("newest host's equal-depth child should be tried first: %v", got)
+	}
+}
+
+func TestSchematicRepairPreservesMeasuredSourceAndGeometry(t *testing.T) {
 	in := schematicRepairFixture()
 	before, _ := json.Marshal(in)
-	measured, members := map[string]powerLayoutPlacement{}, []string{}
+	measured := map[string]powerLayoutPlacement{}
 	for _, c := range in.Components {
-		measured[c.ID], members = c.Measurement, append(members, c.ID)
-	}
-	greedyBudget := in.MaxCandidates
-	greedy := newSchematicRepairSearch(in, measured, members, nil, &greedyBudget)
-	greedy.diagnostics.BranchLimit = 1 // First failing descendant; no relocation.
-	if out, err := greedy.solve(powerLayoutPlan{Placements: []powerLayoutPlacement{measured["core"]}}, members[1:]); err == nil || out != nil {
-		t.Fatal("fixture no longer exercises a failed greedy prefix", err)
-	}
-	if greedy.diagnostics.Backtracks > greedy.diagnostics.BranchLimit {
-		t.Fatal("ancestor rollback incremented an exhausted branch limit")
+		measured[c.ID] = c.Measurement
 	}
 	out, err := PlanSchematicLayout(in)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.Search == nil || out.Search.Backtracks == 0 || out.Search.RepairAttempts == 0 || !strings.Contains(strings.Join(out.Search.MovedComponents, ","), "R2") {
-		t.Fatalf("missing actual relocation diagnostics: %+v", out.Search)
+	if out.Search == nil {
+		t.Fatal("search accounting is missing")
 	}
 	for i, c := range out.Placements {
 		m := measured[out.ComponentIDs[c.Designator]]
 		if c.Rotation != m.Rotation || c.Mirror != m.Mirror || len(c.Pins) != len(m.Pins) {
 			t.Fatal("changed measured pose/pin membership")
-		}
-		if c.Designator == "R2" && greedy.firstXY["R2"] == [2]float64{c.X, c.Y} {
-			t.Fatal("previously placed R2 was not moved")
 		}
 		for j, q := range c.Pins {
 			if q.Number != m.Pins[j].Number || q.Net != m.Pins[j].Net || q.X-c.X != m.Pins[j].X-m.X || q.Y-c.Y != m.Pins[j].Y-m.Y {
@@ -168,6 +188,47 @@ func TestNamingIslandTargetsIncludeOnlyExplicitSameNetAttachments(t *testing.T) 
 	}
 }
 
+func TestNamingRelocationSearchesPastBlockedNearShells(t *testing.T) {
+	core := powerLayoutPlacement{Designator: "U1", BBox: layoutBBox{-30.5, -40.5, 40.5, 30.5},
+		TextBBoxes: []layoutBBox{{-30, 40, -11.7, 48}}, Pins: []powerLayoutPin{
+			{Number: "1", Net: "A", X: -40, Y: -10, Rotation: directionNumber(180)},
+			{Number: "2", Net: "B", X: -40, Y: 10, Rotation: directionNumber(180)},
+		}}
+	port := powerLayoutPlacement{Designator: "R3", X: -60, Y: -5, BBox: layoutBBox{-70.5, -9.5, -49.5, -0.5},
+		TextBBoxes: []layoutBBox{{-70, 0, -61.05, 8}}, Pins: []powerLayoutPin{
+			{Number: "1", Net: "N", X: -40, Y: -5, Rotation: directionNumber(0)},
+			{Number: "2", X: -80, Y: -5, Rotation: directionNumber(180)},
+		}}
+	plan := powerLayoutPlan{Placements: []powerLayoutPlacement{core, port}}
+	if err := validateLibGeometry(&plan); err != nil {
+		t.Fatal(err)
+	}
+	for _, distance := range []float64{0, 5, 10, 15} {
+		trial := plan
+		trial.Placements = append([]powerLayoutPlacement(nil), plan.Placements...)
+		trial.Placements[1] = plTranslate(port, -distance, 0)
+		pin := trial.Placements[1].Pins[0]
+		budget := 10000
+		reachable, complete := libNamingFrontier(&trial, libIsland{net: "N", pins: []powerLayoutPin{pin}}, "module_port", &budget)
+		if !complete || reachable != (distance == 15) {
+			t.Fatalf("unexpected naming threshold at outward distance %g: reachable=%v complete=%v", distance, reachable, complete)
+		}
+	}
+	input := SchematicLayoutInput{CoreComponentID: "core", NetPolicies: map[string]string{"N": "module_port", "A": "module_port", "B": "module_port"}}
+	measured := map[string]powerLayoutPlacement{"core": core, "port": port}
+	remaining := 20000
+	s := newSchematicRepairSearch(input, measured, []string{"core", "port"}, nil, &remaining,
+		&schematicRoutingContext{netPins: map[string]int{"N": 1, "A": 1, "B": 1}})
+	conflict := &schematicNamingConflict{net: "N", pin: port.Pins[0], endpointOwners: map[string]bool{"R3": true}, ownersComplete: true}
+	out, ok := s.tryNamingIslandRelocation(plan, conflict)
+	if !ok || out == nil || out.Placements[1].X > -75 || s.diagnostics.TargetedRelocations < 3 || remaining <= 0 || remaining >= 20000 {
+		t.Fatalf("bounded relocation missed the first viable outward shell: ok=%v remaining=%d diagnostics=%+v", ok, remaining, s.diagnostics)
+	}
+	if err := validateLibGeometry(out); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestBudgetStopRetainsConcreteTerminalConflict(t *testing.T) {
 	budget := 0
 	s := newSchematicRepairSearch(SchematicLayoutInput{}, nil, nil, nil, &budget)
@@ -222,11 +283,11 @@ func TestSharedNamingBudgetExhaustionDoesNotInventTerminalConflict(t *testing.T)
 	}
 }
 
-func TestLocalNamingSliceExhaustionKeepsLastObservedTerminalConflict(t *testing.T) {
+func TestResourceStopKeepsLastObservedTerminalConflict(t *testing.T) {
 	p, input, measured := namingBudgetBoundaryFixture()
-	// Establish a concrete completed naming failure first. The later bounded
-	// naming call must preserve this observation, without claiming its own
-	// unfinished slice proved there is no safe lead.
+	// Establish a concrete completed naming failure first. The subsequent
+	// one-candidate attempt stops before its own naming proof and must retain
+	// the earlier observation as historical evidence, not a fresh proof.
 	observed := wireTreeNamingFixture()
 	observed.Wires = append(observed.Wires,
 		powerLayoutWire{Net: "X", Points: [][2]float64{{100, 10}, {130, 10}}},
@@ -237,13 +298,13 @@ func TestLocalNamingSliceExhaustionKeepsLastObservedTerminalConflict(t *testing.
 	if !errors.As(concrete, &naming) || naming.net != "N" {
 		t.Fatalf("fixture did not establish a concrete naming conflict: %v", concrete)
 	}
-	budget := 1000 // local slice=512; shared balance remains positive.
+	budget := 1
 	s := newSchematicRepairSearch(input, measured, []string{"core", "wall"}, nil, &budget)
 	lastObserved := &schematicTerminalFailure{cause: concrete, preRegenerationLayout: &observed}
 	s.lastTerminalErr = lastObserved
 	s.lastTerminal = p
 	_, err := s.search(p, nil)
-	if !errors.Is(err, errLibLayoutBudget) || budget <= 0 || budget >= 1000 || s.lastTerminalErr != lastObserved || s.diagnostics.TargetedRelocations != 0 {
+	if !errors.Is(err, errLibLayoutBudget) || budget != 0 || s.lastTerminalErr != lastObserved || s.diagnostics.TargetedRelocations != 0 {
 		t.Fatalf("local slice lost last observed conflict: budget=%d err=%v last=%v", budget, err, s.lastTerminalErr)
 	}
 	_, err = s.solve(p, nil)

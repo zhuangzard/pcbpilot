@@ -85,7 +85,7 @@ func TestLayoutPlanMachineReportPreservesFailureContract(t *testing.T) {
 }
 
 func TestLayoutReportClassifiesRoutingFailureAndDuration(t *testing.T) {
-	for _, kind := range []string{"data-missing", "no-path-within-bounds", "expanded-node-budget-exhausted", "final-validation-failed"} {
+	for _, kind := range []string{"data-missing", "no-path-within-bounds", "terminal-frontier-rejected", "route-attempt-node-limit", "relocation-budget-reserved", "expanded-node-budget-exhausted", "final-validation-failed"} {
 		failure := &schematicRoutingFailure{Kind: kind, Net: "N", SourceIsland: "a", TargetIsland: "b",
 			Routing: &SchematicRoutingDiagnostics{duration: 1500 * time.Millisecond}, cause: errors.New("fixture")}
 		if got := schLayoutFailureClass(fmt.Errorf("wrapped: %w", failure), "solve"); got != kind {

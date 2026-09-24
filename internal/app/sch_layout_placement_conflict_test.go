@@ -23,8 +23,18 @@ func dependencyBackjumpFixture() SchematicLayoutInput {
 	return in
 }
 
-func TestClosedHostPlacementConflictStopsUnrelatedSuffix(t *testing.T) {
+// A wider attached body cannot fit in the first host-to-core gap. The host
+// must move before the child can be placed; naming repair alone cannot turn
+// this geometry conflict into a valid placement.
+func dependencyBackjumpPlacementFixture() SchematicLayoutInput {
 	in := dependencyBackjumpFixture()
+	in.Components[2].Measurement.BBox = SchematicBox{-15, -15, 15, 15}
+	in.Components[2].Measurement.Pins[0].X = 20
+	return in
+}
+
+func TestClosedHostPlacementConflictStopsUnrelatedSuffix(t *testing.T) {
+	in := dependencyBackjumpPlacementFixture()
 	measured := map[string]powerLayoutPlacement{}
 	members := []string{}
 	hints := map[string]SchematicLayoutPeripheral{}
@@ -72,7 +82,7 @@ func TestClosedHostPlacementConflictStopsUnrelatedSuffix(t *testing.T) {
 }
 
 func TestDependencyBackjumpMovesHostAndSolvesWithinSharedBudget(t *testing.T) {
-	in := dependencyBackjumpFixture()
+	in := dependencyBackjumpPlacementFixture()
 	in.Components = in.Components[:3]
 	in.Attachments = in.Attachments[:2]
 	before, _ := json.Marshal(in)
@@ -217,7 +227,7 @@ func TestPlacementConflictSkipsUnrelatedCheckpoint(t *testing.T) {
 func TestPlacementConflictIdentityAndRigidTransformContract(t *testing.T) {
 	for quarter := 0; quarter < 4; quarter++ {
 		t.Run(fmt.Sprint(quarter), func(t *testing.T) {
-			in := dependencyBackjumpFixture()
+			in := dependencyBackjumpPlacementFixture()
 			in.Components = in.Components[:3]
 			in.Attachments = in.Attachments[:2]
 			rename := map[string]string{"root-id": "opaque:9", "host-id": "opaque:2", "child-id": "opaque:7"}
@@ -246,8 +256,45 @@ func TestPlacementConflictIdentityAndRigidTransformContract(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if out.Search == nil {
+				t.Fatal("missing bounded-search accounting")
+			}
 			if out.Search.PlacementFailures == 0 || len(out.Search.BackjumpTargets) == 0 || out.Search.BackjumpTargets[0] != "opaque:2" {
 				t.Fatal("ownership depends on names or axes", out.Search)
+			}
+			for _, id := range out.Search.RelocationTargets {
+				if id != "opaque:2" && id != "opaque:7" {
+					t.Fatal("relocation attributed to unrelated component", out.Search)
+				}
+			}
+			if len(out.Placements) != len(in.Components) {
+				t.Fatal("incomplete transformed layout", out.Placements)
+			}
+			for _, placement := range out.Placements {
+				id := out.ComponentIDs[placement.Designator]
+				var source *SchematicLayoutComponent
+				for i := range in.Components {
+					if in.Components[i].ID == id {
+						source = &in.Components[i]
+						break
+					}
+				}
+				if source == nil || placement.Rotation != source.Measurement.Rotation || placement.Mirror != source.Measurement.Mirror || len(placement.Pins) != len(source.Measurement.Pins) {
+					t.Fatal("transformed component identity or pose changed", id, placement)
+				}
+				for j, pin := range placement.Pins {
+					original := source.Measurement.Pins[j]
+					if pin.Number != original.Number || pin.Net != original.Net || pin.X-placement.X != original.X-source.Measurement.X || pin.Y-placement.Y != original.Y-source.Measurement.Y {
+						t.Fatal("transformed pin geometry or net changed", id, pin)
+					}
+				}
+			}
+			plan := powerLayoutPlan{Placements: out.Placements, Wires: out.Wires, Flags: out.Flags}
+			if err := validateLibGeometry(&plan); err != nil {
+				t.Fatal("transformed geometry invalid", err)
+			}
+			if err := validateSchCompositionNets(&plan); err != nil {
+				t.Fatal("transformed connectivity invalid", err)
 			}
 			after, _ := json.Marshal(in)
 			if !reflect.DeepEqual(before, after) {

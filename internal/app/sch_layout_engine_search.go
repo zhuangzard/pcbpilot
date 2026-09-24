@@ -121,6 +121,7 @@ func libPlacePeripheralPairs(current powerLayoutPlan, measured powerLayoutPlacem
 func libPlacePeripheralPairsWithRouting(current powerLayoutPlan, measured powerLayoutPlacement, pairs []libAttachmentPair, policies map[string]string, budget *int, rejected map[[2]float64]bool, routing *schematicRoutingContext, cursor *float64) (*powerLayoutPlan, error) {
 	current.Flags = nil // Full marker placement is deferred to the final gate.
 	existingContactNodes := libWireContactNodes(current.Wires)
+	namingWitnesses := libNamingPlacementWitnesses{}
 	var lastErr error
 	conflict := newPlacementCandidateConflict()
 	// Search complete distance shells: don't accept the first legal coordinate.
@@ -185,6 +186,10 @@ func libPlacePeripheralPairsWithRouting(current powerLayoutPlan, measured powerL
 						conflict.observe(lastErr)
 						continue
 					}
+					if lastErr = libValidateSingletonNamingPlacement(&current, &trial, c, policies, routing, budget, namingWitnesses); lastErr != nil {
+						conflict.observe(lastErr)
+						continue
+					}
 					q, _ := libPin(c, pair.own.Number)
 					// Facing pins on a net that still has another source-data pin need
 					// an exact grid midpoint for a future T. This is about the whole net,
@@ -213,6 +218,14 @@ func libPlacePeripheralPairsWithRouting(current powerLayoutPlan, measured powerL
 						// withdraws the whole forest and rebuilds it in a bounded order.
 						if lastErr = libJoinNearbyRails(&candidate, policies); lastErr != nil {
 							conflict.observe(lastErr)
+							continue
+						}
+						// A short provisional direct join can be electrically complete
+						// while sealing both outward pin exits. Reject that position
+						// here, while the distance shell can still try another XY,
+						// instead of repeatedly failing the terminal regeneration.
+						if policies[q.Net] == "direct" && libPinsShareIsland(&candidate, pair.host, q) && !libIslandMergeCanContinue(&candidate, pair.host, q) {
+							conflict.reasons["direct-frontier-sealed"]++
 							continue
 						}
 						// This is a geometry/routing checkpoint, not a completed
@@ -331,6 +344,31 @@ func libIslands(p *powerLayoutPlan) []libIsland {
 func libNameIslands(p *powerLayoutPlan, policies map[string]string, budget ...*int) error {
 	base := *p
 	base.Flags = nil
+	// All route joins have finished. Every remaining physical island therefore
+	// needs its own legal marker lead. Prove each independently before exploring
+	// combinations of unrelated labels: one sealed direct tree or module port
+	// would otherwise consume the entire joint-search slice and hide its exact
+	// placement/routing conflict.
+	for _, island := range libIslands(&base) {
+		probe := 4096
+		if len(budget) > 0 && *budget[0] < probe {
+			probe = *budget[0]
+		}
+		if probe <= 0 {
+			return errLibLayoutBudget
+		}
+		before := probe
+		reachable, complete := libNamingFrontier(&base, island, policies[island.net], &probe)
+		if len(budget) > 0 {
+			*budget[0] -= before - probe
+		}
+		if !reachable && complete {
+			return libNamingConflict(&base, island)
+		}
+		if !complete && len(budget) > 0 && *budget[0] <= 0 {
+			return errLibLayoutBudget
+		}
+	}
 	var lastErr error
 	var jointOrder []libIsland
 	for order := 0; order < 5; order++ {
@@ -394,7 +432,7 @@ func libNameIslands(p *powerLayoutPlan, policies map[string]string, budget ...*i
 const libJointNamingChoicesPerIsland = 8
 
 func libNameIslandsJoint(base *powerLayoutPlan, policies map[string]string, islands []libIsland, budget *int) error {
-	return libNameIslandsJointWith(base, policies, islands, budget, libJointNamingOptions)
+	return libNameIslandsJointWithMode(base, policies, islands, budget, libJointNamingOptions, true)
 }
 
 type libNamingOptionVisitor func(*powerLayoutPlan, libIsland, string, func(*powerLayoutPlan) bool, *int)
@@ -432,6 +470,10 @@ func libJointNamingOptions(current *powerLayoutPlan, island libIsland, kind stri
 }
 
 func libNameIslandsJointWith(base *powerLayoutPlan, policies map[string]string, islands []libIsland, budget *int, options libNamingOptionVisitor) error {
+	return libNameIslandsJointWithMode(base, policies, islands, budget, options, false)
+}
+
+func libNameIslandsJointWithMode(base *powerLayoutPlan, policies map[string]string, islands []libIsland, budget *int, options libNamingOptionVisitor, checkRemaining bool) error {
 	var lastErr error
 	var visit func(powerLayoutPlan, int) (*powerLayoutPlan, bool)
 	visit = func(current powerLayoutPlan, index int) (*powerLayoutPlan, bool) {
@@ -460,6 +502,32 @@ func libNameIslandsJointWith(base *powerLayoutPlan, policies map[string]string, 
 		}
 		var solved *powerLayoutPlan
 		accept := func(candidate *powerLayoutPlan) bool {
+			if checkRemaining {
+				for _, remaining := range islands[index+1:] {
+					if policies[remaining.net] != "module_port" || libPlanNetPinCount(candidate, remaining.net) != 1 {
+						continue
+					}
+					probe := 512
+					if *budget < probe {
+						probe = *budget
+					}
+					if probe <= 0 {
+						lastErr = errLibLayoutBudget
+						return true
+					}
+					before := probe
+					reachable, complete := libNamingFrontier(candidate, remaining, "module_port", &probe)
+					*budget -= before - probe
+					if !reachable && complete {
+						lastErr = libNamingConflict(candidate, remaining)
+						return false
+					}
+					if *budget <= 0 {
+						lastErr = errLibLayoutBudget
+						return true
+					}
+				}
+			}
 			if result, ok := visit(*candidate, index+1); ok {
 				solved = result
 				return true
@@ -644,6 +712,7 @@ func schematicRerouteOrder(policies map[string]string, failed string, round int)
 
 func libJoinNetsPass(p *powerLayoutPlan, policies map[string]string, railsOnly, joinPorts bool, routing *schematicRoutingContext, preferred []string, preferExternal bool) error {
 	rank := map[string]int{}
+	namingWitnesses := libRouteNamingWitnesses{}
 	for i, net := range preferred {
 		rank[net] = i + 1
 	}
@@ -792,12 +861,20 @@ func libJoinNetsPass(p *powerLayoutPlan, policies map[string]string, railsOnly, 
 				trial := *p
 				trial.Wires = libAppendRoute(p.Wires, route)
 				if validateLibGeometry(&trial) == nil && libPinsShareIsland(&trial, islands[e.aIsland].pins[0], islands[e.bIsland].pins[0]) {
-					if libIslandMergeCanContinue(&trial, islands[e.aIsland].pins[0], islands[e.bIsland].pins[0]) {
+					if !libIslandMergeCanContinue(&trial, islands[e.aIsland].pins[0], islands[e.bIsland].pins[0]) {
+						sealedPair = true
+						continue
+					}
+					if libDirectRouteKeepsFrontiers(p, &trial, policies) {
+						keepsNaming, updated := libRouteKeepsCompletedNamingFrontiers(p, &trial, policies, routing, namingWitnesses)
+						if !keepsNaming {
+							continue
+						}
 						*p = trial
+						namingWitnesses = updated
 						joined = true
 						break
 					}
-					sealedPair = true
 				}
 			}
 			pair := [2]int{e.aIsland, e.bIsland}
@@ -825,12 +902,23 @@ func libJoinNetsPass(p *powerLayoutPlan, policies map[string]string, railsOnly, 
 			// budget for direct nets whose islands must physically merge.
 			if !joined && !railsOnly && routing != nil && policies[e.a.Net] == "direct" && !mazeTried[pair] {
 				mazeTried[pair] = true
-				route, err := libMazeRoute(p, islands[e.aIsland], islands[e.bIsland], routing)
+				var acceptedWitnesses libRouteNamingWitnesses
+				route, err := libMazeRouteAccepted(p, islands[e.aIsland], islands[e.bIsland], routing, func(trial *powerLayoutPlan) bool {
+					if !libIslandMergeCanContinue(trial, islands[e.aIsland].pins[0], islands[e.bIsland].pins[0]) || !libDirectRouteKeepsFrontiers(p, trial, policies) {
+						return false
+					}
+					keepsNaming, updated := libRouteKeepsCompletedNamingFrontiers(p, trial, policies, routing, namingWitnesses)
+					if keepsNaming {
+						acceptedWitnesses = updated
+					}
+					return keepsNaming
+				})
 				if err == nil {
 					trial := *p
 					trial.Wires = libAppendRoute(p.Wires, route)
-					if validateLibGeometry(&trial) == nil && libIslandMergeCanContinue(&trial, islands[e.aIsland].pins[0], islands[e.bIsland].pins[0]) {
+					if validateLibGeometry(&trial) == nil && acceptedWitnesses != nil {
 						*p, joined = trial, true
+						namingWitnesses = acceptedWitnesses
 					}
 				} else {
 					lastMazeErr = err

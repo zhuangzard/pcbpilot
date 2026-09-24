@@ -40,6 +40,22 @@ func libFinishSchematicLayoutMode(p powerLayoutPlan, netPolicies map[string]stri
 	if len(routingArg) > 0 {
 		routing = routingArg[0]
 	}
+	if routing != nil {
+		previous := routing.candidateBudget
+		previousReserve := routing.namingReserve
+		routing.candidateBudget = budget
+		// Route-level lookahead and final naming share one candidate slice. Keep
+		// enough candidates for the latter to expose a concrete sealed island,
+		// even when many route alternatives each need a marker probe.
+		routing.namingReserve = *budget / 4
+		if routing.namingReserve > 4096 {
+			routing.namingReserve = 4096
+		}
+		defer func() {
+			routing.candidateBudget = previous
+			routing.namingReserve = previousReserve
+		}()
+	}
 	p.Flags = nil
 	if regenerate {
 		p.Wires = nil
