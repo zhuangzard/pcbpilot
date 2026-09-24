@@ -3,6 +3,7 @@ package pcbauto
 import (
 	"context"
 	"math"
+	"os"
 	"sort"
 	"time"
 )
@@ -146,26 +147,35 @@ type router struct {
 	nets   []*rnet
 	byName map[string]*rnet
 	// A* scratch
-	gcost      []float32
-	parent     []int32
-	dir        []int8
-	stamp      []int32
-	closed     []int32
-	cur        int32
-	nodeC      []float32 // cached node cost for the current search (NaN = unknown)
-	nodeS      []int32
-	claimStamp []int32
-	claimCur   int32
-	presFac    float64
-	strict     bool
-	deadline   time.Time
-	split      map[int]*coarse // split-plane labelling per layer id
-	pairField  map[int32]float32
-	pbuckets   [][]padEntry
-	pbW, pbH   int
-	viaS       []int32
-	statics    map[int][]uint8
-	viaC       []float64
+	gcost       []float32
+	parent      []int32
+	dir         []int8
+	stamp       []int32
+	closed      []int32
+	cur         int32
+	heap        iheap
+	searchStats searchStats
+	tgt         []int32 // search targets, stamped with cur
+	floodSrc    []int32 // provablyUnreachable: sources, stamped with cur
+	floodSeen   []int32
+	floodQ      []int32
+	nodeC       []float32 // cached node cost for the current search (NaN = unknown)
+	nodeS       []int32
+	claimStamp  []int32
+	claimCur    int32
+	presFac     float64
+	strict      bool
+	deadline    time.Time
+	split       map[int]*coarse // split-plane labelling per layer id
+	pairField   map[int32]float32
+	pbuckets    [][]padEntry
+	pbW, pbH    int
+	viaS        []int32
+	statics     map[int][]uint8
+	staticMRU   [4]staticEntry
+	owners      map[int][]uint32 // nodeOK pad-owner summaries per radius key
+	ownerMRU    [4]ownerEntry
+	viaC        []float64
 }
 
 // auditHook lets tests observe router state between phases.
@@ -196,6 +206,7 @@ func Route(ctx context.Context, b *Board, st *Stackup, an *Analysis, opt RouteOp
 		return nil, err
 	}
 	r := &router{b: b, st: st, an: an, gr: gr, opt: opt, byName: map[string]*rnet{}}
+	r.searchStats.stage = -1
 	r.deadline = start.Add(opt.Timeout)
 	n := len(gr.flags)
 	r.gcost = make([]float32, n)
@@ -203,6 +214,10 @@ func Route(ctx context.Context, b *Board, st *Stackup, an *Analysis, opt RouteOp
 	r.dir = make([]int8, n)
 	r.stamp = make([]int32, n)
 	r.closed = make([]int32, n)
+	r.heap.pos = make([]int32, n)
+	r.tgt = make([]int32, n)
+	r.floodSrc = make([]int32, n)
+	r.floodSeen = make([]int32, n)
 	r.nodeC = make([]float32, n)
 	r.nodeS = make([]int32, n)
 	r.claimStamp = make([]int32, n)
@@ -239,6 +254,10 @@ func Route(ctx context.Context, b *Board, st *Stackup, an *Analysis, opt RouteOp
 		auditHook("pourRepair", r)
 	}
 	r.emit(res)
+	if os.Getenv("PCBAUTO_ROUTESTATS") != "" {
+		st := r.searchStats
+		res.Notes = append(res.Notes, sprintf("radii: %d statics, grid %dx%dx%d; searches ok %d (%d exp) failed %d (%d exp); by window stage [okN okExp failN failExp] %v; %d proven unreachable", len(r.statics), gr.W, gr.H, len(gr.layers), st.okN, st.okExp, st.failN, st.failExp, st.byStage, st.proofs))
+	}
 	res.Stats.GridMil = opt.GridMil
 	res.Stats.Millis = time.Since(start).Milliseconds()
 	return res, nil
@@ -382,6 +401,25 @@ func (r *router) nodeOK(n *rnet, l, x, y int, rad float64) bool {
 	case staticBlocked:
 		return false
 	}
+	if ow := r.ownerArray(rad); ow != nil && len(r.nets) < ownerNetLimit && !noOwnerCache {
+		// Which nets own the pads in the inner disk and in the ring is
+		// static: summarised once per (radius, cell), so later calls are one
+		// array read instead of a ring scan (a third of K230's routing time).
+		i := gr.idx(l, x, y)
+		v := ow[i]
+		if v == 0 {
+			v = r.scanOwners(l, x, y, rad)
+			ow[i] = v
+		}
+		inner, ring := int32(v>>16)-2, int32(v&0xffff)-2
+		if inner == ownerMany || inner >= 0 && inner != n.id {
+			return false
+		}
+		if ring == ownerMany || ring >= 0 && ring != n.id {
+			return r.padsClear(n, gr.layers[l], gr.center(x, y), rad-n.share)
+		}
+		return true
+	}
 	offs, inner := gr.ring(rad)
 	near := false
 	for k, o := range offs {
@@ -410,6 +448,78 @@ func (r *router) nodeOK(n *rnet, l, x, y int, rad float64) bool {
 }
 
 const (
+	ownerNone int32 = -1 // no pad
+	ownerMany int32 = -2 // pads of several nets (or a multi-net pad)
+	// ownerNetLimit keeps net ids inside the 16-bit fields of an owner entry.
+	ownerNetLimit = 0xfff0
+	// ownerMaxBytes caps the owner arrays; beyond it nodeOK scans as before.
+	ownerMaxBytes = 512 << 20
+)
+
+// ownerArray returns the lazily filled owner summary for claim radius rad:
+// per layer-cell 0 = not computed, else (inner+2)<<16 | (ring+2) with inner
+// and ring each ownerNone, ownerMany or the single net owning those pads.
+func (r *router) ownerArray(rad float64) []uint32 {
+	for k := range r.ownerMRU {
+		if e := &r.ownerMRU[k]; e.m != nil && e.rad == rad {
+			return e.m
+		}
+	}
+	key := int(math.Round(rad * 100))
+	m, ok := r.owners[key]
+	if !ok {
+		if (len(r.owners)+1)*len(r.gr.flags)*4 > ownerMaxBytes {
+			return nil
+		}
+		if r.owners == nil {
+			r.owners = map[int][]uint32{}
+		}
+		m = make([]uint32, len(r.gr.flags))
+		r.owners[key] = m
+	}
+	copy(r.ownerMRU[1:], r.ownerMRU[:len(r.ownerMRU)-1])
+	r.ownerMRU[0] = ownerEntry{rad, m}
+	return m
+}
+
+type ownerEntry struct {
+	rad float64
+	m   []uint32
+}
+
+// scanOwners summarises the pads around a staticPads cell (whose inner disk
+// is inside the grid and free of hard cells and multi-net pads).
+func (r *router) scanOwners(l, x, y int, rad float64) uint32 {
+	gr := r.gr
+	inner, ring := ownerNone, ownerNone
+	merge := func(o *int32, p int32) {
+		switch {
+		case p == -1:
+		case p < 0 || *o == ownerMany:
+			*o = ownerMany
+		case *o == ownerNone:
+			*o = p
+		case *o != p:
+			*o = ownerMany
+		}
+	}
+	offs, in := gr.ring(rad)
+	for k, o := range offs {
+		xx, yy := x+o[0], y+o[1]
+		if !gr.in(xx, yy) {
+			continue
+		}
+		p := gr.pad[gr.idx(l, xx, yy)]
+		if k < in {
+			merge(&inner, p)
+		} else {
+			merge(&ring, p)
+		}
+	}
+	return uint32(inner+2)<<16 | uint32(ring+2)
+}
+
+const (
 	staticUnknown uint8 = iota
 	staticClear         // no hard cell in the disk and no pad claim in disk+ring: legal for every net
 	staticBlocked       // a hard cell (edge, keepout, hole, netless pad) in the disk: illegal for every net
@@ -420,6 +530,25 @@ const (
 // computed once per distinct radius. It turns most node checks into a
 // single byte read; only cells near pads fall back to the per-net test.
 func (r *router) static(rad float64) []uint8 {
+	// A search asks for the same two or three radii millions of times; the
+	// map lookup (with its rounding) was ~7 % of routing time.
+	for k := range r.staticMRU {
+		if e := &r.staticMRU[k]; e.m != nil && e.rad == rad {
+			return e.m
+		}
+	}
+	m := r.staticSlow(rad)
+	copy(r.staticMRU[1:], r.staticMRU[:len(r.staticMRU)-1])
+	r.staticMRU[0] = staticEntry{rad, m}
+	return m
+}
+
+type staticEntry struct {
+	rad float64
+	m   []uint8
+}
+
+func (r *router) staticSlow(rad float64) []uint8 {
 	gr := r.gr
 	key := int(math.Round(rad * 100))
 	if m, ok := r.statics[key]; ok {
@@ -533,6 +662,24 @@ func (r *router) inNeck(n *rnet, x, y int) bool {
 // nodeCong sums other nets' claims inside the disk.
 func (r *router) nodeCong(l, x, y int, rad float64) (occ float64, hist float64) {
 	gr := r.gr
+	// Empty neighbourhood (the common case): the block summaries prove the
+	// sum is zero. Skipping zero terms leaves the float sum unchanged.
+	ri := int(math.Ceil(rad/gr.g)) + 1
+	bx0, bx1 := max(x-ri, 0)/blockCells, min(x+ri, gr.W-1)/blockCells
+	by0, by1 := max(y-ri, 0)/blockCells, min(y+ri, gr.H-1)/blockCells
+	empty := true
+	for by := by0; by <= by1 && empty; by++ {
+		base := (l*gr.bH + by) * gr.bW
+		for bx := bx0; bx <= bx1; bx++ {
+			if gr.bUse[base+bx] != 0 || gr.bHist[base+bx] != 0 {
+				empty = false
+				break
+			}
+		}
+	}
+	if empty {
+		return 0, 0
+	}
 	for _, o := range gr.disk(rad) {
 		j := gr.idx(l, x+o[0], y+o[1])
 		if u := gr.use[j]; u > 0 {
@@ -615,11 +762,14 @@ func (r *router) viaCostR(n *rnet, x, y int, rad float64) float64 {
 
 // stampClaims adds (sign=+1) or removes (-1) a claim list.
 func (r *router) applyClaims(list []int32, sign int) {
+	gr := r.gr
 	for _, i := range list {
 		if sign > 0 {
-			r.gr.use[i]++
-		} else if r.gr.use[i] > 0 {
-			r.gr.use[i]--
+			gr.use[i]++
+			gr.bUse[gr.blockOf(int(i))]++
+		} else if gr.use[i] > 0 {
+			gr.use[i]--
+			gr.bUse[gr.blockOf(int(i))]--
 		}
 	}
 }
@@ -780,61 +930,85 @@ type pqItem struct {
 	i int32
 	f float32
 }
-type pq []pqItem
 
-func (q pq) Len() int { return len(q) }
-func (q pq) less(a, b int) bool {
-	return q[a].f < q[b].f || q[a].f == q[b].f && q[a].i < q[b].i
+// iheap is a binary min-heap on (f, i) with a position index per node, so a
+// node's key can be lowered in place.
+type iheap struct {
+	items []pqItem
+	pos   []int32 // node → heap slot (valid while the node is open)
 }
 
-// push/pop are a monomorphic binary heap (container/heap boxes every item).
-func (q *pq) push(it pqItem) {
-	*q = append(*q, it)
-	h := *q
-	i := len(h) - 1
-	for i > 0 {
-		p := (i - 1) / 2
-		if !h.less(i, p) {
+func (q *iheap) less(a, b pqItem) bool { return a.f < b.f || a.f == b.f && a.i < b.i }
+
+// set inserts it, or lowers the key of a node already open.
+func (q *iheap) set(it pqItem, open bool) {
+	k := len(q.items)
+	if open {
+		k = int(q.pos[it.i])
+		q.items[k] = it
+	} else {
+		q.items = append(q.items, it)
+	}
+	q.up(k)
+}
+
+func (q *iheap) up(k int) {
+	h := q.items
+	it := h[k]
+	for k > 0 {
+		p := (k - 1) / 2
+		if !q.less(it, h[p]) {
 			break
 		}
-		h[i], h[p] = h[p], h[i]
-		i = p
+		h[k] = h[p]
+		q.pos[h[k].i] = int32(k)
+		k = p
 	}
+	h[k] = it
+	q.pos[it.i] = int32(k)
 }
 
-func (q *pq) pop() pqItem {
-	h := *q
+func (q *iheap) pop() pqItem {
+	h := q.items
 	top := h[0]
 	n := len(h) - 1
-	h[0] = h[n]
+	last := h[n]
 	h = h[:n]
-	i := 0
+	q.items = h
+	if n == 0 {
+		return top
+	}
+	k := 0
 	for {
-		l, m := 2*i+1, i
-		if l < n && h.less(l, m) {
-			m = l
-		}
-		if l+1 < n && h.less(l+1, m) {
-			m = l + 1
-		}
-		if m == i {
+		l := 2*k + 1
+		if l >= n {
 			break
 		}
-		h[i], h[m] = h[m], h[i]
-		i = m
+		m := l
+		if l+1 < n && q.less(h[l+1], h[l]) {
+			m = l + 1
+		}
+		if !q.less(h[m], last) {
+			break
+		}
+		h[k] = h[m]
+		q.pos[h[k].i] = int32(k)
+		k = m
 	}
-	*q = h
+	h[k] = last
+	q.pos[last.i] = int32(k)
 	return top
 }
 
 // search finds a path from any source node to any target node for net n,
 // restricted to bounds (cell rect). Returns the node list source→target.
-func (r *router) search(n *rnet, sources []int32, targets map[int32]bool, bounds [4]int) []int32 {
+func (r *router) search(n *rnet, sources []int32, targets map[int32]bool, bounds [4]int) (found []int32) {
 	gr := r.gr
 	r.cur++
 	if r.cur == math.MaxInt32 {
 		for i := range r.stamp {
-			r.stamp[i], r.closed[i], r.nodeS[i] = 0, 0, 0
+			r.stamp[i], r.closed[i], r.nodeS[i], r.tgt[i] = 0, 0, 0, 0
+			r.floodSrc[i], r.floodSeen[i] = 0, 0
 		}
 		for i := range r.viaS {
 			r.viaS[i] = 0
@@ -846,6 +1020,7 @@ func (r *router) search(n *rnet, sources []int32, targets map[int32]bool, bounds
 	for t := range targets {
 		_, x, y := gr.xy(int(t))
 		tb = [4]int{min(tb[0], x), min(tb[1], y), max(tb[2], x), max(tb[3], y)}
+		r.tgt[t] = r.cur // array membership: a map lookup per pop was ~1 %
 	}
 	g := float32(gr.g)
 	h := func(x, y int) float32 {
@@ -854,27 +1029,31 @@ func (r *router) search(n *rnet, sources []int32, targets map[int32]bool, bounds
 		mn, mx := min(dx, dy), max(dx, dy)
 		return g * (float32(mx-mn) + 1.4142*float32(mn))
 	}
-	q := &pq{}
+	// Indexed heap with decrease-key: every open node is in it once. Pops come
+	// out in the same (f, index) order as the old lazy-deletion heap, whose
+	// stale duplicates were skipped — the paths are identical, the heap is a
+	// fraction of the size (the lazy heap was 27 % of routing time).
+	q := &r.heap
+	q.items = q.items[:0]
 	for _, s := range sources {
 		c := r.cost(n, int(s))
-		if math.IsInf(float64(c), 1) && !targets[s] {
+		if math.IsInf(float64(c), 1) && r.tgt[s] != r.cur {
 			continue
 		}
+		open := r.stamp[s] == r.cur
 		r.stamp[s], r.gcost[s], r.parent[s], r.dir[s] = r.cur, 0, -1, -1
 		_, x, y := gr.xy(int(s))
-		q.push(pqItem{s, h(x, y)})
+		q.set(pqItem{s, h(x, y)}, open)
 	}
 	nl := len(gr.layers)
 	viaCost := float32(r.opt.ViaCostMil)
 	expansions := 0
-	for q.Len() > 0 {
+	defer func() { r.searchStats.add(expansions, found) }()
+	for len(q.items) > 0 {
 		it := q.pop()
 		i := it.i
-		if r.closed[i] == r.cur {
-			continue
-		}
 		r.closed[i] = r.cur
-		if targets[i] {
+		if r.tgt[i] == r.cur {
 			var path []int32
 			for k := i; k >= 0; k = r.parent[k] {
 				path = append(path, k)
@@ -928,9 +1107,9 @@ func (r *router) search(n *rnet, sources []int32, targets map[int32]bool, bounds
 				}
 			}
 			ng := gi + step*c
-			if r.stamp[j] != r.cur || ng < r.gcost[j] {
+			if open := r.stamp[j] == r.cur; !open || ng < r.gcost[j] {
 				r.stamp[j], r.gcost[j], r.parent[j], r.dir[j] = r.cur, ng, i, int8(d)
-				q.push(pqItem{j, ng + h(xx, yy)})
+				q.set(pqItem{j, ng + h(xx, yy)}, open)
 			}
 		}
 		// Layer change through a via.
@@ -956,9 +1135,9 @@ func (r *router) search(n *rnet, sources []int32, targets map[int32]bool, bounds
 					continue
 				}
 				ng := gi + viaCost*vc
-				if r.stamp[j] != r.cur || ng < r.gcost[j] {
+				if open := r.stamp[j] == r.cur; !open || ng < r.gcost[j] {
 					r.stamp[j], r.gcost[j], r.parent[j], r.dir[j] = r.cur, ng, i, -1
-					q.push(pqItem{j, ng + h(x, y)})
+					q.set(pqItem{j, ng + h(x, y)}, open)
 				}
 			}
 		}
@@ -1087,10 +1266,24 @@ func (r *router) routeNetKeep(n *rnet, keep bool) bool {
 			_, x, y := gr.xy(int(t))
 			bb = [4]int{min(bb[0], x), min(bb[1], y), max(bb[2], x), max(bb[3], y)}
 		}
-		for _, grow := range []int{int(120 / gr.g), int(400 / gr.g), 1 << 20} {
+		// A connection whose targets sit in a closed pocket fails in every
+		// window; proving that with a cheap flood from the target side skips
+		// three full A* searches (K230: 95 % of all search work went into
+		// failed searches, and the larger windows rescued 5 of 729).
+		unreachable := r.provablyUnreachable(n, tree, targets)
+		if unreachable {
+			r.searchStats.proofs++
+		}
+		for stage, grow := range []int{int(120 / gr.g), int(400 / gr.g), 1 << 20} {
+			if unreachable {
+				break
+			}
 			m := grow + (bb[2]-bb[0]+bb[3]-bb[1])/4
 			w := [4]int{max(bb[0]-m, 0), max(bb[1]-m, 0), min(bb[2]+m, gr.W-1), min(bb[3]+m, gr.H-1)}
-			if path = r.search(n, tree, targets, w); path != nil {
+			r.searchStats.stage = stage
+			path = r.search(n, tree, targets, w)
+			r.searchStats.stage = -1
+			if path != nil {
 				break
 			}
 			if time.Now().After(r.deadline) {
@@ -1338,6 +1531,9 @@ func (r *router) negotiate(ctx context.Context, res *RouteResult) error {
 		// History: every over-used cell becomes more expensive for good.
 		for i, u := range r.gr.use {
 			if u > 1 {
+				if r.gr.hist[i] == 0 {
+					r.gr.bHist[r.gr.blockOf(i)]++
+				}
 				r.gr.hist[i] += 0.5 * float32(u-1)
 			}
 		}
@@ -1392,6 +1588,115 @@ func (r *router) negotiate(ctx context.Context, res *RouteResult) error {
 	res.Notes = append(res.Notes, sprintf("negotiation: legalisation dropped %d plane fan-outs that blocked signals", r.yielded))
 	return nil
 }
+
+// floodCap bounds the target-side flood of provablyUnreachable: a pocket
+// larger than this is left to the search.
+const floodCap = 60000
+
+// provablyUnreachable reports whether no path can exist from sources to
+// targets on the whole board: a flood from the targets under relaxed rules
+// (any turn, same node and via legality as search) exhausts its region
+// without touching a source. Relaxed moves reach a superset of what search
+// can, so a true result is a proof; a large or open region, a source in
+// reach, or the deadline all give false and the search runs as before.
+func (r *router) provablyUnreachable(n *rnet, sources []int32, targets map[int32]bool) bool {
+	if noUnreachableProof {
+		return false
+	}
+	gr := r.gr
+	r.cur++ // fresh cost cache for this flood
+	cur := r.cur
+	for _, s := range sources {
+		r.floodSrc[s] = cur
+	}
+	queue := r.floodQ[:0]
+	defer func() { r.floodQ = queue[:0] }()
+	for t := range targets {
+		if r.floodSrc[t] == cur {
+			return false
+		}
+		if math.IsInf(float64(r.cost(n, int(t))), 1) || r.floodSeen[t] == cur {
+			continue
+		}
+		r.floodSeen[t] = cur
+		queue = append(queue, t)
+	}
+	nl := len(gr.layers)
+	for k := 0; k < len(queue); k++ {
+		if len(queue) > floodCap || k&0xfff == 0 && time.Now().After(r.deadline) {
+			return false
+		}
+		i := queue[k]
+		l, x, y := gr.xy(int(i))
+		visit := func(j int32) bool {
+			if r.floodSeen[j] == cur {
+				return true
+			}
+			if math.IsInf(float64(r.cost(n, int(j))), 1) {
+				return true
+			}
+			if r.floodSrc[j] == cur {
+				return false // a source is in reach
+			}
+			r.floodSeen[j] = cur
+			queue = append(queue, j)
+			return true
+		}
+		for d := 0; d < 8; d++ {
+			xx, yy := x+dirs8[d][0], y+dirs8[d][1]
+			if !gr.in(xx, yy) {
+				continue
+			}
+			if !visit(int32(gr.idx(l, xx, yy))) {
+				return false
+			}
+		}
+		if nl > 1 && !math.IsInf(r.viaCost(n, x, y), 1) {
+			for ll := 0; ll < nl; ll++ {
+				if ll == l || !gr.routable[ll] {
+					continue
+				}
+				if !visit(int32(gr.idx(ll, x, y))) {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
+// noUnreachableProof disables provablyUnreachable (A/B diagnostics).
+var noUnreachableProof bool
+
+// searchStats counts A* work by outcome (diagnostics).
+type searchStats struct {
+	okN, failN     int
+	okExp, failExp int64
+	proofs         int         // connections proven unreachable without a search
+	stage          int         // window stage of routeNetKeep's current search, -1 otherwise
+	byStage        [3][4]int64 // ok n, ok exp, fail n, fail exp
+}
+
+func (s *searchStats) add(exp int, found []int32) {
+	if found != nil {
+		s.okN++
+		s.okExp += int64(exp)
+	} else {
+		s.failN++
+		s.failExp += int64(exp)
+	}
+	if s.stage >= 0 && s.stage < 3 {
+		k := 0
+		if found == nil {
+			k = 2
+		}
+		s.byStage[s.stage][k]++
+		s.byStage[s.stage][k+1] += int64(exp)
+	}
+}
+
+// noOwnerCache disables the nodeOK pad-owner summaries (A/B diagnostics).
+var noOwnerCache bool
 
 // negotiateNoKeep disables rerouteKeepOnTimeout (A/B diagnostics).
 var negotiateNoKeep bool

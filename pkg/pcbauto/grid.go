@@ -33,13 +33,28 @@ type grid struct {
 	pad      []int32  // per layer-cell: -1 none, net id, -2 several nets
 	use      []uint16 // per layer-cell: routed/fanout claims (distinct nets)
 	hist     []float32
+	// Coarse 8×8-cell block summaries, so a congestion sum over an empty
+	// neighbourhood is a few block reads instead of a disk of cells:
+	// bUse = sum of use in the block, bHist = cells with non-zero history.
+	bUse, bHist []int32
+	bW, bH      int
 	noVia    []bool // per x,y (all layers)
 	baseClr  float64
 	dcache   map[int]offs
+	diskMRU  [4]diskEntry
 	rcache   map[int]ringEntry
 }
 
 func (gr *grid) idx(l, x, y int) int { return (l*gr.H+y)*gr.W + x }
+
+const blockCells = 8
+
+// blockOf returns the block summary index of layer-cell i.
+func (gr *grid) blockOf(i int) int {
+	x := i % gr.W
+	r := i / gr.W
+	return ((r/gr.H)*gr.bH+(r%gr.H)/blockCells)*gr.bW + x/blockCells
+}
 func (gr *grid) xy(i int) (l, x, y int) {
 	x = i % gr.W
 	r := i / gr.W
@@ -69,6 +84,23 @@ func (gr *grid) layerIndex(id int) int {
 type offs [][2]int
 
 func (gr *grid) disk(r float64) offs {
+	for k := range gr.diskMRU {
+		if e := &gr.diskMRU[k]; e.d != nil && e.r == r {
+			return e.d
+		}
+	}
+	d := gr.diskSlow(r)
+	copy(gr.diskMRU[1:], gr.diskMRU[:len(gr.diskMRU)-1])
+	gr.diskMRU[0] = diskEntry{r, d}
+	return d
+}
+
+type diskEntry struct {
+	r float64
+	d offs
+}
+
+func (gr *grid) diskSlow(r float64) offs {
 	rc := math.Ceil(r/gr.g-0.5-1e-9) + 0.25
 	key := int(math.Round(rc * 100))
 	if gr.dcache == nil {
@@ -114,6 +146,9 @@ func newGrid(b *Board, stack *Stackup, g float64) (*grid, error) {
 	}
 	gr.use = make([]uint16, n)
 	gr.hist = make([]float32, n)
+	gr.bW, gr.bH = (gr.W+blockCells-1)/blockCells, (gr.H+blockCells-1)/blockCells
+	gr.bUse = make([]int32, len(gr.layers)*gr.bW*gr.bH)
+	gr.bHist = make([]int32, len(gr.layers)*gr.bW*gr.bH)
 	gr.noVia = make([]bool, gr.W*gr.H)
 	return gr, nil
 }
