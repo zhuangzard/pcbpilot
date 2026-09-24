@@ -63,6 +63,10 @@ var schematicAnnealDisabled bool
 // annealAttemptHook observes each terminal-gate attempt (diagnostics).
 var annealAttemptHook func(round, spent int, err error)
 
+// annealCandidateHook observes each placement handed to the terminal gate
+// (diagnostics only).
+var annealCandidateHook func(p powerLayoutPlan)
+
 type annealPart struct {
 	id       string
 	measured powerLayoutPlacement
@@ -157,6 +161,9 @@ func solveSchematicLayoutAnneal(input SchematicLayoutInput, measured map[string]
 			// round-0 attempt burned 54k and round 1, which passes in ~20k
 			// evaluations, never ran). Cap a single attempt.
 			slice = min(slice, max(6000, annealFinishAttemptCap))
+			if annealCandidateHook != nil {
+				annealCandidateHook(p)
+			}
 			spent := slice
 			done, err := libFinishSchematicLayoutRegenerate(p, s.policies, &slice, routing)
 			*s.budget -= spent - slice

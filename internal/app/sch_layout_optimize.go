@@ -148,7 +148,7 @@ func validateSchematicOptimizationEvidence(in SchematicLayoutInput, r *Schematic
 		quarters := int(math.Mod(got.Rotation-c.Measurement.Rotation+360, 360) / 90)
 		expected := plRotate(c.Measurement, quarters)
 		expected = plTranslate(expected, got.X-expected.X, got.Y-expected.Y)
-		if !reflect.DeepEqual(got, expected) {
+		if !plPlacementRigidEqual(got, expected) {
 			return fmt.Errorf("optimized result is not a rigid source transform for %s", c.ID)
 		}
 		if c.ID == in.CoreComponentID && (got.X != 0 || got.Y != 0 || got.Rotation != c.Measurement.Rotation) {
@@ -474,4 +474,35 @@ func restoreSchematicOptimizationConnections(p *powerLayoutPlan, baseline *Schem
 		}
 	}
 	return nil
+}
+
+// plPlacementRigidEqual compares two placements produced by different orders
+// of the same rigid transforms: coordinates within the variant tolerance
+// (float sums of fractional measured text boxes are order dependent), every
+// identity, net, pin and pose field exactly.
+func plPlacementRigidEqual(a, b powerLayoutPlacement) bool {
+	num := schematicVariantNumberEqual
+	boxes := func(x, y []layoutBBox) bool {
+		if len(x) != len(y) {
+			return false
+		}
+		for i := range x {
+			if !schematicVariantBoxEqual(x[i], y[i]) {
+				return false
+			}
+		}
+		return true
+	}
+	if a.PrimitiveID != b.PrimitiveID || a.Designator != b.Designator || a.Value != b.Value || a.Rotation != b.Rotation || a.Mirror != b.Mirror ||
+		!num(a.X, b.X) || !num(a.Y, b.Y) || !schematicVariantBoxEqual(a.BBox, b.BBox) || !boxes(a.TextBBoxes, b.TextBBoxes) ||
+		!reflect.DeepEqual(a.TextBBoxesByRotation, b.TextBBoxesByRotation) || len(a.Pins) != len(b.Pins) {
+		return false
+	}
+	for i := range a.Pins {
+		p, q := a.Pins[i], b.Pins[i]
+		if p.Number != q.Number || p.Name != q.Name || p.Net != q.Net || !num(p.X, q.X) || !num(p.Y, q.Y) || !reflect.DeepEqual(p.Rotation, q.Rotation) {
+			return false
+		}
+	}
+	return true
 }

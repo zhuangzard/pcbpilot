@@ -57,6 +57,13 @@ func TestDebugRealZone(t *testing.T) {
 	}
 	annealAttemptHook = func(round, spent int, e error) { t.Logf("  anneal round %d attempt spent %d: %.300v", round, spent, e) }
 	annealHook = func(e error) { t.Logf("  anneal result: %.300v", e) }
+	if dump := os.Getenv("PCBPILOT_REALZONE_DUMP"); dump != "" {
+		annealCandidateHook = func(p powerLayoutPlan) {
+			b, _ := json.Marshal(p)
+			_ = os.WriteFile(dump, b, 0o644)
+		}
+		defer func() { annealCandidateHook = nil }()
+	}
 	defer func() { annealAttemptHook, annealHook = nil, nil }()
 	start := time.Now()
 	out, err := PlanSchematicLayout(in)

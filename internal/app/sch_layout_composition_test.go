@@ -53,3 +53,23 @@ func TestLayoutCompositionMapsRolesAndRefusesDrift(t *testing.T) {
 		t.Fatal("pin net drift between source and page accepted")
 	}
 }
+
+// V3 designator boxes are fractional; translate-then-rotate and
+// rotate-then-translate differ in the last float bit. Rigid validation must
+// accept that and still reject a real pose/geometry change.
+func TestRigidPlacementEqualToleratesTransformOrder(t *testing.T) {
+	c := powerLayoutPlacement{Designator: "C105", X: 520.3, Y: 700.7, BBox: layoutBBox{509.8, 692.2, 530.8, 709.2},
+		TextBBoxes:           []layoutBBox{{510.3, 710.7, 519.4271820068359, 718.7}},
+		TextBBoxesByRotation: map[string][]layoutBBox{"90": {{15, 0, 24.127182006835938, 8}}},
+		Pins:                 []powerLayoutPin{{Number: "1", Net: "+3V3", X: 530.3, Y: 700.7}, {Number: "2", Net: "GND", X: 510.3, Y: 700.7}}}
+	a := plTranslate(plRotate(plTranslate(c, -333.3, -77.7), 1), -12.1, 45.9)
+	b := plRotate(c, 1)
+	b = plTranslate(b, a.X-b.X, a.Y-b.Y)
+	if !plPlacementRigidEqual(a, b) {
+		t.Fatalf("order-dependent float sums rejected:\n%+v\n%+v", a, b)
+	}
+	b.TextBBoxes[0].MaxX += 1
+	if plPlacementRigidEqual(a, b) {
+		t.Fatal("a real text-box change was accepted")
+	}
+}

@@ -57,6 +57,17 @@ pcbpilot sch sheet-geometry --project <project> --json
 解出；10 件 SY8089 区 1.4 s。小区（< 6 件外围）仍走原搜索，结果不变。回归见
 `internal/app/sch_layout_bench_test.go`。
 
+**分区建模经验（2026-09-24 压力验证：ESP32 合并/×2/×3、AT32F415 65 件，V3/V4 两套实测几何）**：
+- 功能区内按信号网（排除电源/地）连通分组；只接电源/地的去耦件归入该功能区主核心组；
+  zone-review 报 `non-rail-subgraph-detached` 的子图（如三个独立按键）拆成独立区。
+- 密集连接器：核心有 ≥4 个信号脚各接一个两脚外围（上拉/串阻）且这些信号还要去别的区时，
+  10 raw 脚距放不下“每脚一个外围 + 一个端口引线”。把这些外围画成独立的阵列区（阵列内用电源
+  导线真连），连接器脚只出端口。实测 AT32 microSD（卡座 + 6 上拉）不拆时 50 万候选失败，拆后秒解。
+- 合并区时原核心变成外围：挂在原核心上的 attachment 要反向（例如 J_PWR→D_TERM），
+  否则退火报 “peripherals have no connected host”。
+- 解不出先看诊断再加预算：`maxCandidates` 是每区上限，已解出的区不多花；V3 几何的 ESP32
+  MCU 区需要 80 万。
+
 复杂直连网络在源输入顶层使用可选
 `routing:{"maxExpandedNodes":200000,"maxReroutes":4}`；省略即采用这两个默认值。
 该预算按 zone 隔离，5 raw 方向网格的 40/80/160/320 raw 包络扩展、全部 direct 网络、
