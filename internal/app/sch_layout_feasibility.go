@@ -123,6 +123,12 @@ func runSchematicLayoutFeasibility(input SchematicLayoutInput, measured map[stri
 	run func(map[string]powerLayoutPlacement, *int) (*SchematicLayoutResult, error),
 ) (*SchematicLayoutResult, *SchematicFeasibilityReport, error) {
 	poses, truncated := schematicFeasibilityPoses(input, allowed)
+	if !schematicAnnealDisabled && len(input.Components)-1 >= annealMinPeripherals {
+		// Dense zones go straight to the annealing placer, which chooses each
+		// peripheral's rotation from the same allowed set; a pose menu around
+		// it would split the budget into up to 17 slices of the same search.
+		poses = nil
+	}
 	if len(poses) == 0 {
 		out, err := run(measured, budget)
 		return out, nil, err // Preserve the established fixed-pose contract.

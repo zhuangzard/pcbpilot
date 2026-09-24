@@ -42,6 +42,14 @@ const annealMinPeripherals = 6
 
 const annealEvalsPerCandidate = 8
 
+// annealFallbackMinPeripherals: zones this size and up (below
+// annealMinPeripherals) get the annealer as a fallback after the search.
+const annealFallbackMinPeripherals = 3
+
+// annealFallbackMinBudget: below this the budget is too small to split, and
+// the search keeps it whole (its bounded-failure reporting is pinned).
+const annealFallbackMinBudget = 4000
+
 var schematicAnnealDisabled bool
 
 // annealAttemptHook observes each terminal-gate attempt (diagnostics).
@@ -55,7 +63,11 @@ type annealPart struct {
 	ownPin   string
 	depth    int
 	slots    [][2]float64 // (distance, lateral) from the host pin
+	rots     []int        // allowed quarter turns relative to the measurement (0 first)
 }
+
+// A state entry encodes (rotation, slot) as rot*len(slots)+slot.
+func (p *annealPart) choices() int { return len(p.rots) * len(p.slots) }
 
 type annealState []int // slot index per part (aligned with parts)
 
@@ -67,13 +79,28 @@ type annealSolver struct {
 	budget    *int
 	rng       *rand.Rand
 	leadBoost map[string]float64 // component/pin key → extra lead length
+	netWeight map[string]float64 // net → extra wire-length weight (route conflicts)
+	allowed   map[string][]float64
+	refs      map[string]string // designator → component id
+	roles     map[string]string // peripheral-direct net roles
 	evals     int
 }
 
 func solveSchematicLayoutAnneal(input SchematicLayoutInput, measured map[string]powerLayoutPlacement, members []string, hints map[string]SchematicLayoutPeripheral, budget *int, routing *schematicRoutingContext) (*SchematicLayoutResult, error) {
 	core := measured[input.CoreComponentID]
 	core = plTranslate(core, -core.X, -core.Y)
-	s := &annealSolver{input: input, core: core, policies: input.NetPolicies, budget: budget, leadBoost: map[string]float64{}}
+	s := &annealSolver{input: input, core: core, policies: input.NetPolicies, budget: budget, leadBoost: map[string]float64{}, netWeight: map[string]float64{}, allowed: map[string][]float64{}}
+	s.refs = map[string]string{}
+	for _, c := range input.Components {
+		s.allowed[c.ID] = c.AllowedRotations
+		s.refs[c.Measurement.Designator] = c.ID
+	}
+	probe := input
+	probe.NetPolicies = map[string]string{}
+	for k, v := range input.NetPolicies {
+		probe.NetPolicies[k] = v
+	}
+	s.roles = schematicMandatoryPeripheralSignalPolicies(&probe)
 	h := fnv.New64a()
 	for _, id := range members {
 		h.Write([]byte(id))
@@ -114,6 +141,18 @@ func solveSchematicLayoutAnneal(input SchematicLayoutInput, measured map[string]
 			done, err := libFinishSchematicLayoutRegenerate(p, s.policies, &slice, routing)
 			*s.budget -= spent - slice
 			if err == nil {
+				// The zone gate that runs after the solver: every owned
+				// peripheral needs a physical non-ground path to the core.
+				// Check it here so a candidate it would reject is not taken.
+				tmp := &SchematicLayoutResult{Placements: done.Placements, Wires: done.Wires, Flags: done.Flags, ComponentIDs: s.refs}
+				if perr := validateSchematicLayoutPeripheralDirect(tmp, s.input.CoreComponentID, s.roles); perr != nil {
+					lastErr = perr
+					if annealAttemptHook != nil {
+						annealAttemptHook(round, spent-slice, perr)
+					}
+					s.pullOwnedPeripherals()
+					continue
+				}
 				return &SchematicLayoutResult{Placements: done.Placements, Wires: done.Wires, Flags: done.Flags, Score: libCandidateScore(done),
 					Search: &SchematicLayoutSearchDiagnostics{Strategy: fmt.Sprintf("anneal-v1 (round %d, %d evaluations)", round+1, s.evals), MovedComponents: []string{}}}, nil
 			}
@@ -167,7 +206,16 @@ func (s *annealSolver) buildParts(measured map[string]powerLayoutPlacement, memb
 			if hostID == "" {
 				continue
 			}
-			part := &annealPart{id: id, measured: own, hostID: hostID, hostPin: pair.host.Number, ownPin: pair.own.Number, depth: depth[hostID] + 1}
+			part := &annealPart{id: id, measured: own, hostID: hostID, hostPin: pair.host.Number, ownPin: pair.own.Number, depth: depth[hostID] + 1, rots: []int{0}}
+			for _, a := range s.allowed[id] {
+				q := int(math.Round((a-own.Rotation)/90)) % 4
+				if q < 0 {
+					q += 4
+				}
+				if q != 0 && !slicesContainsInt(part.rots, q) {
+					part.rots = append(part.rots, q)
+				}
+			}
 			for d := 15.0; d <= 120; d += 5 {
 				for lat := -60.0; lat <= 60; lat += 5 {
 					part.slots = append(part.slots, [2]float64{d, lat})
@@ -213,11 +261,15 @@ func (s *annealSolver) plan(st annealState) powerLayoutPlan {
 		hp, _ := libPin(host, part.hostPin)
 		side, _ := libPinSide(hp, host.BBox)
 		ux, uy := annealDir(side)
-		slot := part.slots[st[i]]
+		slot := part.slots[st[i]%len(part.slots)]
+		body := part.measured
+		if q := part.rots[st[i]/len(part.slots)]; q != 0 {
+			body = plRotate(body, q)
+		}
 		tx := annealSnap(hp.X + ux*slot[0] - uy*slot[1])
 		ty := annealSnap(hp.Y + uy*slot[0] + ux*slot[1])
-		op, _ := libPin(part.measured, part.ownPin)
-		c := plTranslate(part.measured, tx-op.X, ty-op.Y)
+		op, _ := libPin(body, part.ownPin)
+		c := plTranslate(body, tx-op.X, ty-op.Y)
 		at[part.id] = c
 		p.Placements = append(p.Placements, c)
 	}
@@ -355,9 +407,9 @@ func (s *annealSolver) cost(st annealState) (float64, bool) {
 		}
 	}
 	for net, b := range nets {
-		w := 1.0
+		w := 1.0 + s.netWeight[net]
 		if s.policies[net] == "direct" {
-			w = 2
+			w += 1
 		}
 		wire += w * (b.MaxX - b.MinX + b.MaxY - b.MinY)
 	}
@@ -376,7 +428,7 @@ func (s *annealSolver) seed() annealState {
 	st := make(annealState, len(s.parts))
 	for i := range s.parts {
 		bestK, bestC := 0, math.Inf(1)
-		for k := 0; k < len(s.parts[i].slots); k += 3 {
+		for k := 0; k < s.parts[i].choices(); k += 3 {
 			st[i] = k
 			if c, _ := s.costPrefix(st, i+1); c < bestC {
 				bestK, bestC = k, c
@@ -422,13 +474,18 @@ func (s *annealSolver) anneal(start annealState, iters int) []annealState {
 		t := t0 * math.Pow(t1/t0, float64(it)/float64(iters))
 		i := s.rng.Intn(len(s.parts))
 		old := cur[i]
-		n := len(s.parts[i].slots)
-		if s.rng.Float64() < 0.35 {
-			cur[i] = s.rng.Intn(n)
-		} else {
+		part := s.parts[i]
+		n := len(part.slots)
+		rot, slot := old/n, old%n
+		switch r := s.rng.Float64(); {
+		case r < 0.3:
+			slot = s.rng.Intn(n)
+		case r < 0.45 && len(part.rots) > 1:
+			rot = s.rng.Intn(len(part.rots))
+		default:
 			// Neighbour slot: one step in distance or lateral offset.
 			per := 25 // lateral steps per distance row (-60..60 by 5)
-			d, l := old/per, old%per
+			d, l := slot/per, slot%per
 			switch s.rng.Intn(4) {
 			case 0:
 				d++
@@ -440,10 +497,13 @@ func (s *annealSolver) anneal(start annealState, iters int) []annealState {
 				l--
 			}
 			if d < 0 || l < 0 || l >= per || d*per+l >= n {
-				cur[i] = old
 				continue
 			}
-			cur[i] = d*per + l
+			slot = d*per + l
+		}
+		cur[i] = rot*n + slot
+		if cur[i] == old {
+			continue
 		}
 		c, ok := s.cost(cur)
 		if c <= curC || s.rng.Float64() < math.Exp((curC-c)/t) {
@@ -472,8 +532,9 @@ func (s *annealSolver) learn(err error, p powerLayoutPlan) {
 	boost := func(net string) {
 		for _, c := range p.Placements {
 			for _, pin := range c.Pins {
-				if pin.Net == net {
-					s.leadBoost[c.Designator+"."+pin.Number] += 15
+				k := c.Designator + "." + pin.Number
+				if pin.Net == net && s.leadBoost[k] < 30 {
+					s.leadBoost[k] += 10
 				}
 			}
 		}
@@ -483,15 +544,45 @@ func (s *annealSolver) learn(err error, p powerLayoutPlan) {
 		boost(nc.net)
 		return
 	}
+	// A net that could not be routed: pull its pins together.
 	var rc *schematicRouteConflict
 	if errors.As(err, &rc) {
-		boost(rc.net)
+		s.netWeight[rc.net] += 3
 		return
 	}
-	// Unclassified: widen every lead a little.
-	for _, c := range p.Placements {
-		for _, pin := range c.Pins {
-			s.leadBoost[c.Designator+"."+pin.Number] += 5
+}
+
+// pullOwnedPeripherals raises the wire weight of every non-ground net a
+// peripheral shares with its host, so the next round keeps owned parts close
+// enough for a physical connection rather than a symbol at each end.
+func (s *annealSolver) pullOwnedPeripherals() {
+	for _, part := range s.parts {
+		op, ok := libPin(part.measured, part.ownPin)
+		if ok && op.Net != "" && s.policies[op.Net] != "local_ground" {
+			s.netWeight[op.Net] += 2
 		}
 	}
+}
+
+func slicesContainsInt(xs []int, v int) bool {
+	for _, x := range xs {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
+// schematicAnnealHandlesRotations reports whether this zone goes through the
+// annealing placer (directly or as the search's fallback), which then owns
+// the choice of allowed rotations.
+func schematicAnnealHandlesRotations(input SchematicLayoutInput, budget int) bool {
+	if schematicAnnealDisabled {
+		return false
+	}
+	peripherals := len(input.Components) - 1
+	if peripherals >= annealMinPeripherals {
+		return true
+	}
+	return peripherals >= annealFallbackMinPeripherals && budget >= annealFallbackMinBudget
 }

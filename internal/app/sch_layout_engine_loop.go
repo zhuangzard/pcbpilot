@@ -37,6 +37,30 @@ func solveSchematicLayout(input SchematicLayoutInput, measured map[string]powerL
 		}
 		// Fall back to the candidate search with what is left.
 	}
+	if !schematicAnnealDisabled && len(pending) >= annealFallbackMinPeripherals && len(pending) < annealMinPeripherals && *budget >= annealFallbackMinBudget {
+		// Smaller zones: the candidate search first (its results are pinned by
+		// many fixtures) on half the budget; if it cannot finish, the annealer
+		// gets the other half (USB-C/CH340C zone, 5 peripherals: the search
+		// exhausted 20 000 candidates on "+3V3 has no safe naming lead").
+		half := *budget / 2
+		rest := *budget - half
+		s := newSchematicRepairSearch(input, measured, members, hints, &half, routing)
+		out, err := s.solve(p, pending)
+		*budget = rest + max(half, 0)
+		if err == nil {
+			return out, nil
+		}
+		local := *budget
+		aout, aerr := solveSchematicLayoutAnneal(input, measured, members, hints, &local, routing)
+		*budget = max(local, 0)
+		if annealHook != nil {
+			annealHook(aerr)
+		}
+		if aerr == nil {
+			return aout, nil
+		}
+		return nil, err
+	}
 	s := newSchematicRepairSearch(input, measured, members, hints, budget, routing)
 	return s.solve(p, pending)
 }

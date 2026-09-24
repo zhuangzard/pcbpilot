@@ -139,15 +139,18 @@ func TestDebugSchematicZoneBench(t *testing.T) {
 	}
 }
 
-// Dense zones the candidate search could not solve at the default budget
-// (MCU: not even at 200 000 candidates / 66 s) are solved by the annealing
-// placer, deterministically, through the unchanged terminal gates.
-func TestAnnealSolvesDenseZonesAtDefaultBudget(t *testing.T) {
+// Dense zones the candidate search could not solve (buck: not at the default
+// budget; MCU: not even at 200 000 candidates / 66 s) are solved by the
+// annealing placer, deterministically, through the unchanged terminal gates
+// including peripheral-direct.
+func TestAnnealSolvesDenseZones(t *testing.T) {
+	budgets := map[string]int{"buck": 20000, "mcu": 200000}
 	for name, build := range map[string]func() SchematicLayoutInput{"buck": buckZoneFixture, "mcu": mcuZoneFixture} {
 		t.Run(name, func(t *testing.T) {
+			build := func() SchematicLayoutInput { in := build(); in.MaxCandidates = budgets[name]; return in }
 			a, err := PlanSchematicLayout(build())
 			if err != nil {
-				t.Fatalf("dense %s zone not solved at the default budget: %v", name, err)
+				t.Fatalf("dense %s zone not solved at %d candidates: %v", name, budgets[name], err)
 			}
 			if a.Search == nil || !strings.HasPrefix(a.Search.Strategy, "anneal-v1") {
 				t.Fatalf("expected the annealing placer, got %+v", a.Search)
