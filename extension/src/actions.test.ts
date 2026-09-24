@@ -2643,7 +2643,7 @@ test('page primitive attribute state uses typed get(id) when bulk getter is inco
 		const expectedPagePrimitives = JSON.stringify(read.result.pagePrimitives);
 		directKeyVisible = undefined;
 		await assert.rejects(() => runAction('schematic.page.clear', { expectedPagePrimitives }),
-			/Page attribute attr-1 remains unreadable after typed get\(id\)/);
+			/Official native project export is unavailable for attribute visibility recovery/);
 		assert.equal(deletes, 0);
 	}
 	finally { delete (globalThis as any).eda; }

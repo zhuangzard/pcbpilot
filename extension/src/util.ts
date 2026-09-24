@@ -651,6 +651,71 @@ export function projectFootprintSourceInventory(
 	return inventory;
 }
 
+export interface NativeSchematicAttribute {
+	id: string;
+	key: string;
+	value: unknown;
+	parentId: string;
+	keyVisible?: boolean | null;
+	valueVisible?: boolean | null;
+}
+
+/** Exact ATTR records from one SCH_PAGE of an official current-project export.
+ * Pin-owned attributes can omit visibility entirely. An explicit native null
+ * can recover an SDK getter's undefined; an absent field never can.
+ */
+export function projectSchematicAttributeInventory(
+	text: string,
+	documentUuid: string,
+): Map<string, NativeSchematicAttribute> {
+	if (!documentUuid || text.length > 64 * 1024 * 1024) throw new Error('native project source is missing its target or exceeds 64 MiB');
+	const rows = text.split(/\r?\n/);
+	if (rows.length > 200000) throw new Error('native project source exceeds 200000 rows');
+	let lastRow = rows.length - 1;
+	while (lastRow >= 0 && !rows[lastRow].trim()) lastRow--;
+	const attributes = new Map<string, NativeSchematicAttribute>();
+	let target = false;
+	let targetPages = 0;
+	for (const [rowIndex, raw] of rows.entries()) {
+		let line = raw.trim();
+		if (!line) continue;
+		const delimiter = line.indexOf('||');
+		if (delimiter < 0) throw new Error('malformed native project source row');
+		if (!line.endsWith('|')) {
+			if (rowIndex !== lastRow) throw new Error('unterminated native project source row before EOF');
+			JSON.parse(line.slice(delimiter + 2));
+			line += '|';
+		}
+		const header = JSON.parse(line.slice(0, delimiter)) as Record<string, unknown>;
+		if (header.type === 'DOCHEAD') {
+			const payload = JSON.parse(line.slice(delimiter + 2, -1)) as Record<string, unknown>;
+			target = payload.docType === 'SCH_PAGE' && payload.uuid === documentUuid;
+			if (target) targetPages++;
+			continue;
+		}
+		if (!target || header.type !== 'ATTR') continue;
+		const payload = JSON.parse(line.slice(delimiter + 2, -1)) as Record<string, unknown>;
+		const id = header.id;
+		const hasKeyVisible = Object.hasOwn(payload, 'keyVisible');
+		const hasValueVisible = Object.hasOwn(payload, 'valueVisible');
+		if (typeof id !== 'string' || !id || typeof payload.key !== 'string' || typeof payload.parentId !== 'string'
+			|| !Object.hasOwn(payload, 'value') || hasKeyVisible !== hasValueVisible
+			|| (hasKeyVisible && payload.keyVisible !== null && typeof payload.keyVisible !== 'boolean')
+			|| (hasValueVisible && payload.valueVisible !== null && typeof payload.valueVisible !== 'boolean')) {
+			throw new Error('native SCH_PAGE ATTR identity/visibility is incomplete');
+		}
+		if (attributes.has(id)) throw new Error(`duplicate native SCH_PAGE ATTR ${id}`);
+		attributes.set(id, {
+			id, key: payload.key, value: payload.value, parentId: payload.parentId,
+			keyVisible: payload.keyVisible as boolean | null | undefined,
+			valueVisible: payload.valueVisible as boolean | null | undefined,
+		});
+		if (attributes.size > 200000) throw new Error('native SCH_PAGE exceeds 200000 attributes');
+	}
+	if (targetPages !== 1) throw new Error(`native project contains ${targetPages} matching SCH_PAGE documents; one is required`);
+	return attributes;
+}
+
 /** Read an exact origin from the official per-document footprint source inventory.
  * Never scan arbitrary text for a source string: it must belong to the single
  * FOOTPRINT DOCHEAD identified by this API entry and its following unique META.

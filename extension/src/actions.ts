@@ -12,7 +12,7 @@ import { exactJSON, preservedInstance } from './preserve-instance';
 import { barePcbRuleConfiguration, pcbRulesEqual, planPcbConfig } from './pcb-config';
 import { pcbNetColorSet } from './pcb-net-color';
 import { documentTypeLabel, readResponseContext } from './eda-context';
-import { readProjectFootprintSourceArchive } from './native-footprint-source';
+import { readProjectFootprintSourceArchive, readProjectNativeSourceArchive } from './native-footprint-source';
 import {
 	assertLegacySimpleWireOperation,
 	classifyWireContact,
@@ -47,12 +47,14 @@ import {
 	optionalNumber,
 	optionalString,
 	pickNamedCandidate,
+	projectSchematicAttributeInventory,
 	readDeviceFootprint,
 	readNativeFootprintSource,
 	requireNumber,
 	requireString,
 	requireStringArray,
 	uint8ToBase64,
+	type NativeSchematicAttribute,
 } from './util';
 
 type Payload = Record<string, unknown>;
@@ -2202,20 +2204,43 @@ const SCH_PAGE_STATE_FIELDS: Record<string, Array<string>> = {
 	objects: ['Content', 'StartX', 'StartY', 'Width', 'Height', 'Rotation', 'Mirror', 'FileName'],
 };
 
-function schPrimitiveStateRecord(primitive: SchPrimitiveLike, kind: string): Record<string, unknown> {
+function schPrimitiveStateRecord(primitive: SchPrimitiveLike, kind: string, native?: NativeSchematicAttribute): Record<string, unknown> {
 	const primitiveId = primitive.getState_PrimitiveId();
 	const record: Record<string, unknown> = { primitiveId };
 	for (const field of SCH_PAGE_STATE_FIELDS[kind]) {
 		const getter = (primitive as unknown as Record<string, unknown>)[`getState_${field}`];
 		if (typeof getter !== 'function') throw new Error(`Page ${kind}.${field} accessor unavailable for ${primitiveId}.`);
-		const value = (getter as () => unknown).call(primitive);
+		let value = (getter as () => unknown).call(primitive);
+		if (value === undefined && kind === 'attributes' && native) {
+			if (field === 'KeyVisible') value = native.keyVisible;
+			if (field === 'ValueVisible') value = native.valueVisible;
+		}
 		if (value === undefined || (typeof value === 'number' && !Number.isFinite(value)) || (typeof File !== 'undefined' && value instanceof File)) throw new Error(`Page ${kind}.${field} state unavailable or unsupported for ${primitiveId}.`);
 		record[field] = value;
 	}
 	return record;
 }
 
-async function schAttributeStateRecord(attribute: SchPrimitiveLike): Promise<Record<string, unknown>> {
+async function readCurrentNativePageAttributes(): Promise<Map<string, NativeSchematicAttribute>> {
+	if (typeof eda.sys_FileManager?.getProjectFile !== 'function') throw new Error('Official native project export is unavailable for attribute visibility recovery.');
+	const before = await readResponseContext();
+	if (!before.projectUuid || !before.documentUuid || before.documentType !== 'schematic') throw new Error('Current schematic identity is unavailable for native attribute recovery.');
+	const file = await withTimeout(eda.sys_FileManager.getProjectFile('easyeda-agent-attribute-source.epro2', undefined, 'epro2'), 15000,
+		'Native attribute project export timed out after 15000ms');
+	const after = await readResponseContext();
+	if (after.projectUuid !== before.projectUuid || after.documentUuid !== before.documentUuid || after.documentType !== before.documentType || after.tabId !== before.tabId) {
+		throw new Error('Current schematic identity changed during native attribute recovery.');
+	}
+	if (!file || !Number.isSafeInteger(file.size) || file.size <= 0 || file.size > MAX_PROJECT_SOURCE_BYTES) {
+		throw new Error('Official native project export is missing, empty, or exceeds the 8 MiB attribute recovery limit.');
+	}
+	return projectSchematicAttributeInventory(await readProjectNativeSourceArchive(file), before.documentUuid);
+}
+
+async function schAttributeStateRecord(
+	attribute: SchPrimitiveLike,
+	nativeReader?: () => Promise<Map<string, NativeSchematicAttribute>>,
+): Promise<Record<string, unknown>> {
 	try { return schPrimitiveStateRecord(attribute, 'attributes'); }
 	catch (firstError) {
 		const id = attribute.getState_PrimitiveId();
@@ -2225,6 +2250,17 @@ async function schAttributeStateRecord(attribute: SchPrimitiveLike): Promise<Rec
 		}
 		try { return schPrimitiveStateRecord(reread, 'attributes'); }
 		catch (rereadError) {
+			if (nativeReader) {
+				const native = (await nativeReader()).get(id);
+				if (!native) throw new Error(`Page attribute ${id} is absent from the current native SCH_PAGE source.`);
+				const item = reread as unknown as Record<string, () => unknown>;
+				if (item.getState_Key?.() !== native.key || item.getState_ParentPrimitiveId?.() !== native.parentId
+					|| item.getState_Value?.() !== native.value) {
+					throw new Error(`Page attribute ${id} identity/value differs from the current native SCH_PAGE source.`);
+				}
+				try { return schPrimitiveStateRecord(reread, 'attributes', native); }
+				catch (nativeError) { throw new Error(`Page attribute ${id} remains unreadable after exact native SCH_PAGE recovery: ${describeThrown(nativeError)}.`); }
+			}
 			throw new Error(`Page attribute ${id} remains unreadable after typed get(id): ${describeThrown(rereadError)}.`);
 		}
 	}
@@ -2340,9 +2376,14 @@ async function readSchPagePrimitiveState(): Promise<Record<string, Array<Record<
 	const sheets = new Set(components.filter(c => c.getState_ComponentType() === SCH_SHEET_TYPE).map(c => c.getState_PrimitiveId()));
 	out.attributes = [];
 	const attributeValues = [...attributes.values()];
+	let nativePromise: Promise<Map<string, NativeSchematicAttribute>> | undefined;
+	const nativeReader = () => nativePromise ??= readCurrentNativePageAttributes().then(native => {
+		for (const id of attributes.keys()) if (!native.has(id)) throw new Error(`Page attribute ${id} is absent from the current native SCH_PAGE source.`);
+		return native;
+	});
 	for (let offset = 0; offset < attributeValues.length; offset += 4) {
 		const batch = await Promise.all(attributeValues.slice(offset, offset + 4).map(async attribute => {
-			const record = await schAttributeStateRecord(attribute);
+			const record = await schAttributeStateRecord(attribute, nativeReader);
 			if (sheets.has(String(record.ParentPrimitiveId)) && (record.Key === '@Update Date' || record.Key === '@Update Time')) record.Value = null;
 			return record;
 		}));

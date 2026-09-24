@@ -12,10 +12,7 @@ const CRC32_TABLE = Array.from({ length: 256 }, (_, value) => {
 /** Decode the single root .epru in an official epro2 export, without extracting
  * images or writing any archive content to disk. Bound decompression as it runs.
  */
-export async function readProjectFootprintSourceArchive(
-	file: Blob,
-	documentUuid: string,
-): Promise<Array<{ footprintUuid: string; documentSource: string }>> {
+export async function readProjectNativeSourceArchive(file: Blob): Promise<string> {
 	if (!file || file.size <= 0 || file.size > MAX_ARCHIVE_BYTES) throw new Error('official project archive is empty or exceeds 64 MiB');
 	const bytes = await file.arrayBuffer();
 	if (bytes.byteLength !== file.size || bytes.byteLength > MAX_ARCHIVE_BYTES) throw new Error('official project archive size changed while reading');
@@ -71,5 +68,12 @@ export async function readProjectFootprintSourceArchive(
 		});
 		stream.resume();
 	});
-	return projectFootprintSourceInventory(new TextDecoder('utf-8', { fatal: true }).decode(sourceBytes), documentUuid);
+	return new TextDecoder('utf-8', { fatal: true }).decode(sourceBytes);
+}
+
+export async function readProjectFootprintSourceArchive(
+	file: Blob,
+	documentUuid: string,
+): Promise<Array<{ footprintUuid: string; documentSource: string }>> {
+	return projectFootprintSourceInventory(await readProjectNativeSourceArchive(file), documentUuid);
 }

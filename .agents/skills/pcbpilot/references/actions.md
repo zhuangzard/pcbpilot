@@ -33,6 +33,10 @@ device identity、bbox、pins、wires 与连接摘要，不能用前者替代后
 （编码可保留属性中的字面 `${...}`）。缺测或变化时重新采集，
 旧队列不能继续执行。sheet 自动更新时间不参与此比较。普通 clear 遇到孤儿属性或嵌入对象
 会拒绝；官方属性全局枚举漏掉逐父可见对象、嵌入文件内容不可读时也拒绝，不报告为零对象。
+重载后若官方 `getAll` 和 `get(id)` 的属性可见性 getter 都为 `undefined`，连接器只在
+官方当前工程 `.epro2` 源的目标 `SCH_PAGE` 中找到同 ID、同 key、同 parent、同 value 的
+`ATTR`，且源明确含 `keyVisible`/`valueVisible` 时补齐这两个字段。先后核对工程、文档和
+标签身份；源缺失、字段缺失或状态不符仍拒绝完整快照和清页，不把 `undefined` 猜成 `null`。
 
 ## SCH Apply
 
