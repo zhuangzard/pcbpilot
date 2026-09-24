@@ -10,6 +10,15 @@ pcbpilot 支持 EasyEDA Pro V3（3.2.x，桌面 3.2.149 与 pro.easyeda.com 已�
 也没有列出任何 V3 做不到的能力，其 V4 相关代码均为“有 V4 新特性才生效”的守卫。
 运行 `pcbpilot health` 后检查 `hostCompatibility`：受支持的 V3/V4 为 `ok`（报告注明宿主线）；
 3.2 以前、V4 早于 4.1.60 或未知新大版本为 `warn`，未经 save→reload→readback 不能宣称写入兼容。
+宿主画像：`protocol.ParseHostProfile` 是唯一的版本→版本线/能力表（health 每窗口的
+`hostCompatibility.findings[].line/features`）。有官方版本依据的差异进表：`nativeNetLabel`、
+`pinLevelAttributes`、`multiVariantDevices`、`unsetStyleAsNull`（V4 起）、`editorVersionApi`
+（3.2.176 / 4.1.13）、`schematicImageExport`（3.2.183 / 4.1.23）；解析不出版本时一律关闭。
+无官方版本依据的行为（旋转后位号重排、网络标记旋转存储）不按版本号猜，运行时探测或实测。
+connector 对可选接口仍用 `typeof … === 'function'` 能力探测，版本表只做 daemon 侧门禁和溯源。
+已知 V3 差异：未设置的属性样式读成 `undefined`（V4 为 `null`），connector 只对样式字段按未设置
+处理，身份/值/父 ID/坐标/可见性仍严格；V3 标题栏字段名 `Drawn`（V4 为 `Drawed`），以
+`sch titleblock-get` 回读为准。
 截至 2026-09-24，pro.easyeda.com（国际版线上）仍为 3.2.149；美国网络访问 pro.lceda.cn（V4）实测
 约 2% 请求整段无响应，海外优先用国际版或本机桌面版。宿主产品
 版本不参与 CLI/daemon/Connector 版本对齐；`extension.json` 的 `engines.eda ~3.2.0` 是扩展

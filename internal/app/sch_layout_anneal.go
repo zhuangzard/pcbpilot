@@ -50,6 +50,14 @@ const annealFallbackMinPeripherals = 3
 // the search keeps it whole (its bounded-failure reporting is pinned).
 const annealFallbackMinBudget = 4000
 
+const (
+	annealRounds           = 3
+	annealFailuresPerRound = 2
+)
+
+// annealFinishAttemptCap bounds one terminal-gate attempt of the annealer.
+var annealFinishAttemptCap = 25000
+
 var schematicAnnealDisabled bool
 
 // annealAttemptHook observes each terminal-gate attempt (diagnostics).
@@ -111,7 +119,7 @@ func solveSchematicLayoutAnneal(input SchematicLayoutInput, measured map[string]
 	}
 	var lastErr error
 	best := s.seed()
-	for round := 0; round < 3; round++ {
+	for round := 0; round < annealRounds; round++ {
 		// A fixed schedule (~2 500 candidates) so the placement does not
 		// depend on the budget; only tiny budgets shorten it.
 		iters := 20000
@@ -123,7 +131,14 @@ func solveSchematicLayoutAnneal(input SchematicLayoutInput, measured map[string]
 			lastErr = fmt.Errorf("annealing found no overlap-free placement")
 			break
 		}
+		failed := 0
 		for k, st := range finals {
+			// Two failed terminal gates per round are enough to learn from;
+			// re-annealing with the boosted leads beats grinding through the
+			// rest of this round's near-identical alternatives.
+			if failed >= annealFailuresPerRound && round < annealRounds-1 {
+				break
+			}
 			if *s.budget <= 0 {
 				return nil, fmt.Errorf("%w: annealing placer", errLibLayoutBudget)
 			}
@@ -137,6 +152,11 @@ func solveSchematicLayoutAnneal(input SchematicLayoutInput, measured map[string]
 			if k == 0 {
 				slice = min(*s.budget, max(6000, *s.budget*3/4))
 			}
+			// A terminal gate that fails keeps nothing, while the learned
+			// next round needs budget too (ESP32 MCU zone on V3 geometry: one
+			// round-0 attempt burned 54k and round 1, which passes in ~20k
+			// evaluations, never ran). Cap a single attempt.
+			slice = min(slice, max(6000, annealFinishAttemptCap))
 			spent := slice
 			done, err := libFinishSchematicLayoutRegenerate(p, s.policies, &slice, routing)
 			*s.budget -= spent - slice
@@ -157,6 +177,7 @@ func solveSchematicLayoutAnneal(input SchematicLayoutInput, measured map[string]
 					Search: &SchematicLayoutSearchDiagnostics{Strategy: fmt.Sprintf("anneal-v1 (round %d, %d evaluations)", round+1, s.evals), MovedComponents: []string{}}}, nil
 			}
 			lastErr = err
+			failed++
 			if annealAttemptHook != nil {
 				annealAttemptHook(round, spent-slice, err)
 			}

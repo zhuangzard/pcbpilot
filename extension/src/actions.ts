@@ -2231,7 +2231,9 @@ const SCH_PAGE_STATE_FIELDS: Record<string, Array<string>> = {
 	objects: ['Content', 'StartX', 'StartY', 'Width', 'Height', 'Rotation', 'Mirror', 'FileName'],
 };
 
-function schPrimitiveStateRecord(primitive: SchPrimitiveLike, kind: string, native?: NativeSchematicAttribute): Record<string, unknown> {
+export const SCH_ATTRIBUTE_UNSET_STYLE_FIELDS = new Set(['Rotation', 'Color', 'FontName', 'FontSize', 'Bold', 'Italic', 'UnderLine', 'AlignMode', 'FillColor']);
+
+export function schPrimitiveStateRecord(primitive: SchPrimitiveLike, kind: string, native?: NativeSchematicAttribute): Record<string, unknown> {
 	const primitiveId = primitive.getState_PrimitiveId();
 	const record: Record<string, unknown> = { primitiveId };
 	for (const field of SCH_PAGE_STATE_FIELDS[kind]) {
@@ -2242,6 +2244,10 @@ function schPrimitiveStateRecord(primitive: SchPrimitiveLike, kind: string, nati
 			if (field === 'KeyVisible') value = native.keyVisible;
 			if (field === 'ValueVisible') value = native.valueVisible;
 		}
+		// V3 (3.2.149 desktop) reports an UNSET presentation style as undefined
+		// where V4 reports null. Style fields only: identity, value, parent,
+		// position and visibility stay strict and still fail closed.
+		if (value === undefined && kind === 'attributes' && SCH_ATTRIBUTE_UNSET_STYLE_FIELDS.has(field)) value = null;
 		if (value === undefined || (typeof value === 'number' && !Number.isFinite(value)) || (typeof File !== 'undefined' && value instanceof File)) throw new Error(`Page ${kind}.${field} state unavailable or unsupported for ${primitiveId}.`);
 		record[field] = value;
 	}

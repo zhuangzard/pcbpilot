@@ -60,10 +60,15 @@ def main():
     base = ["--project", a.project, "--doc", a.page]
     # A resumed run may reuse parts this script already placed at rotation 0
     # (matched by designator AND anchor); anything else on the page refuses.
-    existing = {(c.get("designator"), c.get("x"), c.get("y")): c for c in page_parts(a.project, a.page)}
+    def keyed():
+        return {(c.get("designator"), round(c.get("x"), 3), round(c.get("y"), 3)): c for c in page_parts(a.project, a.page)}
+    existing = keyed()
     wanted = {(p["designator"], p["measureAt"][0], p["measureAt"][1]) for p in parts}
-    if any(k not in wanted or (c.get("rotation") or 0) != 0 for k, c in existing.items()):
-        sys.exit("scratch page holds foreign or rotated parts; refusing to measure on a design page")
+    if any(k not in wanted for k in existing):
+        sys.exit("scratch page holds foreign parts; refusing to measure on a design page")
+    for c in existing.values():
+        if (c.get("rotation") or 0) != 0:
+            cli("sch", "modify", *base, "--id", c["primitiveId"], "--rotation", "0")
     placed = {}
     for p in parts:
         x, y = p["measureAt"]
@@ -75,11 +80,11 @@ def main():
                 # V4 Web sometimes acks late or drops a place. Read back before
                 # any retry so a late landing is never duplicated.
                 time.sleep(5)
-                existing = {(c.get("designator"), c.get("x"), c.get("y")): c for c in page_parts(a.project, a.page)}
+                existing = keyed()
                 if key not in existing:
                     cli("sch", "place", *base, "--lib", p["libraryUuid"], "--uuid", p.get("deviceUuid") or p["uuid"],
                         "--x", str(x), "--y", str(y), "--designator", p["designator"])
-            existing = {(c.get("designator"), c.get("x"), c.get("y")): c for c in page_parts(a.project, a.page)}
+            existing = keyed()
         placed[p["id"]] = (existing[key]["primitiveId"], x, y)
     out = {pid: {} for pid in placed}
 
@@ -99,9 +104,14 @@ def main():
         after = cli("sch", "list", "--project", a.project, "--page", a.page, "--stay")
         anchors = {c["primitiveId"]: (c.get("x"), c.get("y")) for c in after["result"]["components"]}
         for pid, (prim, x, y) in placed.items():
-            if anchors.get(prim) != (x, y):
+            got = anchors.get(prim)
+            if got is None or abs(got[0] - x) > 1e-6 or abs(got[1] - y) > 1e-6:
                 sys.exit(f"{pid}: anchor moved on rotation {angle}: {anchors.get(prim)} != {(x, y)}")
         record(angle)
+    # Leave every part back at rotation 0 so the same page can serve the
+    # ordinary pins/bbox/designator measurement (sch list --include-pins ...).
+    for pid, (prim, x, y) in placed.items():
+        cli("sch", "modify", *base, "--id", prim, "--rotation", "0")
     json.dump(out, open(a.out, "w"), indent=2)
     print(f"measured {len(out)} parts at rotations 0,{a.rotations} -> {a.out}")
 

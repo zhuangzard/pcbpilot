@@ -46,8 +46,9 @@ type powerLayoutPlacement struct {
 	TextBBoxes  []layoutBBox `json:"textBboxes,omitempty"`
 	// TextBBoxesByRotation holds host-measured designator boxes RELATIVE to the
 	// anchor (x,y), keyed by absolute rotation "0"/"90"/"180"/"270". EasyEDA
-	// Pro V4 re-lays a designator on rotation (it does not turn rigidly with
-	// the body), so a measured pose beats the rigid-rotation estimate.
+	// Pro (V3 3.2.149 and V4 4.1.60 alike) re-lays a designator on rotation
+	// instead of turning it with the body, so a measured pose beats the
+	// rigid-rotation estimate.
 	TextBBoxesByRotation map[string][]layoutBBox `json:"textBboxesByRotation,omitempty"`
 	Pins                 []powerLayoutPin        `json:"pins"`
 }

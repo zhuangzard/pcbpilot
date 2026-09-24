@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/zhuangzard/pcbpilot/internal/protocol"
 	"strconv"
 	"strings"
 )
@@ -25,8 +26,12 @@ type hostCompatibilityFinding struct {
 	WindowID string `json:"windowId,omitempty"`
 	Version  string `json:"version,omitempty"`
 	Severity string `json:"severity"` // ok | warn | block | skipped
-	Reason   string `json:"reason"`
-	Fix      string `json:"fix,omitempty"`
+	// Line and Features come from protocol.ParseHostProfile: which host line
+	// this window is and which version-gated capabilities it has.
+	Line     string          `json:"line,omitempty"`
+	Features map[string]bool `json:"features,omitempty"`
+	Reason   string          `json:"reason"`
+	Fix      string          `json:"fix,omitempty"`
 }
 
 type hostCompatibilityReport struct {
@@ -58,7 +63,8 @@ func hostCompatibilityFromHealth(raw []byte) hostCompatibilityReport {
 }
 
 func evaluateHostVersion(windowID, raw string) hostCompatibilityFinding {
-	f := hostCompatibilityFinding{WindowID: strings.TrimSpace(windowID), Version: strings.TrimSpace(raw)}
+	profile := protocol.ParseHostProfile(raw)
+	f := hostCompatibilityFinding{WindowID: strings.TrimSpace(windowID), Version: strings.TrimSpace(raw), Line: profile.Line, Features: profile.Features}
 	parts, ok := productVersionNumbers(raw)
 	if !ok {
 		f.Severity = versionSevSkipped

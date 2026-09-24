@@ -3943,3 +3943,17 @@ test('V4 pin-level attributes belong to their component, not orphan remnants', (
 	assert.equal(schAttributeOwnerComponent('old-marker'), 'old-marker');
 	assert.equal(schAttributeOwnerComponent('part-e'), 'part-e');
 });
+
+import { schPrimitiveStateRecord } from './actions';
+
+test('V3 unset attribute style reads as null; identity and visibility stay strict', () => {
+	const state: Record<string, unknown> = { PrimitiveId: 'a1', X: 1, Y: 2, Rotation: undefined, Color: undefined, FontName: undefined, FontSize: undefined, Bold: undefined, Italic: undefined, UnderLine: undefined, AlignMode: undefined, FillColor: undefined, Key: 'Name', Value: 'P1', KeyVisible: false, ValueVisible: true, ParentPrimitiveId: 'sheet' };
+	const prim = new Proxy({}, { get: (_t, k: string) => k.startsWith('getState_') ? () => state[k.slice(9)] : undefined }) as never;
+	const rec = schPrimitiveStateRecord(prim, 'attributes');
+	assert.equal(rec.AlignMode, null);
+	assert.equal(rec.Value, 'P1');
+	state.KeyVisible = undefined;
+	assert.throws(() => schPrimitiveStateRecord(prim, 'attributes'), /KeyVisible/);
+	state.KeyVisible = false; state.Value = undefined;
+	assert.throws(() => schPrimitiveStateRecord(prim, 'attributes'), /Value/);
+});

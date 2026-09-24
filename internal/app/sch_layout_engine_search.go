@@ -407,6 +407,11 @@ func libNameIslands(p *powerLayoutPlan, policies map[string]string, budget ...*i
 			return nil
 		}
 		if len(budget) > 0 && *budget[0] <= 0 {
+			// Keep the observed conflict: callers that learn from it (the
+			// annealer's lead boost) must not see a bare budget stop.
+			if lastErr != nil && !errors.Is(lastErr, errLibLayoutBudget) {
+				return fmt.Errorf("%w: last naming conflict: %w", errLibLayoutBudget, lastErr)
+			}
 			return errLibLayoutBudget
 		}
 	}
