@@ -26,6 +26,9 @@ pcbpilot sch sheet-geometry --project <project> --json
 如需调查内置图框的原始符号，可由 `sch list` 的 sheet 组件取 `symbol.uuid/libraryUuid`，
 使用 `lib symbol export-source` 保存官方 `.elibz2` 原包；该导出目前仅为 source-only 证据，
 不得将其或 A4 纸张外框直接填成 `sheetBorder`。命令边界见 [actions.md](actions.md#图纸与明细表)。
+若内置符号文件不可导出，可用 `project export-source --uuid <current-project-uuid>`
+保存官方 `.epro2` 原包，离线检查当前 `SCH_PAGE` 与关联 `SYMBOL` 的真实记录；仅在实际
+图元可识别并与现场只读显示核对后，才可建立精确内框和图签占位。
 
 在副本中依据官方典型电路补齐器件、引脚和网络；修复非标准位号后再布局。
 外围要围绕核心引脚并直接接线。已有网络与显式 NC 保持可追溯，不能把缺数据当作悬空或 NC。

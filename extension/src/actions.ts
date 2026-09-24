@@ -415,6 +415,37 @@ const projectCurrent: Handler = async () => {
 	};
 };
 
+// Preserve the official current-project archive byte-for-byte for offline
+// inspection. The archive is evidence, not a parsed sheet-border measurement.
+const MAX_PROJECT_SOURCE_BYTES = 8 << 20;
+const projectExportSource: Handler = async (payload) => {
+	const uuid = requireString(payload, 'uuid');
+	if (typeof eda.sys_FileManager?.getProjectFile !== 'function') {
+		throw new ActionError(ErrorCodes.EDA_API_UNAVAILABLE, 'Official project-file getter is unavailable in this EasyEDA build.');
+	}
+	let file: File | undefined;
+	try {
+		const before = await withTimeout(eda.dmt_Project.getCurrentProjectInfo(), 7000,
+			'project source getCurrentProjectInfo timed out before export after 7000ms');
+		if (!before || before.uuid !== uuid) throw new ActionError(ErrorCodes.INVALID_STATE, 'Current project UUID does not match the requested project.');
+		file = await withTimeout(eda.sys_FileManager.getProjectFile('easyeda-agent-project.epro2', undefined, 'epro2'), 15000,
+			'project source getProjectFile timed out after 15000ms');
+		const after = await withTimeout(eda.dmt_Project.getCurrentProjectInfo(), 7000,
+			'project source getCurrentProjectInfo timed out after export after 7000ms');
+		if (!after || after.uuid !== uuid) throw new ActionError(ErrorCodes.INVALID_STATE, 'Current project changed during source export.');
+	}
+	catch (err) {
+		if (err instanceof ActionError) throw err;
+		throw edaError(err, 'Failed to export the native project file.');
+	}
+	if (!file || !Number.isSafeInteger(file.size) || file.size <= 0 || file.size > MAX_PROJECT_SOURCE_BYTES) {
+		throw new ActionError(ErrorCodes.INVALID_STATE,
+			`Official project file is missing, empty, or exceeds the ${MAX_PROJECT_SOURCE_BYTES}-byte transfer limit.`);
+	}
+	const artifact = await blobToArtifact(file, 'project_source', 'project-source.epro2', 'application/octet-stream');
+	return { result: { uuid, fileType: 'epro2', size: file.size, artifactId: artifact.id }, artifacts: [artifact] };
+};
+
 /** Reconcile a possibly partial create using only the official project read APIs. */
 const projectFind: Handler = async (payload) => {
 	const friendlyName = requireString(payload, 'friendlyName');
@@ -14067,6 +14098,7 @@ const debugExecJs: Handler = async (payload) => {
 
 const HANDLERS: Record<string, Handler> = {
 	'project.current': projectCurrent,
+	'project.export_source': projectExportSource,
 	'project.find': projectFind,
 	'project.create': projectCreate,
 	'project.open': projectOpen,

@@ -54,6 +54,15 @@ func AllActions() []ActionSpec {
 			Outputs:     []string{"project uuid", "project name", "team/workspace context"},
 		},
 		{
+			Name:        "project.export_source",
+			Domain:      DomainProject,
+			Phase:       1,
+			NeedsWindow: true,
+			Description: "Export the exact native .epro2 current-project archive through sys_FileManager.getProjectFile. Read-only; this does not interpret schematic geometry. The connector refuses missing, empty, or >8 MiB files; the daemon persists original bytes with SHA-256.",
+			Inputs:      []string{"uuid (expected current project UUID, required)"},
+			Outputs:     []string{"uuid", "fileType=epro2", "size", "artifact path/size/SHA-256"},
+		},
+		{
 			Name:        "project.find",
 			Domain:      DomainProject,
 			Phase:       1,

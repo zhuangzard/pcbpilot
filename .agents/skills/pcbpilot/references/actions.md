@@ -101,6 +101,12 @@ Playbook 使用 `version:1`、`meta` 和有序 `steps`。每步只选一种执�
 
 ## 图纸与明细表
 
+`project export-source --uuid <current-project-uuid> [--window <window-id>] [--out project.epro2]`
+经官方 `sys_FileManager.getProjectFile(..., 'epro2')` 导出当前工程原包。`--uuid` 必须等于
+导出前后的活动工程 UUID；CLI 核对官方大小、daemon 落盘大小及 SHA-256。超过 8 MiB、
+权限不足、工程切换或超时均失败。此命令只保存原始证据；`epro2` 中是否含当前图框 `SYMBOL`
+及可区分红色内框与图签的图元，须逐份验证，不能直接当成几何实测。
+
 `lib symbol export-source --uuid <sheet.symbol.uuid> --library <sheet.symbol.libraryUuid>
 [--out source.elibz2]` 经官方 `sys_FileManager.getSymbolFileBySymbolUuid` 导出原始符号包。
 从 `sch list` 的 `componentType:"sheet"` 记录取 **symbol** UUID，不要误用 `component`
