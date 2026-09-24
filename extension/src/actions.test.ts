@@ -3957,3 +3957,24 @@ test('V3 unset attribute style reads as null; identity and visibility stay stric
 	state.KeyVisible = false; state.Value = undefined;
 	assert.throws(() => schPrimitiveStateRecord(prim, 'attributes'), /Value/);
 });
+
+test('schematic.export_image clears an earlier selection before selecting the requested ids', async () => {
+	let selection: Array<string> = ['old-part'];
+	let exported: Array<string> = [];
+	(globalThis as any).eda = {
+		sch_SelectControl: {
+			clearSelected: () => { selection = []; return true; },
+			doSelectPrimitives: async (ids: Array<string>) => { selection = [...selection, ...ids]; return true; },
+			getAllSelectedPrimitives_PrimitiveId: async () => selection,
+		},
+		sch_ManufactureData: { getExportDocumentFile: async () => { exported = [...selection]; return new File(['<svg/>'], 'x.svg'); } },
+	};
+	try {
+		const res: any = await runAction('schematic.export.image', { primitiveIds: ['p1'] });
+		assert.ok(res);
+		assert.deepEqual(exported, ['p1']);
+	}
+	finally {
+		delete (globalThis as any).eda;
+	}
+});

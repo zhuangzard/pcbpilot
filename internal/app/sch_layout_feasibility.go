@@ -119,6 +119,10 @@ func schematicFeasibilityPoses(input SchematicLayoutInput, allowed map[string][]
 // it three quarters of a larger allowance (capped at 150k) before exploring
 // optional rotations. Each fallback still receives a fair share of the same
 // remaining allowance. Unspent quota returns, never resets.
+// schematicPoseMenuDefersToAnneal: zones that get the annealer as a fallback
+// skip the pose menu too; the annealer picks rotations from the same set.
+var schematicPoseMenuDefersToAnneal = true
+
 func runSchematicLayoutFeasibility(input SchematicLayoutInput, measured map[string]powerLayoutPlacement, allowed map[string][]float64, budget *int,
 	run func(map[string]powerLayoutPlacement, *int) (*SchematicLayoutResult, error),
 ) (*SchematicLayoutResult, *SchematicFeasibilityReport, error) {
@@ -132,6 +136,20 @@ func runSchematicLayoutFeasibility(input SchematicLayoutInput, measured map[stri
 	if len(poses) == 0 {
 		out, err := run(measured, budget)
 		return out, nil, err // Preserve the established fixed-pose contract.
+	}
+	if schematicPoseMenuDefersToAnneal && !schematicAnnealDisabled && len(input.Components)-1 >= annealFallbackMinPeripherals && *budget >= 2*annealFallbackMinBudget {
+		// First the measured pose with half the allowance, so the annealer
+		// (which chooses rotations itself) gets a real share instead of a
+		// 1/17 slice; the pose menu then runs on what is left. Stress L1:
+		// ESP32 MCU (V3) 800k -> 200k, AT32 LCD 200k -> 50k, while zones only
+		// a later menu pose solves (AT32 MCU) keep that path.
+		half := *budget / 2
+		spent := half
+		if out, err := run(measured, &half); err == nil {
+			*budget -= spent - max(half, 0)
+			return out, nil, nil
+		}
+		*budget -= spent - max(half, 0)
 	}
 	report := &SchematicFeasibilityReport{Strategy: "allowed-pose-baseline-v1", PoseLimit: schematicFeasibilityPoseLimit, ProposalsTruncated: truncated}
 	initial := *budget

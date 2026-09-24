@@ -34,6 +34,7 @@ func feasibilityFixture(count int) (SchematicLayoutInput, map[string]powerLayout
 }
 
 func TestFeasibilityTriesCoordinatedAllowedPoseWithinOriginalBudget(t *testing.T) {
+	defer poseMenuOnly()()
 	in, measured, allowed := feasibilityFixture(2)
 	before, _ := json.Marshal([]any{in, measured})
 	budget, calls := 100000, 0
@@ -105,6 +106,7 @@ func TestFeasibilityFixedPoseRetainsExistingContract(t *testing.T) {
 }
 
 func TestFeasibilityBudgetCannotResetAcrossFailedPoses(t *testing.T) {
+	defer poseMenuOnly()()
 	in, measured, allowed := feasibilityFixture(2)
 	budget, allocated := 100000, 0
 	out, report, err := runSchematicLayoutFeasibility(in, measured, allowed, &budget, func(_ map[string]powerLayoutPlacement, quota *int) (*SchematicLayoutResult, error) {
@@ -161,6 +163,7 @@ func TestFeasibilityPoseMenuBoundedAndDeterministic(t *testing.T) {
 }
 
 func TestFeasibilityPreservesDefaultSourceWindowAndReturnsUnusedQuota(t *testing.T) {
+	defer poseMenuOnly()()
 	in, measured, allowed := feasibilityFixture(2)
 	budget, calls := 30000, 0
 	_, report, err := runSchematicLayoutFeasibility(in, measured, allowed, &budget, func(_ map[string]powerLayoutPlacement, quota *int) (*SchematicLayoutResult, error) {
@@ -225,5 +228,41 @@ func TestFeasibilityRetainsTypedDiagnosticsForEarlierFailedPoses(t *testing.T) {
 	}
 	if len(report.Attempts[2].Diagnostics) != 0 || budget != 97 {
 		t.Fatal("success retained stale conflict or budget changed", report, budget)
+	}
+}
+
+// poseMenuOnly pins the pose-menu contract by switching off the leading
+// measured-pose attempt (tested separately below).
+func poseMenuOnly() func() {
+	old := schematicPoseMenuDefersToAnneal
+	schematicPoseMenuDefersToAnneal = false
+	return func() { schematicPoseMenuDefersToAnneal = old }
+}
+
+func TestFeasibilityLeadsWithHalfBudgetOnMeasuredPose(t *testing.T) {
+	in, measured, allowed := feasibilityFixture(2)
+	budget, calls := 100000, 0
+	_, report, err := runSchematicLayoutFeasibility(in, measured, allowed, &budget, func(_ map[string]powerLayoutPlacement, quota *int) (*SchematicLayoutResult, error) {
+		calls++
+		if calls == 1 {
+			if *quota != 50000 {
+				t.Fatalf("leading measured-pose attempt must get half: %d", *quota)
+			}
+			*quota -= 30000
+			return nil, errors.New("measured pose failed")
+		}
+		*quota -= 10
+		return &SchematicLayoutResult{}, nil
+	})
+	if err != nil || calls != 2 || report == nil || budget != 100000-30000-10 {
+		t.Fatal(calls, budget, report, err)
+	}
+	budget, calls = 100000, 0
+	if _, report, err = runSchematicLayoutFeasibility(in, measured, allowed, &budget, func(_ map[string]powerLayoutPlacement, quota *int) (*SchematicLayoutResult, error) {
+		calls++
+		*quota -= 5
+		return &SchematicLayoutResult{}, nil
+	}); err != nil || calls != 1 || report != nil || budget != 99995 {
+		t.Fatal("a solved measured pose must return without the menu", calls, budget, report, err)
 	}
 }

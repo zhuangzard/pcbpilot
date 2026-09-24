@@ -4632,6 +4632,9 @@ const schematicExportImage: Handler = async (payload) => {
 	// whatever the user/agent selected earlier.
 	if (ids && ids.length) {
 		try {
+			// doSelectPrimitives ADDS to the current selection; an earlier
+			// selection would otherwise be exported too (live 3.2.149).
+			eda.sch_SelectControl.clearSelected();
 			await eda.sch_SelectControl.doSelectPrimitives(ids);
 		}
 		catch (err) {
@@ -4643,6 +4646,13 @@ const schematicExportImage: Handler = async (payload) => {
 		selected = (await eda.sch_SelectControl.getAllSelectedPrimitives_PrimitiveId()) ?? [];
 	}
 	catch { /* selection read is advisory */ }
+	if (ids && ids.length && selected.length) {
+		const want = new Set(ids);
+		const extra = selected.filter(id => !want.has(id) && !ids.some(p => id.startsWith(`${p}-`)));
+		if (extra.length) {
+			throw new ActionError(ErrorCodes.INVALID_STATE, `Selection holds ${extra.length} primitive(s) beyond the requested ids (${extra.slice(0, 5).join(', ')}); refusing to export them.`);
+		}
+	}
 	if (scope === 'selection' && selected.length === 0) {
 		throw new ActionError(
 			ErrorCodes.INVALID_STATE,
