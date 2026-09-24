@@ -72,7 +72,11 @@ AT32F415 65 件：与手写推导逐项一致，下游 18 区全部求解。
 - 合并区时原核心变成外围：挂在原核心上的 attachment 要反向（例如 J_PWR→D_TERM），
   否则退火报 “peripherals have no connected host”。
 - 解不出先看诊断再加预算：`maxCandidates` 是每区上限，已解出的区不多花；V3 几何的 ESP32
-  MCU 区需要 80 万。
+  MCU 区需要 80 万。推荐同时给 `maxCandidatesCeiling`（独立预算模式）：预算耗尽的区按 4 倍
+  自动重试到上限，结构性失败不重试，升级记在该区 `search.strategy` 的 `[escalated budget N]`。
+  实测默认 20 万 + 上限 80 万：ESP32-V3 与 AT32 两板一次通过，只有难区升级。
+- 核心某条边引脚密（10 raw）且多数要端口标签时，挂在这条边上的外围放不下（AT32 BOOT0
+  下拉并入 MCU 区 80 万仍无解）；这类外围保持独立功能区。
 
 复杂直连网络在源输入顶层使用可选
 `routing:{"maxExpandedNodes":200000,"maxReroutes":4}`；省略即采用这两个默认值。

@@ -158,6 +158,7 @@ func decodeSchematicZonesInput(raw []byte) (SchematicZonesInput, error) {
 	}
 	delete(fields, "zones")
 	delete(fields, "spacing")
+	delete(fields, "maxCandidatesCeiling") // zones-only: per-zone budget escalation
 	fields["coreComponentId"] = json.RawMessage(`"zone-validation"`)
 	measurementJSON, err := json.Marshal(fields)
 	if err != nil {

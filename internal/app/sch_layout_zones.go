@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"reflect"
@@ -16,16 +17,20 @@ type SchematicZone struct {
 	Placement       *SchematicZonePlacement `json:"placement,omitempty"`
 }
 type SchematicZonesInput struct {
-	SchemaVersion int                          `json:"schemaVersion"`
-	Spacing       *float64                     `json:"spacing,omitempty"`
-	Components    []SchematicLayoutComponent   `json:"components"`
-	NetPolicies   map[string]string            `json:"netPolicies"`
-	Attachments   []SchematicLayoutPeripheral  `json:"attachments,omitempty"`
-	MaxCandidates int                          `json:"maxCandidates,omitempty"`
-	Zones         []SchematicZone              `json:"zones"`
-	Optimization  *SchematicLayoutOptimization `json:"optimization,omitempty"`
-	Routing       *SchematicRoutingOptions     `json:"routing,omitempty"`
-	MarkerAnchors []SchematicMarkerAnchor      `json:"markerAnchors,omitempty"`
+	SchemaVersion int                         `json:"schemaVersion"`
+	Spacing       *float64                    `json:"spacing,omitempty"`
+	Components    []SchematicLayoutComponent  `json:"components"`
+	NetPolicies   map[string]string           `json:"netPolicies"`
+	Attachments   []SchematicLayoutPeripheral `json:"attachments,omitempty"`
+	MaxCandidates int                         `json:"maxCandidates,omitempty"`
+	// MaxCandidatesCeiling (isolated-budget mode only): a zone whose search
+	// stops on its budget is retried at 4x, up to this ceiling. Solved zones
+	// never re-run; structural failures are not retried.
+	MaxCandidatesCeiling int                          `json:"maxCandidatesCeiling,omitempty"`
+	Zones                []SchematicZone              `json:"zones"`
+	Optimization         *SchematicLayoutOptimization `json:"optimization,omitempty"`
+	Routing              *SchematicRoutingOptions     `json:"routing,omitempty"`
+	MarkerAnchors        []SchematicMarkerAnchor      `json:"markerAnchors,omitempty"`
 }
 type SchematicZoneVariant struct {
 	ID            string                 `json:"id"`
@@ -136,6 +141,9 @@ func validateSchematicZoneOwnership(in SchematicZonesInput) (*schematicZoneOwner
 // PlanSchematicZones computes independent, core-normalized zones, not sheet
 // positions or rendered frames. No partial result escapes on any zone failure.
 func PlanSchematicZones(in SchematicZonesInput) (*SchematicZonesResult, error) {
+	if c := in.MaxCandidatesCeiling; c != 0 && (c < max(in.MaxCandidates, 20000) || c > 4000000) {
+		return nil, fmt.Errorf("maxCandidatesCeiling must be maxCandidates..4000000")
+	}
 	index, err := validateSchematicZoneOwnership(in)
 	if err != nil {
 		return nil, err
@@ -184,6 +192,15 @@ func PlanSchematicZones(in SchematicZonesInput) (*SchematicZonesResult, error) {
 		}
 		before := *zoneBudget
 		layout, err := planSchematicLayoutWithBudget(local, zoneBudget)
+		for tier := initial * 4; err != nil && zoneBudget != &budget && tier <= in.MaxCandidatesCeiling && schematicBudgetStop(err); tier *= 4 {
+			out.CandidatesUsed += before - *zoneBudget
+			retry := tier
+			zoneBudget, before = &retry, tier
+			layout, err = planSchematicLayoutWithBudget(local, zoneBudget)
+			if err == nil && layout.Search != nil {
+				layout.Search.Strategy += fmt.Sprintf(" [escalated budget %d]", tier)
+			}
+		}
 		if err != nil {
 			return nil, fmt.Errorf("zone %s (%s): %w", z.ID, z.Title, err)
 		}
@@ -240,4 +257,14 @@ func measureSchematicZoneVariant(z SchematicZone, id string, layout *SchematicLa
 		return SchematicZoneVariant{}, fmt.Errorf("zone %s frame: %w", z.ID, err)
 	}
 	return SchematicZoneVariant{ID: id, ContentBounds: b, Frame: frame, Layout: layout}, nil
+}
+
+// schematicBudgetStop reports a bounded-search stop (worth a larger budget),
+// as opposed to a structural refusal (ownership, geometry, attachment).
+func schematicBudgetStop(err error) bool {
+	if errors.Is(err, errLibLayoutBudget) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "candidate-budget-exhausted") || strings.Contains(msg, "budget exhausted") || strings.Contains(msg, "candidate budget")
 }
