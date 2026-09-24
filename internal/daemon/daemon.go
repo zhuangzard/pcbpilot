@@ -73,6 +73,11 @@ type Server struct {
 	// (queueblock.go).
 	queueBlocks *queueBlockTracker
 
+	// geometry reuses a guarded write's verified after-read as the next
+	// guarded write's before-read when nothing touched the window in between
+	// (geometrycache.go).
+	geometry *geometryCache
+
 	// clientInflight counts client-issued actions currently forwarded per window,
 	// so the debounced autosave never injects a 20-60s save into the middle of a
 	// batch (autosave.go: 真机实测 4 次超时簇全部叠在 22s/36s/44s/59s 的 autosave 上).
@@ -150,6 +155,7 @@ func New(opts Options) *Server {
 		concurrentWrites: newConcurrentGuard(),
 		writeHealth:      newWriteHealthTracker(),
 		queueBlocks:      newQueueBlockTracker(),
+		geometry:         newGeometryCache(),
 	}
 	if opts.AutosaveDebounce > 0 {
 		s.autosave = newAutosaver(opts.AutosaveDebounce, s.dispatchSave)

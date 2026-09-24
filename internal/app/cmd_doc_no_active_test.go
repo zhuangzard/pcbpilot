@@ -58,7 +58,7 @@ func TestDocListAndOpenRecoverWhenProjectHasNoActiveDocument(t *testing.T) {
 			}
 			active = "pcb-target"
 			result = map[string]any{"tabId": "tab-pcb", "ready": true}
-		case "pcb.components.list":
+		case "pcb.components.list", "pcb.components.count":
 			result = map[string]any{"components": []any{map[string]any{"primitiveId": "c1"}}, "count": 1}
 		default:
 			t.Errorf("unexpected action %s", req.Action)
@@ -170,7 +170,7 @@ func TestDocOpenRequiresFreshCurrentAfterNoActiveRecovery(t *testing.T) {
 			result["pcbs"] = []any{map[string]any{"uuid": "pcb-target", "name": "PCB1"}}
 		case "document.open":
 			opened++
-		case "pcb.components.list":
+		case "pcb.components.list", "pcb.components.count":
 			probed++
 		default:
 			t.Errorf("unexpected action %s", req.Action)

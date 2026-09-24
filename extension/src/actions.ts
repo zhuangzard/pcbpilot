@@ -1109,6 +1109,33 @@ async function tagComponentPages(requireComplete = false): Promise<Map<string, {
 }
 
 /** Fixed, read-only Designator geometry inventory for schematic source measurements. */
+// Cheap load-settle probes: ids only. The CLI polls these after a document
+// switch until two consecutive counts match; the full components.list it used
+// to poll costs ~1.5 s per call (57 % of schematic machine time in real runs).
+export const schematicComponentsCount: Handler = async () => {
+	let ids: unknown;
+	try {
+		ids = await eda.sch_PrimitiveComponent.getAllPrimitiveId();
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to count schematic components.');
+	}
+	if (!Array.isArray(ids)) throw new ActionError(ErrorCodes.EDA_CALL_FAILED, 'Schematic component id list unavailable.');
+	return { result: { count: ids.length } };
+};
+
+export const pcbComponentsCount: Handler = async () => {
+	let ids: unknown;
+	try {
+		ids = await eda.pcb_PrimitiveComponent.getAllPrimitiveId();
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to count PCB components.');
+	}
+	if (!Array.isArray(ids)) throw new ActionError(ErrorCodes.EDA_CALL_FAILED, 'PCB component id list unavailable.');
+	return { result: { count: ids.length } };
+};
+
 export const schematicDesignatorsList: Handler = async () => {
 	try {
 		const before = await eda.dmt_SelectControl.getCurrentDocumentInfo();
@@ -14164,6 +14191,7 @@ const HANDLERS: Record<string, Handler> = {
 	'schematic.components.list': schematicComponentsList,
 	'schematic.attribute.inspect': schematicAttributeInspect,
 	'schematic.designators.list': schematicDesignatorsList,
+	'schematic.components.count': schematicComponentsCount,
 	'schematic.component.place': schematicComponentPlace,
 	'schematic.component.modify': schematicComponentModify,
 	'schematic.component.delete': schematicComponentDelete,
@@ -14212,6 +14240,7 @@ const HANDLERS: Record<string, Handler> = {
 	'schematic.text.list': schematicTextList,
 	'pcb.documents.list': pcbDocumentsList,
 	'pcb.components.list': pcbComponentsList,
+	'pcb.components.count': pcbComponentsCount,
 	'pcb.layers.list': pcbLayersList,
 	'pcb.layers.set_current': pcbLayerSetCurrent,
 	'pcb.layers.visibility': pcbLayerVisibility,

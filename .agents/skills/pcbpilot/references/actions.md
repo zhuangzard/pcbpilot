@@ -282,6 +282,17 @@ EasyEDA 交互界面兜底。能力边界与未来 typed 验收见 [project-impo
 
 CLI `project open --project-uuid` 与 `project export` 封装上述 action；导出 CLI 负责 ZIP/CRC 校验、禁止覆盖与 SHA-256。MCP 使用 `pcbpilot_project_transfer`。需要包含 handler 的连接器，无调试脚本回退；具体参数与恢复验证边界见 [project-import.md](project-import.md)。
 
+## 读取开销与页面加载探测
+
+- `schematic.components.count` / `pcb.components.count`：只读图元 ID 数量（毫秒级），是切页后
+  加载稳定探测（两次计数相同）的专用探针。完整 `components.list` 每次约 1.5 s，历史实测占原理图
+  机器时间 57%，其中大半是这个等待循环。旧 daemon/连接器没有计数动作时，探测首次失败即自动退回
+  完整读取，不影响结果。
+- 几何守卫（导线/连脚/放件/改件前后各读一次整页）会复用上一次受守卫写入的写后快照作为下一次的
+  写前快照，条件：同一窗口、期间没有其他写入/切页/调试脚本/切页读取、10 秒内；写后读取每次都重新
+  读取，文档与 FIFO 新鲜度核对不变。回执 `geometryGuard.beforeReused` 标明是否复用。连续批量
+  写入的整页读取约减半。
+
 ## 原生原理图 DRC 的判定与覆盖
 
 `schematic.drc.check` 的 `passed` / `nativePassed` 采用宿主布尔重载在指定 `strict` 下的判定。详细模式另取统计，两次 SDK 读取不是原子快照；检查期间不要并发修改工程。非严格通过并不代表零告警。

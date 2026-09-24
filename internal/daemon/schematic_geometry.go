@@ -115,9 +115,17 @@ func (s *Server) forwardSchematicGeometry(ctx context.Context, req protocol.Requ
 	if !schematicGeometryGuarded(req.Action) {
 		return dispatch(ctx, req)
 	}
-	before, err := s.readSchematicGeometry(ctx, req, dispatch, "before")
-	if err != nil {
-		return geometryFailure(req, "preflight", false, nil, err.Error()), nil
+	var before *protocol.Response
+	if s.geometry != nil {
+		before = s.geometry.take(req.WindowID)
+	}
+	reused := before != nil
+	if !reused {
+		var err error
+		before, err = s.readSchematicGeometry(ctx, req, dispatch, "before")
+		if err != nil {
+			return geometryFailure(req, "preflight", false, nil, err.Error()), nil
+		}
 	}
 	baseline := schguard.AnalyzeWireGeometry(before.Result)
 	addingWire := req.Action == "schematic.wire.create" || req.Action == "schematic.power.connect_pin"
@@ -188,7 +196,10 @@ func (s *Server) forwardSchematicGeometry(ctx context.Context, req protocol.Requ
 	if res.Result == nil {
 		res.Result = map[string]any{}
 	}
-	res.Result["geometryGuard"] = map[string]any{"passed": true, "phase": "readback", "preexistingFindings": len(baseline), "scope": "pin-exit-direction/wire-through-body"}
+	if s.geometry != nil {
+		s.geometry.put(req.WindowID, after)
+	}
+	res.Result["geometryGuard"] = map[string]any{"passed": true, "phase": "readback", "preexistingFindings": len(baseline), "scope": "pin-exit-direction/wire-through-body", "beforeReused": reused}
 	if req.Action == "schematic.wire.create" || req.Action == "schematic.power.connect_pin" {
 		res.Result["geometryGuard"].(map[string]any)["scope"] = "pin-exit-direction/wire-through-body/wire-coverage/wire-contact-topology"
 		res.Result["geometryGuard"].(map[string]any)["baselineFindings"] = baseline

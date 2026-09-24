@@ -250,6 +250,9 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if s.geometry != nil && geometryCacheInvalidates(&req) {
+		s.geometry.bump(req.WindowID)
+	}
 	if schematicGeometrySerializes(&req) {
 		release, acquired := s.acquireExclusive("schematic-geometry-window", req.WindowID)
 		if !acquired {

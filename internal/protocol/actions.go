@@ -276,6 +276,15 @@ func AllActions() []ActionSpec {
 			Outputs:     []string{"primitiveId", "identityBefore", "identityAfter", "getAll", "get", "reset"},
 		},
 		{
+			Name:        "schematic.components.count",
+			Domain:      DomainSchematic,
+			Phase:       1,
+			Mutates:     false,
+			NeedsWindow: true,
+			Description: "Read-only count of component primitives on the active schematic page via sch_PrimitiveComponent.getAllPrimitiveId() — ids only, no per-component state. The cheap load-settle probe after a page switch (a full schematic.components.list costs ~1.5 s per call and the settle loop polled it until two reads matched).",
+			Outputs:     []string{"count"},
+		},
+		{
 			Name:        "schematic.designators.list",
 			Domain:      DomainSchematic,
 			Phase:       1,
@@ -740,6 +749,15 @@ func AllActions() []ActionSpec {
 			NeedsWindow: true,
 			Description: "List all PCB documents in the current project. Returns uuid + name for each board; pass uuid to document.open to switch to that PCB.",
 			Outputs:     []string{"pcbs[].uuid", "pcbs[].name", "pcbs[].parentProjectUuid", "count"},
+		},
+		{
+			Name:        "pcb.components.count",
+			Domain:      DomainPcb,
+			Phase:       2,
+			Mutates:     false,
+			NeedsWindow: true,
+			Description: "Read-only count of component primitives on the active PCB via pcb_PrimitiveComponent.getAllPrimitiveId() — ids only. The cheap load-settle probe after a document switch.",
+			Outputs:     []string{"count"},
 		},
 		{
 			Name:        "pcb.components.list",

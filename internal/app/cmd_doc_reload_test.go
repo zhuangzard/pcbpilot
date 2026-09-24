@@ -65,7 +65,7 @@ func (fx *reloadFixture) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	case "pcb.save":
 		// Successful checkpoint before close.
-	case "pcb.components.list":
+	case "pcb.components.list", "pcb.components.count":
 		result["count"] = 69
 	case "document.close":
 		if got := req.Payload["uuid"]; got != "pcb-target" {
@@ -134,7 +134,7 @@ func TestReloadDocumentPreservesTargetSplitAndWaitsForClose(t *testing.T) {
 	if fx.openTimeoutMs != 15_000 {
 		t.Fatalf("document.open timeoutMs=%d, want bounded 15000", fx.openTimeoutMs)
 	}
-	want := []string{"document.current", "pcb.save", "document.close", "document.current", "document.open", "document.current", "pcb.components.list", "pcb.components.list"}
+	want := []string{"document.current", "pcb.save", "document.close", "document.current", "document.open", "document.current", "pcb.components.count", "pcb.components.count"}
 	if strings.Join(fx.actions, ",") != strings.Join(want, ",") {
 		t.Fatalf("actions=%v, want %v", fx.actions, want)
 	}

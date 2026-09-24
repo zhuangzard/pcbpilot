@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"time"
 )
 
@@ -63,21 +64,46 @@ func settleProbeAction(docType string) string {
 	return "schematic.components.list"
 }
 
+// settleCountAction is the cheap probe (ids only, ms instead of ~1.5 s):
+// the full list it replaces was 57 % of schematic machine time in real runs,
+// mostly this loop. Older daemons/connectors lack it; the loop then falls back
+// to settleProbeAction.
+func settleCountAction(docType string) string {
+	if docType == "pcb" {
+		return "pcb.components.count"
+	}
+	return "schematic.components.count"
+}
+
+// unsupportedAction reports a daemon/connector that does not know the action.
+func unsupportedAction(err error) bool {
+	if err == nil {
+		return false
+	}
+	m := err.Error()
+	return strings.Contains(m, "UNKNOWN_ACTION") || strings.Contains(m, "unknown action") || strings.Contains(m, "Unknown action")
+}
+
 // countActivePageWith reads the active document's component count via the given
 // list action. The second return distinguishes "read produced a count" from
 // "read failed" so the caller can stop retrying a probe that cannot work here.
 func countActivePageWith(cfg *appConfig, window, action string) (int, bool) {
+	c, ok, _ := countActivePage(cfg, window, action)
+	return c, ok
+}
+
+func countActivePage(cfg *appConfig, window, action string) (int, bool, error) {
 	res, err := requestAction(cfg, action, window, nil)
 	if err != nil || res.Result == nil {
-		return 0, false
+		return 0, false, err
 	}
 	if c, ok := res.Result["count"].(float64); ok {
-		return int(c), true
+		return int(c), true, nil
 	}
 	if comps, ok := res.Result["components"].([]any); ok {
-		return len(comps), true
+		return len(comps), true, nil
 	}
-	return 0, false
+	return 0, false, nil
 }
 
 // waitDocSettle polls the active page's primitive count until it stabilizes
@@ -93,12 +119,22 @@ func waitDocSettle(cfg *appConfig, window string) bool {
 // probe. It also bails out after docSettleMaxProbeErrors consecutive read
 // failures instead of spinning to the deadline (issue #161).
 func waitDocSettleFor(cfg *appConfig, window, docType string) bool {
-	action := settleProbeAction(docType)
+	action := settleCountAction(docType)
 	tracker := &settleTracker{minEmptySamples: 3}
 	deadline := time.Now().Add(docSettleDeadline)
 	probeErrors := 0
+	first := true
 	for {
-		count, ok := countActivePageWith(cfg, window, action)
+		count, ok, err := countActivePage(cfg, window, action)
+		// The count probe failing on its first call — an older daemon or
+		// connector without it (UNKNOWN_ACTION) or any runtime that cannot
+		// serve it — falls back to the full-list probe for this wait.
+		if !ok && action != settleProbeAction(docType) && (first || unsupportedAction(err)) {
+			action = settleProbeAction(docType)
+			first = false
+			continue
+		}
+		first = false
 		if ok {
 			probeErrors = 0
 			if tracker.observe(count) {

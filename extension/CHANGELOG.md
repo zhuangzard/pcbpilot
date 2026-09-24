@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+- New read-only `schematic.components.count` / `pcb.components.count` (primitive
+  ids only): the CLI's post-switch load-settle loop polls these instead of the
+  full ~1.5 s `components.list` (57 % of schematic machine time in real runs).
+  Older connectors fall back automatically.
+- Ported from upstream easyeda-agent `dev` (unreleased, cherry-picked and renamed):
+  schematic designator geometry and sheet-symbol source export, native project
+  source export, native attribute visibility recovery for unreadable fields,
+  sparse-attribute rereads, typed project-creation reconciliation, and the
+  CH340C block's USB ESD fix (SM712 → USBLC6-2SC6).
+
 - Ported from upstream easyeda-agent v1.6.0 (cherry-picked, adapted to
   pcbpilot names): typed `project.open` / `project.export` handlers
   (`project-transfer.ts`) for cross-project open with identity checks and

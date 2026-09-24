@@ -3916,3 +3916,20 @@ test('import confirm probe never clicks a non-apply button and ignores unrelated
 	const unrelated = await runImportConfirmStep('Design Rule Check', ['Apply Changes']);
 	assert.deepEqual(unrelated, { outcome: 'none', clicked: [] });
 });
+
+test('components.count probes read ids only and count them', async () => {
+	const g = globalThis as any;
+	const prev = g.eda;
+	g.eda = {
+		sch_PrimitiveComponent: { getAllPrimitiveId: async () => ['a', 'b', 'c'], getAll: async () => { throw new Error('full read must not be used'); } },
+		pcb_PrimitiveComponent: { getAllPrimitiveId: async () => ['x'], getAll: async () => { throw new Error('full read must not be used'); } },
+	};
+	try {
+		const { schematicComponentsCount, pcbComponentsCount } = await import('./actions');
+		assert.deepEqual((await schematicComponentsCount({})).result, { count: 3 });
+		assert.deepEqual((await pcbComponentsCount({})).result, { count: 1 });
+	}
+	finally {
+		g.eda = prev;
+	}
+});
