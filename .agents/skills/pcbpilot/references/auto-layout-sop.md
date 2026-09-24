@@ -57,6 +57,12 @@ pcbpilot sch sheet-geometry --project <project> --json
 解出；10 件 SY8089 区 1.4 s。小区（< 6 件外围）仍走原搜索，结果不变。回归见
 `internal/app/sch_layout_bench_test.go`。
 
+从设计意图生成 zones 源用 `sch zones-derive`（离线）：`--parts` 为每件的功能区与引脚连接
+（按引脚号或符号引脚名；只有数字名的符号用 `{"pin","source"}` 显式覆盖并写依据），`--list`/
+`--designators` 为临时页 0° 实测，`--rotations` 为实测位号姿态，`--power/--ground` 声明电源/地网。
+下面四条分区规则由它执行并写进 `--report`；未提及的实测引脚记为 unconnected，从不猜 NC。
+AT32F415 65 件：与手写推导逐项一致，下游 18 区全部求解。
+
 **分区建模经验（2026-09-24 压力验证：ESP32 合并/×2/×3、AT32F415 65 件，V3/V4 两套实测几何）**：
 - 功能区内按信号网（排除电源/地）连通分组；只接电源/地的去耦件归入该功能区主核心组；
   zone-review 报 `non-rail-subgraph-detached` 的子图（如三个独立按键）拆成独立区。
