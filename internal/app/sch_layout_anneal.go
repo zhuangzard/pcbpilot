@@ -58,6 +58,10 @@ const (
 	annealFailuresPerRound = 2
 )
 
+// Slot grid in front of the host pin (raw): distance 15..reach, lateral
+// -lateral..lateral, 5-raw steps.
+var annealSlotReach, annealSlotLateral = 120.0, 60.0
+
 // annealFinishAttemptCap bounds one terminal-gate attempt of the annealer.
 var annealFinishAttemptCap = 25000
 
@@ -247,8 +251,8 @@ func (s *annealSolver) buildParts(measured map[string]powerLayoutPlacement, memb
 					part.rots = append(part.rots, q)
 				}
 			}
-			for d := 15.0; d <= 120; d += 5 {
-				for lat := -60.0; lat <= 60; lat += 5 {
+			for d := 15.0; d <= annealSlotReach; d += 5 {
+				for lat := -annealSlotLateral; lat <= annealSlotLateral; lat += 5 {
 					part.slots = append(part.slots, [2]float64{d, lat})
 				}
 			}

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"encoding/json"
 	"os"
 	"testing"
@@ -65,6 +66,12 @@ func TestDebugRealZone(t *testing.T) {
 		defer func() { annealCandidateHook = nil }()
 	}
 	defer func() { annealAttemptHook, annealHook = nil, nil }()
+	if v := os.Getenv("PCBPILOT_ANNEAL_SLOTS"); v != "" {
+		var r, l float64
+		fmt.Sscanf(v, "%g,%g", &r, &l)
+		annealSlotReach, annealSlotLateral = r, l
+		defer func() { annealSlotReach, annealSlotLateral = 120, 60 }()
+	}
 	start := time.Now()
 	out, err := PlanSchematicLayout(in)
 	if err != nil {
