@@ -292,6 +292,14 @@ CLI `project open --project-uuid` 与 `project export` 封装上述 action；导
   写前快照，条件：同一窗口、期间没有其他写入/切页/调试脚本/切页读取、10 秒内；写后读取每次都重新
   读取，文档与 FIFO 新鲜度核对不变。回执 `geometryGuard.beforeReused` 标明是否复用。连续批量
   写入的整页读取约减半。
+- EasyEDA Pro V4 Web 可能先回执 `wire.create` 再让导线出现在列表里（2026-09-24 实测：写后立即回读
+  缺线，数秒后存在且为反向端点）。守卫在覆盖校验失败时只做有界重读（4 次，间隔递增，总计约 2 s），
+  从不重写；每次重读仍核对文档/FIFO 新鲜度和新增几何问题，仍缺则按原规则失败。
+- 服务器选择：美国网络访问 pro.lceda.cn（国内服务器）时实测约 2% 的 place/标记请求整段无响应
+  （88 s）、封装源查询 `Network Error`、网络标记超时后迟到落地。海外用户用 pro.easyeda.com，
+  并用 `scripts/parts-relocalize.py` 重解析器件 uuid。超时/丢请求后一律先回读，按 Apply 规则清页重跑。
+- V4 页面图元里的引脚级属性（Pin Name/Number/Type）父 ID 为 `<器件ID>-e<n>`，随器件删除，
+  清页守卫按器件自有属性处理，不再误判为孤儿属性（Go 守卫已修；connector 在下一版生效）。
 
 ## 原生原理图 DRC 的判定与覆盖
 

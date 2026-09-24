@@ -66,6 +66,9 @@ func TestSchematicGeometryRefusesRawWireBeforeDispatch(t *testing.T) {
 func ptrRequest(req protocol.Request) *protocol.Request { return &req }
 
 func TestSchematicGeometryReadbackCannotReportAPISuccess(t *testing.T) {
+	old := wireSettleStep
+	wireSettleStep = time.Millisecond
+	defer func() { wireSettleStep = old }()
 	for _, scenario := range []string{"valid", "bad-after", "wrong-doc", "missing-inventory", "missing-rotation", "not-landed"} {
 		t.Run(scenario, func(t *testing.T) {
 			s := New(Options{})
@@ -244,5 +247,40 @@ func TestGeometryFailureDetailTruncatesAndToleratesNoFindings(t *testing.T) {
 	plain := geometryFailure(geometryRequest("[]"), "preflight", false, nil, "read failed")
 	if plain.Error.Detail != "read failed" {
 		t.Errorf("detail must be untouched without findings: %q", plain.Error.Detail)
+	}
+}
+
+// EasyEDA Pro V4 Web acknowledged wire.create before its list showed the wire
+// (live 2026-09-24). The guard re-reads, never re-writes, until it appears.
+func TestSchematicGeometryWaitsForLaggingWireInventory(t *testing.T) {
+	old := wireSettleStep
+	wireSettleStep = time.Millisecond
+	defer func() { wireSettleStep = old }()
+	for _, lag := range []int{1, 3, wireSettleRereads + 1} {
+		s := New(Options{})
+		before, after := geometryFixture(t), geometryFixture(t)
+		after["wires"] = []any{map[string]any{"x0": 620., "y0": 1020., "x1": 590., "y1": 1020.}}
+		writes, afterReads := 0, 0
+		inner := geometryDispatcher(before, after, &writes, false)
+		dispatch := func(ctx context.Context, req protocol.Request) (*protocol.Response, error) {
+			res, err := inner(ctx, req)
+			if req.Action == "schematic.components.list" && writes > 0 {
+				afterReads++
+				if afterReads <= lag {
+					res.Result = geometryFixture(t)
+				}
+			}
+			return res, err
+		}
+		res, err := s.forwardSchematicGeometry(context.Background(), geometryRequest(`[[590,1020],[620,1020]]`), dispatch)
+		if err != nil || writes != 1 {
+			t.Fatalf("lag %d: writes=%d err=%v", lag, writes, err)
+		}
+		if lag <= wireSettleRereads && !res.OK {
+			t.Fatalf("lag %d: lagging inventory rejected: %+v", lag, res)
+		}
+		if lag > wireSettleRereads && (res.OK || res.Result["partial"] != true) {
+			t.Fatalf("lag %d: never-landed wire accepted", lag)
+		}
 	}
 }

@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"strings"
 )
 
 // A replacement clears more than parts. The source snapshot must enumerate the
@@ -118,7 +119,7 @@ func schComposeOrdinaryClearable(page map[string]any) error {
 	}
 	for _, item := range page["attributes"].([]any) {
 		attribute := item.(map[string]any)
-		if !components[stringVal(attribute["ParentPrimitiveId"])] {
+		if !components[schAttributeOwnerComponent(stringVal(attribute["ParentPrimitiveId"]))] {
 			return fmt.Errorf("ordinary page clear cannot prove deletion of orphan attribute %s", stringVal(attribute["primitiveId"]))
 		}
 	}
@@ -126,4 +127,20 @@ func schComposeOrdinaryClearable(page map[string]any) error {
 		return fmt.Errorf("ordinary page clear cannot prove deletion of embedded objects")
 	}
 	return nil
+}
+
+// V4 hosts expose pin-level attributes (Pin Name/Number/Type) whose parent is
+// the pin primitive "<componentId>-e<n>". They are deleted with their
+// component, so they are component-owned, not orphan remnants.
+func schAttributeOwnerComponent(parent string) string {
+	i := strings.LastIndex(parent, "-e")
+	if i <= 0 || i+2 == len(parent) {
+		return parent
+	}
+	for _, r := range parent[i+2:] {
+		if r < '0' || r > '9' {
+			return parent
+		}
+	}
+	return parent[:i]
 }

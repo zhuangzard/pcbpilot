@@ -93,6 +93,12 @@ direct 放置前沿、整网撤线重布和阻挡器件/attachment 刚体迁移�
 候选几何、框和连接必须整套选择；禁止在渲染脚本里旋转符号、缩框或用其他方案导线拼接。
 每页完整固定渲染与重复计算一致性验证通过后才交付本地效果，不证明 EDA 已 Apply。
 
+zones 源到 composition 的固定转换用 `sch layout-composition`（离线，不手拼 JSON）：
+`pcbpilot sch layout-composition --source zones.json --page pageN.json --devices parts.json
+--project <P> --document <页UUID> --out compN.json`。它逐件核对源与页的位号/引脚名/网络/成员，
+网络角色取自 netPolicies（local_power→power、local_ground→ground，与区内求解器一致），
+器件库身份只取 `--devices` 的真实 uuid。多页时每页分别转换、分别 compose/Apply；
+先建不会与其他页位号冲突的页。
 已确认 `layout-sheet-plan` 页时，将该页选中几何原样对应为 composition 的 modules，
 补齐同页 canonical 连接核心与新鲜身份/纸张证据；使用下列固定转换入口，不再次求解。
 page.json 是 pages[] 中的一页，不含候选包；间距、框、标题、位置均必须与预览一致。

@@ -136,6 +136,7 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 	sch.AddCommand(newSchLayoutEditCmd(stdout))
 	sch.AddCommand(newSchLayoutRenderCmd(stdout))
 	sch.AddCommand(newSchLayoutSheetPlanCmd(stdout))
+	sch.AddCommand(newSchLayoutCompositionCmd(stdout))
 	sch.AddCommand(newSchDesignatorsCmd(cfg, &window, stdout, stderr))
 	sch.AddCommand(newSchDesignatorGeometryCmd(cfg, &window, stdout))
 	// `sch apply` is the schematic-domain entry point for the shared, ordered
@@ -623,7 +624,7 @@ undefined is unreadable and does not become a default. Current document identity
 is checked before and after. This diagnostic never modifies the design and does
 not relax guarded page replacement or clear.`,
 			Example: `  pcbpilot sch attribute-inspect --id <primitiveId> --project <project> --doc <page-uuid>`,
-			Args: cobra.NoArgs,
+			Args:    cobra.NoArgs,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if strings.TrimSpace(primitiveID) == "" {
 					return fmt.Errorf("--id is required")

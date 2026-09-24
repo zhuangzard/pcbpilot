@@ -228,6 +228,22 @@ func decodeSchematicLayoutInput(raw []byte) (SchematicLayoutInput, error) {
 				return input, err
 			}
 		}
+		if raw, ok := m["textBboxesByRotation"]; ok {
+			var byRotation map[string][]json.RawMessage
+			if string(raw) == "null" || json.Unmarshal(raw, &byRotation) != nil {
+				return input, fmt.Errorf("%s.textBboxesByRotation requires measured boxes keyed by rotation", where)
+			}
+			for angle, boxes := range byRotation {
+				if angle != "0" && angle != "90" && angle != "180" && angle != "270" || len(boxes) == 0 {
+					return input, fmt.Errorf("%s.textBboxesByRotation keys must be 0/90/180/270 with measured boxes", where)
+				}
+				for _, box := range boxes {
+					if err := require(box, where+".textBboxesByRotation", "minX", "minY", "maxX", "maxY"); err != nil {
+						return input, err
+					}
+				}
+			}
+		}
 		var pins []json.RawMessage
 		_ = json.Unmarshal(m["pins"], &pins)
 		for _, p := range pins {

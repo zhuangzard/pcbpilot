@@ -3933,3 +3933,13 @@ test('components.count probes read ids only and count them', async () => {
 		g.eda = prev;
 	}
 });
+
+import { schAttributeOwnerComponent } from './actions';
+
+test('V4 pin-level attributes belong to their component, not orphan remnants', () => {
+	assert.equal(schAttributeOwnerComponent('bf0e4d6c28081e0d-e9'), 'bf0e4d6c28081e0d');
+	assert.equal(schAttributeOwnerComponent('f0a17f52fb783867-e51'), 'f0a17f52fb783867');
+	assert.equal(schAttributeOwnerComponent('393a2516f2d47331'), '393a2516f2d47331');
+	assert.equal(schAttributeOwnerComponent('old-marker'), 'old-marker');
+	assert.equal(schAttributeOwnerComponent('part-e'), 'part-e');
+});

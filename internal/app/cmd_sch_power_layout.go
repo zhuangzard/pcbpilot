@@ -35,16 +35,21 @@ type powerLayoutPin struct {
 }
 
 type powerLayoutPlacement struct {
-	PrimitiveID string           `json:"primitiveId"`
-	Designator  string           `json:"designator"`
-	Value       string           `json:"value,omitempty"`
-	X           float64          `json:"x"`
-	Y           float64          `json:"y"`
-	Rotation    float64          `json:"rotation"`
-	Mirror      bool             `json:"mirror"`
-	BBox        layoutBBox       `json:"bbox"`
-	TextBBoxes  []layoutBBox     `json:"textBboxes,omitempty"`
-	Pins        []powerLayoutPin `json:"pins"`
+	PrimitiveID string       `json:"primitiveId"`
+	Designator  string       `json:"designator"`
+	Value       string       `json:"value,omitempty"`
+	X           float64      `json:"x"`
+	Y           float64      `json:"y"`
+	Rotation    float64      `json:"rotation"`
+	Mirror      bool         `json:"mirror"`
+	BBox        layoutBBox   `json:"bbox"`
+	TextBBoxes  []layoutBBox `json:"textBboxes,omitempty"`
+	// TextBBoxesByRotation holds host-measured designator boxes RELATIVE to the
+	// anchor (x,y), keyed by absolute rotation "0"/"90"/"180"/"270". EasyEDA
+	// Pro V4 re-lays a designator on rotation (it does not turn rigidly with
+	// the body), so a measured pose beats the rigid-rotation estimate.
+	TextBBoxesByRotation map[string][]layoutBBox `json:"textBboxesByRotation,omitempty"`
+	Pins                 []powerLayoutPin        `json:"pins"`
 }
 
 type powerLayoutWire struct {
@@ -510,12 +515,20 @@ func plRotate(c powerLayoutPlacement, quarters int) powerLayoutPlacement {
 	}
 	c.BBox = b
 	c.TextBBoxes = append([]layoutBBox(nil), c.TextBBoxes...)
-	for i, box := range c.TextBBoxes {
-		x1, y1 := rotate(box.MinX, box.MinY)
-		x2, y2 := rotate(box.MaxX, box.MaxY)
-		c.TextBBoxes[i] = layoutBBox{math.Min(x1, x2), math.Min(y1, y2), math.Max(x1, x2), math.Max(y1, y2)}
+	target := math.Mod(c.Rotation+float64(quarters)*90, 360)
+	if measured, ok := c.TextBBoxesByRotation[strconv.Itoa(int(target))]; ok && quarters != 0 {
+		c.TextBBoxes = make([]layoutBBox, len(measured))
+		for i, box := range measured {
+			c.TextBBoxes[i] = layoutBBox{box.MinX + c.X, box.MinY + c.Y, box.MaxX + c.X, box.MaxY + c.Y}
+		}
+	} else {
+		for i, box := range c.TextBBoxes {
+			x1, y1 := rotate(box.MinX, box.MinY)
+			x2, y2 := rotate(box.MaxX, box.MaxY)
+			c.TextBBoxes[i] = layoutBBox{math.Min(x1, x2), math.Min(y1, y2), math.Max(x1, x2), math.Max(y1, y2)}
+		}
 	}
-	c.Rotation = math.Mod(c.Rotation+float64(quarters)*90, 360)
+	c.Rotation = target
 	return c
 }
 

@@ -108,6 +108,11 @@ func (s *Server) readSchematicGeometry(ctx context.Context, req protocol.Request
 	return res, nil
 }
 
+// Bounded read-only settle for hosts whose wire inventory lags the create ack.
+const wireSettleRereads = 4
+
+var wireSettleStep = 200 * time.Millisecond
+
 func (s *Server) forwardSchematicGeometry(ctx context.Context, req protocol.Request, dispatch dispatchFn) (*protocol.Response, error) {
 	if req.Action == "schematic.pin.repair_marker" {
 		return s.forwardSchematicPinMarkerRepair(ctx, req, dispatch)
@@ -182,7 +187,31 @@ func (s *Server) forwardSchematicGeometry(ctx context.Context, req protocol.Requ
 	}
 	if req.Action == "schematic.wire.create" || req.Action == "schematic.power.connect_pin" {
 		proposed, _ := proposedSchematicWire(req)
-		if err := schguard.VerifyWirePresent(after.Result, proposed); err != nil {
+		// EasyEDA Pro V4 Web can acknowledge a wire before its list inventory
+		// shows it. Re-read (never re-write) a bounded number of times; the
+		// same freshness and new-finding gates apply to every re-read.
+		err := schguard.VerifyWirePresent(after.Result, proposed)
+		for attempt := 1; err != nil && attempt <= wireSettleRereads; attempt++ {
+			select {
+			case <-ctx.Done():
+			case <-time.After(time.Duration(attempt) * wireSettleStep):
+			}
+			again, rerr := s.readSchematicGeometry(ctx, req, dispatch, "after")
+			if rerr != nil || again.Context.DocumentUUID != after.Context.DocumentUUID || again.Seq == nil || *again.Seq <= *after.Seq ||
+				again.SeqAbandoned == nil || *again.SeqAbandoned != *after.SeqAbandoned {
+				break
+			}
+			after = again
+			findings = schguard.AnalyzeWireGeometry(after.Result)
+			findings = schguard.NewGeometryFindings(baseline, findings)
+			if len(findings) != 0 {
+				failed := geometryFailure(req, "readback", true, findings, "New invalid geometry observed after write. Repair the measured state; API success is not validation success.")
+				failed.Result["actionResult"] = res.Result
+				return failed, nil
+			}
+			err = schguard.VerifyWirePresent(after.Result, proposed)
+		}
+		if err != nil {
 			failed := geometryFailure(req, "readback", true, nil, err.Error())
 			failed.Result["actionResult"] = res.Result
 			return failed, nil

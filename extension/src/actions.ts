@@ -2425,10 +2425,17 @@ async function readSchPagePrimitiveState(): Promise<Record<string, Array<Record<
 	return out;
 }
 
+// V4 hosts expose pin-level attributes (Pin Name/Number/Type) whose parent is
+// the pin primitive "<componentId>-e<n>". They go with their component.
+export function schAttributeOwnerComponent(parent: string): string {
+	const m = /^(.+)-e\d+$/.exec(parent);
+	return m ? m[1] : parent;
+}
+
 function independentSchPagePrimitives(page: Record<string, Array<Record<string, unknown>>>): { orphanAttributes: Array<string>; objects: Array<string> } {
 	const parents = new Set(page.components.map(c => String(c.primitiveId)));
 	return {
-		orphanAttributes: page.attributes.filter(a => !parents.has(String(a.ParentPrimitiveId))).map(a => String(a.primitiveId)),
+		orphanAttributes: page.attributes.filter(a => !parents.has(schAttributeOwnerComponent(String(a.ParentPrimitiveId)))).map(a => String(a.primitiveId)),
 		objects: page.objects.map(o => String(o.primitiveId)),
 	};
 }
@@ -2655,7 +2662,7 @@ const schematicPageClearPreservingParts: Handler = async (payload) => {
 		const owned: Array<string> = [];
 		for (const attribute of attributes.values()) {
 			const id = attribute.getState_PrimitiveId();
-			if (protectedParents.has(attribute.getState_ParentPrimitiveId())) { protectedIds.add(id); owned.push(id); }
+			if (protectedParents.has(schAttributeOwnerComponent(attribute.getState_ParentPrimitiveId()))) { protectedIds.add(id); owned.push(id); }
 			else (groups.orphanAttributes ??= []).push(id);
 		}
 		owned.sort();

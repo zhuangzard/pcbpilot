@@ -627,6 +627,7 @@ pcbpilot sch compose --from composition.json --out plan.json
 | `modules[]` | `id/title/placements/wires/flags`，可附 `terminals/titleMetrics`；与 connectivity 的 Lib 成员逐项对应，每件只归属一个模块。 |
 | `placements[]` | `designator/value/x/y/rotation/mirror/bbox/pins`；bbox 与引脚位置来自官方实测，器件和引脚坐标落在 5 raw 网格。 |
 | `placements[].textBboxes` | 可选外置位号 bbox 数组，格式同 sheet；也用于 measurements。仅填入按原始属性类型筛出的 Designator，非位号属性不进入此数组。与当前实测姿态一致，随平移进入碰撞和框包络。普通 list 不自动提供，须另存类型、parent 与测量来源；不控制实际文字位置，Apply 后须回读验证。缺失不代表位号为空或已验证。 |
+| `placements[].textBboxesByRotation` | 可选 `{"0":[box],"90":[box],"180":[box],"270":[box]}`，位号 bbox **相对锚点 (x,y)**，按绝对旋转角实测。EasyEDA Pro V4 旋转器件时会重排位号而不是随本体刚体旋转（2026-09-24 实测：电阻转 180° 位号保持 0° 偏移，电容转 90/270° 位号移到右侧），刚体推算会造成 Apply 后位号重叠。提供后求解器在该姿态直接用实测框；缺失时才退回刚体推算。用 `scripts/measure-designator-rotations.py` 在专用临时页实测（place→modify 旋转→`sch designator-geometry`），测完 `sch page-delete`。 |
 | `pins[]` | 完整 `{number,name,net,x,y}`；官方量测提供时保留 `rotation`（世界坐标外向角：0 右、90 上、180 左、270 下），刚体旋转同步更新，不重复应用父器件旋转。NC 的 `net` 为空，与连接核心的 NC 状态一致。旧输入缺角度时仅允许唯一 bbox 侧推断，不得伪造为官方角度；候选不能删除或篡改已提供的角度。 |
 | `flags[].anchor` | 必须可归因为 `{type:"pin",componentId,pinNumber}` 或 `{type:"wire_tree",zoneId?,net,x,y}`。pin 锚定的 `pinX/pinY/direction` 必须等于目标引脚坐标与官方外向方向；wire_tree 接入点必须落在指定网的唯一真实线岛上。旧结果只在几何能唯一归因时迁移，歧义非零失败。 |
 
