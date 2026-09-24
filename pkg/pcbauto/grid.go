@@ -38,11 +38,11 @@ type grid struct {
 	// bUse = sum of use in the block, bHist = cells with non-zero history.
 	bUse, bHist []int32
 	bW, bH      int
-	noVia    []bool // per x,y (all layers)
-	baseClr  float64
-	dcache   map[int]offs
-	diskMRU  [4]diskEntry
-	rcache   map[int]ringEntry
+	noVia       []bool // per x,y (all layers)
+	baseClr     float64
+	dcache      map[int]offs
+	diskMRU     [4]diskEntry
+	rcache      map[int]ringEntry
 }
 
 func (gr *grid) idx(l, x, y int) int { return (l*gr.H+y)*gr.W + x }
