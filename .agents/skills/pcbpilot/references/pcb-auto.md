@@ -258,3 +258,10 @@ pcbpilot pcb check --project <工程>
   保持实测位姿（`ApplyMechInPlace`，偏差 >0.5 mil 只记 note）。
 - 离线重放：r2 默认栅格 DRC 0、0 未接通；r4 用现场 route2 铜重放，严格 DRC 检出 pad-via 5.95 mil，微修移孔 0.06 mil 后 0。
   回归：`pkg/pcbauto/microfix_test.go`。
+
+**同板 E2E 修复复测（2026-09-25，桌面 V3 3.2.149，连接器 0.2.10）** — `live-verified`
+
+- 封装 NPTH：`pcb dump` 读出 J2 两个定位孔（e45/e46，Ø29.5 mil，`pad-verified`）与板规则槽孔间距 11.81 mil；
+  `pcb check` 的 `footprint-hole-clearance` 与原生 DRC 逐条一致（4 条）。新引擎默认参数重布：信号 30/30、平面 54/54、
+  综合分 92.3（高速重试自动选 2.88 mil 栅格），原生 DRC 通过；带 `--mech` 的仅布线运行不再重复写孔/区域（7 区域 / 4 孔）。
+- 丝印：`pcb silk-align` 一轮收敛，`unresolvedPairs` 为空，`pcb check` silkOverlap=0（0.2.9 时 C2/C3 三轮不收敛）。
