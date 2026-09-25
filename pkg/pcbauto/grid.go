@@ -207,8 +207,13 @@ func (gr *grid) markKeepout(k *Keepout) {
 	})
 }
 
+// markHole blocks the drill plus its keep annulus plus the other half of the
+// clearance: CheckDRC wants Keep+Clearance from the copper edge and a claim
+// carries only half of it (hw+c/2), so Dia/2+Keep alone let an ESP32 +5V
+// fan-out via sit 2.6 mil inside an M3 keep ring (final gate then dropped
+// the whole net's bridging).
 func (gr *grid) markHole(h *Hole) {
-	r := h.Dia/2 + h.Keep
+	r := h.Dia/2 + h.Keep + gr.baseClr/2
 	gr.forCellsNear(Rect{h.C.X, h.C.Y, h.C.X, h.C.Y}, r, func(p Point) float64 { return p.Dist(h.C) }, func(x, y int) {
 		for li := range gr.layers {
 			gr.flags[gr.idx(li, x, y)] |= flagHard

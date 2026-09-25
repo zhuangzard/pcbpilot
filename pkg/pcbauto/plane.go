@@ -67,7 +67,7 @@ func (r *router) fanout(res *RouteResult) {
 				need = clampInt(n.plan.ViasPerTransition, 2, 9)
 			}
 		}
-		stubW := math.Min(math.Max(n.width, r.b.Rules.TrackWidth), math.Max(math.Min(pd.Box.W, pd.Box.H), r.b.Rules.TrackWidth))
+		stubW := r.fanStubW(n, pd)
 		placed := r.placeFanoutVias(n, pd, li, need, stubW, res)
 		if placed == 0 && r.shareFanout(n, pd, li, stubW) {
 			placed = 1
@@ -76,6 +76,77 @@ func (r *router) fanout(res *RouteResult) {
 			res.Notes = append(res.Notes, sprintf("fan-out: no via site for %s (%s); it will be routed as a track", pd.Key(), n.name))
 		}
 	}
+}
+
+// fanStubW is the width of a fan-out stub from pd.
+func (r *router) fanStubW(n *rnet, pd *Pad) float64 {
+	return math.Min(math.Max(n.width, r.b.Rules.TrackWidth), math.Max(math.Min(pd.Box.W, pd.Box.H), r.b.Rules.TrackWidth))
+}
+
+func seq(n int) []int {
+	out := make([]int, n)
+	for i := range out {
+		out[i] = i
+	}
+	return out
+}
+
+// relocateFanout moves fan-out k of n that fails the final exact DRC to
+// another site around its pad: the fan-out is withdrawn and the pad's
+// candidate sites are tried again, each vetted by accept against all
+// emitted copper. The ESP32 D1.1 +5V via sat in an M3 keep ring; the final
+// gate then dropped the net's bridging and the via, leaving two plane
+// connections open. Pinned (BGA) fan-outs are not moved. It reports whether
+// the fan-out was withdrawn (moved, or reported fanout-drc when no site
+// passes).
+func (r *router) relocateFanout(n *rnet, k int, res *RouteResult, accept func() bool) bool {
+	if k < len(n.fanPinned) && n.fanPinned[k] {
+		return false
+	}
+	var pd *Pad
+	via := n.fanVias[k]
+	// Stubs of other pads or escapes hanging on the via would go with it.
+	for _, t := range n.shareTracks {
+		if t.B.Dist(via.C) < 0.5 {
+			return false
+		}
+	}
+	for _, e := range n.escs {
+		if e.hasVia && e.via.Dist(via.C) < 0.5 {
+			return false
+		}
+	}
+	for _, g := range n.groups {
+		for _, q := range g {
+			if ti := n.fanTrack[k]; ti >= 0 && q.Box.C.Dist(n.fanTracks[ti].A) < 0.5 || ti < 0 && q.Box.Dist(via.C) == 0 {
+				pd = q
+			}
+		}
+	}
+	if pd == nil {
+		return false
+	}
+	li := r.gr.layerIndex(pd.Layer)
+	if li < 0 || !r.gr.routable[li] {
+		return false
+	}
+	var keep []int
+	for i := range n.fanVias {
+		if i != k {
+			keep = append(keep, i)
+		}
+	}
+	r.keepFanouts(n, keep)
+	res.Stats.FanoutVias--
+	strict := r.strict
+	r.strict = true
+	defer func() { r.strict = strict }()
+	if r.placeFanoutViasChecked(n, pd, li, 1, r.fanStubW(n, pd), res, accept) > 0 {
+		res.Notes = append(res.Notes, sprintf("final gate: moved the %s fan-out via of %s to another site (exact DRC)", n.name, pd.Key()))
+	} else {
+		n.failed = append(n.failed, Unrouted{Net: n.name, Pads: []string{pd.Key()}, Reason: "fanout-drc"})
+	}
+	return true
 }
 
 func clampInt(v, lo, hi int) int {
@@ -89,7 +160,15 @@ func clampInt(v, lo, hi int) int {
 }
 
 func (r *router) placeFanoutVias(n *rnet, pd *Pad, li, need int, stubW float64, res *RouteResult) int {
+	return r.placeFanoutViasChecked(n, pd, li, need, stubW, res, nil)
+}
+
+// placeFanoutViasChecked is placeFanoutVias with an exact vetting step:
+// accept (nil = none) runs after each commit and a rejected site is
+// withdrawn; at most 12 sites are vetted.
+func (r *router) placeFanoutViasChecked(n *rnet, pd *Pad, li, need int, stubW float64, res *RouteResult, accept func() bool) int {
 	gr := r.gr
+	vetted := 0
 	part := r.b.Part(pd.Part)
 	away := Point{}
 	if part != nil {
@@ -181,7 +260,17 @@ func (r *router) placeFanoutVias(n *rnet, pd *Pad, li, need int, stubW float64, 
 				continue
 			}
 		}
+		if accept != nil && vetted >= 12 {
+			break
+		}
 		r.commitFanout(n, pd, li, c.x, c.y, c.c, stubW, inside, false)
+		if accept != nil {
+			vetted++
+			if !accept() {
+				r.keepFanouts(n, seq(len(n.fanVias)-1))
+				continue
+			}
+		}
 		res.Stats.FanoutVias++
 		placed++
 	}

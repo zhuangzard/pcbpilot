@@ -15,7 +15,21 @@ type Violation struct {
 	At       Point   `json:"at"`
 	Gap      float64 `json:"gapMil"`
 	Required float64 `json:"requiredMil"`
+
+	// The two parties (rb.kind < 0 for a single-object finding), so a
+	// repair moves the object that violates, not whatever lies near At.
+	ra, rb drcRef
 }
+
+// drcRef names one party of a violation: kind 0 pad, 1 track, 2 via; idx is
+// the index into the checked tracks or vias.
+type drcRef struct {
+	kind int
+	idx  int
+	pad  *Pad
+}
+
+var noRef = drcRef{kind: -1}
 
 // DRCReport is the independent check of a routed board.
 type DRCReport struct {
@@ -34,7 +48,10 @@ type drcItem struct {
 	v     Via
 	bb    Rect
 	id    int
+	idx   int // index into the checked tracks / vias
 }
+
+func (it *drcItem) ref() drcRef { return drcRef{kind: it.kind, idx: it.idx, pad: it.pad} }
 
 func (it *drcItem) onLayer(l int) bool {
 	return it.layer == LayerMulti || it.layer == l
@@ -108,12 +125,12 @@ func checkDRCTol(b *Board, an *Analysis, st *Stackup, tracks []Track, vias []Via
 			items = append(items, &drcItem{kind: 0, net: pd.Net, layer: pd.Layer, pad: pd, bb: pd.Box.Bounds()})
 		}
 	}
-	for _, t := range tracks {
+	for i, t := range tracks {
 		bb := EmptyRect().AddPoint(t.A).AddPoint(t.B).Expand(t.Width / 2)
-		items = append(items, &drcItem{kind: 1, net: t.Net, layer: t.Layer, t: t, bb: bb})
+		items = append(items, &drcItem{kind: 1, net: t.Net, layer: t.Layer, t: t, bb: bb, idx: i})
 	}
-	for _, v := range vias {
-		items = append(items, &drcItem{kind: 2, net: v.Net, layer: LayerMulti, v: v, bb: Rect{v.C.X, v.C.Y, v.C.X, v.C.Y}.Expand(v.Dia / 2)})
+	for i, v := range vias {
+		items = append(items, &drcItem{kind: 2, net: v.Net, layer: LayerMulti, v: v, bb: Rect{v.C.X, v.C.Y, v.C.X, v.C.Y}.Expand(v.Dia / 2), idx: i})
 	}
 	for i, it := range items {
 		it.id = i
@@ -172,7 +189,7 @@ func checkDRCTol(b *Board, an *Analysis, st *Stackup, tracks []Track, vias []Via
 					if a.kind > c.kind {
 						a, c = c, a
 					}
-					rep.Violations = append(rep.Violations, Violation{Kind: k, NetA: a.net, NetB: c.net, Layer: layer, At: at, Gap: round2(g), Required: req})
+					rep.Violations = append(rep.Violations, Violation{Kind: k, NetA: a.net, NetB: c.net, Layer: layer, At: at, Gap: round2(g), Required: req, ra: a.ref(), rb: c.ref()})
 				}
 			}
 		}
@@ -190,7 +207,7 @@ func checkDRCTol(b *Board, an *Analysis, st *Stackup, tracks []Track, vias []Via
 				for _, j := range holeCell[[2]int{k[0] + dx, k[1] + dy}] {
 					o := vias[j]
 					if g := v.C.Dist(o.C) - v.Drill/2 - o.Drill/2; g < holeGap(b)-0.01 {
-						rep.Violations = append(rep.Violations, Violation{Kind: "hole-hole", NetA: v.Net, NetB: o.Net, At: v.C, Gap: round2(g), Required: holeGap(b)})
+						rep.Violations = append(rep.Violations, Violation{Kind: "hole-hole", NetA: v.Net, NetB: o.Net, At: v.C, Gap: round2(g), Required: holeGap(b), ra: drcRef{kind: 2, idx: i}, rb: drcRef{kind: 2, idx: j}})
 					}
 				}
 			}
@@ -223,7 +240,7 @@ func checkDRCTol(b *Board, an *Analysis, st *Stackup, tracks []Track, vias []Via
 			}
 		}
 		if len(b.Outline) >= 3 && d < b.Rules.EdgeClearance-0.1 {
-			rep.Violations = append(rep.Violations, Violation{Kind: "edge", NetA: it.net, Layer: it.layer, At: at, Gap: round2(d), Required: b.Rules.EdgeClearance})
+			rep.Violations = append(rep.Violations, Violation{Kind: "edge", NetA: it.net, Layer: it.layer, At: at, Gap: round2(d), Required: b.Rules.EdgeClearance, ra: it.ref(), rb: noRef})
 		}
 		for _, k := range b.Keepouts {
 			if !k.NoCopper && !(k.NoVias && it.kind == 2) {
@@ -244,7 +261,7 @@ func checkDRCTol(b *Board, an *Analysis, st *Stackup, tracks []Track, vias []Via
 				}
 			}
 			if hit {
-				rep.Violations = append(rep.Violations, Violation{Kind: "keepout", NetA: it.net, Layer: it.layer, At: at})
+				rep.Violations = append(rep.Violations, Violation{Kind: "keepout", NetA: it.net, Layer: it.layer, At: at, ra: it.ref(), rb: noRef})
 			}
 		}
 		for _, h := range b.Holes {
@@ -255,7 +272,7 @@ func checkDRCTol(b *Board, an *Analysis, st *Stackup, tracks []Track, vias []Via
 				g = h.C.Dist(it.v.C) - it.v.Dia/2 - h.Dia/2
 			}
 			if g < h.Keep+b.Rules.Clearance-0.1 {
-				rep.Violations = append(rep.Violations, Violation{Kind: "hole", NetA: it.net, Layer: it.layer, At: at, Gap: round2(g), Required: h.Keep + b.Rules.Clearance})
+				rep.Violations = append(rep.Violations, Violation{Kind: "hole", NetA: it.net, Layer: it.layer, At: at, Gap: round2(g), Required: h.Keep + b.Rules.Clearance, ra: it.ref(), rb: noRef})
 			}
 		}
 	}
@@ -386,25 +403,32 @@ func checkConnectivity(b *Board, st *Stackup, items []*drcItem) []Unrouted {
 // narrowing a track instead of re-routing: grid-discretised near misses.
 const microFixMaxShort = 0.25
 
-// MicroFix narrows routed tracks that miss a clearance by at most
-// microFixMaxShort under the strict check, keeping them at or above the
-// process minimum. Ripping such connections in repair cost bbclaw 11 %
-// completion; a 10 mil track 0.14 mil narrower is electrically the same.
-// It returns how many tracks were narrowed.
+// MicroFix settles strict-check clearance misses of at most
+// microFixMaxShort: it first shifts the offending track vertex/segment or via
+// away from the other party (keeping widths and connections), then narrows
+// tracks, keeping them at or above the process minimum. Ripping such
+// connections in repair cost bbclaw 11 % completion; a 10 mil track 0.14 mil
+// narrower is electrically the same. It returns how many shortfalls it fixed.
 func MicroFix(b *Board, an *Analysis, st *Stackup, rr *RouteResult) int {
 	fixed := 0
 	for pass := 0; pass < 3; pass++ {
 		changed := false
-		for _, v := range CheckDRCStrict(b, an, st, rr.Tracks, rr.Vias).Violations {
+		vs := CheckDRCStrict(b, an, st, rr.Tracks, rr.Vias).Violations
+		cur := len(vs)
+		for _, v := range vs {
 			short := v.Required - v.Gap
-			if short <= 0 || short > microFixMaxShort || !strings.Contains(v.Kind, "track") {
+			if short <= 0 || short > microFixMaxShort || v.ra.kind < 0 || v.rb.kind < 0 || v.Kind == "hole-hole" {
 				continue
 			}
-			// First shift the offending segment/vertex away from the pad (keeps
-			// the width); narrow nearby tracks of either net only if that fails.
-			if nudgeAway(b, an, st, rr, v, short) {
+			// First shift the violating track or via away from the other
+			// party; narrow nearby tracks of either net only if that fails.
+			if n := nudgeAway(b, an, st, rr, v, short, cur); n >= 0 {
+				cur = n
 				fixed++
 				changed = true
+				continue
+			}
+			if !strings.Contains(v.Kind, "track") {
 				continue
 			}
 			hit := false
@@ -435,102 +459,140 @@ func MicroFix(b *Board, an *Analysis, st *Stackup, rr *RouteResult) int {
 	return fixed
 }
 
-// nudgeAway translates the routed segment nearest a pad clearance violation
-// by the shortfall (+0.03 mil) away from the nearest pad, dragging every
-// same-net segment end that coincides with its ends. Ends on a pad or via of
-// the net are anchors: then nothing moves. The move is kept only if the strict
-// check has fewer violations afterwards.
-func nudgeAway(b *Board, an *Analysis, st *Stackup, rr *RouteResult, v Violation, short float64) bool {
-	var pad *Pad
-	pd := math.Inf(1)
-	for _, p := range b.Parts {
-		for _, q := range p.Pads {
-			if q.Net != v.NetA && q.Net != v.NetB {
+// shapeOf returns a violation party's distance function, nearest-point
+// function and centre (pad copper, track centreline, via centre).
+func shapeOf(r drcRef, rr *RouteResult) (func(Point) float64, func(Point) Point, Point) {
+	switch r.kind {
+	case 0:
+		return r.pad.Box.Dist, r.pad.Box.Nearest, r.pad.Box.C
+	case 1:
+		t := rr.Tracks[r.idx]
+		return func(p Point) float64 { return PointSegDist(p, t.A, t.B) },
+			func(p Point) Point { return segNearest(p, t.A, t.B) }, t.A.Add(t.B).Scale(0.5)
+	}
+	c := rr.Vias[r.idx].C
+	return func(p Point) float64 { return p.Dist(c) }, func(Point) Point { return c }, c
+}
+
+// nudgeAway moves one routed party of violation v — a track segment or
+// vertex, else a via — by the shortfall (+0.03 mil) straight away from the
+// other party's nearest copper, dragging every same-net track end that
+// coincides with a moved point (a via drags the tracks ending at it on every
+// layer). Track ends on a pad or via of the net are anchors and never move.
+// A move is kept only if the strict check then has fewer than cur
+// violations; it returns the new count, or -1 when nothing was kept.
+func nudgeAway(b *Board, an *Analysis, st *Stackup, rr *RouteResult, v Violation, short float64, cur int) int {
+	near := func(a, c Point) bool { return a.Dist(c) <= 0.01 }
+	try := func(net string, move []Point, d Point, via int) int {
+		savedT := append([]Track(nil), rr.Tracks...)
+		savedV := append([]Via(nil), rr.Vias...)
+		if via >= 0 {
+			rr.Vias[via].C = rr.Vias[via].C.Add(d)
+		}
+		for i := range rr.Tracks {
+			t := &rr.Tracks[i]
+			if t.Net != net {
 				continue
 			}
-			if d := q.Box.Dist(v.At); d < pd {
-				pad, pd = q, d
-			}
-		}
-	}
-	if pad == nil {
-		return false
-	}
-	net := v.NetA
-	if pad.Net == v.NetA {
-		net = v.NetB
-	}
-	best, bd := -1, math.Inf(1)
-	for i, t := range rr.Tracks {
-		if t.Net != net || v.Layer != 0 && t.Layer != v.Layer {
-			continue
-		}
-		if d := PointSegDist(v.At, t.A, t.B); d < bd {
-			best, bd = i, d
-		}
-	}
-	if best < 0 || bd > v.Gap+rr.Tracks[best].Width {
-		return false
-	}
-	dir := v.At.Sub(pad.Box.C)
-	l := math.Hypot(dir.X, dir.Y)
-	if l == 0 {
-		return false
-	}
-	d := dir.Scale((short + 0.03) / l)
-	near := func(a, c Point) bool { return a.Dist(c) <= 0.01 }
-	anchored := func(p Point) bool {
-		for _, via := range rr.Vias {
-			if via.Net == net && near(via.C, p) {
-				return true
-			}
-		}
-		for _, part := range b.Parts {
-			for _, q := range part.Pads {
-				if q.Net == net && q.Box.Dist(p) == 0 {
-					return true
+			for _, e := range []*Point{&t.A, &t.B} {
+				for _, m := range move {
+					if near(*e, m) {
+						*e = e.Add(d)
+						break
+					}
 				}
 			}
 		}
-		return false
-	}
-	a0, b0 := rr.Tracks[best].A, rr.Tracks[best].B
-	// The closest point is a vertex: move only it (its other segments
-	// follow); otherwise translate the whole segment.
-	var move []Point
-	switch {
-	case v.At.Dist(a0) <= 0.5:
-		move = []Point{a0}
-	case v.At.Dist(b0) <= 0.5:
-		move = []Point{b0}
-	default:
-		move = []Point{a0, b0}
-	}
-	for _, m := range move {
-		if anchored(m) {
-			return false
+		if n := len(CheckDRCStrict(b, an, st, rr.Tracks, rr.Vias).Violations); n < cur {
+			return n
 		}
+		copy(rr.Tracks, savedT)
+		copy(rr.Vias, savedV)
+		return -1
 	}
-	before := len(CheckDRCStrict(b, an, st, rr.Tracks, rr.Vias).Violations)
-	saved := append([]Track(nil), rr.Tracks...)
-	for i := range rr.Tracks {
-		t := &rr.Tracks[i]
-		if t.Net != net {
-			continue
+	away := func(p Point, other drcRef, mag float64) (Point, bool) {
+		_, nearest, c := shapeOf(other, rr)
+		dir := p.Sub(nearest(p))
+		if math.Hypot(dir.X, dir.Y) < 1e-9 {
+			dir = p.Sub(c)
 		}
-		for _, e := range []*Point{&t.A, &t.B} {
-			for _, m := range move {
-				if near(*e, m) {
-					*e = e.Add(d)
-					break
+		l := math.Hypot(dir.X, dir.Y)
+		if l < 1e-9 {
+			return Point{}, false
+		}
+		return dir.Scale(mag / l), true
+	}
+	mag := short + 0.03
+	for _, pr := range [][2]drcRef{{v.rb, v.ra}, {v.ra, v.rb}} {
+		self, other := pr[0], pr[1]
+		switch self.kind {
+		case 1:
+			t := rr.Tracks[self.idx]
+			anchored := func(p Point) bool {
+				for _, via := range rr.Vias {
+					if via.Net == t.Net && near(via.C, p) {
+						return true
+					}
 				}
+				for _, part := range b.Parts {
+					for _, q := range part.Pads {
+						if q.Net == t.Net && q.Box.Dist(p) == 0 {
+							return true
+						}
+					}
+				}
+				return false
+			}
+			dist, _, _ := shapeOf(other, rr)
+			p := segClosest(t.A, t.B, dist)
+			d, ok := away(p, other, mag)
+			if !ok {
+				continue
+			}
+			// Candidate moves: the vertex at the hot spot, else the whole
+			// segment; with one end anchored, swing the free end so the hot
+			// spot still clears.
+			var moves [][]Point
+			var ds []Point
+			switch {
+			case p.Dist(t.A) <= 0.5:
+				moves, ds = append(moves, []Point{t.A}), append(ds, d)
+			case p.Dist(t.B) <= 0.5:
+				moves, ds = append(moves, []Point{t.B}), append(ds, d)
+			}
+			moves, ds = append(moves, []Point{t.A, t.B}), append(ds, d)
+			for _, end := range [][2]Point{{t.A, t.B}, {t.B, t.A}} {
+				free, pivot := end[0], end[1]
+				if !anchored(pivot) || anchored(free) || p.Dist(pivot) < 0.5 {
+					continue
+				}
+				k := math.Min(free.Dist(pivot)/p.Dist(pivot), 4)
+				moves, ds = append(moves, []Point{free}), append(ds, d.Scale(k))
+			}
+			for i, m := range moves {
+				blocked := false
+				for _, q := range m {
+					if anchored(q) {
+						blocked = true
+					}
+				}
+				if blocked {
+					continue
+				}
+				if n := try(t.Net, m, ds[i], -1); n >= 0 {
+					return n
+				}
+			}
+		case 2:
+			via := rr.Vias[self.idx]
+			d, ok := away(via.C, other, mag)
+			if !ok {
+				continue
+			}
+			if n := try(via.Net, []Point{via.C}, d, self.idx); n >= 0 {
+				return n
 			}
 		}
 	}
-	after := len(CheckDRCStrict(b, an, st, rr.Tracks, rr.Vias).Violations)
-	if after < before {
-		return true
-	}
-	copy(rr.Tracks, saved)
-	return false
+	return -1
 }

@@ -144,7 +144,14 @@ func (r *router) emit(res *RouteResult) {
 			break
 		}
 		changed := false
+		moved := map[Via]bool{}
 		for _, v := range final {
+			// A fan-out via or stub in violation moves to another site
+			// around its pad first; its net's routing is not at fault.
+			if r.relocateFanoutAt(v, ts, vs, res, collect, moved) {
+				changed = true
+				continue
+			}
 			if nets := routedOnly(v); len(nets) > 0 {
 				for _, n := range nets {
 					r.applyClaims(n.claims, -1)
@@ -200,6 +207,68 @@ func (r *router) emit(res *RouteResult) {
 		res.Stats.Completion = 100
 	}
 	sort.SliceStable(res.Unrouted, func(i, j int) bool { return res.Unrouted[i].Net < res.Unrouted[j].Net })
+}
+
+// relocateFanoutAt finds the fan-out party of final-gate violation v (ts/vs
+// are the copper the violation indexes) and relocates it, vetting each new
+// site with the exact check over collect(). moved holds the fan-outs already
+// withdrawn in this pass: a later violation of the same via is settled.
+func (r *router) relocateFanoutAt(v Violation, ts []Track, vs []Via, res *RouteResult, collect func() ([]Track, []Via), moved map[Via]bool) bool {
+	for _, ref := range []drcRef{v.ra, v.rb} {
+		var n *rnet
+		k := -1
+		switch {
+		case ref.kind == 1 && ts[ref.idx].Kind == "fanout" && moved[Via{Net: ts[ref.idx].Net, C: ts[ref.idx].B}]:
+			return true
+		case ref.kind == 2 && moved[Via{Net: vs[ref.idx].Net, C: vs[ref.idx].C}]:
+			return true
+		case ref.kind == 1 && ts[ref.idx].Kind == "fanout":
+			t := ts[ref.idx]
+			if n = r.byName[t.Net]; n != nil {
+				for i, ti := range n.fanTrack {
+					if ti >= 0 && n.fanTracks[ti] == t {
+						k = i
+					}
+				}
+			}
+		case ref.kind == 2 && vs[ref.idx].Kind == "fanout":
+			via := vs[ref.idx]
+			if n = r.byName[via.Net]; n != nil {
+				for i, fv := range n.fanVias {
+					if fv == via {
+						k = i
+					}
+				}
+			}
+		}
+		if k < 0 {
+			continue
+		}
+		accept := func() bool {
+			ts, vs := collect()
+			nv := n.fanVias[len(n.fanVias)-1]
+			var nt Track
+			ti := n.fanTrack[len(n.fanTrack)-1]
+			if ti >= 0 {
+				nt = n.fanTracks[ti]
+			}
+			for _, w := range CheckDRC(r.b, r.an, r.st, ts, vs).Violations {
+				for _, p := range []drcRef{w.ra, w.rb} {
+					if p.kind == 2 && vs[p.idx] == nv || p.kind == 1 && ti >= 0 && ts[p.idx] == nt {
+						return false
+					}
+				}
+			}
+			return true
+		}
+		old := n.fanVias[k]
+		if r.relocateFanout(n, k, res, accept) {
+			moved[Via{Net: old.Net, C: old.C}] = true
+			return true
+		}
+		return false
+	}
+	return false
 }
 
 func failedGroups(n *rnet) int {

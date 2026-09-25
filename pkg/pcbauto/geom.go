@@ -221,6 +221,51 @@ func (b OrientedBox) SegDist(a, c Point) float64 {
 	return best
 }
 
+// Nearest returns the point of the box copper closest to p (p itself when
+// inside).
+func (b OrientedBox) Nearest(p Point) Point {
+	q := p.Sub(b.C).Rotate(-b.Rot)
+	hw, hh := b.W/2, b.H/2
+	if b.Round {
+		r := math.Min(hw, hh)
+		ax, ay := hw-r, hh-r
+		c := Point{clamp(q.X, -ax, ax), clamp(q.Y, -ay, ay)}
+		if d := q.Dist(c); d > r {
+			q = c.Add(q.Sub(c).Scale(r / d))
+		}
+	} else {
+		q = Point{clamp(q.X, -hw, hw), clamp(q.Y, -hh, hh)}
+	}
+	return b.C.Add(q.Rotate(b.Rot))
+}
+
+// segClosest returns the point of segment ab where dist — the distance to a
+// convex shape, hence convex along the segment — is smallest.
+func segClosest(a, b Point, dist func(Point) float64) Point {
+	at := func(t float64) Point { return a.Add(b.Sub(a).Scale(t)) }
+	lo, hi := 0.0, 1.0
+	for k := 0; k < 80 && hi-lo > 1e-12; k++ {
+		m1, m2 := lo+(hi-lo)/3, hi-(hi-lo)/3
+		if dist(at(m1)) <= dist(at(m2)) {
+			hi = m2
+		} else {
+			lo = m1
+		}
+	}
+	return at((lo + hi) / 2)
+}
+
+// segNearest is the point of segment ab closest to p.
+func segNearest(p, a, b Point) Point {
+	ab := b.Sub(a)
+	l2 := ab.X*ab.X + ab.Y*ab.Y
+	if l2 < 1e-12 {
+		return a
+	}
+	t := clamp(((p.X-a.X)*ab.X+(p.Y-a.Y)*ab.Y)/l2, 0, 1)
+	return a.Add(ab.Scale(t))
+}
+
 // Bounds returns the axis-aligned bounds of the box.
 func (b OrientedBox) Bounds() Rect {
 	r := EmptyRect()

@@ -141,6 +141,19 @@ var screwHoles = map[string][2]float64{ // drill, keepout diameter (mm)
 // keepouts, fixed poses and edge connectors. It returns the constraint set
 // the placer must keep.
 func ApplyMech(b *Board, m *MechSpec) (*Mechanics, error) {
+	return applyMech(b, m, false)
+}
+
+// ApplyMechInPlace is ApplyMech for a route-only run: fixed and edge parts
+// keep their measured pose (the playbook does not move parts without a
+// placement), and a pose the spec would change by more than 0.5 mil is only
+// noted. Snapping U1 0.05 mil to the ESP32 top edge in the model hid a via
+// 5.96 mil from U1.36 on the real board (engine DRC saw 5.99).
+func ApplyMechInPlace(b *Board, m *MechSpec) (*Mechanics, error) {
+	return applyMech(b, m, true)
+}
+
+func applyMech(b *Board, m *MechSpec, inPlace bool) (*Mechanics, error) {
 	k := 1 / 0.0254 // mm → mil
 	if strings.EqualFold(m.Units, "mil") {
 		k = 1
@@ -227,7 +240,11 @@ func ApplyMech(b *Board, m *MechSpec) (*Mechanics, error) {
 		if f.Side == "bottom" && p.Side != LayerBottom {
 			out.Notes = append(out.Notes, fmt.Sprintf("%s: side change to bottom must be done in EasyEDA (flip), pose applied on its current side", f.Ref))
 		}
+		keep := savePose(p)
 		movePartCentre(p, Point{bb.MinX + f.X*k, bb.MinY + f.Y*k}, f.Rot)
+		if inPlace {
+			out.Notes = append(out.Notes, keep.restore(p)...)
+		}
 		p.Fixed = true
 		out.Fixed[f.Ref] = true
 	}
@@ -241,8 +258,12 @@ func ApplyMech(b *Board, m *MechSpec) (*Mechanics, error) {
 		if e.At >= 0 {
 			e.At *= k
 		}
+		keep := savePose(p)
 		if err := PlaceOnEdge(b, p, e); err != nil {
 			return nil, err
+		}
+		if inPlace {
+			out.Notes = append(out.Notes, keep.restore(p)...)
 		}
 		p.Fixed = true
 		out.Edge[e.Ref] = e
@@ -267,6 +288,35 @@ func ApplyMech(b *Board, m *MechSpec) (*Mechanics, error) {
 		}
 	}
 	return out, nil
+}
+
+// partPose is a part's measured pose, pad copper included (restoring through
+// MoveTo would re-derive the pads and add float noise).
+type partPose struct {
+	pos  Point
+	rot  float64
+	pads []OrientedBox
+}
+
+func savePose(p *Part) partPose {
+	ps := partPose{pos: p.Pos, rot: p.Rotation}
+	for _, pd := range p.Pads {
+		ps.pads = append(ps.pads, pd.Box)
+	}
+	return ps
+}
+
+// restore puts the saved pose back and notes how far the spec moved it.
+func (ps partPose) restore(p *Part) []string {
+	var notes []string
+	if d := p.Pos.Dist(ps.pos); d > 0.5 || math.Abs(normDeg(p.Rotation)-normDeg(ps.rot)) > 1e-6 {
+		notes = append(notes, fmt.Sprintf("%s: mech spec would move it %.1f mil / rotate to %g° — kept at its measured pose (route-only; use --place to apply)", p.Ref, d, p.Rotation))
+	}
+	p.Pos, p.Rotation = ps.pos, ps.rot
+	for i, pd := range p.Pads {
+		pd.Box = ps.pads[i]
+	}
+	return notes
 }
 
 // reAntennaModule matches modules with an integrated PCB antenna at one end
