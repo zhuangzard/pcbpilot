@@ -1,6 +1,32 @@
 # Changelog
 
-## [Unreleased]
+## [0.3.0] — 2026-09-25
+
+Requires re-importing the connector (0.3.0) together with the matching CLI/daemon.
+
+- **Daemon login service is required**: `pcbpilot daemon service install|status|uninstall`
+  (macOS launchd, Linux systemd --user, Windows HKCU Run). `setup-agent.sh`, `install.sh`
+  and `install.ps1` install it and the post-install verify fails without it (`--no-service`
+  removed). `launchctl bootstrap` retries launchd's asynchronous bootout.
+- Fresh-agent E2E (esp32MiniRequire §1, desktop V3) findings, all fixed and live-verified:
+  footprint NPTH/slot regions (USB-C locating holes) are modelled from `pcb.footprint.sources`
+  and checked by `pcb check` (`footprint-hole-clearance`); `pcb auto run` retries high-speed
+  nets with skew/plane-split/via findings on finer grids (ESP32 mini 78 → 92); a route-only run
+  with `--mech` writes only mechanics the board lacks; MicroFix moves vias and shifts along
+  the true normal; mounting-hole blocking keeps the full clearance; plane fan-out failures
+  retry nearby sites and the headline reports signal and plane connections separately;
+  `pcb silk-align` converges on read-back bboxes (the connector no longer scores a label
+  collision as clean) and `pcb check` adds `silk-overlap`; ESD parts no longer get a plug
+  envelope and named differential pairs are exempt from the 3W rule; `sch gate` by project
+  name finds the UUID-keyed module groups; multi-page compose saves before the gate and defers
+  unmatched cross-page ports; `sch sheet-geometry` reports the inner border (Blade Width,
+  pixel-verified 10 raw on A4); `audit cost` uses local time by default.
+- `pcbpilot sch groups`: schematic module frames → PCB placement groups for any schematic
+  (new read-only `schematic.rectangles.list`). `pcb auto run --refine --only <refs>` adjusts
+  named parts on a confirmed layout; placement-only plans keep the live stackup. Experimental
+  two-stage macro placement is opt-in (`--macro`; lost the 8-board A/B on 7).
+- `project.export` archives larger than 1 MiB no longer fail ("unexpected end of JSON input").
+- Standard parts: `led.red_0805` (C2296 KT-0805Y) is yellow — corrected, red alternative noted.
 
 - New read-only `pcb.footprint.sources` (per-instance footprint source of the
   active PCB, epro2 fallback keeps every FOOTPRINT row) and
@@ -56,7 +82,6 @@
   poured nets' single-layer vias, via-in-pad by real copper. `pcb pour-fit
   --replace` is layer-scoped. `pcb dump` adds `contentSha256` (stable across
   pour re-materialisation). ESP32 E2E routed live: native DRC clean.
-- Requires re-importing the connector (0.2.8).
 
 - New read-only `schematic.components.count` / `pcb.components.count` (primitive
   ids only): the CLI's post-switch load-settle loop polls these instead of the

@@ -3,7 +3,7 @@
 	"uuid": "bcd81ca73a874142a2d2b6c1f195d083",
 	"displayName": "PCB Pilot Connector",
 	"description": "Bridges the local agent daemon to the official eda.* API over a local WebSocket, dispatching typed schematic and PCB actions.",
-	"version": "0.2.10",
+	"version": "0.3.0",
 	"publisher": "zhuangzard",
 	"engines": {
 		"eda": "~3.2.0"
