@@ -119,8 +119,21 @@ func isBoardConnector(c boardComp) bool {
 	if nonConnectorDesRe.MatchString(des) {
 		return false
 	}
+	// U* 等位号只能靠器件名：名字撞了 usb/sma 的保护件或 USB 接口 IC 不是插座。
+	// 保护件判据复用 isProtectionPart（layout-score protection 维同一口径，不另起一套）。
+	if isProtectionPart(c) || usbInterfaceICRe.MatchString(c.Device) {
+		return false
+	}
 	return c.Device != "" && cpReEdgeConn.MatchString(c.Device)
 }
+
+// usbInterfaceICRe 是「器件名含 usb、实际是接口 IC」的型号族：Microchip USB2514/
+// USB3300 这类 USB+数字 的 hub/PHY、TI TUSB、onsemi FSUSB 模拟开关。
+//
+// 2026-09-25 ceshi E2E：U2 = USBLC6-2SC6（SOT-23-6 USB ESD 阵列）位号是 U，躲过
+// nonConnectorDesRe，名字含 "usb" 命中 cpReEdgeConn，于是拿 bbox+2mm 兜底包络报了
+// 「J2 ↔ U2 插头打架」。USBLC 由 isProtectionPart 排除；这里补非保护类的 USB IC。
+var usbInterfaceICRe = regexp.MustCompile(`(?i)^usb\d{3,}|\btusb\d|fsusb\d`)
 
 // nonConnectorDesRe 是「位号已表明它不是连接器」的前缀集：无源件、分立半导体、
 // 保护件、晶体、测试点、安装孔。后面必须跟数字或下划线，所以 `TVS_VBUS`、`ESD1`、

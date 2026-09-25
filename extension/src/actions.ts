@@ -8581,7 +8581,7 @@ export const pcbStackupSet: Handler = async (payload) => {
 // pcb_PrimitiveAttribute.getAllPrimitiveId(componentId) + .modify(id,{x,y}); no
 // per-designator-position setter exists on the component itself. Verified live: R2's
 // designator moved exactly to the requested (x,y).
-type silkRect = { minX: number; minY: number; maxX: number; maxY: number };
+export type silkRect = { minX: number; minY: number; maxX: number; maxY: number };
 type silkItem = {
 	cid: string; desig: string; cb: silkRect; attrId: string;
 	w: number; h: number; offx: number; offy: number;
@@ -8592,7 +8592,54 @@ function silkOverlap(a: silkRect, b: silkRect, m: number): boolean {
 }
 
 // ── silk-align geometry helpers (module scope) ──
-type silkObs = { rect: silkRect; kind: string; owner: string; m: number };
+export type silkObs = { rect: silkRect; kind: string; owner: string; m: number };
+// A designator label already on the board (placed this pass, or still at its
+// old spot), keyed by attribute id; desig names the other side of a collision.
+export type silkLabelBox = { rect: silkRect; desig: string };
+export type silkSlotScore = {
+	cost: number; padH: number; ownPadH: number; off: number; khard: number;
+	ksoft: number; lab: number; labWith: string[]; oBody: number;
+};
+const SILK_CLABEL = 6;
+// silkScoreSlot is the pure cost model of one candidate label rect L. It keeps
+// every violation as a COUNT next to the cost: the tie-break terms (side rank,
+// clearance reward) used to be summed into the same number the callers compared
+// against 1e4, and the clearance reward is negative — a slot in open space that
+// overlapped exactly one other label cost 1e4 - 25 and passed as "clean". The
+// 2026-09-25 ceshi run placed C2/C3 (and 6 more pairs) on top of each other and
+// reported 0 unresolved that way.
+export function silkScoreSlot(
+	L: silkRect, self: { cid: string; attrId: string }, obs: silkObs[],
+	lab: Record<string, silkLabelBox>, safeArea: silkRect | null, rank: number,
+): silkSlotScore {
+	let padH = 0, ownPadH = 0, off = 0, khard = 0, labN = 0, oBody = 0, ksoft = 0, minClr = Infinity;
+	const labWith: string[] = [];
+	if (safeArea && !silkInside(L, safeArea)) off = 1;
+	for (const o of obs) {
+		if (o.kind === 'PAD') { if (o.owner !== self.cid) { if (silkOverlap(L, o.rect, 0)) padH++; } else if (silkOverlap(L, o.rect, 0)) ownPadH++; }
+		else if (o.kind === 'BODY') { if (o.owner !== self.cid && silkOverlap(L, o.rect, o.m)) oBody++; }
+		else if (o.kind === 'REGION_H') { if (silkOverlap(L, o.rect, o.m)) khard++; }
+		else if (o.kind === 'REGION_S') { if (silkOverlap(L, o.rect, o.m)) ksoft++; }
+		else if (o.kind === 'FROZEN') { if (silkOverlap(L, o.rect, o.m)) { labN++; if (o.owner) labWith.push(o.owner); } }
+		if (o.kind === 'BODY' && o.owner === self.cid) continue;
+		const g = silkGap(L, o.rect); if (g < minClr) minClr = g;
+	}
+	for (const [id, lb] of Object.entries(lab)) {
+		if (id !== self.attrId && silkOverlap(L, lb.rect, SILK_CLABEL)) { labN++; labWith.push(lb.desig); }
+	}
+	// tie-break only, bounded to [0, 25 + 25·rank] so it can never cross a
+	// violation weight.
+	const tie = 25 * (1 - Math.min(minClr, 30) / 30) + rank * 25;
+	const cost = 1e9 * padH + 1e8 * off + 1e6 * khard + 1e4 * labN + 5e3 * oBody + 4e3 * ownPadH + 100 * ksoft + tie;
+	return { cost, padH, ownPadH, off, khard, ksoft, lab: labN, labWith, oBody };
+}
+// silkSlotClean: no copper, board-edge, hard keep-out, or label collision, and
+// the soft terms (other bodies, own-pad crowding, soft keep-out) inside the
+// budget the ladder always accepted. Judged on the counts, never on the cost.
+export function silkSlotClean(s: silkSlotScore): boolean {
+	return s.padH === 0 && s.off === 0 && s.khard === 0 && s.lab === 0
+		&& 5e3 * s.oBody + 4e3 * s.ownPadH + 100 * s.ksoft < 1e4;
+}
 const silkCenter = (r: silkRect) => ({ x: (r.minX + r.maxX) / 2, y: (r.minY + r.maxY) / 2 });
 const silkInflate = (r: silkRect, m: number): silkRect => ({ minX: r.minX - m, minY: r.minY - m, maxX: r.maxX + m, maxY: r.maxY + m });
 const silkUnion = (a: silkRect, b: silkRect): silkRect => ({ minX: Math.min(a.minX, b.minX), minY: Math.min(a.minY, b.minY), maxX: Math.max(a.maxX, b.maxX), maxY: Math.max(a.maxY, b.maxY) });
@@ -8650,7 +8697,7 @@ const pcbSilkAlign: Handler = async (payload) => {
 	const spacing = optionalNumber(payload, 'spacing') ?? 1.5;
 	const baseOffset = (optionalNumber(payload, 'offset') ?? 15) * spacing;
 
-	const Cpad = 12, Cedge = 15, Cregion = 6, Clabel = 6, Cbody = 6, HALO = 2, Cassembly = 10;
+	const Cpad = 12, Cedge = 15, Cregion = 6, Clabel = SILK_CLABEL, Cbody = 6, HALO = 2, Cassembly = 10;
 	const STEP = 22, R_MAX = 6, MAX_SCAN = 200, GAP_CAP = 120;
 
 	let comps;
@@ -8703,10 +8750,10 @@ const pcbSilkAlign: Handler = async (payload) => {
 	}
 
 	// ── build items (in-scope designators) + seed placed-label boxes; freeze the rest ──
-	type Item = { c: typeof comps[number]; cid: string; desig: string; attrId: string; cb: silkRect; w: number; h: number; offx: number; offy: number; layer: number; curLayer: number; curMirror: boolean };
+	type Item = { c: typeof comps[number]; cid: string; desig: string; attrId: string; cb: silkRect; db: silkRect; w: number; h: number; offx: number; offy: number; layer: number; curLayer: number; curMirror: boolean };
 	const items: Item[] = [];
 	const skipped: Array<Record<string, unknown>> = [];
-	const LAB: Record<string, silkRect> = {};
+	const LAB: Record<string, silkLabelBox> = {};
 	for (const c of comps) {
 		const cid = c.getState_PrimitiveId();
 		const desig = c.getState_Designator?.() ?? '';
@@ -8726,7 +8773,7 @@ const pcbSilkAlign: Handler = async (payload) => {
 		let db = await bbox1(attrId);
 		if (!a || !db) { skipped.push({ designator: desig, reason: 'designator attribute not readable' }); continue; }
 		// out-of-scope designators are frozen obstacles (still block in-scope placement).
-		if (refs && !refs.includes(desig)) { OBS.push({ rect: db, kind: 'FROZEN', owner: '', m: Clabel }); continue; }
+		if (refs && !refs.includes(desig)) { OBS.push({ rect: db, kind: 'FROZEN', owner: desig, m: Clabel }); continue; }
 		// The label is placed upright (rotation 0). Measure it upright: a
 		// sideways/upside-down label has other extents and another anchor
 		// offset, and planning with them landed 14 of 30 ESP32 designators on
@@ -8742,11 +8789,12 @@ const pcbSilkAlign: Handler = async (payload) => {
 		const ax = a.getState_X() ?? 0, ay = a.getState_Y() ?? 0;
 		const bc = silkCenter(db);
 		items.push({
-			c, cid, desig, attrId, cb, w: db.maxX - db.minX, h: db.maxY - db.minY,
+			c, cid, desig, attrId, cb, db, w: db.maxX - db.minX, h: db.maxY - db.minY,
 			offx: bc.x - ax, offy: bc.y - ay, layer: Number(c.getState_Layer?.() ?? 1),
 			curLayer: Number(a.getState_Layer?.() ?? 3), curMirror: !!a.getState_Mirror?.(),
 		});
-		LAB[attrId] = db;
+		// Not seeded into LAB: an in-scope label's current spot is about to be
+		// vacated, so it only becomes an obstacle once placed (or left in place).
 	}
 
 	// ── most-constrained-first order (MRV): fewest free sides / closest to edge first ──
@@ -8812,25 +8860,9 @@ const pcbSilkAlign: Handler = async (payload) => {
 		return scored.map(s => s.dir).concat(diags);
 	};
 
-	const scoreSlot = (L: silkRect, it: Item, rank: number): number => {
-		let padH = 0, ownPadH = 0, off = 0, khard = 0, lab = 0, oBody = 0, ksoft = 0, minClr = Infinity;
-		if (safeArea && !silkInside(L, safeArea)) off = 1;
-		for (const o of OBS) {
-			if (o.kind === 'PAD') { if (o.owner !== it.cid) { if (silkOverlap(L, o.rect, 0)) padH++; } else if (silkOverlap(L, o.rect, 0)) ownPadH++; }
-			else if (o.kind === 'BODY') { if (o.owner !== it.cid && silkOverlap(L, o.rect, o.m)) oBody++; }
-			else if (o.kind === 'REGION_H') { if (silkOverlap(L, o.rect, o.m)) khard++; }
-			else if (o.kind === 'REGION_S') { if (silkOverlap(L, o.rect, o.m)) ksoft++; }
-			else if (o.kind === 'FROZEN') { if (silkOverlap(L, o.rect, o.m)) lab++; }
-			if (o.kind === 'BODY' && o.owner === it.cid) continue;
-			const g = silkGap(L, o.rect); if (g < minClr) minClr = g;
-		}
-		for (const [id, lb] of Object.entries(LAB)) { if (id !== it.attrId && silkOverlap(L, lb, Clabel)) lab++; }
-		const reward = -25 * Math.min(minClr, 30) / 30;
-		return 1e9 * padH + 1e8 * off + 1e6 * khard + 4e3 * ownPadH + 1e4 * lab + 5e3 * oBody + 100 * ksoft + rank * 25 + reward;
-	};
-
 	const aligned: Array<Record<string, unknown>> = [];
 	const unresolved: Array<Record<string, unknown>> = [];
+	const labelCollisions: Array<{ designator: string; with: string[] }> = [];
 	for (const it of items) {
 		const cc = silkCenter(it.cb);
 		// offset from the body inflated by the assembly-clearance floor, so the label
@@ -8838,21 +8870,23 @@ const pcbSilkAlign: Handler = async (payload) => {
 		const cbP = silkInflate(it.cb, Cassembly);
 		const hw = (cbP.maxX - cbP.minX) / 2, hh = (cbP.maxY - cbP.minY) / 2;
 		const pref = rankSides(it);
-		let best: { lx: number; ly: number; L: silkRect; cost: number } | null = null;
-		for (let ring = 0; ring < R_MAX && !(best && best.cost < 1e4); ring++) {
+		let best: { lx: number; ly: number; L: silkRect; sc: silkSlotScore; dir: number[] } | null = null;
+		for (let ring = 0; ring < R_MAX && !(best && silkSlotClean(best.sc)); ring++) {
 			const d = baseOffset + ring * STEP;
 			for (let i = 0; i < pref.length; i++) {
 				const [dx, dy] = pref[i];
 				const lx = cc.x + dx * (hw + d + it.w / 2);
 				const ly = cc.y + dy * (hh + d + it.h / 2);
 				const L = silkInflate({ minX: lx - it.w / 2, minY: ly - it.h / 2, maxX: lx + it.w / 2, maxY: ly + it.h / 2 }, HALO);
-				const cost = scoreSlot(L, it, i < 4 ? i : 3);
-				if (!best || cost < best.cost) best = { lx, ly, L, cost };
-				if (cost < 1e4) break;
+				const sc = silkScoreSlot(L, it, OBS, LAB, safeArea, i < 4 ? i : 3);
+				if (!best || sc.cost < best.sc.cost) best = { lx, ly, L, sc, dir: pref[i] };
+				if (silkSlotClean(sc)) break;
 			}
 		}
-		if (!best || best.cost >= 1e8) {
-			unresolved.push({ designator: it.desig, reason: best && best.cost >= 1e9 ? 'pad-collision' : 'boxed-in-or-off-board', bestCost: best ? best.cost : null });
+		if (!best || best.sc.padH > 0 || best.sc.off > 0) {
+			unresolved.push({ designator: it.desig, reason: best && best.sc.padH > 0 ? 'pad-collision' : 'boxed-in-or-off-board', bestCost: best ? best.sc.cost : null });
+			// left where it is: from now on its current box is an obstacle.
+			LAB[it.attrId] = { rect: it.db, desig: it.desig };
 			continue;
 		}
 		const layer = it.layer === 2 ? 4 : 3, mirror = it.layer === 2;
@@ -8866,14 +8900,22 @@ const pcbSilkAlign: Handler = async (payload) => {
 				if ('mirror' in mod || 'layer' in mod) { delete mod.mirror; delete mod.layer; r = await eda.pcb_PrimitiveAttribute.modify(it.attrId, mod as never); }
 				else throw e;
 			}
-			LAB[it.attrId] = best.L;
-			aligned.push({ designator: it.desig, x: Math.round(best.lx * 100) / 100, y: Math.round(best.ly * 100) / 100, side: pref[0], clean: best.cost < 1e4, warnBodyOverlap: best.cost >= 5e3 && best.cost < 1e4, ok: !!r });
+			LAB[it.attrId] = { rect: best.L, desig: it.desig };
+			const clean = silkSlotClean(best.sc);
+			// A label that only found overlapping slots is still moved to the least
+			// bad one, but it is NOT clean: it is listed in labelCollisions so the
+			// caller (the CLI convergence loop) re-aligns it against the readback.
+			if (best.sc.lab > 0) labelCollisions.push({ designator: it.desig, with: best.sc.labWith });
+			aligned.push({ designator: it.desig, x: Math.round(best.lx * 100) / 100, y: Math.round(best.ly * 100) / 100, side: best.dir, clean, labelOverlap: best.sc.lab, warnBodyOverlap: best.sc.oBody > 0, ok: !!r });
 		}
-		catch (err) { skipped.push({ designator: it.desig, reason: `modify failed: ${String(err)}` }); }
+		catch (err) {
+			skipped.push({ designator: it.desig, reason: `modify failed: ${String(err)}` });
+			LAB[it.attrId] = { rect: it.db, desig: it.desig };
+		}
 	}
 
 	const warned = aligned.filter(a => a.warnBodyOverlap === true).length;
-	return { result: { aligned: aligned.length, warned, unresolved: unresolved.length, skipped: skipped.length, details: aligned, unresolvedDetails: unresolved, skippedDetails: skipped } };
+	return { result: { aligned: aligned.length, warned, unresolved: unresolved.length, labelCollisions: labelCollisions.length, skipped: skipped.length, details: aligned, unresolvedDetails: unresolved, labelCollisionDetails: labelCollisions, skippedDetails: skipped } };
 };
 
 // pcb.silk.list — enumerate every SILKSCREEN TEXT primitive with its layer +

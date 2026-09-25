@@ -441,6 +441,8 @@ finding 报文自带 `[约定 §N …]` 回指本文件对应小节，所以「�
 
 - **§9.4「文字 bbox 距本体 ≤50mil、不压 pad/铜/相邻本体」** —— 不在 tidy 维；压焊盘那条由
   `pcb check` 的 **silk-over-pad** 管（那是可制造性问题，不是观感问题）。
+- **位号互压**（两个可见位号的真实 bbox 相交）—— 由 `pcb check` 的 **silk-overlap**（WARN）管；
+  `pcb silk-align` 的结论以回读为准（`converged` / `unresolvedPairs`），不以 connector 自报的 `clean` 为准。
 - **§9.4「designator 朝向只取 0°/90°，禁 180/270 倒读」** —— 由 `pcb check` 的
   **silkscreen-flipped** 管（ERROR/WARN 级），不由 tidy 维重复报。
 - **§9.4.1 引脚级/极性丝印、装配后不被遮** —— 需要"零件塑料罩投影"这类三维信息，机械判不了，

@@ -4270,25 +4270,37 @@ with 'pcb outline-get'; its rendered bbox includes the stroke. Run BEFORE pour/r
 	// ── silk-align (丝印/位号对齐) ──────────────────────────────────────────
 	// pcb.silk.align — reposition each designator to a consistent spot above/below
 	// its footprint. Designators are component-bound attributes (pcb_PrimitiveAttribute).
+	// The CLI judges the result on the READBACK (pcb.silk.list real bboxes) and
+	// re-aligns still-overlapping labels with everything else frozen, --rounds times.
 	{
 		var offset, spacing float64
 		var side string
 		var refs []string
+		var rounds int
 		c := &cobra.Command{
 			Use:   "silk-align",
-			Short: "Align component designators (位号) with collision avoidance (no overlaps)",
+			Short: "Align component designators (位号) with collision avoidance, verified on the readback",
 			Long: `Reposition every component's DESIGNATOR silkscreen with COLLISION AVOIDANCE: for
 each label it searches candidate slots around the footprint (preferred --side first,
 then the other directions, at increasing distance) and takes the first that hits no
-other component body and no already-placed label — so dense-cluster designators get
+pad, board edge, hard keep-out or other label — so dense-cluster designators get
 pushed into open space instead of piling on top of each other. --side (top|bottom|
 left|right) biases the search, --offset is the base gap, --refs limits to specific
-parts. Reports unresolvedCollisions (still-overlapping labels ⇒ the layout is too
-dense — loosen placement). Verify with 'pcb snapshot'.`,
+parts (all others are frozen obstacles).
+
+Convergence loop (--rounds, default 3): after each pass the CLI reads the REAL
+rendered silk boxes back (pcb.silk.list) and re-aligns only the designators that
+still overlap another visible designator, with every other label fixed. The verdict
+— converged / unresolvedPairs — comes from that readback, never from the connector's
+own planning model (2026-09-25: the planner reported 0 unresolved while 7 pairs
+overlapped). unresolvedPairs left after the last round mean the area is too dense
+for the label size: loosen placement, or place them with 'pcb silk-set'. Confirm
+with 'pcb check' (silk-overlap / silk-over-pad).`,
 			Args: cobra.NoArgs,
 			Example: `  pcbpilot pcb silk-align
   pcbpilot pcb silk-align --side bottom --offset 15
-  pcbpilot pcb silk-align --refs U1 --refs LED1`,
+  pcbpilot pcb silk-align --refs U1 --refs LED1
+  pcbpilot pcb silk-align --rounds 1          # single pass, still judged on the readback`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				payload := map[string]any{}
 				if cmd.Flags().Changed("offset") {
@@ -4297,19 +4309,38 @@ dense — loosen placement). Verify with 'pcb snapshot'.`,
 				if side != "" {
 					payload["side"] = side
 				}
-				if len(refs) > 0 {
-					payload["refs"] = refs
-				}
 				if cmd.Flags().Changed("spacing") {
 					payload["spacing"] = spacing
 				}
-				return dispatch(cfg, "pcb.silk.align", window, payload, stdout, stderr)
+				act := func(action string, p map[string]any) (map[string]any, error) {
+					var body any
+					if p != nil {
+						body = p
+					}
+					res, err := requestAction(cfg, action, window, body)
+					if err != nil {
+						return nil, err
+					}
+					return res.Result, nil
+				}
+				rep, err := runSilkAlignConverge(act, payload, refs, rounds)
+				if err != nil {
+					return err
+				}
+				if err := writeJSON(stdout, rep); err != nil {
+					return err
+				}
+				if !rep.Converged {
+					fmt.Fprintf(stderr, "WARN silk-align: %s\n", rep.Note)
+				}
+				return nil
 			},
 		}
 		c.Flags().Float64Var(&offset, "offset", 15, "base distance from the footprint edge (mil); ×spacing")
 		c.Flags().Float64Var(&spacing, "spacing", 1.5, "spacing coefficient — scales the label drift for assembly/solder room (bigger = further out)")
 		c.Flags().StringVar(&side, "side", "", "bias which side of the footprint: top|bottom|left|right (soft hint)")
 		c.Flags().StringArrayVar(&refs, "refs", nil, "limit to these designators (repeatable); default = all")
+		c.Flags().IntVar(&rounds, "rounds", 3, "max align passes; after each, still-overlapping designators (real readback bboxes) are re-aligned with all others frozen")
 		pcb.AddCommand(c)
 	}
 

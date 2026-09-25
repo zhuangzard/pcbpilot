@@ -59,7 +59,7 @@
 
 | 能力 | 命令 | 说明 |
 |---|---|---|
-| 位号避让重排 | `pcb silk-align` | 位置感知:4 方向打分避开焊盘/器件体/禁区/板框/其它标签;挤死的如实报告 |
+| 位号避让重排 | `pcb silk-align` | 位置感知:4 方向打分避开焊盘/器件体/禁区/板框/其它标签;按 `pcb.silk.list` 真实 bbox 回读收敛(`--rounds`,只重排仍互压的位号),`unresolvedPairs` 以回读为准 |
 | 自由丝印 | `pcb silk-add` / `silk-set` | 板注/极性标记,层/字号/线宽/旋转/`--font-family` 可配并回读实际字体；`--align --ref` 对齐参考 |
 | 矢量图形 | `pcb silk-import-svg` | SVG(logo/品牌)转填充丝印图元,dry-run 预览 |
 

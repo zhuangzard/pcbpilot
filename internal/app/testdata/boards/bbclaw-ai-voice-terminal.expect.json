@@ -5,7 +5,8 @@
   "来源:用户自己的开源发布设计(2026-08-10 真机 dump,真多边形板框)。",
   "中等密度双面板锚点:0 blocking + clearance/compact 双满分,五轮校准全程分数纹丝不动 ——",
   "它是「修正不误杀正常板」的哨兵,任何让它掉分的度量改动都要先怀疑改动本身。",
-  "实测:overall 67.7,tidy 85/edge-io 80/rf 100。maxBlocking=0。"
+  "实测:overall 67.7,tidy 85/edge-io 80/rf 100。maxBlocking=0。",
+  "2026-09-25:这块板没有任何连接器(快照里 J*/USB*/CN* 位号均无)。edge-io 过去能算分,是因为 U10=USBLC6-2SC6(USB ESD 阵列)名字含 usb 被误判成连接器;修正后 edge-io 无对象,诚实地 skipped(「没测≠满分」),故从 requireScored/minDimension 挪进 expectSkipped。"
  ],
  "noSpec": true,
  "minOverall": 58,
@@ -13,7 +14,6 @@
  "minDimension": {
   "clearance": 90,
   "compact": 90,
-  "edge-io": 70,
   "partition": 27,
   "protection": 23,
   "rf": 90,
@@ -22,7 +22,6 @@
  },
  "requireScored": [
   "partition",
-  "edge-io",
   "protection",
   "tidy",
   "compact",
@@ -31,6 +30,7 @@
   "clearance"
  ],
  "expectSkipped": [
-  "flow-order"
+  "flow-order",
+  "edge-io"
  ]
 }

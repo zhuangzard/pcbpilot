@@ -31,6 +31,8 @@ import {
 	selectBoardOutlineSources,
 	serializeComponent,
 	serializePcbPad,
+	silkScoreSlot,
+	silkSlotClean,
 	summarizeActivePageConnectivity,
 } from './actions';
 
@@ -4027,4 +4029,30 @@ test('pcbPageClear: --only copper keeps MULTI-layer hole fills; regions scope re
 	await pcbPageClear({ only: 'regions' });
 	assert.deepEqual(s.deleted.fills ?? [], ['m3-hole']);
 	delete (globalThis as any).eda;
+});
+
+test('silk-align slot score: one label overlap in open space is never clean (ceshi 2026-09-25 C2/C3)', () => {
+	// Live readback: C2 [563.3,539.8,616.5,584.8] and C3 [541.4,539.1,594.6,584.1]
+	// were both reported clean. The old cost summed a NEGATIVE clearance reward
+	// into the number compared against 1e4, so 1 label overlap scored 9975.
+	const halo = 2;
+	const box = (cx: number, cy: number) => ({ minX: cx - 26.6 - halo, minY: cy - 22.5 - halo, maxX: cx + 26.6 + halo, maxY: cy + 22.5 + halo });
+	const lab = { attrC2: { rect: box(589.89, 562.33), desig: 'C2' } };
+	const sc = silkScoreSlot(box(567.95, 561.59), { cid: 'c3', attrId: 'attrC3' }, [], lab, null, 0);
+	assert.equal(sc.lab, 1);
+	assert.deepEqual(sc.labWith, ['C2']);
+	assert.ok(sc.cost >= 1e4, `cost ${sc.cost} must not undercut the label weight`);
+	assert.equal(silkSlotClean(sc), false);
+
+	// a frozen (out-of-scope) designator names itself too
+	const frozen = [{ rect: box(589.89, 562.33), kind: 'FROZEN', owner: 'C2', m: 6 }];
+	const sf = silkScoreSlot(box(567.95, 561.59), { cid: 'c3', attrId: 'attrC3' }, frozen, {}, null, 0);
+	assert.deepEqual(sf.labWith, ['C2']);
+	assert.equal(silkSlotClean(sf), false);
+
+	// the same label far from C2 is clean; its own label entry never counts
+	const far = silkScoreSlot(box(567.95, 400), { cid: 'c3', attrId: 'attrC3' }, [], { ...lab, attrC3: { rect: box(567.95, 400), desig: 'C3' } }, null, 3);
+	assert.equal(far.lab, 0);
+	assert.equal(silkSlotClean(far), true);
+	assert.ok(far.cost >= 0 && far.cost <= 100, `tie-break stays in [0,100], got ${far.cost}`);
 });
