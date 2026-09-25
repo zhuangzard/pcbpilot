@@ -62,6 +62,15 @@ const (
 // -lateral..lateral, 5-raw steps.
 var annealSlotReach, annealSlotLateral = 120.0, 60.0
 
+// annealLabelCost / annealOrderCost: boundary-labelling and river-routing cost
+// terms. OFF by default - stress L1 (six affected zones, min budget):
+//   label: LCD 200k->20k, MICRO_SD 800k->50k, ESP32-V3 MCU 800k->200k, but
+//          CAN 20k->200k, ESP32-V4 MCU 200k->800k, AT32 MCU 200k->unsolved;
+//   order: no gains, CAN 20k->200k.
+// A global label term helps label-dense attachments and hurts the rest; it is
+// kept for the staged solver, which applies it only to the dense stage.
+var annealLabelCost, annealOrderCost = false, false
+
 // annealFinishAttemptCap bounds one terminal-gate attempt of the annealer.
 var annealFinishAttemptCap = 25000
 
@@ -102,6 +111,7 @@ type annealSolver struct {
 	allowed   map[string][]float64
 	refs      map[string]string // designator → component id
 	roles     map[string]string // peripheral-direct net roles
+	netPins   map[string]int    // net → connected pins in this zone
 	evals     int
 }
 
@@ -110,7 +120,13 @@ func solveSchematicLayoutAnneal(input SchematicLayoutInput, measured map[string]
 	core = plTranslate(core, -core.X, -core.Y)
 	s := &annealSolver{input: input, core: core, policies: input.NetPolicies, budget: budget, leadBoost: map[string]float64{}, netWeight: map[string]float64{}, allowed: map[string][]float64{}}
 	s.refs = map[string]string{}
+	s.netPins = map[string]int{}
 	for _, c := range input.Components {
+		for _, q := range c.Measurement.Pins {
+			if q.Net != "" {
+				s.netPins[q.Net]++
+			}
+		}
 		s.allowed[c.ID] = c.AllowedRotations
 		s.refs[c.Measurement.Designator] = c.ID
 	}
@@ -408,10 +424,6 @@ func (s *annealSolver) cost(st annealState) (float64, bool) {
 			}
 		}
 	}
-	// Facing: an attached pin should exit towards its host pin; otherwise the
-	// wire has to wrap round the part's own body, which is what exhausts the
-	// terminal router.
-	facing := 0.0
 	at := map[string]powerLayoutPlacement{}
 	for i, c := range p.Placements {
 		if i == 0 {
@@ -420,6 +432,87 @@ func (s *annealSolver) cost(st annealState) (float64, bool) {
 		}
 		at[s.parts[i-1].id] = c
 	}
+	// Labels (boundary labelling): a pin whose net has no other pin in this
+	// zone must be named at that pin, so its port/flag body beyond the lead is
+	// as real an obstacle as a part. Nets shared inside the zone can be named
+	// anywhere on their tree and reserve nothing here.
+	labelHits := 0.0
+	if annealLabelCost {
+		for i, c := range p.Placements {
+			for _, pin := range c.Pins {
+				if pin.Net == "" || s.netPins[pin.Net] > 1 {
+					continue
+				}
+				kind := ""
+				switch s.policies[pin.Net] {
+				case "module_port":
+					kind = "net_port_bi"
+				case "local_ground":
+					kind = "ground"
+				case "local_power":
+					kind = "power"
+				default:
+					continue
+				}
+				side, err := libPinSide(pin, c.BBox)
+				if err != nil {
+					continue
+				}
+				ux, uy := annealDir(side)
+				l := 35 + s.leadBoost[c.Designator+"."+pin.Number]
+				label := predictedMarkerBBox(pin.X+ux*l, pin.Y+uy*l, kind, side, pin.Net)
+				for j, rs := range rects {
+					if j == i {
+						continue
+					}
+					for _, r := range rs {
+						labelHits += annealOverlap(label, r)
+					}
+				}
+			}
+		}
+	}
+	// River routing: a peripheral wired to two or more pins on one side of its
+	// host must keep their order along that side, or the wires must cross.
+	crossed := 0.0
+	if annealOrderCost {
+		for i, part := range s.parts[:len(p.Placements)-1] {
+			c := p.Placements[i+1]
+			host := at[part.hostID]
+			type pair struct{ h, o powerLayoutPin }
+			bySide := map[string][]pair{}
+			for _, op := range c.Pins {
+				if op.Net == "" || s.policies[op.Net] == "local_ground" || s.policies[op.Net] == "local_power" {
+					continue
+				}
+				for _, hp := range host.Pins {
+					if hp.Net == op.Net {
+						if side, err := libPinSide(hp, host.BBox); err == nil {
+							bySide[side] = append(bySide[side], pair{hp, op})
+						}
+					}
+				}
+			}
+			for side, ps := range bySide {
+				vertical := side == "left" || side == "right"
+				for a := 0; a < len(ps); a++ {
+					for b := a + 1; b < len(ps); b++ {
+						dh, do := ps[a].h.X-ps[b].h.X, ps[a].o.X-ps[b].o.X
+						if vertical {
+							dh, do = ps[a].h.Y-ps[b].h.Y, ps[a].o.Y-ps[b].o.Y
+						}
+						if dh*do < 0 {
+							crossed++
+						}
+					}
+				}
+			}
+		}
+	}
+	// Facing: an attached pin should exit towards its host pin; otherwise the
+	// wire has to wrap round the part's own body, which is what exhausts the
+	// terminal router.
+	facing := 0.0
 	for i, part := range s.parts[:len(p.Placements)-1] {
 		c := p.Placements[i+1]
 		op, _ := libPin(c, part.ownPin)
@@ -469,7 +562,7 @@ func (s *annealSolver) cost(st annealState) (float64, bool) {
 		env.MaxX, env.MaxY = math.Max(env.MaxX, c.BBox.MaxX), math.Max(env.MaxY, c.BBox.MaxY)
 	}
 	area := (env.MaxX - env.MinX) * (env.MaxY - env.MinY)
-	return 50*overlap + 200*blocked + 150*facing + wire + 0.002*area, overlap == 0 && blocked == 0
+	return 50*overlap + 200*blocked + 150*facing + 100*labelHits + 150*crossed + wire + 0.002*area, overlap == 0 && blocked == 0
 }
 
 // seed places parts greedily in order, each at its cheapest slot given the

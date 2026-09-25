@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"fmt"
 	"encoding/json"
 	"os"
@@ -71,6 +72,11 @@ func TestDebugRealZone(t *testing.T) {
 		fmt.Sscanf(v, "%g,%g", &r, &l)
 		annealSlotReach, annealSlotLateral = r, l
 		defer func() { annealSlotReach, annealSlotLateral = 120, 60 }()
+	}
+	if v, ok := os.LookupEnv("PCBPILOT_ANNEAL_TERMS"); ok {
+		oldL, oldO := annealLabelCost, annealOrderCost
+		annealLabelCost, annealOrderCost = strings.Contains(v, "label"), strings.Contains(v, "order")
+		defer func() { annealLabelCost, annealOrderCost = oldL, oldO }()
 	}
 	start := time.Now()
 	out, err := PlanSchematicLayout(in)
