@@ -73,7 +73,7 @@ func TestMarkHoleKeepsFullClearance(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := &Hole{C: Point{200, 200}, Dia: 126, Keep: 20}
-	gr.markHole(h)
+	gr.markHole(h, b.Rules)
 	for y := 0; y < gr.H; y++ {
 		for x := 0; x < gr.W; x++ {
 			c := gr.center(x, y)

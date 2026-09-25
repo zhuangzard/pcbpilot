@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- New read-only `pcb.footprint.sources` (per-instance footprint source of the
+  active PCB, epro2 fallback keeps every FOOTPRINT row) and
+  `pcb.components.list` now carries each part's `footprint` instance ref, so
+  `pcb dump` can model footprint NPTH/slot FILLs (USB-C locating holes) that
+  native DRC checks as "Slot Region".
 - **EasyEDA Pro V3 and V4 both supported** (host profile by version: line,
   native net labels, pin-level attributes, unset-style reads). Verified on the
   desktop V3 3.2.149 and pro.easyeda.com. V3 net labels are written as the

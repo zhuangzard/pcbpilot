@@ -196,9 +196,9 @@ func frameFault(b *Board, pr *PlaceResult) string {
 		return fmt.Sprintf("%d keepout hits", m.KeepoutHits)
 	}
 	for _, h := range b.Holes {
-		hr := Rect{h.C.X, h.C.Y, h.C.X, h.C.Y}.Expand(h.Dia/2 + h.Keep)
+		hr := h.Bounds().Expand(h.Keep)
 		for _, p := range b.Parts {
-			if p.Body().OverlapArea(hr) > 1 {
+			if p.Ref != h.Owner && p.Body().OverlapArea(hr) > 1 {
 				return fmt.Sprintf("%s on hole %s", p.Ref, h.Name)
 			}
 		}

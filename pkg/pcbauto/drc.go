@@ -266,13 +266,26 @@ func checkDRCTol(b *Board, an *Analysis, st *Stackup, tracks []Track, vias []Via
 		}
 		for _, h := range b.Holes {
 			var g float64
-			if it.kind == 1 {
+			switch {
+			case len(h.Poly) >= 3 && it.kind == 1:
+				d := h.SegDist(it.t.A, it.t.B)
+				g = d - it.t.Width/2
+				if d == 0 {
+					g = -1 // copper crosses the slot
+				}
+			case len(h.Poly) >= 3:
+				d := h.Dist(it.v.C)
+				g = d - it.v.Dia/2
+				if d == 0 {
+					g = -1
+				}
+			case it.kind == 1:
 				g = PointSegDist(h.C, it.t.A, it.t.B) - it.t.Width/2 - h.Dia/2
-			} else {
+			default:
 				g = h.C.Dist(it.v.C) - it.v.Dia/2 - h.Dia/2
 			}
-			if g < h.Keep+b.Rules.Clearance-0.1 {
-				rep.Violations = append(rep.Violations, Violation{Kind: "hole", NetA: it.net, Layer: it.layer, At: at, Gap: round2(g), Required: h.Keep + b.Rules.Clearance, ra: it.ref(), rb: noRef})
+			if req := h.Required(b.Rules); g < req-0.1 {
+				rep.Violations = append(rep.Violations, Violation{Kind: "hole", NetA: it.net, Layer: it.layer, At: at, Gap: round2(g), Required: round2(req), ra: it.ref(), rb: noRef})
 			}
 		}
 	}

@@ -4056,3 +4056,76 @@ test('silk-align slot score: one label overlap in open space is never clean (ces
 	assert.equal(silkSlotClean(far), true);
 	assert.ok(far.cost >= 0 && far.cost <= 100, `tie-break stays in [0,100], got ${far.cost}`);
 });
+
+// ─── pcb.footprint.sources (footprint NPTH/slot geometry, E2E 2026-09-25) ───
+import { pcbComponentsList, pcbFootprintSources } from './actions';
+
+const fpHoleSource = [
+	'{"type":"DOCHEAD","ticket":786}||{"docType":"FOOTPRINT","uuid":"10066e9574936036"}|',
+	'{"type":"FILL","ticket":42,"id":"e45"}||{"layerId":12,"path":["CIRCLE",-113.78,43.484,14.764]}|',
+	'{"type":"META","ticket":785,"id":"META"}||{"title":"USB-C","source":"823fdf8423b847ea98bae343ac5969ce|0819f05c4eef4c71ace90d822a990e87"}|',
+].join('\n') + '\n';
+
+function footprintSourcesEda(docType = 3) {
+	const calls: unknown[] = [];
+	const globals = globalThis as any;
+	globals.EDMT_EditorDocumentType = { HOME: -1, BLANK: 0, SCHEMATIC_PAGE: 1, PCB: 3 };
+	return {
+		calls,
+		dmt_Project: { getCurrentProjectInfo: async () => ({ uuid: 'project-fp-holes' }) },
+		dmt_SelectControl: { getCurrentDocumentInfo: async () => ({ uuid: '19387e123849e85a', documentType: docType }) },
+		sys_FileManager: {
+			getDocumentFootprintSources: async () => { calls.push(['getDocumentFootprintSources']); return [
+				{ footprintUuid: '10066e9574936036', documentSource: fpHoleSource },
+				{ footprintUuid: 'aaaaaaaaaaaaaaaa', documentSource: '{"type":"DOCHEAD"}||{"docType":"FOOTPRINT","uuid":"aaaaaaaaaaaaaaaa"}|\n' },
+			]; },
+		} as Record<string, any>,
+	};
+}
+
+async function withEda<T>(mock: unknown, fn: () => Promise<T>): Promise<T> {
+	(globalThis as any).eda = mock;
+	try { return await fn(); } finally { delete (globalThis as any).eda; delete (globalThis as any).EDMT_EditorDocumentType; }
+}
+
+test('pcb.footprint.sources: returns the full per-instance source, filtered by footprintUuids', async () => {
+	const mock = footprintSourcesEda();
+	const res: any = await withEda(mock, () => pcbFootprintSources({ footprintUuids: ['10066e9574936036'] }));
+	assert.equal(res.result.count, 1);
+	assert.equal(res.result.footprints[0].footprintUuid, '10066e9574936036');
+	assert.match(res.result.footprints[0].documentSource, /"layerId":12,"path":\["CIRCLE"/);
+	assert.equal(res.result.documentUuid, '19387e123849e85a');
+	const all: any = await withEda(footprintSourcesEda(), () => pcbFootprintSources({}));
+	assert.equal(all.result.count, 2);
+});
+
+test('pcb.footprint.sources: refuses a non-PCB document and a malformed filter', async () => {
+	await assert.rejects(withEda(footprintSourcesEda(1), () => pcbFootprintSources({})), /active PCB document/);
+	await assert.rejects(withEda(footprintSourcesEda(), () => pcbFootprintSources({ footprintUuids: 'x' })), /array of strings/);
+});
+
+test('pcb.footprint.sources: empty source API falls back to the epro2 archive and keeps every FOOTPRINT row', async () => {
+	const mock = footprintSourcesEda();
+	const zip = new JSZip();
+	zip.file('p.epru', fpHoleSource + '{"type":"DOCHEAD"}||{"docType":"PCB","uuid":"19387e123849e85a"}|\n{"type":"COMPONENT","id":"c1"}||{"x":1}|\n');
+	const file = new Blob([await zip.generateAsync({ type: 'arraybuffer', compression: 'DEFLATE' })]);
+	mock.sys_FileManager.getDocumentFootprintSources = async () => [];
+	mock.sys_FileManager.getProjectFile = async () => file;
+	const res: any = await withEda(mock, () => pcbFootprintSources({}));
+	assert.equal(res.result.count, 1);
+	assert.equal(res.result.footprints[0].sourceKind, 'project-epro2');
+	assert.match(res.result.footprints[0].documentSource, /"id":"e45"/, 'geometry rows survive the archive fallback');
+	assert.doesNotMatch(res.result.footprints[0].documentSource, /COMPONENT/, 'the PCB document body is not part of any footprint');
+});
+
+test('pcb.components.list: carries the placed footprint instance ref', async () => {
+	const comp = {
+		getState_PrimitiveId: () => '0998e91872a558c4', getState_UniqueId: () => 'gge1', getState_Designator: () => 'J2',
+		getState_Name: () => 'n', getState_Layer: () => 1, getState_X: () => 1053.16, getState_Y: () => 167.97,
+		getState_Rotation: () => 0, getState_PrimitiveLock: () => false, getState_AddIntoBom: () => true,
+		getState_ManufacturerId: () => 'm', getState_SupplierId: () => 'C1',
+		getState_Footprint: () => ({ uuid: '10066e9574936036', libraryUuid: 'lib', name: 'USB-C-SMD_TYPE-C-16PIN' }),
+	};
+	const res: any = await withEda({ pcb_PrimitiveComponent: { getAll: async () => [comp] } }, () => pcbComponentsList({}));
+	assert.deepEqual(res.result.components[0].footprint, { uuid: '10066e9574936036', libraryUuid: 'lib', name: 'USB-C-SMD_TYPE-C-16PIN' });
+});

@@ -40,6 +40,22 @@ type snapComp struct {
 	Pads       []snapPad `json:"pads"`
 }
 
+type snapFootprintHole struct {
+	Owner    string       `json:"owner"`
+	SourceID string       `json:"sourceId"`
+	Shape    string       `json:"shape"`
+	X        float64      `json:"x"`
+	Y        float64      `json:"y"`
+	Dia      float64      `json:"dia"`
+	Points   [][2]float64 `json:"points"`
+}
+
+// DefaultSlotClearance is the copper → footprint NPTH/slot spacing when the
+// snapshot's rules carry no Slot Region entry: 0.3 mm, what native DRC
+// ("Slot Region to Track", Safe Spacing copperThickness1oz) demanded on the
+// 2026-09-25 ESP32 E2E board.
+const DefaultSlotClearance = 11.811
+
 type snapshot struct {
 	Components []snapComp `json:"components"`
 	Outline    *struct {
@@ -56,8 +72,12 @@ type snapshot struct {
 		ViaDiameterMil  float64 `json:"viaDiameterMil"`
 		CopperToEdgeMil float64 `json:"copperToEdgeMil"`
 		HoleToHoleMil   float64 `json:"holeToHoleMil"`
+		SlotClearance   float64 `json:"slotClearanceMil"`
 	} `json:"rules"`
-	Copper *struct {
+	// FootprintHoles: NPTH/slot regions inside placed footprints (pcb dump
+	// footprintHoles[], board coordinates). Not pads, no net.
+	FootprintHoles []snapFootprintHole `json:"footprintHoles"`
+	Copper         *struct {
 		Regions []map[string]any `json:"regions"`
 		Fills   []map[string]any `json:"fills"`
 	} `json:"copper"`
@@ -166,10 +186,41 @@ func FromSnapshot(raw []byte) (*Board, error) {
 			b.Holes = append(b.Holes, &Hole{Name: str(f["primitiveId"]), C: bb.Center(), Dia: math.Min(bb.W(), bb.H())})
 		}
 	}
+	slotClr := DefaultSlotClearance
+	if s.Rules != nil && s.Rules.SlotClearance > 0 {
+		slotClr = s.Rules.SlotClearance
+	}
+	for _, fh := range s.FootprintHoles {
+		h := &Hole{Name: fh.Owner + ":" + fh.SourceID, Owner: fh.Owner, C: Point{fh.X, fh.Y}, Clr: slotClr}
+		if b.partByRef(fh.Owner) == nil {
+			h.Owner = "" // owner not on the board model: a fixed obstacle
+		}
+		switch {
+		case fh.Shape == "circle" && fh.Dia > 0:
+			h.Dia = fh.Dia
+		case len(fh.Points) >= 3:
+			for _, q := range fh.Points {
+				h.Poly = append(h.Poly, Point{q[0], q[1]})
+			}
+		default:
+			continue
+		}
+		b.Holes = append(b.Holes, h)
+	}
 	if err := b.Index(); err != nil {
 		return nil, err
 	}
 	return b, nil
+}
+
+// partByRef is a pre-Index lookup.
+func (b *Board) partByRef(ref string) *Part {
+	for _, p := range b.Parts {
+		if p.Ref == ref {
+			return p
+		}
+	}
+	return nil
 }
 
 // silkMarginMil caps how far the rendered bbox is shrunk toward the pads on
@@ -318,6 +369,7 @@ func ExportPlacedSnapshot(raw []byte, b *Board) ([]byte, error) {
 		return nil, fmt.Errorf("snapshot: %w", err)
 	}
 	comps, _ := doc["components"].([]any)
+	movers := map[string]func(Point) Point{}
 	for _, ci := range comps {
 		c, ok := ci.(map[string]any)
 		if !ok {
@@ -331,6 +383,7 @@ func ExportPlacedSnapshot(raw []byte, b *Board) ([]byte, error) {
 		oldRot := normDeg(num(c["rotation"]))
 		delta := normDeg(p.Rotation - oldRot)
 		move := func(q Point) Point { return p.Pos.Add(q.Sub(oldPos).Rotate(delta)) }
+		movers[p.Ref] = move
 		quarter := int(math.Round(delta/90)) % 2
 		c["x"], c["y"], c["rotation"] = round2(p.Pos.X), round2(p.Pos.Y), p.Rotation
 		if bb, ok := anyBBox(c["bbox"]); ok {
@@ -354,6 +407,28 @@ func ExportPlacedSnapshot(raw []byte, b *Board) ([]byte, error) {
 			if quarter == 1 {
 				if w, ok := pd["width"]; ok {
 					pd["width"], pd["height"] = pd["height"], w
+				}
+			}
+		}
+	}
+	// Footprint NPTH/slot regions are part of their footprint: rigid with it.
+	fhs, _ := doc["footprintHoles"].([]any)
+	for _, fi := range fhs {
+		fh, ok := fi.(map[string]any)
+		if !ok {
+			continue
+		}
+		move := movers[str(fh["owner"])]
+		if move == nil {
+			continue
+		}
+		c := move(Point{num(fh["x"]), num(fh["y"])})
+		fh["x"], fh["y"] = round2(c.X), round2(c.Y)
+		if pts, ok := fh["points"].([]any); ok {
+			for i, pi := range pts {
+				if xy, ok := pi.([]any); ok && len(xy) == 2 {
+					q := move(Point{num(xy[0]), num(xy[1])})
+					pts[i] = []any{round2(q.X), round2(q.Y)}
 				}
 			}
 		}

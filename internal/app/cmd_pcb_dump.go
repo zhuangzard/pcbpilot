@@ -29,6 +29,7 @@ func newPcbDumpCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *co
 		noRules       bool
 		noLayers      bool
 		includeCopper bool
+		noFpHoles     bool
 		label         string
 	)
 	c := &cobra.Command{
@@ -39,6 +40,9 @@ func newPcbDumpCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *co
 			"--include-copper also captures tracks/arcs, vias, pour boundaries, materialized\n" +
 			"poured copper, regions and static fills. Each category records available/unknown,\n" +
 			"so a failed read cannot be mistaken for an empty board.\n\n" +
+			"footprintHoles[] lists NPTH / slot regions inside placed footprints (MULTI-layer\n" +
+			"FILLs from pcb.footprint.sources, e.g. USB-C locating holes) in board coordinates;\n" +
+			"they are not pads and carry no net. --no-footprint-holes skips that read.\n\n" +
 			"The snapshot is what `" + "pcb layout-score --from <file>" + "` replays offline, so a\n" +
 			"reference board can become a regression fixture that needs no live editor.\n\n" +
 			"Board outline requires the PCB to be the FOREGROUND document (the platform\n" +
@@ -57,6 +61,9 @@ func newPcbDumpCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *co
 				withRules:  !noRules,
 				withLayers: !noLayers,
 				withCopper: includeCopper,
+				// Footprint NPTH/slot regions (MULTI FILLs inside footprints):
+				// pcb auto routes around them, pcb check gates on them.
+				withFootprintHoles: !noFpHoles,
 			})
 			if err != nil {
 				return err
@@ -92,6 +99,7 @@ func newPcbDumpCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *co
 	c.Flags().BoolVar(&noSilk, "no-silk", false, "skip silkscreen (drops the silk-consistency dimensions)")
 	c.Flags().BoolVar(&noRules, "no-rules", false, "skip live DRC rules (thresholds fall back to the JLCPCB baseline)")
 	c.Flags().BoolVar(&noLayers, "no-layers", false, "skip copper layer count")
+	c.Flags().BoolVar(&noFpHoles, "no-footprint-holes", false, "skip footprint NPTH/slot regions (pcb.footprint.sources)")
 	c.Flags().BoolVar(&includeCopper, "include-copper", false, "capture exact routed/area copper and rule-region lists with per-category availability")
 	return c
 }

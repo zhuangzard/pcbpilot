@@ -264,6 +264,9 @@ type pcbCheckSummary struct {
 	ConnectorPlugClearance int `json:"connectorPlugClearance"`
 	// 插拔通道禁布：器件挡在卧贴插口的开口前方，插头进不来。
 	ConnectorMatingBlocked int `json:"connectorMatingBlocked"`
+	// Copper under the slot rule from a footprint NPTH/slot region (E2E
+	// 2026-09-25 USB-C J2: native "Slot Region to Track/Via").
+	FootprintHoleClearance int `json:"footprintHoleClearance"`
 	Errors                 int `json:"errors"`
 	Warnings               int `json:"warnings"`
 	Total                  int `json:"total"`
@@ -1957,9 +1960,17 @@ func gatherPcbCheckReport(cfg *appConfig, window string, couplingW float64, chec
 	// 意图来源：优先读 --spec 指定的 S0 spec（连接器 facing/internal 显式声明），
 	// 没有就退回启发式并把 finding 降到 INFO —— 推定错了不该像显式标注那样理直气壮
 	// 地拦人（docs/concepts.md 的三层置信度表）。
-	if connSnap, cerr := fetchBoardSnapshot(cfg, window, boardSnapshotOpts{}); cerr != nil {
-		fmt.Fprintf(stderr, "warning: connector layout checks skipped (%v)\n", cerr)
+	if connSnap, cerr := fetchBoardSnapshot(cfg, window, boardSnapshotOpts{withFootprintHoles: true}); cerr != nil {
+		fmt.Fprintf(stderr, "warning: connector layout and footprint NPTH/slot checks skipped (%v)\n", cerr)
 	} else {
+		// Footprint NPTH/slot regions (MULTI FILLs inside footprints) — the
+		// same snapshot, so a check never needs a second component read.
+		for _, p := range connSnap.Partial {
+			if strings.Contains(p, "NPTH/slot") {
+				fmt.Fprintf(stderr, "warning: %s\n", p)
+			}
+		}
+		reportFootprintHoles(&rep, connSnap.FootprintHoles, tracks, vias, pads, rules, stderr)
 		conns := collectBoardConnectors(connSnap, checkSpec)
 		for _, f := range findInternalOnEdge(conns, connSnap.Outline) {
 			rep.Findings = append(rep.Findings, f)

@@ -212,9 +212,13 @@ func (gr *grid) markKeepout(k *Keepout) {
 // carries only half of it (hw+c/2), so Dia/2+Keep alone let an ESP32 +5V
 // fan-out via sit 2.6 mil inside an M3 keep ring (final gate then dropped
 // the whole net's bridging).
-func (gr *grid) markHole(h *Hole) {
-	r := h.Dia/2 + h.Keep + gr.baseClr/2
-	gr.forCellsNear(Rect{h.C.X, h.C.Y, h.C.X, h.C.Y}, r, func(p Point) float64 { return p.Dist(h.C) }, func(x, y int) {
+//
+// A footprint NPTH/slot (Owner set) may demand more than Keep+Clearance
+// (native "Slot Region" spacing, h.Clr) and may be a polygon: the band is
+// measured from the hole edge, so both reduce to the same rule.
+func (gr *grid) markHole(h *Hole, rules Rules) {
+	r := h.Required(rules) - gr.baseClr/2
+	gr.forCellsNear(h.Bounds(), r, h.Dist, func(x, y int) {
 		for li := range gr.layers {
 			gr.flags[gr.idx(li, x, y)] |= flagHard
 		}
