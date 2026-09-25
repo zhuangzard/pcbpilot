@@ -13,7 +13,7 @@ import (
 // needed. Index is embedded (generated from @jlceda/pro-api-types by gen.py), so
 // the agent (and a developer scoping a new typed action / debug.exec_js call) can
 // answer "what eda.* method do I need" without leaving the CLI.
-func newApiCmd(stdout, stderr io.Writer) *cobra.Command {
+func newApiCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 	api := &cobra.Command{
 		Use:   "api",
 		Short: "Discover the official eda.* API surface (search / list, offline)",
@@ -30,6 +30,7 @@ func newApiCmd(stdout, stderr io.Writer) *cobra.Command {
 		newApiSearchCmd(stdout),
 		newApiLsCmd(stdout),
 		newApiShowCmd(stdout, stderr),
+		newApiProbeCmd(cfg, stdout, stderr),
 	)
 	return api
 }
@@ -138,4 +139,27 @@ func printMethod(w io.Writer, m apidoc.Method) {
 	if m.Sig != "" {
 		fmt.Fprintf(w, "    %s\n", strings.TrimSuffix(m.Sig, ";"))
 	}
+}
+
+// newApiProbeCmd asks the CONNECTED host which eda.* members exist (typeof
+// only, nothing is called): the runtime capability check that sits beside the
+// version-based host profile, e.g. whether a V3 build has createNetLabel.
+func newApiProbeCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
+	var window string
+	var paths []string
+	c := &cobra.Command{
+		Use:     "probe",
+		Short:   "Report typeof for eda.* members on the connected host (read-only, nothing is called)",
+		Example: `  pcbpilot api probe --path sch_PrimitiveAttribute.createNetLabel --path sys_Environment.getEditorCurrentVersion --project ceshi`,
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(paths) == 0 {
+				return fmt.Errorf("--path is required")
+			}
+			return dispatch(cfg, "system.api.probe", window, map[string]any{"paths": paths}, stdout, stderr)
+		},
+	}
+	c.Flags().StringVar(&window, "window", "", "EasyEDA window ID")
+	c.Flags().StringArrayVar(&paths, "path", nil, "eda.* member path, e.g. sch_PrimitiveAttribute.createNetLabel (repeatable)")
+	return c
 }

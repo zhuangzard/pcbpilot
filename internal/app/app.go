@@ -104,7 +104,7 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 		newBomCmd(cfg, stdout, stderr),
 		newLibCmd(cfg, stdout, stderr),
 		newBlocksCmd(stdout, stderr),
-		newApiCmd(stdout, stderr),
+		newApiCmd(cfg, stdout, stderr),
 		newDebugCmd(cfg, stdout, stderr),
 		newSkillCmd(stdout, stderr),
 		newUpdateCmd(cfg, stdout, stderr),

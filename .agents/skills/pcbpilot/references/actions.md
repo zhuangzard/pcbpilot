@@ -301,6 +301,10 @@ CLI `project open --project-uuid` 与 `project export` 封装上述 action；导
 - V4 页面图元里的引脚级属性（Pin Name/Number/Type）父 ID 为 `<器件ID>-e<n>`，随器件删除，
   清页守卫按器件自有属性处理，不再误判为孤儿属性（Go 守卫已修；connector 在下一版生效）。
 
+- 运行时能力探测：`pcbpilot api probe --path sch_PrimitiveAttribute.createNetLabel --project <P>` 只读取
+  `typeof eda.<path>`，从不调用；用于在具体宿主（V3/V4、桌面/Web）上确认可选接口存在，再决定是否走
+  相应路径。它与按版本号的宿主画像（health 的 `line/features`）互补。
+
 ## 原生原理图 DRC 的判定与覆盖
 
 `schematic.drc.check` 的 `passed` / `nativePassed` 采用宿主布尔重载在指定 `strict` 下的判定。详细模式另取统计，两次 SDK 读取不是原子快照；检查期间不要并发修改工程。非严格通过并不代表零告警。

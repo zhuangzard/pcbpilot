@@ -3978,3 +3978,22 @@ test('schematic.export_image clears an earlier selection before selecting the re
 		delete (globalThis as any).eda;
 	}
 });
+
+import { systemApiProbe } from './actions';
+
+test('system.api.probe reports typeof without calling anything', async () => {
+	let called = false;
+	(globalThis as any).eda = {
+		sch_PrimitiveAttribute: { createNetLabel: () => { called = true; } },
+		sys_Environment: { getEditorCurrentVersion: () => '3.2.149' },
+	};
+	try {
+		const res: any = await systemApiProbe({ paths: ['sch_PrimitiveAttribute.createNetLabel', 'sch_PrimitiveAttribute.missing', 'nope.deep.path'] });
+		assert.deepEqual(res.result.members, { 'sch_PrimitiveAttribute.createNetLabel': 'function', 'sch_PrimitiveAttribute.missing': 'undefined', 'nope.deep.path': 'undefined' });
+		assert.equal(called, false);
+		await assert.rejects(systemApiProbe({ paths: ['eda; alert(1)'] }));
+	}
+	finally {
+		delete (globalThis as any).eda;
+	}
+});

@@ -1,6 +1,6 @@
 {
 	"name": "pcbpilot-connector",
-	"version": "0.2.4",
+	"version": "0.2.5",
 	"description": "EasyEDA Pro extension that bridges the pcbpilot Go daemon to the official eda.* API over WebSocket.",
 	"author": "pcbpilot",
 	"license": "(MIT AND Apache-2.0)",

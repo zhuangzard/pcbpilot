@@ -11,7 +11,7 @@ import { armDeadline } from './deadlines';
 import { exactJSON, preservedInstance } from './preserve-instance';
 import { barePcbRuleConfiguration, pcbRulesEqual, planPcbConfig } from './pcb-config';
 import { pcbNetColorSet } from './pcb-net-color';
-import { documentTypeLabel, readResponseContext } from './eda-context';
+import { documentTypeLabel, readEasyEdaVersion, readResponseContext } from './eda-context';
 import { readProjectFootprintSourceArchive, readProjectNativeSourceArchive } from './native-footprint-source';
 import {
 	assertLegacySimpleWireOperation,
@@ -10156,6 +10156,23 @@ const pcbNewBoard: Handler = async (payload) => {
 // system.notify — surface a toast INSIDE the EasyEDA window (设计流程步骤通知).
 // Non-blocking; the design flow calls it as each stage passes so the user can watch
 // progress live ("完成 布线,下一步 铺铜"). type ∈ info|success|warn|error|question.
+// Read-only capability probe: typeof of eda.* members, nothing is invoked.
+export const systemApiProbe: Handler = async (payload) => {
+	const raw = payload.paths;
+	if (!Array.isArray(raw) || raw.length === 0 || raw.length > 64 || !raw.every(p => typeof p === 'string' && /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$/.test(p))) {
+		throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, '"paths" must be 1..64 dotted eda member paths.');
+	}
+	const members: Record<string, string> = {};
+	for (const path of raw as Array<string>) {
+		let node: unknown = eda;
+		for (const key of path.split('.')) {
+			node = node !== null && (typeof node === 'object' || typeof node === 'function') ? (node as Record<string, unknown>)[key] : undefined;
+		}
+		members[path] = typeof node;
+	}
+	return { result: { members, hostVersion: readEasyEdaVersion() } };
+};
+
 const systemNotify: Handler = async (payload) => {
 	const message = requireString(payload, 'message');
 	const raw = (optionalString(payload, 'type') ?? 'info').toLowerCase();
@@ -14293,6 +14310,7 @@ const HANDLERS: Record<string, Handler> = {
 	'board.create': boardCreate,
 	'board.new_pcb': pcbNewBoard,
 	'system.notify': systemNotify,
+	'system.api.probe': systemApiProbe,
 	'board.rename': boardRename,
 	'board.copy': boardCopy,
 	'board.delete': boardDelete,

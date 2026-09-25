@@ -46,6 +46,15 @@ func AllActions() []ActionSpec {
 			Outputs:     []string{"shown", "message", "type"},
 		},
 		{
+			Name:        "system.api.probe",
+			Domain:      DomainSystem,
+			Phase:       1,
+			NeedsWindow: true,
+			Description: "Read-only runtime capability check: report typeof for eda.* member paths on the connected host. Nothing is called; paths outside eda are refused.",
+			Inputs:      []string{"paths (required, array of dotted eda member paths, max 64)"},
+			Outputs:     []string{"members{path: typeof}", "hostVersion"},
+		},
+		{
 			Name:        "project.current",
 			Domain:      DomainProject,
 			Phase:       1,
