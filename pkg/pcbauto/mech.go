@@ -483,3 +483,58 @@ func PlaceOnEdge(b *Board, p *Part, e MechEdge) error {
 	movePartCentre(p, c, best)
 	return nil
 }
+
+// DropExistingMech removes, from the holes and keep-outs a mech spec appended
+// after index holesBefore / keepBefore, those the board already has — same
+// centre and drill within 1 mil, or a keep-out whose bounding box matches a
+// live region's within 1 mil. A route-only run re-applies the mech spec to a
+// board that already carries its mechanics; without this the model counted
+// every hole twice and the playbook wrote a second set of holes and regions
+// (ESP32 mini 2026-09-25: 8 fills / 14 regions, native DRC Slot-to-Slot).
+func DropExistingMech(b *Board, holesBefore, keepBefore int) (newHoles []*Hole, newKeeps []*Keepout) {
+	old := b.Holes[:holesBefore]
+	for _, h := range b.Holes[holesBefore:] {
+		dup := false
+		for _, o := range old {
+			if math.Hypot(h.C.X-o.C.X, h.C.Y-o.C.Y) <= 1 && math.Abs(h.Dia-o.Dia) <= 1 {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			newHoles = append(newHoles, h)
+		}
+	}
+	b.Holes = append(old[:holesBefore:holesBefore], newHoles...)
+	oldK := b.Keepouts[:keepBefore]
+	for _, k := range b.Keepouts[keepBefore:] {
+		kb := PolyBounds(k.Poly)
+		dup := false
+		for _, o := range oldK {
+			ob := PolyBounds(o.Poly)
+			if math.Abs(kb.MinX-ob.MinX) <= 1 && math.Abs(kb.MinY-ob.MinY) <= 1 && math.Abs(kb.MaxX-ob.MaxX) <= 1 && math.Abs(kb.MaxY-ob.MaxY) <= 1 {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			newKeeps = append(newKeeps, k)
+		}
+	}
+	b.Keepouts = append(oldK[:keepBefore:keepBefore], newKeeps...)
+	return newHoles, newKeeps
+}
+
+// SameOutline reports whether two outlines are the same polygon within tol mil
+// (vertex for vertex; a live outline read back keeps the written order).
+func SameOutline(a, b []Point, tol float64) bool {
+	if len(a) != len(b) || len(a) == 0 {
+		return false
+	}
+	for i := range a {
+		if math.Hypot(a[i].X-b[i].X, a[i].Y-b[i].Y) > tol {
+			return false
+		}
+	}
+	return true
+}

@@ -204,6 +204,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 						len(replace.Fills), len(replace.Regions), replaceJournal, dh, dk)
 				}
 				holesBefore, keepBefore := len(b.Holes), len(b.Keepouts)
+				outlineBefore := append([]pcbauto.Point(nil), b.Outline...)
 				var frame *pcbauto.FrameSearch
 				if place && pcbauto.NeedsAutoFrame(mech) {
 					// autoSize without a size: search the smallest frame the
@@ -229,6 +230,14 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 					if mc, err = apply(b, mech); err != nil {
 						return err
 					}
+				}
+				newHoles, newKeeps := b.Holes[holesBefore:], b.Keepouts[keepBefore:]
+				outlineChanged := mech != nil
+				if mech != nil && !place {
+					// Route-only on a board that already carries the mechanics:
+					// write only what is genuinely new.
+					newHoles, newKeeps = pcbauto.DropExistingMech(b, holesBefore, keepBefore)
+					outlineChanged = !pcbauto.SameOutline(outlineBefore, b.Outline, 0.5)
 				}
 				rep := &pcbauto.Report{Mechanics: mc, Frame: frame}
 				pre := pcbauto.Analyze(b, power, nil)
@@ -307,7 +316,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 						len(rep.Result.DRC.Violations), float64(s.Millis)/1000)
 				}
 				pb := pcbauto.BuildPlaybook(pcbauto.PlaybookInput{Board: b, Original: original, Result: rep.Result, Placement: rep.Placement,
-					Circuit: rep.Circuit, OutlineChanged: mech != nil, NewHoles: b.Holes[holesBefore:], NewKeepouts: b.Keepouts[keepBefore:],
+					Circuit: rep.Circuit, OutlineChanged: outlineChanged, NewHoles: newHoles, NewKeepouts: newKeeps,
 					Replace: replace, Name: "pcbauto " + filepath.Base(outDir)})
 				write := func(name string, fn func(io.Writer) error) error {
 					f, err := os.Create(filepath.Join(outDir, name))
