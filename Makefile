@@ -1,4 +1,4 @@
-.PHONY: help test mcp-test fmt actions api-index build install dev-build daemon dev eext eext-fresh connector lint-test blocks-audit modules-audit layout-calibrate release release-check release-build release-script-test release-smoke skill-check publish-skill publish-skill-hub skillhub-check replay demo-replay replay-sch replay-pcb
+.PHONY: help test fixture-bench mcp-test fmt actions api-index build install dev-build daemon dev eext eext-fresh connector lint-test blocks-audit modules-audit layout-calibrate release release-check release-build release-script-test release-smoke skill-check publish-skill publish-skill-hub skillhub-check replay demo-replay replay-sch replay-pcb
 
 DIST := dist
 .PHONY: local-build release-assets
@@ -33,8 +33,11 @@ help: ## show this cheatsheet
 	@echo "changes just edit a .go file — air reloads & the connector auto-reconnects."
 	@echo "Don't kill/swap daemons by hand; it wedges the connector (→ click Reconnect)."
 
-test: ## go test ./...
-	go test ./...
+test: ## go test -short ./... (CI; skips the long routing fixture bench)
+	go test -short ./...
+
+fixture-bench: ## full 5-board routing regression (~25 min): compare routed % with the last run
+	go test ./pkg/pcbauto -run TestFixtureBench -timeout 3600s -v
 
 mcp-test: build ## install MCP deps and run unit + stdio protocol tests
 	npm --prefix mcp ci --ignore-scripts

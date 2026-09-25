@@ -223,7 +223,8 @@ Other targets:
 make build        # bin/pcbpilot (version-stamped via git describe)
 make install      # build + install to /usr/local/bin (PREFIX overridable; sudo only if needed)
 make daemon       # one-shot daemon (no reload) — prefer `make dev`
-make test         # go test ./...
+make test         # go test -short ./... (what CI runs)
+make fixture-bench # full 5-board routing regression (~25 min) — run after pkg/pcbauto routing changes
 make lint-test    # linter rule-trust harness (orientation consistency + fixtures)
 make blocks-audit # 块引脚引用 vs 真实符号引脚表(离线;首审揪出 14 个块 41 处错)
 make layout-calibrate # layout-score 金标准板回归(离线):参考板九维不该掉分 +
