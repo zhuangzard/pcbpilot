@@ -301,6 +301,8 @@ make lint-test    # = python3 .agents/skills/pcbpilot/scripts/tests/run.py
 # 「跑了多少条 CLI 命令」的代理(每条固定 2~3 发探测)。
 # token 不在审计日志里(那是 agent 侧的账),用 --tokens 自报,不给就记「未记录」。
 pcbpilot audit cost --day 2026-08-15 --since 14:12 --until 15:50 --label "…" --tokens N --record
+# --day/--since/--until 默认按**本机时区**(2026-09-25 起;此前是 UTC,F10);--utc 恢复旧口径,
+# 也接受 HH:MM-04:00 / RFC3339。解析后的区间在 stderr 与 JSON window 字段里本地+UTC 双写回显,记账前核对。
 pcbpilot audit cost --ledger                                 # 跨批次对比台账
 ```
 

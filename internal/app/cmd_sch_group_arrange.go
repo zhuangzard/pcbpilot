@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zhuangzard/pcbpilot/internal/blocks"
+	"github.com/zhuangzard/pcbpilot/internal/workflow"
 )
 
 // ── 第二层:组与组之间的排布(ADR-0003)──────────────────────────────────────
@@ -438,7 +439,11 @@ func wrapNoteLines(notes []string, maxWidth float64) []string {
 func drawGroupAnnotations(cfg *appConfig, win, docUUID string, plan []bslGroupPlacement,
 	byID map[string]bslGroupItem, stdout, stderr io.Writer) error {
 
-	st, err := loadPcbStageState(resolveStageProjectQuiet(cfg, win))
+	key := ""
+	if k, uuid, rerr := resolveStageIdentity(cfg, win); rerr == nil {
+		key = pickSchGroupStateKey(k, uuid, docUUID, loadPcbStageState, workflow.Exists)
+	}
+	st, err := loadPcbStageState(key)
 	if err != nil {
 		return fmt.Errorf("取分组状态:%w", err)
 	}
@@ -538,15 +543,6 @@ func parseAnnotationIDs(result map[string]any) ([]string, error) {
 		return nil, fmt.Errorf("绘制失败(%s);已自动清理,画布未留残件", msg)
 	}
 	return append(payload.Rects, payload.Texts...), nil
-}
-
-// resolveStageProjectQuiet 取项目名,失败返回空(调用方已有降级路径)。
-func resolveStageProjectQuiet(cfg *appConfig, win string) string {
-	p, err := resolveStageProject(cfg, win)
-	if err != nil {
-		return ""
-	}
-	return p
 }
 
 // arrangeBoundsOf 把图纸几何换算成可用区:减去边距,再减去图签 keep-out 的那一条。

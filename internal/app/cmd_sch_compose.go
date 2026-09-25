@@ -873,7 +873,17 @@ func schCompositionPlaybook(p *schCompositionPlan, before []byte, replace bool, 
 		}
 		pb.Steps = append(pb.Steps, playbookStep{ID: "apply-page-titleblock", Run: "sch titleblock", Flags: map[string]any{"data": string(data)}})
 	}
-	pb.Steps = append(pb.Steps, playbookStep{ID: "verify-all-pins-nets-nc", Action: "schematic.components.list", Payload: read, ExpectSchematic: final}, playbookStep{ID: "electrical-check", Action: "schematic.check", Assert: map[string]string{"$.passed": "true"}}, playbookStep{ID: "wire-tree-check", Action: "schematic.bridgeCheck", Assert: map[string]string{"$.passed": "true"}}, playbookStep{ID: "strict-schematic-gate", Run: "sch gate", Flags: map[string]any{"strict": true, "json": true}}, playbookStep{ID: "save-composition", Action: "schematic.save", Assert: map[string]string{"$.saved": "true"}})
+	// F2(2026-09-25 E2E):受保护 save 排在 strict gate **之前**。save 只落盘已通过
+	// 逐脚/电气/线树回读的画布,不代表 gate 通过;gate 失败时队列照样停并报错,但
+	// 这一页的成果已经持久化,不再依赖 autosave 兜底。多页设计里本页若有跨页端口,
+	// 对端可能还没落地:gate 带 --defer-cross-page-drc,仅在 fatal=error=0 且
+	// warn ≤ 本页未配对端口数时把原生 DRC 记为 deferred;全部页落地后按 SOP 逐页
+	// 不带该参数重跑 `sch gate --strict`。
+	gateFlags := map[string]any{"strict": true, "json": true}
+	if schLayoutHasCrossPagePorts(&p.Layout) {
+		gateFlags["defer-cross-page-drc"] = true
+	}
+	pb.Steps = append(pb.Steps, playbookStep{ID: "verify-all-pins-nets-nc", Action: "schematic.components.list", Payload: read, ExpectSchematic: final}, playbookStep{ID: "electrical-check", Action: "schematic.check", Assert: map[string]string{"$.passed": "true"}}, playbookStep{ID: "wire-tree-check", Action: "schematic.bridgeCheck", Assert: map[string]string{"$.passed": "true"}}, playbookStep{ID: "save-composition", Action: "schematic.save", Assert: map[string]string{"$.saved": "true"}}, playbookStep{ID: "strict-schematic-gate", Run: "sch gate", Flags: gateFlags})
 	if preserved != nil {
 		pb.Steps = append(pb.Steps, playbookStep{ID: "verify-saved-instance-preservation", Action: "schematic.components.list", Payload: read, ExpectSchematic: final})
 	}
@@ -881,4 +891,19 @@ func schCompositionPlaybook(p *schCompositionPlan, before []byte, replace bool, 
 		return nil, fmt.Errorf("composition Apply preflight: %v", errs)
 	}
 	return pb, nil
+}
+
+// schLayoutHasCrossPagePorts reports whether this page draws any net port — the
+// marker kind whose partner lives on another page of a multi-page composition.
+func schLayoutHasCrossPagePorts(l *powerLayoutPlan) bool {
+	if l == nil {
+		return false
+	}
+	for _, f := range l.Flags {
+		switch f.Kind {
+		case "net_port_in", "net_port_out", "net_port_bi", "netport":
+			return true
+		}
+	}
+	return false
 }

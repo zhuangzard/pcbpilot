@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 
@@ -102,7 +103,7 @@ without sheet placement constraints (not an entire-page validation).
 }
 
 func newSchLayoutSheetPlanCmd(stdout io.Writer) *cobra.Command {
-	var from, out, flow string
+	var from, out, flow, sheetGeometryPath string
 	var diagnostic bool
 	c := &cobra.Command{Use: "layout-sheet-plan", Short: "Pack existing zone geometry into sheet previews offline (no Apply)", Long: `Input: layout-render JSON plus sheet:{bounds,border,keepouts,padding,gap,flow?}.
 Units are raw (0.01 inch); padding/gap >= 10. Keeps symbol scale and internal
@@ -135,6 +136,15 @@ Does not edit EDA, merge nets, or generate an Apply queue.`, Args: cobra.NoArgs,
 		raw, e := os.ReadFile(from)
 		if e != nil {
 			return e
+		}
+		if sheetGeometryPath != "" {
+			geom, gerr := os.ReadFile(sheetGeometryPath)
+			if gerr != nil {
+				return gerr
+			}
+			if raw, e = injectSheetBorderFromGeometry(raw, geom); e != nil {
+				return e
+			}
 		}
 		var in SchematicRenderInput
 		if e = connectivity.DecodeStrictDesignJSON(raw, &in); e != nil {
@@ -175,7 +185,81 @@ Does not edit EDA, merge nets, or generate an Apply queue.`, Args: cobra.NoArgs,
 	c.Flags().StringVar(&out, "out", "", "page plan JSON output")
 	c.Flags().StringVar(&flow, "flow", "z", "reading flow: z or compact; overrides sheet.flow only when explicitly supplied")
 	c.Flags().BoolVar(&diagnostic, "diagnostic", false, "explicitly pack incomplete diagnostics, not a completed layout")
+	c.Flags().StringVar(&sheetGeometryPath, "sheet-geometry", "", "`sch sheet-geometry --json` output: fills sheet.border (and sheet.bounds when absent) from its derived border with borderSource provenance; a conflicting hand-written value is rejected")
 	return c
+}
+
+// injectSheetBorderFromGeometry fills sheet.border / sheet.bounds from a saved
+// `sch sheet-geometry --json` result (enveloped or bare) instead of a hand-typed
+// border (F1, 2026-09-25 E2E: a guessed A4 border went unnoticed). It never
+// overrides: an explicit value that disagrees is an error, one that agrees is
+// kept. keepouts stay explicit.
+func injectSheetBorderFromGeometry(raw, geomRaw []byte) ([]byte, error) {
+	var env struct {
+		Result *sheetGeometry `json:"result"`
+	}
+	var g sheetGeometry
+	if err := json.Unmarshal(geomRaw, &env); err == nil && env.Result != nil {
+		g = *env.Result
+	} else if err := json.Unmarshal(geomRaw, &g); err != nil {
+		return nil, fmt.Errorf("--sheet-geometry: %w", err)
+	}
+	if g.Border == nil || g.Border.BBox == nil {
+		source := sheetSourceNone
+		if g.Border != nil {
+			source = g.Border.Source
+		}
+		return nil, fmt.Errorf("--sheet-geometry carries no derived border (source=%s); see its warnings — a border must come from the sheet's own attributes, not be guessed", source)
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &top); err != nil {
+		return nil, err
+	}
+	var sheet map[string]json.RawMessage
+	if len(top["sheet"]) == 0 || string(top["sheet"]) == "null" {
+		return nil, fmt.Errorf("--sheet-geometry needs an input sheet object (keepouts/padding/gap stay explicit)")
+	}
+	if err := json.Unmarshal(top["sheet"], &sheet); err != nil {
+		return nil, err
+	}
+	fill := func(key string, want *layoutBBox) error {
+		if want == nil {
+			return nil
+		}
+		if cur, ok := sheet[key]; ok && string(cur) != "null" {
+			var have layoutBBox
+			if err := json.Unmarshal(cur, &have); err != nil {
+				return fmt.Errorf("sheet.%s: %w", key, err)
+			}
+			if math.Abs(have.MinX-want.MinX) > 0.01 || math.Abs(have.MinY-want.MinY) > 0.01 ||
+				math.Abs(have.MaxX-want.MaxX) > 0.01 || math.Abs(have.MaxY-want.MaxY) > 0.01 {
+				return fmt.Errorf("sheet.%s %+v conflicts with --sheet-geometry %+v; drop the hand-written value", key, have, *want)
+			}
+			return nil
+		}
+		b, err := json.Marshal(want)
+		if err != nil {
+			return err
+		}
+		sheet[key] = b
+		return nil
+	}
+	if err := fill("bounds", g.Sheet.BBox); err != nil {
+		return nil, err
+	}
+	if err := fill("border", g.Border.BBox); err != nil {
+		return nil, err
+	}
+	if _, ok := sheet["borderSource"]; !ok {
+		src, _ := json.Marshal("sheet-geometry " + g.Border.Source + " (" + g.Border.Status + ")")
+		sheet["borderSource"] = src
+	}
+	b, err := json.Marshal(sheet)
+	if err != nil {
+		return nil, err
+	}
+	top["sheet"] = b
+	return json.Marshal(top)
 }
 
 func validateRenderSheetJSON(raw []byte) error {

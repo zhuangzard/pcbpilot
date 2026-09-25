@@ -91,3 +91,72 @@ func TestTruncPageName_CutsOnRunes(t *testing.T) {
 		t.Errorf("截断后 %d runes, want ≤18", len([]rune(got)))
 	}
 }
+
+// F10 (2026-09-25 E2E): the user typed local EDT times and got a UTC window.
+func TestResolveAuditCostRange_LocalByDefault(t *testing.T) {
+	edt := time.FixedZone("EDT", -4*3600)
+	now := time.Date(2026, 9, 25, 13, 0, 0, 0, edt)
+	from, to, err := resolveAuditCostRange("2026-09-25", "12:22", "12:57", edt, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := from.UTC().Format("15:04"); got != "16:22" {
+		t.Errorf("from UTC = %s, want 16:22", got)
+	}
+	if got := to.UTC().Format("15:04"); got != "16:57" {
+		t.Errorf("to UTC = %s, want 16:57", got)
+	}
+	// --utc keeps the old meaning.
+	from, _, err = resolveAuditCostRange("2026-09-25", "12:22", "", time.UTC, now)
+	if err != nil || from.UTC().Format("15:04") != "12:22" {
+		t.Errorf("--utc from = %v (%v), want 12:22Z", from, err)
+	}
+}
+
+func TestResolveAuditCostRange_ExplicitOffsetsAndDefaults(t *testing.T) {
+	edt := time.FixedZone("EDT", -4*3600)
+	now := time.Date(2026, 9, 25, 22, 30, 0, 0, edt) // already 2026-09-26 in UTC
+	// Explicit offset / Z ignore the interpretation zone.
+	from, to, err := resolveAuditCostRange("2026-09-25", "12:22-04:00", "16:57Z", time.UTC, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if from.UTC().Format("15:04") != "16:22" || to.UTC().Format("15:04") != "16:57" {
+		t.Errorf("offsets: %v → %v", from.UTC(), to.UTC())
+	}
+	from, _, err = resolveAuditCostRange("", "2026-09-25T12:22:00-04:00", "", edt, now)
+	if err != nil || !from.Equal(time.Date(2026, 9, 25, 16, 22, 0, 0, time.UTC)) {
+		t.Errorf("RFC3339 since = %v (%v)", from, err)
+	}
+	// Default day is "today" in the interpretation zone, not in UTC.
+	from, to, err = resolveAuditCostRange("", "", "", edt, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if from.In(edt).Format("2006-01-02 15:04") != "2026-09-25 00:00" || to.Sub(from) != 24*time.Hour {
+		t.Errorf("default window = %v → %v", from, to)
+	}
+	if _, _, err := resolveAuditCostRange("2026-09-25", "13:00", "12:00", edt, now); err == nil {
+		t.Error("until before since must be rejected")
+	}
+	if _, _, err := resolveAuditCostRange("2026-09-25", "25:99", "", edt, now); err == nil {
+		t.Error("bad time must be rejected")
+	}
+}
+
+func TestAuditDayFiles_LocalEveningSpansTwoUTCDays(t *testing.T) {
+	edt := time.FixedZone("EDT", -4*3600)
+	from := time.Date(2026, 9, 25, 19, 0, 0, 0, edt) // 23:00Z
+	to := time.Date(2026, 9, 25, 21, 0, 0, 0, edt)   // 01:00Z next day
+	days, err := auditDayFiles(from, to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(days) != 2 || days[0] != "2026-09-25" || days[1] != "2026-09-26" {
+		t.Errorf("days = %v", days)
+	}
+	w := newAuditCostWindow(edt, from, to)
+	if w.From != "2026-09-25T19:00:00-04:00" || w.FromUTC != "2026-09-25T23:00:00Z" {
+		t.Errorf("window echo = %+v", w)
+	}
+}

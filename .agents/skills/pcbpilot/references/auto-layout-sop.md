@@ -22,7 +22,12 @@ pcbpilot sch sheet-geometry --project <project> --json
 
 纸张门禁需从 typed 官方读取得到**红色绘图区内框**及图签真实占位；只有纸张外尺寸
 或图签 keepout 时，保守内缩矩形只能用于离线探索，不能记为内框入页验收通过。
-缺少精确内框 getter 时保留原响应并标 `unsupported`，先补采集能力再做现场写前门禁。
+`sch sheet-geometry --json` 的 `border` 取自图框符号自身属性（`titleblock.get` 的
+`Border`/`Blade Width`：实测 sheet bbox 四边各内缩 Blade Width，A4 为 10 raw），带
+`source:"titleblock-attributes:Blade Width"`、`status:"source-only"`；把整份 JSON 存下，
+用 `sch layout-sheet-plan --sheet-geometry sheet-geometry.json` 填 `sheet.border`，不再手写
+（与手写值冲突即拒绝）。该语义尚未与渲染内框逐像素核对，入页验收报告须写明 source-only；
+`border.source:"none"`（Border=0 或缺 Blade Width）时照旧标 `unsupported`。
 如需调查内置图框的原始符号，可由 `sch list` 的 sheet 组件取 `symbol.uuid/libraryUuid`，
 使用 `lib symbol export-source` 保存官方 `.elibz2` 原包；该导出目前仅为 source-only 证据，
 不得将其或 A4 纸张外框直接填成 `sheetBorder`。命令边界见 [actions.md](actions.md#图纸与明细表)。
@@ -125,6 +130,12 @@ zones 源到 composition 的固定转换用 `sch layout-composition`（离线，
 网络角色取自 netPolicies（local_power→power、local_ground→ground，与区内求解器一致），
 器件库身份只取 `--devices` 的真实 uuid。多页时每页分别转换、分别 compose/Apply；
 先建不会与其他页位号冲突的页。
+多页逐页 Apply 的跨页端口（F2，2026-09-25 E2E）：compose 队列把受保护 `save-composition`
+排在 `strict-schematic-gate` **之前**，gate 失败也不丢本页成果。本页画了 net port 时 gate 带
+`--defer-cross-page-drc`：仅当原生 DRC fatal=error=0 且 warn 数 ≤ 本页「其它页尚无同网端口」
+的端口数时，DRC 记为 deferred（摘要列出网名）；其余阻塞照旧。**全部页落地后**，对每一页
+执行不带该参数的 `pcbpilot sch gate --strict --json --project <P> --doc <页>`，全部通过才算
+S5 完成；不得把 deferred 当作通过证据。
 已确认 `layout-sheet-plan` 页时，将该页选中几何原样对应为 composition 的 modules，
 补齐同页 canonical 连接核心与新鲜身份/纸张证据；使用下列固定转换入口，不再次求解。
 page.json 是 pages[] 中的一页，不含候选包；间距、框、标题、位置均必须与预览一致。

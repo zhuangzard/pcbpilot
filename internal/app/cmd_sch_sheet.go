@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"strconv"
+	"strings"
 )
 
 // ── sheet-geometry: normalized sheet bounds + title-block keep-out (issue #26) ─
@@ -117,12 +119,99 @@ type keepout struct {
 	Hard bool        `json:"hard"`
 }
 
+// sheetBorderInfo is the drawing frame's INNER border (the red frame inside the
+// zone-label strip) — what layout-sheet-plan's sheet.border means (F1,
+// 2026-09-25 E2E: no typed getter exposed it, the agent hand-derived one).
+//
+// Source: the sheet symbol's own attributes as returned by
+// `schematic.titleblock.get` (titleBlockData): `Border` (frame on/off) and
+// `Blade Width` (width of the zone-label strip between the outer frame — the
+// sheet bbox — and the inner frame). The inner border is the live sheet bbox
+// inset by Blade Width on all four sides.
+//
+// Status is source-only: the attribute semantics are inferred from the A4
+// template (Blade Width=10, title-block table right/bottom edges at
+// 1160.5/9.5 raw in the .epro2 symbol, i.e. flush with a 10-raw inset) and
+// have not yet been verified against rendered frame geometry.
+type sheetBorderInfo struct {
+	BBox       *layoutBBox       `json:"bbox,omitempty"`
+	Source     string            `json:"source"`
+	Status     string            `json:"status,omitempty"`
+	Attributes map[string]string `json:"attributes,omitempty"`
+}
+
+const (
+	sheetBorderSourceAttributes = "titleblock-attributes:Blade Width"
+	sheetBorderStatusSourceOnly = "source-only"
+)
+
+// deriveSheetBorder is the pure parser: live sheet bbox + titleBlockData →
+// inner border with provenance, or source "none" plus a warning explaining why.
+func deriveSheetBorder(sheet *layoutBBox, data map[string]any) (sheetBorderInfo, []string) {
+	out := sheetBorderInfo{Source: sheetSourceNone}
+	valueOf := func(k string) (string, bool) {
+		m, ok := data[k].(map[string]any)
+		if !ok {
+			return "", false
+		}
+		v, ok := m["value"]
+		if !ok || v == nil {
+			return "", false
+		}
+		return strings.TrimSpace(fmt.Sprint(v)), true
+	}
+	if sheet == nil {
+		return out, []string{"sheet border not derived: no sheet bbox"}
+	}
+	if data == nil {
+		return out, []string{"sheet border not derived: titleblock.get returned no titleBlockData (sheet symbol attributes unavailable)"}
+	}
+	attrs := map[string]string{}
+	for _, k := range []string{"Border", "Blade Width", "Width", "Height"} {
+		if v, ok := valueOf(k); ok {
+			attrs[k] = v
+		}
+	}
+	out.Attributes = attrs
+	if v, ok := attrs["Border"]; ok && v == "0" {
+		return out, []string{"sheet border not derived: drawing frame is hidden (Border=0)"}
+	}
+	blade, err := strconv.ParseFloat(attrs["Blade Width"], 64)
+	if err != nil || blade <= 0 || math.IsNaN(blade) || math.IsInf(blade, 0) {
+		return out, []string{fmt.Sprintf("sheet border not derived: sheet symbol attribute \"Blade Width\" missing or not a positive number (%q)", attrs["Blade Width"])}
+	}
+	var warnings []string
+	w, h := sheet.MaxX-sheet.MinX, sheet.MaxY-sheet.MinY
+	for _, dim := range []struct {
+		key  string
+		live float64
+	}{{"Width", w}, {"Height", h}} {
+		if v, ok := attrs[dim.key]; ok {
+			if n, perr := strconv.ParseFloat(v, 64); perr == nil && math.Abs(n-dim.live) > 1 {
+				warnings = append(warnings, fmt.Sprintf("sheet symbol %s=%s disagrees with the live sheet bbox (%.2f); border uses the live bbox", dim.key, v, dim.live))
+			}
+		}
+	}
+	if 2*blade >= w || 2*blade >= h {
+		return out, append(warnings, fmt.Sprintf("sheet border not derived: Blade Width %.2f leaves no inner area on a %.0f×%.0f sheet", blade, w, h))
+	}
+	out.BBox = &layoutBBox{
+		MinX: round2(sheet.MinX + blade), MinY: round2(sheet.MinY + blade),
+		MaxX: round2(sheet.MaxX - blade), MaxY: round2(sheet.MaxY - blade),
+	}
+	out.Source, out.Status = sheetBorderSourceAttributes, sheetBorderStatusSourceOnly
+	return out, warnings
+}
+
 // sheetGeometry is the full normalized result, shaped to the issue #26 contract.
 type sheetGeometry struct {
 	Sheet      sheetInfo      `json:"sheet"`
 	TitleBlock titleBlockInfo `json:"titleBlock"`
-	Keepouts   []keepout      `json:"keepouts"`
-	Warnings   []string       `json:"warnings"`
+	// Border is the inner drawing frame (see sheetBorderInfo); nil only when
+	// the title block could not be read at all.
+	Border   *sheetBorderInfo `json:"border,omitempty"`
+	Keepouts []keepout        `json:"keepouts"`
+	Warnings []string         `json:"warnings"`
 }
 
 // isA4LandscapeSize reports whether a landscape sheet is A4-sized — the size the
@@ -277,13 +366,19 @@ func runSheetGeometry(cfg *appConfig, window string, asJSON bool, stdout, stderr
 
 	// 2. Title-block visibility (best effort; non-fatal if unavailable).
 	var showTB *bool
+	var tbData map[string]any
 	if tb, terr := requestAction(cfg, "schematic.titleblock.get", window, nil); terr == nil && tb.Result != nil {
 		if v, ok := tb.Result["showTitleBlock"].(bool); ok {
 			showTB = &v
 		}
+		tbData, _ = tb.Result["titleBlockData"].(map[string]any)
 	}
 
 	g := deriveSheetGeometry(sheet, showTB)
+	// 3. Inner border from the sheet symbol's attributes (read-only, same read).
+	border, bw := deriveSheetBorder(sheet, tbData)
+	g.Border = &border
+	g.Warnings = append(g.Warnings, bw...)
 
 	if asJSON {
 		// Wrap in the same {id,type,version,ok,result} envelope the rest of the
@@ -318,6 +413,13 @@ func renderSheetGeometry(g sheetGeometry, w io.Writer) {
 			vis, g.TitleBlock.Source, b.MinX, b.MinY, b.MaxX, b.MaxY)
 	} else {
 		fmt.Fprintf(w, "  titleBlock (%s, source=%s): no keep-out\n", vis, g.TitleBlock.Source)
+	}
+	if g.Border != nil && g.Border.BBox != nil {
+		b := g.Border.BBox
+		fmt.Fprintf(w, "  border (source=%s, status=%s): [%.2f,%.2f → %.2f,%.2f]\n",
+			g.Border.Source, g.Border.Status, b.MinX, b.MinY, b.MaxX, b.MaxY)
+	} else {
+		fmt.Fprintln(w, "  border (source=none): not derived")
 	}
 	for _, k := range g.Keepouts {
 		hard := "soft"
