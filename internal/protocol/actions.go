@@ -55,6 +55,21 @@ func AllActions() []ActionSpec {
 			Outputs:     []string{"members{path: typeof}", "hostVersion"},
 		},
 		{
+			// Ported from upstream easyeda-agent f05f25c. Mutates=true (runtime
+			// state, not design data): never retried as a read by apply. Its
+			// system domain keeps it out of autosave/stale-read document routing.
+			Name:         "system.page_reload",
+			Domain:       DomainSystem,
+			Phase:        1,
+			Mutates:      true,
+			NeedsWindow:  true,
+			NeedsConfirm: true,
+			Description:  "Schedule a full Web editor page reload after the response is sent (explicit, user-requested; not a recovery path for a hung editor). Use through `pcbpilot web reload`, which saves the exact active document first and then requires a NEW connector registration with the same project/document and a stable component-ID readback.",
+			Inputs:       []string{"projectUuid (exact current, required)", "documentUuid (exact active, required)"},
+			Outputs:      []string{"scheduled", "delayMs", "projectUuid", "documentUuid"},
+			VerifyWith:   []string{"system.health", "document.current"},
+		},
+		{
 			Name:        "project.current",
 			Domain:      DomainProject,
 			Phase:       1,

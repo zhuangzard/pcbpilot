@@ -146,7 +146,8 @@ Node 版本遵循 bundle 的要求（至少 20.17）。
 
 开发连接器：`make connector` 按当前版本/UUID 构建，`make eext` 升 patch 后构建同 UUID
 安装包。更换连接器后保存文档，重新加载编辑器（Web 刷新页面；桌面版完全退出并重开 EasyEDA），让所有旧页面运行时停止。
-只重新导入包不保证已打开页面执行新代码。不要用 IndexedDB 覆写或清空站点数据作为
+只重新导入包不保证已打开页面执行新代码。Web 端在用户明确要求时可用 typed `pcbpilot web reload`
+（见下文「Web 整页重载」）刷新并等待新连接与同一工程/文档回读；桌面端仍完全退出后重开。不要用 IndexedDB 覆写或清空站点数据作为
 常规升级方式；它们绕过安装流程且可能破坏扩展或登录状态。
 
 用户明确授权的仓库开发验证可按仓库 `docs/dev-environment.md §5` 对**已安装的同一
@@ -238,7 +239,26 @@ Web 编辑器若在重开后持续显示加载动画，停止自动重试和现�
 仍在宿主内部执行，重复重开会叠加空白标签。保留错误、当前标签状态和 typed read 结果；只有
 UUID 变成目标值、但对象仍不可读时，仍视为加载未完成。当前 `doc reload` 保存目标分屏、等待
 旧文档退出活动态，并只做一次有界重开；失败时报告数据不可用，修复 typed reload/open 后复测。
-禁止通过刷新浏览器、工程树、属性面板或 CUA 恢复。
+禁止通过刷新浏览器、工程树、属性面板或 CUA 恢复；下面的 typed `web reload` 只用于用户明确要求的
+整页刷新（典型场景：Web EDA 导入新 connector 后让已打开页面加载新代码），不替代读取故障的诊断，
+也不是卡死/持续加载编辑器的恢复手段。
+
+### Web 整页重载（typed，显式请求）
+
+```bash
+pcbpilot web reload --project <project-uuid> --doc <active-doc-uuid> --timeout 30s
+```
+
+移植自上游 easyeda-agent（f05f25c / 439137f / fe68d8b / dbaf316）。`--doc` 必须已是当前活动页
+（命令不替你切页）。该命令保存当前文档并记录组件 ID 基线，调用 typed `system.page_reload`
+（连接器在回执发出后从宿主全局 realm 调度顶层页面刷新），在 `--timeout`（1s–2m）内等待同工程的
+**新** connector windowId。若宿主恢复了同工程的另一文档，CLI 最多调用一次 typed `document.open`
+找回原文档；此调用可能晚于回包完成，失败时不自动重试。成功要求连续的同页 fresh 组件清单与基线 ID
+相同、对象状态稳定、末次 `document.current` 仍为目标页。空组件基线须经过更长的连续空读；结果中的
+`readbackScope=stable-empty-page-routing` 只证明空页路由可读，不能充当宿主的完整加载信号。其他
+已打开文档须事先保存。超时或再次漂移报告失败和未知状态，停止写入并检查实际活动页；输出含
+`saveMs`/`reconnectMs`/`elapsedMs`。之后再用 `pcbpilot health` 核对目标 project/doc 的
+`connectorVersion`。仅 Web 宿主可用；桌面版无此路径。
 
 ## 单连接恢复
 

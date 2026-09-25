@@ -572,6 +572,45 @@ const documentCurrent: Handler = async () => {
 	};
 };
 
+/**
+ * Reload the whole Web editor page after this response has left the connector
+ * queue (ported from upstream easyeda-agent f05f25c/439137f/fe68d8b). It is an
+ * explicit, user-requested typed action — the CLI `web reload` saves the exact
+ * active document first and then requires a NEW connector registration on the
+ * same project/document. It is NOT a recovery path for a hung editor.
+ */
+const systemPageReload: Handler = async (payload) => {
+	const projectUuid = requireString(payload, 'projectUuid');
+	const documentUuid = requireString(payload, 'documentUuid');
+	const context = await readResponseContext();
+	if (context.projectUuid !== projectUuid || context.documentUuid !== documentUuid) {
+		throw new ActionError(ErrorCodes.PRECONDITION_REFUSED,
+			'Web page reload refused: current project/document differs from the exact requested UUIDs.');
+	}
+	const delayMs = 500;
+	try {
+		// EasyEDA shadows both `window` and `Function` in typed handler scope.
+		// AsyncFunction's scope resolves the browser global, as in clickImportConfirm.
+		// This fixed, payload-free script was verified upstream in the Web host.
+		const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor as {
+			new (body: string): () => Promise<void>;
+		};
+		const schedule = new AsyncFunction(`
+			const page = window.top;
+			if (!page || typeof page.location.reload !== 'function') {
+				throw new Error('top-level page reload is unavailable');
+			}
+			setTimeout(() => page.location.reload(), ${delayMs});
+		`);
+		await schedule();
+	}
+	catch (err) {
+		throw new ActionError(ErrorCodes.PRECONDITION_REFUSED,
+			'Web page reload is unavailable in this connector context.', describeThrown(err));
+	}
+	return { result: { scheduled: true, delayMs, projectUuid, documentUuid }, context };
+};
+
 // ─── Schematic pages ─────────────────────────────────────────────────
 
 const schematicPagesList: Handler = async () => {
@@ -14514,6 +14553,7 @@ const HANDLERS: Record<string, Handler> = {
 	'board.create': boardCreate,
 	'board.new_pcb': pcbNewBoard,
 	'system.notify': systemNotify,
+	'system.page_reload': systemPageReload,
 	'system.api.probe': systemApiProbe,
 	'board.rename': boardRename,
 	'board.copy': boardCopy,

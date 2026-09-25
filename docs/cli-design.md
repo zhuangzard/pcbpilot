@@ -18,6 +18,7 @@ pcbpilot <domain> <action> [flags]
 | `pcbpilot bom` | BOM 导出与补全 |
 | `pcbpilot lib` | 器件库搜索、符号/封装/Device 资产创建与选型 |
 | `pcbpilot daemon` | 守护进程管理（start / stop / restart / health；restart 与 start 同为前台阻塞） |
+| `pcbpilot web` | Web 编辑器页面生命周期；`reload` 与 `doc reload` 区分，保存后等待新连接和同一文档可读（用户明确要求时使用，不作卡死恢复） |
 | `pcbpilot audit` | 操作日志查看 |
 | `pcbpilot update` | 自更新（别名 `upgrade`）：CLI 二进制 + skill 目录 → latest；连接器只报不改 |
 | `pcbpilot skill` | skill 目录单独管理（status / sync；`update` 已含其能力） |

@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+Ports from upstream easyeda-agent v1.6.0..v1.7.0 (behavior ported, adapted to pcbpilot names/ports;
+not yet live-verified on pcbpilot's connector). Requires a connector rebuild/re-import.
+
+- Typed Web editor page reload: new connector action `system.page_reload` (scheduled from the
+  host global realm through a fixed, payload-free AsyncFunction because EasyEDA shadows `window`
+  and `Function` in handler scope) and CLI `pcbpilot web reload` (saves the exact active document,
+  freezes a component-ID baseline, requires a NEW connector registration in the same project,
+  at most one typed `document.open` restore, stable fresh readback; reports `saveMs`,
+  `reconnectMs`, `elapsedMs`). Explicit, user-requested only — not a recovery path for a hung
+  editor. Upstream f05f25c, 439137f, fe68d8b, dbaf316.
+
 ## [0.3.0] — 2026-09-25
 
 Requires re-importing the connector (0.3.0) together with the matching CLI/daemon.
