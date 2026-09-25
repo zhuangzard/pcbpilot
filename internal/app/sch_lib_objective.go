@@ -20,7 +20,7 @@ func libSignalPolicyPriority(policy string) int {
 	switch policy {
 	case "direct":
 		return 0
-	case "module_port":
+	case "module_port", "net_label":
 		return 1
 	default:
 		return 2

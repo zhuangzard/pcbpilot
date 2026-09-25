@@ -233,7 +233,7 @@ func validateSchDesignPlan(p schCompositionPlan) error {
 			return fmt.Errorf("unsupported flag direction %q", f.Direction)
 		}
 		switch f.Kind {
-		case "power", "ground", "net_port_in", "net_port_out", "net_port_bi":
+		case "power", "ground", "net_port_in", "net_port_out", "net_port_bi", "net_label":
 		default:
 			return fmt.Errorf("unsupported flag kind %q", f.Kind)
 		}

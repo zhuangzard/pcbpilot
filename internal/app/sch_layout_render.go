@@ -117,7 +117,7 @@ func RenderSchematicLayoutSVG(in SchematicRenderInput) ([]byte, error) {
 				return nil, fmt.Errorf("invalid marker direction")
 			}
 			switch f.Kind {
-			case "power", "ground", "net_port_bi", "net_port_in", "net_port_out":
+			case "power", "ground", "net_port_bi", "net_port_in", "net_port_out", "net_label":
 			default:
 				return nil, fmt.Errorf("invalid marker kind")
 			}

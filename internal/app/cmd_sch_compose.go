@@ -461,7 +461,7 @@ func validateSchCompositionNets(p *powerLayoutPlan) error {
 			return fmt.Errorf("invalid marker net/offset")
 		}
 		switch f.Kind {
-		case "power", "ground", "net_port_in", "net_port_out", "net_port_bi":
+		case "power", "ground", "net_port_in", "net_port_out", "net_port_bi", "net_label":
 		default:
 			return fmt.Errorf("unsupported marker kind %s", f.Kind)
 		}

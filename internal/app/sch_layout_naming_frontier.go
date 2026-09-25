@@ -30,13 +30,7 @@ func libNamingFrontierWitness(p *powerLayoutPlan, island libIsland, policy strin
 	trial.Placements = append([]powerLayoutPlacement(nil), p.Placements...)
 	trial.Wires = clonePowerLayoutWires(p.Wires)
 	trial.Flags = append([]powerLayoutFlag(nil), p.Flags...)
-	kind := "net_port_bi"
-	switch policy {
-	case "local_ground":
-		kind = "ground"
-	case "local_power":
-		kind = "power"
-	}
+	kind := libPortMarkerKind(policy)
 	if libPlaceMidpointMarker(&trial, island, kind, budget) || libPlaceWireTreeMarker(&trial, island, kind, budget) {
 		return &trial, true
 	}
@@ -105,7 +99,7 @@ func libValidateSingletonNamingPlacement(before, after *powerLayoutPlan, placed 
 	}
 	for _, component := range geometryAfter.Placements {
 		for _, pin := range component.Pins {
-			if pin.Net == "" || policies[pin.Net] != "module_port" || routing.netPins[pin.Net] != 1 {
+			if pin.Net == "" || !libPortPolicy(policies[pin.Net]) || routing.netPins[pin.Net] != 1 {
 				continue
 			}
 			island := libIsland{net: pin.Net, pins: []powerLayoutPin{pin}}
@@ -117,7 +111,7 @@ func libValidateSingletonNamingPlacement(before, after *powerLayoutPlan, placed 
 				witness, known := cache[pin.Net]
 				if !known {
 					var complete bool
-					witness, complete = libNamingFrontierWitness(&geometryBefore, island, "module_port", budget)
+					witness, complete = libNamingFrontierWitness(&geometryBefore, island, policies[pin.Net], budget)
 					if !complete {
 						return errLibLayoutBudget
 					}
@@ -132,7 +126,7 @@ func libValidateSingletonNamingPlacement(before, after *powerLayoutPlan, placed 
 					continue // Reuse a complete, previously validated naming witness.
 				}
 			}
-			if ok, complete := libNamingFrontier(&geometryAfter, island, "module_port", budget); ok {
+			if ok, complete := libNamingFrontier(&geometryAfter, island, policies[pin.Net], budget); ok {
 				continue
 			} else if !complete {
 				return errLibLayoutBudget

@@ -684,7 +684,7 @@ func (s *schematicRepairSearch) tryTerminalRelocation(p powerLayoutPlan, refs []
 						probe = targetAllowance - targetSpent
 					}
 					beforeProbe := probe
-					reachable, complete := libNamingFrontier(&trial, libIsland{net: pin.Net, pins: []powerLayoutPin{pin}}, "module_port", &probe)
+					reachable, complete := libNamingFrontier(&trial, libIsland{net: pin.Net, pins: []powerLayoutPin{pin}}, s.input.NetPolicies[pin.Net], &probe)
 					spent := beforeProbe - probe
 					*s.budget -= spent
 					targetSpent += spent

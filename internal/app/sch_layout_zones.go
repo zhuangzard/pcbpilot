@@ -119,7 +119,7 @@ func validateSchematicZoneOwnership(in SchematicZonesInput) (*schematicZoneOwner
 	}
 	for net, zones := range netOwners {
 		switch in.NetPolicies[net] {
-		case "local_ground", "local_power", "module_port":
+		case "local_ground", "local_power", "module_port", "net_label":
 		case "direct":
 			if len(zones) > 1 {
 				return nil, fmt.Errorf("cross-zone net %s requires module_port policy", net)
@@ -200,7 +200,7 @@ func PlanSchematicZones(in SchematicZonesInput) (*SchematicZonesResult, error) {
 			ports := map[string]bool{}
 			parentNets := netsOf(z.ComponentIDs)
 			for net := range netsOf(child.ComponentIDs) {
-				if pol := in.NetPolicies[net]; parentNets[net] && (pol == "direct" || pol == "module_port") {
+				if pol := in.NetPolicies[net]; parentNets[net] && (pol == "direct" || libPortPolicy(pol)) {
 					ports[net] = true
 				}
 			}

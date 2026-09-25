@@ -338,6 +338,14 @@ func flagTextBand(c layoutComp) *layoutBBox {
 			return &layoutBBox{MinX: b.MinX, MinY: b.MaxY, MaxX: b.MinX + h, MaxY: b.MaxY + l}
 		}
 	}
+	// Predicted labels carry a point anchor box; a label measured on the host
+	// already includes its text and needs no estimated band.
+	if c.ComponentType == "netlabel" && c.Rotation != nil && c.BBox.MaxX-c.BBox.MinX <= 3 && c.BBox.MaxY-c.BBox.MinY <= 3 {
+		if dir, ok := flagDirectionOf("port", *c.Rotation); ok {
+			return netLabelTextBand(c.X, c.Y, dir, c.Net)
+		}
+		return nil
+	}
 	if c.ComponentType != "netflag" || c.Rotation == nil {
 		return nil
 	}

@@ -530,18 +530,12 @@ func libNameIslandsJointWithMode(base *powerLayoutPlan, policies map[string]stri
 			return nil, false
 		}
 		island := islands[index]
-		kind := "net_port_bi"
-		switch policies[island.net] {
-		case "local_ground":
-			kind = "ground"
-		case "local_power":
-			kind = "power"
-		}
+		kind := libPortMarkerKind(policies[island.net])
 		var solved *powerLayoutPlan
 		accept := func(candidate *powerLayoutPlan) bool {
 			if checkRemaining {
 				for _, remaining := range islands[index+1:] {
-					if policies[remaining.net] != "module_port" || libPlanNetPinCount(candidate, remaining.net) != 1 {
+					if !libPortPolicy(policies[remaining.net]) || libPlanNetPinCount(candidate, remaining.net) != 1 {
 						continue
 					}
 					probe := 512
@@ -553,7 +547,7 @@ func libNameIslandsJointWithMode(base *powerLayoutPlan, policies map[string]stri
 						return true
 					}
 					before := probe
-					reachable, complete := libNamingFrontier(candidate, remaining, "module_port", &probe)
+					reachable, complete := libNamingFrontier(candidate, remaining, policies[remaining.net], &probe)
 					*budget -= before - probe
 					if !reachable && complete {
 						lastErr = libNamingConflict(candidate, remaining)
@@ -611,13 +605,7 @@ func libNamingConflict(p *powerLayoutPlan, island libIsland) *schematicNamingCon
 func libNameOrderedIslands(p *powerLayoutPlan, policies map[string]string, islands []libIsland, budget ...*int) error {
 	// Ground constraints are tighter than signal naming at dense core pins.
 	for _, island := range islands {
-		kind := "net_port_bi"
-		if policies[island.net] == "local_ground" {
-			kind = "ground"
-		}
-		if policies[island.net] == "local_power" {
-			kind = "power"
-		}
+		kind := libPortMarkerKind(policies[island.net])
 		if libPlaceMidpointMarker(p, island, kind, budget...) {
 			continue
 		}
@@ -715,7 +703,7 @@ func libJoinNetsMode(p *powerLayoutPlan, policies map[string]string, railsOnly, 
 func schematicRerouteOrder(policies map[string]string, failed string, round int) []string {
 	var nets []string
 	for net, policy := range policies {
-		if policy == "direct" || policy == "module_port" {
+		if policy == "direct" || libPortPolicy(policy) {
 			nets = append(nets, net)
 		}
 	}
@@ -786,7 +774,7 @@ func libJoinNetsPass(p *powerLayoutPlan, policies map[string]string, railsOnly, 
 			edges = append(edges, edge{a: a, b: b, aIsland: ai, bIsland: bi, length: math.Abs(a.X-b.X) + math.Abs(a.Y-b.Y), sameComponent: sameComponent, sameSide: sameSide})
 		}
 		for i, a := range islands {
-			if !joinPorts && policies[a.net] == "module_port" {
+			if !joinPorts && libPortPolicy(policies[a.net]) {
 				continue
 			}
 			isRail := libNetPriority(policies[a.net]) < 2

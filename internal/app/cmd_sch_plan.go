@@ -103,7 +103,7 @@ func buildSchPlan(a, b connectivity.Document) (*playbook, error) {
 	for k, c := range next {
 		if _, ok := old[k]; !ok {
 			switch c.Kind {
-			case "power", "ground", "net_port_in", "net_port_out", "net_port_bi":
+			case "power", "ground", "net_port_in", "net_port_out", "net_port_bi", "net_label":
 			default:
 				return nil, fmt.Errorf("%v: explicit power/ground/net_port kind required; wire routing is not implemented", k)
 			}

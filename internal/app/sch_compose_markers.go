@@ -26,6 +26,9 @@ func compositionMarkerGeometry(p *powerLayoutPlan) ([]layoutBBox, error) {
 		if isNetPortKind(f.Kind) {
 			family, kind = "port", "netport"
 		}
+		if f.Kind == "net_label" {
+			family, kind = "port", "netlabel"
+		}
 		rotation := flagBodyRotation[family][f.Direction]
 		c := layoutComp{ID: fmt.Sprintf("marker-%03d-%s", i, f.Net), ComponentType: kind, Net: f.Net, X: x, Y: y, AnchorAvailable: true, Rotation: &rotation, BBox: &body}
 		comps = append(comps, c)

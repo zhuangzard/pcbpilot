@@ -240,7 +240,7 @@ func schematicMandatoryPeripheralSignalPolicies(input *SchematicLayoutInput) map
 	for _, c := range input.Components {
 		counts := map[string]map[string]int{}
 		for _, pin := range c.Measurement.Pins {
-			if pin.Net == "" || input.NetPolicies[pin.Net] != "module_port" || roles[pin.Net] != "signal" {
+			if pin.Net == "" || !libPortPolicy(input.NetPolicies[pin.Net]) || roles[pin.Net] != "signal" {
 				continue
 			}
 			side, err := libPinSide(pin, c.Measurement.BBox)

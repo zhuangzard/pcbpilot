@@ -240,6 +240,10 @@ func markerBBoxProfile(canonicalKind, net string) acMarkerBBoxProfile {
 		return acMarkerBBoxProfile{Near: 9.5, Far: 9.5 + acPortBodyLen, Cross: 5.5}
 	case "ground", "analog_ground", "protective_ground", "protect_ground", "gnd", "agnd", "pgnd":
 		return acMarkerBBoxProfile{Near: 9.5, Far: 19.5, Cross: 10.5}
+	case "net_label", "netlabel":
+		// A net label is text on the wire end; the anchor itself is a point.
+		// ESTIMATE until calibrated on the host (see netLabelTextBand).
+		return acMarkerBBoxProfile{Near: 1, Far: 2, Cross: 1}
 	default: // power and any future netflag family: conservative power envelope
 		return acMarkerBBoxProfile{Near: 4.5, Far: 10.5, Cross: 5.5}
 	}
@@ -397,6 +401,9 @@ func predictedMarkerBBox(x, y float64, canonicalKind, direction, net string) lay
 func predictedFlagTextBand(x, y float64, body layoutBBox, canonicalKind, direction, net string) *layoutBBox {
 	if net == "" {
 		return nil
+	}
+	if canonicalKind == "net_label" || canonicalKind == "netlabel" {
+		return netLabelTextBand(x, y, direction, net)
 	}
 	switch canonicalKind {
 	case "net_port_in", "net_port_out", "net_port_bi", "netport":
@@ -1076,4 +1083,26 @@ func applyLaneStagger(all []acCandidate, lanes map[string]float64,
 	// 哪条路都通不了 —— 退回原来的最优。挤一点是可见的、可后修的;短路和压器件
 	// 不是。宁可留一条 marker-overlap 让 `sch check` 报出来。
 	return best
+}
+
+// netLabelTextBand: the name of a net label, drawn from the lead end outward.
+// ESTIMATE (2026-09-24) until measured on the host: 4.5 raw per character
+// (+2) along the lead - designators measure ~3 raw per character at 8 raw
+// height, so this is conservative - and 8 raw across, on the upper/left side
+// of the lead. Across the lead it fits a 10-raw pin pitch with 2 raw to spare,
+// which is why same-sheet signals use labels instead of 11-raw port bodies.
+func netLabelTextBand(x, y float64, direction, net string) *layoutBBox {
+	l := 4.5*float64(len(net)) + 2
+	const h, gap = 8.0, 1.0 // text sits 1 raw off its own lead
+	switch direction {
+	case "left":
+		return &layoutBBox{MinX: x - l, MinY: y + gap, MaxX: x, MaxY: y + gap + h}
+	case "right":
+		return &layoutBBox{MinX: x, MinY: y + gap, MaxX: x + l, MaxY: y + gap + h}
+	case "up":
+		return &layoutBBox{MinX: x - gap - h, MinY: y, MaxX: x - gap, MaxY: y + l}
+	case "down":
+		return &layoutBBox{MinX: x - gap - h, MinY: y - l, MaxX: x - gap, MaxY: y}
+	}
+	return nil
 }

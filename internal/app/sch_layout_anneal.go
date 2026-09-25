@@ -420,6 +420,8 @@ func (s *annealSolver) cost(st annealState) (float64, bool) {
 			switch s.policies[pin.Net] {
 			case "module_port", "local_ground", "local_power":
 				l = 35
+			case "net_label":
+				l = 20
 			}
 			l += s.leadBoost[c.Designator+"."+pin.Number]
 			side, err := libPinSide(pin, c.BBox)
@@ -459,8 +461,8 @@ func (s *annealSolver) cost(st annealState) (float64, bool) {
 				}
 				kind := ""
 				switch s.policies[pin.Net] {
-				case "module_port":
-					kind = "net_port_bi"
+				case "module_port", "net_label":
+					kind = libPortMarkerKind(s.policies[pin.Net])
 				case "local_ground":
 					kind = "ground"
 				case "local_power":

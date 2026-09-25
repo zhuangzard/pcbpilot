@@ -64,7 +64,7 @@ func planSchCompositionTerminals(p *powerLayoutPlan, terminals []schCompositionT
 			kind = "net_port_bi"
 		}
 		switch kind {
-		case "net_port_in", "net_port_out", "net_port_bi", "power", "ground":
+		case "net_port_in", "net_port_out", "net_port_bi", "power", "ground", "net_label":
 		default:
 			return fmt.Errorf("terminal %s.%s has unsupported kind %q", key.ref, key.pin, kind)
 		}
@@ -144,7 +144,7 @@ func schTerminalSegments(p *powerLayoutPlan) ([]powerLayoutWire, error) {
 	segments := append([]powerLayoutWire(nil), p.Wires...)
 	for _, f := range p.Flags {
 		switch f.Kind {
-		case "net_port_in", "net_port_out", "net_port_bi", "power", "ground":
+		case "net_port_in", "net_port_out", "net_port_bi", "power", "ground", "net_label":
 		default:
 			return nil, fmt.Errorf("terminal plan contains unsupported marker kind %q", f.Kind)
 		}
