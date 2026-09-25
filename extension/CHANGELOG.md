@@ -26,6 +26,9 @@ not yet live-verified on pcbpilot's connector). Requires a connector rebuild/re-
 - CLI: an unknown subcommand under a command group (`pcbpilot sch not-a-command`,
   `pcbpilot pcb config typo`) now fails with exit 1 and "unknown command" instead of printing
   help with exit 0; a bare group still prints help. Upstream bf355d7.
+- CLI: `pcbpilot project find --timeout <d>` bounds the whole lookup scan (default 90s, 5s–10m;
+  one detail read per project UUID made a 52-project team exceed the old ~20s budget). A timeout
+  is still `unknown`, never absence. Upstream c6bdc05.
 
 ## [0.3.0] — 2026-09-25
 
