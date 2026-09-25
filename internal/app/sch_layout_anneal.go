@@ -64,9 +64,11 @@ var annealSlotReach, annealSlotLateral = 120.0, 60.0
 
 // annealLabelCost / annealOrderCost: boundary-labelling and river-routing cost
 // terms. OFF by default - stress L1 (six affected zones, min budget):
-//   label: LCD 200k->20k, MICRO_SD 800k->50k, ESP32-V3 MCU 800k->200k, but
-//          CAN 20k->200k, ESP32-V4 MCU 200k->800k, AT32 MCU 200k->unsolved;
-//   order: no gains, CAN 20k->200k.
+//
+//	label: LCD 200k->20k, MICRO_SD 800k->50k, ESP32-V3 MCU 800k->200k, but
+//	       CAN 20k->200k, ESP32-V4 MCU 200k->800k, AT32 MCU 200k->unsolved;
+//	order: no gains, CAN 20k->200k.
+//
 // A global label term helps label-dense attachments and hurts the rest; it is
 // kept for the staged solver, which applies it only to the dense stage.
 var annealLabelCost, annealOrderCost = false, false
@@ -112,6 +114,11 @@ type annealSolver struct {
 	refs      map[string]string // designator → component id
 	roles     map[string]string // peripheral-direct net roles
 	netPins   map[string]int    // net → connected pins in this zone
+	labelOn   bool              // boundary-label cost for this solver (staged dense pass)
+	frozen    []bool            // parts fixed by an earlier stage (not mutated)
+	// closest-to-legal state seen (diagnostics for "no overlap-free placement")
+	bestIllegal    float64
+	bestIllegalWhy string
 	evals     int
 }
 
@@ -145,6 +152,13 @@ func solveSchematicLayoutAnneal(input SchematicLayoutInput, measured map[string]
 		return nil, err
 	}
 	var lastErr error
+	if annealStaged {
+		if out, err := s.staged(routing); out != nil {
+			return out, nil
+		} else if err != nil {
+			lastErr = err
+		}
+	}
 	best := s.seed()
 	learned := map[string]int{} // conflict fingerprint -> round it was learned in
 	for round := 0; round < annealRounds; round++ {
@@ -157,7 +171,7 @@ func solveSchematicLayoutAnneal(input SchematicLayoutInput, measured map[string]
 		}
 		finals := s.anneal(best, iters)
 		if len(finals) == 0 {
-			lastErr = fmt.Errorf("annealing found no overlap-free placement")
+			lastErr = fmt.Errorf("annealing found no overlap-free placement (closest: %s)", s.bestIllegalWhy)
 			break
 		}
 		failed := 0
@@ -437,7 +451,7 @@ func (s *annealSolver) cost(st annealState) (float64, bool) {
 	// as real an obstacle as a part. Nets shared inside the zone can be named
 	// anywhere on their tree and reserve nothing here.
 	labelHits := 0.0
-	if annealLabelCost {
+	if annealLabelCost || s.labelOn {
 		for i, c := range p.Placements {
 			for _, pin := range c.Pins {
 				if pin.Net == "" || s.netPins[pin.Net] > 1 {
@@ -562,14 +576,25 @@ func (s *annealSolver) cost(st annealState) (float64, bool) {
 		env.MaxX, env.MaxY = math.Max(env.MaxX, c.BBox.MaxX), math.Max(env.MaxY, c.BBox.MaxY)
 	}
 	area := (env.MaxX - env.MinX) * (env.MaxY - env.MinY)
+	if overlap+blocked < s.bestIllegal || s.bestIllegal == 0 {
+		s.bestIllegal, s.bestIllegalWhy = overlap+blocked, fmt.Sprintf("overlap %.1f, blocked leads %.1f", overlap, blocked)
+	}
 	return 50*overlap + 200*blocked + 150*facing + 100*labelHits + 150*crossed + wire + 0.002*area, overlap == 0 && blocked == 0
 }
 
 // seed places parts greedily in order, each at its cheapest slot given the
 // parts already fixed (later parts at their first slot meanwhile).
 func (s *annealSolver) seed() annealState {
-	st := make(annealState, len(s.parts))
+	return s.seedFrom(make(annealState, len(s.parts)))
+}
+
+// seedFrom greedily seeds every part that is not frozen; frozen parts keep
+// their preset slot.
+func (s *annealSolver) seedFrom(st annealState) annealState {
 	for i := range s.parts {
+		if s.frozen != nil && s.frozen[i] {
+			continue
+		}
 		bestK, bestC := 0, math.Inf(1)
 		for k := 0; k < s.parts[i].choices(); k += 3 {
 			st[i] = k
@@ -612,10 +637,19 @@ func (s *annealSolver) anneal(start annealState, iters int) []annealState {
 	if _, ok := s.cost(cur); ok {
 		record(cur, curC)
 	}
+	var mutable []int
+	for i := range s.parts {
+		if s.frozen == nil || !s.frozen[i] {
+			mutable = append(mutable, i)
+		}
+	}
+	if len(mutable) == 0 {
+		return []annealState{cur}
+	}
 	t0, t1 := 400.0, 1.0
 	for it := 0; it < iters && *s.budget > 0; it++ {
 		t := t0 * math.Pow(t1/t0, float64(it)/float64(iters))
-		i := s.rng.Intn(len(s.parts))
+		i := mutable[s.rng.Intn(len(mutable))]
 		old := cur[i]
 		part := s.parts[i]
 		n := len(part.slots)
@@ -728,4 +762,162 @@ func schematicAnnealHandlesRotations(input SchematicLayoutInput, budget int) boo
 		return true
 	}
 	return peripherals >= annealFallbackMinPeripherals && budget >= annealFallbackMinBudget
+}
+
+// annealStaged: place the tight parts first, freeze them, then the rest
+// (dense-first staging, 2026-09-24). Tight = hangs on a core pin with a
+// same-side neighbour within one pitch that must carry its own label, or
+// wires to two or more core signal pins (crystal, SWD header); their host
+// chain comes along. Stage 1 anneals only those with the boundary-label cost
+// on; stage 2 freezes them and anneals the rest with it off. Up to three
+// stage-1 layouts are tried before the ordinary rounds run.
+// OFF: stress L1 made it a net loss as-is (ESP32 MCU V3/V4 unsolved, BUZZER
+// 20k -> 50k: stage-1 gates spend the budget the learned rounds need) and it
+// cannot solve the dense-edge cases, whose root cause is the straight-lead-only
+// naming (a pin between two port-labelled neighbours needs bent leaders).
+var annealStaged = false
+
+func (s *annealSolver) denseParts() []bool {
+	dense := make([]bool, len(s.parts))
+	index := map[string]int{}
+	for i, part := range s.parts {
+		index[part.id] = i
+	}
+	needsLabel := func(net string) bool {
+		if net == "" || s.netPins[net] > 1 {
+			return false
+		}
+		switch s.policies[net] {
+		case "module_port", "local_ground", "local_power":
+			return true
+		}
+		return false
+	}
+	signal := func(net string) bool {
+		pol := s.policies[net]
+		return net != "" && pol != "local_ground" && pol != "local_power"
+	}
+	for i, part := range s.parts {
+		if part.hostID == s.input.CoreComponentID {
+			if hp, ok := libPin(s.core, part.hostPin); ok {
+				for _, n := range s.core.Pins {
+					same := n.Rotation != nil && hp.Rotation != nil && *n.Rotation == *hp.Rotation
+					if n.Number != hp.Number && same && needsLabel(n.Net) && math.Abs(n.X-hp.X)+math.Abs(n.Y-hp.Y) <= 10.5 {
+						dense[i] = true
+					}
+				}
+			}
+		}
+		links := 0
+		for _, op := range part.measured.Pins {
+			if !signal(op.Net) {
+				continue
+			}
+			for _, cp := range s.core.Pins {
+				if cp.Net == op.Net {
+					links++
+					break
+				}
+			}
+		}
+		if links >= 2 {
+			dense[i] = true
+		}
+	}
+	for changed := true; changed; {
+		changed = false
+		for i, part := range s.parts {
+			if j, ok := index[part.hostID]; ok && dense[i] && !dense[j] {
+				dense[j], changed = true, true
+			}
+		}
+	}
+	return dense
+}
+
+func (s *annealSolver) staged(routing *schematicRoutingContext) (*SchematicLayoutResult, error) {
+	dense := s.denseParts()
+	var sub []*annealPart
+	var at []int
+	for i, d := range dense {
+		if d {
+			sub = append(sub, s.parts[i])
+			at = append(at, i)
+		}
+	}
+	if len(sub) == 0 || len(sub) == len(s.parts) {
+		return nil, nil // nothing to stage, or everything is tight: ordinary rounds
+	}
+	first := *s
+	first.parts, first.labelOn, first.frozen = sub, true, nil
+	iters := 20000
+	if *s.budget < 6000 {
+		iters = max(2000, *s.budget*2)
+	}
+	stage1 := first.anneal(first.seed(), iters)
+	s.evals = first.evals
+	s.frozen = dense
+	defer func() { s.frozen = nil }()
+	var lastErr error
+	for k, f1 := range stage1 {
+		if k == annealStagedAlternatives || *s.budget <= 0 {
+			break
+		}
+		preset := make(annealState, len(s.parts))
+		for j, i := range at {
+			preset[i] = f1[j]
+		}
+		finals := s.anneal(s.seedFrom(preset), iters)
+		for n, st := range finals {
+			if n == 2 {
+				break
+			}
+			out, err := s.gate(st, n == 0, routing, fmt.Sprintf("anneal-v1 staged (dense %d/%d, stage-1 #%d)", len(sub), len(s.parts), k+1))
+			if out != nil {
+				return out, nil
+			}
+			if err != nil {
+				lastErr = err
+			}
+		}
+	}
+	if lastErr != nil {
+		return nil, fmt.Errorf("staged: %w", lastErr)
+	}
+	return nil, nil
+}
+
+const annealStagedAlternatives = 3
+
+// gate runs one terminal-gate attempt (routing, naming, peripheral-direct).
+func (s *annealSolver) gate(st annealState, lead bool, routing *schematicRoutingContext, strategy string) (*SchematicLayoutResult, error) {
+	p := s.plan(st)
+	if err := validateLibGeometry(&p); err != nil {
+		return nil, err
+	}
+	slice := min(*s.budget, max(6000, *s.budget/3))
+	if lead {
+		slice = min(*s.budget, max(6000, *s.budget*3/4))
+	}
+	slice = min(slice, max(6000, annealFinishAttemptCap))
+	if annealCandidateHook != nil {
+		annealCandidateHook(p)
+	}
+	spent := slice
+	done, err := libFinishSchematicLayoutRegenerate(p, s.policies, &slice, routing)
+	*s.budget -= spent - slice
+	if annealAttemptHook != nil {
+		annealAttemptHook(-1, spent-slice, err)
+	}
+	if err != nil {
+		s.learn(err, p)
+		return nil, err
+	}
+	tmp := &SchematicLayoutResult{Placements: done.Placements, Wires: done.Wires, Flags: done.Flags, ComponentIDs: s.refs}
+	if perr := validateSchematicLayoutPeripheralDirect(tmp, s.input.CoreComponentID, s.roles); perr != nil {
+		s.pullOwnedPeripherals()
+		return nil, perr
+	}
+	return &SchematicLayoutResult{Placements: done.Placements, Wires: done.Wires, Flags: done.Flags, Score: libCandidateScore(done),
+		Search: &SchematicLayoutSearchDiagnostics{Strategy: fmt.Sprintf("%s, %d evaluations", strategy, s.evals), MovedComponents: []string{}}}, nil
 }
