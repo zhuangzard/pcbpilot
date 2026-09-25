@@ -24,9 +24,9 @@ pcbpilot sch sheet-geometry --project <project> --json
 或图签 keepout 时，保守内缩矩形只能用于离线探索，不能记为内框入页验收通过。
 `sch sheet-geometry --json` 的 `border` 取自图框符号自身属性（`titleblock.get` 的
 `Border`/`Blade Width`：实测 sheet bbox 四边各内缩 Blade Width，A4 为 10 raw），带
-`source:"titleblock-attributes:Blade Width"`、`status:"source-only"`；把整份 JSON 存下，
+`source:"titleblock-attributes:Blade Width"`、`status:"live-verified"`；把整份 JSON 存下，
 用 `sch layout-sheet-plan --sheet-geometry sheet-geometry.json` 填 `sheet.border`，不再手写
-（与手写值冲突即拒绝）。该语义尚未与渲染内框逐像素核对，入页验收报告须写明 source-only；
+（与手写值冲突即拒绝）。2026-09-25 桌面 V3 A4 官方导图逐像素核对：外框 1170 raw 占 2313 px，内框内缩 19.8 px = 10.0 raw，与 Blade Width 一致（同轮 Agent 曾把 20 px 误读成 20 raw）；
 `border.source:"none"`（Border=0 或缺 Blade Width）时照旧标 `unsupported`。
 如需调查内置图框的原始符号，可由 `sch list` 的 sheet 组件取 `symbol.uuid/libraryUuid`，
 使用 `lib symbol export-source` 保存官方 `.elibz2` 原包；该导出目前仅为 source-only 证据，

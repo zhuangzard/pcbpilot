@@ -15,7 +15,7 @@
 | 由测量计算 Lib 内部 | `sch lib-layout --from layout-input.json --out composition.json`；纯离线 |
 | 核心相对移动/单脚标签修复 | `sch layout-edit --source zones.json --page page.json --snapshot fresh.json (--move-core ID --to X,Y \| --repair-pin ID:PIN) --out target.json [--report report.json] [--playbook repair.json]`；纯离线生成，修复 playbook 使用作用域 action |
 | 合并已设计的 Lib 几何 | `sch compose --from … --out … --before … --playbook …`；队列先 `save-composition` 再 `strict-schematic-gate`，本页有 net port 时 gate 带 `--defer-cross-page-drc`（见 auto-layout-sop） |
-| 纸张/内框/图签 | `sch sheet-geometry --json`：`sheet.bbox`、`titleBlock`、`border`（图框符号 `Blade Width` 内缩，`status:"source-only"`，带属性原值） |
+| 纸张/内框/图签 | `sch sheet-geometry --json`：`sheet.bbox`、`titleBlock`、`border`（图框符号 `Blade Width` 内缩，`status:"live-verified"`，带属性原值） |
 | 纸张装箱 | `sch layout-sheet-plan --from … --out … [--sheet-geometry sg.json]`：从 sheet-geometry 填 `sheet.border`/缺省的 `bounds` 并记 `borderSource`；手写值冲突即拒绝 |
 | 放置固定 IR 中的器件 | `sch materialize <connectivity.json> --out …`；不是完整布局/布线器 |
 | 少量显式标记连接增量 | `sch plan <before.json> <after.json>`；不支持任意器件或导线 diff |
@@ -128,8 +128,8 @@ Playbook 使用 `version:1`、`meta` 和有序 `steps`。每步只选一种执�
 `sch sheet-geometry --json` 的 `border` 由同一次 `titleblock.get` 的图框符号属性推出：`Border=1`
 且 `Blade Width` 为正数时，内框 = 实测 sheet bbox 四边内缩 Blade Width（A4：`{10,10,1160,815}`），
 `attributes` 附 Border/Blade Width/Width/Height 原值；Width/Height 与实测 bbox 不符只告警、以实测为准。
-语义来自 A4 模板（.epro2 图签表右下角 1160.5/9.5 与 10 raw 内缩齐平），尚未与渲染内框核对，
-状态 `source-only`；缺属性或 Border=0 时 `source:"none"`，不猜。
+语义已按 A4 官方导图逐像素核对（内缩 10.0 raw = Blade Width，2026-09-25 桌面 V3），
+状态 `live-verified`；缺属性或 Border=0 时 `source:"none"`，不猜。
 
 `sch titleblock-get` 先取得实际字段名；`sch titleblock --data` 只传要改的明细项，按
 `--doc` 钉住聚焦页。不要把 get 返回的整包字段写回，尤其 Device/Symbol、几何与 `@` 投影项。

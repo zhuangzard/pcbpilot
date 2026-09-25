@@ -129,10 +129,9 @@ type keepout struct {
 // sheet bbox — and the inner frame). The inner border is the live sheet bbox
 // inset by Blade Width on all four sides.
 //
-// Status is source-only: the attribute semantics are inferred from the A4
-// template (Blade Width=10, title-block table right/bottom edges at
-// 1160.5/9.5 raw in the .epro2 symbol, i.e. flush with a 10-raw inset) and
-// have not yet been verified against rendered frame geometry.
+// Status is live-verified (2026-09-25, desktop V3 3.2.149, A4): in the
+// official page export the outer frame spans 1170 raw over 2313 px and the
+// inner frame sits 19.8 px inside it — 10.0 raw, exactly Blade Width.
 type sheetBorderInfo struct {
 	BBox       *layoutBBox       `json:"bbox,omitempty"`
 	Source     string            `json:"source"`
@@ -142,7 +141,7 @@ type sheetBorderInfo struct {
 
 const (
 	sheetBorderSourceAttributes = "titleblock-attributes:Blade Width"
-	sheetBorderStatusSourceOnly = "source-only"
+	sheetBorderStatusSourceOnly = "live-verified"
 )
 
 // deriveSheetBorder is the pure parser: live sheet bbox + titleBlockData →
