@@ -29,6 +29,10 @@ not yet live-verified on pcbpilot's connector). Requires a connector rebuild/re-
 - CLI: `pcbpilot project find --timeout <d>` bounds the whole lookup scan (default 90s, 5s–10m;
   one detail read per project UUID made a 52-project team exceed the old ~20s budget). A timeout
   is still `unknown`, never absence. Upstream c6bdc05.
+- CLI: known-bug advisories on stderr (Chinese, linking upstream issues #256/#257/#258 observed
+  on Web 4.1.60) before `sch modify`, `sch no-connect --clear` and non-dry-run `pcb config` rule
+  writes. Raw stdout JSON and exit codes are unchanged; reads, help, `--dry-run` and NC set stay
+  silent. Upstream 1414784 (its extra non-zero exit for `sch` `verified:false` not ported).
 
 ## [0.3.0] — 2026-09-25
 

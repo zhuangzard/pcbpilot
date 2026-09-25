@@ -95,6 +95,13 @@ rebind 使用候选优先事务：先回读 Device association，候选创建且
 回放 `propertiesBefore` 只能恢复覆盖值，不能靠 merge 删除本次新增的键。不要把库记录的
 `Designator`、`Unique ID` 等投影字段整包写入实例。
 
+已知宿主问题提示（移植自上游 easyeda-agent 1414784，问题由上游跟踪，Web 4.1.60 观察）：
+`sch modify` 曾间歇报 cmdKey（[上游 #256](https://github.com/zhoushoujianwork/easyeda-agent/issues/256)），
+`sch no-connect --clear` 曾间歇未生效（[上游 #257](https://github.com/zhoushoujianwork/easyeda-agent/issues/257)），
+不假定同源。这两条命令写入前在 stderr 打印 `warning [bug #…]` 提示；stdout 原始 JSON 与退出码
+不变，提示不说明本次失败、不触发重试，也不代表 bug 已修复或已在 V3/桌面版复现。失败后先 fresh
+`sch list`（NC 用 `--include-pins` 核对 `noConnected:false`）再决定，关键结果保存重载再读。
+
 清页先看 `sch clear --dry-run`，只在已授权的重建范围内执行；默认保留 sheet。
 清后用 `sch clear --dry-run --expect-empty` 核对所有非保留图元，读取失败不是空页。
 新 frame 和旧 zone-draw 分别拥有自己的图元，清旧标注用其对应命令，不按类型删除用户图形。
