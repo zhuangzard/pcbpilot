@@ -102,6 +102,35 @@ DRC 规则，再修复可以确定的问题。不要凭截图猜连接；所有�
 
 ## 效果展示
 
+### ESP32-S3 四层板：一句需求交给新 Agent，到 DRC 通过（v0.3.0，2026-09-25 实测）
+
+输入只有 [esp32MiniRequire.md](esp32MiniRequire.md) 第一节的客户原始需求（不给 BOM、不给网表），交给一个
+**没有任何上下文的新 Agent**，约 36 分钟自行完成：
+
+- **原理图**：自行选型，画两页原理图（31 个器件、21 个网络，按功能模块加框），回读逐脚 0 差异，两页 strict gate 通过；
+- **布局**：`pcb auto` 求出 53.5 × 39.5 mm 的最小板框，四角 M3，ESP32 天线独占上边并全层禁布，USB-C 贴下边外伸
+  0.5 mm；原理图模块框决定 PCB 归属（降压电容跟降压芯片、EN 复位电容贴 EN 脚、ESD 贴 USB 口）；两轮自检
+  （第 2 轮保存 → 重载 → 重读 → 重新出图）后进入布线；
+- **布线**：4 层（TOP / IN1 GND 平面 / IN2 电源分区 / BOTTOM），信号 30/30、平面连接 54/54，综合分 92.3；
+  原生 DRC 通过、`pcb check` 0 ERROR、丝印无重叠、逐焊盘对账 0 差异、保存重开后内容哈希不变；
+- **反哺工具**：这一轮暴露的 11 个问题（USB-C 封装定位孔未建模、USB 差分线跨电源分割、丝印不收敛、
+  按工程名检查误报等）全部修进仓库，并在同一块板上现场复测通过，随 v0.3.0 发布；
+- 宿主：EasyEDA Pro **V3 3.2.149 桌面版**（国际版）。
+
+| 原理图第 1 页（USB-C / CH340C 串口与自动下载 / 5V 输入） | 原理图第 2 页（降压 / ESP32-S3 / 按键 / LED） |
+|---|---|
+| <img src="docs/assets/esp32-mini-sch-p1.png" width="420" alt="ESP32 最小系统原理图第 1 页"/> | <img src="docs/assets/esp32-mini-sch-p2.png" width="420" alt="ESP32 最小系统原理图第 2 页"/> |
+
+| 布局（两轮自检后、布线前） | 布线 + 铺铜 + 丝印（终检通过） |
+|---|---|
+| <img src="docs/assets/esp32-mini-layout.png" width="420" alt="ESP32 最小系统 PCB 布局"/> | <img src="docs/assets/esp32-mini-routed.png" width="420" alt="ESP32 最小系统 PCB 布线完成"/> |
+
+过程、问题与修法见 [pcb-auto 实测记录](.agents/skills/pcbpilot/references/pcb-auto.md#实测记录)。
+
+## 上游 easyeda-agent 的案例（分叉前）
+
+以下三个案例由原项目作者 [zhoushoujian](https://github.com/zhoushoujianwork) 在分叉前完成，保留在此作为能力来源的记录。
+
 ### 从模块尺寸图到个人私有库
 
 **需求：** 按用户提供的 AS07-M1101D-SMA 尺寸与引脚图创建个人库，原理图保持双排引脚的
@@ -130,27 +159,6 @@ DRC 规则，再修复可以确定的问题。不要凭截图猜连接；所有�
 
 标准考试来源：**嘉立创 PCB 初级考试题第十八期**。执行步骤、参数和验证边界见
 [260919 AT32F415 考试执行指导](docs/260919-exam-execution-guide.md)。
-
-### ESP32-S3 四层板：从一句需求到 DRC 通过（2026-09-25 实测）
-
-输入只有 [esp32MiniRequire.md](esp32MiniRequire.md) 第一节的客户原始需求（不给 BOM、不给网表）。
-Agent 自行选型、画两页原理图（30 个器件、95 个引脚网络，回读 0 差异），导入 PCB 后：
-
-- `pcb auto` 搜索出 43.5 × 43 mm 的最小可行板框，四角 M3，ESP32 天线贴边并留两侧净空；
-  原理图模块归属驱动布局（降压输出电容跟随降压芯片，ESD 贴 USB 口）；
-- 两轮自检后**停下来等用户确认布局**，确认后整板布线：4 层（TOP / GND 平面 / 电源分区 / BOTTOM），
-  30/30 布通，原生 DRC 通过，逐焊盘对账 0 差异，保存重开后内容哈希不变；
-- 宿主：EasyEDA Pro **V3 3.2.149 桌面版**，连接器 0.2.8。
-
-| 原理图（第 1 页：电源 / 降压 / USB / 串口） | 原理图（第 2 页：ESP32 / LED / 自动下载 / 按键） |
-|---|---|
-| <img src="docs/assets/esp32-mini-sch-p1.png" width="420" alt="ESP32 最小系统原理图第 1 页"/> | <img src="docs/assets/esp32-mini-sch-p2.png" width="420" alt="ESP32 最小系统原理图第 2 页"/> |
-
-| 布局（用户确认版） | 布线 + 铺铜 + 丝印（终检通过） |
-|---|---|
-| <img src="docs/assets/esp32-mini-layout.png" width="420" alt="ESP32 最小系统 PCB 布局"/> | <img src="docs/assets/esp32-mini-routed.png" width="420" alt="ESP32 最小系统 PCB 布线完成"/> |
-
-过程中发现并修复的问题与参数见 [pcb-auto 实测记录](.agents/skills/pcbpilot/references/pcb-auto.md#实测记录)。
 
 ### 数据驱动的原理图组合
 

@@ -1,6 +1,11 @@
 # 实战案例:一份需求文档 → AI 画完 ESP32-S3 四层板
 
-## 2026-09-25 回归(当前版本)
+## 2026-09-25 v0.3.0:新 Agent 从零独立完成(当前版本)
+
+同一份需求交给没有上下文的新 Agent:31 个器件、21 个网络,53.5 × 39.5 mm,信号 30/30、平面 54/54、综合分 92.3,
+原生 DRC 通过;这一轮暴露的 11 个工具问题已修复并现场复测。图与数据见 [README 效果展示](../README.md#效果展示)。
+
+## 2026-09-25 回归(主会话,连接器 0.2.8)
 
 - **输入**:只给 [`esp32MiniRequire.md`](../esp32MiniRequire.md) 第一节客户原始需求(不给 BOM/网表)。
 - **宿主**:EasyEDA Pro **V3 3.2.149 桌面版(国际版器件库)**,PCB Pilot Connector 0.2.8。
@@ -14,11 +19,11 @@
 
 | 原理图第 1 页 | 原理图第 2 页 |
 |---|---|
-| <img src="assets/esp32-mini-sch-p1.png" width="420" alt="原理图第 1 页"/> | <img src="assets/esp32-mini-sch-p2.png" width="420" alt="原理图第 2 页"/> |
+| <img src="assets/esp32-mini-v1-sch-p1.png" width="420" alt="原理图第 1 页"/> | <img src="assets/esp32-mini-v1-sch-p2.png" width="420" alt="原理图第 2 页"/> |
 
 | 布局(用户确认版) | 布线 + 铺铜 + 丝印 |
 |---|---|
-| <img src="assets/esp32-mini-layout.png" width="420" alt="PCB 布局"/> | <img src="assets/esp32-mini-routed.png" width="420" alt="PCB 布线完成"/> |
+| <img src="assets/esp32-mini-v1-layout.png" width="420" alt="PCB 布局"/> | <img src="assets/esp32-mini-v1-routed.png" width="420" alt="PCB 布线完成"/> |
 
 这次运行暴露并修复的问题(板框搜索、模块归属、天线禁布、连接器开口、孔距、焊盘内过孔、间距微修、
 丝印转正、铺铜替换范围等)见 [pcb-auto 实测记录](../.agents/skills/pcbpilot/references/pcb-auto.md#实测记录)

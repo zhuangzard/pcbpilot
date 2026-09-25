@@ -249,7 +249,43 @@ for the tool inventory and development checks.
 
 ## Showcase
 
-### Access control example: local data → SCH Apply → a real schematic
+### ESP32-S3 4-layer board: one requirement to a fresh agent, to a clean DRC (v0.3.0, live 2026-09-25)
+
+The only input was the customer's raw requirement — section 1 of
+[esp32MiniRequire.md](esp32MiniRequire.md), no BOM, no netlist — handed to a **fresh agent with no
+prior context**. In about 36 minutes it:
+
+- **Schematic**: selected the parts and drew two sheets (31 parts, 21 nets, framed functional modules);
+  pin-level readback 0 differences, strict gate passed on both sheets.
+- **Layout**: `pcb auto` searched a 53.5 × 39.5 mm minimum frame with M3 holes in the corners, the
+  ESP32 antenna alone on the top edge with an all-layer keep-out, USB-C on the bottom edge (0.5 mm
+  overhang). Schematic module frames drove PCB ownership (buck caps with the buck, the EN reset cap at
+  the EN pin, ESD at the USB port). Two self-check rounds (round 2: save → reload → fresh dump →
+  fresh render) before routing.
+- **Routing**: 4 layers (TOP / IN1 GND plane / IN2 power split / BOTTOM), signals 30/30, plane
+  connections 54/54, joint score 92.3; native DRC clean, `pcb check` 0 ERROR, no silk overlaps,
+  pad-by-pad netlist diff 0, content hash unchanged across save → reopen.
+- **Tools improved**: the 11 issues this run exposed (USB-C footprint locating holes not modelled, the
+  USB pair crossing a power split, silk-align not converging, a gate false positive by project name,
+  …) were fixed in the repo and re-verified live on the same board, shipped in v0.3.0.
+- Host: EasyEDA Pro **V3 3.2.149 desktop** (international).
+
+| Schematic sheet 1 (USB-C / CH340C serial + auto-download / 5 V input) | Schematic sheet 2 (buck / ESP32-S3 / keys / LED) |
+|---|---|
+| <img src="docs/assets/esp32-mini-sch-p1.png" width="420" alt="ESP32 mini schematic sheet 1"/> | <img src="docs/assets/esp32-mini-sch-p2.png" width="420" alt="ESP32 mini schematic sheet 2"/> |
+
+| Layout (after two self-check rounds, before routing) | Routed + pours + silk (final checks passed) |
+|---|---|
+| <img src="docs/assets/esp32-mini-layout.png" width="420" alt="ESP32 mini PCB layout"/> | <img src="docs/assets/esp32-mini-routed.png" width="420" alt="ESP32 mini PCB routed"/> |
+
+Process, findings and fixes: [pcb-auto live records](.agents/skills/pcbpilot/references/pcb-auto.md#实测记录).
+
+### Upstream easyeda-agent cases (before the fork)
+
+The cases below were built by the original author, [zhoushoujian](https://github.com/zhoushoujianwork),
+before pcbpilot forked; they are kept as a record of where the capabilities came from.
+
+#### Access control example: local data → SCH Apply → a real schematic
 
 Components, physical pins, stable net IDs, and NC states live in a local
 connectivity graph. The agent calculates component positions, orientations,
@@ -259,7 +295,7 @@ designators and component identities stay intact.
 
 **23 components · 165 physical pins · 28 nets · 2 schematic sheets**
 
-#### Power and RF controller
+##### Power and RF controller
 
 ![Access control example: power and RF controller sheet, with pin-oriented peripheral wiring and pink dashed functional frames](docs/images/access-control-power-rf.png)
 
@@ -267,7 +303,7 @@ Power, the RF controller, and the programming interface each form a Lib.
 Peripheral wiring follows pin directions, terminal wires use staggered lengths,
 and pink dashed frames with 0.2 inch titles are calculated from the data.
 
-#### Talk controller and peripheral interfaces
+##### Talk controller and peripheral interfaces
 
 ![Access control example: talk and interface sheet, with compact functional frames in Z-order reading sequence](docs/images/access-control-talk-interfaces.png)
 
@@ -276,7 +312,7 @@ contents with a minimum inset; frames align at the top of each row, and the next
 row starts below its tallest frame. Titles use available space above or below
 the circuit to reduce height.
 
-#### SCH Apply in action
+##### SCH Apply in action
 
 ![Actual SCH Apply stages for the access control example, captured and played back at an accelerated pace](docs/assets/access-control-sch-apply.gif)
 
@@ -287,7 +323,7 @@ Both sheets passed local layout and connectivity checks with zero errors and
 warnings. Official DRC still reports 3 warnings, so the strict gate did not pass;
 some text placement needs refinement. See [the 1.4 validation record](docs/releases/release-1.4.md) for the tested scope.
 
-### Historical PCB case: ESP32-S3-WROOM-1 minimal system board
+#### Historical PCB case (upstream): ESP32-S3-WROOM-1 minimal system board
 
 This separate regression case starts from the raw requirement in
 [esp32MiniRequire.md](esp32MiniRequire.md), with the agent selecting real LCSC
