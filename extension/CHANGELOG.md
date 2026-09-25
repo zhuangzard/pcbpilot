@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- Live-verified on desktop V3 3.2.149 with connector 0.3.1 (2026-09-25): `pcb region create`
+  reads back the region (`verified:true`) and refuses a name on a non-follow-rule region with
+  nothing created; `pcb add-component` returns the read-back designator (`bindingVerified:true`);
+  `pcb modify` works and `pcb modify` / `pcb delete` with a stale ID return `PRECONDITION_REFUSED`
+  with no write dispatched; unknown subcommands exit 1; `project find --timeout` returns `unknown`
+  on an empty inventory. Net label on V3: the normal path (host returns the object) passed; the
+  empty-return readback recovery was not triggered. `web reload` is Web-only and not yet live-tested.
+
 Ports from upstream easyeda-agent v1.6.0..v1.7.0 (behavior ported, adapted to pcbpilot names/ports;
 not yet live-verified on pcbpilot's connector). Requires a connector rebuild/re-import.
 
