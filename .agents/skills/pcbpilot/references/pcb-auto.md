@@ -133,6 +133,10 @@ pcbpilot pcb auto run --board board.json --groups groups.json --place --out-dir 
 - 少于 `--min-members`（默认 2）件的框、以及装下约整页的框（图框/标题栏）忽略；`unframed` 列出未入框器件，
   它们仍按网表规则归属。
 - pcbpilot 自己 compose 的页面也可以直接用 composition JSON 作为 `--groups`；`sch groups` 让任意人工原理图同样可用。
+- 验证状态 `live-verified`（2026-09-25，桌面 V3 3.2.149，连接器 0.2.9）：按 compose 剧本重建 ESP32 两页原理图后读取，
+  7 个多件模块与 composition 逐件一致，框坐标与 `sch frame apply` 源数据一致；单件模块（BOOT/RST 按键）按
+  `--min-members 2` 列入 `unframed`。生成文件直接用于 `pcb auto run --groups`。新 action 需要**连接器和 daemon 都是新版**：
+  旧 daemon 会报 `unknown action`，`pcbpilot daemon restart` 后恢复。
 - 归属进入引擎后按角色决定拉力：去耦 / 功率链（buck 输入、电感、输出电容）/ `pin-filter`（IC 信号脚到地/电源的
   电容，如 EN 复位 RC）/ 晶振与负载电容 / 端口保护（保护件留在连接器旁，不跟核心走）。
 

@@ -193,7 +193,7 @@ func readSchGroupPage(cfg *appConfig, window, page string) (schGroupPage, error)
 	}
 	rres, err := requestAction(cfg, "schematic.rectangles.list", window, nil)
 	if err != nil {
-		return pg, fmt.Errorf("%w (needs connector ≥ 0.2.9: schematic.rectangles.list)", err)
+		return pg, fmt.Errorf("%w (schematic.rectangles.list needs connector ≥ 0.2.9 AND a daemon built with it — an 'unknown action' from an older daemon clears after `pcbpilot daemon restart`)", err)
 	}
 	rects, _ := rres.Result["rectangles"].([]any)
 	for _, raw := range rects {
