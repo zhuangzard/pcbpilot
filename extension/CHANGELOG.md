@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+- **EasyEDA Pro V3 and V4 both supported** (host profile by version: line,
+  native net labels, pin-level attributes, unset-style reads). Verified on the
+  desktop V3 3.2.149 and pro.easyeda.com. V3 net labels are written as the
+  wire's own Name attribute (`wire.modify` + anchor), never delete-and-recreate
+  (that deleted a merged +5V tree). Unset V3 style fields read as `null`.
+  New read-only `system.api.probe` / `pcbpilot api probe`.
+- Component `modify` re-asserts a real LCSC `supplierId` (V3 resets it to
+  `<MPN>.1`, which broke identity evidence). Export-image clears the selection
+  first and refuses stray selected primitives.
+- Schematic layout: zones from design intent (`sch zones-derive`), zones →
+  composition (`sch layout-composition`), same-sheet convention (net labels
+  inside a page, ports across pages: `net_label` / `direct_label` policies),
+  edge label planning for dense symbol edges, conflict fingerprints and budget
+  escalation, measured designator poses per rotation.
+- PCB (`pcb auto run`): autoSize frame search with a quality gate; schematic
+  module ownership via `--groups`; automatic RF-module antenna keep-out split
+  so the module does not trip native DRC; block-declared connector openings on
+  board edges; replayable mechanics (`--replace <journal>`); switch nodes stay
+  out of power planes; truthful module bodies (antenna ends). `pcb dump`
+  normalizes rotations; `pcb check` no longer flags buck output caps.
+  Live-verified on the ESP32-S3 mini E2E layout (desktop V3).
+- Requires re-importing the connector (0.2.7).
+
 - New read-only `schematic.components.count` / `pcb.components.count` (primitive
   ids only): the CLI's post-switch load-settle loop polls these instead of the
   full ~1.5 s `components.list` (57 % of schematic machine time in real runs).
