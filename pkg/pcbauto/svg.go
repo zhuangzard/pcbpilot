@@ -58,6 +58,10 @@ func RenderSVG(w io.Writer, b *Board, c *Circuit, st *Stackup, rr *RouteResult) 
 		p(`<polygon points="%s" fill="%s" fill-opacity="0.18" stroke="%s" stroke-dasharray="6 3"><title>%s</title></polygon>`+"\n", pts(k.Poly), fill, fill, esc(k.Name))
 	}
 	for _, h := range b.Holes {
+		if len(h.Poly) >= 3 {
+			p(`<polygon points="%s" fill="#000" stroke="#aaa"><title>%s</title></polygon>`+"\n", pts(h.Poly), esc(h.Name))
+			continue
+		}
 		p(`<circle cx="%.1f" cy="%.1f" r="%.1f" fill="#000" stroke="#aaa"/>`+"\n", x(h.C.X), y(h.C.Y), h.Dia/2*scale)
 		if h.Keep > 0 {
 			p(`<circle cx="%.1f" cy="%.1f" r="%.1f" fill="none" stroke="#aaa" stroke-dasharray="2 2"/>`+"\n", x(h.C.X), y(h.C.Y), (h.Dia/2+h.Keep)*scale)

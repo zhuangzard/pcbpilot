@@ -6924,7 +6924,10 @@ const stableIdentityName = (value: unknown): string => {
 };
 
 interface NativeFootprintInventory { entries?: unknown; error?: string }
-async function loadNativeFootprintInventory(expectedContext?: { projectUuid?: string; documentUuid?: string }): Promise<NativeFootprintInventory> {
+async function loadNativeFootprintInventory(
+	expectedContext?: { projectUuid?: string; documentUuid?: string },
+	archiveOptions: { targetDocType?: 'SCH_PAGE' | 'PCB'; fullDocument?: boolean } = {},
+): Promise<NativeFootprintInventory> {
 	try {
 		const before = await readResponseContext();
 		if (!before.projectUuid || !before.documentUuid) return { error: 'native footprint source requires a known current project and document' };
@@ -6940,7 +6943,7 @@ async function loadNativeFootprintInventory(expectedContext?: { projectUuid?: st
 			if (typeof eda.sys_FileManager?.getProjectFile !== 'function') return { error: `official footprint source inventory unavailable; project export unavailable${documentError ? ` (${documentError})` : ''}` };
 			const archive = await withTimeout(eda.sys_FileManager.getProjectFile('pcbpilot-identity.epro2', undefined, 'epro2'), 10000, 'identity getProjectFile timed out after 10000ms');
 			if (!archive) return { error: 'official project export did not return a source archive' };
-			entries = await withTimeout(readProjectFootprintSourceArchive(archive, before.documentUuid), 7000, 'identity source archive decoding timed out after 7000ms');
+			entries = await withTimeout(readProjectFootprintSourceArchive(archive, before.documentUuid, archiveOptions), 7000, 'identity source archive decoding timed out after 7000ms');
 		}
 		if (!Array.isArray(entries) || entries.length > 2048) return { error: 'official footprint source inventory is incomplete or exceeds 2048 entries' };
 		const after = await readResponseContext();
@@ -8243,7 +8246,7 @@ const pcbDocumentsList: Handler = async () => {
  * List placed components on the active PCB. Optionally filter by layer and
  * include each component's pads (the net-by-name connectivity surface).
  */
-const pcbComponentsList: Handler = async (payload) => {
+export const pcbComponentsList: Handler = async (payload) => {
 	const layer = payload.layer as TPCB_LayersOfComponent | undefined;
 	const includePads = optionalBoolean(payload, 'includePads') === true;
 	// includeBBox attaches each component's rendered extent {minX,minY,maxX,maxY}
@@ -8260,6 +8263,14 @@ const pcbComponentsList: Handler = async (payload) => {
 	const serialized: Array<Record<string, unknown>> = [];
 	for (const component of components) {
 		const record = serializePcbComponent(component);
+		// The placed footprint's instance ref: its uuid keys the document's
+		// footprint source (pcb.footprint.sources) — the only place the
+		// footprint's non-pad primitives (NPTH/slot FILLs on MULTI) live.
+		try {
+			const footprint = readDeviceFootprint({ footprint: component.getState_Footprint?.() });
+			if (footprint.uuid) record.footprint = footprint;
+		}
+		catch { /* footprint ref is optional */ }
 		if (includeBBox) {
 			try {
 				const box = await eda.pcb_Primitive.getPrimitivesBBox([component.getState_PrimitiveId()]);
@@ -13077,6 +13088,44 @@ const pcbFillCreate: Handler = async (payload) => {
 	};
 };
 
+/**
+ * Read-only: the active PCB document's footprint sources — one DOCHEAD-bounded
+ * record stream per placed footprint instance, keyed by the instance uuid that
+ * pcb.components.list reports as `footprint.uuid`. Pads are already listed per
+ * component; this is how offline tools see the footprint's OTHER primitives,
+ * e.g. MULTI-layer (layerId 12) FILLs = NPTH locating holes and milled slots
+ * that native DRC checks as "Slot Region" (USB-C J2, E2E 2026-09-25).
+ * Uses sys_FileManager.getDocumentFootprintSources(); when that returns [] it
+ * falls back to the official current-project epro2 export (same path as the
+ * identity resolver) and keeps every row of each FOOTPRINT document.
+ */
+export const pcbFootprintSources: Handler = async (payload) => {
+	const rawFilter = payload.footprintUuids;
+	if (rawFilter !== undefined && (!Array.isArray(rawFilter) || rawFilter.some(v => typeof v !== 'string'))) {
+		throw new Error('footprintUuids must be an array of strings');
+	}
+	const filter = Array.isArray(rawFilter) && rawFilter.length > 0 ? new Set(rawFilter as Array<string>) : undefined;
+	const context = await readResponseContext();
+	if (context.documentType !== 'pcb') throw new Error(`pcb.footprint.sources needs an active PCB document (current: ${context.documentType ?? 'unknown'})`);
+	const inventory = await loadNativeFootprintInventory(
+		{ projectUuid: context.projectUuid, documentUuid: context.documentUuid },
+		{ targetDocType: 'PCB', fullDocument: true },
+	);
+	if (inventory.error) throw new Error(inventory.error);
+	const footprints: Array<{ footprintUuid: string; documentSource: string; sourceKind?: string }> = [];
+	for (const raw of inventory.entries as Array<unknown>) {
+		const entry = raw !== null && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+		if (typeof entry.footprintUuid !== 'string' || typeof entry.documentSource !== 'string') continue;
+		if (filter && !filter.has(entry.footprintUuid)) continue;
+		footprints.push({
+			footprintUuid: entry.footprintUuid,
+			documentSource: entry.documentSource,
+			...(entry.sourceKind === 'project-epro2' ? { sourceKind: 'project-epro2' } : {}),
+		});
+	}
+	return { result: { footprints, count: footprints.length, documentUuid: context.documentUuid } };
+};
+
 const pcbFillList: Handler = async (payload) => {
 	const layer = optionalNumber(payload, 'layer');
 	const net = optionalString(payload, 'net');
@@ -14508,6 +14557,7 @@ const HANDLERS: Record<string, Handler> = {
 	'pcb.region.delete': pcbRegionDelete,
 	'pcb.fill.create': pcbFillCreate,
 	'pcb.fill.list': pcbFillList,
+	'pcb.footprint.sources': pcbFootprintSources,
 	'pcb.fill.delete': pcbFillDelete,
 	'pcb.save': pcbSave,
 	'pcb.export.dsn': pcbExportDsn,

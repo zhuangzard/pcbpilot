@@ -199,7 +199,12 @@ EasyEDA 交互界面兜底。能力边界与未来 typed 验收见 [project-impo
 
 - `pcb.documents.list` — 工程内所有 PCB 文档（uuid + name）
 - `pcb.components.list` — PCB 上的封装/器件；`includePads:true` 回传 pad 的原始
-  `shape` / `rotation` / `specialPad`，支持形状另带旋转后 bbox `width/height`
+  `shape` / `rotation` / `specialPad`，支持形状另带旋转后 bbox `width/height`；
+  `footprint.uuid` 是封装实例 uuid（`pcb.footprint.sources` 的键）
+- `pcb.footprint.sources` — 只读：当前 PCB 文档每个封装实例的源码（`getDocumentFootprintSources()`，
+  返回空时回退官方 epro2 导出，保留 FOOTPRINT 文档全部行）；可选 `footprintUuids` 过滤。
+  用途：封装里的 MULTI 层 FILL = NPTH 定位孔/槽（原生 DRC 的 “Slot Region”），`pcb dump` 据此输出
+  `footprintHoles[]`，供 `pcb auto` 避让与 `pcb check` 的 `footprint-hole-clearance` 判定（`--no-footprint-holes` 跳过）
 - `pcb.line.list` — 铜线与圆弧；`arcsAvailable:true` 才能证明空 `arcs` 确实表示没有圆弧
 - `pcb net-path` — 用 fresh pads/tracks/arcs/vias 证明有序焊盘拓扑、层与过孔；长度累计实际
   经过的 track 子段和 arc 子弧，分叉落在图元中段时不把整图元或圆弧弦长计入结果。

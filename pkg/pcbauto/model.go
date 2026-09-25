@@ -70,6 +70,9 @@ type Part struct {
 	// direct pad edits both invalidate it.
 	bodyKey   bodyKey
 	bodyCache Rect
+	// holes are the footprint's own NPTH/slot regions (Board.Holes entries
+	// with Owner == Ref); MoveTo carries them with the part.
+	holes []*Hole
 	// Rigid-body shortcut: bounds relative to the anchor, per rotation. A
 	// part is rigid, so a move is a translation of this rect — the spiral
 	// search tries hundreds of poses per part.
@@ -158,6 +161,13 @@ func (p *Part) freeze() {
 		pd.rel = pd.Box.C.Sub(p.Pos).Rotate(-p.Rotation)
 		pd.relRot = pd.Box.Rot - p.Rotation
 	}
+	for _, h := range p.holes {
+		h.rel = h.C.Sub(p.Pos).Rotate(-p.Rotation)
+		h.relPoly = make([]Point, len(h.Poly))
+		for i, q := range h.Poly {
+			h.relPoly[i] = q.Sub(p.Pos).Rotate(-p.Rotation)
+		}
+	}
 }
 
 // MoveTo re-poses the part and all of its pads.
@@ -167,6 +177,12 @@ func (p *Part) MoveTo(pos Point, rot float64) {
 	for _, pd := range p.Pads {
 		pd.Box.C = pos.Add(pd.rel.Rotate(rot))
 		pd.Box.Rot = normDeg(pd.relRot + rot)
+	}
+	for _, h := range p.holes {
+		h.C = pos.Add(h.rel.Rotate(rot))
+		for i, q := range h.relPoly {
+			h.Poly[i] = pos.Add(q.Rotate(rot))
+		}
 	}
 }
 
@@ -210,13 +226,63 @@ func (k *Keepout) onLayer(id int) bool {
 	return false
 }
 
-// Hole is a non-plated mechanical hole (mounting hole, slot approximated).
+// Hole is a non-plated mechanical hole (mounting hole, slot approximated) or
+// a footprint's own NPTH / slot region.
 type Hole struct {
 	Name string  `json:"name,omitempty"`
 	C    Point   `json:"c"`
 	Dia  float64 `json:"dia"`
 	// Keep is the copper-free annulus radius beyond the drill (screw head).
 	Keep float64 `json:"keep,omitempty"`
+	// Poly, when set, is the exact outline of a non-circular slot (board
+	// coordinates); C is then only a label point and Dia is ignored.
+	Poly []Point `json:"poly,omitempty"`
+	// Owner is the part whose footprint contains the hole (a USB-C
+	// locating hole): it moves with that part and does not repel it.
+	Owner string `json:"owner,omitempty"`
+	// Clr is the copper clearance from the hole edge the board rule demands
+	// (native "Slot Region" spacing); 0 = Keep + Rules.Clearance.
+	Clr float64 `json:"clr,omitempty"`
+
+	rel     Point   // centre relative to the owner, unrotated frame
+	relPoly []Point // Poly relative to the owner, unrotated frame
+}
+
+// Required is the copper-edge to hole-edge distance the hole demands.
+func (h *Hole) Required(r Rules) float64 { return math.Max(h.Keep+r.Clearance, h.Clr) }
+
+// Bounds is the hole's extent (drill / slot outline, no keep).
+func (h *Hole) Bounds() Rect {
+	if len(h.Poly) >= 3 {
+		return PolyBounds(h.Poly)
+	}
+	return Rect{h.C.X, h.C.Y, h.C.X, h.C.Y}.Expand(h.Dia / 2)
+}
+
+// Dist is the distance from p to the hole region (0 inside).
+func (h *Hole) Dist(p Point) float64 {
+	if len(h.Poly) >= 3 {
+		if PolyContains(h.Poly, p) {
+			return 0
+		}
+		return PolyEdgeDist(h.Poly, p)
+	}
+	return math.Max(p.Dist(h.C)-h.Dia/2, 0)
+}
+
+// SegDist is the distance from segment a–b to the hole region (0 on overlap).
+func (h *Hole) SegDist(a, b Point) float64 {
+	if len(h.Poly) >= 3 {
+		if PolyContains(h.Poly, a) || PolyContains(h.Poly, b) {
+			return 0
+		}
+		d := math.Inf(1)
+		for i := range h.Poly {
+			d = math.Min(d, SegSegDist(a, b, h.Poly[i], h.Poly[(i+1)%len(h.Poly)]))
+		}
+		return d
+	}
+	return math.Max(PointSegDist(h.C, a, b)-h.Dia/2, 0)
 }
 
 // Rules are fabrication minimums and board defaults, all mil.
@@ -310,6 +376,14 @@ func (b *Board) Index() error {
 		for _, pd := range p.Pads {
 			pd.Part = p.Ref
 		}
+		p.holes = nil
+	}
+	for _, h := range b.Holes {
+		if o := b.byRef[h.Owner]; h.Owner != "" && o != nil {
+			o.holes = append(o.holes, h)
+		}
+	}
+	for _, p := range b.Parts {
 		p.freeze()
 	}
 	b.Rules.sanitize()
@@ -389,7 +463,14 @@ func (b *Board) Clone() *Board {
 		nb.Parts[i] = &np
 	}
 	nb.Keepouts = append([]*Keepout(nil), b.Keepouts...)
-	nb.Holes = append([]*Hole(nil), b.Holes...)
+	nb.Holes = make([]*Hole, len(b.Holes))
+	for i, h := range b.Holes {
+		// Deep copy: footprint holes move with their owner (MoveTo writes
+		// C/Poly), so a clone must not share them with the original.
+		c := *h
+		c.Poly = append([]Point(nil), h.Poly...)
+		nb.Holes[i] = &c
+	}
 	nb.byRef = nil
 	_ = nb.Index()
 	return &nb

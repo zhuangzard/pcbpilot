@@ -79,7 +79,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 			raw, err = os.ReadFile(in.board)
 		} else {
 			var snap *boardSnapshot
-			snap, err = fetchBoardSnapshot(cfg, *window, boardSnapshotOpts{withRules: true, withLayers: true, withCopper: true})
+			snap, err = fetchBoardSnapshot(cfg, *window, boardSnapshotOpts{withRules: true, withLayers: true, withCopper: true, withFootprintHoles: true})
 			if err == nil {
 				raw, err = json.Marshal(snap)
 			}

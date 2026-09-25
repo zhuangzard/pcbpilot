@@ -507,7 +507,10 @@ func (pl *placer) partCost(p *Part) float64 {
 		}
 	}
 	for _, h := range pl.b.Holes {
-		hr := Rect{h.C.X, h.C.Y, h.C.X, h.C.Y}.Expand(h.Dia/2 + h.Keep)
+		if h.Owner == p.Ref {
+			continue // a footprint's own locating holes sit inside its body
+		}
+		hr := h.Bounds().Expand(h.Keep)
 		cost += 20 * bx.OverlapArea(hr)
 	}
 	for _, hz := range pl.m.HeightZones {

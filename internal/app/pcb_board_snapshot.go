@@ -77,6 +77,10 @@ type boardComp struct {
 	Locked     bool        `json:"locked,omitempty"`
 	BBox       *layoutBBox `json:"bbox,omitempty"` // 渲染包围盒（含丝印，非 IPC courtyard）
 	Pads       []boardPad  `json:"pads,omitempty"`
+	// FootprintUUID is the placed footprint's instance uuid (connector
+	// components[].footprint.uuid): the key into pcb.footprint.sources, where
+	// the footprint's NPTH/slot FILLs live. Empty on older connectors/dumps.
+	FootprintUUID string `json:"footprintUuid,omitempty"`
 }
 
 // center 返回判位置该用的坐标：有 bbox 用 bbox 几何中心，否则退回 anchor。
@@ -287,11 +291,16 @@ type boardSnapshot struct {
 	// nil = 旧 dump/没读到（未知），0 = 真没布线。routable 维用它对**成品板**
 	// 诚实 —— ratsnest 交叉不知道板子已经布完了，五块开源好板校准实锤该维在
 	// 成品板上恒 26~40（布线自由度早已被真实走线兑现，量表系统性偏低）。
-	RoutedLines    *int     `json:"routedLines,omitempty"`
-	Partial        []string `json:"partial,omitempty"`
-	CapturedAt     string   `json:"capturedAt,omitempty"`
-	Project        string   `json:"project,omitempty"`
-	SemanticSHA256 string   `json:"semanticSha256,omitempty"`
+	RoutedLines *int `json:"routedLines,omitempty"`
+	// FootprintHoles are NPTH / slot regions inside placed footprints
+	// (MULTI-layer FILLs in the footprint source), in board coordinates.
+	// Not pads, no net: every copper layer keeps the slot rule from them
+	// (E2E 2026-09-25: USB-C J2 locating holes failed native DRC).
+	FootprintHoles []boardFootprintHole `json:"footprintHoles,omitempty"`
+	Partial        []string             `json:"partial,omitempty"`
+	CapturedAt     string               `json:"capturedAt,omitempty"`
+	Project        string               `json:"project,omitempty"`
+	SemanticSHA256 string               `json:"semanticSha256,omitempty"`
 	// ContentSHA256 hashes what the board IS, not how the host last materialised
 	// it: materialised pour copper (copper.poured) is regenerated on every
 	// reload with new primitive/fill ids, another order and 64 vs 64.0 number
@@ -329,7 +338,10 @@ type boardRules struct {
 	ViaDiameterMil         float64 `json:"viaDiameterMil"`
 	CopperToEdgeMil        float64 `json:"copperToEdgeMil"`
 	HoleToHoleMil          float64 `json:"holeToHoleMil,omitempty"`
-	Source                 string  `json:"source"` // live | fallback
+	// SlotClearanceMil is Safe Spacing Track↔Slot Region when the matrix has
+	// that row; 0 = not read (consumers default to 0.3 mm).
+	SlotClearanceMil float64 `json:"slotClearanceMil,omitempty"`
+	Source           string  `json:"source"` // live | fallback
 }
 
 func rulesToBoard(r pcbRules) *boardRules {
@@ -338,7 +350,8 @@ func rulesToBoard(r pcbRules) *boardRules {
 		TrackWidthMil: r.trackWidthMil,
 		PowerWidthMil: r.powerWidthMil, TrackWidthMinMil: r.trackWidthMinMil,
 		ViaDrillMil: r.viaDrillMil, ViaDiameterMil: r.viaDiameterMil,
-		CopperToEdgeMil: r.copperToEdgeMil, HoleToHoleMil: r.holeToHoleMil, Source: r.source,
+		CopperToEdgeMil: r.copperToEdgeMil, HoleToHoleMil: r.holeToHoleMil,
+		SlotClearanceMil: r.slotClearanceMil, Source: r.source,
 	}
 }
 
@@ -357,7 +370,8 @@ func (b *boardRules) toPcbRules() pcbRules {
 		trackWidthMil: b.TrackWidthMil,
 		powerWidthMil: b.PowerWidthMil, trackWidthMinMil: b.TrackWidthMinMil,
 		viaDrillMil: b.ViaDrillMil, viaDiameterMil: b.ViaDiameterMil,
-		copperToEdgeMil: b.CopperToEdgeMil, holeToHoleMil: b.HoleToHoleMil, source: b.Source,
+		copperToEdgeMil: b.CopperToEdgeMil, holeToHoleMil: b.HoleToHoleMil,
+		slotClearanceMil: b.SlotClearanceMil, source: b.Source,
 	}
 }
 
@@ -507,6 +521,9 @@ func parseBoardComponents(result map[string]any) []boardComp {
 		c.Rotation, _ = asFloatOK(cm["rotation"])
 		c.Rotation = snapRotation(c.Rotation)
 		c.Locked, _ = cm["locked"].(bool)
+		if fp, ok := cm["footprint"].(map[string]any); ok {
+			c.FootprintUUID = asString(fp["uuid"])
+		}
 		if bb, ok := cm["bbox"].(map[string]any); ok {
 			minX, ok1 := asFloatOK(bb["minX"])
 			minY, ok2 := asFloatOK(bb["minY"])
@@ -618,6 +635,9 @@ type boardSnapshotOpts struct {
 	withRules  bool
 	withLayers bool
 	withCopper bool
+	// withFootprintHoles reads pcb.footprint.sources and records footprint
+	// NPTH/slot regions (routing + clearance consumers need them).
+	withFootprintHoles bool
 }
 
 // fetchBoardSnapshot 一次拉齐板级只读视图。任何一段失败都只记进 Partial 并继续
@@ -700,6 +720,9 @@ func fetchBoardSnapshot(cfg *appConfig, window string, opts boardSnapshotOpts) (
 	}
 	if opts.withCopper {
 		snap.fetchCopper(cfg, window)
+	}
+	if opts.withFootprintHoles {
+		snap.fetchFootprintHoles(cfg, window)
 	}
 	semantic, serr := boardSnapshotSemanticSHA256(snap)
 	if serr != nil {
@@ -824,6 +847,23 @@ func boardSnapshotSemanticSHA256(s *boardSnapshot) (string, error) {
 	clone.CapturedAt = ""
 	clone.SemanticSHA256 = ""
 	clone.ContentSHA256 = "" // added later; must not move existing semantic baselines
+	// Footprint NPTH/slot data (2026-09-25) is derived from the footprints the
+	// components already pin down; keep it out so existing module-check
+	// baselines stay valid across this CLI upgrade.
+	clone.FootprintHoles = nil
+	if s.Rules != nil {
+		r := *s.Rules
+		r.SlotClearanceMil = 0
+		clone.Rules = &r
+	}
+	if len(s.Components) > 0 {
+		comps := make([]boardComp, len(s.Components))
+		copy(comps, s.Components)
+		for i := range comps {
+			comps[i].FootprintUUID = ""
+		}
+		clone.Components = comps
+	}
 	raw, err := json.Marshal(clone)
 	if err != nil {
 		return "", err

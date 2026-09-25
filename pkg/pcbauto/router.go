@@ -393,7 +393,7 @@ func (r *router) rasterise() {
 		gr.markKeepout(k)
 	}
 	for _, h := range r.b.Holes {
-		gr.markHole(h)
+		gr.markHole(h, r.b.Rules)
 	}
 	viaR := r.b.Rules.ViaDia / 2
 	for _, p := range r.b.Parts {

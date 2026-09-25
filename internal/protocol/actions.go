@@ -785,7 +785,17 @@ func AllActions() []ActionSpec {
 			NeedsWindow: true,
 			Description: "List placed footprints/components on the active PCB, with layer, coordinates, rotation, lock, optional bbox (rendered extent, for overlap/spacing reasoning), and optional pads.",
 			Inputs:      []string{"layer optional", "includeBBox optional", "includePads optional"},
-			Outputs:     []string{"components[].primitiveId", "components[].designator", "components[].layer", "components[].x", "components[].y", "components[].rotation", "components[].bbox", "components[].pads", "count"},
+			Outputs:     []string{"components[].primitiveId", "components[].designator", "components[].layer", "components[].x", "components[].y", "components[].rotation", "components[].footprint (instance uuid/libraryUuid/name)", "components[].bbox", "components[].pads", "count"},
+		},
+		{
+			Name:        "pcb.footprint.sources",
+			Domain:      DomainPcb,
+			Phase:       2,
+			Mutates:     false,
+			NeedsWindow: true,
+			Description: "Read-only: the active PCB document's footprint sources via sys_FileManager.getDocumentFootprintSources() (fallback: the official current-project epro2 export, every row of each FOOTPRINT document). One DOCHEAD-bounded record stream per placed footprint instance, keyed by the instance uuid that pcb.components.list reports as components[].footprint.uuid. Exposes the footprint's non-pad primitives — MULTI-layer (layerId 12) FILLs are NPTH locating holes / milled slots that native DRC checks as \"Slot Region\"; `pcb dump` turns them into footprintHoles for pcb auto and pcb check.",
+			Inputs:      []string{"footprintUuids optional (string[] filter)"},
+			Outputs:     []string{"footprints[].footprintUuid", "footprints[].documentSource", "footprints[].sourceKind (project-epro2 on fallback)", "count", "documentUuid"},
 		},
 		{
 			Name:        "pcb.layers.list",

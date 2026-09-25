@@ -613,7 +613,13 @@ export interface NativeFootprintSource {
 export function projectFootprintSourceInventory(
 	text: string,
 	documentUuid: string,
+	options: { targetDocType?: 'SCH_PAGE' | 'PCB'; fullDocument?: boolean } = {},
 ): Array<{ footprintUuid: string; documentSource: string; sourceKind: 'project-epro2' }> {
+	// Identity callers need only DOCHEAD+META (the footprint's origin). Geometry
+	// callers (pcb.footprint.sources: NPTH/slot FILLs) need every row of each
+	// FOOTPRINT document, bounded by the next DOCHEAD.
+	const targetDocType = options.targetDocType ?? 'SCH_PAGE';
+	const fullDocument = options.fullDocument === true;
 	if (!documentUuid || text.length > 64 * 1024 * 1024) throw new Error('native project source is missing its target or exceeds 64 MiB');
 	const rows = text.split(/\r?\n/);
 	if (rows.length > 200000) throw new Error('native project source exceeds 200000 rows');
@@ -636,18 +642,18 @@ export function projectFootprintSourceInventory(
 		if (header.type === 'DOCHEAD') {
 			const payload = JSON.parse(line.slice(delimiter + 2, -1)) as Record<string, unknown>;
 			current = undefined;
-			if (payload.docType === 'SCH_PAGE' && payload.uuid === documentUuid) targetPages++;
+			if (payload.docType === targetDocType && payload.uuid === documentUuid) targetPages++;
 			if (payload.docType === 'FOOTPRINT') {
 				if (typeof payload.uuid !== 'string') throw new Error('footprint DOCHEAD has no instance UUID');
 				current = { footprintUuid: payload.uuid, documentSource: line + '\n', sourceKind: 'project-epro2' };
 				inventory.push(current);
 				if (inventory.length > 2048) throw new Error('native project exceeds 2048 footprint documents');
 			}
-		} else if (current && header.type === 'META') {
+		} else if (current && (fullDocument || header.type === 'META')) {
 			current.documentSource += line + '\n';
 		}
 	}
-	if (targetPages !== 1) throw new Error(`native project contains ${targetPages} matching SCH_PAGE documents; one is required`);
+	if (targetPages !== 1) throw new Error(`native project contains ${targetPages} matching ${targetDocType} documents; one is required`);
 	return inventory;
 }
 

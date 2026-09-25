@@ -181,6 +181,13 @@ pcbpilot pcb check --project <工程>
   Connection Error 先 `pcb pour-rebuild`（见 [pcb-routing.md](pcb-routing.md)）。
 - 未布通项在报告与预览中列出，不得用 GUI 手工补线；调整 mech/power/层数后重算。
 - 引擎结果是离线几何证明，最终以 EasyEDA 原生 DRC 和保存重载后的回读为准。
+- **封装内 NPTH / 槽孔已建模**（2026-09-25 E2E 发现）：USB-C 等封装的定位孔是封装文档里的
+  MULTI 层（layerId 12）FILL，不是焊盘；旧 dump 看不到，引擎把 CC1 走线/过孔直接布进 J2 的孔，
+  原生 DRC 报 “Slot Region to Track/Via ≥ 11.8mil”。现在 `pcb dump` 经 `pcb.footprint.sources`
+  输出 `footprintHoles[]`（主器件位号 + 源图元 id，圆/多边形，按同封装焊盘验证的变换落到板坐标），
+  引擎把它们当作**随主器件移动、无网络**的障碍，铜到孔边 ≥ `rules.slotClearanceMil`（板规则无
+  Slot Region 项时默认 0.3 mm = 11.81 mil）；`pcb check` 同阈值报 `footprint-hole-clearance` ERROR。
+  旧 dump（无 `footprintHoles`）必须重新 dump，否则仍看不到这些孔。
 - **重排用 `--replace <上一版 journal>`**：剧本创建的孔（MULTI fill）和区域会把 `primitiveId` 捕获进
   apply journal（`MECH_FILL_*` / `MECH_REGION_*`）；下一版 `pcb auto run --replace out-prev/playbook.json.journal.jsonl`
   会在写新机械件前只删除这些 ID，不会叠出第二套孔和禁布区（2026-09-25 连续两次重排现场验证：始终 4 孔 7 区域）。

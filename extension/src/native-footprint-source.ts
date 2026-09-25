@@ -74,6 +74,7 @@ export async function readProjectNativeSourceArchive(file: Blob): Promise<string
 export async function readProjectFootprintSourceArchive(
 	file: Blob,
 	documentUuid: string,
+	options: { targetDocType?: 'SCH_PAGE' | 'PCB'; fullDocument?: boolean } = {},
 ): Promise<Array<{ footprintUuid: string; documentSource: string }>> {
-	return projectFootprintSourceInventory(await readProjectNativeSourceArchive(file), documentUuid);
+	return projectFootprintSourceInventory(await readProjectNativeSourceArchive(file), documentUuid, options);
 }

@@ -9,6 +9,11 @@ package app
 // falls back independently to a JLCPCB 2-layer baseline (which matches ceshi's own
 // live rules), so a missing/renamed path degrades gracefully instead of breaking.
 
+import (
+	"math"
+	"strings"
+)
+
 const mmToMil = 39.37007874
 
 // ruleMil converts a rule value to mil. JLCEDA returns rule values in the
@@ -35,6 +40,7 @@ type pcbRules struct {
 	viaDiameterMil         float64 // via outer diameter
 	copperToEdgeMil        float64 // copper/plane-zone → board-outline clearance (pour inset floor)
 	holeToHoleMil          float64 // drill edge to drill edge (Other Spacing hole2Hole); 0 = not read
+	slotClearanceMil       float64 // Safe Spacing Track↔Slot Region (footprint NPTH/slots); 0 = not read
 	source                 string  // "live" | "fallback"
 }
 
@@ -225,6 +231,34 @@ func parsePcbRules(result map[string]any) pcbRules {
 					r.copperToEdgeMil = ruleMil(v)
 				}
 			}
+		}
+	}
+
+	// Track ↔ Slot Region (footprint NPTH / milled slot FILLs on MULTI): native
+	// DRC reports "Slot Region to Track" under Safe Spacing copperThickness1oz
+	// (ceshi 2026-09-25: 0.3 mm). Located by label like Board Outline above;
+	// the label spelling is taken from the DRC report, and either triangle
+	// half of the matrix is accepted.
+	if content, ok := mnav(ss, "tables", "1", "content").([]any); ok {
+		tr, sl := indexOf(labels, "Track"), -1
+		for i, l := range labels {
+			if strings.EqualFold(strings.TrimSpace(l), "Slot Region") {
+				sl = i
+			}
+		}
+		cell := func(r, c int) float64 {
+			if r < 0 || c < 0 || r >= len(content) {
+				return 0
+			}
+			row, ok := content[r].([]any)
+			if !ok || c >= len(row) {
+				return 0
+			}
+			v, _ := asFloatOK(row[c])
+			return v
+		}
+		if v := math.Max(cell(sl, tr), cell(tr, sl)); v > 0 {
+			r.slotClearanceMil = ruleMil(v)
 		}
 	}
 
