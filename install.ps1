@@ -524,6 +524,19 @@ try {
             Write-Detail 'Restart the daemon so it runs the new binary: pcbpilot daemon stop; pcbpilot daemon start'
             if ($orphan) { Write-Detail "Delete the old file once the process exits: $orphan" }
         }
+        # -- daemon login service (required): HKCU Run entry via the CLI -------
+        # The connector only talks to a daemon on 61832; without it every EDA
+        # action fails after a reboot. Releases older than 'daemon service'
+        # get the manual instruction instead.
+        $serviceOk = $false
+        & $target daemon service --help *> $null
+        if ($LASTEXITCODE -eq 0) {
+            & $target daemon service install
+            if ($LASTEXITCODE -eq 0) { $serviceOk = $true; Write-Ok 'daemon login service installed (starts now and at every login)' }
+            else { Write-Warn 'daemon login service install failed - run: pcbpilot daemon service install' }
+        } else {
+            Write-Warn "this release predates 'pcbpilot daemon service'; start the daemon at login yourself (see docs/manual.md)"
+        }
         # Best-effort sweep of files an earlier locked upgrade had to leave behind.
         Get-ChildItem -LiteralPath $InstallDir -Filter '.pcbpilot-old-*.exe' -Force -ErrorAction SilentlyContinue |
             Where-Object { $_.FullName -ne $orphan } |
@@ -652,8 +665,11 @@ try {
         Write-Ok "pcbpilot $Version installed"
         Write-Host ''
         Write-Host 'Next steps:'
-        Write-Host '  1. Start the daemon:'
-        Write-Host '       pcbpilot daemon start'
+        if ($serviceOk) {
+            Write-Host '  1. Daemon: installed as a login service (check: pcbpilot daemon service status)'
+        } else {
+            Write-Host '  1. Daemon (required at every login): pcbpilot daemon service install'
+        }
         Write-Host ''
         Write-Host '  2. Install the EasyEDA connector extension (sideload only - not on the marketplace):'
         Write-Host "          Download: $BaseUrl/pcbpilot-connector.eext"

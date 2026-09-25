@@ -28,7 +28,8 @@ git clone https://github.com/zhuangzard/pcbpilot.git && cd pcbpilot
 scripts/setup-agent.sh          # --dry-run 先预览
 ```
 
-它编译 CLI、链接 Skill、安装并注册 MCP（Claude Code 与 Codex）、构建连接器 `.eext`、启动 daemon。
+它编译 CLI、链接 Skill、安装并注册 MCP（Claude Code / Codex / ZCode）、构建连接器 `.eext`，并把 daemon
+装成**登录服务（必需）**：`pcbpilot daemon service install`，开机登录自动启动。
 需要 Go ≥ 1.26、Node.js ≥ 20.17；没有 Go 时自动改用发布版。
 
 **只装发布版：**
@@ -54,7 +55,7 @@ irm https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.ps1 | iex
 ## 3. 验证
 
 ```bash
-pcbpilot daemon start          # 未运行时（固定端口 61832）
+pcbpilot daemon service status # 登录服务已安装（必需）；缺失时 pcbpilot daemon service install
 pcbpilot health                # windows[] 出现目标工程/文档；connectorVersion 与仓库一致
 pcbpilot update --check        # 可选：CLI / Skill / 连接器三方版本
 ```

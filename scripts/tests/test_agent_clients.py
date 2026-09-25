@@ -86,3 +86,20 @@ class AgentClientsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ServiceEntryTest(unittest.TestCase):
+    def test_launchd_and_systemd_entries(self):
+        import sys as _sys
+        with tempfile.TemporaryDirectory() as home:
+            self.assertEqual(ac.service_entry(home), (None, None))
+            if _sys.platform == "darwin":
+                p = os.path.join(home, "Library", "LaunchAgents", "com.pcbpilot.daemon.plist")
+                os.makedirs(os.path.dirname(p))
+                open(p, "w").write("<array><string>/opt/a &amp; b/pcbpilot</string><string>daemon</string>")
+                self.assertEqual(ac.service_entry(home), (p, "/opt/a & b/pcbpilot"))
+            elif _sys.platform.startswith("linux"):
+                p = os.path.join(home, ".config", "systemd", "user", "pcbpilot-daemon.service")
+                os.makedirs(os.path.dirname(p))
+                open(p, "w").write('[Service]\nExecStart="/opt/my dir/pcbpilot" daemon start\n')
+                self.assertEqual(ac.service_entry(home), (p, "/opt/my dir/pcbpilot"))

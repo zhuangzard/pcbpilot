@@ -257,6 +257,27 @@ def mcp_handshake(node, server, pbin, timeout=30):
         p.kill()
 
 
+def service_entry(home=None):
+    """(path, binary) of the daemon login service, or (None, None)."""
+    home = home or os.path.expanduser("~")
+    if sys.platform == "darwin":
+        p = os.path.join(home, "Library", "LaunchAgents", "com.pcbpilot.daemon.plist")
+        if not os.path.exists(p):
+            return None, None
+        m = re.search(r"<array><string>([^<]*)</string>", open(p).read())
+        b = m.group(1) if m else None
+        if b:
+            b = b.replace("&apos;", "'").replace("&quot;", '"').replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+        return p, b
+    if sys.platform.startswith("linux"):
+        p = os.path.join(home, ".config", "systemd", "user", "pcbpilot-daemon.service")
+        if not os.path.exists(p):
+            return None, None
+        m = re.search(r'^ExecStart=(?:"((?:[^"\\]|\\.)*)"|(\S+))', open(p).read(), re.M)
+        return p, (m.group(1) or m.group(2)) if m else None
+    return None, None
+
+
 def verify(pbin, server, repo):
     bad = []
     ok = []
@@ -265,6 +286,12 @@ def verify(pbin, server, repo):
     # binaries
     check(os.access(pbin, os.X_OK), f"pcbpilot binary {pbin}", f"pcbpilot binary missing: {pbin}")
     check(os.path.exists(server), f"MCP server {server}", f"MCP server missing: {server}")
+    # daemon login service (required): its file must exist and name an existing binary
+    svc, svc_bin = service_entry()
+    if sys.platform == "darwin" or sys.platform.startswith("linux"):
+        check(svc is not None and svc_bin and os.path.exists(svc_bin),
+              f"daemon login service {svc} → {svc_bin}",
+              f"daemon login service missing or stale ({svc or 'none'}) — run: pcbpilot daemon service install")
     # per client: pcbpilot present + points at existing files, upstream absent
     def entry_ok(label, e):
         if not e:

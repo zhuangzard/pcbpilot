@@ -174,7 +174,7 @@ pcbpilot 由四部分组成：`pcbpilot` CLI/daemon、运行在 EasyEDA 内的 *
 ```
 
 Agent 会运行 [`scripts/setup-agent.sh`](scripts/setup-agent.sh)：编译 CLI，为 **Claude Code / Codex / ZCode**
-链接 Skill 并注册 MCP，构建连接器，以登录服务启动 daemon，最后自动验证（MCP 真实握手）。若机器上装过上游
+链接 Skill 并注册 MCP，构建连接器，把 daemon 装成开机登录自动启动的服务（必需，`pcbpilot daemon service install`），最后自动验证（MCP 真实握手）。若机器上装过上游
 easyeda-agent，会移除其 MCP 并把其 Skill 移入可恢复的备份，避免与 pcbpilot 争用同类任务。也可以自己运行：
 
 ```bash

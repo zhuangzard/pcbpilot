@@ -30,8 +30,10 @@
 #                    "EDA Agent Connector" do not collide with pcbpilot and are left alone.
 #   --purge-upstream also stop the upstream daemon and move its CLI + data dir to the backup
 #   --keep-upstream  skip step 0
-#   --no-service     do not install the daemon login service (start it yourself:
-#                    `pcbpilot daemon start`, which blocks)
+#
+# The daemon login service is REQUIRED (`pcbpilot daemon service install`: launchd /
+# systemd --user / HKCU Run) — the connector only talks to a daemon on 61832, so a
+# machine without it loses every EDA action after a reboot. Verify fails without it.
 #
 # Environment: PCBPILOT_BIN_DIR (default ~/.local/bin), CLAUDE_CONFIG_DIR, CODEX_HOME.
 set -euo pipefail
@@ -41,14 +43,13 @@ BIN_DIR="${PCBPILOT_BIN_DIR:-$HOME/.local/bin}"
 MODE=source
 DRY=0
 UPSTREAM=clean
-SERVICE=1
 for a in "$@"; do
   case "$a" in
     --release) MODE=release ;;
     --dry-run) DRY=1 ;;
     --keep-upstream) UPSTREAM=keep ;;
     --purge-upstream) UPSTREAM=purge ;;
-    --no-service) SERVICE=0 ;;
+    --no-service) echo "--no-service was removed: the daemon login service is required (developing pcbpilot with make dev? run 'pcbpilot daemon service uninstall' while developing)" >&2; exit 2 ;;
     -h|--help) sed -n '2,37p' "$0"; exit 0 ;;
     *) echo "unknown option: $a" >&2; exit 2 ;;
   esac
@@ -186,53 +187,38 @@ fi
 
 CONN_VER="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$REPO/extension/extension.json" | head -1)"
 
-# 5. Daemon (login service) + health --------------------------------------------
+# 5. Daemon (login service, required) + health ------------------------------------
 # A daemon already answering (e.g. `make dev`, or one started by hand) is left
-# running; the login service is still written so the next login starts one —
-# skipping it outright left machines with no daemon after a reboot.
-RUNNING=0
+# running; the service is still registered so the next login starts one —
+# skipping it left machines with no daemon after a reboot.
+NOSTART=""
 if [ "$DRY" = 0 ] && "$PCB" daemon health >/dev/null 2>&1; then
-  RUNNING=1; say "A pcbpilot daemon is already running — left as is (service installed for next login)"
+  NOSTART="--no-start"; say "A pcbpilot daemon is already running — left as is (service registered for next login)"
 fi
-if [ "$SERVICE" = 1 ] && [ "$(uname)" = Darwin ]; then
-  PL="$HOME/Library/LaunchAgents/com.pcbpilot.daemon.plist"
-  say "Installing the daemon login service ($PL)"
-  if [ "$DRY" = 1 ]; then
-    printf '   $ write %s; launchctl bootstrap gui/%s %s\n' "$PL" "$(id -u)" "$PL"
+say "Installing the daemon login service (required)"
+if [ "$DRY" = 1 ]; then
+  printf '   $ %s daemon service install %s\n' "$PCB" "$NOSTART"
+else
+  if "$PCB" daemon service --help >/dev/null 2>&1; then
+    "$PCB" daemon service install $NOSTART || warn "daemon login service install failed — verify will fail until 'pcbpilot daemon service install' succeeds"
   else
-    mkdir -p "$HOME/Library/LaunchAgents" "$HOME/.pcbpilot"
-    cat > "$PL" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>Label</key><string>com.pcbpilot.daemon</string>
-  <key>ProgramArguments</key><array><string>$PCB</string><string>daemon</string><string>start</string></array>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>$HOME/.pcbpilot/daemon.log</string>
-  <key>StandardErrorPath</key><string>$HOME/.pcbpilot/daemon.log</string>
-</dict></plist>
-PLIST
-    if [ "$RUNNING" = 0 ]; then
-      launchctl bootout "gui/$(id -u)/com.pcbpilot.daemon" >/dev/null 2>&1 || true
-      launchctl bootstrap "gui/$(id -u)" "$PL" || warn "launchctl bootstrap failed — start manually: $PCB daemon start"
+    # A published CLI older than `daemon service` (release mode before the next
+    # release): write the same launchd / systemd --user entry here.
+    if [ "$(uname)" = Darwin ]; then
+      PL="$HOME/Library/LaunchAgents/com.pcbpilot.daemon.plist"; mkdir -p "$(dirname "$PL")" "$HOME/.pcbpilot"
+      printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>\n  <key>Label</key><string>com.pcbpilot.daemon</string>\n  <key>ProgramArguments</key><array><string>%s</string><string>daemon</string><string>start</string></array>\n  <key>RunAtLoad</key><true/>\n  <key>KeepAlive</key><true/>\n  <key>StandardOutPath</key><string>%s/.pcbpilot/daemon.log</string>\n  <key>StandardErrorPath</key><string>%s/.pcbpilot/daemon.log</string>\n</dict></plist>\n' "$PCB" "$HOME" "$HOME" > "$PL"
+      if [ -z "$NOSTART" ]; then
+        launchctl bootout "gui/$(id -u)/com.pcbpilot.daemon" >/dev/null 2>&1 || true
+        launchctl bootstrap "gui/$(id -u)" "$PL" || warn "launchctl bootstrap failed"
+      fi
+    elif have systemctl; then
+      UNIT="$HOME/.config/systemd/user/pcbpilot-daemon.service"; mkdir -p "$(dirname "$UNIT")"
+      printf '[Unit]\nDescription=pcbpilot daemon\n\n[Service]\nExecStart="%s" daemon start\nRestart=on-failure\n\n[Install]\nWantedBy=default.target\n' "$PCB" > "$UNIT"
+      N="--now"; [ -n "$NOSTART" ] && N=""
+      systemctl --user daemon-reload && systemctl --user enable $N pcbpilot-daemon || warn "systemd --user failed"
+    else
+      warn "no launchd/systemd: add '$PCB daemon start' to your session startup yourself"
     fi
-  fi
-elif [ "$SERVICE" = 1 ] && have systemctl; then
-  UNIT="$HOME/.config/systemd/user/pcbpilot-daemon.service"
-  say "Installing the daemon login service ($UNIT)"
-  if [ "$DRY" = 1 ]; then
-    printf '   $ write %s; systemctl --user enable --now pcbpilot-daemon\n' "$UNIT"
-  else
-    mkdir -p "$(dirname "$UNIT")"
-    printf '[Unit]\nDescription=pcbpilot daemon\n\n[Service]\nExecStart=%s daemon start\nRestart=on-failure\n\n[Install]\nWantedBy=default.target\n' "$PCB" > "$UNIT"
-    NOW="--now"; [ "$RUNNING" = 1 ] && NOW=""
-    systemctl --user daemon-reload && systemctl --user enable $NOW pcbpilot-daemon || warn "systemd --user failed — start manually: $PCB daemon start"
-  fi
-elif [ "$RUNNING" = 0 ]; then
-  say "Starting the daemon in the background (log: ~/.pcbpilot/daemon.log)"
-  if [ "$DRY" = 1 ]; then printf '   $ nohup %s daemon start &\n' "$PCB"; else
-    mkdir -p "$HOME/.pcbpilot"; nohup "$PCB" daemon start >> "$HOME/.pcbpilot/daemon.log" 2>&1 &
   fi
 fi
 if [ "$DRY" = 0 ]; then

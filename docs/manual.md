@@ -95,9 +95,17 @@ Agent 会执行 `scripts/setup-agent.sh`，自动完成：
 
 `--purge-upstream` 另外停止上游 daemon 并把其 CLI 与数据目录移入备份；`--keep-upstream` 跳过第 0 步。
 
-daemon 以**登录服务**运行（macOS `~/Library/LaunchAgents/com.pcbpilot.daemon.plist`，Linux
-`systemd --user`），日志 `~/.pcbpilot/daemon.log`；已有健康 daemon（如开发时的 `make dev`）时不改动。
-`--no-service` 不装服务（`pcbpilot daemon start` 会前台阻塞）。
+**daemon 必须以登录服务运行**（安装的硬性要求，2026-09-25 起）：连接器只连 61832 上的 daemon，
+没有登录服务的机器重启后所有 EDA 操作都会失败。安装脚本调用 `pcbpilot daemon service install`
+（macOS `~/Library/LaunchAgents/com.pcbpilot.daemon.plist`，Linux `systemd --user`，Windows
+`HKCU\...\Run` 的 `pcbpilot-daemon`），日志 `~/.pcbpilot/daemon.log`；安装后自检缺服务即失败。
+已有健康 daemon（如开发时的 `make dev`）时只登记、下次登录生效（`--no-start`）。
+
+```bash
+pcbpilot daemon service status      # 已安装、指向的二进制存在；否则退出码 1
+pcbpilot daemon service install     # 补装 / 换了安装位置后重装
+pcbpilot daemon service uninstall   # 开发 pcbpilot 本身、用 make dev 时临时移除
+```
 
 **唯一需要人做的一步**是在 EasyEDA 里导入连接器（扩展管理器没有 API，本项目也禁止用
 GUI 自动化操作 EDA），见 [4. 连接 EasyEDA](#4-连接-easyeda-并验证)。

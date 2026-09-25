@@ -330,6 +330,7 @@ docs/                        Architecture, protocol, features/roadmap, conventio
 go run ./cmd/pcbpilot version
 go run ./cmd/pcbpilot actions
 go run ./cmd/pcbpilot daemon start
+go run ./cmd/pcbpilot daemon service install   # required: run the daemon at every login (launchd / systemd --user / HKCU Run)
 go run ./cmd/pcbpilot daemon health
 go run ./cmd/pcbpilot doc ls --project <name>
 go run ./cmd/pcbpilot sch drc --project <name>

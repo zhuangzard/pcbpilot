@@ -33,6 +33,7 @@ func newDaemonCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 		newDaemonStopCmd(cfg, stdout),
 		newDaemonRestartCmd(cfg, stdout, stderr),
 		newDaemonHealthCmd(cfg, stdout, stderr),
+		newDaemonServiceCmd(stdout, stderr),
 	)
 	return d
 }

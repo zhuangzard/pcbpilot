@@ -330,6 +330,21 @@ for client in $TARGETS; do
   install_skill_to "$client" "$SRC_SKILL"
 done
 
+# ── daemon login service (required) ──────────────────────────────────────────
+# The connector only talks to a daemon on 61832; without a login service every
+# EDA action fails after a reboot. `daemon service install` exists from the
+# release after v0.2.x; an older binary gets the manual instruction instead.
+SERVICE_OK=0
+if "${INSTALL_DIR}/pcbpilot" daemon service --help >/dev/null 2>&1; then
+  if "${INSTALL_DIR}/pcbpilot" daemon service install; then
+    SERVICE_OK=1; ok "daemon login service installed (starts now and at every login)"
+  else
+    warn "daemon login service install failed — run: pcbpilot daemon service install"
+  fi
+else
+  warn "this release predates 'pcbpilot daemon service'; start the daemon at login yourself (see docs/manual.md)"
+fi
+
 # ── PATH check ────────────────────────────────────────────────────────────────
 if ! echo ":${PATH}:" | grep -q ":${INSTALL_DIR}:"; then
   warn "${INSTALL_DIR} is not in PATH"
@@ -342,8 +357,11 @@ printf '\n'
 ok "pcbpilot ${VERSION} installed"
 printf '\n'
 printf 'Next steps:\n'
-printf '  1. Start the daemon:\n'
-printf '       pcbpilot daemon start\n\n'
+if [ "$SERVICE_OK" = 1 ]; then
+  printf '  1. Daemon: installed as a login service (check: pcbpilot daemon service status)\n\n'
+else
+  printf '  1. Daemon (required at every login): pcbpilot daemon service install\n\n'
+fi
 printf '  2. Install the EasyEDA connector extension (sideload only - not on the marketplace):\n'
 printf '       Download: %s/pcbpilot-connector.eext\n' "$BASE_URL"
 printf '       EasyEDA Pro: 高级 → 扩展管理器 → 已安装 (Advanced → Extension manager → Installed):\n'

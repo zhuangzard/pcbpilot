@@ -98,7 +98,9 @@ SHA-256 校验。`PCBPILOT_GITHUB_PROXY=https://mirror.example/{url}` 可替换�
 
 1. 运行 `pcbpilot update` 更新到所选版本；需要精确 Release 时显式传 `--version`。
    `--preserve` 会形成混合内容，不能作为纯 Release 一致性的证据。
-2. 停止旧 daemon，用升级后的 `pcbpilot daemon start` 重启。
+2. 重启 daemon 使其运行新二进制：已装登录服务时 `pcbpilot daemon stop`（launchd/systemd 立即按服务重新拉起），
+   否则 `pcbpilot daemon service install`。**daemon 登录服务是安装的必需项**：`pcbpilot daemon service status`
+   退出码非 0 就先 `pcbpilot daemon service install`，否则机器重启后所有 EDA 操作都连不上。
 3. 纯 patch 更新时保留现有 Connector，不重新导入，也不重开 EasyEDA。仅当
    Connector 与 latest 跨 minor/major 不兼容时，从 `update` 输出的 GitHub Release 地址取得
    对应 `.eext`；在扩展管理器卸载旧的 PCB Pilot Connector、导入新包，然后重新加载编辑器（Web 刷新页面；桌面版完全退出并重开 EasyEDA）。
