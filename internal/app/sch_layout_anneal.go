@@ -130,7 +130,9 @@ func solveSchematicLayoutAnneal(input SchematicLayoutInput, measured map[string]
 	}
 	var lastErr error
 	best := s.seed()
+	learned := map[string]int{} // conflict fingerprint -> round it was learned in
 	for round := 0; round < annealRounds; round++ {
+		repeats := 0
 		// A fixed schedule (~2 500 candidates) so the placement does not
 		// depend on the budget; only tiny budgets shorten it.
 		iters := 20000
@@ -195,7 +197,20 @@ func solveSchematicLayoutAnneal(input SchematicLayoutInput, measured map[string]
 			if annealAttemptHook != nil {
 				annealAttemptHook(round, spent-slice, err)
 			}
+			if print := schematicConflictFingerprint(err); print != "" {
+				if r, ok := learned[print]; ok && r < round {
+					repeats++
+				} else if !ok {
+					learned[print] = round
+				}
+			}
 			s.learn(err, p)
+		}
+		// Every failure of this round repeated a conflict already learned in
+		// an earlier round: the lead boosts changed nothing, stop spending.
+		if round > 0 && failed > 0 && repeats == failed {
+			lastErr = fmt.Errorf("%w (annealer stopped: round %d repeated learned conflicts)", lastErr, round+1)
+			break
 		}
 		best = finals[0]
 	}

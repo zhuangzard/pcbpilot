@@ -192,7 +192,15 @@ func PlanSchematicZones(in SchematicZonesInput) (*SchematicZonesResult, error) {
 		}
 		before := *zoneBudget
 		layout, err := planSchematicLayoutWithBudget(local, zoneBudget)
+		lastPrint := ""
 		for tier := initial * 4; err != nil && zoneBudget != &budget && tier <= in.MaxCandidatesCeiling && schematicBudgetStop(err); tier *= 4 {
+			// No progress: the same conflict stopped the previous tier too.
+			print := schematicConflictFingerprint(err)
+			if print != "" && print == lastPrint {
+				err = fmt.Errorf("%w (escalation stopped: the same conflict %s persisted across budget tiers; revise zoning/geometry, more budget will not help)", err, print)
+				break
+			}
+			lastPrint = print
 			out.CandidatesUsed += before - *zoneBudget
 			retry := tier
 			zoneBudget, before = &retry, tier

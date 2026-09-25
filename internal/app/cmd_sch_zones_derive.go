@@ -47,12 +47,24 @@ type zonesDeriveDecision struct {
 	Detail string   `json:"detail,omitempty"`
 }
 
+type zonesDeriveRisk struct {
+	Zone       string   `json:"zone"`
+	Peripheral string   `json:"peripheral"`
+	CorePin    string   `json:"corePin"`
+	Labeled    []string `json:"labeledNeighbours"`
+	Advice     string   `json:"advice"`
+}
+
 type zonesDeriveReport struct {
 	SchemaVersion int                   `json:"schemaVersion"`
 	Parts         int                   `json:"parts"`
 	Zones         int                   `json:"zones"`
 	Decisions     []zonesDeriveDecision `json:"decisions"`
 	OpenPins      map[string][]string   `json:"openPins,omitempty"`
+	// Risks: a peripheral hanging on a core pin whose neighbours within one
+	// 10-raw pitch on the same side mostly need port labels. Stress runs could
+	// not place such parts at any budget; keep them in their own zone.
+	Risks []zonesDeriveRisk `json:"risks,omitempty"`
 	Policies      map[string]int        `json:"policies"`
 }
 
@@ -126,6 +138,9 @@ Two-pin parts default to allowedRotations [0,90,180,270]. No editor calls.`, Arg
 		fmt.Fprintf(stdout, "zones-derive: %d parts, %d zones -> %s\n", rep.Parts, rep.Zones, out)
 		for _, d := range rep.Decisions {
 			fmt.Fprintf(stdout, "  %-22s %-16s %s\n", d.Zone, d.Rule, strings.Join(d.Parts, ","))
+		}
+		for _, r := range rep.Risks {
+			fmt.Fprintf(stdout, "  RISK dense-edge zone=%s %s on %s (labelled neighbours %s): %s\n", r.Zone, r.Peripheral, r.CorePin, strings.Join(r.Labeled, ","), r.Advice)
 		}
 		return nil
 	}}
@@ -481,6 +496,35 @@ func deriveSchematicZones(parts []zonesDerivePart, list, desig map[string]any, r
 		}
 		src.NetPolicies[n] = policy
 		rep.Policies[policy]++
+	}
+	// Only net ports count: power/ground symbols are short (AT32 RGB_LED and
+	// LCD have them on both sides of a host pin and still solve).
+	labeled := func(net string) bool { return src.NetPolicies[net] == "module_port" }
+	for _, z := range zones {
+		core := byID[z.CoreComponentID].Measurement
+		for _, pid := range z.ComponentIDs[1:] {
+			for _, q := range byID[pid].Measurement.Pins {
+				if q.Net == "" || opts.Ground[q.Net] || opts.Power[q.Net] {
+					continue
+				}
+				for _, h := range core.Pins {
+					if h.Net != q.Net {
+						continue
+					}
+					var near []string
+					for _, n := range core.Pins {
+						same := n.Rotation != nil && h.Rotation != nil && *n.Rotation == *h.Rotation
+						if n.Number != h.Number && same && n.Net != "" && labeled(n.Net) && math.Abs(n.X-h.X)+math.Abs(n.Y-h.Y) <= 10.5 {
+							near = append(near, n.Name)
+						}
+					}
+					if len(near) >= 2 {
+						rep.Risks = append(rep.Risks, zonesDeriveRisk{Zone: z.ID, Peripheral: pid, CorePin: h.Name, Labeled: near,
+							Advice: "both neighbours of this pin need port leads at a 10-raw pitch; place the peripheral in its own zone"})
+					}
+				}
+			}
+		}
 	}
 	for _, id := range order {
 		src.Components = append(src.Components, *byID[id])
