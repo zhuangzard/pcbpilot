@@ -192,7 +192,7 @@ Agent 会按设计流程执行，并在需要你决策时提问（例如降压�
 | 阶段 | 做什么 | 关键命令 |
 |---|---|---|
 | P0–P1 导入 | 从原理图导入，逐焊盘对账 | `pcb import-changes`、`pcb dump`、`scripts/pad-net-diff.py` |
-| P2–P5 布局 | 机械约束（板框、孔、贴边接口、天线净空）→ 离线求解 → 写入 | `pcb auto run --place --mech mech.json --power power.json --groups <原理图 composition>` → `pcbpilot apply` |
+| P2–P5 布局 | 机械约束（板框、孔、贴边接口、天线净空）→ 离线求解 → 写入 | `sch groups --pages <页> --out groups.json`（原理图模块框 → 分组）→ `pcb auto run --place --mech mech.json --power power.json --groups groups.json` → `pcbpilot apply` |
 | P6 布局确认 | 整板预览 + 两轮自检（第 2 轮 save → reload → fresh dump → render），**交用户确认** | `pcb stage-snapshot --fit-mode board`、`pcb check`、`pcb drc` |
 | P7–P8 布线与铜 | 关键网、电源主干、平面/分区铺铜、GND 铺铜 | `pcb auto run`（不带 `--place`）→ `apply`、`pcb pour-fit`、`pcb pour-rebuild` |
 | P9 丝印 | 位号转正、避让焊盘/器件 | `pcb silk-align`、`pcb check` |

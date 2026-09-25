@@ -29,6 +29,16 @@ type PlaceOptions struct {
 	// Halo adds keep-clear distance (mil) around named parts — the place/route
 	// loop inflates parts in regions the router failed.
 	Halo map[string]float64 `json:"halo,omitempty"`
+	// Macro enables the experimental two-stage placement (see freezeMacros):
+	// each core is seated with its critical auxiliaries, the group anneals as
+	// one rigid body, then everything is polished. Off by default: on the
+	// 8-board A/B (2026-09-25) it lost to the single-stage anneal on 7 boards
+	// (longer wiring, decaps and crystals further out) — freezing the cluster
+	// before the global arrangement exists fixes the wrong local geometry.
+	Macro bool `json:"macro,omitempty"`
+	// Only restricts the movable set to these designators (with Refine: a
+	// local adjustment of named parts on an otherwise confirmed layout).
+	Only []string `json:"only,omitempty"`
 }
 
 // Placement is a part's decided pose (anchor coordinates, like EasyEDA).
@@ -81,13 +91,16 @@ type pnet struct {
 }
 
 type placer struct {
-	b        *Board
-	an       *Analysis
-	c        *Circuit
-	m        *Mechanics
-	opt      PlaceOptions
-	rng      *rand.Rand
-	movable  []*Part
+	b       *Board
+	an      *Analysis
+	c       *Circuit
+	m       *Mechanics
+	opt     PlaceOptions
+	rng     *rand.Rand
+	movable []*Part
+	// Two-stage placement: macro[core] are the critical auxiliaries frozen
+	// to their core after stage 1; they move with it rigidly in the anneal.
+	macro    map[*Part][]*Part
 	nets     []*pnet
 	partNet  map[*Part][]int
 	zoneOf   map[*Part]Rect     // allowed centre region
@@ -150,7 +163,16 @@ func Place(b *Board, an *Analysis, c *Circuit, m *Mechanics, opt PlaceOptions) (
 		pl.construct()
 	}
 	pl.legalise()
+	if opt.Macro && len(opt.Only) == 0 {
+		// Stage 1: seat every critical auxiliary at its pin, then freeze it
+		// to its core. Stage 2 anneals macros + loose parts only, so a
+		// crystal or decap can no longer be dragged away from its pin (the
+		// szpi crystal ended 36 mm from its hub IC when it annealed alone).
+		pl.freezeMacros()
+	}
 	pl.anneal(start.Add(opt.Timeout))
+	pl.unfreezeMacros()
+	// Stage 3: local fine-tune in the gaps the macros left.
 	pl.legalise()
 	pl.polish()
 	pl.tidy()
@@ -183,8 +205,12 @@ func (pl *placer) setup(res *PlaceResult) {
 		}
 	}
 	pl.region = bb.Expand(-b.Rules.EdgeClearance - pl.spacing)
+	only := map[string]bool{}
+	for _, r := range pl.opt.Only {
+		only[r] = true
+	}
 	for _, p := range b.Parts {
-		if !p.Fixed && pl.c.Kinds[p.Ref] != KindMechanical {
+		if !p.Fixed && pl.c.Kinds[p.Ref] != KindMechanical && (len(only) == 0 || only[p.Ref]) {
 			pl.movable = append(pl.movable, p)
 		}
 	}
@@ -1124,7 +1150,18 @@ func (pl *placer) tryMove(p *Part, radius float64, keep bool) float64 {
 		}
 	}
 	var grp []*Part
-	if kind == 7 && len(pl.servedBy[p.Ref]) > 0 {
+	macro := pl.macro[p]
+	if len(macro) > 0 {
+		// A macro core always carries its frozen auxiliaries; no swaps.
+		if kind == 9 || kind == 7 {
+			kind = 0
+			q = nil
+		}
+		for _, d := range macro {
+			grp = append(grp, d)
+			lastMove.grp = append(lastMove.grp, posePart{d, d.Pos, d.Rotation})
+		}
+	} else if kind == 7 && len(pl.servedBy[p.Ref]) > 0 {
 		// Block move: the core carries its auxiliaries rigidly.
 		for _, d := range pl.servedBy[p.Ref] {
 			if !d.Fixed {
@@ -1138,6 +1175,9 @@ func (pl *placer) tryMove(p *Part, radius float64, keep bool) float64 {
 	before := pl.localCost(p, q)
 	for _, d := range grp {
 		before += pl.groupCost(d)
+		if len(macro) > 0 {
+			before += pl.partCost(d)
+		}
 	}
 	if pl.rudy != nil {
 		moved := append([]*Part{p}, grp...)
@@ -1166,20 +1206,34 @@ func (pl *placer) tryMove(p *Part, radius float64, keep bool) float64 {
 		pl.bucketOp(p, true)
 		pl.bucketOp(q, true)
 	case kind == 8 && !pl.opt.NoRotate:
+		ang := 90 * float64(1+pl.rng.Intn(3))
+		pc := p.Body().Center()
 		pl.bucketOp(p, false)
-		movePartCentre(p, p.Body().Center(), normDeg(p.Rotation+90*float64(1+pl.rng.Intn(3))))
+		movePartCentre(p, pc, normDeg(p.Rotation+ang))
 		pl.boxes[p] = pl.box(p)
 		pl.bucketOp(p, true)
+		for _, d := range grp { // macro: rotate rigidly about the core centre
+			dc := d.Body().Center().Sub(pc).Rotate(ang).Add(pc)
+			pl.bucketOp(d, false)
+			movePartCentre(d, dc, normDeg(d.Rotation+ang))
+			pl.boxes[d] = pl.box(d)
+			pl.bucketOp(d, true)
+		}
 	default:
-		c := p.Body().Center().Add(Point{(pl.rng.Float64()*2 - 1) * radius, (pl.rng.Float64()*2 - 1) * radius})
-		pl.bucketOp(p, false)
-		movePartCentre(p, c, p.Rotation)
-		pl.boxes[p] = pl.box(p)
-		pl.bucketOp(p, true)
+		delta := Point{(pl.rng.Float64()*2 - 1) * radius, (pl.rng.Float64()*2 - 1) * radius}
+		for _, d := range append([]*Part{p}, grp...) {
+			pl.bucketOp(d, false)
+			movePartCentre(d, d.Body().Center().Add(delta), d.Rotation)
+			pl.boxes[d] = pl.box(d)
+			pl.bucketOp(d, true)
+		}
 	}
 	after := pl.localCost(p, q)
 	for _, d := range grp {
 		after += pl.groupCost(d)
+		if len(macro) > 0 {
+			after += pl.partCost(d)
+		}
 	}
 	if pl.rudy != nil {
 		after += pl.rudy.commit()
@@ -1777,7 +1831,7 @@ func (pl *placer) chainCost(p *Part) float64 {
 
 // polishRoles are the parts whose last few mils decide the electrical
 // result; annealing gets them close, polish makes them exact.
-var polishRoles = map[string]bool{"hot-loop": true, "bootstrap": true, "decap": true, "clock": true, "clock-load": true, "protection": true, "feedback": true}
+var polishRoles = map[string]bool{"hot-loop": true, "bootstrap": true, "decap": true, "clock": true, "clock-load": true, "protection": true, "feedback": true, "pin-filter": true, "power-path": true}
 
 // polish is a deterministic exhaustive local search for critical auxiliaries:
 // every 15 mil grid point within 180 mil of the target pad, four rotations,
@@ -1820,7 +1874,14 @@ func (pl *placer) polish() {
 		rots = nil
 	}
 	for _, it := range items {
-		p := it.p
+		pl.polishPart(it.p, rots, step, radius)
+	}
+}
+
+// polishPart moves p to the best legal pose on a grid around its tether
+// target (exhaustive over positions within radius and the given rotations).
+func (pl *placer) polishPart(p *Part, rots []float64, step, radius float64) {
+	{
 		target := pl.tether[p].pads[0].Box.C
 		bestPos, bestRot := p.Pos, p.Rotation
 		best := pl.localCost(p, nil)
@@ -1957,4 +2018,97 @@ func fitSpacing(b *Board) float64 {
 		best = math.Min(best, 2*(0.85*board-area)/perim)
 	}
 	return best
+}
+
+// freezeMacros ends stage 1 of two-stage placement: every movable auxiliary
+// in a physically critical role (criticalRoles: decap, crystal and its load
+// caps, converter power stage, ESD/power path at a connector, pin filters)
+// is frozen to the core it serves and leaves the movable set; tryMove then
+// carries it rigidly with that core.
+func (pl *placer) freezeMacros() {
+	pl.macro = map[*Part][]*Part{}
+	frozen := map[*Part]bool{}
+	for _, bl := range pl.c.Blocks {
+		core := pl.b.Part(bl.Core)
+		if core == nil {
+			continue
+		}
+		for _, m := range bl.Members {
+			d := pl.b.Part(m.Ref)
+			t := pl.tether[d]
+			if d == nil || d.Fixed || t == nil || !criticalRoles[t.role] || frozen[d] {
+				continue
+			}
+			pl.macro[core] = append(pl.macro[core], d)
+			frozen[d] = true
+		}
+	}
+	pl.seatMacros()
+	kept := pl.movable[:0]
+	for _, p := range pl.movable {
+		if !frozen[p] {
+			kept = append(kept, p)
+		}
+	}
+	pl.movable = kept
+}
+
+// seatMacros solves each macro on its own: every other part is taken out of
+// the collision buckets, so the core's critical auxiliaries (bulk decaps
+// included) pack at their pins as tightly as the core alone allows, instead
+// of settling into whatever gap the crowded stage-1 board left.
+func (pl *placer) seatMacros() {
+	cores := make([]*Part, 0, len(pl.macro))
+	for c := range pl.macro {
+		cores = append(cores, c)
+	}
+	sort.Slice(cores, func(i, j int) bool { return cores[i].Ref < cores[j].Ref })
+	rots := []float64{0, 90, 180, 270}
+	if pl.opt.NoRotate {
+		rots = nil
+	}
+	for _, core := range cores {
+		members := append([]*Part(nil), pl.macro[core]...)
+		in := map[*Part]bool{core: true}
+		for _, d := range members {
+			in[d] = true
+		}
+		pl.rebuildBuckets()
+		for _, p := range pl.b.Parts {
+			if !in[p] {
+				pl.bucketOp(p, false)
+			}
+		}
+		sort.SliceStable(members, func(i, j int) bool {
+			ri, rj := roleRank(pl.tether[members[i]].role), roleRank(pl.tether[members[j]].role)
+			if ri != rj {
+				return ri < rj
+			}
+			if a, b := capRank(members[i]), capRank(members[j]); a != b {
+				return a < b
+			}
+			return members[i].Ref < members[j].Ref
+		})
+		for _, d := range members {
+			pl.polishPart(d, rots, 15, 240)
+		}
+	}
+	pl.rebuildBuckets()
+}
+
+// unfreezeMacros returns the frozen auxiliaries to the movable set for the
+// stage-3 fine-tune (legalise + polish).
+func (pl *placer) unfreezeMacros() {
+	if pl.macro == nil {
+		return
+	}
+	cores := make([]*Part, 0, len(pl.macro))
+	for c := range pl.macro {
+		cores = append(cores, c)
+	}
+	sort.Slice(cores, func(i, j int) bool { return cores[i].Ref < cores[j].Ref })
+	for _, c := range cores {
+		pl.movable = append(pl.movable, pl.macro[c]...)
+	}
+	pl.macro = nil
 }

@@ -108,8 +108,12 @@ the editor.`,
 	c.Flags().IntVar(&moves, "moves", 0, "annealing moves per movable part (0 = placer default)")
 	c.Flags().StringVar(&dumpDir, "dump-dir", "", "write each engine placement as <board>.engine.json (a pcb dump snapshot) for layout-score / inspection")
 	c.Flags().StringSliceVar(&variants, "variants", []string{"human", "engine"}, "which placements to measure")
+	c.Flags().BoolVar(&benchMacro, "macro", false, "engine: two-stage macro placement (A/B against the default single-stage placer)")
 	return c
 }
+
+// benchMacro selects two-stage macro placement for A/B runs (--macro).
+var benchMacro bool
 
 func benchOne(ctx context.Context, name, variant string, raw []byte, seed int64, noRoute bool, timeout time.Duration, dumpDir string, moves int, congestion float64, loops int) (benchRow, error) {
 	row := benchRow{Board: name, Variant: variant}
@@ -130,7 +134,7 @@ func benchOne(ctx context.Context, name, variant string, raw []byte, seed int64,
 			}
 		}
 		start := time.Now()
-		popt := pcbauto.PlaceOptions{Seed: seed, Moves: moves, Congestion: congestion}
+		popt := pcbauto.PlaceOptions{Seed: seed, Moves: moves, Congestion: congestion, Macro: benchMacro}
 		var pr *pcbauto.PlaceResult
 		if loops > 0 && !noRoute {
 			lr, err := pcbauto.PlaceRoute(ctx, b, an, circ, nil, popt,

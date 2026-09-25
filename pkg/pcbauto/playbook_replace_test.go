@@ -30,3 +30,28 @@ func TestMechFromJournalAndReplaceSteps(t *testing.T) {
 		t.Fatalf("mechanics must capture their primitiveId: %+v %+v", fill, keep)
 	}
 }
+
+// A placement-only plan (no routing) on a board that already has the planned
+// layer count must not rewrite the stackup: the reset would turn the live GND
+// plane back into a signal layer with nothing to re-pour it.
+func TestPlaybookPlaceOnlyKeepsStackup(t *testing.T) {
+	has := func(pb *Playbook) bool {
+		for _, s := range pb.Steps {
+			if s.Action == "pcb.stackup.set" {
+				return true
+			}
+		}
+		return false
+	}
+	b := &Board{CopperLayers: 4}
+	st := &Stackup{Layers: 4}
+	if has(BuildPlaybook(PlaybookInput{Board: b, Result: &Result{Stackup: st}})) {
+		t.Fatal("placement-only plan on a 4-layer board wrote a stackup step")
+	}
+	if !has(BuildPlaybook(PlaybookInput{Board: &Board{CopperLayers: 2}, Result: &Result{Stackup: st}})) {
+		t.Fatal("layer-count change must still write the stackup")
+	}
+	if !has(BuildPlaybook(PlaybookInput{Board: b, Result: &Result{Stackup: st, Route: &RouteResult{}}})) {
+		t.Fatal("a routed plan must still write the stackup")
+	}
+}

@@ -414,6 +414,16 @@ func AllActions() []ActionSpec {
 			Outputs:     []string{"count", "scope (activePage)", "texts[].primitiveId", "texts[].content", "texts[].x", "texts[].y", "texts[].rotation", "texts[].fontSize", "texts[].color"},
 		},
 		{
+			Name:        "schematic.rectangles.list",
+			Domain:      DomainSchematic,
+			Phase:       1,
+			Mutates:     false,
+			NeedsWindow: true,
+			Description: "Read-only list of ALL rectangle primitives on the ACTIVE schematic page — module frames that `sch groups` maps to PCB placement groups. y is the host TopLeftY (mirrored about y=0 on 3.2.149; the CLI normalises it). Active page only.",
+			Inputs:      []string{},
+			Outputs:     []string{"count", "scope (activePage)", "rectangles[].primitiveId", "rectangles[].x", "rectangles[].y", "rectangles[].width", "rectangles[].height", "rectangles[].rotation", "rectangles[].lineType", "rectangles[].color"},
+		},
+		{
 			Name:        "schematic.library.search",
 			Domain:      DomainSchematic,
 			Phase:       1,

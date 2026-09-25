@@ -6809,6 +6809,30 @@ const schematicTextList: Handler = async () => {
 	return { result: { count: items.length, scope: 'activePage', texts: items } };
 };
 
+/**
+ * List all rectangle primitives on the ACTIVE schematic page — module frames
+ * (dashed boxes) that `pcbpilot sch groups` turns into PCB placement groups.
+ * Read-only. `y` is reported as the host returns TopLeftY (3.2.149 mirrors it
+ * about y=0; the CLI normalises it with schFrameRectTopY).
+ */
+const schematicRectanglesList: Handler = async () => {
+	let rects;
+	try { rects = await eda.sch_PrimitiveRectangle.getAll(); }
+	catch (err) { throw edaError(err, 'Failed to list schematic rectangle primitives.'); }
+	const items = (Array.isArray(rects) ? rects : []).map(r => ({
+		primitiveId: r.getState_PrimitiveId(),
+		x: r.getState_TopLeftX(),
+		y: r.getState_TopLeftY(),
+		width: r.getState_Width(),
+		height: r.getState_Height(),
+		rotation: r.getState_Rotation(),
+		color: r.getState_Color(),
+		lineWidth: r.getState_LineWidth(),
+		lineType: r.getState_LineType(),
+	}));
+	return { result: { count: items.length, scope: 'activePage', rectangles: items } };
+};
+
 // ─── Replace: swap a placed component's DEVICE(器件标准化「使用推荐器件」)───
 
 /** Pin identity snapshot used for the before/after diff of a device replace. */
@@ -14366,6 +14390,7 @@ const HANDLERS: Record<string, Handler> = {
 	'schematic.component.replace': schematicComponentReplace,
 	'schematic.component.resolve_lcsc': schematicComponentResolveLcsc,
 	'schematic.text.list': schematicTextList,
+	'schematic.rectangles.list': schematicRectanglesList,
 	'pcb.documents.list': pcbDocumentsList,
 	'pcb.components.list': pcbComponentsList,
 	'pcb.components.count': pcbComponentsCount,

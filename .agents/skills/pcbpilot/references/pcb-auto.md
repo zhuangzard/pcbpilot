@@ -18,6 +18,8 @@ typed action，符合“禁止手工操作 EDA 工程”准则。
 | 从刚导入的散乱器件开始，按机械要求自动布局再布线 | `pcb auto run --place --mech mech.json` |
 | 已有布局只想微调 | `pcb auto run --place --refine` |
 | 要求固定层数（如需求写明 4 层） | 加 `--layers 4` |
+| 确认版布局只改个别器件（如把 RC 电容挪近引脚、ESD 转向） | `pcb auto run --place --refine --only C7,D3 --no-route` |
+| 原理图画了模块框，要 PCB 按框归属 | `sch groups --pages <页> --out groups.json` → `--groups groups.json` |
 
 `pcb route-short`、`route-critical`、`layout-plan` 等既有命令仍适用于逐模块、逐网的精细控制；
 `pcb auto` 负责整板级决策。二者可组合：先 `pcb auto analyze` 取线宽/层数/域，再用既有命令
@@ -117,6 +119,39 @@ typed action，符合“禁止手工操作 EDA 工程”准则。
   不要用手工挪器件兜底，按参数（`--loops`、`--seed`、mech/power 约束）重算。**先读 `report.md`「布局依据」表核对归属**：归属错（例如测试点被当成串阻、
   开关电源被当成 logic）就修网名/判据再重跑，不要手工挪器件。
 
+## 原理图模块框 → PCB 归属（`--groups`）
+
+原理图上每个功能模块的框（核心 + 去耦/晶振/稳压外围）就是 PCB 布局需要的**归属**：共享电源轨上
+“buck 输出电容”与“MCU 去耦”同网，只靠网表分不清；框能分清。
+
+```bash
+pcbpilot sch groups --project <工程> --pages <页1>,<页2> --out groups.json   # 只读，需连接器 ≥ 0.2.9
+pcbpilot pcb auto run --board board.json --groups groups.json --place --out-dir out/
+```
+
+- 器件归入包含其 bbox 中心的**最小**框（嵌套框内层优先）；框名取框左上角最近的文字。
+- 少于 `--min-members`（默认 2）件的框、以及装下约整页的框（图框/标题栏）忽略；`unframed` 列出未入框器件，
+  它们仍按网表规则归属。
+- pcbpilot 自己 compose 的页面也可以直接用 composition JSON 作为 `--groups`；`sch groups` 让任意人工原理图同样可用。
+- 归属进入引擎后按角色决定拉力：去耦 / 功率链（buck 输入、电感、输出电容）/ `pin-filter`（IC 信号脚到地/电源的
+  电容，如 EN 复位 RC）/ 晶振与负载电容 / 端口保护（保护件留在连接器旁，不跟核心走）。
+
+### 两阶段宏布局（`--macro`，实验，默认关闭）
+
+思路：先把每个核心和它的关键外围作为刚体“宏”摆好，再让宏和其余器件一起退火，最后解冻精修。
+2026-09-25 在 8 块板（含 5 块真实开源板）的 A/B 上，它在 7 块上**不如**默认的单阶段退火：走线更长，
+去耦更远，szpi 晶振 3.8 → 9.9 mm，rk3568 分数 66.9 → 61.3。原因：在全局排布出来之前先冻结局部几何，
+固定的是“在空处摆得好”的形状，而不是“在整板里摆得好”的形状；刚体宏也让退火步长变粗。默认流程里
+关键角色的拉力、退火后的确定性精修（`polish`）已经让同一模块在 PCB 上靠拢，所以不开宏。保留开关供对照：
+`pcb auto bench … --macro`。
+
+### 局部调整（`--refine --only`）
+
+用户已确认的布局只改几个器件时，用 `--only` 只让这些器件可动，其余位姿视为固定；配合 `--no-route` 只出放置剧本。
+**只放置、且层数与现板相同时，剧本不写 `pcb.stackup.set`**：重写叠层会把现场的 GND 内电层打回信号层，
+而没有布线步骤去重铺它（2026-09-25 修复，`TestPlaybookPlaceOnlyKeepsStackup`）。改动器件后仍要重新走
+Layout 两轮自检并请用户确认，确认后再布线。
+
 ## 执行
 
 ```bash
@@ -183,4 +218,13 @@ pcbpilot pcb check --project <工程>
   → 新增 `pin-filter` 角色（IC 信号脚到地/电源的电容），同板重排后 3.5 mm；确认版布局未改动。
 - 晶振（szpi CH334F 的 X1）：负载下同一 seed 曾被放到 36 mm 外，另一次 0.4 mm —— 退火按墙钟冷却且辅助件归属
   依赖 map 顺序。改为按步数冷却 + 排序遍历后同一 seed 逐字节一致，X1 距时钟脚 3.8 mm（人工 4.1 mm）。
+
+**同板布局调整（用户要求 C7 靠近 EN、D3 转向）** — `live-verified`（Layout 阶段，待用户确认）
+
+- 输入：确认版 fresh dump `adj0.json` + 两页 composition groups；`pcb auto run --place --refine --only C7,D3 --no-route --layers 4`。
+- 结果：只动 C7 (110,1310,90°) → (395,1385,90°)、D3 (910,410,0°) → (915,405,90°)；C7 EN 脚到 U3 EN 脚 3.29 mm
+  （原 10.2 mm）；USB P/N 扭绞 1 → 0。剧本只有 place-C7 / place-D3 / save（不写叠层）。
+- 现场：先 `pcb rip-up` + 按 dump 中 9 个铺铜的精确 ID `pour-delete`，再 apply；save → reload 后 30 件、7 区域、4 孔不变，
+  C7/D3 位姿与剧本一致；`pcb silk-align --refs` 修 3 处丝印压焊盘和 D3 侧向位号；`pcb check` 0 ERROR（只剩布线前的
+  “电源未铺铜”）；原生 DRC 只剩未布线 Connection Error。
 

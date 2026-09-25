@@ -166,7 +166,8 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 	// ── run ──────────────────────────────────────────────────────────────
 	{
 		var outDir, replaceJournal string
-		var place, noRoute, refine bool
+		var place, noRoute, refine, macro bool
+		var only []string
 		var seed int64
 		var loops int
 		c := &cobra.Command{
@@ -212,7 +213,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 					if err != nil {
 						return err
 					}
-					if mech, frame, err = pcbauto.AutoFrame(b, fa, fc, mech, pcbauto.PlaceOptions{Seed: seed}); err != nil {
+					if mech, frame, err = pcbauto.AutoFrame(b, fa, fc, mech, pcbauto.PlaceOptions{Seed: seed, Macro: macro}); err != nil {
 						return err
 					}
 					fmt.Fprintf(stderr, "autoSize: frame %.1f × %.1f %s (%d trials)\n", frame.Width, frame.Height, frame.Units, len(frame.Trials))
@@ -253,7 +254,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 				}
 				looped := false
 				if place && !noRoute && loops > 0 {
-					lr, err := pcbauto.PlaceRoute(ctx, b, pre, rep.Circuit, mc, pcbauto.PlaceOptions{Seed: seed, Refine: refine}, opts, pcbauto.LoopOptions{Passes: loops, Budget: in.timeout * time.Duration(loops+1)})
+					lr, err := pcbauto.PlaceRoute(ctx, b, pre, rep.Circuit, mc, pcbauto.PlaceOptions{Seed: seed, Refine: refine, Macro: macro, Only: only}, opts, pcbauto.LoopOptions{Passes: loops, Budget: in.timeout * time.Duration(loops+1)})
 					if err != nil {
 						return err
 					}
@@ -263,7 +264,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 					}
 					fmt.Fprintf(stderr, "loop: best pass %d\n", lr.Best)
 				} else if place {
-					rep.Placement, err = pcbauto.Place(b, pre, rep.Circuit, mc, pcbauto.PlaceOptions{Seed: seed, Refine: refine})
+					rep.Placement, err = pcbauto.Place(b, pre, rep.Circuit, mc, pcbauto.PlaceOptions{Seed: seed, Refine: refine, Macro: macro, Only: only})
 					if err != nil {
 						return err
 					}
@@ -334,6 +335,8 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 		c.Flags().StringVar(&replaceJournal, "replace", "", "apply journal of the previous pcbauto playbook: its captured holes/keep-outs (MECH_*) are deleted first, so a re-plan does not stack a second set")
 		c.Flags().BoolVar(&place, "place", false, "run the placer (mechanics, domain zones, blocks) before routing")
 		c.Flags().BoolVar(&refine, "refine", false, "with --place: refine the current placement instead of constructing one")
+		c.Flags().BoolVar(&macro, "macro", false, "with --place: experimental two-stage placement — freeze each core with its critical auxiliaries as a rigid macro, anneal macros + the rest, then polish (8-board A/B 2026-09-25: worse than the default single-stage anneal on 7/8)")
+		c.Flags().StringSliceVar(&only, "only", nil, "with --place --refine: move only these designators (local adjustment of a confirmed layout), e.g. --only C7,D3")
 		c.Flags().BoolVar(&noRoute, "no-route", false, "stop after placement / stackup")
 		c.Flags().Int64Var(&seed, "seed", 0, "placement random seed (runs are reproducible per seed)")
 		c.Flags().IntVar(&loops, "loops", 3, "with --place: place↔route loop passes — parts near unrouted pads / DRC points are inflated and re-placed; 0 = one placement then route")

@@ -83,8 +83,12 @@ func BuildPlaybook(in PlaybookInput) *Playbook {
 	}
 	res := in.Result
 	st := res.Stackup
-	// 1. Stackup: count first, all inner layers SIGNAL until poured.
-	if st != nil && st.Layers >= 2 {
+	// 1. Stackup: count first, all inner layers SIGNAL until poured. A
+	// placement-only plan on a board that already has this layer count
+	// leaves the stackup alone: resetting it would turn the live GND plane
+	// back into a signal layer while nothing re-pours it.
+	placeOnly := res.Route == nil
+	if st != nil && st.Layers >= 2 && !(placeOnly && in.Board.CopperLayers == st.Layers) {
 		var layers []map[string]any
 		for _, l := range st.Stack {
 			if l.ID >= LayerInner1 {
