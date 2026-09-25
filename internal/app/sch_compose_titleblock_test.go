@@ -30,7 +30,7 @@ func TestComposeTitleBlockSourceCompilesBeforeStrictGate(t *testing.T) {
 		writeIndex, write := composeStep(t, pb, "apply-page-titleblock")
 		gateIndex, _ := composeStep(t, pb, "strict-schematic-gate")
 		saveIndex, _ := composeStep(t, pb, "save-composition")
-		if write.Run != "sch titleblock" || writeIndex >= gateIndex || gateIndex >= saveIndex {
+		if write.Run != "sch titleblock" || writeIndex >= gateIndex || writeIndex >= saveIndex || saveIndex >= gateIndex {
 			t.Fatalf("title block must use the guarded CLI before gate/save: %+v", write)
 		}
 		var patch map[string]map[string]string

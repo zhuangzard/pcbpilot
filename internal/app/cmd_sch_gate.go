@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"sort"
 	"strings"
 
@@ -344,10 +345,7 @@ func gateClustersStage(cfg *appConfig, window string, strict bool, geom *schGeom
 	if strict {
 		minGap = bslPartGap // 非 strict 只判硬伤;组间"贴着但不压"留给 strict
 	}
-	var same schSameGroupFn
-	if _, _, docUUID, _, gst, _, gerr := loadSchGroupsContext(cfg, window); gerr == nil {
-		same = schSameLayoutOwnerFromState(gst, docUUID)
-	}
+	same, _ := loadSchPageOwnership(cfg, window) // 读不到归属只降级为无豁免
 	findings := judgeSchClustersWith(clusters, usable, minGap, same)
 	st.Detail = schClusterReport{Clusters: clusters, Findings: findings, Sheet: usable}
 	var overlaps, offSheet, tight int
@@ -432,7 +430,7 @@ func gateBridgeStage(cfg *appConfig, window string, allPages, strict bool) gateS
 
 // gateDrcStage runs the official SDK DRC. Only fatal blocks — matching the
 // standalone `sch drc` contract, which real boards are calibrated against.
-func gateDrcStage(cfg *appConfig, window string, strict bool) gateStage {
+func gateDrcStage(cfg *appConfig, window string, strict, deferCrossPage bool) gateStage {
 	st := gateStage{Name: "drc"}
 	payload := map[string]any{"includeVerboseError": true}
 	if strict {
@@ -461,13 +459,97 @@ func gateDrcStage(cfg *appConfig, window string, strict bool) gateStage {
 			rep.Summary.Fatal, rep.Summary.Error, rep.Summary.Warn, rep.Summary.Info, rep.Summary.Total,
 			drcVerdictLabel(rep.Passed))
 	}
-	st.BlockingReasons = append(st.BlockingReasons, drcBlockingReasons(rep, strict)...)
+	reasons := drcBlockingReasons(rep, strict)
+	if deferCrossPage && len(reasons) > 0 {
+		// 只有「严格档下的 warn」才可能是跨页端口未配对;先用纯判据排除 fatal/error,
+		// 省掉一次全工程读。
+		if _, ok := deferDrcForCrossPagePorts(rep, strict, drcCrossPageDeferral{Ports: math.MaxInt}); ok {
+			res, lerr := requestAction(cfg, "schematic.components.list", window,
+				map[string]any{"allPages": true, "tagPages": true})
+			if lerr == nil {
+				active := ""
+				if res.Context != nil {
+					active = strings.TrimSpace(res.Context.DocumentUUID)
+				}
+				raw, _ := res.Result["components"].([]any)
+				d := planDrcCrossPageDeferral(raw, active)
+				if note, ok := deferDrcForCrossPagePorts(rep, strict, d); ok {
+					reasons = nil
+					st.Summary += "; " + note
+					st.Detail = map[string]any{"drc": rep, "crossPageDeferral": d}
+				}
+			}
+		}
+	}
+	st.BlockingReasons = append(st.BlockingReasons, reasons...)
 	if len(st.BlockingReasons) > 0 {
 		st.Status = gateStatusFail
 	} else {
 		st.Status = gateStatusPass
 	}
 	return st
+}
+
+// drcCrossPageDeferral 是「本页跨页端口还没有对端」的证据(F2,2026-09-25 E2E)。
+//
+// 多页 compose 按页顺序落地:P1 上的 net_port(EN/IO0/ESP_TXD/ESP_RXD)在 P2 落地前
+// 必然没有对端,原生 DRC 于是报 warn;--strict 把它升成阻塞,P1 队列停在 gate,后面
+// 受保护的 save 也跟着没跑。平台 DRC 只回聚合计数,不能逐条认领 —— 所以判据是保守的
+// **计数上界**:fatal=error=0,且 warn 数 ≤ 本页「无对端端口」图元数,才把这次
+// DRC 记为 deferred(不阻塞)。对端全齐时不豁免任何东西;所有页落地后必须对每一页
+// 不带 --defer-cross-page-drc 重跑 `sch gate --strict`(SOP 写明)。
+type drcCrossPageDeferral struct {
+	// Unmatched 是本页有端口、其它页没有同网端口的网名(排序)。
+	Unmatched []string `json:"unmatchedNets"`
+	// Ports 是这些网在本页的端口图元数 —— warn 计数的上界。
+	Ports int `json:"unmatchedPorts"`
+}
+
+// planDrcCrossPageDeferral 从 allPages+tagPages 的 components.list 原始记录里找出本页
+// 未配对的跨页端口。pageUuid 缺失的记录不参与(无法证明它在哪一页)。
+func planDrcCrossPageDeferral(raw []any, activeDoc string) drcCrossPageDeferral {
+	here := map[string]int{}
+	elsewhere := map[string]bool{}
+	for _, item := range raw {
+		m, ok := item.(map[string]any)
+		if !ok || asString(m["componentType"]) != "netport" {
+			continue
+		}
+		net := strings.TrimSpace(asString(m["net"]))
+		page := strings.TrimSpace(asString(m["pageUuid"]))
+		if net == "" || page == "" || activeDoc == "" {
+			continue
+		}
+		if page == activeDoc {
+			here[net]++
+		} else {
+			elsewhere[net] = true
+		}
+	}
+	var d drcCrossPageDeferral
+	for net, n := range here {
+		if !elsewhere[net] {
+			d.Unmatched = append(d.Unmatched, net)
+			d.Ports += n
+		}
+	}
+	sort.Strings(d.Unmatched)
+	return d
+}
+
+// deferDrcForCrossPagePorts 是纯判据:能否把这次 DRC 的阻塞记为「等待其它页」。
+func deferDrcForCrossPagePorts(rep drcReport, strict bool, d drcCrossPageDeferral) (string, bool) {
+	if !strict || rep.Summary == nil || d.Ports == 0 {
+		return "", false
+	}
+	if rep.Summary.Fatal > 0 || rep.Summary.Error > 0 || (rep.Fatal != nil && *rep.Fatal > 0) {
+		return "", false
+	}
+	if rep.Summary.Warn == 0 || rep.Summary.Warn > d.Ports {
+		return "", false
+	}
+	return fmt.Sprintf("deferred: %d warn ≤ %d 个未配对跨页端口(%s)—— 其它页落地后必须不带 --defer-cross-page-drc 重跑 `sch gate --strict`",
+		rep.Summary.Warn, d.Ports, strings.Join(d.Unmatched, ",")), true
 }
 
 // drcBlockingReasons 是 DRC 关的**阻塞判据**,抽成纯函数以便逐档钉死契约。
@@ -551,9 +633,9 @@ func gateAdviceFor(st gateStage) []string {
 }
 
 // runSchGate executes the fixed S5 gate pipeline and renders one report.
-func runSchGate(cfg *appConfig, window string, allPages, strict, asJSON, failFast bool,
+func runSchGate(cfg *appConfig, window string, allPages, strict, asJSON, failFast, deferCrossPage bool,
 	only, skip string, minGap, pinEps, overlapEps float64, stdout, stderr io.Writer) error {
-	rep, err := collectSchGate(cfg, window, allPages, strict, failFast, only, skip,
+	rep, err := collectSchGate(cfg, window, allPages, strict, failFast, deferCrossPage, only, skip,
 		minGap, pinEps, overlapEps, stderr)
 	if err != nil {
 		return err
@@ -585,7 +667,7 @@ func runSchGate(cfg *appConfig, window string, allPages, strict, asJSON, failFas
 // (pass / fail / **blocked**),而不是打印出来的那段文字。如果它改用「调 runSchGate
 // 看 error 非空」来判,blocked 就会被折成 fail —— 「检查器没跑起来」被当成「板子有病」,
 // 正是 gate 三态存在的理由。判定只有一个来源,渲染是它的下游。
-func collectSchGate(cfg *appConfig, window string, allPages, strict, failFast bool,
+func collectSchGate(cfg *appConfig, window string, allPages, strict, failFast, deferCrossPage bool,
 	only, skip string, minGap, pinEps, overlapEps float64, stderr io.Writer) (*gateReport, error) {
 	if strict && allPages {
 		return nil, fmt.Errorf("sch gate: --strict cannot be combined with --all-pages: inactive pages expose shallow geometry (see layout-lint), so gate each page after `pcbpilot doc switch <page>`")
@@ -626,7 +708,7 @@ func collectSchGate(cfg *appConfig, window string, allPages, strict, failFast bo
 		case "bridge-check":
 			st = gateBridgeStage(cfg, window, allPages, strict)
 		case "drc":
-			st = gateDrcStage(cfg, window, strict)
+			st = gateDrcStage(cfg, window, strict, deferCrossPage)
 		}
 		byName[name] = st
 		// A stage that could not RUN stops the pipeline: the remaining checkers
@@ -763,6 +845,7 @@ func renderGateReport(rep gateReport, w io.Writer) {
 func newSchGateCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {
 	var (
 		allPages, strict, asJSON, failFast bool
+		deferCrossPage                     bool
 		only, skip                         string
 		minGap, pinEps, overlapEps         float64
 	)
@@ -805,9 +888,10 @@ superset of the four single commands' JSON: nothing needs a second run.`,
   pcbpilot sch gate --strict                 # 告警也阻塞
   pcbpilot sch gate --only layout-lint,check # 只跑便宜的两关
   pcbpilot sch gate --skip drc               # 窗口不在前台时跳过 DRC
-  pcbpilot sch gate --fail-fast              # 第一个阻塞失败就停`,
+  pcbpilot sch gate --fail-fast              # 第一个阻塞失败就停
+  pcbpilot sch gate --strict --defer-cross-page-drc  # 多页逐页落地时,本页端口的对端还没落`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runSchGate(cfg, *window, allPages, strict, asJSON, failFast,
+			return runSchGate(cfg, *window, allPages, strict, asJSON, failFast, deferCrossPage,
 				only, skip, minGap, pinEps, overlapEps, stdout, stderr)
 		},
 	}
@@ -815,6 +899,7 @@ superset of the four single commands' JSON: nothing needs a second run.`,
 	c.Flags().BoolVar(&strict, "strict", false, "promote advisory findings (tight spacing, warn-level, orphan stubs) to blocking")
 	c.Flags().BoolVar(&asJSON, "json", false, "emit the aggregate report as JSON, with each stage's full report under stages[].detail")
 	c.Flags().BoolVar(&failFast, "fail-fast", false, "stop at the first blocking failure instead of collecting every stage")
+	c.Flags().BoolVar(&deferCrossPage, "defer-cross-page-drc", false, "multi-page compose: treat strict DRC warns as deferred when fatal=error=0 and warn count ≤ this page's net ports that have no partner port on another page yet (re-gate without it after every page exists)")
 	c.Flags().StringVar(&only, "only", "", "run only these stages (comma-separated: layout-lint,check,bridge-check,drc)")
 	c.Flags().StringVar(&skip, "skip", "", "skip these stages (comma-separated)")
 	// Defaults mirror `sch layout-lint` / `sch check` exactly — gating a page must

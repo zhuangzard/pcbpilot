@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/zhuangzard/pcbpilot/internal/workflow"
 )
 
 // layoutObjectSource 是布局对象的来源标签(报错/status 里原样展示)。
@@ -205,6 +207,67 @@ func layoutObjectTableFromState(st *pcbStageState, docUUID string) []*layoutObje
 		return nil
 	}
 	return buildLayoutObjectTable(st.SchZonesForPage(docUUID), st.GroupsForPage(docUUID))
+}
+
+// loadSchPageOwnership pins the page and returns the ownership predicate that
+// layout-lint / clusters / gate share, read from EVERY state record of the live
+// project (typed --project key, resolved key and live uuid). Groups created by an
+// `sch apply` queue are filed under the uuid while zone claims may sit under the
+// name; the exemption must not depend on which identity the caller typed (F3).
+func loadSchPageOwnership(cfg *appConfig, window string) (schSameGroupFn, error) {
+	pinned, win, docUUID, err := pinZonePage(cfg, window)
+	if err != nil {
+		return nil, err
+	}
+	return loadSchPageOwnershipFor(pinned, win, docUUID)
+}
+
+func loadSchPageOwnershipFor(cfg *appConfig, window, docUUID string) (schSameGroupFn, error) {
+	key, uuid, err := resolveStageIdentity(cfg, window)
+	if err != nil {
+		return nil, err
+	}
+	keys := []string{key, uuid, strings.TrimSpace(cfg.project)}
+	return schSameLayoutOwnerAcrossKeys(keys, docUUID, loadPcbStageState, workflow.Exists), nil
+}
+
+// schSameLayoutOwnerAcrossKeys ORs the per-record ownership predicates. Only
+// declarations count (see schSameLayoutOwnerFromState); a record that does not
+// exist contributes nothing.
+func schSameLayoutOwnerAcrossKeys(keys []string, docUUID string, load func(string) (*pcbStageState, error), exists func(string) bool) schSameGroupFn {
+	seen := map[string]bool{}
+	var fns []schSameGroupFn
+	for _, k := range keys {
+		k = strings.TrimSpace(k)
+		if k == "" || seen[workflow.SanitizeKey(k)] {
+			continue
+		}
+		seen[workflow.SanitizeKey(k)] = true
+		if !exists(k) {
+			continue
+		}
+		st, err := load(k)
+		if err != nil {
+			continue
+		}
+		if fn := schSameLayoutOwnerFromState(st, docUUID); fn != nil {
+			fns = append(fns, fn)
+		}
+	}
+	switch len(fns) {
+	case 0:
+		return nil
+	case 1:
+		return fns[0]
+	}
+	return func(a, b string) bool {
+		for _, fn := range fns {
+			if fn(a, b) {
+				return true
+			}
+		}
+		return false
+	}
 }
 
 // schSameLayoutOwnerFromState folds the page's explicit ownership declarations

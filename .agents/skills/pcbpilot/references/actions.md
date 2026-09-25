@@ -14,7 +14,9 @@
 | 完整本地版本比较 | `sch design-diff expected.json actual.json --exit-code`；检查 coverage/unverified |
 | 由测量计算 Lib 内部 | `sch lib-layout --from layout-input.json --out composition.json`；纯离线 |
 | 核心相对移动/单脚标签修复 | `sch layout-edit --source zones.json --page page.json --snapshot fresh.json (--move-core ID --to X,Y \| --repair-pin ID:PIN) --out target.json [--report report.json] [--playbook repair.json]`；纯离线生成，修复 playbook 使用作用域 action |
-| 合并已设计的 Lib 几何 | `sch compose --from … --out … --before … --playbook …` |
+| 合并已设计的 Lib 几何 | `sch compose --from … --out … --before … --playbook …`；队列先 `save-composition` 再 `strict-schematic-gate`，本页有 net port 时 gate 带 `--defer-cross-page-drc`（见 auto-layout-sop） |
+| 纸张/内框/图签 | `sch sheet-geometry --json`：`sheet.bbox`、`titleBlock`、`border`（图框符号 `Blade Width` 内缩，`status:"source-only"`，带属性原值） |
+| 纸张装箱 | `sch layout-sheet-plan --from … --out … [--sheet-geometry sg.json]`：从 sheet-geometry 填 `sheet.border`/缺省的 `bounds` 并记 `borderSource`；手写值冲突即拒绝 |
 | 放置固定 IR 中的器件 | `sch materialize <connectivity.json> --out …`；不是完整布局/布线器 |
 | 少量显式标记连接增量 | `sch plan <before.json> <after.json>`；不支持任意器件或导线 diff |
 | 转换/核验模块方框与标题 | `sch frame apply/check --from …` |
@@ -88,7 +90,8 @@ Playbook 使用 `version:1`、`meta` 和有序 `steps`。每步只选一种执�
 | `sch no-connect` | 显式设置/清除 NC，不创建零长线，不推断缺失数据为 NC |
 | `sch replace/rebind-symbol/rebind-footprint` | rebind 先回读 Device association，再创建并回读候选，之后才删除原件；恢复后逐字段核对设备/符号或封装绑定、`uniqueId`、位姿和属性。失败回执含 phase、原件/候选存在性和 rollback 事实。超时后禁止盲重试及 `pcb import-changes`，先新鲜回读。换器件另查看 pinDiff，按引脚差异重连和验收 |
 | `sch export-image` | 文档渲染 SVG/PNG/PDF；`--ids` 导局部，不依赖视口截图 |
-| `sch read/check/bridge-check/drc/gate` | 用法与判读见 [schematic.md](schematic.md)；SDK DRC 聚合值不代表 UI 所有警告消失 |
+| `sch read/check/bridge-check/drc/gate` | 用法与判读见 [schematic.md](schematic.md)；SDK DRC 聚合值不代表 UI 所有警告消失。`gate --defer-cross-page-drc` 只供多页逐页落地：fatal=error=0 且 warn ≤ 本页未配对跨页端口数时 DRC 记 deferred，全部页落地后须不带它逐页重跑 |
+| 虚拟组/归属读取（`sch group`、`sch gate`/`clusters`/`layout-lint` 的所有权豁免） | 工程状态键按活体身份汇合：`--project` 字面键无状态文件时改用同一工程 uuid/名字已有的文件；两份都在时组表按页取有组的那份，豁免取两份声明的并集。名字与 uuid 路由结果必须一致（F3） |
 | `sch save` | 通过阶段验证后保存并确认 `saved:true`，不能只依赖防抖 autosave |
 
 `replace` 保留 sch↔PCB 的 `uniqueId`，器件型号/供应商字段随新 device；`--keep-properties`
@@ -121,6 +124,12 @@ Playbook 使用 `version:1`、`meta` 和有序 `steps`。每步只选一种执�
 此命令只保留未改写的原始证据，尚无已验证的 `.elibz2` 图框解析器，不能把符号包、纸张
 外 bbox 或图签比例估计称为红色绘图区内框实测。下载库权限和当前宿主是否能导出内置图框
 符号须现场只读验证。
+
+`sch sheet-geometry --json` 的 `border` 由同一次 `titleblock.get` 的图框符号属性推出：`Border=1`
+且 `Blade Width` 为正数时，内框 = 实测 sheet bbox 四边内缩 Blade Width（A4：`{10,10,1160,815}`），
+`attributes` 附 Border/Blade Width/Width/Height 原值；Width/Height 与实测 bbox 不符只告警、以实测为准。
+语义来自 A4 模板（.epro2 图签表右下角 1160.5/9.5 与 10 raw 内缩齐平），尚未与渲染内框核对，
+状态 `source-only`；缺属性或 Border=0 时 `source:"none"`，不猜。
 
 `sch titleblock-get` 先取得实际字段名；`sch titleblock --data` 只传要改的明细项，按
 `--doc` 钉住聚焦页。不要把 get 返回的整包字段写回，尤其 Device/Symbol、几何与 `@` 投影项。

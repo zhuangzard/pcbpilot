@@ -72,7 +72,15 @@ func checkRouteGate(s *pcbStageState, force, forceUnsafe bool, reason string) ro
 // the explicit --project when given, else the live window's project identity.
 func resolveStageProject(cfg *appConfig, window string) (string, error) {
 	if strings.TrimSpace(cfg.project) != "" {
-		return cfg.project, nil
+		if workflow.Exists(cfg.project) {
+			return cfg.project, nil // 零往返的常规路径不变
+		}
+		// 字面键没有状态文件:可能记在同一工程的另一个身份下(名字 ↔ uuid,F3)。
+		name, uuid, lerr := resolveStageIdentityLive(cfg, window)
+		if lerr != nil {
+			return cfg.project, nil
+		}
+		return stageKeyAlias(cfg.project, name, uuid, workflow.Exists), nil
 	}
 	key, _, err := resolveStageIdentityLive(cfg, window)
 	return key, err
@@ -97,15 +105,34 @@ func resolveStageProject(cfg *appConfig, window string) (string, error) {
 // keep using resolveStageProject and fall back to State.ProjectUUID for scoping.
 func resolveStageIdentity(cfg *appConfig, window string) (key, uuid string, err error) {
 	if strings.TrimSpace(cfg.project) != "" {
-		_, live, lerr := resolveStageIdentityLive(cfg, window)
+		name, live, lerr := resolveStageIdentityLive(cfg, window)
 		if lerr != nil {
 			// The typed name is authoritative for the key; an unreachable window
 			// only costs us the uuid.
 			return cfg.project, "", nil
 		}
-		return cfg.project, live, nil
+		return stageKeyAlias(cfg.project, name, live, workflow.Exists), live, nil
 	}
 	return resolveStageIdentityLive(cfg, window)
+}
+
+// stageKeyAlias keeps the typed --project key whenever it already has a state
+// file. When it has none but the SAME live project is recorded under its other
+// identity (uuid or friendly name), that record is used instead: `sch apply`
+// queues route by uuid while people type `--project ceshi`, and reading the
+// empty name-keyed record made `sch gate` lose every group ownership exemption
+// (2026-09-25 E2E F3: 13 false "组间过近" by name, 0 by uuid). Aliases come only
+// from the live window, never from string similarity.
+func stageKeyAlias(typed, liveName, liveUUID string, exists func(string) bool) string {
+	if exists(typed) {
+		return typed
+	}
+	for _, alias := range []string{liveUUID, liveName} {
+		if strings.TrimSpace(alias) != "" && alias != typed && exists(alias) {
+			return alias
+		}
+	}
+	return typed
 }
 
 // resolveStageIdentityLive asks the window who it is (name + uuid).

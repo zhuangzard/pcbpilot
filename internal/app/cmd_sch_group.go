@@ -726,12 +726,52 @@ func loadSchGroupsContext(cfg *appConfig, window string) (pinned *appConfig, win
 	if err != nil {
 		return nil, "", "", "", nil, nil, err
 	}
+	project = pickSchGroupStateKey(project, uuid, docUUID, loadPcbStageState, workflow.Exists)
 	st, err = loadPcbStageState(project)
 	if err != nil {
 		return nil, "", "", "", nil, nil, err
 	}
 	st.Bind(uuid)
 	return pinned, win, docUUID, project, st, st.GroupsForPage(docUUID), nil
+}
+
+// pickSchGroupStateKey 决定一页的虚拟组表落在哪个状态文件(读和写同一把键)。
+//
+// 组表的真实归属是**活体工程 uuid**(与模块框 recordedModuleFrameCount 同口径):
+// `sch apply` 队列按 uuid 路由建组,而人按 CLAUDE.md 习惯敲 `--project ceshi`。旧实现
+// 直接拿 --project 字面串当文件键,名字路由读到的是另一份(空)组表 —— 所有权豁免
+// 全丢,`sch gate --strict` 的 clusters 当场报 13 处"组间过近"(2026-09-25 E2E F3),
+// 同一页用 uuid 路由则为 0。
+//
+// 键先经 stageKeyAlias(resolveStageIdentity 内):字面键没有状态文件时改用同一活体
+// 工程的另一身份(uuid ↔ 名字)已有的文件,所以先建组的那条路由决定唯一的文件,
+// 后来的另一种路由自动汇合过去。本函数再处理**两份文件都存在**的情形,按页选:
+//  1. uuid 文件里有这一页的组 → uuid;
+//  2. 否则名字文件里有这一页的组 → 名字,不丢遗留数据;
+//  3. 都没有 → 解析出的键原样(不为了"规范"把一个工程再拆成两份文件)。
+// uuid 取不到或与键相同 → 原样。
+func pickSchGroupStateKey(key, uuid, docUUID string, load func(string) (*pcbStageState, error), exists func(string) bool) string {
+	key, uuid = strings.TrimSpace(key), strings.TrimSpace(uuid)
+	if uuid == "" || key == uuid || workflow.SanitizeKey(key) == workflow.SanitizeKey(uuid) {
+		return key
+	}
+	hasPage := func(k string) bool {
+		if !exists(k) {
+			return false
+		}
+		st, err := load(k)
+		return err == nil && len(st.GroupsForPage(docUUID)) > 0
+	}
+	if hasPage(uuid) {
+		return uuid
+	}
+	if key != "" && hasPage(key) {
+		return key
+	}
+	if key == "" {
+		return uuid
+	}
+	return key
 }
 
 // schGroupFlagTypes are the marker component types that ride along with a stub.

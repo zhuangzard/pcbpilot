@@ -192,6 +192,7 @@ pcbpilot sch clear --project ceshi
 pcbpilot audit cost --day <YYYY-MM-DD> --since HH:MM --until HH:MM \
   --label "esp32Mini E2E" --tokens <N> --record
 pcbpilot audit cost --ledger           # 跨批次对比
+# 时间按本机时区解释（--utc 为旧 UTC 口径）；记账前核对 stderr 回显的本地/UTC 区间
 ```
 
 ## 8. 把路上撞到的问题反馈回仓库（跑完再统一提）

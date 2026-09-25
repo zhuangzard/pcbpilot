@@ -62,6 +62,9 @@ type auditCostReport struct {
 	From    string `json:"from"`
 	To      string `json:"to"`
 	Project string `json:"project,omitempty"`
+	// Window 回显**解析后的查询区间**(本地与 UTC 两种写法)。Day/From/To 仍是
+	// 命中记录的 UTC 首末时刻(台账历史口径不变)。
+	Window *auditCostWindow `json:"window,omitempty"`
 
 	WallMinutes   float64 `json:"wallMinutes"`
 	DaemonMinutes float64 `json:"daemonMinutes"`
@@ -85,6 +88,91 @@ type auditCostReport struct {
 	Top      []auditActionStat `json:"topActions"`
 	TopFails []auditActionStat `json:"topFailures"`
 	Note     string            `json:"note,omitempty"`
+}
+
+// auditCostWindow 是解析后的查询区间。F10(2026-09-25 E2E):旧版把 --day/--since/
+// --until 一律当 UTC,用户按本地 EDT 填 12:22–12:57 取到了别场数据并记进台账。
+// 现在默认按本机时区解释,--utc 恢复旧口径,且区间总是双写回显,错了一眼能看出。
+type auditCostWindow struct {
+	Zone    string `json:"zone"` // 解释 HH:MM 所用的时区(Local 名或 UTC)
+	From    string `json:"from"` // RFC3339,带解释时区的偏移
+	To      string `json:"to"`
+	FromUTC string `json:"fromUtc"`
+	ToUTC   string `json:"toUtc"`
+}
+
+func newAuditCostWindow(loc *time.Location, from, to time.Time) *auditCostWindow {
+	return &auditCostWindow{
+		Zone:    loc.String(),
+		From:    from.In(loc).Format(time.RFC3339),
+		To:      to.In(loc).Format(time.RFC3339),
+		FromUTC: from.UTC().Format(time.RFC3339),
+		ToUTC:   to.UTC().Format(time.RFC3339),
+	}
+}
+
+// resolveAuditCostRange 把 --day/--since/--until 解析成绝对区间。
+//
+//   - HH:MM / HH:MM:SS 按 loc(默认本机时区,--utc 时为 UTC)落在 --day 那天;
+//   - 可带显式偏移:HH:MM-04:00 / HH:MMZ,或完整 RFC3339(此时忽略 loc);
+//   - 缺省 --day = loc 下的今天;缺省 since/until = 该日 00:00 与次日 00:00。
+func resolveAuditCostRange(day, since, until string, loc *time.Location, now time.Time) (time.Time, time.Time, error) {
+	if loc == nil {
+		loc = time.Local
+	}
+	if strings.TrimSpace(day) == "" {
+		day = now.In(loc).Format("2006-01-02")
+	}
+	d, err := time.ParseInLocation("2006-01-02", day, loc)
+	if err != nil {
+		return time.Time{}, time.Time{}, fmt.Errorf("invalid --day %q (want YYYY-MM-DD)", day)
+	}
+	parse := func(v string, def time.Time) (time.Time, error) {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			return def, nil
+		}
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			return t, nil
+		}
+		for _, layout := range []string{"15:04:05Z07:00", "15:04Z07:00"} {
+			if t, err := time.Parse(layout, v); err == nil {
+				return time.Date(d.Year(), d.Month(), d.Day(), t.Hour(), t.Minute(), t.Second(), 0, t.Location()), nil
+			}
+		}
+		for _, layout := range []string{"15:04:05", "15:04"} {
+			if t, err := time.Parse(layout, v); err == nil {
+				return time.Date(d.Year(), d.Month(), d.Day(), t.Hour(), t.Minute(), t.Second(), 0, loc), nil
+			}
+		}
+		return time.Time{}, fmt.Errorf("invalid time %q (want HH:MM[:SS], HH:MM[:SS]±hh:mm or RFC3339)", v)
+	}
+	from, err := parse(since, d)
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	to, err := parse(until, d.AddDate(0, 0, 1))
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	if to.Before(from) {
+		return time.Time{}, time.Time{}, fmt.Errorf("--until %s is before --since %s", to.Format(time.RFC3339), from.Format(time.RFC3339))
+	}
+	return from, to, nil
+}
+
+// auditDayFiles 列出区间覆盖的每一个 UTC 日志文件名(daemon 按 UTC 日切文件,
+// 本地区间可能跨两个 UTC 日)。上限 31 天,防止误写的 RFC3339 扫全盘。
+func auditDayFiles(from, to time.Time) ([]string, error) {
+	start := time.Date(from.UTC().Year(), from.UTC().Month(), from.UTC().Day(), 0, 0, 0, 0, time.UTC)
+	var out []string
+	for d := start; !d.After(to.UTC()); d = d.AddDate(0, 0, 1) {
+		if len(out) >= 31 {
+			return nil, fmt.Errorf("区间跨度超过 31 天(%s → %s)", from.Format(time.RFC3339), to.Format(time.RFC3339))
+		}
+		out = append(out, d.Format("2006-01-02"))
+	}
+	return out, nil
 }
 
 // summarizeAuditCost 是纯核:把一段区间内的审计行折成成本画像。无 I/O,可单测。
@@ -201,6 +289,7 @@ func appendCostLedger(rep auditCostReport) error {
 	line := map[string]any{
 		"recordedAt": time.Now().UTC().Format(time.RFC3339),
 		"label":      rep.Label, "day": rep.Day, "from": rep.From, "to": rep.To,
+		"window":        rep.Window,
 		"project":       rep.Project,
 		"wallMinutes":   costRound1(rep.WallMinutes),
 		"daemonMinutes": costRound1(rep.DaemonMinutes),
@@ -260,7 +349,11 @@ func renderCostReport(rep auditCostReport, stdout io.Writer) {
 	if title == "" {
 		title = "(未命名)"
 	}
-	fmt.Fprintf(stdout, "audit cost — %s · %s %s→%s UTC\n\n", title, rep.Day, rep.From, rep.To)
+	fmt.Fprintf(stdout, "audit cost — %s · %s %s→%s UTC\n", title, rep.Day, rep.From, rep.To)
+	if w := rep.Window; w != nil {
+		fmt.Fprintf(stdout, "  查询区间 %s → %s(%s)= %s → %s UTC\n", w.From, w.To, w.Zone, w.FromUTC, w.ToUTC)
+	}
+	fmt.Fprintln(stdout)
 	fmt.Fprintf(stdout, "  墙钟            %.1f 分钟\n", rep.WallMinutes)
 	fmt.Fprintf(stdout, "  ├ daemon 侧     %.1f 分钟(%.0f%%)—— 机器真在算\n",
 		rep.DaemonMinutes, pct(rep.DaemonMinutes, rep.WallMinutes))
@@ -312,6 +405,7 @@ func newAuditCostCmd(stdout, stderr io.Writer) *cobra.Command {
 		label, project, note   string
 		tokens                 int
 		asJSON, record, ledger bool
+		useUTC                 bool
 	)
 	c := &cobra.Command{
 		Use:   "cost",
@@ -331,7 +425,9 @@ esp32Mini 原理图 E2E:5466 次调用里 3527 次(65%)是它们 —— 这种�
 token 不在审计日志里(那是 agent 侧的账),用 --tokens 自报;不给就记「未记录」,
 **不估算冒充实测**。`,
 		Args: cobra.NoArgs,
-		Example: `  pcbpilot audit cost --day 2026-08-15 --since 14:12 --until 15:50
+		Example: `  pcbpilot audit cost --day 2026-08-15 --since 14:12 --until 15:50          # 本机时区
+  pcbpilot audit cost --day 2026-08-15 --since 18:12 --until 19:50 --utc    # 旧 UTC 口径
+  pcbpilot audit cost --since 2026-09-25T12:22:00-04:00 --until 2026-09-25T12:57:00-04:00
   pcbpilot audit cost --since 14:12 --until 15:50 --label "esp32Mini 原理图 E2E" --tokens 1200000 --record
   pcbpilot audit cost --ledger`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -364,16 +460,36 @@ token 不在审计日志里(那是 agent 侧的账),用 --tokens 自报;不给�
 			if dir == "" {
 				dir = defaultAuditDir()
 			}
-			if day == "" {
-				day = time.Now().UTC().Format("2006-01-02")
+			loc := time.Local
+			if useUTC {
+				loc = time.UTC
 			}
-			rows, err := readAuditRows(filepath.Join(dir, day+".jsonl"))
+			fromTs, toTs, err := resolveAuditCostRange(day, since, until, loc, time.Now())
 			if err != nil {
 				return err
 			}
-			fromTs, toTs, err := parseAuditRange(day, since, until)
+			window := newAuditCostWindow(loc, fromTs, toTs)
+			fmt.Fprintf(stderr, "区间: %s → %s(%s)= %s → %s UTC\n", window.From, window.To, window.Zone, window.FromUTC, window.ToUTC)
+			days, err := auditDayFiles(fromTs, toTs)
 			if err != nil {
 				return err
+			}
+			var rows []auditRow
+			found := 0
+			for _, d := range days {
+				path := filepath.Join(dir, d+".jsonl")
+				if _, serr := os.Stat(path); serr != nil {
+					continue
+				}
+				part, rerr := readAuditRows(path)
+				if rerr != nil {
+					return rerr
+				}
+				found++
+				rows = append(rows, part...)
+			}
+			if found == 0 {
+				return fmt.Errorf("没有审计日志:%s 下缺 %s.jsonl(按 UTC 日切文件)", dir, strings.Join(days, ".jsonl / "))
 			}
 			var in []auditRow
 			for _, r := range rows {
@@ -383,9 +499,10 @@ token 不在审计日志里(那是 agent 侧的账),用 --tokens 自报;不给�
 				in = append(in, r)
 			}
 			if len(in) == 0 {
-				return fmt.Errorf("%s 的 %s–%s 区间内没有审计记录", day, since, until)
+				return fmt.Errorf("%s → %s(%s)区间内没有审计记录", window.From, window.To, window.Zone)
 			}
 			rep := summarizeAuditCost(in, mutatingActionSet())
+			rep.Window = window
 			rep.Label, rep.Project, rep.Tokens, rep.Note = label, project, tokens, note
 
 			if asJSON {
@@ -407,9 +524,10 @@ token 不在审计日志里(那是 agent 侧的账),用 --tokens 自报;不给�
 		},
 	}
 	c.Flags().StringVar(&dir, "dir", "", "audit log directory (default ~/.pcbpilot/audit)")
-	c.Flags().StringVar(&day, "day", "", "day to read, YYYY-MM-DD (default today, UTC)")
-	c.Flags().StringVar(&since, "since", "", "start time HH:MM or HH:MM:SS (UTC)")
-	c.Flags().StringVar(&until, "until", "", "end time HH:MM or HH:MM:SS (UTC)")
+	c.Flags().StringVar(&day, "day", "", "day, YYYY-MM-DD (default today in the local time zone; UTC with --utc)")
+	c.Flags().StringVar(&since, "since", "", "start: HH:MM[:SS] in local time (UTC with --utc), HH:MM[:SS]±hh:mm, or RFC3339")
+	c.Flags().StringVar(&until, "until", "", "end: HH:MM[:SS] in local time (UTC with --utc), HH:MM[:SS]±hh:mm, or RFC3339")
+	c.Flags().BoolVar(&useUTC, "utc", false, "interpret --day/--since/--until as UTC (pre-2026-09-25 behaviour)")
 	c.Flags().StringVar(&label, "label", "", "这一场叫什么(台账里的名字)")
 	c.Flags().StringVar(&project, "project-name", "", "工程名(仅记录用)")
 	c.Flags().StringVar(&note, "note", "", "备注(踩了什么坑、跑到哪一步)")

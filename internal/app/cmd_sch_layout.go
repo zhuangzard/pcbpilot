@@ -679,14 +679,9 @@ func collectLayoutLintWith(cfg *appConfig, window string, minGap, pinEps float64
 	var zerr error
 	var sameOwner schSameGroupFn
 	if !allPages {
-		var project string
-		zones, project, zerr = loadSchZoneClaimsForPage(readCfg, readWindow, docUUID)
+		zones, _, zerr = loadSchZoneClaimsForPage(readCfg, readWindow, docUUID)
 		if zerr == nil {
-			var st *pcbStageState
-			st, zerr = loadPcbStageState(project)
-			if zerr == nil {
-				sameOwner = schSameLayoutOwnerFromState(st, docUUID)
-			}
+			sameOwner, zerr = loadSchPageOwnershipFor(readCfg, readWindow, docUUID)
 		}
 	}
 	rep := analyzeLayoutWithOwnership(parts, mmToSchematicUnits(minGap), mmToSchematicUnits(pinEps), sameOwner)

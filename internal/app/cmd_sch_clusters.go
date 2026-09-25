@@ -488,10 +488,7 @@ func runSchClusters(cfg *appConfig, window string, minGap float64, asJSON, stric
 	// 回答"到底是摆得不好还是根本装不下"。
 	oversized := schClustersTooBig(clusters, usable, keepout)
 	// 带上功能子群信息:块内「去耦贴电源脚」这类紧贴是设计要求,不该报 tight。
-	var same schSameGroupFn
-	if _, _, docUUID, _, st, _, gerr := loadSchGroupsContext(cfg, window); gerr == nil {
-		same = schSameLayoutOwnerFromState(st, docUUID)
-	}
+	same, _ := loadSchPageOwnership(cfg, window)
 	findings := judgeSchClustersWith(clusters, usable, minGap, same)
 	report := schClusterReport{Clusters: clusters, Findings: findings, Sheet: usable, Unowned: unowned,
 		TooBig: oversized}
