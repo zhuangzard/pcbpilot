@@ -690,3 +690,18 @@ func TestFindClearance_CrossingTracksAreReported(t *testing.T) {
 		t.Errorf("cross-layer crossing is legal, got %d: %+v", len(out), out)
 	}
 }
+
+// A track running through the via pad (not ending at its centre) still makes
+// the transition real — ESP32 USB_DP: TOP bridge between two ESD pins passes
+// 3 mil from the via centre, BOTTOM track ends on it.
+func TestPcbCheck_ViaOnBridgeTrackOK(t *testing.T) {
+	vias := []pcbViaP{{ID: "v1", Net: "SIG1", X: 906, Y: 439.45, Hole: 12, Dia: 24}}
+	tracks := []pcbTrack{
+		{ID: "t1", Net: "SIG1", Layer: 1, X1: 960.2, Y1: 442.4, X2: 869.8, Y2: 442.4, Width: 10},
+		{ID: "t2", Net: "SIG1", Layer: 2, X1: 906, Y1: 439.45, X2: 906, Y2: 318, Width: 10},
+	}
+	rep := analyzePcbCheck(nil, tracks, vias, 0)
+	if got := countType(rep, "single-layer-via"); got != 0 {
+		t.Fatalf("single-layer-via = %d, want 0 (findings: %+v)", got, rep.Findings)
+	}
+}

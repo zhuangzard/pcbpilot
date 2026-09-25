@@ -946,12 +946,16 @@ func findViaIssues(tracks []pcbTrack, vias []pcbViaP) []pcbCheckFinding {
 		if isGlobalNet(v.Net) {
 			continue
 		}
+		// A track whose centreline runs through the via pad is connected even
+		// without an endpoint at the via centre (a pad-to-pad bridge the router
+		// dropped the via onto — ESP32 USB_DP between the two D3 pins, 3 mil off).
+		reach := math.Max(pcbCoincEps, v.Dia/2)
 		layers := map[int]bool{}
 		for _, t := range tracks {
 			if t.Net != v.Net { // a foreign net's track merely crossing the XY isn't served by this via
 				continue
 			}
-			if segPtDist(v.X, v.Y, t.X1, t.Y1, t.X2, t.Y2) <= pcbCoincEps {
+			if segPtDist(v.X, v.Y, t.X1, t.Y1, t.X2, t.Y2) <= reach {
 				layers[t.Layer] = true
 			}
 		}
