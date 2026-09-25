@@ -316,8 +316,10 @@ When diagnosing this class of issue, follow this order:
 3. Run a one-pin live probe, then immediately `sch read`/`sch check`; never
    assume a timeout means nothing landed.
 4. If the native promise does not settle, restore the previous connection,
-   save, and report a runtime-version compatibility gap. Upgrade EasyEDA to a
-   runtime that supports EDA v4 before retrying automation.
+   save, and report a runtime-version compatibility gap. V3 (3.2.x) and V4 are
+   both supported hosts; on V3 the connector uses the wire-name fallback for
+   `net_label` (measured on 3.2.149), so upgrading is not required — report the
+   exact host line and version with the finding.
 
 ## Advisory loop: what the implement operator can and cannot do
 

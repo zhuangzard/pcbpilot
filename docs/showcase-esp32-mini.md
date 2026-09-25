@@ -1,4 +1,31 @@
-# 实战案例:一份需求文档 → AI 全自动画完 ESP32-S3 四层板
+# 实战案例:一份需求文档 → AI 画完 ESP32-S3 四层板
+
+## 2026-09-25 回归(当前版本)
+
+- **输入**:只给 [`esp32MiniRequire.md`](../esp32MiniRequire.md) 第一节客户原始需求(不给 BOM/网表)。
+- **宿主**:EasyEDA Pro **V3 3.2.149 桌面版(国际版器件库)**,PCB Pilot Connector 0.2.8。
+- **原理图**:两页,30 个器件(同步降压 SY8089 + 双肖特基电源或门 + CH340C + USBLC6 + ESP32-S3-WROOM-1 +
+  自动下载 + BOOT/RESET + LED),95 个引脚网络,保存重开后逐脚回读 0 差异。
+- **布局**:`pcb auto run --place` 搜索出 43.5 × 43 mm 最小可行板框;四角 M3;USB-C 下边、5V 端子左边
+  (进线口朝外)、天线贴上边并两侧留 3 mm 禁布;原理图模块归属驱动(`--groups`)。两轮自检后**等待用户确认**。
+- **布线与铜**:4 层 TOP / IN1 GND 平面 / IN2 电源分区(+3V3、VSYS_5V、USB_VBUS、+5V_TERM) / BOTTOM,
+  TOP 与 BOTTOM GND 铺铜;30/30 布通,原生 DRC 通过,`pcb check` 0 ERROR,丝印全部转正且不压焊盘,
+  保存重开后 `contentSha256` 不变。
+
+| 原理图第 1 页 | 原理图第 2 页 |
+|---|---|
+| <img src="assets/esp32-mini-sch-p1.png" width="420" alt="原理图第 1 页"/> | <img src="assets/esp32-mini-sch-p2.png" width="420" alt="原理图第 2 页"/> |
+
+| 布局(用户确认版) | 布线 + 铺铜 + 丝印 |
+|---|---|
+| <img src="assets/esp32-mini-layout.png" width="420" alt="PCB 布局"/> | <img src="assets/esp32-mini-routed.png" width="420" alt="PCB 布线完成"/> |
+
+这次运行暴露并修复的问题(板框搜索、模块归属、天线禁布、连接器开口、孔距、焊盘内过孔、间距微修、
+丝印转正、铺铜替换范围等)见 [pcb-auto 实测记录](../.agents/skills/pcbpilot/references/pcb-auto.md#实测记录)
+与 [PCB 布线实测要点](../.agents/skills/pcbpilot/references/pcb-routing.md)。已知偏差:USB 全速 D+ 3 个过孔
+(引擎 SI 上限 2,12 Mbps 下无影响);建议项:USBLC6 转 180° 可消除差分扭绞。
+
+## 早期版本(历史记录)
 
 > **输入**是一份 30 行的中文需求([`esp32MiniRequire.md`](../esp32MiniRequire.md)),
 > **输出**是一块过了 DRC 的四层板:原理图 19 器件 13 网络、PCB 布局评审 + 布线 + 内电层 +

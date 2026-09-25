@@ -36,11 +36,12 @@
 
 | 能力 | 命令 | 说明 |
 |---|---|---|
+| 整板自动设计 | `pcb auto analyze` / `pcb auto run` | 内置电气感知整板引擎:布局、协商拥塞多层布线、平面/铺铜、独立 DRC;2026-09-25 在 ESP32-S3 mini 板(V3 3.2.149 桌面版)现场 30/30 布通、原生 DRC 通过、save+reload 后 `contentSha256` 一致;离线 5 板回归中小板 89–100%、大型 BGA 板 55–62%。详见 [pcbauto](../pcbauto.md) |
 | 短线启发式 | `pcb route-short` | 每网 MST、规则感知线宽(按网络角色给宽)、障碍感知 L 朝向、默认跳电源/地(该铺铜) |
 | 离线局部寻路 | `pcb route solve/check --board board.json --from request.json --out report.json` | 公共 Go 包 `pkg/pcbrouting`；TOP/BOTTOM 单层零过孔、直线/45°有界寻路。默认同时输出同名 SVG，显示整板障碍、搜索范围、路径线宽/净距和失败原因；`check` 另传 `--plan plan.json`，按独立需求重验；不连接编辑器、不是整板自动布线 |
 | 关键网先行 | `pcb route-critical` | P7.0 一条命令:电源按层数走 planes/pour → 差分对双源识别成对布线+skew 实测 → 自动 `track-lock` |
 | 逐焊盘铜路径核查 | `pcb net-path --from REF.PAD [--through REF.PAD] --to REF.PAD [--layer 1]` | 只读按支持的原始 pad shape + track/arc/via 构图；`--layer` 在受限图求路并排除物理过孔，回报 requestedLayer/连续路径/层/线宽/过孔数；未知焊盘几何、缺失 arc 回读或 ordered proof 的重叠铜返回 unknown/error，同网名不等于连通，铺铜/PLANE 明确排除 |
-| 外部自动布线 | `pcb export-dsn` / `import-autoroute` / `pcb autoroute` | Specctra DSN 往返(带禁布区注入),Freerouting 兜底;稠密板默认交编辑器原生自动布线 |
+| 外部自动布线 | `pcb export-dsn` / `import-autoroute` / `pcb autoroute` | Specctra DSN 往返(带禁布区注入),Freerouting 与编辑器原生自动布线均为可选替代,非必需;默认整板布线用 `pcb auto run` |
 | 拆线 | `pcb rip-up` | 按网/按范围拆 |
 | 锁定 | `pcb track-lock` | 手布关键线锁死,防被自动布线/pour-rebuild 冲掉 |
 

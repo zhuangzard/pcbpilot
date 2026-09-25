@@ -42,6 +42,11 @@
 
 > **结论:全 headless DRC=0 目前不可达。** 达标路径 = 好布局 + **tier② 原生自动布线(human-in-loop)**。
 > 信号连通性本次已 100% 完成(DRC Connection=0),4 层电源树已通(Connection 52→0);差的只有布线**间距**。
+>
+> **更新(2026-09-25)**:上述结论为当时记录,已被取代。内置整板引擎 `pcbpilot pcb auto run`
+> 在同一 ESP32-S3 mini 用例(EasyEDA V3 3.2.149 桌面版,connector 0.2.8)上全 headless 达到
+> 30/30 布通、原生 DRC 通过、焊盘网络差异 0、save + reload 前后 `contentSha256` 一致。
+> 原生自动布线与 Freerouting 现为可选替代。详见 [pcbauto.md](./pcbauto.md)。
 
 ## 2. blocks 已减少的重复推导——按 verification 和消费者能力使用
 
@@ -92,7 +97,7 @@ blocks 当前主要提供可检索的已证拓扑和设计提示,尚无完整 `b
 
 **要让上面这套跑到 DRC=0,当前必须:**
 - **布局**:在工具消费 block 数据前,由 agent 按 block `placement`/`pcb_layout` **确定性紧凑播种**(别 trial-and-error 缩放);
-- **布线**:非平凡板走 **tier② 原生自动布线**(rip-up 信号 → `track-lock` 电源平面/缝合过孔 → 人点「布线→自动布线」并念 4 条对话框提醒 → agent 接手验 DRC+铺铜)。
+- **布线**(2026-09-25 更新:默认用 `pcb auto run`,已在 ESP32 用例 headless 达到 DRC=0;以下原生自动布线路径保留为可选替代):非平凡板走 **tier② 原生自动布线**(rip-up 信号 → `track-lock` 电源平面/缝合过孔 → 人点「布线→自动布线」并念 4 条对话框提醒 → agent 接手验 DRC+铺铜)。
 
 **待补(补齐后可逼近全 headless 达标)**:
 1. `place-constrained` **消费 block `placement`/`pcb_layout`**(edge/side/orientation/adjacency)→ 确定性紧凑布局,消灭手工试凑 + 给路由器更好起点。改进应**沉淀进 block 声明式数据**,不做成工具启发式(误伤别人板)。

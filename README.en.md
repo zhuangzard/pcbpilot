@@ -101,6 +101,18 @@ GitHub-Release `.eext` whose URL the installer prints. pcbpilot's connector
 "EDA Agent Connector" belongs to the upstream easyeda-agent project. The two can be
 installed side by side (different uuid, ports 61832–61841 vs 60832–60841).
 
+**New machine, from a clone** (Claude Code / Codex developers): clone the repo and
+run `scripts/setup-agent.sh`. It builds the CLI into `~/.local/bin`, symlinks the
+skills into `~/.claude/skills`, `~/.codex/skills` and `~/.agents/skills`, installs
+the MCP adapter (`npm --prefix mcp ci`, Node ≥ 20.17) and registers it with Claude
+Code and Codex, builds the connector `.eext`, and starts the daemon. The full
+step-by-step manual (Chinese) is [`docs/manual.md`](docs/manual.md).
+
+```bash
+git clone https://github.com/zhuangzard/pcbpilot.git && cd pcbpilot
+scripts/setup-agent.sh
+```
+
 > **Attribution**: pcbpilot is a fork of
 > [zhoushoujianwork/easyeda-agent](https://github.com/zhoushoujianwork/easyeda-agent) (MIT).
 > The CLI, daemon, connector, typed actions, skills and most docs come from that project,
@@ -183,19 +195,20 @@ Give the following prompt to the agent together with the actual design request:
 ```text
 Use pcbpilot to complete this EasyEDA Pro task.
 
-Use EasyEDA Pro V4. Version 4.1.60 or a newer V4 build is recommended; if
-pcbpilot health reports hostCompatibility=block for V3, stop live writes and
-upgrade the editor first.
+Use EasyEDA Pro V3 (3.2.x) or V4 (4.1.60 or newer recommended), desktop or Web.
+pcbpilot health reports hostCompatibility with line v3|v4 and ok; report the
+exact host form and version with the results.
 
 Before editing, confirm that these three parts use the same release version:
 1. pcbpilot CLI/daemon
 2. pcbpilot Skill
-3. EDA Agent Connector extension
+3. PCB Pilot Connector extension
 
 Run pcbpilot update --check --exit-code. If the CLI or Skill is behind, run pcbpilot
 update. If the connector is behind, install pcbpilot-connector.eext from the
-same GitHub Release, save open documents, then fully quit and restart EasyEDA.
-Enable Allow external interaction and run pcbpilot health to verify the target
+same GitHub Release (uninstall the old PCB Pilot Connector first), save open
+documents, then reload the editor (Web: refresh the page; desktop: fully restart
+EasyEDA). Enable Allow external interaction and run pcbpilot health to verify the target
 project, page, and versions.
 
 For schematic work, first read or create a local canonical connectivity JSON. Treat
@@ -215,8 +228,16 @@ bypass typed actions, auditing, workflow gates, or the official `eda.*` API. The
 arbitrary-JavaScript `debug.exec_js` domain is intentionally not exposed through
 MCP.
 
+`scripts/setup-agent.sh` installs and registers it automatically. To do it by
+hand (Node ≥ 20.17):
+
 ```bash
 npm --prefix mcp ci --ignore-scripts
+# Claude Code
+claude mcp add pcbpilot --scope user \
+  --env PCBPILOT_BIN="$(command -v pcbpilot)" \
+  -- node "$(pwd)/mcp/src/server.mjs"
+# Codex
 codex mcp add pcbpilot \
   --env PCBPILOT_BIN="$(command -v pcbpilot)" \
   -- node "$(pwd)/mcp/src/server.mjs"
@@ -349,6 +370,7 @@ Capabilities are exposed through CLI subcommands (`pcbpilot <domain> <verb>`). V
 - **`pcb add-component`** — add one part to an existing PCB and net its pads (the working path around the broken incremental `import_changes`).
 
 **PCB — routing & copper**
+- **`pcb auto run`** — built-in electrical-aware whole-board engine: placement, negotiated-congestion multi-layer router, planes/pours and an independent DRC. Live-verified 2026-09-25 on the ESP32-S3 mini board (EasyEDA V3 3.2.149 desktop, connector 0.2.8): 30/30 nets routed, native DRC clean, pad-net diff 0, `contentSha256` stable across save + reload. Offline 5-board fixture regression: small/medium boards 89–100 %, large BGA boards (RK3568, K230) 55–62 %.
 - **`pcb route-short`** — heuristic short-trace router: per-net MST, **rule-aware widths** (signal vs power), **obstacle-aware** L-orientation, **skips power/ground nets** (they belong in a pour).
 - **`pcb pour`** (rule-aware copper-to-edge inset) / **`pcb pour-fit`** / **`pcb via-stitch`** / **`pcb rip-up`**.
 - **`pcb power-planes`** — 4-layer power distribution: GND + power on **dedicated inner planes** + via-stitch each pad, then **flips the GND inner layer to 内电层/PLANE** after pouring (verified pour-while-SIGNAL → flip → rebuild recipe, DRC clean), matching the common customer stackup **GND=内电层 / VCC=signal layer** (drove the regression board's DRC 31→0, No-Connection to 0).
@@ -368,7 +390,7 @@ Capabilities are exposed through CLI subcommands (`pcbpilot <domain> <verb>`). V
 
 Current capability status is maintained in [`docs/FEATURES.md`](docs/FEATURES.md) and the [CLI reference](docs/cli/README.md). The [2026-07 marketplace survey](docs/reviews/2026-07-marketplace-coverage.md) is a historical snapshot; it does not establish current support or an implementation commitment. Some remaining limitations:
 
-- **Maze-tier autorouting** (dense / any-distance / push-shove) — the daemon does *short, clear* heuristic routing only. Full routing is external **Freerouting** (the DSN round-trip building blocks exist); a turnkey integration is **deferred** (needs a Java runtime; waiting on the official EasyEDA autorouter maturing past `@alpha`).
+- **Dense-board autorouting** — `pcb auto run` routes whole small/medium boards (see above), but large BGA boards still complete only 55–62 % offline, and there is no push-shove. `pcb route-short` remains the short-hop heuristic tool. External **Freerouting** (DSN round-trip) and the native EasyEDA autorouter are **optional** alternatives, not required.
 - **Interactive routing UX** — the interactive *menu* (push-shove drag-routing, live length-tuning, remove-loops) has **no `eda.*` API**. But the *outputs* — diff-pair geometry, fanout-with-vias, serpentine length-match — are writable via `pcb_PrimitiveLine/Via.create`, so they're **feasible as our own heuristics** (absorb-list, not walled); only the drag UX is UI-only.
 - **Controlled impedance Z0** — genuinely walled: stackup Er / dielectric height / copper weight aren't readable via `eda.*`, so trace-width-for-Z0 can't be computed. **But net length IS readable** (`pcb_Net.getNetLength`), so length-match / skew / timing-margin reports are doable (absorb-list) — that part was mis-flagged as a wall.
 - **Teardrops (泪滴)** — no *typed* create API; a raw document-source-injection path (as `eext-balance-copper` uses for net-less fills) is plausible but unverified. Treat this as unsupported until a typed action and automated verification exist.

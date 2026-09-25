@@ -643,7 +643,6 @@ try {
         # reads correctly on a console whose codepage cannot render CJK.
         $ExtManage = Expand-Unicode '\u6269\u5c55\u7ba1\u7406'
         $ImportExt = Expand-Unicode '\u5bfc\u5165\u6269\u5c55'
-        $Marketplace = Expand-Unicode '\u7acb\u521b\u5b98\u65b9\u63d2\u4ef6\u5e02\u573a'
         $AllowExternal = Expand-Unicode '\u5141\u8bb8\u5916\u90e8\u4ea4\u4e92'
         $Advanced = Expand-Unicode '\u9ad8\u7ea7'
         $ExtManager = Expand-Unicode '\u6269\u5c55\u7ba1\u7406\u5668'
@@ -656,17 +655,15 @@ try {
         Write-Host '  1. Start the daemon:'
         Write-Host '       pcbpilot daemon start'
         Write-Host ''
-        Write-Host '  2. Install the EasyEDA connector extension (either channel):'
-        Write-Host '     a) Sideload this release (same major.minor compatibility line):'
+        Write-Host '  2. Install the EasyEDA connector extension (sideload only - not on the marketplace):'
         Write-Host "          Download: $BaseUrl/pcbpilot-connector.eext"
-        Write-Host "          In EasyEDA Pro: $ExtManage (Extensions) -> $ImportExt (Import extension) -> pick the .eext"
-        Write-Host "     b) $Marketplace (LCEDA marketplace: one-click, auto-updates in place; may lag the CLI):"
-        Write-Host '          https://github.com/zhuangzard/pcbpilot/releases/latest'
+        Write-Host "          EasyEDA Pro: $Advanced (Advanced) -> $ExtManager (Extension manager) -> $Installed (Installed):"
+        Write-Host '          uninstall any older "PCB Pilot Connector" first (same uuid imports silently fail),'
+        Write-Host "          then $ImportExt (Import extension) -> pick the .eext. Upstream ""EDA Agent Connector"" can stay."
         Write-Host ''
-        Write-Host "  3. In EasyEDA Pro: enable $AllowExternal (Allow external interaction)"
-        Write-Host "       V3.2 desktop: $Advanced (Advanced) -> $ExtManager (Extension manager) -> $Installed (Installed)"
-        Write-Host '       -> select the connector. The Config tab only appears while the extension'
-        Write-Host "       shows Enabled, and the $AllowExternal checkbox lives on that Config tab."
+        Write-Host "  3. Enable $AllowExternal (Allow interactive with external):"
+        Write-Host '       select "PCB Pilot Connector" -> status Enabled -> Config tab -> tick the checkbox,'
+        Write-Host '       then reload the editor (Web: refresh; desktop: restart EasyEDA). Check: pcbpilot health'
         Write-Host ''
         Write-Host '  4. Use the skill in your AI client:'
         Write-Host '       /pcbpilot       (schematic + PCB workflow)'

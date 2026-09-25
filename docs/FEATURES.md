@@ -64,10 +64,12 @@
 执行许可已从版本、workflow stage、布局 tier 和 stale-read 状态中移除。旧接口继续返回
 `compatibilityOnly` 或 `staleRisk` 供诊断；权威批次使用 save → reload → readback。
 
-## 电气感知整板自动设计（`pcb auto`，离线验证）
+## 电气感知整板自动设计（`pcb auto`，现场验证）
 
-`pcbpilot pcb auto analyze|run` 调用离线引擎 [`pkg/pcbauto`](../pkg/pcbauto)，状态 `offline-verified`：
-剧本通过 `pcbpilot apply --dry-run` 预检，尚未在现场执行并回读。设计理由与证据见 [pcbauto.md](pcbauto.md)。
+`pcbpilot pcb auto analyze|run` 调用内置引擎 [`pkg/pcbauto`](../pkg/pcbauto)，状态 `live-verified`：
+2026-09-25 在 ESP32-S3 mini 板（EasyEDA V3 3.2.149 桌面版，connector 0.2.8）现场执行并回读——
+30/30 网络布通、原生 DRC 通过、焊盘网络差异 0、save + reload 前后 `contentSha256` 一致。离线 5 板
+fixture 回归：中小板 89–100%，大型 BGA 板（RK3568、K230）55–62%。设计理由与证据见 [pcbauto.md](pcbauto.md)。
 
 | 能力 | 语义 |
 |---|---|
@@ -114,7 +116,7 @@ A1 resolved C6186→AMS1117-3.3 identity, A5 returned the full rule config, A3 r
 back 0→500 — bound to the right net), and `pcb drc` + save passed. The live run surfaced
 a gap — **no `pcb.save` + PCB not covered by autosave** — now fixed (`pcb.save` action +
 `saveActionForDocType` maps `pcb`→`pcb.save`, so PCB edits autosave like schematic edits).
-No one-call PCB autorouter exists on this build (A4 blocked — see survey §6).
+The native one-call EasyEDA autorouter is not available through the API on this build (A4 blocked — see survey §6); whole-board routing is provided by pcbpilot's own `pcb auto run` engine instead.
 
 ### Read context and typed document navigation (8 actions)
 

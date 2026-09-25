@@ -553,7 +553,7 @@ net ID、全量 verification、provenance 和复杂 PCB constraints；否则保�
 - ⬜ **T4 `pcb_layout` adjacency** → 卫星贴脚距离硬约束。
 - ⬜ **T3 主芯片信号流 floorplan**:块**不编码**主芯片相对位置 → 板子大小主要由 agent 的种子决定,
   这是「偏散板」的更大根因(见 [e2e-automation-acceptance.md](./e2e-automation-acceptance.md) §5)。
-- ⬜ **末端 headless 干净布线**:route-short 稀疏板启发式,非平凡板需 tier② 原生自动布线。
+- ✅ **末端 headless 干净布线**:`pcb auto run` 内置整板引擎(2026-09-25 ESP32-S3 mini 板现场 30/30 布通、原生 DRC 通过);route-short 仍是稀疏板短线启发式,原生自动布线/Freerouting 为可选替代。大型 BGA 板离线仅 55–62%,仍待提升。
 
 ### 4 层叠层规格(客户确认 2026-07-13)= GND 主导
 - **L1 顶层**:信号 + **GND 铺铜**(首层) · **L2 Inner1**:**GND 内电层 PLANE** · **L3 Inner2**:信号层**主走电源**(3V3+5V 埋这层) · **L4 底层**:信号 + **GND 铺铜**(尾层)。
@@ -657,7 +657,8 @@ compose 排版验证。固定预览需显示端口占位和真实接点，不能
 ## V4 宿主与新数据模型
 
 EasyEDA Pro 产品版本、扩展 API 引擎版本和 pcbpilot 发布版本是三个独立概念。
-项目主线宿主从 2026-09-21 起为 EasyEDA Pro V4；`extension.json` 的 `engines.eda: ~3.2.0`
+pcbpilot 同时支持 EasyEDA Pro V3（3.2.x）与 V4（推荐 ≥4.1.60），桌面版与 Web 版均可
+（2026-09-24 用户决定）；`hostCompatibility` 报告 `line: v3|v4` 与 `ok`。`extension.json` 的 `engines.eda: ~3.2.0`
 仍是官方扩展 API 引擎约束，不应随产品版本机械改成 4.x。`pcbpilot health` 分别报告宿主兼容性
 和 CLI/daemon/Connector 一致性，两者都不代替对象级回读。
 

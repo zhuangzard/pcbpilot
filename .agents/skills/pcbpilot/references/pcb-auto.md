@@ -167,3 +167,20 @@ pcbpilot pcb check --project <工程>
   进了电源平面；对称端子进线口朝内；快照本体把 WROOM 天线端砍半（模块伸出板边 3.5 mm）；
   天线禁布区让模块自报 DRC；重载后 270° 读成 -90.00000000000001°（dump 归一化）；`pcb check`
   把 buck 输出电容当作远离 IC 的去耦。
+
+**同板 P7–P10（用户确认 Layout 后）** — `live-verified`
+
+- 布线基线：确认版 fresh dump（与确认时 semanticSha 相同）；`pcb auto run` 不带 `--place`。
+- 结果：4 层 TOP / IN1-GND 平面 / IN2 分区（+3V3、VSYS_5V、USB_VBUS、+5V_TERM）/ BOTTOM+GND 铺铜，
+  另补 TOP GND；30/30 布通，扇出 55、信号过孔 21，原生 DRC 通过，逐焊盘对账 0，`pcb check` 0 ERROR，
+  save→reload 后 `contentSha256` 不变。
+- 过程中实测暴露并修复：U0RXD 距 U3 NC 焊盘 5.92 < 5.98 mil（引擎容差 0.1 放过）→ 交付严格 DRC + 微修（顶点外移
+  0.08 mil）；两个 VSYS_5V 扇出孔相距 7 mil（Hole to Hole）→ 板规则孔距 + 同网共享扇出孔；21 个焊盘内过孔 →
+  只对 IC/模块散热焊盘开放；ESD 朝向使 USB P/N 扭绞 → 布局扭绞代价（确认版布局未动，建议项：D3 转 180°）。
+- 5 块真实板回归（mipi/bbclaw/szpi/rk3568/k230）用于把关：菊花链与全局路由余量都会让布通率下降，已关闭/撤回。
+- 原理图→PCB 邻近核对（确认版布局，边缘距离）：降压 L1/R1/R2/C1 距 U1 ≤ 0.6 mm，输出电容 C2/C3 距 L1 3V3 脚
+  1.8–1.9 mm；U3 去耦 C6/C5 距 3V3 脚 1.5/2.5 mm；ESD D3 贴 USB-C。**缺陷**：EN 复位 RC 电容 C7 距 EN 脚 10.2 mm
+  → 新增 `pin-filter` 角色（IC 信号脚到地/电源的电容），同板重排后 3.5 mm；确认版布局未改动。
+- 晶振（szpi CH334F 的 X1）：负载下同一 seed 曾被放到 36 mm 外，另一次 0.4 mm —— 退火按墙钟冷却且辅助件归属
+  依赖 map 顺序。改为按步数冷却 + 排序遍历后同一 seed 逐字节一致，X1 距时钟脚 3.8 mm（人工 4.1 mm）。
+

@@ -330,6 +330,8 @@ eda.pcb_PrimitiveVia.getAll() + via.getState_Net()            // 每网过孔数
   编排（引擎可插拔），实测 rip-up→autoroute 出 **83 铜线**、Connection Error 27→2。
 - 但「能用的板」两侧都卡官方：**引擎**（要么自备 Freerouting=GUI 弹窗+自装 Java，要么等
   #28 原生 API）+ **keepout**（#29）。我们不自备环境，故 autoroute 引擎留给原生 API / 用户自备。
+- **更新（2026-09-25）**：此后自研内置整板引擎 `pcb auto run`（协商拥塞多层布线）已在 ESP32-S3 mini
+  板现场 30/30 布通、原生 DRC 通过；Freerouting 与原生自动布线降为可选替代。见 [pcbauto.md](pcbauto.md)。
 
 ### 8.4 副产物：`api search` 索引有 class 归属 bug
 
@@ -358,6 +360,8 @@ eda.pcb_PrimitiveVia.getAll() + via.getState_Net()            // 每网过孔数
    改算法不重导）。
 2. **迷宫布线档**（任意距离/拥塞/推挤/等长）——**外包 Freerouting**（开源事实标准；现已有
    CLI + API + MCP，headless 可避 1.9 GUI 弹窗；我们文件式路径已对接）。别自研。
+   *（2026-09-25 更新：该定调已被推翻——内置 `pcb auto run` 引擎已现场验证，中小板离线 89–100% 布通；
+   Freerouting 现为可选替代，大型 BGA 板仍待提升。）*
 
 **外部库**：完整布线=Freerouting；布局/短线/扇出/铺铜=无现成库（bespoke 启发式，自研）；
 OrthoRoute(GPU/FPGA 小众)、Quilter.ai(商业 RL 云,非库)。
@@ -593,8 +597,8 @@ DRC 或图元 API，不能据此调整功能支持矩阵。
 
 后者的流程是“Agent 明确器件、坐标和网络 → Node 脚本 → `.eprj3` 索引 + SCH/PCB 文本容器
 → 结构校验 → 离线客户端打开”。它不依赖我们的 daemon/connector，也不依赖运行中的编辑器
-来生成文件；README 要求最后打开时使用 V4.1+ 离线客户端。**本项目仍遵守 Web EDA 现场约束，
-不能把这条路线当成连接器失败后的桌面客户端兜底。**
+来生成文件；README 要求最后打开时使用 V4.1+ 离线客户端。**本项目的现场写入仍须经 connector
+typed action（桌面版与 Web 版宿主均可），不能把这条离线文件路线当成连接器失败后的兜底。**
 
 ### 12.2 值得吸收的能力
 

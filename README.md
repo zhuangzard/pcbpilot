@@ -10,6 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/zhuangzard/pcbpilot"><b>GitHub</b></a> ·
+  <a href="docs/manual.md"><b>使用手册</b></a> ·
   <a href="docs/quick-start.md"><b>快速开始</b></a> ·
   <a href="README.en.md">English</a>
 </p>
@@ -24,7 +25,8 @@
 
 `pcbpilot` 是 EasyEDA Pro（嘉立创 EDA 专业版）的 AI 自动化层。你可以直接描述想做的
 电路或要修的问题，Agent 会读取真实工程数据，通过官方 `eda.*` API 完成操作，并在写入前后
-检查器件身份、引脚网络、几何、DRC 和保存状态。
+检查器件身份、引脚网络、几何、DRC 和保存状态。支持 **V3（3.2.x）与 V4**、桌面版与 Web 版、
+国际版（pro.easyeda.com）与国内版（lceda.cn）。
 
 ## 它能做什么
 
@@ -34,7 +36,7 @@
 | **从需求做到一块板** | 从自然语言需求完成选型、原理图、分区布局、PCB、板框、叠层、布线、铺铜、丝印、DRC 和制造检查 |
 | **原理图器件标准化** | 用 LCSC C 号或准确型号替换非标准器件，保留位号、位置和 PCB 同步身份；报告引脚差异并指导重新接线 |
 | **原理图整理与修复** | 读取完整连接图，检查悬空、短路、跨页网名、NC、位号和模块归属，重新排版并回读验证 |
-| **PCB 布局与布线** | 模块感知自动布局、板框贴合、规则感知短线布线、过孔、铺铜、4 层电源平面、天线 keepout |
+| **PCB 布局与布线** | `pcb auto` 整板引擎：机械约束 → 最小可行板框 → 原理图模块归属驱动的布局 → 多层协商布线 → 电源平面/分区铺铜 → 独立 DRC；天线净空、孔距、差分对、开关电源热回路 |
 | **丝印调整** | 自动避开焊盘、器件体、禁区、板框和其他标签；添加板注、接口名、LED 极性及 SVG Logo |
 | **复用成熟电路** | 从内置电路块库复用 CH340、ESP32 自动下载、按键、USB Hub、降压等拓扑，放件、连线并对账 |
 | **检查与交付** | 原理图连接与几何检查、PCB DRC/DFM、BOM、网表、制造文件、截图、审计日志和显式保存 |
@@ -129,16 +131,26 @@ DRC 规则，再修复可以确定的问题。不要凭截图猜连接；所有�
 标准考试来源：**嘉立创 PCB 初级考试题第十八期**。执行步骤、参数和验证边界见
 [260919 AT32F415 考试执行指导](docs/260919-exam-execution-guide.md)。
 
-### ESP32-S3 四层板（历史案例）
+### ESP32-S3 四层板：从一句需求到 DRC 通过（2026-09-25 实测）
 
-Agent 完成原理图到 PCB 的完整流程，包括模块布局、圆角板框、4 层电源结构、天线净空、
-规则感知布线、铺铜和丝印整理。
+输入只有 [esp32MiniRequire.md](esp32MiniRequire.md) 第一节的客户原始需求（不给 BOM、不给网表）。
+Agent 自行选型、画两页原理图（30 个器件、95 个引脚网络，回读 0 差异），导入 PCB 后：
 
-![AI 在 EasyEDA 中完成 PCB 布局、板框和铺铜](docs/assets/demo-pcb-layout.gif)
+- `pcb auto` 搜索出 43.5 × 43 mm 的最小可行板框，四角 M3，ESP32 天线贴边并留两侧净空；
+  原理图模块归属驱动布局（降压输出电容跟随降压芯片，ESD 贴 USB 口）；
+- 两轮自检后**停下来等用户确认布局**，确认后整板布线：4 层（TOP / GND 平面 / 电源分区 / BOTTOM），
+  30/30 布通，原生 DRC 通过，逐焊盘对账 0 差异，保存重开后内容哈希不变；
+- 宿主：EasyEDA Pro **V3 3.2.149 桌面版**，连接器 0.2.8。
 
-| 板框贴合 | 丝印避让 |
+| 原理图（第 1 页：电源 / 降压 / USB / 串口） | 原理图（第 2 页：ESP32 / LED / 自动下载 / 按键） |
 |---|---|
-| <img src="docs/assets/demo-outline-before.png" width="300" alt="板框贴合前"/> → <img src="docs/assets/demo-outline-after.png" width="300" alt="板框贴合后"/> | <img src="docs/assets/demo-silk-before.png" width="300" alt="丝印整理前"/> → 整理结果见成品板 |
+| <img src="docs/assets/esp32-mini-sch-p1.png" width="420" alt="ESP32 最小系统原理图第 1 页"/> | <img src="docs/assets/esp32-mini-sch-p2.png" width="420" alt="ESP32 最小系统原理图第 2 页"/> |
+
+| 布局（用户确认版） | 布线 + 铺铜 + 丝印（终检通过） |
+|---|---|
+| <img src="docs/assets/esp32-mini-layout.png" width="420" alt="ESP32 最小系统 PCB 布局"/> | <img src="docs/assets/esp32-mini-routed.png" width="420" alt="ESP32 最小系统 PCB 布线完成"/> |
+
+过程中发现并修复的问题与参数见 [pcb-auto 实测记录](.agents/skills/pcbpilot/references/pcb-auto.md#实测记录)。
 
 ### 数据驱动的原理图组合
 
@@ -151,60 +163,44 @@ Agent 先在本地连接数据中核对器件、引脚和网络，再计算模�
 
 ## 安装与开始使用
 
-pcbpilot 由三部分组成：`pcbpilot` CLI/daemon、运行在 EasyEDA 内的
-**EDA Agent Connector**，以及安装在 AI 客户端中的 `pcbpilot` Skill。
+pcbpilot 由四部分组成：`pcbpilot` CLI/daemon、运行在 EasyEDA 内的 **PCB Pilot Connector**
+（`.eext`，侧载安装，不在插件市场）、AI 客户端里的 `pcbpilot` Skill，以及可选的 MCP 服务。
 
-### 1. 安装 CLI 和 Skill
+### 新机器：一句话交给 Claude
 
-macOS / Linux：
+```text
+克隆 https://github.com/zhuangzard/pcbpilot 并按仓库 AGENTS.md 的「新机器安装」完成 pcbpilot 安装，
+最后告诉我需要我手动做的连接器导入步骤。
+```
+
+Agent 会运行 [`scripts/setup-agent.sh`](scripts/setup-agent.sh)：编译 CLI，为 **Claude Code / Codex / ZCode**
+链接 Skill 并注册 MCP，构建连接器，以登录服务启动 daemon，最后自动验证（MCP 真实握手）。若机器上装过上游
+easyeda-agent，会移除其 MCP 并把其 Skill 移入可恢复的备份，避免与 pcbpilot 争用同类任务。也可以自己运行：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.sh | bash
+git clone https://github.com/zhuangzard/pcbpilot.git && cd pcbpilot
+scripts/setup-agent.sh          # --dry-run 先预览；无 Go 时自动改用发布版
 ```
 
-原生 Windows（Windows PowerShell 5.1 或 PowerShell 7）：
-
-```powershell
-irm https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.ps1 | iex
-```
-
-两个脚本行为一致：先取 `checksums.txt`，全部资产校验 SHA-256、核对 CLI `--version`
-与 Skill `metadata.version` 之后才替换已安装文件；环境变量 `PCBPILOT_VERSION`、
-`PCBPILOT_INSTALL_DIR`、`PCBPILOT_INSTALL_SKILLS`、`PCBPILOT_SKILL_PRESERVE`、
-`PCBPILOT_GITHUB_PROXY` 同样生效。安装器会识别 Codex、Codex Desktop 和 Claude Code，
-并打印连接器下载地址。
-
-install.ps1 默认装到 `%USERPROFILE%\.local\bin`，不会自作主张改 PATH：目录不在用户
-PATH 上时只打印添加命令，需要自动添加用 `-AddToPath`（下载成文件运行）或
-`$env:PCBPILOT_ADD_TO_PATH=1`（管道运行）；机器级 PATH 始终不动。手工安装步骤见
-[快速开始](docs/quick-start.md)。
-
-### 2. 安装连接器
-
-从 [最新 GitHub Release](https://github.com/zhuangzard/pcbpilot/releases/latest) 下载
-`pcbpilot-connector.eext` 后在 EasyEDA Pro 的扩展管理器中导入。
-
-### 3. 启动并连接
+只装已发布版本（无需克隆）：
 
 ```bash
-pcbpilot daemon start
+curl -fsSL https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.sh | bash      # macOS / Linux
+irm https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.ps1 | iex             # Windows PowerShell
 ```
 
-打开目标 EasyEDA 工程，并启用 **设置 → 允许外部交互**。开始操作前运行健康检查；需要安装对账时再显式运行版本检查：
+### 唯一的人工步骤：导入连接器
+
+1. EasyEDA Pro → 扩展管理器 → 已安装：先**卸载**旧的 “PCB Pilot Connector”（同 uuid 不卸载会静默导入失败）；
+2. 导入 `setup-agent.sh` 打印的 `.eext`，或 [Release](https://github.com/zhuangzard/pcbpilot/releases/latest) 里的 `pcbpilot-connector.eext`；
+3. **高级 → 扩展管理器 → 已安装 → 选中 PCB Pilot Connector**（状态须为 `Enabled`）→ **Config** 页签 → 勾选 **允许外部交互**；
+4. 重新加载编辑器（Web 刷新页面，桌面重开工程），然后：
 
 ```bash
-pcbpilot health
-pcbpilot update --check --exit-code  # 可选：安装版本对账
+pcbpilot health        # windows[] 出现你的工程和文档，connectorVersion 与仓库一致
 ```
 
-项目主线要求 **EasyEDA Pro V4**，推荐升级到已验证的 **V4.1.60 或更新 V4**。
-`pcbpilot health` 会在 `hostCompatibility` 中单独报告宿主产品版本；V3 环境应先升级再做现场写入。
-V4 适配进度和边界见 [V4 开发台账](docs/v4-development.md)。
-
-版本差异会作为诊断输出，不作为设计动作的许可。Connector 若缺少当前动作或协议不兼容，
-按诊断升级对应组件；Skill 内容更新后让客户端重新加载它。
-
-更详细的安装、升级、代理和排障步骤见 [快速开始](docs/quick-start.md)。
+完整安装、升级、MCP、排障见 **[使用手册](docs/manual.md)**。
 
 ## 为什么它适合 Agent
 
@@ -225,7 +221,7 @@ AI Agent / Skill
 pcbpilot CLI + local daemon
        │ typed actions / audit / artifacts
        ▼
-EDA Agent Connector (.eext)
+PCB Pilot Connector (.eext)
        │ official eda.* API
        ▼
 EasyEDA Pro project
@@ -235,7 +231,9 @@ EasyEDA Pro project
 
 ## 能力边界
 
-- 稠密板的完整迷宫自动布线需要外部 Freerouting；内置路由器适合短线和清晰局部连接。
+- `pcb auto` 对中小型板可整板布通（ESP32 实测 100%）；大型 BGA 板（RK3568/K230 级）离线回归布通率 55–62%，
+  适合作为起点，可选接外部 Freerouting。
+- 连接器导入与“允许外部交互”需要人来做；Agent 不操作 EDA 的 GUI。
 - EasyEDA 扩展 API 不提供编程式 undo，项目通过源数据、写前守卫、回读和失败回滚降低风险。
 - 受控阻抗所需的介质厚度、Er 和铜厚无法从当前 `eda.*` API 完整读取，不能自动声称阻抗合格。
 - PDF 自动建库仍以具体型号和原厂证据为准；扫描模糊、封装后缀不明或缺少焊盘依据时会暂停询问。

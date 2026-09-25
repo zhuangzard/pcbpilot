@@ -61,7 +61,7 @@ checksum 只防意外损坏，不是签名：只使用自己构建或可信来�
 
 ### 正式版
 
-CLI/daemon、`pcbpilot` Skill 和 EDA Agent Connector 是三个配套组成部分；CLI、daemon
+CLI/daemon、`pcbpilot` Skill 和 PCB Pilot Connector 是三个配套组成部分；CLI、daemon
 与 Skill 必须精确同版，Connector 按 major.minor 兼容线对齐。EasyEDA Pro 是宿主，不参与
 项目版本号对齐。
 
@@ -99,9 +99,9 @@ SHA-256 校验。`PCBPILOT_GITHUB_PROXY=https://mirror.example/{url}` 可替换�
 1. 运行 `pcbpilot update` 更新到所选版本；需要精确 Release 时显式传 `--version`。
    `--preserve` 会形成混合内容，不能作为纯 Release 一致性的证据。
 2. 停止旧 daemon，用升级后的 `pcbpilot daemon start` 重启。
-3. 纯 patch 更新时保留现有 Connector，不升级插件市场版本，也不重开 EasyEDA。仅当
+3. 纯 patch 更新时保留现有 Connector，不重新导入，也不重开 EasyEDA。仅当
    Connector 与 latest 跨 minor/major 不兼容时，从 `update` 输出的 GitHub Release 地址取得
-   对应 `.eext`；在扩展管理器卸载旧侧载项、导入新包，然后完全退出并重开 EasyEDA。
+   对应 `.eext`；在扩展管理器卸载旧的 PCB Pilot Connector、导入新包，然后重新加载编辑器（Web 刷新页面；桌面版完全退出并重开 EasyEDA）。
 4. 重新运行 `pcbpilot update --check` 记录实际版本。若当前运行时不能热加载新 Skill，后续步骤按
    已加载说明和当前 `--help` 执行，并明确文档/二进制差异；无需把重开会话当作执行许可。
 
@@ -137,15 +137,13 @@ Node 版本遵循 bundle 的要求（至少 20.17）。
 随 Go 代码热重建。`make dev` 会刷新仓库二进制和可写的安装路径；先用 `command -v pcbpilot`
 核对实际 CLI。不要再启动一个后台 daemon 与开发进程交替接管端口。
 
-连接器有两种安装渠道，同一编辑器 profile 保留一种：
-
-| 渠道 | 安装/升级方法 |
-|---|---|
-| GitHub Release `.eext` 侧载 | 跨 minor/major 时下载与 CLI 兼容线对应的包，在 EasyEDA 扩展管理器卸载旧项，再导入新包。平台按 UUID 去重，侧载没有自动更新。 |
-| [立创插件市场](https://github.com/zhuangzard/pcbpilot/releases/latest) | 在市场安装，平台支持原地自动更新；市场版本可落后 patch，只要 major.minor 相同就无需处理。 |
+连接器只有一种安装渠道：GitHub Release `.eext` 侧载（<https://github.com/zhuangzard/pcbpilot/releases>，
+或从源码构建 `extension/build/dist/pcbpilot-connector_vX.Y.Z.eext`）。pcbpilot 连接器不在立创插件市场
+上架（市场上的“EDA Agent Connector”属于上游 easyeda-agent），没有原地自动更新。跨 minor/major 时下载
+与 CLI 兼容线对应的包，在 EasyEDA 扩展管理器卸载旧的 PCB Pilot Connector，再导入新包；平台按 UUID 去重。
 
 开发连接器：`make connector` 按当前版本/UUID 构建，`make eext` 升 patch 后构建同 UUID
-安装包。更换连接器后保存文档，完全退出并重开 EasyEDA，让所有旧页面运行时停止。
+安装包。更换连接器后保存文档，重新加载编辑器（Web 刷新页面；桌面版完全退出并重开 EasyEDA），让所有旧页面运行时停止。
 只重新导入包不保证已打开页面执行新代码。不要用 IndexedDB 覆写或清空站点数据作为
 常规升级方式；它们绕过安装流程且可能破坏扩展或登录状态。
 
@@ -159,7 +157,8 @@ Web 编辑器并核对新窗口/运行版本。用户指定 Web 时绝不改开�
 ## 确认连接和目标文档
 
 桌面版和网页版使用同一连接器。打开用户指定的宿主、账号和工程，在扩展设置启用
-“允许外部交互”。可使用现有浏览器或桌面工具完成已授权的打开操作；只有登录、权限
+“允许外部交互”（高级 → 扩展管理器 → 已安装 → 选中 PCB Pilot Connector → 状态须为 `Enabled`
+→ `Config` 页签 → 勾选“允许外部交互 / Allow interactive with external”）。可使用现有浏览器或桌面工具完成已授权的打开操作；只有登录、权限
 或界面操作确实无法代办时才请用户介入，不因连接失败擅自换到另一个宿主。
 
 V4 的权限入口仍从**高级 → 扩展管理器 → 已安装 → 选中连接器**进入。旧 V3.2 的状态按钮也使用
@@ -203,7 +202,7 @@ pcbpilot doc switch "<doc-name-or-uuid>" --project "<project>"
   永远不加载。在扩展管理器卸载该项，完全退出并重开 EasyEDA，再重新导入 `.eext`。
 - **重启后不自启（#221，根因未明）**：国际版桌面客户端 3.2.149（Half Offline 与 Full Online
   均复现）上，侧载的连接器只在“导入当次”的运行期间工作；EasyEDA 重启后不再 activate，
-  顶部菜单栏里也看不到 `EDA Agent`。当前只有规避手段：每次启动 EasyEDA 后重新导入同一个
+  顶部菜单栏里也看不到 `PCB Pilot`。当前只有规避手段：每次启动 EasyEDA 后重新导入同一个
   `.eext`。覆盖导入会保留外部交互设置，但状态可能变为 `Disabled`，需点回 `Enabled`；
   当次运行内即可注册，`pcbpilot update --check --exit-code` 返回 `READY`。这不是修复，
   其他客户端版本是否受影响未验证。

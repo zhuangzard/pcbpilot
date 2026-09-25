@@ -176,7 +176,8 @@ _LDFLAGS = -s -w -X 'github.com/zhuangzard/pcbpilot/internal/version.Version=$(V
 
 .PHONY: agent-check
 agent-check: ## validate repository Agent links, discovery and safe Skill installation
-	python3 -m unittest discover -s scripts/tests -p 'test_agent_skills.py'
+	python3 -m unittest discover -s scripts/tests -p 'test_agent_*.py'
+	bash -n scripts/setup-agent.sh
 
 skill-check: ## validate tracked skill contents and installed-package local links (offline)
 	python3 scripts/pack-skill.py --check

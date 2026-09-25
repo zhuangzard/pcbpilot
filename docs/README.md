@@ -8,7 +8,8 @@
 
 | 当前任务 | 先读 | 需要更多信息时 |
 |---|---|---|
-| 安装、连接和升级 | [quick-start.md](quick-start.md) | [dev-environment.md](dev-environment.md) |
+| 完整使用说明（安装 → 设计流程 → 排障） | [manual.md](manual.md) | [quick-start.md](quick-start.md) |
+| 新机器安装（含 MCP）、连接和升级 | [quick-start.md](quick-start.md)、`scripts/setup-agent.sh` | [dev-environment.md](dev-environment.md) |
 | 让 Agent 设计或修复电路 | [SKILL.md](../.agents/skills/pcbpilot/SKILL.md) | 该入口的任务路由与参考 |
 | 找到可改参数的相近案例 | [样例索引](../.agents/skills/pcbpilot/references/examples/index.md) | 具体样例的来源、参数及回读 |
 | 确认能做什么、不能做什么 | [FEATURES.md](FEATURES.md) | [cli/README.md](cli/README.md) |

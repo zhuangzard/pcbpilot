@@ -370,7 +370,7 @@ BGA / 大模块的板上输在布通率，失败遍布全板，闭环判定为�
    长出的 AU_GND 区域吞掉了主地焊盘），已撤回；`starGrounds()` 保留，分割区改为“分割地焊盘外包络”列为 planned。
 4. 综合分曾看不到平面焊盘未接通（布通率只计信号连接）；已计入布通系数，并作为可交付条件。
 
-## 验证证据（`offline-verified`）
+## 验证证据（`offline-verified`；ESP32 案例 `live-verified`，见下文 2026-09-25 记录）
 
 全部离线、可复现（`go test ./pkg/pcbauto -run TestFixtureBench -v`，相同输入逐字相同输出）。
 fixture 为仓库内开源/官方板的 `pcb dump`（人工布局，无铜）。
@@ -407,10 +407,14 @@ MIPI 板加权线长 50.4 in，人工布局 59.1 in（短 15%），0 重叠；�
 
 **剧本**：`pcbpilot apply out/playbook.json --dry-run` 预检通过（1250 步，动作与参数符合协议目录）。
 
-**尚未验证**：剧本在用户 EasyEDA 现场执行、保存重载后的原生 DRC 回读；与 Freerouting 在同一
-DSN 上的正面对比（需要自备 Freerouting 可执行文件，见路线图 R-1）。在这两项完成前，
-“比 Freerouting 更好”只能说在**设计决策覆盖面**上更强（线宽/间距/平面/隔离/等长），布通率与
-质量的正面对比尚无数据。
+**现场验证（2026-09-25）**：`pcbpilot pcb auto run` 在 ESP32-S3 mini 板（EasyEDA V3 3.2.149
+桌面版，connector 0.2.8）现场执行并回读：30/30 网络布通、原生 DRC 通过、焊盘网络差异 0、
+save + reload 前后 `contentSha256` 一致。离线 5 板 fixture 回归：中小板布通 89–100%，大型 BGA
+板（RK3568、K230）55–62%。
+
+**尚未验证**：与 Freerouting 在同一 DSN 上的正面对比（需要自备 Freerouting 可执行文件，见路线图
+R-1）。在此之前，“比 Freerouting 更好”只能说在**设计决策覆盖面**上更强（线宽/间距/平面/隔离/等长），
+布通率与质量的正面对比尚无数据。
 
 ### 布局基准：人工 vs 引擎（2026-09-23，`pcb auto bench --no-route`，默认 6000 步）
 
@@ -439,7 +443,7 @@ DSN 上的正面对比（需要自备 Freerouting 可执行文件，见路线图
 - 热回路、信号链绕行、去耦距离三项，引擎在每块有对应结构的板上都更好。
 - RK3568 的加权线长仍高于人工（653 in，人工 524 in）。
 - 放置耗时：最大的板 17 s。`Part.Body()` 按朝向缓存刚体相对包围盒后，合法化阶段从 80 s 降到约 1 s。
-- 仍是 `offline-verified`：未布线对比、未在 EasyEDA 现场回放。
+- 本基准（2026-09-23）为 `offline-verified`：未布线对比、未在 EasyEDA 现场回放（整板引擎的现场记录见上文 2026-09-25）。
 - 已知口径差异：K230 有 1 处固定件之间原本就存在的重叠；layout-score 仍把 Boost 输出电容当作去耦电容评估。
 
 ## EasyEDA API 限制与对策

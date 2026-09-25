@@ -202,7 +202,10 @@ EasyEDA 交互界面兜底。能力边界与未来 typed 验收见 [project-impo
 - `pcb.nets.list` — PCB 全部网络
 - `pcb dump --include-copper --out board.json` — 生成自包含快照；焊盘保留原始 shape、旋转和
   specialPad，铜按 routing/vias/pours/poured/regions/fills 分别标记 available/unknown，
-  `semanticSha256` 排除采集时间与自身哈希后用于执行前 stale 检查。
+  `semanticSha256` 排除采集时间与自身哈希后用于执行前 stale 检查（精确、含宿主 ID，module-check 基线）。
+  `contentSha256` 另把重建后的实际铺铜（poured）去 ID、去顺序、数值取 0.01 后再哈希：宿主每次
+  重载都重新材料化铺铜（新 ID、新顺序、64 与 64.0），无任何写入的 save→reload 也会让
+  semanticSha256 变化（2026-09-25 ESP32 布线板实测）。**持久化证明用 contentSha256**。
 - `pcb.poured.list` / `pcb poured-list` — 读取 `pour-rebuild` 后的实际铜岛，不等同于
   `pcb.pour.list` 的可编辑边界；complex polygon 的孔洞与已验证 ARC 原样保留，任一 fill
   几何读取失败则整个 action 失败。宿主 poured fill 的坐标和 `lineWidth` 为 0.1mil，typed

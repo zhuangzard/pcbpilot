@@ -23,7 +23,35 @@
   out of power planes; truthful module bodies (antenna ends). `pcb dump`
   normalizes rotations; `pcb check` no longer flags buck output caps.
   Live-verified on the ESP32-S3 mini E2E layout (desktop V3).
-- Requires re-importing the connector (0.2.7).
+- Connector 0.2.8: `pcb.silk.list` reports attribute `keyVisible` / `valueVisible`
+  (hidden Footprint/Device texts are no longer silkscreen findings);
+  `pcb.silk.align` turns a designator upright before measuring it (14 of 30
+  landed on pads when planned with the sideways extents); `pcb clear --only
+  copper` keeps MULTI-layer mounting-hole fills (they belong to `regions`).
+- PCB routing (`pkg/pcbauto`): board hole-to-hole rule (`pcb dump`
+  `rules.holeToHoleMil`, JLC 0.254 mm fallback) between all vias; adjacent
+  same-net pins share a fan-out via; vias inside pads only on IC/module thermal
+  pads; delivered copper is checked at 0.01 mil and sub-0.25 mil shortfalls are
+  micro-fixed (shift, then narrow) instead of ripped; the placer prices a
+  twisted differential pair; duplicate segments are dropped. Pad-to-pad daisy
+  growth for differential nets exists but is off (fixture regression). The
+  hole-to-hole rule is enforced only when the board declares it (a live
+  `pcb dump`); an assumed default cost the K230 fixture 300 fan-out vias.
+  Capacitors from an IC signal pin to ground/rail (reset RC, debounce) are
+  "pin-filter" members held at that pin (the ESP32 EN cap sat 10 mm away).
+  Placement is deterministic per seed: anneal cooling follows the move count
+  (the clock only guards the last 20 % of the budget) and auxiliary ownership
+  no longer depends on Go map order.
+- `scripts/setup-agent.sh` + `scripts/agent_clients.py`: one-shot install from a
+  clone for Claude Code, Codex/Codex Desktop, ZCode and `~/.agents`; retires an
+  upstream easyeda-agent install (MCP removed, skills moved to a restorable
+  backup); daemon as a launchd / systemd --user login service; ends with a
+  verification (per-client registration, no upstream left, skill links, a real
+  MCP initialize + tools/list handshake). `pcb check`: OVAL pads as stadiums,
+  poured nets' single-layer vias, via-in-pad by real copper. `pcb pour-fit
+  --replace` is layer-scoped. `pcb dump` adds `contentSha256` (stable across
+  pour re-materialisation). ESP32 E2E routed live: native DRC clean.
+- Requires re-importing the connector (0.2.8).
 
 - New read-only `schematic.components.count` / `pcb.components.count` (primitive
   ids only): the CLI's post-switch load-settle loop polls these instead of the

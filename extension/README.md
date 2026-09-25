@@ -68,8 +68,8 @@ Skill / CLI -> Go daemon -> PCB Pilot Connector -> 官方 eda.* API
 **PCB**
 
 - 布局:新建板并绑定原理图、模块感知自动布局(间距规则感知)、板框贴合/圆角、布局质量与可布性评分、丝印位置感知避让重排、自由丝印字串(板注/LED 极性标记)。
-- 布线与铜:启发式短线布线(规则感知线宽、障碍感知)、铺铜/禁铺区/过孔缝合、4 层电源分配(GND 内电层 + 电源平面 + 焊盘过孔缝合)、挖槽。
-- 叠层与制造:铜层数与内层类型设置、读取板子实时 DRC 规则并全链路遵循(缺失时回退 JLCPCB 工艺参考)、DRC/`pcb check`、Specctra DSN 导出/回导(对接外部 Freerouting)。
+- 布线与铜:`pcb auto run` 内置电气感知整板引擎(布局、协商拥塞多层布线、平面/铺铜、独立 DRC;2026-09-25 在 ESP32-S3 mini 板 V3 3.2.149 桌面版现场 30/30 布通、原生 DRC 通过)、`route-short` 启发式短线布线(规则感知线宽、障碍感知)、铺铜/禁铺区/过孔缝合、4 层电源分配(GND 内电层 + 电源平面 + 焊盘过孔缝合)、挖槽。
+- 叠层与制造:铜层数与内层类型设置、读取板子实时 DRC 规则并全链路遵循(缺失时回退 JLCPCB 工艺参考)、DRC/`pcb check`、Specctra DSN 导出/回导(可选对接外部 Freerouting,非必需)。
 
 **基础设施**
 
@@ -92,10 +92,7 @@ Skill / CLI -> Go daemon -> PCB Pilot Connector -> 官方 eda.* API
 
 ## 安装与开始
 
-**1. 装本连接器**(两条通道任选):
-
-- 在本市场页面点击「安装」——平台可原地自动更新,最省心;
-- 或从 GitHub Release(https://github.com/zhuangzard/pcbpilot/releases/latest)侧载 `pcbpilot-connector.eext`——与 CLI 严格同版。
+**1. 装本连接器**:从 GitHub Release(https://github.com/zhuangzard/pcbpilot/releases/latest)侧载 `.eext`(或从源码构建 `extension/build/dist/pcbpilot-connector_vX.Y.Z.eext`)——与 CLI 严格同版。本连接器不在立创插件市场上架,无原地自动更新。
 
 **2. 装 CLI/daemon + Skill**(一行脚本,自动检测 Claude Code / Codex 并装好 Skill):
 
@@ -105,20 +102,17 @@ curl -fsSL https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.sh
 
 **3. 在 EasyEDA 中确认三件事**:
 
-1. 已安装本连接器(市场安装或 `.eext` 导入);
-2. 已开启「允许外部交互 / Allow external interaction」——否则连接器的 WebSocket 连不上本地 daemon;
+1. 已导入本连接器 `.eext`(扩展管理器中显示为 PCB Pilot Connector,顶部菜单为「PCB Pilot」);
+2. 已开启外部交互:高级 → 扩展管理器 → 已安装 → 选中 PCB Pilot Connector → 状态须为 Enabled → Config 页签 → 勾选「允许外部交互 / Allow interactive with external」——否则连接器的 WebSocket 连不上本地 daemon;
 3. 已启动本地 daemon(`pcbpilot daemon start`),`pcbpilot health` 能看到已连接窗口。
 
 **之后升级不必再跑脚本**:`pcbpilot update` 一键升 CLI + Skill;`pcbpilot update --check` 只读三方(cli / skill / connector)版本对齐表。
 
 ### 版本配套约定
 
-CLI/daemon、连接器与 Skill 遵循**同一版本号**。三者需配套安装,并运行开启外部交互的 EasyEDA Pro;EasyEDA 应用使用自身版本号。落后的连接器会被 `pcbpilot daemon health` 标成 stale。两条安装通道的取舍:
+CLI/daemon、连接器与 Skill 遵循**同一版本号**。三者需配套安装,并运行开启外部交互的 EasyEDA Pro;EasyEDA 应用使用自身版本号。落后的连接器会被 `pcbpilot daemon health` 标成 stale。EasyEDA Pro V3(3.2.x)与 V4(推荐 ≥4.1.60)、桌面版与 Web 版均可使用。
 
-- **市场版**:平台可原地自动更新,最省心;但市场无发布 API,每版需人工重新提交,**上架版本可能滞后于 CLI**。
-- **GitHub Release 侧载版**:与 CLI **严格同版**,需严格版本对齐时以它为准;代价是无原地自动更新,升级需手动卸载旧版再导入。
-
-导入更新后需完全退出并重新启动 EasyEDA,已经打开的窗口可能仍运行旧连接器代码。
+连接器只通过 GitHub Release 侧载分发,与 CLI **严格同版**;无原地自动更新,升级需先卸载旧的「PCB Pilot Connector」(按 uuid 去重)再导入。导入后需重新加载编辑器(Web 版刷新页面;桌面版完全退出并重启 EasyEDA),已经打开的窗口可能仍运行旧连接器代码。桌面版 3.2.149 已知问题(#221):侧载连接器在每次重启 EasyEDA 后可能需要重新导入。
 
 完整上手、版本对齐与升级注意事项见 [快速开始](https://github.com/zhuangzard/pcbpilot/blob/main/docs/quick-start.md)。
 

@@ -95,11 +95,13 @@ Real routing primitives — **additive creates**, like the schematic
 `pcb.layers.list`. EasyEDA's `create()` is **lenient** — it can return no primitive on a
 bad layer/coords without throwing, so each action verifies a primitive came back and
 fails honestly otherwise. **PCB autosave is on** (debounced) — still **save explicitly**
-at checkpoints. There is **no one-call autorouter** on this build
-(`pcb_Document.autoRouting` is undefined — see `docs/ecosystem-survey.md` §6/§7); route
-segment-by-segment, or use the file-exchange autoroute flow. 布线方式见
-[`design-flow.md`](./design-flow.md) P7：稀疏短线可逐段或 `route-short`，稠密板使用题目允许的
-EasyEDA 原生自动布线或已配置的外部路由器，完成后都按网回读并运行 DRC。
+at checkpoints. The **native** one-call autorouter is not available through the API on
+this build (`pcb_Document.autoRouting` is undefined — see `docs/ecosystem-survey.md` §6/§7);
+whole-board routing uses pcbpilot's built-in engine **`pcb auto run`** (see
+[`pcb-auto.md`](./pcb-auto.md); live-verified 2026-09-25 on the ESP32-S3 mini board: 30/30
+routed, native DRC clean). 布线方式见 [`design-flow.md`](./design-flow.md) P7：整板默认
+`pcb auto run`；稀疏短线可逐段或 `route-short`；EasyEDA 原生自动布线与外部 Freerouting 为可选替代。
+完成后都按网回读并运行 DRC。
 
 - `pcb.line.create` — a copper **track** (导线): line segment on a copper layer
   (`TOP=1`, `BOTTOM=2`; **inner-copper ids are higher** — `id 3` is silkscreen, not
@@ -286,7 +288,9 @@ and re-pours; passing raw points to the bare `eda.*` create fails ("无法创建
 - `pcb pour-fit` (daemon-side) — **auto-size a pour to the board**: reads the outline
   and insets its bbox by `--inset` (mil, default 20) so copper keeps edge clearance
   (fixes Board-Outline-to-Copper), then pours `--net`/`--layer`. `--replace` (default)
-  clears the net's existing pours first so they don't stack. v1 pours a RECTANGLE within
+  clears the net's existing pours **on the same layer** first so they don't stack (before
+  2026-09-25 it matched the net only and deleted the BOTTOM GND pour when TOP GND was poured;
+  `--dry-run` now reports `wouldClear`). v1 pours a RECTANGLE within
   the bbox; for an odd outline draw a custom polygon with `pcb pour`. `--dry-run` previews.
 - `pcb via-stitch` (daemon-side) — fill a `--rect "x0,y0,x1,y1"` with a `--pitch`-spaced
   grid of `--net` vias: **thermal vias** under a power-IC center pad (tie it to the GND
@@ -535,3 +539,24 @@ MCU GND anchor 精确相接、尺寸/位置符合模块设计的过孔。候选 
 via-in-pad 许可。`routing.demands[].existingViasOnly` 还要求列出的 PID、网络、位置及
 `existingViaInPadAnchors` 焊盘归属与 fresh 快照一致；这些孔只作为既有 witness，不计入
 候选新增过孔，不能仅靠同名网络代替实际入口铜路径。
+
+
+## 2026-09-25 ESP32 E2E 布线/铜/丝印实测要点（桌面 V3 3.2.149，connector 0.2.6）
+
+- 整板布线用 `pcb auto run --board <确认后的 dump> --power power.json --groups <sch composition> --layers 4`
+  （不带 `--place`，布局保持用户确认版），`apply` 后 **save → reload → pour-rebuild → save**，再 fresh dump、原生 DRC。
+- 重布：先 `pcb rip-up`（全部走线/过孔）+ `pcb pour-delete --ids <当前 pours>`；**不要**用
+  `pcb clear --only copper` —— connector < 0.2.8 会把 MULTI 层安装孔 fill 一起删掉（0.2.8 起归 `regions`）。
+- TOP GND 铺铜（S0 决策）在剧本之后用 `pcb pour-fit --net GND --layer 1` 补。
+- 丝印：`pcb silk-align` 在 connector < 0.2.8 上要**连跑两次**：首轮按转正前的尺寸规划，把侧向/倒置
+  位号转正后 14/30 落到焊盘上；第二轮（全部已 0°）得 0 压焊盘 0 朝向问题。0.2.8 起首轮先转正再量（2026-09-25 现场验证：4 个位号转成 90° 后单跑一次 → silkFlipped 0、silkOverPad 0；
+  `clear --only routing,copper --dry-run` 不再列出 4 个安装孔 fill；隐藏的 Footprint/Device 属性按 `valueVisible` 排除）。
+- 布线器本轮修复（`pkg/pcbauto`）：孔距取板规则 `hole2Hole`（`pcb dump` 的 `rules.holeToHoleMil`，
+  ceshi 0.3 mm；读不到时用 JLC 0.254 mm），同网过孔、布线过孔与扇出过孔都遵守；相邻同网引脚共享扇出孔；
+  焊盘内过孔只给 IC/模块散热焊盘；交付前严格 DRC（0.01 mil）+ **微修**：≤0.25 mil 的间距短缺先把线段/顶点
+  外移（保持线宽，5 mil 细颈也能修），再退而收窄，不再删连接。差分菊花链（禁止中段 T 接）默认关闭：
+  5 板回归中使 bbclaw 布通率 −7%。全局 0.1–0.25 mil 路由余量同样使 0.65 mm BGA 狗骨测试跌到 60%，已撤回。
+- 旧 dump（2026-09-25 前）没有 `holeToHoleMil`：重布前重新 `pcb dump`，或从新 dump 的 rules 补进基线。
+- 结果（route11，最终算法）：100% 布通，原生 DRC 通过，逐焊盘对账 0 差异，`pcb check` 0 ERROR，
+  save→reload `contentSha256` 不变；余下 WARN 为自由角度走线风格、低速 3W、+3V3 细颈、无 Fiducial（INFO）；
+  USB FS 的 D+ 3 过孔（引擎 SI 上限 2），对内长度差 46 mil。泪滴保持 `unsupported`。

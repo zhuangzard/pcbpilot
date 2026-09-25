@@ -1,8 +1,8 @@
 # Codex 内置浏览器：本地版本测试执行步骤
 
-供 Codex Agent 在用户已登录的 **Web EasyEDA Pro** 中复测本仓库的本地开发版。当前工程操作
-遵守根目录 [AGENTS.md](../AGENTS.md) 和公开 [easyeda-agent Skill](../.agents/skills/pcbpilot/SKILL.md)：
-工程读写只走 typed `easyeda` 命令或受保护 Apply；浏览器界面只用于打开工程、管理连接器
+供 Codex Agent 在用户已登录的 **Web EasyEDA Pro** 中复测本仓库的本地开发版（本文只覆盖 Web 场景；桌面版 V3/V4 同样受支持，不在本文范围）。当前工程操作
+遵守根目录 [AGENTS.md](../AGENTS.md) 和公开 [pcbpilot Skill](../.agents/skills/pcbpilot/SKILL.md)：
+工程读写只走 typed `pcbpilot` 命令或受保护 Apply；浏览器界面只用于打开工程、管理连接器
 与只读观察。原理图的数据准备与转换细节见
 [数据驱动架构基准](../.agents/skills/pcbpilot/references/schematic-data.md#数据驱动架构基准)。
 
@@ -18,13 +18,13 @@
 make local-build VERSION=vX.Y.Z-dev.N DIST="$PWD/dist/local-vX.Y.Z-dev.N"
 dist/local-vX.Y.Z-dev.N/pcbpilot_darwin_arm64 update \
   --local-dir "$PWD/dist/local-vX.Y.Z-dev.N" \
-  --binary "$(command -v easyeda)"
-make local-daemon-restart LOCAL_EASYEDA="$(command -v easyeda)"
+  --binary "$(command -v pcbpilot)"
+make local-daemon-restart LOCAL_EASYEDA="$(command -v pcbpilot)"
 ```
 
 4. 在用户的内置浏览器 Web EDA 中，停用旧连接器；从上述 `dist` 导入
-   `easyeda-agent-connector.eext` 并启用“允许外部交互”。同 UUID 的旧侧载项须先卸载；
-   市场版与本地侧载版不要同时运行。权限弹窗按浏览器要求由用户单独确认。扩展安装项
+   `pcbpilot-connector.eext`（PCB Pilot Connector）并启用“允许外部交互”。同 UUID 的旧侧载项须先卸载；
+   pcbpilot 连接器不在插件市场上架，与上游 EDA Agent Connector 端口段不同，可并存。权限弹窗按浏览器要求由用户单独确认。扩展安装项
    显示新版本，不证明当前网页已运行新代码。已有文档先按实际状态保留可用证据；更新插件后
    **请用户刷新当前 Web 页面**，Agent 不用 GUI 刷新来恢复工程或代替 typed 验证。
 
@@ -58,7 +58,7 @@ pcbpilot update --local-dir "$PWD/dist/local-vX.Y.Z-dev.N" --check --exit-code
 [`esp32MiniRequire.md`「一、客户原始需求」](../esp32MiniRequire.md#一客户原始需求)。不提供
 历史报告、加工后的 BOM/UUID/网表、预制布局或答案图；它自行选型和规划。
 
-> 你是独立测试执行员。先读 AGENTS.md、公开 easyeda-agent Skill 和客户原始需求。
+> 你是独立测试执行员。先读 AGENTS.md、公开 pcbpilot Skill 和客户原始需求。
 > 在已核对版本及工程/页 UUID 的专用 Web EDA 测试工程中，从原始快照构建参数化连接与
 > 核心/外围归属，逐件测量唯一可见位号的官方 bbox，完成区内布局、整页布局、固定转换、
 > 受保护 Apply。图签文本进入逐页源。对器件、物理引脚到网/NC、真实直连、位号、框和

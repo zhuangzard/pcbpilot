@@ -21,13 +21,14 @@ pcbpilot CLI ──HTTP──▶ pcbpilot daemon（127.0.0.1:61832）
 所以 MCP 调用与直接敲命令走的是**同一条链路**：同样的 typed action 校验、审计日志、自动保存、
 版本诊断和 `--project/--doc` 目标锁定。MCP 不会绕过任何护栏。
 
-## 暴露哪些工具（11 个）
+## 暴露哪些工具（12 个）
 
 | 工具 | 作用 |
 |---|---|
 | `pcbpilot_health` | daemon 与已连接窗口、版本（先调它） |
 | `pcbpilot_actions` | typed action 目录与参数说明（调领域工具前查它） |
 | `pcbpilot_artifact` / `_board` / `_document` / `_pcb` / `_project` / `_schematic` / `_system` | 7 个安全领域，每个执行一条该领域的 typed action |
+| `pcbpilot_project_transfer` | 打开 / 导出原生 EasyEDA 工程（固定官方 API 适配器，无需文档路由） |
 | `pcbpilot_blocks` | 电路块库查询 |
 | `pcbpilot_workflow` | 工作流状态机（结构化参数，不接受任意 CLI 选项） |
 
@@ -37,9 +38,9 @@ pcbpilot CLI ──HTTP──▶ pcbpilot daemon（127.0.0.1:61832）
 **不在 MCP 里的**：CLI 的组合命令（`pcb auto`、`pcb dump`、`apply`、`sch compose` 等）不是单条 typed action，
 MCP 不直接提供。需要它们时让 Agent 在终端运行 `pcbpilot ...`（Skill 的配方正是这样写的）。
 
-## 本机当前状态（2026-09-22）
+## 示例：一台开发机上的注册状态（2026-09-22 记录，非通用配置）
 
-原版与 pcbpilot 的 MCP **并存**，互不影响：
+以下为某台开发机的实际记录，仅作示例；原版与 pcbpilot 的 MCP 可以**并存**，互不影响：
 
 | 客户端 | 服务名 | 命令 | 调用的 CLI |
 |---|---|---|---|
@@ -53,15 +54,22 @@ MCP 不直接提供。需要它们时让 Agent 在终端运行 `pcbpilot ...`（
 
 ## 在其他机器上接入
 
+从仓库克隆一键接入（推荐）：`scripts/setup-agent.sh` 会构建 CLI 到 `~/.local/bin`、把 Skill
+软链到 `~/.claude/skills` / `~/.codex/skills` / `~/.agents/skills`、执行 `npm --prefix mcp ci` 并向
+Claude Code 与 Codex 注册 MCP、构建 connector 并启动 daemon。MCP 需要 Node ≥ 20.17。完整手册见
+[manual.md](manual.md)。
+
+手动接入：
+
 ```bash
 # 1. 安装 CLI + Skill（发布后）
 curl -fsSL https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.sh | bash
-# 2. 取 MCP 源码并安装依赖（MCP 目前不随安装脚本分发，planned）
+# 2. 取 MCP 源码并安装依赖（安装脚本 install.sh 不分发 MCP；从克隆运行 scripts/setup-agent.sh 可自动完成 2–3 步）
 git clone https://github.com/zhuangzard/pcbpilot.git ~/Tools/pcbpilot
 cd ~/Tools/pcbpilot/mcp && npm ci --ignore-scripts
 # 3. 注册
-claude mcp add pcbpilot -s user -e PCBPILOT_BIN=$HOME/.local/bin/pcbpilot -- node ~/Tools/pcbpilot/mcp/src/server.mjs
-codex mcp add pcbpilot --env PCBPILOT_BIN=$HOME/.local/bin/pcbpilot -- node ~/Tools/pcbpilot/mcp/src/server.mjs
+claude mcp add pcbpilot --scope user --env PCBPILOT_BIN="$(command -v pcbpilot)" -- node ~/Tools/pcbpilot/mcp/src/server.mjs
+codex mcp add pcbpilot --env PCBPILOT_BIN="$(command -v pcbpilot)" -- node ~/Tools/pcbpilot/mcp/src/server.mjs
 ```
 
 注册后重启客户端，先调 `pcbpilot_health`。自检：`cd mcp && PCBPILOT_BIN=... npm test`（8 项）。

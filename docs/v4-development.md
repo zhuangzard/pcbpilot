@@ -5,15 +5,15 @@
 > 推荐并已读验证：4.1.60（2026-09-21）  
 > 当前结论：`read-compatible / targeted-write-verified / full-E2E-pending`
 
-本文只跟踪 V4 产品版本带来的兼容、开发与现场验证。历史 V3 证据继续保留在原报告中，
-但不再作为新功能完成态的宿主基线。V4 官方更新来源：
+本文只跟踪 V4 产品版本带来的兼容、开发与现场验证。V3 证据保留在原报告中，
+V3 与 V4 结果分别计为各自宿主线的回归。V4 官方更新来源：
 [专业版更新记录](https://pro.lceda.cn/page/update-record)。
 
 ## 版本边界
 
-- 用户运行现场 EDA 自动化前必须升级到 V4；推荐使用 4.1.60 或更新的 V4 构建。
-- `pcbpilot health` 的 `hostCompatibility` 独立检查产品版本：V3 为 `block` 诊断，较老 V4 为
-  `warn`，4.1.60+ V4 为 `ok`；它不靠版本号替代动作回读，也不改变普通 action 的许可语义。
+- V3（3.2.x）与 V4 均可运行现场 EDA 自动化，桌面版与 Web 版均可；使用 V4 时推荐 4.1.60 或更新构建。
+- `pcbpilot health` 的 `hostCompatibility` 独立检查产品版本并报告 `line: v3|v4`：V3 3.2.x 为 `ok`，
+  低于 3.2 或低于 4.1.60 的 V4 为 `warn`，4.1.60+ V4 为 `ok`；它不靠版本号替代动作回读，也不改变普通 action 的许可语义。
 - `extension/extension.json` 的 `engines.eda: ~3.2.0` 是扩展 API 引擎版本。官方 V4 SDK 模板仍
   使用 3.2 API 线，不能把它误改成产品版本 4.x。
 - Connector 开发类型基线升级到 `@jlceda/pro-api-types ^0.4.25`。
@@ -33,8 +33,8 @@
 
 | P0 项 | 实现状态 | 完成判据 |
 |---|---|---|
-| V4 主线宿主声明 | implemented | health JSON 与人类摘要区分产品版本/API 引擎/项目版本 |
-| 用户升级要求 | implemented | Skill 首检 V4；V3 停止现场写入并要求升级；推荐 4.1.60+ |
+| V4 宿主线声明 | implemented | health JSON 与人类摘要区分产品版本/API 引擎/项目版本与宿主线 v3/v4 |
+| 宿主版本检查 | implemented | Skill 首检宿主线；V3 3.2.x 与 V4 均可写入（2026-09-24 起不再阻断 V3）；V4 推荐 4.1.60+ |
 | 官方类型升级 | implemented | 0.4.25 typecheck + Connector 测试通过 |
 | 引脚文本属性保真 | implemented | `pins[].otherProperty` 回读及单测 |
 | 多变体 fail-closed | implemented | 复数 symbol/device/footprint 输入或运行时关联在 mutation 前拒绝；传统 subPart 不误伤 |

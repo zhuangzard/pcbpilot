@@ -11,9 +11,16 @@ PCBPILOT_BIN=/absolute/path/to/pcbpilot npm test
 PCBPILOT_BIN=/absolute/path/to/pcbpilot npm start
 ```
 
-Codex registration:
+Requires Node ≥ 20.17. From a repository clone, `scripts/setup-agent.sh` runs
+`npm --prefix mcp ci` and registers the server with both Claude Code and Codex
+(see [`docs/manual.md`](../docs/manual.md)). Manual registration:
 
 ```bash
+# Claude Code
+claude mcp add pcbpilot --scope user \
+  --env PCBPILOT_BIN=/absolute/path/to/pcbpilot \
+  -- node /absolute/path/to/mcp/src/server.mjs
+# Codex
 codex mcp add pcbpilot \
   --env PCBPILOT_BIN=/absolute/path/to/pcbpilot \
   -- node /absolute/path/to/mcp/src/server.mjs
