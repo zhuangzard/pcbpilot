@@ -64,8 +64,8 @@ type zonesDeriveReport struct {
 	// Risks: a peripheral hanging on a core pin whose neighbours within one
 	// 10-raw pitch on the same side mostly need port labels. Stress runs could
 	// not place such parts at any budget; keep them in their own zone.
-	Risks []zonesDeriveRisk `json:"risks,omitempty"`
-	Policies      map[string]int        `json:"policies"`
+	Risks    []zonesDeriveRisk `json:"risks,omitempty"`
+	Policies map[string]int    `json:"policies"`
 }
 
 func newSchZonesDeriveCmd(stdout io.Writer) *cobra.Command {

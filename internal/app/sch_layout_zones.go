@@ -15,6 +15,9 @@ type SchematicZone struct {
 	CoreComponentID string                  `json:"coreComponentId"`
 	ComponentIDs    []string                `json:"componentIds"`
 	Placement       *SchematicZonePlacement `json:"placement,omitempty"`
+	// EmbedIn solves this zone first and places it as one macro part inside
+	// the named parent zone (one level; see sch_layout_macro.go).
+	EmbedIn string `json:"embedIn,omitempty"`
 }
 type SchematicZonesInput struct {
 	SchemaVersion int                         `json:"schemaVersion"`
@@ -162,14 +165,93 @@ func PlanSchematicZones(in SchematicZonesInput) (*SchematicZonesResult, error) {
 		spacing := *in.Spacing
 		out.Spacing = &spacing
 	}
+	children := map[string][]SchematicZone{}
+	zoneByID := map[string]SchematicZone{}
 	for _, z := range in.Zones {
+		zoneByID[z.ID] = z
+	}
+	for _, z := range in.Zones {
+		if z.EmbedIn == "" {
+			continue
+		}
+		parent, ok := zoneByID[z.EmbedIn]
+		if !ok || parent.EmbedIn != "" || z.EmbedIn == z.ID {
+			return nil, fmt.Errorf("zone %s embedIn %q must name a top-level zone", z.ID, z.EmbedIn)
+		}
+		children[z.EmbedIn] = append(children[z.EmbedIn], z)
+	}
+	netsOf := func(ids []string) map[string]bool {
+		out := map[string]bool{}
+		for _, id := range ids {
+			for _, p := range components[id].Measurement.Pins {
+				if p.Net != "" {
+					out[p.Net] = true
+				}
+			}
+		}
+		return out
+	}
+	for _, z := range in.Zones {
+		if z.EmbedIn != "" {
+			continue // solved as a macro inside its parent
+		}
+		var macros []*schematicMacro
+		for _, child := range children[z.ID] {
+			ports := map[string]bool{}
+			parentNets := netsOf(z.ComponentIDs)
+			for net := range netsOf(child.ComponentIDs) {
+				if pol := in.NetPolicies[net]; parentNets[net] && (pol == "direct" || pol == "module_port") {
+					ports[net] = true
+				}
+			}
+			if len(ports) == 0 {
+				return nil, fmt.Errorf("zone %s embedIn %s shares no signal net with it", child.ID, z.ID)
+			}
+			sub := SchematicLayoutInput{SchemaVersion: 1, CoreComponentID: child.CoreComponentID, NetPolicies: map[string]string{}, Routing: in.Routing}
+			for _, id := range child.ComponentIDs {
+				c := components[id]
+				sub.Components = append(sub.Components, c)
+				for _, p := range c.Measurement.Pins {
+					if p.Net != "" {
+						sub.NetPolicies[p.Net] = in.NetPolicies[p.Net]
+						if ports[p.Net] {
+							sub.NetPolicies[p.Net] = "module_port"
+						}
+					}
+				}
+			}
+			for _, h := range in.Attachments {
+				if owners[h.ComponentID] == child.ID {
+					sub.Attachments = append(sub.Attachments, h)
+				}
+			}
+			childBudget := initial
+			childLayout, err := planSchematicLayoutWithBudget(sub, &childBudget)
+			if err != nil {
+				return nil, fmt.Errorf("zone %s (embedded in %s): %w", child.ID, z.ID, err)
+			}
+			out.CandidatesUsed += initial - childBudget
+			macro, err := buildSchematicMacro(child, childLayout, ports)
+			if err != nil {
+				return nil, err
+			}
+			macros = append(macros, macro)
+		}
 		local := SchematicLayoutInput{SchemaVersion: 1, CoreComponentID: z.CoreComponentID, NetPolicies: map[string]string{}, Optimization: in.Optimization, Routing: in.Routing}
+		for _, macro := range macros {
+			local.Components = append(local.Components, macro.part)
+			for net := range macro.ports {
+				local.NetPolicies[net] = "direct"
+			}
+		}
 		for _, id := range z.ComponentIDs {
 			c := components[id]
 			local.Components = append(local.Components, c)
 			for _, p := range c.Measurement.Pins {
 				if p.Net != "" {
-					local.NetPolicies[p.Net] = in.NetPolicies[p.Net]
+					if _, macroNet := local.NetPolicies[p.Net]; !macroNet || local.NetPolicies[p.Net] != "direct" {
+						local.NetPolicies[p.Net] = in.NetPolicies[p.Net]
+					}
 				}
 			}
 		}
@@ -211,6 +293,12 @@ func PlanSchematicZones(in SchematicZonesInput) (*SchematicZonesResult, error) {
 		}
 		if err != nil {
 			return nil, fmt.Errorf("zone %s (%s): %w", z.ID, z.Title, err)
+		}
+		for _, macro := range macros {
+			if err := macro.expand(layout); err != nil {
+				return nil, fmt.Errorf("zone %s (%s): %w", z.ID, z.Title, err)
+			}
+			layout.Variants = nil // variants were computed with the macro folded
 		}
 		setSchematicMarkerAnchorZone(layout, z.ID)
 		out.CandidatesUsed += before - *zoneBudget

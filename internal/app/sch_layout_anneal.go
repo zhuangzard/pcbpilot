@@ -119,7 +119,7 @@ type annealSolver struct {
 	// closest-to-legal state seen (diagnostics for "no overlap-free placement")
 	bestIllegal    float64
 	bestIllegalWhy string
-	evals     int
+	evals          int
 }
 
 func solveSchematicLayoutAnneal(input SchematicLayoutInput, measured map[string]powerLayoutPlacement, members []string, hints map[string]SchematicLayoutPeripheral, budget *int, routing *schematicRoutingContext) (*SchematicLayoutResult, error) {
