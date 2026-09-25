@@ -30,7 +30,7 @@ func TestParseHostProfileLinesAndFeatures(t *testing.T) {
 			}
 		}
 	}
-	if NativeNetLabelSupport("3.2.149") == nil || NativeNetLabelSupport("4.1.60") != nil {
-		t.Fatal("net_label gate must follow the profile")
+	if NativeNetLabelSupport("3.2.149") != nil || NativeNetLabelSupport("4.1.60") != nil || NativeNetLabelSupport("") == nil {
+		t.Fatal("net_label: V3 (wire-name fallback) and V4 allowed, unknown host refused")
 	}
 }

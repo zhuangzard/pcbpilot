@@ -3,7 +3,7 @@ package protocol
 import "testing"
 
 func TestNativeNetLabelCompatibility(t *testing.T) {
-	for version, supported := range map[string]bool{"3.2.186": false, "3.2.149.88089769": false, "": false, "dev": false, "4.bad.1": false, "4.0.0": true, "v4.1.60": true, "4.1.60.123": true} {
+	for version, supported := range map[string]bool{"3.2.186": true, "3.2.149.88089769": true, "2.2.40": false, "": false, "dev": false, "4.bad.1": false, "4.0.0": true, "v4.1.60": true, "4.1.60.123": true} {
 		if (NativeNetLabelSupport(version) == nil) != supported {
 			t.Fatalf("version %q support mismatch", version)
 		}

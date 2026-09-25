@@ -11,8 +11,10 @@ import (
 	"github.com/zhuangzard/pcbpilot/internal/protocol"
 )
 
+// Only an unidentified host is refused before dispatch; V3 and V4 both
+// support net labels (V3 through the connector's wire-name fallback).
 func TestNativeLabelRefusedBeforeConnectorDispatch(t *testing.T) {
-	for _, version := range []string{"3.2.186", ""} {
+	for _, version := range []string{"", "2.2.40"} {
 		t.Run(version, func(t *testing.T) {
 			base, cleanup := startDaemon(t)
 			defer cleanup()
