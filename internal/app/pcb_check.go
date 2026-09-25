@@ -123,6 +123,24 @@ type pcbSlotP struct {
 	MinX, MinY, MaxX, MaxY float64
 }
 
+// padSegDist is the distance from segment (x1,y1)-(x2,y2) to the copper of a
+// sized pad. Round-ended pads (native OVAL/ELLIPSE at a cardinal rotation) are
+// a stadium — the AABB corner of an SOP-16 OVAL pad false-flagged a via 3.3
+// mil away that is really 7.3 mil from the rounded end (native DRC passed).
+// The stadium contains the ellipse, so ELLIPSE stays conservative. Anything
+// else is its axis-aligned rectangle.
+func padSegDist(p pcbPadP, x1, y1, x2, y2 float64) float64 {
+	if p.ShapeOK && (p.Shape == "OVAL" || p.Shape == "ELLIPSE") && netPathCardinalRotation(p.Rotation) && p.W > 0 && p.H > 0 {
+		r := math.Min(p.W, p.H) / 2
+		ax, ay, bx, by := p.X, p.Y-p.H/2+r, p.X, p.Y+p.H/2-r
+		if p.W >= p.H {
+			ax, ay, bx, by = p.X-p.W/2+r, p.Y, p.X+p.W/2-r, p.Y
+		}
+		return math.Max(0, segSegDist(ax, ay, bx, by, x1, y1, x2, y2)-r)
+	}
+	return rectSegDist(p.X-p.W/2, p.Y-p.H/2, p.X+p.W/2, p.Y+p.H/2, x1, y1, x2, y2)
+}
+
 // rectPtDist is the distance from a point to an axis-aligned rect (0 inside).
 func rectPtDist(minX, minY, maxX, maxY, x, y float64) float64 {
 	dx := math.Max(math.Max(minX-x, 0), x-maxX)
@@ -173,6 +191,10 @@ type pcbSilkText struct {
 	// Real rendered extent from the connector (nil on older connectors). When
 	// present it supersedes any anchor/char-width/rotation estimation.
 	BBox *pcbRect
+	// Hidden: an attribute that is not rendered (value invisible). Kept in
+	// the list — the Device text still identifies antennas — but it is not
+	// silkscreen: the visual checks skip it.
+	Hidden bool
 }
 
 // pcbRect is a plain min/max rectangle in board mils.
@@ -742,7 +764,7 @@ func findClearanceViolations(tracks []pcbTrack, pads []pcbPadP, vias []pcbViaP, 
 			// half-width 5.9mil, seen on ceshi). Nominal radius only as fallback.
 			var edgeD float64
 			if p.W > 0 && p.H > 0 {
-				edgeD = rectSegDist(p.X-p.W/2, p.Y-p.H/2, p.X+p.W/2, p.Y+p.H/2, t.X1, t.Y1, t.X2, t.Y2)
+				edgeD = padSegDist(p, t.X1, t.Y1, t.X2, t.Y2)
 			} else {
 				edgeD = centerD - nominalPadHalf
 			}
@@ -825,7 +847,7 @@ func findClearanceViolations(tracks []pcbTrack, pads []pcbPadP, vias []pcbViaP, 
 			// max-half would false-flag vias beside elongated connector pads.
 			var d float64
 			if p.W > 0 && p.H > 0 {
-				d = rectPtDist(p.X-p.W/2, p.Y-p.H/2, p.X+p.W/2, p.Y+p.H/2, v.X, v.Y) - v.Dia/2
+				d = padSegDist(p, v.X, v.Y, v.X, v.Y) - v.Dia/2
 			} else {
 				d = math.Hypot(v.X-p.X, v.Y-p.Y) - v.Dia/2 - nominalPadHalf
 			}
@@ -1157,6 +1179,9 @@ func findSilkscreenFlipped(silk []pcbSilkText) []pcbCheckFinding {
 	}
 	var out []pcbCheckFinding
 	for _, s := range silk {
+		if s.Hidden {
+			continue // not rendered: not silkscreen
+		}
 		if s.Layer != silkTopLayer && s.Layer != silkBottomLayer {
 			continue // not a silkscreen text
 		}
@@ -1985,6 +2010,7 @@ func gatherPcbCheckReport(cfg *appConfig, window string, couplingW float64, chec
 		}
 		planes = bindPlaneNets(planes, pours)
 		pouredNets := pouredNetSet(pours, planes)
+		dropPouredSingleLayerVias(&rep, pouredNets)
 
 		for _, f := range findNetlessPours(pours) {
 			rep.Findings = append(rep.Findings, f)
@@ -2222,13 +2248,41 @@ func fetchPcbSilk(cfg *appConfig, window string) ([]pcbSilkText, error) {
 				bbox = &pcbRect{MinX: minX, MinY: minY, MaxX: maxX, MaxY: maxY}
 			}
 		}
+		hidden := false
+		if v, ok := tm["valueVisible"].(bool); ok && kind == "attribute" && !v {
+			hidden = true
+		}
 		silk = append(silk, pcbSilkText{
 			ID: id, Kind: kind, Key: key, Text: text, Layer: int(layer), Mirror: mirror,
 			Reverse: reverse, Rotation: rotation, FontSize: fontSize, CompID: compID, CompLayer: int(compLayer), X: x, Y: y,
-			BBox: bbox,
+			BBox: bbox, Hidden: hidden,
 		})
 	}
+	markUnrenderedSilk(silk)
 	return silk, nil
+}
+
+// markUnrenderedSilk hides attributes the host did not render. Connectors
+// before 0.2.8 do not report visibility; there the host's getPrimitivesBBox
+// answers null for a hidden attribute while every rendered text has a box.
+// The ESP32 board's 60 hidden Footprint/Device attributes sit at (0,0) with no
+// box and were reported as silk over J2's pads and as sideways text.
+func markUnrenderedSilk(silk []pcbSilkText) {
+	boxed := false
+	for _, t := range silk {
+		if t.BBox != nil {
+			boxed = true
+			break
+		}
+	}
+	if !boxed {
+		return // old connector without boxes: nothing to tell hidden from shown
+	}
+	for i := range silk {
+		if silk[i].Kind == "attribute" && silk[i].BBox == nil {
+			silk[i].Hidden = true
+		}
+	}
 }
 
 // fetchAntennaContext resolves antenna-bearing components (by device name from the
@@ -2408,4 +2462,22 @@ func isDeclaredDiffPair(a, b string, pairs []pcbDiffPair) bool {
 		}
 	}
 	return false
+}
+
+// dropPouredSingleLayerVias withdraws single-layer-via findings on nets that
+// have a pour or plane: such a via feeds the pour on another layer (a split
+// power region on an inner SIGNAL layer), which is its whole purpose. The ESP32
+// board's VSYS_5V / USB_VBUS fan-outs into IN2 were flagged as pointless.
+func dropPouredSingleLayerVias(rep *pcbCheckReport, poured map[string]bool) {
+	kept := rep.Findings[:0]
+	for _, f := range rep.Findings {
+		if f.Type == "single-layer-via" && poured[f.Net] {
+			rep.Summary.SingleLayerVias--
+			rep.Summary.Warnings--
+			rep.Summary.Total--
+			continue
+		}
+		kept = append(kept, f)
+	}
+	rep.Findings = kept
 }

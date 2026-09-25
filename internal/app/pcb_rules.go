@@ -34,6 +34,7 @@ type pcbRules struct {
 	viaDrillMil            float64 // via hole diameter
 	viaDiameterMil         float64 // via outer diameter
 	copperToEdgeMil        float64 // copper/plane-zone → board-outline clearance (pour inset floor)
+	holeToHoleMil          float64 // drill edge to drill edge (Other Spacing hole2Hole); 0 = not read
 	source                 string  // "live" | "fallback"
 }
 
@@ -225,6 +226,13 @@ func parsePcbRules(result map[string]any) pcbRules {
 				}
 			}
 		}
+	}
+
+	// Hole to hole (drill edge to drill edge): Other Spacing → otherClearance.
+	// ceshi live = 0.3 mm; the host DRC flags vias closer than this, same net
+	// included.
+	if v, ok := asFloatOK(mnav(cfg, "Spacing", "Other Spacing", "otherClearance", "form", "hole2Hole")); ok && v > 0 {
+		r.holeToHoleMil = ruleMil(v)
 	}
 
 	// Power width is a design convention (fab reference), not in the board rule;

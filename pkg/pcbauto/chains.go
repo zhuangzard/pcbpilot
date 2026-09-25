@@ -405,3 +405,94 @@ func padAt(b *Board, key string) *Pad {
 	}
 	return nil
 }
+
+// chainSkeleton is the pad-to-pad path a chain's copper must follow:
+// connector pad, then each node's entry pad (nearest the previous point) and,
+// for a part with several pads on the chain's nets (series parts, pass-through
+// ESD arrays), its exit pad, then the IC pad.
+func chainSkeleton(b *Board, ch *SignalChain) []Point {
+	return chainSkeletonFrom(b, ch, ch.conn)
+}
+
+func chainSkeletonFrom(b *Board, ch *SignalChain, start *Pad) []Point {
+	if start == nil {
+		return nil
+	}
+	nets := map[string]bool{}
+	for _, n := range ch.Nets {
+		nets[n] = true
+	}
+	pts := []Point{start.Box.C}
+	for _, n := range ch.Nodes {
+		p := b.Part(n.Ref)
+		if p == nil {
+			continue
+		}
+		var pads []*Pad
+		for _, pd := range p.Pads {
+			if nets[pd.Net] {
+				pads = append(pads, pd)
+			}
+		}
+		if len(pads) == 0 {
+			continue
+		}
+		cur := pts[len(pts)-1]
+		sort.Slice(pads, func(i, j int) bool { return pads[i].Box.C.Dist(cur) < pads[j].Box.C.Dist(cur) })
+		pts = append(pts, pads[0].Box.C)
+		if len(pads) > 1 {
+			pts = append(pts, pads[len(pads)-1].Box.C)
+		}
+	}
+	if ch.ic != nil {
+		pts = append(pts, ch.ic.Box.C)
+	}
+	return pts
+}
+
+// PairTwist counts how often a differential pair's two skeletons cross. Each
+// crossing is a layer change (two vias) on the pair or a detour around the
+// partner: an in-line part rotated the wrong way round swaps P and N between
+// its neighbours (ESP32 demo: the USBLC6 put D- left of D+ while the CH340
+// wanted D- below D+, and the router spent three vias on D+).
+func PairTwist(b *Board, ch *SignalChain) int {
+	if ch.Pair == nil {
+		return 0
+	}
+	// A connector may carry the net on several pads (USB-C A6/B6): they are
+	// joined anyway, so the pair may leave from whichever pads cross least.
+	best := -1
+	for _, sa := range connPadsOf(b, ch) {
+		for _, sc := range connPadsOf(b, ch.Pair) {
+			a, c := chainSkeletonFrom(b, ch, sa), chainSkeletonFrom(b, ch.Pair, sc)
+			n := 0
+			for i := 1; i < len(a); i++ {
+				for j := 1; j < len(c); j++ {
+					if segsIntersect(a[i-1], a[i], c[j-1], c[j]) {
+						n++
+					}
+				}
+			}
+			if best < 0 || n < best {
+				best = n
+			}
+		}
+	}
+	return max(best, 0)
+}
+
+// connPadsOf lists the chain connector's pads on the chain's first net.
+func connPadsOf(b *Board, ch *SignalChain) []*Pad {
+	if ch.conn == nil {
+		return nil
+	}
+	var out []*Pad
+	if p := b.Part(ch.conn.Part); p != nil {
+		for _, pd := range p.Pads {
+			if pd.Net == ch.conn.Net {
+				out = append(out, pd)
+			}
+		}
+	}
+	return out
+}

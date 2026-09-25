@@ -200,7 +200,7 @@ func (r *Report) WriteMarkdown(w io.Writer) {
 
 var roleCN = map[string]string{
 	"decap": "去耦", "clock": "晶振", "clock-load": "晶振负载电容", "power-stage": "功率级",
-	"protection": "端口保护", "pull": "上下拉/偏置", "signal": "信号串联/滤波", "chain": "链上器件", "test": "测试点", "power-path": "电源路径", "group": "模块成员", "hot-loop": "热回路", "bootstrap": "自举", "feedback": "反馈分压", "unassigned": "未归属",
+	"protection": "端口保护", "pull": "上下拉/偏置", "signal": "信号串联/滤波", "chain": "链上器件", "test": "测试点", "power-path": "电源路径", "pin-filter": "引脚滤波", "group": "模块成员", "hot-loop": "热回路", "bootstrap": "自举", "feedback": "反馈分压", "unassigned": "未归属",
 }
 
 // writeLayoutBasis lists, per core, which auxiliaries follow it, in what

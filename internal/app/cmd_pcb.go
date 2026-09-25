@@ -1125,7 +1125,7 @@ behavior (faster, but re-check with '--dry-run' after a reload yourself).`,
   pcbpilot pcb clear --no-verify            # single pass, no save/reload (legacy behavior)
   pcbpilot pcb clear --dry-run              # report what would be deleted, delete nothing
   pcbpilot pcb clear --only components      # delete only components
-  pcbpilot pcb clear --only routing,copper  # delete only routing + pours/fills
+  pcbpilot pcb clear --only routing,copper  # delete only routing + pours/copper fills (MULTI-layer hole/cutout fills belong to 'regions')
   pcbpilot pcb clear --no-preserve-outline  # also delete the board outline (layer 11)
   pcbpilot pcb clear --include-locked       # also delete locked primitives (danger)`,
 			RunE: func(cmd *cobra.Command, args []string) error {
@@ -2223,20 +2223,25 @@ clears existing pours on the same net so you don't stack them.`,
 				x0, y0, x1, y1 := minX+inset, minY+inset, maxX-inset, maxY-inset
 				points := [][]float64{{x0, y0}, {x1, y0}, {x1, y1}, {x0, y1}}
 
-				// 2. Optionally clear existing pours on this net (avoid stacking).
+				// 2. Optionally clear existing pours on this net AND layer (avoid
+				// stacking). Matching the net alone deleted the BOTTOM GND pour
+				// when TOP GND was poured (ESP32 E2E, 2026-09-25); the dry-run
+				// now reports what would be cleared.
 				cleared := 0
-				if replace && !dryRun {
+				if replace {
 					if lr, err := requestAction(cfg, "pcb.pour.list", window, nil); err == nil {
 						var ids []any
 						pours, _ := lr.Result["pours"].([]any)
 						for _, pi := range pours {
-							if pm, ok := pi.(map[string]any); ok && asString(pm["net"]) == net {
+							if pm, ok := pi.(map[string]any); ok && asString(pm["net"]) == net && pourOnLayer(pm, layer) {
 								if id := asString(pm["primitiveId"]); id != "" {
 									ids = append(ids, id)
 								}
 							}
 						}
-						if len(ids) > 0 {
+						if dryRun {
+							cleared = len(ids)
+						} else if len(ids) > 0 {
 							if _, err := requestAction(cfg, "pcb.pour.delete", window, map[string]any{"primitiveIds": ids}); err == nil {
 								cleared = len(ids)
 							}
@@ -4973,4 +4978,10 @@ func syncSchAttrsToPcb(cfg *appConfig, window string, overwrite bool, out io.Wri
 		fmt.Fprintf(out, "ℹ sync-attrs: %d part(s) without an LCSC C-number skipped: %v\n", len(nl), nl)
 	}
 	return nil
+}
+
+// pourOnLayer reports whether a pour.list entry sits on copper layer id.
+func pourOnLayer(pm map[string]any, layer int) bool {
+	v, ok := asFloatOK(pm["layer"])
+	return ok && int(v) == layer
 }

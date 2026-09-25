@@ -87,17 +87,23 @@ type RouteResult struct {
 
 // rnet is the router's per-net state.
 type rnet struct {
-	id        int32
-	name      string
-	plan      *NetPlan
-	width     float64
-	share     float64 // clearance share each side
-	radius    float64 // claim radius = width/2 + share
-	viaR      float64 // via claim radius = viaDia/2 + share
-	onPlane   bool    // delivered by a plane layer: pads fan out, groups joined by the plane
-	poured    bool    // 2-layer pour net
-	groups    [][]*Pad
-	route     bool
+	id      int32
+	name    string
+	plan    *NetPlan
+	width   float64
+	share   float64 // clearance share each side
+	radius  float64 // claim radius = width/2 + share
+	viaR    float64 // via claim radius = viaDia/2 + share
+	onPlane bool    // delivered by a plane layer: pads fan out, groups joined by the plane
+	poured  bool    // 2-layer pour net
+	groups  [][]*Pad
+	route   bool
+	// daisy nets (differential pairs, RF) grow pad to pad: a new connection
+	// may leave only from a pad already in the tree, never tee off the
+	// middle of a routed segment. A tee is a stub on a matched line — and on
+	// the ESP32 demo USB_DM teed off its run under the USBLC6 and walled
+	// USB_DP out of the pass-through, costing D+ three vias.
+	daisy     bool
 	fixed     []int32 // fan-out claims (never ripped)
 	claims    []int32 // routed claims
 	paths     []rpath
@@ -127,6 +133,14 @@ type rpath struct {
 
 // router holds all state for one run.
 type router struct {
+	// fanHoles buckets every committed fan-out via by 50 mil cell so a new
+	// fan-out keeps the process hole-to-hole gap to all of them, same net
+	// included (two VSYS_5V fan-outs 7 mil apart failed native Hole to Hole).
+	fanHoles map[[2]int][]Via
+	// holeBlk marks grid cells where a new board-drill via would break the
+	// hole gap to a fan-out via: an O(1) test for the via-cost hot path (the
+	// bucket scan there cost RK3568 a third of its negotiation iterations).
+	holeBlk []bool
 	// BGA dog-bone state: balls fanned out by bgaFanout, and the via cell of
 	// each signal ball's escape (an extra access node on every layer).
 	bgaDone map[*Pad]bool
@@ -311,9 +325,13 @@ func (r *router) setupNets() {
 			rn.width = r.b.Rules.TrackWidth
 		}
 		// Clearance share: base nets c/2; high-voltage nets take the excess.
-		rn.share = base / 2
+		// routeSafetyMil (0) is kept for experiments: a 0.25 mil margin cut the
+		// 0.65 mm-pitch BGA dog-bone test from passing to 62 %. Rounding
+		// shortfalls (a track 0.06 mil inside a 5.98 mil rule on the host) are
+		// caught by the independent DRC at 0.01 mil and fixed by local repair.
+		rn.share = base/2 + routeSafetyMil/2
 		if plan.ClearanceMil > base {
-			rn.share = plan.ClearanceMil - base/2
+			rn.share = plan.ClearanceMil - base/2 + routeSafetyMil/2
 		}
 		rn.radius = rn.width/2 + rn.share
 		rn.viaR = r.b.Rules.ViaDia/2 + rn.share
@@ -332,6 +350,7 @@ func (r *router) setupNets() {
 			}
 		}
 		rn.route = len(allow) == 0 || allow[n.Name]
+		rn.daisy = daisyDiff && (plan.Role == RoleDiff || plan.Role == RoleRF)
 		for _, pd := range n.Pads {
 			rn.groups = append(rn.groups, []*Pad{pd})
 		}
@@ -742,6 +761,11 @@ func (r *router) viaCostUncached(n *rnet, x, y int) float64 {
 func (r *router) viaCostR(n *rnet, x, y int, rad float64) float64 {
 	gr := r.gr
 	if gr.noVia[y*gr.W+x] {
+		return math.Inf(1)
+	}
+	// Drilled holes keep the process gap to every fan-out via, own net too:
+	// a bridging via 7 mil from VSYS_5V's fan-out failed native Hole to Hole.
+	if r.holeBlk != nil && r.holeBlk[y*gr.W+x] {
 		return math.Inf(1)
 	}
 	total := 1.0
@@ -1230,6 +1254,13 @@ func (r *router) routeNetKeep(n *rnet, keep bool) bool {
 		return false
 	}
 	tree := append([]int32(nil), terms[0].nodes...)
+	// Daisy nets search from pads first; the full tree (routed cells too) is
+	// the fallback when no pad-to-pad path exists — a hard daisy rule cost
+	// bbclaw 7 % completion.
+	var treeAll []int32
+	if n.daisy {
+		treeAll = append([]int32(nil), tree...)
+	}
 	treePads := map[int32]*Pad{}
 	for _, pd := range terms[0].pads {
 		for _, a := range r.access(n, pd) {
@@ -1292,6 +1323,13 @@ func (r *router) routeNetKeep(n *rnet, keep bool) bool {
 				break
 			}
 		}
+		if path == nil && n.daisy && len(treeAll) > len(tree) && !unreachable && !time.Now().After(r.deadline) {
+			w := [4]int{0, 0, gr.W - 1, gr.H - 1}
+			path = r.search(n, treeAll, targets, w)
+			if path != nil && treePads[path[0]] == nil {
+				r.searchStats.stage = -1
+			}
+		}
 		if path == nil && bridging && !grown && len(remaining) > 1 && !time.Now().After(r.deadline) {
 			// Nothing reached from the root: the root is the likely culprit
 			// (walled in), not the group it failed to reach. It is the root
@@ -1342,10 +1380,15 @@ func (r *router) routeNetKeep(n *rnet, keep bool) bool {
 		}
 		n.paths = append(n.paths, rp)
 		grown = true
-		tree = append(tree, path...)
+		if !n.daisy {
+			tree = append(tree, path...)
+		} else {
+			treeAll = append(treeAll, path...)
+		}
 		for _, pd := range remaining[k].pads {
 			for _, a := range r.access(n, pd) {
 				tree = append(tree, a)
+				treeAll = append(treeAll, a)
 				treePads[a] = pd
 			}
 		}
@@ -1749,3 +1792,56 @@ func (r *router) rerouteKeepOnTimeout(n *rnet, res *RouteResult) {
 	r.applyClaims(n.claims, +1)
 	res.Stats.KeptOnTimeout++
 }
+
+// routeSafetyMil is extra clearance the router keeps beyond the rule (see
+// setupNets: 0, dense BGA channels cannot afford it).
+const routeSafetyMil = 0.0
+
+// holeClash reports whether a via of the given drill at c would come closer
+// than the board's hole gap (drill edge to drill edge) to a committed fan-out via.
+func (r *router) holeClash(c Point, drill float64) bool {
+	if holeGap(r.b) <= 0 {
+		return false
+	}
+	k := [2]int{int(math.Floor(c.X / 50)), int(math.Floor(c.Y / 50))}
+	for dx := -1; dx <= 1; dx++ {
+		for dy := -1; dy <= 1; dy++ {
+			for _, v := range r.fanHoles[[2]int{k[0] + dx, k[1] + dy}] {
+				if c.Dist(v.C)-drill/2-v.Drill/2 < holeGap(r.b) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func (r *router) addFanHole(v Via) {
+	if r.fanHoles == nil {
+		r.fanHoles = map[[2]int][]Via{}
+	}
+	k := [2]int{int(math.Floor(v.C.X / 50)), int(math.Floor(v.C.Y / 50))}
+	r.fanHoles[k] = append(r.fanHoles[k], v)
+	gr := r.gr
+	if gr == nil || holeGap(r.b) <= 0 {
+		return
+	}
+	if r.holeBlk == nil {
+		r.holeBlk = make([]bool, gr.W*gr.H)
+	}
+	reach := v.Drill/2 + r.b.Rules.ViaDrill/2 + holeGap(r.b)
+	cx, cy := gr.cellOf(v.C)
+	rc := int(math.Ceil(reach/gr.g)) + 1
+	for y := cy - rc; y <= cy+rc; y++ {
+		for x := cx - rc; x <= cx+rc; x++ {
+			if gr.in(x, y) && gr.center(x, y).Dist(v.C) < reach {
+				r.holeBlk[y*gr.W+x] = true
+			}
+		}
+	}
+}
+
+// daisyDiff makes differential/RF nets grow pad to pad (see rnet.daisy). Off:
+// on the fixture boards it cost bbclaw 7 % completion and on the ESP32 board
+// it removed the ESD stub but not the vias.
+var daisyDiff = false

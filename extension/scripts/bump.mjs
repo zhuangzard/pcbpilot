@@ -85,7 +85,21 @@ pkg.version = to;
 writeJsonTabs(extPath, ext);
 writeJsonTabs(pkgPath, pkg);
 
-console.log(`version ${from} -> ${to}  (extension.json + package.json)`);
+// package-lock.json carries the version twice (top level and packages[""]);
+// release-check requires all three to match, and this bump used to leave the
+// lock behind (0.2.1 while the connector shipped 0.2.8). Rewrite only those
+// two fields so the lock keeps its own formatting.
+const lockPath = path.join(here, '..', 'package-lock.json');
+if (fs.existsSync(lockPath)) {
+	const lock = fs.readFileSync(lockPath, 'utf-8');
+	const lockObj = JSON.parse(lock);
+	const old = lockObj.version;
+	let n = 0;
+	const next = lock.replace(new RegExp(`"version": "${String(old).replace(/\./g, '\\.')}"`, 'g'), (m) => (n++ < 2 ? `"version": "${to}"` : m));
+	fs.writeFileSync(lockPath, next, 'utf-8');
+}
+
+console.log(`version ${from} -> ${to}  (extension.json + package.json + package-lock.json)`);
 console.log(freshUuid
 	? `uuid    ${fromUuid} -> ${toUuid}  (FRESH uuid — imports as a new extension; delete the old one)`
 	: `uuid    ${toUuid}  (unchanged — update in place: uninstall old in 已安装, then import)`);

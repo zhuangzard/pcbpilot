@@ -69,6 +69,9 @@ func (r *router) fanout(res *RouteResult) {
 		}
 		stubW := math.Min(math.Max(n.width, r.b.Rules.TrackWidth), math.Max(math.Min(pd.Box.W, pd.Box.H), r.b.Rules.TrackWidth))
 		placed := r.placeFanoutVias(n, pd, li, need, stubW, res)
+		if placed == 0 && r.shareFanout(n, pd, li, stubW) {
+			placed = 1
+		}
 		if placed == 0 {
 			res.Notes = append(res.Notes, sprintf("fan-out: no via site for %s (%s); it will be routed as a track", pd.Key(), n.name))
 		}
@@ -103,7 +106,14 @@ func (r *router) placeFanoutVias(n *rnet, pd *Pad, li, need int, stubW float64, 
 	var cs []cand
 	// Large pads (EPAD) may host vias inside: those are thermal vias and
 	// allowed; for normal pads the via sits just outside the copper.
-	inPadOK := need > 1
+	// Only an IC's exposed/thermal pad hosts vias inside (filled + capped by
+	// the fab as a thermal array). Connector shells, switch legs and passive
+	// pads got in-pad vias from the size test alone: 21 via-in-pad warnings
+	// on the ESP32 board, each a solder-wicking joint.
+	// On 6+ layer boards JLC fills and caps via-in-pad (POFV) as standard,
+	// so large passive pads may host vias there too: forbidding them cost
+	// the 6-layer K230 fixture 300 fan-out vias and 5 points of completion.
+	inPadOK := need > 1 && part != nil && (ClassifyPart(part) == KindIC || ClassifyPart(part) == KindModule || r.st != nil && r.st.Layers >= 6)
 	for dy := -rc; dy <= rc; dy += 1 {
 		for dx := -rc; dx <= rc; dx += 1 {
 			x, y := cx+dx, cy+dy
@@ -141,6 +151,9 @@ func (r *router) placeFanoutVias(n *rnet, pd *Pad, li, need int, stubW float64, 
 			break
 		}
 		inside := pd.Box.Dist(c.c) == 0
+		if r.holeClash(c.c, r.b.Rules.ViaDrill) {
+			continue
+		}
 		if inside {
 			// Thermal via inside an EPAD: only pad/hard checks, the via copper
 			// merges with the pad.
@@ -221,6 +234,7 @@ func (r *router) commitFanout(n *rnet, pd *Pad, li, x, y int, c Point, stubW flo
 	r.applyClaims(fresh, +1)
 	n.fixed = dedup(append(n.fixed, fresh...))
 	n.fanVias = append(n.fanVias, Via{Net: n.name, C: c, Drill: drill, Dia: dia, Kind: "fanout"})
+	r.addFanHole(n.fanVias[len(n.fanVias)-1])
 }
 
 // antipadMask marks the cells inside the antipad of every via and
@@ -956,6 +970,48 @@ func contains32(xs []string, v string) bool {
 		if x == v {
 			return true
 		}
+	}
+	return false
+}
+
+// shareFanout ties pd to an existing fan-out via of its own net with a stub
+// when pd could not get a via of its own. Adjacent same-net pins (a buck's EN
+// strapped to VIN) otherwise each dropped a via: the second one either sat
+// 7 mil from the first (native Hole to Hole) or, with the hole gap enforced,
+// found no site and left the pad off the plane.
+func (r *router) shareFanout(n *rnet, pd *Pad, li int, stubW float64) bool {
+	const maxShare = 120.0
+	type cand struct {
+		c Point
+		d float64
+	}
+	var cs []cand
+	for _, v := range n.fanVias {
+		if d := v.C.Dist(pd.Box.C); d <= maxShare {
+			cs = append(cs, cand{v.C, d})
+		}
+	}
+	sort.Slice(cs, func(i, j int) bool { return cs[i].d < cs[j].d })
+	for _, c := range cs {
+		if !r.segmentOK(n, li, pd.Box.C, c.c, stubW, true) {
+			continue
+		}
+		cl := dedup(r.claimSegment(n, li, pd.Box.C, c.c, stubW, nil))
+		r.claimCur++
+		for _, j := range n.fixed {
+			r.claimStamp[j] = r.claimCur
+		}
+		fresh := cl[:0]
+		for _, j := range cl {
+			if r.claimStamp[j] != r.claimCur {
+				fresh = append(fresh, j)
+			}
+		}
+		r.applyClaims(fresh, +1)
+		n.fixed = dedup(append(n.fixed, fresh...))
+		n.shareTracks = append(n.shareTracks, Track{Net: n.name, Layer: r.gr.layers[li], A: pd.Box.C, B: c.c, Width: stubW, Kind: "fanout"})
+		n.shareClaims = append(n.shareClaims, append([]int32(nil), fresh...))
+		return true
 	}
 	return false
 }

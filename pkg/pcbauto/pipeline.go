@@ -57,7 +57,10 @@ func Run(ctx context.Context, b *Board, opt Options) (*Result, error) {
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		drc := CheckDRC(b, an, st, rr.Tracks, rr.Vias)
+		if n := MicroFix(b, an, st, rr); n > 0 {
+			rr.Notes = append(rr.Notes, sprintf("micro-fix: %d sub-0.25 mil clearance shortfall(s) cleared by shifting or narrowing a track", n))
+		}
+		drc := CheckDRCStrict(b, an, st, rr.Tracks, rr.Vias)
 		res.Attempts = append(res.Attempts, Attempt{Stack: stackLabel(st), Completion: rr.Stats.Completion,
 			Vias: rr.Stats.Vias + rr.Stats.FanoutVias, Violations: len(drc.Violations), Millis: time.Since(start).Milliseconds()})
 		return an, rr, drc, nil

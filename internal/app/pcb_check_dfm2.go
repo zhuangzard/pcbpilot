@@ -70,6 +70,9 @@ func padOnSilkSide(padLayer, silkLayer int) bool {
 func findSilkOverPad(silk []pcbSilkText, pads []pcbPadP) []pcbCheckFinding {
 	var out []pcbCheckFinding
 	for _, s := range silk {
+		if s.Hidden {
+			continue // not rendered: not silkscreen
+		}
 		txt := strings.TrimSpace(s.Text)
 		if txt == "" {
 			continue
@@ -240,7 +243,14 @@ func findViaInPad(vias []pcbViaP, pads []pcbPadP) []pcbCheckFinding {
 			if strings.TrimSpace(p.Net) != net {
 				continue
 			}
-			if math.Hypot(v.X-p.X, v.Y-p.Y) > p.halfExt() {
+			// Sized pads: inside the real copper (stadium/rect). The radial
+			// max(W,H)/2 test put a via 20 mil beside a long USB-C shell pad
+			// "on" it.
+			if p.W > 0 && p.H > 0 {
+				if padSegDist(p, v.X, v.Y, v.X, v.Y) > 0 {
+					continue
+				}
+			} else if math.Hypot(v.X-p.X, v.Y-p.Y) > p.halfExt() {
 				continue
 			}
 			ref := p.Designator

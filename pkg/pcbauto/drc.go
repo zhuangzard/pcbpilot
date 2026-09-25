@@ -3,6 +3,7 @@ package pcbauto
 import (
 	"math"
 	"sort"
+	"strings"
 )
 
 // Violation is one exact-geometry DRC finding.
@@ -80,7 +81,18 @@ var kindNames = [3]string{"pad", "track", "via"}
 // CheckDRC verifies tracks and vias against pads, each other, the board edge,
 // keepouts and holes, then checks per-net connectivity of routed nets.
 // an supplies per-net clearance (nil = board rule for all nets).
+// CheckDRC is the routing-loop check (0.1 mil tolerance for float noise).
 func CheckDRC(b *Board, an *Analysis, st *Stackup, tracks []Track, vias []Via) *DRCReport {
+	return checkDRCTol(b, an, st, tracks, vias, 0.1)
+}
+
+// CheckDRCStrict judges the delivered copper at 0.01 mil: the host DRC flagged
+// a track 0.06 mil inside a 5.98 mil rule that the loop tolerance passed.
+func CheckDRCStrict(b *Board, an *Analysis, st *Stackup, tracks []Track, vias []Via) *DRCReport {
+	return checkDRCTol(b, an, st, tracks, vias, 0.01)
+}
+
+func checkDRCTol(b *Board, an *Analysis, st *Stackup, tracks []Track, vias []Via, tol float64) *DRCReport {
 	rep := &DRCReport{ByKind: map[string]int{}}
 	clr := func(net string) float64 {
 		if an != nil {
@@ -155,8 +167,7 @@ func CheckDRC(b *Board, an *Analysis, st *Stackup, tracks []Track, vias []Via) *
 				}
 				seen[pair] = true
 				g, at := gapOf(a, c)
-				// Tolerance: 0.1 mil for float/rounding.
-				if g < req-0.1 {
+				if g < req-tol {
 					k := kindNames[min(a.kind, c.kind)] + "-" + kindNames[max(a.kind, c.kind)]
 					if a.kind > c.kind {
 						a, c = c, a
@@ -165,6 +176,26 @@ func CheckDRC(b *Board, an *Analysis, st *Stackup, tracks []Track, vias []Via) *
 				}
 			}
 		}
+	}
+	// Hole to hole (drill edge to drill edge), same net included: vias of
+	// one net may overlap in copper but the fab cannot drill them that close.
+	holeCell := map[[2]int][]int{}
+	for i, v := range vias {
+		if holeGap(b) <= 0 {
+			break
+		}
+		k := [2]int{int(math.Floor(v.C.X / 50)), int(math.Floor(v.C.Y / 50))}
+		for dx := -1; dx <= 1; dx++ {
+			for dy := -1; dy <= 1; dy++ {
+				for _, j := range holeCell[[2]int{k[0] + dx, k[1] + dy}] {
+					o := vias[j]
+					if g := v.C.Dist(o.C) - v.Drill/2 - o.Drill/2; g < holeGap(b)-0.01 {
+						rep.Violations = append(rep.Violations, Violation{Kind: "hole-hole", NetA: v.Net, NetB: o.Net, At: v.C, Gap: round2(g), Required: holeGap(b)})
+					}
+				}
+			}
+		}
+		holeCell[k] = append(holeCell[k], i)
 	}
 	// Edge, keepouts, holes.
 	for _, it := range items {
@@ -251,6 +282,12 @@ func CheckDRC(b *Board, an *Analysis, st *Stackup, tracks []Track, vias []Via) *
 	})
 	rep.Disconnected = checkConnectivity(b, st, items)
 	return rep
+}
+
+// holeGap is the board's drill-edge to drill-edge rule (Rules.HoleGap);
+// 0 when the snapshot carries none — then it is not enforced.
+func holeGap(b *Board) float64 {
+	return b.Rules.HoleGap
 }
 
 func round2(v float64) float64 { return math.Round(v*100) / 100 }
@@ -343,4 +380,157 @@ func checkConnectivity(b *Board, st *Stackup, items []*drcItem) []Unrouted {
 		}
 	}
 	return out
+}
+
+// microFixMaxShort is the largest clearance shortfall (mil) settled by
+// narrowing a track instead of re-routing: grid-discretised near misses.
+const microFixMaxShort = 0.25
+
+// MicroFix narrows routed tracks that miss a clearance by at most
+// microFixMaxShort under the strict check, keeping them at or above the
+// process minimum. Ripping such connections in repair cost bbclaw 11 %
+// completion; a 10 mil track 0.14 mil narrower is electrically the same.
+// It returns how many tracks were narrowed.
+func MicroFix(b *Board, an *Analysis, st *Stackup, rr *RouteResult) int {
+	fixed := 0
+	for pass := 0; pass < 3; pass++ {
+		changed := false
+		for _, v := range CheckDRCStrict(b, an, st, rr.Tracks, rr.Vias).Violations {
+			short := v.Required - v.Gap
+			if short <= 0 || short > microFixMaxShort || !strings.Contains(v.Kind, "track") {
+				continue
+			}
+			// First shift the offending segment/vertex away from the pad (keeps
+			// the width); narrow nearby tracks of either net only if that fails.
+			if nudgeAway(b, an, st, rr, v, short) {
+				fixed++
+				changed = true
+				continue
+			}
+			hit := false
+			for i, t := range rr.Tracks {
+				if t.Net != v.NetA && t.Net != v.NetB || v.Layer != 0 && t.Layer != v.Layer {
+					continue
+				}
+				if PointSegDist(v.At, t.A, t.B)-t.Width/2 > v.Gap+1 {
+					continue
+				}
+				w := t.Width - 2*short - 0.04
+				if w < b.Rules.MinTrack {
+					continue
+				}
+				rr.Tracks[i].Width = math.Floor(w*100) / 100
+				hit = true
+			}
+			if !hit {
+				continue
+			}
+			fixed++
+			changed = true
+		}
+		if !changed {
+			break
+		}
+	}
+	return fixed
+}
+
+// nudgeAway translates the routed segment nearest a pad clearance violation
+// by the shortfall (+0.03 mil) away from the nearest pad, dragging every
+// same-net segment end that coincides with its ends. Ends on a pad or via of
+// the net are anchors: then nothing moves. The move is kept only if the strict
+// check has fewer violations afterwards.
+func nudgeAway(b *Board, an *Analysis, st *Stackup, rr *RouteResult, v Violation, short float64) bool {
+	var pad *Pad
+	pd := math.Inf(1)
+	for _, p := range b.Parts {
+		for _, q := range p.Pads {
+			if q.Net != v.NetA && q.Net != v.NetB {
+				continue
+			}
+			if d := q.Box.Dist(v.At); d < pd {
+				pad, pd = q, d
+			}
+		}
+	}
+	if pad == nil {
+		return false
+	}
+	net := v.NetA
+	if pad.Net == v.NetA {
+		net = v.NetB
+	}
+	best, bd := -1, math.Inf(1)
+	for i, t := range rr.Tracks {
+		if t.Net != net || v.Layer != 0 && t.Layer != v.Layer {
+			continue
+		}
+		if d := PointSegDist(v.At, t.A, t.B); d < bd {
+			best, bd = i, d
+		}
+	}
+	if best < 0 || bd > v.Gap+rr.Tracks[best].Width {
+		return false
+	}
+	dir := v.At.Sub(pad.Box.C)
+	l := math.Hypot(dir.X, dir.Y)
+	if l == 0 {
+		return false
+	}
+	d := dir.Scale((short + 0.03) / l)
+	near := func(a, c Point) bool { return a.Dist(c) <= 0.01 }
+	anchored := func(p Point) bool {
+		for _, via := range rr.Vias {
+			if via.Net == net && near(via.C, p) {
+				return true
+			}
+		}
+		for _, part := range b.Parts {
+			for _, q := range part.Pads {
+				if q.Net == net && q.Box.Dist(p) == 0 {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	a0, b0 := rr.Tracks[best].A, rr.Tracks[best].B
+	// The closest point is a vertex: move only it (its other segments
+	// follow); otherwise translate the whole segment.
+	var move []Point
+	switch {
+	case v.At.Dist(a0) <= 0.5:
+		move = []Point{a0}
+	case v.At.Dist(b0) <= 0.5:
+		move = []Point{b0}
+	default:
+		move = []Point{a0, b0}
+	}
+	for _, m := range move {
+		if anchored(m) {
+			return false
+		}
+	}
+	before := len(CheckDRCStrict(b, an, st, rr.Tracks, rr.Vias).Violations)
+	saved := append([]Track(nil), rr.Tracks...)
+	for i := range rr.Tracks {
+		t := &rr.Tracks[i]
+		if t.Net != net {
+			continue
+		}
+		for _, e := range []*Point{&t.A, &t.B} {
+			for _, m := range move {
+				if near(*e, m) {
+					*e = e.Add(d)
+					break
+				}
+			}
+		}
+	}
+	after := len(CheckDRCStrict(b, an, st, rr.Tracks, rr.Vias).Violations)
+	if after < before {
+		return true
+	}
+	copy(rr.Tracks, saved)
+	return false
 }

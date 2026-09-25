@@ -190,6 +190,7 @@ func (r *router) emit(res *RouteResult) {
 			}
 		}
 	}
+	res.Tracks = dedupTracks(res.Tracks)
 	res.Stats.Connections = conn
 	res.Stats.Routed = max(routed, 0)
 	res.Stats.Unrouted = len(res.Unrouted)
@@ -723,4 +724,35 @@ func (r *router) dropShare(n *rnet, k int) {
 	n.fixed = fixed
 	n.shareTracks = append(n.shareTracks[:k], n.shareTracks[k+1:]...)
 	n.shareClaims = append(n.shareClaims[:k], n.shareClaims[k+1:]...)
+}
+
+// dedupTracks drops a segment that repeats another of the same net and layer
+// with the same end points (either direction), keeping the wider one. Two
+// paths leaving one pad along its entry stub emitted it twice (USB_DP on the
+// ESP32 board: pcb check "duplicate-segment").
+func dedupTracks(ts []Track) []Track {
+	type key struct {
+		net            string
+		layer          int
+		ax, ay, bx, by int64
+	}
+	q := func(v float64) int64 { return int64(math.Round(v * 100)) }
+	idx := map[key]int{}
+	out := ts[:0]
+	for _, t := range ts {
+		a, b := t.A, t.B
+		if q(b.X) < q(a.X) || q(b.X) == q(a.X) && q(b.Y) < q(a.Y) {
+			a, b = b, a
+		}
+		k := key{t.Net, t.Layer, q(a.X), q(a.Y), q(b.X), q(b.Y)}
+		if i, ok := idx[k]; ok {
+			if t.Width > out[i].Width {
+				out[i].Width = t.Width
+			}
+			continue
+		}
+		idx[k] = len(out)
+		out = append(out, t)
+	}
+	return out
 }

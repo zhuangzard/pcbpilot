@@ -230,6 +230,11 @@ type Rules struct {
 	CopperOz      float64 `json:"copperOz"`      // outer copper weight
 	InnerCopperOz float64 `json:"innerCopperOz"` // inner copper weight
 	BoardThickMil float64 `json:"boardThickMil"`
+	// HoleGap is the board's drill-edge to drill-edge rule (mil) when the
+	// snapshot carries it (pcb dump rules.holeToHoleMil); 0 = unknown, not
+	// enforced. Enforcing an assumed default cut the K230 fixture's fan-out
+	// vias by 300 and its completion by 10 points.
+	HoleGap float64 `json:"holeGap,omitempty"`
 }
 
 // DefaultRules are conservative JLCPCB-class standard-process values.

@@ -89,6 +89,7 @@ func removePCBModuleOwnedObjects(s *boardSnapshot, owned []pcbModuleOwnedObject)
 		out.Copper.Poured = kept
 	}
 	out.SemanticSHA256 = ""
+	out.ContentSHA256 = ""
 	return out, nil
 }
 

@@ -125,13 +125,17 @@ func TestAutoFrameESP32Mini(t *testing.T) {
 	if kb, u3 := PolyBounds(ant.Poly), b.Part("U3").Body(); kb.MinY <= u3.Center().Y || kb.MaxY < u3.MaxY {
 		t.Errorf("antenna keep-out %+v not over U3's pad-free top end %+v", kb, u3)
 	}
+	// Body edge gaps: centre distances grow with the part size and said
+	// nothing about adjacency once bodies were modelled at full size.
 	near := func(a, bref string, mil float64) {
-		if d := b.Part(a).Body().Center().Dist(b.Part(bref).Body().Center()); d > mil {
+		d := rectDist(b.Part(a).Body(), b.Part(bref).Body())
+		t.Logf("%s–%s edge gap %.0f mil", a, bref, d)
+		if d > mil {
 			t.Errorf("%s is %.0f mil from %s (> %.0f)", a, d, bref, mil)
 		}
 	}
-	near("L1", "U1", 250)
-	near("C2", "L1", 250)
-	near("D1", "J1", 350)
-	near("D3", "J2", 350)
+	near("L1", "U1", 120)
+	near("C2", "L1", 120)
+	near("D1", "J1", 150)
+	near("D3", "J2", 200)
 }

@@ -205,6 +205,8 @@ func groupMember(c *Circuit, b *Board, an *Analysis, p, core *Part, target *Bloc
 			m.Role, m.Why = "decap", why+": decouples "+pin.Net+" at "+pin.Key()
 		case c.Kinds[core.Ref] == KindConnector && an.Plan(pin.Net, b.Rules).Role == RolePower:
 			m.Role, m.Why = "power-path", why+": power path from "+pin.Key()+" ("+pin.Net+")"
+		case c.Kinds[p.Ref] == KindCapacitor && an.Plan(pin.Net, b.Rules).Role != RolePower:
+			m.Role, m.Why = "pin-filter", why+": filters "+pin.Key()+" ("+pin.Net+")"
 		}
 		return m
 	}

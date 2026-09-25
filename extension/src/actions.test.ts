@@ -4015,3 +4015,16 @@ test('modify: a rotation-only patch re-sends the real LCSC C-number (V3 resets i
 	assert.equal(fx.calls[0].patch.rotation, 90);
 	delete (globalThis as any).eda;
 });
+
+test('pcbPageClear: --only copper keeps MULTI-layer hole fills; regions scope removes them', async () => {
+	let s = installPcbClearStub({ fills: [pcbPrim('cu-fill', 1), pcbPrim('m3-hole', 12)], pours: [pcbPrim('gnd', 2)] });
+	await pcbPageClear({ only: 'routing,copper' });
+	assert.deepEqual(s.deleted.fills ?? [], ['cu-fill'], 'a mounting hole is not copper');
+	assert.deepEqual(s.deleted.pours ?? [], ['gnd']);
+	delete (globalThis as any).eda;
+
+	s = installPcbClearStub({ fills: [pcbPrim('cu-fill', 1), pcbPrim('m3-hole', 12)] });
+	await pcbPageClear({ only: 'regions' });
+	assert.deepEqual(s.deleted.fills ?? [], ['m3-hole']);
+	delete (globalThis as any).eda;
+});

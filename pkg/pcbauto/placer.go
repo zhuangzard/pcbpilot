@@ -718,7 +718,7 @@ func (pl *placer) construct() {
 	}
 }
 
-var roleOrder = []string{"hot-loop", "bootstrap", "decap", "clock", "clock-load", "power-stage", "feedback", "protection", "power-path", "pull", "group", "signal", "chain", "test"}
+var roleOrder = []string{"hot-loop", "bootstrap", "decap", "clock", "clock-load", "power-stage", "feedback", "protection", "power-path", "pin-filter", "pull", "group", "signal", "chain", "test"}
 
 func roleRank(r string) int {
 	for i, x := range roleOrder {
@@ -1070,7 +1070,15 @@ func (pl *placer) anneal(deadline time.Time) {
 				break
 			}
 		}
-		frac := math.Max(float64(i)/float64(total), timeFrac)
+		// Cooling follows the move count, so a seed reproduces its layout
+		// whatever the machine load; the clock only takes over past 80 % of
+		// the budget, to end cold instead of mid-melt. Mixing it in from the
+		// start made a loaded machine strand the szpi crystal 36 mm from its
+		// hub IC in one run and place it 0.4 mm away in the next.
+		frac := float64(i) / float64(total)
+		if timeFrac > 0.8 {
+			frac = math.Max(frac, timeFrac)
+		}
 		// Cool geometrically; the last 15% is greedy descent.
 		t := temp * math.Pow(0.001, frac/0.85)
 		r := math.Max(minR, radius*math.Pow(0.02, frac))
@@ -1508,7 +1516,7 @@ type tether struct {
 // criticalRoles are the relations whose distance is electrical (loop area,
 // decoupling inductance, clock load, clamp path) rather than routing comfort.
 var criticalRoles = map[string]bool{"hot-loop": true, "bootstrap": true, "decap": true, "clock": true, "clock-load": true,
-	"power-stage": true, "protection": true, "power-path": true}
+	"power-stage": true, "protection": true, "power-path": true, "pin-filter": true}
 
 var tetherRoles = map[string][2]float64{ // weight, slack (mil)
 	"hot-loop":    {8, 20},
@@ -1520,6 +1528,7 @@ var tetherRoles = map[string][2]float64{ // weight, slack (mil)
 	"power-stage": {5, 60},
 	"protection":  {5, 100},
 	"power-path":  {5, 80},
+	"pin-filter":  {5, 60},
 	"group":       {3, 100},
 	"pull":        {2, 120},
 	"signal":      {1.5, 160},
@@ -1746,12 +1755,17 @@ func rectDist(a, b Rect) float64 {
 
 // chainCost prices interface order for p: the detour of every chain p sits
 // on, and for a diff-pair part the gap to its partner beyond side-by-side.
+const pairTwistMil = 400.0
+
 func (pl *placer) chainCost(p *Part) float64 {
 	cost := 0.0
 	for _, ch := range pl.chains[p] {
 		if ex, _, ok := ChainCost(pl.b, pl.c, ch); ok {
 			cost += 1.5 * ch.Weight * ex
 		}
+		// A twisted pair costs vias on a matched line: price a crossing
+		// like 400 mil of detour so the placer turns the in-line part.
+		cost += pairTwistMil * ch.Weight * float64(PairTwist(pl.b, ch))
 	}
 	if q := pl.pairOf[p]; q != nil {
 		pb, qb := p.Body(), q.Body()

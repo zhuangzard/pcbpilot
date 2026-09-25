@@ -254,6 +254,7 @@ func projectPCBLayoutPoses(s *boardSnapshot, moved map[string]boardComp) (*board
 		}
 	}
 	out.SemanticSHA256 = ""
+	out.ContentSHA256 = ""
 	return out, nil
 }
 

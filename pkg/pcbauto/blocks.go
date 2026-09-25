@@ -155,12 +155,17 @@ func (c *Circuit) buildBlocks(b *Board, an *Analysis) {
 		if isCore(c.Kinds[p.Ref]) || c.BlockOf[p.Ref] != "" {
 			continue
 		}
-		nets := map[string]bool{}
+		// Sorted, not a map: several rules below keep the first/last match,
+		// and map order made the same board place differently run to run.
+		var nets []string
+		seenNet := map[string]bool{}
 		for _, pd := range p.Pads {
-			if pd.Net != "" {
-				nets[pd.Net] = true
+			if pd.Net != "" && !seenNet[pd.Net] {
+				seenNet[pd.Net] = true
+				nets = append(nets, pd.Net)
 			}
 		}
+		sort.Strings(nets)
 		// 1. protection
 		if isProtectionPart(c, p) {
 			var pin *Pad
@@ -218,7 +223,7 @@ func (c *Circuit) buildBlocks(b *Board, an *Analysis) {
 		// 3. clock-load cap
 		if c.Kinds[p.Ref] == KindCapacitor {
 			done := false
-			for n := range nets {
+			for _, n := range nets {
 				if ic := crystalNets[n]; ic != "" {
 					assign(p, ic, "clock-load", nil, "load capacitor on crystal net "+n)
 					done = true
@@ -247,7 +252,7 @@ func (c *Circuit) buildBlocks(b *Board, an *Analysis) {
 		}
 		if c.Kinds[p.Ref] == KindInductor {
 			var pin *Pad
-			for n := range nets {
+			for _, n := range nets {
 				for _, cp := range corePads[n] {
 					if isIC(b.Part(cp.Part)) && c.coreKind(b, an, b.Part(cp.Part)) == "power" {
 						pin = cp
@@ -257,6 +262,32 @@ func (c *Circuit) buildBlocks(b *Board, an *Analysis) {
 			if pin != nil {
 				assign(p, pin.Part, "power-stage", pin, "inductor of regulator "+pin.Part)
 				continue
+			}
+		}
+		// 4b. pin filter: a capacitor from an IC signal pin to ground/rail
+		// (reset RC, ADC/BOOT debounce) must sit at that pin — as a plain
+		// "signal" member the ESP32 EN cap landed 10 mm from EN.
+		if c.Kinds[p.Ref] == KindCapacitor && len(p.Pads) == 2 {
+			a, bb := p.Pads[0].Net, p.Pads[1].Net
+			sig := ""
+			switch {
+			case global(a) && bb != "" && !global(bb):
+				sig = bb
+			case global(bb) && a != "" && !global(a):
+				sig = a
+			}
+			if sig != "" && crystalNets[sig] == "" {
+				var pin *Pad
+				for _, cp := range corePads[sig] {
+					if isIC(b.Part(cp.Part)) {
+						pin = cp
+						break
+					}
+				}
+				if pin != nil {
+					assign(p, pin.Part, "pin-filter", pin, "filters "+pin.Key()+" ("+sig+")")
+					continue
+				}
 			}
 		}
 		// 5. pull-up / pull-down
@@ -286,7 +317,7 @@ func (c *Circuit) buildBlocks(b *Board, an *Analysis) {
 		// 6. signal affinity (ICs outweigh connectors)
 		score := map[string]float64{}
 		pinOf := map[string]*Pad{}
-		for n := range nets {
+		for _, n := range nets {
 			if global(n) {
 				continue
 			}

@@ -55,6 +55,7 @@ type snapshot struct {
 		ViaDrillMil     float64 `json:"viaDrillMil"`
 		ViaDiameterMil  float64 `json:"viaDiameterMil"`
 		CopperToEdgeMil float64 `json:"copperToEdgeMil"`
+		HoleToHoleMil   float64 `json:"holeToHoleMil"`
 	} `json:"rules"`
 	Copper *struct {
 		Regions []map[string]any `json:"regions"`
@@ -76,6 +77,9 @@ func FromSnapshot(raw []byte) (*Board, error) {
 		b.Rules.ViaDrill = s.Rules.ViaDrillMil
 		b.Rules.ViaDia = s.Rules.ViaDiameterMil
 		b.Rules.EdgeClearance = s.Rules.CopperToEdgeMil
+		if s.Rules.HoleToHoleMil > 0 {
+			b.Rules.HoleGap = s.Rules.HoleToHoleMil
+		}
 	}
 	if s.Outline != nil {
 		if len(s.Outline.Points) >= 3 {

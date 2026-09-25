@@ -64,3 +64,28 @@ func TestBoardSnapshotPreservesExactPadShapeAndSpecialPad(t *testing.T) {
 		t.Fatalf("pad geometry was dropped: shape=%#v special=%#v", pad.Shape, pad.SpecialPad)
 	}
 }
+
+// Materialised pour copper is regenerated on every reload: other ids, order
+// and 64 vs 64.0. contentSha256 must not move; semanticSha256 must ignore the
+// new field so recorded baselines keep matching.
+func TestBoardSnapshotContentHashIgnoresPourRematerialisation(t *testing.T) {
+	a := &boardSnapshot{Copper: &boardCopperSnapshot{Poured: []any{
+		map[string]any{"primitiveId": "p1", "net": "GND", "fills": []any{map[string]any{"id": "f1", "source": []any{64.0, 1320.0}}}},
+		map[string]any{"primitiveId": "p2", "net": "+3V3", "fills": []any{}},
+	}}}
+	b := &boardSnapshot{Copper: &boardCopperSnapshot{Poured: []any{
+		map[string]any{"primitiveId": "q2", "net": "+3V3", "fills": []any{}},
+		map[string]any{"primitiveId": "q1", "net": "GND", "fills": []any{map[string]any{"id": "g9", "source": []any{64.000001, 1320.0}}}},
+	}}}
+	ha, _ := boardSnapshotContentSHA256(a)
+	hb, _ := boardSnapshotContentSHA256(b)
+	if ha != hb {
+		t.Fatal("content hash moved on a pure re-materialisation")
+	}
+	s1, _ := boardSnapshotSemanticSHA256(a)
+	a.ContentSHA256 = ha
+	s2, _ := boardSnapshotSemanticSHA256(a)
+	if s1 != s2 {
+		t.Fatal("semantic hash must not depend on contentSha256")
+	}
+}

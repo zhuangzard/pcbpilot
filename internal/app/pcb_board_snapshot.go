@@ -292,6 +292,14 @@ type boardSnapshot struct {
 	CapturedAt     string   `json:"capturedAt,omitempty"`
 	Project        string   `json:"project,omitempty"`
 	SemanticSHA256 string   `json:"semanticSha256,omitempty"`
+	// ContentSHA256 hashes what the board IS, not how the host last materialised
+	// it: materialised pour copper (copper.poured) is regenerated on every
+	// reload with new primitive/fill ids, another order and 64 vs 64.0 number
+	// forms, so semanticSha256 changed across a mutation-free save+reload of
+	// the routed ESP32 board. Poured copper is compared id-free, order-free,
+	// numbers at 0.01 mil. Use it as the persistence proof; semanticSha256
+	// (exact, id-bearing) stays the module-check baseline.
+	ContentSHA256 string `json:"contentSha256,omitempty"`
 }
 
 // boardCopperSnapshot keeps the connector's exact JSON projections.  The list
@@ -320,6 +328,7 @@ type boardRules struct {
 	ViaDrillMil            float64 `json:"viaDrillMil"`
 	ViaDiameterMil         float64 `json:"viaDiameterMil"`
 	CopperToEdgeMil        float64 `json:"copperToEdgeMil"`
+	HoleToHoleMil          float64 `json:"holeToHoleMil,omitempty"`
 	Source                 string  `json:"source"` // live | fallback
 }
 
@@ -329,7 +338,7 @@ func rulesToBoard(r pcbRules) *boardRules {
 		TrackWidthMil: r.trackWidthMil,
 		PowerWidthMil: r.powerWidthMil, TrackWidthMinMil: r.trackWidthMinMil,
 		ViaDrillMil: r.viaDrillMil, ViaDiameterMil: r.viaDiameterMil,
-		CopperToEdgeMil: r.copperToEdgeMil, Source: r.source,
+		CopperToEdgeMil: r.copperToEdgeMil, HoleToHoleMil: r.holeToHoleMil, Source: r.source,
 	}
 }
 
@@ -348,7 +357,7 @@ func (b *boardRules) toPcbRules() pcbRules {
 		trackWidthMil: b.TrackWidthMil,
 		powerWidthMil: b.PowerWidthMil, trackWidthMinMil: b.TrackWidthMinMil,
 		viaDrillMil: b.ViaDrillMil, viaDiameterMil: b.ViaDiameterMil,
-		copperToEdgeMil: b.CopperToEdgeMil, source: b.Source,
+		copperToEdgeMil: b.CopperToEdgeMil, holeToHoleMil: b.HoleToHoleMil, source: b.Source,
 	}
 }
 
@@ -698,7 +707,65 @@ func fetchBoardSnapshot(cfg *appConfig, window string, opts boardSnapshotOpts) (
 	} else {
 		snap.SemanticSHA256 = semantic
 	}
+	if content, cerr := boardSnapshotContentSHA256(snap); cerr == nil {
+		snap.ContentSHA256 = content
+	}
 	return snap, nil
+}
+
+func boardSnapshotContentSHA256(s *boardSnapshot) (string, error) {
+	raw, err := json.Marshal(s)
+	if err != nil {
+		return "", err
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return "", err
+	}
+	delete(m, "capturedAt")
+	delete(m, "semanticSha256")
+	delete(m, "contentSha256")
+	if cp, ok := m["copper"].(map[string]any); ok {
+		if poured, ok := cp["poured"].([]any); ok {
+			keys := make([]string, 0, len(poured))
+			for _, p := range poured {
+				b, _ := json.Marshal(contentNormalize(p))
+				keys = append(keys, string(b))
+			}
+			sort.Strings(keys)
+			cp["poured"] = keys
+		}
+	}
+	out, err := json.Marshal(m)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(out)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+// contentNormalize drops host-generated ids and rounds numbers to 0.01.
+func contentNormalize(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		o := map[string]any{}
+		for k, x := range t {
+			if k == "id" || k == "primitiveId" || k == "pourPrimitiveId" {
+				continue
+			}
+			o[k] = contentNormalize(x)
+		}
+		return o
+	case []any:
+		o := make([]any, len(t))
+		for i, x := range t {
+			o[i] = contentNormalize(x)
+		}
+		return o
+	case float64:
+		return math.Round(t*100) / 100
+	}
+	return v
 }
 
 func (s *boardSnapshot) fetchCopper(cfg *appConfig, window string) {
@@ -756,6 +823,7 @@ func boardSnapshotSemanticSHA256(s *boardSnapshot) (string, error) {
 	clone := *s
 	clone.CapturedAt = ""
 	clone.SemanticSHA256 = ""
+	clone.ContentSHA256 = "" // added later; must not move existing semantic baselines
 	raw, err := json.Marshal(clone)
 	if err != nil {
 		return "", err

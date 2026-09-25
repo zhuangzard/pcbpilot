@@ -8698,11 +8698,23 @@ const pcbSilkAlign: Handler = async (payload) => {
 			}
 		} catch { /* skip below */ }
 		if (!attrId) { if (!refs || refs.includes(desig)) skipped.push({ designator: desig, reason: 'no designator attribute found' }); continue; }
-		const a = await eda.pcb_PrimitiveAttribute.get(attrId);
-		const db = await bbox1(attrId);
+		let a = await eda.pcb_PrimitiveAttribute.get(attrId);
+		let db = await bbox1(attrId);
 		if (!a || !db) { skipped.push({ designator: desig, reason: 'designator attribute not readable' }); continue; }
 		// out-of-scope designators are frozen obstacles (still block in-scope placement).
 		if (refs && !refs.includes(desig)) { OBS.push({ rect: db, kind: 'FROZEN', owner: '', m: Clabel }); continue; }
+		// The label is placed upright (rotation 0). Measure it upright: a
+		// sideways/upside-down label has other extents and another anchor
+		// offset, and planning with them landed 14 of 30 ESP32 designators on
+		// pads after the rotation was reset (a second run was clean).
+		if (Number(a.getState_Rotation?.() ?? 0) % 360 !== 0) {
+			try {
+				await eda.pcb_PrimitiveAttribute.modify(attrId, { rotation: 0 } as never);
+				a = await eda.pcb_PrimitiveAttribute.get(attrId);
+				db = await bbox1(attrId);
+			} catch { /* keep the old measurement */ }
+			if (!a || !db) { skipped.push({ designator: desig, reason: 'designator attribute not readable after upright reset' }); continue; }
+		}
 		const ax = a.getState_X() ?? 0, ay = a.getState_Y() ?? 0;
 		const bc = silkCenter(db);
 		items.push({
@@ -8896,6 +8908,10 @@ const pcbSilkList: Handler = async () => {
 				fontSize: Number(a.getState_FontSize?.() ?? 0) || 0,
 				componentId: pid,
 				componentLayer: compLayer.get(pid) ?? 0,
+				// Hidden Footprint/Device attributes sit on the silk layer too;
+				// report visibility so checks skip what is not printed.
+				keyVisible: typeof a.getState_KeyVisible === 'function' ? a.getState_KeyVisible() : undefined,
+				valueVisible: typeof a.getState_ValueVisible === 'function' ? a.getState_ValueVisible() : undefined,
 				x: a.getState_X() ?? 0,
 				y: a.getState_Y() ?? 0,
 			});
@@ -11434,6 +11450,8 @@ function pcbPrimLayer(p: SchPrimitiveLike): number {
 	catch { return NaN; }
 }
 
+const PCB_MULTI_LAYER = 12;
+
 type PcbClearKind = {
 	key: string;
 	// Content kinds carry a scope (gated by --only); outline kinds omit it (they
@@ -11458,7 +11476,11 @@ const PCB_CLEAR_KINDS: Array<PcbClearKind> = [
 	{ key: 'arcs', scope: 'routing', getAll: () => eda.pcb_PrimitiveArc.getAll(), del: ids => eda.pcb_PrimitiveArc.delete(ids), filter: p => onPcbCopperLayer(pcbPrimLayer(p)) },
 	{ key: 'vias', scope: 'routing', getAll: () => eda.pcb_PrimitiveVia.getAll(), del: ids => eda.pcb_PrimitiveVia.delete(ids) },
 	{ key: 'pours', scope: 'copper', getAll: () => eda.pcb_PrimitivePour.getAll(), del: ids => eda.pcb_PrimitivePour.delete(ids) },
-	{ key: 'fills', scope: 'copper', getAll: () => eda.pcb_PrimitiveFill.getAll(), del: ids => eda.pcb_PrimitiveFill.delete(ids) },
+	// MULTI-layer (12) fills are board cutouts / mounting holes (pcb mount-holes,
+	// pcb auto): mechanics, not copper. `--only copper` deleted the four M3
+	// holes of the ESP32 board with the pours; they go with the regions scope.
+	{ key: 'fills', scope: 'copper', getAll: () => eda.pcb_PrimitiveFill.getAll(), del: ids => eda.pcb_PrimitiveFill.delete(ids), filter: p => pcbPrimLayer(p) !== PCB_MULTI_LAYER },
+	{ key: 'holeFills', scope: 'regions', getAll: () => eda.pcb_PrimitiveFill.getAll(), del: ids => eda.pcb_PrimitiveFill.delete(ids), filter: p => pcbPrimLayer(p) === PCB_MULTI_LAYER },
 	{ key: 'regions', scope: 'regions', getAll: () => eda.pcb_PrimitiveRegion.getAll(), del: ids => eda.pcb_PrimitiveRegion.delete(ids) },
 	{ key: 'silkStrings', scope: 'silk', getAll: () => eda.pcb_PrimitiveString.getAll(), del: ids => eda.pcb_PrimitiveString.delete(ids), filter: p => isPcbSilkLayer(pcbPrimLayer(p)) },
 	{ key: 'silkLines', scope: 'silk', getAll: () => eda.pcb_PrimitiveLine.getAll(), del: ids => eda.pcb_PrimitiveLine.delete(ids), filter: p => isPcbSilkLayer(pcbPrimLayer(p)) },
