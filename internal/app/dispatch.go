@@ -816,6 +816,10 @@ func stripArtifactNesting(p string) string {
 
 // postAction is the shared HTTP core: find a live daemon, POST the typed action,
 // and return the raw response body.
+// actionResponseLimit bounds one action response: project.export carries a
+// base64 archive of up to 16 MiB (≈ 21.4 MiB encoded).
+const actionResponseLimit = 32 << 20
+
 func postAction(cfg *appConfig, action, window string, payload any, timeout time.Duration) ([]byte, error) {
 	// dry-run 纯计算铁律 (ADR-0004 Decision 4): while the process-wide dry-run
 	// flag is set, a Mutates=true action is refused HERE — before any network
@@ -906,8 +910,14 @@ func postAction(cfg *appConfig, action, window string, payload any, timeout time
 	if err != nil {
 		return nil, err
 	}
-	respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	// One byte past the cap tells a truncated body apart from a full one: a
+	// silent cut used to surface as "unexpected end of JSON input" (a 0.9 MiB
+	// project.export archive is 1.2 MiB of base64).
+	respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, actionResponseLimit+1))
 	closeErr := resp.Body.Close()
+	if readErr == nil && len(respBody) > actionResponseLimit {
+		return nil, fmt.Errorf("%s response exceeds %d MiB", action, actionResponseLimit>>20)
+	}
 	if readErr != nil {
 		return nil, fmt.Errorf("read response: %w", readErr)
 	}

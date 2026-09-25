@@ -227,4 +227,10 @@ pcbpilot pcb check --project <工程>
 - 现场：先 `pcb rip-up` + 按 dump 中 9 个铺铜的精确 ID `pour-delete`，再 apply；save → reload 后 30 件、7 区域、4 孔不变，
   C7/D3 位姿与剧本一致；`pcb silk-align --refs` 修 3 处丝印压焊盘和 D3 侧向位号；`pcb check` 0 ERROR（只剩布线前的
   “电源未铺铜”）；原生 DRC 只剩未布线 Connection Error。
+- 用户确认后重布（`pcb auto run` 不带 `--place`，基线为确认版 fresh dump）：30/30 布通，综合分 78.2 → 92.2（调整前同板），
+  信号过孔 19 + 扇出 55；原生 DRC 通过 0 条；`pcb check` 0 ERROR；逐焊盘对账 0（原理图连通性必须当场重读，旧文件里有已删位号）；
+  save → reload 前后 `contentSha256` 相同。`pcb check` 曾报 USB_DP 过孔“单层”：TOP 桥线穿过过孔焊盘而不在中心结束，属误报，
+  已改为按过孔半径判接触（`TestPcbCheck_ViaOnBridgeTrackOK`）。
+- 收尾：`project export` 导出 `.epro2` 备份（916515 字节，ZIP 校验通过；曾因 CLI 响应 1 MiB 上限截断报
+  “unexpected end of JSON input”，上限已改 32 MiB），随后 `pcb clear --no-preserve-outline` 与两页 `sch clear`，重载后均为空。
 
