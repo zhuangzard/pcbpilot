@@ -252,11 +252,13 @@ type pcbCheckSummary struct {
 	NetlessViaInPad   int `json:"netlessViaInPad"`
 	WidthUnderSpec    int `json:"widthUnderSpec"`
 	SilkOverPad       int `json:"silkOverPad"`
-	DecapTooFar       int `json:"decapTooFar"`
-	ViaInPad          int `json:"viaInPad"`
-	CopperNearEdge    int `json:"copperNearEdge"`
-	FiducialMissing   int `json:"fiducialMissing"`
-	ZoneViolation     int `json:"zoneViolation"`
+	// Two visible designators printed on top of each other (real bboxes).
+	SilkOverlap     int `json:"silkOverlap"`
+	DecapTooFar     int `json:"decapTooFar"`
+	ViaInPad        int `json:"viaInPad"`
+	CopperNearEdge  int `json:"copperNearEdge"`
+	FiducialMissing int `json:"fiducialMissing"`
+	ZoneViolation   int `json:"zoneViolation"`
 	// #168 连接器布局：内部件占板外沿 / 相邻对外口插头护套打架。
 	InternalOnEdge         int `json:"internalOnEdge"`
 	ConnectorPlugClearance int `json:"connectorPlugClearance"`
@@ -330,6 +332,7 @@ func analyzePcbCheckFull(pads []pcbPadP, tracks []pcbTrack, vias []pcbViaP, arcs
 	rep.Findings = append(rep.Findings, findParallelCoupling(tracks, couplingW, diffPairs)...)
 	rep.Findings = append(rep.Findings, findSilkscreenFlipped(silk)...)
 	rep.Findings = append(rep.Findings, findSilkOverPad(silk, pads)...)
+	rep.Findings = append(rep.Findings, findSilkOverlap(silk)...)
 	rep.Findings = append(rep.Findings, findDecapTooFar(pads)...)
 	rep.Findings = append(rep.Findings, findViaInPad(vias, pads)...)
 	rep.Findings = append(rep.Findings, findFiducialMissing(pads)...)
@@ -358,6 +361,8 @@ func analyzePcbCheckFull(pads []pcbPadP, tracks []pcbTrack, vias []pcbViaP, arcs
 			rep.Summary.SilkscreenFlipped++
 		case "silk-over-pad":
 			rep.Summary.SilkOverPad++
+		case "silk-overlap":
+			rep.Summary.SilkOverlap++
 		case "decap-too-far":
 			rep.Summary.DecapTooFar++
 		case "via-in-pad":
@@ -1110,7 +1115,7 @@ func findParallelCoupling(tracks []pcbTrack, couplingW float64, diffPairs []pcbD
 			if a.Net == b.Net || a.Layer != b.Layer || isGlobalNet(b.Net) {
 				continue
 			}
-			if isDeclaredDiffPair(a.Net, b.Net, diffPairs) {
+			if isDeclaredDiffPair(a.Net, b.Net, diffPairs) || isNamedDiffPair(a.Net, b.Net) {
 				continue // intra-pair coupling is the design intent, not a defect
 			}
 			gap, ovlp, ok := parallelGap(a, b)
@@ -2222,7 +2227,13 @@ func fetchPcbSilk(cfg *appConfig, window string) ([]pcbSilkText, error) {
 	if err != nil {
 		return nil, err
 	}
-	rawTexts, _ := mnav(res.Result, "texts").([]any)
+	return parsePcbSilkList(res.Result), nil
+}
+
+// parsePcbSilkList parses a pcb.silk.list result (shared by `pcb check` and the
+// `pcb silk-align` readback loop so both judge the same boxes).
+func parsePcbSilkList(result map[string]any) []pcbSilkText {
+	rawTexts, _ := mnav(result, "texts").([]any)
 	var silk []pcbSilkText
 	for _, rt := range rawTexts {
 		tm, ok := rt.(map[string]any)
@@ -2263,7 +2274,7 @@ func fetchPcbSilk(cfg *appConfig, window string) ([]pcbSilkText, error) {
 		})
 	}
 	markUnrenderedSilk(silk)
-	return silk, nil
+	return silk
 }
 
 // markUnrenderedSilk hides attributes the host did not render. Connectors
@@ -2409,9 +2420,9 @@ func renderPcbCheckReport(rep pcbCheckReport, w io.Writer) {
 		fmt.Fprintln(w, "  ✓ no DFM issues found")
 		return
 	}
-	fmt.Fprintf(w, "  ERROR=%d WARN=%d  |  dangling=%d acute=%d nonOrtho=%d overPad=%d clearance=%d silkFlipped=%d overlapVia=%d singleLayerVia=%d widthMismatch=%d dupSegment=%d coupling=%d antennaKeepout=%d netlessPour=%d viaCrossesPlane=%d floatingIsland=%d powerNotPoured=%d netlessViaInPad=%d widthUnderSpec=%d silkOverPad=%d decapTooFar=%d viaInPad=%d copperNearEdge=%d fiducialMissing=%d zoneViolation=%d internalOnEdge=%d plugClearance=%d matingBlocked=%d\n",
+	fmt.Fprintf(w, "  ERROR=%d WARN=%d  |  dangling=%d acute=%d nonOrtho=%d overPad=%d clearance=%d silkFlipped=%d overlapVia=%d singleLayerVia=%d widthMismatch=%d dupSegment=%d coupling=%d antennaKeepout=%d netlessPour=%d viaCrossesPlane=%d floatingIsland=%d powerNotPoured=%d netlessViaInPad=%d widthUnderSpec=%d silkOverPad=%d silkOverlap=%d decapTooFar=%d viaInPad=%d copperNearEdge=%d fiducialMissing=%d zoneViolation=%d internalOnEdge=%d plugClearance=%d matingBlocked=%d\n",
 		s.Errors, s.Warnings-s.Errors,
-		s.DanglingEnds, s.AcuteAngles, s.NonOrthogonal, s.TrackOverPad, s.Clearance, s.SilkscreenFlipped, s.OverlappingVias, s.SingleLayerVias, s.WidthMismatches, s.DuplicateSegments, s.ParallelCoupling, s.AntennaKeepout, s.NetlessPours, s.ViaCrossesPlane, s.FloatingIslands, s.PowerNotPoured, s.NetlessViaInPad, s.WidthUnderSpec, s.SilkOverPad, s.DecapTooFar, s.ViaInPad, s.CopperNearEdge, s.FiducialMissing, s.ZoneViolation, s.InternalOnEdge, s.ConnectorPlugClearance, s.ConnectorMatingBlocked)
+		s.DanglingEnds, s.AcuteAngles, s.NonOrthogonal, s.TrackOverPad, s.Clearance, s.SilkscreenFlipped, s.OverlappingVias, s.SingleLayerVias, s.WidthMismatches, s.DuplicateSegments, s.ParallelCoupling, s.AntennaKeepout, s.NetlessPours, s.ViaCrossesPlane, s.FloatingIslands, s.PowerNotPoured, s.NetlessViaInPad, s.WidthUnderSpec, s.SilkOverPad, s.SilkOverlap, s.DecapTooFar, s.ViaInPad, s.CopperNearEdge, s.FiducialMissing, s.ZoneViolation, s.InternalOnEdge, s.ConnectorPlugClearance, s.ConnectorMatingBlocked)
 	for _, f := range rep.Findings {
 		loc := ""
 		if f.At != nil {
@@ -2466,6 +2477,18 @@ func isDeclaredDiffPair(a, b string, pairs []pcbDiffPair) bool {
 		}
 	}
 	return false
+}
+
+// isNamedDiffPair recognises an undeclared pair by name (USB_DP/USB_DM, D+/D-,
+// X_P/X_N, V+/V-) with the same conservative suffix table the critical-net
+// router uses (identifyDiffPairsByName). The ceshi 2026-09-25 board routed
+// USB_DP/USB_DM as a coupled pair without a `pcb diff-pair create`, and the
+// 3W rule reported the pair's own intended coupling as crosstalk.
+func isNamedDiffPair(a, b string) bool {
+	if a == "" || b == "" || strings.EqualFold(a, b) {
+		return false
+	}
+	return len(identifyDiffPairsByName([]string{a, b})) > 0
 }
 
 // dropPouredSingleLayerVias withdraws single-layer-via findings on nets that

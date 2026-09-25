@@ -397,3 +397,32 @@ func TestConnectorPinsDedupes(t *testing.T) {
 		t.Errorf("pins = %d, want 3", got)
 	}
 }
+
+// 2026-09-25 ceshi E2E：U2 = USBLC6-2SC6（SOT-23-6 USB ESD 阵列）紧挨着 J2 Type-C，
+// 位号是 U 躲过了 nonConnectorDesRe，名字含 "usb" 又命中 cpReEdgeConn，被当成连接器
+// 拿 bbox+2mm 兜底包络报了「J2 ↔ U2 插头打架」。只有连接器类器件才有插头包络。
+func TestFindConnectorPlugClearance_USBProtectionICIsNotAConnector(t *testing.T) {
+	snap := &boardSnapshot{
+		Outline: testOutline(),
+		Components: []boardComp{
+			mkBoardConn("J2", "USB3.1TYPE-C16P", 1, 1053, 136, 474, 351, "VBUS", "GND", "USB_DP", "USB_DM", "CC1", "CC2"),
+			mkBoardConn("U2", "USBLC6-2SC6", 1, 1093, 388, 140, 141, "USB_DP", "USB_DM", "GND", "VBUS"),
+		},
+	}
+	if got := findConnectorPlugClearance(collectBoardConnectors(snap, nil), snap.Outline); len(got) != 0 {
+		t.Fatalf("U2 is an ESD array, not a connector — no plug envelope: %+v", got)
+	}
+	for _, c := range []boardComp{
+		mkBoardConn("U2", "USBLC6-2SC6", 1, 0, 0, 10, 10),
+		mkBoardConn("U7", "USB2514B-I/M2", 1, 0, 0, 10, 10),
+		mkBoardConn("U8", "TUSB320LAI", 1, 0, 0, 10, 10),
+	} {
+		if isBoardConnector(c) {
+			t.Errorf("%s (%s) must not be classified as a connector", c.Designator, c.Device)
+		}
+	}
+	// 位号不守约定、把 Type-C 标成 U 的真插座仍然是连接器。
+	if !isBoardConnector(mkBoardConn("U3", "TYPE-C-31-M-12", 1, 0, 0, 10, 10)) {
+		t.Error("a Type-C receptacle labelled U3 is still a connector")
+	}
+}

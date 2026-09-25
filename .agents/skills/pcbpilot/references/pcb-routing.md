@@ -551,6 +551,13 @@ via-in-pad 许可。`routing.demands[].existingViasOnly` 还要求列出的 PID�
 - 丝印：`pcb silk-align` 在 connector < 0.2.8 上要**连跑两次**：首轮按转正前的尺寸规划，把侧向/倒置
   位号转正后 14/30 落到焊盘上；第二轮（全部已 0°）得 0 压焊盘 0 朝向问题。0.2.8 起首轮先转正再量（2026-09-25 现场验证：4 个位号转成 90° 后单跑一次 → silkFlipped 0、silkOverPad 0；
   `clear --only routing,copper --dry-run` 不再列出 4 个安装孔 fill；隐藏的 Footprint/Device 属性按 `valueVisible` 排除）。
+- 丝印互压（2026-09-25 ceshi，V3 3.2.149 / connector 0.2.9）：`silk-align` 报 0 unresolved，fresh dump 却有
+  7 对位号互压（C1/U4、C2/C3、C4/C5、C6/R3、C7/R6、R5/R9、R8/U3），`--refs C2 --refs C3 --spacing 2` 仍压。根因是
+  connector 的槽位代价把负的净空奖励（−25）和「1 次标签碰撞 = 1e4」加在同一个数里再和 1e4 比，开阔处压一个标签
+  得 9975 → 判 clean。修法：connector 按违规**计数**判 clean（标签碰撞永不 clean，并列入 `labelCollisions`）；CLI
+  以 `pcb.silk.list` 真实 bbox 回读做收敛循环（`--rounds`，默认 3，只重排仍互压的位号，其余冻结）；`pcb check`
+  新增 **silk-overlap** WARN。回读里的 `unresolvedPairs` 才是结论；离线 fixture
+  `internal/app/testdata/silk/ceshi-e2e-20260925-designators.json`。待现场复验（需重导 connector）。
 - 布线器本轮修复（`pkg/pcbauto`）：孔距取板规则 `hole2Hole`（`pcb dump` 的 `rules.holeToHoleMil`，
   ceshi 0.3 mm；读不到时用 JLC 0.254 mm），同网过孔、布线过孔与扇出过孔都遵守；相邻同网引脚共享扇出孔；
   焊盘内过孔只给 IC/模块散热焊盘；交付前严格 DRC（0.01 mil）+ **微修**：≤0.25 mil 的间距短缺先把线段/顶点
