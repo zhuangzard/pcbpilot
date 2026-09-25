@@ -342,14 +342,45 @@ func libIslands(p *powerLayoutPlan) []libIsland {
 }
 
 func libNameIslands(p *powerLayoutPlan, policies map[string]string, budget ...*int) error {
+	// Dense edges first: whole runs of single-pin port islands get alternating
+	// lead lengths at once (sch_layout_edge_labels.go); they stay as obstacles
+	// and only the remaining islands are searched. If that fixed choice blocks
+	// the rest, the unplanned search runs as before (no regression by design).
+	plain := *p
+	plain.Flags = nil
+	planned, named := libPlanEdgeLabels(&plain, policies)
+	if len(planned) > 0 {
+		trial := *p
+		err := libNameIslandsPlanned(&trial, policies, planned, named, budget...)
+		if err == nil {
+			*p = trial
+			return nil
+		}
+		if len(budget) > 0 && *budget[0] <= 0 {
+			return err
+		}
+	}
+	return libNameIslandsPlanned(p, policies, nil, map[string]bool{}, budget...)
+}
+
+func libNameIslandsPlanned(p *powerLayoutPlan, policies map[string]string, planned []powerLayoutFlag, named map[string]bool, budget ...*int) error {
 	base := *p
-	base.Flags = nil
+	base.Flags = planned
+	unnamed := func(list []libIsland) []libIsland {
+		out := list[:0:0]
+		for _, island := range list {
+			if !named[island.key] {
+				out = append(out, island)
+			}
+		}
+		return out
+	}
 	// All route joins have finished. Every remaining physical island therefore
 	// needs its own legal marker lead. Prove each independently before exploring
 	// combinations of unrelated labels: one sealed direct tree or module port
 	// would otherwise consume the entire joint-search slice and hide its exact
 	// placement/routing conflict.
-	for _, island := range libIslands(&base) {
+	for _, island := range unnamed(libIslands(&base)) {
 		probe := 4096
 		if len(budget) > 0 && *budget[0] < probe {
 			probe = *budget[0]
@@ -373,7 +404,8 @@ func libNameIslands(p *powerLayoutPlan, policies map[string]string, budget ...*i
 	var jointOrder []libIsland
 	for order := 0; order < 5; order++ {
 		trial := base
-		islands := libIslands(&trial)
+		trial.Flags = append([]powerLayoutFlag(nil), base.Flags...)
+		islands := unnamed(libIslands(&trial))
 		sort.SliceStable(islands, func(i, j int) bool {
 			a, b := islands[i].pins[0], islands[j].pins[0]
 			switch order {

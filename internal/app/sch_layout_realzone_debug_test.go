@@ -78,6 +78,11 @@ func TestDebugRealZone(t *testing.T) {
 		annealLabelCost, annealOrderCost = strings.Contains(v, "label"), strings.Contains(v, "order")
 		defer func() { annealLabelCost, annealOrderCost = oldL, oldO }()
 	}
+	if v := os.Getenv("PCBPILOT_ANNEAL_CAP"); v != "" {
+		old := annealFinishAttemptCap
+		fmt.Sscanf(v, "%d", &annealFinishAttemptCap)
+		defer func() { annealFinishAttemptCap = old }()
+	}
 	start := time.Now()
 	out, err := PlanSchematicLayout(in)
 	if err != nil {
