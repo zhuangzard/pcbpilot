@@ -175,14 +175,14 @@
       "desc": "22µF 25V X5R 0805 (LDO output)"
     },
     "led.red_0805": {
-      "value": "RED",
+      "value": "YELLOW",
       "mpn": "KT-0805Y",
       "lcsc": "C2296",
       "manufacturer": "Hubei KENTO",
       "deviceUuid": "06303f8c50b646d88d0dd08d2ec9692c",
       "footprint": "LED0805-R-RD",
       "basic": false,
-      "desc": "0805 indicator LED"
+      "desc": "0805 indicator LED — KT-0805Y is YELLOW despite the key name (kept for block compatibility); for red use LCSC C84256 Nationstar NCD0805R1 (same LED0805 footprint class; resolve its deviceUuid per site with lib by-lcsc)"
     },
     "ind.15uh_12x12mm": {
       "value": "15µH",
