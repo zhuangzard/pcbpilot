@@ -220,7 +220,13 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 				}
 				var mc *pcbauto.Mechanics
 				if mech != nil {
-					if mc, err = pcbauto.ApplyMech(b, mech); err != nil {
+					apply := pcbauto.ApplyMech
+					if !place {
+						// Route-only: the playbook moves no part, so the model
+						// must keep the measured poses.
+						apply = pcbauto.ApplyMechInPlace
+					}
+					if mc, err = apply(b, mech); err != nil {
 						return err
 					}
 				}
@@ -290,8 +296,14 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 						pcbauto.JointOptions{PlacementScore: -1, Overlaps: overlaps})
 					fmt.Fprintf(stderr, "joint score %.1f (completion ×%.2f, quality %.0f)\n", rep.Joint.Overall, rep.Joint.CompletionFactor, rep.Joint.Quality)
 					s := rep.Result.Route.Stats
-					fmt.Fprintf(stderr, "routing: %d layers, %.1f%% (%d/%d), vias %d+%d fan-out, DRC violations %d, %.1fs\n",
-						rep.Result.Stackup.Layers, s.Completion, s.Routed, s.Connections, s.Vias, s.FanoutVias,
+					// Signal completion alone read "100%" while two +5V plane
+					// connections were open (ESP32 E2E): report both.
+					plane := ""
+					if j := rep.Joint; j.PlanePads > 0 {
+						plane = fmt.Sprintf(", plane connections %d/%d", j.PlanePads-j.PlaneOpen, j.PlanePads)
+					}
+					fmt.Fprintf(stderr, "routing: %d layers, signal %.1f%% (%d/%d)%s, vias %d+%d fan-out, DRC violations %d, %.1fs\n",
+						rep.Result.Stackup.Layers, s.Completion, s.Routed, s.Connections, plane, s.Vias, s.FanoutVias,
 						len(rep.Result.DRC.Violations), float64(s.Millis)/1000)
 				}
 				pb := pcbauto.BuildPlaybook(pcbauto.PlaybookInput{Board: b, Original: original, Result: rep.Result, Placement: rep.Placement,

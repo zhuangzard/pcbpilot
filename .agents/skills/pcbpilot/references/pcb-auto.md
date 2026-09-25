@@ -238,3 +238,16 @@ pcbpilot pcb check --project <工程>
 - 收尾：`project export` 导出 `.epro2` 备份（916515 字节，ZIP 校验通过；曾因 CLI 响应 1 MiB 上限截断报
   “unexpected end of JSON input”，上限已改 32 MiB），随后 `pcb clear --no-preserve-outline` 与两页 `sch clear`，重载后均为空。
 
+
+**同板 E2E 复盘 F6/F7（2026-09-25，离线重放现场 dump r2/r4）** — 引擎修复 `offline-verified`，现场待下一轮
+- F6：默认栅格报“100% (30/30)”但 DRC 1、+5V 两条平面连接未接通。原因 ① 安装孔栅格禁区只封 `Dia/2+Keep`，
+  少了另一半间距，D1.1 的 +5V 扇出孔落进 M3 保持环 2.6 mil，终检又把整条 +5V 桥接一起删掉；② USB 焊盘 pad-track
+  差 0.06 mil 时微修沿“违规点→焊盘中心”方向移，细长焊盘上几乎平行于边，移不开。修法：禁区补 `Clearance/2`；
+  终检中扇出孔/短线违规先在同焊盘周边换位（每个候选用精确 DRC 复核），换不成才报 `fanout-drc`，不再拆网；
+  微修按违规双方精确最近点的法向移动（顶点 / 整段 / 锚定端外侧摆动），过孔同样可微移（同网线端跟随）。
+  CLI 顶行改为 `signal x% (a/b), plane connections c/d`，report.md 分列“信号布通率 / 平面/地连接”。
+- F7：`pcb check` 报 via–U1.36 5.96 < 5.98 mil 而引擎 DRC 0。原因不是距离算法，而是 `--mech` 的 edge 吸边在模型里把
+  U1 移了 0.05 mil，剧本（无 `--place`）不搬器件，引擎按不存在的位置布线。修法：不带 `--place` 时 mech 固定/贴边件
+  保持实测位姿（`ApplyMechInPlace`，偏差 >0.5 mil 只记 note）。
+- 离线重放：r2 默认栅格 DRC 0、0 未接通；r4 用现场 route2 铜重放，严格 DRC 检出 pad-via 5.95 mil，微修移孔 0.06 mil 后 0。
+  回归：`pkg/pcbauto/microfix_test.go`。

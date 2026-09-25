@@ -145,8 +145,12 @@ func (r *Report) WriteMarkdown(w io.Writer) {
 	if rr := res.Route; rr != nil {
 		s := rr.Stats
 		p("## 5. 布线\n\n| 指标 | 数值 |\n|---|---|\n")
-		p("| 布通率 | %.1f%%（%d/%d） |\n| 走线总长 | %.1f in |\n| 信号过孔 | %d |\n| 扇出过孔 | %d |\n| 协商迭代 | %d |\n| 等长调整 | %d 条 |\n| 栅格 | %.2f mil |\n| 耗时 | %.1f s |\n\n",
-			s.Completion, s.Routed, s.Connections, s.WireLengthIn, s.Vias, s.FanoutVias, s.Iterations, s.Tuned, s.GridMil, float64(s.Millis)/1000)
+		p("| 信号布通率 | %.1f%%（%d/%d） |\n", s.Completion, s.Routed, s.Connections)
+		if j := r.Joint; j != nil && j.PlanePads > 0 {
+			p("| 平面/地连接 | %d/%d 接通 |\n", j.PlanePads-j.PlaneOpen, j.PlanePads)
+		}
+		p("| 走线总长 | %.1f in |\n| 信号过孔 | %d |\n| 扇出过孔 | %d |\n| 协商迭代 | %d |\n| 等长调整 | %d 条 |\n| 栅格 | %.2f mil |\n| 耗时 | %.1f s |\n\n",
+			s.WireLengthIn, s.Vias, s.FanoutVias, s.Iterations, s.Tuned, s.GridMil, float64(s.Millis)/1000)
 		if d := res.DRC; d != nil {
 			if len(d.Violations) == 0 {
 				p("独立几何 DRC：**0 违规**。\n\n")
