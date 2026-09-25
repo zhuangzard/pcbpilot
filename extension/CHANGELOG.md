@@ -23,6 +23,9 @@ not yet live-verified on pcbpilot's connector). Requires a connector rebuild/re-
   refuse stale IDs against the live inventory with `PRECONDITION_REFUSED` before any write.
   CLI: an ok:true response with `partial` or `verified:false` from these four actions exits
   non-zero (raw JSON unchanged); `sch autoconnect` treats it as a non-retryable failure.
+- CLI: an unknown subcommand under a command group (`pcbpilot sch not-a-command`,
+  `pcbpilot pcb config typo`) now fails with exit 1 and "unknown command" instead of printing
+  help with exit 0; a bare group still prints help. Upstream bf355d7.
 
 ## [0.3.0] — 2026-09-25
 
