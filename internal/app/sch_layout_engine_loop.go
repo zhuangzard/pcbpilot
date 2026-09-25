@@ -59,7 +59,27 @@ func solveSchematicLayout(input SchematicLayoutInput, measured map[string]powerL
 		out, err := s.solve(p, pending)
 		*budget = rest + max(half, 0)
 		if err == nil {
-			return out, nil
+			// The search does not enforce the zone's peripheral-direct gate
+			// (the annealer does); a layout that names a decoupler's rail with
+			// a flag instead of wiring it would be rejected after solving.
+			// Treat that as a search failure and let the annealer try.
+			probe := input
+			probe.NetPolicies = map[string]string{}
+			for k, v := range input.NetPolicies {
+				probe.NetPolicies[k] = v
+			}
+			check := *out
+			if len(check.ComponentIDs) == 0 {
+				check.ComponentIDs = map[string]string{}
+				for id, m := range measured {
+					check.ComponentIDs[m.Designator] = id
+				}
+			}
+			if perr := validateSchematicLayoutPeripheralDirect(&check, input.CoreComponentID, schematicMandatoryPeripheralSignalPolicies(&probe)); perr == nil {
+				return out, nil
+			} else {
+				err = perr
+			}
 		}
 		local := *budget
 		aout, aerr := solveSchematicLayoutAnneal(input, measured, members, hints, &local, routing)

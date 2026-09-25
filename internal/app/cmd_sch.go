@@ -1364,7 +1364,7 @@ pull fresh ids before any follow-up mutation on it.`,
 	// ── netflag ───────────────────────────────────────────────────────────
 	// schematic.netflag.create
 	{
-		var kind, net string
+		var kind, net, hostExperiment string
 		var x, y, rotation float64
 		c := &cobra.Command{
 			Use:   "netflag",
@@ -1392,6 +1392,9 @@ pull fresh ids before any follow-up mutation on it.`,
 				if cmd.Flags().Changed("rotation") {
 					payload["rotation"] = rotation
 				}
+				if hostExperiment != "" {
+					payload["hostExperiment"] = hostExperiment
+				}
 				return dispatch(cfg, "schematic.netflag.create", window, payload, stdout, stderr)
 			},
 		}
@@ -1400,6 +1403,7 @@ pull fresh ids before any follow-up mutation on it.`,
 		c.Flags().Float64Var(&x, "x", 0, "X coordinate")
 		c.Flags().Float64Var(&y, "y", 0, "Y coordinate")
 		c.Flags().Float64Var(&rotation, "rotation", 0, "rotation in degrees")
+		c.Flags().StringVar(&hostExperiment, "host-experiment", "", "audited opt-in for an unverified host path; only v3-net-label (native net_label on a V3 host) exists")
 		sch.AddCommand(c)
 	}
 

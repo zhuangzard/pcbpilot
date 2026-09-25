@@ -243,7 +243,12 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	req.CreatedAt = time.Now().UTC()
 	req.WindowID = target.id()
 	if protocol.UsesNativeNetLabel(req.Action, req.Payload) {
-		if err := protocol.NativeNetLabelSupport(target.snapshot().EasyEDAVersion); err != nil {
+		// V3 3.2.149 exposes createNetLabel (api probe); upstream recorded hangs.
+		// An explicit, audited experiment may try it on a V3 host; the default
+		// stays refused until the experiment is live-verified.
+		experiment, _ := req.Payload["hostExperiment"].(string)
+		v3Experiment := experiment == "v3-net-label" && protocol.ParseHostProfile(target.snapshot().EasyEDAVersion).Line == "v3"
+		if err := protocol.NativeNetLabelSupport(target.snapshot().EasyEDAVersion); err != nil && !v3Experiment {
 			resp := errorResponse(req.ID, "HOST_API_UNSUPPORTED", "native net_label is unavailable on this host", err.Error())
 			s.audit.Append(fromResponse(time.Now().UTC(), &req, &resp))
 			writeJSON(w, http.StatusUnprocessableEntity, resp)

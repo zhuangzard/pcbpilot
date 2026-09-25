@@ -3997,3 +3997,12 @@ test('system.api.probe reports typeof without calling anything', async () => {
 		delete (globalThis as any).eda;
 	}
 });
+
+import { netLabelAnchor } from './actions';
+
+test('V3 wire-name label anchor keeps the text on the lead, ending at its free end', () => {
+	assert.deepEqual(netLabelAnchor('left', 100, 50, 30), { x: 100, y: 50 });
+	assert.deepEqual(netLabelAnchor('right', 100, 50, 30), { x: 70, y: 50 });
+	assert.deepEqual(netLabelAnchor('up', 100, 50, 30), { x: 100, y: 20 });
+	assert.deepEqual(netLabelAnchor('down', 100, 50, 30), { x: 100, y: 50 });
+});

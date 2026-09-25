@@ -4648,7 +4648,16 @@ const schematicExportImage: Handler = async (payload) => {
 	catch { /* selection read is advisory */ }
 	if (ids && ids.length && selected.length) {
 		const want = new Set(ids);
-		const extra = selected.filter(id => !want.has(id) && !ids.some(p => id.startsWith(`${p}-`)));
+		const extra: Array<string> = [];
+		for (const id of selected) {
+			if (want.has(id) || ids.some(p => id.startsWith(`${p}-`))) continue;
+			// A requested primitive's own attributes (a wire's Name label, a
+			// part's Designator) come along with it; anything else is refused.
+			let parent = '';
+			try { parent = (await eda.sch_PrimitiveAttribute.get(id))?.getState_ParentPrimitiveId?.() ?? ''; }
+			catch { /* not an attribute */ }
+			if (!want.has(parent)) extra.push(id);
+		}
 		if (extra.length) {
 			throw new ActionError(ErrorCodes.INVALID_STATE, `Selection holds ${extra.length} primitive(s) beyond the requested ids (${extra.slice(0, 5).join(', ')}); refusing to export them.`);
 		}
@@ -7680,7 +7689,7 @@ const schematicPowerConnectPin: Handler = async (payload) => {
 	// occupies the endpoint) — so retry ONCE after a short settle before failing,
 	// and include the exact endpoint in the terminal error so the caller can
 	// inspect what occupies it.
-	let wire;
+	let wire: Awaited<ReturnType<typeof eda.sch_PrimitiveWire.create>>;
 	let wireErr: unknown;
 	for (let attempt = 0; attempt < 2 && !wire; attempt++) {
 		if (attempt > 0) await new Promise((r) => setTimeout(r, 250));
@@ -7708,7 +7717,7 @@ const schematicPowerConnectPin: Handler = async (payload) => {
 	// (issue #137): a half-built stub (wire without its flag) is an orphan-stub the
 	// caller has no id for, and the next retry plans around the debris.
 	const rollbackWire = async () => {
-		try { await deleteSchGroup('wires', [wire.getState_PrimitiveId()]); }
+		try { if (wire) await deleteSchGroup('wires', [wire.getState_PrimitiveId()]); }
 		catch { /* best-effort — bridge-check's orphan-stub rule is the backstop */ }
 	};
 	let flag;
@@ -7730,11 +7739,31 @@ const schematicPowerConnectPin: Handler = async (payload) => {
 			);
 		}
 		else if (kind === NET_LABEL_KIND) {
-			flag = await withTimeout(
-				Promise.resolve(eda.sch_PrimitiveAttribute.createNetLabel(endX, endY, net)),
-				CONNECT_PIN_OP_TIMEOUT_MS,
-				`Netlabel create did not settle within ${CONNECT_PIN_OP_TIMEOUT_MS}ms — rolling back the stub wire.`,
-			);
+			flag = typeof eda.sch_PrimitiveAttribute.createNetLabel === 'function'
+				? await withTimeout(
+					Promise.resolve(eda.sch_PrimitiveAttribute.createNetLabel(endX, endY, net)),
+					CONNECT_PIN_OP_TIMEOUT_MS,
+					`Netlabel create did not settle within ${CONNECT_PIN_OP_TIMEOUT_MS}ms — rolling back the stub wire.`,
+				)
+				: undefined;
+			if (!flag) {
+				// V3 (3.2.149 measured 2026-09-25): createNetLabel exists but returns
+				// undefined. A net label there IS the wire's visible "Name"
+				// attribute: rebuild the stub with the net name and move that
+				// attribute to the planned text start so the name rides on the
+				// lead (text reads +x above a horizontal wire, +y left of a
+				// vertical one; see netLabelTextBand in the CLI).
+				await rollbackWire();
+				const named = await eda.sch_PrimitiveWire.create([pinGX, pinGY, endX, endY], net);
+				if (!named) throw new ActionError(ErrorCodes.EDA_CALL_FAILED, 'Named stub wire creation returned no primitive (net label fallback).');
+				wire = named;
+				const attrs = await eda.sch_PrimitiveAttribute.getAll(named.getState_PrimitiveId());
+				const name = attrs.find(a => a.getState_Key() === 'Name' && a.getState_Value() === net);
+				if (!name) throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `Named stub wire has no visible Name attribute for ${net}.`);
+				const textLen = 5.2 * net.length + 1;
+				const anchor = netLabelAnchor(direction, endX, endY, textLen);
+				flag = await eda.sch_PrimitiveAttribute.modify(name, { x: anchor.x, y: anchor.y, valueVisible: true }) ?? name;
+			}
 		}
 		else {
 			throw new ActionError(
@@ -7765,6 +7794,16 @@ const schematicPowerConnectPin: Handler = async (payload) => {
 		},
 	};
 };
+
+// netLabelAnchor: the text start of a V3 wire-name label so the text lies on
+// the lead, ending at its free end (mirror of the CLI's netLabelTextBand).
+export function netLabelAnchor(direction: string, endX: number, endY: number, textLen: number): { x: number; y: number } {
+	switch (direction) {
+		case 'right': return { x: endX - textLen, y: endY };
+		case 'up': return { x: endX, y: endY - textLen };
+		default: return { x: endX, y: endY }; // left, down: text runs back toward the pin
+	}
+}
 
 // ─── schematic.pin.disconnect ────────────────────────────────────────
 // Symmetric inverse of schematic.power.connect_pin. connect_pin builds a

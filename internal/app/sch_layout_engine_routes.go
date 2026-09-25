@@ -332,7 +332,11 @@ func libVisitMarkerAt(p *powerLayoutPlan, q powerLayoutPin, kind string, directi
 	if e != nil {
 		return false
 	}
-	for offset := 10.0; offset <= cap; offset += 5 {
+	start := 10.0
+	if kind == "net_label" {
+		start = netLabelMinLead(q.Net) // the name rides on the lead
+	}
+	for offset := start; offset <= cap; offset += 5 {
 		seen := map[string]bool{}
 		for _, direction := range directions {
 			if seen[direction] {

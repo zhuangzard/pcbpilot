@@ -421,7 +421,7 @@ func (s *annealSolver) cost(st annealState) (float64, bool) {
 			case "module_port", "local_ground", "local_power":
 				l = 35
 			case "net_label":
-				l = 20
+				l = netLabelMinLead(pin.Net)
 			}
 			l += s.leadBoost[c.Designator+"."+pin.Number]
 			side, err := libPinSide(pin, c.BBox)

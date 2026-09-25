@@ -1085,24 +1085,32 @@ func applyLaneStagger(all []acCandidate, lanes map[string]float64,
 	return best
 }
 
-// netLabelTextBand: the name of a net label, drawn from the lead end outward.
-// ESTIMATE (2026-09-24) until measured on the host: 4.5 raw per character
-// (+2) along the lead - designators measure ~3 raw per character at 8 raw
-// height, so this is conservative - and 8 raw across, on the upper/left side
-// of the lead. Across the lead it fits a 10-raw pin pitch with 2 raw to spare,
-// which is why same-sheet signals use labels instead of 11-raw port bodies.
+// netLabelTextBand: the name of a net label. MEASURED on EasyEDA Pro 3.2.149
+// (2026-09-25): a net label is the wire's visible "Name" attribute - Arial
+// 7.15 raw, sitting ON the wire (above a horizontal wire, left of a vertical
+// one, which is drawn rotated -90), written from its anchor towards +x / +y.
+// The layout places the text on the lead itself, ending at the lead's free
+// end, so the lead must be at least netLabelMinLead long; Apply moves the
+// Name attribute to the text start. Width: 5.2 raw per character (Arial
+// capitals at 7.15 are 4.0-5.6), height 7.2.
 func netLabelTextBand(x, y float64, direction, net string) *layoutBBox {
-	l := 4.5*float64(len(net)) + 2
-	const h, gap = 8.0, 1.0 // text sits 1 raw off its own lead
+	l := netLabelTextLen(net)
+	const h = 7.2
 	switch direction {
-	case "left":
-		return &layoutBBox{MinX: x - l, MinY: y + gap, MaxX: x, MaxY: y + gap + h}
+	case "left": // free end at x, pin to the right: text [x, x+l] above the wire
+		return &layoutBBox{MinX: x, MinY: y, MaxX: x + l, MaxY: y + h}
 	case "right":
-		return &layoutBBox{MinX: x, MinY: y + gap, MaxX: x + l, MaxY: y + gap + h}
-	case "up":
-		return &layoutBBox{MinX: x - gap - h, MinY: y, MaxX: x - gap, MaxY: y + l}
+		return &layoutBBox{MinX: x - l, MinY: y, MaxX: x, MaxY: y + h}
+	case "up": // vertical text reads upwards, left of the wire
+		return &layoutBBox{MinX: x - h, MinY: y - l, MaxX: x, MaxY: y}
 	case "down":
-		return &layoutBBox{MinX: x - gap - h, MinY: y - l, MaxX: x - gap, MaxY: y}
+		return &layoutBBox{MinX: x - h, MinY: y, MaxX: x, MaxY: y + l}
 	}
 	return nil
 }
+
+func netLabelTextLen(net string) float64 { return 5.2*float64(len(net)) + 1 }
+
+// netLabelMinLead: the shortest lead that carries the whole name clear of the
+// pin (text plus 2 raw), on the 5-raw grid.
+func netLabelMinLead(net string) float64 { return math.Ceil((netLabelTextLen(net)+2)/5) * 5 }
