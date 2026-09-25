@@ -171,8 +171,15 @@ fi
 EEXT=""
 if have node && have npm && [ "$MODE" = source ]; then
   say "Building the connector .eext at the repo version"
-  run make -C "$REPO" connector
-  EEXT="$(ls -t "$REPO"/extension/build/dist/pcbpilot-connector_v*.eext 2>/dev/null | head -1 || true)"
+  if [ ! -d "$REPO/extension/node_modules" ]; then
+    run npm --prefix "$REPO/extension" ci --no-audit --no-fund
+  fi
+  if run make -C "$REPO" connector; then
+    EEXT="$(ls -t "$REPO"/extension/build/dist/pcbpilot-connector_v*.eext 2>/dev/null | head -1 || true)"
+  else
+    warn "connector build failed — use the release .eext instead"
+    EEXT="https://github.com/zhuangzard/pcbpilot/releases/latest (pcbpilot-connector.eext)"
+  fi
 else
   EEXT="https://github.com/zhuangzard/pcbpilot/releases/latest (pcbpilot-connector.eext)"
 fi
