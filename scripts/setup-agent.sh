@@ -187,9 +187,14 @@ fi
 CONN_VER="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$REPO/extension/extension.json" | head -1)"
 
 # 5. Daemon (login service) + health --------------------------------------------
+# A daemon already answering (e.g. `make dev`, or one started by hand) is left
+# running; the login service is still written so the next login starts one —
+# skipping it outright left machines with no daemon after a reboot.
+RUNNING=0
 if [ "$DRY" = 0 ] && "$PCB" daemon health >/dev/null 2>&1; then
-  say "A pcbpilot daemon is already running — left as is"
-elif [ "$SERVICE" = 1 ] && [ "$(uname)" = Darwin ]; then
+  RUNNING=1; say "A pcbpilot daemon is already running — left as is (service installed for next login)"
+fi
+if [ "$SERVICE" = 1 ] && [ "$(uname)" = Darwin ]; then
   PL="$HOME/Library/LaunchAgents/com.pcbpilot.daemon.plist"
   say "Installing the daemon login service ($PL)"
   if [ "$DRY" = 1 ]; then
@@ -208,8 +213,10 @@ elif [ "$SERVICE" = 1 ] && [ "$(uname)" = Darwin ]; then
   <key>StandardErrorPath</key><string>$HOME/.pcbpilot/daemon.log</string>
 </dict></plist>
 PLIST
-    launchctl bootout "gui/$(id -u)/com.pcbpilot.daemon" >/dev/null 2>&1 || true
-    launchctl bootstrap "gui/$(id -u)" "$PL" || warn "launchctl bootstrap failed — start manually: $PCB daemon start"
+    if [ "$RUNNING" = 0 ]; then
+      launchctl bootout "gui/$(id -u)/com.pcbpilot.daemon" >/dev/null 2>&1 || true
+      launchctl bootstrap "gui/$(id -u)" "$PL" || warn "launchctl bootstrap failed — start manually: $PCB daemon start"
+    fi
   fi
 elif [ "$SERVICE" = 1 ] && have systemctl; then
   UNIT="$HOME/.config/systemd/user/pcbpilot-daemon.service"
@@ -219,9 +226,10 @@ elif [ "$SERVICE" = 1 ] && have systemctl; then
   else
     mkdir -p "$(dirname "$UNIT")"
     printf '[Unit]\nDescription=pcbpilot daemon\n\n[Service]\nExecStart=%s daemon start\nRestart=on-failure\n\n[Install]\nWantedBy=default.target\n' "$PCB" > "$UNIT"
-    systemctl --user daemon-reload && systemctl --user enable --now pcbpilot-daemon || warn "systemd --user failed — start manually: $PCB daemon start"
+    NOW="--now"; [ "$RUNNING" = 1 ] && NOW=""
+    systemctl --user daemon-reload && systemctl --user enable $NOW pcbpilot-daemon || warn "systemd --user failed — start manually: $PCB daemon start"
   fi
-else
+elif [ "$RUNNING" = 0 ]; then
   say "Starting the daemon in the background (log: ~/.pcbpilot/daemon.log)"
   if [ "$DRY" = 1 ]; then printf '   $ nohup %s daemon start &\n' "$PCB"; else
     mkdir -p "$HOME/.pcbpilot"; nohup "$PCB" daemon start >> "$HOME/.pcbpilot/daemon.log" 2>&1 &
