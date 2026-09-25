@@ -118,14 +118,22 @@ func FromSnapshot(raw []byte) (*Board, error) {
 			p.SetBody(Rect{c.BBox.MinX, c.BBox.MinY, c.BBox.MaxX, c.BBox.MaxY})
 		} else if c.BBox != nil && c.BBox.MaxX > c.BBox.MinX {
 			// The rendered bbox includes silk; shrink toward the pads so the
-			// courtyard is not ~40% oversized.
+			// courtyard is not ~40% oversized — by half the gap, but never more
+			// than a silk margin per side: a pad-free end is body, not silk.
+			// Halving it cut an ESP32-S3-WROOM-1's 300 mil antenna end to
+			// 159 mil, so the "flush" module hung 3.5 mm off the board edge and
+			// its antenna keep-out sat 140 mil short.
 			bb := Rect{c.BBox.MinX, c.BBox.MinY, c.BBox.MaxX, c.BBox.MaxY}
 			pads := EmptyRect()
 			for _, pd := range p.Pads {
 				pads = pads.Union(pd.Box.Bounds())
 			}
 			if !pads.Empty() {
-				bb = Rect{(bb.MinX + pads.MinX) / 2, (bb.MinY + pads.MinY) / 2, (bb.MaxX + pads.MaxX) / 2, (bb.MaxY + pads.MaxY) / 2}
+				// gap > 0: silk/body beyond the pads (shrink ≤ margin);
+				// gap < 0: a pad beyond the bbox (grow halfway, as before).
+				in := func(gap float64) float64 { return math.Min(gap/2, silkMarginMil) }
+				bb = Rect{bb.MinX + in(pads.MinX-bb.MinX), bb.MinY + in(pads.MinY-bb.MinY),
+					bb.MaxX - in(bb.MaxX-pads.MaxX), bb.MaxY - in(bb.MaxY-pads.MaxY)}
 			}
 			p.SetBody(bb)
 		}
@@ -159,6 +167,10 @@ func FromSnapshot(raw []byte) (*Board, error) {
 	}
 	return b, nil
 }
+
+// silkMarginMil caps how far the rendered bbox is shrunk toward the pads on
+// each side (silk outline + line width).
+const silkMarginMil = 20.0
 
 // padSized reports whether the snapshot gives the pad a real size.
 func padSized(sp snapPad) bool {
@@ -197,7 +209,7 @@ func snapPadToPad(sp snapPad) *Pad {
 // regionKeepout converts a pcb.region.list record. EasyEDA rule types:
 // 2 no-components, 5 no-wires, 6 no-fills, 7 no-pours, 8 no-inner-electrical.
 func regionKeepout(r map[string]any) *Keepout {
-	k := &Keepout{Name: str(r["name"])}
+	k := &Keepout{Name: str(r["name"]), ID: str(r["primitiveId"])}
 	if rules, ok := r["ruleType"].([]any); ok {
 		for _, v := range rules {
 			switch int(num(v)) {

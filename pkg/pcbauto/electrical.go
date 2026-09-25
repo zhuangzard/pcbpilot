@@ -373,7 +373,10 @@ func Analyze(b *Board, spec PowerSpec, stack *Stackup) *Analysis {
 				np.Voltage = rail.Voltage
 			}
 			np.CurrentA = rail.CurrentA
-			if np.Role != RoleGround {
+			// Declaring a switch node's current sizes its copper; it stays a
+			// switch node (never a plane net, kept short) — declaring LX as a
+			// rail once put the buck's SW node into the IN2 power plane.
+			if np.Role != RoleGround && np.Role != RoleSwitch {
 				np.Role = RolePower
 			}
 			if rail.Plane != nil {

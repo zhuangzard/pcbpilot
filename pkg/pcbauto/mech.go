@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"regexp"
 	"strings"
 )
 
@@ -48,6 +49,10 @@ type MechSpec struct {
 		MaxHeight float64    `json:"maxHeight"`
 	} `json:"heightZones,omitempty"`
 	Zones []MechZone `json:"zones,omitempty"`
+	// AntennaClearance (spec units) widens the automatic keep-out over an
+	// edge/fixed RF module's antenna end on both lateral sides; default 3 mm.
+	// Negative disables the automatic keep-out.
+	AntennaClearance float64 `json:"antennaClearance,omitempty"`
 }
 
 // MechHole is a mounting hole.
@@ -243,7 +248,67 @@ func ApplyMech(b *Board, m *MechSpec) (*Mechanics, error) {
 		out.Edge[e.Ref] = e
 		out.Fixed[e.Ref] = true
 	}
+	if m.AntennaClearance >= 0 {
+		lat := m.AntennaClearance * k
+		if m.AntennaClearance == 0 {
+			lat = 3 / 0.0254
+		}
+		for _, p := range b.Parts {
+			if !reAntennaModule.MatchString(p.Device) {
+				continue
+			}
+			if !p.Fixed {
+				out.Notes = append(out.Notes, fmt.Sprintf("%s: RF module is not edge/fixed — its antenna keep-out cannot follow a moving part; put it on an edge", p.Ref))
+				continue
+			}
+			if kp := antennaKeepout(p, lat); kp != nil {
+				b.Keepouts = append(b.Keepouts, kp)
+			}
+		}
+	}
 	return out, nil
+}
+
+// reAntennaModule matches modules with an integrated PCB antenna at one end
+// (the same allowlist as `pcb check` / `pcb antenna-keepout`).
+var reAntennaModule = regexp.MustCompile(`(?i)(WROOM|WROVER|ESP32-C\d-MINI|ESP8266|ESP-\d\d)`)
+
+// antennaKeepout is the no-parts/no-copper region over a module's pad-free
+// end of its long axis, pulled 40 mil back from the pad centres and widened
+// by lat on both lateral sides (20 mil past the outer end). The module owns it.
+func antennaKeepout(p *Part, lat float64) *Keepout {
+	const padClear, outer = 40.0, 20.0
+	bd := p.Body()
+	alongY := bd.H() >= bd.W()
+	lo, hi := math.Inf(1), math.Inf(-1)
+	for _, pd := range p.Pads {
+		v := pd.Box.C.X
+		if alongY {
+			v = pd.Box.C.Y
+		}
+		lo, hi = math.Min(lo, v), math.Max(hi, v)
+	}
+	if math.IsInf(lo, 1) {
+		return nil
+	}
+	var r Rect
+	if alongY {
+		if bd.MaxY-hi >= lo-bd.MinY {
+			r = Rect{bd.MinX - lat, hi + padClear, bd.MaxX + lat, bd.MaxY + outer}
+		} else {
+			r = Rect{bd.MinX - lat, bd.MinY - outer, bd.MaxX + lat, lo - padClear}
+		}
+	} else {
+		if bd.MaxX-hi >= lo-bd.MinX {
+			r = Rect{hi + padClear, bd.MinY - lat, bd.MaxX + outer, bd.MaxY + lat}
+		} else {
+			r = Rect{bd.MinX - outer, bd.MinY - lat, lo - padClear, bd.MaxY + lat}
+		}
+	}
+	if r.W() <= 1 || r.H() <= 1 {
+		return nil
+	}
+	return &Keepout{Name: "antenna " + p.Ref, Poly: r.Corners(), NoCopper: true, NoParts: true, NoVias: true, Owner: p.Ref}
 }
 
 // RoundedRect returns a rectangle outline with corner arcs approximated by
@@ -323,6 +388,9 @@ func PlaceOnEdge(b *Board, p *Part, e MechEdge) error {
 	for _, rot := range []float64{0, 90, 180, 270} {
 		p.MoveTo(p.Pos, rot)
 		f := Facing(p)
+		if p.Opening != (Point{}) {
+			f = p.Opening.Rotate(rot)
+		}
 		body := p.Body()
 		score := f.X*out.X + f.Y*out.Y
 		if f.X == 0 && f.Y == 0 {

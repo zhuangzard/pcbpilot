@@ -142,3 +142,28 @@ pcbpilot pcb check --project <工程>
   Connection Error 先 `pcb pour-rebuild`（见 [pcb-routing.md](pcb-routing.md)）。
 - 未布通项在报告与预览中列出，不得用 GUI 手工补线；调整 mech/power/层数后重算。
 - 引擎结果是离线几何证明，最终以 EasyEDA 原生 DRC 和保存重载后的回读为准。
+- **重排用 `--replace <上一版 journal>`**：剧本创建的孔（MULTI fill）和区域会把 `primitiveId` 捕获进
+  apply journal（`MECH_FILL_*` / `MECH_REGION_*`）；下一版 `pcb auto run --replace out-prev/playbook.json.journal.jsonl`
+  会在写新机械件前只删除这些 ID，不会叠出第二套孔和禁布区（2026-09-25 连续两次重排现场验证：始终 4 孔 7 区域）。
+  没有 journal 的旧剧本只能按其 `pcb.fill.create` / `pcb.region.create` 的**精确几何**逐个比对后 `--ids` 删除，
+  不要用 bbox 阈值去猜（同日用 `minY>1400` 过滤误删了一个 M3 孔禁布区，随后按剧本同一步参数补回）。
+- 天线等**有主**禁布区（`owner`）写入时拆成：整块 `no-wires,no-pours` + 主器件两侧的
+  `no-components` 条带（按主器件本体外扩 20 mil 丝印余量）。EasyEDA 区域不能豁免器件，整块
+  `no-components` 会让模块自己报 “Device to Prohibited Region”。
+
+## 实测记录
+
+**2026-09-25 ESP32-S3 mini（esp32MiniRequire 第一节，桌面 V3 3.2.149，ceshi PCB1）** — `live-verified`（Layout 阶段）
+
+- 开始状态：`pcb import-changes` 后 30 件散布、无板框；逐焊盘对账 0 差异。
+- 输入：`mech.json`（autoSize、M3 角孔、U3 贴上边、J2 贴下边外伸 0.5 mm、J1 贴左边）、`power.json`
+  （USB_VBUS 1.5 A、+5V_TERM 2 A、VSYS_5V 1 A、LX 1.5 A、+3V3 0.8 A、USB 差分 90 Ω）、
+  `--groups` 两页原理图 composition、`--layers 4`。
+- 结果：板框搜索 43.5 × 43 mm；0 重叠/出板/禁布；去耦平均 71 mil；J1 进线口朝外（块库开口声明）；
+  U3 天线端贴边且两侧 3 mm 无器件；save→reload 后 30 件位姿、7 区域、4 孔与剧本逐项一致，
+  `semanticSha256` 两轮相同；原生 DRC 只剩未布线 Connection Error；`pcb check` 仅丝印（P9）与铺铜（P8）WARN。
+- 本轮修掉的引擎缺陷（均有 `pkg/pcbauto/autoframe_test.go` 等回归）：autoSize 以导入散布为框、孔落板外；
+  共享电源轨上 buck 输出电容被分给 CH340/模块（→ `--groups`）；OR 二极管无归属；声明电流的 LX
+  进了电源平面；对称端子进线口朝内；快照本体把 WROOM 天线端砍半（模块伸出板边 3.5 mm）；
+  天线禁布区让模块自报 DRC；重载后 270° 读成 -90.00000000000001°（dump 归一化）；`pcb check`
+  把 buck 输出电容当作远离 IC 的去耦。

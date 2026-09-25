@@ -496,6 +496,7 @@ func parseBoardComponents(result map[string]any) []boardComp {
 		c.X, _ = asFloatOK(cm["x"])
 		c.Y, _ = asFloatOK(cm["y"])
 		c.Rotation, _ = asFloatOK(cm["rotation"])
+		c.Rotation = snapRotation(c.Rotation)
 		c.Locked, _ = cm["locked"].(bool)
 		if bb, ok := cm["bbox"].(map[string]any); ok {
 			minX, ok1 := asFloatOK(bb["minX"])
@@ -527,6 +528,7 @@ func parseBoardComponents(result map[string]any) []boardComp {
 				p.W, _ = asFloatOK(pm["width"])
 				p.H, _ = asFloatOK(pm["height"])
 				p.Rotation, _ = asFloatOK(pm["rotation"])
+				p.Rotation = snapRotation(p.Rotation)
 				if v, ok := asFloatOK(pm["padType"]); ok {
 					p.PadType = int(v)
 				}
@@ -794,4 +796,19 @@ func loadBoardSnapshotFile(r io.Reader) (*boardSnapshot, error) {
 	// 坏 polygon 可能已经落在旧 dump 里 —— 回放路径同样要过护栏。
 	snap.sanitizeOutline()
 	return &snap, nil
+}
+
+// snapRotation normalizes a host rotation to [0,360) and strips float noise
+// (1e-6°). A 270° part reads back as -90.00000000000001 after save + reload
+// on EasyEDA Pro 3.2.149: the same pose, but raw comparisons of before/after
+// dumps flagged six unchanged parts as moved. Sub-degree angles are kept.
+func snapRotation(d float64) float64 {
+	r := math.Round(math.Mod(d, 360)*1e6) / 1e6
+	if r < 0 {
+		r += 360
+	}
+	if r >= 360 {
+		r -= 360
+	}
+	return r
 }

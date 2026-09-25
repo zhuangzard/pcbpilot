@@ -18,6 +18,8 @@ type Report struct {
 	// Stage0 is the physical-feasibility assessment made before placement.
 	Stage0 *Feasibility `json:"stage0,omitempty"`
 	Loop   []LoopPass   `json:"loop,omitempty"`
+	// Frame is the autoSize frame search (mech board.autoSize with no size).
+	Frame *FrameSearch `json:"frame,omitempty"`
 }
 
 // WriteMarkdown renders the report in Chinese for the designer to review.
@@ -92,6 +94,12 @@ func (r *Report) WriteMarkdown(w io.Writer) {
 			}
 		}
 		writeLayoutBasis(p, c)
+		if len(c.Notes) > 0 {
+			p("\n电路理解备注（含原理图模块归属的采纳/保留）：\n\n")
+			for _, n := range c.Notes {
+				p("- %s\n", n)
+			}
+		}
 		writeConverters(p, c)
 		writeChains(p, c)
 		p("\n### 电压域与隔离\n\n")
@@ -121,6 +129,17 @@ func (r *Report) WriteMarkdown(w io.Writer) {
 			p("- %s\n", n)
 		}
 		p("\n")
+		if f := r.Frame; f != nil {
+			p("板框自动尺寸：%.1f × %.1f %s（从密到疏逐一试放，取无重叠/出板/禁布/压孔、且加权线长 ≤ 宽松参考框 %.1f in 的 115%%、关键辅助件（去耦/热回路/功率级/晶振/保护/电源路径）超出牵引距离 ≤ 参考 %.0f mil + max(150, 50%%) 的最小矩形）\n\n| 宽 | 高 | 长宽比 | 填充率 | 线长 in | 关键牵引超出 mil | 结果 |\n|---|---|---|---|---|---|---|\n", f.Width, f.Height, f.Units, f.RefWireIn, f.RefTetherMil)
+			for _, t := range f.Trials {
+				res := "可行"
+				if !t.Feasible {
+					res = t.Reason
+				}
+				p("| %.1f | %.1f | %.2f | %.0f%% | %.1f | %.0f | %s |\n", t.Width, t.Height, t.Aspect, t.Fill*100, t.WireIn, t.TetherMil, res)
+			}
+			p("\n")
+		}
 	}
 
 	if rr := res.Route; rr != nil {
@@ -181,7 +200,7 @@ func (r *Report) WriteMarkdown(w io.Writer) {
 
 var roleCN = map[string]string{
 	"decap": "去耦", "clock": "晶振", "clock-load": "晶振负载电容", "power-stage": "功率级",
-	"protection": "端口保护", "pull": "上下拉/偏置", "signal": "信号串联/滤波", "chain": "链上器件", "test": "测试点", "hot-loop": "热回路", "bootstrap": "自举", "feedback": "反馈分压", "unassigned": "未归属",
+	"protection": "端口保护", "pull": "上下拉/偏置", "signal": "信号串联/滤波", "chain": "链上器件", "test": "测试点", "power-path": "电源路径", "group": "模块成员", "hot-loop": "热回路", "bootstrap": "自举", "feedback": "反馈分压", "unassigned": "未归属",
 }
 
 // writeLayoutBasis lists, per core, which auxiliaries follow it, in what

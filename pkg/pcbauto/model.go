@@ -57,6 +57,9 @@ type Part struct {
 	Pads     []*Pad  `json:"pads"`
 	Fixed    bool    `json:"fixed,omitempty"` // mechanically constrained; placer must not move it
 	Height   float64 `json:"height,omitempty"`
+	// Opening is the declared direction of the plug face / wire entry in the
+	// footprint's rotation-0 frame (zero = unknown: inferred from the pads).
+	Opening Point `json:"opening,omitempty"`
 
 	body    Rect // body bounds relative to anchor at rotation 0
 	hasBody bool
@@ -188,6 +191,11 @@ type Keepout struct {
 	NoCopper bool    `json:"noCopper"`
 	NoParts  bool    `json:"noParts"`
 	NoVias   bool    `json:"noVias"`
+	// Owner is the part the keep-out protects (an RF module's own antenna
+	// end): it may sit inside its own keep-out.
+	Owner string `json:"owner,omitempty"`
+	// ID is the live region's primitiveId when read from a snapshot.
+	ID string `json:"id,omitempty"`
 }
 
 func (k *Keepout) onLayer(id int) bool {

@@ -1,0 +1,79 @@
+{
+ "groups": [
+  {
+   "id": "PWR_IN",
+   "members": [
+    "J1",
+    "D1",
+    "D2"
+   ]
+  },
+  {
+   "id": "BUCK",
+   "members": [
+    "U1",
+    "L1",
+    "R1",
+    "R2",
+    "C1",
+    "C2",
+    "C3"
+   ]
+  },
+  {
+   "id": "USB_CONN",
+   "members": [
+    "J2",
+    "R3",
+    "R4"
+   ]
+  },
+  {
+   "id": "UART",
+   "members": [
+    "U2",
+    "C4",
+    "D3"
+   ]
+  },
+  {
+   "id": "MCU",
+   "members": [
+    "U3",
+    "C5",
+    "C6",
+    "R5",
+    "C7",
+    "R6"
+   ]
+  },
+  {
+   "id": "LED",
+   "members": [
+    "R7",
+    "LED1"
+   ]
+  },
+  {
+   "id": "AUTODL",
+   "members": [
+    "Q1",
+    "R8",
+    "Q2",
+    "R9"
+   ]
+  },
+  {
+   "id": "KEY_BOOT",
+   "members": [
+    "SW1"
+   ]
+  },
+  {
+   "id": "KEY_RST",
+   "members": [
+    "SW2"
+   ]
+  }
+ ]
+}

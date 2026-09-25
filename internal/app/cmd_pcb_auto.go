@@ -39,6 +39,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 	}
 	type inputs struct {
 		board, mech, power string
+		groups             []string
 		layers, maxLayers  int
 		grid               float64
 		timeout            time.Duration
@@ -48,10 +49,27 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 		c.Flags().StringVar(&in.board, "board", "", "pcb dump JSON (omit to read the live editor)")
 		c.Flags().StringVar(&in.mech, "mech", "", "mechanical spec JSON (outline, holes, fixed/edge parts, keepouts, zones)")
 		c.Flags().StringVar(&in.power, "power", "", "power spec JSON (rails with voltage/currentA, diffPairs, tempRiseC)")
+		c.Flags().StringArrayVar(&in.groups, "groups", nil, "schematic module ownership (repeatable): a sch composition JSON (modules[].placements[].designator) or {\"groups\":[{id,core,members}]} — makes each module's parts follow its core; port protection stays at its connector")
 		c.Flags().IntVar(&in.layers, "layers", 0, "force the copper layer count (0 = decide)")
 		c.Flags().IntVar(&in.maxLayers, "max-layers", 6, "cost cap for the layer decision")
 		c.Flags().Float64Var(&in.grid, "grid", 0, "routing grid in mil (0 = derived from the rules)")
 		c.Flags().DurationVar(&in.timeout, "timeout", 4*time.Minute, "routing time budget")
+	}
+	// understand infers the circuit and applies schematic module ownership.
+	understand := func(b *pcbauto.Board, an *pcbauto.Analysis) (*pcbauto.Circuit, error) {
+		c := pcbauto.Understand(b, an)
+		for _, f := range in.groups {
+			raw, err := os.ReadFile(f)
+			if err != nil {
+				return nil, err
+			}
+			gs, err := pcbauto.ParseGroups(raw)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", f, err)
+			}
+			c.Notes = append(c.Notes, pcbauto.ApplyGroups(c, b, an, gs)...)
+		}
+		return c, nil
 	}
 	load := func() (*pcbauto.Board, *pcbauto.MechSpec, pcbauto.PowerSpec, error) {
 		var power pcbauto.PowerSpec
@@ -72,6 +90,14 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 		b, err := pcbauto.FromSnapshot(raw)
 		if err != nil {
 			return nil, nil, power, err
+		}
+		// Block-declared connector openings: a symmetric screw terminal's
+		// wire entry is not in its pads (the ESP32 demo's KF301 went on the
+		// left edge with its entry facing inward).
+		for _, p := range b.Parts {
+			if x, y, ok := connOpeningFor(p.Device); ok {
+				p.Opening = pcbauto.Point{X: x, Y: y}
+			}
 		}
 		var mech *pcbauto.MechSpec
 		if in.mech != "" {
@@ -118,7 +144,11 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 				pre := pcbauto.Analyze(b, power, nil)
 				st := pcbauto.DecideStackup(b, pre, pcbauto.StackOptions{Force: in.layers, MaxLayers: in.maxLayers})
 				an := pcbauto.Analyze(b, power, st)
-				rep := &pcbauto.Report{Result: &pcbauto.Result{Analysis: an, Stackup: st}, Circuit: pcbauto.Understand(b, an), Mechanics: mc}
+				circ, err := understand(b, an)
+				if err != nil {
+					return err
+				}
+				rep := &pcbauto.Report{Result: &pcbauto.Result{Analysis: an, Stackup: st}, Circuit: circ, Mechanics: mc}
 				if asJSON {
 					enc := json.NewEncoder(stdout)
 					enc.SetIndent("", "  ")
@@ -135,7 +165,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 
 	// ── run ──────────────────────────────────────────────────────────────
 	{
-		var outDir string
+		var outDir, replaceJournal string
 		var place, noRoute, refine bool
 		var seed int64
 		var loops int
@@ -161,16 +191,43 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 				for _, p := range b.Parts {
 					original[p.Ref] = pcbauto.Placement{Ref: p.Ref, ID: p.ID, X: p.Pos.X, Y: p.Pos.Y, Rot: p.Rotation, Side: p.Side}
 				}
+				var replace pcbauto.MechReplace
+				if replaceJournal != "" {
+					raw, err := os.ReadFile(replaceJournal)
+					if err != nil {
+						return err
+					}
+					replace = pcbauto.MechFromJournal(raw)
+					dh, dk := pcbauto.DropReplaced(b, replace)
+					fmt.Fprintf(stderr, "replace: %d hole fill(s) and %d region(s) captured in %s are deleted first (%d holes, %d keep-outs dropped from the board model)\n",
+						len(replace.Fills), len(replace.Regions), replaceJournal, dh, dk)
+				}
 				holesBefore, keepBefore := len(b.Holes), len(b.Keepouts)
+				var frame *pcbauto.FrameSearch
+				if place && pcbauto.NeedsAutoFrame(mech) {
+					// autoSize without a size: search the smallest frame the
+					// placer fills cleanly, then run as a fixed-size board.
+					fa := pcbauto.Analyze(b, power, nil)
+					fc, err := understand(b, fa)
+					if err != nil {
+						return err
+					}
+					if mech, frame, err = pcbauto.AutoFrame(b, fa, fc, mech, pcbauto.PlaceOptions{Seed: seed}); err != nil {
+						return err
+					}
+					fmt.Fprintf(stderr, "autoSize: frame %.1f × %.1f %s (%d trials)\n", frame.Width, frame.Height, frame.Units, len(frame.Trials))
+				}
 				var mc *pcbauto.Mechanics
 				if mech != nil {
 					if mc, err = pcbauto.ApplyMech(b, mech); err != nil {
 						return err
 					}
 				}
-				rep := &pcbauto.Report{Mechanics: mc}
+				rep := &pcbauto.Report{Mechanics: mc, Frame: frame}
 				pre := pcbauto.Analyze(b, power, nil)
-				rep.Circuit = pcbauto.Understand(b, pre)
+				if rep.Circuit, err = understand(b, pre); err != nil {
+					return err
+				}
 				opts := pcbauto.Options{Power: power, Stack: pcbauto.StackOptions{Force: in.layers, MaxLayers: in.maxLayers},
 					Route: pcbauto.RouteOptions{GridMil: in.grid, Timeout: in.timeout}}
 				budget := in.timeout * 3
@@ -238,7 +295,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 				}
 				pb := pcbauto.BuildPlaybook(pcbauto.PlaybookInput{Board: b, Original: original, Result: rep.Result, Placement: rep.Placement,
 					Circuit: rep.Circuit, OutlineChanged: mech != nil, NewHoles: b.Holes[holesBefore:], NewKeepouts: b.Keepouts[keepBefore:],
-					Name: "pcbauto " + filepath.Base(outDir)})
+					Replace: replace, Name: "pcbauto " + filepath.Base(outDir)})
 				write := func(name string, fn func(io.Writer) error) error {
 					f, err := os.Create(filepath.Join(outDir, name))
 					if err != nil {
@@ -274,6 +331,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 		}
 		addInputs(c)
 		c.Flags().StringVar(&outDir, "out-dir", "", "directory for plan.json, playbook.json, preview.svg, report.md")
+		c.Flags().StringVar(&replaceJournal, "replace", "", "apply journal of the previous pcbauto playbook: its captured holes/keep-outs (MECH_*) are deleted first, so a re-plan does not stack a second set")
 		c.Flags().BoolVar(&place, "place", false, "run the placer (mechanics, domain zones, blocks) before routing")
 		c.Flags().BoolVar(&refine, "refine", false, "with --place: refine the current placement instead of constructing one")
 		c.Flags().BoolVar(&noRoute, "no-route", false, "stop after placement / stackup")

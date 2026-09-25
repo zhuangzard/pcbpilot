@@ -53,10 +53,16 @@ type PlaceMetrics struct {
 	KeepoutHits  int     `json:"keepoutHits"`
 	HeightHits   int     `json:"heightHits"`
 	DecapMeanMil float64 `json:"decapToPinMeanMil"`
-	BoardAreaIn2 float64 `json:"boardAreaIn2"`
-	PartAreaIn2  float64 `json:"partAreaIn2"`
-	Utilisation  float64 `json:"utilisation"`
-	Millis       int64   `json:"millis"`
+	// TetherExcessMil sums how far every tethered auxiliary sits beyond its
+	// role's slack from the pin it serves (0 = every relation satisfied).
+	TetherExcessMil float64 `json:"tetherExcessMil"`
+	// CriticalExcessMil is the same sum over the physics-critical roles only
+	// (decap, hot loop, bootstrap, power stage, clock, protection, power path).
+	CriticalExcessMil float64 `json:"criticalExcessMil"`
+	BoardAreaIn2      float64 `json:"boardAreaIn2"`
+	PartAreaIn2       float64 `json:"partAreaIn2"`
+	Utilisation       float64 `json:"utilisation"`
+	Millis            int64   `json:"millis"`
 }
 
 // PlaceResult is the placer output.
@@ -466,7 +472,7 @@ func (pl *placer) partCost(p *Part) float64 {
 		}
 	}
 	for _, k := range pl.b.Keepouts {
-		if k.NoParts || k.NoCopper {
+		if (k.NoParts || k.NoCopper) && k.Owner != p.Ref {
 			kb := PolyBounds(k.Poly)
 			if pl.c.Kinds[p.Ref].Bridges() && !k.NoParts {
 				continue // bridges straddle isolation strips by design
@@ -712,7 +718,7 @@ func (pl *placer) construct() {
 	}
 }
 
-var roleOrder = []string{"hot-loop", "bootstrap", "decap", "clock", "clock-load", "power-stage", "feedback", "protection", "pull", "signal", "chain", "test"}
+var roleOrder = []string{"hot-loop", "bootstrap", "decap", "clock", "clock-load", "power-stage", "feedback", "protection", "power-path", "pull", "group", "signal", "chain", "test"}
 
 func roleRank(r string) int {
 	for i, x := range roleOrder {
@@ -1280,7 +1286,7 @@ func (pl *placer) metrics(res *PlaceResult) {
 			m.OutOfZone++
 		}
 		for _, k := range pl.b.Keepouts {
-			if k.NoParts && bi.OverlapArea(PolyBounds(k.Poly)) > 1 {
+			if k.NoParts && k.Owner != p.Ref && bi.OverlapArea(PolyBounds(k.Poly)) > 1 {
 				m.KeepoutHits++
 			}
 		}
@@ -1303,6 +1309,18 @@ func (pl *placer) metrics(res *PlaceResult) {
 	if n > 0 {
 		m.DecapMeanMil = math.Round(sum / float64(n))
 	}
+	excess, critical := 0.0, 0.0
+	for p, t := range pl.tether {
+		if t.w > 0 {
+			e := pl.tetherCost(p) / t.w
+			excess += e
+			if criticalRoles[t.role] {
+				critical += e
+			}
+		}
+	}
+	m.TetherExcessMil = math.Round(excess)
+	m.CriticalExcessMil = math.Round(critical)
 	m.BoardAreaIn2 = pl.b.Area() / 1e6
 	if m.BoardAreaIn2 > 0 {
 		m.Utilisation = math.Round(m.PartAreaIn2/m.BoardAreaIn2*1000) / 10
@@ -1487,6 +1505,11 @@ type tether struct {
 }
 
 // Role weights: how tightly each kind of auxiliary must hug its pin.
+// criticalRoles are the relations whose distance is electrical (loop area,
+// decoupling inductance, clock load, clamp path) rather than routing comfort.
+var criticalRoles = map[string]bool{"hot-loop": true, "bootstrap": true, "decap": true, "clock": true, "clock-load": true,
+	"power-stage": true, "protection": true, "power-path": true}
+
 var tetherRoles = map[string][2]float64{ // weight, slack (mil)
 	"hot-loop":    {8, 20},
 	"bootstrap":   {7, 25},
@@ -1496,6 +1519,8 @@ var tetherRoles = map[string][2]float64{ // weight, slack (mil)
 	"clock-load":  {5, 50},
 	"power-stage": {5, 60},
 	"protection":  {5, 100},
+	"power-path":  {5, 80},
+	"group":       {3, 100},
 	"pull":        {2, 120},
 	"signal":      {1.5, 160},
 	"chain":       {0.8, 220},

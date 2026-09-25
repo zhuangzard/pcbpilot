@@ -21,6 +21,8 @@ pcbpilot pcb auto run --board board.json --mech mech.json --power power.json \
 | 参数 | 何时用 |
 |---|---|
 | `--place` | 器件未布局或用户要求重排；不加则沿用现有布局只布线 |
+| `--replace J` | 上一版剧本的 apply journal：先删除它捕获的孔/禁布区（`MECH_*` primitiveId），再写新机械件；重排已落地的板时必须带，否则孔和区域会叠加 |
+| `--groups F` | 可重复。原理图 composition（`modules[].placements[].designator`）或 `{"groups":[{id,core,members}]}`：让每个原理图模块的外围跟随其核心。共享电源轨上的归属以原理图为准（buck 输出电容不再被分给同轨的 CH340/模块）；端口保护（ESD/TVS/保险丝）仍留在其连接器引脚；无核心件的模块（单按键、LED+电阻）保留推断归属。报告第 3 节“电路理解备注”逐条列出采纳/保留 |
 | `--place --refine` | 已有较好布局，只做局部优化 |
 | `--layers N` | 需求或成本已定层数（例如需求写明 4 层）；不给则引擎决策 |
 | `--max-layers N` | 成本上限（默认 6） |

@@ -133,10 +133,19 @@ func findSilkOverPad(silk []pcbSilkText, pads []pcbPadP) []pcbCheckFinding {
 // from the IC pin it decouples is inductance, not decoupling. For each such cap,
 // measure its power-rail pad to the NEAREST same-rail IC (U*) pad; over budget →
 // WARN. Rails with no IC pad at all are skipped (bulk/input caps decouple a
-// connector, not a chip).
+// connector, not a chip). A cap sitting at an inductor pad on its rail is a
+// switching converter's OUTPUT cap (the buck's +3V3 leaves through L, not an
+// IC pin): it belongs at the inductor and is not judged against the far IC.
 func findDecapTooFar(pads []pcbPadP) []pcbCheckFinding {
 	capRe := regexp.MustCompile(`(?i)^C\d`)
 	icRe := regexp.MustCompile(`(?i)^U\d`)
+	indRe := regexp.MustCompile(`(?i)^L\d`)
+	indPadsByNet := map[string][]pcbPadP{}
+	for _, p := range pads {
+		if net := strings.TrimSpace(p.Net); indRe.MatchString(p.Designator) && net != "" {
+			indPadsByNet[net] = append(indPadsByNet[net], p)
+		}
+	}
 
 	// power-rail pads of ICs, bucketed by net.
 	icPadsByNet := map[string][]pcbPadP{}
@@ -179,6 +188,15 @@ func findDecapTooFar(pads []pcbPadP) []pcbCheckFinding {
 		ics := icPadsByNet[strings.TrimSpace(pwr.Net)]
 		if len(ics) == 0 {
 			continue // no IC on this rail — bulk/input cap, not a decap
+		}
+		atInductor := false
+		for _, lp := range indPadsByNet[strings.TrimSpace(pwr.Net)] {
+			if math.Hypot(lp.X-pwr.X, lp.Y-pwr.Y) <= 2*pcbDecapMaxMil {
+				atInductor = true
+			}
+		}
+		if atInductor {
+			continue // converter output cap at its inductor
 		}
 		best := math.Inf(1)
 		bestRef := ""

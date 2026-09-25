@@ -62,6 +62,12 @@ func TestFindDecapTooFar(t *testing.T) {
 		// C4: signal-signal cap (AC coupling) — not a decap, skipped.
 		{Designator: "C4", Number: "1", Net: "SIG_A", Layer: 1, X: 900, Y: 900},
 		{Designator: "C4", Number: "2", Net: "SIG_B", Layer: 1, X: 940, Y: 900},
+		// C5: buck output cap at the inductor's 3V3 end, far from U1 (the
+		// ESP32 demo's C2/C3) — belongs at L1, skipped.
+		{Designator: "L1", Number: "1", Net: "LX", Layer: 1, X: 600, Y: 600},
+		{Designator: "L1", Number: "2", Net: "3V3", Layer: 1, X: 700, Y: 600},
+		{Designator: "C5", Number: "1", Net: "3V3", Layer: 1, X: 740, Y: 600},
+		{Designator: "C5", Number: "2", Net: "GND", Layer: 1, X: 780, Y: 600},
 	}
 	out := findDecapTooFar(pads)
 	if len(out) != 1 {

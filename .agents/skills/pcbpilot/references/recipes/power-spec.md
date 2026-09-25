@@ -48,7 +48,7 @@ pcbpilot pcb auto analyze --board board.json --json > analysis.json
 | 字段 | 单位 | 默认 | 含义 |
 |---|---|---|---|
 | `tempRiseC` | °C | 10 | 允许导体温升。消费类 10，紧凑/高温环境 5，放宽到 20 会显著变窄 |
-| `rails[].net` | — | — | 与原理图网名**完全一致** |
+| `rails[].net` | — | — | 与原理图网名**完全一致**。开关节点（`SW`/`LX`）可声明电流用于定宽，但仍保持 `switch` 角色，不进电源平面 |
 | `rails[].voltage` | V | 网名推断 | 决定间距（IPC-2221B） |
 | `rails[].currentA` | A | 网名启发式 | 决定线宽与过孔数 |
 | `rails[].plane` | bool | 自动 | 记录“该轨应走平面/铺铜”的意图。**当前版本只记录不决策**（`planned`）：4 层以上所有电源轨都进电源分割平面，2 层板电源轨走计算线宽的走线 |
