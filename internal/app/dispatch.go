@@ -95,7 +95,11 @@ func dispatchTimed(cfg *appConfig, action, window string, payload any, timeout t
 	printArtifactPaths(respBody, stderr)
 
 	var parsed struct {
-		OK    bool `json:"ok"`
+		OK     bool `json:"ok"`
+		Result struct {
+			Verified *bool `json:"verified"`
+			Partial  bool  `json:"partial"`
+		} `json:"result"`
 		Error *struct {
 			Code    string `json:"code"`
 			Message string `json:"message"`
@@ -111,6 +115,37 @@ func dispatchTimed(cfg *appConfig, action, window string, payload any, timeout t
 		}
 		return errors.Join(errActionFailed, &actionError{Action: action, Code: parsed.Error.Code,
 			Message: parsed.Error.Message, Detail: parsed.Error.Detail})
+	}
+	if verifiedWriteActions[action] && (parsed.Result.Partial || (parsed.Result.Verified != nil && !*parsed.Result.Verified)) {
+		// The raw JSON (with the kept IDs) is already on stdout; only the exit
+		// status changes. Never retried here: the write state is unknown.
+		return fmt.Errorf("%s: write not fully verified; inspect returned IDs and fresh state before retrying", action)
+	}
+	return nil
+}
+
+// verifiedWriteActions are basic writes whose connector handler reads the
+// result back and reports `partial` / `verified:false` when the fresh state does
+// not prove the write. An ok:true envelope carrying such a verdict must exit
+// non-zero (ported from upstream easyeda-agent dbaf316).
+var verifiedWriteActions = map[string]bool{
+	"schematic.netflag.create":    true,
+	"schematic.power.connect_pin": true,
+	"pcb.region.create":           true,
+	"pcb.add_component":           true,
+}
+
+// unverifiedWriteError is the requestAction-side twin of the dispatch check: a
+// parsed ok:true result that reports partial / verified:false for one of the
+// verifiedWriteActions becomes an error (never retryable — state is unknown).
+func unverifiedWriteError(action string, res *actionResult) error {
+	if res == nil || !verifiedWriteActions[action] || res.Result == nil {
+		return nil
+	}
+	partial, _ := res.Result["partial"].(bool)
+	verified, hasVerified := res.Result["verified"].(bool)
+	if partial || (hasVerified && !verified) {
+		return fmt.Errorf("%s: write not fully verified (partial evidence kept, no retry); inspect returned IDs and fresh state", action)
 	}
 	return nil
 }

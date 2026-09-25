@@ -1047,10 +1047,20 @@ func acConnectPinRetryable(err error) bool {
 // 代价不是慢,是那一脚根本没连上,要等到几步之后 `sch check` 才暴露成悬空引脚。
 func acConnectPinWithRetry(cfg *appConfig, window string, payload map[string]any) (*actionResult, error, bool) {
 	res, err := requestActionTimed(cfg, "schematic.power.connect_pin", window, payload, acConnectPinTimeout)
-	if err == nil || !acConnectPinRetryable(err) {
+	if err == nil {
+		// A native label whose write could not be proven (upstream dbaf316):
+		// keep the stub evidence, never retry.
+		return res, unverifiedWriteError("schematic.power.connect_pin", res), false
+	}
+	if !acConnectPinRetryable(err) {
 		return res, err, false
 	}
 	res2, err2 := requestActionTimed(cfg, "schematic.power.connect_pin", window, payload, acConnectPinTimeout)
+	if err2 == nil {
+		if uerr := unverifiedWriteError("schematic.power.connect_pin", res2); uerr != nil {
+			return res2, uerr, true
+		}
+	}
 	if err2 != nil {
 		// 两次都失败:报**第一次**的原因(它才是根因;第二次往往是同一次平台抽风的
 		// 余波),并写明重试过 —— 否则读日志的人会以为只试了一次。

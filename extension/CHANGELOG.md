@@ -12,6 +12,17 @@ not yet live-verified on pcbpilot's connector). Requires a connector rebuild/re-
   at most one typed `document.open` restore, stable fresh readback; reports `saveMs`,
   `reconnectMs`, `elapsedMs`). Explicit, user-requested only — not a recovery path for a hung
   editor. Upstream f05f25c, 439137f, fe68d8b, dbaf316.
+- Write verification (upstream dbaf316, c476f6d): native net-label writes are recovered from a
+  unique fresh Name attribute + parent-wire readback when the host returns no object; uncertain
+  outcomes return `partial:true, verified:false` with no automatic retry or stub rollback
+  (a settled, provably empty no-write keeps pcbpilot's live-verified V3 wire-name path in
+  `connect_pin`). `pcb.region.create` verifies layer/rules/geometry/name/lineWidth/lock from a
+  fresh inventory and refuses a name outside follow-rule (9) regions (the `pcb antenna-keepout`
+  path no longer sends a name). `pcb.add_component` returns the re-read designator/uniqueId with
+  `bindingVerified` (partial when unproven). `pcb.component.modify` / `pcb.component.delete`
+  refuse stale IDs against the live inventory with `PRECONDITION_REFUSED` before any write.
+  CLI: an ok:true response with `partial` or `verified:false` from these four actions exits
+  non-zero (raw JSON unchanged); `sch autoconnect` treats it as a non-retryable failure.
 
 ## [0.3.0] — 2026-09-25
 

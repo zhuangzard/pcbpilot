@@ -388,12 +388,15 @@ convention as pour (connector builds the polygon).
   removes components, NOT regions — use `region delete`). `--ids` takes CSV or a
   JSON array.
 
-> **Read-back limit (verified #18):** `--name` on a region is fire-and-forget —
-> `getState_RegionName` never reads it back, so `region list` shows `null` and the
-> injected DSN keepout is named `region_keepout_N`. Likewise `pcb fill`'s `fillMode`
-> always reads back `solid`. Geometry / layer / net / **ruleType** persist fine —
-> just don't gate logic on reading a region's name or a fill's mode. Platform SDK
-> quirk (same family as the netflag rotation echo trap), not fixable from here.
+`pcb region create --name` 仅用于 `--rule follow-rule` 的 DRC 规则区域；`no-pours` 等禁布区
+不保存名称，连接器写前以 `PRECONDITION_REFUSED` 拒绝该组合（移植自上游 easyeda-agent
+dbaf316）。创建后连接器从 fresh `region list` 回读真实层/规则/几何/名称/线宽/锁定并返回
+`verified`；`partial:true` 或 `verified:false` 时 CLI 非零退出、保留已创建 ID，先回读该 ID 再决定，
+不能重复创建。上游 Web 4.1.60 实测拒绝 `no-pours` 与 `follow-rule` 混合组合。
+
+> **历史结论更正（上游 2026-09-25，Web 4.1.60）：** #18 的“区域名称永远不可回读”仅来自禁布区，
+> 不能推广到 `follow-rule`；后者名称可真实回读。DSN 中无名称禁布区仍使用 `region_keepout_N`。
+> `pcb fill` 的 `fillMode` 只读到 `solid` 的旧结论未复测。pcbpilot 连接器上的这些行为尚待现场复核。
 
 > **ESP32-S3-WROOM-1 ships with NO antenna keep-out** — you must create it (test-case
 > P1). **`getDsnFile` drops regions**, but `pcb export-dsn` now **re-injects** them as

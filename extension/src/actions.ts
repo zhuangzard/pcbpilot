@@ -3222,12 +3222,76 @@ const NET_PORT_KINDS: Record<string, NetPortDirection> = {
 };
 const NET_LABEL_KIND = 'net_label';
 
+// Web 4.1.60 creates a wire Name attribute but returns undefined. Recover only
+// a unique NEW attribute from a fresh inventory, never the requested input.
+// Ported from upstream easyeda-agent dbaf316: no automatic retry or rollback
+// while the native write state is unknown — the caller gets partial evidence.
+//
+// pcbpilot adaptation: with `allowNoWrite`, a call that SETTLED without error,
+// returned no object and provably added no attribute (readable inventory,
+// unchanged document identity) returns null so connect_pin can take its
+// live-verified V3 wire-name path (3.2.149: createNetLabel returns undefined
+// and writes nothing). Every uncertain outcome stays a partial result.
+async function createVerifiedNetLabel(x: number, y: number, net: string, expectedParentId?: string): Promise<ActionResult>;
+async function createVerifiedNetLabel(x: number, y: number, net: string, expectedParentId: string, opts: { allowNoWrite: true }): Promise<ActionResult | null>;
+async function createVerifiedNetLabel(x: number, y: number, net: string, expectedParentId?: string, opts?: { allowNoWrite?: boolean }): Promise<ActionResult | null> {
+	const identity = await readResponseContext();
+	if (!identity.projectUuid || !identity.documentUuid || !identity.tabId || identity.documentType !== 'schematic') {
+		throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, 'Schematic identity unavailable; net label was not dispatched.');
+	}
+	const before = await eda.sch_PrimitiveAttribute.getAll();
+	if (!Array.isArray(before)) throw new ActionError(ErrorCodes.INVALID_STATE, 'Attribute inventory unavailable; net label was not dispatched.');
+	const ids = new Set(before.map(a => a.getState_PrimitiveId()));
+	let returnedId: string | undefined;
+	let apiError: string | undefined;
+	let settled = false;
+	try {
+		const pending = Promise.resolve().then(() => eda.sch_PrimitiveAttribute.createNetLabel(x, y, net)).finally(() => { settled = true; });
+		const created = await withTimeout(pending,
+			CONNECT_PIN_OP_TIMEOUT_MS, 'Net label creation timed out; write state is unknown.');
+		returnedId = created?.getState_PrimitiveId();
+	}
+	catch (err) { apiError = describeThrown(err); }
+	let addedIds: string[] = [];
+	try {
+		const after = await eda.sch_PrimitiveAttribute.getAll();
+		if (!Array.isArray(after)) throw new Error('Post-write attribute inventory unavailable.');
+		const added = after.filter(a => !ids.has(a.getState_PrimitiveId()));
+		addedIds = added.map(a => a.getState_PrimitiveId());
+		const afterIdentity = await readResponseContext();
+		if ((['projectUuid', 'documentUuid', 'tabId', 'documentType'] as const).some(key => identity[key] !== afterIdentity[key])) throw new Error('Document identity changed during net label creation.');
+		if (!settled) throw new Error('Native label call is still pending; a matching snapshot cannot prove completion.');
+		if (opts?.allowNoWrite && added.length === 0 && returnedId === undefined && apiError === undefined) return null;
+		const matches = added.filter(a => a.getState_Key() === 'Name' && a.getState_Value() === net
+			&& a.getState_X() === x && a.getState_Y() === y);
+		if (matches.length !== 1) throw new Error(`Expected one new matching Name attribute; found ${matches.length}.`);
+		const attribute = matches[0];
+		const record = await schAttributeStateRecord(attribute, readCurrentNativePageAttributes);
+		const parentId = attribute.getState_ParentPrimitiveId();
+		if (expectedParentId !== undefined && parentId !== expectedParentId) throw new Error(`Label belongs to wire ${parentId}, not the created stub ${expectedParentId}.`);
+		const wire = parentId ? await eda.sch_PrimitiveWire.get(parentId) : undefined;
+		if (!wire || wire.getState_PrimitiveId() !== parentId || wire.getState_Net() !== net || record.ValueVisible !== true) {
+			throw new Error('Label visibility or parent wire network does not match.');
+		}
+		return { result: { primitiveId: attribute.getState_PrimitiveId(), parentPrimitiveId: parentId,
+			verified: true, recoveredFromReadback: returnedId !== attribute.getState_PrimitiveId(),
+			attribute: record, ...(apiError ? { apiError } : {}) } };
+	}
+	catch (err) {
+		return { result: { partial: true, verified: false, writeState: 'unknown',
+			primitiveId: returnedId ?? null, addedAttributeIds: addedIds, error: describeThrown(err),
+			...(apiError ? { apiError } : {}) },
+		warnings: ['Net label write could not be verified. Save and inspect attributes and wires before retrying; no automatic retry or rollback was attempted.'] };
+	}
+}
+
 const schematicNetflagCreate: Handler = async (payload) => {
 	const kind = requireString(payload, 'kind');
 	const x = requireNumber(payload, 'x');
 	const y = requireNumber(payload, 'y');
 	const rotation = optionalNumber(payload, 'rotation');
 	const mirror = optionalBoolean(payload, 'mirror');
+	if (kind === NET_LABEL_KIND) return createVerifiedNetLabel(x, y, requireString(payload, 'net'));
 
 	let component;
 	try {
@@ -3252,10 +3316,6 @@ const schematicNetflagCreate: Handler = async (payload) => {
 				rotation,
 				mirror,
 			);
-		}
-		else if (kind === NET_LABEL_KIND) {
-			const net = requireString(payload, 'net');
-			component = await eda.sch_PrimitiveAttribute.createNetLabel(x, y, net);
 		}
 		else if (kind === 'short_circuit') {
 			component = await eda.sch_PrimitiveComponent.createShortCircuitFlag(x, y, rotation, mirror);
@@ -7833,13 +7893,18 @@ const schematicPowerConnectPin: Handler = async (payload) => {
 			);
 		}
 		else if (kind === NET_LABEL_KIND) {
-			flag = typeof eda.sch_PrimitiveAttribute.createNetLabel === 'function'
-				? await withTimeout(
-					Promise.resolve(eda.sch_PrimitiveAttribute.createNetLabel(endX, endY, net)),
-					CONNECT_PIN_OP_TIMEOUT_MS,
-					`Netlabel create did not settle within ${CONNECT_PIN_OP_TIMEOUT_MS}ms — rolling back the stub wire.`,
-				)
-				: undefined;
+			// Upstream easyeda-agent dbaf316: Web 4.1.60 writes the Name attribute
+			// but returns undefined. Recover it from a unique fresh attribute +
+			// parent-wire readback; any uncertain outcome keeps the stub (no
+			// rollback, no retry) and is reported as a partial, unverified write.
+			if (typeof eda.sch_PrimitiveAttribute.createNetLabel === 'function') {
+				const label = await createVerifiedNetLabel(endX, endY, net, wire.getState_PrimitiveId(), { allowNoWrite: true });
+				if (label) {
+					return { ...label, result: { ...label.result,
+						wirePrimitiveId: wire.getState_PrimitiveId(), flagPrimitiveId: label.result?.primitiveId,
+						endPoint: { x: endX, y: endY }, direction, offset, rotation, appliedRotation: applied } };
+				}
+			}
 			if (!flag) {
 				// V3 (3.2.149 measured 2026-09-25): createNetLabel exists but returns
 				// undefined. A net label there IS the wire's visible "Name"
@@ -10818,11 +10883,32 @@ const pcbAddComponent: Handler = async (payload) => {
 	}
 	catch { /* best-effort — diagnostic only */ }
 
+	// create() retains its original auto-assigned designator after modify().
+	// Read the committed inventory rather than echoing that stale instance
+	// (ported from upstream easyeda-agent dbaf316). An unverified binding keeps
+	// the placed ID and is reported as a partial write for explicit recovery.
+	let actualDesignator: string | null = null;
+	let actualUniqueId: string | null = null;
+	let bindingVerified = false;
+	try {
+		const inventory = await eda.pcb_PrimitiveComponent.getAll();
+		const fresh = Array.isArray(inventory) ? inventory.find(c => c.getState_PrimitiveId() === id) : undefined;
+		if (fresh) {
+			actualDesignator = fresh.getState_Designator() ?? null;
+			actualUniqueId = fresh.getState_UniqueId() ?? null;
+			bindingVerified = (!designator || actualDesignator === designator) && (!uniqueId || actualUniqueId === uniqueId);
+		}
+	}
+	catch { /* preserve the placed ID for explicit recovery */ }
+	if (!bindingVerified) warnings.push('Placed component identity/link could not be verified; inspect this primitive ID before retrying.');
+
 	return {
 		result: {
 			primitiveId: id,
-			designator: comp.getState_Designator?.() ?? designator ?? null,
-			uniqueId: comp.getState_UniqueId?.() ?? uniqueId ?? null,
+			designator: actualDesignator,
+			uniqueId: actualUniqueId,
+			bindingVerified,
+			...(!bindingVerified ? { partial: true } : {}),
 			padCount: (pads ?? []).length,
 			assignedNets,
 			unmatchedPads: unmatched,
@@ -11338,6 +11424,13 @@ export const pcbComponentModify: Handler = async (payload) => {
 		throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, 'Missing required object field "patch".');
 	}
 	const patch = normalizePcbComponentPatch(rawPatch as Record<string, unknown>);
+	// Refuse a stale ID against the live inventory before any write
+	// (ported from upstream easyeda-agent dbaf316).
+	const inventory = await eda.pcb_PrimitiveComponent.getAll();
+	if (!Array.isArray(inventory)) throw new ActionError(ErrorCodes.INVALID_STATE, 'PCB component inventory unavailable; modification was not dispatched.');
+	if (!inventory.some(c => c.getState_PrimitiveId() === primitiveId)) {
+		throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, `PCB component primitive ID not found: ${primitiveId}. Pull fresh IDs from pcb list; no modification was dispatched.`);
+	}
 
 	let component;
 	try {
@@ -11524,6 +11617,28 @@ const pcbComponentDelete: Handler = async (payload) => {
 			ErrorCodes.MISSING_PAYLOAD_FIELD,
 			'Missing required field "primitiveIds" (string or string[]).',
 		);
+	}
+	// Refuse stale IDs against the live inventory before the official delete
+	// (ported from upstream easyeda-agent c476f6d).
+	const requested = typeof primitiveIds === 'string' ? [primitiveIds] : primitiveIds;
+	if (requested.length === 0 || requested.some(id => !id)) {
+		throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, 'PCB component deletion requires non-empty primitive IDs.');
+	}
+	let components;
+	try {
+		components = await eda.pcb_PrimitiveComponent.getAll();
+	}
+	catch (err) {
+		throw edaError(err, 'Failed to verify PCB component IDs before deletion.');
+	}
+	if (!Array.isArray(components)) {
+		throw new ActionError(ErrorCodes.INVALID_STATE, 'PCB component inventory unavailable; deletion was not dispatched.');
+	}
+	const liveIds = new Set(components.map(component => component.getState_PrimitiveId()));
+	const missing = [...new Set(requested)].filter(id => !liveIds.has(id));
+	if (missing.length > 0) {
+		throw new ActionError(ErrorCodes.PRECONDITION_REFUSED,
+			`PCB component primitive ID(s) not found: ${missing.join(', ')}. Pull fresh IDs from pcb list; no deletion was dispatched.`);
 	}
 	let deleted;
 	try {
@@ -12992,6 +13107,12 @@ const pcbRegionCreate: Handler = async (payload) => {
 	const layer = (optionalNumber(payload, 'layer') ?? 1) as unknown as TPCB_LayersOfRegion;
 	const ruleTypes = parseRegionRuleTypes(payload.ruleType ?? payload.ruleTypes);
 	const regionName = optionalString(payload, 'name');
+	// The host persists a region name only on follow-rule (9) regions; a name
+	// elsewhere was echoed by create() but read back null (upstream
+	// easyeda-agent dbaf316, Web 4.1.60). Refuse it before writing.
+	if (regionName !== undefined && !ruleTypes.includes(9)) {
+		throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, 'Region name is only supported with follow-rule (9); no region was created.');
+	}
 	const lineWidth = optionalNumber(payload, 'lineWidth');
 	const lock = payload.locked === true;
 
@@ -13009,15 +13130,31 @@ const pcbRegionCreate: Handler = async (payload) => {
 	if (!region) {
 		throw new ActionError(ErrorCodes.EDA_CALL_FAILED, 'Region creation returned no primitive (check layer/points/ruleType).');
 	}
-	return {
-		result: {
-			primitiveId: region.getState_PrimitiveId(),
-			layer: Number(layer),
-			ruleType: ruleTypes,
-			ruleTypeNames: ruleTypes.map(v => REGION_RULE_NAME[v] ?? String(v)),
-			regionName: regionName ?? null,
-		},
-	};
+	// Verify the persisted geometry + metadata from a fresh inventory instead of
+	// echoing the request (ported from upstream easyeda-agent dbaf316).
+	const primitiveId = region.getState_PrimitiveId();
+	try {
+		const regions = await eda.pcb_PrimitiveRegion.getAll();
+		if (!Array.isArray(regions)) throw new Error('Region inventory unavailable after creation.');
+		const fresh = regions.find(r => r.getState_PrimitiveId() === primitiveId);
+		if (!fresh || fresh.getState_PrimitiveId() !== primitiveId) throw new Error('Created region is absent from fresh readback.');
+		const actual = { primitiveId, layer: fresh.getState_Layer(), ruleType: fresh.getState_RuleType(),
+			regionName: fresh.getState_RegionName() ?? null, source: fresh.getState_ComplexPolygon().getSource(),
+			lineWidth: fresh.getState_LineWidth(), locked: fresh.getState_PrimitiveLock() };
+		const differences: string[] = [];
+		if (actual.layer !== Number(layer)) differences.push('layer');
+		if (JSON.stringify([...actual.ruleType].sort()) !== JSON.stringify([...ruleTypes].sort())) differences.push('ruleType');
+		if (regionName !== undefined && actual.regionName !== regionName) differences.push('regionName');
+		if (!equivalentLinearRegionGeometry(poly.getSource(), actual.source)) differences.push('geometry');
+		if (lineWidth !== undefined && actual.lineWidth !== lineWidth) differences.push('lineWidth');
+		if (actual.locked !== lock) differences.push('locked');
+		return { result: { ...actual, ruleTypeNames: actual.ruleType.map(v => REGION_RULE_NAME[v] ?? String(v)),
+			verified: differences.length === 0, ...(differences.length ? { partial: true, differences } : {}) } };
+	}
+	catch (err) {
+		return { result: { primitiveId, partial: true, verified: false, error: describeThrown(err) },
+			warnings: ['Region was created but readback failed; inspect this ID before retrying.'] };
+	}
 };
 
 const pcbRegionList: Handler = async (payload) => {

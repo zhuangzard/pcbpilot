@@ -161,6 +161,10 @@ daemon 在派发 `net_label` 创建/连接前检查宿主产品版本：V3 或�
 `HOST_API_UNSUPPORTED`，不会创建桩线；`autoconnect --dry-run` 使用相同检查，批次含不支持的
 label 时在任何写入前整体拒绝。不会自动替换为电气语义可能不同的 netport。
 历史实测详见仓库 `docs/dev-environment.md` 的 Native net-label compatibility。
+上游在 Web 4.1.60 实测：原生标签已写入却返回空对象，因此“快速空回包”不能说明未写入。
+连接器现以新增属性、坐标、可见性与父导线网络共同验证；无法唯一验证时保留部分写入证据
+（`partial:true, verified:false`）并非零退出，不自动重试、不删除桩线。契约见
+[连接原语](schematic-wiring.md)。
 
 ## 检查覆盖边界（原理图验收）
 
