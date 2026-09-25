@@ -237,7 +237,7 @@ func libPreferDirectFirst(p *powerLayoutPlan, policies map[string]string) bool {
 	for _, component := range p.Placements {
 		bySide := map[string]map[string]int{}
 		for _, pin := range component.Pins {
-			if pin.Net == "" || policies[pin.Net] != "direct" {
+			if pin.Net == "" || !libDirectPolicy(policies[pin.Net]) {
 				continue
 			}
 			side, err := libPinSide(pin, component.BBox)

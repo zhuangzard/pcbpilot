@@ -567,7 +567,7 @@ func (s *annealSolver) cost(st annealState) (float64, bool) {
 	}
 	for net, b := range nets {
 		w := 1.0 + s.netWeight[net]
-		if s.policies[net] == "direct" {
+		if libDirectPolicy(s.policies[net]) {
 			w += 1
 		}
 		wire += w * (b.MaxX - b.MinX + b.MaxY - b.MinY)

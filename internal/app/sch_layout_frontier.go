@@ -54,7 +54,7 @@ func libValidateMandatoryDirectPlacementFrontiers(before, after *powerLayoutPlan
 		islandCounts[island.net]++
 	}
 	for _, island := range afterIslands {
-		if policies[island.net] != "direct" || (islandCounts[island.net] <= 1 && expectedPins[island.net] <= len(island.pins)) {
+		if !libDirectPolicy(policies[island.net]) || (islandCounts[island.net] <= 1 && expectedPins[island.net] <= len(island.pins)) {
 			continue
 		}
 		if !libPlacementCanInfluenceFrontier(after, island, placed, libDirectFrontierExpansionRaw) {

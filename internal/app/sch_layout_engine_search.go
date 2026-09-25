@@ -224,7 +224,7 @@ func libPlacePeripheralPairsWithRouting(current powerLayoutPlan, measured powerL
 						// while sealing both outward pin exits. Reject that position
 						// here, while the distance shell can still try another XY,
 						// instead of repeatedly failing the terminal regeneration.
-						if policies[q.Net] == "direct" && libPinsShareIsland(&candidate, pair.host, q) && !libIslandMergeCanContinue(&candidate, pair.host, q) {
+						if libDirectPolicy(policies[q.Net]) && libPinsShareIsland(&candidate, pair.host, q) && !libIslandMergeCanContinue(&candidate, pair.host, q) {
 							conflict.reasons["direct-frontier-sealed"]++
 							continue
 						}
@@ -703,7 +703,7 @@ func libJoinNetsMode(p *powerLayoutPlan, policies map[string]string, railsOnly, 
 func schematicRerouteOrder(policies map[string]string, failed string, round int) []string {
 	var nets []string
 	for net, policy := range policies {
-		if policy == "direct" || libPortPolicy(policy) {
+		if libDirectPolicy(policy) || libPortPolicy(policy) {
 			nets = append(nets, net)
 		}
 	}
@@ -862,7 +862,7 @@ func libJoinNetsPass(p *powerLayoutPlan, policies map[string]string, railsOnly, 
 		})
 		joined := false
 		lockedNet := ""
-		if len(edges) > 0 && policies[edges[0].a.Net] == "direct" {
+		if len(edges) > 0 && libDirectPolicy(policies[edges[0].a.Net]) {
 			// A mandatory net is an atomic routing obligation. Once selected,
 			// finish its physical tree (or fail and reroute the whole forest)
 			// before another net can consume the remaining corridor.
@@ -925,7 +925,7 @@ func libJoinNetsPass(p *powerLayoutPlan, policies map[string]string, railsOnly, 
 			// module_port explicitly permits separately named physical islands at
 			// a zone boundary. Keep cheap local joins, but reserve obstacle-search
 			// budget for direct nets whose islands must physically merge.
-			if !joined && !railsOnly && routing != nil && policies[e.a.Net] == "direct" && !mazeTried[pair] {
+			if !joined && !railsOnly && routing != nil && libDirectPolicy(policies[e.a.Net]) && !mazeTried[pair] {
 				mazeTried[pair] = true
 				var acceptedWitnesses libRouteNamingWitnesses
 				route, err := libMazeRouteAccepted(p, islands[e.aIsland], islands[e.bIsland], routing, func(trial *powerLayoutPlan) bool {
@@ -971,7 +971,7 @@ func libJoinNetsPass(p *powerLayoutPlan, policies map[string]string, railsOnly, 
 				orderedFailures = append([]edge{*failedMazeEdge}, edges...)
 			}
 			for _, e := range orderedFailures {
-				if policies[e.a.Net] == "direct" {
+				if libDirectPolicy(policies[e.a.Net]) {
 					conflict := &schematicRouteConflict{net: e.a.Net, sourceIsland: libIslandStableID(islands[e.aIsland]), targetIsland: libIslandStableID(islands[e.bIsland]), endpointOwners: map[string]bool{}, blockers: map[string]bool{}, ownersComplete: true, cause: lastMazeErr}
 					for _, index := range []int{e.aIsland, e.bIsland} {
 						for _, pin := range islands[index].pins {

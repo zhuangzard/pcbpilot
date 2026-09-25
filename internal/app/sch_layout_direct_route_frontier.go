@@ -16,7 +16,7 @@ func libDirectRouteKeepsFrontiers(before, after *powerLayoutPlan, policies map[s
 	}
 	var beforeIslands []libIsland
 	for _, island := range afterIslands {
-		if policies[island.net] != "direct" || counts[island.net] < 2 || len(island.pins) == 0 {
+		if !libDirectPolicy(policies[island.net]) || counts[island.net] < 2 || len(island.pins) == 0 {
 			continue
 		}
 		newFrontier := libDirectIslandLocalFrontier(after, island, libDirectFrontierExpansionRaw, libDirectFrontierNodeLimit)

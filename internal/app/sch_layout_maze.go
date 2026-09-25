@@ -688,7 +688,7 @@ func libMazeRouteAccepted(p *powerLayoutPlan, source, target libIsland, routing 
 	if routing == nil {
 		return nil, fmt.Errorf("routing context missing")
 	}
-	if policy, known := routing.policies[source.net]; known && policy != "direct" {
+	if policy, known := routing.policies[source.net]; known && !libDirectPolicy(policy) {
 		return nil, fmt.Errorf("maze routing is reserved for direct nets; %s is %s", source.net, policy)
 	}
 	started := time.Now()

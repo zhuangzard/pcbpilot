@@ -30,6 +30,10 @@ type SchematicZonesInput struct {
 	// stops on its budget is retried at 4x, up to this ceiling. Solved zones
 	// never re-run; structural failures are not retried.
 	MaxCandidatesCeiling int                          `json:"maxCandidatesCeiling,omitempty"`
+	// SameSheetMarker "net_label": every in-zone direct net is named with a
+	// small net label (policy direct_label) - ports stay for module_port nets,
+	// which by convention are the cross-sheet ones.
+	SameSheetMarker string `json:"sameSheetMarker,omitempty"`
 	Zones                []SchematicZone              `json:"zones"`
 	Optimization         *SchematicLayoutOptimization `json:"optimization,omitempty"`
 	Routing              *SchematicRoutingOptions     `json:"routing,omitempty"`
@@ -120,7 +124,7 @@ func validateSchematicZoneOwnership(in SchematicZonesInput) (*schematicZoneOwner
 	for net, zones := range netOwners {
 		switch in.NetPolicies[net] {
 		case "local_ground", "local_power", "module_port", "net_label":
-		case "direct":
+		case "direct", "direct_label":
 			if len(zones) > 1 {
 				return nil, fmt.Errorf("cross-zone net %s requires module_port policy", net)
 			}
@@ -144,6 +148,20 @@ func validateSchematicZoneOwnership(in SchematicZonesInput) (*schematicZoneOwner
 // PlanSchematicZones computes independent, core-normalized zones, not sheet
 // positions or rendered frames. No partial result escapes on any zone failure.
 func PlanSchematicZones(in SchematicZonesInput) (*SchematicZonesResult, error) {
+	switch in.SameSheetMarker {
+	case "", "net_port":
+	case "net_label":
+		policies := make(map[string]string, len(in.NetPolicies))
+		for net, p := range in.NetPolicies {
+			if p == "direct" {
+				p = "direct_label"
+			}
+			policies[net] = p
+		}
+		in.NetPolicies = policies
+	default:
+		return nil, fmt.Errorf("sameSheetMarker must be net_label or net_port")
+	}
 	if c := in.MaxCandidatesCeiling; c != 0 && (c < max(in.MaxCandidates, 20000) || c > 4000000) {
 		return nil, fmt.Errorf("maxCandidatesCeiling must be maxCandidates..4000000")
 	}
@@ -200,7 +218,7 @@ func PlanSchematicZones(in SchematicZonesInput) (*SchematicZonesResult, error) {
 			ports := map[string]bool{}
 			parentNets := netsOf(z.ComponentIDs)
 			for net := range netsOf(child.ComponentIDs) {
-				if pol := in.NetPolicies[net]; parentNets[net] && (pol == "direct" || libPortPolicy(pol)) {
+				if pol := in.NetPolicies[net]; parentNets[net] && (libDirectPolicy(pol) || libPortPolicy(pol)) {
 					ports[net] = true
 				}
 			}

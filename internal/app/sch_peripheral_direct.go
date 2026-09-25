@@ -228,7 +228,7 @@ func schematicMandatoryPeripheralSignalPolicies(input *SchematicLayoutInput) map
 	}
 	for net := range coreNets {
 		if peripheralNets[net] && roles[net] == "signal" {
-			input.NetPolicies[net] = "direct"
+			input.NetPolicies[net] = promotedDirect(input.NetPolicies[net])
 		}
 	}
 	// A module_port remains the external zone-boundary contract, but repeated
@@ -252,9 +252,18 @@ func schematicMandatoryPeripheralSignalPolicies(input *SchematicLayoutInput) map
 			}
 			counts[pin.Net][side]++
 			if counts[pin.Net][side] > 1 {
-				input.NetPolicies[pin.Net] = "direct"
+				input.NetPolicies[pin.Net] = promotedDirect(input.NetPolicies[pin.Net])
 			}
 		}
 	}
 	return roles
+}
+
+// promotedDirect keeps a same-sheet label net drawn as a label once it must be
+// wired inside the zone.
+func promotedDirect(policy string) string {
+	if policy == "net_label" || policy == "direct_label" {
+		return "direct_label"
+	}
+	return "direct"
 }

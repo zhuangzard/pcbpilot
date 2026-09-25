@@ -18,7 +18,7 @@ func libNetPriority(policy string) int {
 // before optional local joins can consume its escape corridors.
 func libSignalPolicyPriority(policy string) int {
 	switch policy {
-	case "direct":
+	case "direct", "direct_label":
 		return 0
 	case "module_port", "net_label":
 		return 1

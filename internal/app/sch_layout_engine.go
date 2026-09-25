@@ -171,7 +171,7 @@ func planSchematicLayoutWithBudget(input SchematicLayoutInput, budget *int) (*Sc
 	}
 	for n := range used {
 		switch input.NetPolicies[n] {
-		case "direct", "module_port", "net_label", "local_power", "local_ground":
+		case "direct", "direct_label", "module_port", "net_label", "local_power", "local_ground":
 		default:
 			return nil, fmt.Errorf("net %s needs explicit policy", n)
 		}

@@ -150,7 +150,7 @@ func planLibLayout(input libLayoutSource) (*schCompositionSource, error) {
 		}
 		for n := range usedNets {
 			switch intent.NetPolicies[n] {
-			case "direct", "local_power", "local_ground", "module_port", "net_label":
+			case "direct", "direct_label", "local_power", "local_ground", "module_port", "net_label":
 				netPolicies[netNames[n]] = intent.NetPolicies[n]
 			default:
 				return fail("module %s net %s needs an explicit supported policy", intent.ID, n)
