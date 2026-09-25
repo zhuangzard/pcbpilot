@@ -1,6 +1,8 @@
 # Changelog
 
-## [Unreleased]
+## [0.3.2] — 2026-09-25
+
+Requires re-importing the connector (0.3.2) together with the matching CLI/daemon.
 
 - Live-verified on desktop V3 3.2.149 with connector 0.3.1 (2026-09-25): `pcb region create`
   reads back the region (`verified:true`) and refuses a name on a non-follow-rule region with
