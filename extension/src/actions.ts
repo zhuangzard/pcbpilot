@@ -1790,6 +1790,8 @@ export const schematicComponentModify: Handler = async (payload) => {
 	let expectedProperties: Record<string, SchematicPropertyValue> | undefined;
 	let propertiesBefore: Record<string, SchematicPropertyValue> | undefined;
 	let preservedPropertyKeys: Array<string> | undefined;
+	let identitySource: SchComponent | undefined;
+	let identityReasserted = false; // supplierId re-sent by us, not requested
 	if (hasCustomAttributes || hasOtherProperty) {
 		const field = hasCustomAttributes ? 'customAttributes' : 'otherProperty';
 		expectedProperties = requireSchematicPropertyPatch(normalizedPatch[field], field);
@@ -1798,6 +1800,7 @@ export const schematicComponentModify: Handler = async (payload) => {
 		// 使 CLI 文档中的 customAttributes 别名可用，同时避免修改 Value 时清空其他属性。
 		// before 快照同时兑现审计 before/after 约定,部分应用时随 result 返回。
 		const current = await getComponentOrThrow(primitiveId);
+		identitySource = current;
 		propertiesBefore = cleanOtherProperty(
 			current.getState_OtherProperty() as Record<string, unknown> | undefined,
 		) ?? {};
@@ -1813,6 +1816,7 @@ export const schematicComponentModify: Handler = async (payload) => {
 		// otherProperty 键(无数据可保,也不做无谓的整体写 — 见 attrs_backfill
 		// 处对整体写 otherProperty 平台副作用的实测记录)。
 		const current = await getComponentOrThrow(primitiveId);
+		identitySource = current;
 		const existing = cleanOtherProperty(
 			current.getState_OtherProperty() as Record<string, unknown> | undefined,
 		);
@@ -1820,6 +1824,19 @@ export const schematicComponentModify: Handler = async (payload) => {
 			propertiesBefore = existing;
 			preservedPropertyKeys = Object.keys(existing);
 			normalizedPatch.otherProperty = { ...existing };
+		}
+	}
+
+	// Identity re-assert (measured on 3.2.149 desktop, 2026-09-25): even a
+	// rotation-only modify re-projects the device record and resets supplierId
+	// to the platform default "<MPN>.1", losing the backfilled LCSC C-number
+	// that identity readback depends on. Carry a real C-number in the same call
+	// unless the patch sets supplierId itself.
+	if (!Object.prototype.hasOwnProperty.call(normalizedPatch, 'supplierId') && identitySource) {
+		const supplierId = (serializeComponent(identitySource) as Record<string, unknown>).supplierId;
+		if (typeof supplierId === 'string' && /^C\d+$/.test(supplierId)) {
+			normalizedPatch.supplierId = supplierId;
+			identityReasserted = true;
 		}
 	}
 
@@ -1915,7 +1932,7 @@ export const schematicComponentModify: Handler = async (payload) => {
 			!notApplied.includes(key) && propertyApplied(before, key, expectedProperties[key]));
 		const applied = expectedKeys.filter(key =>
 			!notApplied.includes(key) && !alreadySet.includes(key));
-		const patchedBeyondProperties = Object.keys(normalizedPatch).some(key => key !== 'otherProperty');
+		const patchedBeyondProperties = Object.keys(normalizedPatch).some(key => key !== 'otherProperty' && !(identityReasserted && key === 'supplierId'));
 		if (notApplied.length > 0 && applied.length === 0 && !patchedBeyondProperties) {
 			// 纯属性 patch 且无一可证明写入:画布确未变(alreadySet 键本来就是
 			// 期望值),假成功必须报错(回读铁律,此时 ok:false 不 arm autosave
@@ -7717,7 +7734,18 @@ const schematicPowerConnectPin: Handler = async (payload) => {
 	// (issue #137): a half-built stub (wire without its flag) is an orphan-stub the
 	// caller has no id for, and the next retry plans around the debris.
 	const rollbackWire = async () => {
-		try { if (wire) await deleteSchGroup('wires', [wire.getState_PrimitiveId()]); }
+		try {
+			if (!wire) return;
+			// EasyEDA merges touching wires into one polyline primitive. Deleting a
+			// merged primitive would take the already-routed tree with it (live
+			// 2026-09-25): only a primitive that is still exactly our one stub
+			// segment may be deleted; otherwise leave it for bridge-check.
+			const fresh = await eda.sch_PrimitiveWire.get(wire.getState_PrimitiveId());
+			const line = (fresh?.getState_Line?.() ?? []) as Array<number> | Array<Array<number>>;
+			const flat = (line as Array<unknown>).flat(2) as Array<number>;
+			if (flat.length !== 4) return;
+			await deleteSchGroup('wires', [wire.getState_PrimitiveId()]);
+		}
 		catch { /* best-effort — bridge-check's orphan-stub rule is the backstop */ }
 	};
 	let flag;
@@ -7749,14 +7777,13 @@ const schematicPowerConnectPin: Handler = async (payload) => {
 			if (!flag) {
 				// V3 (3.2.149 measured 2026-09-25): createNetLabel exists but returns
 				// undefined. A net label there IS the wire's visible "Name"
-				// attribute: rebuild the stub with the net name and move that
-				// attribute to the planned text start so the name rides on the
-				// lead (text reads +x above a horizontal wire, +y left of a
-				// vertical one; see netLabelTextBand in the CLI).
-				await rollbackWire();
-				const named = await eda.sch_PrimitiveWire.create([pinGX, pinGY, endX, endY], net);
-				if (!named) throw new ActionError(ErrorCodes.EDA_CALL_FAILED, 'Named stub wire creation returned no primitive (net label fallback).');
-				wire = named;
+				// attribute. NEVER delete and redraw the stub: EasyEDA merges
+				// touching wires into one polyline, so deleting "the stub" deleted
+				// the whole already-routed tree (live, +5V_TERM). Name the existing
+				// wire instead and move its Name attribute to the planned text start
+				// (text rides on the lead; see netLabelTextBand in the CLI).
+				const named = await eda.sch_PrimitiveWire.modify(wire, { net });
+				if (!named) throw new ActionError(ErrorCodes.EDA_CALL_FAILED, 'Naming the stub wire returned no primitive (net label fallback).');
 				const attrs = await eda.sch_PrimitiveAttribute.getAll(named.getState_PrimitiveId());
 				const name = attrs.find(a => a.getState_Key() === 'Name' && a.getState_Value() === net);
 				if (!name) throw new ActionError(ErrorCodes.EDA_CALL_FAILED, `Named stub wire has no visible Name attribute for ${net}.`);

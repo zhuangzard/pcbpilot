@@ -65,6 +65,10 @@ func (e *schematicDrawingExpectation) geometry() (map[string]bool, map[string]in
 		if isNetPortKind(f.Kind) {
 			family, kind = "port", "netport"
 		}
+		label := f.Kind == "net_label"
+		if label {
+			family = "port" // direction table only; a label is not a component
+		}
 		rot, ok := flagBodyRotation[family][f.Direction]
 		if !ok || f.Net == "" || f.Offset <= 0 || !plGrid(f.Offset) {
 			return nil, nil, fmt.Errorf("invalid drawing marker")
@@ -81,6 +85,12 @@ func (e *schematicDrawingExpectation) geometry() (map[string]bool, map[string]in
 			y -= f.Offset
 		}
 		wires = append(wires, powerLayoutWire{Net: f.Net, Points: [][2]float64{{f.PinX, f.PinY}, {x, y}}})
+		if label {
+			// V3: the stub wire's visible Name attribute; V4: a label
+			// attribute. Neither is a component: its lead is checked here and
+			// its name by the per-pin net readback.
+			continue
+		}
 		markers[fmt.Sprintf("%s:%s:%g,%g:%g", kind, f.Net, x, y, rot)]++
 	}
 	edges, err := drawingEdges(wires)

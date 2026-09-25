@@ -88,16 +88,33 @@ func schTitleBlockMerge(cfg *appConfig, window string, patch map[string]any) (ma
 	out := make(map[string]any, len(patch))
 	var unknown []string
 	for k, v := range patch {
-		if _, ok := full[k]; !ok {
+		cur, known := full[k].(map[string]any)
+		if !known {
 			unknown = append(unknown, k)
+			continue
 		}
-		value := v
+		// Visibility is preserved unless the patch sets it: forcing
+		// showTitle/showValue=true drew a second, floating "Key : Value" copy of
+		// every written field in the middle of the sheet (3.2.149, 2026-09-25) -
+		// the title-block table shows the value on its own.
+		item := map[string]any{"showTitle": tbBoolOr(cur["showTitle"], false), "showValue": tbBoolOr(cur["showValue"], false), "value": cur["value"]}
 		if m, isMap := v.(map[string]any); isMap {
+			touched := false
 			if inner, has := m["value"]; has {
-				value = inner
+				item["value"], touched = inner, true
 			}
+			for _, flag := range []string{"showTitle", "showValue"} {
+				if b, has := m[flag].(bool); has {
+					item[flag], touched = b, true
+				}
+			}
+			if !touched {
+				return nil, false, fmt.Errorf("明细项 %s 的补丁需要 value 和/或 showTitle/showValue(布尔),收到 %v", k, m)
+			}
+		} else {
+			item["value"] = v
 		}
-		out[k] = map[string]any{"showTitle": true, "showValue": true, "value": value}
+		out[k] = item
 	}
 	if len(unknown) > 0 {
 		return nil, false, fmt.Errorf("这些明细项当前页没有:%s —— 先跑 `pcbpilot sch titleblock-get` 看可用 key(平台对不认识的项会崩或静默忽略)",
@@ -187,11 +204,25 @@ func tbPatchLanded(cfg *appConfig, window string, patch map[string]any) (bool, [
 		var miss []string
 		for _, k := range tbRequestedKeys(patch) {
 			want := patch[k]
-			if m, ok := want.(map[string]any); ok {
-				want = m["value"] // 接受 {"Name":{"value":"X"}} 与 {"Name":"X"} 两种写法
-			}
 			cur, _ := full[k].(map[string]any)
-			if cur == nil || fmt.Sprint(cur["value"]) != fmt.Sprint(want) {
+			if cur == nil {
+				miss = append(miss, k)
+				continue
+			}
+			if m, ok := want.(map[string]any); ok {
+				// {"Name":{"value":"X","showValue":false}}: check what was asked
+				for _, flag := range []string{"showTitle", "showValue"} {
+					if b, has := m[flag].(bool); has && tbBoolOr(cur[flag], !b) != b {
+						miss = append(miss, k+"."+flag)
+					}
+				}
+				inner, has := m["value"]
+				if !has {
+					continue
+				}
+				want = inner
+			}
+			if fmt.Sprint(cur["value"]) != fmt.Sprint(want) {
 				miss = append(miss, k)
 			}
 		}

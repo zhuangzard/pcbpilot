@@ -20,6 +20,7 @@ type schLayoutCompositionDevice struct {
 	DeviceUUID  string `json:"deviceUuid"`
 	Name        string `json:"name"`
 	MPN         string `json:"mpn"`
+	LCSC        string `json:"lcsc"`
 }
 
 type schLayoutCompositionInput struct {
@@ -178,7 +179,7 @@ func buildSchLayoutComposition(in schLayoutCompositionInput) (*schCompositionSou
 			if len(pagePins) != len(src.Measurement.Pins) {
 				return nil, fmt.Errorf("%s pin set differs between source and page", p.Designator)
 			}
-			comp := connectivity.Component{ID: id, Ref: p.Designator, Device: connectivity.Device{LibraryUUID: dev.LibraryUUID, UUID: uuid, Name: name}}
+			comp := connectivity.Component{ID: id, Ref: p.Designator, Device: connectivity.Device{LibraryUUID: dev.LibraryUUID, UUID: uuid, Name: name, SupplierID: dev.LCSC}}
 			for _, q := range src.Measurement.Pins {
 				pq, ok := pagePins[q.Number]
 				if !ok || pq.Name != q.Name || pq.Net != q.Net {

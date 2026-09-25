@@ -1654,7 +1654,8 @@ test('modify: maps customAttributes to SDK otherProperty and preserves existing 
 
 	assert.deepEqual(fx.calls[0], {
 		id: 'r2-pid',
-		patch: { otherProperty: { Description: 'keep me', Value: '10kΩ' } },
+		// the instance's real LCSC C-number rides along (V3 modify resets it)
+		patch: { otherProperty: { Description: 'keep me', Value: '10kΩ' }, supplierId: 'C2765186' },
 	});
 	assert.deepEqual(fx.getOtherProperty(), { Description: 'keep me', Value: '10kΩ' });
 	assert.equal(res.result.component.otherProperty.Value, '10kΩ');
@@ -4005,4 +4006,12 @@ test('V3 wire-name label anchor keeps the text on the lead, ending at its free e
 	assert.deepEqual(netLabelAnchor('right', 100, 50, 30), { x: 70, y: 50 });
 	assert.deepEqual(netLabelAnchor('up', 100, 50, 30), { x: 100, y: 20 });
 	assert.deepEqual(netLabelAnchor('down', 100, 50, 30), { x: 100, y: 50 });
+});
+
+test('modify: a rotation-only patch re-sends the real LCSC C-number (V3 resets it to <MPN>.1)', async () => {
+	const fx = installComponentModifyStub();
+	await schematicComponentModify({ primitiveId: 'r2-pid', patch: { rotation: 90 } });
+	assert.equal(fx.calls[0].patch.supplierId, 'C2765186');
+	assert.equal(fx.calls[0].patch.rotation, 90);
+	delete (globalThis as any).eda;
 });

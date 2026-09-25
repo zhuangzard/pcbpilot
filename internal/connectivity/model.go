@@ -167,6 +167,9 @@ type Device struct {
 	LibraryUUID string `json:"libraryUuid,omitempty"`
 	UUID        string `json:"deviceUuid"`
 	Name        string `json:"name,omitempty"`
+	// SupplierID is the real LCSC C-number when known. Apply re-asserts it:
+	// EasyEDA 3.2.149 resets supplierId to "<MPN>.1" on any component modify.
+	SupplierID string `json:"supplierId,omitempty"`
 }
 type Pin struct {
 	Number          string  `json:"number"`

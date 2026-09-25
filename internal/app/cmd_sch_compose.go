@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -813,6 +814,10 @@ func schCompositionPlaybook(p *schCompositionPlan, before []byte, replace bool, 
 				// Absolute modify has the stored-rotation contract used by measured IR.
 				patch, assertions := schComponentBinding(canonical)
 				patch["rotation"], patch["mirror"], patch["x"], patch["y"] = c.Rotation, c.Mirror, c.X, c.Y
+				if regexp.MustCompile(`^C\d+$`).MatchString(d.SupplierID) {
+					patch["supplierId"] = d.SupplierID
+					assertions["$.component.supplierId"] = "==" + d.SupplierID
+				}
 				pb.Steps = append(pb.Steps, playbookStep{ID: fmt.Sprintf("orient-%03d", i), Action: "schematic.component.modify", Payload: map[string]any{"primitiveId": fmt.Sprintf("${part_%03d}", i), "patch": patch}, Assert: assertions})
 			}
 		}
