@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0] — 2026-09-25
+
+Same code as 0.3.2, released on the 0.4 minor line: 0.3.1/0.3.2 changed connector behaviour
+(ported upstream 1.7.0 write verification, stale-ID guard and `system.page_reload`), which the
+version policy places in a new minor line. Re-import the connector (0.4.0) together with the
+matching CLI/daemon; `pcbpilot update` reports a connector on 0.3.x as behind the 0.4 line.
+
 ## [0.3.2] — 2026-09-25
 
 Requires re-importing the connector (0.3.2) together with the matching CLI/daemon.

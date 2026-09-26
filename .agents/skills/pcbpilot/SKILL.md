@@ -4,7 +4,7 @@ description: "通过本地 pcbpilot CLI、daemon 和连接器操作嘉立创EDA�
 license: MIT
 metadata:
   author: "zhuangzard (pcbpilot); original easyeda-agent by zhoushoujianwork"
-  version: "0.3.2"
+  version: "0.4.0"
   homepage: "https://github.com/zhuangzard/pcbpilot"
 ---
 
