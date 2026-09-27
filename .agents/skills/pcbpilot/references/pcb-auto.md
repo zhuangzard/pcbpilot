@@ -106,6 +106,63 @@ typed action，符合“禁止手工操作 EDA 工程”准则。
 | `plan.json` | 全部决策与几何（分析、叠层、电路模型、布局、走线、过孔、铺铜区、SI）；`--sim` 时 `analysis.nets[].padCurrents`、`route.power.nets[]`（每焊盘压降、每段电流/布线宽/分段宽、最坏路径） |
 | `playbook.json` | `pcbpilot apply` 剧本：叠层 → 板框/孔/禁布区 → 器件位姿 → 走线/过孔 → 铺铜 → 翻转内电层 → 重铺 → 保存 → DRC |
 | `preview.svg` | 目视复核图：器件按电压域着色，各层走线、过孔、平面分区、隔离带、未布通飞线（黄色虚线） |
+| `feedback.json` | 回推原理图的建议（见下节「闭环：布线难点回推原理图」）；`report.md` 同名一节。`--no-feedback` 关闭 |
+
+## 闭环：布线难点回推原理图
+
+布不通、飞线大量交叉、绕远、高速网过孔多、IR drop 超预算、焊盘窄于电流所需线宽——这些常常是
+**原理图**的问题（GPIO 分在模块另一侧、排针针序与对端相反、去耦被两颗 IC 共用、稳压器在错误一端），
+只在 Layout 里挪件治标不治本。`pcb auto run` 布线后自动写 `feedback.json` 和报告「6b. 回推原理图的建议」；
+已有 `plan.json` 时可单独重算：
+
+```bash
+pcbpilot pcb auto run --board board.json --power power.json --out-dir out/            # 默认验证前 3 个换脚候选
+pcbpilot pcb auto run --board board.json --power power.json --out-dir out/ --feedback-loop 3
+pcbpilot pcb feedback --plan out/plan.json --board board.json --power power.json --out out/feedback.json [--verify N] [--loop N]
+pcbpilot sch pin-swap --plan out/feedback.json --item FB01 --sch <该页 sch connectivity.json> --dry-run
+pcbpilot sch pin-swap --plan out/feedback.json --item FB01 --sch <该页 sch connectivity.json> --out swap.playbook.json
+```
+
+每条建议：`kind / severity / evidence（指标、网、位号、坐标）/ proposal（精确改法）/ expectedGain（方法 +
+前后数值）/ confidence / applyable / status=live-unverified`。
+
+| kind | 何时出现 | 证据与收益怎么算 | applyable |
+|---|---|---|---|
+| `mcu-pin-swap` | 器件在 [pin-capabilities.json](pin-capabilities.json) 里（ESP32-S3-WROOM-1 起步，`--pin-caps` 追加 STM32/AT32） | 网→引脚的指派问题：匈牙利解（长度 + 与固定网的交叉）起步，再做换位/迁移局部搜索（含换脚网之间的交叉），最后撤回不值 25 mil 的改动，使原理图改动最少。候选先按飞线估算，再在**板副本**上把焊盘网络对调、整条流水线重布，报布通率/过孔/线长/飞线交叉/DRC/联合评分前后值；重布无收益的进 `rejected` | 是 |
+| `connector-pin-swap` | 通用排针/排母（J/P/CN/H 位号 + 表内型号关键字；USB、Type-C、SWD/JTAG、端子等协议口排除），电源/地脚固定 | 同上 | 是（对外接口，需用户同意线束同步改） |
+| `decap-ownership` | ≥8 脚 IC 的某电源网 300 mil 内没有“最近归属于它”的 电源↔地 电容（没有或与别的 IC 共用） | 最近电容距离；按 0402 就近 60 mil 估回路长度 | 否（加件） |
+| `rail-ir-drop` | `--sim` 且电源轨超预算/开路 | 最坏路径按 track/via/plane 分摊；给出加宽倍数、稳压器到最远负载需缩短到的长度、拆轨后主干电流（线性 R 模型） | 否 |
+| `package-change` | 大电流焊盘（`--sim` 的逐脚电流；无仿真时只看 L/D/F/FB/J/P 串联件）窄于该电流 IPC 线宽且入焊盘段颈缩 | 宽度比 | 否（仅建议） |
+
+**引脚能力表规则**：只有带 `gpio` 且无 `fixed` 的脚是可换位；`netNeeds` 按网名推导需求（ADC/触摸/USB/DAC）；
+`gpio-matrix`（ESP32 系）数字功能任意映射，`af-table`（STM32/AT32）外设网要求目标脚具备当前脚的全部复用功能，
+只有 LED/KEY/CS/RST/INT 等纯 GPIO 网自由换。ESP32-S3-WROOM-1 固定：IO0/IO3/IO45/IO46（strapping）、
+IO19/IO20（USB）、TXD0/RXD0（ROM 下载串口，CH340 自动下载依赖它）、IO35–37（R8 版八线 PSRAM）；IO15/16、
+IO39–42、IO47/48 可换但带 `caution`（32k 晶振 / JTAG / 1.8 V），置信度下调。表是 Skill 规范源，
+`pkg/pcbauto/data/` 是嵌入镜像，`TestPinCapsMirrorInSync` 保证一致——**改表两处同改**。
+
+**`--feedback-loop N`**：在内存副本上应用最优换脚 → 重布 → 联合评分提高（且布通率不降、DRC 不增）才保留，
+最多 N 轮、每轮试 3 个候选；接受的换脚按“原脚→终脚”合成一条建议。`plan.json`/`playbook.json` 始终是**未改动
+原理图**的那块板（与不加 flag 时逐字节相同，只多 `feedback` 字段），因为现场焊盘网络来自原理图。
+
+**应用换脚（`sch pin-swap`）**：只生成 playbook，不执行。步骤：`check-before`（带 `--sch` 时）→ 旧脚
+`schematic.pin.disconnect` → 新脚清 NC → `sch autoconnect --kind net_label --strict` → 旧脚置 NC → `schematic.save`
+→ `check-after`（期望连通快照，逐脚 pin→net 与 NC 比对）。`--sch` 会校验旧脚确实在该网、新脚为空，否则报
+`stale feedback`。旧脚若是直连导线（非桩线+网标），disconnect 不处理，playbook 在该步停止，需重新规划。
+
+**护栏**：
+- 换脚改的是原理图 → 与 Layout 变更同一确认规则：先把 diff 与重布前后数值给用户，得到明确同意再 `sch apply`。
+- 执行后：`sch gate` / `sch connectivity` 回读 → 原理图更新到 PCB（`pcb import-changes`）→ `pcb pad-net-diff`
+  对账 → 重新 `pcb auto run`；这一串完成前不得称“已改善”。固件引脚定义同步修改。
+- `status` 一律 `live-unverified`：目前只有离线证据（2026-09-27）。
+- 加件/封装/拆轨是设计取舍，给数值不自动执行；回到 S2（目标连接数据）改源数据再走 S3–S6。
+
+**实测（离线，2026-09-27，ESP32 mini v4-base live dump）**：确认版布局上唯一未被功能锁定的可换网是 LED_CTRL
+（ESP_TXD/RXD 在 ROM UART0、按键在 IO0/EN、USB 在 IO19/20，均正确排除）。飞线估算提出 IO2→IO1（交叉 −1、
+飞线 +10 mil），整板重布 **无收益**（联合 92.28→92.28，过孔 22→22，线长 7.55→7.59 in）→ 进 `rejected`，
+`--feedback-loop 3` 0 接受：该板**无有益 GPIO 换脚**。负对照：把 LED_CTRL 人为移到 IO5（模块左列）后，
+搜索把它移回右列 IO1，重布验证 过孔 24→22、线长 8.26→7.59 in、联合 86.4→86.8（`TestFeedbackESP32MiniMisassignedLED`）。
+`--sim --ir-budget 0.2%,3mV` 压力下给出 +3V3 超预算 1.36× 的三条带数值措施。
 
 ## 引擎怎么决策（读报告时对照）
 

@@ -92,6 +92,7 @@ metadata:
 | 高压/低压分区与隔离、爬电距离 | [recipes/hv-isolation.md](references/recipes/hv-isolation.md) |
 | 高速：差分、阻抗、等长、参考平面 | [recipes/high-speed.md](references/recipes/high-speed.md) |
 | 整板电气感知自动设计：执行、判读、迭代、落地 | [pcb-auto.md](references/pcb-auto.md)、[recipes/pcb-auto-run.md](references/recipes/pcb-auto-run.md) |
+| 布线难点回推原理图（换脚/加去耦/拆轨/换封装，`feedback.json` → `sch pin-swap`，须用户确认） | [pcb-auto.md#闭环布线难点回推原理图](references/pcb-auto.md#闭环布线难点回推原理图)、[pin-capabilities.json](references/pin-capabilities.json) |
 | EDA 配置、考试设计规则、PWR 网络类绑定 | [pcb-config.md](references/pcb-config.md) |
 | 从需求到整板 | [design-flow.md](references/design-flow.md)、[design-decisions.md](references/design-decisions.md) |
 | 选型、标准电路、库器件 | [part-selection.md](references/part-selection.md)、[library-authoring.md](references/library-authoring.md)、[standard-parts.json](references/standard-parts.json) |

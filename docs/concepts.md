@@ -120,6 +120,14 @@ Skill 目录。源码位置不改变发布包内的 `pcbpilot/` 根目录或用�
   不变差时采用），否则如实报告。地网只报告地电位抬升，不设预算。
 - **仿真电流 vs 声明电流**：`power.json` 声明的轨电流是设计意图，优先于仿真；声明值低于仿真值时
   报告告警。仿真里没有的网沿用原逻辑（declared / name / heuristic）。
+- **回推 / feedback loop（PCB → 原理图闭环）**：布线证据（未布通、飞线交叉、过孔、IR drop、颈缩）反向生成的
+  **原理图**修改建议，写在 `feedback.json`。每条有 kind（`mcu-pin-swap` / `connector-pin-swap` /
+  `decap-ownership` / `rail-ir-drop` / `package-change`）、证据、精确改法、预期收益（方法：`reroute` = 板副本
+  上改焊盘网络后整条流水线重布；`ratsnest` = MST 飞线长度与交叉；`model` = 写明的线性模型）、置信度与
+  `applyable`（能否由 `sch pin-swap` 编译成 playbook）。**可换脚**由引脚能力表
+  （`.agents/skills/pcbpilot/references/pin-capabilities.json`：`gpio` 能力、`fixed` 原因、`caution`、网名需求）
+  决定。`--feedback-loop N` 只在内存副本上“应用 → 重布 → 联合评分提高才保留”，结论是推荐清单，不改现场。
+  状态恒为 `live-unverified`，落地须经用户确认 → sch apply → 回读 → PCB 重新导入 → pad-net-diff → 重布。
 - **占位（claim）**：布线栅格上一个铜对象占据的“半线宽 + 半间距”范围；两网不共格即满足间距。
   栅格结论只是候选，**精确几何 DRC** 才是引擎内的判据，EasyEDA 原生 DRC 与回读是最终判据。
 

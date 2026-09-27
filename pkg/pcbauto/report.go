@@ -20,6 +20,9 @@ type Report struct {
 	Loop   []LoopPass   `json:"loop,omitempty"`
 	// Frame is the autoSize frame search (mech board.autoSize with no size).
 	Frame *FrameSearch `json:"frame,omitempty"`
+	// Feedback are the schematic proposals routing evidence supports
+	// (also written as feedback.json).
+	Feedback *Feedback `json:"feedback,omitempty"`
 }
 
 // WriteMarkdown renders the report in Chinese for the designer to review.
@@ -200,6 +203,7 @@ func (r *Report) WriteMarkdown(w io.Writer) {
 		}
 		p("\n")
 	}
+	WriteFeedback(p, r.Feedback)
 	p("## 7. 执行\n\n```bash\npcbpilot apply playbook.json --project <工程> --dry-run\npcbpilot apply playbook.json --project <工程>\n```\n\n")
 	p("执行后按仓库准则：`pcb save` → `doc reload` → `pcb drc` / `pcb check` 回读确认。\n")
 }

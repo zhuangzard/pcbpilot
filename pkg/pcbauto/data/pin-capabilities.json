@@ -1,0 +1,463 @@
+{
+ "schemaVersion": 1,
+ "description": "Pin capability tables for schematic pin-swap feedback (pcbpilot pcb auto run → feedback.json → sch pin-swap). A pin is a swap slot only when it carries the 'gpio' capability and no 'fixed' reason. Canonical copy: .agents/skills/pcbpilot/references/pin-capabilities.json; pkg/pcbauto/data/pin-capabilities.json is the embedded mirror (a test keeps them identical).",
+ "schema": {
+  "parts[].match": "case-insensitive substrings of the PCB device / part name",
+  "parts[].remap": "gpio-matrix = any digital function (GPIO, UART, I2C, SPI ≤ 40 MHz, LEDC/PWM, RMT) can be routed to any gpio pin; af-table = only plain GPIO nets move freely, a peripheral net needs every non-gpio capability of its current pin on the target pin (STM32/AT32 alternate-function tables)",
+  "parts[].pins[]": "{pin: footprint pad number, name, gpio?: number, caps: [gpio, adc1, adc2, touch, dac, usart1_tx, …], fixed?: why the pin must not move, caution?: why a swap onto it needs a human check}",
+  "netNeeds[]": "{pattern: Go regexp on the net name, needs: capability every candidate pin must carry} — first match wins; no match = plain digital",
+  "genericConnectors": "headers whose signal pins are interchangeable (power/ground pins stay): match on device/name, exclude protocol connectors"
+ },
+ "netNeeds": [
+  {
+   "pattern": "(?i)(ADC|AIN|VBAT_?SENSE|V_?SENSE|_SENSE$|NTC|POT)",
+   "needs": "analog-in"
+  },
+  {
+   "pattern": "(?i)TOUCH|^T_?PAD",
+   "needs": "touch"
+  },
+  {
+   "pattern": "(?i)^(USB_?)?D[PM+-]$|USB_?D[PMN+-]$",
+   "needs": "usb"
+  },
+  {
+   "pattern": "(?i)DAC|AOUT",
+   "needs": "dac"
+  }
+ ],
+ "capAliases": {
+  "analog-in": [
+   "adc1",
+   "adc2",
+   "adc"
+  ]
+ },
+ "parts": [
+  {
+   "id": "esp32-s3-wroom-1",
+   "match": [
+    "ESP32-S3-WROOM-1"
+   ],
+   "family": "ESP32-S3",
+   "remap": "gpio-matrix",
+   "source": "Espressif ESP32-S3-WROOM-1/1U datasheet (pin definitions, strapping pins) + ESP32-S3 TRM ch. IO MUX and GPIO matrix",
+   "notes": [
+    "ADC2 is unusable while Wi-Fi is active: an analog net that must work with Wi-Fi needs adc1 (declare the net name with ADC1 or keep it off ADC2 pins)",
+    "Pins 28–30 (IO35–37) are reserved for octal PSRAM on R8 variants and treated as fixed for every variant"
+   ],
+   "pins": [
+    {
+     "pin": "1",
+     "name": "GND",
+     "caps": [],
+     "fixed": "ground"
+    },
+    {
+     "pin": "2",
+     "name": "3V3",
+     "caps": [],
+     "fixed": "power"
+    },
+    {
+     "pin": "3",
+     "name": "EN",
+     "caps": [],
+     "fixed": "chip enable / reset (RC + RESET key)"
+    },
+    {
+     "pin": "4",
+     "name": "IO4",
+     "gpio": 4,
+     "caps": [
+      "gpio",
+      "adc1",
+      "touch"
+     ]
+    },
+    {
+     "pin": "5",
+     "name": "IO5",
+     "gpio": 5,
+     "caps": [
+      "gpio",
+      "adc1",
+      "touch"
+     ]
+    },
+    {
+     "pin": "6",
+     "name": "IO6",
+     "gpio": 6,
+     "caps": [
+      "gpio",
+      "adc1",
+      "touch"
+     ]
+    },
+    {
+     "pin": "7",
+     "name": "IO7",
+     "gpio": 7,
+     "caps": [
+      "gpio",
+      "adc1",
+      "touch"
+     ]
+    },
+    {
+     "pin": "8",
+     "name": "IO15",
+     "gpio": 15,
+     "caps": [
+      "gpio",
+      "adc2"
+     ],
+     "caution": "XTAL_32K_P: free only without a 32 kHz crystal"
+    },
+    {
+     "pin": "9",
+     "name": "IO16",
+     "gpio": 16,
+     "caps": [
+      "gpio",
+      "adc2"
+     ],
+     "caution": "XTAL_32K_N: free only without a 32 kHz crystal"
+    },
+    {
+     "pin": "10",
+     "name": "IO17",
+     "gpio": 17,
+     "caps": [
+      "gpio",
+      "adc2"
+     ]
+    },
+    {
+     "pin": "11",
+     "name": "IO18",
+     "gpio": 18,
+     "caps": [
+      "gpio",
+      "adc2"
+     ]
+    },
+    {
+     "pin": "12",
+     "name": "IO8",
+     "gpio": 8,
+     "caps": [
+      "gpio",
+      "adc1",
+      "touch"
+     ]
+    },
+    {
+     "pin": "13",
+     "name": "IO19",
+     "gpio": 19,
+     "caps": [
+      "gpio",
+      "adc2"
+     ],
+     "fixed": "USB D- (USB-Serial-JTAG / OTG)"
+    },
+    {
+     "pin": "14",
+     "name": "IO20",
+     "gpio": 20,
+     "caps": [
+      "gpio",
+      "adc2"
+     ],
+     "fixed": "USB D+ (USB-Serial-JTAG / OTG)"
+    },
+    {
+     "pin": "15",
+     "name": "IO3",
+     "gpio": 3,
+     "caps": [
+      "gpio",
+      "adc1",
+      "touch"
+     ],
+     "fixed": "strapping pin: JTAG signal source"
+    },
+    {
+     "pin": "16",
+     "name": "IO46",
+     "gpio": 46,
+     "caps": [
+      "gpio"
+     ],
+     "fixed": "strapping pin: ROM message print / boot mode"
+    },
+    {
+     "pin": "17",
+     "name": "IO9",
+     "gpio": 9,
+     "caps": [
+      "gpio",
+      "adc1",
+      "touch"
+     ]
+    },
+    {
+     "pin": "18",
+     "name": "IO10",
+     "gpio": 10,
+     "caps": [
+      "gpio",
+      "adc1",
+      "touch"
+     ]
+    },
+    {
+     "pin": "19",
+     "name": "IO11",
+     "gpio": 11,
+     "caps": [
+      "gpio",
+      "adc2",
+      "touch"
+     ]
+    },
+    {
+     "pin": "20",
+     "name": "IO12",
+     "gpio": 12,
+     "caps": [
+      "gpio",
+      "adc2",
+      "touch"
+     ]
+    },
+    {
+     "pin": "21",
+     "name": "IO13",
+     "gpio": 13,
+     "caps": [
+      "gpio",
+      "adc2",
+      "touch"
+     ]
+    },
+    {
+     "pin": "22",
+     "name": "IO14",
+     "gpio": 14,
+     "caps": [
+      "gpio",
+      "adc2",
+      "touch"
+     ]
+    },
+    {
+     "pin": "23",
+     "name": "IO21",
+     "gpio": 21,
+     "caps": [
+      "gpio"
+     ]
+    },
+    {
+     "pin": "24",
+     "name": "IO47",
+     "gpio": 47,
+     "caps": [
+      "gpio"
+     ],
+     "caution": "1.8 V I/O on octal-flash (N*R*V) variants"
+    },
+    {
+     "pin": "25",
+     "name": "IO48",
+     "gpio": 48,
+     "caps": [
+      "gpio"
+     ],
+     "caution": "1.8 V I/O on octal-flash (N*R*V) variants; on-board RGB LED on DevKitC"
+    },
+    {
+     "pin": "26",
+     "name": "IO45",
+     "gpio": 45,
+     "caps": [
+      "gpio"
+     ],
+     "fixed": "strapping pin: VDD_SPI voltage"
+    },
+    {
+     "pin": "27",
+     "name": "IO0",
+     "gpio": 0,
+     "caps": [
+      "gpio"
+     ],
+     "fixed": "strapping pin: boot mode (BOOT key / auto-download transistor)"
+    },
+    {
+     "pin": "28",
+     "name": "IO35",
+     "gpio": 35,
+     "caps": [
+      "gpio"
+     ],
+     "fixed": "used by octal PSRAM on N*R8 variants"
+    },
+    {
+     "pin": "29",
+     "name": "IO36",
+     "gpio": 36,
+     "caps": [
+      "gpio"
+     ],
+     "fixed": "used by octal PSRAM on N*R8 variants"
+    },
+    {
+     "pin": "30",
+     "name": "IO37",
+     "gpio": 37,
+     "caps": [
+      "gpio"
+     ],
+     "fixed": "used by octal PSRAM on N*R8 variants"
+    },
+    {
+     "pin": "31",
+     "name": "IO38",
+     "gpio": 38,
+     "caps": [
+      "gpio"
+     ]
+    },
+    {
+     "pin": "32",
+     "name": "IO39",
+     "gpio": 39,
+     "caps": [
+      "gpio"
+     ],
+     "caution": "MTCK: JTAG when the JTAG source is the pins"
+    },
+    {
+     "pin": "33",
+     "name": "IO40",
+     "gpio": 40,
+     "caps": [
+      "gpio"
+     ],
+     "caution": "MTDO: JTAG when the JTAG source is the pins"
+    },
+    {
+     "pin": "34",
+     "name": "IO41",
+     "gpio": 41,
+     "caps": [
+      "gpio"
+     ],
+     "caution": "MTDI: JTAG when the JTAG source is the pins"
+    },
+    {
+     "pin": "35",
+     "name": "IO42",
+     "gpio": 42,
+     "caps": [
+      "gpio"
+     ],
+     "caution": "MTMS: JTAG when the JTAG source is the pins"
+    },
+    {
+     "pin": "36",
+     "name": "RXD0",
+     "gpio": 44,
+     "caps": [
+      "gpio"
+     ],
+     "fixed": "U0RXD: ROM bootloader UART0 (download / console), fixed pin"
+    },
+    {
+     "pin": "37",
+     "name": "TXD0",
+     "gpio": 43,
+     "caps": [
+      "gpio"
+     ],
+     "fixed": "U0TXD: ROM bootloader UART0 (download / console), fixed pin"
+    },
+    {
+     "pin": "38",
+     "name": "IO2",
+     "gpio": 2,
+     "caps": [
+      "gpio",
+      "adc1",
+      "touch"
+     ]
+    },
+    {
+     "pin": "39",
+     "name": "IO1",
+     "gpio": 1,
+     "caps": [
+      "gpio",
+      "adc1",
+      "touch"
+     ]
+    },
+    {
+     "pin": "40",
+     "name": "GND",
+     "caps": [],
+     "fixed": "ground"
+    },
+    {
+     "pin": "41",
+     "name": "GND",
+     "caps": [],
+     "fixed": "ground"
+    }
+   ]
+  }
+ ],
+ "genericConnectors": {
+  "match": [
+   "HDR",
+   "HEADER",
+   "PIN HEADER",
+   "PINHEADER",
+   "PZ254",
+   "2.54-",
+   "2.54MM",
+   "XH2.54",
+   "PH2.0",
+   "ZH1.5",
+   "GH1.25",
+   "SH1.0",
+   "JST",
+   "排针",
+   "排母"
+  ],
+  "exclude": [
+   "USB",
+   "TYPE-C",
+   "TYPEC",
+   "HDMI",
+   "RJ45",
+   "SIM",
+   "TF",
+   "MICROSD",
+   "SD-",
+   "FPC",
+   "FFC",
+   "KF301",
+   "KF128",
+   "DC-",
+   "BARREL",
+   "AUDIO",
+   "SWD",
+   "JTAG"
+  ]
+ }
+}

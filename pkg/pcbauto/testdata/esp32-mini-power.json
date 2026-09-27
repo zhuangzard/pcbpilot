@@ -1,0 +1,14 @@
+{
+  "tempRiseC": 10,
+  "rails": [
+    {"net": "+3V3", "voltage": 3.3, "currentA": 0.8},
+    {"net": "+5V", "voltage": 5.0, "currentA": 1.0},
+    {"net": "VBUS", "voltage": 5.0, "currentA": 1.0},
+    {"net": "5V_TERM", "voltage": 5.0, "currentA": 1.0},
+    {"net": "SW", "voltage": 5.0, "currentA": 1.5}
+  ],
+  "diffPairs": [["USB_DP", "USB_DM"]],
+  "diffOhm": 90,
+  "singleEndedOhm": 50,
+  "coated": false
+}

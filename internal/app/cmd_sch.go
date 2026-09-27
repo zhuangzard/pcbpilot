@@ -128,6 +128,7 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 	sch.AddCommand(newSchConnectivityDiffCmd(stdout))
 	sch.AddCommand(newSchDesignDiffCmd(stdout, stderr))
 	sch.AddCommand(newSchPlanCmd(stdout))
+	sch.AddCommand(newSchPinSwapCmd(stdout, stderr))
 	sch.AddCommand(newSchMaterializeCmd(stdout, stderr))
 	sch.AddCommand(newSchComposeCmd(stdout, stderr))
 	sch.AddCommand(newSchLibLayoutCmd(stdout, stderr))

@@ -17,7 +17,7 @@ import (
 // newPcbAutoCmd wires the offline pcbauto engine: circuit understanding,
 // electrical analysis, stackup decision, placement, routing and checks. It
 // never writes the editor; `run` emits an `pcbpilot apply` playbook.
-func newPcbAutoCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {
+func newPcbAutoCmd(cfg *appConfig, window *string, stdout, stderr io.Writer, aliasParents ...*cobra.Command) *cobra.Command {
 	group := &cobra.Command{
 		Use:   "auto",
 		Short: "Electrical-aware auto design: analyse, decide layers, place, route, check (offline engine → apply playbook)",
@@ -40,6 +40,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 	type inputs struct {
 		board, mech, power string
 		sim, irBudget      string
+		pinCaps            string
 		groups             []string
 		layers, maxLayers  int
 		grid               float64
@@ -57,6 +58,49 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 		c.Flags().IntVar(&in.maxLayers, "max-layers", 6, "cost cap for the layer decision")
 		c.Flags().Float64Var(&in.grid, "grid", 0, "routing grid in mil (0 = derived from the rules)")
 		c.Flags().DurationVar(&in.timeout, "timeout", 4*time.Minute, "routing time budget")
+		c.Flags().StringVar(&in.pinCaps, "pin-caps", "", "extra pin-capability table merged over the built-in one (schema: .agents/skills/pcbpilot/references/pin-capabilities.json) — adds STM32/AT32/other remappable parts for schematic pin-swap feedback")
+	}
+	loadCaps := func() (*pcbauto.PinCapTable, error) {
+		t := pcbauto.DefaultPinCaps()
+		if in.pinCaps == "" {
+			return t, nil
+		}
+		raw, err := os.ReadFile(in.pinCaps)
+		if err != nil {
+			return nil, err
+		}
+		o, err := pcbauto.ParsePinCaps(raw)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", in.pinCaps, err)
+		}
+		t.Merge(o)
+		return t, nil
+	}
+	// feedback derives the schematic proposals of a routed board and logs
+	// the headline to stderr.
+	feedback := func(cmd *cobra.Command, b *pcbauto.Board, rep *pcbauto.Report, opts pcbauto.Options, verify, loop int, source string) (*pcbauto.Feedback, error) {
+		caps, err := loadCaps()
+		if err != nil {
+			return nil, err
+		}
+		ctx, cancel := context.WithTimeout(cmd.Context(), in.timeout*time.Duration(verify+3*loop+1))
+		defer cancel()
+		fb, err := pcbauto.BuildFeedback(ctx, b, rep.Result, rep.Joint, pcbauto.FeedbackOptions{Caps: caps, Circuit: rep.Circuit, Route: opts,
+			Verify: verify, Loop: loop, Source: source, Log: func(f string, a ...any) { fmt.Fprintf(stderr, f+"\n", a...) }})
+		if err != nil {
+			return nil, err
+		}
+		applyable := 0
+		for _, it := range fb.Items {
+			if it.Applyable {
+				applyable++
+			}
+		}
+		fmt.Fprintf(stderr, "feedback: %d schematic proposal(s) (%d applyable pin swaps), %d rejected by re-route; hard=%v\n", len(fb.Items), applyable, len(fb.Rejected), fb.Difficulty.Hard)
+		if lp := fb.Loop; lp != nil {
+			fmt.Fprintf(stderr, "feedback loop: %d tries, %d accepted swap(s); joint %.1f → %.1f, vias %.0f → %.0f\n", len(lp.Passes), len(lp.Accepted), lp.Before["joint"], lp.After["joint"], lp.Before["vias"], lp.After["vias"])
+		}
+		return fb, nil
 	}
 	// understand infers the circuit and applies schematic module ownership.
 	understand := func(b *pcbauto.Board, an *pcbauto.Analysis) (*pcbauto.Circuit, error) {
@@ -189,6 +233,8 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 		var only []string
 		var seed int64
 		var loops int
+		var noFeedback bool
+		var fbVerify, fbLoop int
 		c := &cobra.Command{
 			Use:   "run",
 			Short: "Full pipeline: analyse → stackup → (place) → route → DRC/SI → plan.json + playbook.json + preview.svg + report.md",
@@ -343,6 +389,11 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 						}
 						fmt.Fprintf(stderr, "ir-drop (%s, budget %s): %s\n", pw.Scenario, pw.Budget, strings.Join(parts, ", "))
 					}
+					if !noFeedback || fbLoop > 0 {
+						if rep.Feedback, err = feedback(cmd, b, rep, opts, fbVerify, fbLoop, "pcb auto run"); err != nil {
+							return err
+						}
+					}
 				}
 				pb := pcbauto.BuildPlaybook(pcbauto.PlaybookInput{Board: b, Original: original, Result: rep.Result, Placement: rep.Placement,
 					Circuit: rep.Circuit, OutlineChanged: outlineChanged, NewHoles: newHoles, NewKeepouts: newKeeps,
@@ -366,17 +417,23 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 				if rep.Result != nil {
 					rr = rep.Result.Route
 				}
-				for name, fn := range map[string]func(io.Writer) error{
+				files := map[string]func(io.Writer) error{
 					"plan.json":     js(rep),
 					"playbook.json": js(pb),
 					"preview.svg":   func(w io.Writer) error { return pcbauto.RenderSVG(w, b, rep.Circuit, rep.Result.Stackup, rr) },
 					"report.md":     func(w io.Writer) error { rep.WriteMarkdown(w); return nil },
-				} {
+				}
+				names := "plan.json,playbook.json,preview.svg,report.md"
+				if rep.Feedback != nil {
+					files["feedback.json"] = js(rep.Feedback)
+					names += ",feedback.json"
+				}
+				for name, fn := range files {
 					if err := write(name, fn); err != nil {
 						return err
 					}
 				}
-				fmt.Fprintf(stdout, "wrote %s/{plan.json,playbook.json,preview.svg,report.md} (%d playbook steps)\n", outDir, len(pb.Steps))
+				fmt.Fprintf(stdout, "wrote %s/{%s} (%d playbook steps)\n", outDir, names, len(pb.Steps))
 				return nil
 			},
 		}
@@ -389,9 +446,109 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 		c.Flags().StringSliceVar(&only, "only", nil, "with --place --refine: move only these designators (local adjustment of a confirmed layout), e.g. --only C7,D3")
 		c.Flags().BoolVar(&noRoute, "no-route", false, "stop after placement / stackup")
 		c.Flags().Int64Var(&seed, "seed", 0, "placement random seed (runs are reproducible per seed)")
+		c.Flags().BoolVar(&noFeedback, "no-feedback", false, "skip the schematic feedback (feedback.json / report section 回推原理图的建议)")
+		c.Flags().IntVar(&fbVerify, "feedback-verify", 3, "re-route up to N pin-swap candidates on a board copy to verify their gain (0 = ratsnest estimate only; skipped when the base routing took > 60 s)")
+		c.Flags().IntVar(&fbLoop, "feedback-loop", 0, "closed loop PCB→schematic: up to N passes that apply the best pin swap to an in-memory copy, re-route and keep it only when the joint score improves; the accepted swaps are the recommendation (plan/playbook stay those of the unmodified board)")
 		c.Flags().IntVar(&loops, "loops", 3, "with --place: place↔route loop passes — parts near unrouted pads / DRC points are inflated and re-placed; 0 = one placement then route")
 		group.AddCommand(c)
 	}
 	group.AddCommand(newPcbAutoBenchCmd(stdout, stderr))
+
+	// ── feedback ─────────────────────────────────────────────────────────
+	mkFeedback := func() *cobra.Command {
+		var planPath, outPath string
+		var verify, loop int
+		c := &cobra.Command{
+			Use:   "feedback",
+			Short: "Recompute schematic feedback (pin swaps, decap ownership, IR drop, package) from an existing plan.json (offline)",
+			Long: `Reads the plan.json of a 'pcb auto run' plus the board it was run on
+(--board, the same dump) and recomputes feedback.json: evidence-backed
+schematic changes that make routing easier — MCU GPIO / header pin swaps
+(verified by re-routing a board copy), missing or shared decoupling caps,
+IR-drop remedies (with --sim in the original run), package suggestions.
+Nothing is written to EasyEDA; apply a pin swap with 'pcbpilot sch pin-swap'.`,
+			Example: `  pcbpilot pcb feedback --plan out/plan.json --board board.json --power power.json --out out/feedback.json
+  pcbpilot pcb feedback --plan out/plan.json --board board.json --verify 5 --loop 3`,
+			Args: cobra.NoArgs,
+			RunE: func(cmd *cobra.Command, _ []string) error {
+				if planPath == "" || in.board == "" {
+					return fmt.Errorf("--plan and --board are required (the plan does not carry the pads)")
+				}
+				b, mech, power, err := load()
+				if err != nil {
+					return err
+				}
+				raw, err := os.ReadFile(planPath)
+				if err != nil {
+					return err
+				}
+				var rep pcbauto.Report
+				if err := json.Unmarshal(raw, &rep); err != nil {
+					return fmt.Errorf("%s: %w", planPath, err)
+				}
+				if rep.Result == nil || rep.Result.Route == nil || rep.Result.Stackup == nil {
+					return fmt.Errorf("%s has no routing result (was it run with --no-route?)", planPath)
+				}
+				if pl := rep.Placement; pl != nil {
+					for _, p := range pl.Placements {
+						if part := b.Part(p.Ref); part != nil {
+							part.MoveTo(pcbauto.Point{X: p.X, Y: p.Y}, p.Rot)
+						}
+					}
+					if len(pl.Outline) >= 3 {
+						b.Outline = pl.Outline
+					}
+				}
+				if mech != nil {
+					if _, err := pcbauto.ApplyMechInPlace(b, mech); err != nil {
+						return err
+					}
+				}
+				rep.Result.Analysis = pcbauto.Analyze(b, power, rep.Result.Stackup)
+				if rep.Circuit == nil {
+					if rep.Circuit, err = understand(b, rep.Result.Analysis); err != nil {
+						return err
+					}
+				}
+				if rep.Joint == nil {
+					rep.Joint = pcbauto.Joint(b, rep.Result.Analysis, rep.Circuit, rep.Result.Stackup, rep.Result.Route, rep.Result.DRC, pcbauto.JointOptions{PlacementScore: -1})
+				}
+				opts := pcbauto.Options{Power: power, Stack: pcbauto.StackOptions{Force: rep.Result.Stackup.Layers, MaxLayers: in.maxLayers},
+					Route: pcbauto.RouteOptions{GridMil: in.grid, Timeout: in.timeout}}
+				fb, err := feedback(cmd, b, &rep, opts, verify, loop, "pcb feedback")
+				if err != nil {
+					return err
+				}
+				var w io.Writer = stdout
+				if outPath != "" {
+					f, err := os.Create(outPath)
+					if err != nil {
+						return err
+					}
+					defer f.Close()
+					w = f
+				}
+				enc := json.NewEncoder(w)
+				enc.SetIndent("", "  ")
+				if err := enc.Encode(fb); err != nil {
+					return err
+				}
+				if outPath != "" {
+					fmt.Fprintf(stdout, "wrote %s (%d items)\n", outPath, len(fb.Items))
+				}
+				return nil
+			},
+		}
+		addInputs(c)
+		c.Flags().StringVar(&planPath, "plan", "", "plan.json of a previous 'pcb auto run' (required)")
+		c.Flags().StringVar(&outPath, "out", "", "write feedback.json here (default stdout)")
+		c.Flags().IntVar(&verify, "verify", 3, "re-route up to N pin-swap candidates to verify their gain (0 = ratsnest estimate only)")
+		c.Flags().IntVar(&loop, "loop", 0, "accept-if-better loop passes (see pcb auto run --feedback-loop)")
+		return c
+	}
+	group.AddCommand(mkFeedback())
+	for _, p := range aliasParents {
+		p.AddCommand(mkFeedback()) // 'pcb feedback' = 'pcb auto feedback'
+	}
 	return group
 }
