@@ -39,6 +39,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 	}
 	type inputs struct {
 		board, mech, power string
+		sim, irBudget      string
 		groups             []string
 		layers, maxLayers  int
 		grid               float64
@@ -49,6 +50,8 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 		c.Flags().StringVar(&in.board, "board", "", "pcb dump JSON (omit to read the live editor)")
 		c.Flags().StringVar(&in.mech, "mech", "", "mechanical spec JSON (outline, holes, fixed/edge parts, keepouts, zones)")
 		c.Flags().StringVar(&in.power, "power", "", "power spec JSON (rails with voltage/currentA, diffPairs, tempRiseC)")
+		c.Flags().StringVar(&in.sim, "sim", "", "simulated per-pin currents (pcbpilot sim power JSON, schemaVersion 1): nets it lists are sized from the \"worst\" scenario (else the per-pin maximum), power copper is tapered per segment to its own current, fan-out vias are counted per pad, and the routed copper is solved for DC IR drop")
+		c.Flags().StringVar(&in.irBudget, "ir-budget", "", "with --sim: allowed DC drop on power nets, e.g. 2%,30mV (default: the larger of 2% of the rail and 30 mV; rails above 5 V use the percentage)")
 		c.Flags().StringArrayVar(&in.groups, "groups", nil, "schematic module ownership (repeatable): a sch composition JSON (modules[].placements[].designator) or {\"groups\":[{id,core,members}]} — makes each module's parts follow its core; port protection stays at its connector")
 		c.Flags().IntVar(&in.layers, "layers", 0, "force the copper layer count (0 = decide)")
 		c.Flags().IntVar(&in.maxLayers, "max-layers", 6, "cost cap for the layer decision")
@@ -117,6 +120,22 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 			if err := json.Unmarshal(praw, &power); err != nil {
 				return nil, nil, power, fmt.Errorf("power spec: %w", err)
 			}
+		}
+		if in.sim != "" {
+			sraw, err := os.ReadFile(in.sim)
+			if err != nil {
+				return nil, nil, power, err
+			}
+			if power.Sim, err = pcbauto.ParseSim(sraw); err != nil {
+				return nil, nil, power, err
+			}
+		}
+		if in.irBudget != "" {
+			bud, err := pcbauto.ParseIRBudget(in.irBudget)
+			if err != nil {
+				return nil, nil, power, err
+			}
+			power.IRBudget = &bud
 		}
 		return b, mech, power, nil
 	}
@@ -314,6 +333,16 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 					fmt.Fprintf(stderr, "routing: %d layers, signal %.1f%% (%d/%d)%s, vias %d+%d fan-out, DRC violations %d, %.1fs\n",
 						rep.Result.Stackup.Layers, s.Completion, s.Routed, s.Connections, plane, s.Vias, s.FanoutVias,
 						len(rep.Result.DRC.Violations), float64(s.Millis)/1000)
+					if pw := rep.Result.Route.Power; pw != nil {
+						var parts []string
+						for _, n := range pw.Nets {
+							if n.Role != pcbauto.RolePower {
+								continue
+							}
+							parts = append(parts, fmt.Sprintf("%s %.1f/%.0f mV %s", n.Net, n.WorstMV, n.BudgetMV, n.Status))
+						}
+						fmt.Fprintf(stderr, "ir-drop (%s, budget %s): %s\n", pw.Scenario, pw.Budget, strings.Join(parts, ", "))
+					}
 				}
 				pb := pcbauto.BuildPlaybook(pcbauto.PlaybookInput{Board: b, Original: original, Result: rep.Result, Placement: rep.Placement,
 					Circuit: rep.Circuit, OutlineChanged: outlineChanged, NewHoles: newHoles, NewKeepouts: newKeeps,

@@ -76,6 +76,7 @@ func (r *Report) WriteMarkdown(w io.Writer) {
 		if len(heuristic) > 0 {
 			p("**需要确认**：以下电源轨的电流是按网名估算的，请用 `--power power.json` 给出真实预算：%s\n\n", strings.Join(heuristic, "、"))
 		}
+		writeSimCurrents(p, an)
 	}
 
 	if c := r.Circuit; c != nil {
@@ -181,6 +182,7 @@ func (r *Report) WriteMarkdown(w io.Writer) {
 			p("- %s\n", n)
 		}
 		p("\n")
+		writePowerIntegrity(p, rr.Power)
 	}
 
 	writeJoint(p, r)

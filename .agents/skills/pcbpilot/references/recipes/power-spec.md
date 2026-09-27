@@ -76,6 +76,26 @@ pcbpilot pcb auto analyze --board board.json --power power.json
 报告第 2 节每个声明的轨 `来源` 应为 `declared`；没有 `heuristic` 残留；线宽与上表量级一致。
 若某轨线宽大到放不进连接器焊盘，说明要么电流过大、要么需要多焊盘并联或铺铜区（`"plane": true`）。
 
+## 6. 声明电流 vs 仿真电流（`--sim`）
+
+有 `pcbpilot sim power` 的逐脚电流时，一起传入：
+
+```bash
+pcbpilot pcb auto run --board board.json --power power.json --sim sim.json --out-dir out/
+```
+
+| 情况 | 采用 | 报告 |
+|---|---|---|
+| 轨在 `power.json` 里声明 | 声明值（设计意图）定整网线宽；逐脚电流仍用于分段收窄、每焊盘过孔和 IR drop | 声明 ≥ 仿真：`why` 写明；声明 < 仿真：**告警**，复核预算 |
+| 轨只在仿真里 | 仿真电流，来源 `simulated`（写场景） | 2.1 节列出仿真与采用值 |
+| 两处都没有 | 原逻辑（网名 / 启发式） | 同第 5 节 |
+
+- 仿真的 `worst` 场景优先；没有时取各场景逐脚最大值。开关节点按纹波 RMS 定宽、峰值定过孔。
+- 仿真是**逐焊盘**的，声明是**整轨**的：声明给上限（主干宽度），仿真决定分支怎么收窄。
+  若 IR drop 超预算，先回宽已收窄段，再带更宽线宽重布；仍不够就要改拓扑（加铺铜、换层、挪器件）。
+- 预算 `--ir-budget 2%,30mV`（默认，取大；>5 V 轨只用百分比），也可在 `power.json` 写
+  `"irBudget": {"pct": 2, "mv": 30}`。
+
 ## 常见错误
 
 - 用典型电流 → 线宽偏窄；用输出电流当 DC-DC 输入电流 → 高压侧偏窄或偏宽。

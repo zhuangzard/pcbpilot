@@ -249,6 +249,24 @@ func Joint(b *Board, an *Analysis, c *Circuit, st *Stackup, rr *RouteResult, drc
 		}
 	}
 
+	// DC IR drop (only with simulated currents, so boards without --sim
+	// score exactly as before): worst drop/budget over the power nets.
+	if pw := rr.Power; pw != nil {
+		ratio, open := pw.WorstRatio(), 0
+		for _, n := range pw.Nets {
+			if n.Role == RolePower && n.Status == "open" {
+				open++
+			}
+		}
+		if ratio > 0 || open > 0 {
+			sc := ramp(ratio, 0.5, 1.5)
+			if open > 0 {
+				sc = 0
+			}
+			add("electrical", "ir-drop", sc, 0.2, fmt.Sprintf("worst DC drop %.2f× budget over %d simulated nets, %d open", ratio, len(pw.Nets), open))
+		}
+	}
+
 	// ---- efficiency ----
 	var routedLen, mstLen float64
 	conns := 0

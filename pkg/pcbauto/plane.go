@@ -56,17 +56,7 @@ func (r *router) fanout(res *RouteResult) {
 		if li < 0 || !gr.routable[li] {
 			continue
 		}
-		// A 2-layer pour net only needs the via if the pad would otherwise rely
-		// on a single layer; every GND pad gets one (return-path discipline).
-		need := 1
-		padArea := pd.Box.W * pd.Box.H
-		viaArea := math.Pi * r.b.Rules.ViaDia * r.b.Rules.ViaDia / 4
-		if padArea > 6*viaArea {
-			need = clampInt(int(math.Ceil(float64(n.plan.ViasPerTransition)/2)), 1, 3)
-			if padArea > 30*viaArea {
-				need = clampInt(n.plan.ViasPerTransition, 2, 9)
-			}
-		}
+		need := fanoutNeed(n.plan, pd, r.b.Rules, r.an.TempRiseC)
 		stubW := r.fanStubW(n, pd)
 		placed := r.placeFanoutVias(n, pd, li, need, stubW, res)
 		if placed == 0 && r.shareFanout(n, pd, li, stubW) {
@@ -78,8 +68,50 @@ func (r *router) fanout(res *RouteResult) {
 	}
 }
 
+// fanoutNeed is the number of fan-out vias for pd. Without simulated
+// currents: one per small pad, and the rail's via count (halved for mid-size
+// pads) for large ones. With a simulated pad current the pad's own current
+// sets the count (a thermal pad keeps a two-via floor: heat, not current).
+// IR-drop feedback adds ExtraVias.
+func fanoutNeed(plan *NetPlan, pd *Pad, ru Rules, tempRise float64) int {
+	// A 2-layer pour net only needs the via if the pad would otherwise rely
+	// on a single layer; every GND pad gets one (return-path discipline).
+	need := 1
+	padArea := pd.Box.W * pd.Box.H
+	viaArea := math.Pi * ru.ViaDia * ru.ViaDia / 4
+	if padArea > 6*viaArea {
+		need = clampInt(int(math.Ceil(float64(plan.ViasPerTransition)/2)), 1, 3)
+		if padArea > 30*viaArea {
+			need = clampInt(plan.ViasPerTransition, 2, 9)
+		}
+	}
+	if pc, ok := plan.padCurrent(pd); ok {
+		byI := int(math.Ceil(pc.sizing()/ViaCurrent(ru.ViaDrill, tempRise) - 1e-9))
+		switch {
+		case padArea > 30*viaArea:
+			need = clampInt(byI, 2, 9)
+		case padArea > 6*viaArea:
+			need = clampInt(byI, 1, 3)
+		default:
+			need = clampInt(byI, 1, 2)
+		}
+	}
+	return need + plan.ExtraVias
+}
+
 // fanStubW is the width of a fan-out stub from pd.
 func (r *router) fanStubW(n *rnet, pd *Pad) float64 {
+	if pc, ok := n.plan.padCurrent(pd); ok && n.plan.Role != RoleGround {
+		// The stub carries only this pad's current (ground keeps the net
+		// width: its return also spreads through the plane under the pad).
+		li := r.gr.layerIndex(pd.Layer)
+		oz := r.b.Rules.CopperOz
+		if li >= 0 && !r.st.Stack[li].Outer {
+			oz = r.b.Rules.InnerCopperOz
+		}
+		w := math.Min(math.Max(n.width, r.b.Rules.TrackWidth), branchWidth(pc.sizing(), r.an.TempRiseC, oz, classMinWidth(n.plan.Role, r.b.Rules)))
+		return math.Min(w, math.Max(math.Min(pd.Box.W, pd.Box.H), r.b.Rules.TrackWidth))
+	}
 	return math.Min(math.Max(n.width, r.b.Rules.TrackWidth), math.Max(math.Min(pd.Box.W, pd.Box.H), r.b.Rules.TrackWidth))
 }
 
