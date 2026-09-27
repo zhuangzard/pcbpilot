@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
 	"sort"
 	"strings"
 
@@ -267,9 +268,12 @@ type pcbCheckSummary struct {
 	// Copper under the slot rule from a footprint NPTH/slot region (E2E
 	// 2026-09-25 USB-C J2: native "Slot Region to Track/Via").
 	FootprintHoleClearance int `json:"footprintHoleClearance"`
-	Errors                 int `json:"errors"`
-	Warnings               int `json:"warnings"`
-	Total                  int `json:"total"`
+	// Clearance / creepage shortfalls between insulated voltage domains
+	// (`pcb check --intent`).
+	Isolation int `json:"isolation,omitempty"`
+	Errors    int `json:"errors"`
+	Warnings  int `json:"warnings"`
+	Total     int `json:"total"`
 }
 
 type pcbCheckReport struct {
@@ -1813,9 +1817,47 @@ func uniqStr(in []string) []string {
 // runPcbCheck pulls placed copper (tracks + vias + pads), runs the DFM audit,
 // renders it, and (with strict) returns a non-zero exit when there are findings.
 func runPcbCheck(cfg *appConfig, window string, couplingW float64, checkSpec *spec.Spec, strict, asJSON bool, stdout, stderr io.Writer) error {
-	rep, err := gatherPcbCheckReport(cfg, window, couplingW, checkSpec, stderr)
-	if err != nil {
-		return err
+	return runPcbCheckIntent(cfg, window, couplingW, checkSpec, "", "", strict, asJSON, stdout, stderr)
+}
+
+// runPcbCheckIntent is runPcbCheck plus the isolation rule: with intentPath
+// the copper of two insulated domains is checked against the pair's
+// clearance and creepage; with boardPath (a `pcb dump --include-copper`
+// file) the check runs offline and only the isolation rule applies.
+func runPcbCheckIntent(cfg *appConfig, window string, couplingW float64, checkSpec *spec.Spec, intentPath, boardPath string, strict, asJSON bool, stdout, stderr io.Writer) error {
+	var rep *pcbCheckReport
+	var err error
+	if boardPath != "" {
+		if intentPath == "" {
+			return fmt.Errorf("--board runs the offline isolation check and needs --intent")
+		}
+		rep = &pcbCheckReport{}
+		raw, rerr := os.ReadFile(boardPath)
+		if rerr != nil {
+			return rerr
+		}
+		if err := addIsolationFindings(rep, raw, intentPath); err != nil {
+			return err
+		}
+		rep.Limitations = append(rep.Limitations, "offline --board: only the isolation rule ran (no live DFM rules)")
+	} else {
+		rep, err = gatherPcbCheckReport(cfg, window, couplingW, checkSpec, stderr)
+		if err != nil {
+			return err
+		}
+		if intentPath != "" {
+			snap, serr := fetchBoardSnapshot(cfg, window, boardSnapshotOpts{withRules: true, withLayers: true, withCopper: true, withFootprintHoles: true})
+			if serr != nil {
+				return fmt.Errorf("isolation check: board snapshot: %w", serr)
+			}
+			raw, merr := json.Marshal(snap)
+			if merr != nil {
+				return merr
+			}
+			if err := addIsolationFindings(rep, raw, intentPath); err != nil {
+				return err
+			}
+		}
 	}
 
 	if asJSON {

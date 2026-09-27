@@ -3998,7 +3998,7 @@ short/overlap/off-board errors still exit non-zero.`,
 	{
 		var strict, asJSON bool
 		var couplingW float64
-		var checkSpecPath string
+		var checkSpecPath, checkIntentPath, checkBoardPath string
 		c := &cobra.Command{
 			Use:   "check",
 			Short: "DFM audit: acute angles / dangling copper / bad vias / neck-down / 3W coupling (read-only)",
@@ -4029,6 +4029,15 @@ Rules:
   • width-under-spec  — a routed power track thinner than its net-class spec  → WARN
                         (branch 0.25mm / trunk 0.4mm / high-current 0.5mm — see
                         'pcb net-classes'; fine-pitch narrowing + stitch stubs exempt)
+  • iso-clearance / iso-creepage (with --intent) — copper of two insulated
+                        voltage domains (intent.json pairs) closer than the
+                        pair's clearance (any shared layer) or, on the outer
+                        surface, a creepage path shorter than required; milled
+                        slots (MULTI-layer cutouts ≥ the slot width) lengthen
+                        the path → ERROR. Distances come from the intent or
+                        from IEC 62368-1 / 60601-1 / 61010-1 / IPC-2221B tables
+                        (engineering reference — confirm with the lab).
+                        --board dump.json runs this rule offline.
 
 Complements 'pcb drc' (rule clearance) and 'pcb layout-lint' (placement/routability).
 Exit code: 0 by default (informational). --strict exits non-zero on any WARN/ERROR
@@ -4037,7 +4046,9 @@ so it can gate the flow. Arcs are out of scope for v1 (line/via/pad only).`,
 			Example: `  pcbpilot pcb check
   pcbpilot pcb check --json
   pcbpilot pcb check --strict
-  pcbpilot pcb check --coupling-w 2.5`,
+  pcbpilot pcb check --coupling-w 2.5
+  pcbpilot pcb check --intent intent.json --strict
+  pcbpilot pcb check --intent intent.json --board board.json --json`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				var checkSpec *spec.Spec
 				if checkSpecPath != "" {
@@ -4050,9 +4061,11 @@ so it can gate the flow. Arcs are out of scope for v1 (line/via/pad only).`,
 						return perr
 					}
 				}
-				return runPcbCheck(cfg, window, couplingW, checkSpec, strict, asJSON, stdout, stderr)
+				return runPcbCheckIntent(cfg, window, couplingW, checkSpec, checkIntentPath, checkBoardPath, strict, asJSON, stdout, stderr)
 			},
 		}
+		c.Flags().StringVar(&checkIntentPath, "intent", "", "intent.json (pcbpilot intent derive): add the isolation rule — clearance/creepage between insulated voltage domains, slots credited")
+		c.Flags().StringVar(&checkBoardPath, "board", "", "with --intent: check a 'pcb dump --include-copper' file offline (isolation rule only, no editor needed)")
 		c.Flags().BoolVar(&strict, "strict", false, "exit non-zero when there are issues (gate mode)")
 		c.Flags().BoolVar(&asJSON, "json", false, "emit the report as JSON")
 		c.Flags().Float64Var(&couplingW, "coupling-w", 3.0, "3W-rule factor: flag different-net parallel traces closer than this × trace width")

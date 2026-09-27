@@ -143,6 +143,23 @@ func checkDRCTol(b *Board, an *Analysis, st *Stackup, tracks []Track, vias []Via
 		for _, p := range an.Nets {
 			maxClr = math.Max(maxClr, p.ClearanceMil)
 		}
+		// Domain pairs (intent) demand their insulation clearance between
+		// the two domains' copper on every layer; creepage (surface, with
+		// slot credit) is judged by CheckIsolation.
+		if an.Iso != nil {
+			for _, p := range an.Iso.Pairs {
+				maxClr = math.Max(maxClr, p.ClearanceMil)
+			}
+		}
+	}
+	pairClr := func(a, b string) float64 {
+		if an == nil || an.Iso == nil {
+			return 0
+		}
+		if p := an.Iso.NetPair(a, b); p != nil {
+			return p.ClearanceMil
+		}
+		return 0
 	}
 	buckets := map[[2]int][]*drcItem{}
 	key := func(x, y float64) [2]int { return [2]int{int(math.Floor(x / cell)), int(math.Floor(y / cell))} }
@@ -178,7 +195,7 @@ func checkDRCTol(b *Board, an *Analysis, st *Stackup, tracks []Track, vias []Via
 				if seen[pair] {
 					continue
 				}
-				req := math.Max(clr(a.net), clr(c.net))
+				req := math.Max(math.Max(clr(a.net), clr(c.net)), pairClr(a.net, c.net))
 				if !a.bb.Expand(req).Overlaps(c.bb) {
 					continue
 				}

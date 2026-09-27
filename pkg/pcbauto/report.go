@@ -5,6 +5,8 @@ import (
 	"io"
 	"sort"
 	"strings"
+
+	"github.com/zhuangzard/pcbpilot/pkg/safety"
 )
 
 // Report bundles everything one run decided, for JSON and Markdown output.
@@ -184,6 +186,7 @@ func (r *Report) WriteMarkdown(w io.Writer) {
 		p("\n")
 		writePowerIntegrity(p, rr.Power)
 	}
+	writeIsolation(p, res.Isolation)
 
 	writeJoint(p, r)
 	if si := r.SI; si != nil && (len(si.Pairs) > 0 || len(si.Findings) > 0) {
@@ -371,3 +374,41 @@ func writeStage0(p func(string, ...any), r *Report) {
 }
 
 var verdictCN = map[string]string{"ok": "宽裕", "tight": "偏紧", "insufficient": "不足", "excluded": "排除"}
+
+// writeIsolation renders the intent insulation outcome.
+func writeIsolation(p func(string, ...any), iso *IsolationReport) {
+	if iso == nil || len(iso.Pairs) == 0 {
+		return
+	}
+	p("### 安规隔离（%s）\n\n| 域 A | 域 B | 工作电压 | 绝缘 | 电气间隙 | 爬电距离 | 槽宽下限 | 来源 | 依据 |\n|---|---|---|---|---|---|---|---|---|\n", iso.Standard)
+	for _, ip := range iso.Pairs {
+		p("| %s | %s | %.0f Vrms / %.0f Vpk | %s | %.2f mm | %.2f mm | %.2f mm | %s | %s |\n", ip.A, ip.B, ip.WorkingVrms, ip.WorkingVpeak, ip.Insulation,
+			ip.ClearanceMil*0.0254, ip.CreepageMil*0.0254, ip.SlotWidthMil*0.0254, ip.Source, ip.Ref)
+	}
+	p("\n> %s\n\n", safety.Caveat)
+	for _, s := range iso.Slots {
+		p("- 开槽 %s（%s|%s）：%.0f × %.0f mil，焊盘间距 %.0f mil\n", s.Ref, s.A, s.B, s.WidthMil, s.LengthMil, s.GapMil)
+		for _, w := range s.Why {
+			p("  - %s\n", w)
+		}
+	}
+	if len(iso.Moats) > 0 {
+		p("- 隔离带禁铺铜区域 %d 个（live `pcb.region.create` no-pours）\n", len(iso.Moats))
+	}
+	for _, n := range iso.Notes {
+		p("- %s\n", n)
+	}
+	if len(iso.Findings) == 0 {
+		p("\n跨域铜皮电气间隙 / 爬电距离核查：**0 违规**（外层按沿面路径并计入开槽；覆铜未计入，由禁铺铜区域保证）。\n\n")
+		return
+	}
+	p("\n跨域铜皮核查：**%d 处不足**\n\n| 类型 | 对象 A | 对象 B | 直线 mil | 沿面 mil | 要求 mil |\n|---|---|---|---|---|---|\n", len(iso.Findings))
+	for i, f := range iso.Findings {
+		if i == 30 {
+			p("| … | 另 %d 处 | | | | |\n", len(iso.Findings)-30)
+			break
+		}
+		p("| %s | %s (%s) | %s (%s) | %.1f | %.1f | %.1f |\n", f.Kind, f.ItemA, f.NetA, f.ItemB, f.NetB, f.GapMil, f.PathMil, f.RequiredMil)
+	}
+	p("\n")
+}

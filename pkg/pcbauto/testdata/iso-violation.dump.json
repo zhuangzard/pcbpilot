@@ -1,0 +1,175 @@
+{
+ "components": [
+  {
+   "primitiveId": "c1",
+   "designator": "J1",
+   "device": "KF301-2P",
+   "layer": 1,
+   "x": 200,
+   "y": 1000,
+   "pads": [
+    {
+     "padNumber": "1",
+     "net": "AC_L",
+     "layer": 12,
+     "x": 200,
+     "y": 900,
+     "width": 80,
+     "height": 80
+    },
+    {
+     "padNumber": "2",
+     "net": "AC_N",
+     "layer": 12,
+     "x": 200,
+     "y": 1100,
+     "width": 80,
+     "height": 80
+    }
+   ]
+  },
+  {
+   "primitiveId": "c2",
+   "designator": "U1",
+   "device": "PC817",
+   "layer": 1,
+   "x": 1000,
+   "y": 1000,
+   "pads": [
+    {
+     "padNumber": "1",
+     "net": "LED_A",
+     "layer": 1,
+     "x": 910,
+     "y": 950,
+     "width": 60,
+     "height": 30
+    },
+    {
+     "padNumber": "2",
+     "net": "AC_N",
+     "layer": 1,
+     "x": 910,
+     "y": 1050,
+     "width": 60,
+     "height": 30
+    },
+    {
+     "padNumber": "3",
+     "net": "GND",
+     "layer": 1,
+     "x": 1090,
+     "y": 1050,
+     "width": 60,
+     "height": 30
+    },
+    {
+     "padNumber": "4",
+     "net": "ZC",
+     "layer": 1,
+     "x": 1090,
+     "y": 950,
+     "width": 60,
+     "height": 30
+    }
+   ]
+  },
+  {
+   "primitiveId": "c3",
+   "designator": "C1",
+   "device": "100nF",
+   "layer": 1,
+   "x": 400,
+   "y": 700,
+   "pads": [
+    {
+     "padNumber": "1",
+     "net": "+3V3",
+     "layer": 1,
+     "x": 370,
+     "y": 700,
+     "width": 30,
+     "height": 30
+    },
+    {
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 1,
+     "x": 430,
+     "y": 700,
+     "width": 30,
+     "height": 30
+    }
+   ]
+  }
+ ],
+ "outline": {
+  "bbox": {
+   "minX": 0,
+   "minY": 0,
+   "maxX": 2000,
+   "maxY": 2000
+  },
+  "points": [
+   [
+    0,
+    0
+   ],
+   [
+    2000,
+    0
+   ],
+   [
+    2000,
+    2000
+   ],
+   [
+    0,
+    2000
+   ]
+  ],
+  "source": "polygon"
+ },
+ "copperLayers": 2,
+ "rules": {
+  "clearanceMil": 6,
+  "trackWidthMil": 10,
+  "trackWidthMinMil": 5,
+  "viaDrillMil": 12,
+  "viaDiameterMil": 24,
+  "copperToEdgeMil": 10
+ },
+ "copper": {
+  "availability": {
+   "routing": "ok"
+  },
+  "lines": [
+   {
+    "primitiveId": "t1",
+    "net": "GND",
+    "layer": 1,
+    "startX": 285,
+    "startY": 700,
+    "endX": 285,
+    "endY": 950,
+    "lineWidth": 10
+   },
+   {
+    "primitiveId": "t2",
+    "net": "ZC",
+    "layer": 1,
+    "startX": 1120,
+    "startY": 950,
+    "endX": 1400,
+    "endY": 950,
+    "lineWidth": 10
+   }
+  ],
+  "arcs": [],
+  "vias": [],
+  "pours": [],
+  "poured": [],
+  "regions": [],
+  "fills": []
+ }
+}

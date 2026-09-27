@@ -22,6 +22,9 @@ type Result struct {
 	Route    *RouteResult `json:"route"`
 	DRC      *DRCReport   `json:"drc"`
 	Attempts []Attempt    `json:"attempts"`
+	// Isolation is the intent insulation outcome: pairs, milled slots,
+	// no-pour regions and the creepage/clearance check of the routed copper.
+	Isolation *IsolationReport `json:"isolation,omitempty"`
 }
 
 // Attempt records one stackup variant tried by the pipeline.
@@ -49,6 +52,9 @@ func stackLabel(s *Stackup) string {
 // a mixed signal+pour layer and keeps the better result.
 func Run(ctx context.Context, b *Board, opt Options) (*Result, error) {
 	pre := Analyze(b, opt.Power, nil)
+	// Milled slots under bridge parts are planned on the final placement
+	// and become owned holes the router keeps copper away from.
+	isoSlots, isoNotes := PlanIsoSlots(b, pre.Iso)
 	st := DecideStackup(b, pre, opt.Stack)
 	res := &Result{}
 	try := func(st *Stackup) (*Analysis, *RouteResult, *DRCReport, error) {
@@ -126,6 +132,7 @@ func Run(ctx context.Context, b *Board, opt Options) (*Result, error) {
 	if err := irReroute(ctx, b, opt, res); err != nil {
 		return nil, err
 	}
+	res.Isolation = isolationReport(b, res.Analysis, res.Route, isoSlots, isoNotes)
 	return res, nil
 }
 

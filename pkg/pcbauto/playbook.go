@@ -148,6 +148,26 @@ func BuildPlaybook(in PlaybookInput) *Playbook {
 			}
 		}
 	}
+	// 2b. Isolation: milled slots (MULTI-layer fill = board cutout, the same
+	// typed primitive as `pcb slot` / mounting holes) and the isolation
+	// band as live regions, so EasyEDA pours stay out of it.
+	if iso := res.Isolation; iso != nil {
+		for i, s := range iso.Slots {
+			add(sprintf("iso-slot-%d", i+1), sprintf("isolation slot under %s (%s|%s, %.0f×%.0f mil)", s.Ref, s.A, s.B, s.WidthMil, s.LengthMil),
+				"pcb.fill.create", map[string]any{"points": pts2(s.Poly), "layer": LayerMulti})
+		}
+	}
+	if in.Placement != nil && len(in.Placement.Barriers) > 0 {
+		for i, k := range in.Placement.Barriers {
+			add(sprintf("iso-band-%d", i+1), k.Name, "pcb.region.create", map[string]any{
+				"points": pts2(k.Poly), "layer": LayerMulti, "ruleType": []string{"no-wires", "no-pours"}})
+		}
+	} else if iso := res.Isolation; iso != nil {
+		for i, m := range iso.Moats {
+			add(sprintf("iso-moat-%d", i+1), "isolation no-pour band", "pcb.region.create", map[string]any{
+				"points": pts2(m), "layer": LayerMulti, "ruleType": []string{"no-pours"}})
+		}
+	}
 	// 3. Part poses (only parts that moved).
 	if in.Placement != nil {
 		for _, p := range in.Placement.Placements {

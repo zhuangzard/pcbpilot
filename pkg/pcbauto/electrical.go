@@ -50,6 +50,10 @@ type PowerSpec struct {
 	// Sim are simulated per-pin currents (`pcb auto run --sim`): nets it
 	// lists are sized from them and their copper is tapered per segment.
 	Sim *SimPower `json:"-"`
+	// Intent is intent.json (`pcb auto run --intent`): declared per-net
+	// widths/currents/vias/clearances and net classes win over inference,
+	// and its domains/pairs drive the isolation rules.
+	Intent *Intent `json:"-"`
 	// boost is IR-drop feedback for a re-route (see simBoost).
 	boost map[string]simBoost
 }
@@ -344,6 +348,8 @@ type Analysis struct {
 	Sim *SimSummary `json:"sim,omitempty"`
 	// IRBudget is the DC drop budget applied to power nets.
 	IRBudget IRBudget `json:"irBudget"`
+	// Iso is the domain insulation (intent pairs), nil without an intent.
+	Iso *IsoRules `json:"isolation,omitempty"`
 }
 
 // SimSummary is the provenance of the simulated currents.
@@ -369,6 +375,9 @@ func Analyze(b *Board, spec PowerSpec, stack *Stackup) *Analysis {
 	}
 	r := b.Rules
 	a := &Analysis{ByNet: map[string]*NetPlan{}, TempRiseC: spec.TempRiseC, IRBudget: DefaultIRBudget()}
+	if spec.Intent != nil {
+		a.Iso = buildIsoRules(b, spec.Intent)
+	}
 	if spec.IRBudget != nil {
 		a.IRBudget = *spec.IRBudget
 	}
@@ -437,6 +446,9 @@ func Analyze(b *Board, spec PowerSpec, stack *Stackup) *Analysis {
 				_, isDeclared := declared[upper(n.Name)]
 				applySim(a, np, n, sn, spec.Sim, isDeclared)
 			}
+		}
+		if in := intentLookup(spec.Intent, n.Name); in != nil {
+			applyIntentBase(np, in)
 		}
 		if p := explicitPair[n.Name]; p != "" {
 			np.PairWith, np.Role = p, RoleDiff
@@ -544,6 +556,16 @@ func Analyze(b *Board, spec PowerSpec, stack *Stackup) *Analysis {
 			np.ViasPerTransition = int(math.Max(1, math.Ceil(viaA/per)))
 		} else {
 			np.ViasPerTransition = 1
+		}
+		if spec.Intent != nil {
+			in := intentLookup(spec.Intent, np.Net)
+			if cls := intentClass(spec.Intent, np.Net, in); in != nil || cls != nil {
+				applyIntentRules(np, in, cls, r)
+				if bo, ok := spec.boost[np.Net]; ok && bo.WidthMil > np.WidthMil {
+					np.WidthMil = bo.WidthMil // IR-drop feedback only ever widens
+					np.InnerWidthMil = math.Max(np.InnerWidthMil, bo.WidthMil)
+				}
+			}
 		}
 		switch np.Role {
 		case RoleClock, RoleRF:

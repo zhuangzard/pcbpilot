@@ -1,0 +1,25 @@
+{
+  "standard": {"name": "IEC62368-1", "insulation": "reinforced", "mop": "", "mopCount": 0,
+               "pollutionDegree": 2, "materialGroup": "IIIa", "altitudeM": 2000,
+               "overvoltageCategory": "II", "coated": false},
+  "domains": [
+    {"id": "MAINS", "kind": "mains", "nets": ["AC_L", "AC_N", "L_F", "LED_A"], "reference": "AC_N",
+     "workingVrms": 230, "workingVpeak": 325},
+    {"id": "SELV", "kind": "SELV", "nets": ["GND", "+3V3", "ZC", "SDA", "SCL", "NRST"], "reference": "GND",
+     "workingVrms": 3.3, "workingVpeak": 3.3}
+  ],
+  "nets": {
+    "AC_L": {"role": "power", "domain": "MAINS", "voltage": {"nom": 230, "min": -325, "max": 325, "peak": 325},
+             "currentA": 0.5, "widthMil": {"outer": 30, "inner": 30, "min": 20}, "viasPerTransition": 2,
+             "clearanceMil": 0, "netClass": "MAINS", "why": ["230 Vac input"]},
+    "+3V3": {"role": "power", "domain": "SELV", "voltage": {"nom": 3.3, "min": 3.2, "max": 3.4, "peak": 3.4},
+             "currentA": 0.3, "widthMil": {"outer": 20, "inner": 16, "min": 10}, "viasPerTransition": 1,
+             "why": ["MCU rail"]}
+  },
+  "pairs": [
+    {"a": "domain:MAINS", "b": "domain:SELV", "workingVrms": 230, "workingVpeak": 325, "insulation": "reinforced",
+     "why": ["mains to touchable SELV"]}
+  ],
+  "netClasses": [{"name": "MAINS", "nets": ["AC_L", "AC_N", "L_F"], "trackMil": 25, "clearanceMil": 20}],
+  "findings": []
+}
