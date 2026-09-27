@@ -124,6 +124,7 @@ type rnet struct {
 	neckW       float64        // pad-entry width when the full width does not fit
 	neckR       float64        // claim radius at neck width
 	neck        map[int32]bool // columns near own pads where necking is allowed
+	isoDom      int            // index into router.iso domains, -1 = unfenced
 }
 
 type rpath struct {
@@ -194,6 +195,13 @@ type router struct {
 	owners      map[int][]uint32 // nodeOK pad-owner summaries per radius key
 	ownerMRU    [8]ownerEntry
 	viaC        []float64
+	// sqHard / sqPad are per-layer squared cell distances to hard cells /
+	// multi-net pads and to any pad claim (large-radius static maps).
+	sqHard, sqPad [][]uint32
+	// iso is the domain territory field (intent insulation pairs): copper
+	// of a fenced net keeps half the pair requirement from the partner
+	// territories. nil without an intent.
+	iso *isoField
 }
 
 // auditHook lets tests observe router state between phases.
@@ -245,6 +253,7 @@ func Route(ctx context.Context, b *Board, st *Stackup, an *Analysis, opt RouteOp
 	res := &RouteResult{}
 	r.setupNets()
 	r.rasterise()
+	r.setupIso()
 	if !opt.NoFanout {
 		r.fanout(res)
 		r.bgaEscape(res)
@@ -418,6 +427,9 @@ func (r *router) rasterise() {
 // violation), the exact pad distance decides.
 func (r *router) nodeOK(n *rnet, l, x, y int, rad float64) bool {
 	gr := r.gr
+	if r.iso != nil && n.isoDom >= 0 && !r.isoOK(n, l, x, y, rad-n.share) {
+		return false
+	}
 	switch r.static(rad)[gr.idx(l, x, y)] {
 	case staticClear:
 		return true
@@ -579,6 +591,14 @@ func (r *router) staticSlow(rad float64) []uint8 {
 	}
 	m := make([]uint8, len(gr.flags))
 	offs, inner := gr.ring(rad)
+	if len(offs) > staticEDTMinOffsets {
+		r.staticByDistance(rad, m)
+		if r.statics == nil {
+			r.statics = map[int][]uint8{}
+		}
+		r.statics[key] = m
+		return m
+	}
 	for l := range gr.layers {
 		for y := 0; y < gr.H; y++ {
 			for x := 0; x < gr.W; x++ {
@@ -1847,3 +1867,56 @@ func (r *router) addFanHole(v Via) {
 // on the fixture boards it cost bbclaw 7 % completion and on the ESP32 board
 // it removed the ESD stub but not the vias.
 var daisyDiff = false
+
+// staticEDTMinOffsets is the ring size above which the static map is built
+// from distance transforms instead of scanning every cell's ring. Both give
+// the same map; the scan is O(cells × ring) and a high-voltage net's 60 mil
+// claim made it minutes on a small board. Small rings (every ordinary
+// signal, power and via radius) keep the scan.
+var staticEDTMinOffsets = 400
+
+// staticByDistance fills the static map for claim radius rad from the exact
+// squared distances to hard cells / multi-net pads (blocked within the
+// inner disk), to the grid edge (an inner offset off the grid blocks) and
+// to any pad claim (pads within the disk + ring): the same predicate the
+// ring scan in staticSlow evaluates offset by offset.
+func (r *router) staticByDistance(rad float64, m []uint8) {
+	gr := r.gr
+	if r.sqHard == nil {
+		plane := gr.W * gr.H
+		r.sqHard = make([][]uint32, len(gr.layers))
+		r.sqPad = make([][]uint32, len(gr.layers))
+		hard := make([]bool, plane)
+		pad := make([]bool, plane)
+		for l := range gr.layers {
+			for i := 0; i < plane; i++ {
+				j := l*plane + i
+				p := gr.pad[j]
+				hard[i] = gr.flags[j]&flagHard != 0 || p == -2
+				pad[i] = p != -1
+			}
+			r.sqHard[l] = edtSq(hard, gr.W, gr.H)
+			r.sqPad[l] = edtSq(pad, gr.W, gr.H)
+		}
+	}
+	rc := rad/gr.g + 0.25
+	ro := rc + 1.5
+	rc2, ro2 := rc*rc, ro*ro
+	for l := range gr.layers {
+		sh, sp := r.sqHard[l], r.sqPad[l]
+		for y := 0; y < gr.H; y++ {
+			for x := 0; x < gr.W; x++ {
+				i := y*gr.W + x
+				out := min(x+1, y+1, gr.W-x, gr.H-y)
+				v := staticClear
+				switch {
+				case float64(out*out) <= rc2 || float64(sh[i]) <= rc2:
+					v = staticBlocked
+				case float64(sp[i]) <= ro2:
+					v = staticPads
+				}
+				m[gr.idx(l, x, y)] = v
+			}
+		}
+	}
+}

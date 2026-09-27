@@ -120,6 +120,7 @@ type placer struct {
 	boxes    map[*Part]Rect
 	rudy     *rudy // congestion grid, live during annealing only
 	intimate map[[2]*Part]bool
+	strips   []*Keepout // isolation strips this placement added to the board
 }
 
 // intimateGap is the courtyard gap kept between parts that connect directly
@@ -180,6 +181,7 @@ func Place(b *Board, an *Analysis, c *Circuit, m *Mechanics, opt PlaceOptions) (
 		res.Outline = pl.autosize()
 	}
 	pl.metrics(res)
+	pl.carveStrips(res)
 	for _, p := range b.Parts {
 		res.Placements = append(res.Placements, Placement{Ref: p.Ref, ID: p.ID, X: round2(p.Pos.X), Y: round2(p.Pos.Y),
 			Rot: p.Rotation, Side: p.Side, Fixed: p.Fixed, Block: c.BlockOf[p.Ref]})
@@ -347,6 +349,16 @@ func coreOf(c *Circuit, ref string) string {
 func (pl *placer) zones(res *PlaceResult) {
 	b, c := pl.b, pl.c
 	userZone := map[string]Rect{}
+	// A re-placement (place/route loop pass) replaces the previous pass's
+	// isolation strips instead of stacking another copy.
+	ks := b.Keepouts[:0]
+	for _, k := range b.Keepouts {
+		if !strings.HasPrefix(k.Name, isoStripPrefix) {
+			ks = append(ks, k)
+		}
+	}
+	b.Keepouts = ks
+	stripOf := map[[2]string]Rect{}
 	for _, z := range pl.m.Zones {
 		if z.Domain != "" {
 			userZone[z.Domain] = z.Rect
@@ -406,9 +418,11 @@ func (pl *placer) zones(res *PlaceResult) {
 			res.Zones = append(res.Zones, Zone{Domain: k.d.ID, Rect: r})
 			if gap > 0 {
 				strip := Rect{x + w, b.Bounds().MinY, x + w + gap, b.Bounds().MaxY}
-				ko := Keepout{Name: "isolation " + k.d.ID + "|" + ks[i+1].d.ID, Poly: strip.Corners(), NoCopper: true, NoVias: true}
+				ko := Keepout{Name: isoStripPrefix + k.d.ID + "|" + ks[i+1].d.ID, Poly: strip.Corners(), NoCopper: true, NoVias: true}
 				b.Keepouts = append(b.Keepouts, &ko)
+				pl.strips = append(pl.strips, &ko)
 				res.Barriers = append(res.Barriers, ko)
+				stripOf[isoKey(k.d.ID, ks[i+1].d.ID)] = strip
 				res.Notes = append(res.Notes, sprintf("isolation strip %.0f mil wide between %s and %s (no copper; bridges straddle it)", gap, k.d.ID, ks[i+1].d.ID))
 			}
 			x += w + gap
@@ -416,14 +430,20 @@ func (pl *placer) zones(res *PlaceResult) {
 	}
 	for _, p := range pl.movable {
 		d := c.DomainOf[p.Ref]
-		if r, ok := userZone[d]; ok && !c.Kinds[p.Ref].Bridges() {
+		if r, ok := userZone[d]; ok && !c.IsBridge(p.Ref) {
 			pl.zoneOf[p] = r
 			continue
 		}
 		pl.zoneOf[p] = pl.region
-		if c.Kinds[p.Ref].Bridges() && len(res.Barriers) > 0 {
-			// A bridge sits centred on its strip.
+		if c.IsBridge(p.Ref) && len(res.Barriers) > 0 {
+			// A bridge sits centred on the strip of its own barrier.
 			s := PolyBounds(res.Barriers[0].Poly)
+			for _, br := range c.Barriers {
+				if r, ok := stripOf[isoKey(br.A, br.B)]; ok && containsStr(br.Bridges, p.Ref) {
+					s = r
+					break
+				}
+			}
 			pl.zoneOf[p] = Rect{s.Center().X - 1, pl.region.MinY, s.Center().X + 1, pl.region.MaxY}
 		}
 	}
@@ -493,14 +513,14 @@ func (pl *placer) partCost(p *Part) float64 {
 		dy := math.Max(0, math.Max(z.MinY-cen.Y, cen.Y-z.MaxY))
 		cost += 30 * (dx + dy) * math.Max(bx.W(), bx.H())
 		// Zone body containment for non-bridges keeps HV parts wholly in zone.
-		if !pl.c.Kinds[p.Ref].Bridges() && z != pl.region {
+		if !pl.c.IsBridge(p.Ref) && z != pl.region {
 			cost += 20 * outside(bx, z)
 		}
 	}
 	for _, k := range pl.b.Keepouts {
 		if (k.NoParts || k.NoCopper) && k.Owner != p.Ref {
 			kb := PolyBounds(k.Poly)
-			if pl.c.Kinds[p.Ref].Bridges() && !k.NoParts {
+			if pl.c.IsBridge(p.Ref) && !k.NoParts {
 				continue // bridges straddle isolation strips by design
 			}
 			cost += 20 * bx.OverlapArea(kb)
@@ -518,6 +538,7 @@ func (pl *placer) partCost(p *Part) float64 {
 			cost += 20 * bx.OverlapArea(hz.Rect)
 		}
 	}
+	cost += pl.isoCost(p, bx)
 	if !pl.hardOnly {
 		cost += pl.tetherCost(p)
 		cost += pl.converterCost(p)
@@ -1347,7 +1368,7 @@ func (pl *placer) metrics(res *PlaceResult) {
 				}
 			}
 		}
-		if z, ok := pl.zoneOf[p]; ok && z != pl.region && !pl.c.Kinds[p.Ref].Bridges() && outside(bi, z) > 1 {
+		if z, ok := pl.zoneOf[p]; ok && z != pl.region && !pl.c.IsBridge(p.Ref) && outside(bi, z) > 1 {
 			m.OutOfZone++
 		}
 		for _, k := range pl.b.Keepouts {
@@ -2114,4 +2135,115 @@ func (pl *placer) unfreezeMacros() {
 		pl.movable = append(pl.movable, pl.macro[c]...)
 	}
 	pl.macro = nil
+}
+
+// isoStripPrefix names the isolation strips the placer adds.
+const isoStripPrefix = "isolation "
+
+// carveStrips opens each isolation strip where a bridge part sits on it
+// (intent runs only): a bridge whose pad rows are closer than the strip is
+// wide would otherwise have its pads inside a no-copper band and be
+// unroutable. Across the bridge the domain fence, the milled slot and the
+// isolation check carry the insulation instead.
+func (pl *placer) carveStrips(res *PlaceResult) {
+	if pl.an == nil || pl.an.Iso == nil || len(pl.strips) == 0 {
+		return
+	}
+	margin := math.Max(DefaultSlotClearance, pl.b.Rules.Clearance)
+	var out []*Keepout
+	res.Barriers = res.Barriers[:0]
+	for _, k := range pl.strips {
+		s := PolyBounds(k.Poly)
+		type span struct{ lo, hi float64 }
+		var cut []span
+		for _, p := range pl.b.Parts {
+			if !pl.c.IsBridge(p.Ref) {
+				continue
+			}
+			body := p.Body()
+			for _, pd := range p.Pads {
+				body = body.Union(pd.Box.Bounds())
+			}
+			if body.MaxX < s.MinX || body.MinX > s.MaxX {
+				continue
+			}
+			cut = append(cut, span{body.MinY - margin, body.MaxY + margin})
+		}
+		sort.Slice(cut, func(i, j int) bool { return cut[i].lo < cut[j].lo })
+		y := s.MinY
+		piece := 0
+		emit := func(y0, y1 float64) {
+			if y1-y0 < 1 {
+				return
+			}
+			piece++
+			ko := &Keepout{Name: sprintf("%s#%d", k.Name, piece), Poly: Rect{s.MinX, y0, s.MaxX, y1}.Corners(), NoCopper: true, NoVias: true}
+			out = append(out, ko)
+		}
+		for _, c := range cut {
+			if c.lo > y {
+				emit(y, math.Min(c.lo, s.MaxY))
+			}
+			y = math.Max(y, c.hi)
+		}
+		emit(y, s.MaxY)
+		if len(cut) > 0 {
+			res.Notes = append(res.Notes, sprintf("%s opened at %d bridge position(s): the domain fence, slot and isolation check carry the insulation there", k.Name, len(cut)))
+		}
+	}
+	drop := map[*Keepout]bool{}
+	for _, k := range pl.strips {
+		drop[k] = true
+	}
+	ks := pl.b.Keepouts[:0]
+	for _, k := range pl.b.Keepouts {
+		if !drop[k] {
+			ks = append(ks, k)
+		}
+	}
+	pl.b.Keepouts = append(ks, out...)
+	pl.strips = out
+	for _, k := range out {
+		res.Barriers = append(res.Barriers, *k)
+	}
+}
+
+// isoCost keeps the pads of insulated domains (intent pairs) the pair's
+// creepage apart across different parts: the zones and the isolation strip
+// only bound part centres and bodies softly, and next to a bridge the strip
+// is open. A bridge's own pad rows are its footprint's (slot / part choice).
+func (pl *placer) isoCost(p *Part, bx Rect) float64 {
+	if pl.an == nil || pl.an.Iso == nil || len(pl.an.Iso.Pairs) == 0 {
+		return 0
+	}
+	iso := pl.an.Iso
+	if false {
+		return 0
+	}
+	reach := iso.MaxClearanceMil()
+	cost := 0.0
+	seen := map[*Part]bool{}
+	pl.forBuckets(bx.Expand(reach), func(q *Part) {
+		if q == p || seen[q] {
+			return
+		}
+		seen[q] = true
+		for _, a := range p.Pads {
+			da := iso.NetDomain[a.Net]
+			if da == "" {
+				continue
+			}
+			for _, c := range q.Pads {
+				ip := iso.Pair(da, iso.NetDomain[c.Net])
+				if ip == nil {
+					continue
+				}
+				gap := c.Box.Dist(a.Box.C) - math.Min(a.Box.W, a.Box.H)/2
+				if short := ip.CreepageMil - gap; short > 0 {
+					cost += 800 * short
+				}
+			}
+		}
+	})
+	return cost
 }

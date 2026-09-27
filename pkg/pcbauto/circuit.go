@@ -161,6 +161,7 @@ type Link struct {
 // Domain is a voltage/reference domain (parts sharing a ground reference).
 type Domain struct {
 	ID         string   `json:"id"`
+	Kind       string   `json:"kind,omitempty"` // intent domain kind (SELV, mains, patient, …)
 	Ground     string   `json:"ground"`
 	MaxVoltage float64  `json:"maxVoltage"`
 	Hazardous  bool     `json:"hazardous"` // above SELV (60 V DC / 30 V AC) or mains
@@ -179,6 +180,9 @@ type Barrier struct {
 	CreepageMil  float64  `json:"creepageMil"`
 	ClearanceMil float64  `json:"clearanceMil"`
 	SlotUnder    []string `json:"slotUnder,omitempty"` // bridges needing a milled slot
+	SlotWidthMil float64  `json:"slotWidthMil,omitempty"`
+	Ref          string   `json:"standardRef,omitempty"`
+	Source       string   `json:"source,omitempty"` // inferred | intent | computed
 	Why          []string `json:"why"`
 }
 
@@ -196,7 +200,10 @@ type Circuit struct {
 	Converters []*Converter `json:"converters,omitempty"`
 	// Chains are connector-to-IC signal paths whose part order matters.
 	Chains []*SignalChain `json:"chains,omitempty"`
-	Notes  []string       `json:"notes,omitempty"`
+	// Bridge marks parts spanning two insulated intent domains that are not
+	// an isolator kind (a Y capacitor, a sense resistor chain).
+	Bridge map[string]bool `json:"bridgeParts,omitempty"`
+	Notes  []string        `json:"notes,omitempty"`
 }
 
 var (
@@ -221,11 +228,17 @@ func Understand(b *Board, an *Analysis) *Circuit {
 		c.Kinds[p.Ref] = ClassifyPart(p)
 	}
 	c.buildDomains(b, an)
+	intent := an != nil && an.Iso != nil && len(an.Iso.Domains) > 0
+	if intent {
+		c.intentDomains(b, an)
+	}
 	c.buildBlocks(b, an)
 	c.buildConverters(b, an)
 	c.buildChains(b, an)
 	c.buildLinks(b, an)
-	c.buildBarriers(b, an)
+	if !intent {
+		c.buildBarriers(b, an)
+	}
 	return c
 }
 

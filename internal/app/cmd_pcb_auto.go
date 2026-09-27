@@ -41,6 +41,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 		board, mech, power string
 		sim, irBudget      string
 		pinCaps            string
+		intent             string
 		groups             []string
 		layers, maxLayers  int
 		grid               float64
@@ -52,6 +53,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 		c.Flags().StringVar(&in.mech, "mech", "", "mechanical spec JSON (outline, holes, fixed/edge parts, keepouts, zones)")
 		c.Flags().StringVar(&in.power, "power", "", "power spec JSON (rails with voltage/currentA, diffPairs, tempRiseC)")
 		c.Flags().StringVar(&in.sim, "sim", "", "simulated per-pin currents (pcbpilot sim power JSON, schemaVersion 1): nets it lists are sized from the \"worst\" scenario (else the per-pin maximum), power copper is tapered per segment to its own current, fan-out vias are counted per pad, and the routed copper is solved for DC IR drop")
+		c.Flags().StringVar(&in.intent, "intent", "", "intent.json (pcbpilot intent derive): declared per-net width/current/vias/clearance and net classes win over --power/--sim/inference (source \"intent\"); its domains and insulation pairs (IEC 62368-1 / 60601-1 MOOP·MOPP / 61010-1 / IPC-2221B) drive the domain zones, the isolation band (= pair creepage), per-pair clearance in routing and DRC, milled slots under bridge parts whose pad rows are closer than the creepage (pcb.fill.create on MULTI = board cutout), no-pour regions, and the post-route creepage check")
 		c.Flags().StringVar(&in.irBudget, "ir-budget", "", "with --sim: allowed DC drop on power nets, e.g. 2%,30mV (default: the larger of 2% of the rail and 30 mV; rails above 5 V use the percentage)")
 		c.Flags().StringArrayVar(&in.groups, "groups", nil, "schematic module ownership (repeatable): a sch composition JSON (modules[].placements[].designator) or {\"groups\":[{id,core,members}]} — makes each module's parts follow its core; port protection stays at its connector")
 		c.Flags().IntVar(&in.layers, "layers", 0, "force the copper layer count (0 = decide)")
@@ -174,6 +176,15 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 				return nil, nil, power, err
 			}
 		}
+		if in.intent != "" {
+			iraw, err := os.ReadFile(in.intent)
+			if err != nil {
+				return nil, nil, power, err
+			}
+			if power.Intent, err = pcbauto.ParseIntent(iraw); err != nil {
+				return nil, nil, power, err
+			}
+		}
 		if in.irBudget != "" {
 			bud, err := pcbauto.ParseIRBudget(in.irBudget)
 			if err != nil {
@@ -240,6 +251,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 			Short: "Full pipeline: analyse → stackup → (place) → route → DRC/SI → plan.json + playbook.json + preview.svg + report.md",
 			Example: `  pcbpilot pcb auto run --board board.json --out-dir out/
   pcbpilot pcb auto run --board board.json --mech mech.json --place --out-dir out/
+  pcbpilot pcb auto run --board board.json --intent intent.json --place --out-dir out/
   pcbpilot apply out/playbook.json --project demo --dry-run`,
 			Args: cobra.NoArgs,
 			RunE: func(cmd *cobra.Command, _ []string) error {
@@ -388,6 +400,13 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 							parts = append(parts, fmt.Sprintf("%s %.1f/%.0f mV %s", n.Net, n.WorstMV, n.BudgetMV, n.Status))
 						}
 						fmt.Fprintf(stderr, "ir-drop (%s, budget %s): %s\n", pw.Scenario, pw.Budget, strings.Join(parts, ", "))
+					}
+					if iso := rep.Result.Isolation; iso != nil && len(iso.Pairs) > 0 {
+						fmt.Fprintf(stderr, "isolation (%s): %d pair(s), %d slot(s), %d no-pour region(s), %d clearance/creepage finding(s)\n",
+							iso.Standard, len(iso.Pairs), len(iso.Slots), len(iso.Moats), len(iso.Findings))
+						for _, n := range iso.Notes {
+							fmt.Fprintf(stderr, "isolation: %s\n", n)
+						}
 					}
 					if !noFeedback || fbLoop > 0 {
 						if rep.Feedback, err = feedback(cmd, b, rep, opts, fbVerify, fbLoop, "pcb auto run"); err != nil {
