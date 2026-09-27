@@ -42,6 +42,12 @@ device identity、bbox、pins、wires 与连接摘要，不能用前者替代后
 宿主可能暴露未写入工程源的自动生成属性；其字段全由 SDK 正常读取时继续保留在 SDK 清单中，
 不要求这些可读属性出现在 `.epro2` 源里。
 
+## 仿真（离线计算，无 typed action）
+
+| 目的 | CLI |
+|---|---|
+| 原理图直流电源仿真：每网电压、每焊盘电流（source/sink/pass）、稳压器工作点、buck 纹波、多输入源场景与逐焊盘 worst | `sim power --connectivity p1.json [--connectivity p2.json] --values list.json --out sim.json [--report sim.md] [--spice sim.cir --spice-check]`；不带 `--connectivity` 时现场只读逐页读取（`--pages`）。模型库 [power-models.json](power-models.json)，读法见 [power-sim.md](power-sim.md) |
+
 ## SCH Apply
 
 ```bash

@@ -82,6 +82,17 @@ fixture 回归：中小板 89–100%，大型 BGA 板（RK3568、K230）55–62%
 | 布线 | 平面扇出、多层拥塞协商、网级线宽间距、缩颈、铺铜连通仿真补线、精确 DRC 修复环、差分贴线、蛇形/45° 等长 |
 | 检查与输出 | 精确几何 DRC、连通性、SI（长度、过孔、对内长度差、跨分割）；`report.md` / `plan.json` / `preview.svg` / `playbook.json` |
 
+## 原理图电源仿真（`sim power`，离线验证）
+
+| 能力 | 语义 |
+|---|---|
+| 直流工作点 | `pkg/powersim`：MNA + Newton-Raphson（结电压限幅、阻尼），R/L(DCR)/C(开路)/二极管/LED/BJT/开关/输入源/负载/LDO/buck；未收敛如实报告 |
+| 逐焊盘电流 | 每网电压与每个焊盘电流（source/sink/pass，KCL 逐网成立），地回流、多脚分流（同轨供电脚、多个地脚、USB-C 双 VBUS） |
+| 电源树 | buck 由 FB 分压求 Vout、功率守恒求输入电流与纹波（SW/电感 Ipk/Irms、输入/输出电容 Irms）；LDO 含 Iq、dropout、关断 |
+| 场景 | typical / peak / buttons-pressed / 每输入源单独（OR 二极管）/ worst（逐焊盘最大） |
+| 模型库 | `.agents/skills/pcbpilot/references/power-models.json`（LCSC→MPN→正则，带出处与 confidence）；未知 IC 假设负载并告警 |
+| 交叉核对 | `--spice` 导出线性化 .op 网表，`--spice-check` 用 ngspice 比对节点电压 |
+
 ## 已知不支持：Altium Designer 工程自动导入
 
 - `.SchDoc` / `.PcbDoc` 当前没有 typed action 或 CLI 导入入口；使用 EasyEDA Pro 的

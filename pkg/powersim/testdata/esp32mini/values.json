@@ -1,0 +1,204 @@
+{
+ "_provenance": "ref → value/MPN/LCSC trimmed from artifacts/ceshi-e2e-20260925/s0/scratch-list.json (live pcbpilot sch list of the S0 scratch measurement page, 2026-09-25; same device set and designators as the final pages, cross-checked against s0/devices.json)",
+ "parts": {
+  "J1": {
+   "mpn": "KF301-5.0-2P",
+   "lcsc": "C474881",
+   "manufacturer": "KEFA(科发)",
+   "description": "Number of Positions or Pins:1x2P Pitch:5mm Color:Blue Mounting Type:Through Hole Number of Pins:2P Number of Rows:1 Number of PINs Per Row:2 Screw Specification:M2.5 Current Rating:17A Voltage Rating (Max):250V Wire Gauge - AWG:14~22 Wire Gauge - mm2:1.5"
+  },
+  "D3": {
+   "mpn": "SMAJ5.0A",
+   "lcsc": "C143135",
+   "manufacturer": "FMS(美丽微)",
+   "description": "Polarity:Unidirectional Reverse Stand-Off Voltage (Vrwm):5V Clamping Voltage:9.2V Peak Pulse Current (Ipp):43.5A@10/1000us Peak Pulse Power Dissipation (Ppp):400W@10/1000us Voltage - Breakdown:7V Reverse Leakage Current (Ir):800uA Number of Channels:1 Ope"
+  },
+  "D1": {
+   "mpn": "SS34",
+   "lcsc": "C8678",
+   "manufacturer": "MDD(辰达半导体)",
+   "description": "Diode Configuration:Independent Voltage - Forward(Vf@If):550mV@3A Voltage - DC Reverse(Vr):40V Current - Rectified:3A Reverse Leakage Current (Ir):500uA@40V Operating Junction Temperature Range:-55℃~+125℃ Operating Junction Temperature Range:-55℃~+125℃"
+  },
+  "J2": {
+   "mpn": "USB3.1TYPE-C16P",
+   "lcsc": "C9900012665"
+  },
+  "R1": {
+   "value": "5.1kΩ",
+   "mpn": "0402WGF5101TCE",
+   "lcsc": "C25905",
+   "manufacturer": "UNI-ROYAL(厚声)",
+   "description": "Type:Thick Film Resistor Resistance:5.1kΩ Tolerance:±1% Tolerance:±1% Power(Watts):62.5mW Voltage-Supply(Max):50V Temperature Coefficient:±100ppm/℃ Temperature Coefficient:±100ppm/℃ Operating Temperature:-55℃~+155℃ Operating Temperature:-55℃~+155℃"
+  },
+  "R2": {
+   "value": "5.1kΩ",
+   "mpn": "0402WGF5101TCE",
+   "lcsc": "C25905",
+   "manufacturer": "UNI-ROYAL(厚声)",
+   "description": "Type:Thick Film Resistor Resistance:5.1kΩ Tolerance:±1% Tolerance:±1% Power(Watts):62.5mW Voltage-Supply(Max):50V Temperature Coefficient:±100ppm/℃ Temperature Coefficient:±100ppm/℃ Operating Temperature:-55℃~+155℃ Operating Temperature:-55℃~+155℃"
+  },
+  "U2": {
+   "mpn": "USBLC6-2SC6",
+   "lcsc": "C2687116",
+   "manufacturer": "UMW(友台半导体)",
+   "description": "Reverse Stand-Off Voltage (Vrwm):5V Clamping Voltage:15V Peak Pulse Current (Ipp):6A@8/20us Peak Pulse Power Dissipation (Ppp):150W@8/20us Voltage - Breakdown:6V Reverse Leakage Current (Ir):100nA Number of Channels:2 Type:ESD Junction Capacitance:0.35pF；"
+  },
+  "D2": {
+   "mpn": "SS34",
+   "lcsc": "C8678",
+   "manufacturer": "MDD(辰达半导体)",
+   "description": "Diode Configuration:Independent Voltage - Forward(Vf@If):550mV@3A Voltage - DC Reverse(Vr):40V Current - Rectified:3A Reverse Leakage Current (Ir):500uA@40V Operating Junction Temperature Range:-55℃~+125℃ Operating Junction Temperature Range:-55℃~+125℃"
+  },
+  "U3": {
+   "mpn": "CH340C",
+   "lcsc": "C84681",
+   "manufacturer": "WCH(南京沁恒)",
+   "description": "Applications Function:Transceiver USB Protocol:USB 2.0 Number of Channels:- Voltage - Supply:3.3V；5V Voltage - Supply:3.3V；5V Data Rate:2Mbps Operating Temperature:-20℃~+70℃ Operating Temperature:-20℃~+70℃ Current - Supply:7mA Quiescent Supply Current:50u"
+  },
+  "C7": {
+   "value": "100nF",
+   "mpn": "CL05B104KO5NNNC",
+   "lcsc": "C1525",
+   "manufacturer": "SAMSUNG(三星)",
+   "description": "Capacitance:100nF Tolerance:±10% Tolerance:±10% Voltage Rating:16V Temperature Coefficient:X7R"
+  },
+  "Q1": {
+   "mpn": "MMBT3904(RANGE:100-300)",
+   "lcsc": "C20526",
+   "manufacturer": "CJ(江苏长电/长晶)",
+   "description": "type:NPN Current - Collector(Ic):200mA Collector - Emitter Voltage VCEO:40V Pd - Power Dissipation:200mW DC Current Gain:100 DC Current Gain:100 Transition frequency(fT):300MHz Current - Collector Cutoff:100nA Vce Saturation(VCE(sat)):300mV Operating Temp"
+  },
+  "Q2": {
+   "mpn": "MMBT3904(RANGE:100-300)",
+   "lcsc": "C20526",
+   "manufacturer": "CJ(江苏长电/长晶)",
+   "description": "type:NPN Current - Collector(Ic):200mA Collector - Emitter Voltage VCEO:40V Pd - Power Dissipation:200mW DC Current Gain:100 DC Current Gain:100 Transition frequency(fT):300MHz Current - Collector Cutoff:100nA Vce Saturation(VCE(sat)):300mV Operating Temp"
+  },
+  "R7": {
+   "value": "4.7kΩ",
+   "mpn": "0402WGJ0472TCE",
+   "lcsc": "C25940",
+   "manufacturer": "UNI-ROYAL(厚声)",
+   "description": "Type:Thick Film Resistor Resistance:4.7kΩ Tolerance:±5% Tolerance:±5% Power(Watts):62.5mW Voltage-Supply(Max):50V Temperature Coefficient:±100ppm/℃ Temperature Coefficient:±100ppm/℃ Operating Temperature:-55℃~+155℃ Operating Temperature:-55℃~+155℃"
+  },
+  "R8": {
+   "value": "4.7kΩ",
+   "mpn": "0402WGJ0472TCE",
+   "lcsc": "C25940",
+   "manufacturer": "UNI-ROYAL(厚声)",
+   "description": "Type:Thick Film Resistor Resistance:4.7kΩ Tolerance:±5% Tolerance:±5% Power(Watts):62.5mW Voltage-Supply(Max):50V Temperature Coefficient:±100ppm/℃ Temperature Coefficient:±100ppm/℃ Operating Temperature:-55℃~+155℃ Operating Temperature:-55℃~+155℃"
+  },
+  "U4": {
+   "mpn": "SY8089A1AAC",
+   "lcsc": "C479074",
+   "manufacturer": "Silergy(矽力杰)",
+   "description": "Function:Step-down type Voltage - Supply:2.5V~5.5V Voltage - Supply:2.5V~5.5V Output Voltage:- Output Voltage:- Output Current:2A Frequency - Switching:1.5MHz Frequency - Switching:1.5MHz Operating Temperature:-40℃~+125℃@(TA/TJ) Operating Temperature:-40℃"
+  },
+  "L1": {
+   "value": "2.2uH",
+   "mpn": "NLCV32T-2R2M-PF",
+   "lcsc": "C250183",
+   "manufacturer": "TDK",
+   "description": "Inductance:2.2uH Tolerance:±20% Tolerance:±20% Current Rating:770mA Current - Saturation(Isat):- DC Resistance(DCR):169mΩ Type:Wire-wound inductor"
+  },
+  "R3": {
+   "value": "45.3kΩ",
+   "mpn": "0402WGF4532TCE",
+   "lcsc": "C26980",
+   "manufacturer": "UNI-ROYAL(厚声)",
+   "description": "Type:Thick Film Resistor Resistance:45.3kΩ Tolerance:±1% Tolerance:±1% Power(Watts):62.5mW Voltage-Supply(Max):50V Temperature Coefficient:±100ppm/℃ Temperature Coefficient:±100ppm/℃ Operating Temperature:-55℃~+155℃ Operating Temperature:-55℃~+155℃"
+  },
+  "R4": {
+   "value": "10kΩ",
+   "mpn": "0402WGF1002TCE",
+   "lcsc": "C25744",
+   "manufacturer": "UNI-ROYAL(厚声)",
+   "description": "Type:Thick Film Resistor Resistance:10kΩ Tolerance:±1% Tolerance:±1% Power(Watts):62.5mW Voltage-Supply(Max):50V Temperature Coefficient:±100ppm/℃ Temperature Coefficient:±100ppm/℃ Operating Temperature:-55℃~+155℃ Operating Temperature:-55℃~+155℃"
+  },
+  "C1": {
+   "value": "10uF",
+   "mpn": "GRM21BR61H106KE43L",
+   "lcsc": "C440198",
+   "manufacturer": "muRata(村田)",
+   "description": "Capacitance:10uF Tolerance:±10% Tolerance:±10% Voltage Rating:50V Temperature Coefficient:X5R"
+  },
+  "C2": {
+   "value": "22uF",
+   "mpn": "CL21A226MAQNNNE",
+   "lcsc": "C45783",
+   "manufacturer": "SAMSUNG(三星)",
+   "description": "Capacitance:22uF Tolerance:±20% Tolerance:±20% Voltage Rating:25V Temperature Coefficient:X5R"
+  },
+  "C3": {
+   "value": "100nF",
+   "mpn": "CL05B104KO5NNNC",
+   "lcsc": "C1525",
+   "manufacturer": "SAMSUNG(三星)",
+   "description": "Capacitance:100nF Tolerance:±10% Tolerance:±10% Voltage Rating:16V Temperature Coefficient:X7R"
+  },
+  "U1": {
+   "mpn": "ESP32-S3-WROOM-1",
+   "lcsc": "C9900163599"
+  },
+  "C4": {
+   "value": "10uF",
+   "mpn": "GRM21BR61H106KE43L",
+   "lcsc": "C440198",
+   "manufacturer": "muRata(村田)",
+   "description": "Capacitance:10uF Tolerance:±10% Tolerance:±10% Voltage Rating:50V Temperature Coefficient:X5R"
+  },
+  "C5": {
+   "value": "100nF",
+   "mpn": "CL05B104KO5NNNC",
+   "lcsc": "C1525",
+   "manufacturer": "SAMSUNG(三星)",
+   "description": "Capacitance:100nF Tolerance:±10% Tolerance:±10% Voltage Rating:16V Temperature Coefficient:X7R"
+  },
+  "R5": {
+   "value": "10kΩ",
+   "mpn": "0402WGF1002TCE",
+   "lcsc": "C25744",
+   "manufacturer": "UNI-ROYAL(厚声)",
+   "description": "Type:Thick Film Resistor Resistance:10kΩ Tolerance:±1% Tolerance:±1% Power(Watts):62.5mW Voltage-Supply(Max):50V Temperature Coefficient:±100ppm/℃ Temperature Coefficient:±100ppm/℃ Operating Temperature:-55℃~+155℃ Operating Temperature:-55℃~+155℃"
+  },
+  "C6": {
+   "value": "1uF",
+   "mpn": "CL05A105KA5NQNC",
+   "lcsc": "C52923",
+   "manufacturer": "SAMSUNG(三星)",
+   "description": "Capacitance:1uF Tolerance:±10% Tolerance:±10% Voltage Rating:25V Temperature Coefficient:X5R"
+  },
+  "R6": {
+   "value": "10kΩ",
+   "mpn": "0402WGF1002TCE",
+   "lcsc": "C25744",
+   "manufacturer": "UNI-ROYAL(厚声)",
+   "description": "Type:Thick Film Resistor Resistance:10kΩ Tolerance:±1% Tolerance:±1% Power(Watts):62.5mW Voltage-Supply(Max):50V Temperature Coefficient:±100ppm/℃ Temperature Coefficient:±100ppm/℃ Operating Temperature:-55℃~+155℃ Operating Temperature:-55℃~+155℃"
+  },
+  "SW1": {
+   "mpn": "TS-1088-AR02016",
+   "lcsc": "C720477",
+   "manufacturer": "XUNPU(讯普)",
+   "description": "Circuit:SPST Actuator Style:Round Button Operating Force:1.6N Mounting Type:Surface Mount,Vertical Length:3.9mm Width:3mm Switch Height:2mm with Bracket:Without Bracket Contact Current:50mA Voltage Rating:12V Actuator/Cap Color:Black With Lamp:- IP Rating"
+  },
+  "SW2": {
+   "mpn": "TS-1088-AR02016",
+   "lcsc": "C720477",
+   "manufacturer": "XUNPU(讯普)",
+   "description": "Circuit:SPST Actuator Style:Round Button Operating Force:1.6N Mounting Type:Surface Mount,Vertical Length:3.9mm Width:3mm Switch Height:2mm with Bracket:Without Bracket Contact Current:50mA Voltage Rating:12V Actuator/Cap Color:Black With Lamp:- IP Rating"
+  },
+  "R9": {
+   "value": "1kΩ",
+   "mpn": "0402WGF1001TCE",
+   "lcsc": "C11702",
+   "manufacturer": "UNI-ROYAL(厚声)",
+   "description": "Type:Thick Film Resistor Resistance:1kΩ Tolerance:±1% Tolerance:±1% Power(Watts):62.5mW Voltage-Supply(Max):50V Temperature Coefficient:±100ppm/℃ Temperature Coefficient:±100ppm/℃ Operating Temperature:-55℃~+155℃ Operating Temperature:-55℃~+155℃"
+  },
+  "LED1": {
+   "mpn": "KT-0805Y",
+   "lcsc": "C2296",
+   "manufacturer": "KENTO",
+   "description": "Lamp Holder Type:- Illumination Color:Yellow Voltage - Forward(Vf):1.8V~2.4V Voltage - Forward(Vf):1.8V~2.4V Power(Watts):40mW Forward Current:- Wavelength - Dominant:584nm~594nm Wavelength - Dominant:584nm~594nm Peak Wavelength:596nm Peak Wavelength:596n"
+  }
+ }
+}

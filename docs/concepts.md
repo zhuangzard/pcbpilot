@@ -308,6 +308,23 @@ EasyEDA Pro 3.2.186 的隔离页数据验证（2026-09-15）表明：严格位�
   故内联 Go 为真值 + `fab-rules-jlcpcb.json` 文档镜像;精确值由块 `signals.track_width_mil` 声明覆盖
   (`improvements-sink-to-blocks`,消费待 block-apply)。
 
+### 电源仿真(power simulation)—— `pcbpilot sim power`
+**是什么**:从原理图连接 + 器件功耗模型求**直流工作点**(MNA + Newton-Raphson)与**平均化电源树**,
+输出每个网的电压和**每个焊盘的电流**(`pkg/powersim`,契约 `schemaVersion 1`)。**不是瞬态 SPICE**:
+电容开路、电感 = DCR、开关电源按功率守恒平均(buck:V(FB)=Vref 经真实分压求 Vout,
+Iin = V(LX)·Iout/(η·Vin)+Iq;LDO:Iin = Iout+Iq,含 dropout/关断),纹波用闭式公式
+(ΔI=(Vin−Vout)·D/(L·fsw)、Ipk、Irms、输入电容 Iout·√(D(1−D)))。
+- **焊盘电流方向**:`source` = 电流由器件流出进网,`sink` = 由网流入器件,`pass` = 无直流;
+  网电流 = Σsource = Σsink(KCL),地网焊盘同样列出(回流)。
+- **场景**:`typical` / `peak` / `buttons-pressed`(轻触开关按下)/ 每个输入源单独供电的
+  `<source>-only`(多源经 OR 二极管时)/ 合成 `worst`(逐焊盘取最大,标出处场景)。线宽按 worst。
+- **模型可信度**:每个器件标 `datasheet`(手册/LCSC 参数)、`approx`(典型值/曲线)、
+  `assumed`(占位)、`value`(被动件阻值/感值);未知 IC 每供电脚假设 50 mA 并告警,**绝不静默为 0**。
+  模型是数据([`power-models.json`](../.agents/skills/pcbpilot/references/power-models.json)),不是代码。
+- **与 `power.json` 的关系**:`power.json` 是手填预算(声明优先);`sim.json` 是算出来的逐焊盘电流,
+  供线宽规划消费。二者冲突时以有出处的模型数据为准并回写说明。用法见
+  [`power-sim.md`](../.agents/skills/pcbpilot/references/power-sim.md)。状态:`offline-verified`。
+
 ### 网感知(net-aware) vs 几何(geometric)—— 本项目的核心决策二分
 | | 依据 | 例子(连接器分组选边) |
 |---|---|---|

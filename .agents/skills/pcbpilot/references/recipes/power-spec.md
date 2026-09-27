@@ -3,6 +3,10 @@
 目的：让 `pcb auto` 按**真实电流与电压**定线宽、间距和换层过孔数，而不是按网名猜。
 不给 `power.json` 时，引擎按网名估电流并在报告里标“需要确认”——那只是占位，不是设计。
 
+**先算，再手填**：`pcbpilot sim power` 从原理图算出每个网的电压和每个焊盘的电流（含 buck
+纹波与多输入源场景），输出 `sim.json`；第 2 节的公式它都已按真实分压电阻/器件模型执行，
+手填前先看它的 `worst` 结果与 warnings/assumptions，见 [power-sim.md](../power-sim.md)。
+
 ## 1. 列出电源轨
 
 ```bash
