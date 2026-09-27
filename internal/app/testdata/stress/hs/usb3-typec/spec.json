@@ -1,0 +1,7 @@
+{
+ "layers": 4,
+ "standard": {
+  "name": "IPC-2221B"
+ },
+ "usbBudgetA": 0.9
+}

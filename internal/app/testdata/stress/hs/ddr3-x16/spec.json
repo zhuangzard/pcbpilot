@@ -1,0 +1,103 @@
+{
+ "layers": 6,
+ "standard": {
+  "name": "IPC-2221B"
+ },
+ "rules": {
+  "clearanceMil": 4,
+  "trackMil": 4,
+  "viaDrillMil": 8,
+  "viaDiaMil": 16
+ },
+ "hsInterfaces": [
+  {
+   "name": "DDR",
+   "pairs": [
+    [
+     "DDR_DQS0_P",
+     "DDR_DQS0_N"
+    ]
+   ],
+   "nets": [
+    "DDR_DQ0",
+    "DDR_DQ1",
+    "DDR_DQ2",
+    "DDR_DQ3",
+    "DDR_DQ4",
+    "DDR_DQ5",
+    "DDR_DQ6",
+    "DDR_DQ7",
+    "DDR_DM0"
+   ],
+   "diffOhm": 100,
+   "singleOhm": 50,
+   "lengthGroup": "DDR_BYTE0",
+   "lengthTolMil": 25,
+   "maxVias": 2
+  },
+  {
+   "name": "DDR",
+   "pairs": [
+    [
+     "DDR_DQS1_P",
+     "DDR_DQS1_N"
+    ]
+   ],
+   "nets": [
+    "DDR_DQ8",
+    "DDR_DQ9",
+    "DDR_DQ10",
+    "DDR_DQ11",
+    "DDR_DQ12",
+    "DDR_DQ13",
+    "DDR_DQ14",
+    "DDR_DQ15",
+    "DDR_DM1"
+   ],
+   "diffOhm": 100,
+   "singleOhm": 50,
+   "lengthGroup": "DDR_BYTE1",
+   "lengthTolMil": 25,
+   "maxVias": 2
+  },
+  {
+   "name": "DDR",
+   "pairs": [
+    [
+     "DDR_CK_P",
+     "DDR_CK_N"
+    ]
+   ],
+   "nets": [
+    "DDR_A0",
+    "DDR_A1",
+    "DDR_A2",
+    "DDR_A3",
+    "DDR_A4",
+    "DDR_A5",
+    "DDR_A6",
+    "DDR_A7",
+    "DDR_A8",
+    "DDR_A9",
+    "DDR_A10",
+    "DDR_A11",
+    "DDR_A12",
+    "DDR_A13",
+    "DDR_BA0",
+    "DDR_BA1",
+    "DDR_BA2",
+    "DDR_RAS_N",
+    "DDR_CAS_N",
+    "DDR_WE_N",
+    "DDR_CS_N",
+    "DDR_CKE",
+    "DDR_ODT"
+   ],
+   "diffOhm": 100,
+   "singleOhm": 50,
+   "lengthGroup": "DDR_ADDR",
+   "lengthTolMil": 100,
+   "maxVias": 4
+  }
+ ]
+}

@@ -192,12 +192,19 @@ func (r *Report) WriteMarkdown(w io.Writer) {
 	writeIsolation(p, res.Isolation)
 
 	writeJoint(p, r)
-	if si := r.SI; si != nil && (len(si.Pairs) > 0 || len(si.Findings) > 0) {
+	if si := r.SI; si != nil && (len(si.Pairs) > 0 || len(si.Groups) > 0 || len(si.Findings) > 0) {
 		p("## 6. 高速信号\n\n")
 		if len(si.Pairs) > 0 {
 			p("| 差分对 | 长度差 mil | 允许 mil |\n|---|---|---|\n")
 			for _, pr := range si.Pairs {
 				p("| %s / %s | %.0f | %.0f |\n", pr.P, pr.N, pr.SkewMil, pr.LimitMil)
+			}
+			p("\n")
+		}
+		if len(si.Groups) > 0 {
+			p("| 等长组 | 成员 | 最短 mil | 最长 mil | 差 mil | 容差 mil |\n|---|---|---|---|---|---|\n")
+			for _, g := range si.Groups {
+				p("| %s | %d | %.0f | %.0f | %.0f | %.0f |\n", g.Name, len(g.Units), g.MinMil, g.MaxMil, g.SpreadMil, g.TolMil)
 			}
 			p("\n")
 		}

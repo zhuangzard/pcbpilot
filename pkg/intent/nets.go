@@ -11,22 +11,78 @@ import (
 	"github.com/zhuangzard/pcbpilot/pkg/powersim"
 )
 
-// hsIface is a recognised impedance-controlled interface.
-type hsIface struct {
-	re      *regexp.Regexp
-	name    string
-	diffOhm float64
-	note    string
+// ifaceNames maps the engine's HS class (pcbauto.ClassifyHSName — the one
+// table the router, the SI check and the rule push use) to the interface
+// name intent.json writes.
+var ifaceNames = map[string]string{
+	"USB2": "USB", "USB3": "USB3", "PCIe": "PCIE", "SATA": "SATA", "HDMI": "HDMI", "MIPI D-PHY": "MIPI",
+	"LVDS": "LVDS", "DDR": "DDR", "Ethernet": "ETH", "CAN/RS-485": "CAN/RS485", "diff": "DIFF",
 }
 
-var hsIfaces = []hsIface{
-	{regexp.MustCompile(`(?i)USB`), "USB", 90, "USB 2.0: 90 Ω ±10 % differential"},
-	{regexp.MustCompile(`(?i)(ETH|RGMII|SGMII|MDI|TX[PN]|RX[PN])`), "ETH", 100, "Ethernet MDI: 100 Ω differential"},
-	{regexp.MustCompile(`(?i)(HDMI|TMDS)`), "HDMI", 100, "HDMI TMDS: 100 Ω differential"},
-	{regexp.MustCompile(`(?i)(MIPI|DSI|CSI|LVDS)`), "MIPI", 100, "MIPI D-PHY / LVDS: 100 Ω differential"},
-	{regexp.MustCompile(`(?i)PCIE`), "PCIE", 85, "PCIe: 85 Ω differential"},
-	{regexp.MustCompile(`(?i)SATA`), "SATA", 100, "SATA: 100 Ω differential"},
-	{regexp.MustCompile(`(?i)(CAN|RS485|485)`), "CAN/RS485", 120, "CAN / RS-485: 120 Ω line (terminated); routing impedance uncritical at these edge rates"},
+var ifaceNotes = map[string]string{
+	"USB":       "USB 2.0 high-speed: 90 Ω ±10 % differential",
+	"USB3":      "USB 3.x SuperSpeed: 90 Ω ±10 % differential, ≤ 5 mil intra-pair skew",
+	"PCIE":      "PCIe: 85 Ω differential (PCI-SIG CEM), ≤ 5 mil intra-pair skew",
+	"SATA":      "SATA: 100 Ω differential",
+	"HDMI":      "HDMI TMDS: 100 Ω differential, pairs length-matched to each other",
+	"MIPI":      "MIPI D-PHY: 100 Ω differential, lanes matched to the clock lane",
+	"LVDS":      "LVDS: 100 Ω differential",
+	"DDR":       "DDR: 100 Ω differential strobe/clock, byte lanes length-matched",
+	"ETH":       "Ethernet MDI: 100 Ω differential",
+	"CAN/RS485": "CAN / RS-485: 120 Ω line (terminated); routing impedance uncritical at these edge rates",
+	"DIFF":      "generic differential pair: 100 Ω default",
+}
+
+// hsOf is the recognised interface of a differential net: its intent name,
+// target impedance, declared length group, the engine class and a note.
+type hsOf struct {
+	name  string
+	ohm   float64
+	group string
+	class *pcbauto.HSClass
+	note  string
+	spec  *SpecHS
+}
+
+func (c *ctx) ifaceOf(net string) hsOf {
+	for i := range c.spec.HSInterfaces {
+		hs := &c.spec.HSInterfaces[i]
+		for _, p := range hs.Pairs {
+			if p[0] == net || p[1] == net {
+				hc := pcbauto.ClassifyHSName(hs.Name, net)
+				ohm := hs.DiffOhm
+				if ohm == 0 {
+					ohm = hc.DiffOhm
+				}
+				return hsOf{name: hs.Name, ohm: ohm, group: hs.LengthGroup, class: hc, note: "declared in spec.hsInterfaces (" + hs.Name + ")", spec: hs}
+			}
+		}
+	}
+	hc := pcbauto.ClassifyHSName("", net)
+	name := ifaceNames[hc.Name]
+	if name == "" {
+		name = "DIFF"
+	}
+	return hsOf{name: name, ohm: hc.DiffOhm, class: hc, note: ifaceNotes[name]}
+}
+
+// reLane splits a lane of a multi-pair interface: HDMI_0P, HDMI_CP,
+// MIPI_DSI_TX0_D1P, CSI0_CLK_N → prefix + lane + polarity.
+var reLane = regexp.MustCompile(`^(.*?)[_-]?(D?[0-9]+|CLK|CK|C)[_-]?(P|N|\+|-)$`)
+
+// laneGroup is the port prefix of a lane of a multi-lane interface whose
+// lanes are matched to each other (HDMI TMDS, MIPI D-PHY, LVDS), else "".
+func laneGroup(net, iface string) string {
+	switch iface {
+	case "HDMI", "MIPI", "LVDS":
+	default:
+		return ""
+	}
+	m := reLane.FindStringSubmatch(strings.ToUpper(net))
+	if m == nil || m[1] == "" {
+		return ""
+	}
+	return m[1] + "_LANES"
 }
 
 // netVoltageEnvelope computes nom/min/max/peak of a net.
@@ -138,26 +194,6 @@ func (c *ctx) switchRegulator(net string) string {
 	return ""
 }
 
-func (c *ctx) ifaceOf(net string) (string, float64, string, string) {
-	for _, hs := range c.spec.HSInterfaces {
-		for _, p := range hs.Pairs {
-			if p[0] == net || p[1] == net {
-				ohm := hs.DiffOhm
-				if ohm == 0 {
-					ohm = 100
-				}
-				return hs.Name, ohm, hs.LengthGroup, "declared in spec.hsInterfaces"
-			}
-		}
-	}
-	for _, f := range hsIfaces {
-		if f.re.MatchString(net) {
-			return f.name, f.diffOhm, "", f.note
-		}
-	}
-	return "DIFF", 100, "", "generic differential pair: 100 Ω default"
-}
-
 func commonPrefix(a, b string) string {
 	i := 0
 	for i < len(a) && i < len(b) && a[i] == b[i] {
@@ -174,6 +210,24 @@ func (c *ctx) buildNets() {
 	for _, hs := range c.spec.HSInterfaces {
 		for _, n := range hs.Nets {
 			hsSingle[n] = hs
+		}
+	}
+	c.laneGroups = map[string]string{}
+	laneNets := map[string][]string{}
+	for _, net := range c.d.Nets() {
+		if pp := c.an.Plan(net, c.rules); pp.Role == pcbauto.RoleDiff {
+			if hs := c.ifaceOf(net); hs.spec == nil {
+				if lg := laneGroup(net, hs.name); lg != "" {
+					laneNets[lg] = append(laneNets[lg], net)
+				}
+			}
+		}
+	}
+	for lg, nets := range laneNets {
+		if len(nets) >= 4 { // at least two pairs of one port
+			for _, n := range nets {
+				c.laneGroups[n] = lg
+			}
 		}
 	}
 	for _, net := range c.d.Nets() {
@@ -222,6 +276,14 @@ func (c *ctx) buildNets() {
 				np.Why = append(np.Why, fmt.Sprintf("ripple budget %s mVpp (spec.rails)", trimFloat(r.RippleMvpp, 1)))
 			}
 		}
+		// A "power"-named net whose only simulated sources are resistors is
+		// a divider / sense node (VBUS_DET, VIN_SENSE), not a rail: it must
+		// not become a power-plane island that high-speed pairs then cross.
+		if pp.Role == pcbauto.RolePower && pp.Source != "declared" && c.resistorFed(net) {
+			pp = &pcbauto.NetPlan{Net: pp.Net, Role: pcbauto.RoleSignal, WidthMil: c.rules.TrackWidth, InnerWidthMil: c.rules.TrackWidth, PadCount: pp.PadCount, Priority: 5, ViasPerTransition: 1}
+			np.Role = "signal"
+			np.Why = append(np.Why, "named like a rail but fed only through a resistor in the simulation: a divider/sense signal, routed as a signal (not a plane island)")
+		}
 		// Widths.
 		np.WidthMil = Width{Outer: pp.WidthMil, Inner: pp.InnerWidthMil}
 		floor := c.rules.TrackWidth
@@ -259,22 +321,50 @@ func (c *ctx) buildNets() {
 		// Impedance-controlled nets.
 		switch {
 		case pp.Role == pcbauto.RoleDiff:
-			name, ohm, group, note := c.ifaceOf(net)
+			hs := c.ifaceOf(net)
+			name, ohm, group, note := hs.name, hs.ohm, hs.group, hs.note
 			np.Interface, np.ImpedanceOhm, np.DiffPair = name, ohm, pp.PairWith
-			if group == "" {
-				group = commonPrefix(net, pp.PairWith)
-				if group == "" {
+			np.MaxSkewMil, np.MaxVias = hs.class.MaxSkewMil, hs.class.MaxVias
+			if sp := hs.spec; sp != nil {
+				if sp.MaxSkewMil > 0 {
+					np.MaxSkewMil = sp.MaxSkewMil
+				}
+				if sp.MaxVias > 0 {
+					np.MaxVias = sp.MaxVias
+				}
+				np.LengthTolMil = sp.LengthTolMil
+			}
+			switch {
+			case group != "":
+				if np.LengthTolMil == 0 {
+					np.LengthTolMil = hs.class.GroupSkewMil
+				}
+			default:
+				if dg := c.ddrGroup[net]; dg != "" {
+					group, np.LengthTolMil = dg, hs.class.GroupSkewMil
+					if strings.HasSuffix(dg, "_ADDR") {
+						np.LengthTolMil = ddrAddrTolMil
+					}
+					np.Why = append(np.Why, fmt.Sprintf("DDR %s recognised from the net names: length group %s, tolerance %.0f mil", map[bool]string{true: "clock (fly-by address/command group)", false: "strobe (byte lane)"}[strings.HasSuffix(dg, "_ADDR")], dg, np.LengthTolMil))
+				} else if lg := c.laneGroups[net]; lg != "" {
+					group, np.LengthTolMil = lg, hs.class.GroupSkewMil
+					np.Why = append(np.Why, fmt.Sprintf("%s lanes of one port are length-matched to each other: group %s, tolerance %.0f mil (%s default)", name, lg, np.LengthTolMil, hs.class.Name))
+				} else if group = commonPrefix(net, pp.PairWith); group == "" {
 					group = name
 				}
 			}
 			np.LengthGroup = group
+			np.Why = append(np.Why, fmt.Sprintf("%s: intra-pair skew ≤ %.0f mil, ≤ %d vias per net (%s)", name, np.MaxSkewMil, np.MaxVias, map[bool]string{true: "spec.hsInterfaces", false: hs.class.Name + " design-guide default"}[hs.spec != nil && (hs.spec.MaxSkewMil > 0 || hs.spec.MaxVias > 0)]))
 			w, s := pcbauto.SolveDiff(ohm, c.refH, t, c.er, c.rules.Clearance)
 			if c.layers <= 2 || w > 25 {
 				np.Why = append(np.Why, fmt.Sprintf("%s: %.0f Ω needs w=%.0f mil over h=%.0f mil — not controllable without an adjacent plane; routed as a tightly coupled %.0f/%.0f mil pair", note, ohm, w, c.refH, c.rules.TrackWidth, c.rules.Clearance))
 				w, s = c.rules.TrackWidth, c.rules.Clearance
 				c.uncontrolled = append(c.uncontrolled, net)
+				if hs.class.RateGbps >= 1 {
+					c.noReference = append(c.noReference, net)
+				}
 			} else {
-				np.Why = append(np.Why, fmt.Sprintf("%s: edge-coupled microstrip over h=%.1f mil, εr=%.2f, t=%.2f mil → w=%.1f mil, gap=%.1f mil (pcbauto.SolveDiff)", note, c.refH, c.er, t, w, s))
+				np.Why = append(np.Why, fmt.Sprintf("%s: edge-coupled microstrip over h=%.2f mil, εr=%.2f, t=%.2f mil → w=%.1f mil, gap=%.1f mil (pcbauto.SolveDiff on %s)", note, c.refH, c.er, t, w, s, c.stackName))
 			}
 			w = math.Ceil(w*10) / 10
 			np.WidthMil = Width{Outer: w, Inner: w, Min: w}
@@ -300,6 +390,30 @@ func (c *ctx) buildNets() {
 			w = math.Ceil(w*10) / 10
 			np.Role, np.Interface, np.ImpedanceOhm, np.LengthGroup = "hs", hs.Name, ohm, firstNonEmpty(hs.LengthGroup, hs.Name)
 			np.WidthMil = Width{Outer: w, Inner: w, Min: w}
+			np.LengthTolMil, np.MaxVias = hs.LengthTolMil, hs.MaxVias
+			if hc := pcbauto.HSClassForInterface(hs.Name); hc != nil {
+				if np.LengthTolMil == 0 {
+					np.LengthTolMil = hc.GroupSkewMil
+				}
+				if np.MaxVias == 0 {
+					np.MaxVias = hc.MaxVias
+				}
+			}
+			if np.LengthTolMil > 0 {
+				np.Why = append(np.Why, fmt.Sprintf("length group %s: matched within %.0f mil", np.LengthGroup, np.LengthTolMil))
+			}
+		}
+		if dg := c.ddrGroup[net]; dg != "" && np.LengthGroup == "" && np.Role != "diff" {
+			// Single-ended DDR data/address: grouped and via-budgeted; the
+			// width stays the routing width (a 50 Ω microstrip on a 4-layer
+			// JLC stack is ~15 mil, unroutable under the SoC BGA) — declare
+			// the interface in spec.hsInterfaces to solve the SE impedance.
+			hc := pcbauto.HSClassForInterface("DDR")
+			np.Interface, np.LengthGroup, np.LengthTolMil, np.MaxVias = "DDR", dg, hc.GroupSkewMil, hc.MaxVias
+			if strings.HasSuffix(dg, "_ADDR") {
+				np.LengthTolMil = ddrAddrTolMil
+			}
+			np.Why = append(np.Why, fmt.Sprintf("DDR %s recognised from the net name: length group %s matched within %.0f mil, ≤ %d vias", map[bool]string{true: "address/command/control", false: "data (byte lane)"}[strings.HasSuffix(dg, "_ADDR")], dg, np.LengthTolMil, np.MaxVias))
 		}
 		// Clearance from the peak voltage to the net's own reference.
 		np.ClearanceMil = c.rules.Clearance
@@ -455,4 +569,25 @@ func (c *ctx) mainsCurrent() (float64, string) {
 		return 1, "no line fuse found: 1 A default"
 	}
 	return best, src
+}
+
+// resistorFed reports a net whose simulated source pins (worst case) all
+// belong to resistors and that carries under 1 mA: a divider or sense node.
+func (c *ctx) resistorFed(net string) bool {
+	nr := c.netW(net)
+	if nr == nil || nr.Floating {
+		return false
+	}
+	src, total := 0, 0.0
+	for _, p := range nr.Pins {
+		if p.Dir != "source" {
+			continue
+		}
+		if c.kind(p.Ref) != pcbauto.KindResistor {
+			return false
+		}
+		src++
+		total += p.CurrentA
+	}
+	return src > 0 && total < 1e-3
 }

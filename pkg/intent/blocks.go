@@ -743,7 +743,7 @@ func (c *ctx) summarize(bl *Block) (string, []string) {
 	case "mcu", "rf-module":
 		rail, ia := c.supplyOf(bl.Core)
 		typA := 0.0
-		if t := c.scenRes("typical"); t != nil {
+		if t := c.scenRes("typical"); t != nil && t.Nets[rail] != nil {
 			for _, pp := range t.Nets[rail].Pins {
 				if pp.Ref == bl.Core && pp.Dir == "sink" {
 					typA += pp.CurrentA

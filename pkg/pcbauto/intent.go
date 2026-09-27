@@ -70,6 +70,15 @@ type IntentNet struct {
 	DiffPair          string        `json:"diffPair"`
 	NetClass          string        `json:"netClass"`
 	Why               []string      `json:"why"`
+	// High-speed additive fields (intent derive): interface family, edge
+	// gap of the pair, length group and its tolerance, declared intra-pair
+	// skew and via budget.
+	Interface    string  `json:"interface,omitempty"`
+	PairGapMil   float64 `json:"pairGapMil,omitempty"`
+	LengthGroup  string  `json:"lengthGroup,omitempty"`
+	LengthTolMil float64 `json:"lengthTolMil,omitempty"`
+	MaxSkewMil   float64 `json:"maxSkewMil,omitempty"`
+	MaxVias      int     `json:"maxVias,omitempty"`
 }
 
 // IntentPair is the insulation between two domains ("domain:ID").
@@ -89,6 +98,9 @@ type IntentPair struct {
 	MOP       string `json:"mop,omitempty"`
 	MOPCount  int    `json:"mopCount,omitempty"`
 	Transient string `json:"transient,omitempty"`
+	// RequiredWithstandV is a declared electric-strength requirement (V
+	// peak, e.g. IEEE 802.3 1500 Vrms → 2121 V).
+	RequiredWithstandV float64 `json:"requiredWithstandV,omitempty"`
 }
 
 // IntentNetClass is a named rule set for a group of nets.
@@ -266,7 +278,7 @@ func buildIsoRules(b *Board, in *Intent) *IsoRules {
 		a, bb := pairDomain(ip.A), pairDomain(ip.B)
 		da, db := dom[a], dom[bb]
 		sp := safety.Pair{A: a, B: bb, WorkingVrms: ip.WorkingVrms, WorkingVpeak: ip.WorkingVpeak,
-			Insulation: ip.Insulation, MOP: ip.MOP, MOPCount: ip.MOPCount, Transient: ip.Transient}
+			Insulation: ip.Insulation, MOP: ip.MOP, MOPCount: ip.MOPCount, Transient: ip.Transient, RequiredWithstandV: ip.RequiredWithstandV}
 		if sp.WorkingVrms == 0 && sp.WorkingVpeak == 0 {
 			sp.WorkingVrms = math.Max(da.WorkingVrms, db.WorkingVrms)
 			sp.WorkingVpeak = math.Max(da.WorkingVpeak, db.WorkingVpeak)
@@ -422,6 +434,8 @@ func applyIntentBase(np *NetPlan, n *IntentNet) {
 	if n.DiffPair != "" {
 		np.PairWith, np.Role = n.DiffPair, RoleDiff
 	}
+	np.Interface, np.LengthGroup = n.Interface, n.LengthGroup
+	np.LengthTolMil, np.MaxSkewMil, np.MaxVias, np.ImpedanceOhm = n.LengthTolMil, n.MaxSkewMil, n.MaxVias, n.ImpedanceOhm
 	np.Why = append(np.Why, n.Why...)
 }
 
@@ -445,6 +459,12 @@ func applyIntentRules(np *NetPlan, n *IntentNet, cls *IntentNetClass, r Rules) {
 		if n.ClearanceMil > 0 {
 			np.ClearanceMil = math.Max(n.ClearanceMil, r.Clearance)
 			np.Why = append(np.Why, whyf("intent clearance %.1f mil", np.ClearanceMil))
+		}
+		if n.PairGapMil > 0 && np.Role == RoleDiff {
+			// The impedance was solved for this edge gap: the router's pair
+			// field must hold it, never below the process clearance.
+			np.PairGapMil = math.Max(n.PairGapMil, r.Clearance)
+			np.Why = append(np.Why, whyf("intent pair gap %.1f mil", np.PairGapMil))
 		}
 	}
 	if cls != nil {

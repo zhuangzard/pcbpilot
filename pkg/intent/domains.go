@@ -162,6 +162,23 @@ func (c *ctx) assignDomainsToBlocks() {
 
 func hazardKind(k string) bool { return k == "mains" || k == "hazardous" }
 
+// declaredIsolation is the largest spec.domains isolationVrms declared for
+// either domain of a pair (by any of its nets).
+func (c *ctx) declaredIsolation(a, b *Domain) float64 {
+	best := 0.0
+	for _, sd := range c.spec.Domains {
+		if sd.IsolationVrms <= 0 {
+			continue
+		}
+		for _, n := range sd.Nets {
+			if has(a.Nets, n) || has(b.Nets, n) {
+				best = math.Max(best, sd.IsolationVrms)
+			}
+		}
+	}
+	return best
+}
+
 // buildPairs states the insulation between every pair of domains an
 // isolation part (optocoupler, isolator, isolated DC/DC, transformer, relay)
 // bridges. The distances come from SafetyDistances.
@@ -194,6 +211,13 @@ func (c *ctx) buildPairs() {
 		default:
 			p.Insulation = "functional"
 			p.Why = append(p.Why, "both sides SELV: functional isolation (noise / ground loop), not a safety barrier")
+		}
+		if iso := c.declaredIsolation(a, b); iso > 0 {
+			p.RequiredWithstandV = round(iso*math.Sqrt2, 1)
+			if p.Insulation == "functional" {
+				p.Insulation = "basic"
+			}
+			p.Why = append(p.Why, fmt.Sprintf("spec.domains isolationVrms %s Vrms (electric strength, e.g. IEEE 802.3 MDI): dimensioned as %s insulation for a %s V peak withstand (IEC 60664-1 procedure 2)", trimFloat(iso, 0), p.Insulation, trimFloat(p.RequiredWithstandV, 0)))
 		}
 		if st.MOP != "" {
 			p.MOP = st.MOP

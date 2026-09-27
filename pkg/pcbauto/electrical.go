@@ -83,6 +83,15 @@ type NetPlan struct {
 	PadCurrents []PadCurrent `json:"padCurrents,omitempty"`
 	ExtraVias   int          `json:"extraVias,omitempty"` // IR-drop feedback: extra fan-out vias per pad
 	Warnings    []string     `json:"warnings,omitempty"`
+	// High-speed intent (--intent): the interface family, the length group
+	// the net is matched in, and declared limits that override the family
+	// defaults of ClassifyHS (0 = family default).
+	Interface    string  `json:"interface,omitempty"`
+	LengthGroup  string  `json:"lengthGroup,omitempty"`
+	LengthTolMil float64 `json:"lengthTolMil,omitempty"`
+	MaxSkewMil   float64 `json:"maxSkewMil,omitempty"`
+	MaxVias      int     `json:"maxVias,omitempty"`
+	ImpedanceOhm float64 `json:"impedanceOhm,omitempty"`
 }
 
 var (

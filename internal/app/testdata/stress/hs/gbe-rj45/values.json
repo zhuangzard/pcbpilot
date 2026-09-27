@@ -1,0 +1,91 @@
+{
+ "_provenance": "synthetic values for connectivity.json (gen.py)",
+ "parts": {
+  "J1": {
+   "mpn": "RJ45-8P8C-NOMAG"
+  },
+  "T1": {
+   "mpn": "H5007NL"
+  },
+  "R10": {
+   "mpn": "0603WAF750JT5E",
+   "value": "75R"
+  },
+  "R11": {
+   "mpn": "0603WAF750JT5E",
+   "value": "75R"
+  },
+  "R12": {
+   "mpn": "0603WAF750JT5E",
+   "value": "75R"
+  },
+  "R13": {
+   "mpn": "0603WAF750JT5E",
+   "value": "75R"
+  },
+  "C20": {
+   "mpn": "1808B102K202NT",
+   "value": "1nF",
+   "description": "Capacitance:1nF Voltage Rating:2kV"
+  },
+  "C21": {
+   "mpn": "1808B102K202NT",
+   "value": "1nF",
+   "description": "Capacitance:1nF Voltage Rating:2kV"
+  },
+  "C10": {
+   "mpn": "CL05B104KO5NNNC",
+   "value": "100nF"
+  },
+  "C11": {
+   "mpn": "CL05B104KO5NNNC",
+   "value": "100nF"
+  },
+  "C12": {
+   "mpn": "CL05B104KO5NNNC",
+   "value": "100nF"
+  },
+  "C13": {
+   "mpn": "CL05B104KO5NNNC",
+   "value": "100nF"
+  },
+  "U1": {
+   "mpn": "RTL8211F-CG"
+  },
+  "R1": {
+   "mpn": "0402WGF2491TCE",
+   "value": "2.49k"
+  },
+  "C5": {
+   "mpn": "CL05B104KO5NNNC",
+   "value": "100nF",
+   "description": "Capacitance:100nF Voltage Rating:16V"
+  },
+  "C6": {
+   "mpn": "CL05B104KO5NNNC",
+   "value": "100nF",
+   "description": "Capacitance:100nF Voltage Rating:16V"
+  },
+  "C7": {
+   "mpn": "CL05B104KO5NNNC",
+   "value": "100nF",
+   "description": "Capacitance:100nF Voltage Rating:16V"
+  },
+  "J2": {
+   "mpn": "KF301-5.0-2P"
+  },
+  "U9": {
+   "mpn": "AMS1117-3.3"
+  },
+  "C90": {
+   "mpn": "CL10A106KP8NNNC",
+   "value": "10uF",
+   "description": "Capacitance:10uF Voltage Rating:10V"
+  },
+  "C91": {
+   "mpn": "CL10A106KP8NNNC",
+   "value": "10uF",
+   "description": "Capacitance:10uF Voltage Rating:10V"
+  }
+ }
+}

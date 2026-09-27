@@ -1,0 +1,65 @@
+{
+ "_provenance": "synthetic values for connectivity.json (gen.py)",
+ "parts": {
+  "J1": {
+   "mpn": "M.2-KEY-M-SOCKET"
+  },
+  "C1": {
+   "mpn": "GRM033R61A104KE15D",
+   "value": "100nF",
+   "description": "Capacitance:100nF Voltage Rating:10V"
+  },
+  "C2": {
+   "mpn": "GRM033R61A104KE15D",
+   "value": "100nF",
+   "description": "Capacitance:100nF Voltage Rating:10V"
+  },
+  "U1": {
+   "mpn": "ASM-PCIE-RC"
+  },
+  "R1": {
+   "mpn": "0402WGF1002TCE",
+   "value": "10k"
+  },
+  "R2": {
+   "mpn": "0402WGF1002TCE",
+   "value": "10k"
+  },
+  "C5": {
+   "mpn": "CL05B104KO5NNNC",
+   "value": "100nF",
+   "description": "Capacitance:100nF Voltage Rating:16V"
+  },
+  "C6": {
+   "mpn": "CL05B104KO5NNNC",
+   "value": "100nF",
+   "description": "Capacitance:100nF Voltage Rating:16V"
+  },
+  "C7": {
+   "mpn": "CL05B104KO5NNNC",
+   "value": "100nF",
+   "description": "Capacitance:100nF Voltage Rating:16V"
+  },
+  "C8": {
+   "mpn": "CL05B104KO5NNNC",
+   "value": "100nF",
+   "description": "Capacitance:100nF Voltage Rating:16V"
+  },
+  "J2": {
+   "mpn": "KF301-5.0-2P"
+  },
+  "U9": {
+   "mpn": "AMS1117-3.3"
+  },
+  "C90": {
+   "mpn": "CL10A106KP8NNNC",
+   "value": "10uF",
+   "description": "Capacitance:10uF Voltage Rating:10V"
+  },
+  "C91": {
+   "mpn": "CL10A106KP8NNNC",
+   "value": "10uF",
+   "description": "Capacitance:10uF Voltage Rating:10V"
+  }
+ }
+}

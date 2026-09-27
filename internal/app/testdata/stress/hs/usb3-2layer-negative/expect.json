@@ -1,0 +1,121 @@
+{
+ "case": "usb3-2layer-negative",
+ "title": "USB 3.0 device with an integrated Type-C flip mux (TX1/TX2/RX1/RX2) behind a straddle-mount Type-C: 100 nF TX AC caps at the controller, flow-through ESD at the connector; USB 2.0 D+/D- with USBLC6; 5.1 kΩ CC pull-downs; VBUS divider sense; AMS1117 3V3 — NEGATIVE: ordered as a 2-layer board",
+ "layers": 2,
+ "stackup": {
+  "h": 62.99,
+  "er": 4.5,
+  "name": "JLC 2-layer 1.6mm FR4"
+ },
+ "pairs": [
+  {
+   "p": "USB3_SSTX1_P",
+   "n": "USB3_SSTX1_N",
+   "interface": "USB3",
+   "ohm": 90,
+   "maxSkewMil": 5,
+   "maxVias": 2,
+   "widthMil": 6,
+   "gapMil": 6,
+   "why": "2-layer: 90 Ω would need ≫ 25 mil over 62.99 mil — uncontrolled, routed as a coupled 6/6 mil pair",
+   "uncontrolled": true
+  },
+  {
+   "p": "USB3_SSTX1C_P",
+   "n": "USB3_SSTX1C_N",
+   "interface": "USB3",
+   "ohm": 90,
+   "maxSkewMil": 5,
+   "maxVias": 2,
+   "widthMil": 6,
+   "gapMil": 6,
+   "why": "2-layer: 90 Ω would need ≫ 25 mil over 62.99 mil — uncontrolled, routed as a coupled 6/6 mil pair",
+   "uncontrolled": true
+  },
+  {
+   "p": "USB3_SSRX1_P",
+   "n": "USB3_SSRX1_N",
+   "interface": "USB3",
+   "ohm": 90,
+   "maxSkewMil": 5,
+   "maxVias": 2,
+   "widthMil": 6,
+   "gapMil": 6,
+   "why": "2-layer: 90 Ω would need ≫ 25 mil over 62.99 mil — uncontrolled, routed as a coupled 6/6 mil pair",
+   "uncontrolled": true
+  },
+  {
+   "p": "USB3_SSTX2_P",
+   "n": "USB3_SSTX2_N",
+   "interface": "USB3",
+   "ohm": 90,
+   "maxSkewMil": 5,
+   "maxVias": 2,
+   "widthMil": 6,
+   "gapMil": 6,
+   "why": "2-layer: 90 Ω would need ≫ 25 mil over 62.99 mil — uncontrolled, routed as a coupled 6/6 mil pair",
+   "uncontrolled": true
+  },
+  {
+   "p": "USB3_SSTX2C_P",
+   "n": "USB3_SSTX2C_N",
+   "interface": "USB3",
+   "ohm": 90,
+   "maxSkewMil": 5,
+   "maxVias": 2,
+   "widthMil": 6,
+   "gapMil": 6,
+   "why": "2-layer: 90 Ω would need ≫ 25 mil over 62.99 mil — uncontrolled, routed as a coupled 6/6 mil pair",
+   "uncontrolled": true
+  },
+  {
+   "p": "USB3_SSRX2_P",
+   "n": "USB3_SSRX2_N",
+   "interface": "USB3",
+   "ohm": 90,
+   "maxSkewMil": 5,
+   "maxVias": 2,
+   "widthMil": 6,
+   "gapMil": 6,
+   "why": "2-layer: 90 Ω would need ≫ 25 mil over 62.99 mil — uncontrolled, routed as a coupled 6/6 mil pair",
+   "uncontrolled": true
+  },
+  {
+   "p": "USB_DP",
+   "n": "USB_DM",
+   "interface": "USB",
+   "ohm": 90,
+   "maxSkewMil": 100,
+   "maxVias": 2,
+   "widthMil": 6,
+   "gapMil": 6,
+   "why": "2-layer: 90 Ω would need ≫ 25 mil over 62.99 mil — uncontrolled, routed as a coupled 6/6 mil pair",
+   "uncontrolled": true
+  }
+ ],
+ "acCaps": [
+  [
+   "C1",
+   "C2"
+  ],
+  [
+   "C3",
+   "C4"
+  ]
+ ],
+ "findingsMust": [
+  "reference-plane-missing",
+  "impedance-uncontrolled"
+ ],
+ "findingsMustNot": [],
+ "route": {
+  "minCompletion": 100,
+  "maxDRC": 0,
+  "maxSplitCrossings": 0
+ },
+ "negative": true,
+ "siMust": [
+  "no-reference"
+ ],
+ "note": "USB 3.2 Gen1 layout: 90 Ω ±10 %, intra-pair ≤ 5 mil, ≤ 2 vias per net; TX AC caps (75–265 nF, 100 nF) at the transmitter, symmetric; USB 2.0 pair 90 Ω, ≤ 100 mil. Negative variant: same netlist on a 2-layer board — impedance cannot be controlled (no adjacent plane at 62.99 mil) and must be flagged, never silently routed as 'pass'."
+}

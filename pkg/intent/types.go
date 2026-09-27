@@ -140,6 +140,12 @@ type NetPlan struct {
 	PadCount   int      `json:"padCount,omitempty"`   // pins on the net
 	Priority   int      `json:"priority,omitempty"`   // routing order hint (lower first)
 	Warnings   []string `json:"warnings,omitempty"`
+	// High-speed limits (diff / hs nets): intra-pair skew, the tolerance of
+	// the length group, and the via budget per net — the engine's HS class
+	// defaults unless spec.hsInterfaces declares them.
+	MaxSkewMil   float64 `json:"maxSkewMil,omitempty"`
+	LengthTolMil float64 `json:"lengthTolMil,omitempty"`
+	MaxVias      int     `json:"maxVias,omitempty"`
 }
 
 // Pair is the insulation requirement between two domains (or nets).
@@ -159,6 +165,10 @@ type Pair struct {
 	Bridges  []string `json:"bridges,omitempty"` // parts spanning the barrier
 	MOP      string   `json:"mop,omitempty"`
 	MOPCount int      `json:"mopCount,omitempty"`
+	// RequiredWithstandV is a declared electric-strength requirement (V
+	// peak), e.g. IEEE 802.3 MDI isolation 1500 Vrms → 2121 V: the
+	// clearance is dimensioned for it (IEC 60664-1 procedure 2).
+	RequiredWithstandV float64 `json:"requiredWithstandV,omitempty"`
 }
 
 // NetClass is an EasyEDA-pushable rule class.

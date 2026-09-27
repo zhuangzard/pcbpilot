@@ -1,0 +1,129 @@
+{
+ "case": "ddr3-x16",
+ "title": "DDR3 16-bit: controller BGA-196 (1.0 mm) → two x8 DDR3 FBGA-78 (0.8 mm); byte lanes point-to-point with differential DQS; address/command/control + CK fly-by U1 → U2 → U3 → VTT terminations",
+ "layers": 6,
+ "stackup": {
+  "h": 4.4,
+  "er": 4.2,
+  "name": "JLC06161H-2116"
+ },
+ "pairs": [
+  {
+   "p": "DDR_DQS0_P",
+   "n": "DDR_DQS0_N",
+   "interface": "DDR",
+   "ohm": 100,
+   "maxSkewMil": 5,
+   "maxVias": 2,
+   "widthMil": 5.0,
+   "gapMil": 4.0,
+   "why": "100 Ω edge-coupled microstrip on JLC06161H-2116 (h=4.4 mil, εr=4.2, t=1.378 mil, s=4 mil): Hammerstad-Jensen w=4.94 mil (IPC-2141 check 93.8 Ω)",
+   "group": "DDR_BYTE0"
+  },
+  {
+   "p": "DDR_DQS1_P",
+   "n": "DDR_DQS1_N",
+   "interface": "DDR",
+   "ohm": 100,
+   "maxSkewMil": 5,
+   "maxVias": 2,
+   "widthMil": 5.0,
+   "gapMil": 4.0,
+   "why": "100 Ω edge-coupled microstrip on JLC06161H-2116 (h=4.4 mil, εr=4.2, t=1.378 mil, s=4 mil): Hammerstad-Jensen w=4.94 mil (IPC-2141 check 93.8 Ω)",
+   "group": "DDR_BYTE1"
+  },
+  {
+   "p": "DDR_CK_P",
+   "n": "DDR_CK_N",
+   "interface": "DDR",
+   "ohm": 100,
+   "maxSkewMil": 5,
+   "maxVias": 4,
+   "widthMil": 5.0,
+   "gapMil": 4.0,
+   "why": "100 Ω edge-coupled microstrip on JLC06161H-2116 (h=4.4 mil, εr=4.2, t=1.378 mil, s=4 mil): Hammerstad-Jensen w=4.94 mil (IPC-2141 check 93.8 Ω)",
+   "group": "DDR_ADDR"
+  }
+ ],
+ "singleEnded": {
+  "ohm": 50,
+  "widthMil": 7.8,
+  "nets": [
+   "DDR_DQ0",
+   "DDR_DQ1",
+   "DDR_DQ2",
+   "DDR_DQ3",
+   "DDR_DQ4",
+   "DDR_DQ5",
+   "DDR_DQ6",
+   "DDR_DQ7",
+   "DDR_DM0",
+   "DDR_DQ8",
+   "DDR_DQ9",
+   "DDR_DQ10",
+   "DDR_DQ11",
+   "DDR_DQ12",
+   "DDR_DQ13",
+   "DDR_DQ14",
+   "DDR_DQ15",
+   "DDR_DM1",
+   "DDR_A0",
+   "DDR_A1",
+   "DDR_A2",
+   "DDR_A3",
+   "DDR_A4",
+   "DDR_A5",
+   "DDR_A6",
+   "DDR_A7",
+   "DDR_A8",
+   "DDR_A9",
+   "DDR_A10",
+   "DDR_A11",
+   "DDR_A12",
+   "DDR_A13",
+   "DDR_BA0",
+   "DDR_BA1",
+   "DDR_BA2",
+   "DDR_RAS_N",
+   "DDR_CAS_N",
+   "DDR_WE_N",
+   "DDR_CS_N",
+   "DDR_CKE",
+   "DDR_ODT"
+  ],
+  "why": "50 Ω microstrip on JLC06161H-2116: Hammerstad-Jensen w=7.77 mil"
+ },
+ "groups": [
+  {
+   "name": "DDR_BYTE0",
+   "units": 10,
+   "tolMil": 25
+  },
+  {
+   "name": "DDR_BYTE1",
+   "units": 10,
+   "tolMil": 25
+  },
+  {
+   "name": "DDR_ADDR",
+   "units": 24,
+   "tolMil": 100
+  }
+ ],
+ "viaBudget": {
+  "DDR_BYTE0": 2,
+  "DDR_BYTE1": 2,
+  "DDR_ADDR": 4
+ },
+ "findingsMustNot": [
+  "reference-plane-missing",
+  "impedance-uncontrolled"
+ ],
+ "route": {
+  "minCompletion": 95,
+  "maxDRC": 0,
+  "maxSplitCrossings": 0
+ },
+ "negative": false,
+ "note": "DDR3 layout guide values: DQ/DM/DQS of a byte lane within ±25 mil of DQS, DQS/CK pairs ≤ 5 mil intra-pair, address/command/control within ±100 mil of CK along the fly-by; ≤ 2 vias per data net, ≤ 4 per fly-by net"
+}

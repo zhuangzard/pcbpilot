@@ -1,0 +1,73 @@
+{
+ "case": "pcie-m2",
+ "title": "PCIe Gen2 x1 root port → M.2 key-M socket: host TX with 100 nF AC caps, RX direct (caps on the module), 100 MHz HCSL REFCLK pair, PERST#/CLKREQ#/WAKE#",
+ "layers": 4,
+ "stackup": {
+  "h": 8.28,
+  "er": 4.4,
+  "name": "JLC04161H-7628"
+ },
+ "pairs": [
+  {
+   "p": "PCIE_TX_P",
+   "n": "PCIE_TX_N",
+   "interface": "PCIE",
+   "ohm": 85,
+   "maxSkewMil": 5,
+   "maxVias": 2,
+   "widthMil": 12.0,
+   "gapMil": 6.0,
+   "why": "85 Ω edge-coupled microstrip on JLC04161H-7628 (h=8.28 mil, εr=4.4, t=1.378 mil, s=6 mil): Hammerstad-Jensen w=11.99 mil (IPC-2141 check 82.7 Ω)"
+  },
+  {
+   "p": "PCIE_TXC_P",
+   "n": "PCIE_TXC_N",
+   "interface": "PCIE",
+   "ohm": 85,
+   "maxSkewMil": 5,
+   "maxVias": 2,
+   "widthMil": 12.0,
+   "gapMil": 6.0,
+   "why": "85 Ω edge-coupled microstrip on JLC04161H-7628 (h=8.28 mil, εr=4.4, t=1.378 mil, s=6 mil): Hammerstad-Jensen w=11.99 mil (IPC-2141 check 82.7 Ω)"
+  },
+  {
+   "p": "PCIE_RX_P",
+   "n": "PCIE_RX_N",
+   "interface": "PCIE",
+   "ohm": 85,
+   "maxSkewMil": 5,
+   "maxVias": 2,
+   "widthMil": 12.0,
+   "gapMil": 6.0,
+   "why": "85 Ω edge-coupled microstrip on JLC04161H-7628 (h=8.28 mil, εr=4.4, t=1.378 mil, s=6 mil): Hammerstad-Jensen w=11.99 mil (IPC-2141 check 82.7 Ω)"
+  },
+  {
+   "p": "PCIE_REFCLK_P",
+   "n": "PCIE_REFCLK_N",
+   "interface": "PCIE",
+   "ohm": 85,
+   "maxSkewMil": 5,
+   "maxVias": 2,
+   "widthMil": 12.0,
+   "gapMil": 6.0,
+   "why": "85 Ω edge-coupled microstrip on JLC04161H-7628 (h=8.28 mil, εr=4.4, t=1.378 mil, s=6 mil): Hammerstad-Jensen w=11.99 mil (IPC-2141 check 82.7 Ω)"
+  }
+ ],
+ "acCaps": [
+  [
+   "C1",
+   "C2"
+  ]
+ ],
+ "findingsMustNot": [
+  "reference-plane-missing",
+  "impedance-uncontrolled"
+ ],
+ "route": {
+  "minCompletion": 100,
+  "maxDRC": 0,
+  "maxSplitCrossings": 0
+ },
+ "negative": false,
+ "note": "PCIe CEM / M.2: 85 Ω ±15 % (100 Ω also allowed; the engine uses 85), intra-pair ≤ 5 mil, ≤ 2 vias per net, TX AC caps 75–265 nF at the transmitter, placed as a symmetric pair"
+}

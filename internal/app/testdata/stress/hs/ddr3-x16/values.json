@@ -1,0 +1,160 @@
+{
+ "_provenance": "synthetic values for connectivity.json (gen.py)",
+ "parts": {
+  "U1": {
+   "mpn": "DDR-CTRL-BGA196"
+  },
+  "U2": {
+   "mpn": "MT41K256M8DA-125"
+  },
+  "U3": {
+   "mpn": "MT41K256M8DA-125"
+  },
+  "R20": {
+   "mpn": "0402WGF390JTCE",
+   "value": "39R"
+  },
+  "R21": {
+   "mpn": "0402WGF390JTCE",
+   "value": "39R"
+  },
+  "R22": {
+   "mpn": "0402WGF390JTCE",
+   "value": "39R"
+  },
+  "R23": {
+   "mpn": "0402WGF390JTCE",
+   "value": "39R"
+  },
+  "R24": {
+   "mpn": "0402WGF390JTCE",
+   "value": "39R"
+  },
+  "R25": {
+   "mpn": "0402WGF390JTCE",
+   "value": "39R"
+  },
+  "R26": {
+   "mpn": "0402WGF390JTCE",
+   "value": "39R"
+  },
+  "R27": {
+   "mpn": "0402WGF390JTCE",
+   "value": "39R"
+  },
+  "R28": {
+   "mpn": "0402WGF390JTCE",
+   "value": "39R"
+  },
+  "R29": {
+   "mpn": "0402WGF390JTCE",
+   "value": "39R"
+  },
+  "R30": {
+   "mpn": "0402WGF390JTCE",
+   "value": "39R"
+  },
+  "R31": {
+   "mpn": "0402WGF390JTCE",
+   "value": "39R"
+  },
+  "R32": {
+   "mpn": "0402WGF390JTCE",
+   "value": "39R"
+  },
+  "R33": {
+   "mpn": "0402WGF390JTCE",
+   "value": "39R"
+  },
+  "R34": {
+   "mpn": "0402WGF390JTCE",
+   "value": "39R"
+  },
+  "R35": {
+   "mpn": "0402WGF390JTCE",
+   "value": "39R"
+  },
+  "R36": {
+   "mpn": "0402WGF390JTCE",
+   "value": "39R"
+  },
+  "R37": {
+   "mpn": "0402WGF390JTCE",
+   "value": "39R"
+  },
+  "R38": {
+   "mpn": "0402WGF390JTCE",
+   "value": "39R"
+  },
+  "R39": {
+   "mpn": "0402WGF390JTCE",
+   "value": "39R"
+  },
+  "R40": {
+   "mpn": "0402WGF390JTCE",
+   "value": "39R"
+  },
+  "R41": {
+   "mpn": "0402WGF390JTCE",
+   "value": "39R"
+  },
+  "R42": {
+   "mpn": "0402WGF390JTCE",
+   "value": "39R"
+  },
+  "R50": {
+   "mpn": "0402WGF360JTCE",
+   "value": "36R"
+  },
+  "R51": {
+   "mpn": "0402WGF360JTCE",
+   "value": "36R"
+  },
+  "C50": {
+   "mpn": "CL05B104KO5NNNC",
+   "value": "100nF"
+  },
+  "U4": {
+   "mpn": "TPS51200DRCR"
+  },
+  "U5": {
+   "mpn": "AMS1117-1.5"
+  },
+  "C5": {
+   "mpn": "CL05B104KO5NNNC",
+   "value": "100nF",
+   "description": "Capacitance:100nF Voltage Rating:16V"
+  },
+  "C6": {
+   "mpn": "CL05B104KO5NNNC",
+   "value": "100nF",
+   "description": "Capacitance:100nF Voltage Rating:16V"
+  },
+  "C7": {
+   "mpn": "CL05B104KO5NNNC",
+   "value": "100nF",
+   "description": "Capacitance:100nF Voltage Rating:16V"
+  },
+  "C8": {
+   "mpn": "CL05B104KO5NNNC",
+   "value": "100nF",
+   "description": "Capacitance:100nF Voltage Rating:16V"
+  },
+  "J2": {
+   "mpn": "KF301-5.0-2P"
+  },
+  "U9": {
+   "mpn": "AMS1117-3.3"
+  },
+  "C90": {
+   "mpn": "CL10A106KP8NNNC",
+   "value": "10uF",
+   "description": "Capacitance:10uF Voltage Rating:10V"
+  },
+  "C91": {
+   "mpn": "CL10A106KP8NNNC",
+   "value": "10uF",
+   "description": "Capacitance:10uF Voltage Rating:10V"
+  }
+ }
+}
