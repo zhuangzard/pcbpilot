@@ -83,6 +83,8 @@ type RouteResult struct {
 	Planes   []PlaneRegion `json:"planes,omitempty"`
 	Stats    RouteStats    `json:"stats"`
 	Notes    []string      `json:"notes,omitempty"`
+	// Power is the post-route segment-current / IR-drop result (--sim only).
+	Power *IRReport `json:"power,omitempty"`
 }
 
 // rnet is the router's per-net state.

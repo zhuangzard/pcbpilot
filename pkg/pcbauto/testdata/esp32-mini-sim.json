@@ -1,0 +1,831 @@
+{
+ "schemaVersion": 1,
+ "generator": "pcbpilot sim power",
+ "note": "HAND-BUILT (dir pass = no DC current, per the feat/sim contract) for the ESP32 mini replay (easyeda-agent artifacts/ceshi-e2e-20260925/pcb/v4-base.json) pending feat/sim: engineering estimates in the sim power contract format, not simulator output",
+ "scenarios": [
+  "typical",
+  "worst"
+ ],
+ "results": [
+  {
+   "scenario": "typical",
+   "nets": {
+    "+3V3": {
+     "voltage": 3.3,
+     "currentA": 0.1401,
+     "role": "power",
+     "pins": [
+      {
+       "ref": "L1",
+       "pin": "2",
+       "name": "L_OUT",
+       "currentA": 0.1401,
+       "dir": "source",
+       "kind": "inductor"
+      },
+      {
+       "ref": "U1",
+       "pin": "2",
+       "name": "3V3",
+       "currentA": 0.12,
+       "dir": "sink"
+      },
+      {
+       "ref": "U3",
+       "pin": "16",
+       "name": "VCC",
+       "currentA": 0.02,
+       "dir": "sink"
+      },
+      {
+       "ref": "U3",
+       "pin": "4",
+       "name": "V3",
+       "currentA": 0.0,
+       "dir": "sink"
+      },
+      {
+       "ref": "R3",
+       "pin": "1",
+       "name": "FB_TOP",
+       "currentA": 6e-05,
+       "dir": "sink"
+      },
+      {
+       "ref": "R5",
+       "pin": "2",
+       "name": "EN_PU",
+       "currentA": 0.0,
+       "dir": "sink"
+      },
+      {
+       "ref": "R6",
+       "pin": "2",
+       "name": "IO0_PU",
+       "currentA": 0.0,
+       "dir": "sink"
+      },
+      {
+       "ref": "C2",
+       "pin": "1",
+       "currentA": 0.0,
+       "dir": "pass"
+      },
+      {
+       "ref": "C3",
+       "pin": "1",
+       "currentA": 0.0,
+       "dir": "pass"
+      },
+      {
+       "ref": "C4",
+       "pin": "1",
+       "currentA": 0.0,
+       "dir": "pass"
+      },
+      {
+       "ref": "C5",
+       "pin": "1",
+       "currentA": 0.0,
+       "dir": "pass"
+      },
+      {
+       "ref": "C7",
+       "pin": "1",
+       "currentA": 0.0,
+       "dir": "pass"
+      }
+     ]
+    },
+    "SW": {
+     "voltage": 3.3,
+     "currentA": 0.1401,
+     "role": "switch",
+     "pins": [
+      {
+       "ref": "U4",
+       "pin": "3",
+       "name": "LX",
+       "currentA": 0.1401,
+       "dir": "source"
+      },
+      {
+       "ref": "L1",
+       "pin": "1",
+       "currentA": 0.1401,
+       "dir": "sink",
+       "kind": "inductor"
+      }
+     ]
+    },
+    "+5V": {
+     "voltage": 4.55,
+     "currentA": 0.1155,
+     "role": "power",
+     "pins": [
+      {
+       "ref": "D2",
+       "pin": "1",
+       "name": "K",
+       "currentA": 0.1155,
+       "dir": "source",
+       "kind": "diode"
+      },
+      {
+       "ref": "D1",
+       "pin": "1",
+       "name": "K",
+       "currentA": 0.0,
+       "dir": "pass"
+      },
+      {
+       "ref": "U4",
+       "pin": "4",
+       "name": "IN",
+       "currentA": 0.1155,
+       "dir": "sink"
+      },
+      {
+       "ref": "U4",
+       "pin": "1",
+       "name": "EN",
+       "currentA": 0.0,
+       "dir": "sink"
+      },
+      {
+       "ref": "C1",
+       "pin": "1",
+       "currentA": 0.0,
+       "dir": "pass"
+      }
+     ]
+    },
+    "VBUS": {
+     "voltage": 5.0,
+     "currentA": 0.1155,
+     "role": "power",
+     "pins": [
+      {
+       "ref": "J2",
+       "pin": "A4B9",
+       "name": "VBUS",
+       "currentA": 0.05775,
+       "dir": "source",
+       "kind": "connector-source"
+      },
+      {
+       "ref": "J2",
+       "pin": "B4A9",
+       "name": "VBUS",
+       "currentA": 0.05775,
+       "dir": "source",
+       "kind": "connector-source"
+      },
+      {
+       "ref": "D2",
+       "pin": "2",
+       "name": "A",
+       "currentA": 0.1155,
+       "dir": "sink",
+       "kind": "diode"
+      },
+      {
+       "ref": "U2",
+       "pin": "5",
+       "name": "VBUS",
+       "currentA": 0.0,
+       "dir": "sink"
+      }
+     ]
+    },
+    "5V_TERM": {
+     "voltage": 5.0,
+     "currentA": 0.0,
+     "role": "power",
+     "pins": [
+      {
+       "ref": "J1",
+       "pin": "1",
+       "currentA": 0.0,
+       "dir": "pass",
+       "kind": "connector-source"
+      },
+      {
+       "ref": "D1",
+       "pin": "2",
+       "name": "A",
+       "currentA": 0.0,
+       "dir": "pass"
+      },
+      {
+       "ref": "D3",
+       "pin": "1",
+       "currentA": 0.0,
+       "dir": "pass"
+      }
+     ]
+    },
+    "LED_CTRL": {
+     "voltage": 3.3,
+     "currentA": 0.0026,
+     "role": "signal",
+     "pins": [
+      {
+       "ref": "U1",
+       "pin": "38",
+       "name": "IO",
+       "currentA": 0.0026,
+       "dir": "source"
+      },
+      {
+       "ref": "R9",
+       "pin": "1",
+       "currentA": 0.0026,
+       "dir": "sink"
+      }
+     ]
+    },
+    "LED_A": {
+     "voltage": 1.9,
+     "currentA": 0.0026,
+     "role": "signal",
+     "pins": [
+      {
+       "ref": "R9",
+       "pin": "2",
+       "currentA": 0.0026,
+       "dir": "source"
+      },
+      {
+       "ref": "LED1",
+       "pin": "1",
+       "name": "A",
+       "currentA": 0.0026,
+       "dir": "sink"
+      }
+     ]
+    },
+    "FB": {
+     "voltage": 0.6,
+     "currentA": 6e-05,
+     "role": "signal",
+     "pins": [
+      {
+       "ref": "R3",
+       "pin": "2",
+       "currentA": 6e-05,
+       "dir": "source"
+      },
+      {
+       "ref": "R4",
+       "pin": "1",
+       "currentA": 6e-05,
+       "dir": "sink"
+      },
+      {
+       "ref": "U4",
+       "pin": "5",
+       "name": "FB",
+       "currentA": 0.0,
+       "dir": "sink"
+      }
+     ]
+    },
+    "GND": {
+     "voltage": 0.0,
+     "currentA": 0.13996,
+     "role": "ground",
+     "pins": [
+      {
+       "ref": "U1",
+       "pin": "1",
+       "currentA": 0.0117,
+       "dir": "source"
+      },
+      {
+       "ref": "U1",
+       "pin": "40",
+       "currentA": 0.0117,
+       "dir": "source"
+      },
+      {
+       "ref": "U1",
+       "pin": "41",
+       "currentA": 0.0939,
+       "dir": "source"
+      },
+      {
+       "ref": "U3",
+       "pin": "1",
+       "currentA": 0.02,
+       "dir": "source"
+      },
+      {
+       "ref": "LED1",
+       "pin": "2",
+       "currentA": 0.0026,
+       "dir": "source"
+      },
+      {
+       "ref": "R4",
+       "pin": "2",
+       "currentA": 6e-05,
+       "dir": "source"
+      },
+      {
+       "ref": "U4",
+       "pin": "2",
+       "name": "GND",
+       "currentA": 0.0246,
+       "dir": "sink"
+      },
+      {
+       "ref": "J2",
+       "pin": "A1B12",
+       "name": "GND",
+       "currentA": 0.05768,
+       "dir": "sink",
+       "kind": "connector-source"
+      },
+      {
+       "ref": "J2",
+       "pin": "B1A12",
+       "name": "GND",
+       "currentA": 0.05768,
+       "dir": "sink",
+       "kind": "connector-source"
+      },
+      {
+       "ref": "J1",
+       "pin": "2",
+       "currentA": 0.0,
+       "dir": "pass",
+       "kind": "connector-source"
+      }
+     ]
+    }
+   },
+   "parts": {
+    "U4": {
+     "model": "buck",
+     "powerW": 0.063,
+     "notes": [
+      "SY8089A1AAC, efficiency ~88% at this load"
+     ]
+    },
+    "U1": {
+     "model": "load",
+     "powerW": 0.396,
+     "notes": [
+      "ESP32-S3-WROOM-1: modem-sleep ~0.12 A"
+     ]
+    },
+    "U3": {
+     "model": "load",
+     "powerW": 0.066,
+     "notes": [
+      "CH340C ~20 mA"
+     ]
+    },
+    "D2": {
+     "model": "diode",
+     "powerW": 0.052,
+     "notes": [
+      "SS34 Vf~0.45 V"
+     ]
+    }
+   },
+   "ripple": {
+    "SW": {
+     "iPeakA": 0.34,
+     "iRmsA": 0.182
+    },
+    "C1": {
+     "iRmsA": 0.058
+    },
+    "C2": {
+     "iRmsA": 0.115
+    }
+   },
+   "warnings": [],
+   "assumptions": [
+    "USB powered (VBUS); 5V_TERM open",
+    "SS34 Vf 0.45 V",
+    "buck efficiency 88 %",
+    "inductor ripple 0.4 App",
+    "LED 2.6 mA via 1k from a 3.3 V GPIO, counted in U1's supply draw",
+    "ground: loads push their return in (source); the USB host return J2 and the buck low side U4.2 take it out (sink)"
+   ]
+  },
+  {
+   "scenario": "worst",
+   "nets": {
+    "+3V3": {
+     "voltage": 3.3,
+     "currentA": 0.5501,
+     "role": "power",
+     "pins": [
+      {
+       "ref": "L1",
+       "pin": "2",
+       "name": "L_OUT",
+       "currentA": 0.5501,
+       "dir": "source",
+       "kind": "inductor"
+      },
+      {
+       "ref": "U1",
+       "pin": "2",
+       "name": "3V3",
+       "currentA": 0.53,
+       "dir": "sink"
+      },
+      {
+       "ref": "U3",
+       "pin": "16",
+       "name": "VCC",
+       "currentA": 0.02,
+       "dir": "sink"
+      },
+      {
+       "ref": "U3",
+       "pin": "4",
+       "name": "V3",
+       "currentA": 0.0,
+       "dir": "sink"
+      },
+      {
+       "ref": "R3",
+       "pin": "1",
+       "name": "FB_TOP",
+       "currentA": 6e-05,
+       "dir": "sink"
+      },
+      {
+       "ref": "R5",
+       "pin": "2",
+       "name": "EN_PU",
+       "currentA": 0.0,
+       "dir": "sink"
+      },
+      {
+       "ref": "R6",
+       "pin": "2",
+       "name": "IO0_PU",
+       "currentA": 0.0,
+       "dir": "sink"
+      },
+      {
+       "ref": "C2",
+       "pin": "1",
+       "currentA": 0.0,
+       "dir": "pass"
+      },
+      {
+       "ref": "C3",
+       "pin": "1",
+       "currentA": 0.0,
+       "dir": "pass"
+      },
+      {
+       "ref": "C4",
+       "pin": "1",
+       "currentA": 0.0,
+       "dir": "pass"
+      },
+      {
+       "ref": "C5",
+       "pin": "1",
+       "currentA": 0.0,
+       "dir": "pass"
+      },
+      {
+       "ref": "C7",
+       "pin": "1",
+       "currentA": 0.0,
+       "dir": "pass"
+      }
+     ]
+    },
+    "SW": {
+     "voltage": 3.3,
+     "currentA": 0.5501,
+     "role": "switch",
+     "pins": [
+      {
+       "ref": "U4",
+       "pin": "3",
+       "name": "LX",
+       "currentA": 0.5501,
+       "dir": "source"
+      },
+      {
+       "ref": "L1",
+       "pin": "1",
+       "currentA": 0.5501,
+       "dir": "sink",
+       "kind": "inductor"
+      }
+     ]
+    },
+    "+5V": {
+     "voltage": 4.55,
+     "currentA": 0.4534,
+     "role": "power",
+     "pins": [
+      {
+       "ref": "D2",
+       "pin": "1",
+       "name": "K",
+       "currentA": 0.4534,
+       "dir": "source",
+       "kind": "diode"
+      },
+      {
+       "ref": "D1",
+       "pin": "1",
+       "name": "K",
+       "currentA": 0.0,
+       "dir": "pass"
+      },
+      {
+       "ref": "U4",
+       "pin": "4",
+       "name": "IN",
+       "currentA": 0.4534,
+       "dir": "sink"
+      },
+      {
+       "ref": "U4",
+       "pin": "1",
+       "name": "EN",
+       "currentA": 0.0,
+       "dir": "sink"
+      },
+      {
+       "ref": "C1",
+       "pin": "1",
+       "currentA": 0.0,
+       "dir": "pass"
+      }
+     ]
+    },
+    "VBUS": {
+     "voltage": 5.0,
+     "currentA": 0.4534,
+     "role": "power",
+     "pins": [
+      {
+       "ref": "J2",
+       "pin": "A4B9",
+       "name": "VBUS",
+       "currentA": 0.2267,
+       "dir": "source",
+       "kind": "connector-source"
+      },
+      {
+       "ref": "J2",
+       "pin": "B4A9",
+       "name": "VBUS",
+       "currentA": 0.2267,
+       "dir": "source",
+       "kind": "connector-source"
+      },
+      {
+       "ref": "D2",
+       "pin": "2",
+       "name": "A",
+       "currentA": 0.4534,
+       "dir": "sink",
+       "kind": "diode"
+      },
+      {
+       "ref": "U2",
+       "pin": "5",
+       "name": "VBUS",
+       "currentA": 0.0,
+       "dir": "sink"
+      }
+     ]
+    },
+    "5V_TERM": {
+     "voltage": 5.0,
+     "currentA": 0.0,
+     "role": "power",
+     "pins": [
+      {
+       "ref": "J1",
+       "pin": "1",
+       "currentA": 0.0,
+       "dir": "pass",
+       "kind": "connector-source"
+      },
+      {
+       "ref": "D1",
+       "pin": "2",
+       "name": "A",
+       "currentA": 0.0,
+       "dir": "pass"
+      },
+      {
+       "ref": "D3",
+       "pin": "1",
+       "currentA": 0.0,
+       "dir": "pass"
+      }
+     ]
+    },
+    "LED_CTRL": {
+     "voltage": 3.3,
+     "currentA": 0.0026,
+     "role": "signal",
+     "pins": [
+      {
+       "ref": "U1",
+       "pin": "38",
+       "name": "IO",
+       "currentA": 0.0026,
+       "dir": "source"
+      },
+      {
+       "ref": "R9",
+       "pin": "1",
+       "currentA": 0.0026,
+       "dir": "sink"
+      }
+     ]
+    },
+    "LED_A": {
+     "voltage": 1.9,
+     "currentA": 0.0026,
+     "role": "signal",
+     "pins": [
+      {
+       "ref": "R9",
+       "pin": "2",
+       "currentA": 0.0026,
+       "dir": "source"
+      },
+      {
+       "ref": "LED1",
+       "pin": "1",
+       "name": "A",
+       "currentA": 0.0026,
+       "dir": "sink"
+      }
+     ]
+    },
+    "FB": {
+     "voltage": 0.6,
+     "currentA": 6e-05,
+     "role": "signal",
+     "pins": [
+      {
+       "ref": "R3",
+       "pin": "2",
+       "currentA": 6e-05,
+       "dir": "source"
+      },
+      {
+       "ref": "R4",
+       "pin": "1",
+       "currentA": 6e-05,
+       "dir": "sink"
+      },
+      {
+       "ref": "U4",
+       "pin": "5",
+       "name": "FB",
+       "currentA": 0.0,
+       "dir": "sink"
+      }
+     ]
+    },
+    "GND": {
+     "voltage": 0.0,
+     "currentA": 0.54996,
+     "role": "ground",
+     "pins": [
+      {
+       "ref": "U1",
+       "pin": "1",
+       "currentA": 0.0527,
+       "dir": "source"
+      },
+      {
+       "ref": "U1",
+       "pin": "40",
+       "currentA": 0.0527,
+       "dir": "source"
+      },
+      {
+       "ref": "U1",
+       "pin": "41",
+       "currentA": 0.4219,
+       "dir": "source"
+      },
+      {
+       "ref": "U3",
+       "pin": "1",
+       "currentA": 0.02,
+       "dir": "source"
+      },
+      {
+       "ref": "LED1",
+       "pin": "2",
+       "currentA": 0.0026,
+       "dir": "source"
+      },
+      {
+       "ref": "R4",
+       "pin": "2",
+       "currentA": 6e-05,
+       "dir": "source"
+      },
+      {
+       "ref": "U4",
+       "pin": "2",
+       "name": "GND",
+       "currentA": 0.0967,
+       "dir": "sink"
+      },
+      {
+       "ref": "J2",
+       "pin": "A1B12",
+       "name": "GND",
+       "currentA": 0.22663,
+       "dir": "sink",
+       "kind": "connector-source"
+      },
+      {
+       "ref": "J2",
+       "pin": "B1A12",
+       "name": "GND",
+       "currentA": 0.22663,
+       "dir": "sink",
+       "kind": "connector-source"
+      },
+      {
+       "ref": "J1",
+       "pin": "2",
+       "currentA": 0.0,
+       "dir": "pass",
+       "kind": "connector-source"
+      }
+     ]
+    }
+   },
+   "parts": {
+    "U4": {
+     "model": "buck",
+     "powerW": 0.248,
+     "notes": [
+      "SY8089A1AAC, efficiency ~88% at this load"
+     ]
+    },
+    "U1": {
+     "model": "load",
+     "powerW": 1.749,
+     "notes": [
+      "ESP32-S3-WROOM-1: Wi-Fi TX peak 0.5 A + digital"
+     ]
+    },
+    "U3": {
+     "model": "load",
+     "powerW": 0.066,
+     "notes": [
+      "CH340C ~20 mA"
+     ]
+    },
+    "D2": {
+     "model": "diode",
+     "powerW": 0.204,
+     "notes": [
+      "SS34 Vf~0.45 V"
+     ]
+    }
+   },
+   "ripple": {
+    "SW": {
+     "iPeakA": 0.75,
+     "iRmsA": 0.562
+    },
+    "C1": {
+     "iRmsA": 0.227
+    },
+    "C2": {
+     "iRmsA": 0.115
+    }
+   },
+   "warnings": [],
+   "assumptions": [
+    "USB powered (VBUS); 5V_TERM open",
+    "SS34 Vf 0.45 V",
+    "buck efficiency 88 %",
+    "inductor ripple 0.4 App",
+    "LED 2.6 mA via 1k from a 3.3 V GPIO, counted in U1's supply draw",
+    "ground: loads push their return in (source); the USB host return J2 and the buck low side U4.2 take it out (sink)"
+   ]
+  }
+ ]
+}

@@ -44,6 +44,14 @@ type PowerSpec struct {
 	// SingleEndedOhm / DiffOhm targets (defaults 50 / 90).
 	SingleEndedOhm float64 `json:"singleEndedOhm,omitempty"`
 	DiffOhm        float64 `json:"diffOhm,omitempty"`
+	// IRBudget bounds the simulated DC drop on power nets (default
+	// max(2 % of the rail, 30 mV)).
+	IRBudget *IRBudget `json:"irBudget,omitempty"`
+	// Sim are simulated per-pin currents (`pcb auto run --sim`): nets it
+	// lists are sized from them and their copper is tapered per segment.
+	Sim *SimPower `json:"-"`
+	// boost is IR-drop feedback for a re-route (see simBoost).
+	boost map[string]simBoost
 }
 
 // NetPlan is the per-net electrical decision.
@@ -63,6 +71,14 @@ type NetPlan struct {
 	Priority          int      `json:"priority"` // routing order: lower first
 	Plane             bool     `json:"plane"`    // delivered by a plane/area instead of tracks
 	Why               []string `json:"why,omitempty"`
+	// Simulated currents (--sim): the scenario used, the simulated net
+	// current, the switch-node peak, and the current through every pad.
+	SimScenario string       `json:"simScenario,omitempty"`
+	SimCurrentA float64      `json:"simCurrentA,omitempty"`
+	PeakA       float64      `json:"peakA,omitempty"`
+	PadCurrents []PadCurrent `json:"padCurrents,omitempty"`
+	ExtraVias   int          `json:"extraVias,omitempty"` // IR-drop feedback: extra fan-out vias per pad
+	Warnings    []string     `json:"warnings,omitempty"`
 }
 
 var (
@@ -324,6 +340,19 @@ type Analysis struct {
 	MaxVoltage    float64             `json:"maxVoltage"`
 	TotalCurrentA float64             `json:"totalCurrentA"`
 	Notes         []string            `json:"notes,omitempty"`
+	// Sim describes the simulated current set (--sim), nil without one.
+	Sim *SimSummary `json:"sim,omitempty"`
+	// IRBudget is the DC drop budget applied to power nets.
+	IRBudget IRBudget `json:"irBudget"`
+}
+
+// SimSummary is the provenance of the simulated currents.
+type SimSummary struct {
+	Scenario    string   `json:"scenario"`
+	Generator   string   `json:"generator,omitempty"`
+	Nets        int      `json:"nets"`
+	Warnings    []string `json:"warnings,omitempty"`
+	Assumptions []string `json:"assumptions,omitempty"`
 }
 
 // Analyze derives per-net electrical requirements. stack may be nil (then
@@ -339,7 +368,14 @@ func Analyze(b *Board, spec PowerSpec, stack *Stackup) *Analysis {
 		spec.DiffOhm = 90
 	}
 	r := b.Rules
-	a := &Analysis{ByNet: map[string]*NetPlan{}, TempRiseC: spec.TempRiseC}
+	a := &Analysis{ByNet: map[string]*NetPlan{}, TempRiseC: spec.TempRiseC, IRBudget: DefaultIRBudget()}
+	if spec.IRBudget != nil {
+		a.IRBudget = *spec.IRBudget
+	}
+	if spec.Sim != nil {
+		a.Sim = &SimSummary{Scenario: spec.Sim.Scenario, Generator: spec.Sim.Generator, Nets: len(spec.Sim.Nets),
+			Warnings: spec.Sim.Warnings, Assumptions: spec.Sim.Assumptions}
+	}
 	declared := map[string]PowerRail{}
 	for _, rail := range spec.Rails {
 		declared[upper(rail.Net)] = rail
@@ -388,6 +424,20 @@ func Analyze(b *Board, spec PowerSpec, stack *Stackup) *Analysis {
 				np.Source = "heuristic"
 			}
 		}
+		if spec.Sim != nil {
+			sn := spec.Sim.Nets[n.Name]
+			if sn == nil {
+				for name, v := range spec.Sim.Nets {
+					if upper(name) == upper(n.Name) {
+						sn = v
+					}
+				}
+			}
+			if sn != nil {
+				_, isDeclared := declared[upper(n.Name)]
+				applySim(a, np, n, sn, spec.Sim, isDeclared)
+			}
+		}
 		if p := explicitPair[n.Name]; p != "" {
 			np.PairWith, np.Role = p, RoleDiff
 		} else if looksDiffName(n.Name) {
@@ -417,7 +467,7 @@ func Analyze(b *Board, spec PowerSpec, stack *Stackup) *Analysis {
 		}
 	}
 	for _, np := range a.Nets {
-		if np.Role == RoleGround {
+		if np.Role == RoleGround && np.Source != "simulated" {
 			np.CurrentA = math.Max(maxRail, 0.5)
 			np.Source = "largest-rail-return"
 			np.Why = append(np.Why, whyf("plane net: total return %.2fA flows in the plane; tracks sized for the largest branch", total))
@@ -481,9 +531,17 @@ func Analyze(b *Board, spec PowerSpec, stack *Stackup) *Analysis {
 		if np.Voltage > 30 {
 			np.Why = append(np.Why, whyf("IPC-2221B %gV → clearance %.1fmil", np.Voltage, np.ClearanceMil))
 		}
-		if np.CurrentA > 0 {
+		if bo, ok := spec.boost[np.Net]; ok {
+			if bo.WidthMil > np.WidthMil {
+				np.Why = append(np.Why, whyf("IR-drop feedback: width %.1f → %.1f mil for the re-route", np.WidthMil, bo.WidthMil))
+				np.InnerWidthMil = math.Max(np.InnerWidthMil, bo.WidthMil)
+				np.WidthMil = bo.WidthMil
+			}
+			np.ExtraVias = bo.ExtraVia
+		}
+		if viaA := math.Max(np.CurrentA, np.PeakA); viaA > 0 {
 			per := ViaCurrent(r.ViaDrill, spec.TempRiseC)
-			np.ViasPerTransition = int(math.Max(1, math.Ceil(np.CurrentA/per)))
+			np.ViasPerTransition = int(math.Max(1, math.Ceil(viaA/per)))
 		} else {
 			np.ViasPerTransition = 1
 		}
@@ -505,6 +563,29 @@ func Analyze(b *Board, spec PowerSpec, stack *Stackup) *Analysis {
 		}
 	}
 	return a
+}
+
+// classMinWidth is the narrowest width a current-sized track of role may
+// taper to (the same floor Analyze applies to the whole net).
+func classMinWidth(role NetRole, r Rules) float64 {
+	switch role {
+	case RolePower, RoleGround:
+		return math.Max(r.TrackWidth, 10)
+	case RoleSwitch:
+		return math.Max(r.TrackWidth, 20)
+	}
+	return r.TrackWidth
+}
+
+// branchWidth is the width a segment carrying amps needs on a layer of oz
+// copper: IPC-2221/2152 rounded up to the metric step, never below the
+// class floor.
+func branchWidth(amps, tempRise, oz, floor float64) float64 {
+	w := TraceWidthForCurrent(amps, tempRise, oz, false)
+	if w > floor {
+		return metricRound(w)
+	}
+	return floor
 }
 
 // metricRound rounds a width up to the 0.05 mm step the repo standardises on.

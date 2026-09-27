@@ -2,6 +2,7 @@ package pcbauto
 
 import (
 	"context"
+	"strings"
 	"time"
 )
 
@@ -60,6 +61,7 @@ func Run(ctx context.Context, b *Board, opt Options) (*Result, error) {
 		if n := MicroFix(b, an, st, rr); n > 0 {
 			rr.Notes = append(rr.Notes, sprintf("micro-fix: %d sub-0.25 mil clearance shortfall(s) cleared by shifting or narrowing a track", n))
 		}
+		rr.Power = powerIntegrity(b, an, st, rr)
 		drc := CheckDRCStrict(b, an, st, rr.Tracks, rr.Vias)
 		res.Attempts = append(res.Attempts, Attempt{Stack: stackLabel(st), Completion: rr.Stats.Completion,
 			Vias: rr.Stats.Vias + rr.Stats.FanoutVias, Violations: len(drc.Violations), Millis: time.Since(start).Milliseconds()})
@@ -106,6 +108,7 @@ func Run(ctx context.Context, b *Board, opt Options) (*Result, error) {
 				if n := MicroFix(b, an, res.Stackup, rr); n > 0 {
 					rr.Notes = append(rr.Notes, sprintf("micro-fix: %d sub-0.25 mil clearance shortfall(s) cleared by shifting or narrowing a track", n))
 				}
+				rr.Power = powerIntegrity(b, an, res.Stackup, rr)
 				drc := CheckDRCStrict(b, an, res.Stackup, rr.Tracks, rr.Vias)
 				res.Attempts = append(res.Attempts, Attempt{Stack: stackLabel(res.Stackup) + sprintf(" grid %.2f", fine.Route.GridMil), Completion: rr.Stats.Completion,
 					Vias: rr.Stats.Vias + rr.Stats.FanoutVias, Violations: len(drc.Violations), Millis: time.Since(start).Milliseconds()})
@@ -120,7 +123,74 @@ func Run(ctx context.Context, b *Board, opt Options) (*Result, error) {
 			}
 		}
 	}
+	if err := irReroute(ctx, b, opt, res); err != nil {
+		return nil, err
+	}
 	return res, nil
+}
+
+// irReroute closes the IR-drop loop: a simulated power net that misses its
+// drop budget with every segment on its worst path already at routed width
+// is re-routed with a wider net width (and extra fan-out vias when the vias
+// dominate the drop). At most two passes; a pass is kept only when it
+// routes no worse (completion, DRC) and lowers the IR violations or the
+// worst drop/budget ratio.
+func irReroute(ctx context.Context, b *Board, opt Options, res *Result) error {
+	if opt.Power.Sim == nil || res.Route == nil || res.Route.Power == nil {
+		return nil
+	}
+	boost := map[string]simBoost{}
+	for k, v := range opt.Power.boost {
+		boost[k] = v
+	}
+	for pass := 1; pass <= 2; pass++ {
+		changed := false
+		for _, n := range res.Route.Power.Nets {
+			if n.Reroute == nil {
+				continue
+			}
+			boost[n.Net] = *n.Reroute
+			changed = true
+		}
+		if !changed {
+			return nil
+		}
+		o2 := opt
+		o2.Power.boost = map[string]simBoost{}
+		for k, v := range boost {
+			o2.Power.boost[k] = v
+		}
+		o2.Route.GridMil = res.Route.Stats.GridMil
+		an := Analyze(b, o2.Power, res.Stackup)
+		start := time.Now()
+		rr, err := Route(ctx, b, res.Stackup, an, o2.Route)
+		if err != nil {
+			return err
+		}
+		if n := MicroFix(b, an, res.Stackup, rr); n > 0 {
+			rr.Notes = append(rr.Notes, sprintf("micro-fix: %d sub-0.25 mil clearance shortfall(s) cleared by shifting or narrowing a track", n))
+		}
+		rr.Power = powerIntegrity(b, an, res.Stackup, rr)
+		drc := CheckDRCStrict(b, an, res.Stackup, rr.Tracks, rr.Vias)
+		res.Attempts = append(res.Attempts, Attempt{Stack: stackLabel(res.Stackup) + sprintf(" IR re-route %d", pass), Completion: rr.Stats.Completion,
+			Vias: rr.Stats.Vias + rr.Stats.FanoutVias, Violations: len(drc.Violations), Millis: time.Since(start).Milliseconds()})
+		old := res.Route.Power
+		better := rr.Stats.Completion >= res.Route.Stats.Completion && len(drc.Violations) <= len(res.DRC.Violations) &&
+			(rr.Power.Violations() < old.Violations() || rr.Power.WorstRatio() < old.WorstRatio()-1e-6)
+		if !better {
+			res.Route.Notes = append(res.Route.Notes, sprintf("IR re-route %d: not kept (routed %.1f%%, DRC %d, IR violations %d, worst %.2f× budget)", pass, rr.Stats.Completion, len(drc.Violations), rr.Power.Violations(), rr.Power.WorstRatio()))
+			return nil
+		}
+		rr.Power.Passes += old.Passes
+		for _, n := range res.Route.Notes {
+			if strings.HasPrefix(n, "IR re-route") {
+				rr.Notes = append(rr.Notes, n)
+			}
+		}
+		res.Analysis, res.Route, res.DRC = an, rr, drc
+		res.Route.Notes = append(res.Route.Notes, sprintf("IR re-route %d kept: IR violations %d → %d, worst %.2f× → %.2f× budget", pass, old.Violations(), rr.Power.Violations(), old.WorstRatio(), rr.Power.WorstRatio()))
+	}
+	return nil
 }
 
 // hsFindings counts the SI findings the joint score treats as defects.
