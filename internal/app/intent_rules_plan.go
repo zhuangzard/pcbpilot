@@ -30,6 +30,8 @@ import (
 	"math"
 	"sort"
 	"strings"
+
+	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
 )
 
 const intentRulePrefix = "PP_"
@@ -241,9 +243,15 @@ func buildIntentClassSpecs(in *designIntent) ([]intentClassSpec, []intentPlanNot
 		if s.trackInner == 0 {
 			s.trackInner = s.trackOuter
 		}
-		if s.trackMin == 0 && !math.IsInf(minW, 1) {
-			s.trackMin = minW
-		}
+		// The per-net current minimum (widthMil.min) is what the body of a
+		// trace needs; the router still necks down to the fabrication
+		// minimum for a few mil at fine-pitch pads. EasyEDA's rule cannot
+		// say "only a short neck may be narrower", so the rule minimum stays
+		// at the board default (fab minimum) and the class width becomes the
+		// default — pushing widthMil.min as the minimum flagged every neck
+		// (live 2026-09-27: 9 Track errors at 5 mil necks). Only an explicit
+		// class minTrackMil overrides.
+		_ = minW
 		if s.clearance == 0 {
 			s.clearance = clr
 		}
@@ -731,9 +739,23 @@ func diffPolarity(net string) int {
 func (p *intentRulesPlan) planDiffPairs(in *designIntent, rc map[string]any, specs []intentClassSpec, onPcb func(string) bool, live []intentLiveDiffPair) {
 	groups := map[string][]string{}
 	for _, name := range in.sortedNetNames() {
-		if dp := in.Nets[name].DiffPair; dp != "" {
-			groups[dp] = append(groups[dp], name)
+		dp := in.Nets[name].DiffPair
+		if dp == "" {
+			continue
 		}
+		// Two conventions reach here: a shared pair id on both nets
+		// ("USB_D"), or each net naming its partner net (`intent derive`
+		// writes USB_DM → "USB_DP", USB_DP → "USB_DM"). A mutual partner
+		// reference is one pair, keyed by the common name prefix.
+		if partner, ok := in.Nets[dp]; ok && partner.DiffPair == name {
+			if name > dp {
+				continue // the pair is added once, from the lower name
+			}
+			dp = diffPairKey(name, dp)
+			groups[dp] = append(groups[dp], name, in.sortedPartner(name))
+			continue
+		}
+		groups[dp] = append(groups[dp], name)
 	}
 	classGap := map[string]float64{}
 	for _, s := range specs {
@@ -821,12 +843,28 @@ func (p *intentRulesPlan) planDiffPairs(in *designIntent, rc map[string]any, spe
 			return
 		}
 	}
-	if err := p.ensureDiffPairRule(rc, widths[0], gaps[0]); err != nil {
+	// Intra-pair length tolerance: the router's HS class table (USB2 100 mil,
+	// USB3/PCIe/HDMI 5 mil, …) — one source for the SI check and the host
+	// rule; the strictest pair wins. The host default 10 mil flagged a
+	// 20.9 mil USB2 mismatch the SI check accepts.
+	tol := math.Inf(1)
+	for _, d := range p.DiffPairs {
+		if d.Action == "skip" {
+			continue
+		}
+		if hc := pcbauto.ClassifyHS(&pcbauto.NetPlan{Net: d.Positive, Role: pcbauto.RoleDiff}); hc != nil && hc.MaxSkewMil > 0 {
+			tol = math.Min(tol, hc.MaxSkewMil)
+		}
+	}
+	if math.IsInf(tol, 1) {
+		tol = 0
+	}
+	if err := p.ensureDiffPairRule(rc, widths[0], gaps[0], tol); err != nil {
 		p.Conflicts = append(p.Conflicts, intentPlanNote{Item: "Differential Pair rule", Detail: err.Error()})
 	}
 }
 
-func (p *intentRulesPlan) ensureDiffPairRule(rc map[string]any, widthMil, gapMil float64) error {
+func (p *intentRulesPlan) ensureDiffPairRule(rc map[string]any, widthMil, gapMil, lenTolMil float64) error {
 	cat, err := ruleCategory(rc, "Physics", "Differential Pair")
 	if err != nil {
 		return err
@@ -864,6 +902,14 @@ func (p *intentRulesPlan) ensureDiffPairRule(rc map[string]any, widthMil, gapMil
 	if gapMil > 0 {
 		if err := set("diffPairSpacingTables", gapMil); err != nil {
 			return err
+		}
+	}
+	if lenTolMil > 0 {
+		// EasyEDA's own spelling of the key; a scalar in the rule unit.
+		if _, ok := mnav(desired, "form", "differentailPairLenTolerMax").(float64); ok {
+			mnavSet(desired, milToStored(lenTolMil, unit), "form", "differentailPairLenTolerMax")
+		} else {
+			p.Advisories = append(p.Advisories, intentPlanNote{Item: "Differential Pair rule", Detail: "no form.differentailPairLenTolerMax on this host; length tolerance left at the host default"})
 		}
 	}
 	p.commitRule(cat, "Physics.Differential Pair", name, desired)
@@ -961,4 +1007,34 @@ func jsonDiff(before, after any, path string) []intentRuleChange {
 		return nil
 	}
 	return []intentRuleChange{{Path: path, Before: before, After: after}}
+}
+
+// sortedPartner returns the partner net named by a mutual diffPair reference.
+func (in *designIntent) sortedPartner(name string) string { return in.Nets[name].DiffPair }
+
+// diffPairKey names a pair from its two nets: the common prefix without a
+// trailing separator ("USB_DM","USB_DP" → "USB_D"), else "a/b".
+func diffPairKey(a, b string) string {
+	n := 0
+	for n < len(a) && n < len(b) && a[n] == b[n] {
+		n++
+	}
+	k := strings.TrimRight(a[:n], "_-")
+	if k == "" {
+		return a + "/" + b
+	}
+	return k
+}
+
+// mnavSet sets v at the key path of nested maps; the parents must exist.
+func mnavSet(root map[string]any, v any, keys ...string) {
+	m := root
+	for _, k := range keys[:len(keys)-1] {
+		next, ok := m[k].(map[string]any)
+		if !ok {
+			return
+		}
+		m = next
+	}
+	m[keys[len(keys)-1]] = v
 }

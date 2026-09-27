@@ -312,3 +312,11 @@ func TestSchIntentAnnotateExplicitPlacementAndFlagPairing(t *testing.T) {
 		t.Fatal("--x without --y must fail")
 	}
 }
+
+func TestWrapIntentLines(t *testing.T) {
+	got := wrapIntentLines([]string{"  [warn] aaaa bbbb cccc dddd", "short"}, 16)
+	want := []string{"  [warn] aaaa", "    bbbb cccc", "    dddd", "short"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("wrap: %q", got)
+	}
+}

@@ -382,7 +382,12 @@ func (c *ctx) buildNetClasses() {
 		nc.Nets = append(nc.Nets, net)
 		nc.TrackMil = math.Max(nc.TrackMil, np.WidthMil.Outer)
 		nc.InnerTrackMil = math.Max(nc.InnerTrackMil, np.WidthMil.Inner)
-		nc.MinTrackMil = math.Max(nc.MinTrackMil, np.WidthMil.Min)
+		// minTrackMil is the narrowest width allowed anywhere on the class
+		// — the router's neck-down at fine-pitch pads, i.e. the fabrication
+		// minimum — not the width the body of the trace needs (that is
+		// widthMil.min / trackMil). Pushing the body width as the class
+		// minimum made host DRC flag every legal neck (live 2026-09-27).
+		nc.MinTrackMil = c.rules.MinTrack
 		nc.ClearanceMil = math.Max(nc.ClearanceMil, np.ClearanceMil)
 		nc.DiffGapMil = math.Max(nc.DiffGapMil, np.PairGapMil)
 		nc.ImpedanceOhm = math.Max(nc.ImpedanceOhm, np.ImpedanceOhm)

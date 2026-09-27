@@ -211,6 +211,37 @@ func renderIntentAnnotation(in *designIntent) []string {
 
 type intentAnnotateMetrics struct {
 	LineHeight, CharWidth, Margin float64
+	// Wrap is the maximum characters per text line (0 = no wrap). A finding
+	// line reached 228 characters ≈ 1368 units — wider than an A4 sheet.
+	Wrap int
+}
+
+// wrapIntentLines breaks long lines at spaces into width-limited lines; a
+// continuation keeps the line's indent plus two spaces.
+func wrapIntentLines(lines []string, width int) []string {
+	if width <= 0 {
+		return lines
+	}
+	var out []string
+	for _, l := range lines {
+		indent := len(l) - len(strings.TrimLeft(l, " "))
+		prefix := strings.Repeat(" ", indent)
+		cont := prefix + "  "
+		cur := ""
+		for _, w := range strings.Fields(l) {
+			switch {
+			case cur == "":
+				cur = prefix + w
+			case len([]rune(cur))+1+len([]rune(w)) > width:
+				out = append(out, cur)
+				cur = cont + w
+			default:
+				cur += " " + w
+			}
+		}
+		out = append(out, cur)
+	}
+	return out
 }
 
 func textWidthEstimate(s string, charW float64) float64 {
@@ -353,9 +384,9 @@ func runIntentAnnotate(in *designIntent, opt intentAnnotateOptions, call intentR
 	if opt.dryRun {
 		rep.Mode = "dry-run"
 	}
-	lines := renderIntentAnnotation(in)
-	rep.Lines = lines
 	m := opt.metrics
+	lines := wrapIntentLines(renderIntentAnnotation(in), m.Wrap)
+	rep.Lines = lines
 
 	journal, err := readIntentAnnotateJournal(opt.journal)
 	if err != nil {
@@ -603,7 +634,7 @@ func newSchIntentAnnotateCmd(cfg *appConfig, window *string, stdout, stderr io.W
 	var intentPath, page, journal string
 	var dryRun bool
 	var x, y, fontSize float64
-	m := intentAnnotateMetrics{LineHeight: 12, CharWidth: 6, Margin: 10}
+	m := intentAnnotateMetrics{LineHeight: 12, CharWidth: 6, Margin: 10, Wrap: 90}
 	c := &cobra.Command{
 		Use:   "intent-annotate",
 		Short: "Write the electrical intent (block summaries, rail V/I/width/class) into the schematic as one replaceable text block",
@@ -680,5 +711,6 @@ are reported, never deleted. Save afterwards (autosave also fires).`,
 	c.Flags().Float64Var(&fontSize, "font-size", 0, "text font size (default: host default)")
 	c.Flags().Float64Var(&m.LineHeight, "line-height", m.LineHeight, "line pitch in schematic units (calibrate to the font)")
 	c.Flags().Float64Var(&m.CharWidth, "char-width", m.CharWidth, "estimated character width for free-area search")
+	c.Flags().IntVar(&m.Wrap, "wrap", m.Wrap, "wrap text lines at this many characters (0 = no wrap)")
 	return c
 }

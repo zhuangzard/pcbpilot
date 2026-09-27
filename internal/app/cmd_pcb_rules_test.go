@@ -279,7 +279,10 @@ func TestIntentRulesPlanESP32FromCleanBoard(t *testing.T) {
 	}
 	l1 := mnav(pw, "form", "data", "1").(map[string]any)
 	closeTo(t, "POWER default", l1["defaultValue"], 20*0.0254)
-	closeTo(t, "POWER min (smallest member min = +3V3 12 mil)", l1["minValue"], 12*0.0254)
+	// The rule minimum stays at the board's fabrication minimum so the
+	// router's short neck-downs at fine-pitch pads pass host DRC (live
+	// 2026-09-27); the class width is the default.
+	closeTo(t, "POWER min (board fab minimum, not the member current minimum)", l1["minValue"], 0.127)
 	closeTo(t, "POWER max kept", l1["maxValue"], 2.54)
 	sp := mnav(rc, "Spacing", "Safe Spacing", "PP_SWITCH", "tables", "1", "content").([]any)
 	closeTo(t, "SWITCH Track/Track", sp[0].([]any)[0], 10*0.0254)
