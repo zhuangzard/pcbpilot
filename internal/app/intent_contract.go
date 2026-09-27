@@ -1,0 +1,195 @@
+package app
+
+// intent_contract.go — the CONSUMER side of the schematic electrical-intent
+// contract (intent.json). A sibling producer derives it from the schematic +
+// DC simulation; `pcb rules apply/check` and `sch intent-annotate` only read the
+// subset below. Unknown fields are ignored so additive producer changes never
+// break these consumers; the fixed fields are validated before any EDA call.
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"math"
+	"os"
+	"sort"
+	"strings"
+)
+
+type designIntent struct {
+	Nets       map[string]*intentNet `json:"nets"`
+	Pairs      []intentPair          `json:"pairs"`
+	NetClasses []intentNetClass      `json:"netClasses"`
+	Blocks     []intentBlock         `json:"blocks"`
+	Domains    []intentDomain        `json:"domains"`
+	Findings   []intentFinding       `json:"findings"`
+
+	// sha256 of the raw file bytes; provenance for reports and annotations.
+	sourceSHA string
+}
+
+type intentNet struct {
+	Role              string        `json:"role"`
+	Domain            string        `json:"domain"`
+	Voltage           intentVoltage `json:"voltage"`
+	CurrentA          float64       `json:"currentA"`
+	WidthMil          intentWidth   `json:"widthMil"`
+	ViasPerTransition int           `json:"viasPerTransition"`
+	ClearanceMil      float64       `json:"clearanceMil"`
+	ImpedanceOhm      float64       `json:"impedanceOhm"`
+	DiffPair          string        `json:"diffPair"`
+	NetClass          string        `json:"netClass"`
+	PairGapMil        float64       `json:"pairGapMil,omitempty"` // additive producer field
+	Why               []string      `json:"why"`
+}
+
+type intentVoltage struct {
+	Nom  float64 `json:"nom"`
+	Peak float64 `json:"peak"`
+}
+
+type intentWidth struct {
+	Outer float64 `json:"outer"`
+	Inner float64 `json:"inner"`
+	Min   float64 `json:"min"`
+}
+
+type intentPair struct {
+	A            string   `json:"a"`
+	B            string   `json:"b"`
+	ClearanceMm  float64  `json:"clearanceMm"`
+	CreepageMm   float64  `json:"creepageMm"`
+	SlotRequired bool     `json:"slotRequired"`
+	Why          []string `json:"why"`
+}
+
+type intentNetClass struct {
+	Name         string   `json:"name"`
+	Nets         []string `json:"nets"`
+	TrackMil     float64  `json:"trackMil"`
+	ClearanceMil float64  `json:"clearanceMil"`
+	ViaDrillMil  float64  `json:"viaDrillMil"`
+	ViaDiaMil    float64  `json:"viaDiaMil"`
+	// Additive producer fields (optional).
+	InnerTrackMil float64 `json:"innerTrackMil,omitempty"`
+	MinTrackMil   float64 `json:"minTrackMil,omitempty"`
+	DiffGapMil    float64 `json:"diffGapMil,omitempty"`
+}
+
+type intentBlock struct {
+	ID       string   `json:"id"`
+	Function string   `json:"function"`
+	Core     string   `json:"core"`
+	Parts    []string `json:"parts"`
+	Nets     []string `json:"nets"`
+	Summary  string   `json:"summary"`
+}
+
+type intentDomain struct {
+	ID   string   `json:"id"`
+	Kind string   `json:"kind"`
+	Nets []string `json:"nets"`
+}
+
+type intentFinding struct {
+	Severity   string `json:"severity"`
+	Kind       string `json:"kind"`
+	Message    string `json:"message"`
+	Suggestion string `json:"suggestion"`
+}
+
+// loadDesignIntent reads and validates an intent.json file.
+func loadDesignIntent(path string) (*designIntent, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read intent: %w", err)
+	}
+	return parseDesignIntent(raw)
+}
+
+func parseDesignIntent(raw []byte) (*designIntent, error) {
+	var in designIntent
+	if err := json.Unmarshal(raw, &in); err != nil {
+		return nil, fmt.Errorf("parse intent: %w", err)
+	}
+	sum := sha256.Sum256(raw)
+	in.sourceSHA = hex.EncodeToString(sum[:])
+	if err := in.validate(); err != nil {
+		return nil, err
+	}
+	return &in, nil
+}
+
+var intentRoles = map[string]bool{"power": true, "ground": true, "signal": true, "switch": true, "hs": true, "diff": true, "rf": true, "analog": true, "clock": true, "": true}
+
+func (in *designIntent) validate() error {
+	if len(in.Nets) == 0 && len(in.NetClasses) == 0 {
+		return fmt.Errorf("intent: no nets and no netClasses — nothing to apply")
+	}
+	nonNeg := func(where string, vals ...float64) error {
+		for _, v := range vals {
+			if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
+				return fmt.Errorf("intent: %s has a negative or non-finite dimension (%v)", where, v)
+			}
+		}
+		return nil
+	}
+	for name, n := range in.Nets {
+		if strings.TrimSpace(name) == "" || n == nil {
+			return fmt.Errorf("intent: nets contains an empty name or null entry")
+		}
+		if !intentRoles[n.Role] {
+			return fmt.Errorf("intent: net %s has unknown role %q", name, n.Role)
+		}
+		if err := nonNeg("net "+name, n.CurrentA, n.WidthMil.Outer, n.WidthMil.Inner, n.WidthMil.Min, n.ClearanceMil, n.ImpedanceOhm, n.PairGapMil); err != nil {
+			return err
+		}
+	}
+	seen := map[string]bool{}
+	for _, c := range in.NetClasses {
+		if err := validIntentName(c.Name); err != nil {
+			return fmt.Errorf("intent: netClasses: %w", err)
+		}
+		if seen[c.Name] {
+			return fmt.Errorf("intent: duplicate netClass %s", c.Name)
+		}
+		seen[c.Name] = true
+		if err := nonNeg("netClass "+c.Name, c.TrackMil, c.ClearanceMil, c.ViaDrillMil, c.ViaDiaMil, c.InnerTrackMil, c.MinTrackMil, c.DiffGapMil); err != nil {
+			return err
+		}
+		if c.ViaDiaMil > 0 && c.ViaDrillMil > 0 && c.ViaDrillMil >= c.ViaDiaMil {
+			return fmt.Errorf("intent: netClass %s via drill %.2f mil must be smaller than diameter %.2f mil", c.Name, c.ViaDrillMil, c.ViaDiaMil)
+		}
+	}
+	for _, p := range in.Pairs {
+		if err := nonNeg("pair "+p.A+"/"+p.B, p.ClearanceMm, p.CreepageMm); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validIntentName guards names that become EDA rule/class keys.
+func validIntentName(name string) error {
+	if strings.TrimSpace(name) == "" || name != strings.TrimSpace(name) {
+		return fmt.Errorf("name %q must be non-empty without surrounding spaces", name)
+	}
+	if name == "__proto__" || name == "constructor" || name == "prototype" {
+		return fmt.Errorf("name %q is reserved", name)
+	}
+	if strings.ContainsAny(name, "\n\r\t\"\\") {
+		return fmt.Errorf("name %q contains control or quote characters", name)
+	}
+	return nil
+}
+
+// sortedNetNames returns intent net names in a stable order.
+func (in *designIntent) sortedNetNames() []string {
+	out := make([]string, 0, len(in.Nets))
+	for n := range in.Nets {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out
+}

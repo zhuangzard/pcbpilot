@@ -133,6 +133,8 @@ var verifiedWriteActions = map[string]bool{
 	"schematic.power.connect_pin": true,
 	"pcb.region.create":           true,
 	"pcb.add_component":           true,
+	"pcb.net_class.add_nets":      true,
+	"schematic.text.create":       true,
 }
 
 // unverifiedWriteError is the requestAction-side twin of the dispatch check: a

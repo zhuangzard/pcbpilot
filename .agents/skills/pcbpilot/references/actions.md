@@ -21,6 +21,7 @@
 | 少量显式标记连接增量 | `sch plan <before.json> <after.json>`；不支持任意器件或导线 diff |
 | 转换/核验模块方框与标题 | `sch frame apply/check --from …` |
 | 执行计划 | `sch apply <playbook.json>` |
+| 把电气意图写进原理图 | `sch intent-annotate --intent intent.json --page <uuid> [--dry-run]`：一个可替换文字块（每行一个 typed `schematic.text.create`），放在内框内空白处；ID 记入 journal，重跑只删 journal 内的文字，不碰器件/导线/连接。见 [pcb-config.md](pcb-config.md#电气意图--原生规则pcb-rules-apply) |
 
 生成器的输入、支持范围与位号/身份规则集中在 [schematic-data.md](schematic-data.md)。
 数据层校验用于发现结构问题，执行时的实时回读用于证明变更确已生效。
@@ -203,6 +204,14 @@ EasyEDA 交互界面兜底。能力边界与未来 typed 验收见 [project-impo
 - `pcb.config.get` / `pcb.config.set` — 当前 PCB 的配置读取与参数化局部修改。CLI 为
   `pcb config get/clearance/track/via/bind`；参数、mil/mm、dry-run、部分成功及回读契约见
   [pcb-config.md](pcb-config.md)。`get` 导出可交给 `pcb drc-rules-set --from` 完整恢复。
+- `pcb rules apply|check --intent intent.json` — 把原理图电气意图（intent.json 契约）映射成原生
+  网络类、`PP_<class>` 线宽/间距/过孔规则与 netRules 绑定、差分对约束；只用既有 typed 读写
+  （`pcb.config.get` / `pcb.net_class.create|add_nets` / `pcb.drc.rules.set` / `pcb.differential_pair.create`），
+  `--dry-run` 出计划，写后重读必须计划为 0 才算 verified；`check` 只读，漂移即非零。见
+  [pcb-config.md](pcb-config.md#电气意图--原生规则pcb-rules-apply)。
+- `pcb.net_class.add_nets` — 给已存在网络类**追加**网络（不删成员），回读核对；网不在板上或属其他类时写前拒绝。
+  `live-unverified`。
+- `schematic.text.create` — 在当前原理图页建一个文字图元并回读内容/位置；只作注释。`live-unverified`。
 
 - `pcb.documents.list` — 工程内所有 PCB 文档（uuid + name）
 - `pcb.components.list` — PCB 上的封装/器件；`includePads:true` 回传 pad 的原始

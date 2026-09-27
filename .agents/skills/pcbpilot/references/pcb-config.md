@@ -63,6 +63,59 @@ Web 3.2.203 的规则写回会出现 IEEE 浮点尾差（例如 `0.1759966` →
 错误），且 Inner1/Inner2 的 `PLANE` 类型重载后回退成 `SIGNAL`，只有正片铜保留。因此该固定
 回归为 `incomplete`，不能作为完整整板验收。临时 Board 已删除并切回上述考试 PCB。
 
+## 电气意图 → 原生规则（pcb rules apply）
+
+来源：原理图 + 直流仿真生成的 `intent.json`（固定契约：`nets` / `pairs` / `netClasses` /
+`blocks` / `findings`）。样例：`internal/app/testdata/intent/esp32-mini.intent.json`（ESP32 mini：
+POWER/SWITCH/GND/USB 四类，USB_DP/USB_DM 90 Ω 差分）。开始状态：PCB 已导入网络，尚未布局/布线。
+
+```bash
+pcbpilot pcb rules apply --intent intent.json --dry-run --project ceshi --doc PCB1   # 只读，打印计划
+pcbpilot pcb rules apply --intent intent.json --project ceshi --doc PCB1             # 只写差异
+pcbpilot pcb save --project ceshi --doc PCB1 && pcbpilot doc reload --project ceshi
+pcbpilot pcb rules check --intent intent.json --project ceshi --doc PCB1             # 只读，0 漂移才退出 0
+pcbpilot sch intent-annotate --intent intent.json --page <页UUID> --dry-run --project ceshi
+pcbpilot sch intent-annotate --intent intent.json --page <页UUID> --project ceshi
+```
+
+| intent | EasyEDA 原生对象 | 规则 |
+|---|---|---|
+| `netClasses[]` ∪ `nets[].netClass` | 网络类（`pcb.net_class.create`，缺成员 `add_nets`） | 只增不删；板上没有的网列入 advisories；同一网被两个类声明或已属其他现存类 → conflict，不写 |
+| 类线宽 `trackMil`（缺省取成员 `widthMil.outer` 最大值）、`innerTrackMil`/成员 inner、`minTrackMil`/成员 `widthMil.min` 最小值 | `Physics.Track."PP_<类>"` | 复制默认规则（`isSetDefault:false`）；层键 1/2 或单表 = 外层；min ≤ default，max 不足则抬到 default |
+| 类间距 `clearanceMil`（缺省取成员最大值） | `Spacing."Safe Spacing"."PP_<类>"` | 复制默认矩阵，仅铜×铜格（Track/Pad/Test Point/Via/Fill/Zone）取 max(默认, 要求)，其余保持默认 |
+| 类过孔 `viaDrillMil`/`viaDiaMil`（两者都给才写） | `Physics."Via Size"."PP_<类>"` | default=要求值，min/max 只在越界时放宽；孔 ≥ 外径拒绝 |
+| 以上规则 | `netRules` 类项及每个成员子项的 `Track`/`Safe Spacing`/`Via Size` | 子项与现存成员不一致、字段不是字符串 → conflict |
+| `nets[].diffPair` | `pcb.differential_pair.create`（极性按 `_DP/_P/+/_H` vs `_DM/_N/-/_L` 后缀） | 同名同网 = ok；同网他名 = ok；同名他网 = conflict |
+| 差分 `widthMil.outer` + `pairGapMil`/类 `diffGapMil` | 唯一的全局 `Differential Pair` 规则 | 仅当所有对一致时写；`impedanceOhm` 只作 advisory（宿主不存阻抗） |
+| `pairs[]`（域间电气间隙/爬电/开槽） | —— | `unsupported / planned`：官方 `pcb_Drc.overwriteNetByNetRules` 结构不透明且未现场采样；用布局禁区/开槽 + DRC 兜底 |
+| `viasPerTransition>1`、单端阻抗 | —— | advisory，由布线/复核执行 |
+
+每次都从**默认规则 + intent** 重新计算期望值（不以旧 `PP_*` 为源），所以重放 = 0 写入、intent
+改了就收敛；数值比较只容忍宿主浮点尾差（相对 1e-9），不引入工程容差。执行顺序：读
+`pcb nets`/`config get`/`constraint list` → 冲突即停（零写入）→ 建类/补成员 → 重读重算（新类的
+netRules 项必须出现，否则 unverified）→ 一次 `pcb.drc.rules.set`（完整规则 + netRules，
+连接器自带回滚与精确回读）→ 建差分对 → 重读，**计划必须为 0** 才 `verified:true`。任何一步
+未确认都非零退出并保留 JSON 报告（writes / final），不自动重试。`check --strict` 让
+unsupported 项也失败。默认规则名（如 `copperThickness1oz`）不改，`pcb auto run` 读取的基线不变。
+
+`sch intent-annotate`：宿主没有网级属性 API（`sch_Net` 只读，`sch_PrimitiveWire.modify` 无属性），
+所以写成**一个**分组文字块：块功能摘要、每条电源/地/开关轨的 V/I/线宽/类/间距/过孔数、差分对、
+网络类、隔离对、warn/error findings。位置：内框（sheet-geometry `Blade Width`）内，避开图签、
+器件 bbox、导线和其他文字（按 `--line-height`/`--char-width` 估算，可 `--x/--y` 固定左上角）。
+创建的 ID 写入 journal（默认 `.pcbpilot/intent-annotate/<页>.json`），重跑只删除 journal 中且内容
+未被手改的文字；内容相同则 0 写入；journal 外的带 `[pcbpilot:intent]` 标记文字只报告不删除。
+
+验证状态：`offline-verified`（Go 假 daemon 覆盖计划、幂等重放、dry-run、回读失败/静默丢写/
+类项缺失非零、冲突零写入、宿主浮点尾差不抖动；TS 覆盖两个新 handler）。需现场验证：
+
+1. Web/桌面 V3、V4 上 `PP_*` Track/Safe Spacing/Via Size 新规则经 `overwriteCurrentRuleConfiguration`
+   被接受、原样回读（宿主是否规范化字段导致每次都有 diff）；
+2. `netRules` 把 `Safe Spacing`/`Via Size` 绑到命名规则后 DRC 实际生效（Track 绑定已于 2026-09-20 验证）；
+3. `createNetClass` 后 `getNetRules` 立即出现类项与成员子项的时机；`addNetToNetClass` 行为；
+4. 全局 `Differential Pair` 规则的层表写回；
+5. `sch_PrimitiveText.create` 的锚点、默认字号、行距与 y 方向（决定 `--line-height/--char-width` 默认值）；
+6. save → reload → `pcb rules check` 为 in-sync（持久化）。
+
 ## 其他考试配置的现有入口
 
 | 要求 | 命令与边界 |

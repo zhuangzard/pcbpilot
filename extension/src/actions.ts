@@ -6909,6 +6909,41 @@ const schematicTextList: Handler = async () => {
 };
 
 /**
+ * Create ONE free text primitive on the ACTIVE schematic page and verify it by
+ * readback (content + position). Annotation only: it never touches parts,
+ * wires or connectivity. Used by `sch intent-annotate`, which journals the
+ * returned primitiveId so a re-run replaces exactly what it created.
+ */
+const schematicTextCreate: Handler = async (payload) => {
+	const x = requireNumber(payload, 'x');
+	const y = requireNumber(payload, 'y');
+	const content = requireString(payload, 'content');
+	if (!Number.isFinite(x) || !Number.isFinite(y)) throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, 'x and y must be finite.');
+	const fontSize = optionalNumber(payload, 'fontSize');
+	if (fontSize !== undefined && !(fontSize > 0 && Number.isFinite(fontSize))) throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, 'fontSize must be a finite positive number.');
+	const color = optionalString(payload, 'color');
+	if (color !== undefined && !/^#[0-9a-fA-F]{6}$/.test(color)) throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, 'color must be #RRGGBB.');
+	let created;
+	try { created = await eda.sch_PrimitiveText.create(x, y, content, 0, color ?? null, null, fontSize ?? null, false, false, false); }
+	catch (err) { throw edaError(err, 'Failed to create schematic text.'); }
+	const primitiveId = created?.getState_PrimitiveId?.();
+	if (!primitiveId) throw new ActionError(ErrorCodes.EDA_CALL_FAILED, 'sch_PrimitiveText.create returned no primitive; nothing to verify.');
+	let actual: Record<string, unknown> | null = null;
+	let readbackError: string | undefined;
+	try {
+		const t = await eda.sch_PrimitiveText.get(primitiveId);
+		if (t) actual = { content: t.getState_Content(), x: t.getState_X(), y: t.getState_Y(), fontSize: t.getState_FontSize() };
+	}
+	catch (err) { readbackError = describeThrown(err); }
+	const verified = !!actual && actual.content === content
+		&& Math.abs(Number(actual.x) - x) < 0.01 && Math.abs(Number(actual.y) - y) < 0.01;
+	return {
+		result: { primitiveId, content, x, y, actual, verified, partial: !verified, ...(readbackError ? { readbackError } : {}) },
+		...(verified ? {} : { warnings: [`Text ${primitiveId} was created but readback did not confirm content/position; it is kept (id returned) — inspect before retrying.`] }),
+	};
+};
+
+/**
  * List all rectangle primitives on the ACTIVE schematic page — module frames
  * (dashed boxes) that `pcbpilot sch groups` turns into PCB placement groups.
  * Read-only. `y` is reported as the host returns TopLeftY (3.2.149 mirrors it
@@ -12502,6 +12537,50 @@ const pcbNetClassCreate: Handler = async (payload) => {
 	};
 };
 
+/**
+ * Add nets to an EXISTING net class (eda.pcb_Drc.addNetToNetClass) and verify
+ * by readback. Additive only — members are never removed — so `pcb rules apply`
+ * can converge a class to the intent without rewriting user-added members.
+ * Nets already in the class are reported as alreadyMembers; nets missing from
+ * the board, or already owned by ANOTHER class, are refused before any write.
+ */
+const pcbNetClassAddNets: Handler = async (payload) => {
+	const name = requireString(payload, 'name');
+	const nets = [...new Set(requireStringArray(payload, 'nets'))];
+	const allNets = new Set((await eda.pcb_Net.getAllNetsName()) ?? []);
+	const missing = nets.filter(n => !allNets.has(n));
+	if (missing.length) {
+		throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, `Net class ${name}: net(s) not on this PCB: ${missing.join(', ')}`);
+	}
+	const classes = (await eda.pcb_Drc.getAllNetClasses()) ?? [];
+	const target = classes.find(c => c.name === name);
+	if (!target) {
+		throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, `Net class ${name} does not exist; create it with pcb.net_class.create first.`);
+	}
+	const members = new Set(target.nets ?? []);
+	const alreadyMembers = nets.filter(n => members.has(n));
+	const toAdd = nets.filter(n => !members.has(n));
+	const owned = toAdd.flatMap(n => classes.filter(c => c.name !== name && (c.nets ?? []).includes(n)).map(c => `${n}∈${c.name}`));
+	if (owned.length) {
+		throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, `Net class ${name}: net(s) already belong to another class: ${owned.join(', ')}`);
+	}
+	if (!toAdd.length) {
+		return { result: { name, added: [], alreadyMembers, verified: true, partial: false, netClass: target } };
+	}
+	let ok = false;
+	try { ok = await eda.pcb_Drc.addNetToNetClass(name, toAdd); }
+	catch (err) { throw edaError(err, `Failed to add nets to PCB net class ${name}.`); }
+	const readback = ((await eda.pcb_Drc.getAllNetClasses()) ?? []).find(c => c.name === name);
+	const after = new Set(readback?.nets ?? []);
+	const notApplied = toAdd.filter(n => !after.has(n));
+	const lost = [...members].filter(n => !after.has(n));
+	const verified = !!readback && notApplied.length === 0 && lost.length === 0;
+	return {
+		result: { name, added: toAdd.filter(n => after.has(n)), alreadyMembers, notApplied, lostMembers: lost, returned: ok, verified, partial: !verified, netClass: readback ?? null },
+		...(verified ? {} : { warnings: [`Net class ${name} membership was not confirmed by readback; inspect netClass before retrying.`] }),
+	};
+};
+
 // ─── PCB routing (copper tracks + vias) ──────────────────────────────
 // Real routing primitives: a track is a line on a copper layer; a via is a
 // plated hole. Both bind to a net by NAME (pull names from pcb.nets.list). Layer
@@ -14657,6 +14736,7 @@ const HANDLERS: Record<string, Handler> = {
 	'schematic.component.replace': schematicComponentReplace,
 	'schematic.component.resolve_lcsc': schematicComponentResolveLcsc,
 	'schematic.text.list': schematicTextList,
+	'schematic.text.create': schematicTextCreate,
 	'schematic.rectangles.list': schematicRectanglesList,
 	'pcb.documents.list': pcbDocumentsList,
 	'pcb.components.list': pcbComponentsList,
@@ -14676,6 +14756,7 @@ const HANDLERS: Record<string, Handler> = {
 	'pcb.nets.list': pcbNetsList,
 	'pcb.net_class.list': pcbNetClassList,
 	'pcb.net_class.create': pcbNetClassCreate,
+	'pcb.net_class.add_nets': pcbNetClassAddNets,
 	'pcb.report': pcbReport,
 	'pcb.constraint.list': pcbConstraintList,
 	'pcb.differential_pair.create': pcbDiffPairCreate,
