@@ -1,0 +1,12 @@
+{
+ "standard": {
+  "name": "IEC62368-1",
+  "insulation": "reinforced",
+  "pollutionDegree": 2,
+  "altitudeM": 2000
+ },
+ "layers": 2,
+ "mains": {
+  "vrms": 230
+ }
+}

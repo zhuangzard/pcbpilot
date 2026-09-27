@@ -94,6 +94,16 @@ fixture 回归：中小板 89–100%，大型 BGA 板（RK3568、K230）55–62%
 | 模型库 | `.agents/skills/pcbpilot/references/power-models.json`（LCSC→MPN→正则，带出处与 confidence）；未知 IC 假设负载并告警 |
 | 交叉核对 | `--spice` 导出线性化 .op 网表，`--spice-check` 用 ngspice 比对节点电压 |
 
+## 设计意图（`intent derive` → `intent.json`，离线验证）
+
+| 能力 | 语义 |
+|---|---|
+| 电路功能 | `pkg/intent` 在 `pcbauto.Understand` 核心/外围块上识别用途：power-input（OR 二极管/TVS）、buck/boost/ldo、usb-uart、mcu/rf-module、esd、led、keys、auto-download、connector、isolation、mains、sensor、motor-driver；每块带仿真数字的 summary |
+| 网计划 | 电压 nom/min/max/peak（开关节点 peak=Vin、市电 √2·Vrms）、仿真/声明/启发电流与逐焊盘电流、IPC-2221/2152 内外层线宽与最小线宽、过孔数、IPC-2221B 间距、USB 90 Ω 等差分阻抗与等长组、网络类（GND/POWER/POWER_HI/SWITCH/HS_DIFF/HS/RF/HV_*/SIGNAL） |
+| 域与绝缘 | 按参考地与隔离件划分 SELV/hazardous/mains/patient/floating/isolated-secondary 域；域间绝缘对经 `SafetyDistances(pair, standard)`（占位：IEC 60664-1 工程默认 + 污染等级/海拔/MOPP；`pkg/safety` 一行接入） |
+| 设计提示 | 电感额定余量、稳压余量/dropout/占空比/Vin 上限、二极管损耗、额定电流/功率/电容耐压、缺大电容、USB 500 mA 预算、缺 USB ESD、阻抗不可控、需开槽、未知模型 |
+| 输入 | 离线 connectivity+values（进程内仿真，`--sim-out` 另存）或 `--sim`；`--spec` 产品级参数；现场只读 `--pages` |
+
 ## 已知不支持：Altium Designer 工程自动导入
 
 - `.SchDoc` / `.PcbDoc` 当前没有 typed action 或 CLI 导入入口；使用 EasyEDA Pro 的

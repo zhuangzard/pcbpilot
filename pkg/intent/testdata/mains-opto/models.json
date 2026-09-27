@@ -1,0 +1,123 @@
+{
+ "schemaVersion": 1,
+ "models": [
+  {
+   "id": "hlk-5m05",
+   "kind": "connector-source",
+   "match": {
+    "mpn": [
+     "HLK-5M05"
+    ]
+   },
+   "sourceName": "acdc",
+   "voltageV": 5.0,
+   "rsOhm": 0.05,
+   "supplyPins": [
+    "+Vo"
+   ],
+   "returnPins": [
+    "-Vo"
+   ],
+   "maxA": 1.0,
+   "source": "synthetic test model: Hi-Link HLK-5M05 5 V / 1 A isolated AC-DC module output",
+   "confidence": "approx"
+  },
+  {
+   "id": "field-3p",
+   "kind": "connector-source",
+   "match": {
+    "mpn": [
+     "KF301-5.0-3P"
+    ]
+   },
+   "sourceName": "field",
+   "voltageV": 24.0,
+   "rsOhm": 0.1,
+   "supplyPins": [
+    "1"
+   ],
+   "returnPins": [
+    "2"
+   ],
+   "source": "synthetic test model: 24 V field supply terminal",
+   "confidence": "assumed"
+  },
+  {
+   "id": "stm32f030f4",
+   "kind": "load",
+   "match": {
+    "mpn": [
+     "STM32F030F4P6"
+    ]
+   },
+   "supplyPins": [
+    "VDD"
+   ],
+   "returnPins": [
+    "VSS"
+   ],
+   "typA": 0.02,
+   "peakA": 0.03,
+   "gpioPins": "^P[A-F][0-9]+$",
+   "gpioRoutOhm": 40,
+   "gpioMaxA": 0.02,
+   "source": "synthetic test model",
+   "confidence": "approx"
+  },
+  {
+   "id": "pc817-led",
+   "kind": "led",
+   "match": {
+    "mpn": [
+     "PC817C"
+    ]
+   },
+   "pins": {
+    "anode": [
+     "A"
+    ],
+    "cathode": [
+     "K"
+    ]
+   },
+   "vfV": 1.2,
+   "ifA": 0.01,
+   "maxA": 0.05,
+   "source": "synthetic test model: PC817 input LED (output transistor not modelled)",
+   "confidence": "approx"
+  },
+  {
+   "id": "srd-05vdc",
+   "kind": "load",
+   "match": {
+    "mpn": [
+     "SRD-05VDC-SL-C"
+    ]
+   },
+   "supplyPins": [
+    "COIL1"
+   ],
+   "returnPins": [
+    "COIL2"
+   ],
+   "typA": 0.07,
+   "peakA": 0.072,
+   "source": "synthetic test model: 5 V relay coil 70 \u03a9 \u2192 71 mA",
+   "confidence": "approx"
+  },
+  {
+   "id": "1n4148w",
+   "kind": "diode",
+   "match": {
+    "mpn": [
+     "1N4148W"
+    ]
+   },
+   "vfV": 0.7,
+   "ifA": 0.01,
+   "maxA": 0.15,
+   "source": "synthetic test model",
+   "confidence": "approx"
+  }
+ ]
+}

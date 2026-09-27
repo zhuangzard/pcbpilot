@@ -1,0 +1,197 @@
+package intent
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+// Spec is the product-level input (`--spec spec.json`): the things a
+// schematic cannot say — the safety standard, environment, declared rail
+// budgets that override the simulation, ripple budgets and high-speed
+// interfaces. Every field is optional.
+type Spec struct {
+	Standard *Standard `json:"standard,omitempty"`
+	// Layers is the planned copper layer count (default 4).
+	Layers int `json:"layers,omitempty"`
+	// Copper weights (default 1 oz outer / 0.5 oz inner, JLC standard).
+	OuterOz float64 `json:"outerOz,omitempty"`
+	InnerOz float64 `json:"innerOz,omitempty"`
+	// TempRiseC is the allowed conductor temperature rise (default 10 °C).
+	TempRiseC float64 `json:"tempRiseC,omitempty"`
+	// Rails are declared voltage/current budgets; a declared current wins over
+	// the simulated one (reported as "declared").
+	Rails []SpecRail `json:"rails,omitempty"`
+	// HSInterfaces declare impedance-controlled interfaces beyond the
+	// auto-recognised USB pairs.
+	HSInterfaces []SpecHS `json:"hsInterfaces,omitempty"`
+	// Mains describes AC line nets (names are otherwise recognised as
+	// L/N/AC_L/…); Vrms defaults to 230.
+	Mains *SpecMains `json:"mains,omitempty"`
+	// Domains override the kind of a domain (e.g. patient) by any of its nets.
+	Domains []SpecDomain `json:"domains,omitempty"`
+	// USBBudgetA is the current a USB source may deliver (default 0.5 A,
+	// USB 2.0 default power; 1.5/3.0 for USB-C current advertisement).
+	USBBudgetA float64 `json:"usbBudgetA,omitempty"`
+	// Rules override the fabrication minimums (mil).
+	Rules *SpecRules `json:"rules,omitempty"`
+}
+
+// SpecRail is a declared rail.
+type SpecRail struct {
+	Net        string  `json:"net"`
+	Voltage    float64 `json:"voltage,omitempty"`
+	CurrentA   float64 `json:"currentA,omitempty"`
+	RippleMvpp float64 `json:"rippleMvpp,omitempty"`
+	// PeakV overrides the peak voltage (surges, inductive kick).
+	PeakV float64 `json:"peakV,omitempty"`
+}
+
+// SpecHS is a declared high-speed interface.
+type SpecHS struct {
+	Name        string      `json:"name"`
+	Nets        []string    `json:"nets,omitempty"`  // single-ended members
+	Pairs       [][2]string `json:"pairs,omitempty"` // P/N pairs
+	DiffOhm     float64     `json:"diffOhm,omitempty"`
+	SingleOhm   float64     `json:"singleOhm,omitempty"`
+	LengthGroup string      `json:"lengthGroup,omitempty"`
+}
+
+// SpecMains declares the AC line.
+type SpecMains struct {
+	Vrms float64  `json:"vrms,omitempty"`
+	Nets []string `json:"nets,omitempty"`
+}
+
+// SpecDomain overrides a domain's kind.
+type SpecDomain struct {
+	Kind string   `json:"kind"` // patient | floating | isolated-secondary | SELV | hazardous | mains
+	Nets []string `json:"nets"`
+	// WorkingVrms overrides the domain working voltage (e.g. a floating
+	// secondary referenced to mains).
+	WorkingVrms float64 `json:"workingVrms,omitempty"`
+}
+
+// SpecRules override fabrication minimums (mil).
+type SpecRules struct {
+	ClearanceMil float64 `json:"clearanceMil,omitempty"`
+	TrackMil     float64 `json:"trackMil,omitempty"`
+	ViaDrillMil  float64 `json:"viaDrillMil,omitempty"`
+	ViaDiaMil    float64 `json:"viaDiaMil,omitempty"`
+}
+
+// ParseSpec decodes spec.json (unknown fields are rejected to catch typos).
+func ParseSpec(b []byte) (*Spec, error) {
+	var s Spec
+	dec := json.NewDecoder(strings.NewReader(string(b)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&s); err != nil {
+		return nil, fmt.Errorf("spec: %w", err)
+	}
+	if st := s.Standard; st != nil {
+		if err := validateStandard(st); err != nil {
+			return nil, fmt.Errorf("spec.standard: %w", err)
+		}
+	}
+	for i, d := range s.Domains {
+		switch d.Kind {
+		case "patient", "floating", "isolated-secondary", "SELV", "hazardous", "mains":
+		default:
+			return nil, fmt.Errorf("spec.domains[%d].kind %q: want patient|floating|isolated-secondary|SELV|hazardous|mains", i, d.Kind)
+		}
+	}
+	return &s, nil
+}
+
+var (
+	knownStandards = []string{"IPC-2221B", "IEC62368-1", "IEC60601-1", "IEC61010-1"}
+	knownInsul     = []string{"functional", "basic", "supplementary", "double", "reinforced"}
+)
+
+func validateStandard(st *Standard) error {
+	if st.Name != "" && !containsFold(knownStandards, st.Name) {
+		return fmt.Errorf("name %q: want one of %s", st.Name, strings.Join(knownStandards, ", "))
+	}
+	if st.Insulation != "" && !containsFold(knownInsul, st.Insulation) {
+		return fmt.Errorf("insulation %q: want one of %s", st.Insulation, strings.Join(knownInsul, ", "))
+	}
+	switch strings.ToUpper(st.MOP) {
+	case "", "MOOP", "MOPP":
+	default:
+		return fmt.Errorf("mop %q: want MOOP, MOPP or empty", st.MOP)
+	}
+	if st.PollutionDegree < 0 || st.PollutionDegree > 4 {
+		return fmt.Errorf("pollutionDegree %d: want 1..4", st.PollutionDegree)
+	}
+	return nil
+}
+
+func containsFold(list []string, v string) bool {
+	for _, s := range list {
+		if strings.EqualFold(s, v) {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveStandard fills engineering defaults. hazardous tells whether the
+// design has a hazardous/mains domain (then the default standard is IEC
+// 62368-1 instead of plain IPC-2221B spacing).
+func resolveStandard(in *Standard, hazardous bool) Standard {
+	var st Standard
+	if in != nil {
+		st = *in
+	}
+	st.Defaulted = nil
+	def := func(field string) { st.Defaulted = append(st.Defaulted, field) }
+	for _, n := range knownStandards {
+		if strings.EqualFold(n, st.Name) {
+			st.Name = n
+		}
+	}
+	if st.Name == "" {
+		st.Name = "IPC-2221B"
+		if hazardous {
+			st.Name = "IEC62368-1"
+		}
+		def("name")
+	}
+	st.Insulation = strings.ToLower(st.Insulation)
+	if st.Insulation == "" {
+		st.Insulation = "functional"
+		if hazardous {
+			st.Insulation = "reinforced"
+		}
+		def("insulation")
+	}
+	st.MOP = strings.ToUpper(st.MOP)
+	if st.Name == "IEC60601-1" && st.MOP == "" {
+		st.MOP = "MOPP"
+		def("mop")
+	}
+	if st.MOP != "" && st.MOPCount == 0 {
+		st.MOPCount = 1
+		if st.Insulation == "reinforced" || st.Insulation == "double" {
+			st.MOPCount = 2
+		}
+		def("mopCount")
+	}
+	if st.PollutionDegree == 0 {
+		st.PollutionDegree = 2
+		def("pollutionDegree")
+	}
+	if st.MaterialGroup == "" {
+		st.MaterialGroup = "IIIa"
+		def("materialGroup")
+	}
+	if st.AltitudeM == 0 {
+		st.AltitudeM = 2000
+		def("altitudeM")
+	}
+	if st.OvervoltageCategory == "" {
+		st.OvervoltageCategory = "II"
+		def("overvoltageCategory")
+	}
+	return st
+}

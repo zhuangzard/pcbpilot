@@ -1,0 +1,88 @@
+{
+ "_provenance": "synthetic values for connectivity.json",
+ "parts": {
+  "J1": {
+   "mpn": "1729128",
+   "description": "Current Rating:10A Voltage Rating (Max):300V"
+  },
+  "F1": {
+   "value": "1A",
+   "mpn": "0217001.MXP",
+   "description": "Current Rating:1A Voltage Rating:250V"
+  },
+  "PS1": {
+   "mpn": "HLK-5M05",
+   "description": "AC-DC isolated module 5V 1A"
+  },
+  "C1": {
+   "value": "22uF",
+   "mpn": "CL21A226MAQNNNE",
+   "description": "Capacitance:22uF Voltage Rating:25V"
+  },
+  "U2": {
+   "mpn": "AMS1117-3.3",
+   "lcsc": "C6186"
+  },
+  "C2": {
+   "value": "22uF",
+   "mpn": "CL21A226MAQNNNE",
+   "description": "Capacitance:22uF Voltage Rating:25V"
+  },
+  "C3": {
+   "value": "100nF",
+   "mpn": "CL05B104KO5NNNC",
+   "description": "Capacitance:100nF Voltage Rating:16V"
+  },
+  "U1": {
+   "mpn": "STM32F030F4P6"
+  },
+  "R3": {
+   "value": "10kΩ",
+   "mpn": "0402WGF1002TCE",
+   "description": "Resistance:10kΩ Power(Watts):62.5mW"
+  },
+  "U3": {
+   "mpn": "PC817C",
+   "description": "optocoupler CTR 200-400%"
+  },
+  "R2": {
+   "value": "4.7kΩ",
+   "mpn": "0805W8F4701T5E",
+   "description": "Resistance:4.7kΩ Power(Watts):125mW"
+  },
+  "J2": {
+   "mpn": "KF301-5.0-3P"
+  },
+  "C4": {
+   "value": "1uF",
+   "mpn": "CL21B105KBFNNNE",
+   "description": "Capacitance:1uF Voltage Rating:50V"
+  },
+  "R4": {
+   "value": "1kΩ",
+   "mpn": "0402WGF1001TCE",
+   "description": "Resistance:1kΩ Power(Watts):62.5mW"
+  },
+  "Q1": {
+   "mpn": "MMBT3904",
+   "lcsc": "C20526"
+  },
+  "D1": {
+   "mpn": "1N4148W",
+   "description": "Current - Rectified:150mA"
+  },
+  "K1": {
+   "mpn": "SRD-05VDC-SL-C",
+   "description": "relay 5V coil 70mA, contacts 10A 250VAC"
+  },
+  "J3": {
+   "mpn": "1729128",
+   "description": "Current Rating:10A Voltage Rating (Max):300V"
+  },
+  "C5": {
+   "value": "100nF",
+   "mpn": "MKP-X2-104K275",
+   "description": "Capacitance:100nF Voltage Rating:275V"
+  }
+ }
+}

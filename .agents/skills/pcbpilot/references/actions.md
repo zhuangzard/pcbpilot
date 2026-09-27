@@ -48,6 +48,7 @@ device identity、bbox、pins、wires 与连接摘要，不能用前者替代后
 | 目的 | CLI |
 |---|---|
 | 原理图直流电源仿真：每网电压、每焊盘电流（source/sink/pass）、稳压器工作点、buck 纹波、多输入源场景与逐焊盘 worst | `sim power --connectivity p1.json [--connectivity p2.json] --values list.json --out sim.json [--report sim.md] [--spice sim.cir --spice-check]`；不带 `--connectivity` 时现场只读逐页读取（`--pages`）。模型库 [power-models.json](power-models.json)，读法见 [power-sim.md](power-sim.md) |
+| 原理图 → 设计意图：电路功能块、每网电压/电流/线宽/过孔/间距/阻抗/网络类、电压域与绝缘对、设计提示 | `intent derive --connectivity p1.json [--connectivity p2.json] --values list.json [--sim sim.json] [--spec spec.json] --out intent.json [--report intent.md] [--sim-out sim.json] [--strict]`；不带 `--connectivity/--sim` 时现场只读（`--pages`）。读法见 [design-intent.md](design-intent.md) |
 
 ## SCH Apply
 
