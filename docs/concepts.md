@@ -341,6 +341,28 @@ Iin = V(LX)·Iout/(η·Vin)+Iq;LDO:Iin = Iout+Iq,含 dropout/关断),纹波用�
   供线宽规划消费。二者冲突时以有出处的模型数据为准并回写说明。用法见
   [`power-sim.md`](../.agents/skills/pcbpilot/references/power-sim.md)。状态:`offline-verified`。
 
+### 设计意图(design intent)—— `intent.json`
+**是什么**:原理图验收后由 `pcbpilot intent derive`(`pkg/intent`,契约 `schemaVersion 1`,只加字段
+不改名)推导出的**带理由的电气计划**,是原理图与 PCB 之间唯一的交接数据——没有它 PCB 只知道位置。
+它由三件东西合成:连接(sch connectivity + 器件值)、电源仿真(`sim power`,见上节)、产品 spec
+(安规标准/绝缘等级/MOP/污染等级/海拔/叠层铜厚/声明轨预算/高速接口)。
+- **块(block)的功能**:在 pcbauto 核心/外围块之上识别电路**用途**——power-input(OR 二极管、TVS)、
+  buck/boost/ldo(分压求 Vout、η、损耗)、usb-uart、mcu/rf-module、esd、led、keys、auto-download、
+  connector、isolation、mains…,每块一句带仿真数字的 summary。与第三章“块库”的 block 同名不同物:
+  这里是**被识别出的现场电路**,不是可复用模板。
+- **网计划**:role、domain、block、电压{nom,min,max,peak}(开关节点 peak=Vin,市电 peak=√2·Vrms)、
+  电流及来源(simulated/declared/heuristic)、逐焊盘电流、线宽{outer,inner,min}、每次换层过孔数、
+  间距(IPC-2221B 按峰值)、阻抗/差分对/等长组、网络类、why。
+- **电压域与绝缘对**:域 = 同一参考地的电路(SELV / hazardous >60 V DC / mains / patient / floating /
+  isolated-secondary);**绝缘对(pair)**= 隔离件跨接的两域之间的绝缘等级与爬电/电气间隙/开槽,数字
+  只经 `SafetyDistances(pair, standard)` 一个入口(占位实现,`pkg/safety` 接入为一行替换)。
+- **网络类**:GND / POWER / POWER_HI(>1 A)/ SWITCH / HS_DIFF / HS / RF / HV_<域> / SIGNAL,可直接推送 EasyEDA。
+- **findings**:给设计者的提示(电感额定余量、稳压余量、二极管损耗、额定电流/功率/耐压、缺大电容、
+  USB 预算、缺 ESD、阻抗不可控、需开槽、未知模型)。
+- **铁律**:下游(规则推送、`pcb auto`、安规、反馈)只读 intent,不再各自按网名猜;数字不对就改
+  原理图/spec/功耗模型后重新 derive,不手改 intent.json。用法见
+  [`design-intent.md`](../.agents/skills/pcbpilot/references/design-intent.md)。状态:`offline-verified`。
+
 ### 网感知(net-aware) vs 几何(geometric)—— 本项目的核心决策二分
 | | 依据 | 例子(连接器分组选边) |
 |---|---|---|

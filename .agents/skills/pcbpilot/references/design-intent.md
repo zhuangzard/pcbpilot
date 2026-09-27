@@ -1,0 +1,108 @@
+# 设计意图：`pcbpilot intent derive` → `intent.json`
+
+状态：`offline-verified`（ESP32 mini 两页回放 + 合成市电/光耦板 + CLI 测试；现场只读路径已实现、
+未现场跑）。
+
+目的：原理图验收后，把“这块板每个电路是干什么的、每个网该怎么走”一次算清并写成可审计数据。
+没有它，原理图 → PCB 只剩位置；有了它，EasyEDA 规则推送、`pcb auto`、安规检查和反馈回路都
+读同一份带理由的电气计划，而不是各自按网名猜。它**只读原理图、不写工程**。
+
+## 1. 运行
+
+离线（可复现，推荐）：
+
+```bash
+pcbpilot sch connectivity --page P1 > sch-p1.json     # 每页一份
+pcbpilot sch list --page P1 > list-p1.json            # Value / MPN / LCSC / 描述（额定值来源）
+pcbpilot intent derive --connectivity sch-p1.json --connectivity sch-p2.json \
+    --values list-p1.json --values list-p2.json \
+    --spec spec.json --out intent.json --report intent.md --sim-out sim.json
+```
+
+- 不给 `--sim` 时在进程内跑 `sim power`（同一套 [power-models.json](power-models.json)，
+  `--models` / `--models-lib` / `--scenario` / `--switch` 与 `sim power` 同义）；`--sim-out` 把这份
+  仿真另存，供 `pcb auto run --sim` 复用，保证两边电流同源。
+- 已有 `sim.json`：`--sim sim.json` 复用；只给 `--sim`（无连接）时按仿真的逐网焊盘表重建网表——
+  没有器件值，分类靠模型 id，额定值和电容量无法核对（相应提示降为 info）。
+- 现场只读：`pcbpilot --project <工程> intent derive --pages P1,P2 --out intent.json`
+  （逐页读取后恢复原页）。
+- `--strict`：有 `error` 级 finding 时非零退出，可作回归门槛。
+
+`spec.json`（全部可选；未知字段报错，防拼写错误）：
+
+```json
+{"standard":{"name":"IEC62368-1","insulation":"reinforced","mop":"","pollutionDegree":2,
+  "materialGroup":"IIIa","altitudeM":2000,"overvoltageCategory":"II","coated":false},
+ "layers":4,"outerOz":1,"innerOz":0.5,"tempRiseC":10,
+ "rails":[{"net":"+3V3","voltage":3.3,"currentA":0.8,"rippleMvpp":30,"peakV":0}],
+ "hsInterfaces":[{"name":"ETH","pairs":[["TXP","TXN"]],"diffOhm":100,"lengthGroup":"ETH_TX"},
+                 {"name":"SDIO","nets":["SD_CLK"],"singleOhm":50}],
+ "mains":{"vrms":230,"nets":["L","N"]},
+ "domains":[{"kind":"patient","nets":["ECG_IN"],"workingVrms":0}],
+ "usbBudgetA":0.5,
+ "rules":{"clearanceMil":6,"trackMil":6,"viaDrillMil":12,"viaDiaMil":24}}
+```
+
+声明的轨电流**优先于仿真**（`currentSource: declared`）；声明低于仿真值会出 finding。标准未声明时
+按工程默认（无危险电压 = IPC-2221B/functional；有市电或 >60 V DC = IEC62368-1/reinforced），
+`standard.defaulted` 列出被默认的字段，市电板未声明标准会出 `standard-defaulted` 警告。
+
+## 2. 读结果（`intent.json` schemaVersion 1，固定契约：只加字段，不改名不删除）
+
+| 字段 | 含义 |
+|---|---|
+| `blocks[]` | 电路功能：`function` ∈ power-input / buck / boost / ldo / charger / usb-uart / mcu / rf-module / led / esd / connector / isolation / mains / sensor / motor-driver / other；`subFunction` 细分（or-ing、keys、auto-download、optocoupler…）；`core`、`parts`、`nets`（该块**拥有**的网：电源网归输出它的块，信号网归核心在网上的块，地网全局不归块）、`summary`（带仿真数字的一句话）、`notes`（如 buck 分压求 Vout、纹波公式）。 |
+| `nets{}` | 每网计划：`role`（power/ground/signal/switch/hs/diff/rf/analog/clock）、`domain`、`block`、`voltage{nom,min,max,peak}`（nom=typical；min/max=通电场景包络；开关节点 peak=Vin；市电 peak=√2·Vrms）、`currentA`+`currentSource`（simulated/declared/heuristic；开关节点按纹波 RMS，`peakA` 给峰值、`dcCurrentA` 给直流）、`pins[]`（ref/pin/currentA/dir，仿真 worst）、`widthMil{outer,inner,min}`、`viasPerTransition`、`clearanceMil`、`impedanceOhm`/`diffPair`/`lengthGroup`/`pairGapMil`、`netClass`、`why[]`（每个数字的出处）。 |
+| `domains[]` | 参考域（每个地一个，经 0 Ω/磁珠相连的地合并；市电；无参考=floating）。`kind` ∈ SELV / hazardous（>60 V DC）/ mains / patient（spec 声明）/ floating / isolated-secondary（经隔离件才连到主 SELV 域的另一个低压域），`workingVrms`/`workingVpeak`。 |
+| `pairs[]` | 隔离件（光耦、隔离器、隔离电源、变压器、继电器）跨接的两个域之间的绝缘要求：工作电压、`insulation`（危险↔可触及 = reinforced；危险↔危险 = basic；SELV↔SELV = functional）、`clearanceMm`/`creepageMm`/`slotRequired`/`slotWidthMm`/`standardRef`、`bridges`。数字统一来自 `SafetyDistances(pair, standard)`。 |
+| `netClasses[]` | GND、POWER、POWER_HI（>1 A）、SWITCH、HS_DIFF（多种阻抗时 HS_DIFF_<Ω>）、HS、RF、HV_<域>、SIGNAL：`trackMil`（成员最宽外层线宽）、`innerTrackMil`、`minTrackMil`、`clearanceMil`、via、阻抗。可直接推成 EasyEDA 网络类。 |
+| `findings[]` | 设计提示：电感 Ipk/Irms 对额定、稳压器余量/dropout/占空比/Vin 上限/输出电流、二极管压降损耗、引脚/连接器/器件额定电流、电阻功率、电容耐压、缺大容量电容、USB 500 mA 预算、USB 缺 ESD、阻抗不可控、绝缘开槽、未知功耗模型、市电电流未声明。每条带 `refs`/`nets`/`suggestion`。 |
+
+附加：`copper`（层数/铜厚/温升/参考高度/εr/叠层名/工艺最小值）、`simulation`（场景、收敛、警告、假设）、
+`definitions`（约定说明）。
+
+数字的来源：宽度 = `pcbauto.TraceWidthForCurrent`（IPC-2221/2152，外层 1 oz、内层 0.5 oz、ΔT 10 °C，
+电源/地 ≥10 mil、开关节点 ≥20 mil，按 0.05 mm 取整）；`min` = 最大单脚支路电流对应宽度（不低于类下限）；
+过孔 = `pcbauto.ViaCurrent`；间距 = IPC-2221B B2（涂覆 B4）按本网峰值电压，不低于工艺间距；
+差分 = `pcbauto.SolveDiff`，JLC04161H-7628（h=8.4 mil, εr=4.05），间隙取工艺最小（紧耦合），
+USB 90 Ω、以太网/HDMI/MIPI/SATA 100 Ω、PCIe 85 Ω、CAN/485 120 Ω；2 层板无相邻参考面时标“不可控”
+并按标准线宽紧耦合走线。电路理解调用 `pcbauto.Understand`（核心/外围、转换器、域与隔离桥）。
+
+## 3. 正例：ESP32 mini（`pkg/powersim/testdata/esp32mini`，offline-verified）
+
+- 9 个块：POWER_IN（J1 端子 + J2 VBUS 经 D1/D2 SS34 OR 到 +5V，TVS D3）、BUCK_3V3（SY8089A，
+  `0.6·(1+45.3k/10k)=3.318 V`，0.521 A 峰值，η 90%）、RF_MODULE（ESP32-S3-WROOM-1，0.1/0.5 A）、
+  USB_UART（CH340C）、CONN_J2（USB-C，CC 5.1 kΩ 下拉 = sink）、ESD（USBLC6）、LED（R9 1 kΩ，1.4 mA）、
+  AUTO_DOWNLOAD（Q1/Q2 + R7/R8）、KEYS（SW1→IO0、SW2→EN、R5/R6 上拉、C6 EN RC）。
+- `+3V3`：3.318 V、0.52 A simulated、POWER、10 mil；`SW`：SWITCH、20 mil、peak 4.73 V（=Vin）、
+  Ipk 0.68 A；`USB_DP/USB_DM`：HS_DIFF、90 Ω、11.7 mil / 6 mil、lengthGroup `USB_D`。
+- 单一 SELV_5V 域，无 pairs。finding 0 error；预期 warn：L1 峰值 0.682 A 对额定 0.77 A 仅 11% 余量、
+  USB-only 0.43 A = 500 mA 预算的 86%。
+
+负例 / 边界（合成 `pkg/intent/testdata/mains-opto`）：市电端子 → 保险丝 → HLK-5M05 → AMS1117 → MCU，
+继电器切市电负载，PC817 接 24 V 现场输入。得到 MAINS_230VAC / SELV_5V / ISO_24V 三域；
+SELV↔MAINS reinforced（桥 PS1、K1），ISO↔SELV functional（桥 U3）；市电网 HV 类、98.5 mil
+（IPC-2221B B2 @ 325 V），线宽按保险丝额定 1 A 并提示声明真实负载电流。污染等级 3 时爬电 ×1.6
+超过隔离件焊盘排间距 → `slotRequired` + `insulation-slot` 警告。
+
+## 4. 能力边界
+
+- 直流仿真的边界照搬 [power-sim.md](power-sim.md)：没有瞬态，交流线电流不被仿真（市电网电流用保险丝额定
+  或 spec 声明）；浮空信号网电压以相连器件的电源轨为上界。
+- `SafetyDistances` 当前是占位实现：`pcbauto.InsulationDistances`（IEC 60664-1 PD2/MG III 工程默认，
+  reinforced = 2× basic）+ 污染等级、海拔、IEC 60601-1 MOPP 下限；是否开槽按“爬电 > 5 mm（常见隔离件
+  焊盘排间距）”估计，真实焊盘几何由 pcb 阶段复核。完整标准表由 `pkg/safety` 提供，接入只需
+  `intent.SafetyProvider = safety.Distances`。所有 `standardRef` 都带 “confirm”，不是认证结论。
+- 市电识别靠网名（L/N/AC_L/LINE/…）或 `spec.mains.nets`，再沿保险丝/电阻/电感/压敏电阻/继电器触点
+  传播；pcbauto 的域划分只认标准网名，非常规命名请在 spec 中声明。
+- 块分类是启发式：分不清的核心归 `other`（summary 仍给器件与网），无关系的零件归 `MISC`。
+
+## 5. 流向
+
+`intent.json` 是 S6.5 的产物（见 [design-flow.md](design-flow.md)），下游只读它：
+- **规则推送**：`netClasses[]`（线宽/间距/过孔/阻抗）→ EasyEDA 网络类与 DRC 规则；`pairs[]` → 域间间距。
+- **`pcb auto`**：`nets{}` 的宽度/过孔/差分/优先级、`blocks[]` 的分组与 `domains[]` 分区；`--sim-out`
+  的 `sim.json` 给逐段线宽和 IR 压降。
+- **安规检查**：`domains[]`/`pairs[]` + `standard`。
+- **反馈**：布线或 DRC 回读与 `intent.json` 对账（线宽、间距、阻抗、开槽）；不符时改参数或 spec
+  重新 derive，而不是改 `intent.json` 本身。

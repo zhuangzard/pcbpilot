@@ -65,6 +65,16 @@
 依据具体 finding 修改目标数据或算法，重算受影响范围并再次 Apply。最终显式 `sch save`；
 需要证明落盘时重开后重新读取连接与几何。导图只辅助检查可读性和采集遗漏，不能替代数据对账。
 
+### S6.5：设计意图推导
+
+原理图验收并保存后、进入 PCB P0 前，运行 `pcbpilot intent derive`（离线用本次导出的
+connectivity + values；现场只读 `--pages`），产出 `intent.json` + `intent.md`，并用 `--sim-out`
+保存同源的 `sim.json`。它说明每个电路块的用途（带仿真电压/电流/功耗），给出每网电压、电流、
+内外层线宽、过孔数、间距、阻抗与差分对、网络类，以及电压域、域间绝缘（爬电/电气间隙/开槽）和
+设计提示。先处理 `error` 级 finding（改原理图、选型或 spec 后重新 derive），`warn` 写明取舍后可继续。
+后续 P1 规则、`pcb auto`、安规和回读对账都消费这份文件，不再按网名重新猜。读法见
+[design-intent.md](design-intent.md)。状态：`offline-verified`。
+
 ## PCB P0–P10
 
 | 步骤 | 操作和应留下的结果 |
