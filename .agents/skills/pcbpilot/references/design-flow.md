@@ -70,7 +70,7 @@
 | 步骤 | 操作和应留下的结果 |
 |---|---|
 | P0 选择工程 | 核实 Board 与原理图关联、目标文档和当前层叠；缺工程时用 `project create`，不改变 `project open` 的含义。 |
-| P1 导入与规则 | `pcb import-changes` 或精确逐件导入；回读实例身份、位号、焊盘网络；设置真实叠层/间距/线宽/过孔/网络类，让规则参与后续布局。 |
+| P1 导入与规则 | `pcb import-changes` 或精确逐件导入；回读实例身份、位号、焊盘网络；设置真实叠层/间距/线宽/过孔/网络类，让规则参与后续布局。有 `intent.json` 时先 `pcb rules apply --intent intent.json --dry-run` 看计划，再 apply（原生网络类 + `PP_<类>` 线宽/间距/过孔 + 差分对，写后重读为 0 才 verified），save/reload 后 `pcb rules check` 须 in-sync，然后才布局/布线；`pairs[]` 域间距仍是 unsupported，靠禁区/开槽 + DRC。原理图侧可用 `sch intent-annotate` 把同一份意图写成可替换注释块。见 [pcb-config.md](pcb-config.md#电气意图--原生规则pcb-rules-apply)。 |
 | P2 板框策略 | 固定尺寸题先建真实板框；可调尺寸设计先组织模块，再按占地与布线通道收紧板框。 |
 | P3 固定与机械 | 先安装孔、锁定件、单轴固定件和自由板边接口；记录 center/anchor、旋转、层和锁定状态。 |
 | P4 使用空间 | 落实屏幕、插拔、天线、开槽、禁元件和禁铜区域；不同 region 类型不能互相替代。 |
@@ -135,7 +135,8 @@ S2 目标连接数据 ──S3/S4 Apply──▶ … P6 Layout 确认 ──▶ 
 ### 规则、布线和铺铜
 
 - 读取真实叠层和 DRC 规则；用 `pcb drc-rules-set --from` 写完整规则，用
-  `pcb net-class create/list` 建立并回读原生网络类别。推导型 `pcb net-classes` 线宽表不能冒充
+  `pcb net-class create/list` 建立并回读原生网络类别。有 intent.json 时用 `pcb rules apply/check --intent`
+  一次完成类、线宽、间距、过孔、差分对并做漂移检查。推导型 `pcb net-classes` 线宽表不能冒充
   编辑器里已持久化的 class 关联。
 - 关键网络按手册和题目决定同层、换层、长度、阻抗与拓扑。USB/CAN 的差分外观不自动表示等长
   要求；CAN 终端电阻保持跨接拓扑，近端 ESD 仍须靠近接口。

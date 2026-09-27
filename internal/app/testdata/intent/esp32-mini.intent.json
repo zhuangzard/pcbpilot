@@ -1,0 +1,34 @@
+{
+  "nets": {
+    "5V_TERM": {"role": "power", "domain": "SELV_5V", "voltage": {"nom": 5.0, "peak": 5.5}, "currentA": 0.6, "widthMil": {"outer": 24, "inner": 16, "min": 16}, "viasPerTransition": 2, "clearanceMil": 8, "netClass": "POWER", "why": ["screw-terminal input, full board current"]},
+    "VBUS": {"role": "power", "domain": "SELV_5V", "voltage": {"nom": 5.0, "peak": 5.5}, "currentA": 0.5, "widthMil": {"outer": 20, "inner": 14, "min": 14}, "viasPerTransition": 1, "clearanceMil": 8, "netClass": "POWER", "why": ["USB bus power, OR-ed into +5V"]},
+    "+5V": {"role": "power", "domain": "SELV_5V", "voltage": {"nom": 5.0, "peak": 5.5}, "currentA": 0.6, "widthMil": {"outer": 24, "inner": 16, "min": 16}, "viasPerTransition": 2, "clearanceMil": 8, "netClass": "POWER", "why": ["buck input after OR-ing"]},
+    "+3V3": {"role": "power", "domain": "SELV_5V", "voltage": {"nom": 3.318, "peak": 3.35}, "currentA": 0.52, "widthMil": {"outer": 20, "inner": 12, "min": 12}, "viasPerTransition": 1, "clearanceMil": 8, "netClass": "POWER", "why": ["ESP32 Wi-Fi TX burst 0.5 A peak"]},
+    "SW": {"role": "switch", "domain": "SELV_5V", "voltage": {"nom": 5.0, "peak": 6.0}, "currentA": 0.52, "widthMil": {"outer": 20, "inner": 20, "min": 16}, "viasPerTransition": 0, "clearanceMil": 10, "netClass": "SWITCH", "why": ["buck switch node: short, wide, no vias"]},
+    "GND": {"role": "ground", "domain": "SELV_5V", "voltage": {"nom": 0, "peak": 0}, "currentA": 0.6, "widthMil": {"outer": 20, "inner": 20, "min": 12}, "viasPerTransition": 2, "clearanceMil": 6, "netClass": "GND", "why": ["return; inner plane carries it"]},
+    "USB_DP": {"role": "diff", "domain": "SELV_5V", "voltage": {"nom": 3.3, "peak": 3.6}, "currentA": 0.01, "widthMil": {"outer": 8, "inner": 8, "min": 8}, "viasPerTransition": 0, "clearanceMil": 6, "impedanceOhm": 90, "diffPair": "USB_D", "netClass": "USB", "pairGapMil": 6, "why": ["USB 2.0 FS, 90 Ω differential"]},
+    "USB_DM": {"role": "diff", "domain": "SELV_5V", "voltage": {"nom": 3.3, "peak": 3.6}, "currentA": 0.01, "widthMil": {"outer": 8, "inner": 8, "min": 8}, "viasPerTransition": 0, "clearanceMil": 6, "impedanceOhm": 90, "diffPair": "USB_D", "netClass": "USB", "pairGapMil": 6, "why": ["USB 2.0 FS, 90 Ω differential"]},
+    "TXD0": {"role": "signal", "domain": "SELV_5V", "voltage": {"nom": 3.3, "peak": 3.3}, "currentA": 0.005, "widthMil": {"outer": 8, "inner": 8, "min": 6}, "clearanceMil": 6, "why": ["UART to CH340"]},
+    "RXD0": {"role": "signal", "domain": "SELV_5V", "voltage": {"nom": 3.3, "peak": 3.3}, "currentA": 0.005, "widthMil": {"outer": 8, "inner": 8, "min": 6}, "clearanceMil": 6, "why": ["UART from CH340"]},
+    "EN": {"role": "signal", "domain": "SELV_5V", "voltage": {"nom": 3.3, "peak": 3.3}, "currentA": 0.001, "widthMil": {"outer": 8, "inner": 8, "min": 6}, "clearanceMil": 6, "why": ["RESET key + auto-reset"]},
+    "IO0": {"role": "signal", "domain": "SELV_5V", "voltage": {"nom": 3.3, "peak": 3.3}, "currentA": 0.001, "widthMil": {"outer": 8, "inner": 8, "min": 6}, "clearanceMil": 6, "why": ["BOOT key + auto-download"]},
+    "LED": {"role": "signal", "domain": "SELV_5V", "voltage": {"nom": 3.3, "peak": 3.3}, "currentA": 0.005, "widthMil": {"outer": 8, "inner": 8, "min": 6}, "clearanceMil": 6, "why": ["status LED"]}
+  },
+  "pairs": [],
+  "netClasses": [
+    {"name": "POWER", "nets": ["5V_TERM", "VBUS", "+5V", "+3V3"], "trackMil": 20, "clearanceMil": 8, "viaDrillMil": 12, "viaDiaMil": 24},
+    {"name": "SWITCH", "nets": ["SW"], "trackMil": 20, "clearanceMil": 10, "viaDrillMil": 0, "viaDiaMil": 0},
+    {"name": "GND", "nets": ["GND"], "trackMil": 20, "clearanceMil": 6, "viaDrillMil": 12, "viaDiaMil": 24},
+    {"name": "USB", "nets": ["USB_DP", "USB_DM"], "trackMil": 8, "clearanceMil": 6, "viaDrillMil": 0, "viaDiaMil": 0}
+  ],
+  "blocks": [
+    {"id": "PWR_IN", "function": "power-input", "core": "J1", "parts": ["J1", "D1", "D2", "C1"], "nets": ["5V_TERM", "VBUS", "+5V"], "summary": "5V screw terminal OR USB VBUS → +5V (Schottky OR-ing)"},
+    {"id": "BUCK_3V3", "function": "buck", "core": "U4", "parts": ["U4", "L1", "C5", "C6", "R3", "R4"], "nets": ["+5V", "SW", "+3V3"], "summary": "5V→3.318V sync buck, 0.52 A peak"},
+    {"id": "USB_UART", "function": "usb-uart", "core": "U2", "parts": ["U2", "J2", "Q1", "Q2"], "nets": ["USB_DP", "USB_DM", "TXD0", "RXD0", "EN", "IO0"], "summary": "CH340 USB-UART + auto-download (EN/IO0)"},
+    {"id": "MCU", "function": "rf-module", "core": "U1", "parts": ["U1", "SW1", "SW2", "C10"], "nets": ["+3V3", "EN", "IO0", "LED"], "summary": "ESP32 module, BOOT/RESET keys, antenna keep-out"},
+    {"id": "LED", "function": "led", "core": "D3", "parts": ["D3", "R7"], "nets": ["LED"], "summary": "status LED, 5 mA"}
+  ],
+  "findings": [
+    {"severity": "warn", "kind": "switch-node", "message": "SW node must stay short and on one layer", "suggestion": "place L1 next to U4 pin SW"}
+  ]
+}
