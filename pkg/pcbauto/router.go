@@ -132,6 +132,12 @@ type rnet struct {
 	relief      map[int32][]*Pad // own pads whose HV footprint relief covers a column
 	busbar      bool             // too wide for a routed track: reported "needs-pour"
 	reliefMemo  map[uint64]bool  // reliefOK verdicts per (cell, radius)
+	// viaDrill / viaDia are the net's via size (NetPlan.Via, else the board
+	// rule); viaShort counts array vias of its transitions that found no
+	// site, arrayBad the array sites the exact DRC rejected.
+	viaDrill, viaDia float64
+	viaShort         int
+	arrayBad         map[Point]bool
 }
 
 type rpath struct {
@@ -359,7 +365,13 @@ func (r *router) setupNets() {
 			rn.share = plan.ClearanceMil - base/2 + routeSafetyMil/2
 		}
 		rn.radius = rn.width/2 + rn.share
-		rn.viaR = r.b.Rules.ViaDia/2 + rn.share
+		rn.viaDrill, rn.viaDia = r.b.Rules.ViaDrill, r.b.Rules.ViaDia
+		if v := plan.Via; v != nil && v.DrillMil > 0 && v.DiaMil > v.DrillMil {
+			// Never below the board's via rule (a 12/24 intent class on a
+			// live 12.01/24.02 rule keeps the rule's exact size).
+			rn.viaDrill, rn.viaDia = math.Max(v.DrillMil, rn.viaDrill), math.Max(v.DiaMil, rn.viaDia)
+		}
+		rn.viaR = rn.viaDia/2 + rn.share
 		rn.neckW, rn.neckR = rn.width, rn.radius
 		if nw := r.b.Rules.MinTrack; nw < rn.width { // fine-pitch escape: neck to the process minimum
 			rn.neckW, rn.neckR = nw, nw/2+rn.share
@@ -403,6 +415,7 @@ func (r *router) rasterise() {
 	reach := r.b.Rules.ViaDia/2 + r.b.Rules.Clearance
 	for _, rn := range r.nets {
 		reach = math.Max(reach, rn.plan.ClearanceMil+rn.width/2)
+		reach = math.Max(reach, rn.viaDia/2+r.b.Rules.Clearance)
 	}
 	reach += 2 * gr.g
 	r.pbW = int(float64(gr.W)*gr.g/padBucket) + 1
@@ -875,6 +888,11 @@ func (r *router) viaCostR(n *rnet, x, y int, rad float64) float64 {
 	// Drilled holes keep the process gap to every fan-out via, own net too:
 	// a bridging via 7 mil from VSYS_5V's fan-out failed native Hole to Hole.
 	if r.holeBlk != nil && r.holeBlk[y*gr.W+x] {
+		return math.Inf(1)
+	}
+	// holeBlk is drawn for the board drill: a larger (current-sized) drill
+	// checks the committed holes exactly.
+	if n.viaDrill > r.b.Rules.ViaDrill+1e-6 && r.holeClash(gr.center(x, y), n.viaDrill) {
 		return math.Inf(1)
 	}
 	total := 1.0

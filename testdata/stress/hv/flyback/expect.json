@@ -107,6 +107,7 @@
      "currentA": 2.0,
      "widthOuterMil": 31.5,
      "vias": 3,
+     "viaDrillMil": 15.75,
      "voltageMax": 12.0
     },
     "VCC_P": {

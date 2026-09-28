@@ -151,6 +151,28 @@ type NetPlan struct {
 	MaxSkewMil   float64 `json:"maxSkewMil,omitempty"`
 	LengthTolMil float64 `json:"lengthTolMil,omitempty"`
 	MaxVias      int     `json:"maxVias,omitempty"`
+	// Via is the sized via of a layer transition (additive): size, count
+	// (= viasPerTransition), ampacity, margin and barrel drop.
+	Via *NetVia `json:"via,omitempty"`
+}
+
+// NetVia is a net's via per layer transition (pcbauto.SizeVias): the via
+// size and parallel count that carry the net's current with the margin, and
+// the numbers behind it. Barrel = IPC-2221 internal conductor on π(d+t)t.
+type NetVia struct {
+	DrillMil           float64 `json:"drillMil"`
+	DiaMil             float64 `json:"diaMil"`
+	CountPerTransition int     `json:"countPerTransition"`
+	PerViaA            float64 `json:"perViaA"`
+	AmpacityA          float64 `json:"ampacityA"`
+	CurrentA           float64 `json:"currentA"`
+	MarginPct          float64 `json:"marginPct"`
+	PlatingMil         float64 `json:"platingMil"`
+	LengthMil          float64 `json:"lengthMil"`
+	ResistanceMOhm     float64 `json:"resistanceMOhm"`   // one barrel
+	DropMV             float64 `json:"dropMV"`           // per transition at currentA
+	Source             string  `json:"source,omitempty"` // sized | class | declared
+	Why                string  `json:"why"`
 }
 
 // Pair is the insulation requirement between two domains (or nets).
@@ -221,6 +243,10 @@ type Copper struct {
 	ClearanceMil float64 `json:"clearanceMil"`
 	ViaDrillMil  float64 `json:"viaDrillMil"`
 	ViaDiaMil    float64 `json:"viaDiaMil"`
+	// Additive: the via barrel plating and the ampacity margin the via
+	// sizing used.
+	ViaPlatingMil float64 `json:"viaPlatingMil,omitempty"`
+	ViaMarginPct  float64 `json:"viaMarginPct,omitempty"`
 }
 
 // SimInfo summarises the simulation the numbers came from.

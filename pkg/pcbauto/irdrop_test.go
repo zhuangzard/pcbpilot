@@ -360,7 +360,8 @@ func TestFanoutNeedPerPad(t *testing.T) {
 	if got := fanoutNeed(sim, mid, ru, 10); got != 1 {
 		t.Fatalf("0.1 A mid pad wants %d vias (rail would give 3)", got)
 	}
-	if got := fanoutNeed(sim, big, ru, 10); got != 4 {
+	if got := fanoutNeed(sim, big, ru, 10); got != 5 {
+		// 3.5 via-currents × 1.2 (the 20 % sizing margin) = 4.2 → 5.
 		t.Fatalf("3.5 via-currents on a thermal pad want %d vias", got)
 	}
 	sim.ExtraVias = 1

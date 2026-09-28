@@ -74,20 +74,20 @@
      "currentA": 30,
      "widthOuterMil": 423.23,
      "widthInnerMil": 423.23,
-     "vias": 30,
+     "vias": 36,
      "clearanceMil": 98.5
     },
     "PHASE": {
      "currentA": 30,
      "widthOuterMil": 423.23,
-     "vias": 30,
+     "vias": 36,
      "clearanceMil": 102.4,
      "voltagePeak": 520
     },
     "HV_GND": {
      "currentA": 30,
      "widthOuterMil": 423.23,
-     "vias": 30
+     "vias": 36
     },
     "KS_H": {
      "voltagePeak": 527.5,

@@ -544,6 +544,25 @@ via-in-pad 许可。`routing.demands[].existingViasOnly` 还要求列出的 PID�
 候选新增过孔，不能仅靠同名网络代替实际入口铜路径。
 
 
+## 过孔载流：换层阵列与 via-current（offline-verified）
+
+电源网换层时，一颗小过孔会卡住整条加宽的路径。`pcb auto` 读 intent `nets.<n>.via`（或自己按
+`pcbauto.SizeVias` 算）：该网所有布线过孔、扇出过孔都用这个尺寸（不低于板规则），每个换层点除主过孔外
+再放 N−1 颗**阵列过孔**（`kind:"array"`）——落在任一层同网走线上，否则用该层网宽短桩连回主过孔；
+候选点在栅格上严格避让异网占用、孔距与禁孔区；精确 DRC 拒绝的阵列孔只删它自己（不删整网布线），
+该点不再尝试。放不满时 notes 报 `via array: <net> is short of k via(s)`，由 `pcb check` 定论。扇出按焊盘
+自身电流 × 1.2 / 单孔载流计数（焊盘大小的数量上限只在电流需要时按焊盘周长可容纳数放宽）。
+
+布完用 `pcb check --intent intent.json [--board board.routed.json]` 复核 `via-current`：同网 60 mil /
+2.5 倍外径内的过孔成一组（一个换层或一个扇出场），所需电流 = 相邻焊盘 intent 引脚电流之和；无引脚数据时
+= 网络电流，但不超过所连最宽走线按 IPC-2152 能带的电流；没有电流要穿过的组（平面缝合、零电流去耦脚）
+不评。Σ 载流 < 电流 → ERROR，裕量 < 20 % → WARN，消息给出安培数、裕量、孔壁毫伏与建议尺寸。
+
+回归：`TestRouterPlacesViaArrayOnHighCurrentNet`（3 A → 5 × 12/24；2 A 细线 → 3 × 0.4 mm）、
+`TestViaCurrentCheckSingleVia3A`（单颗 0.3 mm 过 3 A → ERROR，5 孔阵列通过）、ESP32 v05 现场板
+（final.reload.json + intent：37 个换层/扇出组全部通过，0 finding）。能力边界：设计期孔长按整板厚；
+阵列只在换层点附近 100 mil 内找位；铺铜/平面网的缝合孔不按电流评。
+
 ## 2026-09-25 ESP32 E2E 布线/铜/丝印实测要点（桌面 V3 3.2.149，connector 0.2.6）
 
 - 整板布线用 `pcb auto run --board <确认后的 dump> --power power.json --groups <sch composition> --layers 4`

@@ -257,12 +257,16 @@ func (c *ctx) buildNets() {
 		for _, w := range pp.Why {
 			// Impedance lines are re-derived below per interface; a zero-current
 			// IPC line says nothing.
-			if strings.Contains(w, "Ω diff over") || strings.Contains(w, "Ω microstrip") || strings.Contains(w, "IPC-2221/2152 0.00A") {
+			if strings.Contains(w, "Ω diff over") || strings.Contains(w, "Ω microstrip") || strings.Contains(w, "IPC-2221/2152 0.00A") || strings.HasPrefix(w, "vias: ") {
 				continue
 			}
 			np.Why = append(np.Why, w)
 		}
-		np.Warnings = append(np.Warnings, pp.Warnings...)
+		for _, w := range pp.Warnings {
+			if !strings.HasPrefix(w, "via-current:") { // re-rated below (findVias)
+				np.Warnings = append(np.Warnings, w)
+			}
+		}
 		maxPin := 0.0
 		if nr := c.netW(net); nr != nil {
 			np.Floating = nr.Floating
@@ -320,7 +324,6 @@ func (c *ctx) buildNets() {
 				np.WidthMil.Outer = math.Max(floor, metricRoundMil(pcbauto.TraceWidthForCurrent(ia, c.tempRise, c.outerOz, false)))
 				np.WidthMil.Inner = math.Max(floor, metricRoundMil(pcbauto.TraceWidthForCurrent(ia, c.tempRise, c.innerOz, false)))
 				np.WidthMil.Min = np.WidthMil.Outer
-				np.ViasPerTransition = int(math.Max(1, math.Ceil(ia/pcbauto.ViaCurrent(c.rules.ViaDrill, c.tempRise))))
 			}
 		}
 		// Impedance-controlled nets.
@@ -428,11 +431,11 @@ func (c *ctx) buildNets() {
 		} else if v.Peak > 0 {
 			np.Why = append(np.Why, fmt.Sprintf("IPC-2221B %s V peak needs ≤ %.1f mil: fab clearance %.1f mil governs", trimFloat(v.Peak, 1), ipc, c.rules.Clearance))
 		}
-		if !c.mains[net] || np.CurrentSource == "declared" {
-			np.ViasPerTransition = pp.ViasPerTransition
-		}
-		if np.ViasPerTransition > 1 {
-			np.Why = append(np.Why, fmt.Sprintf("%d vias per layer change: one %.0f mil via carries %.2f A at ΔT %.0f °C (pcbauto.ViaCurrent)", np.ViasPerTransition, c.rules.ViaDrill, pcbauto.ViaCurrent(c.rules.ViaDrill, c.tempRise), c.tempRise))
+		// Vias: sized per layer transition for the thermal current (power,
+		// ground and switch nets; signals keep one board via).
+		np.ViasPerTransition = 1
+		if cur := viaCurrent(np); cur > 0 && (np.Role == "power" || np.Role == "ground" || np.Role == "switch") {
+			c.sizeVia(net, np, pcbauto.ViaSize{DrillMil: c.rules.ViaDrill, DiaMil: c.rules.ViaDia})
 		}
 		np.NetClass = c.classOf(net, np)
 		c.out.Nets[net] = np
@@ -527,6 +530,7 @@ func (c *ctx) buildNetClasses() {
 		nc.DiffGapMil = math.Max(nc.DiffGapMil, np.PairGapMil)
 		nc.ImpedanceOhm = math.Max(nc.ImpedanceOhm, np.ImpedanceOhm)
 	}
+	c.classVias(byName)
 	for _, nc := range byName {
 		switch {
 		case nc.Name == "SIGNAL":

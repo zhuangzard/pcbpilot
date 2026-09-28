@@ -83,12 +83,12 @@ pcbpilot sch intent-annotate --intent intent.json --page <页UUID> --project ces
 | `netClasses[]` ∪ `nets[].netClass` | 网络类（`pcb.net_class.create`，缺成员 `add_nets`） | 只增不删；板上没有的网列入 advisories；同一网被两个类声明或已属其他现存类 → conflict，不写 |
 | 类线宽 `trackMil`（缺省取成员 `widthMil.outer` 最大值）、`innerTrackMil`/成员 inner、`minTrackMil`/成员 `widthMil.min` 最小值 | `Physics.Track."PP_<类>"` | 复制默认规则（`isSetDefault:false`）；层键 1/2 或单表 = 外层；min ≤ default，max 不足则抬到 default |
 | 类间距 `clearanceMil`（缺省取成员最大值） | `Spacing."Safe Spacing"."PP_<类>"` | 复制默认矩阵，仅铜×铜格（Track/Pad/Test Point/Via/Fill/Zone）取 max(默认, 要求)，其余保持默认 |
-| 类过孔 `viaDrillMil`/`viaDiaMil`（两者都给才写） | `Physics."Via Size"."PP_<类>"` | default=要求值，min/max 只在越界时放宽；孔 ≥ 外径拒绝 |
+| 类过孔 `viaDrillMil`/`viaDiaMil`（两者都给才写；intent derive 取成员按电流定的最大过孔，如 POWER_HI 0.4/0.7 mm，不是板默认） | `Physics."Via Size"."PP_<类>"` | default=要求值，min/max 只在越界时放宽；孔 ≥ 外径拒绝 |
 | 以上规则 | `netRules` 类项及每个成员子项的 `Track`/`Safe Spacing`/`Via Size` | 子项与现存成员不一致、字段不是字符串 → conflict |
 | `nets[].diffPair` | `pcb.differential_pair.create`（极性按 `_DP/_P/+/_H` vs `_DM/_N/-/_L` 后缀） | 同名同网 = ok；同网他名 = ok；同名他网 = conflict |
 | 差分 `widthMil.outer` + `pairGapMil`/类 `diffGapMil` | 唯一的全局 `Differential Pair` 规则 | 仅当所有对一致时写；`impedanceOhm` 只作 advisory（宿主不存阻抗） |
 | `pairs[]`（域间电气间隙/爬电/开槽） | —— | `unsupported / planned`：官方 `pcb_Drc.overwriteNetByNetRules` 结构不透明且未现场采样；用布局禁区/开槽 + DRC 兜底 |
-| `viasPerTransition>1`、单端阻抗 | —— | advisory，由布线/复核执行 |
+| `viasPerTransition>1`（= `via.countPerTransition`）、单端阻抗 | —— | advisory，由布线（换层阵列）执行、`pcb check --intent` 的 `via-current` 复核 |
 
 每次都从**默认规则 + intent** 重新计算期望值（不以旧 `PP_*` 为源），所以重放 = 0 写入、intent
 改了就收敛；数值比较只容忍宿主浮点尾差（相对 1e-9），不引入工程容差。执行顺序：读

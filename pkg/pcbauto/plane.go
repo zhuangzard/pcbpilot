@@ -86,14 +86,26 @@ func fanoutNeed(plan *NetPlan, pd *Pad, ru Rules, tempRise float64) int {
 		}
 	}
 	if pc, ok := plan.padCurrent(pd); ok {
-		byI := int(math.Ceil(pc.sizing()/ViaCurrent(ru.ViaDrill, tempRise) - 1e-9))
+		// The pad's own current through the net's (current-sized) via, with
+		// the sizing margin. The pad-size caps keep small pads from growing
+		// via fields; a current that needs more lifts the cap up to what
+		// fits around the pad (PadViaSpace).
+		size, plating, margin := ViaSize{ru.ViaDrill, ru.ViaDia}, DefaultViaPlatingMil, DefaultViaMarginPct
+		if v := plan.Via; v != nil && v.DrillMil > 0 {
+			size, plating, margin = v.Size(), v.PlatingMil, v.RequiredMarginPct
+		}
+		byI := int(math.Ceil(pc.sizing()*(1+margin/100)/ViaAmpacity(size.DrillMil, plating, tempRise) - 1e-9))
+		fits := PadViaSpace(pd.Box.W, pd.Box.H, false).Fits(size, ru.Clearance, ru.HoleGap)
+		hi := 2
 		switch {
 		case padArea > 30*viaArea:
-			need = clampInt(byI, 2, 9)
+			hi = 9
+			need = clampInt(byI, 2, max(hi, min(byI, fits)))
 		case padArea > 6*viaArea:
-			need = clampInt(byI, 1, 3)
+			hi = 3
+			need = clampInt(byI, 1, max(hi, min(byI, fits)))
 		default:
-			need = clampInt(byI, 1, 2)
+			need = clampInt(byI, 1, max(hi, min(byI, fits)))
 		}
 	}
 	return need + plan.ExtraVias
@@ -211,7 +223,7 @@ func (r *router) placeFanoutViasChecked(n *rnet, pd *Pad, li, need int, stubW fl
 		c    Point
 		s    float64
 	}
-	maxR := math.Max(80, 3.5*r.b.Rules.ViaDia)
+	maxR := math.Max(80, 3.5*n.viaDia)
 	cx, cy := gr.cellOf(pd.Box.C)
 	rc := int(math.Ceil(maxR / gr.g))
 	var cs []cand
@@ -262,7 +274,7 @@ func (r *router) placeFanoutViasChecked(n *rnet, pd *Pad, li, need int, stubW fl
 			break
 		}
 		inside := pd.Box.Dist(c.c) == 0
-		if r.holeClash(c.c, r.b.Rules.ViaDrill) {
+		if r.holeClash(c.c, n.viaDrill) {
 			continue
 		}
 		if inside {
@@ -313,7 +325,7 @@ func (r *router) placeFanoutViasChecked(n *rnet, pd *Pad, li, need int, stubW fl
 // stub from pd on layer li (none for a via inside the pad), records it as
 // fixed copper of n, and emits the track and via.
 func (r *router) commitFanout(n *rnet, pd *Pad, li, x, y int, c Point, stubW float64, inside, pinned bool, via ...float64) {
-	drill, dia, rad := r.b.Rules.ViaDrill, r.b.Rules.ViaDia, n.viaR
+	drill, dia, rad := n.viaDrill, n.viaDia, n.viaR
 	if len(via) == 2 {
 		// A via class other than the board default (BGA fan-out).
 		drill, dia = via[0], via[1]
@@ -389,7 +401,7 @@ func (r *router) antipadMask(n *rnet) []bool {
 				pl, px, py := gr.xy(int(p.nodes[k-1]))
 				l, x, y := gr.xy(int(p.nodes[k]))
 				if pl != l && px == x && py == y {
-					mark(gr.center(x, y), r.b.Rules.ViaDia/2+clr)
+					mark(gr.center(x, y), o.viaDia/2+clr)
 				}
 			}
 		}

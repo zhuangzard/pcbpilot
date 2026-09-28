@@ -45,6 +45,16 @@ type SpecRail struct {
 	RippleMvpp float64 `json:"rippleMvpp,omitempty"`
 	// PeakV overrides the peak voltage (surges, inductive kick).
 	PeakV float64 `json:"peakV,omitempty"`
+	// Via declares the rail's via (size and/or count per layer change); it
+	// is rated, not resized — a shortfall is a via-undersized finding.
+	Via *SpecVia `json:"via,omitempty"`
+}
+
+// SpecVia is a declared via (mil); zero fields are sized.
+type SpecVia struct {
+	DrillMil float64 `json:"drillMil,omitempty"`
+	DiaMil   float64 `json:"diaMil,omitempty"`
+	Count    int     `json:"count,omitempty"`
 }
 
 // SpecHS is a declared high-speed interface.
@@ -100,6 +110,11 @@ type SpecRules struct {
 	TrackMil     float64 `json:"trackMil,omitempty"`
 	ViaDrillMil  float64 `json:"viaDrillMil,omitempty"`
 	ViaDiaMil    float64 `json:"viaDiaMil,omitempty"`
+	// ViaPlatingMil is the via barrel plating (default 0.7 mil ≈ 18 µm,
+	// JLC standard); ViaMarginPct the ampacity margin per layer transition
+	// (default 20 %).
+	ViaPlatingMil float64 `json:"viaPlatingMil,omitempty"`
+	ViaMarginPct  float64 `json:"viaMarginPct,omitempty"`
 }
 
 // ParseSpec decodes spec.json (unknown fields are rejected to catch typos).
@@ -129,6 +144,14 @@ func ParseSpec(b []byte) (*Spec, error) {
 		if d.RatedVrms < 0 || d.WorkingVrms < 0 {
 			return nil, fmt.Errorf("spec.domains[%d]: negative voltage", i)
 		}
+	}
+	for i, r := range s.Rails {
+		if v := r.Via; v != nil && (v.DrillMil < 0 || v.DiaMil < 0 || v.Count < 0 || v.DrillMil > 0 && v.DiaMil > 0 && v.DrillMil >= v.DiaMil) {
+			return nil, fmt.Errorf("spec.rails[%d].via: want drill < diameter, non-negative count", i)
+		}
+	}
+	if r := s.Rules; r != nil && (r.ViaPlatingMil < 0 || r.ViaPlatingMil > 3) {
+		return nil, fmt.Errorf("spec.rules.viaPlatingMil %.2f: want 0..3 mil (JLC ≈ 0.7)", r.ViaPlatingMil)
 	}
 	return &s, nil
 }

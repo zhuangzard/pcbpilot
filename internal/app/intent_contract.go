@@ -36,6 +36,7 @@ type intentNet struct {
 	CurrentA          float64       `json:"currentA"`
 	WidthMil          intentWidth   `json:"widthMil"`
 	ViasPerTransition int           `json:"viasPerTransition"`
+	Via               *intentVia    `json:"via,omitempty"` // additive producer field
 	ClearanceMil      float64       `json:"clearanceMil"`
 	ImpedanceOhm      float64       `json:"impedanceOhm"`
 	DiffPair          string        `json:"diffPair"`
@@ -59,6 +60,17 @@ type intentWidth struct {
 	Outer float64 `json:"outer"`
 	Inner float64 `json:"inner"`
 	Min   float64 `json:"min"`
+}
+
+// intentVia is a net's current-sized via per layer transition (pkg/intent
+// NetVia; pcbauto.SizeVias).
+type intentVia struct {
+	DrillMil           float64 `json:"drillMil"`
+	DiaMil             float64 `json:"diaMil"`
+	CountPerTransition int     `json:"countPerTransition"`
+	AmpacityA          float64 `json:"ampacityA"`
+	MarginPct          float64 `json:"marginPct"`
+	Why                string  `json:"why"`
 }
 
 type intentPair struct {
@@ -150,6 +162,14 @@ func (in *designIntent) validate() error {
 		}
 		if err := nonNeg("net "+name, n.CurrentA, n.WidthMil.Outer, n.WidthMil.Inner, n.WidthMil.Min, n.ClearanceMil, n.ImpedanceOhm, n.PairGapMil, n.LengthTolMil, n.MaxSkewMil, float64(n.MaxVias)); err != nil {
 			return err
+		}
+		if v := n.Via; v != nil {
+			if err := nonNeg("net "+name+" via", v.DrillMil, v.DiaMil, v.AmpacityA, float64(v.CountPerTransition)); err != nil {
+				return err
+			}
+			if v.DrillMil > 0 && v.DiaMil > 0 && v.DrillMil >= v.DiaMil {
+				return fmt.Errorf("intent: net %s via drill %.2f mil must be smaller than diameter %.2f mil", name, v.DrillMil, v.DiaMil)
+			}
 		}
 	}
 	seen := map[string]bool{}

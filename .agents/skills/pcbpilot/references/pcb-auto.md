@@ -100,8 +100,11 @@ typed action，符合“禁止手工操作 EDA 工程”准则。
 
 5. **设计意图** `--intent intent.json`（可选；`pcbpilot intent derive` 的输出或手写，可与 `--power`/`--sim` 同用，
    **intent 声明的值优先**）：
-   - `nets.<NET>`：`widthMil.outer/inner`、`currentA`、`viasPerTransition`、`clearanceMil`、`diffPair`、`role`
-     覆盖推断，报告来源 `intent`；`netClasses[]` 的 `trackMil`/`clearanceMil` 作为该类网的下限。
+   - `nets.<NET>`：`widthMil.outer/inner`、`currentA`、`viasPerTransition`、`via{drillMil,diaMil,countPerTransition}`、
+     `clearanceMil`、`diffPair`、`role` 覆盖推断，报告来源 `intent`；`netClasses[]` 的 `trackMil`/`clearanceMil`
+     作为该类网的下限，类 `viaDrillMil/viaDiaMil` 是成员过孔的首选尺寸。电源网的布线过孔、扇出过孔用
+     该网过孔尺寸（不低于板规则），每个换层点放 `countPerTransition` 颗（阵列，见
+     [pcb-routing.md 过孔载流](pcb-routing.md)）；声明的过孔载流不足进 `warnings`（`via-current:`）。
    - `domains[]` / `pairs[]` / `standard`：电压域与两域之间的绝缘要求。距离由 `pkg/safety` 按
      IPC-2221B / IEC 62368-1 / IEC 60601-1（MOOP·MOPP）/ IEC 61010-1 查表（pair 显式给出 `clearanceMm`/
      `creepageMm` 时用显式值，低于标准计算值时告警）。引擎据此：按域分区、隔离带宽 = 爬电距离、

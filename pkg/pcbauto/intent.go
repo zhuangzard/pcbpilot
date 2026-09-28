@@ -21,6 +21,20 @@ type Intent struct {
 	Pairs      []IntentPair          `json:"pairs"`
 	NetClasses []IntentNetClass      `json:"netClasses"`
 	Findings   []IntentFinding       `json:"findings"`
+	// Copper is the stackup/sizing assumptions (ΔT, copper weights, via
+	// plating and margin) the currents were sized with.
+	Copper *IntentCopper `json:"copper,omitempty"`
+}
+
+// IntentCopper is the subset of intent.copper the engine reads.
+type IntentCopper struct {
+	TempRiseC     float64 `json:"tempRiseC"`
+	OuterOz       float64 `json:"outerOz"`
+	InnerOz       float64 `json:"innerOz"`
+	ViaDrillMil   float64 `json:"viaDrillMil"`
+	ViaDiaMil     float64 `json:"viaDiaMil"`
+	ViaPlatingMil float64 `json:"viaPlatingMil,omitempty"`
+	ViaMarginPct  float64 `json:"viaMarginPct,omitempty"`
 }
 
 // IntentDomain is one voltage/reference domain.
@@ -83,6 +97,19 @@ type IntentNet struct {
 	LengthTolMil float64 `json:"lengthTolMil,omitempty"`
 	MaxSkewMil   float64 `json:"maxSkewMil,omitempty"`
 	MaxVias      int     `json:"maxVias,omitempty"`
+	// Via is the sized via of a layer transition (additive; intent derive
+	// fills it from pcbauto.SizeVias).
+	Via *IntentVia `json:"via,omitempty"`
+}
+
+// IntentVia is a net's via: size, count per layer transition and rating.
+type IntentVia struct {
+	DrillMil           float64 `json:"drillMil"`
+	DiaMil             float64 `json:"diaMil"`
+	CountPerTransition int     `json:"countPerTransition"`
+	AmpacityA          float64 `json:"ampacityA"`
+	MarginPct          float64 `json:"marginPct"`
+	Why                string  `json:"why"`
 }
 
 // IntentPair is the insulation between two domains ("domain:ID").
@@ -143,6 +170,20 @@ func ParseIntent(raw []byte) (*Intent, error) {
 			return nil, fmt.Errorf("intent: duplicate domain %q", d.ID)
 		}
 		seen[d.ID] = true
+	}
+	for name, n := range in.Nets {
+		if n == nil || n.Via == nil {
+			continue
+		}
+		v := n.Via
+		for _, x := range []float64{v.DrillMil, v.DiaMil, v.AmpacityA, float64(v.CountPerTransition)} {
+			if math.IsNaN(x) || math.IsInf(x, 0) || x < 0 {
+				return nil, fmt.Errorf("intent: net %s via has a negative or non-finite value", name)
+			}
+		}
+		if v.DrillMil > 0 && v.DiaMil > 0 && v.DrillMil >= v.DiaMil {
+			return nil, fmt.Errorf("intent: net %s via drill %.2f mil must be smaller than diameter %.2f mil", name, v.DrillMil, v.DiaMil)
+		}
 	}
 	for i, p := range in.Pairs {
 		a, b := pairDomain(p.A), pairDomain(p.B)
@@ -447,7 +488,7 @@ func applyIntentBase(np *NetPlan, n *IntentNet) {
 // applyIntentRules overrides widths / vias / clearance after the engine's
 // own computation: net-level declarations win exactly (never below the
 // process minimum); a class width is a floor over the current-based width.
-func applyIntentRules(np *NetPlan, n *IntentNet, cls *IntentNetClass, r Rules) {
+func applyIntentRules(np *NetPlan, n *IntentNet, cls *IntentNetClass, r Rules, spec PowerSpec) {
 	if n != nil {
 		if n.WidthMil.Outer > 0 {
 			np.WidthMil = math.Max(n.WidthMil.Outer, r.MinTrack)
@@ -457,9 +498,6 @@ func applyIntentRules(np *NetPlan, n *IntentNet, cls *IntentNetClass, r Rules) {
 			np.InnerWidthMil = math.Max(n.WidthMil.Inner, r.MinTrack)
 		} else if n.WidthMil.Outer > 0 {
 			np.InnerWidthMil = math.Max(np.InnerWidthMil, np.WidthMil)
-		}
-		if n.ViasPerTransition > 0 {
-			np.ViasPerTransition = n.ViasPerTransition
 		}
 		if n.ClearanceMil > 0 {
 			np.ClearanceMil = math.Max(n.ClearanceMil, r.Clearance)
@@ -482,6 +520,61 @@ func applyIntentRules(np *NetPlan, n *IntentNet, cls *IntentNetClass, r Rules) {
 			np.ClearanceMil = cls.ClearanceMil
 			np.Why = append(np.Why, whyf("net class %s: clearance %.1f mil", cls.Name, cls.ClearanceMil))
 		}
+	}
+	applyIntentVia(np, n, cls, r, spec)
+}
+
+// applyIntentVia sets the net's via from the intent: a declared via (size
+// and/or count) is taken as declared and rated — a shortfall is a warning,
+// never silently resized —; otherwise the via is sized with the net class's
+// via size as the preferred size.
+func applyIntentVia(np *NetPlan, n *IntentNet, cls *IntentNetClass, r Rules, spec PowerSpec) {
+	class := ViaSize{r.ViaDrill, r.ViaDia}
+	if cls != nil && cls.ViaDrillMil > 0 && cls.ViaDiaMil > cls.ViaDrillMil {
+		class = ViaSize{cls.ViaDrillMil, cls.ViaDiaMil}
+	}
+	cur := np.thermalCurrent()
+	if n != nil && n.CurrentA > 0 {
+		// Rated against the intent's own current (the engine may replace a
+		// ground net's current by its largest-rail-return heuristic).
+		cur = n.CurrentA
+	}
+	q := ViaSizing{CurrentA: cur, TempRiseC: spec.TempRiseC, PlatingMil: spec.ViaPlatingMil, MarginPct: spec.ViaMarginPct,
+		Class: class, Space: TrackViaSpace(np.WidthMil), LengthMil: r.BoardThickMil, Clearance: r.Clearance, HoleGap: r.HoleGap}
+	size, count := ViaSize{}, 0
+	if n != nil {
+		if v := n.Via; v != nil {
+			if v.DrillMil > 0 && v.DiaMil > v.DrillMil {
+				size = ViaSize{v.DrillMil, v.DiaMil}
+			}
+			count = v.CountPerTransition
+		}
+		if count <= 0 {
+			count = n.ViasPerTransition
+		}
+	}
+	var p ViaPlan
+	switch {
+	case size.DrillMil > 0 || count > 0:
+		if size.DrillMil <= 0 {
+			size = class
+		}
+		if count <= 0 {
+			q.Class, q.Ladder = size, []ViaSize{}
+			count = SizeVias(q).Count
+		}
+		p = EvalVias(q, size, count)
+		p.Why = whyf("intent via %d × %.1f/%.1f mil: %.2f A for %.2f A (margin %.0f %%)", count, size.DrillMil, size.DiaMil, p.AmpacityA, p.CurrentA, p.MarginPct)
+		if n.Via != nil && n.Via.Why != "" {
+			p.Why = n.Via.Why
+		}
+	default:
+		p = SizeVias(q)
+	}
+	np.Via = &p
+	np.ViasPerTransition = p.Count
+	if !p.OK && p.CurrentA > 0 {
+		np.Warnings = append(np.Warnings, whyf("via-current: %d × %.1f/%.1f mil carries %.2f A for %.2f A (margin %.0f %% < %.0f %%)", p.Count, p.DrillMil, p.DiaMil, p.AmpacityA, p.CurrentA, p.MarginPct, ViaMarginOr(spec.ViaMarginPct)))
 	}
 }
 

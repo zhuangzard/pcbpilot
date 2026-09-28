@@ -76,7 +76,7 @@ func WriteReport(w io.Writer, in *Intent) error {
 		}
 	}
 
-	b.WriteString("\n## 网络电气规划 / nets\n\n| net | role | class | block | V nom | V peak | I (A) | source | width o/i/min mil | vias | clr mil | Z Ω | pair |\n|---|---|---|---|---:|---:|---:|---|---|---:|---:|---:|---|\n")
+	b.WriteString("\n## 网络电气规划 / nets\n\n| net | role | class | block | V nom | V peak | I (A) | source | width o/i/min mil | vias/transition | clr mil | Z Ω | pair |\n|---|---|---|---|---:|---:|---:|---|---|---:|---:|---:|---|\n")
 	names := make([]string, 0, len(in.Nets))
 	for n := range in.Nets {
 		names = append(names, n)
@@ -94,9 +94,13 @@ func WriteReport(w io.Writer, in *Intent) error {
 		if np.ImpedanceOhm > 0 {
 			z = trimFloat(np.ImpedanceOhm, 0)
 		}
-		fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s | %s | %s | %s/%s/%s | %d | %s | %s | %s |\n", n, np.Role, np.NetClass, np.Block,
+		vias := fmt.Sprint(np.ViasPerTransition)
+		if v := np.Via; v != nil {
+			vias = fmt.Sprintf("%d×%s/%s", v.CountPerTransition, trimFloat(v.DrillMil, 1), trimFloat(v.DiaMil, 1))
+		}
+		fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s | %s | %s | %s/%s/%s | %s | %s | %s | %s |\n", n, np.Role, np.NetClass, np.Block,
 			trimFloat(np.Voltage.Nom, 3), trimFloat(np.Voltage.Peak, 3), trimFloat(np.CurrentA, 4), np.CurrentSource,
-			trimFloat(np.WidthMil.Outer, 2), trimFloat(np.WidthMil.Inner, 2), trimFloat(np.WidthMil.Min, 2), np.ViasPerTransition, trimFloat(np.ClearanceMil, 1), z, np.DiffPair)
+			trimFloat(np.WidthMil.Outer, 2), trimFloat(np.WidthMil.Inner, 2), trimFloat(np.WidthMil.Min, 2), vias, trimFloat(np.ClearanceMil, 1), z, np.DiffPair)
 	}
 	b.WriteString("\n### why (power, switch, high-speed, HV)\n\n")
 	for _, n := range names {

@@ -271,6 +271,7 @@ type pcbCheckSummary struct {
 	// Clearance / creepage shortfalls between insulated voltage domains
 	// (`pcb check --intent`).
 	Isolation int `json:"isolation,omitempty"`
+	ViaCurr   int `json:"viaCurrent,omitempty"` // via-current (--intent): transitions short of their current
 	Errors    int `json:"errors"`
 	Warnings  int `json:"warnings"`
 	Total     int `json:"total"`
@@ -1839,7 +1840,10 @@ func runPcbCheckIntent(cfg *appConfig, window string, couplingW float64, checkSp
 		if err := addIsolationFindings(rep, raw, intentPath); err != nil {
 			return err
 		}
-		rep.Limitations = append(rep.Limitations, "offline --board: only the isolation rule ran (no live DFM rules)")
+		if err := addViaCurrentFindings(rep, raw, intentPath); err != nil {
+			return err
+		}
+		rep.Limitations = append(rep.Limitations, "offline --board: only the isolation and via-current rules ran (no live DFM rules)")
 	} else {
 		rep, err = gatherPcbCheckReport(cfg, window, couplingW, checkSpec, stderr)
 		if err != nil {
@@ -1855,6 +1859,9 @@ func runPcbCheckIntent(cfg *appConfig, window string, couplingW float64, checkSp
 				return merr
 			}
 			if err := addIsolationFindings(rep, raw, intentPath); err != nil {
+				return err
+			}
+			if err := addViaCurrentFindings(rep, raw, intentPath); err != nil {
 				return err
 			}
 		}
