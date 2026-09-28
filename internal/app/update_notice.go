@@ -50,7 +50,8 @@ func noticeExempt(args []string) bool {
 		}
 	}
 	switch args[0] {
-	case "help", "version", "completion", "update", "upgrade", "self-update", "daemon", "mcp", "skill", "actions":
+	case "help", "version", "completion", "update", "upgrade", "self-update", "daemon", "mcp", "skill", "actions", "health":
+		// health prints the same notices itself (daemon health / MCP health tool).
 		return true
 	}
 	return strings.HasPrefix(args[0], "__complete")

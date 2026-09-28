@@ -152,7 +152,11 @@ refused. The daemon never pulls a checkout unless ` + "`--auto source`" + `.`,
 				return runAutoSetting(cfg, auto, jsonOut, stdout)
 			}
 			if rollback {
-				return runRollback(cmd.Context(), cfg, pinVersion, jsonOut, stdout, stderr)
+				comps, err := selectComponents(false, false, nil, skip)
+				if err != nil {
+					return err
+				}
+				return runRollback(cmd.Context(), cfg, pinVersion, comps[compDaemon], jsonOut, stdout, stderr)
 			}
 			// --local-dir with a release (X.Y.Z) package and --binary: the full
 			// engine, replacing the CLI at --binary (a simulated or foreign
@@ -929,7 +933,7 @@ func runAutoSetting(cfg *appConfig, mode string, jsonOut bool, stdout io.Writer)
 	return nil
 }
 
-func runRollback(ctx context.Context, cfg *appConfig, ver string, jsonOut bool, stdout, stderr io.Writer) error {
+func runRollback(ctx context.Context, cfg *appConfig, ver string, restart, jsonOut bool, stdout, stderr io.Writer) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -938,8 +942,10 @@ func runRollback(ctx context.Context, cfg *appConfig, ver string, jsonOut bool, 
 		return err
 	}
 	restored, rerr := selfupdate.RestoreSnapshot(ctx, snap)
-	deps := realUpdateDeps(cfg, nil)
-	how, derr := restartDaemonService(deps)
+	how, derr := "not restarted (--skip daemon)", error(nil)
+	if restart {
+		how, derr = restartDaemonService(realUpdateDeps(cfg, nil))
+	}
 	st := selfupdate.UpdateState{Phase: selfupdate.PhaseRolledBack, To: snap.Version, At: time.Now().UTC(), By: "cli",
 		Summary: fmt.Sprintf("rolled back to %s (%s)", snap.Version, strings.Join(restored, ", "))}
 	_ = selfupdate.WriteJSON(selfupdate.UpdateStatePath(), st)
@@ -955,9 +961,12 @@ func runRollback(ctx context.Context, cfg *appConfig, ver string, jsonOut bool, 
 		emitJSON(stdout, out)
 	} else {
 		fmt.Fprintf(stdout, "rolled back to v%s from %s: %s\n", snap.Version, snap.Dir, strings.Join(restored, ", "))
-		if derr != nil {
+		switch {
+		case derr != nil:
 			fmt.Fprintf(stdout, "  ! daemon restart (%s) failed: %v — run `pcbpilot daemon service install`\n", how, derr)
-		} else {
+		case !restart:
+			fmt.Fprintln(stdout, "  daemon not restarted (--skip daemon) — restart it to run the restored binary")
+		default:
 			fmt.Fprintf(stdout, "  daemon restarted (%s)\n", how)
 		}
 		fmt.Fprintln(stdout, "  auto-update stays as configured; `pcbpilot update --auto off` keeps this version")

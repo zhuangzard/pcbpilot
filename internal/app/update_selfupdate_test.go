@@ -445,12 +445,12 @@ func TestSessionHookFirstCommandOnlyAndExemptions(t *testing.T) {
 	if !fresh || again || !later {
 		t.Fatalf("session = first command after 30 min idle: %v %v %v", fresh, again, later)
 	}
-	for _, args := range [][]string{nil, {"update"}, {"daemon", "start"}, {"mcp", "install"}, {"actions"}, {"health", "--help"}, {"--version"}} {
+	for _, args := range [][]string{nil, {"update"}, {"daemon", "start"}, {"mcp", "install"}, {"actions"}, {"health"}, {"--version"}} {
 		if !noticeExempt(args) {
 			t.Fatalf("%v must be exempt", args)
 		}
 	}
-	if noticeExempt([]string{"health"}) || noticeExempt([]string{"sch", "layout-lint"}) {
+	if noticeExempt([]string{"pcb", "check"}) || noticeExempt([]string{"sch", "layout-lint"}) {
 		t.Fatal("ordinary commands must get the notice")
 	}
 }
