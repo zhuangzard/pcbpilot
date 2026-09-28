@@ -10,6 +10,7 @@
 | **PCB Pilot Connector**（`.eext`） | 运行在 EasyEDA 内的薄桥接层，调用官方 `eda.*` API | EasyEDA 扩展管理器（侧载，**不在插件市场**） |
 | **Skill**（`pcbpilot`） | Agent 的工作流、规则、样例、参考数据 | `~/.claude/skills`、`~/.codex/skills`、`~/.agents/skills` |
 | **MCP**（可选） | 同一套 typed action 的 MCP 工具入口 | `mcp/src/server.mjs`，注册到 Claude Code / Codex |
+| **仿真工具** | ngspice（必需）、Elmer FEM（可选）做交叉验证；pcbpilot 自带仿真器已编译进二进制 | 系统包管理器（brew / apt / dnf / winget·choco），由 `pcbpilot sim tools install` 安装 |
 | **EasyEDA Pro（宿主）** | V3（3.2.x）或 V4，桌面或 Web（pro.easyeda.com / lceda.cn） | 用户自己打开 |
 
 ## 1. 安装
@@ -29,7 +30,9 @@ scripts/setup-agent.sh          # --dry-run 先预览
 ```
 
 它编译 CLI、链接 Skill、安装并注册 MCP（Claude Code / Codex / ZCode）、构建连接器 `.eext`，并把 daemon
-装成**登录服务（必需）**：`pcbpilot daemon service install`，开机登录自动启动。
+装成**登录服务（必需）**：`pcbpilot daemon service install`，开机登录自动启动；并执行
+`pcbpilot sim tools install --yes` 安装 ngspice（必需）与 Elmer FEM（可选，macOS 源码编译较久，失败只警告；
+`--no-sim-tools` 跳过）。
 需要 Go ≥ 1.26、Node.js ≥ 20.17；没有 Go 时自动改用发布版。
 
 **只装发布版：**
@@ -41,7 +44,8 @@ irm https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.ps1 | iex
 
 发布版脚本会查询 GitHub latest release。遇到 `403`（匿名额度）时 `export GITHUB_TOKEN=…`，
 或用 `PCBPILOT_VERSION=vX.Y.Z` 锁版本。其他变量：`PCBPILOT_INSTALL_DIR`、
-`PCBPILOT_INSTALL_SKILLS=codex,claude,agents|none`、`PCBPILOT_SKILL_PRESERVE=1`、`PCBPILOT_GITHUB_PROXY`。
+`PCBPILOT_INSTALL_SKILLS=codex,claude,agents|none`、`PCBPILOT_SKILL_PRESERVE=1`、`PCBPILOT_GITHUB_PROXY`、
+`PCBPILOT_SIM_TOOLS=0`（不装仿真工具）。发布版脚本装好 CLI 后同样调用 `pcbpilot sim tools install --yes`。
 
 ## 2. 导入连接器（人工）
 
@@ -58,6 +62,7 @@ irm https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.ps1 | iex
 pcbpilot daemon service status # 登录服务已安装（必需）；缺失时 pcbpilot daemon service install
 pcbpilot health                # windows[] 出现目标工程/文档；connectorVersion 与仓库一致
 pcbpilot update --check        # 可选：CLI / Skill / 连接器三方版本
+pcbpilot sim tools check       # ngspice（必需）/ Elmer（可选）路径、版本、状态与本机安装命令
 ```
 
 ## 4. 开始使用

@@ -36,11 +36,15 @@ func newSimCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
               设计后仿真: the finished board's real copper (pcb dump
               --include-copper) with sim power's currents — IR drop per load
               pad, via currents, current density, thermal maps, part
-              temperatures, width/corner/via feedback.`,
+              temperatures, width/corner/via feedback.
+  sim tools   check / install the external open-source cross-check simulators
+              (ngspice required, Elmer FEM optional). pcbpilot's own simulators
+              are built into this binary and need no install.`,
 	}
 	sim.PersistentFlags().StringVar(&window, "window", "", "EasyEDA window ID (live mode)")
 	sim.AddCommand(newSimPowerCmd(cfg, &window, stdout, stderr))
 	sim.AddCommand(newSimPostLayoutCmd(stdout, stderr))
+	sim.AddCommand(newSimToolsCmd(stdout, stderr))
 	return sim
 }
 

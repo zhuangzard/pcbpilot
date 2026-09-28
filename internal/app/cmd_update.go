@@ -240,6 +240,9 @@ If the binary lives in a root-owned dir, re-run with sudo.`,
 				emitJSON(stdout, rep)
 			} else {
 				printUpdateReport(stdout, rep)
+				if checkOnly {
+					fmt.Fprintln(stdout, simToolsOneLine(simToolsEnv().Check()))
+				}
 			}
 			if operationFailed {
 				return errQuiet

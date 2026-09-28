@@ -157,6 +157,29 @@ Node 版本遵循 bundle 的要求（至少 20.17）。
 `debug exec` 运行已审阅的专用更新脚本，不能借此绕过设计写操作守卫。重载用户选定的
 Web 编辑器并核对新窗口/运行版本。用户指定 Web 时绝不改开桌面客户端。
 
+### 仿真工具（ngspice / Elmer FEM）
+
+pcbpilot 自带仿真器（`sim power` DC MNA、走线 IR/温升估算）编译在二进制里，不需要安装。
+开源工具只做独立交叉验证，唯一来源是 `pcbpilot sim tools`；三个安装脚本在装好 CLI 后都执行
+`pcbpilot sim tools install --yes`（`--no-sim-tools` / `PCBPILOT_SIM_TOOLS=0` 跳过）。
+
+| 工具 | 必需 | 用途 | 缺失时 |
+|---|---|---|---|
+| ngspice ≥ 30 | 是 | `sim power --spice-check`、模拟 SPICE 流程 | 安装自检 FAIL；`spiceCheck.skipped` |
+| Elmer FEM ≥ 9.0（ElmerSolver + ElmerGrid） | 否 | `sim post-layout --elmer-check` 热交叉验证 | 安装自检 WARN；交叉验证跳过 |
+
+```bash
+pcbpilot sim tools check [--json]           # 路径/版本/最低版本/ok|missing|outdated/本机安装命令；必需缺失退出码 1
+pcbpilot sim tools install --dry-run        # 只打印命令
+pcbpilot sim tools install --yes [--only ngspice|elmer] [--require-elmer]
+```
+
+平台命令由该命令按 OS/发行版选择（macOS brew + 官方 tap `elmercsc/elmerfem`，Elmer 源码编译
+20–60+ 分钟；Debian/Ubuntu apt，Ubuntu Elmer 走官方 PPA；Fedora dnf；Windows winget/choco +
+官方 Elmer NSIS 安装包）。Agent 规则：交叉验证前先 `sim tools check --json`；报告里写实际版本；
+工具缺失时如实写“交叉验证未执行”，不把 `skipped` 当通过。安装系统软件（sudo/UAC/长时间编译）
+前告知用户并取得同意，不在 EDA 现场任务中途静默安装；macOS 缺 Homebrew 只转告官方安装命令。
+
 ## 确认连接和目标文档
 
 桌面版和网页版使用同一连接器。打开用户指定的宿主、账号和工程，在扩展设置启用

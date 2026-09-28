@@ -102,6 +102,39 @@ else:
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.splitlines(), [str(self.cli), 'pcbpilot v1.4.2'])
 
+    def logging_binary(self, supports_sim=True):
+        """A release binary that logs its argv and (optionally) lacks `sim tools`."""
+        log = self.root / 'calls.log'
+        sim = '' if supports_sim else 'case "$1 $2" in "sim tools") exit 1;; esac\n'
+        (self.assets / self.binary_name).write_text(
+            f'#!/bin/sh\necho "$*" >> "{log}"\n{sim}printf "pcbpilot v1.4.2\\n"\n')
+        self.sums()
+        return log
+
+    def test_sim_tools_installed_after_binary(self):
+        log = self.logging_binary()
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        calls = log.read_text().splitlines()
+        self.assertIn('sim tools install --yes', calls)
+        self.assertIn('ngspice (required) + Elmer FEM (optional)', result.stdout)
+        self.assertIn('simulation tools ready', result.stdout)
+
+    def test_sim_tools_opt_out_and_old_release(self):
+        log = self.logging_binary()
+        result = self.run_install(PCBPILOT_SIM_TOOLS='0')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn('sim tools install --yes', log.read_text())
+        self.assertIn('PCBPILOT_SIM_TOOLS=0', result.stdout)
+        log.unlink()
+        log = self.logging_binary(supports_sim=False)
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn('sim tools install', log.read_text())
+        out = result.stdout + result.stderr
+        self.assertIn("predates 'pcbpilot sim tools'", out)
+        self.assertIn('ngspice', out)
+
     def test_shared_agents_skill_root(self):
         result = self.run_install(PCBPILOT_INSTALL_SKILLS='agents')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

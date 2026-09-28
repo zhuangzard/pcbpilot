@@ -13,6 +13,8 @@ SKILL_PRESERVE="${PCBPILOT_SKILL_PRESERVE:-0}"
 # CODEX_HOME / CLAUDE_CONFIG_DIR select client config roots.
 # PCBPILOT_VERSION=v0.18.2 pins the release and skips the GitHub API lookup entirely
 VERSION="${PCBPILOT_VERSION:-}"
+# PCBPILOT_SIM_TOOLS=0 skips installing the open-source simulators (ngspice, Elmer FEM)
+SIM_TOOLS="${PCBPILOT_SIM_TOOLS:-1}"
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 info()  { printf '\033[34m[pcbpilot]\033[0m %s\n' "$*"; }
@@ -345,6 +347,30 @@ else
   warn "this release predates 'pcbpilot daemon service'; start the daemon at login yourself (see docs/manual.md)"
 fi
 
+# ── simulation tools (ngspice required, Elmer FEM optional) ──────────────────
+# Single source: `pcbpilot sim tools install` picks the platform commands and
+# prints each one. stdin comes from the terminal (never the `curl | bash` pipe,
+# which a package manager would otherwise read the rest of this script from).
+# A failure never aborts the installer; `pcbpilot sim tools check` re-reports.
+SIM_OK=0
+SIM_MANUAL_MAC='brew install ngspice   # Elmer (optional, builds from source): brew tap elmercsc/elmerfem && brew install elmercsc/elmerfem/elmer'
+SIM_MANUAL_LINUX='sudo apt-get install -y ngspice   (Fedora: sudo dnf install -y ngspice; Ubuntu Elmer: sudo add-apt-repository -y ppa:elmer-csc-ubuntu/elmer-csc-ppa && sudo apt-get install -y elmerfem-csc)'
+sim_manual() { if [ "$(uname -s)" = Darwin ]; then printf '%s\n' "$SIM_MANUAL_MAC"; else printf '%s\n' "$SIM_MANUAL_LINUX"; fi; }
+if [ "$SIM_TOOLS" = 0 ]; then
+  info "simulation tools skipped (PCBPILOT_SIM_TOOLS=0); later: pcbpilot sim tools install --yes"
+elif "${INSTALL_DIR}/pcbpilot" sim tools --help >/dev/null 2>&1; then
+  info "Installing simulation tools: ngspice (required) + Elmer FEM (optional); pcbpilot's own simulators are built in"
+  if { exec 3</dev/tty; } 2>/dev/null; then SIM_IN=/dev/tty; exec 3<&-; else SIM_IN=/dev/null; fi
+  if "${INSTALL_DIR}/pcbpilot" sim tools install --yes <"$SIM_IN"; then
+    SIM_OK=1; ok "simulation tools ready (check: pcbpilot sim tools check)"
+  else
+    warn "ngspice (required for sim power --spice-check) is not installed — see above; retry: pcbpilot sim tools install --yes"
+  fi
+else
+  warn "this release predates 'pcbpilot sim tools'; install the simulators yourself:"
+  printf '    %s\n' "$(sim_manual)"
+fi
+
 # ── PATH check ────────────────────────────────────────────────────────────────
 if ! echo ":${PATH}:" | grep -q ":${INSTALL_DIR}:"; then
   warn "${INSTALL_DIR} is not in PATH"
@@ -361,6 +387,9 @@ if [ "$SERVICE_OK" = 1 ]; then
   printf '  1. Daemon: installed as a login service (check: pcbpilot daemon service status)\n\n'
 else
   printf '  1. Daemon (required at every login): pcbpilot daemon service install\n\n'
+fi
+if [ "$SIM_OK" != 1 ] && [ "$SIM_TOOLS" != 0 ]; then
+  printf '  Simulators: ngspice missing — pcbpilot sim tools install --yes  (or: %s)\n\n' "$(sim_manual)"
 fi
 printf '  2. Install the EasyEDA connector extension (sideload only - not on the marketplace):\n'
 printf '       Download: %s/pcbpilot-connector.eext\n' "$BASE_URL"

@@ -262,6 +262,11 @@ curl -fsSL https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.sh
 irm https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.ps1 | iex             # Windows PowerShell
 ```
 
+三种安装方式都会顺带执行 `pcbpilot sim tools install --yes`，自动安装开源仿真工具：**ngspice**（必需，
+`sim power --spice-check` 与模拟 SPICE 流程）和 **Elmer FEM**（可选热交叉验证；macOS 走官方 Homebrew tap
+源码编译，较慢，失败只警告）。pcbpilot 自带的仿真器已编译进二进制，无需安装。`pcbpilot sim tools check`
+查看状态；`--no-sim-tools` / `PCBPILOT_SIM_TOOLS=0` 跳过。各平台命令见 [使用手册 3.4](docs/manual.md#34-仿真工具)。
+
 ### 唯一的人工步骤：导入连接器
 
 1. EasyEDA Pro → 扩展管理器 → 已安装：先**卸载**旧的 “PCB Pilot Connector”（同 uuid 不卸载会静默导入失败）；

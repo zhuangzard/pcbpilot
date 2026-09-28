@@ -15,6 +15,9 @@ Skills are read from ~/.claude/skills, ~/.codex/skills, ~/.agents/skills and
   agent_clients.py register --bin PCBPILOT --node NODE --server SERVER.mjs [--dry-run]
   agent_clients.py verify --bin PCBPILOT --server SERVER.mjs --repo REPO
 
+`verify` also runs `pcbpilot sim tools check --json`: a missing ngspice is a
+FAIL (required), a missing Elmer FEM a WARN (optional cross-check).
+
 Every edited file is copied into the backup dir (clean-upstream) or next to
 itself as <file>.bak-pcbpilot (register) before the first write.
 """
@@ -278,9 +281,38 @@ def service_entry(home=None):
     return None, None
 
 
+def sim_tools_findings(report):
+    """(ok, warn, bad) lines from `pcbpilot sim tools check --json` (schemaVersion 1).
+
+    Required tools (ngspice) that are not ok FAIL; optional ones (Elmer FEM) WARN.
+    """
+    ok, warn, bad = [], [], []
+    tools = report.get("tools") if isinstance(report, dict) else None
+    if not tools:
+        return ok, warn, ["sim tools: unreadable `pcbpilot sim tools check --json` report"]
+    for t in tools:
+        name = t.get("name", "?")
+        status = t.get("status", "?")
+        if status == "ok":
+            ver = f" v{t['version']}" if t.get("version") else ""
+            ok.append(f"sim tool {name}{ver} → {t.get('path', '?')}")
+            continue
+        hint = "; ".join(t.get("install") or []) or t.get("manual") or "see pcbpilot sim tools check"
+        line = f"sim tool {name} {status} ({t.get('detail', '')}) — run: pcbpilot sim tools install --yes  [{hint}]"
+        (bad if t.get("required") else warn).append(line + ("" if t.get("required") else " (optional)"))
+    return ok, warn, bad
+
+
+def sim_tools_report(pbin):
+    """Run `pcbpilot sim tools check --json`; its exit status 1 only means a required tool is missing."""
+    p = subprocess.run([pbin, "sim", "tools", "check", "--json"], capture_output=True, text=True, timeout=60)
+    return json.loads(p.stdout)
+
+
 def verify(pbin, server, repo):
     bad = []
     ok = []
+    warns = []
     def check(cond, good, fail):
         (ok if cond else bad).append(good if cond else fail)
     # binaries
@@ -355,8 +387,18 @@ def verify(pbin, server, repo):
         check(bool(v), f"CLI {v}", "CLI did not report a version")
     except Exception as e:  # noqa: BLE001
         bad.append(f"CLI failed: {e}")
+    # open-source simulators: ngspice required (FAIL), Elmer FEM optional (WARN)
+    try:
+        o, w, b = sim_tools_findings(sim_tools_report(pbin))
+        ok += o
+        warns += w
+        bad += b
+    except Exception as e:  # noqa: BLE001
+        bad.append(f"sim tools check failed: {e} — run: pcbpilot sim tools check")
     for x in ok:
         print(f"   ok   {x}")
+    for x in warns:
+        print(f"   WARN {x}")
     for x in bad:
         print(f"   FAIL {x}")
     return not bad

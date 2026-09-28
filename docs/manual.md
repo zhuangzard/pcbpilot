@@ -55,6 +55,7 @@ pcbpilot 与上游 easyeda-agent 使用不同的命令名、端口段（上游 6
 | EasyEDA Pro | **V3（3.2.x）或 V4（推荐 ≥ 4.1.60）**，桌面版或 Web 版均可；国际版 pro.easyeda.com 与国内版 lceda.cn 均可 |
 | 源码构建 | Go ≥ 1.26、Node.js ≥ 20.17、npm、make |
 | 仅用发布版 | 无需 Go/Node（MCP 需要 Node） |
+| 仿真工具 | ngspice ≥ 30（必需）、Elmer FEM ≥ 9.0（可选）——安装脚本自动安装，见 [3.4](#34-仿真工具) |
 
 宿主版本差异由 `pcbpilot health` 的 `hostCompatibility` 报告（`line: v3|v4`、特性表）。
 V3 与 V4 的已知差异（网络标签写法、未设置样式读回 `undefined`、修改器件会重置 LCSC 编号等）
@@ -78,7 +79,10 @@ Agent 会执行 `scripts/setup-agent.sh`，自动完成：
 3. 把 Skill 软链到 Claude Code / Codex / ZCode / `~/.agents`（`git pull` 即更新）；
 4. 安装 MCP 依赖并注册到检测到的每个客户端；
 5. 以仓库版本构建连接器 `.eext` 并打印路径；
-6. 以登录服务启动 daemon，并自动验证全部客户端。
+6. 以登录服务启动 daemon，并自动验证全部客户端；
+7. 编译 CLI 后立即执行 `pcbpilot sim tools install --yes` 安装开源仿真工具（ngspice 必需、
+   Elmer FEM 可选，见 [3.4](#34-仿真工具)；`--no-sim-tools` 跳过）。验证时 ngspice 缺失 = FAIL，
+   Elmer 缺失 = WARN。
 
 脚本支持的 AI 客户端：**Claude Code**（`claude mcp` / `~/.claude.json`）、**Codex / Codex Desktop**
 （`~/.codex/config.toml`）、**ZCode**（`~/.zcode/cli/config.json` 与 `~/.zcode/skills`），以及共享的
@@ -136,8 +140,34 @@ irm https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.ps1 | iex
 | `PCBPILOT_INSTALL_SKILLS=codex,claude,agents` / `none` | Skill 安装目标 |
 | `PCBPILOT_SKILL_PRESERVE=1` | 保留本地修改过的 Skill |
 | `PCBPILOT_GITHUB_PROXY` | 下载代理前缀 |
+| `PCBPILOT_SIM_TOOLS=0` | 不安装仿真工具（Windows 也可用 `-NoSimTools`） |
 
-注意：发布版只包含已发布的版本；`dev` 分支上的新能力需要源码安装。
+注意：发布版只包含已发布的版本；`dev` 分支上的新能力需要源码安装。早于 `pcbpilot sim tools`
+的发布版由安装脚本打印下方 3.4 的手动命令。
+
+### 3.4 仿真工具
+
+pcbpilot **自带的仿真器编译在二进制里**（`sim power` 的 DC 电源树 MNA、走线 IR/温升估算），
+无需单独安装。下面两个开源工具只做**独立交叉验证**，由唯一来源 `pcbpilot sim tools` 检查与安装，
+三个安装脚本（`setup-agent.sh` / `install.sh` / `install.ps1`）都调用它：
+
+| 工具 | 必需 | 最低版本 | 用途 | macOS | Debian/Ubuntu | Fedora/RHEL | Windows |
+|---|---|---|---|---|---|---|---|
+| ngspice | **是** | 30 | `sim power --spice-check`、模拟 SPICE 仿真流程 | `brew install ngspice` | `sudo apt-get install -y ngspice` | `sudo dnf install -y ngspice` | 运行时 `winget show` 有 ngspice 包则用 winget，否则 `choco install ngspice -y`（管理员），都没有则打印官网下载说明 |
+| Elmer FEM（ElmerSolver + ElmerGrid） | 否（`--require-elmer` 可改为必需） | 9.0 | `sim post-layout --elmer-check` 热交叉验证 | `brew tap elmercsc/elmerfem` + `brew install elmercsc/elmerfem/elmer`（**源码编译，20–60+ 分钟**） | Ubuntu：`sudo add-apt-repository -y ppa:elmer-csc-ubuntu/elmer-csc-ppa` + `sudo apt-get install -y elmerfem-csc`；其他发行版打印源码编译说明 | 打印源码编译说明 | 官方 NSIS 安装包 `rel26.1/ElmerFEM-nogui-nompi-Windows-AMD64-rel26.1.exe`（nic.funet.fi 镜像）下载到临时目录后 `/S` 静默运行（UAC 确认）；URL 失效时打印镜像目录 |
+
+```bash
+pcbpilot sim tools check                 # 路径、版本、最低版本、ok/missing/outdated、本机安装命令
+pcbpilot sim tools check --json          # 同上 JSON（schemaVersion 1）；必需工具缺失时退出码 1
+pcbpilot sim tools install --dry-run     # 只打印命令
+pcbpilot sim tools install --yes         # 执行（每条命令先打印）；--only ngspice|elmer
+```
+
+规则：不加 `--yes` 时只在交互终端询问 y/N，否则只打印；只有**必需**工具（ngspice）装完仍不可用
+才返回非零；Elmer 失败只给出明确警告。Linux 需要 root：有 sudo 就用（可能要求密码），非交互
+shell 且 sudo 需要密码时只打印命令；macOS 没有 Homebrew 时只打印 Homebrew 官方安装命令，不代装。
+Windows 上安装器常不改 PATH，检查也会找 `C:\Spice64\bin`、`Program Files\Elmer*\bin`。
+`pcbpilot update --check` 末尾显示一行仿真工具状态。
 
 ## 4. 连接 EasyEDA 并验证
 

@@ -26,8 +26,10 @@ skill ──▶ Go CLI/daemon ──WebSocket──▶ connector .eext ──▶
 
 1. 在仓库根目录运行 `scripts/setup-agent.sh`（先 `--dry-run` 给用户看将执行什么；无 Go 时脚本自动改用发布版
    `install.sh`）。它编译 CLI 到 `~/.local/bin`、把 `.agents/skills/*` 软链到 Claude Code / Codex / `~/.agents`、
-   为 Claude Code / Codex / ZCode / `~/.agents` 注册 MCP、构建连接器 `.eext`、以登录服务启动 daemon（**必需**：`pcbpilot daemon service install`，自检缺服务即失败），最后自动
-   验证（每个客户端无上游残留、MCP 握手成功）。已装上游 easyeda-agent 时默认移除其 MCP、把其 Skill 移入
+   为 Claude Code / Codex / ZCode / `~/.agents` 注册 MCP、构建连接器 `.eext`、以登录服务启动 daemon（**必需**：`pcbpilot daemon service install`，自检缺服务即失败），
+   编译 CLI 后执行 `pcbpilot sim tools install --yes` 安装开源仿真工具（ngspice 必需；Elmer FEM 可选，macOS 源码编译
+   较久、失败只警告；`--no-sim-tools` 跳过；pcbpilot 自带仿真器已编译进二进制），最后自动
+   验证（每个客户端无上游残留、MCP 握手成功、ngspice 缺失 FAIL / Elmer 缺失 WARN）。已装上游 easyeda-agent 时默认移除其 MCP、把其 Skill 移入
    `~/.pcbpilot/upstream-backup/`（可恢复）；执行前把 `--dry-run` 结果给用户看。
 2. 把脚本最后打印的**人工步骤**原样告诉用户：卸载旧 “PCB Pilot Connector” → 导入打印的 `.eext` →
    设置里打开“允许外部交互” → 重新加载编辑器。不得用 GUI 自动化代做。

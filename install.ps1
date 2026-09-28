@@ -193,6 +193,8 @@ try {
     $InstallSkills = Get-EnvValue 'PCBPILOT_INSTALL_SKILLS'
     $SkillPreserve = (Get-EnvValue 'PCBPILOT_SKILL_PRESERVE') -eq '1'
     $AddToPath = (Get-EnvValue 'PCBPILOT_ADD_TO_PATH') -eq '1'
+    # PCBPILOT_SIM_TOOLS=0 / -NoSimTools skips the open-source simulators (ngspice, Elmer FEM)
+    $SimTools = (Get-EnvValue 'PCBPILOT_SIM_TOOLS') -ne '0'
 
     $argv = @($EasyEdaInstallerArgv |
         Where-Object { $null -ne $_ -and ([string]$_).Trim() -ne '' } |
@@ -203,13 +205,14 @@ try {
         switch -Regex ($option) {
             '^(?i)-{1,2}addtopath$|^(?i)--add-to-path$' { $AddToPath = $true }
             '^(?i)-{1,2}preserve$' { $SkillPreserve = $true }
+            '^(?i)-{1,2}nosimtools$|^(?i)--no-sim-tools$' { $SimTools = $false }
             '^(?i)-{1,2}version$' { $needsValue = $true }
             '^(?i)-{1,2}installdir$|^(?i)--install-dir$' { $needsValue = $true }
             '^(?i)-{1,2}skills$' { $needsValue = $true }
             '^(?i)-h$|^(?i)-{1,2}help$' {
-                Write-Host 'Usage: install.ps1 [-Version <tag>] [-InstallDir <abs path>] [-Skills auto|none|codex,claude,agents] [-Preserve] [-AddToPath]'
+                Write-Host 'Usage: install.ps1 [-Version <tag>] [-InstallDir <abs path>] [-Skills auto|none|codex,claude,agents] [-Preserve] [-AddToPath] [-NoSimTools]'
                 Write-Host 'Env:   PCBPILOT_VERSION PCBPILOT_INSTALL_DIR PCBPILOT_INSTALL_SKILLS PCBPILOT_SKILL_PRESERVE'
-                Write-Host '       PCBPILOT_ADD_TO_PATH PCBPILOT_GITHUB_PROXY CODEX_HOME CLAUDE_CONFIG_DIR GITHUB_TOKEN/GH_TOKEN'
+                Write-Host '       PCBPILOT_ADD_TO_PATH PCBPILOT_SIM_TOOLS PCBPILOT_GITHUB_PROXY CODEX_HOME CLAUDE_CONFIG_DIR GITHUB_TOKEN/GH_TOKEN'
                 return
             }
             default { Stop-Install "Unknown option: $option (try -Help)" }
@@ -537,6 +540,26 @@ try {
         } else {
             Write-Warn "this release predates 'pcbpilot daemon service'; start the daemon at login yourself (see docs/manual.md)"
         }
+        # -- simulation tools: ngspice (required) + Elmer FEM (optional) -------
+        # Single source: 'pcbpilot sim tools install' picks winget/choco for
+        # ngspice and the official Elmer NSIS installer (UAC prompt), printing
+        # each command. A failure never aborts the installer.
+        $simOk = $false
+        $simManual = 'ngspice: choco install ngspice -y (or https://ngspice.sourceforge.io/download.html); Elmer (optional): https://www.nic.funet.fi/pub/sci/physics/elmer/bin/windows/'
+        if (-not $SimTools) {
+            Write-Step 'simulation tools skipped (PCBPILOT_SIM_TOOLS=0 / -NoSimTools); later: pcbpilot sim tools install --yes'
+        } else {
+            & $target sim tools --help *> $null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Step "Installing simulation tools: ngspice (required) + Elmer FEM (optional); pcbpilot's own simulators are built in"
+                & $target sim tools install --yes
+                if ($LASTEXITCODE -eq 0) { $simOk = $true; Write-Ok 'simulation tools ready (check: pcbpilot sim tools check)' }
+                else { Write-Warn 'ngspice (required for sim power --spice-check) is not installed - see above; retry: pcbpilot sim tools install --yes' }
+            } else {
+                Write-Warn "this release predates 'pcbpilot sim tools'; install the simulators yourself:"
+                Write-Detail $simManual
+            }
+        }
         # Best-effort sweep of files an earlier locked upgrade had to leave behind.
         Get-ChildItem -LiteralPath $InstallDir -Filter '.pcbpilot-old-*.exe' -Force -ErrorAction SilentlyContinue |
             Where-Object { $_.FullName -ne $orphan } |
@@ -671,6 +694,10 @@ try {
             Write-Host '  1. Daemon (required at every login): pcbpilot daemon service install'
         }
         Write-Host ''
+        if ($SimTools -and -not $simOk) {
+            Write-Host "  Simulators: ngspice missing - pcbpilot sim tools install --yes  (or: $simManual)"
+            Write-Host ''
+        }
         Write-Host '  2. Install the EasyEDA connector extension (sideload only - not on the marketplace):'
         Write-Host "          Download: $BaseUrl/pcbpilot-connector.eext"
         Write-Host "          EasyEDA Pro: $Advanced (Advanced) -> $ExtManager (Extension manager) -> $Installed (Installed):"

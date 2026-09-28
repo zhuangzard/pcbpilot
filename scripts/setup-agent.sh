@@ -19,6 +19,12 @@
 #      (Enabled) → Config → Allow external interaction, reload the editor.
 #   5. daemon as a login service (macOS launchd / Linux systemd --user; skipped
 #      when a healthy daemon already runs, e.g. `make dev`) + `pcbpilot health`
+#   6. open-source simulators via `pcbpilot sim tools install --yes` (right after
+#      the CLI build): ngspice (required: sim power --spice-check, analog SPICE)
+#      and Elmer FEM (optional thermal cross-check; builds from source on macOS,
+#      can take long; a failure only warns). pcbpilot's own simulators are built
+#      into the binary. --no-sim-tools skips this step (verify then FAILs on a
+#      missing ngspice and WARNs on a missing Elmer).
 #
 # Step 0 keeps an existing upstream easyeda-agent install from interfering:
 #   default          remove upstream MCP registrations ("easyeda-agent", "easyeda")
@@ -30,6 +36,7 @@
 #                    "EDA Agent Connector" do not collide with pcbpilot and are left alone.
 #   --purge-upstream also stop the upstream daemon and move its CLI + data dir to the backup
 #   --keep-upstream  skip step 0
+#   --no-sim-tools   skip step 6 (ngspice / Elmer FEM)
 #
 # The daemon login service is REQUIRED (`pcbpilot daemon service install`: launchd /
 # systemd --user / HKCU Run) — the connector only talks to a daemon on 61832, so a
@@ -43,14 +50,16 @@ BIN_DIR="${PCBPILOT_BIN_DIR:-$HOME/.local/bin}"
 MODE=source
 DRY=0
 UPSTREAM=clean
+SIMTOOLS=1
 for a in "$@"; do
   case "$a" in
     --release) MODE=release ;;
     --dry-run) DRY=1 ;;
     --keep-upstream) UPSTREAM=keep ;;
     --purge-upstream) UPSTREAM=purge ;;
+    --no-sim-tools) SIMTOOLS=0 ;;
     --no-service) echo "--no-service was removed: the daemon login service is required (developing pcbpilot with make dev? run 'pcbpilot daemon service uninstall' while developing)" >&2; exit 2 ;;
-    -h|--help) sed -n '2,37p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,44p' "$0"; exit 0 ;;
     *) echo "unknown option: $a" >&2; exit 2 ;;
   esac
 done
@@ -136,6 +145,27 @@ else
 fi
 PCB="$BIN_DIR/pcbpilot"
 case ":$PATH:" in *":$BIN_DIR:"*) ;; *) warn "$BIN_DIR is not on PATH — add: export PATH=\"$BIN_DIR:\$PATH\"" ;; esac
+
+# 1b. Simulation tools (ngspice required, Elmer FEM optional) -------------------
+# Single source: `pcbpilot sim tools install` picks the platform commands and
+# prints each before running it. A failure here never aborts setup; verify
+# reports it (ngspice FAIL, Elmer WARN).
+SIM_MANUAL="macOS: brew install ngspice; brew tap elmercsc/elmerfem && brew install elmercsc/elmerfem/elmer | Debian/Ubuntu: sudo apt-get install -y ngspice; Ubuntu Elmer: sudo add-apt-repository -y ppa:elmer-csc-ubuntu/elmer-csc-ppa && sudo apt-get install -y elmerfem-csc | Fedora: sudo dnf install -y ngspice"
+if [ "$SIMTOOLS" = 0 ]; then
+  say "Simulation tools skipped (--no-sim-tools); check later: $PCB sim tools check"
+else
+  say "Installing simulation tools: ngspice (required) + Elmer FEM (optional); pcbpilot's own simulators are built in"
+  if [ "$DRY" = 1 ]; then
+    printf '   $ %s sim tools install --yes\n' "$PCB"
+    if [ -x "$PCB" ] && "$PCB" sim tools --help >/dev/null 2>&1; then
+      "$PCB" sim tools install --dry-run | sed 's/^/     /' || true
+    fi
+  elif "$PCB" sim tools --help >/dev/null 2>&1; then
+    "$PCB" sim tools install --yes || warn "ngspice (required) is not installed — see above; retry: $PCB sim tools install --yes"
+  else
+    warn "this pcbpilot predates 'sim tools' — install the simulators yourself: $SIM_MANUAL"
+  fi
+fi
 
 # 2. Skills (symlinks into the clone) --------------------------------------
 say "Linking Skills into the AI clients"
