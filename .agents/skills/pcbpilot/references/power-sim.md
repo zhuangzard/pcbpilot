@@ -54,6 +54,19 @@ connectivity 里的 `device.name` 常是未解析模板 `={Value}`，不给 valu
   `voltageMin/voltageMax` 给电压范围。线宽取 `worst`，或取对应场景。
 - `parts[].powerW` = Σ V·I（器件吸收功率；输入源为负并给 `suppliedW`）；稳压器另给 `mode`
   （regulating / dropout / off）、`vinV/voutV/inputA/outputA/efficiency`。
+- **热用平均功率，载流用峰值（v0.6.1 起）**：`currentA`/`powerW` 是该场景工作点（peak 场景 = 峰值负载），
+  线宽、过孔、IR 压降、额定电流都用它。稳态热要的是时间平均：每个 peak 场景另做一次**同源同开关、负载取
+  typ（模型平均电流）**的孪生求解，写入 `thermalBasis:"average-bound"`、`parts[].thermalW`、
+  `nets[].thermalCurrentA`；非 peak 场景 `thermalBasis:"average"`、`thermalW=powerW`。规则：负载/IC/LED/
+  稳压器（功耗 ∝ 电流：LDO (Vin−Vout)·I、buck (1/η−1)·Pout）取平均工作点功耗；I²R 类（电阻、电感、磁珠、
+  保险丝、二极管、三极管、ESD、整流桥）与铜取 √(P_avg·P_peak)、√(I_avg·I_peak)——电流在 [0, I_peak]
+  且均值 I_avg 时 E[I²] ≤ I_avg·I_peak（开关型突发），是不依赖占空比的上界。`parts[].mpn` 供
+  `sim post-layout` 核对位号是否与板上同一器件。**模型的 `typA` 必须是平均电流**（如 ESP32 的 Wi-Fi 连接平均
+  0.1 A），`peakA` 是突发峰值（TX 0.5 A）。
+- **板外负载不算板上热**：`load` 模型绑在连接器位号（J/P/CN/CON/X/USB/TB…）上时，表示产品输出端子后面的
+  外部负载（如反激 12 V/2 A 输出端子），`parts[].offBoard:true`、`thermalW:0`——电流仍按它算（端子、走线、
+  过孔载流不变）。负载真在板上时在模型写 `"offBoard": false`。
+  E2E 根因（2026-09-28 HV 反激）：J2 输出端子的 24 W 外部负载被当成 J2 焊盘上的热源，板温 8374 °C。
 - `ripple`：buck 的开关网与电感给 `iPeakA/iRmsA/iAvgA/deltaIA/duty`；输入电容给
   `Iout·√(D(1−D))`，输出网上每个电容给 `ΔI/(2√3)`（整值记给每颗，偏保守）。
 - 顶层 `models[]` 列出每个位号绑定的模型、匹配依据和 `confidence`。

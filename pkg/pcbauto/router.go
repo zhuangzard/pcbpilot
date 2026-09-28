@@ -833,7 +833,13 @@ func (r *router) nodeCong(l, x, y int, rad float64) (occ float64, hist float64) 
 		return
 	}
 	for _, o := range d {
-		j := gr.idx(l, x+o[0], y+o[1])
+		// The claim disk (ceil rounding) can reach one cell past the ring
+		// nodeOK checked (inner rounding): cells off the grid carry no use.
+		xx, yy := x+o[0], y+o[1]
+		if xx < 0 || yy < 0 || xx >= gr.W || yy >= gr.H {
+			continue
+		}
+		j := gr.idx(l, xx, yy)
 		if u := gr.use[j]; u > 0 {
 			occ += float64(u)
 		}

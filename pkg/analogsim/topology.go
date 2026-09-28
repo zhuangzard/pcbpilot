@@ -21,19 +21,22 @@ type edge struct {
 
 // circuit is the analysable view of a design.
 type circuit struct {
-	d       *powersim.Design
-	lib     *Library
-	parts   map[string]*powersim.Part
-	passive map[string]*passive // two-pin R/C/L by ref
-	netPins map[string][]pinRef
-	edges   map[string][]edge // net → passives touching it
-	ground  map[string]bool
-	railV   map[string]float64 // DC rails (incl. ground = 0)
-	railSrc map[string]string
-	sim     *powersim.Output
-	simV    map[string]float64 // typical-scenario net voltages
-	pmodels map[string]*powersim.Model
-	assump  []string
+	// loopFindings: shunt regulators used as loop error amplifiers
+	// (findReferences), reported instead of simulated.
+	loopFindings []Finding
+	d            *powersim.Design
+	lib          *Library
+	parts        map[string]*powersim.Part
+	passive      map[string]*passive // two-pin R/C/L by ref
+	netPins      map[string][]pinRef
+	edges        map[string][]edge // net → passives touching it
+	ground       map[string]bool
+	railV        map[string]float64 // DC rails (incl. ground = 0)
+	railSrc      map[string]string
+	sim          *powersim.Output
+	simV         map[string]float64 // typical-scenario net voltages
+	pmodels      map[string]*powersim.Model
+	assump       []string
 }
 
 type passive struct {

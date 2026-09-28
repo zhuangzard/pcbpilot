@@ -293,15 +293,24 @@ func applyMech(b *Board, m *MechSpec, inPlace bool) (*Mechanics, error) {
 // partPose is a part's measured pose, pad copper included (restoring through
 // MoveTo would re-derive the pads and add float noise).
 type partPose struct {
-	pos  Point
-	rot  float64
-	pads []OrientedBox
+	pos   Point
+	rot   float64
+	pads  []OrientedBox
+	holes []holePose // the part's own holes (USB-C locating pegs …)
+}
+
+type holePose struct {
+	c    Point
+	poly []Point
 }
 
 func savePose(p *Part) partPose {
 	ps := partPose{pos: p.Pos, rot: p.Rotation}
 	for _, pd := range p.Pads {
 		ps.pads = append(ps.pads, pd.Box)
+	}
+	for _, h := range p.holes {
+		ps.holes = append(ps.holes, holePose{c: h.C, poly: append([]Point(nil), h.Poly...)})
 	}
 	return ps
 }
@@ -315,6 +324,14 @@ func (ps partPose) restore(p *Part) []string {
 	p.Pos, p.Rotation = ps.pos, ps.rot
 	for i, pd := range p.Pads {
 		pd.Box = ps.pads[i]
+	}
+	// Owned holes move with the part (MoveTo): put them back too, or the
+	// route-only DRC checks a locating hole where the spec would have put it.
+	for i, h := range p.holes {
+		if i < len(ps.holes) {
+			h.C = ps.holes[i].c
+			copy(h.Poly, ps.holes[i].poly)
+		}
 	}
 	return notes
 }
@@ -537,4 +554,42 @@ func SameOutline(a, b []Point, tol float64) bool {
 		}
 	}
 	return true
+}
+
+// MechHolesOnPads checks the mech holes added from index `from` on against
+// the pads of parts at their measured poses. In a route-only run nothing
+// moves out of a hole's way, so a hole (drill + screw-head keep) over a pad
+// would be written into the playbook on top of a part: e.g. autoSize
+// cornerHoles on a board dump without an outline are placed at the corners
+// of the part envelope, straight onto the corner parts. It returns an error
+// naming every collision.
+func MechHolesOnPads(b *Board, from int) error {
+	var hits []string
+	for _, h := range b.Holes[min(from, len(b.Holes)):] {
+		if len(h.Poly) > 0 {
+			continue
+		}
+		r := h.Dia/2 + h.Keep
+		for _, p := range b.Parts {
+			for _, pd := range p.Pads {
+				if d := pd.Box.Dist(h.C); d < r {
+					hits = append(hits, fmt.Sprintf("%s at (%.0f, %.0f) r %.0f mil covers %s.%s (%.0f mil from the centre)", firstNonEmptyStr(h.Name, "hole"), h.C.X, h.C.Y, r, p.Ref, pd.Number, d))
+					break
+				}
+			}
+		}
+	}
+	if len(hits) == 0 {
+		return nil
+	}
+	return fmt.Errorf("route-only: %d mech hole(s) land on parts kept at their measured poses — %s; give the board outline (mech board.width/height or outline, or a dump with the outline) or run with --place", len(hits), strings.Join(hits, "; "))
+}
+
+func firstNonEmptyStr(s ...string) string {
+	for _, x := range s {
+		if x != "" {
+			return x
+		}
+	}
+	return ""
 }

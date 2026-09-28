@@ -554,3 +554,39 @@ func TestNgspiceESP32(t *testing.T) {
 		t.Errorf("Q2 overdrive %.3g", ov)
 	}
 }
+
+// A TL431 whose REF sits on a divider (the opto feedback of an isolated
+// flyback) is a loop error amplifier, not a biased reference: it must not be
+// simulated as one (the cathode was left unbiased and a 0 A Ik failed the
+// HV stress E2E), but its Ik,min is still flagged for the loop to verify.
+// A REF-to-cathode TL431 stays a reference block.
+func TestShuntRegulatorInLoopNotAReference(t *testing.T) {
+	tl := func(ref, refNet, k string) *powersim.Part {
+		return part(ref, "TL431AIDBZR", "TL431", "", pn{"1", "REF", refNet}, pn{"2", "K", k}, pn{"3", "A", "GND"})
+	}
+	loop := design(tl("U3", "TL_REF", "OPTO_K"), res("R8", "1k", "+12V", "OPTO_A"),
+		part("U2", "PC817C", "PC817C", "", pn{"1", "A", "OPTO_A"}, pn{"2", "K", "OPTO_K"}, pn{"3", "E", "PGND"}, pn{"4", "C", "COMP"}),
+		res("R9", "38.3k", "+12V", "TL_REF"), res("R10", "10k", "TL_REF", "GND"))
+	out := runNoSpice(t, loop, nil)
+	for _, b := range out.Blocks {
+		if b.Class == ClassReference {
+			t.Fatalf("loop TL431 simulated as a reference: %+v", b)
+		}
+	}
+	var warn bool
+	for _, f := range out.Findings {
+		if f.Kind == "shunt-regulator-loop" && f.Severity == "warn" && strings.Contains(f.Message, "U3") {
+			warn = true
+		}
+		if f.Severity == "error" {
+			t.Fatalf("error finding %+v", f)
+		}
+	}
+	if !warn {
+		t.Fatalf("no shunt-regulator-loop warning: %+v", out.Findings)
+	}
+	ref := design(tl("U1", "VREF", "VREF"), res("R1", "1k", "+5V", "VREF"))
+	if b := blockOf(t, runNoSpice(t, ref, nil), ClassReference); b.Core != "U1" {
+		t.Fatalf("reference block %+v", b)
+	}
+}

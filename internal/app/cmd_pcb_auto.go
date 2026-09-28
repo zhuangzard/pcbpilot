@@ -310,6 +310,11 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 					if mc, err = apply(b, mech); err != nil {
 						return err
 					}
+					if !place {
+						if err := pcbauto.MechHolesOnPads(b, holesBefore); err != nil {
+							return err
+						}
+					}
 				}
 				newHoles, newKeeps := b.Holes[holesBefore:], b.Keepouts[keepBefore:]
 				outlineChanged := mech != nil

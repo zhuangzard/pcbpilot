@@ -229,12 +229,25 @@ func EdgeFromIntent(in *Intent, b *Board) *EdgePolicy {
 				p.netDomain[n] = d.ID
 			}
 		}
+		// The per-net domain is authoritative (as for isolation, intent.go):
+		// a net listed under two domains takes its own, and a net whose own
+		// domain has no edge band (SELV) drops a band inherited from a
+		// neighbour's list.
+		known := map[string]bool{}
+		for _, d := range in.Domains {
+			known[d.ID] = true
+		}
 		for n, np := range in.Nets {
-			if np != nil && p.ByDomain[np.Domain] != nil {
+			if np == nil || !known[np.Domain] {
+				continue
+			}
+			if p.ByDomain[np.Domain] != nil {
 				if p.netDomain == nil {
 					p.netDomain = map[string]string{}
 				}
 				p.netDomain[n] = np.Domain
+			} else {
+				delete(p.netDomain, n)
 			}
 		}
 	}

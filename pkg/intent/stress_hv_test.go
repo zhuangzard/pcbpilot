@@ -91,6 +91,24 @@ func TestStressFlybackIntent(t *testing.T) {
 		t.Fatalf("DRAIN %s / %s (a flyback drain is a switch node, not 'analog')", c, it.Nets["DRAIN"].Role)
 	}
 	near(t, "VOUT current (voltage-only rail)", it.Nets["VOUT"].CurrentA, 2.0, 0.01)
+	// Each net is listed under exactly its own domain: the Y capacitor C8
+	// (PGND–GND_S) must not pull the secondary ground into the mains list
+	// (the board-edge band read the lists and gave GND_S 260 mil).
+	seen := map[string]string{}
+	for _, d := range it.Domains {
+		for _, n := range d.Nets {
+			if o, dup := seen[n]; dup {
+				t.Fatalf("%s listed under %s and %s", n, o, d.ID)
+			}
+			seen[n] = d.ID
+			if nd := it.Nets[n]; nd != nil && nd.Domain != "" && nd.Domain != d.ID {
+				t.Fatalf("%s listed under %s but its domain is %s", n, d.ID, nd.Domain)
+			}
+		}
+	}
+	if d := it.Nets["GND_S"].Domain; strings.HasPrefix(d, "MAINS") || seen["GND_S"] != d {
+		t.Fatalf("GND_S domain %s, listed under %s", d, seen["GND_S"])
+	}
 	for _, f := range it.Findings {
 		if f.Severity == "error" || f.Kind == "declared-below-sim" {
 			t.Fatalf("finding %+v", f)

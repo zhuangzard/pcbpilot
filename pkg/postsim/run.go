@@ -206,6 +206,16 @@ func Run(boardRaw, simRaw []byte, o Options) (*Result, error) {
 	for _, r := range scen {
 		res.Scenarios = append(res.Scenarios, r.Scenario)
 	}
+	thermalBasis := true
+	for _, r := range scen {
+		thermalBasis = thermalBasis && r.ThermalBasis != ""
+	}
+	if thermalBasis {
+		res.Assumptions = append(res.Assumptions, "thermal: time-averaged heat — parts at the sim file's thermalW (loads at their average current; I²R parts √(P_avg·P_peak)), copper Joule heat scaled to the RMS bound √(I_avg·I_peak); IR drop, via current and copper self-heating stay at the operating-point (peak) currents")
+	} else {
+		res.Assumptions = append(res.Assumptions, "thermal: the sim file carries no time-averaged thermal power (written before v0.6.1) — every scenario's operating-point power is treated as continuous (peak bursts overstate the temperature); re-run pcbpilot sim power")
+	}
+	res.Findings = append(res.Findings, crossCheck(b, scen)...)
 
 	// Roles and ground nets.
 	role := map[string]string{}
@@ -287,9 +297,11 @@ func Run(boardRaw, simRaw []byte, o Options) (*Result, error) {
 	for k := range res.JMap {
 		res.JMap[k] = make([]float64, nc)
 	}
-	heat := map[string][]float64{} // scenario → per k*nc+c Joule heat (W)
+	heat := map[string][]float64{}   // scenario → per k*nc+c Joule heat (W) at the operating point (copper self-heating / sizing)
+	heatTh := map[string][]float64{} // scenario → time-averaged Joule heat (W) for the board thermal solve
 	for _, r := range scen {
 		heat[r.Scenario] = make([]float64, nl*nc)
+		heatTh[r.Scenario] = make([]float64, nl*nc)
 	}
 	platingMm := o.PlatingMil * MilMm
 	viaWorst := map[*Via]*ViaResult{}
@@ -432,8 +444,11 @@ func Run(boardRaw, simRaw []byte, o Options) (*Result, error) {
 					WorstMV: round(co.worst*1000, 3), WorstPad: co.wpad, LossMW: round(co.loss*1000, 4), Iter: sol.iter})
 			}
 			if scenBest != nil {
-				// Joule heat of this scenario (the case with the largest drop).
-				en.deposit(scenBest.sol, g, heat[r.Scenario])
+				// Joule heat of this scenario (the case with the largest drop):
+				// at the operating point for copper self-heating, scaled to the
+				// RMS bound (I_th/I)² for the time-averaged board thermal.
+				en.deposit(scenBest.sol, g, heat[r.Scenario], 1)
+				en.deposit(scenBest.sol, g, heatTh[r.Scenario], thermalScale(r, nr))
 				if best == nil || scenBest.worst > best.worst {
 					best = scenBest
 				}
@@ -497,7 +512,7 @@ func Run(boardRaw, simRaw []byte, o Options) (*Result, error) {
 	to := ThermalOptions{AmbientC: o.AmbientC, HTop: hTop, HBottom: hBot, Emissivity: o.Emissivity,
 		KFR4XY: o.KFR4XY, KFR4Z: o.KFR4Z, PlatingMm: platingMm}
 	tm := buildThermal(b, g, st, to)
-	res.Thermal = runThermal(tm, b, g, st, scen, heat, to, o, res)
+	res.Thermal = runThermal(tm, b, g, st, scen, heatTh, to, o, res)
 	// Copper self-heating: the Joule heat of the scenario with the largest
 	// copper loss, alone, on the same board.
 	var rise []float64
@@ -540,6 +555,169 @@ func Run(boardRaw, simRaw []byte, o Options) (*Result, error) {
 	res.Model = modelNotes(o, st)
 	res.findings(o)
 	return res, nil
+}
+
+// crossCheck verifies that the sim file and the board are the same design
+// revision. A current-carrying sim pin with no pad (or a pad on another net)
+// would silently drop its current from the IR-drop / via / Joule solve, and
+// a designator that names a different device on the board would put one
+// part's heat under another's footprint — so every such disagreement fails
+// the run instead of producing optimistic (or absurd) numbers.
+func crossCheck(b *Board, scen []*powersim.Result) []Finding {
+	type miss struct {
+		why string
+		i   float64
+		net string
+	}
+	pins := map[string]*miss{}
+	onBoard := map[string]*Part{}
+	for _, p := range b.Parts {
+		onBoard[p.Ref] = p
+	}
+	absent := map[string]float64{}
+	ident := map[string]string{}  // different device, pins do not fit the footprint: another part
+	unsync := map[string]string{} // different MPN on a pin-compatible footprint: a value change not on the board yet
+	simPins := map[string]map[string]bool{}
+	for _, r := range scen {
+		for _, nr := range r.Nets {
+			for _, p := range nr.Pins {
+				if simPins[p.Ref] == nil {
+					simPins[p.Ref] = map[string]bool{}
+				}
+				simPins[p.Ref][p.Pin] = true
+			}
+		}
+	}
+	fits := func(ref string) bool {
+		for pin := range simPins[ref] {
+			if b.PadByPin(ref, pin) == nil {
+				return false
+			}
+		}
+		return true
+	}
+	for _, r := range scen {
+		for net, nr := range r.Nets {
+			if nr.Role != "power" && nr.Role != "ground" && nr.Role != "switch" {
+				continue
+			}
+			for _, p := range nr.Pins {
+				if p.Dir != "sink" && p.Dir != "source" || p.CurrentA < 1e-6 {
+					continue
+				}
+				why := ""
+				pd := b.PadByPin(p.Ref, p.Pin)
+				switch {
+				case onBoard[p.Ref] == nil:
+					why = "part not on the board"
+				case pd == nil:
+					why = "no such pad"
+				case pd.Net != "" && pd.Net != net:
+					why = "pad is on " + pd.Net
+				default:
+					continue
+				}
+				k := p.Ref + "." + p.Pin
+				if m := pins[k]; m == nil || p.CurrentA > m.i {
+					pins[k] = &miss{why: why, i: p.CurrentA, net: net}
+				}
+			}
+		}
+		for ref, pr := range r.Parts {
+			bp := onBoard[ref]
+			if bp == nil {
+				if w := math.Max(thermalPower(r, pr), 0); w >= 0.01 {
+					absent[ref] = math.Max(absent[ref], w)
+				}
+				continue
+			}
+			if pr.MPN != "" && bp.Device != "" && !sameDevice(pr.MPN, bp.Device) {
+				msg := fmt.Sprintf("%s: sim %s, board %s", ref, pr.MPN, bp.Device)
+				if fits(ref) {
+					unsync[ref] = msg
+				} else {
+					ident[ref] = msg
+				}
+			}
+		}
+	}
+	var out []Finding
+	if len(ident) > 0 {
+		var refs, msgs []string
+		for _, k := range sortedStrings(ident) {
+			refs, msgs = append(refs, k), append(msgs, ident[k])
+		}
+		out = append(out, Finding{Severity: "fail", Kind: "sim-board-mismatch", Refs: refs,
+			Message: fmt.Sprintf("sim and board disagree on %d designator(s) — not the same design revision (%s); re-run sim power on this board's schematic", len(refs), strings.Join(msgs, "; "))})
+	}
+	if len(unsync) > 0 {
+		var refs, msgs []string
+		for _, k := range sortedStrings(unsync) {
+			refs, msgs = append(refs, k), append(msgs, unsync[k])
+		}
+		out = append(out, Finding{Severity: "warn", Kind: "sim-board-bom", Refs: refs,
+			Message: fmt.Sprintf("%d part(s) differ between the sim and the board on the same footprint (%s) — a value change not yet on the board: sync the schematic to the PCB and re-dump before sign-off", len(refs), strings.Join(msgs, "; "))})
+	}
+	if len(pins) > 0 {
+		var keys []string
+		nets := map[string]bool{}
+		for k, m := range pins {
+			keys = append(keys, k)
+			nets[m.net] = true
+		}
+		sort.Slice(keys, func(i, j int) bool {
+			if pins[keys[i]].i != pins[keys[j]].i {
+				return pins[keys[i]].i > pins[keys[j]].i
+			}
+			return keys[i] < keys[j]
+		})
+		var msgs []string
+		for i, k := range keys {
+			if i == 6 {
+				msgs = append(msgs, fmt.Sprintf("… %d more", len(keys)-6))
+				break
+			}
+			m := pins[k]
+			msgs = append(msgs, fmt.Sprintf("%s (%s, %.3g A): %s", k, m.net, m.i, m.why))
+		}
+		var nl []string
+		for n := range nets {
+			nl = append(nl, n)
+		}
+		sort.Strings(nl)
+		out = append(out, Finding{Severity: "fail", Kind: "sim-board-mismatch", Nets: nl,
+			Message: fmt.Sprintf("%d current-carrying sim pin(s) have no matching pad on the board — their current would be dropped from the IR/via/thermal solve: %s", len(keys), strings.Join(msgs, "; "))})
+	}
+	if len(absent) > 0 {
+		var refs, msgs []string
+		for _, k := range sortedStrings(absent) {
+			refs, msgs = append(refs, k), append(msgs, fmt.Sprintf("%s %.3g W", k, absent[k]))
+		}
+		out = append(out, Finding{Severity: "fail", Kind: "sim-board-mismatch", Refs: refs,
+			Message: "dissipating sim part(s) missing from the board — their heat would be left out of the thermal solve: " + strings.Join(msgs, ", ")})
+	}
+	return out
+}
+
+// sameDevice compares a sim MPN with a board device name, ignoring case,
+// spaces and an ordering-code suffix on either side (ESP32-S3-WROOM-1 vs
+// ESP32-S3-WROOM-1-N8).
+func sameDevice(a, b string) bool {
+	norm := func(s string) string { return strings.ToUpper(strings.Join(strings.Fields(s), "")) }
+	a, b = norm(a), norm(b)
+	if strings.HasPrefix(b, "={") || strings.HasPrefix(a, "={") {
+		return true // unresolved EasyEDA attribute template: nothing to compare
+	}
+	return a == b || strings.HasPrefix(a, b) || strings.HasPrefix(b, a)
+}
+
+func sortedStrings[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func roleRank(r string) int {
@@ -653,14 +831,41 @@ func trackAmpacity(wMil, tMil, dT float64) float64 {
 	return 0.048 * math.Pow(dT, 0.44) * math.Pow(wMil*tMil, 0.725)
 }
 
-// deposit adds the solution's Joule heat to q (k*nc+c, W).
-func (n *eNet) deposit(sol *eSolution, g *Grid, q []float64) {
+// thermalScale is the factor from the operating-point Joule heat of a net
+// to its time-averaged heat: (thermalCurrentA/currentA)² when the sim file
+// carries the thermal basis (powersim.attachThermal), 1 otherwise.
+func thermalScale(r *powersim.Result, nr *powersim.NetResult) float64 {
+	if r.ThermalBasis == "" || nr.CurrentA <= 0 {
+		return 1
+	}
+	k := math.Min(nr.ThermalCurrentA/nr.CurrentA, 1)
+	return k * k
+}
+
+// thermalPower is a part's dissipation for the steady-state thermal solve:
+// the time-averaged thermalW when the sim file has a thermal basis, else the
+// operating-point power (older files: peak treated as continuous).
+func thermalPower(r *powersim.Result, pr *powersim.PartResult) float64 {
+	if pr == nil {
+		return 0
+	}
+	if r.ThermalBasis != "" {
+		return pr.ThermalW
+	}
+	return pr.PowerW
+}
+
+// deposit adds the solution's Joule heat × scale to q (k*nc+c, W).
+func (n *eNet) deposit(sol *eSolution, g *Grid, q []float64, scale float64) {
+	if scale <= 0 {
+		return
+	}
 	for _, e := range n.edges {
 		i := sol.current(e)
 		if i == 0 {
 			continue
 		}
-		p := i * i / e.g
+		p := scale * i * i / e.g
 		switch e.kind {
 		case kindSheet:
 			q[e.k*n.nc+e.cellA] += p / 2
@@ -849,12 +1054,13 @@ func runThermal(tm *thermalModel, b *Board, g *Grid, st *Stackup, scen []*powers
 		q := make([]float64, len(tm.cells))
 		partsW, jouleW := 0.0, 0.0
 		for ref, pr := range r.Parts {
-			if pr == nil || pr.PowerW <= 0 {
+			pw := thermalPower(r, pr)
+			if pw <= 0 {
 				continue
 			}
 			pc := pcs[ref]
 			if pc == nil || pc.total == 0 {
-				msg := fmt.Sprintf("%s dissipates %.3g W but has no footprint on the board: left out of the thermal solve", ref, pr.PowerW)
+				msg := fmt.Sprintf("%s dissipates %.3g W but has no footprint on the board: left out of the thermal solve", ref, pw)
 				if !contains(res.Assumptions, msg) {
 					res.Assumptions = append(res.Assumptions, msg)
 				}
@@ -862,10 +1068,10 @@ func runThermal(tm *thermalModel, b *Board, g *Grid, st *Stackup, scen []*powers
 			}
 			for kc, n := range pc.subs {
 				if i := tm.idx[kc]; i >= 0 {
-					q[i] += pr.PowerW * float64(n) / float64(pc.total)
+					q[i] += pw * float64(n) / float64(pc.total)
 				}
 			}
-			partsW += pr.PowerW
+			partsW += pw
 		}
 		for kc, w := range joule[r.Scenario] {
 			if w == 0 {
@@ -917,10 +1123,7 @@ func runThermal(tm *thermalModel, b *Board, g *Grid, st *Stackup, scen []*powers
 			if pc == nil || pc.total == 0 {
 				continue
 			}
-			pw := 0.0
-			if pr := r.Parts[p.Ref]; pr != nil && pr.PowerW > 0 {
-				pw = pr.PowerW
-			}
+			pw := math.Max(thermalPower(r, r.Parts[p.Ref]), 0)
 			tmax, tsum, n := math.Inf(-1), 0.0, 0
 			for kc := range pc.subs {
 				if i := tm.idx[kc]; i >= 0 {

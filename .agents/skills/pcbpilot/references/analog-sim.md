@@ -35,6 +35,7 @@ pcbpilot --project <工程> sim analog --pages P1,P2 --out analog.json --report 
 | `comparator` | 无负反馈；out→+in 电阻为回差；开漏比较器（LM393…）带上拉 | 上升/下降阈值与回差（三角波 tran），解析节点方程对照 |
 | `current-sense` / `instrumentation-amp` | INA180/INA240 固定增益；INA128/AD620/INA333 由 RG 求增益 | 增益、带宽、满量程输出（分流器电流取自 sim power） |
 | `voltage-reference` | LM4040/TL431 分流基准 + 偏置电阻 | 阴极电流 Ik（op）vs 数据手册窗口、功耗 |
+| （不建块）`shunt-regulator-loop` warn | TL431 的 REF 接分压而不是阴极（隔离反激光耦反馈的误差放大器） | 不按基准仿真（v0.6.1 之前阴极无偏置、Ik=0 A 判 error）；提示在环路最小驱动下核对 Ik ≥ Ik,min，光耦 LED 并泄放电阻（≈1 kΩ）可保证 |
 | `adc-input` | ADC 引脚（MCP3201/MCP3008、STM32F1、ESP32-S3 模拟网）的源网络 | 采样保持建立误差（LSB，SAR 开关 + Csh 预放电到 0 V 的 tran）、源阻抗、允许最大源阻抗 |
 | `regulator-feedback` | power-models.json 中有 `vref` 的 buck/LDO 的 FB 分压 | Vout = Vref·(1+Rtop/Rbot)（op，误差放大器强制 FB = Vref），容差分布 |
 | `crystal-load` | Y/X 位号或描述含晶振，两脚各一只对地电容 | CL = C1C2/(C1+C2)+Cstray vs 规格 CL；BVD 模型串联谐振的频偏 ppm |

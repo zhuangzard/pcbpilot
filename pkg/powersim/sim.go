@@ -858,6 +858,16 @@ func (e *Engine) Run() (*Output, error) {
 		rr := e.solve(sc)
 		e.runs[sc.name] = rr
 		res := e.result(rr)
+		// Steady-state heat needs the time-averaged operating point: a peak
+		// scenario gets a twin solve with the same sources and switches but
+		// every load at its average current (attachThermal).
+		var avg *Result
+		if sc.peak {
+			twin := sc
+			twin.peak = false
+			avg = e.result(e.solve(twin))
+		}
+		attachThermal(res, avg)
 		if len(want) == 0 || want[sc.name] {
 			out.Scenarios = append(out.Scenarios, sc.name)
 			out.Results = append(out.Results, *res)

@@ -254,14 +254,23 @@ func (c *circuit) values(refs []string) map[string]float64 {
 
 // referenceBlocks: shunt references biased from a rail (and marks their
 // cathode net as a reference rail for the op-amp detection).
-func (c *circuit) findReferences() []*refInst {
+//
+// An adjustable shunt (TL431) whose REF pin is NOT tied to its cathode is a
+// shunt regulator / error amplifier (the REF divider of an opto-coupled
+// flyback feedback): its cathode current is set by the loop, not by a bias
+// resistor from a rail. It is not a reference block — simulating it as one
+// left the cathode unbiased (0 A) and failed a fabricated Ik — so it is
+// reported as a warning that asks for the loop's Ik,min check instead.
+func (c *circuit) findReferences() ([]*refInst, []string) {
 	var out []*refInst
+	var notes []string
 	for _, p := range c.d.Parts {
 		m := c.lib.reference(p)
 		if m == nil || m.Kind != "shunt" {
 			continue
 		}
 		ri := &refInst{Ref: p.Ref, Model: *m}
+		refNet := ""
 		for _, pin := range p.Pins {
 			s := normPin(pin.Name)
 			switch {
@@ -269,7 +278,21 @@ func (c *circuit) findReferences() []*refInst {
 				ri.K = pin.Net
 			case s == "A" || s == "ANODE" || s == "-":
 				ri.A = pin.Net
+			case s == "REF" || s == "R" || s == "VREF" || s == "ADJ" || s == "FB":
+				refNet = pin.Net
 			}
+		}
+		if refNet != "" && ri.K != "" && refNet != ri.K {
+			ik := ""
+			if m.IkMinA > 0 {
+				ik = fmt.Sprintf(" ≥ %s A", FormatSI(m.IkMinA))
+			}
+			msg := fmt.Sprintf("%s (%s): REF on %s, cathode on %s — a shunt regulator / error amplifier in a feedback loop, not a biased reference; not simulated", p.Ref, m.ID, refNet, ri.K)
+			notes = append(notes, msg)
+			c.loopFindings = append(c.loopFindings, Finding{Severity: "warn", Kind: "shunt-regulator-loop", Refs: []string{p.Ref}, Nets: []string{refNet, ri.K},
+				Message:    msg + fmt.Sprintf("; its cathode current comes through the loop (opto LED / pull-up), so Ik%s is not verified", ik),
+				Suggestion: fmt.Sprintf("check Ik%s at the loop's minimum drive (minimum COMP source current ÷ opto CTR); a bleeder resistor across the opto LED (≈ 1 kΩ for a 1 V LED drop) guarantees it", ik)})
+			continue
 		}
 		if ri.K == "" || ri.A == "" {
 			// 2-pin symbol with numeric pins: pin 1 = cathode (LM4040 SOT-23: 1 +, 2 −).
@@ -286,7 +309,7 @@ func (c *circuit) findReferences() []*refInst {
 		}
 		out = append(out, ri)
 	}
-	return out
+	return out, notes
 }
 
 func (c *circuit) referenceBlock(ri *refInst) *Block {
@@ -1019,7 +1042,8 @@ func (c *circuit) detect() ([]*Block, []string) {
 	var blocks []*Block
 	var notes []string
 	// References first: their cathode nets act as rails for bias networks.
-	refs := c.findReferences()
+	refs, refNotes := c.findReferences()
+	notes = append(notes, refNotes...)
 	for _, ri := range refs {
 		if c.railSrc[ri.K] != "spec" {
 			c.railV[ri.K], c.railSrc[ri.K] = ri.Model.VzV, "reference"

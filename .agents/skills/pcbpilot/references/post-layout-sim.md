@@ -51,7 +51,16 @@ intent `copper.tempRiseC`）；`--margin 1.2`；`--j-max`（A/mm²，默认按 I
   其余焊盘按仿真电流取/注。IC(0) 预条件 CG。ρ 取 20 °C 值，不随温度修正。
 - **热**：2.5-D 有限体积，每层每单元一个温度：面内 k_Cu·t·覆盖率 + FR-4（相邻介质各一半），
   层间 FR-4 厚度方向 + 过孔孔壁铜，上下表面对流（+ 可选辐射），板边绝热。热源 = `sim.json`
-  各场景 `parts[].powerW` 按焊盘面积分到器件所在面 + 直流解的焦耳热。每个场景都解，热图取最热场景。
+  各场景的**时间平均**功耗 `parts[].thermalW`（peak 场景：负载取平均电流的孪生工作点，I²R 类取
+  √(P_avg·P_peak)，见 [power-sim.md](power-sim.md)）按焊盘面积分到器件所在面 + 焦耳热按
+  (thermalCurrentA/currentA)² 缩放到 RMS 上界。每个场景都解，热图取最热场景。IR 压降、过孔电流、
+  铜自热（线宽反馈）仍用峰值工作点电流。v0.6.1 之前的 sim.json 没有 `thermalBasis`：退回把各场景
+  `powerW` 当持续功耗（峰值突发会把板温高估数倍），assumptions 写明，应重跑 `sim power`。
+- **sim ↔ 板一致性（fail）**：带电流的 sim 焊盘在板上找不到（器件不在、无此焊盘、焊盘在别的网）、
+  同一位号 sim 的 MPN 与板上器件不同、或 ≥10 mW 的发热件不在板上，都判
+  `sim-board-mismatch` 失败——否则该电流会被静默丢出 IR/过孔/热求解，发热会落到别的封装下。
+  MPN 不同但 sim 引脚都在板上该封装里（同封装改值，如 LED 限流电阻 1 k→330 Ω 的 what-if 还没同步到 PCB）
+  只报 `sim-board-bom` warn：同步原理图到 PCB、重新 dump 后再签核。
 - **结温**：Tj = 器件下板温最大值 + P·θJB（只有 θJC 时用 θJC）；θ 取 `power-models.json` 的
   `ratings.thetaJbCW / thetaJcCW / tjMaxC`（须带数据手册出处）。没有额定只报板温并标“需数据手册”，不猜。
 - **过孔载流**：IPC-2221 外层曲线作用于孔壁截面 π(d+t)t（IPC-2152：内层≈外层），ΔT = `--via-dt`。
@@ -65,7 +74,7 @@ intent `copper.tempRiseC`）；`--margin 1.2`；`--j-max`（A/mm²，默认按 I
 `compare[]`（`--plan` 时与 pcb auto 布线期 IR 估算对比）、`elmer`、`maps[]`、`assumptions[]`、`model[]`、
 `findings[]`、`verdict`。
 
-结论：**fail** = 电源网超 IR 预算、负载开路、过孔超载流量、Tj 超 Tj,max、板温 > 130 °C；
+结论：**fail** = sim 与板不是同一设计版本（`sim-board-mismatch`）、电源网超 IR 预算、负载开路、过孔超载流量、Tj 超 Tj,max、板温 > 130 °C；
 **warn** = 压降 > 80 % 预算、过孔 > 80 %、Tj > 80 % Tj,max、板温 > 105 °C（FR-4 Tg 余量）、Elmer 不一致。
 报告第 6A 章与“验证状态”一行都由它生成，进入封面总体结论。
 
@@ -115,8 +124,23 @@ SaveScalars 在探针点——板最高点、每个发热器件下最热单元�
 输出与热图：仓库 `docs/examples/esp32-mini-post-layout/`（`post.json`、`post.md`、`heatmaps/*.svg`、`elmer/`）。
 要点：IN1 没有铜对象 → 按 GND 负片平面建模（假设已记录）；各电源网均在预算内，最坏 USB_VBUS 17.07 mV
 （J2→D2.2 的 10 mil 长走线，含 5 mil 颈部 96.7 A/mm²，长度 21 mil，铜自热 < 0.5 °C）；
-最大过孔电流 0.50 A（+3V3，34 % 载流量）；peak/单源场景板最高 86.3 °C 在 ESP32 模组下（1.66 W 峰值功耗
-按**持续**计算，属保守上限；加辐射 `--emissivity 0.9` 后明显降低）；U3/U1/D1/D2 无 θJB 额定 → 只报板温。
+最大过孔电流 0.50 A（+3V3，34 % 载流量）；U3/U1/D1/D2 无 θJB 额定 → 只报板温。
+板温：用该板同版本原理图的新 sim（`internal/app/testdata/esp32-v05/` 的 connectivity + values）按时间平均
+功耗解，最热场景 terminal-only 约 **39 °C**（0.49 W：ESP32 3.3 V × 0.1 A 平均 0.33 W、D1 OR 二极管
+0.06 W、SY8089 buck 损耗 0.04 W…；本板是 buck 而非 LDO，若换 AMS1117 则 (5−0.35−3.3)×I_avg≈0.14 W
+会成为第二热源）。量级核对：板内 8218 个 0.5 mm 单元 ≈ 20.5 cm²，平均温升 ΔT ≈ P/(2·h·A) = 0.49/(2·10·0.00205) ≈ 12 °C → 约 37 °C 平均、热点 39 °C。测试
+`TestESP32MiniThermalAverage`。旧 sim.json（无 thermalBasis）仍给 86.3 °C（1.66 W TX 峰值按持续计，已废弃口径，
+`TestESP32MiniPostLayout` 保留作兼容回归）。
+
+### E2E FAIL 根因（2026-09-28 离线全链 E2E：ESP32 板温 192 °C）
+
+1. **输入不是同一设计版本**：E2E 用 `pkg/powersim/testdata/esp32mini`（2026-09-25 早期原理图，ESP32=U1、
+   buck=U4、网名 +5V/VBUS/5V_TERM）的 sim 配 `internal/app/testdata/esp32-v05` 的板（buck=U1、ESP32=U3、
+   网名 VSYS_5V/USB_VBUS/+5V_TERM）。1.66 W 的 ESP32 功耗被按位号放到 SOT-23-5 的 buck 焊盘下 → 192 °C；
+   17 个带电流焊盘对不上被静默丢出 IR 求解（+5V 等网“无铜”却通过）。修法：同版本 fixture
+   （`esp32-v05/sch-*.json` + `values.json`），并新增 `sim-board-mismatch` fail（`TestSimBoardMismatch`）。
+2. **峰值当持续**：peak/单源场景把 ESP32 TX 0.5 A 突发当持续热源（即使输入一致，现场 v3 板也报 86 °C）。
+   修法：上面的时间平均热源；载流仍用峰值。
 
 与 pcb auto 布线期 IR 估算的差异（设计后都更小）：焊盘/过孔环内走线被短接（pcb auto 从焊盘中心量）；
 真实灌铜替代 ≥ 25 mil 粗网格；过孔长度按真实叠层 z；逐场景而非合并包络。

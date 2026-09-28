@@ -73,6 +73,15 @@ func TestHVModels(t *testing.T) {
 	if !strings.Contains(strings.Join(res.Warnings, " "), "T2: transformer") {
 		t.Fatalf("unmodelled transformer not warned: %v", res.Warnings)
 	}
+	// J2 is the product's output terminal: the 12.5 W its "load" model draws
+	// is the external load's, not board heat (the flyback E2E put 24 W on the
+	// terminal's pads: 8374 °C). U2 (a load on the board) keeps its heat.
+	if j2 := res.Parts["J2"]; !j2.OffBoard || j2.PowerW < 10 || j2.ThermalW != 0 {
+		t.Fatalf("J2 %+v: an output terminal's load is off the board", j2)
+	}
+	if u2 := res.Parts["U2"]; u2.OffBoard || u2.ThermalW <= 0 {
+		t.Fatalf("U2 %+v: an on-board load keeps its heat", u2)
+	}
 	// RV1 must draw nothing (it used to be a 50 mA "unknown IC" load).
 	if p := pinCurrent(t, res, "L", "RV1", "1"); p.CurrentA > 1e-9 {
 		t.Fatalf("varistor draws %.3g A", p.CurrentA)

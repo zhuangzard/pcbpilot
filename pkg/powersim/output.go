@@ -3,6 +3,7 @@ package powersim
 import (
 	"fmt"
 	"math"
+	"regexp"
 	"strings"
 
 	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
@@ -58,7 +59,19 @@ type Result struct {
 	Ripple      map[string]*RippleEntry `json:"ripple"`
 	Warnings    []string                `json:"warnings"`
 	Assumptions []string                `json:"assumptions"`
+	// ThermalBasis is set when parts[].thermalW and nets[].thermalCurrentA
+	// are present: ThermalAverage (the scenario's own loads are already the
+	// time-averaged ones) or ThermalAverageBound (a peak scenario: the
+	// thermal values come from a twin solve at average loads — see
+	// attachThermal). Empty in files written before v0.6.1.
+	ThermalBasis string `json:"thermalBasis,omitempty"`
 }
+
+// Thermal bases of Result.ThermalBasis.
+const (
+	ThermalAverage      = "average"
+	ThermalAverageBound = "average-bound"
+)
 
 // NetResult is one net's DC state.
 type NetResult struct {
@@ -71,6 +84,10 @@ type NetResult struct {
 	VoltageMin *float64    `json:"voltageMin,omitempty"`
 	VoltageMax *float64    `json:"voltageMax,omitempty"`
 	Scenario   string      `json:"scenario,omitempty"` // worst: scenario of the max current
+	// ThermalCurrentA is the RMS current bound for steady-state copper
+	// heating (see Result.ThermalBasis): CurrentA in an average scenario,
+	// √(I_avg·I_peak) in a peak scenario.
+	ThermalCurrentA float64 `json:"thermalCurrentA,omitempty"`
 }
 
 // PinResult is the DC current through one pad.
@@ -86,10 +103,18 @@ type PinResult struct {
 
 // PartResult is one part's operating state.
 type PartResult struct {
-	Model      string   `json:"model"`
-	ModelID    string   `json:"modelId,omitempty"`
-	Confidence string   `json:"confidence,omitempty"`
-	PowerW     float64  `json:"powerW"`
+	Model      string `json:"model"`
+	ModelID    string `json:"modelId,omitempty"`
+	Confidence string `json:"confidence,omitempty"`
+	MPN        string `json:"mpn,omitempty"`
+	// OffBoard: the power this part draws is dissipated by an external load
+	// behind it (Model.OffBoard); it is excluded from board heat.
+	OffBoard bool    `json:"offBoard,omitempty"`
+	PowerW   float64 `json:"powerW"`
+	// ThermalW is the time-averaged dissipation for steady-state thermal
+	// (see Result.ThermalBasis); PowerW stays the scenario's operating-point
+	// power used for current capacity and ratings.
+	ThermalW   float64  `json:"thermalW,omitempty"`
 	SuppliedW  float64  `json:"suppliedW,omitempty"`
 	Mode       string   `json:"mode,omitempty"`
 	VinV       float64  `json:"vinV,omitempty"`
@@ -216,7 +241,7 @@ func (e *Engine) result(r *run) *Result {
 		if b.kind == KindIgnore {
 			continue
 		}
-		pr := &PartResult{Model: b.kind, ModelID: b.model.ID, Confidence: b.confidence}
+		pr := &PartResult{Model: b.kind, ModelID: b.model.ID, Confidence: b.confidence, MPN: b.part.MPN, OffBoard: e.offBoard(b)}
 		pw := 0.0
 		for _, pin := range b.part.Pins {
 			v, _ := r.voltage(pin.Net, e)
@@ -488,6 +513,17 @@ func (e *Engine) checks(r *run, res *Result) {
 func worst(results []*Result) *Result {
 	w := &Result{Scenario: "worst", Description: "per-pin maximum over " + scenarioList(results) + " (KCL does not hold across pins of different scenarios)",
 		Converged: true, Nets: map[string]*NetResult{}, Parts: map[string]*PartResult{}, Ripple: map[string]*RippleEntry{}}
+	w.ThermalBasis = ThermalAverage
+	for _, res := range results {
+		switch res.ThermalBasis {
+		case "":
+			w.ThermalBasis = ""
+		case ThermalAverageBound:
+			if w.ThermalBasis != "" {
+				w.ThermalBasis = ThermalAverageBound
+			}
+		}
+	}
 	seenW, seenA := map[string]bool{}, map[string]bool{}
 	for _, res := range results {
 		w.Converged = w.Converged && res.Converged
@@ -523,6 +559,7 @@ func worst(results []*Result) *Result {
 			if nr.CurrentA > wn.CurrentA {
 				wn.CurrentA, wn.Voltage, wn.Scenario = nr.CurrentA, nr.Voltage, res.Scenario
 			}
+			wn.ThermalCurrentA = math.Max(wn.ThermalCurrentA, nr.ThermalCurrentA)
 			if !nr.Floating {
 				if wn.Floating {
 					*wn.VoltageMin, *wn.VoltageMax, wn.Floating = nr.Voltage, nr.Voltage, false
@@ -544,7 +581,12 @@ func worst(results []*Result) *Result {
 			if wp == nil || math.Abs(pr.PowerW) > math.Abs(wp.PowerW) {
 				cp := *pr
 				cp.Scenario = res.Scenario
+				if wp != nil {
+					cp.ThermalW = math.Max(cp.ThermalW, wp.ThermalW)
+				}
 				w.Parts[ref] = &cp
+			} else {
+				wp.ThermalW = math.Max(wp.ThermalW, pr.ThermalW)
 			}
 		}
 		for k, re := range res.Ripple {
@@ -568,6 +610,94 @@ func worst(results []*Result) *Result {
 		w.Warnings = []string{}
 	}
 	return w
+}
+
+// attachThermal fills the steady-state thermal fields of res.
+//
+// Current capacity (IR drop, track width, via count, ratings) must see the
+// peak operating point, but heat is integrated over time: a burst load (an
+// ESP32 Wi-Fi TX at 0.5 A with a 0.1 A average) dissipates its AVERAGE
+// power, not its peak. avg is the twin operating point of the same scenario
+// (same sources and switches) with every load at its model's average
+// current (typA); nil when res is itself an average scenario.
+//
+//   - parts whose dissipation is linear in their current (loads, ICs, LED,
+//     LDO (Vin−Vout)·I, buck (1/η−1)·Pout, sources): thermalW = P_avg (exact
+//     for a constant-voltage load).
+//   - I²R-type parts (resistors, inductors, ferrites, fuses, diodes, BJTs,
+//     ESD, bridges) and copper: a current bounded by [0, I_peak] with mean
+//     I_avg has E[I²] ≤ I_avg·I_peak (the bang-bang waveform), so
+//     thermalW = √(P_avg·P_peak) and thermalCurrentA = √(I_avg·I_peak) —
+//     an upper bound on the time-averaged heat that stays conservative for
+//     any duty cycle the models do not state.
+func attachThermal(res, avg *Result) {
+	defer func() {
+		for _, pr := range res.Parts {
+			if pr.OffBoard {
+				pr.ThermalW = 0 // the external load behind the connector dissipates it
+			}
+		}
+	}()
+	if avg == nil {
+		res.ThermalBasis = ThermalAverage
+		for _, nr := range res.Nets {
+			nr.ThermalCurrentA = nr.CurrentA
+		}
+		for _, pr := range res.Parts {
+			pr.ThermalW = pr.PowerW
+		}
+		return
+	}
+	res.ThermalBasis = ThermalAverageBound
+	for net, nr := range res.Nets {
+		a := 0.0
+		if an := avg.Nets[net]; an != nil {
+			a = an.CurrentA
+		}
+		nr.ThermalCurrentA = round(boundedRMS(a, nr.CurrentA), 7)
+	}
+	for ref, pr := range res.Parts {
+		a := 0.0
+		if ap := avg.Parts[ref]; ap != nil {
+			a = ap.PowerW
+		}
+		switch pr.Model {
+		case KindResistor, KindInductor, KindFerrite, KindFuse, KindDiode, KindBJT, KindESD, KindBridge, KindOpen, KindCapacitor:
+			pr.ThermalW = round(boundedRMS(a, pr.PowerW), 6)
+		default:
+			pr.ThermalW = a
+		}
+	}
+}
+
+var reConnectorRef = regexp.MustCompile(`^(J|P|CN|CON|X|XS|XP|USB|TB)\d`)
+
+// offBoard reports whether a bound part's power is drawn by an external load
+// (Model.OffBoard, default: a load model on a connector designator).
+func (e *Engine) offBoard(b *binding) bool {
+	if b.kind != KindLoad {
+		return false
+	}
+	if b.model.OffBoard != nil {
+		return *b.model.OffBoard
+	}
+	if reConnectorRef.MatchString(strings.ToUpper(b.part.Ref)) {
+		e.assumef("%s: load model %s on a connector — the power it draws is the external load's (off the board), not board heat (set offBoard:false in the model if the load sits on the board)", b.part.Ref, b.model.ID)
+		return true
+	}
+	return false
+}
+
+// boundedRMS is √(avg·peak) clamped to [avg, peak] (both ≥ 0); it returns
+// avg when the average point is not below the peak one.
+func boundedRMS(avg, peak float64) float64 {
+	if avg <= 0 || peak <= 0 {
+		return math.Max(avg, 0)
+	}
+	if avg >= peak {
+		return avg
+	}
+	return math.Sqrt(avg * peak)
 }
 
 func rank(role string) int {
