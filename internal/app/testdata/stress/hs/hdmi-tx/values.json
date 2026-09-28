@@ -1,0 +1,65 @@
+{
+ "_provenance": "synthetic values for connectivity.json (gen.py)",
+ "parts": {
+  "J1": {
+   "mpn": "HDMI-A-19P-SMT"
+  },
+  "U4": {
+   "mpn": "TPD4E05U06DQAR"
+  },
+  "U5": {
+   "mpn": "TPD4E05U06DQAR"
+  },
+  "U1": {
+   "mpn": "IT66121FN"
+  },
+  "R1": {
+   "mpn": "0402WGF4701TCE",
+   "value": "4.7k"
+  },
+  "R2": {
+   "mpn": "0402WGF4701TCE",
+   "value": "4.7k"
+  },
+  "R3": {
+   "mpn": "0402WGF1002TCE",
+   "value": "10k"
+  },
+  "F1": {
+   "mpn": "SMD0805P050TF",
+   "value": "0.5A",
+   "description": "Current Rating:500mA"
+  },
+  "J2": {
+   "mpn": "KF301-5.0-2P"
+  },
+  "C5": {
+   "mpn": "CL05B104KO5NNNC",
+   "value": "100nF",
+   "description": "Capacitance:100nF Voltage Rating:16V"
+  },
+  "C6": {
+   "mpn": "CL05B104KO5NNNC",
+   "value": "100nF",
+   "description": "Capacitance:100nF Voltage Rating:16V"
+  },
+  "C7": {
+   "mpn": "CL05B104KO5NNNC",
+   "value": "100nF",
+   "description": "Capacitance:100nF Voltage Rating:16V"
+  },
+  "U9": {
+   "mpn": "AMS1117-3.3"
+  },
+  "C90": {
+   "mpn": "CL10A106KP8NNNC",
+   "value": "10uF",
+   "description": "Capacitance:10uF Voltage Rating:10V"
+  },
+  "C91": {
+   "mpn": "CL10A106KP8NNNC",
+   "value": "10uF",
+   "description": "Capacitance:10uF Voltage Rating:10V"
+  }
+ }
+}

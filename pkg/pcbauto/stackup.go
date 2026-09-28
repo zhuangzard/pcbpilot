@@ -334,6 +334,23 @@ func DecideStackup(b *Board, a *Analysis, opt StackOptions) *Stackup {
 	return s
 }
 
+// StackupReference is the outer-layer microstrip reference of the stackup
+// the engine builds for a copper layer count: dielectric height from the
+// outer signal layer to its plane (mil), εr and the JLC stackup name. It is
+// the single source for impedance widths — intent derive solves on it, so
+// the width it declares is the width this stackup holds.
+func StackupReference(layers int) (hMil, er float64, name string) {
+	switch {
+	case layers <= 2:
+		return 62.99, 4.5, "JLC 2-layer 1.6mm FR4"
+	case layers <= 4:
+		return 8.28, 4.4, "JLC04161H-7628"
+	case layers >= 8:
+		return 4.4, 4.2, "JLC08161H-3313"
+	}
+	return 4.4, 4.2, "JLC06161H-2116"
+}
+
 // buildStack assigns layer roles and plane nets for the chosen layer count.
 func (s *Stackup) buildStack(rails []*NetPlan, b *Board) {
 	gnd := groundNet(b)
@@ -363,8 +380,7 @@ func (s *Stackup) buildStack(rails []*NetPlan, b *Board) {
 			{ID: LayerTop, Name: "TOP", Kind: KindSignal, Dir: "h", Outer: true, PourNets: gnds},
 			{ID: LayerBottom, Name: "BOTTOM", Kind: KindSignal, Dir: "v", Outer: true, PourNets: gnds},
 		}
-		s.JLCStackup = "JLC 2-layer 1.6mm FR4"
-		s.RefHeightMil, s.Er = 62.99, 4.5
+		s.RefHeightMil, s.Er, s.JLCStackup = StackupReference(2)
 	case 4:
 		s.Stack = []StackLayer{
 			{ID: LayerTop, Name: "TOP", Kind: KindSignal, Dir: "h", Outer: true},
@@ -372,8 +388,7 @@ func (s *Stackup) buildStack(rails []*NetPlan, b *Board) {
 			{ID: LayerInner1 + 1, Name: "IN2-PWR", Kind: KindPlane, Nets: railNames},
 			{ID: LayerBottom, Name: "BOTTOM", Kind: KindSignal, Dir: "v", Outer: true, PourNets: gnds},
 		}
-		s.JLCStackup = "JLC04161H-7628"
-		s.RefHeightMil, s.Er = 8.28, 4.4
+		s.RefHeightMil, s.Er, s.JLCStackup = StackupReference(4)
 	case 8:
 		// SIG/GND/SIG/PWR/GND/SIG/GND/SIG: four routing layers, each next to a plane.
 		s.Stack = []StackLayer{
@@ -386,8 +401,7 @@ func (s *Stackup) buildStack(rails []*NetPlan, b *Board) {
 			{ID: LayerInner1 + 5, Name: "IN6-GND", Kind: KindPlane, Nets: planeGnds},
 			{ID: LayerBottom, Name: "BOTTOM", Kind: KindSignal, Dir: "v", Outer: true},
 		}
-		s.JLCStackup = "JLC08161H-3313"
-		s.RefHeightMil, s.Er = 4.4, 4.2
+		s.RefHeightMil, s.Er, s.JLCStackup = StackupReference(8)
 	default:
 		s.Layers = 6
 		// SIG / GND / SIG / PWR / GND / SIG: every signal layer adjacent to a plane.
@@ -399,8 +413,7 @@ func (s *Stackup) buildStack(rails []*NetPlan, b *Board) {
 			{ID: LayerInner1 + 3, Name: "IN4-GND", Kind: KindPlane, Nets: planeGnds},
 			{ID: LayerBottom, Name: "BOTTOM", Kind: KindSignal, Dir: "v", Outer: true},
 		}
-		s.JLCStackup = "JLC06161H-2116"
-		s.RefHeightMil, s.Er = 4.4, 4.2
+		s.RefHeightMil, s.Er, s.JLCStackup = StackupReference(6)
 	}
 	if s.Layers >= 4 && len(railNames) == 0 {
 		// No rails: the power plane becomes a second ground plane.

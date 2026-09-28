@@ -21,6 +21,9 @@ type Input struct {
 	SimOptions powersim.Options
 	Spec       *Spec
 	Sources    Sources
+	// BoardLayers is the copper layer count of the measured board the
+	// design came from (`intent derive --board`); spec.layers wins.
+	BoardLayers int
 }
 
 // ParseSimOutput decodes a `pcbpilot sim power` document (schemaVersion 1).

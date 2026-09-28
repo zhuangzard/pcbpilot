@@ -1,0 +1,1225 @@
+{
+ "schemaVersion": "1.4",
+ "projectId": "stress-hs-hdmi-tx",
+ "documentId": "page-1",
+ "_provenance": "synthetic high-speed stress case (gen.py): HDMI 1.4 source: TMDS D0-D2 + clock (100 Ω) through two flow-through ESD arrays to a type-A receptacle; DDC with pull-ups, HPD, +5V with a PTC; lanes inter-pair matched (HDMI_LANES recognised from the names)",
+ "components": [
+  {
+   "id": "cmp-J1",
+   "ref": "J1",
+   "device": {
+    "name": "={Value}"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "D2+"
+    },
+    {
+     "number": "2",
+     "name": "D2S"
+    },
+    {
+     "number": "3",
+     "name": "D2-"
+    },
+    {
+     "number": "4",
+     "name": "D1+"
+    },
+    {
+     "number": "5",
+     "name": "D1S"
+    },
+    {
+     "number": "6",
+     "name": "D1-"
+    },
+    {
+     "number": "7",
+     "name": "D0+"
+    },
+    {
+     "number": "8",
+     "name": "D0S"
+    },
+    {
+     "number": "9",
+     "name": "D0-"
+    },
+    {
+     "number": "10",
+     "name": "CK+"
+    },
+    {
+     "number": "11",
+     "name": "CKS"
+    },
+    {
+     "number": "12",
+     "name": "CK-"
+    },
+    {
+     "number": "13",
+     "name": "CEC"
+    },
+    {
+     "number": "14",
+     "name": "UTIL"
+    },
+    {
+     "number": "15",
+     "name": "SCL"
+    },
+    {
+     "number": "16",
+     "name": "SDA"
+    },
+    {
+     "number": "17",
+     "name": "DDCGND"
+    },
+    {
+     "number": "18",
+     "name": "+5V"
+    },
+    {
+     "number": "19",
+     "name": "HPD"
+    },
+    {
+     "number": "S1",
+     "name": "S1"
+    },
+    {
+     "number": "S2",
+     "name": "S2"
+    },
+    {
+     "number": "S3",
+     "name": "S3"
+    },
+    {
+     "number": "S4",
+     "name": "S4"
+    }
+   ]
+  },
+  {
+   "id": "cmp-U4",
+   "ref": "U4",
+   "device": {
+    "name": "={Value}"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "D1+"
+    },
+    {
+     "number": "2",
+     "name": "D1-"
+    },
+    {
+     "number": "3",
+     "name": "GND"
+    },
+    {
+     "number": "4",
+     "name": "D2+"
+    },
+    {
+     "number": "5",
+     "name": "D2-"
+    },
+    {
+     "number": "6",
+     "name": "D2-"
+    },
+    {
+     "number": "7",
+     "name": "D2+"
+    },
+    {
+     "number": "8",
+     "name": "GND"
+    },
+    {
+     "number": "9",
+     "name": "D1-"
+    },
+    {
+     "number": "10",
+     "name": "D1+"
+    }
+   ]
+  },
+  {
+   "id": "cmp-U5",
+   "ref": "U5",
+   "device": {
+    "name": "={Value}"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "D1+"
+    },
+    {
+     "number": "2",
+     "name": "D1-"
+    },
+    {
+     "number": "3",
+     "name": "GND"
+    },
+    {
+     "number": "4",
+     "name": "D2+"
+    },
+    {
+     "number": "5",
+     "name": "D2-"
+    },
+    {
+     "number": "6",
+     "name": "D2-"
+    },
+    {
+     "number": "7",
+     "name": "D2+"
+    },
+    {
+     "number": "8",
+     "name": "GND"
+    },
+    {
+     "number": "9",
+     "name": "D1-"
+    },
+    {
+     "number": "10",
+     "name": "D1+"
+    }
+   ]
+  },
+  {
+   "id": "cmp-U1",
+   "ref": "U1",
+   "device": {
+    "name": "={Value}"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "TX2P"
+    },
+    {
+     "number": "2",
+     "name": "TX2N"
+    },
+    {
+     "number": "3",
+     "name": "GND"
+    },
+    {
+     "number": "4",
+     "name": "TX1P"
+    },
+    {
+     "number": "5",
+     "name": "TX1N"
+    },
+    {
+     "number": "6",
+     "name": "GND"
+    },
+    {
+     "number": "7",
+     "name": "TX0P"
+    },
+    {
+     "number": "8",
+     "name": "TX0N"
+    },
+    {
+     "number": "9",
+     "name": "GND"
+    },
+    {
+     "number": "10",
+     "name": "TXCP"
+    },
+    {
+     "number": "11",
+     "name": "TXCN"
+    },
+    {
+     "number": "12",
+     "name": "AVDD"
+    },
+    {
+     "number": "13",
+     "name": "SCL"
+    },
+    {
+     "number": "14",
+     "name": "SDA"
+    },
+    {
+     "number": "15",
+     "name": "HPD"
+    },
+    {
+     "number": "16",
+     "name": "CEC"
+    },
+    {
+     "number": "17",
+     "name": "GND"
+    },
+    {
+     "number": "18",
+     "name": "DVDD"
+    },
+    {
+     "number": "19",
+     "name": "19"
+    },
+    {
+     "number": "20",
+     "name": "20"
+    },
+    {
+     "number": "21",
+     "name": "21"
+    },
+    {
+     "number": "22",
+     "name": "22"
+    },
+    {
+     "number": "23",
+     "name": "23"
+    },
+    {
+     "number": "24",
+     "name": "GND"
+    },
+    {
+     "number": "25",
+     "name": "25"
+    },
+    {
+     "number": "26",
+     "name": "26"
+    },
+    {
+     "number": "27",
+     "name": "27"
+    },
+    {
+     "number": "28",
+     "name": "28"
+    },
+    {
+     "number": "29",
+     "name": "29"
+    },
+    {
+     "number": "30",
+     "name": "30"
+    },
+    {
+     "number": "31",
+     "name": "31"
+    },
+    {
+     "number": "32",
+     "name": "32"
+    },
+    {
+     "number": "33",
+     "name": "33"
+    },
+    {
+     "number": "34",
+     "name": "34"
+    },
+    {
+     "number": "35",
+     "name": "35"
+    },
+    {
+     "number": "36",
+     "name": "36"
+    },
+    {
+     "number": "37",
+     "name": "DVDD"
+    },
+    {
+     "number": "38",
+     "name": "GND"
+    },
+    {
+     "number": "39",
+     "name": "39"
+    },
+    {
+     "number": "40",
+     "name": "40"
+    },
+    {
+     "number": "41",
+     "name": "41"
+    },
+    {
+     "number": "42",
+     "name": "42"
+    },
+    {
+     "number": "43",
+     "name": "43"
+    },
+    {
+     "number": "44",
+     "name": "44"
+    },
+    {
+     "number": "45",
+     "name": "45"
+    },
+    {
+     "number": "46",
+     "name": "46"
+    },
+    {
+     "number": "47",
+     "name": "47"
+    },
+    {
+     "number": "48",
+     "name": "AVDD"
+    },
+    {
+     "number": "49",
+     "name": "49"
+    }
+   ]
+  },
+  {
+   "id": "cmp-R1",
+   "ref": "R1",
+   "device": {
+    "name": "={Value}"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-R2",
+   "ref": "R2",
+   "device": {
+    "name": "={Value}"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-R3",
+   "ref": "R3",
+   "device": {
+    "name": "={Value}"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-F1",
+   "ref": "F1",
+   "device": {
+    "name": "={Value}"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-J2",
+   "ref": "J2",
+   "device": {
+    "name": "={Value}"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-C5",
+   "ref": "C5",
+   "device": {
+    "name": "={Value}"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-C6",
+   "ref": "C6",
+   "device": {
+    "name": "={Value}"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-C7",
+   "ref": "C7",
+   "device": {
+    "name": "={Value}"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-U9",
+   "ref": "U9",
+   "device": {
+    "name": "={Value}"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "GND"
+    },
+    {
+     "number": "2",
+     "name": "VOUT"
+    },
+    {
+     "number": "3",
+     "name": "VIN"
+    },
+    {
+     "number": "4",
+     "name": "TAB"
+    }
+   ]
+  },
+  {
+   "id": "cmp-C90",
+   "ref": "C90",
+   "device": {
+    "name": "={Value}"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-C91",
+   "ref": "C91",
+   "device": {
+    "name": "={Value}"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  }
+ ],
+ "nets": [
+  {
+   "id": "net-+3V3",
+   "name": "+3V3",
+   "role": "power"
+  },
+  {
+   "id": "net-5V_IN",
+   "name": "5V_IN",
+   "role": "power"
+  },
+  {
+   "id": "net-GND",
+   "name": "GND",
+   "role": "ground"
+  },
+  {
+   "id": "net-HDMI_5V",
+   "name": "HDMI_5V",
+   "role": "signal"
+  },
+  {
+   "id": "net-HDMI_CEC",
+   "name": "HDMI_CEC",
+   "role": "signal"
+  },
+  {
+   "id": "net-HDMI_CLK_N",
+   "name": "HDMI_CLK_N",
+   "role": "signal"
+  },
+  {
+   "id": "net-HDMI_CLK_P",
+   "name": "HDMI_CLK_P",
+   "role": "signal"
+  },
+  {
+   "id": "net-HDMI_D0_N",
+   "name": "HDMI_D0_N",
+   "role": "signal"
+  },
+  {
+   "id": "net-HDMI_D0_P",
+   "name": "HDMI_D0_P",
+   "role": "signal"
+  },
+  {
+   "id": "net-HDMI_D1_N",
+   "name": "HDMI_D1_N",
+   "role": "signal"
+  },
+  {
+   "id": "net-HDMI_D1_P",
+   "name": "HDMI_D1_P",
+   "role": "signal"
+  },
+  {
+   "id": "net-HDMI_D2_N",
+   "name": "HDMI_D2_N",
+   "role": "signal"
+  },
+  {
+   "id": "net-HDMI_D2_P",
+   "name": "HDMI_D2_P",
+   "role": "signal"
+  },
+  {
+   "id": "net-HDMI_HPD",
+   "name": "HDMI_HPD",
+   "role": "signal"
+  },
+  {
+   "id": "net-HDMI_SCL",
+   "name": "HDMI_SCL",
+   "role": "signal"
+  },
+  {
+   "id": "net-HDMI_SDA",
+   "name": "HDMI_SDA",
+   "role": "signal"
+  }
+ ],
+ "connections": [
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "1",
+   "netId": "net-HDMI_D2_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "2",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "3",
+   "netId": "net-HDMI_D2_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "4",
+   "netId": "net-HDMI_D1_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "5",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "6",
+   "netId": "net-HDMI_D1_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "7",
+   "netId": "net-HDMI_D0_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "8",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "9",
+   "netId": "net-HDMI_D0_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "10",
+   "netId": "net-HDMI_CLK_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "11",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "12",
+   "netId": "net-HDMI_CLK_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "13",
+   "netId": "net-HDMI_CEC",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "15",
+   "netId": "net-HDMI_SCL",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "16",
+   "netId": "net-HDMI_SDA",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "17",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "18",
+   "netId": "net-HDMI_5V",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "19",
+   "netId": "net-HDMI_HPD",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "S1",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "S2",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "S3",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "S4",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U4",
+   "pinNumber": "1",
+   "netId": "net-HDMI_D1_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U4",
+   "pinNumber": "2",
+   "netId": "net-HDMI_D1_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U4",
+   "pinNumber": "3",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U4",
+   "pinNumber": "4",
+   "netId": "net-HDMI_D2_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U4",
+   "pinNumber": "5",
+   "netId": "net-HDMI_D2_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U4",
+   "pinNumber": "6",
+   "netId": "net-HDMI_D2_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U4",
+   "pinNumber": "7",
+   "netId": "net-HDMI_D2_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U4",
+   "pinNumber": "8",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U4",
+   "pinNumber": "9",
+   "netId": "net-HDMI_D1_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U4",
+   "pinNumber": "10",
+   "netId": "net-HDMI_D1_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U5",
+   "pinNumber": "1",
+   "netId": "net-HDMI_CLK_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U5",
+   "pinNumber": "2",
+   "netId": "net-HDMI_CLK_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U5",
+   "pinNumber": "3",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U5",
+   "pinNumber": "4",
+   "netId": "net-HDMI_D0_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U5",
+   "pinNumber": "5",
+   "netId": "net-HDMI_D0_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U5",
+   "pinNumber": "6",
+   "netId": "net-HDMI_D0_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U5",
+   "pinNumber": "7",
+   "netId": "net-HDMI_D0_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U5",
+   "pinNumber": "8",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U5",
+   "pinNumber": "9",
+   "netId": "net-HDMI_CLK_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U5",
+   "pinNumber": "10",
+   "netId": "net-HDMI_CLK_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "1",
+   "netId": "net-HDMI_D2_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "2",
+   "netId": "net-HDMI_D2_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "3",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "4",
+   "netId": "net-HDMI_D1_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "5",
+   "netId": "net-HDMI_D1_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "6",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "7",
+   "netId": "net-HDMI_D0_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "8",
+   "netId": "net-HDMI_D0_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "9",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "10",
+   "netId": "net-HDMI_CLK_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "11",
+   "netId": "net-HDMI_CLK_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "12",
+   "netId": "net-+3V3",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "13",
+   "netId": "net-HDMI_SCL",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "14",
+   "netId": "net-HDMI_SDA",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "15",
+   "netId": "net-HDMI_HPD",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "16",
+   "netId": "net-HDMI_CEC",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "17",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "18",
+   "netId": "net-+3V3",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "24",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "37",
+   "netId": "net-+3V3",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "38",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "48",
+   "netId": "net-+3V3",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "49",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-R1",
+   "pinNumber": "1",
+   "netId": "net-HDMI_5V",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-R1",
+   "pinNumber": "2",
+   "netId": "net-HDMI_SCL",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-R2",
+   "pinNumber": "1",
+   "netId": "net-HDMI_5V",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-R2",
+   "pinNumber": "2",
+   "netId": "net-HDMI_SDA",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-R3",
+   "pinNumber": "1",
+   "netId": "net-HDMI_HPD",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-R3",
+   "pinNumber": "2",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-F1",
+   "pinNumber": "1",
+   "netId": "net-5V_IN",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-F1",
+   "pinNumber": "2",
+   "netId": "net-HDMI_5V",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J2",
+   "pinNumber": "1",
+   "netId": "net-5V_IN",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J2",
+   "pinNumber": "2",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C5",
+   "pinNumber": "1",
+   "netId": "net-+3V3",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C5",
+   "pinNumber": "2",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C6",
+   "pinNumber": "1",
+   "netId": "net-+3V3",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C6",
+   "pinNumber": "2",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C7",
+   "pinNumber": "1",
+   "netId": "net-+3V3",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C7",
+   "pinNumber": "2",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U9",
+   "pinNumber": "1",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U9",
+   "pinNumber": "2",
+   "netId": "net-+3V3",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U9",
+   "pinNumber": "3",
+   "netId": "net-5V_IN",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U9",
+   "pinNumber": "4",
+   "netId": "net-+3V3",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C90",
+   "pinNumber": "1",
+   "netId": "net-5V_IN",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C90",
+   "pinNumber": "2",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C91",
+   "pinNumber": "1",
+   "netId": "net-+3V3",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C91",
+   "pinNumber": "2",
+   "netId": "net-GND",
+   "kind": "netlist"
+  }
+ ]
+}

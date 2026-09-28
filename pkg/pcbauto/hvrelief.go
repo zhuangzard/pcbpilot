@@ -20,6 +20,12 @@ import "math"
 // the neck the full clearance applies. Boards whose nets all use the board
 // clearance never enter this path.
 
+// hvExcessMil is how far a net's clearance must exceed the board rule before
+// the high-voltage machinery (footprint relief, ΔV pair clearance, HV placer
+// halo) engages: a 6 mil intent class over a 5.98 mil live rule is rounding,
+// not high voltage (it re-routed the ESP32 mini, joint 92.6 → 90.2).
+const hvExcessMil = 2.0
+
 // hvReliefReach is how far from its own pad a net keeps the relief (mil):
 // enough to leave the neighbour's clearance zone in any direction.
 func (r *router) hvReliefReach(n *rnet) float64 {
@@ -32,7 +38,7 @@ func (r *router) setupRelief() {
 	base := r.b.Rules.Clearance
 	r.maxClr = base
 	for _, n := range r.nets {
-		if n.plan.ClearanceMil > base+1e-9 {
+		if n.plan.ClearanceMil > base+hvExcessMil {
 			r.relief = true
 		}
 		r.maxClr = math.Max(r.maxClr, n.plan.ClearanceMil)
@@ -293,7 +299,7 @@ func (a *Analysis) PairClearanceMil(x, y string, r Rules) float64 {
 	}
 	cx, cy := a.Plan(x, r).ClearanceMil, a.Plan(y, r).ClearanceMil
 	req := math.Max(r.Clearance, math.Max(cx, cy))
-	if req <= r.Clearance || len(a.spans) == 0 {
+	if req <= r.Clearance+hvExcessMil || len(a.spans) == 0 {
 		return req
 	}
 	sx, okx := a.spans[x]

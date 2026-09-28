@@ -13,7 +13,7 @@ func init() {
 	intent.SafetyProvider = func(p intent.Pair, st intent.Standard) (float64, float64, bool, float64, string, []string) {
 		r := safety.Distances(safety.Pair{
 			A: p.A, B: p.B, WorkingVrms: p.WorkingVrms, WorkingVpeak: p.WorkingVpeak,
-			Insulation: p.Insulation, MOP: p.MOP, MOPCount: p.MOPCount,
+			Insulation: p.Insulation, MOP: p.MOP, MOPCount: p.MOPCount, RequiredWithstandV: p.RequiredWithstandV,
 			Transient: p.Transient, MainsVrms: p.MainsVrms,
 		}, safety.Standard{
 			Name: st.Name, Insulation: st.Insulation, MOP: st.MOP, MOPCount: st.MOPCount,

@@ -1,0 +1,1472 @@
+{
+ "components": [
+  {
+   "primitiveId": "e0",
+   "designator": "J1",
+   "device": "HDMI-A-19P-SMT",
+   "layer": 1,
+   "x": 50,
+   "y": 650,
+   "rotation": 0,
+   "locked": true,
+   "bbox": {
+    "minX": -12.0,
+    "minY": 303.0,
+    "maxX": 270.0,
+    "maxY": 997.0
+   },
+   "pads": [
+    {
+     "primitiveId": "e0p0",
+     "padNumber": "1",
+     "net": "HDMI_D2_P",
+     "layer": 1,
+     "x": 50.0,
+     "y": 827.165,
+     "width": 55,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e0p1",
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 1,
+     "x": 100.0,
+     "y": 807.48,
+     "width": 55,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e0p2",
+     "padNumber": "3",
+     "net": "HDMI_D2_N",
+     "layer": 1,
+     "x": 50.0,
+     "y": 787.795,
+     "width": 55,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e0p3",
+     "padNumber": "4",
+     "net": "HDMI_D1_P",
+     "layer": 1,
+     "x": 100.0,
+     "y": 768.11,
+     "width": 55,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e0p4",
+     "padNumber": "5",
+     "net": "GND",
+     "layer": 1,
+     "x": 50.0,
+     "y": 748.425,
+     "width": 55,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e0p5",
+     "padNumber": "6",
+     "net": "HDMI_D1_N",
+     "layer": 1,
+     "x": 100.0,
+     "y": 728.74,
+     "width": 55,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e0p6",
+     "padNumber": "7",
+     "net": "HDMI_D0_P",
+     "layer": 1,
+     "x": 50.0,
+     "y": 709.055,
+     "width": 55,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e0p7",
+     "padNumber": "8",
+     "net": "GND",
+     "layer": 1,
+     "x": 100.0,
+     "y": 689.37,
+     "width": 55,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e0p8",
+     "padNumber": "9",
+     "net": "HDMI_D0_N",
+     "layer": 1,
+     "x": 50.0,
+     "y": 669.685,
+     "width": 55,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e0p9",
+     "padNumber": "10",
+     "net": "HDMI_CLK_P",
+     "layer": 1,
+     "x": 100.0,
+     "y": 650.0,
+     "width": 55,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e0p10",
+     "padNumber": "11",
+     "net": "GND",
+     "layer": 1,
+     "x": 50.0,
+     "y": 630.315,
+     "width": 55,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e0p11",
+     "padNumber": "12",
+     "net": "HDMI_CLK_N",
+     "layer": 1,
+     "x": 100.0,
+     "y": 610.63,
+     "width": 55,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e0p12",
+     "padNumber": "13",
+     "net": "HDMI_CEC",
+     "layer": 1,
+     "x": 50.0,
+     "y": 590.945,
+     "width": 55,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e0p13",
+     "padNumber": "14",
+     "net": "",
+     "layer": 1,
+     "x": 100.0,
+     "y": 571.26,
+     "width": 55,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e0p14",
+     "padNumber": "15",
+     "net": "HDMI_SCL",
+     "layer": 1,
+     "x": 50.0,
+     "y": 551.575,
+     "width": 55,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e0p15",
+     "padNumber": "16",
+     "net": "HDMI_SDA",
+     "layer": 1,
+     "x": 100.0,
+     "y": 531.89,
+     "width": 55,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e0p16",
+     "padNumber": "17",
+     "net": "GND",
+     "layer": 1,
+     "x": 50.0,
+     "y": 512.205,
+     "width": 55,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e0p17",
+     "padNumber": "18",
+     "net": "HDMI_5V",
+     "layer": 1,
+     "x": 100.0,
+     "y": 492.52,
+     "width": 55,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e0p18",
+     "padNumber": "19",
+     "net": "HDMI_HPD",
+     "layer": 1,
+     "x": 50.0,
+     "y": 472.835,
+     "width": 55,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e0p19",
+     "padNumber": "S1",
+     "net": "GND",
+     "layer": 12,
+     "x": 30.0,
+     "y": 940.0,
+     "width": 60,
+     "height": 90
+    },
+    {
+     "primitiveId": "e0p20",
+     "padNumber": "S2",
+     "net": "GND",
+     "layer": 12,
+     "x": 30.0,
+     "y": 360.0,
+     "width": 60,
+     "height": 90
+    },
+    {
+     "primitiveId": "e0p21",
+     "padNumber": "S3",
+     "net": "GND",
+     "layer": 12,
+     "x": 210.0,
+     "y": 920.0,
+     "width": 60,
+     "height": 90
+    },
+    {
+     "primitiveId": "e0p22",
+     "padNumber": "S4",
+     "net": "GND",
+     "layer": 12,
+     "x": 210.0,
+     "y": 380.0,
+     "width": 60,
+     "height": 90
+    }
+   ]
+  },
+  {
+   "primitiveId": "e1",
+   "designator": "U4",
+   "device": "TPD4E05U06DQAR",
+   "layer": 1,
+   "x": 380,
+   "y": 760,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 336.5,
+    "minY": 703.7,
+    "maxX": 423.5,
+    "maxY": 816.3
+   },
+   "pads": [
+    {
+     "primitiveId": "e1p0",
+     "padNumber": "1",
+     "net": "HDMI_D1_N",
+     "layer": 1,
+     "x": 399.7,
+     "y": 720.6,
+     "width": 23.6,
+     "height": 9.8
+    },
+    {
+     "primitiveId": "e1p1",
+     "padNumber": "2",
+     "net": "HDMI_D1_P",
+     "layer": 1,
+     "x": 399.7,
+     "y": 740.3,
+     "width": 23.6,
+     "height": 9.8
+    },
+    {
+     "primitiveId": "e1p2",
+     "padNumber": "3",
+     "net": "GND",
+     "layer": 1,
+     "x": 399.7,
+     "y": 760.0,
+     "width": 23.6,
+     "height": 9.8
+    },
+    {
+     "primitiveId": "e1p3",
+     "padNumber": "4",
+     "net": "HDMI_D2_N",
+     "layer": 1,
+     "x": 399.7,
+     "y": 779.7,
+     "width": 23.6,
+     "height": 9.8
+    },
+    {
+     "primitiveId": "e1p4",
+     "padNumber": "5",
+     "net": "HDMI_D2_P",
+     "layer": 1,
+     "x": 399.7,
+     "y": 799.4,
+     "width": 23.6,
+     "height": 9.8
+    },
+    {
+     "primitiveId": "e1p5",
+     "padNumber": "6",
+     "net": "HDMI_D2_P",
+     "layer": 1,
+     "x": 360.3,
+     "y": 799.4,
+     "width": 23.6,
+     "height": 9.8
+    },
+    {
+     "primitiveId": "e1p6",
+     "padNumber": "7",
+     "net": "HDMI_D2_N",
+     "layer": 1,
+     "x": 360.3,
+     "y": 779.7,
+     "width": 23.6,
+     "height": 9.8
+    },
+    {
+     "primitiveId": "e1p7",
+     "padNumber": "8",
+     "net": "GND",
+     "layer": 1,
+     "x": 360.3,
+     "y": 760.0,
+     "width": 23.6,
+     "height": 9.8
+    },
+    {
+     "primitiveId": "e1p8",
+     "padNumber": "9",
+     "net": "HDMI_D1_P",
+     "layer": 1,
+     "x": 360.3,
+     "y": 740.3,
+     "width": 23.6,
+     "height": 9.8
+    },
+    {
+     "primitiveId": "e1p9",
+     "padNumber": "10",
+     "net": "HDMI_D1_N",
+     "layer": 1,
+     "x": 360.3,
+     "y": 720.6,
+     "width": 23.6,
+     "height": 9.8
+    }
+   ]
+  },
+  {
+   "primitiveId": "e2",
+   "designator": "U5",
+   "device": "TPD4E05U06DQAR",
+   "layer": 1,
+   "x": 380,
+   "y": 540,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 336.5,
+    "minY": 483.7,
+    "maxX": 423.5,
+    "maxY": 596.3
+   },
+   "pads": [
+    {
+     "primitiveId": "e2p0",
+     "padNumber": "1",
+     "net": "HDMI_CLK_N",
+     "layer": 1,
+     "x": 399.7,
+     "y": 500.6,
+     "width": 23.6,
+     "height": 9.8
+    },
+    {
+     "primitiveId": "e2p1",
+     "padNumber": "2",
+     "net": "HDMI_CLK_P",
+     "layer": 1,
+     "x": 399.7,
+     "y": 520.3,
+     "width": 23.6,
+     "height": 9.8
+    },
+    {
+     "primitiveId": "e2p2",
+     "padNumber": "3",
+     "net": "GND",
+     "layer": 1,
+     "x": 399.7,
+     "y": 540.0,
+     "width": 23.6,
+     "height": 9.8
+    },
+    {
+     "primitiveId": "e2p3",
+     "padNumber": "4",
+     "net": "HDMI_D0_N",
+     "layer": 1,
+     "x": 399.7,
+     "y": 559.7,
+     "width": 23.6,
+     "height": 9.8
+    },
+    {
+     "primitiveId": "e2p4",
+     "padNumber": "5",
+     "net": "HDMI_D0_P",
+     "layer": 1,
+     "x": 399.7,
+     "y": 579.4,
+     "width": 23.6,
+     "height": 9.8
+    },
+    {
+     "primitiveId": "e2p5",
+     "padNumber": "6",
+     "net": "HDMI_D0_P",
+     "layer": 1,
+     "x": 360.3,
+     "y": 579.4,
+     "width": 23.6,
+     "height": 9.8
+    },
+    {
+     "primitiveId": "e2p6",
+     "padNumber": "7",
+     "net": "HDMI_D0_N",
+     "layer": 1,
+     "x": 360.3,
+     "y": 559.7,
+     "width": 23.6,
+     "height": 9.8
+    },
+    {
+     "primitiveId": "e2p7",
+     "padNumber": "8",
+     "net": "GND",
+     "layer": 1,
+     "x": 360.3,
+     "y": 540.0,
+     "width": 23.6,
+     "height": 9.8
+    },
+    {
+     "primitiveId": "e2p8",
+     "padNumber": "9",
+     "net": "HDMI_CLK_P",
+     "layer": 1,
+     "x": 360.3,
+     "y": 520.3,
+     "width": 23.6,
+     "height": 9.8
+    },
+    {
+     "primitiveId": "e2p9",
+     "padNumber": "10",
+     "net": "HDMI_CLK_N",
+     "layer": 1,
+     "x": 360.3,
+     "y": 500.6,
+     "width": 23.6,
+     "height": 9.8
+    }
+   ]
+  },
+  {
+   "primitiveId": "e3",
+   "designator": "U1",
+   "device": "IT66121FN",
+   "layer": 1,
+   "x": 950,
+   "y": 650,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 794.2,
+    "minY": 494.2,
+    "maxX": 1105.8,
+    "maxY": 805.8
+   },
+   "pads": [
+    {
+     "primitiveId": "e3p0",
+     "padNumber": "1",
+     "net": "HDMI_D2_P",
+     "layer": 1,
+     "x": 821.95,
+     "y": 758.268,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e3p1",
+     "padNumber": "2",
+     "net": "HDMI_D2_N",
+     "layer": 1,
+     "x": 821.95,
+     "y": 738.582,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e3p2",
+     "padNumber": "3",
+     "net": "GND",
+     "layer": 1,
+     "x": 821.95,
+     "y": 718.898,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e3p3",
+     "padNumber": "4",
+     "net": "HDMI_D1_P",
+     "layer": 1,
+     "x": 821.95,
+     "y": 699.212,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e3p4",
+     "padNumber": "5",
+     "net": "HDMI_D1_N",
+     "layer": 1,
+     "x": 821.95,
+     "y": 679.528,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e3p5",
+     "padNumber": "6",
+     "net": "GND",
+     "layer": 1,
+     "x": 821.95,
+     "y": 659.842,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e3p6",
+     "padNumber": "7",
+     "net": "HDMI_D0_P",
+     "layer": 1,
+     "x": 821.95,
+     "y": 640.158,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e3p7",
+     "padNumber": "8",
+     "net": "HDMI_D0_N",
+     "layer": 1,
+     "x": 821.95,
+     "y": 620.472,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e3p8",
+     "padNumber": "9",
+     "net": "GND",
+     "layer": 1,
+     "x": 821.95,
+     "y": 600.788,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e3p9",
+     "padNumber": "10",
+     "net": "HDMI_CLK_P",
+     "layer": 1,
+     "x": 821.95,
+     "y": 581.102,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e3p10",
+     "padNumber": "11",
+     "net": "HDMI_CLK_N",
+     "layer": 1,
+     "x": 821.95,
+     "y": 561.418,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e3p11",
+     "padNumber": "12",
+     "net": "+3V3",
+     "layer": 1,
+     "x": 821.95,
+     "y": 541.732,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e3p12",
+     "padNumber": "13",
+     "net": "HDMI_SCL",
+     "layer": 1,
+     "x": 841.732,
+     "y": 521.95,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e3p13",
+     "padNumber": "14",
+     "net": "HDMI_SDA",
+     "layer": 1,
+     "x": 861.418,
+     "y": 521.95,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e3p14",
+     "padNumber": "15",
+     "net": "HDMI_HPD",
+     "layer": 1,
+     "x": 881.102,
+     "y": 521.95,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e3p15",
+     "padNumber": "16",
+     "net": "HDMI_CEC",
+     "layer": 1,
+     "x": 900.788,
+     "y": 521.95,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e3p16",
+     "padNumber": "17",
+     "net": "GND",
+     "layer": 1,
+     "x": 920.472,
+     "y": 521.95,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e3p17",
+     "padNumber": "18",
+     "net": "+3V3",
+     "layer": 1,
+     "x": 940.158,
+     "y": 521.95,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e3p18",
+     "padNumber": "19",
+     "net": "",
+     "layer": 1,
+     "x": 959.842,
+     "y": 521.95,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e3p19",
+     "padNumber": "20",
+     "net": "",
+     "layer": 1,
+     "x": 979.528,
+     "y": 521.95,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e3p20",
+     "padNumber": "21",
+     "net": "",
+     "layer": 1,
+     "x": 999.212,
+     "y": 521.95,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e3p21",
+     "padNumber": "22",
+     "net": "",
+     "layer": 1,
+     "x": 1018.898,
+     "y": 521.95,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e3p22",
+     "padNumber": "23",
+     "net": "",
+     "layer": 1,
+     "x": 1038.582,
+     "y": 521.95,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e3p23",
+     "padNumber": "24",
+     "net": "GND",
+     "layer": 1,
+     "x": 1058.267,
+     "y": 521.95,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e3p24",
+     "padNumber": "25",
+     "net": "",
+     "layer": 1,
+     "x": 1078.05,
+     "y": 541.732,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e3p25",
+     "padNumber": "26",
+     "net": "",
+     "layer": 1,
+     "x": 1078.05,
+     "y": 561.418,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e3p26",
+     "padNumber": "27",
+     "net": "",
+     "layer": 1,
+     "x": 1078.05,
+     "y": 581.102,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e3p27",
+     "padNumber": "28",
+     "net": "",
+     "layer": 1,
+     "x": 1078.05,
+     "y": 600.788,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e3p28",
+     "padNumber": "29",
+     "net": "",
+     "layer": 1,
+     "x": 1078.05,
+     "y": 620.472,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e3p29",
+     "padNumber": "30",
+     "net": "",
+     "layer": 1,
+     "x": 1078.05,
+     "y": 640.158,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e3p30",
+     "padNumber": "31",
+     "net": "",
+     "layer": 1,
+     "x": 1078.05,
+     "y": 659.842,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e3p31",
+     "padNumber": "32",
+     "net": "",
+     "layer": 1,
+     "x": 1078.05,
+     "y": 679.528,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e3p32",
+     "padNumber": "33",
+     "net": "",
+     "layer": 1,
+     "x": 1078.05,
+     "y": 699.212,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e3p33",
+     "padNumber": "34",
+     "net": "",
+     "layer": 1,
+     "x": 1078.05,
+     "y": 718.898,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e3p34",
+     "padNumber": "35",
+     "net": "",
+     "layer": 1,
+     "x": 1078.05,
+     "y": 738.582,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e3p35",
+     "padNumber": "36",
+     "net": "",
+     "layer": 1,
+     "x": 1078.05,
+     "y": 758.268,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e3p36",
+     "padNumber": "37",
+     "net": "+3V3",
+     "layer": 1,
+     "x": 1058.267,
+     "y": 778.05,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e3p37",
+     "padNumber": "38",
+     "net": "GND",
+     "layer": 1,
+     "x": 1038.582,
+     "y": 778.05,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e3p38",
+     "padNumber": "39",
+     "net": "",
+     "layer": 1,
+     "x": 1018.898,
+     "y": 778.05,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e3p39",
+     "padNumber": "40",
+     "net": "",
+     "layer": 1,
+     "x": 999.212,
+     "y": 778.05,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e3p40",
+     "padNumber": "41",
+     "net": "",
+     "layer": 1,
+     "x": 979.528,
+     "y": 778.05,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e3p41",
+     "padNumber": "42",
+     "net": "",
+     "layer": 1,
+     "x": 959.842,
+     "y": 778.05,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e3p42",
+     "padNumber": "43",
+     "net": "",
+     "layer": 1,
+     "x": 940.158,
+     "y": 778.05,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e3p43",
+     "padNumber": "44",
+     "net": "",
+     "layer": 1,
+     "x": 920.472,
+     "y": 778.05,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e3p44",
+     "padNumber": "45",
+     "net": "",
+     "layer": 1,
+     "x": 900.788,
+     "y": 778.05,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e3p45",
+     "padNumber": "46",
+     "net": "",
+     "layer": 1,
+     "x": 881.102,
+     "y": 778.05,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e3p46",
+     "padNumber": "47",
+     "net": "",
+     "layer": 1,
+     "x": 861.418,
+     "y": 778.05,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e3p47",
+     "padNumber": "48",
+     "net": "+3V3",
+     "layer": 1,
+     "x": 841.732,
+     "y": 778.05,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e3p48",
+     "padNumber": "49",
+     "net": "GND",
+     "layer": 1,
+     "x": 950.0,
+     "y": 650.0,
+     "width": 200,
+     "height": 200
+    }
+   ]
+  },
+  {
+   "primitiveId": "e4",
+   "designator": "R1",
+   "device": "0402WGF4701TCE",
+   "layer": 1,
+   "x": 700,
+   "y": 320,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 677.15,
+    "minY": 276.5,
+    "maxX": 722.85,
+    "maxY": 363.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e4p0",
+     "padNumber": "1",
+     "net": "HDMI_5V",
+     "layer": 1,
+     "x": 700.0,
+     "y": 300.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e4p1",
+     "padNumber": "2",
+     "net": "HDMI_SCL",
+     "layer": 1,
+     "x": 700.0,
+     "y": 339.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e5",
+   "designator": "R2",
+   "device": "0402WGF4701TCE",
+   "layer": 1,
+   "x": 760,
+   "y": 320,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 737.15,
+    "minY": 276.5,
+    "maxX": 782.85,
+    "maxY": 363.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e5p0",
+     "padNumber": "1",
+     "net": "HDMI_5V",
+     "layer": 1,
+     "x": 760.0,
+     "y": 300.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e5p1",
+     "padNumber": "2",
+     "net": "HDMI_SDA",
+     "layer": 1,
+     "x": 760.0,
+     "y": 339.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e6",
+   "designator": "R3",
+   "device": "0402WGF1002TCE",
+   "layer": 1,
+   "x": 820,
+   "y": 320,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 797.15,
+    "minY": 276.5,
+    "maxX": 842.85,
+    "maxY": 363.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e6p0",
+     "padNumber": "1",
+     "net": "HDMI_HPD",
+     "layer": 1,
+     "x": 820.0,
+     "y": 300.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e6p1",
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 1,
+     "x": 820.0,
+     "y": 339.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e7",
+   "designator": "F1",
+   "device": "SMD0805P050TF",
+   "layer": 1,
+   "x": 400,
+   "y": 230,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 330.9,
+    "minY": 192.4,
+    "maxX": 469.1,
+    "maxY": 267.6
+   },
+   "pads": [
+    {
+     "primitiveId": "e7p0",
+     "padNumber": "1",
+     "net": "5V_IN",
+     "layer": 1,
+     "x": 362.6,
+     "y": 230.0,
+     "width": 39.4,
+     "height": 51.2
+    },
+    {
+     "primitiveId": "e7p1",
+     "padNumber": "2",
+     "net": "HDMI_5V",
+     "layer": 1,
+     "x": 437.4,
+     "y": 230.0,
+     "width": 39.4,
+     "height": 51.2
+    }
+   ]
+  },
+  {
+   "primitiveId": "e8",
+   "designator": "J2",
+   "device": "KF301-5.0-2P",
+   "layer": 1,
+   "x": 1500,
+   "y": 1150,
+   "rotation": 0,
+   "locked": true,
+   "bbox": {
+    "minX": 1348.0,
+    "minY": 1098.0,
+    "maxX": 1652.0,
+    "maxY": 1202.0
+   },
+   "pads": [
+    {
+     "primitiveId": "e8p0",
+     "padNumber": "1",
+     "net": "5V_IN",
+     "layer": 12,
+     "x": 1400.0,
+     "y": 1150.0,
+     "width": 80,
+     "height": 80
+    },
+    {
+     "primitiveId": "e8p1",
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 12,
+     "x": 1600.0,
+     "y": 1150.0,
+     "width": 80,
+     "height": 80
+    }
+   ]
+  },
+  {
+   "primitiveId": "e9",
+   "designator": "C5",
+   "device": "CL05B104KO5NNNC",
+   "layer": 1,
+   "x": 870,
+   "y": 890,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 847.15,
+    "minY": 846.5,
+    "maxX": 892.85,
+    "maxY": 933.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e9p0",
+     "padNumber": "1",
+     "net": "+3V3",
+     "layer": 1,
+     "x": 870.0,
+     "y": 870.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e9p1",
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 1,
+     "x": 870.0,
+     "y": 909.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e10",
+   "designator": "C6",
+   "device": "CL05B104KO5NNNC",
+   "layer": 1,
+   "x": 1030,
+   "y": 890,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 1007.15,
+    "minY": 846.5,
+    "maxX": 1052.85,
+    "maxY": 933.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e10p0",
+     "padNumber": "1",
+     "net": "+3V3",
+     "layer": 1,
+     "x": 1030.0,
+     "y": 870.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e10p1",
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 1,
+     "x": 1030.0,
+     "y": 909.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e11",
+   "designator": "C7",
+   "device": "CL05B104KO5NNNC",
+   "layer": 1,
+   "x": 1180,
+   "y": 410,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 1157.15,
+    "minY": 366.5,
+    "maxX": 1202.85,
+    "maxY": 453.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e11p0",
+     "padNumber": "1",
+     "net": "+3V3",
+     "layer": 1,
+     "x": 1180.0,
+     "y": 390.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e11p1",
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 1,
+     "x": 1180.0,
+     "y": 429.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e12",
+   "designator": "U9",
+   "device": "AMS1117-3.3",
+   "layer": 1,
+   "x": 1500,
+   "y": 500,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 1373.9,
+    "minY": 328.5,
+    "maxX": 1626.1,
+    "maxY": 671.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e12p0",
+     "padNumber": "1",
+     "net": "GND",
+     "layer": 1,
+     "x": 1409.4,
+     "y": 380.0,
+     "width": 47,
+     "height": 79
+    },
+    {
+     "primitiveId": "e12p1",
+     "padNumber": "2",
+     "net": "+3V3",
+     "layer": 1,
+     "x": 1500.0,
+     "y": 380.0,
+     "width": 47,
+     "height": 79
+    },
+    {
+     "primitiveId": "e12p2",
+     "padNumber": "3",
+     "net": "5V_IN",
+     "layer": 1,
+     "x": 1590.6,
+     "y": 380.0,
+     "width": 47,
+     "height": 79
+    },
+    {
+     "primitiveId": "e12p3",
+     "padNumber": "4",
+     "net": "+3V3",
+     "layer": 1,
+     "x": 1500.0,
+     "y": 620.0,
+     "width": 130,
+     "height": 79
+    }
+   ]
+  },
+  {
+   "primitiveId": "e13",
+   "designator": "C90",
+   "device": "CL10A106KP8NNNC",
+   "layer": 1,
+   "x": 1590,
+   "y": 250,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 1530.75,
+    "minY": 220.3,
+    "maxX": 1649.25,
+    "maxY": 279.7
+   },
+   "pads": [
+    {
+     "primitiveId": "e13p0",
+     "padNumber": "1",
+     "net": "5V_IN",
+     "layer": 1,
+     "x": 1558.5,
+     "y": 250.0,
+     "width": 31.5,
+     "height": 35.4
+    },
+    {
+     "primitiveId": "e13p1",
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 1,
+     "x": 1621.5,
+     "y": 250.0,
+     "width": 31.5,
+     "height": 35.4
+    }
+   ]
+  },
+  {
+   "primitiveId": "e14",
+   "designator": "C91",
+   "device": "CL10A106KP8NNNC",
+   "layer": 1,
+   "x": 1410,
+   "y": 750,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 1350.75,
+    "minY": 720.3,
+    "maxX": 1469.25,
+    "maxY": 779.7
+   },
+   "pads": [
+    {
+     "primitiveId": "e14p0",
+     "padNumber": "1",
+     "net": "+3V3",
+     "layer": 1,
+     "x": 1378.5,
+     "y": 750.0,
+     "width": 31.5,
+     "height": 35.4
+    },
+    {
+     "primitiveId": "e14p1",
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 1,
+     "x": 1441.5,
+     "y": 750.0,
+     "width": 31.5,
+     "height": 35.4
+    }
+   ]
+  }
+ ],
+ "outline": {
+  "bbox": {
+   "minX": 0,
+   "minY": 0,
+   "maxX": 1800,
+   "maxY": 1300
+  },
+  "points": [
+   [
+    0,
+    0
+   ],
+   [
+    1800,
+    0
+   ],
+   [
+    1800,
+    1300
+   ],
+   [
+    0,
+    1300
+   ]
+  ],
+  "source": "synthetic"
+ },
+ "copperLayers": 4,
+ "rules": {
+  "clearanceMil": 4,
+  "trackWidthMil": 4,
+  "trackWidthMinMil": 3.5,
+  "viaDrillMil": 8,
+  "viaDiameterMil": 16,
+  "copperToEdgeMil": 12
+ },
+ "project": "stress-hs/hdmi-tx",
+ "_provenance": "synthetic high-speed stress case (gen.py): HDMI 1.4 source: TMDS D0-D2 + clock (100 Ω) through two flow-through ESD arrays to a type-A receptacle; DDC with pull-ups, HPD, +5V with a PTC; lanes inter-pair matched (HDMI_LANES recognised from the names)"
+}

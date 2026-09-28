@@ -240,7 +240,7 @@ func Joint(b *Board, an *Analysis, c *Circuit, st *Stackup, rr *RouteResult, drc
 			bad := 0
 			for _, f := range si.Findings {
 				switch f.Kind {
-				case "skew", "split-crossing", "vias":
+				case "skew", "split-crossing", "vias", "group-skew":
 					bad++
 				}
 			}

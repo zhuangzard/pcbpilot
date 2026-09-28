@@ -1,0 +1,125 @@
+{
+ "case": "gbe-rj45",
+ "title": "Gigabit Ethernet: RTL8211-class PHY → 4 MDI pairs (100 Ω) → discrete 1000BASE-T magnetics (SOIC-24W) → RJ45; Bob-Smith termination (4× 75 Ω → 1 nF/2 kV → chassis); chassis ↔ GND 1 nF/2 kV; IEEE 802.3 1500 Vrms isolation declared on the chassis/cable side",
+ "layers": 4,
+ "stackup": {
+  "h": 8.28,
+  "er": 4.4,
+  "name": "JLC04161H-7628"
+ },
+ "pairs": [
+  {
+   "p": "ETH_MDI0_P",
+   "n": "ETH_MDI0_N",
+   "interface": "ETH",
+   "ohm": 100,
+   "maxSkewMil": 50,
+   "maxVias": 2,
+   "widthMil": 8.6,
+   "gapMil": 6.0,
+   "why": "100 Ω edge-coupled microstrip on JLC04161H-7628 (h=8.28 mil, εr=4.4, t=1.378 mil, s=6 mil): Hammerstad-Jensen w=8.58 mil (IPC-2141 check 98.5 Ω)"
+  },
+  {
+   "p": "ETH_MDI1_P",
+   "n": "ETH_MDI1_N",
+   "interface": "ETH",
+   "ohm": 100,
+   "maxSkewMil": 50,
+   "maxVias": 2,
+   "widthMil": 8.6,
+   "gapMil": 6.0,
+   "why": "100 Ω edge-coupled microstrip on JLC04161H-7628 (h=8.28 mil, εr=4.4, t=1.378 mil, s=6 mil): Hammerstad-Jensen w=8.58 mil (IPC-2141 check 98.5 Ω)"
+  },
+  {
+   "p": "ETH_MDI2_P",
+   "n": "ETH_MDI2_N",
+   "interface": "ETH",
+   "ohm": 100,
+   "maxSkewMil": 50,
+   "maxVias": 2,
+   "widthMil": 8.6,
+   "gapMil": 6.0,
+   "why": "100 Ω edge-coupled microstrip on JLC04161H-7628 (h=8.28 mil, εr=4.4, t=1.378 mil, s=6 mil): Hammerstad-Jensen w=8.58 mil (IPC-2141 check 98.5 Ω)"
+  },
+  {
+   "p": "ETH_MDI3_P",
+   "n": "ETH_MDI3_N",
+   "interface": "ETH",
+   "ohm": 100,
+   "maxSkewMil": 50,
+   "maxVias": 2,
+   "widthMil": 8.6,
+   "gapMil": 6.0,
+   "why": "100 Ω edge-coupled microstrip on JLC04161H-7628 (h=8.28 mil, εr=4.4, t=1.378 mil, s=6 mil): Hammerstad-Jensen w=8.58 mil (IPC-2141 check 98.5 Ω)"
+  },
+  {
+   "p": "ETH_TRD0_P",
+   "n": "ETH_TRD0_N",
+   "interface": "ETH",
+   "ohm": 100,
+   "maxSkewMil": 50,
+   "maxVias": 2,
+   "widthMil": 8.6,
+   "gapMil": 6.0,
+   "why": "100 Ω edge-coupled microstrip on JLC04161H-7628 (h=8.28 mil, εr=4.4, t=1.378 mil, s=6 mil): Hammerstad-Jensen w=8.58 mil (IPC-2141 check 98.5 Ω)"
+  },
+  {
+   "p": "ETH_TRD1_P",
+   "n": "ETH_TRD1_N",
+   "interface": "ETH",
+   "ohm": 100,
+   "maxSkewMil": 50,
+   "maxVias": 2,
+   "widthMil": 8.6,
+   "gapMil": 6.0,
+   "why": "100 Ω edge-coupled microstrip on JLC04161H-7628 (h=8.28 mil, εr=4.4, t=1.378 mil, s=6 mil): Hammerstad-Jensen w=8.58 mil (IPC-2141 check 98.5 Ω)"
+  },
+  {
+   "p": "ETH_TRD2_P",
+   "n": "ETH_TRD2_N",
+   "interface": "ETH",
+   "ohm": 100,
+   "maxSkewMil": 50,
+   "maxVias": 2,
+   "widthMil": 8.6,
+   "gapMil": 6.0,
+   "why": "100 Ω edge-coupled microstrip on JLC04161H-7628 (h=8.28 mil, εr=4.4, t=1.378 mil, s=6 mil): Hammerstad-Jensen w=8.58 mil (IPC-2141 check 98.5 Ω)"
+  },
+  {
+   "p": "ETH_TRD3_P",
+   "n": "ETH_TRD3_N",
+   "interface": "ETH",
+   "ohm": 100,
+   "maxSkewMil": 50,
+   "maxVias": 2,
+   "widthMil": 8.6,
+   "gapMil": 6.0,
+   "why": "100 Ω edge-coupled microstrip on JLC04161H-7628 (h=8.28 mil, εr=4.4, t=1.378 mil, s=6 mil): Hammerstad-Jensen w=8.58 mil (IPC-2141 check 98.5 Ω)"
+  }
+ ],
+ "isolation": {
+  "domainNet": "CHASSIS_GND",
+  "insulation": "basic",
+  "requiredWithstandV": 2121.3,
+  "clearanceMm": 1.5,
+  "creepageMm": 1.5,
+  "bridges": [
+   "C21",
+   "T1"
+  ],
+  "why": "IEEE 802.3 §40.6.1.1: 1500 Vrms electric strength → 2121 V peak; IEC 60664-1 Table F.2 case A, PD2, step table → 2.5 kV row = 1.5 mm clearance; working voltage ≤ 3.3 V → creepage (Table F.4) below it, raised to the clearance → 1.5 mm; the gap under the magnetics (pin rows 420 mil apart) holds it without a slot"
+ },
+ "findingsMustNot": [
+  "reference-plane-missing",
+  "impedance-uncontrolled",
+  "insulation-slot"
+ ],
+ "route": {
+  "minCompletion": 100,
+  "maxDRC": 0,
+  "maxSplitCrossings": 0,
+  "maxIsolationFindings": 0
+ },
+ "negative": false,
+ "note": "1000BASE-T MDI: 100 Ω ±10 %, intra-pair ≤ 50 mil, ≤ 2 vias; no plane under the cable side of the magnetics"
+}

@@ -80,6 +80,10 @@ func (c *ctx) maxPinCurrent(ref string) (float64, string, string) {
 }
 
 func (c *ctx) buildFindings() {
+	if fromBoard(c.d) {
+		c.add("info", "netlist-from-board", fmt.Sprintf("netlist rebuilt from the PCB pads (%d parts): pin names and part values are unknown — currents, ratings and block summaries are heuristic; impedance, pairs and length groups come from net names and the stackup", len(c.d.Parts)), nil, nil,
+			"derive from the schematic (--connectivity/--values or live) when it is available")
+	}
 	c.findSim()
 	c.findRegulators()
 	c.findInductors()
@@ -541,7 +545,7 @@ func (c *ctx) findNets() {
 	// USB data lines at a connector need ESD protection.
 	for _, net := range sortedKeys(c.out.Nets) {
 		np := c.out.Nets[net]
-		if np.Interface != "USB" {
+		if np.Interface != "USB" && np.Interface != "USB3" {
 			continue
 		}
 		conn, prot := "", false
@@ -556,6 +560,11 @@ func (c *ctx) findNets() {
 		if conn != "" && !prot {
 			c.add("warn", "usb-esd", fmt.Sprintf("%s leaves the board at %s without an ESD clamp", net, conn), []string{conn}, []string{net}, "add a low-capacitance USB ESD array (e.g. USBLC6-2SC6) next to the connector")
 		}
+	}
+	c.findACCoupling()
+	if len(c.noReference) > 0 {
+		c.add("error", "reference-plane-missing", fmt.Sprintf("%d-layer stackup has no reference plane next to the signal layers: %s run at ≥ 1 Gb/s and need a controlled impedance and an unbroken return path", c.layers, strings.Join(c.noReference, ", ")), nil, c.noReference,
+			"use a 4+ layer stackup with the pairs on a layer adjacent to solid GND (JLC04161H-7628: L1 over L2 GND); a 2-layer board cannot hold 85–100 Ω at a routable width")
 	}
 	if len(c.uncontrolled) > 0 {
 		c.add("warn", "impedance-uncontrolled", fmt.Sprintf("%d-layer stackup cannot hold the target impedance of %s", c.layers, strings.Join(c.uncontrolled, ", ")), nil, c.uncontrolled,
@@ -590,5 +599,80 @@ func (c *ctx) findSafety() {
 		if d.Kind == "floating" {
 			c.add("warn", "floating-domain", fmt.Sprintf("parts %s have no ground reference", strings.Join(d.Parts, ", ")), d.Parts, nil, "check that the part is connected, or declare the domain in spec.domains")
 		}
+	}
+}
+
+// acCouplingRange is the series AC-coupling capacitor range (F) of the
+// interfaces whose transmitter needs one: USB 3.x (USB 3.2 §6.2: 75–265 nF;
+// 100 nF typical) and PCIe (CEM: 75–265 nF for 2.5/5 GT/s; 176–265 nF from
+// 8 GT/s — 220 nF covers both), SATA (≤ 12 nF, 10 nF typical).
+var acCouplingRange = map[string][2]float64{"USB3": {75e-9, 265e-9}, "PCIE": {75e-9, 265e-9}, "SATA": {3e-9, 12e-9}}
+
+// findACCoupling checks the transmit pairs of AC-coupled interfaces: a
+// series capacitor on each member, equal values on P and N, value inside
+// the interface range. Only the TX direction is checked — the RX caps of a
+// link sit at the far transmitter (cable partner, add-in card).
+func (c *ctx) findACCoupling() {
+	type seen struct {
+		caps []string
+		tx   []string
+	}
+	by := map[string]*seen{}
+	for _, net := range sortedKeys(c.out.Nets) {
+		np := c.out.Nets[net]
+		if np.Role != "diff" {
+			continue
+		}
+		rng, ok := acCouplingRange[np.Interface]
+		if !ok || !strings.Contains(strings.ToUpper(net), "TX") {
+			continue
+		}
+		s := by[np.Interface]
+		if s == nil {
+			s = &seen{}
+			by[np.Interface] = s
+		}
+		s.tx = append(s.tx, net)
+		for _, ref := range c.partsOn(net) {
+			if c.kind(ref) != pcbauto.KindCapacitor {
+				continue
+			}
+			ns := c.partNets(ref)
+			if len(ns) != 2 || c.isGround(ns[0]) || c.isGround(ns[1]) || c.isPowerNet(ns[0]) || c.isPowerNet(ns[1]) {
+				continue
+			}
+			if has(s.caps, ref) {
+				continue
+			}
+			s.caps = append(s.caps, ref)
+			other := ns[0]
+			if other == net {
+				other = ns[1]
+			}
+			v := c.capacitance(ref)
+			if v > 0 && (v < rng[0] || v > rng[1]) {
+				c.add("warn", "ac-coupling-value", fmt.Sprintf("%s AC-coupling cap %s is %s — outside %s–%s for %s", net, ref, fmtF(v), fmtF(rng[0]), fmtF(rng[1]), np.Interface), []string{ref}, []string{net, other},
+					"use 100 nF (USB 3.x, PCIe ≤ 5 GT/s) / 220 nF (PCIe 8 GT/s+) X7R 0201/0402, one per member, placed as a symmetric pair")
+			}
+			if pn := c.out.Nets[np.DiffPair]; pn != nil {
+				for _, r2 := range c.partsOn(np.DiffPair) {
+					if c.kind(r2) == pcbauto.KindCapacitor && r2 != ref && len(c.partNets(r2)) == 2 && has(c.partNets(r2), np.DiffPair) {
+						if v2 := c.capacitance(r2); v > 0 && v2 > 0 && math.Abs(v-v2) > 1e-12 && strings.HasSuffix(strings.ToUpper(net), "P") {
+							c.add("warn", "ac-coupling-mismatch", fmt.Sprintf("%s/%s AC caps %s (%s) and %s (%s) differ", net, np.DiffPair, ref, fmtF(v), r2, fmtF(v2)), []string{ref, r2}, []string{net, np.DiffPair},
+								"both members of a pair need the same capacitor (value, package, orientation) for a balanced pair")
+						}
+					}
+				}
+			}
+		}
+	}
+	for _, iface := range sortedKeys(by) {
+		s := by[iface]
+		if len(s.caps) == 0 {
+			c.add("warn", "ac-coupling-missing", fmt.Sprintf("%s transmit pairs %s have no series AC-coupling capacitor", iface, strings.Join(s.tx, ", ")), nil, s.tx,
+				"add one series capacitor per TX member next to the transmitter (USB 3.x / PCIe: 75–265 nF, typically 100 nF)")
+			continue
+		}
+		c.add("info", "ac-coupling", fmt.Sprintf("%s TX AC coupling: %s", iface, strings.Join(sortRefs(s.caps), ", ")), sortRefs(s.caps), s.tx, "place each pair of caps side by side, same package and orientation, near the transmitter")
 	}
 }

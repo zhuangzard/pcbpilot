@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/zhuangzard/pcbpilot/pkg/designreport"
 	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
 )
 
@@ -241,7 +242,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 
 	// ── run ──────────────────────────────────────────────────────────────
 	{
-		var outDir, replaceJournal string
+		var outDir, replaceJournal, reportDir, reportName string
 		var place, noRoute, refine, macro bool
 		var only []string
 		var seed int64
@@ -472,11 +473,23 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 					}
 				}
 				fmt.Fprintf(stdout, "wrote %s/{%s} (%d playbook steps)\n", outDir, names, len(pb.Steps))
+				if reportDir != "" {
+					// P11: publish the next design-report version from what this
+					// run has (intent, sim, this plan dir, the board dump).
+					dir, dr, err := runDesignReport(designReportOpts{outDir: reportDir, version: "auto", project: reportName,
+						intent: in.intent, sim: in.sim, planDir: outDir, board: in.board, maxImageBytes: designreport.DefaultMaxImageBytes}, stderr)
+					if err != nil {
+						return fmt.Errorf("design report: %w", err)
+					}
+					fmt.Fprintf(stdout, "wrote %s/{report.html,report.md,report.json} — %s %s\n", dir, dr.VersionLabel, dr.Verdict.Status)
+				}
 				return nil
 			},
 		}
 		addInputs(c)
 		c.Flags().StringVar(&outDir, "out-dir", "", "directory for plan.json, playbook.json, preview.svg, report.md")
+		c.Flags().StringVar(&reportDir, "report-dir", "", "also publish the next design-report version here (reports/<name>/; see 'pcbpilot report design'): intent/sim/board/this plan; add DRC/check/images later with 'report design'")
+		c.Flags().StringVar(&reportName, "report-name", "", "project name on the report cover (default: the report dir name)")
 		c.Flags().StringVar(&replaceJournal, "replace", "", "apply journal of the previous pcbauto playbook: its captured holes/keep-outs (MECH_*) are deleted first, so a re-plan does not stack a second set")
 		c.Flags().BoolVar(&place, "place", false, "run the placer (mechanics, domain zones, blocks) before routing")
 		c.Flags().BoolVar(&refine, "refine", false, "with --place: refine the current placement instead of constructing one")

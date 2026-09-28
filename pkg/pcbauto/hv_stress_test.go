@@ -356,3 +356,20 @@ func TestPairClearanceFloatingIsland(t *testing.T) {
 		t.Errorf("KS_H|HV_GND = %.1f mil, want the full 520 V swing", got)
 	}
 }
+
+// A 6 mil intent class over a 5.98 mil live rule is rounding, not high
+// voltage: the HV machinery stays off (it re-routed the ESP32 mini).
+func TestHVMachineryNeedsRealExcess(t *testing.T) {
+	b := hvBoard(hvPart("R1", "1206", Point{1000, 1000}, smdPad("1", "A", -58, 0, 45, 71), smdPad("2", "B", 58, 0, 45, 71)))
+	b.Rules.Clearance = 5.98
+	in := &Intent{Domains: []IntentDomain{{ID: "S", Kind: "SELV", Nets: []string{"A", "B"}}},
+		Nets: map[string]*IntentNet{"A": {Domain: "S", ClearanceMil: 6, Voltage: IntentVoltage{Max: 5, Nom: 5, Peak: 5}}, "B": {Domain: "S", ClearanceMil: 6}}}
+	an := Analyze(b, PowerSpec{Intent: in}, nil)
+	if got := an.PairClearanceMil("A", "B", b.Rules); got != 6 {
+		t.Fatalf("pair clearance %.2f, want the plain 6", got)
+	}
+	pl := &placer{b: b, an: an}
+	if pl.hvPadCost(b.Parts[0], b.Parts[0].Body()) != 0 {
+		t.Fatal("HV pad cost on a SELV board")
+	}
+}

@@ -1,0 +1,5104 @@
+{
+ "components": [
+  {
+   "primitiveId": "e0",
+   "designator": "U1",
+   "device": "DDR-CTRL-BGA196",
+   "layer": 1,
+   "x": 700,
+   "y": 800,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 423.095,
+    "minY": 523.095,
+    "maxX": 976.905,
+    "maxY": 1076.905
+   },
+   "pads": [
+    {
+     "primitiveId": "e0p0",
+     "padNumber": "A1",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 444.095,
+     "y": 1055.905,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p1",
+     "padNumber": "A2",
+     "net": "",
+     "layer": 1,
+     "x": 483.465,
+     "y": 1055.905,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p2",
+     "padNumber": "A3",
+     "net": "GND",
+     "layer": 1,
+     "x": 522.835,
+     "y": 1055.905,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p3",
+     "padNumber": "A4",
+     "net": "",
+     "layer": 1,
+     "x": 562.205,
+     "y": 1055.905,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p4",
+     "padNumber": "A5",
+     "net": "",
+     "layer": 1,
+     "x": 601.575,
+     "y": 1055.905,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p5",
+     "padNumber": "A6",
+     "net": "GND",
+     "layer": 1,
+     "x": 640.945,
+     "y": 1055.905,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p6",
+     "padNumber": "A7",
+     "net": "",
+     "layer": 1,
+     "x": 680.315,
+     "y": 1055.905,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p7",
+     "padNumber": "A8",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 719.685,
+     "y": 1055.905,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p8",
+     "padNumber": "A9",
+     "net": "GND",
+     "layer": 1,
+     "x": 759.055,
+     "y": 1055.905,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p9",
+     "padNumber": "A10",
+     "net": "",
+     "layer": 1,
+     "x": 798.425,
+     "y": 1055.905,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p10",
+     "padNumber": "A11",
+     "net": "",
+     "layer": 1,
+     "x": 837.795,
+     "y": 1055.905,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p11",
+     "padNumber": "A12",
+     "net": "DDR_A4",
+     "layer": 1,
+     "x": 877.165,
+     "y": 1055.905,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p12",
+     "padNumber": "A13",
+     "net": "DDR_DQ11",
+     "layer": 1,
+     "x": 916.535,
+     "y": 1055.905,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p13",
+     "padNumber": "A14",
+     "net": "DDR_DQ0",
+     "layer": 1,
+     "x": 955.905,
+     "y": 1055.905,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p14",
+     "padNumber": "B1",
+     "net": "",
+     "layer": 1,
+     "x": 444.095,
+     "y": 1016.535,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p15",
+     "padNumber": "B2",
+     "net": "GND",
+     "layer": 1,
+     "x": 483.465,
+     "y": 1016.535,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p16",
+     "padNumber": "B3",
+     "net": "",
+     "layer": 1,
+     "x": 522.835,
+     "y": 1016.535,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p17",
+     "padNumber": "B4",
+     "net": "",
+     "layer": 1,
+     "x": 562.205,
+     "y": 1016.535,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p18",
+     "padNumber": "B5",
+     "net": "GND",
+     "layer": 1,
+     "x": 601.575,
+     "y": 1016.535,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p19",
+     "padNumber": "B6",
+     "net": "",
+     "layer": 1,
+     "x": 640.945,
+     "y": 1016.535,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p20",
+     "padNumber": "B7",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 680.315,
+     "y": 1016.535,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p21",
+     "padNumber": "B8",
+     "net": "GND",
+     "layer": 1,
+     "x": 719.685,
+     "y": 1016.535,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p22",
+     "padNumber": "B9",
+     "net": "",
+     "layer": 1,
+     "x": 759.055,
+     "y": 1016.535,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p23",
+     "padNumber": "B10",
+     "net": "",
+     "layer": 1,
+     "x": 798.425,
+     "y": 1016.535,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p24",
+     "padNumber": "B11",
+     "net": "GND",
+     "layer": 1,
+     "x": 837.795,
+     "y": 1016.535,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p25",
+     "padNumber": "B12",
+     "net": "DDR_A5",
+     "layer": 1,
+     "x": 877.165,
+     "y": 1016.535,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p26",
+     "padNumber": "B13",
+     "net": "DDR_DQS1_P",
+     "layer": 1,
+     "x": 916.535,
+     "y": 1016.535,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p27",
+     "padNumber": "B14",
+     "net": "DDR_DQ1",
+     "layer": 1,
+     "x": 955.905,
+     "y": 1016.535,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p28",
+     "padNumber": "C1",
+     "net": "GND",
+     "layer": 1,
+     "x": 444.095,
+     "y": 977.165,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p29",
+     "padNumber": "C2",
+     "net": "",
+     "layer": 1,
+     "x": 483.465,
+     "y": 977.165,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p30",
+     "padNumber": "C3",
+     "net": "",
+     "layer": 1,
+     "x": 522.835,
+     "y": 977.165,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p31",
+     "padNumber": "C4",
+     "net": "GND",
+     "layer": 1,
+     "x": 562.205,
+     "y": 977.165,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p32",
+     "padNumber": "C5",
+     "net": "",
+     "layer": 1,
+     "x": 601.575,
+     "y": 977.165,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p33",
+     "padNumber": "C6",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 640.945,
+     "y": 977.165,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p34",
+     "padNumber": "C7",
+     "net": "GND",
+     "layer": 1,
+     "x": 680.315,
+     "y": 977.165,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p35",
+     "padNumber": "C8",
+     "net": "",
+     "layer": 1,
+     "x": 719.685,
+     "y": 977.165,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p36",
+     "padNumber": "C9",
+     "net": "",
+     "layer": 1,
+     "x": 759.055,
+     "y": 977.165,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p37",
+     "padNumber": "C10",
+     "net": "GND",
+     "layer": 1,
+     "x": 798.425,
+     "y": 977.165,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p38",
+     "padNumber": "C11",
+     "net": "",
+     "layer": 1,
+     "x": 837.795,
+     "y": 977.165,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p39",
+     "padNumber": "C12",
+     "net": "DDR_A6",
+     "layer": 1,
+     "x": 877.165,
+     "y": 977.165,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p40",
+     "padNumber": "C13",
+     "net": "DDR_DQS1_N",
+     "layer": 1,
+     "x": 916.535,
+     "y": 977.165,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p41",
+     "padNumber": "C14",
+     "net": "DDR_DQ2",
+     "layer": 1,
+     "x": 955.905,
+     "y": 977.165,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p42",
+     "padNumber": "D1",
+     "net": "",
+     "layer": 1,
+     "x": 444.095,
+     "y": 937.795,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p43",
+     "padNumber": "D2",
+     "net": "",
+     "layer": 1,
+     "x": 483.465,
+     "y": 937.795,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p44",
+     "padNumber": "D3",
+     "net": "GND",
+     "layer": 1,
+     "x": 522.835,
+     "y": 937.795,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p45",
+     "padNumber": "D4",
+     "net": "",
+     "layer": 1,
+     "x": 562.205,
+     "y": 937.795,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p46",
+     "padNumber": "D5",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 601.575,
+     "y": 937.795,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p47",
+     "padNumber": "D6",
+     "net": "GND",
+     "layer": 1,
+     "x": 640.945,
+     "y": 937.795,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p48",
+     "padNumber": "D7",
+     "net": "",
+     "layer": 1,
+     "x": 680.315,
+     "y": 937.795,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p49",
+     "padNumber": "D8",
+     "net": "",
+     "layer": 1,
+     "x": 719.685,
+     "y": 937.795,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p50",
+     "padNumber": "D9",
+     "net": "GND",
+     "layer": 1,
+     "x": 759.055,
+     "y": 937.795,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p51",
+     "padNumber": "D10",
+     "net": "",
+     "layer": 1,
+     "x": 798.425,
+     "y": 937.795,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p52",
+     "padNumber": "D11",
+     "net": "",
+     "layer": 1,
+     "x": 837.795,
+     "y": 937.795,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p53",
+     "padNumber": "D12",
+     "net": "DDR_A7",
+     "layer": 1,
+     "x": 877.165,
+     "y": 937.795,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p54",
+     "padNumber": "D13",
+     "net": "DDR_DQ12",
+     "layer": 1,
+     "x": 916.535,
+     "y": 937.795,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p55",
+     "padNumber": "D14",
+     "net": "DDR_DQ3",
+     "layer": 1,
+     "x": 955.905,
+     "y": 937.795,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p56",
+     "padNumber": "E1",
+     "net": "",
+     "layer": 1,
+     "x": 444.095,
+     "y": 898.425,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p57",
+     "padNumber": "E2",
+     "net": "GND",
+     "layer": 1,
+     "x": 483.465,
+     "y": 898.425,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p58",
+     "padNumber": "E3",
+     "net": "",
+     "layer": 1,
+     "x": 522.835,
+     "y": 898.425,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p59",
+     "padNumber": "E4",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 562.205,
+     "y": 898.425,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p60",
+     "padNumber": "E5",
+     "net": "GND",
+     "layer": 1,
+     "x": 601.575,
+     "y": 898.425,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p61",
+     "padNumber": "E6",
+     "net": "",
+     "layer": 1,
+     "x": 640.945,
+     "y": 898.425,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p62",
+     "padNumber": "E7",
+     "net": "",
+     "layer": 1,
+     "x": 680.315,
+     "y": 898.425,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p63",
+     "padNumber": "E8",
+     "net": "GND",
+     "layer": 1,
+     "x": 719.685,
+     "y": 898.425,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p64",
+     "padNumber": "E9",
+     "net": "",
+     "layer": 1,
+     "x": 759.055,
+     "y": 898.425,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p65",
+     "padNumber": "E10",
+     "net": "",
+     "layer": 1,
+     "x": 798.425,
+     "y": 898.425,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p66",
+     "padNumber": "E11",
+     "net": "GND",
+     "layer": 1,
+     "x": 837.795,
+     "y": 898.425,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p67",
+     "padNumber": "E12",
+     "net": "DDR_A8",
+     "layer": 1,
+     "x": 877.165,
+     "y": 898.425,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p68",
+     "padNumber": "E13",
+     "net": "DDR_DQ13",
+     "layer": 1,
+     "x": 916.535,
+     "y": 898.425,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p69",
+     "padNumber": "E14",
+     "net": "DDR_DQS0_P",
+     "layer": 1,
+     "x": 955.905,
+     "y": 898.425,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p70",
+     "padNumber": "F1",
+     "net": "GND",
+     "layer": 1,
+     "x": 444.095,
+     "y": 859.055,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p71",
+     "padNumber": "F2",
+     "net": "",
+     "layer": 1,
+     "x": 483.465,
+     "y": 859.055,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p72",
+     "padNumber": "F3",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 522.835,
+     "y": 859.055,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p73",
+     "padNumber": "F4",
+     "net": "GND",
+     "layer": 1,
+     "x": 562.205,
+     "y": 859.055,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p74",
+     "padNumber": "F5",
+     "net": "",
+     "layer": 1,
+     "x": 601.575,
+     "y": 859.055,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p75",
+     "padNumber": "F6",
+     "net": "",
+     "layer": 1,
+     "x": 640.945,
+     "y": 859.055,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p76",
+     "padNumber": "F7",
+     "net": "GND",
+     "layer": 1,
+     "x": 680.315,
+     "y": 859.055,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p77",
+     "padNumber": "F8",
+     "net": "",
+     "layer": 1,
+     "x": 719.685,
+     "y": 859.055,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p78",
+     "padNumber": "F9",
+     "net": "",
+     "layer": 1,
+     "x": 759.055,
+     "y": 859.055,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p79",
+     "padNumber": "F10",
+     "net": "GND",
+     "layer": 1,
+     "x": 798.425,
+     "y": 859.055,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p80",
+     "padNumber": "F11",
+     "net": "",
+     "layer": 1,
+     "x": 837.795,
+     "y": 859.055,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p81",
+     "padNumber": "F12",
+     "net": "DDR_A9",
+     "layer": 1,
+     "x": 877.165,
+     "y": 859.055,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p82",
+     "padNumber": "F13",
+     "net": "DDR_DQ14",
+     "layer": 1,
+     "x": 916.535,
+     "y": 859.055,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p83",
+     "padNumber": "F14",
+     "net": "DDR_DQS0_N",
+     "layer": 1,
+     "x": 955.905,
+     "y": 859.055,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p84",
+     "padNumber": "G1",
+     "net": "",
+     "layer": 1,
+     "x": 444.095,
+     "y": 819.685,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p85",
+     "padNumber": "G2",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 483.465,
+     "y": 819.685,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p86",
+     "padNumber": "G3",
+     "net": "GND",
+     "layer": 1,
+     "x": 522.835,
+     "y": 819.685,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p87",
+     "padNumber": "G4",
+     "net": "",
+     "layer": 1,
+     "x": 562.205,
+     "y": 819.685,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p88",
+     "padNumber": "G5",
+     "net": "",
+     "layer": 1,
+     "x": 601.575,
+     "y": 819.685,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p89",
+     "padNumber": "G6",
+     "net": "GND",
+     "layer": 1,
+     "x": 640.945,
+     "y": 819.685,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p90",
+     "padNumber": "G7",
+     "net": "",
+     "layer": 1,
+     "x": 680.315,
+     "y": 819.685,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p91",
+     "padNumber": "G8",
+     "net": "",
+     "layer": 1,
+     "x": 719.685,
+     "y": 819.685,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p92",
+     "padNumber": "G9",
+     "net": "GND",
+     "layer": 1,
+     "x": 759.055,
+     "y": 819.685,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p93",
+     "padNumber": "G10",
+     "net": "",
+     "layer": 1,
+     "x": 798.425,
+     "y": 819.685,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p94",
+     "padNumber": "G11",
+     "net": "",
+     "layer": 1,
+     "x": 837.795,
+     "y": 819.685,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p95",
+     "padNumber": "G12",
+     "net": "DDR_A10",
+     "layer": 1,
+     "x": 877.165,
+     "y": 819.685,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p96",
+     "padNumber": "G13",
+     "net": "DDR_DQ15",
+     "layer": 1,
+     "x": 916.535,
+     "y": 819.685,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p97",
+     "padNumber": "G14",
+     "net": "DDR_DQ4",
+     "layer": 1,
+     "x": 955.905,
+     "y": 819.685,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p98",
+     "padNumber": "H1",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 444.095,
+     "y": 780.315,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p99",
+     "padNumber": "H2",
+     "net": "GND",
+     "layer": 1,
+     "x": 483.465,
+     "y": 780.315,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p100",
+     "padNumber": "H3",
+     "net": "",
+     "layer": 1,
+     "x": 522.835,
+     "y": 780.315,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p101",
+     "padNumber": "H4",
+     "net": "",
+     "layer": 1,
+     "x": 562.205,
+     "y": 780.315,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p102",
+     "padNumber": "H5",
+     "net": "GND",
+     "layer": 1,
+     "x": 601.575,
+     "y": 780.315,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p103",
+     "padNumber": "H6",
+     "net": "",
+     "layer": 1,
+     "x": 640.945,
+     "y": 780.315,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p104",
+     "padNumber": "H7",
+     "net": "",
+     "layer": 1,
+     "x": 680.315,
+     "y": 780.315,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p105",
+     "padNumber": "H8",
+     "net": "GND",
+     "layer": 1,
+     "x": 719.685,
+     "y": 780.315,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p106",
+     "padNumber": "H9",
+     "net": "",
+     "layer": 1,
+     "x": 759.055,
+     "y": 780.315,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p107",
+     "padNumber": "H10",
+     "net": "",
+     "layer": 1,
+     "x": 798.425,
+     "y": 780.315,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p108",
+     "padNumber": "H11",
+     "net": "GND",
+     "layer": 1,
+     "x": 837.795,
+     "y": 780.315,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p109",
+     "padNumber": "H12",
+     "net": "DDR_A11",
+     "layer": 1,
+     "x": 877.165,
+     "y": 780.315,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p110",
+     "padNumber": "H13",
+     "net": "DDR_DM1",
+     "layer": 1,
+     "x": 916.535,
+     "y": 780.315,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p111",
+     "padNumber": "H14",
+     "net": "DDR_DQ5",
+     "layer": 1,
+     "x": 955.905,
+     "y": 780.315,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p112",
+     "padNumber": "J1",
+     "net": "GND",
+     "layer": 1,
+     "x": 444.095,
+     "y": 740.945,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p113",
+     "padNumber": "J2",
+     "net": "",
+     "layer": 1,
+     "x": 483.465,
+     "y": 740.945,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p114",
+     "padNumber": "J3",
+     "net": "",
+     "layer": 1,
+     "x": 522.835,
+     "y": 740.945,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p115",
+     "padNumber": "J4",
+     "net": "GND",
+     "layer": 1,
+     "x": 562.205,
+     "y": 740.945,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p116",
+     "padNumber": "J5",
+     "net": "",
+     "layer": 1,
+     "x": 601.575,
+     "y": 740.945,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p117",
+     "padNumber": "J6",
+     "net": "",
+     "layer": 1,
+     "x": 640.945,
+     "y": 740.945,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p118",
+     "padNumber": "J7",
+     "net": "GND",
+     "layer": 1,
+     "x": 680.315,
+     "y": 740.945,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p119",
+     "padNumber": "J8",
+     "net": "",
+     "layer": 1,
+     "x": 719.685,
+     "y": 740.945,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p120",
+     "padNumber": "J9",
+     "net": "",
+     "layer": 1,
+     "x": 759.055,
+     "y": 740.945,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p121",
+     "padNumber": "J10",
+     "net": "GND",
+     "layer": 1,
+     "x": 798.425,
+     "y": 740.945,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p122",
+     "padNumber": "J11",
+     "net": "",
+     "layer": 1,
+     "x": 837.795,
+     "y": 740.945,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p123",
+     "padNumber": "J12",
+     "net": "DDR_A12",
+     "layer": 1,
+     "x": 877.165,
+     "y": 740.945,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p124",
+     "padNumber": "J13",
+     "net": "DDR_CK_P",
+     "layer": 1,
+     "x": 916.535,
+     "y": 740.945,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p125",
+     "padNumber": "J14",
+     "net": "DDR_DQ6",
+     "layer": 1,
+     "x": 955.905,
+     "y": 740.945,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p126",
+     "padNumber": "K1",
+     "net": "",
+     "layer": 1,
+     "x": 444.095,
+     "y": 701.575,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p127",
+     "padNumber": "K2",
+     "net": "",
+     "layer": 1,
+     "x": 483.465,
+     "y": 701.575,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p128",
+     "padNumber": "K3",
+     "net": "GND",
+     "layer": 1,
+     "x": 522.835,
+     "y": 701.575,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p129",
+     "padNumber": "K4",
+     "net": "",
+     "layer": 1,
+     "x": 562.205,
+     "y": 701.575,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p130",
+     "padNumber": "K5",
+     "net": "",
+     "layer": 1,
+     "x": 601.575,
+     "y": 701.575,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p131",
+     "padNumber": "K6",
+     "net": "GND",
+     "layer": 1,
+     "x": 640.945,
+     "y": 701.575,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p132",
+     "padNumber": "K7",
+     "net": "",
+     "layer": 1,
+     "x": 680.315,
+     "y": 701.575,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p133",
+     "padNumber": "K8",
+     "net": "",
+     "layer": 1,
+     "x": 719.685,
+     "y": 701.575,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p134",
+     "padNumber": "K9",
+     "net": "GND",
+     "layer": 1,
+     "x": 759.055,
+     "y": 701.575,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p135",
+     "padNumber": "K10",
+     "net": "",
+     "layer": 1,
+     "x": 798.425,
+     "y": 701.575,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p136",
+     "padNumber": "K11",
+     "net": "",
+     "layer": 1,
+     "x": 837.795,
+     "y": 701.575,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p137",
+     "padNumber": "K12",
+     "net": "DDR_A13",
+     "layer": 1,
+     "x": 877.165,
+     "y": 701.575,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p138",
+     "padNumber": "K13",
+     "net": "DDR_CK_N",
+     "layer": 1,
+     "x": 916.535,
+     "y": 701.575,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p139",
+     "padNumber": "K14",
+     "net": "DDR_DQ7",
+     "layer": 1,
+     "x": 955.905,
+     "y": 701.575,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p140",
+     "padNumber": "L1",
+     "net": "",
+     "layer": 1,
+     "x": 444.095,
+     "y": 662.205,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p141",
+     "padNumber": "L2",
+     "net": "GND",
+     "layer": 1,
+     "x": 483.465,
+     "y": 662.205,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p142",
+     "padNumber": "L3",
+     "net": "",
+     "layer": 1,
+     "x": 522.835,
+     "y": 662.205,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p143",
+     "padNumber": "L4",
+     "net": "",
+     "layer": 1,
+     "x": 562.205,
+     "y": 662.205,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p144",
+     "padNumber": "L5",
+     "net": "GND",
+     "layer": 1,
+     "x": 601.575,
+     "y": 662.205,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p145",
+     "padNumber": "L6",
+     "net": "",
+     "layer": 1,
+     "x": 640.945,
+     "y": 662.205,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p146",
+     "padNumber": "L7",
+     "net": "",
+     "layer": 1,
+     "x": 680.315,
+     "y": 662.205,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p147",
+     "padNumber": "L8",
+     "net": "GND",
+     "layer": 1,
+     "x": 719.685,
+     "y": 662.205,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p148",
+     "padNumber": "L9",
+     "net": "",
+     "layer": 1,
+     "x": 759.055,
+     "y": 662.205,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p149",
+     "padNumber": "L10",
+     "net": "",
+     "layer": 1,
+     "x": 798.425,
+     "y": 662.205,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p150",
+     "padNumber": "L11",
+     "net": "GND",
+     "layer": 1,
+     "x": 837.795,
+     "y": 662.205,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p151",
+     "padNumber": "L12",
+     "net": "DDR_BA0",
+     "layer": 1,
+     "x": 877.165,
+     "y": 662.205,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p152",
+     "padNumber": "L13",
+     "net": "DDR_A0",
+     "layer": 1,
+     "x": 916.535,
+     "y": 662.205,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p153",
+     "padNumber": "L14",
+     "net": "DDR_DM0",
+     "layer": 1,
+     "x": 955.905,
+     "y": 662.205,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p154",
+     "padNumber": "M1",
+     "net": "GND",
+     "layer": 1,
+     "x": 444.095,
+     "y": 622.835,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p155",
+     "padNumber": "M2",
+     "net": "",
+     "layer": 1,
+     "x": 483.465,
+     "y": 622.835,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p156",
+     "padNumber": "M3",
+     "net": "",
+     "layer": 1,
+     "x": 522.835,
+     "y": 622.835,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p157",
+     "padNumber": "M4",
+     "net": "GND",
+     "layer": 1,
+     "x": 562.205,
+     "y": 622.835,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p158",
+     "padNumber": "M5",
+     "net": "",
+     "layer": 1,
+     "x": 601.575,
+     "y": 622.835,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p159",
+     "padNumber": "M6",
+     "net": "",
+     "layer": 1,
+     "x": 640.945,
+     "y": 622.835,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p160",
+     "padNumber": "M7",
+     "net": "GND",
+     "layer": 1,
+     "x": 680.315,
+     "y": 622.835,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p161",
+     "padNumber": "M8",
+     "net": "",
+     "layer": 1,
+     "x": 719.685,
+     "y": 622.835,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p162",
+     "padNumber": "M9",
+     "net": "",
+     "layer": 1,
+     "x": 759.055,
+     "y": 622.835,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p163",
+     "padNumber": "M10",
+     "net": "GND",
+     "layer": 1,
+     "x": 798.425,
+     "y": 622.835,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p164",
+     "padNumber": "M11",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 837.795,
+     "y": 622.835,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p165",
+     "padNumber": "M12",
+     "net": "DDR_BA1",
+     "layer": 1,
+     "x": 877.165,
+     "y": 622.835,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p166",
+     "padNumber": "M13",
+     "net": "DDR_A1",
+     "layer": 1,
+     "x": 916.535,
+     "y": 622.835,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p167",
+     "padNumber": "M14",
+     "net": "DDR_DQ8",
+     "layer": 1,
+     "x": 955.905,
+     "y": 622.835,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p168",
+     "padNumber": "N1",
+     "net": "",
+     "layer": 1,
+     "x": 444.095,
+     "y": 583.465,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p169",
+     "padNumber": "N2",
+     "net": "",
+     "layer": 1,
+     "x": 483.465,
+     "y": 583.465,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p170",
+     "padNumber": "N3",
+     "net": "GND",
+     "layer": 1,
+     "x": 522.835,
+     "y": 583.465,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p171",
+     "padNumber": "N4",
+     "net": "",
+     "layer": 1,
+     "x": 562.205,
+     "y": 583.465,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p172",
+     "padNumber": "N5",
+     "net": "",
+     "layer": 1,
+     "x": 601.575,
+     "y": 583.465,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p173",
+     "padNumber": "N6",
+     "net": "GND",
+     "layer": 1,
+     "x": 640.945,
+     "y": 583.465,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p174",
+     "padNumber": "N7",
+     "net": "",
+     "layer": 1,
+     "x": 680.315,
+     "y": 583.465,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p175",
+     "padNumber": "N8",
+     "net": "",
+     "layer": 1,
+     "x": 719.685,
+     "y": 583.465,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p176",
+     "padNumber": "N9",
+     "net": "GND",
+     "layer": 1,
+     "x": 759.055,
+     "y": 583.465,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p177",
+     "padNumber": "N10",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 798.425,
+     "y": 583.465,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p178",
+     "padNumber": "N11",
+     "net": "",
+     "layer": 1,
+     "x": 837.795,
+     "y": 583.465,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p179",
+     "padNumber": "N12",
+     "net": "DDR_BA2",
+     "layer": 1,
+     "x": 877.165,
+     "y": 583.465,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p180",
+     "padNumber": "N13",
+     "net": "DDR_A2",
+     "layer": 1,
+     "x": 916.535,
+     "y": 583.465,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p181",
+     "padNumber": "N14",
+     "net": "DDR_DQ9",
+     "layer": 1,
+     "x": 955.905,
+     "y": 583.465,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p182",
+     "padNumber": "P1",
+     "net": "",
+     "layer": 1,
+     "x": 444.095,
+     "y": 544.095,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p183",
+     "padNumber": "P2",
+     "net": "GND",
+     "layer": 1,
+     "x": 483.465,
+     "y": 544.095,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p184",
+     "padNumber": "P3",
+     "net": "",
+     "layer": 1,
+     "x": 522.835,
+     "y": 544.095,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p185",
+     "padNumber": "P4",
+     "net": "",
+     "layer": 1,
+     "x": 562.205,
+     "y": 544.095,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p186",
+     "padNumber": "P5",
+     "net": "GND",
+     "layer": 1,
+     "x": 601.575,
+     "y": 544.095,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p187",
+     "padNumber": "P6",
+     "net": "",
+     "layer": 1,
+     "x": 640.945,
+     "y": 544.095,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p188",
+     "padNumber": "P7",
+     "net": "",
+     "layer": 1,
+     "x": 680.315,
+     "y": 544.095,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p189",
+     "padNumber": "P8",
+     "net": "GND",
+     "layer": 1,
+     "x": 719.685,
+     "y": 544.095,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p190",
+     "padNumber": "P9",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 759.055,
+     "y": 544.095,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p191",
+     "padNumber": "P10",
+     "net": "",
+     "layer": 1,
+     "x": 798.425,
+     "y": 544.095,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p192",
+     "padNumber": "P11",
+     "net": "GND",
+     "layer": 1,
+     "x": 837.795,
+     "y": 544.095,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p193",
+     "padNumber": "P12",
+     "net": "DDR_RAS_N",
+     "layer": 1,
+     "x": 877.165,
+     "y": 544.095,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p194",
+     "padNumber": "P13",
+     "net": "DDR_A3",
+     "layer": 1,
+     "x": 916.535,
+     "y": 544.095,
+     "width": 18,
+     "height": 18
+    },
+    {
+     "primitiveId": "e0p195",
+     "padNumber": "P14",
+     "net": "DDR_DQ10",
+     "layer": 1,
+     "x": 955.905,
+     "y": 544.095,
+     "width": 18,
+     "height": 18
+    }
+   ]
+  },
+  {
+   "primitiveId": "e1",
+   "designator": "U2",
+   "device": "MT41K256M8DA-125",
+   "layer": 1,
+   "x": 1500,
+   "y": 1150,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 1354.5,
+    "minY": 941.5,
+    "maxX": 1645.5,
+    "maxY": 1358.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e1p0",
+     "padNumber": "A1",
+     "net": "DDR_DQ0",
+     "layer": 1,
+     "x": 1374.0,
+     "y": 1339.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p1",
+     "padNumber": "A2",
+     "net": "DDR_DQ1",
+     "layer": 1,
+     "x": 1405.5,
+     "y": 1339.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p2",
+     "padNumber": "A3",
+     "net": "DDR_DQ2",
+     "layer": 1,
+     "x": 1437.0,
+     "y": 1339.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p3",
+     "padNumber": "A7",
+     "net": "GND",
+     "layer": 1,
+     "x": 1563.0,
+     "y": 1339.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p4",
+     "padNumber": "A8",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1594.5,
+     "y": 1339.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p5",
+     "padNumber": "A9",
+     "net": "GND",
+     "layer": 1,
+     "x": 1626.0,
+     "y": 1339.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p6",
+     "padNumber": "B1",
+     "net": "DDR_DQ3",
+     "layer": 1,
+     "x": 1374.0,
+     "y": 1307.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p7",
+     "padNumber": "B2",
+     "net": "DDR_DQS0_P",
+     "layer": 1,
+     "x": 1405.5,
+     "y": 1307.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p8",
+     "padNumber": "B3",
+     "net": "DDR_DQS0_N",
+     "layer": 1,
+     "x": 1437.0,
+     "y": 1307.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p9",
+     "padNumber": "B7",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1563.0,
+     "y": 1307.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p10",
+     "padNumber": "B8",
+     "net": "GND",
+     "layer": 1,
+     "x": 1594.5,
+     "y": 1307.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p11",
+     "padNumber": "B9",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1626.0,
+     "y": 1307.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p12",
+     "padNumber": "C1",
+     "net": "DDR_DQ4",
+     "layer": 1,
+     "x": 1374.0,
+     "y": 1276.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p13",
+     "padNumber": "C2",
+     "net": "DDR_DQ5",
+     "layer": 1,
+     "x": 1405.5,
+     "y": 1276.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p14",
+     "padNumber": "C3",
+     "net": "DDR_DQ6",
+     "layer": 1,
+     "x": 1437.0,
+     "y": 1276.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p15",
+     "padNumber": "C7",
+     "net": "GND",
+     "layer": 1,
+     "x": 1563.0,
+     "y": 1276.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p16",
+     "padNumber": "C8",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1594.5,
+     "y": 1276.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p17",
+     "padNumber": "C9",
+     "net": "GND",
+     "layer": 1,
+     "x": 1626.0,
+     "y": 1276.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p18",
+     "padNumber": "D1",
+     "net": "DDR_DQ7",
+     "layer": 1,
+     "x": 1374.0,
+     "y": 1244.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p19",
+     "padNumber": "D2",
+     "net": "DDR_DM0",
+     "layer": 1,
+     "x": 1405.5,
+     "y": 1244.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p20",
+     "padNumber": "D3",
+     "net": "DDR_CK_P",
+     "layer": 1,
+     "x": 1437.0,
+     "y": 1244.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p21",
+     "padNumber": "D7",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1563.0,
+     "y": 1244.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p22",
+     "padNumber": "D8",
+     "net": "GND",
+     "layer": 1,
+     "x": 1594.5,
+     "y": 1244.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p23",
+     "padNumber": "D9",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1626.0,
+     "y": 1244.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p24",
+     "padNumber": "E1",
+     "net": "DDR_CK_N",
+     "layer": 1,
+     "x": 1374.0,
+     "y": 1213.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p25",
+     "padNumber": "E2",
+     "net": "DDR_A0",
+     "layer": 1,
+     "x": 1405.5,
+     "y": 1213.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p26",
+     "padNumber": "E3",
+     "net": "DDR_A1",
+     "layer": 1,
+     "x": 1437.0,
+     "y": 1213.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p27",
+     "padNumber": "E7",
+     "net": "GND",
+     "layer": 1,
+     "x": 1563.0,
+     "y": 1213.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p28",
+     "padNumber": "E8",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1594.5,
+     "y": 1213.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p29",
+     "padNumber": "E9",
+     "net": "GND",
+     "layer": 1,
+     "x": 1626.0,
+     "y": 1213.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p30",
+     "padNumber": "F1",
+     "net": "DDR_A2",
+     "layer": 1,
+     "x": 1374.0,
+     "y": 1181.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p31",
+     "padNumber": "F2",
+     "net": "DDR_A3",
+     "layer": 1,
+     "x": 1405.5,
+     "y": 1181.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p32",
+     "padNumber": "F3",
+     "net": "DDR_A4",
+     "layer": 1,
+     "x": 1437.0,
+     "y": 1181.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p33",
+     "padNumber": "F7",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1563.0,
+     "y": 1181.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p34",
+     "padNumber": "F8",
+     "net": "GND",
+     "layer": 1,
+     "x": 1594.5,
+     "y": 1181.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p35",
+     "padNumber": "F9",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1626.0,
+     "y": 1181.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p36",
+     "padNumber": "G1",
+     "net": "DDR_A5",
+     "layer": 1,
+     "x": 1374.0,
+     "y": 1150.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p37",
+     "padNumber": "G2",
+     "net": "DDR_A6",
+     "layer": 1,
+     "x": 1405.5,
+     "y": 1150.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p38",
+     "padNumber": "G3",
+     "net": "DDR_A7",
+     "layer": 1,
+     "x": 1437.0,
+     "y": 1150.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p39",
+     "padNumber": "G7",
+     "net": "GND",
+     "layer": 1,
+     "x": 1563.0,
+     "y": 1150.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p40",
+     "padNumber": "G8",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1594.5,
+     "y": 1150.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p41",
+     "padNumber": "G9",
+     "net": "GND",
+     "layer": 1,
+     "x": 1626.0,
+     "y": 1150.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p42",
+     "padNumber": "H1",
+     "net": "DDR_A8",
+     "layer": 1,
+     "x": 1374.0,
+     "y": 1118.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p43",
+     "padNumber": "H2",
+     "net": "DDR_A9",
+     "layer": 1,
+     "x": 1405.5,
+     "y": 1118.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p44",
+     "padNumber": "H3",
+     "net": "DDR_A10",
+     "layer": 1,
+     "x": 1437.0,
+     "y": 1118.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p45",
+     "padNumber": "H7",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1563.0,
+     "y": 1118.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p46",
+     "padNumber": "H8",
+     "net": "GND",
+     "layer": 1,
+     "x": 1594.5,
+     "y": 1118.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p47",
+     "padNumber": "H9",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1626.0,
+     "y": 1118.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p48",
+     "padNumber": "J1",
+     "net": "DDR_A11",
+     "layer": 1,
+     "x": 1374.0,
+     "y": 1087.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p49",
+     "padNumber": "J2",
+     "net": "DDR_A12",
+     "layer": 1,
+     "x": 1405.5,
+     "y": 1087.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p50",
+     "padNumber": "J3",
+     "net": "DDR_A13",
+     "layer": 1,
+     "x": 1437.0,
+     "y": 1087.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p51",
+     "padNumber": "J7",
+     "net": "GND",
+     "layer": 1,
+     "x": 1563.0,
+     "y": 1087.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p52",
+     "padNumber": "J8",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1594.5,
+     "y": 1087.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p53",
+     "padNumber": "J9",
+     "net": "GND",
+     "layer": 1,
+     "x": 1626.0,
+     "y": 1087.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p54",
+     "padNumber": "K1",
+     "net": "DDR_BA0",
+     "layer": 1,
+     "x": 1374.0,
+     "y": 1055.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p55",
+     "padNumber": "K2",
+     "net": "DDR_BA1",
+     "layer": 1,
+     "x": 1405.5,
+     "y": 1055.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p56",
+     "padNumber": "K3",
+     "net": "DDR_BA2",
+     "layer": 1,
+     "x": 1437.0,
+     "y": 1055.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p57",
+     "padNumber": "K7",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1563.0,
+     "y": 1055.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p58",
+     "padNumber": "K8",
+     "net": "GND",
+     "layer": 1,
+     "x": 1594.5,
+     "y": 1055.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p59",
+     "padNumber": "K9",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1626.0,
+     "y": 1055.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p60",
+     "padNumber": "L1",
+     "net": "DDR_RAS_N",
+     "layer": 1,
+     "x": 1374.0,
+     "y": 1024.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p61",
+     "padNumber": "L2",
+     "net": "DDR_CAS_N",
+     "layer": 1,
+     "x": 1405.5,
+     "y": 1024.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p62",
+     "padNumber": "L3",
+     "net": "DDR_WE_N",
+     "layer": 1,
+     "x": 1437.0,
+     "y": 1024.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p63",
+     "padNumber": "L7",
+     "net": "GND",
+     "layer": 1,
+     "x": 1563.0,
+     "y": 1024.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p64",
+     "padNumber": "L8",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1594.5,
+     "y": 1024.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p65",
+     "padNumber": "L9",
+     "net": "GND",
+     "layer": 1,
+     "x": 1626.0,
+     "y": 1024.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p66",
+     "padNumber": "M1",
+     "net": "DDR_CS_N",
+     "layer": 1,
+     "x": 1374.0,
+     "y": 992.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p67",
+     "padNumber": "M2",
+     "net": "DDR_CKE",
+     "layer": 1,
+     "x": 1405.5,
+     "y": 992.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p68",
+     "padNumber": "M3",
+     "net": "DDR_ODT",
+     "layer": 1,
+     "x": 1437.0,
+     "y": 992.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p69",
+     "padNumber": "M7",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1563.0,
+     "y": 992.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p70",
+     "padNumber": "M8",
+     "net": "GND",
+     "layer": 1,
+     "x": 1594.5,
+     "y": 992.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p71",
+     "padNumber": "M9",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1626.0,
+     "y": 992.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p72",
+     "padNumber": "N1",
+     "net": "",
+     "layer": 1,
+     "x": 1374.0,
+     "y": 961.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p73",
+     "padNumber": "N2",
+     "net": "",
+     "layer": 1,
+     "x": 1405.5,
+     "y": 961.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p74",
+     "padNumber": "N3",
+     "net": "",
+     "layer": 1,
+     "x": 1437.0,
+     "y": 961.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p75",
+     "padNumber": "N7",
+     "net": "GND",
+     "layer": 1,
+     "x": 1563.0,
+     "y": 961.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p76",
+     "padNumber": "N8",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1594.5,
+     "y": 961.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e1p77",
+     "padNumber": "N9",
+     "net": "GND",
+     "layer": 1,
+     "x": 1626.0,
+     "y": 961.0,
+     "width": 15,
+     "height": 15
+    }
+   ]
+  },
+  {
+   "primitiveId": "e2",
+   "designator": "U3",
+   "device": "MT41K256M8DA-125",
+   "layer": 1,
+   "x": 1500,
+   "y": 450,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 1354.5,
+    "minY": 241.5,
+    "maxX": 1645.5,
+    "maxY": 658.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e2p0",
+     "padNumber": "A1",
+     "net": "DDR_DQ8",
+     "layer": 1,
+     "x": 1374.0,
+     "y": 639.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p1",
+     "padNumber": "A2",
+     "net": "DDR_DQ9",
+     "layer": 1,
+     "x": 1405.5,
+     "y": 639.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p2",
+     "padNumber": "A3",
+     "net": "DDR_DQ10",
+     "layer": 1,
+     "x": 1437.0,
+     "y": 639.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p3",
+     "padNumber": "A7",
+     "net": "GND",
+     "layer": 1,
+     "x": 1563.0,
+     "y": 639.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p4",
+     "padNumber": "A8",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1594.5,
+     "y": 639.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p5",
+     "padNumber": "A9",
+     "net": "GND",
+     "layer": 1,
+     "x": 1626.0,
+     "y": 639.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p6",
+     "padNumber": "B1",
+     "net": "DDR_DQ11",
+     "layer": 1,
+     "x": 1374.0,
+     "y": 607.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p7",
+     "padNumber": "B2",
+     "net": "DDR_DQS1_P",
+     "layer": 1,
+     "x": 1405.5,
+     "y": 607.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p8",
+     "padNumber": "B3",
+     "net": "DDR_DQS1_N",
+     "layer": 1,
+     "x": 1437.0,
+     "y": 607.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p9",
+     "padNumber": "B7",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1563.0,
+     "y": 607.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p10",
+     "padNumber": "B8",
+     "net": "GND",
+     "layer": 1,
+     "x": 1594.5,
+     "y": 607.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p11",
+     "padNumber": "B9",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1626.0,
+     "y": 607.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p12",
+     "padNumber": "C1",
+     "net": "DDR_DQ12",
+     "layer": 1,
+     "x": 1374.0,
+     "y": 576.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p13",
+     "padNumber": "C2",
+     "net": "DDR_DQ13",
+     "layer": 1,
+     "x": 1405.5,
+     "y": 576.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p14",
+     "padNumber": "C3",
+     "net": "DDR_DQ14",
+     "layer": 1,
+     "x": 1437.0,
+     "y": 576.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p15",
+     "padNumber": "C7",
+     "net": "GND",
+     "layer": 1,
+     "x": 1563.0,
+     "y": 576.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p16",
+     "padNumber": "C8",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1594.5,
+     "y": 576.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p17",
+     "padNumber": "C9",
+     "net": "GND",
+     "layer": 1,
+     "x": 1626.0,
+     "y": 576.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p18",
+     "padNumber": "D1",
+     "net": "DDR_DQ15",
+     "layer": 1,
+     "x": 1374.0,
+     "y": 544.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p19",
+     "padNumber": "D2",
+     "net": "DDR_DM1",
+     "layer": 1,
+     "x": 1405.5,
+     "y": 544.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p20",
+     "padNumber": "D3",
+     "net": "DDR_CK_P",
+     "layer": 1,
+     "x": 1437.0,
+     "y": 544.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p21",
+     "padNumber": "D7",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1563.0,
+     "y": 544.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p22",
+     "padNumber": "D8",
+     "net": "GND",
+     "layer": 1,
+     "x": 1594.5,
+     "y": 544.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p23",
+     "padNumber": "D9",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1626.0,
+     "y": 544.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p24",
+     "padNumber": "E1",
+     "net": "DDR_CK_N",
+     "layer": 1,
+     "x": 1374.0,
+     "y": 513.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p25",
+     "padNumber": "E2",
+     "net": "DDR_A0",
+     "layer": 1,
+     "x": 1405.5,
+     "y": 513.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p26",
+     "padNumber": "E3",
+     "net": "DDR_A1",
+     "layer": 1,
+     "x": 1437.0,
+     "y": 513.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p27",
+     "padNumber": "E7",
+     "net": "GND",
+     "layer": 1,
+     "x": 1563.0,
+     "y": 513.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p28",
+     "padNumber": "E8",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1594.5,
+     "y": 513.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p29",
+     "padNumber": "E9",
+     "net": "GND",
+     "layer": 1,
+     "x": 1626.0,
+     "y": 513.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p30",
+     "padNumber": "F1",
+     "net": "DDR_A2",
+     "layer": 1,
+     "x": 1374.0,
+     "y": 481.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p31",
+     "padNumber": "F2",
+     "net": "DDR_A3",
+     "layer": 1,
+     "x": 1405.5,
+     "y": 481.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p32",
+     "padNumber": "F3",
+     "net": "DDR_A4",
+     "layer": 1,
+     "x": 1437.0,
+     "y": 481.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p33",
+     "padNumber": "F7",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1563.0,
+     "y": 481.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p34",
+     "padNumber": "F8",
+     "net": "GND",
+     "layer": 1,
+     "x": 1594.5,
+     "y": 481.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p35",
+     "padNumber": "F9",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1626.0,
+     "y": 481.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p36",
+     "padNumber": "G1",
+     "net": "DDR_A5",
+     "layer": 1,
+     "x": 1374.0,
+     "y": 450.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p37",
+     "padNumber": "G2",
+     "net": "DDR_A6",
+     "layer": 1,
+     "x": 1405.5,
+     "y": 450.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p38",
+     "padNumber": "G3",
+     "net": "DDR_A7",
+     "layer": 1,
+     "x": 1437.0,
+     "y": 450.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p39",
+     "padNumber": "G7",
+     "net": "GND",
+     "layer": 1,
+     "x": 1563.0,
+     "y": 450.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p40",
+     "padNumber": "G8",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1594.5,
+     "y": 450.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p41",
+     "padNumber": "G9",
+     "net": "GND",
+     "layer": 1,
+     "x": 1626.0,
+     "y": 450.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p42",
+     "padNumber": "H1",
+     "net": "DDR_A8",
+     "layer": 1,
+     "x": 1374.0,
+     "y": 418.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p43",
+     "padNumber": "H2",
+     "net": "DDR_A9",
+     "layer": 1,
+     "x": 1405.5,
+     "y": 418.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p44",
+     "padNumber": "H3",
+     "net": "DDR_A10",
+     "layer": 1,
+     "x": 1437.0,
+     "y": 418.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p45",
+     "padNumber": "H7",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1563.0,
+     "y": 418.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p46",
+     "padNumber": "H8",
+     "net": "GND",
+     "layer": 1,
+     "x": 1594.5,
+     "y": 418.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p47",
+     "padNumber": "H9",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1626.0,
+     "y": 418.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p48",
+     "padNumber": "J1",
+     "net": "DDR_A11",
+     "layer": 1,
+     "x": 1374.0,
+     "y": 387.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p49",
+     "padNumber": "J2",
+     "net": "DDR_A12",
+     "layer": 1,
+     "x": 1405.5,
+     "y": 387.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p50",
+     "padNumber": "J3",
+     "net": "DDR_A13",
+     "layer": 1,
+     "x": 1437.0,
+     "y": 387.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p51",
+     "padNumber": "J7",
+     "net": "GND",
+     "layer": 1,
+     "x": 1563.0,
+     "y": 387.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p52",
+     "padNumber": "J8",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1594.5,
+     "y": 387.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p53",
+     "padNumber": "J9",
+     "net": "GND",
+     "layer": 1,
+     "x": 1626.0,
+     "y": 387.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p54",
+     "padNumber": "K1",
+     "net": "DDR_BA0",
+     "layer": 1,
+     "x": 1374.0,
+     "y": 355.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p55",
+     "padNumber": "K2",
+     "net": "DDR_BA1",
+     "layer": 1,
+     "x": 1405.5,
+     "y": 355.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p56",
+     "padNumber": "K3",
+     "net": "DDR_BA2",
+     "layer": 1,
+     "x": 1437.0,
+     "y": 355.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p57",
+     "padNumber": "K7",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1563.0,
+     "y": 355.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p58",
+     "padNumber": "K8",
+     "net": "GND",
+     "layer": 1,
+     "x": 1594.5,
+     "y": 355.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p59",
+     "padNumber": "K9",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1626.0,
+     "y": 355.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p60",
+     "padNumber": "L1",
+     "net": "DDR_RAS_N",
+     "layer": 1,
+     "x": 1374.0,
+     "y": 324.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p61",
+     "padNumber": "L2",
+     "net": "DDR_CAS_N",
+     "layer": 1,
+     "x": 1405.5,
+     "y": 324.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p62",
+     "padNumber": "L3",
+     "net": "DDR_WE_N",
+     "layer": 1,
+     "x": 1437.0,
+     "y": 324.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p63",
+     "padNumber": "L7",
+     "net": "GND",
+     "layer": 1,
+     "x": 1563.0,
+     "y": 324.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p64",
+     "padNumber": "L8",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1594.5,
+     "y": 324.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p65",
+     "padNumber": "L9",
+     "net": "GND",
+     "layer": 1,
+     "x": 1626.0,
+     "y": 324.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p66",
+     "padNumber": "M1",
+     "net": "DDR_CS_N",
+     "layer": 1,
+     "x": 1374.0,
+     "y": 292.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p67",
+     "padNumber": "M2",
+     "net": "DDR_CKE",
+     "layer": 1,
+     "x": 1405.5,
+     "y": 292.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p68",
+     "padNumber": "M3",
+     "net": "DDR_ODT",
+     "layer": 1,
+     "x": 1437.0,
+     "y": 292.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p69",
+     "padNumber": "M7",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1563.0,
+     "y": 292.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p70",
+     "padNumber": "M8",
+     "net": "GND",
+     "layer": 1,
+     "x": 1594.5,
+     "y": 292.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p71",
+     "padNumber": "M9",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1626.0,
+     "y": 292.5,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p72",
+     "padNumber": "N1",
+     "net": "",
+     "layer": 1,
+     "x": 1374.0,
+     "y": 261.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p73",
+     "padNumber": "N2",
+     "net": "",
+     "layer": 1,
+     "x": 1405.5,
+     "y": 261.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p74",
+     "padNumber": "N3",
+     "net": "",
+     "layer": 1,
+     "x": 1437.0,
+     "y": 261.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p75",
+     "padNumber": "N7",
+     "net": "GND",
+     "layer": 1,
+     "x": 1563.0,
+     "y": 261.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p76",
+     "padNumber": "N8",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1594.5,
+     "y": 261.0,
+     "width": 15,
+     "height": 15
+    },
+    {
+     "primitiveId": "e2p77",
+     "padNumber": "N9",
+     "net": "GND",
+     "layer": 1,
+     "x": 1626.0,
+     "y": 261.0,
+     "width": 15,
+     "height": 15
+    }
+   ]
+  },
+  {
+   "primitiveId": "e3",
+   "designator": "R20",
+   "device": "0402WGF390JTCE",
+   "layer": 1,
+   "x": 1900,
+   "y": 250,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 1877.15,
+    "minY": 206.5,
+    "maxX": 1922.85,
+    "maxY": 293.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e3p0",
+     "padNumber": "1",
+     "net": "DDR_A0",
+     "layer": 1,
+     "x": 1900.0,
+     "y": 230.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e3p1",
+     "padNumber": "2",
+     "net": "DDR_VTT",
+     "layer": 1,
+     "x": 1900.0,
+     "y": 269.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e4",
+   "designator": "R21",
+   "device": "0402WGF390JTCE",
+   "layer": 1,
+   "x": 1960,
+   "y": 250,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 1937.15,
+    "minY": 206.5,
+    "maxX": 1982.85,
+    "maxY": 293.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e4p0",
+     "padNumber": "1",
+     "net": "DDR_A1",
+     "layer": 1,
+     "x": 1960.0,
+     "y": 230.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e4p1",
+     "padNumber": "2",
+     "net": "DDR_VTT",
+     "layer": 1,
+     "x": 1960.0,
+     "y": 269.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e5",
+   "designator": "R22",
+   "device": "0402WGF390JTCE",
+   "layer": 1,
+   "x": 2020,
+   "y": 250,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 1997.15,
+    "minY": 206.5,
+    "maxX": 2042.85,
+    "maxY": 293.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e5p0",
+     "padNumber": "1",
+     "net": "DDR_A2",
+     "layer": 1,
+     "x": 2020.0,
+     "y": 230.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e5p1",
+     "padNumber": "2",
+     "net": "DDR_VTT",
+     "layer": 1,
+     "x": 2020.0,
+     "y": 269.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e6",
+   "designator": "R23",
+   "device": "0402WGF390JTCE",
+   "layer": 1,
+   "x": 2080,
+   "y": 250,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 2057.15,
+    "minY": 206.5,
+    "maxX": 2102.85,
+    "maxY": 293.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e6p0",
+     "padNumber": "1",
+     "net": "DDR_A3",
+     "layer": 1,
+     "x": 2080.0,
+     "y": 230.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e6p1",
+     "padNumber": "2",
+     "net": "DDR_VTT",
+     "layer": 1,
+     "x": 2080.0,
+     "y": 269.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e7",
+   "designator": "R24",
+   "device": "0402WGF390JTCE",
+   "layer": 1,
+   "x": 2140,
+   "y": 250,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 2117.15,
+    "minY": 206.5,
+    "maxX": 2162.85,
+    "maxY": 293.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e7p0",
+     "padNumber": "1",
+     "net": "DDR_A4",
+     "layer": 1,
+     "x": 2140.0,
+     "y": 230.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e7p1",
+     "padNumber": "2",
+     "net": "DDR_VTT",
+     "layer": 1,
+     "x": 2140.0,
+     "y": 269.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e8",
+   "designator": "R25",
+   "device": "0402WGF390JTCE",
+   "layer": 1,
+   "x": 2200,
+   "y": 250,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 2177.15,
+    "minY": 206.5,
+    "maxX": 2222.85,
+    "maxY": 293.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e8p0",
+     "padNumber": "1",
+     "net": "DDR_A5",
+     "layer": 1,
+     "x": 2200.0,
+     "y": 230.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e8p1",
+     "padNumber": "2",
+     "net": "DDR_VTT",
+     "layer": 1,
+     "x": 2200.0,
+     "y": 269.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e9",
+   "designator": "R26",
+   "device": "0402WGF390JTCE",
+   "layer": 1,
+   "x": 1900,
+   "y": 310,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 1877.15,
+    "minY": 266.5,
+    "maxX": 1922.85,
+    "maxY": 353.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e9p0",
+     "padNumber": "1",
+     "net": "DDR_A6",
+     "layer": 1,
+     "x": 1900.0,
+     "y": 290.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e9p1",
+     "padNumber": "2",
+     "net": "DDR_VTT",
+     "layer": 1,
+     "x": 1900.0,
+     "y": 329.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e10",
+   "designator": "R27",
+   "device": "0402WGF390JTCE",
+   "layer": 1,
+   "x": 1960,
+   "y": 310,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 1937.15,
+    "minY": 266.5,
+    "maxX": 1982.85,
+    "maxY": 353.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e10p0",
+     "padNumber": "1",
+     "net": "DDR_A7",
+     "layer": 1,
+     "x": 1960.0,
+     "y": 290.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e10p1",
+     "padNumber": "2",
+     "net": "DDR_VTT",
+     "layer": 1,
+     "x": 1960.0,
+     "y": 329.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e11",
+   "designator": "R28",
+   "device": "0402WGF390JTCE",
+   "layer": 1,
+   "x": 2020,
+   "y": 310,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 1997.15,
+    "minY": 266.5,
+    "maxX": 2042.85,
+    "maxY": 353.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e11p0",
+     "padNumber": "1",
+     "net": "DDR_A8",
+     "layer": 1,
+     "x": 2020.0,
+     "y": 290.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e11p1",
+     "padNumber": "2",
+     "net": "DDR_VTT",
+     "layer": 1,
+     "x": 2020.0,
+     "y": 329.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e12",
+   "designator": "R29",
+   "device": "0402WGF390JTCE",
+   "layer": 1,
+   "x": 2080,
+   "y": 310,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 2057.15,
+    "minY": 266.5,
+    "maxX": 2102.85,
+    "maxY": 353.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e12p0",
+     "padNumber": "1",
+     "net": "DDR_A9",
+     "layer": 1,
+     "x": 2080.0,
+     "y": 290.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e12p1",
+     "padNumber": "2",
+     "net": "DDR_VTT",
+     "layer": 1,
+     "x": 2080.0,
+     "y": 329.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e13",
+   "designator": "R30",
+   "device": "0402WGF390JTCE",
+   "layer": 1,
+   "x": 2140,
+   "y": 310,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 2117.15,
+    "minY": 266.5,
+    "maxX": 2162.85,
+    "maxY": 353.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e13p0",
+     "padNumber": "1",
+     "net": "DDR_A10",
+     "layer": 1,
+     "x": 2140.0,
+     "y": 290.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e13p1",
+     "padNumber": "2",
+     "net": "DDR_VTT",
+     "layer": 1,
+     "x": 2140.0,
+     "y": 329.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e14",
+   "designator": "R31",
+   "device": "0402WGF390JTCE",
+   "layer": 1,
+   "x": 2200,
+   "y": 310,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 2177.15,
+    "minY": 266.5,
+    "maxX": 2222.85,
+    "maxY": 353.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e14p0",
+     "padNumber": "1",
+     "net": "DDR_A11",
+     "layer": 1,
+     "x": 2200.0,
+     "y": 290.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e14p1",
+     "padNumber": "2",
+     "net": "DDR_VTT",
+     "layer": 1,
+     "x": 2200.0,
+     "y": 329.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e15",
+   "designator": "R32",
+   "device": "0402WGF390JTCE",
+   "layer": 1,
+   "x": 1900,
+   "y": 370,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 1877.15,
+    "minY": 326.5,
+    "maxX": 1922.85,
+    "maxY": 413.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e15p0",
+     "padNumber": "1",
+     "net": "DDR_A12",
+     "layer": 1,
+     "x": 1900.0,
+     "y": 350.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e15p1",
+     "padNumber": "2",
+     "net": "DDR_VTT",
+     "layer": 1,
+     "x": 1900.0,
+     "y": 389.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e16",
+   "designator": "R33",
+   "device": "0402WGF390JTCE",
+   "layer": 1,
+   "x": 1960,
+   "y": 370,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 1937.15,
+    "minY": 326.5,
+    "maxX": 1982.85,
+    "maxY": 413.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e16p0",
+     "padNumber": "1",
+     "net": "DDR_A13",
+     "layer": 1,
+     "x": 1960.0,
+     "y": 350.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e16p1",
+     "padNumber": "2",
+     "net": "DDR_VTT",
+     "layer": 1,
+     "x": 1960.0,
+     "y": 389.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e17",
+   "designator": "R34",
+   "device": "0402WGF390JTCE",
+   "layer": 1,
+   "x": 2020,
+   "y": 370,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 1997.15,
+    "minY": 326.5,
+    "maxX": 2042.85,
+    "maxY": 413.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e17p0",
+     "padNumber": "1",
+     "net": "DDR_BA0",
+     "layer": 1,
+     "x": 2020.0,
+     "y": 350.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e17p1",
+     "padNumber": "2",
+     "net": "DDR_VTT",
+     "layer": 1,
+     "x": 2020.0,
+     "y": 389.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e18",
+   "designator": "R35",
+   "device": "0402WGF390JTCE",
+   "layer": 1,
+   "x": 2080,
+   "y": 370,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 2057.15,
+    "minY": 326.5,
+    "maxX": 2102.85,
+    "maxY": 413.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e18p0",
+     "padNumber": "1",
+     "net": "DDR_BA1",
+     "layer": 1,
+     "x": 2080.0,
+     "y": 350.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e18p1",
+     "padNumber": "2",
+     "net": "DDR_VTT",
+     "layer": 1,
+     "x": 2080.0,
+     "y": 389.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e19",
+   "designator": "R36",
+   "device": "0402WGF390JTCE",
+   "layer": 1,
+   "x": 2140,
+   "y": 370,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 2117.15,
+    "minY": 326.5,
+    "maxX": 2162.85,
+    "maxY": 413.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e19p0",
+     "padNumber": "1",
+     "net": "DDR_BA2",
+     "layer": 1,
+     "x": 2140.0,
+     "y": 350.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e19p1",
+     "padNumber": "2",
+     "net": "DDR_VTT",
+     "layer": 1,
+     "x": 2140.0,
+     "y": 389.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e20",
+   "designator": "R37",
+   "device": "0402WGF390JTCE",
+   "layer": 1,
+   "x": 2200,
+   "y": 370,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 2177.15,
+    "minY": 326.5,
+    "maxX": 2222.85,
+    "maxY": 413.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e20p0",
+     "padNumber": "1",
+     "net": "DDR_RAS_N",
+     "layer": 1,
+     "x": 2200.0,
+     "y": 350.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e20p1",
+     "padNumber": "2",
+     "net": "DDR_VTT",
+     "layer": 1,
+     "x": 2200.0,
+     "y": 389.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e21",
+   "designator": "R38",
+   "device": "0402WGF390JTCE",
+   "layer": 1,
+   "x": 1900,
+   "y": 430,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 1877.15,
+    "minY": 386.5,
+    "maxX": 1922.85,
+    "maxY": 473.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e21p0",
+     "padNumber": "1",
+     "net": "DDR_CAS_N",
+     "layer": 1,
+     "x": 1900.0,
+     "y": 410.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e21p1",
+     "padNumber": "2",
+     "net": "DDR_VTT",
+     "layer": 1,
+     "x": 1900.0,
+     "y": 449.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e22",
+   "designator": "R39",
+   "device": "0402WGF390JTCE",
+   "layer": 1,
+   "x": 1960,
+   "y": 430,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 1937.15,
+    "minY": 386.5,
+    "maxX": 1982.85,
+    "maxY": 473.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e22p0",
+     "padNumber": "1",
+     "net": "DDR_WE_N",
+     "layer": 1,
+     "x": 1960.0,
+     "y": 410.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e22p1",
+     "padNumber": "2",
+     "net": "DDR_VTT",
+     "layer": 1,
+     "x": 1960.0,
+     "y": 449.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e23",
+   "designator": "R40",
+   "device": "0402WGF390JTCE",
+   "layer": 1,
+   "x": 2020,
+   "y": 430,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 1997.15,
+    "minY": 386.5,
+    "maxX": 2042.85,
+    "maxY": 473.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e23p0",
+     "padNumber": "1",
+     "net": "DDR_CS_N",
+     "layer": 1,
+     "x": 2020.0,
+     "y": 410.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e23p1",
+     "padNumber": "2",
+     "net": "DDR_VTT",
+     "layer": 1,
+     "x": 2020.0,
+     "y": 449.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e24",
+   "designator": "R41",
+   "device": "0402WGF390JTCE",
+   "layer": 1,
+   "x": 2080,
+   "y": 430,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 2057.15,
+    "minY": 386.5,
+    "maxX": 2102.85,
+    "maxY": 473.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e24p0",
+     "padNumber": "1",
+     "net": "DDR_CKE",
+     "layer": 1,
+     "x": 2080.0,
+     "y": 410.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e24p1",
+     "padNumber": "2",
+     "net": "DDR_VTT",
+     "layer": 1,
+     "x": 2080.0,
+     "y": 449.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e25",
+   "designator": "R42",
+   "device": "0402WGF390JTCE",
+   "layer": 1,
+   "x": 2140,
+   "y": 430,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 2117.15,
+    "minY": 386.5,
+    "maxX": 2162.85,
+    "maxY": 473.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e25p0",
+     "padNumber": "1",
+     "net": "DDR_ODT",
+     "layer": 1,
+     "x": 2140.0,
+     "y": 410.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e25p1",
+     "padNumber": "2",
+     "net": "DDR_VTT",
+     "layer": 1,
+     "x": 2140.0,
+     "y": 449.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e26",
+   "designator": "R50",
+   "device": "0402WGF360JTCE",
+   "layer": 1,
+   "x": 1900,
+   "y": 560,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 1856.5,
+    "minY": 537.15,
+    "maxX": 1943.5,
+    "maxY": 582.85
+   },
+   "pads": [
+    {
+     "primitiveId": "e26p0",
+     "padNumber": "1",
+     "net": "DDR_CK_P",
+     "layer": 1,
+     "x": 1880.3,
+     "y": 560.0,
+     "width": 23.6,
+     "height": 21.7
+    },
+    {
+     "primitiveId": "e26p1",
+     "padNumber": "2",
+     "net": "DDR_CK_TERM",
+     "layer": 1,
+     "x": 1919.7,
+     "y": 560.0,
+     "width": 23.6,
+     "height": 21.7
+    }
+   ]
+  },
+  {
+   "primitiveId": "e27",
+   "designator": "R51",
+   "device": "0402WGF360JTCE",
+   "layer": 1,
+   "x": 1900,
+   "y": 620,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 1856.5,
+    "minY": 597.15,
+    "maxX": 1943.5,
+    "maxY": 642.85
+   },
+   "pads": [
+    {
+     "primitiveId": "e27p0",
+     "padNumber": "1",
+     "net": "DDR_CK_N",
+     "layer": 1,
+     "x": 1880.3,
+     "y": 620.0,
+     "width": 23.6,
+     "height": 21.7
+    },
+    {
+     "primitiveId": "e27p1",
+     "padNumber": "2",
+     "net": "DDR_CK_TERM",
+     "layer": 1,
+     "x": 1919.7,
+     "y": 620.0,
+     "width": 23.6,
+     "height": 21.7
+    }
+   ]
+  },
+  {
+   "primitiveId": "e28",
+   "designator": "C50",
+   "device": "CL05B104KO5NNNC",
+   "layer": 1,
+   "x": 2000,
+   "y": 590,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 1977.15,
+    "minY": 546.5,
+    "maxX": 2022.85,
+    "maxY": 633.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e28p0",
+     "padNumber": "1",
+     "net": "DDR_CK_TERM",
+     "layer": 1,
+     "x": 2000.0,
+     "y": 570.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e28p1",
+     "padNumber": "2",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 2000.0,
+     "y": 609.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e29",
+   "designator": "U4",
+   "device": "TPS51200DRCR",
+   "layer": 1,
+   "x": 2350,
+   "y": 400,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 2263.0,
+    "minY": 343.6,
+    "maxX": 2437.0,
+    "maxY": 456.4
+   },
+   "pads": [
+    {
+     "primitiveId": "e29p0",
+     "padNumber": "1",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 2290.0,
+     "y": 439.4,
+     "width": 30,
+     "height": 10
+    },
+    {
+     "primitiveId": "e29p1",
+     "padNumber": "2",
+     "net": "DDR_VTT",
+     "layer": 1,
+     "x": 2290.0,
+     "y": 419.7,
+     "width": 30,
+     "height": 10
+    },
+    {
+     "primitiveId": "e29p2",
+     "padNumber": "3",
+     "net": "GND",
+     "layer": 1,
+     "x": 2290.0,
+     "y": 400.0,
+     "width": 30,
+     "height": 10
+    },
+    {
+     "primitiveId": "e29p3",
+     "padNumber": "4",
+     "net": "DDR_VTT",
+     "layer": 1,
+     "x": 2290.0,
+     "y": 380.3,
+     "width": 30,
+     "height": 10
+    },
+    {
+     "primitiveId": "e29p4",
+     "padNumber": "5",
+     "net": "DDR_VREF",
+     "layer": 1,
+     "x": 2290.0,
+     "y": 360.6,
+     "width": 30,
+     "height": 10
+    },
+    {
+     "primitiveId": "e29p5",
+     "padNumber": "6",
+     "net": "GND",
+     "layer": 1,
+     "x": 2410.0,
+     "y": 360.6,
+     "width": 30,
+     "height": 10
+    },
+    {
+     "primitiveId": "e29p6",
+     "padNumber": "7",
+     "net": "GND",
+     "layer": 1,
+     "x": 2410.0,
+     "y": 380.3,
+     "width": 30,
+     "height": 10
+    },
+    {
+     "primitiveId": "e29p7",
+     "padNumber": "8",
+     "net": "+3V3",
+     "layer": 1,
+     "x": 2410.0,
+     "y": 400.0,
+     "width": 30,
+     "height": 10
+    },
+    {
+     "primitiveId": "e29p8",
+     "padNumber": "9",
+     "net": "GND",
+     "layer": 1,
+     "x": 2410.0,
+     "y": 419.7,
+     "width": 30,
+     "height": 10
+    },
+    {
+     "primitiveId": "e29p9",
+     "padNumber": "10",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 2410.0,
+     "y": 439.4,
+     "width": 30,
+     "height": 10
+    }
+   ]
+  },
+  {
+   "primitiveId": "e30",
+   "designator": "U5",
+   "device": "AMS1117-1.5",
+   "layer": 1,
+   "x": 2350,
+   "y": 1200,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 2223.9,
+    "minY": 1028.5,
+    "maxX": 2476.1,
+    "maxY": 1371.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e30p0",
+     "padNumber": "1",
+     "net": "GND",
+     "layer": 1,
+     "x": 2259.4,
+     "y": 1080.0,
+     "width": 47,
+     "height": 79
+    },
+    {
+     "primitiveId": "e30p1",
+     "padNumber": "2",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 2350.0,
+     "y": 1080.0,
+     "width": 47,
+     "height": 79
+    },
+    {
+     "primitiveId": "e30p2",
+     "padNumber": "3",
+     "net": "+3V3",
+     "layer": 1,
+     "x": 2440.6,
+     "y": 1080.0,
+     "width": 47,
+     "height": 79
+    },
+    {
+     "primitiveId": "e30p3",
+     "padNumber": "4",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 2350.0,
+     "y": 1320.0,
+     "width": 130,
+     "height": 79
+    }
+   ]
+  },
+  {
+   "primitiveId": "e31",
+   "designator": "C5",
+   "device": "CL05B104KO5NNNC",
+   "layer": 1,
+   "x": 1350,
+   "y": 1150,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 1327.15,
+    "minY": 1106.5,
+    "maxX": 1372.85,
+    "maxY": 1193.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e31p0",
+     "padNumber": "1",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1350.0,
+     "y": 1130.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e31p1",
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 1,
+     "x": 1350.0,
+     "y": 1169.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e32",
+   "designator": "C6",
+   "device": "CL05B104KO5NNNC",
+   "layer": 1,
+   "x": 1350,
+   "y": 450,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 1327.15,
+    "minY": 406.5,
+    "maxX": 1372.85,
+    "maxY": 493.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e32p0",
+     "padNumber": "1",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 1350.0,
+     "y": 430.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e32p1",
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 1,
+     "x": 1350.0,
+     "y": 469.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e33",
+   "designator": "C7",
+   "device": "CL05B104KO5NNNC",
+   "layer": 1,
+   "x": 2250,
+   "y": 250,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 2227.15,
+    "minY": 206.5,
+    "maxX": 2272.85,
+    "maxY": 293.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e33p0",
+     "padNumber": "1",
+     "net": "DDR_VTT",
+     "layer": 1,
+     "x": 2250.0,
+     "y": 230.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e33p1",
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 1,
+     "x": 2250.0,
+     "y": 269.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e34",
+   "designator": "C8",
+   "device": "CL05B104KO5NNNC",
+   "layer": 1,
+   "x": 400,
+   "y": 800,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 377.15,
+    "minY": 756.5,
+    "maxX": 422.85,
+    "maxY": 843.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e34p0",
+     "padNumber": "1",
+     "net": "DDR_VDDQ",
+     "layer": 1,
+     "x": 400.0,
+     "y": 780.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e34p1",
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 1,
+     "x": 400.0,
+     "y": 819.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e35",
+   "designator": "J2",
+   "device": "KF301-5.0-2P",
+   "layer": 1,
+   "x": 250,
+   "y": 1450,
+   "rotation": 0,
+   "locked": true,
+   "bbox": {
+    "minX": 98.0,
+    "minY": 1398.0,
+    "maxX": 402.0,
+    "maxY": 1502.0
+   },
+   "pads": [
+    {
+     "primitiveId": "e35p0",
+     "padNumber": "1",
+     "net": "5V_IN",
+     "layer": 12,
+     "x": 150.0,
+     "y": 1450.0,
+     "width": 80,
+     "height": 80
+    },
+    {
+     "primitiveId": "e35p1",
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 12,
+     "x": 350.0,
+     "y": 1450.0,
+     "width": 80,
+     "height": 80
+    }
+   ]
+  },
+  {
+   "primitiveId": "e36",
+   "designator": "U9",
+   "device": "AMS1117-3.3",
+   "layer": 1,
+   "x": 250,
+   "y": 400,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 123.9,
+    "minY": 228.5,
+    "maxX": 376.1,
+    "maxY": 571.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e36p0",
+     "padNumber": "1",
+     "net": "GND",
+     "layer": 1,
+     "x": 159.4,
+     "y": 280.0,
+     "width": 47,
+     "height": 79
+    },
+    {
+     "primitiveId": "e36p1",
+     "padNumber": "2",
+     "net": "+3V3",
+     "layer": 1,
+     "x": 250.0,
+     "y": 280.0,
+     "width": 47,
+     "height": 79
+    },
+    {
+     "primitiveId": "e36p2",
+     "padNumber": "3",
+     "net": "5V_IN",
+     "layer": 1,
+     "x": 340.6,
+     "y": 280.0,
+     "width": 47,
+     "height": 79
+    },
+    {
+     "primitiveId": "e36p3",
+     "padNumber": "4",
+     "net": "+3V3",
+     "layer": 1,
+     "x": 250.0,
+     "y": 520.0,
+     "width": 130,
+     "height": 79
+    }
+   ]
+  },
+  {
+   "primitiveId": "e37",
+   "designator": "C90",
+   "device": "CL10A106KP8NNNC",
+   "layer": 1,
+   "x": 340,
+   "y": 150,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 280.75,
+    "minY": 120.3,
+    "maxX": 399.25,
+    "maxY": 179.7
+   },
+   "pads": [
+    {
+     "primitiveId": "e37p0",
+     "padNumber": "1",
+     "net": "5V_IN",
+     "layer": 1,
+     "x": 308.5,
+     "y": 150.0,
+     "width": 31.5,
+     "height": 35.4
+    },
+    {
+     "primitiveId": "e37p1",
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 1,
+     "x": 371.5,
+     "y": 150.0,
+     "width": 31.5,
+     "height": 35.4
+    }
+   ]
+  },
+  {
+   "primitiveId": "e38",
+   "designator": "C91",
+   "device": "CL10A106KP8NNNC",
+   "layer": 1,
+   "x": 160,
+   "y": 650,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 100.75,
+    "minY": 620.3,
+    "maxX": 219.25,
+    "maxY": 679.7
+   },
+   "pads": [
+    {
+     "primitiveId": "e38p0",
+     "padNumber": "1",
+     "net": "+3V3",
+     "layer": 1,
+     "x": 128.5,
+     "y": 650.0,
+     "width": 31.5,
+     "height": 35.4
+    },
+    {
+     "primitiveId": "e38p1",
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 1,
+     "x": 191.5,
+     "y": 650.0,
+     "width": 31.5,
+     "height": 35.4
+    }
+   ]
+  }
+ ],
+ "outline": {
+  "bbox": {
+   "minX": 0,
+   "minY": 0,
+   "maxX": 2600,
+   "maxY": 1600
+  },
+  "points": [
+   [
+    0,
+    0
+   ],
+   [
+    2600,
+    0
+   ],
+   [
+    2600,
+    1600
+   ],
+   [
+    0,
+    1600
+   ]
+  ],
+  "source": "synthetic"
+ },
+ "copperLayers": 6,
+ "rules": {
+  "clearanceMil": 4,
+  "trackWidthMil": 4,
+  "trackWidthMinMil": 3.5,
+  "viaDrillMil": 8,
+  "viaDiameterMil": 16,
+  "copperToEdgeMil": 12
+ },
+ "project": "stress-hs/ddr3-x16",
+ "_provenance": "synthetic high-speed stress case (gen.py): DDR3 16-bit: controller BGA-196 (1.0 mm) → two x8 DDR3 FBGA-78 (0.8 mm); byte lanes point-to-point with differential DQS; address/command/control + CK fly-by U1 → U2 → U3 → VTT terminations"
+}

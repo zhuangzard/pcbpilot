@@ -9,7 +9,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/zhuangzard/pcbpilot/pkg/designreport"
 	"github.com/zhuangzard/pcbpilot/pkg/intent"
+	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
 	"github.com/zhuangzard/pcbpilot/pkg/powersim"
 )
 
@@ -35,7 +37,7 @@ rule push, pcb auto, the safety checker and the feedback loop.`,
 
 func newIntentDeriveCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {
 	var connPaths, valuePaths, modelPaths, pages, scenarios, switches []string
-	var simPath, specPath, modelsLib, outPath, reportPath, simOut string
+	var simPath, specPath, modelsLib, outPath, reportPath, simOut, boardPath, reportDir, reportName string
 	var strict bool
 	c := &cobra.Command{
 		Use:   "derive",
@@ -86,6 +88,11 @@ INPUTS
   'pcbpilot sim power' document instead of simulating; --sim alone (no
   connectivity) rebuilds the netlist from the sim's pin lists (no part values:
   weaker classification and no description-based ratings).
+  --board board.json (no schematic available, e.g. a reference PCB): the
+  netlist is rebuilt from the PCB pads; pin names and part values are unknown,
+  so currents/ratings are heuristic (finding netlist-from-board) while pairs,
+  interfaces, impedance widths and length groups come from the net names and
+  the board's layer count.
   Live (no --connectivity/--sim): reads every schematic page (or --pages) of the
   connected --project with sch connectivity + sch list, restores the original
   page and simulates in-process. Read-only: nothing is written to the editor.
@@ -109,6 +116,9 @@ OUTPUT
   pcbpilot intent derive --connectivity sch-p1.json --connectivity sch-p2.json \
       --values sch-list.json --out intent.json --report intent.md
 
+  # reference PCB without its schematic: netlist from the pads
+  pcbpilot intent derive --board board.json --out intent.json --report intent.md
+
   # reuse an existing simulation and add the product spec
   pcbpilot intent derive --connectivity c.json --values v.json --sim sim.json \
       --spec spec.json --out intent.json
@@ -122,6 +132,9 @@ OUTPUT
 			}
 			if len(connPaths) == 0 && len(valuePaths) > 0 {
 				return fmt.Errorf("--values needs --connectivity (live mode reads values itself)")
+			}
+			if boardPath != "" && (len(connPaths) > 0 || len(pages) > 0 || simPath != "") {
+				return fmt.Errorf("--board rebuilds the netlist from PCB pads; do not combine it with --connectivity, --pages or --sim")
 			}
 			sw, err := parseSimSwitches(switches)
 			if err != nil {
@@ -156,6 +169,18 @@ OUTPUT
 			var connDocs [][]byte
 			values := map[string]powersim.PartValues{}
 			switch {
+			case boardPath != "":
+				raw, err := os.ReadFile(boardPath)
+				if err != nil {
+					return err
+				}
+				b, err := pcbauto.FromSnapshot(raw)
+				if err != nil {
+					return fmt.Errorf("%s: %w", boardPath, err)
+				}
+				in.Design, in.BoardLayers = intent.DesignFromBoard(b), b.CopperLayers
+				in.Sources.Schematic = []string{"(netlist from PCB pads: " + boardPath + "; part values unknown → heuristic currents/ratings)"}
+				fmt.Fprintf(stderr, "board: %d parts, %d copper layers — netlist from pads, values unknown (heuristics, marked netlist-from-board)\n", len(in.Design.Parts), b.CopperLayers)
 			case len(connPaths) > 0:
 				for _, p := range connPaths {
 					b, err := os.ReadFile(p)
@@ -263,6 +288,33 @@ OUTPUT
 			}
 			fmt.Fprintf(stderr, "intent: %d blocks, %d nets, %d domains, %d pairs; classes %s; findings %d error / %d warn / %d info\n",
 				len(doc.Blocks), len(doc.Nets), len(doc.Domains), len(doc.Pairs), strings.Join(classes, " "), counts["error"], counts["warn"], counts["info"])
+			if reportDir != "" {
+				// P11 pre-layout version: intent + simulation (+ board/values).
+				if outPath == "" {
+					return fmt.Errorf("--report-dir needs --out (the report reads intent.json from disk)")
+				}
+				simFile := simPath
+				if simFile == "" {
+					simFile = simOut
+				}
+				if simFile == "" {
+					return fmt.Errorf("--report-dir with an in-process simulation needs --sim-out (the report reads sim.json from disk)")
+				}
+				models := ""
+				if len(libNames) > 0 {
+					models = libNames[len(libNames)-1]
+				}
+				values := ""
+				if len(valuePaths) == 1 {
+					values = valuePaths[0]
+				}
+				dir, dr, err := runDesignReport(designReportOpts{outDir: reportDir, version: "auto", project: reportName, intent: outPath, sim: simFile,
+					models: models, values: values, maxImageBytes: designreport.DefaultMaxImageBytes}, stderr)
+				if err != nil {
+					return fmt.Errorf("design report: %w", err)
+				}
+				fmt.Fprintf(stdout, "wrote %s/{report.html,report.md,report.json} — %s %s\n", dir, dr.VersionLabel, dr.Verdict.Status)
+			}
 			if strict && counts["error"] > 0 {
 				return fmt.Errorf("%d error finding(s) (--strict)", counts["error"])
 			}
@@ -272,6 +324,7 @@ OUTPUT
 	f := c.Flags()
 	f.StringArrayVar(&connPaths, "connectivity", nil, "offline: 'pcbpilot sch connectivity' JSON `file` (repeat per page; merged by net name)")
 	f.StringArrayVar(&valuePaths, "values", nil, "offline: 'pcbpilot sch list' JSON or {\"parts\":{ref:{value,mpn,lcsc}}} values `file` (repeatable)")
+	f.StringVar(&boardPath, "board", "", "offline without a schematic: 'pcb dump' JSON `file` — netlist from the PCB pads (footprint name as device, values unknown → heuristic currents, marked netlist-from-board); layers default to the board's")
 	f.StringVar(&simPath, "sim", "", "existing 'pcbpilot sim power' JSON (skips the in-process simulation; alone = netlist from its pin lists)")
 	f.StringVar(&specPath, "spec", "", "product spec JSON: standard, insulation, MOP, pollution degree, altitude, layers/copper, declared rails (+ripple), HS interfaces, mains, domains, USB budget, fab rules")
 	f.StringSliceVar(&pages, "pages", nil, "live: schematic pages (name or uuid, comma-separated); default all pages")
@@ -283,5 +336,7 @@ OUTPUT
 	f.StringVar(&reportPath, "report", "", "write the Markdown reading (blocks, domains, pairs, nets, classes, findings)")
 	f.StringVar(&simOut, "sim-out", "", "also write the in-process simulation JSON (for pcb auto --sim)")
 	f.BoolVar(&strict, "strict", false, "exit non-zero when any finding has severity error")
+	f.StringVar(&reportDir, "report-dir", "", "also publish the next (pre-layout) design-report version here (reports/<name>/; needs --out and --sim or --sim-out; see 'pcbpilot report design')")
+	f.StringVar(&reportName, "report-name", "", "project name on the report cover (default: the report dir name)")
 	return c
 }

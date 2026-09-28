@@ -1,0 +1,10 @@
+{
+  "units": "mm",
+  "board": {"autoSize": true, "margin": 1.5, "cornerRadius": 1, "thickness": 1.6},
+  "cornerHoles": {"size": "M3"},
+  "edge": [
+    {"ref": "U3", "edge": "top", "at": -1},
+    {"ref": "J2", "edge": "bottom", "at": -1, "overhang": 0.5},
+    {"ref": "J1", "edge": "left", "at": -1}
+  ]
+}

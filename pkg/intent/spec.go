@@ -55,6 +55,13 @@ type SpecHS struct {
 	DiffOhm     float64     `json:"diffOhm,omitempty"`
 	SingleOhm   float64     `json:"singleOhm,omitempty"`
 	LengthGroup string      `json:"lengthGroup,omitempty"`
+	// LengthTolMil is the length-group tolerance (max − min, mil; a pair
+	// counts at its mean length); 0 = the interface default.
+	LengthTolMil float64 `json:"lengthTolMil,omitempty"`
+	// MaxSkewMil is the intra-pair skew limit; 0 = the interface default.
+	MaxSkewMil float64 `json:"maxSkewMil,omitempty"`
+	// MaxVias is the via budget per net; 0 = the interface default.
+	MaxVias int `json:"maxVias,omitempty"`
 }
 
 // SpecMains declares the AC line.
@@ -80,6 +87,11 @@ type SpecDomain struct {
 	// the DC bus) the transient is taken from; 0 = the domain's working
 	// voltage.
 	RatedVrms float64 `json:"ratedVrms,omitempty"`
+	// IsolationVrms is an electric-strength (hi-pot) requirement of the
+	// barrier to this domain, e.g. 1500 for IEEE 802.3 MDI (§14.3.1.1 /
+	// §40.6.1.1): the pair becomes basic insulation dimensioned for that
+	// withstand voltage even between two SELV domains.
+	IsolationVrms float64 `json:"isolationVrms,omitempty"`
 }
 
 // SpecRules override fabrication minimums (mil).

@@ -103,7 +103,18 @@ fixture 回归：中小板 89–100%，大型 BGA 板（RK3568、K230）55–62%
 | 域与绝缘 | 按参考地与隔离件划分 SELV/hazardous/mains/patient/floating/isolated-secondary 域（整流桥后的一次侧与市电线同域）；隔离件跨接的域对与无跨接的危险↔可触及域对都出绝缘对，数字来自 `pkg/safety`（IPC-2221B / IEC 62368-1 / IEC 60601-1 MOOP·MOPP / IEC 61010-1，CLI 经 `intent_safety.go` 接入）；瞬态来源 `transient`/`mainsVrms` 随对写出 |
 | 高压压力测试 | `make stress-hv`（`-tags stress`）：5 块手工设计的高压板（230 Vac 反激 2000/5000 m、IEC 60601-1 2×MOPP / 1×MOOP 病人前端、IEC 61010-1 CAT III 600 V 分压输入、400 VDC 半桥隔离驱动 reinforced/functional、1206 当 Y 电容的不可行负例）逐板跑 sim → intent derive → pcb auto run（布局 + 仅布线）→ `pcb check --intent --board board.routed.json`，与 `testdata/stress/hv/<case>/expect.json` 手算答案比对；离线验证（source-only / offline-verified，未上现场） |
 | 设计提示 | 电感额定余量、稳压余量/dropout/占空比/Vin 上限、二极管损耗、额定电流/功率/电容耐压、缺大电容、USB 500 mA 预算、缺 USB ESD、阻抗不可控、需开槽、未知模型 |
-| 输入 | 离线 connectivity+values（进程内仿真，`--sim-out` 另存）或 `--sim`；`--spec` 产品级参数；现场只读 `--pages` |
+| 输入 | 离线 connectivity+values（进程内仿真，`--sim-out` 另存）或 `--sim`；`--spec` 产品级参数；现场只读 `--pages`；无原理图时 `--board board.json` 由 PCB 焊盘重建网表（器件值未知 → 启发式，`netlist-from-board`） |
+| 高速意图 | 接口识别与限值和布线器/SI/规则推送同一张表（`pcbauto.ClassifyHSName`：USB3/PCIe/SATA/HDMI/MIPI/LVDS/DDR/ETH/USB2/CAN）；每网 `interface`/`maxSkewMil`/`lengthTolMil`/`maxVias`；HDMI/MIPI 同端口多对与 DDR 字节通道/地址命令按网名成等长组；线宽在引擎叠层（`StackupReference`）上解；2 层 ≥1 Gb/s = `reference-plane-missing`；TX 交流耦合检查；`isolationVrms`（802.3 1500 Vrms）→ basic + 要求耐压 |
+| 高速压力测试 | `make stress-hs`：6 个合成用例（USB3 Type-C、HDMI、千兆以太网+隔离、PCIe M.2、DDR3 x16 fly-by、2 层 USB3 负例）+ RK3568/K230 `--board`，离线跑 intent → 规则计划 → `pcb auto --intent`（布线/布局）→ SI 对账；配方见 `references/recipes/high-speed.md` §6 |
+
+## 设计报告（`report design`，离线验证）
+
+| 能力 | 语义 |
+|---|---|
+| 版本化交付 | `reports/<name>/vN/{report.html,report.md,report.json}` + `index.json` + `CHANGELOG.md`；`--version auto` 取下一整数，已存在版本不覆盖；相同输入除 `generatedAt` 外逐字节一致 |
+| 12 章固定模板 | 封面结论（PASS / PASS with warnings / FAIL + 原因）、执行摘要、需求与意图、电源仿真（分组柱状图、功耗条形图、电源树）、器件可行性（应力 vs 额定、余量图、“需数据手册”）、工程计算（IPC 线宽/过孔/间距、阻抗重算、爬电/耐压）、布局布线（图片、IR 压降图、最坏路径、SI）、验证状态、测试点计划、制造装配、调试上电、附录；模板规范源在 Skill `templates/design-report/`，`pkg/designreport` 嵌入副本并测试一致 |
+| 额定来源 | `power-models.json` `maxA` + 可选 `ratings`（带 source）、电容/电阻 MPN 解码、LCSC 描述属性、电阻封装功率表；未知额定不猜 |
+| 集成 | `intent derive --report-dir`（预布局版）、`pcb auto run --report-dir`；样例 `docs/examples/esp32-mini-design-report/`（v1 真实现场产物，v2 演示变更记录） |
 
 ## 已知不支持：Altium Designer 工程自动导入
 

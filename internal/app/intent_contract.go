@@ -42,6 +42,12 @@ type intentNet struct {
 	NetClass          string        `json:"netClass"`
 	PairGapMil        float64       `json:"pairGapMil,omitempty"` // additive producer field
 	Why               []string      `json:"why"`
+	// Additive high-speed producer fields (optional).
+	Interface    string  `json:"interface,omitempty"`
+	LengthGroup  string  `json:"lengthGroup,omitempty"`
+	LengthTolMil float64 `json:"lengthTolMil,omitempty"`
+	MaxSkewMil   float64 `json:"maxSkewMil,omitempty"`
+	MaxVias      int     `json:"maxVias,omitempty"`
 }
 
 type intentVoltage struct {
@@ -142,7 +148,7 @@ func (in *designIntent) validate() error {
 		if !intentRoles[n.Role] {
 			return fmt.Errorf("intent: net %s has unknown role %q", name, n.Role)
 		}
-		if err := nonNeg("net "+name, n.CurrentA, n.WidthMil.Outer, n.WidthMil.Inner, n.WidthMil.Min, n.ClearanceMil, n.ImpedanceOhm, n.PairGapMil); err != nil {
+		if err := nonNeg("net "+name, n.CurrentA, n.WidthMil.Outer, n.WidthMil.Inner, n.WidthMil.Min, n.ClearanceMil, n.ImpedanceOhm, n.PairGapMil, n.LengthTolMil, n.MaxSkewMil, float64(n.MaxVias)); err != nil {
 			return err
 		}
 	}

@@ -91,6 +91,7 @@ type pnet struct {
 }
 
 type placer struct {
+	hvReach float64 // largest high-voltage net clearance (0 = no HV nets)
 	b       *Board
 	an      *Analysis
 	c       *Circuit
@@ -256,6 +257,11 @@ func (pl *placer) setup(res *PlaceResult) {
 	pl.setupTethers()
 	pl.setupIntimate()
 	pl.pinAccessHalo()
+	for _, np := range pl.an.Nets {
+		if np.ClearanceMil > pl.b.Rules.Clearance+hvExcessMil {
+			pl.hvReach = math.Max(pl.hvReach, np.ClearanceMil)
+		}
+	}
 	pl.zones(res)
 }
 
@@ -336,7 +342,7 @@ func (pl *placer) pinAccessHalo() {
 		if extra > 0 {
 			halo[p.Ref] += math.Min(extra, 20)
 		}
-		if hv > 0 {
+		if hv > hvExcessMil/2 {
 			halo[p.Ref] += math.Min(hv, 100)
 		}
 	}
@@ -548,6 +554,7 @@ func (pl *placer) partCost(p *Part) float64 {
 		}
 	}
 	cost += pl.isoCost(p, bx)
+	cost += pl.hvPadCost(p, bx)
 	if !pl.hardOnly {
 		cost += pl.tetherCost(p)
 		cost += pl.converterCost(p)
@@ -2281,4 +2288,42 @@ func isoPadGap(a, c *Pad, need float64) float64 {
 	}
 	d, _, _ := polyDist(padPoly(a), padPoly(c))
 	return d
+}
+
+// hvPadCost keeps the pads of two different parts the high-voltage clearance
+// their nets need from each other (ΔV-aware, same rule as the router and
+// DRC). The halo only splits the excess evenly, which is short when an 850 V
+// divider node sits next to a 1 V ADC input (CAT III stress board: 79 mil
+// between pads that need 98). Zero cost on boards without high-voltage nets.
+func (pl *placer) hvPadCost(p *Part, bx Rect) float64 {
+	if pl.an == nil || pl.hvReach <= 0 {
+		return 0
+	}
+	base := pl.b.Rules.Clearance
+	cost := 0.0
+	seen := map[*Part]bool{}
+	pl.forBuckets(bx.Expand(pl.hvReach), func(q *Part) {
+		if q == p || seen[q] {
+			return
+		}
+		seen[q] = true
+		for _, a := range p.Pads {
+			if a.Net == "" {
+				continue
+			}
+			for _, c := range q.Pads {
+				if c.Net == "" || c.Net == a.Net {
+					continue
+				}
+				req := pl.an.PairClearanceMil(a.Net, c.Net, pl.b.Rules)
+				if req <= base+hvExcessMil {
+					continue
+				}
+				if short := req - isoPadGap(a, c, req); short > 0 {
+					cost += 800 * short
+				}
+			}
+		}
+	})
+	return cost
 }

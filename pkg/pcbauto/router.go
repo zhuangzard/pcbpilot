@@ -105,7 +105,11 @@ type rnet struct {
 	// middle of a routed segment. A tee is a stub on a matched line — and on
 	// the ESP32 demo USB_DM teed off its run under the USBLC6 and walled
 	// USB_DP out of the pass-through, costing D+ three vias.
-	daisy     bool
+	daisy bool
+	// layerMul is a per-layer step-cost factor (nil = all 1): an intent
+	// high-speed net that needs a reference plane pays to run on a layer
+	// whose adjacent plane is split (the return path crosses the gaps).
+	layerMul  []float32
 	fixed     []int32 // fan-out claims (never ripped)
 	claims    []int32 // routed claims
 	paths     []rpath
@@ -190,6 +194,7 @@ type router struct {
 	deadline    time.Time
 	split       map[int]*coarse // split-plane labelling per layer id
 	pairField   map[int32]float32
+	pairFac     float32 // pair-field cost factor (0 = the default 0.55)
 	pbuckets    [][]padEntry
 	pbW, pbH    int
 	viaS        []int32
@@ -379,6 +384,7 @@ func (r *router) setupNets() {
 			rn.failed = append(rn.failed, Unrouted{Net: n.Name, Pads: padKeys(n.Pads), Reason: "needs-pour"})
 		}
 		rn.daisy = daisyDiff && (plan.Role == RoleDiff || plan.Role == RoleRF)
+		rn.layerMul = referenceLayerCost(r.st, plan)
 		for _, pd := range n.Pads {
 			rn.groups = append(rn.groups, []*Pad{pd})
 		}
@@ -1235,6 +1241,9 @@ func (r *router) search(n *rnet, sources []int32, targets map[int32]bool, bounds
 					step += 0.4 * g // 45° bend
 				}
 			}
+			if n.layerMul != nil {
+				step *= n.layerMul[l]
+			}
 			ng := gi + step*c
 			if open := r.stamp[j] == r.cur; !open || ng < r.gcost[j] {
 				r.stamp[j], r.gcost[j], r.parent[j], r.dir[j] = r.cur, ng, i, int8(d)
@@ -1630,12 +1639,16 @@ func (r *router) buildPairField(n *rnet) map[int32]float32 {
 		}
 	}
 	f := map[int32]float32{}
+	fac := r.pairFac
+	if fac <= 0 {
+		fac = 0.55
+	}
 	for _, path := range p.paths {
 		for _, node := range path.nodes {
 			l, x, y := gr.xy(int(node))
 			for _, o := range ring {
 				if xx, yy := x+o[0], y+o[1]; gr.in(xx, yy) {
-					f[int32(gr.idx(l, xx, yy))] = 0.55
+					f[int32(gr.idx(l, xx, yy))] = fac
 				}
 			}
 		}
@@ -2005,3 +2018,59 @@ func (r *router) staticByDistance(rad float64, m []uint8) {
 // busbarWidthMil is the widest track the grid router lays; wider current
 // paths are left to a pour / busbar and reported (reason "needs-pour").
 const busbarWidthMil = 250.0
+
+// splitRefCost is the step-cost factor of a signal layer whose adjacent
+// plane is split, for a high-speed net that needs a continuous reference.
+const splitRefCost = 4
+
+// refCostMinGbps limits the reference-layer pricing to lanes of ≥ 1 Gb/s
+// (USB3, PCIe, SATA, HDMI, MIPI, LVDS, DDR). A whole-layer ×4 is blunt: on
+// the ESP32 mini (2026-09-27) it priced USB_DM's short BOTTOM hop — which
+// crossed no split — so high that the pair detoured round the USBLC6 on
+// TOP: routed stub to the ESD array 68 → 299 mil, detour 7.7 → 8.7 in,
+// joint 92.6 → 80.6. A 480 Mb/s USB2 or 125 MBd Ethernet pair tolerates a
+// short excursion; the post-route split-crossing check still reports a
+// real crossing, and the ESD array must stay on the path.
+const refCostMinGbps = 1
+
+// referenceLayerCost prices the layers for an intent high-speed net (one
+// with an interface or a length group from intent.json): a signal layer
+// next to a single-net plane is its reference; one next only to a split
+// plane (IN2 carrying several rails) or to no plane (BOTTOM of the mixed
+// IN2-SIG+PWR stack) costs splitRefCost per step. Nets
+// without intent keep the unweighted search (their routing is unchanged).
+func referenceLayerCost(st *Stackup, plan *NetPlan) []float32 {
+	if st == nil || plan.Interface == "" && plan.LengthGroup == "" {
+		return nil
+	}
+	hc := ClassifyHS(plan)
+	if hc == nil || !hc.Reference || hc.RateGbps < refCostMinGbps {
+		return nil
+	}
+	mul := make([]float32, len(st.Stack))
+	anySolid, anySplit := false, false // anySplit: some layer lacks a solid reference
+	for i, l := range st.Stack {
+		mul[i] = 1
+		if l.Kind != KindSignal {
+			continue
+		}
+		solid := false
+		for _, j := range []int{i - 1, i + 1} {
+			if j >= 0 && j < len(st.Stack) && st.Stack[j].Kind == KindPlane && len(st.Stack[j].Nets) <= 1 {
+				solid = true
+			}
+		}
+		if solid {
+			anySolid = true
+		} else {
+			// Next to a split plane, or to no plane at all (the mixed
+			// IN2-SIG+PWR stack leaves BOTTOM with none): no reference.
+			mul[i] = splitRefCost
+			anySplit = true
+		}
+	}
+	if !anySolid || !anySplit {
+		return nil
+	}
+	return mul
+}

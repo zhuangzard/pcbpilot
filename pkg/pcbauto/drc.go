@@ -213,13 +213,13 @@ func checkDRCTol(b *Board, an *Analysis, st *Stackup, tracks []Track, vias []Via
 					continue
 				}
 				netReq := math.Max(clr(a.net), clr(c.net))
-				if an != nil && netReq > b.Rules.Clearance {
+				if an != nil && netReq > b.Rules.Clearance+hvExcessMil {
 					netReq = an.PairClearanceMil(a.net, c.net, b.Rules) // ΔV within a domain
 				}
-				if netReq > b.Rules.Clearance && a.kind != 0 && c.kind != 0 {
+				if netReq > b.Rules.Clearance+hvExcessMil && a.kind != 0 && c.kind != 0 {
 					netReq = drcTrackRelief(b, netReq, a, c, padsOf, reliefReach)
 				}
-				if netReq > b.Rules.Clearance && (a.kind == 0) != (c.kind == 0) {
+				if netReq > b.Rules.Clearance+hvExcessMil && (a.kind == 0) != (c.kind == 0) {
 					// HV footprint relief (hvrelief.go): copper leaving its own
 					// pad may be as close to a neighbour pad of the same part as
 					// its pad is. Never applied to a domain pair requirement.

@@ -1,0 +1,77 @@
+{
+ "_provenance": "modules of artifacts/ceshi-e2e-20260924/d-comp1.json",
+ "modules": [
+  {
+   "id": "PWR_IN",
+   "core": null,
+   "placements": [
+    {
+     "designator": "J1"
+    },
+    {
+     "designator": "D1"
+    },
+    {
+     "designator": "D2"
+    }
+   ]
+  },
+  {
+   "id": "BUCK",
+   "core": null,
+   "placements": [
+    {
+     "designator": "U1"
+    },
+    {
+     "designator": "L1"
+    },
+    {
+     "designator": "R1"
+    },
+    {
+     "designator": "R2"
+    },
+    {
+     "designator": "C1"
+    },
+    {
+     "designator": "C2"
+    },
+    {
+     "designator": "C3"
+    }
+   ]
+  },
+  {
+   "id": "USB_CONN",
+   "core": null,
+   "placements": [
+    {
+     "designator": "J2"
+    },
+    {
+     "designator": "R3"
+    },
+    {
+     "designator": "R4"
+    }
+   ]
+  },
+  {
+   "id": "UART",
+   "core": null,
+   "placements": [
+    {
+     "designator": "U2"
+    },
+    {
+     "designator": "C4"
+    },
+    {
+     "designator": "D3"
+    }
+   ]
+  }
+ ]
+}

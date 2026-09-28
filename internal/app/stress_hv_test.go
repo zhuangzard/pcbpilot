@@ -131,7 +131,7 @@ func (r *hvResult) check(ok bool, what, want, got string) {
 
 func approx(got, want, tol float64) bool { return math.Abs(got-want) <= tol+1e-9 }
 
-func runCLI(t *testing.T, args ...string) (string, string, error) {
+func hvRunCLI(t *testing.T, args ...string) (string, string, error) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
 	root := newRootCmd(&stdout, &stderr)
@@ -190,10 +190,10 @@ func runHVVariant(t *testing.T, dir, lib string, v hvVariant) *hvResult {
 	}
 	conn, vals, models := filepath.Join(dir, "connectivity.json"), filepath.Join(dir, "values.json"), filepath.Join(dir, "models.json")
 	simPath, intentPath := filepath.Join(out, "sim.json"), filepath.Join(out, "intent.json")
-	if _, se, err := runCLI(t, "sim", "power", "--connectivity", conn, "--values", vals, "--models", models, "--models-lib", lib, "--out", simPath); err != nil {
+	if _, se, err := hvRunCLI(t, "sim", "power", "--connectivity", conn, "--values", vals, "--models", models, "--models-lib", lib, "--out", simPath); err != nil {
 		t.Fatalf("sim power: %v\n%s", err, se)
 	}
-	if _, se, err := runCLI(t, "intent", "derive", "--connectivity", conn, "--values", vals, "--models", models, "--models-lib", lib,
+	if _, se, err := hvRunCLI(t, "intent", "derive", "--connectivity", conn, "--values", vals, "--models", models, "--models-lib", lib,
 		"--sim", simPath, "--spec", filepath.Join(dir, v.Spec), "--out", intentPath, "--report", filepath.Join(out, "intent.md")); err != nil {
 		t.Fatalf("intent derive: %v\n%s", err, se)
 	}
@@ -205,7 +205,7 @@ func runHVVariant(t *testing.T, dir, lib string, v hvVariant) *hvResult {
 	if err := json.Unmarshal(raw, &it); err != nil {
 		t.Fatal(err)
 	}
-	checkIntent(res, &it, v)
+	hvCheckIntent(res, &it, v)
 
 	type run struct {
 		name string
@@ -230,17 +230,17 @@ func runHVVariant(t *testing.T, dir, lib string, v hvVariant) *hvResult {
 		runs = append(runs, run{"route", append(append([]string(nil), common...), "--out-dir", filepath.Join(out, "route"))})
 	}
 	for _, r := range runs {
-		_, se, err := runCLI(t, r.args...)
+		_, se, err := hvRunCLI(t, r.args...)
 		if err != nil {
 			t.Fatalf("pcb auto run (%s): %v\n%s", r.name, err, se)
 		}
-		t.Logf("%s: %s", r.name, lastLines(se, 6))
-		checkAuto(t, res, r.name, filepath.Join(out, r.name), intentPath, v)
+		t.Logf("%s: %s", r.name, hvLastLines(se, 6))
+		hvCheckAuto(t, res, r.name, filepath.Join(out, r.name), intentPath, v)
 	}
 	return res
 }
 
-func lastLines(s string, n int) string {
+func hvLastLines(s string, n int) string {
 	l := strings.Split(strings.TrimSpace(s), "\n")
 	if len(l) > n {
 		l = l[len(l)-n:]
@@ -249,7 +249,7 @@ func lastLines(s string, n int) string {
 }
 
 // kindsOf maps domain ids to kinds.
-func kindsOf(it *intent.Intent) map[string]string {
+func hvKindsOf(it *intent.Intent) map[string]string {
 	m := map[string]string{}
 	for _, d := range it.Domains {
 		m[d.ID] = d.Kind
@@ -257,7 +257,7 @@ func kindsOf(it *intent.Intent) map[string]string {
 	return m
 }
 
-func inList(xs []string, v string) bool {
+func hvInList(xs []string, v string) bool {
 	for _, x := range xs {
 		if x == v {
 			return true
@@ -266,12 +266,12 @@ func inList(xs []string, v string) bool {
 	return false
 }
 
-func checkIntent(res *hvResult, it *intent.Intent, v hvVariant) {
-	kinds := kindsOf(it)
+func hvCheckIntent(res *hvResult, it *intent.Intent, v hvVariant) {
+	kinds := hvKindsOf(it)
 	for _, ed := range v.Domains {
 		var got *intent.Domain
 		for _, d := range it.Domains {
-			if inList(ed.Kinds, d.Kind) {
+			if hvInList(ed.Kinds, d.Kind) {
 				ok := true
 				for _, n := range ed.Nets {
 					ok = ok && it.Nets[n] != nil && it.Nets[n].Domain == d.ID
@@ -293,7 +293,7 @@ func checkIntent(res *hvResult, it *intent.Intent, v hvVariant) {
 		var got *intent.Pair
 		for _, p := range it.Pairs {
 			ka, kb := kinds[strings.TrimPrefix(p.A, "domain:")], kinds[strings.TrimPrefix(p.B, "domain:")]
-			if inList(ep.Kinds[0], ka) && inList(ep.Kinds[1], kb) || inList(ep.Kinds[0], kb) && inList(ep.Kinds[1], ka) {
+			if hvInList(ep.Kinds[0], ka) && hvInList(ep.Kinds[1], kb) || hvInList(ep.Kinds[0], kb) && hvInList(ep.Kinds[1], ka) {
 				got = p
 			}
 		}
@@ -315,7 +315,7 @@ func checkIntent(res *hvResult, it *intent.Intent, v hvVariant) {
 			res.check(got.Transient == ep.Transient && approx(got.MainsVrms, ep.MainsVrms, 0.5), what+" transient", fmt.Sprintf("%s @ %.0f V", ep.Transient, ep.MainsVrms), fmt.Sprintf("%s @ %.0f V", got.Transient, got.MainsVrms))
 		}
 		for _, b := range ep.Bridges {
-			res.check(inList(got.Bridges, b), what+" bridge "+b, "listed", strings.Join(got.Bridges, ","))
+			res.check(hvInList(got.Bridges, b), what+" bridge "+b, "listed", strings.Join(got.Bridges, ","))
 		}
 	}
 	names := hvKeys(v.Nets)
@@ -421,7 +421,7 @@ type autoPlan struct {
 	} `json:"result"`
 }
 
-func checkAuto(t *testing.T, res *hvResult, run, dir, intentPath string, v hvVariant) {
+func hvCheckAuto(t *testing.T, res *hvResult, run, dir, intentPath string, v hvVariant) {
 	raw, err := os.ReadFile(filepath.Join(dir, "plan.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -519,7 +519,7 @@ func checkAuto(t *testing.T, res *hvResult, run, dir, intentPath string, v hvVar
 	}
 	res.check(len(r.DRC.Violations) == 0, p+"engine DRC violations", "0", fmt.Sprint(len(r.DRC.Violations)))
 	if v.MaxIsoFindings != nil {
-		res.check(len(iso.Findings) <= *v.MaxIsoFindings, p+"engine isolation findings", fmt.Sprintf("≤ %d", *v.MaxIsoFindings), isoSummary(iso.Findings))
+		res.check(len(iso.Findings) <= *v.MaxIsoFindings, p+"engine isolation findings", fmt.Sprintf("≤ %d", *v.MaxIsoFindings), hvIsoSummary(iso.Findings))
 	}
 	for _, n := range v.NeedsPour {
 		reason := ""
@@ -550,7 +550,7 @@ func checkAuto(t *testing.T, res *hvResult, run, dir, intentPath string, v hvVar
 	}
 	// Offline pcb check on the routed board.
 	routed := filepath.Join(dir, "board.routed.json")
-	stdout, se, err := runCLI(t, "pcb", "check", "--intent", intentPath, "--board", routed, "--json")
+	stdout, se, err := hvRunCLI(t, "pcb", "check", "--intent", intentPath, "--board", routed, "--json")
 	if err != nil {
 		t.Fatalf("pcb check: %v\n%s", err, se)
 	}
@@ -572,17 +572,17 @@ func checkAuto(t *testing.T, res *hvResult, run, dir, intentPath string, v hvVar
 		res.check(isoF <= *v.MaxIsoFindings, p+"pcb check clearance/creepage", fmt.Sprintf("≤ %d", *v.MaxIsoFindings), fmt.Sprint(isoF))
 	}
 	if len(v.Infeasible) > 0 {
-		_, _, err := runCLI(t, "pcb", "check", "--intent", intentPath, "--board", routed, "--strict")
+		_, _, err := hvRunCLI(t, "pcb", "check", "--intent", intentPath, "--board", routed, "--strict")
 		res.check(err != nil, p+"pcb check --strict gates", "non-zero exit", fmt.Sprint(err != nil))
 	} else if v.MaxIsoFindings != nil && *v.MaxIsoFindings == 0 {
 		res.check(chk.Summary.Isolation == 0, p+"pcb check isolation summary", "0", fmt.Sprint(chk.Summary.Isolation))
 	}
 	if len(v.Chain) > 0 {
-		checkChain(t, res, p, routed, v.Chain)
+		hvCheckChain(t, res, p, routed, v.Chain)
 	}
 }
 
-func isoSummary(fs []pcbauto.IsoFinding) string {
+func hvIsoSummary(fs []pcbauto.IsoFinding) string {
 	if len(fs) == 0 {
 		return "0"
 	}
@@ -599,7 +599,7 @@ func isoSummary(fs []pcbauto.IsoFinding) string {
 
 // ipcB2 is IPC-2221B Table 6-1 column B2 (external, uncoated, ≤ 3050 m), mm —
 // written out here independently of the engine.
-func ipcB2(v float64) float64 {
+func hvIPCB2(v float64) float64 {
 	v = math.Abs(v)
 	rows := []struct{ max, mm float64 }{{15, 0.1}, {30, 0.1}, {50, 0.6}, {100, 0.6}, {150, 0.6}, {170, 1.25}, {250, 1.25}, {300, 1.25}, {500, 2.5}}
 	for _, r := range rows {
@@ -614,7 +614,7 @@ func ipcB2(v float64) float64 {
 // divider-chain nets keeps IPC-2221B B2 at their voltage difference, except
 // the pads of one resistor (the footprint's own spacing, checked separately
 // against the same rule).
-func checkChain(t *testing.T, res *hvResult, p, routed string, chain map[string]float64) {
+func hvCheckChain(t *testing.T, res *hvResult, p, routed string, chain map[string]float64) {
 	raw, err := os.ReadFile(routed)
 	if err != nil {
 		t.Fatal(err)
@@ -664,7 +664,7 @@ func checkChain(t *testing.T, res *hvResult, p, routed string, chain map[string]
 			if a.net == c.net || a.layer != c.layer && a.layer != pcbauto.LayerMulti && c.layer != pcbauto.LayerMulti {
 				continue
 			}
-			req := ipcB2(chain[a.net]-chain[c.net]) / 0.0254
+			req := hvIPCB2(chain[a.net]-chain[c.net]) / 0.0254
 			d := pcbauto.PolyGap(a.poly, c.poly)
 			if m := d / req; m < worst {
 				worst, where = m, fmt.Sprintf("%s(%s)↔%s(%s) %.0f/%.0f mil", a.name, a.net, c.name, c.net, d, req)

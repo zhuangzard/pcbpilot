@@ -96,18 +96,35 @@ type intentDiffPairPlan struct {
 	WidthMil     float64 `json:"widthMil,omitempty"`
 	GapMil       float64 `json:"gapMil,omitempty"`
 	Note         string  `json:"note,omitempty"`
+	// Interface family and its intra-pair length tolerance (intent
+	// maxSkewMil, else the router's HS class table).
+	Interface    string  `json:"interface,omitempty"`
+	LengthTolMil float64 `json:"lengthTolMil,omitempty"`
+}
+
+// intentLengthGroupPlan is a declared length-matching group (inter-pair /
+// byte lane). The host's Net Length Tolerance rule schema is not captured,
+// so groups are reported for the router and reviewer, not written.
+type intentLengthGroupPlan struct {
+	Name      string   `json:"name"`
+	Interface string   `json:"interface,omitempty"`
+	Nets      []string `json:"nets"`
+	Pairs     int      `json:"pairs"`
+	TolMil    float64  `json:"tolMil"`
+	MaxVias   int      `json:"maxVias,omitempty"`
 }
 
 type intentRulesPlan struct {
-	Classes         []intentClassPlan    `json:"classes"`
-	RuleChanges     []intentRuleChange   `json:"ruleChanges"`
-	Bindings        []intentBindChange   `json:"bindings"`
-	PendingBindings []string             `json:"pendingBindings,omitempty"`
-	DiffPairs       []intentDiffPairPlan `json:"diffPairs"`
-	Unsupported     []intentPlanNote     `json:"unsupported"`
-	Advisories      []intentPlanNote     `json:"advisories"`
-	Conflicts       []intentPlanNote     `json:"conflicts"`
-	PendingWrites   int                  `json:"pendingWrites"`
+	Classes         []intentClassPlan       `json:"classes"`
+	RuleChanges     []intentRuleChange      `json:"ruleChanges"`
+	Bindings        []intentBindChange      `json:"bindings"`
+	PendingBindings []string                `json:"pendingBindings,omitempty"`
+	DiffPairs       []intentDiffPairPlan    `json:"diffPairs"`
+	LengthGroups    []intentLengthGroupPlan `json:"lengthGroups,omitempty"`
+	Unsupported     []intentPlanNote        `json:"unsupported"`
+	Advisories      []intentPlanNote        `json:"advisories"`
+	Conflicts       []intentPlanNote        `json:"conflicts"`
+	PendingWrites   int                     `json:"pendingWrites"`
 
 	ruleConfiguration map[string]any // desired complete configuration
 	netRules          []any          // desired complete net rules
@@ -376,6 +393,7 @@ func planIntentRules(in *designIntent, snap intentRulesSnapshot, pcbNets map[str
 	}
 
 	p.planDiffPairs(in, rc, specs, onPcb, livePairs)
+	p.planLengthGroups(in, onPcb)
 
 	for _, pr := range in.Pairs {
 		req := []string{}
@@ -793,6 +811,18 @@ func (p *intentRulesPlan) planDiffPairs(in *designIntent, rc map[string]any, spe
 		}
 		d := intentDiffPairPlan{Name: g, Positive: pos, Negative: neg, Note: note}
 		np, nn := in.Nets[pos], in.Nets[neg]
+		d.Interface = firstNonEmptyStr(np.Interface, nn.Interface)
+		switch {
+		case np.MaxSkewMil > 0 && nn.MaxSkewMil > 0:
+			d.LengthTolMil = math.Min(np.MaxSkewMil, nn.MaxSkewMil)
+		case np.MaxSkewMil > 0 || nn.MaxSkewMil > 0:
+			d.LengthTolMil = math.Max(np.MaxSkewMil, nn.MaxSkewMil)
+		default:
+			d.LengthTolMil = pcbauto.ClassifyHSName(d.Interface, pos).MaxSkewMil
+		}
+		if np.Interface != "" && nn.Interface != "" && np.Interface != nn.Interface {
+			p.Conflicts = append(p.Conflicts, intentPlanNote{Item: "diffPair " + g, Detail: fmt.Sprintf("members disagree on the interface (%s: %s, %s: %s)", pos, np.Interface, neg, nn.Interface)})
+		}
 		d.ImpedanceOhm = math.Max(np.ImpedanceOhm, nn.ImpedanceOhm)
 		if np.WidthMil.Outer > 0 && np.WidthMil.Outer == nn.WidthMil.Outer {
 			d.WidthMil = np.WidthMil.Outer
@@ -849,12 +879,10 @@ func (p *intentRulesPlan) planDiffPairs(in *designIntent, rc map[string]any, spe
 	// 20.9 mil USB2 mismatch the SI check accepts.
 	tol := math.Inf(1)
 	for _, d := range p.DiffPairs {
-		if d.Action == "skip" {
+		if d.Action == "skip" || d.LengthTolMil <= 0 {
 			continue
 		}
-		if hc := pcbauto.ClassifyHS(&pcbauto.NetPlan{Net: d.Positive, Role: pcbauto.RoleDiff}); hc != nil && hc.MaxSkewMil > 0 {
-			tol = math.Min(tol, hc.MaxSkewMil)
-		}
+		tol = math.Min(tol, d.LengthTolMil)
 	}
 	if math.IsInf(tol, 1) {
 		tol = 0
@@ -1037,4 +1065,76 @@ func mnavSet(root map[string]any, v any, keys ...string) {
 		m = next
 	}
 	m[keys[len(keys)-1]] = v
+}
+
+func firstNonEmptyStr(xs ...string) string {
+	for _, x := range xs {
+		if x != "" {
+			return x
+		}
+	}
+	return ""
+}
+
+// planLengthGroups reports every declared length group with more than one
+// matching unit (a pair counts once). Tolerances disagreeing inside a group
+// are a conflict; the host rule is unsupported (schema not captured).
+func (p *intentRulesPlan) planLengthGroups(in *designIntent, onPcb func(string) bool) {
+	members := map[string][]string{}
+	for _, name := range in.sortedNetNames() {
+		if g := in.Nets[name].LengthGroup; g != "" && onPcb(name) {
+			members[g] = append(members[g], name)
+		}
+	}
+	names := make([]string, 0, len(members))
+	for g := range members {
+		names = append(names, g)
+	}
+	sort.Strings(names)
+	for _, g := range names {
+		nets := members[g]
+		in1 := map[string]bool{}
+		for _, n := range nets {
+			in1[n] = true
+		}
+		units, pairs := 0, 0
+		seen := map[string]bool{}
+		lg := intentLengthGroupPlan{Name: g, Nets: nets}
+		tols := map[float64]bool{}
+		for _, n := range nets {
+			np := in.Nets[n]
+			if np.LengthTolMil > 0 {
+				tols[np.LengthTolMil] = true
+				lg.TolMil = math.Max(lg.TolMil, np.LengthTolMil)
+			}
+			if np.MaxVias > 0 && (lg.MaxVias == 0 || np.MaxVias < lg.MaxVias) {
+				lg.MaxVias = np.MaxVias
+			}
+			lg.Interface = firstNonEmptyStr(lg.Interface, np.Interface)
+			if seen[n] {
+				continue
+			}
+			seen[n] = true
+			units++
+			if dp := np.DiffPair; dp != "" && in1[dp] {
+				seen[dp] = true
+				pairs++
+			}
+		}
+		if units < 2 {
+			continue // a lone pair: its intra-pair tolerance is the diff-pair rule
+		}
+		lg.Pairs = pairs
+		if len(tols) > 1 {
+			p.Conflicts = append(p.Conflicts, intentPlanNote{Item: "lengthGroup " + g, Detail: "members declare different lengthTolMil values; one group has one tolerance"})
+		}
+		p.LengthGroups = append(p.LengthGroups, lg)
+		detail := fmt.Sprintf("%d unit(s) (%d pair(s)) matched within %.0f mil", units, pairs, lg.TolMil)
+		if lg.TolMil == 0 {
+			detail = fmt.Sprintf("%d unit(s) (%d pair(s)) grouped without a tolerance (reported only)", units, pairs)
+		}
+		p.Unsupported = append(p.Unsupported, intentPlanNote{Item: "lengthGroup " + g,
+			Detail: detail + " — the host Net Length Tolerance rule schema is not captured; pcb auto --intent tunes and checks the group, verify after routing",
+			Status: "planned"})
+	}
 }

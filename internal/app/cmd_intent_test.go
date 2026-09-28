@@ -76,3 +76,53 @@ func TestIntentDeriveFlagValidation(t *testing.T) {
 		}
 	}
 }
+
+// A reference PCB without its schematic: the netlist comes from the pads,
+// the layer count from the board, and the HS plan from the net names.
+func TestIntentDeriveFromBoardCLI(t *testing.T) {
+	dir := t.TempDir()
+	outPath := filepath.Join(dir, "intent.json")
+	var stdout, stderr bytes.Buffer
+	root := newRootCmd(&stdout, &stderr)
+	root.SetArgs([]string{"intent", "derive", "--board", "testdata/boards/lckfb-rk3568-4layer.json",
+		"--models-lib", "../../.agents/skills/pcbpilot/references/power-models.json", "--out", outPath})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("%v\n%s", err, stderr.String())
+	}
+	var doc intent.Intent
+	if err := json.Unmarshal(mustReadFile(t, outPath), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Copper.Layers != 4 || !strings.Contains(doc.Sources.Schematic[0], "PCB pads") {
+		t.Fatalf("copper %+v sources %+v", doc.Copper, doc.Sources)
+	}
+	found := false
+	for _, f := range doc.Findings {
+		found = found || f.Kind == "netlist-from-board"
+	}
+	if !found {
+		t.Fatal("netlist-from-board finding missing")
+	}
+	for net, want := range map[string]string{"PCIE20_TXP": "PCIE", "USB3_HOST1_SSTX_P": "USB3", "USB3_HOST1_DP": "USB", "HDMI_0P": "HDMI", "DDR_A_DQS0P": "DDR"} {
+		if np := doc.Nets[net]; np == nil || np.Interface != want {
+			t.Errorf("%s: %+v, want %s", net, np, want)
+		}
+	}
+	if np := doc.Nets["HDMI_CP"]; np.LengthGroup != "HDMI_LANES" || np.LengthTolMil != 100 {
+		t.Errorf("HDMI_CP group %s ±%v", np.LengthGroup, np.LengthTolMil)
+	}
+	root = newRootCmd(&stdout, &stderr)
+	root.SetArgs([]string{"intent", "derive", "--board", "x.json", "--connectivity", "y.json"})
+	if err := root.Execute(); err == nil || !strings.Contains(err.Error(), "--board") {
+		t.Fatalf("--board with --connectivity: %v", err)
+	}
+}
+
+func mustReadFile(t *testing.T, p string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}

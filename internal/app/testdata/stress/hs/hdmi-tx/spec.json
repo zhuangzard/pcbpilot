@@ -1,0 +1,12 @@
+{
+ "layers": 4,
+ "standard": {
+  "name": "IPC-2221B"
+ },
+ "rules": {
+  "clearanceMil": 4,
+  "trackMil": 4,
+  "viaDrillMil": 8,
+  "viaDiaMil": 16
+ }
+}

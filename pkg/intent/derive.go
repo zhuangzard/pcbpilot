@@ -53,6 +53,10 @@ type ctx struct {
 	netBlock     map[string]string     // net → intent block id
 	volts        map[string]Voltage    // net → voltage envelope
 	uncontrolled []string              // diff nets whose impedance the stackup cannot hold
+	noReference  []string              // ≥ 1 Gb/s diff nets without an adjacent reference plane
+	laneGroups   map[string]string     // net → auto length group of a multi-lane port
+	ddrPairs     [][2]string           // DDR strobe/clock pairs recognised from names
+	ddrGroup     map[string]string     // net → DDR byte-lane / address group
 }
 
 type pinRef struct {
@@ -152,6 +156,9 @@ func (c *ctx) setup() error {
 	// Stackup / copper.
 	c.layers = c.spec.Layers
 	if c.layers <= 0 {
+		c.layers = c.in.BoardLayers
+	}
+	if c.layers <= 0 {
 		c.layers = 4
 	}
 	c.rules = pcbauto.DefaultRules()
@@ -176,12 +183,19 @@ func (c *ctx) setup() error {
 	if c.tempRise <= 0 {
 		c.tempRise = 10
 	}
-	c.refH, c.er, c.stackName = 8.4, 4.05, "JLC04161H-7628 (4-layer 1.6 mm, L1→L2 prepreg 0.2104 mm)"
+	// The stackup the engine builds for this layer count (pcbauto.
+	// StackupReference): one source, so the width solved here is the width
+	// pcb auto's stackup holds. (Before 2026-09-27 intent solved 4-layer on
+	// h=8.4 mil εr 4.05 and 6-layer on 3.5 mil εr 4.1 while the engine
+	// declared 8.28/4.4 and 4.4/4.2 — a 6-layer 100 Ω pair came out 5.1 mil
+	// wide, ≈ 112 Ω on the stackup actually ordered.)
+	h, er, name := pcbauto.StackupReference(c.layers)
+	c.refH, c.er, c.stackName = h, er, name
 	switch {
 	case c.layers == 2:
-		c.refH, c.stackName = c.rules.BoardThickMil, "JLC 2-layer 1.6 mm FR4 (no adjacent reference plane)"
-	case c.layers >= 6:
-		c.refH, c.er, c.stackName = 3.5, 4.1, "JLC 6+-layer (thin prepreg ≈ 0.09 mm, engineering default)"
+		c.refH, c.stackName = c.rules.BoardThickMil, name+" (no adjacent reference plane)"
+	case c.layers == 4:
+		c.stackName = name + " (4-layer 1.6 mm, L1→L2 7628 prepreg 0.2104 mm)"
 	}
 	c.mains = map[string]bool{}
 	if c.spec.Mains != nil {
@@ -216,8 +230,23 @@ func (c *ctx) setup() error {
 			ps.Rails = append(ps.Rails, pcbauto.PowerRail{Net: r.Net, Voltage: r.Voltage, CurrentA: r.CurrentA})
 		}
 	}
+	declared := map[string]bool{}
 	for _, hs := range c.spec.HSInterfaces {
 		ps.DiffPairs = append(ps.DiffPairs, hs.Pairs...)
+		for _, p := range hs.Pairs {
+			declared[p[0]], declared[p[1]] = true, true
+		}
+		for _, n := range hs.Nets {
+			declared[n] = true
+		}
+	}
+	// DDR strobes/clocks are differential pairs no generic name rule sees
+	// (DDR_A_DQS0P/N, DDR_CLKA_P/N): recognise them unless the spec did.
+	for _, p := range sortedPairs(ddrPairs(c.d.Nets())) {
+		if !declared[p[0]] && !declared[p[1]] {
+			ps.DiffPairs = append(ps.DiffPairs, p)
+			c.ddrPairs = append(c.ddrPairs, p)
+		}
 	}
 	var st *pcbauto.Stackup
 	if c.layers == 2 {
@@ -227,6 +256,13 @@ func (c *ctx) setup() error {
 	}
 	c.an = pcbauto.Analyze(b, ps, st)
 	c.circ = pcbauto.Understand(b, c.an)
+	c.ddrGroup = ddrGroups(c.d.Nets(), c.ddrPairs, func(n string) bool {
+		if declared[n] {
+			return false
+		}
+		r := c.an.Plan(n, c.rules).Role
+		return r != pcbauto.RolePower && r != pcbauto.RoleGround
+	})
 	return nil
 }
 

@@ -1,0 +1,1444 @@
+{
+ "schemaVersion": "1.4",
+ "projectId": "stress-hs-usb3-typec",
+ "documentId": "page-1",
+ "_provenance": "synthetic high-speed stress case (gen.py): USB 3.0 device with an integrated Type-C flip mux (TX1/TX2/RX1/RX2) behind a straddle-mount Type-C: 100 nF TX AC caps at the controller, flow-through ESD at the connector; USB 2.0 D+/D- with USBLC6; 5.1 kΩ CC pull-downs; VBUS divider sense; AMS1117 3V3",
+ "components": [
+  {
+   "id": "cmp-J1",
+   "ref": "J1",
+   "device": {
+    "name": "={Value}"
+   },
+   "pins": [
+    {
+     "number": "A1",
+     "name": "GND"
+    },
+    {
+     "number": "B12",
+     "name": "GND"
+    },
+    {
+     "number": "A2",
+     "name": "SSTXp1"
+    },
+    {
+     "number": "B11",
+     "name": "SSRXp1"
+    },
+    {
+     "number": "A3",
+     "name": "SSTXn1"
+    },
+    {
+     "number": "B10",
+     "name": "SSRXn1"
+    },
+    {
+     "number": "A4",
+     "name": "VBUS"
+    },
+    {
+     "number": "B9",
+     "name": "VBUS"
+    },
+    {
+     "number": "A5",
+     "name": "CC1"
+    },
+    {
+     "number": "B8",
+     "name": "SBU2"
+    },
+    {
+     "number": "A6",
+     "name": "Dp1"
+    },
+    {
+     "number": "B7",
+     "name": "Dn2"
+    },
+    {
+     "number": "A7",
+     "name": "Dn1"
+    },
+    {
+     "number": "B6",
+     "name": "Dp2"
+    },
+    {
+     "number": "A8",
+     "name": "SBU1"
+    },
+    {
+     "number": "B5",
+     "name": "CC2"
+    },
+    {
+     "number": "A9",
+     "name": "VBUS"
+    },
+    {
+     "number": "B4",
+     "name": "VBUS"
+    },
+    {
+     "number": "A10",
+     "name": "SSRXn2"
+    },
+    {
+     "number": "B3",
+     "name": "SSTXn2"
+    },
+    {
+     "number": "A11",
+     "name": "SSRXp2"
+    },
+    {
+     "number": "B2",
+     "name": "SSTXp2"
+    },
+    {
+     "number": "A12",
+     "name": "GND"
+    },
+    {
+     "number": "B1",
+     "name": "GND"
+    },
+    {
+     "number": "S1",
+     "name": "S1"
+    },
+    {
+     "number": "S2",
+     "name": "S2"
+    },
+    {
+     "number": "S3",
+     "name": "S3"
+    },
+    {
+     "number": "S4",
+     "name": "S4"
+    }
+   ]
+  },
+  {
+   "id": "cmp-U4",
+   "ref": "U4",
+   "device": {
+    "name": "={Value}"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "D1+"
+    },
+    {
+     "number": "2",
+     "name": "D1-"
+    },
+    {
+     "number": "3",
+     "name": "GND"
+    },
+    {
+     "number": "4",
+     "name": "D2+"
+    },
+    {
+     "number": "5",
+     "name": "D2-"
+    },
+    {
+     "number": "6",
+     "name": "D2-"
+    },
+    {
+     "number": "7",
+     "name": "D2+"
+    },
+    {
+     "number": "8",
+     "name": "GND"
+    },
+    {
+     "number": "9",
+     "name": "D1-"
+    },
+    {
+     "number": "10",
+     "name": "D1+"
+    }
+   ]
+  },
+  {
+   "id": "cmp-U5",
+   "ref": "U5",
+   "device": {
+    "name": "={Value}"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "D1+"
+    },
+    {
+     "number": "2",
+     "name": "D1-"
+    },
+    {
+     "number": "3",
+     "name": "GND"
+    },
+    {
+     "number": "4",
+     "name": "D2+"
+    },
+    {
+     "number": "5",
+     "name": "D2-"
+    },
+    {
+     "number": "6",
+     "name": "D2-"
+    },
+    {
+     "number": "7",
+     "name": "D2+"
+    },
+    {
+     "number": "8",
+     "name": "GND"
+    },
+    {
+     "number": "9",
+     "name": "D1-"
+    },
+    {
+     "number": "10",
+     "name": "D1+"
+    }
+   ]
+  },
+  {
+   "id": "cmp-U6",
+   "ref": "U6",
+   "device": {
+    "name": "={Value}"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "I/O1"
+    },
+    {
+     "number": "2",
+     "name": "GND"
+    },
+    {
+     "number": "3",
+     "name": "I/O2"
+    },
+    {
+     "number": "4",
+     "name": "I/O2"
+    },
+    {
+     "number": "5",
+     "name": "VBUS"
+    },
+    {
+     "number": "6",
+     "name": "I/O1"
+    }
+   ]
+  },
+  {
+   "id": "cmp-C1",
+   "ref": "C1",
+   "device": {
+    "name": "={Value}"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-C2",
+   "ref": "C2",
+   "device": {
+    "name": "={Value}"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-C3",
+   "ref": "C3",
+   "device": {
+    "name": "={Value}"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-C4",
+   "ref": "C4",
+   "device": {
+    "name": "={Value}"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-U1",
+   "ref": "U1",
+   "device": {
+    "name": "={Value}"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "SSTX1P"
+    },
+    {
+     "number": "2",
+     "name": "SSTX1N"
+    },
+    {
+     "number": "3",
+     "name": "GND"
+    },
+    {
+     "number": "4",
+     "name": "SSRX1P"
+    },
+    {
+     "number": "5",
+     "name": "SSRX1N"
+    },
+    {
+     "number": "6",
+     "name": "DP"
+    },
+    {
+     "number": "7",
+     "name": "DM"
+    },
+    {
+     "number": "8",
+     "name": "GND"
+    },
+    {
+     "number": "9",
+     "name": "SSRX2N"
+    },
+    {
+     "number": "10",
+     "name": "SSRX2P"
+    },
+    {
+     "number": "11",
+     "name": "SSTX2N"
+    },
+    {
+     "number": "12",
+     "name": "SSTX2P"
+    },
+    {
+     "number": "13",
+     "name": "RESETN"
+    },
+    {
+     "number": "14",
+     "name": "XI"
+    },
+    {
+     "number": "15",
+     "name": "XO"
+    },
+    {
+     "number": "16",
+     "name": "GND"
+    },
+    {
+     "number": "17",
+     "name": "VDD33"
+    },
+    {
+     "number": "18",
+     "name": "18"
+    },
+    {
+     "number": "19",
+     "name": "19"
+    },
+    {
+     "number": "20",
+     "name": "20"
+    },
+    {
+     "number": "21",
+     "name": "21"
+    },
+    {
+     "number": "22",
+     "name": "22"
+    },
+    {
+     "number": "23",
+     "name": "23"
+    },
+    {
+     "number": "24",
+     "name": "GND"
+    },
+    {
+     "number": "25",
+     "name": "25"
+    },
+    {
+     "number": "26",
+     "name": "26"
+    },
+    {
+     "number": "27",
+     "name": "27"
+    },
+    {
+     "number": "28",
+     "name": "28"
+    },
+    {
+     "number": "29",
+     "name": "29"
+    },
+    {
+     "number": "30",
+     "name": "30"
+    },
+    {
+     "number": "31",
+     "name": "31"
+    },
+    {
+     "number": "32",
+     "name": "32"
+    },
+    {
+     "number": "33",
+     "name": "33"
+    },
+    {
+     "number": "34",
+     "name": "34"
+    },
+    {
+     "number": "35",
+     "name": "VBUS_DET"
+    },
+    {
+     "number": "36",
+     "name": "GND"
+    },
+    {
+     "number": "37",
+     "name": "VDD33"
+    },
+    {
+     "number": "38",
+     "name": "GND"
+    },
+    {
+     "number": "39",
+     "name": "39"
+    },
+    {
+     "number": "40",
+     "name": "40"
+    },
+    {
+     "number": "41",
+     "name": "41"
+    },
+    {
+     "number": "42",
+     "name": "42"
+    },
+    {
+     "number": "43",
+     "name": "43"
+    },
+    {
+     "number": "44",
+     "name": "44"
+    },
+    {
+     "number": "45",
+     "name": "45"
+    },
+    {
+     "number": "46",
+     "name": "46"
+    },
+    {
+     "number": "47",
+     "name": "47"
+    },
+    {
+     "number": "48",
+     "name": "VDD33"
+    },
+    {
+     "number": "49",
+     "name": "EP"
+    }
+   ]
+  },
+  {
+   "id": "cmp-R1",
+   "ref": "R1",
+   "device": {
+    "name": "={Value}"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-R2",
+   "ref": "R2",
+   "device": {
+    "name": "={Value}"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-R3",
+   "ref": "R3",
+   "device": {
+    "name": "={Value}"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-R4",
+   "ref": "R4",
+   "device": {
+    "name": "={Value}"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-C5",
+   "ref": "C5",
+   "device": {
+    "name": "={Value}"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-C6",
+   "ref": "C6",
+   "device": {
+    "name": "={Value}"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-C7",
+   "ref": "C7",
+   "device": {
+    "name": "={Value}"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-U9",
+   "ref": "U9",
+   "device": {
+    "name": "={Value}"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "GND"
+    },
+    {
+     "number": "2",
+     "name": "VOUT"
+    },
+    {
+     "number": "3",
+     "name": "VIN"
+    },
+    {
+     "number": "4",
+     "name": "TAB"
+    }
+   ]
+  },
+  {
+   "id": "cmp-C90",
+   "ref": "C90",
+   "device": {
+    "name": "={Value}"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-C91",
+   "ref": "C91",
+   "device": {
+    "name": "={Value}"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  }
+ ],
+ "nets": [
+  {
+   "id": "net-+3V3",
+   "name": "+3V3",
+   "role": "power"
+  },
+  {
+   "id": "net-CC1",
+   "name": "CC1",
+   "role": "signal"
+  },
+  {
+   "id": "net-CC2",
+   "name": "CC2",
+   "role": "signal"
+  },
+  {
+   "id": "net-GND",
+   "name": "GND",
+   "role": "ground"
+  },
+  {
+   "id": "net-RESETN",
+   "name": "RESETN",
+   "role": "signal"
+  },
+  {
+   "id": "net-USB3_SSRX1_N",
+   "name": "USB3_SSRX1_N",
+   "role": "signal"
+  },
+  {
+   "id": "net-USB3_SSRX1_P",
+   "name": "USB3_SSRX1_P",
+   "role": "signal"
+  },
+  {
+   "id": "net-USB3_SSRX2_N",
+   "name": "USB3_SSRX2_N",
+   "role": "signal"
+  },
+  {
+   "id": "net-USB3_SSRX2_P",
+   "name": "USB3_SSRX2_P",
+   "role": "signal"
+  },
+  {
+   "id": "net-USB3_SSTX1C_N",
+   "name": "USB3_SSTX1C_N",
+   "role": "signal"
+  },
+  {
+   "id": "net-USB3_SSTX1C_P",
+   "name": "USB3_SSTX1C_P",
+   "role": "signal"
+  },
+  {
+   "id": "net-USB3_SSTX1_N",
+   "name": "USB3_SSTX1_N",
+   "role": "signal"
+  },
+  {
+   "id": "net-USB3_SSTX1_P",
+   "name": "USB3_SSTX1_P",
+   "role": "signal"
+  },
+  {
+   "id": "net-USB3_SSTX2C_N",
+   "name": "USB3_SSTX2C_N",
+   "role": "signal"
+  },
+  {
+   "id": "net-USB3_SSTX2C_P",
+   "name": "USB3_SSTX2C_P",
+   "role": "signal"
+  },
+  {
+   "id": "net-USB3_SSTX2_N",
+   "name": "USB3_SSTX2_N",
+   "role": "signal"
+  },
+  {
+   "id": "net-USB3_SSTX2_P",
+   "name": "USB3_SSTX2_P",
+   "role": "signal"
+  },
+  {
+   "id": "net-USB_DM",
+   "name": "USB_DM",
+   "role": "signal"
+  },
+  {
+   "id": "net-USB_DP",
+   "name": "USB_DP",
+   "role": "signal"
+  },
+  {
+   "id": "net-VBUS",
+   "name": "VBUS",
+   "role": "power"
+  },
+  {
+   "id": "net-VBUS_DET",
+   "name": "VBUS_DET",
+   "role": "power"
+  }
+ ],
+ "connections": [
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "A1",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "B12",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "A2",
+   "netId": "net-USB3_SSTX1C_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "B11",
+   "netId": "net-USB3_SSRX1_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "A3",
+   "netId": "net-USB3_SSTX1C_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "B10",
+   "netId": "net-USB3_SSRX1_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "A4",
+   "netId": "net-VBUS",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "B9",
+   "netId": "net-VBUS",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "A5",
+   "netId": "net-CC1",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "A6",
+   "netId": "net-USB_DP",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "B7",
+   "netId": "net-USB_DM",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "A7",
+   "netId": "net-USB_DM",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "B6",
+   "netId": "net-USB_DP",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "B5",
+   "netId": "net-CC2",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "A9",
+   "netId": "net-VBUS",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "B4",
+   "netId": "net-VBUS",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "A10",
+   "netId": "net-USB3_SSRX2_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "B3",
+   "netId": "net-USB3_SSTX2C_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "A11",
+   "netId": "net-USB3_SSRX2_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "B2",
+   "netId": "net-USB3_SSTX2C_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "A12",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "B1",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "S1",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "S2",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "S3",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "S4",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U4",
+   "pinNumber": "1",
+   "netId": "net-USB3_SSRX1_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U4",
+   "pinNumber": "2",
+   "netId": "net-USB3_SSRX1_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U4",
+   "pinNumber": "3",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U4",
+   "pinNumber": "4",
+   "netId": "net-USB3_SSTX1C_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U4",
+   "pinNumber": "5",
+   "netId": "net-USB3_SSTX1C_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U4",
+   "pinNumber": "6",
+   "netId": "net-USB3_SSTX1C_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U4",
+   "pinNumber": "7",
+   "netId": "net-USB3_SSTX1C_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U4",
+   "pinNumber": "8",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U4",
+   "pinNumber": "9",
+   "netId": "net-USB3_SSRX1_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U4",
+   "pinNumber": "10",
+   "netId": "net-USB3_SSRX1_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U5",
+   "pinNumber": "1",
+   "netId": "net-USB3_SSTX2C_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U5",
+   "pinNumber": "2",
+   "netId": "net-USB3_SSTX2C_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U5",
+   "pinNumber": "3",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U5",
+   "pinNumber": "4",
+   "netId": "net-USB3_SSRX2_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U5",
+   "pinNumber": "5",
+   "netId": "net-USB3_SSRX2_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U5",
+   "pinNumber": "6",
+   "netId": "net-USB3_SSRX2_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U5",
+   "pinNumber": "7",
+   "netId": "net-USB3_SSRX2_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U5",
+   "pinNumber": "8",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U5",
+   "pinNumber": "9",
+   "netId": "net-USB3_SSTX2C_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U5",
+   "pinNumber": "10",
+   "netId": "net-USB3_SSTX2C_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U6",
+   "pinNumber": "1",
+   "netId": "net-USB_DP",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U6",
+   "pinNumber": "2",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U6",
+   "pinNumber": "3",
+   "netId": "net-USB_DM",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U6",
+   "pinNumber": "4",
+   "netId": "net-USB_DM",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U6",
+   "pinNumber": "5",
+   "netId": "net-VBUS",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U6",
+   "pinNumber": "6",
+   "netId": "net-USB_DP",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C1",
+   "pinNumber": "1",
+   "netId": "net-USB3_SSTX1C_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C1",
+   "pinNumber": "2",
+   "netId": "net-USB3_SSTX1_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C2",
+   "pinNumber": "1",
+   "netId": "net-USB3_SSTX1C_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C2",
+   "pinNumber": "2",
+   "netId": "net-USB3_SSTX1_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C3",
+   "pinNumber": "1",
+   "netId": "net-USB3_SSTX2C_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C3",
+   "pinNumber": "2",
+   "netId": "net-USB3_SSTX2_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C4",
+   "pinNumber": "1",
+   "netId": "net-USB3_SSTX2C_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C4",
+   "pinNumber": "2",
+   "netId": "net-USB3_SSTX2_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "1",
+   "netId": "net-USB3_SSTX1_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "2",
+   "netId": "net-USB3_SSTX1_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "3",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "4",
+   "netId": "net-USB3_SSRX1_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "5",
+   "netId": "net-USB3_SSRX1_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "6",
+   "netId": "net-USB_DP",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "7",
+   "netId": "net-USB_DM",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "8",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "9",
+   "netId": "net-USB3_SSRX2_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "10",
+   "netId": "net-USB3_SSRX2_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "11",
+   "netId": "net-USB3_SSTX2_N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "12",
+   "netId": "net-USB3_SSTX2_P",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "13",
+   "netId": "net-RESETN",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "16",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "17",
+   "netId": "net-+3V3",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "24",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "35",
+   "netId": "net-VBUS_DET",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "36",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "37",
+   "netId": "net-+3V3",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "38",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "48",
+   "netId": "net-+3V3",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "49",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-R1",
+   "pinNumber": "1",
+   "netId": "net-CC1",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-R1",
+   "pinNumber": "2",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-R2",
+   "pinNumber": "1",
+   "netId": "net-CC2",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-R2",
+   "pinNumber": "2",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-R3",
+   "pinNumber": "1",
+   "netId": "net-VBUS",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-R3",
+   "pinNumber": "2",
+   "netId": "net-VBUS_DET",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-R4",
+   "pinNumber": "1",
+   "netId": "net-+3V3",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-R4",
+   "pinNumber": "2",
+   "netId": "net-RESETN",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C5",
+   "pinNumber": "1",
+   "netId": "net-+3V3",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C5",
+   "pinNumber": "2",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C6",
+   "pinNumber": "1",
+   "netId": "net-+3V3",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C6",
+   "pinNumber": "2",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C7",
+   "pinNumber": "1",
+   "netId": "net-+3V3",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C7",
+   "pinNumber": "2",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U9",
+   "pinNumber": "1",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U9",
+   "pinNumber": "2",
+   "netId": "net-+3V3",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U9",
+   "pinNumber": "3",
+   "netId": "net-VBUS",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U9",
+   "pinNumber": "4",
+   "netId": "net-+3V3",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C90",
+   "pinNumber": "1",
+   "netId": "net-VBUS",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C90",
+   "pinNumber": "2",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C91",
+   "pinNumber": "1",
+   "netId": "net-+3V3",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C91",
+   "pinNumber": "2",
+   "netId": "net-GND",
+   "kind": "netlist"
+  }
+ ]
+}

@@ -1,0 +1,17 @@
+{
+ "layers": 4,
+ "standard": {
+  "name": "IEC62368-1",
+  "insulation": "functional",
+  "pollutionDegree": 2
+ },
+ "domains": [
+  {
+   "kind": "isolated-secondary",
+   "nets": [
+    "CHASSIS_GND"
+   ],
+   "isolationVrms": 1500
+  }
+ ]
+}

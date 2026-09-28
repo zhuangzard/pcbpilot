@@ -1,0 +1,382 @@
+{{- /* pcbpilot design report — Markdown template (canonical copy:
+.agents/skills/pcbpilot/templates/design-report/report.md.tmpl). Charts are
+the SVG files in charts/, images the content-addressed files in ../assets/. */ -}}
+{{- $R := .R -}}
+# {{$R.Project}} 设计报告 {{$R.VersionLabel}}
+
+> **总体结论：{{$R.Verdict.Status}}** · 客户 {{or $R.Customer "—"}} · 生成 {{$R.GeneratedAt}} · pcbpilot {{$R.Tools.Pcbpilot}}{{with $R.Tools.Host}} · 宿主 {{.}}{{end}}{{with $R.Tools.Connector}} · connector {{.}}{{end}}
+>
+> 输入摘要 `{{$R.InputsDigest}}`{{with $R.Changes}} · 相对 {{.Previous}}{{end}}
+{{if $R.Verdict.Reasons}}
+**不通过原因**
+{{range $R.Verdict.Reasons}}
+- {{.}}{{end}}
+{{end}}{{if $R.Verdict.Warnings}}
+**警告**
+{{range $R.Verdict.Warnings}}
+- {{.}}{{end}}
+{{end}}
+## 0 封面与输入来源
+
+| 类型 | 说明 | 状态 | 路径 | sha256 |
+|---|---|---|---|---|
+{{- range $R.Inputs}}
+| {{.Kind}} | {{md .Label}} | {{if .Present}}已提供{{else}}未提供{{end}} | `{{.Path}}` | `{{short .SHA256}}` |{{end}}
+
+## 1 执行摘要
+
+| 指标 | 数值 | 说明 |
+|---|---|---|
+{{- range $R.Summary.KeyNumbers}}
+| {{md .Label}} | {{md .Value}} | {{md .Note}} |{{end}}
+
+### 主要风险
+{{if $R.Summary.TopRisks}}
+| 级别 | 来源 | 内容 | 建议 |
+|---|---|---|---|
+{{- range $R.Summary.TopRisks}}
+| {{.Severity}} | {{.Source}} | {{md .Message}} | {{md .Suggestion}} |{{end}}
+{{else}}
+未发现需要关注的风险。
+{{end}}
+{{- with $R.Changes}}
+### 相对 {{.Previous}} 的变化
+
+{{if .Identical}}输入与上一版完全相同。{{else}}输入变化：{{join .InputsChanged "；"}}{{end}}
+{{if .Rows}}
+| 指标 | 之前 | 之后 | 变化 |
+|---|---|---|---|
+{{- range .Rows}}
+| {{md .Metric}} | {{.Before}} | {{.After}} | {{.Delta}} |{{end}}
+{{end}}
+{{- range .FindingsAdded}}
+- 新增问题：{{md .}}{{end}}
+{{- range .FindingsResolved}}
+- 已解决：{{md .}}{{end}}
+{{end}}
+
+## 2 需求与设计意图
+{{with $R.Requirements}}
+| ID | 功能 | 核心 | 器件 | 说明 |
+|---|---|---|---|---|
+{{- range .Blocks}}
+| {{.ID}} | {{.Function}} | {{.Core}} | {{md .Parts}} | {{md .Summary}} |{{end}}
+
+| 电压域 | 类型 | 参考 | Vrms / Vpk | 网络 | 器件 |
+|---|---|---|---|---|---|
+{{- range .Domains}}
+| {{.ID}} | {{.Kind}} | {{.Reference}} | {{f3 .WorkingVrms}} / {{f3 .WorkingVpeak}} | {{.Nets}} | {{.Parts}} |{{end}}
+
+| 安全设定 | 值 | 说明 |
+|---|---|---|
+{{- range .Standard}}
+| {{.Label}} | {{md .Value}} | {{.Note}} |{{end}}
+
+**设计发现**
+
+| 级别 | 类型 | 内容 | 建议 |
+|---|---|---|---|
+{{- range .Findings}}
+| {{.Severity}} | {{.Source}} | {{md .Message}} | {{md .Suggestion}} |{{end}}
+{{else}}
+> 本节不可用：{{missing $R "2"}}
+{{end}}
+
+## 3 电源仿真
+{{with $R.Power}}
+场景：{{join .Scenarios "、"}}；收敛：{{if .Converged}}是{{else}}否{{end}}。
+
+| 网络 | 标称 V | 范围 V |{{range .Scenarios}} {{.}} A |{{end}} 最大 A |
+|---|---|---|{{range .Scenarios}}---|{{end}}---|
+{{- range .Rails}}
+| {{.Net}} | {{f3 .VNom}} | {{f3 .VMin}}–{{f3 .VMax}} |{{range .Currents}} {{f4 .}} |{{end}} {{f4 .IMaxA}} ({{.Worst}}) |{{end}}
+
+![各场景电源轨电流](charts/rail-current.svg)
+
+| 场景 | 输入功率 | 负载功率 | 损耗 | 整体效率 |
+|---|---|---|---|---|
+{{- range .ScenarioPwr}}
+| {{.Scenario}} | {{watt .SuppliedW}} | {{watt .LoadW}} | {{watt .LossW}} | {{eff .LoadW .SuppliedW}} |{{end}}
+
+![器件功耗](charts/part-power.svg)
+
+| 器件 | 型号 | 模型 | 功耗 | 场景 |
+|---|---|---|---|---|
+{{- range .PartPower}}
+| {{.Ref}} | {{md .Device}} | {{.Kind}} | {{watt .PowerW}} | {{.Scenario}} |{{end}}
+
+![电源轨功率](charts/rail-power.svg)
+{{if .Tree.Nodes}}
+![电源树](charts/power-tree.svg)
+
+| 从 | 到 | 电源轨 |
+|---|---|---|
+{{- range .Tree.Edges}}
+| {{.From}} | {{.To}} | {{md .Label}} |{{end}}
+{{end}}
+{{- if .Regulators}}
+**稳压器工作点**
+
+| 器件 | 场景 | 模式 | Vin | Vout | Iout | Iin | D | η | 损耗 |
+|---|---|---|---|---|---|---|---|---|---|
+{{- range .Regulators}}
+| {{.Ref}} | {{.Scenario}} | {{.Mode}} | {{f3 .VinV}} | {{f3 .VoutV}} | {{f4 .IoutA}} | {{f4 .IinA}} | {{f3 .Duty}} | {{pct100 .Eff}} | {{watt .LossW}} |{{end}}
+{{range .Regulators}}{{if .Notes}}
+{{.Ref}}（{{.Scenario}}）计算过程：
+{{range .Notes}}
+- `{{.}}`{{end}}
+{{end}}{{end}}{{end}}
+{{- if .Ripple}}
+**纹波电流**
+
+| 对象 | 类型 | 稳压器 | ΔI | Ipk | Irms | Iavg | D | 场景 |
+|---|---|---|---|---|---|---|---|---|
+{{- range .Ripple}}
+| {{.Key}} | {{.Kind}} | {{.Regulator}} | {{opt .DeltaIA}} | {{opt .IPeakA}} | {{f4 .IRmsA}} | {{opt .IAvgA}} | {{opt .Duty}} | {{.Scenario}} |{{end}}
+{{end}}
+**模型可信度**：{{range $k, $v := .Confidence}}{{$k}} {{$v}}　{{end}}
+
+| 器件 | 型号 | 模型 | 可信度 | 来源 |
+|---|---|---|---|---|
+{{- range .Models}}
+| {{.Ref}} | {{md .Device}} | {{.ModelID}} | {{if .Assumed}}**assumed**{{else}}{{.Confidence}}{{end}} | {{md .Source}} |{{end}}
+
+**假设**
+{{range .Assumptions}}
+- {{md .}}{{end}}
+{{- if .Warnings}}
+
+**仿真警告**
+{{range .Warnings}}
+- {{md .}}{{end}}{{end}}
+{{else}}
+> 本节不可用：{{missing $R "3"}}
+{{end}}
+
+## 4 器件可行性
+{{with $R.Feasibility}}
+统计：满足 {{index .Counts "ok"}} · 临界 {{index .Counts "marginal"}} · 超限 {{index .Counts "over"}} · 需数据手册 {{index .Counts "unknown"}}
+
+| 器件 | 型号 | 检查项 | 应力 | 额定 | 余量 | 准则 | 结论 | 额定来源 / 备注 |
+|---|---|---|---|---|---|---|---|---|
+{{- range .Rows}}
+| {{.Ref}} | {{md .Device}} | {{md .Check}}{{with .StressNote}} ({{md .}}){{end}} | {{num .Stress}} {{.Unit}} | {{if .Rating}}{{num .Rating}} {{.Unit}}{{else}}—{{end}} | {{if .MarginPct}}{{margin .MarginPct}}{{else}}—{{end}} | ≥ {{f1 .GuidePct}} % | {{statusZh .Status}} | {{md .RatingSource}}{{if and .RatingSource .Note}}；{{end}}{{md .Note}} |{{end}}
+
+![器件余量](charts/margins.svg)
+
+| 对象 | 准则 | 说明 |
+|---|---|---|
+{{- range .Guidelines}}
+| {{.Label}} | {{.Value}} | {{.Note}} |{{end}}
+{{else}}
+> 本节不可用：{{missing $R "4"}}
+{{end}}
+
+## 5 工程计算
+{{with $R.Calcs}}
+| 基础 | 值 |
+|---|---|
+{{- range .Basis}}
+| {{.Label}} | {{md .Value}} |{{end}}
+
+| 项目 | 公式 | 依据 |
+|---|---|---|
+{{- range .Formulas}}
+| {{.Label}} | `{{.Value}}` | {{.Note}} |{{end}}
+{{range .Notes}}
+> {{.}}
+{{end}}
+**载流线宽**
+
+| 网络 | 类 | 电流 A | 来源 | 外层需/计划 mil | 内层需/计划 mil | 外层载流 A | 结论 |
+|---|---|---|---|---|---|---|---|
+{{- range .Widths}}
+| {{.Net}} | {{.Class}} | {{f4 .CurrentA}} | {{.Source}} | {{f2 .OuterNeedMil}} / {{f2 .OuterPlanMil}} | {{f2 .InnerNeedMil}} / {{f2 .InnerPlanMil}} | {{f3 .OuterCapA}} | {{.Status}} |{{end}}
+
+**过孔**
+
+| 网络 | 电流 A | 钻孔 mil | 单孔 A | 需要 | 计划 | 结论 |
+|---|---|---|---|---|---|---|
+{{- range .Vias}}
+| {{.Net}} | {{f4 .CurrentA}} | {{f2 .DrillMil}} | {{f3 .PerViaA}} | {{.Need}} | {{.Plan}} | {{.Status}} |{{end}}
+
+**电压间距**
+
+| 网络 | Vpk | IPC mil | 工艺 mil | 计划 mil | 决定因素 | 结论 |
+|---|---|---|---|---|---|---|
+{{- range .Clearance}}
+| {{.Net}} | {{f3 .VPeak}} | {{f2 .IPCMil}} | {{f2 .FabMil}} | {{f2 .PlanMil}} | {{.Governs}} | {{.Status}} |{{end}}
+{{if .Impedance}}
+**阻抗**
+
+| 类 | 网络 | 类型 | w | gap | h | t | εr | Z0 | Zdiff | 目标 | 偏差 | 结论 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+{{- range .Impedance}}
+| {{.Name}} | {{md .Nets}} | {{.Kind}} | {{f2 .WMil}} | {{f2 .GapMil}} | {{f2 .HMil}} | {{f3 .TMil}} | {{f2 .Er}} | {{f1 .Z0}} | {{f1 .Zdiff}} | {{f1 .Target}} | {{f1 .DevPct}} % | {{.Status}} |{{end}}
+{{end}}
+{{- if .Insulation}}
+**爬电 / 间隙 / 铣槽**
+
+| A | B | Vrms/Vpk | 绝缘 | 间隙 mm | 爬电 mm | 铣槽 | 标准 | 耐压 |
+|---|---|---|---|---|---|---|---|---|
+{{- range .Insulation}}
+| {{.A}} | {{.B}} | {{f1 .WorkingVrms}}/{{f1 .WorkingVpeak}} | {{.Insulation}} | {{f2 .ClearanceMm}} | {{f2 .CreepageMm}} | {{if .Slot}}≥ {{f2 .SlotWidthMm}} mm{{else}}否{{end}} | {{md .StandardRef}} | {{if .TestVrms}}{{f1 .TestVrms}} Vrms{{else}}{{md .TestRef}}{{end}} |{{end}}
+{{else}}
+无绝缘对（单一电压域）。
+{{end}}
+{{- else}}
+> 本节不可用：{{missing $R "5"}}
+{{end}}
+
+## 6 布局与布线
+{{with $R.Layout}}
+{{- range .Images}}
+![{{.Label}}]({{imgpath .}})
+*{{.Label}}{{if .Resized}}（已缩小）{{end}}*
+{{end}}
+{{- if .Stackup}}
+**叠层 {{.StackupName}}**
+
+| 层 | 名称 | 类型 | 网络 | 方向 |
+|---|---|---|---|---|
+{{- range .Stackup}}
+| {{.ID}} | {{.Name}} | {{.Kind}} | {{md .Nets}} | {{.Dir}} |{{end}}
+{{end}}
+{{- if .Routing}}
+| 布线统计 | 值 |
+|---|---|
+{{- range .Routing}}
+| {{.Label}} | {{md .Value}} |{{end}}
+{{end}}
+{{- if .IRNets}}
+**直流压降（预算 {{.IRBudget}}）**
+
+| 网络 | V | I | 供电 | 最坏 mV | 预算 mV | 占比 | 最坏焊盘 | 状态 |
+|---|---|---|---|---|---|---|---|---|
+{{- range .IRNets}}
+| {{.Net}} | {{f3 .VoltageV}} | {{f4 .CurrentA}} | {{md .Reference}} | {{f3 .WorstMV}} | {{opt .BudgetMV}} | {{if .BudgetMV}}{{f1 .RatioPct}} %{{else}}—{{end}} | {{.WorstPad}} | {{.Status}} |{{end}}
+
+![IR 压降](charts/ir-drop.svg)
+{{range .WorstPaths}}
+最坏路径 {{.Net}} → {{.Pad}}（{{f3 .TotalMV}} mV）：{{range $i, $s := .Steps}}{{if $i}} → {{end}}{{$s.Kind}} {{md $s.What}} {{f3 $s.DropMV}} mV{{end}}
+{{end}}
+压降最大的 {{len .Segments}} 段（共 {{.SegmentsAll}} 段）：
+
+| 网络 | 层 | 类型 | 长 mil | I A | 布线宽 | 收窄后 | 需要 | 压降 mV |
+|---|---|---|---|---|---|---|---|---|
+{{- range .Segments}}
+| {{.Net}} | {{.Layer}} | {{.Kind}} | {{f1 .LengthMil}} | {{f4 .CurrentA}} | {{f1 .RoutedMil}} | {{f1 .WidthMil}} | {{f2 .NeedMil}} | {{f4 .DropMV}} |{{end}}
+{{end}}
+{{- if .SIPairs}}
+| 差分对 | skew mil | 限值 mil | 结论 |
+|---|---|---|---|
+{{- range .SIPairs}}
+| {{.P}}/{{.N}} | {{f1 .SkewMil}} | {{f1 .LimitMil}} | {{.Status}} |{{end}}
+{{end}}
+{{- range .SINets}}
+- SI {{.Net}}（{{.Class}}）：{{f1 .LengthMil}} mil，{{.Vias}} 过孔，层 {{.Layers}}{{end}}
+{{- range .SIFindings}}
+- {{md .}}{{end}}
+{{- range .Isolation}}
+- 隔离：{{md .}}{{end}}
+{{- range .Feedback}}
+- 反馈：{{md .}}{{end}}
+{{else}}
+> 本节不可用：{{missing $R "6"}}
+{{end}}
+
+## 7 验证状态
+
+| 检查 | 结论 | 说明 | 证据 |
+|---|---|---|---|
+{{- range $R.Verification}}
+| {{.Name}} | **{{.Status}}** | {{md .Detail}} | `{{.Evidence}}` |{{end}}
+
+## 8 测试点计划
+{{with $R.TestPlan}}
+| ID | 类别 | 测什么 | 在哪里 | 期望 | 限值/设置 | 方法 |
+|---|---|---|---|---|---|---|
+{{- range .Items}}
+| {{.ID}} | {{.Category}} | {{md .What}} | {{md .Where}} | {{md .Expected}} | {{md .Limit}} | {{md .Method}} |{{end}}
+{{if .AddTP}}
+**建议新增测试点**
+
+| 网络 | 原因 | 靠近 | X / Y mm |
+|---|---|---|---|
+{{- range .AddTP}}
+| {{.Net}} | {{.Reason}} | {{.Near}} | {{f1 .XMm}} / {{f1 .YMm}} |{{end}}
+{{end}}
+{{- range .Notes}}
+> {{.}}
+{{end}}
+{{- else}}
+> 本节不可用：{{missing $R "8"}}
+{{end}}
+
+## 9 制造与装配
+{{with $R.Manufacturing}}
+| 制板参数 | 值 | 说明 |
+|---|---|---|
+{{- range .Fab}}
+| {{.Label}} | {{md .Value}} | {{md .Note}} |{{end}}
+{{if .DFM}}
+| DFM 级别 | 类型 | 数量 | 示例 |
+|---|---|---|---|
+{{- range .DFM}}
+| {{.Level}} | {{.Type}} | {{.Count}} | {{md .Example}} |{{end}}
+{{end}}
+| 器件 | 型号 | 关注点 | 说明 |
+|---|---|---|---|
+{{- range .Assembly}}
+| {{.Ref}} | {{md .Device}} | {{.Concern}} | {{.Note}} |{{end}}
+{{range .HV}}
+- {{md .}}{{end}}
+{{range .Handling}}
+- {{md .}}{{end}}
+{{else}}
+> 本节不可用：{{missing $R "9"}}
+{{end}}
+
+## 10 调试上电流程与注意事项
+{{with $R.BringUp}}
+| # | 步骤 | 操作 | 期望 | 异常处理 |
+|---|---|---|---|---|
+{{- range .Steps}}
+| {{.N}} | {{.Title}} | {{md .Action}} | {{md .Expect}} | {{md .IfFail}} |{{end}}
+
+| 电源轨 | 已知电阻路径 | 期望 | 判据 |
+|---|---|---|---|
+{{- range .Shorts}}
+| {{.Net}} | {{md .KnownPath}} | {{md .Expected}} | {{md .FailBelow}} |{{end}}
+
+| 现象 | 可能原因 | 检查 |
+|---|---|---|
+{{- range .Signatures}}
+| {{.Symptom}} | {{md .Cause}} | {{md .Check}} |{{end}}
+{{else}}
+> 本节不可用：{{missing $R "10"}}
+{{end}}
+
+## 11 附录
+
+| 网络 | 角色 | 类 | V 标称/最大 | 电流 A | 线宽 外/内 | 间距 | 阻抗 |
+|---|---|---|---|---|---|---|---|
+{{- range $R.Appendix.Nets}}
+| {{.Net}} | {{.Role}} | {{.Class}} | {{f3 .VNom}}/{{f3 .VMax}} | {{f4 .CurrentA}} | {{f1 .OuterMil}}/{{f1 .InnerMil}} | {{f1 .ClearMil}} | {{if .Impedance}}{{f1 .Impedance}}{{end}} |{{end}}
+
+| 位号 | 型号 | 类型 | 模型 | 可信度 | 解码 |
+|---|---|---|---|---|---|
+{{- range $R.Appendix.Parts}}
+| {{.Ref}} | {{md .Device}} | {{.Kind}} | {{.ModelID}} | {{.Confidence}} | {{md .Parsed}} |{{end}}
+{{if $R.Missing}}
+**未生成内容**
+{{range $R.Missing}}
+- §{{.Section}}：{{.Reason}}{{end}}
+{{end}}
+| 术语 | 含义 |
+|---|---|
+{{- range $R.Appendix.Glossary}}
+| {{.Label}} | {{.Value}} |{{end}}
+
+---
+本报告由 {{$R.Generator}} 自动生成；数值可由 report.json 复核。工程参考值（安全距离、降额准则）最终以器件数据手册与认证机构为准。

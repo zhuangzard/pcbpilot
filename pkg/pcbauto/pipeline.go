@@ -210,7 +210,7 @@ func hsFindings(si *SIReport) int {
 	n := 0
 	for _, f := range si.Findings {
 		switch f.Kind {
-		case "skew", "split-crossing", "vias":
+		case "skew", "split-crossing", "vias", "group-skew":
 			n++
 		}
 	}

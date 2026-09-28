@@ -1,0 +1,1630 @@
+{
+ "components": [
+  {
+   "primitiveId": "e0",
+   "designator": "J1",
+   "device": "RJ45-8P8C-NOMAG",
+   "layer": 1,
+   "x": 60,
+   "y": 750,
+   "rotation": 0,
+   "locked": true,
+   "bbox": {
+    "minX": 0.0,
+    "minY": 388.0,
+    "maxX": 620.0,
+    "maxY": 1112.0
+   },
+   "pads": [
+    {
+     "primitiveId": "e0p0",
+     "padNumber": "1",
+     "net": "ETH_TRD0_P",
+     "layer": 12,
+     "x": 210.0,
+     "y": 890.7,
+     "width": 60,
+     "height": 60
+    },
+    {
+     "primitiveId": "e0p1",
+     "padNumber": "2",
+     "net": "ETH_TRD0_N",
+     "layer": 12,
+     "x": 280.0,
+     "y": 850.5,
+     "width": 60,
+     "height": 60
+    },
+    {
+     "primitiveId": "e0p2",
+     "padNumber": "3",
+     "net": "ETH_TRD1_P",
+     "layer": 12,
+     "x": 210.0,
+     "y": 810.3,
+     "width": 60,
+     "height": 60
+    },
+    {
+     "primitiveId": "e0p3",
+     "padNumber": "4",
+     "net": "ETH_TRD2_P",
+     "layer": 12,
+     "x": 280.0,
+     "y": 770.1,
+     "width": 60,
+     "height": 60
+    },
+    {
+     "primitiveId": "e0p4",
+     "padNumber": "5",
+     "net": "ETH_TRD2_N",
+     "layer": 12,
+     "x": 210.0,
+     "y": 729.9,
+     "width": 60,
+     "height": 60
+    },
+    {
+     "primitiveId": "e0p5",
+     "padNumber": "6",
+     "net": "ETH_TRD1_N",
+     "layer": 12,
+     "x": 280.0,
+     "y": 689.7,
+     "width": 60,
+     "height": 60
+    },
+    {
+     "primitiveId": "e0p6",
+     "padNumber": "7",
+     "net": "ETH_TRD3_P",
+     "layer": 12,
+     "x": 210.0,
+     "y": 649.5,
+     "width": 60,
+     "height": 60
+    },
+    {
+     "primitiveId": "e0p7",
+     "padNumber": "8",
+     "net": "ETH_TRD3_N",
+     "layer": 12,
+     "x": 280.0,
+     "y": 609.3,
+     "width": 60,
+     "height": 60
+    },
+    {
+     "primitiveId": "e0p8",
+     "padNumber": "S1",
+     "net": "CHASSIS_GND",
+     "layer": 12,
+     "x": 80.0,
+     "y": 1055.0,
+     "width": 90,
+     "height": 90
+    },
+    {
+     "primitiveId": "e0p9",
+     "padNumber": "S2",
+     "net": "CHASSIS_GND",
+     "layer": 12,
+     "x": 80.0,
+     "y": 445.0,
+     "width": 90,
+     "height": 90
+    }
+   ]
+  },
+  {
+   "primitiveId": "e1",
+   "designator": "T1",
+   "device": "H5007NL",
+   "layer": 1,
+   "x": 850,
+   "y": 750,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 588.0,
+    "minY": 420.0,
+    "maxX": 1112.0,
+    "maxY": 1080.0
+   },
+   "pads": [
+    {
+     "primitiveId": "e1p0",
+     "padNumber": "1",
+     "net": "ETH_TCT0",
+     "layer": 1,
+     "x": 1060.0,
+     "y": 1025.0,
+     "width": 80,
+     "height": 24
+    },
+    {
+     "primitiveId": "e1p1",
+     "padNumber": "2",
+     "net": "ETH_MDI0_P",
+     "layer": 1,
+     "x": 1060.0,
+     "y": 975.0,
+     "width": 80,
+     "height": 24
+    },
+    {
+     "primitiveId": "e1p2",
+     "padNumber": "3",
+     "net": "ETH_MDI0_N",
+     "layer": 1,
+     "x": 1060.0,
+     "y": 925.0,
+     "width": 80,
+     "height": 24
+    },
+    {
+     "primitiveId": "e1p3",
+     "padNumber": "4",
+     "net": "ETH_TCT1",
+     "layer": 1,
+     "x": 1060.0,
+     "y": 875.0,
+     "width": 80,
+     "height": 24
+    },
+    {
+     "primitiveId": "e1p4",
+     "padNumber": "5",
+     "net": "ETH_MDI1_P",
+     "layer": 1,
+     "x": 1060.0,
+     "y": 825.0,
+     "width": 80,
+     "height": 24
+    },
+    {
+     "primitiveId": "e1p5",
+     "padNumber": "6",
+     "net": "ETH_MDI1_N",
+     "layer": 1,
+     "x": 1060.0,
+     "y": 775.0,
+     "width": 80,
+     "height": 24
+    },
+    {
+     "primitiveId": "e1p6",
+     "padNumber": "7",
+     "net": "ETH_TCT2",
+     "layer": 1,
+     "x": 1060.0,
+     "y": 725.0,
+     "width": 80,
+     "height": 24
+    },
+    {
+     "primitiveId": "e1p7",
+     "padNumber": "8",
+     "net": "ETH_MDI2_P",
+     "layer": 1,
+     "x": 1060.0,
+     "y": 675.0,
+     "width": 80,
+     "height": 24
+    },
+    {
+     "primitiveId": "e1p8",
+     "padNumber": "9",
+     "net": "ETH_MDI2_N",
+     "layer": 1,
+     "x": 1060.0,
+     "y": 625.0,
+     "width": 80,
+     "height": 24
+    },
+    {
+     "primitiveId": "e1p9",
+     "padNumber": "10",
+     "net": "ETH_TCT3",
+     "layer": 1,
+     "x": 1060.0,
+     "y": 575.0,
+     "width": 80,
+     "height": 24
+    },
+    {
+     "primitiveId": "e1p10",
+     "padNumber": "11",
+     "net": "ETH_MDI3_P",
+     "layer": 1,
+     "x": 1060.0,
+     "y": 525.0,
+     "width": 80,
+     "height": 24
+    },
+    {
+     "primitiveId": "e1p11",
+     "padNumber": "12",
+     "net": "ETH_MDI3_N",
+     "layer": 1,
+     "x": 1060.0,
+     "y": 475.0,
+     "width": 80,
+     "height": 24
+    },
+    {
+     "primitiveId": "e1p12",
+     "padNumber": "13",
+     "net": "ETH_TRD3_N",
+     "layer": 1,
+     "x": 640.0,
+     "y": 475.0,
+     "width": 80,
+     "height": 24
+    },
+    {
+     "primitiveId": "e1p13",
+     "padNumber": "14",
+     "net": "ETH_TRD3_P",
+     "layer": 1,
+     "x": 640.0,
+     "y": 525.0,
+     "width": 80,
+     "height": 24
+    },
+    {
+     "primitiveId": "e1p14",
+     "padNumber": "15",
+     "net": "ETH_MCT3",
+     "layer": 1,
+     "x": 640.0,
+     "y": 575.0,
+     "width": 80,
+     "height": 24
+    },
+    {
+     "primitiveId": "e1p15",
+     "padNumber": "16",
+     "net": "ETH_TRD2_N",
+     "layer": 1,
+     "x": 640.0,
+     "y": 625.0,
+     "width": 80,
+     "height": 24
+    },
+    {
+     "primitiveId": "e1p16",
+     "padNumber": "17",
+     "net": "ETH_TRD2_P",
+     "layer": 1,
+     "x": 640.0,
+     "y": 675.0,
+     "width": 80,
+     "height": 24
+    },
+    {
+     "primitiveId": "e1p17",
+     "padNumber": "18",
+     "net": "ETH_MCT2",
+     "layer": 1,
+     "x": 640.0,
+     "y": 725.0,
+     "width": 80,
+     "height": 24
+    },
+    {
+     "primitiveId": "e1p18",
+     "padNumber": "19",
+     "net": "ETH_TRD1_N",
+     "layer": 1,
+     "x": 640.0,
+     "y": 775.0,
+     "width": 80,
+     "height": 24
+    },
+    {
+     "primitiveId": "e1p19",
+     "padNumber": "20",
+     "net": "ETH_TRD1_P",
+     "layer": 1,
+     "x": 640.0,
+     "y": 825.0,
+     "width": 80,
+     "height": 24
+    },
+    {
+     "primitiveId": "e1p20",
+     "padNumber": "21",
+     "net": "ETH_MCT1",
+     "layer": 1,
+     "x": 640.0,
+     "y": 875.0,
+     "width": 80,
+     "height": 24
+    },
+    {
+     "primitiveId": "e1p21",
+     "padNumber": "22",
+     "net": "ETH_TRD0_N",
+     "layer": 1,
+     "x": 640.0,
+     "y": 925.0,
+     "width": 80,
+     "height": 24
+    },
+    {
+     "primitiveId": "e1p22",
+     "padNumber": "23",
+     "net": "ETH_TRD0_P",
+     "layer": 1,
+     "x": 640.0,
+     "y": 975.0,
+     "width": 80,
+     "height": 24
+    },
+    {
+     "primitiveId": "e1p23",
+     "padNumber": "24",
+     "net": "ETH_MCT0",
+     "layer": 1,
+     "x": 640.0,
+     "y": 1025.0,
+     "width": 80,
+     "height": 24
+    }
+   ]
+  },
+  {
+   "primitiveId": "e2",
+   "designator": "R10",
+   "device": "0603WAF750JT5E",
+   "layer": 1,
+   "x": 700,
+   "y": 230,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 640.75,
+    "minY": 200.3,
+    "maxX": 759.25,
+    "maxY": 259.7
+   },
+   "pads": [
+    {
+     "primitiveId": "e2p0",
+     "padNumber": "1",
+     "net": "ETH_MCT0",
+     "layer": 1,
+     "x": 668.5,
+     "y": 230.0,
+     "width": 31.5,
+     "height": 35.4
+    },
+    {
+     "primitiveId": "e2p1",
+     "padNumber": "2",
+     "net": "ETH_BS",
+     "layer": 1,
+     "x": 731.5,
+     "y": 230.0,
+     "width": 31.5,
+     "height": 35.4
+    }
+   ]
+  },
+  {
+   "primitiveId": "e3",
+   "designator": "R11",
+   "device": "0603WAF750JT5E",
+   "layer": 1,
+   "x": 700,
+   "y": 290,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 640.75,
+    "minY": 260.3,
+    "maxX": 759.25,
+    "maxY": 319.7
+   },
+   "pads": [
+    {
+     "primitiveId": "e3p0",
+     "padNumber": "1",
+     "net": "ETH_MCT1",
+     "layer": 1,
+     "x": 668.5,
+     "y": 290.0,
+     "width": 31.5,
+     "height": 35.4
+    },
+    {
+     "primitiveId": "e3p1",
+     "padNumber": "2",
+     "net": "ETH_BS",
+     "layer": 1,
+     "x": 731.5,
+     "y": 290.0,
+     "width": 31.5,
+     "height": 35.4
+    }
+   ]
+  },
+  {
+   "primitiveId": "e4",
+   "designator": "R12",
+   "device": "0603WAF750JT5E",
+   "layer": 1,
+   "x": 700,
+   "y": 350,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 640.75,
+    "minY": 320.3,
+    "maxX": 759.25,
+    "maxY": 379.7
+   },
+   "pads": [
+    {
+     "primitiveId": "e4p0",
+     "padNumber": "1",
+     "net": "ETH_MCT2",
+     "layer": 1,
+     "x": 668.5,
+     "y": 350.0,
+     "width": 31.5,
+     "height": 35.4
+    },
+    {
+     "primitiveId": "e4p1",
+     "padNumber": "2",
+     "net": "ETH_BS",
+     "layer": 1,
+     "x": 731.5,
+     "y": 350.0,
+     "width": 31.5,
+     "height": 35.4
+    }
+   ]
+  },
+  {
+   "primitiveId": "e5",
+   "designator": "R13",
+   "device": "0603WAF750JT5E",
+   "layer": 1,
+   "x": 700,
+   "y": 410,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 640.75,
+    "minY": 380.3,
+    "maxX": 759.25,
+    "maxY": 439.7
+   },
+   "pads": [
+    {
+     "primitiveId": "e5p0",
+     "padNumber": "1",
+     "net": "ETH_MCT3",
+     "layer": 1,
+     "x": 668.5,
+     "y": 410.0,
+     "width": 31.5,
+     "height": 35.4
+    },
+    {
+     "primitiveId": "e5p1",
+     "padNumber": "2",
+     "net": "ETH_BS",
+     "layer": 1,
+     "x": 731.5,
+     "y": 410.0,
+     "width": 31.5,
+     "height": 35.4
+    }
+   ]
+  },
+  {
+   "primitiveId": "e6",
+   "designator": "C20",
+   "device": "1808B102K202NT",
+   "layer": 1,
+   "x": 450,
+   "y": 190,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 317.85,
+    "minY": 132.7,
+    "maxX": 582.15,
+    "maxY": 247.3
+   },
+   "pads": [
+    {
+     "primitiveId": "e6p0",
+     "padNumber": "1",
+     "net": "ETH_BS",
+     "layer": 1,
+     "x": 359.4,
+     "y": 190.0,
+     "width": 59.1,
+     "height": 90.6
+    },
+    {
+     "primitiveId": "e6p1",
+     "padNumber": "2",
+     "net": "CHASSIS_GND",
+     "layer": 1,
+     "x": 540.6,
+     "y": 190.0,
+     "width": 59.1,
+     "height": 90.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e7",
+   "designator": "C21",
+   "device": "1808B102K202NT",
+   "layer": 1,
+   "x": 450,
+   "y": 1310,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 317.85,
+    "minY": 1252.7,
+    "maxX": 582.15,
+    "maxY": 1367.3
+   },
+   "pads": [
+    {
+     "primitiveId": "e7p0",
+     "padNumber": "1",
+     "net": "CHASSIS_GND",
+     "layer": 1,
+     "x": 359.4,
+     "y": 1310.0,
+     "width": 59.1,
+     "height": 90.6
+    },
+    {
+     "primitiveId": "e7p1",
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 1,
+     "x": 540.6,
+     "y": 1310.0,
+     "width": 59.1,
+     "height": 90.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e8",
+   "designator": "C10",
+   "device": "CL05B104KO5NNNC",
+   "layer": 1,
+   "x": 1180,
+   "y": 420,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 1157.15,
+    "minY": 376.5,
+    "maxX": 1202.85,
+    "maxY": 463.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e8p0",
+     "padNumber": "1",
+     "net": "ETH_TCT0",
+     "layer": 1,
+     "x": 1180.0,
+     "y": 400.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e8p1",
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 1,
+     "x": 1180.0,
+     "y": 439.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e9",
+   "designator": "C11",
+   "device": "CL05B104KO5NNNC",
+   "layer": 1,
+   "x": 1180,
+   "y": 640,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 1157.15,
+    "minY": 596.5,
+    "maxX": 1202.85,
+    "maxY": 683.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e9p0",
+     "padNumber": "1",
+     "net": "ETH_TCT1",
+     "layer": 1,
+     "x": 1180.0,
+     "y": 620.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e9p1",
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 1,
+     "x": 1180.0,
+     "y": 659.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e10",
+   "designator": "C12",
+   "device": "CL05B104KO5NNNC",
+   "layer": 1,
+   "x": 1180,
+   "y": 860,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 1157.15,
+    "minY": 816.5,
+    "maxX": 1202.85,
+    "maxY": 903.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e10p0",
+     "padNumber": "1",
+     "net": "ETH_TCT2",
+     "layer": 1,
+     "x": 1180.0,
+     "y": 840.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e10p1",
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 1,
+     "x": 1180.0,
+     "y": 879.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e11",
+   "designator": "C13",
+   "device": "CL05B104KO5NNNC",
+   "layer": 1,
+   "x": 1180,
+   "y": 1080,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 1157.15,
+    "minY": 1036.5,
+    "maxX": 1202.85,
+    "maxY": 1123.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e11p0",
+     "padNumber": "1",
+     "net": "ETH_TCT3",
+     "layer": 1,
+     "x": 1180.0,
+     "y": 1060.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e11p1",
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 1,
+     "x": 1180.0,
+     "y": 1099.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e12",
+   "designator": "U1",
+   "device": "RTL8211F-CG",
+   "layer": 1,
+   "x": 1500,
+   "y": 750,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 1344.2,
+    "minY": 594.2,
+    "maxX": 1655.8,
+    "maxY": 905.8
+   },
+   "pads": [
+    {
+     "primitiveId": "e12p0",
+     "padNumber": "1",
+     "net": "ETH_MDI0_P",
+     "layer": 1,
+     "x": 1371.95,
+     "y": 858.268,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e12p1",
+     "padNumber": "2",
+     "net": "ETH_MDI0_N",
+     "layer": 1,
+     "x": 1371.95,
+     "y": 838.582,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e12p2",
+     "padNumber": "3",
+     "net": "+3V3",
+     "layer": 1,
+     "x": 1371.95,
+     "y": 818.898,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e12p3",
+     "padNumber": "4",
+     "net": "ETH_MDI1_P",
+     "layer": 1,
+     "x": 1371.95,
+     "y": 799.212,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e12p4",
+     "padNumber": "5",
+     "net": "ETH_MDI1_N",
+     "layer": 1,
+     "x": 1371.95,
+     "y": 779.528,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e12p5",
+     "padNumber": "6",
+     "net": "GND",
+     "layer": 1,
+     "x": 1371.95,
+     "y": 759.842,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e12p6",
+     "padNumber": "7",
+     "net": "ETH_MDI2_P",
+     "layer": 1,
+     "x": 1371.95,
+     "y": 740.158,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e12p7",
+     "padNumber": "8",
+     "net": "ETH_MDI2_N",
+     "layer": 1,
+     "x": 1371.95,
+     "y": 720.472,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e12p8",
+     "padNumber": "9",
+     "net": "+3V3",
+     "layer": 1,
+     "x": 1371.95,
+     "y": 700.788,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e12p9",
+     "padNumber": "10",
+     "net": "ETH_MDI3_P",
+     "layer": 1,
+     "x": 1371.95,
+     "y": 681.102,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e12p10",
+     "padNumber": "11",
+     "net": "ETH_MDI3_N",
+     "layer": 1,
+     "x": 1371.95,
+     "y": 661.418,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e12p11",
+     "padNumber": "12",
+     "net": "GND",
+     "layer": 1,
+     "x": 1371.95,
+     "y": 641.732,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e12p12",
+     "padNumber": "13",
+     "net": "PHY_RSET",
+     "layer": 1,
+     "x": 1391.733,
+     "y": 621.95,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e12p13",
+     "padNumber": "14",
+     "net": "GND",
+     "layer": 1,
+     "x": 1411.418,
+     "y": 621.95,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e12p14",
+     "padNumber": "15",
+     "net": "+3V3",
+     "layer": 1,
+     "x": 1431.102,
+     "y": 621.95,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e12p15",
+     "padNumber": "16",
+     "net": "",
+     "layer": 1,
+     "x": 1450.787,
+     "y": 621.95,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e12p16",
+     "padNumber": "17",
+     "net": "",
+     "layer": 1,
+     "x": 1470.473,
+     "y": 621.95,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e12p17",
+     "padNumber": "18",
+     "net": "",
+     "layer": 1,
+     "x": 1490.158,
+     "y": 621.95,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e12p18",
+     "padNumber": "19",
+     "net": "",
+     "layer": 1,
+     "x": 1509.842,
+     "y": 621.95,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e12p19",
+     "padNumber": "20",
+     "net": "",
+     "layer": 1,
+     "x": 1529.527,
+     "y": 621.95,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e12p20",
+     "padNumber": "21",
+     "net": "",
+     "layer": 1,
+     "x": 1549.213,
+     "y": 621.95,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e12p21",
+     "padNumber": "22",
+     "net": "",
+     "layer": 1,
+     "x": 1568.898,
+     "y": 621.95,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e12p22",
+     "padNumber": "23",
+     "net": "GND",
+     "layer": 1,
+     "x": 1588.582,
+     "y": 621.95,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e12p23",
+     "padNumber": "24",
+     "net": "+3V3",
+     "layer": 1,
+     "x": 1608.267,
+     "y": 621.95,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e12p24",
+     "padNumber": "25",
+     "net": "",
+     "layer": 1,
+     "x": 1628.05,
+     "y": 641.732,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e12p25",
+     "padNumber": "26",
+     "net": "",
+     "layer": 1,
+     "x": 1628.05,
+     "y": 661.418,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e12p26",
+     "padNumber": "27",
+     "net": "",
+     "layer": 1,
+     "x": 1628.05,
+     "y": 681.102,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e12p27",
+     "padNumber": "28",
+     "net": "",
+     "layer": 1,
+     "x": 1628.05,
+     "y": 700.788,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e12p28",
+     "padNumber": "29",
+     "net": "",
+     "layer": 1,
+     "x": 1628.05,
+     "y": 720.472,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e12p29",
+     "padNumber": "30",
+     "net": "",
+     "layer": 1,
+     "x": 1628.05,
+     "y": 740.158,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e12p30",
+     "padNumber": "31",
+     "net": "",
+     "layer": 1,
+     "x": 1628.05,
+     "y": 759.842,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e12p31",
+     "padNumber": "32",
+     "net": "",
+     "layer": 1,
+     "x": 1628.05,
+     "y": 779.528,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e12p32",
+     "padNumber": "33",
+     "net": "",
+     "layer": 1,
+     "x": 1628.05,
+     "y": 799.212,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e12p33",
+     "padNumber": "34",
+     "net": "",
+     "layer": 1,
+     "x": 1628.05,
+     "y": 818.898,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e12p34",
+     "padNumber": "35",
+     "net": "GND",
+     "layer": 1,
+     "x": 1628.05,
+     "y": 838.582,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e12p35",
+     "padNumber": "36",
+     "net": "+3V3",
+     "layer": 1,
+     "x": 1628.05,
+     "y": 858.268,
+     "width": 31.5,
+     "height": 11.8
+    },
+    {
+     "primitiveId": "e12p36",
+     "padNumber": "37",
+     "net": "+3V3",
+     "layer": 1,
+     "x": 1608.267,
+     "y": 878.05,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e12p37",
+     "padNumber": "38",
+     "net": "GND",
+     "layer": 1,
+     "x": 1588.582,
+     "y": 878.05,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e12p38",
+     "padNumber": "39",
+     "net": "",
+     "layer": 1,
+     "x": 1568.898,
+     "y": 878.05,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e12p39",
+     "padNumber": "40",
+     "net": "",
+     "layer": 1,
+     "x": 1549.213,
+     "y": 878.05,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e12p40",
+     "padNumber": "41",
+     "net": "",
+     "layer": 1,
+     "x": 1529.527,
+     "y": 878.05,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e12p41",
+     "padNumber": "42",
+     "net": "",
+     "layer": 1,
+     "x": 1509.842,
+     "y": 878.05,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e12p42",
+     "padNumber": "43",
+     "net": "",
+     "layer": 1,
+     "x": 1490.158,
+     "y": 878.05,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e12p43",
+     "padNumber": "44",
+     "net": "",
+     "layer": 1,
+     "x": 1470.473,
+     "y": 878.05,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e12p44",
+     "padNumber": "45",
+     "net": "",
+     "layer": 1,
+     "x": 1450.787,
+     "y": 878.05,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e12p45",
+     "padNumber": "46",
+     "net": "",
+     "layer": 1,
+     "x": 1431.102,
+     "y": 878.05,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e12p46",
+     "padNumber": "47",
+     "net": "",
+     "layer": 1,
+     "x": 1411.418,
+     "y": 878.05,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e12p47",
+     "padNumber": "48",
+     "net": "",
+     "layer": 1,
+     "x": 1391.733,
+     "y": 878.05,
+     "width": 11.8,
+     "height": 31.5
+    },
+    {
+     "primitiveId": "e12p48",
+     "padNumber": "49",
+     "net": "GND",
+     "layer": 1,
+     "x": 1500.0,
+     "y": 750.0,
+     "width": 200,
+     "height": 200
+    }
+   ]
+  },
+  {
+   "primitiveId": "e13",
+   "designator": "R1",
+   "device": "0402WGF2491TCE",
+   "layer": 1,
+   "x": 1500,
+   "y": 420,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 1456.5,
+    "minY": 397.15,
+    "maxX": 1543.5,
+    "maxY": 442.85
+   },
+   "pads": [
+    {
+     "primitiveId": "e13p0",
+     "padNumber": "1",
+     "net": "PHY_RSET",
+     "layer": 1,
+     "x": 1480.3,
+     "y": 420.0,
+     "width": 23.6,
+     "height": 21.7
+    },
+    {
+     "primitiveId": "e13p1",
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 1,
+     "x": 1519.7,
+     "y": 420.0,
+     "width": 23.6,
+     "height": 21.7
+    }
+   ]
+  },
+  {
+   "primitiveId": "e14",
+   "designator": "C5",
+   "device": "CL05B104KO5NNNC",
+   "layer": 1,
+   "x": 1420,
+   "y": 1000,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 1397.15,
+    "minY": 956.5,
+    "maxX": 1442.85,
+    "maxY": 1043.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e14p0",
+     "padNumber": "1",
+     "net": "+3V3",
+     "layer": 1,
+     "x": 1420.0,
+     "y": 980.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e14p1",
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 1,
+     "x": 1420.0,
+     "y": 1019.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e15",
+   "designator": "C6",
+   "device": "CL05B104KO5NNNC",
+   "layer": 1,
+   "x": 1580,
+   "y": 1000,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 1557.15,
+    "minY": 956.5,
+    "maxX": 1602.85,
+    "maxY": 1043.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e15p0",
+     "padNumber": "1",
+     "net": "+3V3",
+     "layer": 1,
+     "x": 1580.0,
+     "y": 980.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e15p1",
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 1,
+     "x": 1580.0,
+     "y": 1019.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e16",
+   "designator": "C7",
+   "device": "CL05B104KO5NNNC",
+   "layer": 1,
+   "x": 1700,
+   "y": 500,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 1677.15,
+    "minY": 456.5,
+    "maxX": 1722.85,
+    "maxY": 543.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e16p0",
+     "padNumber": "1",
+     "net": "+3V3",
+     "layer": 1,
+     "x": 1700.0,
+     "y": 480.3,
+     "width": 21.7,
+     "height": 23.6
+    },
+    {
+     "primitiveId": "e16p1",
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 1,
+     "x": 1700.0,
+     "y": 519.7,
+     "width": 21.7,
+     "height": 23.6
+    }
+   ]
+  },
+  {
+   "primitiveId": "e17",
+   "designator": "J2",
+   "device": "KF301-5.0-2P",
+   "layer": 1,
+   "x": 1950,
+   "y": 1350,
+   "rotation": 0,
+   "locked": true,
+   "bbox": {
+    "minX": 1798.0,
+    "minY": 1298.0,
+    "maxX": 2102.0,
+    "maxY": 1402.0
+   },
+   "pads": [
+    {
+     "primitiveId": "e17p0",
+     "padNumber": "1",
+     "net": "5V_IN",
+     "layer": 12,
+     "x": 1850.0,
+     "y": 1350.0,
+     "width": 80,
+     "height": 80
+    },
+    {
+     "primitiveId": "e17p1",
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 12,
+     "x": 2050.0,
+     "y": 1350.0,
+     "width": 80,
+     "height": 80
+    }
+   ]
+  },
+  {
+   "primitiveId": "e18",
+   "designator": "U9",
+   "device": "AMS1117-3.3",
+   "layer": 1,
+   "x": 1950,
+   "y": 800,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 1823.9,
+    "minY": 628.5,
+    "maxX": 2076.1,
+    "maxY": 971.5
+   },
+   "pads": [
+    {
+     "primitiveId": "e18p0",
+     "padNumber": "1",
+     "net": "GND",
+     "layer": 1,
+     "x": 1859.4,
+     "y": 680.0,
+     "width": 47,
+     "height": 79
+    },
+    {
+     "primitiveId": "e18p1",
+     "padNumber": "2",
+     "net": "+3V3",
+     "layer": 1,
+     "x": 1950.0,
+     "y": 680.0,
+     "width": 47,
+     "height": 79
+    },
+    {
+     "primitiveId": "e18p2",
+     "padNumber": "3",
+     "net": "5V_IN",
+     "layer": 1,
+     "x": 2040.6,
+     "y": 680.0,
+     "width": 47,
+     "height": 79
+    },
+    {
+     "primitiveId": "e18p3",
+     "padNumber": "4",
+     "net": "+3V3",
+     "layer": 1,
+     "x": 1950.0,
+     "y": 920.0,
+     "width": 130,
+     "height": 79
+    }
+   ]
+  },
+  {
+   "primitiveId": "e19",
+   "designator": "C90",
+   "device": "CL10A106KP8NNNC",
+   "layer": 1,
+   "x": 2040,
+   "y": 550,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 1980.75,
+    "minY": 520.3,
+    "maxX": 2099.25,
+    "maxY": 579.7
+   },
+   "pads": [
+    {
+     "primitiveId": "e19p0",
+     "padNumber": "1",
+     "net": "5V_IN",
+     "layer": 1,
+     "x": 2008.5,
+     "y": 550.0,
+     "width": 31.5,
+     "height": 35.4
+    },
+    {
+     "primitiveId": "e19p1",
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 1,
+     "x": 2071.5,
+     "y": 550.0,
+     "width": 31.5,
+     "height": 35.4
+    }
+   ]
+  },
+  {
+   "primitiveId": "e20",
+   "designator": "C91",
+   "device": "CL10A106KP8NNNC",
+   "layer": 1,
+   "x": 1860,
+   "y": 1050,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 1800.75,
+    "minY": 1020.3,
+    "maxX": 1919.25,
+    "maxY": 1079.7
+   },
+   "pads": [
+    {
+     "primitiveId": "e20p0",
+     "padNumber": "1",
+     "net": "+3V3",
+     "layer": 1,
+     "x": 1828.5,
+     "y": 1050.0,
+     "width": 31.5,
+     "height": 35.4
+    },
+    {
+     "primitiveId": "e20p1",
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 1,
+     "x": 1891.5,
+     "y": 1050.0,
+     "width": 31.5,
+     "height": 35.4
+    }
+   ]
+  }
+ ],
+ "outline": {
+  "bbox": {
+   "minX": 0,
+   "minY": 0,
+   "maxX": 2200,
+   "maxY": 1500
+  },
+  "points": [
+   [
+    0,
+    0
+   ],
+   [
+    2200,
+    0
+   ],
+   [
+    2200,
+    1500
+   ],
+   [
+    0,
+    1500
+   ]
+  ],
+  "source": "synthetic"
+ },
+ "copperLayers": 4,
+ "rules": {
+  "clearanceMil": 6,
+  "trackWidthMil": 6,
+  "trackWidthMinMil": 5,
+  "viaDrillMil": 12,
+  "viaDiameterMil": 24,
+  "copperToEdgeMil": 12
+ },
+ "project": "stress-hs/gbe-rj45",
+ "_provenance": "synthetic high-speed stress case (gen.py): Gigabit Ethernet: RTL8211-class PHY → 4 MDI pairs (100 Ω) → discrete 1000BASE-T magnetics (SOIC-24W) → RJ45; Bob-Smith termination (4× 75 Ω → 1 nF/2 kV → chassis); chassis ↔ GND 1 nF/2 kV; IEEE 802.3 1500 Vrms isolation declared on the chassis/cable side"
+}

@@ -180,6 +180,23 @@ func (c *ctx) assignDomainsToBlocks() {
 
 func hazardKind(k string) bool { return k == "mains" || k == "hazardous" }
 
+// declaredIsolation is the largest spec.domains isolationVrms declared for
+// either domain of a pair (by any of its nets).
+func (c *ctx) declaredIsolation(a, b *Domain) float64 {
+	best := 0.0
+	for _, sd := range c.spec.Domains {
+		if sd.IsolationVrms <= 0 {
+			continue
+		}
+		for _, n := range sd.Nets {
+			if has(a.Nets, n) || has(b.Nets, n) {
+				best = math.Max(best, sd.IsolationVrms)
+			}
+		}
+	}
+	return best
+}
+
 // buildPairs states the insulation between every pair of domains an
 // isolation part (optocoupler, isolator, isolated DC/DC, transformer, relay)
 // bridges, and between every hazardous and touchable domain even when no part
@@ -221,17 +238,7 @@ func (c *ctx) pairFor(a, b *Domain, bridges []string, note string) *Pair {
 	// Every part with pins in both domains bridges the pair — a Y capacitor
 	// or a sense resistor is not an isolation part, but its body spans the
 	// barrier all the same (pcb auto slots / checks it like one).
-	for _, part := range c.d.Parts {
-		ina, inb := false, false
-		for _, n := range c.partNets(part.Ref) {
-			ina = ina || c.domOfNet[n] == a.ID
-			inb = inb || c.domOfNet[n] == b.ID
-		}
-		if ina && inb && !has(bridges, part.Ref) {
-			bridges = append(bridges, part.Ref)
-		}
-	}
-	p := &Pair{A: "domain:" + a.ID, B: "domain:" + b.ID, Bridges: sortRefs(bridges)}
+	p := &Pair{A: "domain:" + a.ID, B: "domain:" + b.ID, Bridges: sortRefs(uniq(append(append([]string(nil), bridges...), c.spanning(a.ID, b.ID)...)))}
 	if note != "" {
 		p.Why = append(p.Why, note)
 	}
@@ -258,6 +265,13 @@ func (c *ctx) pairFor(a, b *Domain, bridges []string, note string) *Pair {
 	default:
 		p.Insulation = "functional"
 		p.Why = append(p.Why, "both sides SELV: functional isolation (noise / ground loop), not a safety barrier")
+	}
+	if iso := c.declaredIsolation(a, b); iso > 0 {
+		p.RequiredWithstandV = round(iso*math.Sqrt2, 1)
+		if p.Insulation == "functional" {
+			p.Insulation = "basic"
+		}
+		p.Why = append(p.Why, fmt.Sprintf("spec.domains isolationVrms %s Vrms (electric strength, e.g. IEEE 802.3 MDI): dimensioned as %s insulation for a %s V peak withstand (IEC 60664-1 procedure 2)", trimFloat(iso, 0), p.Insulation, trimFloat(p.RequiredWithstandV, 0)))
 	}
 	if st.MOP != "" && p.Insulation != "functional" {
 		p.MOP = st.MOP
@@ -350,4 +364,27 @@ func (c *ctx) mainsNominal(d *Domain) float64 {
 		}
 	}
 	return d.WorkingVrms
+}
+
+// spanning lists the parts with pins in both domains: besides the isolation
+// part itself, the Y / chassis capacitors and resistors that cross the
+// barrier (an Ethernet chassis-to-GND 1 nF/2 kV cap) — each needs the
+// insulation's voltage rating and sits in the barrier's creepage path.
+func (c *ctx) spanning(a, b string) []string {
+	var out []string
+	for _, p := range c.d.Parts {
+		ina, inb := false, false
+		for _, n := range c.partNets(p.Ref) {
+			switch c.domOfNet[n] {
+			case a:
+				ina = true
+			case b:
+				inb = true
+			}
+		}
+		if ina && inb {
+			out = append(out, p.Ref)
+		}
+	}
+	return out
 }
