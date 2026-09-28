@@ -1,0 +1,14 @@
+{
+ "standard": {
+  "name": "IEC61010-1",
+  "insulation": "reinforced",
+  "pollutionDegree": 2,
+  "materialGroup": "IIIa",
+  "altitudeM": 2000,
+  "overvoltageCategory": "III"
+ },
+ "layers": 4,
+ "domains": [
+  {"kind": "mains", "nets": ["GND_M"], "workingVrms": 600}
+ ]
+}

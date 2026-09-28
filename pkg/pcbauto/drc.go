@@ -152,6 +152,23 @@ func checkDRCTol(b *Board, an *Analysis, st *Stackup, tracks []Track, vias []Via
 			}
 		}
 	}
+	netMaxClr := b.Rules.Clearance
+	if an != nil {
+		for _, p := range an.Nets {
+			netMaxClr = math.Max(netMaxClr, p.ClearanceMil)
+		}
+	}
+	reliefReach := func(w float64) float64 { return math.Max(math.Max(3*w, 30), netMaxClr+w) }
+	padsOf := map[string][]*Pad{}
+	if netMaxClr > b.Rules.Clearance {
+		for _, p := range b.Parts {
+			for _, pd := range p.Pads {
+				if pd.Net != "" {
+					padsOf[pd.Net] = append(padsOf[pd.Net], pd)
+				}
+			}
+		}
+	}
 	pairClr := func(a, b string) float64 {
 		if an == nil || an.Iso == nil {
 			return 0
@@ -195,7 +212,31 @@ func checkDRCTol(b *Board, an *Analysis, st *Stackup, tracks []Track, vias []Via
 				if seen[pair] {
 					continue
 				}
-				req := math.Max(math.Max(clr(a.net), clr(c.net)), pairClr(a.net, c.net))
+				netReq := math.Max(clr(a.net), clr(c.net))
+				if an != nil && netReq > b.Rules.Clearance {
+					netReq = an.PairClearanceMil(a.net, c.net, b.Rules) // ΔV within a domain
+				}
+				if netReq > b.Rules.Clearance && a.kind != 0 && c.kind != 0 {
+					netReq = drcTrackRelief(b, netReq, a, c, padsOf, reliefReach)
+				}
+				if netReq > b.Rules.Clearance && (a.kind == 0) != (c.kind == 0) {
+					// HV footprint relief (hvrelief.go): copper leaving its own
+					// pad may be as close to a neighbour pad of the same part as
+					// its pad is. Never applied to a domain pair requirement.
+					pd, cu := a, c
+					if c.kind == 0 {
+						pd, cu = c, a
+					}
+					var near Point
+					w := 0.0
+					if cu.kind == 1 {
+						near, w = segNearest(pd.pad.Box.C, cu.t.A, cu.t.B), cu.t.Width
+					} else {
+						near, w = cu.v.C, cu.v.Dia
+					}
+					netReq = drcRelief(b, netReq, cu.net, pd.pad, near, reliefReach(w))
+				}
+				req := math.Max(netReq, pairClr(a.net, c.net))
 				if !a.bb.Expand(req).Overlaps(c.bb) {
 					continue
 				}

@@ -1,0 +1,39 @@
+{
+ "_provenance": "values for connectivity.json (negative)",
+ "parts": {
+  "J1": {
+   "mpn": "DG128-5.0-02P-AC",
+   "description": "Screw terminal 2P 5.0 mm"
+  },
+  "F1": {
+   "mpn": "0466001.NR",
+   "value": "1A",
+   "description": "SMD fuse 1206 1 A Current Rating:1A"
+  },
+  "BR1": {
+   "mpn": "MB10S"
+  },
+  "C1": {
+   "mpn": "400BXW4R7MEFC8X11",
+   "value": "4.7uF",
+   "description": "Capacitance:4.7uF Voltage Rating:400V"
+  },
+  "T1": {
+   "mpn": "EE10-5V",
+   "description": "EE10 transformer (functional model)"
+  },
+  "C2": {
+   "mpn": "1206Y-2KV-102",
+   "value": "1nF",
+   "description": "1206 MLCC 1 nF 2 kV used as 'Y capacitor' (not Y-rated)"
+  },
+  "C3": {
+   "mpn": "CL21A106KAYNNNE",
+   "value": "10uF"
+  },
+  "J2": {
+   "mpn": "DG128-5.0-02P",
+   "description": "Output terminal 2P 5.0 mm, 5 V 0.2 A load"
+  }
+ }
+}

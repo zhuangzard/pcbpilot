@@ -1,0 +1,327 @@
+{
+ "schemaVersion": "1.4",
+ "projectId": "stress-hv-negative",
+ "documentId": "page-1",
+ "_provenance": "hand-designed negative stress fixture: 230 Vac isolated 5 V with a 1206 MLCC across the reinforced barrier on a 40 × 25 mm board",
+ "components": [
+  {
+   "id": "cmp-J1",
+   "ref": "J1",
+   "device": {
+    "name": "DG128-5.0-02P-AC"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "L"
+    },
+    {
+     "number": "2",
+     "name": "N"
+    }
+   ]
+  },
+  {
+   "id": "cmp-F1",
+   "ref": "F1",
+   "device": {
+    "name": "0466001.NR"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-BR1",
+   "ref": "BR1",
+   "device": {
+    "name": "MB10S"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "+"
+    },
+    {
+     "number": "2",
+     "name": "-"
+    },
+    {
+     "number": "3",
+     "name": "~1"
+    },
+    {
+     "number": "4",
+     "name": "~2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-C1",
+   "ref": "C1",
+   "device": {
+    "name": "400BXW4R7MEFC8X11"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "+"
+    },
+    {
+     "number": "2",
+     "name": "-"
+    }
+   ]
+  },
+  {
+   "id": "cmp-T1",
+   "ref": "T1",
+   "device": {
+    "name": "EE10-5V"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "P+"
+    },
+    {
+     "number": "2",
+     "name": "P-"
+    },
+    {
+     "number": "3",
+     "name": "3"
+    },
+    {
+     "number": "4",
+     "name": "S+"
+    },
+    {
+     "number": "5",
+     "name": "5"
+    },
+    {
+     "number": "6",
+     "name": "S-"
+    }
+   ]
+  },
+  {
+   "id": "cmp-C2",
+   "ref": "C2",
+   "device": {
+    "name": "1206Y-2KV-102"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-C3",
+   "ref": "C3",
+   "device": {
+    "name": "CL21A106KAYNNNE"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-J2",
+   "ref": "J2",
+   "device": {
+    "name": "DG128-5.0-02P"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "+"
+    },
+    {
+     "number": "2",
+     "name": "-"
+    }
+   ]
+  }
+ ],
+ "nets": [
+  {
+   "id": "net-GND_S",
+   "name": "GND_S",
+   "role": "ground"
+  },
+  {
+   "id": "net-HV_BULK",
+   "name": "HV_BULK",
+   "role": "power"
+  },
+  {
+   "id": "net-L",
+   "name": "L",
+   "role": "signal"
+  },
+  {
+   "id": "net-L_F",
+   "name": "L_F",
+   "role": "signal"
+  },
+  {
+   "id": "net-N",
+   "name": "N",
+   "role": "signal"
+  },
+  {
+   "id": "net-PGND",
+   "name": "PGND",
+   "role": "ground"
+  },
+  {
+   "id": "net-VOUT",
+   "name": "VOUT",
+   "role": "power"
+  }
+ ],
+ "connections": [
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "1",
+   "netId": "net-L",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "2",
+   "netId": "net-N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-F1",
+   "pinNumber": "1",
+   "netId": "net-L",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-F1",
+   "pinNumber": "2",
+   "netId": "net-L_F",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-BR1",
+   "pinNumber": "1",
+   "netId": "net-HV_BULK",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-BR1",
+   "pinNumber": "2",
+   "netId": "net-PGND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-BR1",
+   "pinNumber": "3",
+   "netId": "net-L_F",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-BR1",
+   "pinNumber": "4",
+   "netId": "net-N",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C1",
+   "pinNumber": "1",
+   "netId": "net-HV_BULK",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C1",
+   "pinNumber": "2",
+   "netId": "net-PGND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-T1",
+   "pinNumber": "1",
+   "netId": "net-HV_BULK",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-T1",
+   "pinNumber": "2",
+   "netId": "net-PGND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-T1",
+   "pinNumber": "4",
+   "netId": "net-VOUT",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-T1",
+   "pinNumber": "6",
+   "netId": "net-GND_S",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C2",
+   "pinNumber": "1",
+   "netId": "net-PGND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C2",
+   "pinNumber": "2",
+   "netId": "net-GND_S",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C3",
+   "pinNumber": "1",
+   "netId": "net-VOUT",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C3",
+   "pinNumber": "2",
+   "netId": "net-GND_S",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J2",
+   "pinNumber": "1",
+   "netId": "net-VOUT",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J2",
+   "pinNumber": "2",
+   "netId": "net-GND_S",
+   "kind": "netlist"
+  }
+ ]
+}

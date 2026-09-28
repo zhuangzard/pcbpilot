@@ -1,0 +1,16 @@
+{
+ "standard": {
+  "name": "IEC60601-1",
+  "insulation": "basic",
+  "mop": "MOOP",
+  "mopCount": 1,
+  "pollutionDegree": 2,
+  "materialGroup": "IIIa",
+  "altitudeM": 2000,
+  "overvoltageCategory": "II"
+ },
+ "layers": 4,
+ "domains": [
+  {"kind": "patient", "nets": ["GND_PAT"], "workingVrms": 250}
+ ]
+}

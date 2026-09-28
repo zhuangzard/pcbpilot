@@ -1,0 +1,217 @@
+{
+ "case": "flyback",
+ "summary": "230 Vac → 12 V / 2 A isolated flyback (UC3843, STD7N65M2, EE25, TL431 + PC817, Y1 cap) — IEC 62368-1 reinforced",
+ "variants": [
+  {
+   "name": "2000m",
+   "spec": "spec.json",
+   "route": {
+    "place": true,
+    "routeOnly": true,
+    "timeout": "60s",
+    "grid": 5,
+    "loops": 1,
+    "minCompletion": 90
+   },
+   "domains": [
+    {
+     "kinds": [
+      "mains"
+     ],
+     "nets": [
+      "L",
+      "N",
+      "L_F",
+      "HV_BULK",
+      "DRAIN",
+      "PGND",
+      "VCC_P"
+     ],
+     "workingVrms": 324.6,
+     "workingVpeak": 650
+    },
+    {
+     "kinds": [
+      "isolated-secondary",
+      "SELV"
+     ],
+     "nets": [
+      "VOUT",
+      "GND_S",
+      "SEC",
+      "OPTO_A"
+     ],
+     "workingVrms": 12.9,
+     "workingVpeak": 12.9
+    }
+   ],
+   "pairs": [
+    {
+     "kinds": [
+      [
+       "mains"
+      ],
+      [
+       "isolated-secondary",
+       "SELV"
+      ]
+     ],
+     "insulation": "reinforced",
+     "clearanceMm": 3.0,
+     "creepageMm": 6.6,
+     "slotWidthMm": 1.0,
+     "transient": "mains",
+     "mainsVrms": 230,
+     "bridges": [
+      "T1",
+      "U2",
+      "C8"
+     ],
+     "why": "IEC 62368-1 reinforced, PD2, MG IIIa, OVC II. Clearance: procedure 2 — 230 Vrms mains, OVC II → IEC 60664-1 Table F.1 2500 V; reinforced one preferred step higher → 4000 V → Table F.2 (PD2) 3.0 mm; procedure 1 — 1.6 × 650 V drain peak = 1040 V → F.2 0.25 mm; governs 3.0 mm. Creepage: working voltage = rectified bulk 324.6 V DC (the primary is one circuit with the line through BR1) → Table F.4 PD2 MG III interpolated 320→400 V: 3.246 → 3.3 mm basic, reinforced ×2 = 6.6 mm. Slot width PD2 = 1.0 mm (IEC 60664-1 §6.2 X)."
+    }
+   ],
+   "nets": {
+    "L": {
+     "currentA": 1.0,
+     "widthOuterMil": 13.78,
+     "widthInnerMil": 25.59,
+     "vias": 2,
+     "clearanceMil": 98.5,
+     "voltagePeak": 325.27
+    },
+    "N": {
+     "currentA": 1.0,
+     "widthOuterMil": 13.78,
+     "vias": 2,
+     "clearanceMil": 98.5
+    },
+    "L_F": {
+     "currentA": 1.0,
+     "widthOuterMil": 13.78,
+     "vias": 2,
+     "clearanceMil": 98.5
+    },
+    "HV_BULK": {
+     "clearanceMil": 98.5,
+     "voltageMax": 324.6
+    },
+    "DRAIN": {
+     "clearanceMil": 128.0,
+     "voltagePeak": 650
+    },
+    "CLAMP": {
+     "clearanceMil": 102.4,
+     "voltagePeak": 520
+    },
+    "VOUT": {
+     "currentA": 2.0,
+     "widthOuterMil": 31.5,
+     "vias": 3,
+     "voltageMax": 12.0
+    },
+    "VCC_P": {
+     "voltageMax": 15.78,
+     "voltageTol": 0.03
+    }
+   },
+   "slots": {
+    "under": [
+     "U2"
+    ],
+    "notUnder": [
+     "T1",
+     "C8"
+    ],
+    "lengthMil": {
+     "U2": 251.4
+    }
+   },
+   "findings": {
+    "noErrors": true,
+    "expect": [
+     "insulation"
+    ],
+    "absent": [
+     "power-rating",
+     "resistor-voltage",
+     "floating-supply"
+    ]
+   },
+   "infeasible": [],
+   "maxIsoFindings": 0,
+   "knownLimits": [
+    {
+     "check": "place: routed completion %",
+     "why": "the placer packs HV parts for a 2-layer route with additive HV–HV shares; the hand placement (route variant) meets the bar — documented limit"
+    }
+   ]
+  },
+  {
+   "name": "5000m",
+   "spec": "spec-5000m.json",
+   "route": {
+    "routeOnly": true,
+    "timeout": "60s",
+    "grid": 5,
+    "minCompletion": 90
+   },
+   "domains": [
+    {
+     "kinds": [
+      "mains"
+     ],
+     "nets": [
+      "L",
+      "HV_BULK",
+      "DRAIN",
+      "PGND"
+     ],
+     "workingVrms": 324.6,
+     "workingVpeak": 650
+    }
+   ],
+   "pairs": [
+    {
+     "kinds": [
+      [
+       "mains"
+      ],
+      [
+       "isolated-secondary",
+       "SELV"
+      ]
+     ],
+     "insulation": "reinforced",
+     "clearanceMm": 4.44,
+     "creepageMm": 6.6,
+     "slotWidthMm": 1.0,
+     "transient": "mains",
+     "mainsVrms": 230,
+     "bridges": [
+      "T1",
+      "U2",
+      "C8"
+     ],
+     "why": "as 2000 m, clearance × 1.48 (IEC 60664-1 Table A.2 / IEC 62368-1 Table 16 at 5000 m) = 4.44 mm; creepage has no altitude factor (6.6 mm). PC817 rows 6.07 mm ≥ 4.44 mm: the slot still works."
+    }
+   ],
+   "slots": {
+    "under": [
+     "U2"
+    ],
+    "notUnder": [
+     "T1",
+     "C8"
+    ],
+    "lengthMil": {
+     "U2": 251.4
+    }
+   },
+   "findings": {
+    "noErrors": true
+   },
+   "infeasible": [],
+   "maxIsoFindings": 0
+  }
+ ]
+}

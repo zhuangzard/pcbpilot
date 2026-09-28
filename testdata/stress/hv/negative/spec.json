@@ -1,0 +1,12 @@
+{
+ "standard": {
+  "name": "IEC62368-1",
+  "insulation": "reinforced",
+  "pollutionDegree": 2,
+  "materialGroup": "IIIa",
+  "altitudeM": 2000,
+  "overvoltageCategory": "II"
+ },
+ "layers": 2,
+ "mains": {"vrms": 230, "nets": ["L", "N"]}
+}

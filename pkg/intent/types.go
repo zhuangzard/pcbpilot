@@ -130,15 +130,20 @@ type NetPlan struct {
 	NetClass          string       `json:"netClass"`
 	Why               []string     `json:"why"`
 	// Additive.
-	PeakA      float64  `json:"peakA,omitempty"`      // switch-node / pulsed peak current
-	DCCurrentA float64  `json:"dcCurrentA,omitempty"` // simulated DC net current (when sizing uses ripple RMS)
-	PairGapMil float64  `json:"pairGapMil,omitempty"` // diff-pair edge gap
-	Floating   bool     `json:"floating,omitempty"`   // no DC path in the simulation
-	Scenario   string   `json:"scenario,omitempty"`   // scenario of the sizing current
-	RippleMvpp float64  `json:"rippleMvpp,omitempty"` // declared ripple budget (spec rails)
-	Interface  string   `json:"interface,omitempty"`  // recognised HS interface (USB, …)
-	PadCount   int      `json:"padCount,omitempty"`   // pins on the net
-	Priority   int      `json:"priority,omitempty"`   // routing order hint (lower first)
+	PeakA      float64 `json:"peakA,omitempty"`      // switch-node / pulsed peak current
+	DCCurrentA float64 `json:"dcCurrentA,omitempty"` // simulated DC net current (when sizing uses ripple RMS)
+	PairGapMil float64 `json:"pairGapMil,omitempty"` // diff-pair edge gap
+	Floating   bool    `json:"floating,omitempty"`   // no DC path in the simulation
+	Scenario   string  `json:"scenario,omitempty"`   // scenario of the sizing current
+	RippleMvpp float64 `json:"rippleMvpp,omitempty"` // declared ripple budget (spec rails)
+	Interface  string  `json:"interface,omitempty"`  // recognised HS interface (USB, …)
+	PadCount   int     `json:"padCount,omitempty"`   // pins on the net
+	// FloatsOn names the switch node a floating gate-drive net rides on;
+	// RelVoltage is its voltage relative to that node (voltage{} is then the
+	// absolute envelope, switch node swing included).
+	FloatsOn   string   `json:"floatsOn,omitempty"`
+	RelVoltage *Voltage `json:"relVoltage,omitempty"`
+	Priority   int      `json:"priority,omitempty"` // routing order hint (lower first)
 	Warnings   []string `json:"warnings,omitempty"`
 }
 
@@ -159,6 +164,12 @@ type Pair struct {
 	Bridges  []string `json:"bridges,omitempty"` // parts spanning the barrier
 	MOP      string   `json:"mop,omitempty"`
 	MOPCount int      `json:"mopCount,omitempty"`
+	// Transient is the transient regime clearance procedure 2 uses:
+	// mains | secondary | none ("" = let the standard's rule infer it).
+	Transient string `json:"transient,omitempty"`
+	// MainsVrms is the nominal system voltage the transient is taken from
+	// (IEC 60664-1 Table F.1 row).
+	MainsVrms float64 `json:"mainsVrms,omitempty"`
 }
 
 // NetClass is an EasyEDA-pushable rule class.

@@ -40,9 +40,12 @@
 - `domains[].kind`：`SELV` | `hazardous` | `mains` | `patient` | `floating` | `isolated-secondary`。
   `mains`/`hazardous` 或峰值 > 60 V 为危险域。
 - pair 可选字段：`clearanceMm`/`creepageMm`（给了就用，低于标准计算值时报告告警）、`slotWidthMm`、
-  `mop`（`MOOP`/`MOPP`）、`mopCount`（1/2）、`transient`（`mains`/`secondary`/`none`，缺省按两侧 kind 推断：
-  有 `mains` → mains；两侧都是 SELV/isolated-secondary/floating/patient → secondary；否则 ES1 电压以下
-  none，其余按 mains 保守处理）。
+  `mop`（`MOOP`/`MOPP`）、`mopCount`（1/2）、`transient`（`mains`/`secondary`/`none`）+ `mainsVrms`
+  （Table F.1 取值电压）。`intent derive` 会写出这两项：spec.domains 声明优先；mains 类域按其**市电**电压
+  （不是整流后的母线电压）；有市电的设计里危险侧 = mains、两侧可触及 = secondary；都没有时留空，由标准规则
+  推断（ES1 以下 none，其余按 230 V mains 保守处理并告警）。
+- 没有隔离件跨接的危险域↔可触及域也成对（`bridges` 为空或只有 Y 电容等）；离线电源的一次侧地经整流桥
+  与市电线是**同一个 mains 域**，不会再和市电之间出一对“绝缘”。
 - 在 S0 `spec.json` 里写产品标准与使用环境，由 `intent derive` 转成这里的 `standard`；手写 intent 时直接按上表写。
 
 ## 3. 标准与查表（`pkg/safety`，`safety.Distances(pair, standard)`）
@@ -80,7 +83,12 @@ IPC B2 100/300/500 V = 0.6/1.25/2.5 mm；61010 CAT II 300 V 基本 1.5 / 3.0、�
    同时作为路由障碍。间距 < 间隙（空气路径，开槽无效）或槽放不进两排焊盘之间时不开槽，报告要求换宽体器件。
 6. **禁铺铜**：有布局时隔离带各段写成 `pcb.region.create`（no-wires + no-pours）；只布线时按领地边界描出
    宽 = 爬电的带，写成 no-pours 区域（`iso-moat-*`），防止 EasyEDA 覆铜按板级间距贴近另一域。
-7. **布线后核查**：两域的焊盘/走线/过孔两两计算：直线距离 < 间隙 → `iso-clearance`；同一外层上沿面最短路径
+7. **高压器件自身焊盘与同域 ΔV**：高压网的 IPC 间距大于器件自身焊盘距（MB10S、1206 分压电阻、DPAK）时，
+   在自身焊盘缩颈范围内铜皮离同一器件的其他焊盘最近可到“自身焊盘距”（不更近）；同域两网按同时可能出现的最大
+   电压差查 IPC-2221B（分压链相邻节点）。两者只放宽**同域**网间要求，不放宽域间 pair；布局按高压网间距加 halo。
+8. **不可行**：跨域器件焊盘距 < 间隙、或槽放不进两排焊盘之间 → `result.isolation.infeasible` + stderr
+   `isolation: INFEASIBLE` + 报告醒目列出 + `pcb check --intent` 的 `iso-infeasible` ERROR。
+9. **布线后核查**：两域的焊盘/走线/过孔两两计算：直线距离 < 间隙 → `iso-clearance`；同一外层上沿面最短路径
    （绕过宽度 ≥ 槽宽下限的铣槽/挖槽）< 爬电 → `iso-creepage`。结果在 `report.md`「安规隔离」与
    `plan.json result.isolation`。
 
@@ -91,6 +99,7 @@ pcbpilot pcb auto run --board board.json --intent intent.json --place --out-dir 
 pcbpilot apply out/playbook.json --project <工程> --dry-run      # 看 iso-slot-* / iso-band-* / iso-moat-* 步骤
 pcbpilot pcb check --intent intent.json --strict                   # 现场：两域铜皮的间隙 / 爬电
 pcbpilot pcb check --intent intent.json --board board.json --json  # 离线：只跑隔离规则
+pcbpilot pcb check --intent intent.json --board out/board.routed.json --strict  # 离线：判引擎布好的板（含槽）
 ```
 
 - 报告「安规隔离」：每对的标准、间隙、爬电、槽宽下限与来源；开槽尺寸；核查 0 违规。
@@ -99,13 +108,46 @@ pcbpilot pcb check --intent intent.json --board board.json --json  # 离线：�
 
 ## 能力边界
 
-- 覆铜不参与核查（由禁铺铜区域保证）；内电层是否遵守区域规则以 EasyEDA 重铺后的原生 DRC 为准。
+- 引擎生成的平面/覆铜按所属绝缘域裁剪（离对方领地 ≥ 半个要求、离对方铜皮 ≥ 整个要求，重建为行合并矩形），
+  隔离核查也量平面/覆铜轮廓（`pour#…`）；EasyEDA 重铺后的实际填充仍以原生 DRC 为准。4 层板的 SELV
+  地平面不再铺到高压区下方（否则只隔 0.2 mm 半固化片——贯穿绝缘距离本工具不计算）。
+- 需要 > 250 mil 线宽的电流（如 30 A）不走格点布线，报 `needs-pour`：按覆铜/母排手工处理并核对温升。
 - 贯穿绝缘距离（内层到外层、薄层绝缘）、灌封、固体绝缘、Y 电容额定值、变压器内部绝缘不在本工具范围。
 - 爬电只计外层沿面；槽的绕行按凸多边形槽计算；圆弧导线按弦处理。
 - 表值是工程参考：以你的产品标准版本和认证实验室的判定为准。
+- IEC 61800-5-1（电驱）、IEC 60335、ISO 6469-3 没有独立表：按 IEC 62368-1 / 60664-1 的插值与
+  `spec.domains[].transient/ratedVrms` 声明计算。IEC 60601-1 的 1 × MOOP 走 IEC 62368-1 协调（程序 2），
+  与 IEC 60601-1 Table 13（源自 60950-1，230 V 市电 1 MOOP 2.0 mm）有差异，按认证路线确认。
+- 两条**高压**走线之间的布线占位按“各自份额相加”（≈ 两者 IPC 间距之和），比 ΔV 要求保守至约 2 倍：
+  2 层板上高压网密集时可能剩少量未布通（压力测试 flyback 实测 90–94 %），需要人工或放宽布局。
+- 同域 ΔV 放宽按“同一时刻”比较（最大对最大、典型对典型）：同一域里由**不同**高压源独立供电且可能单独
+  掉电的两网不在假设内，请把它们分到不同域或在 intent 里给出显式间距。
 
 ## 常见错误
 
 - 两侧共用同一个 `GND` 网名 → 看不出两个域（原理图错误）；intent 里把同一个网写进两个域时以 `nets.<net>.domain` 为准。
 - 光耦型号写成 “光耦” 或留空 → 旧推断认不出桥；有 intent 时按焊盘网络所属域判断，不依赖型号。
 - SOP 光耦用在加强绝缘：两排焊盘面距常 < 4.6 mm（230 V 加强爬电）→ 引擎开槽；< 3.0 mm（加强间隙）→ 必须换宽体。
+- 1206 高压 MLCC 当 Y 电容跨加强绝缘：焊盘距 1.8 mm < 3.0 mm 间隙 → INFEASIBLE，换 Y1 引线电容。
+- 隔离器引脚映射/朝向画反（输出侧信号接到输入侧那一排）→ 两排都有两个域的网，焊盘距只有 0.65 mm，
+  引擎报 INFEASIBLE；先核对数据手册的 side 1 / side 2。
+- 高压分压链电阻数不够：每颗两端电压 > 工作电压（1206 ≈ 200 V）→ `resistor-voltage` error。
+
+## 压力测试样例（`make stress-hv`，状态：source-only / offline-verified，未上现场）
+
+来源：`testdata/stress/hv/<case>/`，手工设计的电路与真实封装焊盘（`gen.py` 生成 connectivity/values/board，
+`spec.json`、`models.json`、`expect.json` 手写；`expect.json` 的数字按标准手算并在 `why` 写出推导）。
+每个变体离线跑 `sim power → intent derive --spec → pcb auto run --intent --sim [--place]`（布局 + 仅布线两种）
+→ `pcb check --intent --board out/board.routed.json`，逐项对比；`STRESS_HV_CASE=<case>` 只跑一个，
+`STRESS_HV_OUT=<dir>` 保留全部中间文件。已知限制在 expect 的 `knownLimits` 里写明，报告为 KNOWN。
+
+| 样例 | 标准与条件 | 手算答案 | 关键检查 |
+|---|---|---|---|
+| flyback 2000 m / 5000 m | IEC 62368-1 加强，PD2，MG IIIa，OVC II；230 Vac → 12 V/2 A（UC3843、STD7N65M2、EE25、PC817+TL431、Y1） | 一次侧与市电同域，工作 324.6 V DC / 650 Vpk；间隙 3.0 mm（2500 V → 高一档 4000 V）/ 5000 m 4.44 mm；爬电 3.3×2 = 6.6 mm；PC817 行距 6.1 mm → 1 mm 槽约 251 mil；T1、Y 电容不开槽；L/N 1 A → 0.35 mm、2 过孔；VOUT 2 A → 0.80 mm、3 过孔 | 布线后与离线检查 0 隔离违规；槽与禁铺铜进剧本 |
+| medical 2×MOPP / 1×MOOP | IEC 60601-1，病人侧 250 Vrms | 2×MOPP：8 mm / 5 mm（Table 12），ISO7741DW 行距 7.29 mm → 槽约 495 mil；1×MOOP：2.5 / 1.5 mm，无槽 | 布局与仅布线 0 违规、100 % |
+| cat3 | IEC 61010-1 加强，CAT III 600 V | 瞬态 600 V OVC III 6000 V：基本 5.5 mm，加强 max(11, 8) = 11.0 mm；爬电 6.0×2 = 12.0 mm；ISO7741DWW、EP10 不开槽；6 × 1 MΩ 分压节点 848/707/566/425/283/142/0.7 V，每颗 141 V < 200 V | 分压链任意两网铜皮 ≥ IPC-2221B B2(ΔV)（独立实现的表） |
+| inverter reinforced / functional | 400 VDC 母线，声明 `transient: mains, ratedVrms: 400`，OVC II | 高边驱动随开关节点浮动（465 V DC / 535 Vpk）；加强 5.5 / 9.4 mm，U1/U2/U3 开槽；功能性 IPC B2 535 V = 2.67 mm；30 A → 2 oz ΔT 20 °C 423 mil（10.75 mm）、30 过孔 → 报 `needs-pour` | Kelvin/栅极回路网必须布通（KNOWN：高压网份额相加） |
+| negative | 同 flyback 条件，40 × 25 mm，1206 当 Y 电容 | C2 焊盘 1.8 mm < 3.0 mm 间隙 → INFEASIBLE；T1 仍开槽 | `pcb check --strict` 非零退出 |
+
+从这些样例改参数时：换标准/海拔/污染等级只改 `spec.json`，重新 `intent derive`；换器件改 `gen.py`
+里的封装与位置后重新生成，并先用 `expect.json` 写出新的手算答案，再跑 `make stress-hv`。

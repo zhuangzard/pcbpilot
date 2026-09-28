@@ -336,6 +336,33 @@ func (e *Engine) build(sc scenario) *run {
 				anode = Terminal{Node: mid}
 			}
 			add(b, &diode{t: [2]Terminal{anode, tk}, is: is, n: n}, p.Ref)
+		case KindBridge:
+			// Four diodes: each AC pin → +, − → each AC pin.
+			ac := p.pinsNamed(roleNames(m, "ac", defBridgeAC...))
+			pos := p.pinsNamed(roleNames(m, "plus", defBridgePlus...))
+			neg := p.pinsNamed(roleNames(m, "minus", defBridgeMinus...))
+			tp, okp := e.term(c, p.Ref, pos)
+			tn, okn := e.term(c, p.Ref, neg)
+			if len(ac) == 0 || !okp || !okn {
+				r.warnf("%s: bridge rectifier pins ~/+/− not identified (ac=%d +=%d −=%d) — left open", p.Ref, len(ac), len(pos), len(neg))
+				continue
+			}
+			vf, ifA := m.VfV, m.IfA
+			if vf == 0 {
+				vf, ifA = e.def.DiodeVfV, e.def.DiodeIfA
+			}
+			if ifA == 0 {
+				ifA = e.def.DiodeIfA
+			}
+			is, n := diodeParams(m, vf, ifA, 1.5)
+			for _, pin := range ac {
+				ta, ok := e.term(c, p.Ref, []Pin{pin})
+				if !ok {
+					continue
+				}
+				add(b, &diode{t: [2]Terminal{ta, tp}, is: is, n: n}, p.Ref+" "+pin.Name+"→+")
+				add(b, &diode{t: [2]Terminal{tn, ta}, is: is, n: n}, p.Ref+" −→"+pin.Name)
+			}
 		case KindBJT:
 			pb := p.pinsNamed(roleNames(m, "b", "B", "BASE"))
 			pc := p.pinsNamed(roleNames(m, "c", "C", "COLLECTOR"))
@@ -405,6 +432,32 @@ func (e *Engine) build(sc scenario) *run {
 				r.assumef("%s (%s) disconnected in %s", p.Ref, b.sourceName, sc.name)
 				continue
 			}
+			if len(m.Outputs) > 0 {
+				for i, o := range m.Outputs {
+					name := o.Name
+					if name == "" {
+						name = fmt.Sprintf("output %d", i+1)
+					}
+					ts, oks := e.term(c, p.Ref, p.pinsNamed(o.Pins))
+					tr, okr := e.term(c, p.Ref, p.pinsNamed(o.ReturnPins))
+					if !oks || !okr || o.VoltageV == 0 {
+						r.warnf("%s: source %s pins %v/%v not connected or no voltage — not used", p.Ref, name, o.Pins, o.ReturnPins)
+						continue
+					}
+					rs := o.RsOhm
+					if rs == 0 {
+						rs = e.def.SourceRsOhm
+					}
+					e.assumef("%s: %s = %.2f V (model %s) with %.3g Ω series resistance", p.Ref, name, o.VoltageV, m.ID, rs)
+					add(b, &vsource{t: [2]Terminal{ts, tr}, e: o.VoltageV, rs: rs, active: true}, p.Ref+" "+name)
+				}
+				// An isolated module draws its input power from the other
+				// side: rails[] are its input load (returnPins = input return).
+				if len(m.Rails) > 0 {
+					e.buildLoad(r, b, sc, add)
+				}
+				continue
+			}
 			power := p.pinsNamed(roleNames(m, "power", m.SupplyPins...))
 			if len(power) == 0 {
 				for _, pin := range p.Pins {
@@ -465,6 +518,7 @@ func (e *Engine) buildLoad(r *run, b *binding, sc scenario, add func(*binding, e
 	type group struct {
 		pins []Pin
 		amps float64
+		ret  []string
 	}
 	var groups []group
 	pick := func(typ, peak float64) float64 {
@@ -478,7 +532,7 @@ func (e *Engine) buildLoad(r *run, b *binding, sc scenario, add func(*binding, e
 	}
 	if len(m.Rails) > 0 {
 		for _, rail := range m.Rails {
-			groups = append(groups, group{pins: p.pinsNamed(rail.Pins), amps: pick(rail.TypA, rail.PeakA)})
+			groups = append(groups, group{pins: p.pinsNamed(rail.Pins), amps: pick(rail.TypA, rail.PeakA), ret: rail.ReturnPins})
 		}
 	} else {
 		var sup []Pin
@@ -516,7 +570,11 @@ func (e *Engine) buildLoad(r *run, b *binding, sc scenario, add func(*binding, e
 		}
 		return
 	}
-	if !okr {
+	perRail := false
+	for _, g := range groups {
+		perRail = perRail || len(g.ret) > 0
+	}
+	if !okr && !perRail {
 		r.warnf("%s: load has no ground/return pin — skipped", p.Ref)
 		return
 	}
@@ -528,7 +586,15 @@ func (e *Engine) buildLoad(r *run, b *binding, sc scenario, add func(*binding, e
 		if !ok || e.isGround(g.pins[0].Net) {
 			continue
 		}
-		add(b, &load{t: [2]Terminal{ts, tr}, inom: g.amps, knee: e.loadKnee(g.pins[0].Net)}, fmt.Sprintf("%s load %s", p.Ref, g.pins[0].Net))
+		gr, okg := tr, okr
+		if len(g.ret) > 0 {
+			gr, okg = e.term(r.c, p.Ref, p.pinsNamed(g.ret))
+		}
+		if !okg {
+			r.warnf("%s: rail %s has no return pin — skipped", p.Ref, g.pins[0].Net)
+			continue
+		}
+		add(b, &load{t: [2]Terminal{ts, gr}, inom: g.amps, knee: e.loadKnee(g.pins[0].Net)}, fmt.Sprintf("%s load %s", p.Ref, g.pins[0].Net))
 	}
 }
 

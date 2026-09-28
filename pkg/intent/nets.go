@@ -180,6 +180,11 @@ func (c *ctx) buildNets() {
 		pp := c.an.Plan(net, c.rules)
 		np := &NetPlan{Domain: c.domOfNet[net], Block: c.netBlock[net], Pins: []PinCurrent{}, Why: []string{}, PadCount: pp.PadCount, Priority: pp.Priority}
 		v, vwhy := c.netVoltageEnvelope(net)
+		if fi, ok := c.floats[net]; ok {
+			v = c.volts[net]
+			vwhy = append(vwhy, c.floatWhy(net))
+			np.FloatsOn, np.RelVoltage = fi.anchor, &Voltage{Min: round(fi.relLo, 4), Max: round(fi.relHi, 4), Nom: round((fi.relLo+fi.relHi)/2, 4), Peak: round(math.Max(math.Abs(fi.relLo), math.Abs(fi.relHi)), 4)}
+		}
 		np.Voltage = v
 		np.Why = append(np.Why, vwhy...)
 		np.Role = string(pp.Role)
@@ -325,32 +330,48 @@ func metricRoundMil(mil float64) float64 {
 	return math.Round(mm/0.0254*100) / 100
 }
 
+// classOf names a net's rule class. HV_<domain> holds the nets whose OWN
+// voltage (to their reference) is hazardous or that carry the line: a 0.7 V
+// ADC input or the 0 V primary ground of a hazardous domain is not a
+// high-voltage net inside its domain — putting it in the HV class gave it the
+// class clearance of the highest net (4.2 mm on a CAT III input) and made a
+// TSSOP ADC pin unroutable. Insulation between domains is pairs[]' job
+// (pcb auto fence / slots / moats and pcb check --intent), not the class.
 func (c *ctx) classOf(net string, np *NetPlan) string {
-	if d := c.domain(np.Domain); np.Voltage.Peak > selvDC || c.mains[net] || d != nil && hazardKind(d.Kind) {
+	if np.Voltage.Peak > selvDC || c.mains[net] {
 		id := np.Domain
 		if id == "" {
 			id = "NET"
 		}
 		return "HV_" + id
 	}
+	cls := "SIGNAL"
 	switch np.Role {
 	case "ground":
-		return "GND"
+		cls = "GND"
 	case "power":
+		cls = "POWER"
 		if np.CurrentA > 1.0 {
-			return "POWER_HI"
+			cls = "POWER_HI"
 		}
-		return "POWER"
 	case "switch":
-		return "SWITCH"
+		cls = "SWITCH"
 	case "diff":
-		return "HS_DIFF"
+		cls = "HS_DIFF"
 	case "hs":
-		return "HS"
+		cls = "HS"
 	case "rf":
-		return "RF"
+		cls = "RF"
 	}
-	return "SIGNAL"
+	// Low-voltage nets of a hazardous domain (a 30 A HV bus return, the gate
+	// drive, a primary controller) get their own classes: merged with the
+	// touchable side's GND/POWER the class width of a 30 A HV_GND was pushed
+	// onto the SELV ground, and the domain identity is what a class-to-class
+	// insulation rule needs.
+	if d := c.domain(np.Domain); d != nil && hazardKind(d.Kind) {
+		cls += "_" + d.ID
+	}
+	return cls
 }
 
 var classOrder = []string{"GND", "POWER", "POWER_HI", "SWITCH", "HS_DIFF", "HS", "RF", "SIGNAL"}
@@ -410,6 +431,11 @@ func (c *ctx) buildNetClasses() {
 		for i, o := range classOrder {
 			if o == n {
 				return i
+			}
+		}
+		for i, o := range classOrder {
+			if strings.HasPrefix(n, o+"_") && !strings.HasPrefix(n, "HV_") {
+				return i // GND_<hazardous domain> next to GND
 			}
 		}
 		if strings.HasPrefix(n, "HS_DIFF") {

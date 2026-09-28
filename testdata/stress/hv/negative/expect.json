@@ -1,0 +1,52 @@
+{
+ "case": "negative",
+ "summary": "230 Vac isolated 5 V on 40 × 25 mm with a 1206 MLCC as 'Y capacitor' across the reinforced barrier: must be reported infeasible",
+ "variants": [
+  {
+   "name": "reinforced",
+   "spec": "spec.json",
+   "route": {
+    "routeOnly": true,
+    "timeout": "30s"
+   },
+   "pairs": [
+    {
+     "kinds": [
+      [
+       "mains"
+      ],
+      [
+       "isolated-secondary",
+       "SELV"
+      ]
+     ],
+     "insulation": "reinforced",
+     "clearanceMm": 3.0,
+     "creepageMm": 6.6,
+     "slotWidthMm": 1.0,
+     "transient": "mains",
+     "mainsVrms": 230,
+     "bridges": [
+      "C2",
+      "T1"
+     ],
+     "why": "same pair as the flyback (bulk 325 V DC: 3.0 mm / 6.6 mm). C2 is a 1206: its pads are 1.8 mm apart < 3.0 mm clearance — a slot does not lengthen an air path: INFEASIBLE (use a Y1 cap with ≥ 6.6 mm lead spacing). T1 rows 6.12 mm < 6.6 mm but ≥ 3.0 mm → slot."
+    }
+   ],
+   "slots": {
+    "under": [
+     "T1"
+    ],
+    "notUnder": [
+     "C2"
+    ],
+    "lengthMil": {
+     "T1": 340.2
+    }
+   },
+   "infeasible": [
+    "C2"
+   ]
+  }
+ ]
+}

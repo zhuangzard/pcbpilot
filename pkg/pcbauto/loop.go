@@ -88,6 +88,11 @@ func PlaceRoute(ctx context.Context, b *Board, an *Analysis, c *Circuit, m *Mech
 		}
 		out, err := Run(ctx, b, ropt)
 		if err != nil {
+			if ctx.Err() != nil && res.Result != nil {
+				// Out of time in a later pass: keep the best finished one.
+				res.Passes[len(res.Passes)-1].Note += " (context ended during the next pass: best kept)"
+				break
+			}
 			return nil, err
 		}
 		js := Joint(b, out.Analysis, c, out.Stackup, out.Route, out.DRC, JointOptions{PlacementScore: -1, Overlaps: pr.Metrics.Overlaps})

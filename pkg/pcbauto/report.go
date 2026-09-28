@@ -390,6 +390,13 @@ func writeIsolation(p func(string, ...any), iso *IsolationReport) {
 			ip.ClearanceMil*0.0254, ip.CreepageMil*0.0254, ip.SlotWidthMil*0.0254, ip.Source, ip.Ref)
 	}
 	p("\n> %s\n\n", safety.Caveat)
+	if len(iso.Infeasible) > 0 {
+		p("**INFEASIBLE — %d 个跨隔离器件自身焊盘无法满足要求（开槽/布线/布局都救不了，必须换器件）：**\n\n", len(iso.Infeasible))
+		for _, f := range iso.Infeasible {
+			p("- %s\n", f.Reason)
+		}
+		p("\n")
+	}
 	for _, s := range iso.Slots {
 		p("- 开槽 %s（%s|%s）：%.0f × %.0f mil，焊盘间距 %.0f mil\n", s.Ref, s.A, s.B, s.WidthMil, s.LengthMil, s.GapMil)
 		for _, w := range s.Why {

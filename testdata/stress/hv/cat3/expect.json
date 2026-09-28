@@ -1,0 +1,134 @@
+{
+ "case": "cat3",
+ "summary": "IEC 61010-1 CAT III 600 V voltage input: PTC + MOV, 6 × 1 MΩ 1206 chain, floating ADS1220, ISO7741DWW, SN6505B/EP10 bias",
+ "variants": [
+  {
+   "name": "reinforced",
+   "spec": "spec.json",
+   "route": {
+    "place": true,
+    "routeOnly": true,
+    "timeout": "60s",
+    "loops": 1,
+    "minCompletion": 90,
+    "layers": 4
+   },
+   "domains": [
+    {
+     "kinds": [
+      "mains"
+     ],
+     "nets": [
+      "GND_M",
+      "VIN_HV",
+      "N1",
+      "ADC_IN",
+      "3V3_M"
+     ],
+     "workingVrms": 600,
+     "workingVpeak": 848.53
+    },
+    {
+     "kinds": [
+      "SELV",
+      "isolated-secondary"
+     ],
+     "nets": [
+      "+5V",
+      "GND",
+      "SCLK"
+     ],
+     "workingVrms": 5,
+     "workingVpeak": 5
+    }
+   ],
+   "pairs": [
+    {
+     "kinds": [
+      [
+       "mains"
+      ],
+      [
+       "SELV",
+       "isolated-secondary"
+      ]
+     ],
+     "insulation": "reinforced",
+     "clearanceMm": 11.0,
+     "creepageMm": 12.0,
+     "slotWidthMm": 1.0,
+     "transient": "mains",
+     "mainsVrms": 600,
+     "bridges": [
+      "T1",
+      "U3"
+     ],
+     "why": "IEC 61010-1:2010 §6.7, measuring circuit CAT III 600 V (COM may sit on a 600 V phase: the whole floating circuit is at 600 Vrms to the host). Basic clearance: Table F.1 600 V OVC III → 6000 V → F.2 5.5 mm; reinforced = max(2 × basic, one impulse step 8000 V → 8.0 mm) = 11.0 mm. Creepage basic F.4 PD2 MG III 600 V (500→630 interpolated) = 6.0 mm, reinforced 12.0 mm. ISO7741DWW 14.5 mm and EP10 13.4 mm rows need no slot."
+    }
+   ],
+   "nets": {
+    "VIN_HV": {
+     "clearanceMil": 167.1,
+     "voltageMax": 848.53
+    },
+    "VIN_P": {
+     "voltageMax": 848.39,
+     "clearanceMil": 167.1
+    },
+    "N1": {
+     "voltageMax": 707.11,
+     "clearanceMil": 139.2
+    },
+    "N2": {
+     "voltageMax": 565.83,
+     "clearanceMil": 111.4
+    },
+    "N3": {
+     "voltageMax": 424.55,
+     "clearanceMil": 98.5
+    },
+    "N4": {
+     "voltageMax": 283.27,
+     "clearanceMil": 49.3
+    },
+    "N5": {
+     "voltageMax": 141.99,
+     "clearanceMil": 23.7
+    },
+    "ADC_IN": {
+     "voltageMax": 0.7,
+     "voltageTol": 0.05
+    }
+   },
+   "chain": {
+    "VIN_P": 848.39,
+    "N1": 707.11,
+    "N2": 565.83,
+    "N3": 424.55,
+    "N4": 283.27,
+    "N5": 141.99,
+    "ADC_IN": 0.7
+   },
+   "slots": {
+    "notUnder": [
+     "U3",
+     "T1"
+    ]
+   },
+   "findings": {
+    "noErrors": true,
+    "absent": [
+     "resistor-voltage"
+    ]
+   },
+   "infeasible": [],
+   "maxIsoFindings": 0,
+   "knownLimits": [
+    {
+     "check": "place: routed completion %",
+     "why": "the placer packs HV parts for a 2-layer route with additive HV–HV shares; the hand placement (route variant) meets the bar — documented limit"
+    }
+   ]
+  }
+ ]
+}

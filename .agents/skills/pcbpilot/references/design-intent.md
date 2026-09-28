@@ -38,12 +38,17 @@ pcbpilot intent derive --connectivity sch-p1.json --connectivity sch-p2.json \
  "hsInterfaces":[{"name":"ETH","pairs":[["TXP","TXN"]],"diffOhm":100,"lengthGroup":"ETH_TX"},
                  {"name":"SDIO","nets":["SD_CLK"],"singleOhm":50}],
  "mains":{"vrms":230,"nets":["L","N"]},
- "domains":[{"kind":"patient","nets":["ECG_IN"],"workingVrms":0}],
+ "domains":[{"kind":"patient","nets":["ECG_IN"],"workingVrms":0},
+            {"kind":"hazardous","nets":["HV_GND"],"transient":"mains","ratedVrms":400}],
  "usbBudgetA":0.5,
  "rules":{"clearanceMil":6,"trackMil":6,"viaDrillMil":12,"viaDiaMil":24}}
 ```
 
-声明的轨电流**优先于仿真**（`currentSource: declared`）；声明低于仿真值会出 finding。标准未声明时
+声明的轨电流**优先于仿真**（`currentSource: declared`）；声明低于仿真值会出 finding。只声明
+`voltage`/`rippleMvpp`/`peakV`（不写 `currentA`）的轨保留仿真/启发电流。`domains[].transient`
+（`mains`/`secondary`/`none`）+ `ratedVrms` 声明该域的瞬态来源与 IEC 60664-1 Table F.1 取值电压
+（电池/直流母线、测量输入等不在网名上的情况；CAT III 600 V 输入把 COM 所在地域声明为
+`{"kind":"mains","workingVrms":600}` 即按 600 V 行取值）。标准未声明时
 按工程默认（无危险电压 = IPC-2221B/functional；有市电或 >60 V DC = IEC62368-1/reinforced），
 `standard.defaulted` 列出被默认的字段，市电板未声明标准会出 `standard-defaulted` 警告。
 
@@ -53,10 +58,10 @@ pcbpilot intent derive --connectivity sch-p1.json --connectivity sch-p2.json \
 |---|---|
 | `blocks[]` | 电路功能：`function` ∈ power-input / buck / boost / ldo / charger / usb-uart / mcu / rf-module / led / esd / connector / isolation / mains / sensor / motor-driver / other；`subFunction` 细分（or-ing、keys、auto-download、optocoupler…）；`core`、`parts`、`nets`（该块**拥有**的网：电源网归输出它的块，信号网归核心在网上的块，地网全局不归块）、`summary`（带仿真数字的一句话）、`notes`（如 buck 分压求 Vout、纹波公式）。 |
 | `nets{}` | 每网计划：`role`（power/ground/signal/switch/hs/diff/rf/analog/clock）、`domain`、`block`、`voltage{nom,min,max,peak}`（nom=typical；min/max=通电场景包络；开关节点 peak=Vin；市电 peak=√2·Vrms）、`currentA`+`currentSource`（simulated/declared/heuristic；开关节点按纹波 RMS，`peakA` 给峰值、`dcCurrentA` 给直流）、`pins[]`（ref/pin/currentA/dir，仿真 worst）、`widthMil{outer,inner,min}`、`viasPerTransition`、`clearanceMil`、`impedanceOhm`/`diffPair`/`lengthGroup`/`pairGapMil`、`netClass`、`why[]`（每个数字的出处）。 |
-| `domains[]` | 参考域（每个地一个，经 0 Ω/磁珠相连的地合并；市电；无参考=floating）。`kind` ∈ SELV / hazardous（>60 V DC）/ mains / patient（spec 声明）/ floating / isolated-secondary（经隔离件才连到主 SELV 域的另一个低压域），`workingVrms`/`workingVpeak`。 |
-| `pairs[]` | 隔离件（光耦、隔离器、隔离电源、变压器、继电器）跨接的两个域之间的绝缘要求：工作电压、`insulation`（危险↔可触及 = reinforced；危险↔危险 = basic；SELV↔SELV = functional）、`clearanceMm`/`creepageMm`/`slotRequired`/`slotWidthMm`/`standardRef`、`bridges`。数字统一来自 `SafetyDistances(pair, standard)`。 |
-| `netClasses[]` | GND、POWER、POWER_HI（>1 A）、SWITCH、HS_DIFF（多种阻抗时 HS_DIFF_<Ω>）、HS、RF、HV_<域>、SIGNAL：`trackMil`（成员最宽外层线宽）、`innerTrackMil`、`minTrackMil`、`clearanceMil`、via、阻抗。可直接推成 EasyEDA 网络类。 |
-| `findings[]` | 设计提示：电感 Ipk/Irms 对额定、稳压器余量/dropout/占空比/Vin 上限/输出电流、二极管压降损耗、引脚/连接器/器件额定电流、电阻功率、电容耐压、缺大容量电容、USB 500 mA 预算、USB 缺 ESD、阻抗不可控、绝缘开槽、未知功耗模型、市电电流未声明。每条带 `refs`/`nets`/`suggestion`。 |
+| `domains[]` | 参考域（每个地一个，经 0 Ω/磁珠相连的地合并；市电；无参考=floating）。经整流桥/电阻等**非隔离件与市电线相连的地**（离线电源的 PGND）与市电线**同一个 mains 域**：其 `workingVrms`/`workingVpeak` 取市电与本域直流母线/漏极峰值中较大者，域名仍按市电电压（`MAINS_230VAC`）。`kind` ∈ SELV / hazardous（>60 V DC）/ mains / patient（spec 声明）/ floating / isolated-secondary（经隔离件才连到主 SELV 域的另一个低压域），`workingVrms`/`workingVpeak`。 |
+| `pairs[]` | 隔离件（光耦、数字隔离器、隔离栅驱动 UCC215xx/Si823x/1EDI…、隔离放大器 AMC1xxx、隔离电源 MGJ/UCC12xxx…、变压器、继电器）跨接的两个域之间的绝缘要求；**没有隔离件跨接的危险域↔可触及域也成对**（铜皮在板上任何位置都要守距离）。字段：工作电压、`insulation`（危险↔可触及 = reinforced 或 spec 声明值；危险↔危险 = basic；病人 = spec 声明值；SELV↔SELV = functional）、`mop`/`mopCount`（取 spec 的产品级声明：2 × MOPP → `double`）、`transient`/`mainsVrms`（程序 2 的瞬态来源：spec.domains 声明优先；mains 类域按其市电电压；有市电的设计里危险侧 = mains、两侧可触及 = secondary；否则留空由标准规则推断）、`clearanceMm`/`creepageMm`/`slotRequired`/`slotWidthMm`/`standardRef`、`bridges`（含引脚同时落在两域的任何器件，如 Y 电容）。数字统一来自 `SafetyDistances(pair, standard)`。 |
+| `netClasses[]` | GND、POWER、POWER_HI（>1 A）、SWITCH、HS_DIFF（多种阻抗时 HS_DIFF_<Ω>）、HS、RF、HV_<域>（**自身峰值 > 60 V 或市电线**的网）、SIGNAL；危险域里的低压网另成 `<类>_<域>`（如 `GND_MAINS_230VAC`、`SIGNAL_HAZ_450V`），不与可触及侧同类：`trackMil`（成员最宽外层线宽）、`innerTrackMil`、`minTrackMil`、`clearanceMil`、via、阻抗。可直接推成 EasyEDA 网络类。 |
+| `findings[]` | 设计提示：电感 Ipk/Irms 对额定、稳压器余量/dropout/占空比/Vin 上限/输出电流、二极管压降损耗、引脚/连接器/器件额定电流、电阻功率、电阻工作电压（`resistor-voltage`：同一场景内两端电压差对 `Max working voltage`/`Limiting Element Voltage`，分压链逐颗核）、电容耐压（电解按 80 % 降额、MLCC 按直流偏压分开提示）、缺大容量电容、USB 500 mA 预算、USB 缺 ESD、阻抗不可控、绝缘开槽、未知功耗模型、市电电流未声明。每条带 `refs`/`nets`/`suggestion`。 |
 
 附加：`copper`（层数/铜厚/温升/参考高度/εr/叠层名/工艺最小值）、`simulation`（场景、收敛、警告、假设）、
 `definitions`（约定说明）。

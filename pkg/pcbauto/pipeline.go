@@ -54,7 +54,7 @@ func Run(ctx context.Context, b *Board, opt Options) (*Result, error) {
 	pre := Analyze(b, opt.Power, nil)
 	// Milled slots under bridge parts are planned on the final placement
 	// and become owned holes the router keeps copper away from.
-	isoSlots, isoNotes := PlanIsoSlots(b, pre.Iso)
+	isoSlots, isoNotes, isoBad := PlanIsoSlotsDetail(b, pre.Iso)
 	st := DecideStackup(b, pre, opt.Stack)
 	res := &Result{}
 	try := func(st *Stackup) (*Analysis, *RouteResult, *DRCReport, error) {
@@ -78,7 +78,7 @@ func Run(ctx context.Context, b *Board, opt Options) (*Result, error) {
 		return nil, err
 	}
 	res.Analysis, res.Stackup, res.Route, res.DRC = an, st, rr, drc
-	if !opt.NoEscalate && rr.Stats.Completion < 97 && st.Layers >= 4 {
+	if !opt.NoEscalate && rr.Stats.Completion < 97 && st.Layers >= 4 && timeLeft(ctx, opt.Route.Timeout) {
 		alt := *st
 		alt.Stack = append([]StackLayer(nil), st.Stack...)
 		alt.Reasons = append([]string(nil), st.Reasons...)
@@ -99,7 +99,7 @@ func Run(ctx context.Context, b *Board, opt Options) (*Result, error) {
 	// while 2.5 mil routed it clean — the E2E agent had to find that by hand.
 	if !opt.NoEscalate && opt.Route.GridMil <= 0 && len(res.Attempts) > 0 && res.Attempts[0].Millis < 20000 {
 		for _, k := range []float64{0.9, 0.8, 0.7} {
-			if hsFindings(CheckSI(b, res.Analysis, res.Stackup, res.Route)) == 0 {
+			if hsFindings(CheckSI(b, res.Analysis, res.Stackup, res.Route)) == 0 || !timeLeft(ctx, opt.Route.Timeout) {
 				break
 			}
 			fine := opt
@@ -132,7 +132,8 @@ func Run(ctx context.Context, b *Board, opt Options) (*Result, error) {
 	if err := irReroute(ctx, b, opt, res); err != nil {
 		return nil, err
 	}
-	res.Isolation = isolationReport(b, res.Analysis, res.Route, isoSlots, isoNotes)
+	isoNotes = append(isoNotes, clipPlanesToIso(b, res.Analysis, res.Route)...)
+	res.Isolation = isolationReport(b, res.Analysis, res.Route, isoSlots, isoNotes, isoBad)
 	return res, nil
 }
 
@@ -160,6 +161,10 @@ func irReroute(ctx context.Context, b *Board, opt Options, res *Result) error {
 			changed = true
 		}
 		if !changed {
+			return nil
+		}
+		if !timeLeft(ctx, opt.Route.Timeout) {
+			res.Route.Notes = append(res.Route.Notes, "IR-drop re-route skipped: not enough of the time budget left for another routing pass")
 			return nil
 		}
 		o2 := opt
@@ -223,4 +228,18 @@ func betterHS(b *Board, rr2 *RouteResult, drc2 *DRCReport, an2 *Analysis, res *R
 		return v2 < v1
 	}
 	return hsFindings(CheckSI(b, an2, res.Stackup, rr2)) < hsFindings(CheckSI(b, res.Analysis, res.Stackup, res.Route))
+}
+
+// timeLeft reports whether ctx leaves room for another routing pass of
+// budget d (always true without a deadline or a route timeout). The optional
+// retries (layer escalation, finer-grid high-speed passes, IR-drop re-route)
+// each cost a full pass: on slow boards (high-voltage clearances) they ran
+// the whole command past its context and `pcb auto run --place` failed with
+// "context deadline exceeded" instead of returning the routed board.
+func timeLeft(ctx context.Context, d time.Duration) bool {
+	dl, ok := ctx.Deadline()
+	if !ok || d <= 0 {
+		return true
+	}
+	return time.Until(dl) > d+d/4
 }

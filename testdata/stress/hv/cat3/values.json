@@ -1,0 +1,108 @@
+{
+ "_provenance": "values for connectivity.json (cat3)",
+ "parts": {
+  "J1": {
+   "mpn": "CAT3-600V-JACKS",
+   "description": "4 mm safety jacks INPUT / COM, CAT III 600 V"
+  },
+  "RT1": {
+   "mpn": "PTC-600V-1K",
+   "value": "1kΩ",
+   "description": "PTC thermistor 1 kΩ 600 V (input protection)"
+  },
+  "RV1": {
+   "mpn": "14D112K",
+   "description": "Varistor 1100 V 14 mm (680 Vac)"
+  },
+  "R1": {
+   "mpn": "RC1206FR-071ML",
+   "value": "1MΩ",
+   "description": "Resistance:1MΩ Power(Watts):250mW Max working voltage:200V"
+  },
+  "R2": {
+   "mpn": "RC1206FR-071ML",
+   "value": "1MΩ",
+   "description": "Resistance:1MΩ Power(Watts):250mW Max working voltage:200V"
+  },
+  "R3": {
+   "mpn": "RC1206FR-071ML",
+   "value": "1MΩ",
+   "description": "Resistance:1MΩ Power(Watts):250mW Max working voltage:200V"
+  },
+  "R4": {
+   "mpn": "RC1206FR-071ML",
+   "value": "1MΩ",
+   "description": "Resistance:1MΩ Power(Watts):250mW Max working voltage:200V"
+  },
+  "R5": {
+   "mpn": "RC1206FR-071ML",
+   "value": "1MΩ",
+   "description": "Resistance:1MΩ Power(Watts):250mW Max working voltage:200V"
+  },
+  "R6": {
+   "mpn": "RC1206FR-071ML",
+   "value": "1MΩ",
+   "description": "Resistance:1MΩ Power(Watts):250mW Max working voltage:200V"
+  },
+  "R7": {
+   "mpn": "RC1206FR-074K99L",
+   "value": "4.99kΩ"
+  },
+  "C1": {
+   "mpn": "CL21B103KBANNNC",
+   "value": "10nF"
+  },
+  "D1": {
+   "mpn": "BAV99",
+   "description": "Dual switching diode (clamp)"
+  },
+  "U1": {
+   "mpn": "ADS1220IPWR",
+   "description": "24-bit delta-sigma ADC (floating on COM)"
+  },
+  "C2": {
+   "mpn": "CL21B104KBCNNNC",
+   "value": "100nF"
+  },
+  "U2": {
+   "mpn": "TLV75533PDBVR",
+   "description": "500 mA LDO 3.3 V"
+  },
+  "C3": {
+   "mpn": "CL21A106KAYNNNE",
+   "value": "10uF"
+  },
+  "C4": {
+   "mpn": "CL21A106KAYNNNE",
+   "value": "10uF"
+  },
+  "D2": {
+   "mpn": "BAT54C",
+   "description": "Dual Schottky common cathode 30 V"
+  },
+  "T1": {
+   "mpn": "EP10-REINF-CAT3",
+   "description": "Custom isolation transformer EP10 1:1.1, reinforced for CAT III 600 V (≥ 13 mm pin-row spacing, triple-insulated wire)"
+  },
+  "U3": {
+   "mpn": "ISO7741DWWR",
+   "description": "Quad digital isolator, SOIC-16 DWW extra-wide (14.5 mm creepage), reinforced 5.7 kVrms"
+  },
+  "U4": {
+   "mpn": "SN6505BDBVR",
+   "description": "Low-noise 1 A transformer driver for isolated supplies"
+  },
+  "C5": {
+   "mpn": "CL21A106KAYNNNE",
+   "value": "10uF"
+  },
+  "C6": {
+   "mpn": "CL21B104KBCNNNC",
+   "value": "100nF"
+  },
+  "J2": {
+   "mpn": "PZ254V-11-06P",
+   "description": "Host header 6P 2.54 mm"
+  }
+ }
+}

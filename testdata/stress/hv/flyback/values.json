@@ -1,0 +1,163 @@
+{
+ "_provenance": "values for connectivity.json (flyback)",
+ "parts": {
+  "J1": {
+   "mpn": "DG142R-7.5-02P",
+   "description": "Screw terminal 2P 7.5 mm pitch, 300 V 15 A"
+  },
+  "F1": {
+   "mpn": "37211000411",
+   "value": "1A",
+   "description": "TR5 time-lag fuse 1 A 250 Vac Current Rating:1A"
+  },
+  "RV1": {
+   "mpn": "07D471K",
+   "description": "Varistor 470 V 7 mm disc (300 Vac)"
+  },
+  "C1": {
+   "mpn": "MKP-X2-104K275",
+   "value": "100nF",
+   "description": "X2 film capacitor Capacitance:100nF Voltage Rating:275Vac"
+  },
+  "BR1": {
+   "mpn": "MB10S",
+   "description": "Bridge rectifier 1000 V 0.5 A"
+  },
+  "C2": {
+   "mpn": "400BXW22MEFR10X16",
+   "value": "22uF",
+   "description": "Aluminium electrolytic Capacitance:22uF Voltage Rating:400V"
+  },
+  "R1": {
+   "mpn": "RC1206FR-07330KL",
+   "value": "330kΩ",
+   "description": "Resistance:330kΩ Power(Watts):250mW Overload Voltage (Max):400V"
+  },
+  "R2": {
+   "mpn": "RC1206FR-07330KL",
+   "value": "330kΩ",
+   "description": "Resistance:330kΩ Power(Watts):250mW Overload Voltage (Max):400V"
+  },
+  "D1": {
+   "mpn": "US1M",
+   "description": "Ultrafast 1000 V 1 A"
+  },
+  "R3": {
+   "mpn": "RC2512FK-07100KL",
+   "value": "100kΩ",
+   "description": "Resistance:100kΩ Power(Watts):1W"
+  },
+  "C3": {
+   "mpn": "1206B102K102NT",
+   "value": "1nF",
+   "description": "Capacitance:1nF Voltage Rating:1kV"
+  },
+  "Q1": {
+   "mpn": "STD7N65M2",
+   "description": "N-channel MOSFET 650 V 5 A DPAK"
+  },
+  "R4": {
+   "mpn": "0805W8F100JT5E",
+   "value": "10Ω"
+  },
+  "R5": {
+   "mpn": "1206W4F470LT5E",
+   "value": "0.47Ω",
+   "description": "Resistance:470mΩ Power(Watts):250mW"
+  },
+  "R6": {
+   "mpn": "0805W8F1001T5E",
+   "value": "1kΩ"
+  },
+  "C4": {
+   "mpn": "CL21B471KBANNNC",
+   "value": "470pF"
+  },
+  "U1": {
+   "mpn": "UC3843BD1R2G",
+   "description": "Current-mode PWM controller"
+  },
+  "R7": {
+   "mpn": "0805W8F1002T5E",
+   "value": "10kΩ"
+  },
+  "C5": {
+   "mpn": "CL21B472KBANNNC",
+   "value": "4.7nF"
+  },
+  "C6": {
+   "mpn": "CL31A226KBHNNNE",
+   "value": "22uF",
+   "description": "Capacitance:22uF Voltage Rating:50V"
+  },
+  "C7": {
+   "mpn": "CL21B102KBANNNC",
+   "value": "1nF"
+  },
+  "D2": {
+   "mpn": "1N4148W",
+   "description": "Switching diode 100 V"
+  },
+  "T1": {
+   "mpn": "EE25-FLY-12V2A",
+   "description": "Flyback transformer EE25, reinforced (triple-insulated secondary), Lp 800 uH, Np:Ns:Na 60:10:13"
+  },
+  "U2": {
+   "mpn": "PC817C",
+   "description": "Optocoupler CTR 200-400%, 5000 Vrms"
+  },
+  "C8": {
+   "mpn": "CD45-E2GA102M-NKA",
+   "value": "1nF",
+   "description": "Y1 safety ceramic capacitor Capacitance:1nF Voltage Rating:400Vac"
+  },
+  "D3": {
+   "mpn": "SS310",
+   "description": "Schottky 100 V 3 A"
+  },
+  "C9": {
+   "mpn": "25ZLH680MEFC8X20",
+   "value": "680uF",
+   "description": "Capacitance:680uF Voltage Rating:25V"
+  },
+  "C10": {
+   "mpn": "25ZLH680MEFC8X20",
+   "value": "680uF",
+   "description": "Capacitance:680uF Voltage Rating:25V"
+  },
+  "L1": {
+   "mpn": "SWPA5040S2R2MT",
+   "value": "2.2uH",
+   "description": "Power inductor 2.2 uH 4.5 A DCR 20 mΩ"
+  },
+  "C11": {
+   "mpn": "25ZLH100MEFC5X11",
+   "value": "100uF",
+   "description": "Capacitance:100uF Voltage Rating:25V"
+  },
+  "J2": {
+   "mpn": "DG128-5.0-02P",
+   "description": "Output terminal 2P 5.0 mm, 12 V 2 A load"
+  },
+  "R8": {
+   "mpn": "0805W8F1001T5E",
+   "value": "1kΩ"
+  },
+  "U3": {
+   "mpn": "TL431AIDBZR",
+   "description": "Programmable shunt reference 2.495 V"
+  },
+  "R9": {
+   "mpn": "0805W8F3832T5E",
+   "value": "38.3kΩ"
+  },
+  "R10": {
+   "mpn": "0805W8F1002T5E",
+   "value": "10kΩ"
+  },
+  "C12": {
+   "mpn": "CL21B104KBCNNNC",
+   "value": "100nF"
+  }
+ }
+}

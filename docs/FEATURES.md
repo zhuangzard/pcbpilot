@@ -100,7 +100,8 @@ fixture 回归：中小板 89–100%，大型 BGA 板（RK3568、K230）55–62%
 |---|---|
 | 电路功能 | `pkg/intent` 在 `pcbauto.Understand` 核心/外围块上识别用途：power-input（OR 二极管/TVS）、buck/boost/ldo、usb-uart、mcu/rf-module、esd、led、keys、auto-download、connector、isolation、mains、sensor、motor-driver；每块带仿真数字的 summary |
 | 网计划 | 电压 nom/min/max/peak（开关节点 peak=Vin、市电 √2·Vrms）、仿真/声明/启发电流与逐焊盘电流、IPC-2221/2152 内外层线宽与最小线宽、过孔数、IPC-2221B 间距、USB 90 Ω 等差分阻抗与等长组、网络类（GND/POWER/POWER_HI/SWITCH/HS_DIFF/HS/RF/HV_*/SIGNAL） |
-| 域与绝缘 | 按参考地与隔离件划分 SELV/hazardous/mains/patient/floating/isolated-secondary 域；域间绝缘对经 `SafetyDistances(pair, standard)`（占位：IEC 60664-1 工程默认 + 污染等级/海拔/MOPP；`pkg/safety` 一行接入） |
+| 域与绝缘 | 按参考地与隔离件划分 SELV/hazardous/mains/patient/floating/isolated-secondary 域（整流桥后的一次侧与市电线同域）；隔离件跨接的域对与无跨接的危险↔可触及域对都出绝缘对，数字来自 `pkg/safety`（IPC-2221B / IEC 62368-1 / IEC 60601-1 MOOP·MOPP / IEC 61010-1，CLI 经 `intent_safety.go` 接入）；瞬态来源 `transient`/`mainsVrms` 随对写出 |
+| 高压压力测试 | `make stress-hv`（`-tags stress`）：5 块手工设计的高压板（230 Vac 反激 2000/5000 m、IEC 60601-1 2×MOPP / 1×MOOP 病人前端、IEC 61010-1 CAT III 600 V 分压输入、400 VDC 半桥隔离驱动 reinforced/functional、1206 当 Y 电容的不可行负例）逐板跑 sim → intent derive → pcb auto run（布局 + 仅布线）→ `pcb check --intent --board board.routed.json`，与 `testdata/stress/hv/<case>/expect.json` 手算答案比对；离线验证（source-only / offline-verified，未上现场） |
 | 设计提示 | 电感额定余量、稳压余量/dropout/占空比/Vin 上限、二极管损耗、额定电流/功率/电容耐压、缺大电容、USB 500 mA 预算、缺 USB ESD、阻抗不可控、需开槽、未知模型 |
 | 输入 | 离线 connectivity+values（进程内仿真，`--sim-out` 另存）或 `--sim`；`--spec` 产品级参数；现场只读 `--pages` |
 

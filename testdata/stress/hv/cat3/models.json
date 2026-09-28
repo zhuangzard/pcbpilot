@@ -1,0 +1,42 @@
+{
+ "schemaVersion": 1,
+ "_doc": "Design-specific power models of the CAT III 600 V input stress fixture.",
+ "models": [
+  {
+   "id": "cat3-600v-input-dc-peak",
+   "kind": "connector-source",
+   "match": {"mpn": ["CAT3-600V-JACKS"]},
+   "supplyPins": ["1"],
+   "returnPins": ["2"],
+   "voltageV": 848.53,
+   "rsOhm": 1.0,
+   "sourceName": "meas",
+   "source": "DC stand-in for the rated CAT III 600 Vrms measurement input at its peak (√2 · 600 V): the divider nodes then read their peak voltages.",
+   "confidence": "assumed"
+  },
+  {
+   "id": "ep10-reinf-cat3",
+   "kind": "connector-source",
+   "match": {"mpn": ["EP10-REINF-CAT3"]},
+   "outputs": [
+    {"name": "S1", "pins": ["S1"], "returnPins": ["SCT"], "voltageV": 5.5, "rsOhm": 1.5},
+    {"name": "S2", "pins": ["S2"], "returnPins": ["SCT"], "voltageV": 5.5, "rsOhm": 1.5}
+   ],
+   "sourceName": "isobias",
+   "source": "SN6505B push-pull at 5 V with a 1:1.1 centre-tapped transformer: each half-secondary ≈ 5.5 V, winding + driver ≈ 1.5 Ω.",
+   "confidence": "assumed"
+  },
+  {
+   "id": "host-5v-header",
+   "kind": "connector-source",
+   "match": {"mpn": ["PZ254V-11-06P"]},
+   "supplyPins": ["1"],
+   "returnPins": ["2"],
+   "voltageV": 5.0,
+   "rsOhm": 0.1,
+   "sourceName": "host",
+   "source": "Host board supplies +5 V (SELV) on pin 1.",
+   "confidence": "assumed"
+  }
+ ]
+}

@@ -86,14 +86,16 @@ type NetPlan struct {
 }
 
 var (
-	reVolt     = regexp.MustCompile(`(?i)(?:^|[^0-9])([0-9]+)V([0-9]+)(?:$|[^0-9])`)             // 3V3, 1V8
-	reVoltDec  = regexp.MustCompile(`(?i)(?:^|[^0-9.])([0-9]+(?:\.[0-9]+)?)\s*V(?:$|[^0-9A-Z])`) // 3.3V, +5V, 12V
-	reGround   = regexp.MustCompile(`(?i)^([A-Z0-9]+_)?(A|D|P|S|C|E)?GND[A-Z0-9_]*$|^VSS[A-Z0-9_]*$|^GROUND$|^EARTH$|^0V$`)
-	rePower    = regexp.MustCompile(`(?i)^\+?(VCC|VDD|VBUS|VIN|VBAT|VSYS|VOUT|VCORE|VIO|VREF|AVDD|DVDD|PVDD|V[0-9]|[0-9]+V[0-9]*|\+)`)
-	reClock    = regexp.MustCompile(`(?i)(XTAL|XIN|XOUT|OSC|XI$|XO$|CLK|MCLK|SCLK|BCLK)`)
-	reRF       = regexp.MustCompile(`(?i)(ANT|RF_|_RF|LNA)`)
-	reSwitch   = regexp.MustCompile(`(?i)^(SW|LX|PH)[0-9_]*$|_SW$|_LX$`)
-	reAnalog   = regexp.MustCompile(`(?i)(ADC|AIN|VREF|MIC|AUDIO|SENSE)`)
+	reVolt    = regexp.MustCompile(`(?i)(?:^|[^0-9])([0-9]+)V([0-9]+)(?:$|[^0-9])`)             // 3V3, 1V8
+	reVoltDec = regexp.MustCompile(`(?i)(?:^|[^0-9.])([0-9]+(?:\.[0-9]+)?)\s*V(?:$|[^0-9A-Z])`) // 3.3V, +5V, 12V
+	reGround  = regexp.MustCompile(`(?i)^([A-Z0-9]+_)?(A|D|P|S|C|E)?GND[A-Z0-9_]*$|^VSS[A-Z0-9_]*$|^GROUND$|^EARTH$|^0V$`)
+	rePower   = regexp.MustCompile(`(?i)^\+?(VCC|VDD|VBUS|VIN|VBAT|VSYS|VOUT|VCORE|VIO|VREF|AVDD|DVDD|PVDD|V[0-9]|[0-9]+V[0-9]*|\+)`)
+	reClock   = regexp.MustCompile(`(?i)(XTAL|XIN|XOUT|OSC|XI$|XO$|CLK|MCLK|SCLK|BCLK)`)
+	reRF      = regexp.MustCompile(`(?i)(ANT|RF_|_RF|LNA)`)
+	// Switch nodes: buck/boost SW/LX, a half-bridge PHASE, a flyback DRAIN.
+	reSwitch = regexp.MustCompile(`(?i)^(SW|LX|PH|PHASE|DRAIN)[0-9_]*$|_SW$|_LX$|_PHASE$|_DRAIN$`)
+	// AIN only as its own token (AIN0, ADC_AIN1): "DRAIN" is not analog.
+	reAnalog   = regexp.MustCompile(`(?i)(ADC|(^|_)AIN[0-9PN]*($|_)|VREF|MIC|AUDIO|SENSE)`)
 	rePairBase = regexp.MustCompile(`(?i)^(.*?)(_?)(D|DP|DM|DN|P|N|\+|-)$`)
 	reUSBData  = regexp.MustCompile(`(?i)(^|[_\-])(USB[0-9]*[_\-]?)?D[+-]$`)
 )
@@ -350,6 +352,10 @@ type Analysis struct {
 	IRBudget IRBudget `json:"irBudget"`
 	// Iso is the domain insulation (intent pairs), nil without an intent.
 	Iso *IsoRules `json:"isolation,omitempty"`
+	// spans are the intent voltage envelopes [lo, hi] of the nets (ΔV
+	// clearance between two nets of one domain, hvrelief.go).
+	spans  map[string]voltSpan
+	coated bool
 }
 
 // SimSummary is the provenance of the simulated currents.
@@ -377,7 +383,9 @@ func Analyze(b *Board, spec PowerSpec, stack *Stackup) *Analysis {
 	a := &Analysis{ByNet: map[string]*NetPlan{}, TempRiseC: spec.TempRiseC, IRBudget: DefaultIRBudget()}
 	if spec.Intent != nil {
 		a.Iso = buildIsoRules(b, spec.Intent)
+		a.spans = intentSpans(b, spec.Intent)
 	}
+	a.coated = spec.Coated
 	if spec.IRBudget != nil {
 		a.IRBudget = *spec.IRBudget
 	}
@@ -412,7 +420,24 @@ func Analyze(b *Board, spec PowerSpec, stack *Stackup) *Analysis {
 		np.Role = classify(n.Name, len(n.Pads))
 		np.Voltage = InferVoltage(n.Name)
 		np.Source = "name"
-		if rail, ok := declared[upper(n.Name)]; ok {
+		rail, isRail := declared[upper(n.Name)]
+		// A rail that declares only its voltage (or plane) keeps the
+		// simulated / heuristic current: declaring "VOUT 12 V" once zeroed
+		// its current and sized the 2 A output as a 10 mil signal.
+		currentDeclared := isRail && rail.CurrentA > 0
+		if isRail && !currentDeclared {
+			if rail.Voltage != 0 {
+				np.Voltage = rail.Voltage
+			}
+			if np.Role != RoleGround && np.Role != RoleSwitch {
+				np.Role = RolePower
+			}
+			if rail.Plane != nil {
+				np.Plane = *rail.Plane
+			}
+			np.CurrentA = defaultCurrent(np.Role, n.Name, len(n.Pads))
+			np.Source = "heuristic"
+		} else if isRail {
 			np.Source = "declared"
 			if rail.Voltage != 0 {
 				np.Voltage = rail.Voltage
@@ -443,8 +468,7 @@ func Analyze(b *Board, spec PowerSpec, stack *Stackup) *Analysis {
 				}
 			}
 			if sn != nil {
-				_, isDeclared := declared[upper(n.Name)]
-				applySim(a, np, n, sn, spec.Sim, isDeclared)
+				applySim(a, np, n, sn, spec.Sim, currentDeclared)
 			}
 		}
 		if in := intentLookup(spec.Intent, n.Name); in != nil {

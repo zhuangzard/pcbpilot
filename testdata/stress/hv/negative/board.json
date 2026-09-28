@@ -1,0 +1,515 @@
+{
+ "_provenance": "hand-designed negative stress fixture: 230 Vac isolated 5 V with a 1206 MLCC across the reinforced barrier on a 40 × 25 mm board — hand placement (mil, y-up)",
+ "components": [
+  {
+   "primitiveId": "c-J1",
+   "designator": "J1",
+   "device": "DG128-5.0-02P-AC",
+   "layer": 1,
+   "x": 150,
+   "y": 500,
+   "rotation": 0,
+   "locked": true,
+   "bbox": {
+    "minX": 0.0,
+    "minY": 283.0,
+    "maxX": 300.0,
+    "maxY": 717.0
+   },
+   "pads": [
+    {
+     "padNumber": "1",
+     "net": "L",
+     "layer": 12,
+     "x": 150.0,
+     "y": 598.5,
+     "width": 90,
+     "height": 90,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      90,
+      90
+     ]
+    },
+    {
+     "padNumber": "2",
+     "net": "N",
+     "layer": 12,
+     "x": 150.0,
+     "y": 401.5,
+     "width": 90,
+     "height": 90,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      90,
+      90
+     ]
+    }
+   ]
+  },
+  {
+   "primitiveId": "c-F1",
+   "designator": "F1",
+   "device": "0466001.NR",
+   "layer": 1,
+   "x": 400,
+   "y": 800,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 314.5,
+    "minY": 759.5,
+    "maxX": 485.5,
+    "maxY": 840.5
+   },
+   "pads": [
+    {
+     "padNumber": "1",
+     "net": "L",
+     "layer": 1,
+     "x": 342.0,
+     "y": 800.0,
+     "width": 45,
+     "height": 71,
+     "rotation": 0,
+     "shape": [
+      "RECT",
+      45,
+      71
+     ]
+    },
+    {
+     "padNumber": "2",
+     "net": "L_F",
+     "layer": 1,
+     "x": 458.0,
+     "y": 800.0,
+     "width": 45,
+     "height": 71,
+     "rotation": 0,
+     "shape": [
+      "RECT",
+      45,
+      71
+     ]
+    }
+   ]
+  },
+  {
+   "primitiveId": "c-BR1",
+   "designator": "BR1",
+   "device": "MB10S",
+   "layer": 1,
+   "x": 550,
+   "y": 450,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 420.0,
+    "minY": 350.0,
+    "maxX": 680.0,
+    "maxY": 550.0
+   },
+   "pads": [
+    {
+     "padNumber": "1",
+     "net": "HV_BULK",
+     "layer": 1,
+     "x": 650.0,
+     "y": 500.0,
+     "width": 60,
+     "height": 40,
+     "rotation": 0,
+     "shape": [
+      "RECT",
+      60,
+      40
+     ]
+    },
+    {
+     "padNumber": "2",
+     "net": "PGND",
+     "layer": 1,
+     "x": 650.0,
+     "y": 400.0,
+     "width": 60,
+     "height": 40,
+     "rotation": 0,
+     "shape": [
+      "RECT",
+      60,
+      40
+     ]
+    },
+    {
+     "padNumber": "3",
+     "net": "L_F",
+     "layer": 1,
+     "x": 450.0,
+     "y": 500.0,
+     "width": 60,
+     "height": 40,
+     "rotation": 0,
+     "shape": [
+      "RECT",
+      60,
+      40
+     ]
+    },
+    {
+     "padNumber": "4",
+     "net": "N",
+     "layer": 1,
+     "x": 450.0,
+     "y": 400.0,
+     "width": 60,
+     "height": 40,
+     "rotation": 0,
+     "shape": [
+      "RECT",
+      60,
+      40
+     ]
+    }
+   ]
+  },
+  {
+   "primitiveId": "c-C1",
+   "designator": "C1",
+   "device": "400BXW4R7MEFC8X11",
+   "layer": 1,
+   "x": 800,
+   "y": 700,
+   "rotation": 90,
+   "locked": false,
+   "bbox": {
+    "minX": 675.0,
+    "minY": 575.0,
+    "maxX": 925.0,
+    "maxY": 825.0
+   },
+   "pads": [
+    {
+     "padNumber": "1",
+     "net": "HV_BULK",
+     "layer": 12,
+     "x": 800.0,
+     "y": 651.0,
+     "width": 55,
+     "height": 55,
+     "rotation": 90,
+     "shape": [
+      "ELLIPSE",
+      55,
+      55
+     ]
+    },
+    {
+     "padNumber": "2",
+     "net": "PGND",
+     "layer": 12,
+     "x": 800.0,
+     "y": 749.0,
+     "width": 55,
+     "height": 55,
+     "rotation": 90,
+     "shape": [
+      "ELLIPSE",
+      55,
+      55
+     ]
+    }
+   ]
+  },
+  {
+   "primitiveId": "c-T1",
+   "designator": "T1",
+   "device": "EE10-5V",
+   "layer": 1,
+   "x": 1050,
+   "y": 300,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 850.0,
+    "minY": 110.0,
+    "maxX": 1250.0,
+    "maxY": 490.0
+   },
+   "pads": [
+    {
+     "padNumber": "1",
+     "net": "HV_BULK",
+     "layer": 12,
+     "x": 902.0,
+     "y": 398.0,
+     "width": 55,
+     "height": 55,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      55,
+      55
+     ]
+    },
+    {
+     "padNumber": "2",
+     "net": "PGND",
+     "layer": 12,
+     "x": 902.0,
+     "y": 300.0,
+     "width": 55,
+     "height": 55,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      55,
+      55
+     ]
+    },
+    {
+     "padNumber": "3",
+     "net": "",
+     "layer": 12,
+     "x": 902.0,
+     "y": 202.0,
+     "width": 55,
+     "height": 55,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      55,
+      55
+     ]
+    },
+    {
+     "padNumber": "4",
+     "net": "VOUT",
+     "layer": 12,
+     "x": 1198.0,
+     "y": 202.0,
+     "width": 55,
+     "height": 55,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      55,
+      55
+     ]
+    },
+    {
+     "padNumber": "5",
+     "net": "",
+     "layer": 12,
+     "x": 1198.0,
+     "y": 300.0,
+     "width": 55,
+     "height": 55,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      55,
+      55
+     ]
+    },
+    {
+     "padNumber": "6",
+     "net": "GND_S",
+     "layer": 12,
+     "x": 1198.0,
+     "y": 398.0,
+     "width": 55,
+     "height": 55,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      55,
+      55
+     ]
+    }
+   ]
+  },
+  {
+   "primitiveId": "c-C2",
+   "designator": "C2",
+   "device": "1206Y-2KV-102",
+   "layer": 1,
+   "x": 1050,
+   "y": 800,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 964.5,
+    "minY": 759.5,
+    "maxX": 1135.5,
+    "maxY": 840.5
+   },
+   "pads": [
+    {
+     "padNumber": "1",
+     "net": "PGND",
+     "layer": 1,
+     "x": 992.0,
+     "y": 800.0,
+     "width": 45,
+     "height": 71,
+     "rotation": 0,
+     "shape": [
+      "RECT",
+      45,
+      71
+     ]
+    },
+    {
+     "padNumber": "2",
+     "net": "GND_S",
+     "layer": 1,
+     "x": 1108.0,
+     "y": 800.0,
+     "width": 45,
+     "height": 71,
+     "rotation": 0,
+     "shape": [
+      "RECT",
+      45,
+      71
+     ]
+    }
+   ]
+  },
+  {
+   "primitiveId": "c-C3",
+   "designator": "C3",
+   "device": "CL21A106KAYNNNE",
+   "layer": 1,
+   "x": 1350,
+   "y": 600,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 1287.5,
+    "minY": 570.0,
+    "maxX": 1412.5,
+    "maxY": 630.0
+   },
+   "pads": [
+    {
+     "padNumber": "1",
+     "net": "VOUT",
+     "layer": 1,
+     "x": 1312.5,
+     "y": 600.0,
+     "width": 40,
+     "height": 50,
+     "rotation": 0,
+     "shape": [
+      "RECT",
+      40,
+      50
+     ]
+    },
+    {
+     "padNumber": "2",
+     "net": "GND_S",
+     "layer": 1,
+     "x": 1387.5,
+     "y": 600.0,
+     "width": 40,
+     "height": 50,
+     "rotation": 0,
+     "shape": [
+      "RECT",
+      40,
+      50
+     ]
+    }
+   ]
+  },
+  {
+   "primitiveId": "c-J2",
+   "designator": "J2",
+   "device": "DG128-5.0-02P",
+   "layer": 1,
+   "x": 1420,
+   "y": 300,
+   "rotation": 0,
+   "locked": true,
+   "bbox": {
+    "minX": 1270.0,
+    "minY": 83.0,
+    "maxX": 1570.0,
+    "maxY": 517.0
+   },
+   "pads": [
+    {
+     "padNumber": "1",
+     "net": "VOUT",
+     "layer": 12,
+     "x": 1420.0,
+     "y": 398.5,
+     "width": 90,
+     "height": 90,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      90,
+      90
+     ]
+    },
+    {
+     "padNumber": "2",
+     "net": "GND_S",
+     "layer": 12,
+     "x": 1420.0,
+     "y": 201.5,
+     "width": 90,
+     "height": 90,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      90,
+      90
+     ]
+    }
+   ]
+  }
+ ],
+ "outline": {
+  "bbox": {
+   "minX": 0,
+   "minY": 0,
+   "maxX": 1574.8,
+   "maxY": 984.25
+  },
+  "points": [
+   [
+    0,
+    0
+   ],
+   [
+    1574.8,
+    0
+   ],
+   [
+    1574.8,
+    984.25
+   ],
+   [
+    0,
+    984.25
+   ]
+  ],
+  "source": "polygon"
+ },
+ "copperLayers": 2,
+ "rules": {
+  "clearanceMil": 6,
+  "trackWidthMil": 10,
+  "trackWidthMinMil": 6,
+  "viaDrillMil": 12,
+  "viaDiameterMil": 24,
+  "copperToEdgeMil": 12
+ }
+}

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "_doc": "Part power models for `pcbpilot sim power` (DC operating point + averaged power tree). Data, not code: a model matches a part by LCSC C-number, then exact MPN, then nameRegex (tested against MPN, Value and device name); files passed with --models are consulted first and override this one. Every numeric field cites its origin in `source`; `confidence` is datasheet (numbers read from the datasheet/LCSC attributes), approx (typical figure or curve reading) or assumed (placeholder, verify). Units: A, V, Ω, Hz. Pin lists are pin NAMES or numbers (\"#4\" or \"4\"). Kinds: load|ic-small (supplyPins/returnPins, typA/peakA or rails[]), ldo|buck (pins.in/out/gnd/fb/en, vout or vref, eta, fswHz, iqA, dropoutV, vinMinV, maxA), diode|led (pins.anode/cathode, vfV@ifA + n, or vfPoints [[I,V],...], rsOhm), bjt (polarity, isA, beta, betaR), connector-source (supplyPins/pins.power, returnPins, voltageV or the net-name voltage, rsOhm, sourceName = scenario key '<name>-only'), esd (pins.line/supplyPins, returnPins, leakTypA/leakPeakA), switch (momentary, ronOhm), inductor|ferrite|fuse (dcrOhm), connector (passive), open, ignore.",
+  "_doc": "Part power models for `pcbpilot sim power` (DC operating point + averaged power tree). Data, not code: a model matches a part by LCSC C-number, then exact MPN, then nameRegex (tested against MPN, Value and device name); files passed with --models are consulted first and override this one. Every numeric field cites its origin in `source`; `confidence` is datasheet (numbers read from the datasheet/LCSC attributes), approx (typical figure or curve reading) or assumed (placeholder, verify). Units: A, V, Ω, Hz. Pin lists are pin NAMES or numbers (\"#4\" or \"4\"). Kinds: load|ic-small (supplyPins/returnPins, typA/peakA or rails[] {pins,typA,peakA,returnPins?} — a rail's own returnPins for isolators whose sides return to different grounds), ldo|buck (pins.in/out/gnd/fb/en, vout or vref, eta, fswHz, iqA, dropoutV, vinMinV, maxA), diode|led (pins.anode/cathode, vfV@ifA + n, or vfPoints [[I,V],...], rsOhm), bjt (polarity, isA, beta, betaR), connector-source (supplyPins/pins.power, returnPins, voltageV or the net-name voltage, rsOhm, sourceName = scenario key '<name>-only'; outputs[] {name,pins,returnPins,voltageV,rsOhm} for a multi-output source — transformer windings at their regulated operating point, isolated module outputs — plus optional rails[] as the module's input load), bridge (pins.ac/plus/minus, vfV@ifA or vfPoints per element), esd (pins.line/supplyPins, returnPins, leakTypA/leakPeakA), switch (momentary, ronOhm), inductor|ferrite|fuse (dcrOhm), connector (passive), open, ignore.",
   "defaults": {
     "unknownIcLoadAPerSupplyPin": 0.05,
     "loadKneeV": 0.8,
@@ -196,6 +196,142 @@
       "maxA": 0.77,
       "source": "LCSC C250183 attributes (TDK NLCV32T-2R2M-PF, 1210 wire-wound 2.2 µH): DC Resistance 169 mΩ, Current Rating 770 mA. Compare the reported switch-node peak (ripple iPeakA) with the rating.",
       "confidence": "datasheet"
+    },
+    {
+      "id": "mb10s",
+      "kind": "bridge",
+      "match": {"mpn": ["MB10S", "MB6S", "MB8S", "MB10F", "MB6F"]},
+      "pins": {"ac": ["~1", "~2", "~", "AC1", "AC2"], "plus": ["+"], "minus": ["-"]},
+      "vfPoints": [[0.01, 0.6], [0.5, 0.95]],
+      "maxA": 0.5,
+      "source": "MB10S (TO-269AA 0.5 A / 1000 V bridge) datasheets: VF ≤ 1.0 V per element at 0.4–0.5 A; ≈0.6 V at 10 mA from the typical forward curve (two-point fit per element; four elements).",
+      "confidence": "approx"
+    },
+    {
+      "id": "ss310",
+      "kind": "diode",
+      "match": {"mpn": ["SS310", "SS310A", "SK310", "SK310A"], "lcsc": ["C181186"]},
+      "pins": {"anode": ["A"], "cathode": ["K"]},
+      "vfPoints": [[0.1, 0.45], [3.0, 0.85]],
+      "maxA": 3.0,
+      "source": "SS310 (3 A / 100 V Schottky) datasheets: VF max 0.85 V at 3 A; ≈0.45 V at 0.1 A from the typical forward curve.",
+      "confidence": "approx"
+    },
+    {
+      "id": "us1m",
+      "kind": "diode",
+      "match": {"mpn": ["US1M", "US1M-E3/61T", "US1MFA"]},
+      "pins": {"anode": ["A"], "cathode": ["K"]},
+      "vfPoints": [[0.01, 0.8], [1.0, 1.7]],
+      "maxA": 1.0,
+      "source": "US1M (1 A / 1000 V ultrafast) datasheets: VF max 1.7 V at 1 A; ≈0.8 V at 10 mA from the typical curve.",
+      "confidence": "approx"
+    },
+    {
+      "id": "uc3843b",
+      "kind": "load",
+      "match": {"mpn": ["UC3843BD1R2G", "UC3843BDR2G", "UC3843BN", "UC3842BD1R2G", "UC3845BD1R2G", "UC3844BD1R2G"], "nameRegex": "(?i)^UC384[2-5]B"},
+      "supplyPins": ["VCC"],
+      "returnPins": ["GND"],
+      "typA": 0.012,
+      "peakA": 0.017,
+      "source": "onsemi UC3842B/3843B datasheet, total device: power supply current ICC 12 mA typ, 17 mA max (VCC = 15 V); gate-drive current (Qg·fsw) of a small DPAK MOSFET adds < 1 mA.",
+      "confidence": "approx"
+    },
+    {
+      "id": "tl431",
+      "kind": "load",
+      "match": {"mpn": ["TL431AIDBZR", "TL431ACDBZR", "TL431BIDBZR", "TL431"], "nameRegex": "(?i)^(TL|AZ|ATL)431"},
+      "supplyPins": ["K"],
+      "returnPins": ["A"],
+      "typA": 0.0015,
+      "peakA": 0.0015,
+      "source": "TL431 in a flyback/opto feedback loop sinks its regulation current through the opto LED: IKA(min) 1 mA (datasheet), 1–1.5 mA design point; modelled as a constant cathode sink.",
+      "confidence": "assumed"
+    },
+    {
+      "id": "pc817",
+      "kind": "led",
+      "match": {"mpn": ["PC817C", "PC817B", "PC817", "PC817X2NSZ9F", "EL817C"], "nameRegex": "(?i)^(PC|EL|LTV-?)817"},
+      "pins": {"anode": ["A", "1"], "cathode": ["K", "2"]},
+      "vfV": 1.2,
+      "ifA": 0.02,
+      "source": "Sharp PC817 datasheet: input forward voltage VF 1.2 V typ at IF 20 mA (only the LED side is modelled; the phototransistor is open at DC).",
+      "confidence": "approx"
+    },
+    {
+      "id": "sn6505b",
+      "kind": "load",
+      "match": {"mpn": ["SN6505BDBVR", "SN6505ADBVR", "SN6505B", "SN6505A"]},
+      "supplyPins": ["VCC"],
+      "returnPins": ["GND"],
+      "typA": 0.0006,
+      "peakA": 0.0012,
+      "source": "TI SN6505 datasheet: VCC supply current ≈ 0.6 mA (no load); the isolated load power flows through the transformer centre tap and is not modelled (the transformer's secondary model is the isolated source).",
+      "confidence": "approx"
+    },
+    {
+      "id": "iso7741",
+      "kind": "load",
+      "match": {"mpn": ["ISO7741DWR", "ISO7741DWWR", "ISO7741FDWR", "ISO7741DBQR"], "nameRegex": "(?i)^ISO774[0-2]"},
+      "rails": [
+        {"pins": ["VCC1"], "typA": 0.0025, "peakA": 0.0045, "returnPins": ["GND1"]},
+        {"pins": ["VCC2"], "typA": 0.0025, "peakA": 0.0045, "returnPins": ["GND2"]}
+      ],
+      "returnPins": ["GND1"],
+      "source": "TI ISO7741 datasheet supply-current table: ≈ 2.5 mA per side at 1 Mbps (3.3–5 V), ≈ 4.5 mA at 25 Mbps; each side returns to its own ground.",
+      "confidence": "approx"
+    },
+    {
+      "id": "ads1220",
+      "kind": "load",
+      "match": {"mpn": ["ADS1220IPWR", "ADS1220IRVAR", "ADS1220"]},
+      "supplyPins": ["AVDD", "DVDD"],
+      "returnPins": ["AVSS", "DGND"],
+      "typA": 0.00042,
+      "peakA": 0.00085,
+      "source": "TI ADS1220 datasheet: normal mode IAVDD + IDVDD ≈ 0.42 mA (PGA enabled, internal reference); turbo mode ≈ 0.85 mA used as peak.",
+      "confidence": "approx"
+    },
+    {
+      "id": "tlv75533p",
+      "kind": "ldo",
+      "match": {"mpn": ["TLV75533PDBVR", "TLV75533PDRVR", "TLV75533P"]},
+      "pins": {"in": ["IN"], "out": ["OUT"], "gnd": ["GND"], "en": ["EN"]},
+      "vout": 3.3,
+      "dropoutV": 0.24,
+      "iqA": 2.5e-05,
+      "maxA": 0.5,
+      "source": "TI TLV755P datasheet: 500 mA, dropout 238 mV typ at 500 mA (3.3 V option), IQ 25 µA typ.",
+      "confidence": "datasheet"
+    },
+    {
+      "id": "ucc21520",
+      "kind": "load",
+      "match": {"mpn": ["UCC21520DWR", "UCC21520ADWR", "UCC21521CDWR", "UCC21520DW"], "nameRegex": "(?i)^UCC2152[0-2]"},
+      "rails": [
+        {"pins": ["VCCI"], "typA": 0.002, "peakA": 0.003, "returnPins": ["GND"]},
+        {"pins": ["VDDA"], "typA": 0.006, "peakA": 0.012, "returnPins": ["VSSA"]},
+        {"pins": ["VDDB"], "typA": 0.006, "peakA": 0.012, "returnPins": ["VSSB"]}
+      ],
+      "returnPins": ["GND"],
+      "source": "TI UCC21520 datasheet: IVCCI ≈ 1.5–2 mA, IVDDx quiescent ≈ 1.3 mA; plus the average gate charge Qg·fsw (46 nC × 100 kHz ≈ 4.6 mA for a C3M0060065K) per output channel; peak = 12 mA at 200 kHz.",
+      "confidence": "approx"
+    },
+    {
+      "id": "mgj2d051505sc",
+      "kind": "connector-source",
+      "match": {"mpn": ["MGJ2D051505SC", "MGJ2D051505MPC", "MGJ2D151505SC"]},
+      "outputs": [
+        {"name": "+15 V gate supply", "pins": ["+VO"], "returnPins": ["0V"], "voltageV": 15.0, "rsOhm": 0.5}
+      ],
+      "rails": [
+        {"pins": ["+VIN"], "typA": 0.05, "peakA": 0.08, "returnPins": ["-VIN"]}
+      ],
+      "returnPins": ["-VIN"],
+      "sourceName": "gatebias",
+      "source": "Murata MGJ2 series datasheet: 5 V input, +15 V / −5 V outputs, 2 W, 5.2 kVDC isolation; input ≈ 50 mA at a SiC gate-drive load (≈ 0.2 W / η 0.8 / 5 V), 80 mA peak. Only the +15 V output is modelled (−5 V is not a rail here).",
+      "confidence": "approx"
     }
   ]
 }

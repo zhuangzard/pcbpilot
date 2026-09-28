@@ -46,11 +46,13 @@ type ctx struct {
 
 	blockOfPart  map[string]string // ref → intent block id
 	blockByID    map[string]*Block
-	domOfPcb     map[string]*Domain // pcbauto domain id → intent domain
-	domOfNet     map[string]string  // net → intent domain id
-	netBlock     map[string]string  // net → intent block id
-	volts        map[string]Voltage // net → voltage envelope
-	uncontrolled []string           // diff nets whose impedance the stackup cannot hold
+	domOfPcb     map[string]*Domain    // pcbauto domain id → intent domain
+	domOfNet     map[string]string     // net → intent domain id
+	domSpec      map[string]SpecDomain // intent domain id → matching spec.domains entry
+	floats       map[string]floatInfo  // nets riding on a switch node
+	netBlock     map[string]string     // net → intent block id
+	volts        map[string]Voltage    // net → voltage envelope
+	uncontrolled []string              // diff nets whose impedance the stackup cannot hold
 }
 
 type pinRef struct {

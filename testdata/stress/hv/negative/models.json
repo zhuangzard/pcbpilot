@@ -1,0 +1,38 @@
+{
+ "schemaVersion": 1,
+ "_doc": "Design-specific power models of the negative (infeasible) stress fixture.",
+ "models": [
+  {
+   "id": "mains-230vac-dc-envelope",
+   "kind": "connector-source",
+   "match": {"mpn": ["DG128-5.0-02P-AC"]},
+   "supplyPins": ["1"],
+   "returnPins": ["2"],
+   "voltageV": 325.27,
+   "rsOhm": 0.5,
+   "sourceName": "mains",
+   "source": "DC stand-in for 230 Vac (√2·230 V).",
+   "confidence": "assumed"
+  },
+  {
+   "id": "ee10-5v",
+   "kind": "connector-source",
+   "match": {"mpn": ["EE10-5V"]},
+   "outputs": [{"name": "secondary 5 V", "pins": ["S+"], "returnPins": ["S-"], "voltageV": 5.0, "rsOhm": 0.1}],
+   "sourceName": "flyback",
+   "source": "Secondary of the small isolated converter at regulation (5 V).",
+   "confidence": "assumed"
+  },
+  {
+   "id": "out-5v-load",
+   "kind": "load",
+   "match": {"mpn": ["DG128-5.0-02P"]},
+   "supplyPins": ["1"],
+   "returnPins": ["2"],
+   "typA": 0.2,
+   "peakA": 0.2,
+   "source": "Rated output 5 V / 0.2 A.",
+   "confidence": "assumed"
+  }
+ ]
+}

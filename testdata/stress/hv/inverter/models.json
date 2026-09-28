@@ -1,0 +1,30 @@
+{
+ "schemaVersion": 1,
+ "_doc": "Design-specific power models of the 400 VDC half-bridge stress fixture.",
+ "models": [
+  {
+   "id": "battery-400v",
+   "kind": "connector-source",
+   "match": {"mpn": ["MKDSP10N-2-10.16"]},
+   "supplyPins": ["1"],
+   "returnPins": ["2"],
+   "voltageV": 450.0,
+   "rsOhm": 0.05,
+   "sourceName": "battery",
+   "source": "400 V nominal traction battery at full charge (4.2 V/cell × 108 s ≈ 450 V); pack + cable ≈ 50 mΩ.",
+   "confidence": "assumed"
+  },
+  {
+   "id": "ctl-5v-header",
+   "kind": "connector-source",
+   "match": {"mpn": ["PZ254V-11-04P"]},
+   "supplyPins": ["1"],
+   "returnPins": ["2"],
+   "voltageV": 5.0,
+   "rsOhm": 0.1,
+   "sourceName": "control",
+   "source": "Controller board supplies +5 V (SELV) on pin 1.",
+   "confidence": "assumed"
+  }
+ ]
+}

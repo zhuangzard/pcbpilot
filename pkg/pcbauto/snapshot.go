@@ -450,3 +450,66 @@ func ExportPlacedSnapshot(raw []byte, b *Board) ([]byte, error) {
 	delete(doc, "semanticSha256")
 	return json.MarshalIndent(doc, "", " ")
 }
+
+// ExportRoutedSnapshot is ExportPlacedSnapshot plus the engine's result as a
+// `pcb dump --include-copper` document: the routed tracks and vias, the
+// isolation slots as MULTI-layer fills (board cutouts, the same primitive the
+// playbook writes) and the isolation no-pour regions. The offline
+// `pcb check --intent --board` then judges exactly the copper the playbook
+// would create, so the whole intent → layout → check chain runs without an
+// editor.
+func ExportRoutedSnapshot(raw []byte, b *Board, res *Result) ([]byte, error) {
+	placed, err := ExportPlacedSnapshot(raw, b)
+	if err != nil {
+		return nil, err
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(placed, &doc); err != nil {
+		return nil, err
+	}
+	lines, vias, fills, regions, pours := []any{}, []any{}, []any{}, []any{}, []any{}
+	if res != nil && res.Route != nil {
+		for i, t := range res.Route.Tracks {
+			lines = append(lines, map[string]any{"primitiveId": sprintf("auto-t%d", i+1), "net": t.Net, "layer": t.Layer,
+				"startX": round2(t.A.X), "startY": round2(t.A.Y), "endX": round2(t.B.X), "endY": round2(t.B.Y), "lineWidth": round2(t.Width)})
+		}
+		for i, v := range res.Route.Vias {
+			vias = append(vias, map[string]any{"primitiveId": sprintf("auto-v%d", i+1), "net": v.Net, "x": round2(v.C.X), "y": round2(v.C.Y),
+				"diameter": round2(v.Dia), "holeDiameter": round2(v.Drill)})
+		}
+	}
+	src := func(poly []Point) ([]any, map[string]any) {
+		var out []any
+		for i, q := range poly {
+			if i == 1 {
+				out = append(out, "L")
+			}
+			out = append(out, round2(q.X), round2(q.Y))
+		}
+		bb := PolyBounds(poly)
+		return out, map[string]any{"minX": round2(bb.MinX), "minY": round2(bb.MinY), "maxX": round2(bb.MaxX), "maxY": round2(bb.MaxY)}
+	}
+	if res != nil && res.Route != nil {
+		for i, pr := range res.Route.Planes {
+			for j, poly := range pr.Polys {
+				pts, bb := src(poly)
+				pours = append(pours, map[string]any{"primitiveId": sprintf("auto-pour%d-%d", i+1, j+1), "net": pr.Net, "layer": pr.Layer, "source": pts, "bbox": bb})
+			}
+		}
+	}
+	if res != nil && res.Isolation != nil {
+		for i, s := range res.Isolation.Slots {
+			pts, bb := src(s.Poly)
+			fills = append(fills, map[string]any{"primitiveId": sprintf("auto-slot%d", i+1), "layer": LayerMulti, "net": "", "source": pts, "bbox": bb})
+		}
+		for i, m := range res.Isolation.Moats {
+			pts, bb := src(m)
+			regions = append(regions, map[string]any{"primitiveId": sprintf("auto-moat%d", i+1), "name": "isolation no-pour band", "layer": LayerMulti,
+				"ruleType": []any{7}, "source": pts, "bbox": bb})
+		}
+	}
+	doc["copper"] = map[string]any{"availability": map[string]any{"routing": "ok"}, "lines": lines, "arcs": []any{}, "vias": vias,
+		"pours": pours, "poured": []any{}, "regions": regions, "fills": fills}
+	doc["_provenance"] = "pcbpilot pcb auto run: placed + routed board (engine result, not a live readback)"
+	return json.MarshalIndent(doc, "", " ")
+}

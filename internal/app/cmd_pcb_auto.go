@@ -120,10 +120,12 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 		}
 		return c, nil
 	}
+	var boardRaw []byte // the snapshot the run started from (board.routed.json)
 	load := func() (*pcbauto.Board, *pcbauto.MechSpec, pcbauto.PowerSpec, error) {
 		var power pcbauto.PowerSpec
 		var raw []byte
 		var err error
+		defer func() { boardRaw = raw }()
 		if in.board != "" {
 			raw, err = os.ReadFile(in.board)
 		} else {
@@ -325,7 +327,11 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 					Route: pcbauto.RouteOptions{GridMil: in.grid, Timeout: in.timeout}}
 				budget := in.timeout * 3
 				if place && !noRoute && loops > 0 {
-					budget = in.timeout * time.Duration(3*loops)
+					// Every pass places (the annealer's own 90 s default) and then
+					// routes: the placement time was missing from the budget, so a
+					// slow high-voltage board hit "context deadline exceeded" in its
+					// first pass and the command returned nothing.
+					budget = (in.timeout*3 + 90*time.Second) * time.Duration(loops)
 				}
 				ctx, cancel := context.WithTimeout(cmd.Context(), budget)
 				defer cancel()
@@ -407,6 +413,9 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 						for _, n := range iso.Notes {
 							fmt.Fprintf(stderr, "isolation: %s\n", n)
 						}
+						if len(iso.Infeasible) > 0 {
+							fmt.Fprintf(stderr, "isolation: INFEASIBLE — %d bridge part(s) cannot meet the pair with any slot/routing/placement (change the part); plan.json result.isolation.infeasible\n", len(iso.Infeasible))
+						}
 					}
 					if !noFeedback || fbLoop > 0 {
 						if rep.Feedback, err = feedback(cmd, b, rep, opts, fbVerify, fbLoop, "pcb auto run"); err != nil {
@@ -446,6 +455,16 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 				if rep.Feedback != nil {
 					files["feedback.json"] = js(rep.Feedback)
 					names += ",feedback.json"
+				}
+				if rr != nil && len(boardRaw) > 0 {
+					// The placed + routed board as a pcb dump: `pcb check --intent
+					// --board board.routed.json` judges it offline.
+					routed, err := pcbauto.ExportRoutedSnapshot(boardRaw, b, rep.Result)
+					if err != nil {
+						return err
+					}
+					files["board.routed.json"] = func(w io.Writer) error { _, err := w.Write(append(routed, '\n')); return err }
+					names += ",board.routed.json"
 				}
 				for name, fn := range files {
 					if err := write(name, fn); err != nil {

@@ -378,20 +378,31 @@ func TestMainsOpto(t *testing.T) {
 		t.Fatalf("mains %+v iso %+v", mains, iso)
 	}
 	hasAll(t, "mains nets", mains.Nets, "L", "N", "L_F", "LOAD_L")
-	if len(it.Pairs) != 2 {
+	// Three pairs: SELV↔MAINS (bridged by PS1/K1), SELV↔field (functional,
+	// U3) and MAINS↔field — no part bridges those two, but the line copper
+	// must keep reinforced distance from the touchable 24 V field wiring.
+	if len(it.Pairs) != 3 {
 		t.Fatalf("pairs %+v", it.Pairs)
 	}
-	var hv, fn *Pair
+	var hv, fn, implicit *Pair
 	for _, p := range it.Pairs {
-		switch p.Insulation {
-		case "reinforced":
+		switch {
+		case p.Insulation == "reinforced" && len(p.Bridges) > 0:
 			hv = p
-		case "functional":
+		case p.Insulation == "reinforced":
+			implicit = p
+		case p.Insulation == "functional":
 			fn = p
 		}
 	}
-	if hv == nil || fn == nil {
+	if hv == nil || fn == nil || implicit == nil {
 		t.Fatalf("pairs %+v", it.Pairs)
+	}
+	if implicit.A != "domain:ISO_24V" || implicit.Transient != "mains" || implicit.MainsVrms != 230 {
+		t.Fatalf("implicit mains↔field pair %+v", implicit)
+	}
+	if hv.Transient != "mains" || fn.Transient != "secondary" {
+		t.Fatalf("transients hv=%q fn=%q", hv.Transient, fn.Transient)
 	}
 	if hv.A != "domain:SELV_5V" || hv.B != "domain:MAINS_230VAC" || hv.WorkingVrms != 230 || hv.ClearanceMm < 4 || hv.CreepageMm < hv.ClearanceMm || hv.SlotRequired || !strings.Contains(hv.StandardRef, "IEC62368-1") {
 		t.Fatalf("hv pair %+v", hv)

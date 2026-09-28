@@ -15,7 +15,11 @@ var (
 	reCurRating = regexp.MustCompile(`(?i)(?:Current Rating|Rated Current|Current - Rectified|Current - Collector\s*\(Ic\)|Contact Current|Current - Output|Output Current|Forward Current|Current - Saturation\s*\(Isat\))\s*(?:\(Max\))?:\s*([0-9.]+)\s*(m?A)`)
 	rePowRating = regexp.MustCompile(`(?i)Power\s*\(Watts\):\s*([0-9.]+)\s*(m?W)`)
 	reVRating   = regexp.MustCompile(`(?i)Voltage Rating(?:\s*\(Max\))?:\s*([0-9.]+)\s*V`)
-	reVinRange  = regexp.MustCompile(`(?i)Voltage - (?:Supply|Input)(?:\s*\(Max\))?:\s*([0-9.]+)\s*V\s*[~-]\s*([0-9.]+)\s*V`)
+	// Resistor working (limiting element) voltage in LCSC / datasheet wording.
+	reRWorkV = regexp.MustCompile(`(?i)(?:Max(?:imum)? working voltage|Working Voltage|Limiting Element Voltage|Rated Voltage)\s*(?:\(Max\))?:\s*([0-9.]+)\s*V`)
+	// Aluminium / polymer electrolytics (rated for DC, derated for lifetime, not DC bias).
+	reElectrolytic = regexp.MustCompile(`(?i)(electrolytic|aluminium|aluminum|polymer|snap-in|[0-9]+BXW|ZLH|EEU-)`)
+	reVinRange     = regexp.MustCompile(`(?i)Voltage - (?:Supply|Input)(?:\s*\(Max\))?:\s*([0-9.]+)\s*V\s*[~-]\s*([0-9.]+)\s*V`)
 )
 
 func unitScale(u string) float64 {
@@ -340,6 +344,34 @@ func (c *ctx) findRatings() {
 				}
 			}
 		}
+		// Resistor working voltage (limiting element voltage) vs the voltage
+		// across it: a high-voltage divider chain must split the input over
+		// enough resistors (1206 ≈ 200 V, 2512 ≈ 500 V).
+		if c.kind(p.Ref) == pcbauto.KindResistor {
+			if m := reRWorkV.FindStringSubmatch(p.Description); m != nil {
+				var vr float64
+				fmt.Sscanf(m[1], "%g", &vr)
+				if ns := c.partNets(p.Ref); vr > 0 && len(ns) == 2 && !c.mains[ns[0]] && !c.mains[ns[1]] {
+					// The largest simultaneous difference over the solved
+					// scenarios (not one net's maximum against the other's
+					// source-off minimum).
+					dv := 0.0
+					for _, r := range c.scens {
+						na, nb := r.Nets[ns[0]], r.Nets[ns[1]]
+						if na != nil && nb != nil {
+							dv = math.Max(dv, math.Abs(na.Voltage-nb.Voltage))
+						}
+					}
+					msg := fmt.Sprintf("%s has %s V across it vs %s V working voltage (%s ↔ %s)", p.Ref, trimFloat(dv, 1), trimFloat(vr, 0), ns[0], ns[1])
+					switch {
+					case dv > vr:
+						c.add("error", "resistor-voltage", msg+" — EXCEEDED", []string{p.Ref}, ns, "split the drop over more resistors in series or use a high-voltage resistor")
+					case dv > 0.8*vr:
+						c.add("warn", "resistor-voltage", fmt.Sprintf("%s (%.0f%%)", msg, dv/vr*100), []string{p.Ref}, ns, "keep ≥ 20 % margin on the working voltage")
+					}
+				}
+			}
+		}
 		// Capacitor voltage rating vs the net's peak.
 		if c.kind(p.Ref) == pcbauto.KindCapacitor {
 			if m := reVRating.FindStringSubmatch(p.Description); m != nil {
@@ -348,7 +380,21 @@ func (c *ctx) findRatings() {
 				pk := 0.0
 				var hot []string
 				ac := false
-				for _, n := range c.partNets(p.Ref) {
+				ns := c.partNets(p.Ref)
+				floating := len(ns) == 2
+				for _, n := range ns {
+					fi, ok := c.floats[n]
+					floating = floating && (ok || c.floatAnchor(n)) && (!ok || fi.anchor == c.floatAnchorOf(ns))
+				}
+				for _, n := range ns {
+					if floating {
+						// A cap on a gate-drive island (VDDA–KS_H) sees the
+						// difference, not the switch node's swing.
+						a, b := c.relV(ns[0]), c.relV(ns[1])
+						pk = math.Max(pk, math.Abs(a-b))
+						hot = append(hot, n)
+						continue
+					}
 					if !c.isGround(n) {
 						v := c.volts[n].Peak
 						if c.mains[n] {
@@ -361,6 +407,8 @@ func (c *ctx) findRatings() {
 				switch {
 				case vr > 0 && pk > vr:
 					c.add("error", "cap-voltage", fmt.Sprintf("%s rated %s V sits on %s at %s V%s", p.Ref, trimFloat(vr, 1), strings.Join(hot, "/"), trimFloat(pk, 2), map[bool]string{true: " rms (AC line)", false: " peak"}[ac]), []string{p.Ref}, hot, "use a higher-voltage capacitor (X2/Y-rated on the line)")
+				case vr > 0 && pk > 0.8*vr && !ac && reElectrolytic.MatchString(p.Description+" "+p.MPN):
+					c.add("warn", "cap-voltage", fmt.Sprintf("%s rated %s V at %s V peak (%.0f%%): electrolytic above 80 %% of its rating (line surge margin, lifetime)", p.Ref, trimFloat(vr, 1), trimFloat(pk, 2), pk/vr*100), []string{p.Ref}, hot, "check the high-line peak (e.g. 264 Vac → 373 V) and surge against the rating; derate to ≤ 80 %")
 				case vr > 0 && pk > 0.8*vr && !ac:
 					c.add("warn", "cap-voltage", fmt.Sprintf("%s rated %s V at %s V peak (%.0f%%): MLCC DC-bias loses most of its capacitance", p.Ref, trimFloat(vr, 1), trimFloat(pk, 2), pk/vr*100), []string{p.Ref}, hot, "use ≥ 1.5–2× the working voltage for MLCCs")
 				}

@@ -90,6 +90,10 @@ var (
 	defEN      = []string{"EN", "CE", "SHDN", "ON/OFF", "EN/UVLO", "RUN"}
 	defAnode   = []string{"A", "+", "ANODE", "AN", "A1"}
 	defCathode = []string{"K", "-", "C", "CATHODE", "KA", "K1"}
+	// Bridge rectifiers (MB10S, GBU, DB10x, KBP): AC inputs and DC outputs.
+	defBridgeAC    = []string{"~", "~1", "~2", "AC", "AC1", "AC2", "AC~", "IN1", "IN2"}
+	defBridgePlus  = []string{"+", "DC+", "V+", "PLUS", "OUT+"}
+	defBridgeMinus = []string{"-", "DC-", "V-", "MINUS", "OUT-"}
 )
 
 func defaultModel(kind string) Model { return Model{ID: "generic-" + kind, Kind: kind} }
@@ -185,6 +189,25 @@ func (e *Engine) bindGeneric(b *binding) {
 		set(KindInductor, "inductor by ref prefix L")
 	case prefix == "F" || prefix == "PTC":
 		set(KindFuse, "fuse")
+	case (prefix == "RT" || prefix == "NTC" || prefix == "TH") && len(p.Pins) == 2:
+		// Thermistors (inrush NTC, protection PTC) are resistors at DC. The
+		// default made "RT1 on VIN_HV" an unknown-IC load of 50 mA.
+		if _, ok := partValue(p, "resistance"); ok {
+			set(KindResistor, "thermistor by ref prefix (cold resistance)")
+			b.confidence = "value"
+		} else {
+			set(KindFuse, "thermistor with no value (small series resistance)")
+		}
+	case prefix == "RV" || prefix == "MOV" || prefix == "VDR" || prefix == "ZNR" || has("varistor", "mov "):
+		// A varistor below its clamping voltage leaks µA: open at DC. Left to
+		// the default it became an "unknown IC" load of 50 mA per pin.
+		set(KindOpen, "varistor (leakage neglected, open at DC)")
+	case (prefix == "BR" || prefix == "DB") && len(p.Pins) >= 4:
+		set(KindBridge, "bridge rectifier by ref prefix")
+	case prefix == "T" || prefix == "TR":
+		// Energy crosses a transformer only while it switches: no DC path.
+		set(KindOpen, "transformer (no DC transfer — model its windings as a multi-output source)")
+		e.warnf("%s: transformer %s has no power model — its windings supply nothing in the DC simulation (add a connector-source model with outputs[])", p.Ref, firstNonEmpty(p.MPN, p.Value, p.DeviceName))
 	case (prefix == "D" || prefix == "TVS" || prefix == "ZD") && has("tvs", "esd", "transient", "smaj", "smbj"):
 		set(KindESD, "TVS/ESD by description")
 	case prefix == "D" || prefix == "ZD":

@@ -1,0 +1,40 @@
+{
+ "standard": {
+  "name": "IEC62368-1",
+  "insulation": "functional",
+  "pollutionDegree": 2,
+  "materialGroup": "IIIa",
+  "altitudeM": 2000,
+  "overvoltageCategory": "II"
+ },
+ "layers": 4,
+ "outerOz": 2,
+ "innerOz": 2,
+ "tempRiseC": 20,
+ "rails": [
+  {
+   "net": "HV+",
+   "voltage": 450,
+   "currentA": 30
+  },
+  {
+   "net": "PHASE",
+   "currentA": 30,
+   "peakV": 520
+  },
+  {
+   "net": "HV_GND",
+   "currentA": 30
+  }
+ ],
+ "domains": [
+  {
+   "kind": "hazardous",
+   "nets": [
+    "HV_GND"
+   ],
+   "transient": "mains",
+   "ratedVrms": 400
+  }
+ ]
+}

@@ -1,0 +1,41 @@
+{
+ "schemaVersion": 1,
+ "_doc": "Design-specific power models of the flyback stress fixture (the generic parts come from the skill's power-models.json).",
+ "models": [
+  {
+   "id": "mains-230vac-dc-envelope",
+   "kind": "connector-source",
+   "match": {"mpn": ["DG142R-7.5-02P"]},
+   "supplyPins": ["1"],
+   "returnPins": ["2"],
+   "voltageV": 325.27,
+   "rsOhm": 0.5,
+   "sourceName": "mains",
+   "source": "DC operating-point stand-in for the 230 Vac line: the bulk capacitor charges to √2·230 V = 325.3 V less the bridge drops; line impedance + fuse ≈ 0.5 Ω. intent derive restores the AC envelope of the line nets (230 Vrms / 325 V peak).",
+   "confidence": "assumed"
+  },
+  {
+   "id": "ee25-fly-12v2a",
+   "kind": "connector-source",
+   "match": {"mpn": ["EE25-FLY-12V2A"]},
+   "outputs": [
+    {"name": "secondary 12 V", "pins": ["S+"], "returnPins": ["S-"], "voltageV": 12.96, "rsOhm": 0.03},
+    {"name": "aux 16.5 V", "pins": ["AUX"], "returnPins": ["AUXR"], "voltageV": 16.5, "rsOhm": 2.0}
+   ],
+   "sourceName": "flyback",
+   "source": "Design operating point of the EE25 flyback transformer at regulation: TL431 holds VOUT = 12.0 V, so the secondary winding sits at VOUT + VF(SS310, 2 A ≈ 0.8 V) + the L1 drop ≈ 12.96 V; the aux winding (Na/Ns = 13/10) at 1.3 × 12.7 ≈ 16.5 V. The primary (switching) power is not a DC quantity and is not modelled.",
+   "confidence": "assumed"
+  },
+  {
+   "id": "out-12v-2a-load",
+   "kind": "load",
+   "match": {"mpn": ["DG128-5.0-02P"]},
+   "supplyPins": ["1"],
+   "returnPins": ["2"],
+   "typA": 2.0,
+   "peakA": 2.0,
+   "source": "Rated output of the product: 12 V / 2 A continuous (spec).",
+   "confidence": "assumed"
+  }
+ ]
+}
