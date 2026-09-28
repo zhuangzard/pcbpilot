@@ -272,7 +272,25 @@ func checkDRCTol(b *Board, an *Analysis, st *Stackup, tracks []Track, vias []Via
 		}
 		holeCell[k] = append(holeCell[k], i)
 	}
-	// Edge, keepouts, holes.
+	// Edge, keepouts, holes. The edge distance is per layer class (outer /
+	// inner) and per insulated domain (EdgePolicy); a via spans every layer.
+	pol := an.edgePolicy(b)
+	viaLayer := LayerTop
+	if st != nil {
+		for _, l := range st.Stack {
+			if !IsOuterLayer(l.ID) {
+				viaLayer = l.ID
+			}
+		}
+	} else if b.CopperLayers > 2 {
+		viaLayer = LayerInner1
+	}
+	var heads []*Hole
+	for _, h := range b.Holes {
+		if h.Owner == "" && len(h.Poly) < 3 && h.Dia > 0 {
+			heads = append(heads, h)
+		}
+	}
 	for _, it := range items {
 		if it.kind == 0 {
 			continue
@@ -297,8 +315,29 @@ func checkDRCTol(b *Board, an *Analysis, st *Stackup, tracks []Track, vias []Via
 				d = -1
 			}
 		}
-		if len(b.Outline) >= 3 && d < b.Rules.EdgeClearance-0.1 {
-			rep.Violations = append(rep.Violations, Violation{Kind: "edge", NetA: it.net, Layer: it.layer, At: at, Gap: round2(d), Required: b.Rules.EdgeClearance, ra: it.ref(), rb: noRef})
+		ly := it.layer
+		if it.kind == 2 {
+			ly = viaLayer
+		}
+		edgeReq := pol.Req(ly, it.net)
+		if len(b.Outline) >= 3 && d < edgeReq-0.1 {
+			rep.Violations = append(rep.Violations, Violation{Kind: "edge", NetA: it.net, Layer: it.layer, At: at, Gap: round2(d), Required: edgeReq, ra: it.ref(), rb: noRef})
+		}
+		if nr := pol.NetReq(it.net); nr > 0 {
+			// Hazardous copper keeps its insulation distance to the metal
+			// screw heads of the mounting holes (accessible / earthed).
+			for _, h := range heads {
+				var g float64
+				if it.kind == 1 {
+					g = PointSegDist(h.C, it.t.A, it.t.B) - it.t.Width/2
+				} else {
+					g = h.C.Dist(it.v.C) - it.v.Dia/2
+				}
+				g -= h.Dia/2 + h.Keep
+				if g < nr-0.1 {
+					rep.Violations = append(rep.Violations, Violation{Kind: "edge", NetA: it.net, Layer: it.layer, At: h.C, Gap: round2(g), Required: nr, ra: it.ref(), rb: noRef})
+				}
+			}
 		}
 		for _, k := range b.Keepouts {
 			if !k.NoCopper && !(k.NoVias && it.kind == 2) {

@@ -189,6 +189,23 @@ func (c *ctx) buildVerification() {
 	} else {
 		add("pcb check（DFM 重建审计）", "check", StatusNA, "未提供 pcb check 输出（--check）")
 	}
+	// Board-edge safety distance (copper-to-edge): measured on the save/
+	// reload dump (else the board dump, else the plan).
+	if eg := c.edge(); eg.chk != nil {
+		st := StatusPass
+		det := eg.requirement() + "；实测 " + eg.measured()
+		if n := eg.errors(); n > 0 {
+			st = StatusFail
+			det = sprintf("%d 处低于板边安全距离；", n) + det
+		}
+		kind := eg.src
+		if kind == "plan" {
+			det += "（计划几何，未经宿主回读）"
+		}
+		add("板边安全距离（copper-to-edge）", kind, st, det)
+	} else {
+		add("板边安全距离（copper-to-edge）", "board", StatusNA, "未提供板级回读或 plan.json；要求 "+eg.requirement())
+	}
 	if r := c.in.RulesCheck; r != nil {
 		st, det := StatusPass, "intent 规则与 EasyEDA 一致（"+r.Status+"）"
 		if r.Status != "in-sync" || len(r.Plan.Conflicts) > 0 || r.Plan.PendingWrites > 0 {

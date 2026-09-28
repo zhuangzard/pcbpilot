@@ -41,7 +41,9 @@ func (c *ctx) buildCalcs() {
 		{"微带线 Z0", "Hammerstad–Jensen（含铜厚修正）", "pkg/pcbauto MicrostripZ0"},
 		{"差分 Zdiff", "Zdiff ≈ 2·Z0·(1 − 0.48·e^(−0.96·s/h))", "边耦合微带近似"},
 		{"爬电/电气间隙", "IEC 62368-1 / 60601-1 / 61010-1 表格或 IPC-2221B（按 intent.standard）", "pkg/safety；工程参考，最终以认证机构为准"},
+		{"板边安全距离", "外层铜 ≥ 20 mil（0.5 mm）、内层平面回缩 ≥ 30 mil（0.76 mm）；V-cut 0.5 / 0.8 mm；危险/市电/病人域：到板边与金属安装孔 ≥ max(间隙, 爬电)（可触及面，默认加强绝缘）", "intent.edge / pcbauto EdgePolicy；pcb check copper-to-edge 复核"},
 	}
+	cs.Basis = append(cs.Basis, KV{"板边安全距离", c.edge().requirement(), ""})
 	// Plan widths per net: widths / vias / clearance for power, ground, switch,
 	// diff, hs, rf and any net with ≥ 10 mA.
 	for _, net := range sortedKeys(it.Nets) {
@@ -142,6 +144,20 @@ func (c *ctx) buildCalcs() {
 		cs.Insulation = append(cs.Insulation, InsCalc{A: p.A, B: p.B, WorkingVrms: p.WorkingVrms, WorkingVpeak: p.WorkingVpeak, Insulation: p.Insulation,
 			ClearanceMm: p.ClearanceMm, CreepageMm: p.CreepageMm, Slot: p.SlotRequired, SlotWidthMm: p.SlotWidthMm, StandardRef: p.StandardRef,
 			TestVrms: res.TestVoltageVrms, TestRef: res.TestVoltageRef})
+	}
+	// Hazardous domains to the accessible board edge / mounting holes.
+	if eg := c.edge(); eg.pol != nil {
+		for _, id := range sortedKeys(eg.pol.ByDomain) {
+			d := eg.pol.ByDomain[id]
+			var vr, vp float64
+			for _, dm := range it.Domains {
+				if dm.ID == id {
+					vr, vp = dm.WorkingVrms, dm.WorkingVpeak
+				}
+			}
+			cs.Insulation = append(cs.Insulation, InsCalc{A: "domain:" + id, B: "板边 / 金属安装孔（可触及面）", WorkingVrms: vr, WorkingVpeak: vp, Insulation: d.Insulation,
+				ClearanceMm: d.ClearanceMm, CreepageMm: d.CreepageMm, StandardRef: sprintf("板边安全距离 %s mil = max(间隙, 爬电)", f1(d.Mil))})
+		}
 	}
 	sort.SliceStable(cs.Widths, func(i, j int) bool { return cs.Widths[i].CurrentA > cs.Widths[j].CurrentA })
 	sort.SliceStable(cs.Vias, func(i, j int) bool { return cs.Vias[i].CurrentA > cs.Vias[j].CurrentA })

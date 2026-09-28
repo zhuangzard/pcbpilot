@@ -21,6 +21,7 @@ package app
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
 	"io"
 	"math"
 	"os"
@@ -254,10 +255,12 @@ type pcbCheckSummary struct {
 	WidthUnderSpec    int `json:"widthUnderSpec"`
 	SilkOverPad       int `json:"silkOverPad"`
 	// Two visible designators printed on top of each other (real bboxes).
-	SilkOverlap     int `json:"silkOverlap"`
-	DecapTooFar     int `json:"decapTooFar"`
-	ViaInPad        int `json:"viaInPad"`
-	CopperNearEdge  int `json:"copperNearEdge"`
+	SilkOverlap int `json:"silkOverlap"`
+	DecapTooFar int `json:"decapTooFar"`
+	ViaInPad    int `json:"viaInPad"`
+	// Copper (tracks, pads, vias, poured fills, planes) closer to the board
+	// edge / metal mounting holes than the edge safety distance.
+	CopperToEdge    int `json:"copperToEdge"`
 	FiducialMissing int `json:"fiducialMissing"`
 	ZoneViolation   int `json:"zoneViolation"`
 	// #168 连接器布局：内部件占板外沿 / 相邻对外口插头护套打架。
@@ -285,6 +288,8 @@ type pcbCheckReport struct {
 	PadCount    int               `json:"padCount"`
 	Findings    []pcbCheckFinding `json:"findings"`
 	Limitations []string          `json:"limitations,omitempty"`
+	// Edge is the copper-to-edge measurement (policy + per-layer minima).
+	Edge *pcbauto.EdgeCheck `json:"edge,omitempty"`
 }
 
 // analyzePcbCheck is the copper-only DFM core (no silkscreen). Thin wrapper over
@@ -1818,34 +1823,42 @@ func uniqStr(in []string) []string {
 // runPcbCheck pulls placed copper (tracks + vias + pads), runs the DFM audit,
 // renders it, and (with strict) returns a non-zero exit when there are findings.
 func runPcbCheck(cfg *appConfig, window string, couplingW float64, checkSpec *spec.Spec, strict, asJSON bool, stdout, stderr io.Writer) error {
-	return runPcbCheckIntent(cfg, window, couplingW, checkSpec, "", "", strict, asJSON, stdout, stderr)
+	return runPcbCheckIntent(cfg, window, couplingW, checkSpec, "", "", "", strict, asJSON, stdout, stderr)
 }
 
 // runPcbCheckIntent is runPcbCheck plus the isolation rule: with intentPath
 // the copper of two insulated domains is checked against the pair's
 // clearance and creepage; with boardPath (a `pcb dump --include-copper`
 // file) the check runs offline and only the isolation rule applies.
-func runPcbCheckIntent(cfg *appConfig, window string, couplingW float64, checkSpec *spec.Spec, intentPath, boardPath string, strict, asJSON bool, stdout, stderr io.Writer) error {
+func runPcbCheckIntent(cfg *appConfig, window string, couplingW float64, checkSpec *spec.Spec, intentPath, boardPath, edgeKind string, strict, asJSON bool, stdout, stderr io.Writer) error {
 	var rep *pcbCheckReport
 	var err error
+	edgeIntent, err := loadEdgeIntent(intentPath)
+	if err != nil {
+		return fmt.Errorf("intent: %w", err)
+	}
 	if boardPath != "" {
-		if intentPath == "" {
-			return fmt.Errorf("--board runs the offline isolation check and needs --intent")
-		}
 		rep = &pcbCheckReport{}
 		raw, rerr := os.ReadFile(boardPath)
 		if rerr != nil {
 			return rerr
 		}
-		if err := addIsolationFindings(rep, raw, intentPath); err != nil {
+		if err := addEdgeFindings(rep, raw, edgeIntent, edgeKind); err != nil {
 			return err
 		}
-		if err := addViaCurrentFindings(rep, raw, intentPath); err != nil {
-			return err
+		if intentPath != "" {
+			if err := addIsolationFindings(rep, raw, intentPath); err != nil {
+				return err
+			}
+			if err := addViaCurrentFindings(rep, raw, intentPath); err != nil {
+				return err
+			}
+			rep.Limitations = append(rep.Limitations, "offline --board: the copper-to-edge, isolation and via-current rules ran (no live DFM rules)")
+		} else {
+			rep.Limitations = append(rep.Limitations, "offline --board: only the copper-to-edge rule ran (add --intent for the isolation and via-current rules and the intent edge distances)")
 		}
-		rep.Limitations = append(rep.Limitations, "offline --board: only the isolation and via-current rules ran (no live DFM rules)")
 	} else {
-		rep, err = gatherPcbCheckReport(cfg, window, couplingW, checkSpec, stderr)
+		rep, err = gatherPcbCheckReportEdge(cfg, window, couplingW, checkSpec, pcbCheckEdgeOpts{intent: edgeIntent, kind: edgeKind}, stderr)
 		if err != nil {
 			return err
 		}
@@ -1888,6 +1901,17 @@ func runPcbCheckIntent(cfg *appConfig, window string, couplingW float64, checkSp
 // post_route_checked gate (布完必查), while `pcb check` keeps owning rendering
 // and --strict semantics.
 func gatherPcbCheckReport(cfg *appConfig, window string, couplingW float64, checkSpec *spec.Spec, stderr io.Writer) (*pcbCheckReport, error) {
+	return gatherPcbCheckReportEdge(cfg, window, couplingW, checkSpec, pcbCheckEdgeOpts{}, stderr)
+}
+
+// pcbCheckEdgeOpts selects the copper-to-edge thresholds: intent.json
+// "edge" (nil = defaults) and an edge-kind override.
+type pcbCheckEdgeOpts struct {
+	intent *pcbauto.Intent
+	kind   string
+}
+
+func gatherPcbCheckReportEdge(cfg *appConfig, window string, couplingW float64, checkSpec *spec.Spec, edge pcbCheckEdgeOpts, stderr io.Writer) (*pcbCheckReport, error) {
 	pads, err := fetchPcbPads(cfg, window)
 	if err != nil {
 		return nil, fmt.Errorf("fetch PCB pads: %w", err)
@@ -1957,30 +1981,15 @@ func gatherPcbCheckReport(cfg *appConfig, window string, couplingW float64, chec
 	}
 	rep.Passed = rep.Summary.Total == 0
 
-	// Copper-near-edge is a LIVE-only rule (needs the board outline). The floor is
-	// the live copper-to-edge rule (fallback: JLC routed-edge 8mil, doc §5.1
-	// recommends ~20mil/0.5mm — we gate on the fab floor, the doc value is advice).
-	if ores, oerr := requestAction(cfg, "pcb.outline.get", window, nil); oerr != nil {
-		fmt.Fprintf(stderr, "warning: copper-near-edge check skipped (%v)\n", oerr)
-	} else if bb, ok := mnav(ores.Result, "bbox").(map[string]any); ok {
-		minX, ok1 := asFloatOK(bb["minX"])
-		minY, ok2 := asFloatOK(bb["minY"])
-		maxX, ok3 := asFloatOK(bb["maxX"])
-		maxY, ok4 := asFloatOK(bb["maxY"])
-		if ok1 && ok2 && ok3 && ok4 {
-			outline := &layoutBBox{MinX: minX, MinY: minY, MaxX: maxX, MaxY: maxY}
-			edgeClr := rules.copperToEdgeMil
-			if edgeClr <= 0 {
-				edgeClr = 8
-			}
-			for _, f := range findCopperNearEdge(tracks, vias, outline, edgeClr) {
-				rep.Findings = append(rep.Findings, f)
-				rep.Summary.CopperNearEdge++
-				rep.Summary.Warnings++
-				rep.Summary.Total++
-			}
-			rep.Passed = rep.Summary.Total == 0
-		}
+	// copper-to-edge is a LIVE-only rule here (needs the outline, the poured
+	// copper and the layer types): one board dump, measured by
+	// pcbauto.CheckEdgeSnapshot — the same geometry pcb auto plans with.
+	if dump, derr := liveEdgeDump(cfg, window); derr != nil {
+		fmt.Fprintf(stderr, "warning: copper-to-edge check skipped (%v)\n", derr)
+		rep.Limitations = append(rep.Limitations, "copper-to-edge NOT checked: board dump unavailable")
+	} else if err := addEdgeFindings(&rep, dump, edge.intent, edge.kind); err != nil {
+		fmt.Fprintf(stderr, "warning: %v\n", err)
+		rep.Limitations = append(rep.Limitations, "copper-to-edge NOT checked: "+err.Error())
 	}
 
 	// Zone-violation is a LIVE-only rule (issue #126): claimed parts must sit in
@@ -2480,9 +2489,9 @@ func renderPcbCheckReport(rep pcbCheckReport, w io.Writer) {
 		fmt.Fprintln(w, "  ✓ no DFM issues found")
 		return
 	}
-	fmt.Fprintf(w, "  ERROR=%d WARN=%d  |  dangling=%d acute=%d nonOrtho=%d overPad=%d clearance=%d silkFlipped=%d overlapVia=%d singleLayerVia=%d widthMismatch=%d dupSegment=%d coupling=%d antennaKeepout=%d netlessPour=%d viaCrossesPlane=%d floatingIsland=%d powerNotPoured=%d netlessViaInPad=%d widthUnderSpec=%d silkOverPad=%d silkOverlap=%d decapTooFar=%d viaInPad=%d copperNearEdge=%d fiducialMissing=%d zoneViolation=%d internalOnEdge=%d plugClearance=%d matingBlocked=%d\n",
+	fmt.Fprintf(w, "  ERROR=%d WARN=%d  |  dangling=%d acute=%d nonOrtho=%d overPad=%d clearance=%d silkFlipped=%d overlapVia=%d singleLayerVia=%d widthMismatch=%d dupSegment=%d coupling=%d antennaKeepout=%d netlessPour=%d viaCrossesPlane=%d floatingIsland=%d powerNotPoured=%d netlessViaInPad=%d widthUnderSpec=%d silkOverPad=%d silkOverlap=%d decapTooFar=%d viaInPad=%d copperToEdge=%d fiducialMissing=%d zoneViolation=%d internalOnEdge=%d plugClearance=%d matingBlocked=%d\n",
 		s.Errors, s.Warnings-s.Errors,
-		s.DanglingEnds, s.AcuteAngles, s.NonOrthogonal, s.TrackOverPad, s.Clearance, s.SilkscreenFlipped, s.OverlappingVias, s.SingleLayerVias, s.WidthMismatches, s.DuplicateSegments, s.ParallelCoupling, s.AntennaKeepout, s.NetlessPours, s.ViaCrossesPlane, s.FloatingIslands, s.PowerNotPoured, s.NetlessViaInPad, s.WidthUnderSpec, s.SilkOverPad, s.SilkOverlap, s.DecapTooFar, s.ViaInPad, s.CopperNearEdge, s.FiducialMissing, s.ZoneViolation, s.InternalOnEdge, s.ConnectorPlugClearance, s.ConnectorMatingBlocked)
+		s.DanglingEnds, s.AcuteAngles, s.NonOrthogonal, s.TrackOverPad, s.Clearance, s.SilkscreenFlipped, s.OverlappingVias, s.SingleLayerVias, s.WidthMismatches, s.DuplicateSegments, s.ParallelCoupling, s.AntennaKeepout, s.NetlessPours, s.ViaCrossesPlane, s.FloatingIslands, s.PowerNotPoured, s.NetlessViaInPad, s.WidthUnderSpec, s.SilkOverPad, s.SilkOverlap, s.DecapTooFar, s.ViaInPad, s.CopperToEdge, s.FiducialMissing, s.ZoneViolation, s.InternalOnEdge, s.ConnectorPlugClearance, s.ConnectorMatingBlocked)
 	for _, f := range rep.Findings {
 		loc := ""
 		if f.At != nil {

@@ -87,6 +87,7 @@ pcbpilot sch intent-annotate --intent intent.json --page <页UUID> --project ces
 | 以上规则 | `netRules` 类项及每个成员子项的 `Track`/`Safe Spacing`/`Via Size` | 子项与现存成员不一致、字段不是字符串 → conflict |
 | `nets[].diffPair` | `pcb.differential_pair.create`（极性按 `_DP/_P/+/_H` vs `_DM/_N/-/_L` 后缀） | 同名同网 = ok；同网他名 = ok；同名他网 = conflict |
 | 差分 `widthMil.outer` + `pairGapMil`/类 `diffGapMil` | 唯一的全局 `Differential Pair` 规则 | 仅当所有对一致时写；`impedanceOhm` 只作 advisory（宿主不存阻抗） |
+| `edge`（板边安全距离；旧 intent 无此字段 → 默认 20/30 mil，危险域按 `domains`+`standard` 现算） | `Spacing."Safe Spacing"` 默认规则 **和** 每个 `PP_<类>` 的 **Board Outline × 铜对象**格（Track / SMD Pad / TH Pad / SMD·TH Test Point / Via / Fill Region/Teardrop / Copper/Plane Zone） | 取 max(现值, 要求)；矩阵不分层类 → 单表取内层值（默认 30 mil），多层表时 1/2 键取外层值；含危险域网的类取域距离（`plan.edge.classes`）；Slot/Line/Text/Hole 不动。宿主铺铜与负片内电层按这一格回缩。原生 `Creepage Distance` 只写 advisory（建议值），不启用 |
 | `pairs[]`（域间电气间隙/爬电/开槽） | —— | `unsupported / planned`：官方 `pcb_Drc.overwriteNetByNetRules` 结构不透明且未现场采样；用布局禁区/开槽 + DRC 兜底 |
 | `viasPerTransition>1`（= `via.countPerTransition`）、单端阻抗 | —— | advisory，由布线（换层阵列）执行、`pcb check --intent` 的 `via-current` 复核 |
 
@@ -96,7 +97,9 @@ pcbpilot sch intent-annotate --intent intent.json --page <页UUID> --project ces
 netRules 项必须出现，否则 unverified）→ 一次 `pcb.drc.rules.set`（完整规则 + netRules，
 连接器自带回滚与精确回读）→ 建差分对 → 重读，**计划必须为 0** 才 `verified:true`。任何一步
 未确认都非零退出并保留 JSON 报告（writes / final），不自动重试。`check --strict` 让
-unsupported 项也失败。默认规则名（如 `copperThickness1oz`）不改，`pcb auto run` 读取的基线不变。
+unsupported 项也失败。默认规则名（如 `copperThickness1oz`）不改；默认规则**只**改 Board Outline × 铜
+对象格（板边安全距离），所以 `pcb auto run` 读取的基线除 `copperToEdgeMil`（10 → 30）外不变 ——
+这是有意的：引擎把它当下限，布线/内缩本来就按 20/30 mil。重放幂等（第二次计划 0 写入）。
 
 `sch intent-annotate`：宿主没有网级属性 API（`sch_Net` 只读，`sch_PrimitiveWire.modify` 无属性），
 所以写成**一个**分组文字块：块功能摘要、每条电源/地/开关轨的 V/I/线宽/类/间距/过孔数、差分对、
@@ -115,6 +118,9 @@ unsupported 项也失败。默认规则名（如 `copperThickness1oz`）不改�
 4. 全局 `Differential Pair` 规则的层表写回；
 5. `sch_PrimitiveText.create` 的锚点、默认字号、行距与 y 方向（决定 `--line-height/--char-width` 默认值）；
 6. save → reload → `pcb rules check` 为 in-sync（持久化）。
+7. 板边安全距离（2026-09-28 新增；离线已验证，以下待现场）：默认规则的 Board Outline 格被宿主接受并回读；`pcb pour-rebuild`
+   后灌铜与负片内电层确实回缩到新值（`pcb dump --include-copper` + `pcb check` copper-to-edge 0 ERROR）；
+   `no-inner-electrical` 板边带（pcb auto 剧本 `plane-edge-*`）确实挡住负片平面。
 
 ## 其他考试配置的现有入口
 

@@ -117,7 +117,7 @@ func BuildPlaybook(in PlaybookInput) *Playbook {
 		add(sprintf("hole-%d", i+1), "mounting hole "+h.Name, "pcb.fill.create", map[string]any{"points": pts2(circle(h.C, h.Dia/2, 24)), "layer": LayerMulti})
 		if h.Keep > 0 {
 			add(sprintf("hole-keep-%d", i+1), "screw head keep-out", "pcb.region.create", map[string]any{
-				"points": pts2(circle(h.C, h.Dia/2+h.Keep, 24)), "layer": LayerMulti, "ruleType": []string{"no-components", "no-wires", "no-pours"}})
+				"points": pts2(circle(h.C, h.Dia/2+h.Keep, 24)), "layer": LayerMulti, "ruleType": []string{"no-components", "no-wires", "no-pours", "no-inner-electrical"}})
 		}
 	}
 	for i, k := range in.NewKeepouts {
@@ -201,6 +201,18 @@ func BuildPlaybook(in PlaybookInput) *Playbook {
 				add(sprintf("pour-%d-%d", i+1, j+1), sprintf("%s on layer %d", pr.Net, pr.Layer), "pcb.pour.create", map[string]any{
 					"points": pts2(poly), "net": pr.Net, "layer": pr.Layer, "fill": "solid", "priority": pr.Priority,
 					"name": sprintf("auto_%s_L%d", pr.Net, pr.Layer)})
+			}
+		}
+		// 5b. Negative planes ignore the pour polygon once flipped: the host
+		// draws them to the Board Outline rule. A no-inner-electrical band
+		// along the outline (EPCB region rule 8) pulls them back by the
+		// inner edge distance (or a hazardous plane net's domain distance).
+		if res.Analysis != nil && len(in.Board.Outline) >= 3 {
+			if band := PlaneBandMil(res.Analysis.edgePolicy(in.Board), st); band > 0 {
+				for i, poly := range EdgeBand(in.Board.Outline, band) {
+					add(sprintf("plane-edge-%d", i+1), sprintf("inner plane pull-back %.1f mil (board-edge safety distance)", band), "pcb.region.create", map[string]any{
+						"points": pts2(poly), "layer": LayerMulti, "ruleType": []string{"no-inner-electrical"}})
+				}
 			}
 		}
 		// 6. Flip solid planes to PLANE after pouring, then rebuild.

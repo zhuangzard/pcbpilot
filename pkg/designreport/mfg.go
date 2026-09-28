@@ -95,11 +95,19 @@ func (c *ctx) buildManufacturing() {
 			KV{"最小线宽（规则 / 实际）", sprintf("%s mil / %s", f2(r.TrackWidthMinMil), ml), "规则来自板级回读 rules"},
 			KV{"最小间距（通用 / 线-线）", sprintf("%s / %s mil", f2(r.ClearanceMil), f2(r.TrackTrackMil)), ""},
 			KV{"过孔 钻孔/外径", sprintf("%s / %s mil（%s / %s mm）", f2(r.ViaDrillMil), f2(r.ViaDiameterMil), f2(r.ViaDrillMil*0.0254), f2(r.ViaDiameterMil*0.0254)), ""},
-			KV{"铜到板边", sprintf("%s mil", f2(r.CopperToEdgeMil)), ""},
+			KV{"铜到板边（EasyEDA 规则）", sprintf("%s mil", f2(r.CopperToEdgeMil)), "Board Outline ↔ Copper/Plane Zone；铺铜与负片内电层按它回缩"},
 			KV{"孔-孔 / 槽间距", sprintf("%s / %s mil", f2(r.HoleToHoleMil), f2(r.SlotClearanceMil)), ""},
 			KV{"走线 / 过孔数量", sprintf("%d / %d", len(b.Copper.Lines), b.ViaCount()), ""},
 		)
 	}
+	// Board-edge safety distance: requirement and measured minima.
+	eg := c.edge()
+	fab = append(fab, KV{"板边安全距离（要求）", eg.requirement(), "工程默认 0.5 mm 外层 / 0.76 mm 内层平面（JLC 最小 0.2 mm 铣边、0.4 mm V-cut）；docs/pcb-design-rules.md §5.4"})
+	mNote := "pcb check copper-to-edge 同一几何：铺铜按实际灌铜多边形量"
+	if n := eg.errors(); n > 0 {
+		mNote = sprintf("%d 处低于要求 —— 下单前修正（pcb pour-fit / rules apply --intent / 重新铺铜）", n)
+	}
+	fab = append(fab, KV{"铜到板边（实测最小，每层）", eg.measured(), mNote})
 	var imp []string
 	if it != nil {
 		for _, ncl := range it.NetClasses {
@@ -223,6 +231,10 @@ func (c *ctx) buildManufacturing() {
 		}
 	} else {
 		ms.HV = append(ms.HV, "无绝缘对（单一 SELV 域）：无铣槽/爬电特别要求")
+	}
+	for _, id := range sortedKeys(eg.pol.ByDomain) {
+		d := eg.pol.ByDomain[id]
+		ms.HV = append(ms.HV, sprintf("%s 域铜到板边与金属安装孔（螺钉头）≥ %s mil（%s mm；%s 绝缘，间隙 %s / 爬电 %s mm）：板边与安装孔按可触及/接地面处理", id, f1(d.Mil), f2(d.Mil*0.0254), d.Insulation, f2(d.ClearanceMm), f2(d.CreepageMm)))
 	}
 	if pl != nil && pl.Result != nil && pl.Result.Isolation != nil {
 		for _, s := range pl.Result.Isolation.Slots {

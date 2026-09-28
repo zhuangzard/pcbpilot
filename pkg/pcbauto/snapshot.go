@@ -434,15 +434,20 @@ func ExportPlacedSnapshot(raw []byte, b *Board) ([]byte, error) {
 		}
 	}
 	if len(b.Outline) >= 3 {
-		if o, ok := doc["outline"].(map[string]any); ok {
-			bb := PolyBounds(b.Outline)
-			pts := make([][2]float64, len(b.Outline))
-			for i, q := range b.Outline {
-				pts[i] = [2]float64{round2(q.X), round2(q.Y)}
-			}
-			o["points"] = pts
-			o["bbox"] = map[string]any{"minX": bb.MinX, "minY": bb.MinY, "maxX": bb.MaxX, "maxY": bb.MaxY}
+		o, ok := doc["outline"].(map[string]any)
+		if !ok {
+			// An auto-sized frame: the plan's outline is the board edge the
+			// offline checks (copper-to-edge) measure against.
+			o = map[string]any{"source": "polygon", "format": "polyline", "origin": "pcb auto plan"}
+			doc["outline"] = o
 		}
+		bb := PolyBounds(b.Outline)
+		pts := make([][2]float64, len(b.Outline))
+		for i, q := range b.Outline {
+			pts[i] = [2]float64{round2(q.X), round2(q.Y)}
+		}
+		o["points"] = pts
+		o["bbox"] = map[string]any{"minX": bb.MinX, "minY": bb.MinY, "maxX": bb.MaxX, "maxY": bb.MaxY}
 	}
 	// A moved board is no longer the captured board: drop routed copper so
 	// nobody reads stale tracks against new pad positions.
@@ -495,6 +500,20 @@ func ExportRoutedSnapshot(raw []byte, b *Board, res *Result) ([]byte, error) {
 				pts, bb := src(poly)
 				pours = append(pours, map[string]any{"primitiveId": sprintf("auto-pour%d-%d", i+1, j+1), "net": pr.Net, "layer": pr.Layer, "source": pts, "bbox": bb})
 			}
+		}
+	}
+	// Board mounting holes (MULTI cutouts) and their screw-head keep-out
+	// rings, as the playbook draws them.
+	for i, h := range b.Holes {
+		if h.Owner != "" || len(h.Poly) >= 3 || h.Dia <= 0 {
+			continue
+		}
+		pts, bb := src(circle(h.C, h.Dia/2, 24))
+		fills = append(fills, map[string]any{"primitiveId": sprintf("auto-hole%d", i+1), "layer": LayerMulti, "net": "", "source": pts, "bbox": bb})
+		if h.Keep > 0 {
+			pts, bb := src(circle(h.C, h.Dia/2+h.Keep, 24))
+			regions = append(regions, map[string]any{"primitiveId": sprintf("auto-holekeep%d", i+1), "name": "screw head keep-out", "layer": LayerMulti,
+				"ruleType": []any{2, 5, 7, 8}, "source": pts, "bbox": bb})
 		}
 	}
 	if res != nil && res.Isolation != nil {

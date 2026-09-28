@@ -323,7 +323,7 @@ d ≥ (envelope_A + envelope_B) / 2
 | 参数 | 推荐值 |
 |------|-------|
 | 铜皮到走线间距（Clearance） | 0.3mm (12mil) |
-| 铜皮到板边间距 | 0.5mm |
+| 铜皮到板边间距 | 外层 0.5mm（20mil），内层平面 0.76mm（30mil）—— 见 [§5.4](#54-板边安全距离edge-clearance) |
 | 最小铜皮面积 | 1mm² |
 | 去孤岛 | 开启（面积阈值 1mm²） |
 
@@ -339,6 +339,46 @@ d ≥ (envelope_A + envelope_B) / 2
 - 禁止在天线/RF 模块下方铺铜（各层均需 keepout）
 - 禁止铺铜穿越晶振底部
 - 差分对之间不铺铜（保持阻抗一致性）
+
+### 5.4 板边安全距离（edge clearance）
+
+铜到铣边 / V-cut 线的距离是**安全距离**，不是工艺极限：贴边的铜被铣刀切穿后外露、分板毛刺
+把铜带出板边，板边又是可触及面（手指、接地的机壳、金属支柱/螺钉）——漏电、误触、对地短路，
+高压板上直接是安全事故。2026-09-28 ESP32 v0.5 实板：TOP/BOTTOM GND 与 IN2 电源分区灌铜距板框
+仅 14.1mil（0.36mm），IN1 负片 GND 平面只受 EasyEDA 默认 10mil 规则约束。
+
+| 对象 | 默认（每块板自动生效） | 工艺下限（不可低于） | 依据 |
+|---|---|---|---|
+| 外层铜（走线、焊盘、过孔、铺铜/填充）→ 铣边 | **≥ 20mil（0.5mm）** | 0.2mm（8mil） | JLC 能力：铣边铜距 ≥0.2mm（`fab-rules-jlcpcb.json` `copperToEdgeMil.routed`）；工厂 DFM 通行 0.25–0.5mm，取上限留铣刀公差 + 毛刺 |
+| 内层平面 / 内层铺铜（plane pull-back） | **≥ 30mil（0.76mm）** | 0.2mm | 平面是板上最宽的铜、布线器看不见；业界平面回缩 0.5–1.0mm（20–40mil） |
+| 外层铜 → V-cut 线 | **≥ 0.5mm（20mil）** | 0.4mm（16mil） | JLC V-cut 铜距 ≥0.4mm（`copperToEdgeMil.vcut`）；V 槽+掰板边缘比铣边粗糙 |
+| 内层铜 → V-cut 线 | **≥ 0.8mm（32mil，31.5 上取整）** | 0.4mm | 同上，内层再加回缩裕量 |
+| 铜 → 金属安装孔孔壁 | 同该层板边距离 | —— | 孔壁也是铣/钻出来的边；螺钉头/垫片另有禁铜环（§13.1 ≥1mm，`pcb auto` / `pcb mount-holes` 自动画，含 no-inner-electrical） |
+| 危险/市电/病人域铜 → 板边、金属安装孔（螺钉头） | **max(电气间隙, 爬电)**，默认加强绝缘 | —— | `pkg/safety.Distances(域 ↔ 可触及面)`：直线到板边的路径同时是空气间隙与板面爬电路径，取大者；板边与金属安装件按**可触及或接地**处理；外壳提供另一重保护或安装件保护接地时 `spec.edge.insulation="basic"` |
+
+规则与落地：
+
+- **配置**：`spec.json` 的 `edge`（`edgeKind: routed|vcut|mixed`、`outerMil/innerMil/vcutMil`、
+  `insulation`、`domainMil`）→ `intent derive` 写出 `intent.json` 的 `edge`（`outerMil/innerMil/
+  vcutMil/edgeKind/byDomain{域:{mil,clearanceMm,creepageMm,insulation,why}}/why`）。低于工艺下限
+  的覆盖值直接拒绝；`domainMil` 低于绝缘距离时忽略并注明。没有 intent 的板用默认值。
+  V-cut/混合板对**所有边**生效（板框不标哪条边是 V-cut）。
+- **pcb auto**：布线器按层分档禁布带（外层 20 / 内层 30），危险域网另加到板边与螺钉头的距离；
+  铺铜/平面多边形 = 板框中心线内缩（按层、按网所属域）；拆分平面和隔离裁剪按**整格四角**判断；
+  负片内电层额外画 `no-inner-electrical` 板边带（宿主负片不认铺铜多边形）；引擎 DRC 同口径复核。
+- **EasyEDA 规则**：`pcb rules apply --intent` 把 Safe Spacing 矩阵 **Board Outline × 铜对象**
+  （Track / SMD Pad / TH Pad / 测试点 / Via / Fill Region / Copper/Plane Zone）写进默认规则和每个
+  `PP_*` 规则；矩阵不分层类，所以取内层值（默认 30mil）；含危险域网的类取域距离。宿主铺铜和
+  负片平面正是按这一格回缩。推送后板上规则 = 30mil，所有消费者把现行规则当**下限**，因此外层铜实际也
+  按 30mil 执行（与原生 DRC 一致；过孔、通孔焊盘本就穿过内层）。原生 Creepage Distance 规则只给建议值，
+  不自动启用（全板生效、不分网）。
+- **铺铜命令**：`pcb pour-fit` / `power-pour` / `power-planes` 的边界 = 板框**中心线多边形**
+  （不是含线宽的渲染 bbox）按该层距离内缩，圆角处不再切出板框；`--inset` 可覆盖（低于工艺下限
+  被抬到下限，低于安全距离给警告）。
+- **检查**：`pcb check` 的 `copper-to-edge` / `copper-to-hole` / `plane-pullback`（ERROR）量**实际
+  灌铜**（poured 复杂多边形、ARC 展平）、走线/圆弧、焊盘、过孔；内层无铜图元 = 负片平面，按宿主
+  Board Outline 规则值判；贴板边安装的连接器焊盘降级 WARN（仍列出）。`--board dump.json` 离线可跑。
+  设计报告 §5/§7/§9 列出要求值与每层实测最小值。
 
 ---
 
@@ -460,8 +500,8 @@ SMT 贴片时传送带夹持需要工艺边：
 
 | 分板方式 | 铜皮到切割线 | 适用场景 |
 |---------|-----------|---------|
-| V-Cut（邮票孔） | ≥0.4mm | 规则矩形板，批量生产 |
-| 路由槽 | ≥0.2mm | 异形板，高精度分离 |
+| V-Cut（邮票孔） | ≥0.4mm 下限，**设计取外层 0.5mm / 内层 0.8mm**（§5.4，`edgeKind: vcut`） | 规则矩形板，批量生产 |
+| 路由槽 | ≥0.2mm 下限，**设计取外层 0.5mm / 内层 0.76mm**（§5.4） | 异形板，高精度分离 |
 | 邮票孔（鼠咬） | — | 不规则形状 |
 
 拼板建议：
@@ -546,6 +586,7 @@ Bottom   — 信号 + 局部铺铜
 - [ ] 网络全连通
 - [ ] SMT 板有 Mark 点（≥3，不共线）
 - [ ] 丝印不压焊盘
+- [ ] 铜到板边 ≥ 板边安全距离（`pcb check` copper-to-edge / plane-pullback，§5.4）
 
 ### 13.3 推荐通过（WARN）
 

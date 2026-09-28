@@ -91,6 +91,14 @@ IPC B2 100/300/500 V = 0.6/1.25/2.5 mm；61010 CAT II 300 V 基本 1.5 / 3.0、�
 9. **布线后核查**：两域的焊盘/走线/过孔两两计算：直线距离 < 间隙 → `iso-clearance`；同一外层上沿面最短路径
    （绕过宽度 ≥ 槽宽下限的铣槽/挖槽）< 爬电 → `iso-creepage`。结果在 `report.md`「安规隔离」与
    `plan.json result.isolation`。
+10. **板边与金属安装孔是可触及面**：危险/市电/病人域的铜到板框中心线、到金属安装孔螺钉头（禁铜环外沿）
+   ≥ `max(间隙, 爬电)`（`intent.edge.byDomain`，由 `safety.Distances(域 ↔ edge:accessible)` 算出，默认
+   **加强绝缘** —— 板边可能被手指、接地机壳、金属支柱碰到；外壳提供另一重保护或安装件保护接地时写
+   `spec.edge.insulation: "basic"`）。路由器对这些网另加到板边/螺钉头的距离场，铺铜/平面按域内缩，
+   引擎 DRC 与 `pcb check copper-to-edge` / `copper-to-hole` 复核；`pcb rules apply --intent` 把该域所在
+   网络类 `PP_<类>` 的 Board Outline 格写成域距离。SELV 域用默认 20 / 30 mil。原生 Creepage Distance
+   规则只在计划里给建议值，不自动启用（全板、不分网，会误报所有 SELV 对）。例：230 Vac 加强绝缘
+   （IEC 62368-1，PD2，MG IIIa，OVC II）→ 间隙 3.0 / 爬电 4.6 mm → 板边 ≥ 181.2 mil。
 
 ## 5. 核对
 
@@ -98,8 +106,8 @@ IPC B2 100/300/500 V = 0.6/1.25/2.5 mm；61010 CAT II 300 V 基本 1.5 / 3.0、�
 pcbpilot pcb auto run --board board.json --intent intent.json --place --out-dir out/
 pcbpilot apply out/playbook.json --project <工程> --dry-run      # 看 iso-slot-* / iso-band-* / iso-moat-* 步骤
 pcbpilot pcb check --intent intent.json --strict                   # 现场：两域铜皮的间隙 / 爬电
-pcbpilot pcb check --intent intent.json --board board.json --json  # 离线：只跑隔离规则
-pcbpilot pcb check --intent intent.json --board out/board.routed.json --strict  # 离线：判引擎布好的板（含槽）
+pcbpilot pcb check --intent intent.json --board board.json --json  # 离线：隔离规则 + 板边安全距离
+pcbpilot pcb check --intent intent.json --board out/board.routed.json --strict  # 离线：判引擎布好的板（含槽、板边距离）
 ```
 
 - 报告「安规隔离」：每对的标准、间隙、爬电、槽宽下限与来源；开槽尺寸；核查 0 违规。

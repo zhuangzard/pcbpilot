@@ -24,6 +24,8 @@ import (
 	"fmt"
 	"io"
 	"sort"
+
+	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
 )
 
 // powerPourPlan is one pour region the orchestrator will create.
@@ -110,6 +112,20 @@ func planPowerPour(pads []pcbPadP, outline [4]float64, gndLayers []int, railsMod
 	return plans
 }
 
+// fitPowerPourToBoundary replaces the GND planes' rectangle with the inset
+// outline polygon (rounded corners kept clear) and clips each rail's local
+// rectangle to it.
+func fitPowerPourToBoundary(plans []powerPourPlan, boundary [][]float64) []powerPourPlan {
+	for i := range plans {
+		if plans[i].Kind == "gnd-plane" {
+			plans[i].Points = cloneRect(boundary)
+		} else {
+			plans[i].Points = clipToBoundary(plans[i].Points, boundary)
+		}
+	}
+	return plans
+}
+
 func cloneRect(r [][]float64) [][]float64 {
 	out := make([][]float64, len(r))
 	for i, p := range r {
@@ -159,7 +175,7 @@ func parseGndLayers(spec string) ([]int, error) {
 
 // runPowerPour is the live orchestrator: read outline + pads, plan the pours, then
 // (unless dry-run) clear same-net pours and create each region, optionally rebuilding.
-func runPowerPour(cfg *appConfig, window, gndLayersSpec, railsMode string, margin, inset float64, replace, rebuild, dryRun bool, stdout, stderr io.Writer) error {
+func runPowerPour(cfg *appConfig, window, gndLayersSpec, railsMode string, margin float64, edge pourEdgeOpts, replace, rebuild, dryRun bool, stdout, stderr io.Writer) error {
 	// ADR-0004 Decision 4: dry-run 必须纯计算 —— 机械保证,Mutates 派发直接被拒。
 	if dryRun {
 		defer setDispatchDryRun(true)()
@@ -173,10 +189,14 @@ func runPowerPour(cfg *appConfig, window, gndLayersSpec, railsMode string, margi
 	if err != nil {
 		return err
 	}
-	if inset <= 0 {
-		inset = fetchPcbRules(cfg, window).copperToEdgeMil
+	// Board-edge safety distance: TOP/BOTTOM pours are outer copper (20 mil
+	// default); the boundary is the centre-line outline polygon inset by it.
+	pol, err := edge.edgePolicy(cfg, window)
+	if err != nil {
+		return err
 	}
-	outline, err := outlineRect(cfg, window, inset)
+	inset := edge.insetFor(pol, pcbauto.LayerTop, "", stderr)
+	boundary, outline, err := pourBoundary(cfg, window, inset)
 	if err != nil {
 		return fmt.Errorf("%v — set a board outline first (`pcb outline-set`)", err)
 	}
@@ -187,7 +207,7 @@ func runPowerPour(cfg *appConfig, window, gndLayersSpec, railsMode string, margi
 	if err != nil {
 		return fmt.Errorf("read pads: %w", err)
 	}
-	plans := planPowerPour(pads, outline, gndLayers, railsMode, margin)
+	plans := fitPowerPourToBoundary(planPowerPour(pads, outline, gndLayers, railsMode, margin), boundary)
 	if len(plans) == 0 {
 		return fmt.Errorf("no power nets found to pour (nothing matches isGlobalNet: GND/VCC/3V3/…)")
 	}

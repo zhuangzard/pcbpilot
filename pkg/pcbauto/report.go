@@ -190,6 +190,7 @@ func (r *Report) WriteMarkdown(w io.Writer) {
 		writePowerIntegrity(p, rr.Power)
 	}
 	writeIsolation(p, res.Isolation)
+	writeEdge(p, res.Edge)
 
 	writeJoint(p, r)
 	if si := r.SI; si != nil && (len(si.Pairs) > 0 || len(si.Groups) > 0 || len(si.Findings) > 0) {
@@ -429,4 +430,41 @@ func writeIsolation(p func(string, ...any), iso *IsolationReport) {
 		p("| %s | %s (%s) | %s (%s) | %.1f | %.1f | %.1f |\n", f.Kind, f.ItemA, f.NetA, f.ItemB, f.NetB, f.GapMil, f.PathMil, f.RequiredMil)
 	}
 	p("\n")
+}
+
+// writeEdge reports the board-edge safety distance of the plan.
+func writeEdge(p func(string, ...any), e *EdgeCheck) {
+	if e == nil || e.Policy == nil {
+		return
+	}
+	pol := e.Policy
+	p("### 板边安全距离\n\n%s 板边（%s）：外层 ≥ %.1f mil，内层/平面 ≥ %.1f mil（工艺下限 %.1f mil）。\n\n",
+		pol.Kind, pol.Source, pol.LayerReq(LayerTop), pol.LayerReq(LayerInner1), pol.FabMinMil)
+	p("| 层 | 类 | 要求 mil | 实测最小 mil | 对象 |\n|---|---|---|---|---|\n")
+	for _, l := range e.Layers {
+		if !l.Measured {
+			continue
+		}
+		p("| %d | %s | %.1f | %.2f | %s %s |\n", l.Layer, l.Class, l.RequiredMil, l.MinMil, l.Kind, l.Net)
+	}
+	for _, id := range sortedDomainIDs(pol.ByDomain) {
+		d := pol.ByDomain[id]
+		p("\n- 域 %s：到板边与金属安装孔 ≥ %.1f mil（%s 绝缘，间隙 %.2f / 爬电 %.2f mm）", id, d.Mil, d.Insulation, d.ClearanceMm, d.CreepageMm)
+	}
+	for _, f := range e.Findings {
+		p("\n- **%s** %s", f.Level, f.Message)
+	}
+	for _, n := range e.Notes {
+		p("\n- %s", n)
+	}
+	p("\n\n")
+}
+
+func sortedDomainIDs(m map[string]*EdgeDomain) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

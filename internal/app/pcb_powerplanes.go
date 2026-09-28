@@ -17,6 +17,7 @@ package app
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
 	"io"
 	"sort"
 	"strings"
@@ -124,16 +125,27 @@ func runPowerPlanes(cfg *appConfig, window string, gndLayer, powerLayer int, gnd
 		}
 	}
 
-	// Board outline → the pour rectangle (inset a hair so the plane sits inside).
-	rect, rerr := outlineRect(cfg, window, 10)
+	// Board outline → the plane boundary: the centre-line outline polygon
+	// inset by the inner-layer board-edge safety distance (plane pull-back,
+	// 30 mil default, never below the live Board Outline rule). The old
+	// 10 mil inset of the stroke-inclusive bbox left planes 5 mil from the cut.
+	edgePol, eerr := pourEdgeOpts{}.edgePolicy(cfg, window)
+	if eerr != nil {
+		return eerr
+	}
+	planeInset := edgePol.LayerReq(pcbauto.LayerInner1)
+	boundary, rect, rerr := pourBoundary(cfg, window, planeInset)
 	if rerr != nil {
 		return fmt.Errorf("read board outline (needed for the plane pour): %w", rerr)
+	}
+	if gndAsPlane && edgePol.RuleMil < planeInset-0.05 {
+		warnings = append(warnings, fmt.Sprintf("GND becomes a negative plane (内电层): the host draws it to the Board Outline rule (%.1f mil), not to the pour polygon — run `pcb rules apply --intent <intent.json>` (raises the rule to %.1f mil) or add a no-inner-electrical edge band (`pcb region create --rule no-inner-electrical`)", edgePol.RuleMil, planeInset))
 	}
 
 	if dryRun {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
-		return enc.Encode(map[string]any{"dryRun": true, "plan": plan, "routeAsTracks": routeAsTracks, "warnings": warnings, "pourRect": rect, "gndAsPlane": gndAsPlane, "gndLayer": gndLayer, "stackup": stackupPlan})
+		return enc.Encode(map[string]any{"dryRun": true, "plan": plan, "routeAsTracks": routeAsTracks, "warnings": warnings, "pourRect": rect, "pourBoundary": boundary, "edgeInsetMil": planeInset, "gndAsPlane": gndAsPlane, "gndLayer": gndLayer, "stackup": stackupPlan})
 	}
 
 	// Only the explicit, preflighted upgrade may change the copper-layer count.
@@ -187,7 +199,7 @@ func runPowerPlanes(cfg *appConfig, window string, gndLayer, powerLayer int, gnd
 			warnings = append(warnings, fmt.Sprintf("net %q: %d pad(s) had no clearance-clean via spot — left unstitched (check DRC)", p.Net, st.Unplaced))
 		}
 		pres, perr := requestAction(cfg, "pcb.pour.create", window, map[string]any{
-			"net": p.Net, "layer": p.Layer, "points": rectCorners(rect[0], rect[1], rect[2], rect[3]),
+			"net": p.Net, "layer": p.Layer, "points": boundary,
 		})
 		if perr == nil && pres != nil {
 			if b, ok := mnav(pres.Result, "poured").(bool); ok {

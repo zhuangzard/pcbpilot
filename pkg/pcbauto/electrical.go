@@ -366,6 +366,8 @@ type Analysis struct {
 	IRBudget IRBudget `json:"irBudget"`
 	// Iso is the domain insulation (intent pairs), nil without an intent.
 	Iso *IsoRules `json:"isolation,omitempty"`
+	// Edge is the board-edge safety distance (intent "edge" or the defaults).
+	Edge *EdgePolicy `json:"edge,omitempty"`
 	// spans are the intent voltage envelopes [lo, hi] of the nets (ΔV
 	// clearance between two nets of one domain, hvrelief.go).
 	spans  map[string]voltSpan
@@ -413,6 +415,7 @@ func Analyze(b *Board, spec PowerSpec, stack *Stackup) *Analysis {
 		a.Iso = buildIsoRules(b, spec.Intent)
 		a.spans = intentSpans(b, spec.Intent)
 	}
+	a.Edge = EdgeFromIntent(spec.Intent, b)
 	a.coated = spec.Coated
 	if spec.IRBudget != nil {
 		a.IRBudget = *spec.IRBudget

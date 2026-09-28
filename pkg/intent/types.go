@@ -10,6 +10,8 @@
 // dependency; the CLI (`pcbpilot intent derive`) does the I/O.
 package intent
 
+import "github.com/zhuangzard/pcbpilot/pkg/pcbauto"
+
 // SchemaVersion of intent.json.
 const SchemaVersion = 1
 
@@ -32,7 +34,18 @@ type Intent struct {
 	Copper      *Copper      `json:"copper,omitempty"`
 	Simulation  *SimInfo     `json:"simulation,omitempty"`
 	Definitions *Definitions `json:"definitions,omitempty"`
+	// Edge is the board-edge safety distance (板边安全距离): outer / inner
+	// copper to the routed or V-cut edge, and per insulated domain the
+	// distance to the edge and metal mounting holes (accessible surfaces).
+	Edge *Edge `json:"edge,omitempty"`
 }
+
+// Edge is intent.json "edge" — the same type pcb auto reads
+// (pcbauto.IntentEdge), so producer and engine cannot drift.
+type Edge = pcbauto.IntentEdge
+
+// EdgeDomain is one insulated domain's board-edge distance.
+type EdgeDomain = pcbauto.EdgeDomain
 
 // Sources records provenance.
 type Sources struct {

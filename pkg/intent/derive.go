@@ -110,6 +110,7 @@ func Derive(in Input) (*Intent, error) {
 	c.buildNets()
 	c.assignDomainsToBlocks()
 	c.buildPairs()
+	c.buildEdge()
 	c.buildNetClasses()
 	c.buildFindings()
 	return c.out, nil

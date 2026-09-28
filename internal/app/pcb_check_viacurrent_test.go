@@ -35,7 +35,7 @@ func TestPcbCheckViaCurrentOffline(t *testing.T) {
 	}
 	run := func(board string) (pcbCheckReport, error) {
 		var out, errb bytes.Buffer
-		err := runPcbCheckIntent(nil, "", 3, nil, intentPath, board, true, true, &out, &errb)
+		err := runPcbCheckIntent(nil, "", 3, nil, intentPath, board, "", true, true, &out, &errb)
 		var rep pcbCheckReport
 		if jerr := json.Unmarshal(out.Bytes(), &rep); jerr != nil {
 			t.Fatalf("%v: %s %s", jerr, out.String(), errb.String())

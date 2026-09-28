@@ -286,8 +286,17 @@ func TestIntentRulesPlanESP32FromCleanBoard(t *testing.T) {
 	closeTo(t, "POWER max kept", l1["maxValue"], 2.54)
 	sp := mnav(rc, "Spacing", "Safe Spacing", "PP_SWITCH", "tables", "1", "content").([]any)
 	closeTo(t, "SWITCH Track/Track", sp[0].([]any)[0], 10*0.0254)
-	closeTo(t, "SWITCH Copper zone/Track", sp[7].([]any)[0], 0.254)                // default 0.254 ≥ 10 mil kept
-	closeTo(t, "SWITCH Board Outline/Track untouched", sp[11].([]any)[0], 0.29972) // non-copper pair
+	closeTo(t, "SWITCH Copper zone/Track", sp[7].([]any)[0], 0.254) // default 0.254 ≥ 10 mil kept
+	// Board Outline × copper = the edge safety distance (default intent-less
+	// policy: 30 mil inner / plane pull-back covers the 20 mil outer copper).
+	closeTo(t, "SWITCH Board Outline/Track = edge distance", sp[11].([]any)[0], 30*0.0254)
+	closeTo(t, "SWITCH Board Outline/Copper zone = edge distance", sp[11].([]any)[7], 30*0.0254)
+	closeTo(t, "SWITCH Board Outline/Slot untouched", sp[11].([]any)[8], 0.29972) // non-copper pair
+	defSS := mnav(rc, "Spacing", "Safe Spacing", "copperThickness1oz", "tables", "1", "content").([]any)
+	closeTo(t, "default rule Board Outline/Copper zone raised", defSS[11].([]any)[7], 30*0.0254)
+	if p.Edge == nil || p.Edge.RuleMil != 30 || len(p.Edge.Cells) != 8 {
+		t.Fatalf("edge plan: %+v", p.Edge)
+	}
 	via := mnav(rc, "Physics", "Via Size", "PP_POWER", "form").(map[string]any)
 	closeTo(t, "via outer", via["viaOuterdiameterDefault"], 24*0.0254)
 	closeTo(t, "via hole", via["viaInnerdiameterDefault"], 12*0.0254)
@@ -533,7 +542,20 @@ func TestIntentRulesLeavePcbAutoBaselineUnchanged(t *testing.T) {
 	p := planIntentRules(mustIntent(t), snapshotOf(t, cfg), netSet(esp32PcbNets), nil)
 	before := parsePcbRules(map[string]any{"rules": map[string]any{"config": cfg["ruleConfiguration"]}})
 	after := parsePcbRules(map[string]any{"rules": map[string]any{"config": p.ruleConfiguration}})
+	// The one intended move: the board-edge distance (Board Outline ↔
+	// Copper/Plane Zone) rises from the host's 10 mil to the 30 mil default.
+	if after.copperToEdgeMil != 30 {
+		t.Fatalf("copper-to-edge after the push = %v, want 30", after.copperToEdgeMil)
+	}
+	after.copperToEdgeMil = before.copperToEdgeMil
 	if before != after || before.source != "live" {
 		t.Fatalf("pcb auto baseline moved: %+v → %+v", before, after)
+	}
+	// Idempotent: planning again over the pushed configuration is a no-op.
+	again := planIntentRules(mustIntent(t), snapshotOf(t, map[string]any{"ruleConfiguration": p.ruleConfiguration, "classes": cfg["classes"], "netRules": p.netRules}), netSet(esp32PcbNets), nil)
+	for _, ch := range again.RuleChanges {
+		if strings.HasPrefix(ch.Path, "Spacing.Safe Spacing.copperThickness1oz") {
+			t.Fatalf("default edge cells not idempotent: %+v", ch)
+		}
 	}
 }

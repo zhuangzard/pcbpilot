@@ -21,6 +21,8 @@ type Intent struct {
 	Pairs      []IntentPair          `json:"pairs"`
 	NetClasses []IntentNetClass      `json:"netClasses"`
 	Findings   []IntentFinding       `json:"findings"`
+	// Edge is the board-edge safety distance (additive; nil = defaults).
+	Edge *IntentEdge `json:"edge,omitempty"`
 	// Copper is the stackup/sizing assumptions (ΔT, copper weights, via
 	// plating and margin) the currents were sized with.
 	Copper *IntentCopper `json:"copper,omitempty"`

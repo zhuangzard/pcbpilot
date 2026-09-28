@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
 )
 
 // Spec is the product-level input (`--spec spec.json`): the things a
@@ -35,6 +37,29 @@ type Spec struct {
 	USBBudgetA float64 `json:"usbBudgetA,omitempty"`
 	// Rules override the fabrication minimums (mil).
 	Rules *SpecRules `json:"rules,omitempty"`
+	// Edge declares how the board is separated from the panel and
+	// overrides the board-edge safety distances (default: routed edge,
+	// 20 mil outer / 30 mil inner).
+	Edge *SpecEdge `json:"edge,omitempty"`
+}
+
+// SpecEdge is spec.json "edge".
+type SpecEdge struct {
+	// EdgeKind is routed | vcut | mixed (default routed).
+	EdgeKind string `json:"edgeKind,omitempty"`
+	// OuterMil / InnerMil / VcutMil raise or lower the defaults; never
+	// below the fabricator's floor (0.2 mm routed, 0.4 mm V-cut).
+	OuterMil float64 `json:"outerMil,omitempty"`
+	InnerMil float64 `json:"innerMil,omitempty"`
+	VcutMil  float64 `json:"vcutMil,omitempty"`
+	// Insulation is the grade hazardous copper needs to the board edge and
+	// metal mounting holes: reinforced (default — the edge is accessible)
+	// or basic (the enclosure provides the second means of protection, or
+	// the mounting hardware is protectively earthed).
+	Insulation string `json:"insulation,omitempty"`
+	// DomainMil raises a domain's edge distance (key: domain id or any net
+	// of the domain, mil). A value below the insulation distance is ignored.
+	DomainMil map[string]float64 `json:"domainMil,omitempty"`
 }
 
 // SpecRail is a declared rail.
@@ -152,6 +177,28 @@ func ParseSpec(b []byte) (*Spec, error) {
 	}
 	if r := s.Rules; r != nil && (r.ViaPlatingMil < 0 || r.ViaPlatingMil > 3) {
 		return nil, fmt.Errorf("spec.rules.viaPlatingMil %.2f: want 0..3 mil (JLC ≈ 0.7)", r.ViaPlatingMil)
+	}
+	if e := s.Edge; e != nil {
+		kind, err := pcbauto.NormEdgeKind(e.EdgeKind)
+		if err != nil {
+			return nil, fmt.Errorf("spec.edge: %w", err)
+		}
+		_, _, _, fab, _ := pcbauto.EdgeDefaults(kind)
+		for name, v := range map[string]float64{"outerMil": e.OuterMil, "innerMil": e.InnerMil, "vcutMil": e.VcutMil} {
+			if v != 0 && v < fab {
+				return nil, fmt.Errorf("spec.edge.%s %.1f mil is below the fabricator's %s floor %.1f mil", name, v, kind, fab)
+			}
+		}
+		switch strings.ToLower(e.Insulation) {
+		case "", "basic", "supplementary", "double", "reinforced":
+		default:
+			return nil, fmt.Errorf("spec.edge.insulation %q: want basic|supplementary|double|reinforced", e.Insulation)
+		}
+		for k, v := range e.DomainMil {
+			if v < 0 {
+				return nil, fmt.Errorf("spec.edge.domainMil[%s]: negative distance", k)
+			}
+		}
 	}
 	return &s, nil
 }
