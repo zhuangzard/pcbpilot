@@ -39,6 +39,30 @@ var RepoSlug = "zhuangzard/pcbpilot"
 // RepoEnv overrides RepoSlug at run time (e.g. to test another channel).
 const RepoEnv = "PCBPILOT_RELEASE_REPO"
 
+// ReleaseBaseEnv points every release URL (latest-version lookup and asset
+// downloads) at another server: {base}/latest answers {"tag_name":"vX.Y.Z"} and
+// {base}/download/vX.Y.Z/<asset> serves the assets. For offline tests and
+// private mirrors; the checksum-verified third-party mirror fallback is off
+// while it is set.
+const ReleaseBaseEnv = "PCBPILOT_RELEASE_BASE_URL"
+
+func releaseBase() string {
+	return strings.TrimRight(strings.TrimSpace(os.Getenv(ReleaseBaseEnv)), "/")
+}
+
+// ReleaseAssetURL is the download URL of one release asset.
+func ReleaseAssetURL(version, asset string) string {
+	if b := releaseBase(); b != "" {
+		return fmt.Sprintf("%s/download/v%s/%s", b, strings.TrimPrefix(version, "v"), asset)
+	}
+	return fmt.Sprintf("https://github.com/%s/releases/download/v%s/%s", Repo(), strings.TrimPrefix(version, "v"), asset)
+}
+
+// ReleasePageURL is the human release page of a version.
+func ReleasePageURL(version string) string {
+	return fmt.Sprintf("https://github.com/%s/releases/tag/v%s", Repo(), strings.TrimPrefix(version, "v"))
+}
+
 // Repo returns the effective release repository.
 func Repo() string {
 	if v := strings.TrimSpace(os.Getenv(RepoEnv)); strings.Count(v, "/") == 1 {
@@ -57,27 +81,51 @@ const (
 )
 
 // clientOrder is the deterministic client iteration order.
-var clientOrder = []string{"claude", "codex", "agents"}
+// zcode reads ~/.zcode/skills (setup-agent.sh links it when ~/.zcode exists).
+var clientOrder = []string{"claude", "codex", "agents", "zcode"}
 
 // Endpoint builders, overridable in tests to point at an httptest server.
 var (
 	tarballURL = func(version string) string {
-		return fmt.Sprintf("https://github.com/%s/releases/download/v%s/skills.tar.gz", Repo(), version)
+		return ReleaseAssetURL(version, "skills.tar.gz")
 	}
 	latestAPIURL = func() string {
+		if b := releaseBase(); b != "" {
+			return b + "/latest"
+		}
 		return fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", Repo())
 	}
 	latestWebURL = func() string {
+		if b := releaseBase(); b != "" {
+			return b + "/latest"
+		}
 		return fmt.Sprintf("https://github.com/%s/releases/latest", Repo())
 	}
 )
 
 // SkillTarget is one installed (or installable) skill location.
 type SkillTarget struct {
-	Client    string `json:"client"`    // "claude" | "codex" | "agents"
+	Client    string `json:"client"`    // "claude" | "codex" | "agents" | "zcode"
 	Dir       string `json:"dir"`       // absolute skill dir
 	Present   bool   `json:"present"`   // dir exists on disk
 	Installed string `json:"installed"` // version marker, "" if unknown/missing
+	// Linked is the symlink target when the skill dir is a symlink (a source
+	// install from a git checkout). Updaters never write through it: `git pull`
+	// is what updates a linked skill.
+	Linked string `json:"linked,omitempty"`
+}
+
+// SkillLinkTarget returns where dir points when it is a symlink, else "".
+func SkillLinkTarget(dir string) string {
+	fi, err := os.Lstat(dir)
+	if err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		return ""
+	}
+	if r, err := filepath.EvalSymlinks(dir); err == nil {
+		return r
+	}
+	t, _ := os.Readlink(dir)
+	return t
 }
 
 // skillDir returns the skill dir for a client under $HOME, or "" if unknown.
@@ -100,6 +148,8 @@ func skillDir(client string) string {
 		}
 	case "agents":
 		base = filepath.Join(home, ".agents")
+	case "zcode":
+		base = filepath.Join(home, ".zcode")
 	default:
 		return ""
 	}
@@ -116,8 +166,8 @@ func ValidateClients(clients []string) error {
 		clients = clientOrder
 	}
 	for _, client := range clients {
-		if client != "codex" && client != "claude" && client != "agents" {
-			return fmt.Errorf("unknown skill client %q (want codex, claude, or agents)", client)
+		if client != "codex" && client != "claude" && client != "agents" && client != "zcode" {
+			return fmt.Errorf("unknown skill client %q (want codex, claude, agents, or zcode)", client)
 		}
 		if skillDir(client) == "" {
 			return fmt.Errorf("invalid %s client home: CODEX_HOME/CLAUDE_CONFIG_DIR and user home must be absolute paths", client)
@@ -145,6 +195,7 @@ func Targets(onlyPresent bool) []SkillTarget {
 			Dir:       dir,
 			Present:   present,
 			Installed: readMarker(dir),
+			Linked:    SkillLinkTarget(dir),
 		})
 	}
 	return out
@@ -236,6 +287,10 @@ type SyncOptions struct {
 	// CreateMissing installs into a client dir even if it doesn't exist yet
 	// (the manual `skill sync` default; the daemon leaves this false).
 	CreateMissing bool
+	// Assets, when set, supplies skills.tar.gz (a local asset dir or a pinned
+	// release) instead of the default GitHub download; its Version() is written
+	// verbatim as the marker, so X.Y.Z-dev.N local packages keep their suffix.
+	Assets AssetSource
 }
 
 // TargetOutcome is the per-dir result of a sync.
@@ -244,8 +299,9 @@ type TargetOutcome struct {
 	Dir    string `json:"dir"`
 	From   string `json:"from"`   // installed version before
 	To     string `json:"to"`     // target version
-	Status string `json:"status"` // updated|up-to-date|created|preserved|skipped|error
+	Status string `json:"status"` // updated|up-to-date|created|preserved|skipped|linked|error
 	Err    string `json:"err,omitempty"`
+	Linked string `json:"linked,omitempty"` // symlink target of a source-install skill
 }
 
 // SyncResult is the full sync report.
@@ -265,6 +321,9 @@ func SyncSkills(ctx context.Context, opts SyncOptions, logf func(string, ...any)
 		}
 	}
 	target := SemverCore(opts.TargetVersion)
+	if opts.Assets != nil {
+		target = strings.TrimPrefix(opts.Assets.Version(), "v")
+	}
 	if target == "" {
 		return SyncResult{}, fmt.Errorf("sync: bad target version %q", opts.TargetVersion)
 	}
@@ -293,6 +352,13 @@ func SyncSkills(ctx context.Context, opts SyncOptions, logf func(string, ...any)
 		}
 		present := isDir(dir)
 		from := readMarker(dir)
+		if link := SkillLinkTarget(dir); link != "" {
+			// Source install: the dir is a symlink into a git checkout. Writing
+			// release files through it would dirty the checkout; `git pull`
+			// (pcbpilot update on a source install) is what updates it.
+			res.Outcomes = append(res.Outcomes, TargetOutcome{Client: c, Dir: dir, From: from, To: target, Status: "linked", Linked: link})
+			continue
+		}
 		if !present && !(opts.CreateMissing) {
 			res.Outcomes = append(res.Outcomes, TargetOutcome{Client: c, Dir: dir, From: from, To: target, Status: "skipped", Err: "not installed"})
 			continue
@@ -310,7 +376,14 @@ func SyncSkills(ctx context.Context, opts SyncOptions, logf func(string, ...any)
 
 	// Download + extract the release skill tree once into a temp dir.
 	log("skill-sync: fetching skills.tar.gz for v%s", target)
-	srcRoot, cleanup, err := fetchSkillTree(ctx, target)
+	var srcRoot string
+	var cleanup func()
+	var err error
+	if opts.Assets != nil {
+		srcRoot, cleanup, err = assetSkillTree(ctx, opts.Assets)
+	} else {
+		srcRoot, cleanup, err = fetchSkillTree(ctx, target)
+	}
 	if err != nil {
 		// Every pending job fails, but that's best-effort — report and return.
 		for _, j := range jobs {
@@ -419,19 +492,31 @@ func fetchSkillTree(ctx context.Context, version string) (root string, cleanup f
 	if len(archive) > 64<<20 {
 		return "", func() {}, fmt.Errorf("skills.tar.gz exceeds 64 MiB")
 	}
+	// Verify the entire archive before trusting or installing any extracted file.
+	if !legacyNoChecksum && !strings.EqualFold(want, checksumHex(archive)) {
+		return "", func() {}, fmt.Errorf("checksum mismatch for skills.tar.gz")
+	}
+	return extractSkillTree(archive, version, legacyNoChecksum)
+}
 
+// assetSkillTree extracts skills.tar.gz from an explicit asset source (whose
+// Fetch has already verified the checksum).
+func assetSkillTree(ctx context.Context, src AssetSource) (string, func(), error) {
+	archive, err := src.Fetch(ctx, "skills.tar.gz", 64<<20)
+	if err != nil {
+		return "", func() {}, fmt.Errorf("skills.tar.gz: %w", err)
+	}
+	return extractSkillTree(archive, strings.TrimPrefix(src.Version(), "v"), false)
+}
+
+// extractSkillTree unpacks a verified skills.tar.gz into a temp dir and checks
+// that its SKILL.md declares version.
+func extractSkillTree(archive []byte, version string, legacyNoChecksum bool) (root string, cleanup func(), err error) {
 	tmp, err := os.MkdirTemp("", "easyeda-skill-*")
 	if err != nil {
 		return "", func() {}, err
 	}
 	cleanup = func() { _ = os.RemoveAll(tmp) }
-
-	// Verify the entire archive before trusting or installing any extracted file.
-	sum := sha256.Sum256(archive)
-	if !legacyNoChecksum && !strings.EqualFold(want, hex.EncodeToString(sum[:])) {
-		cleanup()
-		return "", func() {}, fmt.Errorf("checksum mismatch for skills.tar.gz")
-	}
 	gz, err := gzip.NewReader(bytes.NewReader(archive))
 	if err != nil {
 		cleanup()
@@ -744,7 +829,7 @@ func StartupSync(ctx context.Context, daemonVersion string, logf func(string, ..
 	}
 	latest, err := LatestReleaseVersion(ctx)
 	if err == nil && SemverLess(target, latest) {
-		log("update available: CLI v%s < latest v%s — run `pcbpilot update`, then restart the daemon; "+
-			"the connector .eext still needs a manual re-import (`pcbpilot update --check` prints the URL)", target, latest)
+		log("update available: v%s < latest v%s — with auto-update on the daemon applies it when EasyEDA is idle; "+
+			"otherwise run `pcbpilot update` (the connector .eext is re-imported by hand; health prints the steps)", target, latest)
 	}
 }

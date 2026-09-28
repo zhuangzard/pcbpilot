@@ -1020,7 +1020,11 @@ type healthResult struct {
 	// (the extension API engine). It guides the Skill preflight but does not
 	// authorize or refuse ordinary action dispatch.
 	HostCompatibility *hostCompatibilityReport `json:"hostCompatibility,omitempty"`
-	Checked           []checkedHealth          `json:"checked"`
+	// Updates mirrors the daemon's self-update block; Notices are the lines an
+	// Agent must relay to the user (upgrade done, connector import pending …).
+	Updates *healthUpdates  `json:"updates,omitempty"`
+	Notices []string        `json:"notices,omitempty"`
+	Checked []checkedHealth `json:"checked"`
 }
 
 type checkedHealth struct {

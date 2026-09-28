@@ -133,27 +133,24 @@ func daemonFinding(cli, daemon string) versionFinding {
 	return f
 }
 
-// connectorFinding grades the CLI ↔ connector pair: major/minor drift is a
-// high-priority diagnostic (the connector may not have the requested handler),
-// while patch drift is compatible by release policy.
+// connectorFinding grades the CLI ↔ connector pair. Since 2026-09-28 (user
+// decision) any clean-release difference is blocking: the daemon refuses EDA
+// design actions until the matching connector is imported. Dev stamps and
+// -dev.N builds on either side are exempt.
 func connectorFinding(cli, connector string) versionFinding {
 	f := versionFinding{Component: "connector", Version: strings.TrimSpace(connector)}
 	cliCore, connCore := selfupdate.SemverCore(cli), selfupdate.SemverCore(connector)
 	switch {
-	case !selfupdate.IsCleanRelease(cli) || connCore == "":
+	case !selfupdate.IsCleanRelease(cli) || !selfupdate.IsCleanRelease(connector):
 		f.Severity = versionSevSkipped
 		f.Reason = fmt.Sprintf("CLI %s 或连接器 %s 非 clean release tag,不做硬判定",
 			display(cli), display(connector))
 	case cliCore == connCore:
 		f.Severity = versionSevOK
 		f.Reason = fmt.Sprintf("与 CLI 同版 %s", display(cli))
-	case sameMajorMinor(cliCore, connCore):
-		f.Severity = versionSevOK
-		f.Reason = fmt.Sprintf("CLI %s 与 connector %s 同属 major.minor 兼容线;patch 发布不要求升级插件市场版本",
-			display(cli), display(connector))
 	default:
 		f.Severity = versionSevBlock
-		f.Reason = fmt.Sprintf("CLI %s ≠ connector %s(差 minor 及以上)—— 连接器可能根本没有这版 CLI 要调的 handler,动作会静默走偏",
+		f.Reason = fmt.Sprintf("CLI %s ≠ connector %s —— daemon 在连接器对齐前拒绝设计动作(只放行 health/system.*/project.current/document.current)",
 			display(cli), display(connector))
 		f.Fix = fixConnectorStale
 	}
@@ -167,12 +164,11 @@ const fixDaemonStale = `重启 daemon(它跑的是启动那一刻的构建):
     不需要你先去 kill。
 确认:` + "`pcbpilot health`" + ` 的 version 应与 ` + "`pcbpilot version`" + ` 一致。`
 
-var fixConnectorStale = `重装连接器 .eext(跨 major/minor 兼容线时需要):
-  1. 下载 latest .eext:https://github.com/` + versionGateRepoSlug + `/releases/latest
-  2. EasyEDA「扩展管理 → 已安装」**先卸载旧的**(uuid 相同,不卸载直接导入会静默失败)
-  3. 导入新的 .eext
-  4. **完全退出并重启 EasyEDA** —— 重导入不会重载已开窗口,旧窗口会继续跑旧代码并抢 daemon
-  (插件市场版可原地自动更新但可能滞后;同 major.minor 的 patch 差异无需处理。)`
+var fixConnectorStale = `导入与 CLI 同版的连接器 .eext(daemon 已下载到 ~/.pcbpilot/connector/,路径见 pcbpilot health 的 updates.connector):
+  1. EasyEDA「高级 → 扩展管理器 → 已安装」**先卸载旧的** "PCB Pilot Connector"(uuid 相同,不卸载直接导入会静默失败)
+  2. 导入新的 .eext(未下载时:https://github.com/` + versionGateRepoSlug + `/releases/latest)
+  3. 启用 → 配置 → 勾选「允许外部交互」,然后重新加载编辑器(Web 刷新页面;桌面版重启 EasyEDA)
+  新连接器连上后 daemon 自动放行,无需重启 daemon。`
 
 // versionGateRepoSlug is the GitHub owner/repo shipping the connector .eext.
 var versionGateRepoSlug = selfupdate.Repo()
@@ -321,11 +317,11 @@ func versionCheckSkipped(cfg *appConfig) bool {
 func versionGateSummary(rep versionGateReport) string {
 	switch rep.Verdict {
 	case versionSevBlock:
-		return "⚠ 版本一致性:存在不兼容差异(仅诊断,不阻塞 action) —— 见 versionGate.findings[].fix"
+		return "⚠ 版本一致性:存在错位 —— connector 错位时 daemon 暂停设计动作直到导入同版连接器;见 versionGate.findings[].fix 与 updates.connector.steps"
 	case versionSevWarn:
 		return "⚠ 版本一致性:有落后组件(不拦)—— 见 versionGate.findings[].fix"
 	case versionSevOK:
-		return "✓ 版本一致性:CLI / daemon 同版,connector major.minor 兼容 " + display(rep.CLI)
+		return "✓ 版本一致性:CLI / daemon / connector 同版 " + display(rep.CLI)
 	default:
 		return "· 版本一致性:未判定(dev 构建或无连接器上报版本)"
 	}

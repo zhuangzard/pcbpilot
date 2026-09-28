@@ -171,6 +171,20 @@ export function toMcpResult(execution) {
   return result;
 }
 
+// healthResult is toMcpResult plus the daemon's update notices up front, so an
+// Agent sees "upgraded …" / "connector import pending: 1. 2. 3." before the JSON.
+export function healthResult(execution) {
+  const result = toMcpResult(execution);
+  const body = execution.ok ? execution.result : execution.error?.stdout;
+  const notices = Array.isArray(body?.notices) ? body.notices : [];
+  const steps = body?.updates?.connector?.misaligned?.length ? body.updates.connector.steps || [] : [];
+  if (notices.length === 0) return result;
+  const lines = ['pcbpilot notices — tell the user:', ...notices.map((n) => `- ${n}`)];
+  steps.forEach((s, i) => lines.push(`  ${i + 1}. ${s}`));
+  result.content.unshift({ type: 'text', text: lines.join('\n') });
+  return result;
+}
+
 // Project-level transfer has no existing-document routing prerequisite.
 export function buildProjectTransferArgs(input = {}) {
   for (const key of ['window', 'projectUuid']) {

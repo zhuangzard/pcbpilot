@@ -166,14 +166,16 @@ func TestProbeConnectorFlagsStaleConnector(t *testing.T) {
 	}
 }
 
-func TestProbeConnectorAcceptsPatchDriftWithinCompatibilityLine(t *testing.T) {
+func TestProbeConnectorPatchDriftIsBehind(t *testing.T) {
+	// 2026-09-28 user decision: the connector must equal the release exactly —
+	// the daemon pauses design actions otherwise, so patch drift is "behind".
 	host, port := fakeDaemon(t, `{"service":"pcbpilot","version":"v1.4.8","status":"ok",
 	  "windows":[{"windowId":"w1","connectorVersion":"1.4.6"},{"windowId":"w2","connectorVersion":"1.4.8"}]}`)
 	cfg := &appConfig{host: host, ports: fmt.Sprintf("%d-%d", port, port)}
 
 	rep := probeConnector(cfg, "1.4.8")
-	if rep.Status != "compatible" {
-		t.Fatalf("status=%q want compatible for same major.minor patch drift: %+v", rep.Status, rep)
+	if rep.Status != "behind" {
+		t.Fatalf("status=%q want behind for patch drift: %+v", rep.Status, rep)
 	}
 	gate := updateReport{
 		Target: "1.4.8", CLI: &selfupdate.CLIOutcome{Status: "up-to-date"},
@@ -182,11 +184,11 @@ func TestProbeConnectorAcceptsPatchDriftWithinCompatibilityLine(t *testing.T) {
 	gate.Behind = countBehind(gate)
 	gate.Mismatched, gate.Unverified = countVersionGateProblems(gate)
 	gate.Ready = gate.Behind == 0 && gate.Mismatched == 0 && gate.Unverified == 0
-	if !gate.Ready {
-		t.Fatalf("same-major.minor connector must pass latest gate: %+v", gate)
+	if gate.Ready {
+		t.Fatalf("patch-drifted connector must not be ready: %+v", gate)
 	}
-	if notes := strings.Join(updateNotes(gate), "\n"); strings.Contains(notes, ".eext") {
-		t.Fatalf("patch drift must not request connector upgrade: %q", notes)
+	if notes := strings.Join(updateNotes(gate), "\n"); !strings.Contains(notes, ".eext") {
+		t.Fatalf("patch drift must request the connector re-import: %q", notes)
 	}
 }
 

@@ -398,19 +398,23 @@ Workspace → Project → **Board** → schematic + PCB. Map to `eda.dmt_Board.*
   `.eext`. `make eext` keeps the uuid **stable** (update-in-place: uninstall old →
   import); `make eext-fresh` mints a **fresh uuid** (imports as a separate entry,
   no uninstall needed) as the fallback when the installed one won't uninstall.
-- **`pcbpilot update` (alias `upgrade`) — in-place self-update** for the two pieces
-  that *can* be updated programmatically: the **CLI binary** (downloads this
-  platform's release asset, verifies sha256 against the release `checksums.txt`
-  when present, runs the download once to confirm it reports the expected
-  version, then swaps it in with a same-dir rename) and the **skill dirs** (same
-  machinery as `pcbpilot skill sync`). The **connector `.eext` is reported, never
-  touched** — sideloads have no in-place update, so `update` prints the version
-  it found in each open window plus the re-import URL. `--check` is read-only and
-  `--check --exit-code` exits **10** unless the installed CLI/Skill and live
-  daemon/Connector are all verifiably equal to the exact target Release. This is
-  an explicit installation-accounting command; ordinary actions continue and
-  report version differences as diagnostics. A **dev build is never overwritten** without `--force`
-  (air rebuilds it anyway; silently replacing it would make the dev loop lie).
+- **`pcbpilot update` (alias `upgrade`) — one-step upgrade of every component**
+  (v0.6.1): CLI (sha256 + run-verify + atomic swap) → Skill in every client dir
+  (Claude Code / Codex / `~/.agents` / ZCode; symlinked source dirs left alone) →
+  MCP server (release asset `mcp.tar.gz` → `~/.pcbpilot/mcp/<v>` + `current`,
+  registered with every client, upstream entries retired) → sim tools → daemon
+  restart via the login service → connector `.eext` downloaded to
+  `~/.pcbpilot/connector/` with the 3 import steps → verify, with automatic rollback
+  (`--rollback` by hand). `--only/--skip`, `--check` (`--exit-code` 10 when anything is
+  behind), `--local-dir`, `--auto on|off|source|status`. **Automatic by default**: the
+  daemon checks (startup / 6 h / after 30 min idle, offline backoff 1m → 30m) and
+  applies releases when EasyEDA is idle, then restarts into the new binary and
+  verifies it. Source checkouts: `git pull --ff-only` + `setup-agent.sh`, notify-only
+  in auto mode unless `--auto source`. A **dev build is never overwritten** without `--force`.
+- **Connector version gate** (user decision 2026-09-28): the daemon refuses design
+  actions for a connector whose release differs from its own (diagnosis actions stay
+  open) and lifts the block when a matching connector connects; dev builds exempt.
+- **`pcbpilot mcp install|status|register`** — the MCP package and its client registrations.
 
 ---
 

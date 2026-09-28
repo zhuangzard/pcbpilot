@@ -186,7 +186,13 @@ irm https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.ps1 | iex
 The one-line script installs/updates the `pcbpilot` CLI/daemon, auto-detects
 installed clients and installs/updates the `pcbpilot` skill into each —
 Codex (`~/.codex/skills/pcbpilot`) and Claude Code
-(`~/.claude/skills/pcbpilot`) — and prints the connector `.eext` import URL.
+(`~/.claude/skills/pcbpilot`) — installs the MCP server when Node.js >= 20.17 is present (registered with Claude
+Code, Codex, ZCode and `~/.agents`), and prints the connector `.eext` import steps.
+**Upgrading later is automatic**: the daemon checks GitHub and upgrades CLI,
+Skill, MCP and simulators when EasyEDA is idle (rollback on failure; opt out with
+`pcbpilot update --auto off`). By hand it is one step: `pcbpilot update`
+(`--check` to only report, `--rollback` to go back). The connector is the one
+manual step — the daemon downloads it and pauses design actions until you re-import it.
 Both scripts fetch `checksums.txt` first and verify every asset's SHA-256, the
 CLI `--version` and the skill's `metadata.version` before replacing an installed
 file. Control skill install with env vars:
@@ -261,17 +267,15 @@ Use EasyEDA Pro V3 (3.2.x) or V4 (4.1.60 or newer recommended), desktop or Web.
 pcbpilot health reports hostCompatibility with line v3|v4 and ok; report the
 exact host form and version with the results.
 
-Before editing, confirm that these three parts use the same release version:
-1. pcbpilot CLI/daemon
-2. pcbpilot Skill
-3. PCB Pilot Connector extension
-
-Run pcbpilot update --check --exit-code. If the CLI or Skill is behind, run pcbpilot
-update. If the connector is behind, install pcbpilot-connector.eext from the
-same GitHub Release (uninstall the old PCB Pilot Connector first), save open
-documents, then reload the editor (Web: refresh the page; desktop: fully restart
-EasyEDA). Enable Allow external interaction and run pcbpilot health to verify the target
-project, page, and versions.
+Before editing, run pcbpilot health. Upgrades are automatic: the daemon updates
+the CLI, Skill, MCP server and simulators when EasyEDA is idle and reports the
+result in health.notices — relay those lines to the user. If
+health.updates.connector.misaligned is not empty, the daemon pauses design actions
+until the matching connector is imported: tell the user the 3 steps in
+health.updates.connector.steps (uninstall the old PCB Pilot Connector, import the
+downloaded ~/.pcbpilot/connector/pcbpilot-connector-vX.Y.Z.eext, enable Allow
+external interaction and reload the editor) and wait. Then run pcbpilot health to
+verify the target project, page, and versions.
 
 For schematic work, first read or create a local canonical connectivity JSON. Treat
 components, complete physical pins, stable net IDs, and pin-to-net/NC records as the

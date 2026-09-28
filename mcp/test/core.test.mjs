@@ -102,3 +102,21 @@ test('catalogued project transfers enforce window, identity and acknowledgement'
   }
   assert.throws(() => buildActionCallArgs({ name: 'project.open', mutates: true }, { window: 'w', payload: { projectUuid: 'p', allowDiscardUnsaved: 'true' } }));
 });
+
+test('healthResult puts update notices and connector steps before the JSON', async () => {
+  const { healthResult } = await import('../src/core.mjs');
+  const r = healthResult({
+    ok: true,
+    result: {
+      status: 'ok',
+      notices: ['pcbpilot upgraded 0.6.0 → 0.6.1: cli, skill, mcp', 'connector ≠ pcbpilot v0.6.1'],
+      updates: { connector: { misaligned: ['w1=0.6.0'], steps: ['uninstall', 'import /x.eext', 'enable + reload'] } },
+    },
+  });
+  assert.match(r.content[0].text, /tell the user/);
+  assert.match(r.content[0].text, /upgraded 0\.6\.0/);
+  assert.match(r.content[0].text, /2\. import \/x\.eext/);
+  assert.equal(r.content.length, 2);
+  const quiet = healthResult({ ok: true, result: { status: 'ok' } });
+  assert.equal(quiet.content.length, 1);
+});

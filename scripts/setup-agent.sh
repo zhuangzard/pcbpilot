@@ -6,6 +6,8 @@
 #   scripts/setup-agent.sh            # source build (Go + Node available)
 #   scripts/setup-agent.sh --release  # released CLI/Skill via install.sh instead
 #   scripts/setup-agent.sh --dry-run  # print what would happen
+#   scripts/setup-agent.sh --upgrade  # git pull --ff-only (refuses a dirty/diverged
+#                                     # checkout), then re-run setup and restart the daemon
 #
 # It installs everything an AI client (Claude Code / Codex) needs:
 #   1. pcbpilot CLI + daemon  → ~/.local/bin/pcbpilot (no sudo)
@@ -37,6 +39,14 @@
 #   --purge-upstream also stop the upstream daemon and move its CLI + data dir to the backup
 #   --keep-upstream  skip step 0
 #   --no-sim-tools   skip step 6 (ngspice / Elmer FEM)
+#   --restart-daemon restart a running service daemon so it runs the new build
+#                    (implied by --upgrade; `pcbpilot update` on a source install
+#                    pulls itself and then runs this script with --restart-daemon)
+#
+# The checkout is recorded in ~/.pcbpilot/install.json ({"kind":"source","repo":…})
+# so `pcbpilot update` knows to pull + re-run setup instead of downloading release
+# assets. The daemon never pulls a checkout on its own unless `pcbpilot update
+# --auto source` (fast-forward only, clean checkout only).
 #
 # The daemon login service is REQUIRED (`pcbpilot daemon service install`: launchd /
 # systemd --user / HKCU Run) — the connector only talks to a daemon on 61832, so a
@@ -51,17 +61,23 @@ MODE=source
 DRY=0
 UPSTREAM=clean
 SIMTOOLS=1
+UPGRADE=0
+RESTART=0
+PASS=()
 for a in "$@"; do
   case "$a" in
+    --upgrade) UPGRADE=1; continue ;;
+    --restart-daemon) RESTART=1 ;;
     --release) MODE=release ;;
     --dry-run) DRY=1 ;;
     --keep-upstream) UPSTREAM=keep ;;
     --purge-upstream) UPSTREAM=purge ;;
     --no-sim-tools) SIMTOOLS=0 ;;
     --no-service) echo "--no-service was removed: the daemon login service is required (developing pcbpilot with make dev? run 'pcbpilot daemon service uninstall' while developing)" >&2; exit 2 ;;
-    -h|--help) sed -n '2,44p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,56p' "$0"; exit 0 ;;
     *) echo "unknown option: $a" >&2; exit 2 ;;
   esac
+  PASS+=("$a")
 done
 
 say()  { printf '\033[1m==>\033[0m %s\n' "$*"; }
@@ -70,6 +86,27 @@ run()  { if [ "$DRY" = 1 ]; then printf '   $ %s\n' "$*"; else "$@"; fi; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
 [ -f "$REPO/AGENTS.md" ] && [ -d "$REPO/.agents/skills/pcbpilot" ] || { echo "run from a pcbpilot clone" >&2; exit 1; }
+
+# --upgrade: fast-forward the checkout, then re-run the (possibly updated) script.
+if [ "$UPGRADE" = 1 ]; then
+  if [ -n "$(git -C "$REPO" status --porcelain --untracked-files=no)" ]; then
+    echo "refusing to upgrade: $REPO has uncommitted changes (commit or stash them first; nothing was changed)" >&2
+    git -C "$REPO" status --short --untracked-files=no | head -5 >&2
+    exit 3
+  fi
+  say "Fetching $(git -C "$REPO" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || echo upstream)"
+  run git -C "$REPO" fetch --quiet
+  if [ "$DRY" = 0 ]; then
+    counts="$(git -C "$REPO" rev-list --left-right --count 'HEAD...@{u}' 2>/dev/null)" || { echo "the current branch has no upstream — set one (git branch --set-upstream-to …)" >&2; exit 3; }
+    ahead="${counts%%[[:space:]]*}"; behind="${counts##*[[:space:]]}"
+    if [ "$ahead" -gt 0 ] && [ "$behind" -gt 0 ]; then
+      echo "refusing to upgrade: local branch diverged from upstream ($ahead local / $behind upstream commits) — rebase or merge yourself" >&2
+      exit 3
+    fi
+    [ "$behind" -gt 0 ] && git -C "$REPO" pull --ff-only
+  fi
+  exec bash "$REPO/scripts/setup-agent.sh" --restart-daemon ${PASS[@]+"${PASS[@]}"}
+fi
 
 # 0. Upstream easyeda-agent -------------------------------------------------
 if [ "$UPSTREAM" != keep ]; then
@@ -223,7 +260,12 @@ CONN_VER="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$REPO/extension/extensi
 # skipping it left machines with no daemon after a reboot.
 NOSTART=""
 if [ "$DRY" = 0 ] && "$PCB" daemon health >/dev/null 2>&1; then
-  NOSTART="--no-start"; say "A pcbpilot daemon is already running — left as is (service registered for next login)"
+  if [ "$RESTART" = 1 ] && "$PCB" daemon service status >/dev/null 2>&1; then
+    say "Restarting the service daemon so it runs the new build"
+  else
+    NOSTART="--no-start"; say "A pcbpilot daemon is already running — left as is (service registered for next login)"
+    [ "$RESTART" = 1 ] && warn "the running daemon is not the login service (e.g. make dev) — restart it yourself to load the new build"
+  fi
 fi
 say "Installing the daemon login service (required)"
 if [ "$DRY" = 1 ]; then
@@ -254,6 +296,16 @@ fi
 if [ "$DRY" = 0 ]; then
   for _ in 1 2 3 4 5 6 7 8 9 10; do "$PCB" daemon health >/dev/null 2>&1 && break; sleep 1; done
   "$PCB" daemon health >/dev/null 2>&1 && say "daemon healthy" || warn "daemon not answering yet — see ~/.pcbpilot/daemon.log"
+fi
+
+# install.json: `pcbpilot update` pulls + re-runs this script for a source install.
+if [ "$DRY" = 0 ]; then
+  mkdir -p "$HOME/.pcbpilot"
+  KIND=source; [ "$MODE" = release ] && KIND=release
+  printf '{\n  "kind": "%s",\n  "repo": "%s",\n  "bin": "%s",\n  "version": "%s",\n  "installedAt": "%s"\n}\n' \
+    "$KIND" "$REPO" "$PCB" "$("$PCB" --version 2>/dev/null | sed 's/^pcbpilot //')" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$HOME/.pcbpilot/install.json"
+else
+  printf '   $ write %s\n' "$HOME/.pcbpilot/install.json"
 fi
 
 VERIFY_RC=0

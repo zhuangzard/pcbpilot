@@ -38,6 +38,21 @@ skill ──▶ Go CLI/daemon ──WebSocket──▶ connector .eext ──▶
 
 完整说明见 [docs/manual.md](docs/manual.md)。
 
+## 升级（给 Agent）
+
+- **默认全自动，Agent 不主动升级**：daemon 在启动、每 6 小时、空闲 30 分钟后首个动作时查 GitHub，
+  EasyEDA 空闲时自动升级 CLI/Skill/MCP/仿真工具并自检，失败回滚（`~/.pcbpilot/update.log`）。会话开始
+  跑 `pcbpilot health`，把 `notices` 原样转告用户；只有 `updates.auto` 为 `off` 时才建议 `pcbpilot update`。
+- 用户要求升级时：`pcbpilot update`（一步：CLI → Skill → MCP → 仿真工具 → 经登录服务重启 daemon →
+  下载连接器 → 校验）；`--check` 只读、`--rollback` 回退、`--auto on|off|source|status`。源码安装是
+  `git pull --ff-only` + `setup-agent.sh`（等价 `scripts/setup-agent.sh --upgrade`），脏/分叉 checkout 拒绝。
+  测试升级链只能用临时 HOME（`PCBPILOT_RELEASE_BASE_URL` / `--local-dir` 指向假发布），不得改真实用户配置。
+- **连接器版本门（2026-09-28 用户明确决定，覆盖旧的“版本差异只诊断”规则）**：CLI、daemon、Skill、MCP、
+  connector 必须同版。connector 与 daemon 发布版本不一致时 daemon 拒绝设计动作，只放行 health/system.*/
+  project.current/document.current；新连接器连上后自动放行。dev 构建（git describe 戳、`-dev.N`）两侧豁免；
+  `PCBPILOT_ALLOW_VERSION_SKEW=1` 仅供开发。health 显示错位时把 3 步 + `~/.pcbpilot/connector/` 路径告诉
+  用户并等待，不绕过、不用 GUI 代做。
+
 ## 官方插件库调研参考
 文章：docs/ecosystem-survey.md，遇到什么不确认的情况可以来这里参考分析，并更新认知到相应文档；
 

@@ -61,7 +61,7 @@ irm https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.ps1 | iex
 ```bash
 pcbpilot daemon service status # 登录服务已安装（必需）；缺失时 pcbpilot daemon service install
 pcbpilot health                # windows[] 出现目标工程/文档；connectorVersion 与仓库一致
-pcbpilot update --check        # 可选：CLI / Skill / 连接器三方版本
+pcbpilot update --check        # 可选：CLI / Skill / MCP / 仿真工具 / daemon / 连接器版本
 pcbpilot sim tools check       # ngspice（必需）/ Elmer（可选）路径、版本、状态与本机安装命令
 ```
 
@@ -72,14 +72,13 @@ pcbpilot sim tools check       # ngspice（必需）/ Elmer（可选）路径、
 
 ## 升级
 
-| 情况 | 做法 |
-|---|---|
-| 源码安装 | `git pull && scripts/setup-agent.sh`；连接器版本变了就按第 2 步重导 |
-| 发布版 | `pcbpilot update`（CLI + Skill）；升级后重启 daemon |
-| 只改了 CLI / daemon | 无需重导连接器 |
+无需操作：daemon 自动检查并在 EasyEDA 空闲时升级 CLI、Skill、MCP 和仿真工具，失败自动回滚；
+`pcbpilot health` 会告诉你升级结果。想手动：`pcbpilot update`（一步全部升级）、`pcbpilot update --check`
+（只看）、`pcbpilot update --auto off`（只提示不自动）、`pcbpilot update --rollback`（回退上一版）。
+源码安装用 `pcbpilot update` 或 `scripts/setup-agent.sh --upgrade`（只快进干净的 checkout）。
 
-`daemon start` 默认会把已存在的发布版 Skill 目录同步到当前 CLI 版本（开发构建不写入；
-`PCBPILOT_SKILL_PRESERVE=1` 保留本地改动）。连接器是侧载的，daemon 只能检测版本落后并提示，重导需要人来做。
+**连接器需要你手动重导**：版本与 CLI 不一致时 daemon 暂停设计动作，`pcbpilot health` 给出已下载的
+`~/.pcbpilot/connector/pcbpilot-connector-vX.Y.Z.eext` 和第 2 节同样的 3 步；导入后自动恢复。
 
 ## 常见卡点
 

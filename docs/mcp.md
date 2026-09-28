@@ -18,6 +18,11 @@ pcbpilot CLI ──HTTP──▶ pcbpilot daemon（127.0.0.1:61832）
                  PCB Pilot Connector（EasyEDA 扩展）──▶ 官方 eda.* API
 ```
 
+发布版安装与升级：MCP 以 Release 资产 `mcp.tar.gz`（含生产 node_modules，只需 Node.js ≥ 20.17）装到
+`~/.pcbpilot/mcp/<版本>`，客户端注册指向稳定的 `~/.pcbpilot/mcp/current/src/server.mjs`；`install.sh`、
+`pcbpilot update` 和 daemon 自动升级都会安装/更新它，`pcbpilot mcp status|install|register` 单独管理。
+源码安装仍由 `scripts/setup-agent.sh` 指向仓库内 `mcp/src/server.mjs`。
+
 所以 MCP 调用与直接敲命令走的是**同一条链路**：同样的 typed action 校验、审计日志、自动保存、
 版本诊断和 `--project/--doc` 目标锁定。MCP 不会绕过任何护栏。
 
@@ -25,7 +30,7 @@ pcbpilot CLI ──HTTP──▶ pcbpilot daemon（127.0.0.1:61832）
 
 | 工具 | 作用 |
 |---|---|
-| `pcbpilot_health` | daemon 与已连接窗口、版本（先调它） |
+| `pcbpilot_health` | daemon 与已连接窗口、版本、升级通知（先调它；结果首段 `pcbpilot notices — tell the user` 要原样转告用户） |
 | `pcbpilot_actions` | typed action 目录与参数说明（调领域工具前查它） |
 | `pcbpilot_artifact` / `_board` / `_document` / `_pcb` / `_project` / `_schematic` / `_system` | 7 个安全领域，每个执行一条该领域的 typed action |
 | `pcbpilot_project_transfer` | 打开 / 导出原生 EasyEDA 工程（固定官方 API 适配器，无需文档路由） |

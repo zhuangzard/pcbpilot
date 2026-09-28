@@ -31,10 +31,10 @@ import (
 // Endpoint builders, overridable in tests to point at an httptest server.
 var (
 	binaryURL = func(version, asset string) string {
-		return fmt.Sprintf("https://github.com/%s/releases/download/v%s/%s", Repo(), version, asset)
+		return ReleaseAssetURL(version, asset)
 	}
 	checksumsURL = func(version string) string {
-		return fmt.Sprintf("https://github.com/%s/releases/download/v%s/checksums.txt", Repo(), version)
+		return ReleaseAssetURL(version, "checksums.txt")
 	}
 )
 
@@ -339,6 +339,9 @@ func downloadToWithFallback(ctx context.Context, primary, dir string, mode os.Fi
 }
 
 func githubProxyURL(primary string) string {
+	if releaseBase() != "" {
+		return "" // an explicit release server has no third-party mirror
+	}
 	prefix, ok := os.LookupEnv(GitHubProxyEnv)
 	if !ok {
 		prefix = DefaultGitHubProxy
@@ -354,6 +357,11 @@ func githubProxyURL(primary string) string {
 }
 
 var errChecksumUnavailable = errors.New("release has no checksums.txt (HTTP 404)")
+
+// ErrAssetMissing: the release's checksums.txt does not list the asset — the
+// release predates it (e.g. mcp.tar.gz before v0.6.1). Callers skip that
+// component instead of failing the whole update.
+var ErrAssetMissing = errors.New("asset is not part of this release")
 
 // fetchChecksum pulls checksums.txt for the release and returns the sha256 hex
 // recorded for asset. Only HTTP 404 permits the legacy-release fallback;
@@ -394,7 +402,7 @@ func fetchChecksum(ctx context.Context, version, asset string) (string, error) {
 		found = fields[0]
 	}
 	if found == "" {
-		return "", fmt.Errorf("no checksum entry for %s", asset)
+		return "", fmt.Errorf("no checksum entry for %s: %w", asset, ErrAssetMissing)
 	}
 	return found, nil
 }

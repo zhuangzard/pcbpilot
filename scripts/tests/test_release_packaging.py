@@ -19,6 +19,7 @@ def load_script(name):
 
 pack = load_script("pack-skill")
 release = load_script("release-check")
+pack_mcp = load_script("pack-mcp")
 
 
 class TrackedSkillPackageTests(unittest.TestCase):
@@ -148,6 +149,62 @@ class ReleaseVersionAndAssetTests(unittest.TestCase):
         (dist / release.ASSETS[0]).unlink()
         with self.assertRaisesRegex(ValueError, "missing/empty"):
             release.write_checksums(dist)
+
+
+class MCPPackageAndManifestTests(unittest.TestCase):
+    """mcp.tar.gz + manifest.json: the assets the self-updater needs (v0.6.1)."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        repo = self.root / "repo"
+        (repo / "mcp/src").mkdir(parents=True)
+        (repo / "mcp/package.json").write_text('{"name":"pcbpilot-mcp","version":"0.0.0"}')
+        (repo / "mcp/package-lock.json").write_text("{}")
+        (repo / "mcp/src/server.mjs").write_text("#!/usr/bin/env node\n")
+        nm = self.root / "node_modules"
+        (nm / "@modelcontextprotocol/sdk").mkdir(parents=True)
+        (nm / "@modelcontextprotocol/sdk/package.json").write_text('{"version":"1.30.0"}')
+        (nm / ".bin").mkdir()
+        (nm / ".bin/tool").symlink_to("../@modelcontextprotocol/sdk/package.json")
+        self.repo, self.nm = repo, nm
+
+    def build(self, version="1.4.2"):
+        out = self.root / "dist/mcp.tar.gz"
+        pack_mcp.pack(version, out, self.repo, self.nm)
+        return out
+
+    def test_archive_is_versioned_deterministic_and_link_free(self):
+        out = self.build("v1.4.2")
+        first = out.read_bytes()
+        release.check_mcp(out, "1.4.2")
+        with tarfile.open(out) as archive:
+            names = archive.getnames()
+            self.assertTrue(all(n == "mcp" or n.startswith("mcp/") for n in names))
+            self.assertFalse(any("/.bin" in n for n in names), names)
+            self.assertEqual(archive.extractfile("mcp/VERSION").read().decode().strip(), "1.4.2")
+        self.build("v1.4.2")
+        self.assertEqual(first, out.read_bytes(), "mcp.tar.gz must be byte-reproducible")
+        with self.assertRaisesRegex(ValueError, "VERSION differs"):
+            release.check_mcp(out, "1.4.3")
+
+    def test_manifest_lists_every_asset_with_sha256_and_min_connector(self):
+        dist = self.root / "dist"
+        dist.mkdir()
+        for name in release.MANIFEST_ASSETS:
+            (dist / name).write_bytes(name.encode())
+        release.write_manifest(dist, "1.4.2")
+        manifest = json.loads((dist / "manifest.json").read_text())
+        self.assertEqual(manifest["minConnector"], "1.4.2")
+        self.assertEqual(manifest["components"]["mcp"], "1.4.2")
+        self.assertEqual(set(manifest["assets"]), set(release.MANIFEST_ASSETS))
+        release.check_manifest(dist, "1.4.2")
+        (dist / "mcp.tar.gz").write_bytes(b"tampered")
+        with self.assertRaisesRegex(ValueError, "mismatch: mcp.tar.gz"):
+            release.check_manifest(dist, "1.4.2")
+        self.assertIn("mcp.tar.gz", release.ASSETS)
+        self.assertIn("manifest.json", release.ASSETS)
 
 
 if __name__ == "__main__":

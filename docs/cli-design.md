@@ -20,7 +20,8 @@ pcbpilot <domain> <action> [flags]
 | `pcbpilot daemon` | 守护进程管理（start / stop / restart / health；restart 与 start 同为前台阻塞） |
 | `pcbpilot web` | Web 编辑器页面生命周期；`reload` 与 `doc reload` 区分，保存后等待新连接和同一文档可读（用户明确要求时使用，不作卡死恢复） |
 | `pcbpilot audit` | 操作日志查看 |
-| `pcbpilot update` | 自更新（别名 `upgrade`）：CLI 二进制 + skill 目录 → latest；连接器只报不改 |
+| `pcbpilot update` | 一步全升级（别名 `upgrade`）：CLI → Skill → MCP → 仿真工具 → 重启 daemon → 下载连接器 → 校验/回滚；`--check` 只读，`--auto` 自动模式（默认开，由 daemon 执行），`--rollback` 回退 |
+| `pcbpilot mcp` | MCP server 安装 / 状态 / 各客户端注册（`update` 的 mcp 步骤同一实现） |
 | `pcbpilot skill` | skill 目录单独管理（status / sync；`update` 已含其能力） |
 | `pcbpilot debug` | 逃生舱（exec-js 等开发/调试命令） |
 

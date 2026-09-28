@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Offline smoke of a release package and a native CLI, outside any checkout.
 
---assets verifies all eight release assets, then runs only the current platform's
+--assets verifies every release asset, then runs only the current platform's
 CLI in a temporary directory. --binary + --skill-dir tests a native CI build
 without downloading a release. Never installs, starts a daemon, or calls EDA.
 """
@@ -24,7 +24,8 @@ import zipfile
 ASSETS = (
     "pcbpilot_darwin_amd64", "pcbpilot_darwin_arm64", "pcbpilot_linux_amd64",
     "pcbpilot_linux_arm64", "pcbpilot_windows_amd64.exe",
-    "pcbpilot-connector.eext", "skills.tar.gz", "install.sh", "install.ps1",
+    "pcbpilot-connector.eext", "skills.tar.gz", "mcp.tar.gz", "install.sh", "install.ps1",
+    "manifest.json",
 )
 # These helpers are directly executable in the public package. Other Python
 # helpers are intentionally invoked via python3 and need only read permission.
@@ -185,7 +186,9 @@ def smoke_cli(binary, tag, work):
         # Offline commands must not consult any active user daemon even if they
         # regress. Do not change HOME or the user's installation/configuration.
         command = [str(binary), "--host", "127.0.0.1", "--ports", "1-1", *map(str, args)]
-        result = subprocess.run(command, cwd=work, capture_output=True, text=True, encoding="utf-8", timeout=30)
+        # PCBPILOT_UPDATE_NOTICE=0: no session notice / update check from the smoke.
+        env = dict(os.environ, PCBPILOT_UPDATE_NOTICE="0")
+        result = subprocess.run(command, cwd=work, capture_output=True, text=True, encoding="utf-8", timeout=30, env=env)
         label = " ".join(map(str, args[:2]))
         if error:
             require(result.returncode != 0 and error in result.stderr,

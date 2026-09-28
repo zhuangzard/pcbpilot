@@ -217,7 +217,8 @@ func TestSkillSyncFailureIsolatedAcrossClients(t *testing.T) {
 	}
 	serveRelease(t, "1.4.2", makeVersionedTarball(t, "1.4.2", map[string]string{"SKILL.md": "NEW"}, false))
 	res, err := SyncSkills(context.Background(), SyncOptions{TargetVersion: "1.4.2", CreateMissing: true}, nil)
-	if err == nil || len(res.Outcomes) != 3 || res.Changed != 2 {
+	// claude fails; codex, agents and zcode (4 clients since v0.6.1) install.
+	if err == nil || len(res.Outcomes) != 4 || res.Changed != 3 {
 		t.Fatalf("multi-client failure hidden: %+v %v", res, err)
 	}
 	if readMarker(skillDir("codex")) != "1.4.2" {
