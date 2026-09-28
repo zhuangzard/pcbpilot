@@ -380,6 +380,40 @@ input/evidence files in data/ (one self-contained package per version). */ -}}
 > 本节不可用：{{missing $R "6A"}}
 {{end}}
 
+## 6B 布局布线美观度 Aesthetics（只报告）
+{{with $R.Aesthetics}}
+**{{f1 .Score}}**（布局 {{f1 .Placement}} / 布线 {{f1 .Routing}}，布通份额 {{f3 .RoutedShare}}）· 来源 {{.Source}} · 约束层级 {{.Tier}} · 风格 `{{.Profile}}`
+
+风格：{{md .ProfileNote}}
+
+> 边界：{{.Boundary}}
+
+| 项 | 指标 | 值 | 分 | 说明 |
+|---|---|---|---|---|
+{{- range .Metrics}}
+| {{.ID}} | {{md .Name}} | {{.Value}} | {{.Score}} | {{md .Detail}} |{{end}}
+{{if .Symmetry}}
+同构子电路（P4）：
+
+| 类型 | 签名 | 实例 | 最佳变换 | 误差 | 分 |
+|---|---|---|---|---|---|
+{{- range .Symmetry}}
+| {{.Kind}} | {{md .Signature}} | {{md .Instances}} | {{.Axis}} | {{.Error}} | {{.Score}} |{{end}}
+{{end}}
+{{- if .Exemptions}}
+电气优先豁免：
+{{range .Exemptions}}
+- {{md .Label}}：{{.Value}} — {{md .Note}}{{end}}
+{{end}}
+<details><summary>约束优先级（美观为最低一层软约束）</summary>
+{{range .Priority}}
+- {{md .Label}}（{{.Value}}）：{{md .Note}}{{end}}
+
+</details>
+{{else}}
+> 本节不可用：未提供板级 dump / board.routed.json，plan.json 也没有 joint.aesthetics（只报告章节，不计入缺失项）。
+{{end}}
+
 ## 7 验证状态
 
 | 检查 | 结论 | 说明 | 证据 |

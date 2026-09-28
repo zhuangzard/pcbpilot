@@ -328,6 +328,10 @@ func writeJoint(p func(string, ...any), r *Report) {
 		}
 		p("| %s | %s | %.0f | %s |\n", g, it.ID, it.Score, it.Detail)
 	}
+	if a := j.Aesthetics; a != nil {
+		p("\n美观度（只报告，权重 %.2f，不计入综合分；电气规则优先）：%.1f（布局 %.1f / 布线 %.1f，布通份额 %.2f）。明细见 `pcbpilot pcb aesthetics --board board.routed.json`。\n",
+			a.Weight, a.Score, a.Placement, a.Routing, a.RoutedShare)
+	}
 	if len(r.Loop) > 0 {
 		p("\n布局↔布线闭环（布不通和 DRC 违规附近的器件每轮加宽半条布线通道后重新布局，取综合分最高的一轮）：\n\n| 轮 | 布通率 | DRC | 综合分 | 加宽器件 | 备注 |\n|---|---|---|---|---|---|\n")
 		for _, lp := range r.Loop {

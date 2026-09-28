@@ -70,6 +70,7 @@ type Report struct {
 	Calcs         *CalcSection         `json:"calculations,omitempty"`
 	Layout        *LayoutSection       `json:"layout,omitempty"`
 	Post          *PostSection         `json:"postLayout,omitempty"`
+	Aesthetics    *AestheticsSection   `json:"aesthetics,omitempty"` // §6B, report-only (aesthetics.go)
 	Verification  []Check              `json:"verification"`
 	TestPlan      *TestPlanSection     `json:"testPlan,omitempty"`
 	Manufacturing *MfgSection          `json:"manufacturing,omitempty"`

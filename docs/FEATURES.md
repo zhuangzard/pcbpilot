@@ -22,6 +22,7 @@
 - 单页组合：`sch compose` 以完整 IR 和实测 Lib 几何生成同页位置及严格 Apply 队列；校验实际 bbox、全部 pin/net/NC、导线路径和标记方向。跨页位号须唯一，不自动删除源页。[组合契约](schematic-page-composition.md)。
 - 位号：`sch designators allocate/plan/verify` 按官方库前缀修复非标准名称，保留合法编号与稳定 ID；原地队列核对位置、引脚/网络/NC、导线与全工程位号。[使用合同](../.agents/skills/pcbpilot/references/schematic-data.md)。
 - PCB：`layout-lint`、`layout-score`、`pcb check` 与 DRC 分别报告布局、质量、制造和电气事实；它们不授权或拒绝普通 action。
+- PCB：`pcb aesthetics` 离线度量布局（P1–P9，含同构子电路对称检测）与布线（R1–R9）美观度，只报告、权重 0（2026-09 Phase A，见 `docs/reviews/2026-09-routing-aesthetics/`）。
 - PCB 独立求解内核：公开 Go 包 `pkg/pcbrouting` 被晶振规划和 `pcb route solve/check` 共用，
   无额外 CLI 安装；当前为单层零过孔、直线/45°有界寻路与独立路径校验（离线能力）。
   快照适配层处理真实几何/规则，未知数据、圆弧铜及有限搜索失败保持 incomplete；

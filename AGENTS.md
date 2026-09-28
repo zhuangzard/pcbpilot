@@ -128,6 +128,12 @@ Web 项目已打开不代表 connector 已连接；`pcbpilot health` 的 `window
 
 详见 [`docs/cli-design.md`](docs/cli-design.md)。核心约束：所有明确的功能模块必须以 **Cobra 子命令**方式暴露（`pcbpilot sch`、`pcbpilot pcb`、`pcbpilot bom` …），`--help` 自描述，新功能先设计命令接口再写实现，Skill 描述与子命令签名保持同步。开发闭环：官方 API/离线 fixture 调研 → typed action → Cobra 子命令；不得用 `debug.exec_js` 临时操作工程来跳过接口开发。
 
+## 首要准则 — 流程契约不可削弱
+
+流程契约测试 `TestFlowContract`（`internal/app/flow_contract_test.go`）保护已沉淀的研究步骤（intent derive、sim power / analog、
+逐网线宽与颈缩、隔离带与开槽、按电流定过孔与阵列、板边铜距、rules plan、设计后热/IR、report design 各章节）；
+永远不要为了让改动通过而削弱它。新能力（如美观度）只能作为叠加的低优先级约束，见 `docs/concepts.md`「约束优先级」。
+
 ## 首要准则 — 固定测试用例（端到端验收）
 
 **每次做端到端测试，都必须把 [`esp32MiniRequire.md`](esp32MiniRequire.md) 的
