@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "_doc": "Part power models for `pcbpilot sim power` (DC operating point + averaged power tree). Data, not code: a model matches a part by LCSC C-number, then exact MPN, then nameRegex (tested against MPN, Value and device name); files passed with --models are consulted first and override this one. Every numeric field cites its origin in `source`; `confidence` is datasheet (numbers read from the datasheet/LCSC attributes), approx (typical figure or curve reading) or assumed (placeholder, verify). Units: A, V, Ω, Hz. Pin lists are pin NAMES or numbers (\"#4\" or \"4\"). Kinds: load|ic-small (supplyPins/returnPins, typA/peakA or rails[]), ldo|buck (pins.in/out/gnd/fb/en, vout or vref, eta, fswHz, iqA, dropoutV, vinMinV, maxA), diode|led (pins.anode/cathode, vfV@ifA + n, or vfPoints [[I,V],...], rsOhm), bjt (polarity, isA, beta, betaR), connector-source (supplyPins/pins.power, returnPins, voltageV or the net-name voltage, rsOhm, sourceName = scenario key '<name>-only'), esd (pins.line/supplyPins, returnPins, leakTypA/leakPeakA), switch (momentary, ronOhm), inductor|ferrite|fuse (dcrOhm), connector (passive), open, ignore.",
+  "_doc": "Part power models for `pcbpilot sim power` (DC operating point + averaged power tree). Data, not code: a model matches a part by LCSC C-number, then exact MPN, then nameRegex (tested against MPN, Value and device name); files passed with --models are consulted first and override this one. Every numeric field cites its origin in `source`; `confidence` is datasheet (numbers read from the datasheet/LCSC attributes), approx (typical figure or curve reading) or assumed (placeholder, verify). Units: A, V, Ω, Hz. Pin lists are pin NAMES or numbers (\"#4\" or \"4\"). Kinds: load|ic-small (supplyPins/returnPins, typA/peakA or rails[]), ldo|buck (pins.in/out/gnd/fb/en, vout or vref, eta, fswHz, iqA, dropoutV, vinMinV, maxA), diode|led (pins.anode/cathode, vfV@ifA + n, or vfPoints [[I,V],...], rsOhm), bjt (polarity, isA, beta, betaR), connector-source (supplyPins/pins.power, returnPins, voltageV or the net-name voltage, rsOhm, sourceName = scenario key '<name>-only'), esd (pins.line/supplyPins, returnPins, leakTypA/leakPeakA), switch (momentary, ronOhm), inductor|ferrite|fuse (dcrOhm), connector (passive), open, ignore. Optional \"ratings\" (vinMaxV, vccMinV/vccMaxV, vrrmV, vrwmV, isatA, iratedA, contactA, thetaJaCW, tjMaxC, sourceVMinV/sourceVMaxV, sourceBudgetA, vrefAccuracyPct + their own source) are limits read only by `pcbpilot report design` (component feasibility); `sim power` ignores them. Never fill a rating without a datasheet citation — a missing rating is reported as \"needs datasheet\".",
   "defaults": {
     "unknownIcLoadAPerSupplyPin": 0.05,
     "loadKneeV": 0.8,
@@ -47,7 +47,8 @@
       "gpioRoutOhm": 40,
       "gpioMaxA": 0.04,
       "source": "Espressif ESP32-S3-WROOM-1 datasheet v1.x: RF current table — Rx 802.11b/g/n ≈ 88–97 mA (typ 0.1 A used as Wi-Fi-connected average); Tx 802.11b 1 Mbps @ 21 dBm ≈ 355 mA; 'Power Supply' — the external supply should provide ≥ 0.5 A (peak 0.5 A used). GPIO max source 40 mA (ESP32-S3 series datasheet, DC characteristics).",
-      "confidence": "datasheet"
+      "confidence": "datasheet",
+      "ratings": {"vccMinV": 3.0, "vccMaxV": 3.6, "source": "Espressif ESP32-S3-WROOM-1 datasheet, recommended operating conditions: VDD33 3.0–3.6 V"}
     },
     {
       "id": "ch340c",
@@ -73,7 +74,8 @@
       "enThreshV": 1.5,
       "maxA": 2.0,
       "source": "Silergy SY8089A datasheet: VFB = 0.6 V, fsw = 1.5 MHz, IOUT 2 A, VIN 2.5–5.5 V, EN high ≥ 1.5 V; LCSC C479074 attributes: Quiescent Current 50 µA, Frequency 1.5 MHz. η ≈ 0.9 at 5 V→3.3 V / 0.3–1 A read from the efficiency curve (approx).",
-      "confidence": "datasheet"
+      "confidence": "datasheet",
+      "ratings": {"vinMaxV": 5.5, "source": "Silergy SY8089A datasheet: input voltage range 2.5–5.5 V"}
     },
     {
       "id": "ams1117-3.3",
@@ -96,7 +98,8 @@
       "vfPoints": [[0.1, 0.30], [3.0, 0.45]],
       "maxA": 3.0,
       "source": "SS34 (3 A / 40 V Schottky) datasheets: VF 0.45–0.50 V at 3 A, ≈0.30 V at 0.1 A from the typical forward curve; two-point Shockley fit.",
-      "confidence": "approx"
+      "confidence": "approx",
+      "ratings": {"vrrmV": 40, "source": "SS34 datasheets: VRRM 40 V (3 A / 40 V Schottky)"}
     },
     {
       "id": "smaj5.0a",
@@ -107,7 +110,8 @@
       "leakTypA": 5e-6,
       "leakPeakA": 8e-4,
       "source": "Littelfuse SMAJ series datasheet: SMAJ5.0A VRWM 5 V, IR ≤ 800 µA at VRWM (max, used for peak); typical leakage at 5 V is a few µA (typ 5 µA assumed). ≈0 A for trace sizing.",
-      "confidence": "datasheet"
+      "confidence": "datasheet",
+      "ratings": {"vrwmV": 5, "source": "Littelfuse SMAJ5.0A: VRWM 5 V"}
     },
     {
       "id": "usblc6-2sc6",
@@ -118,7 +122,8 @@
       "leakTypA": 1e-8,
       "leakPeakA": 1.5e-7,
       "source": "ST USBLC6-2 datasheet: IRM ≤ 150 nA at VRM = 5 V (max, used for peak); typ 10 nA assumed.",
-      "confidence": "datasheet"
+      "confidence": "datasheet",
+      "ratings": {"vrwmV": 5, "source": "ST USBLC6-2 datasheet: VRM (reverse stand-off) 5 V"}
     },
     {
       "id": "mmbt3904",
@@ -156,7 +161,8 @@
       "voltageV": 5.0,
       "rsOhm": 0.1,
       "source": "USB 2.0/Type-C default VBUS 5.0 V (4.75–5.25 V). 0.1 Ω lumps cable + contact resistance (assumed). Shell/EP pins are not counted as return paths.",
-      "confidence": "approx"
+      "confidence": "approx",
+      "ratings": {"sourceVMinV": 4.75, "sourceVMaxV": 5.25, "sourceBudgetA": 0.5, "source": "USB 2.0: VBUS 4.75–5.25 V; default (non-negotiated) USB 2.0 port current 500 mA"}
     },
     {
       "id": "usb-micro-b",
@@ -168,7 +174,8 @@
       "voltageV": 5.0,
       "rsOhm": 0.1,
       "source": "USB VBUS 5.0 V; 0.1 Ω cable + contact (assumed).",
-      "confidence": "approx"
+      "confidence": "approx",
+      "ratings": {"sourceVMinV": 4.75, "sourceVMaxV": 5.25, "sourceBudgetA": 0.5, "source": "USB 2.0: VBUS 4.75–5.25 V; default USB 2.0 port current 500 mA"}
     },
     {
       "id": "kf301-2p",

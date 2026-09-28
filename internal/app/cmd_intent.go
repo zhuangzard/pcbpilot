@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/zhuangzard/pcbpilot/pkg/designreport"
 	"github.com/zhuangzard/pcbpilot/pkg/intent"
 	"github.com/zhuangzard/pcbpilot/pkg/powersim"
 )
@@ -35,7 +36,7 @@ rule push, pcb auto, the safety checker and the feedback loop.`,
 
 func newIntentDeriveCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {
 	var connPaths, valuePaths, modelPaths, pages, scenarios, switches []string
-	var simPath, specPath, modelsLib, outPath, reportPath, simOut string
+	var simPath, specPath, modelsLib, outPath, reportPath, simOut, reportDir, reportName string
 	var strict bool
 	c := &cobra.Command{
 		Use:   "derive",
@@ -263,6 +264,33 @@ OUTPUT
 			}
 			fmt.Fprintf(stderr, "intent: %d blocks, %d nets, %d domains, %d pairs; classes %s; findings %d error / %d warn / %d info\n",
 				len(doc.Blocks), len(doc.Nets), len(doc.Domains), len(doc.Pairs), strings.Join(classes, " "), counts["error"], counts["warn"], counts["info"])
+			if reportDir != "" {
+				// P11 pre-layout version: intent + simulation (+ board/values).
+				if outPath == "" {
+					return fmt.Errorf("--report-dir needs --out (the report reads intent.json from disk)")
+				}
+				simFile := simPath
+				if simFile == "" {
+					simFile = simOut
+				}
+				if simFile == "" {
+					return fmt.Errorf("--report-dir with an in-process simulation needs --sim-out (the report reads sim.json from disk)")
+				}
+				models := ""
+				if len(libNames) > 0 {
+					models = libNames[len(libNames)-1]
+				}
+				values := ""
+				if len(valuePaths) == 1 {
+					values = valuePaths[0]
+				}
+				dir, dr, err := runDesignReport(designReportOpts{outDir: reportDir, version: "auto", project: reportName, intent: outPath, sim: simFile,
+					models: models, values: values, maxImageBytes: designreport.DefaultMaxImageBytes}, stderr)
+				if err != nil {
+					return fmt.Errorf("design report: %w", err)
+				}
+				fmt.Fprintf(stdout, "wrote %s/{report.html,report.md,report.json} — %s %s\n", dir, dr.VersionLabel, dr.Verdict.Status)
+			}
 			if strict && counts["error"] > 0 {
 				return fmt.Errorf("%d error finding(s) (--strict)", counts["error"])
 			}
@@ -283,5 +311,7 @@ OUTPUT
 	f.StringVar(&reportPath, "report", "", "write the Markdown reading (blocks, domains, pairs, nets, classes, findings)")
 	f.StringVar(&simOut, "sim-out", "", "also write the in-process simulation JSON (for pcb auto --sim)")
 	f.BoolVar(&strict, "strict", false, "exit non-zero when any finding has severity error")
+	f.StringVar(&reportDir, "report-dir", "", "also publish the next (pre-layout) design-report version here (reports/<name>/; needs --out and --sim or --sim-out; see 'pcbpilot report design')")
+	f.StringVar(&reportName, "report-name", "", "project name on the report cover (default: the report dir name)")
 	return c
 }

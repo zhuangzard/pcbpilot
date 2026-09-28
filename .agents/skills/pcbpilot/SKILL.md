@@ -89,6 +89,7 @@ metadata:
 | 电源预算 → 线宽/间距/过孔（`power.json`） | [recipes/power-spec.md](references/recipes/power-spec.md) |
 | 原理图电源仿真：每网电压、每焊盘电流、buck 纹波、多输入源场景（`sim power`） | [power-sim.md](references/power-sim.md)、[power-models.json](references/power-models.json) |
 | 原理图验收后推导设计意图：电路功能、每网电压/电流/线宽/间距/阻抗/网络类、电压域与绝缘对、设计提示（`intent derive` → `intent.json`） | [design-intent.md](references/design-intent.md) |
+| 每次运行后生成/更新客户设计报告（仿真图表、器件余量、工程计算、测试点计划、制造与上电注意；版本化 vN + 变更记录，`report design` / `--report-dir`） | [design-report.md](references/design-report.md)、[模板](templates/design-report/README.md) |
 | 机械要求 → 板框/孔/接口/禁布区（`mech.json`） | [recipes/mech-spec.md](references/recipes/mech-spec.md) |
 | 高压/低压分区与隔离、爬电距离 | [recipes/hv-isolation.md](references/recipes/hv-isolation.md) |
 | 高速：差分、阻抗、等长、参考平面 | [recipes/high-speed.md](references/recipes/high-speed.md) |

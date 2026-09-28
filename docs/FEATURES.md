@@ -104,6 +104,15 @@ fixture 回归：中小板 89–100%，大型 BGA 板（RK3568、K230）55–62%
 | 设计提示 | 电感额定余量、稳压余量/dropout/占空比/Vin 上限、二极管损耗、额定电流/功率/电容耐压、缺大电容、USB 500 mA 预算、缺 USB ESD、阻抗不可控、需开槽、未知模型 |
 | 输入 | 离线 connectivity+values（进程内仿真，`--sim-out` 另存）或 `--sim`；`--spec` 产品级参数；现场只读 `--pages` |
 
+## 设计报告（`report design`，离线验证）
+
+| 能力 | 语义 |
+|---|---|
+| 版本化交付 | `reports/<name>/vN/{report.html,report.md,report.json}` + `index.json` + `CHANGELOG.md`；`--version auto` 取下一整数，已存在版本不覆盖；相同输入除 `generatedAt` 外逐字节一致 |
+| 12 章固定模板 | 封面结论（PASS / PASS with warnings / FAIL + 原因）、执行摘要、需求与意图、电源仿真（分组柱状图、功耗条形图、电源树）、器件可行性（应力 vs 额定、余量图、“需数据手册”）、工程计算（IPC 线宽/过孔/间距、阻抗重算、爬电/耐压）、布局布线（图片、IR 压降图、最坏路径、SI）、验证状态、测试点计划、制造装配、调试上电、附录；模板规范源在 Skill `templates/design-report/`，`pkg/designreport` 嵌入副本并测试一致 |
+| 额定来源 | `power-models.json` `maxA` + 可选 `ratings`（带 source）、电容/电阻 MPN 解码、LCSC 描述属性、电阻封装功率表；未知额定不猜 |
+| 集成 | `intent derive --report-dir`（预布局版）、`pcb auto run --report-dir`；样例 `docs/examples/esp32-mini-design-report/`（v1 真实现场产物，v2 演示变更记录） |
+
 ## 已知不支持：Altium Designer 工程自动导入
 
 - `.SchDoc` / `.PcbDoc` 当前没有 typed action 或 CLI 导入入口；使用 EasyEDA Pro 的
