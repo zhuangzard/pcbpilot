@@ -80,6 +80,13 @@ func TestReferenceLayerCost(t *testing.T) {
 	if referenceLayerCost(st, &NetPlan{Net: "USB3_SSTX_P", Role: RoleDiff}) != nil {
 		t.Fatal("non-intent net weighted")
 	}
+	// USB2 / Ethernet (< 1 Gb/s) are not priced: the ESP32 mini's USB_DM
+	// detoured round its USBLC6 when they were (esd stub 68 → 299 mil).
+	for _, np := range []*NetPlan{{Net: "USB_DM", Role: RoleDiff, PairWith: "USB_DP", Interface: "USB"}, {Net: "ETH_MDI0_P", Role: RoleDiff, Interface: "ETH"}} {
+		if m := referenceLayerCost(st, np); m != nil {
+			t.Fatalf("%s (%s) weighted: %v", np.Net, np.Interface, m)
+		}
+	}
 	st.Stack[2].Nets = []string{"+3V3"}
 	if referenceLayerCost(st, &NetPlan{Net: "USB3_SSTX_P", Role: RoleDiff, Interface: "USB3"}) != nil {
 		t.Fatal("no split plane: no weighting expected")

@@ -51,8 +51,11 @@ HDMI/TMDS、MIPI/DSI/CSI、LVDS、DDR/DQS、ETH/MDI/TRD/TXP…、USB/D+/DP/DM、
 ## 4. 布线时发生了什么
 
 - 差分两根背靠背布线；后布的一根在距前一根“线宽+线距”处代价打折，自然贴着走。
-- 带 intent 的高速网（有 `interface` 或等长组）走“参考层”：紧邻单网平面（GND）的信号层正常计价，
-  紧邻分割电源平面或没有相邻平面的层（混合 IN2-SIG+PWR 叠层下的 BOTTOM）每步 ×4。无 intent 的板不变。
+- 带 intent 的 ≥1 Gb/s 高速网（USB3/PCIe/SATA/HDMI/MIPI/LVDS/DDR）走“参考层”：紧邻单网平面（GND）的
+  信号层正常计价，紧邻分割电源平面或没有相邻平面的层（混合 IN2-SIG+PWR 叠层下的 BOTTOM）每步 ×4。
+  USB2 / 以太网 / CAN 不加价：整层 ×4 是粗手段，ESP32 mini（2026-09-27）上它让 USB_DM 为躲一段
+  并未跨缝的 BOTTOM 短跳而绕过 USBLC6，ESD 支线 68 → 299 mil、联合分 92.6 → 80.6（回归测试
+  `TestESP32MiniIntentKeepsESDOnPath`）。真跨缝仍由布线后的 `split-crossing` 检查报告。无 intent 的板不变。
 - 带 intent 的差分对若两根走了不同路线（长度差 > 4×上限且 > 40 mil），把较长一根沿另一根严格重布
   （更强的贴线折扣）；只有全部连通、过孔不增、长度差下降时才保留，否则逐段恢复原铜。
 - 布完若对内长度差超预算，在较短一根的直线段上加蛇形线（大差值）或 45° 梯形凸起（小差值），

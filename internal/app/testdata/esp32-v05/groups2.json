@@ -1,0 +1,77 @@
+{
+ "_provenance": "modules of artifacts/ceshi-e2e-20260924/d-comp2.json",
+ "modules": [
+  {
+   "id": "MCU",
+   "core": null,
+   "placements": [
+    {
+     "designator": "U3"
+    },
+    {
+     "designator": "C5"
+    },
+    {
+     "designator": "C6"
+    },
+    {
+     "designator": "R5"
+    },
+    {
+     "designator": "C7"
+    },
+    {
+     "designator": "R6"
+    }
+   ]
+  },
+  {
+   "id": "LED",
+   "core": null,
+   "placements": [
+    {
+     "designator": "R7"
+    },
+    {
+     "designator": "LED1"
+    }
+   ]
+  },
+  {
+   "id": "AUTODL",
+   "core": null,
+   "placements": [
+    {
+     "designator": "Q1"
+    },
+    {
+     "designator": "R8"
+    },
+    {
+     "designator": "Q2"
+    },
+    {
+     "designator": "R9"
+    }
+   ]
+  },
+  {
+   "id": "KEY_BOOT",
+   "core": null,
+   "placements": [
+    {
+     "designator": "SW1"
+    }
+   ]
+  },
+  {
+   "id": "KEY_RST",
+   "core": null,
+   "placements": [
+    {
+     "designator": "SW2"
+    }
+   ]
+  }
+ ]
+}

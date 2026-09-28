@@ -1938,6 +1938,16 @@ func (r *router) staticByDistance(rad float64, m []uint8) {
 // plane is split, for a high-speed net that needs a continuous reference.
 const splitRefCost = 4
 
+// refCostMinGbps limits the reference-layer pricing to lanes of ≥ 1 Gb/s
+// (USB3, PCIe, SATA, HDMI, MIPI, LVDS, DDR). A whole-layer ×4 is blunt: on
+// the ESP32 mini (2026-09-27) it priced USB_DM's short BOTTOM hop — which
+// crossed no split — so high that the pair detoured round the USBLC6 on
+// TOP: routed stub to the ESD array 68 → 299 mil, detour 7.7 → 8.7 in,
+// joint 92.6 → 80.6. A 480 Mb/s USB2 or 125 MBd Ethernet pair tolerates a
+// short excursion; the post-route split-crossing check still reports a
+// real crossing, and the ESD array must stay on the path.
+const refCostMinGbps = 1
+
 // referenceLayerCost prices the layers for an intent high-speed net (one
 // with an interface or a length group from intent.json): a signal layer
 // next to a single-net plane is its reference; one next only to a split
@@ -1949,7 +1959,7 @@ func referenceLayerCost(st *Stackup, plan *NetPlan) []float32 {
 		return nil
 	}
 	hc := ClassifyHS(plan)
-	if hc == nil || !hc.Reference {
+	if hc == nil || !hc.Reference || hc.RateGbps < refCostMinGbps {
 		return nil
 	}
 	mul := make([]float32, len(st.Stack))
