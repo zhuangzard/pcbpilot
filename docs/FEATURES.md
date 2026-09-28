@@ -108,12 +108,23 @@ fixture 回归：中小板 89–100%，大型 BGA 板（RK3568、K230）55–62%
 | 高速意图 | 接口识别与限值和布线器/SI/规则推送同一张表（`pcbauto.ClassifyHSName`：USB3/PCIe/SATA/HDMI/MIPI/LVDS/DDR/ETH/USB2/CAN）；每网 `interface`/`maxSkewMil`/`lengthTolMil`/`maxVias`；HDMI/MIPI 同端口多对与 DDR 字节通道/地址命令按网名成等长组；线宽在引擎叠层（`StackupReference`）上解；2 层 ≥1 Gb/s = `reference-plane-missing`；TX 交流耦合检查；`isolationVrms`（802.3 1500 Vrms）→ basic + 要求耐压 |
 | 高速压力测试 | `make stress-hs`：6 个合成用例（USB3 Type-C、HDMI、千兆以太网+隔离、PCIe M.2、DDR3 x16 fly-by、2 层 USB3 负例）+ RK3568/K230 `--board`，离线跑 intent → 规则计划 → `pcb auto --intent`（布线/布局）→ SI 对账；配方见 `references/recipes/high-speed.md` §6 |
 
+## 设计后仿真（`sim post-layout`，离线验证）
+
+| 能力 | 语义 |
+|---|---|
+| 真实铜皮 | `pkg/postsim` 读 `pcb dump --include-copper`（走线/圆弧、带 ARC 的灌铜复杂多边形、热焊盘辐条、静态填充、焊盘形状、过孔、板框与开孔）逐层栅格化（默认 0.5 mm × 5×5 子采样）；无铜对象的内层按地网负片平面（扣反焊盘）假设并记录；`--plane` 覆盖 |
+| 直流 | 每个 power/ground/switch 网逐场景（KCL 一致）求解：走线一维电阻（焊盘/过孔环内短接）、面铜单元、过孔按叠层 z 分段；IC(0)-CG；每负载焊盘电压/压降对 IR 预算、电流密度热点、走线段 I²R、过孔电流 vs IPC 载流量；`--plan` 与 pcb auto IR 估算对比 |
+| 热 | 2.5-D 有限体积：铜覆盖率 + FR-4 面内/厚度方向、过孔孔壁、上下自然对流（可选线性化辐射）；器件功耗按焊盘面积 + 焦耳热；每场景求解、能量平衡；每层温度 / 电流密度 SVG 热图；器件板温与 Tj（θJB/θJC 额定，缺则“需数据手册”）；仅铜损的铜自热 |
+| 反馈 | `widen-segment` / `corner-crowding` / `via-bottleneck`（pcb auto `feedback.json` 同 schema，`--feedback` 合并） |
+| 交叉核对 | `--elmer-dir` 导出同一热模型的 Elmer FEM 输入包，`--elmer-check` 在装有 ElmerSolver（`sim tools install --only elmer`）时比对探针，否则 skipped |
+| 集成与验证 | `pcb auto run --post-sim`、`report design --post`（第 6A 章 + 封面结论）；解析解 7 项（走线/铜片/过孔链电阻、一维肋片、点热源 K0、能量守恒、IPC 温升量级）+ ESP32 现场回读板回放（`docs/examples/esp32-mini-post-layout/`） |
+
 ## 设计报告（`report design`，离线验证）
 
 | 能力 | 语义 |
 |---|---|
-| 版本化交付 | `reports/<name>/vN/{report.html,report.md,report.json}` + `index.json` + `CHANGELOG.md`；`--version auto` 取下一整数，已存在版本不覆盖；相同输入除 `generatedAt` 外逐字节一致 |
-| 12 章固定模板 | 封面结论（PASS / PASS with warnings / FAIL + 原因）、执行摘要、需求与意图、电源仿真（分组柱状图、功耗条形图、电源树）、器件可行性（应力 vs 额定、余量图、“需数据手册”）、工程计算（IPC 线宽/过孔/间距、阻抗重算、爬电/耐压）、布局布线（图片、IR 压降图、最坏路径、SI）、验证状态、测试点计划、制造装配、调试上电、附录；模板规范源在 Skill `templates/design-report/`，`pkg/designreport` 嵌入副本并测试一致 |
+| 版本化交付 | `reports/<name>/vN/{report.html,report.md,report.json,manifest.json,assets/,data/}` + `pcbpilot-report-<name>-vN.zip` + `index.json` + `CHANGELOG.md`（每版一个自包含交付包：图片/图表/热图、全部输入与证据文件、逐文件 sha256 与生成命令）；`--version auto` 取下一整数，已存在版本不覆盖；相同输入除 `generatedAt` 外逐字节一致 |
+| 12 章固定模板 | 封面结论（PASS / PASS with warnings / FAIL + 原因）、执行摘要、需求与意图、电源仿真（分组柱状图、功耗条形图、电源树）、器件可行性（应力 vs 额定、余量图、“需数据手册”）、工程计算（IPC 线宽/过孔/间距、阻抗重算、爬电/耐压）、布局布线（图片、IR 压降图、最坏路径、SI）、设计后仿真验证（6A：真实铜皮压降、过孔电流、热图、器件温度、铜皮建议）、验证状态、测试点计划、制造装配、调试上电、附录；模板规范源在 Skill `templates/design-report/`，`pkg/designreport` 嵌入副本并测试一致 |
 | 额定来源 | `power-models.json` `maxA` + 可选 `ratings`（带 source）、电容/电阻 MPN 解码、LCSC 描述属性、电阻封装功率表；未知额定不猜 |
 | 集成 | `intent derive --report-dir`（预布局版）、`pcb auto run --report-dir`；样例 `docs/examples/esp32-mini-design-report/`（v1 真实现场产物，v2 演示变更记录） |
 

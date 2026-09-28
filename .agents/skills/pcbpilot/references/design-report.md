@@ -12,11 +12,24 @@
 |---|---|---|
 | S6.5 原理图验收后 | `pcbpilot intent derive … --out intent.json --sim-out sim.json --report-dir reports/<name>` | 预布局版：需求、仿真、器件可行性、工程计算、测试计划、上电流程；布局/验证章节标“不可用” |
 | P7 自动布线后 | `pcbpilot pcb auto run --board board.json --intent intent.json --sim sim.json … --out-dir out --report-dir reports/<name>` | 加入叠层、布线统计、IR 压降、SI、反馈 |
-| P10 终检后（交付版） | `pcbpilot report design --out-dir reports/<name> --intent … --sim … --plan-dir out --board final.json --reload-board final.reloaded.json --drc drc.json --check check.txt --rules-check rules-check.json --image sch:P1=p1.png --image layout=snapshot.png --host "<宿主与精确版本>" --connector <版本>` | 完整报告：验证证据齐全，图片来自 typed 导出/快照 |
+| P10.5 设计后仿真后（交付版） | `pcbpilot report design --out-dir reports/<name> --intent … --sim … --plan-dir out --board final.json --reload-board final.reloaded.json --drc drc.json --check check.txt --rules-check rules-check.json --post post.json --image sch:P1=p1.png --image layout=snapshot.png --host "<宿主与精确版本>" --connector <版本>` | 完整报告：验证证据齐全，第 6A 章真实铜皮压降/过孔电流/热图/器件温度，图片来自 typed 导出/快照 |
 
 每次运行都会得到下一个 `vN`；**不要**覆盖旧版本（`--force` 只用于重生成同一版本的笔误修正）。
-客户交付物是 `reports/<name>/vN/report.html`（单文件，可直接发送或打印），`CHANGELOG.md`
-说明相对上一版改了什么。
+每个版本是**一个完整交付包**：
+
+```
+reports/<name>/
+  index.json  CHANGELOG.md  pcbpilot-report-<name>-vN.zip   ← zip = 下面整个 vN/
+  vN/report.html   单文件自包含（图表内联、图片 base64），可直接发送或打印
+  vN/report.md     同内容；图引用 assets/，数据链接 data/
+  vN/report.json   全部计算表（schemaVersion 1）
+  vN/manifest.json 每个文件：路径、角色、sha256、字节、生成命令、原始路径
+  vN/assets/       原理图图、布局快照、pcb auto 预览、热图/电流密度图、charts/*.svg
+  vN/data/         intent/sim/post/plan/feedback/board/board.reload/drc/check/rules-check/
+                   net-diff/values/power-models/sim.cir 与 elmer/ 输入包（有则全带）
+```
+
+报告里每个表/图旁链接其 `data/` 文件；`--no-zip` 不写 zip。`CHANGELOG.md` 说明相对上一版改了什么。
 
 ## 输入与证据
 
@@ -29,7 +42,9 @@
 | `--drc` `--check` `--rules-check` `--net-diff` | `pcb drc` / `pcb check`（文本或 `--json`）/ `pcb rules check` / `scripts/pad-net-diff.py --json`（原理图连通性 vs 板级 dump，`ok` 字段即结论） | §7 对应项 N/A，总体结论降为“PASS with warnings” |
 | `--models` | 默认已安装 Skill 的 `power-models.json` | 只剩 MPN/描述解码的额定 |
 | `--values` | `sch list` JSON 或 `{"parts":{ref:{value,mpn,description}}}` | MPN 取自板级 dump 的 device |
-| `--image KIND[:LABEL]=PATH` | `sch export-image`、`pcb stage-snapshot` | §6 无图 |
+| `--post` | `sim post-layout --out post.json`（其 `--svg-dir` 热图与 `--elmer-dir` 输入包自动进包） | §6A 不可用，§7 “设计后仿真”为 N/A，结论降为 warnings |
+| `--spice` | `sim power --spice sim.cir` | 包内无网表 |
+| `--image KIND[:LABEL]=PATH` | `sch export-image`、`pcb stage-snapshot`；`heat:TOP=heatmaps/temp-TOP.svg` 指定热图 | §6 无图 |
 
 所有输入以“路径 + sha256”记录在封面与附录；给了但读不出的文件直接报错（避免静默变薄）。
 图片只作展示证据，数值结论全部来自对象回读与计算。
@@ -40,7 +55,7 @@
   FAIL；warnings 逐条写明取舍（例如“USB 0.5 A 预算余量 14 %：产品说明要求 ≥ 1 A 端口”）。
 - **需数据手册**：额定未知的检查不计余量、不影响 FAIL，但计入 warnings。补额定的正确做法是在
   `power-models.json` 该模型加 `ratings`（`vinMaxV`、`vccMinV/vccMaxV`、`vrrmV`、`vrwmV`、`isatA`、
-  `iratedA`、`contactA`、`thetaJaCW`、`tjMaxC`、`sourceVMinV/sourceVMaxV`、`sourceBudgetA`、
+  `iratedA`、`contactA`、`thetaJaCW`、`thetaJbCW`/`thetaJcCW`（设计后仿真 Tj）、`tjMaxC`、`sourceVMinV/sourceVMaxV`、`sourceBudgetA`、
   `vrefAccuracyPct`）并写 `source`；或在 values 的 description 里保留 LCSC 属性。**禁止凭印象填额定。**
 - **余量准则**见模板 README §4；`marginal` 不是错误，是需要在报告里给出理由或换件的提示。
 - **测试点计划**是 bring-up/生产测试的起点：公差里标“假定”的项（如 Vref 精度）应在拿到数据手册后

@@ -10,7 +10,7 @@
 | 文件 | 作用 |
 |---|---|
 | `report.html.tmpl` | Go `html/template`：自包含 HTML（内联 CSS、内联 SVG 图表、base64 图片；浅色/深色/打印） |
-| `report.md.tmpl` | Go `text/template`：同内容的 Markdown；图表引用 `charts/*.svg`，图片引用 `../assets/` |
+| `report.md.tmpl` | Go `text/template`：同内容的 Markdown；图表引用 `assets/charts/*.svg`，图片引用 `assets/`，数据链接 `data/`（版本包内相对路径） |
 
 **本目录是规范源。** Go 包 `pkg/designreport/templates/` 用 `go:embed` 嵌入一份副本，
 `TestTemplatesMatchSkill` 要求两份逐字节相同：改模板时先改这里，再
@@ -33,7 +33,8 @@ HTML 另有 `chart`、`img`、`verdictClass`、`statusCls`；Markdown 另有 `im
 | 4 | 器件可行性 | 每个器件的“应力 vs 额定 → 余量%”：额定来自 `power-models.json`（`maxA` 及可选 `ratings`）、MPN 解码（Samsung CL / Murata GRM / Yageo CC 电容的封装+介质+容值+耐压；UNI-ROYAL / Yageo RC 电阻的封装+阻值+公差）、器件描述中的 LCSC 属性（Current Rating / Voltage Rating / Power(Watts)），电阻功率默认表 0402 1/16 W、0603 1/10 W、0805 1/8 W、1206 1/4 W（70 °C 额定）。准则：电流 ≥ 20 %、电阻 P ≤ 50 %、MLCC 额定 ≥ 1.5×（< 2× 另提示 DC 偏压）、TVS VRWM ≥ 线电压、供电范围 ≥ 3 %、Tj ≤ 80 % Tj,max。额定未知一律“需数据手册”，不参与余量。余量图升序 |
 | 5 | 工程计算 | `intent.json` 的 copper/nets/netClasses/pairs：IPC-2221/2152 线宽（外层 k=0.048，内层同曲线用内层铜厚，与 intent/pcbauto 一致）与计划线宽、计划线宽的载流；单孔载流与过孔数；IPC-2221B 电压间距 vs 工艺间距；按叠层 h/εr/t 重算微带 Z0 与差分 Zdiff 并与目标比较（>5 % WARN、>10 % FAIL）；每个绝缘对的间隙/爬电/铣槽 + `pkg/safety` 的耐压试验电压；plan 与 intent 叠层参数不一致时提示 |
 | 6 | 布局与布线 | 图片（`--image`，>1 MB 自动减半缩小）+ plan 目录的 `preview.svg`；`plan.json`：叠层、布线统计、引擎 DRC、联合评分；`route.power` 的每网 IR 压降/预算、负载焊盘压降占预算（图）、最坏路径分解、压降最大的 20 段；SI 长度/过孔/skew；隔离报告；`feedback.json` 难度与反馈项 |
-| 7 | 验证状态 | 原生 DRC（`--drc`）、pcb check（`--check`，文本或 JSON）、规则同步（`--rules-check`）、焊盘网络对账（`--net-diff`）、保存/重载 semanticSha256（`--board` + `--reload-board`）、布线完成度与平面连接、IR 预算；每项 PASS/WARN/FAIL/N/A + 证据文件与 sha256 |
+| 6A | 设计后仿真验证 | `--post post.json`（`sim post-layout`）：边界（板级自然对流，非 CFD）、设置、每网真实铜皮压降/预算/最坏焊盘/铜损/最大电流密度/最大过孔电流/铜自热、与 pcb auto IR 估算对比、过孔电流 vs IPC 载流量、板最高温度与能量平衡、各层温度、器件板温/θ/Tj/状态、热图与电流密度图（`heat` 图片，post.json `mapsDir` 自动收集）、铜皮修改建议（widen-segment / corner-crowding / via-bottleneck）、Elmer 交叉校验状态、模型与假设；结论作为 §7 一行进入总体结论 |
+| 7 | 验证状态 | 设计后仿真（`--post`，PASS/WARN/FAIL = post.json verdict）、原生 DRC（`--drc`）、pcb check（`--check`，文本或 JSON）、规则同步（`--rules-check`）、焊盘网络对账（`--net-diff`）、保存/重载 semanticSha256（`--board` + `--reload-board`）、布线完成度与平面连接、IR 预算；每项 PASS/WARN/FAIL/N/A + 证据文件与 sha256 |
 | 8 | 测试点计划 | 由电源树、仿真与板级焊盘生成：限流上电（1.5× typical 源电流，功能测试前 1.5× 峰值）；每条电源轨的期望值 ± 公差（稳压输出：Vref 精度（`ratings.vrefAccuracyPct`，缺省假定 2 % 并标注）+ 2×分压电阻公差×(1−Vref/Vout)；源：`ratings.sourceVMin/MaxV`；OR 后：仿真包络）、测量位置（负载焊盘 = IR 最坏焊盘，最近测试点/无源件焊盘，稳压器输出焊盘）；开关节点波形；输出纹波 ΔV ≈ ΔI/(8·fsw·ΣC)（理想电容估算）；复位/启动脚空闲与按下电平、上拉/对地电容与 τ=RC；LED 电流与阳极电压；接口枚举；受控阻抗 TDR；绝缘对耐压；晶振。没有 TP 的电源轨给出建议新增测试点（板坐标 mm，相对外框左下角） |
 | 9 | 制造与装配 | 层数/叠层/板厚（叠层字符串）/铜厚、板级规则的线宽/间距/过孔/板边/孔距与实际最小线宽、阻抗控制目标；表面处理建议（最细焊盘中心距 ≤ 0.65 mm 或有 EP → ENIG）；pcb check 按类型分组；装配关注（极性、1 脚、EP、细间距、机械件、MSL）；高压/铣槽/涂覆；ESD 与回流通用注意 |
 | 10 | 调试上电 | 步骤：目检（极性件列表）→ 断电对地电阻（已知电阻路径 = 直接对地或经高阻节点的两电阻串联，> 100 Ω 期望、< 10 Ω 判短路）→ 限流上电 → 各轨测量 → 开关波形 → 功能接口 → 峰值带载；故障特征只列本板存在的电路（降压、LDO、OR 二极管、USB、LED） |

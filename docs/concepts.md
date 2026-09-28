@@ -369,6 +369,20 @@ Iin = V(LX)·Iout/(η·Vin)+Iq;LDO:Iin = Iout+Iq,含 dropout/关断),纹波用�
   供线宽规划消费。二者冲突时以有出处的模型数据为准并回写说明。用法见
   [`power-sim.md`](../.agents/skills/pcbpilot/references/power-sim.md)。状态:`offline-verified`。
 
+### 设计前仿真 vs 设计后仿真(pre-layout / post-layout simulation)
+**设计前仿真**:只看原理图,`sim power` + `intent derive` 求每焊盘电流、器件功耗,**决定**线宽、过孔数、
+网络类——此时还没有铜。**设计后仿真**(`pcbpilot sim post-layout`,`pkg/postsim`,契约 `schemaVersion 1`):
+在**布完线的真实铜皮**(`pcb dump --include-copper` 回读,手工板与 `pcb auto` 板一视同仁;`pcb auto run
+--post-sim` 只验引擎结果)上用同一份电流与功耗**复核**:每负载焊盘直流压降对预算、过孔电流对 IPC 载流量、
+电流密度热点(颈部、拐角)、每层稳态温度热图、器件板温与 Tj(= 板温 + P·θJB,无额定则“需数据手册”)。
+- **边界**:板级——裸板静止空气、上下表面自然对流,不含外壳/风扇/气流,不是 CFD;直流稳态,不含交流与瞬态。
+- **负片平面**:dump 不列出内电层的铜;无铜对象的内层按地网整层平面(扣反焊盘)建模并记为假设,`--plane` 覆盖。
+- **反馈**:`widen-segment` / `corner-crowding` / `via-bottleneck`,与 pcb auto 的 `feedback.json` 同 schema,
+  全部 `live-unverified`——改铜后 save → reload → dump → 重跑才算改善。
+- **交叉校验**:同一热模型可导出 Elmer FEM 输入包(`--elmer-dir`/`--elmer-check`,类似 `sim power --spice-check`)。
+- **铁律**:设计后仿真的输入必须是回读的铜,不是计划;结论进入设计报告第 6A 章与封面结论。用法见
+  [`post-layout-sim.md`](../.agents/skills/pcbpilot/references/post-layout-sim.md)。状态:`offline-verified`。
+
 ### 设计意图(design intent)—— `intent.json`
 **是什么**:原理图验收后由 `pcbpilot intent derive`(`pkg/intent`,契约 `schemaVersion 1`,只加字段
 不改名)推导出的**带理由的电气计划**,是原理图与 PCB 之间唯一的交接数据——没有它 PCB 只知道位置。

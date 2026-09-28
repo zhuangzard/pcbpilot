@@ -90,6 +90,7 @@ metadata:
 | 原理图电源仿真：每网电压、每焊盘电流、buck 纹波、多输入源场景（`sim power`） | [power-sim.md](references/power-sim.md)、[power-models.json](references/power-models.json) |
 | 外部交叉验证仿真器状态/安装（ngspice 必需、Elmer 可选，`sim tools check/install`） | [environment-setup.md](references/environment-setup.md#仿真工具ngspice--elmer-fem) |
 | 原理图验收后推导设计意图：电路功能、每网电压/电流/线宽/间距/阻抗/网络类、电压域与绝缘对、设计提示（`intent derive` → `intent.json`） | [design-intent.md](references/design-intent.md) |
+| 布线完成后在**真实铜皮**上做设计后仿真：每负载焊盘压降、过孔电流 vs 载流量、电流密度与颈部/拐角、每层温度热图、器件板温/Tj、线宽/拐角/过孔修改建议、Elmer 交叉校验（`pcb dump --include-copper` → `sim post-layout` → `report design --post`） | [post-layout-sim.md](references/post-layout-sim.md) |
 | 每次运行后生成/更新客户设计报告（仿真图表、器件余量、工程计算、测试点计划、制造与上电注意；版本化 vN + 变更记录，`report design` / `--report-dir`） | [design-report.md](references/design-report.md)、[模板](templates/design-report/README.md) |
 | 机械要求 → 板框/孔/接口/禁布区（`mech.json`） | [recipes/mech-spec.md](references/recipes/mech-spec.md) |
 | 高压/低压分区与隔离、爬电距离 | [recipes/hv-isolation.md](references/recipes/hv-isolation.md) |

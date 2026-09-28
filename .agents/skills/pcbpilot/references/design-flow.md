@@ -76,7 +76,7 @@ connectivity + values；现场只读 `--pages`），产出 `intent.json` + `inte
 [design-intent.md](design-intent.md)。状态：`offline-verified`。加 `--report-dir reports/<name>`
 同时生成预布局版设计报告（P11，见 [design-report.md](design-report.md)）。
 
-## PCB P0–P11
+## PCB P0–P11（含 P10.5）
 
 | 步骤 | 操作和应留下的结果 |
 |---|---|
@@ -91,7 +91,8 @@ connectivity + values；现场只读 `--pages`），产出 `intent.json` + `inte
 | P8 普通信号与铜 | 完成其余信号、换层、GND 铜、缝合孔和热路径；修改铜后重建铺铜。 |
 | P9 丝印与工艺 | 核对功能、接口逐脚、极性、字体、方向；泪滴创建在 typed 接口可用前保持 `unsupported`，不得手工补做。 |
 | P10 终检 | 回读全部网络、机械干涉、DRC 和检查 findings，显式保存并重开，再次读取关键对象。 |
-| P11 设计报告（每次运行自动更新，版本化交付客户） | `pcbpilot report design --out-dir reports/<name> …`（或 `intent derive` / `pcb auto run` 的 `--report-dir`）生成下一个 `vN/report.html`（自包含）+ `report.md` + `report.json`，并更新 `index.json` 与 `CHANGELOG.md`。交付版须带 DRC、check、保存重载前后两份 dump、原理图与布局图；封面结论为 FAIL 时不交付，warnings 逐条写明取舍。见 [design-report.md](design-report.md)。 |
+| P10.5 设计后仿真验证 | 终检保存重载后 `pcb dump --include-copper` 回读真实铜皮，`pcbpilot sim post-layout --board board.json --sim sim.json --intent intent.json --out post.json --report post.md --svg-dir heatmaps/`：每负载焊盘压降对预算、过孔电流对载流量、电流密度热点、每层温度热图、器件板温/Tj。`fail`（超预算、开路、过孔超载、Tj 超限、板温 > 130 °C）必须改铜后重跑；`feedback[]` 的 `widen-segment / corner-crowding / via-bottleneck` 是具体改法（位置、建议线宽/过孔数），改后 save → reload → dump → 重跑 → DRC。负片内电层 dump 不可见时按地平面假设并写明。`pcb auto run --post-sim` 只验引擎结果，落地后仍要对现场板重跑。见 [post-layout-sim.md](post-layout-sim.md)。 |
+| P11 设计报告（每次运行自动更新，版本化交付客户） | `pcbpilot report design --out-dir reports/<name> …`（或 `intent derive` / `pcb auto run` 的 `--report-dir`）生成下一个 `vN/report.html`（自包含）+ `report.md` + `report.json` + `manifest.json` + `assets/` + `data/`，打包 `pcbpilot-report-<name>-vN.zip`，并更新 `index.json` 与 `CHANGELOG.md`。交付版须带 DRC、check、保存重载前后两份 dump、`--post post.json`（第 6A 章）、原理图与布局图；封面结论为 FAIL 时不交付，warnings 逐条写明取舍。见 [design-report.md](design-report.md)。 |
 
 ### 板框、固定件与布局顺序
 
