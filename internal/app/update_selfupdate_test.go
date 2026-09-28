@@ -471,3 +471,31 @@ func TestHealthCommandCarriesUpdateNotices(t *testing.T) {
 		t.Fatalf("health must expose + print notices: %s / %s", stdout.String(), stderr.String())
 	}
 }
+
+// Startup alignment: a release daemon brings a missing/old MCP and the
+// connector file to its own version (Skill dirs: StartupSync); auto off
+// leaves a never-installed MCP alone.
+func TestSelfUpdaterAlignInstallsMCPAndConnectorForOwnVersion(t *testing.T) {
+	skipOnWindows(t)
+	oi := seedOldInstall(t, "0.6.1")
+	serveFakeRelease(t, "0.6.1")
+	t.Setenv(selfupdate.AutoUpdateEnv, "0")
+	u, _, _ := newTestUpdater(t, oi, "0.6.1", &recorder{}, &daemon.Activity{})
+	if !u.align(context.Background()) || selfupdate.MCPInstalledVersion() != "" {
+		t.Fatalf("auto off must not install a never-installed MCP (installed=%q)", selfupdate.MCPInstalledVersion())
+	}
+	os.Remove(selfupdate.ConnectorPath("0.6.1"))
+	t.Setenv(selfupdate.AutoUpdateEnv, "")
+	if !u.align(context.Background()) {
+		t.Fatal("alignment must succeed against the release")
+	}
+	if selfupdate.MCPInstalledVersion() != "0.6.1" {
+		t.Fatalf("mcp = %q", selfupdate.MCPInstalledVersion())
+	}
+	if _, err := os.Stat(selfupdate.ConnectorPath("0.6.1")); err != nil {
+		t.Fatal("connector for the daemon's own version not downloaded")
+	}
+	if !strings.Contains(readText(filepath.Join(oi.home, ".codex", "config.toml")), selfupdate.MCPServerPath()) {
+		t.Fatal("aligned MCP not registered")
+	}
+}
