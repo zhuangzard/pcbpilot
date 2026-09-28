@@ -140,6 +140,28 @@ func (c *ctx) buildSummary() {
 			risks = append(risks, Risk{Severity: "info", Source: "feasibility", Message: sprintf("%d 项器件额定未知（需数据手册），未计入余量判定", unknown), Suggestion: "在 power-models.json 的 ratings 中补充并注明来源"})
 		}
 	}
+	if cs := c.rep.Calcs; cs != nil {
+		for _, w := range cs.Widths {
+			if w.Status == StatusFail {
+				risks = append(risks, Risk{Severity: "error", Source: "calculation", Message: sprintf("%s 线宽 %s/%s mil（外/内）小于 %s A 所需 %s/%s mil", w.Net, f2(w.OuterPlanMil), f2(w.InnerPlanMil), trimF(w.CurrentA), f2(w.OuterNeedMil), f2(w.InnerNeedMil)), Suggestion: "加宽该网络类线宽 / 改铺铜，或重新 intent derive 让规则跟随电流"})
+			}
+		}
+		for _, v := range cs.Vias {
+			if v.Status == StatusFail {
+				risks = append(risks, Risk{Severity: "error", Source: "calculation", Message: sprintf("%s 每次换层 %d 个过孔，%s A 需要 %d 个", v.Net, v.Plan, trimF(v.CurrentA), v.Need), Suggestion: "增加换层过孔数"})
+			}
+		}
+		for _, cl := range cs.Clearance {
+			if cl.Status == StatusFail {
+				risks = append(risks, Risk{Severity: "error", Source: "calculation", Message: sprintf("%s 间距 %s mil 小于 %s V 所需 %s mil", cl.Net, f2(cl.PlanMil), f3(cl.VPeak), f2(math.Max(cl.IPCMil, cl.FabMil)))})
+			}
+		}
+		for _, im := range cs.Impedance {
+			if im.Status == StatusFail {
+				risks = append(risks, Risk{Severity: "error", Source: "calculation", Message: sprintf("%s 阻抗偏差 %s %%（目标 %g Ω）", im.Name, f1(im.DevPct), im.Target)})
+			}
+		}
+	}
 	for _, ch := range c.rep.Verification {
 		if ch.Status == StatusFail {
 			risks = append(risks, Risk{Severity: "error", Source: "verification", Message: ch.Name + "：" + ch.Detail})
