@@ -1,0 +1,290 @@
+{{- /* pcbpilot design report — HTML template (canonical copy:
+.agents/skills/pcbpilot/templates/design-report/report.html.tmpl; the Go
+package embeds pkg/designreport/templates/, a test keeps both identical).
+Data: .R = report.json (designreport.Report), .Charts = inline SVG by name,
+.Img = data URI per image asset. Every section prints "不可用" with the reason
+when its inputs were missing — never invented values. */ -}}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="{{.R.Generator}}">
+<title>{{.R.Project}} 设计报告 {{.R.VersionLabel}}</title>
+<style>
+:root{color-scheme:light;--bg:#fcfcfb;--panel:#ffffff;--ink:#0b0b0b;--ink2:#52514e;--line:#e3e2dd;--head:#f3f2ee;--accent:#2a78d6;--ok:#0a7d0a;--okbg:#e5f4e5;--warn:#8a5a00;--warnbg:#fdf1d6;--bad:#b3261e;--badbg:#fbe4e2;--na:#5d5c57;--nabg:#ecebe7}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--bg:#1a1a19;--panel:#222220;--ink:#f4f4f2;--ink2:#c3c2b7;--line:#3a3935;--head:#2b2b28;--accent:#6da7ec;--ok:#7fd67f;--okbg:#17331a;--warn:#f5c35b;--warnbg:#3a2d10;--bad:#f28b82;--badbg:#3d1a18;--na:#c3c2b7;--nabg:#34332f}}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#1a1a19;--panel:#222220;--ink:#f4f4f2;--ink2:#c3c2b7;--line:#3a3935;--head:#2b2b28;--accent:#6da7ec;--ok:#7fd67f;--okbg:#17331a;--warn:#f5c35b;--warnbg:#3a2d10;--bad:#f28b82;--badbg:#3d1a18;--na:#c3c2b7;--nabg:#34332f}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 system-ui,-apple-system,"PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif}
+main{max-width:1080px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:28px;margin:0 0 4px}h2{font-size:21px;margin:40px 0 12px;padding-top:12px;border-top:2px solid var(--line)}h3{font-size:16px;margin:24px 0 8px}
+p,li{color:var(--ink)}.muted{color:var(--ink2)}small{color:var(--ink2)}
+table{border-collapse:collapse;width:100%;margin:8px 0 16px;font-size:13px;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:5px 8px;text-align:left;vertical-align:top}
+th{background:var(--head);font-weight:600;white-space:nowrap}
+td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.badge{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;font-weight:600;white-space:nowrap}
+.PASS,.ok{background:var(--okbg);color:var(--ok)}.WARN,.marginal,.warn{background:var(--warnbg);color:var(--warn)}.FAIL,.over,.error{background:var(--badbg);color:var(--bad)}.NA,.unknown,.info{background:var(--nabg);color:var(--na)}
+.verdict{font-size:20px;padding:6px 14px;border-radius:8px}
+.cover{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:20px 24px}
+.kv{display:grid;grid-template-columns:minmax(140px,220px) 1fr;gap:4px 16px;margin:12px 0}
+.kv div:nth-child(odd){color:var(--ink2)}
+.chart{margin:12px 0;overflow-x:auto}.chart svg{max-width:100%;height:auto}
+.img{margin:12px 0}.img img{max-width:100%;height:auto;border:1px solid var(--line);border-radius:6px;background:#fff}
+.na{padding:8px 12px;border-left:4px solid var(--na);background:var(--nabg);color:var(--na);border-radius:4px}
+details{margin:4px 0 16px}summary{cursor:pointer;color:var(--accent)}
+nav.toc ol{columns:2;font-size:14px}
+code{font-size:12px;word-break:break-all}
+@media print{:root{--bg:#fff;--panel:#fff;--ink:#000;--ink2:#333}body{font-size:11pt}main{max-width:none;padding:0}h2{break-before:page}details{display:block}details>*{display:block}.chart svg{max-width:100%}}
+@media (max-width:640px){.kv{grid-template-columns:1fr}nav.toc ol{columns:1}}
+</style>
+</head>
+<body>
+<main>
+{{- define "na"}}<p class="na">本节不可用：{{.}}</p>{{end}}
+{{- $R := .R}}
+
+<section class="cover" id="s0">
+<p class="muted">设计报告 Design Report · {{$R.VersionLabel}}</p>
+<h1>{{$R.Project}}</h1>
+<p><span class="badge verdict {{verdictClass $R.Verdict.Status}}">总体结论：{{$R.Verdict.Status}}</span></p>
+<div class="kv">
+<div>客户 Customer</div><div>{{or $R.Customer "—"}}</div>
+<div>版本 Version</div><div>{{$R.VersionLabel}}{{with $R.Changes}}（相对 {{.Previous}}）{{end}}</div>
+<div>生成时间</div><div>{{$R.GeneratedAt}}</div>
+<div>工具</div><div>pcbpilot {{$R.Tools.Pcbpilot}}{{with $R.Tools.Host}} · 宿主 {{.}}{{end}}{{with $R.Tools.Connector}} · connector {{.}}{{end}}</div>
+<div>输入摘要</div><div><code>{{$R.InputsDigest}}</code></div>
+</div>
+{{- if $R.Verdict.Reasons}}<h3>不通过原因</h3><ul>{{range $R.Verdict.Reasons}}<li>{{.}}</li>{{end}}</ul>{{end}}
+{{- if $R.Verdict.Warnings}}<h3>警告</h3><ul>{{range $R.Verdict.Warnings}}<li>{{.}}</li>{{end}}</ul>{{end}}
+<h3>输入来源 Input provenance</h3>
+<table><thead><tr><th>类型</th><th>说明</th><th>状态</th><th>路径</th><th>sha256</th></tr></thead><tbody>
+{{- range $R.Inputs}}<tr><td>{{.Kind}}</td><td>{{.Label}}</td><td>{{if .Present}}<span class="badge PASS">已提供</span>{{else}}<span class="badge NA">未提供</span>{{end}}</td><td><code>{{.Path}}</code>{{with .Note}}<br><small>{{.}}</small>{{end}}</td><td><code>{{short .SHA256}}</code></td></tr>{{end}}
+</tbody></table>
+</section>
+
+<nav class="toc"><ol start="0">
+<li><a href="#s0">封面</a></li><li><a href="#s1">执行摘要</a></li><li><a href="#s2">需求与设计意图</a></li><li><a href="#s3">电源仿真</a></li>
+<li><a href="#s4">器件可行性</a></li><li><a href="#s5">工程计算</a></li><li><a href="#s6">布局与布线</a></li><li><a href="#s7">验证状态</a></li>
+<li><a href="#s8">测试点计划</a></li><li><a href="#s9">制造与装配</a></li><li><a href="#s10">调试上电流程</a></li><li><a href="#s11">附录</a></li>
+</ol></nav>
+
+<h2 id="s1">1 执行摘要 Executive summary</h2>
+<table><thead><tr><th>指标</th><th>数值</th><th>说明</th></tr></thead><tbody>
+{{- range $R.Summary.KeyNumbers}}<tr><td>{{.Label}}</td><td>{{.Value}}</td><td>{{.Note}}</td></tr>{{end}}
+</tbody></table>
+<h3>主要风险 Top risks</h3>
+{{- if $R.Summary.TopRisks}}
+<table><thead><tr><th>级别</th><th>来源</th><th>内容</th><th>建议</th></tr></thead><tbody>
+{{- range $R.Summary.TopRisks}}<tr><td><span class="badge {{.Severity}}">{{.Severity}}</span></td><td>{{.Source}}</td><td>{{.Message}}</td><td>{{.Suggestion}}</td></tr>{{end}}
+</tbody></table>
+{{- else}}<p>未发现需要关注的风险。</p>{{end}}
+{{- with $R.Changes}}
+<h3>相对 {{.Previous}} 的变化</h3>
+<p>{{if .Identical}}输入与上一版完全相同。{{else}}输入变化：{{join .InputsChanged "；"}}{{end}}</p>
+{{- if .Rows}}<table><thead><tr><th>指标</th><th>之前</th><th>之后</th><th>变化</th></tr></thead><tbody>{{range .Rows}}<tr><td>{{.Metric}}</td><td class="n">{{.Before}}</td><td class="n">{{.After}}</td><td class="n">{{.Delta}}</td></tr>{{end}}</tbody></table>{{end}}
+{{- if .FindingsAdded}}<p>新增问题：</p><ul>{{range .FindingsAdded}}<li>{{.}}</li>{{end}}</ul>{{end}}
+{{- if .FindingsResolved}}<p>已解决：</p><ul>{{range .FindingsResolved}}<li>{{.}}</li>{{end}}</ul>{{end}}
+{{- end}}
+
+<h2 id="s2">2 需求与设计意图 Requirements &amp; design intent</h2>
+{{- with $R.Requirements}}
+<h3>功能块 Blocks</h3>
+<table><thead><tr><th>ID</th><th>功能</th><th>核心</th><th>器件</th><th>说明</th><th>功耗</th></tr></thead><tbody>
+{{- range .Blocks}}<tr><td>{{.ID}}</td><td>{{.Function}}</td><td>{{.Core}}</td><td>{{.Parts}}</td><td>{{.Summary}}</td><td class="n">{{if .PowerW}}{{watt .PowerW}}{{end}}</td></tr>{{end}}
+</tbody></table>
+<h3>电压域 Domains</h3>
+<table><thead><tr><th>ID</th><th>类型</th><th>参考地</th><th>工作电压 Vrms / Vpk</th><th>网络数</th><th>器件数</th></tr></thead><tbody>
+{{- range .Domains}}<tr><td>{{.ID}}</td><td>{{.Kind}}</td><td>{{.Reference}}</td><td class="n">{{f3 .WorkingVrms}} / {{f3 .WorkingVpeak}} V</td><td class="n">{{.Nets}}</td><td class="n">{{.Parts}}</td></tr>{{end}}
+</tbody></table>
+<p>绝缘对 Insulation pairs：{{.Pairs}}</p>
+<h3>安全标准与绝缘设定</h3>
+<div class="kv">{{range .Standard}}<div>{{.Label}}</div><div>{{.Value}} <small>{{.Note}}</small></div>{{end}}</div>
+{{- if .Copper}}<h3>铜厚与叠层假设</h3><div class="kv">{{range .Copper}}<div>{{.Label}}</div><div>{{.Value}} <small>{{.Note}}</small></div>{{end}}</div>{{end}}
+<h3>设计发现 Findings</h3>
+<table><thead><tr><th>级别</th><th>类型</th><th>内容</th><th>建议</th></tr></thead><tbody>
+{{- range .Findings}}<tr><td><span class="badge {{.Severity}}">{{.Severity}}</span></td><td>{{.Source}}</td><td>{{.Message}}</td><td>{{.Suggestion}}</td></tr>{{end}}
+</tbody></table>
+{{- else}}{{template "na" (missing $R "2")}}{{end}}
+
+<h2 id="s3">3 电源仿真 Power simulation</h2>
+{{- with $R.Power}}
+<p>直流工作点（MNA + Newton–Raphson），场景：{{join .Scenarios "、"}}；收敛：{{if .Converged}}是{{else}}<b>否</b>{{end}}。</p>
+<h3>3.1 电源轨（各场景）</h3>
+<table><thead><tr><th>网络</th><th>标称 V</th><th>范围 V</th>{{range .Scenarios}}<th>{{.}} A</th>{{end}}<th>最大 A</th></tr></thead><tbody>
+{{- range .Rails}}<tr><td>{{.Net}}</td><td class="n">{{f3 .VNom}}</td><td class="n">{{f3 .VMin}}–{{f3 .VMax}}</td>{{range .Currents}}<td class="n">{{f4 .}}</td>{{end}}<td class="n">{{f4 .IMaxA}} <small>{{.Worst}}</small></td></tr>{{end}}
+</tbody></table>
+<div class="chart">{{chart "rail-current"}}</div>
+<h3>3.2 功率预算</h3>
+<table><thead><tr><th>场景</th><th>输入功率</th><th>负载功率</th><th>损耗</th><th>整体效率</th></tr></thead><tbody>
+{{- range .ScenarioPwr}}<tr><td>{{.Scenario}}</td><td class="n">{{watt .SuppliedW}}</td><td class="n">{{watt .LoadW}}</td><td class="n">{{watt .LossW}}</td><td class="n">{{eff .LoadW .SuppliedW}}</td></tr>{{end}}
+</tbody></table>
+<div class="chart">{{chart "part-power"}}</div>
+<details><summary>数据表：器件功耗</summary><table><thead><tr><th>器件</th><th>型号</th><th>模型</th><th>功耗</th><th>场景</th></tr></thead><tbody>{{range .PartPower}}<tr><td>{{.Ref}}</td><td>{{.Device}}</td><td>{{.Kind}}</td><td class="n">{{watt .PowerW}}</td><td>{{.Scenario}}</td></tr>{{end}}</tbody></table></details>
+<div class="chart">{{chart "rail-power"}}</div>
+<details><summary>数据表：电源轨功率</summary><table><thead><tr><th>网络</th><th>V</th><th>Imax</th><th>P</th></tr></thead><tbody>{{range .RailPower}}<tr><td>{{.Net}}</td><td class="n">{{f3 .V}}</td><td class="n">{{f4 .IA}}</td><td class="n">{{watt .PowerW}}</td></tr>{{end}}</tbody></table></details>
+<h3>3.3 电源树</h3>
+{{- if .Tree.Nodes}}<div class="chart">{{chart "power-tree"}}</div>
+<details><summary>数据表：电源树连接</summary><table><thead><tr><th>从</th><th>到</th><th>电源轨</th></tr></thead><tbody>{{range .Tree.Edges}}<tr><td>{{.From}}</td><td>{{.To}}</td><td>{{.Label}}</td></tr>{{end}}</tbody></table>
+<table><thead><tr><th>器件</th><th>角色</th><th>工作点</th></tr></thead><tbody>{{range .Tree.Nodes}}<tr><td>{{.Label}}</td><td>{{.Kind}}</td><td>{{.Detail}}</td></tr>{{end}}</tbody></table></details>
+{{- else}}<p class="na">未识别出电源树（无 connector-source / 稳压器模型）。</p>{{end}}
+<h3>3.4 稳压器工作点</h3>
+{{- if .Regulators}}
+<table><thead><tr><th>器件</th><th>场景</th><th>模式</th><th>Vin</th><th>Vout</th><th>Iout</th><th>Iin</th><th>D</th><th>η</th><th>损耗</th></tr></thead><tbody>
+{{- range .Regulators}}<tr><td>{{.Ref}} <small>{{.Device}}</small></td><td>{{.Scenario}}</td><td>{{.Mode}}</td><td class="n">{{f3 .VinV}}</td><td class="n">{{f3 .VoutV}}</td><td class="n">{{f4 .IoutA}}</td><td class="n">{{f4 .IinA}}</td><td class="n">{{f3 .Duty}}</td><td class="n">{{pct100 .Eff}}</td><td class="n">{{watt .LossW}}</td></tr>{{end}}
+</tbody></table>
+{{- range .Regulators}}{{if .Notes}}<p><b>{{.Ref}}（{{.Scenario}}）计算过程：</b></p><ul>{{range .Notes}}<li><code>{{.}}</code></li>{{end}}</ul>{{end}}{{end}}
+{{- else}}<p>无稳压器。</p>{{end}}
+<h3>3.5 纹波电流</h3>
+{{- if .Ripple}}
+<table><thead><tr><th>对象</th><th>类型</th><th>稳压器</th><th>ΔI</th><th>Ipk</th><th>Irms</th><th>Iavg</th><th>D</th><th>场景</th></tr></thead><tbody>
+{{- range .Ripple}}<tr><td>{{.Key}}</td><td>{{.Kind}}</td><td>{{.Regulator}}</td><td class="n">{{opt .DeltaIA}}</td><td class="n">{{opt .IPeakA}}</td><td class="n">{{f4 .IRmsA}}</td><td class="n">{{opt .IAvgA}}</td><td class="n">{{opt .Duty}}</td><td>{{.Scenario}}</td></tr>{{end}}
+</tbody></table>
+{{- else}}<p>无开关稳压器纹波。</p>{{end}}
+<h3>3.6 模型可信度与假设</h3>
+<p>模型可信度统计：{{range $k, $v := .Confidence}}{{$k}} {{$v}}　{{end}}</p>
+<table><thead><tr><th>器件</th><th>型号</th><th>模型</th><th>匹配</th><th>可信度</th><th>来源</th></tr></thead><tbody>
+{{- range .Models}}<tr><td>{{.Ref}}</td><td>{{.Device}}</td><td>{{.ModelID}} <small>{{.Kind}}</small></td><td><small>{{.Match}}</small></td><td>{{if .Assumed}}<span class="badge WARN">assumed</span>{{else}}{{.Confidence}}{{end}}</td><td><small>{{.Source}}</small></td></tr>{{end}}
+</tbody></table>
+<ul>{{range .Assumptions}}<li>{{.}}</li>{{end}}</ul>
+{{- if .Warnings}}<p><b>仿真警告：</b></p><ul>{{range .Warnings}}<li>{{.}}</li>{{end}}</ul>{{end}}
+{{- else}}{{template "na" (missing $R "3")}}{{end}}
+
+<h2 id="s4">4 器件可行性 Component feasibility</h2>
+{{- with $R.Feasibility}}
+<p>统计：<span class="badge ok">满足 {{index .Counts "ok"}}</span> <span class="badge marginal">临界 {{index .Counts "marginal"}}</span> <span class="badge over">超限 {{index .Counts "over"}}</span> <span class="badge unknown">需数据手册 {{index .Counts "unknown"}}</span></p>
+<table><thead><tr><th>器件</th><th>型号</th><th>检查项</th><th>应力</th><th>额定</th><th>余量</th><th>准则</th><th>结论</th><th>额定来源 / 备注</th></tr></thead><tbody>
+{{- range .Rows}}<tr><td>{{.Ref}}</td><td><small>{{.Device}}</small></td><td>{{.Check}}{{with .StressNote}}<br><small>{{.}}</small>{{end}}</td><td class="n">{{num .Stress}} {{.Unit}}</td><td class="n">{{if .Rating}}{{num .Rating}} {{.Unit}}{{else}}—{{end}}</td><td class="n">{{if .MarginPct}}{{margin .MarginPct}}{{else}}—{{end}}</td><td class="n">≥ {{f1 .GuidePct}} %</td><td><span class="badge {{.Status}}">{{statusZh .Status}}</span></td><td><small>{{.RatingSource}}{{if and .RatingSource .Note}}；{{end}}{{.Note}}</small></td></tr>{{end}}
+</tbody></table>
+<div class="chart">{{chart "margins"}}</div>
+<h3>判据</h3>
+<table><thead><tr><th>对象</th><th>准则</th><th>说明</th></tr></thead><tbody>{{range .Guidelines}}<tr><td>{{.Label}}</td><td>{{.Value}}</td><td>{{.Note}}</td></tr>{{end}}</tbody></table>
+{{- else}}{{template "na" (missing $R "4")}}{{end}}
+
+<h2 id="s5">5 工程计算 Engineering calculations</h2>
+{{- with $R.Calcs}}
+<h3>5.1 计算基础与公式</h3>
+<div class="kv">{{range .Basis}}<div>{{.Label}}</div><div>{{.Value}} <small>{{.Note}}</small></div>{{end}}</div>
+<table><thead><tr><th>项目</th><th>公式</th><th>依据</th></tr></thead><tbody>{{range .Formulas}}<tr><td>{{.Label}}</td><td><code>{{.Value}}</code></td><td>{{.Note}}</td></tr>{{end}}</tbody></table>
+{{- range .Notes}}<p class="na">{{.}}</p>{{end}}
+<h3>5.2 载流线宽（IPC-2221/2152）</h3>
+<table><thead><tr><th>网络</th><th>类</th><th>电流</th><th>来源</th><th>外层需 / 计划 mil</th><th>内层需 / 计划 mil</th><th>计划外层载流</th><th>结论</th></tr></thead><tbody>
+{{- range .Widths}}<tr><td>{{.Net}}</td><td>{{.Class}}</td><td class="n">{{f4 .CurrentA}} A</td><td>{{.Source}}</td><td class="n">{{f2 .OuterNeedMil}} / {{f2 .OuterPlanMil}}</td><td class="n">{{f2 .InnerNeedMil}} / {{f2 .InnerPlanMil}}</td><td class="n">{{f3 .OuterCapA}} A</td><td><span class="badge {{.Status}}">{{.Status}}</span></td></tr>{{end}}
+</tbody></table>
+<h3>5.3 过孔数量</h3>
+<table><thead><tr><th>网络</th><th>电流</th><th>钻孔 mil</th><th>单孔载流</th><th>需要</th><th>计划</th><th>结论</th></tr></thead><tbody>
+{{- range .Vias}}<tr><td>{{.Net}}</td><td class="n">{{f4 .CurrentA}} A</td><td class="n">{{f2 .DrillMil}}</td><td class="n">{{f3 .PerViaA}} A</td><td class="n">{{.Need}}</td><td class="n">{{.Plan}}</td><td><span class="badge {{.Status}}">{{.Status}}</span></td></tr>{{end}}
+</tbody></table>
+<h3>5.4 电压间距（IPC-2221B）</h3>
+<table><thead><tr><th>网络</th><th>峰值电压</th><th>IPC 要求 mil</th><th>工艺最小 mil</th><th>计划 mil</th><th>决定因素</th><th>结论</th></tr></thead><tbody>
+{{- range .Clearance}}<tr><td>{{.Net}}</td><td class="n">{{f3 .VPeak}} V</td><td class="n">{{f2 .IPCMil}}</td><td class="n">{{f2 .FabMil}}</td><td class="n">{{f2 .PlanMil}}</td><td>{{.Governs}}</td><td><span class="badge {{.Status}}">{{.Status}}</span></td></tr>{{end}}
+</tbody></table>
+<h3>5.5 阻抗</h3>
+{{- if .Impedance}}
+<table><thead><tr><th>类</th><th>网络</th><th>类型</th><th>w mil</th><th>间距 mil</th><th>h mil</th><th>t mil</th><th>εr</th><th>Z0 Ω</th><th>Zdiff Ω</th><th>目标 Ω</th><th>偏差</th><th>结论</th></tr></thead><tbody>
+{{- range .Impedance}}<tr><td>{{.Name}}</td><td>{{.Nets}}</td><td>{{.Kind}}</td><td class="n">{{f2 .WMil}}</td><td class="n">{{f2 .GapMil}}</td><td class="n">{{f2 .HMil}}</td><td class="n">{{f3 .TMil}}</td><td class="n">{{f2 .Er}}</td><td class="n">{{f1 .Z0}}</td><td class="n">{{f1 .Zdiff}}</td><td class="n">{{f1 .Target}}</td><td class="n">{{f1 .DevPct}} %</td><td><span class="badge {{.Status}}">{{.Status}}</span></td></tr>{{end}}
+</tbody></table>
+{{- else}}<p>无阻抗控制网络。</p>{{end}}
+<h3>5.6 爬电 / 电气间隙 / 铣槽</h3>
+{{- if .Insulation}}
+<table><thead><tr><th>A</th><th>B</th><th>工作电压</th><th>绝缘</th><th>间隙 mm</th><th>爬电 mm</th><th>铣槽</th><th>标准</th><th>耐压试验</th></tr></thead><tbody>
+{{- range .Insulation}}<tr><td>{{.A}}</td><td>{{.B}}</td><td class="n">{{f1 .WorkingVrms}} Vrms / {{f1 .WorkingVpeak}} Vpk</td><td>{{.Insulation}}</td><td class="n">{{f2 .ClearanceMm}}</td><td class="n">{{f2 .CreepageMm}}</td><td>{{if .Slot}}需要 ≥ {{f2 .SlotWidthMm}} mm{{else}}不需要{{end}}</td><td><small>{{.StandardRef}}</small></td><td>{{if .TestVrms}}{{f1 .TestVrms}} Vrms{{else}}<small>{{.TestRef}}</small>{{end}}</td></tr>{{end}}
+</tbody></table>
+{{- else}}<p>无绝缘对（单一电压域），不需要爬电/铣槽设计。</p>{{end}}
+{{- else}}{{template "na" (missing $R "5")}}{{end}}
+
+<h2 id="s6">6 布局与布线 Layout &amp; routing</h2>
+{{- with $R.Layout}}
+{{- range .Images}}<figure class="img"><img src="{{img .}}" alt="{{.Label}}"{{if .Width}} width="{{.Width}}" height="{{.Height}}"{{end}}><figcaption><small>{{.Label}} · <code>{{.Path}}</code>{{if .Resized}}（已缩小）{{end}}</small></figcaption></figure>{{end}}
+{{- if .Stackup}}
+<h3>6.1 叠层 {{.StackupName}}</h3>
+<table><thead><tr><th>层 ID</th><th>名称</th><th>类型</th><th>网络</th><th>走线方向</th></tr></thead><tbody>{{range .Stackup}}<tr><td class="n">{{.ID}}</td><td>{{.Name}}</td><td>{{.Kind}}</td><td>{{.Nets}}</td><td>{{.Dir}}</td></tr>{{end}}</tbody></table>
+{{- if .StackNotes}}<ul>{{range .StackNotes}}<li>{{.}}</li>{{end}}</ul>{{end}}
+{{- end}}
+{{- if .Routing}}<h3>6.2 布线统计</h3><table><tbody>{{range .Routing}}<tr><th>{{.Label}}</th><td>{{.Value}}</td><td><small>{{.Note}}</small></td></tr>{{end}}</tbody></table>{{end}}
+{{- if .Joint}}<details><summary>联合评分明细</summary><table><tbody>{{range .Joint}}<tr><th>{{.Label}}</th><td class="n">{{.Value}}</td><td><small>{{.Note}}</small></td></tr>{{end}}</tbody></table></details>{{end}}
+{{- if .IRNets}}
+<h3>6.3 直流压降 IR drop（预算 {{.IRBudget}}）</h3>
+<table><thead><tr><th>网络</th><th>角色</th><th>V</th><th>I</th><th>供电</th><th>最坏压降 mV</th><th>预算 mV</th><th>占比</th><th>最坏焊盘</th><th>状态</th></tr></thead><tbody>
+{{- range .IRNets}}<tr><td>{{.Net}}</td><td>{{.Role}}</td><td class="n">{{f3 .VoltageV}}</td><td class="n">{{f4 .CurrentA}}</td><td>{{.Reference}}</td><td class="n">{{f3 .WorstMV}}</td><td class="n">{{if .BudgetMV}}{{f1 .BudgetMV}}{{else}}—{{end}}</td><td class="n">{{if .BudgetMV}}{{f1 .RatioPct}} %{{else}}—{{end}}</td><td>{{.WorstPad}}</td><td>{{.Status}}</td></tr>{{end}}
+</tbody></table>
+<div class="chart">{{chart "ir-drop"}}</div>
+<details><summary>数据表：负载焊盘压降</summary><table><thead><tr><th>网络</th><th>焊盘</th><th>电流</th><th>压降 mV</th><th>预算 mV</th><th>占比</th></tr></thead><tbody>{{range .IRPads}}<tr><td>{{.Net}}</td><td>{{.Pad}}</td><td class="n">{{f4 .CurrentA}}</td><td class="n">{{f3 .DropMV}}</td><td class="n">{{f1 .BudgetMV}}</td><td class="n">{{f1 .RatioPct}} %</td></tr>{{end}}</tbody></table></details>
+<h3>6.4 最坏路径分解</h3>
+{{- range .WorstPaths}}<p><b>{{.Net}}</b> → {{.Pad}}：合计 {{f3 .TotalMV}} mV</p><table><thead><tr><th>元素</th><th>描述</th><th>压降 mV</th></tr></thead><tbody>{{range .Steps}}<tr><td>{{.Kind}}</td><td>{{.What}}</td><td class="n">{{f3 .DropMV}}</td></tr>{{end}}</tbody></table>{{end}}
+<h3>6.5 分段线宽与压降（压降最大的 {{len .Segments}} 段，共 {{.SegmentsAll}} 段）</h3>
+<table><thead><tr><th>网络</th><th>层</th><th>类型</th><th>长度 mil</th><th>电流 A</th><th>布线宽 mil</th><th>收窄后 mil</th><th>需要 mil</th><th>压降 mV</th></tr></thead><tbody>
+{{- range .Segments}}<tr><td>{{.Net}}</td><td class="n">{{.Layer}}</td><td>{{.Kind}}</td><td class="n">{{f1 .LengthMil}}</td><td class="n">{{f4 .CurrentA}}</td><td class="n">{{f1 .RoutedMil}}</td><td class="n">{{f1 .WidthMil}}</td><td class="n">{{f2 .NeedMil}}</td><td class="n">{{f4 .DropMV}}</td></tr>{{end}}
+</tbody></table>
+{{- if .IRModel}}<details><summary>IR 模型说明</summary><ul>{{range .IRModel}}<li>{{.}}</li>{{end}}</ul></details>{{end}}
+{{- end}}
+<h3>6.6 信号完整性 SI</h3>
+{{- if or .SINets .SIPairs}}
+<table><thead><tr><th>网络</th><th>类</th><th>长度 mil</th><th>过孔</th><th>层</th></tr></thead><tbody>{{range .SINets}}<tr><td>{{.Net}}</td><td>{{.Class}}</td><td class="n">{{f1 .LengthMil}}</td><td class="n">{{.Vias}}</td><td>{{.Layers}}</td></tr>{{end}}</tbody></table>
+<table><thead><tr><th>差分对</th><th>skew mil</th><th>限值 mil</th><th>结论</th></tr></thead><tbody>{{range .SIPairs}}<tr><td>{{.P}} / {{.N}}</td><td class="n">{{f1 .SkewMil}}</td><td class="n">{{f1 .LimitMil}}</td><td><span class="badge {{.Status}}">{{.Status}}</span></td></tr>{{end}}</tbody></table>
+{{- if .SIFindings}}<ul>{{range .SIFindings}}<li>{{.}}</li>{{end}}</ul>{{else}}<p>无 skew / 过孔 / 跨分割问题。</p>{{end}}
+{{- else}}<p>无高速网络或未提供 SI 结果。</p>{{end}}
+<h3>6.7 隔离检查</h3>
+{{- if .Isolation}}<ul>{{range .Isolation}}<li>{{.}}</li>{{end}}</ul>{{else}}<p>无隔离结果（单一电压域或未提供）。</p>{{end}}
+<h3>6.8 闭环反馈（回推原理图的建议）</h3>
+{{- if .Difficulty}}<table><tbody>{{range .Difficulty}}<tr><th>{{.Label}}</th><td>{{.Value}}</td></tr>{{end}}</tbody></table>{{end}}
+{{- if .Feedback}}<ul>{{range .Feedback}}<li>{{.}}</li>{{end}}</ul>{{else}}<p>无反馈项。</p>{{end}}
+{{- else}}{{template "na" (missing $R "6")}}{{end}}
+
+<h2 id="s7">7 验证状态 Verification status</h2>
+<table><thead><tr><th>检查</th><th>结论</th><th>说明</th><th>证据文件</th></tr></thead><tbody>
+{{- range $R.Verification}}<tr><td>{{.Name}}</td><td><span class="badge {{statusCls .Status}}">{{.Status}}</span></td><td>{{.Detail}}</td><td><code>{{.Evidence}}</code>{{with .SHA256}}<br><small>sha256 {{short .}}</small>{{end}}</td></tr>{{end}}
+</tbody></table>
+
+<h2 id="s8">8 测试点计划 Test-point plan</h2>
+{{- with $R.TestPlan}}
+<table><thead><tr><th>ID</th><th>类别</th><th>测什么</th><th>在哪里测</th><th>期望值</th><th>限值 / 设置</th><th>仪器与方法</th><th>依据</th></tr></thead><tbody>
+{{- range .Items}}<tr><td>{{.ID}}</td><td>{{.Category}}</td><td>{{.What}}</td><td>{{.Where}}</td><td>{{.Expected}}</td><td>{{.Limit}}</td><td>{{.Method}}</td><td><small>{{.Basis}}</small></td></tr>{{end}}
+</tbody></table>
+<h3>建议新增测试点</h3>
+{{- if .AddTP}}<table><thead><tr><th>网络</th><th>原因</th><th>靠近</th><th>建议位置 X / Y mm</th></tr></thead><tbody>{{range .AddTP}}<tr><td>{{.Net}}</td><td>{{.Reason}}</td><td>{{.Near}}</td><td class="n">{{f1 .XMm}} / {{f1 .YMm}}</td></tr>{{end}}</tbody></table>{{else}}<p>所有电源轨均已有测试点或无板级数据。</p>{{end}}
+{{- range .Notes}}<p class="muted">{{.}}</p>{{end}}
+{{- else}}{{template "na" (missing $R "8")}}{{end}}
+
+<h2 id="s9">9 制造与装配 Manufacturing &amp; assembly</h2>
+{{- with $R.Manufacturing}}
+<h3>9.1 制板参数</h3>
+<table><tbody>{{range .Fab}}<tr><th>{{.Label}}</th><td>{{.Value}}</td><td><small>{{.Note}}</small></td></tr>{{end}}</tbody></table>
+<h3>9.2 DFM 警告（pcb check）</h3>
+{{- if .DFM}}<table><thead><tr><th>级别</th><th>类型</th><th>数量</th><th>示例</th></tr></thead><tbody>{{range .DFM}}<tr><td><span class="badge {{statusCls .Level}}">{{.Level}}</span></td><td>{{.Type}}</td><td class="n">{{.Count}}</td><td><small>{{.Example}}</small></td></tr>{{end}}</tbody></table>{{else}}{{template "na" (missing $R "9.2")}}{{end}}
+<h3>9.3 装配注意</h3>
+<table><thead><tr><th>器件</th><th>型号</th><th>关注点</th><th>说明</th></tr></thead><tbody>{{range .Assembly}}<tr><td>{{.Ref}}</td><td><small>{{.Device}}</small></td><td>{{.Concern}}</td><td>{{.Note}}</td></tr>{{end}}</tbody></table>
+<h3>9.4 高压 / 隔离 / 涂覆</h3><ul>{{range .HV}}<li>{{.}}</li>{{end}}</ul>
+<h3>9.5 工艺与 ESD 防护</h3><ul>{{range .Handling}}<li>{{.}}</li>{{end}}</ul>
+{{- else}}{{template "na" (missing $R "9")}}{{end}}
+
+<h2 id="s10">10 调试上电流程与注意事项 Bring-up</h2>
+{{- with $R.BringUp}}
+<table><thead><tr><th>#</th><th>步骤</th><th>操作</th><th>期望</th><th>异常处理</th></tr></thead><tbody>
+{{- range .Steps}}<tr><td class="n">{{.N}}</td><td>{{.Title}}</td><td>{{.Action}}</td><td>{{.Expect}}</td><td>{{.IfFail}}</td></tr>{{end}}
+</tbody></table>
+<h3>断电对地电阻检查</h3>
+<table><thead><tr><th>电源轨</th><th>已知电阻路径</th><th>期望</th><th>判据</th></tr></thead><tbody>{{range .Shorts}}<tr><td>{{.Net}}</td><td>{{.KnownPath}}</td><td>{{.Expected}}</td><td>{{.FailBelow}}</td></tr>{{end}}</tbody></table>
+<h3>故障特征</h3>
+<table><thead><tr><th>现象</th><th>可能原因</th><th>检查</th></tr></thead><tbody>{{range .Signatures}}<tr><td>{{.Symptom}}</td><td>{{.Cause}}</td><td>{{.Check}}</td></tr>{{end}}</tbody></table>
+{{- else}}{{template "na" (missing $R "10")}}{{end}}
+
+<h2 id="s11">11 附录 Appendix</h2>
+<h3>11.1 网络表</h3>
+<table><thead><tr><th>网络</th><th>角色</th><th>类</th><th>块</th><th>V 标称/最大</th><th>电流 A</th><th>来源</th><th>线宽 外/内 mil</th><th>间距 mil</th><th>阻抗 Ω</th><th>焊盘</th></tr></thead><tbody>
+{{- range $R.Appendix.Nets}}<tr><td>{{.Net}}</td><td>{{.Role}}</td><td>{{.Class}}</td><td>{{.Block}}</td><td class="n">{{f3 .VNom}} / {{f3 .VMax}}</td><td class="n">{{f4 .CurrentA}}</td><td>{{.Source}}</td><td class="n">{{f1 .OuterMil}} / {{f1 .InnerMil}}</td><td class="n">{{f1 .ClearMil}}</td><td class="n">{{if .Impedance}}{{f1 .Impedance}}{{end}}</td><td class="n">{{.Pads}}</td></tr>{{end}}
+</tbody></table>
+<h3>11.2 器件清单与模型</h3>
+<table><thead><tr><th>位号</th><th>型号</th><th>类型</th><th>功率模型</th><th>可信度</th><th>型号解码</th><th>功能块</th></tr></thead><tbody>
+{{- range $R.Appendix.Parts}}<tr><td>{{.Ref}}</td><td>{{.Device}}</td><td>{{.Kind}}</td><td>{{.ModelID}}</td><td>{{.Confidence}}</td><td>{{.Parsed}}</td><td>{{.Block}}</td></tr>{{end}}
+</tbody></table>
+<h3>11.3 原始输入溯源</h3>
+<table><thead><tr><th>类型</th><th>路径</th><th>字节</th><th>sha256</th></tr></thead><tbody>{{range $R.Inputs}}{{if .Present}}<tr><td>{{.Kind}}</td><td><code>{{.Path}}</code></td><td class="n">{{.Bytes}}</td><td><code>{{.SHA256}}</code></td></tr>{{end}}{{end}}</tbody></table>
+{{- if $R.Missing}}<h3>11.4 未生成内容</h3><ul>{{range $R.Missing}}<li>§{{.Section}}：{{.Reason}}</li>{{end}}</ul>{{end}}
+<h3>11.5 术语表</h3>
+<table><tbody>{{range $R.Appendix.Glossary}}<tr><th>{{.Label}}</th><td>{{.Value}}</td></tr>{{end}}</tbody></table>
+<p class="muted">本报告由 {{$R.Generator}} 依据上述输入自动生成；数值均可由 report.json 复核。工程参考值（安全距离、降额准则）最终以器件数据手册与认证机构为准。</p>
+</main>
+</body>
+</html>

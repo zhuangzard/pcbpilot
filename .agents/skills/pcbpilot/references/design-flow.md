@@ -73,9 +73,10 @@ connectivity + values；现场只读 `--pages`），产出 `intent.json` + `inte
 内外层线宽、过孔数、间距、阻抗与差分对、网络类，以及电压域、域间绝缘（爬电/电气间隙/开槽）和
 设计提示。先处理 `error` 级 finding（改原理图、选型或 spec 后重新 derive），`warn` 写明取舍后可继续。
 后续 P1 规则、`pcb auto`、安规和回读对账都消费这份文件，不再按网名重新猜。读法见
-[design-intent.md](design-intent.md)。状态：`offline-verified`。
+[design-intent.md](design-intent.md)。状态：`offline-verified`。加 `--report-dir reports/<name>`
+同时生成预布局版设计报告（P11，见 [design-report.md](design-report.md)）。
 
-## PCB P0–P10
+## PCB P0–P11
 
 | 步骤 | 操作和应留下的结果 |
 |---|---|
@@ -90,6 +91,7 @@ connectivity + values；现场只读 `--pages`），产出 `intent.json` + `inte
 | P8 普通信号与铜 | 完成其余信号、换层、GND 铜、缝合孔和热路径；修改铜后重建铺铜。 |
 | P9 丝印与工艺 | 核对功能、接口逐脚、极性、字体、方向；泪滴创建在 typed 接口可用前保持 `unsupported`，不得手工补做。 |
 | P10 终检 | 回读全部网络、机械干涉、DRC 和检查 findings，显式保存并重开，再次读取关键对象。 |
+| P11 设计报告（每次运行自动更新，版本化交付客户） | `pcbpilot report design --out-dir reports/<name> …`（或 `intent derive` / `pcb auto run` 的 `--report-dir`）生成下一个 `vN/report.html`（自包含）+ `report.md` + `report.json`，并更新 `index.json` 与 `CHANGELOG.md`。交付版须带 DRC、check、保存重载前后两份 dump、原理图与布局图；封面结论为 FAIL 时不交付，warnings 逐条写明取舍。见 [design-report.md](design-report.md)。 |
 
 ### 板框、固定件与布局顺序
 
