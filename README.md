@@ -39,10 +39,67 @@
 | **PCB 布局与布线** | `pcb auto` 整板引擎：机械约束 → 最小可行板框 → 原理图模块归属驱动的布局 → 多层协商布线 → 电源平面/分区铺铜 → 独立 DRC；天线净空、孔距、差分对、开关电源热回路 |
 | **丝印调整** | 自动避开焊盘、器件体、禁区、板框和其他标签；添加板注、接口名、LED 极性及 SVG Logo |
 | **复用成熟电路** | 从内置电路块库复用 CH340、ESP32 自动下载、按键、USB Hub、降压等拓扑，放件、连线并对账 |
-| **检查与交付** | 原理图连接与几何检查、PCB DRC/DFM、BOM、网表、制造文件、截图、审计日志和显式保存 |
+| **电气分析与设计意图（v0.5）** | 从原理图做直流电源仿真（每脚电流、稳压器工作点、纹波），推导每个功能块的用途、每个网的电压/电流/线宽/过孔/间距/阻抗和网络类，写进 EasyEDA 规则与原理图注释；高压按 IEC 62368-1 / 60601-1（MOOP/MOPP）/ 61010-1 算爬电、间隙与开槽 |
+| **检查与交付** | 原理图连接与几何检查、PCB DRC/DFM、BOM、网表、制造文件、截图、审计日志和显式保存；**每次运行自动生成版本化的设计报告**（仿真图表、器件可行性、工程计算、测试点、制造与上电注意事项），可直接交付客户 |
 
 完整能力与状态见 [功能清单](docs/FEATURES.md)，命令索引见
 [原理图 CLI](docs/cli/schematic.md) 和 [PCB CLI](docs/cli/pcb.md)。
+
+## v0.5：从原理图到交付报告的电气闭环
+
+以前原理图到 PCB 之间只传“位置”，PCB 不知道每个电路是做什么的、流多大电流、要多高的安规。
+v0.5 把原理图里的电气意图算出来，一路带到布线、检查和交付：
+
+```text
+原理图 ──▶ sim power（直流仿真）──▶ intent derive（设计意图）──┬─▶ sch intent-annotate（写回原理图注释）
+                                                             ├─▶ pcb rules apply（写入 EasyEDA 网络类/线宽/间距/差分对规则）
+                                                             └─▶ pcb auto run --intent --sim
+                                                                   ├─ 按段电流定线宽、布线后 IR 压降校核
+                                                                   ├─ 高压：按标准的爬电/间隙、隔离带、自动开槽
+                                                                   ├─ 高速：阻抗、对内/组内等长、参考平面
+                                                                   └─ feedback.json：布线难点回推原理图（换脚等）
+                                                                            ──▶ report design（版本化设计报告）
+```
+
+```bash
+pcbpilot sim power      --project <工程> --pages <p1>,<p2> --out sim.json --report sim.md
+pcbpilot intent derive  --project <工程> --pages <p1>,<p2> --out intent.json --report-dir reports/<项目>
+pcbpilot sch intent-annotate --project <工程> --page <p1> --intent intent.json
+pcbpilot pcb rules apply --project <工程> --doc <PCB> --intent intent.json      # 先 --dry-run
+pcbpilot pcb auto run --board board.json --intent intent.json --sim sim.json --place --report-dir reports/<项目>
+```
+
+2026-09-27 这条链在 EasyEDA 桌面版 V3 上对 ESP32-S3 四层板完整实跑：规则写入并保存重载后仍同步，
+布线 30/30、平面连接 52/52、各电源轨 IR 压降在预算内，原生 DRC 通过。高压（反激、医疗 2×MOPP、
+CAT III 600 V、400 V 逆变）与高速（USB3、HDMI、PCIe、千兆以太网、DDR）压力测试的现状与已知缺口见
+[高压隔离](.agents/skills/pcbpilot/references/recipes/hv-isolation.md) 与
+[高速](.agents/skills/pcbpilot/references/recipes/high-speed.md) 配方。
+
+### 设计报告（每次运行自动更新，版本化交付客户）
+
+`report design` 按固定模板生成单文件 HTML（图表内联，可离线打开、打印）+ Markdown + JSON，每次运行一个新版本
+`reports/<项目>/vN/`，并写出与上一版的变化。章节：封面与总体结论 · 执行摘要与主要风险 · 设计意图 ·
+电源仿真（各场景电流、功率平衡、电源树、稳压器工作点、纹波、模型可信度）· **器件可行性**（每个器件的
+电压/电流/功率 vs 额定与余量，未知额定标“需数据手册”，不猜）· 工程计算（线宽、过孔、间距、阻抗、爬电，
+附公式）· 布局与布线（截图、IR 压降、SI、隔离、回推建议）· 验证状态 · **测试点计划**（测哪里、期望值
+± 公差、仪器与方法）· **制造与装配注意事项** · **上电调试流程** · 附录。
+
+<p align="center">
+  <img src="docs/assets/design-report-cover.png" width="420" alt="设计报告封面与总体结论"/>
+  <img src="docs/assets/design-report-margins.png" width="380" alt="器件余量图"/>
+</p>
+<p align="center">
+  <img src="docs/assets/design-report-power-tree.png" width="820" alt="电源树"/>
+</p>
+<p align="center">
+  <img src="docs/assets/design-report-rail-current.png" width="560" alt="各场景电源轨电流"/>
+</p>
+
+样例（今天 ESP32 现场实跑数据生成）：[v1 报告（Markdown）](docs/examples/esp32-mini-design-report/v1/report.md) ·
+[单文件 HTML（下载后打开）](docs/examples/esp32-mini-design-report/v1/report.html) ·
+[v1→v2 变更记录](docs/examples/esp32-mini-design-report/CHANGELOG.md) ·
+模板与每节计算来源：[templates/design-report](.agents/skills/pcbpilot/templates/design-report/README.md) ·
+使用说明：[design-report.md](.agents/skills/pcbpilot/references/design-report.md)。
 
 ## 直接这样告诉 Agent
 
@@ -90,6 +147,14 @@
 优先匹配标准器件库和准确 LCSC C 号，核对型号、封装及引脚后再替换。
 替换时保留位号、位置和 uniqueId；如果 pinDiff 非空，修复接线并重新运行 sch check、
 bridge-check 和官方 DRC。最后输出替换清单和仍无法确定的器件。
+```
+
+### 出一份交付客户的设计报告
+
+```text
+请使用 pcbpilot 给当前工程出设计报告：先对原理图做电源仿真和设计意图推导，再用已完成的布线结果、
+保存重载后的回读、原生 DRC、pcb check、规则同步和逐焊盘对账作为证据，生成新版本的设计报告。
+额定未知的器件标“需数据手册”，不要猜；总体结论里的每条警告写明取舍，告诉我相对上一版改了什么。
 ```
 
 ### 检查并修复已有工程

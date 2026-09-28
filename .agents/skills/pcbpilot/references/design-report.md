@@ -26,7 +26,7 @@
 | `--sim` | `sim power` / `intent derive --sim-out` | §3 不可用；§4 用 intent 网络电流 |
 | `--plan-dir` | `pcb auto run --out-dir`（plan.json、feedback.json、preview.svg） | §6 只有图片 |
 | `--board` / `--reload-board` | `pcb dump --include-copper`（保存重载前/后） | 无 MPN 解码、无测试点坐标、无制板规则；无重载对比则 §7 该项 N/A |
-| `--drc` `--check` `--rules-check` `--net-diff` | `pcb drc` / `pcb check`（文本或 `--json`）/ `pcb rules check` / 焊盘网络对账 JSON | §7 对应项 N/A，总体结论降为“PASS with warnings” |
+| `--drc` `--check` `--rules-check` `--net-diff` | `pcb drc` / `pcb check`（文本或 `--json`）/ `pcb rules check` / `scripts/pad-net-diff.py --json`（原理图连通性 vs 板级 dump，`ok` 字段即结论） | §7 对应项 N/A，总体结论降为“PASS with warnings” |
 | `--models` | 默认已安装 Skill 的 `power-models.json` | 只剩 MPN/描述解码的额定 |
 | `--values` | `sch list` JSON 或 `{"parts":{ref:{value,mpn,description}}}` | MPN 取自板级 dump 的 device |
 | `--image KIND[:LABEL]=PATH` | `sch export-image`、`pcb stage-snapshot` | §6 无图 |

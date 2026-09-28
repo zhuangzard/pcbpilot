@@ -87,6 +87,48 @@ parts point back into the standard-parts library (BOM-ready).
 > without a daemon or editor window. Contribution guide:
 > [`standard-blocks-contributing.md`](.agents/skills/pcbpilot/references/standard-blocks-contributing.md)
 
+## v0.5: an electrical loop from schematic to customer report
+
+Before v0.5 only *positions* crossed from schematic to PCB — the board did not know what each circuit is for, how
+much current it carries or which safety standard applies. v0.5 computes the schematic's electrical intent and
+carries it through routing, checking and delivery:
+
+```text
+schematic ─▶ sim power (DC simulation) ─▶ intent derive (design intent) ─┬─▶ sch intent-annotate (notes back on the schematic)
+                                                                        ├─▶ pcb rules apply (EasyEDA net classes / widths / clearances / diff pairs)
+                                                                        └─▶ pcb auto run --intent --sim
+                                                                              ├─ per-segment width from branch current, post-route IR-drop check
+                                                                              ├─ high voltage: creepage/clearance per standard, isolation bands, auto slots
+                                                                              ├─ high speed: impedance, intra-pair / group length matching, reference planes
+                                                                              └─ feedback.json: routing difficulties pushed back to the schematic (pin swaps…)
+                                                                                     ─▶ report design (versioned design report)
+```
+
+- **Power simulation** (`pcbpilot sim power`): DC operating point by modified nodal analysis — per-pin currents,
+  regulator operating points (buck Vout from its real feedback divider, efficiency, ripple), scenarios (typical,
+  peak, per-source), a power-model library with sources and confidence, optional SPICE export for ngspice.
+- **Design intent** (`pcbpilot intent derive`): what each block does, voltage domains, per-net voltage/current/
+  width/vias/clearance/impedance and net classes, and design findings (inductor margin, USB budget…). Safety
+  distances from IPC-2221B, IEC 62368-1, IEC 60601-1 (MOOP/MOPP) and IEC 61010-1 tables.
+- **Into EasyEDA** (`pcb rules apply`, `sch intent-annotate`): idempotent, read back, `--dry-run` first.
+- **Design report** (`pcbpilot report design`, or `--report-dir` on `intent derive` / `pcb auto run`): one
+  self-contained HTML (inline SVG charts) + Markdown + JSON per run, versioned as `reports/<project>/vN/` with a
+  changelog. Sections: verdict · summary & top risks · design intent · power simulation · **component feasibility**
+  (stress vs rating and margin; unknown ratings say "needs datasheet", never guessed) · engineering calculations ·
+  layout & routing · verification evidence · **test-point plan** · **manufacturing & assembly notes** · **bring-up
+  procedure** · appendix. Sample: [docs/examples/esp32-mini-design-report](docs/examples/esp32-mini-design-report/README.md).
+
+<p align="center">
+  <img src="docs/assets/design-report-power-tree.png" width="820" alt="Design report: power tree"/>
+</p>
+
+Live 2026-09-27 on EasyEDA desktop V3 (ESP32-S3, 4 layers): rules written and still in sync after save → reload,
+routed 30/30 with all 52 plane connections, every rail within its IR-drop budget, native DRC clean. High-voltage
+(flyback, medical 2×MOPP, CAT III 600 V, 400 V inverter) and high-speed (USB3, HDMI, PCIe, Gigabit Ethernet, DDR)
+stress suites and their known gaps are documented in the
+[HV isolation](.agents/skills/pcbpilot/references/recipes/hv-isolation.md) and
+[high-speed](.agents/skills/pcbpilot/references/recipes/high-speed.md) recipes.
+
 ## Install
 
 > **Full setup & usage notes: [Quick Start →](docs/quick-start.md)** — the
