@@ -111,3 +111,19 @@ pcbpilot pcb report --project <P> --doc <PCB>        # 回读 skew / spread
 `STRESS_HS_REAL=0` 跳过真板；结果在 `$STRESS_HS_OUT`（默认 `$TMPDIR/pcbpilot-stress-hs`）：每例
 `intent.json`、`rules-plan.json`、`<mode>/plan.json|report.md|preview.svg` 与总表 `summary.md`。
 失败项就是引擎的待办——不得为通过而放宽判据；修引擎后补回归测试。
+
+### 当前基线（2026-09-27，stress/hs，无并行负载，路由预算 2 min）
+
+| 用例 | 检查 | 失败 | 结论 | 剩余失败（引擎待办） |
+|---|---|---|---|---|
+| `hdmi-tx` | 73 | 0 | PASS | — |
+| `usb3-2layer-negative` | 60 | 0 | PASS | 正确报 `reference-plane-missing` + SI `no-reference` |
+| `usb3-typec` | 111 | 6 | FAIL | 给定布局 95%（RX2 一根在骑板座密脚处无路）；混合 IN2 叠层使 B 排焊盘出线在 BOTTOM 无参考（6 处 `no-reference`，40–100 mil）；布局模式 USB2 对 4–5 孔 |
+| `pcie-m2` | 67 | 6 | FAIL | 5 mil 对内差剩 6–8 mil（短网全在颈缩/阶梯段，凸起放不下）；REFCLK 143 mil；布局后 TX 交流耦合电容相距 66 mil（布局器的配对项权重不足） |
+| `gbe-rj45` | 125 | 6 | FAIL | RJ45 的 3/6 线对跨 4/5 线对（T568 固有）→ TRD1 差 252 mil；平面连接 2–3 个开路；布局模式 1 条未通 |
+| `ddr3-x16` | 74 | 18 | FAIL | 6 层双 BGA：布通 49–75%，字节通道差 137–786 mil（容差 25），fly-by 地址差 >2000 mil，过孔超预算——BGA 区内没有蛇形空间，fly-by 仍按树布线 |
+
+真板（`--board`，仅报告）：RK3568 4 层 `--intent` 布通 48.4%（同负载下无 intent 48.0%，引擎改动 A/B 与 dev 一致），
+认出 HDMI 8、MIPI 10、PCIe 26、USB3 6、USB 6、DDR 70 网，HDMI_LANES 组差 1777 mil、5 对超对内上限、9 处 `no-reference`
+（混合叠层）；K230 6 层 67.1%，认出 MIPI 28、DDR 64、USB 4，DDR 字节通道 A0/B0 差 6 mil（满足 25），
+地址组 200–223 mil（超 100），MIPI 各 lane 组未布通。
