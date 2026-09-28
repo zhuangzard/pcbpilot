@@ -340,6 +340,249 @@
         ]
       },
       "package": "pcbpilot-report-ESP32-S3-mini-v2.zip"
+    },
+    {
+      "version": 3,
+      "label": "v3",
+      "dir": "v3",
+      "generatedAt": "2026-09-28T14:31:22Z",
+      "verdict": "PASS with warnings",
+      "inputsDigest": "ff144d3dcdaa3a3bfcccf6b1b6ff365693c156df40f3905c3301eda04dddb1af",
+      "inputs": {
+        "analog:模拟仿真 analog.json": "dcdc9fc6d38078df0ba68f5dae011bfc643677933791b3d65380b52b92ede6aa",
+        "board:板级回读 board dump": "0c3a06da3ffad9d52af8a0e30e07da176a94c8e14695424e6f6cd38e4e80716d",
+        "check:pcb check": "5a3a3791984ac7acea26b8842a469a198a662e1a7d6508900cec1b6ee2da1b91",
+        "drc:原生 DRC": "cc3884525eac116c95c00746f7c3629d5b09cd2a63a5f6db398b8d871cec5763",
+        "feedback:pcb auto feedback.json": "e0dad5446087a9eefa0fe203e8d06390a941e8dadea01fabd450dc614fad82cc",
+        "image:BOTTOM 热图": "9b0828378aef1c2c89294267cc3b03961a0eeaf9bbe13a38eeec3b0920625379",
+        "image:IN1 热图": "0706b3da12d6974dd5811a632310f3539c29da299ed6636ee0862a79b662014c",
+        "image:IN2 热图": "501988982046f22d3f4656188e04f51de21b0d1bd0d1e3f963606ae8f096ad22",
+        "image:PCB 布局（编辑器快照）": "b3ae70d17c4e343214d9e2acd8e46dfa454a850477da6a70c8b2cba1b73cf3db",
+        "image:TOP 热图": "1a314a9a9780082881e56cd33f18730f6748f7e6b6aeb97914b2fd9caa5ecf0a",
+        "image:pcb auto 离线布线预览（preview.svg）": "661660ec1fc2ef70dc6c335bb13715f2c378353fe525ee7deb07648ff524d0f9",
+        "image:原理图 P1": "8a57cbdd3a56371642dc336db75a81a58aa0b46afb61c5a4871dd95507fc4094",
+        "image:原理图 P2": "b3c20ee5aa379e5ac43d4812cc251680a48c553d633e3ca908300fd45d2f45be",
+        "intent:设计意图 intent.json": "fbcd333e3a5d215e7733c3e4f7a0601dbd0dbc537c734d5f70efca5083bf19a4",
+        "models:功率模型/额定 power-models.json": "db129b6271fe2336a647c9df71840d022338b052cc3b10f3d6254e7fecd4b0c5",
+        "net-diff:焊盘网络对账": "6931fd8912a9f4a8a2a3d7b2a638e6a00e9d626ce9fdc3dd880c8febd1fc637a",
+        "plan:pcb auto plan.json": "e23c0981bcb62078a1de72c089823053448a2ca578b4aaa2d95f6629da658e77",
+        "post:设计后仿真 post.json": "eeacf37d0c64677b25f070bf9d3cddd1cc50cf8cf866091433094528281c593d",
+        "reload-board:保存重载后回读": "be6df89532246ed205eda6d5d90d0efff8fcae8bcdc480846a3ac897a68c3a9b",
+        "rules-check:规则同步 rules check": "786173eedc12efce3ba81d5c4780b5501f58ad88da5cffbc0494b25515bcf429",
+        "sim:电源仿真 sim.json": "c04bed826d616b92ba12dee4667bb3baf36cee2f2943fec1c2f29be1eef2b88e"
+      },
+      "metrics": {
+        "railCurrentA": {
+          "+3V3": 0.521459,
+          "+5V_TERM": 0.426521,
+          "USB_VBUS": 0.42975,
+          "VSYS_5V": 0.42975
+        },
+        "railVoltageV": {
+          "+3V3": 3.318,
+          "+5V_TERM": 4.9991,
+          "USB_VBUS": 4.9957,
+          "VSYS_5V": 4.7331
+        },
+        "irDropMV": {
+          "+3V3": 3.846,
+          "+5V_TERM": 1.992,
+          "GND": 1.119,
+          "LX": 0.614,
+          "USB_VBUS": 17.873,
+          "VSYS_5V": 15.574
+        },
+        "marginPct": {
+          "C1 直流电压 V vs 额定": 90.5,
+          "C2 直流电压 V vs 额定": 86.7,
+          "C3 直流电压 V vs 额定": 79.3,
+          "C4 直流电压 V vs 额定": 79.3,
+          "C5 直流电压 V vs 额定": 93.4,
+          "C6 直流电压 V vs 额定": 79.3,
+          "C7 直流电压 V vs 额定": 86.7,
+          "D1 反向电压 VR vs VRRM": 88.2,
+          "D1 正向电流 If vs 额定": 85.8,
+          "D2 反向电压 VR vs VRRM": 88.2,
+          "D2 正向电流 If vs 额定": 85.7,
+          "D3 VRWM vs 最高线电压": 0.1,
+          "J2 供电预算 I vs 端口额定": 14,
+          "L1 峰值电流 Ipk vs Isat": 11.4,
+          "L1 有效值 Irms vs Irated": 31.2,
+          "LED1 正向电流 If vs IF,max": 94.4,
+          "Q1 集电极电流 Ic vs IC,max": 100,
+          "Q2 集电极电流 Ic vs IC,max": 100,
+          "R1 功率 P vs 封装额定": 99.7,
+          "R2 功率 P vs 封装额定": 99.9,
+          "R3 功率 P vs 封装额定": 100,
+          "R4 功率 P vs 封装额定": 100,
+          "R5 功率 P vs 封装额定": 98.2,
+          "R6 功率 P vs 封装额定": 98.2,
+          "R7 功率 P vs 封装额定": 96.9,
+          "R8 功率 P vs 封装额定": 100,
+          "R9 功率 P vs 封装额定": 100,
+          "U1 输入电压 Vin,max vs 绝对/推荐上限": 13.9,
+          "U1 输入电压 Vin,min vs 最低工作电压": 45.6,
+          "U1 输出电流 Iout vs 额定": 73.9,
+          "U3 GPIO IO2 (LED_CTRL) 输出电流": 96.5,
+          "U3 供电 +3V3 Vmax vs 推荐上限": 7.8,
+          "U3 供电 +3V3 Vmin vs 推荐下限": 9.6
+        },
+        "feasibility": {
+          "marginal": 3,
+          "ok": 30,
+          "unknown": 14
+        },
+        "completionPct": 100,
+        "checks": {
+          "pcb check（DFM 重建审计）": "WARN",
+          "保存/重载一致性": "PASS",
+          "原生 DRC（EasyEDA）": "PASS",
+          "布线完成度（pcb auto）": "PASS",
+          "总体结论": "PASS with warnings",
+          "板边安全距离（copper-to-edge）": "PASS",
+          "焊盘网络对账（pad-net diff）": "PASS",
+          "直流压降（IR drop）": "PASS",
+          "规则同步（pcb rules check）": "PASS",
+          "设计后仿真（post-layout）": "PASS"
+        },
+        "suppliedW": {
+          "buttons-pressed": 0.44709,
+          "peak": 2.11516,
+          "terminal-only": 2.12897,
+          "typical": 0.44445,
+          "usb-only": 2.13028
+        },
+        "intentCurrentA": {
+          "+3V3": 0.52146,
+          "+5V_TERM": 0.42652,
+          "GND": 0.52146,
+          "LX": 0.52963,
+          "USB_VBUS": 0.42975,
+          "VSYS_5V": 0.42975
+        },
+        "widthNeedMil": {
+          "+3V3": 4.82,
+          "+5V_TERM": 3.65,
+          "GND": 4.82,
+          "LX": 4.92,
+          "USB_VBUS": 3.69,
+          "VSYS_5V": 3.69
+        },
+        "postDropMV": {
+          "+3V3": 2.708,
+          "+5V_TERM": 1.007,
+          "GND": 0.338,
+          "LX": 0.265,
+          "USB_VBUS": 17.071,
+          "VSYS_5V": 13.609
+        },
+        "postMaxC": 86.37
+      },
+      "findings": {
+        "feas|D3|VRWM vs 最高线电压": "marginal: D3 VRWM vs 最高线电压 余量 0.1 %",
+        "feas|J2|供电预算 I vs 端口额定": "marginal: J2 供电预算 I vs 端口额定 余量 14 %",
+        "feas|L1|峰值电流 Ipk vs Isat": "marginal: L1 峰值电流 Ipk vs Isat 余量 11.4 %",
+        "intent:analog-reset-ok|[C7,R5,U3] A4 U3.EN: EN rises to VIH 13.37ms after the rail is stable (≥ 50µs required)": "info: [C7,R5,U3] A4 U3.EN: EN rises to VIH 13.37ms after the rail is stable (≥ 50µs required)",
+        "intent:analog-transient-current|[C7,Q2,R5,R9] A2 Q2: 集电极峰值电流 228.4mA outside the target ≤ 200mA (inferred)": "warn: [C7,Q2,R5,R9] A2 Q2: 集电极峰值电流 228.4mA outside the target ≤ 200mA (inferred)",
+        "intent:diode-loss|[D1] D1 (SS34) conducts 0.427 A: Vf ≈ 0.364 V, loss 0.155 W (terminal-only)": "info: [D1] D1 (SS34) conducts 0.427 A: Vf ≈ 0.364 V, loss 0.155 W (terminal-only)",
+        "intent:diode-loss|[D2] D2 (SS34) conducts 0.43 A: Vf ≈ 0.364 V, loss 0.157 W (usb-only)": "info: [D2] D2 (SS34) conducts 0.43 A: Vf ≈ 0.364 V, loss 0.157 W (usb-only)",
+        "intent:impedance|impedance-controlled nets: USB_DM 90 Ω, USB_DP 90 Ω — order the board with the stackup the widths were solved for (JLC04161H-7628 (4-layer 1.6 mm, L1→L2 7628 prepreg 0.2104 mm))": "info: impedance-controlled nets: USB_DM 90 Ω, USB_DP 90 Ω — order the board with the stackup the widths were solved for (JLC04161H-7628 (4-layer 1.6 mm, L1→L2 7628 prepreg 0.2104 mm))",
+        "intent:inductor-rating|[L1,U1] L1 (regulator U1) peak 0.682 A / RMS 0.53 A vs rated 0.77 A (power model nlcv32t-2r2m): 11% margin on the peak": "warn: [L1,U1] L1 (regulator U1) peak 0.682 A / RMS 0.53 A vs rated 0.77 A (power model nlcv32t-2r2m): 11% margin on the peak",
+        "intent:regulator-headroom|[U1] U1 buck: Vin min 4.593 V → 3.318 V, duty ≤ 82%": "info: [U1] U1 buck: Vin min 4.593 V → 3.318 V, duty ≤ 82%",
+        "intent:usb-budget|[J2] J2 draws 0.43 A from USB (usb-only) vs the 0.5 A budget (86%) — little margin for inrush/radio bursts": "warn: [J2] J2 draws 0.43 A from USB (usb-only) vs the 0.5 A budget (86%) — little margin for inrush/radio bursts"
+      },
+      "changes": {
+        "previous": "v2",
+        "inputsIdentical": false,
+        "inputsChanged": [
+          "新增 analog:模拟仿真 analog.json",
+          "变更 board:板级回读 board dump",
+          "变更 check:pcb check",
+          "变更 drc:原生 DRC",
+          "变更 feedback:pcb auto feedback.json",
+          "移除 image:BOTTOM 温度（68.88–86.28 °C）",
+          "新增 image:BOTTOM 热图",
+          "移除 image:BOTTOM 电流密度（0.1–96.68 A/mm²）",
+          "移除 image:IN1 温度（68.88–86.28 °C）",
+          "新增 image:IN1 热图",
+          "移除 image:IN1 电流密度（0.1–96.68 A/mm²）",
+          "移除 image:IN2 温度（68.88–86.28 °C）",
+          "新增 image:IN2 热图",
+          "移除 image:IN2 电流密度（0.1–96.68 A/mm²）",
+          "变更 image:PCB 布局（编辑器快照）",
+          "移除 image:TOP 温度（68.88–86.28 °C）",
+          "新增 image:TOP 热图",
+          "移除 image:TOP 电流密度（0.1–96.68 A/mm²）",
+          "变更 image:pcb auto 离线布线预览（preview.svg）",
+          "变更 intent:设计意图 intent.json",
+          "变更 models:功率模型/额定 power-models.json",
+          "变更 plan:pcb auto plan.json",
+          "变更 post:设计后仿真 post.json",
+          "变更 reload-board:保存重载后回读",
+          "变更 rules-check:规则同步 rules check"
+        ],
+        "rows": [
+          {
+            "metric": "IR 压降 +3V3",
+            "before": "3.828 mV",
+            "after": "3.846 mV",
+            "delta": "+0.018 mV"
+          },
+          {
+            "metric": "IR 压降 +5V_TERM",
+            "before": "1.98 mV",
+            "after": "1.992 mV",
+            "delta": "+0.012 mV"
+          },
+          {
+            "metric": "IR 压降 VSYS_5V",
+            "before": "15.617 mV",
+            "after": "15.574 mV",
+            "delta": "-0.043 mV"
+          },
+          {
+            "metric": "设计后压降 +5V_TERM",
+            "before": "0.993 mV",
+            "after": "1.007 mV",
+            "delta": "+0.014 mV"
+          },
+          {
+            "metric": "意图电流 +3V3",
+            "before": "1 A",
+            "after": "0.521 A",
+            "delta": "-0.479 A"
+          },
+          {
+            "metric": "所需线宽 +3V3",
+            "before": "11.83 mil",
+            "after": "4.82 mil",
+            "delta": "-7.01 mil"
+          },
+          {
+            "metric": "总体结论",
+            "before": "FAIL",
+            "after": "PASS with warnings",
+            "delta": ""
+          },
+          {
+            "metric": "板边安全距离（copper-to-edge）",
+            "before": "—",
+            "after": "PASS",
+            "delta": ""
+          }
+        ],
+        "findingsAdded": [
+          "info: [C7,R5,U3] A4 U3.EN: EN rises to VIH 13.37ms after the rail is stable (≥ 50µs required)",
+          "warn: [C7,Q2,R5,R9] A2 Q2: 集电极峰值电流 228.4mA outside the target ≤ 200mA (inferred)",
+          "info: impedance-controlled nets: USB_DM 90 Ω, USB_DP 90 Ω — order the board with the stackup the widths were solved for (JLC04161H-7628 (4-layer 1.6 mm, L1→L2 7628 prepreg 0.2104 mm))"
+        ],
+        "findingsResolved": [
+          "FAIL: +3V3 过孔 1 \u003c 需要 2 @ 1 A",
+          "FAIL: +3V3 线宽 10/10 mil（外/内）\u003c 需要 11.83/23.65 mil @ 1 A",
+          "info: impedance-controlled nets: USB_DM 90 Ω, USB_DP 90 Ω — order the board with the stackup the widths were solved for (JLC04161H-7628 (4-layer 1.6 mm, L1→L2 prepreg 0.2104 mm))"
+        ]
+      },
+      "package": "pcbpilot-report-ESP32-S3-mini-v3.zip"
     }
   ]
 }

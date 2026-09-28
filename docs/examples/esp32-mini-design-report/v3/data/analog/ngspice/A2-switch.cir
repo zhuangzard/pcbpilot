@@ -1,0 +1,23 @@
+* pcbpilot sim analog — block A2 transistor-switch (Q2) mode switch
+* generated from schematic connectivity; rails from pcbpilot sim power (typical scenario)
+.include "pcbpilot-generic.lib"
+V_n__3v3 n__3v3 0 DC 3.318
+C_c7 n_en 0 1e-06
+R_r5 n_en n__3v3 10000
+R_r9 n_dtr n_q2_b 4700
+V_IC_q2 n_en ic_q2 DC 0
+Q_q2 ic_q2 n_q2_b n_rts QM_q2
+.model QM_q2 NPN(IS=6.734e-15 BF=416.4 BR=0.7371 VAF=100 CJE=4.5p CJC=3.6p TF=0.3n TR=50n)
+V_DRV n_dtr 0 PWL(0 0 0.006 0 0.00600001 3.318 0.069 3.318 0.06900001 0)
+V_EMIT n_rts 0 DC 0
+.options noacct rshunt=1e12
+.control
+set filetype=ascii
+set wr_singlescale
+set wr_vecnames
+option numdgt=10
+tran 1.26e-06 0.126 0 1.26e-06
+wrdata A2-switch-switch.txt v(n_en) v(n_dtr) i(v_ic_q2)
+quit
+.endc
+.end

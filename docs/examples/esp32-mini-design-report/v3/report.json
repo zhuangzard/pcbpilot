@@ -1,0 +1,5478 @@
+{
+  "schemaVersion": 1,
+  "generator": "pcbpilot report design",
+  "generatedAt": "2026-09-28T14:31:22Z",
+  "project": "ESP32-S3 mini",
+  "customer": "Demo",
+  "version": 3,
+  "versionLabel": "v3",
+  "tools": {
+    "pcbpilot": "v0.6.0",
+    "host": "EasyEDA Pro desktop V3 3.2.149",
+    "connector": "0.4.1"
+  },
+  "inputs": [
+    {
+      "kind": "intent",
+      "label": "设计意图 intent.json",
+      "path": "artifacts/v06-live/intent.json",
+      "sha256": "fbcd333e3a5d215e7733c3e4f7a0601dbd0dbc537c734d5f70efca5083bf19a4",
+      "bytes": 55028,
+      "present": true
+    },
+    {
+      "kind": "sim",
+      "label": "电源仿真 sim.json",
+      "path": "artifacts/v06-live/sim.json",
+      "sha256": "c04bed826d616b92ba12dee4667bb3baf36cee2f2943fec1c2f29be1eef2b88e",
+      "bytes": 194596,
+      "present": true
+    },
+    {
+      "kind": "plan",
+      "label": "pcb auto plan.json",
+      "path": "artifacts/v06-live/route/plan.json",
+      "sha256": "e23c0981bcb62078a1de72c089823053448a2ca578b4aaa2d95f6629da658e77",
+      "bytes": 280811,
+      "present": true
+    },
+    {
+      "kind": "feedback",
+      "label": "pcb auto feedback.json",
+      "path": "artifacts/v06-live/route/feedback.json",
+      "sha256": "e0dad5446087a9eefa0fe203e8d06390a941e8dadea01fabd450dc614fad82cc",
+      "bytes": 1167,
+      "present": true
+    },
+    {
+      "kind": "board",
+      "label": "板级回读 board dump",
+      "path": "artifacts/v06-live/reload.json",
+      "sha256": "0c3a06da3ffad9d52af8a0e30e07da176a94c8e14695424e6f6cd38e4e80716d",
+      "bytes": 467818,
+      "present": true
+    },
+    {
+      "kind": "reload-board",
+      "label": "保存重载后回读",
+      "path": "artifacts/v06-live/reload2.json",
+      "sha256": "be6df89532246ed205eda6d5d90d0efff8fcae8bcdc480846a3ac897a68c3a9b",
+      "bytes": 467818,
+      "present": true
+    },
+    {
+      "kind": "drc",
+      "label": "原生 DRC",
+      "path": "artifacts/v06-live/drc.json",
+      "sha256": "cc3884525eac116c95c00746f7c3629d5b09cd2a63a5f6db398b8d871cec5763",
+      "bytes": 454,
+      "present": true
+    },
+    {
+      "kind": "check",
+      "label": "pcb check",
+      "path": "artifacts/v06-live/check-live.txt",
+      "sha256": "5a3a3791984ac7acea26b8842a469a198a662e1a7d6508900cec1b6ee2da1b91",
+      "bytes": 31633,
+      "present": true
+    },
+    {
+      "kind": "rules-check",
+      "label": "规则同步 rules check",
+      "path": "artifacts/v06-live/rules-check.json",
+      "sha256": "786173eedc12efce3ba81d5c4780b5501f58ad88da5cffbc0494b25515bcf429",
+      "bytes": 3223,
+      "present": true
+    },
+    {
+      "kind": "net-diff",
+      "label": "焊盘网络对账",
+      "path": "artifacts/v06-live/netdiff.json",
+      "sha256": "6931fd8912a9f4a8a2a3d7b2a638e6a00e9d626ce9fdc3dd880c8febd1fc637a",
+      "bytes": 352,
+      "present": true
+    },
+    {
+      "kind": "analog",
+      "label": "模拟仿真 analog.json",
+      "path": "artifacts/v06-live/analog.json",
+      "sha256": "dcdc9fc6d38078df0ba68f5dae011bfc643677933791b3d65380b52b92ede6aa",
+      "bytes": 84550,
+      "present": true
+    },
+    {
+      "kind": "values",
+      "label": "器件值/型号",
+      "present": false
+    },
+    {
+      "kind": "models",
+      "label": "功率模型/额定 power-models.json",
+      "path": ".agents/skills/pcbpilot/references/power-models.json",
+      "sha256": "db129b6271fe2336a647c9df71840d022338b052cc3b10f3d6254e7fecd4b0c5",
+      "bytes": 19429,
+      "present": true
+    },
+    {
+      "kind": "post",
+      "label": "设计后仿真 post.json",
+      "path": "artifacts/v06-live/post.json",
+      "sha256": "eeacf37d0c64677b25f070bf9d3cddd1cc50cf8cf866091433094528281c593d",
+      "bytes": 72058,
+      "present": true
+    },
+    {
+      "kind": "spice",
+      "label": "SPICE 网表",
+      "present": false
+    },
+    {
+      "kind": "image",
+      "label": "原理图 P1",
+      "path": "artifacts/v06-live/sch-905bb85957eaf435.png",
+      "sha256": "8a57cbdd3a56371642dc336db75a81a58aa0b46afb61c5a4871dd95507fc4094",
+      "bytes": 540793,
+      "present": true
+    },
+    {
+      "kind": "image",
+      "label": "原理图 P2",
+      "path": "artifacts/v06-live/sch-950ae6609e91d753.png",
+      "sha256": "b3c20ee5aa379e5ac43d4812cc251680a48c553d633e3ca908300fd45d2f45be",
+      "bytes": 349750,
+      "present": true
+    },
+    {
+      "kind": "image",
+      "label": "PCB 布局（编辑器快照）",
+      "path": "artifacts/v06-live/snap/v06-final/snapshot.png",
+      "sha256": "b3ae70d17c4e343214d9e2acd8e46dfa454a850477da6a70c8b2cba1b73cf3db",
+      "bytes": 285949,
+      "present": true
+    },
+    {
+      "kind": "image",
+      "label": "TOP 热图",
+      "path": "artifacts/v06-live/heatmaps/temp-TOP.svg",
+      "sha256": "1a314a9a9780082881e56cd33f18730f6748f7e6b6aeb97914b2fd9caa5ecf0a",
+      "bytes": 61357,
+      "present": true
+    },
+    {
+      "kind": "image",
+      "label": "IN1 热图",
+      "path": "artifacts/v06-live/heatmaps/temp-IN1.svg",
+      "sha256": "0706b3da12d6974dd5811a632310f3539c29da299ed6636ee0862a79b662014c",
+      "bytes": 49824,
+      "present": true
+    },
+    {
+      "kind": "image",
+      "label": "IN2 热图",
+      "path": "artifacts/v06-live/heatmaps/temp-IN2.svg",
+      "sha256": "501988982046f22d3f4656188e04f51de21b0d1bd0d1e3f963606ae8f096ad22",
+      "bytes": 47864,
+      "present": true
+    },
+    {
+      "kind": "image",
+      "label": "BOTTOM 热图",
+      "path": "artifacts/v06-live/heatmaps/temp-BOTTOM.svg",
+      "sha256": "9b0828378aef1c2c89294267cc3b03961a0eeaf9bbe13a38eeec3b0920625379",
+      "bytes": 47155,
+      "present": true
+    },
+    {
+      "kind": "image",
+      "label": "pcb auto 离线布线预览（preview.svg）",
+      "path": "artifacts/v06-live/route/preview.svg",
+      "sha256": "661660ec1fc2ef70dc6c335bb13715f2c378353fe525ee7deb07648ff524d0f9",
+      "bytes": 85980,
+      "present": true
+    }
+  ],
+  "inputsDigest": "ff144d3dcdaa3a3bfcccf6b1b6ff365693c156df40f3905c3301eda04dddb1af",
+  "verdict": {
+    "status": "PASS with warnings",
+    "warnings": [
+      "intent 有 3 条 warn 级发现",
+      "1 个器件功率模型为假定值（assumed）",
+      "3 项器件余量低于准则",
+      "14 项器件额定需数据手册确认",
+      "pcb check（DFM 重建审计）：ERROR 0 / WARN 97 / INFO 13"
+    ]
+  },
+  "changes": {
+    "previous": "v2",
+    "inputsIdentical": false,
+    "inputsChanged": [
+      "新增 analog:模拟仿真 analog.json",
+      "变更 board:板级回读 board dump",
+      "变更 check:pcb check",
+      "变更 drc:原生 DRC",
+      "变更 feedback:pcb auto feedback.json",
+      "移除 image:BOTTOM 温度（68.88–86.28 °C）",
+      "新增 image:BOTTOM 热图",
+      "移除 image:BOTTOM 电流密度（0.1–96.68 A/mm²）",
+      "移除 image:IN1 温度（68.88–86.28 °C）",
+      "新增 image:IN1 热图",
+      "移除 image:IN1 电流密度（0.1–96.68 A/mm²）",
+      "移除 image:IN2 温度（68.88–86.28 °C）",
+      "新增 image:IN2 热图",
+      "移除 image:IN2 电流密度（0.1–96.68 A/mm²）",
+      "变更 image:PCB 布局（编辑器快照）",
+      "移除 image:TOP 温度（68.88–86.28 °C）",
+      "新增 image:TOP 热图",
+      "移除 image:TOP 电流密度（0.1–96.68 A/mm²）",
+      "变更 image:pcb auto 离线布线预览（preview.svg）",
+      "变更 intent:设计意图 intent.json",
+      "变更 models:功率模型/额定 power-models.json",
+      "变更 plan:pcb auto plan.json",
+      "变更 post:设计后仿真 post.json",
+      "变更 reload-board:保存重载后回读",
+      "变更 rules-check:规则同步 rules check"
+    ],
+    "rows": [
+      {
+        "metric": "IR 压降 +3V3",
+        "before": "3.828 mV",
+        "after": "3.846 mV",
+        "delta": "+0.018 mV"
+      },
+      {
+        "metric": "IR 压降 +5V_TERM",
+        "before": "1.98 mV",
+        "after": "1.992 mV",
+        "delta": "+0.012 mV"
+      },
+      {
+        "metric": "IR 压降 VSYS_5V",
+        "before": "15.617 mV",
+        "after": "15.574 mV",
+        "delta": "-0.043 mV"
+      },
+      {
+        "metric": "设计后压降 +5V_TERM",
+        "before": "0.993 mV",
+        "after": "1.007 mV",
+        "delta": "+0.014 mV"
+      },
+      {
+        "metric": "意图电流 +3V3",
+        "before": "1 A",
+        "after": "0.521 A",
+        "delta": "-0.479 A"
+      },
+      {
+        "metric": "所需线宽 +3V3",
+        "before": "11.83 mil",
+        "after": "4.82 mil",
+        "delta": "-7.01 mil"
+      },
+      {
+        "metric": "总体结论",
+        "before": "FAIL",
+        "after": "PASS with warnings",
+        "delta": ""
+      },
+      {
+        "metric": "板边安全距离（copper-to-edge）",
+        "before": "—",
+        "after": "PASS",
+        "delta": ""
+      }
+    ],
+    "findingsAdded": [
+      "info: [C7,R5,U3] A4 U3.EN: EN rises to VIH 13.37ms after the rail is stable (≥ 50µs required)",
+      "warn: [C7,Q2,R5,R9] A2 Q2: 集电极峰值电流 228.4mA outside the target ≤ 200mA (inferred)",
+      "info: impedance-controlled nets: USB_DM 90 Ω, USB_DP 90 Ω — order the board with the stackup the widths were solved for (JLC04161H-7628 (4-layer 1.6 mm, L1→L2 7628 prepreg 0.2104 mm))"
+    ],
+    "findingsResolved": [
+      "FAIL: +3V3 过孔 1 \u003c 需要 2 @ 1 A",
+      "FAIL: +3V3 线宽 10/10 mil（外/内）\u003c 需要 11.83/23.65 mil @ 1 A",
+      "info: impedance-controlled nets: USB_DM 90 Ω, USB_DP 90 Ω — order the board with the stackup the widths were solved for (JLC04161H-7628 (4-layer 1.6 mm, L1→L2 prepreg 0.2104 mm))"
+    ]
+  },
+  "summary": {
+    "keyNumbers": [
+      {
+        "label": "板尺寸",
+        "value": "46 × 45.5 mm",
+        "note": "4 层，30 个器件"
+      },
+      {
+        "label": "电源轨 +3V3",
+        "value": "3.318 V，最大 0.521 A",
+        "note": "最坏场景 peak"
+      },
+      {
+        "label": "电源轨 +5V_TERM",
+        "value": "4.999 V，最大 0.427 A",
+        "note": "最坏场景 terminal-only"
+      },
+      {
+        "label": "电源轨 USB_VBUS",
+        "value": "4.996 V，最大 0.43 A",
+        "note": "最坏场景 usb-only"
+      },
+      {
+        "label": "电源轨 VSYS_5V",
+        "value": "4.733 V，最大 0.43 A",
+        "note": "最坏场景 usb-only"
+      },
+      {
+        "label": "输入功率（typical）",
+        "value": "0.444 W",
+        "note": "负载 0.374 W，损耗 70.15 mW"
+      },
+      {
+        "label": "输入功率（peak）",
+        "value": "2.115 W",
+        "note": "负载 1.728 W，损耗 0.387 W"
+      },
+      {
+        "label": "最紧器件余量（相对准则）",
+        "value": "11.4 %（准则 ≥ 20 %）",
+        "note": "L1 峰值电流 Ipk vs Isat"
+      },
+      {
+        "label": "器件检查",
+        "value": "30 ok / 3 临界 / 0 超限 / 14 需数据手册"
+      },
+      {
+        "label": "最坏 IR 压降",
+        "value": "17.87 mV / 预算 99.9 mV（17.9 %）",
+        "note": "USB_VBUS @ D2.2"
+      },
+      {
+        "label": "布线完成率",
+        "value": "100 % (30/30)"
+      },
+      {
+        "label": "原生 DRC（EasyEDA）",
+        "value": "PASS",
+        "note": "原生 DRC 通过，0 违规；2026-09-28T14:30:19.678591Z"
+      },
+      {
+        "label": "pcb check（DFM 重建审计）",
+        "value": "WARN",
+        "note": "ERROR 0 / WARN 97 / INFO 13"
+      },
+      {
+        "label": "设计后最坏压降（真实铜皮）",
+        "value": "17.07 mV / 预算 99.1 mV",
+        "note": "USB_VBUS @ D2.2（usb-only）"
+      },
+      {
+        "label": "设计后板最高温度",
+        "value": "86.4 °C",
+        "note": "场景 terminal-only；TOP (561, 1151.6) mil，U3 下方"
+      },
+      {
+        "label": "设计发现（intent）",
+        "value": "0 error / 3 warn / 5 info"
+      }
+    ],
+    "topRisks": [
+      {
+        "severity": "warn",
+        "source": "intent:analog-transient-current",
+        "message": "[C7,Q2,R5,R9] A2 Q2: 集电极峰值电流 228.4mA outside the target ≤ 200mA (inferred)",
+        "suggestion": "the peak is a short capacitor-discharge pulse; add a series resistor on the collector/capacitor path or confirm the pulse rating in the datasheet"
+      },
+      {
+        "severity": "warn",
+        "source": "intent:inductor-rating",
+        "message": "[L1,U1] L1 (regulator U1) peak 0.682 A / RMS 0.53 A vs rated 0.77 A (power model nlcv32t-2r2m): 11% margin on the peak",
+        "suggestion": "choose an inductor rated ≥ 1.3× Ipk (saturation), or confirm Isat separately from the thermal Irms rating"
+      },
+      {
+        "severity": "warn",
+        "source": "intent:usb-budget",
+        "message": "[J2] J2 draws 0.43 A from USB (usb-only) vs the 0.5 A budget (86%) — little margin for inrush/radio bursts",
+        "suggestion": "a host port may current-limit or brown out; declare usbBudgetA in the spec if the source advertises more"
+      },
+      {
+        "severity": "warn",
+        "source": "feasibility",
+        "message": "D3 VRWM vs 最高线电压：余量 0.1 %（准则 ≥ 0 %）",
+        "suggestion": "源规格上限 5.25 V \u003e VRWM：高端漏电增加，请按数据手册核对 VBR/漏电"
+      },
+      {
+        "severity": "warn",
+        "source": "feasibility",
+        "message": "L1 峰值电流 Ipk vs Isat：余量 11.4 %（准则 ≥ 20 %）"
+      },
+      {
+        "severity": "warn",
+        "source": "feasibility",
+        "message": "J2 供电预算 I vs 端口额定：余量 14 %（准则 ≥ 20 %）"
+      },
+      {
+        "severity": "info",
+        "source": "feasibility",
+        "message": "14 项器件额定未知（需数据手册），未计入余量判定",
+        "suggestion": "在 power-models.json 的 ratings 中补充并注明来源"
+      }
+    ]
+  },
+  "requirements": {
+    "standard": [
+      {
+        "label": "安全标准 Standard",
+        "value": "IPC-2221B",
+        "note": "工程默认值（规格书未声明）"
+      },
+      {
+        "label": "绝缘等级 Insulation",
+        "value": "functional",
+        "note": "工程默认值（规格书未声明）"
+      },
+      {
+        "label": "污染等级 Pollution degree",
+        "value": "PD2",
+        "note": "工程默认值（规格书未声明）"
+      },
+      {
+        "label": "材料组 Material group",
+        "value": "IIIa",
+        "note": "工程默认值（规格书未声明）"
+      },
+      {
+        "label": "海拔 Altitude",
+        "value": "2000 m",
+        "note": "工程默认值（规格书未声明）"
+      },
+      {
+        "label": "过电压类别 OVC",
+        "value": "II",
+        "note": "工程默认值（规格书未声明）"
+      },
+      {
+        "label": "三防涂覆 Coated",
+        "value": "否",
+        "note": "规格书声明"
+      }
+    ],
+    "copper": [
+      {
+        "label": "层数 Layers",
+        "value": "4"
+      },
+      {
+        "label": "铜厚 外/内",
+        "value": "1 oz / 0.5 oz"
+      },
+      {
+        "label": "温升 ΔT",
+        "value": "10 °C",
+        "note": "IPC-2221/2152 线宽计算的温升"
+      },
+      {
+        "label": "叠层 Stackup",
+        "value": "JLC04161H-7628 (4-layer 1.6 mm, L1→L2 7628 prepreg 0.2104 mm)"
+      },
+      {
+        "label": "参考高度 h / εr",
+        "value": "8.28 mil / 4.4",
+        "note": "阻抗计算用"
+      },
+      {
+        "label": "工艺最小线宽/间距",
+        "value": "6 / 6 mil"
+      },
+      {
+        "label": "过孔 钻孔/外径",
+        "value": "12 / 24 mil"
+      }
+    ],
+    "blocks": [
+      {
+        "id": "POWER_IN",
+        "function": "power-input / or-ing",
+        "core": "J1",
+        "parts": "J1, D1, D2",
+        "summary": "J1 (+5V_TERM, terminal) + J2 (USB_VBUS, usb) OR-ed by D1, D2 (SS34) onto VSYS_5V; 0.43 A worst (usb-only), diode loss ≤ 0.157 W each",
+        "powerW": 0.3118
+      },
+      {
+        "id": "BUCK_3V3",
+        "function": "buck",
+        "core": "U1",
+        "parts": "U1, C1, L1, R1, R2",
+        "summary": "VSYS_5V 4.59–4.73 V → +3V3 3.318 V synchronous buck (SY8089A1AAC), 0.521 A peak / 0.113 A typical, η 90%, loss 0.198 W",
+        "powerW": 0.2437
+      },
+      {
+        "id": "RF_MODULE",
+        "function": "rf-module",
+        "core": "U3",
+        "parts": "U3, C3, C6",
+        "summary": "ESP32-S3-WROOM-1 RF/MCU module on +3V3: 0.101 A typical, 0.501 A peak (1.659 W)",
+        "powerW": 1.6591
+      },
+      {
+        "id": "USB_UART",
+        "function": "usb-uart",
+        "core": "U2",
+        "parts": "U2, C2, C4, C5",
+        "summary": "CH340C USB↔UART bridge on +3V3 (20 mA peak); UART U0RXD/U0TXD",
+        "powerW": 0.0664
+      },
+      {
+        "id": "CONN_J2",
+        "function": "connector",
+        "core": "J2",
+        "parts": "J2, R3, R4",
+        "summary": "J2 (USB3.1TYPE-C16P): CC1, CC2, USB_DM, USB_DP, USB_VBUS; CC pull-downs R3 5.1kΩ, R4 5.1kΩ (USB-C sink Rd → default USB power)"
+      },
+      {
+        "id": "ESD",
+        "function": "esd",
+        "core": "D3",
+        "parts": "D3",
+        "summary": "D3 (USBLC6-2SC6) ESD array on USB_DM, USB_DP, USB_VBUS"
+      },
+      {
+        "id": "LED",
+        "function": "led",
+        "core": "LED1",
+        "parts": "LED1, R7",
+        "summary": "LED1 (KT-0805Y) indicator driven from U3.IO2 (LED_CTRL) via R7 1kΩ, 1.399 mA",
+        "powerW": 0.0046
+      },
+      {
+        "id": "AUTO_DOWNLOAD",
+        "function": "other / auto-download",
+        "core": "Q1",
+        "parts": "Q1, Q2, R8, R9",
+        "summary": "Q1/Q2 (MMBT3904(RANGE:100-300)) auto-download: DTR/RTS drive EN/IO0 for automatic flashing"
+      },
+      {
+        "id": "KEYS",
+        "function": "other / keys",
+        "core": "SW1",
+        "parts": "SW1, C7, R5, R6, SW2",
+        "summary": "momentary keys SW1 → IO0, SW2 → EN; C7 1uF RC, R5 10kΩ pull, R6 10kΩ pull",
+        "powerW": 0.0022
+      }
+    ],
+    "domains": [
+      {
+        "id": "SELV_5V",
+        "kind": "SELV",
+        "reference": "GND",
+        "workingVrms": 4.999,
+        "workingVpeak": 4.999,
+        "nets": 21,
+        "parts": 30
+      }
+    ],
+    "findings": [
+      {
+        "severity": "warn",
+        "source": "intent:analog-transient-current",
+        "message": "[C7,Q2,R5,R9] A2 Q2: 集电极峰值电流 228.4mA outside the target ≤ 200mA (inferred)",
+        "suggestion": "the peak is a short capacitor-discharge pulse; add a series resistor on the collector/capacitor path or confirm the pulse rating in the datasheet"
+      },
+      {
+        "severity": "warn",
+        "source": "intent:inductor-rating",
+        "message": "[L1,U1] L1 (regulator U1) peak 0.682 A / RMS 0.53 A vs rated 0.77 A (power model nlcv32t-2r2m): 11% margin on the peak",
+        "suggestion": "choose an inductor rated ≥ 1.3× Ipk (saturation), or confirm Isat separately from the thermal Irms rating"
+      },
+      {
+        "severity": "warn",
+        "source": "intent:usb-budget",
+        "message": "[J2] J2 draws 0.43 A from USB (usb-only) vs the 0.5 A budget (86%) — little margin for inrush/radio bursts",
+        "suggestion": "a host port may current-limit or brown out; declare usbBudgetA in the spec if the source advertises more"
+      },
+      {
+        "severity": "info",
+        "source": "intent:analog-reset-ok",
+        "message": "[C7,R5,U3] A4 U3.EN: EN rises to VIH 13.37ms after the rail is stable (≥ 50µs required)"
+      },
+      {
+        "severity": "info",
+        "source": "intent:diode-loss",
+        "message": "[D1] D1 (SS34) conducts 0.427 A: Vf ≈ 0.364 V, loss 0.155 W (terminal-only)",
+        "suggestion": "if the downstream headroom matters, an ideal-diode controller or P-MOSFET OR-ing removes most of this drop"
+      },
+      {
+        "severity": "info",
+        "source": "intent:diode-loss",
+        "message": "[D2] D2 (SS34) conducts 0.43 A: Vf ≈ 0.364 V, loss 0.157 W (usb-only)",
+        "suggestion": "if the downstream headroom matters, an ideal-diode controller or P-MOSFET OR-ing removes most of this drop"
+      },
+      {
+        "severity": "info",
+        "source": "intent:impedance",
+        "message": "impedance-controlled nets: USB_DM 90 Ω, USB_DP 90 Ω — order the board with the stackup the widths were solved for (JLC04161H-7628 (4-layer 1.6 mm, L1→L2 7628 prepreg 0.2104 mm))"
+      },
+      {
+        "severity": "info",
+        "source": "intent:regulator-headroom",
+        "message": "[U1] U1 buck: Vin min 4.593 V → 3.318 V, duty ≤ 82%"
+      }
+    ],
+    "pairs": 0
+  },
+  "power": {
+    "converged": true,
+    "scenarios": [
+      "typical",
+      "peak",
+      "buttons-pressed",
+      "terminal-only",
+      "usb-only"
+    ],
+    "rails": [
+      {
+        "net": "+3V3",
+        "role": "power",
+        "vNom": 3.318,
+        "vMin": 3.318,
+        "vMax": 3.318,
+        "voltages": [
+          3.318,
+          3.318,
+          3.318,
+          3.318,
+          3.318
+        ],
+        "currentsA": [
+          0.11346,
+          0.521459,
+          0.114123,
+          0.521459,
+          0.521459
+        ],
+        "iMaxA": 0.5214595,
+        "worstScenario": "peak"
+      },
+      {
+        "net": "+5V_TERM",
+        "role": "power",
+        "vNom": 4.9991,
+        "vMin": 4.5928,
+        "vMax": 4.9991,
+        "voltages": [
+          4.9991,
+          4.9951,
+          4.9991,
+          4.9915,
+          4.5928
+        ],
+        "currentsA": [
+          0.046162,
+          0.243419,
+          0.046446,
+          0.426521,
+          0
+        ],
+        "iMaxA": 0.4265206,
+        "worstScenario": "terminal-only"
+      },
+      {
+        "net": "USB_VBUS",
+        "role": "power",
+        "vNom": 4.9957,
+        "vMin": 4.6275,
+        "vMax": 4.9957,
+        "voltages": [
+          4.9957,
+          4.9819,
+          4.9957,
+          4.6275,
+          4.957
+        ],
+        "currentsA": [
+          0.042773,
+          0.180501,
+          0.043018,
+          0,
+          0.42975
+        ],
+        "iMaxA": 0.4297499,
+        "worstScenario": "usb-only"
+      },
+      {
+        "net": "VSYS_5V",
+        "role": "power",
+        "vNom": 4.7331,
+        "vMin": 4.5928,
+        "vMax": 4.7331,
+        "voltages": [
+          4.7331,
+          4.6559,
+          4.7328,
+          4.6275,
+          4.5928
+        ],
+        "currentsA": [
+          0.088936,
+          0.42392,
+          0.089464,
+          0.426521,
+          0.42975
+        ],
+        "iMaxA": 0.4297498,
+        "worstScenario": "usb-only"
+      }
+    ],
+    "scenarioPower": [
+      {
+        "scenario": "typical",
+        "suppliedW": 0.44445,
+        "loadW": 0.3743,
+        "lossW": 0.07015
+      },
+      {
+        "scenario": "peak",
+        "suppliedW": 2.11516,
+        "loadW": 1.72805,
+        "lossW": 0.38711
+      },
+      {
+        "scenario": "buttons-pressed",
+        "suppliedW": 0.44709,
+        "loadW": 0.3743,
+        "lossW": 0.07279
+      },
+      {
+        "scenario": "terminal-only",
+        "suppliedW": 2.12897,
+        "loadW": 1.72805,
+        "lossW": 0.40092
+      },
+      {
+        "scenario": "usb-only",
+        "suppliedW": 2.13028,
+        "loadW": 1.72805,
+        "lossW": 0.40224
+      }
+    ],
+    "partPower": [
+      {
+        "ref": "U3",
+        "device": "ESP32-S3-WROOM-1",
+        "kind": "load",
+        "powerW": 1.659078,
+        "scenario": "peak"
+      },
+      {
+        "ref": "U1",
+        "device": "SY8089A1AAC",
+        "kind": "buck",
+        "powerW": 0.197584,
+        "scenario": "peak"
+      },
+      {
+        "ref": "D2",
+        "device": "SS34",
+        "kind": "diode",
+        "powerW": 0.156543,
+        "scenario": "usb-only"
+      },
+      {
+        "ref": "D1",
+        "device": "SS34",
+        "kind": "diode",
+        "powerW": 0.155225,
+        "scenario": "terminal-only"
+      },
+      {
+        "ref": "U2",
+        "device": "CH340C",
+        "kind": "load",
+        "powerW": 0.06636,
+        "scenario": "peak"
+      },
+      {
+        "ref": "L1",
+        "device": "NLCV32T-2R2M-PF",
+        "kind": "inductor",
+        "powerW": 0.045954,
+        "scenario": "peak"
+      },
+      {
+        "ref": "LED1",
+        "device": "KT-0805Y",
+        "kind": "led",
+        "powerW": 0.002607,
+        "scenario": "typical"
+      },
+      {
+        "ref": "R7",
+        "device": "0402WGF1001TCE",
+        "kind": "resistor",
+        "powerW": 0.001959,
+        "scenario": "typical"
+      },
+      {
+        "ref": "R5",
+        "device": "0402WGF1002TCE",
+        "kind": "resistor",
+        "powerW": 0.001101,
+        "scenario": "buttons-pressed"
+      },
+      {
+        "ref": "R6",
+        "device": "0402WGF1002TCE",
+        "kind": "resistor",
+        "powerW": 0.001101,
+        "scenario": "buttons-pressed"
+      },
+      {
+        "ref": "R1",
+        "device": "0402WGF4532TCE",
+        "kind": "resistor",
+        "powerW": 0.000163,
+        "scenario": "typical"
+      },
+      {
+        "ref": "R2",
+        "device": "0402WGF1002TCE",
+        "kind": "resistor",
+        "powerW": 0.000036,
+        "scenario": "typical"
+      }
+    ],
+    "railPower": [
+      {
+        "net": "USB_VBUS",
+        "v": 4.957,
+        "iA": 0.4297499,
+        "powerW": 2.13027
+      },
+      {
+        "net": "+5V_TERM",
+        "v": 4.9915,
+        "iA": 0.4265206,
+        "powerW": 2.128978
+      },
+      {
+        "net": "VSYS_5V",
+        "v": 4.5928,
+        "iA": 0.4297498,
+        "powerW": 1.973755
+      },
+      {
+        "net": "+3V3",
+        "v": 3.318,
+        "iA": 0.5214595,
+        "powerW": 1.730203
+      }
+    ],
+    "tree": {
+      "nodes": [
+        {
+          "ref": "D1",
+          "kind": "or-diode",
+          "col": 1,
+          "label": "D1 SS34",
+          "detail": "If 0.427 A · Vf≈0.364 V · 0.155 W"
+        },
+        {
+          "ref": "D2",
+          "kind": "or-diode",
+          "col": 1,
+          "label": "D2 SS34",
+          "detail": "If 0.43 A · Vf≈0.364 V · 0.157 W"
+        },
+        {
+          "ref": "J1",
+          "kind": "source",
+          "col": 0,
+          "label": "J1 KF301-5.0-2P",
+          "detail": "+5V_TERM 4.999 V · 2.129 W"
+        },
+        {
+          "ref": "J2",
+          "kind": "source",
+          "col": 0,
+          "label": "J2 USB3.1TYPE-C16P",
+          "detail": "USB_VBUS 4.996 V · 2.13 W"
+        },
+        {
+          "ref": "U1",
+          "kind": "regulator",
+          "col": 2,
+          "label": "U1 SY8089A1AAC",
+          "detail": "4.656 V→3.406 V · Iout 0.521 A · η 90 % · loss 0.198 W"
+        },
+        {
+          "ref": "U2",
+          "kind": "load",
+          "col": 3,
+          "label": "U2 CH340C",
+          "detail": "20 mA · 66.36 mW"
+        },
+        {
+          "ref": "U3",
+          "kind": "load",
+          "col": 3,
+          "label": "U3 ESP32-S3-WROOM-1",
+          "detail": "0.501 A · 1.659 W"
+        }
+      ],
+      "edges": [
+        {
+          "from": "J1",
+          "to": "D1",
+          "net": "+5V_TERM",
+          "label": "+5V_TERM 4.999 V / 0.427 A"
+        },
+        {
+          "from": "J2",
+          "to": "D2",
+          "net": "USB_VBUS",
+          "label": "USB_VBUS 4.996 V / 0.43 A"
+        },
+        {
+          "from": "D1",
+          "to": "U1",
+          "net": "VSYS_5V",
+          "label": "VSYS_5V 4.733 V / 0.43 A"
+        },
+        {
+          "from": "D2",
+          "to": "U1",
+          "net": "VSYS_5V",
+          "label": "VSYS_5V 4.733 V / 0.43 A"
+        },
+        {
+          "from": "U1",
+          "to": "U2",
+          "net": "+3V3",
+          "label": "+3V3 3.318 V / 0.521 A"
+        },
+        {
+          "from": "U1",
+          "to": "U3",
+          "net": "+3V3",
+          "label": "+3V3 3.318 V / 0.521 A"
+        }
+      ]
+    },
+    "regulators": [
+      {
+        "ref": "U1",
+        "device": "SY8089A1AAC",
+        "kind": "buck",
+        "scenario": "typical",
+        "mode": "regulating",
+        "vinV": 4.7331,
+        "voutV": 3.3372,
+        "ioutA": 0.1134595,
+        "iinA": 0.0889355,
+        "duty": 0.7789,
+        "efficiency": 0.8995,
+        "lossW": 0.042307
+      },
+      {
+        "ref": "U1",
+        "device": "SY8089A1AAC",
+        "kind": "buck",
+        "scenario": "peak",
+        "mode": "regulating",
+        "vinV": 4.6559,
+        "voutV": 3.4061,
+        "ioutA": 0.5214595,
+        "iinA": 0.4239201,
+        "duty": 0.7918,
+        "efficiency": 0.8999,
+        "lossW": 0.197584,
+        "notes": [
+          "Vout=0.6*(1+R1/R2)=3.318V on +3V3 (R1=45.3kΩ, R2=10kΩ)",
+          "Iin=Vout·Iout/(η·Vin)+Iq=3.406·0.521/(0.90·4.656)+5e-05A=0.4239A",
+          "D=Vout/(η·Vin)=0.792; ΔI=(Vin−Vout)·D/(L·fsw)=(4.656−3.318)·0.792/(2.2µH·1.5MHz)=0.321A; Ipk=0.682A Irms=0.530A",
+          "input cap Irms=Iout·√(D(1−D))=0.212A (full value to each cap on VSYS_5V); output cap Irms=ΔI/(2√3)=0.0927A (each cap on +3V3)",
+          "U1.IN (input pin) pulsed current Irms≈Iout·√D=0.464A, peak 0.682A"
+        ]
+      },
+      {
+        "ref": "U1",
+        "device": "SY8089A1AAC",
+        "kind": "buck",
+        "scenario": "buttons-pressed",
+        "mode": "regulating",
+        "vinV": 4.7328,
+        "voutV": 3.3373,
+        "ioutA": 0.1141231,
+        "iinA": 0.0894635,
+        "duty": 0.779,
+        "efficiency": 0.8995,
+        "lossW": 0.042555
+      },
+      {
+        "ref": "U1",
+        "device": "SY8089A1AAC",
+        "kind": "buck",
+        "scenario": "terminal-only",
+        "mode": "regulating",
+        "vinV": 4.6275,
+        "voutV": 3.4061,
+        "ioutA": 0.5214595,
+        "iinA": 0.4265205,
+        "duty": 0.7967,
+        "efficiency": 0.8999,
+        "lossW": 0.197582
+      },
+      {
+        "ref": "U1",
+        "device": "SY8089A1AAC",
+        "kind": "buck",
+        "scenario": "usb-only",
+        "mode": "regulating",
+        "vinV": 4.5928,
+        "voutV": 3.4061,
+        "ioutA": 0.5214595,
+        "iinA": 0.4297498,
+        "duty": 0.8027,
+        "efficiency": 0.8999,
+        "lossW": 0.19758
+      }
+    ],
+    "ripple": [
+      {
+        "key": "C1",
+        "kind": "capacitor",
+        "regulator": "U1",
+        "iRmsA": 0.21171,
+        "scenario": "peak"
+      },
+      {
+        "key": "C2",
+        "kind": "capacitor",
+        "regulator": "U1",
+        "iRmsA": 0.09642,
+        "scenario": "typical"
+      },
+      {
+        "key": "C3",
+        "kind": "capacitor",
+        "regulator": "U1",
+        "iRmsA": 0.09642,
+        "scenario": "typical"
+      },
+      {
+        "key": "C4",
+        "kind": "capacitor",
+        "regulator": "U1",
+        "iRmsA": 0.09642,
+        "scenario": "typical"
+      },
+      {
+        "key": "C5",
+        "kind": "capacitor",
+        "regulator": "U1",
+        "iRmsA": 0.09642,
+        "scenario": "typical"
+      },
+      {
+        "key": "C6",
+        "kind": "capacitor",
+        "regulator": "U1",
+        "iRmsA": 0.09642,
+        "scenario": "typical"
+      },
+      {
+        "key": "L1",
+        "kind": "inductor",
+        "regulator": "U1",
+        "iPeakA": 0.68197,
+        "iRmsA": 0.52963,
+        "iAvgA": 0.52146,
+        "deltaIA": 0.33401,
+        "duty": 0.8027,
+        "scenario": "peak"
+      },
+      {
+        "key": "LX",
+        "kind": "switch-node",
+        "regulator": "U1",
+        "iPeakA": 0.68197,
+        "iRmsA": 0.52963,
+        "iAvgA": 0.52146,
+        "deltaIA": 0.33401,
+        "duty": 0.8027,
+        "scenario": "peak"
+      }
+    ],
+    "models": [
+      {
+        "ref": "C1",
+        "device": "GRM21BR61H106KE43L",
+        "kind": "capacitor",
+        "modelId": "generic-capacitor",
+        "match": "generic: capacitor (open at DC)",
+        "confidence": "value",
+        "assumed": false
+      },
+      {
+        "ref": "C2",
+        "device": "CL21A226MAQNNNE",
+        "kind": "capacitor",
+        "modelId": "generic-capacitor",
+        "match": "generic: capacitor (open at DC)",
+        "confidence": "value",
+        "assumed": false
+      },
+      {
+        "ref": "C3",
+        "device": "CL05B104KO5NNNC",
+        "kind": "capacitor",
+        "modelId": "generic-capacitor",
+        "match": "generic: capacitor (open at DC)",
+        "confidence": "value",
+        "assumed": false
+      },
+      {
+        "ref": "C4",
+        "device": "CL05B104KO5NNNC",
+        "kind": "capacitor",
+        "modelId": "generic-capacitor",
+        "match": "generic: capacitor (open at DC)",
+        "confidence": "value",
+        "assumed": false
+      },
+      {
+        "ref": "C5",
+        "device": "GRM21BR61H106KE43L",
+        "kind": "capacitor",
+        "modelId": "generic-capacitor",
+        "match": "generic: capacitor (open at DC)",
+        "confidence": "value",
+        "assumed": false
+      },
+      {
+        "ref": "C6",
+        "device": "CL05B104KO5NNNC",
+        "kind": "capacitor",
+        "modelId": "generic-capacitor",
+        "match": "generic: capacitor (open at DC)",
+        "confidence": "value",
+        "assumed": false
+      },
+      {
+        "ref": "C7",
+        "device": "CL05A105KA5NQNC",
+        "kind": "capacitor",
+        "modelId": "generic-capacitor",
+        "match": "generic: capacitor (open at DC)",
+        "confidence": "value",
+        "assumed": false
+      },
+      {
+        "ref": "D1",
+        "device": "SS34",
+        "kind": "diode",
+        "modelId": "ss34",
+        "match": "lcsc C8678 → model ss34",
+        "confidence": "approx",
+        "source": "SS34 (3 A / 40 V Schottky) datasheets: VF 0.45–0.50 V at 3 A, ≈0.30 V at 0.1 A from the typical forward curve; two-point Shockley fit.",
+        "assumed": false
+      },
+      {
+        "ref": "D2",
+        "device": "SS34",
+        "kind": "diode",
+        "modelId": "ss34",
+        "match": "lcsc C8678 → model ss34",
+        "confidence": "approx",
+        "source": "SS34 (3 A / 40 V Schottky) datasheets: VF 0.45–0.50 V at 3 A, ≈0.30 V at 0.1 A from the typical forward curve; two-point Shockley fit.",
+        "assumed": false
+      },
+      {
+        "ref": "D3",
+        "device": "USBLC6-2SC6",
+        "kind": "esd",
+        "modelId": "usblc6-2sc6",
+        "match": "lcsc C2687116 → model usblc6-2sc6",
+        "confidence": "datasheet",
+        "source": "ST USBLC6-2 datasheet: IRM ≤ 150 nA at VRM = 5 V (max, used for peak); typ 10 nA assumed.",
+        "assumed": false
+      },
+      {
+        "ref": "J1",
+        "device": "KF301-5.0-2P",
+        "kind": "connector-source",
+        "modelId": "kf301-2p",
+        "match": "lcsc C474881 → model kf301-2p",
+        "confidence": "assumed",
+        "source": "2-pin screw terminal used as a supply input: voltage from the net name (e.g. 5V_TERM → 5 V), else the default; 20 mΩ contact + short lead (assumed).",
+        "assumed": true
+      },
+      {
+        "ref": "J2",
+        "device": "USB3.1TYPE-C16P",
+        "kind": "connector-source",
+        "modelId": "usb-c-receptacle",
+        "match": "lcsc C9900012665 → model usb-c-receptacle",
+        "confidence": "approx",
+        "source": "USB 2.0/Type-C default VBUS 5.0 V (4.75–5.25 V). 0.1 Ω lumps cable + contact resistance (assumed). Shell/EP pins are not counted as return paths.",
+        "assumed": false
+      },
+      {
+        "ref": "L1",
+        "device": "NLCV32T-2R2M-PF",
+        "kind": "inductor",
+        "modelId": "nlcv32t-2r2m",
+        "match": "lcsc C250183 → model nlcv32t-2r2m",
+        "confidence": "datasheet",
+        "source": "LCSC C250183 attributes (TDK NLCV32T-2R2M-PF, 1210 wire-wound 2.2 µH): DC Resistance 169 mΩ, Current Rating 770 mA. Compare the reported switch-node peak (ripple iPeakA) with the rating.",
+        "assumed": false
+      },
+      {
+        "ref": "LED1",
+        "device": "KT-0805Y",
+        "kind": "led",
+        "modelId": "kt-0805y",
+        "match": "lcsc C2296 → model kt-0805y",
+        "confidence": "approx",
+        "source": "Hubei KENTO KT-0805Y (yellow 0805) datasheet: VF 1.8–2.4 V (typ 2.0 V) at 20 mA, IF max 25 mA; ideality n=2 assumed for the knee.",
+        "assumed": false
+      },
+      {
+        "ref": "Q1",
+        "device": "MMBT3904(RANGE:100-300)",
+        "kind": "bjt",
+        "modelId": "mmbt3904",
+        "match": "lcsc C20526 → model mmbt3904",
+        "confidence": "datasheet",
+        "source": "onsemi 2N3904/MMBT3904 SPICE model (IS=6.734f BF=416.4 BR=0.7371); IC max 200 mA.",
+        "assumed": false
+      },
+      {
+        "ref": "Q2",
+        "device": "MMBT3904(RANGE:100-300)",
+        "kind": "bjt",
+        "modelId": "mmbt3904",
+        "match": "lcsc C20526 → model mmbt3904",
+        "confidence": "datasheet",
+        "source": "onsemi 2N3904/MMBT3904 SPICE model (IS=6.734f BF=416.4 BR=0.7371); IC max 200 mA.",
+        "assumed": false
+      },
+      {
+        "ref": "R1",
+        "device": "0402WGF4532TCE",
+        "kind": "resistor",
+        "modelId": "generic-resistor",
+        "match": "generic: resistor by ref prefix R",
+        "confidence": "value",
+        "assumed": false
+      },
+      {
+        "ref": "R2",
+        "device": "0402WGF1002TCE",
+        "kind": "resistor",
+        "modelId": "generic-resistor",
+        "match": "generic: resistor by ref prefix R",
+        "confidence": "value",
+        "assumed": false
+      },
+      {
+        "ref": "R3",
+        "device": "0402WGF5101TCE",
+        "kind": "resistor",
+        "modelId": "generic-resistor",
+        "match": "generic: resistor by ref prefix R",
+        "confidence": "value",
+        "assumed": false
+      },
+      {
+        "ref": "R4",
+        "device": "0402WGF5101TCE",
+        "kind": "resistor",
+        "modelId": "generic-resistor",
+        "match": "generic: resistor by ref prefix R",
+        "confidence": "value",
+        "assumed": false
+      },
+      {
+        "ref": "R5",
+        "device": "0402WGF1002TCE",
+        "kind": "resistor",
+        "modelId": "generic-resistor",
+        "match": "generic: resistor by ref prefix R",
+        "confidence": "value",
+        "assumed": false
+      },
+      {
+        "ref": "R6",
+        "device": "0402WGF1002TCE",
+        "kind": "resistor",
+        "modelId": "generic-resistor",
+        "match": "generic: resistor by ref prefix R",
+        "confidence": "value",
+        "assumed": false
+      },
+      {
+        "ref": "R7",
+        "device": "0402WGF1001TCE",
+        "kind": "resistor",
+        "modelId": "generic-resistor",
+        "match": "generic: resistor by ref prefix R",
+        "confidence": "value",
+        "assumed": false
+      },
+      {
+        "ref": "R8",
+        "device": "0402WGJ0472TCE",
+        "kind": "resistor",
+        "modelId": "generic-resistor",
+        "match": "generic: resistor by ref prefix R",
+        "confidence": "value",
+        "assumed": false
+      },
+      {
+        "ref": "R9",
+        "device": "0402WGJ0472TCE",
+        "kind": "resistor",
+        "modelId": "generic-resistor",
+        "match": "generic: resistor by ref prefix R",
+        "confidence": "value",
+        "assumed": false
+      },
+      {
+        "ref": "SW1",
+        "device": "TS-1088-AR02016",
+        "kind": "switch",
+        "modelId": "ts-1088",
+        "match": "lcsc C720477 → model ts-1088",
+        "confidence": "datasheet",
+        "source": "XKB TS-1088 tactile switch: contact resistance ≤ 100 mΩ; momentary (open in typical, pressed in peak).",
+        "assumed": false
+      },
+      {
+        "ref": "SW2",
+        "device": "TS-1088-AR02016",
+        "kind": "switch",
+        "modelId": "ts-1088",
+        "match": "lcsc C720477 → model ts-1088",
+        "confidence": "datasheet",
+        "source": "XKB TS-1088 tactile switch: contact resistance ≤ 100 mΩ; momentary (open in typical, pressed in peak).",
+        "assumed": false
+      },
+      {
+        "ref": "U1",
+        "device": "SY8089A1AAC",
+        "kind": "buck",
+        "modelId": "sy8089a",
+        "match": "lcsc C479074 → model sy8089a",
+        "confidence": "datasheet",
+        "source": "Silergy SY8089A datasheet: VFB = 0.6 V, fsw = 1.5 MHz, IOUT 2 A, VIN 2.5–5.5 V, EN high ≥ 1.5 V; LCSC C479074 attributes: Quiescent Current 50 µA, Frequency 1.5 MHz. η ≈ 0.9 at 5 V→3.3 V / 0.3–1 A read from the efficiency curve (approx).",
+        "assumed": false
+      },
+      {
+        "ref": "U2",
+        "device": "CH340C",
+        "kind": "load",
+        "modelId": "ch340c",
+        "match": "lcsc C84681 → model ch340c",
+        "confidence": "approx",
+        "source": "WCH CH340 datasheet DC characteristics: operating supply current ≈ 12 mA typ while USB active; 20 mA used as peak. At 3.3 V V3 is tied to VCC (internal regulator bypassed), so only VCC is the supply pin.",
+        "assumed": false
+      },
+      {
+        "ref": "U3",
+        "device": "ESP32-S3-WROOM-1",
+        "kind": "load",
+        "modelId": "esp32-s3-wroom-1",
+        "match": "lcsc C9900163599 → model esp32-s3-wroom-1",
+        "confidence": "datasheet",
+        "source": "Espressif ESP32-S3-WROOM-1 datasheet v1.x: RF current table — Rx 802.11b/g/n ≈ 88–97 mA (typ 0.1 A used as Wi-Fi-connected average); Tx 802.11b 1 Mbps @ 21 dBm ≈ 355 mA; 'Power Supply' — the external supply should provide ≥ 0.5 A (peak 0.5 A used). GPIO max source 40 mA (ESP32-S3 series datasheet, DC characteristics).",
+        "assumed": false
+      }
+    ],
+    "confidence": {
+      "approx": 5,
+      "assumed": 1,
+      "datasheet": 8,
+      "value": 16
+    },
+    "assumptions": [
+      "DC operating point (MNA + Newton-Raphson): capacitors open, inductors = DCR, switching regulators averaged by power balance; not a transient simulation",
+      "IC signal pins are high-impedance (no DC drive) unless a GPIO drives an LED network",
+      "loads are constant-current above a knee voltage and resistive below it (unpowered rails draw nothing)",
+      "J1: input source +5V_TERM = 5.00 V (net name) with 0.02 Ω series resistance",
+      "J2: input source USB_VBUS = 5.00 V (model) with 0.1 Ω series resistance",
+      "momentary switches are released (open) except in buttons-pressed",
+      "U3.IO2 (LED_CTRL) assumed driven high (LED1 on) through 40 Ω output resistance",
+      "SW1 closed: momentary switch pressed in buttons-pressed",
+      "SW2 closed: momentary switch pressed in buttons-pressed",
+      "J2 (usb) disconnected in terminal-only",
+      "J1 (terminal) disconnected in usb-only"
+    ],
+    "warnings": []
+  },
+  "analog": {
+    "generator": "pcbpilot sim analog",
+    "ngspice": "ngspice-47（7 次运行）",
+    "status": "WARN",
+    "keyNumbers": [
+      {
+        "label": "模拟块",
+        "value": "4 个（仿真 4）"
+      },
+      {
+        "label": "目标",
+        "value": "6 项：满足 5，未满足 1"
+      },
+      {
+        "label": "建议修改",
+        "value": "0 个元件值",
+        "note": "原理图修改，须用户确认"
+      }
+    ],
+    "blocks": [
+      {
+        "id": "A1",
+        "class": "transistor-switch",
+        "classZh": "晶体管开关",
+        "title": "晶体管开关 Q1（RTS → IO0）",
+        "topology": "BJT switch, drive RTS → Q1_B, load on IO0, return DTR",
+        "model": "mmbt3904（datasheet）",
+        "simulated": true,
+        "status": "PASS",
+        "parts": "Q1, R6, R8",
+        "netlist": "data/analog/ngspice/A1-op.cir"
+      },
+      {
+        "id": "A2",
+        "class": "transistor-switch",
+        "classZh": "晶体管开关",
+        "title": "晶体管开关 Q2（DTR → EN）",
+        "topology": "BJT switch, drive DTR → Q2_B, load on EN, return RTS",
+        "model": "mmbt3904（datasheet）",
+        "simulated": true,
+        "status": "WARN",
+        "parts": "C7, Q2, R5, R9",
+        "netlist": "data/analog/ngspice/A2-op.cir"
+      },
+      {
+        "id": "A3",
+        "class": "regulator-feedback",
+        "classZh": "稳压器反馈分压",
+        "title": "稳压器反馈分压 U1（+3V3）",
+        "topology": "buck sy8089a feedback divider: Vout = 0.6 V·(1 + R1/R2)",
+        "model": "sy8089a（datasheet）",
+        "simulated": true,
+        "status": "PASS",
+        "parts": "R1, R2, U1",
+        "netlist": "data/analog/ngspice/A3-op.cir"
+      },
+      {
+        "id": "A4",
+        "class": "reset-rc",
+        "classZh": "复位 RC 延时",
+        "title": "复位 RC 延时 U3.EN（EN）",
+        "topology": "RC pull-up R5 to +3V3 with C7 to GND on U3.EN",
+        "model": "esp32-s3-chip-pu（approx）",
+        "simulated": true,
+        "status": "PASS",
+        "parts": "C7, R5, U3",
+        "netlist": "data/analog/ngspice/A4-rstep.cir"
+      }
+    ],
+    "metrics": [
+      {
+        "block": "A1",
+        "metric": "icPeakA",
+        "label": "集电极峰值电流",
+        "value": "330.6µA",
+        "method": "ngspice-tran",
+        "target": "≤ 200mA",
+        "source": "inferred",
+        "status": "PASS"
+      },
+      {
+        "block": "A1",
+        "metric": "overdrive",
+        "label": "饱和过驱倍数",
+        "value": "171 ×",
+        "analytic": "168 ×",
+        "method": "ngspice-op",
+        "target": "≥ 2 ×",
+        "source": "inferred",
+        "status": "PASS"
+      },
+      {
+        "block": "A2",
+        "metric": "icPeakA",
+        "label": "集电极峰值电流",
+        "value": "228.4mA",
+        "method": "ngspice-tran",
+        "target": "≤ 200mA",
+        "source": "inferred",
+        "status": "WARN"
+      },
+      {
+        "block": "A2",
+        "metric": "overdrive",
+        "label": "饱和过驱倍数",
+        "value": "171 ×",
+        "analytic": "168 ×",
+        "method": "ngspice-op",
+        "target": "≥ 2 ×",
+        "source": "inferred",
+        "status": "PASS"
+      },
+      {
+        "block": "A3",
+        "metric": "voutV",
+        "label": "输出电压",
+        "value": "3.318V",
+        "analytic": "3.318V",
+        "method": "ngspice-op",
+        "target": "3.3V ± 3 %",
+        "source": "inferred",
+        "status": "PASS"
+      },
+      {
+        "block": "A4",
+        "metric": "delayS",
+        "label": "复位释放延时",
+        "value": "13.37ms",
+        "analytic": "13.86ms",
+        "method": "ngspice-tran",
+        "target": "≥ 50µs",
+        "source": "datasheet",
+        "status": "PASS"
+      }
+    ],
+    "tolerance": [
+      {
+        "block": "A3",
+        "phase": "当前",
+        "label": "输出电压",
+        "nominal": "3.318V",
+        "min": "3.289V",
+        "max": "3.352V",
+        "std": "11.34mV",
+        "inSpec": "100 %",
+        "yield": "100 %",
+        "method": "ngspice-op-mc",
+        "runs": 100
+      },
+      {
+        "block": "A4",
+        "phase": "当前",
+        "label": "复位释放延时",
+        "nominal": "13.37ms",
+        "min": "12.51ms",
+        "max": "15.13ms",
+        "std": "449.6µs",
+        "inSpec": "100 %",
+        "yield": "100 %",
+        "method": "analytic-mc",
+        "runs": 100
+      }
+    ],
+    "findings": [
+      {
+        "severity": "warn",
+        "source": "analog A2",
+        "message": "A2 Q2: 集电极峰值电流 228.4mA outside the target ≤ 200mA (inferred)",
+        "suggestion": "the peak is a short capacitor-discharge pulse; add a series resistor on the collector/capacitor path or confirm the pulse rating in the datasheet"
+      },
+      {
+        "severity": "info",
+        "source": "analog A4",
+        "message": "A4 U3.EN: EN rises to VIH 13.37ms after the rail is stable (≥ 50µs required)"
+      }
+    ],
+    "charts": [
+      {
+        "name": "analog-a1-switch",
+        "block": "A1",
+        "title": "A1 开关导通/关断瞬态"
+      },
+      {
+        "name": "analog-a2-switch",
+        "block": "A2",
+        "title": "A2 开关导通/关断瞬态"
+      },
+      {
+        "name": "analog-a4-rstep",
+        "block": "A4",
+        "title": "A4 上电后复位/使能引脚充电"
+      }
+    ],
+    "data": [
+      "data/analog/analog.json",
+      "data/analog/ngspice/pcbpilot-generic.lib",
+      "data/analog/ngspice/A1-op.cir",
+      "data/analog/ngspice/A1-op.log",
+      "data/analog/ngspice/A1-switch.cir",
+      "data/analog/ngspice/A1-switch.log",
+      "data/analog/ngspice/A1-switch-switch.txt",
+      "data/analog/ngspice/A2-op.cir",
+      "data/analog/ngspice/A2-op.log",
+      "data/analog/ngspice/A2-switch.cir",
+      "data/analog/ngspice/A2-switch.log",
+      "data/analog/ngspice/A2-switch-switch.txt",
+      "data/analog/ngspice/A3-op.cir",
+      "data/analog/ngspice/A3-op.log",
+      "data/analog/ngspice/A3-mc.cir",
+      "data/analog/ngspice/A4-rstep.cir",
+      "data/analog/ngspice/A4-rstep.log",
+      "data/analog/ngspice/A4-rstep-rstep.txt"
+    ],
+    "notes": [
+      "drive high level 3.32 V (U2 supply)",
+      "drive high level 3.32 V (U2 supply)",
+      "loop compensation not modelled (no regulator loop model in power-models.json)",
+      "tolerance spread covers the divider resistors only; add the Vref accuracy of the datasheet (typically ±1–2 %) on top"
+    ]
+  },
+  "feasibility": {
+    "rows": [
+      {
+        "ref": "C1",
+        "device": "GRM21BR61H106KE43L",
+        "kind": "capacitor",
+        "check": "直流电压 V vs 额定",
+        "stress": 4.7331,
+        "unit": "V",
+        "stressNote": "10 µF X5R 0805",
+        "rating": 50,
+        "ratingSource": "Murata GRM part number",
+        "marginPct": 90.5,
+        "guidelinePct": 33.3,
+        "status": "ok"
+      },
+      {
+        "ref": "C1",
+        "device": "GRM21BR61H106KE43L",
+        "kind": "capacitor",
+        "check": "纹波电流 Irms",
+        "stress": 0.21171,
+        "unit": "A",
+        "stressNote": "稳压器 U1 @peak",
+        "guidelinePct": 20,
+        "status": "unknown",
+        "note": "需数据手册（MLCC 纹波额定按自发热 ΔT≤20 °C 曲线查询）"
+      },
+      {
+        "ref": "C2",
+        "device": "CL21A226MAQNNNE",
+        "kind": "capacitor",
+        "check": "直流电压 V vs 额定",
+        "stress": 3.318,
+        "unit": "V",
+        "stressNote": "22 µF X5R 0805",
+        "rating": 25,
+        "ratingSource": "Samsung CL part number",
+        "marginPct": 86.7,
+        "guidelinePct": 33.3,
+        "status": "ok"
+      },
+      {
+        "ref": "C2",
+        "device": "CL21A226MAQNNNE",
+        "kind": "capacitor",
+        "check": "纹波电流 Irms",
+        "stress": 0.09642,
+        "unit": "A",
+        "stressNote": "稳压器 U1 @typical",
+        "guidelinePct": 20,
+        "status": "unknown",
+        "note": "需数据手册（MLCC 纹波额定按自发热 ΔT≤20 °C 曲线查询）"
+      },
+      {
+        "ref": "C3",
+        "device": "CL05B104KO5NNNC",
+        "kind": "capacitor",
+        "check": "直流电压 V vs 额定",
+        "stress": 3.318,
+        "unit": "V",
+        "stressNote": "100 nF X7R 0402",
+        "rating": 16,
+        "ratingSource": "Samsung CL part number",
+        "marginPct": 79.3,
+        "guidelinePct": 33.3,
+        "status": "ok"
+      },
+      {
+        "ref": "C3",
+        "device": "CL05B104KO5NNNC",
+        "kind": "capacitor",
+        "check": "纹波电流 Irms",
+        "stress": 0.09642,
+        "unit": "A",
+        "stressNote": "稳压器 U1 @typical",
+        "guidelinePct": 20,
+        "status": "unknown",
+        "note": "需数据手册（MLCC 纹波额定按自发热 ΔT≤20 °C 曲线查询）"
+      },
+      {
+        "ref": "C4",
+        "device": "CL05B104KO5NNNC",
+        "kind": "capacitor",
+        "check": "直流电压 V vs 额定",
+        "stress": 3.318,
+        "unit": "V",
+        "stressNote": "100 nF X7R 0402",
+        "rating": 16,
+        "ratingSource": "Samsung CL part number",
+        "marginPct": 79.3,
+        "guidelinePct": 33.3,
+        "status": "ok"
+      },
+      {
+        "ref": "C4",
+        "device": "CL05B104KO5NNNC",
+        "kind": "capacitor",
+        "check": "纹波电流 Irms",
+        "stress": 0.09642,
+        "unit": "A",
+        "stressNote": "稳压器 U1 @typical",
+        "guidelinePct": 20,
+        "status": "unknown",
+        "note": "需数据手册（MLCC 纹波额定按自发热 ΔT≤20 °C 曲线查询）"
+      },
+      {
+        "ref": "C5",
+        "device": "GRM21BR61H106KE43L",
+        "kind": "capacitor",
+        "check": "直流电压 V vs 额定",
+        "stress": 3.318,
+        "unit": "V",
+        "stressNote": "10 µF X5R 0805",
+        "rating": 50,
+        "ratingSource": "Murata GRM part number",
+        "marginPct": 93.4,
+        "guidelinePct": 33.3,
+        "status": "ok"
+      },
+      {
+        "ref": "C5",
+        "device": "GRM21BR61H106KE43L",
+        "kind": "capacitor",
+        "check": "纹波电流 Irms",
+        "stress": 0.09642,
+        "unit": "A",
+        "stressNote": "稳压器 U1 @typical",
+        "guidelinePct": 20,
+        "status": "unknown",
+        "note": "需数据手册（MLCC 纹波额定按自发热 ΔT≤20 °C 曲线查询）"
+      },
+      {
+        "ref": "C6",
+        "device": "CL05B104KO5NNNC",
+        "kind": "capacitor",
+        "check": "直流电压 V vs 额定",
+        "stress": 3.318,
+        "unit": "V",
+        "stressNote": "100 nF X7R 0402",
+        "rating": 16,
+        "ratingSource": "Samsung CL part number",
+        "marginPct": 79.3,
+        "guidelinePct": 33.3,
+        "status": "ok"
+      },
+      {
+        "ref": "C6",
+        "device": "CL05B104KO5NNNC",
+        "kind": "capacitor",
+        "check": "纹波电流 Irms",
+        "stress": 0.09642,
+        "unit": "A",
+        "stressNote": "稳压器 U1 @typical",
+        "guidelinePct": 20,
+        "status": "unknown",
+        "note": "需数据手册（MLCC 纹波额定按自发热 ΔT≤20 °C 曲线查询）"
+      },
+      {
+        "ref": "C7",
+        "device": "CL05A105KA5NQNC",
+        "kind": "capacitor",
+        "check": "直流电压 V vs 额定",
+        "stress": 3.318,
+        "unit": "V",
+        "stressNote": "1 µF X5R 0402",
+        "rating": 25,
+        "ratingSource": "Samsung CL part number",
+        "marginPct": 86.7,
+        "guidelinePct": 33.3,
+        "status": "ok"
+      },
+      {
+        "ref": "D1",
+        "device": "SS34",
+        "kind": "diode",
+        "check": "正向电流 If vs 额定",
+        "stress": 0.426521,
+        "unit": "A",
+        "stressNote": "Vf≈0.364 V, P 0.155 W @terminal-only",
+        "rating": 3,
+        "ratingSource": "power-models.json ss34 (approx)",
+        "marginPct": 85.8,
+        "guidelinePct": 20,
+        "status": "ok"
+      },
+      {
+        "ref": "D1",
+        "device": "SS34",
+        "kind": "diode",
+        "check": "反向电压 VR vs VRRM",
+        "stress": 4.7331,
+        "unit": "V",
+        "stressNote": "输入 J1 拔出时阳极按 0 V：VR = V(VSYS_5V)max",
+        "rating": 40,
+        "ratingSource": "ratings.vrrmV — SS34 datasheets: VRRM 40 V (3 A / 40 V Schottky)",
+        "marginPct": 88.2,
+        "guidelinePct": 20,
+        "status": "ok"
+      },
+      {
+        "ref": "D1",
+        "device": "SS34",
+        "kind": "diode",
+        "check": "耗散功率 P",
+        "stress": 0.155225,
+        "unit": "W",
+        "guidelinePct": 20,
+        "status": "unknown",
+        "note": "需数据手册（封装热阻/功率降额）"
+      },
+      {
+        "ref": "D2",
+        "device": "SS34",
+        "kind": "diode",
+        "check": "正向电流 If vs 额定",
+        "stress": 0.42975,
+        "unit": "A",
+        "stressNote": "Vf≈0.364 V, P 0.157 W @usb-only",
+        "rating": 3,
+        "ratingSource": "power-models.json ss34 (approx)",
+        "marginPct": 85.7,
+        "guidelinePct": 20,
+        "status": "ok"
+      },
+      {
+        "ref": "D2",
+        "device": "SS34",
+        "kind": "diode",
+        "check": "反向电压 VR vs VRRM",
+        "stress": 4.7331,
+        "unit": "V",
+        "stressNote": "输入 J2 拔出时阳极按 0 V：VR = V(VSYS_5V)max",
+        "rating": 40,
+        "ratingSource": "ratings.vrrmV — SS34 datasheets: VRRM 40 V (3 A / 40 V Schottky)",
+        "marginPct": 88.2,
+        "guidelinePct": 20,
+        "status": "ok"
+      },
+      {
+        "ref": "D2",
+        "device": "SS34",
+        "kind": "diode",
+        "check": "耗散功率 P",
+        "stress": 0.156543,
+        "unit": "W",
+        "guidelinePct": 20,
+        "status": "unknown",
+        "note": "需数据手册（封装热阻/功率降额）"
+      },
+      {
+        "ref": "D3",
+        "device": "USBLC6-2SC6",
+        "kind": "esd",
+        "check": "VRWM vs 最高线电压",
+        "stress": 4.9957,
+        "unit": "V",
+        "stressNote": "最高网络 USB_VBUS",
+        "rating": 5,
+        "ratingSource": "ratings.vrwmV — ST USBLC6-2 datasheet: VRM (reverse stand-off) 5 V",
+        "marginPct": 0.1,
+        "guidelinePct": 0,
+        "status": "marginal",
+        "note": "源规格上限 5.25 V \u003e VRWM：高端漏电增加，请按数据手册核对 VBR/漏电"
+      },
+      {
+        "ref": "J1",
+        "device": "KF301-5.0-2P",
+        "kind": "connector-source",
+        "check": "接触电流 vs 额定",
+        "stress": 0.426521,
+        "unit": "A",
+        "guidelinePct": 20,
+        "status": "unknown",
+        "note": "需数据手册（额定值未知，不做猜测）"
+      },
+      {
+        "ref": "J2",
+        "device": "USB3.1TYPE-C16P",
+        "kind": "connector-source",
+        "check": "接触电流 vs 额定",
+        "stress": 0.42975,
+        "unit": "A",
+        "guidelinePct": 20,
+        "status": "unknown",
+        "note": "需数据手册（额定值未知，不做猜测）"
+      },
+      {
+        "ref": "J2",
+        "device": "USB3.1TYPE-C16P",
+        "kind": "connector-source",
+        "check": "供电预算 I vs 端口额定",
+        "stress": 0.42975,
+        "unit": "A",
+        "rating": 0.5,
+        "ratingSource": "ratings.sourceBudgetA — USB 2.0: VBUS 4.75–5.25 V; default (non-negotiated) USB 2.0 port current 500 mA",
+        "marginPct": 14,
+        "guidelinePct": 20,
+        "status": "marginal"
+      },
+      {
+        "ref": "L1",
+        "device": "NLCV32T-2R2M-PF",
+        "kind": "inductor",
+        "check": "峰值电流 Ipk vs Isat",
+        "stress": 0.68197,
+        "unit": "A",
+        "stressNote": "ΔI 0.334 A, D 0.803 @peak",
+        "rating": 0.77,
+        "ratingSource": "power-models.json nlcv32t-2r2m (datasheet) maxA（单一 Current Rating）",
+        "marginPct": 11.4,
+        "guidelinePct": 20,
+        "status": "marginal"
+      },
+      {
+        "ref": "L1",
+        "device": "NLCV32T-2R2M-PF",
+        "kind": "inductor",
+        "check": "有效值 Irms vs Irated",
+        "stress": 0.52963,
+        "unit": "A",
+        "rating": 0.77,
+        "ratingSource": "power-models.json nlcv32t-2r2m (datasheet) maxA",
+        "marginPct": 31.2,
+        "guidelinePct": 20,
+        "status": "ok"
+      },
+      {
+        "ref": "LED1",
+        "device": "KT-0805Y",
+        "kind": "led",
+        "check": "正向电流 If vs IF,max",
+        "stress": 0.0014,
+        "unit": "A",
+        "rating": 0.025,
+        "ratingSource": "power-models.json kt-0805y (approx)",
+        "marginPct": 94.4,
+        "guidelinePct": 20,
+        "status": "ok"
+      },
+      {
+        "ref": "Q1",
+        "device": "MMBT3904(RANGE:100-300)",
+        "kind": "bjt",
+        "check": "集电极电流 Ic vs IC,max",
+        "stress": 0,
+        "unit": "A",
+        "rating": 0.2,
+        "ratingSource": "power-models.json mmbt3904 (datasheet)",
+        "marginPct": 100,
+        "guidelinePct": 20,
+        "status": "ok"
+      },
+      {
+        "ref": "Q2",
+        "device": "MMBT3904(RANGE:100-300)",
+        "kind": "bjt",
+        "check": "集电极电流 Ic vs IC,max",
+        "stress": 0,
+        "unit": "A",
+        "rating": 0.2,
+        "ratingSource": "power-models.json mmbt3904 (datasheet)",
+        "marginPct": 100,
+        "guidelinePct": 20,
+        "status": "ok"
+      },
+      {
+        "ref": "R1",
+        "device": "0402WGF4532TCE",
+        "kind": "resistor",
+        "check": "功率 P vs 封装额定",
+        "stress": 0.000163,
+        "unit": "W",
+        "stressNote": "45.3 kΩ @typical",
+        "rating": 0.0625,
+        "ratingSource": "0402 通用厚膜额定（70 °C）；UNI-ROYAL part number",
+        "marginPct": 99.7,
+        "guidelinePct": 50,
+        "status": "ok"
+      },
+      {
+        "ref": "R2",
+        "device": "0402WGF1002TCE",
+        "kind": "resistor",
+        "check": "功率 P vs 封装额定",
+        "stress": 0.000036,
+        "unit": "W",
+        "stressNote": "10 kΩ @typical",
+        "rating": 0.0625,
+        "ratingSource": "0402 通用厚膜额定（70 °C）；UNI-ROYAL part number",
+        "marginPct": 99.9,
+        "guidelinePct": 50,
+        "status": "ok"
+      },
+      {
+        "ref": "R3",
+        "device": "0402WGF5101TCE",
+        "kind": "resistor",
+        "check": "功率 P vs 封装额定",
+        "stress": 0,
+        "unit": "W",
+        "stressNote": "5.1 kΩ @typical",
+        "rating": 0.0625,
+        "ratingSource": "0402 通用厚膜额定（70 °C）；UNI-ROYAL part number",
+        "marginPct": 100,
+        "guidelinePct": 50,
+        "status": "ok",
+        "note": "P = I²R（仿真未给功率）"
+      },
+      {
+        "ref": "R4",
+        "device": "0402WGF5101TCE",
+        "kind": "resistor",
+        "check": "功率 P vs 封装额定",
+        "stress": 0,
+        "unit": "W",
+        "stressNote": "5.1 kΩ @typical",
+        "rating": 0.0625,
+        "ratingSource": "0402 通用厚膜额定（70 °C）；UNI-ROYAL part number",
+        "marginPct": 100,
+        "guidelinePct": 50,
+        "status": "ok",
+        "note": "P = I²R（仿真未给功率）"
+      },
+      {
+        "ref": "R5",
+        "device": "0402WGF1002TCE",
+        "kind": "resistor",
+        "check": "功率 P vs 封装额定",
+        "stress": 0.001101,
+        "unit": "W",
+        "stressNote": "10 kΩ @buttons-pressed",
+        "rating": 0.0625,
+        "ratingSource": "0402 通用厚膜额定（70 °C）；UNI-ROYAL part number",
+        "marginPct": 98.2,
+        "guidelinePct": 50,
+        "status": "ok"
+      },
+      {
+        "ref": "R6",
+        "device": "0402WGF1002TCE",
+        "kind": "resistor",
+        "check": "功率 P vs 封装额定",
+        "stress": 0.001101,
+        "unit": "W",
+        "stressNote": "10 kΩ @buttons-pressed",
+        "rating": 0.0625,
+        "ratingSource": "0402 通用厚膜额定（70 °C）；UNI-ROYAL part number",
+        "marginPct": 98.2,
+        "guidelinePct": 50,
+        "status": "ok"
+      },
+      {
+        "ref": "R7",
+        "device": "0402WGF1001TCE",
+        "kind": "resistor",
+        "check": "功率 P vs 封装额定",
+        "stress": 0.001959,
+        "unit": "W",
+        "stressNote": "1 kΩ @typical",
+        "rating": 0.0625,
+        "ratingSource": "0402 通用厚膜额定（70 °C）；UNI-ROYAL part number",
+        "marginPct": 96.9,
+        "guidelinePct": 50,
+        "status": "ok"
+      },
+      {
+        "ref": "R8",
+        "device": "0402WGJ0472TCE",
+        "kind": "resistor",
+        "check": "功率 P vs 封装额定",
+        "stress": 0,
+        "unit": "W",
+        "stressNote": "4.7 kΩ @typical",
+        "rating": 0.0625,
+        "ratingSource": "0402 通用厚膜额定（70 °C）；UNI-ROYAL part number",
+        "marginPct": 100,
+        "guidelinePct": 50,
+        "status": "ok",
+        "note": "P = I²R（仿真未给功率）"
+      },
+      {
+        "ref": "R9",
+        "device": "0402WGJ0472TCE",
+        "kind": "resistor",
+        "check": "功率 P vs 封装额定",
+        "stress": 0,
+        "unit": "W",
+        "stressNote": "4.7 kΩ @typical",
+        "rating": 0.0625,
+        "ratingSource": "0402 通用厚膜额定（70 °C）；UNI-ROYAL part number",
+        "marginPct": 100,
+        "guidelinePct": 50,
+        "status": "ok",
+        "note": "P = I²R（仿真未给功率）"
+      },
+      {
+        "ref": "SW1",
+        "device": "TS-1088-AR02016",
+        "kind": "switch",
+        "check": "触点电流 vs 额定",
+        "stress": 0.000332,
+        "unit": "A",
+        "guidelinePct": 20,
+        "status": "unknown",
+        "note": "需数据手册（额定值未知，不做猜测）"
+      },
+      {
+        "ref": "SW2",
+        "device": "TS-1088-AR02016",
+        "kind": "switch",
+        "check": "触点电流 vs 额定",
+        "stress": 0.000332,
+        "unit": "A",
+        "guidelinePct": 20,
+        "status": "unknown",
+        "note": "需数据手册（额定值未知，不做猜测）"
+      },
+      {
+        "ref": "U1",
+        "device": "SY8089A1AAC",
+        "kind": "buck",
+        "check": "输出电流 Iout vs 额定",
+        "stress": 0.521459,
+        "unit": "A",
+        "stressNote": "@peak",
+        "rating": 2,
+        "ratingSource": "power-models.json sy8089a (datasheet)",
+        "marginPct": 73.9,
+        "guidelinePct": 20,
+        "status": "ok"
+      },
+      {
+        "ref": "U1",
+        "device": "SY8089A1AAC",
+        "kind": "buck",
+        "check": "输入电压 Vin,max vs 绝对/推荐上限",
+        "stress": 4.7331,
+        "unit": "V",
+        "rating": 5.5,
+        "ratingSource": "ratings.vinMaxV — Silergy SY8089A datasheet: input voltage range 2.5–5.5 V",
+        "marginPct": 13.9,
+        "guidelinePct": 10,
+        "status": "ok"
+      },
+      {
+        "ref": "U1",
+        "device": "SY8089A1AAC",
+        "kind": "buck",
+        "check": "输入电压 Vin,min vs 最低工作电压",
+        "stress": 4.5928,
+        "unit": "V",
+        "rating": 2.5,
+        "ratingSource": "power-models.json sy8089a (datasheet) vinMinV",
+        "marginPct": 45.6,
+        "guidelinePct": 20,
+        "status": "ok"
+      },
+      {
+        "ref": "U1",
+        "device": "SY8089A1AAC",
+        "kind": "buck",
+        "check": "结温 Tj = Ta + P·θJA",
+        "stress": 0.197584,
+        "unit": "W",
+        "stressNote": "损耗 P（结温需 θJA）",
+        "guidelinePct": 20,
+        "status": "unknown",
+        "note": "需数据手册（θJA / Tj,max）"
+      },
+      {
+        "ref": "U2",
+        "device": "CH340C",
+        "kind": "load",
+        "check": "供电 +3V3 电压范围",
+        "stress": 3.318,
+        "unit": "V",
+        "guidelinePct": 3,
+        "status": "unknown",
+        "note": "需数据手册（推荐工作电压范围）"
+      },
+      {
+        "ref": "U3",
+        "device": "ESP32-S3-WROOM-1",
+        "kind": "load",
+        "check": "供电 +3V3 Vmax vs 推荐上限",
+        "stress": 3.318,
+        "unit": "V",
+        "rating": 3.6,
+        "ratingSource": "ratings.vccMaxV — Espressif ESP32-S3-WROOM-1 datasheet, recommended operating conditions: VDD33 3.0–3.6 V",
+        "marginPct": 7.8,
+        "guidelinePct": 3,
+        "status": "ok"
+      },
+      {
+        "ref": "U3",
+        "device": "ESP32-S3-WROOM-1",
+        "kind": "load",
+        "check": "供电 +3V3 Vmin vs 推荐下限",
+        "stress": 3.318,
+        "unit": "V",
+        "rating": 3,
+        "ratingSource": "ratings.vccMinV — Espressif ESP32-S3-WROOM-1 datasheet, recommended operating conditions: VDD33 3.0–3.6 V",
+        "marginPct": 9.6,
+        "guidelinePct": 3,
+        "status": "ok"
+      },
+      {
+        "ref": "U3",
+        "device": "ESP32-S3-WROOM-1",
+        "kind": "load",
+        "check": "GPIO IO2 (LED_CTRL) 输出电流",
+        "stress": 0.0014,
+        "unit": "A",
+        "rating": 0.04,
+        "ratingSource": "power-models.json esp32-s3-wroom-1 (datasheet) gpioMaxA",
+        "marginPct": 96.5,
+        "guidelinePct": 20,
+        "status": "ok"
+      }
+    ],
+    "counts": {
+      "marginal": 3,
+      "ok": 30,
+      "unknown": 14
+    },
+    "guidelines": [
+      {
+        "label": "电流（电感/稳压器/二极管/LED/BJT/连接器）",
+        "value": "余量 ≥ 20 %",
+        "note": "margin = (额定 − 应力)/额定"
+      },
+      {
+        "label": "电感 Ipk",
+        "value": "Isat ≥ 1.3 × Ipk 更稳妥",
+        "note": "库中只有单一 Current Rating 时同时比较 Ipk 与 Irms"
+      },
+      {
+        "label": "电阻功率",
+        "value": "P ≤ 50 % 额定（70 °C 额定值）",
+        "note": "0402 1/16 W、0603 1/10 W、0805 1/8 W、1206 1/4 W（通用厚膜）"
+      },
+      {
+        "label": "MLCC 直流电压",
+        "value": "额定 ≥ 1.5 × 工作电压（余量 ≥ 33 %）",
+        "note": "X5R/X7R \u003c 2× 时须查 DC 偏压容量曲线"
+      },
+      {
+        "label": "ESD/TVS",
+        "value": "VRWM ≥ 线上最高工作电压",
+        "note": "余量 ≥ 0 即通过"
+      },
+      {
+        "label": "供电范围",
+        "value": "工作电压距推荐范围边界 ≥ 3 %",
+        "note": "下限 margin = (V − Vmin)/V"
+      },
+      {
+        "label": "结温",
+        "value": "Tj ≤ 80 % Tj,max",
+        "note": "Tj = Ta + P·θJA，θJA 未知 → 需数据手册"
+      },
+      {
+        "label": "未知额定",
+        "value": "标记“需数据手册”",
+        "note": "绝不猜测额定值"
+      }
+    ]
+  },
+  "calculations": {
+    "basis": [
+      {
+        "label": "外层/内层铜厚",
+        "value": "1 oz (1.378 mil) / 0.5 oz (0.689 mil)",
+        "note": "1 oz = 1.378 mil"
+      },
+      {
+        "label": "允许温升 ΔT",
+        "value": "10 °C"
+      },
+      {
+        "label": "叠层",
+        "value": "JLC04161H-7628 (4-layer 1.6 mm, L1→L2 7628 prepreg 0.2104 mm)"
+      },
+      {
+        "label": "外层→参考平面 h",
+        "value": "8.28 mil"
+      },
+      {
+        "label": "介电常数 εr",
+        "value": "4.4"
+      },
+      {
+        "label": "工艺最小线宽/间距",
+        "value": "6 / 6 mil"
+      },
+      {
+        "label": "板边安全距离",
+        "value": "外层 ≥ 30 mil（0.76 mm）/ 内层·平面 ≥ 30 mil（0.76 mm），routed 板边，来源 intent"
+      }
+    ],
+    "formulas": [
+      {
+        "label": "IPC-2221/2152 载流",
+        "value": "I = 0.048 · ΔT^0.44 · A^0.725，A = w · t（mil²）；内层按 IPC-2152 用同一曲线、内层铜厚",
+        "note": "IPC-2221B §6.2 外层曲线；IPC-2152 内外层同截面载流相近（与 intent/pcbauto 一致）"
+      },
+      {
+        "label": "单过孔载流",
+        "value": "I = 0.024 · ΔT^0.44 · (π·(d+t)·t)^0.725，镀铜 t = 0.7 mil",
+        "note": "孔壁按内层导体计"
+      },
+      {
+        "label": "电压间距",
+        "value": "IPC-2221B 表 6-1（B1 内层 / B2 外层未涂覆 / B4 涂覆），与工艺最小间距取大"
+      },
+      {
+        "label": "微带线 Z0",
+        "value": "Hammerstad–Jensen（含铜厚修正）",
+        "note": "pkg/pcbauto MicrostripZ0"
+      },
+      {
+        "label": "差分 Zdiff",
+        "value": "Zdiff ≈ 2·Z0·(1 − 0.48·e^(−0.96·s/h))",
+        "note": "边耦合微带近似"
+      },
+      {
+        "label": "爬电/电气间隙",
+        "value": "IEC 62368-1 / 60601-1 / 61010-1 表格或 IPC-2221B（按 intent.standard）",
+        "note": "pkg/safety；工程参考，最终以认证机构为准"
+      },
+      {
+        "label": "板边安全距离",
+        "value": "外层铜 ≥ 20 mil（0.5 mm）、内层平面回缩 ≥ 30 mil（0.76 mm）；V-cut 0.5 / 0.8 mm；危险/市电/病人域：到板边与金属安装孔 ≥ max(间隙, 爬电)（可触及面，默认加强绝缘）",
+        "note": "intent.edge / pcbauto EdgePolicy；pcb check copper-to-edge 复核"
+      }
+    ],
+    "widths": [
+      {
+        "net": "LX",
+        "class": "SWITCH",
+        "currentA": 0.52963,
+        "source": "simulated",
+        "outerNeedMil": 4.92,
+        "innerNeedMil": 9.84,
+        "outerPlanMil": 20,
+        "innerPlanMil": 20,
+        "outerCapacityA": 1.464,
+        "status": "PASS"
+      },
+      {
+        "net": "+3V3",
+        "class": "POWER",
+        "currentA": 0.52146,
+        "source": "simulated",
+        "outerNeedMil": 4.82,
+        "innerNeedMil": 9.63,
+        "outerPlanMil": 10,
+        "innerPlanMil": 10,
+        "outerCapacityA": 0.886,
+        "status": "PASS"
+      },
+      {
+        "net": "GND",
+        "class": "GND",
+        "currentA": 0.52146,
+        "source": "simulated",
+        "outerNeedMil": 4.82,
+        "innerNeedMil": 9.63,
+        "outerPlanMil": 10,
+        "innerPlanMil": 10,
+        "outerCapacityA": 0.886,
+        "status": "PASS"
+      },
+      {
+        "net": "USB_VBUS",
+        "class": "POWER",
+        "currentA": 0.42975,
+        "source": "simulated",
+        "outerNeedMil": 3.69,
+        "innerNeedMil": 7.38,
+        "outerPlanMil": 10,
+        "innerPlanMil": 10,
+        "outerCapacityA": 0.886,
+        "status": "PASS"
+      },
+      {
+        "net": "VSYS_5V",
+        "class": "POWER",
+        "currentA": 0.42975,
+        "source": "simulated",
+        "outerNeedMil": 3.69,
+        "innerNeedMil": 7.38,
+        "outerPlanMil": 10,
+        "innerPlanMil": 10,
+        "outerCapacityA": 0.886,
+        "status": "PASS"
+      },
+      {
+        "net": "+5V_TERM",
+        "class": "POWER",
+        "currentA": 0.42652,
+        "source": "simulated",
+        "outerNeedMil": 3.65,
+        "innerNeedMil": 7.3,
+        "outerPlanMil": 10,
+        "innerPlanMil": 10,
+        "outerCapacityA": 0.886,
+        "status": "PASS"
+      }
+    ],
+    "vias": [
+      {
+        "net": "LX",
+        "currentA": 0.52963,
+        "drillMil": 12,
+        "perViaA": 0.739,
+        "need": 1,
+        "plan": 1,
+        "status": "PASS"
+      },
+      {
+        "net": "+3V3",
+        "currentA": 0.52146,
+        "drillMil": 12,
+        "perViaA": 0.739,
+        "need": 1,
+        "plan": 1,
+        "status": "PASS"
+      },
+      {
+        "net": "GND",
+        "currentA": 0.52146,
+        "drillMil": 12,
+        "perViaA": 0.739,
+        "need": 1,
+        "plan": 1,
+        "status": "PASS"
+      },
+      {
+        "net": "USB_VBUS",
+        "currentA": 0.42975,
+        "drillMil": 12,
+        "perViaA": 0.739,
+        "need": 1,
+        "plan": 1,
+        "status": "PASS"
+      },
+      {
+        "net": "VSYS_5V",
+        "currentA": 0.42975,
+        "drillMil": 12,
+        "perViaA": 0.739,
+        "need": 1,
+        "plan": 1,
+        "status": "PASS"
+      },
+      {
+        "net": "+5V_TERM",
+        "currentA": 0.42652,
+        "drillMil": 12,
+        "perViaA": 0.739,
+        "need": 1,
+        "plan": 1,
+        "status": "PASS"
+      }
+    ],
+    "clearance": [
+      {
+        "net": "+3V3",
+        "vPeak": 3.318,
+        "ipcMil": 3.94,
+        "fabMil": 6,
+        "planMil": 6,
+        "governs": "工艺最小值",
+        "status": "PASS"
+      },
+      {
+        "net": "+5V_TERM",
+        "vPeak": 4.999,
+        "ipcMil": 3.94,
+        "fabMil": 6,
+        "planMil": 6,
+        "governs": "工艺最小值",
+        "status": "PASS"
+      },
+      {
+        "net": "GND",
+        "vPeak": 0,
+        "ipcMil": 3.94,
+        "fabMil": 6,
+        "planMil": 6,
+        "governs": "工艺最小值",
+        "status": "PASS"
+      },
+      {
+        "net": "LX",
+        "vPeak": 4.733,
+        "ipcMil": 3.94,
+        "fabMil": 6,
+        "planMil": 6,
+        "governs": "工艺最小值",
+        "status": "PASS"
+      },
+      {
+        "net": "USB_DM",
+        "vPeak": 4.996,
+        "ipcMil": 3.94,
+        "fabMil": 6,
+        "planMil": 6,
+        "governs": "工艺最小值",
+        "status": "PASS"
+      },
+      {
+        "net": "USB_DP",
+        "vPeak": 4.996,
+        "ipcMil": 3.94,
+        "fabMil": 6,
+        "planMil": 6,
+        "governs": "工艺最小值",
+        "status": "PASS"
+      },
+      {
+        "net": "USB_VBUS",
+        "vPeak": 4.996,
+        "ipcMil": 3.94,
+        "fabMil": 6,
+        "planMil": 6,
+        "governs": "工艺最小值",
+        "status": "PASS"
+      },
+      {
+        "net": "VSYS_5V",
+        "vPeak": 4.733,
+        "ipcMil": 3.94,
+        "fabMil": 6,
+        "planMil": 6,
+        "governs": "工艺最小值",
+        "status": "PASS"
+      }
+    ],
+    "impedance": [
+      {
+        "name": "HS_DIFF",
+        "nets": "USB_DM, USB_DP",
+        "kind": "diff",
+        "wMil": 10.8,
+        "gapMil": 6,
+        "hMil": 8.28,
+        "tMil": 1.378,
+        "er": 4.4,
+        "z0": 58.9,
+        "zdiff": 89.6,
+        "target": 90,
+        "devPct": -0.4,
+        "status": "PASS"
+      }
+    ],
+    "insulation": null
+  },
+  "layout": {
+    "images": [
+      {
+        "kind": "sch",
+        "label": "原理图 P1",
+        "path": "artifacts/v06-live/sch-905bb85957eaf435.png",
+        "sha256": "8a57cbdd3a56371642dc336db75a81a58aa0b46afb61c5a4871dd95507fc4094",
+        "asset": "8a57cbdd3a563716.png",
+        "mime": "image/png",
+        "width": 2362,
+        "height": 1672,
+        "bytes": 540793
+      },
+      {
+        "kind": "sch",
+        "label": "原理图 P2",
+        "path": "artifacts/v06-live/sch-950ae6609e91d753.png",
+        "sha256": "b3c20ee5aa379e5ac43d4812cc251680a48c553d633e3ca908300fd45d2f45be",
+        "asset": "b3c20ee5aa379e5a.png",
+        "mime": "image/png",
+        "width": 2362,
+        "height": 1672,
+        "bytes": 349750
+      },
+      {
+        "kind": "layout",
+        "label": "PCB 布局（编辑器快照）",
+        "path": "artifacts/v06-live/snap/v06-final/snapshot.png",
+        "sha256": "b3ae70d17c4e343214d9e2acd8e46dfa454a850477da6a70c8b2cba1b73cf3db",
+        "asset": "b3ae70d17c4e3432.png",
+        "mime": "image/png",
+        "width": 1377,
+        "height": 670,
+        "bytes": 285949
+      },
+      {
+        "kind": "heat",
+        "label": "TOP 热图",
+        "path": "artifacts/v06-live/heatmaps/temp-TOP.svg",
+        "sha256": "1a314a9a9780082881e56cd33f18730f6748f7e6b6aeb97914b2fd9caa5ecf0a",
+        "asset": "1a314a9a97800828.svg",
+        "mime": "image/svg+xml",
+        "bytes": 61357
+      },
+      {
+        "kind": "heat",
+        "label": "IN1 热图",
+        "path": "artifacts/v06-live/heatmaps/temp-IN1.svg",
+        "sha256": "0706b3da12d6974dd5811a632310f3539c29da299ed6636ee0862a79b662014c",
+        "asset": "0706b3da12d6974d.svg",
+        "mime": "image/svg+xml",
+        "bytes": 49824
+      },
+      {
+        "kind": "heat",
+        "label": "IN2 热图",
+        "path": "artifacts/v06-live/heatmaps/temp-IN2.svg",
+        "sha256": "501988982046f22d3f4656188e04f51de21b0d1bd0d1e3f963606ae8f096ad22",
+        "asset": "501988982046f22d.svg",
+        "mime": "image/svg+xml",
+        "bytes": 47864
+      },
+      {
+        "kind": "heat",
+        "label": "BOTTOM 热图",
+        "path": "artifacts/v06-live/heatmaps/temp-BOTTOM.svg",
+        "sha256": "9b0828378aef1c2c89294267cc3b03961a0eeaf9bbe13a38eeec3b0920625379",
+        "asset": "9b0828378aef1c2c.svg",
+        "mime": "image/svg+xml",
+        "bytes": 47155
+      },
+      {
+        "kind": "preview",
+        "label": "pcb auto 离线布线预览（preview.svg）",
+        "path": "artifacts/v06-live/route/preview.svg",
+        "sha256": "661660ec1fc2ef70dc6c335bb13715f2c378353fe525ee7deb07648ff524d0f9",
+        "asset": "661660ec1fc2ef70.svg",
+        "mime": "image/svg+xml",
+        "bytes": 85980
+      }
+    ],
+    "stackupName": "JLC04161H-7628",
+    "stackup": [
+      {
+        "id": 1,
+        "name": "TOP",
+        "kind": "signal",
+        "dir": "h"
+      },
+      {
+        "id": 15,
+        "name": "IN1-GND",
+        "kind": "plane",
+        "nets": "GND"
+      },
+      {
+        "id": 16,
+        "name": "IN2-PWR",
+        "kind": "plane",
+        "nets": "+3V3, VSYS_5V, USB_VBUS, +5V_TERM"
+      },
+      {
+        "id": 2,
+        "name": "BOTTOM",
+        "kind": "signal",
+        "nets": "GND",
+        "dir": "v"
+      }
+    ],
+    "stackupReasons": [
+      "routing demand 0.16 in² vs 0.91 in²/layer → 0.17 signal layers",
+      "1 low-speed differential pair(s) (USB2 full-speed/CAN/RS-485) route fine as coupled pairs on 2 layers",
+      "2 layers suffice: low demand, no impedance-controlled or RF nets",
+      "forced to 4 layers by specification (decision was 2)"
+    ],
+    "routing": [
+      {
+        "label": "信号连接完成率",
+        "value": "100 % (30/30)"
+      },
+      {
+        "label": "未布通",
+        "value": "0"
+      },
+      {
+        "label": "信号过孔 / 扇出过孔",
+        "value": "14 / 55"
+      },
+      {
+        "label": "布线总长",
+        "value": "9.8 in"
+      },
+      {
+        "label": "迭代 / 剩余冲突",
+        "value": "7 / 0"
+      },
+      {
+        "label": "引擎内 DRC",
+        "value": "0 违规 / 463 项检查",
+        "note": "离线独立 DRC；以原生 DRC 为准（§7）"
+      }
+    ],
+    "joint": [
+      {
+        "label": "联合评分 Joint",
+        "value": "92.7",
+        "note": "可交付 true；平面连接 52/52"
+      },
+      {
+        "label": "electrical/hot-loop",
+        "value": "86",
+        "note": "1 switcher loops, mean routed perimeter 426 mil"
+      },
+      {
+        "label": "electrical/decap-loop",
+        "value": "77",
+        "note": "3 decaps, mean routed loop 230 mil (rail path + ground return)"
+      },
+      {
+        "label": "electrical/esd-stub",
+        "value": "89.1",
+        "note": "2 protected lines, mean routed stub 68 mil"
+      },
+      {
+        "label": "electrical/high-speed",
+        "value": "100",
+        "note": "2 HS nets, 0 skew/split/via findings"
+      },
+      {
+        "label": "electrical/ir-drop",
+        "value": "100",
+        "note": "worst DC drop 0.18× budget over 6 simulated nets, 0 open"
+      },
+      {
+        "label": "efficiency/detour",
+        "value": "100",
+        "note": "routed 7.9 in over pad-MST 6.7 in (ratio 1.18, fully routed nets)"
+      },
+      {
+        "label": "efficiency/vias",
+        "value": "100",
+        "note": "14 signal vias over 30 connections (0.47 each)"
+      }
+    ],
+    "irBudget": "2 % 或 30 mV 取大（场景 worst）",
+    "irNets": [
+      {
+        "net": "+3V3",
+        "role": "power",
+        "voltageV": 3.318,
+        "currentA": 0.52146,
+        "reference": "L1",
+        "budgetMV": 66.36,
+        "worstMV": 3.846,
+        "worstPad": "U3.2",
+        "ratioPct": 5.8,
+        "status": "ok"
+      },
+      {
+        "net": "+5V_TERM",
+        "role": "power",
+        "voltageV": 4.9991,
+        "currentA": 0.42652,
+        "reference": "J1",
+        "budgetMV": 99.98,
+        "worstMV": 1.992,
+        "worstPad": "D1.2",
+        "ratioPct": 2,
+        "status": "ok"
+      },
+      {
+        "net": "GND",
+        "role": "ground",
+        "voltageV": 0,
+        "currentA": 0.52146,
+        "reference": "J2|J1",
+        "budgetMV": 0,
+        "worstMV": 1.119,
+        "worstPad": "U3.1",
+        "ratioPct": 0,
+        "status": "info"
+      },
+      {
+        "net": "LX",
+        "role": "switch",
+        "voltageV": 3.3372,
+        "currentA": 0.52963,
+        "reference": "U1",
+        "budgetMV": 0,
+        "worstMV": 0.614,
+        "worstPad": "L1.1",
+        "ratioPct": 0,
+        "status": "info"
+      },
+      {
+        "net": "USB_VBUS",
+        "role": "power",
+        "voltageV": 4.9957,
+        "currentA": 0.42975,
+        "reference": "J2",
+        "budgetMV": 99.91,
+        "worstMV": 17.873,
+        "worstPad": "D2.2",
+        "ratioPct": 17.9,
+        "status": "ok"
+      },
+      {
+        "net": "VSYS_5V",
+        "role": "power",
+        "voltageV": 4.7331,
+        "currentA": 0.42975,
+        "reference": "D2|D1",
+        "budgetMV": 94.66,
+        "worstMV": 15.574,
+        "worstPad": "U1.4",
+        "ratioPct": 16.5,
+        "status": "ok"
+      }
+    ],
+    "irPads": [
+      {
+        "net": "USB_VBUS",
+        "pad": "D2.2",
+        "currentA": 0.4297498,
+        "dropMV": 17.873,
+        "budgetMV": 99.91,
+        "ratioPct": 17.89
+      },
+      {
+        "net": "VSYS_5V",
+        "pad": "U1.4",
+        "currentA": 0.4297498,
+        "dropMV": 15.574,
+        "budgetMV": 94.66,
+        "ratioPct": 16.45
+      },
+      {
+        "net": "+3V3",
+        "pad": "U3.2",
+        "currentA": 0.5013995,
+        "dropMV": 3.846,
+        "budgetMV": 66.36,
+        "ratioPct": 5.8
+      },
+      {
+        "net": "+5V_TERM",
+        "pad": "D1.2",
+        "currentA": 0.4265206,
+        "dropMV": 1.992,
+        "budgetMV": 99.98,
+        "ratioPct": 1.99
+      },
+      {
+        "net": "+3V3",
+        "pad": "U2.16",
+        "currentA": 0.02,
+        "dropMV": 1.291,
+        "budgetMV": 66.36,
+        "ratioPct": 1.95
+      },
+      {
+        "net": "+3V3",
+        "pad": "R6.2",
+        "currentA": 0.0003318,
+        "dropMV": 1.242,
+        "budgetMV": 66.36,
+        "ratioPct": 1.87
+      },
+      {
+        "net": "+3V3",
+        "pad": "R5.2",
+        "currentA": 0.0003318,
+        "dropMV": 1.015,
+        "budgetMV": 66.36,
+        "ratioPct": 1.53
+      },
+      {
+        "net": "+3V3",
+        "pad": "R1.1",
+        "currentA": 0.00006,
+        "dropMV": 0.726,
+        "budgetMV": 66.36,
+        "ratioPct": 1.09
+      },
+      {
+        "net": "USB_VBUS",
+        "pad": "D3.5",
+        "currentA": 2e-7,
+        "dropMV": 0,
+        "budgetMV": 99.91,
+        "ratioPct": 0
+      }
+    ],
+    "segments": [
+      {
+        "net": "VSYS_5V",
+        "layer": 2,
+        "kind": "route",
+        "lengthMil": 581.7,
+        "currentA": 0.4297,
+        "routedMil": 10,
+        "widthMil": 10,
+        "needMil": 10,
+        "dropMV": 12.284
+      },
+      {
+        "net": "USB_VBUS",
+        "layer": 1,
+        "kind": "route",
+        "lengthMil": 424.9,
+        "currentA": 0.4298,
+        "routedMil": 10,
+        "widthMil": 10,
+        "needMil": 10,
+        "dropMV": 8.9724
+      },
+      {
+        "net": "USB_VBUS",
+        "layer": 1,
+        "kind": "route",
+        "lengthMil": 306.8,
+        "currentA": 0.4298,
+        "routedMil": 10,
+        "widthMil": 10,
+        "needMil": 10,
+        "dropMV": 6.4795
+      },
+      {
+        "net": "+3V3",
+        "layer": 1,
+        "kind": "fanout",
+        "lengthMil": 63.7,
+        "currentA": 0.5014,
+        "routedMil": 10,
+        "widthMil": 10,
+        "needMil": 10,
+        "dropMV": 1.5688
+      },
+      {
+        "net": "+5V_TERM",
+        "layer": 1,
+        "kind": "fanout",
+        "lengthMil": 53.2,
+        "currentA": 0.4265,
+        "routedMil": 10,
+        "widthMil": 10,
+        "needMil": 10,
+        "dropMV": 1.1147
+      },
+      {
+        "net": "USB_VBUS",
+        "layer": 1,
+        "kind": "route",
+        "lengthMil": 49.7,
+        "currentA": 0.4298,
+        "routedMil": 10,
+        "widthMil": 10,
+        "needMil": 10,
+        "dropMV": 1.05
+      },
+      {
+        "net": "VSYS_5V",
+        "layer": 1,
+        "kind": "route",
+        "lengthMil": 72.3,
+        "currentA": 0.2283,
+        "routedMil": 10,
+        "widthMil": 10,
+        "needMil": 10,
+        "dropMV": 0.8113
+      },
+      {
+        "net": "USB_VBUS",
+        "layer": 1,
+        "kind": "route",
+        "lengthMil": 18.1,
+        "currentA": 0.4298,
+        "routedMil": 5,
+        "widthMil": 5,
+        "needMil": 10,
+        "dropMV": 0.7636
+      },
+      {
+        "net": "VSYS_5V",
+        "layer": 1,
+        "kind": "fanout",
+        "lengthMil": 35.1,
+        "currentA": 0.4297,
+        "routedMil": 10,
+        "widthMil": 10,
+        "needMil": 10,
+        "dropMV": 0.7409
+      },
+      {
+        "net": "LX",
+        "layer": 1,
+        "kind": "route",
+        "lengthMil": 47.9,
+        "currentA": 0.5215,
+        "routedMil": 20,
+        "widthMil": 20,
+        "needMil": 20,
+        "dropMV": 0.6142
+      },
+      {
+        "net": "+3V3",
+        "layer": 1,
+        "kind": "fanout",
+        "lengthMil": 53.2,
+        "currentA": 0.2237,
+        "routedMil": 10,
+        "widthMil": 10,
+        "needMil": 10,
+        "dropMV": 0.585
+      },
+      {
+        "net": "VSYS_5V",
+        "layer": 1,
+        "kind": "fanout",
+        "lengthMil": 53.8,
+        "currentA": 0.2142,
+        "routedMil": 10,
+        "widthMil": 10,
+        "needMil": 10,
+        "dropMV": 0.566
+      },
+      {
+        "net": "VSYS_5V",
+        "layer": 1,
+        "kind": "fanout",
+        "lengthMil": 53.7,
+        "currentA": 0.2015,
+        "routedMil": 10,
+        "widthMil": 10,
+        "needMil": 10,
+        "dropMV": 0.5317
+      },
+      {
+        "net": "USB_VBUS",
+        "layer": 1,
+        "kind": "route",
+        "lengthMil": 22.4,
+        "currentA": 0.4298,
+        "routedMil": 10,
+        "widthMil": 10,
+        "needMil": 10,
+        "dropMV": 0.4725
+      },
+      {
+        "net": "VSYS_5V",
+        "layer": 1,
+        "kind": "route",
+        "lengthMil": 41.5,
+        "currentA": 0.2155,
+        "routedMil": 10,
+        "widthMil": 10,
+        "needMil": 10,
+        "dropMV": 0.4401
+      },
+      {
+        "net": "+3V3",
+        "layer": 1,
+        "kind": "route",
+        "lengthMil": 28.8,
+        "currentA": 0.2984,
+        "routedMil": 10,
+        "widthMil": 10,
+        "needMil": 10,
+        "dropMV": 0.4219
+      },
+      {
+        "net": "GND",
+        "layer": 1,
+        "kind": "fanout",
+        "lengthMil": 48.4,
+        "currentA": 0.4298,
+        "routedMil": 10,
+        "widthMil": 10,
+        "needMil": 10,
+        "dropMV": 0.3961
+      },
+      {
+        "net": "GND",
+        "layer": 1,
+        "kind": "fanout",
+        "lengthMil": 42.8,
+        "currentA": 0.4298,
+        "routedMil": 10,
+        "widthMil": 10,
+        "needMil": 10,
+        "dropMV": 0.3505
+      },
+      {
+        "net": "GND",
+        "layer": 1,
+        "kind": "fanout",
+        "lengthMil": 25.9,
+        "currentA": 0.4298,
+        "routedMil": 10,
+        "widthMil": 10,
+        "needMil": 10,
+        "dropMV": 0.2624
+      },
+      {
+        "net": "GND",
+        "layer": 1,
+        "kind": "fanout",
+        "lengthMil": 23.8,
+        "currentA": 0.4298,
+        "routedMil": 10,
+        "widthMil": 10,
+        "needMil": 10,
+        "dropMV": 0.2557
+      }
+    ],
+    "segmentsTotal": 87,
+    "worstPaths": [
+      {
+        "net": "+3V3",
+        "pad": "U3.2",
+        "totalMV": 3.846,
+        "steps": [
+          {
+            "kind": "track",
+            "what": "10.0 mil × 53 mil (fanout)",
+            "dropMV": 0.585
+          },
+          {
+            "kind": "via",
+            "what": "via(471,778)",
+            "dropMV": 0.228
+          },
+          {
+            "kind": "plane",
+            "what": "sheet",
+            "dropMV": 0.955
+          },
+          {
+            "kind": "via",
+            "what": "via(507,1494)",
+            "dropMV": 0.51
+          },
+          {
+            "kind": "track",
+            "what": "10.0 mil × 64 mil (fanout)",
+            "dropMV": 1.569
+          }
+        ]
+      },
+      {
+        "net": "+5V_TERM",
+        "pad": "D1.2",
+        "totalMV": 1.992,
+        "steps": [
+          {
+            "kind": "plane",
+            "what": "sheet",
+            "dropMV": 0.444
+          },
+          {
+            "kind": "via",
+            "what": "via(136,1101)",
+            "dropMV": 0.434
+          },
+          {
+            "kind": "track",
+            "what": "10.0 mil × 53 mil (fanout)",
+            "dropMV": 1.115
+          }
+        ]
+      },
+      {
+        "net": "GND",
+        "pad": "U3.1",
+        "totalMV": 1.119,
+        "steps": [
+          {
+            "kind": "track",
+            "what": "10.0 mil × 26 mil (fanout)",
+            "dropMV": 0.262
+          },
+          {
+            "kind": "via",
+            "what": "via(753,270)",
+            "dropMV": 0.176
+          },
+          {
+            "kind": "plane",
+            "what": "sheet",
+            "dropMV": 0.135
+          },
+          {
+            "kind": "via",
+            "what": "via(519,1536)",
+            "dropMV": 0.149
+          },
+          {
+            "kind": "track",
+            "what": "10.0 mil × 48 mil (fanout)",
+            "dropMV": 0.396
+          }
+        ]
+      },
+      {
+        "net": "LX",
+        "pad": "L1.1",
+        "totalMV": 0.614,
+        "steps": [
+          {
+            "kind": "track",
+            "what": "20.0 mil × 48 mil (route)",
+            "dropMV": 0.614
+          }
+        ]
+      },
+      {
+        "net": "USB_VBUS",
+        "pad": "D2.2",
+        "totalMV": 17.873,
+        "steps": [
+          {
+            "kind": "track",
+            "what": "5.0 mil × 3 mil (route)",
+            "dropMV": 0.135
+          },
+          {
+            "kind": "track",
+            "what": "5.0 mil × 18 mil (route)",
+            "dropMV": 0.764
+          },
+          {
+            "kind": "track",
+            "what": "10.0 mil × 22 mil (route)",
+            "dropMV": 0.472
+          },
+          {
+            "kind": "track",
+            "what": "10.0 mil × 50 mil (route)",
+            "dropMV": 1.05
+          },
+          {
+            "kind": "track",
+            "what": "10.0 mil × 307 mil (route)",
+            "dropMV": 6.479
+          },
+          {
+            "kind": "track",
+            "what": "10.0 mil × 425 mil (route)",
+            "dropMV": 8.972
+          }
+        ]
+      },
+      {
+        "net": "VSYS_5V",
+        "pad": "U1.4",
+        "totalMV": 15.574,
+        "steps": [
+          {
+            "kind": "track",
+            "what": "10.0 mil × 72 mil (route)",
+            "dropMV": 0.811
+          },
+          {
+            "kind": "via",
+            "what": "via(190,1274)",
+            "dropMV": 0.451
+          },
+          {
+            "kind": "track",
+            "what": "10.0 mil × 582 mil (route)",
+            "dropMV": 12.284
+          },
+          {
+            "kind": "via",
+            "what": "via(190,692)",
+            "dropMV": 0.219
+          },
+          {
+            "kind": "plane",
+            "what": "sheet",
+            "dropMV": 0.631
+          },
+          {
+            "kind": "via",
+            "what": "via(305,561)",
+            "dropMV": 0.437
+          },
+          {
+            "kind": "track",
+            "what": "10.0 mil × 35 mil (fanout)",
+            "dropMV": 0.741
+          }
+        ]
+      }
+    ],
+    "irModel": [
+      "track R = ρ·L/(w·t), ρ = 1.72e-8 Ω·m, t = copper weight × 1.378 mil (outer/inner from the rules)",
+      "via R = ρ·h/(π·(d+t)·t), plating t = 0.7 mil, h = layer spacing (board thickness / (layers−1))",
+      "planes and pours = resistive sheet grid (pitch ≥ 25 mil, ≤ 6000 cells) over the region outline; antipads and other nets' copper are not subtracted (optimistic)",
+      "each supply (power: source part ≥ 5 % of the largest; ground: the return entry, kind connector-source when marked) is solved as the sole reference; other pads draw (+I) or feed (−I) their simulated current; per-segment currents and per-pad drops are the maxima over these cases (a merged worst-case file does not satisfy KCL)",
+      "trunk segments (carrying a case's whole load) carry at least the supplying pin's own current; capacitor pads with ripple RMS keep the width that current needs"
+    ],
+    "siNets": [
+      {
+        "net": "USB_DM",
+        "class": "USB2",
+        "lengthMil": 882,
+        "vias": 2,
+        "layers": "1,2"
+      },
+      {
+        "net": "USB_DP",
+        "class": "USB2",
+        "lengthMil": 860,
+        "vias": 0,
+        "layers": "1"
+      }
+    ],
+    "siPairs": [
+      {
+        "p": "USB_DM",
+        "n": "USB_DP",
+        "skewMil": 22,
+        "limitMil": 100,
+        "status": "PASS"
+      }
+    ],
+    "siFindings": null,
+    "isolation": [
+      "标准 IPC-2221B：0 对绝缘要求，0 个铣槽，0 个禁铺区，0 条间距/爬电问题"
+    ],
+    "feedback": [
+      "引脚交换：在可重映射器件（pin-capabilities.json 收录的 MCU、通用排针）上没有找到能缩短飞线或减少交叉的排列"
+    ],
+    "difficulty": [
+      {
+        "label": "布线困难",
+        "value": "否"
+      },
+      {
+        "label": "飞线交叉 / 飞线总长",
+        "value": "12 / 6672 mil"
+      },
+      {
+        "label": "IR 超预算网络",
+        "value": "0"
+      },
+      {
+        "label": "缩颈段",
+        "value": "0"
+      }
+    ]
+  },
+  "postLayout": {
+    "status": "PASS",
+    "board": "8236b697139e07acdebc1c5748d16d8d511ea8f97ce6719e2d670c27ce3bc1fc",
+    "scenarios": "typical, peak, buttons-pressed, terminal-only, usb-only（scenarios）",
+    "boundary": "板级：裸板静止空气，上下表面自然对流 h 顶 10 / 底 10 W/m²K，环境 25 °C；不含外壳、风扇或气流（非 CFD），板边绝热",
+    "settings": [
+      {
+        "label": "网格",
+        "value": "0.5 mm 单元 92×92，板内 8218 单元/层"
+      },
+      {
+        "label": "IR 预算",
+        "value": "2%,30mV"
+      },
+      {
+        "label": "铜温升限值",
+        "value": "10 °C，余量 ×1.2",
+        "note": "线宽反馈"
+      },
+      {
+        "label": "过孔",
+        "value": "镀层 0.7 mil，载流 ΔT 10 °C",
+        "note": "IPC-2221 外层曲线作用于孔壁截面"
+      },
+      {
+        "label": "FR-4",
+        "value": "面内 0.3 / 厚度方向 0.3 W/mK"
+      },
+      {
+        "label": "负片平面 IN1",
+        "value": "GND",
+        "note": "dump 不列出负片铜：按整层平面扣反焊盘建模"
+      }
+    ],
+    "nets": [
+      {
+        "net": "+3V3",
+        "role": "power",
+        "scenario": "peak",
+        "reference": "L1",
+        "currentA": 0.521459,
+        "budgetMV": 66.36,
+        "worstMV": 2.708,
+        "worstPad": "U3.2",
+        "lossMW": 1.3764,
+        "maxJAmm2": 56.4,
+        "maxViaA": 0.5014,
+        "copperRiseC": 0.325,
+        "status": "ok"
+      },
+      {
+        "net": "+5V_TERM",
+        "role": "power",
+        "scenario": "terminal-only",
+        "reference": "J1",
+        "currentA": 0.426521,
+        "budgetMV": 99.83,
+        "worstMV": 1.007,
+        "worstPad": "D1.2",
+        "lossMW": 0.4295,
+        "maxJAmm2": 47.978,
+        "maxViaA": 0.42652,
+        "copperRiseC": 0.249,
+        "status": "ok"
+      },
+      {
+        "net": "USB_VBUS",
+        "role": "power",
+        "scenario": "usb-only",
+        "reference": "J2",
+        "currentA": 0.42975,
+        "budgetMV": 99.14,
+        "worstMV": 17.071,
+        "worstPad": "D2.2",
+        "lossMW": 7.3364,
+        "maxJAmm2": 96.682,
+        "maxViaA": 0,
+        "copperRiseC": 0.399,
+        "status": "ok"
+      },
+      {
+        "net": "VSYS_5V",
+        "role": "power",
+        "scenario": "terminal-only",
+        "reference": "D1",
+        "currentA": 0.426521,
+        "budgetMV": 92.55,
+        "worstMV": 13.609,
+        "worstPad": "U1.4",
+        "lossMW": 5.8044,
+        "maxJAmm2": 47.978,
+        "maxViaA": 0.42975,
+        "copperRiseC": 0.309,
+        "status": "ok"
+      },
+      {
+        "net": "LX",
+        "role": "switch",
+        "scenario": "peak",
+        "reference": "U1",
+        "currentA": 0.521459,
+        "worstMV": 0.265,
+        "worstPad": "L1.1",
+        "lossMW": 0.1383,
+        "maxJAmm2": 29.328,
+        "maxViaA": 0,
+        "copperRiseC": 0.293,
+        "status": "info"
+      },
+      {
+        "net": "GND",
+        "role": "ground",
+        "scenario": "usb-only",
+        "reference": "J2",
+        "currentA": 0.42975,
+        "worstMV": 0.338,
+        "worstPad": "U3.41",
+        "lossMW": 0.1484,
+        "maxJAmm2": 23.397,
+        "maxViaA": 0.16667,
+        "copperRiseC": 0.35,
+        "status": "info"
+      }
+    ],
+    "vias": [
+      {
+        "net": "+3V3",
+        "at": "(506.6, 1494.1) mil",
+        "currentA": 0.5014,
+        "ampacityA": 1.478,
+        "usePct": 33.9,
+        "scenario": "peak"
+      },
+      {
+        "net": "VSYS_5V",
+        "at": "(305.2, 560.9) mil",
+        "currentA": 0.42975,
+        "ampacityA": 1.478,
+        "usePct": 29.1,
+        "scenario": "usb-only"
+      },
+      {
+        "net": "VSYS_5V",
+        "at": "(190.2, 691.9) mil",
+        "currentA": 0.42652,
+        "ampacityA": 1.478,
+        "usePct": 28.9,
+        "scenario": "terminal-only"
+      },
+      {
+        "net": "VSYS_5V",
+        "at": "(190.2, 1273.6) mil",
+        "currentA": 0.42652,
+        "ampacityA": 1.478,
+        "usePct": 28.9,
+        "scenario": "terminal-only"
+      },
+      {
+        "net": "+5V_TERM",
+        "at": "(135.8, 1101) mil",
+        "currentA": 0.42652,
+        "ampacityA": 1.478,
+        "usePct": 28.9,
+        "scenario": "terminal-only"
+      },
+      {
+        "net": "+3V3",
+        "at": "(436.3, 704.7) mil",
+        "currentA": 0.27679,
+        "ampacityA": 1.478,
+        "usePct": 18.7,
+        "scenario": "peak"
+      },
+      {
+        "net": "+3V3",
+        "at": "(471.4, 778.2) mil",
+        "currentA": 0.24467,
+        "ampacityA": 1.478,
+        "usePct": 16.6,
+        "scenario": "peak"
+      },
+      {
+        "net": "VSYS_5V",
+        "at": "(126.2, 637.6) mil",
+        "currentA": 0.22937,
+        "ampacityA": 1.478,
+        "usePct": 15.5,
+        "scenario": "usb-only"
+      }
+    ],
+    "thermal": [
+      {
+        "label": "板最高温度",
+        "value": "86.4 °C",
+        "note": "场景 terminal-only；TOP (561, 1151.6) mil，U3 下方"
+      },
+      {
+        "label": "热源",
+        "value": "2.137 W（器件 2.129 W + 铜损 7.89 mW）"
+      },
+      {
+        "label": "能量平衡",
+        "value": "散出 2.137 W，误差 0.0000 %",
+        "note": "Σ 对流散热 = Σ 热源"
+      },
+      {
+        "label": "铜自热（仅铜损）",
+        "value": "0.4 °C",
+        "note": "场景 usb-only"
+      }
+    ],
+    "layers": [
+      {
+        "layer": "TOP",
+        "maxC": 86.37,
+        "meanC": 77.82,
+        "at": "(561, 1151.6)"
+      },
+      {
+        "layer": "IN1",
+        "maxC": 83.58,
+        "meanC": 77.58,
+        "at": "(580.7, 1112.2)"
+      },
+      {
+        "layer": "IN2",
+        "maxC": 80.8,
+        "meanC": 76.45,
+        "at": "(757.9, 1230.3)"
+      },
+      {
+        "layer": "BOTTOM",
+        "maxC": 80.49,
+        "meanC": 76.19,
+        "at": "(757.9, 1230.3)"
+      }
+    ],
+    "parts": [
+      {
+        "ref": "U3",
+        "side": "TOP",
+        "powerW": 1.659078,
+        "scenario": "terminal-only",
+        "boardMaxC": 86.37,
+        "status": "needs-datasheet"
+      },
+      {
+        "ref": "U1",
+        "side": "TOP",
+        "powerW": 0.19758,
+        "scenario": "usb-only",
+        "boardMaxC": 83.37,
+        "status": "needs-datasheet"
+      },
+      {
+        "ref": "D1",
+        "side": "TOP",
+        "powerW": 0.155225,
+        "scenario": "terminal-only",
+        "boardMaxC": 82.67,
+        "status": "needs-datasheet"
+      },
+      {
+        "ref": "L1",
+        "side": "TOP",
+        "powerW": 0.045954,
+        "scenario": "usb-only",
+        "boardMaxC": 82.31,
+        "status": "needs-datasheet"
+      },
+      {
+        "ref": "D2",
+        "side": "TOP",
+        "powerW": 0.156543,
+        "scenario": "usb-only",
+        "boardMaxC": 82,
+        "status": "needs-datasheet"
+      },
+      {
+        "ref": "R2",
+        "side": "TOP",
+        "powerW": 0.000036,
+        "scenario": "usb-only",
+        "boardMaxC": 79.96,
+        "status": "needs-datasheet"
+      },
+      {
+        "ref": "R1",
+        "side": "TOP",
+        "powerW": 0.000163,
+        "scenario": "usb-only",
+        "boardMaxC": 79.7,
+        "status": "needs-datasheet"
+      },
+      {
+        "ref": "R7",
+        "side": "TOP",
+        "powerW": 0.001959,
+        "scenario": "terminal-only",
+        "boardMaxC": 78.68,
+        "status": "needs-datasheet"
+      },
+      {
+        "ref": "LED1",
+        "side": "TOP",
+        "powerW": 0.002607,
+        "scenario": "terminal-only",
+        "boardMaxC": 77.89,
+        "status": "needs-datasheet"
+      },
+      {
+        "ref": "U2",
+        "side": "TOP",
+        "powerW": 0.06636,
+        "scenario": "usb-only",
+        "boardMaxC": 77.29,
+        "status": "needs-datasheet"
+      },
+      {
+        "ref": "D3",
+        "side": "TOP",
+        "powerW": 0.000001,
+        "scenario": "usb-only",
+        "boardMaxC": 76.77,
+        "status": "needs-datasheet"
+      }
+    ],
+    "feedback": null,
+    "maps": [
+      {
+        "kind": "heat",
+        "label": "TOP 热图",
+        "path": "artifacts/v06-live/heatmaps/temp-TOP.svg",
+        "sha256": "1a314a9a9780082881e56cd33f18730f6748f7e6b6aeb97914b2fd9caa5ecf0a",
+        "asset": "1a314a9a97800828.svg",
+        "mime": "image/svg+xml",
+        "bytes": 61357
+      },
+      {
+        "kind": "heat",
+        "label": "IN1 热图",
+        "path": "artifacts/v06-live/heatmaps/temp-IN1.svg",
+        "sha256": "0706b3da12d6974dd5811a632310f3539c29da299ed6636ee0862a79b662014c",
+        "asset": "0706b3da12d6974d.svg",
+        "mime": "image/svg+xml",
+        "bytes": 49824
+      },
+      {
+        "kind": "heat",
+        "label": "IN2 热图",
+        "path": "artifacts/v06-live/heatmaps/temp-IN2.svg",
+        "sha256": "501988982046f22d3f4656188e04f51de21b0d1bd0d1e3f963606ae8f096ad22",
+        "asset": "501988982046f22d.svg",
+        "mime": "image/svg+xml",
+        "bytes": 47864
+      },
+      {
+        "kind": "heat",
+        "label": "BOTTOM 热图",
+        "path": "artifacts/v06-live/heatmaps/temp-BOTTOM.svg",
+        "sha256": "9b0828378aef1c2c89294267cc3b03961a0eeaf9bbe13a38eeec3b0920625379",
+        "asset": "9b0828378aef1c2c.svg",
+        "mime": "image/svg+xml",
+        "bytes": 47155
+      }
+    ],
+    "assumptions": [
+      "copper from the board dump: tracks/arcs = 1-D resistors ρL/(w·t) split at junctions/vias/pads and at every cell; poured fills, static fills, planes = sheet cells G = (t/ρ)·min(harmonic coverage, shared-edge copper fraction); pads shorted to the sheet they overlap",
+      "ρ = 1.72e-08 Ω·m (20 °C); via barrel R = ρ·h/(π(d+t)t), plating t = 0.7 mil, h = layer-centre distance",
+      "stackup: TOP 35.0 µm @ z 0.018 mm; IN1 17.5 µm @ z 0.254 mm; IN2 17.5 µm @ z 1.346 mm; BOTTOM 35.0 µm @ z 1.583 mm; dielectrics [0.2104 1.0742 0.2104] mm (JLC04161H-7628 (4-layer 1.6 mm, L1→L2 7628 prepreg 0.2104 mm))",
+      "each scenario of the sim file is solved on its own (KCL-consistent): the supplying part (power: source pins; ground: return entry, connector-source first) is the 0 V reference, every other pad draws (+I) or feeds (−I) its simulated current; worst = maximum over scenarios",
+      "via ampacity = IPC-2221 external curve on the barrel cross-section π(d+t)t at ΔT 10 °C (IPC-2152: internal ≈ external)",
+      "thermal: per layer k_Cu 385 W/mK × t × coverage + FR-4 0.3 W/mK in-plane over half of each adjacent dielectric; FR-4 0.3 W/mK through-plane + via barrels; convection top/bottom; part heat on its pads by area; Joule heat from the DC solve; board edges adiabatic; part bodies do not convect separately (their top face shares the board's h)",
+      "Tj = board temperature under the part + P·θJB (θJC when only that is rated); without a rating only the board temperature is reported",
+      "2 through-hole pad(s) carry no drill in the dump: plated hole assumed = 0.5 × the smaller pad side",
+      "80 thermal-relief spoke(s) of the poured copper modelled as tracks of their stroke width",
+      "IN1 has no copper objects in the dump (a negative/内电层 plane is not listed by pcb dump): assumed a solid GND plane — board outline inset 30 mil (copper-to-edge), antipads around every other-net via / THT pad / cutout = its copper + 6.0 mil clearance, same-net vias connect directly (thermal-relief spokes ignored). Override with --plane 15=NET or --plane 15=none",
+      "boundary: the bare board in still air — natural convection on both faces (top 10.0, bottom 10.0 W/m²K), no enclosure, fan or airflow (no CFD); board edges adiabatic"
+    ],
+    "data": "data/post.json"
+  },
+  "verification": [
+    {
+      "name": "原生 DRC（EasyEDA）",
+      "status": "PASS",
+      "detail": "原生 DRC 通过，0 违规；2026-09-28T14:30:19.678591Z",
+      "evidence": "artifacts/v06-live/drc.json",
+      "sha256": "cc3884525eac116c95c00746f7c3629d5b09cd2a63a5f6db398b8d871cec5763",
+      "data": "data/drc.json"
+    },
+    {
+      "name": "pcb check（DFM 重建审计）",
+      "status": "WARN",
+      "detail": "ERROR 0 / WARN 97 / INFO 13",
+      "evidence": "artifacts/v06-live/check-live.txt",
+      "sha256": "5a3a3791984ac7acea26b8842a469a198a662e1a7d6508900cec1b6ee2da1b91",
+      "data": "data/check.txt"
+    },
+    {
+      "name": "板边安全距离（copper-to-edge）",
+      "status": "PASS",
+      "detail": "外层 ≥ 30 mil（0.76 mm）/ 内层·平面 ≥ 30 mil（0.76 mm），routed 板边，来源 intent；实测 L1 34.1 mil（pour，≥ 30）；L15 30 mil（plane，≥ 30）；L16 35.02 mil（pour，≥ 30）；L2 34.1 mil（pour，≥ 30）；安装孔壁 67.96 mil（reload-board）",
+      "evidence": "artifacts/v06-live/reload2.json",
+      "sha256": "be6df89532246ed205eda6d5d90d0efff8fcae8bcdc480846a3ac897a68c3a9b",
+      "data": "data/board.reload.json"
+    },
+    {
+      "name": "规则同步（pcb rules check）",
+      "status": "PASS",
+      "detail": "intent 规则与 EasyEDA 一致（in-sync）",
+      "evidence": "artifacts/v06-live/rules-check.json",
+      "sha256": "786173eedc12efce3ba81d5c4780b5501f58ad88da5cffbc0494b25515bcf429",
+      "data": "data/rules-check.json"
+    },
+    {
+      "name": "焊盘网络对账（pad-net diff）",
+      "status": "PASS",
+      "detail": "原理图网表与 PCB 焊盘网络一致",
+      "evidence": "artifacts/v06-live/netdiff.json",
+      "sha256": "6931fd8912a9f4a8a2a3d7b2a638e6a00e9d626ce9fdc3dd880c8febd1fc637a",
+      "data": "data/net-diff.json"
+    },
+    {
+      "name": "保存/重载一致性",
+      "status": "PASS",
+      "detail": "保存重载前后 semanticSha256 一致：8236b697139e",
+      "evidence": "artifacts/v06-live/reload2.json",
+      "sha256": "be6df89532246ed205eda6d5d90d0efff8fcae8bcdc480846a3ac897a68c3a9b",
+      "data": "data/board.reload.json"
+    },
+    {
+      "name": "布线完成度（pcb auto）",
+      "status": "PASS",
+      "detail": "信号 100 %（30/30），平面连接 52/52",
+      "evidence": "artifacts/v06-live/route/plan.json",
+      "sha256": "e23c0981bcb62078a1de72c089823053448a2ca578b4aaa2d95f6629da658e77",
+      "data": "data/plan.json"
+    },
+    {
+      "name": "直流压降（IR drop）",
+      "status": "PASS",
+      "detail": "0 个网络超预算，最坏 17.9 % 预算",
+      "evidence": "artifacts/v06-live/route/plan.json",
+      "sha256": "e23c0981bcb62078a1de72c089823053448a2ca578b4aaa2d95f6629da658e77",
+      "data": "data/plan.json"
+    },
+    {
+      "name": "设计后仿真（post-layout）",
+      "status": "PASS",
+      "detail": "post-layout PASS；+3V3 2.71/66.4 mV；+5V_TERM 1.01/99.8 mV；USB_VBUS 17.07/99.1 mV；VSYS_5V 13.61/92.6 mV；板最高 86.4 °C",
+      "evidence": "artifacts/v06-live/post.json",
+      "sha256": "eeacf37d0c64677b25f070bf9d3cddd1cc50cf8cf866091433094528281c593d",
+      "data": "data/post.json"
+    }
+  ],
+  "testPlan": {
+    "items": [
+      {
+        "id": "T01",
+        "category": "上电限流",
+        "what": "输入电流（限流上电）",
+        "where": "任一路输入源：J1(+5V_TERM), J2(USB_VBUS)",
+        "expected": "典型 46.16 mA（typical），峰值场景 0.43 A",
+        "limit": "首次上电限流 69.24 mA（1.5× 典型）；功能/射频测试前升到 ≥ 0.645 A（1.5× 峰值）",
+        "method": "可调限流电源 + 电流表；先 0.5× 电压缓升，再升至标称",
+        "basis": "sim typical/peak 源电流"
+      },
+      {
+        "id": "T02",
+        "category": "电源轨",
+        "net": "+5V_TERM",
+        "what": "+5V_TERM 直流电压",
+        "where": "负载端 D1.2",
+        "expected": "4.999 V ± 外部电源精度（未声明）",
+        "limit": "满载 0.427 A（terminal-only 场景）",
+        "method": "万用表 DC V（≥4½ 位），黑表笔就近 GND 焊盘",
+        "basis": "外部电源规格未在输入中声明"
+      },
+      {
+        "id": "T03",
+        "category": "电源轨",
+        "net": "USB_VBUS",
+        "what": "USB_VBUS 直流电压",
+        "where": "负载端 D2.2",
+        "expected": "4.75 V–5.25 V（源规格），仿真 4.996 V",
+        "limit": "满载 0.43 A（usb-only 场景）",
+        "method": "万用表 DC V（≥4½ 位），黑表笔就近 GND 焊盘",
+        "basis": "ratings.sourceVMin/MaxV — USB 2.0: VBUS 4.75–5.25 V; default (non-negotiated) USB 2.0 port current 500 mA"
+      },
+      {
+        "id": "T04",
+        "category": "电源轨",
+        "net": "VSYS_5V",
+        "what": "VSYS_5V 直流电压",
+        "where": "负载端 U1.4；探测 C1.1（无源件焊盘，距负载 4.9 mm）",
+        "expected": "4.593 V–4.733 V（源电压 − Vf，随负载变化）",
+        "limit": "满载 0.43 A（usb-only 场景）",
+        "method": "万用表 DC V（≥4½ 位），黑表笔就近 GND 焊盘",
+        "basis": "sim 各场景；再叠加源电压容差与 Vf 离散"
+      },
+      {
+        "id": "T05",
+        "category": "电源轨",
+        "net": "+3V3",
+        "what": "+3V3 直流电压",
+        "where": "负载端 U3.2；探测 C6.1（无源件焊盘，距负载 1.5 mm）；稳压器输出 L1.2",
+        "expected": "3.318 V ± 3.6 %（3.197 V … 3.439 V）",
+        "limit": "满载 0.521 A（peak 场景）",
+        "method": "万用表 DC V（≥4½ 位），黑表笔就近 GND 焊盘",
+        "basis": "Vref ±2 %（假定，数据手册未录入） + 分压 2×1 %×(1−Vref/Vout)=1.64 %（R1 1 %, R2 1 %）"
+      },
+      {
+        "id": "T06",
+        "category": "开关节点",
+        "net": "LX",
+        "what": "LX 开关波形 / 过冲振铃",
+        "where": "U1 开关脚与 L1 之间",
+        "expected": "方波 0→4.733 V，占空比 ≈ 0.803，fsw 1.5 MHz",
+        "limit": "振铃峰值不超过稳压器 SW 脚绝对最大值（需数据手册）",
+        "method": "示波器 ≥ 200 MHz，10× 探头，接地弹簧（不用长地夹）",
+        "basis": "sim ripple / power-models fsw"
+      },
+      {
+        "id": "T07",
+        "category": "输出纹波",
+        "net": "+3V3",
+        "what": "+3V3 输出纹波",
+        "where": "输出电容 C2,C3,C4,C5,C6 两端",
+        "expected": "≈ 0.86 mVpp（ΔI 0.334 A /(8·fsw·ΣC 32.3 µF)，理想电容，不含 ESR/ESL 与 DC 偏压衰减）",
+        "limit": "20 MHz 带宽限制下测量；负载在 peak 场景",
+        "method": "示波器 AC 耦合，接地弹簧直接压在输出电容 GND 端",
+        "basis": "sim ΔI + 输出电容 MPN 解码"
+      },
+      {
+        "id": "T08",
+        "category": "复位/启动",
+        "net": "EN",
+        "what": "EN 逻辑电平与上电时序",
+        "where": "C7.1, Q2.3, R5.1, SW2.1, U3.3",
+        "expected": "空闲 3.318 V；按键按下 0 V（对地电容 C7 1 µF，上拉 R5 10 kΩ → +3V3，τ = R·C ≈ 10 ms）",
+        "limit": "高电平 ≥ 0.75×VDD，低电平 ≤ 0.25×VDD（CMOS 通用判据；以芯片手册为准）",
+        "method": "万用表测静态；示波器单次触发看上电上升沿（RC 延时）",
+        "basis": "sim typical / buttons-pressed"
+      },
+      {
+        "id": "T09",
+        "category": "复位/启动",
+        "net": "IO0",
+        "what": "IO0 逻辑电平与上电时序",
+        "where": "Q1.3, R6.1, SW1.1, U3.27",
+        "expected": "空闲 3.318 V；按键按下 0 V（上拉 R6 10 kΩ → +3V3）",
+        "limit": "高电平 ≥ 0.75×VDD，低电平 ≤ 0.25×VDD（CMOS 通用判据；以芯片手册为准）",
+        "method": "万用表测静态；示波器单次触发看上电上升沿（RC 延时）",
+        "basis": "sim typical / buttons-pressed"
+      },
+      {
+        "id": "T10",
+        "category": "指示灯",
+        "net": "LED_A",
+        "what": "LED1 驱动",
+        "where": "LED1",
+        "expected": "点亮，If ≈ 1.4 mA，阳极 LED_A ≈ 1.863 V",
+        "method": "固件拉高驱动脚；万用表测阳极电压，串联电阻两端压降/阻值 = 电流",
+        "basis": "sim typical"
+      },
+      {
+        "id": "T11",
+        "category": "接口",
+        "net": "USB_DM",
+        "what": "USB 枚举 / 通信",
+        "where": "接口连接器",
+        "expected": "主机枚举出 U2 CH340C 串口设备；烧录下载成功",
+        "method": "连接 PC；设备管理器 / lsusb 查看；执行一次固件下载",
+        "basis": "intent 接口识别"
+      },
+      {
+        "id": "T12",
+        "category": "阻抗",
+        "what": "90 Ω 受控阻抗",
+        "where": "板边阻抗测试条（coupon），网络 USB_DM, USB_DP",
+        "expected": "90 Ω ± 10 %（常见工厂阻抗控制公差）",
+        "method": "TDR；下单时勾选阻抗控制并要求出具测试报告",
+        "basis": "intent netClasses.impedanceOhm"
+      }
+    ],
+    "addTestPoints": [
+      {
+        "net": "+5V_TERM",
+        "reason": "电源轨无测试点",
+        "near": "D1.2",
+        "xMm": 3.4,
+        "yMm": 29.3
+      },
+      {
+        "net": "USB_VBUS",
+        "reason": "电源轨无测试点",
+        "near": "D2.2",
+        "xMm": 4.6,
+        "yMm": 11.8
+      },
+      {
+        "net": "VSYS_5V",
+        "reason": "电源轨无测试点",
+        "near": "U1.4",
+        "xMm": 8.6,
+        "yMm": 14.2
+      },
+      {
+        "net": "+3V3",
+        "reason": "电源轨无测试点",
+        "near": "U3.2",
+        "xMm": 14.2,
+        "yMm": 37.1
+      }
+    ],
+    "notes": [
+      "建议新增测试点：直径 ≥ 1.0 mm 圆形裸铜焊盘（顶层），位置取负载端附近空白处；坐标为相对外框左下角的板坐标（mm），放置前请确认不与器件/走线冲突。"
+    ]
+  },
+  "manufacturing": {
+    "fab": [
+      {
+        "label": "层数",
+        "value": "4"
+      },
+      {
+        "label": "叠层",
+        "value": "JLC04161H-7628 (4-layer 1.6 mm, L1→L2 7628 prepreg 0.2104 mm)",
+        "note": "下单时选择同名叠层"
+      },
+      {
+        "label": "板厚",
+        "value": "1.6 mm"
+      },
+      {
+        "label": "铜厚 外/内",
+        "value": "1 oz / 0.5 oz"
+      },
+      {
+        "label": "最小线宽（规则 / 实际）",
+        "value": "5 mil / 5 mil",
+        "note": "规则来自板级回读 rules"
+      },
+      {
+        "label": "最小间距（通用 / 线-线）",
+        "value": "5.98 / 4.02 mil"
+      },
+      {
+        "label": "过孔 钻孔/外径",
+        "value": "12.01 / 24.02 mil（0.31 / 0.61 mm）"
+      },
+      {
+        "label": "铜到板边（EasyEDA 规则）",
+        "value": "30 mil",
+        "note": "Board Outline ↔ Copper/Plane Zone；铺铜与负片内电层按它回缩"
+      },
+      {
+        "label": "孔-孔 / 槽间距",
+        "value": "11.81 / 11.81 mil"
+      },
+      {
+        "label": "走线 / 过孔数量",
+        "value": "240 / 69"
+      },
+      {
+        "label": "板边安全距离（要求）",
+        "value": "外层 ≥ 30 mil（0.76 mm）/ 内层·平面 ≥ 30 mil（0.76 mm），routed 板边，来源 intent",
+        "note": "工程默认 0.5 mm 外层 / 0.76 mm 内层平面（JLC 最小 0.2 mm 铣边、0.4 mm V-cut）；docs/pcb-design-rules.md §5.4"
+      },
+      {
+        "label": "铜到板边（实测最小，每层）",
+        "value": "L1 34.1 mil（pour，≥ 30）；L15 30 mil（plane，≥ 30）；L16 35.02 mil（pour，≥ 30）；L2 34.1 mil（pour，≥ 30）；安装孔壁 67.96 mil（reload-board）",
+        "note": "pcb check copper-to-edge 同一几何：铺铜按实际灌铜多边形量"
+      },
+      {
+        "label": "阻抗控制",
+        "value": "需要：HS_DIFF 90 Ω（差分，线宽 10.8 / 间距 6 mil；USB_DM,USB_DP）",
+        "note": "下单勾选阻抗控制，叠层须与计算一致"
+      },
+      {
+        "label": "表面处理（建议）",
+        "value": "建议沉金（ENIG）：细间距/底部焊盘需要平整焊盘面",
+        "note": "最细焊盘中心距 0.5 mm（J2）"
+      },
+      {
+        "label": "阻焊/丝印（建议）",
+        "value": "绿油白字（标准）；细间距器件间保留阻焊桥",
+        "note": "建议项，非计算结果"
+      }
+    ],
+    "dfm": [
+      {
+        "level": "WARN",
+        "type": "non-orthogonal",
+        "count": 93,
+        "example": "trace runs at 137.7° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (398, 804) [+3V3]"
+      },
+      {
+        "level": "WARN",
+        "type": "parallel-coupling",
+        "count": 2,
+        "example": "parallel traces 19.2 mil apart over 26 mil (\u003c 32.4 mil = 3×W) — crosstalk/3W risk [规范 §4.2 减少串扰 — pcb-design-rules.md]  [[CC1 USB_DM]]"
+      },
+      {
+        "level": "WARN",
+        "type": "decap-too-far",
+        "count": 1,
+        "example": "decoupling cap C5 sits 166mil (4.2mm) from the nearest +3V3 pin U3.2 — a decap must hug its IC (≤2mm) [规范 §3.1 去耦电容紧贴IC — pcb-design-rules.md] @ (395, 1454) [+3V3]"
+      },
+      {
+        "level": "WARN",
+        "type": "width-under-spec",
+        "count": 1,
+        "example": "power net +3V3: 2 track(s) below the power-branch spec width 9.84 mil (thinnest 5 mil) — widen for current capacity (route-short sizes by role; pour it instead, or --width-power to override) [规范 §1.2 推荐线宽 — pcb-design-rules.md] @ (433, 739) [+3V3]"
+      },
+      {
+        "level": "INFO",
+        "type": "width-mismatch",
+        "count": 11,
+        "example": "2-pin part C7: entering track widths differ (10.0 vs 6.0 mil) [规范 §1.2 推荐线宽 — pcb-design-rules.md] [GND]"
+      },
+      {
+        "level": "INFO",
+        "type": "fiducial-missing",
+        "count": 1,
+        "example": "board has 142 top-layer pads (SMT-scale) but only 0 fiducial(s) (FID*/MARK*) — SMT wants ≥3 non-collinear 1mm marks (JLC panel rails add their own; local marks needed for fine-pitch) [规范 §9 Mark点设计 — pcb-design-rules.md]"
+      },
+      {
+        "level": "INFO",
+        "type": "via-crosses-plane",
+        "count": 1,
+        "example": "inner PLANE IN1-GND has no net-bound pour visible — plane net unknown; NOTE (#110): after `doc reload` PLANE-layer pours are invisible to pcb.pour.list, so this may be a false positive — treat `pcb drc` Connection=0 as the arbiter before adding any pour; if the plane is genuinely empty, pour the net while the layer is still SIGNAL, then flip to PLANE and pour-rebuild (`pcb power-planes` does this)"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "copper-to-edge (intent, routed edge): outer ≥ 30.0 mil, inner ≥ 30.0 mil (fab floor 8.0 mil, live Board Outline rule 30.0 mil)"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "copper-to-edge layer 1 (outer): min 34.10 mil (pour GND), required 30.0 mil"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "copper-to-edge layer 15 (inner): min 30.00 mil (plane ), required 30.0 mil"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "copper-to-edge layer 16 (inner): min 35.02 mil (pour +3V3), required 30.0 mil"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "copper-to-edge layer 2 (outer): min 34.10 mil (pour GND), required 30.0 mil"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper 5a03a7b691121882 fill 802686d1ba3abd92 (layer 16): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper 5a03a7b691121882 fill 2a211427f0fad335 (layer 16): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper 5a03a7b691121882 fill e20d306f8a0739e4 (layer 16): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper 5a03a7b691121882 fill f1bdcb9415692086 (layer 16): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper 7dc22cba1cab9ac8 fill 826f49d5a2d7a47f (layer 2): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper 7dc22cba1cab9ac8 fill d085d839a707fee7 (layer 2): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper 7dc22cba1cab9ac8 fill 3298c0a93d262f6e (layer 2): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 968fd4edd1615180 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill ff9cc159a853265f (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill a44cf31b7212544d (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 3ae785fe0d5ab1e4 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 515a0d2795d4f0f7 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 0e1727773f406f30 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill fd7a0bfd85eb1c3a (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill a6825745b5ff6fc8 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 6cab81e8f27ee907 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 5924d602a6ad44ca (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 3aeb1ea361757b69 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill bfb0c4eea7651a70 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 377af2b3a1a9a163 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 5734382f82c4390d (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill e74254bc5d1c46c2 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill a1e5e98abbe807f8 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 5dcdd538da5d3846 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 4a5f6f228f0196d5 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 8858d69377790654 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill d601e08a3f674b43 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 61a6e422e6fed353 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 0b35ad76045b4d94 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill b0255c4775bae70d (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 038982fe96beb54d (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill c57238c029669591 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill a429831d53068111 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill f6ec5fb903a0e087 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill f4d61578d8f04a2a (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 80091998f89b8d06 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 3f261d814ba29f30 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill ee71c291e45dcd4e (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill c997975c36c57fea (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 12a615b4fc9e8f21 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 01a64e124c38ad1b (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill da3a67530dd28d90 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 8c01c4b4f697e2b7 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill c8a4772bb23304f2 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 109ff2c18cb73f63 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill a80cda4fdddd19ca (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 63f8589db8bc60dd (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 74e2881cebbf0d34 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 6ceb5cf23db85163 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 57a4dde3421875e0 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill a289e06f1c4d94eb (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 4b31b84cf0b0a406 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 2b4d4f5196814705 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 51beaa3648f83f41 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill ea602b9f70965c13 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 6128ad0e0630c920 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 104887bb9ebc098a (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill c1c2299e301e799e (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 73595ab04ce48f70 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 7e62c652f84cdb6a (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 88f3480e232762c9 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill df7b683d09431d55 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 75d6b9a8a368203b (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 78ad7aa04531ae1d (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill f8465130c6bb5931 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 84f4bf658bb40404 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill b7db17da7983d77d (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 9d49b3ac516b6fba (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 5892bb29ef583e2b (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill fc80b5d6fade5fff (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 49703a7c64bb6112 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 09fe865f3dfecefd (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 76a9d09fe77e22fe (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill e8b887a77e4bf5b4 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 3921bbaedec238b8 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 6aaa6a5f387aa922 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill d469028038a95b44 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 3d39c1a7cf4f0100 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 184d185b0c80b20c (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "poured copper ba2ed097a369e68a fill 0fb8b303f25103f1 (layer 1): geometry unsupported/unreadable — NOT measured"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "4 metal mounting hole(s) measured (copper to the drilled wall ≥ the layer edge distance; hazardous copper to the screw-head keep-out ring ≥ its domain distance)"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "isolation: the intent declares no insulation pair — nothing to check"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "9 pour outline(s) checked as drawn (the flooded copper stays inside them) — re-check after pcb pour rebuild with native DRC"
+      },
+      {
+        "level": "LIMIT",
+        "type": "limitation",
+        "count": 1,
+        "example": "via-current: 37 transition(s) rated (Σ via ampacity vs current, margin ≥ 20 %); 15 via group(s) without a current to pass (plane stitching, zero-current pins) not rated"
+      }
+    ],
+    "assembly": [
+      {
+        "ref": "D1",
+        "device": "SS34",
+        "concern": "极性",
+        "note": "阴极色环/标记朝向丝印“K”端"
+      },
+      {
+        "ref": "D2",
+        "device": "SS34",
+        "concern": "极性",
+        "note": "阴极色环/标记朝向丝印“K”端"
+      },
+      {
+        "ref": "D3",
+        "device": "USBLC6-2SC6",
+        "concern": "方向（1 脚）",
+        "note": "阵列型 ESD 器件按 1 脚标记贴装"
+      },
+      {
+        "ref": "J1",
+        "device": "KF301-5.0-2P",
+        "concern": "机械件",
+        "note": "插拔受力件：检查定位柱/固定脚焊接强度与板边对齐"
+      },
+      {
+        "ref": "J2",
+        "device": "USB3.1TYPE-C16P",
+        "concern": "细间距 0.5 mm",
+        "note": "钢网厚度 0.10–0.12 mm，回流后检查连锡（AOI/放大镜）"
+      },
+      {
+        "ref": "J2",
+        "device": "USB3.1TYPE-C16P",
+        "concern": "机械件",
+        "note": "插拔受力件：检查定位柱/固定脚焊接强度与板边对齐"
+      },
+      {
+        "ref": "LED1",
+        "device": "KT-0805Y",
+        "concern": "极性",
+        "note": "LED 阴极标记与丝印一致"
+      },
+      {
+        "ref": "Q1",
+        "device": "MMBT3904(RANGE:100-300)",
+        "concern": "方向",
+        "note": "SOT-23 B/E/C 与封装一致"
+      },
+      {
+        "ref": "Q2",
+        "device": "MMBT3904(RANGE:100-300)",
+        "concern": "方向",
+        "note": "SOT-23 B/E/C 与封装一致"
+      },
+      {
+        "ref": "U1",
+        "device": "SY8089A1AAC",
+        "concern": "1 脚方向 / 湿敏",
+        "note": "按 1 脚标记贴装；湿敏等级（MSL）以数据手册为准，超时需烘烤"
+      },
+      {
+        "ref": "U2",
+        "device": "CH340C",
+        "concern": "1 脚方向 / 湿敏",
+        "note": "按 1 脚标记贴装；湿敏等级（MSL）以数据手册为准，超时需烘烤"
+      },
+      {
+        "ref": "U3",
+        "device": "ESP32-S3-WROOM-1",
+        "concern": "1 脚方向 / 湿敏",
+        "note": "按 1 脚标记贴装；湿敏等级（MSL）以数据手册为准，超时需烘烤"
+      }
+    ],
+    "hv": [
+      "无绝缘对（单一 SELV 域）：无铣槽/爬电特别要求"
+    ],
+    "handling": [
+      "静电防护：全程佩戴腕带、防静电台面与包装（IC/模块/ESD 器件均为静电敏感）",
+      "回流：无铅（SAC305）曲线峰值约 240–250 °C；模块类器件以其手册的回流次数/温度为准",
+      "清洗：免洗助焊剂残留在高阻/射频区域需清洗",
+      "无本地 Mark 点：拼板时由工厂工艺边加 Mark；细间距器件建议增加局部 Mark"
+    ]
+  },
+  "bringUp": {
+    "steps": [
+      {
+        "n": 1,
+        "title": "目检",
+        "action": "放大镜/AOI 检查极性与方向件：D1, D2, D3, LED1, Q1, Q2, U1, U2, U3；细间距与 EP 器件检查连锡、立碑、少锡",
+        "expect": "极性/1 脚全部与丝印一致，无连锡",
+        "ifFail": "返修后重新目检，禁止带缺陷上电"
+      },
+      {
+        "n": 2,
+        "title": "断电短路检查",
+        "action": "万用表欧姆档，红表笔接各电源轨、黑表笔接 GND（见下表）",
+        "expect": "每条轨 \u003e 100 Ω，数值与下表已知路径同量级",
+        "ifFail": "\u003c 10 Ω：按电源树从源头逐段断开（拆 0 Ω/电感/二极管）定位短路"
+      },
+      {
+        "n": 3,
+        "title": "限流上电",
+        "action": "可调电源接其中一路输入（J1(+5V_TERM), J2(USB_VBUS)，逐路验证），限流 69.24 mA（1.5× 典型），电压从 0 缓升到标称",
+        "expect": "空载/典型电流 ≈ 46.16 mA（仿真 typical），无器件发热",
+        "ifFail": "电流顶到限流：立即断电，回到第 2 步；局部发热用热像/手触定位"
+      },
+      {
+        "n": 4,
+        "title": "测量各电源轨",
+        "action": "按 §8 测试点计划逐条测量，从上游到下游：+5V_TERM → USB_VBUS → VSYS_5V → +3V3",
+        "expect": "均在 §8 期望范围内",
+        "ifFail": "见下方故障特征表"
+      },
+      {
+        "n": 5,
+        "title": "开关电源波形",
+        "action": "示波器接地弹簧测开关节点与输出纹波（§8）",
+        "expect": "占空比与仿真一致，纹波在估算量级",
+        "ifFail": "占空比异常/间歇工作：检查反馈分压、电感焊接、输入电容"
+      },
+      {
+        "n": 6,
+        "title": "功能与接口",
+        "action": "按 §8 测接口枚举、复位/启动键、指示灯",
+        "expect": "全部通过",
+        "ifFail": "接口失败先查差分对焊接与 CC/上下拉电阻值"
+      },
+      {
+        "n": 7,
+        "title": "带载 / 峰值",
+        "action": "运行峰值负载固件（如射频发射），记录输入电流与各轨最低电压",
+        "expect": "输入电流 ≈ 0.43 A（仿真峰值场景），各轨不跌出容差",
+        "ifFail": "跌落：检查 IR 压降路径（§6）与输入源能力"
+      }
+    ],
+    "shortChecks": [
+      {
+        "net": "+5V_TERM",
+        "knownPath": "无已知纯电阻路径",
+        "expected": "\u003e 100 Ω（通常 kΩ 级；IC 体二极管/ESD 使读数低于纯电阻路径）",
+        "failBelow": "\u003c 10 Ω 判短路；10–100 Ω 需排查"
+      },
+      {
+        "net": "USB_VBUS",
+        "knownPath": "无已知纯电阻路径",
+        "expected": "\u003e 100 Ω（通常 kΩ 级；IC 体二极管/ESD 使读数低于纯电阻路径）",
+        "failBelow": "\u003c 10 Ω 判短路；10–100 Ω 需排查"
+      },
+      {
+        "net": "VSYS_5V",
+        "knownPath": "无已知纯电阻路径",
+        "expected": "\u003e 100 Ω（通常 kΩ 级；IC 体二极管/ESD 使读数低于纯电阻路径）",
+        "failBelow": "\u003c 10 Ω 判短路；10–100 Ω 需排查"
+      },
+      {
+        "net": "+3V3",
+        "knownPath": "R1+R2 = 55.3 kΩ（经 FB）",
+        "expected": "\u003e 100 Ω，且 ≤ 已知电阻路径 55.3 kΩ",
+        "failBelow": "\u003c 10 Ω 判短路；10–100 Ω 需排查"
+      }
+    ],
+    "signatures": [
+      {
+        "symptom": "上电即顶限流",
+        "cause": "电源轨短路 / 极性件反贴 / IC 方向错",
+        "check": "断电测各轨对地电阻；目检极性件"
+      },
+      {
+        "symptom": "降压输出 0 V，输入正常",
+        "cause": "EN 未拉高 / 电感虚焊 / 芯片未起振",
+        "check": "测 EN 电平与开关节点波形"
+      },
+      {
+        "symptom": "降压输出 ≈ 输入电压",
+        "cause": "反馈分压开路或阻值错（FB 悬空）",
+        "check": "测 FB 电压应 ≈ Vref；核对分压电阻"
+      },
+      {
+        "symptom": "输出纹波大 / 啸叫",
+        "cause": "输出电容虚焊或容值不足（DC 偏压）/ 电感饱和",
+        "check": "测纹波与电感电流；核对 §4 电感余量"
+      },
+      {
+        "symptom": "系统电压比输入低 \u003e 0.5 V",
+        "cause": "OR 二极管 Vf 高于模型 / 走线压降",
+        "check": "测二极管两端压差，对照 §3 Vf"
+      },
+      {
+        "symptom": "USB 不枚举",
+        "cause": "D+/D− 焊接或交换 / Type-C CC 下拉缺失 / 桥接芯片未供电",
+        "check": "测 VBUS、CC 电阻值、桥接芯片供电与晶振"
+      },
+      {
+        "symptom": "指示灯不亮",
+        "cause": "LED 反贴 / 驱动脚未输出 / 限流电阻错",
+        "check": "二极管档测 LED 方向；测驱动脚电平"
+      }
+    ]
+  },
+  "appendix": {
+    "nets": [
+      {
+        "net": "+3V3",
+        "role": "power",
+        "class": "POWER",
+        "block": "BUCK_3V3",
+        "vNom": 3.318,
+        "vMax": 3.318,
+        "currentA": 0.52146,
+        "source": "simulated",
+        "outerMil": 10,
+        "innerMil": 10,
+        "clearanceMil": 6,
+        "pads": 12
+      },
+      {
+        "net": "+5V_TERM",
+        "role": "power",
+        "class": "POWER",
+        "block": "POWER_IN",
+        "vNom": 4.9991,
+        "vMax": 4.9991,
+        "currentA": 0.42652,
+        "source": "simulated",
+        "outerMil": 10,
+        "innerMil": 10,
+        "clearanceMil": 6,
+        "pads": 2
+      },
+      {
+        "net": "CC1",
+        "role": "signal",
+        "class": "SIGNAL",
+        "block": "CONN_J2",
+        "vNom": 0,
+        "vMax": 0,
+        "currentA": 0,
+        "source": "simulated",
+        "outerMil": 6,
+        "innerMil": 6,
+        "clearanceMil": 6,
+        "pads": 2
+      },
+      {
+        "net": "CC2",
+        "role": "signal",
+        "class": "SIGNAL",
+        "block": "CONN_J2",
+        "vNom": 0,
+        "vMax": 0,
+        "currentA": 0,
+        "source": "simulated",
+        "outerMil": 6,
+        "innerMil": 6,
+        "clearanceMil": 6,
+        "pads": 2
+      },
+      {
+        "net": "DTR",
+        "role": "signal",
+        "class": "SIGNAL",
+        "block": "USB_UART",
+        "vNom": 1.1113,
+        "vMax": 1.1113,
+        "currentA": 0,
+        "source": "simulated",
+        "outerMil": 6,
+        "innerMil": 6,
+        "clearanceMil": 6,
+        "pads": 3
+      },
+      {
+        "net": "EN",
+        "role": "signal",
+        "class": "SIGNAL",
+        "block": "RF_MODULE",
+        "vNom": 3.318,
+        "vMax": 3.318,
+        "currentA": 0.00033,
+        "source": "simulated",
+        "outerMil": 6,
+        "innerMil": 6,
+        "clearanceMil": 6,
+        "pads": 5
+      },
+      {
+        "net": "FB",
+        "role": "signal",
+        "class": "SIGNAL",
+        "block": "BUCK_3V3",
+        "vNom": 0.6,
+        "vMax": 0.6,
+        "currentA": 0.00006,
+        "source": "simulated",
+        "outerMil": 6,
+        "innerMil": 6,
+        "clearanceMil": 6,
+        "pads": 3
+      },
+      {
+        "net": "GND",
+        "role": "ground",
+        "class": "GND",
+        "vNom": 0,
+        "vMax": 0,
+        "currentA": 0.52146,
+        "source": "simulated",
+        "outerMil": 10,
+        "innerMil": 10,
+        "clearanceMil": 6,
+        "pads": 26
+      },
+      {
+        "net": "IO0",
+        "role": "signal",
+        "class": "SIGNAL",
+        "block": "RF_MODULE",
+        "vNom": 3.318,
+        "vMax": 3.318,
+        "currentA": 0.00033,
+        "source": "simulated",
+        "outerMil": 6,
+        "innerMil": 6,
+        "clearanceMil": 6,
+        "pads": 4
+      },
+      {
+        "net": "LED_A",
+        "role": "signal",
+        "class": "SIGNAL",
+        "block": "LED",
+        "vNom": 1.8625,
+        "vMax": 1.8625,
+        "currentA": 0.0014,
+        "source": "simulated",
+        "outerMil": 6,
+        "innerMil": 6,
+        "clearanceMil": 6,
+        "pads": 2
+      },
+      {
+        "net": "LED_CTRL",
+        "role": "signal",
+        "class": "SIGNAL",
+        "block": "RF_MODULE",
+        "vNom": 3.262,
+        "vMax": 3.262,
+        "currentA": 0.0014,
+        "source": "simulated",
+        "outerMil": 6,
+        "innerMil": 6,
+        "clearanceMil": 6,
+        "pads": 2
+      },
+      {
+        "net": "LX",
+        "role": "switch",
+        "class": "SWITCH",
+        "block": "BUCK_3V3",
+        "vNom": 3.3372,
+        "vMax": 3.4061,
+        "currentA": 0.52963,
+        "source": "simulated",
+        "outerMil": 20,
+        "innerMil": 20,
+        "clearanceMil": 6,
+        "pads": 2
+      },
+      {
+        "net": "Q1_B",
+        "role": "signal",
+        "class": "SIGNAL",
+        "block": "AUTO_DOWNLOAD",
+        "vNom": 1.1113,
+        "vMax": 1.1113,
+        "currentA": 0,
+        "source": "simulated",
+        "outerMil": 6,
+        "innerMil": 6,
+        "clearanceMil": 6,
+        "pads": 2
+      },
+      {
+        "net": "Q2_B",
+        "role": "signal",
+        "class": "SIGNAL",
+        "block": "AUTO_DOWNLOAD",
+        "vNom": 1.1113,
+        "vMax": 1.1113,
+        "currentA": 0,
+        "source": "simulated",
+        "outerMil": 6,
+        "innerMil": 6,
+        "clearanceMil": 6,
+        "pads": 2
+      },
+      {
+        "net": "RTS",
+        "role": "signal",
+        "class": "SIGNAL",
+        "block": "USB_UART",
+        "vNom": 1.1113,
+        "vMax": 1.1113,
+        "currentA": 0,
+        "source": "simulated",
+        "outerMil": 6,
+        "innerMil": 6,
+        "clearanceMil": 6,
+        "pads": 3
+      },
+      {
+        "net": "U0RXD",
+        "role": "signal",
+        "class": "SIGNAL",
+        "block": "RF_MODULE",
+        "vNom": 0,
+        "vMax": 3.318,
+        "currentA": 0,
+        "source": "simulated",
+        "outerMil": 6,
+        "innerMil": 6,
+        "clearanceMil": 6,
+        "pads": 2
+      },
+      {
+        "net": "U0TXD",
+        "role": "signal",
+        "class": "SIGNAL",
+        "block": "RF_MODULE",
+        "vNom": 0,
+        "vMax": 3.318,
+        "currentA": 0,
+        "source": "simulated",
+        "outerMil": 6,
+        "innerMil": 6,
+        "clearanceMil": 6,
+        "pads": 2
+      },
+      {
+        "net": "USB_DM",
+        "role": "diff",
+        "class": "HS_DIFF",
+        "block": "USB_UART",
+        "vNom": 0,
+        "vMax": 4.996,
+        "currentA": 0,
+        "source": "simulated",
+        "outerMil": 10.8,
+        "innerMil": 10.8,
+        "clearanceMil": 6,
+        "impedanceOhm": 90,
+        "pads": 5
+      },
+      {
+        "net": "USB_DP",
+        "role": "diff",
+        "class": "HS_DIFF",
+        "block": "USB_UART",
+        "vNom": 0,
+        "vMax": 4.996,
+        "currentA": 0,
+        "source": "simulated",
+        "outerMil": 10.8,
+        "innerMil": 10.8,
+        "clearanceMil": 6,
+        "impedanceOhm": 90,
+        "pads": 5
+      },
+      {
+        "net": "USB_VBUS",
+        "role": "power",
+        "class": "POWER",
+        "block": "POWER_IN",
+        "vNom": 4.9957,
+        "vMax": 4.9957,
+        "currentA": 0.42975,
+        "source": "simulated",
+        "outerMil": 10,
+        "innerMil": 10,
+        "clearanceMil": 6,
+        "pads": 4
+      },
+      {
+        "net": "VSYS_5V",
+        "role": "power",
+        "class": "POWER",
+        "block": "POWER_IN",
+        "vNom": 4.7331,
+        "vMax": 4.7331,
+        "currentA": 0.42975,
+        "source": "simulated",
+        "outerMil": 10,
+        "innerMil": 10,
+        "clearanceMil": 6,
+        "pads": 5
+      }
+    ],
+    "parts": [
+      {
+        "ref": "C1",
+        "device": "GRM21BR61H106KE43L",
+        "kind": "capacitor",
+        "modelId": "generic-capacitor",
+        "confidence": "value",
+        "parsed": "10 µF X5R 0805 50 V",
+        "block": "BUCK_3V3"
+      },
+      {
+        "ref": "C2",
+        "device": "CL21A226MAQNNNE",
+        "kind": "capacitor",
+        "modelId": "generic-capacitor",
+        "confidence": "value",
+        "parsed": "22 µF X5R 0805 25 V",
+        "block": "USB_UART"
+      },
+      {
+        "ref": "C3",
+        "device": "CL05B104KO5NNNC",
+        "kind": "capacitor",
+        "modelId": "generic-capacitor",
+        "confidence": "value",
+        "parsed": "100 nF X7R 0402 16 V",
+        "block": "RF_MODULE"
+      },
+      {
+        "ref": "C4",
+        "device": "CL05B104KO5NNNC",
+        "kind": "capacitor",
+        "modelId": "generic-capacitor",
+        "confidence": "value",
+        "parsed": "100 nF X7R 0402 16 V",
+        "block": "USB_UART"
+      },
+      {
+        "ref": "C5",
+        "device": "GRM21BR61H106KE43L",
+        "kind": "capacitor",
+        "modelId": "generic-capacitor",
+        "confidence": "value",
+        "parsed": "10 µF X5R 0805 50 V",
+        "block": "USB_UART"
+      },
+      {
+        "ref": "C6",
+        "device": "CL05B104KO5NNNC",
+        "kind": "capacitor",
+        "modelId": "generic-capacitor",
+        "confidence": "value",
+        "parsed": "100 nF X7R 0402 16 V",
+        "block": "RF_MODULE"
+      },
+      {
+        "ref": "C7",
+        "device": "CL05A105KA5NQNC",
+        "kind": "capacitor",
+        "modelId": "generic-capacitor",
+        "confidence": "value",
+        "parsed": "1 µF X5R 0402 25 V",
+        "block": "KEYS"
+      },
+      {
+        "ref": "D1",
+        "device": "SS34",
+        "kind": "diode",
+        "modelId": "ss34",
+        "confidence": "approx",
+        "block": "POWER_IN"
+      },
+      {
+        "ref": "D2",
+        "device": "SS34",
+        "kind": "diode",
+        "modelId": "ss34",
+        "confidence": "approx",
+        "block": "POWER_IN"
+      },
+      {
+        "ref": "D3",
+        "device": "USBLC6-2SC6",
+        "kind": "esd",
+        "modelId": "usblc6-2sc6",
+        "confidence": "datasheet",
+        "block": "ESD"
+      },
+      {
+        "ref": "J1",
+        "device": "KF301-5.0-2P",
+        "kind": "connector-source",
+        "modelId": "kf301-2p",
+        "confidence": "assumed",
+        "block": "POWER_IN"
+      },
+      {
+        "ref": "J2",
+        "device": "USB3.1TYPE-C16P",
+        "kind": "connector-source",
+        "modelId": "usb-c-receptacle",
+        "confidence": "approx",
+        "block": "CONN_J2"
+      },
+      {
+        "ref": "L1",
+        "device": "NLCV32T-2R2M-PF",
+        "kind": "inductor",
+        "modelId": "nlcv32t-2r2m",
+        "confidence": "datasheet",
+        "block": "BUCK_3V3"
+      },
+      {
+        "ref": "LED1",
+        "device": "KT-0805Y",
+        "kind": "led",
+        "modelId": "kt-0805y",
+        "confidence": "approx",
+        "block": "LED"
+      },
+      {
+        "ref": "Q1",
+        "device": "MMBT3904(RANGE:100-300)",
+        "kind": "bjt",
+        "modelId": "mmbt3904",
+        "confidence": "datasheet",
+        "block": "AUTO_DOWNLOAD"
+      },
+      {
+        "ref": "Q2",
+        "device": "MMBT3904(RANGE:100-300)",
+        "kind": "bjt",
+        "modelId": "mmbt3904",
+        "confidence": "datasheet",
+        "block": "AUTO_DOWNLOAD"
+      },
+      {
+        "ref": "R1",
+        "device": "0402WGF4532TCE",
+        "kind": "resistor",
+        "modelId": "generic-resistor",
+        "confidence": "value",
+        "parsed": "45.3 kΩ ±1% 0402",
+        "block": "BUCK_3V3"
+      },
+      {
+        "ref": "R2",
+        "device": "0402WGF1002TCE",
+        "kind": "resistor",
+        "modelId": "generic-resistor",
+        "confidence": "value",
+        "parsed": "10 kΩ ±1% 0402",
+        "block": "BUCK_3V3"
+      },
+      {
+        "ref": "R3",
+        "device": "0402WGF5101TCE",
+        "kind": "resistor",
+        "modelId": "generic-resistor",
+        "confidence": "value",
+        "parsed": "5.1 kΩ ±1% 0402",
+        "block": "CONN_J2"
+      },
+      {
+        "ref": "R4",
+        "device": "0402WGF5101TCE",
+        "kind": "resistor",
+        "modelId": "generic-resistor",
+        "confidence": "value",
+        "parsed": "5.1 kΩ ±1% 0402",
+        "block": "CONN_J2"
+      },
+      {
+        "ref": "R5",
+        "device": "0402WGF1002TCE",
+        "kind": "resistor",
+        "modelId": "generic-resistor",
+        "confidence": "value",
+        "parsed": "10 kΩ ±1% 0402",
+        "block": "KEYS"
+      },
+      {
+        "ref": "R6",
+        "device": "0402WGF1002TCE",
+        "kind": "resistor",
+        "modelId": "generic-resistor",
+        "confidence": "value",
+        "parsed": "10 kΩ ±1% 0402",
+        "block": "KEYS"
+      },
+      {
+        "ref": "R7",
+        "device": "0402WGF1001TCE",
+        "kind": "resistor",
+        "modelId": "generic-resistor",
+        "confidence": "value",
+        "parsed": "1 kΩ ±1% 0402",
+        "block": "LED"
+      },
+      {
+        "ref": "R8",
+        "device": "0402WGJ0472TCE",
+        "kind": "resistor",
+        "modelId": "generic-resistor",
+        "confidence": "value",
+        "parsed": "4.7 kΩ ±5% 0402",
+        "block": "AUTO_DOWNLOAD"
+      },
+      {
+        "ref": "R9",
+        "device": "0402WGJ0472TCE",
+        "kind": "resistor",
+        "modelId": "generic-resistor",
+        "confidence": "value",
+        "parsed": "4.7 kΩ ±5% 0402",
+        "block": "AUTO_DOWNLOAD"
+      },
+      {
+        "ref": "SW1",
+        "device": "TS-1088-AR02016",
+        "kind": "switch",
+        "modelId": "ts-1088",
+        "confidence": "datasheet",
+        "block": "KEYS"
+      },
+      {
+        "ref": "SW2",
+        "device": "TS-1088-AR02016",
+        "kind": "switch",
+        "modelId": "ts-1088",
+        "confidence": "datasheet",
+        "block": "KEYS"
+      },
+      {
+        "ref": "U1",
+        "device": "SY8089A1AAC",
+        "kind": "buck",
+        "modelId": "sy8089a",
+        "confidence": "datasheet",
+        "block": "BUCK_3V3"
+      },
+      {
+        "ref": "U2",
+        "device": "CH340C",
+        "kind": "load",
+        "modelId": "ch340c",
+        "confidence": "approx",
+        "block": "USB_UART"
+      },
+      {
+        "ref": "U3",
+        "device": "ESP32-S3-WROOM-1",
+        "kind": "load",
+        "modelId": "esp32-s3-wroom-1",
+        "confidence": "datasheet",
+        "block": "RF_MODULE"
+      }
+    ],
+    "glossary": [
+      {
+        "label": "余量 Margin",
+        "value": "(额定 − 应力)/额定 × 100 %；下限类检查为 (工作值 − 下限)/工作值"
+      },
+      {
+        "label": "IR 压降",
+        "value": "直流电流在走线/过孔/平面电阻上的电压降"
+      },
+      {
+        "label": "Ipk / Irms",
+        "value": "开关电源电感电流峰值 / 有效值"
+      },
+      {
+        "label": "Isat",
+        "value": "电感饱和电流：电感量下降到规定比例时的电流"
+      },
+      {
+        "label": "VRWM",
+        "value": "TVS/ESD 反向工作电压（不导通的最高电压）"
+      },
+      {
+        "label": "VRRM",
+        "value": "二极管最大重复反向电压"
+      },
+      {
+        "label": "θJA",
+        "value": "结到环境热阻（°C/W）"
+      },
+      {
+        "label": "DC 偏压",
+        "value": "II 类 MLCC 在直流电压下有效容量下降的现象"
+      },
+      {
+        "label": "爬电距离 / 电气间隙",
+        "value": "沿绝缘表面 / 空气中两导体的最短距离"
+      },
+      {
+        "label": "TDR",
+        "value": "时域反射计：测量传输线阻抗"
+      },
+      {
+        "label": "SELV",
+        "value": "安全特低电压"
+      },
+      {
+        "label": "DFM",
+        "value": "可制造性设计"
+      },
+      {
+        "label": "EP",
+        "value": "器件底部裸露散热/接地焊盘"
+      }
+    ]
+  },
+  "data": {
+    "analog": "data/analog.json",
+    "board": "data/board.json",
+    "check": "data/check.txt",
+    "drc": "data/drc.json",
+    "feedback": "data/feedback.json",
+    "intent": "data/intent.json",
+    "models": "data/power-models.json",
+    "net-diff": "data/net-diff.json",
+    "plan": "data/plan.json",
+    "post": "data/post.json",
+    "reload-board": "data/board.reload.json",
+    "rules-check": "data/rules-check.json",
+    "sim": "data/sim.json"
+  },
+  "package": "pcbpilot-report-ESP32-S3-mini-v3.zip"
+}

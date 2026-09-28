@@ -1,0 +1,201 @@
+PCB check (DFM): 240 track(s), 69 via(s), 144 pad(s) — 110 issue(s)
+  LIMIT copper-to-edge (intent, routed edge): outer ≥ 30.0 mil, inner ≥ 30.0 mil (fab floor 8.0 mil, live Board Outline rule 30.0 mil)
+  LIMIT copper-to-edge layer 1 (outer): min 34.10 mil (pour GND), required 30.0 mil
+  LIMIT copper-to-edge layer 15 (inner): min 30.00 mil (plane ), required 30.0 mil
+  LIMIT copper-to-edge layer 16 (inner): min 35.02 mil (pour +3V3), required 30.0 mil
+  LIMIT copper-to-edge layer 2 (outer): min 34.10 mil (pour GND), required 30.0 mil
+  LIMIT poured copper 5a03a7b691121882 fill 802686d1ba3abd92 (layer 16): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper 5a03a7b691121882 fill 2a211427f0fad335 (layer 16): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper 5a03a7b691121882 fill e20d306f8a0739e4 (layer 16): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper 5a03a7b691121882 fill f1bdcb9415692086 (layer 16): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper 7dc22cba1cab9ac8 fill 826f49d5a2d7a47f (layer 2): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper 7dc22cba1cab9ac8 fill d085d839a707fee7 (layer 2): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper 7dc22cba1cab9ac8 fill 3298c0a93d262f6e (layer 2): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 968fd4edd1615180 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill ff9cc159a853265f (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill a44cf31b7212544d (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 3ae785fe0d5ab1e4 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 515a0d2795d4f0f7 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 0e1727773f406f30 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill fd7a0bfd85eb1c3a (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill a6825745b5ff6fc8 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 6cab81e8f27ee907 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 5924d602a6ad44ca (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 3aeb1ea361757b69 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill bfb0c4eea7651a70 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 377af2b3a1a9a163 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 5734382f82c4390d (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill e74254bc5d1c46c2 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill a1e5e98abbe807f8 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 5dcdd538da5d3846 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 4a5f6f228f0196d5 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 8858d69377790654 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill d601e08a3f674b43 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 61a6e422e6fed353 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 0b35ad76045b4d94 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill b0255c4775bae70d (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 038982fe96beb54d (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill c57238c029669591 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill a429831d53068111 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill f6ec5fb903a0e087 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill f4d61578d8f04a2a (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 80091998f89b8d06 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 3f261d814ba29f30 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill ee71c291e45dcd4e (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill c997975c36c57fea (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 12a615b4fc9e8f21 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 01a64e124c38ad1b (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill da3a67530dd28d90 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 8c01c4b4f697e2b7 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill c8a4772bb23304f2 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 109ff2c18cb73f63 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill a80cda4fdddd19ca (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 63f8589db8bc60dd (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 74e2881cebbf0d34 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 6ceb5cf23db85163 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 57a4dde3421875e0 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill a289e06f1c4d94eb (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 4b31b84cf0b0a406 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 2b4d4f5196814705 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 51beaa3648f83f41 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill ea602b9f70965c13 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 6128ad0e0630c920 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 104887bb9ebc098a (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill c1c2299e301e799e (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 73595ab04ce48f70 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 7e62c652f84cdb6a (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 88f3480e232762c9 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill df7b683d09431d55 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 75d6b9a8a368203b (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 78ad7aa04531ae1d (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill f8465130c6bb5931 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 84f4bf658bb40404 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill b7db17da7983d77d (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 9d49b3ac516b6fba (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 5892bb29ef583e2b (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill fc80b5d6fade5fff (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 49703a7c64bb6112 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 09fe865f3dfecefd (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 76a9d09fe77e22fe (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill e8b887a77e4bf5b4 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 3921bbaedec238b8 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 6aaa6a5f387aa922 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill d469028038a95b44 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 3d39c1a7cf4f0100 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 184d185b0c80b20c (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT poured copper ba2ed097a369e68a fill 0fb8b303f25103f1 (layer 1): geometry unsupported/unreadable — NOT measured
+  LIMIT 4 metal mounting hole(s) measured (copper to the drilled wall ≥ the layer edge distance; hazardous copper to the screw-head keep-out ring ≥ its domain distance)
+  LIMIT isolation: the intent declares no insulation pair — nothing to check
+  LIMIT 9 pour outline(s) checked as drawn (the flooded copper stays inside them) — re-check after pcb pour rebuild with native DRC
+  LIMIT via-current: 37 transition(s) rated (Σ via ampacity vs current, margin ≥ 20 %); 15 via group(s) without a current to pass (plane stitching, zero-current pins) not rated
+  ERROR=0 WARN=97  |  dangling=0 acute=0 nonOrtho=93 overPad=0 clearance=0 silkFlipped=0 overlapVia=0 singleLayerVia=0 widthMismatch=11 dupSegment=0 coupling=2 antennaKeepout=0 netlessPour=0 viaCrossesPlane=1 floatingIsland=0 powerNotPoured=0 netlessViaInPad=0 widthUnderSpec=1 silkOverPad=0 silkOverlap=0 decapTooFar=1 viaInPad=0 copperToEdge=0 fiducialMissing=1 zoneViolation=0 internalOnEdge=0 plugClearance=0 matingBlocked=0
+  WARN  non-orthogonal    trace runs at 137.7° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (398, 804)  [+3V3]
+  WARN  non-orthogonal    trace runs at 145.5° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1151, 585)  [+3V3]
+  WARN  non-orthogonal    trace runs at 96.3° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (505, 1452)  [+3V3]
+  WARN  non-orthogonal    trace runs at 143.3° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (415, 410)  [+3V3]
+  WARN  non-orthogonal    trace runs at 31.6° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (668, 696)  [+3V3]
+  WARN  non-orthogonal    trace runs at 37.8° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1330, 862)  [+3V3]
+  WARN  non-orthogonal    trace runs at 65.9° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1204, 608)  [+3V3]
+  WARN  non-orthogonal    trace runs at 121.8° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1356, 345)  [+3V3]
+  WARN  non-orthogonal    trace runs at 148.7° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (534, 1478)  [+3V3]
+  WARN  non-orthogonal    trace runs at 43.3° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (452, 760)  [+3V3]
+  WARN  non-orthogonal    trace runs at 91.6° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (526, 745)  [+3V3]
+  WARN  non-orthogonal    trace runs at 129.1° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (379, 1474)  [+3V3]
+  WARN  non-orthogonal    trace runs at 94.1° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (433, 739)  [+3V3]
+  WARN  non-orthogonal    trace runs at 35.0° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (406, 419)  [+3V3]
+  WARN  non-orthogonal    trace runs at 105.4° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (856, 271)  [CC1]
+  WARN  non-orthogonal    trace runs at 120.9° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (818, 343)  [CC1]
+  WARN  non-orthogonal    trace runs at 32.9° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1039, 346)  [CC2]
+  WARN  non-orthogonal    trace runs at 103.8° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (974, 271)  [CC2]
+  WARN  non-orthogonal    trace runs at 21.3° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1307, 707)  [DTR]
+  WARN  non-orthogonal    trace runs at 113.7° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1381, 806)  [DTR]
+  WARN  non-orthogonal    trace runs at 66.1° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1346, 590)  [DTR]
+  WARN  non-orthogonal    trace runs at 151.5° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (768, 732)  [EN]
+  WARN  non-orthogonal    trace runs at 123.7° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (681, 735)  [EN]
+  WARN  non-orthogonal    trace runs at 144.7° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (678, 738)  [EN]
+  WARN  non-orthogonal    trace runs at 133.5° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (563, 1409)  [EN]
+  WARN  non-orthogonal    trace runs at 19.5° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (492, 1407)  [EN]
+  WARN  non-orthogonal    trace runs at 172.0° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (773, 731)  [EN]
+  WARN  non-orthogonal    trace runs at 47.3° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1448, 703)  [EN]
+  WARN  non-orthogonal    trace runs at 172.1° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (315, 417)  [FB]
+  WARN  non-orthogonal    trace runs at 11.2° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (368, 417)  [FB]
+  WARN  non-orthogonal    trace runs at 50.9° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (314, 419)  [FB]
+  WARN  non-orthogonal    trace runs at 42.1° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (452, 804)  [GND]
+  WARN  non-orthogonal    trace runs at 35.0° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1151, 633)  [GND]
+  WARN  non-orthogonal    trace runs at 142.8° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (460, 1473)  [GND]
+  WARN  non-orthogonal    trace runs at 91.5° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (490, 1362)  [GND]
+  WARN  non-orthogonal    trace runs at 139.3° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (268, 427)  [GND]
+  WARN  non-orthogonal    trace runs at 86.2° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (782, 333)  [GND]
+  WARN  non-orthogonal    trace runs at 49.4° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1047, 390)  [GND]
+  WARN  non-orthogonal    trace runs at 176.1° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (766, 269)  [GND]
+  WARN  non-orthogonal    trace runs at 176.6° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1044, 268)  [GND]
+  WARN  non-orthogonal    trace runs at 131.9° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1183, 375)  [GND]
+  WARN  non-orthogonal    trace runs at 149.5° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (540, 1523)  [GND]
+  WARN  non-orthogonal    trace runs at 178.7° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1271, 1511)  [GND]
+  WARN  non-orthogonal    trace runs at 143.5° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (917, 1141)  [GND]
+  WARN  non-orthogonal    trace runs at 130.6° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (859, 1138)  [GND]
+  WARN  non-orthogonal    trace runs at 102.3° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (788, 1277)  [GND]
+  WARN  non-orthogonal    trace runs at 114.4° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (839, 1277)  [GND]
+  WARN  non-orthogonal    trace runs at 43.6° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (888, 1194)  [GND]
+  WARN  non-orthogonal    trace runs at 139.3° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (777, 1220)  [GND]
+  WARN  non-orthogonal    trace runs at 133.4° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (833, 1221)  [GND]
+  WARN  non-orthogonal    trace runs at 28.6° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1460, 1288)  [GND]
+  WARN  non-orthogonal    trace runs at 32.0° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1026, 544)  [GND]
+  WARN  non-orthogonal    trace runs at 178.5° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (795, 558)  [GND]
+  WARN  non-orthogonal    trace runs at 113.6° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (697, 87)  [GND]
+  WARN  non-orthogonal    trace runs at 69.0° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1113, 87)  [GND]
+  WARN  non-orthogonal    trace runs at 64.2° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (696, 211)  [GND]
+  WARN  non-orthogonal    trace runs at 137.4° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1317, 821)  [IO0]
+  WARN  non-orthogonal    trace runs at 146.2° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1252, 860)  [IO0]
+  WARN  non-orthogonal    trace runs at 52.0° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1461, 847)  [IO0]
+  WARN  non-orthogonal    trace runs at 38.8° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1052, 732)  [IO0]
+  WARN  non-orthogonal    trace runs at 170.2° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1477, 1382)  [LED_A]
+  WARN  non-orthogonal    trace runs at 56.4° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1406, 1380)  [LED_A]
+  WARN  non-orthogonal    trace runs at 15.3° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1403, 1412)  [LED_CTRL]
+  WARN  non-orthogonal    trace runs at 128.2° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (441, 562)  [LX]
+  WARN  non-orthogonal    trace runs at 21.9° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1378, 881)  [Q1_B]
+  WARN  non-orthogonal    trace runs at 32.9° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1252, 738)  [Q1_B]
+  WARN  non-orthogonal    trace runs at 166.1° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1307, 740)  [Q2_B]
+  WARN  non-orthogonal    trace runs at 30.4° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1368, 741)  [Q2_B]
+  WARN  non-orthogonal    trace runs at 78.4° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1295, 590)  [RTS]
+  WARN  non-orthogonal    trace runs at 75.9° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1370, 665)  [RTS]
+  WARN  non-orthogonal    trace runs at 104.8° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1251, 701)  [RTS]
+  WARN  non-orthogonal    trace runs at 152.2° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1252, 1310)  [U0RXD]
+  WARN  non-orthogonal    trace runs at 142.3° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1247, 361)  [U0RXD]
+  WARN  non-orthogonal    trace runs at 164.8° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1252, 1360)  [U0TXD]
+  WARN  non-orthogonal    trace runs at 150.6° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1297, 361)  [U0TXD]
+  WARN  non-orthogonal    trace runs at 137.0° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (875, 269)  [USB_DM]
+  WARN  non-orthogonal    trace runs at 105.7° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (877, 266)  [USB_DM]
+  WARN  non-orthogonal    trace runs at 57.6° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (914, 266)  [USB_DM]
+  WARN  non-orthogonal    trace runs at 13.8° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (977, 423)  [USB_DM]
+  WARN  non-orthogonal    trace runs at 73.6° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1446, 364)  [USB_DM]
+  WARN  non-orthogonal    trace runs at 117.4° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (886, 346)  [USB_DP]
+  WARN  non-orthogonal    trace runs at 81.1° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (896, 271)  [USB_DP]
+  WARN  non-orthogonal    trace runs at 92.0° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (935, 271)  [USB_DP]
+  WARN  non-orthogonal    trace runs at 123.2° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (937, 266)  [USB_DP]
+  WARN  non-orthogonal    trace runs at 91.2° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (1395, 361)  [USB_DP]
+  WARN  non-orthogonal    trace runs at 23.9° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (993, 393)  [USB_VBUS]
+  WARN  non-orthogonal    trace runs at 83.8° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (811, 290)  [USB_VBUS]
+  WARN  non-orthogonal    trace runs at 107.8° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (809, 266)  [USB_VBUS]
+  WARN  non-orthogonal    trace runs at 157.3° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (182, 463)  [USB_VBUS]
+  WARN  non-orthogonal    trace runs at 40.1° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (491, 449)  [VSYS_5V]
+  WARN  non-orthogonal    trace runs at 178.9° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (153, 637)  [VSYS_5V]
+  WARN  non-orthogonal    trace runs at 82.3° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (180, 639)  [VSYS_5V]
+  WARN  non-orthogonal    trace runs at 144.2° — not on the 0/45/90° grid (free-angle routing) [规范 §4.1 推荐45°折线或圆弧 — pcb-design-rules.md] @ (137, 1326)  [VSYS_5V]
+  INFO  width-mismatch    2-pin part C7: entering track widths differ (10.0 vs 6.0 mil) [规范 §1.2 推荐线宽 — pcb-design-rules.md]  [GND]
+  INFO  width-mismatch    2-pin part L1: entering track widths differ (10.0 vs 20.0 mil) [规范 §1.2 推荐线宽 — pcb-design-rules.md]  [+3V3]
+  INFO  width-mismatch    2-pin part LED1: entering track widths differ (10.0 vs 6.0 mil) [规范 §1.2 推荐线宽 — pcb-design-rules.md]  [GND]
+  INFO  width-mismatch    2-pin part R1: entering track widths differ (6.0 vs 10.0 mil) [规范 §1.2 推荐线宽 — pcb-design-rules.md]  [FB]
+  INFO  width-mismatch    2-pin part R2: entering track widths differ (10.0 vs 6.0 mil) [规范 §1.2 推荐线宽 — pcb-design-rules.md]  [GND]
+  INFO  width-mismatch    2-pin part R3: entering track widths differ (10.0 vs 6.0 mil) [规范 §1.2 推荐线宽 — pcb-design-rules.md]  [GND]
+  INFO  width-mismatch    2-pin part R4: entering track widths differ (10.0 vs 6.0 mil) [规范 §1.2 推荐线宽 — pcb-design-rules.md]  [GND]
+  INFO  width-mismatch    2-pin part R5: entering track widths differ (10.0 vs 6.0 mil) [规范 §1.2 推荐线宽 — pcb-design-rules.md]  [+3V3]
+  INFO  width-mismatch    2-pin part R6: entering track widths differ (10.0 vs 6.0 mil) [规范 §1.2 推荐线宽 — pcb-design-rules.md]  [+3V3]
+  INFO  width-mismatch    2-pin part SW1: entering track widths differ (6.0 vs 10.0 mil) [规范 §1.2 推荐线宽 — pcb-design-rules.md]  [IO0]
+  INFO  width-mismatch    2-pin part SW2: entering track widths differ (6.0 vs 10.0 mil) [规范 §1.2 推荐线宽 — pcb-design-rules.md]  [EN]
+  WARN  parallel-coupling parallel traces 19.2 mil apart over 26 mil (< 32.4 mil = 3×W) — crosstalk/3W risk [规范 §4.2 减少串扰 — pcb-design-rules.md]  [[CC1 USB_DM]]
+  WARN  parallel-coupling parallel traces 28.9 mil apart over 26 mil (< 30.0 mil = 3×W) — crosstalk/3W risk [规范 §4.2 减少串扰 — pcb-design-rules.md]  [[CC2 USB_VBUS]]
+  WARN  decap-too-far     decoupling cap C5 sits 166mil (4.2mm) from the nearest +3V3 pin U3.2 — a decap must hug its IC (≤2mm) [规范 §3.1 去耦电容紧贴IC — pcb-design-rules.md] @ (395, 1454)  [+3V3]
+  INFO  fiducial-missing  board has 142 top-layer pads (SMT-scale) but only 0 fiducial(s) (FID*/MARK*) — SMT wants ≥3 non-collinear 1mm marks (JLC panel rails add their own; local marks needed for fine-pitch) [规范 §9 Mark点设计 — pcb-design-rules.md]  []
+  INFO  via-crosses-plane inner PLANE IN1-GND has no net-bound pour visible — plane net unknown; NOTE (#110): after `doc reload` PLANE-layer pours are invisible to pcb.pour.list, so this may be a false positive — treat `pcb drc` Connection=0 as the arbiter before adding any pour; if the plane is genuinely empty, pour the net while the layer is still SIGNAL, then flip to PLANE and pour-rebuild (`pcb power-planes` does this)  []
+  WARN  width-under-spec  power net +3V3: 2 track(s) below the power-branch spec width 9.84 mil (thinnest 5 mil) — widen for current capacity (route-short sizes by role; pour it instead, or --width-power to override) [规范 §1.2 推荐线宽 — pcb-design-rules.md] @ (433, 739)  [+3V3]

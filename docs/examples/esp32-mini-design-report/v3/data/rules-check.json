@@ -1,0 +1,127 @@
+{
+  "mode": "check",
+  "intent": "artifacts/v06-live/intent.json",
+  "intentSha256": "fbcd333e3a5d215e7733c3e4f7a0601dbd0dbc537c734d5f70efca5083bf19a4",
+  "plan": {
+    "classes": [
+      {
+        "name": "GND",
+        "action": "ok",
+        "nets": [
+          "GND"
+        ],
+        "trackRule": "PP_GND",
+        "spacingRule": "PP_GND",
+        "viaRule": "PP_GND"
+      },
+      {
+        "name": "POWER",
+        "action": "ok",
+        "nets": [
+          "+3V3",
+          "+5V_TERM",
+          "USB_VBUS",
+          "VSYS_5V"
+        ],
+        "trackRule": "PP_POWER",
+        "spacingRule": "PP_POWER",
+        "viaRule": "PP_POWER"
+      },
+      {
+        "name": "SWITCH",
+        "action": "ok",
+        "nets": [
+          "LX"
+        ],
+        "trackRule": "PP_SWITCH",
+        "spacingRule": "PP_SWITCH",
+        "viaRule": "PP_SWITCH"
+      },
+      {
+        "name": "HS_DIFF",
+        "action": "ok",
+        "nets": [
+          "USB_DM",
+          "USB_DP"
+        ],
+        "trackRule": "PP_HS_DIFF",
+        "spacingRule": "PP_HS_DIFF",
+        "viaRule": "PP_HS_DIFF"
+      },
+      {
+        "name": "SIGNAL",
+        "action": "ok",
+        "nets": [
+          "CC1",
+          "CC2",
+          "DTR",
+          "EN",
+          "FB",
+          "IO0",
+          "LED_A",
+          "LED_CTRL",
+          "Q1_B",
+          "Q2_B",
+          "RTS",
+          "U0RXD",
+          "U0TXD"
+        ],
+        "trackRule": "PP_SIGNAL",
+        "spacingRule": "PP_SIGNAL",
+        "viaRule": "PP_SIGNAL"
+      }
+    ],
+    "ruleChanges": [],
+    "bindings": [],
+    "diffPairs": [
+      {
+        "name": "USB_D",
+        "positiveNet": "USB_DP",
+        "negativeNet": "USB_DM",
+        "action": "ok",
+        "impedanceOhm": 90,
+        "widthMil": 10.8,
+        "gapMil": 6,
+        "interface": "USB",
+        "lengthTolMil": 100
+      }
+    ],
+    "unsupported": [],
+    "advisories": [
+      {
+        "item": "board edge",
+        "detail": "Safe Spacing Board Outline × copper cells ≥ 30.0 mil in the default rule copperThickness1oz and every PP_ rule (routed edge; the matrix is not per layer class, so the inner/plane value 30.0 mil covers outer copper 20.0 mil too). Pours and negative planes (内电层) are pulled back by exactly this rule."
+      },
+      {
+        "item": "diffPair USB_D",
+        "detail": "90 Ω target: EasyEDA stores width/gap, not impedance; width/gap must come from the stackup calculation in intent"
+      }
+    ],
+    "conflicts": [],
+    "pendingWrites": 0,
+    "edge": {
+      "edgeKind": "routed",
+      "source": "intent",
+      "outerMil": 20,
+      "innerMil": 30,
+      "ruleMil": 30,
+      "cells": [
+        "Track",
+        "SMD Pad",
+        "TH Pad",
+        "SMD Test Point",
+        "TH Test Point",
+        "Via",
+        "Fill Region/Teardrop",
+        "Copper/Plane Zone"
+      ],
+      "why": [
+        "routed edge: outer copper ≥ 20 mil (0.5 mm), inner planes ≥ 30 mil (0.76 mm) — engineering default above the JLC 0.2 mm floor (docs/pcb-design-rules.md §5.4)",
+        "no hazardous, mains or patient domain: SELV copper uses the layer defaults"
+      ]
+    }
+  },
+  "writes": [],
+  "verified": true,
+  "status": "in-sync"
+}

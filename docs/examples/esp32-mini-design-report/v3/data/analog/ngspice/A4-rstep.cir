@@ -1,0 +1,17 @@
+* pcbpilot sim analog — block A4 reset-rc (U3.EN) mode rstep
+* generated from schematic connectivity; rails from pcbpilot sim power (typical scenario)
+.include "pcbpilot-generic.lib"
+V_n__3v3 n__3v3 0 PWL(0 0 0.001 3.318)
+C_c7 n_en 0 1e-06
+R_r5 n_en n__3v3 10000
+.options noacct rshunt=1e12
+.control
+set filetype=ascii
+set wr_singlescale
+set wr_vecnames
+option numdgt=10
+tran 4.05e-06 0.081 0 4.05e-06
+wrdata A4-rstep-rstep.txt v(n_en) v(n__3v3)
+quit
+.endc
+.end

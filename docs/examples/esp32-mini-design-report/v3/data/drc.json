@@ -1,0 +1,20 @@
+{
+  "id": "req_710",
+  "type": "response",
+  "version": "v1",
+  "createdAt": "2026-09-28T14:30:19.678591Z",
+  "ok": true,
+  "result": {
+    "passed": true,
+    "violations": []
+  },
+  "context": {
+    "projectUuid": "1cdaf015a8ae4a68ba26327e6b6c31f0",
+    "projectName": "ceshi",
+    "documentUuid": "19387e123849e85a",
+    "documentType": "pcb",
+    "tabId": "19387e123849e85a@1cdaf015a8ae4a68ba26327e6b6c31f0"
+  },
+  "seq": 2036,
+  "seqAbandoned": 0
+}

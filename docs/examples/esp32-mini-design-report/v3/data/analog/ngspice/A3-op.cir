@@ -1,0 +1,18 @@
+* pcbpilot sim analog — block A3 regulator-feedback (U1) mode op
+* generated from schematic connectivity; rails from pcbpilot sim power (typical scenario)
+.include "pcbpilot-generic.lib"
+V_VREF vref_reg 0 DC 0.6
+E_REG n__3v3 0 vref_reg n_fb 1e5
+R_r1 n__3v3 n_fb 45300
+R_r2 n_fb 0 10000
+.options noacct rshunt=1e12
+.control
+set filetype=ascii
+set wr_singlescale
+set wr_vecnames
+option numdgt=10
+op
+print v(n__3v3)
+quit
+.endc
+.end

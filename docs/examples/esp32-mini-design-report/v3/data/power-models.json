@@ -1,0 +1,378 @@
+{
+  "schemaVersion": 1,
+  "_doc": "Part power models for `pcbpilot sim power` (DC operating point + averaged power tree). Data, not code: a model matches a part by LCSC C-number, then exact MPN, then nameRegex (tested against MPN, Value and device name); files passed with --models are consulted first and override this one. Every numeric field cites its origin in `source`; `confidence` is datasheet (numbers read from the datasheet/LCSC attributes), approx (typical figure or curve reading) or assumed (placeholder, verify). Units: A, V, Ω, Hz. Pin lists are pin NAMES or numbers (\"#4\" or \"4\"). Kinds: load|ic-small (supplyPins/returnPins, typA/peakA or rails[] {pins,typA,peakA,returnPins?} — a rail's own returnPins for isolators whose sides return to different grounds), ldo|buck (pins.in/out/gnd/fb/en, vout or vref, eta, fswHz, iqA, dropoutV, vinMinV, maxA), diode|led (pins.anode/cathode, vfV@ifA + n, or vfPoints [[I,V],...], rsOhm), bjt (polarity, isA, beta, betaR), connector-source (supplyPins/pins.power, returnPins, voltageV or the net-name voltage, rsOhm, sourceName = scenario key '<name>-only'; outputs[] {name,pins,returnPins,voltageV,rsOhm} for a multi-output source — transformer windings at their regulated operating point, isolated module outputs — plus optional rails[] as the module's input load), bridge (pins.ac/plus/minus, vfV@ifA or vfPoints per element), esd (pins.line/supplyPins, returnPins, leakTypA/leakPeakA), switch (momentary, ronOhm), inductor|ferrite|fuse (dcrOhm), connector (passive), open, ignore. Optional \"ratings\" (vinMaxV, vccMinV/vccMaxV, vrrmV, vrwmV, isatA, iratedA, contactA, thetaJaCW, thetaJbCW, thetaJcCW, tjMaxC, sourceVMinV/sourceVMaxV, sourceBudgetA, vrefAccuracyPct + their own source) are limits read by `pcbpilot report design` (component feasibility) and `pcbpilot sim post-layout` (Tj = board temperature under the part + P·θJB, θJC when only that is rated); `sim power` ignores them. Never fill a rating without a datasheet citation — a missing rating is reported as \"needs datasheet\".",
+  "defaults": {
+    "unknownIcLoadAPerSupplyPin": 0.05,
+    "loadKneeV": 0.8,
+    "gpioRoutOhm": 40,
+    "gpioMaxA": 0.02,
+    "switchRonOhm": 0.05,
+    "inductorDcrOhm": 0.05,
+    "ferriteOhm": 0.1,
+    "fuseOhm": 0.05,
+    "zeroOhm": 0.001,
+    "sourceRsOhm": 0.05,
+    "sourceVoltageV": 5.0,
+    "diodeVfV": 0.7,
+    "diodeIfA": 0.01,
+    "schottkyVfV": 0.45,
+    "schottkyIfA": 1.0,
+    "ledIfA": 0.005,
+    "ledN": 2.0,
+    "ledVf": {"red": 1.9, "yellow": 2.0, "orange": 2.0, "green": 2.1, "green-ingan": 3.0, "blue": 3.0, "white": 3.0},
+    "buckEta": 0.85,
+    "buckFswHz": 1000000,
+    "buckVref": 0.6,
+    "ldoDropoutV": 1.1,
+    "enThreshV": 1.0,
+    "esdLeakA": 1e-6,
+    "bjtBeta": 100,
+    "sources": {
+      "unknownIcLoadAPerSupplyPin": "assumed conservative placeholder; an unknown IC is never silently zero",
+      "ledVf": "typical indicator LED forward voltage at the 2–5 mA knee (AlInGaP red/yellow/orange ≈1.9–2.0 V, InGaN green/blue/white ≈3.0 V)",
+      "gpioRoutOhm": "typical CMOS push-pull output resistance at 3.3 V (≈40 Ω); assumed",
+      "loadKneeV": "numerical: loads become resistive below this voltage so unpowered rails draw nothing"
+    }
+  },
+  "models": [
+    {
+      "id": "esp32-s3-wroom-1",
+      "kind": "load",
+      "match": {"mpn": ["ESP32-S3-WROOM-1", "ESP32-S3-WROOM-1-N4", "ESP32-S3-WROOM-1-N8", "ESP32-S3-WROOM-1-N16", "ESP32-S3-WROOM-1-N8R8", "ESP32-S3-WROOM-1-N16R8", "ESP32-S3-WROOM-1U-N8"], "lcsc": ["C9900163599", "C2913202", "C2913204", "C2980297"], "nameRegex": "(?i)^ESP32-S3-WROOM-1"},
+      "supplyPins": ["3V3"],
+      "returnPins": ["GND", "EPAD", "EP"],
+      "typA": 0.1,
+      "peakA": 0.5,
+      "gpioPins": "^(IO|GPIO)[0-9]+$",
+      "gpioRoutOhm": 40,
+      "gpioMaxA": 0.04,
+      "source": "Espressif ESP32-S3-WROOM-1 datasheet v1.x: RF current table — Rx 802.11b/g/n ≈ 88–97 mA (typ 0.1 A used as Wi-Fi-connected average); Tx 802.11b 1 Mbps @ 21 dBm ≈ 355 mA; 'Power Supply' — the external supply should provide ≥ 0.5 A (peak 0.5 A used). GPIO max source 40 mA (ESP32-S3 series datasheet, DC characteristics).",
+      "confidence": "datasheet",
+      "ratings": {"vccMinV": 3.0, "vccMaxV": 3.6, "source": "Espressif ESP32-S3-WROOM-1 datasheet, recommended operating conditions: VDD33 3.0–3.6 V"}
+    },
+    {
+      "id": "ch340c",
+      "kind": "ic-small",
+      "match": {"mpn": ["CH340C", "CH340G", "CH340N", "CH340E", "CH340K"], "lcsc": ["C84681", "C14267", "C2977777", "C99652"]},
+      "supplyPins": ["VCC"],
+      "returnPins": ["GND"],
+      "typA": 0.012,
+      "peakA": 0.02,
+      "source": "WCH CH340 datasheet DC characteristics: operating supply current ≈ 12 mA typ while USB active; 20 mA used as peak. At 3.3 V V3 is tied to VCC (internal regulator bypassed), so only VCC is the supply pin.",
+      "confidence": "approx"
+    },
+    {
+      "id": "sy8089a",
+      "kind": "buck",
+      "match": {"mpn": ["SY8089A1AAC", "SY8089AAAC", "SY8089"], "lcsc": ["C479074", "C78988"]},
+      "pins": {"in": ["IN"], "out": ["LX"], "gnd": ["GND"], "fb": ["FB"], "en": ["EN"]},
+      "vref": 0.6,
+      "fswHz": 1500000,
+      "eta": 0.9,
+      "iqA": 5e-5,
+      "vinMinV": 2.5,
+      "enThreshV": 1.5,
+      "maxA": 2.0,
+      "source": "Silergy SY8089A datasheet: VFB = 0.6 V, fsw = 1.5 MHz, IOUT 2 A, VIN 2.5–5.5 V, EN high ≥ 1.5 V; LCSC C479074 attributes: Quiescent Current 50 µA, Frequency 1.5 MHz. η ≈ 0.9 at 5 V→3.3 V / 0.3–1 A read from the efficiency curve (approx).",
+      "confidence": "datasheet",
+      "ratings": {"vinMaxV": 5.5, "source": "Silergy SY8089A datasheet: input voltage range 2.5–5.5 V"}
+    },
+    {
+      "id": "ams1117-3.3",
+      "kind": "ldo",
+      "match": {"mpn": ["AMS1117-3.3", "AMS1117-3.3V", "LM1117-3.3", "AMS1117-3V3"], "lcsc": ["C6186", "C347222"], "nameRegex": "(?i)^(AMS|LM)1117.?3\\.?3"},
+      "pins": {"in": ["VIN", "IN", "INPUT"], "out": ["VOUT", "OUT", "OUTPUT", "TAB"], "gnd": ["GND", "GND/ADJ", "ADJ/GND", "ADJ"]},
+      "vout": 3.3,
+      "dropoutV": 1.1,
+      "iqA": 0.005,
+      "vinMinV": 1.6,
+      "maxA": 1.0,
+      "source": "Advanced Monolithic Systems AMS1117 datasheet: dropout 1.1 V typ @ 1 A (1.3 V max), quiescent current 5 mA typ, output current 1 A.",
+      "confidence": "datasheet"
+    },
+    {
+      "id": "ss34",
+      "kind": "diode",
+      "match": {"mpn": ["SS34", "SS34A", "SS34-E3/57T", "SS34FA", "SK34", "SK34A"], "lcsc": ["C8678", "C22452", "C79989"]},
+      "pins": {"anode": ["A"], "cathode": ["K"]},
+      "vfPoints": [[0.1, 0.30], [3.0, 0.45]],
+      "maxA": 3.0,
+      "source": "SS34 (3 A / 40 V Schottky) datasheets: VF 0.45–0.50 V at 3 A, ≈0.30 V at 0.1 A from the typical forward curve; two-point Shockley fit.",
+      "confidence": "approx",
+      "ratings": {"vrrmV": 40, "source": "SS34 datasheets: VRRM 40 V (3 A / 40 V Schottky)"}
+    },
+    {
+      "id": "smaj5.0a",
+      "kind": "esd",
+      "match": {"mpn": ["SMAJ5.0A", "SMAJ5.0A-13-F", "SMAJ5.0A-E3/61"], "lcsc": ["C143135", "C113952"], "nameRegex": "(?i)^SMAJ5\\.0C?A"},
+      "pins": {"line": ["K"]},
+      "returnPins": ["A"],
+      "leakTypA": 5e-6,
+      "leakPeakA": 8e-4,
+      "source": "Littelfuse SMAJ series datasheet: SMAJ5.0A VRWM 5 V, IR ≤ 800 µA at VRWM (max, used for peak); typical leakage at 5 V is a few µA (typ 5 µA assumed). ≈0 A for trace sizing.",
+      "confidence": "datasheet",
+      "ratings": {"vrwmV": 5, "source": "Littelfuse SMAJ5.0A: VRWM 5 V"}
+    },
+    {
+      "id": "usblc6-2sc6",
+      "kind": "esd",
+      "match": {"mpn": ["USBLC6-2SC6", "USBLC6-2P6"], "lcsc": ["C2687116", "C7519", "C2827693"]},
+      "supplyPins": ["VBUS"],
+      "returnPins": ["GND"],
+      "leakTypA": 1e-8,
+      "leakPeakA": 1.5e-7,
+      "source": "ST USBLC6-2 datasheet: IRM ≤ 150 nA at VRM = 5 V (max, used for peak); typ 10 nA assumed.",
+      "confidence": "datasheet",
+      "ratings": {"vrwmV": 5, "source": "ST USBLC6-2 datasheet: VRM (reverse stand-off) 5 V"}
+    },
+    {
+      "id": "mmbt3904",
+      "kind": "bjt",
+      "match": {"mpn": ["MMBT3904", "MMBT3904LT1G", "2N3904", "MMBT3904-7-F"], "lcsc": ["C20526", "C18536"]},
+      "pins": {"b": ["B"], "c": ["C"], "e": ["E"]},
+      "polarity": "npn",
+      "isA": 6.734e-15,
+      "beta": 416.4,
+      "betaR": 0.7371,
+      "maxA": 0.2,
+      "source": "onsemi 2N3904/MMBT3904 SPICE model (IS=6.734f BF=416.4 BR=0.7371); IC max 200 mA.",
+      "confidence": "datasheet"
+    },
+    {
+      "id": "kt-0805y",
+      "kind": "led",
+      "match": {"mpn": ["KT-0805Y"], "lcsc": ["C2296"]},
+      "pins": {"anode": ["+", "A"], "cathode": ["-", "K"]},
+      "color": "yellow",
+      "vfV": 2.0,
+      "ifA": 0.02,
+      "n": 2.0,
+      "maxA": 0.025,
+      "source": "Hubei KENTO KT-0805Y (yellow 0805) datasheet: VF 1.8–2.4 V (typ 2.0 V) at 20 mA, IF max 25 mA; ideality n=2 assumed for the knee.",
+      "confidence": "approx"
+    },
+    {
+      "id": "usb-c-receptacle",
+      "kind": "connector-source",
+      "match": {"mpn": ["USB3.1TYPE-C16P", "TYPE-C-31-M-12", "TYPE-C 16PIN 2MD(073)", "USB-TYPE-C-018"], "lcsc": ["C9900012665", "C165948", "C2765186", "C2927029"], "nameRegex": "(?i)(TYPE-?C|USB-?C)"},
+      "sourceName": "usb",
+      "supplyPins": ["VBUS"],
+      "returnPins": ["GND"],
+      "voltageV": 5.0,
+      "rsOhm": 0.1,
+      "source": "USB 2.0/Type-C default VBUS 5.0 V (4.75–5.25 V). 0.1 Ω lumps cable + contact resistance (assumed). Shell/EP pins are not counted as return paths.",
+      "confidence": "approx",
+      "ratings": {"sourceVMinV": 4.75, "sourceVMaxV": 5.25, "sourceBudgetA": 0.5, "source": "USB 2.0: VBUS 4.75–5.25 V; default (non-negotiated) USB 2.0 port current 500 mA"}
+    },
+    {
+      "id": "usb-micro-b",
+      "kind": "connector-source",
+      "match": {"nameRegex": "(?i)(MICRO.?USB|USB.?MICRO|MICRO-?B|MICROXNJ)"},
+      "sourceName": "usb",
+      "supplyPins": ["VBUS", "VCC"],
+      "returnPins": ["GND"],
+      "voltageV": 5.0,
+      "rsOhm": 0.1,
+      "source": "USB VBUS 5.0 V; 0.1 Ω cable + contact (assumed).",
+      "confidence": "approx",
+      "ratings": {"sourceVMinV": 4.75, "sourceVMaxV": 5.25, "sourceBudgetA": 0.5, "source": "USB 2.0: VBUS 4.75–5.25 V; default USB 2.0 port current 500 mA"}
+    },
+    {
+      "id": "kf301-2p",
+      "kind": "connector-source",
+      "match": {"mpn": ["KF301-5.0-2P", "KF301-2P", "KF128-5.08-2P", "DG301-5.0-02P"], "lcsc": ["C474881", "C8465"], "nameRegex": "(?i)^(KF|DG)[0-9]{3}.*-2P"},
+      "sourceName": "terminal",
+      "rsOhm": 0.02,
+      "source": "2-pin screw terminal used as a supply input: voltage from the net name (e.g. 5V_TERM → 5 V), else the default; 20 mΩ contact + short lead (assumed).",
+      "confidence": "assumed"
+    },
+    {
+      "id": "ts-1088",
+      "kind": "switch",
+      "match": {"mpn": ["TS-1088-AR02016", "TS-1088R-02526"], "lcsc": ["C720477", "C720478"]},
+      "momentary": true,
+      "ronOhm": 0.1,
+      "source": "XKB TS-1088 tactile switch: contact resistance ≤ 100 mΩ; momentary (open in typical, pressed in peak).",
+      "confidence": "datasheet"
+    },
+    {
+      "id": "nlcv32t-2r2m",
+      "kind": "inductor",
+      "match": {"mpn": ["NLCV32T-2R2M-PF", "NLCV32T-2R2M-EFR"], "lcsc": ["C250183"]},
+      "dcrOhm": 0.169,
+      "maxA": 0.77,
+      "source": "LCSC C250183 attributes (TDK NLCV32T-2R2M-PF, 1210 wire-wound 2.2 µH): DC Resistance 169 mΩ, Current Rating 770 mA. Compare the reported switch-node peak (ripple iPeakA) with the rating.",
+      "confidence": "datasheet"
+    },
+    {
+      "id": "mb10s",
+      "kind": "bridge",
+      "match": {"mpn": ["MB10S", "MB6S", "MB8S", "MB10F", "MB6F"]},
+      "pins": {"ac": ["~1", "~2", "~", "AC1", "AC2"], "plus": ["+"], "minus": ["-"]},
+      "vfPoints": [[0.01, 0.6], [0.5, 0.95]],
+      "maxA": 0.5,
+      "source": "MB10S (TO-269AA 0.5 A / 1000 V bridge) datasheets: VF ≤ 1.0 V per element at 0.4–0.5 A; ≈0.6 V at 10 mA from the typical forward curve (two-point fit per element; four elements).",
+      "confidence": "approx"
+    },
+    {
+      "id": "ss310",
+      "kind": "diode",
+      "match": {"mpn": ["SS310", "SS310A", "SK310", "SK310A"], "lcsc": ["C181186"]},
+      "pins": {"anode": ["A"], "cathode": ["K"]},
+      "vfPoints": [[0.1, 0.45], [3.0, 0.85]],
+      "maxA": 3.0,
+      "source": "SS310 (3 A / 100 V Schottky) datasheets: VF max 0.85 V at 3 A; ≈0.45 V at 0.1 A from the typical forward curve.",
+      "confidence": "approx"
+    },
+    {
+      "id": "us1m",
+      "kind": "diode",
+      "match": {"mpn": ["US1M", "US1M-E3/61T", "US1MFA"]},
+      "pins": {"anode": ["A"], "cathode": ["K"]},
+      "vfPoints": [[0.01, 0.8], [1.0, 1.7]],
+      "maxA": 1.0,
+      "source": "US1M (1 A / 1000 V ultrafast) datasheets: VF max 1.7 V at 1 A; ≈0.8 V at 10 mA from the typical curve.",
+      "confidence": "approx"
+    },
+    {
+      "id": "uc3843b",
+      "kind": "load",
+      "match": {"mpn": ["UC3843BD1R2G", "UC3843BDR2G", "UC3843BN", "UC3842BD1R2G", "UC3845BD1R2G", "UC3844BD1R2G"], "nameRegex": "(?i)^UC384[2-5]B"},
+      "supplyPins": ["VCC"],
+      "returnPins": ["GND"],
+      "typA": 0.012,
+      "peakA": 0.017,
+      "source": "onsemi UC3842B/3843B datasheet, total device: power supply current ICC 12 mA typ, 17 mA max (VCC = 15 V); gate-drive current (Qg·fsw) of a small DPAK MOSFET adds < 1 mA.",
+      "confidence": "approx"
+    },
+    {
+      "id": "tl431",
+      "kind": "load",
+      "match": {"mpn": ["TL431AIDBZR", "TL431ACDBZR", "TL431BIDBZR", "TL431"], "nameRegex": "(?i)^(TL|AZ|ATL)431"},
+      "supplyPins": ["K"],
+      "returnPins": ["A"],
+      "typA": 0.0015,
+      "peakA": 0.0015,
+      "source": "TL431 in a flyback/opto feedback loop sinks its regulation current through the opto LED: IKA(min) 1 mA (datasheet), 1–1.5 mA design point; modelled as a constant cathode sink.",
+      "confidence": "assumed"
+    },
+    {
+      "id": "pc817",
+      "kind": "led",
+      "match": {"mpn": ["PC817C", "PC817B", "PC817", "PC817X2NSZ9F", "EL817C"], "nameRegex": "(?i)^(PC|EL|LTV-?)817"},
+      "pins": {"anode": ["A", "1"], "cathode": ["K", "2"]},
+      "vfV": 1.2,
+      "ifA": 0.02,
+      "source": "Sharp PC817 datasheet: input forward voltage VF 1.2 V typ at IF 20 mA (only the LED side is modelled; the phototransistor is open at DC).",
+      "confidence": "approx"
+    },
+    {
+      "id": "sn6505b",
+      "kind": "load",
+      "match": {"mpn": ["SN6505BDBVR", "SN6505ADBVR", "SN6505B", "SN6505A"]},
+      "supplyPins": ["VCC"],
+      "returnPins": ["GND"],
+      "typA": 0.0006,
+      "peakA": 0.0012,
+      "source": "TI SN6505 datasheet: VCC supply current ≈ 0.6 mA (no load); the isolated load power flows through the transformer centre tap and is not modelled (the transformer's secondary model is the isolated source).",
+      "confidence": "approx"
+    },
+    {
+      "id": "iso7741",
+      "kind": "load",
+      "match": {"mpn": ["ISO7741DWR", "ISO7741DWWR", "ISO7741FDWR", "ISO7741DBQR"], "nameRegex": "(?i)^ISO774[0-2]"},
+      "rails": [
+        {"pins": ["VCC1"], "typA": 0.0025, "peakA": 0.0045, "returnPins": ["GND1"]},
+        {"pins": ["VCC2"], "typA": 0.0025, "peakA": 0.0045, "returnPins": ["GND2"]}
+      ],
+      "returnPins": ["GND1"],
+      "source": "TI ISO7741 datasheet supply-current table: ≈ 2.5 mA per side at 1 Mbps (3.3–5 V), ≈ 4.5 mA at 25 Mbps; each side returns to its own ground.",
+      "confidence": "approx"
+    },
+    {
+      "id": "mcp6002",
+      "kind": "load",
+      "match": {"mpn": ["MCP6002", "MCP6002T-I/SN", "MCP6002-I/SN", "MCP6002T-I/MS"], "nameRegex": "(?i)^MCP600[124]"},
+      "supplyPins": ["VDD", "V+"],
+      "returnPins": ["VSS", "V-", "GND"],
+      "typA": 0.0002,
+      "peakA": 0.00034,
+      "source": "Microchip MCP6001/2/4 datasheet (DS21733): IQ 100 µA typ / 170 µA max per amplifier (dual = 2×); output load current is not included.",
+      "confidence": "approx"
+    },
+    {
+      "id": "mcp3201",
+      "kind": "load",
+      "match": {"mpn": ["MCP3201", "MCP3201-CI/SN", "MCP3201-BI/SN", "MCP3201T-CI/SN"], "nameRegex": "(?i)^MCP3201"},
+      "rails": [
+        {"pins": ["VDD"], "typA": 0.0003, "peakA": 0.0005, "returnPins": ["VSS"]},
+        {"pins": ["VREF"], "typA": 0.00015, "peakA": 0.00015, "returnPins": ["VSS"]}
+      ],
+      "returnPins": ["VSS"],
+      "source": "Microchip MCP3201 datasheet (DS21290): IDD ≈ 300 µA typ / 500 µA max while converting at 5 V; IREF ≈ 150 µA during conversion.",
+      "confidence": "approx"
+    },
+    {
+      "id": "lm4040",
+      "kind": "load",
+      "match": {"nameRegex": "(?i)^LM4040"},
+      "supplyPins": ["K", "+"],
+      "returnPins": ["A", "-"],
+      "typA": 0.0007,
+      "peakA": 0.0007,
+      "source": "LM4040 shunt reference: the DC power sim has no zener element, so the cathode is a constant sink at a typical bias point (0.7 mA, between the 60–75 µA minimum and 15 mA maximum of TI SNOS633). The reference VOLTAGE and the real cathode current come from pcbpilot sim analog (spice-models/analog-models.json).",
+      "confidence": "assumed"
+    },
+    {
+      "id": "ads1220",
+      "kind": "load",
+      "match": {"mpn": ["ADS1220IPWR", "ADS1220IRVAR", "ADS1220"]},
+      "supplyPins": ["AVDD", "DVDD"],
+      "returnPins": ["AVSS", "DGND"],
+      "typA": 0.00042,
+      "peakA": 0.00085,
+      "source": "TI ADS1220 datasheet: normal mode IAVDD + IDVDD ≈ 0.42 mA (PGA enabled, internal reference); turbo mode ≈ 0.85 mA used as peak.",
+      "confidence": "approx"
+    },
+    {
+      "id": "tlv75533p",
+      "kind": "ldo",
+      "match": {"mpn": ["TLV75533PDBVR", "TLV75533PDRVR", "TLV75533P"]},
+      "pins": {"in": ["IN"], "out": ["OUT"], "gnd": ["GND"], "en": ["EN"]},
+      "vout": 3.3,
+      "dropoutV": 0.24,
+      "iqA": 2.5e-05,
+      "maxA": 0.5,
+      "source": "TI TLV755P datasheet: 500 mA, dropout 238 mV typ at 500 mA (3.3 V option), IQ 25 µA typ.",
+      "confidence": "datasheet"
+    },
+    {
+      "id": "ucc21520",
+      "kind": "load",
+      "match": {"mpn": ["UCC21520DWR", "UCC21520ADWR", "UCC21521CDWR", "UCC21520DW"], "nameRegex": "(?i)^UCC2152[0-2]"},
+      "rails": [
+        {"pins": ["VCCI"], "typA": 0.002, "peakA": 0.003, "returnPins": ["GND"]},
+        {"pins": ["VDDA"], "typA": 0.006, "peakA": 0.012, "returnPins": ["VSSA"]},
+        {"pins": ["VDDB"], "typA": 0.006, "peakA": 0.012, "returnPins": ["VSSB"]}
+      ],
+      "returnPins": ["GND"],
+      "source": "TI UCC21520 datasheet: IVCCI ≈ 1.5–2 mA, IVDDx quiescent ≈ 1.3 mA; plus the average gate charge Qg·fsw (46 nC × 100 kHz ≈ 4.6 mA for a C3M0060065K) per output channel; peak = 12 mA at 200 kHz.",
+      "confidence": "approx"
+    },
+    {
+      "id": "mgj2d051505sc",
+      "kind": "connector-source",
+      "match": {"mpn": ["MGJ2D051505SC", "MGJ2D051505MPC", "MGJ2D151505SC"]},
+      "outputs": [
+        {"name": "+15 V gate supply", "pins": ["+VO"], "returnPins": ["0V"], "voltageV": 15.0, "rsOhm": 0.5}
+      ],
+      "rails": [
+        {"pins": ["+VIN"], "typA": 0.05, "peakA": 0.08, "returnPins": ["-VIN"]}
+      ],
+      "returnPins": ["-VIN"],
+      "sourceName": "gatebias",
+      "source": "Murata MGJ2 series datasheet: 5 V input, +15 V / −5 V outputs, 2 W, 5.2 kVDC isolation; input ≈ 50 mA at a SiC gate-drive load (≈ 0.2 W / η 0.8 / 5 V), 80 mA peak. Only the +15 V output is modelled (−5 V is not a rail here).",
+      "confidence": "approx"
+    }
+  ]
+}
