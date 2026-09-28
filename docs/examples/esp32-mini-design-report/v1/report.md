@@ -1,8 +1,8 @@
 # ESP32-S3 mini 设计报告 v1
 
-> **总体结论：PASS with warnings** · 客户 Demo · 生成 2026-09-28T01:55:12Z · pcbpilot v0.4.0-15-gac0fb96 · 宿主 EasyEDA Pro desktop V3 3.2.149 · connector 0.4.1
+> **总体结论：PASS with warnings** · 客户 Demo · 生成 2026-09-28T04:01:02Z · pcbpilot v0.5.0 · 宿主 EasyEDA Pro desktop V3 3.2.149 · connector 0.4.1
 >
-> 输入摘要 `3589ca9e685b3a7baf8def81e00c70fa14944b9fe2c2c07ca64faadcf6a8b921`
+> 输入摘要 `3942cb48405350f2c3b8f4929d77200a7b097a7bf4cddf27a6263a5b3c1e419e`
 
 **警告**
 
@@ -11,7 +11,6 @@
 - 3 项器件余量低于准则
 - 14 项器件额定需数据手册确认
 - pcb check（DFM 重建审计）：ERROR 0 / WARN 100 / INFO 13
-- 2 项验证缺少证据（N/A）
 
 ## 0 封面与输入来源
 
@@ -22,13 +21,13 @@
 | plan | pcb auto plan.json | 已提供 | `artifacts/v05-live/final/plan.json` | `82bfc1b79f39` |
 | feedback | pcb auto feedback.json | 已提供 | `artifacts/v05-live/final/feedback.json` | `887905161e9a` |
 | board | 板级回读 board dump | 已提供 | `artifacts/v05-live/final.after2.json` | `5de96657c297` |
-| reload-board | 保存重载后回读 | 未提供 | `` | `` |
-| drc | 原生 DRC | 已提供 | `artifacts/v05-live/final.drc3.json` | `da970f785a42` |
+| reload-board | 保存重载后回读 | 已提供 | `artifacts/v05-live/final.reload.json` | `51256aeb9120` |
+| drc | 原生 DRC | 已提供 | `artifacts/v05-live/final.drc4.json` | `8d9b9c691219` |
 | check | pcb check | 已提供 | `artifacts/v05-live/final.check2.txt` | `12174bf2fcb5` |
-| rules-check | 规则同步 rules check | 已提供 | `artifacts/v05-live/rules-check.json` | `bb85ead2c5bc` |
-| net-diff | 焊盘网络对账 | 未提供 | `` | `` |
+| rules-check | 规则同步 rules check | 已提供 | `artifacts/v05-live/rules-check.json` | `a9e2e056f938` |
+| net-diff | 焊盘网络对账 | 已提供 | `artifacts/v05-live/netdiff.json` | `6931fd8912a9` |
 | values | 器件值/型号 | 未提供 | `` | `` |
-| models | 功率模型/额定 power-models.json | 已提供 | `.agents/skills/pcbpilot/references/power-models.json` | `bee3e8636639` |
+| models | 功率模型/额定 power-models.json | 已提供 | `.agents/skills/pcbpilot/references/power-models.json` | `d0156edeb226` |
 | image | 原理图 P1 | 已提供 | `artifacts/v05-live/sch-905bb85957eaf435.png` | `8a57cbdd3a56` |
 | image | 原理图 P2 | 已提供 | `artifacts/v05-live/sch-950ae6609e91d753.png` | `b3c20ee5aa37` |
 | image | PCB 布局（编辑器快照） | 已提供 | `artifacts/v05-live/snap/v05-final/snapshot.png` | `912dc6053d52` |
@@ -49,7 +48,7 @@
 | 器件检查 | 30 ok / 3 临界 / 0 超限 / 14 需数据手册 |  |
 | 最坏 IR 压降 | 17.87 mV / 预算 99.9 mV（17.9 %） | USB_VBUS @ D2.2 |
 | 布线完成率 | 100 % (30/30) |  |
-| 原生 DRC（EasyEDA） | PASS | 原生 DRC 通过，0 违规；2026-09-27T22:15:00.767533Z |
+| 原生 DRC（EasyEDA） | PASS | 原生 DRC 通过，0 违规；2026-09-28T04:00:20.47119Z |
 | pcb check（DFM 重建审计） | WARN | ERROR 0 / WARN 100 / INFO 13 |
 | 设计发现（intent） | 0 error / 2 warn / 4 info |  |
 
@@ -461,11 +460,11 @@ U1（peak）计算过程：
 
 | 检查 | 结论 | 说明 | 证据 |
 |---|---|---|---|
-| 原生 DRC（EasyEDA） | **PASS** | 原生 DRC 通过，0 违规；2026-09-27T22:15:00.767533Z | `artifacts/v05-live/final.drc3.json` |
+| 原生 DRC（EasyEDA） | **PASS** | 原生 DRC 通过，0 违规；2026-09-28T04:00:20.47119Z | `artifacts/v05-live/final.drc4.json` |
 | pcb check（DFM 重建审计） | **WARN** | ERROR 0 / WARN 100 / INFO 13 | `artifacts/v05-live/final.check2.txt` |
 | 规则同步（pcb rules check） | **PASS** | intent 规则与 EasyEDA 一致（in-sync） | `artifacts/v05-live/rules-check.json` |
-| 焊盘网络对账（pad-net diff） | **N/A** | 未提供（--net-diff） | `` |
-| 保存/重载一致性 | **N/A** | 只有一份板级回读（2026-09-27T22:15:05Z，semantic 208a2bcb43be）；需 --reload-board 才能比对 | `artifacts/v05-live/final.after2.json` |
+| 焊盘网络对账（pad-net diff） | **PASS** | 原理图网表与 PCB 焊盘网络一致 | `artifacts/v05-live/netdiff.json` |
+| 保存/重载一致性 | **PASS** | 保存重载前后 semanticSha256 一致：208a2bcb43be | `artifacts/v05-live/final.reload.json` |
 | 布线完成度（pcb auto） | **PASS** | 信号 100 %（30/30），平面连接 52/52 | `artifacts/v05-live/final/plan.json` |
 | 直流压降（IR drop） | **PASS** | 0 个网络超预算，最坏 17.9 % 预算 | `artifacts/v05-live/final/plan.json` |
 

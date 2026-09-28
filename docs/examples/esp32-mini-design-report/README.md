@@ -1,6 +1,6 @@
 # 样例：ESP32-S3 mini 设计报告（v1 / v2）
 
-`pcbpilot report design` 的参考输出。打开 [v1/report.html](v1/report.html)（单文件，自包含）或
+`pcbpilot report design` 的参考输出（由 v0.5.0 生成）。打开 [v1/report.html](v1/report.html)（单文件，自包含）或
 [v1/report.md](v1/report.md)；版本变化见 [CHANGELOG.md](CHANGELOG.md)，机器可读数据见各版本的
 `report.json` 与 [index.json](index.json)。
 
@@ -13,7 +13,7 @@
 （pcb check）、`rules-check.json`（规则 in-sync）、两页原理图导出图与 `stage-snapshot` 布局快照。
 
 - **v1**：上述产物原样输入 → `PASS with warnings`（L1 峰值电流余量 11 %、USB 0.5 A 预算余量 14 %、
-  USBLC6 VRWM 与 5 V 线电压贴边、14 项额定需数据手册、pcb check WARN、缺焊盘网络对账与保存重载对比）。
+  USBLC6 VRWM 与 5 V 线电压贴边、14 项额定需数据手册、pcb check WARN）；保存重载一致、逐焊盘对账、规则同步与原生 DRC 证据齐全，0 个章节缺失。
 - **v2**：只把 intent 中 `+3V3` 声明为 1 A（[inputs/intent-3v3-1A.json](inputs/intent-3v3-1A.json)，
   手工改写的演示输入，不是重新 derive 的 intent）→ 10 mil 线宽 / 1 个过孔不再满足 → `FAIL`，
   变更记录列出意图电流、所需线宽、结论变化和新增问题。
@@ -26,8 +26,8 @@
 ```bash
 A=artifacts/v05-live
 common=(--project-name "ESP32-S3 mini" --customer Demo --sim $A/sim.json --plan-dir $A/final
-  --board $A/final.after2.json --drc $A/final.drc3.json --check $A/final.check2.txt
-  --rules-check $A/rules-check.json
+  --board $A/final.after2.json --reload-board $A/final.reload.json --drc $A/final.drc4.json
+  --check $A/final.check2.txt --rules-check $A/rules-check.json --net-diff $A/netdiff.json
   --image sch:P1=$A/sch-905bb85957eaf435.png --image sch:P2=$A/sch-950ae6609e91d753.png
   --image layout=$A/snap/v05-final/snapshot.png
   --models .agents/skills/pcbpilot/references/power-models.json

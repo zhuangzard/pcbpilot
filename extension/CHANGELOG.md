@@ -1,5 +1,51 @@
 # Changelog
 
+## [0.5.0] — 2026-09-28
+
+**Electrical loop from schematic to customer report.** Re-import the connector (0.5.0) together with the
+matching CLI/daemon (new typed actions `pcb.net_class.add_nets`, `schematic.text.create`,
+`pcb.footprint.sources`, `schematic.rectangles.list`).
+
+- **Power simulation** — `pcbpilot sim power`: DC operating point by modified nodal analysis with Newton
+  iteration (diodes/LEDs/BJTs), regulator models (buck Vout from the real feedback divider, input current by
+  efficiency, inductor/switch-node/input-cap ripple; LDO dropout), scenarios (typical, peak, per-source,
+  buttons, worst), per-pin currents and directions, part power; power-model library `power-models.json` with
+  sources and confidence (unknown ICs are assumed loads with a warning, never zero); optional SPICE export and
+  ngspice cross-check.
+- **Design intent** — `pcbpilot intent derive` (live schematic, offline connectivity, or `--board` netlist):
+  function blocks with summaries, voltage domains, per-net voltage/current/width/vias/clearance/impedance/
+  net class, differential pairs and length groups (USB/USB3/PCIe/HDMI/MIPI/Ethernet/DDR from one shared
+  classification table and stackup reference), findings (inductor margin, USB budget, regulator headroom,
+  resistor working voltage, 2-layer reference-plane errors…).
+- **Safety distances** — `pkg/safety`: IPC-2221B, IEC 62368-1, IEC 60601-1 MOOP/MOPP 1×/2× (with test
+  voltages), IEC 61010-1, altitude correction, slot rule (width X by pollution degree, length along the
+  barrier, infeasible cases reported).
+- **Into EasyEDA** — `pcb rules apply|check --intent`: net classes, per-class track/clearance/via rules
+  (rule minimum = fabrication neck width), differential pairs with the interface's length tolerance;
+  idempotent, read back, `--dry-run`. `sch intent-annotate`: a wrapped, journaled text block of block
+  functions and rail V/I/width on the schematic.
+- **pcb auto** — `--sim` (simulated currents, per-segment width from branch current, post-route IR-drop
+  solve with widen/re-route, `--ir-budget`), `--intent` (per-net plans, domain bands and per-pair clearance,
+  creepage check, auto milled slots and no-pour moats, planes clipped per domain, 30 A busbars flagged
+  `needs-pour`), high-speed retry on finer grids, length-group tuning, reference-plane cost for ≥1 Gb/s
+  lanes, footprint NPTH/slot regions modelled, route-only `--mech` no longer duplicates mechanics;
+  `feedback.json` pushes routing difficulties back to the schematic (MCU/connector pin swaps verified by
+  re-routing, decoupling ownership, IR-drop measures) and `sch pin-swap` turns a swap into a schematic plan.
+- **Design report** — `pcbpilot report design` (and `--report-dir` on `intent derive` / `pcb auto run`):
+  versioned `reports/<project>/vN/` single-file HTML with inline SVG charts + Markdown + JSON and a
+  changelog: verdict, simulation, component feasibility (stress vs rating, "needs datasheet" when unknown),
+  engineering calculations, layout/routing, verification evidence, test-point plan, manufacturing/assembly
+  notes, bring-up procedure. Template in the Skill (`templates/design-report/`).
+- **Stress suites** — `make stress-hv` (flyback 230 Vac, medical 2×MOPP, CAT III 600 V, 400 V inverter,
+  infeasible negative case: 332 checks match hand-derived answers, 10 known routing-completion limits) and
+  `make stress-hs` (HDMI and 2-layer negative pass; USB3, PCIe, Gigabit Ethernet, DDR3 have documented
+  routing gaps).
+- **Install** — the daemon login service is required (`pcbpilot daemon service install|status|uninstall`).
+- Live-verified 2026-09-27/28 on EasyEDA Pro desktop V3 3.2.149 (connector 0.4.1, same connector code as
+  0.5.0): ESP32-S3 4-layer board — intent derive from the live schematic, schematic annotation, rules
+  written and in sync after save → reload, 30/30 routed with 52/52 plane connections, all rails within IR
+  budget, native DRC passed, pad-by-pad diff 0, content hash unchanged across reload.
+
 ## [0.4.0] — 2026-09-25
 
 Same code as 0.3.2, released on the 0.4 minor line: 0.3.1/0.3.2 changed connector behaviour

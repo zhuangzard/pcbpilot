@@ -6,9 +6,9 @@
 
 ## v2 — FAIL
 
-- 生成时间：2026-09-28T01:55:12Z
+- 生成时间：2026-09-28T04:01:02Z
 - 报告：[v2/report.html](v2/report.html) · [report.md](v2/report.md) · [report.json](v2/report.json)
-- 输入摘要：`4992a0c2b2b4`
+- 输入摘要：`467962198b3e`
 
 相对 v1：变更 intent:设计意图 intent.json。
 
@@ -23,9 +23,9 @@
 
 ## v1 — PASS with warnings
 
-- 生成时间：2026-09-28T01:55:12Z
+- 生成时间：2026-09-28T04:01:02Z
 - 报告：[v1/report.html](v1/report.html) · [report.md](v1/report.md) · [report.json](v1/report.json)
-- 输入摘要：`3589ca9e685b`
+- 输入摘要：`3942cb484053`
 
 首个版本。
 
