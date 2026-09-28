@@ -745,6 +745,9 @@ func (e *Env) runPlan(w io.Writer, p Plan, o InstallOptions) (action, msg string
 				continue
 			}
 			m := fmt.Sprintf("%s failed: %v", shellJoin(argv), err)
+			if e.GOOS == "darwin" && len(argv) > 0 && argv[0] == "brew" {
+				m += " — " + brewToolchainHint
+			}
 			if p.Manual != "" {
 				m += " — " + p.Manual
 			}
@@ -765,3 +768,11 @@ func (e *Env) canSudo() bool {
 	_, err := e.Output("sudo", "-n", "true")
 	return err == nil
 }
+
+// brewToolchainHint: a source-built formula (Elmer's tap) needs current Xcode
+// Command Line Tools; live 2026-09-28 the install stopped at "Your Command
+// Line Tools are too outdated". Updating them needs the user's password, so
+// the installer only names the fix.
+const brewToolchainHint = "if Homebrew reported \"Command Line Tools are too outdated\" (source builds need current tools), update them first: " +
+	"`softwareupdate --list` then `softwareupdate -i \"Command Line Tools for Xcode-<version>\"`, or " +
+	"`sudo rm -rf /Library/Developer/CommandLineTools && sudo xcode-select --install`; then re-run `pcbpilot sim tools install --only elmer`"

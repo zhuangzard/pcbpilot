@@ -377,3 +377,11 @@ func TestInstallWindowsElmerDownload(t *testing.T) {
 		t.Fatal(buf.String())
 	}
 }
+
+// A failed brew step on macOS names the Command Line Tools fix (live
+// 2026-09-28: Elmer's source build stopped at outdated CLT).
+func TestBrewFailureNamesToolchainFix(t *testing.T) {
+	if !strings.Contains(brewToolchainHint, "xcode-select --install") || !strings.Contains(brewToolchainHint, "softwareupdate") {
+		t.Fatal(brewToolchainHint)
+	}
+}
