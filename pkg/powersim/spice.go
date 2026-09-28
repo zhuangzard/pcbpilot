@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/zhuangzard/pcbpilot/pkg/simtools"
 )
 
 // SpiceCheck compares our node voltages with ngspice on the linearised netlist.
@@ -126,7 +128,7 @@ var reSpiceOut = regexp.MustCompile(`^\s*(n_[a-z0-9_]+)\s*=\s*([-+0-9.eE]+)\s*$`
 // compares node voltages.
 func (e *Engine) CheckSPICE(scenarioName string, tolV float64) *SpiceCheck {
 	ck := &SpiceCheck{Scenario: scenarioName, TolV: tolV}
-	bin, err := exec.LookPath("ngspice")
+	bin, err := simtools.Find("ngspice") // PATH, then Windows install dirs
 	if err != nil {
 		ck.Skipped = "ngspice not on PATH"
 		return ck

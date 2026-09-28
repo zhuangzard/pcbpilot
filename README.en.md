@@ -187,6 +187,15 @@ curl -fsSL .../install.sh | PCBPILOT_SKILL_PRESERVE=1 bash  # keep local edits
 curl -fsSL .../install.sh | PCBPILOT_VERSION='<vX.Y.Z>' bash  # pin a release (skips the API)
 ```
 
+**Simulation tools.** Every installer (`setup-agent.sh`, `install.sh`, `install.ps1`)
+also runs `pcbpilot sim tools install --yes`: **ngspice** (required — `sim power
+--spice-check` and the analog SPICE flow) and **Elmer FEM** (optional thermal
+cross-check; on macOS it builds from source via the official `elmercsc/elmerfem`
+Homebrew tap and can take a long time, so a failure only warns). pcbpilot's own
+simulators are built into the binary — nothing to install. Check with
+`pcbpilot sim tools check [--json]`; skip with `--no-sim-tools` /
+`PCBPILOT_SIM_TOOLS=0`. Per-platform commands: [`docs/manual.md` §3.4](docs/manual.md#34-仿真工具).
+
 ```powershell
 $env:PCBPILOT_INSTALL_SKILLS = 'codex,claude'   # same knobs on Windows
 $env:PCBPILOT_VERSION = '<vX.Y.Z>'              # pin a release (skips the API)

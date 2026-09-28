@@ -93,6 +93,7 @@ fixture 回归：中小板 89–100%，大型 BGA 板（RK3568、K230）55–62%
 | 场景 | typical / peak / buttons-pressed / 每输入源单独（OR 二极管）/ worst（逐焊盘最大） |
 | 模型库 | `.agents/skills/pcbpilot/references/power-models.json`（LCSC→MPN→正则，带出处与 confidence）；未知 IC 假设负载并告警 |
 | 交叉核对 | `--spice` 导出线性化 .op 网表，`--spice-check` 用 ngspice 比对节点电压 |
+| 外部仿真工具 | `sim tools check [--json]` / `install [--yes] [--only] [--dry-run] [--require-elmer]`（`pkg/simtools`）：ngspice 必需、Elmer FEM 可选；按 OS/发行版选 brew / apt+PPA / dnf / winget·choco / Elmer 官方 NSIS；三个安装脚本与 `agent_clients.py verify` 共用。自带仿真器编译在二进制内 |
 
 ## 设计意图（`intent derive` → `intent.json`，离线验证）
 

@@ -103,3 +103,52 @@ class ServiceEntryTest(unittest.TestCase):
                 os.makedirs(os.path.dirname(p))
                 open(p, "w").write('[Service]\nExecStart="/opt/my dir/pcbpilot" daemon start\n')
                 self.assertEqual(ac.service_entry(home), (p, "/opt/my dir/pcbpilot"))
+
+
+class SimToolsVerifyTest(unittest.TestCase):
+    """verify's simulator check reads `pcbpilot sim tools check --json` (fake reports)."""
+
+    @staticmethod
+    def report(ngspice="ok", elmer="missing"):
+        return {"schemaVersion": 1, "ok": ngspice == "ok", "tools": [
+            {"name": "ngspice", "required": True, "status": ngspice, "path": "/opt/homebrew/bin/ngspice",
+             "version": "47" if ngspice == "ok" else "", "detail": "" if ngspice == "ok" else "not found: ngspice",
+             "install": ["brew install ngspice"]},
+            {"name": "elmer", "required": False, "status": elmer, "detail": "not found: ElmerSolver, ElmerGrid",
+             "install": ["brew tap elmercsc/elmerfem", "brew install elmercsc/elmerfem/elmer"]},
+        ]}
+
+    def test_ngspice_ok_elmer_missing_is_warn_only(self):
+        ok, warn, bad = ac.sim_tools_findings(self.report())
+        self.assertEqual(bad, [])
+        self.assertEqual(len(ok), 1)
+        self.assertIn("ngspice v47", ok[0])
+        self.assertEqual(len(warn), 1)
+        self.assertIn("elmer missing", warn[0])
+        self.assertIn("optional", warn[0])
+
+    def test_ngspice_missing_fails(self):
+        ok, warn, bad = ac.sim_tools_findings(self.report(ngspice="missing", elmer="ok"))
+        self.assertEqual(len(bad), 1)
+        self.assertIn("ngspice missing", bad[0])
+        self.assertIn("brew install ngspice", bad[0])
+        self.assertEqual(warn, [])
+
+    def test_outdated_required_fails(self):
+        _, _, bad = ac.sim_tools_findings(self.report(ngspice="outdated"))
+        self.assertIn("outdated", bad[0])
+
+    def test_unreadable_report_fails(self):
+        for rep in ({}, {"tools": []}, None, []):
+            _, _, bad = ac.sim_tools_findings(rep)
+            self.assertEqual(len(bad), 1)
+
+    def test_report_runs_the_cli(self):
+        with tempfile.TemporaryDirectory() as d:
+            fake = os.path.join(d, "pcbpilot")
+            with open(fake, "w") as f:
+                f.write('#!/bin/sh\n[ "$1 $2 $3 $4" = "sim tools check --json" ] || exit 9\n'
+                        "echo '" + json.dumps(self.report(ngspice="missing")) + "'\nexit 1\n")
+            os.chmod(fake, 0o755)
+            _, _, bad = ac.sim_tools_findings(ac.sim_tools_report(fake))
+            self.assertIn("ngspice missing", bad[0])

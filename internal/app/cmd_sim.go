@@ -31,10 +31,14 @@ func newSimCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 
   sim power   DC operating point of the power tree: voltage of every net and the
               current through every component pin, per scenario. Feeds trace
-              width sizing with computed (not guessed) currents.`,
+              width sizing with computed (not guessed) currents.
+  sim tools   check / install the external open-source cross-check simulators
+              (ngspice required, Elmer FEM optional). pcbpilot's own simulators
+              are built into this binary and need no install.`,
 	}
 	sim.PersistentFlags().StringVar(&window, "window", "", "EasyEDA window ID (live mode)")
 	sim.AddCommand(newSimPowerCmd(cfg, &window, stdout, stderr))
+	sim.AddCommand(newSimToolsCmd(stdout, stderr))
 	return sim
 }
 
