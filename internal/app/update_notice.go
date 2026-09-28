@@ -114,14 +114,15 @@ func sessionStartNotice(cfg *appConfig, args []string, stderr io.Writer) {
 	if err != nil || !fresh {
 		return
 	}
-	runSessionNotice(context.Background(), realNoticeDeps(cfg), stderr)
+	sessionNoticePrinted = runSessionNotice(context.Background(), realNoticeDeps(cfg), stderr)
 }
 
-func runSessionNotice(ctx context.Context, d noticeDeps, stderr io.Writer) {
+// runSessionNotice returns whether it relayed daemon notices.
+func runSessionNotice(ctx context.Context, d noticeDeps, stderr io.Writer) bool {
 	p := d.probe(ctx)
 	if !p.Running {
 		fallbackNotice(ctx, d, stderr)
-		return
+		return false
 	}
 	// daemon↔CLI skew: both clean releases, different versions, and the
 	// service runs this very binary → the daemon simply was not restarted.
@@ -141,10 +142,11 @@ func runSessionNotice(ctx context.Context, d noticeDeps, stderr io.Writer) {
 			}
 		}
 	}
-	for _, line := range healthNoticeLines(p.Raw, true) {
+	lines := healthNoticeLines(p.Raw, true)
+	for _, line := range lines {
 		fmt.Fprintln(stderr, line)
-		sessionNoticePrinted = true
 	}
+	return len(lines) > 0
 }
 
 // healthNoticeLines renders /health "updates" notices (plus the connector
