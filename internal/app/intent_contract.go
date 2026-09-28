@@ -15,6 +15,9 @@ import (
 	"os"
 	"sort"
 	"strings"
+
+	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
+	"github.com/zhuangzard/pcbpilot/pkg/safety"
 )
 
 type designIntent struct {
@@ -24,6 +27,11 @@ type designIntent struct {
 	Blocks     []intentBlock         `json:"blocks"`
 	Domains    []intentDomain        `json:"domains"`
 	Findings   []intentFinding       `json:"findings"`
+	// Standard is the safety frame (used for domain edge distances).
+	Standard safety.Standard `json:"standard"`
+	// Edge is the additive board-edge safety distance (nil in intents
+	// derived before it existed: the consumers then use the defaults).
+	Edge *intentEdge `json:"edge,omitempty"`
 
 	// sha256 of the raw file bytes; provenance for reports and annotations.
 	sourceSHA string
@@ -93,9 +101,29 @@ type intentBlock struct {
 }
 
 type intentDomain struct {
-	ID   string   `json:"id"`
-	Kind string   `json:"kind"`
-	Nets []string `json:"nets"`
+	ID           string   `json:"id"`
+	Kind         string   `json:"kind"`
+	Nets         []string `json:"nets"`
+	WorkingVrms  float64  `json:"workingVrms,omitempty"`
+	WorkingVpeak float64  `json:"workingVpeak,omitempty"`
+}
+
+// intentEdge mirrors intent.json "edge" (pkg/intent Edge = pcbauto.IntentEdge).
+type intentEdge struct {
+	OuterMil float64                      `json:"outerMil"`
+	InnerMil float64                      `json:"innerMil"`
+	VcutMil  float64                      `json:"vcutMil"`
+	EdgeKind string                       `json:"edgeKind"`
+	ByDomain map[string]*intentEdgeDomain `json:"byDomain,omitempty"`
+	Why      []string                     `json:"why,omitempty"`
+}
+
+type intentEdgeDomain struct {
+	Mil         float64  `json:"mil"`
+	ClearanceMm float64  `json:"clearanceMm,omitempty"`
+	CreepageMm  float64  `json:"creepageMm,omitempty"`
+	Insulation  string   `json:"insulation,omitempty"`
+	Why         []string `json:"why,omitempty"`
 }
 
 type intentFinding struct {
@@ -173,7 +201,48 @@ func (in *designIntent) validate() error {
 			return err
 		}
 	}
+	if e := in.Edge; e != nil {
+		if _, err := pcbauto.NormEdgeKind(e.EdgeKind); err != nil {
+			return fmt.Errorf("intent: edge: %w", err)
+		}
+		if err := nonNeg("edge", e.OuterMil, e.InnerMil, e.VcutMil); err != nil {
+			return err
+		}
+		for id, d := range e.ByDomain {
+			if d == nil {
+				return fmt.Errorf("intent: edge.byDomain[%s] is null", id)
+			}
+			if err := nonNeg("edge.byDomain["+id+"]", d.Mil, d.ClearanceMm, d.CreepageMm); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
+}
+
+// edgePolicy resolves the intent's board-edge distance with the same
+// rules pcb auto uses (defaults when the intent predates "edge"; domain
+// distances from the intent domains + standard when byDomain is absent).
+func (in *designIntent) edgePolicy() *pcbauto.EdgePolicy {
+	pi := &pcbauto.Intent{Nets: map[string]*pcbauto.IntentNet{}}
+	for _, d := range in.Domains {
+		pi.Domains = append(pi.Domains, pcbauto.IntentDomain{ID: d.ID, Kind: d.Kind, Nets: d.Nets, WorkingVrms: d.WorkingVrms, WorkingVpeak: d.WorkingVpeak})
+	}
+	for name, n := range in.Nets {
+		pi.Nets[name] = &pcbauto.IntentNet{Domain: n.Domain}
+	}
+	pi.Standard = in.Standard
+	if e := in.Edge; e != nil {
+		pe := &pcbauto.IntentEdge{OuterMil: e.OuterMil, InnerMil: e.InnerMil, VcutMil: e.VcutMil, EdgeKind: e.EdgeKind, Why: e.Why}
+		for id, d := range e.ByDomain {
+			if pe.ByDomain == nil {
+				pe.ByDomain = map[string]*pcbauto.EdgeDomain{}
+			}
+			pe.ByDomain[id] = &pcbauto.EdgeDomain{Mil: d.Mil, ClearanceMm: d.ClearanceMm, CreepageMm: d.CreepageMm, Insulation: d.Insulation, Why: d.Why}
+		}
+		pi.Edge = pe
+	}
+	return pcbauto.EdgeFromIntent(pi, nil)
 }
 
 // validIntentName guards names that become EDA rule/class keys.

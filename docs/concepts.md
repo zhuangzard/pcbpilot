@@ -391,6 +391,27 @@ Iin = V(LX)·Iout/(η·Vin)+Iq;LDO:Iin = Iout+Iq,含 dropout/关断),纹波用�
   原理图/spec/功耗模型后重新 derive,不手改 intent.json。用法见
   [`design-intent.md`](../.agents/skills/pcbpilot/references/design-intent.md)。状态:`offline-verified`。
 
+### 板边安全距离(edge clearance)—— `intent.json` `edge` / `pcbauto.EdgePolicy`
+**是什么**:铜(走线、焊盘、过孔、铺铜/填充、内层平面)到**板框中心线**(真实铣切/V-cut 线)与
+**金属安装孔**的最小距离。它是安全距离,不是工艺极限:贴边的铜会被铣穿外露、分板带毛刺,而板边与
+安装件是可触及/接地面(手指、金属机壳、螺钉头)。
+- **分档**:外层铜 20 mil(0.5 mm)、内层平面/铺铜 30 mil(0.76 mm,plane pull-back);V-cut 板
+  0.5 / 0.8 mm(对所有边);永不低于工艺下限(JLC 铣边 0.2 mm、V-cut 0.4 mm)与板上现行
+  Board Outline 规则。过孔穿过内层,按内层值;通孔焊盘同理。
+- **按域**:hazardous / mains / patient 域的铜到板边与金属安装孔(螺钉头禁铜环外沿)≥
+  `max(电气间隙, 爬电)`(`pkg/safety.Distances(域 ↔ 可触及面)`,默认加强绝缘;
+  `spec.edge.insulation="basic"` 表示外壳/保护接地提供另一重保护)。SELV 域用分档默认值。
+- **负片平面**:EasyEDA 内电层(PLANE)翻转后不认铺铜多边形,只按 Safe Spacing 的
+  **Board Outline × Copper/Plane Zone** 规则回缩,或被 `no-inner-electrical` 规则区挡住 ——
+  所以 `pcb rules apply --intent` 写规则格,`pcb auto` 画板边带,`pcb check` 把“内层无铜图元”
+  判为负片并按规则值量(`plane-pullback`)。
+- **量什么**:检查量**实际灌铜**(`pcb.poured.list` 复杂多边形,ARC 展平),不是铺铜边界;
+  中心线多边形,不是含线宽的渲染 bbox(那会多算 5 mil)。
+- **谁执行**:`pcb auto`(禁布带/内缩/域距离/引擎 DRC)、`pcb rules apply --intent`、
+  `pcb pour-fit|power-pour|power-planes`、`pcb check copper-to-edge`、设计报告 §5/§7/§9。
+  正本数值与来源:Skill `references/pcb-design-rules.md` §5.4。状态:`offline-verified`
+  (现场回读待验证:见 Skill `pcb-config.md`)。
+
 ### 网感知(net-aware) vs 几何(geometric)—— 本项目的核心决策二分
 | | 依据 | 例子(连接器分组选边) |
 |---|---|---|

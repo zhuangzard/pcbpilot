@@ -125,13 +125,16 @@ type rnet struct {
 	escs        []*bgaEsc // BGA escapes: fixed copper from a ball to the array boundary
 	failed      []Unrouted
 	conflict    bool
-	neckW       float64          // pad-entry width when the full width does not fit
-	neckR       float64          // claim radius at neck width
-	neck        map[int32]bool   // columns near own pads where necking is allowed
-	isoDom      int              // index into router.iso domains, -1 = unfenced
-	relief      map[int32][]*Pad // own pads whose HV footprint relief covers a column
-	busbar      bool             // too wide for a routed track: reported "needs-pour"
-	reliefMemo  map[uint64]bool  // reliefOK verdicts per (cell, radius)
+	neckW       float64        // pad-entry width when the full width does not fit
+	neckR       float64        // claim radius at neck width
+	neck        map[int32]bool // columns near own pads where necking is allowed
+	isoDom      int            // index into router.iso domains, -1 = unfenced
+	// edgeMil is the insulated domain's distance to the board edge and the
+	// metal mounting holes (0 = the per-layer edge band covers it).
+	edgeMil    float64
+	relief     map[int32][]*Pad // own pads whose HV footprint relief covers a column
+	busbar     bool             // too wide for a routed track: reported "needs-pour"
+	reliefMemo map[uint64]bool  // reliefOK verdicts per (cell, radius)
 }
 
 type rpath struct {
@@ -151,6 +154,10 @@ type router struct {
 	// hole gap to a fan-out via: an O(1) test for the via-cost hot path (the
 	// bucket scan there cost RK3568 a third of its negotiation iterations).
 	holeBlk []bool
+	// edgeDist is, per grid column, the distance (mil) from the cell centre
+	// to the nearest accessible surface (board edge, mounting-hole screw
+	// head); only built when a net's domain needs more than the layer band.
+	edgeDist []float32
 	// BGA dog-bone state: balls fanned out by bgaFanout, and the via cell of
 	// each signal ball's escape (an extra access node on every layer).
 	bgaDone map[*Pad]bool
@@ -422,7 +429,9 @@ func (r *router) rasterise() {
 			}
 		}
 	}
-	gr.markEdge(r.b.Outline, r.b.Rules.EdgeClearance)
+	pol := r.an.edgePolicy(r.b)
+	gr.markEdge(r.b.Outline, pol.LayerReq)
+	r.setupEdgeNets(pol)
 	for _, k := range r.b.Keepouts {
 		gr.markKeepout(k)
 	}
@@ -452,7 +461,7 @@ func (r *router) nodeOK(n *rnet, l, x, y int, rad float64) bool {
 	if r.nodeOKBase(n, l, x, y, rad) {
 		return true
 	}
-	if !r.relief || r.iso != nil && n.isoDom >= 0 && !r.isoOK(n, l, x, y, rad-n.share) {
+	if !r.relief || !r.edgeOK(n, x, y, rad) || r.iso != nil && n.isoDom >= 0 && !r.isoOK(n, l, x, y, rad-n.share) {
 		return false
 	}
 	// The relief verdict depends only on static obstacles: memoised per
@@ -471,6 +480,9 @@ func (r *router) nodeOK(n *rnet, l, x, y int, rad float64) bool {
 
 func (r *router) nodeOKBase(n *rnet, l, x, y int, rad float64) bool {
 	gr := r.gr
+	if !r.edgeOK(n, x, y, rad) {
+		return false
+	}
 	if r.iso != nil && n.isoDom >= 0 && !r.isoOK(n, l, x, y, rad-n.share) {
 		return false
 	}
@@ -2073,4 +2085,49 @@ func referenceLayerCost(st *Stackup, plan *NetPlan) []float32 {
 		return nil
 	}
 	return mul
+}
+
+// setupEdgeNets gives every net of an insulated domain its edge distance
+// and, when one exceeds the per-layer band, builds the distance field to
+// the accessible surfaces (outline and mounting-hole screw heads).
+func (r *router) setupEdgeNets(pol *EdgePolicy) {
+	need := false
+	for _, n := range r.nets {
+		n.edgeMil = pol.NetReq(n.name)
+		if n.edgeMil > 0 && n.edgeMil > pol.LayerReq(LayerTop)-1e-9 {
+			need = true
+		} else {
+			n.edgeMil = 0
+		}
+	}
+	if !need || len(r.b.Outline) < 3 {
+		return
+	}
+	gr := r.gr
+	var heads []*Hole
+	for _, h := range r.b.Holes {
+		if h.Owner == "" && len(h.Poly) < 3 && h.Dia > 0 {
+			heads = append(heads, h)
+		}
+	}
+	r.edgeDist = make([]float32, gr.W*gr.H)
+	for y := 0; y < gr.H; y++ {
+		for x := 0; x < gr.W; x++ {
+			c := gr.center(x, y)
+			d := 0.0
+			if PolyContains(r.b.Outline, c) {
+				d = PolyEdgeDist(r.b.Outline, c)
+			}
+			for _, h := range heads {
+				d = math.Min(d, c.Dist(h.C)-h.Dia/2-h.Keep)
+			}
+			r.edgeDist[y*gr.W+x] = float32(math.Max(d, 0))
+		}
+	}
+}
+
+// edgeOK reports whether copper of claim radius rad at column (x,y) keeps
+// the net's domain distance to the accessible surfaces.
+func (r *router) edgeOK(n *rnet, x, y int, rad float64) bool {
+	return n.edgeMil <= 0 || r.edgeDist == nil || float64(r.edgeDist[y*r.gr.W+x]) >= n.edgeMil+rad-n.share
 }

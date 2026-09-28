@@ -69,7 +69,11 @@ pcbpilot intent derive --connectivity sch-p1.json --connectivity sch-p2.json \
 | `netClasses[]` | GND、POWER、POWER_HI（>1 A）、SWITCH、HS_DIFF（多种阻抗时 HS_DIFF_<Ω>）、HS、RF、HV_<域>（**自身峰值 > 60 V 或市电线**的网）、SIGNAL；危险域里的低压网另成 `<类>_<域>`（如 `GND_MAINS_230VAC`、`SIGNAL_HAZ_450V`），不与可触及侧同类：`trackMil`（成员最宽外层线宽）、`innerTrackMil`、`minTrackMil`、`clearanceMil`、via、阻抗。可直接推成 EasyEDA 网络类。 |
 | `findings[]` | 设计提示：电感 Ipk/Irms 对额定、稳压器余量/dropout/占空比/Vin 上限/输出电流、二极管压降损耗、引脚/连接器/器件额定电流、电阻功率、电阻工作电压（`resistor-voltage`：同一场景内两端电压差对 `Max working voltage`/`Limiting Element Voltage`，分压链逐颗核）、电容耐压（电解按 80 % 降额、MLCC 按直流偏压分开提示）、缺大容量电容、USB 500 mA 预算、USB 缺 ESD、阻抗不可控、绝缘开槽、未知功耗模型、市电电流未声明。每条带 `refs`/`nets`/`suggestion`。 |
 
-附加：`copper`（层数/铜厚/温升/参考高度/εr/叠层名/工艺最小值）、`simulation`（场景、收敛、警告、假设）、
+附加：`edge`（板边安全距离：`outerMil` 20 / `innerMil` 30 / `vcutMil` / `edgeKind` routed|vcut|mixed /
+`byDomain{域:{mil,clearanceMm,creepageMm,insulation,why}}` —— 危险/市电/病人域到板边与金属安装孔的
+max(间隙, 爬电)，默认加强绝缘；来自 `spec.edge`（`edgeKind`、`outerMil/innerMil/vcutMil` 覆盖但不低于工艺
+下限、`insulation`、`domainMil`）；类型就是 `pcbauto.IntentEdge`，`pcb auto` / `pcb rules apply` /
+`pcb check` / 设计报告读同一份数，见 `pcb-design-rules.md` §5.4）、`copper`（层数/铜厚/温升/参考高度/εr/叠层名/工艺最小值）、`simulation`（场景、收敛、警告、假设）、
 `definitions`（约定说明）。
 
 数字的来源：宽度 = `pcbauto.TraceWidthForCurrent`（IPC-2221/2152，外层 1 oz、内层 0.5 oz、ΔT 10 °C，

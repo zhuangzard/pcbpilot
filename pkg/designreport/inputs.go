@@ -68,6 +68,9 @@ type Board struct {
 	Project        string            `json:"project"`
 	SemanticSHA256 string            `json:"semanticSha256"`
 	ContentSHA256  string            `json:"contentSha256"`
+
+	// raw is the dump document (the copper-to-edge measurement re-reads it).
+	raw []byte
 }
 
 // BoardRules are the live design rules of the dump.
@@ -156,6 +159,7 @@ func ParseBoard(raw []byte) (*Board, error) {
 	if len(b.Components) == 0 {
 		return nil, fmt.Errorf("no components[] — not a pcb dump")
 	}
+	b.raw = raw
 	return &b, nil
 }
 

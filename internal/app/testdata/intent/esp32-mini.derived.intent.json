@@ -2059,5 +2059,15 @@
     "widthMil": "IPC-2221/2152 width for currentA at tempRiseC: outer on outerOz, inner on innerOz; min = narrowest allowed neck (largest single-pin branch current, class floor); diff/RF = impedance width",
     "clearanceMil": "IPC-2221B B2 (B4 when coated) for the net's peak voltage to its own reference, never below the fab clearance; domain-to-domain insulation is in pairs[]",
     "pairs": "insulation between domains that an isolation part bridges; numbers from SafetyDistances(pair, standard)"
+  },
+  "edge": {
+    "outerMil": 20,
+    "innerMil": 30,
+    "vcutMil": 0,
+    "edgeKind": "routed",
+    "why": [
+      "routed edge: outer copper ≥ 20 mil (0.5 mm), inner planes ≥ 30 mil (0.76 mm) — engineering default above the JLC 0.2 mm floor (docs/pcb-design-rules.md §5.4)",
+      "no hazardous, mains or patient domain: SELV copper uses the layer defaults"
+    ]
   }
 }

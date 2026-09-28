@@ -207,7 +207,9 @@ func (pl *placer) setup(res *PlaceResult) {
 			b.Outline = bb.Corners()
 		}
 	}
-	pl.region = bb.Expand(-b.Rules.EdgeClearance - pl.spacing)
+	// Bodies cover their pads: keeping a body the outer board-edge distance
+	// in keeps its pads there (the spacing margin usually covers it).
+	pl.region = bb.Expand(-math.Max(b.Rules.EdgeClearance+pl.spacing, pl.an.edgePolicy(b).LayerReq(LayerTop)))
 	only := map[string]bool{}
 	for _, r := range pl.opt.Only {
 		only[r] = true
@@ -1358,7 +1360,7 @@ func (pl *placer) autosize() []Point {
 	for _, p := range pl.b.Parts {
 		r = r.Union(p.Body())
 	}
-	r = r.Expand(pl.m.MarginMil + pl.b.Rules.EdgeClearance)
+	r = r.Expand(math.Max(pl.m.MarginMil+pl.b.Rules.EdgeClearance, pl.an.edgePolicy(pl.b).LayerReq(LayerTop)))
 	pl.b.Outline = RoundedRect(r, math.Min(80, r.W()/10))
 	return pl.b.Outline
 }

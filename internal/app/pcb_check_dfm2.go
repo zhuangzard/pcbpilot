@@ -7,11 +7,11 @@ package app
 //   silk-over-pad     §11.2 丝印不压焊盘 — silk text over exposed copper is fab-clipped
 //   decap-too-far     §3.1  去耦电容紧贴 IC 电源引脚 (≤2mm)
 //   via-in-pad        §2.3  禁止过孔打在焊盘上 (solder wicking; needs filled-via)
-//   copper-near-edge  §5.1  铜到板边间距 (copper-to-edge floor)
+//   copper-to-edge    §5.4  板边安全距离 (pcb_check_edge.go)
 //   fiducial-missing  §9    SMT 板需要 ≥3 个不共线 Mark 点
 //
-// All are pure-Go over already-fetched primitives except copper-near-edge,
-// which needs the live board outline (wired in runPcbCheck like the other
+// All are pure-Go over already-fetched primitives except copper-to-edge,
+// which needs the live board dump (wired in runPcbCheck like the other
 // LIVE-only rules).
 
 import (
@@ -269,81 +269,11 @@ func findViaInPad(vias []pcbViaP, pads []pcbPadP) []pcbCheckFinding {
 	return out
 }
 
-// ── R21: copper-near-edge (§5.1 铜到板边间距) ───────────────────────────────
-// Routed copper (tracks/vias) closer to the board outline than the
-// copper-to-edge floor risks exposed/burred copper after routing. Findings are
-// aggregated per net (worst offender + count), like width-under-spec. The
-// outline is its BBOX — good for rectangular boards; interior cutouts are the
-// clearance rule's slot check. d<0 (copper outside the outline) counts too.
-func findCopperNearEdge(tracks []pcbTrack, vias []pcbViaP, outline *layoutBBox, edgeClr float64) []pcbCheckFinding {
-	if outline == nil || edgeClr <= 0 {
-		return nil
-	}
-	// distance from an interior point to the nearest outline edge (min of four
-	// linear functions → its minimum over a straight segment is at an endpoint).
-	edgeDist := func(x, y float64) float64 {
-		return math.Min(math.Min(x-outline.MinX, outline.MaxX-x), math.Min(y-outline.MinY, outline.MaxY-y))
-	}
-	type offender struct {
-		count int
-		worst float64
-		at    pcbXY
-		prim  string
-	}
-	byNet := map[string]*offender{}
-	var order []string
-	note := func(net string, d, x, y float64, id string) {
-		o := byNet[net]
-		if o == nil {
-			o = &offender{worst: math.Inf(1)}
-			byNet[net] = o
-			order = append(order, net)
-		}
-		o.count++
-		if d < o.worst {
-			o.worst = d
-			o.at = pcbXY{round2(x), round2(y)}
-			o.prim = id
-		}
-	}
-	for _, t := range tracks {
-		net := strings.TrimSpace(t.Net)
-		if net == "" {
-			continue // net-less lines are the outline itself / mechanical
-		}
-		for _, ep := range [][2]float64{{t.X1, t.Y1}, {t.X2, t.Y2}} {
-			if d := edgeDist(ep[0], ep[1]) - t.Width/2; d < edgeClr {
-				note(net, d, ep[0], ep[1], t.ID)
-				break
-			}
-		}
-	}
-	for _, v := range vias {
-		net := strings.TrimSpace(v.Net)
-		if net == "" {
-			continue
-		}
-		if d := edgeDist(v.X, v.Y) - v.Dia/2; d < edgeClr {
-			note(net, d, v.X, v.Y, v.ID)
-		}
-	}
-	sort.Strings(order)
-	var out []pcbCheckFinding
-	for _, n := range order {
-		o := byNet[n]
-		f := pcbCheckFinding{
-			Type: "copper-near-edge", Level: "WARN", Net: n,
-			At: &pcbXY{o.at.X, o.at.Y},
-			Message: fmt.Sprintf("net %s: %d copper primitive(s) within %.0fmil of the board edge (worst %.1fmil) — keep copper ≥%.0fmil from the outline%s",
-				n, o.count, edgeClr, math.Max(o.worst, 0), edgeClr, docRule("5.1", "铜到板边间距")),
-		}
-		if o.prim != "" {
-			f.Primitives = []string{o.prim}
-		}
-		out = append(out, f)
-	}
-	return out
-}
+// ── R21: copper-to-edge (§5.4 板边安全距离) ────────────────────────────────
+// Moved to pcb_check_edge.go / pkg/pcbauto CheckEdgeSnapshot: it measures the
+// real poured copper, pads, vias and tracks per layer class and domain
+// (the old rule here saw only tracks/vias against the outline bbox, at the
+// 8–10 mil fab floor, and never fired on 14 mil pours).
 
 // ── R22: fiducial-missing (§9 Mark 点) ──────────────────────────────────────
 // An SMT-assembled board needs ≥3 non-collinear fiducials for the pick-and-place

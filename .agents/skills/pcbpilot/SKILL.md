@@ -123,6 +123,10 @@ metadata:
   第一个变体。V4 自定义位号须在源数据声明锚定 pattern，只验证/保留，不猜递增规则。
 - DRC、`check`、连通率、几何测量和评分各自只说明其覆盖事实。缺测、读回失败、未保存或
   未重开核验时标记 `incomplete`，截图仅用于发现遗漏。
+- 板边安全距离是每块板的默认安全项（外层 20 mil、内层平面 30 mil、V-cut 0.5/0.8 mm，危险域到
+  板边与金属安装孔取 max(间隙, 爬电)）：铺铜命令、`pcb auto`、`pcb rules apply --intent` 自动执行，
+  `pcb check` 的 copper-to-edge / plane-pullback 是 ERROR；不得为了铺满或布通把 `--inset` 压到
+  安全距离以下。见 [pcb-design-rules.md §5.4](references/pcb-design-rules.md)。
 - PCB 先满足题目或机械约束，再安排接口、关键路径、核心与外围。固定尺寸题先板框和固定件；
   无固定尺寸的自建板可先排功能模块，再据占地与布线空间收紧板框。
 - 已有器件的 device、footprint、3D model 绑定正确时，添加 region/keepout 必须保持关联不变；

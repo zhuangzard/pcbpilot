@@ -8,6 +8,9 @@ package app
 // `pcb place-constrained`, and `pcb check`'s clearance rule (fetchPcbSlots)
 // keeps copper off the milled edge.
 //
+// Each hole also gets a screw-head keep-out ring (no-wires, no-pours,
+// no-inner-electrical) so pours and negative planes stay off the metal head.
+//
 // Defaults (mil) follow pcb-layout-conventions §2.3 + issue #102:
 //   - Ø3.2 mm ≈ 126 mil — the M3 clearance hole
 //   - center inset ~5 mm ≈ 197 mil from each board edge
@@ -230,10 +233,26 @@ func runPcbMountHoles(cfg *appConfig, window string, dia, inset, clearance float
 			continue
 		}
 		plan[i].Status = "placed"
-		placed = append(placed, map[string]any{
+		entry := map[string]any{
 			"corner": plan[i].Corner, "x": plan[i].X, "y": plan[i].Y,
 			"primitiveId": asString(mnav(cres.Result, "primitiveId")),
-		})
+		}
+		// Screw-head keep-out ring: pours (and negative inner planes, rule 8)
+		// stay off the metal head/washer — an accessible or earthed surface
+		// (board-edge safety distance). Same rules the pcb auto playbook draws.
+		keepR := clearance
+		if keepR <= 0 {
+			keepR = mhClearanceRadius(dia)
+		}
+		if kres, kerr := requestAction(cfg, "pcb.region.create", window, map[string]any{
+			"points": mhCirclePolygon(plan[i].X, plan[i].Y, 2*keepR/math.Cos(math.Pi/mhPolygonSides), mhPolygonSides),
+			"layer":  pcbLayerMulti, "ruleType": []string{"no-wires", "no-pours", "no-inner-electrical"},
+		}); kerr != nil {
+			fmt.Fprintf(stderr, "warning: corner %s: screw-head keep-out region not created (%v) — pours may flood up to the hole\n", plan[i].Corner, kerr)
+		} else {
+			entry["keepoutId"] = asString(mnav(kres.Result, "primitiveId"))
+		}
+		placed = append(placed, entry)
 	}
 
 	out := map[string]any{

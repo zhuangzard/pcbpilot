@@ -26,6 +26,8 @@ type ctx struct {
 	scen  []*powersim.Result
 	worst *powersim.Result
 	tree  *treeInfo
+	// edgeC caches the board-edge policy + measurement (c.edge()).
+	edgeC *edgeInfo
 }
 
 type elecNet struct {

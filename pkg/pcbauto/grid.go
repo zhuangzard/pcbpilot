@@ -179,18 +179,32 @@ func newGrid(b *Board, stack *Stackup, g float64) (*grid, error) {
 
 // markHardOutside blocks cells outside the outline or closer to the edge than
 // edgeClr - baseClr/2 (so a claim of hw+c/2 keeps copper hw+edgeClr away).
-func (gr *grid) markEdge(outline []Point, edgeClr float64) {
+func (gr *grid) markEdge(outline []Point, edgeClr func(layer int) float64) {
 	if len(outline) < 3 {
 		return
 	}
-	band := math.Max(edgeClr-gr.baseClr/2, 0)
+	// Per copper layer: outer layers keep the outer edge distance, inner
+	// layers (and the plane layers vias perforate) the inner one.
+	bands := make([]float64, len(gr.layers))
+	minBand := math.Inf(1)
+	for li, id := range gr.layers {
+		bands[li] = math.Max(edgeClr(id)-gr.baseClr/2, 0)
+		minBand = math.Min(minBand, bands[li])
+	}
 	for y := 0; y < gr.H; y++ {
 		for x := 0; x < gr.W; x++ {
 			c := gr.center(x, y)
-			if !PolyContains(outline, c) || PolyEdgeDist(outline, c) < band {
-				for l := range gr.layers {
-					gr.flags[gr.idx(l, x, y)] |= flagHard
+			inside := PolyContains(outline, c)
+			d := 0.0
+			if inside {
+				d = PolyEdgeDist(outline, c)
+			}
+			for li := range gr.layers {
+				if !inside || d < bands[li] {
+					gr.flags[gr.idx(li, x, y)] |= flagHard
 				}
+			}
+			if !inside || d < minBand {
 				gr.noVia[y*gr.W+x] = true
 			}
 		}

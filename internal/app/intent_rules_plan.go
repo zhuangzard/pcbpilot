@@ -125,7 +125,11 @@ type intentRulesPlan struct {
 	Advisories      []intentPlanNote        `json:"advisories"`
 	Conflicts       []intentPlanNote        `json:"conflicts"`
 	PendingWrites   int                     `json:"pendingWrites"`
+	// Edge is the board-edge safety distance written into the Safe Spacing
+	// "Board Outline" cells (default rule and every PP_ rule).
+	Edge *intentEdgePlan `json:"edge,omitempty"`
 
+	edgePol           *pcbauto.EdgePolicy
 	ruleConfiguration map[string]any // desired complete configuration
 	netRules          []any          // desired complete net rules
 }
@@ -169,6 +173,160 @@ func (p *intentRulesPlan) finish() {
 	if p.DiffPairs == nil {
 		p.DiffPairs = []intentDiffPairPlan{}
 	}
+}
+
+// intentEdgePlan is the board-edge distance the rules push writes.
+type intentEdgePlan struct {
+	EdgeKind string   `json:"edgeKind"`
+	Source   string   `json:"source"` // intent | default
+	OuterMil float64  `json:"outerMil"`
+	InnerMil float64  `json:"innerMil"`
+	VcutMil  float64  `json:"vcutMil,omitempty"`
+	RuleMil  float64  `json:"ruleMil"` // written to the Board Outline cells of the default rule
+	Cells    []string `json:"cells"`
+	// Classes lists PP_ rules whose Board Outline cells exceed RuleMil (a
+	// hazardous domain's distance to the accessible edge).
+	Classes map[string]float64 `json:"classes,omitempty"`
+	Why     []string           `json:"why,omitempty"`
+}
+
+// safeSpacingEdgeCopper are the copper objects whose Board Outline cell
+// the edge distance sets (the Safe Spacing matrix has no per-layer-class
+// split, so one value covers pours, tracks, pads and vias on every layer).
+var safeSpacingEdgeCopper = map[string]bool{
+	"Track": true, "SMD Pad": true, "TH Pad": true, "SMD Test Point": true, "TH Test Point": true,
+	"Via": true, "Fill Region/Teardrop": true, "Copper/Plane Zone": true,
+}
+
+// edgeRuleMil is the Board Outline value for one Safe Spacing table: with a
+// single table (the observed host schema) the larger inner/plane value —
+// the matrix applies to every layer, and the inner plane is the copper that
+// must pull back furthest; with per-layer tables outer keys take the outer
+// value.
+func edgeRuleMil(pol *pcbauto.EdgePolicy, key string, tables int) float64 {
+	if tables > 1 && (key == "1" || key == "2") {
+		return pol.LayerReq(pcbauto.LayerTop)
+	}
+	return math.Max(pol.LayerReq(pcbauto.LayerTop), pol.LayerReq(pcbauto.LayerInner1))
+}
+
+// setBoardOutlineCells raises every Board Outline × copper cell of a Safe
+// Spacing rule to ≥ want(tableKey) mil; returns the touched cell labels.
+func setBoardOutlineCells(rule map[string]any, want func(key string, tables int) float64) ([]string, error) {
+	rows, cols := asStrSlice(rule["row"]), asStrSlice(rule["column"])
+	tables, ok := rule["tables"].(map[string]any)
+	if !ok || len(tables) == 0 || len(rows) == 0 || len(cols) == 0 {
+		return nil, fmt.Errorf("Safe Spacing rule lacks row/column labels or tables")
+	}
+	unit := asString(rule["unit"])
+	seen := map[string]bool{}
+	var labels []string
+	for _, key := range sortedKeys(tables) {
+		content, ok := mnav(tables[key], "content").([]any)
+		if !ok {
+			return nil, fmt.Errorf("Safe Spacing table %s has no content matrix", key)
+		}
+		w := milToStored(want(key, len(tables)), unit)
+		for i, rowRaw := range content {
+			row, ok := rowRaw.([]any)
+			if !ok || i >= len(rows) {
+				continue
+			}
+			for j := range row {
+				if j >= len(cols) {
+					continue
+				}
+				other := ""
+				switch {
+				case rows[i] == "Board Outline" && safeSpacingEdgeCopper[cols[j]]:
+					other = cols[j]
+				case cols[j] == "Board Outline" && safeSpacingEdgeCopper[rows[i]]:
+					other = rows[i]
+				default:
+					continue
+				}
+				v, ok := asFloatOK(row[j])
+				if !ok {
+					return nil, fmt.Errorf("Safe Spacing table %s cell %d,%d is not numeric", key, i, j)
+				}
+				row[j] = math.Max(v, w)
+				if !seen[other] {
+					seen[other] = true
+					labels = append(labels, other)
+				}
+			}
+		}
+	}
+	if len(labels) == 0 {
+		return nil, fmt.Errorf("Safe Spacing matrix has no Board Outline × copper cells (labels %v)", rows)
+	}
+	return labels, nil
+}
+
+// planEdge raises the DEFAULT Safe Spacing rule's Board Outline cells to the
+// edge distance (every PP_ rule is derived from it afterwards) and states
+// the native creepage rule it would take, without enabling it.
+func (p *intentRulesPlan) planEdge(rc map[string]any, in *designIntent) {
+	pol := in.edgePolicy()
+	p.edgePol = pol
+	ep := &intentEdgePlan{EdgeKind: pol.Kind, Source: pol.Source, OuterMil: pol.LayerReq(pcbauto.LayerTop), InnerMil: pol.LayerReq(pcbauto.LayerInner1), VcutMil: pol.VcutMil,
+		RuleMil: edgeRuleMil(pol, "", 1), Why: pol.Why}
+	p.Edge = ep
+	cat, err := ruleCategory(rc, "Spacing", "Safe Spacing")
+	if err != nil {
+		p.Conflicts = append(p.Conflicts, intentPlanNote{Item: "board edge", Detail: err.Error()})
+		return
+	}
+	name, def, err := defaultRuleOf(cat, "Spacing.Safe Spacing")
+	if err != nil {
+		p.Conflicts = append(p.Conflicts, intentPlanNote{Item: "board edge", Detail: err.Error()})
+		return
+	}
+	desired, _ := jsonClone(def).(map[string]any)
+	cells, err := setBoardOutlineCells(desired, func(key string, n int) float64 { return edgeRuleMil(pol, key, n) })
+	if err != nil {
+		p.Conflicts = append(p.Conflicts, intentPlanNote{Item: "board edge", Detail: err.Error()})
+		return
+	}
+	ep.Cells = cells
+	p.commitRule(cat, "Spacing.Safe Spacing", name, desired)
+	p.Advisories = append(p.Advisories, intentPlanNote{Item: "board edge",
+		Detail: fmt.Sprintf("Safe Spacing Board Outline × copper cells ≥ %.1f mil in the default rule %s and every PP_ rule (%s edge; the matrix is not per layer class, so the inner/plane value %.1f mil covers outer copper %.1f mil too). Pours and negative planes (内电层) are pulled back by exactly this rule.",
+			ep.RuleMil, name, pol.Kind, ep.InnerMil, ep.OuterMil)})
+	// Native creepage (Spacing › Creepage Distance): board-wide, net-agnostic
+	// — enabling it would flag every SELV pair. Report the value only.
+	maxCreep := 0.0
+	for _, pr := range in.Pairs {
+		maxCreep = math.Max(maxCreep, pr.CreepageMm)
+	}
+	for _, d := range pol.ByDomain {
+		maxCreep = math.Max(maxCreep, d.CreepageMm)
+	}
+	if maxCreep > 0 {
+		cur := "unknown"
+		if cr, ok := mnav(rc, "Spacing", "Creepage Distance").(map[string]any); ok {
+			for _, k := range sortedKeys(cr) {
+				if v, ok := asFloatOK(mnav(cr[k], "creepageDistance")); ok {
+					cur = fmt.Sprintf("%s = %g", k, v)
+				}
+			}
+		}
+		p.Advisories = append(p.Advisories, intentPlanNote{Item: "native creepage rule", Status: "advisory",
+			Detail: fmt.Sprintf("Spacing › Creepage Distance would take creepageDistance %.2f mm (largest intent creepage; live %s) — NOT enabled: the host rule is board-wide and net-agnostic, so it would flag every SELV pair; pcb check --intent and pcb auto enforce the per-domain creepage instead", maxCreep, cur)})
+	}
+}
+
+// classEdgeMil is the Board Outline value of a class's PP_ rule: the
+// general value, raised to the domain distance of any hazardous member.
+func (p *intentRulesPlan) classEdgeMil(key string, tables int, nets []string) float64 {
+	if p.edgePol == nil {
+		return 0
+	}
+	v := edgeRuleMil(p.edgePol, key, tables)
+	for _, n := range nets {
+		v = math.Max(v, p.edgePol.NetReq(n))
+	}
+	return v
 }
 
 // intentClassSpec is one class's desired membership + dimensions (mil).
@@ -303,6 +461,7 @@ func planIntentRules(in *designIntent, snap intentRulesSnapshot, pcbNets map[str
 
 	specs, conflicts := buildIntentClassSpecs(in)
 	p.Conflicts = append(p.Conflicts, conflicts...)
+	p.planEdge(rc, in)
 
 	for _, s := range specs {
 		cp := intentClassPlan{Name: s.name}
@@ -597,6 +756,19 @@ func (p *intentRulesPlan) ensureSpacingRule(rc map[string]any, s intentClassSpec
 	}
 	if touched == 0 {
 		return "", fmt.Errorf("Safe Spacing matrix has no copper×copper cells (labels %v)", rows)
+	}
+	if p.edgePol != nil {
+		// The default already carries the general edge distance; a class with
+		// hazardous members keeps its domain distance to the edge.
+		if _, err := setBoardOutlineCells(desired, func(key string, n int) float64 { return p.classEdgeMil(key, n, s.nets) }); err != nil {
+			return "", err
+		}
+		if v := p.classEdgeMil("", 1, s.nets); p.Edge != nil && v > p.Edge.RuleMil+1e-9 {
+			if p.Edge.Classes == nil {
+				p.Edge.Classes = map[string]float64{}
+			}
+			p.Edge.Classes[name] = v
+		}
 	}
 	p.commitRule(cat, "Spacing.Safe Spacing", name, desired)
 	return name, nil

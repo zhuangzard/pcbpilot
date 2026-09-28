@@ -285,13 +285,21 @@ and re-pours; passing raw points to the bare `eda.*` create fails ("无法创建
   lists them first. Detected by `pcb check` (netless-pour rule).
 - `pcb.pour.rebuild` — re-pour all (or by net) after moving components/routing so the
   copper reflows around new obstacles.
-- `pcb pour-fit` (daemon-side) — **auto-size a pour to the board**: reads the outline
-  and insets its bbox by `--inset` (mil, default 20) so copper keeps edge clearance
-  (fixes Board-Outline-to-Copper), then pours `--net`/`--layer`. `--replace` (default)
-  clears the net's existing pours **on the same layer** first so they don't stack (before
-  2026-09-25 it matched the net only and deleted the BOTTOM GND pour when TOP GND was poured;
-  `--dry-run` now reports `wouldClear`). v1 pours a RECTANGLE within
-  the bbox; for an odd outline draw a custom polygon with `pcb pour`. `--dry-run` previews.
+- `pcb pour-fit` (daemon-side) — **auto-size a pour to the board**: reads the outline's
+  **centre-line polygon** (the real cut — not the stroke-inclusive rendered bbox, which added
+  5 mil) and insets it (mitred, rounded corners kept clear) by the layer's **board-edge safety
+  distance** — 20 mil TOP/BOTTOM, 30 mil inner, V-cut 0.5/0.8 mm (`--edge-kind`), intent.json
+  `edge` with `--intent` (a hazardous net keeps its domain distance), never below the live Board
+  Outline rule (`pcb-design-rules.md` §5.4). `--inset` overrides (clamped to the fab floor, warned
+  below the safety distance). Then pours `--net`/`--layer`. `--replace` (default) clears the net's
+  existing pours **on the same layer** first so they don't stack (before 2026-09-25 it matched the
+  net only and deleted the BOTTOM GND pour when TOP GND was poured; `--dry-run` reports
+  `wouldClear`). `pcb power-pour` (2-layer) and `pcb power-planes` (4-layer, 30 mil plane
+  pull-back) use the same boundary; power-planes warns that a flipped negative GND plane follows
+  the Board Outline **rule**, not the polygon — run `pcb rules apply --intent`.
+  Negative-plane truth: a PLANE (内电层) layer is drawn by the host up to the Safe Spacing
+  Board Outline ↔ Copper/Plane Zone cell (ESP32 v0.5: 10 mil default) or a `no-inner-electrical`
+  region; `pcb auto` writes both (rules via `pcb rules apply --intent`, regions `plane-edge-*`).
 - `pcb via-stitch` (daemon-side) — fill a `--rect "x0,y0,x1,y1"` with a `--pitch`-spaced
   grid of `--net` vias: **thermal vias** under a power-IC center pad (tie it to the GND
   plane) or **GND stitching** between top & bottom pours. Run `pcb pour-rebuild` after so

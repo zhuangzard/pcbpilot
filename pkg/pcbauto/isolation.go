@@ -1282,6 +1282,9 @@ func clipPlanesToIso(b *Board, an *Analysis, rr *RouteResult) []string {
 			}
 		}
 		cuDist := isoPartnerDist(b, an.Iso, rr, f, partner, pr.Layer)
+		// The rebuilt rectangles are whole cells: each keeps the board-edge
+		// distance with its corners, not only its centre.
+		edgeReq := an.edgePolicy(b).Req(pr.Layer, pr.Net)
 		type run struct{ x0, x1, y0, y1 int }
 		var rects []run
 		open := map[[2]int]int{} // (x0,x1) → index of the rectangle still growing
@@ -1300,6 +1303,9 @@ func clipPlanesToIso(b *Board, an *Analysis, rr *RouteResult) []string {
 						}
 					}
 					if !in {
+						return false
+					}
+					if len(b.Outline) >= 3 && !edgeCellOK(b.Outline, c, f.g/2, edgeReq) {
 						return false
 					}
 					if f.slack(di, c, outer) < margin || float64(cuDist[y*f.W+x])*f.g-f.g < req+margin/2 {

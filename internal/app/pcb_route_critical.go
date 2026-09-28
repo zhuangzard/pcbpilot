@@ -384,7 +384,7 @@ with --spec stackup.layers refuses before routing; no default layer count is ass
 					}
 				} else {
 					out["power"] = fmt.Sprintf("power-pour (%d-layer, from %s)", copper, copperSrc)
-					if err := runPowerPour(cfg, *window, "both", "pour", railMargin, 0, true, true, dryRun, stderr, stderr); err != nil {
+					if err := runPowerPour(cfg, *window, "both", "pour", railMargin, pourEdgeOpts{}, true, true, dryRun, stderr, stderr); err != nil {
 						return fmt.Errorf("power step (power-pour): %w", err)
 					}
 				}

@@ -423,13 +423,32 @@ func (r *router) splitPlanes() []PlaneRegion {
 	if len(outline) < 3 {
 		outline = r.b.Bounds().Corners()
 	}
+	pol := r.an.edgePolicy(r.b)
+	// whole is the whole-layer region of a net: the outline inset by the
+	// layer's (and the net's domain) board-edge distance.
+	whole := func(net string, layer int) [][]Point {
+		// +0.05 mil: the playbook rounds coordinates to 0.01 mil.
+		req := pol.Req(layer, net) + 0.05
+		if in := insetRegion(outline, req); in != nil {
+			return [][]Point{in}
+		}
+		return rasterClip(outline, [][]Point{outline}, req, 5)
+	}
+	area := func(polys [][]Point) float64 {
+		a := 0.0
+		for _, p := range polys {
+			a += PolyArea(p)
+		}
+		return a / 1e6
+	}
 	for _, l := range r.st.Stack {
 		if l.Kind == KindSignal && len(l.PourNets) > 0 {
 			// Pours on a routing layer (2-layer GND, or a 4-layer mixed power
 			// layer): flooded around the tracks after routing.
 			if len(l.PourNets) == 1 {
-				out = append(out, PlaneRegion{Net: l.PourNets[0], Layer: l.ID, Polys: [][]Point{outline},
-					AreaIn2: PolyArea(outline) / 1e6, Priority: 1})
+				polys := whole(l.PourNets[0], l.ID)
+				out = append(out, PlaneRegion{Net: l.PourNets[0], Layer: l.ID, Polys: polys,
+					AreaIn2: area(polys), Priority: 1})
 				continue
 			}
 			out = append(out, r.splitLayer(StackLayer{ID: l.ID, Name: l.Name, Kind: KindSignal, Nets: l.PourNets}, outline)...)
@@ -439,8 +458,9 @@ func (r *router) splitPlanes() []PlaneRegion {
 			continue
 		}
 		if len(l.Nets) == 1 {
-			out = append(out, PlaneRegion{Net: l.Nets[0], Layer: l.ID, Polys: [][]Point{outline},
-				AreaIn2: PolyArea(outline) / 1e6, Priority: 1, Plane: true})
+			polys := whole(l.Nets[0], l.ID)
+			out = append(out, PlaneRegion{Net: l.Nets[0], Layer: l.ID, Polys: polys,
+				AreaIn2: area(polys), Priority: 1, Plane: true})
 			continue
 		}
 		out = append(out, r.splitLayer(l, outline)...)
@@ -468,10 +488,18 @@ func (r *router) splitLayer(l StackLayer, outline []Point) []PlaneRegion {
 	c.H = int(math.Ceil(bb.H()/cg)) + 1
 	c.label = make([]int, c.W*c.H)
 	inside := make([]bool, c.W*c.H)
+	// A cell is plane copper only when its whole square (all four corners)
+	// keeps the layer's board-edge distance: the traced region is the
+	// union of cell squares, so a centre test let IN2 reach the outline.
+	pol := r.an.edgePolicy(r.b)
+	req := pol.LayerReq(l.ID)
+	for _, net := range l.Nets {
+		req = math.Max(req, pol.NetReq(net))
+	}
 	for y := 0; y < c.H; y++ {
 		for x := 0; x < c.W; x++ {
 			p := c.center(x, y)
-			inside[y*c.W+x] = PolyContains(outline, p) && PolyEdgeDist(outline, p) >= r.b.Rules.EdgeClearance
+			inside[y*c.W+x] = edgeCellOK(outline, p, cg/2, req)
 			c.label[y*c.W+x] = -1
 		}
 	}

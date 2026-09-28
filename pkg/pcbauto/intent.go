@@ -21,6 +21,8 @@ type Intent struct {
 	Pairs      []IntentPair          `json:"pairs"`
 	NetClasses []IntentNetClass      `json:"netClasses"`
 	Findings   []IntentFinding       `json:"findings"`
+	// Edge is the board-edge safety distance (additive; nil = defaults).
+	Edge *IntentEdge `json:"edge,omitempty"`
 }
 
 // IntentDomain is one voltage/reference domain.

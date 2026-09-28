@@ -2179,50 +2179,43 @@ a real run. The PCB must be the active/foreground tab.`,
 	{
 		var net, fill string
 		var layer int
-		var inset float64
+		var edge pourEdgeOpts
 		var replace, dryRun bool
 		c := &cobra.Command{
 			Use:   "pour-fit",
-			Short: "Auto-size a GND/power pour to the board outline, inset from the edge",
-			Long: `Pour a net-bound plane sized to the board, inset from the edge by --inset (mil)
-so copper keeps clearance to the board outline (fixes Board-Outline-to-Copper).
-Reads the board outline (pcb.outline.get) and insets its bbox — v1 pours a
-RECTANGLE within the bbox (an odd-shaped outline still gets a rectangular plane;
-draw a custom polygon with 'pcb pour' for those). By default (--replace) it first
-clears existing pours on the same net so you don't stack them.`,
+			Short: "Auto-size a GND/power pour to the board outline, inset by the board-edge safety distance",
+			Long: `Pour a net-bound plane sized to the board, inset from the edge by the board-edge
+safety distance of its layer: the board outline's CENTRE-LINE polygon (the real
+cut, rounded corners included) offset inward — 20 mil on TOP/BOTTOM, 30 mil on
+inner layers by default; --intent uses intent.json "edge" (and a hazardous
+net's domain distance); --edge-kind vcut raises it to 0.5 / 0.8 mm. Never below
+the live Board Outline rule. --inset overrides (clamped to the fab floor, and
+warned when below the safety distance). By default (--replace) it first clears
+existing pours on the same net and layer so you don't stack them.`,
 			Args: cobra.NoArgs,
 			Example: `  pcbpilot pcb pour-fit --project ceshi --net GND --layer 1
+  pcbpilot pcb pour-fit --net GND --layer 15 --intent intent.json --dry-run
   pcbpilot pcb pour-fit --net GND --layer 1 --inset 25 --dry-run`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				// ADR-0004 Decision 4: dry-run 必须纯计算 —— 机械保证。
 				if dryRun {
 					defer setDispatchDryRun(true)()
 				}
-				// Inset defaults to the board's copper-to-edge rule (JLCPCB fab floor
-				// ~8mil; ceshi live ~10mil) instead of a fixed 20 — the real
-				// Board-Outline-to-Copper clearance. --inset still overrides. (#32)
-				if !cmd.Flags().Changed("inset") {
-					inset = fetchPcbRules(cfg, window).copperToEdgeMil
-				}
 				if strings.TrimSpace(net) == "" {
 					return fmt.Errorf("--net must not be empty (a pour must bind to a net; a netless pour is dead copper)")
 				}
-				// 1. Board outline bbox.
-				ores, err := requestAction(cfg, "pcb.outline.get", window, nil)
+				// 1. Edge distance of this layer class (+ domain), then the
+				// centre-line outline polygon inset by it.
+				edge.insetSet = cmd.Flags().Changed("inset")
+				pol, err := edge.edgePolicy(cfg, window)
 				if err != nil {
 					return err
 				}
-				bb, ok := ores.Result["bbox"].(map[string]any)
-				if !ok || bb == nil {
-					return fmt.Errorf("no board outline found — set one first with `pcb outline-set`")
+				inset := edge.insetFor(pol, layer, net, stderr)
+				points, _, err := pourBoundary(cfg, window, inset)
+				if err != nil {
+					return err
 				}
-				minX, maxX := asFloat(bb["minX"]), asFloat(bb["maxX"])
-				minY, maxY := asFloat(bb["minY"]), asFloat(bb["maxY"])
-				if maxX-minX <= 2*inset || maxY-minY <= 2*inset {
-					return fmt.Errorf("inset %.0f too large for board %0.f×%0.f mil", inset, maxX-minX, maxY-minY)
-				}
-				x0, y0, x1, y1 := minX+inset, minY+inset, maxX-inset, maxY-inset
-				points := [][]float64{{x0, y0}, {x1, y0}, {x1, y1}, {x0, y1}}
 
 				// 2. Optionally clear existing pours on this net AND layer (avoid
 				// stacking). Matching the net alone deleted the BOTTOM GND pour
@@ -2273,7 +2266,9 @@ clears existing pours on the same net so you don't stack them.`,
 		}
 		c.Flags().StringVar(&net, "net", "GND", "net to bind the pour to")
 		c.Flags().IntVar(&layer, "layer", 1, "copper layer id (TOP=1, BOTTOM=2)")
-		c.Flags().Float64Var(&inset, "inset", 20, "inset from the board outline (mil; default = board's copper-to-edge rule ~8–10)")
+		c.Flags().Float64Var(&edge.inset, "inset", 0, "inset from the board outline (mil; default = the layer's board-edge safety distance: 20 outer / 30 inner, never below the live rule)")
+		c.Flags().StringVar(&edge.intentPath, "intent", "", "intent.json: take the edge distances from its \"edge\" field (hazardous domains keep their insulation distance)")
+		c.Flags().StringVar(&edge.edgeKind, "edge-kind", "", "board edge: routed | vcut | mixed (V-cut: 0.5 / 0.8 mm)")
 		c.Flags().StringVar(&fill, "fill", "", "fill style: solid (default) | grid | grid45")
 		c.Flags().BoolVar(&replace, "replace", true, "clear existing pours on this net first (avoid stacking)")
 		c.Flags().BoolVar(&dryRun, "dry-run", false, "print the computed pour polygon without drawing")
@@ -3999,7 +3994,7 @@ short/overlap/off-board errors still exit non-zero.`,
 	{
 		var strict, asJSON bool
 		var couplingW float64
-		var checkSpecPath, checkIntentPath, checkBoardPath string
+		var checkSpecPath, checkIntentPath, checkBoardPath, checkEdgeKind string
 		c := &cobra.Command{
 			Use:   "check",
 			Short: "DFM audit: acute angles / dangling copper / bad vias / neck-down / 3W coupling (read-only)",
@@ -4030,6 +4025,15 @@ Rules:
   • width-under-spec  — a routed power track thinner than its net-class spec  → WARN
                         (branch 0.25mm / trunk 0.4mm / high-current 0.5mm — see
                         'pcb net-classes'; fine-pitch narrowing + stitch stubs exempt)
+  • copper-to-edge / copper-to-hole / plane-pullback — copper (tracks, arcs,
+                        pads, vias, the materialized poured copper, net fills)
+                        closer to the board outline than the edge safety
+                        distance, or to a metal mounting hole wall; a negative
+                        inner plane's pull-back is the host Board Outline rule
+                        → ERROR. Default 20 mil outer / 30 mil inner (V-cut
+                        0.5 / 0.8 mm); --intent uses intent.json "edge" and
+                        each hazardous domain's insulation distance to the
+                        edge / screw heads. Edge-mounted connector pads: WARN.
   • iso-clearance / iso-creepage (with --intent) — copper of two insulated
                         voltage domains (intent.json pairs) closer than the
                         pair's clearance (any shared layer) or, on the outer
@@ -4049,7 +4053,8 @@ so it can gate the flow. Arcs are out of scope for v1 (line/via/pad only).`,
   pcbpilot pcb check --strict
   pcbpilot pcb check --coupling-w 2.5
   pcbpilot pcb check --intent intent.json --strict
-  pcbpilot pcb check --intent intent.json --board board.json --json`,
+  pcbpilot pcb check --intent intent.json --board board.json --json
+  pcbpilot pcb check --board board.json --edge-kind vcut   # copper-to-edge offline`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				var checkSpec *spec.Spec
 				if checkSpecPath != "" {
@@ -4062,11 +4067,12 @@ so it can gate the flow. Arcs are out of scope for v1 (line/via/pad only).`,
 						return perr
 					}
 				}
-				return runPcbCheckIntent(cfg, window, couplingW, checkSpec, checkIntentPath, checkBoardPath, strict, asJSON, stdout, stderr)
+				return runPcbCheckIntent(cfg, window, couplingW, checkSpec, checkIntentPath, checkBoardPath, checkEdgeKind, strict, asJSON, stdout, stderr)
 			},
 		}
 		c.Flags().StringVar(&checkIntentPath, "intent", "", "intent.json (pcbpilot intent derive): add the isolation rule — clearance/creepage between insulated voltage domains, slots credited")
-		c.Flags().StringVar(&checkBoardPath, "board", "", "with --intent: check a 'pcb dump --include-copper' file offline (isolation rule only, no editor needed)")
+		c.Flags().StringVar(&checkBoardPath, "board", "", "check a 'pcb dump --include-copper' file offline (copper-to-edge; + isolation with --intent), no editor needed")
+		c.Flags().StringVar(&checkEdgeKind, "edge-kind", "", "board edge: routed | vcut | mixed (default: intent edge.edgeKind, else routed) — V-cut raises the edge distance to 0.5/0.8 mm")
 		c.Flags().BoolVar(&strict, "strict", false, "exit non-zero when there are issues (gate mode)")
 		c.Flags().BoolVar(&asJSON, "json", false, "emit the report as JSON")
 		c.Flags().Float64Var(&couplingW, "coupling-w", 3.0, "3W-rule factor: flag different-net parallel traces closer than this × trace width")
@@ -4212,7 +4218,8 @@ current/target layer counts without mutation. Missing layer evidence always refu
 	// pours (retreat, never short). Core in pcb_powerpour.go.
 	{
 		var gndLayersSpec, railsMode string
-		var margin, inset float64
+		var margin float64
+		var edge pourEdgeOpts
 		var replace, rebuild, dryRun bool
 		c := &cobra.Command{
 			Use:   "power-pour",
@@ -4239,13 +4246,16 @@ reflows after. Run AFTER auto-place + outline-fit + route-short (signals), then
   pcbpilot pcb power-pour --gnd-layers bottom --rails pour
   pcbpilot pcb power-pour --dry-run              # print the pour plan only`,
 			RunE: func(cmd *cobra.Command, args []string) error {
-				return runPowerPour(cfg, window, gndLayersSpec, railsMode, margin, inset, replace, rebuild, dryRun, stdout, stderr)
+				edge.insetSet = cmd.Flags().Changed("inset")
+				return runPowerPour(cfg, window, gndLayersSpec, railsMode, margin, edge, replace, rebuild, dryRun, stdout, stderr)
 			},
 		}
 		c.Flags().StringVar(&gndLayersSpec, "gnd-layers", "both", "GND pour layer(s): both | top | bottom")
 		c.Flags().StringVar(&railsMode, "rails", "pour", "non-GND rail handling: pour (local copper) | skip")
 		c.Flags().Float64Var(&margin, "margin", railMargin, "how far a rail's local pour extends past its pad bbox (mil)")
-		c.Flags().Float64Var(&inset, "inset", 0, "inset from the board outline (mil; default = board's copper-to-edge rule ~8–10)")
+		c.Flags().Float64Var(&edge.inset, "inset", 0, "inset from the board outline (mil; default = the outer board-edge safety distance 20 mil, never below the live rule)")
+		c.Flags().StringVar(&edge.intentPath, "intent", "", "intent.json: take the edge distances from its \"edge\" field")
+		c.Flags().StringVar(&edge.edgeKind, "edge-kind", "", "board edge: routed | vcut | mixed (V-cut: 0.5 / 0.8 mm)")
 		c.Flags().BoolVar(&replace, "replace", true, "clear existing pours on each net first (avoid stacking)")
 		c.Flags().BoolVar(&rebuild, "rebuild", true, "run pour-rebuild after creating the pours")
 		c.Flags().BoolVar(&dryRun, "dry-run", false, "print the pour plan (nets→layers→rects) without mutating")

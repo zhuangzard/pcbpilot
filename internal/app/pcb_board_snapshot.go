@@ -27,6 +27,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
 	"io"
 	"math"
 	"sort"
@@ -281,12 +282,16 @@ func (o *boardOutline) containsPoint(x, y float64) bool {
 // 报错），下游据此降级并在报告里说明——**绝不能因为某段数据缺失就静默跳过一整维
 // 却仍然给满分**，那会让"好板得高分"的校准判据失去意义。
 type boardSnapshot struct {
-	Components   []boardComp          `json:"components"`
-	Outline      *boardOutline        `json:"outline,omitempty"`
-	Silk         []pcbSilkText        `json:"silk,omitempty"`
-	CopperLayers int                  `json:"copperLayers,omitempty"`
-	Rules        *boardRules          `json:"rules,omitempty"`
-	Copper       *boardCopperSnapshot `json:"copper,omitempty"`
+	Components   []boardComp   `json:"components"`
+	Outline      *boardOutline `json:"outline,omitempty"`
+	Silk         []pcbSilkText `json:"silk,omitempty"`
+	CopperLayers int           `json:"copperLayers,omitempty"`
+	// PlaneLayers are the copper layers of PLANE (negative, 内电层) type:
+	// the host draws them to the Board Outline rule, so the edge check
+	// reads their pull-back from the rule (not part of the hashes).
+	PlaneLayers []int                `json:"planeLayers,omitempty"`
+	Rules       *boardRules          `json:"rules,omitempty"`
+	Copper      *boardCopperSnapshot `json:"copper,omitempty"`
 	// RoutedLines 是抓取时板上已布铜线段数（pcb.line.list 计数）。指针三态：
 	// nil = 旧 dump/没读到（未知），0 = 真没布线。routable 维用它对**成品板**
 	// 诚实 —— ratsnest 交叉不知道板子已经布完了，五块开源好板校准实锤该维在
@@ -717,6 +722,19 @@ func fetchBoardSnapshot(cfg *appConfig, window string, opts boardSnapshotOpts) (
 		} else {
 			snap.note("copper layer count unreadable (%v)", lerr)
 		}
+		if planes, perr := fetchPcbPlaneLayers(cfg, window); perr == nil {
+			active := map[int]bool{}
+			for _, id := range pcbauto.CopperLayerIDs(snap.CopperLayers) {
+				active[id] = true
+			}
+			for _, pl := range planes {
+				if active[pl.Layer] {
+					snap.PlaneLayers = append(snap.PlaneLayers, pl.Layer)
+				}
+			}
+		} else {
+			snap.note("layer types unreadable (%v) — inner layers without copper are assumed to be negative planes", perr)
+		}
 	}
 	if opts.withCopper {
 		snap.fetchCopper(cfg, window)
@@ -748,6 +766,7 @@ func boardSnapshotContentSHA256(s *boardSnapshot) (string, error) {
 	delete(m, "capturedAt")
 	delete(m, "semanticSha256")
 	delete(m, "contentSha256")
+	delete(m, "planeLayers") // added later; must not move existing content baselines
 	if cp, ok := m["copper"].(map[string]any); ok {
 		if poured, ok := cp["poured"].([]any); ok {
 			keys := make([]string, 0, len(poured))
@@ -851,6 +870,7 @@ func boardSnapshotSemanticSHA256(s *boardSnapshot) (string, error) {
 	// components already pin down; keep it out so existing module-check
 	// baselines stay valid across this CLI upgrade.
 	clone.FootprintHoles = nil
+	clone.PlaneLayers = nil // stackup layer types (2026-09-28): keep existing baselines valid
 	if s.Rules != nil {
 		r := *s.Rules
 		r.SlotClearanceMil = 0

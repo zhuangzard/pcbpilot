@@ -25,6 +25,9 @@ type Result struct {
 	// Isolation is the intent insulation outcome: pairs, milled slots,
 	// no-pour regions and the creepage/clearance check of the routed copper.
 	Isolation *IsolationReport `json:"isolation,omitempty"`
+	// Edge is the board-edge safety distance: the policy and the measured
+	// copper-to-edge minimum per layer of the plan.
+	Edge *EdgeCheck `json:"edge,omitempty"`
 }
 
 // Attempt records one stackup variant tried by the pipeline.
@@ -134,6 +137,10 @@ func Run(ctx context.Context, b *Board, opt Options) (*Result, error) {
 	}
 	isoNotes = append(isoNotes, clipPlanesToIso(b, res.Analysis, res.Route)...)
 	res.Isolation = isolationReport(b, res.Analysis, res.Route, isoSlots, isoNotes, isoBad)
+	if res.Route != nil {
+		res.Route.Notes = append(res.Route.Notes, enforcePlaneEdge(b, res.Analysis.edgePolicy(b), res.Route.Planes)...)
+	}
+	res.Edge = planEdgeCheck(b, res.Analysis, res.Stackup, res.Route)
 	return res, nil
 }
 

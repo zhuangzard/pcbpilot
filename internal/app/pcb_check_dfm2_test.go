@@ -127,39 +127,6 @@ func TestFindSilkOverPad_FontSize(t *testing.T) {
 	}
 }
 
-// ── copper-near-edge (§5.1) ──────────────────────────────────────────────────
-
-func TestFindCopperNearEdge(t *testing.T) {
-	outline := &layoutBBox{MinX: 0, MinY: 0, MaxX: 1000, MaxY: 1000}
-	tracks := []pcbTrack{
-		// endpoint 4mil from the left edge (width 10 → copper edge at -1) → flagged
-		{ID: "t1", Net: "SIG1", Layer: 1, X1: 4, Y1: 500, X2: 300, Y2: 500, Width: 10},
-		// comfortably interior → OK
-		{ID: "t2", Net: "SIG2", Layer: 1, X1: 500, Y1: 500, X2: 600, Y2: 500, Width: 10},
-		// net-less (board outline segment itself) → skipped
-		{ID: "t3", Net: "", Layer: 1, X1: 0, Y1: 0, X2: 1000, Y2: 0, Width: 10},
-	}
-	vias := []pcbViaP{
-		{ID: "v1", Net: "GND", X: 995, Y: 500, Hole: 12, Dia: 24}, // 5mil to edge minus radius → flagged
-		{ID: "v2", Net: "GND", X: 500, Y: 500, Hole: 12, Dia: 24}, // interior → OK
-	}
-	out := findCopperNearEdge(tracks, vias, outline, 8)
-	if len(out) != 2 { // aggregated per net: SIG1 + GND
-		t.Fatalf("copper-near-edge = %d findings, want 2 (%+v)", len(out), out)
-	}
-	nets := map[string]bool{}
-	for _, f := range out {
-		nets[f.Net] = true
-	}
-	if !nets["SIG1"] || !nets["GND"] {
-		t.Errorf("expected SIG1+GND, got %v", nets)
-	}
-	// nil outline → rule disabled, never panics
-	if out := findCopperNearEdge(tracks, vias, nil, 8); out != nil {
-		t.Errorf("nil outline must disable the rule, got %+v", out)
-	}
-}
-
 // ── fiducial-missing (§9) ────────────────────────────────────────────────────
 
 func TestFindFiducialMissing(t *testing.T) {
