@@ -66,7 +66,7 @@ code{font-size:12px;word-break:break-all}
 
 <nav class="toc"><ol start="0">
 <li><a href="#s0">封面</a></li><li><a href="#s1">执行摘要</a></li><li><a href="#s2">需求与设计意图</a></li><li><a href="#s3">电源仿真</a></li>
-<li><a href="#s4">器件可行性</a></li><li><a href="#s5">工程计算</a></li><li><a href="#s6">布局与布线</a></li><li><a href="#s7">验证状态</a></li>
+<li><a href="#s4">器件可行性</a></li><li><a href="#s5">工程计算</a></li><li><a href="#s6">布局与布线</a></li><li><a href="#s6a">设计后仿真</a></li><li><a href="#s7">验证状态</a></li>
 <li><a href="#s8">测试点计划</a></li><li><a href="#s9">制造与装配</a></li><li><a href="#s10">调试上电流程</a></li><li><a href="#s11">附录</a></li>
 </ol></nav>
 
@@ -89,6 +89,7 @@ code{font-size:12px;word-break:break-all}
 {{- end}}
 
 <h2 id="s2">2 需求与设计意图 Requirements &amp; design intent</h2>
+{{- with $R.Data.intent}}<p class="muted">数据：<a href="{{.}}"><code>{{.}}</code></a></p>{{end}}
 {{- with $R.Requirements}}
 <h3>功能块 Blocks</h3>
 <table><thead><tr><th>ID</th><th>功能</th><th>核心</th><th>器件</th><th>说明</th><th>功耗</th></tr></thead><tbody>
@@ -109,6 +110,7 @@ code{font-size:12px;word-break:break-all}
 {{- else}}{{template "na" (missing $R "2")}}{{end}}
 
 <h2 id="s3">3 电源仿真 Power simulation</h2>
+{{- with $R.Data.sim}}<p class="muted">数据：<a href="{{.}}"><code>{{.}}</code></a></p>{{end}}
 {{- with $R.Power}}
 <p>直流工作点（MNA + Newton–Raphson），场景：{{join .Scenarios "、"}}；收敛：{{if .Converged}}是{{else}}<b>否</b>{{end}}。</p>
 <h3>3.1 电源轨（各场景）</h3>
@@ -231,6 +233,32 @@ code{font-size:12px;word-break:break-all}
 {{- if .Difficulty}}<table><tbody>{{range .Difficulty}}<tr><th>{{.Label}}</th><td>{{.Value}}</td></tr>{{end}}</tbody></table>{{end}}
 {{- if .Feedback}}<ul>{{range .Feedback}}<li>{{.}}</li>{{end}}</ul>{{else}}<p>无反馈项。</p>{{end}}
 {{- else}}{{template "na" (missing $R "6")}}{{end}}
+
+<h2 id="s6a">6A 设计后仿真验证 Post-layout verification</h2>
+{{- with $R.Post}}
+<p><span class="badge {{statusCls .Status}}">{{.Status}}</span> 场景 {{.Scenarios}}{{with .Board}} · 板 semantic <code>{{short .}}</code>{{end}}{{with .Data}} · 数据 <a href="{{.}}"><code>{{.}}</code></a>{{end}}</p>
+<p class="muted">边界：{{.Boundary}}</p>
+{{- if .Reasons}}<ul>{{range .Reasons}}<li>{{.}}</li>{{end}}</ul>{{end}}
+<table><tbody>{{range .Settings}}<tr><th>{{.Label}}</th><td>{{.Value}}</td><td><small>{{.Note}}</small></td></tr>{{end}}</tbody></table>
+<h3>6A.1 真实铜皮直流压降 IR drop on the real copper</h3>
+<table><thead><tr><th>网络</th><th>角色</th><th>最坏场景</th><th>参考</th><th>I A</th><th>预算 mV</th><th>最坏 mV</th><th>最坏焊盘</th><th>铜损 mW</th><th>最大 J A/mm²</th><th>最大过孔 A</th><th>铜自热 °C</th><th>状态</th></tr></thead><tbody>
+{{- range .Nets}}<tr><td>{{.Net}}</td><td>{{.Role}}</td><td>{{.Scenario}}</td><td>{{.Reference}}</td><td class="n">{{f3 .CurrentA}}</td><td class="n">{{opt .BudgetMV}}</td><td class="n">{{f3 .WorstMV}}</td><td>{{.WorstPad}}</td><td class="n">{{f3 .LossMW}}</td><td class="n">{{f1 .MaxJ}}</td><td class="n">{{f3 .MaxViaA}}</td><td class="n">{{f2 .RiseC}}</td><td>{{.Status}}</td></tr>{{end}}
+</tbody></table>
+{{- if .Compare}}<details><summary>与 pcb auto 布线期 IR 估算对比</summary><table><thead><tr><th>网络</th><th>pcb auto mV</th><th>设计后 mV</th><th>差 mV</th><th>焊盘</th></tr></thead><tbody>{{range .Compare}}<tr><td>{{.Net}}</td><td class="n">{{f2 .AutoMV}}</td><td class="n">{{f2 .PostMV}}</td><td class="n">{{f2 .DeltaMV}}</td><td>{{.Pad}}</td></tr>{{end}}</tbody></table></details>{{end}}
+<h3>6A.2 过孔电流 Via currents</h3>
+{{- if .Vias}}<table><thead><tr><th>网络</th><th>位置</th><th>I A</th><th>载流量 A</th><th>占用</th><th>场景</th></tr></thead><tbody>{{range .Vias}}<tr><td>{{.Net}}</td><td>{{.At}}</td><td class="n">{{f3 .CurrentA}}</td><td class="n">{{f2 .AmpacityA}}</td><td class="n">{{f1 .UsePct}} %</td><td>{{.Scenario}}</td></tr>{{end}}</tbody></table>{{else}}<p>没有过孔承载仿真电流。</p>{{end}}
+<h3>6A.3 稳态热仿真 Thermal</h3>
+<table><tbody>{{range .Thermal}}<tr><th>{{.Label}}</th><td>{{.Value}}</td><td><small>{{.Note}}</small></td></tr>{{end}}</tbody></table>
+<table><thead><tr><th>层</th><th>最高 °C</th><th>平均 °C</th><th>位置 mil</th></tr></thead><tbody>{{range .Layers}}<tr><td>{{.Layer}}</td><td class="n">{{f1 .MaxC}}</td><td class="n">{{f1 .MeanC}}</td><td>{{.At}}</td></tr>{{end}}</tbody></table>
+<table><thead><tr><th>器件</th><th>面</th><th>功耗 W</th><th>场景</th><th>板温 °C</th><th>θ</th><th>Tj °C</th><th>Tj,max °C</th><th>状态</th></tr></thead><tbody>
+{{- range .Parts}}<tr><td>{{.Ref}}</td><td>{{.Side}}</td><td class="n">{{f4 .PowerW}}</td><td>{{.Scenario}}</td><td class="n">{{f1 .BoardC}}</td><td>{{or .Theta "—"}}</td><td class="n">{{opt .TjC}}</td><td class="n">{{opt .TjMaxC}}</td><td>{{statusZh .Status}}</td></tr>{{end}}
+</tbody></table>
+{{- range .Maps}}<figure class="img"><img src="{{img .}}" alt="{{.Label}}"{{if .Width}} width="{{.Width}}" height="{{.Height}}"{{end}}><figcaption><small>{{.Label}} · <code>{{.Path}}</code></small></figcaption></figure>{{end}}
+<h3>6A.4 铜皮修改建议 Copper feedback</h3>
+{{- if .Feedback}}<table><thead><tr><th>ID</th><th>类型</th><th>级别</th><th>位置 mil</th><th>建议</th></tr></thead><tbody>{{range .Feedback}}<tr><td>{{.ID}}</td><td>{{.Kind}}</td><td>{{.Severity}}</td><td>{{.Where}}</td><td>{{.Summary}}</td></tr>{{end}}</tbody></table>{{else}}<p>无需加宽的走线、需倒角的拐角或过孔瓶颈。</p>{{end}}
+{{- if .Elmer}}<h3>6A.5 Elmer FEM 交叉校验</h3><table><tbody>{{range .Elmer}}<tr><th>{{.Label}}</th><td>{{.Value}}</td><td><small>{{.Note}}</small></td></tr>{{end}}</tbody></table>{{end}}
+<details><summary>模型与假设</summary><ul>{{range .Assumptions}}<li>{{.}}</li>{{end}}</ul></details>
+{{- else}}{{template "na" (missing $R "6A")}}{{end}}
 
 <h2 id="s7">7 验证状态 Verification status</h2>
 <table><thead><tr><th>检查</th><th>结论</th><th>说明</th><th>证据文件</th></tr></thead><tbody>

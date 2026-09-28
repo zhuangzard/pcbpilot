@@ -83,6 +83,7 @@ func Build(in *Inputs) *Report {
 		c.rep.Tools.Pcbpilot = "dev"
 	}
 	c.rep.InputsDigest = inputsDigest(in.Refs)
+	c.rep.Data = in.Data
 	c.prepare()
 	c.buildRequirements()
 	c.buildPower()
@@ -90,6 +91,7 @@ func Build(in *Inputs) *Report {
 	c.buildCalcs()
 	c.buildLayout()
 	c.buildVerification()
+	c.buildPost()
 	c.buildTestPlan()
 	c.buildManufacturing()
 	c.buildBringUp()

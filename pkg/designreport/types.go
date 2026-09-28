@@ -68,11 +68,16 @@ type Report struct {
 	Feasibility   *FeasibilitySection  `json:"feasibility,omitempty"`
 	Calcs         *CalcSection         `json:"calculations,omitempty"`
 	Layout        *LayoutSection       `json:"layout,omitempty"`
+	Post          *PostSection         `json:"postLayout,omitempty"`
 	Verification  []Check              `json:"verification"`
 	TestPlan      *TestPlanSection     `json:"testPlan,omitempty"`
 	Manufacturing *MfgSection          `json:"manufacturing,omitempty"`
 	BringUp       *BringUpSection      `json:"bringUp,omitempty"`
 	Appendix      AppendixSection      `json:"appendix"`
+	// Data maps an input kind to its file inside the report package.
+	Data map[string]string `json:"data,omitempty"`
+	// Package is the zip of this version (reports/<name>/<Package>).
+	Package string `json:"package,omitempty"`
 	// Missing lists the sections (or parts of them) left out and why.
 	Missing []Missing `json:"missing,omitempty"`
 }

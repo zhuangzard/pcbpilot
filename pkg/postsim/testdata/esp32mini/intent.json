@@ -1,0 +1,17 @@
+{
+ "schemaVersion": 1,
+ "_provenance": "copper section of artifacts/v05-live/intent.json",
+ "copper": {
+  "layers": 4,
+  "outerOz": 1,
+  "innerOz": 0.5,
+  "tempRiseC": 10,
+  "refHeightMil": 8.4,
+  "er": 4.05,
+  "stackup": "JLC04161H-7628 (4-layer 1.6 mm, L1\u2192L2 prepreg 0.2104 mm)",
+  "minTrackMil": 6,
+  "clearanceMil": 6,
+  "viaDrillMil": 12,
+  "viaDiaMil": 24
+ }
+}

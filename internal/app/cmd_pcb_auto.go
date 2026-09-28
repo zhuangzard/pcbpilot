@@ -247,7 +247,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 		var only []string
 		var seed int64
 		var loops int
-		var noFeedback bool
+		var noFeedback, postSim bool
 		var fbVerify, fbLoop int
 		c := &cobra.Command{
 			Use:   "run",
@@ -473,11 +473,17 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 					}
 				}
 				fmt.Fprintf(stdout, "wrote %s/{%s} (%d playbook steps)\n", outDir, names, len(pb.Steps))
+				postPath := ""
+				if postSim {
+					if postPath, err = autoPostSim(outDir, in.sim, in.intent, b, rep, stdout, stderr); err != nil {
+						return fmt.Errorf("post-sim: %w", err)
+					}
+				}
 				if reportDir != "" {
 					// P11: publish the next design-report version from what this
 					// run has (intent, sim, this plan dir, the board dump).
 					dir, dr, err := runDesignReport(designReportOpts{outDir: reportDir, version: "auto", project: reportName,
-						intent: in.intent, sim: in.sim, planDir: outDir, board: in.board, maxImageBytes: designreport.DefaultMaxImageBytes}, stderr)
+						intent: in.intent, sim: in.sim, planDir: outDir, board: in.board, post: postPath, maxImageBytes: designreport.DefaultMaxImageBytes}, stderr)
 					if err != nil {
 						return fmt.Errorf("design report: %w", err)
 					}
@@ -497,6 +503,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 		c.Flags().StringSliceVar(&only, "only", nil, "with --place --refine: move only these designators (local adjustment of a confirmed layout), e.g. --only C7,D3")
 		c.Flags().BoolVar(&noRoute, "no-route", false, "stop after placement / stackup")
 		c.Flags().Int64Var(&seed, "seed", 0, "placement random seed (runs are reproducible per seed)")
+		c.Flags().BoolVar(&postSim, "post-sim", false, "after routing, run the post-layout verification (sim post-layout) on this run's own routed board (board.routed.json, engine result — verify the live board again after apply with pcb dump → sim post-layout): post.json, post.md, heatmaps/, copper feedback merged into feedback.json; needs --sim")
 		c.Flags().BoolVar(&noFeedback, "no-feedback", false, "skip the schematic feedback (feedback.json / report section 回推原理图的建议)")
 		c.Flags().IntVar(&fbVerify, "feedback-verify", 3, "re-route up to N pin-swap candidates on a board copy to verify their gain (0 = ratsnest estimate only; skipped when the base routing took > 60 s)")
 		c.Flags().IntVar(&fbLoop, "feedback-loop", 0, "closed loop PCB→schematic: up to N passes that apply the best pin swap to an in-memory copy, re-route and keep it only when the joint score improves; the accepted swaps are the recommendation (plan/playbook stay those of the unmodified board)")
@@ -602,4 +609,40 @@ Nothing is written to EasyEDA; apply a pin swap with 'pcbpilot sch pin-swap'.`,
 		p.AddCommand(mkFeedback()) // 'pcb feedback' = 'pcb auto feedback'
 	}
 	return group
+}
+
+// autoPostSim runs `sim post-layout` on pcb auto's routed board dump.
+func autoPostSim(outDir, simPath, intentPath string, b *pcbauto.Board, rep *pcbauto.Report, stdout, stderr io.Writer) (string, error) {
+	routed := filepath.Join(outDir, "board.routed.json")
+	if simPath == "" {
+		fmt.Fprintln(stderr, "⚠️  --post-sim needs --sim (pin currents and part power): skipped")
+		return "", nil
+	}
+	if _, err := os.Stat(routed); err != nil {
+		fmt.Fprintln(stderr, "⚠️  --post-sim: no routed board (board.routed.json) — skipped")
+		return "", nil
+	}
+	o := postSimOpts{board: routed, sim: simPath, intent: intentPath,
+		out: filepath.Join(outDir, "post.json"), report: filepath.Join(outDir, "post.md"), svgDir: filepath.Join(outDir, "heatmaps"),
+		feedback: filepath.Join(outDir, "feedback.json"), plan: filepath.Join(outDir, "plan.json"),
+		cell: 0.5, ambient: 25, hTop: 10, hBottom: 10, kxy: 0.3, kz: 0.3, plating: 0.7, viaDT: 10, margin: 1.2,
+		outerOz: b.Rules.CopperOz, innerOz: b.Rules.InnerCopperOz, thick: b.Rules.BoardThickMil * 0.0254,
+		source: "pcb auto run result (engine routing, not a live readback)"}
+	if rep != nil && rep.Result != nil && rep.Result.Stackup != nil {
+		for _, l := range rep.Result.Stackup.Stack {
+			if l.Kind == pcbauto.KindPlane && len(l.Nets) == 1 && l.ID >= pcbauto.LayerInner1 {
+				o.planes = append(o.planes, fmt.Sprintf("%d=%s", l.ID, l.Nets[0]))
+			}
+		}
+	}
+	res, err := runPostSim(o, stderr)
+	if err != nil {
+		return "", err
+	}
+	maxC := 0.0
+	if res.Thermal != nil {
+		maxC = res.Thermal.MaxBoardC
+	}
+	fmt.Fprintf(stdout, "post-layout %s — board max %.1f °C, %d feedback item(s) → %s\n", strings.ToUpper(res.Verdict.Status), maxC, len(res.Feedback), o.out)
+	return o.out, nil
 }

@@ -1,0 +1,70 @@
+{
+ "_provenance": "result.route.power of artifacts/v05-live/final/plan.json (pcb auto IR estimate)",
+ "result": {
+  "route": {
+   "power": {
+    "budget": {
+     "pct": 2,
+     "mv": 30
+    },
+    "scenario": "worst",
+    "nets": [
+     {
+      "net": "+3V3",
+      "role": "power",
+      "reference": "L1",
+      "worstMV": 3.828459092029492,
+      "worstPad": "U3.2",
+      "budgetMV": 66.36,
+      "status": "ok"
+     },
+     {
+      "net": "+5V_TERM",
+      "role": "power",
+      "reference": "J1",
+      "worstMV": 1.9797011137103107,
+      "worstPad": "D1.2",
+      "budgetMV": 99.982,
+      "status": "ok"
+     },
+     {
+      "net": "GND",
+      "role": "ground",
+      "reference": "J2|J1",
+      "worstMV": 1.117924524441923,
+      "worstPad": "U3.1",
+      "budgetMV": 0,
+      "status": "info"
+     },
+     {
+      "net": "LX",
+      "role": "switch",
+      "reference": "U1",
+      "worstMV": 0.6142343933865116,
+      "worstPad": "L1.1",
+      "budgetMV": 0,
+      "status": "info"
+     },
+     {
+      "net": "USB_VBUS",
+      "role": "power",
+      "reference": "J2",
+      "worstMV": 17.872940317938053,
+      "worstPad": "D2.2",
+      "budgetMV": 99.914,
+      "status": "ok"
+     },
+     {
+      "net": "VSYS_5V",
+      "role": "power",
+      "reference": "D2|D1",
+      "worstMV": 15.617127754403352,
+      "worstPad": "U1.4",
+      "budgetMV": 94.662,
+      "status": "ok"
+     }
+    ]
+   }
+  }
+ }
+}

@@ -46,6 +46,7 @@ func (res *Result) WriteMaps(dir string) error {
 		return err
 	}
 	res.Maps = nil
+	res.MapsDir = filepath.ToSlash(dir)
 	lo, hi := math.Inf(1), math.Inf(-1)
 	for _, m := range res.TempMap {
 		for _, t := range m {

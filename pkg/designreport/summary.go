@@ -106,6 +106,7 @@ func (c *ctx) buildSummary() {
 			add(ch.Name, ch.Status, ch.Detail)
 		}
 	}
+	c.postKeyNumbers(add)
 	if it := c.in.Intent; it != nil {
 		n := map[string]int{}
 		for _, f := range it.Findings {

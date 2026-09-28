@@ -31,6 +31,8 @@ type designReportOpts struct {
 	reloadBoard, drc, check     string
 	rulesCheck, netDiff, models string
 	values                      string
+	post, spice                 string
+	noZip                       bool
 	images                      []string
 	force                       bool
 	maxImageBytes               int
@@ -157,7 +159,10 @@ func addDesignReportFlags(c *cobra.Command, o *designReportOpts) {
 	f.StringVar(&o.netDiff, "net-diff", "", "pad-net diff JSON ({passed|ok, diffs[]…})")
 	f.StringVar(&o.models, "models", "", "power-models.json with ratings (default: the installed skill's references/power-models.json)")
 	f.StringVar(&o.values, "values", "", "part values/MPNs: sch list JSON or {\"parts\":{ref:{value,mpn}}}")
-	f.StringArrayVar(&o.images, "image", nil, "image KIND[:LABEL]=PATH, KIND sch|layout|other (repeatable), e.g. sch:P1=p1.png, layout=snapshot.png")
+	f.StringVar(&o.post, "post", "", "post.json (pcbpilot sim post-layout): chapter 6A 设计后仿真验证 + verdict; its heat maps (--svg-dir) and Elmer deck are packaged")
+	f.StringVar(&o.spice, "spice", "", "SPICE netlist of sim power --spice, packaged under data/")
+	f.BoolVar(&o.noZip, "no-zip", false, "do not write reports/<name>/pcbpilot-report-<name>-vN.zip")
+	f.StringArrayVar(&o.images, "image", nil, "image KIND[:LABEL]=PATH, KIND sch|layout|heat|other (repeatable), e.g. sch:P1=p1.png, layout=snapshot.png, heat:TOP=heatmaps/temp-TOP.svg")
 	f.BoolVar(&o.force, "force", false, "overwrite an existing version")
 	f.IntVar(&o.maxImageBytes, "max-image-bytes", designreport.DefaultMaxImageBytes, "raster images larger than this are halved until they fit")
 	f.StringVar(&o.date, "date", "", "generatedAt override (RFC3339); default SOURCE_DATE_EPOCH or now")
@@ -165,7 +170,8 @@ func addDesignReportFlags(c *cobra.Command, o *designReportOpts) {
 
 // reportInput reads one optional input file and records its provenance.
 type reportInputs struct {
-	refs []designreport.InputRef
+	refs  []designreport.InputRef
+	files []pkgFile // non-image inputs, packaged under data/
 }
 
 func (ri *reportInputs) read(kind, label, path string) ([]byte, error) {
@@ -181,6 +187,9 @@ func (ri *reportInputs) read(kind, label, path string) ([]byte, error) {
 	h := sha256.Sum256(b)
 	ref.Present, ref.SHA256, ref.Bytes = true, hex.EncodeToString(h[:]), len(b)
 	ri.refs = append(ri.refs, ref)
+	if kind != "image" {
+		ri.files = append(ri.files, newPkgFile(dataFileName(kind, path), "data:"+kind, producers[kind], path, b))
+	}
 	return b, nil
 }
 
@@ -209,7 +218,7 @@ func reportTime(date string) (time.Time, error) {
 
 // loadDesignReportInputs parses every given input; a present but unreadable
 // input is an error (a typo must not silently produce a thinner report).
-func loadDesignReportInputs(o designReportOpts, stderr io.Writer) (*designreport.Inputs, error) {
+func loadDesignReportInputs(o designReportOpts, stderr io.Writer) (*designreport.Inputs, []pkgFile, error) {
 	in := &designreport.Inputs{Project: o.project, Customer: o.customer,
 		Tools: designreport.ToolInfo{Pcbpilot: version.Version, Host: o.host, Connector: o.connector}}
 	if in.Project == "" {
@@ -217,23 +226,23 @@ func loadDesignReportInputs(o designReportOpts, stderr io.Writer) (*designreport
 	}
 	var err error
 	if in.GeneratedAt, err = reportTime(o.date); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	ri := &reportInputs{}
 	if b, err := ri.read("intent", "设计意图 intent.json", o.intent); err != nil {
-		return nil, err
+		return nil, nil, err
 	} else if b != nil {
 		var it intent.Intent
 		if err := json.Unmarshal(b, &it); err != nil {
-			return nil, fmt.Errorf("%s: %w", o.intent, err)
+			return nil, nil, fmt.Errorf("%s: %w", o.intent, err)
 		}
 		in.Intent = &it
 	}
 	if b, err := ri.read("sim", "电源仿真 sim.json", o.sim); err != nil {
-		return nil, err
+		return nil, nil, err
 	} else if b != nil {
 		if in.Sim, err = intent.ParseSimOutput(b); err != nil {
-			return nil, fmt.Errorf("%s: %w", o.sim, err)
+			return nil, nil, fmt.Errorf("%s: %w", o.sim, err)
 		}
 	}
 	planPath, fbPath, prevPath := "", "", ""
@@ -247,20 +256,20 @@ func loadDesignReportInputs(o designReportOpts, stderr io.Writer) (*designreport
 		}
 	}
 	if b, err := ri.read("plan", "pcb auto plan.json", planPath); err != nil {
-		return nil, err
+		return nil, nil, err
 	} else if b != nil {
 		var rep pcbauto.Report
 		if err := json.Unmarshal(b, &rep); err != nil {
-			return nil, fmt.Errorf("%s: %w", planPath, err)
+			return nil, nil, fmt.Errorf("%s: %w", planPath, err)
 		}
 		in.Plan = &rep
 	}
 	if b, err := ri.read("feedback", "pcb auto feedback.json", fbPath); err != nil {
-		return nil, err
+		return nil, nil, err
 	} else if b != nil {
 		var fb pcbauto.Feedback
 		if err := json.Unmarshal(b, &fb); err != nil {
-			return nil, fmt.Errorf("%s: %w", fbPath, err)
+			return nil, nil, fmt.Errorf("%s: %w", fbPath, err)
 		}
 		in.Feedback = &fb
 	}
@@ -275,25 +284,25 @@ func loadDesignReportInputs(o designReportOpts, stderr io.Writer) (*designreport
 		return nil
 	}
 	if err := parse("board", "板级回读 board dump", o.board, func(b []byte) (err error) { in.Board, err = designreport.ParseBoard(b); return }); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := parse("reload-board", "保存重载后回读", o.reloadBoard, func(b []byte) (err error) { in.ReloadBoard, err = designreport.ParseBoard(b); return }); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := parse("drc", "原生 DRC", o.drc, func(b []byte) (err error) { in.DRC, err = designreport.ParseDRC(b); return }); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := parse("check", "pcb check", o.check, func(b []byte) (err error) { in.Check, err = designreport.ParseCheck(b); return }); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := parse("rules-check", "规则同步 rules check", o.rulesCheck, func(b []byte) (err error) { in.RulesCheck, err = designreport.ParseRulesCheck(b); return }); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := parse("net-diff", "焊盘网络对账", o.netDiff, func(b []byte) (err error) { in.NetDiff, err = designreport.ParseNetDiff(b); return }); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := parse("values", "器件值/型号", o.values, func(b []byte) (err error) { in.Values, err = powersim.ParseValues(b); return }); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	modelsPath := o.models
 	if modelsPath == "" {
@@ -307,15 +316,22 @@ func loadDesignReportInputs(o designReportOpts, stderr io.Writer) (*designreport
 		in.Models, err = designreport.ParseModels(b, modelsPath)
 		return
 	}); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	// Images: explicit ones, then the pcb auto preview.
+	if err := parse("post", "设计后仿真 post.json", o.post, func(b []byte) (err error) { in.Post, err = designreport.ParsePost(b); return }); err != nil {
+		return nil, nil, err
+	}
+	if err := parse("spice", "SPICE 网表", o.spice, func([]byte) error { return nil }); err != nil {
+		return nil, nil, err
+	}
+	// Images: explicit ones, then the pcb auto preview, then the post-layout
+	// heat maps (unless given explicitly).
 	type imgSpec struct{ kind, label, path string }
 	var specs []imgSpec
 	for _, s := range o.images {
 		k, p, ok := strings.Cut(s, "=")
 		if !ok || p == "" {
-			return nil, fmt.Errorf("--image %q: want KIND[:LABEL]=PATH", s)
+			return nil, nil, fmt.Errorf("--image %q: want KIND[:LABEL]=PATH", s)
 		}
 		kind, label, _ := strings.Cut(k, ":")
 		switch kind {
@@ -325,6 +341,8 @@ func loadDesignReportInputs(o designReportOpts, stderr io.Writer) (*designreport
 			if label == "" {
 				label = "PCB 布局（编辑器快照）"
 			}
+		case "heat":
+			label = strings.TrimSpace(label + " 热图")
 		default:
 			if label == "" {
 				label = kind
@@ -335,14 +353,27 @@ func loadDesignReportInputs(o designReportOpts, stderr io.Writer) (*designreport
 	if prevPath != "" {
 		specs = append(specs, imgSpec{"preview", "pcb auto 离线布线预览（preview.svg）", prevPath})
 	}
+	explicitHeat := false
+	for _, sp := range specs {
+		explicitHeat = explicitHeat || sp.kind == "heat"
+	}
+	if !explicitHeat {
+		if _, hs := postHeatImages(in.Post, o.post); len(hs) > 0 {
+			for _, h := range hs {
+				specs = append(specs, imgSpec{h[0], h[1], h[2]})
+			}
+		} else if in.Post != nil && len(in.Post.Maps) > 0 {
+			fmt.Fprintf(stderr, "warning: post.json lists %d heat map(s) in %q but the directory was not found; pass --image heat:LAYER=… \n", len(in.Post.Maps), in.Post.MapsDir)
+		}
+	}
 	for _, s := range specs {
 		b, err := ri.read("image", s.label, s.path)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		img, err := designreport.PrepareImage(s.kind, s.label, s.path, b, o.maxImageBytes)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if img.Resized {
 			ri.note("image", fmt.Sprintf("缩小到 %d×%d（%d 字节）", img.Width, img.Height, img.Bytes))
@@ -350,12 +381,16 @@ func loadDesignReportInputs(o designReportOpts, stderr io.Writer) (*designreport
 		in.Images = append(in.Images, img)
 	}
 	in.Refs = ri.refs
-	return in, nil
+	in.Data = map[string]string{}
+	for _, f := range ri.files {
+		in.Data[strings.TrimPrefix(f.Role, "data:")] = f.Rel
+	}
+	return in, ri.files, nil
 }
 
 // runDesignReport builds and publishes one report version.
 func runDesignReport(o designReportOpts, stderr io.Writer) (string, *designreport.Report, error) {
-	in, err := loadDesignReportInputs(o, stderr)
+	in, packaged, err := loadDesignReportInputs(o, stderr)
 	if err != nil {
 		return "", nil, err
 	}
@@ -388,6 +423,10 @@ func runDesignReport(o designReportOpts, stderr io.Writer) (string, *designrepor
 	rep.Changes = designreport.Compare(idx.Latest(v), cur)
 	cur.Changes = rep.Changes
 	charts := designreport.Charts(rep)
+	zipFile := zipName(rep.Project, label)
+	if !o.noZip {
+		rep.Package = zipFile
+	}
 	html, err := designreport.RenderHTML(rep, charts)
 	if err != nil {
 		return "", nil, fmt.Errorf("render html: %w", err)
@@ -397,16 +436,22 @@ func runDesignReport(o designReportOpts, stderr io.Writer) (string, *designrepor
 		return "", nil, fmt.Errorf("render markdown: %w", err)
 	}
 	js, _ := json.MarshalIndent(rep, "", "  ")
-	if err := os.MkdirAll(filepath.Join(dir, "charts"), 0o755); err != nil {
-		return "", nil, err
+	if o.force {
+		_ = os.RemoveAll(dir)
 	}
-	if err := os.MkdirAll(filepath.Join(o.outDir, "assets"), 0o755); err != nil {
-		return "", nil, err
+	// The version package: report files, assets/ (images, charts, heat
+	// maps), data/ (every input and evidence file), manifest.json, zip.
+	files := []pkgFile{
+		newPkgFile("report.html", "report-html", producers["report"], "", html),
+		newPkgFile("report.md", "report-md", producers["report"], "", md),
+		newPkgFile("report.json", "report-json", producers["report"], "", append(js, '\n')),
 	}
 	for _, img := range in.Images {
-		if err := os.WriteFile(filepath.Join(o.outDir, "assets", img.Asset), img.Data, 0o644); err != nil {
-			return "", nil, err
+		prod := producers["image"]
+		if p, ok := producers[img.Kind]; ok {
+			prod = p
 		}
+		files = append(files, newPkgFile("assets/"+img.Asset, "image:"+img.Kind, prod, img.Path, img.Data))
 	}
 	names := make([]string, 0, len(charts))
 	for n := range charts {
@@ -414,15 +459,30 @@ func runDesignReport(o designReportOpts, stderr io.Writer) (string, *designrepor
 	}
 	sort.Strings(names)
 	for _, n := range names {
-		if err := os.WriteFile(filepath.Join(dir, "charts", n+".svg"), []byte(charts[n]+"\n"), 0o644); err != nil {
-			return "", nil, err
-		}
+		files = append(files, newPkgFile("assets/charts/"+n+".svg", "chart", producers["report"], "", []byte(charts[n]+"\n")))
 	}
-	files := map[string][]byte{"report.html": html, "report.md": md, "report.json": append(js, '\n')}
-	for _, n := range []string{"report.html", "report.md", "report.json"} {
-		if err := os.WriteFile(filepath.Join(dir, n), files[n], 0o644); err != nil {
-			return "", nil, err
-		}
+	files = append(files, packaged...)
+	var notes []string
+	if ef, note := elmerFiles(in.Post, o.post); note != "" {
+		notes = append(notes, note)
+	} else {
+		files = append(files, ef...)
+	}
+	man := &reportManifest{SchemaVersion: 1, Generator: designreport.Generator, Project: rep.Project, Version: label,
+		GeneratedAt: rep.GeneratedAt, Verdict: rep.Verdict.Status, Notes: notes}
+	zipPath := filepath.Join(o.outDir, zipFile)
+	if !o.noZip {
+		man.Zip = zipFile
+	}
+	when, _ := time.Parse(time.RFC3339, rep.GeneratedAt)
+	if o.noZip {
+		zipPath = filepath.Join(os.TempDir(), "pcbpilot-report-discard.zip")
+	}
+	if err := writeReportPackage(dir, zipPath, man, files, when); err != nil {
+		return "", nil, err
+	}
+	if o.noZip {
+		_ = os.Remove(zipPath)
 	}
 	if idx.Project == "" {
 		idx.Project = rep.Project

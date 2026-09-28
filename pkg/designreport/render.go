@@ -126,15 +126,15 @@ func RenderHTML(r *Report, charts map[string]string) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// RenderMarkdown renders report.md; chart files are charts/<name>.svg and
-// images ../assets/<asset>.
+// RenderMarkdown renders report.md; chart files are assets/charts/<name>.svg
+// and images assets/<asset> (paths inside the version package).
 func RenderMarkdown(r *Report) ([]byte, error) {
 	src, err := Templates.ReadFile("templates/report.md.tmpl")
 	if err != nil {
 		return nil, err
 	}
 	fm := texttpl.FuncMap(commonFuncs())
-	fm["imgpath"] = func(img Image) string { return "../assets/" + img.Asset }
+	fm["imgpath"] = func(img Image) string { return "assets/" + img.Asset }
 	t, err := texttpl.New("report.md").Funcs(fm).Parse(string(src))
 	if err != nil {
 		return nil, err

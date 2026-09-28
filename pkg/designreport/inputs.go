@@ -13,6 +13,7 @@ import (
 
 	"github.com/zhuangzard/pcbpilot/pkg/intent"
 	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
+	"github.com/zhuangzard/pcbpilot/pkg/postsim"
 	"github.com/zhuangzard/pcbpilot/pkg/powersim"
 )
 
@@ -37,6 +38,11 @@ type Inputs struct {
 	Models      *ModelLib
 	Values      map[string]powersim.PartValues
 	Images      []Image
+	// Post is the post-layout verification (pcbpilot sim post-layout).
+	Post *postsim.Result
+	// Data maps an input kind to its path inside the report package
+	// (data/…); the templates link tables to it.
+	Data map[string]string
 	// Refs is the provenance of every input kind (present or not).
 	Refs []InputRef
 }

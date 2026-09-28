@@ -409,8 +409,12 @@ func statusZh(s string) string {
 		return "临界"
 	case FeasOver:
 		return "超限"
-	case FeasUnknown:
+	case FeasUnknown, "needs-datasheet":
 		return "需数据手册"
+	case "warn":
+		return "警告"
+	case "fail":
+		return "超限"
 	}
 	return s
 }

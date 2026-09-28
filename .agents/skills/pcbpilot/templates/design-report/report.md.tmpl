@@ -1,6 +1,7 @@
 {{- /* pcbpilot design report — Markdown template (canonical copy:
 .agents/skills/pcbpilot/templates/design-report/report.md.tmpl). Charts are
-the SVG files in charts/, images the content-addressed files in ../assets/. */ -}}
+the SVG files in assets/charts/, images the content-addressed files in assets/,
+input/evidence files in data/ (one self-contained package per version). */ -}}
 {{- $R := .R -}}
 # {{$R.Project}} 设计报告 {{$R.VersionLabel}}
 
@@ -56,7 +57,9 @@ the SVG files in charts/, images the content-addressed files in ../assets/. */ -
 {{end}}
 
 ## 2 需求与设计意图
-{{with $R.Requirements}}
+{{with $R.Data.intent}}
+数据：[{{.}}]({{.}})
+{{end}}{{with $R.Requirements}}
 | ID | 功能 | 核心 | 器件 | 说明 |
 |---|---|---|---|---|
 {{- range .Blocks}}
@@ -83,7 +86,9 @@ the SVG files in charts/, images the content-addressed files in ../assets/. */ -
 {{end}}
 
 ## 3 电源仿真
-{{with $R.Power}}
+{{with $R.Data.sim}}
+数据：[{{.}}]({{.}})
+{{end}}{{with $R.Power}}
 场景：{{join .Scenarios "、"}}；收敛：{{if .Converged}}是{{else}}否{{end}}。
 
 | 网络 | 标称 V | 范围 V |{{range .Scenarios}} {{.}} A |{{end}} 最大 A |
@@ -91,23 +96,23 @@ the SVG files in charts/, images the content-addressed files in ../assets/. */ -
 {{- range .Rails}}
 | {{.Net}} | {{f3 .VNom}} | {{f3 .VMin}}–{{f3 .VMax}} |{{range .Currents}} {{f4 .}} |{{end}} {{f4 .IMaxA}} ({{.Worst}}) |{{end}}
 
-![各场景电源轨电流](charts/rail-current.svg)
+![各场景电源轨电流](assets/charts/rail-current.svg)
 
 | 场景 | 输入功率 | 负载功率 | 损耗 | 整体效率 |
 |---|---|---|---|---|
 {{- range .ScenarioPwr}}
 | {{.Scenario}} | {{watt .SuppliedW}} | {{watt .LoadW}} | {{watt .LossW}} | {{eff .LoadW .SuppliedW}} |{{end}}
 
-![器件功耗](charts/part-power.svg)
+![器件功耗](assets/charts/part-power.svg)
 
 | 器件 | 型号 | 模型 | 功耗 | 场景 |
 |---|---|---|---|---|
 {{- range .PartPower}}
 | {{.Ref}} | {{md .Device}} | {{.Kind}} | {{watt .PowerW}} | {{.Scenario}} |{{end}}
 
-![电源轨功率](charts/rail-power.svg)
+![电源轨功率](assets/charts/rail-power.svg)
 {{if .Tree.Nodes}}
-![电源树](charts/power-tree.svg)
+![电源树](assets/charts/power-tree.svg)
 
 | 从 | 到 | 电源轨 |
 |---|---|---|
@@ -162,7 +167,7 @@ the SVG files in charts/, images the content-addressed files in ../assets/. */ -
 {{- range .Rows}}
 | {{.Ref}} | {{md .Device}} | {{md .Check}}{{with .StressNote}} ({{md .}}){{end}} | {{num .Stress}} {{.Unit}} | {{if .Rating}}{{num .Rating}} {{.Unit}}{{else}}—{{end}} | {{if .MarginPct}}{{margin .MarginPct}}{{else}}—{{end}} | ≥ {{f1 .GuidePct}} % | {{statusZh .Status}} | {{md .RatingSource}}{{if and .RatingSource .Note}}；{{end}}{{md .Note}} |{{end}}
 
-![器件余量](charts/margins.svg)
+![器件余量](assets/charts/margins.svg)
 
 | 对象 | 准则 | 说明 |
 |---|---|---|
@@ -256,7 +261,7 @@ the SVG files in charts/, images the content-addressed files in ../assets/. */ -
 {{- range .IRNets}}
 | {{.Net}} | {{f3 .VoltageV}} | {{f4 .CurrentA}} | {{md .Reference}} | {{f3 .WorstMV}} | {{opt .BudgetMV}} | {{if .BudgetMV}}{{f1 .RatioPct}} %{{else}}—{{end}} | {{.WorstPad}} | {{.Status}} |{{end}}
 
-![IR 压降](charts/ir-drop.svg)
+![IR 压降](assets/charts/ir-drop.svg)
 {{range .WorstPaths}}
 最坏路径 {{.Net}} → {{.Pad}}（{{f3 .TotalMV}} mV）：{{range $i, $s := .Steps}}{{if $i}} → {{end}}{{$s.Kind}} {{md $s.What}} {{f3 $s.DropMV}} mV{{end}}
 {{end}}
@@ -283,6 +288,88 @@ the SVG files in charts/, images the content-addressed files in ../assets/. */ -
 - 反馈：{{md .}}{{end}}
 {{else}}
 > 本节不可用：{{missing $R "6"}}
+{{end}}
+
+## 6A 设计后仿真验证 Post-layout verification
+{{with $R.Post}}
+**结论 {{.Status}}** · 场景 {{.Scenarios}}{{with .Board}} · 板 semantic `{{short .}}`{{end}}{{with .Data}} · 数据 [{{.}}]({{.}}){{end}}
+
+> 边界：{{.Boundary}}
+{{range .Reasons}}
+- {{md .}}{{end}}
+
+| 设置 | 值 | 说明 |
+|---|---|---|
+{{- range .Settings}}
+| {{md .Label}} | {{md .Value}} | {{md .Note}} |{{end}}
+
+**6A.1 真实铜皮直流压降**
+
+| 网络 | 角色 | 最坏场景 | 参考 | I A | 预算 mV | 最坏 mV | 最坏焊盘 | 铜损 mW | 最大 J A/mm² | 最大过孔 A | 铜自热 °C | 状态 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+{{- range .Nets}}
+| {{.Net}} | {{.Role}} | {{.Scenario}} | {{.Reference}} | {{f3 .CurrentA}} | {{opt .BudgetMV}} | {{f3 .WorstMV}} | {{.WorstPad}} | {{f3 .LossMW}} | {{f1 .MaxJ}} | {{f3 .MaxViaA}} | {{f2 .RiseC}} | {{.Status}} |{{end}}
+{{if .Compare}}
+与 pcb auto 布线期估算对比：
+
+| 网络 | pcb auto mV | 设计后 mV | 差 mV | 焊盘 |
+|---|---|---|---|---|
+{{- range .Compare}}
+| {{.Net}} | {{f2 .AutoMV}} | {{f2 .PostMV}} | {{f2 .DeltaMV}} | {{.Pad}} |{{end}}
+{{end}}
+**6A.2 过孔电流**
+{{if .Vias}}
+| 网络 | 位置 | I A | 载流量 A | 占用 | 场景 |
+|---|---|---|---|---|---|
+{{- range .Vias}}
+| {{.Net}} | {{.At}} | {{f3 .CurrentA}} | {{f2 .AmpacityA}} | {{f1 .UsePct}} % | {{.Scenario}} |{{end}}
+{{else}}
+没有过孔承载仿真电流。
+{{end}}
+**6A.3 稳态热仿真**
+
+| 项 | 值 | 说明 |
+|---|---|---|
+{{- range .Thermal}}
+| {{md .Label}} | {{md .Value}} | {{md .Note}} |{{end}}
+
+| 层 | 最高 °C | 平均 °C | 位置 mil |
+|---|---|---|---|
+{{- range .Layers}}
+| {{.Layer}} | {{f1 .MaxC}} | {{f1 .MeanC}} | {{.At}} |{{end}}
+
+| 器件 | 面 | 功耗 W | 场景 | 板温 °C | θ | Tj °C | Tj,max °C | 状态 |
+|---|---|---|---|---|---|---|---|---|
+{{- range .Parts}}
+| {{.Ref}} | {{.Side}} | {{f4 .PowerW}} | {{.Scenario}} | {{f1 .BoardC}} | {{or .Theta "—"}} | {{opt .TjC}} | {{opt .TjMaxC}} | {{statusZh .Status}} |{{end}}
+{{range .Maps}}
+![{{.Label}}]({{imgpath .}})
+*{{.Label}}*
+{{end}}
+**6A.4 铜皮修改建议**
+{{if .Feedback}}
+| ID | 类型 | 级别 | 位置 | 建议 |
+|---|---|---|---|---|
+{{- range .Feedback}}
+| {{.ID}} | {{.Kind}} | {{.Severity}} | {{md .Where}} | {{md .Summary}} |{{end}}
+{{else}}
+无需加宽的走线、需倒角的拐角或过孔瓶颈。
+{{end}}
+{{- if .Elmer}}
+**6A.5 Elmer FEM 交叉校验**
+
+| 项 | 值 | 说明 |
+|---|---|---|
+{{- range .Elmer}}
+| {{md .Label}} | {{md .Value}} | {{md .Note}} |{{end}}
+{{end}}
+<details><summary>模型与假设</summary>
+{{range .Assumptions}}
+- {{md .}}{{end}}
+
+</details>
+{{else}}
+> 本节不可用：{{missing $R "6A"}}
 {{end}}
 
 ## 7 验证状态

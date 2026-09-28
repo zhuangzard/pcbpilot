@@ -27,6 +27,7 @@ type Result struct {
 	Feedback      []*pcbauto.FeedbackItem `json:"feedback"`
 	Verdict       Verdict                 `json:"verdict"`
 	Maps          []MapFile               `json:"maps,omitempty"`
+	MapsDir       string                  `json:"mapsDir,omitempty"` // where WriteMaps put them (as given)
 	Elmer         *ElmerCheck             `json:"elmer,omitempty"`
 
 	// Rasters for the heat maps (not serialised).

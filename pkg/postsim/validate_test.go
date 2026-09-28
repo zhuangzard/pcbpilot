@@ -51,7 +51,7 @@ func (t *tb) json() []byte {
 		pts = append(pts, []any{p[0], p[1]})
 	}
 	d := map[string]any{"components": t.comps, "outline": map[string]any{"points": pts}, "copperLayers": t.layers,
-		"rules": map[string]any{"clearanceMil": 6, "copperToEdgeMil": 0},
+		"rules":  map[string]any{"clearanceMil": 6, "copperToEdgeMil": 0},
 		"copper": map[string]any{"lines": t.lines, "arcs": []any{}, "vias": t.vias, "pours": []any{}, "poured": t.poured, "fills": []any{}, "regions": []any{}}}
 	b, _ := json.Marshal(d)
 	return b

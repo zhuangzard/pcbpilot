@@ -31,7 +31,7 @@ func TestReportDesignCLI(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatalf("%v\n%s", err, stderr.String())
 	}
-	for _, f := range []string{"v1/report.html", "v1/report.md", "v1/report.json", "v1/charts/margins.svg", "index.json", "CHANGELOG.md"} {
+	for _, f := range []string{"v1/report.html", "v1/report.md", "v1/report.json", "v1/assets/charts/margins.svg", "v1/manifest.json", "v1/data/intent.json", "v1/data/sim.json", "pcbpilot-report-ESP32-mini-v1.zip", "index.json", "CHANGELOG.md"} {
 		if st, err := os.Stat(filepath.Join(rep, f)); err != nil || st.Size() == 0 {
 			t.Fatalf("%s not written: %v", f, err)
 		}
