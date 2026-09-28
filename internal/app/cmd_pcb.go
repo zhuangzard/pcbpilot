@@ -4039,6 +4039,14 @@ Rules:
                         from IEC 62368-1 / 60601-1 / 61010-1 / IPC-2221B tables
                         (engineering reference — confirm with the lab).
                         --board dump.json runs this rule offline.
+  • via-current (with --intent) — the vias of each power-net layer transition
+                        (an array at a track's layer change, a fan-out field
+                        at a pad) rated against the current they pass: Σ via
+                        ampacity (IPC-2221 barrel π(d+t)t, intent ΔT/plating)
+                        vs the pins' / net's intent current, bounded by the
+                        attached track → ERROR below the current, WARN under
+                        the 20 % margin; prints amps, margin and barrel mV.
+                        --board dump.json runs this rule offline too.
 
 Complements 'pcb drc' (rule clearance) and 'pcb layout-lint' (placement/routability).
 Exit code: 0 by default (informational). --strict exits non-zero on any WARN/ERROR
@@ -4065,8 +4073,8 @@ so it can gate the flow. Arcs are out of scope for v1 (line/via/pad only).`,
 				return runPcbCheckIntent(cfg, window, couplingW, checkSpec, checkIntentPath, checkBoardPath, strict, asJSON, stdout, stderr)
 			},
 		}
-		c.Flags().StringVar(&checkIntentPath, "intent", "", "intent.json (pcbpilot intent derive): add the isolation rule — clearance/creepage between insulated voltage domains, slots credited")
-		c.Flags().StringVar(&checkBoardPath, "board", "", "with --intent: check a 'pcb dump --include-copper' file offline (isolation rule only, no editor needed)")
+		c.Flags().StringVar(&checkIntentPath, "intent", "", "intent.json (pcbpilot intent derive): add the isolation rule (clearance/creepage between insulated voltage domains, slots credited) and the via-current rule (vias per layer transition vs the intent current)")
+		c.Flags().StringVar(&checkBoardPath, "board", "", "with --intent: check a 'pcb dump --include-copper' file offline (isolation and via-current rules only, no editor needed)")
 		c.Flags().BoolVar(&strict, "strict", false, "exit non-zero when there are issues (gate mode)")
 		c.Flags().BoolVar(&asJSON, "json", false, "emit the report as JSON")
 		c.Flags().Float64Var(&couplingW, "coupling-w", 3.0, "3W-rule factor: flag different-net parallel traces closer than this × trace width")

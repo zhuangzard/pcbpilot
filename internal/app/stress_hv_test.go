@@ -71,6 +71,7 @@ type hvVariant struct {
 		WidthOuterMil  float64 `json:"widthOuterMil"`
 		WidthInnerMil  float64 `json:"widthInnerMil"`
 		Vias           int     `json:"vias"`
+		ViaDrillMil    float64 `json:"viaDrillMil"`
 		ClearanceMil   float64 `json:"clearanceMil"`
 		VoltageMax     float64 `json:"voltageMax"`
 		VoltagePeak    float64 `json:"voltagePeak"`
@@ -337,6 +338,13 @@ func hvCheckIntent(res *hvResult, it *intent.Intent, v hvVariant) {
 		}
 		if en.Vias > 0 {
 			res.check(np.ViasPerTransition == en.Vias, "net "+n+" vias/transition", fmt.Sprint(en.Vias), fmt.Sprint(np.ViasPerTransition))
+		}
+		if en.ViaDrillMil > 0 {
+			got := 0.0
+			if np.Via != nil {
+				got = np.Via.DrillMil
+			}
+			res.check(approx(got, en.ViaDrillMil, 0.01), "net "+n+" via drill mil", fmt.Sprint(en.ViaDrillMil), fmt.Sprint(got))
 		}
 		if en.ClearanceMil > 0 {
 			res.check(approx(np.ClearanceMil, en.ClearanceMil, 0.5), "net "+n+" clearance mil", fmt.Sprint(en.ClearanceMil), fmt.Sprint(np.ClearanceMil))

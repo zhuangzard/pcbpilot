@@ -12,7 +12,9 @@
 
 - `pcb check` 新增 5 条规则的报错信息直接引用该手册章节号（`docs/pcb-design-rules.md §N`）：
   `silk-over-pad` §11.2 / `decap-too-far` §3.1 / `via-in-pad` §2.3 /
-  `copper-near-edge` §5.1 / `fiducial-missing` §9（`internal/app/pcb_check_dfm2.go`）。
+  `copper-near-edge` §5.1 / `fiducial-missing` §9（`internal/app/pcb_check_dfm2.go`）；
+  `via-current` §2.4 过孔载流（`internal/app/pcb_check_viacurrent.go` → `pkg/pcbauto/viacheck.go`，
+  公式/阶梯/选择顺序的唯一实现在 `pkg/pcbauto/viasize.go`）。
 - 数值型工艺极限的机器可读版：`.agents/skills/pcbpilot/references/fab-rules-jlcpcb.json`
   （daemon 的 DRC fallback 基线，`internal/app/pcb_rules.go`）。
 - net-class 线宽阶梯的代码正本：`internal/app/pcb_netclass.go`。

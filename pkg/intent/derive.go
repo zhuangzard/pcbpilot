@@ -94,7 +94,8 @@ func Derive(in Input) (*Intent, error) {
 		c.out.Sources.Schematic = []string{}
 	}
 	c.out.Copper = &Copper{Layers: c.layers, OuterOz: c.outerOz, InnerOz: c.innerOz, TempRiseC: c.tempRise, RefHeightMil: c.refH, Er: c.er,
-		Stackup: c.stackName, MinTrackMil: c.rules.TrackWidth, ClearanceMil: c.rules.Clearance, ViaDrillMil: c.rules.ViaDrill, ViaDiaMil: c.rules.ViaDia}
+		Stackup: c.stackName, MinTrackMil: c.rules.TrackWidth, ClearanceMil: c.rules.Clearance, ViaDrillMil: c.rules.ViaDrill, ViaDiaMil: c.rules.ViaDia,
+		ViaPlatingMil: c.viaQ(0, 0).PlatingMil, ViaMarginPct: pcbauto.ViaMarginOr(c.viaQ(0, 0).MarginPct)}
 	c.out.Simulation = c.simInfo()
 	c.out.Definitions = &Definitions{
 		Voltage:   "V over the solved DC scenarios: nom = typical, min/max = envelope, peak = highest instantaneous (switch node swings to Vin; AC = √2·Vrms)",
@@ -222,6 +223,9 @@ func (c *ctx) setup() error {
 		return err
 	}
 	ps := pcbauto.PowerSpec{TempRiseC: c.tempRise, Sim: sp, DiffOhm: 90}
+	if r := c.spec.Rules; r != nil {
+		ps.ViaPlatingMil, ps.ViaMarginPct = r.ViaPlatingMil, r.ViaMarginPct
+	}
 	if c.spec.Standard != nil {
 		ps.Coated = c.spec.Standard.Coated
 	}

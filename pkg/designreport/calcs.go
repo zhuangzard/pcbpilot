@@ -68,7 +68,15 @@ func (c *ctx) buildCalcs() {
 					drill = ncl.ViaDrillMil
 				}
 			}
-			per := pcbauto.ViaCurrent(drill, cu.TempRiseC)
+			plating := pcbauto.DefaultViaPlatingMil
+			if cu.ViaPlatingMil > 0 {
+				plating = cu.ViaPlatingMil
+			}
+			if np.Via != nil && np.Via.DrillMil > 0 {
+				// The net's own current-sized via (intent via block).
+				drill = np.Via.DrillMil
+			}
+			per := pcbauto.ViaAmpacity(drill, plating, cu.TempRiseC)
 			need := int(math.Ceil(cur / per))
 			if need < 1 {
 				need = 1

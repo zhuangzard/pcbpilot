@@ -66,6 +66,9 @@ func (r *router) emit(res *RouteResult) {
 		at := map[*rnet][]Violation{}
 		var order []*rnet
 		for _, v := range drc.Violations {
+			if r.dropArrayAt(v, ts, vs, outs) {
+				continue
+			}
 			for _, n := range routedOnly(v) {
 				if !bad[n] {
 					bad[n] = true
@@ -146,6 +149,10 @@ func (r *router) emit(res *RouteResult) {
 		changed := false
 		moved := map[Via]bool{}
 		for _, v := range final {
+			if r.dropArrayAt(v, ts, vs, outs) {
+				changed = true
+				continue
+			}
 			// A fan-out via or stub in violation moves to another site
 			// around its pad first; its net's routing is not at fault.
 			if r.relocateFanoutAt(v, ts, vs, res, collect, moved) {
@@ -178,6 +185,9 @@ func (r *router) emit(res *RouteResult) {
 
 	conn, routed := 0, 0
 	for _, n := range r.nets {
+		if n.viaShort > 0 && len(n.paths) > 0 {
+			res.Notes = append(res.Notes, sprintf("via array: %s is short of %d via(s) at its layer transitions (%d × %.1f/%.1f mil planned per transition) — pcb check via-current rates the result", n.name, n.viaShort, n.viaCount(), n.viaDrill, n.viaDia))
+		}
 		o := outs[n]
 		res.Tracks = append(res.Tracks, n.fanTracks...)
 		res.Tracks = append(res.Tracks, n.shareTracks...)
@@ -285,7 +295,7 @@ func failedGroups(n *rnet) int {
 func (r *router) inflate(n *rnet, d float64) {
 	n.share += d
 	n.radius = n.width/2 + n.share
-	n.viaR = r.b.Rules.ViaDia/2 + n.share
+	n.viaR = n.viaDia/2 + n.share
 	n.neckR = n.neckW/2 + n.share
 	if n.neckW >= n.width {
 		n.neckR = n.radius
@@ -302,6 +312,7 @@ func (r *router) emitNet(n *rnet) *netOut {
 	}
 	r.applyClaims(n.claims, -1)
 	var newClaims []int32
+	n.viaShort = 0
 	for _, p := range n.paths {
 		runs := splitRuns(gr, p)
 		for ri, run := range runs {
@@ -361,8 +372,12 @@ func (r *router) emitNet(n *rnet) *netOut {
 				start = k
 			}
 			if ri > 0 {
-				o.vias = append(o.vias, Via{Net: n.name, C: run.pts[0], Drill: r.b.Rules.ViaDrill, Dia: r.b.Rules.ViaDia, Kind: "route"})
+				o.vias = append(o.vias, Via{Net: n.name, C: run.pts[0], Drill: n.viaDrill, Dia: n.viaDia, Kind: "route"})
 				newClaims = r.claimVia(n, run.nodes[0], newClaims)
+				if k := n.viaCount(); k > 1 {
+					// A current-sized transition: k vias in parallel.
+					newClaims = r.viaArray(n, runs[ri-1], run, run.nodes[0], k-1, o, newClaims)
+				}
 			}
 		}
 	}

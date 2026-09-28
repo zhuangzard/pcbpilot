@@ -85,6 +85,7 @@ func (c *ctx) buildFindings() {
 			"derive from the schematic (--connectivity/--values or live) when it is available")
 	}
 	c.findSim()
+	c.findVias()
 	c.findRegulators()
 	c.findInductors()
 	c.findDiodes()

@@ -50,6 +50,10 @@ type PowerSpec struct {
 	// Sim are simulated per-pin currents (`pcb auto run --sim`): nets it
 	// lists are sized from them and their copper is tapered per segment.
 	Sim *SimPower `json:"-"`
+	// ViaPlatingMil is the via barrel plating (default 0.7 mil ≈ 18 µm);
+	// ViaMarginPct the ampacity margin per transition (default 20 %).
+	ViaPlatingMil float64 `json:"viaPlatingMil,omitempty"`
+	ViaMarginPct  float64 `json:"viaMarginPct,omitempty"`
 	// Intent is intent.json (`pcb auto run --intent`): declared per-net
 	// widths/currents/vias/clearances and net classes win over inference,
 	// and its domains/pairs drive the isolation rules.
@@ -83,6 +87,9 @@ type NetPlan struct {
 	PadCurrents []PadCurrent `json:"padCurrents,omitempty"`
 	ExtraVias   int          `json:"extraVias,omitempty"` // IR-drop feedback: extra fan-out vias per pad
 	Warnings    []string     `json:"warnings,omitempty"`
+	// Via is the sized via of a layer transition (SizeVias): drill/pad,
+	// count, ampacity, margin and barrel drop; ViasPerTransition = Via.Count.
+	Via *ViaPlan `json:"via,omitempty"`
 	// High-speed intent (--intent): the interface family, the length group
 	// the net is matched in, and declared limits that override the family
 	// defaults of ClassifyHS (0 = family default).
@@ -220,9 +227,7 @@ func CurrentForWidth(width, tempRise, oz float64, internal bool) float64 {
 // ViaCurrent returns the current one via barrel carries (plating 0.7 mil ≈ 18 µm,
 // the JLC standard), treating the barrel as an internal conductor.
 func ViaCurrent(drill, tempRise float64) float64 {
-	const plating = 0.7
-	area := math.Pi * (drill + plating) * plating
-	return ipcKInternal * math.Pow(tempRise, 0.44) * math.Pow(area, 0.725)
+	return ViaAmpacity(drill, DefaultViaPlatingMil, tempRise)
 }
 
 // ClearanceForVoltage returns the IPC-2221B minimum spacing (mil) for a peak
@@ -379,6 +384,11 @@ type SimSummary struct {
 // Analyze derives per-net electrical requirements. stack may be nil (then
 // impedance-controlled widths use a 4-layer JLC7628 default reference height).
 func Analyze(b *Board, spec PowerSpec, stack *Stackup) *Analysis {
+	if in := spec.Intent; spec.TempRiseC <= 0 && in != nil && in.Copper != nil && in.Copper.TempRiseC > 0 {
+		// The ΔT the intent sized its widths and vias for (a 400 V
+		// inverter at 20 °C): rating them at 10 °C halved the vias' worth.
+		spec.TempRiseC = in.Copper.TempRiseC
+	}
 	if spec.TempRiseC <= 0 {
 		spec.TempRiseC = 10
 	}
@@ -387,6 +397,15 @@ func Analyze(b *Board, spec PowerSpec, stack *Stackup) *Analysis {
 	}
 	if spec.DiffOhm <= 0 {
 		spec.DiffOhm = 90
+	}
+	if in := spec.Intent; in != nil && in.Copper != nil {
+		// The via plating / margin the intent was sized with.
+		if spec.ViaPlatingMil <= 0 {
+			spec.ViaPlatingMil = in.Copper.ViaPlatingMil
+		}
+		if spec.ViaMarginPct == 0 {
+			spec.ViaMarginPct = in.Copper.ViaMarginPct
+		}
 	}
 	r := b.Rules
 	a := &Analysis{ByNet: map[string]*NetPlan{}, TempRiseC: spec.TempRiseC, IRBudget: DefaultIRBudget()}
@@ -584,16 +603,17 @@ func Analyze(b *Board, spec PowerSpec, stack *Stackup) *Analysis {
 			}
 			np.ExtraVias = bo.ExtraVia
 		}
-		if viaA := math.Max(np.CurrentA, np.PeakA); viaA > 0 {
-			per := ViaCurrent(r.ViaDrill, spec.TempRiseC)
-			np.ViasPerTransition = int(math.Max(1, math.Ceil(viaA/per)))
-		} else {
-			np.ViasPerTransition = 1
+		sizeNetVias(np, ViaSize{r.ViaDrill, r.ViaDia}, r, spec)
+		if np.Via.Count > 1 || np.Via.DrillMil != r.ViaDrill {
+			np.Why = append(np.Why, whyf("vias: %s (%.1f mV per transition)", np.Via.Why, np.Via.DropMV))
+		}
+		if !np.Via.OK {
+			np.Warnings = append(np.Warnings, "via-current: "+np.Via.Why)
 		}
 		if spec.Intent != nil {
 			in := intentLookup(spec.Intent, np.Net)
 			if cls := intentClass(spec.Intent, np.Net, in); in != nil || cls != nil {
-				applyIntentRules(np, in, cls, r)
+				applyIntentRules(np, in, cls, r, spec)
 				if bo, ok := spec.boost[np.Net]; ok && bo.WidthMil > np.WidthMil {
 					np.WidthMil = bo.WidthMil // IR-drop feedback only ever widens
 					np.InnerWidthMil = math.Max(np.InnerWidthMil, bo.WidthMil)
