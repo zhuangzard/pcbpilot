@@ -116,7 +116,6 @@ extension/src/transport.ts).`,
 			ctx, cancelRun := context.WithCancel(sigCtx)
 			defer cancelRun()
 
-
 			opts := daemon.Options{
 				Host:             cfg.host,
 				PortStart:        port,

@@ -281,11 +281,11 @@ func testUpdateDeps(t *testing.T, oi oldInstall, version string, rec *recorder, 
 	t.Helper()
 	var ran [][]string
 	return updateDeps{
-		goos:     runtime.GOOS,
-		home:     oi.home,
-		binPath:  oi.bin,
-		version:  "v" + version,
-		runner:   rec.run,
+		goos:    runtime.GOOS,
+		home:    oi.home,
+		binPath: oi.bin,
+		version: "v" + version,
+		runner:  rec.run,
 		lookPath: func(n string) (string, error) {
 			if n == "node" {
 				return "/fake/bin/node", nil
