@@ -122,6 +122,17 @@ schematic ─▶ sim power (DC simulation) ─▶ intent derive (design intent) 
   <img src="docs/assets/design-report-power-tree.png" width="820" alt="Design report: power tree"/>
 </p>
 
+**v0.6** adds the other half: `sim analog` (ngspice simulation of the analog circuits with value changes the
+user confirms), vias sized by current, a board-edge safety distance on every board (outer ≥ 0.5 mm, inner
+planes ≥ 0.76 mm, HV per creepage/clearance, checked as ERROR), and `sim post-layout` — DC drop, via currents,
+current density and steady-state thermal maps on the real copper read back from EasyEDA, with width/corner/via
+feedback and an optional Elmer FEM cross-check. The installer sets up ngspice and Elmer (`pcbpilot sim tools`).
+
+<p align="center">
+  <img src="docs/assets/postsim-temp-top.png" width="420" alt="Post-layout thermal map"/>
+  <img src="docs/assets/postsim-current-top.png" width="420" alt="Post-layout current density"/>
+</p>
+
 Live 2026-09-27 on EasyEDA desktop V3 (ESP32-S3, 4 layers): rules written and still in sync after save → reload,
 routed 30/30 with all 52 plane connections, every rail within its IR-drop budget, native DRC clean. High-voltage
 (flyback, medical 2×MOPP, CAT III 600 V, 400 V inverter) and high-speed (USB3, HDMI, PCIe, Gigabit Ethernet, DDR)

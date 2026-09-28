@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.6.0] — 2026-09-28
+
+**Pre-layout + post-layout simulation, board-edge safety distance, analog SPICE.** The connector code is
+unchanged since 0.4.1/0.5.0; re-import the 0.6.0 package only to keep versions aligned.
+
+- **Board-edge safety distance (safety default for every board)** — outer copper ≥ 20 mil (0.5 mm), inner
+  planes ≥ 30 mil (0.76 mm), V-cut 0.5/0.8 mm; hazardous/mains/patient domains keep their creepage/clearance
+  to the edge and metal mounting holes (pkg/safety). Applied in intent (`edge`), routing edge bands, pour/plane
+  insets (incl. negative inner planes), `pcb rules apply` (Safe Spacing "Board Outline" cells), pour commands
+  and `pcb check` (`copper-to-edge`, `copper-to-hole`, `plane-pullback`, ERROR; the old `copper-near-edge`
+  never measured poured copper). Live on the ESP32 board: pours/planes 14.1/10 mil → ≥ 30 mil, 7 → 0 errors.
+- **Vias sized by current** — one model (IPC barrel ampacity, resistance, per-transition drop, plating as a
+  parameter) over a JLC via ladder: more vias in parallel before a bigger drill; intent `via` per net, class
+  Via Size rules, via arrays at power layer changes and fan-outs, `pcb check` `via-current` (ERROR/WARN).
+- **Post-layout simulation** — `pcbpilot sim post-layout` on the real copper read back from EasyEDA
+  (hand-routed boards too): per-pad DC drop, via currents, current-density maps, steady-state 2.5-D thermal
+  maps per layer, part board temperature and Tj where θJB/θJC is known, and width / corner / via feedback;
+  board-only natural convection (no enclosure/airflow); validated against analytic cases (≤ 3 %); optional
+  Elmer FEM cross-check deck (`--elmer-check`).
+- **Analog SPICE design loop** — `pcbpilot sim analog`: detects op-amp amplifiers/filters, passive filters,
+  ADC inputs, references, comparators, crystal load, reset RC, transistor switches and regulator feedback,
+  simulates them with ngspice (.op/.ac/.tran/loop gain/Monte-Carlo), optimises values to E-series/stock parts,
+  and emits a value-change plan (user-confirmed, `compile-plan` → `pcbpilot apply`); runs inside
+  `intent derive`; spice model library in the Skill.
+- **Simulation tools installed with pcbpilot** — `pcbpilot sim tools check|install` (ngspice required, Elmer
+  optional); setup-agent.sh, install.sh and install.ps1 call it; verify reports it.
+- **Design report package** — each version is `reports/<project>/vN/` (report, `assets/` charts/images/heat
+  maps, `data/` every input and evidence file, `manifest.json` with sha256) plus a zip; new chapters 3A
+  (analog SPICE) and 6A (post-layout verification).
+- Live-verified 2026-09-28 on EasyEDA Pro desktop V3 3.2.149 (connector 0.4.1): ESP32-S3 4-layer board —
+  analog SPICE from the live schematic, intent with edge/via fields, rules in sync, routed 30/30 + 52/52,
+  copper-to-edge ≥ 30 mil on every layer, native DRC passed, pad-by-pad diff 0, save → reload hash stable,
+  post-layout PASS, full report v3 generated (docs/examples/esp32-mini-design-report/v3).
+- Not verified: Elmer cross-check (this Mac's Command Line Tools are too old for the source build; the
+  installer now names the fix), install.ps1 on real Windows.
+
 ## [0.5.0] — 2026-09-28
 
 **Electrical loop from schematic to customer report.** Re-import the connector (0.5.0) together with the

@@ -75,6 +75,20 @@ CAT III 600 V、400 V 逆变）与高速（USB3、HDMI、PCIe、千兆以太网�
 [高压隔离](.agents/skills/pcbpilot/references/recipes/hv-isolation.md) 与
 [高速](.agents/skills/pcbpilot/references/recipes/high-speed.md) 配方。
 
+### v0.6：设计前仿真 + 设计后仿真 + 板边安全距离
+
+- **设计前**：`sim power`（电源树直流仿真）、`sim analog`（模拟电路 ngspice 仿真并按结果改元件值，改值需确认）、
+  `intent derive`（线宽、**按电流定尺寸与数量的过孔**、间距、阻抗、**板边安全距离**）。
+- **设计后**：`sim post-layout` 在 EasyEDA 回读的**真实铜皮**上算每个负载脚的直流压降、每个过孔电流、电流密度、
+  每层稳态温度图和器件板温，并给出该加宽的线段、拐角与过孔（手工布的板也能用）；可选 Elmer FEM 交叉校验。
+- **板边安全距离**（所有板默认）：外层铜 ≥ 0.5 mm、内层平面 ≥ 0.76 mm，高压域按爬电/间隙；写入 EasyEDA 规则并由
+  `pcb check` 按 ERROR 检查。安装 pcbpilot 时自动安装 ngspice 与 Elmer（`pcbpilot sim tools`）。
+
+<p align="center">
+  <img src="docs/assets/postsim-temp-top.png" width="420" alt="设计后仿真：顶层温度图"/>
+  <img src="docs/assets/postsim-current-top.png" width="420" alt="设计后仿真：电流密度图"/>
+</p>
+
 ### 设计报告（每次运行自动更新，版本化交付客户）
 
 `report design` 按固定模板生成单文件 HTML（图表内联，可离线打开、打印）+ Markdown + JSON，每次运行一个新版本
