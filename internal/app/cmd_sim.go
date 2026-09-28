@@ -31,10 +31,16 @@ func newSimCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 
   sim power   DC operating point of the power tree: voltage of every net and the
               current through every component pin, per scenario. Feeds trace
-              width sizing with computed (not guessed) currents.`,
+              width sizing with computed (not guessed) currents.
+  sim post-layout
+              设计后仿真: the finished board's real copper (pcb dump
+              --include-copper) with sim power's currents — IR drop per load
+              pad, via currents, current density, thermal maps, part
+              temperatures, width/corner/via feedback.`,
 	}
 	sim.PersistentFlags().StringVar(&window, "window", "", "EasyEDA window ID (live mode)")
 	sim.AddCommand(newSimPowerCmd(cfg, &window, stdout, stderr))
+	sim.AddCommand(newSimPostLayoutCmd(stdout, stderr))
 	return sim
 }
 
