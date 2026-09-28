@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/zhuangzard/pcbpilot/pkg/simtools"
 )
 
 // Open-source cross-check of the thermal model with Elmer FEM
@@ -35,6 +37,10 @@ import (
 // adiabatic, as in the finite-volume model. SaveScalars writes the
 // temperature at probe coordinates (the board maximum and the hottest cell
 // under each dissipating part) to probes.dat.
+
+// findElmer locates an Elmer binary (PATH and the Windows install dirs of
+// `pcbpilot sim tools install`); tests replace it.
+var findElmer = simtools.Find
 
 // ElmerCheck is the cross-check result recorded in post.json.
 type ElmerCheck struct {
@@ -103,10 +109,10 @@ func (res *Result) RunElmer(timeout time.Duration) {
 	if e == nil {
 		return
 	}
-	bin, err := exec.LookPath("ElmerSolver")
+	bin, err := findElmer("ElmerSolver")
 	if err != nil {
 		e.Status = "skipped"
-		e.Note = "ElmerSolver not installed: the deck is written for a later run (cd " + e.Deck + " && ElmerSolver case.sif), then `pcbpilot sim post-layout … --elmer-result " + filepath.Join(e.Deck, "probes.dat") + "`"
+		e.Note = "ElmerSolver not installed — run: pcbpilot sim tools install --only elmer. The deck is written for a later run (cd " + e.Deck + " && ElmerSolver case.sif), then `pcbpilot sim post-layout … --elmer-result " + filepath.Join(e.Deck, "probes.dat") + "`"
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)

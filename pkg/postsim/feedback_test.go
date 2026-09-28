@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -258,11 +259,13 @@ func TestElmerDeck(t *testing.T) {
 	if e.Status != "error" {
 		t.Fatalf("short file: %s", e.Status)
 	}
-	// Without ElmerSolver on PATH the check is skipped, never faked.
-	t.Setenv("PATH", t.TempDir())
+	// Without ElmerSolver the check is skipped, never faked.
+	old := findElmer
+	defer func() { findElmer = old }()
+	findElmer = func(string) (string, error) { return "", exec.ErrNotFound }
 	r.RunElmer(0)
-	if e.Status != "skipped" {
-		t.Fatalf("status %s", e.Status)
+	if e.Status != "skipped" || !strings.Contains(e.Note, "pcbpilot sim tools install --only elmer") {
+		t.Fatalf("status %s: %s", e.Status, e.Note)
 	}
 }
 

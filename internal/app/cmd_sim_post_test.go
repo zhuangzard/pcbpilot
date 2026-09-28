@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
 	"github.com/zhuangzard/pcbpilot/pkg/postsim"
 )
 
@@ -99,5 +100,53 @@ func TestSimPostLayoutCLI(t *testing.T) {
 	defer zr.Close()
 	if len(zr.File) != len(man.Files)+1 || !strings.HasPrefix(zr.File[0].Name, "pcbpilot-report-ESP32-mini-v1/") {
 		t.Fatalf("zip has %d entries (%s), manifest %d", len(zr.File), zr.File[0].Name, len(man.Files))
+	}
+}
+
+// TestAutoPostSimHook: pcb auto run --post-sim verifies the run's own
+// board.routed.json with the stackup's plane layers declared, writes
+// post.json / heat maps and merges the copper feedback into feedback.json.
+func TestAutoPostSimHook(t *testing.T) {
+	dir := t.TempDir()
+	cp := func(src, dst string) {
+		b, err := os.ReadFile(src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, dst), b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cp(filepath.Join(postFixture, "board.json"), "board.routed.json")
+	cp(filepath.Join(postFixture, "plan-ir.json"), "plan.json")
+	if err := os.WriteFile(filepath.Join(dir, "feedback.json"), []byte(`{"schemaVersion":1,"source":"pcb auto run","items":[{"id":"fb-1","kind":"mcu-pin-swap"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b := &pcbauto.Board{Rules: pcbauto.DefaultRules()}
+	rep := &pcbauto.Report{Result: &pcbauto.Result{Stackup: &pcbauto.Stackup{Stack: []pcbauto.StackLayer{
+		{ID: 1}, {ID: 15, Kind: pcbauto.KindPlane, Nets: []string{"GND"}}, {ID: 16, Kind: pcbauto.KindPlane, Nets: []string{"+3V3", "VSYS_5V"}}, {ID: 2}}}}}
+	var stdout, stderr bytes.Buffer
+	post, err := autoPostSim(dir, filepath.Join(postFixture, "sim.json"), filepath.Join(postFixture, "intent.json"), b, rep, &stdout, &stderr)
+	if err != nil || post == "" {
+		t.Fatalf("%v %q\n%s", err, post, stderr.String())
+	}
+	raw, _ := os.ReadFile(post)
+	var res postsim.Result
+	if err := json.Unmarshal(raw, &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.Settings.Planes["IN1"] != "GND" || res.Settings.Planes["IN2"] != "" || res.Inputs.Source == "" || len(res.Compare) == 0 {
+		t.Fatalf("planes %v source %q compare %d", res.Settings.Planes, res.Inputs.Source, len(res.Compare))
+	}
+	fb, _ := os.ReadFile(filepath.Join(dir, "feedback.json"))
+	if !strings.Contains(string(fb), `"fb-1"`) || !strings.Contains(string(fb), "post-layout items") {
+		t.Fatalf("feedback not merged: %s", fb)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "heatmaps", "temp-TOP.svg")); err != nil {
+		t.Fatal(err)
+	}
+	// Without --sim the hook is a warning, not an error.
+	if p, err := autoPostSim(dir, "", "", b, rep, &stdout, &stderr); err != nil || p != "" || !strings.Contains(stderr.String(), "needs --sim") {
+		t.Fatalf("no-sim: %q %v", p, err)
 	}
 }
