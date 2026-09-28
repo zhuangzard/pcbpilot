@@ -231,7 +231,7 @@ func newDaemonHealthCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command
 			if result.HostCompatibility != nil {
 				fmt.Fprintln(stderr, hostCompatibilitySummary(*result.HostCompatibility))
 			}
-			if result.Found != nil {
+			if result.Found != nil && !sessionNoticePrinted {
 				for _, line := range healthNoticeLines(result.Found.Raw, true) {
 					fmt.Fprintln(stderr, line)
 				}

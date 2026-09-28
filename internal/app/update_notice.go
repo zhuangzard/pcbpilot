@@ -31,6 +31,10 @@ import (
 // directly never touch ~/.pcbpilot or the network.
 var sessionHookEnabled bool
 
+// sessionNoticePrinted: the hook already relayed the notices in this process,
+// so `pcbpilot health` does not print them a second time.
+var sessionNoticePrinted bool
+
 // Main is the binary entry point: Run plus the session-start notice.
 func Main(args []string, stdout, stderr io.Writer) int {
 	sessionHookEnabled = true
@@ -50,8 +54,7 @@ func noticeExempt(args []string) bool {
 		}
 	}
 	switch args[0] {
-	case "help", "version", "completion", "update", "upgrade", "self-update", "daemon", "mcp", "skill", "actions", "health":
-		// health prints the same notices itself (daemon health / MCP health tool).
+	case "help", "version", "completion", "update", "upgrade", "self-update", "daemon", "mcp", "skill", "actions":
 		return true
 	}
 	return strings.HasPrefix(args[0], "__complete")
@@ -140,6 +143,7 @@ func runSessionNotice(ctx context.Context, d noticeDeps, stderr io.Writer) {
 	}
 	for _, line := range healthNoticeLines(p.Raw, true) {
 		fmt.Fprintln(stderr, line)
+		sessionNoticePrinted = true
 	}
 }
 
