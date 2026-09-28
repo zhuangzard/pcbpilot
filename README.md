@@ -292,6 +292,10 @@ irm https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.ps1 | iex
 pcbpilot health        # windows[] 出现你的工程和文档，connectorVersion 与仓库一致
 ```
 
+**升级是自动的**：daemon 定期检查 GitHub，在 EasyEDA 空闲时升级 CLI、Skill、MCP 和仿真工具（失败自动
+回滚，`pcbpilot update --auto off` 可关闭）；手动一步：`pcbpilot update`（`--check` 只看，`--rollback` 回退）。
+连接器版本必须与 CLI 一致，daemon 会把新 `.eext` 下载到 `~/.pcbpilot/connector/`，按上面 3 步重导即可。
+
 完整安装、升级、MCP、排障见 **[使用手册](docs/manual.md)**。
 
 ## 为什么它适合 Agent

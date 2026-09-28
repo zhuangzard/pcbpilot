@@ -52,7 +52,7 @@ pcbpilot update --local-dir /absolute/path/to/dist --check --exit-code
 
 本地安装替换 CLI 和已安装客户端的完整 Skill（备份路径输出），不自动重启进程或导入插件。
 保存文档，用安装后的 CLI 重启 daemon；卸载旧侧载连接器、导入输出的 `.eext`，完全退出并重开
-EasyEDA。开发版精确同版便于定位源码与运行态差异，不能套用正式版的 patch 兼容规则。
+EasyEDA。开发版（`-dev.N`）不受连接器版本门约束，但精确同版便于定位源码与运行态差异。
 检查比对包 SHA-256、实际 CLI 字节、Skill 全部文件（含 metadata 和 `.version`）及实时版本。
 checksum 只防意外损坏，不是签名：只使用自己构建或可信来源的本地包。
 无连接、旧 daemon、混合 Skill 或任一旧 Connector 均会在对账中显示差异；它们不阻止离线工作，
@@ -61,16 +61,13 @@ checksum 只防意外损坏，不是签名：只使用自己构建或可信来�
 
 ### 正式版
 
-CLI/daemon、`pcbpilot` Skill 和 PCB Pilot Connector 是三个配套组成部分；CLI、daemon
-与 Skill 必须精确同版，Connector 按 major.minor 兼容线对齐。EasyEDA Pro 是宿主，不参与
-项目版本号对齐。
+CLI/daemon、`pcbpilot` Skill、MCP server 和 PCB Pilot Connector 是配套组成部分，**全部必须与
+发布版本精确同版**（2026-09-28 用户决定）。EasyEDA Pro 是宿主，不参与项目版本号对齐。
 
-发布版安装 CLI 和 Skill：
+首次安装（CLI、daemon 登录服务、Skill、有 Node.js ≥ 20.17 时 MCP、ngspice/Elmer）：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.sh | bash
-pcbpilot update --check
-pcbpilot update
 ```
 
 原生 Windows 用 PowerShell（5.1 或 7 均可）执行同源的 `install.ps1`；`install.sh`
@@ -80,32 +77,58 @@ pcbpilot update
 irm https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.ps1 | iex
 ```
 
-`update --check` 是显式、只读的安装对账工具，不是每次 EDA 操作的前置许可。
-`--check --exit-code` 保留现有自动化退出码：满足所选对账条件返回 0，组件差异返回 10，查询
-本身失败返回 1。正式版对账可比较 GitHub latest 与 Connector major.minor 兼容线；本地开发版
-使用 `--local-dir` 比较指定构建。发现差异时根据当前任务是否依赖该运行态能力决定升级或只记录，
-不强制追 latest，也不要求另开 Agent 会话。latest 查询会使用 `GH_TOKEN` / `GITHUB_TOKEN`，API 匿名额度耗尽时回退
-到公开 Release 重定向。普通 `update` 更新 CLI 与已安装的 Skill，不能安装或替换编辑器里的连接器。需要安装缺失的客户端
-Skill 时用 `--create-missing`，保留本地 Skill 修改用 `--preserve`，固定发布版用
-`--version <version>`。更新二进制后还需让 daemon 使用新二进制启动。
+#### 自动升级（默认开启）
+
+daemon 是唯一检查和应用升级的地方：启动时、每 6 小时、以及空闲 30 分钟后的第一个 action 时
+查询 GitHub latest；离线时静默指数退避重试（1m → 2m → … 封顶 30m），`health.updates.state`
+为 `offline-retrying` 并带 `lastError` / `nextRetryAt`，设计动作照常工作。有新版本且
+`update --auto on`（默认）时，daemon 在 EasyEDA 空闲（无在飞动作、无未保存编辑、2 分钟无动作）
+时依次：快照回滚点 → CLI → Skill（所有客户端目录；源码 symlink 不动）→ MCP → ngspice →
+下载连接器 `.eext` → 退出让登录服务拉起新二进制 → 新 daemon 自检（版本、Skill、MCP 握手），
+失败自动回滚并永不再自动应用该版本。状态写 `~/.pcbpilot/update-state.json`，日志
+`~/.pcbpilot/update.log`。CLI/MCP 不自己查网，只在会话首条命令时转述 daemon 状态；daemon 不在
+时才做一次 1 小时缓存、3 秒超时的检查并提示修复服务。
+
+- 关闭：`pcbpilot update --auto off`（写 `~/.pcbpilot/config.json`，登录服务也生效）；
+  `PCBPILOT_AUTO_UPDATE=0` 只影响读到该环境变量的进程。`--auto status` 查看。
+- 回滚：`pcbpilot update --rollback` 恢复上一版 CLI/Skill/MCP 链接并重启 daemon。
+- 源码 checkout（`scripts/setup-agent.sh` 安装，`~/.pcbpilot/install.json` 记 `kind: source`）
+  默认只提示；`pcbpilot update` 执行 `git pull --ff-only` + `setup-agent.sh`（工作区脏或分叉时
+  拒绝并说明）；`update --auto source` 才允许 daemon 在干净 checkout 上自动快进。
+
+#### 手动一步升级
+
+```bash
+pcbpilot update --check              # 只读对账表：cli / skill:<client> / mcp / tools / daemon / connector
+pcbpilot update                      # 全部升级（a CLI → b Skill → c MCP → d 仿真工具 → e 重启 daemon → f 下载连接器 → g 校验）
+pcbpilot update --only cli,skill     # 或 --skip tools,daemon
+pcbpilot update --open --wait-connector   # 打开 .eext 所在目录，等待新连接器连上
+```
+
+`--check --exit-code`：全部精确同版返回 0，任一落后/错位返回 10，查询本身失败返回 1。
+`--local-dir <dist>` 用本地发布资产（`checksums.txt` 校验）走同一流程、不访问 GitHub；
+`--preserve` 保留本地 Skill 修改（混合内容，不能作为纯 Release 一致性证据）；`--version` 固定版本；
+`--create-missing` 为尚无目录的客户端安装 Skill。MCP 需要 Node.js ≥ 20.17，缺失时跳过并打印安装方法；
+`pcbpilot mcp status|install|register` 单独管理 MCP。
 
 GitHub Release 大资产连续三次失败时，CLI/安装器默认尝试 `https://gh-proxy.com/`；只有
 先从 GitHub 主源取得该 Release 的 `checksums.txt` 才允许镜像回退，下载后仍按主源
 SHA-256 校验。`PCBPILOT_GITHUB_PROXY=https://mirror.example/{url}` 可替换传输镜像，设为
 `off` 可禁用。不要把镜像提供的 checksum 当信任依据。
 
-需要升级时按以下顺序恢复安装态：
+#### 连接器（唯一的人工步骤）
 
-1. 运行 `pcbpilot update` 更新到所选版本；需要精确 Release 时显式传 `--version`。
-   `--preserve` 会形成混合内容，不能作为纯 Release 一致性的证据。
-2. 重启 daemon 使其运行新二进制：已装登录服务时 `pcbpilot daemon stop`（launchd/systemd 立即按服务重新拉起），
-   否则 `pcbpilot daemon service install`。**daemon 登录服务是安装的必需项**：`pcbpilot daemon service status`
-   退出码非 0 就先 `pcbpilot daemon service install`，否则机器重启后所有 EDA 操作都连不上。
-3. 纯 patch 更新时保留现有 Connector，不重新导入，也不重开 EasyEDA。仅当
-   Connector 与 latest 跨 minor/major 不兼容时，从 `update` 输出的 GitHub Release 地址取得
-   对应 `.eext`；在扩展管理器卸载旧的 PCB Pilot Connector、导入新包，然后重新加载编辑器（Web 刷新页面；桌面版完全退出并重开 EasyEDA）。
-4. 重新运行 `pcbpilot update --check` 记录实际版本。若当前运行时不能热加载新 Skill，后续步骤按
-   已加载说明和当前 `--help` 执行，并明确文档/二进制差异；无需把重开会话当作执行许可。
+EasyEDA 扩展管理器没有 API，也不允许 GUI 自动化，所以连接器只能由用户导入。daemon/`update`
+已把 `.eext` 下载到 `~/.pcbpilot/connector/pcbpilot-connector-vX.Y.Z.eext`。**连接器版本 ≠ daemon
+发布版本时，daemon 拒绝设计动作**（只放行 `health`、`system.*`、`project.current`、
+`document.current`），错误里带 3 步和本地路径；`health.notices` / `updates.connector.steps` 同样给出：
+
+1. EasyEDA Pro → 高级 → 扩展管理器 → 已安装：卸载旧的 “PCB Pilot Connector”
+2. 导入 `~/.pcbpilot/connector/pcbpilot-connector-vX.Y.Z.eext`
+3. 选中 “PCB Pilot Connector” → 启用 → 配置 → 勾选「允许外部交互」，重新加载编辑器（Web 刷新；桌面版重启）
+
+**Agent 规则：health 显示连接器错位时，把这 3 步告诉用户并等待；不要绕过、不要换动作试探。**
+新连接器连上后自动放行，无需重启 daemon。dev 构建（git describe 戳、`-dev.N`）两侧均豁免。
 
 在另一台机器或新的终端验证时，固定 Release 版本并使用独立目录，先检查
 `pcbpilot --version`、`pcbpilot sch compose --help`、`pcbpilot blocks ls --json`。

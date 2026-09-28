@@ -182,7 +182,7 @@ Windows 上安装器常不改 PATH，检查也会找 `C:\Spice64\bin`、`Program
 ```bash
 pcbpilot daemon start                   # 若未在运行
 pcbpilot health                         # windows[] 出现目标工程和文档，connectorVersion 与仓库一致
-pcbpilot update --check --exit-code     # 可选：CLI / Skill / 连接器版本对账
+pcbpilot update --check --exit-code     # 可选：CLI / Skill / MCP / 仿真工具 / daemon / 连接器对账
 ```
 
 “页面已打开”不等于连接器已连接；以 `health.windows` 精确列出目标工程和文档为准。
@@ -286,13 +286,33 @@ MCP 是同一套 typed action 的另一个入口，不暴露任意 JavaScript（
 
 ## 10. 升级与版本
 
-| 情况 | 做法 |
-|---|---|
-| 源码安装 | `git pull && scripts/setup-agent.sh`；连接器版本变了就重导 `.eext`（先卸载旧的） |
-| 发布版 | `pcbpilot update`（CLI + Skill），`pcbpilot update --check` 看三方版本 |
-| 只改了 CLI/daemon | 无需重导连接器；重启 daemon |
-| 连接器 handler / manifest 变了 | 卸载旧连接器 → 导入新 `.eext` → 重新加载编辑器 → `health` 确认 `connectorVersion` |
+**一步升级，默认全自动。** 已安装过任意旧版的机器不需要重跑安装脚本：
 
+| 方式 | 做法 |
+|---|---|
+| 自动（默认开启） | daemon 在启动时、每 6 小时、空闲 30 分钟后的第一个动作时查 GitHub；有新版本且 EasyEDA 空闲（无在飞动作、无未保存编辑、2 分钟无操作）时自动升级 CLI、Skill（全部客户端）、MCP、ngspice，下载新连接器，然后重启自身并自检，失败自动回滚 |
+| 手动一步 | `pcbpilot update`：a CLI → b Skill → c MCP（安装 + 注册 Claude Code/Codex/ZCode/~/.agents）→ d 仿真工具 → e 经登录服务重启 daemon → f 下载连接器并打印 3 步 → g 校验（失败回滚） |
+| 只看不改 | `pcbpilot update --check`（每个组件一行；`--exit-code` 落后时退出 10） |
+| 部分组件 | `--only cli,skill` / `--skip tools,daemon` |
+| 关闭自动 | `pcbpilot update --auto off`（只提示）；`--auto on` 恢复；`--auto status` 查看 |
+| 回退 | `pcbpilot update --rollback`（恢复 `~/.pcbpilot/rollback/` 里的上一版并重启 daemon） |
+| 源码安装 | `pcbpilot update` = `git pull --ff-only` + `scripts/setup-agent.sh`（工作区脏或分叉时拒绝并说明）；等价 `scripts/setup-agent.sh --upgrade`。daemon 默认只提示，`--auto source` 才自动快进 |
+
+离线或网络差时：daemon 静默指数退避重试（1m → 30m 封顶），`pcbpilot health` 的 `updates.state` 为
+`offline-retrying`，每个会话最多一行提示，设计动作照常可用。下载先按 `checksums.txt` 校验再替换。
+
+**连接器是唯一的人工步骤**（EasyEDA 扩展管理器没有 API，也不允许 GUI 自动化）。版本必须与 CLI
+完全一致——不一致时 daemon 暂停设计动作（只放行 health/system.* 等诊断），`pcbpilot health`
+和错误信息都会给出本地文件 `~/.pcbpilot/connector/pcbpilot-connector-vX.Y.Z.eext` 与 3 步：
+
+1. EasyEDA Pro → 高级 → 扩展管理器 → 已安装：卸载旧的 “PCB Pilot Connector”
+2. 导入上面的 `.eext`（`pcbpilot update --open` 会打开所在目录）
+3. 选中 → 启用 → 配置 → 勾选「允许外部交互」，重新加载编辑器（Web 刷新；桌面版重启）
+
+新连接器连上后自动放行；`pcbpilot update --wait-connector` 会等到它连上为止。
+
+状态与日志：`~/.pcbpilot/update-state.json`（最近一次升级）、`update-check.json`（检查缓存/退避）、
+`update.log`（全部记录）、`config.json`（自动开关）、`install.json`（安装方式）。
 版本只以签名 tag `vX.Y.Z`（`make release`）为准；推送到 `dev`/`main` 不是发布。
 发布流程见 [release-workflow.md](release-workflow.md)。
 

@@ -5,7 +5,7 @@ set -euo pipefail
 
 REPO="zhuangzard/pcbpilot"
 SKILL_NAME="pcbpilot"
-# PCBPILOT_INSTALL_SKILLS: ""|auto (detect), "none" (skip), or CSV of codex,claude,agents
+# PCBPILOT_INSTALL_SKILLS: ""|auto (detect), "none" (skip), or CSV of codex,claude,agents,zcode
 INSTALL_SKILLS="${PCBPILOT_INSTALL_SKILLS:-}"
 # PCBPILOT_SKILL_PRESERVE=1 keeps existing files instead of clean-replacing
 SKILL_PRESERVE="${PCBPILOT_SKILL_PRESERVE:-0}"
@@ -15,6 +15,8 @@ SKILL_PRESERVE="${PCBPILOT_SKILL_PRESERVE:-0}"
 VERSION="${PCBPILOT_VERSION:-}"
 # PCBPILOT_SIM_TOOLS=0 skips installing the open-source simulators (ngspice, Elmer FEM)
 SIM_TOOLS="${PCBPILOT_SIM_TOOLS:-1}"
+# PCBPILOT_MCP=0 skips the MCP server (mcp.tar.gz; needs Node.js >= 20.17)
+MCP="${PCBPILOT_MCP:-1}"
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 info()  { printf '\033[34m[pcbpilot]\033[0m %s\n' "$*"; }
@@ -238,6 +240,9 @@ detect_targets() {
   if [ -d "${HOME}/.agents" ]; then
     printf 'agents\n'; found=1
   fi
+  if [ -d "${HOME}/.zcode" ]; then
+    printf 'zcode\n'; found=1
+  fi
   # Neither detected → create both by default so the skill is ready when a
   # client shows up. PCBPILOT_INSTALL_SKILLS=none opts out.
   if [ "$found" = 0 ]; then
@@ -253,6 +258,7 @@ client_base_dir() {
     codex)  printf '%s/skills\n' "${CODEX_HOME:-${HOME}/.codex}" ;;
     claude) printf '%s/skills\n' "${CLAUDE_CONFIG_DIR:-${HOME}/.claude}" ;;
     agents) printf '%s/skills\n' "${HOME}/.agents" ;;
+    zcode)  printf '%s/skills\n' "${HOME}/.zcode" ;;
     *)      return 1 ;;
   esac
 }
@@ -371,6 +377,30 @@ else
   printf '    %s\n' "$(sim_manual)"
 fi
 
+# ── MCP server (release asset mcp.tar.gz; needs Node.js >= 20.17) ─────────────
+# `pcbpilot mcp install` downloads + verifies mcp.tar.gz, installs it to
+# ~/.pcbpilot/mcp/<version> (+ a stable current link) and registers it with
+# Claude Code / Codex / ZCode / ~/.agents. Skipped without Node.js.
+MCP_OK=0
+if [ "$MCP" = 0 ]; then
+  info "MCP server skipped (PCBPILOT_MCP=0); later: pcbpilot mcp install"
+elif ! command -v node >/dev/null 2>&1; then
+  warn "Node.js (>= 20.17) not found — MCP server skipped (the CLI + Skill work without it). Install Node, then: pcbpilot mcp install"
+elif "${INSTALL_DIR}/pcbpilot" mcp --help >/dev/null 2>&1; then
+  info "Installing the MCP server and registering it with your AI clients"
+  if "${INSTALL_DIR}/pcbpilot" mcp install --version "${VERSION#v}" </dev/null; then
+    MCP_OK=1; ok "MCP server installed (check: pcbpilot mcp status)"
+  else
+    warn "MCP install failed — retry: pcbpilot mcp install"
+  fi
+fi
+
+# ── install.json: lets `pcbpilot update` tell a release install from a source one
+mkdir -p "${HOME}/.pcbpilot" 2>/dev/null || true
+printf '{\n  "kind": "release",\n  "bin": "%s",\n  "version": "%s",\n  "installedAt": "%s"\n}\n' \
+  "${INSTALL_DIR}/pcbpilot" "${VERSION#v}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${HOME}/.pcbpilot/install.json" 2>/dev/null \
+  || warn "could not write ~/.pcbpilot/install.json"
+
 # ── PATH check ────────────────────────────────────────────────────────────────
 if ! echo ":${PATH}:" | grep -q ":${INSTALL_DIR}:"; then
   warn "${INSTALL_DIR} is not in PATH"
@@ -392,20 +422,24 @@ if [ "$SIM_OK" != 1 ] && [ "$SIM_TOOLS" != 0 ]; then
   printf '  Simulators: ngspice missing — pcbpilot sim tools install --yes  (or: %s)\n\n' "$(sim_manual)"
 fi
 printf '  2. Install the EasyEDA connector extension (sideload only - not on the marketplace):\n'
-printf '       Download: %s/pcbpilot-connector.eext\n' "$BASE_URL"
+printf '       File: %s (the daemon downloads it; or %s/pcbpilot-connector.eext)\n' "${HOME}/.pcbpilot/connector/pcbpilot-connector-${VERSION}.eext" "$BASE_URL"
 printf '       EasyEDA Pro: 高级 → 扩展管理器 → 已安装 (Advanced → Extension manager → Installed):\n'
 printf '       uninstall any older "PCB Pilot Connector" first (same uuid imports silently fail),\n'
 printf '       then import the .eext. Upstream "EDA Agent Connector" can stay (other ports).\n\n'
 printf '  3. Select "PCB Pilot Connector" → status Enabled → Config tab →\n'
 printf '       tick 允许外部交互 (Allow interactive with external); then reload the editor\n'
-printf '       (Web: refresh the page; desktop: restart EasyEDA). Check: pcbpilot health\n\n'
-printf '  4. Use the skill in your AI client:\n'
+printf '       (Web: refresh the page; desktop: restart EasyEDA). Check: pcbpilot health\n'
+printf '       The connector version must equal the CLI version; the daemon pauses design actions until it does.\n\n'
+printf '  4. Use the skill in your AI client (restart it so it loads the Skill and the MCP server):\n'
 printf '       /pcbpilot       (schematic + PCB workflow)\n'
-printf '       Installed for detected clients: Codex (~/.codex/skills), Codex Desktop shared (~/.agents/skills), and/or Claude Code (~/.claude/skills)\n\n'
-printf 'Optional MCP server + source install (Claude Code / Codex): clone the repo and run\n'
-printf '       scripts/setup-agent.sh      (see docs/manual.md)\n\n'
-printf 'Upgrading later? No need to re-run this script:\n'
-printf '       pcbpilot update           # CLI binary + skill dirs → latest\n'
-printf '       pcbpilot update --check   # report only (cli / skill / connector)\n'
-printf '     (connector patch drift is compatible; re-import only when `update` reports a major/minor mismatch)\n\n'
+printf '       Installed for detected clients: Claude Code, Codex, ~/.agents, ZCode\n'
+if [ "$MCP_OK" != 1 ]; then
+  printf '       MCP server: not installed (needs Node.js >= 20.17) — later: pcbpilot mcp install\n'
+fi
+printf '\n'
+printf 'Upgrading later? Automatic: the daemon installs new releases (CLI, Skill, MCP, simulators)\n'
+printf 'when EasyEDA is idle and keeps the previous version for rollback. By hand:\n'
+printf '       pcbpilot update             # everything → latest (connector: prints the 3 import steps)\n'
+printf '       pcbpilot update --check     # report only\n'
+printf '       pcbpilot update --auto off  # notify only; pcbpilot update --rollback to go back\n\n'
 printf 'Full docs: https://github.com/%s\n' "$REPO"

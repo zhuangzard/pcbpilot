@@ -6,6 +6,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import { readFileSync } from 'node:fs';
 import {
   buildBlocksArgs,
   buildProjectTransferArgs,
@@ -13,9 +14,23 @@ import {
   buildWorkflowArgs,
   DOMAIN_NAMES,
   filterActions,
+  healthResult,
   runEasyeda,
   toMcpResult,
 } from './core.mjs';
+
+// The release packer writes mcp/VERSION (= the pcbpilot release); the updater
+// verifies it through the initialize handshake. A source checkout has none.
+function serverVersion() {
+  for (const rel of ['../VERSION', '../package.json']) {
+    try {
+      const text = readFileSync(new URL(rel, import.meta.url), 'utf8');
+      return rel.endsWith('.json') ? JSON.parse(text).version : text.trim();
+    }
+    catch { /* try the next source */ }
+  }
+  return '0.0.0';
+}
 
 const catalogExecution = await runEasyeda(['actions'], 30_000);
 if (!catalogExecution.ok || !Array.isArray(catalogExecution.result)) {
@@ -26,7 +41,7 @@ const actions = catalogExecution.result.filter((action) => DOMAIN_NAMES.includes
 const byName = new Map(actions.map((action) => [action.name, action]));
 
 const server = new Server(
-  { name: 'pcbpilot-mcp', version: '0.18.3' },
+  { name: 'pcbpilot-mcp', version: serverVersion() },
   {
     capabilities: { tools: {} },
     instructions: [
@@ -109,7 +124,7 @@ const tools = [
   {
     name: 'pcbpilot_health',
     title: 'EasyEDA connection health',
-    description: 'Check the local daemon and connected EasyEDA Pro windows.',
+    description: 'Check the local daemon and connected EasyEDA Pro windows. Call it first in every session: its notices (upgrade done, connector import pending with the 3 steps) must be relayed to the user.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
@@ -179,7 +194,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return toMcpResult(await runEasyeda(buildProjectTransferArgs(input), 90_000));
     }
     if (name === 'pcbpilot_health') {
-      return toMcpResult(await runEasyeda(['daemon', 'health'], 30_000));
+      return healthResult(await runEasyeda(['daemon', 'health'], 30_000));
     }
     if (name === 'pcbpilot_actions') {
       const filtered = filterActions(actions, input);

@@ -40,6 +40,15 @@ type Options struct {
 	// successful mutating action the daemon saves the window once edits quiesce for
 	// this long (a burst coalesces into one save). 0 disables it. See autosave.go.
 	AutosaveDebounce time.Duration
+
+	// Updates, when set, fills /health "updates" (self-update state, notices)
+	// and "updateAvailable". See updates.go.
+	Updates UpdatesProvider
+
+	// OnAction is called at the start of every /action with how long the
+	// daemon had been idle (negative on the first action). The self-updater
+	// uses it to re-check after >30 min idle. Must not block.
+	OnAction func(idleFor time.Duration)
 }
 
 // Server is the long-running local HTTP server. It serves /health, accepts
@@ -77,6 +86,9 @@ type Server struct {
 	// guarded write's before-read when nothing touched the window in between
 	// (geometrycache.go).
 	geometry *geometryCache
+
+	// activity tracks the last action and windows with unsaved edits (updates.go).
+	activity *activityTracker
 
 	// clientInflight counts client-issued actions currently forwarded per window,
 	// so the debounced autosave never injects a 20-60s save into the middle of a
@@ -156,6 +168,7 @@ func New(opts Options) *Server {
 		writeHealth:      newWriteHealthTracker(),
 		queueBlocks:      newQueueBlockTracker(),
 		geometry:         newGeometryCache(),
+		activity:         newActivityTracker(),
 	}
 	if opts.AutosaveDebounce > 0 {
 		s.autosave = newAutosaver(opts.AutosaveDebounce, s.dispatchSave)
@@ -178,6 +191,12 @@ type health struct {
 	// per-action buckets (actions / degradedActions) keep one broken road from
 	// being averaged away. Omitted while no action has been forwarded.
 	WriteHealth map[string]WindowWriteHealth `json:"writeHealth,omitempty"`
+	// Activity: in-flight actions, last action, windows with unsaved edits.
+	Activity Activity `json:"activity"`
+	// Updates is the self-update block (state, latest release, notices);
+	// UpdateAvailable is {current, latest, releaseUrl} when a newer release exists.
+	Updates         any `json:"updates,omitempty"`
+	UpdateAvailable any `json:"updateAvailable,omitempty"`
 }
 
 // routes builds the HTTP handlers. port is the bound port, reported in /health
@@ -193,7 +212,7 @@ func (s *Server) routes(port int) *http.ServeMux {
 		w.Header().Set("Content-Type", "application/json")
 		enc := json.NewEncoder(w)
 		enc.SetIndent("", "  ")
-		_ = enc.Encode(health{
+		h := health{
 			PID:         os.Getpid(),
 			Service:     Service,
 			Version:     s.opts.Version,
@@ -201,7 +220,12 @@ func (s *Server) routes(port int) *http.ServeMux {
 			Port:        port,
 			Windows:     s.hub.listAnnotated(s.opts.Version),
 			WriteHealth: s.writeHealth.all(),
-		})
+			Activity:    s.Activity(),
+		}
+		if s.opts.Updates != nil {
+			h.Updates, h.UpdateAvailable = s.opts.Updates(h.Windows)
+		}
+		_ = enc.Encode(h)
 	})
 	mux.HandleFunc("/eda", s.handleConnect)
 	mux.HandleFunc("/action", s.handleAction)

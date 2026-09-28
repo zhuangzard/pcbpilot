@@ -15,6 +15,7 @@ import (
 // Run is the main entry point called by main.go.
 // It returns 0 on success, 1 on any error.
 func Run(args []string, stdout, stderr io.Writer) int {
+	sessionStartNotice(&appConfig{host: defaultHost, ports: fmt.Sprintf("%d-%d", defaultPortStart, defaultPortEnd)}, args, stderr)
 	root := newRootCmd(stdout, stderr)
 	root.SetArgs(args)
 	root.SetOut(stdout)
@@ -112,6 +113,7 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 		newDebugCmd(cfg, stdout, stderr),
 		newSkillCmd(stdout, stderr),
 		newUpdateCmd(cfg, stdout, stderr),
+		newMCPCmd(cfg, stdout, stderr),
 	)
 	installMissingSubcommandErrors(root)
 

@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.6.1] — unreleased
+
+**One-step, automatic upgrades of every component; connector version gate.** The connector code is
+unchanged; re-import 0.6.1 because the daemon now requires the connector to match its release exactly.
+
+- **`pcbpilot update` upgrades everything in one step** — CLI (sha256 + run-verify + atomic swap), Skill in
+  every present client dir (now incl. `~/.zcode/skills`; symlinked source-install dirs are left alone and
+  reported "linked"), MCP server (new release asset `mcp.tar.gz` → `~/.pcbpilot/mcp/<v>` + `current` link,
+  registered with Claude Code / Codex / ZCode / `~/.agents`, upstream easyeda-agent entries retired), sim
+  tools, daemon restart through the login service, connector download to `~/.pcbpilot/connector/` with the
+  3 import steps (`--open`, `--wait-connector`), then verify (versions, MCP handshake, service) with automatic
+  rollback. `--only/--skip`, `--check` (table for every component, `--exit-code` 10), `--rollback`,
+  `--local-dir` for local assets. New `pcbpilot mcp install|status|register`.
+- **Automatic mode (default on)** — the daemon is the single place that checks (startup, every 6 h, first
+  action after 30 min idle; offline: quiet backoff 1m → 30m, `health.updates.state=offline-retrying`) and
+  applies a release when EasyEDA is idle (no action in flight, no unsaved edits, 2 min quiet), exits so the
+  login service starts the new binary, verifies itself and rolls back on failure (`skipVersion`). CLI/MCP only
+  relay `health.notices` once per session; a daemon↔CLI skew is fixed by a service restart. `update --auto
+  off|on|source|status`; source checkouts are notify-only unless `--auto source` (ff-only on a clean tree).
+- **Connector version gate (user decision 2026-09-28)** — a connector whose release differs from the daemon
+  may only run health/system.*/project.current/document.current; the refusal carries the 3 import steps and
+  the downloaded `.eext` path, and lifts automatically when a matching connector connects. Dev builds are
+  exempt; `PCBPILOT_ALLOW_VERSION_SKEW=1` for development.
+- **Release assets** — `mcp.tar.gz` (production node_modules, reproducible) and `manifest.json` (component
+  versions, sha256/size of every asset, `minConnector`); install.sh / install.ps1 also install the MCP server
+  and write `~/.pcbpilot/install.json`; `scripts/setup-agent.sh --upgrade` / `--restart-daemon`.
+
 ## [0.6.0] — 2026-09-28
 
 **Pre-layout + post-layout simulation, board-edge safety distance, analog SPICE.** The connector code is

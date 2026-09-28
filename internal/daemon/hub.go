@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -614,10 +615,10 @@ func (h *hub) listAnnotated(daemonVersion string) []Window {
 // compare against).
 func connectorVersionOK(connector, daemon, newestPeer string) *bool {
 	cn := semverCore(connector)
-	if cn == "" {
-		return nil
+	if cn == "" || !isCleanRelease(strings.TrimSpace(connector)) {
+		return nil // unparseable or a -dev.N / git-describe build: no verdict
 	}
-	if newestPeer != "" && semverLess(cn, newestPeer) && !sameMajorMinor(cn, newestPeer) {
+	if newestPeer != "" && semverLess(cn, newestPeer) {
 		stale := false
 		return &stale
 	}
@@ -625,29 +626,30 @@ func connectorVersionOK(connector, daemon, newestPeer string) *bool {
 	// the daemon. A dev daemon stamped by `git describe` (e.g. v0.5.1-19-ge9552d8)
 	// or "dev" must NOT — its semver core ("0.5.1") is an old tag, not the real
 	// code level, so comparing it to a newer connector would be a false mismatch.
+	// Since 2026-09-28 (user decision) the connector must equal the daemon
+	// release exactly; the daemon refuses design actions otherwise (updates.go).
 	if isCleanRelease(daemon) {
-		ok := sameMajorMinor(cn, semverCore(daemon))
+		ok := cn == semverCore(daemon)
 		return &ok
 	}
 	return nil
 }
 
 // staleConnectorNotice returns an actionable one-liner when a just-registered
-// connector is behind the running daemon's major.minor compatibility line
-// (both clean semver), or "" otherwise. Patch drift is intentionally accepted.
-// The connector .eext has no sideload auto-update, so the daemon can only detect
-// the mismatch and tell the user to re-import — it cannot swap it in place.
+// connector release differs from the running daemon release (both clean
+// semver), or "" otherwise. The daemon refuses design actions for that window
+// until the matching connector connects (connectorGate).
 func staleConnectorNotice(connector, daemon string) string {
+	if !ConnectorMisaligned(connector, daemon) {
+		return "" // aligned, dev build or unparseable — no hard verdict
+	}
 	cn, dn := semverCore(connector), semverCore(daemon)
-	if cn == "" || dn == "" || !isCleanRelease(daemon) {
-		return "" // dev build or unparseable — no hard verdict
+	path := selfupdate.ConnectorPath(dn)
+	if _, err := os.Stat(path); err != nil {
+		path = selfupdate.ReleaseAssetURL(dn, selfupdate.ConnectorAsset)
 	}
-	if !semverLess(cn, dn) || sameMajorMinor(cn, dn) {
-		return ""
-	}
-	return fmt.Sprintf("stale connector: v%s < daemon v%s — re-import the connector .eext "+
-		"(uninstall old in 已安装 → import new → FULLY quit & relaunch EasyEDA). "+
-		"Latest .eext: https://github.com/%s/releases/latest", cn, dn, releaseRepoSlug)
+	return fmt.Sprintf("connector v%s ≠ daemon v%s — design actions are paused for this window until the matching connector is imported "+
+		"(uninstall old in 已安装 → import %s → enable + 允许外部交互 → reload the editor); it unblocks automatically on reconnect", cn, dn, path)
 }
 
 // releaseRepoSlug is the GitHub owner/repo that ships the connector .eext.

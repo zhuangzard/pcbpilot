@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -43,6 +44,7 @@ func newDaemonCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 func newDaemonStartCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 	var autosaveDebounce time.Duration
 	var autoUpdateSkill bool
+	var selfUpdate bool
 	c := &cobra.Command{
 		Use:   "start",
 		Short: "Start the daemon (blocks until SIGINT/SIGTERM)",
@@ -59,8 +61,18 @@ pcbpilot skill dirs (CLAUDE_CONFIG_DIR / CODEX_HOME, default ~/.claude / ~/.code
 startup, so you never hand-copy the skill after a CLI upgrade. It touches only
 dirs that already exist, honors PCBPILOT_SKILL_PRESERVE=1, and logs each change.
 The EasyEDA connector .eext has no sideload auto-update (marketplace-only).
-Patch drift is compatible; a connector behind the daemon's major.minor line is
-only DETECTED and logged with a re-import notice — not swapped.
+Its version must equal the daemon release exactly (user decision 2026-09-28):
+a misaligned window may only run health/system.*/project.current/
+document.current until the matching connector connects (PCBPILOT_ALLOW_VERSION_SKEW=1
+disables this for development; dev builds are exempt).
+
+Self-update (--self-update, on by default) is the single place that checks and
+applies releases: at startup, every 6 h and on the first action after 30 min
+idle (offline: quiet exponential backoff 1m → 30m). With ` + "`pcbpilot update --auto on`" + `
+(the default) a newer release is applied when EasyEDA is idle — no action in
+flight, no unsaved edits, no action for 2 min — then the daemon exits so the
+login service starts the new binary, which verifies itself and rolls back on
+failure. /health "updates" carries the state and the notices to relay.
 
 The daemon binds a SINGLE fixed port (61832, the start of --ports) and never
 spills to the next one — so at most one daemon ever runs and the connector always
@@ -99,23 +111,50 @@ extension/src/transport.ts).`,
 			cleanup := writeDaemonPID(stdout)
 			defer cleanup()
 
-			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+			sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
+			ctx, cancelRun := context.WithCancel(sigCtx)
+			defer cancelRun()
 
-			// Best-effort background skill sync — never blocks or fails the daemon.
-			if autoUpdateSkill {
-				go runStartupSkillSync(ctx, stdout)
-			}
 
-			srv := daemon.New(daemon.Options{
+			opts := daemon.Options{
 				Host:             cfg.host,
 				PortStart:        port,
 				PortEnd:          port, // single fixed port — no spill
 				Version:          version.Version,
 				AutosaveDebounce: autosaveDebounce,
-			})
+			}
+			// The daemon is the single place that checks and applies updates
+			// (daemon_selfupdate.go). A successful apply cancels ctx and the
+			// daemon exits so its supervisor starts the new binary.
+			var restartRequested atomic.Bool
+			var upd *selfUpdater
+			if selfUpdate {
+				upd = newSelfUpdater(realUpdateDeps(cfg, nil), version.Version, nil, func() {
+					restartRequested.Store(true)
+					cancelRun()
+				})
+				opts.Updates = upd.Health
+				opts.OnAction = upd.OnAction
+			}
+			srv := daemon.New(opts)
+			// Best-effort skill sync — never blocks or fails the daemon. With the
+			// self-updater it runs inside it (before any apply, so they never race).
+			switch {
+			case upd != nil:
+				upd.activity = srv.Activity
+				if autoUpdateSkill {
+					upd.startupSkills = func(ctx context.Context) { runStartupSkillSync(ctx, stdout) }
+				}
+				go upd.Run(ctx)
+			case autoUpdateSkill:
+				go runStartupSkillSync(ctx, stdout)
+			}
 			if err := srv.Run(ctx, stdout); err != nil {
 				return err
+			}
+			if restartRequested.Load() {
+				return restartAfterSelfUpdate(stdout)
 			}
 			return nil
 		},
@@ -124,6 +163,8 @@ extension/src/transport.ts).`,
 		"autosave a window this long after its last mutating action (0 = disable)")
 	c.Flags().BoolVar(&autoUpdateSkill, "auto-update-skill", true,
 		"on startup, sync installed skill dirs to this daemon's release; skip dev builds (best-effort)")
+	c.Flags().BoolVar(&selfUpdate, "self-update", true,
+		"check for releases (startup, every 6h, after 30 min idle) and — with `update --auto on`, the default — apply them when EasyEDA is idle")
 	return c
 }
 
@@ -175,6 +216,10 @@ func newDaemonHealthCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command
 				result.VersionGate = &rep
 				hostRep := hostCompatibilityFromHealth(result.Found.Raw)
 				result.HostCompatibility = &hostRep
+				if u := parseHealthUpdates(result.Found.Raw); u != nil {
+					result.Updates = u
+					result.Notices = u.Notices
+				}
 			}
 			enc := json.NewEncoder(stdout)
 			enc.SetIndent("", "  ")
@@ -186,6 +231,11 @@ func newDaemonHealthCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command
 			}
 			if result.HostCompatibility != nil {
 				fmt.Fprintln(stderr, hostCompatibilitySummary(*result.HostCompatibility))
+			}
+			if result.Found != nil {
+				for _, line := range healthNoticeLines(result.Found.Raw, true) {
+					fmt.Fprintln(stderr, line)
+				}
 			}
 			if result.Found == nil {
 				return errActionFailed // daemon absent; response already printed

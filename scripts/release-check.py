@@ -14,8 +14,12 @@ import zipfile
 ASSETS = [
     "pcbpilot_darwin_amd64", "pcbpilot_darwin_arm64",
     "pcbpilot_linux_amd64", "pcbpilot_linux_arm64", "pcbpilot_windows_amd64.exe",
-    "pcbpilot-connector.eext", "skills.tar.gz", "install.sh", "install.ps1",
+    "pcbpilot-connector.eext", "skills.tar.gz", "mcp.tar.gz", "install.sh", "install.ps1",
+    "manifest.json",
 ]
+# manifest.json describes every other asset (version + sha256 + size) for the
+# updater and humans; checksums.txt still covers all ASSETS including it.
+MANIFEST_ASSETS = [name for name in ASSETS if name != "manifest.json"]
 # Installer scripts are published verbatim; the packaged copy must match the source.
 INSTALLERS = ["install.sh", "install.ps1"]
 
@@ -58,6 +62,61 @@ def check_connector(path: Path, version: str, uuid: str) -> None:
             raise ValueError(f"{path}: compiled connector entry is missing")
 
 
+def write_manifest(dist: Path, version: str, repo_slug: str = "zhuangzard/pcbpilot") -> None:
+    """Versions and sha256 of every asset the updater needs. The connector must
+    equal the release exactly (daemon gate, 2026-09-28): minConnector = version."""
+    assets = {}
+    for name in MANIFEST_ASSETS:
+        path = dist / name
+        if not path.is_file() or path.stat().st_size == 0:
+            raise ValueError(f"missing/empty release asset: {path}")
+        data = path.read_bytes()
+        assets[name] = {"sha256": hashlib.sha256(data).hexdigest(), "size": len(data)}
+    manifest = {
+        "schemaVersion": 1,
+        "name": "pcbpilot",
+        "version": version,
+        "tag": f"v{version}",
+        "repo": repo_slug,
+        "minConnector": version,
+        "components": {"cli": version, "daemon": version, "skill": version, "mcp": version, "connector": version},
+        "assets": assets,
+    }
+    with (dist / "manifest.json").open("w", encoding="utf-8", newline="\n") as stream:
+        json.dump(manifest, stream, indent=2, sort_keys=True)
+        stream.write("\n")
+
+
+def check_mcp(path: Path, version: str) -> None:
+    with tarfile.open(path, "r:gz") as archive:
+        names = set()
+        for member in archive.getmembers():
+            name = member.name
+            if not (name == "mcp" or name.startswith("mcp/")) or ".." in name.split("/"):
+                raise ValueError(f"mcp.tar.gz: entry outside mcp/: {name}")
+            if not (member.isfile() or member.isdir()):
+                raise ValueError(f"mcp.tar.gz: links/devices are not allowed: {name}")
+            names.add(name)
+        for need in ("mcp/src/server.mjs", "mcp/package.json", "mcp/VERSION",
+                     "mcp/node_modules/@modelcontextprotocol/sdk/package.json"):
+            if need not in names:
+                raise ValueError(f"mcp.tar.gz is missing {need}")
+        if archive.extractfile("mcp/VERSION").read().decode().strip() != version:
+            raise ValueError("mcp.tar.gz VERSION differs from the release")
+
+
+def check_manifest(dist: Path, version: str) -> None:
+    manifest = json.loads((dist / "manifest.json").read_text(encoding="utf-8"))
+    if manifest.get("version") != version or manifest.get("minConnector") != version:
+        raise ValueError("manifest.json version/minConnector differs from the release")
+    if set(manifest.get("assets", {})) != set(MANIFEST_ASSETS):
+        raise ValueError("manifest.json must list every release asset except itself")
+    for name, entry in manifest["assets"].items():
+        data = (dist / name).read_bytes()
+        if entry.get("sha256") != hashlib.sha256(data).hexdigest() or entry.get("size") != len(data):
+            raise ValueError(f"manifest.json sha256/size mismatch: {name}")
+
+
 def write_checksums(dist: Path) -> None:
     records = []
     for name in ASSETS:
@@ -89,6 +148,8 @@ def check_artifacts(repo: Path, dist: Path, version: str) -> None:
         item = archive.extractfile("pcbpilot/SKILL.md")
         if item is None or skill_version(item.read().decode()) != version:
             raise ValueError("packaged SKILL.md has the wrong version")
+    check_mcp(dist / "mcp.tar.gz", version)
+    check_manifest(dist, version)
     for name in INSTALLERS:
         if (dist / name).read_bytes() != (repo / name).read_bytes():
             raise ValueError(f"packaged {name} differs from source")
@@ -112,6 +173,8 @@ def main() -> int:
     parser.add_argument("--local-dev", action="store_true", help="require vX.Y.Z-dev.N; never publish")
     parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parent.parent)
     parser.add_argument("--connector", type=Path)
+    parser.add_argument("--write-manifest", type=Path, help="write DIST/manifest.json (before --write-checksums)")
+    parser.add_argument("--repo-slug", default="zhuangzard/pcbpilot")
     parser.add_argument("--write-checksums", type=Path)
     parser.add_argument("--artifacts", type=Path)
     args = parser.parse_args()
@@ -120,6 +183,8 @@ def main() -> int:
         if args.connector:
             uuid = json.loads((args.repo / "extension/extension.json").read_text(encoding="utf-8"))["uuid"]
             check_connector(args.connector, version, uuid)
+        if args.write_manifest:
+            write_manifest(args.write_manifest, version, args.repo_slug)
         if args.write_checksums:
             write_checksums(args.write_checksums)
         if args.artifacts:

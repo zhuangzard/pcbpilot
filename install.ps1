@@ -419,6 +419,7 @@ try {
                     return (Join-Path $root.TrimEnd('\', '/') 'skills')
                 }
                 'agents' { return (Join-Path (Join-Path (Get-HomeDir) '.agents') 'skills') }
+                'zcode' { return (Join-Path (Join-Path (Get-HomeDir) '.zcode') 'skills') }
                 default { return '' }
             }
         }
@@ -438,6 +439,7 @@ try {
             if ((Test-Path -LiteralPath $claudeHome) -or
                 $null -ne (Get-Command -Name 'claude' -ErrorAction SilentlyContinue)) { $found += 'claude' }
             if (Test-Path -LiteralPath (Join-Path (Get-HomeDir) '.agents')) { $found += 'agents' }
+            if (Test-Path -LiteralPath (Join-Path (Get-HomeDir) '.zcode')) { $found += 'zcode' }
             if ($found.Count -eq 0) {
                 # Neither detected -> create both by default so the skill is ready when
                 # a client shows up. PCBPILOT_INSTALL_SKILLS=none opts out.
@@ -559,6 +561,31 @@ try {
                 Write-Warn "this release predates 'pcbpilot sim tools'; install the simulators yourself:"
                 Write-Detail $simManual
             }
+        }
+        # -- MCP server (release asset mcp.tar.gz; needs Node.js >= 20.17) -----
+        # 'pcbpilot mcp install' downloads + verifies mcp.tar.gz, installs it to
+        # ~/.pcbpilot/mcp/<version> (+ current junction) and registers it with
+        # Claude Code / Codex / ZCode / ~/.agents. Skipped without Node.js.
+        $mcpOk = $false
+        if (Get-Command node -ErrorAction SilentlyContinue) {
+            & $target mcp --help *> $null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Step 'Installing the MCP server and registering it with your AI clients'
+                & $target mcp install --version $BareVersion
+                if ($LASTEXITCODE -eq 0) { $mcpOk = $true; Write-Ok 'MCP server installed (check: pcbpilot mcp status)' }
+                else { Write-Warn 'MCP install failed - retry: pcbpilot mcp install' }
+            }
+        } else {
+            Write-Warn 'Node.js (>= 20.17) not found - MCP server skipped (CLI + Skill work without it). Install Node (winget install OpenJS.NodeJS.LTS), then: pcbpilot mcp install'
+        }
+        # -- install.json: lets the updater tell a release install from a source one
+        try {
+            $stateDir = Join-Path $HOME '.pcbpilot'
+            if (-not (Test-Path -LiteralPath $stateDir)) { [void](New-Item -ItemType Directory -Path $stateDir -Force) }
+            $info = [ordered]@{ kind = 'release'; bin = $target; version = $BareVersion; installedAt = (Get-Date).ToUniversalTime().ToString('o') }
+            [IO.File]::WriteAllText((Join-Path $stateDir 'install.json'), ($info | ConvertTo-Json) + "`n")
+        } catch {
+            Write-Warn "could not write ~/.pcbpilot/install.json: $($_.Exception.Message)"
         }
         # Best-effort sweep of files an earlier locked upgrade had to leave behind.
         Get-ChildItem -LiteralPath $InstallDir -Filter '.pcbpilot-old-*.exe' -Force -ErrorAction SilentlyContinue |
@@ -698,8 +725,9 @@ try {
             Write-Host "  Simulators: ngspice missing - pcbpilot sim tools install --yes  (or: $simManual)"
             Write-Host ''
         }
+        $eextLocal = Join-Path $HOME ".pcbpilot\connector\pcbpilot-connector-v$BareVersion.eext"
         Write-Host '  2. Install the EasyEDA connector extension (sideload only - not on the marketplace):'
-        Write-Host "          Download: $BaseUrl/pcbpilot-connector.eext"
+        Write-Host "          File: $eextLocal (the daemon downloads it; or $BaseUrl/pcbpilot-connector.eext)"
         Write-Host "          EasyEDA Pro: $Advanced (Advanced) -> $ExtManager (Extension manager) -> $Installed (Installed):"
         Write-Host '          uninstall any older "PCB Pilot Connector" first (same uuid imports silently fail),'
         Write-Host "          then $ImportExt (Import extension) -> pick the .eext. Upstream ""EDA Agent Connector"" can stay."
@@ -707,17 +735,22 @@ try {
         Write-Host "  3. Enable $AllowExternal (Allow interactive with external):"
         Write-Host '       select "PCB Pilot Connector" -> status Enabled -> Config tab -> tick the checkbox,'
         Write-Host '       then reload the editor (Web: refresh; desktop: restart EasyEDA). Check: pcbpilot health'
+        Write-Host '       The connector version must equal the CLI version; the daemon pauses design actions until it does.'
         Write-Host ''
-        Write-Host '  4. Use the skill in your AI client:'
+        Write-Host '  4. Use the skill in your AI client (restart it so it loads the Skill and the MCP server):'
         Write-Host '       /pcbpilot       (schematic + PCB workflow)'
         if ($Targets.Count -gt 0) {
             Write-Host "       Installed for: $($Targets -join ', ')"
         }
+        if (-not $mcpOk) {
+            Write-Host '       MCP server: not installed (needs Node.js >= 20.17) - later: pcbpilot mcp install'
+        }
         Write-Host ''
-        Write-Host 'Upgrading later? No need to re-run this script:'
-        Write-Host '       pcbpilot update           # CLI binary + skill dirs -> latest'
-        Write-Host '       pcbpilot update --check   # report only (cli / skill / connector)'
-        Write-Host '     (connector patch drift is compatible; re-import only when `update` reports a major/minor mismatch)'
+        Write-Host 'Upgrading later? Automatic: the daemon installs new releases (CLI, Skill, MCP, simulators)'
+        Write-Host 'when EasyEDA is idle and keeps the previous version for rollback. By hand:'
+        Write-Host '       pcbpilot update           # everything -> latest (connector: prints the 3 import steps)'
+        Write-Host '       pcbpilot update --check   # report only'
+        Write-Host '       pcbpilot update --auto off   # notify only; pcbpilot update --rollback to go back'
         Write-Host ''
         Write-Host "Full docs: https://github.com/$Repo"
     } finally {

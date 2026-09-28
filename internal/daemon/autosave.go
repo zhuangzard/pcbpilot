@@ -253,5 +253,6 @@ func (s *Server) dispatchSave(windowID, saveAction string) {
 		return
 	}
 	s.audit.Append(fromResponse(started, &req, resp))
+	s.activity.observe(&req, resp.OK)
 	s.logf("autosave: %s on %s (ok=%v)", saveAction, windowID, resp.OK)
 }

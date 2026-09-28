@@ -152,10 +152,11 @@ func TestEvaluateVersionGateConnectorGrading(t *testing.T) {
 		conn    string
 		wantSev string
 	}{
-		// Patch releases contain no connector runtime changes. Marketplace lag
-		// within the same compatibility line is fully supported.
-		{"patch behind is compatible", "v1.1.1", "1.1.0", versionSevOK},
-		{"patch ahead is compatible", "v1.1.0", "1.1.1", versionSevOK},
+		// 2026-09-28 user decision: connector must equal the release exactly;
+		// the daemon pauses design actions otherwise. -dev.N stays exempt.
+		{"patch behind blocks", "v1.1.1", "1.1.0", versionSevBlock},
+		{"patch ahead blocks", "v1.1.0", "1.1.1", versionSevBlock},
+		{"dev connector exempt", "v1.1.1", "1.1.2-dev.3", versionSevSkipped},
 		{"minor behind blocks", "v1.2.0", "1.1.0", versionSevBlock},
 		{"major behind blocks", "v2.0.0", "1.9.9", versionSevBlock},
 		{"same version ok", "v1.1.1", "1.1.1", versionSevOK},
@@ -172,7 +173,7 @@ func TestEvaluateVersionGateConnectorGrading(t *testing.T) {
 				// The connector fix must spell the two hard-won steps: uninstall
 				// first (same uuid → silent import failure) and fully relaunch
 				// EasyEDA (re-import does not reload open windows).
-				for _, want := range []string{"卸载", "完全退出并重启 EasyEDA"} {
+				for _, want := range []string{"卸载", "允许外部交互", "重新加载编辑器"} {
 					if !strings.Contains(got.Fix, want) {
 						t.Fatalf("connector fix %q missing %q", got.Fix, want)
 					}
@@ -274,14 +275,17 @@ func TestPostActionDoesNotConsultVersionDiagnostic(t *testing.T) {
 	}
 }
 
-func TestRunVersionGateSilentlyAcceptsConnectorPatch(t *testing.T) {
+func TestRunVersionGateReportsConnectorPatch(t *testing.T) {
 	withCLIVersion(t, "v1.1.1")
 	var stderr bytes.Buffer
+	// The CLI-side report stays a diagnostic (the daemon is the enforcing
+	// point); patch drift is now reported because the daemon refuses design
+	// actions until the connector matches exactly.
 	if err := runVersionGate(&appConfig{}, healthBody("1.1.1", "1.1.0"), &stderr); err != nil {
-		t.Fatalf("connector patch drift must not block: %v", err)
+		t.Fatalf("CLI diagnostic must not error: %v", err)
 	}
-	if stderr.Len() != 0 {
-		t.Fatalf("compatible connector patch drift must be silent, got:\n%s", stderr.String())
+	if !strings.Contains(stderr.String(), "connector") {
+		t.Fatalf("connector patch drift must be reported, got:\n%s", stderr.String())
 	}
 }
 

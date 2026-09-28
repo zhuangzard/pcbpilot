@@ -287,13 +287,13 @@ func TestConnectorVersionOK(t *testing.T) {
 	}{
 		{"0.5.5", "v0.5.5", "0.5.5", boolp(true)},
 		{"v0.5.5", "0.5.5", "0.5.5", boolp(true)},
-		{"0.5.4", "v0.5.5", "0.5.5", boolp(true)}, // patch drift is compatible
-		{"0.1.0", "0.5.5", "0.5.5", boolp(false)}, // stale vs daemon
-		{"dev", "0.5.5", "0.5.5", nil},            // non-semver connector → no verdict
-		{"0.5.5", "dev", "0.5.5", nil},            // dev daemon, leads peers → no verdict
-		{"", "0.5.5", "0.5.5", nil},               // missing connector version
-		{"0.5", "0.5.0", "0.5.0", nil},            // not x.y.z
-		{"0.5.x", "0.5.0", "", nil},               // non-numeric component
+		{"0.5.4", "v0.5.5", "0.5.5", boolp(false)}, // exact match required since 2026-09-28
+		{"0.1.0", "0.5.5", "0.5.5", boolp(false)},  // stale vs daemon
+		{"dev", "0.5.5", "0.5.5", nil},             // non-semver connector → no verdict
+		{"0.5.5", "dev", "0.5.5", nil},             // dev daemon, leads peers → no verdict
+		{"", "0.5.5", "0.5.5", nil},                // missing connector version
+		{"0.5", "0.5.0", "0.5.0", nil},             // not x.y.z
+		{"0.5.x", "0.5.0", "", nil},                // non-numeric component
 		// cross-window: behind a peer is stale even when the daemon is non-semver
 		{"0.1.0", "dev", "0.5.6", boolp(false)},
 		{"0.5.6", "dev", "0.5.6", nil}, // newest peer, dev daemon → no verdict
@@ -318,8 +318,14 @@ func TestStaleConnectorNotice(t *testing.T) {
 	} else if !strings.Contains(note, "0.8.3") || !strings.Contains(note, "0.9.0") {
 		t.Errorf("notice should name both versions: %q", note)
 	}
-	// Up to date / ahead → no notice.
-	for _, c := range [][2]string{{"0.9.0", "v0.9.0"}, {"0.9.1", "v0.9.0"}, {"0.8.3", "v0.8.9"}, {"0.10.0", "v0.9.0"}} {
+	// Patch drift and ahead are misaligned too (exact match since 2026-09-28).
+	for _, c := range [][2]string{{"0.9.1", "v0.9.0"}, {"0.8.3", "v0.8.9"}, {"0.10.0", "v0.9.0"}} {
+		if note := staleConnectorNotice(c[0], c[1]); note == "" {
+			t.Errorf("staleConnectorNotice(%q,%q) should name the mismatch", c[0], c[1])
+		}
+	}
+	// Aligned or a -dev.N connector → no notice.
+	for _, c := range [][2]string{{"0.9.0", "v0.9.0"}, {"0.9.1-dev.2", "v0.9.0"}} {
 		if note := staleConnectorNotice(c[0], c[1]); note != "" {
 			t.Errorf("staleConnectorNotice(%q,%q) should be empty, got %q", c[0], c[1], note)
 		}

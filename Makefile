@@ -225,9 +225,11 @@ release-assets:
 	cp "extension/build/dist/pcbpilot-connector_$(VERSION).eext" "$(DIST)/pcbpilot-connector.eext"
 	@echo "  packaging skills..."
 	python3 scripts/pack-skill.py --out "$(DIST)/skills.tar.gz"
+	@echo "  packaging MCP server (src + production node_modules)..."
+	python3 scripts/pack-mcp.py --version "$(VERSION)" --out "$(DIST)/mcp.tar.gz"
 	cp install.sh $(DIST)/install.sh
 	cp install.ps1 $(DIST)/install.ps1
-	python3 scripts/release-check.py "$(VERSION)" $(LOCAL_CHECK) --write-checksums "$(DIST)" --artifacts "$(DIST)"
+	python3 scripts/release-check.py "$(VERSION)" $(LOCAL_CHECK) --repo-slug "$(RELEASE_REPO)" --write-manifest "$(DIST)" --write-checksums "$(DIST)" --artifacts "$(DIST)"
 	@echo "✅ Local release assets ready in $(DIST)/ — nothing published"
 
 release: ## build reviewed sources, tag and publish GitHub Release (explicit publication only)
@@ -241,7 +243,7 @@ release: ## build reviewed sources, tag and publish GitHub Release (explicit pub
 	@awk '/^## \[$(VERSION:v%=%)\]/{f=1} f&&/^## \[/&&!/^## \[$(VERSION:v%=%)\]/{exit} f' extension/CHANGELOG.md > $(DIST)/changelog-section.md
 	@{ \
 		cat $(DIST)/changelog-section.md; \
-		printf '\n---\n\nAlready installed? Upgrade in place:\n```\npcbpilot update          # CLI binary (sha256-verified) + skill dirs\npcbpilot update --check  # report only\n```\n\nFirst install (macOS/Linux):\n```\ncurl -fsSL https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.sh | bash\n```\n\nFirst install (native Windows, PowerShell 5.1+):\n```\nirm https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.ps1 | iex\n```\n\nInstalls/updates:\n- pcbpilot CLI/daemon\n- pcbpilot skill for Codex (~/.codex/skills), Codex Desktop shared (~/.agents/skills), and/or Claude Code (~/.claude/skills) when detected\n- prints EasyEDA connector .eext import URL\n\nThe connector .eext is never auto-updated for sideloads. Connector patch drift within the same major.minor line is compatible; re-import only when `pcbpilot update` reports a major/minor mismatch.\n\nSkill targets: set `PCBPILOT_INSTALL_SKILLS=codex,agents,claude` to force targets, `none` to skip, or `PCBPILOT_SKILL_PRESERVE=1` to keep local edits.\n\n`checksums.txt` lists sha256 for every asset above.\n'; \
+		printf '\n---\n\nAlready installed? Nothing to do: the daemon checks releases and upgrades CLI, Skill, MCP and sim tools automatically when EasyEDA is idle (opt out: `pcbpilot update --auto off`). By hand:\n```\npcbpilot update          # CLI + Skill + MCP + sim tools + daemon restart + connector download\npcbpilot update --check  # report only\n```\nThe connector .eext is downloaded to ~/.pcbpilot/connector/; re-import it in EasyEDA (the daemon pauses design actions until the connector matches).\n\nFirst install (macOS/Linux):\n```\ncurl -fsSL https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.sh | bash\n```\n\nFirst install (native Windows, PowerShell 5.1+):\n```\nirm https://raw.githubusercontent.com/zhuangzard/pcbpilot/main/install.ps1 | iex\n```\n\nInstalls/updates:\n- pcbpilot CLI/daemon (login service)\n- pcbpilot skill for Claude Code, Codex, ~/.agents and ZCode when detected\n- MCP server (mcp.tar.gz, needs Node.js >= 20.17) registered with every detected client\n- ngspice / Elmer FEM simulators\n- prints the EasyEDA connector .eext import steps\n\nThe connector .eext is never auto-installed (sideload only): the version must match the release exactly, and the daemon pauses design actions until it does.\n\nSkill targets: set `PCBPILOT_INSTALL_SKILLS=codex,agents,claude` to force targets, `none` to skip, or `PCBPILOT_SKILL_PRESERVE=1` to keep local edits.\n\n`checksums.txt` lists sha256 for every asset above; `manifest.json` records component versions, sizes and minConnector.\n'; \
 	} > $(DIST)/release-notes.md
 	gh release create $(VERSION) --repo $(RELEASE_REPO) \
 		$(DIST)/pcbpilot_darwin_amd64 \
@@ -251,6 +253,8 @@ release: ## build reviewed sources, tag and publish GitHub Release (explicit pub
 		$(DIST)/pcbpilot_windows_amd64.exe \
 		$(DIST)/pcbpilot-connector.eext \
 		$(DIST)/skills.tar.gz \
+		$(DIST)/mcp.tar.gz \
+		$(DIST)/manifest.json \
 		$(DIST)/install.sh \
 		$(DIST)/install.ps1 \
 		$(DIST)/checksums.txt \

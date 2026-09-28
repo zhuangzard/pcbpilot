@@ -146,6 +146,9 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorResponse(req.ID, "ACTION_REQUIRED", "action is required", "include an \"action\" field"))
 		return
 	}
+	if idle := s.activity.touch(time.Now()); s.opts.OnAction != nil {
+		s.opts.OnAction(idle)
+	}
 	if !knownActions[req.Action] {
 		// Audit the rejection: a CLI↔daemon catalog drift (an action the CLI
 		// ships but the daemon never registered) used to leave NO trace here,
@@ -242,6 +245,11 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	}
 	req.CreatedAt = time.Now().UTC()
 	req.WindowID = target.id()
+	if refusal := s.connectorGate(&req, target.snapshot().ConnectorVersion); refusal != nil {
+		s.audit.Append(fromResponse(time.Now().UTC(), &req, refusal))
+		writeJSON(w, http.StatusConflict, refusal)
+		return
+	}
 	if protocol.UsesNativeNetLabel(req.Action, req.Payload) {
 		// V3 3.2.149 exposes createNetLabel (api probe); upstream recorded hangs.
 		// An explicit, audited experiment may try it on a V3 host; the default
@@ -388,6 +396,7 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	// After a successful content-changing action, arm a debounced autosave so the
 	// work reaches disk without the agent having to remember to save (no-op when
 	// autosave is disabled or the action doesn't mutate). See autosave.go.
+	s.activity.observe(&req, resp.OK)
 	if resp.OK {
 		s.maybeAutosave(&req)
 	}
