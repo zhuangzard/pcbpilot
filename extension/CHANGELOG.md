@@ -23,6 +23,9 @@ unchanged; re-import 0.6.1 because the daemon now requires the connector to matc
   may only run health/system.*/project.current/document.current; the refusal carries the 3 import steps and
   the downloaded `.eext` path, and lifts automatically when a matching connector connects. Dev builds are
   exempt; `PCBPILOT_ALLOW_VERSION_SKEW=1` for development.
+- **Upgrading from ≤ 0.6.0** — run `pcbpilot update` once (the old updater does CLI + Skill); the next command
+  restarts the stale daemon through the service and the new daemon installs the MCP server and downloads the
+  connector. Automatic from then on.
 - **Release assets** — `mcp.tar.gz` (production node_modules, reproducible) and `manifest.json` (component
   versions, sha256/size of every asset, `minConnector`); install.sh / install.ps1 also install the MCP server
   and write `~/.pcbpilot/install.json`; `scripts/setup-agent.sh --upgrade` / `--restart-daemon`.

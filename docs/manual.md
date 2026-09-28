@@ -298,6 +298,10 @@ MCP 是同一套 typed action 的另一个入口，不暴露任意 JavaScript（
 | 回退 | `pcbpilot update --rollback`（恢复 `~/.pcbpilot/rollback/` 里的上一版并重启 daemon） |
 | 源码安装 | `pcbpilot update` = `git pull --ff-only` + `scripts/setup-agent.sh`（工作区脏或分叉时拒绝并说明）；等价 `scripts/setup-agent.sh --upgrade`。daemon 默认只提示，`--auto source` 才自动快进 |
 
+**从 0.6.0 及更早版本升级（一次性）**：旧版还没有自动升级，运行一次 `pcbpilot update`（旧代码只升级
+CLI + Skill）即可；之后第一条 `pcbpilot` 命令发现 daemon 仍是旧版，会经登录服务自动重启它，新 daemon
+自动补装 MCP（有 Node.js 时）并下载新连接器。从此以后全部自动。
+
 离线或网络差时：daemon 静默指数退避重试（1m → 30m 封顶），`pcbpilot health` 的 `updates.state` 为
 `offline-retrying`，每个会话最多一行提示，设计动作照常可用。下载先按 `checksums.txt` 校验再替换。
 
