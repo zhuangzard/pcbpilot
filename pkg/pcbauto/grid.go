@@ -41,6 +41,7 @@ type grid struct {
 	noVia       []bool // per x,y (all layers)
 	baseClr     float64
 	dcache      map[int]offs
+	spanCache   map[int][][3]int
 	diskMRU     [4]diskEntry
 	rcache      map[int]ringEntry
 }
@@ -93,6 +94,29 @@ func (gr *grid) disk(r float64) offs {
 	copy(gr.diskMRU[1:], gr.diskMRU[:len(gr.diskMRU)-1])
 	gr.diskMRU[0] = diskEntry{r, d}
 	return d
+}
+
+// diskSpans returns the disk of radius r as row spans [dy, dx0, dx1]
+// (the same cells as disk(r), row by row).
+func (gr *grid) diskSpans(r float64) [][3]int {
+	d := gr.disk(r)
+	key := len(d)<<8 ^ int(math.Round(r*10))
+	if s, ok := gr.spanCache[key]; ok {
+		return s
+	}
+	var out [][3]int
+	for _, o := range d {
+		if n := len(out); n > 0 && out[n-1][0] == o[1] && out[n-1][2] == o[0]-1 {
+			out[n-1][2] = o[0]
+			continue
+		}
+		out = append(out, [3]int{o[1], o[0], o[0]})
+	}
+	if gr.spanCache == nil {
+		gr.spanCache = map[int][][3]int{}
+	}
+	gr.spanCache[key] = out
+	return out
 }
 
 type diskEntry struct {

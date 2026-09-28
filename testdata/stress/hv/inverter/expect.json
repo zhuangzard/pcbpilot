@@ -1,0 +1,215 @@
+{
+ "case": "inverter",
+ "summary": "400 VDC half-bridge leg: 2 × C3M0060065K (TO-247-4 Kelvin), UCC21520DW, 2 × MGJ2D051505SC, 30 A bus",
+ "variants": [
+  {
+   "name": "reinforced",
+   "spec": "spec.json",
+   "route": {
+    "place": true,
+    "routeOnly": true,
+    "timeout": "60s",
+    "loops": 1,
+    "minCompletion": 60,
+    "layers": 4
+   },
+   "domains": [
+    {
+     "kinds": [
+      "hazardous"
+     ],
+     "nets": [
+      "HV+",
+      "PHASE",
+      "HV_GND",
+      "KS_H",
+      "G_H",
+      "VDDA",
+      "KS_L"
+     ],
+     "workingVrms": 465,
+     "workingVpeak": 535
+    },
+    {
+     "kinds": [
+      "SELV",
+      "isolated-secondary"
+     ],
+     "nets": [
+      "+5V",
+      "GND",
+      "PWM_H"
+     ],
+     "workingVrms": 5,
+     "workingVpeak": 5
+    }
+   ],
+   "pairs": [
+    {
+     "kinds": [
+      [
+       "hazardous"
+      ],
+      [
+       "SELV",
+       "isolated-secondary"
+      ]
+     ],
+     "insulation": "reinforced",
+     "clearanceMm": 5.5,
+     "creepageMm": 9.4,
+     "slotWidthMm": 1.0,
+     "transient": "mains",
+     "mainsVrms": 400,
+     "bridges": [
+      "U1",
+      "U2",
+      "U3"
+     ],
+     "why": "IEC 62368-1 / IEC 60664-1 insulation coordination (drive standard IEC 61800-5-1 not tabulated in pkg/safety). Working voltage: DC bus 450 V max; the high-side gate supply rides 15 V above the switch node (floating island VDDA/KS_H/G_H/OUTA), so the highest HV-side copper is 465 V DC, 535 V peak with the 520 V switching overshoot. Clearance: transient declared mains at 400 V, OVC II → Table F.1 (300–600 V) 4000 V; reinforced → 6000 V → F.2 5.5 mm (procedure 1: 1.6 × 535 = 856 V → 0.2 mm). Creepage: 465 V → F.4 PD2 MG III 4.65 → 4.7 mm basic, 9.4 mm reinforced. UCC21520DW rows 7.29 mm and the MGJ2 input/output pins 5.94 mm are ≥ 5.5 mm but < 9.4 mm → 1 mm slots under U1, U2, U3."
+    }
+   ],
+   "nets": {
+    "HV+": {
+     "currentA": 30,
+     "widthOuterMil": 423.23,
+     "widthInnerMil": 423.23,
+     "vias": 30,
+     "clearanceMil": 98.5
+    },
+    "PHASE": {
+     "currentA": 30,
+     "widthOuterMil": 423.23,
+     "vias": 30,
+     "clearanceMil": 102.4,
+     "voltagePeak": 520
+    },
+    "HV_GND": {
+     "currentA": 30,
+     "widthOuterMil": 423.23,
+     "vias": 30
+    },
+    "KS_H": {
+     "voltagePeak": 527.5,
+     "voltageTol": 0.03
+    },
+    "VDDA": {
+     "voltagePeak": 535.0,
+     "voltageTol": 0.03
+    }
+   },
+   "slots": {
+    "under": [
+     "U1",
+     "U2",
+     "U3"
+    ],
+    "lengthMil": {
+     "U1": 593.2,
+     "U2": 333.4,
+     "U3": 333.4
+    }
+   },
+   "findings": {
+    "noErrors": true,
+    "absent": [
+     "cap-voltage"
+    ]
+   },
+   "mustRoute": [
+    "G_H",
+    "KS_H",
+    "G_L",
+    "KS_L",
+    "OUTA",
+    "OUTB"
+   ],
+   "infeasible": [],
+   "maxIsoFindings": 0,
+   "needsPour": [
+    "PHASE",
+    "HV_GND"
+   ],
+   "knownLimits": [
+    {
+     "check": "place: routed completion %",
+     "why": "the placer packs HV parts for a 2-layer route with additive HV–HV shares; the hand placement (route variant) meets the bar — documented limit"
+    },
+    {
+     "check": "place: routed KS_",
+     "why": "HV–HV tracks claim their clearance shares additively (≈ sum of both IPC clearances, up to 2× the ΔV requirement): documented limit, recipes/hv-isolation.md 能力边界"
+    },
+    {
+     "check": "place: routed OUTA",
+     "why": "HV–HV tracks claim their clearance shares additively (≈ sum of both IPC clearances, up to 2× the ΔV requirement): documented limit, recipes/hv-isolation.md 能力边界"
+    },
+    {
+     "check": "route: routed completion %",
+     "why": "HV–HV tracks claim their clearance shares additively (≈ sum of both IPC clearances, up to 2× the ΔV requirement): documented limit, recipes/hv-isolation.md 能力边界; the gate-drive island (KS_H/G_H/OUTA/VDDA) rides on the 520 V switch node"
+    },
+    {
+     "check": "route: routed KS_",
+     "why": "HV–HV tracks claim their clearance shares additively (≈ sum of both IPC clearances, up to 2× the ΔV requirement): documented limit, recipes/hv-isolation.md 能力边界"
+    },
+    {
+     "check": "route: routed OUTA",
+     "why": "HV–HV tracks claim their clearance shares additively (≈ sum of both IPC clearances, up to 2× the ΔV requirement): documented limit, recipes/hv-isolation.md 能力边界"
+    }
+   ]
+  },
+  {
+   "name": "functional",
+   "spec": "spec-functional.json",
+   "route": {
+    "routeOnly": true,
+    "timeout": "60s",
+    "minCompletion": 60,
+    "layers": 4
+   },
+   "pairs": [
+    {
+     "kinds": [
+      [
+       "hazardous"
+      ],
+      [
+       "SELV",
+       "isolated-secondary"
+      ]
+     ],
+     "insulation": "functional",
+     "clearanceMm": 2.67,
+     "creepageMm": 2.67,
+     "bridges": [
+      "U1",
+      "U2",
+      "U3"
+     ],
+     "why": "functional insulation (the control side is not accessible — protection elsewhere): no standard minimum; IPC-2221B Table 6-1 B2 at the 535 V peak (gate supply on top of the 520 V switch node) = 2.5 + 35 × 0.005 = 2.675 → 2.67 mm for both. No slot."
+    }
+   ],
+   "slots": {
+    "notUnder": [
+     "U1",
+     "U2",
+     "U3"
+    ]
+   },
+   "findings": {
+    "noErrors": true
+   },
+   "infeasible": [],
+   "maxIsoFindings": 0,
+   "needsPour": [
+    "PHASE",
+    "HV_GND"
+   ],
+   "knownLimits": [
+    {
+     "check": "route: routed completion %",
+     "why": "HV–HV tracks claim their clearance shares additively (≈ sum of both IPC clearances, up to 2× the ΔV requirement): documented limit, recipes/hv-isolation.md 能力边界"
+    }
+   ]
+  }
+ ]
+}

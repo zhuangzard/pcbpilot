@@ -91,6 +91,7 @@ type pnet struct {
 }
 
 type placer struct {
+	hvReach float64 // largest high-voltage net clearance (0 = no HV nets)
 	b       *Board
 	an      *Analysis
 	c       *Circuit
@@ -256,6 +257,11 @@ func (pl *placer) setup(res *PlaceResult) {
 	pl.setupTethers()
 	pl.setupIntimate()
 	pl.pinAccessHalo()
+	for _, np := range pl.an.Nets {
+		if np.ClearanceMil > pl.b.Rules.Clearance+hvExcessMil {
+			pl.hvReach = math.Max(pl.hvReach, np.ClearanceMil)
+		}
+	}
 	pl.zones(res)
 }
 
@@ -316,12 +322,18 @@ func (pl *placer) pinAccessHalo() {
 	}
 	base := pl.b.Rules.TrackWidth
 	for _, p := range pl.b.Parts {
-		extra := 0.0
+		extra, hv := 0.0, 0.0
 		for _, pd := range p.Pads {
 			if pd.Net == "" {
 				continue
 			}
 			np := pl.an.Plan(pd.Net, pl.b.Rules)
+			// A high-voltage net needs its IPC-2221B clearance to every other
+			// net's copper: the parts it sits on keep half the excess over the
+			// board rule each (the neighbour keeps the other half), or its
+			// track cannot pass between them (flyback stress board: the bulk
+			// and drain nets were unroutable between tightly packed parts).
+			hv = math.Max(hv, (np.ClearanceMil-pl.b.Rules.Clearance)/2)
 			if np.Plane || np.Role == RoleGround {
 				continue // reaches its plane through a fan-out via
 			}
@@ -329,6 +341,9 @@ func (pl *placer) pinAccessHalo() {
 		}
 		if extra > 0 {
 			halo[p.Ref] += math.Min(extra, 20)
+		}
+		if hv > hvExcessMil/2 {
+			halo[p.Ref] += math.Min(hv, 100)
 		}
 	}
 	pl.opt.Halo = halo
@@ -539,6 +554,7 @@ func (pl *placer) partCost(p *Part) float64 {
 		}
 	}
 	cost += pl.isoCost(p, bx)
+	cost += pl.hvPadCost(p, bx)
 	if !pl.hardOnly {
 		cost += pl.tetherCost(p)
 		cost += pl.converterCost(p)
@@ -2238,8 +2254,72 @@ func (pl *placer) isoCost(p *Part, bx Rect) float64 {
 				if ip == nil {
 					continue
 				}
-				gap := c.Box.Dist(a.Box.C) - math.Min(a.Box.W, a.Box.H)/2
+				// Exact pad-to-pad copper gap: the centre-minus-half-width
+				// estimate read an elongated inductor pad as 30 mil narrower
+				// than it is and left it 8 mil inside a Y capacitor's
+				// creepage (flyback stress board).
+				gap := isoPadGap(a, c, ip.CreepageMil)
 				if short := ip.CreepageMil - gap; short > 0 {
+					cost += 800 * short
+				}
+			}
+		}
+	})
+	return cost
+}
+
+// isoPadGap is the copper gap of two pads, exact but cheap: the bounding-box
+// gap (a lower bound) settles pads already farther than need apart and is
+// exact for axis-aligned rectangles; only near round / rotated pads is the
+// polygon distance computed (the legaliser calls this millions of times).
+func isoPadGap(a, c *Pad, need float64) float64 {
+	ab, cb := a.Box.Bounds(), c.Box.Bounds()
+	dx := math.Max(0, math.Max(ab.MinX-cb.MaxX, cb.MinX-ab.MaxX))
+	dy := math.Max(0, math.Max(ab.MinY-cb.MaxY, cb.MinY-ab.MaxY))
+	g := math.Hypot(dx, dy)
+	if g >= need {
+		return g
+	}
+	aligned := func(p *Pad) bool {
+		return !p.Box.Round && math.Abs(math.Remainder(p.Box.Rot, 90)) < 1e-6
+	}
+	if aligned(a) && aligned(c) {
+		return g
+	}
+	d, _, _ := polyDist(padPoly(a), padPoly(c))
+	return d
+}
+
+// hvPadCost keeps the pads of two different parts the high-voltage clearance
+// their nets need from each other (ΔV-aware, same rule as the router and
+// DRC). The halo only splits the excess evenly, which is short when an 850 V
+// divider node sits next to a 1 V ADC input (CAT III stress board: 79 mil
+// between pads that need 98). Zero cost on boards without high-voltage nets.
+func (pl *placer) hvPadCost(p *Part, bx Rect) float64 {
+	if pl.an == nil || pl.hvReach <= 0 {
+		return 0
+	}
+	base := pl.b.Rules.Clearance
+	cost := 0.0
+	seen := map[*Part]bool{}
+	pl.forBuckets(bx.Expand(pl.hvReach), func(q *Part) {
+		if q == p || seen[q] {
+			return
+		}
+		seen[q] = true
+		for _, a := range p.Pads {
+			if a.Net == "" {
+				continue
+			}
+			for _, c := range q.Pads {
+				if c.Net == "" || c.Net == a.Net {
+					continue
+				}
+				req := pl.an.PairClearanceMil(a.Net, c.Net, pl.b.Rules)
+				if req <= base+hvExcessMil {
+					continue
+				}
+				if short := req - isoPadGap(a, c, req); short > 0 {
 					cost += 800 * short
 				}
 			}

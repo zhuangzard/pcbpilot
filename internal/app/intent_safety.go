@@ -14,6 +14,7 @@ func init() {
 		r := safety.Distances(safety.Pair{
 			A: p.A, B: p.B, WorkingVrms: p.WorkingVrms, WorkingVpeak: p.WorkingVpeak,
 			Insulation: p.Insulation, MOP: p.MOP, MOPCount: p.MOPCount, RequiredWithstandV: p.RequiredWithstandV,
+			Transient: p.Transient, MainsVrms: p.MainsVrms,
 		}, safety.Standard{
 			Name: st.Name, Insulation: st.Insulation, MOP: st.MOP, MOPCount: st.MOPCount,
 			PollutionDegree: st.PollutionDegree, MaterialGroup: st.MaterialGroup,

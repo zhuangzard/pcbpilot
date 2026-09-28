@@ -45,9 +45,14 @@ func (k PartKind) Bridges() bool {
 }
 
 var (
-	reOpto     = regexp.MustCompile(`(?i)(PC8\d\d|EL3\d\d|EL8\d\d|TLP\d|LTV|6N13|HCPL|ACPL|MOC30|OPTO|FOD\d|PS28|K10\d\d)`)
-	reIsolator = regexp.MustCompile(`(?i)(ADUM|ISO7\d|ISO1\d|ISO35|SI86|SI84|CA-IS|π1|PI1\d\d|NSI|TPT7|ADM2\d\d\dE|MAX1449|ISOW|ISO5\d)`)
-	reIsoPower = regexp.MustCompile(`(?i)(^B\d{4}S|^IB\d{4}|URB\d|VRB\d|A\d{4}S|HLK-|HI-LINK|AC-?DC|DC-?DC.*ISO|ISO.*DC-?DC|B0505|B0503|F0505|R1SE|MEE1)`)
+	reOpto = regexp.MustCompile(`(?i)(PC8\d\d|EL3\d\d|EL8\d\d|TLP\d|LTV|6N13|HCPL|ACPL|MOC30|OPTO|FOD\d|PS28|K10\d\d)`)
+	// Digital isolators, isolated transceivers, isolated gate drivers
+	// (UCC215xx, UCC53xx, Si823x/827x, 1EDI/1EDC, STGAP, NCD570x, ADuM4xxx)
+	// and isolated amplifiers / modulators (AMC1xxx/3xxx, ISO22x).
+	reIsolator = regexp.MustCompile(`(?i)(ADUM|ISO7\d|ISO1\d|ISO35|SI86|SI84|CA-IS|π1|PI1\d\d|NSI|TPT7|ADM2\d\d\dE|MAX1449|ISOW|ISO5\d|UCC215[0-9]\d|UCC53\d\d|UCC57\d\d|SI82[37]\d|1ED[IC]\d|2EDS\d|STGAP\d|NCD57\d|AMC1\d{3}|AMC3\d{3}|ISO22\d)`)
+	// Isolated DC/DC modules and isolated bias converters (Murata MGJ/MEJ/NXE/
+	// NMV, Recom R..P/REM, Traco TMA/TMR, TI UCC12xxx/UCC14xxx).
+	reIsoPower = regexp.MustCompile(`(?i)(^B\d{4}S|^IB\d{4}|URB\d|VRB\d|A\d{4}S|HLK-|HI-LINK|AC-?DC|DC-?DC.*ISO|ISO.*DC-?DC|B0505|B0503|F0505|R1SE|MEE1|^MGJ\d|^MEJ\d|^NXE\d|^NMV\d|^REM\d|^R\d{2}P\d|^TMA\d|^TMR\d|UCC1[24]\d{3})`)
 	reModule   = regexp.MustCompile(`(?i)(ESP32-|ESP-|WROOM|WROVER|NRF52.*MOD|HC-05|SIM800|EC20|RA-0|BL60|MODULE)`)
 	reConnRef  = regexp.MustCompile(`^(J|P|CN|CON|USB|FPC|X?JP|H\d|TB|DC)\d*`)
 )
@@ -288,10 +293,6 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 			}
 		}
 	}
-	domOfGround := map[string]string{}
-	for _, g := range grounds {
-		domOfGround[g] = gfind(g)
-	}
 	// Mains nets with no ground of their own form a "MAINS" domain.
 	hasMains := false
 	for _, np := range an.Nets {
@@ -299,15 +300,69 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 			hasMains = true
 		}
 	}
+	// A ground galvanically tied to the line — the DC side of a bridge
+	// rectifier, a capacitive dropper's return — is the same hazardous
+	// circuit as the line: one domain, no insulation between them. Only
+	// isolating parts (transformer, opto, isolator, relay) and capacitors
+	// (X/Y caps) do not tie. Without this the primary of an off-line
+	// converter was a separate domain "insulated" from the line by its own
+	// bridge rectifier.
+	mainsRoot := "MAINS"
+	if hasMains {
+		var tied []string
+		for _, p := range b.Parts {
+			k := c.Kinds[p.Ref]
+			if k.Bridges() || k == KindCapacitor {
+				continue
+			}
+			line := false
+			var gs []string
+			for _, pd := range p.Pads {
+				if reMains.MatchString(upper(pd.Net)) {
+					line = true
+				}
+				if an.Plan(pd.Net, b.Rules).Role == RoleGround {
+					gs = append(gs, pd.Net)
+				}
+			}
+			if line {
+				tied = append(tied, gs...)
+			}
+		}
+		sort.Strings(tied)
+		for _, g := range tied {
+			if mainsRoot == "MAINS" {
+				mainsRoot = gfind(g)
+				continue
+			}
+			gparent[gfind(g)] = gfind(mainsRoot)
+			mainsRoot = gfind(mainsRoot)
+		}
+		if mainsRoot != "MAINS" {
+			c.Notes = append(c.Notes, sprintf("ground %s is galvanically tied to the line (rectifier / non-isolating part): one mains domain", mainsRoot))
+		}
+	}
+	domOfGround := map[string]string{}
+	for _, g := range grounds {
+		domOfGround[g] = gfind(g)
+	}
 	assign := map[string]string{}
 	for _, p := range b.Parts {
+		// An isolation part never belongs to one side, even when only one
+		// side's reference is a ground-named net: an isolated gate driver
+		// (VSSA = the switch node's Kelvin source) or a bias module (0 V =
+		// that source) used to join the controller's GND domain and drag
+		// the whole gate drive into SELV.
+		if c.Kinds[p.Ref].Bridges() {
+			continue
+		}
 		var ds []string
 		for _, n := range partNets[p.Ref] {
 			if d, ok := domOfGround[n]; ok && !containsStr(ds, d) {
 				ds = append(ds, d)
 			}
-			if hasMains && reMains.MatchString(upper(n)) && !containsStr(ds, "MAINS") {
-				ds = append(ds, "MAINS")
+			if hasMains && reMains.MatchString(upper(n)) && !containsStr(ds, mainsRoot) {
+				ds = append(ds, mainsRoot)
 			}
 		}
 		if len(ds) == 1 {

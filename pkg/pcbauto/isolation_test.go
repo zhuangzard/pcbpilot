@@ -360,7 +360,7 @@ func TestIntentAllSELVUnaffected(t *testing.T) {
 	if doms != 1 || c.DomainOf["U1"] != "SELV_5V" {
 		t.Fatalf("domains %+v", c.Domains)
 	}
-	rep := isolationReport(b, an, nil, nil, nil)
+	rep := isolationReport(b, an, nil, nil, nil, nil)
 	if rep == nil || len(rep.Findings) != 0 || len(rep.Moats) != 0 || len(rep.Slots) != 0 {
 		t.Fatalf("report %+v", rep)
 	}

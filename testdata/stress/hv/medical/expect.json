@@ -1,0 +1,134 @@
+{
+ "case": "medical",
+ "summary": "patient front-end: ISO7741DW + SN6505B/EP13 transformer between the SELV host and an applied part referenced to 250 Vrms (IEC 60601-1)",
+ "variants": [
+  {
+   "name": "2xMOPP",
+   "spec": "spec.json",
+   "route": {
+    "place": true,
+    "routeOnly": true,
+    "timeout": "60s",
+    "loops": 1,
+    "minCompletion": 95,
+    "layers": 4
+   },
+   "domains": [
+    {
+     "kinds": [
+      "patient"
+     ],
+     "nets": [
+      "GND_PAT",
+      "AIN0",
+      "3V3_PAT",
+      "SCLK_P"
+     ],
+     "workingVrms": 250,
+     "workingVpeak": 353.55
+    },
+    {
+     "kinds": [
+      "SELV",
+      "isolated-secondary"
+     ],
+     "nets": [
+      "+5V",
+      "GND",
+      "SCLK"
+     ],
+     "workingVrms": 5,
+     "workingVpeak": 5
+    }
+   ],
+   "pairs": [
+    {
+     "kinds": [
+      [
+       "patient"
+      ],
+      [
+       "SELV",
+       "isolated-secondary"
+      ]
+     ],
+     "insulation": "double",
+     "clearanceMm": 5.0,
+     "creepageMm": 8.0,
+     "slotWidthMm": 1.0,
+     "mop": "MOPP",
+     "mopCount": 2,
+     "bridges": [
+      "T1",
+      "U3"
+     ],
+     "why": "IEC 60601-1 ed.3.1 Table 12, 2 × MOPP, working voltage ≤ 250 Vrms / ≤ 354 V peak (the applied part may sit at mains potential): creepage 8 mm, clearance 5 mm. ISO7741DW rows 7.29 mm < 8 mm but ≥ 5 mm → a 1 mm slot (PD2) under U3; EP13 rows 15.4 mm → none."
+    }
+   ],
+   "slots": {
+    "under": [
+     "U3"
+    ],
+    "notUnder": [
+     "T1"
+    ],
+    "lengthMil": {
+     "U3": 495.0
+    }
+   },
+   "findings": {
+    "noErrors": true,
+    "expect": [
+     "insulation"
+    ]
+   },
+   "infeasible": [],
+   "maxIsoFindings": 0
+  },
+  {
+   "name": "1xMOOP",
+   "spec": "spec-moop.json",
+   "route": {
+    "routeOnly": true,
+    "timeout": "60s",
+    "minCompletion": 95,
+    "layers": 4
+   },
+   "pairs": [
+    {
+     "kinds": [
+      [
+       "patient"
+      ],
+      [
+       "SELV",
+       "isolated-secondary"
+      ]
+     ],
+     "insulation": "basic",
+     "clearanceMm": 1.5,
+     "creepageMm": 2.5,
+     "slotWidthMm": 1.0,
+     "mop": "MOOP",
+     "mopCount": 1,
+     "bridges": [
+      "T1",
+      "U3"
+     ],
+     "why": "1 × MOOP via the IEC 62368-1 / IEC 60664-1 insulation coordination IEC 60601-1 allows for operator protection: 250 Vrms, transient inferred mains-connected (conservative) OVC II → 2500 V → F.2 1.5 mm; creepage basic Table F.4 PD2 MG III 250 V = 2.5 mm. (IEC 60601-1 Table 13, derived from IEC 60950-1, would give 2.0 mm clearance — documented limit.) No slot."
+    }
+   ],
+   "slots": {
+    "notUnder": [
+     "U3",
+     "T1"
+    ]
+   },
+   "findings": {
+    "noErrors": true
+   },
+   "infeasible": [],
+   "maxIsoFindings": 0
+  }
+ ]
+}

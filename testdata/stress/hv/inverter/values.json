@@ -1,0 +1,91 @@
+{
+ "_provenance": "values for connectivity.json (inverter)",
+ "parts": {
+  "J1": {
+   "mpn": "MKDSP10N-2-10.16",
+   "description": "Power terminal 2P 10.16 mm, 1000 V 41 A"
+  },
+  "C1": {
+   "mpn": "DCLINK-MKP-20UF-800V",
+   "value": "20uF",
+   "description": "MKP DC-link film capacitor 27.5 mm Capacitance:20uF Voltage Rating:800V"
+  },
+  "C2": {
+   "mpn": "DCLINK-MKP-20UF-800V",
+   "value": "20uF",
+   "description": "MKP DC-link film capacitor 27.5 mm Capacitance:20uF Voltage Rating:800V"
+  },
+  "Q1": {
+   "mpn": "C3M0060065K",
+   "description": "SiC MOSFET 650 V 37 A TO-247-4 (Kelvin source)"
+  },
+  "Q2": {
+   "mpn": "C3M0060065K",
+   "description": "SiC MOSFET 650 V 37 A TO-247-4 (Kelvin source)"
+  },
+  "J2": {
+   "mpn": "TB-PHASE-2P-10.16",
+   "description": "Phase output terminal 2P 10.16 mm (both poles paralleled), 1000 V 41 A"
+  },
+  "R1": {
+   "mpn": "RC1206FR-074R7L",
+   "value": "4.7Ω",
+   "description": "Gate resistor"
+  },
+  "R2": {
+   "mpn": "RC1206FR-074R7L",
+   "value": "4.7Ω",
+   "description": "Gate resistor"
+  },
+  "C3": {
+   "mpn": "CL31B105KBHNNNE",
+   "value": "1uF",
+   "description": "Capacitance:1uF Voltage Rating:50V"
+  },
+  "C4": {
+   "mpn": "CL31B105KBHNNNE",
+   "value": "1uF",
+   "description": "Capacitance:1uF Voltage Rating:50V"
+  },
+  "U2": {
+   "mpn": "MGJ2D051505SC",
+   "description": "Isolated DC/DC 2 W 5 V → +15/−5 V, 5.2 kVDC, for SiC gate drivers"
+  },
+  "U3": {
+   "mpn": "MGJ2D051505SC",
+   "description": "Isolated DC/DC 2 W 5 V → +15/−5 V, 5.2 kVDC, for SiC gate drivers"
+  },
+  "U1": {
+   "mpn": "UCC21520DWR",
+   "description": "Dual-channel isolated gate driver 5.7 kVrms reinforced, SOIC-16 DW"
+  },
+  "J3": {
+   "mpn": "PZ254V-11-04P",
+   "description": "Control header 4P 2.54 mm"
+  },
+  "C5": {
+   "mpn": "CL21A106KAYNNNE",
+   "value": "10uF"
+  },
+  "C6": {
+   "mpn": "CL21B104KBCNNNC",
+   "value": "100nF"
+  },
+  "R3": {
+   "mpn": "0805W8F1002T5E",
+   "value": "10kΩ"
+  },
+  "R4": {
+   "mpn": "0805W8F2002T5E",
+   "value": "20kΩ"
+  },
+  "R5": {
+   "mpn": "0805W8F5101T5E",
+   "value": "5.1kΩ"
+  },
+  "R6": {
+   "mpn": "0805W8F5101T5E",
+   "value": "5.1kΩ"
+  }
+ }
+}

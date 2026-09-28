@@ -1,0 +1,85 @@
+{
+ "_provenance": "values for connectivity.json (medical)",
+ "parts": {
+  "J1": {
+   "mpn": "PZ254V-11-06P",
+   "description": "Host header 6P 2.54 mm"
+  },
+  "C1": {
+   "mpn": "CL21A106KAYNNNE",
+   "value": "10uF",
+   "description": "Capacitance:10uF Voltage Rating:25V"
+  },
+  "U2": {
+   "mpn": "SN6505BDBVR",
+   "description": "Low-noise 1 A transformer driver for isolated supplies"
+  },
+  "C2": {
+   "mpn": "CL21B104KBCNNNC",
+   "value": "100nF"
+  },
+  "C3": {
+   "mpn": "CL21B104KBCNNNC",
+   "value": "100nF"
+  },
+  "T1": {
+   "mpn": "EP13-MED-2MOPP",
+   "description": "Custom isolation transformer EP13, 1:1.3 centre-tapped, 2×MOPP 4 kVrms, 17 mm pin-row spacing"
+  },
+  "U3": {
+   "mpn": "ISO7741DWR",
+   "description": "Quad-channel digital isolator 5000 Vrms, reinforced, SOIC-16 DW (8 mm creepage)"
+  },
+  "D1": {
+   "mpn": "BAT54C",
+   "description": "Dual Schottky common cathode 30 V"
+  },
+  "C4": {
+   "mpn": "CL21A106KAYNNNE",
+   "value": "10uF"
+  },
+  "U4": {
+   "mpn": "TLV75533PDBVR",
+   "description": "500 mA LDO 3.3 V"
+  },
+  "C5": {
+   "mpn": "CL21A106KAYNNNE",
+   "value": "10uF"
+  },
+  "U5": {
+   "mpn": "ADS1220IPWR",
+   "description": "24-bit delta-sigma ADC, SPI"
+  },
+  "C6": {
+   "mpn": "CL21B104KBCNNNC",
+   "value": "100nF"
+  },
+  "R1": {
+   "mpn": "RC1206FR-0747KL",
+   "value": "47kΩ",
+   "description": "Patient lead protection resistor"
+  },
+  "R2": {
+   "mpn": "RC1206FR-0747KL",
+   "value": "47kΩ",
+   "description": "Patient lead protection resistor"
+  },
+  "R3": {
+   "mpn": "RC1206FR-0710KL",
+   "value": "10kΩ",
+   "description": "Right-leg reference resistor"
+  },
+  "C7": {
+   "mpn": "CL21B472KBANNNC",
+   "value": "4.7nF"
+  },
+  "C8": {
+   "mpn": "CL21B472KBANNNC",
+   "value": "4.7nF"
+  },
+  "J2": {
+   "mpn": "PATIENT-3P-DIN",
+   "description": "Patient electrode connector (applied part, type BF)"
+  }
+ }
+}

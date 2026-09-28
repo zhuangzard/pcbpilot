@@ -31,6 +31,16 @@ func addIsolationFindings(rep *pcbCheckReport, dump []byte, intentPath string) e
 			p.A, p.B, chk.Standard, p.Insulation, p.ClearanceMil*0.0254, p.CreepageMil*0.0254, "engineering reference; confirm with the certification lab"))
 	}
 	rep.Limitations = append(rep.Limitations, chk.Notes...)
+	for _, f := range chk.Infeasible {
+		// A bridge whose own pads cannot meet the pair: no copper edit fixes
+		// it, so it is reported on its own (and fails the check) even when
+		// the routed copper is clean.
+		rep.Findings = append(rep.Findings, pcbCheckFinding{Type: "iso-infeasible", Level: "ERROR", Primitives: []string{f.Ref},
+			Message: "INFEASIBLE: " + f.Reason})
+		rep.Summary.Isolation++
+		rep.Summary.Errors++
+		rep.Summary.Total++
+	}
 	for _, f := range chk.Findings {
 		rep.Findings = append(rep.Findings, pcbCheckFinding{Type: f.Kind, Level: "ERROR", Nets: []string{f.NetA, f.NetB}, Layer: f.Layer,
 			Primitives: []string{f.ItemA, f.ItemB}, Message: f.Message, At: &pcbXY{X: f.At.X, Y: f.At.Y}})

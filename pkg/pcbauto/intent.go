@@ -70,6 +70,10 @@ type IntentNet struct {
 	DiffPair          string        `json:"diffPair"`
 	NetClass          string        `json:"netClass"`
 	Why               []string      `json:"why"`
+	// FloatsOn / RelVoltage: a gate-drive net riding on a switch node and
+	// its voltage relative to it (intent derive).
+	FloatsOn   string         `json:"floatsOn,omitempty"`
+	RelVoltage *IntentVoltage `json:"relVoltage,omitempty"`
 	// High-speed additive fields (intent derive): interface family, edge
 	// gap of the pair, length group and its tolerance, declared intra-pair
 	// skew and via budget.
@@ -95,9 +99,10 @@ type IntentPair struct {
 	StandardRef  string   `json:"standardRef"`
 	Why          []string `json:"why"`
 	// Optional refinements (not in the base contract).
-	MOP       string `json:"mop,omitempty"`
-	MOPCount  int    `json:"mopCount,omitempty"`
-	Transient string `json:"transient,omitempty"`
+	MOP       string  `json:"mop,omitempty"`
+	MOPCount  int     `json:"mopCount,omitempty"`
+	Transient string  `json:"transient,omitempty"`
+	MainsVrms float64 `json:"mainsVrms,omitempty"`
 	// RequiredWithstandV is a declared electric-strength requirement (V
 	// peak, e.g. IEEE 802.3 1500 Vrms → 2121 V).
 	RequiredWithstandV float64 `json:"requiredWithstandV,omitempty"`
@@ -278,7 +283,7 @@ func buildIsoRules(b *Board, in *Intent) *IsoRules {
 		a, bb := pairDomain(ip.A), pairDomain(ip.B)
 		da, db := dom[a], dom[bb]
 		sp := safety.Pair{A: a, B: bb, WorkingVrms: ip.WorkingVrms, WorkingVpeak: ip.WorkingVpeak,
-			Insulation: ip.Insulation, MOP: ip.MOP, MOPCount: ip.MOPCount, Transient: ip.Transient, RequiredWithstandV: ip.RequiredWithstandV}
+			Insulation: ip.Insulation, MOP: ip.MOP, MOPCount: ip.MOPCount, Transient: ip.Transient, MainsVrms: ip.MainsVrms, RequiredWithstandV: ip.RequiredWithstandV}
 		if sp.WorkingVrms == 0 && sp.WorkingVpeak == 0 {
 			sp.WorkingVrms = math.Max(da.WorkingVrms, db.WorkingVrms)
 			sp.WorkingVpeak = math.Max(da.WorkingVpeak, db.WorkingVpeak)

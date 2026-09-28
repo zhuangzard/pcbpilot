@@ -26,7 +26,8 @@ const (
 	KindInductor  = "inductor"
 	KindFerrite   = "ferrite"
 	KindFuse      = "fuse"
-	KindOpen      = "open" // crystals, MOSFETs without a model, mechanical parts
+	KindBridge    = "bridge" // bridge rectifier: four diodes ~/~ → +/−
+	KindOpen      = "open"   // crystals, MOSFETs without a model, transformers, varistors, mechanical parts
 	KindIgnore    = "ignore"
 )
 
@@ -43,6 +44,10 @@ type Rail struct {
 	Pins  []string `json:"pins"`
 	TypA  float64  `json:"typA"`
 	PeakA float64  `json:"peakA"`
+	// ReturnPins overrides the model's returnPins for this rail: the two
+	// sides of an isolator / isolated gate driver return to different
+	// references (GND1/GND2, VSSA/VSSB).
+	ReturnPins []string `json:"returnPins,omitempty"`
 }
 
 // Regulate is the regulation constraint V(plus) - V(minus) = volts, pins by name.
@@ -89,6 +94,11 @@ type Model struct {
 	// Sources.
 	VoltageV   float64 `json:"voltageV,omitempty"`
 	SourceName string  `json:"sourceName,omitempty"`
+	// Outputs are the independent outputs of a multi-output source: the
+	// windings of a transformer at their regulated operating point, or the
+	// outputs of an isolated module. When set they replace
+	// supplyPins/returnPins/voltageV (each output has its own return).
+	Outputs []SourceOutput `json:"outputs,omitempty"`
 	// Passives / switches / resistive parts.
 	RsOhm     float64 `json:"rsOhm,omitempty"`
 	DCROhm    float64 `json:"dcrOhm,omitempty"`
@@ -104,6 +114,15 @@ type Model struct {
 	// Provenance.
 	Source     string `json:"source,omitempty"`
 	Confidence string `json:"confidence,omitempty"` // datasheet | approx | assumed
+}
+
+// SourceOutput is one output of a multi-output connector-source.
+type SourceOutput struct {
+	Name       string   `json:"name,omitempty"`
+	Pins       []string `json:"pins"`
+	ReturnPins []string `json:"returnPins"`
+	VoltageV   float64  `json:"voltageV"`
+	RsOhm      float64  `json:"rsOhm,omitempty"`
 }
 
 // Defaults are the generic-part parameters used when no model matches.

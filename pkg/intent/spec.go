@@ -77,6 +77,16 @@ type SpecDomain struct {
 	// WorkingVrms overrides the domain working voltage (e.g. a floating
 	// secondary referenced to mains).
 	WorkingVrms float64 `json:"workingVrms,omitempty"`
+	// Transient declares the transient overvoltage regime of the domain for
+	// clearance procedure 2 (IEC 60664-1 Table F.1): "mains" (connected to a
+	// supply network: the overvoltage category applies), "secondary" (behind
+	// an isolating transformer: one category lower) or "none" (battery /
+	// isolated DC, peak working voltage only). Empty = inferred.
+	Transient string `json:"transient,omitempty"`
+	// RatedVrms is the nominal system voltage (line to neutral/earth, or
+	// the DC bus) the transient is taken from; 0 = the domain's working
+	// voltage.
+	RatedVrms float64 `json:"ratedVrms,omitempty"`
 	// IsolationVrms is an electric-strength (hi-pot) requirement of the
 	// barrier to this domain, e.g. 1500 for IEEE 802.3 MDI (§14.3.1.1 /
 	// §40.6.1.1): the pair becomes basic insulation dimensioned for that
@@ -110,6 +120,14 @@ func ParseSpec(b []byte) (*Spec, error) {
 		case "patient", "floating", "isolated-secondary", "SELV", "hazardous", "mains":
 		default:
 			return nil, fmt.Errorf("spec.domains[%d].kind %q: want patient|floating|isolated-secondary|SELV|hazardous|mains", i, d.Kind)
+		}
+		switch d.Transient {
+		case "", "mains", "secondary", "none":
+		default:
+			return nil, fmt.Errorf("spec.domains[%d].transient %q: want mains|secondary|none", i, d.Transient)
+		}
+		if d.RatedVrms < 0 || d.WorkingVrms < 0 {
+			return nil, fmt.Errorf("spec.domains[%d]: negative voltage", i)
 		}
 	}
 	return &s, nil

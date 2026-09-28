@@ -190,7 +190,7 @@ func (r *router) emit(res *RouteResult) {
 			res.Stats.WireLengthIn += t.A.Dist(t.B) / 1000
 		}
 		res.Unrouted = append(res.Unrouted, n.failed...)
-		if len(n.groups) > 1 && !n.onPlane && !n.poured && n.route {
+		if len(n.groups) > 1 && !n.onPlane && !n.poured && (n.route || n.busbar) {
 			conn += len(n.groups) - 1
 			if len(n.paths) > 0 {
 				routed += len(n.groups) - 1 - failedGroups(n)

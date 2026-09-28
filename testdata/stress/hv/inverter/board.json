@@ -1,0 +1,1391 @@
+{
+ "_provenance": "hand-designed stress fixture: 400 VDC half-bridge leg — 2 × C3M0060065K (TO-247-4 Kelvin), UCC21520DW, 2 × MGJ2D051505SC, 30 A bus — hand placement (mil, y-up)",
+ "components": [
+  {
+   "primitiveId": "c-J1",
+   "designator": "J1",
+   "device": "MKDSP10N-2-10.16",
+   "layer": 1,
+   "x": 3280,
+   "y": 600,
+   "rotation": 0,
+   "locked": true,
+   "bbox": {
+    "minX": 3030.0,
+    "minY": 180.0,
+    "maxX": 3530.0,
+    "maxY": 1020.0
+   },
+   "pads": [
+    {
+     "padNumber": "1",
+     "net": "HV+",
+     "layer": 12,
+     "x": 3280.0,
+     "y": 800.0,
+     "width": 200,
+     "height": 200,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      200,
+      200
+     ]
+    },
+    {
+     "padNumber": "2",
+     "net": "HV_GND",
+     "layer": 12,
+     "x": 3280.0,
+     "y": 400.0,
+     "width": 200,
+     "height": 200,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      200,
+      200
+     ]
+    }
+   ]
+  },
+  {
+   "primitiveId": "c-C1",
+   "designator": "C1",
+   "device": "DCLINK-MKP-20UF-800V",
+   "layer": 1,
+   "x": 2900,
+   "y": 2600,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 2270.0,
+    "minY": 2325.0,
+    "maxX": 3530.0,
+    "maxY": 2875.0
+   },
+   "pads": [
+    {
+     "padNumber": "1",
+     "net": "HV+",
+     "layer": 12,
+     "x": 2359.0,
+     "y": 2600.0,
+     "width": 100,
+     "height": 100,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      100,
+      100
+     ]
+    },
+    {
+     "padNumber": "2",
+     "net": "HV_GND",
+     "layer": 12,
+     "x": 3441.0,
+     "y": 2600.0,
+     "width": 100,
+     "height": 100,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      100,
+      100
+     ]
+    }
+   ]
+  },
+  {
+   "primitiveId": "c-C2",
+   "designator": "C2",
+   "device": "DCLINK-MKP-20UF-800V",
+   "layer": 1,
+   "x": 2900,
+   "y": 1500,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 2270.0,
+    "minY": 1225.0,
+    "maxX": 3530.0,
+    "maxY": 1775.0
+   },
+   "pads": [
+    {
+     "padNumber": "1",
+     "net": "HV+",
+     "layer": 12,
+     "x": 2359.0,
+     "y": 1500.0,
+     "width": 100,
+     "height": 100,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      100,
+      100
+     ]
+    },
+    {
+     "padNumber": "2",
+     "net": "HV_GND",
+     "layer": 12,
+     "x": 3441.0,
+     "y": 1500.0,
+     "width": 100,
+     "height": 100,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      100,
+      100
+     ]
+    }
+   ]
+  },
+  {
+   "primitiveId": "c-Q1",
+   "designator": "Q1",
+   "device": "C3M0060065K",
+   "layer": 1,
+   "x": 1950,
+   "y": 2650,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 1630.0,
+    "minY": 2540.0,
+    "maxX": 2270.0,
+    "maxY": 2760.0
+   },
+   "pads": [
+    {
+     "padNumber": "1",
+     "net": "HV+",
+     "layer": 12,
+     "x": 1800.0,
+     "y": 2650.0,
+     "width": 72,
+     "height": 72,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      72,
+      72
+     ]
+    },
+    {
+     "padNumber": "2",
+     "net": "PHASE",
+     "layer": 12,
+     "x": 1900.0,
+     "y": 2650.0,
+     "width": 72,
+     "height": 72,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      72,
+      72
+     ]
+    },
+    {
+     "padNumber": "3",
+     "net": "KS_H",
+     "layer": 12,
+     "x": 2000.0,
+     "y": 2650.0,
+     "width": 72,
+     "height": 72,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      72,
+      72
+     ]
+    },
+    {
+     "padNumber": "4",
+     "net": "G_H",
+     "layer": 12,
+     "x": 2100.0,
+     "y": 2650.0,
+     "width": 72,
+     "height": 72,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      72,
+      72
+     ]
+    }
+   ]
+  },
+  {
+   "primitiveId": "c-Q2",
+   "designator": "Q2",
+   "device": "C3M0060065K",
+   "layer": 1,
+   "x": 1950,
+   "y": 1500,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 1630.0,
+    "minY": 1390.0,
+    "maxX": 2270.0,
+    "maxY": 1610.0
+   },
+   "pads": [
+    {
+     "padNumber": "1",
+     "net": "PHASE",
+     "layer": 12,
+     "x": 1800.0,
+     "y": 1500.0,
+     "width": 72,
+     "height": 72,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      72,
+      72
+     ]
+    },
+    {
+     "padNumber": "2",
+     "net": "HV_GND",
+     "layer": 12,
+     "x": 1900.0,
+     "y": 1500.0,
+     "width": 72,
+     "height": 72,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      72,
+      72
+     ]
+    },
+    {
+     "padNumber": "3",
+     "net": "KS_L",
+     "layer": 12,
+     "x": 2000.0,
+     "y": 1500.0,
+     "width": 72,
+     "height": 72,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      72,
+      72
+     ]
+    },
+    {
+     "padNumber": "4",
+     "net": "G_L",
+     "layer": 12,
+     "x": 2100.0,
+     "y": 1500.0,
+     "width": 72,
+     "height": 72,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      72,
+      72
+     ]
+    }
+   ]
+  },
+  {
+   "primitiveId": "c-J2",
+   "designator": "J2",
+   "device": "TB-PHASE-2P-10.16",
+   "layer": 1,
+   "x": 2100,
+   "y": 600,
+   "rotation": 0,
+   "locked": true,
+   "bbox": {
+    "minX": 1850.0,
+    "minY": 180.0,
+    "maxX": 2350.0,
+    "maxY": 1020.0
+   },
+   "pads": [
+    {
+     "padNumber": "1",
+     "net": "PHASE",
+     "layer": 12,
+     "x": 2100.0,
+     "y": 800.0,
+     "width": 200,
+     "height": 200,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      200,
+      200
+     ]
+    },
+    {
+     "padNumber": "2",
+     "net": "PHASE",
+     "layer": 12,
+     "x": 2100.0,
+     "y": 400.0,
+     "width": 200,
+     "height": 200,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      200,
+      200
+     ]
+    }
+   ]
+  },
+  {
+   "primitiveId": "c-R1",
+   "designator": "R1",
+   "device": "RC1206FR-074R7L",
+   "layer": 1,
+   "x": 1750,
+   "y": 2300,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 1664.5,
+    "minY": 2259.5,
+    "maxX": 1835.5,
+    "maxY": 2340.5
+   },
+   "pads": [
+    {
+     "padNumber": "1",
+     "net": "OUTA",
+     "layer": 1,
+     "x": 1692.0,
+     "y": 2300.0,
+     "width": 45,
+     "height": 71,
+     "rotation": 0,
+     "shape": [
+      "RECT",
+      45,
+      71
+     ]
+    },
+    {
+     "padNumber": "2",
+     "net": "G_H",
+     "layer": 1,
+     "x": 1808.0,
+     "y": 2300.0,
+     "width": 45,
+     "height": 71,
+     "rotation": 0,
+     "shape": [
+      "RECT",
+      45,
+      71
+     ]
+    }
+   ]
+  },
+  {
+   "primitiveId": "c-R2",
+   "designator": "R2",
+   "device": "RC1206FR-074R7L",
+   "layer": 1,
+   "x": 1750,
+   "y": 1200,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 1664.5,
+    "minY": 1159.5,
+    "maxX": 1835.5,
+    "maxY": 1240.5
+   },
+   "pads": [
+    {
+     "padNumber": "1",
+     "net": "OUTB",
+     "layer": 1,
+     "x": 1692.0,
+     "y": 1200.0,
+     "width": 45,
+     "height": 71,
+     "rotation": 0,
+     "shape": [
+      "RECT",
+      45,
+      71
+     ]
+    },
+    {
+     "padNumber": "2",
+     "net": "G_L",
+     "layer": 1,
+     "x": 1808.0,
+     "y": 1200.0,
+     "width": 45,
+     "height": 71,
+     "rotation": 0,
+     "shape": [
+      "RECT",
+      45,
+      71
+     ]
+    }
+   ]
+  },
+  {
+   "primitiveId": "c-C3",
+   "designator": "C3",
+   "device": "CL31B105KBHNNNE",
+   "layer": 1,
+   "x": 1500,
+   "y": 2200,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 1414.5,
+    "minY": 2159.5,
+    "maxX": 1585.5,
+    "maxY": 2240.5
+   },
+   "pads": [
+    {
+     "padNumber": "1",
+     "net": "VDDA",
+     "layer": 1,
+     "x": 1442.0,
+     "y": 2200.0,
+     "width": 45,
+     "height": 71,
+     "rotation": 0,
+     "shape": [
+      "RECT",
+      45,
+      71
+     ]
+    },
+    {
+     "padNumber": "2",
+     "net": "KS_H",
+     "layer": 1,
+     "x": 1558.0,
+     "y": 2200.0,
+     "width": 45,
+     "height": 71,
+     "rotation": 0,
+     "shape": [
+      "RECT",
+      45,
+      71
+     ]
+    }
+   ]
+  },
+  {
+   "primitiveId": "c-C4",
+   "designator": "C4",
+   "device": "CL31B105KBHNNNE",
+   "layer": 1,
+   "x": 1500,
+   "y": 1250,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 1414.5,
+    "minY": 1209.5,
+    "maxX": 1585.5,
+    "maxY": 1290.5
+   },
+   "pads": [
+    {
+     "padNumber": "1",
+     "net": "VDDB",
+     "layer": 1,
+     "x": 1442.0,
+     "y": 1250.0,
+     "width": 45,
+     "height": 71,
+     "rotation": 0,
+     "shape": [
+      "RECT",
+      45,
+      71
+     ]
+    },
+    {
+     "padNumber": "2",
+     "net": "KS_L",
+     "layer": 1,
+     "x": 1558.0,
+     "y": 1250.0,
+     "width": 45,
+     "height": 71,
+     "rotation": 0,
+     "shape": [
+      "RECT",
+      45,
+      71
+     ]
+    }
+   ]
+  },
+  {
+   "primitiveId": "c-U2",
+   "designator": "U2",
+   "device": "MGJ2D051505SC",
+   "layer": 1,
+   "x": 1150,
+   "y": 2600,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 760.0,
+    "minY": 2520.0,
+    "maxX": 1540.0,
+    "maxY": 2680.0
+   },
+   "pads": [
+    {
+     "padNumber": "1",
+     "net": "+5V",
+     "layer": 12,
+     "x": 850.0,
+     "y": 2600.0,
+     "width": 66,
+     "height": 66,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      66,
+      66
+     ]
+    },
+    {
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 12,
+     "x": 950.0,
+     "y": 2600.0,
+     "width": 66,
+     "height": 66,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      66,
+      66
+     ]
+    },
+    {
+     "padNumber": "5",
+     "net": "VDDA",
+     "layer": 12,
+     "x": 1250.0,
+     "y": 2600.0,
+     "width": 66,
+     "height": 66,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      66,
+      66
+     ]
+    },
+    {
+     "padNumber": "6",
+     "net": "KS_H",
+     "layer": 12,
+     "x": 1350.0,
+     "y": 2600.0,
+     "width": 66,
+     "height": 66,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      66,
+      66
+     ]
+    },
+    {
+     "padNumber": "7",
+     "net": "",
+     "layer": 12,
+     "x": 1450.0,
+     "y": 2600.0,
+     "width": 66,
+     "height": 66,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      66,
+      66
+     ]
+    }
+   ]
+  },
+  {
+   "primitiveId": "c-U3",
+   "designator": "U3",
+   "device": "MGJ2D051505SC",
+   "layer": 1,
+   "x": 1150,
+   "y": 1550,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 760.0,
+    "minY": 1470.0,
+    "maxX": 1540.0,
+    "maxY": 1630.0
+   },
+   "pads": [
+    {
+     "padNumber": "1",
+     "net": "+5V",
+     "layer": 12,
+     "x": 850.0,
+     "y": 1550.0,
+     "width": 66,
+     "height": 66,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      66,
+      66
+     ]
+    },
+    {
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 12,
+     "x": 950.0,
+     "y": 1550.0,
+     "width": 66,
+     "height": 66,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      66,
+      66
+     ]
+    },
+    {
+     "padNumber": "5",
+     "net": "VDDB",
+     "layer": 12,
+     "x": 1250.0,
+     "y": 1550.0,
+     "width": 66,
+     "height": 66,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      66,
+      66
+     ]
+    },
+    {
+     "padNumber": "6",
+     "net": "KS_L",
+     "layer": 12,
+     "x": 1350.0,
+     "y": 1550.0,
+     "width": 66,
+     "height": 66,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      66,
+      66
+     ]
+    },
+    {
+     "padNumber": "7",
+     "net": "",
+     "layer": 12,
+     "x": 1450.0,
+     "y": 1550.0,
+     "width": 66,
+     "height": 66,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      66,
+      66
+     ]
+    }
+   ]
+  },
+  {
+   "primitiveId": "c-U1",
+   "designator": "U1",
+   "device": "UCC21520DWR",
+   "layer": 1,
+   "x": 1150,
+   "y": 900,
+   "rotation": 270,
+   "locked": false,
+   "bbox": {
+    "minX": 927.5,
+    "minY": 690.0,
+    "maxX": 1372.5,
+    "maxY": 1110.0
+   },
+   "pads": [
+    {
+     "padNumber": "1",
+     "net": "PWM_H",
+     "layer": 1,
+     "x": 967.0,
+     "y": 1075.0,
+     "width": 79,
+     "height": 24,
+     "rotation": 270,
+     "shape": [
+      "RECT",
+      24,
+      79
+     ]
+    },
+    {
+     "padNumber": "2",
+     "net": "PWM_L",
+     "layer": 1,
+     "x": 967.0,
+     "y": 1025.0,
+     "width": 79,
+     "height": 24,
+     "rotation": 270,
+     "shape": [
+      "RECT",
+      24,
+      79
+     ]
+    },
+    {
+     "padNumber": "3",
+     "net": "+5V",
+     "layer": 1,
+     "x": 967.0,
+     "y": 975.0,
+     "width": 79,
+     "height": 24,
+     "rotation": 270,
+     "shape": [
+      "RECT",
+      24,
+      79
+     ]
+    },
+    {
+     "padNumber": "4",
+     "net": "GND",
+     "layer": 1,
+     "x": 967.0,
+     "y": 925.0,
+     "width": 79,
+     "height": 24,
+     "rotation": 270,
+     "shape": [
+      "RECT",
+      24,
+      79
+     ]
+    },
+    {
+     "padNumber": "5",
+     "net": "DIS",
+     "layer": 1,
+     "x": 967.0,
+     "y": 875.0,
+     "width": 79,
+     "height": 24,
+     "rotation": 270,
+     "shape": [
+      "RECT",
+      24,
+      79
+     ]
+    },
+    {
+     "padNumber": "6",
+     "net": "DT",
+     "layer": 1,
+     "x": 967.0,
+     "y": 825.0,
+     "width": 79,
+     "height": 24,
+     "rotation": 270,
+     "shape": [
+      "RECT",
+      24,
+      79
+     ]
+    },
+    {
+     "padNumber": "7",
+     "net": "",
+     "layer": 1,
+     "x": 967.0,
+     "y": 775.0,
+     "width": 79,
+     "height": 24,
+     "rotation": 270,
+     "shape": [
+      "RECT",
+      24,
+      79
+     ]
+    },
+    {
+     "padNumber": "8",
+     "net": "+5V",
+     "layer": 1,
+     "x": 967.0,
+     "y": 725.0,
+     "width": 79,
+     "height": 24,
+     "rotation": 270,
+     "shape": [
+      "RECT",
+      24,
+      79
+     ]
+    },
+    {
+     "padNumber": "9",
+     "net": "KS_L",
+     "layer": 1,
+     "x": 1333.0,
+     "y": 725.0,
+     "width": 79,
+     "height": 24,
+     "rotation": 270,
+     "shape": [
+      "RECT",
+      24,
+      79
+     ]
+    },
+    {
+     "padNumber": "10",
+     "net": "OUTB",
+     "layer": 1,
+     "x": 1333.0,
+     "y": 775.0,
+     "width": 79,
+     "height": 24,
+     "rotation": 270,
+     "shape": [
+      "RECT",
+      24,
+      79
+     ]
+    },
+    {
+     "padNumber": "11",
+     "net": "VDDB",
+     "layer": 1,
+     "x": 1333.0,
+     "y": 825.0,
+     "width": 79,
+     "height": 24,
+     "rotation": 270,
+     "shape": [
+      "RECT",
+      24,
+      79
+     ]
+    },
+    {
+     "padNumber": "12",
+     "net": "",
+     "layer": 1,
+     "x": 1333.0,
+     "y": 875.0,
+     "width": 79,
+     "height": 24,
+     "rotation": 270,
+     "shape": [
+      "RECT",
+      24,
+      79
+     ]
+    },
+    {
+     "padNumber": "13",
+     "net": "",
+     "layer": 1,
+     "x": 1333.0,
+     "y": 925.0,
+     "width": 79,
+     "height": 24,
+     "rotation": 270,
+     "shape": [
+      "RECT",
+      24,
+      79
+     ]
+    },
+    {
+     "padNumber": "14",
+     "net": "KS_H",
+     "layer": 1,
+     "x": 1333.0,
+     "y": 975.0,
+     "width": 79,
+     "height": 24,
+     "rotation": 270,
+     "shape": [
+      "RECT",
+      24,
+      79
+     ]
+    },
+    {
+     "padNumber": "15",
+     "net": "OUTA",
+     "layer": 1,
+     "x": 1333.0,
+     "y": 1025.0,
+     "width": 79,
+     "height": 24,
+     "rotation": 270,
+     "shape": [
+      "RECT",
+      24,
+      79
+     ]
+    },
+    {
+     "padNumber": "16",
+     "net": "VDDA",
+     "layer": 1,
+     "x": 1333.0,
+     "y": 1075.0,
+     "width": 79,
+     "height": 24,
+     "rotation": 270,
+     "shape": [
+      "RECT",
+      24,
+      79
+     ]
+    }
+   ]
+  },
+  {
+   "primitiveId": "c-J3",
+   "designator": "J3",
+   "device": "PZ254V-11-04P",
+   "layer": 1,
+   "x": 150,
+   "y": 600,
+   "rotation": 0,
+   "locked": true,
+   "bbox": {
+    "minX": 100.0,
+    "minY": 395.0,
+    "maxX": 200.0,
+    "maxY": 805.0
+   },
+   "pads": [
+    {
+     "padNumber": "1",
+     "net": "+5V",
+     "layer": 12,
+     "x": 150.0,
+     "y": 750.0,
+     "width": 66,
+     "height": 66,
+     "rotation": 0,
+     "shape": [
+      "RECT",
+      66,
+      66
+     ]
+    },
+    {
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 12,
+     "x": 150.0,
+     "y": 650.0,
+     "width": 66,
+     "height": 66,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      66,
+      66
+     ]
+    },
+    {
+     "padNumber": "3",
+     "net": "PWM_H",
+     "layer": 12,
+     "x": 150.0,
+     "y": 550.0,
+     "width": 66,
+     "height": 66,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      66,
+      66
+     ]
+    },
+    {
+     "padNumber": "4",
+     "net": "PWM_L",
+     "layer": 12,
+     "x": 150.0,
+     "y": 450.0,
+     "width": 66,
+     "height": 66,
+     "rotation": 0,
+     "shape": [
+      "ELLIPSE",
+      66,
+      66
+     ]
+    }
+   ]
+  },
+  {
+   "primitiveId": "c-C5",
+   "designator": "C5",
+   "device": "CL21A106KAYNNNE",
+   "layer": 1,
+   "x": 450,
+   "y": 450,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 387.5,
+    "minY": 420.0,
+    "maxX": 512.5,
+    "maxY": 480.0
+   },
+   "pads": [
+    {
+     "padNumber": "1",
+     "net": "+5V",
+     "layer": 1,
+     "x": 412.5,
+     "y": 450.0,
+     "width": 40,
+     "height": 50,
+     "rotation": 0,
+     "shape": [
+      "RECT",
+      40,
+      50
+     ]
+    },
+    {
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 1,
+     "x": 487.5,
+     "y": 450.0,
+     "width": 40,
+     "height": 50,
+     "rotation": 0,
+     "shape": [
+      "RECT",
+      40,
+      50
+     ]
+    }
+   ]
+  },
+  {
+   "primitiveId": "c-C6",
+   "designator": "C6",
+   "device": "CL21B104KBCNNNC",
+   "layer": 1,
+   "x": 450,
+   "y": 750,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 387.5,
+    "minY": 720.0,
+    "maxX": 512.5,
+    "maxY": 780.0
+   },
+   "pads": [
+    {
+     "padNumber": "1",
+     "net": "+5V",
+     "layer": 1,
+     "x": 412.5,
+     "y": 750.0,
+     "width": 40,
+     "height": 50,
+     "rotation": 0,
+     "shape": [
+      "RECT",
+      40,
+      50
+     ]
+    },
+    {
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 1,
+     "x": 487.5,
+     "y": 750.0,
+     "width": 40,
+     "height": 50,
+     "rotation": 0,
+     "shape": [
+      "RECT",
+      40,
+      50
+     ]
+    }
+   ]
+  },
+  {
+   "primitiveId": "c-R3",
+   "designator": "R3",
+   "device": "0805W8F1002T5E",
+   "layer": 1,
+   "x": 450,
+   "y": 1050,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 387.5,
+    "minY": 1020.0,
+    "maxX": 512.5,
+    "maxY": 1080.0
+   },
+   "pads": [
+    {
+     "padNumber": "1",
+     "net": "DIS",
+     "layer": 1,
+     "x": 412.5,
+     "y": 1050.0,
+     "width": 40,
+     "height": 50,
+     "rotation": 0,
+     "shape": [
+      "RECT",
+      40,
+      50
+     ]
+    },
+    {
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 1,
+     "x": 487.5,
+     "y": 1050.0,
+     "width": 40,
+     "height": 50,
+     "rotation": 0,
+     "shape": [
+      "RECT",
+      40,
+      50
+     ]
+    }
+   ]
+  },
+  {
+   "primitiveId": "c-R4",
+   "designator": "R4",
+   "device": "0805W8F2002T5E",
+   "layer": 1,
+   "x": 450,
+   "y": 1250,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 387.5,
+    "minY": 1220.0,
+    "maxX": 512.5,
+    "maxY": 1280.0
+   },
+   "pads": [
+    {
+     "padNumber": "1",
+     "net": "DT",
+     "layer": 1,
+     "x": 412.5,
+     "y": 1250.0,
+     "width": 40,
+     "height": 50,
+     "rotation": 0,
+     "shape": [
+      "RECT",
+      40,
+      50
+     ]
+    },
+    {
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 1,
+     "x": 487.5,
+     "y": 1250.0,
+     "width": 40,
+     "height": 50,
+     "rotation": 0,
+     "shape": [
+      "RECT",
+      40,
+      50
+     ]
+    }
+   ]
+  },
+  {
+   "primitiveId": "c-R5",
+   "designator": "R5",
+   "device": "0805W8F5101T5E",
+   "layer": 1,
+   "x": 700,
+   "y": 400,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 637.5,
+    "minY": 370.0,
+    "maxX": 762.5,
+    "maxY": 430.0
+   },
+   "pads": [
+    {
+     "padNumber": "1",
+     "net": "PWM_H",
+     "layer": 1,
+     "x": 662.5,
+     "y": 400.0,
+     "width": 40,
+     "height": 50,
+     "rotation": 0,
+     "shape": [
+      "RECT",
+      40,
+      50
+     ]
+    },
+    {
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 1,
+     "x": 737.5,
+     "y": 400.0,
+     "width": 40,
+     "height": 50,
+     "rotation": 0,
+     "shape": [
+      "RECT",
+      40,
+      50
+     ]
+    }
+   ]
+  },
+  {
+   "primitiveId": "c-R6",
+   "designator": "R6",
+   "device": "0805W8F5101T5E",
+   "layer": 1,
+   "x": 700,
+   "y": 600,
+   "rotation": 0,
+   "locked": false,
+   "bbox": {
+    "minX": 637.5,
+    "minY": 570.0,
+    "maxX": 762.5,
+    "maxY": 630.0
+   },
+   "pads": [
+    {
+     "padNumber": "1",
+     "net": "PWM_L",
+     "layer": 1,
+     "x": 662.5,
+     "y": 600.0,
+     "width": 40,
+     "height": 50,
+     "rotation": 0,
+     "shape": [
+      "RECT",
+      40,
+      50
+     ]
+    },
+    {
+     "padNumber": "2",
+     "net": "GND",
+     "layer": 1,
+     "x": 737.5,
+     "y": 600.0,
+     "width": 40,
+     "height": 50,
+     "rotation": 0,
+     "shape": [
+      "RECT",
+      40,
+      50
+     ]
+    }
+   ]
+  }
+ ],
+ "outline": {
+  "bbox": {
+   "minX": 0,
+   "minY": 0,
+   "maxX": 3543.31,
+   "maxY": 3149.61
+  },
+  "points": [
+   [
+    0,
+    0
+   ],
+   [
+    3543.31,
+    0
+   ],
+   [
+    3543.31,
+    3149.61
+   ],
+   [
+    0,
+    3149.61
+   ]
+  ],
+  "source": "polygon"
+ },
+ "copperLayers": 4,
+ "rules": {
+  "clearanceMil": 6,
+  "trackWidthMil": 6,
+  "trackWidthMinMil": 5,
+  "viaDrillMil": 12,
+  "viaDiameterMil": 24,
+  "copperToEdgeMil": 12
+ }
+}

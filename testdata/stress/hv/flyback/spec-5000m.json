@@ -1,0 +1,35 @@
+{
+ "standard": {
+  "name": "IEC62368-1",
+  "insulation": "reinforced",
+  "pollutionDegree": 2,
+  "materialGroup": "IIIa",
+  "altitudeM": 5000,
+  "overvoltageCategory": "II"
+ },
+ "layers": 2,
+ "outerOz": 1,
+ "tempRiseC": 10,
+ "mains": {
+  "vrms": 230,
+  "nets": [
+   "L",
+   "N"
+  ]
+ },
+ "rails": [
+  {
+   "net": "VOUT",
+   "voltage": 12.0,
+   "rippleMvpp": 120
+  },
+  {
+   "net": "DRAIN",
+   "peakV": 650
+  },
+  {
+   "net": "CLAMP",
+   "peakV": 520
+  }
+ ]
+}

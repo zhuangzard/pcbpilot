@@ -46,15 +46,17 @@ type ctx struct {
 
 	blockOfPart  map[string]string // ref → intent block id
 	blockByID    map[string]*Block
-	domOfPcb     map[string]*Domain // pcbauto domain id → intent domain
-	domOfNet     map[string]string  // net → intent domain id
-	netBlock     map[string]string  // net → intent block id
-	volts        map[string]Voltage // net → voltage envelope
-	uncontrolled []string           // diff nets whose impedance the stackup cannot hold
-	noReference  []string           // ≥ 1 Gb/s diff nets without an adjacent reference plane
-	laneGroups   map[string]string  // net → auto length group of a multi-lane port
-	ddrPairs     [][2]string        // DDR strobe/clock pairs recognised from names
-	ddrGroup     map[string]string  // net → DDR byte-lane / address group
+	domOfPcb     map[string]*Domain    // pcbauto domain id → intent domain
+	domOfNet     map[string]string     // net → intent domain id
+	domSpec      map[string]SpecDomain // intent domain id → matching spec.domains entry
+	floats       map[string]floatInfo  // nets riding on a switch node
+	netBlock     map[string]string     // net → intent block id
+	volts        map[string]Voltage    // net → voltage envelope
+	uncontrolled []string              // diff nets whose impedance the stackup cannot hold
+	noReference  []string              // ≥ 1 Gb/s diff nets without an adjacent reference plane
+	laneGroups   map[string]string     // net → auto length group of a multi-lane port
+	ddrPairs     [][2]string           // DDR strobe/clock pairs recognised from names
+	ddrGroup     map[string]string     // net → DDR byte-lane / address group
 }
 
 type pinRef struct {

@@ -125,10 +125,13 @@ type rnet struct {
 	escs        []*bgaEsc // BGA escapes: fixed copper from a ball to the array boundary
 	failed      []Unrouted
 	conflict    bool
-	neckW       float64        // pad-entry width when the full width does not fit
-	neckR       float64        // claim radius at neck width
-	neck        map[int32]bool // columns near own pads where necking is allowed
-	isoDom      int            // index into router.iso domains, -1 = unfenced
+	neckW       float64          // pad-entry width when the full width does not fit
+	neckR       float64          // claim radius at neck width
+	neck        map[int32]bool   // columns near own pads where necking is allowed
+	isoDom      int              // index into router.iso domains, -1 = unfenced
+	relief      map[int32][]*Pad // own pads whose HV footprint relief covers a column
+	busbar      bool             // too wide for a routed track: reported "needs-pour"
+	reliefMemo  map[uint64]bool  // reliefOK verdicts per (cell, radius)
 }
 
 type rpath struct {
@@ -203,6 +206,11 @@ type router struct {
 	// sqHard / sqPad are per-layer squared cell distances to hard cells /
 	// multi-net pads and to any pad claim (large-radius static maps).
 	sqHard, sqPad [][]uint32
+	// High-voltage footprint relief (hvrelief.go).
+	relief   bool
+	maxClr   float64
+	padGap   map[[2]*Pad]float64
+	padShare map[*Pad]float64
 	// iso is the domain territory field (intent insulation pairs): copper
 	// of a fenced net keeps half the pair requirement from the partner
 	// territories. nil without an intent.
@@ -257,6 +265,7 @@ func Route(ctx context.Context, b *Board, st *Stackup, an *Analysis, opt RouteOp
 
 	res := &RouteResult{}
 	r.setupNets()
+	r.setupRelief()
 	r.rasterise()
 	r.setupIso()
 	if !opt.NoFanout {
@@ -366,6 +375,14 @@ func (r *router) setupNets() {
 			}
 		}
 		rn.route = len(allow) == 0 || allow[n.Name]
+		if rn.route && rn.width > busbarWidthMil && !rn.onPlane && !rn.poured && len(n.Pads) > 1 {
+			// A current that needs a > 250 mil track (30 A on 2 oz: 10.7 mm)
+			// is a pour / busbar job, not a grid route: its claim disk alone
+			// (tens of thousands of cells) starved every other net of the
+			// time budget — the 400 V inverter stress board routed 0 %.
+			rn.route, rn.busbar = false, true
+			rn.failed = append(rn.failed, Unrouted{Net: n.Name, Pads: padKeys(n.Pads), Reason: "needs-pour"})
+		}
 		rn.daisy = daisyDiff && (plan.Role == RoleDiff || plan.Role == RoleRF)
 		rn.layerMul = referenceLayerCost(r.st, plan)
 		for _, pd := range n.Pads {
@@ -432,6 +449,27 @@ func (r *router) rasterise() {
 // lies in the ring just outside it (where discretisation can hide a
 // violation), the exact pad distance decides.
 func (r *router) nodeOK(n *rnet, l, x, y int, rad float64) bool {
+	if r.nodeOKBase(n, l, x, y, rad) {
+		return true
+	}
+	if !r.relief || r.iso != nil && n.isoDom >= 0 && !r.isoOK(n, l, x, y, rad-n.share) {
+		return false
+	}
+	// The relief verdict depends only on static obstacles: memoised per
+	// (cell, radius) — unmemoised it made HV boards route 10× slower.
+	k := uint64(r.gr.idx(l, x, y))<<24 | uint64(math.Round(rad*100))&0xffffff
+	if v, ok := n.reliefMemo[k]; ok {
+		return v
+	}
+	if n.reliefMemo == nil {
+		n.reliefMemo = map[uint64]bool{}
+	}
+	v := r.reliefOK(n, l, x, y, rad)
+	n.reliefMemo[k] = v
+	return v
+}
+
+func (r *router) nodeOKBase(n *rnet, l, x, y int, rad float64) bool {
 	gr := r.gr
 	if r.iso != nil && n.isoDom >= 0 && !r.isoOK(n, l, x, y, rad-n.share) {
 		return false
@@ -668,7 +706,17 @@ func (r *router) padsClear(n *rnet, id int, p Point, hw float64) bool {
 		if id != LayerMulti && !e.pd.OnLayer(id) {
 			continue
 		}
-		if e.pd.Box.Dist(p) < hw+math.Max(e.clr, n.plan.ClearanceMil) {
+		req := r.pairReq(n, e)
+		if r.relief && req > r.b.Rules.Clearance {
+			if x, y := r.gr.cellOf(p); r.gr.in(x, y) {
+				for _, op := range r.reliefOwn(n, x, y) {
+					if op.Part == e.pd.Part && op != e.pd {
+						req = math.Max(r.b.Rules.Clearance, math.Min(req, r.footprintGap(op, e.pd)))
+					}
+				}
+			}
+		}
+		if e.pd.Box.Dist(p) < hw+req {
 			return false
 		}
 	}
@@ -729,7 +777,37 @@ func (r *router) nodeCong(l, x, y int, rad float64) (occ float64, hist float64) 
 	if empty {
 		return 0, 0
 	}
-	for _, o := range gr.disk(rad) {
+	d := gr.disk(rad)
+	if len(d) > diskSpanMin {
+		// Large claim disks (high-voltage nets: 100 mil clearance ≈ 1300
+		// cells) are scanned row by row, skipping 8-cell blocks with no use
+		// and no history — the same sum, a fraction of the reads (nodeCong
+		// was 45 % of the flyback stress board's routing time).
+		for _, sp := range gr.diskSpans(rad) {
+			yy := y + sp[0]
+			if yy < 0 || yy >= gr.H {
+				continue
+			}
+			x0, x1 := max(x+sp[1], 0), min(x+sp[2], gr.W-1)
+			brow := (l*gr.bH + yy/blockCells) * gr.bW
+			for xb := x0; xb <= x1; {
+				bx := xb / blockCells
+				end := min((bx+1)*blockCells-1, x1)
+				if gr.bUse[brow+bx] != 0 || gr.bHist[brow+bx] != 0 {
+					for xx := xb; xx <= end; xx++ {
+						j := gr.idx(l, xx, yy)
+						if u := gr.use[j]; u > 0 {
+							occ += float64(u)
+						}
+						hist += float64(gr.hist[j])
+					}
+				}
+				xb = end + 1
+			}
+		}
+		return
+	}
+	for _, o := range d {
 		j := gr.idx(l, x+o[0], y+o[1])
 		if u := gr.use[j]; u > 0 {
 			occ += float64(u)
@@ -738,6 +816,9 @@ func (r *router) nodeCong(l, x, y int, rad float64) (occ float64, hist float64) 
 	}
 	return
 }
+
+// diskSpanMin is the disk size above which nodeCong scans row spans.
+const diskSpanMin = 400
 
 // cost returns the congestion-weighted cost factor of occupying cell i for
 // net n, or +Inf when illegal. Cached per search.
@@ -748,7 +829,7 @@ func (r *router) cost(n *rnet, i int) float32 {
 	gr := r.gr
 	l, x, y := gr.xy(i)
 	var c float32
-	if rad := r.nodeRadius(n, l, x, y); rad < 0 {
+	if rad := r.claimRadius(n, l, x, y); rad < 0 {
 		c = float32(math.Inf(1))
 	} else {
 		occ, hist := r.nodeCong(l, x, y, rad)
@@ -847,7 +928,7 @@ func (r *router) claimNodes(n *rnet, nodes []int32, out []int32) []int32 {
 	}
 	for k, i := range nodes {
 		l, x, y := gr.xy(int(i))
-		if rad := r.nodeRadius(n, l, x, y); rad > 0 {
+		if rad := r.claimRadius(n, l, x, y); rad > 0 {
 			add(l, x, y, rad)
 		}
 		if k > 0 {
@@ -1933,6 +2014,10 @@ func (r *router) staticByDistance(rad float64, m []uint8) {
 		}
 	}
 }
+
+// busbarWidthMil is the widest track the grid router lays; wider current
+// paths are left to a pour / busbar and reported (reason "needs-pour").
+const busbarWidthMil = 250.0
 
 // splitRefCost is the step-cost factor of a signal layer whose adjacent
 // plane is split, for a high-speed net that needs a continuous reference.

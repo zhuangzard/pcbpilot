@@ -38,7 +38,10 @@ func (c *ctx) buildDomains() {
 		v, _ := c.netVoltageEnvelope(net)
 		c.volts[net] = v
 	}
+	c.floatingIslands()
 	c.domOfPcb = map[string]*Domain{}
+	c.domSpec = map[string]SpecDomain{}
+	declared := map[*Domain]SpecDomain{}
 	main := ""
 	mainN := -1
 	for _, pd := range c.circ.Domains {
@@ -64,6 +67,7 @@ func (c *ctx) buildDomains() {
 		for _, n := range pd.Nets {
 			if c.mains[n] {
 				mains = true
+				continue
 			}
 			v := c.volts[n]
 			rms = math.Max(rms, math.Max(math.Abs(v.Max), math.Abs(v.Min)))
@@ -72,8 +76,15 @@ func (c *ctx) buildDomains() {
 		switch {
 		case mains || pd.ID == "MAINS":
 			d.Kind = "mains"
-			rms, peak = c.mainsVrms(), c.mainsVrms()*math.Sqrt2
-			d.Why = append(d.Why, fmt.Sprintf("AC line nets present: %s Vrms (%s V peak)", trimFloat(rms, 0), trimFloat(peak, 0)))
+			line := c.mainsVrms()
+			d.Why = append(d.Why, fmt.Sprintf("AC line nets present: %s Vrms (%s V peak)", trimFloat(line, 0), trimFloat(line*math.Sqrt2, 0)))
+			if rms > line || peak > line*math.Sqrt2 {
+				// The rectified primary of an off-line converter is the same
+				// circuit as the line: its bulk (DC) and drain (peak) set the
+				// working voltage to the other side of the barrier.
+				d.Why = append(d.Why, fmt.Sprintf("mains-connected primary: bulk/DC up to %s V, peak %s V (rectifier-tied nets of this domain)", trimFloat(rms, 1), trimFloat(peak, 1)))
+			}
+			rms, peak = math.Max(line, rms), math.Max(line*math.Sqrt2, peak)
 		case peak > selvDC:
 			d.Kind = "hazardous"
 			d.Why = append(d.Why, fmt.Sprintf("peak %s V exceeds the SELV limit %.0f V DC", trimFloat(peak, 2), selvDC))
@@ -95,6 +106,7 @@ func (c *ctx) buildDomains() {
 						rms, peak = sd.WorkingVrms, math.Max(peak, sd.WorkingVrms*math.Sqrt2)
 					}
 					d.Why = append(d.Why, "kind "+sd.Kind+" declared in spec.domains (net "+n+")")
+					declared[d] = sd
 					break
 				}
 			}
@@ -103,6 +115,9 @@ func (c *ctx) buildDomains() {
 		prefix := map[string]string{"SELV": "SELV", "hazardous": "HAZ", "mains": "MAINS", "floating": "FLOAT", "isolated-secondary": "ISO", "patient": "PATIENT"}[d.Kind]
 		label := voltLabel(rms)
 		if d.Kind == "mains" {
+			if mains {
+				label = voltLabel(c.mainsVrms()) // named after the line, not the bulk
+			}
 			label += "AC"
 		}
 		id := prefix + "_" + label
@@ -114,6 +129,9 @@ func (c *ctx) buildDomains() {
 		}
 		used[id] = true
 		d.ID = id
+		if sd, ok := declared[d]; ok {
+			c.domSpec[id] = sd
+		}
 		c.domOfPcb[pd.ID] = d
 		c.out.Domains = append(c.out.Domains, d)
 	}
@@ -181,62 +199,171 @@ func (c *ctx) declaredIsolation(a, b *Domain) float64 {
 
 // buildPairs states the insulation between every pair of domains an
 // isolation part (optocoupler, isolator, isolated DC/DC, transformer, relay)
-// bridges. The distances come from SafetyDistances.
+// bridges, and between every hazardous and touchable domain even when no part
+// bridges them (their copper must still keep the distance anywhere on the
+// board). The distances come from SafetyDistances.
 func (c *ctx) buildPairs() {
-	st := c.out.Standard
-	specInsul := c.spec.Standard != nil && c.spec.Standard.Insulation != ""
+	seen := map[[2]string]bool{}
+	key := func(a, b string) [2]string {
+		if a > b {
+			a, b = b, a
+		}
+		return [2]string{a, b}
+	}
 	for _, br := range c.circ.Barriers {
 		a, b := c.domOfPcb[br.A], c.domOfPcb[br.B]
-		if a == nil || b == nil {
+		if a == nil || b == nil || a == b || seen[key(a.ID, b.ID)] {
 			continue
 		}
-		p := &Pair{A: "domain:" + a.ID, B: "domain:" + b.ID, Bridges: sortRefs(uniq(append(append([]string(nil), br.Bridges...), c.spanning(a.ID, b.ID)...)))}
-		p.WorkingVrms = math.Max(a.WorkingVrms, b.WorkingVrms)
-		p.WorkingVpeak = math.Max(a.WorkingVpeak, b.WorkingVpeak)
-		ha, hb := hazardKind(a.Kind), hazardKind(b.Kind)
-		patient := a.Kind == "patient" || b.Kind == "patient"
-		switch {
-		case ha != hb:
-			p.Insulation = "reinforced"
-			if specInsul {
-				p.Insulation = st.Insulation
+		seen[key(a.ID, b.ID)] = true
+		c.out.Pairs = append(c.out.Pairs, c.pairFor(a, b, sortRefs(append([]string(nil), br.Bridges...)), ""))
+	}
+	for i, a := range c.out.Domains {
+		for _, b := range c.out.Domains[i+1:] {
+			if seen[key(a.ID, b.ID)] || a.Kind == "floating" || b.Kind == "floating" || hazardKind(a.Kind) == hazardKind(b.Kind) {
+				continue
 			}
-			p.Why = append(p.Why, fmt.Sprintf("%s (%s) ↔ %s (%s): hazardous to touchable circuit needs %s insulation", a.ID, a.Kind, b.ID, b.Kind, p.Insulation))
-		case ha && hb:
-			p.Insulation = "basic"
-			p.Why = append(p.Why, "both sides hazardous: basic (operational) insulation")
-		case patient:
-			p.Insulation = "basic"
-			p.Why = append(p.Why, "SELV ↔ patient circuit: 1 means of patient protection")
-		default:
-			p.Insulation = "functional"
-			p.Why = append(p.Why, "both sides SELV: functional isolation (noise / ground loop), not a safety barrier")
+			seen[key(a.ID, b.ID)] = true
+			note := fmt.Sprintf("no isolation part bridges %s and %s, but hazardous copper must keep the insulation distance from touchable copper anywhere on the board", a.ID, b.ID)
+			c.out.Pairs = append(c.out.Pairs, c.pairFor(a, b, nil, note))
 		}
-		if iso := c.declaredIsolation(a, b); iso > 0 {
-			p.RequiredWithstandV = round(iso*math.Sqrt2, 1)
-			if p.Insulation == "functional" {
-				p.Insulation = "basic"
-			}
-			p.Why = append(p.Why, fmt.Sprintf("spec.domains isolationVrms %s Vrms (electric strength, e.g. IEEE 802.3 MDI): dimensioned as %s insulation for a %s V peak withstand (IEC 60664-1 procedure 2)", trimFloat(iso, 0), p.Insulation, trimFloat(p.RequiredWithstandV, 0)))
-		}
-		if st.MOP != "" {
-			p.MOP = st.MOP
-			p.MOPCount = 1
-			if ha != hb && (p.Insulation == "reinforced" || p.Insulation == "double") {
-				p.MOPCount = 2
-			}
-			if p.Insulation == "functional" {
-				p.MOPCount = 0
-			}
-		}
-		// The single call site for the distance numbers (pkg/safety plugs in via SafetyProvider).
-		cl, cr, slot, slotW, ref, why := SafetyDistances(*p, st)
-		p.ClearanceMm, p.CreepageMm, p.SlotRequired, p.SlotWidthMm, p.StandardRef = cl, cr, slot, slotW, ref
-		p.Why = append(p.Why, why...)
-		p.Why = append(p.Why, fmt.Sprintf("working voltage %s Vrms / %s V peak = the higher of the two domains; bridged by %s", trimFloat(p.WorkingVrms, 2), trimFloat(p.WorkingVpeak, 2), strings.Join(p.Bridges, ", ")))
-		c.out.Pairs = append(c.out.Pairs, p)
 	}
 	sort.SliceStable(c.out.Pairs, func(i, j int) bool { return c.out.Pairs[i].A+c.out.Pairs[i].B < c.out.Pairs[j].A+c.out.Pairs[j].B })
+}
+
+// pairFor states one insulation pair.
+func (c *ctx) pairFor(a, b *Domain, bridges []string, note string) *Pair {
+	st := c.out.Standard
+	specInsul := c.spec.Standard != nil && c.spec.Standard.Insulation != ""
+	// Every part with pins in both domains bridges the pair — a Y capacitor
+	// or a sense resistor is not an isolation part, but its body spans the
+	// barrier all the same (pcb auto slots / checks it like one).
+	p := &Pair{A: "domain:" + a.ID, B: "domain:" + b.ID, Bridges: sortRefs(uniq(append(append([]string(nil), bridges...), c.spanning(a.ID, b.ID)...)))}
+	if note != "" {
+		p.Why = append(p.Why, note)
+	}
+	p.WorkingVrms = math.Max(a.WorkingVrms, b.WorkingVrms)
+	p.WorkingVpeak = math.Max(a.WorkingVpeak, b.WorkingVpeak)
+	ha, hb := hazardKind(a.Kind), hazardKind(b.Kind)
+	patient := a.Kind == "patient" || b.Kind == "patient"
+	switch {
+	case ha != hb:
+		p.Insulation = "reinforced"
+		if specInsul {
+			p.Insulation = st.Insulation
+		}
+		p.Why = append(p.Why, fmt.Sprintf("%s (%s) ↔ %s (%s): hazardous to touchable circuit needs %s insulation", a.ID, a.Kind, b.ID, b.Kind, p.Insulation))
+	case ha && hb:
+		p.Insulation = "basic"
+		p.Why = append(p.Why, "both sides hazardous: basic (operational) insulation")
+	case patient:
+		p.Insulation = "basic"
+		if specInsul && st.Insulation != "functional" {
+			p.Insulation = st.Insulation
+		}
+		p.Why = append(p.Why, fmt.Sprintf("SELV ↔ patient circuit: %s insulation (means of patient protection)", p.Insulation))
+	default:
+		p.Insulation = "functional"
+		p.Why = append(p.Why, "both sides SELV: functional isolation (noise / ground loop), not a safety barrier")
+	}
+	if iso := c.declaredIsolation(a, b); iso > 0 {
+		p.RequiredWithstandV = round(iso*math.Sqrt2, 1)
+		if p.Insulation == "functional" {
+			p.Insulation = "basic"
+		}
+		p.Why = append(p.Why, fmt.Sprintf("spec.domains isolationVrms %s Vrms (electric strength, e.g. IEEE 802.3 MDI): dimensioned as %s insulation for a %s V peak withstand (IEC 60664-1 procedure 2)", trimFloat(iso, 0), p.Insulation, trimFloat(p.RequiredWithstandV, 0)))
+	}
+	if st.MOP != "" && p.Insulation != "functional" {
+		p.MOP = st.MOP
+		// The product declares how many means of protection its barriers
+		// provide (2 × MOPP for a type BF/CF applied part at mains potential);
+		// both-hazardous operational insulation is never a means of protection.
+		p.MOPCount = 1
+		switch {
+		case ha && hb:
+		case st.MOPCount > 0:
+			p.MOPCount = st.MOPCount
+		case p.Insulation == "reinforced" || p.Insulation == "double":
+			p.MOPCount = 2
+		}
+		if p.MOPCount >= 2 && p.Insulation != "reinforced" {
+			p.Insulation = "double"
+		} else if p.MOPCount == 1 && (p.Insulation == "reinforced" || p.Insulation == "double") {
+			p.Insulation = "basic"
+		}
+		p.Why = append(p.Why, fmt.Sprintf("%d × %s declared by spec.standard (mopCount)", p.MOPCount, p.MOP))
+	}
+	var tw string
+	p.Transient, p.MainsVrms, tw = c.pairTransient(a, b)
+	if tw != "" {
+		p.Why = append(p.Why, tw)
+	}
+	// The single call site for the distance numbers (pkg/safety plugs in via SafetyProvider).
+	cl, cr, slot, slotW, ref, why := SafetyDistances(*p, st)
+	p.ClearanceMm, p.CreepageMm, p.SlotRequired, p.SlotWidthMm, p.StandardRef = cl, cr, slot, slotW, ref
+	p.Why = append(p.Why, why...)
+	by := "no part (implicit pair)"
+	if len(p.Bridges) > 0 {
+		by = strings.Join(p.Bridges, ", ")
+	}
+	p.Why = append(p.Why, fmt.Sprintf("working voltage %s Vrms / %s V peak = the higher of the two domains; bridged by %s", trimFloat(p.WorkingVrms, 2), trimFloat(p.WorkingVpeak, 2), by))
+	return p
+}
+
+// pairTransient resolves the transient regime of a pair (clearance
+// procedure 2) and the nominal system voltage it is taken from: a
+// spec.domains declaration wins; a mains-kind side is mains-connected; in a
+// design with a mains domain a hazardous side is a primary circuit (mains
+// transients reach it through the rectifier) and two touchable sides sit
+// behind the isolating transformer; otherwise the standard's rule infers it.
+func (c *ctx) pairTransient(a, b *Domain) (string, float64, string) {
+	rank := map[string]int{"none": 1, "secondary": 2, "mains": 3}
+	best, v, who := "", 0.0, ""
+	for _, d := range []*Domain{a, b} {
+		sd, ok := c.domSpec[d.ID]
+		if !ok || sd.Transient == "" || rank[sd.Transient] <= rank[best] {
+			continue
+		}
+		best, v, who = sd.Transient, sd.RatedVrms, d.ID
+		if v <= 0 {
+			v = d.WorkingVrms
+		}
+	}
+	if best != "" {
+		return best, v, fmt.Sprintf("transient %s at %s V nominal declared in spec.domains (%s)", best, trimFloat(v, 0), who)
+	}
+	for _, d := range []*Domain{a, b} {
+		if d.Kind == "mains" {
+			v := c.mainsNominal(d)
+			return "mains", v, fmt.Sprintf("%s is connected to the supply network: mains transient at %s Vrms (overvoltage category %s)", d.ID, trimFloat(v, 0), c.out.Standard.OvervoltageCategory)
+		}
+	}
+	var mains *Domain
+	for _, d := range c.out.Domains {
+		if d.Kind == "mains" && (mains == nil || c.mainsNominal(d) > c.mainsNominal(mains)) {
+			mains = d
+		}
+	}
+	if mains == nil {
+		return "", 0, ""
+	}
+	v = c.mainsNominal(mains)
+	if hazardKind(a.Kind) || hazardKind(b.Kind) {
+		return "mains", v, fmt.Sprintf("primary circuit: galvanically connected to %s through the rectifier, so the mains transient at %s Vrms applies", mains.ID, trimFloat(v, 0))
+	}
+	return "secondary", v, fmt.Sprintf("both sides behind the isolating barrier from %s: secondary-circuit transient (one overvoltage category lower) at %s Vrms", mains.ID, trimFloat(v, 0))
+}
+
+// mainsNominal is the supply-network voltage a mains-kind domain carries:
+// the line voltage when it holds line nets (not its rectified bulk), else
+// its declared working voltage (a CAT III measuring circuit at 600 V).
+func (c *ctx) mainsNominal(d *Domain) float64 {
+	for _, n := range d.Nets {
+		if c.mains[n] {
+			return c.mainsVrms()
+		}
+	}
+	return d.WorkingVrms
 }
 
 // spanning lists the parts with pins in both domains: besides the isolation

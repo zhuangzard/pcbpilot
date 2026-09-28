@@ -1,0 +1,907 @@
+{
+ "schemaVersion": "1.4",
+ "projectId": "stress-hv-inverter",
+ "documentId": "page-1",
+ "_provenance": "hand-designed stress fixture: 400 VDC half-bridge leg — 2 × C3M0060065K (TO-247-4 Kelvin), UCC21520DW, 2 × MGJ2D051505SC, 30 A bus",
+ "components": [
+  {
+   "id": "cmp-J1",
+   "ref": "J1",
+   "device": {
+    "name": "MKDSP10N-2-10.16"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "HV+"
+    },
+    {
+     "number": "2",
+     "name": "HV-"
+    }
+   ]
+  },
+  {
+   "id": "cmp-C1",
+   "ref": "C1",
+   "device": {
+    "name": "DCLINK-MKP-20UF-800V"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "+"
+    },
+    {
+     "number": "2",
+     "name": "-"
+    }
+   ]
+  },
+  {
+   "id": "cmp-C2",
+   "ref": "C2",
+   "device": {
+    "name": "DCLINK-MKP-20UF-800V"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "+"
+    },
+    {
+     "number": "2",
+     "name": "-"
+    }
+   ]
+  },
+  {
+   "id": "cmp-Q1",
+   "ref": "Q1",
+   "device": {
+    "name": "C3M0060065K"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "D"
+    },
+    {
+     "number": "2",
+     "name": "S"
+    },
+    {
+     "number": "3",
+     "name": "KS"
+    },
+    {
+     "number": "4",
+     "name": "G"
+    }
+   ]
+  },
+  {
+   "id": "cmp-Q2",
+   "ref": "Q2",
+   "device": {
+    "name": "C3M0060065K"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "D"
+    },
+    {
+     "number": "2",
+     "name": "S"
+    },
+    {
+     "number": "3",
+     "name": "KS"
+    },
+    {
+     "number": "4",
+     "name": "G"
+    }
+   ]
+  },
+  {
+   "id": "cmp-J2",
+   "ref": "J2",
+   "device": {
+    "name": "TB-PHASE-2P-10.16"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "PH"
+    },
+    {
+     "number": "2",
+     "name": "PH2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-R1",
+   "ref": "R1",
+   "device": {
+    "name": "RC1206FR-074R7L"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-R2",
+   "ref": "R2",
+   "device": {
+    "name": "RC1206FR-074R7L"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-C3",
+   "ref": "C3",
+   "device": {
+    "name": "CL31B105KBHNNNE"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-C4",
+   "ref": "C4",
+   "device": {
+    "name": "CL31B105KBHNNNE"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-U2",
+   "ref": "U2",
+   "device": {
+    "name": "MGJ2D051505SC"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "+VIN"
+    },
+    {
+     "number": "2",
+     "name": "-VIN"
+    },
+    {
+     "number": "5",
+     "name": "+VO"
+    },
+    {
+     "number": "6",
+     "name": "0V"
+    },
+    {
+     "number": "7",
+     "name": "7"
+    }
+   ]
+  },
+  {
+   "id": "cmp-U3",
+   "ref": "U3",
+   "device": {
+    "name": "MGJ2D051505SC"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "+VIN"
+    },
+    {
+     "number": "2",
+     "name": "-VIN"
+    },
+    {
+     "number": "5",
+     "name": "+VO"
+    },
+    {
+     "number": "6",
+     "name": "0V"
+    },
+    {
+     "number": "7",
+     "name": "7"
+    }
+   ]
+  },
+  {
+   "id": "cmp-U1",
+   "ref": "U1",
+   "device": {
+    "name": "UCC21520DWR"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "INA"
+    },
+    {
+     "number": "2",
+     "name": "INB"
+    },
+    {
+     "number": "3",
+     "name": "VCCI"
+    },
+    {
+     "number": "4",
+     "name": "GND"
+    },
+    {
+     "number": "5",
+     "name": "DIS"
+    },
+    {
+     "number": "6",
+     "name": "DT"
+    },
+    {
+     "number": "7",
+     "name": "7"
+    },
+    {
+     "number": "8",
+     "name": "VCCI"
+    },
+    {
+     "number": "9",
+     "name": "VSSB"
+    },
+    {
+     "number": "10",
+     "name": "OUTB"
+    },
+    {
+     "number": "11",
+     "name": "VDDB"
+    },
+    {
+     "number": "12",
+     "name": "12"
+    },
+    {
+     "number": "13",
+     "name": "13"
+    },
+    {
+     "number": "14",
+     "name": "VSSA"
+    },
+    {
+     "number": "15",
+     "name": "OUTA"
+    },
+    {
+     "number": "16",
+     "name": "VDDA"
+    }
+   ]
+  },
+  {
+   "id": "cmp-J3",
+   "ref": "J3",
+   "device": {
+    "name": "PZ254V-11-04P"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "+5V"
+    },
+    {
+     "number": "2",
+     "name": "GND"
+    },
+    {
+     "number": "3",
+     "name": "PWM_H"
+    },
+    {
+     "number": "4",
+     "name": "PWM_L"
+    }
+   ]
+  },
+  {
+   "id": "cmp-C5",
+   "ref": "C5",
+   "device": {
+    "name": "CL21A106KAYNNNE"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-C6",
+   "ref": "C6",
+   "device": {
+    "name": "CL21B104KBCNNNC"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-R3",
+   "ref": "R3",
+   "device": {
+    "name": "0805W8F1002T5E"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-R4",
+   "ref": "R4",
+   "device": {
+    "name": "0805W8F2002T5E"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-R5",
+   "ref": "R5",
+   "device": {
+    "name": "0805W8F5101T5E"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  },
+  {
+   "id": "cmp-R6",
+   "ref": "R6",
+   "device": {
+    "name": "0805W8F5101T5E"
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1"
+    },
+    {
+     "number": "2",
+     "name": "2"
+    }
+   ]
+  }
+ ],
+ "nets": [
+  {
+   "id": "net-+5V",
+   "name": "+5V",
+   "role": "power"
+  },
+  {
+   "id": "net-DIS",
+   "name": "DIS",
+   "role": "signal"
+  },
+  {
+   "id": "net-DT",
+   "name": "DT",
+   "role": "signal"
+  },
+  {
+   "id": "net-GND",
+   "name": "GND",
+   "role": "ground"
+  },
+  {
+   "id": "net-G_H",
+   "name": "G_H",
+   "role": "signal"
+  },
+  {
+   "id": "net-G_L",
+   "name": "G_L",
+   "role": "signal"
+  },
+  {
+   "id": "net-HV+",
+   "name": "HV+",
+   "role": "power"
+  },
+  {
+   "id": "net-HV_GND",
+   "name": "HV_GND",
+   "role": "ground"
+  },
+  {
+   "id": "net-KS_H",
+   "name": "KS_H",
+   "role": "signal"
+  },
+  {
+   "id": "net-KS_L",
+   "name": "KS_L",
+   "role": "signal"
+  },
+  {
+   "id": "net-OUTA",
+   "name": "OUTA",
+   "role": "signal"
+  },
+  {
+   "id": "net-OUTB",
+   "name": "OUTB",
+   "role": "signal"
+  },
+  {
+   "id": "net-PHASE",
+   "name": "PHASE",
+   "role": "signal"
+  },
+  {
+   "id": "net-PWM_H",
+   "name": "PWM_H",
+   "role": "signal"
+  },
+  {
+   "id": "net-PWM_L",
+   "name": "PWM_L",
+   "role": "signal"
+  },
+  {
+   "id": "net-VDDA",
+   "name": "VDDA",
+   "role": "power"
+  },
+  {
+   "id": "net-VDDB",
+   "name": "VDDB",
+   "role": "power"
+  }
+ ],
+ "connections": [
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "1",
+   "netId": "net-HV+",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J1",
+   "pinNumber": "2",
+   "netId": "net-HV_GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C1",
+   "pinNumber": "1",
+   "netId": "net-HV+",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C1",
+   "pinNumber": "2",
+   "netId": "net-HV_GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C2",
+   "pinNumber": "1",
+   "netId": "net-HV+",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C2",
+   "pinNumber": "2",
+   "netId": "net-HV_GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-Q1",
+   "pinNumber": "1",
+   "netId": "net-HV+",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-Q1",
+   "pinNumber": "2",
+   "netId": "net-PHASE",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-Q1",
+   "pinNumber": "3",
+   "netId": "net-KS_H",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-Q1",
+   "pinNumber": "4",
+   "netId": "net-G_H",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-Q2",
+   "pinNumber": "1",
+   "netId": "net-PHASE",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-Q2",
+   "pinNumber": "2",
+   "netId": "net-HV_GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-Q2",
+   "pinNumber": "3",
+   "netId": "net-KS_L",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-Q2",
+   "pinNumber": "4",
+   "netId": "net-G_L",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J2",
+   "pinNumber": "1",
+   "netId": "net-PHASE",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J2",
+   "pinNumber": "2",
+   "netId": "net-PHASE",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-R1",
+   "pinNumber": "1",
+   "netId": "net-OUTA",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-R1",
+   "pinNumber": "2",
+   "netId": "net-G_H",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-R2",
+   "pinNumber": "1",
+   "netId": "net-OUTB",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-R2",
+   "pinNumber": "2",
+   "netId": "net-G_L",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C3",
+   "pinNumber": "1",
+   "netId": "net-VDDA",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C3",
+   "pinNumber": "2",
+   "netId": "net-KS_H",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C4",
+   "pinNumber": "1",
+   "netId": "net-VDDB",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C4",
+   "pinNumber": "2",
+   "netId": "net-KS_L",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U2",
+   "pinNumber": "1",
+   "netId": "net-+5V",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U2",
+   "pinNumber": "2",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U2",
+   "pinNumber": "5",
+   "netId": "net-VDDA",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U2",
+   "pinNumber": "6",
+   "netId": "net-KS_H",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U3",
+   "pinNumber": "1",
+   "netId": "net-+5V",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U3",
+   "pinNumber": "2",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U3",
+   "pinNumber": "5",
+   "netId": "net-VDDB",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U3",
+   "pinNumber": "6",
+   "netId": "net-KS_L",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "1",
+   "netId": "net-PWM_H",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "2",
+   "netId": "net-PWM_L",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "3",
+   "netId": "net-+5V",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "4",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "5",
+   "netId": "net-DIS",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "6",
+   "netId": "net-DT",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "8",
+   "netId": "net-+5V",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "9",
+   "netId": "net-KS_L",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "10",
+   "netId": "net-OUTB",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "11",
+   "netId": "net-VDDB",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "14",
+   "netId": "net-KS_H",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "15",
+   "netId": "net-OUTA",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-U1",
+   "pinNumber": "16",
+   "netId": "net-VDDA",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J3",
+   "pinNumber": "1",
+   "netId": "net-+5V",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J3",
+   "pinNumber": "2",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J3",
+   "pinNumber": "3",
+   "netId": "net-PWM_H",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-J3",
+   "pinNumber": "4",
+   "netId": "net-PWM_L",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C5",
+   "pinNumber": "1",
+   "netId": "net-+5V",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C5",
+   "pinNumber": "2",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C6",
+   "pinNumber": "1",
+   "netId": "net-+5V",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-C6",
+   "pinNumber": "2",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-R3",
+   "pinNumber": "1",
+   "netId": "net-DIS",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-R3",
+   "pinNumber": "2",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-R4",
+   "pinNumber": "1",
+   "netId": "net-DT",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-R4",
+   "pinNumber": "2",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-R5",
+   "pinNumber": "1",
+   "netId": "net-PWM_H",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-R5",
+   "pinNumber": "2",
+   "netId": "net-GND",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-R6",
+   "pinNumber": "1",
+   "netId": "net-PWM_L",
+   "kind": "netlist"
+  },
+  {
+   "componentId": "cmp-R6",
+   "pinNumber": "2",
+   "netId": "net-GND",
+   "kind": "netlist"
+  }
+ ]
+}
