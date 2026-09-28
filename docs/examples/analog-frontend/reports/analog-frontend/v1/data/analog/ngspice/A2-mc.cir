@@ -1,0 +1,620 @@
+* pcbpilot sim analog — block A2 opamp-follower (U1:A) mode mc
+* generated from schematic connectivity; rails from pcbpilot sim power (typical scenario)
+.include "pcbpilot-generic.lib"
+V_n__5v n__5v 0 DC 5
+C_c1 n_aaf 0 1e-07
+R_r1 n_sens_in n_div 100000
+R_r2 n_div 0 20000
+R_r3 n_div n_aaf 1000
+X_u1_a n_aaf n_buf_out n__5v 0 n_buf_out x_u1_a_oa x_u1_a_oi PCBPILOT_OPAMP params: gbw=1e+06 aol=398107 sr=600000 vos=0.0045 p2=3e+06 hp=0.025 hn=0.025 zout=100
+V_LINK_u1_a x_u1_a_oa x_u1_a_oi DC 0
+V_STIM n_sens_in 0 DC 15.027 AC 1
+.options noacct rshunt=1e12
+.control
+set filetype=ascii
+set wr_singlescale
+set wr_vecnames
+option numdgt=10
+alter c_c1 = 1.01416e-07
+alter r_r1 = 99957
+alter r_r2 = 19937.1
+alter r_r3 = 1000.23
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc000.txt v(n_buf_out)
+alter c_c1 = 1.04036e-07
+alter r_r1 = 100050
+alter r_r2 = 19968.1
+alter r_r3 = 1005.3
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc001.txt v(n_buf_out)
+alter c_c1 = 9.93184e-08
+alter r_r1 = 99647.1
+alter r_r2 = 20043.8
+alter r_r3 = 1004.62
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc002.txt v(n_buf_out)
+alter c_c1 = 1.02883e-07
+alter r_r1 = 100732
+alter r_r2 = 19950.8
+alter r_r3 = 999.228
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc003.txt v(n_buf_out)
+alter c_c1 = 1.01459e-07
+alter r_r1 = 99923.1
+alter r_r2 = 19964.1
+alter r_r3 = 1003.37
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc004.txt v(n_buf_out)
+alter c_c1 = 1.067e-07
+alter r_r1 = 100080
+alter r_r2 = 19953.8
+alter r_r3 = 1003.81
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc005.txt v(n_buf_out)
+alter c_c1 = 1.00725e-07
+alter r_r1 = 99488.6
+alter r_r2 = 20093.4
+alter r_r3 = 1004.05
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc006.txt v(n_buf_out)
+alter c_c1 = 1.02721e-07
+alter r_r1 = 100053
+alter r_r2 = 19965.8
+alter r_r3 = 997.436
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc007.txt v(n_buf_out)
+alter c_c1 = 9.76882e-08
+alter r_r1 = 100598
+alter r_r2 = 20033.4
+alter r_r3 = 996.485
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc008.txt v(n_buf_out)
+alter c_c1 = 1.0339e-07
+alter r_r1 = 100222
+alter r_r2 = 20052
+alter r_r3 = 1004.44
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc009.txt v(n_buf_out)
+alter c_c1 = 1.00839e-07
+alter r_r1 = 100432
+alter r_r2 = 20035.8
+alter r_r3 = 1002.78
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc010.txt v(n_buf_out)
+alter c_c1 = 9.22927e-08
+alter r_r1 = 99779.8
+alter r_r2 = 20030
+alter r_r3 = 1002.59
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc011.txt v(n_buf_out)
+alter c_c1 = 1.02042e-07
+alter r_r1 = 99861.1
+alter r_r2 = 20059.4
+alter r_r3 = 1001.77
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc012.txt v(n_buf_out)
+alter c_c1 = 1.04965e-07
+alter r_r1 = 99857.3
+alter r_r2 = 20076.7
+alter r_r3 = 997.118
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc013.txt v(n_buf_out)
+alter c_c1 = 9.65684e-08
+alter r_r1 = 99969
+alter r_r2 = 20010.2
+alter r_r3 = 998.766
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc014.txt v(n_buf_out)
+alter c_c1 = 1.04053e-07
+alter r_r1 = 99950.3
+alter r_r2 = 19930
+alter r_r3 = 997.468
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc015.txt v(n_buf_out)
+alter c_c1 = 1.00689e-07
+alter r_r1 = 99872.7
+alter r_r2 = 20010.2
+alter r_r3 = 997.228
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc016.txt v(n_buf_out)
+alter c_c1 = 1.00585e-07
+alter r_r1 = 99837.6
+alter r_r2 = 20123.2
+alter r_r3 = 997.874
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc017.txt v(n_buf_out)
+alter c_c1 = 9.69667e-08
+alter r_r1 = 100294
+alter r_r2 = 20036.9
+alter r_r3 = 998.326
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc018.txt v(n_buf_out)
+alter c_c1 = 1.006e-07
+alter r_r1 = 99642.8
+alter r_r2 = 19972.9
+alter r_r3 = 999.307
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc019.txt v(n_buf_out)
+alter c_c1 = 1.0515e-07
+alter r_r1 = 99907.3
+alter r_r2 = 19978.4
+alter r_r3 = 999.121
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc020.txt v(n_buf_out)
+alter c_c1 = 1.0482e-07
+alter r_r1 = 100314
+alter r_r2 = 20002.1
+alter r_r3 = 1002.12
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc021.txt v(n_buf_out)
+alter c_c1 = 9.5756e-08
+alter r_r1 = 100488
+alter r_r2 = 20058.5
+alter r_r3 = 999.228
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc022.txt v(n_buf_out)
+alter c_c1 = 9.9872e-08
+alter r_r1 = 99794.7
+alter r_r2 = 20074
+alter r_r3 = 1002.27
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc023.txt v(n_buf_out)
+alter c_c1 = 9.71899e-08
+alter r_r1 = 99673.2
+alter r_r2 = 20001.9
+alter r_r3 = 1005.85
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc024.txt v(n_buf_out)
+alter c_c1 = 9.30725e-08
+alter r_r1 = 99989.7
+alter r_r2 = 20019
+alter r_r3 = 1001.27
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc025.txt v(n_buf_out)
+alter c_c1 = 9.91356e-08
+alter r_r1 = 100138
+alter r_r2 = 19843.4
+alter r_r3 = 1001.8
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc026.txt v(n_buf_out)
+alter c_c1 = 9.58159e-08
+alter r_r1 = 100423
+alter r_r2 = 19904.3
+alter r_r3 = 1000.24
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc027.txt v(n_buf_out)
+alter c_c1 = 9.84652e-08
+alter r_r1 = 100226
+alter r_r2 = 19931.9
+alter r_r3 = 1002.45
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc028.txt v(n_buf_out)
+alter c_c1 = 1.02647e-07
+alter r_r1 = 99944.3
+alter r_r2 = 20046.1
+alter r_r3 = 1004.12
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc029.txt v(n_buf_out)
+alter c_c1 = 1.00933e-07
+alter r_r1 = 99404.6
+alter r_r2 = 20059.2
+alter r_r3 = 1003.74
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc030.txt v(n_buf_out)
+alter c_c1 = 9.48909e-08
+alter r_r1 = 99943.4
+alter r_r2 = 20055.4
+alter r_r3 = 1002.64
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc031.txt v(n_buf_out)
+alter c_c1 = 9.59814e-08
+alter r_r1 = 100576
+alter r_r2 = 19856.9
+alter r_r3 = 994.38
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc032.txt v(n_buf_out)
+alter c_c1 = 1.01429e-07
+alter r_r1 = 99710.3
+alter r_r2 = 20050.5
+alter r_r3 = 1006.52
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc033.txt v(n_buf_out)
+alter c_c1 = 1.00006e-07
+alter r_r1 = 100094
+alter r_r2 = 19950
+alter r_r3 = 997.648
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc034.txt v(n_buf_out)
+alter c_c1 = 1.01939e-07
+alter r_r1 = 99944.8
+alter r_r2 = 19964.2
+alter r_r3 = 999.705
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc035.txt v(n_buf_out)
+alter c_c1 = 1.00958e-07
+alter r_r1 = 100082
+alter r_r2 = 19912.5
+alter r_r3 = 997.82
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc036.txt v(n_buf_out)
+alter c_c1 = 9.95972e-08
+alter r_r1 = 100242
+alter r_r2 = 20050
+alter r_r3 = 997.758
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc037.txt v(n_buf_out)
+alter c_c1 = 1.01831e-07
+alter r_r1 = 100398
+alter r_r2 = 19974.2
+alter r_r3 = 991.015
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc038.txt v(n_buf_out)
+alter c_c1 = 1.0991e-07
+alter r_r1 = 99764.9
+alter r_r2 = 19967.8
+alter r_r3 = 997.689
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc039.txt v(n_buf_out)
+alter c_c1 = 1.04934e-07
+alter r_r1 = 99771.5
+alter r_r2 = 20061.8
+alter r_r3 = 1002.96
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc040.txt v(n_buf_out)
+alter c_c1 = 1.00721e-07
+alter r_r1 = 100403
+alter r_r2 = 20058.2
+alter r_r3 = 999.63
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc041.txt v(n_buf_out)
+alter c_c1 = 1.02025e-07
+alter r_r1 = 99774.1
+alter r_r2 = 19989.5
+alter r_r3 = 997.679
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc042.txt v(n_buf_out)
+alter c_c1 = 9.81963e-08
+alter r_r1 = 100241
+alter r_r2 = 19981.8
+alter r_r3 = 998.441
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc043.txt v(n_buf_out)
+alter c_c1 = 9.93585e-08
+alter r_r1 = 100179
+alter r_r2 = 19952.3
+alter r_r3 = 999.104
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc044.txt v(n_buf_out)
+alter c_c1 = 9.78926e-08
+alter r_r1 = 99657.8
+alter r_r2 = 19962.9
+alter r_r3 = 1000.79
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc045.txt v(n_buf_out)
+alter c_c1 = 1.01682e-07
+alter r_r1 = 99611.6
+alter r_r2 = 19996.4
+alter r_r3 = 1002.92
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc046.txt v(n_buf_out)
+alter c_c1 = 9.71925e-08
+alter r_r1 = 100067
+alter r_r2 = 19994
+alter r_r3 = 1002.34
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc047.txt v(n_buf_out)
+alter c_c1 = 9.87917e-08
+alter r_r1 = 100161
+alter r_r2 = 20094
+alter r_r3 = 1002.72
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc048.txt v(n_buf_out)
+alter c_c1 = 1.01335e-07
+alter r_r1 = 100335
+alter r_r2 = 20039.4
+alter r_r3 = 1000.66
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc049.txt v(n_buf_out)
+alter c_c1 = 1.00565e-07
+alter r_r1 = 100240
+alter r_r2 = 19960.3
+alter r_r3 = 1001.2
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc050.txt v(n_buf_out)
+alter c_c1 = 9.9061e-08
+alter r_r1 = 99571.8
+alter r_r2 = 19953.6
+alter r_r3 = 1003.22
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc051.txt v(n_buf_out)
+alter c_c1 = 1.06723e-07
+alter r_r1 = 100197
+alter r_r2 = 20048.2
+alter r_r3 = 995.773
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc052.txt v(n_buf_out)
+alter c_c1 = 1.01876e-07
+alter r_r1 = 99716.1
+alter r_r2 = 20050.4
+alter r_r3 = 1002.5
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc053.txt v(n_buf_out)
+alter c_c1 = 9.54033e-08
+alter r_r1 = 100109
+alter r_r2 = 20061.3
+alter r_r3 = 994.811
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc054.txt v(n_buf_out)
+alter c_c1 = 9.94194e-08
+alter r_r1 = 100064
+alter r_r2 = 19970
+alter r_r3 = 1000.7
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc055.txt v(n_buf_out)
+alter c_c1 = 9.3325e-08
+alter r_r1 = 100153
+alter r_r2 = 20079.1
+alter r_r3 = 1000.99
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc056.txt v(n_buf_out)
+alter c_c1 = 1.00527e-07
+alter r_r1 = 100114
+alter r_r2 = 20074.4
+alter r_r3 = 999.36
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc057.txt v(n_buf_out)
+alter c_c1 = 9.8088e-08
+alter r_r1 = 99000
+alter r_r2 = 20068
+alter r_r3 = 1005.48
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc058.txt v(n_buf_out)
+alter c_c1 = 1.00012e-07
+alter r_r1 = 99490.1
+alter r_r2 = 19903.9
+alter r_r3 = 997.995
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc059.txt v(n_buf_out)
+alter c_c1 = 1.00929e-07
+alter r_r1 = 100071
+alter r_r2 = 20054
+alter r_r3 = 1003.48
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc060.txt v(n_buf_out)
+alter c_c1 = 9.72214e-08
+alter r_r1 = 100175
+alter r_r2 = 20071.6
+alter r_r3 = 991.995
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc061.txt v(n_buf_out)
+alter c_c1 = 9.53037e-08
+alter r_r1 = 99287.4
+alter r_r2 = 19936.6
+alter r_r3 = 1002.15
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc062.txt v(n_buf_out)
+alter c_c1 = 9.83208e-08
+alter r_r1 = 100177
+alter r_r2 = 19952.9
+alter r_r3 = 1004.32
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc063.txt v(n_buf_out)
+alter c_c1 = 1.02349e-07
+alter r_r1 = 99795.8
+alter r_r2 = 20069.7
+alter r_r3 = 1005.64
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc064.txt v(n_buf_out)
+alter c_c1 = 9.35674e-08
+alter r_r1 = 99942.3
+alter r_r2 = 20055.3
+alter r_r3 = 997.205
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc065.txt v(n_buf_out)
+alter c_c1 = 9.70242e-08
+alter r_r1 = 99961.6
+alter r_r2 = 19932.1
+alter r_r3 = 1002.4
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc066.txt v(n_buf_out)
+alter c_c1 = 9.88022e-08
+alter r_r1 = 100063
+alter r_r2 = 19939
+alter r_r3 = 1003.04
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc067.txt v(n_buf_out)
+alter c_c1 = 9.50144e-08
+alter r_r1 = 100268
+alter r_r2 = 20010
+alter r_r3 = 997.536
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc068.txt v(n_buf_out)
+alter c_c1 = 9.82726e-08
+alter r_r1 = 100113
+alter r_r2 = 20042.6
+alter r_r3 = 1007.24
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc069.txt v(n_buf_out)
+alter c_c1 = 1.03186e-07
+alter r_r1 = 100506
+alter r_r2 = 20049.7
+alter r_r3 = 999.237
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc070.txt v(n_buf_out)
+alter c_c1 = 9.74871e-08
+alter r_r1 = 99770.9
+alter r_r2 = 20055.4
+alter r_r3 = 1005.14
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc071.txt v(n_buf_out)
+alter c_c1 = 9.96806e-08
+alter r_r1 = 100246
+alter r_r2 = 20049.4
+alter r_r3 = 1005.04
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc072.txt v(n_buf_out)
+alter c_c1 = 1.00694e-07
+alter r_r1 = 100410
+alter r_r2 = 19932
+alter r_r3 = 1000.91
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc073.txt v(n_buf_out)
+alter c_c1 = 1.00969e-07
+alter r_r1 = 99958.5
+alter r_r2 = 19923.7
+alter r_r3 = 1000.24
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc074.txt v(n_buf_out)
+alter c_c1 = 9.59419e-08
+alter r_r1 = 100243
+alter r_r2 = 20029.5
+alter r_r3 = 996.824
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc075.txt v(n_buf_out)
+alter c_c1 = 9.74754e-08
+alter r_r1 = 100364
+alter r_r2 = 20037.3
+alter r_r3 = 1003.76
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc076.txt v(n_buf_out)
+alter c_c1 = 9.7893e-08
+alter r_r1 = 100142
+alter r_r2 = 19981.3
+alter r_r3 = 1004.46
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc077.txt v(n_buf_out)
+alter c_c1 = 1.06273e-07
+alter r_r1 = 99803.3
+alter r_r2 = 19913.4
+alter r_r3 = 997.912
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc078.txt v(n_buf_out)
+alter c_c1 = 9.84498e-08
+alter r_r1 = 99401.6
+alter r_r2 = 20041.2
+alter r_r3 = 1004.96
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc079.txt v(n_buf_out)
+alter c_c1 = 9.63265e-08
+alter r_r1 = 99562.4
+alter r_r2 = 20029
+alter r_r3 = 998.285
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc080.txt v(n_buf_out)
+alter c_c1 = 1.03473e-07
+alter r_r1 = 100490
+alter r_r2 = 19864.2
+alter r_r3 = 1003.39
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc081.txt v(n_buf_out)
+alter c_c1 = 9.89955e-08
+alter r_r1 = 99705.6
+alter r_r2 = 20011.2
+alter r_r3 = 995.518
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc082.txt v(n_buf_out)
+alter c_c1 = 1.0287e-07
+alter r_r1 = 99918.8
+alter r_r2 = 19922
+alter r_r3 = 1002.15
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc083.txt v(n_buf_out)
+alter c_c1 = 1.02938e-07
+alter r_r1 = 99848.5
+alter r_r2 = 19920.4
+alter r_r3 = 1000.05
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc084.txt v(n_buf_out)
+alter c_c1 = 1.02753e-07
+alter r_r1 = 100076
+alter r_r2 = 20044.5
+alter r_r3 = 1001.54
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc085.txt v(n_buf_out)
+alter c_c1 = 1.0185e-07
+alter r_r1 = 99266.7
+alter r_r2 = 20069
+alter r_r3 = 996.026
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc086.txt v(n_buf_out)
+alter c_c1 = 1.00341e-07
+alter r_r1 = 99885.5
+alter r_r2 = 19946
+alter r_r3 = 996.342
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc087.txt v(n_buf_out)
+alter c_c1 = 9.26634e-08
+alter r_r1 = 99503.5
+alter r_r2 = 19950.7
+alter r_r3 = 998.884
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc088.txt v(n_buf_out)
+alter c_c1 = 1.03913e-07
+alter r_r1 = 99641.1
+alter r_r2 = 20012.5
+alter r_r3 = 1000.36
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc089.txt v(n_buf_out)
+alter c_c1 = 9.85019e-08
+alter r_r1 = 99630.3
+alter r_r2 = 20105.1
+alter r_r3 = 999.837
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc090.txt v(n_buf_out)
+alter c_c1 = 1.03531e-07
+alter r_r1 = 99387.1
+alter r_r2 = 20086.4
+alter r_r3 = 1003.26
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc091.txt v(n_buf_out)
+alter c_c1 = 9.9033e-08
+alter r_r1 = 100132
+alter r_r2 = 20103
+alter r_r3 = 998.146
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc092.txt v(n_buf_out)
+alter c_c1 = 9.90804e-08
+alter r_r1 = 100680
+alter r_r2 = 19968.1
+alter r_r3 = 997.423
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc093.txt v(n_buf_out)
+alter c_c1 = 1.00063e-07
+alter r_r1 = 100154
+alter r_r2 = 20048.2
+alter r_r3 = 1002.2
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc094.txt v(n_buf_out)
+alter c_c1 = 1.04332e-07
+alter r_r1 = 100107
+alter r_r2 = 20006.1
+alter r_r3 = 999.482
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc095.txt v(n_buf_out)
+alter c_c1 = 9.82855e-08
+alter r_r1 = 100107
+alter r_r2 = 19928.1
+alter r_r3 = 1001.57
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc096.txt v(n_buf_out)
+alter c_c1 = 1.05457e-07
+alter r_r1 = 100004
+alter r_r2 = 20050.7
+alter r_r3 = 1001.55
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc097.txt v(n_buf_out)
+alter c_c1 = 1.02071e-07
+alter r_r1 = 99562.2
+alter r_r2 = 20057.5
+alter r_r3 = 996.298
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc098.txt v(n_buf_out)
+alter c_c1 = 1.01975e-07
+alter r_r1 = 100462
+alter r_r2 = 19937.6
+alter r_r3 = 1003.01
+ac dec 40 0.0900877 2e+07
+wrdata A2-mc-mc099.txt v(n_buf_out)
+quit
+.endc
+.end

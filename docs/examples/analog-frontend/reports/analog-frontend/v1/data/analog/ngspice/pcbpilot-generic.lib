@@ -1,0 +1,89 @@
+* pcbpilot generic analog SPICE library (ngspice). Canonical copy:
+*   .agents/skills/pcbpilot/references/spice-models/pcbpilot-generic.lib
+* Embedded mirror: pkg/analogsim/models/pcbpilot-generic.lib (a test keeps them identical).
+* Every subcircuit is BEHAVIOURAL: it reproduces the datasheet-level numbers
+* pcbpilot sim analog reads from analog-models.json (GBW, slew, Aol, Vos,
+* output headroom, output resistance); it is not a transistor-level model.
+
+* ---------------------------------------------------------------------------
+* PCBPILOT_OPAMP  inp inn vp vn out oa oi
+*   Two-pole voltage-feedback op-amp. Stage 1: bounded transconductance
+*   (slew limit = imax/C1) into R1||C1 (DC gain aol, unity gain at gbw).
+*   Stage 1 is clamped at the output swing limits (vp-hp, vn+hn), so the
+*   model clips and recovers like a rail-limited amplifier. Stage 2: second
+*   pole p2 (sets the unity-gain phase margin). oa = ideal (zero-impedance)
+*   output; oi = the node behind zout. Normal use connects oa to oi with a
+*   0 V source; loop-gain analysis puts the AC injection source there
+*   (T = -V(oa)/V(oi), exact because oa is an ideal source).
+* ---------------------------------------------------------------------------
+.subckt PCBPILOT_OPAMP inp inn vp vn out oa oi params: gbw=1e6 aol=1e5 sr=1e6 vos=0 rin=1e12 p2=3e6 hp=0.05 hn=0.05 zout=50
+.param gm=1e-3
+.param c1v={gm/(6.283185307*gbw)}
+.param imax={sr*c1v}
+.param c2v={1/(6.283185307*p2*1e3)}
+Vos inp ip DC {vos}
+Rin ip inn {rin}
+Bmid mid 0 V = (V(vp)+V(vn))/2
+Bg1 mid n1 I = max(min(V(ip,inn)*{gm}, {imax}), -{imax})
+R1 n1 mid {aol/gm}
+C1 n1 mid {c1v}
+Bhi hi 0 V = V(vp)-{hp}
+Blo lo 0 V = V(vn)+{hn}
+Bclh n1 hi I = max(V(n1,hi),0)*10
+Bcll lo n1 I = max(V(lo,n1),0)*10
+E2 n2 0 n1 0 1
+R2 n2 n3 1k
+C2 n3 0 {c2v}
+Eo oa 0 n3 0 1
+Ro oi out {zout}
+.ends PCBPILOT_OPAMP
+
+* ---------------------------------------------------------------------------
+* PCBPILOT_COMP_OD  inp inn vp vn out
+*   Open-drain / open-collector comparator: high-gain fast front end, the
+*   output is a switch from out to vn (ron) that closes when V(inp) < V(inn).
+*   Needs an external pull-up like the real part.
+* ---------------------------------------------------------------------------
+.subckt PCBPILOT_COMP_OD inp inn vp vn out params: vos=0 ron=20 tdel=1e-7
+Vos inp ip DC {vos}
+Bd d 0 V = tanh((V(inn)-V(ip))*1e4)
+Rd d dd 1k
+Cd dd 0 {tdel/1e3}
+Sod out vn dd 0 SWOD
+.model SWOD SW(VT=0 VH=0 RON={ron} ROFF=1e10)
+.ends PCBPILOT_COMP_OD
+
+* ---------------------------------------------------------------------------
+* PCBPILOT_VAMP  inp inn ref vp vn out
+*   Fixed-gain differential amplifier (current-sense amplifier, instrument-
+*   ation amplifier with its gain already computed from RG): out = ref +
+*   gain*(V(inp)-V(inn)), single pole at bw, clipped to the output swing.
+* ---------------------------------------------------------------------------
+.subckt PCBPILOT_VAMP inp inn ref vp vn out params: gain=1 bw=1e5 hp=0.05 hn=0.05 zout=10 vos=0
+B1 n1 0 V = {gain}*(V(inp,inn)+{vos})
+R1 n1 n2 1k
+C1 n2 0 {1/(6.283185307*bw*1e3)}
+Bo oi 0 V = min(max(V(n2)+V(ref), V(vn)+{hn}), V(vp)-{hp})
+Ro oi out {zout}
+Rinp inp 0 1e9
+Rinn inn 0 1e9
+.ends PCBPILOT_VAMP
+
+* ---------------------------------------------------------------------------
+* PCBPILOT_SHUNTREF  k a
+*   Shunt voltage reference (TL431 with REF tied to K, LM4040, ...): above
+*   vz it sinks gm per volt (dynamic impedance 1/gm), below it a leakage.
+* ---------------------------------------------------------------------------
+.subckt PCBPILOT_SHUNTREF k a params: vz=2.5 gm=50
+B1 k a I = max(V(k,a)-{vz},0)*{gm} + 1e-9*V(k,a)
+.ends PCBPILOT_SHUNTREF
+
+* ---------------------------------------------------------------------------
+* Generic discrete models (used when analog-models.json / power-models.json
+* has no part-specific numbers; results are marked "assumed").
+* ---------------------------------------------------------------------------
+.model PCBPILOT_D D(IS=2.52e-9 N=1.752 RS=0.568 CJO=4p BV=100)
+.model PCBPILOT_NPN NPN(IS=6.734e-15 BF=200 BR=0.74 VAF=74 CJE=4.5p CJC=3.6p TF=301p)
+.model PCBPILOT_PNP PNP(IS=1.41e-15 BF=180 BR=4 VAF=18.7 CJE=8p CJC=4.5p TF=603p)
+.model PCBPILOT_NMOS NMOS(LEVEL=1 VTO=1.5 KP=0.1 LAMBDA=0.01 CGSO=2e-11 CGDO=5e-12)
+.model PCBPILOT_PMOS PMOS(LEVEL=1 VTO=-1.5 KP=0.1 LAMBDA=0.01 CGSO=2e-11 CGDO=5e-12)

@@ -1,0 +1,1314 @@
+{
+  "schemaVersion": 1,
+  "generator": "pcbpilot intent derive",
+  "sources": {
+    "schematic": [
+      "../../../testdata/analog/frontend/sch-frontend.json",
+      "../../../testdata/analog/frontend/values.json"
+    ],
+    "sim": "sim.json (in-process pcbpilot sim power)",
+    "spec": "",
+    "models": [
+      "../../../.agents/skills/pcbpilot/references/power-models.json"
+    ]
+  },
+  "standard": {
+    "name": "IPC-2221B",
+    "insulation": "functional",
+    "mop": "",
+    "mopCount": 0,
+    "pollutionDegree": 2,
+    "materialGroup": "IIIa",
+    "altitudeM": 2000,
+    "overvoltageCategory": "II",
+    "coated": false,
+    "defaulted": [
+      "name",
+      "insulation",
+      "pollutionDegree",
+      "materialGroup",
+      "altitudeM",
+      "overvoltageCategory"
+    ]
+  },
+  "blocks": [
+    {
+      "id": "POWER_IN",
+      "function": "power-input",
+      "core": "J2",
+      "parts": [
+        "J2",
+        "R7"
+      ],
+      "nets": [
+        "+5V",
+        "VREF"
+      ],
+      "summary": "J2 (+5V, terminal); 1.69 mA worst (peak)",
+      "notes": [],
+      "domain": "SELV_5V",
+      "powerW": 0.0007,
+      "why": [
+        "input sources (sim connector-source): J1, J2",
+        "R7: shares +5V with J2"
+      ]
+    },
+    {
+      "id": "CONN_J1",
+      "function": "connector",
+      "core": "J1",
+      "parts": [
+        "J1",
+        "R1"
+      ],
+      "nets": [
+        "SENS_IN"
+      ],
+      "summary": "J1 (KF301-5.0-2P): SENS_IN",
+      "notes": [],
+      "domain": "SELV_5V",
+      "why": [
+        "pcbauto core J1 (interface block, 2 parts)",
+        "R1: signal — shares signal nets with J1"
+      ]
+    },
+    {
+      "id": "CONN_J3",
+      "function": "connector",
+      "core": "J3",
+      "parts": [
+        "J3"
+      ],
+      "nets": [],
+      "summary": "J3 (HDR-1x4): ADC_CLK, ADC_CS, ADC_DOUT",
+      "notes": [],
+      "domain": "SELV_5V",
+      "why": [
+        "pcbauto core J3 (interface block, 1 parts)"
+      ]
+    },
+    {
+      "id": "IC_U1",
+      "function": "other",
+      "core": "U1",
+      "parts": [
+        "U1",
+        "C1",
+        "C2",
+        "C3",
+        "C6",
+        "C7",
+        "R2",
+        "R3",
+        "R4",
+        "R5",
+        "R6"
+      ],
+      "nets": [
+        "AAF",
+        "BUF_OUT",
+        "DIV",
+        "FILT_OUT",
+        "SK_P",
+        "SK_X"
+      ],
+      "summary": "U1 (MCP6002T-I/SN)",
+      "notes": [],
+      "domain": "SELV_5V",
+      "powerW": 0.0017,
+      "why": [
+        "pcbauto core U1 (logic block, 11 parts)",
+        "C6: decap — decouples +5V at U1.8",
+        "C7: decap — decouples +5V at U1.8",
+        "C1: pin-filter — filters U1.3 (AAF)",
+        "C3: pin-filter — filters U1.5 (SK_P)",
+        "C2: signal — shares signal nets with U1",
+        "R3: signal — shares signal nets with U1",
+        "R4: signal — shares signal nets with U1",
+        "R5: signal — shares signal nets with U1",
+        "R6: signal — shares signal nets with U1",
+        "R2: chain — connected through R3"
+      ]
+    },
+    {
+      "id": "IC_U2",
+      "function": "other",
+      "core": "U2",
+      "parts": [
+        "U2",
+        "C4",
+        "C5"
+      ],
+      "nets": [
+        "ADC_CLK",
+        "ADC_CS",
+        "ADC_DOUT",
+        "ADC_IN"
+      ],
+      "summary": "U2 (MCP3201-CI/SN)",
+      "notes": [],
+      "domain": "SELV_5V",
+      "powerW": 0.0031,
+      "why": [
+        "pcbauto core U2 (power block, 3 parts)",
+        "C5: decap — decouples VREF at U2.1",
+        "C4: pin-filter — filters U2.2 (ADC_IN)"
+      ]
+    },
+    {
+      "id": "IC_U3",
+      "function": "other",
+      "core": "U3",
+      "parts": [
+        "U3"
+      ],
+      "nets": [],
+      "summary": "U3 (LM4040DIM3-4.1/NOPB)",
+      "notes": [],
+      "domain": "SELV_5V",
+      "powerW": 0.0029,
+      "why": [
+        "pcbauto core U3 (logic block, 1 parts)"
+      ]
+    }
+  ],
+  "domains": [
+    {
+      "id": "SELV_5V",
+      "kind": "SELV",
+      "nets": [
+        "+5V",
+        "AAF",
+        "ADC_CLK",
+        "ADC_CS",
+        "ADC_DOUT",
+        "ADC_IN",
+        "BUF_OUT",
+        "DIV",
+        "FILT_OUT",
+        "GND",
+        "SENS_IN",
+        "SK_P",
+        "SK_X",
+        "VREF"
+      ],
+      "reference": "GND",
+      "workingVrms": 5,
+      "workingVpeak": 5,
+      "parts": [
+        "C1",
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6",
+        "C7",
+        "J1",
+        "J2",
+        "J3",
+        "R1",
+        "R2",
+        "R3",
+        "R4",
+        "R5",
+        "R6",
+        "R7",
+        "U1",
+        "U2",
+        "U3"
+      ],
+      "why": [
+        "≤ 60 V DC / 30 Vrms: SELV (IEC 61140 / 62368-1 ES1)"
+      ]
+    }
+  ],
+  "nets": {
+    "+5V": {
+      "role": "power",
+      "domain": "SELV_5V",
+      "block": "POWER_IN",
+      "voltage": {
+        "nom": 5,
+        "min": 5,
+        "max": 5,
+        "peak": 5
+      },
+      "currentA": 0.00169,
+      "currentSource": "simulated",
+      "pins": [
+        {
+          "ref": "C6",
+          "pin": "1",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "1",
+          "scenario": "typical"
+        },
+        {
+          "ref": "C7",
+          "pin": "1",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "1",
+          "scenario": "typical"
+        },
+        {
+          "ref": "J2",
+          "pin": "1",
+          "currentA": 0.00169,
+          "dir": "source",
+          "name": "1",
+          "scenario": "peak"
+        },
+        {
+          "ref": "R7",
+          "pin": "1",
+          "currentA": 0.00085,
+          "dir": "sink",
+          "name": "1",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U1",
+          "pin": "8",
+          "currentA": 0.00034,
+          "dir": "sink",
+          "name": "VDD",
+          "scenario": "peak"
+        },
+        {
+          "ref": "U2",
+          "pin": "8",
+          "currentA": 0.0005,
+          "dir": "sink",
+          "name": "VDD",
+          "scenario": "peak"
+        }
+      ],
+      "widthMil": {
+        "outer": 10,
+        "inner": 10,
+        "min": 10
+      },
+      "viasPerTransition": 1,
+      "clearanceMil": 6,
+      "impedanceOhm": 0,
+      "diffPair": "",
+      "lengthGroup": "",
+      "netClass": "POWER",
+      "why": [
+        "sim: nom 5 V (typical), envelope 5…5 V over 3 scenario(s)",
+        "1 scenario(s) with the rail unpowered (\u003c 10 % of its maximum) left out of min/max",
+        "simulated worst/peak: 0.002A",
+        "IPC-2221B 5 V peak needs ≤ 3.9 mil: fab clearance 6.0 mil governs"
+      ],
+      "scenario": "worst/peak",
+      "padCount": 6,
+      "priority": 4
+    },
+    "AAF": {
+      "role": "signal",
+      "domain": "SELV_5V",
+      "block": "IC_U1",
+      "voltage": {
+        "nom": 0,
+        "min": 0,
+        "max": 0,
+        "peak": 0
+      },
+      "currentA": 0,
+      "currentSource": "simulated",
+      "pins": [
+        {
+          "ref": "C1",
+          "pin": "1",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "1",
+          "scenario": "typical"
+        },
+        {
+          "ref": "R3",
+          "pin": "2",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "2",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U1",
+          "pin": "3",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "INA+",
+          "scenario": "typical"
+        }
+      ],
+      "widthMil": {
+        "outer": 6,
+        "inner": 6,
+        "min": 6
+      },
+      "viasPerTransition": 1,
+      "clearanceMil": 6,
+      "impedanceOhm": 0,
+      "diffPair": "",
+      "lengthGroup": "",
+      "netClass": "SIGNAL",
+      "why": [
+        "sim: nom 0 V (typical), envelope 0…0 V over 4 scenario(s)",
+        "simulated worst/typical: 0.000A"
+      ],
+      "scenario": "worst/typical",
+      "padCount": 3,
+      "priority": 5
+    },
+    "ADC_CLK": {
+      "role": "clock",
+      "domain": "SELV_5V",
+      "block": "IC_U2",
+      "voltage": {
+        "nom": 0,
+        "min": 0,
+        "max": 5,
+        "peak": 5
+      },
+      "currentA": 0,
+      "currentSource": "simulated",
+      "pins": [
+        {
+          "ref": "J3",
+          "pin": "3",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "3",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U2",
+          "pin": "7",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "CLK",
+          "scenario": "typical"
+        }
+      ],
+      "widthMil": {
+        "outer": 6,
+        "inner": 6,
+        "min": 6
+      },
+      "viasPerTransition": 1,
+      "clearanceMil": 6,
+      "impedanceOhm": 0,
+      "diffPair": "",
+      "lengthGroup": "",
+      "netClass": "SIGNAL",
+      "why": [
+        "no DC path in the simulation (floating signal): bounded by the supply rails of the connected parts, ≤ 5 V",
+        "simulation: no DC path (floating)",
+        "simulated worst/typical: 0.000A",
+        "IPC-2221B 5 V peak needs ≤ 3.9 mil: fab clearance 6.0 mil governs"
+      ],
+      "floating": true,
+      "scenario": "worst/typical",
+      "padCount": 2
+    },
+    "ADC_CS": {
+      "role": "analog",
+      "domain": "SELV_5V",
+      "block": "IC_U2",
+      "voltage": {
+        "nom": 0,
+        "min": 0,
+        "max": 5,
+        "peak": 5
+      },
+      "currentA": 0,
+      "currentSource": "simulated",
+      "pins": [
+        {
+          "ref": "J3",
+          "pin": "1",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "1",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U2",
+          "pin": "5",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "CS/SHDN",
+          "scenario": "typical"
+        }
+      ],
+      "widthMil": {
+        "outer": 6,
+        "inner": 6,
+        "min": 6
+      },
+      "viasPerTransition": 1,
+      "clearanceMil": 6,
+      "impedanceOhm": 0,
+      "diffPair": "",
+      "lengthGroup": "",
+      "netClass": "SIGNAL",
+      "why": [
+        "no DC path in the simulation (floating signal): bounded by the supply rails of the connected parts, ≤ 5 V",
+        "simulation: no DC path (floating)",
+        "simulated worst/typical: 0.000A",
+        "IPC-2221B 5 V peak needs ≤ 3.9 mil: fab clearance 6.0 mil governs"
+      ],
+      "floating": true,
+      "scenario": "worst/typical",
+      "padCount": 2,
+      "priority": 3
+    },
+    "ADC_DOUT": {
+      "role": "analog",
+      "domain": "SELV_5V",
+      "block": "IC_U2",
+      "voltage": {
+        "nom": 0,
+        "min": 0,
+        "max": 5,
+        "peak": 5
+      },
+      "currentA": 0,
+      "currentSource": "simulated",
+      "pins": [
+        {
+          "ref": "J3",
+          "pin": "2",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "2",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U2",
+          "pin": "6",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "DOUT",
+          "scenario": "typical"
+        }
+      ],
+      "widthMil": {
+        "outer": 6,
+        "inner": 6,
+        "min": 6
+      },
+      "viasPerTransition": 1,
+      "clearanceMil": 6,
+      "impedanceOhm": 0,
+      "diffPair": "",
+      "lengthGroup": "",
+      "netClass": "SIGNAL",
+      "why": [
+        "no DC path in the simulation (floating signal): bounded by the supply rails of the connected parts, ≤ 5 V",
+        "simulation: no DC path (floating)",
+        "simulated worst/typical: 0.000A",
+        "IPC-2221B 5 V peak needs ≤ 3.9 mil: fab clearance 6.0 mil governs"
+      ],
+      "floating": true,
+      "scenario": "worst/typical",
+      "padCount": 2,
+      "priority": 3
+    },
+    "ADC_IN": {
+      "role": "analog",
+      "domain": "SELV_5V",
+      "block": "IC_U2",
+      "voltage": {
+        "nom": 0,
+        "min": 0,
+        "max": 0,
+        "peak": 0
+      },
+      "currentA": 0,
+      "currentSource": "simulated",
+      "pins": [
+        {
+          "ref": "C4",
+          "pin": "1",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "1",
+          "scenario": "typical"
+        },
+        {
+          "ref": "R6",
+          "pin": "2",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "2",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U2",
+          "pin": "2",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "IN+",
+          "scenario": "typical"
+        }
+      ],
+      "widthMil": {
+        "outer": 6,
+        "inner": 6,
+        "min": 6
+      },
+      "viasPerTransition": 1,
+      "clearanceMil": 6,
+      "impedanceOhm": 0,
+      "diffPair": "",
+      "lengthGroup": "",
+      "netClass": "SIGNAL",
+      "why": [
+        "sim: nom 0 V (typical), envelope 0…0 V over 4 scenario(s)",
+        "simulated worst/typical: 0.000A"
+      ],
+      "scenario": "worst/typical",
+      "padCount": 3,
+      "priority": 3
+    },
+    "BUF_OUT": {
+      "role": "signal",
+      "domain": "SELV_5V",
+      "block": "IC_U1",
+      "voltage": {
+        "nom": 0,
+        "min": 0,
+        "max": 0,
+        "peak": 0
+      },
+      "currentA": 0,
+      "currentSource": "simulated",
+      "pins": [
+        {
+          "ref": "R4",
+          "pin": "1",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "1",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U1",
+          "pin": "1",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "OUTA",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U1",
+          "pin": "2",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "INA-",
+          "scenario": "typical"
+        }
+      ],
+      "widthMil": {
+        "outer": 6,
+        "inner": 6,
+        "min": 6
+      },
+      "viasPerTransition": 1,
+      "clearanceMil": 6,
+      "impedanceOhm": 0,
+      "diffPair": "",
+      "lengthGroup": "",
+      "netClass": "SIGNAL",
+      "why": [
+        "sim: nom 0 V (typical), envelope 0…0 V over 4 scenario(s)",
+        "simulated worst/typical: 0.000A"
+      ],
+      "scenario": "worst/typical",
+      "padCount": 3,
+      "priority": 5
+    },
+    "DIV": {
+      "role": "signal",
+      "domain": "SELV_5V",
+      "block": "IC_U1",
+      "voltage": {
+        "nom": 0,
+        "min": 0,
+        "max": 0,
+        "peak": 0
+      },
+      "currentA": 0,
+      "currentSource": "simulated",
+      "pins": [
+        {
+          "ref": "R1",
+          "pin": "2",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "2",
+          "scenario": "typical"
+        },
+        {
+          "ref": "R2",
+          "pin": "1",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "1",
+          "scenario": "typical"
+        },
+        {
+          "ref": "R3",
+          "pin": "1",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "1",
+          "scenario": "typical"
+        }
+      ],
+      "widthMil": {
+        "outer": 6,
+        "inner": 6,
+        "min": 6
+      },
+      "viasPerTransition": 1,
+      "clearanceMil": 6,
+      "impedanceOhm": 0,
+      "diffPair": "",
+      "lengthGroup": "",
+      "netClass": "SIGNAL",
+      "why": [
+        "sim: nom 0 V (typical), envelope 0…0 V over 4 scenario(s)",
+        "simulated worst/typical: 0.000A"
+      ],
+      "scenario": "worst/typical",
+      "padCount": 3,
+      "priority": 5
+    },
+    "FILT_OUT": {
+      "role": "signal",
+      "domain": "SELV_5V",
+      "block": "IC_U1",
+      "voltage": {
+        "nom": 0,
+        "min": 0,
+        "max": 0,
+        "peak": 0
+      },
+      "currentA": 0,
+      "currentSource": "simulated",
+      "pins": [
+        {
+          "ref": "C2",
+          "pin": "2",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "2",
+          "scenario": "typical"
+        },
+        {
+          "ref": "R6",
+          "pin": "1",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "1",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U1",
+          "pin": "6",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "INB-",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U1",
+          "pin": "7",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "OUTB",
+          "scenario": "typical"
+        }
+      ],
+      "widthMil": {
+        "outer": 6,
+        "inner": 6,
+        "min": 6
+      },
+      "viasPerTransition": 1,
+      "clearanceMil": 6,
+      "impedanceOhm": 0,
+      "diffPair": "",
+      "lengthGroup": "",
+      "netClass": "SIGNAL",
+      "why": [
+        "sim: nom 0 V (typical), envelope 0…0 V over 4 scenario(s)",
+        "simulated worst/typical: 0.000A"
+      ],
+      "scenario": "worst/typical",
+      "padCount": 4,
+      "priority": 5
+    },
+    "GND": {
+      "role": "ground",
+      "domain": "SELV_5V",
+      "block": "",
+      "voltage": {
+        "nom": 0,
+        "min": 0,
+        "max": 0,
+        "peak": 0
+      },
+      "currentA": 0.00169,
+      "currentSource": "simulated",
+      "pins": [
+        {
+          "ref": "C1",
+          "pin": "2",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "2",
+          "scenario": "typical"
+        },
+        {
+          "ref": "C3",
+          "pin": "2",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "2",
+          "scenario": "typical"
+        },
+        {
+          "ref": "C4",
+          "pin": "2",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "2",
+          "scenario": "typical"
+        },
+        {
+          "ref": "C5",
+          "pin": "2",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "2",
+          "scenario": "typical"
+        },
+        {
+          "ref": "C6",
+          "pin": "2",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "2",
+          "scenario": "typical"
+        },
+        {
+          "ref": "C7",
+          "pin": "2",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "2",
+          "scenario": "typical"
+        },
+        {
+          "ref": "J1",
+          "pin": "2",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "2",
+          "scenario": "typical"
+        },
+        {
+          "ref": "J2",
+          "pin": "2",
+          "currentA": 0.00169,
+          "dir": "sink",
+          "name": "2",
+          "scenario": "peak"
+        },
+        {
+          "ref": "J3",
+          "pin": "4",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "4",
+          "scenario": "typical"
+        },
+        {
+          "ref": "R2",
+          "pin": "2",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "2",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U1",
+          "pin": "4",
+          "currentA": 0.00034,
+          "dir": "source",
+          "name": "VSS",
+          "scenario": "peak"
+        },
+        {
+          "ref": "U2",
+          "pin": "3",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "IN-",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U2",
+          "pin": "4",
+          "currentA": 0.00065,
+          "dir": "source",
+          "name": "VSS",
+          "scenario": "peak"
+        },
+        {
+          "ref": "U3",
+          "pin": "2",
+          "currentA": 0.0007,
+          "dir": "source",
+          "name": "A",
+          "scenario": "typical"
+        }
+      ],
+      "widthMil": {
+        "outer": 10,
+        "inner": 10,
+        "min": 10
+      },
+      "viasPerTransition": 1,
+      "clearanceMil": 6,
+      "impedanceOhm": 0,
+      "diffPair": "",
+      "lengthGroup": "",
+      "netClass": "GND",
+      "why": [
+        "sim: nom 0 V (typical), envelope 0…0 V over 4 scenario(s)",
+        "simulated worst/peak: 0.002A"
+      ],
+      "scenario": "worst/peak",
+      "padCount": 14,
+      "priority": 6
+    },
+    "SENS_IN": {
+      "role": "signal",
+      "domain": "SELV_5V",
+      "block": "CONN_J1",
+      "voltage": {
+        "nom": 0,
+        "min": 0,
+        "max": 0,
+        "peak": 0
+      },
+      "currentA": 0,
+      "currentSource": "simulated",
+      "pins": [
+        {
+          "ref": "J1",
+          "pin": "1",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "1",
+          "scenario": "typical"
+        },
+        {
+          "ref": "R1",
+          "pin": "1",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "1",
+          "scenario": "typical"
+        }
+      ],
+      "widthMil": {
+        "outer": 6,
+        "inner": 6,
+        "min": 6
+      },
+      "viasPerTransition": 1,
+      "clearanceMil": 6,
+      "impedanceOhm": 0,
+      "diffPair": "",
+      "lengthGroup": "",
+      "netClass": "SIGNAL",
+      "why": [
+        "sim: nom 0 V (typical), envelope 0…0 V over 4 scenario(s)",
+        "simulated worst/typical: 0.000A"
+      ],
+      "scenario": "worst/typical",
+      "padCount": 2,
+      "priority": 5
+    },
+    "SK_P": {
+      "role": "signal",
+      "domain": "SELV_5V",
+      "block": "IC_U1",
+      "voltage": {
+        "nom": 0,
+        "min": 0,
+        "max": 0,
+        "peak": 0
+      },
+      "currentA": 0,
+      "currentSource": "simulated",
+      "pins": [
+        {
+          "ref": "C3",
+          "pin": "1",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "1",
+          "scenario": "typical"
+        },
+        {
+          "ref": "R5",
+          "pin": "2",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "2",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U1",
+          "pin": "5",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "INB+",
+          "scenario": "typical"
+        }
+      ],
+      "widthMil": {
+        "outer": 6,
+        "inner": 6,
+        "min": 6
+      },
+      "viasPerTransition": 1,
+      "clearanceMil": 6,
+      "impedanceOhm": 0,
+      "diffPair": "",
+      "lengthGroup": "",
+      "netClass": "SIGNAL",
+      "why": [
+        "sim: nom 0 V (typical), envelope 0…0 V over 4 scenario(s)",
+        "simulated worst/typical: 0.000A"
+      ],
+      "scenario": "worst/typical",
+      "padCount": 3,
+      "priority": 5
+    },
+    "SK_X": {
+      "role": "signal",
+      "domain": "SELV_5V",
+      "block": "IC_U1",
+      "voltage": {
+        "nom": 0,
+        "min": 0,
+        "max": 0,
+        "peak": 0
+      },
+      "currentA": 0,
+      "currentSource": "simulated",
+      "pins": [
+        {
+          "ref": "C2",
+          "pin": "1",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "1",
+          "scenario": "typical"
+        },
+        {
+          "ref": "R4",
+          "pin": "2",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "2",
+          "scenario": "typical"
+        },
+        {
+          "ref": "R5",
+          "pin": "1",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "1",
+          "scenario": "typical"
+        }
+      ],
+      "widthMil": {
+        "outer": 6,
+        "inner": 6,
+        "min": 6
+      },
+      "viasPerTransition": 1,
+      "clearanceMil": 6,
+      "impedanceOhm": 0,
+      "diffPair": "",
+      "lengthGroup": "",
+      "netClass": "SIGNAL",
+      "why": [
+        "sim: nom 0 V (typical), envelope 0…0 V over 4 scenario(s)",
+        "simulated worst/typical: 0.000A"
+      ],
+      "scenario": "worst/typical",
+      "padCount": 3,
+      "priority": 5
+    },
+    "VREF": {
+      "role": "signal",
+      "domain": "SELV_5V",
+      "block": "POWER_IN",
+      "voltage": {
+        "nom": 4.15,
+        "min": 4.15,
+        "max": 4.15,
+        "peak": 4.15
+      },
+      "currentA": 0.00085,
+      "currentSource": "simulated",
+      "pins": [
+        {
+          "ref": "C5",
+          "pin": "1",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "1",
+          "scenario": "typical"
+        },
+        {
+          "ref": "R7",
+          "pin": "2",
+          "currentA": 0.00085,
+          "dir": "source",
+          "name": "2",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U2",
+          "pin": "1",
+          "currentA": 0.00015,
+          "dir": "sink",
+          "name": "VREF",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U3",
+          "pin": "1",
+          "currentA": 0.0007,
+          "dir": "sink",
+          "name": "K",
+          "scenario": "typical"
+        }
+      ],
+      "widthMil": {
+        "outer": 6,
+        "inner": 6,
+        "min": 6
+      },
+      "viasPerTransition": 1,
+      "clearanceMil": 6,
+      "impedanceOhm": 0,
+      "diffPair": "",
+      "lengthGroup": "",
+      "netClass": "SIGNAL",
+      "why": [
+        "sim: nom 4.15 V (typical), envelope 4.15…4.15 V over 3 scenario(s)",
+        "1 scenario(s) with the rail unpowered (\u003c 10 % of its maximum) left out of min/max",
+        "simulated worst/typical: 0.001A",
+        "named like a rail but fed only through a resistor in the simulation: a divider/sense signal, routed as a signal (not a plane island)",
+        "IPC-2221B 4.2 V peak needs ≤ 3.9 mil: fab clearance 6.0 mil governs"
+      ],
+      "scenario": "worst/typical",
+      "padCount": 4,
+      "priority": 4
+    }
+  },
+  "pairs": [],
+  "netClasses": [
+    {
+      "name": "GND",
+      "nets": [
+        "GND"
+      ],
+      "trackMil": 10,
+      "clearanceMil": 6,
+      "viaDrillMil": 12,
+      "viaDiaMil": 24,
+      "innerTrackMil": 10,
+      "minTrackMil": 5,
+      "why": [
+        "widest member width 10.0 mil outer / 10.0 mil inner (IPC-2221/2152 at ΔT 10 °C), largest member clearance"
+      ]
+    },
+    {
+      "name": "POWER",
+      "nets": [
+        "+5V"
+      ],
+      "trackMil": 10,
+      "clearanceMil": 6,
+      "viaDrillMil": 12,
+      "viaDiaMil": 24,
+      "innerTrackMil": 10,
+      "minTrackMil": 5,
+      "why": [
+        "widest member width 10.0 mil outer / 10.0 mil inner (IPC-2221/2152 at ΔT 10 °C), largest member clearance"
+      ]
+    },
+    {
+      "name": "SIGNAL",
+      "nets": [
+        "AAF",
+        "ADC_CLK",
+        "ADC_CS",
+        "ADC_DOUT",
+        "ADC_IN",
+        "BUF_OUT",
+        "DIV",
+        "FILT_OUT",
+        "SENS_IN",
+        "SK_P",
+        "SK_X",
+        "VREF"
+      ],
+      "trackMil": 6,
+      "clearanceMil": 6,
+      "viaDrillMil": 12,
+      "viaDiaMil": 24,
+      "innerTrackMil": 6,
+      "minTrackMil": 5,
+      "why": [
+        "default signal class: fab track/clearance"
+      ]
+    }
+  ],
+  "findings": [
+    {
+      "severity": "error",
+      "kind": "analog-target-miss",
+      "message": "A3 U1:B: 品质因数 Q 0.5 outside the target 0.707 ± 5 % (spec)",
+      "refs": [
+        "C2",
+        "C3",
+        "C4",
+        "R4",
+        "R5",
+        "R6",
+        "U1"
+      ],
+      "nets": [
+        "FILT_OUT"
+      ],
+      "suggestion": "adjust the component values (see the optimisation plan) or revise the spec"
+    },
+    {
+      "severity": "warn",
+      "kind": "analog-adc-source-impedance",
+      "message": "A3 U1:B: ADC 采样建立误差 1.51 LSB outside the target ≤ 0.5 LSB (inferred)",
+      "refs": [
+        "C2",
+        "C3",
+        "C4",
+        "R4",
+        "R5",
+        "R6",
+        "U1"
+      ],
+      "nets": [
+        "FILT_OUT"
+      ],
+      "suggestion": "lower the source impedance (buffer the node), add a charge-reservoir capacitor at the ADC pin (≥ 2^(N+1)·Csh) with its R·C settled before each sample, or lengthen the ADC sampling time"
+    },
+    {
+      "severity": "info",
+      "kind": "analog-tolerance-after",
+      "message": "A3 U1:B: with the proposed values 89 % of 100 Monte-Carlo runs meet every target",
+      "refs": [
+        "C2",
+        "C3",
+        "C4",
+        "R4",
+        "R5",
+        "R6",
+        "U1"
+      ],
+      "nets": [
+        "FILT_OUT"
+      ],
+      "suggestion": "tighten the tolerance of the frequency-setting parts (C0G/NP0 ±5 % capacitors, 1 % or 0.5 % resistors) or widen the target window"
+    },
+    {
+      "severity": "info",
+      "kind": "assumed-model",
+      "message": "U3 model lm4040 is marked assumed",
+      "refs": [
+        "U3"
+      ],
+      "nets": [],
+      "suggestion": "replace with datasheet numbers"
+    }
+  ],
+  "copper": {
+    "layers": 4,
+    "outerOz": 1,
+    "innerOz": 0.5,
+    "tempRiseC": 10,
+    "refHeightMil": 8.28,
+    "er": 4.4,
+    "stackup": "JLC04161H-7628 (4-layer 1.6 mm, L1→L2 7628 prepreg 0.2104 mm)",
+    "minTrackMil": 6,
+    "clearanceMil": 6,
+    "viaDrillMil": 12,
+    "viaDiaMil": 24
+  },
+  "simulation": {
+    "generator": "pcbpilot sim power",
+    "scenarios": [
+      "typical",
+      "peak",
+      "terminal-only",
+      "terminal-j2-only",
+      "worst"
+    ],
+    "converged": true,
+    "assumptions": [
+      "DC operating point (MNA + Newton-Raphson): capacitors open, inductors = DCR, switching regulators averaged by power balance; not a transient simulation",
+      "IC signal pins are high-impedance (no DC drive) unless a GPIO drives an LED network",
+      "loads are constant-current above a knee voltage and resistive below it (unpowered rails draw nothing)",
+      "J2: input source +5V = 5.00 V (net name) with 0.02 Ω series resistance",
+      "J2 (terminal-j2) disconnected in terminal-only",
+      "J1 (terminal) disconnected in terminal-j2-only"
+    ]
+  },
+  "definitions": {
+    "voltage": "V over the solved DC scenarios: nom = typical, min/max = envelope, peak = highest instantaneous (switch node swings to Vin; AC = √2·Vrms)",
+    "currentA": "sizing current (A): simulated worst-case DC net current, switch-node ripple RMS, or a declared/heuristic budget (currentSource)",
+    "widthMil": "IPC-2221/2152 width for currentA at tempRiseC: outer on outerOz, inner on innerOz; min = narrowest allowed neck (largest single-pin branch current, class floor); diff/RF = impedance width",
+    "clearanceMil": "IPC-2221B B2 (B4 when coated) for the net's peak voltage to its own reference, never below the fab clearance; domain-to-domain insulation is in pairs[]",
+    "pairs": "insulation between domains that an isolation part bridges; numbers from SafetyDistances(pair, standard)"
+  },
+  "analog": {
+    "generator": "pcbpilot sim analog",
+    "ngspice": "ngspice-47",
+    "blocks": 3,
+    "simulated": 3,
+    "byClass": {
+      "opamp-follower": 1,
+      "sallen-key-lowpass": 1,
+      "voltage-reference": 1
+    },
+    "targets": 9,
+    "failing": 2,
+    "changes": 3,
+    "status": "FAIL",
+    "output": "analog.json"
+  }
+}

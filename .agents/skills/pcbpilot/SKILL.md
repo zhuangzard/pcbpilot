@@ -89,6 +89,7 @@ metadata:
 | 电源预算 → 线宽/间距/过孔（`power.json`） | [recipes/power-spec.md](references/recipes/power-spec.md) |
 | 原理图电源仿真：每网电压、每焊盘电流、buck 纹波、多输入源场景（`sim power`） | [power-sim.md](references/power-sim.md)、[power-models.json](references/power-models.json) |
 | 外部交叉验证仿真器状态/安装（ngspice 必需、Elmer 可选，`sim tools check/install`） | [environment-setup.md](references/environment-setup.md#仿真工具ngspice--elmer-fem) |
+| 原理图模拟电路 SPICE 仿真与改值：运放放大/有源与无源滤波、ADC 输入建立、基准、比较器、晶振 CL、复位 RC、晶体管开关、稳压反馈；ngspice 指标 vs 目标、Monte-Carlo、值修改计划（原理图修改须用户确认）（`sim analog` / `sim tools`） | [analog-sim.md](references/analog-sim.md)、[spice-models/](references/spice-models/README.md) |
 | 原理图验收后推导设计意图：电路功能、每网电压/电流/线宽/间距/阻抗/网络类、电压域与绝缘对、设计提示（`intent derive` → `intent.json`） | [design-intent.md](references/design-intent.md) |
 | 布线完成后在**真实铜皮**上做设计后仿真：每负载焊盘压降、过孔电流 vs 载流量、电流密度与颈部/拐角、每层温度热图、器件板温/Tj、线宽/拐角/过孔修改建议、Elmer 交叉校验（`pcb dump --include-copper` → `sim post-layout` → `report design --post`） | [post-layout-sim.md](references/post-layout-sim.md) |
 | 每次运行后生成/更新客户设计报告（仿真图表、器件余量、工程计算、测试点计划、制造与上电注意；版本化 vN + 变更记录，`report design` / `--report-dir`） | [design-report.md](references/design-report.md)、[模板](templates/design-report/README.md) |

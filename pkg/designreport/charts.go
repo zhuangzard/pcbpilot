@@ -362,6 +362,9 @@ func Charts(r *Report) map[string]string {
 			out["power-tree"] = PowerTreeSVG(p.Tree)
 		}
 	}
+	for k, v := range analogCharts(r) {
+		out[k] = v
+	}
 	if f := r.Feasibility; f != nil {
 		var rows []HBar
 		var srt []FeasRow

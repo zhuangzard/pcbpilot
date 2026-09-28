@@ -290,6 +290,40 @@
       "confidence": "approx"
     },
     {
+      "id": "mcp6002",
+      "kind": "load",
+      "match": {"mpn": ["MCP6002", "MCP6002T-I/SN", "MCP6002-I/SN", "MCP6002T-I/MS"], "nameRegex": "(?i)^MCP600[124]"},
+      "supplyPins": ["VDD", "V+"],
+      "returnPins": ["VSS", "V-", "GND"],
+      "typA": 0.0002,
+      "peakA": 0.00034,
+      "source": "Microchip MCP6001/2/4 datasheet (DS21733): IQ 100 µA typ / 170 µA max per amplifier (dual = 2×); output load current is not included.",
+      "confidence": "approx"
+    },
+    {
+      "id": "mcp3201",
+      "kind": "load",
+      "match": {"mpn": ["MCP3201", "MCP3201-CI/SN", "MCP3201-BI/SN", "MCP3201T-CI/SN"], "nameRegex": "(?i)^MCP3201"},
+      "rails": [
+        {"pins": ["VDD"], "typA": 0.0003, "peakA": 0.0005, "returnPins": ["VSS"]},
+        {"pins": ["VREF"], "typA": 0.00015, "peakA": 0.00015, "returnPins": ["VSS"]}
+      ],
+      "returnPins": ["VSS"],
+      "source": "Microchip MCP3201 datasheet (DS21290): IDD ≈ 300 µA typ / 500 µA max while converting at 5 V; IREF ≈ 150 µA during conversion.",
+      "confidence": "approx"
+    },
+    {
+      "id": "lm4040",
+      "kind": "load",
+      "match": {"nameRegex": "(?i)^LM4040"},
+      "supplyPins": ["K", "+"],
+      "returnPins": ["A", "-"],
+      "typA": 0.0007,
+      "peakA": 0.0007,
+      "source": "LM4040 shunt reference: the DC power sim has no zener element, so the cathode is a constant sink at a typical bias point (0.7 mA, between the 60–75 µA minimum and 15 mA maximum of TI SNOS633). The reference VOLTAGE and the real cathode current come from pcbpilot sim analog (spice-models/analog-models.json).",
+      "confidence": "assumed"
+    },
+    {
       "id": "ads1220",
       "kind": "load",
       "match": {"mpn": ["ADS1220IPWR", "ADS1220IRVAR", "ADS1220"]},

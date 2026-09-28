@@ -119,6 +119,9 @@ func RenderHTML(r *Report, charts map[string]string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if t, err = parsePartial(t, "templates/analog.html.tmpl"); err != nil {
+		return nil, err
+	}
 	var buf bytes.Buffer
 	if err := t.Execute(&buf, map[string]any{"R": r}); err != nil {
 		return nil, err
@@ -139,6 +142,11 @@ func RenderMarkdown(r *Report) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if part, err := Templates.ReadFile("templates/analog.md.tmpl"); err != nil {
+		return nil, err
+	} else if t, err = t.Parse(string(part)); err != nil {
+		return nil, err
+	}
 	var buf bytes.Buffer
 	if err := t.Execute(&buf, map[string]any{"R": r}); err != nil {
 		return nil, err
@@ -149,4 +157,13 @@ func RenderMarkdown(r *Report) ([]byte, error) {
 		out = strings.ReplaceAll(out, "\n\n\n", "\n\n")
 	}
 	return []byte(out), nil
+}
+
+// parsePartial adds the {{define}} blocks of a partial template file.
+func parsePartial(t *htmltpl.Template, name string) (*htmltpl.Template, error) {
+	part, err := Templates.ReadFile(name)
+	if err != nil {
+		return nil, err
+	}
+	return t.Parse(string(part))
 }

@@ -1,0 +1,62 @@
+{{- /* §3A 模拟电路仿真 — Markdown partial (canonical copy:
+.agents/skills/pcbpilot/templates/design-report/analog.md.tmpl; embedded
+mirror pkg/designreport/templates/). Included by report.md.tmpl with
+{{template "analog" .}}; data = report.json "analog". */ -}}
+{{define "analog"}}{{$R := .R}}
+## 3A 模拟电路仿真 Analog SPICE
+{{with $R.Analog}}
+ngspice：{{.Ngspice}}；结论 **{{.Status}}**。数值来自 ngspice（方法列），“解析”列为闭式公式交叉核对。
+{{range .KeyNums}}
+- {{.Label}}：{{.Value}}{{with .Note}}（{{.}}）{{end}}{{end}}
+
+| 块 | 类别 | 电路 | 拓扑 | 模型 | 状态 |
+|---|---|---|---|---|---|
+{{- range .Blocks}}
+| {{.ID}} | {{.ClassZh}} | {{md .Title}} | {{md .Topology}} | {{md .Model}} | {{.Status}}{{if not .Simulated}}（未仿真）{{end}} |{{end}}
+
+**目标 vs 仿真**
+
+| 块 | 指标 | 仿真/计算 | 解析 | 方法 | 目标 | 状态 |
+|---|---|---|---|---|---|---|
+{{- range .Metrics}}
+| {{.Block}} | {{.Label}} | {{.Value}} | {{.Analytic}} | {{.Method}} | {{md .Target}}{{with .Source}} ({{.}}){{end}} | {{.Status}} |{{end}}
+{{range .Charts}}
+![{{md .Title}}](charts/{{.Name}}.svg)
+{{end}}
+{{- if .Tolerance}}
+**容差分布（Monte-Carlo）**
+
+| 块 | 方案 | 指标 | 标称 | 最小 | 最大 | σ | 达标比例 | 块良率 | 方法 |
+|---|---|---|---|---|---|---|---|---|---|
+{{- range .Tolerance}}
+| {{.Block}} | {{.Phase}} | {{.Label}} | {{.Nominal}} | {{.Min}} | {{.Max}} | {{.Std}} | {{.InSpec}} | {{.Yield}} | {{.Method}} ×{{.Runs}} |{{end}}
+{{end}}
+**建议的元件值修改（原理图修改，须用户确认）**
+{{if .Changes}}
+| 块 | 位号 | 原值 | 新值 | 动作 | 器件 | 修改前 → 修改后 |
+|---|---|---|---|---|---|---|
+{{- range .Changes}}
+| {{.Block}} | {{.Ref}} | {{.From}} | **{{.To}}** | {{.Action}} | {{md .Part}} | {{md .Effect}} |{{end}}
+
+确认后：`pcbpilot sim analog compile-plan` → `pcbpilot apply --dry-run` → apply；随后重跑 sim analog / intent derive / report design。
+{{else}}
+无需修改（或无可改进的 E 系列/库存组合）。
+{{end}}
+{{- if .Findings}}
+**发现**
+
+| 级别 | 来源 | 说明 | 建议 |
+|---|---|---|---|
+{{- range .Findings}}
+| {{.Severity}} | {{.Source}} | {{md .Message}} | {{md .Suggestion}} |{{end}}
+{{end}}
+{{- range .Notes}}
+> {{md .}}
+{{end}}
+{{- if .Data}}
+数据包：{{range .Data}}`{{.}}` {{end}}
+{{end}}
+{{- else}}
+> 未运行模拟仿真（无 analog.json；原理图含模拟电路时运行 `pcbpilot sim analog` 或 `intent derive`）。
+{{end}}
+{{end}}

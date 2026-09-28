@@ -30,6 +30,10 @@ pcbpilot intent derive --connectivity sch-p1.json --connectivity sch-p2.json \
 - 现场只读：`pcbpilot --project <工程> intent derive --pages P1,P2 --out intent.json`
   （逐页读取后恢复原页）。
 - `--strict`：有 `error` 级 finding 时非零退出，可作回归门槛。
+- 模拟仿真（S5.5）：默认在同一设计上运行 `sim analog`（ngspice；缺失则只解析并提示 `sim tools install`），
+  其 finding 以 `analog-*` 进入 `findings[]`，`intent.analog` 记录块数/仿真数/目标达成/修改建议数；
+  `--analog analog.json` 复用已有结果，`--analog-spec` 给目标，`--analog-out` 写出 analog.json（`--report-dir`
+  时默认写在 `--out` 旁边供报告 §3A 使用），`--no-analog` 跳过。见 [analog-sim.md](analog-sim.md)。
 
 `spec.json`（全部可选；未知字段报错，防拼写错误）：
 

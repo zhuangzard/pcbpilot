@@ -383,6 +383,22 @@ Iin = V(LX)·Iout/(η·Vin)+Iq;LDO:Iin = Iout+Iq,含 dropout/关断),纹波用�
 - **铁律**:设计后仿真的输入必须是回读的铜,不是计划;结论进入设计报告第 6A 章与封面结论。用法见
   [`post-layout-sim.md`](../.agents/skills/pcbpilot/references/post-layout-sim.md)。状态:`offline-verified`。
 
+### 模拟电路仿真(analog SPICE)—— `pcbpilot sim analog`
+**是什么**:在原理图连接上**识别模拟块**(运放放大/有源滤波/比较器/无源 RC·LC/ADC 输入/分流基准/晶振负载/
+复位 RC/晶体管开关/稳压反馈/电流检测),把每块抽成带电源轨与负载的 **SPICE 子电路**,用 **ngspice**
+(`-b`、`wrdata`)跑 .dc/.op/.ac/.tran/环路增益/Monte-Carlo,与**目标**比较并**优化元件值**(`pkg/analogsim`,
+契约 `analog.json schemaVersion 1`)。与 `sim power` 分工:后者是直流电源树(平均化),本步骤是信号链动态。
+- **模拟块(analog block)**:一个运放通道或一个可独立分析的无源/分立电路;`id` A1…,`core` 如 `U1:B`;
+  `metrics[]` 每项带 `method`(ngspice-op/dc/ac/tran/loop 或 analytic)与解析对照值。
+- **目标(target)**:spec(`--spec`)或推断(设计标称、数据手册窗口、指南:相位裕度 ≥ 45°、ADC 建立 ≤ ½ LSB…);
+  未达 spec/datasheet = FAIL,未达推断 = WARN。
+- **环路增益注入**:行为宏模型 `PCBPILOT_OPAMP` 暴露零阻抗理想输出节点,电压注入 T = −V(oa)/V(oi) 精确;
+  厂商模型没有该节点,改用阶跃过冲估算相位裕度。
+- **值修改计划(value-change plan)**:`kind: pcbpilot.schematic-value-plan`,每项 ref 原值→新值、库存件或需选型、
+  理由与修改前后指标;**是原理图修改,须用户明确同意**后经 `compile-plan` → `pcbpilot apply` 执行,再重跑仿真。
+- **铁律**:ngspice 缺失 = 只有解析值,必须写明 skipped,不称“已仿真”;模型可信度(`approx`/`assumed`/`vendor`)
+  随结果传播。用法见 [`analog-sim.md`](../.agents/skills/pcbpilot/references/analog-sim.md)。状态:`offline-verified`。
+
 ### 设计意图(design intent)—— `intent.json`
 **是什么**:原理图验收后由 `pcbpilot intent derive`(`pkg/intent`,契约 `schemaVersion 1`,只加字段
 不改名)推导出的**带理由的电气计划**,是原理图与 PCB 之间唯一的交接数据——没有它 PCB 只知道位置。

@@ -89,6 +89,7 @@ func Build(in *Inputs) *Report {
 	c.prepare()
 	c.buildRequirements()
 	c.buildPower()
+	c.buildAnalog()
 	c.buildFeasibility()
 	c.buildCalcs()
 	c.buildLayout()

@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/zhuangzard/pcbpilot/pkg/analogsim"
 	"github.com/zhuangzard/pcbpilot/pkg/designreport"
 	"github.com/zhuangzard/pcbpilot/pkg/intent"
 	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
@@ -38,7 +40,8 @@ rule push, pcb auto, the safety checker and the feedback loop.`,
 func newIntentDeriveCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {
 	var connPaths, valuePaths, modelPaths, pages, scenarios, switches []string
 	var simPath, specPath, modelsLib, outPath, reportPath, simOut, boardPath, reportDir, reportName string
-	var strict bool
+	var strict, noAnalog bool
+	var analogSpec, analogOut, analogModels, analogIn string
 	c := &cobra.Command{
 		Use:   "derive",
 		Short: "Derive intent.json (+ intent.md) from schematic connectivity, part values, power sim and spec",
@@ -111,7 +114,17 @@ OUTPUT
   --out intent.json (default stdout), --report intent.md (human reading),
   --sim-out sim.json (the in-process simulation, reusable by pcb auto --sim).
   A one-line summary goes to stderr. --strict exits non-zero when a finding
-  has severity error.`,
+  has severity error.
+
+ANALOG (design-flow S5.5)
+  When the schematic has analog circuits the analog SPICE step ('pcbpilot sim
+  analog': ngspice .op/.dc/.ac/.tran/loop gain/Monte-Carlo + a value-change
+  plan) runs on the same design with the power-sim rails; its findings join
+  findings[] (kind analog-*) and intent.analog summarises it. ngspice missing →
+  analytic checks and an info finding "run pcbpilot sim tools install".
+  --analog reuses an existing sim analog document, --analog-spec sets targets,
+  --analog-out writes analog.json (+ netlists in analog-ngspice/; default next
+  to --out when --report-dir is set, so the report gets §3A), --no-analog skips.`,
 		Example: `  # offline: exported pages + values (simulates in-process)
   pcbpilot intent derive --connectivity sch-p1.json --connectivity sch-p2.json \
       --values sch-list.json --out intent.json --report intent.md
@@ -253,6 +266,28 @@ OUTPUT
 			} else if simOut != "" {
 				return fmt.Errorf("--sim-out writes the in-process simulation; it has no meaning with --sim")
 			}
+			// Analog SPICE (sim analog) on the same design: findings flow into intent.
+			if analogIn != "" {
+				b, err := os.ReadFile(analogIn)
+				if err != nil {
+					return err
+				}
+				var aout analogsim.Output
+				if err := json.Unmarshal(b, &aout); err != nil {
+					return fmt.Errorf("%s: %w", analogIn, err)
+				}
+				in.Analog = intent.FromAnalog(&aout, analogIn)
+				analogOut = analogIn
+			} else if !noAnalog && in.Design != nil && boardPath == "" {
+				if analogOut == "" && reportDir != "" && outPath != "" {
+					analogOut = filepath.Join(filepath.Dir(outPath), "analog.json")
+				}
+				aout, err := runIntentAnalog(in, libs, analogSpec, analogModels, analogOut, stderr)
+				if err != nil {
+					return fmt.Errorf("analog simulation: %w", err)
+				}
+				in.Analog = intent.FromAnalog(aout, analogOut)
+			}
 			doc, err := intent.Derive(in)
 			if err != nil {
 				return err
@@ -309,7 +344,7 @@ OUTPUT
 					values = valuePaths[0]
 				}
 				dir, dr, err := runDesignReport(designReportOpts{outDir: reportDir, version: "auto", project: reportName, intent: outPath, sim: simFile,
-					models: models, values: values, maxImageBytes: designreport.DefaultMaxImageBytes}, stderr)
+					models: models, values: values, analog: analogOut, maxImageBytes: designreport.DefaultMaxImageBytes}, stderr)
 				if err != nil {
 					return fmt.Errorf("design report: %w", err)
 				}
@@ -338,5 +373,51 @@ OUTPUT
 	f.BoolVar(&strict, "strict", false, "exit non-zero when any finding has severity error")
 	f.StringVar(&reportDir, "report-dir", "", "also publish the next (pre-layout) design-report version here (reports/<name>/; needs --out and --sim or --sim-out; see 'pcbpilot report design')")
 	f.StringVar(&reportName, "report-name", "", "project name on the report cover (default: the report dir name)")
+	f.BoolVar(&noAnalog, "no-analog", false, "skip the analog SPICE step (sim analog) — by default it runs when analog blocks exist (ngspice missing → analytic checks + a note)")
+	f.StringVar(&analogSpec, "analog-spec", "", "analog targets JSON for the sim analog step (see 'pcbpilot sim analog --help')")
+	f.StringVar(&analogOut, "analog-out", "", "write the sim analog document (analog.json; netlists under <name>-ngspice/); default next to --out when --report-dir is set")
+	f.StringVar(&analogModels, "analog-models", "", "analog-models.json for the sim analog step (default: the skill's)")
+	f.StringVar(&analogIn, "analog", "", "existing 'pcbpilot sim analog' JSON (skips the in-process analog step; also feeds --report-dir)")
 	return c
+}
+
+// runIntentAnalog runs sim analog on the intent's design (rails from its power sim).
+func runIntentAnalog(in intent.Input, libs powersim.Libraries, specPath, modelsPath, outPath string, stderr io.Writer) (*analogsim.Output, error) {
+	lib, libPath, err := loadAnalogLibrary(modelsPath, stderr)
+	if err != nil {
+		return nil, err
+	}
+	var spec *analogsim.Spec
+	if specPath != "" {
+		b, err := os.ReadFile(specPath)
+		if err != nil {
+			return nil, err
+		}
+		if spec, err = analogsim.ParseSpec(b); err != nil {
+			return nil, fmt.Errorf("%s: %w", specPath, err)
+		}
+	}
+	stock, _ := loadStockLib("")
+	wd := ""
+	if outPath != "" {
+		wd = strings.TrimSuffix(outPath, filepath.Ext(outPath)) + "-ngspice"
+	}
+	out, err := analogsim.Run(in.Design, lib, analogsim.Options{WorkDir: wd, Optimise: true, Spec: spec, Stock: stock, PowerSim: in.Sim, PowerLibs: libs,
+		Inputs: &analogsim.Inputs{Schematic: in.Sources.Schematic, PowerSim: in.Sources.Sim, Spec: specPath, Models: []string{libPath}}})
+	if err != nil {
+		return nil, err
+	}
+	if out.Summary.Blocks == 0 {
+		fmt.Fprintln(stderr, "sim analog: no analog blocks")
+	} else {
+		printAnalogSummary(stderr, out)
+	}
+	if outPath != "" {
+		relWorkDir(out, outPath)
+		b, _ := json.MarshalIndent(out, "", "  ")
+		if err := os.WriteFile(outPath, append(b, '\n'), 0o644); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }

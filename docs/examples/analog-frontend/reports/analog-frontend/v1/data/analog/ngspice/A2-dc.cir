@@ -1,0 +1,22 @@
+* pcbpilot sim analog — block A2 opamp-follower (U1:A) mode dc
+* generated from schematic connectivity; rails from pcbpilot sim power (typical scenario)
+.include "pcbpilot-generic.lib"
+V_n__5v n__5v 0 DC 5
+C_c1 n_aaf 0 1e-07
+R_r1 n_sens_in n_div 100000
+R_r2 n_div 0 20000
+R_r3 n_div n_aaf 1000
+X_u1_a n_aaf n_buf_out n__5v 0 n_buf_out x_u1_a_oa x_u1_a_oi PCBPILOT_OPAMP params: gbw=1e+06 aol=398107 sr=600000 vos=0.0045 p2=3e+06 hp=0.025 hn=0.025 zout=100
+V_LINK_u1_a x_u1_a_oa x_u1_a_oi DC 0
+V_STIM n_sens_in 0 DC 0 AC 1
+.options noacct rshunt=1e12
+.control
+set filetype=ascii
+set wr_singlescale
+set wr_vecnames
+option numdgt=10
+dc V_STIM -90 90 0.09
+wrdata A2-dc-dc.txt v(n_buf_out) v(n_aaf) v(n_buf_out)
+quit
+.endc
+.end

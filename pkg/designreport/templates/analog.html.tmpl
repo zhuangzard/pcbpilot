@@ -1,0 +1,44 @@
+{{- /* §3A 模拟电路仿真 — HTML partial (canonical copy:
+.agents/skills/pcbpilot/templates/design-report/analog.html.tmpl; embedded
+mirror pkg/designreport/templates/). Included by report.html.tmpl with
+{{template "analog" .}}; data = report.json "analog" (pkg/designreport/analog.go). */ -}}
+{{define "analog"}}{{$R := .R}}
+<h2 id="s3a">3A 模拟电路仿真 Analog SPICE</h2>
+{{- with $R.Analog}}
+<p>ngspice：{{.Ngspice}}；结论 <span class="badge {{statusCls .Status}}">{{.Status}}</span>。数值来自 ngspice（方法列 ngspice-op/dc/ac/tran/loop），“解析”列为闭式公式交叉核对；目标来源 spec = 规格文件，inferred = 设计标称/指南，datasheet = 器件数据手册。</p>
+<table><tbody>{{range .KeyNums}}<tr><th>{{.Label}}</th><td>{{.Value}}</td><td><small>{{.Note}}</small></td></tr>{{end}}</tbody></table>
+<h3>3A.1 识别的模拟电路块</h3>
+<table><thead><tr><th>块</th><th>类别</th><th>电路</th><th>拓扑</th><th>模型</th><th>器件</th><th>状态</th></tr></thead><tbody>
+{{- range .Blocks}}<tr><td>{{.ID}}</td><td>{{.ClassZh}}</td><td>{{.Title}}</td><td><small>{{.Topology}}</small>{{with .Netlist}}<br><small><code>{{.}}</code></small>{{end}}</td><td><small>{{.Model}}</small></td><td><small>{{.Parts}}</small></td><td><span class="badge {{statusCls .Status}}">{{.Status}}</span>{{if not .Simulated}}<br><small>未仿真</small>{{end}}</td></tr>{{end}}
+</tbody></table>
+<h3>3A.2 目标 vs 仿真</h3>
+<table><thead><tr><th>块</th><th>指标</th><th>仿真/计算</th><th>解析</th><th>方法</th><th>目标</th><th>状态</th></tr></thead><tbody>
+{{- range .Metrics}}<tr><td>{{.Block}}</td><td>{{.Label}}</td><td class="n">{{.Value}}</td><td class="n">{{.Analytic}}</td><td><small>{{.Method}}</small></td><td>{{.Target}}{{with .Source}} <small>({{.}})</small>{{end}}</td><td>{{with .Status}}<span class="badge {{statusCls .}}">{{.}}</span>{{end}}</td></tr>{{end}}
+</tbody></table>
+{{- if .Charts}}
+<h3>3A.3 波特图、阶跃与瞬态</h3>
+{{- range .Charts}}<div class="chart">{{chart .Name}}</div>{{end}}
+{{- end}}
+{{- if .Tolerance}}
+<h3>3A.4 容差分布（Monte-Carlo）</h3>
+<table><thead><tr><th>块</th><th>方案</th><th>指标</th><th>标称</th><th>最小</th><th>最大</th><th>σ</th><th>达标比例</th><th>块良率</th><th>方法</th></tr></thead><tbody>
+{{- range .Tolerance}}<tr><td>{{.Block}}</td><td>{{.Phase}}</td><td>{{.Label}}</td><td class="n">{{.Nominal}}</td><td class="n">{{.Min}}</td><td class="n">{{.Max}}</td><td class="n">{{.Std}}</td><td class="n">{{.InSpec}}</td><td class="n">{{.Yield}}</td><td><small>{{.Method}} ×{{.Runs}}</small></td></tr>{{end}}
+</tbody></table>
+{{- end}}
+<h3>3A.5 建议的元件值修改（原理图修改，须用户确认）</h3>
+{{- if .Changes}}
+<table><thead><tr><th>块</th><th>位号</th><th>原值</th><th>新值</th><th>动作</th><th>器件</th><th>修改前 → 修改后</th></tr></thead><tbody>
+{{- range .Changes}}<tr><td>{{.Block}}</td><td>{{.Ref}}</td><td>{{.From}}</td><td><b>{{.To}}</b></td><td>{{.Action}}</td><td><small>{{.Part}}</small></td><td><small>{{.Effect}}</small></td></tr>{{end}}
+</tbody></table>
+<p><small>修改计划（plan.json）经用户确认后：<code>pcbpilot sim analog compile-plan</code> → <code>pcbpilot apply --dry-run</code> → apply；随后重跑 sim analog / intent derive / report design。</small></p>
+{{- else}}<p>无需修改（或无可改进的 E 系列/库存组合）。</p>{{end}}
+{{- if .Findings}}
+<h3>3A.6 发现</h3>
+<table><thead><tr><th>级别</th><th>来源</th><th>说明</th><th>建议</th></tr></thead><tbody>
+{{- range .Findings}}<tr><td><span class="badge {{statusCls .Severity}}">{{.Severity}}</span></td><td>{{.Source}}</td><td>{{.Message}}</td><td><small>{{.Suggestion}}</small></td></tr>{{end}}
+</tbody></table>
+{{- end}}
+{{- if .Notes}}<ul>{{range .Notes}}<li><small>{{.}}</small></li>{{end}}</ul>{{end}}
+{{- if .Data}}<p><small>数据包：{{range .Data}}<code>{{.}}</code> {{end}}</small></p>{{end}}
+{{- else}}<p class="na">未运行模拟仿真（无 analog.json；原理图含模拟电路时运行 <code>pcbpilot sim analog</code> 或 <code>intent derive</code>）。</p>{{end}}
+{{end}}

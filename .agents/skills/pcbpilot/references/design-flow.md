@@ -60,6 +60,16 @@
 
 `sch gate` 可作为旧版聚合报告入口，但不授权写入，也不替代目标连接表和逐页完整几何回读。
 
+### S5.5：模拟仿真验证
+
+原理图含模拟电路（运放放大/有源与无源滤波、ADC 输入、基准、比较器、晶振负载、复位 RC、晶体管开关、
+稳压反馈、电流检测）时，用 `pcbpilot sim analog`（`intent derive` 也会自动跑）把每个模拟块抽成 SPICE 子电路，
+用 ngspice 仿真直流/交流/瞬态/环路增益/容差，与 spec 或推断目标比较，并给出值修改计划 `plan.json`。
+ngspice 缺失时只做解析计算并提示 `pcbpilot sim tools install`，不得称为已仿真。计划中的值修改是**原理图修改**：
+先向用户展示每项原值 → 新值、理由和修改前后指标，得到明确同意后才 `sim analog compile-plan` → `pcbpilot apply`，
+随后回到 S5 回读，并重跑 `sim analog` / `intent derive` / `report design`。error 级模拟 finding（spec 未达、输入共模
+越界、电源超范围）按 S6 处理后再进入 S6.5。读法见 [analog-sim.md](analog-sim.md)。状态：`offline-verified`。
+
 ### S6：修复与保存
 
 依据具体 finding 修改目标数据或算法，重算受影响范围并再次 Apply。最终显式 `sch save`；
@@ -69,7 +79,7 @@
 
 原理图验收并保存后、进入 PCB P0 前，运行 `pcbpilot intent derive`（离线用本次导出的
 connectivity + values；现场只读 `--pages`），产出 `intent.json` + `intent.md`，并用 `--sim-out`
-保存同源的 `sim.json`。它说明每个电路块的用途（带仿真电压/电流/功耗），给出每网电压、电流、
+保存同源的 `sim.json`（S5.5 模拟仿真随之运行，`--analog analog.json` 复用已有结果，finding 以 `analog-*` 进入 intent）。它说明每个电路块的用途（带仿真电压/电流/功耗），给出每网电压、电流、
 内外层线宽、过孔数、间距、阻抗与差分对、网络类，以及电压域、域间绝缘（爬电/电气间隙/开槽）和
 设计提示。先处理 `error` 级 finding（改原理图、选型或 spec 后重新 derive），`warn` 写明取舍后可继续。
 后续 P1 规则、`pcb auto`、安规和回读对账都消费这份文件，不再按网名重新猜。读法见

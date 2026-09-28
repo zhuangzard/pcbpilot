@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/zhuangzard/pcbpilot/internal/version"
+	"github.com/zhuangzard/pcbpilot/pkg/analogsim"
 	"github.com/zhuangzard/pcbpilot/pkg/designreport"
 	"github.com/zhuangzard/pcbpilot/pkg/intent"
 	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
@@ -33,6 +34,7 @@ type designReportOpts struct {
 	values                      string
 	post, spice                 string
 	noZip                       bool
+	analog                      string
 	images                      []string
 	force                       bool
 	maxImageBytes               int
@@ -163,6 +165,7 @@ func addDesignReportFlags(c *cobra.Command, o *designReportOpts) {
 	f.StringVar(&o.spice, "spice", "", "SPICE netlist of sim power --spice, packaged under data/")
 	f.BoolVar(&o.noZip, "no-zip", false, "do not write reports/<name>/pcbpilot-report-<name>-vN.zip")
 	f.StringArrayVar(&o.images, "image", nil, "image KIND[:LABEL]=PATH, KIND sch|layout|heat|other (repeatable), e.g. sch:P1=p1.png, layout=snapshot.png, heat:TOP=heatmaps/temp-TOP.svg")
+	f.StringVar(&o.analog, "analog", "", "analog.json (pcbpilot sim analog): §3A analog SPICE section; its ngspice netlists/outputs are packaged under data/analog/")
 	f.BoolVar(&o.force, "force", false, "overwrite an existing version")
 	f.IntVar(&o.maxImageBytes, "max-image-bytes", designreport.DefaultMaxImageBytes, "raster images larger than this are halved until they fit")
 	f.StringVar(&o.date, "date", "", "generatedAt override (RFC3339); default SOURCE_DATE_EPOCH or now")
@@ -299,6 +302,19 @@ func loadDesignReportInputs(o designReportOpts, stderr io.Writer) (*designreport
 		return nil, nil, err
 	}
 	if err := parse("net-diff", "焊盘网络对账", o.netDiff, func(b []byte) (err error) { in.NetDiff, err = designreport.ParseNetDiff(b); return }); err != nil {
+		return nil, nil, err
+	}
+	if err := parse("analog", "模拟仿真 analog.json", o.analog, func(b []byte) error {
+		var out analogsim.Output
+		if err := json.Unmarshal(b, &out); err != nil {
+			return err
+		}
+		if out.SchemaVersion != analogsim.SchemaVersion {
+			return fmt.Errorf("analog.json schemaVersion %d unsupported", out.SchemaVersion)
+		}
+		in.Analog = &out
+		return nil
+	}); err != nil {
 		return nil, nil, err
 	}
 	if err := parse("values", "器件值/型号", o.values, func(b []byte) (err error) { in.Values, err = powersim.ParseValues(b); return }); err != nil {
@@ -462,6 +478,13 @@ func runDesignReport(o designReportOpts, stderr io.Writer) (string, *designrepor
 		files = append(files, newPkgFile("assets/charts/"+n+".svg", "chart", producers["report"], "", []byte(charts[n]+"\n")))
 	}
 	files = append(files, packaged...)
+	for _, af := range designreport.AnalogPackageFiles(in.Analog, o.analog) {
+		b, err := os.ReadFile(af.Src)
+		if err != nil {
+			continue
+		}
+		files = append(files, newPkgFile(af.Dest, "data", "pcbpilot sim analog", af.Src, b))
+	}
 	var notes []string
 	if ef, note := elmerFiles(in.Post, o.post); note != "" {
 		notes = append(notes, note)

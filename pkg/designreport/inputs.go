@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zhuangzard/pcbpilot/pkg/analogsim"
 	"github.com/zhuangzard/pcbpilot/pkg/intent"
 	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
 	"github.com/zhuangzard/pcbpilot/pkg/postsim"
@@ -27,6 +28,7 @@ type Inputs struct {
 
 	Intent      *intent.Intent
 	Sim         *powersim.Output
+	Analog      *analogsim.Output // pcbpilot sim analog (§3A)
 	Plan        *pcbauto.Report
 	Feedback    *pcbauto.Feedback
 	Board       *Board

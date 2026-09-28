@@ -37,7 +37,8 @@ type Intent struct {
 	// Edge is the board-edge safety distance (板边安全距离): outer / inner
 	// copper to the routed or V-cut edge, and per insulated domain the
 	// distance to the edge and metal mounting holes (accessible surfaces).
-	Edge *Edge `json:"edge,omitempty"`
+	Edge   *Edge       `json:"edge,omitempty"`
+	Analog *AnalogInfo `json:"analog,omitempty"` // sim analog summary (analog.go)
 }
 
 // Edge is intent.json "edge" — the same type pcb auto reads

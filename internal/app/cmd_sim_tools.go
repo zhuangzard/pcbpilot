@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -163,15 +162,6 @@ func simToolsOneLine(rep simtools.Report) string {
 		line += "  → pcbpilot sim tools install --yes"
 	}
 	return line
-}
-
-func sortedStringKeys(m map[string]string) []string {
-	ks := make([]string, 0, len(m))
-	for k := range m {
-		ks = append(ks, k)
-	}
-	sort.Strings(ks)
-	return ks
 }
 
 func validSimTool(name string) error {

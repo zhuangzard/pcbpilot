@@ -1,0 +1,418 @@
+* pcbpilot sim analog — block A1 voltage-reference (U3) mode mc
+* generated from schematic connectivity; rails from pcbpilot sim power (typical scenario)
+.include "pcbpilot-generic.lib"
+V_n__5v n__5v 0 DC 5
+C_c5 n_vref 0 1e-06
+R_r7 n__5v n_vref 1000
+V_IK_u3 n_vref ik_u3 DC 0
+X_u3 ik_u3 0 PCBPILOT_SHUNTREF params: vz=4.096 gm=2
+I_LOAD_n_vref n_vref 0 DC 0.00015
+.options noacct rshunt=1e12
+.control
+set filetype=ascii
+set wr_singlescale
+set wr_vecnames
+option numdgt=10
+alter c_c5 = 9.83217e-07
+alter r_r7 = 994.27
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.04875e-06
+alter r_r7 = 1003.65
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.01814e-06
+alter r_r7 = 994.629
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.01055e-06
+alter r_r7 = 1001.07
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.04355e-06
+alter r_r7 = 993.334
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.75181e-07
+alter r_r7 = 1002.64
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.74624e-07
+alter r_r7 = 1004.31
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.06567e-06
+alter r_r7 = 998.806
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.98848e-07
+alter r_r7 = 1002.12
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.98691e-07
+alter r_r7 = 995.587
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.02258e-06
+alter r_r7 = 1001.64
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.0514e-06
+alter r_r7 = 995.593
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.93854e-07
+alter r_r7 = 1003.34
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.74995e-07
+alter r_r7 = 994.468
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.04622e-06
+alter r_r7 = 999.254
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.05098e-06
+alter r_r7 = 997.762
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.87863e-07
+alter r_r7 = 999.864
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.74984e-07
+alter r_r7 = 1000.2
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.84582e-07
+alter r_r7 = 1005.04
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.00611e-06
+alter r_r7 = 1000.46
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.09027e-06
+alter r_r7 = 998.1
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.01094e-06
+alter r_r7 = 999.522
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.01529e-06
+alter r_r7 = 994.05
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.01191e-06
+alter r_r7 = 997.846
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.00034e-06
+alter r_r7 = 999.606
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.88563e-07
+alter r_r7 = 999.438
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.03597e-06
+alter r_r7 = 994.005
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.54485e-07
+alter r_r7 = 993.917
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.86686e-07
+alter r_r7 = 1002.11
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.6001e-07
+alter r_r7 = 1003.35
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.81242e-07
+alter r_r7 = 995.815
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.03345e-06
+alter r_r7 = 1001.98
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.00283e-06
+alter r_r7 = 1005.28
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.39721e-07
+alter r_r7 = 1001.95
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.40452e-07
+alter r_r7 = 1003.42
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.02604e-06
+alter r_r7 = 998.208
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.7152e-07
+alter r_r7 = 998.341
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.00736e-06
+alter r_r7 = 1000.23
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.58286e-07
+alter r_r7 = 1001.95
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.80389e-07
+alter r_r7 = 1000.52
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.96573e-07
+alter r_r7 = 1001.19
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.00153e-06
+alter r_r7 = 997.252
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.878e-07
+alter r_r7 = 1004.43
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.82783e-07
+alter r_r7 = 1002.46
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.54077e-07
+alter r_r7 = 998.524
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.94009e-07
+alter r_r7 = 1006.74
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.48547e-07
+alter r_r7 = 994.085
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.94685e-07
+alter r_r7 = 1003.24
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.69017e-07
+alter r_r7 = 997.647
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.01633e-06
+alter r_r7 = 1000.71
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.014e-06
+alter r_r7 = 1000.86
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.86743e-07
+alter r_r7 = 1001.11
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.00067e-06
+alter r_r7 = 995.957
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.01239e-06
+alter r_r7 = 998.846
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.02383e-06
+alter r_r7 = 999.051
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.7025e-07
+alter r_r7 = 998.987
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.0245e-06
+alter r_r7 = 1001.05
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.85814e-07
+alter r_r7 = 1001.19
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.85072e-07
+alter r_r7 = 995.205
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.0428e-06
+alter r_r7 = 999.752
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.75007e-07
+alter r_r7 = 998.897
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.75646e-07
+alter r_r7 = 1003.76
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.03663e-06
+alter r_r7 = 998.159
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.05134e-06
+alter r_r7 = 1001.95
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.00542e-06
+alter r_r7 = 1001.3
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.01491e-06
+alter r_r7 = 1005.7
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.03367e-06
+alter r_r7 = 995.49
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.01286e-06
+alter r_r7 = 1006.85
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.69136e-07
+alter r_r7 = 1002.59
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.00117e-06
+alter r_r7 = 1000.45
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.03082e-06
+alter r_r7 = 1005.09
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.61228e-07
+alter r_r7 = 999.69
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.03173e-06
+alter r_r7 = 1003.67
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.02076e-06
+alter r_r7 = 995.707
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.01281e-06
+alter r_r7 = 1001.69
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.0284e-06
+alter r_r7 = 1001.59
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.85905e-07
+alter r_r7 = 996.201
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.55406e-07
+alter r_r7 = 1001.54
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.69342e-07
+alter r_r7 = 1000.8
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.56262e-07
+alter r_r7 = 999.785
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.66676e-07
+alter r_r7 = 1002.33
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.01453e-06
+alter r_r7 = 997.365
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.01569e-06
+alter r_r7 = 999.913
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.78853e-07
+alter r_r7 = 996.304
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.65747e-07
+alter r_r7 = 991.684
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.68998e-07
+alter r_r7 = 1002.57
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.32648e-07
+alter r_r7 = 997.308
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.02587e-06
+alter r_r7 = 1002.1
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.0227e-06
+alter r_r7 = 996.525
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.33432e-07
+alter r_r7 = 1003.88
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.70709e-07
+alter r_r7 = 998.183
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.37613e-07
+alter r_r7 = 1003.32
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.98181e-07
+alter r_r7 = 996.85
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.71223e-07
+alter r_r7 = 1000.82
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.73354e-07
+alter r_r7 = 1000.48
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.00319e-06
+alter r_r7 = 1001.49
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 1.04874e-06
+alter r_r7 = 1001.64
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.88986e-07
+alter r_r7 = 998.79
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.40457e-07
+alter r_r7 = 998.204
+op
+print v(n_vref) i(v_ik_u3)
+alter c_c5 = 9.65369e-07
+alter r_r7 = 1003.97
+op
+print v(n_vref) i(v_ik_u3)
+quit
+.endc
+.end

@@ -94,6 +94,7 @@ func (c *ctx) buildFindings() {
 	c.findUSB()
 	c.findNets()
 	c.findSafety()
+	c.findAnalog()
 	sev := map[string]int{"error": 0, "warn": 1, "info": 2}
 	sort.SliceStable(c.out.Findings, func(i, j int) bool {
 		a, b := c.out.Findings[i], c.out.Findings[j]

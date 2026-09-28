@@ -163,6 +163,7 @@ func (c *ctx) buildSummary() {
 			}
 		}
 	}
+	risks = append(risks, c.analogRisks()...)
 	for _, ch := range c.rep.Verification {
 		if ch.Status == StatusFail {
 			risks = append(risks, Risk{Severity: "error", Source: "verification", Message: ch.Name + "：" + ch.Detail})
@@ -273,6 +274,7 @@ func (c *ctx) verdict() Verdict {
 			fail(sprintf("%d 项工程计算（线宽/过孔/间距/阻抗）不满足", bad))
 		}
 	}
+	c.analogVerdict(fail, warn)
 	na := 0
 	for _, ch := range c.rep.Verification {
 		switch ch.Status {

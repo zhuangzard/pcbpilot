@@ -1,0 +1,3656 @@
+{
+  "schemaVersion": 1,
+  "generator": "pcbpilot sim power",
+  "scenarios": [
+    "typical",
+    "peak",
+    "terminal-only",
+    "terminal-j2-only",
+    "worst"
+  ],
+  "results": [
+    {
+      "scenario": "typical",
+      "description": "typical loads, every input source on, momentary switches open",
+      "converged": true,
+      "iterations": 3,
+      "nets": {
+        "+5V": {
+          "voltage": 5,
+          "currentA": 0.00135,
+          "role": "power",
+          "pins": [
+            {
+              "ref": "C6",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "C7",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "J2",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0.00135,
+              "dir": "source",
+              "kind": "connector-source"
+            },
+            {
+              "ref": "R7",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0.00085,
+              "dir": "sink",
+              "kind": "resistor"
+            },
+            {
+              "ref": "U1",
+              "pin": "8",
+              "name": "VDD",
+              "currentA": 0.0002,
+              "dir": "sink",
+              "kind": "load"
+            },
+            {
+              "ref": "U2",
+              "pin": "8",
+              "name": "VDD",
+              "currentA": 0.0003,
+              "dir": "sink",
+              "kind": "load"
+            }
+          ]
+        },
+        "AAF": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "C1",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "R3",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "U1",
+              "pin": "3",
+              "name": "INA+",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ]
+        },
+        "ADC_CLK": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "J3",
+              "pin": "3",
+              "name": "3",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "connector"
+            },
+            {
+              "ref": "U2",
+              "pin": "7",
+              "name": "CLK",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ],
+          "floating": true
+        },
+        "ADC_CS": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "J3",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "connector"
+            },
+            {
+              "ref": "U2",
+              "pin": "5",
+              "name": "CS/SHDN",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ],
+          "floating": true
+        },
+        "ADC_DOUT": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "J3",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "connector"
+            },
+            {
+              "ref": "U2",
+              "pin": "6",
+              "name": "DOUT",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ],
+          "floating": true
+        },
+        "ADC_IN": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "C4",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "R6",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "U2",
+              "pin": "2",
+              "name": "IN+",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ]
+        },
+        "BUF_OUT": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "R4",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "U1",
+              "pin": "1",
+              "name": "OUTA",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            },
+            {
+              "ref": "U1",
+              "pin": "2",
+              "name": "INA-",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ]
+        },
+        "DIV": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "R1",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "R2",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "R3",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            }
+          ]
+        },
+        "FILT_OUT": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "C2",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "R6",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "U1",
+              "pin": "6",
+              "name": "INB-",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            },
+            {
+              "ref": "U1",
+              "pin": "7",
+              "name": "OUTB",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ]
+        },
+        "GND": {
+          "voltage": 0,
+          "currentA": 0.00135,
+          "role": "ground",
+          "pins": [
+            {
+              "ref": "C1",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "C3",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "C4",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "C5",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "C6",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "C7",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "J1",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "connector-source"
+            },
+            {
+              "ref": "J2",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0.00135,
+              "dir": "sink",
+              "kind": "connector-source"
+            },
+            {
+              "ref": "J3",
+              "pin": "4",
+              "name": "4",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "connector"
+            },
+            {
+              "ref": "R2",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "U1",
+              "pin": "4",
+              "name": "VSS",
+              "currentA": 0.0002,
+              "dir": "source",
+              "kind": "load"
+            },
+            {
+              "ref": "U2",
+              "pin": "3",
+              "name": "IN-",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            },
+            {
+              "ref": "U2",
+              "pin": "4",
+              "name": "VSS",
+              "currentA": 0.00045,
+              "dir": "source",
+              "kind": "load"
+            },
+            {
+              "ref": "U3",
+              "pin": "2",
+              "name": "A",
+              "currentA": 0.0007,
+              "dir": "source",
+              "kind": "load"
+            }
+          ]
+        },
+        "SENS_IN": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "J1",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "connector-source"
+            },
+            {
+              "ref": "R1",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            }
+          ]
+        },
+        "SK_P": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "C3",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "R5",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "U1",
+              "pin": "5",
+              "name": "INB+",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ]
+        },
+        "SK_X": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "C2",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "R4",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "R5",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            }
+          ]
+        },
+        "VREF": {
+          "voltage": 4.15,
+          "currentA": 0.00085,
+          "role": "power",
+          "pins": [
+            {
+              "ref": "C5",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "R7",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0.00085,
+              "dir": "source",
+              "kind": "resistor"
+            },
+            {
+              "ref": "U2",
+              "pin": "1",
+              "name": "VREF",
+              "currentA": 0.00015,
+              "dir": "sink",
+              "kind": "load"
+            },
+            {
+              "ref": "U3",
+              "pin": "1",
+              "name": "K",
+              "currentA": 0.0007,
+              "dir": "sink",
+              "kind": "load"
+            }
+          ]
+        }
+      },
+      "parts": {
+        "C1": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "C2": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "C3": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "C4": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "C5": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "C6": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "C7": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "J1": {
+          "model": "connector-source",
+          "modelId": "kf301-2p",
+          "confidence": "assumed",
+          "powerW": 0
+        },
+        "J2": {
+          "model": "connector-source",
+          "modelId": "kf301-2p",
+          "confidence": "assumed",
+          "powerW": -0.00675,
+          "suppliedW": 0.00675
+        },
+        "J3": {
+          "model": "connector",
+          "modelId": "generic-connector",
+          "confidence": "assumed",
+          "powerW": 0
+        },
+        "R1": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "R2": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "R3": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "R4": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "R5": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "R6": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "R7": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0.000723
+        },
+        "U1": {
+          "model": "load",
+          "modelId": "mcp6002",
+          "confidence": "approx",
+          "powerW": 0.001
+        },
+        "U2": {
+          "model": "load",
+          "modelId": "mcp3201",
+          "confidence": "approx",
+          "powerW": 0.002122
+        },
+        "U3": {
+          "model": "load",
+          "modelId": "lm4040",
+          "confidence": "assumed",
+          "powerW": 0.002905
+        }
+      },
+      "ripple": {},
+      "warnings": [],
+      "assumptions": [
+        "DC operating point (MNA + Newton-Raphson): capacitors open, inductors = DCR, switching regulators averaged by power balance; not a transient simulation",
+        "IC signal pins are high-impedance (no DC drive) unless a GPIO drives an LED network",
+        "loads are constant-current above a knee voltage and resistive below it (unpowered rails draw nothing)",
+        "J2: input source +5V = 5.00 V (net name) with 0.02 Ω series resistance"
+      ]
+    },
+    {
+      "scenario": "peak",
+      "description": "peak loads, every input source on, momentary switches released",
+      "converged": true,
+      "iterations": 3,
+      "nets": {
+        "+5V": {
+          "voltage": 5,
+          "currentA": 0.00169,
+          "role": "power",
+          "pins": [
+            {
+              "ref": "C6",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "C7",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "J2",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0.00169,
+              "dir": "source",
+              "kind": "connector-source"
+            },
+            {
+              "ref": "R7",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0.00085,
+              "dir": "sink",
+              "kind": "resistor"
+            },
+            {
+              "ref": "U1",
+              "pin": "8",
+              "name": "VDD",
+              "currentA": 0.00034,
+              "dir": "sink",
+              "kind": "load"
+            },
+            {
+              "ref": "U2",
+              "pin": "8",
+              "name": "VDD",
+              "currentA": 0.0005,
+              "dir": "sink",
+              "kind": "load"
+            }
+          ]
+        },
+        "AAF": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "C1",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "R3",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "U1",
+              "pin": "3",
+              "name": "INA+",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ]
+        },
+        "ADC_CLK": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "J3",
+              "pin": "3",
+              "name": "3",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "connector"
+            },
+            {
+              "ref": "U2",
+              "pin": "7",
+              "name": "CLK",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ],
+          "floating": true
+        },
+        "ADC_CS": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "J3",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "connector"
+            },
+            {
+              "ref": "U2",
+              "pin": "5",
+              "name": "CS/SHDN",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ],
+          "floating": true
+        },
+        "ADC_DOUT": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "J3",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "connector"
+            },
+            {
+              "ref": "U2",
+              "pin": "6",
+              "name": "DOUT",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ],
+          "floating": true
+        },
+        "ADC_IN": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "C4",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "R6",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "U2",
+              "pin": "2",
+              "name": "IN+",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ]
+        },
+        "BUF_OUT": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "R4",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "U1",
+              "pin": "1",
+              "name": "OUTA",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            },
+            {
+              "ref": "U1",
+              "pin": "2",
+              "name": "INA-",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ]
+        },
+        "DIV": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "R1",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "R2",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "R3",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            }
+          ]
+        },
+        "FILT_OUT": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "C2",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "R6",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "U1",
+              "pin": "6",
+              "name": "INB-",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            },
+            {
+              "ref": "U1",
+              "pin": "7",
+              "name": "OUTB",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ]
+        },
+        "GND": {
+          "voltage": 0,
+          "currentA": 0.00169,
+          "role": "ground",
+          "pins": [
+            {
+              "ref": "C1",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "C3",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "C4",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "C5",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "C6",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "C7",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "J1",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "connector-source"
+            },
+            {
+              "ref": "J2",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0.00169,
+              "dir": "sink",
+              "kind": "connector-source"
+            },
+            {
+              "ref": "J3",
+              "pin": "4",
+              "name": "4",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "connector"
+            },
+            {
+              "ref": "R2",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "U1",
+              "pin": "4",
+              "name": "VSS",
+              "currentA": 0.00034,
+              "dir": "source",
+              "kind": "load"
+            },
+            {
+              "ref": "U2",
+              "pin": "3",
+              "name": "IN-",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            },
+            {
+              "ref": "U2",
+              "pin": "4",
+              "name": "VSS",
+              "currentA": 0.00065,
+              "dir": "source",
+              "kind": "load"
+            },
+            {
+              "ref": "U3",
+              "pin": "2",
+              "name": "A",
+              "currentA": 0.0007,
+              "dir": "source",
+              "kind": "load"
+            }
+          ]
+        },
+        "SENS_IN": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "J1",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "connector-source"
+            },
+            {
+              "ref": "R1",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            }
+          ]
+        },
+        "SK_P": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "C3",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "R5",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "U1",
+              "pin": "5",
+              "name": "INB+",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ]
+        },
+        "SK_X": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "C2",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "R4",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "R5",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            }
+          ]
+        },
+        "VREF": {
+          "voltage": 4.15,
+          "currentA": 0.00085,
+          "role": "power",
+          "pins": [
+            {
+              "ref": "C5",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "R7",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0.00085,
+              "dir": "source",
+              "kind": "resistor"
+            },
+            {
+              "ref": "U2",
+              "pin": "1",
+              "name": "VREF",
+              "currentA": 0.00015,
+              "dir": "sink",
+              "kind": "load"
+            },
+            {
+              "ref": "U3",
+              "pin": "1",
+              "name": "K",
+              "currentA": 0.0007,
+              "dir": "sink",
+              "kind": "load"
+            }
+          ]
+        }
+      },
+      "parts": {
+        "C1": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "C2": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "C3": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "C4": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "C5": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "C6": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "C7": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "J1": {
+          "model": "connector-source",
+          "modelId": "kf301-2p",
+          "confidence": "assumed",
+          "powerW": 0
+        },
+        "J2": {
+          "model": "connector-source",
+          "modelId": "kf301-2p",
+          "confidence": "assumed",
+          "powerW": -0.00845,
+          "suppliedW": 0.00845
+        },
+        "J3": {
+          "model": "connector",
+          "modelId": "generic-connector",
+          "confidence": "assumed",
+          "powerW": 0
+        },
+        "R1": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "R2": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "R3": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "R4": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "R5": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "R6": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "R7": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0.000723
+        },
+        "U1": {
+          "model": "load",
+          "modelId": "mcp6002",
+          "confidence": "approx",
+          "powerW": 0.0017
+        },
+        "U2": {
+          "model": "load",
+          "modelId": "mcp3201",
+          "confidence": "approx",
+          "powerW": 0.003122
+        },
+        "U3": {
+          "model": "load",
+          "modelId": "lm4040",
+          "confidence": "assumed",
+          "powerW": 0.002905
+        }
+      },
+      "ripple": {},
+      "warnings": [],
+      "assumptions": [
+        "DC operating point (MNA + Newton-Raphson): capacitors open, inductors = DCR, switching regulators averaged by power balance; not a transient simulation",
+        "IC signal pins are high-impedance (no DC drive) unless a GPIO drives an LED network",
+        "loads are constant-current above a knee voltage and resistive below it (unpowered rails draw nothing)",
+        "J2: input source +5V = 5.00 V (net name) with 0.02 Ω series resistance"
+      ]
+    },
+    {
+      "scenario": "terminal-only",
+      "description": "peak loads, only J1 (terminal) supplies the board",
+      "converged": true,
+      "iterations": 2,
+      "nets": {
+        "+5V": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "power",
+          "pins": [
+            {
+              "ref": "C6",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "C7",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "J2",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "connector-source"
+            },
+            {
+              "ref": "R7",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "U1",
+              "pin": "8",
+              "name": "VDD",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            },
+            {
+              "ref": "U2",
+              "pin": "8",
+              "name": "VDD",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ]
+        },
+        "AAF": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "C1",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "R3",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "U1",
+              "pin": "3",
+              "name": "INA+",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ]
+        },
+        "ADC_CLK": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "J3",
+              "pin": "3",
+              "name": "3",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "connector"
+            },
+            {
+              "ref": "U2",
+              "pin": "7",
+              "name": "CLK",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ],
+          "floating": true
+        },
+        "ADC_CS": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "J3",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "connector"
+            },
+            {
+              "ref": "U2",
+              "pin": "5",
+              "name": "CS/SHDN",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ],
+          "floating": true
+        },
+        "ADC_DOUT": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "J3",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "connector"
+            },
+            {
+              "ref": "U2",
+              "pin": "6",
+              "name": "DOUT",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ],
+          "floating": true
+        },
+        "ADC_IN": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "C4",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "R6",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "U2",
+              "pin": "2",
+              "name": "IN+",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ]
+        },
+        "BUF_OUT": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "R4",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "U1",
+              "pin": "1",
+              "name": "OUTA",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            },
+            {
+              "ref": "U1",
+              "pin": "2",
+              "name": "INA-",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ]
+        },
+        "DIV": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "R1",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "R2",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "R3",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            }
+          ]
+        },
+        "FILT_OUT": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "C2",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "R6",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "U1",
+              "pin": "6",
+              "name": "INB-",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            },
+            {
+              "ref": "U1",
+              "pin": "7",
+              "name": "OUTB",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ]
+        },
+        "GND": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "ground",
+          "pins": [
+            {
+              "ref": "C1",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "C3",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "C4",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "C5",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "C6",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "C7",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "J1",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "connector-source"
+            },
+            {
+              "ref": "J2",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "connector-source"
+            },
+            {
+              "ref": "J3",
+              "pin": "4",
+              "name": "4",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "connector"
+            },
+            {
+              "ref": "R2",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "U1",
+              "pin": "4",
+              "name": "VSS",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            },
+            {
+              "ref": "U2",
+              "pin": "3",
+              "name": "IN-",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            },
+            {
+              "ref": "U2",
+              "pin": "4",
+              "name": "VSS",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            },
+            {
+              "ref": "U3",
+              "pin": "2",
+              "name": "A",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ]
+        },
+        "SENS_IN": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "J1",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "connector-source"
+            },
+            {
+              "ref": "R1",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            }
+          ]
+        },
+        "SK_P": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "C3",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "R5",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "U1",
+              "pin": "5",
+              "name": "INB+",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ]
+        },
+        "SK_X": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "C2",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "R4",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "R5",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            }
+          ]
+        },
+        "VREF": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "power",
+          "pins": [
+            {
+              "ref": "C5",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "R7",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "U2",
+              "pin": "1",
+              "name": "VREF",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            },
+            {
+              "ref": "U3",
+              "pin": "1",
+              "name": "K",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ]
+        }
+      },
+      "parts": {
+        "C1": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "C2": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "C3": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "C4": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "C5": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "C6": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "C7": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "J1": {
+          "model": "connector-source",
+          "modelId": "kf301-2p",
+          "confidence": "assumed",
+          "powerW": 0
+        },
+        "J2": {
+          "model": "connector-source",
+          "modelId": "kf301-2p",
+          "confidence": "assumed",
+          "powerW": 0
+        },
+        "J3": {
+          "model": "connector",
+          "modelId": "generic-connector",
+          "confidence": "assumed",
+          "powerW": 0
+        },
+        "R1": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "R2": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "R3": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "R4": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "R5": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "R6": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "R7": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "U1": {
+          "model": "load",
+          "modelId": "mcp6002",
+          "confidence": "approx",
+          "powerW": 0
+        },
+        "U2": {
+          "model": "load",
+          "modelId": "mcp3201",
+          "confidence": "approx",
+          "powerW": 0
+        },
+        "U3": {
+          "model": "load",
+          "modelId": "lm4040",
+          "confidence": "assumed",
+          "powerW": 0
+        }
+      },
+      "ripple": {},
+      "warnings": [],
+      "assumptions": [
+        "DC operating point (MNA + Newton-Raphson): capacitors open, inductors = DCR, switching regulators averaged by power balance; not a transient simulation",
+        "IC signal pins are high-impedance (no DC drive) unless a GPIO drives an LED network",
+        "loads are constant-current above a knee voltage and resistive below it (unpowered rails draw nothing)",
+        "J2: input source +5V = 5.00 V (net name) with 0.02 Ω series resistance",
+        "J2 (terminal-j2) disconnected in terminal-only"
+      ]
+    },
+    {
+      "scenario": "terminal-j2-only",
+      "description": "peak loads, only J2 (terminal-j2) supplies the board",
+      "converged": true,
+      "iterations": 3,
+      "nets": {
+        "+5V": {
+          "voltage": 5,
+          "currentA": 0.00169,
+          "role": "power",
+          "pins": [
+            {
+              "ref": "C6",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "C7",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "J2",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0.00169,
+              "dir": "source",
+              "kind": "connector-source"
+            },
+            {
+              "ref": "R7",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0.00085,
+              "dir": "sink",
+              "kind": "resistor"
+            },
+            {
+              "ref": "U1",
+              "pin": "8",
+              "name": "VDD",
+              "currentA": 0.00034,
+              "dir": "sink",
+              "kind": "load"
+            },
+            {
+              "ref": "U2",
+              "pin": "8",
+              "name": "VDD",
+              "currentA": 0.0005,
+              "dir": "sink",
+              "kind": "load"
+            }
+          ]
+        },
+        "AAF": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "C1",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "R3",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "U1",
+              "pin": "3",
+              "name": "INA+",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ]
+        },
+        "ADC_CLK": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "J3",
+              "pin": "3",
+              "name": "3",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "connector"
+            },
+            {
+              "ref": "U2",
+              "pin": "7",
+              "name": "CLK",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ],
+          "floating": true
+        },
+        "ADC_CS": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "J3",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "connector"
+            },
+            {
+              "ref": "U2",
+              "pin": "5",
+              "name": "CS/SHDN",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ],
+          "floating": true
+        },
+        "ADC_DOUT": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "J3",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "connector"
+            },
+            {
+              "ref": "U2",
+              "pin": "6",
+              "name": "DOUT",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ],
+          "floating": true
+        },
+        "ADC_IN": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "C4",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "R6",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "U2",
+              "pin": "2",
+              "name": "IN+",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ]
+        },
+        "BUF_OUT": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "R4",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "U1",
+              "pin": "1",
+              "name": "OUTA",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            },
+            {
+              "ref": "U1",
+              "pin": "2",
+              "name": "INA-",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ]
+        },
+        "DIV": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "R1",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "R2",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "R3",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            }
+          ]
+        },
+        "FILT_OUT": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "C2",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "R6",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "U1",
+              "pin": "6",
+              "name": "INB-",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            },
+            {
+              "ref": "U1",
+              "pin": "7",
+              "name": "OUTB",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ]
+        },
+        "GND": {
+          "voltage": 0,
+          "currentA": 0.00169,
+          "role": "ground",
+          "pins": [
+            {
+              "ref": "C1",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "C3",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "C4",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "C5",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "C6",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "C7",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "J1",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "connector-source"
+            },
+            {
+              "ref": "J2",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0.00169,
+              "dir": "sink",
+              "kind": "connector-source"
+            },
+            {
+              "ref": "J3",
+              "pin": "4",
+              "name": "4",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "connector"
+            },
+            {
+              "ref": "R2",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "U1",
+              "pin": "4",
+              "name": "VSS",
+              "currentA": 0.00034,
+              "dir": "source",
+              "kind": "load"
+            },
+            {
+              "ref": "U2",
+              "pin": "3",
+              "name": "IN-",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            },
+            {
+              "ref": "U2",
+              "pin": "4",
+              "name": "VSS",
+              "currentA": 0.00065,
+              "dir": "source",
+              "kind": "load"
+            },
+            {
+              "ref": "U3",
+              "pin": "2",
+              "name": "A",
+              "currentA": 0.0007,
+              "dir": "source",
+              "kind": "load"
+            }
+          ]
+        },
+        "SENS_IN": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "J1",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "connector-source"
+            },
+            {
+              "ref": "R1",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            }
+          ]
+        },
+        "SK_P": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "C3",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "R5",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "U1",
+              "pin": "5",
+              "name": "INB+",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load"
+            }
+          ]
+        },
+        "SK_X": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "C2",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "R4",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            },
+            {
+              "ref": "R5",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor"
+            }
+          ]
+        },
+        "VREF": {
+          "voltage": 4.15,
+          "currentA": 0.00085,
+          "role": "power",
+          "pins": [
+            {
+              "ref": "C5",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor"
+            },
+            {
+              "ref": "R7",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0.00085,
+              "dir": "source",
+              "kind": "resistor"
+            },
+            {
+              "ref": "U2",
+              "pin": "1",
+              "name": "VREF",
+              "currentA": 0.00015,
+              "dir": "sink",
+              "kind": "load"
+            },
+            {
+              "ref": "U3",
+              "pin": "1",
+              "name": "K",
+              "currentA": 0.0007,
+              "dir": "sink",
+              "kind": "load"
+            }
+          ]
+        }
+      },
+      "parts": {
+        "C1": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "C2": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "C3": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "C4": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "C5": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "C6": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "C7": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "J1": {
+          "model": "connector-source",
+          "modelId": "kf301-2p",
+          "confidence": "assumed",
+          "powerW": 0
+        },
+        "J2": {
+          "model": "connector-source",
+          "modelId": "kf301-2p",
+          "confidence": "assumed",
+          "powerW": -0.00845,
+          "suppliedW": 0.00845
+        },
+        "J3": {
+          "model": "connector",
+          "modelId": "generic-connector",
+          "confidence": "assumed",
+          "powerW": 0
+        },
+        "R1": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "R2": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "R3": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "R4": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "R5": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "R6": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0
+        },
+        "R7": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0.000723
+        },
+        "U1": {
+          "model": "load",
+          "modelId": "mcp6002",
+          "confidence": "approx",
+          "powerW": 0.0017
+        },
+        "U2": {
+          "model": "load",
+          "modelId": "mcp3201",
+          "confidence": "approx",
+          "powerW": 0.003122
+        },
+        "U3": {
+          "model": "load",
+          "modelId": "lm4040",
+          "confidence": "assumed",
+          "powerW": 0.002905
+        }
+      },
+      "ripple": {},
+      "warnings": [],
+      "assumptions": [
+        "DC operating point (MNA + Newton-Raphson): capacitors open, inductors = DCR, switching regulators averaged by power balance; not a transient simulation",
+        "IC signal pins are high-impedance (no DC drive) unless a GPIO drives an LED network",
+        "loads are constant-current above a knee voltage and resistive below it (unpowered rails draw nothing)",
+        "J2: input source +5V = 5.00 V (net name) with 0.02 Ω series resistance",
+        "J1 (terminal) disconnected in terminal-j2-only"
+      ]
+    },
+    {
+      "scenario": "worst",
+      "description": "per-pin maximum over typical, peak, terminal-only, terminal-j2-only (KCL does not hold across pins of different scenarios)",
+      "converged": true,
+      "iterations": 11,
+      "nets": {
+        "+5V": {
+          "voltage": 5,
+          "currentA": 0.00169,
+          "role": "power",
+          "pins": [
+            {
+              "ref": "C6",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor",
+              "scenario": "typical"
+            },
+            {
+              "ref": "C7",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor",
+              "scenario": "typical"
+            },
+            {
+              "ref": "J2",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0.00169,
+              "dir": "source",
+              "kind": "connector-source",
+              "scenario": "peak"
+            },
+            {
+              "ref": "R7",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0.00085,
+              "dir": "sink",
+              "kind": "resistor",
+              "scenario": "typical"
+            },
+            {
+              "ref": "U1",
+              "pin": "8",
+              "name": "VDD",
+              "currentA": 0.00034,
+              "dir": "sink",
+              "kind": "load",
+              "scenario": "peak"
+            },
+            {
+              "ref": "U2",
+              "pin": "8",
+              "name": "VDD",
+              "currentA": 0.0005,
+              "dir": "sink",
+              "kind": "load",
+              "scenario": "peak"
+            }
+          ],
+          "voltageMin": 0,
+          "voltageMax": 5,
+          "scenario": "peak"
+        },
+        "AAF": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "C1",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor",
+              "scenario": "typical"
+            },
+            {
+              "ref": "R3",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor",
+              "scenario": "typical"
+            },
+            {
+              "ref": "U1",
+              "pin": "3",
+              "name": "INA+",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load",
+              "scenario": "typical"
+            }
+          ],
+          "voltageMin": 0,
+          "voltageMax": 0,
+          "scenario": "typical"
+        },
+        "ADC_CLK": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "J3",
+              "pin": "3",
+              "name": "3",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "connector",
+              "scenario": "typical"
+            },
+            {
+              "ref": "U2",
+              "pin": "7",
+              "name": "CLK",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load",
+              "scenario": "typical"
+            }
+          ],
+          "floating": true,
+          "voltageMin": 0,
+          "voltageMax": 0,
+          "scenario": "typical"
+        },
+        "ADC_CS": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "J3",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "connector",
+              "scenario": "typical"
+            },
+            {
+              "ref": "U2",
+              "pin": "5",
+              "name": "CS/SHDN",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load",
+              "scenario": "typical"
+            }
+          ],
+          "floating": true,
+          "voltageMin": 0,
+          "voltageMax": 0,
+          "scenario": "typical"
+        },
+        "ADC_DOUT": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "J3",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "connector",
+              "scenario": "typical"
+            },
+            {
+              "ref": "U2",
+              "pin": "6",
+              "name": "DOUT",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load",
+              "scenario": "typical"
+            }
+          ],
+          "floating": true,
+          "voltageMin": 0,
+          "voltageMax": 0,
+          "scenario": "typical"
+        },
+        "ADC_IN": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "C4",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor",
+              "scenario": "typical"
+            },
+            {
+              "ref": "R6",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor",
+              "scenario": "typical"
+            },
+            {
+              "ref": "U2",
+              "pin": "2",
+              "name": "IN+",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load",
+              "scenario": "typical"
+            }
+          ],
+          "voltageMin": 0,
+          "voltageMax": 0,
+          "scenario": "typical"
+        },
+        "BUF_OUT": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "R4",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor",
+              "scenario": "typical"
+            },
+            {
+              "ref": "U1",
+              "pin": "1",
+              "name": "OUTA",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load",
+              "scenario": "typical"
+            },
+            {
+              "ref": "U1",
+              "pin": "2",
+              "name": "INA-",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load",
+              "scenario": "typical"
+            }
+          ],
+          "voltageMin": 0,
+          "voltageMax": 0,
+          "scenario": "typical"
+        },
+        "DIV": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "R1",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor",
+              "scenario": "typical"
+            },
+            {
+              "ref": "R2",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor",
+              "scenario": "typical"
+            },
+            {
+              "ref": "R3",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor",
+              "scenario": "typical"
+            }
+          ],
+          "voltageMin": 0,
+          "voltageMax": 0,
+          "scenario": "typical"
+        },
+        "FILT_OUT": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "C2",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor",
+              "scenario": "typical"
+            },
+            {
+              "ref": "R6",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor",
+              "scenario": "typical"
+            },
+            {
+              "ref": "U1",
+              "pin": "6",
+              "name": "INB-",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load",
+              "scenario": "typical"
+            },
+            {
+              "ref": "U1",
+              "pin": "7",
+              "name": "OUTB",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load",
+              "scenario": "typical"
+            }
+          ],
+          "voltageMin": 0,
+          "voltageMax": 0,
+          "scenario": "typical"
+        },
+        "GND": {
+          "voltage": 0,
+          "currentA": 0.00169,
+          "role": "ground",
+          "pins": [
+            {
+              "ref": "C1",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor",
+              "scenario": "typical"
+            },
+            {
+              "ref": "C3",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor",
+              "scenario": "typical"
+            },
+            {
+              "ref": "C4",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor",
+              "scenario": "typical"
+            },
+            {
+              "ref": "C5",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor",
+              "scenario": "typical"
+            },
+            {
+              "ref": "C6",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor",
+              "scenario": "typical"
+            },
+            {
+              "ref": "C7",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor",
+              "scenario": "typical"
+            },
+            {
+              "ref": "J1",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "connector-source",
+              "scenario": "typical"
+            },
+            {
+              "ref": "J2",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0.00169,
+              "dir": "sink",
+              "kind": "connector-source",
+              "scenario": "peak"
+            },
+            {
+              "ref": "J3",
+              "pin": "4",
+              "name": "4",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "connector",
+              "scenario": "typical"
+            },
+            {
+              "ref": "R2",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor",
+              "scenario": "typical"
+            },
+            {
+              "ref": "U1",
+              "pin": "4",
+              "name": "VSS",
+              "currentA": 0.00034,
+              "dir": "source",
+              "kind": "load",
+              "scenario": "peak"
+            },
+            {
+              "ref": "U2",
+              "pin": "3",
+              "name": "IN-",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load",
+              "scenario": "typical"
+            },
+            {
+              "ref": "U2",
+              "pin": "4",
+              "name": "VSS",
+              "currentA": 0.00065,
+              "dir": "source",
+              "kind": "load",
+              "scenario": "peak"
+            },
+            {
+              "ref": "U3",
+              "pin": "2",
+              "name": "A",
+              "currentA": 0.0007,
+              "dir": "source",
+              "kind": "load",
+              "scenario": "typical"
+            }
+          ],
+          "voltageMin": 0,
+          "voltageMax": 0,
+          "scenario": "peak"
+        },
+        "SENS_IN": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "J1",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "connector-source",
+              "scenario": "typical"
+            },
+            {
+              "ref": "R1",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor",
+              "scenario": "typical"
+            }
+          ],
+          "voltageMin": 0,
+          "voltageMax": 0,
+          "scenario": "typical"
+        },
+        "SK_P": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "C3",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor",
+              "scenario": "typical"
+            },
+            {
+              "ref": "R5",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor",
+              "scenario": "typical"
+            },
+            {
+              "ref": "U1",
+              "pin": "5",
+              "name": "INB+",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "load",
+              "scenario": "typical"
+            }
+          ],
+          "voltageMin": 0,
+          "voltageMax": 0,
+          "scenario": "typical"
+        },
+        "SK_X": {
+          "voltage": 0,
+          "currentA": 0,
+          "role": "signal",
+          "pins": [
+            {
+              "ref": "C2",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor",
+              "scenario": "typical"
+            },
+            {
+              "ref": "R4",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor",
+              "scenario": "typical"
+            },
+            {
+              "ref": "R5",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "resistor",
+              "scenario": "typical"
+            }
+          ],
+          "voltageMin": 0,
+          "voltageMax": 0,
+          "scenario": "typical"
+        },
+        "VREF": {
+          "voltage": 4.15,
+          "currentA": 0.00085,
+          "role": "power",
+          "pins": [
+            {
+              "ref": "C5",
+              "pin": "1",
+              "name": "1",
+              "currentA": 0,
+              "dir": "pass",
+              "kind": "capacitor",
+              "scenario": "typical"
+            },
+            {
+              "ref": "R7",
+              "pin": "2",
+              "name": "2",
+              "currentA": 0.00085,
+              "dir": "source",
+              "kind": "resistor",
+              "scenario": "typical"
+            },
+            {
+              "ref": "U2",
+              "pin": "1",
+              "name": "VREF",
+              "currentA": 0.00015,
+              "dir": "sink",
+              "kind": "load",
+              "scenario": "typical"
+            },
+            {
+              "ref": "U3",
+              "pin": "1",
+              "name": "K",
+              "currentA": 0.0007,
+              "dir": "sink",
+              "kind": "load",
+              "scenario": "typical"
+            }
+          ],
+          "voltageMin": 0,
+          "voltageMax": 4.15,
+          "scenario": "typical"
+        }
+      },
+      "parts": {
+        "C1": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0,
+          "scenario": "typical"
+        },
+        "C2": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0,
+          "scenario": "typical"
+        },
+        "C3": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0,
+          "scenario": "typical"
+        },
+        "C4": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0,
+          "scenario": "typical"
+        },
+        "C5": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0,
+          "scenario": "typical"
+        },
+        "C6": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0,
+          "scenario": "typical"
+        },
+        "C7": {
+          "model": "capacitor",
+          "modelId": "generic-capacitor",
+          "confidence": "value",
+          "powerW": 0,
+          "scenario": "typical"
+        },
+        "J1": {
+          "model": "connector-source",
+          "modelId": "kf301-2p",
+          "confidence": "assumed",
+          "powerW": 0,
+          "scenario": "typical"
+        },
+        "J2": {
+          "model": "connector-source",
+          "modelId": "kf301-2p",
+          "confidence": "assumed",
+          "powerW": -0.00845,
+          "suppliedW": 0.00845,
+          "scenario": "peak"
+        },
+        "J3": {
+          "model": "connector",
+          "modelId": "generic-connector",
+          "confidence": "assumed",
+          "powerW": 0,
+          "scenario": "typical"
+        },
+        "R1": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0,
+          "scenario": "typical"
+        },
+        "R2": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0,
+          "scenario": "typical"
+        },
+        "R3": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0,
+          "scenario": "typical"
+        },
+        "R4": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0,
+          "scenario": "typical"
+        },
+        "R5": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0,
+          "scenario": "typical"
+        },
+        "R6": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0,
+          "scenario": "typical"
+        },
+        "R7": {
+          "model": "resistor",
+          "modelId": "generic-resistor",
+          "confidence": "value",
+          "powerW": 0.000723,
+          "scenario": "typical"
+        },
+        "U1": {
+          "model": "load",
+          "modelId": "mcp6002",
+          "confidence": "approx",
+          "powerW": 0.0017,
+          "scenario": "peak"
+        },
+        "U2": {
+          "model": "load",
+          "modelId": "mcp3201",
+          "confidence": "approx",
+          "powerW": 0.003122,
+          "scenario": "peak"
+        },
+        "U3": {
+          "model": "load",
+          "modelId": "lm4040",
+          "confidence": "assumed",
+          "powerW": 0.002905,
+          "scenario": "typical"
+        }
+      },
+      "ripple": {},
+      "warnings": [],
+      "assumptions": [
+        "DC operating point (MNA + Newton-Raphson): capacitors open, inductors = DCR, switching regulators averaged by power balance; not a transient simulation",
+        "IC signal pins are high-impedance (no DC drive) unless a GPIO drives an LED network",
+        "loads are constant-current above a knee voltage and resistive below it (unpowered rails draw nothing)",
+        "J2: input source +5V = 5.00 V (net name) with 0.02 Ω series resistance",
+        "J2 (terminal-j2) disconnected in terminal-only",
+        "J1 (terminal) disconnected in terminal-j2-only"
+      ]
+    }
+  ],
+  "inputs": {
+    "connectivity": [
+      "../../../testdata/analog/frontend/sch-frontend.json"
+    ],
+    "values": [
+      "../../../testdata/analog/frontend/values.json"
+    ],
+    "libraries": [
+      "../../../.agents/skills/pcbpilot/references/power-models.json"
+    ]
+  },
+  "models": [
+    {
+      "ref": "C1",
+      "kind": "capacitor",
+      "modelId": "generic-capacitor",
+      "match": "generic: capacitor (open at DC)",
+      "confidence": "value"
+    },
+    {
+      "ref": "C2",
+      "kind": "capacitor",
+      "modelId": "generic-capacitor",
+      "match": "generic: capacitor (open at DC)",
+      "confidence": "value"
+    },
+    {
+      "ref": "C3",
+      "kind": "capacitor",
+      "modelId": "generic-capacitor",
+      "match": "generic: capacitor (open at DC)",
+      "confidence": "value"
+    },
+    {
+      "ref": "C4",
+      "kind": "capacitor",
+      "modelId": "generic-capacitor",
+      "match": "generic: capacitor (open at DC)",
+      "confidence": "value"
+    },
+    {
+      "ref": "C5",
+      "kind": "capacitor",
+      "modelId": "generic-capacitor",
+      "match": "generic: capacitor (open at DC)",
+      "confidence": "value"
+    },
+    {
+      "ref": "C6",
+      "kind": "capacitor",
+      "modelId": "generic-capacitor",
+      "match": "generic: capacitor (open at DC)",
+      "confidence": "value"
+    },
+    {
+      "ref": "C7",
+      "kind": "capacitor",
+      "modelId": "generic-capacitor",
+      "match": "generic: capacitor (open at DC)",
+      "confidence": "value"
+    },
+    {
+      "ref": "J1",
+      "kind": "connector-source",
+      "modelId": "kf301-2p",
+      "match": "lcsc C474881 → model kf301-2p",
+      "confidence": "assumed",
+      "source": "2-pin screw terminal used as a supply input: voltage from the net name (e.g. 5V_TERM → 5 V), else the default; 20 mΩ contact + short lead (assumed)."
+    },
+    {
+      "ref": "J2",
+      "kind": "connector-source",
+      "modelId": "kf301-2p",
+      "match": "lcsc C474881 → model kf301-2p",
+      "confidence": "assumed",
+      "source": "2-pin screw terminal used as a supply input: voltage from the net name (e.g. 5V_TERM → 5 V), else the default; 20 mΩ contact + short lead (assumed)."
+    },
+    {
+      "ref": "J3",
+      "kind": "connector",
+      "modelId": "generic-connector",
+      "match": "generic: connector",
+      "confidence": "assumed"
+    },
+    {
+      "ref": "R1",
+      "kind": "resistor",
+      "modelId": "generic-resistor",
+      "match": "generic: resistor by ref prefix R",
+      "confidence": "value"
+    },
+    {
+      "ref": "R2",
+      "kind": "resistor",
+      "modelId": "generic-resistor",
+      "match": "generic: resistor by ref prefix R",
+      "confidence": "value"
+    },
+    {
+      "ref": "R3",
+      "kind": "resistor",
+      "modelId": "generic-resistor",
+      "match": "generic: resistor by ref prefix R",
+      "confidence": "value"
+    },
+    {
+      "ref": "R4",
+      "kind": "resistor",
+      "modelId": "generic-resistor",
+      "match": "generic: resistor by ref prefix R",
+      "confidence": "value"
+    },
+    {
+      "ref": "R5",
+      "kind": "resistor",
+      "modelId": "generic-resistor",
+      "match": "generic: resistor by ref prefix R",
+      "confidence": "value"
+    },
+    {
+      "ref": "R6",
+      "kind": "resistor",
+      "modelId": "generic-resistor",
+      "match": "generic: resistor by ref prefix R",
+      "confidence": "value"
+    },
+    {
+      "ref": "R7",
+      "kind": "resistor",
+      "modelId": "generic-resistor",
+      "match": "generic: resistor by ref prefix R",
+      "confidence": "value"
+    },
+    {
+      "ref": "U1",
+      "kind": "load",
+      "modelId": "mcp6002",
+      "match": "mpn MCP6002T-I/SN → model mcp6002",
+      "confidence": "approx",
+      "source": "Microchip MCP6001/2/4 datasheet (DS21733): IQ 100 µA typ / 170 µA max per amplifier (dual = 2×); output load current is not included."
+    },
+    {
+      "ref": "U2",
+      "kind": "load",
+      "modelId": "mcp3201",
+      "match": "mpn MCP3201-CI/SN → model mcp3201",
+      "confidence": "approx",
+      "source": "Microchip MCP3201 datasheet (DS21290): IDD ≈ 300 µA typ / 500 µA max while converting at 5 V; IREF ≈ 150 µA during conversion."
+    },
+    {
+      "ref": "U3",
+      "kind": "load",
+      "modelId": "lm4040",
+      "match": "nameRegex LM4040DIM3-4.1/NOPB → model lm4040",
+      "confidence": "assumed",
+      "source": "LM4040 shunt reference: the DC power sim has no zener element, so the cathode is a constant sink at a typical bias point (0.7 mA, between the 60–75 µA minimum and 15 mA maximum of TI SNOS633). The reference VOLTAGE and the real cathode current come from pcbpilot sim analog (spice-models/analog-models.json)."
+    }
+  ],
+  "definitions": {
+    "pinCurrentA": "magnitude (A) of the DC current through the pad",
+    "dir": "source = current leaves the part into the net; sink = enters the part from the net; pass = no DC current (|I| \u003c 1 nA)",
+    "netCurrentA": "sum of source pin currents on the net (= sum of sink currents, KCL)",
+    "worst": "result 'worst' holds, per pin, the maximum current over all scenarios (pins[].scenario names where it occurred)"
+  }
+}
