@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -108,6 +110,7 @@ func newUpdateCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 		waitConnector bool
 		waitTimeout   time.Duration
 		noRollback    bool
+		binOverride   string
 	)
 	c := &cobra.Command{
 		Use:     "update",
@@ -150,6 +153,16 @@ refused. The daemon never pulls a checkout unless ` + "`--auto source`" + `.`,
 			}
 			if rollback {
 				return runRollback(cmd.Context(), cfg, pinVersion, jsonOut, stdout, stderr)
+			}
+			// --local-dir with a release (X.Y.Z) package and --binary: the full
+			// engine, replacing the CLI at --binary (a simulated or foreign
+			// install); X.Y.Z-dev.N packages keep the exact legacy path.
+			if localDir != "" && localBinary != "" && !checkOnly && !localDevPackage(localDir) {
+				if !filepath.IsAbs(localBinary) {
+					return fmt.Errorf("--binary must be an absolute path")
+				}
+				binOverride = localBinary
+				localBinary = ""
 			}
 			if localDir != "" && (localBinary != "" || checkOnly) {
 				for _, flag := range []string{"version", "cli-only", "skill-only", "client", "preserve", "force", "create-missing"} {
@@ -250,6 +263,12 @@ refused. The daemon never pulls a checkout unless ` + "`--auto source`" + `.`,
 				logw = nil
 			}
 			eng := &updateEngine{deps: realUpdateDeps(cfg, logw)}
+			if binOverride != "" {
+				eng.deps.binPath = binOverride
+				if out, err := exec.Command(binOverride, "--version").Output(); err == nil {
+					eng.deps.version = strings.TrimPrefix(strings.TrimSpace(string(out)), "pcbpilot ")
+				}
+			}
 			plan := updatePlan{
 				src: src, target: rep.Target, components: comps, clients: clients,
 				force: force, preserve: preserve, createMissing: createMissing,
@@ -288,7 +307,7 @@ refused. The daemon never pulls a checkout unless ` + "`--auto source`" + `.`,
 	f := c.Flags()
 	f.BoolVar(&checkOnly, "check", false, "report every component against the target without changing anything")
 	f.StringVar(&localDir, "local-dir", "", "use release assets from this local directory (checksums.txt + assets); never query GitHub")
-	f.StringVar(&localBinary, "binary", "", "legacy: with --local-dir, install X.Y.Z-dev.N CLI+Skill to this absolute path only")
+	f.StringVar(&localBinary, "binary", "", "with --local-dir: the CLI binary to replace (absolute; default: this executable). X.Y.Z-dev.N packages: legacy CLI+Skill install")
 	f.BoolVar(&exitCode, "exit-code", false, fmt.Sprintf("with --check: exit %d when anything is behind/misaligned", exitCodeUpdatesAvailable))
 	f.StringVar(&pinVersion, "version", "", "pin a release version (default: latest); with --rollback: the snapshot to restore")
 	f.BoolVar(&cliOnly, "cli-only", false, "same as --only cli")
@@ -308,6 +327,13 @@ refused. The daemon never pulls a checkout unless ` + "`--auto source`" + `.`,
 	f.DurationVar(&waitTimeout, "wait-timeout", 10*time.Minute, "how long --wait-connector waits")
 	f.BoolVar(&noRollback, "no-rollback", false, "keep a failed update in place instead of restoring the snapshot (debugging)")
 	return c
+}
+
+// localDevPackage reports whether a local asset dir holds an X.Y.Z-dev.N
+// package (legacy exact install path) rather than a release.
+func localDevPackage(dir string) bool {
+	src, err := selfupdate.LocalAssets(dir)
+	return err != nil || selfupdate.IsLocalVersion(src.Version())
 }
 
 func selectComponents(cliOnly, skillOnly bool, only, skip []string) (map[string]bool, error) {

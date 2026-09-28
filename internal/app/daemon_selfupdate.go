@@ -456,6 +456,16 @@ func (u *selfUpdater) align(ctx context.Context) bool {
 			ok = ok && err == nil
 		}
 	}
+	// First release with the MCP asset: install it when missing (unless the
+	// user opted out of automatic updates) so "upgrade everything" holds for
+	// machines that came from a release without mcp.tar.gz.
+	if mode, _ := selfupdate.AutoMode(); selfupdate.MCPInstalledVersion() == "" && mode != selfupdate.AutoOff {
+		if node := selfupdate.FindNode(u.deps.lookPath, u.deps.runner, u.deps.goos); node.OK {
+			out, err := selfupdate.InstallMCP(actx, src, false)
+			selfupdate.AppendLog("align: mcp install %s (%s) %v", own, out.Status, errOrNil(err))
+			ok = ok && err == nil
+		}
+	}
 	if selfupdate.MCPInstalledVersion() != "" {
 		if node := selfupdate.FindNode(u.deps.lookPath, u.deps.runner, u.deps.goos); node.OK {
 			eng := &updateEngine{deps: u.deps}
