@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pcbpilot console</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="banner" class="banner" hidden></div>
+<header class="top">
+  <div class="brand"><span class="dot" id="live-dot" title="SSE"></span><b>pcbpilot</b><span class="muted">console</span><span class="tag dev">v0.7 dev</span></div>
+  <nav id="nav">
+    <a href="#/" data-page="monitor">监控</a>
+    <a href="#/projects" data-page="projects">项目</a>
+    <a href="#/activity" data-page="activity">活动流</a>
+    <a href="#/agents" data-page="agents">Agent 运行</a>
+    <a href="#/decisions" data-page="decisions">决策 <span id="ask-badge" class="badge" hidden>0</span></a>
+  </nav>
+  <div class="tools"><button id="theme" class="ghost" title="切换明暗">◐</button></div>
+</header>
+<main id="app"><div class="empty">加载中…</div></main>
+<footer class="foot muted">本地驾驶舱 · 只读观察 + 项目配置/资料库/决策卡；EDA 写入只走 daemon typed action · <span id="foot-daemon"></span></footer>
+<script src="app.js"></script>
+</body>
+</html>

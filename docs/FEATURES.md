@@ -138,6 +138,20 @@ fixture 回归：中小板 89–100%，大型 BGA 板（RK3568、K230）55–62%
 | 额定来源 | `power-models.json` `maxA` + 可选 `ratings`（带 source）、电容/电阻 MPN 解码、LCSC 描述属性、电阻封装功率表；未知额定不猜 |
 | 集成 | `intent derive --report-dir`（预布局版）、`pcb auto run --report-dir`；样例 `docs/examples/esp32-mini-design-report/`（v1 真实现场产物，v2 演示变更记录） |
 
+## 本地驾驶舱 console（v0.7，开发中，离线验证）
+
+| 能力 | 入口 | 状态 |
+|---|---|---|
+| 监控首页：daemon、组件版本对齐、窗口、全部项目（运行中/空闲/已结束 + DRC/报告结论）、实时动作流（SSE，daemon 重启自动重连） | daemon `/ui`，`pcbpilot console open|url` | offline-verified（临时 HOME + 非默认端口实测，见 [console-design.md](console-design.md)） |
+| 项目注册表（审计日志增量回填 + 实时流，`~/.pcbpilot/console/registry.json`） | console 内部 | offline-verified |
+| 工作目录：设计流程时间线（证据视图）、仿真轮次与 Δ、报告包预览（沙箱）、目录状态 | `pcbpilot console projects add`、console 项目页 | offline-verified（`scripts/console-e2e.sh`） |
+| 项目流程模板 `pcbpilot.project.json`（步骤/仿真/报告章节开关 + 约束，守卫校验；报告 §11.5 列出跳过项） | `pcbpilot project-config init|show|set|validate`，`report design --project-config` | offline-verified |
+| 资料库：存储、PDF/MD/TXT/HTML/DOCX 提取、分页分片、BM25、去重、摘要槽、标签、拖放上传 | `pcbpilot kb add|list|search|show|set-summary|tag|summarize-status|reindex` | offline-verified；OCR 未内置 |
+| 决策卡队列（console 回答、长轮询、到期默认、终端回退、决策日志） | `pcbpilot ask` | offline-verified |
+| CLI 长离线命令上报到 console（sim/report/intent/pcb auto/kb） | 自动（`PCBPILOT_CONSOLE_HOOK=0` 关闭） | offline-verified |
+| 本地 Agent 桥接（Claude Code / Codex 会话、子 Agent 与工具调用、权限提示转决策卡） | — | planned（v0.8） |
+| Tauri 托盘安装器 | — | planned（v0.9） |
+
 ## 已知不支持：Altium Designer 工程自动导入
 
 - `.SchDoc` / `.PcbDoc` 当前没有 typed action 或 CLI 导入入口；使用 EasyEDA Pro 的

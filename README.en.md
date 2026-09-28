@@ -140,6 +140,19 @@ stress suites and their known gaps are documented in the
 [HV isolation](.agents/skills/pcbpilot/references/recipes/hv-isolation.md) and
 [high-speed](.agents/skills/pcbpilot/references/recipes/high-speed.md) recipes.
 
+## v0.7 (in development, unreleased): the console
+
+The daemon serves a local cockpit at `http://127.0.0.1:61832/ui/` (`pcbpilot console open`; loopback only, per-install
+token in `~/.pcbpilot/console.token`). The **monitor** landing page streams the daemon (pid, uptime, port, autosave, login
+service), component version alignment (CLI, Skill, MCP, each window's connector), EasyEDA windows, **every project the
+system has worked on** (running / idle / finished with DRC and report outcome, duration, last error — kept across
+restarts) and the live action stream. Project pages add the design-flow timeline (S0–P11, evidence view), simulation
+rounds with deltas, report previews, a resource library (drag-and-drop upload + BM25 search, `pcbpilot kb`) and the
+process template (`pcbpilot.project.json`, `pcbpilot project-config`; the Skill reads it first and the report lists
+what was skipped). `pcbpilot ask` decision cards are answered in the page. The console never edits EDA projects; writes
+still go through typed actions only. Driving local agents (Claude Code / Codex) from the console is planned for v0.8.
+Design and API: [docs/console-design.md](docs/console-design.md).
+
 ## Install
 
 > **Full setup & usage notes: [Quick Start →](docs/quick-start.md)** — the

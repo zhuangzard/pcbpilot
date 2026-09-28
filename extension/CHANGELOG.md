@@ -1,5 +1,27 @@
 # Changelog
 
+## [Unreleased] — v0.7 console (development, not released)
+
+**Local web cockpit served by the daemon.** No connector change.
+
+- **Console** at `/ui` (`pcbpilot console open|url`, `daemon start --console`, default on): monitor landing page (daemon
+  pid/uptime/port/autosave/login service, component version alignment, EasyEDA windows, every project worked on —
+  running/idle/finished with DRC/report outcome, duration, last error — and the live action stream over SSE with
+  automatic reconnect), activity, agent runs (registered runs + inferred CLI sessions; the v0.8 bridge is labelled
+  planned), decisions, and per-work-dir timeline / sim rounds with deltas / reports / resource library / process
+  template. Loopback only, per-install token, Host/Origin checks, no CORS, sandboxed file serving. Embedded static page,
+  no build step, works offline, light/dark.
+- **Project registry** derived from the audit log (incremental backfill) + the live stream, persisted under
+  `~/.pcbpilot/console/`. Audit rows now also carry `projectUuid/projectName/documentUuid/documentType/outputDir`.
+- **`pcbpilot project-config`** — `pcbpilot.project.json` process template (steps / sims / report sections +
+  constraints, guard-rule validation); `report design --project-config` lists skipped steps/sections in §11.5 and no
+  longer counts them as missing. The Skill reads it first.
+- **`pcbpilot kb`** — per-project resource library: pure-Go PDF text (pdftotext fallback), md/txt/html/docx, page-bounded
+  chunks, BM25 with CJK bigrams, sha256 dedupe, summary slots, tags; console drag-and-drop upload.
+- **`pcbpilot ask`** — decision cards answered in the console (long-poll, default on expiry, terminal fallback, decision log).
+- **Fix: `pcb auto` router panic** (`nodeCong` indexed past the grid for a via disk at the board edge; ESP32 v05 board with
+  `--intent --sim`), found by the console end-to-end chain `scripts/console-e2e.sh`.
+
 ## [0.6.0] — 2026-09-28
 
 **Pre-layout + post-layout simulation, board-edge safety distance, analog SPICE.** The connector code is

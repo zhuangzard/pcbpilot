@@ -19,6 +19,16 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	root.SetArgs(args)
 	root.SetOut(stdout)
 	root.SetErr(stderr)
+	// Report long offline commands to the console (best-effort, see console_hook.go).
+	if end := startRunHook(root, args); end != nil {
+		code := execute(root, stderr)
+		end(code)
+		return code
+	}
+	return execute(root, stderr)
+}
+
+func execute(root *cobra.Command, stderr io.Writer) int {
 	if err := root.ExecuteContext(context.Background()); err != nil {
 		// A command that wants a specific exit code (e.g. `update --check
 		// --exit-code` signalling "updates available") has already printed its
@@ -112,6 +122,10 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 		newDebugCmd(cfg, stdout, stderr),
 		newSkillCmd(stdout, stderr),
 		newUpdateCmd(cfg, stdout, stderr),
+		newConsoleCmd(cfg, stdout, stderr),
+		newProjectConfigCmd(stdout, stderr),
+		newKBCmd(stdout, stderr),
+		newAskCmd(cfg, stdout, stderr),
 	)
 	installMissingSubcommandErrors(root)
 
