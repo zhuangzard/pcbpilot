@@ -1,0 +1,96 @@
+{
+  "order": "probes.dat: the last N numbers of the last row are the probe temperatures in this order",
+  "probes": [
+    {
+      "name": "board max",
+      "layer": "TOP",
+      "x": 561,
+      "y": 1151.6,
+      "modelC": 86.28,
+      "hasElmer": false,
+      "xyzM": [
+        0.01425,
+        0.02925,
+        -0.000017500000000000002
+      ]
+    },
+    {
+      "name": "D1",
+      "layer": "TOP",
+      "x": 128,
+      "y": 1171.3,
+      "modelC": 82.435,
+      "hasElmer": false,
+      "xyzM": [
+        0.0032500000000000003,
+        0.02975,
+        -0.000017500000000000002
+      ]
+    },
+    {
+      "name": "D2",
+      "layer": "TOP",
+      "x": 226.4,
+      "y": 679.1,
+      "modelC": 78.59,
+      "hasElmer": false,
+      "xyzM": [
+        0.00575,
+        0.01725,
+        -0.000017500000000000002
+      ]
+    },
+    {
+      "name": "L1",
+      "layer": "TOP",
+      "x": 442.9,
+      "y": 600.4,
+      "modelC": 80.983,
+      "hasElmer": false,
+      "xyzM": [
+        0.01125,
+        0.01525,
+        -0.000017500000000000002
+      ]
+    },
+    {
+      "name": "U1",
+      "layer": "TOP",
+      "x": 442.9,
+      "y": 561,
+      "modelC": 81.978,
+      "hasElmer": false,
+      "xyzM": [
+        0.01125,
+        0.01425,
+        -0.000017500000000000002
+      ]
+    },
+    {
+      "name": "U2",
+      "layer": "TOP",
+      "x": 1190.9,
+      "y": 620.1,
+      "modelC": 77.024,
+      "hasElmer": false,
+      "xyzM": [
+        0.03025,
+        0.01575,
+        -0.000017500000000000002
+      ]
+    },
+    {
+      "name": "U3",
+      "layer": "TOP",
+      "x": 561,
+      "y": 1151.6,
+      "modelC": 86.28,
+      "hasElmer": false,
+      "xyzM": [
+        0.01425,
+        0.02925,
+        -0.000017500000000000002
+      ]
+    }
+  ]
+}

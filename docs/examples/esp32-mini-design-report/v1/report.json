@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
   "generator": "pcbpilot report design",
-  "generatedAt": "2026-09-28T04:01:02Z",
+  "generatedAt": "2026-09-21T14:13:20Z",
   "project": "ESP32-S3 mini",
   "customer": "Demo",
   "version": 1,
   "versionLabel": "v1",
   "tools": {
-    "pcbpilot": "v0.5.0",
+    "pcbpilot": "dev",
     "host": "EasyEDA Pro desktop V3 3.2.149",
     "connector": "0.4.1"
   },
@@ -101,9 +101,22 @@
       "kind": "models",
       "label": "功率模型/额定 power-models.json",
       "path": ".agents/skills/pcbpilot/references/power-models.json",
-      "sha256": "d0156edeb226696fcbe74ed1249edbb596600c8bc7c8ca181431b71dc518b508",
-      "bytes": 17662,
+      "sha256": "8ac867b0ec7d1873c1612131384ea6d2ba37adc8cfe7b61a99d0e4a91335a8b4",
+      "bytes": 17790,
       "present": true
+    },
+    {
+      "kind": "post",
+      "label": "设计后仿真 post.json",
+      "path": "examples/esp32-mini-post-layout/post.json",
+      "sha256": "507c486b7875e5c70e608b9e7de60a696d13c41c9a3408329800daf5f2b41154",
+      "bytes": 75535,
+      "present": true
+    },
+    {
+      "kind": "spice",
+      "label": "SPICE 网表",
+      "present": false
     },
     {
       "kind": "image",
@@ -111,7 +124,8 @@
       "path": "artifacts/v05-live/sch-905bb85957eaf435.png",
       "sha256": "8a57cbdd3a56371642dc336db75a81a58aa0b46afb61c5a4871dd95507fc4094",
       "bytes": 540793,
-      "present": true
+      "present": true,
+      "note": "缩小到 590×418（82280 字节）"
     },
     {
       "kind": "image",
@@ -119,7 +133,8 @@
       "path": "artifacts/v05-live/sch-950ae6609e91d753.png",
       "sha256": "b3c20ee5aa379e5ac43d4812cc251680a48c553d633e3ca908300fd45d2f45be",
       "bytes": 349750,
-      "present": true
+      "present": true,
+      "note": "缩小到 1181×836（120921 字节）"
     },
     {
       "kind": "image",
@@ -127,7 +142,8 @@
       "path": "artifacts/v05-live/snap/v05-final/snapshot.png",
       "sha256": "912dc6053d52f162b1892d3a279a3f3ca4c99c781256bfbb98c3031908083e41",
       "bytes": 250392,
-      "present": true
+      "present": true,
+      "note": "缩小到 688×335（87398 字节）"
     },
     {
       "kind": "image",
@@ -136,9 +152,73 @@
       "sha256": "a0f25c3fdbc7bfa374629757e0c404c7c09af0f3126040fc70b7060baf16b6b7",
       "bytes": 83747,
       "present": true
+    },
+    {
+      "kind": "image",
+      "label": "TOP 温度（68.88–86.28 °C）",
+      "path": "examples/esp32-mini-post-layout/heatmaps/temp-TOP.svg",
+      "sha256": "deae362a5890102541f398b8b2526b14a72ebe72e367b69907b1829faf717cf6",
+      "bytes": 61973,
+      "present": true
+    },
+    {
+      "kind": "image",
+      "label": "IN1 温度（68.88–86.28 °C）",
+      "path": "examples/esp32-mini-post-layout/heatmaps/temp-IN1.svg",
+      "sha256": "4e7b8d550c5815d45c6e36eccf4fde4a85ed0488bd5dce6efdd8c6f8b7af6935",
+      "bytes": 48776,
+      "present": true
+    },
+    {
+      "kind": "image",
+      "label": "IN2 温度（68.88–86.28 °C）",
+      "path": "examples/esp32-mini-post-layout/heatmaps/temp-IN2.svg",
+      "sha256": "0dc5728b3fcd4f576ee96852e440be63f7252e8ec41005990c388d68720bed13",
+      "bytes": 48440,
+      "present": true
+    },
+    {
+      "kind": "image",
+      "label": "BOTTOM 温度（68.88–86.28 °C）",
+      "path": "examples/esp32-mini-post-layout/heatmaps/temp-BOTTOM.svg",
+      "sha256": "77ea8ebd55227ec875088cfb40ea8288f6cee3841b0475b8b3e0315d0bed6c58",
+      "bytes": 47899,
+      "present": true
+    },
+    {
+      "kind": "image",
+      "label": "TOP 电流密度（0.1–96.68 A/mm²）",
+      "path": "examples/esp32-mini-post-layout/heatmaps/current-TOP.svg",
+      "sha256": "44589ccf1ce70c541280a3c5336f16e3d75f646d12ef6d03b5d7d166097fb881",
+      "bytes": 48917,
+      "present": true
+    },
+    {
+      "kind": "image",
+      "label": "IN1 电流密度（0.1–96.68 A/mm²）",
+      "path": "examples/esp32-mini-post-layout/heatmaps/current-IN1.svg",
+      "sha256": "0af05c93bf224829b2e5762d845ebcb9c7789b1531bfc8fd6a01ed8cd9c9fb4b",
+      "bytes": 51494,
+      "present": true
+    },
+    {
+      "kind": "image",
+      "label": "IN2 电流密度（0.1–96.68 A/mm²）",
+      "path": "examples/esp32-mini-post-layout/heatmaps/current-IN2.svg",
+      "sha256": "6ea4e2573da2c948eb7890d4acca490b8de76856890a8172e784334b3067967e",
+      "bytes": 43646,
+      "present": true
+    },
+    {
+      "kind": "image",
+      "label": "BOTTOM 电流密度（0.1–96.68 A/mm²）",
+      "path": "examples/esp32-mini-post-layout/heatmaps/current-BOTTOM.svg",
+      "sha256": "312221df5d18e0783fe0c597d3692da703d3afe2a2d992ef2a8f037beea4627f",
+      "bytes": 42657,
+      "present": true
     }
   ],
-  "inputsDigest": "3942cb48405350f2c3b8f4929d77200a7b097a7bf4cddf27a6263a5b3c1e419e",
+  "inputsDigest": "6985c223aca733095bd2cbb45036be4b70b2418ff3ffa61a737258fc72bb30ff",
   "verdict": {
     "status": "PASS with warnings",
     "warnings": [
@@ -213,6 +293,16 @@
         "label": "pcb check（DFM 重建审计）",
         "value": "WARN",
         "note": "ERROR 0 / WARN 100 / INFO 13"
+      },
+      {
+        "label": "设计后最坏压降（真实铜皮）",
+        "value": "17.07 mV / 预算 99.1 mV",
+        "note": "USB_VBUS @ D2.2（usb-only）"
+      },
+      {
+        "label": "设计后板最高温度",
+        "value": "86.3 °C",
+        "note": "场景 terminal-only；TOP (561, 1151.6) mil，U3 下方"
       },
       {
         "label": "设计发现（intent）",
@@ -2197,33 +2287,36 @@
         "label": "原理图 P1",
         "path": "artifacts/v05-live/sch-905bb85957eaf435.png",
         "sha256": "8a57cbdd3a56371642dc336db75a81a58aa0b46afb61c5a4871dd95507fc4094",
-        "asset": "8a57cbdd3a563716.png",
+        "asset": "23ed79c6b45b26e1.png",
         "mime": "image/png",
-        "width": 2362,
-        "height": 1672,
-        "bytes": 540793
+        "width": 590,
+        "height": 418,
+        "bytes": 82280,
+        "resized": true
       },
       {
         "kind": "sch",
         "label": "原理图 P2",
         "path": "artifacts/v05-live/sch-950ae6609e91d753.png",
         "sha256": "b3c20ee5aa379e5ac43d4812cc251680a48c553d633e3ca908300fd45d2f45be",
-        "asset": "b3c20ee5aa379e5a.png",
+        "asset": "523bb6710f7b6782.png",
         "mime": "image/png",
-        "width": 2362,
-        "height": 1672,
-        "bytes": 349750
+        "width": 1181,
+        "height": 836,
+        "bytes": 120921,
+        "resized": true
       },
       {
         "kind": "layout",
         "label": "PCB 布局（编辑器快照）",
         "path": "artifacts/v05-live/snap/v05-final/snapshot.png",
         "sha256": "912dc6053d52f162b1892d3a279a3f3ca4c99c781256bfbb98c3031908083e41",
-        "asset": "912dc6053d52f162.png",
+        "asset": "d3d3e0fa91016589.png",
         "mime": "image/png",
-        "width": 1377,
-        "height": 670,
-        "bytes": 250392
+        "width": 688,
+        "height": 335,
+        "bytes": 87398,
+        "resized": true
       },
       {
         "kind": "preview",
@@ -2233,6 +2326,78 @@
         "asset": "a0f25c3fdbc7bfa3.svg",
         "mime": "image/svg+xml",
         "bytes": 83747
+      },
+      {
+        "kind": "heat",
+        "label": "TOP 温度（68.88–86.28 °C）",
+        "path": "examples/esp32-mini-post-layout/heatmaps/temp-TOP.svg",
+        "sha256": "deae362a5890102541f398b8b2526b14a72ebe72e367b69907b1829faf717cf6",
+        "asset": "deae362a58901025.svg",
+        "mime": "image/svg+xml",
+        "bytes": 61973
+      },
+      {
+        "kind": "heat",
+        "label": "IN1 温度（68.88–86.28 °C）",
+        "path": "examples/esp32-mini-post-layout/heatmaps/temp-IN1.svg",
+        "sha256": "4e7b8d550c5815d45c6e36eccf4fde4a85ed0488bd5dce6efdd8c6f8b7af6935",
+        "asset": "4e7b8d550c5815d4.svg",
+        "mime": "image/svg+xml",
+        "bytes": 48776
+      },
+      {
+        "kind": "heat",
+        "label": "IN2 温度（68.88–86.28 °C）",
+        "path": "examples/esp32-mini-post-layout/heatmaps/temp-IN2.svg",
+        "sha256": "0dc5728b3fcd4f576ee96852e440be63f7252e8ec41005990c388d68720bed13",
+        "asset": "0dc5728b3fcd4f57.svg",
+        "mime": "image/svg+xml",
+        "bytes": 48440
+      },
+      {
+        "kind": "heat",
+        "label": "BOTTOM 温度（68.88–86.28 °C）",
+        "path": "examples/esp32-mini-post-layout/heatmaps/temp-BOTTOM.svg",
+        "sha256": "77ea8ebd55227ec875088cfb40ea8288f6cee3841b0475b8b3e0315d0bed6c58",
+        "asset": "77ea8ebd55227ec8.svg",
+        "mime": "image/svg+xml",
+        "bytes": 47899
+      },
+      {
+        "kind": "heat",
+        "label": "TOP 电流密度（0.1–96.68 A/mm²）",
+        "path": "examples/esp32-mini-post-layout/heatmaps/current-TOP.svg",
+        "sha256": "44589ccf1ce70c541280a3c5336f16e3d75f646d12ef6d03b5d7d166097fb881",
+        "asset": "44589ccf1ce70c54.svg",
+        "mime": "image/svg+xml",
+        "bytes": 48917
+      },
+      {
+        "kind": "heat",
+        "label": "IN1 电流密度（0.1–96.68 A/mm²）",
+        "path": "examples/esp32-mini-post-layout/heatmaps/current-IN1.svg",
+        "sha256": "0af05c93bf224829b2e5762d845ebcb9c7789b1531bfc8fd6a01ed8cd9c9fb4b",
+        "asset": "0af05c93bf224829.svg",
+        "mime": "image/svg+xml",
+        "bytes": 51494
+      },
+      {
+        "kind": "heat",
+        "label": "IN2 电流密度（0.1–96.68 A/mm²）",
+        "path": "examples/esp32-mini-post-layout/heatmaps/current-IN2.svg",
+        "sha256": "6ea4e2573da2c948eb7890d4acca490b8de76856890a8172e784334b3067967e",
+        "asset": "6ea4e2573da2c948.svg",
+        "mime": "image/svg+xml",
+        "bytes": 43646
+      },
+      {
+        "kind": "heat",
+        "label": "BOTTOM 电流密度（0.1–96.68 A/mm²）",
+        "path": "examples/esp32-mini-post-layout/heatmaps/current-BOTTOM.svg",
+        "sha256": "312221df5d18e0783fe0c597d3692da703d3afe2a2d992ef2a8f037beea4627f",
+        "asset": "312221df5d18e078.svg",
+        "mime": "image/svg+xml",
+        "bytes": 42657
       }
     ],
     "stackupName": "JLC04161H-7628",
@@ -2947,6 +3112,479 @@
       }
     ]
   },
+  "postLayout": {
+    "status": "PASS",
+    "board": "208a2bcb43bebf4cbcbd34f8d3197875e8f7687ce1d5dc4e1b65900ebea40703",
+    "scenarios": "typical, peak, buttons-pressed, terminal-only, usb-only（scenarios）",
+    "boundary": "板级：裸板静止空气，上下表面自然对流 h 顶 10 / 底 10 W/m²K，环境 25 °C；不含外壳、风扇或气流（非 CFD），板边绝热",
+    "settings": [
+      {
+        "label": "网格",
+        "value": "0.5 mm 单元 92×92，板内 8218 单元/层"
+      },
+      {
+        "label": "IR 预算",
+        "value": "2%,30mV"
+      },
+      {
+        "label": "铜温升限值",
+        "value": "10 °C，余量 ×1.2",
+        "note": "线宽反馈"
+      },
+      {
+        "label": "过孔",
+        "value": "镀层 0.7 mil，载流 ΔT 10 °C",
+        "note": "IPC-2221 外层曲线作用于孔壁截面"
+      },
+      {
+        "label": "FR-4",
+        "value": "面内 0.3 / 厚度方向 0.3 W/mK"
+      },
+      {
+        "label": "负片平面 IN1",
+        "value": "GND",
+        "note": "dump 不列出负片铜：按整层平面扣反焊盘建模"
+      }
+    ],
+    "nets": [
+      {
+        "net": "+3V3",
+        "role": "power",
+        "scenario": "peak",
+        "reference": "L1",
+        "currentA": 0.521459,
+        "budgetMV": 66.36,
+        "worstMV": 2.704,
+        "worstPad": "U3.2",
+        "lossMW": 1.3744,
+        "maxJAmm2": 56.4,
+        "maxViaA": 0.5014,
+        "copperRiseC": 0.323,
+        "status": "ok"
+      },
+      {
+        "net": "+5V_TERM",
+        "role": "power",
+        "scenario": "terminal-only",
+        "reference": "J1",
+        "currentA": 0.426521,
+        "budgetMV": 99.83,
+        "worstMV": 0.993,
+        "worstPad": "D1.2",
+        "lossMW": 0.4234,
+        "maxJAmm2": 47.978,
+        "maxViaA": 0.42652,
+        "copperRiseC": 0.249,
+        "status": "ok"
+      },
+      {
+        "net": "USB_VBUS",
+        "role": "power",
+        "scenario": "usb-only",
+        "reference": "J2",
+        "currentA": 0.42975,
+        "budgetMV": 99.14,
+        "worstMV": 17.071,
+        "worstPad": "D2.2",
+        "lossMW": 7.3364,
+        "maxJAmm2": 96.682,
+        "maxViaA": 0,
+        "copperRiseC": 0.395,
+        "status": "ok"
+      },
+      {
+        "net": "VSYS_5V",
+        "role": "power",
+        "scenario": "terminal-only",
+        "reference": "D1",
+        "currentA": 0.426521,
+        "budgetMV": 92.55,
+        "worstMV": 13.608,
+        "worstPad": "U1.4",
+        "lossMW": 5.8041,
+        "maxJAmm2": 47.978,
+        "maxViaA": 0.42975,
+        "copperRiseC": 0.307,
+        "status": "ok"
+      },
+      {
+        "net": "LX",
+        "role": "switch",
+        "scenario": "peak",
+        "reference": "U1",
+        "currentA": 0.521459,
+        "worstMV": 0.265,
+        "worstPad": "L1.1",
+        "lossMW": 0.1383,
+        "maxJAmm2": 29.328,
+        "maxViaA": 0,
+        "copperRiseC": 0.292,
+        "status": "info"
+      },
+      {
+        "net": "GND",
+        "role": "ground",
+        "scenario": "usb-only",
+        "reference": "J2",
+        "currentA": 0.42975,
+        "worstMV": 0.335,
+        "worstPad": "U3.41",
+        "lossMW": 0.1468,
+        "maxJAmm2": 23.357,
+        "maxViaA": 0.16667,
+        "copperRiseC": 0.346,
+        "status": "info"
+      }
+    ],
+    "vias": [
+      {
+        "net": "+3V3",
+        "at": "(506.6, 1494.1) mil",
+        "currentA": 0.5014,
+        "ampacityA": 1.478,
+        "usePct": 33.9,
+        "scenario": "peak"
+      },
+      {
+        "net": "VSYS_5V",
+        "at": "(305.2, 560.9) mil",
+        "currentA": 0.42975,
+        "ampacityA": 1.478,
+        "usePct": 29.1,
+        "scenario": "usb-only"
+      },
+      {
+        "net": "VSYS_5V",
+        "at": "(190.2, 691.9) mil",
+        "currentA": 0.42652,
+        "ampacityA": 1.478,
+        "usePct": 28.9,
+        "scenario": "terminal-only"
+      },
+      {
+        "net": "VSYS_5V",
+        "at": "(190.2, 1273.6) mil",
+        "currentA": 0.42652,
+        "ampacityA": 1.478,
+        "usePct": 28.9,
+        "scenario": "terminal-only"
+      },
+      {
+        "net": "+5V_TERM",
+        "at": "(135.8, 1101) mil",
+        "currentA": 0.42652,
+        "ampacityA": 1.478,
+        "usePct": 28.9,
+        "scenario": "terminal-only"
+      },
+      {
+        "net": "+3V3",
+        "at": "(436.3, 704.7) mil",
+        "currentA": 0.27717,
+        "ampacityA": 1.478,
+        "usePct": 18.8,
+        "scenario": "peak"
+      },
+      {
+        "net": "+3V3",
+        "at": "(471.4, 778.2) mil",
+        "currentA": 0.24429,
+        "ampacityA": 1.478,
+        "usePct": 16.5,
+        "scenario": "peak"
+      },
+      {
+        "net": "VSYS_5V",
+        "at": "(126.2, 637.6) mil",
+        "currentA": 0.22926,
+        "ampacityA": 1.478,
+        "usePct": 15.5,
+        "scenario": "usb-only"
+      }
+    ],
+    "thermal": [
+      {
+        "label": "板最高温度",
+        "value": "86.3 °C",
+        "note": "场景 terminal-only；TOP (561, 1151.6) mil，U3 下方"
+      },
+      {
+        "label": "热源",
+        "value": "2.137 W（器件 2.129 W + 铜损 7.88 mW）"
+      },
+      {
+        "label": "能量平衡",
+        "value": "散出 2.137 W，误差 0.0000 %",
+        "note": "Σ 对流散热 = Σ 热源"
+      },
+      {
+        "label": "铜自热（仅铜损）",
+        "value": "0.4 °C",
+        "note": "场景 usb-only"
+      }
+    ],
+    "layers": [
+      {
+        "layer": "TOP",
+        "maxC": 86.28,
+        "meanC": 77.82,
+        "at": "(561, 1151.6)"
+      },
+      {
+        "layer": "IN1",
+        "maxC": 83.5,
+        "meanC": 77.58,
+        "at": "(580.7, 1112.2)"
+      },
+      {
+        "layer": "IN2",
+        "maxC": 80.74,
+        "meanC": 76.44,
+        "at": "(757.9, 1230.3)"
+      },
+      {
+        "layer": "BOTTOM",
+        "maxC": 80.42,
+        "meanC": 76.19,
+        "at": "(757.9, 1230.3)"
+      }
+    ],
+    "parts": [
+      {
+        "ref": "U3",
+        "side": "TOP",
+        "powerW": 1.659078,
+        "scenario": "terminal-only",
+        "boardMaxC": 86.28,
+        "status": "needs-datasheet"
+      },
+      {
+        "ref": "U1",
+        "side": "TOP",
+        "powerW": 0.19758,
+        "scenario": "usb-only",
+        "boardMaxC": 83.26,
+        "status": "needs-datasheet"
+      },
+      {
+        "ref": "D1",
+        "side": "TOP",
+        "powerW": 0.155225,
+        "scenario": "terminal-only",
+        "boardMaxC": 82.44,
+        "status": "needs-datasheet"
+      },
+      {
+        "ref": "L1",
+        "side": "TOP",
+        "powerW": 0.045954,
+        "scenario": "usb-only",
+        "boardMaxC": 82.2,
+        "status": "needs-datasheet"
+      },
+      {
+        "ref": "D2",
+        "side": "TOP",
+        "powerW": 0.156543,
+        "scenario": "usb-only",
+        "boardMaxC": 81.84,
+        "status": "needs-datasheet"
+      },
+      {
+        "ref": "R2",
+        "side": "TOP",
+        "powerW": 0.000036,
+        "scenario": "usb-only",
+        "boardMaxC": 79.82,
+        "status": "needs-datasheet"
+      },
+      {
+        "ref": "R1",
+        "side": "TOP",
+        "powerW": 0.000163,
+        "scenario": "usb-only",
+        "boardMaxC": 79.6,
+        "status": "needs-datasheet"
+      },
+      {
+        "ref": "R7",
+        "side": "TOP",
+        "powerW": 0.001959,
+        "scenario": "terminal-only",
+        "boardMaxC": 78.53,
+        "status": "needs-datasheet"
+      },
+      {
+        "ref": "LED1",
+        "side": "TOP",
+        "powerW": 0.002607,
+        "scenario": "terminal-only",
+        "boardMaxC": 77.69,
+        "status": "needs-datasheet"
+      },
+      {
+        "ref": "U2",
+        "side": "TOP",
+        "powerW": 0.06636,
+        "scenario": "usb-only",
+        "boardMaxC": 77.3,
+        "status": "needs-datasheet"
+      },
+      {
+        "ref": "D3",
+        "side": "TOP",
+        "powerW": 0.000001,
+        "scenario": "usb-only",
+        "boardMaxC": 76.7,
+        "status": "needs-datasheet"
+      }
+    ],
+    "feedback": null,
+    "compare": [
+      {
+        "net": "+3V3",
+        "autoMV": 3.828,
+        "postMV": 2.704,
+        "deltaMV": -1.124,
+        "pad": "U3.2"
+      },
+      {
+        "net": "+5V_TERM",
+        "autoMV": 1.98,
+        "postMV": 0.993,
+        "deltaMV": -0.987,
+        "pad": "D1.2"
+      },
+      {
+        "net": "GND",
+        "autoMV": 1.118,
+        "postMV": 0.335,
+        "deltaMV": -0.783,
+        "pad": "U3.41"
+      },
+      {
+        "net": "LX",
+        "autoMV": 0.614,
+        "postMV": 0.265,
+        "deltaMV": -0.349,
+        "pad": "L1.1"
+      },
+      {
+        "net": "USB_VBUS",
+        "autoMV": 17.873,
+        "postMV": 17.071,
+        "deltaMV": -0.802,
+        "pad": "D2.2"
+      },
+      {
+        "net": "VSYS_5V",
+        "autoMV": 15.617,
+        "postMV": 13.608,
+        "deltaMV": -2.009,
+        "pad": "U1.4"
+      }
+    ],
+    "elmer": [
+      {
+        "label": "状态",
+        "value": "skipped",
+        "note": "ElmerSolver not installed — run: pcbpilot sim tools install --only elmer. The deck is written for a later run (cd examples/esp32-mini-post-layout/elmer \u0026\u0026 ElmerSolver case.sif), then `pcbpilot sim post-layout … --elmer-result examples/esp32-mini-post-layout/elmer/probes.dat`"
+      },
+      {
+        "label": "输入包",
+        "value": "32872 节点 / 23910 六面体 / 244 体",
+        "note": "examples/esp32-mini-post-layout/elmer"
+      }
+    ],
+    "maps": [
+      {
+        "kind": "heat",
+        "label": "TOP 温度（68.88–86.28 °C）",
+        "path": "examples/esp32-mini-post-layout/heatmaps/temp-TOP.svg",
+        "sha256": "deae362a5890102541f398b8b2526b14a72ebe72e367b69907b1829faf717cf6",
+        "asset": "deae362a58901025.svg",
+        "mime": "image/svg+xml",
+        "bytes": 61973
+      },
+      {
+        "kind": "heat",
+        "label": "IN1 温度（68.88–86.28 °C）",
+        "path": "examples/esp32-mini-post-layout/heatmaps/temp-IN1.svg",
+        "sha256": "4e7b8d550c5815d45c6e36eccf4fde4a85ed0488bd5dce6efdd8c6f8b7af6935",
+        "asset": "4e7b8d550c5815d4.svg",
+        "mime": "image/svg+xml",
+        "bytes": 48776
+      },
+      {
+        "kind": "heat",
+        "label": "IN2 温度（68.88–86.28 °C）",
+        "path": "examples/esp32-mini-post-layout/heatmaps/temp-IN2.svg",
+        "sha256": "0dc5728b3fcd4f576ee96852e440be63f7252e8ec41005990c388d68720bed13",
+        "asset": "0dc5728b3fcd4f57.svg",
+        "mime": "image/svg+xml",
+        "bytes": 48440
+      },
+      {
+        "kind": "heat",
+        "label": "BOTTOM 温度（68.88–86.28 °C）",
+        "path": "examples/esp32-mini-post-layout/heatmaps/temp-BOTTOM.svg",
+        "sha256": "77ea8ebd55227ec875088cfb40ea8288f6cee3841b0475b8b3e0315d0bed6c58",
+        "asset": "77ea8ebd55227ec8.svg",
+        "mime": "image/svg+xml",
+        "bytes": 47899
+      },
+      {
+        "kind": "heat",
+        "label": "TOP 电流密度（0.1–96.68 A/mm²）",
+        "path": "examples/esp32-mini-post-layout/heatmaps/current-TOP.svg",
+        "sha256": "44589ccf1ce70c541280a3c5336f16e3d75f646d12ef6d03b5d7d166097fb881",
+        "asset": "44589ccf1ce70c54.svg",
+        "mime": "image/svg+xml",
+        "bytes": 48917
+      },
+      {
+        "kind": "heat",
+        "label": "IN1 电流密度（0.1–96.68 A/mm²）",
+        "path": "examples/esp32-mini-post-layout/heatmaps/current-IN1.svg",
+        "sha256": "0af05c93bf224829b2e5762d845ebcb9c7789b1531bfc8fd6a01ed8cd9c9fb4b",
+        "asset": "0af05c93bf224829.svg",
+        "mime": "image/svg+xml",
+        "bytes": 51494
+      },
+      {
+        "kind": "heat",
+        "label": "IN2 电流密度（0.1–96.68 A/mm²）",
+        "path": "examples/esp32-mini-post-layout/heatmaps/current-IN2.svg",
+        "sha256": "6ea4e2573da2c948eb7890d4acca490b8de76856890a8172e784334b3067967e",
+        "asset": "6ea4e2573da2c948.svg",
+        "mime": "image/svg+xml",
+        "bytes": 43646
+      },
+      {
+        "kind": "heat",
+        "label": "BOTTOM 电流密度（0.1–96.68 A/mm²）",
+        "path": "examples/esp32-mini-post-layout/heatmaps/current-BOTTOM.svg",
+        "sha256": "312221df5d18e0783fe0c597d3692da703d3afe2a2d992ef2a8f037beea4627f",
+        "asset": "312221df5d18e078.svg",
+        "mime": "image/svg+xml",
+        "bytes": 42657
+      }
+    ],
+    "assumptions": [
+      "copper from the board dump: tracks/arcs = 1-D resistors ρL/(w·t) split at junctions/vias/pads and at every cell; poured fills, static fills, planes = sheet cells G = (t/ρ)·min(harmonic coverage, shared-edge copper fraction); pads shorted to the sheet they overlap",
+      "ρ = 1.72e-08 Ω·m (20 °C); via barrel R = ρ·h/(π(d+t)t), plating t = 0.7 mil, h = layer-centre distance",
+      "stackup: TOP 35.0 µm @ z 0.018 mm; IN1 17.5 µm @ z 0.254 mm; IN2 17.5 µm @ z 1.346 mm; BOTTOM 35.0 µm @ z 1.583 mm; dielectrics [0.2104 1.0742 0.2104] mm (JLC04161H-7628 (4-layer 1.6 mm, L1→L2 prepreg 0.2104 mm))",
+      "each scenario of the sim file is solved on its own (KCL-consistent): the supplying part (power: source pins; ground: return entry, connector-source first) is the 0 V reference, every other pad draws (+I) or feeds (−I) its simulated current; worst = maximum over scenarios",
+      "via ampacity = IPC-2221 external curve on the barrel cross-section π(d+t)t at ΔT 10 °C (IPC-2152: internal ≈ external)",
+      "thermal: per layer k_Cu 385 W/mK × t × coverage + FR-4 0.3 W/mK in-plane over half of each adjacent dielectric; FR-4 0.3 W/mK through-plane + via barrels; convection top/bottom; part heat on its pads by area; Joule heat from the DC solve; board edges adiabatic; part bodies do not convect separately (their top face shares the board's h)",
+      "Tj = board temperature under the part + P·θJB (θJC when only that is rated); without a rating only the board temperature is reported",
+      "2 through-hole pad(s) carry no drill in the dump: plated hole assumed = 0.5 × the smaller pad side",
+      "83 thermal-relief spoke(s) of the poured copper modelled as tracks of their stroke width",
+      "IN1 has no copper objects in the dump (a negative/内电层 plane is not listed by pcb dump): assumed a solid GND plane — board outline inset 10 mil (copper-to-edge), antipads around every other-net via / THT pad / cutout = its copper + 6.0 mil clearance, same-net vias connect directly (thermal-relief spokes ignored). Override with --plane 15=NET or --plane 15=none",
+      "boundary: the bare board in still air — natural convection on both faces (top 10.0, bottom 10.0 W/m²K), no enclosure, fan or airflow (no CFD); board edges adiabatic"
+    ],
+    "data": "data/post.json"
+  },
   "verification": [
     {
       "name": "原生 DRC（EasyEDA）",
@@ -2996,6 +3634,13 @@
       "detail": "0 个网络超预算，最坏 17.9 % 预算",
       "evidence": "artifacts/v05-live/final/plan.json",
       "sha256": "82bfc1b79f39a1f99188318ba856442cb73318eb1c07a8ecbea9e68a8f9c03eb"
+    },
+    {
+      "name": "设计后仿真（post-layout）",
+      "status": "PASS",
+      "detail": "post-layout PASS；+3V3 2.7/66.4 mV；+5V_TERM 0.99/99.8 mV；USB_VBUS 17.07/99.1 mV；VSYS_5V 13.61/92.6 mV；板最高 86.3 °C",
+      "evidence": "examples/esp32-mini-post-layout/post.json",
+      "sha256": "507c486b7875e5c70e608b9e7de60a696d13c41c9a3408329800daf5f2b41154"
     }
   ],
   "testPlan": {
@@ -4094,5 +4739,20 @@
         "value": "器件底部裸露散热/接地焊盘"
       }
     ]
-  }
+  },
+  "data": {
+    "board": "data/board.json",
+    "check": "data/check.txt",
+    "drc": "data/drc.json",
+    "feedback": "data/feedback.json",
+    "intent": "data/intent.json",
+    "models": "data/power-models.json",
+    "net-diff": "data/net-diff.json",
+    "plan": "data/plan.json",
+    "post": "data/post.json",
+    "reload-board": "data/board.reload.json",
+    "rules-check": "data/rules-check.json",
+    "sim": "data/sim.json"
+  },
+  "package": "pcbpilot-report-ESP32-S3-mini-v1.zip"
 }

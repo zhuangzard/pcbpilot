@@ -419,14 +419,14 @@ func runDesignReport(o designReportOpts, stderr io.Writer) (string, *designrepor
 	}
 	rep := designreport.Build(in)
 	rep.Version, rep.VersionLabel = v, label
-	cur := designreport.EntryOf(rep)
-	rep.Changes = designreport.Compare(idx.Latest(v), cur)
-	cur.Changes = rep.Changes
-	charts := designreport.Charts(rep)
 	zipFile := zipName(rep.Project, label)
 	if !o.noZip {
 		rep.Package = zipFile
 	}
+	cur := designreport.EntryOf(rep)
+	rep.Changes = designreport.Compare(idx.Latest(v), cur)
+	cur.Changes = rep.Changes
+	charts := designreport.Charts(rep)
 	html, err := designreport.RenderHTML(rep, charts)
 	if err != nil {
 		return "", nil, fmt.Errorf("render html: %w", err)

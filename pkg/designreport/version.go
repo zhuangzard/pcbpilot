@@ -32,6 +32,8 @@ type IndexEntry struct {
 	Metrics      Metrics           `json:"metrics"`
 	Findings     map[string]string `json:"findings"` // stable key → message
 	Changes      *Changes          `json:"changes,omitempty"`
+	// Package is the zip of the version (reports/<name>/<Package>).
+	Package string `json:"package,omitempty"`
 }
 
 // Metrics are the numbers compared between versions.
@@ -48,6 +50,10 @@ type Metrics struct {
 	// WidthNeedMil the IPC outer width it needs.
 	IntentA      map[string]float64 `json:"intentCurrentA,omitempty"`
 	WidthNeedMil map[string]float64 `json:"widthNeedMil,omitempty"`
+	// Post-layout (sim post-layout): drop on the real copper per net and the
+	// hottest board temperature.
+	PostDropMV map[string]float64 `json:"postDropMV,omitempty"`
+	PostMaxC   *float64           `json:"postMaxC,omitempty"`
 }
 
 // ParseIndex reads index.json (empty input = new index).
@@ -165,6 +171,21 @@ func MetricsOf(r *Report) Metrics {
 			m.IntentA[w.Net], m.WidthNeedMil[w.Net] = w.CurrentA, w.OuterNeedMil
 		}
 	}
+	if p := r.Post; p != nil {
+		m.PostDropMV = map[string]float64{}
+		for _, n := range p.Nets {
+			m.PostDropMV[n.Net] = round(n.WorstMV, 3)
+		}
+		if len(p.Layers) > 0 {
+			mx := p.Layers[0].MaxC
+			for _, l := range p.Layers {
+				if l.MaxC > mx {
+					mx = l.MaxC
+				}
+			}
+			m.PostMaxC = &mx
+		}
+	}
 	for _, ch := range r.Verification {
 		m.Checks[ch.Name] = ch.Status
 	}
@@ -220,7 +241,7 @@ func EntryOf(r *Report) IndexEntry {
 		}
 	}
 	return IndexEntry{Version: r.Version, Label: r.VersionLabel, Dir: r.VersionLabel, GeneratedAt: r.GeneratedAt, Verdict: r.Verdict.Status,
-		InputsDigest: r.InputsDigest, Inputs: in, Metrics: MetricsOf(r), Findings: FindingsOf(r), Changes: r.Changes}
+		InputsDigest: r.InputsDigest, Inputs: in, Metrics: MetricsOf(r), Findings: FindingsOf(r), Changes: r.Changes, Package: r.Package}
 }
 
 // Compare computes the changes of cur against prev.
@@ -259,6 +280,10 @@ func Compare(prev *IndexEntry, cur IndexEntry) *Changes {
 	num("电源轨电压", pm.RailVoltageV, cm.RailVoltageV, " V", 1e-3)
 	num("输入功率", pm.SuppliedW, cm.SuppliedW, " W", 1e-4)
 	num("IR 压降", pm.IRDropMV, cm.IRDropMV, " mV", 0.01)
+	num("设计后压降", pm.PostDropMV, cm.PostDropMV, " mV", 0.01)
+	if pm.PostMaxC != nil && cm.PostMaxC != nil && math.Abs(*pm.PostMaxC-*cm.PostMaxC) >= 0.1 {
+		ch.Rows = append(ch.Rows, ChangeRow{Metric: "设计后板最高温度", Before: f1(*pm.PostMaxC) + " °C", After: f1(*cm.PostMaxC) + " °C", Delta: sprintf("%+.1f °C", *cm.PostMaxC-*pm.PostMaxC)})
+	}
 	num("余量", pm.MarginPct, cm.MarginPct, " %", 0.05)
 	num("意图电流", pm.IntentA, cm.IntentA, " A", 1e-4)
 	num("所需线宽", pm.WidthNeedMil, cm.WidthNeedMil, " mil", 0.01)
@@ -335,12 +360,16 @@ func RenderChangelog(idx *Index) string {
 	if idx.Customer != "" {
 		fmt.Fprintf(&b, "客户：%s\n\n", idx.Customer)
 	}
-	b.WriteString("由 `pcbpilot report design` 生成；每个版本目录含 report.html（自包含）、report.md、report.json。\n\n")
+	b.WriteString("由 `pcbpilot report design` 生成；每个版本目录是一个交付包：report.html（自包含）、report.md、report.json、manifest.json、assets/（图片、图表、热图）、data/（全部输入与证据），并打包为 zip。\n\n")
 	for i := len(idx.Versions) - 1; i >= 0; i-- {
 		e := idx.Versions[i]
 		fmt.Fprintf(&b, "## %s — %s\n\n", e.Label, e.Verdict)
-		fmt.Fprintf(&b, "- 生成时间：%s\n- 报告：[%s/report.html](%s/report.html) · [report.md](%s/report.md) · [report.json](%s/report.json)\n- 输入摘要：`%s`\n\n",
+		fmt.Fprintf(&b, "- 生成时间：%s\n- 报告：[%s/report.html](%s/report.html) · [report.md](%s/report.md) · [report.json](%s/report.json)\n- 输入摘要：`%s`\n",
 			e.GeneratedAt, e.Dir, e.Dir, e.Dir, e.Dir, short(e.InputsDigest))
+		if e.Package != "" {
+			fmt.Fprintf(&b, "- 交付包：`%s`（清单 [%s/manifest.json](%s/manifest.json)）\n", e.Package, e.Dir, e.Dir)
+		}
+		b.WriteString("\n")
 		ch := e.Changes
 		if ch == nil {
 			b.WriteString("首个版本。\n\n")

@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "source": "pcb auto run",
+  "difficulty": {
+    "hard": false,
+    "completion": 100,
+    "unrouted": 0,
+    "ratsCrossings": 12,
+    "ratsLengthMil": 6672,
+    "wireLengthIn": 9.65,
+    "vias": 14,
+    "hsViaFindings": 0,
+    "irOverBudget": 0,
+    "neckDowns": 0,
+    "joint": 92.65
+  },
+  "items": [],
+  "notes": [
+    "引脚交换：在可重映射器件（pin-capabilities.json 收录的 MCU、通用排针）上没有找到能缩短飞线或减少交叉的排列"
+  ],
+  "rules": [
+    "本文件只是离线建议：没有任何一条写入过 EasyEDA（status 一律 live-unverified）。",
+    "引脚交换改的是原理图：执行 `pcbpilot sch pin-swap --plan feedback.json --item \u003cid\u003e` 生成的 playbook 前，先把 diff 给用户确认，与布局变更同一确认规则。",
+    "执行后必须：sch gate / 连通性回读 → 重新导入 PCB（原理图→PCB 更新）→ pcb pad-net-diff 对账 → 重新 pcb auto run；未完成前不得称已改善。",
+    "加件（去耦、稳压器）、封装更换属于设计变更，只给方案与数值，由用户决定后走原理图模块流程。"
+  ]
+}

@@ -1,0 +1,102 @@
+{
+  "mode": "check",
+  "intent": "artifacts/v05-live/intent.json",
+  "intentSha256": "8239b4b298ff1209bf6b181469c40bd4d879f2798eff7197eedb9366d67d3e91",
+  "plan": {
+    "classes": [
+      {
+        "name": "GND",
+        "action": "ok",
+        "nets": [
+          "GND"
+        ],
+        "trackRule": "PP_GND",
+        "spacingRule": "PP_GND",
+        "viaRule": "PP_GND"
+      },
+      {
+        "name": "POWER",
+        "action": "ok",
+        "nets": [
+          "+3V3",
+          "+5V_TERM",
+          "USB_VBUS",
+          "VSYS_5V"
+        ],
+        "trackRule": "PP_POWER",
+        "spacingRule": "PP_POWER",
+        "viaRule": "PP_POWER"
+      },
+      {
+        "name": "SWITCH",
+        "action": "ok",
+        "nets": [
+          "LX"
+        ],
+        "trackRule": "PP_SWITCH",
+        "spacingRule": "PP_SWITCH",
+        "viaRule": "PP_SWITCH"
+      },
+      {
+        "name": "HS_DIFF",
+        "action": "ok",
+        "nets": [
+          "USB_DM",
+          "USB_DP"
+        ],
+        "trackRule": "PP_HS_DIFF",
+        "spacingRule": "PP_HS_DIFF",
+        "viaRule": "PP_HS_DIFF"
+      },
+      {
+        "name": "SIGNAL",
+        "action": "ok",
+        "nets": [
+          "CC1",
+          "CC2",
+          "DTR",
+          "EN",
+          "FB",
+          "IO0",
+          "LED_A",
+          "LED_CTRL",
+          "Q1_B",
+          "Q2_B",
+          "RTS",
+          "U0RXD",
+          "U0TXD"
+        ],
+        "trackRule": "PP_SIGNAL",
+        "spacingRule": "PP_SIGNAL",
+        "viaRule": "PP_SIGNAL"
+      }
+    ],
+    "ruleChanges": [],
+    "bindings": [],
+    "diffPairs": [
+      {
+        "name": "USB_D",
+        "positiveNet": "USB_DP",
+        "negativeNet": "USB_DM",
+        "action": "ok",
+        "impedanceOhm": 90,
+        "widthMil": 11.7,
+        "gapMil": 6,
+        "interface": "USB",
+        "lengthTolMil": 100
+      }
+    ],
+    "unsupported": [],
+    "advisories": [
+      {
+        "item": "diffPair USB_D",
+        "detail": "90 Ω target: EasyEDA stores width/gap, not impedance; width/gap must come from the stackup calculation in intent"
+      }
+    ],
+    "conflicts": [],
+    "pendingWrites": 0
+  },
+  "writes": [],
+  "verified": true,
+  "status": "in-sync"
+}

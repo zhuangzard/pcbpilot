@@ -8,22 +8,31 @@
       "version": 1,
       "label": "v1",
       "dir": "v1",
-      "generatedAt": "2026-09-28T04:01:02Z",
+      "generatedAt": "2026-09-21T14:13:20Z",
       "verdict": "PASS with warnings",
-      "inputsDigest": "3942cb48405350f2c3b8f4929d77200a7b097a7bf4cddf27a6263a5b3c1e419e",
+      "inputsDigest": "6985c223aca733095bd2cbb45036be4b70b2418ff3ffa61a737258fc72bb30ff",
       "inputs": {
         "board:板级回读 board dump": "5de96657c2971ba0f6f8e724fd93c1ced8447dd46965899a782c59811557f290",
         "check:pcb check": "12174bf2fcb5e4a09aa36fc35186147de97e0b76684cc70ec0d5008ab70a0cc6",
         "drc:原生 DRC": "8d9b9c6912195a8f61ae5ccf3890f8f3c3c8ffbe6172a37d951b97ed78426197",
         "feedback:pcb auto feedback.json": "887905161e9aab39b99b2a05065eeaafc14fd0a2242c7f9c57717ca7ffe3f9f3",
+        "image:BOTTOM 温度（68.88–86.28 °C）": "77ea8ebd55227ec875088cfb40ea8288f6cee3841b0475b8b3e0315d0bed6c58",
+        "image:BOTTOM 电流密度（0.1–96.68 A/mm²）": "312221df5d18e0783fe0c597d3692da703d3afe2a2d992ef2a8f037beea4627f",
+        "image:IN1 温度（68.88–86.28 °C）": "4e7b8d550c5815d45c6e36eccf4fde4a85ed0488bd5dce6efdd8c6f8b7af6935",
+        "image:IN1 电流密度（0.1–96.68 A/mm²）": "0af05c93bf224829b2e5762d845ebcb9c7789b1531bfc8fd6a01ed8cd9c9fb4b",
+        "image:IN2 温度（68.88–86.28 °C）": "0dc5728b3fcd4f576ee96852e440be63f7252e8ec41005990c388d68720bed13",
+        "image:IN2 电流密度（0.1–96.68 A/mm²）": "6ea4e2573da2c948eb7890d4acca490b8de76856890a8172e784334b3067967e",
         "image:PCB 布局（编辑器快照）": "912dc6053d52f162b1892d3a279a3f3ca4c99c781256bfbb98c3031908083e41",
+        "image:TOP 温度（68.88–86.28 °C）": "deae362a5890102541f398b8b2526b14a72ebe72e367b69907b1829faf717cf6",
+        "image:TOP 电流密度（0.1–96.68 A/mm²）": "44589ccf1ce70c541280a3c5336f16e3d75f646d12ef6d03b5d7d166097fb881",
         "image:pcb auto 离线布线预览（preview.svg）": "a0f25c3fdbc7bfa374629757e0c404c7c09af0f3126040fc70b7060baf16b6b7",
         "image:原理图 P1": "8a57cbdd3a56371642dc336db75a81a58aa0b46afb61c5a4871dd95507fc4094",
         "image:原理图 P2": "b3c20ee5aa379e5ac43d4812cc251680a48c553d633e3ca908300fd45d2f45be",
         "intent:设计意图 intent.json": "8239b4b298ff1209bf6b181469c40bd4d879f2798eff7197eedb9366d67d3e91",
-        "models:功率模型/额定 power-models.json": "d0156edeb226696fcbe74ed1249edbb596600c8bc7c8ca181431b71dc518b508",
+        "models:功率模型/额定 power-models.json": "8ac867b0ec7d1873c1612131384ea6d2ba37adc8cfe7b61a99d0e4a91335a8b4",
         "net-diff:焊盘网络对账": "6931fd8912a9f4a8a2a3d7b2a638e6a00e9d626ce9fdc3dd880c8febd1fc637a",
         "plan:pcb auto plan.json": "82bfc1b79f39a1f99188318ba856442cb73318eb1c07a8ecbea9e68a8f9c03eb",
+        "post:设计后仿真 post.json": "507c486b7875e5c70e608b9e7de60a696d13c41c9a3408329800daf5f2b41154",
         "reload-board:保存重载后回读": "51256aeb9120ecf4efdc582198134687ba60863c884b22255582494da72eedd0",
         "rules-check:规则同步 rules check": "a9e2e056f938f3f27ad4db3d347887c092392f15461dfd8a0be2e0bffd91838b",
         "sim:电源仿真 sim.json": "c04bed826d616b92ba12dee4667bb3baf36cee2f2943fec1c2f29be1eef2b88e"
@@ -98,7 +107,8 @@
           "总体结论": "PASS with warnings",
           "焊盘网络对账（pad-net diff）": "PASS",
           "直流压降（IR drop）": "PASS",
-          "规则同步（pcb rules check）": "PASS"
+          "规则同步（pcb rules check）": "PASS",
+          "设计后仿真（post-layout）": "PASS"
         },
         "suppliedW": {
           "buttons-pressed": 0.44709,
@@ -122,7 +132,16 @@
           "LX": 4.92,
           "USB_VBUS": 3.69,
           "VSYS_5V": 3.69
-        }
+        },
+        "postDropMV": {
+          "+3V3": 2.704,
+          "+5V_TERM": 0.993,
+          "GND": 0.335,
+          "LX": 0.265,
+          "USB_VBUS": 17.071,
+          "VSYS_5V": 13.608
+        },
+        "postMaxC": 86.28
       },
       "findings": {
         "feas|D3|VRWM vs 最高线电压": "marginal: D3 VRWM vs 最高线电压 余量 0.1 %",
@@ -134,28 +153,38 @@
         "intent:inductor-rating|[L1,U1] L1 (regulator U1) peak 0.682 A / RMS 0.53 A vs rated 0.77 A (power model nlcv32t-2r2m): 11% margin on the peak": "warn: [L1,U1] L1 (regulator U1) peak 0.682 A / RMS 0.53 A vs rated 0.77 A (power model nlcv32t-2r2m): 11% margin on the peak",
         "intent:regulator-headroom|[U1] U1 buck: Vin min 4.593 V → 3.318 V, duty ≤ 82%": "info: [U1] U1 buck: Vin min 4.593 V → 3.318 V, duty ≤ 82%",
         "intent:usb-budget|[J2] J2 draws 0.43 A from USB (usb-only) vs the 0.5 A budget (86%) — little margin for inrush/radio bursts": "warn: [J2] J2 draws 0.43 A from USB (usb-only) vs the 0.5 A budget (86%) — little margin for inrush/radio bursts"
-      }
+      },
+      "package": "pcbpilot-report-ESP32-S3-mini-v1.zip"
     },
     {
       "version": 2,
       "label": "v2",
       "dir": "v2",
-      "generatedAt": "2026-09-28T04:01:02Z",
+      "generatedAt": "2026-09-21T14:13:20Z",
       "verdict": "FAIL",
-      "inputsDigest": "467962198b3ef331ecef2b591900c18b3a7b3d7b03406d2ebbc144e815b4deff",
+      "inputsDigest": "e1310e2aa47f22d88d35767ab465db069b5b922c0cd236c047fcc5388ecf7c60",
       "inputs": {
         "board:板级回读 board dump": "5de96657c2971ba0f6f8e724fd93c1ced8447dd46965899a782c59811557f290",
         "check:pcb check": "12174bf2fcb5e4a09aa36fc35186147de97e0b76684cc70ec0d5008ab70a0cc6",
         "drc:原生 DRC": "8d9b9c6912195a8f61ae5ccf3890f8f3c3c8ffbe6172a37d951b97ed78426197",
         "feedback:pcb auto feedback.json": "887905161e9aab39b99b2a05065eeaafc14fd0a2242c7f9c57717ca7ffe3f9f3",
+        "image:BOTTOM 温度（68.88–86.28 °C）": "77ea8ebd55227ec875088cfb40ea8288f6cee3841b0475b8b3e0315d0bed6c58",
+        "image:BOTTOM 电流密度（0.1–96.68 A/mm²）": "312221df5d18e0783fe0c597d3692da703d3afe2a2d992ef2a8f037beea4627f",
+        "image:IN1 温度（68.88–86.28 °C）": "4e7b8d550c5815d45c6e36eccf4fde4a85ed0488bd5dce6efdd8c6f8b7af6935",
+        "image:IN1 电流密度（0.1–96.68 A/mm²）": "0af05c93bf224829b2e5762d845ebcb9c7789b1531bfc8fd6a01ed8cd9c9fb4b",
+        "image:IN2 温度（68.88–86.28 °C）": "0dc5728b3fcd4f576ee96852e440be63f7252e8ec41005990c388d68720bed13",
+        "image:IN2 电流密度（0.1–96.68 A/mm²）": "6ea4e2573da2c948eb7890d4acca490b8de76856890a8172e784334b3067967e",
         "image:PCB 布局（编辑器快照）": "912dc6053d52f162b1892d3a279a3f3ca4c99c781256bfbb98c3031908083e41",
+        "image:TOP 温度（68.88–86.28 °C）": "deae362a5890102541f398b8b2526b14a72ebe72e367b69907b1829faf717cf6",
+        "image:TOP 电流密度（0.1–96.68 A/mm²）": "44589ccf1ce70c541280a3c5336f16e3d75f646d12ef6d03b5d7d166097fb881",
         "image:pcb auto 离线布线预览（preview.svg）": "a0f25c3fdbc7bfa374629757e0c404c7c09af0f3126040fc70b7060baf16b6b7",
         "image:原理图 P1": "8a57cbdd3a56371642dc336db75a81a58aa0b46afb61c5a4871dd95507fc4094",
         "image:原理图 P2": "b3c20ee5aa379e5ac43d4812cc251680a48c553d633e3ca908300fd45d2f45be",
         "intent:设计意图 intent.json": "0fe14f8bb769714229deefb9d3a141131f78b041b763d534d840125dda5d3343",
-        "models:功率模型/额定 power-models.json": "d0156edeb226696fcbe74ed1249edbb596600c8bc7c8ca181431b71dc518b508",
+        "models:功率模型/额定 power-models.json": "8ac867b0ec7d1873c1612131384ea6d2ba37adc8cfe7b61a99d0e4a91335a8b4",
         "net-diff:焊盘网络对账": "6931fd8912a9f4a8a2a3d7b2a638e6a00e9d626ce9fdc3dd880c8febd1fc637a",
         "plan:pcb auto plan.json": "82bfc1b79f39a1f99188318ba856442cb73318eb1c07a8ecbea9e68a8f9c03eb",
+        "post:设计后仿真 post.json": "507c486b7875e5c70e608b9e7de60a696d13c41c9a3408329800daf5f2b41154",
         "reload-board:保存重载后回读": "51256aeb9120ecf4efdc582198134687ba60863c884b22255582494da72eedd0",
         "rules-check:规则同步 rules check": "a9e2e056f938f3f27ad4db3d347887c092392f15461dfd8a0be2e0bffd91838b",
         "sim:电源仿真 sim.json": "c04bed826d616b92ba12dee4667bb3baf36cee2f2943fec1c2f29be1eef2b88e"
@@ -230,7 +259,8 @@
           "总体结论": "FAIL",
           "焊盘网络对账（pad-net diff）": "PASS",
           "直流压降（IR drop）": "PASS",
-          "规则同步（pcb rules check）": "PASS"
+          "规则同步（pcb rules check）": "PASS",
+          "设计后仿真（post-layout）": "PASS"
         },
         "suppliedW": {
           "buttons-pressed": 0.44709,
@@ -254,7 +284,16 @@
           "LX": 4.92,
           "USB_VBUS": 3.69,
           "VSYS_5V": 3.69
-        }
+        },
+        "postDropMV": {
+          "+3V3": 2.704,
+          "+5V_TERM": 0.993,
+          "GND": 0.335,
+          "LX": 0.265,
+          "USB_VBUS": 17.071,
+          "VSYS_5V": 13.608
+        },
+        "postMaxC": 86.28
       },
       "findings": {
         "calc|via|+3V3": "FAIL: +3V3 过孔 1 \u003c 需要 2 @ 1 A",
@@ -299,7 +338,8 @@
           "FAIL: +3V3 过孔 1 \u003c 需要 2 @ 1 A",
           "FAIL: +3V3 线宽 10/10 mil（外/内）\u003c 需要 11.83/23.65 mil @ 1 A"
         ]
-      }
+      },
+      "package": "pcbpilot-report-ESP32-S3-mini-v2.zip"
     }
   ]
 }

@@ -1,0 +1,290 @@
+{
+  "schemaVersion": 1,
+  "generator": "pcbpilot report design",
+  "project": "ESP32-S3 mini",
+  "version": "v2",
+  "generatedAt": "2026-09-21T14:13:20Z",
+  "verdict": "FAIL",
+  "zip": "pcbpilot-report-ESP32-S3-mini-v2.zip",
+  "files": [
+    {
+      "path": "assets/0af05c93bf224829.svg",
+      "role": "image:heat",
+      "sha256": "0af05c93bf224829b2e5762d845ebcb9c7789b1531bfc8fd6a01ed8cd9c9fb4b",
+      "bytes": 51494,
+      "producer": "pcbpilot sim post-layout --svg-dir",
+      "source": "examples/esp32-mini-post-layout/heatmaps/current-IN1.svg"
+    },
+    {
+      "path": "assets/0dc5728b3fcd4f57.svg",
+      "role": "image:heat",
+      "sha256": "0dc5728b3fcd4f576ee96852e440be63f7252e8ec41005990c388d68720bed13",
+      "bytes": 48440,
+      "producer": "pcbpilot sim post-layout --svg-dir",
+      "source": "examples/esp32-mini-post-layout/heatmaps/temp-IN2.svg"
+    },
+    {
+      "path": "assets/23ed79c6b45b26e1.png",
+      "role": "image:sch",
+      "sha256": "23ed79c6b45b26e17db71396f1823565c8cbe251aad676cc1ac066419eee74be",
+      "bytes": 82280,
+      "producer": "report design --image (supplied file)",
+      "source": "artifacts/v05-live/sch-905bb85957eaf435.png"
+    },
+    {
+      "path": "assets/312221df5d18e078.svg",
+      "role": "image:heat",
+      "sha256": "312221df5d18e0783fe0c597d3692da703d3afe2a2d992ef2a8f037beea4627f",
+      "bytes": 42657,
+      "producer": "pcbpilot sim post-layout --svg-dir",
+      "source": "examples/esp32-mini-post-layout/heatmaps/current-BOTTOM.svg"
+    },
+    {
+      "path": "assets/44589ccf1ce70c54.svg",
+      "role": "image:heat",
+      "sha256": "44589ccf1ce70c541280a3c5336f16e3d75f646d12ef6d03b5d7d166097fb881",
+      "bytes": 48917,
+      "producer": "pcbpilot sim post-layout --svg-dir",
+      "source": "examples/esp32-mini-post-layout/heatmaps/current-TOP.svg"
+    },
+    {
+      "path": "assets/4e7b8d550c5815d4.svg",
+      "role": "image:heat",
+      "sha256": "4e7b8d550c5815d45c6e36eccf4fde4a85ed0488bd5dce6efdd8c6f8b7af6935",
+      "bytes": 48776,
+      "producer": "pcbpilot sim post-layout --svg-dir",
+      "source": "examples/esp32-mini-post-layout/heatmaps/temp-IN1.svg"
+    },
+    {
+      "path": "assets/523bb6710f7b6782.png",
+      "role": "image:sch",
+      "sha256": "523bb6710f7b678280f80f2f223dd92cceac4e22d0102c9a15173c07874a2c12",
+      "bytes": 120921,
+      "producer": "report design --image (supplied file)",
+      "source": "artifacts/v05-live/sch-950ae6609e91d753.png"
+    },
+    {
+      "path": "assets/6ea4e2573da2c948.svg",
+      "role": "image:heat",
+      "sha256": "6ea4e2573da2c948eb7890d4acca490b8de76856890a8172e784334b3067967e",
+      "bytes": 43646,
+      "producer": "pcbpilot sim post-layout --svg-dir",
+      "source": "examples/esp32-mini-post-layout/heatmaps/current-IN2.svg"
+    },
+    {
+      "path": "assets/77ea8ebd55227ec8.svg",
+      "role": "image:heat",
+      "sha256": "77ea8ebd55227ec875088cfb40ea8288f6cee3841b0475b8b3e0315d0bed6c58",
+      "bytes": 47899,
+      "producer": "pcbpilot sim post-layout --svg-dir",
+      "source": "examples/esp32-mini-post-layout/heatmaps/temp-BOTTOM.svg"
+    },
+    {
+      "path": "assets/a0f25c3fdbc7bfa3.svg",
+      "role": "image:preview",
+      "sha256": "a0f25c3fdbc7bfa374629757e0c404c7c09af0f3126040fc70b7060baf16b6b7",
+      "bytes": 83747,
+      "producer": "pcbpilot pcb auto run (preview.svg)",
+      "source": "artifacts/v05-live/final/preview.svg"
+    },
+    {
+      "path": "assets/charts/ir-drop.svg",
+      "role": "chart",
+      "sha256": "b98a61bfb0ca1339ad40e614be5412d9551ddbb291433406a55e3156427ba1eb",
+      "bytes": 6212,
+      "producer": "pcbpilot report design"
+    },
+    {
+      "path": "assets/charts/margins.svg",
+      "role": "chart",
+      "sha256": "e90911d5f28c0eb20d7c9f25386af364e0d0c7534f6b0efdfbff954c2222343b",
+      "bytes": 15123,
+      "producer": "pcbpilot report design"
+    },
+    {
+      "path": "assets/charts/part-power.svg",
+      "role": "chart",
+      "sha256": "d39998f822f958dfbb182033e7ebc2c03f05f273128fb8194561ff62bafda55f",
+      "bytes": 6175,
+      "producer": "pcbpilot report design"
+    },
+    {
+      "path": "assets/charts/power-tree.svg",
+      "role": "chart",
+      "sha256": "0decde13fb1a87255d8c92c1831e465d9f421dc3da812e82e6980f3a4ccc29f0",
+      "bytes": 6559,
+      "producer": "pcbpilot report design"
+    },
+    {
+      "path": "assets/charts/rail-current.svg",
+      "role": "chart",
+      "sha256": "b82cf16c51ac7d5ee2c17384a4bf9e3d01755c1a9cd0a385d442ebd26cfcd10a",
+      "bytes": 6285,
+      "producer": "pcbpilot report design"
+    },
+    {
+      "path": "assets/charts/rail-power.svg",
+      "role": "chart",
+      "sha256": "1f9424fea205ee8a9db4b9959179b30fca97d3ee86376baa1ab32d2973d10da4",
+      "bytes": 4178,
+      "producer": "pcbpilot report design"
+    },
+    {
+      "path": "assets/d3d3e0fa91016589.png",
+      "role": "image:layout",
+      "sha256": "d3d3e0fa910165898c9d8e9a8981a7f8496cbe8a3b15d31b324554a97691da43",
+      "bytes": 87398,
+      "producer": "report design --image (supplied file)",
+      "source": "artifacts/v05-live/snap/v05-final/snapshot.png"
+    },
+    {
+      "path": "assets/deae362a58901025.svg",
+      "role": "image:heat",
+      "sha256": "deae362a5890102541f398b8b2526b14a72ebe72e367b69907b1829faf717cf6",
+      "bytes": 61973,
+      "producer": "pcbpilot sim post-layout --svg-dir",
+      "source": "examples/esp32-mini-post-layout/heatmaps/temp-TOP.svg"
+    },
+    {
+      "path": "data/board.json",
+      "role": "data:board",
+      "sha256": "5de96657c2971ba0f6f8e724fd93c1ced8447dd46965899a782c59811557f290",
+      "bytes": 497498,
+      "producer": "pcbpilot pcb dump --include-copper",
+      "source": "artifacts/v05-live/final.after2.json"
+    },
+    {
+      "path": "data/board.reload.json",
+      "role": "data:reload-board",
+      "sha256": "51256aeb9120ecf4efdc582198134687ba60863c884b22255582494da72eedd0",
+      "bytes": 497498,
+      "producer": "pcbpilot pcb dump --include-copper (after save → reload)",
+      "source": "artifacts/v05-live/final.reload.json"
+    },
+    {
+      "path": "data/check.txt",
+      "role": "data:check",
+      "sha256": "12174bf2fcb5e4a09aa36fc35186147de97e0b76684cc70ec0d5008ab70a0cc6",
+      "bytes": 21513,
+      "producer": "pcbpilot pcb check",
+      "source": "artifacts/v05-live/final.check2.txt"
+    },
+    {
+      "path": "data/drc.json",
+      "role": "data:drc",
+      "sha256": "8d9b9c6912195a8f61ae5ccf3890f8f3c3c8ffbe6172a37d951b97ed78426197",
+      "bytes": 454,
+      "producer": "pcbpilot pcb drc",
+      "source": "artifacts/v05-live/final.drc4.json"
+    },
+    {
+      "path": "data/elmer/case.sif",
+      "role": "elmer",
+      "sha256": "7debf3892d1f400b51a7ffc96bed5a7e10db3e6b5e7b5deda6688c6026926420",
+      "bytes": 58664,
+      "producer": "pcbpilot sim post-layout --elmer-dir",
+      "source": "examples/esp32-mini-post-layout/elmer/case.sif"
+    },
+    {
+      "path": "data/elmer/mesh/mesh.header",
+      "role": "elmer",
+      "sha256": "a308801f959b6c69131007b2923e19dcc1770157bf2ad64d1cc7e35d70292656",
+      "bytes": 40,
+      "producer": "pcbpilot sim post-layout --elmer-dir",
+      "source": "examples/esp32-mini-post-layout/elmer/mesh/mesh.header"
+    },
+    {
+      "path": "data/elmer/probes.json",
+      "role": "elmer",
+      "sha256": "bff5ddca0eb9c2aa008367b6d8c6c0c470b0134344dd8387580d2c633ec205a6",
+      "bytes": 1753,
+      "producer": "pcbpilot sim post-layout --elmer-dir",
+      "source": "examples/esp32-mini-post-layout/elmer/probes.json"
+    },
+    {
+      "path": "data/feedback.json",
+      "role": "data:feedback",
+      "sha256": "887905161e9aab39b99b2a05065eeaafc14fd0a2242c7f9c57717ca7ffe3f9f3",
+      "bytes": 1168,
+      "producer": "pcbpilot pcb auto run / sim post-layout --feedback",
+      "source": "artifacts/v05-live/final/feedback.json"
+    },
+    {
+      "path": "data/intent.json",
+      "role": "data:intent",
+      "sha256": "0fe14f8bb769714229deefb9d3a141131f78b041b763d534d840125dda5d3343",
+      "bytes": 50576,
+      "producer": "pcbpilot intent derive",
+      "source": "examples/esp32-mini-design-report/inputs/intent-3v3-1A.json"
+    },
+    {
+      "path": "data/net-diff.json",
+      "role": "data:net-diff",
+      "sha256": "6931fd8912a9f4a8a2a3d7b2a638e6a00e9d626ce9fdc3dd880c8febd1fc637a",
+      "bytes": 352,
+      "producer": "pad-net-diff.py --json",
+      "source": "artifacts/v05-live/netdiff.json"
+    },
+    {
+      "path": "data/plan.json",
+      "role": "data:plan",
+      "sha256": "82bfc1b79f39a1f99188318ba856442cb73318eb1c07a8ecbea9e68a8f9c03eb",
+      "bytes": 277688,
+      "producer": "pcbpilot pcb auto run",
+      "source": "artifacts/v05-live/final/plan.json"
+    },
+    {
+      "path": "data/post.json",
+      "role": "data:post",
+      "sha256": "507c486b7875e5c70e608b9e7de60a696d13c41c9a3408329800daf5f2b41154",
+      "bytes": 75535,
+      "producer": "pcbpilot sim post-layout",
+      "source": "examples/esp32-mini-post-layout/post.json"
+    },
+    {
+      "path": "data/power-models.json",
+      "role": "data:models",
+      "sha256": "8ac867b0ec7d1873c1612131384ea6d2ba37adc8cfe7b61a99d0e4a91335a8b4",
+      "bytes": 17790,
+      "producer": "skill references/power-models.json",
+      "source": ".agents/skills/pcbpilot/references/power-models.json"
+    },
+    {
+      "path": "data/rules-check.json",
+      "role": "data:rules-check",
+      "sha256": "a9e2e056f938f3f27ad4db3d347887c092392f15461dfd8a0be2e0bffd91838b",
+      "bytes": 2218,
+      "producer": "pcbpilot pcb rules check",
+      "source": "artifacts/v05-live/rules-check.json"
+    },
+    {
+      "path": "data/sim.json",
+      "role": "data:sim",
+      "sha256": "c04bed826d616b92ba12dee4667bb3baf36cee2f2943fec1c2f29be1eef2b88e",
+      "bytes": 194596,
+      "producer": "pcbpilot sim power",
+      "source": "artifacts/v05-live/sim.json"
+    },
+    {
+      "path": "report.html",
+      "role": "report-html",
+      "sha256": "c860d8af1c3111433a7032fdd72822aafc53055c7edcb39aad49a5ea5c365839",
+      "bytes": 1754578,
+      "producer": "pcbpilot report design"
+    },
+    {
+      "path": "report.json",
+      "role": "report-json",
+      "sha256": "e761df47579f802f05457cf971a1d685d79489600bd2afb73e7eebf84769a548",
+      "bytes": 141024,
+      "producer": "pcbpilot report design"
+    },
+    {
+      "path": "report.md",
+      "role": "report-md",
+      "sha256": "43b607667030362beaa16fbdd35d0b5732e917898b9f66650ce2504850f4c06a",
+      "bytes": 63243,
+      "producer": "pcbpilot report design"
+    }
+  ]
+}

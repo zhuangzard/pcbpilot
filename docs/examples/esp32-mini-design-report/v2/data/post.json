@@ -1,0 +1,3230 @@
+{
+  "schemaVersion": 1,
+  "generator": "pcbpilot sim post-layout",
+  "inputs": {
+    "board": "artifacts/v05-live/final.reload.json",
+    "boardSha256": "51256aeb9120ecf4efdc582198134687ba60863c884b22255582494da72eedd0",
+    "boardSemanticSha256": "208a2bcb43bebf4cbcbd34f8d3197875e8f7687ce1d5dc4e1b65900ebea40703",
+    "sim": "artifacts/v05-live/sim.json",
+    "simSha256": "c04bed826d616b92ba12dee4667bb3baf36cee2f2943fec1c2f29be1eef2b88e",
+    "intent": "artifacts/v05-live/intent.json",
+    "models": ".agents/skills/pcbpilot/references/power-models.json"
+  },
+  "settings": {
+    "ambientC": 25,
+    "hTopWm2K": 10,
+    "hBottomWm2K": 10,
+    "kFr4InPlane": 0.3,
+    "kFr4ThroughPlane": 0.3,
+    "viaPlatingMil": 0.7,
+    "viaAmpacityDeltaTC": 10,
+    "irBudget": "2%,30mV",
+    "boardWarnC": 105,
+    "tjWarnPct": 80,
+    "planes": {
+      "IN1": "GND"
+    }
+  },
+  "limits": {
+    "tempRiseC": 10,
+    "margin": 1.2
+  },
+  "stackup": {
+    "layers": [
+      {
+        "id": 1,
+        "name": "TOP",
+        "copperMm": 0.035,
+        "zMm": 0.0175,
+        "kind": "signal"
+      },
+      {
+        "id": 15,
+        "name": "IN1",
+        "copperMm": 0.0175,
+        "zMm": 0.25415,
+        "kind": "plane",
+        "planeNet": "GND"
+      },
+      {
+        "id": 16,
+        "name": "IN2",
+        "copperMm": 0.0175,
+        "zMm": 1.34585,
+        "kind": "signal"
+      },
+      {
+        "id": 2,
+        "name": "BOTTOM",
+        "copperMm": 0.035,
+        "zMm": 1.5825,
+        "kind": "signal"
+      }
+    ],
+    "dielectricMm": [
+      0.2104,
+      1.0742,
+      0.2104
+    ],
+    "thicknessMm": 1.6,
+    "source": "JLC04161H-7628 (4-layer 1.6 mm, L1→L2 prepreg 0.2104 mm)"
+  },
+  "grid": {
+    "cellMm": 0.5,
+    "nx": 92,
+    "ny": 92,
+    "subSamples": 5,
+    "boardCellsPerLayer": 8218
+  },
+  "scenarios": [
+    "typical",
+    "peak",
+    "buttons-pressed",
+    "terminal-only",
+    "usb-only"
+  ],
+  "mode": "scenarios",
+  "nets": [
+    {
+      "net": "+3V3",
+      "role": "power",
+      "nominalV": 3.318,
+      "currentA": 0.521459,
+      "scenario": "peak",
+      "reference": "L1",
+      "budgetMV": 66.36,
+      "worstMV": 2.704,
+      "worstPad": "U3.2",
+      "status": "ok",
+      "pads": [
+        {
+          "pad": "R1.1",
+          "dir": "sink",
+          "currentA": 0.00006,
+          "dropMV": 0.377,
+          "voltageV": 3.31762,
+          "scenario": "peak",
+          "ok": true
+        },
+        {
+          "pad": "R5.2",
+          "dir": "sink",
+          "currentA": 0.000332,
+          "dropMV": 0.152,
+          "voltageV": 3.31785,
+          "scenario": "buttons-pressed",
+          "ok": true
+        },
+        {
+          "pad": "R6.2",
+          "dir": "sink",
+          "currentA": 0.000332,
+          "dropMV": 0.203,
+          "voltageV": 3.3178,
+          "scenario": "buttons-pressed",
+          "ok": true
+        },
+        {
+          "pad": "U2.16",
+          "dir": "sink",
+          "currentA": 0.02,
+          "dropMV": 0.93,
+          "voltageV": 3.31707,
+          "scenario": "peak",
+          "ok": true
+        },
+        {
+          "pad": "U3.2",
+          "dir": "sink",
+          "currentA": 0.5014,
+          "dropMV": 2.704,
+          "voltageV": 3.3153,
+          "scenario": "peak",
+          "ok": true
+        }
+      ],
+      "maxJAmm2": 56.4,
+      "hotspots": [
+        {
+          "layer": "TOP",
+          "x": 524.3,
+          "y": 1483.3,
+          "value": 56.4,
+          "kind": "track",
+          "widthMil": 10,
+          "currentA": 0.5014
+        },
+        {
+          "layer": "TOP",
+          "x": 433.1,
+          "y": 717.2,
+          "value": 31.178,
+          "kind": "track",
+          "widthMil": 10,
+          "currentA": 0.27717
+        },
+        {
+          "layer": "IN2",
+          "x": 502,
+          "y": 1466.5,
+          "value": 13.857,
+          "kind": "sheet",
+          "currentA": 0.12125
+        },
+        {
+          "layer": "IN2",
+          "x": 482.3,
+          "y": 777.6,
+          "value": 9.413,
+          "kind": "sheet",
+          "currentA": 0.08237
+        },
+        {
+          "layer": "IN2",
+          "x": 462.6,
+          "y": 698.8,
+          "value": 6.757,
+          "kind": "sheet",
+          "currentA": 0.05912
+        }
+      ],
+      "topSegments": [
+        {
+          "layer": "TOP",
+          "a": {
+            "x": 531.78,
+            "y": 1478.8
+          },
+          "b": {
+            "x": 516.82,
+            "y": 1487.9
+          },
+          "widthMil": 10,
+          "lengthMil": 17.51,
+          "currentA": 0.5014,
+          "jAmm2": 56.4,
+          "powerMW": 0.21631,
+          "dropMV": 0.4314,
+          "capacityA": 0.885
+        },
+        {
+          "layer": "TOP",
+          "a": {
+            "x": 457.73,
+            "y": 765.3
+          },
+          "b": {
+            "x": 462.69,
+            "y": 769.99
+          },
+          "widthMil": 10,
+          "lengthMil": 6.83,
+          "currentA": 0.24429,
+          "jAmm2": 27.479,
+          "powerMW": 0.02002,
+          "dropMV": 0.0819,
+          "capacityA": 0.885
+        },
+        {
+          "layer": "TOP",
+          "a": {
+            "x": 433.06,
+            "y": 718.1
+          },
+          "b": {
+            "x": 433.06,
+            "y": 716.29
+          },
+          "widthMil": 10,
+          "lengthMil": 1.81,
+          "currentA": 0.27717,
+          "jAmm2": 31.178,
+          "powerMW": 0.00684,
+          "dropMV": 0.0247,
+          "capacityA": 0.885
+        },
+        {
+          "layer": "TOP",
+          "a": {
+            "x": 1205.95,
+            "y": 612.54
+          },
+          "b": {
+            "x": 1207.97,
+            "y": 617.06
+          },
+          "widthMil": 10,
+          "lengthMil": 4.95,
+          "currentA": 0.02,
+          "jAmm2": 2.25,
+          "powerMW": 0.0001,
+          "dropMV": 0.0049,
+          "capacityA": 0.885
+        },
+        {
+          "layer": "TOP",
+          "a": {
+            "x": 432.72,
+            "y": 741.67
+          },
+          "b": {
+            "x": 445.23,
+            "y": 753.49
+          },
+          "widthMil": 10,
+          "lengthMil": 17.2,
+          "currentA": 0,
+          "jAmm2": 0,
+          "powerMW": 0,
+          "dropMV": 0,
+          "capacityA": 0.885
+        },
+        {
+          "layer": "TOP",
+          "a": {
+            "x": 395.01,
+            "y": 1454.41
+          },
+          "b": {
+            "x": 383.74,
+            "y": 1468.28
+          },
+          "widthMil": 10,
+          "lengthMil": 17.87,
+          "currentA": 0,
+          "jAmm2": 0,
+          "powerMW": 0,
+          "dropMV": 0,
+          "capacityA": 0.885
+        },
+        {
+          "layer": "TOP",
+          "a": {
+            "x": 503.76,
+            "y": 1464.98
+          },
+          "b": {
+            "x": 503.77,
+            "y": 1464.9
+          },
+          "widthMil": 10,
+          "lengthMil": 0.08,
+          "currentA": 0,
+          "jAmm2": 0,
+          "powerMW": 0,
+          "dropMV": 0,
+          "capacityA": 0.885
+        },
+        {
+          "layer": "TOP",
+          "a": {
+            "x": 503.77,
+            "y": 1464.9
+          },
+          "b": {
+            "x": 504.96,
+            "y": 1454.25
+          },
+          "widthMil": 10,
+          "lengthMil": 10.71,
+          "currentA": 0,
+          "jAmm2": 0,
+          "powerMW": 0,
+          "dropMV": 0,
+          "capacityA": 0.885
+        }
+      ],
+      "lossMW": 1.3744,
+      "viaCount": 14,
+      "maxViaA": 0.5014,
+      "sheetCells": 5330,
+      "maxTraceRiseC": 0.323,
+      "trackPieces": 74,
+      "perScenario": [
+        {
+          "scenario": "typical",
+          "reference": "L1",
+          "currentA": 0.11346,
+          "worstMV": 0.56,
+          "worstPad": "U3.2",
+          "lossMW": 0.0595,
+          "cgIterations": 190
+        },
+        {
+          "scenario": "peak",
+          "reference": "L1",
+          "currentA": 0.521459,
+          "worstMV": 2.704,
+          "worstPad": "U3.2",
+          "lossMW": 1.3744,
+          "cgIterations": 190
+        },
+        {
+          "scenario": "buttons-pressed",
+          "reference": "L1",
+          "currentA": 0.114123,
+          "worstMV": 0.561,
+          "worstPad": "U3.2",
+          "lossMW": 0.0597,
+          "cgIterations": 190
+        },
+        {
+          "scenario": "terminal-only",
+          "reference": "L1",
+          "currentA": 0.521459,
+          "worstMV": 2.704,
+          "worstPad": "U3.2",
+          "lossMW": 1.3744,
+          "cgIterations": 190
+        },
+        {
+          "scenario": "usb-only",
+          "reference": "L1",
+          "currentA": 0.521459,
+          "worstMV": 2.704,
+          "worstPad": "U3.2",
+          "lossMW": 1.3744,
+          "cgIterations": 190
+        }
+      ]
+    },
+    {
+      "net": "+5V_TERM",
+      "role": "power",
+      "nominalV": 4.9915,
+      "currentA": 0.426521,
+      "scenario": "terminal-only",
+      "reference": "J1",
+      "budgetMV": 99.83,
+      "worstMV": 0.993,
+      "worstPad": "D1.2",
+      "status": "ok",
+      "pads": [
+        {
+          "pad": "D1.2",
+          "dir": "sink",
+          "currentA": 0.426521,
+          "dropMV": 0.993,
+          "voltageV": 4.99051,
+          "scenario": "terminal-only",
+          "ok": true
+        }
+      ],
+      "maxJAmm2": 47.978,
+      "hotspots": [
+        {
+          "layer": "TOP",
+          "x": 135.7,
+          "y": 1113.9,
+          "value": 47.978,
+          "kind": "track",
+          "widthMil": 10,
+          "currentA": 0.42652
+        },
+        {
+          "layer": "IN2",
+          "x": 133.1,
+          "y": 1055.2,
+          "value": 45.658,
+          "kind": "track",
+          "widthMil": 10,
+          "currentA": 0.20295
+        },
+        {
+          "layer": "IN2",
+          "x": 84.8,
+          "y": 1006.8,
+          "value": 22.837,
+          "kind": "track",
+          "widthMil": 10,
+          "currentA": 0.10151
+        },
+        {
+          "layer": "IN2",
+          "x": 181.5,
+          "y": 1006.8,
+          "value": 17.686,
+          "kind": "track",
+          "widthMil": 10,
+          "currentA": 0.07861
+        },
+        {
+          "layer": "IN2",
+          "x": 133.1,
+          "y": 958.4,
+          "value": 9.775,
+          "kind": "track",
+          "widthMil": 10,
+          "currentA": 0.04345
+        }
+      ],
+      "topSegments": [
+        {
+          "layer": "IN2",
+          "a": {
+            "x": 133.13,
+            "y": 1050.1
+          },
+          "b": {
+            "x": 133.13,
+            "y": 1060.2
+          },
+          "widthMil": 10,
+          "lengthMil": 10.1,
+          "currentA": 0.20295,
+          "jAmm2": 45.658,
+          "powerMW": 0.0409,
+          "dropMV": 0.2015,
+          "capacityA": 0.536
+        },
+        {
+          "layer": "TOP",
+          "a": {
+            "x": 135.67,
+            "y": 1114.85
+          },
+          "b": {
+            "x": 135.69,
+            "y": 1113.02
+          },
+          "widthMil": 10,
+          "lengthMil": 1.83,
+          "currentA": 0.42652,
+          "jAmm2": 47.978,
+          "powerMW": 0.01637,
+          "dropMV": 0.0384,
+          "capacityA": 0.885
+        },
+        {
+          "layer": "IN2",
+          "a": {
+            "x": 89.8,
+            "y": 1006.8
+          },
+          "b": {
+            "x": 79.72,
+            "y": 1006.8
+          },
+          "widthMil": 10,
+          "lengthMil": 10.08,
+          "currentA": 0.10151,
+          "jAmm2": 22.837,
+          "powerMW": 0.01021,
+          "dropMV": 0.1005,
+          "capacityA": 0.536
+        },
+        {
+          "layer": "IN2",
+          "a": {
+            "x": 176.4,
+            "y": 1006.8
+          },
+          "b": {
+            "x": 186.54,
+            "y": 1006.8
+          },
+          "widthMil": 10,
+          "lengthMil": 10.14,
+          "currentA": 0.07861,
+          "jAmm2": 17.686,
+          "powerMW": 0.00616,
+          "dropMV": 0.0783,
+          "capacityA": 0.536
+        },
+        {
+          "layer": "IN2",
+          "a": {
+            "x": 133.13,
+            "y": 963.5
+          },
+          "b": {
+            "x": 133.13,
+            "y": 953.39
+          },
+          "widthMil": 10,
+          "lengthMil": 10.11,
+          "currentA": 0.04345,
+          "jAmm2": 9.775,
+          "powerMW": 0.00188,
+          "dropMV": 0.0432,
+          "capacityA": 0.536
+        },
+        {
+          "layer": "IN2",
+          "a": {
+            "x": 133.13,
+            "y": 992.36
+          },
+          "b": {
+            "x": 133.13,
+            "y": 977.93
+          },
+          "widthMil": 10,
+          "lengthMil": 14.43,
+          "currentA": 0,
+          "jAmm2": 0,
+          "powerMW": 0,
+          "dropMV": 0,
+          "capacityA": 0.536
+        },
+        {
+          "layer": "IN2",
+          "a": {
+            "x": 147.55,
+            "y": 1006.8
+          },
+          "b": {
+            "x": 161.98,
+            "y": 1006.8
+          },
+          "widthMil": 10,
+          "lengthMil": 14.42,
+          "currentA": 0,
+          "jAmm2": 0,
+          "powerMW": 0,
+          "dropMV": 0,
+          "capacityA": 0.536
+        },
+        {
+          "layer": "IN2",
+          "a": {
+            "x": 133.13,
+            "y": 1035.66
+          },
+          "b": {
+            "x": 133.13,
+            "y": 1050.1
+          },
+          "widthMil": 10,
+          "lengthMil": 14.43,
+          "currentA": 0,
+          "jAmm2": 0,
+          "powerMW": 0,
+          "dropMV": 0,
+          "capacityA": 0.536
+        }
+      ],
+      "lossMW": 0.4234,
+      "viaCount": 1,
+      "maxViaA": 0.42652,
+      "sheetCells": 271,
+      "maxTraceRiseC": 0.249,
+      "trackPieces": 22,
+      "perScenario": [
+        {
+          "scenario": "typical",
+          "reference": "J1",
+          "currentA": 0.046162,
+          "worstMV": 0.107,
+          "worstPad": "D1.2",
+          "lossMW": 0.005,
+          "cgIterations": 40
+        },
+        {
+          "scenario": "peak",
+          "reference": "J1",
+          "currentA": 0.243419,
+          "worstMV": 0.567,
+          "worstPad": "D1.2",
+          "lossMW": 0.1379,
+          "cgIterations": 40
+        },
+        {
+          "scenario": "buttons-pressed",
+          "reference": "J1",
+          "currentA": 0.046446,
+          "worstMV": 0.108,
+          "worstPad": "D1.2",
+          "lossMW": 0.005,
+          "cgIterations": 40
+        },
+        {
+          "scenario": "terminal-only",
+          "reference": "J1",
+          "currentA": 0.426521,
+          "worstMV": 0.993,
+          "worstPad": "D1.2",
+          "lossMW": 0.4234,
+          "cgIterations": 40
+        }
+      ]
+    },
+    {
+      "net": "USB_VBUS",
+      "role": "power",
+      "nominalV": 4.957,
+      "currentA": 0.42975,
+      "scenario": "usb-only",
+      "reference": "J2",
+      "budgetMV": 99.14,
+      "worstMV": 17.071,
+      "worstPad": "D2.2",
+      "status": "ok",
+      "pads": [
+        {
+          "pad": "D2.2",
+          "dir": "sink",
+          "currentA": 0.42975,
+          "dropMV": 17.071,
+          "voltageV": 4.93993,
+          "scenario": "usb-only",
+          "ok": true
+        },
+        {
+          "pad": "D3.5",
+          "dir": "sink",
+          "currentA": 0,
+          "dropMV": 0,
+          "voltageV": 4.9819,
+          "scenario": "peak",
+          "ok": true
+        }
+      ],
+      "maxJAmm2": 96.682,
+      "hotspots": [
+        {
+          "layer": "TOP",
+          "x": 822.2,
+          "y": 222.9,
+          "value": 96.682,
+          "kind": "track",
+          "widthMil": 5,
+          "currentA": 0.42975
+        },
+        {
+          "layer": "TOP",
+          "x": 239.2,
+          "y": 406.4,
+          "value": 48.341,
+          "kind": "track",
+          "widthMil": 10,
+          "currentA": 0.42975
+        },
+        {
+          "layer": "TOP",
+          "x": 424.6,
+          "y": 221,
+          "value": 48.341,
+          "kind": "track",
+          "widthMil": 10,
+          "currentA": 0.42975
+        },
+        {
+          "layer": "TOP",
+          "x": 513,
+          "y": 161.4,
+          "value": 48.341,
+          "kind": "track",
+          "widthMil": 10,
+          "currentA": 0.42975
+        },
+        {
+          "layer": "TOP",
+          "x": 628,
+          "y": 161.4,
+          "value": 48.341,
+          "kind": "track",
+          "widthMil": 10,
+          "currentA": 0.42975
+        }
+      ],
+      "topSegments": [
+        {
+          "layer": "TOP",
+          "a": {
+            "x": 826.17,
+            "y": 218.93
+          },
+          "b": {
+            "x": 818.18,
+            "y": 226.92
+          },
+          "widthMil": 5,
+          "lengthMil": 11.3,
+          "currentA": 0.42975,
+          "jAmm2": 96.682,
+          "powerMW": 0.20511,
+          "dropMV": 0.4773,
+          "capacityA": 0.536
+        },
+        {
+          "layer": "TOP",
+          "a": {
+            "x": 818.18,
+            "y": 226.92
+          },
+          "b": {
+            "x": 810.19,
+            "y": 234.91
+          },
+          "widthMil": 5,
+          "lengthMil": 11.3,
+          "currentA": 0.42975,
+          "jAmm2": 96.682,
+          "powerMW": 0.20511,
+          "dropMV": 0.4773,
+          "capacityA": 0.536
+        },
+        {
+          "layer": "TOP",
+          "a": {
+            "x": 637.6,
+            "y": 161.4
+          },
+          "b": {
+            "x": 618.42,
+            "y": 161.4
+          },
+          "widthMil": 10,
+          "lengthMil": 19.18,
+          "currentA": 0.42975,
+          "jAmm2": 48.341,
+          "powerMW": 0.17404,
+          "dropMV": 0.405,
+          "capacityA": 0.885
+        },
+        {
+          "layer": "TOP",
+          "a": {
+            "x": 656.78,
+            "y": 161.4
+          },
+          "b": {
+            "x": 637.6,
+            "y": 161.4
+          },
+          "widthMil": 10,
+          "lengthMil": 19.18,
+          "currentA": 0.42975,
+          "jAmm2": 48.341,
+          "powerMW": 0.17404,
+          "dropMV": 0.405,
+          "capacityA": 0.885
+        },
+        {
+          "layer": "TOP",
+          "a": {
+            "x": 560.9,
+            "y": 161.4
+          },
+          "b": {
+            "x": 541.72,
+            "y": 161.4
+          },
+          "widthMil": 10,
+          "lengthMil": 19.18,
+          "currentA": 0.42975,
+          "jAmm2": 48.341,
+          "powerMW": 0.17404,
+          "dropMV": 0.405,
+          "capacityA": 0.885
+        },
+        {
+          "layer": "TOP",
+          "a": {
+            "x": 580.07,
+            "y": 161.4
+          },
+          "b": {
+            "x": 560.9,
+            "y": 161.4
+          },
+          "widthMil": 10,
+          "lengthMil": 19.18,
+          "currentA": 0.42975,
+          "jAmm2": 48.341,
+          "powerMW": 0.17404,
+          "dropMV": 0.405,
+          "capacityA": 0.885
+        },
+        {
+          "layer": "TOP",
+          "a": {
+            "x": 599.25,
+            "y": 161.4
+          },
+          "b": {
+            "x": 580.07,
+            "y": 161.4
+          },
+          "widthMil": 10,
+          "lengthMil": 19.18,
+          "currentA": 0.42975,
+          "jAmm2": 48.341,
+          "powerMW": 0.17404,
+          "dropMV": 0.405,
+          "capacityA": 0.885
+        },
+        {
+          "layer": "TOP",
+          "a": {
+            "x": 618.42,
+            "y": 161.4
+          },
+          "b": {
+            "x": 599.25,
+            "y": 161.4
+          },
+          "widthMil": 10,
+          "lengthMil": 19.18,
+          "currentA": 0.42975,
+          "jAmm2": 48.341,
+          "powerMW": 0.17404,
+          "dropMV": 0.405,
+          "capacityA": 0.885
+        }
+      ],
+      "lossMW": 7.3364,
+      "viaCount": 4,
+      "maxViaA": 0,
+      "sheetCells": 890,
+      "maxTraceRiseC": 0.395,
+      "trackPieces": 70,
+      "perScenario": [
+        {
+          "scenario": "typical",
+          "reference": "J2",
+          "currentA": 0.042773,
+          "worstMV": 1.699,
+          "worstPad": "D2.2",
+          "lossMW": 0.0727,
+          "cgIterations": 31
+        },
+        {
+          "scenario": "peak",
+          "reference": "J2",
+          "currentA": 0.180501,
+          "worstMV": 7.17,
+          "worstPad": "D2.2",
+          "lossMW": 1.2942,
+          "cgIterations": 64
+        },
+        {
+          "scenario": "buttons-pressed",
+          "reference": "J2",
+          "currentA": 0.043018,
+          "worstMV": 1.709,
+          "worstPad": "D2.2",
+          "lossMW": 0.0735,
+          "cgIterations": 31
+        },
+        {
+          "scenario": "terminal-only",
+          "reference": "D2",
+          "currentA": 0,
+          "worstMV": 0,
+          "worstPad": "D3.5",
+          "lossMW": 0,
+          "cgIterations": 70
+        },
+        {
+          "scenario": "usb-only",
+          "reference": "J2",
+          "currentA": 0.42975,
+          "worstMV": 17.071,
+          "worstPad": "D2.2",
+          "lossMW": 7.3364,
+          "cgIterations": 63
+        }
+      ]
+    },
+    {
+      "net": "VSYS_5V",
+      "role": "power",
+      "nominalV": 4.6275,
+      "currentA": 0.426521,
+      "scenario": "terminal-only",
+      "reference": "D1",
+      "budgetMV": 92.55,
+      "worstMV": 13.608,
+      "worstPad": "U1.4",
+      "status": "ok",
+      "pads": [
+        {
+          "pad": "D2.1",
+          "dir": "sink",
+          "currentA": 0,
+          "dropMV": 12.424,
+          "voltageV": 4.61508,
+          "scenario": "terminal-only",
+          "ok": true
+        },
+        {
+          "pad": "U1.4",
+          "dir": "sink",
+          "currentA": 0.426521,
+          "dropMV": 13.608,
+          "voltageV": 4.61389,
+          "scenario": "terminal-only",
+          "ok": true
+        }
+      ],
+      "maxJAmm2": 47.978,
+      "hotspots": [
+        {
+          "layer": "BOTTOM",
+          "x": 190.2,
+          "y": 752,
+          "value": 47.978,
+          "kind": "track",
+          "widthMil": 10,
+          "currentA": 0.42652
+        },
+        {
+          "layer": "BOTTOM",
+          "x": 190.2,
+          "y": 867.4,
+          "value": 47.978,
+          "kind": "track",
+          "widthMil": 10,
+          "currentA": 0.42652
+        },
+        {
+          "layer": "BOTTOM",
+          "x": 190.2,
+          "y": 963.5,
+          "value": 47.978,
+          "kind": "track",
+          "widthMil": 10,
+          "currentA": 0.42652
+        },
+        {
+          "layer": "BOTTOM",
+          "x": 190.2,
+          "y": 1155.8,
+          "value": 47.978,
+          "kind": "track",
+          "widthMil": 10,
+          "currentA": 0.42652
+        },
+        {
+          "layer": "BOTTOM",
+          "x": 190.2,
+          "y": 1078.9,
+          "value": 47.978,
+          "kind": "track",
+          "widthMil": 10,
+          "currentA": 0.42652
+        }
+      ],
+      "topSegments": [
+        {
+          "layer": "BOTTOM",
+          "a": {
+            "x": 190.16,
+            "y": 1050.08
+          },
+          "b": {
+            "x": 190.16,
+            "y": 1069.31
+          },
+          "widthMil": 10,
+          "lengthMil": 19.23,
+          "currentA": 0.42652,
+          "jAmm2": 47.978,
+          "powerMW": 0.17192,
+          "dropMV": 0.4031,
+          "capacityA": 0.885
+        },
+        {
+          "layer": "BOTTOM",
+          "a": {
+            "x": 190.16,
+            "y": 1088.54
+          },
+          "b": {
+            "x": 190.16,
+            "y": 1107.77
+          },
+          "widthMil": 10,
+          "lengthMil": 19.23,
+          "currentA": 0.42652,
+          "jAmm2": 47.978,
+          "powerMW": 0.17192,
+          "dropMV": 0.4031,
+          "capacityA": 0.885
+        },
+        {
+          "layer": "BOTTOM",
+          "a": {
+            "x": 190.16,
+            "y": 742.39
+          },
+          "b": {
+            "x": 190.16,
+            "y": 761.62
+          },
+          "widthMil": 10,
+          "lengthMil": 19.23,
+          "currentA": 0.42652,
+          "jAmm2": 47.978,
+          "powerMW": 0.17192,
+          "dropMV": 0.4031,
+          "capacityA": 0.885
+        },
+        {
+          "layer": "BOTTOM",
+          "a": {
+            "x": 190.16,
+            "y": 1242.38
+          },
+          "b": {
+            "x": 190.16,
+            "y": 1261.61
+          },
+          "widthMil": 10,
+          "lengthMil": 19.23,
+          "currentA": 0.42652,
+          "jAmm2": 47.978,
+          "powerMW": 0.17192,
+          "dropMV": 0.4031,
+          "capacityA": 0.885
+        },
+        {
+          "layer": "BOTTOM",
+          "a": {
+            "x": 190.16,
+            "y": 1223.15
+          },
+          "b": {
+            "x": 190.16,
+            "y": 1242.38
+          },
+          "widthMil": 10,
+          "lengthMil": 19.23,
+          "currentA": 0.42652,
+          "jAmm2": 47.978,
+          "powerMW": 0.17192,
+          "dropMV": 0.4031,
+          "capacityA": 0.885
+        },
+        {
+          "layer": "BOTTOM",
+          "a": {
+            "x": 190.16,
+            "y": 1203.92
+          },
+          "b": {
+            "x": 190.16,
+            "y": 1223.15
+          },
+          "widthMil": 10,
+          "lengthMil": 19.23,
+          "currentA": 0.42652,
+          "jAmm2": 47.978,
+          "powerMW": 0.17192,
+          "dropMV": 0.4031,
+          "capacityA": 0.885
+        },
+        {
+          "layer": "BOTTOM",
+          "a": {
+            "x": 190.16,
+            "y": 1184.69
+          },
+          "b": {
+            "x": 190.16,
+            "y": 1203.92
+          },
+          "widthMil": 10,
+          "lengthMil": 19.23,
+          "currentA": 0.42652,
+          "jAmm2": 47.978,
+          "powerMW": 0.17192,
+          "dropMV": 0.4031,
+          "capacityA": 0.885
+        },
+        {
+          "layer": "BOTTOM",
+          "a": {
+            "x": 190.16,
+            "y": 1165.46
+          },
+          "b": {
+            "x": 190.16,
+            "y": 1184.69
+          },
+          "widthMil": 10,
+          "lengthMil": 19.23,
+          "currentA": 0.42652,
+          "jAmm2": 47.978,
+          "powerMW": 0.17192,
+          "dropMV": 0.4031,
+          "capacityA": 0.885
+        }
+      ],
+      "lossMW": 5.8041,
+      "viaCount": 7,
+      "maxViaA": 0.42975,
+      "sheetCells": 562,
+      "maxTraceRiseC": 0.307,
+      "trackPieces": 66,
+      "perScenario": [
+        {
+          "scenario": "typical",
+          "reference": "D1",
+          "currentA": 0.046162,
+          "worstMV": 1.592,
+          "worstPad": "U1.4",
+          "lossMW": 0.0854,
+          "cgIterations": 66
+        },
+        {
+          "scenario": "peak",
+          "reference": "D1",
+          "currentA": 0.243419,
+          "worstMV": 8.267,
+          "worstPad": "U1.4",
+          "lossMW": 2.2502,
+          "cgIterations": 66
+        },
+        {
+          "scenario": "buttons-pressed",
+          "reference": "D1",
+          "currentA": 0.046446,
+          "worstMV": 1.601,
+          "worstPad": "U1.4",
+          "lossMW": 0.0865,
+          "cgIterations": 66
+        },
+        {
+          "scenario": "terminal-only",
+          "reference": "D1",
+          "currentA": 0.426521,
+          "worstMV": 13.608,
+          "worstPad": "U1.4",
+          "lossMW": 5.8041,
+          "cgIterations": 66
+        },
+        {
+          "scenario": "usb-only",
+          "reference": "D2",
+          "currentA": 0.42975,
+          "worstMV": 1.526,
+          "worstPad": "U1.4",
+          "lossMW": 0.6558,
+          "cgIterations": 66
+        }
+      ]
+    },
+    {
+      "net": "LX",
+      "role": "switch",
+      "nominalV": 3.4061,
+      "currentA": 0.521459,
+      "scenario": "peak",
+      "reference": "U1",
+      "worstMV": 0.265,
+      "worstPad": "L1.1",
+      "status": "info",
+      "pads": [
+        {
+          "pad": "L1.1",
+          "dir": "sink",
+          "currentA": 0.521459,
+          "dropMV": 0.265,
+          "voltageV": 3.40583,
+          "scenario": "peak",
+          "ok": true
+        }
+      ],
+      "maxJAmm2": 29.328,
+      "hotspots": [
+        {
+          "layer": "TOP",
+          "x": 436.3,
+          "y": 589.9,
+          "value": 29.328,
+          "kind": "track",
+          "widthMil": 20,
+          "currentA": 0.52146
+        }
+      ],
+      "topSegments": [
+        {
+          "layer": "TOP",
+          "a": {
+            "x": 436.25,
+            "y": 595.1
+          },
+          "b": {
+            "x": 436.25,
+            "y": 584.75
+          },
+          "widthMil": 20,
+          "lengthMil": 10.35,
+          "currentA": 0.52146,
+          "jAmm2": 29.328,
+          "powerMW": 0.06915,
+          "dropMV": 0.1326,
+          "capacityA": 1.464
+        },
+        {
+          "layer": "TOP",
+          "a": {
+            "x": 436.25,
+            "y": 584.75
+          },
+          "b": {
+            "x": 436.25,
+            "y": 574.4
+          },
+          "widthMil": 20,
+          "lengthMil": 10.35,
+          "currentA": 0.52146,
+          "jAmm2": 29.328,
+          "powerMW": 0.06915,
+          "dropMV": 0.1326,
+          "capacityA": 1.464
+        },
+        {
+          "layer": "TOP",
+          "a": {
+            "x": 432.71,
+            "y": 618.66
+          },
+          "b": {
+            "x": 436.25,
+            "y": 615.23
+          },
+          "widthMil": 20,
+          "lengthMil": 4.93,
+          "currentA": 0,
+          "jAmm2": 0,
+          "powerMW": 0,
+          "dropMV": 0,
+          "capacityA": 1.464
+        },
+        {
+          "layer": "TOP",
+          "a": {
+            "x": 436.25,
+            "y": 615.23
+          },
+          "b": {
+            "x": 436.25,
+            "y": 605.17
+          },
+          "widthMil": 20,
+          "lengthMil": 10.06,
+          "currentA": 0,
+          "jAmm2": 0,
+          "powerMW": 0,
+          "dropMV": 0,
+          "capacityA": 1.464
+        },
+        {
+          "layer": "TOP",
+          "a": {
+            "x": 436.25,
+            "y": 605.17
+          },
+          "b": {
+            "x": 436.25,
+            "y": 595.1
+          },
+          "widthMil": 20,
+          "lengthMil": 10.06,
+          "currentA": 0,
+          "jAmm2": 0,
+          "powerMW": 0,
+          "dropMV": 0,
+          "capacityA": 1.464
+        },
+        {
+          "layer": "TOP",
+          "a": {
+            "x": 436.25,
+            "y": 574.4
+          },
+          "b": {
+            "x": 436.25,
+            "y": 567.29
+          },
+          "widthMil": 20,
+          "lengthMil": 7.11,
+          "currentA": 0,
+          "jAmm2": 0,
+          "powerMW": 0,
+          "dropMV": 0,
+          "capacityA": 1.464
+        },
+        {
+          "layer": "TOP",
+          "a": {
+            "x": 436.25,
+            "y": 567.29
+          },
+          "b": {
+            "x": 439.45,
+            "y": 564.09
+          },
+          "widthMil": 20,
+          "lengthMil": 4.53,
+          "currentA": 0,
+          "jAmm2": 0,
+          "powerMW": 0,
+          "dropMV": 0,
+          "capacityA": 1.464
+        },
+        {
+          "layer": "TOP",
+          "a": {
+            "x": 439.45,
+            "y": 564.09
+          },
+          "b": {
+            "x": 442.18,
+            "y": 560.58
+          },
+          "widthMil": 20,
+          "lengthMil": 4.45,
+          "currentA": 0,
+          "jAmm2": 0,
+          "powerMW": 0,
+          "dropMV": 0,
+          "capacityA": 1.464
+        }
+      ],
+      "lossMW": 0.1383,
+      "viaCount": 0,
+      "maxViaA": 0,
+      "sheetCells": 0,
+      "maxTraceRiseC": 0.292,
+      "trackPieces": 8,
+      "perScenario": [
+        {
+          "scenario": "typical",
+          "reference": "U1",
+          "currentA": 0.11346,
+          "worstMV": 0.058,
+          "worstPad": "L1.1",
+          "lossMW": 0.0065,
+          "cgIterations": 1
+        },
+        {
+          "scenario": "peak",
+          "reference": "U1",
+          "currentA": 0.521459,
+          "worstMV": 0.265,
+          "worstPad": "L1.1",
+          "lossMW": 0.1383,
+          "cgIterations": 1
+        },
+        {
+          "scenario": "buttons-pressed",
+          "reference": "U1",
+          "currentA": 0.114123,
+          "worstMV": 0.058,
+          "worstPad": "L1.1",
+          "lossMW": 0.0066,
+          "cgIterations": 1
+        },
+        {
+          "scenario": "terminal-only",
+          "reference": "U1",
+          "currentA": 0.521459,
+          "worstMV": 0.265,
+          "worstPad": "L1.1",
+          "lossMW": 0.1383,
+          "cgIterations": 1
+        },
+        {
+          "scenario": "usb-only",
+          "reference": "U1",
+          "currentA": 0.521459,
+          "worstMV": 0.265,
+          "worstPad": "L1.1",
+          "lossMW": 0.1383,
+          "cgIterations": 1
+        }
+      ]
+    },
+    {
+      "net": "GND",
+      "role": "ground",
+      "nominalV": 0,
+      "currentA": 0.42975,
+      "scenario": "usb-only",
+      "reference": "J2",
+      "worstMV": 0.335,
+      "worstPad": "U3.41",
+      "status": "info",
+      "pads": [
+        {
+          "pad": "D3.2",
+          "dir": "source",
+          "currentA": 0,
+          "dropMV": 0.125,
+          "voltageV": 0.00013,
+          "scenario": "terminal-only",
+          "ok": true
+        },
+        {
+          "pad": "J2.A1B12",
+          "dir": "sink",
+          "currentA": 0.090251,
+          "dropMV": 0.01,
+          "voltageV": 0.00001,
+          "scenario": "peak",
+          "ok": true
+        },
+        {
+          "pad": "J2.B1A12",
+          "dir": "sink",
+          "currentA": 0.090251,
+          "dropMV": 0.009,
+          "voltageV": 0.00001,
+          "scenario": "peak",
+          "ok": true
+        },
+        {
+          "pad": "LED1.2",
+          "dir": "source",
+          "currentA": 0.0014,
+          "dropMV": 0.208,
+          "voltageV": 0.00021,
+          "scenario": "usb-only",
+          "ok": true
+        },
+        {
+          "pad": "R2.2",
+          "dir": "source",
+          "currentA": 0.00006,
+          "dropMV": 0.123,
+          "voltageV": 0.00012,
+          "scenario": "usb-only",
+          "ok": true
+        },
+        {
+          "pad": "SW1.2",
+          "dir": "source",
+          "currentA": 0.000332,
+          "dropMV": 0.014,
+          "voltageV": 0.00001,
+          "scenario": "buttons-pressed",
+          "ok": true
+        },
+        {
+          "pad": "SW2.2",
+          "dir": "source",
+          "currentA": 0.000332,
+          "dropMV": 0.011,
+          "voltageV": 0.00001,
+          "scenario": "buttons-pressed",
+          "ok": true
+        },
+        {
+          "pad": "U1.2",
+          "dir": "sink",
+          "currentA": 0.09171,
+          "dropMV": 0.081,
+          "voltageV": 0.00008,
+          "scenario": "usb-only",
+          "ok": true
+        },
+        {
+          "pad": "U2.1",
+          "dir": "source",
+          "currentA": 0.02,
+          "dropMV": 0.154,
+          "voltageV": 0.00015,
+          "scenario": "terminal-only",
+          "ok": true
+        },
+        {
+          "pad": "U3.1",
+          "dir": "source",
+          "currentA": 0.166667,
+          "dropMV": 0.292,
+          "voltageV": 0.00029,
+          "scenario": "usb-only",
+          "ok": true
+        },
+        {
+          "pad": "U3.40",
+          "dir": "source",
+          "currentA": 0.166667,
+          "dropMV": 0.282,
+          "voltageV": 0.00028,
+          "scenario": "usb-only",
+          "ok": true
+        },
+        {
+          "pad": "U3.41",
+          "dir": "source",
+          "currentA": 0.166667,
+          "dropMV": 0.335,
+          "voltageV": 0.00034,
+          "scenario": "usb-only",
+          "ok": true
+        }
+      ],
+      "maxJAmm2": 23.357,
+      "hotspots": [
+        {
+          "layer": "TOP",
+          "x": 766.1,
+          "y": 269.1,
+          "value": 23.357,
+          "kind": "track",
+          "widthMil": 10,
+          "currentA": 0.20764
+        },
+        {
+          "layer": "TOP",
+          "x": 828.8,
+          "y": 1225.7,
+          "value": 18.748,
+          "kind": "track",
+          "widthMil": 10,
+          "currentA": 0.16667
+        },
+        {
+          "layer": "TOP",
+          "x": 1043.8,
+          "y": 267.6,
+          "value": 17.35,
+          "kind": "track",
+          "widthMil": 10,
+          "currentA": 0.15425
+        },
+        {
+          "layer": "TOP",
+          "x": 530.6,
+          "y": 1529,
+          "value": 14.676,
+          "kind": "track",
+          "widthMil": 10,
+          "currentA": 0.13047
+        },
+        {
+          "layer": "TOP",
+          "x": 1280.2,
+          "y": 1510.4,
+          "value": 7.749,
+          "kind": "track",
+          "widthMil": 10,
+          "currentA": 0.06889
+        }
+      ],
+      "topSegments": [
+        {
+          "layer": "TOP",
+          "a": {
+            "x": 767.65,
+            "y": 269.05
+          },
+          "b": {
+            "x": 764.63,
+            "y": 269.25
+          },
+          "widthMil": 10,
+          "lengthMil": 3.02,
+          "currentA": 0.20764,
+          "jAmm2": 23.357,
+          "powerMW": 0.00641,
+          "dropMV": 0.0309,
+          "capacityA": 0.885
+        },
+        {
+          "layer": "TOP",
+          "a": {
+            "x": 829.67,
+            "y": 1224.8
+          },
+          "b": {
+            "x": 828.02,
+            "y": 1226.54
+          },
+          "widthMil": 10,
+          "lengthMil": 2.39,
+          "currentA": 0.16667,
+          "jAmm2": 18.748,
+          "powerMW": 0.00327,
+          "dropMV": 0.0196,
+          "capacityA": 0.885
+        },
+        {
+          "layer": "TOP",
+          "a": {
+            "x": 531.45,
+            "y": 1528.52
+          },
+          "b": {
+            "x": 529.68,
+            "y": 1529.57
+          },
+          "widthMil": 10,
+          "lengthMil": 2.06,
+          "currentA": 0.13047,
+          "jAmm2": 14.676,
+          "powerMW": 0.00172,
+          "dropMV": 0.0132,
+          "capacityA": 0.885
+        },
+        {
+          "layer": "TOP",
+          "a": {
+            "x": 1043.35,
+            "y": 267.65
+          },
+          "b": {
+            "x": 1044.3,
+            "y": 267.6
+          },
+          "widthMil": 10,
+          "lengthMil": 0.95,
+          "currentA": 0.15425,
+          "jAmm2": 17.35,
+          "powerMW": 0.00112,
+          "dropMV": 0.0072,
+          "capacityA": 0.885
+        },
+        {
+          "layer": "TOP",
+          "a": {
+            "x": 778.54,
+            "y": 296.85
+          },
+          "b": {
+            "x": 778.54,
+            "y": 306.91
+          },
+          "widthMil": 10,
+          "lengthMil": 10.06,
+          "currentA": 0.03746,
+          "jAmm2": 4.214,
+          "powerMW": 0.00069,
+          "dropMV": 0.0185,
+          "capacityA": 0.885
+        },
+        {
+          "layer": "TOP",
+          "a": {
+            "x": 705.9,
+            "y": 260.75
+          },
+          "b": {
+            "x": 705.9,
+            "y": 270.89
+          },
+          "widthMil": 10,
+          "lengthMil": 10.14,
+          "currentA": 0.03353,
+          "jAmm2": 3.772,
+          "powerMW": 0.00056,
+          "dropMV": 0.0167,
+          "capacityA": 0.885
+        },
+        {
+          "layer": "TOP",
+          "a": {
+            "x": 1032.48,
+            "y": 296.85
+          },
+          "b": {
+            "x": 1032.48,
+            "y": 306.91
+          },
+          "widthMil": 10,
+          "lengthMil": 10.06,
+          "currentA": 0.0304,
+          "jAmm2": 3.42,
+          "powerMW": 0.00046,
+          "dropMV": 0.015,
+          "capacityA": 0.885
+        },
+        {
+          "layer": "TOP",
+          "a": {
+            "x": 590.55,
+            "y": 1511.06
+          },
+          "b": {
+            "x": 600.64,
+            "y": 1511.06
+          },
+          "widthMil": 10,
+          "lengthMil": 10.09,
+          "currentA": 0.02895,
+          "jAmm2": 3.256,
+          "powerMW": 0.00042,
+          "dropMV": 0.0144,
+          "capacityA": 0.885
+        }
+      ],
+      "lossMW": 0.1468,
+      "viaCount": 33,
+      "maxViaA": 0.16667,
+      "sheetCells": 20999,
+      "maxTraceRiseC": 0.346,
+      "trackPieces": 419,
+      "perScenario": [
+        {
+          "scenario": "typical",
+          "reference": "J1",
+          "currentA": 0.046162,
+          "worstMV": 0.051,
+          "worstPad": "U3.41",
+          "lossMW": 0.0049,
+          "cgIterations": 351
+        },
+        {
+          "scenario": "peak",
+          "reference": "J1",
+          "currentA": 0.243419,
+          "worstMV": 0.255,
+          "worstPad": "U3.41",
+          "lossMW": 0.1124,
+          "cgIterations": 353
+        },
+        {
+          "scenario": "buttons-pressed",
+          "reference": "J1",
+          "currentA": 0.046446,
+          "worstMV": 0.051,
+          "worstPad": "U3.41",
+          "lossMW": 0.0049,
+          "cgIterations": 351
+        },
+        {
+          "scenario": "terminal-only",
+          "reference": "J1",
+          "currentA": 0.426521,
+          "worstMV": 0.308,
+          "worstPad": "U3.41",
+          "lossMW": 0.1377,
+          "cgIterations": 350
+        },
+        {
+          "scenario": "usb-only",
+          "reference": "J2",
+          "currentA": 0.42975,
+          "worstMV": 0.335,
+          "worstPad": "U3.41",
+          "lossMW": 0.1468,
+          "cgIterations": 358
+        }
+      ]
+    }
+  ],
+  "vias": [
+    {
+      "id": "cdcdc548d58f5566",
+      "net": "+3V3",
+      "x": 506.57,
+      "y": 1494.13,
+      "drillMil": 12,
+      "currentA": 0.5014,
+      "ampacityA": 1.478,
+      "usePct": 33.9,
+      "scenario": "peak"
+    },
+    {
+      "id": "891be1e0eba1a205",
+      "net": "VSYS_5V",
+      "x": 305.22,
+      "y": 560.9,
+      "drillMil": 12,
+      "currentA": 0.42975,
+      "ampacityA": 1.478,
+      "usePct": 29.1,
+      "scenario": "usb-only"
+    },
+    {
+      "id": "03ed44667039bdb4",
+      "net": "VSYS_5V",
+      "x": 190.16,
+      "y": 691.93,
+      "drillMil": 12,
+      "currentA": 0.42652,
+      "ampacityA": 1.478,
+      "usePct": 28.9,
+      "scenario": "terminal-only"
+    },
+    {
+      "id": "150dad8633756bdf",
+      "net": "VSYS_5V",
+      "x": 190.16,
+      "y": 1273.61,
+      "drillMil": 12,
+      "currentA": 0.42652,
+      "ampacityA": 1.478,
+      "usePct": 28.9,
+      "scenario": "terminal-only"
+    },
+    {
+      "id": "1ac9cdd8d17c7573",
+      "net": "+5V_TERM",
+      "x": 135.83,
+      "y": 1101.02,
+      "drillMil": 12,
+      "currentA": 0.42652,
+      "ampacityA": 1.478,
+      "usePct": 28.9,
+      "scenario": "terminal-only"
+    },
+    {
+      "id": "707d96adacb27378",
+      "net": "+3V3",
+      "x": 436.25,
+      "y": 704.72,
+      "drillMil": 12,
+      "currentA": 0.27717,
+      "ampacityA": 1.478,
+      "usePct": 18.8,
+      "scenario": "peak"
+    },
+    {
+      "id": "7ba87c0ebe67d13d",
+      "net": "+3V3",
+      "x": 471.41,
+      "y": 778.23,
+      "drillMil": 12,
+      "currentA": 0.24429,
+      "ampacityA": 1.478,
+      "usePct": 16.5,
+      "scenario": "peak"
+    },
+    {
+      "id": "0080845cbc03db52",
+      "net": "VSYS_5V",
+      "x": 126.24,
+      "y": 637.6,
+      "drillMil": 12,
+      "currentA": 0.22926,
+      "ampacityA": 1.478,
+      "usePct": 15.5,
+      "scenario": "usb-only"
+    },
+    {
+      "id": "a7a252fee99dfffb",
+      "net": "VSYS_5V",
+      "x": 81.5,
+      "y": 1327.94,
+      "drillMil": 12,
+      "currentA": 0.17047,
+      "ampacityA": 1.478,
+      "usePct": 11.5,
+      "scenario": "terminal-only"
+    },
+    {
+      "id": "2bbb88abb75a4b4d",
+      "net": "GND",
+      "x": 819.77,
+      "y": 1235.25,
+      "drillMil": 12,
+      "currentA": 0.16667,
+      "ampacityA": 1.478,
+      "usePct": 11.3,
+      "scenario": "peak"
+    },
+    {
+      "id": "91373236bb3f3383",
+      "net": "GND",
+      "x": 1056.28,
+      "y": 266.87,
+      "drillMil": 12,
+      "currentA": 0.1456,
+      "ampacityA": 1.478,
+      "usePct": 9.9,
+      "scenario": "usb-only"
+    },
+    {
+      "id": "0d47fce6d92fb72f",
+      "net": "GND",
+      "x": 752.66,
+      "y": 270.06,
+      "drillMil": 12,
+      "currentA": 0.10339,
+      "ampacityA": 1.478,
+      "usePct": 7,
+      "scenario": "usb-only"
+    },
+    {
+      "id": "e7314b729ec98f34",
+      "net": "GND",
+      "x": 519.35,
+      "y": 1535.68,
+      "drillMil": 12,
+      "currentA": 0.09714,
+      "ampacityA": 1.478,
+      "usePct": 6.6,
+      "scenario": "terminal-only"
+    },
+    {
+      "id": "04dd27b993e9f35f",
+      "net": "GND",
+      "x": 1292.78,
+      "y": 1510.11,
+      "drillMil": 12,
+      "currentA": 0.09393,
+      "ampacityA": 1.478,
+      "usePct": 6.4,
+      "scenario": "terminal-only"
+    },
+    {
+      "id": "db0e8ade54c17dd5",
+      "net": "GND",
+      "x": 407.49,
+      "y": 522.55,
+      "drillMil": 12,
+      "currentA": 0.07868,
+      "ampacityA": 1.478,
+      "usePct": 5.3,
+      "scenario": "terminal-only"
+    },
+    {
+      "id": "d6202b03d8534b66",
+      "net": "GND",
+      "x": 685.54,
+      "y": 190.16,
+      "drillMil": 12,
+      "currentA": 0.03005,
+      "ampacityA": 1.478,
+      "usePct": 2,
+      "scenario": "usb-only"
+    },
+    {
+      "id": "e5a0709df1e45daa",
+      "net": "GND",
+      "x": 781.42,
+      "y": 321.2,
+      "drillMil": 12,
+      "currentA": 0.02564,
+      "ampacityA": 1.478,
+      "usePct": 1.7,
+      "scenario": "usb-only"
+    },
+    {
+      "id": "e9320012a96b5b7b",
+      "net": "GND",
+      "x": 394.71,
+      "y": 1334.33,
+      "drillMil": 12,
+      "currentA": 0.02461,
+      "ampacityA": 1.478,
+      "usePct": 1.7,
+      "scenario": "terminal-only"
+    },
+    {
+      "id": "6379175fb74bf308",
+      "net": "GND",
+      "x": 490.59,
+      "y": 1350.31,
+      "drillMil": 12,
+      "currentA": 0.0245,
+      "ampacityA": 1.478,
+      "usePct": 1.7,
+      "scenario": "terminal-only"
+    },
+    {
+      "id": "f9479ba40b895433",
+      "net": "GND",
+      "x": 819.77,
+      "y": 557.7,
+      "drillMil": 12,
+      "currentA": 0.02258,
+      "ampacityA": 1.478,
+      "usePct": 1.5,
+      "scenario": "usb-only"
+    },
+    {
+      "id": "f31f40bdf6aba642",
+      "net": "+3V3",
+      "x": 1212.88,
+      "y": 628.01,
+      "drillMil": 12,
+      "currentA": 0.02,
+      "ampacityA": 1.478,
+      "usePct": 1.4,
+      "scenario": "peak"
+    },
+    {
+      "id": "fb90f6e99bf1b6e6",
+      "net": "GND",
+      "x": 461.82,
+      "y": 813.38,
+      "drillMil": 12,
+      "currentA": 0.01772,
+      "ampacityA": 1.478,
+      "usePct": 1.2,
+      "scenario": "terminal-only"
+    },
+    {
+      "id": "f8ac39057b545c9f",
+      "net": "GND",
+      "x": 791.01,
+      "y": 1120.2,
+      "drillMil": 12,
+      "currentA": 0.01556,
+      "ampacityA": 1.478,
+      "usePct": 1.1,
+      "scenario": "terminal-only"
+    },
+    {
+      "id": "c1753b4151d9f548",
+      "net": "GND",
+      "x": 931.63,
+      "y": 1129.79,
+      "drillMil": 12,
+      "currentA": 0.01541,
+      "ampacityA": 1.478,
+      "usePct": 1,
+      "scenario": "usb-only"
+    },
+    {
+      "id": "ec4441568e4194b6",
+      "net": "GND",
+      "x": 647.19,
+      "y": 723.89,
+      "drillMil": 12,
+      "currentA": 0.01477,
+      "ampacityA": 1.478,
+      "usePct": 1,
+      "scenario": "usb-only"
+    },
+    {
+      "id": "dfe5be6bd77c7767",
+      "net": "GND",
+      "x": 1120.2,
+      "y": 107.07,
+      "drillMil": 12,
+      "currentA": 0.01461,
+      "ampacityA": 1.478,
+      "usePct": 1,
+      "scenario": "usb-only"
+    },
+    {
+      "id": "98f430db43003a69",
+      "net": "GND",
+      "x": 509.76,
+      "y": 586.47,
+      "drillMil": 12,
+      "currentA": 0.01432,
+      "ampacityA": 1.478,
+      "usePct": 1,
+      "scenario": "terminal-only"
+    },
+    {
+      "id": "0a13380a4c181bce",
+      "net": "GND",
+      "x": 1439.8,
+      "y": 1276.8,
+      "drillMil": 12,
+      "currentA": 0.01401,
+      "ampacityA": 1.478,
+      "usePct": 0.9,
+      "scenario": "terminal-only"
+    },
+    {
+      "id": "d287df5064c28e96",
+      "net": "GND",
+      "x": 257.28,
+      "y": 436.25,
+      "drillMil": 12,
+      "currentA": 0.01338,
+      "ampacityA": 1.478,
+      "usePct": 0.9,
+      "scenario": "terminal-only"
+    },
+    {
+      "id": "a2cc54728275f418",
+      "net": "GND",
+      "x": 832.56,
+      "y": 1292.78,
+      "drillMil": 12,
+      "currentA": 0.01263,
+      "ampacityA": 1.478,
+      "usePct": 0.9,
+      "scenario": "usb-only"
+    },
+    {
+      "id": "c4c187423f23d8b8",
+      "net": "GND",
+      "x": 688.74,
+      "y": 107.07,
+      "drillMil": 12,
+      "currentA": 0.01244,
+      "ampacityA": 1.478,
+      "usePct": 0.8,
+      "scenario": "usb-only"
+    },
+    {
+      "id": "9728b8803d3c4403",
+      "net": "GND",
+      "x": 449.04,
+      "y": 1481.35,
+      "drillMil": 12,
+      "currentA": 0.01165,
+      "ampacityA": 1.478,
+      "usePct": 0.8,
+      "scenario": "usb-only"
+    },
+    {
+      "id": "cc428e07a41cf9a0",
+      "net": "GND",
+      "x": 784.62,
+      "y": 1292.78,
+      "drillMil": 12,
+      "currentA": 0.01135,
+      "ampacityA": 1.478,
+      "usePct": 0.8,
+      "scenario": "usb-only"
+    },
+    {
+      "id": "b73d9e4c9152daa8",
+      "net": "GND",
+      "x": 928.44,
+      "y": 1235.25,
+      "drillMil": 12,
+      "currentA": 0.01122,
+      "ampacityA": 1.478,
+      "usePct": 0.8,
+      "scenario": "usb-only"
+    },
+    {
+      "id": "1cc04e74b61c0f98",
+      "net": "GND",
+      "x": 848.54,
+      "y": 385.12,
+      "drillMil": 12,
+      "currentA": 0.01117,
+      "ampacityA": 1.478,
+      "usePct": 0.8,
+      "scenario": "usb-only"
+    },
+    {
+      "id": "122c2663a8155e63",
+      "net": "GND",
+      "x": 762.25,
+      "y": 1232.06,
+      "drillMil": 12,
+      "currentA": 0.01033,
+      "ampacityA": 1.478,
+      "usePct": 0.7,
+      "scenario": "usb-only"
+    },
+    {
+      "id": "a033d9d94855e10d",
+      "net": "GND",
+      "x": 1155.35,
+      "y": 231.71,
+      "drillMil": 12,
+      "currentA": 0.0098,
+      "ampacityA": 1.478,
+      "usePct": 0.7,
+      "scenario": "usb-only"
+    },
+    {
+      "id": "2d26e0f1754d8c9a",
+      "net": "GND",
+      "x": 874.11,
+      "y": 1180.92,
+      "drillMil": 12,
+      "currentA": 0.00966,
+      "ampacityA": 1.478,
+      "usePct": 0.7,
+      "scenario": "usb-only"
+    },
+    {
+      "id": "1d700d77cc999603",
+      "net": "GND",
+      "x": 1046.69,
+      "y": 404.29,
+      "drillMil": 12,
+      "currentA": 0.00957,
+      "ampacityA": 1.478,
+      "usePct": 0.6,
+      "scenario": "usb-only"
+    },
+    {
+      "id": "b306185c17c6a436",
+      "net": "GND",
+      "x": 870.91,
+      "y": 1123.39,
+      "drillMil": 12,
+      "currentA": 0.00889,
+      "ampacityA": 1.478,
+      "usePct": 0.6,
+      "scenario": "usb-only"
+    },
+    {
+      "id": "ef73741ccfbfe722",
+      "net": "GND",
+      "x": 1171.33,
+      "y": 388.31,
+      "drillMil": 12,
+      "currentA": 0.00868,
+      "ampacityA": 1.478,
+      "usePct": 0.6,
+      "scenario": "usb-only"
+    },
+    {
+      "id": "6c85486176545faa",
+      "net": "GND",
+      "x": 1049.89,
+      "y": 519.35,
+      "drillMil": 12,
+      "currentA": 0.00672,
+      "ampacityA": 1.478,
+      "usePct": 0.5,
+      "scenario": "terminal-only"
+    },
+    {
+      "id": "1cfcc159560d00af",
+      "net": "GND",
+      "x": 1161.75,
+      "y": 640.8,
+      "drillMil": 12,
+      "currentA": 0.00125,
+      "ampacityA": 1.478,
+      "usePct": 0.1,
+      "scenario": "usb-only"
+    },
+    {
+      "id": "03171b70f751e7be",
+      "net": "+3V3",
+      "x": 656.78,
+      "y": 688.74,
+      "drillMil": 12,
+      "currentA": 0.00033,
+      "ampacityA": 1.478,
+      "usePct": 0,
+      "scenario": "buttons-pressed"
+    },
+    {
+      "id": "a4674bbbf73f8c17",
+      "net": "+3V3",
+      "x": 1340.72,
+      "y": 870.91,
+      "drillMil": 12,
+      "currentA": 0.00033,
+      "ampacityA": 1.478,
+      "usePct": 0,
+      "scenario": "buttons-pressed"
+    },
+    {
+      "id": "c8790a675ae67719",
+      "net": "+3V3",
+      "x": 413.88,
+      "y": 442.65,
+      "drillMil": 12,
+      "currentA": 0.00006,
+      "ampacityA": 1.478,
+      "usePct": 0,
+      "scenario": "buttons-pressed"
+    },
+    {
+      "id": "c231f79c0089ead5",
+      "net": "+3V3",
+      "x": 426.67,
+      "y": 401.1,
+      "drillMil": 12,
+      "currentA": 0.00002,
+      "ampacityA": 1.478,
+      "usePct": 0,
+      "scenario": "peak"
+    },
+    {
+      "id": "1478935e1bbef310",
+      "net": "USB_VBUS",
+      "x": 1011.53,
+      "y": 401.1,
+      "drillMil": 12,
+      "currentA": 0,
+      "ampacityA": 1.478,
+      "usePct": 0,
+      "scenario": "usb-only"
+    },
+    {
+      "id": "29a7d9ffbcbadc55",
+      "net": "+3V3",
+      "x": 362.75,
+      "y": 1494.13,
+      "drillMil": 12,
+      "currentA": 0,
+      "ampacityA": 1.478,
+      "usePct": 0,
+      "scenario": "peak"
+    },
+    {
+      "id": "2c39de6562b1f8f4",
+      "net": "+3V3",
+      "x": 388.31,
+      "y": 813.38,
+      "drillMil": 12,
+      "currentA": 0,
+      "ampacityA": 1.478,
+      "usePct": 0,
+      "scenario": "peak"
+    },
+    {
+      "id": "2e541cd8e399cf37",
+      "net": "USB_VBUS",
+      "x": 180.57,
+      "y": 410.69,
+      "drillMil": 12,
+      "currentA": 0,
+      "ampacityA": 1.478,
+      "usePct": 0,
+      "scenario": "usb-only"
+    },
+    {
+      "id": "5176f9f5d682e043",
+      "net": "+3V3",
+      "x": 1155.35,
+      "y": 570.49,
+      "drillMil": 12,
+      "currentA": 0,
+      "ampacityA": 1.478,
+      "usePct": 0,
+      "scenario": "peak"
+    },
+    {
+      "id": "7a1cedd2c58b0346",
+      "net": "+3V3",
+      "x": 506.57,
+      "y": 1439.8,
+      "drillMil": 12,
+      "currentA": 0,
+      "ampacityA": 1.478,
+      "usePct": 0,
+      "scenario": "peak"
+    },
+    {
+      "id": "8d4e01f6385381da",
+      "net": "USB_VBUS",
+      "x": 813.38,
+      "y": 311.61,
+      "drillMil": 12,
+      "currentA": 0,
+      "ampacityA": 1.478,
+      "usePct": 0,
+      "scenario": "terminal-only"
+    },
+    {
+      "id": "9e1d7da40bd465f9",
+      "net": "VSYS_5V",
+      "x": 471.41,
+      "y": 433.06,
+      "drillMil": 12,
+      "currentA": 0,
+      "ampacityA": 1.478,
+      "usePct": 0,
+      "scenario": "peak"
+    },
+    {
+      "id": "beacddecc15f86b1",
+      "net": "VSYS_5V",
+      "x": 442.65,
+      "y": 458.63,
+      "drillMil": 12,
+      "currentA": 0,
+      "ampacityA": 1.478,
+      "usePct": 0,
+      "scenario": "peak"
+    },
+    {
+      "id": "c24adc597a16f506",
+      "net": "USB_VBUS",
+      "x": 1001.95,
+      "y": 311.61,
+      "drillMil": 12,
+      "currentA": 0,
+      "ampacityA": 1.478,
+      "usePct": 0,
+      "scenario": "usb-only"
+    },
+    {
+      "id": "ccd76fd2f246b947",
+      "net": "+3V3",
+      "x": 487.39,
+      "y": 691.93,
+      "drillMil": 12,
+      "currentA": 0,
+      "ampacityA": 1.478,
+      "usePct": 0,
+      "scenario": "peak"
+    },
+    {
+      "id": "f91748ecfc4d6d3c",
+      "net": "+3V3",
+      "x": 1366.29,
+      "y": 327.59,
+      "drillMil": 12,
+      "currentA": 0,
+      "ampacityA": 1.478,
+      "usePct": 0,
+      "scenario": "typical"
+    }
+  ],
+  "thermal": {
+    "scenario": "terminal-only",
+    "maxBoardC": 86.28,
+    "maxAt": {
+      "layer": "TOP",
+      "x": 561,
+      "y": 1151.6,
+      "value": 86.28,
+      "kind": "cell",
+      "what": "U3"
+    },
+    "totalW": 2.13684,
+    "partsW": 2.12897,
+    "jouleW": 0.007878,
+    "lossW": 2.13684,
+    "balanceErrPct": -0,
+    "layers": [
+      {
+        "layer": "TOP",
+        "maxC": 86.28,
+        "meanC": 77.82,
+        "x": 561,
+        "y": 1151.6
+      },
+      {
+        "layer": "IN1",
+        "maxC": 83.5,
+        "meanC": 77.58,
+        "x": 580.7,
+        "y": 1112.2
+      },
+      {
+        "layer": "IN2",
+        "maxC": 80.74,
+        "meanC": 76.44,
+        "x": 757.9,
+        "y": 1230.3
+      },
+      {
+        "layer": "BOTTOM",
+        "maxC": 80.42,
+        "meanC": 76.19,
+        "x": 757.9,
+        "y": 1230.3
+      }
+    ],
+    "parts": [
+      {
+        "ref": "U3",
+        "device": "ESP32-S3-WROOM-1",
+        "side": "TOP",
+        "powerW": 1.659078,
+        "scenario": "terminal-only",
+        "boardMaxC": 86.28,
+        "boardMeanC": 84.26,
+        "status": "needs-datasheet",
+        "note": "no θJB/θJC in power-models ratings: board temperature only"
+      },
+      {
+        "ref": "U1",
+        "device": "SY8089A1AAC",
+        "side": "TOP",
+        "powerW": 0.19758,
+        "scenario": "usb-only",
+        "boardMaxC": 83.26,
+        "boardMeanC": 82.49,
+        "status": "needs-datasheet",
+        "note": "no θJB/θJC in power-models ratings: board temperature only"
+      },
+      {
+        "ref": "SW2",
+        "device": "TS-1088-AR02016",
+        "side": "TOP",
+        "powerW": 0,
+        "scenario": "usb-only",
+        "boardMaxC": 82.85,
+        "boardMeanC": 80.18,
+        "status": "ok",
+        "note": "no dissipation: heated by neighbours"
+      },
+      {
+        "ref": "C7",
+        "device": "CL05A105KA5NQNC",
+        "side": "TOP",
+        "powerW": 0,
+        "scenario": "terminal-only",
+        "boardMaxC": 82.54,
+        "boardMeanC": 82.19,
+        "status": "ok",
+        "note": "no dissipation: heated by neighbours"
+      },
+      {
+        "ref": "D1",
+        "device": "SS34",
+        "side": "TOP",
+        "powerW": 0.155225,
+        "scenario": "terminal-only",
+        "boardMaxC": 82.44,
+        "boardMeanC": 81.95,
+        "status": "needs-datasheet",
+        "note": "no θJB/θJC in power-models ratings: board temperature only"
+      },
+      {
+        "ref": "SW1",
+        "device": "TS-1088-AR02016",
+        "side": "TOP",
+        "powerW": 0,
+        "scenario": "usb-only",
+        "boardMaxC": 82.27,
+        "boardMeanC": 79.24,
+        "status": "ok",
+        "note": "no dissipation: heated by neighbours"
+      },
+      {
+        "ref": "L1",
+        "device": "NLCV32T-2R2M-PF",
+        "side": "TOP",
+        "powerW": 0.045954,
+        "scenario": "usb-only",
+        "boardMaxC": 82.2,
+        "boardMeanC": 81.59,
+        "status": "needs-datasheet",
+        "note": "no θJB/θJC in power-models ratings: board temperature only"
+      },
+      {
+        "ref": "C2",
+        "device": "CL21A226MAQNNNE",
+        "side": "TOP",
+        "powerW": 0,
+        "scenario": "usb-only",
+        "boardMaxC": 82.1,
+        "boardMeanC": 81.1,
+        "status": "ok",
+        "note": "no dissipation: heated by neighbours"
+      },
+      {
+        "ref": "D2",
+        "device": "SS34",
+        "side": "TOP",
+        "powerW": 0.156543,
+        "scenario": "usb-only",
+        "boardMaxC": 81.84,
+        "boardMeanC": 81.23,
+        "status": "needs-datasheet",
+        "note": "no θJB/θJC in power-models ratings: board temperature only"
+      },
+      {
+        "ref": "C1",
+        "device": "GRM21BR61H106KE43L",
+        "side": "TOP",
+        "powerW": 0,
+        "scenario": "usb-only",
+        "boardMaxC": 81.66,
+        "boardMeanC": 79.65,
+        "status": "ok",
+        "note": "no dissipation: heated by neighbours"
+      },
+      {
+        "ref": "C5",
+        "device": "GRM21BR61H106KE43L",
+        "side": "TOP",
+        "powerW": 0,
+        "scenario": "terminal-only",
+        "boardMaxC": 81.48,
+        "boardMeanC": 80.71,
+        "status": "ok",
+        "note": "no dissipation: heated by neighbours"
+      },
+      {
+        "ref": "C6",
+        "device": "CL05B104KO5NNNC",
+        "side": "TOP",
+        "powerW": 0,
+        "scenario": "terminal-only",
+        "boardMaxC": 81.48,
+        "boardMeanC": 81.16,
+        "status": "ok",
+        "note": "no dissipation: heated by neighbours"
+      },
+      {
+        "ref": "C3",
+        "device": "CL05B104KO5NNNC",
+        "side": "TOP",
+        "powerW": 0,
+        "scenario": "usb-only",
+        "boardMaxC": 81.15,
+        "boardMeanC": 80.97,
+        "status": "ok",
+        "note": "no dissipation: heated by neighbours"
+      },
+      {
+        "ref": "R5",
+        "device": "0402WGF1002TCE",
+        "side": "TOP",
+        "powerW": 0,
+        "scenario": "usb-only",
+        "boardMaxC": 80.69,
+        "boardMeanC": 80.42,
+        "status": "ok",
+        "note": "no dissipation: heated by neighbours"
+      },
+      {
+        "ref": "J1",
+        "device": "KF301-5.0-2P",
+        "side": "TOP",
+        "powerW": 0,
+        "scenario": "terminal-only",
+        "boardMaxC": 80.32,
+        "boardMeanC": 79.24,
+        "status": "ok",
+        "note": "no dissipation: heated by neighbours"
+      },
+      {
+        "ref": "R6",
+        "device": "0402WGF1002TCE",
+        "side": "TOP",
+        "powerW": 0,
+        "scenario": "usb-only",
+        "boardMaxC": 79.95,
+        "boardMeanC": 79.29,
+        "status": "ok",
+        "note": "no dissipation: heated by neighbours"
+      },
+      {
+        "ref": "R2",
+        "device": "0402WGF1002TCE",
+        "side": "TOP",
+        "powerW": 0.000036,
+        "scenario": "usb-only",
+        "boardMaxC": 79.82,
+        "boardMeanC": 79.49,
+        "status": "needs-datasheet",
+        "note": "no θJB/θJC in power-models ratings: board temperature only"
+      },
+      {
+        "ref": "R1",
+        "device": "0402WGF4532TCE",
+        "side": "TOP",
+        "powerW": 0.000163,
+        "scenario": "usb-only",
+        "boardMaxC": 79.6,
+        "boardMeanC": 79.09,
+        "status": "needs-datasheet",
+        "note": "no θJB/θJC in power-models ratings: board temperature only"
+      },
+      {
+        "ref": "R8",
+        "device": "0402WGJ0472TCE",
+        "side": "TOP",
+        "powerW": 0,
+        "scenario": "usb-only",
+        "boardMaxC": 78.54,
+        "boardMeanC": 78.22,
+        "status": "ok",
+        "note": "no dissipation: heated by neighbours"
+      },
+      {
+        "ref": "R7",
+        "device": "0402WGF1001TCE",
+        "side": "TOP",
+        "powerW": 0.001959,
+        "scenario": "terminal-only",
+        "boardMaxC": 78.53,
+        "boardMeanC": 78.11,
+        "status": "needs-datasheet",
+        "note": "no θJB/θJC in power-models ratings: board temperature only"
+      },
+      {
+        "ref": "R9",
+        "device": "0402WGJ0472TCE",
+        "side": "TOP",
+        "powerW": 0,
+        "scenario": "usb-only",
+        "boardMaxC": 78.45,
+        "boardMeanC": 77.53,
+        "status": "ok",
+        "note": "no dissipation: heated by neighbours"
+      },
+      {
+        "ref": "Q1",
+        "device": "MMBT3904(RANGE:100-300)",
+        "side": "TOP",
+        "powerW": 0,
+        "scenario": "usb-only",
+        "boardMaxC": 78.28,
+        "boardMeanC": 77.01,
+        "status": "ok",
+        "note": "no dissipation: heated by neighbours"
+      },
+      {
+        "ref": "C4",
+        "device": "CL05B104KO5NNNC",
+        "side": "TOP",
+        "powerW": 0,
+        "scenario": "usb-only",
+        "boardMaxC": 78.08,
+        "boardMeanC": 77.52,
+        "status": "ok",
+        "note": "no dissipation: heated by neighbours"
+      },
+      {
+        "ref": "LED1",
+        "device": "KT-0805Y",
+        "side": "TOP",
+        "powerW": 0.002607,
+        "scenario": "terminal-only",
+        "boardMaxC": 77.69,
+        "boardMeanC": 77.09,
+        "status": "needs-datasheet",
+        "note": "no θJB/θJC in power-models ratings: board temperature only"
+      },
+      {
+        "ref": "U2",
+        "device": "CH340C",
+        "side": "TOP",
+        "powerW": 0.06636,
+        "scenario": "usb-only",
+        "boardMaxC": 77.3,
+        "boardMeanC": 74.85,
+        "status": "needs-datasheet",
+        "note": "no θJB/θJC in power-models ratings: board temperature only"
+      },
+      {
+        "ref": "D3",
+        "device": "USBLC6-2SC6",
+        "side": "TOP",
+        "powerW": 0.000001,
+        "scenario": "usb-only",
+        "boardMaxC": 76.7,
+        "boardMeanC": 75.77,
+        "status": "needs-datasheet",
+        "note": "no θJB/θJC in power-models ratings: board temperature only"
+      },
+      {
+        "ref": "Q2",
+        "device": "MMBT3904(RANGE:100-300)",
+        "side": "TOP",
+        "powerW": 0,
+        "scenario": "usb-only",
+        "boardMaxC": 76.51,
+        "boardMeanC": 75.83,
+        "status": "ok",
+        "note": "no dissipation: heated by neighbours"
+      },
+      {
+        "ref": "R3",
+        "device": "0402WGF5101TCE",
+        "side": "TOP",
+        "powerW": 0,
+        "scenario": "usb-only",
+        "boardMaxC": 76.27,
+        "boardMeanC": 76.15,
+        "status": "ok",
+        "note": "no dissipation: heated by neighbours"
+      },
+      {
+        "ref": "J2",
+        "device": "USB3.1TYPE-C16P",
+        "side": "TOP",
+        "powerW": 0,
+        "scenario": "usb-only",
+        "boardMaxC": 76.12,
+        "boardMeanC": 74.76,
+        "status": "ok",
+        "note": "no dissipation: heated by neighbours"
+      },
+      {
+        "ref": "R4",
+        "device": "0402WGF5101TCE",
+        "side": "TOP",
+        "powerW": 0,
+        "scenario": "usb-only",
+        "boardMaxC": 75.2,
+        "boardMeanC": 74.97,
+        "status": "ok",
+        "note": "no dissipation: heated by neighbours"
+      }
+    ],
+    "perScenario": [
+      {
+        "scenario": "typical",
+        "partsW": 0.44445,
+        "jouleW": 0.000234,
+        "maxC": 37.56,
+        "lossW": 0.44469,
+        "balanceErrPct": -0,
+        "cgIterations": 205
+      },
+      {
+        "scenario": "peak",
+        "partsW": 2.11516,
+        "jouleW": 0.005307,
+        "maxC": 85.58,
+        "lossW": 2.12047,
+        "balanceErrPct": -0,
+        "cgIterations": 205
+      },
+      {
+        "scenario": "buttons-pressed",
+        "partsW": 0.44709,
+        "jouleW": 0.000236,
+        "maxC": 37.63,
+        "lossW": 0.44733,
+        "balanceErrPct": -0,
+        "cgIterations": 205
+      },
+      {
+        "scenario": "terminal-only",
+        "partsW": 2.12897,
+        "jouleW": 0.007878,
+        "maxC": 86.28,
+        "lossW": 2.13684,
+        "balanceErrPct": -0,
+        "cgIterations": 205
+      },
+      {
+        "scenario": "usb-only",
+        "partsW": 2.13028,
+        "jouleW": 0.009652,
+        "maxC": 85.8,
+        "lossW": 2.13993,
+        "balanceErrPct": -0,
+        "cgIterations": 205
+      }
+    ],
+    "jouleScenario": "usb-only",
+    "maxCopperRiseC": 0.395
+  },
+  "compare": [
+    {
+      "net": "+3V3",
+      "autoMV": 3.828,
+      "autoPad": "U3.2",
+      "postMV": 2.704,
+      "postPad": "U3.2",
+      "deltaMV": -1.124,
+      "postScenario": "peak"
+    },
+    {
+      "net": "+5V_TERM",
+      "autoMV": 1.98,
+      "autoPad": "D1.2",
+      "postMV": 0.993,
+      "postPad": "D1.2",
+      "deltaMV": -0.987,
+      "postScenario": "terminal-only"
+    },
+    {
+      "net": "GND",
+      "autoMV": 1.118,
+      "autoPad": "U3.1",
+      "postMV": 0.335,
+      "postPad": "U3.41",
+      "deltaMV": -0.783,
+      "postScenario": "usb-only"
+    },
+    {
+      "net": "LX",
+      "autoMV": 0.614,
+      "autoPad": "L1.1",
+      "postMV": 0.265,
+      "postPad": "L1.1",
+      "deltaMV": -0.349,
+      "postScenario": "peak"
+    },
+    {
+      "net": "USB_VBUS",
+      "autoMV": 17.873,
+      "autoPad": "D2.2",
+      "postMV": 17.071,
+      "postPad": "D2.2",
+      "deltaMV": -0.802,
+      "postScenario": "usb-only"
+    },
+    {
+      "net": "VSYS_5V",
+      "autoMV": 15.617,
+      "autoPad": "U1.4",
+      "postMV": 13.608,
+      "postPad": "U1.4",
+      "deltaMV": -2.009,
+      "postScenario": "terminal-only"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "info",
+      "kind": "needs-datasheet",
+      "message": "U3 (1.66 W, board 86.3 °C): no θJB/θJC rating — junction not estimated",
+      "refs": [
+        "U3"
+      ]
+    },
+    {
+      "severity": "info",
+      "kind": "needs-datasheet",
+      "message": "U1 (0.198 W, board 83.3 °C): no θJB/θJC rating — junction not estimated",
+      "refs": [
+        "U1"
+      ]
+    },
+    {
+      "severity": "info",
+      "kind": "needs-datasheet",
+      "message": "D1 (0.155 W, board 82.4 °C): no θJB/θJC rating — junction not estimated",
+      "refs": [
+        "D1"
+      ]
+    },
+    {
+      "severity": "info",
+      "kind": "needs-datasheet",
+      "message": "L1 (0.046 W, board 82.2 °C): no θJB/θJC rating — junction not estimated",
+      "refs": [
+        "L1"
+      ]
+    },
+    {
+      "severity": "info",
+      "kind": "needs-datasheet",
+      "message": "D2 (0.157 W, board 81.8 °C): no θJB/θJC rating — junction not estimated",
+      "refs": [
+        "D2"
+      ]
+    },
+    {
+      "severity": "info",
+      "kind": "needs-datasheet",
+      "message": "R2 (3.6e-05 W, board 79.8 °C): no θJB/θJC rating — junction not estimated",
+      "refs": [
+        "R2"
+      ]
+    },
+    {
+      "severity": "info",
+      "kind": "needs-datasheet",
+      "message": "R1 (0.000163 W, board 79.6 °C): no θJB/θJC rating — junction not estimated",
+      "refs": [
+        "R1"
+      ]
+    },
+    {
+      "severity": "info",
+      "kind": "needs-datasheet",
+      "message": "R7 (0.00196 W, board 78.5 °C): no θJB/θJC rating — junction not estimated",
+      "refs": [
+        "R7"
+      ]
+    },
+    {
+      "severity": "info",
+      "kind": "needs-datasheet",
+      "message": "LED1 (0.00261 W, board 77.7 °C): no θJB/θJC rating — junction not estimated",
+      "refs": [
+        "LED1"
+      ]
+    },
+    {
+      "severity": "info",
+      "kind": "needs-datasheet",
+      "message": "U2 (0.0664 W, board 77.3 °C): no θJB/θJC rating — junction not estimated",
+      "refs": [
+        "U2"
+      ]
+    },
+    {
+      "severity": "info",
+      "kind": "needs-datasheet",
+      "message": "D3 (1e-06 W, board 76.7 °C): no θJB/θJC rating — junction not estimated",
+      "refs": [
+        "D3"
+      ]
+    }
+  ],
+  "assumptions": [
+    "2 through-hole pad(s) carry no drill in the dump: plated hole assumed = 0.5 × the smaller pad side",
+    "83 thermal-relief spoke(s) of the poured copper modelled as tracks of their stroke width",
+    "IN1 has no copper objects in the dump (a negative/内电层 plane is not listed by pcb dump): assumed a solid GND plane — board outline inset 10 mil (copper-to-edge), antipads around every other-net via / THT pad / cutout = its copper + 6.0 mil clearance, same-net vias connect directly (thermal-relief spokes ignored). Override with --plane 15=NET or --plane 15=none",
+    "boundary: the bare board in still air — natural convection on both faces (top 10.0, bottom 10.0 W/m²K), no enclosure, fan or airflow (no CFD); board edges adiabatic"
+  ],
+  "model": [
+    "copper from the board dump: tracks/arcs = 1-D resistors ρL/(w·t) split at junctions/vias/pads and at every cell; poured fills, static fills, planes = sheet cells G = (t/ρ)·min(harmonic coverage, shared-edge copper fraction); pads shorted to the sheet they overlap",
+    "ρ = 1.72e-08 Ω·m (20 °C); via barrel R = ρ·h/(π(d+t)t), plating t = 0.7 mil, h = layer-centre distance",
+    "stackup: TOP 35.0 µm @ z 0.018 mm; IN1 17.5 µm @ z 0.254 mm; IN2 17.5 µm @ z 1.346 mm; BOTTOM 35.0 µm @ z 1.583 mm; dielectrics [0.2104 1.0742 0.2104] mm (JLC04161H-7628 (4-layer 1.6 mm, L1→L2 prepreg 0.2104 mm))",
+    "each scenario of the sim file is solved on its own (KCL-consistent): the supplying part (power: source pins; ground: return entry, connector-source first) is the 0 V reference, every other pad draws (+I) or feeds (−I) its simulated current; worst = maximum over scenarios",
+    "via ampacity = IPC-2221 external curve on the barrel cross-section π(d+t)t at ΔT 10 °C (IPC-2152: internal ≈ external)",
+    "thermal: per layer k_Cu 385 W/mK × t × coverage + FR-4 0.3 W/mK in-plane over half of each adjacent dielectric; FR-4 0.3 W/mK through-plane + via barrels; convection top/bottom; part heat on its pads by area; Joule heat from the DC solve; board edges adiabatic; part bodies do not convect separately (their top face shares the board's h)",
+    "Tj = board temperature under the part + P·θJB (θJC when only that is rated); without a rating only the board temperature is reported"
+  ],
+  "feedback": [],
+  "verdict": {
+    "status": "pass"
+  },
+  "maps": [
+    {
+      "kind": "temperature",
+      "layer": "TOP",
+      "file": "temp-TOP.svg",
+      "min": 68.88,
+      "max": 86.28,
+      "unit": "°C"
+    },
+    {
+      "kind": "temperature",
+      "layer": "IN1",
+      "file": "temp-IN1.svg",
+      "min": 68.88,
+      "max": 86.28,
+      "unit": "°C"
+    },
+    {
+      "kind": "temperature",
+      "layer": "IN2",
+      "file": "temp-IN2.svg",
+      "min": 68.88,
+      "max": 86.28,
+      "unit": "°C"
+    },
+    {
+      "kind": "temperature",
+      "layer": "BOTTOM",
+      "file": "temp-BOTTOM.svg",
+      "min": 68.88,
+      "max": 86.28,
+      "unit": "°C"
+    },
+    {
+      "kind": "current-density",
+      "layer": "TOP",
+      "file": "current-TOP.svg",
+      "min": 0.0967,
+      "max": 96.68,
+      "unit": "A/mm²",
+      "logScale": true
+    },
+    {
+      "kind": "current-density",
+      "layer": "IN1",
+      "file": "current-IN1.svg",
+      "min": 0.0967,
+      "max": 96.68,
+      "unit": "A/mm²",
+      "logScale": true
+    },
+    {
+      "kind": "current-density",
+      "layer": "IN2",
+      "file": "current-IN2.svg",
+      "min": 0.0967,
+      "max": 96.68,
+      "unit": "A/mm²",
+      "logScale": true
+    },
+    {
+      "kind": "current-density",
+      "layer": "BOTTOM",
+      "file": "current-BOTTOM.svg",
+      "min": 0.0967,
+      "max": 96.68,
+      "unit": "A/mm²",
+      "logScale": true
+    }
+  ],
+  "mapsDir": "examples/esp32-mini-post-layout/heatmaps",
+  "elmer": {
+    "status": "skipped",
+    "note": "ElmerSolver not installed — run: pcbpilot sim tools install --only elmer. The deck is written for a later run (cd examples/esp32-mini-post-layout/elmer \u0026\u0026 ElmerSolver case.sif), then `pcbpilot sim post-layout … --elmer-result examples/esp32-mini-post-layout/elmer/probes.dat`",
+    "deck": "examples/esp32-mini-post-layout/elmer",
+    "nodes": 32872,
+    "elements": 23910,
+    "boundaryFaces": 15940,
+    "bodies": 244,
+    "tolC": 3.06,
+    "probes": [
+      {
+        "name": "board max",
+        "layer": "TOP",
+        "x": 561,
+        "y": 1151.6,
+        "modelC": 86.28,
+        "hasElmer": false,
+        "xyzM": [
+          0.01425,
+          0.02925,
+          -0.000017500000000000002
+        ]
+      },
+      {
+        "name": "D1",
+        "layer": "TOP",
+        "x": 128,
+        "y": 1171.3,
+        "modelC": 82.435,
+        "hasElmer": false,
+        "xyzM": [
+          0.0032500000000000003,
+          0.02975,
+          -0.000017500000000000002
+        ]
+      },
+      {
+        "name": "D2",
+        "layer": "TOP",
+        "x": 226.4,
+        "y": 679.1,
+        "modelC": 78.59,
+        "hasElmer": false,
+        "xyzM": [
+          0.00575,
+          0.01725,
+          -0.000017500000000000002
+        ]
+      },
+      {
+        "name": "L1",
+        "layer": "TOP",
+        "x": 442.9,
+        "y": 600.4,
+        "modelC": 80.983,
+        "hasElmer": false,
+        "xyzM": [
+          0.01125,
+          0.01525,
+          -0.000017500000000000002
+        ]
+      },
+      {
+        "name": "U1",
+        "layer": "TOP",
+        "x": 442.9,
+        "y": 561,
+        "modelC": 81.978,
+        "hasElmer": false,
+        "xyzM": [
+          0.01125,
+          0.01425,
+          -0.000017500000000000002
+        ]
+      },
+      {
+        "name": "U2",
+        "layer": "TOP",
+        "x": 1190.9,
+        "y": 620.1,
+        "modelC": 77.024,
+        "hasElmer": false,
+        "xyzM": [
+          0.03025,
+          0.01575,
+          -0.000017500000000000002
+        ]
+      },
+      {
+        "name": "U3",
+        "layer": "TOP",
+        "x": 561,
+        "y": 1151.6,
+        "modelC": 86.28,
+        "hasElmer": false,
+        "xyzM": [
+          0.01425,
+          0.02925,
+          -0.000017500000000000002
+        ]
+      }
+    ]
+  }
+}

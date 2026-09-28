@@ -1,0 +1,19 @@
+{
+  "missingOnPcb": [],
+  "extraOnPcb": [],
+  "pinWithoutPad": [],
+  "padWithoutPin": [],
+  "netMismatch": [],
+  "netCaseOnly": [],
+  "unconnectedPins": [],
+  "ok": true,
+  "counts": {
+    "missingOnPcb": 0,
+    "extraOnPcb": 0,
+    "pinWithoutPad": 0,
+    "padWithoutPin": 0,
+    "netMismatch": 0,
+    "netCaseOnly": 0,
+    "unconnectedPins": 0
+  }
+}

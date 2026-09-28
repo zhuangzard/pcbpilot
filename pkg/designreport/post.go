@@ -3,6 +3,7 @@ package designreport
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/zhuangzard/pcbpilot/pkg/postsim"
@@ -177,7 +178,7 @@ func (c *ctx) buildPost() {
 		s.Thermal = []KV{
 			{"板最高温度", sprintf("%s °C", f1(t.MaxBoardC)), "场景 " + t.Scenario + "；" + at},
 			{"热源", sprintf("%s（器件 %s + 铜损 %s）", fW(t.TotalW), fW(t.PartsW), fW(t.JouleW)), ""},
-			{"能量平衡", sprintf("散出 %s，误差 %s %%", fW(t.LossW), trimF4(t.BalanceErrPct)), "Σ 对流散热 = Σ 热源"},
+			{"能量平衡", sprintf("散出 %s，误差 %.4f %%", fW(t.LossW), math.Abs(t.BalanceErrPct)), "Σ 对流散热 = Σ 热源"},
 		}
 		if t.JouleScenario != "" {
 			s.Thermal = append(s.Thermal, KV{"铜自热（仅铜损）", sprintf("%s °C", f2(t.MaxCopperRiseC)), "场景 " + t.JouleScenario})
@@ -186,6 +187,9 @@ func (c *ctx) buildPost() {
 			s.Layers = append(s.Layers, PostLayer{Layer: l.Layer, MaxC: l.MaxC, MeanC: l.MeanC, At: sprintf("(%s, %s)", f1(l.X), f1(l.Y))})
 		}
 		for _, pt := range t.Parts {
+			if pt.PowerW <= 0 {
+				continue // unpowered parts only follow the board; the maps show them
+			}
 			row := PostPartRow{Ref: pt.Ref, Side: pt.Side, PowerW: pt.PowerW, Scenario: pt.Scenario, BoardC: pt.BoardMaxC, TjC: pt.TjC, TjMaxC: pt.TjMaxC, Status: pt.Status}
 			if pt.ThetaCW > 0 {
 				row.Theta = pt.ThetaKind + " " + trimF4(pt.ThetaCW) + " °C/W"

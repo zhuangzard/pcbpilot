@@ -1,8 +1,8 @@
 # ESP32-S3 mini 设计报告 v2
 
-> **总体结论：FAIL** · 客户 Demo · 生成 2026-09-28T04:01:02Z · pcbpilot v0.5.0 · 宿主 EasyEDA Pro desktop V3 3.2.149 · connector 0.4.1
+> **总体结论：FAIL** · 客户 Demo · 生成 2026-09-21T14:13:20Z · pcbpilot dev · 宿主 EasyEDA Pro desktop V3 3.2.149 · connector 0.4.1
 >
-> 输入摘要 `467962198b3ef331ecef2b591900c18b3a7b3d7b03406d2ebbc144e815b4deff` · 相对 v1
+> 输入摘要 `e1310e2aa47f22d88d35767ab465db069b5b922c0cd236c047fcc5388ecf7c60` · 相对 v1
 
 **不通过原因**
 
@@ -20,7 +20,7 @@
 
 | 类型 | 说明 | 状态 | 路径 | sha256 |
 |---|---|---|---|---|
-| intent | 设计意图 intent.json | 已提供 | `docs/examples/esp32-mini-design-report/inputs/intent-3v3-1A.json` | `0fe14f8bb769` |
+| intent | 设计意图 intent.json | 已提供 | `examples/esp32-mini-design-report/inputs/intent-3v3-1A.json` | `0fe14f8bb769` |
 | sim | 电源仿真 sim.json | 已提供 | `artifacts/v05-live/sim.json` | `c04bed826d61` |
 | plan | pcb auto plan.json | 已提供 | `artifacts/v05-live/final/plan.json` | `82bfc1b79f39` |
 | feedback | pcb auto feedback.json | 已提供 | `artifacts/v05-live/final/feedback.json` | `887905161e9a` |
@@ -31,11 +31,21 @@
 | rules-check | 规则同步 rules check | 已提供 | `artifacts/v05-live/rules-check.json` | `a9e2e056f938` |
 | net-diff | 焊盘网络对账 | 已提供 | `artifacts/v05-live/netdiff.json` | `6931fd8912a9` |
 | values | 器件值/型号 | 未提供 | `` | `` |
-| models | 功率模型/额定 power-models.json | 已提供 | `.agents/skills/pcbpilot/references/power-models.json` | `d0156edeb226` |
+| models | 功率模型/额定 power-models.json | 已提供 | `.agents/skills/pcbpilot/references/power-models.json` | `8ac867b0ec7d` |
+| post | 设计后仿真 post.json | 已提供 | `examples/esp32-mini-post-layout/post.json` | `507c486b7875` |
+| spice | SPICE 网表 | 未提供 | `` | `` |
 | image | 原理图 P1 | 已提供 | `artifacts/v05-live/sch-905bb85957eaf435.png` | `8a57cbdd3a56` |
 | image | 原理图 P2 | 已提供 | `artifacts/v05-live/sch-950ae6609e91d753.png` | `b3c20ee5aa37` |
 | image | PCB 布局（编辑器快照） | 已提供 | `artifacts/v05-live/snap/v05-final/snapshot.png` | `912dc6053d52` |
 | image | pcb auto 离线布线预览（preview.svg） | 已提供 | `artifacts/v05-live/final/preview.svg` | `a0f25c3fdbc7` |
+| image | TOP 温度（68.88–86.28 °C） | 已提供 | `examples/esp32-mini-post-layout/heatmaps/temp-TOP.svg` | `deae362a5890` |
+| image | IN1 温度（68.88–86.28 °C） | 已提供 | `examples/esp32-mini-post-layout/heatmaps/temp-IN1.svg` | `4e7b8d550c58` |
+| image | IN2 温度（68.88–86.28 °C） | 已提供 | `examples/esp32-mini-post-layout/heatmaps/temp-IN2.svg` | `0dc5728b3fcd` |
+| image | BOTTOM 温度（68.88–86.28 °C） | 已提供 | `examples/esp32-mini-post-layout/heatmaps/temp-BOTTOM.svg` | `77ea8ebd5522` |
+| image | TOP 电流密度（0.1–96.68 A/mm²） | 已提供 | `examples/esp32-mini-post-layout/heatmaps/current-TOP.svg` | `44589ccf1ce7` |
+| image | IN1 电流密度（0.1–96.68 A/mm²） | 已提供 | `examples/esp32-mini-post-layout/heatmaps/current-IN1.svg` | `0af05c93bf22` |
+| image | IN2 电流密度（0.1–96.68 A/mm²） | 已提供 | `examples/esp32-mini-post-layout/heatmaps/current-IN2.svg` | `6ea4e2573da2` |
+| image | BOTTOM 电流密度（0.1–96.68 A/mm²） | 已提供 | `examples/esp32-mini-post-layout/heatmaps/current-BOTTOM.svg` | `312221df5d18` |
 
 ## 1 执行摘要
 
@@ -54,6 +64,8 @@
 | 布线完成率 | 100 % (30/30) |  |
 | 原生 DRC（EasyEDA） | PASS | 原生 DRC 通过，0 违规；2026-09-28T04:00:20.47119Z |
 | pcb check（DFM 重建审计） | WARN | ERROR 0 / WARN 100 / INFO 13 |
+| 设计后最坏压降（真实铜皮） | 17.07 mV / 预算 99.1 mV | USB_VBUS @ D2.2（usb-only） |
+| 设计后板最高温度 | 86.3 °C | 场景 terminal-only；TOP (561, 1151.6) mil，U3 下方 |
 | 设计发现（intent） | 0 error / 2 warn / 4 info |  |
 
 ### 主要风险
@@ -83,6 +95,8 @@
 - 新增问题：FAIL: +3V3 线宽 10/10 mil（外/内）< 需要 11.83/23.65 mil @ 1 A
 
 ## 2 需求与设计意图
+
+数据：[data/intent.json](data/intent.json)
 
 | ID | 功能 | 核心 | 器件 | 说明 |
 |---|---|---|---|---|
@@ -123,6 +137,8 @@
 
 ## 3 电源仿真
 
+数据：[data/sim.json](data/sim.json)
+
 场景：typical、peak、buttons-pressed、terminal-only、usb-only；收敛：是。
 
 | 网络 | 标称 V | 范围 V | typical A | peak A | buttons-pressed A | terminal-only A | usb-only A | 最大 A |
@@ -132,7 +148,7 @@
 | USB_VBUS | 4.996 | 4.628–4.996 | 0.0428 | 0.1805 | 0.043 | 0 | 0.4298 | 0.4297 (usb-only) |
 | VSYS_5V | 4.733 | 4.593–4.733 | 0.0889 | 0.4239 | 0.0895 | 0.4265 | 0.4298 | 0.4297 (usb-only) |
 
-![各场景电源轨电流](charts/rail-current.svg)
+![各场景电源轨电流](assets/charts/rail-current.svg)
 
 | 场景 | 输入功率 | 负载功率 | 损耗 | 整体效率 |
 |---|---|---|---|---|
@@ -142,7 +158,7 @@
 | terminal-only | 2.129 W | 1.728 W | 0.401 W | 81.2 % |
 | usb-only | 2.13 W | 1.728 W | 0.402 W | 81.1 % |
 
-![器件功耗](charts/part-power.svg)
+![器件功耗](assets/charts/part-power.svg)
 
 | 器件 | 型号 | 模型 | 功耗 | 场景 |
 |---|---|---|---|---|
@@ -159,9 +175,9 @@
 | R1 | 0402WGF4532TCE | resistor | 0.16 mW | typical |
 | R2 | 0402WGF1002TCE | resistor | 0.04 mW | typical |
 
-![电源轨功率](charts/rail-power.svg)
+![电源轨功率](assets/charts/rail-power.svg)
 
-![电源树](charts/power-tree.svg)
+![电源树](assets/charts/power-tree.svg)
 
 | 从 | 到 | 电源轨 |
 |---|---|---|
@@ -306,7 +322,7 @@ U1（peak）计算过程：
 | U3 | ESP32-S3-WROOM-1 | 供电 +3V3 Vmin vs 推荐下限 | 3.318 V | 3 V | 9.6 % | ≥ 3 % | 满足 | ratings.vccMinV — Espressif ESP32-S3-WROOM-1 datasheet, recommended operating conditions: VDD33 3.0–3.6 V |
 | U3 | ESP32-S3-WROOM-1 | GPIO IO2 (LED_CTRL) 输出电流 | 0.0014 A | 0.04 A | 96.5 % | ≥ 20 % | 满足 | power-models.json esp32-s3-wroom-1 (datasheet) gpioMaxA |
 
-![器件余量](charts/margins.svg)
+![器件余量](assets/charts/margins.svg)
 
 | 对象 | 准则 | 说明 |
 |---|---|---|
@@ -386,17 +402,41 @@ U1（peak）计算过程：
 
 ## 6 布局与布线
 
-![原理图 P1](../assets/8a57cbdd3a563716.png)
-*原理图 P1*
+![原理图 P1](assets/23ed79c6b45b26e1.png)
+*原理图 P1（已缩小）*
 
-![原理图 P2](../assets/b3c20ee5aa379e5a.png)
-*原理图 P2*
+![原理图 P2](assets/523bb6710f7b6782.png)
+*原理图 P2（已缩小）*
 
-![PCB 布局（编辑器快照）](../assets/912dc6053d52f162.png)
-*PCB 布局（编辑器快照）*
+![PCB 布局（编辑器快照）](assets/d3d3e0fa91016589.png)
+*PCB 布局（编辑器快照）（已缩小）*
 
-![pcb auto 离线布线预览（preview.svg）](../assets/a0f25c3fdbc7bfa3.svg)
+![pcb auto 离线布线预览（preview.svg）](assets/a0f25c3fdbc7bfa3.svg)
 *pcb auto 离线布线预览（preview.svg）*
+
+![TOP 温度（68.88–86.28 °C）](assets/deae362a58901025.svg)
+*TOP 温度（68.88–86.28 °C）*
+
+![IN1 温度（68.88–86.28 °C）](assets/4e7b8d550c5815d4.svg)
+*IN1 温度（68.88–86.28 °C）*
+
+![IN2 温度（68.88–86.28 °C）](assets/0dc5728b3fcd4f57.svg)
+*IN2 温度（68.88–86.28 °C）*
+
+![BOTTOM 温度（68.88–86.28 °C）](assets/77ea8ebd55227ec8.svg)
+*BOTTOM 温度（68.88–86.28 °C）*
+
+![TOP 电流密度（0.1–96.68 A/mm²）](assets/44589ccf1ce70c54.svg)
+*TOP 电流密度（0.1–96.68 A/mm²）*
+
+![IN1 电流密度（0.1–96.68 A/mm²）](assets/0af05c93bf224829.svg)
+*IN1 电流密度（0.1–96.68 A/mm²）*
+
+![IN2 电流密度（0.1–96.68 A/mm²）](assets/6ea4e2573da2c948.svg)
+*IN2 电流密度（0.1–96.68 A/mm²）*
+
+![BOTTOM 电流密度（0.1–96.68 A/mm²）](assets/312221df5d18e078.svg)
+*BOTTOM 电流密度（0.1–96.68 A/mm²）*
 
 **叠层 JLC04161H-7628**
 
@@ -427,7 +467,7 @@ U1（peak）计算过程：
 | USB_VBUS | 4.996 | 0.4298 | J2 | 17.873 | 99.91 | 17.9 % | D2.2 | ok |
 | VSYS_5V | 4.733 | 0.4298 | D2\|D1 | 15.617 | 94.66 | 16.5 % | U1.4 | ok |
 
-![IR 压降](charts/ir-drop.svg)
+![IR 压降](assets/charts/ir-drop.svg)
 
 最坏路径 +3V3 → U3.2（3.828 mV）：track 10.0 mil × 53 mil (fanout) 0.578 mV → via via(471,778) 0.225 mV → plane sheet 0.945 mV → via via(507,1494) 0.51 mV → track 10.0 mil × 64 mil (fanout) 1.57 mV
 
@@ -475,6 +515,137 @@ U1（peak）计算过程：
 - 隔离：标准 IPC-2221B：0 对绝缘要求，0 个铣槽，0 个禁铺区，0 条间距/爬电问题
 - 反馈：引脚交换：在可重映射器件（pin-capabilities.json 收录的 MCU、通用排针）上没有找到能缩短飞线或减少交叉的排列
 
+## 6A 设计后仿真验证 Post-layout verification
+
+**结论 PASS** · 场景 typical, peak, buttons-pressed, terminal-only, usb-only（scenarios） · 板 semantic `208a2bcb43be` · 数据 [data/post.json](data/post.json)
+
+> 边界：板级：裸板静止空气，上下表面自然对流 h 顶 10 / 底 10 W/m²K，环境 25 °C；不含外壳、风扇或气流（非 CFD），板边绝热
+
+| 设置 | 值 | 说明 |
+|---|---|---|
+| 网格 | 0.5 mm 单元 92×92，板内 8218 单元/层 |  |
+| IR 预算 | 2%,30mV |  |
+| 铜温升限值 | 10 °C，余量 ×1.2 | 线宽反馈 |
+| 过孔 | 镀层 0.7 mil，载流 ΔT 10 °C | IPC-2221 外层曲线作用于孔壁截面 |
+| FR-4 | 面内 0.3 / 厚度方向 0.3 W/mK |  |
+| 负片平面 IN1 | GND | dump 不列出负片铜：按整层平面扣反焊盘建模 |
+
+**6A.1 真实铜皮直流压降**
+
+| 网络 | 角色 | 最坏场景 | 参考 | I A | 预算 mV | 最坏 mV | 最坏焊盘 | 铜损 mW | 最大 J A/mm² | 最大过孔 A | 铜自热 °C | 状态 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| +3V3 | power | peak | L1 | 0.521 | 66.36 | 2.704 | U3.2 | 1.374 | 56.4 | 0.501 | 0.32 | ok |
+| +5V_TERM | power | terminal-only | J1 | 0.427 | 99.83 | 0.993 | D1.2 | 0.423 | 48 | 0.427 | 0.25 | ok |
+| USB_VBUS | power | usb-only | J2 | 0.43 | 99.14 | 17.071 | D2.2 | 7.336 | 96.7 | 0 | 0.4 | ok |
+| VSYS_5V | power | terminal-only | D1 | 0.427 | 92.55 | 13.608 | U1.4 | 5.804 | 48 | 0.43 | 0.31 | ok |
+| LX | switch | peak | U1 | 0.521 | — | 0.265 | L1.1 | 0.138 | 29.3 | 0 | 0.29 | info |
+| GND | ground | usb-only | J2 | 0.43 | — | 0.335 | U3.41 | 0.147 | 23.4 | 0.167 | 0.35 | info |
+
+与 pcb auto 布线期估算对比：
+
+| 网络 | pcb auto mV | 设计后 mV | 差 mV | 焊盘 |
+|---|---|---|---|---|
+| +3V3 | 3.83 | 2.7 | -1.12 | U3.2 |
+| +5V_TERM | 1.98 | 0.99 | -0.99 | D1.2 |
+| GND | 1.12 | 0.34 | -0.78 | U3.41 |
+| LX | 0.61 | 0.27 | -0.35 | L1.1 |
+| USB_VBUS | 17.87 | 17.07 | -0.8 | D2.2 |
+| VSYS_5V | 15.62 | 13.61 | -2.01 | U1.4 |
+
+**6A.2 过孔电流**
+
+| 网络 | 位置 | I A | 载流量 A | 占用 | 场景 |
+|---|---|---|---|---|---|
+| +3V3 | (506.6, 1494.1) mil | 0.501 | 1.48 | 33.9 % | peak |
+| VSYS_5V | (305.2, 560.9) mil | 0.43 | 1.48 | 29.1 % | usb-only |
+| VSYS_5V | (190.2, 691.9) mil | 0.427 | 1.48 | 28.9 % | terminal-only |
+| VSYS_5V | (190.2, 1273.6) mil | 0.427 | 1.48 | 28.9 % | terminal-only |
+| +5V_TERM | (135.8, 1101) mil | 0.427 | 1.48 | 28.9 % | terminal-only |
+| +3V3 | (436.3, 704.7) mil | 0.277 | 1.48 | 18.8 % | peak |
+| +3V3 | (471.4, 778.2) mil | 0.244 | 1.48 | 16.5 % | peak |
+| VSYS_5V | (126.2, 637.6) mil | 0.229 | 1.48 | 15.5 % | usb-only |
+
+**6A.3 稳态热仿真**
+
+| 项 | 值 | 说明 |
+|---|---|---|
+| 板最高温度 | 86.3 °C | 场景 terminal-only；TOP (561, 1151.6) mil，U3 下方 |
+| 热源 | 2.137 W（器件 2.129 W + 铜损 7.88 mW） |  |
+| 能量平衡 | 散出 2.137 W，误差 0.0000 % | Σ 对流散热 = Σ 热源 |
+| 铜自热（仅铜损） | 0.4 °C | 场景 usb-only |
+
+| 层 | 最高 °C | 平均 °C | 位置 mil |
+|---|---|---|---|
+| TOP | 86.3 | 77.8 | (561, 1151.6) |
+| IN1 | 83.5 | 77.6 | (580.7, 1112.2) |
+| IN2 | 80.7 | 76.4 | (757.9, 1230.3) |
+| BOTTOM | 80.4 | 76.2 | (757.9, 1230.3) |
+
+| 器件 | 面 | 功耗 W | 场景 | 板温 °C | θ | Tj °C | Tj,max °C | 状态 |
+|---|---|---|---|---|---|---|---|---|
+| U3 | TOP | 1.6591 | terminal-only | 86.3 | — | — | — | 需数据手册 |
+| U1 | TOP | 0.1976 | usb-only | 83.3 | — | — | — | 需数据手册 |
+| D1 | TOP | 0.1552 | terminal-only | 82.4 | — | — | — | 需数据手册 |
+| L1 | TOP | 0.046 | usb-only | 82.2 | — | — | — | 需数据手册 |
+| D2 | TOP | 0.1565 | usb-only | 81.8 | — | — | — | 需数据手册 |
+| R2 | TOP | 3.6e-05 | usb-only | 79.8 | — | — | — | 需数据手册 |
+| R1 | TOP | 0.000163 | usb-only | 79.6 | — | — | — | 需数据手册 |
+| R7 | TOP | 0.002 | terminal-only | 78.5 | — | — | — | 需数据手册 |
+| LED1 | TOP | 0.0026 | terminal-only | 77.7 | — | — | — | 需数据手册 |
+| U2 | TOP | 0.0664 | usb-only | 77.3 | — | — | — | 需数据手册 |
+| D3 | TOP | 1e-06 | usb-only | 76.7 | — | — | — | 需数据手册 |
+
+![TOP 温度（68.88–86.28 °C）](assets/deae362a58901025.svg)
+*TOP 温度（68.88–86.28 °C）*
+
+![IN1 温度（68.88–86.28 °C）](assets/4e7b8d550c5815d4.svg)
+*IN1 温度（68.88–86.28 °C）*
+
+![IN2 温度（68.88–86.28 °C）](assets/0dc5728b3fcd4f57.svg)
+*IN2 温度（68.88–86.28 °C）*
+
+![BOTTOM 温度（68.88–86.28 °C）](assets/77ea8ebd55227ec8.svg)
+*BOTTOM 温度（68.88–86.28 °C）*
+
+![TOP 电流密度（0.1–96.68 A/mm²）](assets/44589ccf1ce70c54.svg)
+*TOP 电流密度（0.1–96.68 A/mm²）*
+
+![IN1 电流密度（0.1–96.68 A/mm²）](assets/0af05c93bf224829.svg)
+*IN1 电流密度（0.1–96.68 A/mm²）*
+
+![IN2 电流密度（0.1–96.68 A/mm²）](assets/6ea4e2573da2c948.svg)
+*IN2 电流密度（0.1–96.68 A/mm²）*
+
+![BOTTOM 电流密度（0.1–96.68 A/mm²）](assets/312221df5d18e078.svg)
+*BOTTOM 电流密度（0.1–96.68 A/mm²）*
+
+**6A.4 铜皮修改建议**
+
+无需加宽的走线、需倒角的拐角或过孔瓶颈。
+
+**6A.5 Elmer FEM 交叉校验**
+
+| 项 | 值 | 说明 |
+|---|---|---|
+| 状态 | skipped | ElmerSolver not installed — run: pcbpilot sim tools install --only elmer. The deck is written for a later run (cd examples/esp32-mini-post-layout/elmer && ElmerSolver case.sif), then `pcbpilot sim post-layout … --elmer-result examples/esp32-mini-post-layout/elmer/probes.dat` |
+| 输入包 | 32872 节点 / 23910 六面体 / 244 体 | examples/esp32-mini-post-layout/elmer |
+
+<details><summary>模型与假设</summary>
+
+- copper from the board dump: tracks/arcs = 1-D resistors ρL/(w·t) split at junctions/vias/pads and at every cell; poured fills, static fills, planes = sheet cells G = (t/ρ)·min(harmonic coverage, shared-edge copper fraction); pads shorted to the sheet they overlap
+- ρ = 1.72e-08 Ω·m (20 °C); via barrel R = ρ·h/(π(d+t)t), plating t = 0.7 mil, h = layer-centre distance
+- stackup: TOP 35.0 µm @ z 0.018 mm; IN1 17.5 µm @ z 0.254 mm; IN2 17.5 µm @ z 1.346 mm; BOTTOM 35.0 µm @ z 1.583 mm; dielectrics [0.2104 1.0742 0.2104] mm (JLC04161H-7628 (4-layer 1.6 mm, L1→L2 prepreg 0.2104 mm))
+- each scenario of the sim file is solved on its own (KCL-consistent): the supplying part (power: source pins; ground: return entry, connector-source first) is the 0 V reference, every other pad draws (+I) or feeds (−I) its simulated current; worst = maximum over scenarios
+- via ampacity = IPC-2221 external curve on the barrel cross-section π(d+t)t at ΔT 10 °C (IPC-2152: internal ≈ external)
+- thermal: per layer k_Cu 385 W/mK × t × coverage + FR-4 0.3 W/mK in-plane over half of each adjacent dielectric; FR-4 0.3 W/mK through-plane + via barrels; convection top/bottom; part heat on its pads by area; Joule heat from the DC solve; board edges adiabatic; part bodies do not convect separately (their top face shares the board's h)
+- Tj = board temperature under the part + P·θJB (θJC when only that is rated); without a rating only the board temperature is reported
+- 2 through-hole pad(s) carry no drill in the dump: plated hole assumed = 0.5 × the smaller pad side
+- 83 thermal-relief spoke(s) of the poured copper modelled as tracks of their stroke width
+- IN1 has no copper objects in the dump (a negative/内电层 plane is not listed by pcb dump): assumed a solid GND plane — board outline inset 10 mil (copper-to-edge), antipads around every other-net via / THT pad / cutout = its copper + 6.0 mil clearance, same-net vias connect directly (thermal-relief spokes ignored). Override with --plane 15=NET or --plane 15=none
+- boundary: the bare board in still air — natural convection on both faces (top 10.0, bottom 10.0 W/m²K), no enclosure, fan or airflow (no CFD); board edges adiabatic
+
+</details>
+
 ## 7 验证状态
 
 | 检查 | 结论 | 说明 | 证据 |
@@ -486,6 +657,7 @@ U1（peak）计算过程：
 | 保存/重载一致性 | **PASS** | 保存重载前后 semanticSha256 一致：208a2bcb43be | `artifacts/v05-live/final.reload.json` |
 | 布线完成度（pcb auto） | **PASS** | 信号 100 %（30/30），平面连接 52/52 | `artifacts/v05-live/final/plan.json` |
 | 直流压降（IR drop） | **PASS** | 0 个网络超预算，最坏 17.9 % 预算 | `artifacts/v05-live/final/plan.json` |
+| 设计后仿真（post-layout） | **PASS** | post-layout PASS；+3V3 2.7/66.4 mV；+5V_TERM 0.99/99.8 mV；USB_VBUS 17.07/99.1 mV；VSYS_5V 13.61/92.6 mV；板最高 86.3 °C | `examples/esp32-mini-post-layout/post.json` |
 
 ## 8 测试点计划
 

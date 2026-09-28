@@ -1,0 +1,3714 @@
+! pcbpilot sim post-layout — Elmer FEM cross-check of the board thermal model
+! units: m, W, °C (steady linear heat equation; Density = 1 so Heat Source is W/m³)
+Header
+  CHECK KEYWORDS Warn
+  Mesh DB "." "mesh"
+  Results Directory "results"
+End
+
+Simulation
+  Max Output Level = 3
+  Coordinate System = Cartesian 3D
+  Simulation Type = Steady state
+  Steady State Max Iterations = 1
+  Output Intervals = 1
+End
+
+Constants
+  Stefan Boltzmann = 5.670e-08
+End
+
+Body 1
+  Target Bodies(1) = 1
+  Equation = 1
+  Material = 1
+End
+
+Body 2
+  Target Bodies(1) = 2
+  Equation = 1
+  Material = 2
+End
+
+Body 3
+  Target Bodies(1) = 3
+  Equation = 1
+  Material = 3
+End
+
+Body 4
+  Target Bodies(1) = 4
+  Equation = 1
+  Material = 4
+End
+
+Body 5
+  Target Bodies(1) = 5
+  Equation = 1
+  Material = 5
+End
+
+Body 6
+  Target Bodies(1) = 6
+  Equation = 1
+  Material = 6
+End
+
+Body 7
+  Target Bodies(1) = 7
+  Equation = 1
+  Material = 7
+End
+
+Body 8
+  Target Bodies(1) = 8
+  Equation = 1
+  Material = 8
+End
+
+Body 9
+  Target Bodies(1) = 9
+  Equation = 1
+  Material = 9
+End
+
+Body 10
+  Target Bodies(1) = 10
+  Equation = 1
+  Material = 10
+End
+
+Body 11
+  Target Bodies(1) = 11
+  Equation = 1
+  Material = 11
+End
+
+Body 12
+  Target Bodies(1) = 12
+  Equation = 1
+  Material = 12
+End
+
+Body 13
+  Target Bodies(1) = 13
+  Equation = 1
+  Material = 13
+End
+
+Body 14
+  Target Bodies(1) = 14
+  Equation = 1
+  Material = 14
+End
+
+Body 15
+  Target Bodies(1) = 15
+  Equation = 1
+  Material = 15
+End
+
+Body 16
+  Target Bodies(1) = 16
+  Equation = 1
+  Material = 16
+End
+
+Body 17
+  Target Bodies(1) = 17
+  Equation = 1
+  Material = 17
+End
+
+Body 18
+  Target Bodies(1) = 18
+  Equation = 1
+  Material = 18
+End
+
+Body 19
+  Target Bodies(1) = 19
+  Equation = 1
+  Material = 19
+End
+
+Body 20
+  Target Bodies(1) = 20
+  Equation = 1
+  Material = 20
+End
+
+Body 21
+  Target Bodies(1) = 21
+  Equation = 1
+  Material = 21
+End
+
+Body 22
+  Target Bodies(1) = 22
+  Equation = 1
+  Material = 22
+End
+
+Body 23
+  Target Bodies(1) = 23
+  Equation = 1
+  Material = 23
+End
+
+Body 24
+  Target Bodies(1) = 24
+  Equation = 1
+  Material = 24
+End
+
+Body 25
+  Target Bodies(1) = 25
+  Equation = 1
+  Material = 25
+  Body Force = 25
+End
+
+Body 26
+  Target Bodies(1) = 26
+  Equation = 1
+  Material = 26
+  Body Force = 26
+End
+
+Body 27
+  Target Bodies(1) = 27
+  Equation = 1
+  Material = 27
+  Body Force = 27
+End
+
+Body 28
+  Target Bodies(1) = 28
+  Equation = 1
+  Material = 28
+  Body Force = 28
+End
+
+Body 29
+  Target Bodies(1) = 29
+  Equation = 1
+  Material = 29
+  Body Force = 29
+End
+
+Body 30
+  Target Bodies(1) = 30
+  Equation = 1
+  Material = 30
+  Body Force = 30
+End
+
+Body 31
+  Target Bodies(1) = 31
+  Equation = 1
+  Material = 31
+  Body Force = 31
+End
+
+Body 32
+  Target Bodies(1) = 32
+  Equation = 1
+  Material = 32
+  Body Force = 32
+End
+
+Body 33
+  Target Bodies(1) = 33
+  Equation = 1
+  Material = 33
+  Body Force = 33
+End
+
+Body 34
+  Target Bodies(1) = 34
+  Equation = 1
+  Material = 34
+  Body Force = 34
+End
+
+Body 35
+  Target Bodies(1) = 35
+  Equation = 1
+  Material = 35
+  Body Force = 35
+End
+
+Body 36
+  Target Bodies(1) = 36
+  Equation = 1
+  Material = 36
+  Body Force = 36
+End
+
+Body 37
+  Target Bodies(1) = 37
+  Equation = 1
+  Material = 37
+  Body Force = 37
+End
+
+Body 38
+  Target Bodies(1) = 38
+  Equation = 1
+  Material = 38
+  Body Force = 38
+End
+
+Body 39
+  Target Bodies(1) = 39
+  Equation = 1
+  Material = 39
+  Body Force = 39
+End
+
+Body 40
+  Target Bodies(1) = 40
+  Equation = 1
+  Material = 40
+  Body Force = 40
+End
+
+Body 41
+  Target Bodies(1) = 41
+  Equation = 1
+  Material = 41
+  Body Force = 41
+End
+
+Body 42
+  Target Bodies(1) = 42
+  Equation = 1
+  Material = 42
+  Body Force = 42
+End
+
+Body 43
+  Target Bodies(1) = 43
+  Equation = 1
+  Material = 43
+  Body Force = 43
+End
+
+Body 44
+  Target Bodies(1) = 44
+  Equation = 1
+  Material = 44
+  Body Force = 44
+End
+
+Body 45
+  Target Bodies(1) = 45
+  Equation = 1
+  Material = 45
+  Body Force = 45
+End
+
+Body 46
+  Target Bodies(1) = 46
+  Equation = 1
+  Material = 46
+  Body Force = 46
+End
+
+Body 47
+  Target Bodies(1) = 47
+  Equation = 1
+  Material = 47
+  Body Force = 47
+End
+
+Body 48
+  Target Bodies(1) = 48
+  Equation = 1
+  Material = 48
+  Body Force = 48
+End
+
+Body 49
+  Target Bodies(1) = 49
+  Equation = 1
+  Material = 49
+  Body Force = 49
+End
+
+Body 50
+  Target Bodies(1) = 50
+  Equation = 1
+  Material = 50
+  Body Force = 50
+End
+
+Body 51
+  Target Bodies(1) = 51
+  Equation = 1
+  Material = 51
+  Body Force = 51
+End
+
+Body 52
+  Target Bodies(1) = 52
+  Equation = 1
+  Material = 52
+  Body Force = 52
+End
+
+Body 53
+  Target Bodies(1) = 53
+  Equation = 1
+  Material = 53
+  Body Force = 53
+End
+
+Body 54
+  Target Bodies(1) = 54
+  Equation = 1
+  Material = 54
+  Body Force = 54
+End
+
+Body 55
+  Target Bodies(1) = 55
+  Equation = 1
+  Material = 55
+  Body Force = 55
+End
+
+Body 56
+  Target Bodies(1) = 56
+  Equation = 1
+  Material = 56
+  Body Force = 56
+End
+
+Body 57
+  Target Bodies(1) = 57
+  Equation = 1
+  Material = 57
+  Body Force = 57
+End
+
+Body 58
+  Target Bodies(1) = 58
+  Equation = 1
+  Material = 58
+  Body Force = 58
+End
+
+Body 59
+  Target Bodies(1) = 59
+  Equation = 1
+  Material = 59
+  Body Force = 59
+End
+
+Body 60
+  Target Bodies(1) = 60
+  Equation = 1
+  Material = 60
+  Body Force = 60
+End
+
+Body 61
+  Target Bodies(1) = 61
+  Equation = 1
+  Material = 61
+  Body Force = 61
+End
+
+Body 62
+  Target Bodies(1) = 62
+  Equation = 1
+  Material = 62
+  Body Force = 62
+End
+
+Body 63
+  Target Bodies(1) = 63
+  Equation = 1
+  Material = 63
+  Body Force = 63
+End
+
+Body 64
+  Target Bodies(1) = 64
+  Equation = 1
+  Material = 64
+  Body Force = 64
+End
+
+Body 65
+  Target Bodies(1) = 65
+  Equation = 1
+  Material = 65
+  Body Force = 65
+End
+
+Body 66
+  Target Bodies(1) = 66
+  Equation = 1
+  Material = 66
+  Body Force = 66
+End
+
+Body 67
+  Target Bodies(1) = 67
+  Equation = 1
+  Material = 67
+  Body Force = 67
+End
+
+Body 68
+  Target Bodies(1) = 68
+  Equation = 1
+  Material = 68
+  Body Force = 68
+End
+
+Body 69
+  Target Bodies(1) = 69
+  Equation = 1
+  Material = 69
+  Body Force = 69
+End
+
+Body 70
+  Target Bodies(1) = 70
+  Equation = 1
+  Material = 70
+  Body Force = 70
+End
+
+Body 71
+  Target Bodies(1) = 71
+  Equation = 1
+  Material = 71
+  Body Force = 71
+End
+
+Body 72
+  Target Bodies(1) = 72
+  Equation = 1
+  Material = 72
+  Body Force = 72
+End
+
+Body 73
+  Target Bodies(1) = 73
+  Equation = 1
+  Material = 73
+  Body Force = 73
+End
+
+Body 74
+  Target Bodies(1) = 74
+  Equation = 1
+  Material = 74
+  Body Force = 74
+End
+
+Body 75
+  Target Bodies(1) = 75
+  Equation = 1
+  Material = 75
+  Body Force = 75
+End
+
+Body 76
+  Target Bodies(1) = 76
+  Equation = 1
+  Material = 76
+  Body Force = 76
+End
+
+Body 77
+  Target Bodies(1) = 77
+  Equation = 1
+  Material = 77
+  Body Force = 77
+End
+
+Body 78
+  Target Bodies(1) = 78
+  Equation = 1
+  Material = 78
+  Body Force = 78
+End
+
+Body 79
+  Target Bodies(1) = 79
+  Equation = 1
+  Material = 79
+  Body Force = 79
+End
+
+Body 80
+  Target Bodies(1) = 80
+  Equation = 1
+  Material = 80
+  Body Force = 80
+End
+
+Body 81
+  Target Bodies(1) = 81
+  Equation = 1
+  Material = 81
+  Body Force = 81
+End
+
+Body 82
+  Target Bodies(1) = 82
+  Equation = 1
+  Material = 82
+  Body Force = 82
+End
+
+Body 83
+  Target Bodies(1) = 83
+  Equation = 1
+  Material = 83
+  Body Force = 83
+End
+
+Body 84
+  Target Bodies(1) = 84
+  Equation = 1
+  Material = 84
+  Body Force = 84
+End
+
+Body 85
+  Target Bodies(1) = 85
+  Equation = 1
+  Material = 85
+  Body Force = 85
+End
+
+Body 86
+  Target Bodies(1) = 86
+  Equation = 1
+  Material = 86
+  Body Force = 86
+End
+
+Body 87
+  Target Bodies(1) = 87
+  Equation = 1
+  Material = 87
+  Body Force = 87
+End
+
+Body 88
+  Target Bodies(1) = 88
+  Equation = 1
+  Material = 88
+  Body Force = 88
+End
+
+Body 89
+  Target Bodies(1) = 89
+  Equation = 1
+  Material = 89
+  Body Force = 89
+End
+
+Body 90
+  Target Bodies(1) = 90
+  Equation = 1
+  Material = 90
+  Body Force = 90
+End
+
+Body 91
+  Target Bodies(1) = 91
+  Equation = 1
+  Material = 91
+  Body Force = 91
+End
+
+Body 92
+  Target Bodies(1) = 92
+  Equation = 1
+  Material = 92
+  Body Force = 92
+End
+
+Body 93
+  Target Bodies(1) = 93
+  Equation = 1
+  Material = 93
+  Body Force = 93
+End
+
+Body 94
+  Target Bodies(1) = 94
+  Equation = 1
+  Material = 94
+  Body Force = 94
+End
+
+Body 95
+  Target Bodies(1) = 95
+  Equation = 1
+  Material = 95
+  Body Force = 95
+End
+
+Body 96
+  Target Bodies(1) = 96
+  Equation = 1
+  Material = 96
+  Body Force = 96
+End
+
+Body 97
+  Target Bodies(1) = 97
+  Equation = 1
+  Material = 97
+  Body Force = 97
+End
+
+Body 98
+  Target Bodies(1) = 98
+  Equation = 1
+  Material = 98
+  Body Force = 98
+End
+
+Body 99
+  Target Bodies(1) = 99
+  Equation = 1
+  Material = 99
+  Body Force = 99
+End
+
+Body 100
+  Target Bodies(1) = 100
+  Equation = 1
+  Material = 100
+  Body Force = 100
+End
+
+Body 101
+  Target Bodies(1) = 101
+  Equation = 1
+  Material = 101
+  Body Force = 101
+End
+
+Body 102
+  Target Bodies(1) = 102
+  Equation = 1
+  Material = 102
+  Body Force = 102
+End
+
+Body 103
+  Target Bodies(1) = 103
+  Equation = 1
+  Material = 103
+  Body Force = 103
+End
+
+Body 104
+  Target Bodies(1) = 104
+  Equation = 1
+  Material = 104
+  Body Force = 104
+End
+
+Body 105
+  Target Bodies(1) = 105
+  Equation = 1
+  Material = 105
+  Body Force = 105
+End
+
+Body 106
+  Target Bodies(1) = 106
+  Equation = 1
+  Material = 106
+  Body Force = 106
+End
+
+Body 107
+  Target Bodies(1) = 107
+  Equation = 1
+  Material = 107
+  Body Force = 107
+End
+
+Body 108
+  Target Bodies(1) = 108
+  Equation = 1
+  Material = 108
+  Body Force = 108
+End
+
+Body 109
+  Target Bodies(1) = 109
+  Equation = 1
+  Material = 109
+  Body Force = 109
+End
+
+Body 110
+  Target Bodies(1) = 110
+  Equation = 1
+  Material = 110
+  Body Force = 110
+End
+
+Body 111
+  Target Bodies(1) = 111
+  Equation = 1
+  Material = 111
+  Body Force = 111
+End
+
+Body 112
+  Target Bodies(1) = 112
+  Equation = 1
+  Material = 112
+  Body Force = 112
+End
+
+Body 113
+  Target Bodies(1) = 113
+  Equation = 1
+  Material = 113
+  Body Force = 113
+End
+
+Body 114
+  Target Bodies(1) = 114
+  Equation = 1
+  Material = 114
+  Body Force = 114
+End
+
+Body 115
+  Target Bodies(1) = 115
+  Equation = 1
+  Material = 115
+  Body Force = 115
+End
+
+Body 116
+  Target Bodies(1) = 116
+  Equation = 1
+  Material = 116
+  Body Force = 116
+End
+
+Body 117
+  Target Bodies(1) = 117
+  Equation = 1
+  Material = 117
+  Body Force = 117
+End
+
+Body 118
+  Target Bodies(1) = 118
+  Equation = 1
+  Material = 118
+  Body Force = 118
+End
+
+Body 119
+  Target Bodies(1) = 119
+  Equation = 1
+  Material = 119
+  Body Force = 119
+End
+
+Body 120
+  Target Bodies(1) = 120
+  Equation = 1
+  Material = 120
+  Body Force = 120
+End
+
+Body 121
+  Target Bodies(1) = 121
+  Equation = 1
+  Material = 121
+  Body Force = 121
+End
+
+Body 122
+  Target Bodies(1) = 122
+  Equation = 1
+  Material = 122
+  Body Force = 122
+End
+
+Body 123
+  Target Bodies(1) = 123
+  Equation = 1
+  Material = 123
+  Body Force = 123
+End
+
+Body 124
+  Target Bodies(1) = 124
+  Equation = 1
+  Material = 124
+  Body Force = 124
+End
+
+Body 125
+  Target Bodies(1) = 125
+  Equation = 1
+  Material = 125
+  Body Force = 125
+End
+
+Body 126
+  Target Bodies(1) = 126
+  Equation = 1
+  Material = 126
+  Body Force = 126
+End
+
+Body 127
+  Target Bodies(1) = 127
+  Equation = 1
+  Material = 127
+  Body Force = 127
+End
+
+Body 128
+  Target Bodies(1) = 128
+  Equation = 1
+  Material = 128
+  Body Force = 128
+End
+
+Body 129
+  Target Bodies(1) = 129
+  Equation = 1
+  Material = 129
+  Body Force = 129
+End
+
+Body 130
+  Target Bodies(1) = 130
+  Equation = 1
+  Material = 130
+  Body Force = 130
+End
+
+Body 131
+  Target Bodies(1) = 131
+  Equation = 1
+  Material = 131
+  Body Force = 131
+End
+
+Body 132
+  Target Bodies(1) = 132
+  Equation = 1
+  Material = 132
+  Body Force = 132
+End
+
+Body 133
+  Target Bodies(1) = 133
+  Equation = 1
+  Material = 133
+  Body Force = 133
+End
+
+Body 134
+  Target Bodies(1) = 134
+  Equation = 1
+  Material = 134
+  Body Force = 134
+End
+
+Body 135
+  Target Bodies(1) = 135
+  Equation = 1
+  Material = 135
+  Body Force = 135
+End
+
+Body 136
+  Target Bodies(1) = 136
+  Equation = 1
+  Material = 136
+  Body Force = 136
+End
+
+Body 137
+  Target Bodies(1) = 137
+  Equation = 1
+  Material = 137
+  Body Force = 137
+End
+
+Body 138
+  Target Bodies(1) = 138
+  Equation = 1
+  Material = 138
+  Body Force = 138
+End
+
+Body 139
+  Target Bodies(1) = 139
+  Equation = 1
+  Material = 139
+  Body Force = 139
+End
+
+Body 140
+  Target Bodies(1) = 140
+  Equation = 1
+  Material = 140
+  Body Force = 140
+End
+
+Body 141
+  Target Bodies(1) = 141
+  Equation = 1
+  Material = 141
+  Body Force = 141
+End
+
+Body 142
+  Target Bodies(1) = 142
+  Equation = 1
+  Material = 142
+  Body Force = 142
+End
+
+Body 143
+  Target Bodies(1) = 143
+  Equation = 1
+  Material = 143
+  Body Force = 143
+End
+
+Body 144
+  Target Bodies(1) = 144
+  Equation = 1
+  Material = 144
+  Body Force = 144
+End
+
+Body 145
+  Target Bodies(1) = 145
+  Equation = 1
+  Material = 145
+  Body Force = 145
+End
+
+Body 146
+  Target Bodies(1) = 146
+  Equation = 1
+  Material = 146
+  Body Force = 146
+End
+
+Body 147
+  Target Bodies(1) = 147
+  Equation = 1
+  Material = 147
+  Body Force = 147
+End
+
+Body 148
+  Target Bodies(1) = 148
+  Equation = 1
+  Material = 148
+  Body Force = 148
+End
+
+Body 149
+  Target Bodies(1) = 149
+  Equation = 1
+  Material = 149
+  Body Force = 149
+End
+
+Body 150
+  Target Bodies(1) = 150
+  Equation = 1
+  Material = 150
+  Body Force = 150
+End
+
+Body 151
+  Target Bodies(1) = 151
+  Equation = 1
+  Material = 151
+  Body Force = 151
+End
+
+Body 152
+  Target Bodies(1) = 152
+  Equation = 1
+  Material = 152
+  Body Force = 152
+End
+
+Body 153
+  Target Bodies(1) = 153
+  Equation = 1
+  Material = 153
+End
+
+Body 154
+  Target Bodies(1) = 154
+  Equation = 1
+  Material = 154
+  Body Force = 154
+End
+
+Body 155
+  Target Bodies(1) = 155
+  Equation = 1
+  Material = 155
+  Body Force = 155
+End
+
+Body 156
+  Target Bodies(1) = 156
+  Equation = 1
+  Material = 156
+  Body Force = 156
+End
+
+Body 157
+  Target Bodies(1) = 157
+  Equation = 1
+  Material = 157
+End
+
+Body 158
+  Target Bodies(1) = 158
+  Equation = 1
+  Material = 158
+End
+
+Body 159
+  Target Bodies(1) = 159
+  Equation = 1
+  Material = 159
+  Body Force = 159
+End
+
+Body 160
+  Target Bodies(1) = 160
+  Equation = 1
+  Material = 160
+  Body Force = 160
+End
+
+Body 161
+  Target Bodies(1) = 161
+  Equation = 1
+  Material = 161
+  Body Force = 161
+End
+
+Body 162
+  Target Bodies(1) = 162
+  Equation = 1
+  Material = 162
+  Body Force = 162
+End
+
+Body 163
+  Target Bodies(1) = 163
+  Equation = 1
+  Material = 163
+  Body Force = 163
+End
+
+Body 164
+  Target Bodies(1) = 164
+  Equation = 1
+  Material = 164
+  Body Force = 164
+End
+
+Body 165
+  Target Bodies(1) = 165
+  Equation = 1
+  Material = 165
+  Body Force = 165
+End
+
+Body 166
+  Target Bodies(1) = 166
+  Equation = 1
+  Material = 166
+  Body Force = 166
+End
+
+Body 167
+  Target Bodies(1) = 167
+  Equation = 1
+  Material = 167
+  Body Force = 167
+End
+
+Body 168
+  Target Bodies(1) = 168
+  Equation = 1
+  Material = 168
+  Body Force = 168
+End
+
+Body 169
+  Target Bodies(1) = 169
+  Equation = 1
+  Material = 169
+  Body Force = 169
+End
+
+Body 170
+  Target Bodies(1) = 170
+  Equation = 1
+  Material = 170
+  Body Force = 170
+End
+
+Body 171
+  Target Bodies(1) = 171
+  Equation = 1
+  Material = 171
+  Body Force = 171
+End
+
+Body 172
+  Target Bodies(1) = 172
+  Equation = 1
+  Material = 172
+  Body Force = 172
+End
+
+Body 173
+  Target Bodies(1) = 173
+  Equation = 1
+  Material = 173
+  Body Force = 173
+End
+
+Body 174
+  Target Bodies(1) = 174
+  Equation = 1
+  Material = 174
+  Body Force = 174
+End
+
+Body 175
+  Target Bodies(1) = 175
+  Equation = 1
+  Material = 175
+  Body Force = 175
+End
+
+Body 176
+  Target Bodies(1) = 176
+  Equation = 1
+  Material = 176
+  Body Force = 176
+End
+
+Body 177
+  Target Bodies(1) = 177
+  Equation = 1
+  Material = 177
+  Body Force = 177
+End
+
+Body 178
+  Target Bodies(1) = 178
+  Equation = 1
+  Material = 178
+  Body Force = 178
+End
+
+Body 179
+  Target Bodies(1) = 179
+  Equation = 1
+  Material = 179
+  Body Force = 179
+End
+
+Body 180
+  Target Bodies(1) = 180
+  Equation = 1
+  Material = 180
+  Body Force = 180
+End
+
+Body 181
+  Target Bodies(1) = 181
+  Equation = 1
+  Material = 181
+  Body Force = 181
+End
+
+Body 182
+  Target Bodies(1) = 182
+  Equation = 1
+  Material = 182
+  Body Force = 182
+End
+
+Body 183
+  Target Bodies(1) = 183
+  Equation = 1
+  Material = 183
+  Body Force = 183
+End
+
+Body 184
+  Target Bodies(1) = 184
+  Equation = 1
+  Material = 184
+  Body Force = 184
+End
+
+Body 185
+  Target Bodies(1) = 185
+  Equation = 1
+  Material = 185
+  Body Force = 185
+End
+
+Body 186
+  Target Bodies(1) = 186
+  Equation = 1
+  Material = 186
+  Body Force = 186
+End
+
+Body 187
+  Target Bodies(1) = 187
+  Equation = 1
+  Material = 187
+  Body Force = 187
+End
+
+Body 188
+  Target Bodies(1) = 188
+  Equation = 1
+  Material = 188
+  Body Force = 188
+End
+
+Body 189
+  Target Bodies(1) = 189
+  Equation = 1
+  Material = 189
+  Body Force = 189
+End
+
+Body 190
+  Target Bodies(1) = 190
+  Equation = 1
+  Material = 190
+  Body Force = 190
+End
+
+Body 191
+  Target Bodies(1) = 191
+  Equation = 1
+  Material = 191
+  Body Force = 191
+End
+
+Body 192
+  Target Bodies(1) = 192
+  Equation = 1
+  Material = 192
+  Body Force = 192
+End
+
+Body 193
+  Target Bodies(1) = 193
+  Equation = 1
+  Material = 193
+  Body Force = 193
+End
+
+Body 194
+  Target Bodies(1) = 194
+  Equation = 1
+  Material = 194
+  Body Force = 194
+End
+
+Body 195
+  Target Bodies(1) = 195
+  Equation = 1
+  Material = 195
+  Body Force = 195
+End
+
+Body 196
+  Target Bodies(1) = 196
+  Equation = 1
+  Material = 196
+  Body Force = 196
+End
+
+Body 197
+  Target Bodies(1) = 197
+  Equation = 1
+  Material = 197
+  Body Force = 197
+End
+
+Body 198
+  Target Bodies(1) = 198
+  Equation = 1
+  Material = 198
+  Body Force = 198
+End
+
+Body 199
+  Target Bodies(1) = 199
+  Equation = 1
+  Material = 199
+  Body Force = 199
+End
+
+Body 200
+  Target Bodies(1) = 200
+  Equation = 1
+  Material = 200
+  Body Force = 200
+End
+
+Body 201
+  Target Bodies(1) = 201
+  Equation = 1
+  Material = 201
+  Body Force = 201
+End
+
+Body 202
+  Target Bodies(1) = 202
+  Equation = 1
+  Material = 202
+  Body Force = 202
+End
+
+Body 203
+  Target Bodies(1) = 203
+  Equation = 1
+  Material = 203
+  Body Force = 203
+End
+
+Body 204
+  Target Bodies(1) = 204
+  Equation = 1
+  Material = 204
+  Body Force = 204
+End
+
+Body 205
+  Target Bodies(1) = 205
+  Equation = 1
+  Material = 205
+  Body Force = 205
+End
+
+Body 206
+  Target Bodies(1) = 206
+  Equation = 1
+  Material = 206
+  Body Force = 206
+End
+
+Body 207
+  Target Bodies(1) = 207
+  Equation = 1
+  Material = 207
+  Body Force = 207
+End
+
+Body 208
+  Target Bodies(1) = 208
+  Equation = 1
+  Material = 208
+  Body Force = 208
+End
+
+Body 209
+  Target Bodies(1) = 209
+  Equation = 1
+  Material = 209
+  Body Force = 209
+End
+
+Body 210
+  Target Bodies(1) = 210
+  Equation = 1
+  Material = 210
+End
+
+Body 211
+  Target Bodies(1) = 211
+  Equation = 1
+  Material = 211
+End
+
+Body 212
+  Target Bodies(1) = 212
+  Equation = 1
+  Material = 212
+End
+
+Body 213
+  Target Bodies(1) = 213
+  Equation = 1
+  Material = 213
+End
+
+Body 214
+  Target Bodies(1) = 214
+  Equation = 1
+  Material = 214
+End
+
+Body 215
+  Target Bodies(1) = 215
+  Equation = 1
+  Material = 215
+End
+
+Body 216
+  Target Bodies(1) = 216
+  Equation = 1
+  Material = 216
+End
+
+Body 217
+  Target Bodies(1) = 217
+  Equation = 1
+  Material = 217
+End
+
+Body 218
+  Target Bodies(1) = 218
+  Equation = 1
+  Material = 218
+End
+
+Body 219
+  Target Bodies(1) = 219
+  Equation = 1
+  Material = 219
+End
+
+Body 220
+  Target Bodies(1) = 220
+  Equation = 1
+  Material = 220
+End
+
+Body 221
+  Target Bodies(1) = 221
+  Equation = 1
+  Material = 221
+End
+
+Body 222
+  Target Bodies(1) = 222
+  Equation = 1
+  Material = 222
+End
+
+Body 223
+  Target Bodies(1) = 223
+  Equation = 1
+  Material = 223
+End
+
+Body 224
+  Target Bodies(1) = 224
+  Equation = 1
+  Material = 224
+End
+
+Body 225
+  Target Bodies(1) = 225
+  Equation = 1
+  Material = 225
+End
+
+Body 226
+  Target Bodies(1) = 226
+  Equation = 1
+  Material = 226
+End
+
+Body 227
+  Target Bodies(1) = 227
+  Equation = 1
+  Material = 227
+End
+
+Body 228
+  Target Bodies(1) = 228
+  Equation = 1
+  Material = 228
+  Body Force = 228
+End
+
+Body 229
+  Target Bodies(1) = 229
+  Equation = 1
+  Material = 229
+  Body Force = 229
+End
+
+Body 230
+  Target Bodies(1) = 230
+  Equation = 1
+  Material = 230
+End
+
+Body 231
+  Target Bodies(1) = 231
+  Equation = 1
+  Material = 231
+End
+
+Body 232
+  Target Bodies(1) = 232
+  Equation = 1
+  Material = 232
+End
+
+Body 233
+  Target Bodies(1) = 233
+  Equation = 1
+  Material = 233
+End
+
+Body 234
+  Target Bodies(1) = 234
+  Equation = 1
+  Material = 234
+End
+
+Body 235
+  Target Bodies(1) = 235
+  Equation = 1
+  Material = 235
+  Body Force = 235
+End
+
+Body 236
+  Target Bodies(1) = 236
+  Equation = 1
+  Material = 236
+  Body Force = 236
+End
+
+Body 237
+  Target Bodies(1) = 237
+  Equation = 1
+  Material = 237
+  Body Force = 237
+End
+
+Body 238
+  Target Bodies(1) = 238
+  Equation = 1
+  Material = 238
+  Body Force = 238
+End
+
+Body 239
+  Target Bodies(1) = 239
+  Equation = 1
+  Material = 239
+  Body Force = 239
+End
+
+Body 240
+  Target Bodies(1) = 240
+  Equation = 1
+  Material = 240
+  Body Force = 240
+End
+
+Body 241
+  Target Bodies(1) = 241
+  Equation = 1
+  Material = 241
+  Body Force = 241
+End
+
+Body 242
+  Target Bodies(1) = 242
+  Equation = 1
+  Material = 242
+  Body Force = 242
+End
+
+Body 243
+  Target Bodies(1) = 243
+  Equation = 1
+  Material = 243
+  Body Force = 243
+End
+
+Body 244
+  Target Bodies(1) = 244
+  Equation = 1
+  Material = 244
+End
+
+Material 1
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 43.4966678 0 0  0 43.4966678 0  0 0 0.337428707
+End
+
+Material 2
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 37.8700367 0 0  0 37.8700367 0  0 0 0.337428707
+End
+
+Material 3
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 25.3213572 0 0  0 25.3213572 0  0 0 0.337428707
+End
+
+Material 4
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 16.7476858 0 0  0 16.7476858 0  0 0 0.337428707
+End
+
+Material 5
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 12.2771808 0 0  0 12.2771808 0  0 0 0.337428707
+End
+
+Material 6
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 32.3979236 0 0  0 32.3979236 0  0 0 0.337428707
+End
+
+Material 7
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 28.844714 0 0  0 28.844714 0  0 0 0.337428707
+End
+
+Material 8
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 66.9484196 0 0  0 66.9484196 0  0 0 0.337428707
+End
+
+Material 9
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 57.6448313 0 0  0 57.6448313 0  0 0 0.337428707
+End
+
+Material 10
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 14.4336235 0 0  0 14.4336235 0  0 0 0.337428707
+End
+
+Material 11
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 71.4402061 0 0  0 71.4402061 0  0 0 0.337428707
+End
+
+Material 12
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 49.8706618 0 0  0 49.8706618 0  0 0 0.337428707
+End
+
+Material 13
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 50.0382851 0 0  0 50.0382851 0  0 0 7.27455812
+End
+
+Material 14
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 64.9431439 0 0  0 64.9431439 0  0 0 7.27455812
+End
+
+Material 15
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 43.5985422 0 0  0 43.5985422 0  0 0 7.27455812
+End
+
+Material 16
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 58.5878318 0 0  0 58.5878318 0  0 0 7.27455812
+End
+
+Material 17
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 21.9132874 0 0  0 21.9132874 0  0 0 0.337428707
+End
+
+Material 18
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 19.3960631 0 0  0 19.3960631 0  0 0 0.337428707
+End
+
+Material 19
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 8.1227505 0 0  0 8.1227505 0  0 0 0.337428707
+End
+
+Material 20
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 37.9608926 0 0  0 37.9608926 0  0 0 7.27455812
+End
+
+Material 21
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 43.3992499 0 0  0 43.3992499 0  0 0 14.2116875
+End
+
+Material 22
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 33.1906085 0 0  0 33.1906085 0  0 0 7.27455812
+End
+
+Material 23
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 28.6231566 0 0  0 28.6231566 0  0 0 7.27455812
+End
+
+Material 24
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 33.1499366 0 0  0 33.1499366 0  0 0 14.2116875
+End
+
+Material 25
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 61.762603 0 0  0 61.762603 0  0 0 0.337428707
+End
+
+Body Force 25
+  Heat Source = 1368084.93
+End
+
+Material 26
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 55.4991337 0 0  0 55.4991337 0  0 0 0.337428707
+End
+
+Body Force 26
+  Heat Source = 1563500.55
+End
+
+Material 27
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 51.0862349 0 0  0 51.0862349 0  0 0 0.337428707
+End
+
+Body Force 27
+  Heat Source = 390857.956
+End
+
+Material 28
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 49.5114707 0 0  0 49.5114707 0  0 0 0.337428707
+End
+
+Body Force 28
+  Heat Source = 1485285.05
+End
+
+Material 29
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 55.1195295 0 0  0 55.1195295 0  0 0 0.337428707
+End
+
+Body Force 29
+  Heat Source = 1110357.02
+End
+
+Material 30
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 51.4183886 0 0  0 51.4183886 0  0 0 0.337428707
+End
+
+Body Force 30
+  Heat Source = 1123214.6
+End
+
+Material 31
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 43.4882197 0 0  0 43.4882197 0  0 0 0.337428707
+End
+
+Body Force 31
+  Heat Source = 1458089.3
+End
+
+Material 32
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 41.3351521 0 0  0 41.3351521 0  0 0 7.27455812
+End
+
+Body Force 32
+  Heat Source = 1369995.84
+End
+
+Material 33
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 42.5451405 0 0  0 42.5451405 0  0 0 7.27455812
+End
+
+Body Force 33
+  Heat Source = 977128.393
+End
+
+Material 34
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 38.2745933 0 0  0 38.2745933 0  0 0 0.337428707
+End
+
+Body Force 34
+  Heat Source = 1465962.82
+End
+
+Material 35
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 45.2498204 0 0  0 45.2498204 0  0 0 0.337428707
+End
+
+Body Force 35
+  Heat Source = 586280.373
+End
+
+Material 36
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 52.082696 0 0  0 52.082696 0  0 0 0.337428707
+End
+
+Body Force 36
+  Heat Source = 628464.266
+End
+
+Material 37
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 50.5642792 0 0  0 50.5642792 0  0 0 0.337428707
+End
+
+Body Force 37
+  Heat Source = 5367275.73
+End
+
+Material 38
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 42.1655363 0 0  0 42.1655363 0  0 0 0.337428707
+End
+
+Body Force 38
+  Heat Source = 7156707.4
+End
+
+Material 39
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 32.6090006 0 0  0 32.6090006 0  0 0 0.337428707
+End
+
+Body Force 39
+  Heat Source = 3283145.35
+End
+
+Material 40
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 38.4576167 0 0  0 38.4576167 0  0 0 0.337428707
+End
+
+Body Force 40
+  Heat Source = 7063225.9
+End
+
+Material 41
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 38.4576167 0 0  0 38.4576167 0  0 0 0.337428707
+End
+
+Body Force 41
+  Heat Source = 5332316.28
+End
+
+Material 42
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 46.8156877 0 0  0 46.8156877 0  0 0 7.27455812
+End
+
+Body Force 42
+  Heat Source = 5276479.94
+End
+
+Material 43
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 42.5451405 0 0  0 42.5451405 0  0 0 7.27455812
+End
+
+Body Force 43
+  Heat Source = 3908503.48
+End
+
+Material 44
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 32.7861493 0 0  0 32.7861493 0  0 0 0.337428707
+End
+
+Body Force 44
+  Heat Source = 4069858.11
+End
+
+Material 45
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 54.3603211 0 0  0 54.3603211 0  0 0 0.337428707
+End
+
+Body Force 45
+  Heat Source = 7817066.67
+End
+
+Material 46
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 43.268761 0 0  0 43.268761 0  0 0 0.337428707
+End
+
+Body Force 46
+  Heat Source = 9464282.62
+End
+
+Material 47
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 32.1089907 0 0  0 32.1089907 0  0 0 0.337428707
+End
+
+Body Force 47
+  Heat Source = 5792995.07
+End
+
+Material 48
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 48.6764262 0 0  0 48.6764262 0  0 0 0.337428707
+End
+
+Body Force 48
+  Heat Source = 11684247.4
+End
+
+Material 49
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 48.737434 0 0  0 48.737434 0  0 0 0.337428707
+End
+
+Body Force 49
+  Heat Source = 9478162.04
+End
+
+Material 50
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 63.4708219 0 0  0 63.4708219 0  0 0 7.27455812
+End
+
+Body Force 50
+  Heat Source = 7817207.47
+End
+
+Material 51
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 29.7945067 0 0  0 29.7945067 0  0 0 0.337428707
+End
+
+Body Force 51
+  Heat Source = 5136892.57
+End
+
+Material 52
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 55.9261885 0 0  0 55.9261885 0  0 0 0.337428707
+End
+
+Body Force 52
+  Heat Source = 11488780.3
+End
+
+Material 53
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 45.9615783 0 0  0 45.9615783 0  0 0 0.337428707
+End
+
+Body Force 53
+  Heat Source = 146302.088
+End
+
+Material 54
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 64.0402282 0 0  0 64.0402282 0  0 0 7.27455812
+End
+
+Body Force 54
+  Heat Source = 4104100.86
+End
+
+Material 55
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 37.0883302 0 0  0 37.0883302 0  0 0 0.337428707
+End
+
+Body Force 55
+  Heat Source = 2670812.42
+End
+
+Material 56
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 37.705187 0 0  0 37.705187 0  0 0 7.27455812
+End
+
+Body Force 56
+  Heat Source = 4104310.29
+End
+
+Material 57
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 40.8369216 0 0  0 40.8369216 0  0 0 7.27455812
+End
+
+Body Force 57
+  Heat Source = 5862754.67
+End
+
+Material 58
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 36.9934291 0 0  0 36.9934291 0  0 0 7.27455812
+End
+
+Body Force 58
+  Heat Source = 2735953.64
+End
+
+Material 59
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 28.9268399 0 0  0 28.9268399 0  0 0 0.337428707
+End
+
+Body Force 59
+  Heat Source = 4299356.33
+End
+
+Material 60
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 24.7511937 0 0  0 24.7511937 0  0 0 0.337428707
+End
+
+Body Force 60
+  Heat Source = 3322229.61
+End
+
+Material 61
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 42.72308 0 0  0 42.72308 0  0 0 0.337428707
+End
+
+Body Force 61
+  Heat Source = 5463532.58
+End
+
+Material 62
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 37.5628354 0 0  0 37.5628354 0  0 0 0.337428707
+End
+
+Body Force 62
+  Heat Source = 3029094.41
+End
+
+Material 63
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 38.701648 0 0  0 38.701648 0  0 0 0.337428707
+End
+
+Body Force 63
+  Heat Source = 243494.06
+End
+
+Material 64
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 35.8546165 0 0  0 35.8546165 0  0 0 0.337428707
+End
+
+Body Force 64
+  Heat Source = 383464.597
+End
+
+Material 65
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 37.4204838 0 0  0 37.4204838 0  0 0 0.337428707
+End
+
+Body Force 65
+  Heat Source = 438750.005
+End
+
+Material 66
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 44.1110078 0 0  0 44.1110078 0  0 0 7.27455812
+End
+
+Body Force 66
+  Heat Source = 305315.789
+End
+
+Material 67
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 42.1180858 0 0  0 42.1180858 0  0 0 0.337428707
+End
+
+Body Force 67
+  Heat Source = 176482.88
+End
+
+Material 68
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 37.8475386 0 0  0 37.8475386 0  0 0 0.337428707
+End
+
+Body Force 68
+  Heat Source = 195439.007
+End
+
+Material 69
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 28.5235105 0 0  0 28.5235105 0  0 0 0.337428707
+End
+
+Body Force 69
+  Heat Source = 390853.92
+End
+
+Material 70
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 29.0929168 0 0  0 29.0929168 0  0 0 7.27455812
+End
+
+Body Force 70
+  Heat Source = 390853.414
+End
+
+Material 71
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 26.6017642 0 0  0 26.6017642 0  0 0 7.27455812
+End
+
+Body Force 71
+  Heat Source = 390853.204
+End
+
+Material 72
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 24.6088422 0 0  0 24.6088422 0  0 0 0.337428707
+End
+
+Body Force 72
+  Heat Source = 390852.375
+End
+
+Material 73
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 21.334756 0 0  0 21.334756 0  0 0 0.337428707
+End
+
+Body Force 73
+  Heat Source = 390852.987
+End
+
+Material 74
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 57.3497042 0 0  0 57.3497042 0  0 0 0.337428707
+End
+
+Body Force 74
+  Heat Source = 388783.474
+End
+
+Material 75
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 56.1824213 0 0  0 56.1824213 0  0 0 0.337428707
+End
+
+Body Force 75
+  Heat Source = 195724.68
+End
+
+Material 76
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 51.5132897 0 0  0 51.5132897 0  0 0 0.337428707
+End
+
+Body Force 76
+  Heat Source = 167166.986
+End
+
+Material 77
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 44.6804141 0 0  0 44.6804141 0  0 0 0.337428707
+End
+
+Body Force 77
+  Heat Source = 250753.34
+End
+
+Material 78
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 43.1145468 0 0  0 43.1145468 0  0 0 0.337428707
+End
+
+Body Force 78
+  Heat Source = 292535.885
+End
+
+Material 79
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 37.9424396 0 0  0 37.9424396 0  0 0 7.27455812
+End
+
+Body Force 79
+  Heat Source = 215879.286
+End
+
+Material 80
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 42.6210613 0 0  0 42.6210613 0  0 0 0.337428707
+End
+
+Body Force 80
+  Heat Source = 42314655.6
+End
+
+Material 81
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 49.8050708 0 0  0 49.8050708 0  0 0 0.337428707
+End
+
+Body Force 81
+  Heat Source = 102393150
+End
+
+Material 82
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 45.9615783 0 0  0 45.9615783 0  0 0 0.337428707
+End
+
+Body Force 82
+  Heat Source = 65093162.4
+End
+
+Material 83
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 50.5524165 0 0  0 50.5524165 0  0 0 0.337428707
+End
+
+Body Force 83
+  Heat Source = 19797373.2
+End
+
+Material 84
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 33.2922882 0 0  0 33.2922882 0  0 0 0.337428707
+End
+
+Body Force 84
+  Heat Source = 33831386.3
+End
+
+Material 85
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 47.5986214 0 0  0 47.5986214 0  0 0 7.27455812
+End
+
+Body Force 85
+  Heat Source = 86811238.5
+End
+
+Material 86
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 44.055305 0 0  0 44.055305 0  0 0 0.337428707
+End
+
+Body Force 86
+  Heat Source = 53469332.9
+End
+
+Material 87
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 50.4931034 0 0  0 50.4931034 0  0 0 0.337428707
+End
+
+Body Force 87
+  Heat Source = 132034694
+End
+
+Material 88
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 43.8263047 0 0  0 43.8263047 0  0 0 0.337428707
+End
+
+Body Force 88
+  Heat Source = 98747654.7
+End
+
+Material 89
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 48.9509613 0 0  0 48.9509613 0  0 0 0.337428707
+End
+
+Body Force 89
+  Heat Source = 31774461.3
+End
+
+Material 90
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 33.2922882 0 0  0 33.2922882 0  0 0 0.337428707
+End
+
+Body Force 90
+  Heat Source = 52086953.5
+End
+
+Material 91
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 58.3461652 0 0  0 58.3461652 0  0 0 0.337428707
+End
+
+Body Force 91
+  Heat Source = 19524433.5
+End
+
+Material 92
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 49.4186879 0 0  0 49.4186879 0  0 0 0.337428707
+End
+
+Body Force 92
+  Heat Source = 43262184.5
+End
+
+Material 93
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 55.9546588 0 0  0 55.9546588 0  0 0 0.337428707
+End
+
+Body Force 93
+  Heat Source = 8882665.76
+End
+
+Material 94
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 57.7198183 0 0  0 57.7198183 0  0 0 7.27455812
+End
+
+Body Force 94
+  Heat Source = 50744143.9
+End
+
+Material 95
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 54.9297274 0 0  0 54.9297274 0  0 0 0.337428707
+End
+
+Body Force 95
+  Heat Source = 138899527
+End
+
+Material 96
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 49.4546669 0 0  0 49.4546669 0  0 0 0.337428707
+End
+
+Body Force 96
+  Heat Source = 14799603.7
+End
+
+Material 97
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 58.9155715 0 0  0 58.9155715 0  0 0 0.337428707
+End
+
+Body Force 97
+  Heat Source = 4341111.42
+End
+
+Material 98
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 54.3603211 0 0  0 54.3603211 0  0 0 7.27455812
+End
+
+Body Force 98
+  Heat Source = 45692350.6
+End
+
+Material 99
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 46.1395177 0 0  0 46.1395177 0  0 0 0.337428707
+End
+
+Body Force 99
+  Heat Source = 120464196
+End
+
+Material 100
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 38.2176527 0 0  0 38.2176527 0  0 0 0.337428707
+End
+
+Body Force 100
+  Heat Source = 46455257
+End
+
+Material 101
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 44.5380625 0 0  0 44.5380625 0  0 0 7.27455812
+End
+
+Body Force 101
+  Heat Source = 52471494.1
+End
+
+Material 102
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 39.5557574 0 0  0 39.5557574 0  0 0 0.337428707
+End
+
+Body Force 102
+  Heat Source = 91151619.3
+End
+
+Material 103
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 49.0458624 0 0  0 49.0458624 0  0 0 0.337428707
+End
+
+Body Force 103
+  Heat Source = 24486701.2
+End
+
+Material 104
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 28.9149773 0 0  0 28.9149773 0  0 0 0.337428707
+End
+
+Body Force 104
+  Heat Source = 2980240.33
+End
+
+Material 105
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 25.8900063 0 0  0 25.8900063 0  0 0 0.337428707
+End
+
+Body Force 105
+  Heat Source = 1954257.93
+End
+
+Material 106
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 28.3574336 0 0  0 28.3574336 0  0 0 0.337428707
+End
+
+Body Force 106
+  Heat Source = 2345106.67
+End
+
+Material 107
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 36.1393197 0 0  0 36.1393197 0  0 0 0.337428707
+End
+
+Body Force 107
+  Heat Source = 1954256.76
+End
+
+Material 108
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 44.1110078 0 0  0 44.1110078 0  0 0 0.337428707
+End
+
+Body Force 108
+  Heat Source = 4044552.53
+End
+
+Material 109
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 42.9721952 0 0  0 42.9721952 0  0 0 0.337428707
+End
+
+Body Force 109
+  Heat Source = 2279594.39
+End
+
+Material 110
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 40.69457 0 0  0 40.69457 0  0 0 0.337428707
+End
+
+Body Force 110
+  Heat Source = 1954265.01
+End
+
+Material 111
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 47.2427424 0 0  0 47.2427424 0  0 0 0.337428707
+End
+
+Body Force 111
+  Heat Source = 4027051
+End
+
+Material 112
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 47.385094 0 0  0 47.385094 0  0 0 7.27455812
+End
+
+Body Force 112
+  Heat Source = 52471505.3
+End
+
+Material 113
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 34.089457 0 0  0 34.089457 0  0 0 0.337428707
+End
+
+Body Force 113
+  Heat Source = 40323790
+End
+
+Material 114
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 34.6446281 0 0  0 34.6446281 0  0 0 0.337428707
+End
+
+Body Force 114
+  Heat Source = 6888740.9
+End
+
+Material 115
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 39.4703465 0 0  0 39.4703465 0  0 0 0.337428707
+End
+
+Body Force 115
+  Heat Source = 8537554.11
+End
+
+Material 116
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 57.7233771 0 0  0 57.7233771 0  0 0 0.337428707
+End
+
+Body Force 116
+  Heat Source = 33630651.9
+End
+
+Material 117
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 33.4820903 0 0  0 33.4820903 0  0 0 0.337428707
+End
+
+Body Force 117
+  Heat Source = 14851419.1
+End
+
+Material 118
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 42.858314 0 0  0 42.858314 0  0 0 0.337428707
+End
+
+Body Force 118
+  Heat Source = 20390435.3
+End
+
+Material 119
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 65.7128592 0 0  0 65.7128592 0  0 0 0.337428707
+End
+
+Body Force 119
+  Heat Source = 35440088.6
+End
+
+Material 120
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 45.9615783 0 0  0 45.9615783 0  0 0 7.27455812
+End
+
+Body Force 120
+  Heat Source = 7427297.09
+End
+
+Material 121
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 38.2745933 0 0  0 38.2745933 0  0 0 0.337428707
+End
+
+Body Force 121
+  Heat Source = 4038520.02
+End
+
+Material 122
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 42.2604374 0 0  0 42.2604374 0  0 0 0.337428707
+End
+
+Body Force 122
+  Heat Source = 15838514.5
+End
+
+Material 123
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 43.8974805 0 0  0 43.8974805 0  0 0 7.27455812
+End
+
+Body Force 123
+  Heat Source = 2345680.11
+End
+
+Material 124
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 36.2816712 0 0  0 36.2816712 0  0 0 7.27455812
+End
+
+Body Force 124
+  Heat Source = 1173694.09
+End
+
+Material 125
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 49.3068403 0 0  0 49.3068403 0  0 0 0.337428707
+End
+
+Body Force 125
+  Heat Source = 2339385.36
+End
+
+Material 126
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 33.007585 0 0  0 33.007585 0  0 0 0.337428707
+End
+
+Body Force 126
+  Heat Source = 1172556.73
+End
+
+Material 127
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 34.4311008 0 0  0 34.4311008 0  0 0 0.337428707
+End
+
+Body Force 127
+  Heat Source = 2540532.71
+End
+
+Material 128
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 28.7370378 0 0  0 28.7370378 0  0 0 0.337428707
+End
+
+Body Force 128
+  Heat Source = 1563406.7
+End
+
+Material 129
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 42.9721952 0 0  0 42.9721952 0  0 0 0.337428707
+End
+
+Body Force 129
+  Heat Source = 3034732.83
+End
+
+Material 130
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 46.388633 0 0  0 46.388633 0  0 0 0.337428707
+End
+
+Body Force 130
+  Heat Source = 1172557.58
+End
+
+Material 131
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 50.0897739 0 0  0 50.0897739 0  0 0 0.337428707
+End
+
+Body Force 131
+  Heat Source = 6319085.32
+End
+
+Material 132
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 41.2639763 0 0  0 41.2639763 0  0 0 7.27455812
+End
+
+Body Force 132
+  Heat Source = 140147.595
+End
+
+Material 133
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 37.9898901 0 0  0 37.9898901 0  0 0 7.27455812
+End
+
+Body Force 133
+  Heat Source = 140036.272
+End
+
+Material 134
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 45.1074688 0 0  0 45.1074688 0  0 0 0.337428707
+End
+
+Body Force 134
+  Heat Source = 12174987.3
+End
+
+Material 135
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 43.2568984 0 0  0 43.2568984 0  0 0 7.27455812
+End
+
+Body Force 135
+  Heat Source = 12314628.3
+End
+
+Material 136
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 40.4098669 0 0  0 40.4098669 0  0 0 7.27455812
+End
+
+Body Force 136
+  Heat Source = 12285704.3
+End
+
+Material 137
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 30.3029051 0 0  0 30.3029051 0  0 0 7.27455812
+End
+
+Body Force 137
+  Heat Source = 6073057.37
+End
+
+Material 138
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 38.025478 0 0  0 38.025478 0  0 0 0.337428707
+End
+
+Body Force 138
+  Heat Source = 16396855.3
+End
+
+Material 139
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 40.4098669 0 0  0 40.4098669 0  0 0 0.337428707
+End
+
+Body Force 139
+  Heat Source = 18303784.8
+End
+
+Material 140
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 48.8086098 0 0  0 48.8086098 0  0 0 7.27455812
+End
+
+Body Force 140
+  Heat Source = 16387872
+End
+
+Material 141
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 39.377818 0 0  0 39.377818 0  0 0 7.27455812
+End
+
+Body Force 141
+  Heat Source = 8734635.11
+End
+
+Material 142
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 33.2068772 0 0  0 33.2068772 0  0 0 0.337428707
+End
+
+Body Force 142
+  Heat Source = 19231640.6
+End
+
+Material 143
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 36.4240228 0 0  0 36.4240228 0  0 0 7.27455812
+End
+
+Body Force 143
+  Heat Source = 16418585.9
+End
+
+Material 144
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 32.5805303 0 0  0 32.5805303 0  0 0 7.27455812
+End
+
+Body Force 144
+  Heat Source = 16026342.2
+End
+
+Material 145
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 22.1603951 0 0  0 22.1603951 0  0 0 0.337428707
+End
+
+Body Force 145
+  Heat Source = 15110549.9
+End
+
+Material 146
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 29.3064441 0 0  0 29.3064441 0  0 0 0.337428707
+End
+
+Body Force 146
+  Heat Source = 20605304.4
+End
+
+Material 147
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 19.6265371 0 0  0 19.6265371 0  0 0 0.337428707
+End
+
+Body Force 147
+  Heat Source = 10302645.2
+End
+
+Material 148
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 25.0358969 0 0  0 25.0358969 0  0 0 0.337428707
+End
+
+Body Force 148
+  Heat Source = 10875011.6
+End
+
+Material 149
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 43.9686562 0 0  0 43.9686562 0  0 0 0.337428707
+End
+
+Body Force 149
+  Heat Source = 33948036.6
+End
+
+Material 150
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 49.0175153 0 0  0 49.0175153 0  0 0 0.337428707
+End
+
+Body Force 150
+  Heat Source = 69293804.3
+End
+
+Material 151
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 39.9828122 0 0  0 39.9828122 0  0 0 0.337428707
+End
+
+Body Force 151
+  Heat Source = 51227140.9
+End
+
+Material 152
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 34.1463976 0 0  0 34.1463976 0  0 0 0.337428707
+End
+
+Body Force 152
+  Heat Source = 25184262.7
+End
+
+Material 153
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 71.44251 0 0  0 71.44251 0  0 0 24.3715779
+End
+
+Material 154
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 65.3569802 0 0  0 65.3569802 0  0 0 0.337428707
+End
+
+Body Force 154
+  Heat Source = 100951580
+End
+
+Material 155
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 55.1593268 0 0  0 55.1593268 0  0 0 0.337428707
+End
+
+Body Force 155
+  Heat Source = 78550722
+End
+
+Material 156
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 60.1065797 0 0  0 60.1065797 0  0 0 0.337428707
+End
+
+Body Force 156
+  Heat Source = 91655333.3
+End
+
+Material 157
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 69.4140001 0 0  0 69.4140001 0  0 0 24.3715779
+End
+
+Material 158
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 71.44251 0 0  0 71.44251 0  0 0 7.27455812
+End
+
+Material 159
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 55.4991337 0 0  0 55.4991337 0  0 0 0.337428707
+End
+
+Body Force 159
+  Heat Source = 5723822.71
+End
+
+Material 160
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 38.3007395 0 0  0 38.3007395 0  0 0 0.337428707
+End
+
+Body Force 160
+  Heat Source = 34388904.3
+End
+
+Material 161
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 17.3489119 0 0  0 17.3489119 0  0 0 0.337428707
+End
+
+Body Force 161
+  Heat Source = 5723697.03
+End
+
+Material 162
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 33.8616945 0 0  0 33.8616945 0  0 0 0.337428707
+End
+
+Body Force 162
+  Heat Source = 11447378.1
+End
+
+Material 163
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 43.8342131 0 0  0 43.8342131 0  0 0 0.337428707
+End
+
+Body Force 163
+  Heat Source = 25065720.2
+End
+
+Material 164
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 51.9403444 0 0  0 51.9403444 0  0 0 7.27455812
+End
+
+Body Force 164
+  Heat Source = 330932.985
+End
+
+Material 165
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 61.762603 0 0  0 61.762603 0  0 0 0.337428707
+End
+
+Body Force 165
+  Heat Source = 1641391.58
+End
+
+Material 166
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 43.5416015 0 0  0 43.5416015 0  0 0 7.27455812
+End
+
+Body Force 166
+  Heat Source = 17002160.2
+End
+
+Material 167
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 55.7838369 0 0  0 55.7838369 0  0 0 0.337428707
+End
+
+Body Force 167
+  Heat Source = 55814143.3
+End
+
+Material 168
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 50.1914536 0 0  0 50.1914536 0  0 0 0.337428707
+End
+
+Body Force 168
+  Heat Source = 55982876.7
+End
+
+Material 169
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 60.0543841 0 0  0 60.0543841 0  0 0 7.27455812
+End
+
+Body Force 169
+  Heat Source = 20605772.7
+End
+
+Material 170
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 56.06854 0 0  0 56.06854 0  0 0 7.27455812
+End
+
+Body Force 170
+  Heat Source = 11447678.4
+End
+
+Material 171
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 59.4849778 0 0  0 59.4849778 0  0 0 7.27455812
+End
+
+Body Force 171
+  Heat Source = 9158089.51
+End
+
+Material 172
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 64.6096345 0 0  0 64.6096345 0  0 0 7.27455812
+End
+
+Body Force 172
+  Heat Source = 9158175.53
+End
+
+Material 173
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 71.3357464 0 0  0 71.3357464 0  0 0 0.337428707
+End
+
+Body Force 173
+  Heat Source = 82054123.6
+End
+
+Material 174
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 65.7484471 0 0  0 65.7484471 0  0 0 0.337428707
+End
+
+Body Force 174
+  Heat Source = 73848702.6
+End
+
+Material 175
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 43.0006655 0 0  0 43.0006655 0  0 0 7.27455812
+End
+
+Body Force 175
+  Heat Source = 33898608.1
+End
+
+Material 176
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 43.9686562 0 0  0 43.9686562 0  0 0 7.27455812
+End
+
+Body Force 176
+  Heat Source = 41496789.3
+End
+
+Material 177
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 61.1931967 0 0  0 61.1931967 0  0 0 7.27455812
+End
+
+Body Force 177
+  Heat Source = 32052913.3
+End
+
+Material 178
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 39.5557574 0 0  0 39.5557574 0  0 0 7.27455812
+End
+
+Body Force 178
+  Heat Source = 32052854.9
+End
+
+Material 179
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 28.5946862 0 0  0 28.5946862 0  0 0 0.337428707
+End
+
+Body Force 179
+  Heat Source = 28332738.8
+End
+
+Material 180
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 44.8702162 0 0  0 44.8702162 0  0 0 7.27455812
+End
+
+Body Force 180
+  Heat Source = 26720363
+End
+
+Material 181
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 57.7767589 0 0  0 57.7767589 0  0 0 0.337428707
+End
+
+Body Force 181
+  Heat Source = 2412152.95
+End
+
+Material 182
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 58.5739277 0 0  0 58.5739277 0  0 0 7.27455812
+End
+
+Body Force 182
+  Heat Source = 24726874.4
+End
+
+Material 183
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 47.8121487 0 0  0 47.8121487 0  0 0 7.27455812
+End
+
+Body Force 183
+  Heat Source = 28639966.4
+End
+
+Material 184
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 25.8900063 0 0  0 25.8900063 0  0 0 0.337428707
+End
+
+Body Force 184
+  Heat Source = 22895133.7
+End
+
+Material 185
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 58.3461652 0 0  0 58.3461652 0  0 0 0.337428707
+End
+
+Body Force 185
+  Heat Source = 41211008
+End
+
+Material 186
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 61.762603 0 0  0 61.762603 0  0 0 0.337428707
+End
+
+Body Force 186
+  Heat Source = 41210600
+End
+
+Material 187
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 54.3603211 0 0  0 54.3603211 0  0 0 0.337428707
+End
+
+Body Force 187
+  Heat Source = 24616287.9
+End
+
+Material 188
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 34.7158039 0 0  0 34.7158039 0  0 0 7.27455812
+End
+
+Body Force 188
+  Heat Source = 256534.947
+End
+
+Material 189
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 40.1251637 0 0  0 40.1251637 0  0 0 0.337428707
+End
+
+Body Force 189
+  Heat Source = 28618514.1
+End
+
+Material 190
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 63.4708219 0 0  0 63.4708219 0  0 0 7.27455812
+End
+
+Body Force 190
+  Heat Source = 197192.682
+End
+
+Material 191
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 52.082696 0 0  0 52.082696 0  0 0 7.27455812
+End
+
+Body Force 191
+  Heat Source = 1181547.34
+End
+
+Material 192
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 50.184675 0 0  0 50.184675 0  0 0 0.337428707
+End
+
+Body Force 192
+  Heat Source = 1913863.65
+End
+
+Material 193
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 71.44251 0 0  0 71.44251 0  0 0 0.337428707
+End
+
+Body Force 193
+  Heat Source = 3937426.29
+End
+
+Material 194
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 64.0402282 0 0  0 64.0402282 0  0 0 0.337428707
+End
+
+Body Force 194
+  Heat Source = 3346855.07
+End
+
+Material 195
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 59.2002747 0 0  0 59.2002747 0  0 0 0.337428707
+End
+
+Body Force 195
+  Heat Source = 1804981.46
+End
+
+Material 196
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 54.9297274 0 0  0 54.9297274 0  0 0 0.337428707
+End
+
+Body Force 196
+  Heat Source = 590714.516
+End
+
+Material 197
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 42.4027889 0 0  0 42.4027889 0  0 0 0.337428707
+End
+
+Body Force 197
+  Heat Source = 945001.654
+End
+
+Material 198
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 52.082696 0 0  0 52.082696 0  0 0 0.337428707
+End
+
+Body Force 198
+  Heat Source = 472667.251
+End
+
+Material 199
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 48.381555 0 0  0 48.381555 0  0 0 0.337428707
+End
+
+Body Force 199
+  Heat Source = 753243.235
+End
+
+Material 200
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 32.1534756 0 0  0 32.1534756 0  0 0 0.337428707
+End
+
+Body Force 200
+  Heat Source = 354381.341
+End
+
+Material 201
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 55.4991337 0 0  0 55.4991337 0  0 0 0.337428707
+End
+
+Body Force 201
+  Heat Source = 2834949.66
+End
+
+Material 202
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 37.2781323 0 0  0 37.2781323 0  0 0 0.337428707
+End
+
+Body Force 202
+  Heat Source = 878676.915
+End
+
+Material 203
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 29.8758504 0 0  0 29.8758504 0  0 0 0.337428707
+End
+
+Body Force 203
+  Heat Source = 627649.89
+End
+
+Material 204
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 53.7909149 0 0  0 53.7909149 0  0 0 0.337428707
+End
+
+Body Force 204
+  Heat Source = 236342.174
+End
+
+Material 205
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 53.2215086 0 0  0 53.2215086 0  0 0 0.337428707
+End
+
+Body Force 205
+  Heat Source = 315205.883
+End
+
+Material 206
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 43.2568984 0 0  0 43.2568984 0  0 0 7.27455812
+End
+
+Body Force 206
+  Heat Source = 457422.675
+End
+
+Material 207
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 35.1428587 0 0  0 35.1428587 0  0 0 7.27455812
+End
+
+Body Force 207
+  Heat Source = 457924.03
+End
+
+Material 208
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 31.8687724 0 0  0 31.8687724 0  0 0 7.27455812
+End
+
+Body Force 208
+  Heat Source = 1372024.71
+End
+
+Material 209
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 50.3744771 0 0  0 50.3744771 0  0 0 7.27455812
+End
+
+Body Force 209
+  Heat Source = 40077313.2
+End
+
+Material 210
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 24.7511937 0 0  0 24.7511937 0  0 0 7.27455812
+End
+
+Material 211
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 10.2569565 0 0  0 10.2569565 0  0 0 0.337428707
+End
+
+Material 212
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 4.21531289 0 0  0 4.21531289 0  0 0 0.305341306
+End
+
+Material 213
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 3.39156959 0 0  0 3.39156959 0  0 0 0.304887358
+End
+
+Material 214
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 2.67124439 0 0  0 2.67124439 0  0 0 0.304887358
+End
+
+Material 215
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 3.04256705 0 0  0 3.04256705 0  0 0 0.304981141
+End
+
+Material 216
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 6.42001389 0 0  0 6.42001389 0  0 0 0.304888615
+End
+
+Material 217
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 5.43276299 0 0  0 5.43276299 0  0 0 0.304887358
+End
+
+Material 218
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 4.6688189 0 0  0 4.6688189 0  0 0 0.304887358
+End
+
+Material 219
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 5.34991498 0 0  0 5.34991498 0  0 0 7.24201677
+End
+
+Material 220
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 4.71926558 0 0  0 4.71926558 0  0 0 7.24201677
+End
+
+Material 221
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 4.07687204 0 0  0 4.07687204 0  0 0 7.24201677
+End
+
+Material 222
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 5.89308304 0 0  0 5.89308304 0  0 0 7.24201677
+End
+
+Material 223
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 4.92386645 0 0  0 4.92386645 0  0 0 14.1791462
+End
+
+Material 224
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 3.55686429 0 0  0 3.55686429 0  0 0 7.24201677
+End
+
+Material 225
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 3.15468383 0 0  0 3.15468383 0  0 0 7.24201677
+End
+
+Material 226
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 3.87470001 0 0  0 3.87470001 0  0 0 14.1791462
+End
+
+Material 227
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 6.4320432 0 0  0 6.4320432 0  0 0 24.3390365
+End
+
+Material 228
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 5.8187437 0 0  0 5.8187437 0  0 0 7.24201677
+End
+
+Body Force 228
+  Heat Source = 162287.095
+End
+
+Material 229
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 5.40730588 0 0  0 5.40730588 0  0 0 7.24201677
+End
+
+Body Force 229
+  Heat Source = 161282.834
+End
+
+Material 230
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 2.44669089 0 0  0 2.44669089 0  0 0 0.310112175
+End
+
+Material 231
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 0.266723009 0 0  0 0.266723009 0  0 0 0.337428707
+End
+
+Material 232
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 1.9749419 0 0  0 1.9749419 0  0 0 0.337428707
+End
+
+Material 233
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 9.94663004 0 0  0 9.94663004 0  0 0 0.337428707
+End
+
+Material 234
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 23.1853264 0 0  0 23.1853264 0  0 0 7.27455812
+End
+
+Material 235
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 44.9651173 0 0  0 44.9651173 0  0 0 7.27455812
+End
+
+Body Force 235
+  Heat Source = 214030.804
+End
+
+Material 236
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 49.5203676 0 0  0 49.5203676 0  0 0 7.27455812
+End
+
+Body Force 236
+  Heat Source = 930593.077
+End
+
+Material 237
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 42.9010194 0 0  0 42.9010194 0  0 0 7.27455812
+End
+
+Body Force 237
+  Heat Source = 932790.993
+End
+
+Material 238
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 33.4753116 0 0  0 33.4753116 0  0 0 0.337428707
+End
+
+Body Force 238
+  Heat Source = 1454166.85
+End
+
+Material 239
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 53.7909149 0 0  0 53.7909149 0  0 0 7.27455812
+End
+
+Body Force 239
+  Heat Source = 287802.502
+End
+
+Material 240
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 32.1534756 0 0  0 32.1534756 0  0 0 7.27455812
+End
+
+Body Force 240
+  Heat Source = 289917.145
+End
+
+Material 241
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 42.9721952 0 0  0 42.9721952 0  0 0 7.27455812
+End
+
+Body Force 241
+  Heat Source = 397669.346
+End
+
+Material 242
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 37.8475386 0 0  0 37.8475386 0  0 0 7.27455812
+End
+
+Body Force 242
+  Heat Source = 430662.527
+End
+
+Material 243
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 32.5805303 0 0  0 32.5805303 0  0 0 7.27455812
+End
+
+Body Force 243
+  Heat Source = 406204.047
+End
+
+Material 244
+  Density = 1.0
+  Heat Conductivity(3,3) = Real 19.9112402 0 0  0 19.9112402 0  0 0 7.27455812
+End
+
+Equation 1
+  Active Solvers(1) = 1
+End
+
+Solver 1
+  Equation = Heat Equation
+  Procedure = "HeatSolve" "HeatSolver"
+  Variable = Temperature
+  Linear System Solver = Iterative
+  Linear System Iterative Method = BiCGStab
+  Linear System Max Iterations = 10000
+  Linear System Convergence Tolerance = 1.0e-10
+  Linear System Preconditioning = ILU0
+  Nonlinear System Max Iterations = 1
+  Steady State Convergence Tolerance = 1.0e-8
+End
+
+Solver 2
+  Exec Solver = After Simulation
+  Equation = SaveScalars
+  Procedure = "SaveData" "SaveScalars"
+  Filename = "probes.dat"
+  Variable 1 = Temperature
+  Save Coordinates(7,3) = 0.01425 0.02925 -1.75e-05 \
+    0.00325 0.02975 -1.75e-05 \
+    0.00575 0.01725 -1.75e-05 \
+    0.01125 0.01525 -1.75e-05 \
+    0.01125 0.01425 -1.75e-05 \
+    0.03025 0.01575 -1.75e-05 \
+    0.01425 0.02925 -1.75e-05
+End
+
+Boundary Condition 1
+  Name = "top"
+  Target Boundaries(1) = 1
+  Heat Transfer Coefficient = 10
+  External Temperature = 25
+End
+
+Boundary Condition 2
+  Name = "bottom"
+  Target Boundaries(1) = 2
+  Heat Transfer Coefficient = 10
+  External Temperature = 25
+End
