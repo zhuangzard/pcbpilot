@@ -270,6 +270,8 @@ U1（peak）计算过程：
 
 ## 4 器件可行性
 
+数据：[data/power-models.json](data/power-models.json)
+
 统计：满足 30 · 临界 3 · 超限 0 · 需数据手册 14
 
 | 器件 | 型号 | 检查项 | 应力 | 额定 | 余量 | 准则 | 结论 | 额定来源 / 备注 |
@@ -337,6 +339,8 @@ U1（peak）计算过程：
 
 ## 5 工程计算
 
+数据：[data/intent.json](data/intent.json)
+
 | 基础 | 值 |
 |---|---|
 | 外层/内层铜厚 | 1 oz (1.378 mil) / 0.5 oz (0.689 mil) |
@@ -401,6 +405,8 @@ U1（peak）计算过程：
 无绝缘对（单一电压域）。
 
 ## 6 布局与布线
+
+数据：[data/plan.json](data/plan.json) · [data/feedback.json](data/feedback.json) · [data/board.json](data/board.json)
 
 ![原理图 P1](assets/23ed79c6b45b26e1.png)
 *原理图 P1（已缩小）*
@@ -650,14 +656,14 @@ U1（peak）计算过程：
 
 | 检查 | 结论 | 说明 | 证据 |
 |---|---|---|---|
-| 原生 DRC（EasyEDA） | **PASS** | 原生 DRC 通过，0 违规；2026-09-28T04:00:20.47119Z | `artifacts/v05-live/final.drc4.json` |
-| pcb check（DFM 重建审计） | **WARN** | ERROR 0 / WARN 100 / INFO 13 | `artifacts/v05-live/final.check2.txt` |
-| 规则同步（pcb rules check） | **PASS** | intent 规则与 EasyEDA 一致（in-sync） | `artifacts/v05-live/rules-check.json` |
-| 焊盘网络对账（pad-net diff） | **PASS** | 原理图网表与 PCB 焊盘网络一致 | `artifacts/v05-live/netdiff.json` |
-| 保存/重载一致性 | **PASS** | 保存重载前后 semanticSha256 一致：208a2bcb43be | `artifacts/v05-live/final.reload.json` |
-| 布线完成度（pcb auto） | **PASS** | 信号 100 %（30/30），平面连接 52/52 | `artifacts/v05-live/final/plan.json` |
-| 直流压降（IR drop） | **PASS** | 0 个网络超预算，最坏 17.9 % 预算 | `artifacts/v05-live/final/plan.json` |
-| 设计后仿真（post-layout） | **PASS** | post-layout PASS；+3V3 2.7/66.4 mV；+5V_TERM 0.99/99.8 mV；USB_VBUS 17.07/99.1 mV；VSYS_5V 13.61/92.6 mV；板最高 86.3 °C | `examples/esp32-mini-post-layout/post.json` |
+| 原生 DRC（EasyEDA） | **PASS** | 原生 DRC 通过，0 违规；2026-09-28T04:00:20.47119Z | [data/drc.json](data/drc.json) |
+| pcb check（DFM 重建审计） | **WARN** | ERROR 0 / WARN 100 / INFO 13 | [data/check.txt](data/check.txt) |
+| 规则同步（pcb rules check） | **PASS** | intent 规则与 EasyEDA 一致（in-sync） | [data/rules-check.json](data/rules-check.json) |
+| 焊盘网络对账（pad-net diff） | **PASS** | 原理图网表与 PCB 焊盘网络一致 | [data/net-diff.json](data/net-diff.json) |
+| 保存/重载一致性 | **PASS** | 保存重载前后 semanticSha256 一致：208a2bcb43be | [data/board.reload.json](data/board.reload.json) |
+| 布线完成度（pcb auto） | **PASS** | 信号 100 %（30/30），平面连接 52/52 | [data/plan.json](data/plan.json) |
+| 直流压降（IR drop） | **PASS** | 0 个网络超预算，最坏 17.9 % 预算 | [data/plan.json](data/plan.json) |
+| 设计后仿真（post-layout） | **PASS** | post-layout PASS；+3V3 2.7/66.4 mV；+5V_TERM 0.99/99.8 mV；USB_VBUS 17.07/99.1 mV；VSYS_5V 13.61/92.6 mV；板最高 86.3 °C | [data/post.json](data/post.json) |
 
 ## 8 测试点计划
 

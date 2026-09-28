@@ -159,7 +159,11 @@ func (c *ctx) buildVerification() {
 	var out []Check
 	add := func(name, kind, st, detail string) {
 		p, h := ev(kind)
-		out = append(out, Check{Name: name, Status: st, Detail: detail, Evidence: p, SHA256: h})
+		d := ""
+		if p != "" {
+			d = c.dataPath(kind)
+		}
+		out = append(out, Check{Name: name, Status: st, Detail: detail, Evidence: p, SHA256: h, Data: d})
 	}
 	if d := c.in.DRC; d != nil {
 		st, det := StatusPass, "原生 DRC 通过，0 违规"

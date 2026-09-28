@@ -238,7 +238,7 @@ func (c *ctx) buildPost() {
 			path, sha = r.Path, r.SHA256
 		}
 	}
-	c.rep.Verification = append(c.rep.Verification, Check{Name: "设计后仿真（post-layout）", Status: s.Status, Detail: det, Evidence: path, SHA256: sha})
+	c.rep.Verification = append(c.rep.Verification, Check{Name: "设计后仿真（post-layout）", Status: s.Status, Detail: det, Evidence: path, SHA256: sha, Data: c.dataPath("post")})
 }
 
 // postKeyNumbers adds §1 key numbers.

@@ -268,22 +268,22 @@
     {
       "path": "report.html",
       "role": "report-html",
-      "sha256": "96d1e977f0b5193deaea5a635a58431984af25635932d44c9b1c839614a3ee7f",
-      "bytes": 1753291,
+      "sha256": "b5b08386332ca4cfae5cf9d1738ec9d7e15fa2d08f8550b4f725cbfb338693cd",
+      "bytes": 1753799,
       "producer": "pcbpilot report design"
     },
     {
       "path": "report.json",
       "role": "report-json",
-      "sha256": "74bd40466aa3fa4a27cae22e459c827c84b7a8120c471ff8a05fc9c37892337a",
-      "bytes": 139710,
+      "sha256": "8fd700b472459f702de6897172b593d60d152fb51781aed746f2f659d6c5400e",
+      "bytes": 139984,
       "producer": "pcbpilot report design"
     },
     {
       "path": "report.md",
       "role": "report-md",
-      "sha256": "10b4e08f6ed3487569f71f3e2ba59b00ab21e446b5980c60fdc188ae4e234122",
-      "bytes": 62431,
+      "sha256": "c2c3e8f2e99e9215f9fc16f7c462de606ae856423735a74e522800a9f88e5701",
+      "bytes": 62658,
       "producer": "pcbpilot report design"
     }
   ]

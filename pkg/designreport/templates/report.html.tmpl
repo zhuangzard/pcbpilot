@@ -154,6 +154,7 @@ code{font-size:12px;word-break:break-all}
 {{- else}}{{template "na" (missing $R "3")}}{{end}}
 
 <h2 id="s4">4 器件可行性 Component feasibility</h2>
+{{- with $R.Data.models}}<p class="muted">数据：<a href="{{.}}"><code>{{.}}</code></a></p>{{end}}
 {{- with $R.Feasibility}}
 <p>统计：<span class="badge ok">满足 {{index .Counts "ok"}}</span> <span class="badge marginal">临界 {{index .Counts "marginal"}}</span> <span class="badge over">超限 {{index .Counts "over"}}</span> <span class="badge unknown">需数据手册 {{index .Counts "unknown"}}</span></p>
 <table><thead><tr><th>器件</th><th>型号</th><th>检查项</th><th>应力</th><th>额定</th><th>余量</th><th>准则</th><th>结论</th><th>额定来源 / 备注</th></tr></thead><tbody>
@@ -165,6 +166,7 @@ code{font-size:12px;word-break:break-all}
 {{- else}}{{template "na" (missing $R "4")}}{{end}}
 
 <h2 id="s5">5 工程计算 Engineering calculations</h2>
+{{- with $R.Data.intent}}<p class="muted">数据：<a href="{{.}}"><code>{{.}}</code></a></p>{{end}}
 {{- with $R.Calcs}}
 <h3>5.1 计算基础与公式</h3>
 <div class="kv">{{range .Basis}}<div>{{.Label}}</div><div>{{.Value}} <small>{{.Note}}</small></div>{{end}}</div>
@@ -197,6 +199,7 @@ code{font-size:12px;word-break:break-all}
 {{- else}}{{template "na" (missing $R "5")}}{{end}}
 
 <h2 id="s6">6 布局与布线 Layout &amp; routing</h2>
+{{- with $R.Data.plan}}<p class="muted">数据：<a href="{{.}}"><code>{{.}}</code></a>{{with $R.Data.feedback}} · <a href="{{.}}"><code>{{.}}</code></a>{{end}}{{with $R.Data.board}} · <a href="{{.}}"><code>{{.}}</code></a>{{end}}</p>{{end}}
 {{- with $R.Layout}}
 {{- range .Images}}<figure class="img"><img src="{{img .}}" alt="{{.Label}}"{{if .Width}} width="{{.Width}}" height="{{.Height}}"{{end}}><figcaption><small>{{.Label}} · <code>{{.Path}}</code>{{if .Resized}}（已缩小）{{end}}</small></figcaption></figure>{{end}}
 {{- if .Stackup}}
@@ -262,7 +265,7 @@ code{font-size:12px;word-break:break-all}
 
 <h2 id="s7">7 验证状态 Verification status</h2>
 <table><thead><tr><th>检查</th><th>结论</th><th>说明</th><th>证据文件</th></tr></thead><tbody>
-{{- range $R.Verification}}<tr><td>{{.Name}}</td><td><span class="badge {{statusCls .Status}}">{{.Status}}</span></td><td>{{.Detail}}</td><td><code>{{.Evidence}}</code>{{with .SHA256}}<br><small>sha256 {{short .}}</small>{{end}}</td></tr>{{end}}
+{{- range $R.Verification}}<tr><td>{{.Name}}</td><td><span class="badge {{statusCls .Status}}">{{.Status}}</span></td><td>{{.Detail}}</td><td>{{if .Data}}<a href="{{.Data}}"><code>{{.Data}}</code></a>{{else}}<code>{{.Evidence}}</code>{{end}}{{with .SHA256}}<br><small>sha256 {{short .}}</small>{{end}}</td></tr>{{end}}
 </tbody></table>
 
 <h2 id="s8">8 测试点计划 Test-point plan</h2>

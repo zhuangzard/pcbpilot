@@ -159,6 +159,8 @@ input/evidence files in data/ (one self-contained package per version). */ -}}
 {{end}}
 
 ## 4 器件可行性
+{{with $R.Data.models}}
+数据：[{{.}}]({{.}}){{end}}
 {{with $R.Feasibility}}
 统计：满足 {{index .Counts "ok"}} · 临界 {{index .Counts "marginal"}} · 超限 {{index .Counts "over"}} · 需数据手册 {{index .Counts "unknown"}}
 
@@ -178,6 +180,8 @@ input/evidence files in data/ (one self-contained package per version). */ -}}
 {{end}}
 
 ## 5 工程计算
+{{with $R.Data.intent}}
+数据：[{{.}}]({{.}}){{end}}
 {{with $R.Calcs}}
 | 基础 | 值 |
 |---|---|
@@ -234,6 +238,8 @@ input/evidence files in data/ (one self-contained package per version). */ -}}
 {{end}}
 
 ## 6 布局与布线
+{{with $R.Data.plan}}
+数据：[{{.}}]({{.}}){{with $R.Data.feedback}} · [{{.}}]({{.}}){{end}}{{with $R.Data.board}} · [{{.}}]({{.}}){{end}}{{end}}
 {{with $R.Layout}}
 {{- range .Images}}
 ![{{.Label}}]({{imgpath .}})
@@ -377,7 +383,7 @@ input/evidence files in data/ (one self-contained package per version). */ -}}
 | 检查 | 结论 | 说明 | 证据 |
 |---|---|---|---|
 {{- range $R.Verification}}
-| {{.Name}} | **{{.Status}}** | {{md .Detail}} | `{{.Evidence}}` |{{end}}
+| {{.Name}} | **{{.Status}}** | {{md .Detail}} | {{if .Data}}[{{.Data}}]({{.Data}}){{else}}`{{.Evidence}}`{{end}} |{{end}}
 
 ## 8 测试点计划
 {{with $R.TestPlan}}

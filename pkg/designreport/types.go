@@ -515,6 +515,8 @@ type Check struct {
 	Detail   string `json:"detail"`
 	Evidence string `json:"evidence,omitempty"`
 	SHA256   string `json:"sha256,omitempty"`
+	// Data is the evidence file inside the report package (data/…).
+	Data string `json:"data,omitempty"`
 }
 
 // TestPlanSection is §8.

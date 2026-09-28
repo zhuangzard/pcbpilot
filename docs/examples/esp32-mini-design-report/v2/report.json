@@ -3637,56 +3637,64 @@
       "status": "PASS",
       "detail": "原生 DRC 通过，0 违规；2026-09-28T04:00:20.47119Z",
       "evidence": "artifacts/v05-live/final.drc4.json",
-      "sha256": "8d9b9c6912195a8f61ae5ccf3890f8f3c3c8ffbe6172a37d951b97ed78426197"
+      "sha256": "8d9b9c6912195a8f61ae5ccf3890f8f3c3c8ffbe6172a37d951b97ed78426197",
+      "data": "data/drc.json"
     },
     {
       "name": "pcb check（DFM 重建审计）",
       "status": "WARN",
       "detail": "ERROR 0 / WARN 100 / INFO 13",
       "evidence": "artifacts/v05-live/final.check2.txt",
-      "sha256": "12174bf2fcb5e4a09aa36fc35186147de97e0b76684cc70ec0d5008ab70a0cc6"
+      "sha256": "12174bf2fcb5e4a09aa36fc35186147de97e0b76684cc70ec0d5008ab70a0cc6",
+      "data": "data/check.txt"
     },
     {
       "name": "规则同步（pcb rules check）",
       "status": "PASS",
       "detail": "intent 规则与 EasyEDA 一致（in-sync）",
       "evidence": "artifacts/v05-live/rules-check.json",
-      "sha256": "a9e2e056f938f3f27ad4db3d347887c092392f15461dfd8a0be2e0bffd91838b"
+      "sha256": "a9e2e056f938f3f27ad4db3d347887c092392f15461dfd8a0be2e0bffd91838b",
+      "data": "data/rules-check.json"
     },
     {
       "name": "焊盘网络对账（pad-net diff）",
       "status": "PASS",
       "detail": "原理图网表与 PCB 焊盘网络一致",
       "evidence": "artifacts/v05-live/netdiff.json",
-      "sha256": "6931fd8912a9f4a8a2a3d7b2a638e6a00e9d626ce9fdc3dd880c8febd1fc637a"
+      "sha256": "6931fd8912a9f4a8a2a3d7b2a638e6a00e9d626ce9fdc3dd880c8febd1fc637a",
+      "data": "data/net-diff.json"
     },
     {
       "name": "保存/重载一致性",
       "status": "PASS",
       "detail": "保存重载前后 semanticSha256 一致：208a2bcb43be",
       "evidence": "artifacts/v05-live/final.reload.json",
-      "sha256": "51256aeb9120ecf4efdc582198134687ba60863c884b22255582494da72eedd0"
+      "sha256": "51256aeb9120ecf4efdc582198134687ba60863c884b22255582494da72eedd0",
+      "data": "data/board.reload.json"
     },
     {
       "name": "布线完成度（pcb auto）",
       "status": "PASS",
       "detail": "信号 100 %（30/30），平面连接 52/52",
       "evidence": "artifacts/v05-live/final/plan.json",
-      "sha256": "82bfc1b79f39a1f99188318ba856442cb73318eb1c07a8ecbea9e68a8f9c03eb"
+      "sha256": "82bfc1b79f39a1f99188318ba856442cb73318eb1c07a8ecbea9e68a8f9c03eb",
+      "data": "data/plan.json"
     },
     {
       "name": "直流压降（IR drop）",
       "status": "PASS",
       "detail": "0 个网络超预算，最坏 17.9 % 预算",
       "evidence": "artifacts/v05-live/final/plan.json",
-      "sha256": "82bfc1b79f39a1f99188318ba856442cb73318eb1c07a8ecbea9e68a8f9c03eb"
+      "sha256": "82bfc1b79f39a1f99188318ba856442cb73318eb1c07a8ecbea9e68a8f9c03eb",
+      "data": "data/plan.json"
     },
     {
       "name": "设计后仿真（post-layout）",
       "status": "PASS",
       "detail": "post-layout PASS；+3V3 2.7/66.4 mV；+5V_TERM 0.99/99.8 mV；USB_VBUS 17.07/99.1 mV；VSYS_5V 13.61/92.6 mV；板最高 86.3 °C",
       "evidence": "examples/esp32-mini-post-layout/post.json",
-      "sha256": "507c486b7875e5c70e608b9e7de60a696d13c41c9a3408329800daf5f2b41154"
+      "sha256": "507c486b7875e5c70e608b9e7de60a696d13c41c9a3408329800daf5f2b41154",
+      "data": "data/post.json"
     }
   ],
   "testPlan": {
