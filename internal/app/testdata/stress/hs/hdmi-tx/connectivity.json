@@ -822,13 +822,13 @@
   {
    "componentId": "cmp-U4",
    "pinNumber": "1",
-   "netId": "net-HDMI_D2_P",
+   "netId": "net-HDMI_D1_N",
    "kind": "netlist"
   },
   {
    "componentId": "cmp-U4",
    "pinNumber": "2",
-   "netId": "net-HDMI_D2_N",
+   "netId": "net-HDMI_D1_P",
    "kind": "netlist"
   },
   {
@@ -840,25 +840,25 @@
   {
    "componentId": "cmp-U4",
    "pinNumber": "4",
-   "netId": "net-HDMI_D1_P",
+   "netId": "net-HDMI_D2_N",
    "kind": "netlist"
   },
   {
    "componentId": "cmp-U4",
    "pinNumber": "5",
-   "netId": "net-HDMI_D1_N",
+   "netId": "net-HDMI_D2_P",
    "kind": "netlist"
   },
   {
    "componentId": "cmp-U4",
    "pinNumber": "6",
-   "netId": "net-HDMI_D1_N",
+   "netId": "net-HDMI_D2_P",
    "kind": "netlist"
   },
   {
    "componentId": "cmp-U4",
    "pinNumber": "7",
-   "netId": "net-HDMI_D1_P",
+   "netId": "net-HDMI_D2_N",
    "kind": "netlist"
   },
   {
@@ -870,25 +870,25 @@
   {
    "componentId": "cmp-U4",
    "pinNumber": "9",
-   "netId": "net-HDMI_D2_N",
+   "netId": "net-HDMI_D1_P",
    "kind": "netlist"
   },
   {
    "componentId": "cmp-U4",
    "pinNumber": "10",
-   "netId": "net-HDMI_D2_P",
+   "netId": "net-HDMI_D1_N",
    "kind": "netlist"
   },
   {
    "componentId": "cmp-U5",
    "pinNumber": "1",
-   "netId": "net-HDMI_D0_P",
+   "netId": "net-HDMI_CLK_N",
    "kind": "netlist"
   },
   {
    "componentId": "cmp-U5",
    "pinNumber": "2",
-   "netId": "net-HDMI_D0_N",
+   "netId": "net-HDMI_CLK_P",
    "kind": "netlist"
   },
   {
@@ -900,25 +900,25 @@
   {
    "componentId": "cmp-U5",
    "pinNumber": "4",
-   "netId": "net-HDMI_CLK_P",
+   "netId": "net-HDMI_D0_N",
    "kind": "netlist"
   },
   {
    "componentId": "cmp-U5",
    "pinNumber": "5",
-   "netId": "net-HDMI_CLK_N",
+   "netId": "net-HDMI_D0_P",
    "kind": "netlist"
   },
   {
    "componentId": "cmp-U5",
    "pinNumber": "6",
-   "netId": "net-HDMI_CLK_N",
+   "netId": "net-HDMI_D0_P",
    "kind": "netlist"
   },
   {
    "componentId": "cmp-U5",
    "pinNumber": "7",
-   "netId": "net-HDMI_CLK_P",
+   "netId": "net-HDMI_D0_N",
    "kind": "netlist"
   },
   {
@@ -930,13 +930,13 @@
   {
    "componentId": "cmp-U5",
    "pinNumber": "9",
-   "netId": "net-HDMI_D0_N",
+   "netId": "net-HDMI_CLK_P",
    "kind": "netlist"
   },
   {
    "componentId": "cmp-U5",
    "pinNumber": "10",
-   "netId": "net-HDMI_D0_P",
+   "netId": "net-HDMI_CLK_N",
    "kind": "netlist"
   },
   {

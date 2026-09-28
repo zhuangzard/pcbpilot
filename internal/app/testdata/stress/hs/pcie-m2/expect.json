@@ -15,9 +15,9 @@
    "ohm": 85,
    "maxSkewMil": 5,
    "maxVias": 2,
-   "widthMil": 12.0,
-   "gapMil": 6.0,
-   "why": "85 Ω edge-coupled microstrip on JLC04161H-7628 (h=8.28 mil, εr=4.4, t=1.378 mil, s=6 mil): Hammerstad-Jensen w=11.99 mil (IPC-2141 check 82.7 Ω)"
+   "widthMil": 10.2,
+   "gapMil": 4.0,
+   "why": "85 Ω edge-coupled microstrip on JLC04161H-7628 (h=8.28 mil, εr=4.4, t=1.378 mil, s=4 mil): Hammerstad-Jensen w=10.11 mil (IPC-2141 check 83.4 Ω)"
   },
   {
    "p": "PCIE_TXC_P",
@@ -26,9 +26,9 @@
    "ohm": 85,
    "maxSkewMil": 5,
    "maxVias": 2,
-   "widthMil": 12.0,
-   "gapMil": 6.0,
-   "why": "85 Ω edge-coupled microstrip on JLC04161H-7628 (h=8.28 mil, εr=4.4, t=1.378 mil, s=6 mil): Hammerstad-Jensen w=11.99 mil (IPC-2141 check 82.7 Ω)"
+   "widthMil": 10.2,
+   "gapMil": 4.0,
+   "why": "85 Ω edge-coupled microstrip on JLC04161H-7628 (h=8.28 mil, εr=4.4, t=1.378 mil, s=4 mil): Hammerstad-Jensen w=10.11 mil (IPC-2141 check 83.4 Ω)"
   },
   {
    "p": "PCIE_RX_P",
@@ -37,9 +37,9 @@
    "ohm": 85,
    "maxSkewMil": 5,
    "maxVias": 2,
-   "widthMil": 12.0,
-   "gapMil": 6.0,
-   "why": "85 Ω edge-coupled microstrip on JLC04161H-7628 (h=8.28 mil, εr=4.4, t=1.378 mil, s=6 mil): Hammerstad-Jensen w=11.99 mil (IPC-2141 check 82.7 Ω)"
+   "widthMil": 10.2,
+   "gapMil": 4.0,
+   "why": "85 Ω edge-coupled microstrip on JLC04161H-7628 (h=8.28 mil, εr=4.4, t=1.378 mil, s=4 mil): Hammerstad-Jensen w=10.11 mil (IPC-2141 check 83.4 Ω)"
   },
   {
    "p": "PCIE_REFCLK_P",
@@ -48,9 +48,9 @@
    "ohm": 85,
    "maxSkewMil": 5,
    "maxVias": 2,
-   "widthMil": 12.0,
-   "gapMil": 6.0,
-   "why": "85 Ω edge-coupled microstrip on JLC04161H-7628 (h=8.28 mil, εr=4.4, t=1.378 mil, s=6 mil): Hammerstad-Jensen w=11.99 mil (IPC-2141 check 82.7 Ω)"
+   "widthMil": 10.2,
+   "gapMil": 4.0,
+   "why": "85 Ω edge-coupled microstrip on JLC04161H-7628 (h=8.28 mil, εr=4.4, t=1.378 mil, s=4 mil): Hammerstad-Jensen w=10.11 mil (IPC-2141 check 83.4 Ω)"
   }
  ],
  "acCaps": [

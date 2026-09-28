@@ -227,6 +227,12 @@ def rot(dx, dy, deg):
 
 
 # -------------------------------------------------------------------- case
+# 0.5 mm-pitch connectors (Type-C, HDMI, M.2) are laid out on JLC's 4/4 mil
+# multilayer process with 0.2/0.4 mm vias, as a designer would.
+FINE = dict(clearanceMil=4, trackWidthMil=4, trackWidthMinMil=3.5, viaDrillMil=8, viaDiameterMil=16, copperToEdgeMil=12)
+FINE_SPEC = {"clearanceMil": 4, "trackMil": 4, "viaDrillMil": 8, "viaDiaMil": 16}
+
+
 class Case:
     def __init__(self, name, title, w, h, layers, rules=None):
         self.name, self.title, self.w, self.h, self.layers = name, title, w, h, layers
@@ -351,7 +357,7 @@ def case_usb3(name="usb3-typec", layers=4, negative=False):
     c = Case(name, "USB 3.0 device with an integrated Type-C flip mux (TX1/TX2/RX1/RX2) behind a straddle-mount Type-C: "
                    "100 nF TX AC caps at the controller, flow-through ESD at the connector; USB 2.0 D+/D- with USBLC6; "
                    "5.1 kΩ CC pull-downs; VBUS divider sense; AMS1117 3V3" +
-             (" — NEGATIVE: ordered as a 2-layer board" if negative else ""), 1900, 1250, layers)
+             (" — NEGATIVE: ordered as a 2-layer board" if negative else ""), 1900, 1250, layers, None if negative else dict(FINE))
     y0 = 625
     j = {"A1": "GND", "A12": "GND", "B1": "GND", "B12": "GND", "A4": "VBUS", "A9": "VBUS", "B4": "VBUS", "B9": "VBUS",
          "A2": "USB3_SSTX1C_P", "A3": "USB3_SSTX1C_N", "B11": "USB3_SSRX1_P", "B10": "USB3_SSRX1_N",
@@ -396,6 +402,8 @@ def case_usb3(name="usb3-typec", layers=4, negative=False):
     cap_decaps(c, [("C5", "+3V3", 1060, y0 + 250), ("C6", "+3V3", 1240, y0 + 250), ("C7", "+3V3", 1240, y0 - 250)])
     power_3v3(c, "VBUS", 1600, 950)
     c.spec = {"layers": layers, "standard": {"name": "IPC-2221B"}, "usbBudgetA": 0.9}
+    if not negative:
+        c.spec["rules"] = dict(FINE_SPEC)
     pairs = []
     for base in ["USB3_SSTX1", "USB3_SSTX1C", "USB3_SSRX1", "USB3_SSTX2", "USB3_SSTX2C", "USB3_SSRX2"]:
         pairs.append(pair_expect(c, base + "_P", base + "_N", "USB3", 90, 5, 2))
@@ -423,7 +431,7 @@ def case_usb3(name="usb3-typec", layers=4, negative=False):
 # ================================================================ (b) HDMI
 def case_hdmi():
     c = Case("hdmi-tx", "HDMI 1.4 source: TMDS D0-D2 + clock (100 Ω) through two flow-through ESD arrays to a type-A receptacle; "
-                        "DDC with pull-ups, HPD, +5V with a PTC; lanes inter-pair matched (HDMI_LANES recognised from the names)", 1800, 1300, 4)
+                        "DDC with pull-ups, HPD, +5V with a PTC; lanes inter-pair matched (HDMI_LANES recognised from the names)", 1800, 1300, 4, dict(FINE))
     y0 = 650
     jn = {"1": "HDMI_D2_P", "2": "GND", "3": "HDMI_D2_N", "4": "HDMI_D1_P", "5": "GND", "6": "HDMI_D1_N", "7": "HDMI_D0_P",
           "8": "GND", "9": "HDMI_D0_N", "10": "HDMI_CLK_P", "11": "GND", "12": "HDMI_CLK_N", "13": "HDMI_CEC", "15": "HDMI_SCL",
@@ -433,12 +441,14 @@ def case_hdmi():
     c.add("J1", "HDMI-A-19P-SMT", hdmi_a(), 50, y0, 0, jn, names, locked=True, body=(-40, -320, 220, 320))
     # Two flow-through ESD arrays: U4 D2/D1, U5 D0/CLK.
     esd_names = {"1": "D1+", "2": "D1-", "3": "GND", "4": "D2+", "5": "D2-", "6": "D2-", "7": "D2+", "8": "GND", "9": "D1-", "10": "D1+"}
+    # Rotated 90°: pin 5/6 is the top channel, pin 1/10 the bottom one — the
+    # lines keep the connector's top→bottom order D2+, D2−, D1+, D1− | D0+, D0−, CK+, CK−.
     c.add("U4", "TPD4E05U06DQAR", uson10_flow(), 380, y0 + 110, 90,
-          {"1": "HDMI_D2_P", "10": "HDMI_D2_P", "2": "HDMI_D2_N", "9": "HDMI_D2_N", "3": "GND", "8": "GND",
-           "4": "HDMI_D1_P", "7": "HDMI_D1_P", "5": "HDMI_D1_N", "6": "HDMI_D1_N"}, esd_names)
+          {"5": "HDMI_D2_P", "6": "HDMI_D2_P", "4": "HDMI_D2_N", "7": "HDMI_D2_N", "3": "GND", "8": "GND",
+           "2": "HDMI_D1_P", "9": "HDMI_D1_P", "1": "HDMI_D1_N", "10": "HDMI_D1_N"}, esd_names)
     c.add("U5", "TPD4E05U06DQAR", uson10_flow(), 380, y0 - 110, 90,
-          {"1": "HDMI_D0_P", "10": "HDMI_D0_P", "2": "HDMI_D0_N", "9": "HDMI_D0_N", "3": "GND", "8": "GND",
-           "4": "HDMI_CLK_P", "7": "HDMI_CLK_P", "5": "HDMI_CLK_N", "6": "HDMI_CLK_N"}, esd_names)
+          {"5": "HDMI_D0_P", "6": "HDMI_D0_P", "4": "HDMI_D0_N", "7": "HDMI_D0_N", "3": "GND", "8": "GND",
+           "2": "HDMI_CLK_P", "9": "HDMI_CLK_P", "1": "HDMI_CLK_N", "10": "HDMI_CLK_N"}, esd_names)
     # U1 HDMI transmitter QFN-48 7x7 (0.5 mm): TMDS on the left side facing the connector.
     left = ["TX2P", "TX2N", "GND", "TX1P", "TX1N", "GND", "TX0P", "TX0N", "GND", "TXCP", "TXCN", "AVDD"]
     bottom = ["SCL", "SDA", "HPD", "CEC", "GND", "DVDD", None, None, None, None, None, "GND"]
@@ -459,7 +469,7 @@ def case_hdmi():
     c.add("J2", "KF301-5.0-2P", terminal2(), 1500, 1150, 0, {"1": "5V_IN", "2": "GND"}, {"1": "1", "2": "2"}, locked=True)
     cap_decaps(c, [("C5", "+3V3", 870, y0 + 240), ("C6", "+3V3", 1030, y0 + 240), ("C7", "+3V3", 1180, y0 - 240)])
     power_3v3(c, "5V_IN", 1500, 500)
-    c.spec = {"layers": 4, "standard": {"name": "IPC-2221B"}}
+    c.spec = {"layers": 4, "standard": {"name": "IPC-2221B"}, "rules": dict(FINE_SPEC)}
     pairs = [pair_expect(c, f"HDMI_{b}_P", f"HDMI_{b}_N", "HDMI", 100, 5, 2, group="HDMI_LANES") for b in ("D0", "D1", "D2", "CLK")]
     c.expect = dict(case=c.name, title=c.title, layers=4, stackup=STACK[4], pairs=pairs,
                     groups=[dict(name="HDMI_LANES", units=4, tolMil=100,
@@ -539,7 +549,7 @@ def case_eth():
 # ================================================================ (d) PCIe
 def case_pcie():
     c = Case("pcie-m2", "PCIe Gen2 x1 root port → M.2 key-M socket: host TX with 100 nF AC caps, RX direct (caps on the module), "
-                        "100 MHz HCSL REFCLK pair, PERST#/CLKREQ#/WAKE#", 1900, 1500, 4)
+                        "100 MHz HCSL REFCLK pair, PERST#/CLKREQ#/WAKE#", 1900, 1500, 4, dict(FINE))
     m2 = {"41": "PCIE_TXC_N", "43": "PCIE_TXC_P", "47": "PCIE_RX_N", "49": "PCIE_RX_P", "53": "PCIE_REFCLK_N", "55": "PCIE_REFCLK_P",
           "50": "PCIE_PERST_N", "52": "PCIE_CLKREQ_N", "54": "PCIE_WAKE_N", "S1": "GND", "S2": "GND"}
     for p in (2, 4, 12, 14, 16, 18, 70, 72, 74):
@@ -568,7 +578,7 @@ def case_pcie():
     cap_decaps(c, [("C5", "+3V3", 700, 420), ("C6", "+3V3", 1200, 420), ("C7", "+3V3", 400, 1250), ("C8", "+3V3", 1500, 1250)])
     c.add("J2", "KF301-5.0-2P", terminal2(), 250, 150, 0, {"1": "5V_IN", "2": "GND"}, {"1": "1", "2": "2"}, locked=True)
     power_3v3(c, "5V_IN", 1600, 300)
-    c.spec = {"layers": 4, "standard": {"name": "IPC-2221B"}}
+    c.spec = {"layers": 4, "standard": {"name": "IPC-2221B"}, "rules": dict(FINE_SPEC)}
     pairs = [pair_expect(c, f"PCIE_{b}_P", f"PCIE_{b}_N", "PCIE", 85, 5, 2) for b in ("TX", "TXC", "RX", "REFCLK")]
     c.expect = dict(case=c.name, title=c.title, layers=4, stackup=STACK[4], pairs=pairs, acCaps=[["C1", "C2"]],
                     findingsMustNot=["reference-plane-missing", "impedance-uncontrolled"],

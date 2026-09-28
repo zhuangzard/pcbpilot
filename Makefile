@@ -1,4 +1,4 @@
-.PHONY: help test fixture-bench mcp-test fmt actions api-index build install dev-build daemon dev eext eext-fresh connector lint-test blocks-audit modules-audit layout-calibrate release release-check release-build release-script-test release-smoke skill-check publish-skill publish-skill-hub skillhub-check replay demo-replay replay-sch replay-pcb
+.PHONY: help test fixture-bench stress-hs mcp-test fmt actions api-index build install dev-build daemon dev eext eext-fresh connector lint-test blocks-audit modules-audit layout-calibrate release release-check release-build release-script-test release-smoke skill-check publish-skill publish-skill-hub skillhub-check replay demo-replay replay-sch replay-pcb
 
 DIST := dist
 .PHONY: local-build release-assets
@@ -38,6 +38,9 @@ test: ## go test -short ./... (CI; skips the long routing fixture bench)
 
 fixture-bench: ## full 5-board routing regression (~25 min): compare routed % with the last run
 	go test ./pkg/pcbauto -run TestFixtureBench -timeout 3600s -v
+
+stress-hs: ## high-speed stress suite (~30-60 min): intent derive → rules plan → pcb auto --intent (route + place) → SI vs expect.json, plus rk3568/k230 from --board
+	go test -tags stress ./internal/app -run 'TestStressHS' -timeout 3600s -v
 
 mcp-test: build ## install MCP deps and run unit + stdio protocol tests
 	npm --prefix mcp ci --ignore-scripts

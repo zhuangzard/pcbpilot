@@ -102,7 +102,9 @@ fixture 回归：中小板 89–100%，大型 BGA 板（RK3568、K230）55–62%
 | 网计划 | 电压 nom/min/max/peak（开关节点 peak=Vin、市电 √2·Vrms）、仿真/声明/启发电流与逐焊盘电流、IPC-2221/2152 内外层线宽与最小线宽、过孔数、IPC-2221B 间距、USB 90 Ω 等差分阻抗与等长组、网络类（GND/POWER/POWER_HI/SWITCH/HS_DIFF/HS/RF/HV_*/SIGNAL） |
 | 域与绝缘 | 按参考地与隔离件划分 SELV/hazardous/mains/patient/floating/isolated-secondary 域；域间绝缘对经 `SafetyDistances(pair, standard)`（占位：IEC 60664-1 工程默认 + 污染等级/海拔/MOPP；`pkg/safety` 一行接入） |
 | 设计提示 | 电感额定余量、稳压余量/dropout/占空比/Vin 上限、二极管损耗、额定电流/功率/电容耐压、缺大电容、USB 500 mA 预算、缺 USB ESD、阻抗不可控、需开槽、未知模型 |
-| 输入 | 离线 connectivity+values（进程内仿真，`--sim-out` 另存）或 `--sim`；`--spec` 产品级参数；现场只读 `--pages` |
+| 输入 | 离线 connectivity+values（进程内仿真，`--sim-out` 另存）或 `--sim`；`--spec` 产品级参数；现场只读 `--pages`；无原理图时 `--board board.json` 由 PCB 焊盘重建网表（器件值未知 → 启发式，`netlist-from-board`） |
+| 高速意图 | 接口识别与限值和布线器/SI/规则推送同一张表（`pcbauto.ClassifyHSName`：USB3/PCIe/SATA/HDMI/MIPI/LVDS/DDR/ETH/USB2/CAN）；每网 `interface`/`maxSkewMil`/`lengthTolMil`/`maxVias`；HDMI/MIPI 同端口多对与 DDR 字节通道/地址命令按网名成等长组；线宽在引擎叠层（`StackupReference`）上解；2 层 ≥1 Gb/s = `reference-plane-missing`；TX 交流耦合检查；`isolationVrms`（802.3 1500 Vrms）→ basic + 要求耐压 |
+| 高速压力测试 | `make stress-hs`：6 个合成用例（USB3 Type-C、HDMI、千兆以太网+隔离、PCIe M.2、DDR3 x16 fly-by、2 层 USB3 负例）+ RK3568/K230 `--board`，离线跑 intent → 规则计划 → `pcb auto --intent`（布线/布局）→ SI 对账；配方见 `references/recipes/high-speed.md` §6 |
 
 ## 已知不支持：Altium Designer 工程自动导入
 

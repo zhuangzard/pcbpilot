@@ -1941,7 +1941,8 @@ const splitRefCost = 4
 // referenceLayerCost prices the layers for an intent high-speed net (one
 // with an interface or a length group from intent.json): a signal layer
 // next to a single-net plane is its reference; one next only to a split
-// plane (IN2 carrying several rails) costs splitRefCost per step. Nets
+// plane (IN2 carrying several rails) or to no plane (BOTTOM of the mixed
+// IN2-SIG+PWR stack) costs splitRefCost per step. Nets
 // without intent keep the unweighted search (their routing is unchanged).
 func referenceLayerCost(st *Stackup, plan *NetPlan) []float32 {
 	if st == nil || plan.Interface == "" && plan.LengthGroup == "" {
@@ -1952,26 +1953,23 @@ func referenceLayerCost(st *Stackup, plan *NetPlan) []float32 {
 		return nil
 	}
 	mul := make([]float32, len(st.Stack))
-	anySolid, anySplit := false, false
+	anySolid, anySplit := false, false // anySplit: some layer lacks a solid reference
 	for i, l := range st.Stack {
 		mul[i] = 1
 		if l.Kind != KindSignal {
 			continue
 		}
-		solid, split := false, false
+		solid := false
 		for _, j := range []int{i - 1, i + 1} {
-			if j < 0 || j >= len(st.Stack) || st.Stack[j].Kind != KindPlane {
-				continue
-			}
-			if len(st.Stack[j].Nets) <= 1 {
+			if j >= 0 && j < len(st.Stack) && st.Stack[j].Kind == KindPlane && len(st.Stack[j].Nets) <= 1 {
 				solid = true
-			} else {
-				split = true
 			}
 		}
 		if solid {
 			anySolid = true
-		} else if split {
+		} else {
+			// Next to a split plane, or to no plane at all (the mixed
+			// IN2-SIG+PWR stack leaves BOTTOM with none): no reference.
 			mul[i] = splitRefCost
 			anySplit = true
 		}

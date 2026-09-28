@@ -1702,11 +1702,11 @@
  },
  "copperLayers": 4,
  "rules": {
-  "clearanceMil": 6,
-  "trackWidthMil": 6,
-  "trackWidthMinMil": 5,
-  "viaDrillMil": 12,
-  "viaDiameterMil": 24,
+  "clearanceMil": 4,
+  "trackWidthMil": 4,
+  "trackWidthMinMil": 3.5,
+  "viaDrillMil": 8,
+  "viaDiameterMil": 16,
   "copperToEdgeMil": 12
  },
  "project": "stress-hs/usb3-typec",

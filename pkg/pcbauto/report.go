@@ -202,9 +202,9 @@ func (r *Report) WriteMarkdown(w io.Writer) {
 			p("\n")
 		}
 		if len(si.Groups) > 0 {
-			p("| 等长组 | 成员 | 最短 mil | 最长 mil | 差 mil | 容差 mil |\n|---|---|---|---|---|---|\n")
+			p("| 等长组 | 成员 | 未布通 | 最短 mil | 最长 mil | 差 mil | 容差 mil |\n|---|---|---|---|---|---|---|\n")
 			for _, g := range si.Groups {
-				p("| %s | %d | %.0f | %.0f | %.0f | %.0f |\n", g.Name, len(g.Units), g.MinMil, g.MaxMil, g.SpreadMil, g.TolMil)
+				p("| %s | %d | %d | %.0f | %.0f | %.0f | %.0f |\n", g.Name, len(g.Units), g.Unrouted, g.MinMil, g.MaxMil, g.SpreadMil, g.TolMil)
 			}
 			p("\n")
 		}

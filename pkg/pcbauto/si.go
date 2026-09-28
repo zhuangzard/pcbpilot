@@ -195,6 +195,9 @@ type SIGroup struct {
 	MaxMil    float64  `json:"maxMil"`
 	SpreadMil float64  `json:"spreadMil"`
 	TolMil    float64  `json:"tolMil"` // 0 = no tolerance declared (reported only)
+	// Unrouted units have no length yet; min/max/spread cover the routed
+	// ones and no group-skew is judged until every unit is routed.
+	Unrouted int `json:"unrouted,omitempty"`
 }
 
 // SIReport is the post-route signal-integrity check.
@@ -344,6 +347,7 @@ func checkGroups(an *Analysis, measured map[string]*SINet, fs []SIFinding) ([]SI
 			}
 			sg.MinMil, sg.MaxMil = math.Min(sg.MinMil, u.l), math.Max(sg.MaxMil, u.l)
 		}
+		sg.Unrouted = unrouted
 		if math.IsInf(sg.MinMil, 1) {
 			sg.MinMil = 0
 		}

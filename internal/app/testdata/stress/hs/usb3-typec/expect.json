@@ -15,9 +15,9 @@
    "ohm": 90,
    "maxSkewMil": 5,
    "maxVias": 2,
-   "widthMil": 10.8,
-   "gapMil": 6.0,
-   "why": "90 Ω edge-coupled microstrip on JLC04161H-7628 (h=8.28 mil, εr=4.4, t=1.378 mil, s=6 mil): Hammerstad-Jensen w=10.71 mil (IPC-2141 check 88.1 Ω)"
+   "widthMil": 9.0,
+   "gapMil": 4.0,
+   "why": "90 Ω edge-coupled microstrip on JLC04161H-7628 (h=8.28 mil, εr=4.4, t=1.378 mil, s=4 mil): Hammerstad-Jensen w=8.95 mil (IPC-2141 check 88.6 Ω)"
   },
   {
    "p": "USB3_SSTX1C_P",
@@ -26,9 +26,9 @@
    "ohm": 90,
    "maxSkewMil": 5,
    "maxVias": 2,
-   "widthMil": 10.8,
-   "gapMil": 6.0,
-   "why": "90 Ω edge-coupled microstrip on JLC04161H-7628 (h=8.28 mil, εr=4.4, t=1.378 mil, s=6 mil): Hammerstad-Jensen w=10.71 mil (IPC-2141 check 88.1 Ω)"
+   "widthMil": 9.0,
+   "gapMil": 4.0,
+   "why": "90 Ω edge-coupled microstrip on JLC04161H-7628 (h=8.28 mil, εr=4.4, t=1.378 mil, s=4 mil): Hammerstad-Jensen w=8.95 mil (IPC-2141 check 88.6 Ω)"
   },
   {
    "p": "USB3_SSRX1_P",
@@ -37,9 +37,9 @@
    "ohm": 90,
    "maxSkewMil": 5,
    "maxVias": 2,
-   "widthMil": 10.8,
-   "gapMil": 6.0,
-   "why": "90 Ω edge-coupled microstrip on JLC04161H-7628 (h=8.28 mil, εr=4.4, t=1.378 mil, s=6 mil): Hammerstad-Jensen w=10.71 mil (IPC-2141 check 88.1 Ω)"
+   "widthMil": 9.0,
+   "gapMil": 4.0,
+   "why": "90 Ω edge-coupled microstrip on JLC04161H-7628 (h=8.28 mil, εr=4.4, t=1.378 mil, s=4 mil): Hammerstad-Jensen w=8.95 mil (IPC-2141 check 88.6 Ω)"
   },
   {
    "p": "USB3_SSTX2_P",
@@ -48,9 +48,9 @@
    "ohm": 90,
    "maxSkewMil": 5,
    "maxVias": 2,
-   "widthMil": 10.8,
-   "gapMil": 6.0,
-   "why": "90 Ω edge-coupled microstrip on JLC04161H-7628 (h=8.28 mil, εr=4.4, t=1.378 mil, s=6 mil): Hammerstad-Jensen w=10.71 mil (IPC-2141 check 88.1 Ω)"
+   "widthMil": 9.0,
+   "gapMil": 4.0,
+   "why": "90 Ω edge-coupled microstrip on JLC04161H-7628 (h=8.28 mil, εr=4.4, t=1.378 mil, s=4 mil): Hammerstad-Jensen w=8.95 mil (IPC-2141 check 88.6 Ω)"
   },
   {
    "p": "USB3_SSTX2C_P",
@@ -59,9 +59,9 @@
    "ohm": 90,
    "maxSkewMil": 5,
    "maxVias": 2,
-   "widthMil": 10.8,
-   "gapMil": 6.0,
-   "why": "90 Ω edge-coupled microstrip on JLC04161H-7628 (h=8.28 mil, εr=4.4, t=1.378 mil, s=6 mil): Hammerstad-Jensen w=10.71 mil (IPC-2141 check 88.1 Ω)"
+   "widthMil": 9.0,
+   "gapMil": 4.0,
+   "why": "90 Ω edge-coupled microstrip on JLC04161H-7628 (h=8.28 mil, εr=4.4, t=1.378 mil, s=4 mil): Hammerstad-Jensen w=8.95 mil (IPC-2141 check 88.6 Ω)"
   },
   {
    "p": "USB3_SSRX2_P",
@@ -70,9 +70,9 @@
    "ohm": 90,
    "maxSkewMil": 5,
    "maxVias": 2,
-   "widthMil": 10.8,
-   "gapMil": 6.0,
-   "why": "90 Ω edge-coupled microstrip on JLC04161H-7628 (h=8.28 mil, εr=4.4, t=1.378 mil, s=6 mil): Hammerstad-Jensen w=10.71 mil (IPC-2141 check 88.1 Ω)"
+   "widthMil": 9.0,
+   "gapMil": 4.0,
+   "why": "90 Ω edge-coupled microstrip on JLC04161H-7628 (h=8.28 mil, εr=4.4, t=1.378 mil, s=4 mil): Hammerstad-Jensen w=8.95 mil (IPC-2141 check 88.6 Ω)"
   },
   {
    "p": "USB_DP",
@@ -81,9 +81,9 @@
    "ohm": 90,
    "maxSkewMil": 100,
    "maxVias": 2,
-   "widthMil": 10.8,
-   "gapMil": 6.0,
-   "why": "90 Ω edge-coupled microstrip on JLC04161H-7628 (h=8.28 mil, εr=4.4, t=1.378 mil, s=6 mil): Hammerstad-Jensen w=10.71 mil (IPC-2141 check 88.1 Ω)"
+   "widthMil": 9.0,
+   "gapMil": 4.0,
+   "why": "90 Ω edge-coupled microstrip on JLC04161H-7628 (h=8.28 mil, εr=4.4, t=1.378 mil, s=4 mil): Hammerstad-Jensen w=8.95 mil (IPC-2141 check 88.6 Ω)"
   }
  ],
  "acCaps": [

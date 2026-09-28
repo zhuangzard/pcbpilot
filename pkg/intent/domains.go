@@ -190,7 +190,7 @@ func (c *ctx) buildPairs() {
 		if a == nil || b == nil {
 			continue
 		}
-		p := &Pair{A: "domain:" + a.ID, B: "domain:" + b.ID, Bridges: sortRefs(append([]string(nil), br.Bridges...))}
+		p := &Pair{A: "domain:" + a.ID, B: "domain:" + b.ID, Bridges: sortRefs(uniq(append(append([]string(nil), br.Bridges...), c.spanning(a.ID, b.ID)...)))}
 		p.WorkingVrms = math.Max(a.WorkingVrms, b.WorkingVrms)
 		p.WorkingVpeak = math.Max(a.WorkingVpeak, b.WorkingVpeak)
 		ha, hb := hazardKind(a.Kind), hazardKind(b.Kind)
@@ -237,4 +237,27 @@ func (c *ctx) buildPairs() {
 		c.out.Pairs = append(c.out.Pairs, p)
 	}
 	sort.SliceStable(c.out.Pairs, func(i, j int) bool { return c.out.Pairs[i].A+c.out.Pairs[i].B < c.out.Pairs[j].A+c.out.Pairs[j].B })
+}
+
+// spanning lists the parts with pins in both domains: besides the isolation
+// part itself, the Y / chassis capacitors and resistors that cross the
+// barrier (an Ethernet chassis-to-GND 1 nF/2 kV cap) — each needs the
+// insulation's voltage rating and sits in the barrier's creepage path.
+func (c *ctx) spanning(a, b string) []string {
+	var out []string
+	for _, p := range c.d.Parts {
+		ina, inb := false, false
+		for _, n := range c.partNets(p.Ref) {
+			switch c.domOfNet[n] {
+			case a:
+				ina = true
+			case b:
+				inb = true
+			}
+		}
+		if ina && inb {
+			out = append(out, p.Ref)
+		}
+	}
+	return out
 }

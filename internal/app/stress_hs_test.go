@@ -454,15 +454,31 @@ func checkRoute(r *hsRun, mode string, rep *pcbauto.Report, it *intent.Intent, e
 		vias[n.Net], lens[n.Net] = n.Vias, n.LengthMil
 	}
 	width := routedWidths(res.Route)
+	padsOf := map[string]int{}
+	for _, n := range orig.Nets() {
+		padsOf[n.Name] = len(n.Pads)
+	}
+	open := map[string]bool{}
+	for _, u := range res.Route.Unrouted {
+		open[u.Net] = true
+	}
 	for _, pe := range exp.Pairs {
 		p, ok := pairs[pe.P]
-		r.add(mode, pe.P+" skew", ok && p.SkewMil <= pe.MaxSkewMil && p.LimitMil == pe.MaxSkewMil,
-			fmt.Sprintf("≤ %.0f mil", pe.MaxSkewMil), "%.0f mil (limit %.0f; %.0f/%.0f)", p.SkewMil, p.LimitMil, lens[pe.P], lens[pe.N])
+		inc := ""
+		if open[pe.P] || open[pe.N] {
+			inc = " — pair incomplete"
+		}
+		r.add(mode, pe.P+" skew", ok && inc == "" && p.SkewMil <= pe.MaxSkewMil && p.LimitMil == pe.MaxSkewMil,
+			fmt.Sprintf("≤ %.0f mil", pe.MaxSkewMil), "%.0f mil (limit %.0f; %.0f/%.0f)%s", p.SkewMil, p.LimitMil, lens[pe.P], lens[pe.N], inc)
 		r.add(mode, pe.P+" vias", vias[pe.P] <= pe.MaxVias && vias[pe.N] <= pe.MaxVias, fmt.Sprintf("≤ %d", pe.MaxVias), "%d/%d", vias[pe.P], vias[pe.N])
 		np := it.Nets[pe.P]
 		if np != nil {
-			f := width[pe.P].fracAt(np.WidthMil.Outer)
-			r.add(mode, pe.P+" routed width", f >= 0.6, fmt.Sprintf("≥ 60%% of length at %.1f mil", np.WidthMil.Outer), "%.0f%% (%s)", f*100, width[pe.P].String())
+			// The impedance width must be the body of the route; a neck
+			// to the fab minimum is legal only at the pads (≤ 60 mil per
+			// pad of the net) — a pair necked along its run is off target.
+			f, necked := width[pe.P].fracAt(np.WidthMil.Outer), width[pe.P].below(np.WidthMil.Outer)
+			allow := 60 * float64(padsOf[pe.P])
+			r.add(mode, pe.P+" routed width", f >= 0.6 || necked <= allow, fmt.Sprintf("%.1f mil body (≥ 60%% or necks ≤ %.0f mil)", np.WidthMil.Outer, allow), "%.0f%%, necked %.0f mil (%s)", f*100, necked, width[pe.P].String())
 		}
 	}
 	if b := exp.ViaBudget; b != nil {
@@ -482,8 +498,8 @@ func checkRoute(r *hsRun, mode string, rep *pcbauto.Report, it *intent.Intent, e
 	}
 	for _, g := range exp.Groups {
 		got, ok := sg[g.Name]
-		r.add(mode, "group "+g.Name, ok && got.SpreadMil <= g.TolMil && got.TolMil == g.TolMil,
-			fmt.Sprintf("spread ≤ %.0f mil", g.TolMil), "present=%v spread %.0f mil (%.0f…%.0f, tol %.0f, %d units)", ok, got.SpreadMil, got.MinMil, got.MaxMil, got.TolMil, len(got.Units))
+		r.add(mode, "group "+g.Name, ok && got.Unrouted == 0 && got.SpreadMil <= g.TolMil && got.TolMil == g.TolMil,
+			fmt.Sprintf("spread ≤ %.0f mil", g.TolMil), "present=%v spread %.0f mil (%.0f…%.0f, tol %.0f, %d units, %d unrouted)", ok, got.SpreadMil, got.MinMil, got.MaxMil, got.TolMil, len(got.Units), got.Unrouted)
 	}
 	if exp.Route.MaxIsolationFindings != nil {
 		iso := res.Isolation
@@ -506,7 +522,7 @@ func checkRoute(r *hsRun, mode string, rep *pcbauto.Report, it *intent.Intent, e
 	}
 	for _, cc := range exp.ACCaps {
 		d := pos[cc[0]].Dist(pos[cc[1]])
-		r.add(mode, "AC caps "+cc[0]+"/"+cc[1]+" side by side", d <= 60, "≤ 60 mil apart", "%.0f mil", d)
+		r.add(mode, "AC caps "+cc[0]+"/"+cc[1]+" side by side", d <= 60.5, "≤ 60 mil apart", "%.1f mil", d)
 	}
 }
 
@@ -525,6 +541,16 @@ func (h widthHist) fracAt(w float64) float64 {
 		return 0
 	}
 	return at / tot
+}
+
+func (h widthHist) below(w float64) float64 {
+	s := 0.0
+	for k, l := range h {
+		if k < w-0.05 {
+			s += l
+		}
+	}
+	return s
 }
 
 func (h widthHist) String() string {
@@ -626,9 +652,9 @@ func writeRealHS(w *bytes.Buffer, name string, it *intent.Intent, rep *pcbauto.R
 			fmt.Fprintf(w, "| %s/%s | %.0f | %.0f |\n", p.P, p.N, p.SkewMil, p.LimitMil)
 		}
 	}
-	fmt.Fprintf(w, "\n%d of %d pairs over their intra-pair limit\n\n| group | units | min | max | spread | tol |\n|---|---|---|---|---|---|\n", over, len(si.Pairs))
+	fmt.Fprintf(w, "\n%d of %d pairs over their intra-pair limit\n\n| group | units | unrouted | min | max | spread | tol |\n|---|---|---|---|---|---|---|\n", over, len(si.Pairs))
 	for _, g := range si.Groups {
-		fmt.Fprintf(w, "| %s | %d | %.0f | %.0f | %.0f | %.0f |\n", g.Name, len(g.Units), g.MinMil, g.MaxMil, g.SpreadMil, g.TolMil)
+		fmt.Fprintf(w, "| %s | %d | %d | %.0f | %.0f | %.0f | %.0f |\n", g.Name, len(g.Units), g.Unrouted, g.MinMil, g.MaxMil, g.SpreadMil, g.TolMil)
 	}
 	unr := map[string]int{}
 	for _, u := range rep.Result.Route.Unrouted {

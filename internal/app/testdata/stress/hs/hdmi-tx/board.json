@@ -267,7 +267,7 @@
     {
      "primitiveId": "e1p0",
      "padNumber": "1",
-     "net": "HDMI_D2_P",
+     "net": "HDMI_D1_N",
      "layer": 1,
      "x": 399.7,
      "y": 720.6,
@@ -277,7 +277,7 @@
     {
      "primitiveId": "e1p1",
      "padNumber": "2",
-     "net": "HDMI_D2_N",
+     "net": "HDMI_D1_P",
      "layer": 1,
      "x": 399.7,
      "y": 740.3,
@@ -297,7 +297,7 @@
     {
      "primitiveId": "e1p3",
      "padNumber": "4",
-     "net": "HDMI_D1_P",
+     "net": "HDMI_D2_N",
      "layer": 1,
      "x": 399.7,
      "y": 779.7,
@@ -307,7 +307,7 @@
     {
      "primitiveId": "e1p4",
      "padNumber": "5",
-     "net": "HDMI_D1_N",
+     "net": "HDMI_D2_P",
      "layer": 1,
      "x": 399.7,
      "y": 799.4,
@@ -317,7 +317,7 @@
     {
      "primitiveId": "e1p5",
      "padNumber": "6",
-     "net": "HDMI_D1_N",
+     "net": "HDMI_D2_P",
      "layer": 1,
      "x": 360.3,
      "y": 799.4,
@@ -327,7 +327,7 @@
     {
      "primitiveId": "e1p6",
      "padNumber": "7",
-     "net": "HDMI_D1_P",
+     "net": "HDMI_D2_N",
      "layer": 1,
      "x": 360.3,
      "y": 779.7,
@@ -347,7 +347,7 @@
     {
      "primitiveId": "e1p8",
      "padNumber": "9",
-     "net": "HDMI_D2_N",
+     "net": "HDMI_D1_P",
      "layer": 1,
      "x": 360.3,
      "y": 740.3,
@@ -357,7 +357,7 @@
     {
      "primitiveId": "e1p9",
      "padNumber": "10",
-     "net": "HDMI_D2_P",
+     "net": "HDMI_D1_N",
      "layer": 1,
      "x": 360.3,
      "y": 720.6,
@@ -385,7 +385,7 @@
     {
      "primitiveId": "e2p0",
      "padNumber": "1",
-     "net": "HDMI_D0_P",
+     "net": "HDMI_CLK_N",
      "layer": 1,
      "x": 399.7,
      "y": 500.6,
@@ -395,7 +395,7 @@
     {
      "primitiveId": "e2p1",
      "padNumber": "2",
-     "net": "HDMI_D0_N",
+     "net": "HDMI_CLK_P",
      "layer": 1,
      "x": 399.7,
      "y": 520.3,
@@ -415,7 +415,7 @@
     {
      "primitiveId": "e2p3",
      "padNumber": "4",
-     "net": "HDMI_CLK_P",
+     "net": "HDMI_D0_N",
      "layer": 1,
      "x": 399.7,
      "y": 559.7,
@@ -425,7 +425,7 @@
     {
      "primitiveId": "e2p4",
      "padNumber": "5",
-     "net": "HDMI_CLK_N",
+     "net": "HDMI_D0_P",
      "layer": 1,
      "x": 399.7,
      "y": 579.4,
@@ -435,7 +435,7 @@
     {
      "primitiveId": "e2p5",
      "padNumber": "6",
-     "net": "HDMI_CLK_N",
+     "net": "HDMI_D0_P",
      "layer": 1,
      "x": 360.3,
      "y": 579.4,
@@ -445,7 +445,7 @@
     {
      "primitiveId": "e2p6",
      "padNumber": "7",
-     "net": "HDMI_CLK_P",
+     "net": "HDMI_D0_N",
      "layer": 1,
      "x": 360.3,
      "y": 559.7,
@@ -465,7 +465,7 @@
     {
      "primitiveId": "e2p8",
      "padNumber": "9",
-     "net": "HDMI_D0_N",
+     "net": "HDMI_CLK_P",
      "layer": 1,
      "x": 360.3,
      "y": 520.3,
@@ -475,7 +475,7 @@
     {
      "primitiveId": "e2p9",
      "padNumber": "10",
-     "net": "HDMI_D0_P",
+     "net": "HDMI_CLK_N",
      "layer": 1,
      "x": 360.3,
      "y": 500.6,
@@ -1460,11 +1460,11 @@
  },
  "copperLayers": 4,
  "rules": {
-  "clearanceMil": 6,
-  "trackWidthMil": 6,
-  "trackWidthMinMil": 5,
-  "viaDrillMil": 12,
-  "viaDiameterMil": 24,
+  "clearanceMil": 4,
+  "trackWidthMil": 4,
+  "trackWidthMinMil": 3.5,
+  "viaDrillMil": 8,
+  "viaDiameterMil": 16,
   "copperToEdgeMil": 12
  },
  "project": "stress-hs/hdmi-tx",

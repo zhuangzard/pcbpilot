@@ -36,8 +36,8 @@ func (r *router) tuneLengths(outs map[*rnet]*netOut, res *RouteResult) {
 		}
 		done[n], done[p] = true, true
 		hc := ClassifyHS(n.plan)
-		if hc == nil || hc.MaxSkewMil <= 0 {
-			continue
+		if hc == nil || hc.MaxSkewMil <= 0 || len(n.failed) > 0 || len(p.failed) > 0 {
+			continue // an incomplete member has no meaningful length to match
 		}
 		ln, lp := r.netCopperLen(n, outs[n]), r.netCopperLen(p, outs[p])
 		short := n
@@ -52,12 +52,13 @@ func (r *router) tuneLengths(outs map[*rnet]*netOut, res *RouteResult) {
 		// Spread the added length over several straight runs when no single
 		// run has room: largest chunk that fits first, halving on failure.
 		rem := need
+		minChunk := tuneMinChunk(hc.MaxSkewMil)
 		for attempt := 0; attempt < 8 && rem > hc.MaxSkewMil*0.75; attempt++ {
 			chunk := rem
-			for chunk >= 15 && !r.meander(short, outs[short], chunk) {
+			for chunk >= minChunk && !r.meander(short, outs[short], chunk) {
 				chunk /= 2
 			}
-			if chunk < 15 {
+			if chunk < minChunk {
 				break
 			}
 			rem -= chunk
@@ -71,6 +72,14 @@ func (r *router) tuneLengths(outs map[*rnet]*netOut, res *RouteResult) {
 		}
 	}
 	r.tuneGroups(outs, res)
+}
+
+// tuneMinChunk is the smallest length a tuning step adds: 15 mil, but no
+// more than the limit itself — with a fixed 15 mil floor a 5 mil USB3/PCIe
+// pair 12 mil apart (need ≈ 11 mil) was never touched ("0 of 11 mil
+// added", stress suite 2026-09-27).
+func tuneMinChunk(limit float64) float64 {
+	return math.Max(2, math.Min(15, limit))
 }
 
 // tuneUnit is one member of a length group: a single net, or both nets of
@@ -101,7 +110,7 @@ func (u tuneUnit) name() string {
 func (r *router) lengthGroups() (map[string][]tuneUnit, []string) {
 	members := map[string][]*rnet{}
 	for _, n := range r.nets {
-		if g := n.plan.LengthGroup; g != "" && len(n.paths) > 0 {
+		if g := n.plan.LengthGroup; g != "" && len(n.paths) > 0 && len(n.failed) == 0 {
 			members[g] = append(members[g], n)
 		}
 	}
@@ -161,12 +170,13 @@ func (r *router) tuneGroups(outs map[*rnet]*netOut, res *RouteResult) {
 			}
 			need := target - l - tol/4
 			rem := need
+			minChunk := tuneMinChunk(tol)
 			for attempt := 0; attempt < 8 && rem > tol*0.75; attempt++ {
 				chunk := rem
-				for chunk >= 15 && !r.meanderUnit(u, outs, chunk) {
+				for chunk >= minChunk && !r.meanderUnit(u, outs, chunk) {
 					chunk /= 2
 				}
-				if chunk < 15 {
+				if chunk < minChunk {
 					break
 				}
 				rem -= chunk
@@ -230,9 +240,13 @@ func (r *router) meander(n *rnet, out *netOut, need float64) bool {
 		// Small corrections: one 45° trapezoid bump adds 2h(√2−1) ≈ 0.83h
 		// and needs far less room than a full serpentine.
 		if h := need / (2 * (math.Sqrt2 - 1)); need < 2*(t.Width+pitch) && h <= ampMax {
-			top := 2 * t.Width
+			// The bump may sit anywhere on the run: tryReplace checks every
+			// new segment against all copper, so it needs no pitch margin at
+			// the run's ends (with one, a 10 mil USB3 correction needed a
+			// 110 mil straight run and short pairs were never tuned).
+			top := t.Width
 			span := 2*h + top
-			if span+2*pitch <= L {
+			if span+t.Width <= L {
 				for _, side := range []float64{1, -1} {
 					v := Point{-u.Y, u.X}.Scale(side)
 					s := t.A.Add(u.Scale((L - span) / 2))
@@ -336,7 +350,7 @@ func (r *router) recouple(outs map[*rnet]*netOut, res *RouteResult) {
 	done := map[*rnet]bool{}
 	for _, n := range r.nets {
 		p := r.byName[n.plan.PairWith]
-		if p == nil || done[n] || len(n.paths) == 0 || len(p.paths) == 0 || n.plan.Interface == "" {
+		if p == nil || done[n] || len(n.paths) == 0 || len(p.paths) == 0 || n.plan.Interface == "" || len(n.failed) > 0 || len(p.failed) > 0 {
 			continue
 		}
 		done[n], done[p] = true, true
