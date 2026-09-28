@@ -468,7 +468,7 @@ func TestVersioningChangelog(t *testing.T) {
 // TestTemplatesMatchSkill keeps the embedded templates identical to the
 // Skill's canonical copy (.agents/skills/pcbpilot/templates/design-report/).
 func TestTemplatesMatchSkill(t *testing.T) {
-	for _, name := range []string{"report.html.tmpl", "report.md.tmpl"} {
+	for _, name := range []string{"report.html.tmpl", "report.md.tmpl", "analog.html.tmpl", "analog.md.tmpl"} {
 		emb, err := Templates.ReadFile("templates/" + name)
 		if err != nil {
 			t.Fatal(err)

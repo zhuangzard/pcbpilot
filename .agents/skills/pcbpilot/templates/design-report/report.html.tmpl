@@ -65,7 +65,7 @@ code{font-size:12px;word-break:break-all}
 </section>
 
 <nav class="toc"><ol start="0">
-<li><a href="#s0">封面</a></li><li><a href="#s1">执行摘要</a></li><li><a href="#s2">需求与设计意图</a></li><li><a href="#s3">电源仿真</a></li>
+<li><a href="#s0">封面</a></li><li><a href="#s1">执行摘要</a></li><li><a href="#s2">需求与设计意图</a></li><li><a href="#s3">电源仿真</a> · <a href="#s3a">3A 模拟仿真</a></li>
 <li><a href="#s4">器件可行性</a></li><li><a href="#s5">工程计算</a></li><li><a href="#s6">布局与布线</a></li><li><a href="#s7">验证状态</a></li>
 <li><a href="#s8">测试点计划</a></li><li><a href="#s9">制造与装配</a></li><li><a href="#s10">调试上电流程</a></li><li><a href="#s11">附录</a></li>
 </ol></nav>
@@ -150,6 +150,8 @@ code{font-size:12px;word-break:break-all}
 <ul>{{range .Assumptions}}<li>{{.}}</li>{{end}}</ul>
 {{- if .Warnings}}<p><b>仿真警告：</b></p><ul>{{range .Warnings}}<li>{{.}}</li>{{end}}</ul>{{end}}
 {{- else}}{{template "na" (missing $R "3")}}{{end}}
+
+{{template "analog" .}}
 
 <h2 id="s4">4 器件可行性 Component feasibility</h2>
 {{- with $R.Feasibility}}

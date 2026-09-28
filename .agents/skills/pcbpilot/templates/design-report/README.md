@@ -11,6 +11,7 @@
 |---|---|
 | `report.html.tmpl` | Go `html/template`：自包含 HTML（内联 CSS、内联 SVG 图表、base64 图片；浅色/深色/打印） |
 | `report.md.tmpl` | Go `text/template`：同内容的 Markdown；图表引用 `charts/*.svg`，图片引用 `../assets/` |
+| `analog.html.tmpl` / `analog.md.tmpl` | §3A 模拟电路仿真的局部模板（`{{define "analog"}}`），由两个主模板 `{{template "analog" .}}` 引入 |
 
 **本目录是规范源。** Go 包 `pkg/designreport/templates/` 用 `go:embed` 嵌入一份副本，
 `TestTemplatesMatchSkill` 要求两份逐字节相同：改模板时先改这里，再
@@ -30,6 +31,7 @@ HTML 另有 `chart`、`img`、`verdictClass`、`statusCls`；Markdown 另有 `im
 | 1 | 执行摘要 | 板尺寸（外框点）、各电源轨 V/Imax、typical/peak 输入功率与损耗、最小器件余量、器件检查统计、最坏 IR 压降/预算、布线完成率、原生 DRC、pcb check、intent 发现数；主要风险 = intent error/warn + 余量超限/临界（升序）+ 需数据手册汇总 + 验证 FAIL（最多 12 条）；相对上一版的变化表 |
 | 2 | 需求与设计意图 | `intent.json`：blocks（功能/核心/器件/摘要/功耗）、domains、standard（区分“规格书声明 / 工程默认”）、copper 假设、findings |
 | 3 | 电源仿真 | `sim.json`：各场景电源轨电流（分组柱状图）与电压；场景功率平衡（输入 = Σ connector-source suppliedW，负载 = Σ load/ic-small/led，损耗 = 其余正功耗）；器件功耗与电源轨 V×Imax（横向柱状图）；电源树（源 → OR 二极管 → 稳压器 → 负载，由模型类型与引脚电流方向恢复）；稳压器各场景 Vin/Vout/Iout/Iin/D/η/损耗 + 仿真给出的计算过程；纹波 ΔI/Ipk/Irms；模型可信度表（assumed 高亮）与假设、警告 |
+| 3A | 模拟电路仿真 | `--analog analog.json`（`pcbpilot sim analog`，或 `intent derive` 自动产出）：识别的模拟块（类别/拓扑/模型可信度/网表）、目标 vs ngspice 仿真（含解析交叉核对列）、Bode/环路增益/阶跃/传输/ADC 采样/开关/复位瞬态图、Monte-Carlo 容差（当前与修改后）、建议的元件值修改（原理图修改，须用户确认）与发现；analog.json 与 ngspice 网表/输出进报告包 `data/analog/`。无 analog.json 时只打印一行“未运行”，不计入缺失章节 |
 | 4 | 器件可行性 | 每个器件的“应力 vs 额定 → 余量%”：额定来自 `power-models.json`（`maxA` 及可选 `ratings`）、MPN 解码（Samsung CL / Murata GRM / Yageo CC 电容的封装+介质+容值+耐压；UNI-ROYAL / Yageo RC 电阻的封装+阻值+公差）、器件描述中的 LCSC 属性（Current Rating / Voltage Rating / Power(Watts)），电阻功率默认表 0402 1/16 W、0603 1/10 W、0805 1/8 W、1206 1/4 W（70 °C 额定）。准则：电流 ≥ 20 %、电阻 P ≤ 50 %、MLCC 额定 ≥ 1.5×（< 2× 另提示 DC 偏压）、TVS VRWM ≥ 线电压、供电范围 ≥ 3 %、Tj ≤ 80 % Tj,max。额定未知一律“需数据手册”，不参与余量。余量图升序 |
 | 5 | 工程计算 | `intent.json` 的 copper/nets/netClasses/pairs：IPC-2221/2152 线宽（外层 k=0.048，内层同曲线用内层铜厚，与 intent/pcbauto 一致）与计划线宽、计划线宽的载流；单孔载流与过孔数；IPC-2221B 电压间距 vs 工艺间距；按叠层 h/εr/t 重算微带 Z0 与差分 Zdiff 并与目标比较（>5 % WARN、>10 % FAIL）；每个绝缘对的间隙/爬电/铣槽 + `pkg/safety` 的耐压试验电压；plan 与 intent 叠层参数不一致时提示 |
 | 6 | 布局与布线 | 图片（`--image`，>1 MB 自动减半缩小）+ plan 目录的 `preview.svg`；`plan.json`：叠层、布线统计、引擎 DRC、联合评分；`route.power` 的每网 IR 压降/预算、负载焊盘压降占预算（图）、最坏路径分解、压降最大的 20 段；SI 长度/过孔/skew；隔离报告；`feedback.json` 难度与反馈项 |

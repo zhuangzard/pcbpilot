@@ -24,6 +24,7 @@
 |---|---|---|
 | `--intent` | `intent derive` | §2、§5 不可用；§4/§8 仍可用仿真 |
 | `--sim` | `sim power` / `intent derive --sim-out` | §3 不可用；§4 用 intent 网络电流 |
+| `--analog` | `sim analog --out analog.json`（`intent derive --report-dir` 自动带上） | §3A 只打印“未运行模拟仿真”，不计入缺失章节；给了则 analog.json 与 ngspice 网表/输出复制进 `vN/data/analog/`，模拟 error/warn 计入结论（intent 已含 `analog-*` 时不重复计） |
 | `--plan-dir` | `pcb auto run --out-dir`（plan.json、feedback.json、preview.svg） | §6 只有图片 |
 | `--board` / `--reload-board` | `pcb dump --include-copper`（保存重载前/后） | 无 MPN 解码、无测试点坐标、无制板规则；无重载对比则 §7 该项 N/A |
 | `--drc` `--check` `--rules-check` `--net-diff` | `pcb drc` / `pcb check`（文本或 `--json`）/ `pcb rules check` / `scripts/pad-net-diff.py --json`（原理图连通性 vs 板级 dump，`ok` 字段即结论） | §7 对应项 N/A，总体结论降为“PASS with warnings” |

@@ -1,0 +1,416 @@
+* pcbpilot sim analog — block A4 regulator-feedback (U4) mode mc
+* generated from schematic connectivity; rails from pcbpilot sim power (typical scenario)
+.include "pcbpilot-generic.lib"
+V_VREF vref_reg 0 DC 0.6
+E_REG n__3v3 0 vref_reg n_fb 1e5
+R_r3 n__3v3 n_fb 45300
+R_r4 n_fb 0 10000
+.options noacct rshunt=1e12
+.control
+set filetype=ascii
+set wr_singlescale
+set wr_vecnames
+option numdgt=10
+alter r_r3 = 45378.1
+alter r_r4 = 9957.07
+op
+print v(n__3v3)
+alter r_r3 = 45332.1
+alter r_r4 = 9982.61
+op
+print v(n__3v3)
+alter r_r3 = 45282.4
+alter r_r4 = 9958.47
+op
+print v(n__3v3)
+alter r_r3 = 45361.8
+alter r_r4 = 9965.41
+op
+print v(n__3v3)
+alter r_r3 = 45554.2
+alter r_r4 = 10009.4
+op
+print v(n__3v3)
+alter r_r3 = 45317
+alter r_r4 = 10016.9
+op
+print v(n__3v3)
+alter r_r3 = 45322.6
+alter r_r4 = 10019.6
+op
+print v(n__3v3)
+alter r_r3 = 45403.5
+alter r_r4 = 10014.3
+op
+print v(n__3v3)
+alter r_r3 = 45441.4
+alter r_r4 = 9966.56
+op
+print v(n__3v3)
+alter r_r3 = 45574.2
+alter r_r4 = 10035.3
+op
+print v(n__3v3)
+alter r_r3 = 45253.7
+alter r_r4 = 9971.62
+op
+print v(n__3v3)
+alter r_r3 = 45314.2
+alter r_r4 = 10073.3
+op
+print v(n__3v3)
+alter r_r3 = 45602
+alter r_r4 = 9963.57
+op
+print v(n__3v3)
+alter r_r3 = 45404.4
+alter r_r4 = 10030.1
+op
+print v(n__3v3)
+alter r_r3 = 45341.7
+alter r_r4 = 10014.8
+op
+print v(n__3v3)
+alter r_r3 = 45220.6
+alter r_r4 = 10056.2
+op
+print v(n__3v3)
+alter r_r3 = 45257.7
+alter r_r4 = 9977.4
+op
+print v(n__3v3)
+alter r_r3 = 45299.4
+alter r_r4 = 9994.15
+op
+print v(n__3v3)
+alter r_r3 = 45524.1
+alter r_r4 = 9962.35
+op
+print v(n__3v3)
+alter r_r3 = 45389.8
+alter r_r4 = 9951.05
+op
+print v(n__3v3)
+alter r_r3 = 45045.7
+alter r_r4 = 9986.21
+op
+print v(n__3v3)
+alter r_r3 = 45083
+alter r_r4 = 10014.8
+op
+print v(n__3v3)
+alter r_r3 = 45227.9
+alter r_r4 = 9990.91
+op
+print v(n__3v3)
+alter r_r3 = 45201.4
+alter r_r4 = 10041.6
+op
+print v(n__3v3)
+alter r_r3 = 45248.2
+alter r_r4 = 10034.2
+op
+print v(n__3v3)
+alter r_r3 = 45346.1
+alter r_r4 = 10020.1
+op
+print v(n__3v3)
+alter r_r3 = 44847
+alter r_r4 = 10024.4
+op
+print v(n__3v3)
+alter r_r3 = 45361.7
+alter r_r4 = 10084.5
+op
+print v(n__3v3)
+alter r_r3 = 45164.8
+alter r_r4 = 10016.5
+op
+print v(n__3v3)
+alter r_r3 = 45047
+alter r_r4 = 10002.5
+op
+print v(n__3v3)
+alter r_r3 = 45556.6
+alter r_r4 = 10005.3
+op
+print v(n__3v3)
+alter r_r3 = 45261.1
+alter r_r4 = 10000.5
+op
+print v(n__3v3)
+alter r_r3 = 45425.9
+alter r_r4 = 9975.62
+op
+print v(n__3v3)
+alter r_r3 = 45428.4
+alter r_r4 = 10048.5
+op
+print v(n__3v3)
+alter r_r3 = 45599.1
+alter r_r4 = 10028
+op
+print v(n__3v3)
+alter r_r3 = 45171
+alter r_r4 = 9996.11
+op
+print v(n__3v3)
+alter r_r3 = 45109
+alter r_r4 = 10024.9
+op
+print v(n__3v3)
+alter r_r3 = 45255.9
+alter r_r4 = 10021.9
+op
+print v(n__3v3)
+alter r_r3 = 45417.2
+alter r_r4 = 9984.48
+op
+print v(n__3v3)
+alter r_r3 = 45365.4
+alter r_r4 = 9987.76
+op
+print v(n__3v3)
+alter r_r3 = 45282.5
+alter r_r4 = 10033.6
+op
+print v(n__3v3)
+alter r_r3 = 45580.5
+alter r_r4 = 9933.4
+op
+print v(n__3v3)
+alter r_r3 = 45357.5
+alter r_r4 = 10000.1
+op
+print v(n__3v3)
+alter r_r3 = 45335.7
+alter r_r4 = 9976.85
+op
+print v(n__3v3)
+alter r_r3 = 45277.9
+alter r_r4 = 9989.03
+op
+print v(n__3v3)
+alter r_r3 = 45319
+alter r_r4 = 10016
+op
+print v(n__3v3)
+alter r_r3 = 45324.7
+alter r_r4 = 10014
+op
+print v(n__3v3)
+alter r_r3 = 45411.2
+alter r_r4 = 9993.32
+op
+print v(n__3v3)
+alter r_r3 = 45441.8
+alter r_r4 = 9996.06
+op
+print v(n__3v3)
+alter r_r3 = 45102.7
+alter r_r4 = 10078.5
+op
+print v(n__3v3)
+alter r_r3 = 45390.3
+alter r_r4 = 10014.6
+op
+print v(n__3v3)
+alter r_r3 = 45319
+alter r_r4 = 10002.9
+op
+print v(n__3v3)
+alter r_r3 = 45195.1
+alter r_r4 = 9947.35
+op
+print v(n__3v3)
+alter r_r3 = 45162.1
+alter r_r4 = 10042.8
+op
+print v(n__3v3)
+alter r_r3 = 45194.4
+alter r_r4 = 9947.47
+op
+print v(n__3v3)
+alter r_r3 = 45400.5
+alter r_r4 = 9940.31
+op
+print v(n__3v3)
+alter r_r3 = 45154.6
+alter r_r4 = 9998.82
+op
+print v(n__3v3)
+alter r_r3 = 45290.4
+alter r_r4 = 10008.6
+op
+print v(n__3v3)
+alter r_r3 = 45229.1
+alter r_r4 = 9994.78
+op
+print v(n__3v3)
+alter r_r3 = 45240
+alter r_r4 = 10007.7
+op
+print v(n__3v3)
+alter r_r3 = 45035.8
+alter r_r4 = 9962.4
+op
+print v(n__3v3)
+alter r_r3 = 45474.7
+alter r_r4 = 10018.9
+op
+print v(n__3v3)
+alter r_r3 = 45283.7
+alter r_r4 = 10038.2
+op
+print v(n__3v3)
+alter r_r3 = 45448.9
+alter r_r4 = 10026.5
+op
+print v(n__3v3)
+alter r_r3 = 45184.1
+alter r_r4 = 9990.34
+op
+print v(n__3v3)
+alter r_r3 = 45461.8
+alter r_r4 = 9981.73
+op
+print v(n__3v3)
+alter r_r3 = 45424.6
+alter r_r4 = 9966.65
+op
+print v(n__3v3)
+alter r_r3 = 45402.4
+alter r_r4 = 9997.47
+op
+print v(n__3v3)
+alter r_r3 = 45292.7
+alter r_r4 = 9993.21
+op
+print v(n__3v3)
+alter r_r3 = 45147.7
+alter r_r4 = 9989.78
+op
+print v(n__3v3)
+alter r_r3 = 45221.1
+alter r_r4 = 9993.48
+op
+print v(n__3v3)
+alter r_r3 = 45186.8
+alter r_r4 = 10034.6
+op
+print v(n__3v3)
+alter r_r3 = 45275.8
+alter r_r4 = 9997.17
+op
+print v(n__3v3)
+alter r_r3 = 45445.4
+alter r_r4 = 9992.36
+op
+print v(n__3v3)
+alter r_r3 = 45167.6
+alter r_r4 = 9939.89
+op
+print v(n__3v3)
+alter r_r3 = 45202.6
+alter r_r4 = 9974.34
+op
+print v(n__3v3)
+alter r_r3 = 45385.3
+alter r_r4 = 9980.88
+op
+print v(n__3v3)
+alter r_r3 = 45481.6
+alter r_r4 = 9997.11
+op
+print v(n__3v3)
+alter r_r3 = 45345.4
+alter r_r4 = 9971.15
+op
+print v(n__3v3)
+alter r_r3 = 45244.8
+alter r_r4 = 10002.3
+op
+print v(n__3v3)
+alter r_r3 = 45421.9
+alter r_r4 = 9969.58
+op
+print v(n__3v3)
+alter r_r3 = 45483.5
+alter r_r4 = 9996.83
+op
+print v(n__3v3)
+alter r_r3 = 45139.9
+alter r_r4 = 9963.45
+op
+print v(n__3v3)
+alter r_r3 = 45271
+alter r_r4 = 9977.08
+op
+print v(n__3v3)
+alter r_r3 = 45317
+alter r_r4 = 10057.7
+op
+print v(n__3v3)
+alter r_r3 = 45632.4
+alter r_r4 = 10019.2
+op
+print v(n__3v3)
+alter r_r3 = 45365.4
+alter r_r4 = 9995.47
+op
+print v(n__3v3)
+alter r_r3 = 45341.1
+alter r_r4 = 10027.1
+op
+print v(n__3v3)
+alter r_r3 = 45486.8
+alter r_r4 = 9991.58
+op
+print v(n__3v3)
+alter r_r3 = 45270
+alter r_r4 = 10010.7
+op
+print v(n__3v3)
+alter r_r3 = 45438.9
+alter r_r4 = 10044.8
+op
+print v(n__3v3)
+alter r_r3 = 45467.1
+alter r_r4 = 10003.3
+op
+print v(n__3v3)
+alter r_r3 = 45190.8
+alter r_r4 = 9974.8
+op
+print v(n__3v3)
+alter r_r3 = 45248
+alter r_r4 = 10010
+op
+print v(n__3v3)
+alter r_r3 = 45699.5
+alter r_r4 = 10031.8
+op
+print v(n__3v3)
+alter r_r3 = 45379.4
+alter r_r4 = 10015.4
+op
+print v(n__3v3)
+alter r_r3 = 45549
+alter r_r4 = 10013
+op
+print v(n__3v3)
+alter r_r3 = 45428.5
+alter r_r4 = 9908.75
+op
+print v(n__3v3)
+alter r_r3 = 45225
+alter r_r4 = 9968.31
+op
+print v(n__3v3)
+alter r_r3 = 45135.1
+alter r_r4 = 9937.53
+op
+print v(n__3v3)
+quit
+.endc
+.end

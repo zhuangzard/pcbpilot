@@ -1,0 +1,20 @@
+* pcbpilot sim analog — block A1 voltage-reference (U3) mode op
+* generated from schematic connectivity; rails from pcbpilot sim power (typical scenario)
+.include "pcbpilot-generic.lib"
+V_n__5v n__5v 0 DC 5
+C_c5 n_vref 0 1e-06
+R_r7 n__5v n_vref 1000
+V_IK_u3 n_vref ik_u3 DC 0
+X_u3 ik_u3 0 PCBPILOT_SHUNTREF params: vz=4.096 gm=2
+I_LOAD_n_vref n_vref 0 DC 0.00015
+.options noacct rshunt=1e12
+.control
+set filetype=ascii
+set wr_singlescale
+set wr_vecnames
+option numdgt=10
+op
+print v(n_vref) i(v_ik_u3)
+quit
+.endc
+.end

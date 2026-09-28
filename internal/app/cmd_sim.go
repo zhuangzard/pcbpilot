@@ -26,15 +26,22 @@ func newSimCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 	var window string
 	sim := &cobra.Command{
 		Use:   "sim",
-		Short: "Circuit simulations computed from the schematic (DC power tree)",
+		Short: "Circuit simulations computed from the schematic (DC power tree, analog SPICE)",
 		Long: `Circuit simulations computed from schematic connectivity.
 
   sim power   DC operating point of the power tree: voltage of every net and the
               current through every component pin, per scenario. Feeds trace
-              width sizing with computed (not guessed) currents.`,
+              width sizing with computed (not guessed) currents.
+  sim analog  ngspice simulation of the analog circuits (amplifiers, active and
+              passive filters, ADC inputs, references, comparators, crystals,
+              reset RC, transistor switches, regulator feedback): targets vs
+              simulated, tolerance Monte-Carlo, value-change plan.
+  sim tools   check / install ngspice.`,
 	}
 	sim.PersistentFlags().StringVar(&window, "window", "", "EasyEDA window ID (live mode)")
 	sim.AddCommand(newSimPowerCmd(cfg, &window, stdout, stderr))
+	sim.AddCommand(newSimAnalogCmd(cfg, &window, stdout, stderr))
+	sim.AddCommand(newSimToolsCmd(stdout, stderr))
 	return sim
 }
 

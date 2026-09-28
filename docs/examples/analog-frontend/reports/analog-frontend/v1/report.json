@@ -1,0 +1,2351 @@
+{
+  "schemaVersion": 1,
+  "generator": "pcbpilot report design",
+  "generatedAt": "2026-09-29T00:00:00Z",
+  "project": "ADC front-end (analog fixture)",
+  "version": 1,
+  "versionLabel": "v1",
+  "tools": {
+    "pcbpilot": "dev"
+  },
+  "inputs": [
+    {
+      "kind": "intent",
+      "label": "设计意图 intent.json",
+      "path": "intent.json",
+      "sha256": "57336c182e9d595588b5a15df5f518b5b78e33911acb15eb25e5c747e789e688",
+      "bytes": 30667,
+      "present": true
+    },
+    {
+      "kind": "sim",
+      "label": "电源仿真 sim.json",
+      "path": "sim.json",
+      "sha256": "7361b63986361ebc12d73a7b5eda327f99c859655760fcd0b2fe47ede4f3fe05",
+      "bytes": 93428,
+      "present": true
+    },
+    {
+      "kind": "plan",
+      "label": "pcb auto plan.json",
+      "present": false
+    },
+    {
+      "kind": "feedback",
+      "label": "pcb auto feedback.json",
+      "present": false
+    },
+    {
+      "kind": "board",
+      "label": "板级回读 board dump",
+      "present": false
+    },
+    {
+      "kind": "reload-board",
+      "label": "保存重载后回读",
+      "present": false
+    },
+    {
+      "kind": "drc",
+      "label": "原生 DRC",
+      "present": false
+    },
+    {
+      "kind": "check",
+      "label": "pcb check",
+      "present": false
+    },
+    {
+      "kind": "rules-check",
+      "label": "规则同步 rules check",
+      "present": false
+    },
+    {
+      "kind": "net-diff",
+      "label": "焊盘网络对账",
+      "present": false
+    },
+    {
+      "kind": "analog",
+      "label": "模拟仿真 analog.json",
+      "path": "analog.json",
+      "sha256": "5b2b8a71b4a42a3176080846a671325ca4bf349bfd3f58e5a67ccec79f89f998",
+      "bytes": 197628,
+      "present": true
+    },
+    {
+      "kind": "values",
+      "label": "器件值/型号",
+      "path": "../../../testdata/analog/frontend/values.json",
+      "sha256": "8739d241ebc99c6011ffad2f6e26916582b92139bab88860db42ca8daacdab15",
+      "bytes": 2705,
+      "present": true
+    },
+    {
+      "kind": "models",
+      "label": "功率模型/额定 power-models.json",
+      "path": "../../../.agents/skills/pcbpilot/references/power-models.json",
+      "sha256": "93ed6785b02bce42f0de698ec551f49433159b47268962368d18f83728296c79",
+      "bytes": 19301,
+      "present": true
+    }
+  ],
+  "inputsDigest": "f9d1cb89da7aa6820cc245a56290e5c8a4b71a57e3018889095d3450d6a7ee2b",
+  "verdict": {
+    "status": "FAIL",
+    "reasons": [
+      "intent 有 1 条 error 级发现"
+    ],
+    "warnings": [
+      "intent 有 1 条 warn 级发现",
+      "4 个器件功率模型为假定值（assumed）",
+      "7 项器件额定需数据手册确认",
+      "5 项验证缺少证据（N/A）",
+      "2 个章节/子项因输入缺失未生成"
+    ]
+  },
+  "summary": {
+    "keyNumbers": [
+      {
+        "label": "电源轨 +5V",
+        "value": "5 V，最大 1.69 mA",
+        "note": "最坏场景 peak"
+      },
+      {
+        "label": "电源轨 VREF",
+        "value": "4.15 V，最大 0.85 mA",
+        "note": "最坏场景 typical"
+      },
+      {
+        "label": "输入功率（typical）",
+        "value": "6.75 mW",
+        "note": "负载 6.03 mW，损耗 0.72 mW"
+      },
+      {
+        "label": "输入功率（peak）",
+        "value": "8.45 mW",
+        "note": "负载 7.73 mW，损耗 0.72 mW"
+      },
+      {
+        "label": "最紧器件余量（相对准则）",
+        "value": "68.8 %（准则 ≥ 33.3 %）",
+        "note": "C6 直流电压 V vs 额定"
+      },
+      {
+        "label": "器件检查",
+        "value": "14 ok / 0 临界 / 0 超限 / 7 需数据手册"
+      },
+      {
+        "label": "原生 DRC（EasyEDA）",
+        "value": "N/A",
+        "note": "未提供 pcb drc 结果（--drc）"
+      },
+      {
+        "label": "pcb check（DFM 重建审计）",
+        "value": "N/A",
+        "note": "未提供 pcb check 输出（--check）"
+      },
+      {
+        "label": "设计发现（intent）",
+        "value": "1 error / 1 warn / 2 info"
+      }
+    ],
+    "topRisks": [
+      {
+        "severity": "error",
+        "source": "intent:analog-target-miss",
+        "message": "[C2,C3,C4,R4,R5,R6,U1] A3 U1:B: 品质因数 Q 0.5 outside the target 0.707 ± 5 % (spec)",
+        "suggestion": "adjust the component values (see the optimisation plan) or revise the spec"
+      },
+      {
+        "severity": "warn",
+        "source": "intent:analog-adc-source-impedance",
+        "message": "[C2,C3,C4,R4,R5,R6,U1] A3 U1:B: ADC 采样建立误差 1.51 LSB outside the target ≤ 0.5 LSB (inferred)",
+        "suggestion": "lower the source impedance (buffer the node), add a charge-reservoir capacitor at the ADC pin (≥ 2^(N+1)·Csh) with its R·C settled before each sample, or lengthen the ADC sampling time"
+      },
+      {
+        "severity": "info",
+        "source": "feasibility",
+        "message": "7 项器件额定未知（需数据手册），未计入余量判定",
+        "suggestion": "在 power-models.json 的 ratings 中补充并注明来源"
+      }
+    ]
+  },
+  "requirements": {
+    "standard": [
+      {
+        "label": "安全标准 Standard",
+        "value": "IPC-2221B",
+        "note": "工程默认值（规格书未声明）"
+      },
+      {
+        "label": "绝缘等级 Insulation",
+        "value": "functional",
+        "note": "工程默认值（规格书未声明）"
+      },
+      {
+        "label": "污染等级 Pollution degree",
+        "value": "PD2",
+        "note": "工程默认值（规格书未声明）"
+      },
+      {
+        "label": "材料组 Material group",
+        "value": "IIIa",
+        "note": "工程默认值（规格书未声明）"
+      },
+      {
+        "label": "海拔 Altitude",
+        "value": "2000 m",
+        "note": "工程默认值（规格书未声明）"
+      },
+      {
+        "label": "过电压类别 OVC",
+        "value": "II",
+        "note": "工程默认值（规格书未声明）"
+      },
+      {
+        "label": "三防涂覆 Coated",
+        "value": "否",
+        "note": "规格书声明"
+      }
+    ],
+    "copper": [
+      {
+        "label": "层数 Layers",
+        "value": "4"
+      },
+      {
+        "label": "铜厚 外/内",
+        "value": "1 oz / 0.5 oz"
+      },
+      {
+        "label": "温升 ΔT",
+        "value": "10 °C",
+        "note": "IPC-2221/2152 线宽计算的温升"
+      },
+      {
+        "label": "叠层 Stackup",
+        "value": "JLC04161H-7628 (4-layer 1.6 mm, L1→L2 7628 prepreg 0.2104 mm)"
+      },
+      {
+        "label": "参考高度 h / εr",
+        "value": "8.28 mil / 4.4",
+        "note": "阻抗计算用"
+      },
+      {
+        "label": "工艺最小线宽/间距",
+        "value": "6 / 6 mil"
+      },
+      {
+        "label": "过孔 钻孔/外径",
+        "value": "12 / 24 mil"
+      }
+    ],
+    "blocks": [
+      {
+        "id": "POWER_IN",
+        "function": "power-input",
+        "core": "J2",
+        "parts": "J2, R7",
+        "summary": "J2 (+5V, terminal); 1.69 mA worst (peak)",
+        "powerW": 0.0007
+      },
+      {
+        "id": "CONN_J1",
+        "function": "connector",
+        "core": "J1",
+        "parts": "J1, R1",
+        "summary": "J1 (KF301-5.0-2P): SENS_IN"
+      },
+      {
+        "id": "CONN_J3",
+        "function": "connector",
+        "core": "J3",
+        "parts": "J3",
+        "summary": "J3 (HDR-1x4): ADC_CLK, ADC_CS, ADC_DOUT"
+      },
+      {
+        "id": "IC_U1",
+        "function": "other",
+        "core": "U1",
+        "parts": "U1, C1, C2, C3, C6, C7, R2, R3, R4, R5, R6",
+        "summary": "U1 (MCP6002T-I/SN)",
+        "powerW": 0.0017
+      },
+      {
+        "id": "IC_U2",
+        "function": "other",
+        "core": "U2",
+        "parts": "U2, C4, C5",
+        "summary": "U2 (MCP3201-CI/SN)",
+        "powerW": 0.0031
+      },
+      {
+        "id": "IC_U3",
+        "function": "other",
+        "core": "U3",
+        "parts": "U3",
+        "summary": "U3 (LM4040DIM3-4.1/NOPB)",
+        "powerW": 0.0029
+      }
+    ],
+    "domains": [
+      {
+        "id": "SELV_5V",
+        "kind": "SELV",
+        "reference": "GND",
+        "workingVrms": 5,
+        "workingVpeak": 5,
+        "nets": 14,
+        "parts": 20
+      }
+    ],
+    "findings": [
+      {
+        "severity": "error",
+        "source": "intent:analog-target-miss",
+        "message": "[C2,C3,C4,R4,R5,R6,U1] A3 U1:B: 品质因数 Q 0.5 outside the target 0.707 ± 5 % (spec)",
+        "suggestion": "adjust the component values (see the optimisation plan) or revise the spec"
+      },
+      {
+        "severity": "warn",
+        "source": "intent:analog-adc-source-impedance",
+        "message": "[C2,C3,C4,R4,R5,R6,U1] A3 U1:B: ADC 采样建立误差 1.51 LSB outside the target ≤ 0.5 LSB (inferred)",
+        "suggestion": "lower the source impedance (buffer the node), add a charge-reservoir capacitor at the ADC pin (≥ 2^(N+1)·Csh) with its R·C settled before each sample, or lengthen the ADC sampling time"
+      },
+      {
+        "severity": "info",
+        "source": "intent:analog-tolerance-after",
+        "message": "[C2,C3,C4,R4,R5,R6,U1] A3 U1:B: with the proposed values 89 % of 100 Monte-Carlo runs meet every target",
+        "suggestion": "tighten the tolerance of the frequency-setting parts (C0G/NP0 ±5 % capacitors, 1 % or 0.5 % resistors) or widen the target window"
+      },
+      {
+        "severity": "info",
+        "source": "intent:assumed-model",
+        "message": "[U3] U3 model lm4040 is marked assumed",
+        "suggestion": "replace with datasheet numbers"
+      }
+    ],
+    "pairs": 0
+  },
+  "power": {
+    "converged": true,
+    "scenarios": [
+      "typical",
+      "peak",
+      "terminal-only",
+      "terminal-j2-only"
+    ],
+    "rails": [
+      {
+        "net": "+5V",
+        "role": "power",
+        "vNom": 5,
+        "vMin": 0,
+        "vMax": 5,
+        "voltages": [
+          5,
+          5,
+          0,
+          5
+        ],
+        "currentsA": [
+          0.00135,
+          0.00169,
+          0,
+          0.00169
+        ],
+        "iMaxA": 0.00169,
+        "worstScenario": "peak"
+      },
+      {
+        "net": "VREF",
+        "role": "power",
+        "vNom": 4.15,
+        "vMin": 0,
+        "vMax": 4.15,
+        "voltages": [
+          4.15,
+          4.15,
+          0,
+          4.15
+        ],
+        "currentsA": [
+          0.00085,
+          0.00085,
+          0,
+          0.00085
+        ],
+        "iMaxA": 0.00085,
+        "worstScenario": "typical"
+      }
+    ],
+    "scenarioPower": [
+      {
+        "scenario": "typical",
+        "suppliedW": 0.00675,
+        "loadW": 0.00603,
+        "lossW": 0.00072
+      },
+      {
+        "scenario": "peak",
+        "suppliedW": 0.00845,
+        "loadW": 0.00773,
+        "lossW": 0.00072
+      },
+      {
+        "scenario": "terminal-only",
+        "suppliedW": 0,
+        "loadW": 0,
+        "lossW": 0
+      },
+      {
+        "scenario": "terminal-j2-only",
+        "suppliedW": 0.00845,
+        "loadW": 0.00773,
+        "lossW": 0.00072
+      }
+    ],
+    "partPower": [
+      {
+        "ref": "U2",
+        "device": "MCP3201-CI/SN",
+        "kind": "load",
+        "powerW": 0.003122,
+        "scenario": "peak"
+      },
+      {
+        "ref": "U3",
+        "device": "LM4040DIM3-4.1/NOPB",
+        "kind": "load",
+        "powerW": 0.002905,
+        "scenario": "typical"
+      },
+      {
+        "ref": "U1",
+        "device": "MCP6002T-I/SN",
+        "kind": "load",
+        "powerW": 0.0017,
+        "scenario": "peak"
+      },
+      {
+        "ref": "R7",
+        "device": "0402WGF1001TCE",
+        "kind": "resistor",
+        "powerW": 0.000723,
+        "scenario": "typical"
+      }
+    ],
+    "railPower": [
+      {
+        "net": "+5V",
+        "v": 5,
+        "iA": 0.00169,
+        "powerW": 0.00845
+      },
+      {
+        "net": "VREF",
+        "v": 4.15,
+        "iA": 0.00085,
+        "powerW": 0.003528
+      }
+    ],
+    "tree": {
+      "nodes": [
+        {
+          "ref": "J2",
+          "kind": "source",
+          "col": 0,
+          "label": "J2 KF301-5.0-2P",
+          "detail": "+5V 5 V · 8.45 mW"
+        },
+        {
+          "ref": "U1",
+          "kind": "load",
+          "col": 1,
+          "label": "U1 MCP6002T-I/SN",
+          "detail": "0.34 mA · 1.7 mW"
+        },
+        {
+          "ref": "U2",
+          "kind": "load",
+          "col": 1,
+          "label": "U2 MCP3201-CI/SN",
+          "detail": "0.65 mA · 3.12 mW"
+        },
+        {
+          "ref": "U3",
+          "kind": "load",
+          "col": 1,
+          "label": "U3 LM4040DIM3-4.1/NOPB",
+          "detail": "0.7 mA · 2.91 mW"
+        }
+      ],
+      "edges": [
+        {
+          "from": "J2",
+          "to": "U1",
+          "net": "+5V",
+          "label": "+5V 5 V / 1.69 mA"
+        },
+        {
+          "from": "J2",
+          "to": "U2",
+          "net": "+5V",
+          "label": "+5V 5 V / 1.69 mA"
+        }
+      ]
+    },
+    "regulators": null,
+    "ripple": null,
+    "models": [
+      {
+        "ref": "C1",
+        "device": "CL05B104KO5NNNC",
+        "kind": "capacitor",
+        "modelId": "generic-capacitor",
+        "match": "generic: capacitor (open at DC)",
+        "confidence": "value",
+        "assumed": false
+      },
+      {
+        "ref": "C2",
+        "device": "CL05B103KB5NNNC",
+        "kind": "capacitor",
+        "modelId": "generic-capacitor",
+        "match": "generic: capacitor (open at DC)",
+        "confidence": "value",
+        "assumed": false
+      },
+      {
+        "ref": "C3",
+        "device": "CL05B103KB5NNNC",
+        "kind": "capacitor",
+        "modelId": "generic-capacitor",
+        "match": "generic: capacitor (open at DC)",
+        "confidence": "value",
+        "assumed": false
+      },
+      {
+        "ref": "C4",
+        "device": "CL05B102KB5NNNC",
+        "kind": "capacitor",
+        "modelId": "generic-capacitor",
+        "match": "generic: capacitor (open at DC)",
+        "confidence": "value",
+        "assumed": false
+      },
+      {
+        "ref": "C5",
+        "device": "CL05A105KA5NQNC",
+        "kind": "capacitor",
+        "modelId": "generic-capacitor",
+        "match": "generic: capacitor (open at DC)",
+        "confidence": "value",
+        "assumed": false
+      },
+      {
+        "ref": "C6",
+        "device": "CL05B104KO5NNNC",
+        "kind": "capacitor",
+        "modelId": "generic-capacitor",
+        "match": "generic: capacitor (open at DC)",
+        "confidence": "value",
+        "assumed": false
+      },
+      {
+        "ref": "C7",
+        "device": "CL05B104KO5NNNC",
+        "kind": "capacitor",
+        "modelId": "generic-capacitor",
+        "match": "generic: capacitor (open at DC)",
+        "confidence": "value",
+        "assumed": false
+      },
+      {
+        "ref": "J1",
+        "device": "KF301-5.0-2P",
+        "kind": "connector-source",
+        "modelId": "kf301-2p",
+        "match": "lcsc C474881 → model kf301-2p",
+        "confidence": "assumed",
+        "source": "2-pin screw terminal used as a supply input: voltage from the net name (e.g. 5V_TERM → 5 V), else the default; 20 mΩ contact + short lead (assumed).",
+        "assumed": true
+      },
+      {
+        "ref": "J2",
+        "device": "KF301-5.0-2P",
+        "kind": "connector-source",
+        "modelId": "kf301-2p",
+        "match": "lcsc C474881 → model kf301-2p",
+        "confidence": "assumed",
+        "source": "2-pin screw terminal used as a supply input: voltage from the net name (e.g. 5V_TERM → 5 V), else the default; 20 mΩ contact + short lead (assumed).",
+        "assumed": true
+      },
+      {
+        "ref": "J3",
+        "device": "HDR-1x4",
+        "kind": "connector",
+        "modelId": "generic-connector",
+        "match": "generic: connector",
+        "confidence": "assumed",
+        "assumed": true
+      },
+      {
+        "ref": "R1",
+        "device": "0402WGF1003TCE",
+        "kind": "resistor",
+        "modelId": "generic-resistor",
+        "match": "generic: resistor by ref prefix R",
+        "confidence": "value",
+        "assumed": false
+      },
+      {
+        "ref": "R2",
+        "device": "0402WGF2002TCE",
+        "kind": "resistor",
+        "modelId": "generic-resistor",
+        "match": "generic: resistor by ref prefix R",
+        "confidence": "value",
+        "assumed": false
+      },
+      {
+        "ref": "R3",
+        "device": "0402WGF1001TCE",
+        "kind": "resistor",
+        "modelId": "generic-resistor",
+        "match": "generic: resistor by ref prefix R",
+        "confidence": "value",
+        "assumed": false
+      },
+      {
+        "ref": "R4",
+        "device": "0402WGF1002TCE",
+        "kind": "resistor",
+        "modelId": "generic-resistor",
+        "match": "generic: resistor by ref prefix R",
+        "confidence": "value",
+        "assumed": false
+      },
+      {
+        "ref": "R5",
+        "device": "0402WGF1002TCE",
+        "kind": "resistor",
+        "modelId": "generic-resistor",
+        "match": "generic: resistor by ref prefix R",
+        "confidence": "value",
+        "assumed": false
+      },
+      {
+        "ref": "R6",
+        "device": "0402WGF1000TCE",
+        "kind": "resistor",
+        "modelId": "generic-resistor",
+        "match": "generic: resistor by ref prefix R",
+        "confidence": "value",
+        "assumed": false
+      },
+      {
+        "ref": "R7",
+        "device": "0402WGF1001TCE",
+        "kind": "resistor",
+        "modelId": "generic-resistor",
+        "match": "generic: resistor by ref prefix R",
+        "confidence": "value",
+        "assumed": false
+      },
+      {
+        "ref": "U1",
+        "device": "MCP6002T-I/SN",
+        "kind": "load",
+        "modelId": "mcp6002",
+        "match": "mpn MCP6002T-I/SN → model mcp6002",
+        "confidence": "approx",
+        "source": "Microchip MCP6001/2/4 datasheet (DS21733): IQ 100 µA typ / 170 µA max per amplifier (dual = 2×); output load current is not included.",
+        "assumed": false
+      },
+      {
+        "ref": "U2",
+        "device": "MCP3201-CI/SN",
+        "kind": "load",
+        "modelId": "mcp3201",
+        "match": "mpn MCP3201-CI/SN → model mcp3201",
+        "confidence": "approx",
+        "source": "Microchip MCP3201 datasheet (DS21290): IDD ≈ 300 µA typ / 500 µA max while converting at 5 V; IREF ≈ 150 µA during conversion.",
+        "assumed": false
+      },
+      {
+        "ref": "U3",
+        "device": "LM4040DIM3-4.1/NOPB",
+        "kind": "load",
+        "modelId": "lm4040",
+        "match": "nameRegex LM4040DIM3-4.1/NOPB → model lm4040",
+        "confidence": "assumed",
+        "source": "LM4040 shunt reference: the DC power sim has no zener element, so the cathode is a constant sink at a typical bias point (0.7 mA, between the 60–75 µA minimum and 15 mA maximum of TI SNOS633). The reference VOLTAGE and the real cathode current come from pcbpilot sim analog (spice-models/analog-models.json).",
+        "assumed": true
+      }
+    ],
+    "confidence": {
+      "approx": 2,
+      "assumed": 4,
+      "value": 14
+    },
+    "assumptions": [
+      "DC operating point (MNA + Newton-Raphson): capacitors open, inductors = DCR, switching regulators averaged by power balance; not a transient simulation",
+      "IC signal pins are high-impedance (no DC drive) unless a GPIO drives an LED network",
+      "loads are constant-current above a knee voltage and resistive below it (unpowered rails draw nothing)",
+      "J2: input source +5V = 5.00 V (net name) with 0.02 Ω series resistance",
+      "J2 (terminal-j2) disconnected in terminal-only",
+      "J1 (terminal) disconnected in terminal-j2-only"
+    ],
+    "warnings": []
+  },
+  "analog": {
+    "generator": "pcbpilot sim analog",
+    "ngspice": "ngspice-47（16 次运行）",
+    "status": "FAIL",
+    "keyNumbers": [
+      {
+        "label": "模拟块",
+        "value": "3 个（仿真 3）"
+      },
+      {
+        "label": "目标",
+        "value": "9 项：满足 7，未满足 2"
+      },
+      {
+        "label": "建议修改",
+        "value": "3 个元件值",
+        "note": "原理图修改，须用户确认"
+      }
+    ],
+    "blocks": [
+      {
+        "id": "A1",
+        "class": "voltage-reference",
+        "classZh": "电压基准",
+        "title": "电压基准 U3（VREF）",
+        "topology": "shunt reference lm4040-4.1 (4.096 V) biased by R7 from +5V",
+        "model": "lm4040-4.1（approx）",
+        "simulated": true,
+        "status": "PASS",
+        "parts": "C5, R7, U3",
+        "netlist": "data/analog/ngspice/A1-op.cir"
+      },
+      {
+        "id": "A2",
+        "class": "opamp-follower",
+        "classZh": "电压跟随器",
+        "title": "电压跟随器 U1:A（SENS_IN → BUF_OUT）",
+        "topology": "voltage follower (buffer)",
+        "model": "mcp6002（approx）",
+        "simulated": true,
+        "status": "PASS",
+        "parts": "C1, R1, R2, R3, U1",
+        "netlist": "data/analog/ngspice/A2-main.cir"
+      },
+      {
+        "id": "A3",
+        "class": "sallen-key-lowpass",
+        "classZh": "Sallen-Key 低通",
+        "title": "Sallen-Key 低通 U1:B（BUF_OUT → FILT_OUT）",
+        "topology": "unity-gain Sallen-Key low-pass",
+        "model": "mcp6002（approx）",
+        "simulated": true,
+        "status": "FAIL",
+        "parts": "C2, C3, C4, R4, R5, R6, U1",
+        "netlist": "data/analog/ngspice/A3-main.cir"
+      }
+    ],
+    "metrics": [
+      {
+        "block": "A1",
+        "metric": "ikA",
+        "label": "基准阴极电流",
+        "value": "753.6µA",
+        "analytic": "754µA",
+        "method": "ngspice-op",
+        "target": "73µA … 15mA",
+        "source": "datasheet",
+        "status": "PASS"
+      },
+      {
+        "block": "A1",
+        "metric": "voutV",
+        "label": "输出电压",
+        "value": "4.096V",
+        "analytic": "4.096V",
+        "method": "ngspice-op"
+      },
+      {
+        "block": "A2",
+        "metric": "gain",
+        "label": "增益",
+        "value": "0.1667 V/V",
+        "analytic": "0.1667 V/V",
+        "method": "ngspice-ac",
+        "target": "0.1667 V/V ± 2 %",
+        "source": "inferred",
+        "status": "PASS"
+      },
+      {
+        "block": "A2",
+        "metric": "fcHz",
+        "label": "-3 dB 频率",
+        "value": "90.08Hz",
+        "analytic": "90.09Hz",
+        "method": "ngspice-ac"
+      },
+      {
+        "block": "A2",
+        "metric": "peakingDB",
+        "label": "谐振峰",
+        "value": "0 dB",
+        "method": "ngspice-ac"
+      },
+      {
+        "block": "A2",
+        "metric": "phaseMarginDeg",
+        "label": "相位裕度",
+        "value": "72.4 °",
+        "method": "ngspice-loop",
+        "target": "≥ 45 °",
+        "source": "inferred",
+        "status": "PASS"
+      },
+      {
+        "block": "A2",
+        "metric": "overshootPct",
+        "label": "阶跃过冲",
+        "value": "0 %",
+        "method": "ngspice-tran"
+      },
+      {
+        "block": "A2",
+        "metric": "outMaxV",
+        "label": "输出上摆极限",
+        "value": "4.975V",
+        "method": "ngspice-dc"
+      },
+      {
+        "block": "A3",
+        "metric": "gain",
+        "label": "增益",
+        "value": "1 V/V",
+        "analytic": "1 V/V",
+        "method": "ngspice-ac",
+        "target": "1 V/V ± 2 %",
+        "source": "inferred",
+        "status": "PASS"
+      },
+      {
+        "block": "A3",
+        "metric": "fcHz",
+        "label": "-3 dB 频率",
+        "value": "1.024kHz",
+        "analytic": "1.024kHz",
+        "method": "ngspice-ac",
+        "target": "1kHz ± 5 %",
+        "source": "spec",
+        "status": "PASS"
+      },
+      {
+        "block": "A3",
+        "metric": "f0Hz",
+        "label": "自然频率 f0",
+        "value": "1.59kHz",
+        "analytic": "1.592kHz",
+        "method": "ngspice-ac"
+      },
+      {
+        "block": "A3",
+        "metric": "q",
+        "label": "品质因数 Q",
+        "value": "0.5",
+        "analytic": "0.5",
+        "method": "ngspice-ac",
+        "target": "0.707 ± 5 %",
+        "source": "spec",
+        "status": "FAIL"
+      },
+      {
+        "block": "A3",
+        "metric": "peakingDB",
+        "label": "谐振峰",
+        "value": "0 dB",
+        "method": "ngspice-ac"
+      },
+      {
+        "block": "A3",
+        "metric": "phaseMarginDeg",
+        "label": "相位裕度",
+        "value": "57.9 °",
+        "method": "ngspice-loop",
+        "target": "≥ 45 °",
+        "source": "inferred",
+        "status": "PASS"
+      },
+      {
+        "block": "A3",
+        "metric": "overshootPct",
+        "label": "阶跃过冲",
+        "value": "0 %",
+        "method": "ngspice-tran"
+      },
+      {
+        "block": "A3",
+        "metric": "outMaxV",
+        "label": "输出上摆极限",
+        "value": "4.975V",
+        "method": "ngspice-dc",
+        "target": "≥ 4.014V",
+        "source": "inferred",
+        "status": "PASS"
+      },
+      {
+        "block": "A3",
+        "metric": "settleErrorLsb",
+        "label": "ADC 采样建立误差",
+        "value": "1.51 LSB",
+        "method": "ngspice-tran",
+        "target": "≤ 0.5 LSB",
+        "source": "inferred",
+        "status": "WARN"
+      }
+    ],
+    "tolerance": [
+      {
+        "block": "A1",
+        "phase": "当前",
+        "label": "基准阴极电流",
+        "nominal": "753.6µA",
+        "min": "747.5µA",
+        "max": "761.2µA",
+        "std": "2.955µA",
+        "inSpec": "100 %",
+        "yield": "100 %",
+        "method": "ngspice-op-mc",
+        "runs": 100
+      },
+      {
+        "block": "A2",
+        "phase": "当前",
+        "label": "-3 dB 频率",
+        "nominal": "90.08Hz",
+        "min": "82.1Hz",
+        "max": "97.51Hz",
+        "std": "3.01Hz",
+        "inSpec": "—",
+        "yield": "100 %",
+        "method": "ngspice-ac-mc",
+        "runs": 100
+      },
+      {
+        "block": "A2",
+        "phase": "当前",
+        "label": "增益",
+        "nominal": "0.1667 V/V",
+        "min": "0.1649 V/V",
+        "max": "0.1685 V/V",
+        "std": "0.0006872 V/V",
+        "inSpec": "100 %",
+        "yield": "100 %",
+        "method": "ngspice-ac-mc",
+        "runs": 100
+      },
+      {
+        "block": "A3",
+        "phase": "当前",
+        "label": "自然频率 f0",
+        "nominal": "1.59kHz",
+        "min": "1.49kHz",
+        "max": "1.665kHz",
+        "std": "34.23Hz",
+        "inSpec": "—",
+        "yield": "0 %",
+        "method": "ngspice-ac-mc",
+        "runs": 100
+      },
+      {
+        "block": "A3",
+        "phase": "当前",
+        "label": "-3 dB 频率",
+        "nominal": "1.024kHz",
+        "min": "939.4Hz",
+        "max": "1.111kHz",
+        "std": "35.28Hz",
+        "inSpec": "75 %",
+        "yield": "0 %",
+        "method": "ngspice-ac-mc",
+        "runs": 100
+      },
+      {
+        "block": "A3",
+        "phase": "当前",
+        "label": "增益",
+        "nominal": "1 V/V",
+        "min": "1 V/V",
+        "max": "1 V/V",
+        "std": "3.747e-08 V/V",
+        "inSpec": "100 %",
+        "yield": "0 %",
+        "method": "ngspice-ac-mc",
+        "runs": 100
+      },
+      {
+        "block": "A3",
+        "phase": "当前",
+        "label": "品质因数 Q",
+        "nominal": "0.5",
+        "min": "0.48",
+        "max": "0.522",
+        "std": "0.0105",
+        "inSpec": "0 %",
+        "yield": "0 %",
+        "method": "ngspice-ac-mc",
+        "runs": 100
+      },
+      {
+        "block": "A3",
+        "phase": "修改后",
+        "label": "自然频率 f0",
+        "nominal": "1.001kHz",
+        "min": "938.1Hz",
+        "max": "1.048kHz",
+        "std": "21.57Hz",
+        "inSpec": "—",
+        "yield": "89 %",
+        "method": "ngspice-ac-mc",
+        "runs": 100
+      },
+      {
+        "block": "A3",
+        "phase": "修改后",
+        "label": "-3 dB 频率",
+        "nominal": "993.5Hz",
+        "min": "924.4Hz",
+        "max": "1.058kHz",
+        "std": "28.08Hz",
+        "inSpec": "89 %",
+        "yield": "89 %",
+        "method": "ngspice-ac-mc",
+        "runs": 100
+      },
+      {
+        "block": "A3",
+        "phase": "修改后",
+        "label": "增益",
+        "nominal": "1 V/V",
+        "min": "1 V/V",
+        "max": "1 V/V",
+        "std": "4.212e-08 V/V",
+        "inSpec": "100 %",
+        "yield": "89 %",
+        "method": "ngspice-ac-mc",
+        "runs": 100
+      },
+      {
+        "block": "A3",
+        "phase": "修改后",
+        "label": "品质因数 Q",
+        "nominal": "0.702",
+        "min": "0.673",
+        "max": "0.732",
+        "std": "0.0148",
+        "inSpec": "100 %",
+        "yield": "89 %",
+        "method": "ngspice-ac-mc",
+        "runs": 100
+      }
+    ],
+    "changes": [
+      {
+        "block": "A3",
+        "ref": "C2",
+        "from": "10nF",
+        "to": "33nF",
+        "action": "replace-lcsc",
+        "part": "C1585 33nF",
+        "effect": "-3 dB 频率 1.024kHz → 993.5Hz；品质因数 Q 0.5 → 0.702"
+      },
+      {
+        "block": "A3",
+        "ref": "C3",
+        "from": "10nF",
+        "to": "15nF",
+        "action": "set-value",
+        "part": "需选型：0402 15nF 10% capacitor",
+        "effect": "-3 dB 频率 1.024kHz → 993.5Hz；品质因数 Q 0.5 → 0.702"
+      },
+      {
+        "block": "A3",
+        "ref": "R5",
+        "from": "10kΩ",
+        "to": "5.1kΩ",
+        "action": "replace-lcsc",
+        "part": "C25905 5.1kΩ",
+        "effect": "-3 dB 频率 1.024kHz → 993.5Hz；品质因数 Q 0.5 → 0.702"
+      }
+    ],
+    "findings": [
+      {
+        "severity": "error",
+        "source": "analog A3",
+        "message": "A3 U1:B: 品质因数 Q 0.5 outside the target 0.707 ± 5 % (spec)",
+        "suggestion": "adjust the component values (see the optimisation plan) or revise the spec"
+      },
+      {
+        "severity": "warn",
+        "source": "analog A3",
+        "message": "A3 U1:B: ADC 采样建立误差 1.51 LSB outside the target ≤ 0.5 LSB (inferred)",
+        "suggestion": "lower the source impedance (buffer the node), add a charge-reservoir capacitor at the ADC pin (≥ 2^(N+1)·Csh) with its R·C settled before each sample, or lengthen the ADC sampling time"
+      },
+      {
+        "severity": "info",
+        "source": "analog A3",
+        "message": "A3 U1:B: with the proposed values 89 % of 100 Monte-Carlo runs meet every target",
+        "suggestion": "tighten the tolerance of the frequency-setting parts (C0G/NP0 ±5 % capacitors, 1 % or 0.5 % resistors) or widen the target window"
+      }
+    ],
+    "charts": [
+      {
+        "name": "analog-a2-bode",
+        "block": "A2",
+        "title": "A2 频率响应（Bode）"
+      },
+      {
+        "name": "analog-a2-loop",
+        "block": "A2",
+        "title": "A2 环路增益 T(f)（输出端电压注入）"
+      },
+      {
+        "name": "analog-a2-step",
+        "block": "A2",
+        "title": "A2 小信号阶跃响应"
+      },
+      {
+        "name": "analog-a2-transfer",
+        "block": "A2",
+        "title": "A2 直流传输特性（输入扫描）"
+      },
+      {
+        "name": "analog-a3-bode",
+        "block": "A3",
+        "title": "A3 频率响应（Bode）"
+      },
+      {
+        "name": "analog-a3-loop",
+        "block": "A3",
+        "title": "A3 环路增益 T(f)（输出端电压注入）"
+      },
+      {
+        "name": "analog-a3-step",
+        "block": "A3",
+        "title": "A3 小信号阶跃响应"
+      },
+      {
+        "name": "analog-a3-transfer",
+        "block": "A3",
+        "title": "A3 直流传输特性（输入扫描）"
+      },
+      {
+        "name": "analog-a3-sample",
+        "block": "A3",
+        "title": "A3 ADC 采样保持（mcp3201，每 10µs 一次，Csh 预放电到 0 V）"
+      }
+    ],
+    "data": [
+      "data/analog/analog.json",
+      "data/analog/ngspice/pcbpilot-generic.lib",
+      "data/analog/ngspice/A1-op.cir",
+      "data/analog/ngspice/A1-op.log",
+      "data/analog/ngspice/A1-mc.cir",
+      "data/analog/ngspice/A2-dc.cir",
+      "data/analog/ngspice/A2-dc.log",
+      "data/analog/ngspice/A2-dc-dc.txt",
+      "data/analog/ngspice/A2-main.cir",
+      "data/analog/ngspice/A2-main.log",
+      "data/analog/ngspice/A2-main-ac.txt",
+      "data/analog/ngspice/A2-main-tran.txt",
+      "data/analog/ngspice/A2-loop.cir",
+      "data/analog/ngspice/A2-loop.log",
+      "data/analog/ngspice/A2-loop-loop.txt",
+      "data/analog/ngspice/A2-mc.cir",
+      "data/analog/ngspice/A3-dc.cir",
+      "data/analog/ngspice/A3-dc.log",
+      "data/analog/ngspice/A3-dc-dc.txt",
+      "data/analog/ngspice/A3-main.cir",
+      "data/analog/ngspice/A3-main.log",
+      "data/analog/ngspice/A3-main-ac.txt",
+      "data/analog/ngspice/A3-main-tran.txt",
+      "data/analog/ngspice/A3-loop.cir",
+      "data/analog/ngspice/A3-loop.log",
+      "data/analog/ngspice/A3-loop-loop.txt",
+      "data/analog/ngspice/A3-sample.cir",
+      "data/analog/ngspice/A3-sample.log",
+      "data/analog/ngspice/A3-sample-sample.txt",
+      "data/analog/ngspice/A3-mc.cir",
+      "data/analog/ngspice/A3-dc-after.cir",
+      "data/analog/ngspice/A3-dc-after.log",
+      "data/analog/ngspice/A3-dc-dc-after.txt",
+      "data/analog/ngspice/A3-main-after.cir",
+      "data/analog/ngspice/A3-main-after.log",
+      "data/analog/ngspice/A3-main-ac-after.txt",
+      "data/analog/ngspice/A3-main-tran-after.txt",
+      "data/analog/ngspice/A3-loop-after.cir",
+      "data/analog/ngspice/A3-loop-after.log",
+      "data/analog/ngspice/A3-loop-loop-after.txt",
+      "data/analog/ngspice/A3-sample-after.cir",
+      "data/analog/ngspice/A3-sample-after.log",
+      "data/analog/ngspice/A3-sample-sample-after.txt",
+      "data/analog/ngspice/A3-mc-after.cir"
+    ],
+    "notes": [
+      "U2.VREF VREF input 150µ A (mcp3201)"
+    ]
+  },
+  "feasibility": {
+    "rows": [
+      {
+        "ref": "C1",
+        "device": "CL05B104KO5NNNC",
+        "kind": "capacitor",
+        "check": "直流电压 V vs 额定",
+        "stress": 0,
+        "unit": "V",
+        "stressNote": "100 nF X7R 0402",
+        "rating": 16,
+        "ratingSource": "Samsung CL part number",
+        "marginPct": 100,
+        "guidelinePct": 33.3,
+        "status": "ok"
+      },
+      {
+        "ref": "C2",
+        "device": "CL05B103KB5NNNC",
+        "kind": "capacitor",
+        "check": "直流电压 V vs 额定",
+        "stress": 0,
+        "unit": "V",
+        "stressNote": "10 nF X7R 0402",
+        "rating": 50,
+        "ratingSource": "Samsung CL part number",
+        "marginPct": 100,
+        "guidelinePct": 33.3,
+        "status": "ok"
+      },
+      {
+        "ref": "C3",
+        "device": "CL05B103KB5NNNC",
+        "kind": "capacitor",
+        "check": "直流电压 V vs 额定",
+        "stress": 0,
+        "unit": "V",
+        "stressNote": "10 nF X7R 0402",
+        "rating": 50,
+        "ratingSource": "Samsung CL part number",
+        "marginPct": 100,
+        "guidelinePct": 33.3,
+        "status": "ok"
+      },
+      {
+        "ref": "C4",
+        "device": "CL05B102KB5NNNC",
+        "kind": "capacitor",
+        "check": "直流电压 V vs 额定",
+        "stress": 0,
+        "unit": "V",
+        "stressNote": "1 nF X7R 0402",
+        "rating": 50,
+        "ratingSource": "Samsung CL part number",
+        "marginPct": 100,
+        "guidelinePct": 33.3,
+        "status": "ok"
+      },
+      {
+        "ref": "C5",
+        "device": "CL05A105KA5NQNC",
+        "kind": "capacitor",
+        "check": "直流电压 V vs 额定",
+        "stress": 4.15,
+        "unit": "V",
+        "stressNote": "1 µF X5R 0402",
+        "rating": 25,
+        "ratingSource": "Samsung CL part number",
+        "marginPct": 83.4,
+        "guidelinePct": 33.3,
+        "status": "ok"
+      },
+      {
+        "ref": "C6",
+        "device": "CL05B104KO5NNNC",
+        "kind": "capacitor",
+        "check": "直流电压 V vs 额定",
+        "stress": 5,
+        "unit": "V",
+        "stressNote": "100 nF X7R 0402",
+        "rating": 16,
+        "ratingSource": "Samsung CL part number",
+        "marginPct": 68.8,
+        "guidelinePct": 33.3,
+        "status": "ok"
+      },
+      {
+        "ref": "C7",
+        "device": "CL05B104KO5NNNC",
+        "kind": "capacitor",
+        "check": "直流电压 V vs 额定",
+        "stress": 5,
+        "unit": "V",
+        "stressNote": "100 nF X7R 0402",
+        "rating": 16,
+        "ratingSource": "Samsung CL part number",
+        "marginPct": 68.8,
+        "guidelinePct": 33.3,
+        "status": "ok"
+      },
+      {
+        "ref": "J1",
+        "device": "KF301-5.0-2P",
+        "kind": "connector-source",
+        "check": "接触电流 vs 额定",
+        "stress": 0,
+        "unit": "A",
+        "guidelinePct": 20,
+        "status": "unknown",
+        "note": "需数据手册（额定值未知，不做猜测）"
+      },
+      {
+        "ref": "J2",
+        "device": "KF301-5.0-2P",
+        "kind": "connector-source",
+        "check": "接触电流 vs 额定",
+        "stress": 0.00169,
+        "unit": "A",
+        "guidelinePct": 20,
+        "status": "unknown",
+        "note": "需数据手册（额定值未知，不做猜测）"
+      },
+      {
+        "ref": "J3",
+        "device": "HDR-1x4",
+        "kind": "connector",
+        "check": "接触电流 vs 额定",
+        "stress": 0,
+        "unit": "A",
+        "guidelinePct": 20,
+        "status": "unknown",
+        "note": "需数据手册（额定值未知，不做猜测）"
+      },
+      {
+        "ref": "R1",
+        "device": "0402WGF1003TCE",
+        "kind": "resistor",
+        "check": "功率 P vs 封装额定",
+        "stress": 0,
+        "unit": "W",
+        "stressNote": "100 kΩ @typical",
+        "rating": 0.0625,
+        "ratingSource": "0402 通用厚膜额定（70 °C）；UNI-ROYAL part number",
+        "marginPct": 100,
+        "guidelinePct": 50,
+        "status": "ok",
+        "note": "P = I²R（仿真未给功率）"
+      },
+      {
+        "ref": "R2",
+        "device": "0402WGF2002TCE",
+        "kind": "resistor",
+        "check": "功率 P vs 封装额定",
+        "stress": 0,
+        "unit": "W",
+        "stressNote": "20 kΩ @typical",
+        "rating": 0.0625,
+        "ratingSource": "0402 通用厚膜额定（70 °C）；UNI-ROYAL part number",
+        "marginPct": 100,
+        "guidelinePct": 50,
+        "status": "ok",
+        "note": "P = I²R（仿真未给功率）"
+      },
+      {
+        "ref": "R3",
+        "device": "0402WGF1001TCE",
+        "kind": "resistor",
+        "check": "功率 P vs 封装额定",
+        "stress": 0,
+        "unit": "W",
+        "stressNote": "1 kΩ @typical",
+        "rating": 0.0625,
+        "ratingSource": "0402 通用厚膜额定（70 °C）；UNI-ROYAL part number",
+        "marginPct": 100,
+        "guidelinePct": 50,
+        "status": "ok",
+        "note": "P = I²R（仿真未给功率）"
+      },
+      {
+        "ref": "R4",
+        "device": "0402WGF1002TCE",
+        "kind": "resistor",
+        "check": "功率 P vs 封装额定",
+        "stress": 0,
+        "unit": "W",
+        "stressNote": "10 kΩ @typical",
+        "rating": 0.0625,
+        "ratingSource": "0402 通用厚膜额定（70 °C）；UNI-ROYAL part number",
+        "marginPct": 100,
+        "guidelinePct": 50,
+        "status": "ok",
+        "note": "P = I²R（仿真未给功率）"
+      },
+      {
+        "ref": "R5",
+        "device": "0402WGF1002TCE",
+        "kind": "resistor",
+        "check": "功率 P vs 封装额定",
+        "stress": 0,
+        "unit": "W",
+        "stressNote": "10 kΩ @typical",
+        "rating": 0.0625,
+        "ratingSource": "0402 通用厚膜额定（70 °C）；UNI-ROYAL part number",
+        "marginPct": 100,
+        "guidelinePct": 50,
+        "status": "ok",
+        "note": "P = I²R（仿真未给功率）"
+      },
+      {
+        "ref": "R6",
+        "device": "0402WGF1000TCE",
+        "kind": "resistor",
+        "check": "功率 P vs 封装额定",
+        "stress": 0,
+        "unit": "W",
+        "stressNote": "100 Ω @typical",
+        "rating": 0.0625,
+        "ratingSource": "0402 通用厚膜额定（70 °C）；UNI-ROYAL part number",
+        "marginPct": 100,
+        "guidelinePct": 50,
+        "status": "ok",
+        "note": "P = I²R（仿真未给功率）"
+      },
+      {
+        "ref": "R7",
+        "device": "0402WGF1001TCE",
+        "kind": "resistor",
+        "check": "功率 P vs 封装额定",
+        "stress": 0.000723,
+        "unit": "W",
+        "stressNote": "1 kΩ @typical",
+        "rating": 0.0625,
+        "ratingSource": "0402 通用厚膜额定（70 °C）；UNI-ROYAL part number",
+        "marginPct": 98.8,
+        "guidelinePct": 50,
+        "status": "ok"
+      },
+      {
+        "ref": "U1",
+        "device": "MCP6002T-I/SN",
+        "kind": "load",
+        "check": "供电 +5V 电压范围",
+        "stress": 5,
+        "unit": "V",
+        "guidelinePct": 3,
+        "status": "unknown",
+        "note": "需数据手册（推荐工作电压范围）"
+      },
+      {
+        "ref": "U2",
+        "device": "MCP3201-CI/SN",
+        "kind": "load",
+        "check": "供电 +5V 电压范围",
+        "stress": 5,
+        "unit": "V",
+        "guidelinePct": 3,
+        "status": "unknown",
+        "note": "需数据手册（推荐工作电压范围）"
+      },
+      {
+        "ref": "U2",
+        "device": "MCP3201-CI/SN",
+        "kind": "load",
+        "check": "供电 VREF 电压范围",
+        "stress": 4.15,
+        "unit": "V",
+        "guidelinePct": 3,
+        "status": "unknown",
+        "note": "需数据手册（推荐工作电压范围）"
+      },
+      {
+        "ref": "U3",
+        "device": "LM4040DIM3-4.1/NOPB",
+        "kind": "load",
+        "check": "供电 VREF 电压范围",
+        "stress": 4.15,
+        "unit": "V",
+        "guidelinePct": 3,
+        "status": "unknown",
+        "note": "需数据手册（推荐工作电压范围）"
+      }
+    ],
+    "counts": {
+      "ok": 14,
+      "unknown": 7
+    },
+    "guidelines": [
+      {
+        "label": "电流（电感/稳压器/二极管/LED/BJT/连接器）",
+        "value": "余量 ≥ 20 %",
+        "note": "margin = (额定 − 应力)/额定"
+      },
+      {
+        "label": "电感 Ipk",
+        "value": "Isat ≥ 1.3 × Ipk 更稳妥",
+        "note": "库中只有单一 Current Rating 时同时比较 Ipk 与 Irms"
+      },
+      {
+        "label": "电阻功率",
+        "value": "P ≤ 50 % 额定（70 °C 额定值）",
+        "note": "0402 1/16 W、0603 1/10 W、0805 1/8 W、1206 1/4 W（通用厚膜）"
+      },
+      {
+        "label": "MLCC 直流电压",
+        "value": "额定 ≥ 1.5 × 工作电压（余量 ≥ 33 %）",
+        "note": "X5R/X7R \u003c 2× 时须查 DC 偏压容量曲线"
+      },
+      {
+        "label": "ESD/TVS",
+        "value": "VRWM ≥ 线上最高工作电压",
+        "note": "余量 ≥ 0 即通过"
+      },
+      {
+        "label": "供电范围",
+        "value": "工作电压距推荐范围边界 ≥ 3 %",
+        "note": "下限 margin = (V − Vmin)/V"
+      },
+      {
+        "label": "结温",
+        "value": "Tj ≤ 80 % Tj,max",
+        "note": "Tj = Ta + P·θJA，θJA 未知 → 需数据手册"
+      },
+      {
+        "label": "未知额定",
+        "value": "标记“需数据手册”",
+        "note": "绝不猜测额定值"
+      }
+    ]
+  },
+  "calculations": {
+    "basis": [
+      {
+        "label": "外层/内层铜厚",
+        "value": "1 oz (1.378 mil) / 0.5 oz (0.689 mil)",
+        "note": "1 oz = 1.378 mil"
+      },
+      {
+        "label": "允许温升 ΔT",
+        "value": "10 °C"
+      },
+      {
+        "label": "叠层",
+        "value": "JLC04161H-7628 (4-layer 1.6 mm, L1→L2 7628 prepreg 0.2104 mm)"
+      },
+      {
+        "label": "外层→参考平面 h",
+        "value": "8.28 mil"
+      },
+      {
+        "label": "介电常数 εr",
+        "value": "4.4"
+      },
+      {
+        "label": "工艺最小线宽/间距",
+        "value": "6 / 6 mil"
+      }
+    ],
+    "formulas": [
+      {
+        "label": "IPC-2221/2152 载流",
+        "value": "I = 0.048 · ΔT^0.44 · A^0.725，A = w · t（mil²）；内层按 IPC-2152 用同一曲线、内层铜厚",
+        "note": "IPC-2221B §6.2 外层曲线；IPC-2152 内外层同截面载流相近（与 intent/pcbauto 一致）"
+      },
+      {
+        "label": "单过孔载流",
+        "value": "I = 0.024 · ΔT^0.44 · (π·(d+t)·t)^0.725，镀铜 t = 0.7 mil",
+        "note": "孔壁按内层导体计"
+      },
+      {
+        "label": "电压间距",
+        "value": "IPC-2221B 表 6-1（B1 内层 / B2 外层未涂覆 / B4 涂覆），与工艺最小间距取大"
+      },
+      {
+        "label": "微带线 Z0",
+        "value": "Hammerstad–Jensen（含铜厚修正）",
+        "note": "pkg/pcbauto MicrostripZ0"
+      },
+      {
+        "label": "差分 Zdiff",
+        "value": "Zdiff ≈ 2·Z0·(1 − 0.48·e^(−0.96·s/h))",
+        "note": "边耦合微带近似"
+      },
+      {
+        "label": "爬电/电气间隙",
+        "value": "IEC 62368-1 / 60601-1 / 61010-1 表格或 IPC-2221B（按 intent.standard）",
+        "note": "pkg/safety；工程参考，最终以认证机构为准"
+      }
+    ],
+    "widths": [
+      {
+        "net": "+5V",
+        "class": "POWER",
+        "currentA": 0.00169,
+        "source": "simulated",
+        "outerNeedMil": 0,
+        "innerNeedMil": 0,
+        "outerPlanMil": 10,
+        "innerPlanMil": 10,
+        "outerCapacityA": 0.886,
+        "status": "PASS"
+      },
+      {
+        "net": "GND",
+        "class": "GND",
+        "currentA": 0.00169,
+        "source": "simulated",
+        "outerNeedMil": 0,
+        "innerNeedMil": 0,
+        "outerPlanMil": 10,
+        "innerPlanMil": 10,
+        "outerCapacityA": 0.886,
+        "status": "PASS"
+      }
+    ],
+    "vias": [
+      {
+        "net": "+5V",
+        "currentA": 0.00169,
+        "drillMil": 12,
+        "perViaA": 0.739,
+        "need": 1,
+        "plan": 1,
+        "status": "PASS"
+      },
+      {
+        "net": "GND",
+        "currentA": 0.00169,
+        "drillMil": 12,
+        "perViaA": 0.739,
+        "need": 1,
+        "plan": 1,
+        "status": "PASS"
+      }
+    ],
+    "clearance": [
+      {
+        "net": "+5V",
+        "vPeak": 5,
+        "ipcMil": 3.94,
+        "fabMil": 6,
+        "planMil": 6,
+        "governs": "工艺最小值",
+        "status": "PASS"
+      },
+      {
+        "net": "ADC_CLK",
+        "vPeak": 5,
+        "ipcMil": 3.94,
+        "fabMil": 6,
+        "planMil": 6,
+        "governs": "工艺最小值",
+        "status": "PASS"
+      },
+      {
+        "net": "ADC_CS",
+        "vPeak": 5,
+        "ipcMil": 3.94,
+        "fabMil": 6,
+        "planMil": 6,
+        "governs": "工艺最小值",
+        "status": "PASS"
+      },
+      {
+        "net": "ADC_DOUT",
+        "vPeak": 5,
+        "ipcMil": 3.94,
+        "fabMil": 6,
+        "planMil": 6,
+        "governs": "工艺最小值",
+        "status": "PASS"
+      },
+      {
+        "net": "ADC_IN",
+        "vPeak": 0,
+        "ipcMil": 3.94,
+        "fabMil": 6,
+        "planMil": 6,
+        "governs": "工艺最小值",
+        "status": "PASS"
+      },
+      {
+        "net": "GND",
+        "vPeak": 0,
+        "ipcMil": 3.94,
+        "fabMil": 6,
+        "planMil": 6,
+        "governs": "工艺最小值",
+        "status": "PASS"
+      }
+    ],
+    "impedance": null,
+    "insulation": null
+  },
+  "verification": [
+    {
+      "name": "原生 DRC（EasyEDA）",
+      "status": "N/A",
+      "detail": "未提供 pcb drc 结果（--drc）"
+    },
+    {
+      "name": "pcb check（DFM 重建审计）",
+      "status": "N/A",
+      "detail": "未提供 pcb check 输出（--check）"
+    },
+    {
+      "name": "规则同步（pcb rules check）",
+      "status": "N/A",
+      "detail": "未提供（--rules-check）"
+    },
+    {
+      "name": "焊盘网络对账（pad-net diff）",
+      "status": "N/A",
+      "detail": "未提供（--net-diff）"
+    },
+    {
+      "name": "保存/重载一致性",
+      "status": "N/A",
+      "detail": "未提供板级回读（--board / --reload-board）"
+    }
+  ],
+  "testPlan": {
+    "items": [
+      {
+        "id": "T01",
+        "category": "上电限流",
+        "what": "输入电流（限流上电）",
+        "where": "任一路输入源：J2(+5V)",
+        "expected": "典型 1.35 mA（typical），峰值场景 1.69 mA",
+        "limit": "首次上电限流 50 mA（1.5× 典型）；功能/射频测试前升到 ≥ 2.54 mA（1.5× 峰值）",
+        "method": "可调限流电源 + 电流表；先 0.5× 电压缓升，再升至标称",
+        "basis": "sim typical/peak 源电流"
+      },
+      {
+        "id": "T02",
+        "category": "电源轨",
+        "net": "+5V",
+        "what": "+5V 直流电压",
+        "where": "负载端 R7.1",
+        "expected": "5 V ± 外部电源精度（未声明）",
+        "limit": "满载 1.69 mA（peak 场景）",
+        "method": "万用表 DC V（≥4½ 位），黑表笔就近 GND 焊盘",
+        "basis": "外部电源规格未在输入中声明"
+      },
+      {
+        "id": "T03",
+        "category": "电源轨",
+        "net": "VREF",
+        "what": "VREF 直流电压",
+        "where": "负载端 U3.1",
+        "expected": "4.15 V（仿真范围 0 V–4.15 V）",
+        "limit": "满载 0.85 mA（typical 场景）",
+        "method": "万用表 DC V（≥4½ 位），黑表笔就近 GND 焊盘",
+        "basis": "sim 各场景电压"
+      }
+    ],
+    "addTestPoints": null
+  },
+  "manufacturing": {
+    "fab": [
+      {
+        "label": "层数",
+        "value": "4"
+      },
+      {
+        "label": "叠层",
+        "value": "JLC04161H-7628 (4-layer 1.6 mm, L1→L2 7628 prepreg 0.2104 mm)",
+        "note": "下单时选择同名叠层"
+      },
+      {
+        "label": "板厚",
+        "value": "1.6 mm"
+      },
+      {
+        "label": "铜厚 外/内",
+        "value": "1 oz / 0.5 oz"
+      },
+      {
+        "label": "阻抗控制",
+        "value": "不需要"
+      },
+      {
+        "label": "表面处理（建议）",
+        "value": "无铅喷锡（HASL-LF）即可"
+      },
+      {
+        "label": "阻焊/丝印（建议）",
+        "value": "绿油白字（标准）；细间距器件间保留阻焊桥",
+        "note": "建议项，非计算结果"
+      }
+    ],
+    "dfm": null,
+    "assembly": [
+      {
+        "ref": "J1",
+        "device": "KF301-5.0-2P",
+        "concern": "机械件",
+        "note": "插拔受力件：检查定位柱/固定脚焊接强度与板边对齐"
+      },
+      {
+        "ref": "J2",
+        "device": "KF301-5.0-2P",
+        "concern": "机械件",
+        "note": "插拔受力件：检查定位柱/固定脚焊接强度与板边对齐"
+      },
+      {
+        "ref": "J3",
+        "device": "HDR-1x4",
+        "concern": "机械件",
+        "note": "插拔受力件：检查定位柱/固定脚焊接强度与板边对齐"
+      },
+      {
+        "ref": "U1",
+        "device": "MCP6002T-I/SN",
+        "concern": "1 脚方向 / 湿敏",
+        "note": "按 1 脚标记贴装；湿敏等级（MSL）以数据手册为准，超时需烘烤"
+      },
+      {
+        "ref": "U2",
+        "device": "MCP3201-CI/SN",
+        "concern": "1 脚方向 / 湿敏",
+        "note": "按 1 脚标记贴装；湿敏等级（MSL）以数据手册为准，超时需烘烤"
+      },
+      {
+        "ref": "U3",
+        "device": "LM4040DIM3-4.1/NOPB",
+        "concern": "1 脚方向 / 湿敏",
+        "note": "按 1 脚标记贴装；湿敏等级（MSL）以数据手册为准，超时需烘烤"
+      }
+    ],
+    "hv": [
+      "无绝缘对（单一 SELV 域）：无铣槽/爬电特别要求"
+    ],
+    "handling": [
+      "静电防护：全程佩戴腕带、防静电台面与包装（IC/模块/ESD 器件均为静电敏感）",
+      "回流：无铅（SAC305）曲线峰值约 240–250 °C；模块类器件以其手册的回流次数/温度为准",
+      "清洗：免洗助焊剂残留在高阻/射频区域需清洗"
+    ]
+  },
+  "bringUp": {
+    "steps": [
+      {
+        "n": 1,
+        "title": "目检",
+        "action": "放大镜/AOI 检查极性与方向件：U1, U2, U3；细间距与 EP 器件检查连锡、立碑、少锡",
+        "expect": "极性/1 脚全部与丝印一致，无连锡",
+        "ifFail": "返修后重新目检，禁止带缺陷上电"
+      },
+      {
+        "n": 2,
+        "title": "断电短路检查",
+        "action": "万用表欧姆档，红表笔接各电源轨、黑表笔接 GND（见下表）",
+        "expect": "每条轨 \u003e 100 Ω，数值与下表已知路径同量级",
+        "ifFail": "\u003c 10 Ω：按电源树从源头逐段断开（拆 0 Ω/电感/二极管）定位短路"
+      },
+      {
+        "n": 3,
+        "title": "限流上电",
+        "action": "可调电源接其中一路输入（J2(+5V)，逐路验证），限流 50 mA（1.5× 典型），电压从 0 缓升到标称",
+        "expect": "空载/典型电流 ≈ 1.35 mA（仿真 typical），无器件发热",
+        "ifFail": "电流顶到限流：立即断电，回到第 2 步；局部发热用热像/手触定位"
+      },
+      {
+        "n": 4,
+        "title": "测量各电源轨",
+        "action": "按 §8 测试点计划逐条测量，从上游到下游：+5V → VREF",
+        "expect": "均在 §8 期望范围内",
+        "ifFail": "见下方故障特征表"
+      },
+      {
+        "n": 5,
+        "title": "功能与接口",
+        "action": "按 §8 测接口枚举、复位/启动键、指示灯",
+        "expect": "全部通过",
+        "ifFail": "接口失败先查差分对焊接与 CC/上下拉电阻值"
+      },
+      {
+        "n": 6,
+        "title": "带载 / 峰值",
+        "action": "运行峰值负载固件（如射频发射），记录输入电流与各轨最低电压",
+        "expect": "输入电流 ≈ 1.69 mA（仿真峰值场景），各轨不跌出容差",
+        "ifFail": "跌落：检查 IR 压降路径（§6）与输入源能力"
+      }
+    ],
+    "shortChecks": [
+      {
+        "net": "+5V",
+        "knownPath": "无已知纯电阻路径",
+        "expected": "\u003e 100 Ω（通常 kΩ 级；IC 体二极管/ESD 使读数低于纯电阻路径）",
+        "failBelow": "\u003c 10 Ω 判短路；10–100 Ω 需排查"
+      },
+      {
+        "net": "VREF",
+        "knownPath": "无已知纯电阻路径",
+        "expected": "\u003e 100 Ω（通常 kΩ 级；IC 体二极管/ESD 使读数低于纯电阻路径）",
+        "failBelow": "\u003c 10 Ω 判短路；10–100 Ω 需排查"
+      }
+    ],
+    "signatures": [
+      {
+        "symptom": "上电即顶限流",
+        "cause": "电源轨短路 / 极性件反贴 / IC 方向错",
+        "check": "断电测各轨对地电阻；目检极性件"
+      }
+    ]
+  },
+  "appendix": {
+    "nets": [
+      {
+        "net": "+5V",
+        "role": "power",
+        "class": "POWER",
+        "block": "POWER_IN",
+        "vNom": 5,
+        "vMax": 5,
+        "currentA": 0.00169,
+        "source": "simulated",
+        "outerMil": 10,
+        "innerMil": 10,
+        "clearanceMil": 6,
+        "pads": 6
+      },
+      {
+        "net": "AAF",
+        "role": "signal",
+        "class": "SIGNAL",
+        "block": "IC_U1",
+        "vNom": 0,
+        "vMax": 0,
+        "currentA": 0,
+        "source": "simulated",
+        "outerMil": 6,
+        "innerMil": 6,
+        "clearanceMil": 6,
+        "pads": 3
+      },
+      {
+        "net": "ADC_CLK",
+        "role": "clock",
+        "class": "SIGNAL",
+        "block": "IC_U2",
+        "vNom": 0,
+        "vMax": 5,
+        "currentA": 0,
+        "source": "simulated",
+        "outerMil": 6,
+        "innerMil": 6,
+        "clearanceMil": 6,
+        "pads": 2
+      },
+      {
+        "net": "ADC_CS",
+        "role": "analog",
+        "class": "SIGNAL",
+        "block": "IC_U2",
+        "vNom": 0,
+        "vMax": 5,
+        "currentA": 0,
+        "source": "simulated",
+        "outerMil": 6,
+        "innerMil": 6,
+        "clearanceMil": 6,
+        "pads": 2
+      },
+      {
+        "net": "ADC_DOUT",
+        "role": "analog",
+        "class": "SIGNAL",
+        "block": "IC_U2",
+        "vNom": 0,
+        "vMax": 5,
+        "currentA": 0,
+        "source": "simulated",
+        "outerMil": 6,
+        "innerMil": 6,
+        "clearanceMil": 6,
+        "pads": 2
+      },
+      {
+        "net": "ADC_IN",
+        "role": "analog",
+        "class": "SIGNAL",
+        "block": "IC_U2",
+        "vNom": 0,
+        "vMax": 0,
+        "currentA": 0,
+        "source": "simulated",
+        "outerMil": 6,
+        "innerMil": 6,
+        "clearanceMil": 6,
+        "pads": 3
+      },
+      {
+        "net": "BUF_OUT",
+        "role": "signal",
+        "class": "SIGNAL",
+        "block": "IC_U1",
+        "vNom": 0,
+        "vMax": 0,
+        "currentA": 0,
+        "source": "simulated",
+        "outerMil": 6,
+        "innerMil": 6,
+        "clearanceMil": 6,
+        "pads": 3
+      },
+      {
+        "net": "DIV",
+        "role": "signal",
+        "class": "SIGNAL",
+        "block": "IC_U1",
+        "vNom": 0,
+        "vMax": 0,
+        "currentA": 0,
+        "source": "simulated",
+        "outerMil": 6,
+        "innerMil": 6,
+        "clearanceMil": 6,
+        "pads": 3
+      },
+      {
+        "net": "FILT_OUT",
+        "role": "signal",
+        "class": "SIGNAL",
+        "block": "IC_U1",
+        "vNom": 0,
+        "vMax": 0,
+        "currentA": 0,
+        "source": "simulated",
+        "outerMil": 6,
+        "innerMil": 6,
+        "clearanceMil": 6,
+        "pads": 4
+      },
+      {
+        "net": "GND",
+        "role": "ground",
+        "class": "GND",
+        "vNom": 0,
+        "vMax": 0,
+        "currentA": 0.00169,
+        "source": "simulated",
+        "outerMil": 10,
+        "innerMil": 10,
+        "clearanceMil": 6,
+        "pads": 14
+      },
+      {
+        "net": "SENS_IN",
+        "role": "signal",
+        "class": "SIGNAL",
+        "block": "CONN_J1",
+        "vNom": 0,
+        "vMax": 0,
+        "currentA": 0,
+        "source": "simulated",
+        "outerMil": 6,
+        "innerMil": 6,
+        "clearanceMil": 6,
+        "pads": 2
+      },
+      {
+        "net": "SK_P",
+        "role": "signal",
+        "class": "SIGNAL",
+        "block": "IC_U1",
+        "vNom": 0,
+        "vMax": 0,
+        "currentA": 0,
+        "source": "simulated",
+        "outerMil": 6,
+        "innerMil": 6,
+        "clearanceMil": 6,
+        "pads": 3
+      },
+      {
+        "net": "SK_X",
+        "role": "signal",
+        "class": "SIGNAL",
+        "block": "IC_U1",
+        "vNom": 0,
+        "vMax": 0,
+        "currentA": 0,
+        "source": "simulated",
+        "outerMil": 6,
+        "innerMil": 6,
+        "clearanceMil": 6,
+        "pads": 3
+      },
+      {
+        "net": "VREF",
+        "role": "signal",
+        "class": "SIGNAL",
+        "block": "POWER_IN",
+        "vNom": 4.15,
+        "vMax": 4.15,
+        "currentA": 0.00085,
+        "source": "simulated",
+        "outerMil": 6,
+        "innerMil": 6,
+        "clearanceMil": 6,
+        "pads": 4
+      }
+    ],
+    "parts": [
+      {
+        "ref": "C1",
+        "device": "CL05B104KO5NNNC",
+        "kind": "capacitor",
+        "modelId": "generic-capacitor",
+        "confidence": "value",
+        "parsed": "100 nF X7R 0402 16 V",
+        "block": "IC_U1"
+      },
+      {
+        "ref": "C2",
+        "device": "CL05B103KB5NNNC",
+        "kind": "capacitor",
+        "modelId": "generic-capacitor",
+        "confidence": "value",
+        "parsed": "10 nF X7R 0402 50 V",
+        "block": "IC_U1"
+      },
+      {
+        "ref": "C3",
+        "device": "CL05B103KB5NNNC",
+        "kind": "capacitor",
+        "modelId": "generic-capacitor",
+        "confidence": "value",
+        "parsed": "10 nF X7R 0402 50 V",
+        "block": "IC_U1"
+      },
+      {
+        "ref": "C4",
+        "device": "CL05B102KB5NNNC",
+        "kind": "capacitor",
+        "modelId": "generic-capacitor",
+        "confidence": "value",
+        "parsed": "1 nF X7R 0402 50 V",
+        "block": "IC_U2"
+      },
+      {
+        "ref": "C5",
+        "device": "CL05A105KA5NQNC",
+        "kind": "capacitor",
+        "modelId": "generic-capacitor",
+        "confidence": "value",
+        "parsed": "1 µF X5R 0402 25 V",
+        "block": "IC_U2"
+      },
+      {
+        "ref": "C6",
+        "device": "CL05B104KO5NNNC",
+        "kind": "capacitor",
+        "modelId": "generic-capacitor",
+        "confidence": "value",
+        "parsed": "100 nF X7R 0402 16 V",
+        "block": "IC_U1"
+      },
+      {
+        "ref": "C7",
+        "device": "CL05B104KO5NNNC",
+        "kind": "capacitor",
+        "modelId": "generic-capacitor",
+        "confidence": "value",
+        "parsed": "100 nF X7R 0402 16 V",
+        "block": "IC_U1"
+      },
+      {
+        "ref": "J1",
+        "device": "KF301-5.0-2P",
+        "kind": "connector-source",
+        "modelId": "kf301-2p",
+        "confidence": "assumed",
+        "block": "CONN_J1"
+      },
+      {
+        "ref": "J2",
+        "device": "KF301-5.0-2P",
+        "kind": "connector-source",
+        "modelId": "kf301-2p",
+        "confidence": "assumed",
+        "block": "POWER_IN"
+      },
+      {
+        "ref": "J3",
+        "device": "HDR-1x4",
+        "kind": "connector",
+        "modelId": "generic-connector",
+        "confidence": "assumed",
+        "block": "CONN_J3"
+      },
+      {
+        "ref": "R1",
+        "device": "0402WGF1003TCE",
+        "kind": "resistor",
+        "modelId": "generic-resistor",
+        "confidence": "value",
+        "parsed": "100 kΩ ±1% 0402",
+        "block": "CONN_J1"
+      },
+      {
+        "ref": "R2",
+        "device": "0402WGF2002TCE",
+        "kind": "resistor",
+        "modelId": "generic-resistor",
+        "confidence": "value",
+        "parsed": "20 kΩ ±1% 0402",
+        "block": "IC_U1"
+      },
+      {
+        "ref": "R3",
+        "device": "0402WGF1001TCE",
+        "kind": "resistor",
+        "modelId": "generic-resistor",
+        "confidence": "value",
+        "parsed": "1 kΩ ±1% 0402",
+        "block": "IC_U1"
+      },
+      {
+        "ref": "R4",
+        "device": "0402WGF1002TCE",
+        "kind": "resistor",
+        "modelId": "generic-resistor",
+        "confidence": "value",
+        "parsed": "10 kΩ ±1% 0402",
+        "block": "IC_U1"
+      },
+      {
+        "ref": "R5",
+        "device": "0402WGF1002TCE",
+        "kind": "resistor",
+        "modelId": "generic-resistor",
+        "confidence": "value",
+        "parsed": "10 kΩ ±1% 0402",
+        "block": "IC_U1"
+      },
+      {
+        "ref": "R6",
+        "device": "0402WGF1000TCE",
+        "kind": "resistor",
+        "modelId": "generic-resistor",
+        "confidence": "value",
+        "parsed": "100 Ω ±1% 0402",
+        "block": "IC_U1"
+      },
+      {
+        "ref": "R7",
+        "device": "0402WGF1001TCE",
+        "kind": "resistor",
+        "modelId": "generic-resistor",
+        "confidence": "value",
+        "parsed": "1 kΩ ±1% 0402",
+        "block": "POWER_IN"
+      },
+      {
+        "ref": "U1",
+        "device": "MCP6002T-I/SN",
+        "kind": "load",
+        "modelId": "mcp6002",
+        "confidence": "approx",
+        "block": "IC_U1"
+      },
+      {
+        "ref": "U2",
+        "device": "MCP3201-CI/SN",
+        "kind": "load",
+        "modelId": "mcp3201",
+        "confidence": "approx",
+        "block": "IC_U2"
+      },
+      {
+        "ref": "U3",
+        "device": "LM4040DIM3-4.1/NOPB",
+        "kind": "load",
+        "modelId": "lm4040",
+        "confidence": "assumed",
+        "block": "IC_U3"
+      }
+    ],
+    "glossary": [
+      {
+        "label": "余量 Margin",
+        "value": "(额定 − 应力)/额定 × 100 %；下限类检查为 (工作值 − 下限)/工作值"
+      },
+      {
+        "label": "IR 压降",
+        "value": "直流电流在走线/过孔/平面电阻上的电压降"
+      },
+      {
+        "label": "Ipk / Irms",
+        "value": "开关电源电感电流峰值 / 有效值"
+      },
+      {
+        "label": "Isat",
+        "value": "电感饱和电流：电感量下降到规定比例时的电流"
+      },
+      {
+        "label": "VRWM",
+        "value": "TVS/ESD 反向工作电压（不导通的最高电压）"
+      },
+      {
+        "label": "VRRM",
+        "value": "二极管最大重复反向电压"
+      },
+      {
+        "label": "θJA",
+        "value": "结到环境热阻（°C/W）"
+      },
+      {
+        "label": "DC 偏压",
+        "value": "II 类 MLCC 在直流电压下有效容量下降的现象"
+      },
+      {
+        "label": "爬电距离 / 电气间隙",
+        "value": "沿绝缘表面 / 空气中两导体的最短距离"
+      },
+      {
+        "label": "TDR",
+        "value": "时域反射计：测量传输线阻抗"
+      },
+      {
+        "label": "SELV",
+        "value": "安全特低电压"
+      },
+      {
+        "label": "DFM",
+        "value": "可制造性设计"
+      },
+      {
+        "label": "EP",
+        "value": "器件底部裸露散热/接地焊盘"
+      }
+    ]
+  },
+  "missing": [
+    {
+      "section": "6 布局与布线",
+      "reason": "无 plan.json、板级 dump 或图片"
+    },
+    {
+      "section": "9.2 DFM 警告",
+      "reason": "未提供 pcb check 输出（--check）"
+    }
+  ]
+}

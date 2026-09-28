@@ -1,0 +1,26 @@
+{
+ "_doc": "analog targets of the front-end fixture: Butterworth 1 kHz anti-alias filter; 0–24 V input range on the buffer",
+ "blocks": [
+  {
+   "core": "U1:B",
+   "targets": {
+    "fcHz": 1000,
+    "q": 0.707
+   },
+   "tolPct": {
+    "fcHz": 5,
+    "q": 5
+   }
+  },
+  {
+   "core": "U1:A",
+   "inputRange": [
+    0,
+    24
+   ]
+  }
+ ],
+ "adc": {
+  "sampleRateHz": 100000
+ }
+}

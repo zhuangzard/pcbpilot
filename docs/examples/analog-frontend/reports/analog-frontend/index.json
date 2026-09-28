@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "generator": "pcbpilot report design",
+  "project": "ADC front-end (analog fixture)",
+  "versions": [
+    {
+      "version": 1,
+      "label": "v1",
+      "dir": "v1",
+      "generatedAt": "2026-09-29T00:00:00Z",
+      "verdict": "FAIL",
+      "inputsDigest": "f9d1cb89da7aa6820cc245a56290e5c8a4b71a57e3018889095d3450d6a7ee2b",
+      "inputs": {
+        "analog:模拟仿真 analog.json": "5b2b8a71b4a42a3176080846a671325ca4bf349bfd3f58e5a67ccec79f89f998",
+        "intent:设计意图 intent.json": "57336c182e9d595588b5a15df5f518b5b78e33911acb15eb25e5c747e789e688",
+        "models:功率模型/额定 power-models.json": "93ed6785b02bce42f0de698ec551f49433159b47268962368d18f83728296c79",
+        "sim:电源仿真 sim.json": "7361b63986361ebc12d73a7b5eda327f99c859655760fcd0b2fe47ede4f3fe05",
+        "values:器件值/型号": "8739d241ebc99c6011ffad2f6e26916582b92139bab88860db42ca8daacdab15"
+      },
+      "metrics": {
+        "railCurrentA": {
+          "+5V": 0.00169,
+          "VREF": 0.00085
+        },
+        "railVoltageV": {
+          "+5V": 5,
+          "VREF": 4.15
+        },
+        "marginPct": {
+          "C1 直流电压 V vs 额定": 100,
+          "C2 直流电压 V vs 额定": 100,
+          "C3 直流电压 V vs 额定": 100,
+          "C4 直流电压 V vs 额定": 100,
+          "C5 直流电压 V vs 额定": 83.4,
+          "C6 直流电压 V vs 额定": 68.8,
+          "C7 直流电压 V vs 额定": 68.8,
+          "R1 功率 P vs 封装额定": 100,
+          "R2 功率 P vs 封装额定": 100,
+          "R3 功率 P vs 封装额定": 100,
+          "R4 功率 P vs 封装额定": 100,
+          "R5 功率 P vs 封装额定": 100,
+          "R6 功率 P vs 封装额定": 100,
+          "R7 功率 P vs 封装额定": 98.8
+        },
+        "feasibility": {
+          "ok": 14,
+          "unknown": 7
+        },
+        "checks": {
+          "pcb check（DFM 重建审计）": "N/A",
+          "保存/重载一致性": "N/A",
+          "原生 DRC（EasyEDA）": "N/A",
+          "总体结论": "FAIL",
+          "焊盘网络对账（pad-net diff）": "N/A",
+          "规则同步（pcb rules check）": "N/A"
+        },
+        "suppliedW": {
+          "peak": 0.00845,
+          "terminal-j2-only": 0.00845,
+          "terminal-only": 0,
+          "typical": 0.00675
+        },
+        "intentCurrentA": {
+          "+5V": 0.00169,
+          "GND": 0.00169
+        },
+        "widthNeedMil": {
+          "+5V": 0,
+          "GND": 0
+        }
+      },
+      "findings": {
+        "intent:analog-adc-source-impedance|[C2,C3,C4,R4,R5,R6,U1] A3 U1:B: ADC 采样建立误差 1.51 LSB outside the target ≤ 0.5 LSB (inferred)": "warn: [C2,C3,C4,R4,R5,R6,U1] A3 U1:B: ADC 采样建立误差 1.51 LSB outside the target ≤ 0.5 LSB (inferred)",
+        "intent:analog-target-miss|[C2,C3,C4,R4,R5,R6,U1] A3 U1:B: 品质因数 Q 0.5 outside the target 0.707 ± 5 % (spec)": "error: [C2,C3,C4,R4,R5,R6,U1] A3 U1:B: 品质因数 Q 0.5 outside the target 0.707 ± 5 % (spec)",
+        "intent:analog-tolerance-after|[C2,C3,C4,R4,R5,R6,U1] A3 U1:B: with the proposed values 89 % of 100 Monte-Carlo runs meet every target": "info: [C2,C3,C4,R4,R5,R6,U1] A3 U1:B: with the proposed values 89 % of 100 Monte-Carlo runs meet every target",
+        "intent:assumed-model|[U3] U3 model lm4040 is marked assumed": "info: [U3] U3 model lm4040 is marked assumed"
+      }
+    }
+  ]
+}

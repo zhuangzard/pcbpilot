@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "kind": "pcbpilot.schematic-value-plan",
+  "generator": "pcbpilot sim analog",
+  "requiresUserConfirmation": true,
+  "changes": [
+    {
+      "ref": "C2",
+      "block": "A3",
+      "role": "C1",
+      "kind": "C",
+      "from": "10nF",
+      "to": "33nF",
+      "fromValue": 1e-8,
+      "toValue": 3.3e-8,
+      "series": "E6",
+      "package": "0402",
+      "part": {
+        "key": "cap.33nf_0402",
+        "lcsc": "C1585",
+        "mpn": "0402F333M500NT",
+        "deviceUuid": "d77fec7c92904db5bfcdca81ca5668d1",
+        "footprint": "C0402",
+        "value": "33nF"
+      },
+      "action": "replace-lcsc",
+      "reason": "-3 dB 频率 1.024kHz → 993.5Hz (target 1kHz ± 5 %, spec); 品质因数 Q 0.5 → 0.702 (target 0.707 ± 5 %, spec)",
+      "before": {
+        "fcHz": 1024.39,
+        "q": 0.500445
+      },
+      "after": {
+        "fcHz": 993.519,
+        "q": 0.701908
+      }
+    },
+    {
+      "ref": "C3",
+      "block": "A3",
+      "role": "C2",
+      "kind": "C",
+      "from": "10nF",
+      "to": "15nF",
+      "fromValue": 1e-8,
+      "toValue": 1.5e-8,
+      "series": "E6",
+      "package": "0402",
+      "action": "set-value",
+      "needsPartSelection": true,
+      "searchHint": "0402 15nF 10% capacitor",
+      "reason": "-3 dB 频率 1.024kHz → 993.5Hz (target 1kHz ± 5 %, spec); 品质因数 Q 0.5 → 0.702 (target 0.707 ± 5 %, spec)",
+      "before": {
+        "fcHz": 1024.39,
+        "q": 0.500445
+      },
+      "after": {
+        "fcHz": 993.519,
+        "q": 0.701908
+      }
+    },
+    {
+      "ref": "R5",
+      "block": "A3",
+      "role": "R2",
+      "kind": "R",
+      "from": "10kΩ",
+      "to": "5.1kΩ",
+      "fromValue": 10000,
+      "toValue": 5100,
+      "series": "E24",
+      "package": "0402",
+      "part": {
+        "key": "res.5k1_0402",
+        "lcsc": "C25905",
+        "mpn": "0402WGF5101TCE",
+        "deviceUuid": "ef1f93374e0c4079b48a2d1a3cec8f6b",
+        "footprint": "R0402",
+        "basic": true,
+        "value": "5.1kΩ"
+      },
+      "action": "replace-lcsc",
+      "reason": "-3 dB 频率 1.024kHz → 993.5Hz (target 1kHz ± 5 %, spec); 品质因数 Q 0.5 → 0.702 (target 0.707 ± 5 %, spec)",
+      "before": {
+        "fcHz": 1024.39,
+        "q": 0.500445
+      },
+      "after": {
+        "fcHz": 993.519,
+        "q": 0.701908
+      }
+    }
+  ],
+  "apply": [
+    "1. show the user every change (ref, old → new, reason, before/after metrics) and wait for an explicit yes — value changes are schematic edits",
+    "2. pcbpilot --project \u003cP\u003e sch list --page \u003cpage\u003e \u003e sch-list.json   # fresh primitive IDs of the page(s) holding the refs",
+    "3. pcbpilot sim analog compile-plan --plan plan.json --components sch-list.json --out value-playbook.json",
+    "4. pcbpilot --project \u003cP\u003e apply value-playbook.json --dry-run, then pcbpilot --project \u003cP\u003e apply value-playbook.json"
+  ],
+  "afterApply": [
+    "pcbpilot sch save, then re-export sch connectivity / sch list and check the values read back",
+    "pcbpilot sim analog … (confirm the new metrics), pcbpilot intent derive …, pcbpilot report design … (next report version)"
+  ],
+  "notes": [
+    "C3 → 15nF has no stocked part in standard-parts.json: select one first (pcbpilot lib by-lcsc / parts-select.py, hint \"0402 15nF 10% capacitor\") and fill changes[].part — a Value-only edit leaves the old LCSC/MPN on the BOM"
+  ]
+}

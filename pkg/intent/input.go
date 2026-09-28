@@ -24,6 +24,8 @@ type Input struct {
 	// BoardLayers is the copper layer count of the measured board the
 	// design came from (`intent derive --board`); spec.layers wins.
 	BoardLayers int
+	// Analog carries the `sim analog` summary and findings (optional).
+	Analog *AnalogInput
 }
 
 // ParseSimOutput decodes a `pcbpilot sim power` document (schemaVersion 1).

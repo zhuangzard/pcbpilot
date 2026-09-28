@@ -32,6 +32,7 @@ type Intent struct {
 	Copper      *Copper      `json:"copper,omitempty"`
 	Simulation  *SimInfo     `json:"simulation,omitempty"`
 	Definitions *Definitions `json:"definitions,omitempty"`
+	Analog      *AnalogInfo  `json:"analog,omitempty"` // sim analog summary (analog.go)
 }
 
 // Sources records provenance.

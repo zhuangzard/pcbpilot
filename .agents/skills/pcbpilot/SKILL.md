@@ -88,6 +88,7 @@ metadata:
 | 原理图 → PCB 交接与逐焊盘对账 | [recipes/schematic-to-pcb.md](references/recipes/schematic-to-pcb.md)、[`scripts/pad-net-diff.py`](scripts/pad-net-diff.py) |
 | 电源预算 → 线宽/间距/过孔（`power.json`） | [recipes/power-spec.md](references/recipes/power-spec.md) |
 | 原理图电源仿真：每网电压、每焊盘电流、buck 纹波、多输入源场景（`sim power`） | [power-sim.md](references/power-sim.md)、[power-models.json](references/power-models.json) |
+| 原理图模拟电路 SPICE 仿真与改值：运放放大/有源与无源滤波、ADC 输入建立、基准、比较器、晶振 CL、复位 RC、晶体管开关、稳压反馈；ngspice 指标 vs 目标、Monte-Carlo、值修改计划（原理图修改须用户确认）（`sim analog` / `sim tools`） | [analog-sim.md](references/analog-sim.md)、[spice-models/](references/spice-models/README.md) |
 | 原理图验收后推导设计意图：电路功能、每网电压/电流/线宽/间距/阻抗/网络类、电压域与绝缘对、设计提示（`intent derive` → `intent.json`） | [design-intent.md](references/design-intent.md) |
 | 每次运行后生成/更新客户设计报告（仿真图表、器件余量、工程计算、测试点计划、制造与上电注意；版本化 vN + 变更记录，`report design` / `--report-dir`） | [design-report.md](references/design-report.md)、[模板](templates/design-report/README.md) |
 | 机械要求 → 板框/孔/接口/禁布区（`mech.json`） | [recipes/mech-spec.md](references/recipes/mech-spec.md) |

@@ -1,0 +1,32 @@
+* pcbpilot sim analog — block A3 sallen-key-lowpass (U1:B) mode sample
+* generated from schematic connectivity; rails from pcbpilot sim power (typical scenario)
+.include "pcbpilot-generic.lib"
+V_n__5v n__5v 0 DC 5
+C_c2 n_sk_x n_filt_out 3.3e-08
+C_c3 n_sk_p 0 1.5e-08
+C_c4 n_adc_in 0 1e-09
+R_r4 n_buf_out n_sk_x 10000
+R_r5 n_sk_x n_sk_p 5100
+R_r6 n_filt_out n_adc_in 100
+X_u1_b n_sk_p n_filt_out n__5v 0 n_filt_out x_u1_b_oa x_u1_b_oi PCBPILOT_OPAMP params: gbw=1e+06 aol=398107 sr=600000 vos=0.0045 p2=3e+06 hp=0.025 hn=0.025 zout=100
+V_LINK_u1_b x_u1_b_oa x_u1_b_oi DC 0
+C_ADCPIN n_adc_in 0 7e-12
+V_SMP smp 0 PULSE(0 1 9.0625e-06 1n 1n 9.375e-07 1e-05)
+V_RST rst 0 PULSE(0 1 6.5625e-06 1n 1n 1.25e-06 1e-05)
+S_SMP n_adc_in adc_s1 smp 0 SW_ADC
+R_ADC adc_s1 adc_h 1000
+C_SH adc_h 0 2e-11
+S_RST adc_h 0 rst 0 SW_ADC
+.model SW_ADC SW(VT=0.5 VH=0 RON=1 ROFF=1e12)
+V_STIM n_buf_out 0 DC 3.6909
+.options noacct rshunt=1e12
+.control
+set filetype=ascii
+set wr_singlescale
+set wr_vecnames
+option numdgt=10
+tran 4.6875e-09 4e-05 0 4.6875e-09
+wrdata A3-sample-sample-after.txt v(n_filt_out) v(adc_h) v(smp)
+quit
+.endc
+.end

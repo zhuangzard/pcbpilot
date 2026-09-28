@@ -94,6 +94,16 @@ fixture 回归：中小板 89–100%，大型 BGA 板（RK3568、K230）55–62%
 | 模型库 | `.agents/skills/pcbpilot/references/power-models.json`（LCSC→MPN→正则，带出处与 confidence）；未知 IC 假设负载并告警 |
 | 交叉核对 | `--spice` 导出线性化 .op 网表，`--spice-check` 用 ngspice 比对节点电压 |
 
+## 原理图模拟电路仿真（`sim analog`，离线验证）
+
+| 能力 | 语义 |
+|---|---|
+| 模拟块识别 | `pkg/analogsim`：运放跟随/同相/反相/差分/积分、Sallen-Key 与 MFB 低/高通、比较器回差、电流检测/仪表放大器、分流基准、ADC 输入（SAR 采样保持）、稳压反馈分压、晶振负载电容、复位 RC、BJT/MOSFET 开关与电平转换、LC 滤波、独立 RC 低通 |
+| ngspice 分析 | `-b` 批处理 + `wrdata`：.dc 扫描（偏置/摆幅/共模）、.op、.ac（增益/fc/f0/Q）、环路增益（理想输出注入 → 相位/增益裕度）、.tran（阶跃、ADC 采样、比较器三角波、开关、复位 RC）、晶体 BVD 负载谐振、Monte-Carlo（alter 逐次） |
+| 模型库 | `.agents/skills/pcbpilot/references/spice-models/`：`analog-models.json`（带出处与 confidence）+ `pcbpilot-generic.lib` 行为宏模型；厂商 `.subckt` 放 `vendor/` 按引脚角色映射 |
+| 目标与改值 | spec 或推断目标；解析初值 → E96/E24/E12 + 库存件搜索 → ngspice 复核（只保留仿真改善）；`--apply-plan` 输出 `pcbpilot.schematic-value-plan`，`sim analog compile-plan` 编译为 `pcbpilot apply` playbook（须用户确认）；`--what-if` 内存预览 |
+| 流程集成 | `intent derive` 默认运行（finding `analog-*` 进 intent）；设计报告 §3A（内联 SVG 波特图/环路/阶跃/采样/瞬态、容差、修改前后），analog.json 与网表进报告包 `data/analog/`；`sim tools status/install` 检查/安装 ngspice |
+
 ## 设计意图（`intent derive` → `intent.json`，离线验证）
 
 | 能力 | 语义 |

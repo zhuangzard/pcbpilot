@@ -65,6 +65,7 @@ type Report struct {
 	Summary       SummarySection       `json:"summary"`
 	Requirements  *RequirementsSection `json:"requirements,omitempty"`
 	Power         *PowerSection        `json:"power,omitempty"`
+	Analog        *AnalogSection       `json:"analog,omitempty"` // §3A, see analog.go
 	Feasibility   *FeasibilitySection  `json:"feasibility,omitempty"`
 	Calcs         *CalcSection         `json:"calculations,omitempty"`
 	Layout        *LayoutSection       `json:"layout,omitempty"`

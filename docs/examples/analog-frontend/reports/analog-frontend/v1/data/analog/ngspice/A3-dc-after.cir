@@ -1,0 +1,25 @@
+* pcbpilot sim analog — block A3 sallen-key-lowpass (U1:B) mode dc
+* generated from schematic connectivity; rails from pcbpilot sim power (typical scenario)
+.include "pcbpilot-generic.lib"
+V_n__5v n__5v 0 DC 5
+C_c2 n_sk_x n_filt_out 3.3e-08
+C_c3 n_sk_p 0 1.5e-08
+C_c4 n_adc_in 0 1e-09
+R_r4 n_buf_out n_sk_x 10000
+R_r5 n_sk_x n_sk_p 5100
+R_r6 n_filt_out n_adc_in 100
+X_u1_b n_sk_p n_filt_out n__5v 0 n_filt_out x_u1_b_oa x_u1_b_oi PCBPILOT_OPAMP params: gbw=1e+06 aol=398107 sr=600000 vos=0.0045 p2=3e+06 hp=0.025 hn=0.025 zout=100
+V_LINK_u1_b x_u1_b_oa x_u1_b_oi DC 0
+C_ADCPIN n_adc_in 0 7e-12
+V_STIM n_buf_out 0 DC 0 AC 1
+.options noacct rshunt=1e12
+.control
+set filetype=ascii
+set wr_singlescale
+set wr_vecnames
+option numdgt=10
+dc V_STIM -15 15 0.015
+wrdata A3-dc-dc-after.txt v(n_filt_out) v(n_sk_p) v(n_filt_out)
+quit
+.endc
+.end

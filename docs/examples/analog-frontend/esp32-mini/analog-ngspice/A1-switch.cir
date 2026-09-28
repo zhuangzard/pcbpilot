@@ -1,0 +1,22 @@
+* pcbpilot sim analog — block A1 transistor-switch (Q1) mode switch
+* generated from schematic connectivity; rails from pcbpilot sim power (typical scenario)
+.include "pcbpilot-generic.lib"
+V_n__3v3 n__3v3 0 DC 3.318
+R_r6 n_io0 n__3v3 10000
+R_r7 n_rts n_q1_b 4700
+V_IC_q1 n_io0 ic_q1 DC 0
+Q_q1 ic_q1 n_q1_b n_dtr QM_q1
+.model QM_q1 NPN(IS=6.734e-15 BF=416.4 BR=0.7371 VAF=100 CJE=4.5p CJC=3.6p TF=0.3n TR=50n)
+V_DRV n_rts 0 PWL(0 0 6e-06 0 6.01e-06 3.318 6.9e-05 3.318 6.901e-05 0)
+V_EMIT n_dtr 0 DC 0
+.options noacct rshunt=1e12
+.control
+set filetype=ascii
+set wr_singlescale
+set wr_vecnames
+option numdgt=10
+tran 1.26e-09 0.000126 0 1.26e-09
+wrdata A1-switch-switch.txt v(n_io0) v(n_rts) i(v_ic_q1)
+quit
+.endc
+.end

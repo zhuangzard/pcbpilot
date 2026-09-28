@@ -153,6 +153,8 @@ the SVG files in charts/, images the content-addressed files in ../assets/. */ -
 > 本节不可用：{{missing $R "3"}}
 {{end}}
 
+{{template "analog" .}}
+
 ## 4 器件可行性
 {{with $R.Feasibility}}
 统计：满足 {{index .Counts "ok"}} · 临界 {{index .Counts "marginal"}} · 超限 {{index .Counts "over"}} · 需数据手册 {{index .Counts "unknown"}}

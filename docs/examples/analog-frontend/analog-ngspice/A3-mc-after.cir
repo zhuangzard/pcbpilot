@@ -1,0 +1,823 @@
+* pcbpilot sim analog — block A3 sallen-key-lowpass (U1:B) mode mc
+* generated from schematic connectivity; rails from pcbpilot sim power (typical scenario)
+.include "pcbpilot-generic.lib"
+V_n__5v n__5v 0 DC 5
+C_c2 n_sk_x n_filt_out 3.3e-08
+C_c3 n_sk_p 0 1.5e-08
+C_c4 n_adc_in 0 1e-09
+R_r4 n_buf_out n_sk_x 10000
+R_r5 n_sk_x n_sk_p 5100
+R_r6 n_filt_out n_adc_in 100
+X_u1_b n_sk_p n_filt_out n__5v 0 n_filt_out x_u1_b_oa x_u1_b_oi PCBPILOT_OPAMP params: gbw=1e+06 aol=398107 sr=600000 vos=0.0045 p2=3e+06 hp=0.025 hn=0.025 zout=100
+V_LINK_u1_b x_u1_b_oa x_u1_b_oi DC 0
+C_ADCPIN n_adc_in 0 7e-12
+V_STIM n_buf_out 0 DC 2.0525 AC 1
+.options noacct rshunt=1e12
+.control
+set filetype=ascii
+set wr_singlescale
+set wr_vecnames
+option numdgt=10
+alter c_c2 = 3.27017e-08
+alter c_c3 = 1.54839e-08
+alter c_c4 = 1.1e-09
+alter r_r4 = 10023.7
+alter r_r5 = 5081.67
+alter r_r6 = 100.566
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc000-after.txt v(n_filt_out)
+alter c_c2 = 3.49799e-08
+alter c_c3 = 1.51572e-08
+alter c_c4 = 9.99331e-10
+alter r_r4 = 10019.2
+alter r_r5 = 5121.86
+alter r_r6 = 100.336
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc001-after.txt v(n_filt_out)
+alter c_c2 = 3.37778e-08
+alter c_c3 = 1.50951e-08
+alter c_c4 = 1.01925e-09
+alter r_r4 = 9976.97
+alter r_r5 = 5111
+alter r_r6 = 99.9236
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc002-after.txt v(n_filt_out)
+alter c_c2 = 3.13123e-08
+alter c_c3 = 1.47608e-08
+alter c_c4 = 1.00286e-09
+alter r_r4 = 9984.36
+alter r_r5 = 5070.75
+alter r_r6 = 99.8206
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc003-after.txt v(n_filt_out)
+alter c_c2 = 3.34029e-08
+alter c_c3 = 1.48808e-08
+alter c_c4 = 1.05953e-09
+alter r_r4 = 10013.2
+alter r_r5 = 5124
+alter r_r6 = 99.2345
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc004-after.txt v(n_filt_out)
+alter c_c2 = 3.16708e-08
+alter c_c3 = 1.54419e-08
+alter c_c4 = 9.90548e-10
+alter r_r4 = 9987.64
+alter r_r5 = 5104.44
+alter r_r6 = 100.361
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc005-after.txt v(n_filt_out)
+alter c_c2 = 3.23831e-08
+alter c_c3 = 1.46863e-08
+alter c_c4 = 9.88945e-10
+alter r_r4 = 10006.2
+alter r_r5 = 5110.89
+alter r_r6 = 99.6732
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc006-after.txt v(n_filt_out)
+alter c_c2 = 3.16413e-08
+alter c_c3 = 1.53453e-08
+alter c_c4 = 1.00152e-09
+alter r_r4 = 9970.46
+alter r_r5 = 5113.76
+alter r_r6 = 99.8262
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc007-after.txt v(n_filt_out)
+alter c_c2 = 3.21483e-08
+alter c_c3 = 1.51025e-08
+alter c_c4 = 9.82961e-10
+alter r_r4 = 10031.7
+alter r_r5 = 5099.2
+alter r_r6 = 100.282
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc008-after.txt v(n_filt_out)
+alter c_c2 = 3.46274e-08
+alter c_c3 = 1.53732e-08
+alter c_c4 = 9.98733e-10
+alter r_r4 = 10030.5
+alter r_r5 = 5097.56
+alter r_r6 = 100.005
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc009-after.txt v(n_filt_out)
+alter c_c2 = 3.35192e-08
+alter c_c3 = 1.54452e-08
+alter c_c4 = 9.70273e-10
+alter r_r4 = 9997.76
+alter r_r5 = 5096.1
+alter r_r6 = 99.6523
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc010-after.txt v(n_filt_out)
+alter c_c2 = 3.34225e-08
+alter c_c3 = 1.52514e-08
+alter c_c4 = 9.92938e-10
+alter r_r4 = 10011.4
+alter r_r5 = 5099.87
+alter r_r6 = 99.9424
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc011-after.txt v(n_filt_out)
+alter c_c2 = 3.29028e-08
+alter c_c3 = 1.5823e-08
+alter c_c4 = 9.85452e-10
+alter r_r4 = 9982.54
+alter r_r5 = 5072.59
+alter r_r6 = 100.063
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc012-after.txt v(n_filt_out)
+alter c_c2 = 3.27366e-08
+alter c_c3 = 1.49508e-08
+alter c_c4 = 9.37454e-10
+alter r_r4 = 9918.13
+alter r_r5 = 5071.28
+alter r_r6 = 100.497
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc013-after.txt v(n_filt_out)
+alter c_c2 = 3.17173e-08
+alter c_c3 = 1.49476e-08
+alter c_c4 = 9.80844e-10
+alter r_r4 = 9999.64
+alter r_r5 = 5095.26
+alter r_r6 = 99.9667
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc014-after.txt v(n_filt_out)
+alter c_c2 = 3.05951e-08
+alter c_c3 = 1.47605e-08
+alter c_c4 = 9.77979e-10
+alter r_r4 = 10012
+alter r_r5 = 5088.22
+alter r_r6 = 100.33
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc015-after.txt v(n_filt_out)
+alter c_c2 = 3.2644e-08
+alter c_c3 = 1.54332e-08
+alter c_c4 = 9.96335e-10
+alter r_r4 = 9968.48
+alter r_r5 = 5094.25
+alter r_r6 = 100.271
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc016-after.txt v(n_filt_out)
+alter c_c2 = 3.23489e-08
+alter c_c3 = 1.4802e-08
+alter c_c4 = 1.00672e-09
+alter r_r4 = 10040.7
+alter r_r5 = 5117.38
+alter r_r6 = 99.7768
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc017-after.txt v(n_filt_out)
+alter c_c2 = 3.33082e-08
+alter c_c3 = 1.5559e-08
+alter c_c4 = 9.97066e-10
+alter r_r4 = 10036.8
+alter r_r5 = 5086.02
+alter r_r6 = 100.428
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc018-after.txt v(n_filt_out)
+alter c_c2 = 3.31499e-08
+alter c_c3 = 1.51426e-08
+alter c_c4 = 1.00937e-09
+alter r_r4 = 10013.6
+alter r_r5 = 5110.76
+alter r_r6 = 100.253
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc019-after.txt v(n_filt_out)
+alter c_c2 = 3.41525e-08
+alter c_c3 = 1.53455e-08
+alter c_c4 = 1.0034e-09
+alter r_r4 = 10018
+alter r_r5 = 5119.63
+alter r_r6 = 99.9894
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc020-after.txt v(n_filt_out)
+alter c_c2 = 3.19295e-08
+alter c_c3 = 1.45612e-08
+alter c_c4 = 9.67396e-10
+alter r_r4 = 10006.3
+alter r_r5 = 5087.04
+alter r_r6 = 99.9116
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc021-after.txt v(n_filt_out)
+alter c_c2 = 3.28816e-08
+alter c_c3 = 1.55711e-08
+alter c_c4 = 1.00273e-09
+alter r_r4 = 10015.2
+alter r_r5 = 5089.72
+alter r_r6 = 99.9359
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc022-after.txt v(n_filt_out)
+alter c_c2 = 3.39608e-08
+alter c_c3 = 1.44791e-08
+alter c_c4 = 1.00808e-09
+alter r_r4 = 9975.9
+alter r_r5 = 5082.07
+alter r_r6 = 100.279
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc023-after.txt v(n_filt_out)
+alter c_c2 = 3.28217e-08
+alter c_c3 = 1.48744e-08
+alter c_c4 = 9.70295e-10
+alter r_r4 = 9957.69
+alter r_r5 = 5105.14
+alter r_r6 = 99.6397
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc024-after.txt v(n_filt_out)
+alter c_c2 = 3.36426e-08
+alter c_c3 = 1.49266e-08
+alter c_c4 = 1.01639e-09
+alter r_r4 = 9977.47
+alter r_r5 = 5061.48
+alter r_r6 = 99.9526
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc025-after.txt v(n_filt_out)
+alter c_c2 = 3.34217e-08
+alter c_c3 = 1.47357e-08
+alter c_c4 = 9.91675e-10
+alter r_r4 = 10057.5
+alter r_r5 = 5108.07
+alter r_r6 = 100.423
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc026-after.txt v(n_filt_out)
+alter c_c2 = 3.16682e-08
+alter c_c3 = 1.44973e-08
+alter c_c4 = 1.02619e-09
+alter r_r4 = 10045.9
+alter r_r5 = 5098.45
+alter r_r6 = 99.6324
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc027-after.txt v(n_filt_out)
+alter c_c2 = 3.47568e-08
+alter c_c3 = 1.52502e-08
+alter c_c4 = 1.02013e-09
+alter r_r4 = 9985.58
+alter r_r5 = 5080.73
+alter r_r6 = 100.287
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc028-after.txt v(n_filt_out)
+alter c_c2 = 3.34453e-08
+alter c_c3 = 1.49094e-08
+alter c_c4 = 1.06318e-09
+alter r_r4 = 10016.8
+alter r_r5 = 5107.59
+alter r_r6 = 100.007
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc029-after.txt v(n_filt_out)
+alter c_c2 = 3.38591e-08
+alter c_c3 = 1.4257e-08
+alter c_c4 = 9.6208e-10
+alter r_r4 = 9991.59
+alter r_r5 = 5123.75
+alter r_r6 = 99.7067
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc030-after.txt v(n_filt_out)
+alter c_c2 = 3.19669e-08
+alter c_c3 = 1.53111e-08
+alter c_c4 = 9.84512e-10
+alter r_r4 = 9973.15
+alter r_r5 = 5125.72
+alter r_r6 = 99.6994
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc031-after.txt v(n_filt_out)
+alter c_c2 = 3.3572e-08
+alter c_c3 = 1.53091e-08
+alter c_c4 = 9.72731e-10
+alter r_r4 = 9963.86
+alter r_r5 = 5111.75
+alter r_r6 = 100.147
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc032-after.txt v(n_filt_out)
+alter c_c2 = 3.19155e-08
+alter c_c3 = 1.48562e-08
+alter c_c4 = 9.93174e-10
+alter r_r4 = 9989.3
+alter r_r5 = 5075.32
+alter r_r6 = 100.123
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc033-after.txt v(n_filt_out)
+alter c_c2 = 3.3926e-08
+alter c_c3 = 1.50966e-08
+alter c_c4 = 1.04989e-09
+alter r_r4 = 10052
+alter r_r5 = 5083.42
+alter r_r6 = 100.235
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc034-after.txt v(n_filt_out)
+alter c_c2 = 3.12102e-08
+alter c_c3 = 1.51834e-08
+alter c_c4 = 9.98235e-10
+alter r_r4 = 10019.2
+alter r_r5 = 5136.54
+alter r_r6 = 100.22
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc035-after.txt v(n_filt_out)
+alter c_c2 = 3.41182e-08
+alter c_c3 = 1.53288e-08
+alter c_c4 = 9.34103e-10
+alter r_r4 = 9969.8
+alter r_r5 = 5096.39
+alter r_r6 = 99.9113
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc036-after.txt v(n_filt_out)
+alter c_c2 = 3.57234e-08
+alter c_c3 = 1.5654e-08
+alter c_c4 = 1.01672e-09
+alter r_r4 = 10024.8
+alter r_r5 = 5128.27
+alter r_r6 = 99.6315
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc037-after.txt v(n_filt_out)
+alter c_c2 = 3.27895e-08
+alter c_c3 = 1.46692e-08
+alter c_c4 = 1.03551e-09
+alter r_r4 = 10021.3
+alter r_r5 = 5127.31
+alter r_r6 = 99.5606
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc038-after.txt v(n_filt_out)
+alter c_c2 = 3.23183e-08
+alter c_c3 = 1.54247e-08
+alter c_c4 = 9.9116e-10
+alter r_r4 = 10005.2
+alter r_r5 = 5087.36
+alter r_r6 = 100.155
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc039-after.txt v(n_filt_out)
+alter c_c2 = 3.11851e-08
+alter c_c3 = 1.48023e-08
+alter c_c4 = 9.75999e-10
+alter r_r4 = 10050.8
+alter r_r5 = 5119.24
+alter r_r6 = 99.9649
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc040-after.txt v(n_filt_out)
+alter c_c2 = 3.40694e-08
+alter c_c3 = 1.43062e-08
+alter c_c4 = 9.49295e-10
+alter r_r4 = 9908.72
+alter r_r5 = 5094.68
+alter r_r6 = 99.4184
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc041-after.txt v(n_filt_out)
+alter c_c2 = 3.28285e-08
+alter c_c3 = 1.466e-08
+alter c_c4 = 9.77432e-10
+alter r_r4 = 10024.2
+alter r_r5 = 5096.42
+alter r_r6 = 99.4962
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc042-after.txt v(n_filt_out)
+alter c_c2 = 3.27544e-08
+alter c_c3 = 1.56298e-08
+alter c_c4 = 9.77567e-10
+alter r_r4 = 9990.31
+alter r_r5 = 5109.34
+alter r_r6 = 100.107
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc043-after.txt v(n_filt_out)
+alter c_c2 = 3.31109e-08
+alter c_c3 = 1.46761e-08
+alter c_c4 = 9.64731e-10
+alter r_r4 = 9937.09
+alter r_r5 = 5103.58
+alter r_r6 = 100.088
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc044-after.txt v(n_filt_out)
+alter c_c2 = 3.256e-08
+alter c_c3 = 1.46265e-08
+alter c_c4 = 9.79171e-10
+alter r_r4 = 9955.55
+alter r_r5 = 5121.52
+alter r_r6 = 99.6773
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc045-after.txt v(n_filt_out)
+alter c_c2 = 3.42359e-08
+alter c_c3 = 1.51797e-08
+alter c_c4 = 1.00026e-09
+alter r_r4 = 10094.5
+alter r_r5 = 5112.37
+alter r_r6 = 100.234
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc046-after.txt v(n_filt_out)
+alter c_c2 = 3.34068e-08
+alter c_c3 = 1.53816e-08
+alter c_c4 = 1.05782e-09
+alter r_r4 = 10038.3
+alter r_r5 = 5075.22
+alter r_r6 = 100.231
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc047-after.txt v(n_filt_out)
+alter c_c2 = 3.22697e-08
+alter c_c3 = 1.5923e-08
+alter c_c4 = 1.00516e-09
+alter r_r4 = 10008.8
+alter r_r5 = 5102.36
+alter r_r6 = 99.4296
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc048-after.txt v(n_filt_out)
+alter c_c2 = 3.54215e-08
+alter c_c3 = 1.4808e-08
+alter c_c4 = 9.85485e-10
+alter r_r4 = 9978.97
+alter r_r5 = 5116.89
+alter r_r6 = 100.238
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc049-after.txt v(n_filt_out)
+alter c_c2 = 3.40008e-08
+alter c_c3 = 1.4996e-08
+alter c_c4 = 1.00722e-09
+alter r_r4 = 9990.71
+alter r_r5 = 5082.67
+alter r_r6 = 100.185
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc050-after.txt v(n_filt_out)
+alter c_c2 = 3.40582e-08
+alter c_c3 = 1.47114e-08
+alter c_c4 = 9.98953e-10
+alter r_r4 = 9958.13
+alter r_r5 = 5096.35
+alter r_r6 = 99.892
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc051-after.txt v(n_filt_out)
+alter c_c2 = 3.18523e-08
+alter c_c3 = 1.57072e-08
+alter c_c4 = 1.01776e-09
+alter r_r4 = 10005
+alter r_r5 = 5094.77
+alter r_r6 = 99.7399
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc052-after.txt v(n_filt_out)
+alter c_c2 = 3.32207e-08
+alter c_c3 = 1.48661e-08
+alter c_c4 = 1.00276e-09
+alter r_r4 = 10035.1
+alter r_r5 = 5100.92
+alter r_r6 = 100.126
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc053-after.txt v(n_filt_out)
+alter c_c2 = 3.39336e-08
+alter c_c3 = 1.5468e-08
+alter c_c4 = 1.0214e-09
+alter r_r4 = 9985.13
+alter r_r5 = 5091.97
+alter r_r6 = 99.82
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc054-after.txt v(n_filt_out)
+alter c_c2 = 3.43699e-08
+alter c_c3 = 1.46052e-08
+alter c_c4 = 1.07804e-09
+alter r_r4 = 9994.44
+alter r_r5 = 5088.3
+alter r_r6 = 99.7805
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc055-after.txt v(n_filt_out)
+alter c_c2 = 3.17548e-08
+alter c_c3 = 1.46866e-08
+alter c_c4 = 1.03888e-09
+alter r_r4 = 10004.4
+alter r_r5 = 5073.99
+alter r_r6 = 100.324
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc056-after.txt v(n_filt_out)
+alter c_c2 = 3.34976e-08
+alter c_c3 = 1.58918e-08
+alter c_c4 = 9.69223e-10
+alter r_r4 = 9990.39
+alter r_r5 = 5119.07
+alter r_r6 = 100.119
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc057-after.txt v(n_filt_out)
+alter c_c2 = 3.08391e-08
+alter c_c3 = 1.51367e-08
+alter c_c4 = 9.66898e-10
+alter r_r4 = 10033.4
+alter r_r5 = 5088.26
+alter r_r6 = 100.469
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc058-after.txt v(n_filt_out)
+alter c_c2 = 3.19404e-08
+alter c_c3 = 1.44314e-08
+alter c_c4 = 9.54926e-10
+alter r_r4 = 10034.2
+alter r_r5 = 5096.04
+alter r_r6 = 100.12
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc059-after.txt v(n_filt_out)
+alter c_c2 = 3.37124e-08
+alter c_c3 = 1.48501e-08
+alter c_c4 = 9.79706e-10
+alter r_r4 = 9966.33
+alter r_r5 = 5101.65
+alter r_r6 = 99.604
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc060-after.txt v(n_filt_out)
+alter c_c2 = 3.28672e-08
+alter c_c3 = 1.51894e-08
+alter c_c4 = 1.00544e-09
+alter r_r4 = 10045.3
+alter r_r5 = 5111.98
+alter r_r6 = 99.9799
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc061-after.txt v(n_filt_out)
+alter c_c2 = 3.17951e-08
+alter c_c3 = 1.49015e-08
+alter c_c4 = 9.85621e-10
+alter r_r4 = 9990.35
+alter r_r5 = 5090.97
+alter r_r6 = 100.511
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc062-after.txt v(n_filt_out)
+alter c_c2 = 3.49422e-08
+alter c_c3 = 1.50079e-08
+alter c_c4 = 9.82799e-10
+alter r_r4 = 9964.1
+alter r_r5 = 5092.37
+alter r_r6 = 99.5656
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc063-after.txt v(n_filt_out)
+alter c_c2 = 3.36725e-08
+alter c_c3 = 1.55149e-08
+alter c_c4 = 1.04142e-09
+alter r_r4 = 10029.9
+alter r_r5 = 5101.28
+alter r_r6 = 100.046
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc064-after.txt v(n_filt_out)
+alter c_c2 = 3.28852e-08
+alter c_c3 = 1.54398e-08
+alter c_c4 = 1.00847e-09
+alter r_r4 = 10046.6
+alter r_r5 = 5116.65
+alter r_r6 = 99.7891
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc065-after.txt v(n_filt_out)
+alter c_c2 = 3.36788e-08
+alter c_c3 = 1.46968e-08
+alter c_c4 = 1.01676e-09
+alter r_r4 = 10040
+alter r_r5 = 5081.29
+alter r_r6 = 100.761
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc066-after.txt v(n_filt_out)
+alter c_c2 = 3.37593e-08
+alter c_c3 = 1.47354e-08
+alter c_c4 = 9.93106e-10
+alter r_r4 = 10027.7
+alter r_r5 = 5098.34
+alter r_r6 = 100.168
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc067-after.txt v(n_filt_out)
+alter c_c2 = 3.19887e-08
+alter c_c3 = 1.4904e-08
+alter c_c4 = 1.03941e-09
+alter r_r4 = 10010.8
+alter r_r5 = 5099.31
+alter r_r6 = 99.7975
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc068-after.txt v(n_filt_out)
+alter c_c2 = 3.25687e-08
+alter c_c3 = 1.60913e-08
+alter c_c4 = 9.47895e-10
+alter r_r4 = 9989.61
+alter r_r5 = 5095.33
+alter r_r6 = 100.23
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc069-after.txt v(n_filt_out)
+alter c_c2 = 3.37238e-08
+alter c_c3 = 1.4097e-08
+alter c_c4 = 9.5171e-10
+alter r_r4 = 9998.64
+alter r_r5 = 5078.4
+alter r_r6 = 100.195
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc070-after.txt v(n_filt_out)
+alter c_c2 = 3.15972e-08
+alter c_c3 = 1.49982e-08
+alter c_c4 = 9.81586e-10
+alter r_r4 = 9977.74
+alter r_r5 = 5134.66
+alter r_r6 = 100.087
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc071-after.txt v(n_filt_out)
+alter c_c2 = 3.3162e-08
+alter c_c3 = 1.49639e-08
+alter c_c4 = 1.00684e-09
+alter r_r4 = 9976.62
+alter r_r5 = 5077.65
+alter r_r6 = 99.5785
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc072-after.txt v(n_filt_out)
+alter c_c2 = 3.34669e-08
+alter c_c3 = 1.57506e-08
+alter c_c4 = 1.01845e-09
+alter r_r4 = 10027.3
+alter r_r5 = 5094.61
+alter r_r6 = 100.555
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc073-after.txt v(n_filt_out)
+alter c_c2 = 3.32153e-08
+alter c_c3 = 1.56851e-08
+alter c_c4 = 9.42039e-10
+alter r_r4 = 10020.6
+alter r_r5 = 5127.47
+alter r_r6 = 100.173
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc074-after.txt v(n_filt_out)
+alter c_c2 = 3.27538e-08
+alter c_c3 = 1.48799e-08
+alter c_c4 = 1.00054e-09
+alter r_r4 = 10023
+alter r_r5 = 5073.09
+alter r_r6 = 99.8294
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc075-after.txt v(n_filt_out)
+alter c_c2 = 3.35243e-08
+alter c_c3 = 1.40325e-08
+alter c_c4 = 1.02251e-09
+alter r_r4 = 10036
+alter r_r5 = 5111.24
+alter r_r6 = 100.378
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc076-after.txt v(n_filt_out)
+alter c_c2 = 3.40645e-08
+alter c_c3 = 1.44929e-08
+alter c_c4 = 9.97203e-10
+alter r_r4 = 10058.6
+alter r_r5 = 5064.45
+alter r_r6 = 99.7161
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc077-after.txt v(n_filt_out)
+alter c_c2 = 3.38342e-08
+alter c_c3 = 1.4885e-08
+alter c_c4 = 9.74576e-10
+alter r_r4 = 9954.87
+alter r_r5 = 5121.34
+alter r_r6 = 100.611
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc078-after.txt v(n_filt_out)
+alter c_c2 = 3.29978e-08
+alter c_c3 = 1.56303e-08
+alter c_c4 = 1.02382e-09
+alter r_r4 = 9982.85
+alter r_r5 = 5079.99
+alter r_r6 = 100.345
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc079-after.txt v(n_filt_out)
+alter c_c2 = 3.30977e-08
+alter c_c3 = 1.50079e-08
+alter c_c4 = 9.27628e-10
+alter r_r4 = 9958.83
+alter r_r5 = 5123.77
+alter r_r6 = 100.045
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc080-after.txt v(n_filt_out)
+alter c_c2 = 3.39933e-08
+alter c_c3 = 1.49102e-08
+alter c_c4 = 9.53801e-10
+alter r_r4 = 9991.03
+alter r_r5 = 5073.56
+alter r_r6 = 100.427
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc081-after.txt v(n_filt_out)
+alter c_c2 = 3.23937e-08
+alter c_c3 = 1.53693e-08
+alter c_c4 = 1.01641e-09
+alter r_r4 = 9960.01
+alter r_r5 = 5104.41
+alter r_r6 = 99.6816
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc082-after.txt v(n_filt_out)
+alter c_c2 = 3.34367e-08
+alter c_c3 = 1.47511e-08
+alter c_c4 = 1.02942e-09
+alter r_r4 = 9978.39
+alter r_r5 = 5091.76
+alter r_r6 = 100.344
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc083-after.txt v(n_filt_out)
+alter c_c2 = 3.4198e-08
+alter c_c3 = 1.55242e-08
+alter c_c4 = 1.01039e-09
+alter r_r4 = 9999.77
+alter r_r5 = 5093.96
+alter r_r6 = 99.6519
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc084-after.txt v(n_filt_out)
+alter c_c2 = 3.25779e-08
+alter c_c3 = 1.50066e-08
+alter c_c4 = 1.00799e-09
+alter r_r4 = 9997.78
+alter r_r5 = 5092.19
+alter r_r6 = 99.8459
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc085-after.txt v(n_filt_out)
+alter c_c2 = 3.24027e-08
+alter c_c3 = 1.58133e-08
+alter c_c4 = 1.02064e-09
+alter r_r4 = 9988.18
+alter r_r5 = 5109.65
+alter r_r6 = 100.558
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc086-after.txt v(n_filt_out)
+alter c_c2 = 3.0991e-08
+alter c_c3 = 1.47529e-08
+alter c_c4 = 9.70848e-10
+alter r_r4 = 10005.2
+alter r_r5 = 5104.36
+alter r_r6 = 99.8873
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc087-after.txt v(n_filt_out)
+alter c_c2 = 3.19675e-08
+alter c_c3 = 1.50181e-08
+alter c_c4 = 1.00417e-09
+alter r_r4 = 9946.62
+alter r_r5 = 5092.35
+alter r_r6 = 99.2826
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc088-after.txt v(n_filt_out)
+alter c_c2 = 3.21177e-08
+alter c_c3 = 1.50466e-08
+alter c_c4 = 9.53937e-10
+alter r_r4 = 9968.13
+alter r_r5 = 5109.95
+alter r_r6 = 99.8439
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc089-after.txt v(n_filt_out)
+alter c_c2 = 3.16471e-08
+alter c_c3 = 1.45759e-08
+alter c_c4 = 9.9919e-10
+alter r_r4 = 9998.28
+alter r_r5 = 5069.51
+alter r_r6 = 99.7103
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc090-after.txt v(n_filt_out)
+alter c_c2 = 3.45054e-08
+alter c_c3 = 1.4491e-08
+alter c_c4 = 1.0034e-09
+alter r_r4 = 9999.31
+alter r_r5 = 5098.53
+alter r_r6 = 99.9594
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc091-after.txt v(n_filt_out)
+alter c_c2 = 3.33865e-08
+alter c_c3 = 1.49365e-08
+alter c_c4 = 1.01748e-09
+alter r_r4 = 10000.4
+alter r_r5 = 5105.6
+alter r_r6 = 100.829
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc092-after.txt v(n_filt_out)
+alter c_c2 = 3.24188e-08
+alter c_c3 = 1.52061e-08
+alter c_c4 = 9.73558e-10
+alter r_r4 = 9988.71
+alter r_r5 = 5079.2
+alter r_r6 = 99.9861
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc093-after.txt v(n_filt_out)
+alter c_c2 = 3.23385e-08
+alter c_c3 = 1.48873e-08
+alter c_c4 = 1.00345e-09
+alter r_r4 = 9969.83
+alter r_r5 = 5104.18
+alter r_r6 = 100.236
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc094-after.txt v(n_filt_out)
+alter c_c2 = 3.26766e-08
+alter c_c3 = 1.4499e-08
+alter c_c4 = 9.79337e-10
+alter r_r4 = 10011.9
+alter r_r5 = 5081.55
+alter r_r6 = 100.064
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc095-after.txt v(n_filt_out)
+alter c_c2 = 3.38238e-08
+alter c_c3 = 1.46242e-08
+alter c_c4 = 9.89514e-10
+alter r_r4 = 10015.9
+alter r_r5 = 5123.58
+alter r_r6 = 100.596
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc096-after.txt v(n_filt_out)
+alter c_c2 = 3.33164e-08
+alter c_c3 = 1.49207e-08
+alter c_c4 = 9.44292e-10
+alter r_r4 = 10030.1
+alter r_r5 = 5105.49
+alter r_r6 = 100.142
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc097-after.txt v(n_filt_out)
+alter c_c2 = 3.40445e-08
+alter c_c3 = 1.4676e-08
+alter c_c4 = 1.02959e-09
+alter r_r4 = 10035.8
+alter r_r5 = 5107.01
+alter r_r6 = 100.176
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc098-after.txt v(n_filt_out)
+alter c_c2 = 3.1239e-08
+alter c_c3 = 1.45314e-08
+alter c_c4 = 9.86882e-10
+alter r_r4 = 10042.3
+alter r_r5 = 5107.12
+alter r_r6 = 99.4161
+ac dec 40 0.993663 2e+07
+wrdata A3-mc-mc099-after.txt v(n_filt_out)
+quit
+.endc
+.end

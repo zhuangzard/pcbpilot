@@ -1,0 +1,121 @@
+{
+ "_provenance": "values of the analog front-end fixture (gen.py)",
+ "parts": {
+  "J1": {
+   "mpn": "KF301-5.0-2P",
+   "lcsc": "C474881",
+   "description": "sensor input 0–24 V"
+  },
+  "J2": {
+   "mpn": "KF301-5.0-2P",
+   "lcsc": "C474881",
+   "description": "5 V supply input"
+  },
+  "J3": {
+   "mpn": "HDR-1x4",
+   "description": "ADC SPI header"
+  },
+  "R1": {
+   "mpn": "0402WGF1003TCE",
+   "value": "100kΩ",
+   "lcsc": "C25741",
+   "description": "Resistance:100kΩ Tolerance:±1%"
+  },
+  "R2": {
+   "mpn": "0402WGF2002TCE",
+   "value": "20kΩ",
+   "lcsc": "C25765",
+   "description": "Resistance:20kΩ Tolerance:±1%"
+  },
+  "R3": {
+   "mpn": "0402WGF1001TCE",
+   "value": "1kΩ",
+   "lcsc": "C11702",
+   "description": "Resistance:1kΩ Tolerance:±1%"
+  },
+  "C1": {
+   "mpn": "CL05B104KO5NNNC",
+   "value": "100nF",
+   "lcsc": "C1525",
+   "description": "Capacitance:100nF Tolerance:±10% X7R"
+  },
+  "U1": {
+   "mpn": "MCP6002T-I/SN",
+   "value": "MCP6002",
+   "lcsc": "C7377",
+   "description": "dual RRIO op-amp 1 MHz"
+  },
+  "R4": {
+   "mpn": "0402WGF1002TCE",
+   "value": "10kΩ",
+   "lcsc": "C25744",
+   "description": "Resistance:10kΩ Tolerance:±1%"
+  },
+  "R5": {
+   "mpn": "0402WGF1002TCE",
+   "value": "10kΩ",
+   "lcsc": "C25744",
+   "description": "Resistance:10kΩ Tolerance:±1%"
+  },
+  "C2": {
+   "mpn": "CL05B103KB5NNNC",
+   "value": "10nF",
+   "lcsc": "C15195",
+   "description": "Capacitance:10nF Tolerance:±10% X7R"
+  },
+  "C3": {
+   "mpn": "CL05B103KB5NNNC",
+   "value": "10nF",
+   "lcsc": "C15195",
+   "description": "Capacitance:10nF Tolerance:±10% X7R"
+  },
+  "R6": {
+   "mpn": "0402WGF1000TCE",
+   "value": "100Ω",
+   "lcsc": "C25076",
+   "description": "Resistance:100Ω Tolerance:±1%"
+  },
+  "C4": {
+   "mpn": "CL05B102KB5NNNC",
+   "value": "1nF",
+   "lcsc": "C1523",
+   "description": "Capacitance:1nF Tolerance:±10% X7R"
+  },
+  "U2": {
+   "mpn": "MCP3201-CI/SN",
+   "value": "MCP3201",
+   "lcsc": "C79488",
+   "description": "12-bit SAR ADC SPI"
+  },
+  "U3": {
+   "mpn": "LM4040DIM3-4.1/NOPB",
+   "value": "LM4040DIM3-4.1",
+   "lcsc": "C33193",
+   "description": "4.096 V shunt reference"
+  },
+  "R7": {
+   "mpn": "0402WGF1001TCE",
+   "value": "1kΩ",
+   "lcsc": "C11702",
+   "description": "Resistance:1kΩ Tolerance:±1%"
+  },
+  "C5": {
+   "mpn": "CL05A105KA5NQNC",
+   "value": "1uF",
+   "lcsc": "C52923",
+   "description": "Capacitance:1uF Tolerance:±10% X5R"
+  },
+  "C6": {
+   "mpn": "CL05B104KO5NNNC",
+   "value": "100nF",
+   "lcsc": "C1525",
+   "description": "Capacitance:100nF Tolerance:±10% X7R"
+  },
+  "C7": {
+   "mpn": "CL05B104KO5NNNC",
+   "value": "100nF",
+   "lcsc": "C1525",
+   "description": "Capacitance:100nF Tolerance:±10% X7R"
+  }
+ }
+}

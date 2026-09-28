@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/zhuangzard/pcbpilot/internal/version"
+	"github.com/zhuangzard/pcbpilot/pkg/analogsim"
 	"github.com/zhuangzard/pcbpilot/pkg/designreport"
 	"github.com/zhuangzard/pcbpilot/pkg/intent"
 	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
@@ -31,6 +32,7 @@ type designReportOpts struct {
 	reloadBoard, drc, check     string
 	rulesCheck, netDiff, models string
 	values                      string
+	analog                      string
 	images                      []string
 	force                       bool
 	maxImageBytes               int
@@ -157,6 +159,7 @@ func addDesignReportFlags(c *cobra.Command, o *designReportOpts) {
 	f.StringVar(&o.netDiff, "net-diff", "", "pad-net diff JSON ({passed|ok, diffs[]…})")
 	f.StringVar(&o.models, "models", "", "power-models.json with ratings (default: the installed skill's references/power-models.json)")
 	f.StringVar(&o.values, "values", "", "part values/MPNs: sch list JSON or {\"parts\":{ref:{value,mpn}}}")
+	f.StringVar(&o.analog, "analog", "", "analog.json (pcbpilot sim analog): §3A analog SPICE section; its ngspice netlists/outputs are copied into vN/data/analog/")
 	f.StringArrayVar(&o.images, "image", nil, "image KIND[:LABEL]=PATH, KIND sch|layout|other (repeatable), e.g. sch:P1=p1.png, layout=snapshot.png")
 	f.BoolVar(&o.force, "force", false, "overwrite an existing version")
 	f.IntVar(&o.maxImageBytes, "max-image-bytes", designreport.DefaultMaxImageBytes, "raster images larger than this are halved until they fit")
@@ -292,6 +295,19 @@ func loadDesignReportInputs(o designReportOpts, stderr io.Writer) (*designreport
 	if err := parse("net-diff", "焊盘网络对账", o.netDiff, func(b []byte) (err error) { in.NetDiff, err = designreport.ParseNetDiff(b); return }); err != nil {
 		return nil, err
 	}
+	if err := parse("analog", "模拟仿真 analog.json", o.analog, func(b []byte) error {
+		var out analogsim.Output
+		if err := json.Unmarshal(b, &out); err != nil {
+			return err
+		}
+		if out.SchemaVersion != analogsim.SchemaVersion {
+			return fmt.Errorf("analog.json schemaVersion %d unsupported", out.SchemaVersion)
+		}
+		in.Analog = &out
+		return nil
+	}); err != nil {
+		return nil, err
+	}
 	if err := parse("values", "器件值/型号", o.values, func(b []byte) (err error) { in.Values, err = powersim.ParseValues(b); return }); err != nil {
 		return nil, err
 	}
@@ -418,6 +434,9 @@ func runDesignReport(o designReportOpts, stderr io.Writer) (string, *designrepor
 			return "", nil, err
 		}
 	}
+	if err := copyAnalogPackage(in.Analog, o.analog, dir); err != nil {
+		return "", nil, err
+	}
 	files := map[string][]byte{"report.html": html, "report.md": md, "report.json": append(js, '\n')}
 	for _, n := range []string{"report.html", "report.md", "report.json"} {
 		if err := os.WriteFile(filepath.Join(dir, n), files[n], 0o644); err != nil {
@@ -441,4 +460,23 @@ func runDesignReport(o designReportOpts, stderr io.Writer) (string, *designrepor
 	fmt.Fprintf(stderr, "design report %s: %s (%d warning reason(s), %d fail reason(s)); %d section(s) not available\n",
 		label, rep.Verdict.Status, len(rep.Verdict.Warnings), len(rep.Verdict.Reasons), len(rep.Missing))
 	return dir, rep, nil
+}
+
+// copyAnalogPackage puts analog.json and its ngspice netlists/outputs into
+// <version dir>/data/analog/ (a missing artifact file is skipped).
+func copyAnalogPackage(out *analogsim.Output, analogPath, dir string) error {
+	for _, f := range designreport.AnalogPackageFiles(out, analogPath) {
+		b, err := os.ReadFile(f.Src)
+		if err != nil {
+			continue
+		}
+		dst := filepath.Join(dir, filepath.FromSlash(f.Dest))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(dst, b, 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
 }
