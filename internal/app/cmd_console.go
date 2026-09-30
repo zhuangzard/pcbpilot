@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 	"text/tabwriter"
 	"time"
 
@@ -34,9 +33,6 @@ func mountConsole(srv *daemon.Server, host string, log io.Writer) *console.Conso
 		return nil
 	}
 	userHome, _ := os.UserHomeDir()
-	var svcMu sync.Mutex
-	var svcAt time.Time
-	var svc any
 	c, err := console.New(console.Options{
 		Version:  version.Version,
 		Host:     host,
@@ -49,14 +45,15 @@ func mountConsole(srv *daemon.Server, host string, log io.Writer) *console.Conso
 			return console.DaemonInfo{PID: os.Getpid(), Version: version.Version, Host: host, Port: srv.Port(),
 				StartedAt: srv.StartedAt(), Autosave: d > 0, AutosaveDebounce: d.String()}
 		},
-		// The login-service probe shells out (launchctl/systemctl); cache it.
-		Service: func() any {
-			svcMu.Lock()
-			defer svcMu.Unlock()
-			if time.Since(svcAt) > 30*time.Second {
-				svc, svcAt = readDaemonServiceStatus(runtime.GOOS, userHome), time.Now()
+		// The login-service probe shells out (launchctl/systemctl) and can
+		// block right after the service is (re)bootstrapped: the console runs
+		// it in the background with a deadline and serves the cached value.
+		Service: func(ctx context.Context) (any, error) {
+			st, err := readDaemonServiceStatusCtx(ctx, runtime.GOOS, userHome)
+			if err != nil {
+				return nil, err
 			}
-			return svc
+			return st, nil
 		},
 	})
 	if err != nil {

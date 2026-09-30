@@ -44,6 +44,24 @@ func MCPInstalledVersion() string {
 	return strings.TrimSpace(string(b))
 }
 
+// SourceMCP reports whether this machine is a source install (install.json
+// kind "source") whose every registered MCP client runs the checkout's
+// mcp/src/server.mjs — updated by git pull, not the release tarball. Shared by
+// `pcbpilot update --check` and the console's component table.
+func SourceMCP(clients []Registration) (string, bool) {
+	info := ReadInstallInfo()
+	if info.Kind != "source" || info.Repo == "" || len(clients) == 0 {
+		return "", false
+	}
+	server := filepath.Join(info.Repo, "mcp", "src", "server.mjs")
+	for _, r := range clients {
+		if !strings.Contains(r.Detail+" "+r.Server, server) {
+			return "", false
+		}
+	}
+	return server, true
+}
+
 // MCPCurrentTarget is the version dir current points at ("" if none).
 func MCPCurrentTarget() string {
 	t, err := os.Readlink(MCPCurrent())

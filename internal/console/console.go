@@ -17,6 +17,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"net/http"
 	"os"
@@ -41,6 +42,9 @@ type DaemonInfo struct {
 	AutosaveDebounce string    `json:"autosaveDebounce"`
 	Autosave         bool      `json:"autosave"`
 	Service          any       `json:"service,omitempty"`
+	// ServiceProbe says how fresh Service is (the probe runs in the
+	// background: checking | stale | timeout | error | ok).
+	ServiceProbe *ProbeState `json:"serviceProbe,omitempty"`
 }
 
 // Options wires the console to its daemon.
@@ -55,8 +59,14 @@ type Options struct {
 	Health func(ctx context.Context) (json.RawMessage, error)
 	// Daemon returns pid/port/uptime/autosave.
 	Daemon func() DaemonInfo
-	// Service returns the login-service status (optional).
-	Service func() any
+	// Service returns the login-service status (optional). It may block (it
+	// shells out to launchctl/systemctl); the console runs it in the
+	// background with a deadline and serves the cached value, so a slow
+	// probe never delays /api/status or the SSE hello.
+	Service func(ctx context.Context) (any, error)
+	// Probe timings (zero = defaults; tests shorten them).
+	HealthWait, HealthTimeout               time.Duration
+	ServiceWait, ServiceTimeout, ServiceTTL time.Duration
 	// BackfillDays bounds the startup audit backfill (default 60).
 	BackfillDays int
 	Now          func() time.Time
@@ -83,6 +93,9 @@ type Console struct {
 
 	scanMu    sync.Mutex
 	scanCache map[string]scanEntry
+
+	healthProbe  *probe
+	serviceProbe *probe
 }
 
 type scanEntry struct {
@@ -107,6 +120,16 @@ func New(opts Options) (*Console, error) {
 	if opts.BackfillDays <= 0 {
 		opts.BackfillDays = 60
 	}
+	def := func(d *time.Duration, v time.Duration) {
+		if *d <= 0 {
+			*d = v
+		}
+	}
+	def(&opts.HealthWait, 750*time.Millisecond)
+	def(&opts.HealthTimeout, 3*time.Second)
+	def(&opts.ServiceWait, 200*time.Millisecond)
+	def(&opts.ServiceTimeout, 10*time.Second)
+	def(&opts.ServiceTTL, 30*time.Second)
 	tok, err := EnsureToken(opts.Home)
 	if err != nil {
 		return nil, err
@@ -117,6 +140,23 @@ func New(opts Options) (*Console, error) {
 	c.asks = newAskQueue(filepath.Join(dir, "decisions.jsonl"), opts.Now, func(q *Question) { c.bus.publish("ask", q) })
 	c.runs = newRunStore(filepath.Join(dir, "runs.jsonl"), opts.Now)
 	c.reg = newRegistry(filepath.Join(dir, "registry.json"))
+	c.healthProbe = newProbe(func(ctx context.Context) (any, error) {
+		if c.opts.Health == nil {
+			return nil, errors.New("health source not wired")
+		}
+		raw, err := c.opts.Health(ctx)
+		if err != nil {
+			return nil, err
+		}
+		var m map[string]any
+		if err := json.Unmarshal(raw, &m); err != nil {
+			return nil, err
+		}
+		return m, nil
+	}, 0, opts.HealthTimeout, opts.Now)
+	if opts.Service != nil {
+		c.serviceProbe = newProbe(opts.Service, opts.ServiceTTL, opts.ServiceTimeout, opts.Now)
+	}
 	c.loadRecentActivity()
 	return c, nil
 }
@@ -197,8 +237,9 @@ func (c *Console) daemonInfo() DaemonInfo {
 	if !d.StartedAt.IsZero() {
 		d.UptimeSec = int64(c.opts.Now().Sub(d.StartedAt).Seconds())
 	}
-	if c.opts.Service != nil {
-		d.Service = c.opts.Service()
+	if c.serviceProbe != nil {
+		v, st := c.serviceProbe.get(c.opts.ServiceWait)
+		d.Service, d.ServiceProbe = v, &st
 	}
 	return d
 }
