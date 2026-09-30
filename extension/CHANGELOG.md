@@ -31,6 +31,10 @@ is unchanged.
 - **Analog: loop TL431 is not a reference** — a shunt regulator whose REF is on a divider (opto feedback
   error amplifier) is no longer simulated as a biased reference (cathode unbiased → fabricated 0 A Ik
   error); it gets a `shunt-regulator-loop` warning to verify Ik,min through the loop.
+- **Isolation slot follows the delivered placement** — a planned slot shared its polygon with the owned
+  board hole, so when the place/route loop ran a second pass and then restored the better first pass, the
+  reported slot and the playbook's `pcb.fill.create` stayed at the second pass's opto position (HV flyback
+  E2E: slot ~500 mil from U2, `pcb check` iso-creepage on U2's own pins). The hole now gets its own copy.
 - **Route-only fixes** — router `nodeCong` no longer indexes past the grid (panic on a board without an
   outline; same fix and regression test as the v0.7 console branch); a route-only run refuses mech holes that land on parts (autoSize corner holes on the part
   envelope, MH3 over SW1); part-owned holes (USB-C pegs) are restored with the measured pose.

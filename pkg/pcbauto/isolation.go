@@ -564,7 +564,12 @@ func PlanIsoSlotsDetail(b *Board, iso *IsoRules) (slots []IsoSlot, notes []strin
 	for _, pl := range plans {
 		s := pl.slot
 		slots = append(slots, s)
-		b.Holes = append(b.Holes, &Hole{Name: isoSlotPrefix + s.Ref + ":" + s.A + "|" + s.B, Owner: s.Ref, C: pl.c, Poly: s.Poly, Clr: slotClr})
+		// The hole gets its own copy of the polygon: an owned hole moves with
+		// its part (MoveTo rewrites Poly in place), and a shared slice made
+		// the reported slot — and the playbook's pcb.fill.create — follow
+		// the part into the NEXT loop pass's placement while the board was
+		// restored to the best pass (flyback E2E: slot 500 mil from U2).
+		b.Holes = append(b.Holes, &Hole{Name: isoSlotPrefix + s.Ref + ":" + s.A + "|" + s.B, Owner: s.Ref, C: pl.c, Poly: append([]Point(nil), s.Poly...), Clr: slotClr})
 	}
 	if len(slots) > 0 {
 		_ = b.Index()

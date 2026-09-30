@@ -210,6 +210,16 @@ func TestInfeasibleBridgeAndSlotAxis(t *testing.T) {
 	if s.LengthMil < 330 || s.LengthMil > 355 {
 		t.Fatalf("slot length %.1f, want ≈ 346 (rows 252 mil + 2 × 46)", s.LengthMil)
 	}
+	// The planned slot is a record of THIS placement: moving the bridge
+	// afterwards (the next place/route loop pass) must not drag it along —
+	// the loop restores the best pass's poses and emits its slots (flyback
+	// E2E: the playbook's slot landed 500 mil from the opto).
+	before := PolyBounds(s.Poly)
+	b.Part("T1").MoveTo(Point{2000, 400}, 90)
+	if after := PolyBounds(slots[0].Poly); after != before {
+		t.Fatalf("planned slot moved with its part: %+v → %+v", before, after)
+	}
+	b.Part("T1").MoveTo(Point{1000, 1300}, 0)
 	// Run + routed snapshot + offline check agree.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
