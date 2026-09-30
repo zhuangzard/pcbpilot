@@ -190,12 +190,22 @@ func Targets(onlyPresent bool) []SkillTarget {
 		if onlyPresent && !present {
 			continue
 		}
+		linked := SkillLinkTarget(dir)
+		installed := readMarker(dir)
+		if linked != "" {
+			// A symlinked source checkout never gets a fresh .version marker
+			// (a stale one from an old copy install may remain); its SKILL.md
+			// frontmatter is the version actually in use.
+			if v := linkedSkillVersion(dir); v != "" {
+				installed = v
+			}
+		}
 		out = append(out, SkillTarget{
 			Client:    c,
 			Dir:       dir,
 			Present:   present,
-			Installed: readMarker(dir),
-			Linked:    SkillLinkTarget(dir),
+			Installed: installed,
+			Linked:    linked,
 		})
 	}
 	return out
@@ -204,6 +214,19 @@ func Targets(onlyPresent bool) []SkillTarget {
 func isDir(p string) bool {
 	fi, err := os.Stat(p)
 	return err == nil && fi.IsDir()
+}
+
+// linkedSkillVersion reads metadata.version from a linked skill's SKILL.md.
+func linkedSkillVersion(dir string) string {
+	b, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
+	if err != nil {
+		return ""
+	}
+	v, err := skillMetadataVersion(string(b))
+	if err != nil {
+		return ""
+	}
+	return v
 }
 
 func readMarker(dir string) string {

@@ -86,7 +86,18 @@ func newSelfUpdater(deps updateDeps, ver string, activity func() daemon.Activity
 
 func (u *selfUpdater) now() time.Time { return u.deps.now() }
 
-func (u *selfUpdater) release() bool { return selfupdate.IsCleanRelease(u.version) }
+// release reports whether the daemon runs a release install it may upgrade
+// from release assets. A source checkout built at a release tag stamps a clean
+// version too, but its Skill, MCP and connector come from the checkout (git
+// pull + setup-agent.sh) — treating it as a release would re-point every MCP
+// client at a tarball copy and fight setup-agent.sh.
+func (u *selfUpdater) release() bool {
+	if !selfupdate.IsCleanRelease(u.version) {
+		return false
+	}
+	_, src := sourceInstall()
+	return !src
+}
 
 func (u *selfUpdater) own() string { return normVersion(u.version) }
 

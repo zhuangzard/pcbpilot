@@ -493,6 +493,12 @@ func checkMCP(eng *updateEngine, target string) *mcpCheck {
 			m.Clients = append(m.Clients, r)
 		}
 	}
+	if src, ok := sourceMCP(m.Clients); ok {
+		// Source install (scripts/setup-agent.sh): clients run the checkout's
+		// mcp/src/server.mjs, updated by git pull — not the release tarball.
+		m.Status, m.Server = "linked", src
+		return m
+	}
 	switch {
 	case !node.OK:
 		m.Status = "no-node"
@@ -509,6 +515,22 @@ func checkMCP(eng *updateEngine, target string) *mcpCheck {
 		}
 	}
 	return m
+}
+
+// sourceMCP reports whether this machine is a source install whose every
+// registered MCP client points at the checkout's server.
+func sourceMCP(clients []selfupdate.Registration) (string, bool) {
+	info := selfupdate.ReadInstallInfo()
+	if info.Kind != "source" || info.Repo == "" || len(clients) == 0 {
+		return "", false
+	}
+	server := filepath.Join(info.Repo, "mcp", "src", "server.mjs")
+	for _, r := range clients {
+		if !strings.Contains(r.Detail+" "+r.Server, server) {
+			return "", false
+		}
+	}
+	return server, true
 }
 
 // checkCLI is the read-only half of the CLI update: same verdicts as
