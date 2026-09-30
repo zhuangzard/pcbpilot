@@ -1,7 +1,9 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -40,6 +42,22 @@ var daemonServiceSleep = time.Sleep
 // returns combined output.
 var daemonServiceRunner = func(name string, args ...string) (string, error) {
 	out, err := exec.Command(name, args...).CombinedOutput()
+	return string(out), err
+}
+
+// daemonServiceProbeRunner runs the read-only status probe with a deadline
+// (the console's background service probe). Right after `launchctl bootstrap`
+// — e.g. setup-agent.sh --upgrade reloading the login service — `launchctl
+// print` can block for minutes; the deadline kills it. Swapped in tests.
+var daemonServiceProbeRunner = func(ctx context.Context, name string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	// A killed tool's children can keep the output pipe open; do not wait
+	// for them past the deadline.
+	cmd.WaitDelay = time.Second
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return string(out), fmt.Errorf("%s: %w", name, ctx.Err())
+	}
 	return string(out), err
 }
 
@@ -118,13 +136,35 @@ func daemonServiceBinary(override string) (string, error) {
 }
 
 func readDaemonServiceStatus(goos, home string) daemonServiceStatus {
+	st, _ := readDaemonServiceStatusWith(goos, home, daemonServiceRunner)
+	return st
+}
+
+// readDaemonServiceStatusCtx is readDaemonServiceStatus bounded by ctx: a
+// probe that hits the deadline returns the error instead of a guessed
+// Loaded=false.
+func readDaemonServiceStatusCtx(ctx context.Context, goos, home string) (daemonServiceStatus, error) {
+	return readDaemonServiceStatusWith(goos, home, func(name string, args ...string) (string, error) {
+		return daemonServiceProbeRunner(ctx, name, args...)
+	})
+}
+
+func readDaemonServiceStatusWith(goos, home string, run func(name string, args ...string) (string, error)) (daemonServiceStatus, error) {
 	st := daemonServiceStatus{Platform: goos, Path: daemonServicePath(goos, home)}
+	var probeErr error
+	runProbe := func(name string, args ...string) (string, error) {
+		out, err := run(name, args...)
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			probeErr = err
+		}
+		return out, err
+	}
 	switch goos {
 	case "darwin", "linux":
 		raw, err := os.ReadFile(st.Path)
 		if err != nil {
 			st.Detail = "service file missing"
-			return st
+			return st, probeErr
 		}
 		st.Installed = true
 		text := string(raw)
@@ -135,7 +175,7 @@ func readDaemonServiceStatus(goos, home string) daemonServiceStatus {
 					st.Binary = strings.NewReplacer("&amp;", "&", "&lt;", "<", "&gt;", ">", "&quot;", `"`, "&apos;", "'").Replace(rest[:j])
 				}
 			}
-			_, err := daemonServiceRunner("launchctl", "print", fmt.Sprintf("gui/%d/%s", os.Getuid(), daemonServiceLabel))
+			_, err := runProbe("launchctl", "print", fmt.Sprintf("gui/%d/%s", os.Getuid(), daemonServiceLabel))
 			st.Loaded = err == nil
 		} else {
 			for _, l := range strings.Split(text, "\n") {
@@ -147,14 +187,14 @@ func readDaemonServiceStatus(goos, home string) daemonServiceStatus {
 					}
 				}
 			}
-			out, _ := daemonServiceRunner("systemctl", "--user", "is-enabled", daemonServiceUnit)
+			out, _ := runProbe("systemctl", "--user", "is-enabled", daemonServiceUnit)
 			st.Loaded = strings.TrimSpace(out) == "enabled"
 		}
 	case "windows":
-		out, err := daemonServiceRunner("reg", "query", daemonServiceRunKey, "/v", daemonServiceRunName)
+		out, err := runProbe("reg", "query", daemonServiceRunKey, "/v", daemonServiceRunName)
 		if err != nil {
 			st.Detail = "Run key missing"
-			return st
+			return st, probeErr
 		}
 		st.Installed, st.Loaded = true, true
 		if i := strings.Index(out, "& '"); i >= 0 {
@@ -165,13 +205,13 @@ func readDaemonServiceStatus(goos, home string) daemonServiceStatus {
 		}
 	default:
 		st.Detail = "no login-service support on " + goos
-		return st
+		return st, probeErr
 	}
 	if st.Binary != "" {
 		_, err := os.Stat(st.Binary)
 		st.BinaryOK = err == nil
 	}
-	return st
+	return st, probeErr
 }
 
 func installDaemonService(goos, home, bin string, start bool, stdout io.Writer) error {

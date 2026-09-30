@@ -354,7 +354,10 @@ func (h *hub) pruneStale(now time.Time) int {
 	for _, c := range stale {
 		c.disconnect()
 		if c.ws != nil {
-			_ = c.ws.Close(websocket.StatusGoingAway, "stale connector session")
+			// Close waits for the peer's close frame (seconds); a stale
+			// connector is by definition not answering, and pruneStale runs
+			// inline on /health and every window lookup — close off-path.
+			go func(ws *websocket.Conn) { _ = ws.Close(websocket.StatusGoingAway, "stale connector session") }(c.ws)
 		}
 	}
 	return len(stale)

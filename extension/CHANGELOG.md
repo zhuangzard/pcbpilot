@@ -47,6 +47,18 @@
 - **`pcbpilot kb`** — per-project resource library: pure-Go PDF text (pdftotext fallback), md/txt/html/docx, page-bounded
   chunks, BM25 with CJK bigrams, sha256 dedupe, summary slots, tags; console drag-and-drop upload.
 - **`pcbpilot ask`** — decision cards answered in the console (long-poll, default on expiry, terminal fallback, decision log).
+- **Fix: console landing page stuck on “连接 daemon…” after a service reload.** `/api/status` (and the SSE hello) ran the
+  login-service probe synchronously under a mutex; right after `setup-agent.sh --upgrade` re-bootstraps the launchd job,
+  `launchctl print` can block for minutes, so every status request waited while `/health`, `/api/projects` and
+  `/api/events` answered. Reproduced with a temp HOME, a 494 MB synthetic audit dir, a 30 s fake `launchctl` and a
+  wedged self-updater: `/api/status` 30.46 s before, 0.2–0.3 s after (audit backfill and self-updater were not
+  involved). The service and `/health` probes now run in the background, single-flight, with a deadline (the hung
+  tool is killed, `WaitDelay` covers children holding the pipe) and a cached value; the page shows “检查中…” / the
+  cache age. `/health` itself: pruning a stale connector no longer waits up to 5 s for its websocket close handshake.
+- **Console component table follows the self-updater**: Skill rows use `selfupdate.Targets` (ZCode included; linked
+  source skills read `SKILL.md` `metadata.version` and show `linked`); the MCP row shows the release stamp
+  (`~/.pcbpilot/mcp/current/VERSION`) or `linked (source)`, like `pcbpilot update --check`, instead of
+  `mcp/package.json` 0.18.3 “info”.
 - **Fix: `pcb auto` router panic** (`nodeCong` indexed past the grid for a via disk at the board edge; ESP32 v05 board with
   `--intent --sim`), found by the console end-to-end chain `scripts/console-e2e.sh`.
 

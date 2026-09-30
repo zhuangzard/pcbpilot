@@ -206,7 +206,15 @@ function viewMonitor() {
   const activeRuns = runs.filter(r => r.status === 'running');
   const pending = S.decisions.filter(q => q.status === 'pending');
   const svc = d.service || {};
-  const svcText = svc.installed ? (svc.loaded ? '登录服务已安装并加载' : '登录服务已安装，未加载') : (svc.platform ? '未安装登录服务' : '—');
+  const sp = d.serviceProbe || {};
+  let svcText = svc.installed ? (svc.loaded ? '登录服务已安装并加载' : '登录服务已安装，未加载') : (svc.platform ? '未安装登录服务' : '—');
+  // The service probe runs in the background (launchctl/systemctl can block
+  // right after the service is reloaded); say how fresh the shown value is.
+  if (sp.state === 'checking') svcText = '检查中…';
+  else if (sp.state === 'stale') svcText += '（缓存 ' + ago(sp.at) + '，刷新中）';
+  else if (sp.state === 'timeout') svcText = svc.platform ? svcText + '（刷新超时，显示缓存）' : '检查超时，稍后重试';
+  else if (sp.state === 'error') svcText = svc.platform ? svcText + '（刷新失败）' : '检查失败';
+  const hp = st.healthProbe || {};
   return `
   <div class="stats">
     ${stat(S.online ? '在线' : '离线', 'daemon', S.online ? 'ok' : 'bad')}
@@ -239,6 +247,7 @@ function viewMonitor() {
             <td class="mono">${esc(c.version || '—')}</td><td>${pill(c.align)}${c.detail ? `<div class="muted small">${esc(c.detail)}</div>` : ''}</td></tr>`).join('') || '<tr><td colspan=3 class="muted">health 不可用</td></tr>'}
           </tbody></table>
           ${st.healthError ? `<p class="err small">health: ${esc(st.healthError)}</p>` : ''}
+          ${!st.healthError && ['stale', 'timeout'].includes(hp.state) ? `<p class="muted small">health 刷新中，显示 ${esc(ago(hp.at))} 的数据</p>` : ''}
         </div>
       </div>
       <div class="card"><h2>EasyEDA 窗口 <span class="muted">connector 实时连接</span></h2>

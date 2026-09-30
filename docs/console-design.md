@@ -45,7 +45,7 @@ CLI (pcbpilot ask / kb / project-config / 长离线命令) ────┘   审
 │ 状态 online  版本 0.7.0      │ daemon 0.7.0 aligned         │  [确认] [调整] 备注   │
 │ PID 94255  端口 127.0.0.1:…  │ CLI 0.7.0 aligned            ├──────────────────────┤
 │ 运行时长 1h 02m  自动保存 3s │ Skill(Claude) 0.6.0 stale    │ 活动运行              │
-│ 登录服务 已安装/加载         │ MCP 0.18.3 info              │  cli sim post-layout  │
+│ 登录服务 已安装/加载         │ MCP 0.7.0 / linked (source)  │  cli sim post-layout  │
 │ 更新/离线重试状态（若有）    │ connector ab12 0.7.0 aligned │  会话 host:claude …   │
 ├──────────────────────────────┴──────────────────────────────┼──────────────────────┤
 │ EasyEDA 窗口：窗口 | 宿主(V3/V4+版本) | connector | 工程 | 文档 | 连接于 | 心跳    │ 实时动作流            │
@@ -60,8 +60,8 @@ CLI (pcbpilot ask / kb / project-config / 长离线命令) ────┘   审
 
 | 组件 | 数据来源 |
 |---|---|
-| Daemon 卡 | `DaemonInfo`（pid、`Server.StartedAt`、端口、`AutosaveDebounce`）+ 登录服务状态（`readDaemonServiceStatus`，30 s 缓存） |
-| 组件版本 | daemon/CLI 同一二进制；Skill 读 `~/.claude|~/.codex|~/.agents/skills/pcbpilot/SKILL.md` 的 `version`；MCP 读 `~/.claude.json` 的 `mcpServers.pcbpilot` 与其 `package.json`（独立版本线，标 `info`）；connector 读 health `windows[].connectorVersion` 与 `connectorVersionOk`。徽章：`aligned / drift（补丁不同）/ stale（主次版本不同）/ dev / missing / info` |
+| Daemon 卡 | `DaemonInfo`（pid、`Server.StartedAt`、端口、`AutosaveDebounce`）+ 登录服务状态（`readDaemonServiceStatusCtx`：后台单飞探测，10 s 截止并杀掉挂住的 launchctl/systemctl，30 s 缓存；`serviceProbe.state` = `checking / stale / timeout / error / ok`，页面显示“检查中…”或缓存时间。`/api/status` 与 SSE hello 从不等待探测，最多等 200 ms） |
+| 组件版本 | daemon/CLI 同一二进制；Skill 与自更新共用 `selfupdate.Targets`（Claude Code / Codex / `~/.agents` / ZCode，只列已存在目录）：拷贝安装读 `.version`，软链源码安装读 `SKILL.md` 的 `metadata.version` 并标 `linked`；MCP 与 `pcbpilot update --check` 一致：各客户端（Claude Code / Codex / ZCode / `~/.agents`）的注册全部指向源码检出 `mcp/src/server.mjs` 时显示 `linked (source)`，否则显示发布戳 `~/.pcbpilot/mcp/current/VERSION`（v0.6.1 起 release 包带发布版本，不再读 `mcp/package.json`）；connector 读 health `windows[].connectorVersion` 与 `connectorVersionOk`。徽章：`aligned / drift（补丁不同）/ stale（主次版本不同）/ dev / missing / linked（源码检出，git pull 更新）` |
 | 更新状态 | health 若含 `updates`/`update`/`offline` 字段则原样展示（v0.6.1 自更新分支提供）；缺失时写明“未报告” |
 | 窗口 | health `windows[]`：宿主形态（V3/V4 + 精确版本）、工程、文档、连接与心跳时间 |
 | 项目表 | 项目注册表（见下）+ 窗口在线数 + 旧 workflow 最高阶段（诊断）+ 关联工作目录的最新报告结论 + 运行中的 CLI 命令数 |
@@ -132,7 +132,7 @@ CLI (pcbpilot ask / kb / project-config / 长离线命令) ────┘   审
 |---|---|
 | `POST /api/session` | 用 `X-Pcbpilot-Token` 换 HttpOnly `SameSite=Strict` cookie（EventSource 不能设请求头） |
 | `GET /api/events` | SSE：`hello`（daemon 身份）、`activity`、`ask`、`run`、`project`、`status`、15 s `heartbeat`；`retry: 2000` |
-| `GET /api/status` | daemon、health 原文、窗口、组件版本、更新状态透传、console 状态（订阅数、待决策、回填） |
+| `GET /api/status` | daemon、health 原文、窗口、组件版本、更新状态透传、console 状态（订阅数、待决策、回填）。health 经后台单飞探测，最多等 750 ms，超时返回上次结果并标 `healthProbe.state=stale` |
 | `GET /api/activity?limit=&project=` | 最近动作（无 payload/result，只保留 passed/saved/violations 等小字段） |
 | `GET /api/projects` | 监控项目表 + 工作目录列表（含目录状态） |
 | `GET /api/templates` | 模板、步骤、仿真、报告章节、资料类型目录 |
@@ -278,6 +278,8 @@ pcbpilot ask --question "Layout 回读版本可以进入 P7 吗？" --option ok=
 | 截图 | 内容 |
 |---|---|
 | [monitor.png](assets/console/monitor.png) / [monitor-dark.png](assets/console/monitor-dark.png) | 监控首页（亮/暗）：daemon、组件版本（Skill 0.6.0 对 0.7.0 标 stale）、窗口、运行中/历史项目、本地工作目录状态、待决策卡、活动运行、实时动作流 |
+| [monitor-service-checking.png](assets/console/monitor-service-checking.png) | daemon 启动 3 s、登录服务探测（假 launchctl 挂住）尚未返回时页面已完整渲染，服务显示“检查中…” |
+| [components-source-install.png](assets/console/components-source-install.png) | 源码安装：Skill（Claude Code / ZCode）读 `metadata.version` 标 `linked`，MCP 显示 `linked (source)`；登录服务探测返回后显示“已安装并加载” |
 | [projects.png](assets/console/projects.png) | 工作目录列表：已完成 / 失败 / 运行中 |
 | [esp32-timeline.png](assets/console/esp32-timeline.png)、[hv-flyback-timeline.png](assets/console/hv-flyback-timeline.png)、[demo-finished-timeline.png](assets/console/demo-finished-timeline.png) | 设计流程时间线与工件表（P9 按配置跳过） |
 | [esp32-sims.png](assets/console/esp32-sims.png)、[hv-flyback-sims.png](assets/console/hv-flyback-sims.png) | 仿真轮次与 Δ |

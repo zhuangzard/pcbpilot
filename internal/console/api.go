@@ -1,7 +1,6 @@
 package console
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,21 +20,19 @@ import (
 
 // ── status ────────────────────────────────────────────────────────────────
 
-func (c *Console) health(ctx context.Context) (map[string]any, error) {
-	if c.opts.Health == nil {
-		return nil, errors.New("health source not wired")
+// health returns the daemon's /health (via the background probe: at most
+// HealthWait, then the last good copy marked stale) and its freshness.
+func (c *Console) health() (map[string]any, ProbeState, error) {
+	v, st := c.healthProbe.get(c.opts.HealthWait)
+	m, _ := v.(map[string]any)
+	if m == nil {
+		msg := st.Error
+		if msg == "" {
+			msg = "daemon /health did not answer within " + c.opts.HealthWait.String() + " — still checking"
+		}
+		return nil, st, errors.New(msg)
 	}
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	raw, err := c.opts.Health(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var m map[string]any
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return nil, err
-	}
-	return m, nil
+	return m, st, nil
 }
 
 func windowsOf(h map[string]any) []map[string]any {
@@ -51,8 +48,8 @@ func windowsOf(h map[string]any) []map[string]any {
 }
 
 func (c *Console) handleStatus(w http.ResponseWriter, r *http.Request) {
-	h, err := c.health(r.Context())
-	resp := map[string]any{"daemon": c.daemonInfo(), "now": c.opts.Now().UTC()}
+	h, hst, err := c.health()
+	resp := map[string]any{"daemon": c.daemonInfo(), "now": c.opts.Now().UTC(), "healthProbe": hst}
 	if err != nil {
 		resp["healthError"] = err.Error()
 	} else {
@@ -182,7 +179,7 @@ const (
 
 func (c *Console) handleProjects(w http.ResponseWriter, r *http.Request) {
 	now := c.opts.Now()
-	h, _ := c.health(r.Context())
+	h, _, _ := c.health()
 	wins := windowsOf(h)
 	dirs, _ := LoadWorkDirs(c.home)
 	runs := c.runs.list()

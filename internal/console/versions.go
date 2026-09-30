@@ -1,11 +1,10 @@
 package console
 
 import (
-	"encoding/json"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/zhuangzard/pcbpilot/internal/selfupdate"
 )
 
 // Component is one piece of the installed tool chain with its version and an
@@ -15,7 +14,8 @@ type Component struct {
 	Version string `json:"version,omitempty"`
 	Where   string `json:"where,omitempty"`
 	// Align: aligned | drift (patch differs) | stale (major.minor differs) |
-	// dev (non-release build, no verdict) | missing | info (independently versioned)
+	// dev (non-release build, no verdict) | missing | linked (source checkout,
+	// updated by git pull)
 	Align  string `json:"align"`
 	Detail string `json:"detail,omitempty"`
 }
@@ -40,23 +40,19 @@ func alignOf(v, daemon string) string {
 	return "aligned"
 }
 
-var skillVersionRe = regexp.MustCompile(`(?m)^\s*version:\s*"?([^"\s]+)"?`)
-
-// skillDirs are where setup-agent.sh links the Skill.
-func skillDirs(userHome string) []struct{ client, dir string } {
-	claude := os.Getenv("CLAUDE_CONFIG_DIR")
-	if claude == "" {
-		claude = filepath.Join(userHome, ".claude")
+// skillClientLabel names selfupdate's skill clients for the table.
+func skillClientLabel(client string) string {
+	switch client {
+	case "claude":
+		return "Claude Code"
+	case "codex":
+		return "Codex"
+	case "zcode":
+		return "ZCode"
+	case "agents":
+		return "~/.agents"
 	}
-	codex := os.Getenv("CODEX_HOME")
-	if codex == "" {
-		codex = filepath.Join(userHome, ".codex")
-	}
-	return []struct{ client, dir string }{
-		{"Claude Code", filepath.Join(claude, "skills", "pcbpilot")},
-		{"Codex", filepath.Join(codex, "skills", "pcbpilot")},
-		{"~/.agents", filepath.Join(userHome, ".agents", "skills", "pcbpilot")},
-	}
+	return client
 }
 
 // components lists CLI/daemon, Skill installs, MCP registration and each
@@ -66,23 +62,21 @@ func components(daemonVersion, userHome string, windows []map[string]any) []Comp
 		{Name: "daemon", Version: daemonVersion, Align: "aligned", Detail: "running process"},
 		{Name: "CLI", Version: daemonVersion, Align: "aligned", Detail: "same binary as the daemon (make dev refreshes both)"},
 	}
-	found := false
-	for _, s := range skillDirs(userHome) {
-		b, err := os.ReadFile(filepath.Join(s.dir, "SKILL.md"))
-		if err != nil {
-			continue
+	// Same client list and version source as the self-updater and
+	// `pcbpilot update --check` (selfupdate.Targets): a copied install reads its
+	// .version marker, a symlinked source checkout its SKILL.md metadata.version.
+	targets := selfupdate.Targets(true)
+	for _, t := range targets {
+		c := Component{Name: "Skill (" + skillClientLabel(t.Client) + ")", Version: t.Installed, Where: t.Dir, Align: alignOf(t.Installed, daemonVersion)}
+		if t.Linked != "" {
+			c.Align, c.Detail = "linked", "linked (source) → "+t.Linked+" — updated by git pull"
 		}
-		found = true
-		v := ""
-		if m := skillVersionRe.FindSubmatch(b); m != nil {
-			v = string(m[1])
-		}
-		out = append(out, Component{Name: "Skill (" + s.client + ")", Version: v, Where: s.dir, Align: alignOf(v, daemonVersion)})
+		out = append(out, c)
 	}
-	if !found {
-		out = append(out, Component{Name: "Skill", Align: "missing", Detail: "no installed skill dir found (run scripts/setup-agent.sh)"})
+	if len(targets) == 0 {
+		out = append(out, Component{Name: "Skill", Align: "missing", Detail: "no installed skill dir found (run scripts/setup-agent.sh or `pcbpilot update`)"})
 	}
-	out = append(out, mcpComponent(userHome))
+	out = append(out, mcpComponent(daemonVersion, userHome))
 	for _, w := range windows {
 		cv, _ := w["connectorVersion"].(string)
 		id, _ := w["windowId"].(string)
@@ -108,40 +102,47 @@ func shortID(s string) string {
 	return s
 }
 
-// mcpComponent finds the pcbpilot MCP registration in Claude Code's user
-// config and reads its package version. The MCP adapter is versioned on its
-// own track, so it gets an "info" verdict, not an alignment one.
-func mcpComponent(userHome string) Component {
-	c := Component{Name: "MCP", Align: "missing", Detail: "no pcbpilot MCP registration found in ~/.claude.json"}
-	b, err := os.ReadFile(filepath.Join(userHome, ".claude.json"))
-	if err != nil {
-		return c
-	}
-	var cfg struct {
-		MCPServers map[string]struct {
-			Command string   `json:"command"`
-			Args    []string `json:"args"`
-		} `json:"mcpServers"`
-	}
-	if json.Unmarshal(b, &cfg) != nil {
-		return c
-	}
-	srv, ok := cfg.MCPServers["pcbpilot"]
-	if !ok {
-		return c
-	}
-	c.Align, c.Detail = "info", "registered (independently versioned adapter)"
-	for _, a := range append([]string{srv.Command}, srv.Args...) {
-		if strings.HasSuffix(a, "server.mjs") {
-			c.Where = a
-			pkg := filepath.Join(filepath.Dir(filepath.Dir(a)), "package.json")
-			if pb, err := os.ReadFile(pkg); err == nil {
-				var p struct{ Version string }
-				if json.Unmarshal(pb, &p) == nil {
-					c.Version = p.Version
-				}
-			}
+// mcpComponent reports the MCP server the AI clients are registered with,
+// consistent with `pcbpilot update --check`: a source install whose clients
+// all run the checkout's server is "linked (source)"; otherwise the version is
+// the release stamp in ~/.pcbpilot/mcp/current/VERSION (since v0.6.1 the
+// release mcp.tar.gz carries the release version, not mcp/package.json's).
+func mcpComponent(daemonVersion, userHome string) Component {
+	var regs []selfupdate.Registration
+	var clients []string
+	for _, r := range selfupdate.MCPRegistrations(selfupdate.ClientEnv{Home: userHome}, selfupdate.MCPEntry{}) {
+		if r.Status == "current" { // zero want: "current" = registered
+			regs = append(regs, r)
+			clients = append(clients, r.Client)
 		}
+	}
+	c := Component{Name: "MCP", Align: "missing"}
+	if len(regs) == 0 {
+		c.Detail = "no pcbpilot MCP registration found (Claude Code / Codex / ZCode / ~/.agents) — run `pcbpilot update`"
+		return c
+	}
+	registered := "registered for " + strings.Join(clients, ", ")
+	if server, ok := selfupdate.SourceMCP(regs); ok {
+		c.Version, c.Where, c.Align = "linked (source)", server, "linked"
+		c.Detail = registered + "; source checkout — updated by git pull"
+		return c
+	}
+	installed := selfupdate.MCPInstalledVersion()
+	c.Where = selfupdate.MCPServerPath()
+	if installed == "" {
+		c.Detail = registered + ", but ~/.pcbpilot/mcp/current has no VERSION — run `pcbpilot update`"
+		return c
+	}
+	c.Version, c.Align, c.Detail = installed, alignOf(installed, daemonVersion), registered+" (release-stamped)"
+	var elsewhere []string
+	for _, r := range regs {
+		if r.Server != "" && r.Server != c.Where {
+			elsewhere = append(elsewhere, r.Client+" → "+r.Server)
+		}
+	}
+	if len(elsewhere) > 0 {
+		c.Align = "stale"
+		c.Detail += "; not pointing at ~/.pcbpilot/mcp/current: " + strings.Join(elsewhere, ", ") + " — run `pcbpilot update`"
 	}
 	return c
 }
