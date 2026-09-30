@@ -144,7 +144,7 @@ func (c *Console) authorized(r *http.Request) bool {
 	if h := r.Header.Get(TokenHeader); h != "" {
 		return subtle.ConstantTimeCompare([]byte(h), []byte(tok)) == 1
 	}
-	ck, err := r.Cookie(CookieName)
+	ck, err := r.Cookie(cookieName(r))
 	if err != nil || subtle.ConstantTimeCompare([]byte(ck.Value), []byte(tok)) != 1 {
 		return false
 	}
@@ -154,10 +154,21 @@ func (c *Console) authorized(r *http.Request) bool {
 	return true
 }
 
+// cookieName scopes the session cookie to the daemon's port. Browsers share
+// cookies across ports of one host, so a second daemon on 127.0.0.1 (a test
+// or temp daemon) would otherwise overwrite this one's cookie and leave every
+// open console tab stuck on 401 "offline, reconnecting".
+func cookieName(r *http.Request) string {
+	if _, port, err := net.SplitHostPort(r.Host); err == nil && port != "" {
+		return CookieName + "_" + port
+	}
+	return CookieName
+}
+
 // handleSession exchanges a header token for an HttpOnly SameSite=Strict
 // cookie so EventSource (which cannot set headers) is authenticated.
 func (c *Console) handleSession(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{Name: CookieName, Value: c.token, Path: "/", HttpOnly: true,
+	http.SetCookie(w, &http.Cookie{Name: cookieName(r), Value: c.token, Path: "/", HttpOnly: true,
 		SameSite: http.SameSiteStrictMode})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

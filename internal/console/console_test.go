@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -111,12 +112,17 @@ func TestAuthRejects(t *testing.T) {
 	resp = req(t, srv, "POST", "/api/session", c.Token(), nil, nil)
 	var ck *http.Cookie
 	for _, k := range resp.Cookies() {
-		if k.Name == CookieName {
+		if strings.HasPrefix(k.Name, CookieName+"_") {
 			ck = k
 		}
 	}
 	if ck == nil || !ck.HttpOnly || ck.SameSite != http.SameSiteStrictMode {
 		t.Fatalf("session cookie: %+v", ck)
+	}
+	// Scoped to this daemon's port: another daemon on the same host (cookies
+	// ignore ports) must not overwrite it.
+	if u, _ := url.Parse(srv.URL); ck.Name != CookieName+"_"+u.Port() {
+		t.Fatalf("cookie %q not scoped to port %s", ck.Name, u.Port())
 	}
 	r, _ = http.NewRequest("POST", srv.URL+"/api/ask", strings.NewReader(`{"question":"x","options":[{"id":"a"}]}`))
 	r.AddCookie(ck)
