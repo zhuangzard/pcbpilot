@@ -359,9 +359,13 @@ func (r *router) arrayRoom(n *rnet, x, y int) int {
 		c    Point
 		d    float64
 	}
+	// Candidate sites a third of a via pitch apart: finer steps only
+	// re-test the same disk (an HV board's 5 mil grid gave ~1200 sites per
+	// column and the fix re-route of a 30 A inverter net ran for hours).
+	stride := max(1, int(pitch/(3*gr.g)))
 	var cs []cand
-	for dy := -rc; dy <= rc; dy++ {
-		for dx := -rc; dx <= rc; dx++ {
+	for dy := -rc; dy <= rc; dy += stride {
+		for dx := -rc; dx <= rc; dx += stride {
 			xx, yy := x+dx, y+dy
 			if !gr.in(xx, yy) {
 				continue
@@ -384,6 +388,7 @@ func (r *router) arrayRoom(n *rnet, x, y int) int {
 		if got >= need {
 			break
 		}
+		r.work++ // the virtual clock (clock.go) pays for the site tests too
 		ok := !gr.noVia[c.y*gr.W+c.x] && !r.holeClash(c.c, n.viaDrill) && !(r.holeBlk != nil && r.holeBlk[c.y*gr.W+c.x])
 		for _, q := range placed {
 			if ok && q.Dist(c.c) < pitch-1e-6 {
