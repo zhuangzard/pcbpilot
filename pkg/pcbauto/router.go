@@ -833,10 +833,12 @@ func (r *router) nodeCong(l, x, y int, rad float64) (occ float64, hist float64) 
 		return
 	}
 	for _, o := range d {
-		// The claim disk (ceil rounding) can reach one cell past the ring
-		// nodeOK checked (inner rounding): cells off the grid carry no use.
+		// Cells past the grid edge hold no claims (the span path above clamps
+		// the same way). Without this a current-sized via disk near the board
+		// edge indexed past the layer — or into the next one — and panicked
+		// (ESP32 v05 board with --intent --sim, console e2e 2026-09-28).
 		xx, yy := x+o[0], y+o[1]
-		if xx < 0 || yy < 0 || xx >= gr.W || yy >= gr.H {
+		if xx < 0 || xx >= gr.W || yy < 0 || yy >= gr.H {
 			continue
 		}
 		j := gr.idx(l, xx, yy)

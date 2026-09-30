@@ -383,8 +383,7 @@ func TestPlacerKeepsDomainEdgeBand(t *testing.T) {
 	for _, p := range []*Part{f1, r2} {
 		body := p.Body()
 		movePartCentre(p, Point{x + body.W()/2 + pl.spacing, bb.Center().Y}, p.Rotation)
-		bx := pl.box(p)
-		in := outside(bx, pl.regionOf(p))
+		in := padsOutside(pl.edgeBand[p])
 		if p == f1 && in <= 0 {
 			t.Errorf("F1 (mains) %.0f mil from the edge costs nothing against its %.0f mil band", p.Body().MinX-bb.MinX, req)
 		}

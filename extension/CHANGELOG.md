@@ -22,14 +22,17 @@ is unchanged.
   load was heating its pads to 8374 °C.
 - **Board-edge bands by domain in placement** — the placer keeps each part's own domain edge band (mains
   reinforced creepage to an accessible edge, 259.9 mil on the 230 V flyback) instead of the 20 mil layer
-  default, and `autoSize` keeps it per part. Intent domain net lists are disjoint (a Y capacitor no longer
+  default, and `autoSize` keeps it per part. The band is priced per pad (a bridge keeps it on its
+  hazardous pads only) at 1/20 of the isolation-shortfall weight, so the placer never trades creepage
+  between domains for edge distance; a band remainder stays a `pcb check` ERROR. The legaliser also skips
+  re-spiralling a part whose last full search found nothing at an unchanged cost. Intent domain net lists are disjoint (a Y capacitor no longer
   lists the SELV ground under MAINS) and the edge policy takes the per-net domain — GND_S lost its false
   mains band. HV flyback E2E: `copper-to-edge` 9 → 0; fixture J1/D1/C1 moved out of the band.
 - **Analog: loop TL431 is not a reference** — a shunt regulator whose REF is on a divider (opto feedback
   error amplifier) is no longer simulated as a biased reference (cathode unbiased → fabricated 0 A Ik
   error); it gets a `shunt-regulator-loop` warning to verify Ik,min through the loop.
 - **Route-only fixes** — router `nodeCong` no longer indexes past the grid (panic on a board without an
-  outline); a route-only run refuses mech holes that land on parts (autoSize corner holes on the part
+  outline; same fix and regression test as the v0.7 console branch); a route-only run refuses mech holes that land on parts (autoSize corner holes on the part
   envelope, MH3 over SW1); part-owned holes (USB-C pegs) are restored with the measured pose.
 
 ## [0.6.0] — 2026-09-28

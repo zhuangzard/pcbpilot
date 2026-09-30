@@ -110,9 +110,10 @@ type placer struct {
 	// on a domain with an edge band (mains/hazardous: reinforced creepage to
 	// an accessible edge) — more than the layer default region keeps.
 	edgeReq  map[*Part]float64
-	decap    map[*Part]*Pad     // decap → the core power pad it serves
-	servedBy map[string][]*Part // core ref → its decaps, in board order
-	tether   map[*Part]*tether  // auxiliary → the core pads it serves, by role
+	edgeBand map[*Part][]padBand // its pads with a band, each with the board inset it must stay in (precomputed: partCost is hot)
+	decap    map[*Part]*Pad      // decap → the core power pad it serves
+	servedBy map[string][]*Part  // core ref → its decaps, in board order
+	tether   map[*Part]*tether   // auxiliary → the core pads it serves, by role
 	conv     map[*Part]*Converter
 	swPads   map[*Converter][]*Pad // switch-node pads, resolved once
 	chains   map[*Part][]*SignalChain
@@ -216,10 +217,21 @@ func (pl *placer) setup(res *PlaceResult) {
 	pol := pl.an.edgePolicy(b)
 	base := math.Max(b.Rules.EdgeClearance+pl.spacing, pol.LayerReq(LayerTop))
 	pl.region = bb.Expand(-base)
-	pl.edgeReq = map[*Part]float64{}
+	pl.edgeReq, pl.edgeBand = map[*Part]float64{}, map[*Part][]padBand{}
 	for _, p := range b.Parts {
 		if r := partEdgeReq(p, pol); r > base {
 			pl.edgeReq[p] = r
+			// Per pad: a bridge (opto, transformer, Y cap) keeps the band on
+			// its hazardous pads only, its SELV side may sit nearer the edge.
+			for _, pd := range p.Pads {
+				l := pd.Layer
+				if l == LayerMulti {
+					l = LayerTop
+				}
+				if req := pol.Req(l, pd.Net); req > base {
+					pl.edgeBand[p] = append(pl.edgeBand[p], padBand{pd: pd, in: bb.Expand(-req)})
+				}
+			}
 		}
 	}
 	only := map[string]bool{}
@@ -536,7 +548,17 @@ func (pl *placer) partCost(p *Part) float64 {
 	// Board / zone containment of the body.
 	z := pl.zoneOf[p]
 	if !p.Fixed {
-		cost += 20 * outside(bx, pl.regionOf(p))
+		cost += 20 * outside(bx, pl.region)
+		// Domain edge band: the band is a copper-to-edge distance, so it
+		// holds the pads (a terminal's body may overhang toward the edge).
+		if bs := pl.edgeBand[p]; len(bs) > 0 {
+			// Per mil of shortfall, 1/20 of the isolation weight (isoCost
+			// 800/mil): the legaliser must never buy band by giving up the
+			// barrier between domains (inverter/flyback stress lost 1–8 mil
+			// of creepage at equal weights); a band remainder it cannot clear
+			// stays visible to pcb check copper-to-edge.
+			cost += 40 * padsOutside(bs)
+		}
 		cen := bx.Center()
 		dx := math.Max(0, math.Max(z.MinX-cen.X, cen.X-z.MaxX))
 		dy := math.Max(0, math.Max(z.MinY-cen.Y, cen.Y-z.MaxY))
@@ -585,17 +607,22 @@ func (pl *placer) partCost(p *Part) float64 {
 }
 
 // outside is the body area outside r.
-// regionOf is where a part's body (plus half the spacing) must stay: the
-// placement region, shrunk to the part's own domain edge band.
-func (pl *placer) regionOf(p *Part) Rect {
-	if r := pl.edgeReq[p]; r > 0 {
-		bb := pl.b.Bounds()
-		if len(pl.b.Outline) >= 3 {
-			bb = PolyBounds(pl.b.Outline)
-		}
-		return bb.Expand(-(r + pl.spacing/2))
+// padBand is one pad that must stay inside `in` (the board inset by the
+// pad's domain edge distance).
+type padBand struct {
+	pd *Pad
+	in Rect
+}
+
+// padsOutside is how far (mil, summed over pads) the banded pads reach past
+// their insets — 0 when every pad keeps its domain edge band.
+func padsOutside(bs []padBand) float64 {
+	out := 0.0
+	for _, b := range bs {
+		pb, r := b.pd.Box.Bounds(), b.in
+		out += math.Max(0, math.Max(r.MinX-pb.MinX, pb.MaxX-r.MaxX)) + math.Max(0, math.Max(r.MinY-pb.MinY, pb.MaxY-r.MaxY))
 	}
-	return pl.region
+	return out
 }
 
 // partEdgeReq is the largest board-edge distance any pad of p needs.
@@ -1069,14 +1096,26 @@ func (pl *placer) legalise() {
 	pl.rebuildBuckets()
 	order := append([]*Part(nil), pl.movable...)
 	sort.SliceStable(order, func(i, j int) bool { return order[i].Body().Area() > order[j].Body().Area() })
+	// stuck: parts whose last spiral found no better pose, at that cost. The
+	// full spiral (400 rings × 4 turns) of a bridge that cannot reach zero
+	// (a transformer straddling the isolation strip) costs 10–40 s; with its
+	// local cost unchanged the same search finds the same nothing.
+	stuck := map[*Part]float64{}
 	for pass := 0; pass < 3; pass++ {
 		moved := false
 		for _, p := range order {
-			if pl.hardCost(p) <= 1e-6 {
+			hc := pl.hardCost(p)
+			if hc <= 1e-6 {
+				continue
+			}
+			if c, ok := stuck[p]; ok && c == hc {
 				continue
 			}
 			if pl.spiral(p) {
 				moved = true
+				delete(stuck, p)
+			} else {
+				stuck[p] = pl.hardCost(p)
 			}
 		}
 		if !moved {
@@ -1399,7 +1438,16 @@ func (pl *placer) autosize() []Point {
 	base := math.Max(pl.m.MarginMil+pl.b.Rules.EdgeClearance, pol.LayerReq(LayerTop))
 	r := EmptyRect()
 	for _, p := range pl.b.Parts {
-		r = r.Union(p.Body().Expand(math.Max(base, partEdgeReq(p, pol))))
+		r = r.Union(p.Body().Expand(base))
+		for _, pd := range p.Pads {
+			l := pd.Layer
+			if l == LayerMulti {
+				l = LayerTop
+			}
+			if req := pol.Req(l, pd.Net); req > base {
+				r = r.Union(pd.Box.Bounds().Expand(req))
+			}
+		}
 	}
 	pl.b.Outline = RoundedRect(r, math.Min(80, r.W()/10))
 	return pl.b.Outline
