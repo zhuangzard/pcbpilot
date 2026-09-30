@@ -47,6 +47,10 @@ reports/<name>/
 | `--spice` | `sim power --spice sim.cir` | 包内无网表 |
 | `--image KIND[:LABEL]=PATH` | `sch export-image`、`pcb stage-snapshot`；`heat:TOP=heatmaps/temp-TOP.svg` 指定热图 | §6 无图 |
 
+项目流程模板：`--project-config`（默认读取当前目录的 `pcbpilot.project.json`，`none` 关闭）。被模板关闭的
+步骤与报告章节写入 §11.5“按项目流程模板跳过”（含理由），被跳过的章节不再计入“未生成内容”；§7 的 N/A
+仍表示没有证据，不因跳过而变成通过。
+
 所有输入以“路径 + sha256”记录在封面与附录；给了但读不出的文件直接报错（避免静默变薄）。
 图片只作展示证据，数值结论全部来自对象回读与计算。
 

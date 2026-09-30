@@ -326,6 +326,7 @@ code{font-size:12px;word-break:break-all}
 <h3>11.3 原始输入溯源</h3>
 <table><thead><tr><th>类型</th><th>路径</th><th>字节</th><th>sha256</th></tr></thead><tbody>{{range $R.Inputs}}{{if .Present}}<tr><td>{{.Kind}}</td><td><code>{{.Path}}</code></td><td class="n">{{.Bytes}}</td><td><code>{{.SHA256}}</code></td></tr>{{end}}{{end}}</tbody></table>
 {{- if $R.Missing}}<h3>11.4 未生成内容</h3><ul>{{range $R.Missing}}<li>§{{.Section}}：{{.Reason}}</li>{{end}}</ul>{{end}}
+{{- with $R.ProcessSkips}}<h3>11.5 按项目流程模板跳过</h3><p>来源 {{.Source}}{{if .Template}}（模板 {{.Template}}）{{end}}；以下为有意跳过，不计入缺失。</p><ul>{{range .Steps}}<li>步骤 {{.Section}}：{{.Reason}}</li>{{end}}{{range .Sections}}<li>§{{.Section}}：{{.Reason}}</li>{{end}}</ul>{{end}}
 <h3>11.5 术语表</h3>
 <table><tbody>{{range $R.Appendix.Glossary}}<tr><th>{{.Label}}</th><td>{{.Value}}</td></tr>{{end}}</tbody></table>
 <p class="muted">本报告由 {{$R.Generator}} 依据上述输入自动生成；数值均可由 report.json 复核。工程参考值（安全距离、降额准则）最终以器件数据手册与认证机构为准。</p>

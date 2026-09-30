@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -21,6 +22,7 @@ import (
 	"github.com/zhuangzard/pcbpilot/pkg/intent"
 	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
 	"github.com/zhuangzard/pcbpilot/pkg/powersim"
+	"github.com/zhuangzard/pcbpilot/pkg/projectconfig"
 )
 
 // designReportOpts are the inputs of one report version.
@@ -39,6 +41,9 @@ type designReportOpts struct {
 	force                       bool
 	maxImageBytes               int
 	date                        string
+	// projectConfig: "" = auto (./pcbpilot.project.json when present), "none",
+	// or a path to the file / its work dir.
+	projectConfig string
 }
 
 func newReportCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
@@ -169,6 +174,7 @@ func addDesignReportFlags(c *cobra.Command, o *designReportOpts) {
 	f.BoolVar(&o.force, "force", false, "overwrite an existing version")
 	f.IntVar(&o.maxImageBytes, "max-image-bytes", designreport.DefaultMaxImageBytes, "raster images larger than this are halved until they fit")
 	f.StringVar(&o.date, "date", "", "generatedAt override (RFC3339); default SOURCE_DATE_EPOCH or now")
+	f.StringVar(&o.projectConfig, "project-config", "", "pcbpilot.project.json (file or work dir) whose skipped steps/sections the report lists; default ./pcbpilot.project.json when present, \"none\" to ignore")
 }
 
 // reportInput reads one optional input file and records its provenance.
@@ -401,7 +407,42 @@ func loadDesignReportInputs(o designReportOpts, stderr io.Writer) (*designreport
 	for _, f := range ri.files {
 		in.Data[strings.TrimPrefix(f.Role, "data:")] = f.Rel
 	}
+	skips, err := reportProcessSkips(o.projectConfig)
+	if err != nil {
+		return nil, nil, err
+	}
+	in.ProcessSkips = skips
 	return in, ri.files, nil
+}
+
+// reportProcessSkips reads the project process template so the report says
+// which steps and sections were skipped on purpose (and why) instead of
+// listing them as missing evidence.
+func reportProcessSkips(spec string) (*designreport.ProcessSkips, error) {
+	if spec == "none" {
+		return nil, nil
+	}
+	dir := spec
+	if spec == "" {
+		dir = "."
+	} else if st, err := os.Stat(spec); err == nil && !st.IsDir() {
+		dir = filepath.Dir(spec)
+	}
+	c, err := projectconfig.Load(dir)
+	if errors.Is(err, projectconfig.ErrNotFound) && spec == "" {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("--project-config: %w", err)
+	}
+	ps := &designreport.ProcessSkips{Template: c.Template, Source: projectconfig.Path(dir)}
+	for _, s := range c.SkippedSteps() {
+		ps.Steps = append(ps.Steps, designreport.Missing{Section: s.ID + " " + s.Title, Reason: s.Reason})
+	}
+	for _, s := range c.SkippedSections() {
+		ps.Sections = append(ps.Sections, designreport.Missing{Section: s.ID + " " + s.Title, Reason: s.Reason})
+	}
+	return ps, nil
 }
 
 // runDesignReport builds and publishes one report version.

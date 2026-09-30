@@ -501,6 +501,11 @@ input/evidence files in data/ (one self-contained package per version). */ -}}
 **未生成内容**
 {{range $R.Missing}}
 - §{{.Section}}：{{.Reason}}{{end}}
+{{end}}{{with $R.ProcessSkips}}
+**按项目流程模板跳过**（来源 {{.Source}}{{if .Template}}，模板 {{.Template}}{{end}}；有意跳过，不计入缺失）
+{{range .Steps}}
+- 步骤 {{.Section}}：{{.Reason}}{{end}}{{range .Sections}}
+- §{{.Section}}：{{.Reason}}{{end}}
 {{end}}
 | 术语 | 含义 |
 |---|---|

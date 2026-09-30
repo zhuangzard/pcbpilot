@@ -100,8 +100,34 @@ func Build(in *Inputs) *Report {
 	c.buildManufacturing()
 	c.buildBringUp()
 	c.buildAppendix()
+	c.applyProcessSkips()
 	c.buildSummary()
 	return c.rep
+}
+
+// applyProcessSkips records the project template's deliberate omissions and
+// drops the matching "missing" entries: a section the project chose to skip
+// is reported as skipped (with the reason), not as missing evidence. The
+// verification rows (§7) are untouched — N/A there still means no evidence.
+func (c *ctx) applyProcessSkips() {
+	ps := c.in.ProcessSkips
+	if ps == nil {
+		return
+	}
+	c.rep.ProcessSkips = ps
+	skipped := map[string]bool{}
+	for _, s := range ps.Sections {
+		skipped[strings.Fields(s.Section)[0]] = true
+	}
+	var keep []Missing
+	for _, m := range c.rep.Missing {
+		id := strings.Fields(m.Section)
+		if len(id) > 0 && skipped[id[0]] {
+			continue
+		}
+		keep = append(keep, m)
+	}
+	c.rep.Missing = keep
 }
 
 func inputsDigest(refs []InputRef) string {

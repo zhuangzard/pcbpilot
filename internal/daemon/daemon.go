@@ -99,6 +99,10 @@ type Server struct {
 	// "<action>|<windowId>" — see acquireExclusive / nonReentrant.
 	inflight sync.Map
 
+	// ext holds the additive extension points (extra routes, activity sink,
+	// bound port) used by the v0.7 console — see extensions.go.
+	ext serverExt
+
 	// connCtx is cancelled on shutdown so connector read loops unblock.
 	connCtx    context.Context
 	connCancel context.CancelFunc
@@ -235,6 +239,7 @@ func (s *Server) routes(port int) *http.ServeMux {
 	// covers many of) the calls it judges, and keeping it daemon-local means the
 	// connector never needs a rebuild for it.
 	mux.HandleFunc("/writeverify", s.handleWriteVerify)
+	s.mountExtensions(mux)
 	return mux
 }
 
@@ -267,6 +272,7 @@ func (s *Server) Run(ctx context.Context, log io.Writer) error {
 	}
 
 	s.log = log
+	s.ext.bound(port)
 	s.connCtx, s.connCancel = context.WithCancel(context.Background())
 	defer s.connCancel()
 

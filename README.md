@@ -89,6 +89,18 @@ CAT III 600 V、400 V 逆变）与高速（USB3、HDMI、PCIe、千兆以太网�
   <img src="docs/assets/postsim-current-top.png" width="420" alt="设计后仿真：电流密度图"/>
 </p>
 
+### v0.7（开发中，未发布）：console 本地驾驶舱
+
+daemon 在 `http://127.0.0.1:61832/ui/` 提供本地网页（`pcbpilot console open`，令牌在 `~/.pcbpilot/console.token`，仅回环）：
+**监控首页**实时显示 daemon（pid/运行时长/端口/自动保存/登录服务）、各组件版本对齐（CLI、Skill、MCP、每个窗口的 connector）、
+EasyEDA 窗口、**系统做过的全部项目**（运行中/空闲/已结束、DRC 与报告结论、时长、最后错误，重启后保留）和实时动作流；
+项目页有设计流程时间线（S0–P11，证据视图）、仿真轮次与差值、报告预览、资料库（拖放上传 + BM25 检索，`pcbpilot kb`）、
+流程配置（`pcbpilot.project.json`，`pcbpilot project-config`，Skill 先读、跳过项写进报告）；`pcbpilot ask` 决策卡在页面上回答。
+console 从不编辑 EDA 工程，写入仍只走 typed action。本地 Agent（Claude Code / Codex）桥接是 v0.8 计划。
+设计与 API 见 [docs/console-design.md](docs/console-design.md)。
+
+<p align="center"><img src="docs/assets/console/monitor.png" width="860" alt="console 监控首页"/></p>
+
 ### 设计报告（每次运行自动更新，版本化交付客户）
 
 `report design` 按固定模板生成单文件 HTML（图表内联，可离线打开、打印）+ Markdown + JSON，每次运行一个新版本

@@ -37,6 +37,14 @@ type auditEntry struct {
 	// root-causing is impossible: the titleblock.modify 0/32 investigation had
 	// to reconstruct the cause from the payload alone.
 	ErrorDetail string `json:"errorDetail,omitempty"`
+	// Project context of the answering window (from the response context) and
+	// the calling CLI's working directory. Additive (v0.7 console): lets the
+	// console attribute history to projects and work dirs from the log alone.
+	ProjectUUID  string `json:"projectUuid,omitempty"`
+	ProjectName  string `json:"projectName,omitempty"`
+	DocumentUUID string `json:"documentUuid,omitempty"`
+	DocumentType string `json:"documentType,omitempty"`
+	OutputDir    string `json:"outputDir,omitempty"`
 }
 
 // EnvAuditDir overrides the audit log root, mirroring PCBPILOT_WORKFLOW_DIR
@@ -52,6 +60,9 @@ type auditWriter struct {
 	// disabled writers drop every entry. Only the in-test default fallback
 	// sets this — see newAuditWriter.
 	disabled bool
+	// sink, when set, receives every entry (even when disabled) — the console
+	// activity bus hook (extensions.go). Called outside the file lock.
+	sink func(auditEntry)
 }
 
 // newAuditWriter resolves the audit root: the explicit dir, else
@@ -84,6 +95,9 @@ func newAuditWriter(dir string) *auditWriter {
 // Append writes one entry. Failures are best-effort: audit-log errors must
 // never break the dispatch path.
 func (a *auditWriter) Append(entry auditEntry) {
+	if a != nil && a.sink != nil {
+		a.sink(entry)
+	}
 	if a == nil || a.disabled {
 		return
 	}
@@ -122,6 +136,7 @@ func fromResponse(started time.Time, req *protocol.Request, resp *protocol.Respo
 		Action:     req.Action,
 		Payload:    req.Payload,
 		DurationMs: time.Since(started).Milliseconds(),
+		OutputDir:  req.OutputDir,
 	}
 	if resp != nil {
 		e.OK = resp.OK
@@ -130,6 +145,10 @@ func fromResponse(started time.Time, req *protocol.Request, resp *protocol.Respo
 			e.ErrorCode = resp.Error.Code
 			e.ErrorMsg = resp.Error.Message
 			e.ErrorDetail = resp.Error.Detail
+		}
+		if c := resp.Context; c != nil {
+			e.ProjectUUID, e.ProjectName = c.ProjectUUID, c.ProjectName
+			e.DocumentUUID, e.DocumentType = c.DocumentUUID, c.DocumentType
 		}
 	}
 	return e

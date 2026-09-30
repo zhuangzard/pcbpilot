@@ -106,6 +106,7 @@ metadata:
 | 布线难点回推原理图（换脚/加去耦/拆轨/换封装，`feedback.json` → `sch pin-swap`，须用户确认） | [pcb-auto.md#闭环布线难点回推原理图](references/pcb-auto.md#闭环布线难点回推原理图)、[pin-capabilities.json](references/pin-capabilities.json) |
 | EDA 配置、考试设计规则、PWR 网络类绑定 | [pcb-config.md](references/pcb-config.md) |
 | 从需求到整板 | [design-flow.md](references/design-flow.md)、[design-decisions.md](references/design-decisions.md) |
+| **开工先读**项目流程模板 `pcbpilot.project.json`（跳过的步骤/仿真/报告章节 + 约束；`project-config show`）；查资料库（`kb search --docs → --doc → kb show --pages`，引用 `kb:<id>#p<页>`）；需要用户取舍时发决策卡（`pcbpilot ask`） | [design-flow.md#开工前项目配置资料库与决策卡](references/design-flow.md#开工前项目配置资料库与决策卡) |
 | 选型、标准电路、库器件 | [part-selection.md](references/part-selection.md)、[library-authoring.md](references/library-authoring.md)、[standard-parts.json](references/standard-parts.json) |
 | action 或队列字段 | [actions.md](references/actions.md)；未知官方接口先 `pcbpilot api search/show` |
 

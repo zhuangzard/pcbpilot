@@ -47,6 +47,8 @@ type Inputs struct {
 	Data map[string]string
 	// Refs is the provenance of every input kind (present or not).
 	Refs []InputRef
+	// ProcessSkips comes from pcbpilot.project.json (optional).
+	ProcessSkips *ProcessSkips
 }
 
 // Board is the subset of a `pcb dump` document the report reads (units mil).

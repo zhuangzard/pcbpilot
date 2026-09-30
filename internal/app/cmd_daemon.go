@@ -45,6 +45,7 @@ func newDaemonStartCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command 
 	var autosaveDebounce time.Duration
 	var autoUpdateSkill bool
 	var selfUpdate bool
+	withConsole := true
 	c := &cobra.Command{
 		Use:   "start",
 		Short: "Start the daemon (blocks until SIGINT/SIGTERM)",
@@ -149,6 +150,11 @@ extension/src/transport.ts).`,
 			case autoUpdateSkill:
 				go runStartupSkillSync(ctx, stdout)
 			}
+			if withConsole {
+				if c := mountConsole(srv, cfg.host, stdout); c != nil {
+					defer c.Stop()
+				}
+			}
 			if err := srv.Run(ctx, stdout); err != nil {
 				return err
 			}
@@ -160,6 +166,8 @@ extension/src/transport.ts).`,
 	}
 	c.Flags().DurationVar(&autosaveDebounce, "autosave-debounce", 3*time.Second,
 		"autosave a window this long after its last mutating action (0 = disable)")
+	c.Flags().BoolVar(&withConsole, "console", true,
+		"serve the local web console at /ui (loopback only; token in ~/.pcbpilot/console.token)")
 	c.Flags().BoolVar(&autoUpdateSkill, "auto-update-skill", true,
 		"on startup, sync installed skill dirs to this daemon's release; skip dev builds (best-effort)")
 	c.Flags().BoolVar(&selfUpdate, "self-update", true,

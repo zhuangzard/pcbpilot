@@ -82,6 +82,17 @@ type Report struct {
 	Package string `json:"package,omitempty"`
 	// Missing lists the sections (or parts of them) left out and why.
 	Missing []Missing `json:"missing,omitempty"`
+	// ProcessSkips lists the steps and sections the project's process
+	// template (pcbpilot.project.json) skipped on purpose, with reasons.
+	ProcessSkips *ProcessSkips `json:"processSkips,omitempty"`
+}
+
+// ProcessSkips is the project process template's deliberate omissions.
+type ProcessSkips struct {
+	Template string    `json:"template,omitempty"`
+	Source   string    `json:"source,omitempty"`
+	Steps    []Missing `json:"steps,omitempty"`
+	Sections []Missing `json:"sections,omitempty"`
 }
 
 // ToolInfo names the tool chain the evidence came from.
