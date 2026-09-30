@@ -336,6 +336,9 @@ func viaShortFeedback(res *Result) []*FeedbackItem {
 // when nothing else connects (completion; the shortfall is then reported).
 const arrayMissFac = 10.0
 
+// arrayRoomSites bounds the sites arrayRoom tests per column.
+const arrayRoomSites = 48
+
 // arrayRoom counts the extra array vias that fit round column (x, y)
 // against the static obstacles (other nets' pads, keepouts, board edge,
 // fan-out holes), picked like viaArray: ≥ one via pitch from the transition
@@ -384,11 +387,15 @@ func (r *router) arrayRoom(n *rnet, x, y int) int {
 	})
 	placed := []Point{P}
 	got := 0
-	for _, c := range cs {
-		if got >= need {
+	for k, c := range cs {
+		// The nearest sites decide: past arrayRoomSites the column is
+		// crowded anyway, and on an HV board every site test (clearance
+		// owners, isolation territory) costs as much as a hundred A*
+		// steps — the virtual clock (clock.go) is charged accordingly.
+		if got >= need || k >= arrayRoomSites {
 			break
 		}
-		r.work++ // the virtual clock (clock.go) pays for the site tests too
+		r.work += 100
 		ok := !gr.noVia[c.y*gr.W+c.x] && !r.holeClash(c.c, n.viaDrill) && !(r.holeBlk != nil && r.holeBlk[c.y*gr.W+c.x])
 		for _, q := range placed {
 			if ok && q.Dist(c.c) < pitch-1e-6 {
