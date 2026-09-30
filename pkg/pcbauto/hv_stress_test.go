@@ -292,6 +292,9 @@ func intentStandard() safety.Standard {
 // The optional re-route passes only start when the context leaves room for
 // a full pass (they ran HV boards past the command deadline).
 func TestTimeLeft(t *testing.T) {
+	if VirtualClock() {
+		t.Skip("PCBPILOT_BENCH_WORK set: on the virtual clock wall deadlines do not gate the passes (by design)")
+	}
 	if !timeLeft(context.Background(), time.Minute) {
 		t.Fatal("no deadline must leave time")
 	}

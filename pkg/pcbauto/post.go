@@ -130,10 +130,20 @@ func (r *router) emit(res *RouteResult) {
 	if auditHook != nil {
 		auditHook("repair", r)
 	}
-	// High-speed pairs: equalise intra-pair length before the final gate.
+	// Pairs routed as a unit: pull the follower onto the exact pair pitch
+	// (the grid holds it within a cell of it), then equalise intra-pair
+	// length before the final gate.
+	if !r.opt.NoRepair {
+		r.snapPairGaps(outs, res, collect)
+	}
 	r.tuneLengths(outs, res)
 	if auditHook != nil {
 		auditHook("tune", r)
+	}
+	// Current-carrying transitions whose array came out short: larger drill,
+	// another transition, or no layer change (viafix.go).
+	if !r.opt.NoRepair {
+		r.completeViaArrays(outs, collect)
 	}
 	// Final gate: nothing that violates DRC is shipped. A violation with a
 	// routed party drops that net's routing; one with none — two fan-out vias,
@@ -183,6 +193,16 @@ func (r *router) emit(res *RouteResult) {
 		}
 	}
 
+	// The final gate may have dropped array vias: complete them again (the
+	// alternatives accept only DRC-clean copper).
+	if !r.opt.NoRepair {
+		r.completeViaArrays(outs, collect)
+	}
+	res.Notes = append(res.Notes, r.fixNotes...)
+	res.ViaShortfalls = r.viaShortfalls()
+	for _, s := range res.ViaShortfalls {
+		res.Notes = append(res.Notes, sprintf("via array UNRESOLVED: %s — %s; tried: %s", s.Net, s.Reason, joinSemi(s.Tried)))
+	}
 	conn, routed := 0, 0
 	for _, n := range r.nets {
 		if n.viaShort > 0 && len(n.paths) > 0 {
@@ -312,7 +332,7 @@ func (r *router) emitNet(n *rnet) *netOut {
 	}
 	r.applyClaims(n.claims, -1)
 	var newClaims []int32
-	n.viaShort = 0
+	n.viaShort, n.shortAt = 0, nil
 	for _, p := range n.paths {
 		runs := splitRuns(gr, p)
 		for ri, run := range runs {

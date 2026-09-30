@@ -196,9 +196,18 @@ func (r *Report) WriteMarkdown(w io.Writer) {
 	if si := r.SI; si != nil && (len(si.Pairs) > 0 || len(si.Groups) > 0 || len(si.Findings) > 0) {
 		p("## 6. 高速信号\n\n")
 		if len(si.Pairs) > 0 {
-			p("| 差分对 | 长度差 mil | 允许 mil |\n|---|---|---|\n")
+			p("| 差分对 | 长度差 mil | 允许 mil | 主体耦合 %% | 端部未耦合 / 预算 mil | 过孔 P/N | 层 P/N |\n|---|---|---|---|---|---|---|\n")
 			for _, pr := range si.Pairs {
-				p("| %s / %s | %.0f | %.0f |\n", pr.P, pr.N, pr.SkewMil, pr.LimitMil)
+				if c := pr.Coupling; c != nil {
+					body := sprintf("%.0f（主体 %.0f mil）", c.CoupledPct, c.BodyMil)
+					if c.BodyMil < pairMinBodyMil {
+						body = sprintf("—（全在出线区；整根耦合 %.0f/%.0f mil）", c.CoupledPMil, c.CoupledNMil)
+					}
+					p("| %s / %s | %.0f | %.0f | %s | %.0f / %.0f | %d / %d | %v / %v |\n", pr.P, pr.N, pr.SkewMil, pr.LimitMil,
+						body, c.UncoupledMil, c.BreakoutMil, c.ViasP, c.ViasN, c.LayersP, c.LayersN)
+					continue
+				}
+				p("| %s / %s | %.0f | %.0f | – | – | – | – |\n", pr.P, pr.N, pr.SkewMil, pr.LimitMil)
 			}
 			p("\n")
 		}

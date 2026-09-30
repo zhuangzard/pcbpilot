@@ -1,5 +1,33 @@
 # Changelog
 
+## [Unreleased] — v0.6.2 core routing fixes (development, not released)
+
+**Two electrical defects of the router fixed at the root.** Offline engine + Skill only; no connector change.
+
+- **Via count by current is enforced per layer transition.** A current-carrying net (intent / `--sim`) whose via
+  array came out short at a transition (HV flyback stress board: `VOUT_RAW` got 2 of the intent's 3 × 0.4 mm vias,
+  `pcb check` via-current ERROR, margin −10.9 %) now gets, in order: a larger JLC-ladder drill in place, the layer
+  change slid along the same route to a column with room for the whole array, the connection re-routed with the
+  short site banned and array-less transition columns priced, a single-layer re-route, a larger drill re-routed.
+  Only when all fail is it reported — `plan.json route.viaShortfalls[]` (site, planned/short, size, current, why
+  each alternative failed), a `via array UNRESOLVED` note and a high-severity `via-current` feedback item — never
+  silently. No-via keep-outs now keep the via pad off them, not just its centre. New `make stress-hv` variant
+  `flyback/2000m-e2e` (the e2e chain's `--place --timeout 90s` configuration) reproduces the dev defect
+  deterministically; every HV variant now fails on a via-current ERROR without a reported shortfall.
+- **Differential pairs are routed as coupled pairs, and checked as such.** `CheckSI` measures each pair's coupled
+  share outside the breakout zones, uncoupled length per end against a breakout budget, via-count and layer
+  symmetry (`coupling` / `uncoupled` / `via-asymmetry` / `layer-asymmetry`; limits per HS class, sources in
+  `si.go`). The ESP32 mini USB pair (2 vs 0 vias, 0 mil coupled) that used to report clean now fails. The router
+  routes a pair as a unit: a leader that leaves its partner room, a follower on the offset path at the impedance
+  gap with paired vias on the leader's layer sequence, atomic rip-up in negotiation (penalties decay per round),
+  a final snap of the follower onto the exact pitch, and a free fallback where the geometry cannot couple the pair.
+  The pipeline routes a board's declared pairs both as units and leg by leg (also on each finer-grid retry) and
+  keeps the units only when they complete as much, with no more DRC violations and no worse electrical group
+  (ESD stub, loops, IR) — completion ranks before coupling.
+- **Deterministic fixture bench**: `make fixture-bench-det` (`PCBPILOT_BENCH_WORK`, `RouteOptions.WorkRate`) runs
+  the router on a virtual clock counted in search work, so scores no longer depend on machine load; the env var
+  works for any routing run (stress suites too); real runs keep the wall-clock budget.
+
 ## [Unreleased] — v0.7 console (development, not released)
 
 **Local web cockpit served by the daemon.** No connector change.

@@ -2,6 +2,7 @@ package pcbauto
 
 import (
 	"context"
+	"math"
 	"strings"
 	"time"
 )
@@ -60,10 +61,10 @@ func Run(ctx context.Context, b *Board, opt Options) (*Result, error) {
 	isoSlots, isoNotes, isoBad := PlanIsoSlotsDetail(b, pre.Iso)
 	st := DecideStackup(b, pre, opt.Stack)
 	res := &Result{}
-	try := func(st *Stackup) (*Analysis, *RouteResult, *DRCReport, error) {
+	route1 := func(st *Stackup, ro RouteOptions, label string) (*Analysis, *RouteResult, *DRCReport, error) {
 		an := Analyze(b, opt.Power, st)
 		start := time.Now()
-		rr, err := Route(ctx, b, st, an, opt.Route)
+		rr, err := Route(ctx, b, st, an, ro)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -72,8 +73,32 @@ func Run(ctx context.Context, b *Board, opt Options) (*Result, error) {
 		}
 		rr.Power = powerIntegrity(b, an, st, rr)
 		drc := CheckDRCStrict(b, an, st, rr.Tracks, rr.Vias)
-		res.Attempts = append(res.Attempts, Attempt{Stack: stackLabel(st), Completion: rr.Stats.Completion,
-			Vias: rr.Stats.Vias + rr.Stats.FanoutVias, Violations: len(drc.Violations), Millis: time.Since(start).Milliseconds()})
+		res.Attempts = append(res.Attempts, Attempt{Stack: stackLabel(st) + label, Completion: rr.Stats.Completion,
+			Vias: rr.Stats.Vias + rr.Stats.FanoutVias, Violations: len(drc.Violations), Millis: attemptMillis(start, rr)})
+		return an, rr, drc, nil
+	}
+	try := func(st *Stackup) (*Analysis, *RouteResult, *DRCReport, error) {
+		an, rr, drc, err := route1(st, opt.Route, "")
+		if err != nil || opt.Route.NoPairUnit || !hasUnitPairs(an) || !timeLeft(ctx, opt.Route.Timeout) {
+			return an, rr, drc, err
+		}
+		// Declared pairs were routed as units. Completion ranks above pair
+		// coupling only as far as the unit costs connections: route the
+		// same stack leg by leg too and keep the units only when they
+		// complete as much, with no more DRC violations (usb3-2layer: the
+		// units cost 25 % of the board's connections).
+		lo := opt.Route
+		lo.NoPairUnit = true
+		an2, rr2, drc2, err := route1(st, lo, " (pairs leg by leg)")
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if pairUnitsWorse(b, an, st, rr, drc, an2, rr2, drc2) {
+			rr2.Notes = append(rr2.Notes, sprintf("differential pairs: leg-by-leg routing kept (units routed %.1f%%, DRC %d; leg by leg %.1f%%, DRC %d)", rr.Stats.Completion, len(drc.Violations), rr2.Stats.Completion, len(drc2.Violations)))
+			opt.Route.NoPairUnit = true // the retries below follow the kept mode
+			return an2, rr2, drc2, nil
+		}
+		rr.Notes = append(rr.Notes, sprintf("differential pairs: routed as units (%.1f%%, DRC %d; leg by leg %.1f%%, DRC %d)", rr.Stats.Completion, len(drc.Violations), rr2.Stats.Completion, len(drc2.Violations)))
 		return an, rr, drc, nil
 	}
 	an, rr, drc, err := try(st)
@@ -100,35 +125,63 @@ func Run(ctx context.Context, b *Board, opt Options) (*Result, error) {
 	// geometry depends on the grid phase, and on the ESP32 mini (2026-09-25)
 	// the default 3.2 mil grid put USB_DM across the IN2 power split 16 times
 	// while 2.5 mil routed it clean — the E2E agent had to find that by hand.
-	if !opt.NoEscalate && opt.Route.GridMil <= 0 && len(res.Attempts) > 0 && res.Attempts[0].Millis < 20000 {
+	// "Quick" is the board's own routing time — the leg-by-leg routing of
+	// the first stack when the pairs were also routed as units (the unit
+	// pass is slower or faster depending on the pairs, and must not by
+	// itself switch the retries on or off).
+	quick := len(res.Attempts) > 0 && res.Attempts[0].Millis < 20000
+	if len(res.Attempts) > 1 && strings.HasSuffix(res.Attempts[1].Stack, " (pairs leg by leg)") {
+		quick = res.Attempts[1].Millis < 20000
+	}
+	// Where the first stack routed its declared pairs as units, each finer
+	// grid is also tried leg by leg (usb3-2layer: the units reached 96.4 %
+	// on the finer grids where leg by leg reached 100 %); the unit result
+	// survives only where it completes as much (pairUnitsWorse).
+	unitMode := hasUnitPairs(res.Analysis) && !opt.Route.NoPairUnit
+	if !opt.NoEscalate && opt.Route.GridMil <= 0 && quick {
 		for _, k := range []float64{0.9, 0.8, 0.7} {
-			if hsFindings(CheckSI(b, res.Analysis, res.Stackup, res.Route)) == 0 || !timeLeft(ctx, opt.Route.Timeout) {
+			if hsFindings(CheckSI(b, res.Analysis, res.Stackup, res.Route)) == 0 && !(unitMode && pairDefects(CheckSI(b, res.Analysis, res.Stackup, res.Route)) > 0) || !timeLeft(ctx, opt.Route.Timeout) {
 				break
 			}
-			fine := opt
-			fine.Route.GridMil = k * defaultGrid(b.Rules)
-			an2, rr2, drc2, err := func() (*Analysis, *RouteResult, *DRCReport, error) {
-				an := Analyze(b, opt.Power, res.Stackup)
-				start := time.Now()
-				rr, err := Route(ctx, b, res.Stackup, an, fine.Route)
-				if err != nil {
-					return nil, nil, nil, err
-				}
-				if n := MicroFix(b, an, res.Stackup, rr); n > 0 {
-					rr.Notes = append(rr.Notes, sprintf("micro-fix: %d sub-0.25 mil clearance shortfall(s) cleared by shifting or narrowing a track", n))
-				}
-				rr.Power = powerIntegrity(b, an, res.Stackup, rr)
-				drc := CheckDRCStrict(b, an, res.Stackup, rr.Tracks, rr.Vias)
-				res.Attempts = append(res.Attempts, Attempt{Stack: stackLabel(res.Stackup) + sprintf(" grid %.2f", fine.Route.GridMil), Completion: rr.Stats.Completion,
-					Vias: rr.Stats.Vias + rr.Stats.FanoutVias, Violations: len(drc.Violations), Millis: time.Since(start).Milliseconds()})
-				return an, rr, drc, nil
-			}()
-			if err != nil {
-				return nil, err
+			modes := []bool{opt.Route.NoPairUnit}
+			if unitMode {
+				modes = append(modes, true)
 			}
-			if betterHS(b, rr2, drc2, an2, res) {
-				res.Analysis, res.Route, res.DRC = an2, rr2, drc2
-				res.Route.Notes = append(res.Route.Notes, sprintf("high-speed retry: finer %.2f mil grid kept (fewer skew/split/via findings)", fine.Route.GridMil))
+			for _, legacy := range modes {
+				fine := opt
+				fine.Route.GridMil = k * defaultGrid(b.Rules)
+				fine.Route.NoPairUnit = legacy
+				label := sprintf(" grid %.2f", fine.Route.GridMil)
+				if legacy && unitMode {
+					label += " (pairs leg by leg)"
+				}
+				an2, rr2, drc2, err := func() (*Analysis, *RouteResult, *DRCReport, error) {
+					an := Analyze(b, opt.Power, res.Stackup)
+					start := time.Now()
+					rr, err := Route(ctx, b, res.Stackup, an, fine.Route)
+					if err != nil {
+						return nil, nil, nil, err
+					}
+					if n := MicroFix(b, an, res.Stackup, rr); n > 0 {
+						rr.Notes = append(rr.Notes, sprintf("micro-fix: %d sub-0.25 mil clearance shortfall(s) cleared by shifting or narrowing a track", n))
+					}
+					rr.Power = powerIntegrity(b, an, res.Stackup, rr)
+					drc := CheckDRCStrict(b, an, res.Stackup, rr.Tracks, rr.Vias)
+					res.Attempts = append(res.Attempts, Attempt{Stack: stackLabel(res.Stackup) + label, Completion: rr.Stats.Completion,
+						Vias: rr.Stats.Vias + rr.Stats.FanoutVias, Violations: len(drc.Violations), Millis: attemptMillis(start, rr)})
+					return an, rr, drc, nil
+				}()
+				if err != nil {
+					return nil, err
+				}
+				keep := betterHS(b, rr2, drc2, an2, res)
+				if unitMode {
+					keep = pairUnitsWorse(b, res.Analysis, res.Stackup, res.Route, res.DRC, an2, rr2, drc2)
+				}
+				if keep {
+					res.Analysis, res.Route, res.DRC = an2, rr2, drc2
+					res.Route.Notes = append(res.Route.Notes, sprintf("high-speed retry: finer %.2f mil grid kept%s (fewer skew/split/via findings)", fine.Route.GridMil, map[bool]string{true: ", pairs leg by leg", false: ""}[legacy && unitMode]))
+				}
 			}
 		}
 	}
@@ -192,7 +245,7 @@ func irReroute(ctx context.Context, b *Board, opt Options, res *Result) error {
 		rr.Power = powerIntegrity(b, an, res.Stackup, rr)
 		drc := CheckDRCStrict(b, an, res.Stackup, rr.Tracks, rr.Vias)
 		res.Attempts = append(res.Attempts, Attempt{Stack: stackLabel(res.Stackup) + sprintf(" IR re-route %d", pass), Completion: rr.Stats.Completion,
-			Vias: rr.Stats.Vias + rr.Stats.FanoutVias, Violations: len(drc.Violations), Millis: time.Since(start).Milliseconds()})
+			Vias: rr.Stats.Vias + rr.Stats.FanoutVias, Violations: len(drc.Violations), Millis: attemptMillis(start, rr)})
 		old := res.Route.Power
 		better := rr.Stats.Completion >= res.Route.Stats.Completion && len(drc.Violations) <= len(res.DRC.Violations) &&
 			(rr.Power.Violations() < old.Violations() || rr.Power.WorstRatio() < old.WorstRatio()-1e-6)
@@ -216,12 +269,37 @@ func irReroute(ctx context.Context, b *Board, opt Options, res *Result) error {
 func hsFindings(si *SIReport) int {
 	n := 0
 	for _, f := range si.Findings {
-		switch f.Kind {
-		case "skew", "split-crossing", "vias", "group-skew":
+		if siDefect(f.Kind) {
 			n++
 		}
 	}
 	return n
+}
+
+// siDefect reports the SI finding kinds the joint score and the finer-grid
+// retries treat as defects: length/skew/via budgets and return-path splits.
+// The pair coupling / symmetry findings (pairsi.go) are reported by CheckSI,
+// pcb auto's report and feedback, but do not (yet) move the joint score or
+// pick among retries: the placer does not keep pair corridors clear, so on
+// boards whose placement blocks coupling (the ESP32 mini: a CC resistor in
+// the USB corridor, the USBLC6 rows across the flow) every candidate carries
+// them and ranking by them only trades other electrical results (the ESD
+// stub) for nothing.
+func siDefect(kind string) bool {
+	switch kind {
+	case "skew", "split-crossing", "vias", "group-skew":
+		return true
+	}
+	return false
+}
+
+// pairDefect reports the pair coupling / symmetry finding kinds.
+func pairDefect(kind string) bool {
+	switch kind {
+	case "coupling", "uncoupled", "via-asymmetry", "layer-asymmetry":
+		return true
+	}
+	return false
 }
 
 // betterHS keeps the retry only when it is no worse on completion and DRC
@@ -245,8 +323,78 @@ func betterHS(b *Board, rr2 *RouteResult, drc2 *DRCReport, an2 *Analysis, res *R
 // "context deadline exceeded" instead of returning the routed board.
 func timeLeft(ctx context.Context, d time.Duration) bool {
 	dl, ok := ctx.Deadline()
-	if !ok || d <= 0 {
+	if !ok || d <= 0 || VirtualClock() {
+		// On the virtual clock a wall deadline must not decide which passes
+		// run (the result would depend on the machine again).
 		return true
 	}
 	return time.Until(dl) > d+d/4
+}
+
+// attemptMillis is an attempt's duration: wall time, or the router's
+// virtual time under a work budget (RouteOptions.WorkRate), which the
+// finer-grid retry test reads — a wall-clock figure there would make the
+// deterministic bench depend on machine load again.
+func attemptMillis(start time.Time, rr *RouteResult) int64 {
+	if rr != nil && rr.virtual {
+		return rr.Stats.Millis
+	}
+	return time.Since(start).Milliseconds()
+}
+
+// pairDefects counts the pair coupling / symmetry findings of an SI report.
+func pairDefects(si *SIReport) int {
+	n := 0
+	for _, f := range si.Findings {
+		if pairDefect(f.Kind) {
+			n++
+		}
+	}
+	return n
+}
+
+// hasUnitPairs reports an analysis with a differential pair the router
+// routes as a unit (both legs declared by an intent interface).
+func hasUnitPairs(an *Analysis) bool {
+	for _, np := range an.Nets {
+		if np.PairWith == "" || np.Interface == "" {
+			continue
+		}
+		if p := an.ByNet[np.PairWith]; p != nil && p.Interface != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// pairUnitsWorse reports that the leg-by-leg routing (2) beats the unit
+// routing (1): more connections, else fewer DRC violations, else a better
+// electrical group of the joint score (ESD stub, decoupling and hot loops,
+// IR drop, skew/split/via budgets — a pair routed as a unit must not buy
+// its coupling with a protection device pushed off the line: ESP32 mini
+// USB, 68 → 115 mil ESD stub), else fewer high-speed defects counting the
+// pair coupling / symmetry findings.
+func pairUnitsWorse(b *Board, an1 *Analysis, st *Stackup, rr1 *RouteResult, drc1 *DRCReport, an2 *Analysis, rr2 *RouteResult, drc2 *DRCReport) bool {
+	if c1, c2 := rr1.Stats.Completion, rr2.Stats.Completion; c1 != c2 {
+		return c2 > c1
+	}
+	if v1, v2 := len(drc1.Violations), len(drc2.Violations); v1 != v2 {
+		return v2 < v1
+	}
+	elec := func(an *Analysis, rr *RouteResult, drc *DRCReport) float64 {
+		return Joint(b, an, Understand(b, an), st, rr, drc, JointOptions{PlacementScore: -1}).Groups["electrical"]
+	}
+	if e1, e2 := elec(an1, rr1, drc1), elec(an2, rr2, drc2); math.Abs(e1-e2) > 0.5 {
+		return e2 > e1
+	}
+	bad := func(an *Analysis, rr *RouteResult) int {
+		n := 0
+		for _, f := range CheckSI(b, an, st, rr).Findings {
+			if siDefect(f.Kind) || pairDefect(f.Kind) {
+				n++
+			}
+		}
+		return n
+	}
+	return bad(an2, rr2) < bad(an1, rr1)
 }

@@ -372,6 +372,9 @@ type Analysis struct {
 	// clearance between two nets of one domain, hvrelief.go).
 	spans  map[string]voltSpan
 	coated bool
+	// rated: the currents come from an intent or a simulation, so a via
+	// array's count is an electrical requirement (viafix.go), not a hint.
+	rated bool
 }
 
 // SimSummary is the provenance of the simulated currents.
@@ -411,6 +414,7 @@ func Analyze(b *Board, spec PowerSpec, stack *Stackup) *Analysis {
 	}
 	r := b.Rules
 	a := &Analysis{ByNet: map[string]*NetPlan{}, TempRiseC: spec.TempRiseC, IRBudget: DefaultIRBudget()}
+	a.rated = spec.Intent != nil || spec.Sim != nil
 	if spec.Intent != nil {
 		a.Iso = buildIsoRules(b, spec.Intent)
 		a.spans = intentSpans(b, spec.Intent)

@@ -346,6 +346,12 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 					// first pass and the command returned nothing.
 					budget = (in.timeout*3 + 90*time.Second) * time.Duration(loops)
 				}
+				if pcbauto.VirtualClock() {
+					// Deterministic mode (PCBPILOT_BENCH_WORK): the router's
+					// virtual budget decides; a loaded machine must not cut the
+					// command short.
+					budget *= 20
+				}
 				ctx, cancel := context.WithTimeout(cmd.Context(), budget)
 				defer cancel()
 				// Stage 0 — physical feasibility and stackup before placement:

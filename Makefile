@@ -1,4 +1,4 @@
-.PHONY: help test fixture-bench stress-hv stress-hs mcp-test fmt actions api-index build install dev-build daemon dev eext eext-fresh connector lint-test blocks-audit modules-audit layout-calibrate release release-check release-build release-script-test release-smoke skill-check publish-skill publish-skill-hub skillhub-check replay demo-replay replay-sch replay-pcb
+.PHONY: help test fixture-bench fixture-bench-det stress-hv stress-hs mcp-test fmt actions api-index build install dev-build daemon dev eext eext-fresh connector lint-test blocks-audit modules-audit layout-calibrate release release-check release-build release-script-test release-smoke skill-check publish-skill publish-skill-hub skillhub-check replay demo-replay replay-sch replay-pcb
 
 DIST := dist
 .PHONY: local-build release-assets
@@ -36,8 +36,20 @@ help: ## show this cheatsheet
 test: ## go test -short ./... (CI; skips the long routing fixture bench)
 	go test -short ./...
 
-fixture-bench: ## full 5-board routing regression (~25 min): compare routed % with the last run
+fixture-bench: ## full 5-board routing regression (~25 min): compare routed % with the last run (wall-clock budget: scores move with machine load; see fixture-bench-det)
 	go test ./pkg/pcbauto -run TestFixtureBench -timeout 3600s -v
+
+# Deterministic bench: the router runs on a virtual clock (RouteOptions.WorkRate,
+# pkg/pcbauto/clock.go) — one budget second = BENCH_WORK A* expansions — so the
+# same commit gives the same scores whatever else the machine does. Real runs
+# keep the wall-clock budget. BENCH_WORK ≈ this machine's search speed
+# (2026-09-30: ≈3.2e6 expansions/s under load); compare only runs made with the
+# same value. The same env var makes any Route call deterministic, e.g.
+# PCBPILOT_BENCH_WORK=3e6 make stress-hs (placement annealing still reads the
+# wall clock past 80 % of its budget).
+BENCH_WORK ?= 3000000
+fixture-bench-det: ## deterministic 5-board bench: a work budget instead of wall time (BENCH_WORK A* expansions per budget second → PCBPILOT_BENCH_WORK)
+	PCBPILOT_BENCH_WORK=$(BENCH_WORK) go test ./pkg/pcbauto -run TestFixtureBench -timeout 7200s -v
 
 stress-hv: ## high-voltage isolation stress suite: 5 hand-designed HV boards through sim → intent → pcb auto → pcb check (~1 h; STRESS_HV_CASE=<case> for one, STRESS_HV_OUT=<dir> keeps outputs)
 	go test -tags stress ./internal/app -run TestStressHV -timeout 7200s -v

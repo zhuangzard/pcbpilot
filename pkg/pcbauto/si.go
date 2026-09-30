@@ -24,7 +24,34 @@ type HSClass struct {
 	// RateGbps is the per-lane bit rate the class is sized for; ≥ 1 Gbps
 	// cannot run without an adjacent reference plane.
 	RateGbps float64 `json:"rateGbps,omitempty"`
+	// Pair coupling (pairsi.go). MinCoupledPct is the share of each leg that
+	// must run beside its partner at the target gap on the same layer;
+	// BreakoutMil is the uncoupled length allowed per pair end (fan-out
+	// from the pads before the legs join). 0 = not judged (CAN/RS-485: a
+	// twisted-pair bus at kb/s–Mb/s, the board run is electrically short).
+	MinCoupledPct float64 `json:"minCoupledPct,omitempty"`
+	BreakoutMil   float64 `json:"breakoutMil,omitempty"`
 }
+
+// Coupling limits. Sources: every interface design guide asks for the two
+// legs to run as an edge-coupled pair at a constant gap for the whole route,
+// with the vias of the two legs placed as a symmetric pair and the same
+// layer sequence on both (TI SPRAAR7 "High-Speed Interface Layout
+// Guidelines" §§ differential-pair routing / via discontinuity; Intel and
+// NXP USB 2.0 layout application notes; PCI-SIG and HDMI board design
+// guides); the uncoupled part is only allowed where the pins force it — the
+// breakout from the package or connector. The guides give no universal
+// numeric share, so the numbers below are engineering initial values (the
+// same status as the aesthetics thresholds, recalibrate on real boards):
+// multi-Gb/s classes (rise times ≈ 50 ps, a 150 mil uncoupled run is
+// already a visible discontinuity) 80 % coupled / 150 mil per end;
+// sub-Gb/s classes (USB 2.0, 100BASE-TX, generic) 60 % / 250 mil.
+const (
+	coupledPctFast = 80
+	breakoutFast   = 150
+	coupledPctSlow = 60
+	breakoutSlow   = 250
+)
 
 // hsClassTable is ordered most specific first: a PCIe or SATA "TXP" is not
 // Ethernet, a USB3 connector's D+/D- pair ("USB3_OTG0_DP") is USB 2.0, and
@@ -36,30 +63,30 @@ var hsClassTable = []struct {
 }{
 	{[]string{"USB3", "USB3.0", "USB-SS", "SUPERSPEED"}, func(n string) bool {
 		return hasAny(n, "SSTX", "SSRX", "_SS", "SS_", "SUPERSPEED") || strings.Contains(n, "USB3") && !usb2Data(n)
-	}, HSClass{Name: "USB3", DiffOhm: 90, MaxSkewMil: 5, MaxVias: 2, MaxLenIn: 6, Reference: true, RateGbps: 5}},
+	}, HSClass{Name: "USB3", DiffOhm: 90, MaxSkewMil: 5, MaxVias: 2, MaxLenIn: 6, Reference: true, RateGbps: 5, MinCoupledPct: coupledPctFast, BreakoutMil: breakoutFast}},
 	{[]string{"PCIE", "PCI-E", "PCIEXPRESS"}, func(n string) bool { return hasAny(n, "PCIE", "PCI_E") },
-		HSClass{Name: "PCIe", DiffOhm: 85, MaxSkewMil: 5, MaxVias: 2, MaxLenIn: 8, Reference: true, RateGbps: 5}},
+		HSClass{Name: "PCIe", DiffOhm: 85, MaxSkewMil: 5, MaxVias: 2, MaxLenIn: 8, Reference: true, RateGbps: 5, MinCoupledPct: coupledPctFast, BreakoutMil: breakoutFast}},
 	{[]string{"SATA"}, func(n string) bool { return strings.Contains(n, "SATA") },
-		HSClass{Name: "SATA", DiffOhm: 100, MaxSkewMil: 5, MaxVias: 2, MaxLenIn: 6, Reference: true, RateGbps: 6}},
+		HSClass{Name: "SATA", DiffOhm: 100, MaxSkewMil: 5, MaxVias: 2, MaxLenIn: 6, Reference: true, RateGbps: 6, MinCoupledPct: coupledPctFast, BreakoutMil: breakoutFast}},
 	{[]string{"HDMI", "TMDS", "DVI"}, func(n string) bool { return hasAny(n, "HDMI", "TMDS") },
-		HSClass{Name: "HDMI", DiffOhm: 100, MaxSkewMil: 5, MaxVias: 2, MaxLenIn: 6, Reference: true, GroupSkewMil: 100, RateGbps: 3.4}},
+		HSClass{Name: "HDMI", DiffOhm: 100, MaxSkewMil: 5, MaxVias: 2, MaxLenIn: 6, Reference: true, GroupSkewMil: 100, RateGbps: 3.4, MinCoupledPct: coupledPctFast, BreakoutMil: breakoutFast}},
 	{[]string{"MIPI", "MIPI D-PHY", "DSI", "CSI"}, func(n string) bool { return hasAny(n, "MIPI", "DSI", "CSI") },
-		HSClass{Name: "MIPI D-PHY", DiffOhm: 100, MaxSkewMil: 10, MaxVias: 2, MaxLenIn: 6, Reference: true, GroupSkewMil: 50, RateGbps: 1.5}},
+		HSClass{Name: "MIPI D-PHY", DiffOhm: 100, MaxSkewMil: 10, MaxVias: 2, MaxLenIn: 6, Reference: true, GroupSkewMil: 50, RateGbps: 1.5, MinCoupledPct: coupledPctFast, BreakoutMil: breakoutFast}},
 	{[]string{"LVDS"}, func(n string) bool { return strings.Contains(n, "LVDS") },
-		HSClass{Name: "LVDS", DiffOhm: 100, MaxSkewMil: 10, MaxVias: 2, Reference: true, GroupSkewMil: 50, RateGbps: 1}},
+		HSClass{Name: "LVDS", DiffOhm: 100, MaxSkewMil: 10, MaxVias: 2, Reference: true, GroupSkewMil: 50, RateGbps: 1, MinCoupledPct: coupledPctFast, BreakoutMil: breakoutFast}},
 	{[]string{"DDR", "DDR3", "DDR4", "LPDDR4"}, func(n string) bool { return hasAny(n, "DDR", "DQS", "DDR_CK", "DRAM") },
-		HSClass{Name: "DDR", DiffOhm: 100, MaxSkewMil: 5, MaxVias: 2, MaxLenIn: 3, Reference: true, GroupSkewMil: 25, RateGbps: 1.6}},
+		HSClass{Name: "DDR", DiffOhm: 100, MaxSkewMil: 5, MaxVias: 2, MaxLenIn: 3, Reference: true, GroupSkewMil: 25, RateGbps: 1.6, MinCoupledPct: coupledPctFast, BreakoutMil: breakoutFast}},
 	{[]string{"ETH", "ETHERNET", "MDI", "RJ45"}, func(n string) bool {
 		return hasAny(n, "ETH", "RJ45", "MDI", "TRD", "TXP", "TXN", "RXP", "RXN")
-	}, HSClass{Name: "Ethernet", DiffOhm: 100, MaxSkewMil: 50, MaxVias: 2, MaxLenIn: 4, Reference: true, RateGbps: 0.125}},
+	}, HSClass{Name: "Ethernet", DiffOhm: 100, MaxSkewMil: 50, MaxVias: 2, MaxLenIn: 4, Reference: true, RateGbps: 0.125, MinCoupledPct: coupledPctSlow, BreakoutMil: breakoutSlow}},
 	{[]string{"USB", "USB2", "USB2.0"}, func(n string) bool { return hasAny(n, "USB", "D+", "D-", "DP", "DM") },
-		HSClass{Name: "USB2", DiffOhm: 90, MaxSkewMil: 100, MaxVias: 2, MaxLenIn: 8, Reference: true, RateGbps: 0.48}},
+		HSClass{Name: "USB2", DiffOhm: 90, MaxSkewMil: 100, MaxVias: 2, MaxLenIn: 8, Reference: true, RateGbps: 0.48, MinCoupledPct: coupledPctSlow, BreakoutMil: breakoutSlow}},
 	{[]string{"CAN", "RS485", "CAN/RS485", "CAN/RS-485"}, func(n string) bool { return hasAny(n, "CAN", "485") },
 		HSClass{Name: "CAN/RS-485", DiffOhm: 120, MaxSkewMil: 500, MaxVias: 4}},
 }
 
 // genericDiff is the class of a differential pair no family recognises.
-var genericDiff = HSClass{Name: "diff", DiffOhm: 100, MaxSkewMil: 25, MaxVias: 2, Reference: true}
+var genericDiff = HSClass{Name: "diff", DiffOhm: 100, MaxSkewMil: 25, MaxVias: 2, Reference: true, MinCoupledPct: coupledPctSlow, BreakoutMil: breakoutSlow}
 
 func hasAny(s string, subs ...string) bool {
 	for _, x := range subs {
@@ -174,12 +201,17 @@ type SIPair struct {
 	N        string  `json:"n"`
 	SkewMil  float64 `json:"skewMil"`
 	LimitMil float64 `json:"limitMil"`
+	// Coupling is the pair's coupled share, uncoupled length and via /
+	// layer symmetry (pairsi.go).
+	Coupling *PairCoupling `json:"coupling,omitempty"`
 }
 
 // SIFinding is one signal-integrity issue.
 type SIFinding struct {
-	Net   string  `json:"net"`
-	Kind  string  `json:"kind"` // skew | vias | length | split-crossing | layer-change
+	Net string `json:"net"`
+	// skew | vias | length | split-crossing | no-reference | group-skew |
+	// coupling | uncoupled | via-asymmetry | layer-asymmetry
+	Kind  string  `json:"kind"`
 	Value float64 `json:"value"`
 	Limit float64 `json:"limit"`
 	At    *Point  `json:"at,omitempty"`
@@ -209,8 +241,10 @@ type SIReport struct {
 }
 
 // CheckSI measures high-speed nets after routing: length, vias, intra-pair
-// skew and reference-plane continuity (a track over a split in its adjacent
-// plane loses its return path — the classic EMI/SI failure).
+// skew, pair coupling / via and layer symmetry (pairsi.go) and
+// reference-plane continuity (a track over a split in its adjacent plane
+// loses its return path — the classic EMI/SI failure). Vias counted are the
+// routed ones (Kind "route"; a snapshot's vias carry no kind).
 func CheckSI(b *Board, an *Analysis, st *Stackup, rr *RouteResult) *SIReport {
 	rep := &SIReport{}
 	tracks := map[string][]Track{}
@@ -219,7 +253,7 @@ func CheckSI(b *Board, an *Analysis, st *Stackup, rr *RouteResult) *SIReport {
 		tracks[t.Net] = append(tracks[t.Net], t)
 	}
 	for _, v := range rr.Vias {
-		if v.Kind == "route" {
+		if v.Kind == "route" || v.Kind == "" {
 			vias[v.Net]++
 		}
 	}
@@ -273,11 +307,22 @@ func CheckSI(b *Board, an *Analysis, st *Stackup, rr *RouteResult) *SIReport {
 		}
 		hc := ClassifyHS(np)
 		pr := SIPair{P: np.Net, N: np.PairWith, SkewMil: math.Abs(a.LengthMil - bb.LengthMil), LimitMil: hc.MaxSkewMil}
+		var pads []*Pad
+		for _, part := range b.Parts {
+			for _, pd := range part.Pads {
+				if pd.Net == np.Net || pd.Net == np.PairWith {
+					pads = append(pads, pd)
+				}
+			}
+		}
+		pc := MeasurePairCoupling(tracks[np.Net], tracks[np.PairWith], vias[np.Net], vias[np.PairWith], pads, pairGap(np, b.Rules), hc)
+		pr.Coupling = &pc
 		rep.Pairs = append(rep.Pairs, pr)
 		if pr.SkewMil > pr.LimitMil {
 			rep.Findings = append(rep.Findings, SIFinding{Net: np.Net + "/" + np.PairWith, Kind: "skew", Value: pr.SkewMil, Limit: pr.LimitMil,
 				Fix: "add a serpentine on the shorter member near the mismatch source (pcb eq-group / length tuning)"})
 		}
+		rep.Findings = append(rep.Findings, pairFindings(np.Net+"/"+np.PairWith, pc, hc)...)
 	}
 	rep.Groups, rep.Findings = checkGroups(an, measured, rep.Findings)
 	sort.Slice(rep.Nets, func(i, j int) bool { return rep.Nets[i].Net < rep.Nets[j].Net })

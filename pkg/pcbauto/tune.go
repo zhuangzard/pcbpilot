@@ -371,7 +371,7 @@ func (r *router) recouple(outs map[*rnet]*netOut, res *RouteResult) {
 		savedPaths, savedClaims, savedOut, savedFailed := long.paths, long.claims, outs[long], long.failed
 		oldVias := len(savedOut.vias)
 		deadline, strict, fac := r.deadline, r.strict, r.pairFac
-		r.deadline, r.strict, r.pairFac = time.Now().Add(recoupleBudget), true, recoupleFac
+		r.deadline, r.strict, r.pairFac = r.now().Add(recoupleBudget), true, recoupleFac
 		ok := r.routeNet(long) && len(long.failed) == 0
 		var out *netOut
 		if ok {

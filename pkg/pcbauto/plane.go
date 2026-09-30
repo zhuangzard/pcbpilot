@@ -4,7 +4,6 @@ import (
 	"context"
 	"math"
 	"sort"
-	"time"
 )
 
 // PlaneRegion is copper to pour for a net on a layer (plane or split plane).
@@ -1081,9 +1080,9 @@ func (r *router) pourRepair(ctx context.Context, res *RouteResult) {
 		}
 		return len(nets[i].groups) > len(nets[j].groups)
 	})
-	start := time.Now()
+	start := r.now()
 	defer func() {
-		res.Notes = append(res.Notes, sprintf("plane/pour bridging: %.1f s of the post-routing budget", time.Since(start).Seconds()))
+		res.Notes = append(res.Notes, sprintf("plane/pour bridging: %.1f s of the post-routing budget", r.now().Sub(start).Seconds()))
 	}()
 	for pass := 0; pass < 2; pass++ {
 		fixedAny := false

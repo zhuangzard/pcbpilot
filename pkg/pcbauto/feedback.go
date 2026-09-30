@@ -26,6 +26,7 @@ const (
 	FBConnectorSwap = "connector-pin-swap"
 	FBDecap         = "decap-ownership"
 	FBIRDrop        = "rail-ir-drop"
+	FBViaCurrent    = "via-current"
 	FBPackage       = "package-change"
 )
 
@@ -242,6 +243,8 @@ func BuildFeedback(ctx context.Context, b *Board, res *Result, js *JointScore, o
 	fb.Items = append(fb.Items, decapFeedback(b, an)...)
 	// d. IR drop
 	fb.Items = append(fb.Items, irFeedback(b, an, res)...)
+	// d2. via arrays the router could not complete (viafix.go)
+	fb.Items = append(fb.Items, viaShortFeedback(res)...)
 	// e. package / pad pitch vs current
 	pk := packageFeedback(b, an, res)
 	fb.Difficulty.NeckDowns = len(pk)
@@ -291,10 +294,22 @@ func hardness(b *Board, an *Analysis, res *Result, js *JointScore) FeedbackHardn
 		h.Joint = round2(js.Overall)
 	}
 	si := CheckSI(b, an, res.Stackup, res.Route)
+	pairBad := map[string]bool{}
 	for _, f := range si.Findings {
 		if f.Kind == "vias" {
 			h.HSViaFindings++
 		}
+		if pairDefect(f.Kind) {
+			pairBad[f.Net] = true
+		}
+	}
+	if len(pairBad) > 0 {
+		var ps []string
+		for p := range pairBad {
+			ps = append(ps, p)
+		}
+		sort.Strings(ps)
+		h.Reasons = append(h.Reasons, fmt.Sprintf("%d 对差分对未按耦合/对称走线（%s；SI coupling/uncoupled/via-asymmetry）", len(ps), strings.Join(ps, ", ")))
 	}
 	h.IROver = res.Route.Power.Violations()
 	if h.Unrouted > 0 {
@@ -305,6 +320,9 @@ func hardness(b *Board, an *Analysis, res *Result, js *JointScore) FeedbackHardn
 	}
 	if h.HSViaFindings > 0 {
 		h.Reasons = append(h.Reasons, fmt.Sprintf("高速网络过孔超限 %d 处", h.HSViaFindings))
+	}
+	if n := len(res.Route.ViaShortfalls); n > 0 {
+		h.Reasons = append(h.Reasons, fmt.Sprintf("%d 条载流网络的换层过孔阵列不足（via-current）", n))
 	}
 	if h.IROver > 0 {
 		h.Reasons = append(h.Reasons, fmt.Sprintf("%d 条电源轨 IR 压降超预算", h.IROver))

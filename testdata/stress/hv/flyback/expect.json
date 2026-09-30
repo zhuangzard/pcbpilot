@@ -148,6 +148,150 @@
    ]
   },
   {
+   "name": "2000m-e2e",
+   "spec": "spec.json",
+   "route": {
+    "place": true,
+    "timeout": "90s",
+    "loops": 2,
+    "minCompletion": 90
+   },
+   "domains": [
+    {
+     "kinds": [
+      "mains"
+     ],
+     "nets": [
+      "L",
+      "N",
+      "L_F",
+      "HV_BULK",
+      "DRAIN",
+      "PGND",
+      "VCC_P"
+     ],
+     "workingVrms": 324.6,
+     "workingVpeak": 650
+    },
+    {
+     "kinds": [
+      "isolated-secondary",
+      "SELV"
+     ],
+     "nets": [
+      "VOUT",
+      "GND_S",
+      "SEC",
+      "OPTO_A"
+     ],
+     "workingVrms": 12.9,
+     "workingVpeak": 12.9
+    }
+   ],
+   "pairs": [
+    {
+     "kinds": [
+      [
+       "mains"
+      ],
+      [
+       "isolated-secondary",
+       "SELV"
+      ]
+     ],
+     "insulation": "reinforced",
+     "clearanceMm": 3.0,
+     "creepageMm": 6.6,
+     "slotWidthMm": 1.0,
+     "transient": "mains",
+     "mainsVrms": 230,
+     "bridges": [
+      "T1",
+      "U2",
+      "C8"
+     ],
+     "why": "IEC 62368-1 reinforced, PD2, MG IIIa, OVC II. Clearance: procedure 2 — 230 Vrms mains, OVC II → IEC 60664-1 Table F.1 2500 V; reinforced one preferred step higher → 4000 V → Table F.2 (PD2) 3.0 mm; procedure 1 — 1.6 × 650 V drain peak = 1040 V → F.2 0.25 mm; governs 3.0 mm. Creepage: working voltage = rectified bulk 324.6 V DC (the primary is one circuit with the line through BR1) → Table F.4 PD2 MG III interpolated 320→400 V: 3.246 → 3.3 mm basic, reinforced ×2 = 6.6 mm. Slot width PD2 = 1.0 mm (IEC 60664-1 §6.2 X)."
+    }
+   ],
+   "nets": {
+    "L": {
+     "currentA": 1.0,
+     "widthOuterMil": 13.78,
+     "widthInnerMil": 25.59,
+     "vias": 2,
+     "clearanceMil": 98.5,
+     "voltagePeak": 325.27
+    },
+    "N": {
+     "currentA": 1.0,
+     "widthOuterMil": 13.78,
+     "vias": 2,
+     "clearanceMil": 98.5
+    },
+    "L_F": {
+     "currentA": 1.0,
+     "widthOuterMil": 13.78,
+     "vias": 2,
+     "clearanceMil": 98.5
+    },
+    "HV_BULK": {
+     "clearanceMil": 98.5,
+     "voltageMax": 324.6
+    },
+    "DRAIN": {
+     "clearanceMil": 128.0,
+     "voltagePeak": 650
+    },
+    "CLAMP": {
+     "clearanceMil": 102.4,
+     "voltagePeak": 520
+    },
+    "VOUT": {
+     "currentA": 2.0,
+     "widthOuterMil": 31.5,
+     "vias": 3,
+     "viaDrillMil": 15.75,
+     "voltageMax": 12.0
+    },
+    "VCC_P": {
+     "voltageMax": 15.78,
+     "voltageTol": 0.03
+    }
+   },
+   "slots": {
+    "under": [
+     "U2"
+    ],
+    "notUnder": [
+     "T1",
+     "C8"
+    ],
+    "lengthMil": {
+     "U2": 251.4
+    }
+   },
+   "findings": {
+    "noErrors": true,
+    "expect": [
+     "insulation"
+    ],
+    "absent": [
+     "power-rating",
+     "resistor-voltage",
+     "floating-supply"
+    ]
+   },
+   "infeasible": [],
+   "maxIsoFindings": 0,
+   "knownLimits": [
+    {
+     "check": "place: routed completion %",
+     "why": "as 2000m: the placer packs HV parts for a 2-layer route; the hand placement (route variant) meets the bar"
+    }
+   ],
+   "why": "The offline e2e chain's configuration (pcb auto run --place --seed 1 --timeout 90s, default grid, loop passes): in it the placed board's VOUT_RAW changed layer between the two pads of L1 and the via array got 2 of the intent's 3 vias (pcb check via-current ERROR, margin -10.9 %, 2026-09-30, deterministic with PCBPILOT_BENCH_WORK=3e6). The router must complete the array (the fix slides the transition along the route) or report the shortfall."
+  },
+  {
    "name": "5000m",
    "spec": "spec-5000m.json",
    "route": {

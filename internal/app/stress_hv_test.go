@@ -421,6 +421,7 @@ type autoPlan struct {
 				A     struct{ X, Y float64 }
 				B     struct{ X, Y float64 }
 			} `json:"tracks"`
+			ViaShortfalls []pcbauto.ViaShortfall `json:"viaShortfalls"`
 		} `json:"route"`
 		DRC struct {
 			Violations []json.RawMessage `json:"violations"`
@@ -576,6 +577,28 @@ func hvCheckAuto(t *testing.T, res *hvResult, run, dir, intentPath string, v hvV
 		}
 	}
 	res.check(infeas == len(v.Infeasible), p+"pcb check iso-infeasible", fmt.Sprint(len(v.Infeasible)), fmt.Sprint(infeas))
+	// Via current: every transition carries its sized current, or the
+	// router reported the transition it could not complete (viafix.go) —
+	// an ERROR the plan does not explain is a silent electrical defect.
+	short := map[string]string{}
+	for _, s := range r.Route.ViaShortfalls {
+		short[s.Net] = s.Reason
+	}
+	var silent, explained []string
+	for _, f := range chk.Findings {
+		if f.Type != "via-current" || f.Level != "ERROR" {
+			continue
+		}
+		for _, n := range f.Nets {
+			if _, ok := short[n]; ok {
+				explained = append(explained, n)
+			} else {
+				silent = append(silent, n)
+			}
+		}
+	}
+	res.check(len(silent) == 0, p+"pcb check via-current ERROR", "0 (or a reported via shortfall)",
+		fmt.Sprintf("%d silent %v, %d reported %v", len(silent), silent, len(explained), explained))
 	if v.MaxIsoFindings != nil {
 		res.check(isoF <= *v.MaxIsoFindings, p+"pcb check clearance/creepage", fmt.Sprintf("≤ %d", *v.MaxIsoFindings), fmt.Sprint(isoF))
 	}
