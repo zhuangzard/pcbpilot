@@ -90,7 +90,15 @@ max(间隙, 爬电)，默认加强绝缘；来自 `spec.edge`（`edgeKind`、`ou
 JLC04161H-7628 h=8.28 mil εr=4.4，6 层 JLC06161H-2116 h=4.4 mil εr=4.2；2026-09-27 前 intent 用
 8.4/4.05 与 3.5/4.1，与引擎叠层不一致），间隙取工艺最小（紧耦合），
 USB2/USB3 90 Ω、以太网/HDMI/MIPI/SATA/LVDS/DDR 100 Ω、PCIe 85 Ω、CAN/485 120 Ω；接口识别与
-对内长度差/等长容差/过孔上限统一来自 `pcbauto.ClassifyHSName`（与布线器、SI 检查、规则推送同一张表）。
+对内长度差/等长容差/过孔上限统一来自 `pcbauto.ClassifyHSName`（与布线器、SI 检查、规则推送同一张表）；
+同一张表还给每类差分的耦合下限 `minCoupledPct` 与每端出线预算 `breakoutMil`（SI `coupling` / `uncoupled`，见
+[recipes/high-speed.md](recipes/high-speed.md) §5）。`pairGapMil` 是差分对布线的目标间距：跟随线落在
+“线宽/2 + pairGapMil + 线宽/2” 的中心距上，SI 按 ±max(40 % 间距, 2 mil) 判为耦合。
+
+`via.countPerTransition` 是**每个换层点**的要求，布线器逐个换层点兑现：放不满时依次试更大钻孔、沿路线滑动
+换层点、换位置重布、单层重布；都不行才在 `plan.json route.viaShortfalls[]` 与 `feedback.json`（`via-current`）
+报出原因（[pcb-routing.md 过孔载流](pcb-routing.md)）。`pcb check --intent` 的 via-current ERROR 若没有对应
+shortfall，就是回归。
 HDMI/MIPI/LVDS 同一端口的多对按网名自动成等长组（`<前缀>_LANES`）；DDR 的 DQS/CK 对、字节通道
 （DQ/DM/DQS → `DDR_<通道>_BYTE<n>`，±25 mil）与地址命令组（`DDR_<通道>_ADDR`，±100 mil）按网名识别
 （spec 声明优先）。2 层板无相邻参考面：USB2 等标“不可控”（warn）并按标准线宽紧耦合；≥1 Gb/s 的

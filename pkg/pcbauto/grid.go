@@ -226,14 +226,22 @@ func (gr *grid) forCellsNear(bb Rect, r float64, dist func(Point) float64, fn fu
 	}
 }
 
-func (gr *grid) markKeepout(k *Keepout) {
+// markKeepout marks a keep-out: copper-free cells hard, and via columns
+// blocked. viaRad is the board via's pad radius: a no-via keep-out forbids
+// the via's copper disk, not only its centre (CheckDRC: centre inside or
+// closer than Dia/2 to the edge) — a centre-only mark let a via sit half in
+// the keep-out and the final gate dropped the net. A no-copper keep-out needs
+// no margin here: the static claim map already keeps every via's disk off
+// its hard cells.
+func (gr *grid) markKeepout(k *Keepout, viaRad float64) {
 	bb := PolyBounds(k.Poly)
-	gr.forCellsNear(bb, 0, func(p Point) float64 {
+	inside := func(p Point) float64 {
 		if PolyContains(k.Poly, p) {
 			return 0
 		}
 		return math.Inf(1)
-	}, func(x, y int) {
+	}
+	gr.forCellsNear(bb, 0, inside, func(x, y int) {
 		for li, id := range gr.layers {
 			if k.NoCopper && k.onLayer(id) {
 				gr.flags[gr.idx(li, x, y)] |= flagHard
@@ -243,6 +251,18 @@ func (gr *grid) markKeepout(k *Keepout) {
 			gr.noVia[y*gr.W+x] = true
 		}
 	})
+	if k.NoVias && viaRad > 0 {
+		gr.forCellsNear(bb, viaRad, func(p Point) float64 {
+			if PolyContains(k.Poly, p) {
+				return 0
+			}
+			return PolyEdgeDist(k.Poly, p)
+		}, func(x, y int) {
+			if c := gr.center(x, y); PolyContains(k.Poly, c) || PolyEdgeDist(k.Poly, c) < viaRad {
+				gr.noVia[y*gr.W+x] = true
+			}
+		})
+	}
 }
 
 // markHole blocks the drill plus its keep annulus plus the other half of the

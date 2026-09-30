@@ -66,6 +66,25 @@ func TestFixtureMIPIAdapterRoutes(t *testing.T) {
 	}
 }
 
+// benchWorkRate reads PCBPILOT_BENCH_WORK: A* expansions per virtual second
+// of the routing budget (RouteOptions.WorkRate). Set, the bench runs on the
+// router's virtual clock and its scores no longer depend on machine load;
+// unset (or 0), the budget is wall time as in a real run.
+func benchWorkRate(t testing.TB) float64 {
+	v := os.Getenv("PCBPILOT_BENCH_WORK")
+	if v == "" {
+		return 0
+	}
+	var rate float64
+	if _, err := fmt.Sscan(v, &rate); err != nil || rate < 0 {
+		t.Fatalf("PCBPILOT_BENCH_WORK=%q: want expansions per second (e.g. 3e6)", v)
+	}
+	if rate > 0 {
+		t.Logf("deterministic bench: virtual clock, %.3g A* expansions per budget second", rate)
+	}
+	return rate
+}
+
 // TestFixtureBench routes every real fixture board with its human placement
 // and logs completion / vias / DRC. Long-running: skipped with -short.
 func TestFixtureBench(t *testing.T) {
@@ -81,15 +100,15 @@ func TestFixtureBench(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			b := loadFixture(t, name)
-			out, err := Run(t.Context(), b, Options{Stack: StackOptions{Force: b.CopperLayers}, Route: RouteOptions{Timeout: 4 * time.Minute}})
+			out, err := Run(t.Context(), b, Options{Stack: StackOptions{Force: b.CopperLayers}, Route: RouteOptions{Timeout: 4 * time.Minute, WorkRate: benchWorkRate(t)}})
 			if err != nil {
 				t.Fatal(err)
 			}
 			st, res, drc := out.Stackup, out.Route, out.DRC
 			t.Logf("attempts %+v", out.Attempts)
 			s := res.Stats
-			t.Logf("%s: layers=%d pads=%d nets=%d conn=%d routed=%d (%.1f%%) vias=%d fanout=%d len=%.1fin iters=%d t=%.1fs drc=%v disc=%d pre=%d repaired=%d",
-				name, st.Layers, st.Metrics.PadCount, s.Nets, s.Connections, s.Routed, s.Completion, s.Vias, s.FanoutVias, s.WireLengthIn, s.Iterations, float64(s.Millis)/1000, drc.ByKind, len(drc.Disconnected), s.PreRepairViolations, s.Repaired)
+			t.Logf("%s: layers=%d pads=%d nets=%d conn=%d routed=%d (%.1f%%) vias=%d fanout=%d len=%.1fin iters=%d t=%.1fs work=%d drc=%v disc=%d pre=%d repaired=%d",
+				name, st.Layers, st.Metrics.PadCount, s.Nets, s.Connections, s.Routed, s.Completion, s.Vias, s.FanoutVias, s.WireLengthIn, s.Iterations, float64(s.Millis)/1000, s.Work, drc.ByKind, len(drc.Disconnected), s.PreRepairViolations, s.Repaired)
 			reasons := map[string]int{}
 			for _, u := range res.Unrouted {
 				reasons[u.Reason]++

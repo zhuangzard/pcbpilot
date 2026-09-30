@@ -148,6 +148,11 @@ pcbpilot pcb check --intent intent.json --board out/board.routed.json --strict  
 每个变体离线跑 `sim power → intent derive --spec → pcb auto run --intent --sim [--place]`（布局 + 仅布线两种）
 → `pcb check --intent --board out/board.routed.json`，逐项对比；`STRESS_HV_CASE=<case>` 只跑一个，
 `STRESS_HV_OUT=<dir>` 保留全部中间文件。已知限制在 expect 的 `knownLimits` 里写明，报告为 KNOWN。
+每个变体还核对 `pcb check` 的 **via-current**：ERROR 必须为 0，或对应 `plan.json route.viaShortfalls[]` 里一条
+已报告的短缺（写明各替代方案为何失败）——没有解释的 ERROR 算失败（2026-09-30 起；此前 flyback 布局变体的
+`VOUT_RAW` 换层 2/3 孔、裕量 −10.9 % 只在 notes 里提一句）。flyback 的 `2000m-e2e` 变体用离线 e2e 链的配置
+（`--place --seed 1 --timeout 90s`、默认栅格、布局↔布线循环）复现该缺陷：`PCBPILOT_BENCH_WORK=3e6` 下 dev 在 L1 两焊盘之间
+换层、阵列 2/3 孔（ERROR），本分支沿原路线把换层点滑到能放下 3 孔的位置（0 ERROR）。
 
 | 样例 | 标准与条件 | 手算答案 | 关键检查 |
 |---|---|---|---|

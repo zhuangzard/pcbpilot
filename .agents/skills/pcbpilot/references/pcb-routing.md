@@ -558,15 +558,35 @@ via-in-pad 许可。`routing.demands[].existingViasOnly` 还要求列出的 PID�
 `pcbauto.SizeVias` 算）：该网所有布线过孔、扇出过孔都用这个尺寸（不低于板规则），每个换层点除主过孔外
 再放 N−1 颗**阵列过孔**（`kind:"array"`）——落在任一层同网走线上，否则用该层网宽短桩连回主过孔；
 候选点在栅格上严格避让异网占用、孔距与禁孔区；精确 DRC 拒绝的阵列孔只删它自己（不删整网布线），
-该点不再尝试。放不满时 notes 报 `via array: <net> is short of k via(s)`，由 `pcb check` 定论。扇出按焊盘
-自身电流 × 1.2 / 单孔载流计数（焊盘大小的数量上限只在电流需要时按焊盘周长可容纳数放宽）。
+该点不再尝试。扇出按焊盘自身电流 × 1.2 / 单孔载流计数（焊盘大小的数量上限只在电流需要时按焊盘周长可容纳数放宽）。
+
+**阵列放不满时的替代方案（2026-09-30，`pkg/pcbauto/viafix.go`）。** 搜索只选一个换层点，阵列是事后围着它找位；
+换层点被异网焊盘/走线/HV 间距夹住时会少孔（HV flyback 压力板 `VOUT_RAW`：intent 3 × 0.4 mm，实放 2 → `pcb check`
+via-current ERROR，裕量 −10.9 %）。现在凡是带电流的网（intent 或 `--sim`，`ViasPerTransition>1`），布线收尾在最终
+DRC 闸门前后各跑一轮，依次尝试，第一种能让每个换层点放满且精确 DRC 不变差的方案被保留：
+
+1. **更大钻孔，同一路线**：JLC 阶梯（0.2/0.25/0.3/0.4/0.5/0.6 mm）里比当前大、且所需数量更少的尺寸，原地重放阵列；
+2. **换层点沿原路线滑动**：只把新旧换层点之间那一段改到另一层，新换层列须能放下整组阵列
+   （`arrayRoom`：按静态障碍与当前异网占用数可用孔位）；
+3. **换一个换层位置**：只重布含短缺换层点的那段连接，禁用原位置一个阵列跨度内的过孔，搜索按“每缺一孔 ×3”给
+   放不下整组的换层列加价（最多 2 轮）；
+4. **不换层**：该段连接单层重布；
+5. **更大钻孔 + 重布**。
+
+全部失败才算物理放不下：`plan.json` 的 `route.viaShortfalls[]`（网、换层点坐标、计划数/缺孔数、尺寸、电流、每种方案
+的失败原因）、notes `via array UNRESOLVED: …`、`feedback.json` 一条 `via-current`（high）与困难度理由，**不再静默**。
+不得通过放宽 intent 的过孔要求消掉 ERROR；修法是在换层处腾出阵列空间、整段留在一层，或改铺铜承载。
+无禁孔区的换层点现在按过孔焊盘半径避让禁孔区（此前只看孔心，过孔一半压进禁孔区后被最终闸门整网删除）。
 
 布完用 `pcb check --intent intent.json [--board board.routed.json]` 复核 `via-current`：同网 60 mil /
 2.5 倍外径内的过孔成一组（一个换层或一个扇出场），所需电流 = 相邻焊盘 intent 引脚电流之和；无引脚数据时
 = 网络电流，但不超过所连最宽走线按 IPC-2152 能带的电流；没有电流要穿过的组（平面缝合、零电流去耦脚）
 不评。Σ 载流 < 电流 → ERROR，裕量 < 20 % → WARN，消息给出安培数、裕量、孔壁毫伏与建议尺寸。
 
-回归：`TestRouterPlacesViaArrayOnHighCurrentNet`（3 A → 5 × 12/24；2 A 细线 → 3 × 0.4 mm）、
+回归：`TestViaArrayMovesToRoom`（换层窗口只容 1 孔 → 移到能放 3 孔的窗口，via-current 0 ERROR）、
+`TestViaArrayShortfallReported`（全板只有 1 孔窗口 → `viaShortfalls` + feedback，含每种方案的原因）、
+`make stress-hv` 每个变体的 “pcb check via-current ERROR” 行（ERROR 必须对应一条已报告的 shortfall）、
+`TestRouterPlacesViaArrayOnHighCurrentNet`（3 A → 5 × 12/24；2 A 细线 → 3 × 0.4 mm）、
 `TestViaCurrentCheckSingleVia3A`（单颗 0.3 mm 过 3 A → ERROR，5 孔阵列通过）、ESP32 v05 现场板
 （final.reload.json + intent：37 个换层/扇出组全部通过，0 finding）。能力边界：设计期孔长按整板厚；
 阵列只在换层点附近 100 mil 内找位；铺铜/平面网的缝合孔不按电流评。

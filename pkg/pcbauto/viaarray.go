@@ -16,6 +16,9 @@ import (
 
 // viaCount is the vias per layer transition of n (≥ 1).
 func (n *rnet) viaCount() int {
+	if n.viaK > 0 {
+		return n.viaK // an alternative size chosen by completeViaArrays
+	}
 	if n.plan == nil || n.plan.ViasPerTransition < 1 {
 		return 1
 	}
@@ -135,6 +138,9 @@ func (r *router) viaArray(n *rnet, a, b run, node int32, extra int, o *netOut, c
 		placed = append(placed, c.c)
 		extra--
 	}
+	if extra > 0 {
+		n.shortAt = append(n.shortAt, P)
+	}
 	n.viaShort += extra
 	return claims
 }
@@ -176,6 +182,7 @@ func (r *router) dropArrayAt(v Violation, ts []Track, vs []Via, outs map[*rnet]*
 		}
 		n.arrayBad[at] = true
 		n.viaShort++
+		n.shortAt = append(n.shortAt, at)
 		return true
 	}
 	return false

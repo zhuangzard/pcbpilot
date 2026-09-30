@@ -254,8 +254,7 @@ func Joint(b *Board, an *Analysis, c *Circuit, st *Stackup, rr *RouteResult, drc
 		if len(si.Nets) > 0 {
 			bad := 0
 			for _, f := range si.Findings {
-				switch f.Kind {
-				case "skew", "split-crossing", "vias", "group-skew":
+				if siDefect(f.Kind) {
 					bad++
 				}
 			}

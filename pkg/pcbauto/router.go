@@ -51,6 +51,15 @@ type RouteOptions struct {
 	BGA bool `json:"bga,omitempty"`
 	// NoRepair skips the exact-DRC repair loop (diagnostics only).
 	NoRepair bool `json:"noRepair,omitempty"`
+	// NoPairUnit routes declared differential pairs leg by leg with the soft
+	// pair field (the pre-unit behaviour); the pipeline routes both ways
+	// and keeps the unit routing only when it completes as much.
+	NoPairUnit bool `json:"noPairUnit,omitempty"`
+	// WorkRate > 0 runs the router on a virtual clock (clock.go): one
+	// second of Timeout is WorkRate A* expansions, so every deadline, stall
+	// test and budget depends on the work done, not on machine load — the
+	// fixture bench's deterministic mode (PCBPILOT_BENCH_WORK). 0 = wall time.
+	WorkRate float64 `json:"-"`
 }
 
 // RouteStats summarises a routing run.
@@ -73,6 +82,9 @@ type RouteStats struct {
 	ConflictTrace       []int   `json:"conflictTrace,omitempty"`
 	GridMil             float64 `json:"gridMil"`
 	Millis              int64   `json:"millis"`
+	// Work is the search work done (A* expansions + flood steps): the unit
+	// of the virtual clock (RouteOptions.WorkRate, clock.go).
+	Work int64 `json:"work,omitempty"`
 }
 
 // RouteResult is the router output.
@@ -85,6 +97,11 @@ type RouteResult struct {
 	Notes    []string      `json:"notes,omitempty"`
 	// Power is the post-route segment-current / IR-drop result (--sim only).
 	Power *IRReport `json:"power,omitempty"`
+	// ViaShortfalls are transitions of current-carrying nets whose via
+	// array stayed short of the sizing after every alternative (viafix.go).
+	ViaShortfalls []ViaShortfall `json:"viaShortfalls,omitempty"`
+	// virtual: Stats.Millis is virtual time (RouteOptions.WorkRate).
+	virtual bool
 }
 
 // rnet is the router's per-net state.
@@ -138,6 +155,20 @@ type rnet struct {
 	viaDrill, viaDia float64
 	viaShort         int
 	arrayBad         map[Point]bool
+	// Via-array completion (viafix.go): the transitions that came out short,
+	// the alternatives tried, and the state of the one being tried — a
+	// count for a larger ladder drill, via sites banned round a short
+	// transition, or no layer change at all.
+	shortAt   []Point
+	roomMemo  map[int32]int8 // arrayRoom per column (static obstacles)
+	viaFix    int            // viaFixNone | viaFixKept | viaFixFailed
+	viaFixing bool           // a completeViaArrays re-route is searching
+	pairLeads bool           // this leg leads its differential pair unit (pairroute.go)
+	pairFree  bool           // the pair's best unit was two free legs (pairroute.go)
+	viaTried  []string
+	viaK      int
+	viaBan    []Point
+	noVias    bool
 	// edgeMil is the insulated domain's distance to the board edge and the
 	// metal mounting holes (0 = the per-layer edge band covers it).
 	edgeMil float64
@@ -207,7 +238,11 @@ type router struct {
 	deadline    time.Time
 	split       map[int]*coarse // split-plane labelling per layer id
 	pairField   map[int32]float32
-	pairFac     float32 // pair-field cost factor (0 = the default 0.55)
+	pair        *pairCons // follower constraints of a differential pair leg (pairroute.go)
+	pairLead    *pairLead // leader of a differential pair: room for the partner
+	pairFree    bool      // route the pair's legs free (the soft pair field)
+	pairRound   int       // negotiation round (pair penalty decay), 0 = first routing
+	pairFac     float32   // pair-field cost factor (0 = the default 0.55)
 	pbuckets    [][]padEntry
 	pbW, pbH    int
 	viaS        []int32
@@ -224,6 +259,11 @@ type router struct {
 	maxClr   float64
 	padGap   map[[2]*Pad]float64
 	padShare map[*Pad]float64
+	// clockStart / work drive now() (clock.go).
+	clockStart time.Time
+	work       int64
+	// fixNotes are via-array completion notes (viafix.go).
+	fixNotes []string
 	// iso is the domain territory field (intent insulation pairs): copper
 	// of a fenced net keeps half the pair requirement from the partner
 	// territories. nil without an intent.
@@ -237,7 +277,6 @@ var dirs8 = [8][2]int{{1, 0}, {1, 1}, {0, 1}, {-1, 1}, {-1, 0}, {-1, -1}, {0, -1
 
 // Route runs fan-out, plane splitting and negotiated-congestion routing.
 func Route(ctx context.Context, b *Board, st *Stackup, an *Analysis, opt RouteOptions) (*RouteResult, error) {
-	start := time.Now()
 	if opt.GridMil <= 0 {
 		opt.GridMil = defaultGrid(b.Rules)
 	}
@@ -253,11 +292,16 @@ func Route(ctx context.Context, b *Board, st *Stackup, an *Analysis, opt RouteOp
 	if opt.Timeout <= 0 {
 		opt.Timeout = 3 * time.Minute
 	}
+	if opt.WorkRate <= 0 {
+		opt.WorkRate = envWorkRate()
+	}
 	gr, err := newGrid(b, st, opt.GridMil)
 	if err != nil {
 		return nil, err
 	}
 	r := &router{b: b, st: st, an: an, gr: gr, opt: opt, byName: map[string]*rnet{}}
+	r.clockStart = time.Now()
+	start := r.now()
 	r.searchStats.stage = -1
 	r.deadline = start.Add(opt.Timeout)
 	n := len(gr.flags)
@@ -300,8 +344,16 @@ func Route(ctx context.Context, b *Board, st *Stackup, an *Analysis, opt RouteOp
 	// the DRC repair searches used to inherit an exhausted deadline, so every
 	// search returned "timeout" at once (K230 with a poured power layer: 548
 	// of 549 plane connections left open).
-	r.deadline = time.Now().Add(postBudget(opt.Timeout))
-	pctx, pcancel := context.WithTimeout(context.WithoutCancel(ctx), postBudget(opt.Timeout)+5*time.Second)
+	r.deadline = r.now().Add(postBudget(opt.Timeout))
+	var pctx context.Context
+	var pcancel context.CancelFunc
+	if opt.WorkRate > 0 {
+		// Virtual clock: r.deadline bounds the bridging; a wall-clock
+		// timeout would make the result depend on the machine again.
+		pctx, pcancel = context.WithCancel(context.WithoutCancel(ctx))
+	} else {
+		pctx, pcancel = context.WithTimeout(context.WithoutCancel(ctx), postBudget(opt.Timeout)+5*time.Second)
+	}
 	defer pcancel()
 	r.pourRepair(pctx, res)
 	if auditHook != nil {
@@ -313,7 +365,9 @@ func Route(ctx context.Context, b *Board, st *Stackup, an *Analysis, opt RouteOp
 		res.Notes = append(res.Notes, sprintf("radii: %d statics, grid %dx%dx%d; searches ok %d (%d exp) failed %d (%d exp); by window stage [okN okExp failN failExp] %v; %d proven unreachable", len(r.statics), gr.W, gr.H, len(gr.layers), st.okN, st.okExp, st.failN, st.failExp, st.byStage, st.proofs))
 	}
 	res.Stats.GridMil = opt.GridMil
-	res.Stats.Millis = time.Since(start).Milliseconds()
+	res.Stats.Millis = r.now().Sub(start).Milliseconds()
+	res.virtual = opt.WorkRate > 0
+	res.Stats.Work = r.work
 	return res, nil
 }
 
@@ -446,7 +500,7 @@ func (r *router) rasterise() {
 	gr.markEdge(r.b.Outline, pol.LayerReq)
 	r.setupEdgeNets(pol)
 	for _, k := range r.b.Keepouts {
-		gr.markKeepout(k)
+		gr.markKeepout(k, r.b.Rules.ViaDia/2)
 	}
 	for _, h := range r.b.Holes {
 		gr.markHole(h, r.b.Rules)
@@ -871,7 +925,11 @@ func (r *router) cost(n *rnet, i int) float32 {
 		} else {
 			area := float64(len(gr.disk(n.radius)))
 			c = float32((1 + hist/area) * (1 + r.presFac*occ))
-			if r.pairField != nil {
+			if r.pair != nil {
+				c *= r.pair.factor(gr, i) // run coupled beside the routed partner
+			} else if r.pairLead != nil {
+				c *= r.pairLead.factor(r, n, i) // leave the partner room
+			} else if r.pairField != nil {
 				if f, ok := r.pairField[int32(i)]; ok {
 					c *= f // run alongside the routed partner at the pair pitch
 				}
@@ -890,6 +948,15 @@ func (r *router) viaCost(n *rnet, x, y int) float64 {
 		return r.viaC[col]
 	}
 	v := r.viaCostUncached(n, x, y)
+	if !math.IsInf(v, 1) && n.viaFixing {
+		// Re-routing a short transition (viafix.go): the new transition
+		// needs room for its whole array — a column where fewer fit costs
+		// more per missing via. (Not in negotiation: the scan per column
+		// costs a large HV board a third of its completion.)
+		if miss := n.viaCount() - 1 - r.arrayRoom(n, x, y); miss > 0 {
+			v *= 1 + arrayMissFac*float64(miss)
+		}
+	}
 	r.viaS[col], r.viaC[col] = r.cur, v
 	return v
 }
@@ -903,6 +970,13 @@ func (r *router) viaCostUncached(n *rnet, x, y int) float64 {
 func (r *router) viaCostR(n *rnet, x, y int, rad float64) float64 {
 	gr := r.gr
 	if gr.noVia[y*gr.W+x] {
+		return math.Inf(1)
+	}
+	if (n.noVias || len(n.viaBan) > 0) && r.viaBanned(n, gr.center(x, y)) {
+		return math.Inf(1)
+	}
+	if n.viaDia > r.b.Rules.ViaDia+1e-6 && r.inNoViaKeepout(gr.center(x, y), n.viaDia/2) {
+		// noVia is drawn for the board via; a current-sized pad is larger.
 		return math.Inf(1)
 	}
 	// Drilled holes keep the process gap to every fan-out via, own net too:
@@ -1196,11 +1270,19 @@ func (r *router) search(n *rnet, sources []int32, targets map[int32]bool, bounds
 		r.tgt[t] = r.cur // array membership: a map lookup per pop was ~1 %
 	}
 	g := float32(gr.g)
+	// A pair follower's coupled path costs less per step than the plain
+	// distance the heuristic assumes: scaled to the field factor, the
+	// heuristic stays a lower bound and the search finds the coupled detour
+	// instead of committing to the straight line (ESP32 USB: 0 % coupled).
+	hg := g
+	if r.pair != nil {
+		hg *= r.pair.hScale()
+	}
 	h := func(x, y int) float32 {
 		dx := max(tb[0]-x, 0, x-tb[2])
 		dy := max(tb[1]-y, 0, y-tb[3])
 		mn, mx := min(dx, dy), max(dx, dy)
-		return g * (float32(mx-mn) + 1.4142*float32(mn))
+		return hg * (float32(mx-mn) + 1.4142*float32(mn))
 	}
 	// Indexed heap with decrease-key: every open node is in it once. Pops come
 	// out in the same (f, index) order as the old lazy-deletion heap, whose
@@ -1237,7 +1319,8 @@ func (r *router) search(n *rnet, sources []int32, targets map[int32]bool, bounds
 			return path
 		}
 		expansions++
-		if expansions&0xfff == 0 && time.Now().After(r.deadline) {
+		r.work++
+		if expansions&0xfff == 0 && r.now().After(r.deadline) {
 			return nil
 		}
 		l, x, y := gr.xy(int(i))
@@ -1305,6 +1388,9 @@ func (r *router) search(n *rnet, sources []int32, targets map[int32]bool, bounds
 						break
 					}
 					vc = float32(v)
+					if r.pair != nil {
+						vc *= r.pair.viaFactor(gr, x, y) // vias in pairs
+					}
 				}
 				c := r.cost(n, int(j))
 				if math.IsInf(float64(c), 1) {
@@ -1349,8 +1435,12 @@ func (r *router) routeNetKeep(n *rnet, keep bool) bool {
 	old := n.paths
 	r.ripUp(n, true)
 	defer r.applyClaims(n.fixed, +1)
-	r.pairField = r.buildPairField(n)
-	defer func() { r.pairField = nil }()
+	if r.pairPartner(n) == nil || r.pairFree {
+		r.pairField = r.buildPairField(n) // soft pair field (undeclared pairs, free units)
+	} else if r.pair = r.buildPairCons(n); r.pair == nil {
+		r.pairLead = r.buildPairLead(n)
+	}
+	defer func() { r.pairField, r.pair, r.pairLead = nil, nil, nil }()
 	n.failed = nil
 	if keep {
 		n.paths = old
@@ -1469,18 +1559,18 @@ func (r *router) routeNetKeep(n *rnet, keep bool) bool {
 			if path != nil {
 				break
 			}
-			if time.Now().After(r.deadline) {
+			if r.now().After(r.deadline) {
 				break
 			}
 		}
-		if path == nil && n.daisy && len(treeAll) > len(tree) && !unreachable && !time.Now().After(r.deadline) {
+		if path == nil && n.daisy && len(treeAll) > len(tree) && !unreachable && !r.now().After(r.deadline) {
 			w := [4]int{0, 0, gr.W - 1, gr.H - 1}
 			path = r.search(n, treeAll, targets, w)
 			if path != nil && treePads[path[0]] == nil {
 				r.searchStats.stage = -1
 			}
 		}
-		if path == nil && bridging && !grown && len(remaining) > 1 && !time.Now().After(r.deadline) {
+		if path == nil && bridging && !grown && len(remaining) > 1 && !r.now().After(r.deadline) {
 			// Nothing reached from the root: the root is the likely culprit
 			// (walled in), not the group it failed to reach. It is the root
 			// that is reported; routing restarts from the largest remaining
@@ -1567,7 +1657,7 @@ func largestGroup[T any](xs []T, size func(T) int, ok func(T) bool) int {
 }
 
 func (r *router) failReason() string {
-	if time.Now().After(r.deadline) {
+	if r.now().After(r.deadline) {
 		return "timeout"
 	}
 	if r.strict {
@@ -1711,9 +1801,29 @@ func (r *router) negotiate(ctx context.Context, res *RouteResult) error {
 	order := r.routeOrder()
 	res.Stats.Nets = len(order)
 	r.presFac = 0.6
+	pos := map[*rnet]int{}
+	for k, n := range order {
+		pos[n] = k
+	}
+	// lead returns the partner n follows (nil: n routes alone or leads).
+	lead := func(n *rnet) *rnet {
+		if p := r.pairPartner(n); p != nil {
+			if k, ok := pos[p]; ok && k < pos[n] {
+				return p
+			}
+		}
+		return nil
+	}
 	for _, n := range order {
 		if err := ctx.Err(); err != nil {
 			return err
+		}
+		if lead(n) != nil {
+			continue // routed with its leader
+		}
+		if p := r.pairPartner(n); p != nil && pos[p] > pos[n] {
+			r.routePairUnit(n, p, true)
+			continue
 		}
 		r.routeNet(n)
 	}
@@ -1725,7 +1835,7 @@ func (r *router) negotiate(ctx context.Context, res *RouteResult) error {
 	for ; it < r.opt.MaxIters; it++ {
 		c := r.conflicts()
 		res.Stats.ConflictTrace = append(res.Stats.ConflictTrace, c)
-		if c == 0 || time.Now().After(r.deadline) {
+		if c == 0 || r.now().After(r.deadline) {
 			break
 		}
 		// Stalled: two iterations without a 3 % gain on the best conflict
@@ -1757,7 +1867,8 @@ func (r *router) negotiate(ctx context.Context, res *RouteResult) error {
 			}
 		}
 		r.presFac *= 1.6
-		iterStart := time.Now()
+		r.pairRound = it
+		iterStart := r.now()
 		for _, n := range order {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -1766,16 +1877,29 @@ func (r *router) negotiate(ctx context.Context, res *RouteResult) error {
 			// then returns "timeout" at once loses all its paths — the loop
 			// used to do that to every conflicting net left in the iteration
 			// (RK3568: 42.1 % → 45.4 % once it stopped).
-			if time.Now().After(r.deadline) {
+			if r.now().After(r.deadline) {
 				break
+			}
+			// A pair routed as a unit re-routes as a unit; a pair the unit
+			// could not couple (pairFree) re-routes leg by leg as before.
+			if l := lead(n); l != nil && !n.pairFree {
+				continue // moves with its leader
+			}
+			if p := r.pairPartner(n); p != nil && !n.pairFree && pos[p] > pos[n] {
+				if n.conflict || p.conflict {
+					r.reroutePairKeepOnTimeout(n, p, res)
+				}
+				continue
 			}
 			if n.conflict {
 				r.rerouteKeepOnTimeout(n, res)
 			}
 		}
-		lastIter = time.Since(iterStart)
+		lastIter = r.now().Sub(iterStart)
 	}
 	res.Stats.Iterations = it
+	// Legalisation and the DRC repair re-route pair legs with the decay the
+	// negotiation ended on (full penalties there would undo its give-way).
 	// Strict legalisation: lowest-priority conflicting nets are re-routed with
 	// overlap forbidden; if impossible they are left unrouted (never shorted).
 	r.strict = true
@@ -1844,7 +1968,8 @@ func (r *router) provablyUnreachable(n *rnet, sources []int32, targets map[int32
 	}
 	nl := len(gr.layers)
 	for k := 0; k < len(queue); k++ {
-		if len(queue) > floodCap || k&0xfff == 0 && time.Now().After(r.deadline) {
+		r.work++
+		if len(queue) > floodCap || k&0xfff == 0 && r.now().After(r.deadline) {
 			return false
 		}
 		i := queue[k]
@@ -1938,12 +2063,28 @@ func (r *router) rerouteKeepOnTimeout(n *rnet, res *RouteResult) {
 	claims := append([]int32(nil), n.claims...)
 	failed := append([]Unrouted(nil), n.failed...)
 	r.routeNet(n)
-	if !time.Now().After(r.deadline) || len(n.paths) >= len(paths) {
+	if !r.now().After(r.deadline) || len(n.paths) >= len(paths) {
 		return
 	}
 	r.applyClaims(n.claims, -1)
 	n.paths, n.claims, n.failed = paths, claims, failed
 	r.applyClaims(n.claims, +1)
+	res.Stats.KeptOnTimeout++
+}
+
+// reroutePairKeepOnTimeout is rerouteKeepOnTimeout for a differential pair
+// routed as a unit: both legs are ripped up and re-routed together, and both
+// come back when the deadline cut the new unit short.
+func (r *router) reroutePairKeepOnTimeout(a, b *rnet, res *RouteResult) {
+	sa, sb := r.saveNet(a), r.saveNet(b)
+	r.routePairUnit(a, b, false)
+	if !r.now().After(r.deadline) || len(a.paths)+len(b.paths) >= len(sa.paths)+len(sb.paths) {
+		return
+	}
+	r.clearNet(a)
+	r.clearNet(b)
+	r.restoreNet(a, sa)
+	r.restoreNet(b, sb)
 	res.Stats.KeptOnTimeout++
 }
 
