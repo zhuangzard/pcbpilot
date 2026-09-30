@@ -2,8 +2,10 @@ package pcbauto
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -93,6 +95,16 @@ func TestFixtureBench(t *testing.T) {
 				reasons[u.Reason]++
 			}
 			t.Logf("unrouted reasons %v trace %v grid %.2f", reasons, s.ConflictTrace, s.GridMil)
+			// Report-only aesthetics of the engine-routed board (weight 0).
+			ar := Aesthetics(AesInputFromResult(b, out.Analysis, nil, st, res, out.Isolation))
+			var ms []string
+			for _, m := range ar.Metrics {
+				if !m.Skipped {
+					ms = append(ms, fmt.Sprintf("%s=%.3g/%.0f", m.ID, m.Value, m.Score))
+				}
+			}
+			t.Logf("aesthetics %.1f (placement %.1f, routing %.1f, routed share %.3f, %d symmetry groups): %s",
+				ar.Score, ar.Placement, ar.Routing, ar.RoutedShare, len(ar.Symmetry), strings.Join(ms, " "))
 		})
 	}
 }

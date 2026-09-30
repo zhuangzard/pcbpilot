@@ -2852,6 +2852,8 @@ external router (Freerouting) would route under the antenna. The result reports
 	pcb.AddCommand(newPcbDumpCmd(cfg, &window, stdout, stderr))
 	// ── layout-score: 多维布局打分 + 归因梯度（#167）──────────────────────────
 	pcb.AddCommand(newPcbLayoutScoreCmd(cfg, &window, stdout, stderr))
+	// `pcb aesthetics` — offline placement + routing aesthetics (report-only).
+	pcb.AddCommand(newPcbAestheticsCmd(stdout, stderr))
 	// ── floorplan: 从 S0 flow 推布局骨架（只读规划，#167 ACHIEVE 层）──────────
 	pcb.AddCommand(newPcbFloorplanCmd(cfg, &window, stdout, stderr))
 	// ── layout-plan: 按模块生成参数化布局候选（纯离线，不写 EDA）─────────────

@@ -664,6 +664,26 @@ net ID、全量 verification、provenance 和复杂 PCB constraints；否则保�
 已有合法数字位号保留原拼写、前导零和声明顺序。只为非标准名称或未编号占位符分配
 未占用数字，功能名称保留在 role。原生 `uniqueId` 保持不变，避免影响 PCB 关联。
 
+## 约束优先级（constraint tiers）—— 美观是叠加的最低层软约束
+
+所有已沉淀的研究步骤都是**上层硬约束**，美观度（2026-09 起）只是**新增的一层软约束**，排在最后：
+它只能在不改变 1–6 层结果的解之间做选择，永远不替代、不放宽、不绕过上层。代码唯一真源是
+`pkg/pcbauto/aesthetics.go` 的 `ConstraintPriority` 表；本表与之同步。
+
+| 层 | 名称 | 性质 | 覆盖 |
+|---|---|---|---|
+| 1 | safety 安全 | 硬 | 隔离带与铣槽（intent 绝缘对：IEC 62368-1 / 60601-1 MOOP·MOPP / 61010-1、IPC-2221B 爬电/间隙）、板边铜距带、天线禁布 |
+| 2 | electrical 电气 | 硬 | intent 逐网电流、线宽与颈缩、按电流定过孔尺寸与过孔阵列、直流 IR 预算与设计后热/IR、热回路/去耦、差分、RF、等长组、参考平面、模拟 SPICE 目标 |
+| 3 | manufacturing 制造 | 硬 | rules apply/check、DRC 间距、孔距、槽距、工艺最小值 |
+| 4 | completion 布通 | 硬 | 信号与平面连接全部接通 |
+| 5 | efficiency 效率 | 软 | 绕行比、每连接过孔数 |
+| 6 | placement 布局 | 软 | layout-score：分区、信号流、接口在板边、保护件就近、紧凑、装配间距 |
+| 7 | aesthetics 美观 | 软 | 布局 P1–P9、布线 R1–R9；Phase A 只报告（joint 权重 0） |
+
+落实方式：美观度量对差分、RF、等长、电流过孔/过孔阵列、intent 颈缩、隔离带与开槽、高压间距网在度量前
+**硬编码豁免**；未布通按 0 计入；任何美化改动使 1–6 层任一结果变差即回滚（Phase B 起）。流程契约测试
+`TestFlowContract`（`internal/app/flow_contract_test.go`）保护 1–4 层的研究步骤仍在流程中且输出不变。
+
 ## 四、可信判据(reliable oracles)——判对错只信这些
 
 | 判什么 | ✅ 唯一可信 | ❌ 不可信 |

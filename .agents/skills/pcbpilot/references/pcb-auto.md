@@ -320,6 +320,39 @@ pcbpilot pcb check --project <工程>
   `no-components` 条带（按主器件本体外扩 20 mil 丝印余量）。EasyEDA 区域不能豁免器件，整块
   `no-components` 会让模块自己报 “Device to Prohibited Region”。
 
+## 美观度度量（`pcb aesthetics`，只报告）
+
+`pcbpilot pcb aesthetics --board <dump.json|board.routed.json> [--json] [--all]` 离线、纯几何地度量
+布局与布线的“设计感”，不连编辑器。输入是 `pcb dump`（要布线项就加 `--include-copper`）或
+`pcb auto run` 写出的 `board.routed.json`；没有铜皮时只出布局项。
+
+- **布局 P1–P9**：行列共线（2 mil 内同线，≤15 mil 为“差一点”）、阵列等距 CV、同类朝向一致（极性件按
+  360°、对称无源件按 180°）、**同构子电路对称**（型号多重集 + 引脚-网连通模式哈希识别双路 LDO、
+  多路 LED/按键通道、差分 P/N 链、IC 两侧去耦；输出识别到的组、最佳镜像轴或平移、按模块跨度归一的
+  镜像误差，旋转也须镜像对应）、模块矩形度、板边首排边距 CV、留白均匀度、位号丝印、原点落 5/25 mil 格。
+- **布线 R1–R9**：非 8 向长度占比、焊盘入线（轴向/45°/斜入、偏心、角部出线）、S 形小错位、转折密度
+  （含 90°/锐角残留）、层方向纪律（TOP 器件层权重最低）、平行等距 CV、过孔/顶点落格、单网最大绕行、悬空 stub。
+- 每项给原始值、0–100 分（阈值注释写明出处）、最差对象（位号/网/图元 id）。
+- **只报告**：权重 0，不进 `pcb auto` 综合分和交付门槛（`plan.json` 的 `joint.aesthetics` 与 `report.md`
+  「综合评分」下一行同样只报告）。不要为抬美观分去改布局/布线参数或手工挪件。
+- **电气优先**：差分对、RF 馈线、等长网、电源/地过孔阵列、按电流加倍的过孔、intent 颈缩处的线宽过渡、
+  高压/逐对间距网（绕行与间距不罚）、隔离带与开槽在度量前**硬编码豁免**
+  （报告 `exemptions[]` 列出）；未布通连接按 0 计入布线组，少布线不可能更“好看”。
+  `--no-exemptions` 只用于诊断/对账。
+- **约束优先级**：安全 > 电气 > 制造/DRC > 布通 > 效率 > 布局 > 美观（唯一真源 `pcbauto.ConstraintPriority`，
+  见 `docs/concepts.md`「约束优先级」）。美观是叠加的最低层软约束，已沉淀的研究步骤（intent、sim power/analog、
+  线宽与颈缩、隔离带与开槽、按电流定过孔、板边铜距、rules、设计后热/IR、报告各章）一步都不能少；
+  `TestFlowContract` 守护这条流程，不得为让改动通过而削弱它。
+- **风格档** `--style functional|balanced|precision|auto` 或 `--style-file <json>`（`pcbpilot.project.json` 的
+  `aesthetics` 对象或裸对象；`profile: custom` 可设逐项权重、对齐容差、目标格、是否要求对称、松弛预算）。
+  functional＝密板（计划权重 0.05、宽容差、零额外线长/面积）；balanced＝默认；precision＝25 mil 格、紧对齐、
+  检出对称必须对称，可花 +5% 线长 / +3% 面积 / +4 过孔；auto 按器件/网络数、引脚密度、层数、高速/高压、
+  RUDY 拥塞算复杂度指数选档并打印理由（RK3568/K230/SZPI→functional，ESP32/mipi/bbclaw→balanced）。
+  风格只改软目标，任何碰硬约束的键（clearance/width/via/creepage/drc/completion…）直接拒绝。
+  `pcb auto run` 同样接受 `--style/--style-file`；`report design` 第 6B 章按 plan 里的风格重算并写明选档理由。
+- 基线与已知问题（ESP32 样例扇出线斜入、tidy 未生效原因、USB 差分未耦合）见
+  `docs/reviews/2026-09-routing-aesthetics/baseline.md`。
+
 ## 实测记录
 
 **2026-09-25 ESP32-S3 mini（esp32MiniRequire 第一节，桌面 V3 3.2.149，ceshi PCB1）** — `live-verified`（Layout 阶段）

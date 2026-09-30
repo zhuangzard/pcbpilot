@@ -26,6 +26,10 @@ import (
 //	                    connection
 //	    placement  30 % what routing cannot see: assembly, tidiness, edge I/O,
 //	                    partition (supplied by the caller from layout-score)
+//
+// With JointOptions.Aesthetics the placement + routing aesthetics report
+// (aesthetics.go) rides along as JointScore.Aesthetics with weight 0: it is
+// report-only and changes neither Quality nor Overall.
 
 // JointItem is one measured term.
 type JointItem struct {
@@ -53,6 +57,10 @@ type JointScore struct {
 	Quality          float64            `json:"quality"`
 	Groups           map[string]float64 `json:"groups"`
 	Items            []JointItem        `json:"items"`
+	// Aesthetics is the placement + routing aesthetics report (aesthetics.go),
+	// carried with weight AestheticsWeight = 0: report-only in Phase A, it
+	// is not in Groups, Quality or Overall (docs/reviews/2026-09-routing-aesthetics).
+	Aesthetics *AestheticsReport `json:"aesthetics,omitempty"`
 }
 
 // JointOptions carries what the caller measured outside the engine.
@@ -63,6 +71,13 @@ type JointOptions struct {
 	PlacementScore float64
 	// Overlaps is the count of part body overlaps (a hard gate).
 	Overlaps int
+	// Aesthetics attaches the report-only aesthetics analysis (weight 0);
+	// Isolation, when known, exempts copper in isolation bands and slots.
+	Aesthetics bool
+	Isolation  *IsolationReport
+	// AesProfile is the aesthetics style (nil = balanced; Name "auto" =
+	// chosen from the board). Soft objectives only.
+	AesProfile *AesProfile
 }
 
 var jointGroupWeight = map[string]float64{"electrical": 0.45, "efficiency": 0.25, "placement": 0.30}
@@ -337,6 +352,12 @@ func Joint(b *Board, an *Analysis, c *Circuit, st *Stackup, rr *RouteResult, drc
 		js.Quality = 100 * math.Exp(logSum/wTot)
 	}
 	js.Overall = js.CompletionFactor * js.Quality
+	if opt.Aesthetics {
+		// Report-only: computed after Overall and never folded into it.
+		in := AesInputFromResult(b, an, c, st, rr, opt.Isolation)
+		in.Profile = opt.AesProfile
+		js.Aesthetics = Aesthetics(in)
+	}
 	js.Deliverable = len(js.Gates) == 0 && js.Completion >= 100 && js.DRC == 0 && js.PlaneOpen == 0
 	if len(js.Gates) > 0 {
 		js.Overall = math.Min(js.Overall, 40)

@@ -44,6 +44,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 		pinCaps            string
 		intent             string
 		groups             []string
+		style, styleFile   string
 		layers, maxLayers  int
 		grid               float64
 		timeout            time.Duration
@@ -61,6 +62,8 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 		c.Flags().IntVar(&in.maxLayers, "max-layers", 6, "cost cap for the layer decision")
 		c.Flags().Float64Var(&in.grid, "grid", 0, "routing grid in mil (0 = derived from the rules)")
 		c.Flags().DurationVar(&in.timeout, "timeout", 4*time.Minute, "routing time budget")
+		c.Flags().StringVar(&in.style, "style", "", "aesthetics style profile for the report-only aesthetics block: functional | balanced (default) | precision | auto (soft objectives only; never relaxes safety/electrical/DRC/completion)")
+		c.Flags().StringVar(&in.styleFile, "style-file", "", "aesthetics style JSON (the 'aesthetics' object of pcbpilot.project.json, or the bare object; profile custom with per-metric weights/tolerances)")
 		c.Flags().StringVar(&in.pinCaps, "pin-caps", "", "extra pin-capability table merged over the built-in one (schema: .agents/skills/pcbpilot/references/pin-capabilities.json) — adds STM32/AT32/other remappable parts for schematic pin-swap feedback")
 	}
 	loadCaps := func() (*pcbauto.PinCapTable, error) {
@@ -258,6 +261,10 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
   pcbpilot apply out/playbook.json --project demo --dry-run`,
 			Args: cobra.NoArgs,
 			RunE: func(cmd *cobra.Command, _ []string) error {
+				aesStyle, serr := resolveAesStyle(in.style, in.styleFile)
+				if serr != nil {
+					return serr
+				}
 				if outDir == "" {
 					return fmt.Errorf("--out-dir is required")
 				}
@@ -391,8 +398,12 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 						overlaps = rep.Placement.Metrics.Overlaps
 					}
 					rep.Joint = pcbauto.Joint(b, rep.Result.Analysis, rep.Circuit, rep.Result.Stackup, rep.Result.Route, rep.Result.DRC,
-						pcbauto.JointOptions{PlacementScore: -1, Overlaps: overlaps})
+						pcbauto.JointOptions{PlacementScore: -1, Overlaps: overlaps, Aesthetics: true, Isolation: rep.Result.Isolation, AesProfile: aesStyle})
 					fmt.Fprintf(stderr, "joint score %.1f (completion ×%.2f, quality %.0f)\n", rep.Joint.Overall, rep.Joint.CompletionFactor, rep.Joint.Quality)
+					if a := rep.Joint.Aesthetics; a != nil {
+						fmt.Fprintf(stderr, "aesthetics %.1f (placement %.1f, routing %.1f; report-only, weight %.2f — pcb aesthetics --board board.routed.json)\n",
+							a.Score, a.Placement, a.Routing, a.Weight)
+					}
 					s := rep.Result.Route.Stats
 					// Signal completion alone read "100%" while two +5V plane
 					// connections were open (ESP32 E2E): report both.
@@ -534,6 +545,10 @@ Nothing is written to EasyEDA; apply a pin swap with 'pcbpilot sch pin-swap'.`,
   pcbpilot pcb feedback --plan out/plan.json --board board.json --verify 5 --loop 3`,
 			Args: cobra.NoArgs,
 			RunE: func(cmd *cobra.Command, _ []string) error {
+				aesStyle, serr := resolveAesStyle(in.style, in.styleFile)
+				if serr != nil {
+					return serr
+				}
 				if planPath == "" || in.board == "" {
 					return fmt.Errorf("--plan and --board are required (the plan does not carry the pads)")
 				}
@@ -574,7 +589,8 @@ Nothing is written to EasyEDA; apply a pin swap with 'pcbpilot sch pin-swap'.`,
 					}
 				}
 				if rep.Joint == nil {
-					rep.Joint = pcbauto.Joint(b, rep.Result.Analysis, rep.Circuit, rep.Result.Stackup, rep.Result.Route, rep.Result.DRC, pcbauto.JointOptions{PlacementScore: -1})
+					rep.Joint = pcbauto.Joint(b, rep.Result.Analysis, rep.Circuit, rep.Result.Stackup, rep.Result.Route, rep.Result.DRC,
+						pcbauto.JointOptions{PlacementScore: -1, Aesthetics: true, Isolation: rep.Result.Isolation, AesProfile: aesStyle})
 				}
 				opts := pcbauto.Options{Power: power, Stack: pcbauto.StackOptions{Force: rep.Result.Stackup.Layers, MaxLayers: in.maxLayers},
 					Route: pcbauto.RouteOptions{GridMil: in.grid, Timeout: in.timeout}}
