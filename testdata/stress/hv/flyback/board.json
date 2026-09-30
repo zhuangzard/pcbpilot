@@ -1,19 +1,19 @@
 {
- "_provenance": "hand-designed stress fixture: 230 Vac → 12 V / 2 A flyback (UC3843, STD7N65M2, EE25, PC817+TL431, Y1 cap) — hand placement (mil, y-up)",
+ "_provenance": "hand-designed stress fixture: 230 Vac → 12 V / 2 A flyback (UC3843, STD7N65M2, EE25, PC817+TL431, Y1 cap) — hand placement (mil, y-up); 2026-09-28: J1 +160 mil x, D1 −100 mil y, C1 −60 mil y so every mains pad keeps the 259.9 mil reinforced edge band (IEC 62368-1 creepage to an accessible routed edge) added after this fixture was drawn",
  "components": [
   {
    "primitiveId": "c-J1",
    "designator": "J1",
    "device": "DG142R-7.5-02P",
    "layer": 1,
-   "x": 170,
+   "x": 330,
    "y": 1280,
    "rotation": 0,
    "locked": true,
    "bbox": {
-    "minX": 5.0,
+    "minX": 165.0,
     "minY": 965.0,
-    "maxX": 335.0,
+    "maxX": 495.0,
     "maxY": 1595.0
    },
    "pads": [
@@ -21,7 +21,7 @@
      "padNumber": "1",
      "net": "L",
      "layer": 12,
-     "x": 170.0,
+     "x": 330.0,
      "y": 1427.5,
      "width": 100,
      "height": 100,
@@ -36,7 +36,7 @@
      "padNumber": "2",
      "net": "N",
      "layer": 12,
-     "x": 170.0,
+     "x": 330.0,
      "y": 1132.5,
      "width": 100,
      "height": 100,
@@ -151,14 +151,14 @@
    "device": "MKP-X2-104K275",
    "layer": 1,
    "x": 750,
-   "y": 650,
+   "y": 590,
    "rotation": 0,
    "locked": false,
    "bbox": {
     "minX": 390.0,
-    "minY": 290.0,
+    "minY": 230.0,
     "maxX": 1110.0,
-    "maxY": 1010.0
+    "maxY": 950.0
    },
    "pads": [
     {
@@ -166,7 +166,7 @@
      "net": "L_F",
      "layer": 12,
      "x": 454.5,
-     "y": 650.0,
+     "y": 590.0,
      "width": 75,
      "height": 75,
      "rotation": 0,
@@ -181,7 +181,7 @@
      "net": "N",
      "layer": 12,
      "x": 1045.5,
-     "y": 650.0,
+     "y": 590.0,
      "width": 75,
      "height": 75,
      "rotation": 0,
@@ -421,14 +421,14 @@
    "device": "US1M",
    "layer": 1,
    "x": 1900,
-   "y": 2350,
+   "y": 2250,
    "rotation": 0,
    "locked": false,
    "bbox": {
     "minX": 1785.0,
-    "minY": 2305.0,
+    "minY": 2205.0,
     "maxX": 2015.0,
-    "maxY": 2395.0
+    "maxY": 2295.0
    },
    "pads": [
     {
@@ -436,7 +436,7 @@
      "net": "CLAMP",
      "layer": 1,
      "x": 1820.0,
-     "y": 2350.0,
+     "y": 2250.0,
      "width": 60,
      "height": 80,
      "rotation": 0,
@@ -451,7 +451,7 @@
      "net": "DRAIN",
      "layer": 1,
      "x": 1980.0,
-     "y": 2350.0,
+     "y": 2250.0,
      "width": 60,
      "height": 80,
      "rotation": 0,

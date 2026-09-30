@@ -67,8 +67,13 @@ type Model struct {
 	SupplyPins  []string            `json:"supplyPins,omitempty"`
 	ReturnPins  []string            `json:"returnPins,omitempty"`
 	Rails       []Rail              `json:"rails,omitempty"`
-	TypA        float64             `json:"typA,omitempty"`
-	PeakA       float64             `json:"peakA,omitempty"`
+	// OffBoard marks a load drawn THROUGH this part by something off the
+	// board (the product's output load on an output terminal): its power
+	// leaves through the cable, so it is not board heat (thermalW 0). Unset
+	// = true for a load model bound to a connector designator (J/P/CN/X…).
+	OffBoard *bool   `json:"offBoard,omitempty"`
+	TypA     float64 `json:"typA,omitempty"`
+	PeakA    float64 `json:"peakA,omitempty"`
 	// Regulators.
 	Vref      float64   `json:"vref,omitempty"`
 	Vout      float64   `json:"vout,omitempty"`

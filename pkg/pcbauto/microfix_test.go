@@ -95,6 +95,12 @@ func TestApplyMechInPlaceKeepsPoses(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := isoBoard()
+	// A locating hole owned by J1 (like a USB-C peg) must stay put too.
+	peg := &Hole{Name: "J1-peg", Owner: "J1", C: Point{140, 1100}, Dia: 30}
+	b.Holes = append(b.Holes, peg)
+	if err := b.Index(); err != nil {
+		t.Fatal(err)
+	}
 	before := savePose(b.Part("J1"))
 	mc, err := ApplyMechInPlace(b, spec)
 	if err != nil {
@@ -108,6 +114,9 @@ func TestApplyMechInPlaceKeepsPoses(t *testing.T) {
 		if pd.Box != before.pads[i] {
 			t.Fatalf("pad %s moved: %+v, was %+v", pd.Key(), pd.Box, before.pads[i])
 		}
+	}
+	if peg.C != (Point{140, 1100}) {
+		t.Fatalf("J1's own hole moved to %+v (route-only DRC would check it at the wrong place)", peg.C)
 	}
 	if !mc.Fixed["J1"] || len(mc.Notes) == 0 {
 		t.Fatalf("want J1 fixed and a note on the skipped move: %+v", mc)

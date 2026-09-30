@@ -833,7 +833,15 @@ func (r *router) nodeCong(l, x, y int, rad float64) (occ float64, hist float64) 
 		return
 	}
 	for _, o := range d {
-		j := gr.idx(l, x+o[0], y+o[1])
+		// Cells past the grid edge hold no claims (the span path above clamps
+		// the same way). Without this a current-sized via disk near the board
+		// edge indexed past the layer — or into the next one — and panicked
+		// (ESP32 v05 board with --intent --sim, console e2e 2026-09-28).
+		xx, yy := x+o[0], y+o[1]
+		if xx < 0 || xx >= gr.W || yy < 0 || yy >= gr.H {
+			continue
+		}
+		j := gr.idx(l, xx, yy)
 		if u := gr.use[j]; u > 0 {
 			occ += float64(u)
 		}

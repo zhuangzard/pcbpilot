@@ -1,0 +1,170 @@
+{
+ "_provenance": "ref → value/MPN/LCSC for the live v06 ESP32-S3 mini board (designators and devices of board.json in this dir, i.e. the v0.6 live PCB); value/LCSC/manufacturer per MPN from pkg/powersim/testdata/esp32mini/values.json (same parts, earlier S0 designators). Paired with sch-*.json here (live connectivity snapshot of the same revision, artifacts/v06-live/conn-*.json).",
+ "parts": {
+  "C1": {
+   "value": "10uF",
+   "mpn": "GRM21BR61H106KE43L",
+   "lcsc": "C440198",
+   "manufacturer": "muRata(村田)"
+  },
+  "C2": {
+   "value": "22uF",
+   "mpn": "CL21A226MAQNNNE",
+   "lcsc": "C45783",
+   "manufacturer": "SAMSUNG(三星)"
+  },
+  "C3": {
+   "value": "100nF",
+   "mpn": "CL05B104KO5NNNC",
+   "lcsc": "C1525",
+   "manufacturer": "SAMSUNG(三星)"
+  },
+  "C4": {
+   "value": "100nF",
+   "mpn": "CL05B104KO5NNNC",
+   "lcsc": "C1525",
+   "manufacturer": "SAMSUNG(三星)"
+  },
+  "C5": {
+   "value": "10uF",
+   "mpn": "GRM21BR61H106KE43L",
+   "lcsc": "C440198",
+   "manufacturer": "muRata(村田)"
+  },
+  "C6": {
+   "value": "100nF",
+   "mpn": "CL05B104KO5NNNC",
+   "lcsc": "C1525",
+   "manufacturer": "SAMSUNG(三星)"
+  },
+  "C7": {
+   "value": "1uF",
+   "mpn": "CL05A105KA5NQNC",
+   "lcsc": "C52923",
+   "manufacturer": "SAMSUNG(三星)"
+  },
+  "D1": {
+   "mpn": "SS34",
+   "lcsc": "C8678",
+   "manufacturer": "MDD(辰达半导体)"
+  },
+  "D2": {
+   "mpn": "SS34",
+   "lcsc": "C8678",
+   "manufacturer": "MDD(辰达半导体)"
+  },
+  "D3": {
+   "mpn": "USBLC6-2SC6",
+   "lcsc": "C2687116",
+   "manufacturer": "UMW(友台半导体)"
+  },
+  "J1": {
+   "mpn": "KF301-5.0-2P",
+   "lcsc": "C474881",
+   "manufacturer": "KEFA(科发)"
+  },
+  "J2": {
+   "mpn": "USB3.1TYPE-C16P",
+   "lcsc": "C9900012665"
+  },
+  "L1": {
+   "value": "2.2uH",
+   "mpn": "NLCV32T-2R2M-PF",
+   "lcsc": "C250183",
+   "manufacturer": "TDK"
+  },
+  "LED1": {
+   "mpn": "KT-0805Y",
+   "lcsc": "C2296",
+   "manufacturer": "KENTO"
+  },
+  "Q1": {
+   "mpn": "MMBT3904(RANGE:100-300)",
+   "lcsc": "C20526",
+   "manufacturer": "CJ(江苏长电/长晶)"
+  },
+  "Q2": {
+   "mpn": "MMBT3904(RANGE:100-300)",
+   "lcsc": "C20526",
+   "manufacturer": "CJ(江苏长电/长晶)"
+  },
+  "R1": {
+   "value": "45.3kΩ",
+   "mpn": "0402WGF4532TCE",
+   "lcsc": "C26980",
+   "manufacturer": "UNI-ROYAL(厚声)"
+  },
+  "R2": {
+   "value": "10kΩ",
+   "mpn": "0402WGF1002TCE",
+   "lcsc": "C25744",
+   "manufacturer": "UNI-ROYAL(厚声)"
+  },
+  "R3": {
+   "value": "5.1kΩ",
+   "mpn": "0402WGF5101TCE",
+   "lcsc": "C25905",
+   "manufacturer": "UNI-ROYAL(厚声)"
+  },
+  "R4": {
+   "value": "5.1kΩ",
+   "mpn": "0402WGF5101TCE",
+   "lcsc": "C25905",
+   "manufacturer": "UNI-ROYAL(厚声)"
+  },
+  "R5": {
+   "value": "10kΩ",
+   "mpn": "0402WGF1002TCE",
+   "lcsc": "C25744",
+   "manufacturer": "UNI-ROYAL(厚声)"
+  },
+  "R6": {
+   "value": "10kΩ",
+   "mpn": "0402WGF1002TCE",
+   "lcsc": "C25744",
+   "manufacturer": "UNI-ROYAL(厚声)"
+  },
+  "R7": {
+   "value": "1kΩ",
+   "mpn": "0402WGF1001TCE",
+   "lcsc": "C11702",
+   "manufacturer": "UNI-ROYAL(厚声)"
+  },
+  "R8": {
+   "value": "4.7kΩ",
+   "mpn": "0402WGJ0472TCE",
+   "lcsc": "C25940",
+   "manufacturer": "UNI-ROYAL(厚声)"
+  },
+  "R9": {
+   "value": "4.7kΩ",
+   "mpn": "0402WGJ0472TCE",
+   "lcsc": "C25940",
+   "manufacturer": "UNI-ROYAL(厚声)"
+  },
+  "SW1": {
+   "mpn": "TS-1088-AR02016",
+   "lcsc": "C720477",
+   "manufacturer": "XUNPU(讯普)"
+  },
+  "SW2": {
+   "mpn": "TS-1088-AR02016",
+   "lcsc": "C720477",
+   "manufacturer": "XUNPU(讯普)"
+  },
+  "U1": {
+   "mpn": "SY8089A1AAC",
+   "lcsc": "C479074",
+   "manufacturer": "Silergy(矽力杰)"
+  },
+  "U2": {
+   "mpn": "CH340C",
+   "lcsc": "C84681",
+   "manufacturer": "WCH(南京沁恒)"
+  },
+  "U3": {
+   "mpn": "ESP32-S3-WROOM-1",
+   "lcsc": "C9900163599"
+  }
+ }
+}

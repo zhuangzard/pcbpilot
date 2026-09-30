@@ -80,6 +80,7 @@ func Run(d *powersim.Design, lib *Library, opt Options) (*Output, error) {
 	}
 	blocks, notes := c.detect()
 	out.Warnings = append(out.Warnings, notes...)
+	out.Findings = append(out.Findings, c.loopFindings...)
 	out.Assumptions = append(out.Assumptions, c.assump...)
 	if len(blocks) > 0 && r.bin != "" {
 		if opt.WorkDir != "" {

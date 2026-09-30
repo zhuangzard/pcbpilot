@@ -82,6 +82,17 @@ func TestEdgeFromIntent(t *testing.T) {
 	if p.NetReq("AC_L") != m || p.NetReq("LED_A") != m || p.NetReq("GND") != 0 || p.Req(LayerTop, "AC_L") != m || p.Req(LayerTop, "GND") != 20 {
 		t.Fatalf("net reqs: AC_L %v GND %v", p.NetReq("AC_L"), p.NetReq("GND"))
 	}
+	// A net listed under two domains (a Y capacitor pulled the SELV ground
+	// into the mains list) takes its own per-net domain: SELV, no band.
+	in.Domains[0].Nets = append(in.Domains[0].Nets, "GND")
+	if in.Nets == nil {
+		in.Nets = map[string]*IntentNet{}
+	}
+	in.Nets["GND"] = &IntentNet{Domain: "SELV"}
+	if p := EdgeFromIntent(in, b); p.NetReq("GND") != 0 || p.NetReq("AC_L") != m {
+		t.Fatalf("SELV GND also listed under MAINS: edge req %v (want 0: its own domain has no band), AC_L %v", p.NetReq("GND"), p.NetReq("AC_L"))
+	}
+	in.Domains[0].Nets = in.Domains[0].Nets[:len(in.Domains[0].Nets)-1]
 	// An intent "edge" field wins (V-cut, explicit domain distance).
 	in.Edge = &IntentEdge{EdgeKind: "vcut", OuterMil: 25, ByDomain: map[string]*EdgeDomain{"MAINS": {Mil: 300, Insulation: "reinforced"}}}
 	p = EdgeFromIntent(in, b)
@@ -342,5 +353,50 @@ func TestDRCEdgePerLayerAndDomain(t *testing.T) {
 	}
 	if strings.Join(edges, ",") != "SCL,AC_L" {
 		t.Fatalf("edge violations %v", edges)
+	}
+}
+
+// The placer keeps each part's own domain edge band (reinforced creepage to
+// an accessible edge for mains pads), not just the layer default: the HV
+// flyback E2E placed F1/R3 pads 172–175 mil from the edge against 260 mil,
+// the router then sealed them off (pad-inaccessible) and pcb check failed.
+func TestPlacerKeepsDomainEdgeBand(t *testing.T) {
+	b := mainsSelvBoard()
+	in := loadIntent(t, "iso-mains-selv.intent.json")
+	an := Analyze(b, PowerSpec{Intent: in}, nil)
+	pol := an.edgePolicy(b)
+	req := pol.NetReq("AC_L")
+	if req <= pol.LayerReq(LayerTop)+40 {
+		t.Fatalf("setup: mains band %.1f not above the layer default %.1f", req, pol.LayerReq(LayerTop))
+	}
+	pl := &placer{b: b, an: an, c: Understand(b, an), m: &Mechanics{Edge: map[string]MechEdge{}, Fixed: map[string]bool{}},
+		opt: PlaceOptions{SpacingMil: 12}, partNet: map[*Part][]int{}, zoneOf: map[*Part]Rect{}, decap: map[*Part]*Pad{}, spacing: 12}
+	pl.setup(&PlaceResult{})
+	f1, r2 := b.Part("F1"), b.Part("R2") // F1 on AC_L/L_F (mains), R2 on ZC/+3V3 (SELV)
+	if pl.edgeReq[f1] < req || pl.edgeReq[r2] != 0 {
+		t.Fatalf("edge req F1 %.1f (want ≥ %.1f), R2 %.1f (want 0)", pl.edgeReq[f1], req, pl.edgeReq[r2])
+	}
+	// Both parts' bodies sitting (req+base)/2 from the left edge: inside the
+	// layer-default region, inside the mains band.
+	bb := PolyBounds(b.Outline)
+	x := bb.MinX + (req+pl.region.MinX-bb.MinX)/2
+	for _, p := range []*Part{f1, r2} {
+		body := p.Body()
+		movePartCentre(p, Point{x + body.W()/2 + pl.spacing, bb.Center().Y}, p.Rotation)
+		in := padsOutside(pl.edgeBand[p])
+		if p == f1 && in <= 0 {
+			t.Errorf("F1 (mains) %.0f mil from the edge costs nothing against its %.0f mil band", p.Body().MinX-bb.MinX, req)
+		}
+		if p == r2 && in > 0 {
+			t.Errorf("R2 (SELV) at the same spot is penalised (%.0f)", in)
+		}
+	}
+	// autosize grows the outline so a mains part on the rim keeps its band.
+	pl.m.MarginMil = 0
+	out := pl.autosize()
+	for _, pd := range f1.Pads {
+		if d := PolyEdgeDist(out, pd.Box.C); d < req {
+			t.Errorf("autosize: F1.%s %.1f mil from the new edge < %.1f", pd.Number, d, req)
+		}
 	}
 }

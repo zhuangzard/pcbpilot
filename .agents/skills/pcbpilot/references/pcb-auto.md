@@ -49,6 +49,12 @@ typed action，符合“禁止手工操作 EDA 工程”准则。
 - `edge`：接口贴哪条边、沿边位置（`at<0` 居中）、外伸量。引擎按焊盘质心→本体中心判断开口
   朝向并自动旋转，使开口朝外；对称排针取长边沿板边。
 - `board.autoSize: true`：不给尺寸，按布局结果收紧板框（加 `margin`）。
+- **板边距离按器件自己的域**（v0.6.1）：`--place` 时每个器件的本体要离板边 ≥ 其焊盘所在网络的
+  intent 板边要求（市电/危险电压域 = 到可触及板边的加强绝缘爬电，如 230 V 反激 259.9 mil），不再只用
+  层默认 20 mil；`autoSize` 收框时同样逐器件留这条带。锁定（`locked`/`fixed`）器件不会被挪：它若压在带内，
+  `pcb check` 报 `copper-to-edge` ERROR，要改机械约束或摆位，不能放宽。
+- **route-only（不带 `--place`）需要板框**：dump 没有板框时，`cornerHoles` 会落在器件包络四角的器件上，
+  现在直接报错（`mech hole(s) land on parts`）；给出板框（mech `width/height`/`outline` 或带板框的 dump）或用 `--place`。
 - `zones`：手动指定电压域分区（`domain`）；不给时多电压域自动左右分区并留隔离带。按功能块分区
   （`block`）与限高区（`heightZones`）当前只解析不生效（planned），见 [recipes/mech-spec.md](recipes/mech-spec.md)。
 - 未知字段会被拒绝（防止拼错字段被静默忽略）。

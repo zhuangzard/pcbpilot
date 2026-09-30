@@ -30,6 +30,42 @@ unchanged; re-import 0.6.1 because the daemon now requires the connector to matc
   versions, sha256/size of every asset, `minConnector`); install.sh / install.ps1 also install the MCP server
   and write `~/.pcbpilot/install.json`; `scripts/setup-agent.sh --upgrade` / `--restart-daemon`.
 
+**Also in 0.6.1 — core-flow fixes from the offline full-chain E2E (electrical/safety first):**
+
+- **Thermal uses time-averaged power, current capacity keeps the peak** — `sim power` solves every peak
+  scenario a second time at average loads and writes `thermalBasis`, `parts[].thermalW` (loads/regulators:
+  average power; I²R parts √(P_avg·P_peak)) and `nets[].thermalCurrentA` (√(I_avg·I_peak), the bang-bang
+  bound); `sim post-layout` heats the board with them while IR drop, via current and copper self-heating
+  stay at the peak. ESP32-S3 mini (live v3 board): 86.4 → 39.0 °C (0.49 W: ESP32 0.33 W average, not its
+  1.66 W Wi-Fi TX burst). Older sim files fall back to peak-as-continuous with an assumption note.
+- **`sim-board-mismatch` (fail)** — `sim post-layout` fails when current-carrying sim pins have no matching
+  pad, a designator is a different device (`parts[].mpn` vs the board, pins not on the footprint), or a
+  dissipating part is missing; a value change on the same footprint is a `sim-board-bom` warning. The E2E's
+  192 °C came from an older schematic revision (ESP32 = U1) paired with the live board (U1 = SY8089 buck):
+  the ESP32's heat landed on the SOT-23 buck and 17 pins' current was silently dropped. The ESP32 fixture
+  now carries its own revision's connectivity + values (`internal/app/testdata/esp32-v05`).
+- **Off-board loads are not board heat** — a `load` model on a connector designator (the product's output
+  terminal) is `offBoard` (`thermalW` 0; model field `offBoard` overrides). HV flyback: J2's 24 W external
+  load was heating its pads to 8374 °C.
+- **Board-edge bands by domain in placement** — the placer keeps each part's own domain edge band (mains
+  reinforced creepage to an accessible edge, 259.9 mil on the 230 V flyback) instead of the 20 mil layer
+  default, and `autoSize` keeps it per part. The band is priced per pad (a bridge keeps it on its
+  hazardous pads only) at 1/20 of the isolation-shortfall weight, so the placer never trades creepage
+  between domains for edge distance; a band remainder stays a `pcb check` ERROR. The legaliser also skips
+  re-spiralling a part whose last full search found nothing at an unchanged cost. Intent domain net lists are disjoint (a Y capacitor no longer
+  lists the SELV ground under MAINS) and the edge policy takes the per-net domain — GND_S lost its false
+  mains band. HV flyback E2E: `copper-to-edge` 9 → 0; fixture J1/D1/C1 moved out of the band.
+- **Analog: loop TL431 is not a reference** — a shunt regulator whose REF is on a divider (opto feedback
+  error amplifier) is no longer simulated as a biased reference (cathode unbiased → fabricated 0 A Ik
+  error); it gets a `shunt-regulator-loop` warning to verify Ik,min through the loop.
+- **Isolation slot follows the delivered placement** — a planned slot shared its polygon with the owned
+  board hole, so when the place/route loop ran a second pass and then restored the better first pass, the
+  reported slot and the playbook's `pcb.fill.create` stayed at the second pass's opto position (HV flyback
+  E2E: slot ~500 mil from U2, `pcb check` iso-creepage on U2's own pins). The hole now gets its own copy.
+- **Route-only fixes** — router `nodeCong` no longer indexes past the grid (panic on a board without an
+  outline; same fix and regression test as the v0.7 console branch); a route-only run refuses mech holes that land on parts (autoSize corner holes on the part
+  envelope, MH3 over SW1); part-owned holes (USB-C pegs) are restored with the measured pose.
+
 ## [0.6.0] — 2026-09-28
 
 **Pre-layout + post-layout simulation, board-edge safety distance, analog SPICE.** The connector code is

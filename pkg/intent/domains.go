@@ -152,6 +152,19 @@ func (c *ctx) buildDomains() {
 		}
 		c.domOfNet[net] = best
 	}
+	// A net belongs to ONE domain: a bridging part (a Y capacitor from the
+	// primary ground to the secondary ground) put the secondary ground into
+	// the primary's net list too, and consumers that read Domains[].nets
+	// (board-edge bands) gave the SELV ground the mains edge distance.
+	for _, d := range c.out.Domains {
+		kept := d.Nets[:0]
+		for _, n := range d.Nets {
+			if o := c.domOfNet[n]; o == "" || o == d.ID {
+				kept = append(kept, n)
+			}
+		}
+		d.Nets = kept
+	}
 }
 
 func (c *ctx) domain(id string) *Domain {
