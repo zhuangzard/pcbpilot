@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.6.1] — unreleased
+## [0.6.1] — 2026-09-29
 
 **One-step, automatic upgrades of every component; connector version gate.** The connector code is
 unchanged; re-import 0.6.1 because the daemon now requires the connector to match its release exactly.
