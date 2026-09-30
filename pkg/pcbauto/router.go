@@ -259,6 +259,9 @@ type router struct {
 	maxClr   float64
 	padGap   map[[2]*Pad]float64
 	padShare map[*Pad]float64
+	// flooding: provablyUnreachable is running (viaCost skips the array
+	// room price, which never decides legality).
+	flooding bool
 	// clockStart / work drive now() (clock.go).
 	clockStart time.Time
 	work       int64
@@ -948,7 +951,7 @@ func (r *router) viaCost(n *rnet, x, y int) float64 {
 		return r.viaC[col]
 	}
 	v := r.viaCostUncached(n, x, y)
-	if !math.IsInf(v, 1) && n.viaFixing {
+	if !math.IsInf(v, 1) && n.viaFixing && !r.flooding {
 		// Re-routing a short transition (viafix.go): the new transition
 		// needs room for its whole array — a column where fewer fit costs
 		// more per missing via. (Not in negotiation: the scan per column
@@ -1951,6 +1954,11 @@ func (r *router) provablyUnreachable(n *rnet, sources []int32, targets map[int32
 	gr := r.gr
 	r.cur++ // fresh cost cache for this flood
 	cur := r.cur
+	// The flood only asks "can a via go here": the array-room price
+	// (viafix.go) never makes a column illegal, and scanning the sites of
+	// every flooded column made a 30 A HV inverter fix run for hours.
+	r.flooding = true
+	defer func() { r.flooding = false }()
 	for _, s := range sources {
 		r.floodSrc[s] = cur
 	}
