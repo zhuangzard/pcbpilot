@@ -150,7 +150,10 @@ func TestIntentPlaceRouteMainsSelv(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	res, err := Run(ctx, b, Options{Power: power, Stack: StackOptions{Force: 2}, Route: RouteOptions{Timeout: 20 * time.Second}})
+	// Virtual clock: under a loaded `go test ./...` the wall budget starved
+	// the slot-lengthening pass and left a 170 mil creepage path (2026-09-30).
+	// The router must meet creepage on its work budget, not the machine's load.
+	res, err := Run(ctx, b, Options{Power: power, Stack: StackOptions{Force: 2}, Route: RouteOptions{Timeout: 20 * time.Second, WorkRate: 3e6}})
 	if err != nil {
 		t.Fatal(err)
 	}
