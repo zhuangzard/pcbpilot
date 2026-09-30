@@ -58,10 +58,15 @@ func skillClientLabel(client string) string {
 // components lists CLI/daemon, Skill installs, MCP registration and each
 // connected window's connector.
 func components(daemonVersion, userHome string, windows []map[string]any) []Component {
-	out := []Component{
-		{Name: "daemon", Version: daemonVersion, Align: "aligned", Detail: "running process"},
-		{Name: "CLI", Version: daemonVersion, Align: "aligned", Detail: "same binary as the daemon (make dev refreshes both)"},
-	}
+	return withConnectors(daemonVersion, installedComponents(daemonVersion, userHome), windows)
+}
+
+// installedComponents reads the Skill and MCP installs from disk. It can block:
+// a source install's skills are symlinks into the checkout, and on macOS a
+// launchd daemon's first open() under ~/Documents waits on the privacy (TCC)
+// consent prompt. The console therefore runs it in a background probe.
+func installedComponents(daemonVersion, userHome string) []Component {
+	var out []Component
 	// Same client list and version source as the self-updater and
 	// `pcbpilot update --check` (selfupdate.Targets): a copied install reads its
 	// .version marker, a symlinked source checkout its SKILL.md metadata.version.
@@ -76,7 +81,16 @@ func components(daemonVersion, userHome string, windows []map[string]any) []Comp
 	if len(targets) == 0 {
 		out = append(out, Component{Name: "Skill", Align: "missing", Detail: "no installed skill dir found (run scripts/setup-agent.sh or `pcbpilot update`)"})
 	}
-	out = append(out, mcpComponent(daemonVersion, userHome))
+	return append(out, mcpComponent(daemonVersion, userHome))
+}
+
+// withConnectors prepends daemon/CLI and appends one row per connected window.
+func withConnectors(daemonVersion string, installed []Component, windows []map[string]any) []Component {
+	out := []Component{
+		{Name: "daemon", Version: daemonVersion, Align: "aligned", Detail: "running process"},
+		{Name: "CLI", Version: daemonVersion, Align: "aligned", Detail: "same binary as the daemon (make dev refreshes both)"},
+	}
+	out = append(out, installed...)
 	for _, w := range windows {
 		cv, _ := w["connectorVersion"].(string)
 		id, _ := w["windowId"].(string)

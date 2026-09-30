@@ -56,7 +56,15 @@ func (c *Console) handleStatus(w http.ResponseWriter, r *http.Request) {
 		resp["health"] = h
 		wins := windowsOf(h)
 		resp["windows"] = wins
-		resp["components"] = components(c.opts.Version, c.opts.UserHome, wins)
+		var installed []Component
+		v, ist := c.installProbe.get(200 * time.Millisecond)
+		if list, ok := v.([]Component); ok {
+			installed = list
+		} else {
+			installed = []Component{{Name: "Skill / MCP", Align: "checking", Detail: "reading installs (" + ist.State + ")"}}
+		}
+		resp["components"] = withConnectors(c.opts.Version, installed, wins)
+		resp["installProbe"] = ist
 		// Pass through update/offline-retry state when the daemon reports it
 		// (added by the self-update work; absent on older daemons).
 		for _, k := range []string{"updates", "update", "offline"} {

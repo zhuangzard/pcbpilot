@@ -95,6 +95,7 @@ type Console struct {
 	scanCache map[string]scanEntry
 
 	healthProbe  *probe
+	installProbe *probe // Skill/MCP installs read from disk (may block on TCC)
 	serviceProbe *probe
 }
 
@@ -140,6 +141,9 @@ func New(opts Options) (*Console, error) {
 	c.asks = newAskQueue(filepath.Join(dir, "decisions.jsonl"), opts.Now, func(q *Question) { c.bus.publish("ask", q) })
 	c.runs = newRunStore(filepath.Join(dir, "runs.jsonl"), opts.Now)
 	c.reg = newRegistry(filepath.Join(dir, "registry.json"))
+	c.installProbe = newProbe(func(ctx context.Context) (any, error) {
+		return installedComponents(c.opts.Version, c.opts.UserHome), nil
+	}, 60*time.Second, 10*time.Second, opts.Now)
 	c.healthProbe = newProbe(func(ctx context.Context) (any, error) {
 		if c.opts.Health == nil {
 			return nil, errors.New("health source not wired")
