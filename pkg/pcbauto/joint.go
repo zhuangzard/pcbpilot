@@ -13,14 +13,19 @@ import (
 // the joint score is gated, then scaled by completion, then by quality:
 //
 //	overall = gate × completion factor × quality
-//	  gate              shorts or part overlaps → "not deliverable", capped at 40
+//	  gate              shorts, part overlaps, isolation findings or board-edge
+//	                    ERRORs of an insulated domain → "not deliverable",
+//	                    capped at 40 (verdict.go); blockers (via arrays short of
+//	                    their current, IR drop over budget, SELV copper below the
+//	                    fab edge rule) → "not deliverable", uncapped
 //	  completion factor (completion/100)² × (plane pads tied)² × 0.97^DRC — the last 5 % of
 //	                    unrouted connections costs a disproportionate share
 //	                    of manual work, so completion is squared
 //	  quality           weighted geometric mean of three groups, so no group can
 //	                    be averaged away by another:
 //	    electrical 45 % measured on the routed copper: hot-loop path, decap
-//	                    loop, ESD stub, RF feed length, diff-pair/HS findings
+//	                    loop, ESD stub, RF feed length, HS findings, coupling
+//	                    and symmetry of the intent-declared diff pairs
 //	    efficiency 25 % detour ratio (routed length / Euclidean pad MST over
 //	                    fully routed nets; 45° routing beats Manhattan), vias per
 //	                    connection
@@ -42,10 +47,17 @@ type JointItem struct {
 
 // JointScore is the combined verdict for one placed-and-routed board.
 type JointScore struct {
-	Overall     float64  `json:"overall"`
-	Deliverable bool     `json:"deliverable"`
-	Gates       []string `json:"gates,omitempty"`
-	Completion  float64  `json:"completion"`
+	Overall     float64 `json:"overall"`
+	Deliverable bool    `json:"deliverable"`
+	// Gates are the hard failures: shorts, part overlaps, and the safety
+	// findings (isolation, board edge) — overall is capped at 40.
+	Gates []string `json:"gates,omitempty"`
+	// Blockers are electrical and fabrication requirements the routed
+	// board misses (via arrays short of their current, IR drop over budget,
+	// SELV copper below the fabrication edge rule): not deliverable, the
+	// score is unchanged.
+	Blockers   []string `json:"blockers,omitempty"`
+	Completion float64  `json:"completion"`
 	// PlanePads / PlaneOpen: connections of plane-delivered and ground nets
 	// (pads − 1 per net) and how many failed to close. Completion counts
 	// signal connections only, so without this a board whose ground pads are
@@ -74,7 +86,12 @@ type JointOptions struct {
 	// Aesthetics attaches the report-only aesthetics analysis (weight 0);
 	// Isolation, when known, exempts copper in isolation bands and slots.
 	Aesthetics bool
-	Isolation  *IsolationReport
+	// Isolation, when known, also gates safety: its creepage/clearance
+	// findings and infeasible bridges make the board not deliverable.
+	Isolation *IsolationReport
+	// Edge is the board-edge check; ERRORs of an insulated domain gate like
+	// isolation, the others block delivery (verdict.go).
+	Edge *EdgeCheck
 	// AesProfile is the aesthetics style (nil = balanced; Name "auto" =
 	// chosen from the board). Soft objectives only.
 	AesProfile *AesProfile
@@ -101,6 +118,9 @@ func Joint(b *Board, an *Analysis, c *Circuit, st *Stackup, rr *RouteResult, drc
 	if opt.Overlaps > 0 {
 		js.Gates = append(js.Gates, fmt.Sprintf("%d part overlaps", opt.Overlaps))
 	}
+	safetyGates, elecBlockers := deliveryBlockers(opt.Isolation, opt.Edge, rr)
+	js.Gates = append(js.Gates, safetyGates...)
+	js.Blockers = elecBlockers
 	cg := newCopperGraph(b, an, st, rr)
 	// One net set for numerator and denominator: plane nets plus every
 	// ground net (a split ground off the plane is still a ground).
@@ -261,6 +281,18 @@ func Joint(b *Board, an *Analysis, c *Circuit, st *Stackup, rr *RouteResult, drc
 			frac := float64(bad) / float64(len(si.Nets))
 			add("electrical", "high-speed", 100*(1-math.Min(1, frac*2)), 0.2, fmt.Sprintf("%d HS nets, %d skew/split/via findings", len(si.Nets), bad))
 		}
+		// Coupling of the intent-declared pairs: the placer keeps their
+		// corridors clear and orients their in-line parts with the flow
+		// (placer_corridor.go), and the router routes them as units, so a
+		// pair that still does not couple is a defect of this layout. Each
+		// pair has four checks (coupled share, uncoupled breakout, via and
+		// layer symmetry); the item is the share passed. Pairs named only
+		// by their nets (no intent interface) keep being reported, not
+		// scored: nothing in placement serves them yet.
+		if pairs, bad := intentPairDefects(an, si); pairs > 0 {
+			add("electrical", "diff-pair", 100*(1-math.Min(1, float64(bad)/float64(4*pairs))), 0.2,
+				fmt.Sprintf("%d intent pairs, %d coupling/symmetry findings", pairs, bad))
+		}
 	}
 
 	// DC IR drop (only with simulated currents, so boards without --sim
@@ -357,7 +389,7 @@ func Joint(b *Board, an *Analysis, c *Circuit, st *Stackup, rr *RouteResult, drc
 		in.Profile = opt.AesProfile
 		js.Aesthetics = Aesthetics(in)
 	}
-	js.Deliverable = len(js.Gates) == 0 && js.Completion >= 100 && js.DRC == 0 && js.PlaneOpen == 0
+	js.Deliverable = len(js.Gates) == 0 && len(js.Blockers) == 0 && js.Completion >= 100 && js.DRC == 0 && js.PlaneOpen == 0
 	if len(js.Gates) > 0 {
 		js.Overall = math.Min(js.Overall, 40)
 	}
@@ -618,3 +650,23 @@ func (h jointHeap) Less(i, j int) bool { return h[i].cost < h[j].cost }
 func (h jointHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
 func (h *jointHeap) Push(x any)        { *h = append(*h, x.(jointItem)) }
 func (h *jointHeap) Pop() any          { o := *h; it := o[len(o)-1]; *h = o[:len(o)-1]; return it }
+
+// intentPairDefects counts the intent-declared pairs of si (both legs carry
+// an intent interface) and their pair coupling / symmetry findings.
+func intentPairDefects(an *Analysis, si *SIReport) (pairs, bad int) {
+	names := map[string]bool{}
+	for _, pr := range si.Pairs {
+		p, n := an.ByNet[pr.P], an.ByNet[pr.N]
+		if p == nil || n == nil || p.Interface == "" || n.Interface == "" || pr.Coupling == nil {
+			continue
+		}
+		pairs++
+		names[pr.P+"/"+pr.N] = true
+	}
+	for _, f := range si.Findings {
+		if pairDefect(f.Kind) && names[f.Net] {
+			bad++
+		}
+	}
+	return pairs, bad
+}

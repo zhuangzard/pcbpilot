@@ -4,6 +4,37 @@
 
 **Two electrical defects of the router fixed at the root.** Offline engine + Skill only; no connector change.
 
+- **Safety and electrical results no longer depend on the time budget.** The mains/SELV board under a loaded
+  `go test ./...` kept AC_N↔GND surface paths of 155.9–178 mil below the 181.1 mil reinforced creepage. Root cause:
+  not a starved repair but the router's isolation fence — a straight-line, half-and-half territory split cannot keep
+  the pair distance to *pinched* pads (bridge-part rows, closely set parts of two domains), and its neck allowance
+  was one number per pad. The fence now measures every pinched partner pad exactly (outer layers: surface path round
+  the milled slots against creepage, straight gap against clearance; inner: clearance), and in a net's neck holds
+  copper to the pair requirement or to the net's own nearest pad, whichever is smaller. Starved sweep on the
+  mains/SELV board (8 seeds × anneal 100/500/1500/3000/6000 moves × 3e6/3e4 work rate, 80 runs): dev 13 runs with
+  28 creepage findings (also at the default 6000 moves), this branch 0; mean completion 83.60 → 83.68 %. Via-array
+  completion runs on its own work budget (`onWorkClock`, 30 s × 3e6 expansions per net) instead of the time the
+  negotiation left (dev: "no time left in the routing budget", 1 via carrying 0.89 of 2 A). Whatever still stands
+  is an explicit **not-deliverable** verdict with reasons: `plan.json result.blockers[]` (isolation, infeasible
+  bridge, board-edge ERROR, via arrays short, IR drop over budget / power net open), stderr `NOT DELIVERABLE: …`
+  (else `verdict: deliverable`), `report.md`, `feedback.json notDeliverable[]`, and the joint score (`deliverable=false`;
+  isolation findings and edge ERRORs of a domain insulated from an accessible edge gate like a short, capped at 40;
+  electrical shortfalls and SELV copper below the fab edge rule are uncapped `blockers`). dev scored the HV stress
+  `medical/2xMOPP` route board 76.1 and *deliverable* with 16 mains-to-edge ERRORs; it is now gated. Tests:
+  `TestStarvedBudgetMainsSelvStaysSafe`, `TestStarvedBudgetEdgeBands`, `TestStarvedBudgetViaArrays`,
+  `TestSafetyFindingsBlockDelivery`.
+- **Differential-pair corridors in placement.** For intent-declared pairs the placer keeps the corridor along
+  connector → ESD/series → IC clear of unrelated parts (4 per mil of intrusion, below decap/protection tethers),
+  prices in-line parts whose pin rows face the wrong way, and counts twists on the pads' access paths. Pair-SI
+  findings of intent pairs now score in the joint electrical group (`diff-pair`, weight 0.2; the "units kept only
+  when no worse" guard compares that group, and now ranks open plane/ground connections right after signal completion —
+  without that, scoring the pair kept an hdmi-tx unit result with a GND pad cut off its plane). ESP32 mini USB (`PCBPILOT_BENCH_WORK=3e6`, seeds 1–5): pair checks
+  failed 2/1/3/1/3 of 4 on dev, 0/3/0/1/3 here; ESD stub 0/349/68/518/21 → 0/0/0/0/113 mil; joint
+  77.1/81.3/92.7/70.6/81.0 → 94.4/87.7/92.7/83.6/82.8. Seed 3 (`TestESP32MiniIntentKeepsESDOnPath`, now also
+  requires `diff-pair` ≥ 75): 2/0 → 0/0 vias, 307/250 → 438/500 mil uncoupled, all four checks pass. HS stress
+  place mode over 6 seeds: usb3-typec 8.5 → 5.3 failed checks, gbe-rj45 equal, pcie-m2 2.8 → 3.5 with two seeds
+  losing a leg (`no-legal-path`, `--loops 0`) — open item; fixture bench (deterministic) identical on all 5 boards.
+
 - **Via count by current is enforced per layer transition.** A current-carrying net (intent / `--sim`) whose via
   array came out short at a transition (HV flyback stress board: `VOUT_RAW` got 2 of the intent's 3 × 0.4 mm vias,
   `pcb check` via-current ERROR, margin −10.9 %) now gets, in order: a larger JLC-ladder drill in place, the layer

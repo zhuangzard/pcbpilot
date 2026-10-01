@@ -51,6 +51,13 @@ func TestESP32MiniIntentKeepsESDOnPath(t *testing.T) {
 	if esd := items["esd-stub"]; esd.Score < 89 {
 		t.Errorf("esd-stub %.1f < 89: %s", esd.Score, esd.Detail)
 	}
+	// The USB pair (intent interface): the placer keeps its corridor clear
+	// and turns the USBLC6 with the flow, so the pair checks (uncoupled
+	// breakout, via and layer symmetry) pass — dev: 2/0 vias, 307/250 mil
+	// uncoupled, 3 of 4 failed (2026-09-30).
+	if dp, ok := items["diff-pair"]; !ok || dp.Score < 75 {
+		t.Errorf("diff-pair %.1f < 75: %s", dp.Score, dp.Detail)
+	}
 	if rep.Joint.Overall < 92 {
 		t.Errorf("joint %.1f < 92 (c1b32fd: 92.6)", rep.Joint.Overall)
 	}

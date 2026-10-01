@@ -127,6 +127,9 @@ type placer struct {
 	rudy     *rudy // congestion grid, live during annealing only
 	intimate map[[2]*Part]bool
 	strips   []*Keepout // isolation strips this placement added to the board
+	// corridors keep intent-declared differential pairs' runs clear of
+	// foreign parts (placer_corridor.go).
+	corridors []*pairCorridor
 }
 
 // intimateGap is the courtyard gap kept between parts that connect directly
@@ -595,6 +598,8 @@ func (pl *placer) partCost(p *Part) float64 {
 		cost += pl.tetherCost(p)
 		cost += pl.converterCost(p)
 		cost += pl.chainCost(p)
+		cost += pl.corridorCost(p)
+		cost += pl.pairFlowCost(p)
 		cost += pl.reserveCost(p)
 		for _, pr := range pl.apart {
 			if pr[0] == p || pr[1] == p {
@@ -1831,6 +1836,7 @@ func (pl *placer) setupTethers() {
 		}
 	}
 	pl.setupReserves()
+	pl.setupCorridors()
 	// Noisy vs sensitive cores keep apart.
 	noisy, quiet := []*Part{}, []*Part{}
 	for _, bl := range c.Blocks {
@@ -1948,8 +1954,16 @@ func (pl *placer) chainCost(p *Part) float64 {
 			cost += 1.5 * ch.Weight * ex
 		}
 		// A twisted pair costs vias on a matched line: price a crossing
-		// like 400 mil of detour so the placer turns the in-line part.
-		cost += pairTwistMil * ch.Weight * float64(PairTwist(pl.b, ch))
+		// like 400 mil of detour so the placer turns the in-line part. An
+		// intent-declared pair is judged on its access paths (pads reached
+		// through the side of their part they sit on): an ESD array whose
+		// pin row lies along the approach twists the pair as surely as one
+		// turned the wrong way round (ESP32 mini USBLC6, 2026-09-30).
+		tw := PairTwist(pl.b, ch)
+		if pl.corridorChain(ch) {
+			tw = PairTwistAccess(pl.b, ch)
+		}
+		cost += pairTwistMil * ch.Weight * float64(tw)
 	}
 	if q := pl.pairOf[p]; q != nil {
 		pb, qb := p.Body(), q.Body()

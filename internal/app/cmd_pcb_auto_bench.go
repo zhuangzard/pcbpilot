@@ -218,7 +218,7 @@ func benchOne(ctx context.Context, name, variant string, raw []byte, seed int64,
 	row.DRC = len(out.DRC.Violations)
 	row.RouteMs = s.Millis
 	row.Joint = pcbauto.Joint(b, out.Analysis, pcbauto.Understand(b, out.Analysis), out.Stackup, out.Route, out.DRC,
-		pcbauto.JointOptions{PlacementScore: placementOnlyScore(row.Dims), Overlaps: lintOverlaps, Aesthetics: true, Isolation: out.Isolation})
+		pcbauto.JointOptions{PlacementScore: placementOnlyScore(row.Dims), Overlaps: lintOverlaps, Aesthetics: true, Isolation: out.Isolation, Edge: out.Edge})
 	return row, nil
 }
 

@@ -149,6 +149,7 @@ type rnet struct {
 	relief      map[int32][]*Pad // own pads whose HV footprint relief covers a column
 	busbar      bool             // too wide for a routed track: reported "needs-pour"
 	reliefMemo  map[uint64]bool  // reliefOK verdicts per (cell, radius)
+	isoMemo     map[uint64]bool  // isoPadsOK verdicts per (cell, half width, neck)
 	// viaDrill / viaDia are the net's via size (NetPlan.Via, else the board
 	// rule); viaShort counts array vias of its transitions that found no
 	// site, arrayBad the array sites the exact DRC rejected.
@@ -265,12 +266,23 @@ type router struct {
 	// clockStart / work drive now() (clock.go).
 	clockStart time.Time
 	work       int64
+	// fixRate > 0: a fix-up runs on its own work clock (onWorkClock) —
+	// now() counts work from fixWork at fixRate expansions per second.
+	fixRate  float64
+	fixStart time.Time
+	fixWork  int64
 	// fixNotes are via-array completion notes (viafix.go).
 	fixNotes []string
 	// iso is the domain territory field (intent insulation pairs): copper
 	// of a fenced net keeps half the pair requirement from the partner
 	// territories. nil without an intent.
 	iso *isoField
+	// isoPadSlack caches router.padSlack per pad (inner, outer); isoSlots
+	// the cutouts per slot width, isoOwn a net pad's straight gap and
+	// surface path to a partner pad (isolation.go).
+	isoPadSlack [2]map[*Pad]float64
+	isoSlots    map[float64][][]Point
+	isoOwn      map[[2]*Pad][2]float64
 }
 
 // auditHook lets tests observe router state between phases.
