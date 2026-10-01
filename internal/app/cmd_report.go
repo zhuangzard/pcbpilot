@@ -23,6 +23,7 @@ import (
 	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
 	"github.com/zhuangzard/pcbpilot/pkg/powersim"
 	"github.com/zhuangzard/pcbpilot/pkg/projectconfig"
+	"github.com/zhuangzard/pcbpilot/pkg/schaes"
 )
 
 // designReportOpts are the inputs of one report version.
@@ -38,6 +39,7 @@ type designReportOpts struct {
 	noZip                       bool
 	analog                      string
 	images                      []string
+	schSnapshots                []string
 	force                       bool
 	maxImageBytes               int
 	date                        string
@@ -93,6 +95,8 @@ missing is printed as "不可用" with the reason — nothing is invented)
    6 布局布线    images, stackup, routing stats, IR drop per net / load pad
                  (chart) / worst path / top segments, SI, isolation, feedback
                                                      [--plan-dir, --image]
+  6C 原理图美观 schematic aesthetics per page (wiring / layout / labels / bus
+                 lanes), report-only, never the verdict  [--sch-snapshot]
    7 验证状态    native DRC, pcb check, rules sync, pad-net diff, save/reload
                  hash, routing completion, IR budget — PASS/WARN/FAIL/N/A with
                  the evidence file                 [--drc --check --rules-check
@@ -169,6 +173,7 @@ func addDesignReportFlags(c *cobra.Command, o *designReportOpts) {
 	f.StringVar(&o.post, "post", "", "post.json (pcbpilot sim post-layout): chapter 6A 设计后仿真验证 + verdict; its heat maps (--svg-dir) and Elmer deck are packaged")
 	f.StringVar(&o.spice, "spice", "", "SPICE netlist of sim power --spice, packaged under data/")
 	f.BoolVar(&o.noZip, "no-zip", false, "do not write reports/<name>/pcbpilot-report-<name>-vN.zip")
+	f.StringArrayVar(&o.schSnapshots, "sch-snapshot", nil, "schematic page snapshot [LABEL=]PATH (repeatable): sch list --include-pins --include-bbox --include-wires, layout-plan, lib-layout or canonical JSON → §6C 原理图美观度 (report-only, never changes the verdict)")
 	f.StringArrayVar(&o.images, "image", nil, "image KIND[:LABEL]=PATH, KIND sch|layout|heat|other (repeatable), e.g. sch:P1=p1.png, layout=snapshot.png, heat:TOP=heatmaps/temp-TOP.svg")
 	f.StringVar(&o.analog, "analog", "", "analog.json (pcbpilot sim analog): §3A analog SPICE section; its ngspice netlists/outputs are packaged under data/analog/")
 	f.BoolVar(&o.force, "force", false, "overwrite an existing version")
@@ -197,7 +202,11 @@ func (ri *reportInputs) read(kind, label, path string) ([]byte, error) {
 	ref.Present, ref.SHA256, ref.Bytes = true, hex.EncodeToString(h[:]), len(b)
 	ri.refs = append(ri.refs, ref)
 	if kind != "image" {
-		ri.files = append(ri.files, newPkgFile(dataFileName(kind, path), "data:"+kind, producers[kind], path, b))
+		prod := producers[kind]
+		if prod == "" && strings.HasPrefix(kind, "sch-snapshot") {
+			prod = producers["sch-snapshot"]
+		}
+		ri.files = append(ri.files, newPkgFile(dataFileName(kind, path), "data:"+kind, prod, path, b))
 	}
 	return b, nil
 }
@@ -345,6 +354,31 @@ func loadDesignReportInputs(o designReportOpts, stderr io.Writer) (*designreport
 	}
 	if err := parse("spice", "SPICE 网表", o.spice, func([]byte) error { return nil }); err != nil {
 		return nil, nil, err
+	}
+	for i, spec := range o.schSnapshots {
+		label, path, ok := strings.Cut(spec, "=")
+		if !ok {
+			label, path = fmt.Sprintf("P%d", i+1), spec
+		}
+		kind := "sch-snapshot"
+		if len(o.schSnapshots) > 1 {
+			kind = "sch-snapshot-" + strings.Map(func(r rune) rune {
+				if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
+					return r
+				}
+				return '_'
+			}, label)
+		}
+		if err := parse(kind, "原理图快照 "+label, path, func(b []byte) error {
+			snap, err := schaes.Parse(b)
+			if err != nil {
+				return err
+			}
+			in.SchPages = append(in.SchPages, designreport.SchPage{Label: label, Snapshot: snap})
+			return nil
+		}); err != nil {
+			return nil, nil, err
+		}
 	}
 	// Images: explicit ones, then the pcb auto preview, then the post-layout
 	// heat maps (unless given explicitly).

@@ -149,3 +149,51 @@ exposed it is reported as **provisional** and not geometrically enforced (so a
 guessed box can't corrupt scoring). **Prefer `sch autoconnect`
 over hand-picking `sch connect --direction/--offset`** for power/ground/netport
 stubs; `sch connect` stays for when you deliberately override the geometry.
+
+---
+
+## 标签 vs 导线、总线与原理图美观度（只报告的软层）
+
+优先级固定：**连接正确性 > 可读性 > 美观**。以下规则只决定“同样正确的画法里选哪种”，
+不能为了好看移动已经正确的导线、改网名、拆核心/外围归属或放宽任何门禁。
+`layout-lint`、`sch check`、`bridge-check`、`layout-score`、DRC 保持原样且优先。
+
+**何时用导线、何时用标签**（与 `sch aesthetics` 的 N1/N2 同一把尺，阈值随风格档）：
+
+- 同模块相邻外围、去耦、上下拉、反馈、串联支路：**真实正交导线**（数据驱动基准的直连不变量）。
+  一根信号网在本页、同一框内的全部端点跨度 < `shortLabelSpanUnits`（balanced 120 units，
+  ≈ layout-score 实测同排标签最小间距 117）却用了 ≥2 个标签 → N2 报“短程滥用标签”。
+- 一棵线树总长 > `longWireUnits`（balanced 600 ≈ A4 图宽 1170 的一半）或与异网交叉 >
+  `longWireCrossings`（balanced 2）→ N1 建议改为两端局部 net label / netport（电源地改为就近
+  重复的 power/ground 符号）。**只是建议**：跨模块信号本来就该用 netport；改画法须走源数据 →
+  重算 → Apply → 回读，不在现场逐根改。
+- 跨模块 / 跨页信号：netport（不伪装成电源 flag）；电源/地：就近重复符号，旗体顺导线朝外，
+  电源朝上、地朝下（L1/L2 与 `orientation.json` 同一真值表）。
+- 交叉：严格内部 X 在 EasyEDA 不导通。异网 X 计入 W2；同网 X（看似结点、实为两岛）和
+  四通结点计入 W3——改成错开的两个 T。T 结点不要落在引脚上、离其他拐点/结点 ≥ 10 units（W5）。
+
+**总线**（`sch bus …`，官方 `sch_PrimitiveBus` @beta，**planned / live-unverified**，V3/V4 均未现场验证）：
+
+- 总线只是绘图对象，**不建立也不证明**成员连通；成员连通仍以逐 pin 网表、`sch check` 为准。
+- 扩展 API **没有总线分支（bus entry）图元**：成员用普通正交导线 + 成员名网络标签接入
+  （`connect_pin` / `autoconnect`），不画 45° 斜线（写线守卫拒绝斜段）。
+- `sch bus create --name 'D[0:7]' --points x1,y1,x2,y2,… [--points …] --dry-run` 先离线校验：
+  每段水平/垂直、非零长、各多段线互相接触；`NAME[a:b]` 以外的名字只警告（宿主语法未验证）。
+  不加 `--dry-run` 时写后回读名字与路径，不符即 `partial:true` 非零退出，保留 ID、禁止盲重试。
+- 宿主不可用或未验证时用**虚拟总线**：同组成员（D0…D7、SPI/I2C/UART/SDIO、MIPI/USB 对）的
+  标签放同一列/行、等节距、同朝向。`sch bus candidates --snapshot page.json` 离线列出候选组与
+  泳道质量（N3）；USB/MIPI 是差分对，按对并行，不合并成字母总线。
+
+**度量命令（只报告）**：
+
+```bash
+pcbpilot sch list --include-pins --include-bbox --include-wires --project P --doc <page> > page.json
+pcbpilot sch aesthetics --snapshot page.json            # 或 layout-plan / lib-layout 输出、canonical 快照
+pcbpilot sch aesthetics --snapshot page.json --style precision --json
+pcbpilot sch aesthetics --project P --doc <page>        # 现场只读（live-unverified）
+```
+
+18 项：布线 W1–W8、版面 L1–L7、标签/总线 N1–N3，每项 0–100 并给阈值与来源；缺数据的项
+`skipped`（不算满分），布线组乘“已连引脚份额”（未连的引脚不能显得整齐）。权重 0、永远
+exit 0、不是门；分数只用来排 Phase B 生成器的改进，不用来签字。风格档与 `pcb aesthetics`
+同名（functional / balanced / precision / auto / custom），只改软目标。

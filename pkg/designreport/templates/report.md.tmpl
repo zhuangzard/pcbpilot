@@ -414,6 +414,39 @@ input/evidence files in data/ (one self-contained package per version). */ -}}
 > 本节不可用：未提供板级 dump / board.routed.json，plan.json 也没有 joint.aesthetics（只报告章节，不计入缺失项）。
 {{end}}
 
+## 6C 原理图美观度 Schematic aesthetics（只报告）
+{{with $R.SchAesthetics}}
+风格 `{{.Profile}}`：{{md .ProfileNote}}
+
+> 边界：{{.Boundary}}
+
+| 页 | 来源 | 分 | 判定 | 布线 | 版面 | 标签 | 已连引脚份额 | 已测/未测 |
+|---|---|---|---|---|---|---|---|---|
+{{- range .Pages}}
+| {{md .Label}} | {{.Source}} | {{.Score}} | {{.Verdict}} | {{.Wiring}} | {{.Layout}} | {{.Labels}} | {{.WiredShare}} | {{.Measured}}/{{.Skipped}} |{{end}}
+{{range .Pages}}
+<details><summary>{{md .Label}} 指标明细</summary>
+
+| 项 | 指标 | 值 | 分 | 说明 |
+|---|---|---|---|---|
+{{- range .Metrics}}
+| {{.ID}} | {{md .Name}} | {{.Value}} | {{.Score}} | {{md .Detail}} |{{end}}
+{{if .Lanes}}
+总线/虚拟总线候选：
+{{range .Lanes}}
+- {{md .Label}}：{{md .Value}} — {{md .Note}}{{end}}
+{{end}}
+</details>
+{{end}}
+<details><summary>约束优先级（美观为最低一层）</summary>
+{{range .Priority}}
+- {{md .}}{{end}}
+
+</details>
+{{else}}
+> 本节不可用：未提供 `--sch-snapshot`（只报告章节，不计入缺失项）。
+{{end}}
+
 ## 7 验证状态
 
 | 检查 | 结论 | 说明 | 证据 |

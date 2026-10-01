@@ -62,20 +62,21 @@ type Report struct {
 	Verdict      Verdict  `json:"verdict"`
 	Changes      *Changes `json:"changes,omitempty"`
 
-	Summary       SummarySection       `json:"summary"`
-	Requirements  *RequirementsSection `json:"requirements,omitempty"`
-	Power         *PowerSection        `json:"power,omitempty"`
-	Analog        *AnalogSection       `json:"analog,omitempty"` // §3A, see analog.go
-	Feasibility   *FeasibilitySection  `json:"feasibility,omitempty"`
-	Calcs         *CalcSection         `json:"calculations,omitempty"`
-	Layout        *LayoutSection       `json:"layout,omitempty"`
-	Post          *PostSection         `json:"postLayout,omitempty"`
-	Aesthetics    *AestheticsSection   `json:"aesthetics,omitempty"` // §6B, report-only (aesthetics.go)
-	Verification  []Check              `json:"verification"`
-	TestPlan      *TestPlanSection     `json:"testPlan,omitempty"`
-	Manufacturing *MfgSection          `json:"manufacturing,omitempty"`
-	BringUp       *BringUpSection      `json:"bringUp,omitempty"`
-	Appendix      AppendixSection      `json:"appendix"`
+	Summary       SummarySection        `json:"summary"`
+	Requirements  *RequirementsSection  `json:"requirements,omitempty"`
+	Power         *PowerSection         `json:"power,omitempty"`
+	Analog        *AnalogSection        `json:"analog,omitempty"` // §3A, see analog.go
+	Feasibility   *FeasibilitySection   `json:"feasibility,omitempty"`
+	Calcs         *CalcSection          `json:"calculations,omitempty"`
+	Layout        *LayoutSection        `json:"layout,omitempty"`
+	Post          *PostSection          `json:"postLayout,omitempty"`
+	Aesthetics    *AestheticsSection    `json:"aesthetics,omitempty"`    // §6B, report-only (aesthetics.go)
+	SchAesthetics *SchAestheticsSection `json:"schAesthetics,omitempty"` // §6C, report-only (schaesthetics.go)
+	Verification  []Check               `json:"verification"`
+	TestPlan      *TestPlanSection      `json:"testPlan,omitempty"`
+	Manufacturing *MfgSection           `json:"manufacturing,omitempty"`
+	BringUp       *BringUpSection       `json:"bringUp,omitempty"`
+	Appendix      AppendixSection       `json:"appendix"`
 	// Data maps an input kind to its file inside the report package.
 	Data map[string]string `json:"data,omitempty"`
 	// Package is the zip of this version (reports/<name>/<Package>).

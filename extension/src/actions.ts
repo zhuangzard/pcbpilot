@@ -1,4 +1,5 @@
 import { projectOpen, projectExport } from './project-transfer';
+import { schematicBusCreate, schematicBusDelete, schematicBusList } from './schematic-bus';
 /**
  * Typed-action dispatch. Each action maps to exactly one (occasionally a small
  * cluster of) `eda.*` call(s), serializes the result to plain JSON, and returns
@@ -14738,6 +14739,9 @@ const HANDLERS: Record<string, Handler> = {
 	'schematic.text.list': schematicTextList,
 	'schematic.text.create': schematicTextCreate,
 	'schematic.rectangles.list': schematicRectanglesList,
+	'schematic.bus.list': schematicBusList,
+	'schematic.bus.create': schematicBusCreate,
+	'schematic.bus.delete': schematicBusDelete,
 	'pcb.documents.list': pcbDocumentsList,
 	'pcb.components.list': pcbComponentsList,
 	'pcb.components.count': pcbComponentsCount,

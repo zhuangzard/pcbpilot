@@ -95,7 +95,8 @@ func Build(in *Inputs) *Report {
 	c.buildLayout()
 	c.buildVerification()
 	c.buildPost()
-	c.buildAesthetics() // §6B, additional and report-only: never feeds the verdict
+	c.buildAesthetics()    // §6B, additional and report-only: never feeds the verdict
+	c.buildSchAesthetics() // §6C, additional and report-only: never feeds the verdict
 	c.buildTestPlan()
 	c.buildManufacturing()
 	c.buildBringUp()
