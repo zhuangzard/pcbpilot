@@ -1,0 +1,27 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "properties": {
+  "schematic": {
+   "type": "string"
+  },
+  "source": {
+   "type": "string"
+  },
+  "title": {
+   "type": "string"
+  },
+  "zIndex": {
+   "type": [
+    "number",
+    "null"
+   ]
+  }
+ },
+ "required": [
+  "schematic",
+  "title",
+  "source",
+  "zIndex"
+ ],
+ "type": "object"
+}

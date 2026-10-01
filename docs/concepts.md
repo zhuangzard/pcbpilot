@@ -53,6 +53,12 @@ Skill 目录。源码位置不改变发布包内的 `pcbpilot/` 根目录或用�
 证明本项目已支持它，也不改变现行 Web EDA / typed action 的现场操作约束。调研见
 [官方 eprj3 Skill](ecosystem-survey.md#12-官方-eprj3-skill离线工程生成路线2026-09-21源码与离线实测)。
 
+**只读层已实现**：`pcbpilot project inspect-eprj3`（`internal/eprj3`）解析索引与文档、按最终一致性
+（ticket 大者胜、空载荷为删除）给出每文档计数、单位约定、版本标记，并以官方 Schema 子集给出
+参考性发现。实测编辑器写出的 4.1.36 文件大量偏离“生成器 Schema”（null 布尔、缺省字段），所以
+Schema 发现不作为错误；结构错误（畸形行、空文档、索引不可读）才是错误。它是离线 fixture 的基础，
+不是写入路径；写出适配器仍为 `planned`。
+
 ### PCB 参数化配置
 
 `pcb config` 是当前 PCB 设计规则的参数化入口。它从新鲜官方规则快照计算局部修改，保留

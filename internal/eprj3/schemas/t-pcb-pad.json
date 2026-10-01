@@ -1,0 +1,302 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "properties": {
+  "attrsMap": {
+   "type": "object"
+  },
+  "bottomPasteExpansion": {
+   "type": [
+    "number",
+    "null"
+   ]
+  },
+  "bottomSolderExpansion": {
+   "type": [
+    "number",
+    "null"
+   ]
+  },
+  "centerX": {
+   "type": "number"
+  },
+  "centerY": {
+   "type": "number"
+  },
+  "connectMode": {
+   "enum": [
+    "DIVERGENCE",
+    "DIRECT",
+    "NON_CONNECT",
+    null
+   ],
+   "type": [
+    "string",
+    "null"
+   ]
+  },
+  "defaultPad": {
+   "anyOf": [
+    {
+     "properties": {
+      "height": {
+       "type": "number"
+      },
+      "padType": {
+       "enum": [
+        "ELLIPSE"
+       ],
+       "type": "string"
+      },
+      "width": {
+       "type": "number"
+      }
+     },
+     "required": [
+      "padType",
+      "width",
+      "height"
+     ],
+     "type": "object"
+    },
+    {
+     "properties": {
+      "height": {
+       "type": "number"
+      },
+      "padType": {
+       "enum": [
+        "RECT"
+       ],
+       "type": "string"
+      },
+      "radius": {
+       "type": "number"
+      },
+      "width": {
+       "type": "number"
+      }
+     },
+     "required": [
+      "padType",
+      "width",
+      "height",
+      "radius"
+     ],
+     "type": "object"
+    },
+    {
+     "properties": {
+      "height": {
+       "type": "number"
+      },
+      "padType": {
+       "enum": [
+        "OVAL"
+       ],
+       "type": "string"
+      },
+      "width": {
+       "type": "number"
+      }
+     },
+     "required": [
+      "padType",
+      "width",
+      "height"
+     ],
+     "type": "object"
+    },
+    {
+     "properties": {
+      "padType": {
+       "enum": [
+        "POLYGON"
+       ],
+       "type": "string"
+      },
+      "path": {
+       "type": "array"
+      }
+     },
+     "required": [
+      "padType",
+      "path"
+     ],
+     "type": "object"
+    }
+   ],
+   "type": "object"
+  },
+  "groupId": {
+   "type": "string"
+  },
+  "hole": {
+   "properties": {
+    "cornerRadius": {
+     "type": "number"
+    },
+    "height": {
+     "type": "number"
+    },
+    "holeType": {
+     "enum": [
+      "ROUND",
+      "RECT",
+      "SLOT",
+      "ROUND_RECT"
+     ],
+     "type": "string"
+    },
+    "width": {
+     "type": "number"
+    }
+   },
+   "required": [
+    "holeType",
+    "width",
+    "height"
+   ],
+   "type": [
+    "object",
+    "null"
+   ]
+  },
+  "layerId": {
+   "type": "number"
+  },
+  "locked": {
+   "type": "boolean"
+  },
+  "netName": {
+   "type": "string"
+  },
+  "num": {
+   "type": "string"
+  },
+  "padAngle": {
+   "type": "number"
+  },
+  "padLen": {
+   "type": "number"
+  },
+  "padOffsetX": {
+   "type": "number"
+  },
+  "padOffsetY": {
+   "type": "number"
+  },
+  "padType": {
+   "enum": [
+    "NORMAL",
+    "TEST",
+    "MARKER"
+   ],
+   "type": "string"
+  },
+  "partitionId": {
+   "type": [
+    "string",
+    "null"
+   ]
+  },
+  "plated": {
+   "type": "boolean"
+  },
+  "propagationDelay": {
+   "type": "number"
+  },
+  "refs": {
+   "items": {
+    "type": "string"
+   },
+   "type": "array"
+  },
+  "relativeAngle": {
+   "type": "number"
+  },
+  "specialPad": {
+   "items": {
+    "properties": {
+     "endLayer": {},
+     "pad": {},
+     "startLayer": {}
+    },
+    "type": "object"
+   },
+   "type": "array"
+  },
+  "spokeAngle": {
+   "type": [
+    "number",
+    "null"
+   ]
+  },
+  "spokeSpace": {
+   "type": [
+    "number",
+    "null"
+   ]
+  },
+  "spokeWidth": {
+   "type": [
+    "number",
+    "null"
+   ]
+  },
+  "topPasteExpansion": {
+   "type": [
+    "number",
+    "null"
+   ]
+  },
+  "topSolderExpansion": {
+   "type": [
+    "number",
+    "null"
+   ]
+  },
+  "unusedInnerLayers": {
+   "items": {
+    "type": "number"
+   },
+   "type": "array"
+  },
+  "zIndex": {
+   "default": -1,
+   "type": [
+    "number",
+    "null"
+   ]
+  }
+ },
+ "required": [
+  "groupId",
+  "layerId",
+  "locked",
+  "zIndex",
+  "netName",
+  "num",
+  "centerX",
+  "centerY",
+  "padAngle",
+  "hole",
+  "defaultPad",
+  "specialPad",
+  "padOffsetX",
+  "padOffsetY",
+  "relativeAngle",
+  "plated",
+  "padType",
+  "topSolderExpansion",
+  "bottomSolderExpansion",
+  "topPasteExpansion",
+  "bottomPasteExpansion",
+  "connectMode",
+  "spokeSpace",
+  "spokeWidth",
+  "spokeAngle",
+  "padLen",
+  "propagationDelay"
+ ],
+ "type": "object"
+}

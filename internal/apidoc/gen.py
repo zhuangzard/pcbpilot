@@ -33,7 +33,10 @@ DEFAULT_OUT = os.path.join(HERE, 'api-index.json')
 # it). `$` is allowed for the bundler's `X$1` duplicate suffixes.
 CLASS_RE = re.compile(r'^\s*class\s+([A-Za-z0-9_$]+)')
 # A member declaration: `name(...` (method) — capture the name; the rest may span lines.
-METHOD_RE = re.compile(r'^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(')
+# pro-api-types >= 0.4 prefixes members with an access modifier (`public name(`) and
+# has generic methods (`name<T>(`); private/protected members are not API surface.
+METHOD_RE = re.compile(r'^\s*(?:(public|private|protected)\s+)?(?:static\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*(?:<[^(]*>)?\s*\(')
+MODIFIER_RE = re.compile(r'^(?:public|static)\s+')
 STABILITY_RE = re.compile(r'@(alpha|beta|deprecated|internal)\b')
 # One line of the runtime surface map (`sch_PrimitiveWire: SCH_PrimitiveWire;`)
 # inside the `eda` declaration. The PROPERTY name is the runtime truth — the
@@ -42,7 +45,20 @@ STABILITY_RE = re.compile(r'@(alpha|beta|deprecated|internal)\b')
 # The type may be a UNION (`SCH_PrimitiveComponent | SCH_PrimitiveComponent3` —
 # one runtime object documented as two overload classes): capture the whole type
 # expression and merge every member class's methods under the one property.
-EDA_PROP_RE = re.compile(r'^\s*([a-z][A-Za-z0-9_]*):\s*([A-Z][A-Za-z0-9_$|\s]*[A-Za-z0-9_$]);')
+# Since 0.4 the map lines carry `public ` (`public dmt_Board: DMT_Board;`).
+EDA_PROP_RE = re.compile(r'^\s*(?:(?:public|readonly)\s+)*([a-z][A-Za-z0-9_]*):\s*([A-Z][A-Za-z0-9_$|\s]*[A-Za-z0-9_$]);')
+
+
+def bracket_balance(s):
+    return sum(s.count(c) for c in '({[') - sum(s.count(c) for c in ')}]')
+
+
+def normalize_sig(parts):
+    """Join a (possibly multi-line) declaration into one comparable line."""
+    sig = re.sub(r'\s+', ' ', ' '.join(parts)).strip()
+    sig = re.sub(r'\s*;\s*}', ' }', sig)
+    sig = re.sub(r',\s*([)}\]])', r'\1', sig)
+    return sig
 
 
 def main():
@@ -71,9 +87,18 @@ def main():
     # Reserved words that look like methods but aren't API surface.
     skip = {'constructor', 'if', 'for', 'while', 'switch', 'catch', 'function', 'return'}
 
+    pending = None  # a multi-line member signature being collected
     for raw in lines:
         line = raw.rstrip('\n')
         stripped = line.strip()
+
+        if pending is not None:
+            pending['parts'].append(stripped)
+            pending['bal'] += bracket_balance(stripped)
+            if pending['bal'] <= 0 or len(pending['parts']) > 200:
+                pending['rec']['sig'] = normalize_sig(pending['parts'])
+                pending = None
+            continue
 
         # Class / namespace boundary.
         m = CLASS_RE.match(line)
@@ -116,19 +141,23 @@ def main():
         # Member declaration inside a class.
         if cur_cls:
             mm = METHOD_RE.match(line)
-            if mm and mm.group(1) not in skip:
-                method = mm.group(1)
-                # Signature: from this line to the first ';' (handle multi-line).
-                sig = stripped
-                # If the declaration doesn't end here, leave it as the opening — enough
-                # for search; full multi-line sigs are rare and noisy.
-                sig = re.sub(r'\s+', ' ', sig).rstrip()
-                by_class.setdefault(cur_cls, []).append({
+            if mm and mm.group(2) not in skip and mm.group(1) not in ('private', 'protected'):
+                method = mm.group(2)
+                # Signature: from this line until brackets balance (0.4 splits object
+                # types over many lines). Access modifiers are dropped so signatures
+                # compare across versions (`api upstream-diff`).
+                rec = {
                     'method': method,
-                    'sig': sig,
+                    'sig': '',
                     'summary': doc_summary or '',
                     'stability': doc_stability or '',
-                })
+                }
+                by_class.setdefault(cur_cls, []).append(rec)
+                first = MODIFIER_RE.sub('', stripped)
+                pending = {'rec': rec, 'parts': [first], 'bal': bracket_balance(first)}
+                if pending['bal'] <= 0:
+                    rec['sig'] = normalize_sig(pending['parts'])
+                    pending = None
             # Consume the pending doc whether or not it matched a method.
             if stripped and not stripped.startswith('*'):
                 doc_summary, doc_stability = None, None
@@ -164,8 +193,14 @@ def main():
               + ', '.join(unmapped_props), file=sys.stderr)
 
     namespaces = sorted({r['ns'] for r in deduped})
+    version = ''
+    pkg = os.path.join(os.path.dirname(os.path.abspath(dts)), 'package.json')
+    if os.path.exists(pkg):
+        with open(pkg, encoding='utf-8') as f:
+            version = json.load(f).get('version', '')
     payload = {
         'source': '@jlceda/pro-api-types',
+        'version': version,
         'namespaceCount': len(namespaces),
         'methodCount': len(deduped),
         'records': deduped,

@@ -42,3 +42,44 @@ license sits next to them at `extension/src/beautify/LICENSE`. MIT and
 Apache-2.0 are compatible; redistributing this repository (or the compiled
 `.eext`, which contains the beautify output) means carrying this NOTICE and
 that Apache-2.0 copy along.
+
+────────────────────────────────────────────────────────────────────────
+easyeda-format-skill (JSON Schemas, subset)
+────────────────────────────────────────────────────────────────────────
+Official EasyEDA Pro file-format knowledge and JSON Schemas.
+
+  Source:  https://github.com/easyeda/easyeda-format-skill
+  Commit:  9e42727cc4cf13a8e442140e8e7794ae94d5f41b
+  Author:  Copyright (c) 2026 EasyEDA
+  License: MIT
+
+22 schemas are vendored under `internal/eprj3/schemas/` for
+`pcbpilot project inspect-eprj3`. Change made: the human-readable
+`description` / `enumDescriptions` keys were stripped (validation keywords
+are verbatim); see `internal/eprj3/vendor_schemas.py` and `SOURCE.json`.
+The MIT license text is copied to `internal/eprj3/schemas/LICENSE`.
+
+────────────────────────────────────────────────────────────────────────
+kicad-to-easyeda-eprj3 (example project, test fixture)
+────────────────────────────────────────────────────────────────────────
+  Source:  https://github.com/easyeda/kicad-to-easyeda-eprj3
+  Commit:  a16545dd7922455e6a20f69adeb234c924af08b5
+  License: Apache License 2.0
+
+The editor-written `.eprj3` example project
+(`example/easyeda/easyeda-eprj3-project/`, README files omitted, project
+files unmodified) is redistributed as the test fixture
+`internal/eprj3/testdata/upstream-example/easyeda-eprj3-project/`. A
+verbatim copy of the Apache-2.0 license sits at
+`internal/eprj3/testdata/upstream-example/LICENSE`.
+
+────────────────────────────────────────────────────────────────────────
+@jlceda/pro-api-types (derived API index)
+────────────────────────────────────────────────────────────────────────
+  Source:  https://www.npmjs.com/package/@jlceda/pro-api-types (0.4.25)
+  License: Apache License 2.0
+
+`internal/apidoc/api-index.json` is generated from the package's
+`index.d.ts` (method names, signatures, first doc line, stability tag) by
+`internal/apidoc/gen.py`. `pcbpilot api upstream-diff --fetch` downloads
+the package at run time and does not redistribute it.

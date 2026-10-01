@@ -1,0 +1,30 @@
+{
+ "repository": "https://github.com/easyeda/easyeda-format-skill",
+ "commit": "9e42727cc4cf13a8e442140e8e7794ae94d5f41b",
+ "license": "MIT (Copyright (c) 2026 EasyEDA), see LICENSE",
+ "modification": "description/enumDescriptions stripped; validation keywords verbatim",
+ "schemas": [
+  "t-doc-head",
+  "tm-sheet",
+  "t-sch-canvas",
+  "tm-sch-component",
+  "t-wire",
+  "t-sch-line",
+  "t-sch-attr",
+  "tm-schematic",
+  "tm-pcb",
+  "t-canvas",
+  "tm-pcb-component",
+  "t-net",
+  "t-pcb-via",
+  "t-pcb-line",
+  "t-pcb-arc",
+  "t-pcb-pour",
+  "t-pcb-poured",
+  "t-pad-net-wire",
+  "t-pcb-attr",
+  "t-pcb-pad",
+  "tm-panel",
+  "t-panel-canvas"
+ ]
+}

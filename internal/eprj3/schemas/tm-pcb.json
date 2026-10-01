@@ -1,0 +1,31 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "properties": {
+  "board": {
+   "type": "string"
+  },
+  "parent": {
+   "type": "string"
+  },
+  "source": {
+   "type": "string"
+  },
+  "title": {
+   "type": "string"
+  },
+  "zIndex": {
+   "type": [
+    "number",
+    "null"
+   ]
+  }
+ },
+ "required": [
+  "board",
+  "parent",
+  "title",
+  "source",
+  "zIndex"
+ ],
+ "type": "object"
+}

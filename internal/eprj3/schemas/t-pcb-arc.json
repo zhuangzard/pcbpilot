@@ -1,0 +1,74 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "properties": {
+  "angle": {
+   "type": "number"
+  },
+  "arcType": {
+   "enum": [
+    "DOT",
+    "CENT"
+   ],
+   "type": "string"
+  },
+  "endX": {
+   "type": "number"
+  },
+  "endY": {
+   "type": "number"
+  },
+  "groupId": {
+   "type": "string"
+  },
+  "layerId": {
+   "type": "number"
+  },
+  "locked": {
+   "type": "boolean"
+  },
+  "netName": {
+   "type": "string"
+  },
+  "partitionId": {
+   "type": [
+    "string",
+    "null"
+   ]
+  },
+  "specialColor": {
+   "pattern": "^$|^#[0-9A-Fa-f]{6}$",
+   "type": "string"
+  },
+  "startX": {
+   "type": "number"
+  },
+  "startY": {
+   "type": "number"
+  },
+  "width": {
+   "type": "number"
+  },
+  "zIndex": {
+   "default": -1,
+   "type": [
+    "number",
+    "null"
+   ]
+  }
+ },
+ "required": [
+  "groupId",
+  "layerId",
+  "locked",
+  "zIndex",
+  "netName",
+  "startX",
+  "startY",
+  "endX",
+  "endY",
+  "angle",
+  "width",
+  "arcType"
+ ],
+ "type": "object"
+}

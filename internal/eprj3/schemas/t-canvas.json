@@ -1,0 +1,83 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "properties": {
+  "altSnapXSize": {
+   "type": "number"
+  },
+  "altSnapYSize": {
+   "type": "number"
+  },
+  "gridType": {
+   "enum": [
+    "NONE",
+    "GRID",
+    "OUTLETS"
+   ],
+   "type": "string"
+  },
+  "gridXSize": {
+   "type": "number"
+  },
+  "gridYSize": {
+   "type": "number"
+  },
+  "highlightValue": {
+   "type": "number"
+  },
+  "layerBrightness": {
+   "enum": [
+    "NORMAL",
+    "INACTIVE_GRAY",
+    "INACTIVE_HIDDEN"
+   ],
+   "type": "string"
+  },
+  "multiGridRatio": {
+   "type": "number"
+  },
+  "multiGridType": {
+   "enum": [
+    "NONE",
+    "GRID",
+    "OUTLETS"
+   ],
+   "type": "string"
+  },
+  "originX": {
+   "type": "number"
+  },
+  "originY": {
+   "type": "number"
+  },
+  "snapXSize": {
+   "type": "number"
+  },
+  "snapYSize": {
+   "type": "number"
+  },
+  "unit": {
+   "enum": [
+    "mm",
+    "mil"
+   ],
+   "type": "string"
+  }
+ },
+ "required": [
+  "originX",
+  "originY",
+  "unit",
+  "gridXSize",
+  "gridYSize",
+  "snapXSize",
+  "snapYSize",
+  "altSnapXSize",
+  "altSnapYSize",
+  "gridType",
+  "multiGridType",
+  "multiGridRatio",
+  "highlightValue",
+  "layerBrightness"
+ ],
+ "type": "object"
+}

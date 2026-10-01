@@ -1,0 +1,15 @@
+{"type":"DOCHEAD","ticket":1}||{"docType":"SYMBOL","client":"0123456789abcdef","uuid":"a000000000000001","updateTime":1790000000000,"version":"1790000000000","editVersion":"4.1.60"}|
+{"type":"CANVAS","ticket":1,"id":"CANVAS"}||{"originX":0,"originY":0}|
+{"type":"PART","ticket":2,"id":"R.1"}||{"BBOX":[-10,4,10,-4],"title":"R.1"}|
+{"type":"DOCHEAD","ticket":1}||{"docType":"SCH_PAGE","client":"0123456789abcdef","uuid":"5000000000000002","updateTime":1790000000000,"version":"1790000000000","editVersion":"4.1.60"}|
+{"type":"CANVAS","ticket":1,"id":"CANVAS"}||{"originX":0,"originY":0}|
+{"type":"META","ticket":2,"id":"META"}||{"title":"P1","schematic":"5000000000000001","source":"","zIndex":1}|
+{"type":"COMPONENT","ticket":3,"id":"1000000000000001"}||{"groupId":"","locked":false,"zIndex":1,"partId":"R.1","x":300,"y":400,"rotation":0,"isMirror":false,"attrs":{}}|
+{"type":"COMPONENT","ticket":4,"id":"1000000000000002"}||{"groupId":"","locked":false,"zIndex":2,"partId":"R.1","x":500,"y":400,"rotation":270,"isMirror":false,"attrs":{}}|
+{"type":"WIRE","ticket":5,"id":"2000000000000001"}||{"groupId":"","locked":false,"zIndex":3}|
+{"type":"WIRE","ticket":6,"id":"2000000000000002"}||{"groupId":"","locked":false,"zIndex":4}|
+{"type":"WIRE","ticket":7,"id":"2000000000000003"}||{"groupId":"","locked":false,"zIndex":5}|
+{"type":"ATTR","ticket":8,"id":"3000000000000001"}||{"x":310,"y":400,"rotation":0,"color":null,"fontFamily":null,"fontSize":null,"fontWeight":null,"italic":null,"underline":null,"align":"LEFT_BOTTOM","value":"VCC","keyVisible":false,"valueVisible":true,"key":"NET","fillColor":null,"parentId":"2000000000000001","zIndex":6,"locked":false,"groupId":"","strikeout":null}|
+{"type":"ATTR","ticket":9,"id":"3000000000000002"}||{"x":510,"y":400,"rotation":0,"color":null,"fontFamily":null,"fontSize":null,"fontWeight":null,"italic":null,"underline":null,"align":"LEFT_BOTTOM","value":"GND","keyVisible":false,"valueVisible":true,"key":"NET","fillColor":null,"parentId":"2000000000000002","zIndex":7,"locked":false,"groupId":"","strikeout":null}|
+{"type":"WIRE","ticket":10,"id":"2000000000000003"}|||
+{"type":"COMPONENT","ticket":11,"id":"1000000000000002"}||{"groupId":"","locked":false,"zIndex":2,"partId":"R.1","x":520,"y":400,"rotation":270,"isMirror":false,"attrs":{}}|

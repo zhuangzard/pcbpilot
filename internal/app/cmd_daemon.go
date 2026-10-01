@@ -228,6 +228,9 @@ func newDaemonHealthCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command
 					result.Notices = u.Notices
 				}
 			}
+			// Read-only official-CLI check; computed even without a daemon and
+			// never affects the exit status.
+			result.OfficialCLI = detectOfficialCLI(context.Background(), defaultOfficialCLIEnv())
 			enc := json.NewEncoder(stdout)
 			enc.SetIndent("", "  ")
 			if err := enc.Encode(result); err != nil {

@@ -1024,9 +1024,13 @@ type healthResult struct {
 	HostCompatibility *hostCompatibilityReport `json:"hostCompatibility,omitempty"`
 	// Updates mirrors the daemon's self-update block; Notices are the lines an
 	// Agent must relay to the user (upgrade done, connector import pending …).
-	Updates *healthUpdates  `json:"updates,omitempty"`
-	Notices []string        `json:"notices,omitempty"`
-	Checked []checkedHealth `json:"checked"`
+	Updates *healthUpdates `json:"updates,omitempty"`
+	Notices []string       `json:"notices,omitempty"`
+	// OfficialCLI is the read-only presence/version check of JLC's official
+	// EasyEDA Pro client CLI (easyeda-pro / lceda-pro). Informational only:
+	// it never fails health and is never a pcbpilot write path.
+	OfficialCLI *officialCLIReport `json:"officialCli,omitempty"`
+	Checked     []checkedHealth    `json:"checked"`
 }
 
 type checkedHealth struct {

@@ -1,0 +1,11 @@
+{
+  "name": "synthetic-minimal",
+  "format": "folder",
+  "profile": {
+    "boards": {"b000000000000001": {"uuid": "b000000000000001", "title": "Board1"}},
+    "schematics": {"5000000000000001": {"uuid": "5000000000000001", "name": "Main", "board": "b000000000000001"}},
+    "sheets": {"5000000000000002": {"uuid": "5000000000000002", "title": "P1", "schematic_uuid": "5000000000000001", "zIndex": 1}},
+    "pcbs": {"c000000000000001": {"uuid": "c000000000000001", "title": "PCB1", "board": "b000000000000001"}},
+    "panels": {}
+  }
+}

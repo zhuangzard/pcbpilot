@@ -241,6 +241,35 @@ pcbpilot doc switch "<doc-name-or-uuid>" --project "<project>"
 - 写操作使用 `--project` 和 `--doc`，由 CLI 在派发前实时确认目标文档。没有独立的
   `pcbpilot context` 命令；`health` 显示连接状态，`doc ls/switch` 读取/切换实时文档。
 
+### 官方客户端 CLI 探测（`health.officialCli`，只读）
+
+`pcbpilot health` 额外输出 `officialCli`：嘉立创官方桌面客户端 V4.1.60+ 内置的命令行
+（国际版 `easyeda-pro`、国内版 `lceda-pro`）是否存在、版本多少。它**从不让 health 失败**，
+有无 daemon 都会输出。
+
+| `status` | 含义 |
+|---|---|
+| `not-installed` | PATH 与默认安装位置都没有；`summary` 为 `not installed (requires EasyEDA Pro desktop V4.1.60+)` |
+| `present-unsupported` | 找到客户端但版本低于 4.1.60（例：本机 macOS 3.2.149），无 CLI；**未执行** |
+| `present-not-probed` | 找到 4.1.60+ 或版本不可读，但未运行 `doctor`；原因见 `notProbedReason` |
+| `probed` / `probe-failed` | 仅 Windows：运行了 `doctor`（2 s 超时），`doctor.connected/endpoint/bridgeVersion/versionMatch` |
+
+规则与理由：
+
+- 客户端二进制本身就是 Electron 编辑器。版本只从安装元数据读取（`resources/app/package.json`，
+  macOS 退到 `Info.plist`），**不执行任何程序**；旧版或版本未知时执行它可能直接打开编辑器。
+- 唯一可能执行的命令是 `doctor`。官方文档只在 Windows 客户端上把它写成“探测端点、无编辑器时
+  返回 connected:false”的诊断命令；macOS/Linux 行为未文档化，因此报告 `present (not probed)`。
+  `PCBPILOT_OFFICIAL_CLI_PROBE=0` 在所有平台禁用执行。`open`、`activate`、`invoke`、`session`
+  一律不调用。
+- 默认位置的来源写在 `candidates[].provenance`：Windows `C:\Program Files\EasyEDA-Pro\easyeda-pro.exe`
+  是官方文档（documented），macOS `/Applications/EasyEDA-Pro.app` 为本机实测（observed），
+  其余（`LCEDA-Pro.app`、`/opt/easyeda-pro`）是命名推断（inferred），未验证。
+- **官方 CLI 的 `invoke --code` 是任意 JS 通道，不是 pcbpilot 写入路径**（`writePath` 字段原文写明）。
+  工程写入仍只走 typed action / Cobra 子命令 / `pcbpilot apply`；不要因为 `officialCli` 显示
+  `probed` 就改用官方 CLI 写工程、开关会话或启动 headless 编辑器（与“Agent 不自行启动宿主”冲突）。
+  离线读 `.eprj3` 与 API 差异监测见 [offline-format-api-watch.md](offline-format-api-watch.md)。
+
 ### 扩展已启用、权限已开，但始终没有连接尝试
 
 以下两种情况 daemon 侧都完全不可见（`windows` 为空、无 `connector connected` 日志），

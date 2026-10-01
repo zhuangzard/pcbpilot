@@ -25,6 +25,7 @@ type Method struct {
 
 type index struct {
 	Source         string   `json:"source"`
+	Version        string   `json:"version"`
 	NamespaceCount int      `json:"namespaceCount"`
 	MethodCount    int      `json:"methodCount"`
 	Records        []Method `json:"records"`

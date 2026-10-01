@@ -1,0 +1,23 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "properties": {
+  "originX": {
+   "type": "number"
+  },
+  "originY": {
+   "type": "number"
+  },
+  "yAxisDirection": {
+   "enum": [
+    "up",
+    "down"
+   ],
+   "type": "string"
+  }
+ },
+ "required": [
+  "originX",
+  "originY"
+ ],
+ "type": "object"
+}

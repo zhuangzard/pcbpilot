@@ -21,9 +21,10 @@ func newApiCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 			ns, m := apidoc.Counts()
 			return fmt.Sprintf(
 				"Search and browse the embedded eda.* API index (%d namespaces, %d methods,\n"+
-					"generated from %s). No daemon or connected window required.\n\n"+
+					"generated from %s %s). No daemon or connected window required.\n"+
+					"`api upstream-diff` compares this pinned surface with a newer release.\n\n"+
 					"This is the self-discovery loop for new typed actions / debug.exec_js calls:\n"+
-					"find the eda.* method, read its signature, then wrap it.", ns, m, apidoc.Source())
+					"find the eda.* method, read its signature, then wrap it.", ns, m, apidoc.Source(), apidoc.PinnedVersion())
 		}(),
 	}
 	api.AddCommand(
@@ -31,6 +32,7 @@ func newApiCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 		newApiLsCmd(stdout),
 		newApiShowCmd(stdout, stderr),
 		newApiProbeCmd(cfg, stdout, stderr),
+		newApiUpstreamDiffCmd(stdout),
 	)
 	return api
 }
