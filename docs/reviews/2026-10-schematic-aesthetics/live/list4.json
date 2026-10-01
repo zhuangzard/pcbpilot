@@ -1,0 +1,21 @@
+{
+  "id": "req_54",
+  "type": "response",
+  "version": "v1",
+  "createdAt": "2026-10-01T17:50:54.785487Z",
+  "ok": true,
+  "result": {
+    "buses": [],
+    "count": 0,
+    "scope": "activePage"
+  },
+  "context": {
+    "projectUuid": "1cdaf015a8ae4a68ba26327e6b6c31f0",
+    "projectName": "ceshi",
+    "documentUuid": "905bb85957eaf435",
+    "documentType": "schematic",
+    "tabId": "905bb85957eaf435@1cdaf015a8ae4a68ba26327e6b6c31f0"
+  },
+  "seq": 28,
+  "seqAbandoned": 0
+}

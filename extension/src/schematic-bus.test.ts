@@ -64,6 +64,12 @@ test('validateBusLine accepts orthogonal connected polylines and refuses the doc
 	}
 	assert.equal(sameBusLine([0, 0, 0, 10], [[0, 0, 0, 10]]), true);
 	assert.equal(sameBusLine([0, 0, 0, 10], [0, 0, 0, 15]), false);
+	// Live V3 3.2.149 readback: two branches come back as one flat path that
+	// walks the horizontal leg out and back (2026-10-01).
+	assert.equal(sameBusLine([[620, 260, 780, 260], [620, 260, 620, 320]], [620, 320, 620, 260, 780, 260, 620, 260]), true);
+	// Direction and collinear splitting do not matter; geometry does.
+	assert.equal(sameBusLine([[0, 0, 100, 0]], [[100, 0, 50, 0, 0, 0]]), true);
+	assert.equal(sameBusLine([[620, 260, 780, 260], [620, 260, 620, 320]], [620, 320, 620, 260, 700, 260]), false);
 });
 
 test('schematic.bus.create creates one bus and verifies name and path by readback', async () => {

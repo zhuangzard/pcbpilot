@@ -1,0 +1,39 @@
+{
+  "id": "req_22",
+  "type": "response",
+  "version": "v1",
+  "createdAt": "2026-10-01T17:50:31.920227Z",
+  "ok": true,
+  "result": {
+    "buses": [
+      {
+        "busName": "TBUS[0:7]",
+        "color": null,
+        "line": [
+          620,
+          320,
+          620,
+          260,
+          780,
+          260,
+          620,
+          260
+        ],
+        "lineType": null,
+        "lineWidth": null,
+        "primitiveId": "3c739e2eacd69563"
+      }
+    ],
+    "count": 1,
+    "scope": "activePage"
+  },
+  "context": {
+    "projectUuid": "1cdaf015a8ae4a68ba26327e6b6c31f0",
+    "projectName": "ceshi",
+    "documentUuid": "905bb85957eaf435",
+    "documentType": "schematic",
+    "tabId": "905bb85957eaf435@1cdaf015a8ae4a68ba26327e6b6c31f0"
+  },
+  "seq": 9,
+  "seqAbandoned": 0
+}

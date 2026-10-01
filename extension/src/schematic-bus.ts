@@ -14,7 +14,7 @@
  * the existing typed connect paths. A bus never proves member connectivity:
  * that stays the per-pin netlist and `sch check`.
  *
- * Status: live-unverified on V3 3.2.x and V4 (offline tests only).
+ * Status: live-verified on V3 3.2.149 desktop (list/create/save-reload/delete, 2026-10-01); V4 unverified.
  */
 
 import { ActionError, ErrorCodes, type ActionResult } from './protocol';
@@ -93,12 +93,59 @@ export function busPolylines(line: unknown): Array<Array<number>> {
 	return (line as Array<unknown>).filter(Array.isArray).map(l => (l as Array<unknown>).map(Number)).filter(l => l.length >= 4);
 }
 
-/** Exact (0.01) comparison of two polyline sets, order-sensitive. */
+/**
+ * Geometric comparison of two bus paths as sets of undirected segments.
+ * The host does not echo the shape it was given: on V3 3.2.149 two touching
+ * branches [[620,260,780,260],[620,260,620,320]] read back as ONE flat path
+ * 620,320 → 620,260 → 780,260 → 620,260 (live 2026-10-01). So both sides are
+ * cut at every vertex of either side, made undirected, de-duplicated and
+ * compared as sets (0.01 tolerance).
+ */
 export function sameBusLine(a: unknown, b: unknown): boolean {
 	const pa = busPolylines(a);
 	const pb = busPolylines(b);
-	if (pa.length !== pb.length) return false;
-	return pa.every((l, i) => l.length === pb[i].length && l.every((v, k) => Math.abs(v - pb[i][k]) < 0.01));
+	if (pa.length === 0 || pb.length === 0) return pa.length === pb.length;
+	const segsOf = (pl: Array<Array<number>>): Array<[number, number, number, number]> => {
+		const out: Array<[number, number, number, number]> = [];
+		for (const l of pl) for (let i = 0; i + 3 < l.length; i += 2) {
+			if (Math.abs(l[i] - l[i + 2]) < 0.01 && Math.abs(l[i + 1] - l[i + 3]) < 0.01) continue;
+			out.push([l[i], l[i + 1], l[i + 2], l[i + 3]]);
+		}
+		return out;
+	};
+	const sa = segsOf(pa);
+	const sb = segsOf(pb);
+	const pts: Array<[number, number]> = [];
+	for (const [x0, y0, x1, y1] of [...sa, ...sb]) pts.push([x0, y0], [x1, y1]);
+	const r = (v: number) => Math.round(v * 100) / 100;
+	const keySet = (segs: Array<[number, number, number, number]>): Set<string> => {
+		const keys = new Set<string>();
+		for (const [x0, y0, x1, y1] of segs) {
+			const len = Math.hypot(x1 - x0, y1 - y0);
+			const ts = [0, 1];
+			for (const [px, py] of pts) {
+				const t = ((px - x0) * (x1 - x0) + (py - y0) * (y1 - y0)) / (len * len);
+				if (t <= 0.0001 || t >= 0.9999) continue;
+				const dx = x0 + t * (x1 - x0) - px;
+				const dy = y0 + t * (y1 - y0) - py;
+				if (Math.hypot(dx, dy) < 0.01) ts.push(t);
+			}
+			ts.sort((u, v) => u - v);
+			for (let i = 0; i + 1 < ts.length; i++) {
+				if (ts[i + 1] - ts[i] < 1e-6) continue;
+				const ax = r(x0 + ts[i] * (x1 - x0)), ay = r(y0 + ts[i] * (y1 - y0));
+				const bx = r(x0 + ts[i + 1] * (x1 - x0)), by = r(y0 + ts[i + 1] * (y1 - y0));
+				const [p, q] = ax < bx || (ax === bx && ay <= by) ? [[ax, ay], [bx, by]] : [[bx, by], [ax, ay]];
+				keys.add(`${p[0]},${p[1]}-${q[0]},${q[1]}`);
+			}
+		}
+		return keys;
+	};
+	const ka = keySet(sa);
+	const kb = keySet(sb);
+	if (ka.size !== kb.size) return false;
+	for (const k of ka) if (!kb.has(k)) return false;
+	return true;
 }
 
 type BusPrim = {

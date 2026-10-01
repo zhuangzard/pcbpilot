@@ -172,7 +172,7 @@ stubs; `sch connect` stays for when you deliberately override the geometry.
 - 交叉：严格内部 X 在 EasyEDA 不导通。异网 X 计入 W2；同网 X（看似结点、实为两岛）和
   四通结点计入 W3——改成错开的两个 T。T 结点不要落在引脚上、离其他拐点/结点 ≥ 10 units（W5）。
 
-**总线**（`sch bus …`，官方 `sch_PrimitiveBus` @beta，**planned / live-unverified**，V3/V4 均未现场验证）：
+**总线**（`sch bus …`，官方 `sch_PrimitiveBus` @beta，**V3 3.2.149 现场已验证，V4 未验证**；多分支回读为一条往返折线，核对按线段集合）：
 
 - 总线只是绘图对象，**不建立也不证明**成员连通；成员连通仍以逐 pin 网表、`sch check` 为准。
 - 扩展 API **没有总线分支（bus entry）图元**：成员用普通正交导线 + 成员名网络标签接入

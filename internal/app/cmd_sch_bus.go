@@ -7,8 +7,8 @@ package app
 // NO bus-entry primitive (ESCH_PrimitiveType has Bus and Wire, no BusEntry), so
 // a member is tapped with an ordinary orthogonal wire plus a net label/port of
 // the member name — the same typed connect paths as any other net.
-// Status: planned / live-unverified on V3 3.2.x and V4 until the main agent
-// runs the live probe (docs/reviews/2026-10-schematic-aesthetics §5).
+// Status: live-verified on V3 3.2.149 desktop (2026-10-01); V4 unverified
+// (procedure: docs/reviews/2026-10-schematic-aesthetics §5).
 
 import (
 	"encoding/json"
@@ -166,8 +166,8 @@ func printDryRun(w io.Writer, action string, payload map[string]any, warnings []
 func newSchBusCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {
 	bus := &cobra.Command{
 		Use:   "bus",
-		Short: "Native schematic buses (sch_PrimitiveBus, @beta, live-unverified) and offline bus-candidate detection",
-		Long: "原理图总线（官方 sch_PrimitiveBus，@beta；V3/V4 现场未验证，见 docs/FEATURES.md）。\n\n" +
+		Short: "Native schematic buses (sch_PrimitiveBus, @beta; live-verified on V3 3.2.149, V4 unverified) and offline bus-candidate detection",
+		Long: "原理图总线（官方 sch_PrimitiveBus，@beta；V3 3.2.149 现场已验证，V4 未验证，见 docs/FEATURES.md）。\n\n" +
 			"  list        只读：当前页全部总线（primitiveId/busName/line/color/lineWidth/lineType）\n" +
 			"  create      建一条总线（正交多段线，互相连通），写后回读名字与路径；--dry-run 只做离线校验\n" +
 			"  delete      按 ID 删总线并回读确认；--dry-run 只打印计划\n" +
