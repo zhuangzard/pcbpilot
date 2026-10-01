@@ -1,0 +1,439 @@
+{
+ "schemaVersion": 1,
+ "componentIds": {
+  "C1": "cmp-C1",
+  "C2": "cmp-C2",
+  "C3": "cmp-C3",
+  "U1": "cmp-U1"
+ },
+ "pinStates": {},
+ "placements": [
+  {
+   "primitiveId": "",
+   "designator": "U1",
+   "x": 0,
+   "y": 0,
+   "rotation": 180,
+   "mirror": true,
+   "bbox": {
+    "minX": -35.49999999999994,
+    "minY": -20.5,
+    "maxX": 35.50000000000006,
+    "maxY": 20.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "GND",
+     "net": "GND",
+     "x": -45,
+     "y": -10
+    },
+    {
+     "number": "2",
+     "name": "VOUT",
+     "net": "+3V3",
+     "x": -45,
+     "y": 0
+    },
+    {
+     "number": "3",
+     "name": "VIN",
+     "net": "+5V",
+     "x": -45,
+     "y": 10
+    },
+    {
+     "number": "4",
+     "name": "VOUT",
+     "net": "+3V3",
+     "x": 45,
+     "y": 0
+    }
+   ]
+  },
+  {
+   "primitiveId": "",
+   "designator": "C2",
+   "value": "10uF",
+   "x": -80,
+   "y": -10,
+   "rotation": 270,
+   "mirror": false,
+   "bbox": {
+    "minX": -88.5,
+    "minY": -20.5,
+    "maxX": -71.5,
+    "maxY": 0.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1",
+     "net": "+5V",
+     "x": -80,
+     "y": 10
+    },
+    {
+     "number": "2",
+     "name": "2",
+     "net": "GND",
+     "x": -80,
+     "y": -30
+    }
+   ]
+  },
+  {
+   "primitiveId": "",
+   "designator": "C1",
+   "value": "100nF",
+   "x": 80,
+   "y": -20,
+   "rotation": 270,
+   "mirror": false,
+   "bbox": {
+    "minX": 71.5,
+    "minY": -30.500000000000114,
+    "maxX": 88.5,
+    "maxY": -9.500000000000114
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1",
+     "net": "+3V3",
+     "x": 80,
+     "y": 0
+    },
+    {
+     "number": "2",
+     "name": "2",
+     "net": "GND",
+     "x": 80,
+     "y": -40
+    }
+   ]
+  },
+  {
+   "primitiveId": "",
+   "designator": "C3",
+   "value": "22uF",
+   "x": 50,
+   "y": -85,
+   "rotation": 270,
+   "mirror": false,
+   "bbox": {
+    "minX": 41.5,
+    "minY": -95.50000000000011,
+    "maxX": 58.5,
+    "maxY": -74.50000000000011
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1",
+     "net": "+3V3",
+     "x": 50,
+     "y": -65
+    },
+    {
+     "number": "2",
+     "name": "2",
+     "net": "GND",
+     "x": 50,
+     "y": -105
+    }
+   ]
+  }
+ ],
+ "wires": [
+  {
+   "net": "GND",
+   "points": [
+    [
+     -50,
+     -35
+    ],
+    [
+     -50,
+     -10
+    ]
+   ]
+  },
+  {
+   "net": "GND",
+   "points": [
+    [
+     -50,
+     -10
+    ],
+    [
+     -45,
+     -10
+    ]
+   ]
+  },
+  {
+   "net": "+5V",
+   "points": [
+    [
+     -50,
+     15
+    ],
+    [
+     -50,
+     10
+    ]
+   ]
+  },
+  {
+   "net": "+5V",
+   "points": [
+    [
+     -50,
+     10
+    ],
+    [
+     -45,
+     10
+    ]
+   ]
+  },
+  {
+   "net": "+3V3",
+   "points": [
+    [
+     80,
+     0
+    ],
+    [
+     80,
+     5
+    ]
+   ]
+  },
+  {
+   "net": "+3V3",
+   "points": [
+    [
+     80,
+     5
+    ],
+    [
+     50,
+     5
+    ]
+   ]
+  },
+  {
+   "net": "GND",
+   "points": [
+    [
+     -80,
+     -35
+    ],
+    [
+     -80,
+     -30
+    ]
+   ]
+  },
+  {
+   "net": "GND",
+   "points": [
+    [
+     -80,
+     -35
+    ],
+    [
+     -50,
+     -35
+    ]
+   ]
+  },
+  {
+   "net": "+3V3",
+   "points": [
+    [
+     -45,
+     0
+    ],
+    [
+     -55,
+     0
+    ]
+   ]
+  },
+  {
+   "net": "+3V3",
+   "points": [
+    [
+     -55,
+     0
+    ],
+    [
+     -55,
+     5
+    ]
+   ]
+  },
+  {
+   "net": "+5V",
+   "points": [
+    [
+     -80,
+     10
+    ],
+    [
+     -80,
+     15
+    ]
+   ]
+  },
+  {
+   "net": "+5V",
+   "points": [
+    [
+     -80,
+     15
+    ],
+    [
+     -50,
+     15
+    ]
+   ]
+  },
+  {
+   "net": "+3V3",
+   "points": [
+    [
+     45,
+     0
+    ],
+    [
+     50,
+     0
+    ]
+   ]
+  },
+  {
+   "net": "+3V3",
+   "points": [
+    [
+     50,
+     -65
+    ],
+    [
+     50,
+     0
+    ]
+   ]
+  },
+  {
+   "net": "+3V3",
+   "points": [
+    [
+     50,
+     0
+    ],
+    [
+     50,
+     5
+    ]
+   ]
+  }
+ ],
+ "flags": [
+  {
+   "net": "GND",
+   "kind": "ground",
+   "pinX": -75,
+   "pinY": -35,
+   "direction": "down",
+   "offset": 10,
+   "anchor": {
+    "type": "wire_tree",
+    "net": "GND",
+    "x": -75,
+    "y": -35
+   }
+  },
+  {
+   "net": "GND",
+   "kind": "ground",
+   "pinX": 80,
+   "pinY": -40,
+   "direction": "down",
+   "offset": 10,
+   "anchor": {
+    "type": "pin",
+    "componentId": "cmp-C1",
+    "pinNumber": "2",
+    "net": "GND"
+   }
+  },
+  {
+   "net": "GND",
+   "kind": "ground",
+   "pinX": 50,
+   "pinY": -105,
+   "direction": "down",
+   "offset": 10,
+   "anchor": {
+    "type": "pin",
+    "componentId": "cmp-C3",
+    "pinNumber": "2",
+    "net": "GND"
+   }
+  },
+  {
+   "net": "+3V3",
+   "kind": "power",
+   "pinX": -55,
+   "pinY": 5,
+   "direction": "up",
+   "offset": 15,
+   "anchor": {
+    "type": "wire_tree",
+    "net": "+3V3",
+    "x": -55,
+    "y": 5
+   }
+  },
+  {
+   "net": "+5V",
+   "kind": "power",
+   "pinX": -75,
+   "pinY": 15,
+   "direction": "up",
+   "offset": 30,
+   "anchor": {
+    "type": "wire_tree",
+    "net": "+5V",
+    "x": -75,
+    "y": 15
+   }
+  },
+  {
+   "net": "+3V3",
+   "kind": "power",
+   "pinX": 50,
+   "pinY": 5,
+   "direction": "up",
+   "offset": 10,
+   "anchor": {
+    "type": "wire_tree",
+    "net": "+3V3",
+    "x": 50,
+    "y": 5
+   }
+  }
+ ],
+ "score": [
+  0,
+  0,
+  0,
+  0
+ ],
+ "candidatesUsed": 0
+}

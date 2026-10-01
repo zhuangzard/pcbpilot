@@ -29,15 +29,17 @@ type SchematicZonesInput struct {
 	// MaxCandidatesCeiling (isolated-budget mode only): a zone whose search
 	// stops on its budget is retried at 4x, up to this ceiling. Solved zones
 	// never re-run; structural failures are not retried.
-	MaxCandidatesCeiling int                          `json:"maxCandidatesCeiling,omitempty"`
+	MaxCandidatesCeiling int `json:"maxCandidatesCeiling,omitempty"`
 	// SameSheetMarker "net_label": every in-zone direct net is named with a
 	// small net label (policy direct_label) - ports stay for module_port nets,
 	// which by convention are the cross-sheet ones.
-	SameSheetMarker string `json:"sameSheetMarker,omitempty"`
-	Zones                []SchematicZone              `json:"zones"`
-	Optimization         *SchematicLayoutOptimization `json:"optimization,omitempty"`
-	Routing              *SchematicRoutingOptions     `json:"routing,omitempty"`
-	MarkerAnchors        []SchematicMarkerAnchor      `json:"markerAnchors,omitempty"`
+	SameSheetMarker string                       `json:"sameSheetMarker,omitempty"`
+	Zones           []SchematicZone              `json:"zones"`
+	Optimization    *SchematicLayoutOptimization `json:"optimization,omitempty"`
+	Routing         *SchematicRoutingOptions     `json:"routing,omitempty"`
+	MarkerAnchors   []SchematicMarkerAnchor      `json:"markerAnchors,omitempty"`
+	// Aesthetics: opt-in Phase B beautify pass for every top-level zone.
+	Aesthetics *SchematicAestheticsOptions `json:"aesthetics,omitempty"`
 }
 type SchematicZoneVariant struct {
 	ID            string                 `json:"id"`
@@ -255,7 +257,7 @@ func PlanSchematicZones(in SchematicZonesInput) (*SchematicZonesResult, error) {
 			}
 			macros = append(macros, macro)
 		}
-		local := SchematicLayoutInput{SchemaVersion: 1, CoreComponentID: z.CoreComponentID, NetPolicies: map[string]string{}, Optimization: in.Optimization, Routing: in.Routing}
+		local := SchematicLayoutInput{SchemaVersion: 1, CoreComponentID: z.CoreComponentID, NetPolicies: map[string]string{}, Optimization: in.Optimization, Routing: in.Routing, Aesthetics: in.Aesthetics}
 		for _, macro := range macros {
 			local.Components = append(local.Components, macro.part)
 			for net := range macro.ports {

@@ -24,6 +24,7 @@ package app
 
 import (
 	"fmt"
+	"math"
 	"sort"
 )
 
@@ -194,3 +195,52 @@ func tidyColumnSide(ins []tidySignalMemberIn, anchor tidyAnchor) float64 {
 //     从「整页回滚」改为「对账修复优先,真短路才回滚」。
 // 本文件的 planSignalColumn 一族保留为收敛规划的早期形态;正式路径是
 // sch_zone_follow.go(跟随规则 R1-R5)+ sch_zone_arrange.go(区间求解)。
+
+// schAlignSnap is one candidate translation that puts a part's bbox centre
+// on the row or column of a same-class neighbour (schematic aesthetics B4).
+type schAlignSnap struct {
+	Designator string
+	DX, DY     float64
+	Neighbour  string
+}
+
+// schAlignSnapTargets lists bounded snaps for every non-core part: the
+// neighbour must be of the same class (≤3-pin passive vs IC/connector, the
+// L3 classes) within 300 units, the move a multiple of the 5-unit connection
+// grid, non-zero and at most maxMove. Only translations are proposed; the
+// caller re-routes, re-validates and keeps a snap only if every gate holds.
+func schAlignSnapTargets(parts []powerLayoutPlacement, core string, tol, maxMove float64) []schAlignSnap {
+	small := func(c powerLayoutPlacement) bool { return len(c.Pins) <= 3 }
+	centre := func(c powerLayoutPlacement) (float64, float64) {
+		return (c.BBox.MinX + c.BBox.MaxX) / 2, (c.BBox.MinY + c.BBox.MaxY) / 2
+	}
+	var out []schAlignSnap
+	for _, p := range parts {
+		if p.Designator == core {
+			continue
+		}
+		px, py := centre(p)
+		for _, q := range parts {
+			if q.Designator == p.Designator || small(p) != small(q) {
+				continue
+			}
+			qx, qy := centre(q)
+			if math.Abs(qx-px)+math.Abs(qy-py) > 300 {
+				continue
+			}
+			for _, d := range [][2]float64{{qx - px, 0}, {0, qy - py}} {
+				move := math.Abs(d[0]) + math.Abs(d[1])
+				if move <= tol || move > maxMove || !plGrid(d[0]) || !plGrid(d[1]) {
+					continue
+				}
+				// Snap the move itself to the grid so pin coordinates stay exact.
+				d = [2]float64{math.Round(d[0]/schAnchorGrid) * schAnchorGrid, math.Round(d[1]/schAnchorGrid) * schAnchorGrid}
+				out = append(out, schAlignSnap{Designator: p.Designator, DX: d[0], DY: d[1], Neighbour: q.Designator})
+			}
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return math.Abs(out[i].DX)+math.Abs(out[i].DY) < math.Abs(out[j].DX)+math.Abs(out[j].DY)
+	})
+	return out
+}

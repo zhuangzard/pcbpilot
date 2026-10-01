@@ -1,0 +1,853 @@
+{
+ "schemaVersion": 1,
+ "components": [
+  {
+   "id": "C_HF",
+   "measurement": {
+    "designator": "C3",
+    "x": 445,
+    "y": 585,
+    "rotation": 0,
+    "mirror": false,
+    "bbox": {
+     "minX": 434.5,
+     "minY": 576.5,
+     "maxX": 455.5,
+     "maxY": 593.5
+    },
+    "pins": [
+     {
+      "number": "1",
+      "name": "1",
+      "net": "+3V3",
+      "x": 425,
+      "y": 585
+     },
+     {
+      "number": "2",
+      "name": "2",
+      "net": "GND",
+      "x": 465,
+      "y": 585
+     }
+    ]
+   },
+   "pinStates": {}
+  },
+  {
+   "id": "C_IN",
+   "measurement": {
+    "designator": "C1",
+    "x": 525,
+    "y": 650,
+    "rotation": 0,
+    "mirror": false,
+    "bbox": {
+     "minX": 514.5,
+     "minY": 641.5,
+     "maxX": 535.5,
+     "maxY": 658.5
+    },
+    "pins": [
+     {
+      "number": "1",
+      "name": "1",
+      "net": "VSYS_5V",
+      "x": 505,
+      "y": 650
+     },
+     {
+      "number": "2",
+      "name": "2",
+      "net": "GND",
+      "x": 545,
+      "y": 650
+     }
+    ]
+   },
+   "pinStates": {}
+  },
+  {
+   "id": "C_OUT",
+   "measurement": {
+    "designator": "C2",
+    "x": 354.99999999999994,
+    "y": 585,
+    "rotation": 180,
+    "mirror": false,
+    "bbox": {
+     "minX": 344.49999999999994,
+     "minY": 576.5,
+     "maxX": 365.49999999999994,
+     "maxY": 593.5
+    },
+    "pins": [
+     {
+      "number": "1",
+      "name": "1",
+      "net": "+3V3",
+      "x": 374.99999999999994,
+      "y": 585
+     },
+     {
+      "number": "2",
+      "name": "2",
+      "net": "GND",
+      "x": 334.99999999999994,
+      "y": 585
+     }
+    ]
+   },
+   "pinStates": {}
+  },
+  {
+   "id": "C_VCC",
+   "measurement": {
+    "designator": "C4",
+    "x": 285,
+    "y": 340,
+    "rotation": 0,
+    "mirror": false,
+    "bbox": {
+     "minX": 274.5,
+     "minY": 331.5,
+     "maxX": 295.5,
+     "maxY": 348.5
+    },
+    "pins": [
+     {
+      "number": "1",
+      "name": "1",
+      "net": "+3V3",
+      "x": 265,
+      "y": 340
+     },
+     {
+      "number": "2",
+      "name": "2",
+      "net": "GND",
+      "x": 305,
+      "y": 340
+     }
+    ]
+   },
+   "pinStates": {}
+  },
+  {
+   "id": "D_ESD",
+   "measurement": {
+    "designator": "D3",
+    "x": 205,
+    "y": 385,
+    "rotation": 0,
+    "mirror": false,
+    "bbox": {
+     "minX": 169.5,
+     "minY": 364.5,
+     "maxX": 240.5,
+     "maxY": 405.5
+    },
+    "pins": [
+     {
+      "number": "1",
+      "name": "I/O1",
+      "net": "USB_DM",
+      "x": 160,
+      "y": 395
+     },
+     {
+      "number": "2",
+      "name": "GND",
+      "net": "GND",
+      "x": 160,
+      "y": 385
+     },
+     {
+      "number": "3",
+      "name": "I/O2",
+      "net": "USB_DP",
+      "x": 160,
+      "y": 375
+     },
+     {
+      "number": "4",
+      "name": "I/O2",
+      "net": "USB_DP",
+      "x": 250,
+      "y": 375
+     },
+     {
+      "number": "5",
+      "name": "VBUS",
+      "net": "USB_VBUS",
+      "x": 250,
+      "y": 385
+     },
+     {
+      "number": "6",
+      "name": "I/O1",
+      "net": "USB_DM",
+      "x": 250,
+      "y": 395
+     }
+    ]
+   },
+   "pinStates": {}
+  },
+  {
+   "id": "D_TERM",
+   "measurement": {
+    "designator": "D1",
+    "x": 135,
+    "y": 650,
+    "rotation": 0,
+    "mirror": false,
+    "bbox": {
+     "minX": 127.5,
+     "minY": 641.5,
+     "maxX": 140.5,
+     "maxY": 658.5
+    },
+    "pins": [
+     {
+      "number": "1",
+      "name": "K",
+      "net": "VSYS_5V",
+      "x": 115,
+      "y": 650
+     },
+     {
+      "number": "2",
+      "name": "A",
+      "net": "+5V_TERM",
+      "x": 155,
+      "y": 650
+     }
+    ]
+   },
+   "pinStates": {}
+  },
+  {
+   "id": "D_USB",
+   "measurement": {
+    "designator": "D2",
+    "x": 100,
+    "y": 655,
+    "rotation": 0,
+    "mirror": false,
+    "bbox": {
+     "minX": 92.5,
+     "minY": 646.5,
+     "maxX": 105.5,
+     "maxY": 663.5
+    },
+    "pins": [
+     {
+      "number": "1",
+      "name": "K",
+      "net": "VSYS_5V",
+      "x": 80,
+      "y": 655
+     },
+     {
+      "number": "2",
+      "name": "A",
+      "net": "USB_VBUS",
+      "x": 120,
+      "y": 655
+     }
+    ]
+   },
+   "pinStates": {}
+  },
+  {
+   "id": "J_PWR",
+   "measurement": {
+    "designator": "J1",
+    "x": 185,
+    "y": 645,
+    "rotation": 0,
+    "mirror": false,
+    "bbox": {
+     "minX": 174.5,
+     "minY": 629.5,
+     "maxX": 195.5,
+     "maxY": 660.5
+    },
+    "pins": [
+     {
+      "number": "1",
+      "name": "1",
+      "net": "+5V_TERM",
+      "x": 165,
+      "y": 650
+     },
+     {
+      "number": "2",
+      "name": "2",
+      "net": "GND",
+      "x": 165,
+      "y": 640
+     }
+    ]
+   },
+   "pinStates": {}
+  },
+  {
+   "id": "J_USB",
+   "measurement": {
+    "designator": "J2",
+    "x": 805,
+    "y": 665,
+    "rotation": 0,
+    "mirror": false,
+    "bbox": {
+     "minX": 774.5,
+     "minY": 624.5,
+     "maxX": 845.5,
+     "maxY": 695.5
+    },
+    "pins": [
+     {
+      "number": "10",
+      "name": "EP",
+      "net": "GND",
+      "x": 800,
+      "y": 615
+     },
+     {
+      "number": "11",
+      "name": "EP",
+      "net": "GND",
+      "x": 820,
+      "y": 615
+     },
+     {
+      "number": "8",
+      "name": "EP",
+      "net": "GND",
+      "x": 800,
+      "y": 705
+     },
+     {
+      "number": "9",
+      "name": "EP",
+      "net": "GND",
+      "x": 820,
+      "y": 705
+     },
+     {
+      "number": "A1B12",
+      "name": "GND",
+      "net": "GND",
+      "x": 855,
+      "y": 645
+     },
+     {
+      "number": "A4B9",
+      "name": "VBUS",
+      "net": "USB_VBUS",
+      "x": 855,
+      "y": 635
+     },
+     {
+      "number": "A5",
+      "name": "CC1",
+      "net": "CC1",
+      "x": 765,
+      "y": 635
+     },
+     {
+      "number": "A6",
+      "name": "DP1",
+      "net": "USB_DP",
+      "x": 765,
+      "y": 645
+     },
+     {
+      "number": "A7",
+      "name": "DN1",
+      "net": "USB_DM",
+      "x": 765,
+      "y": 655
+     },
+     {
+      "number": "A8",
+      "name": "SBU1",
+      "net": "",
+      "x": 765,
+      "y": 665
+     },
+     {
+      "number": "B1A12",
+      "name": "GND",
+      "net": "GND",
+      "x": 765,
+      "y": 685
+     },
+     {
+      "number": "B4A9",
+      "name": "VBUS",
+      "net": "USB_VBUS",
+      "x": 765,
+      "y": 675
+     },
+     {
+      "number": "B5",
+      "name": "CC2",
+      "net": "CC2",
+      "x": 855,
+      "y": 685
+     },
+     {
+      "number": "B6",
+      "name": "DP2",
+      "net": "USB_DP",
+      "x": 855,
+      "y": 675
+     },
+     {
+      "number": "B7",
+      "name": "DN2",
+      "net": "USB_DM",
+      "x": 855,
+      "y": 665
+     },
+     {
+      "number": "B8",
+      "name": "SBU2",
+      "net": "",
+      "x": 855,
+      "y": 655
+     }
+    ]
+   },
+   "pinStates": {
+    "A8": "nc",
+    "B8": "nc"
+   }
+  },
+  {
+   "id": "L_BUCK",
+   "measurement": {
+    "designator": "L1",
+    "x": 380,
+    "y": 620,
+    "rotation": 270,
+    "mirror": false,
+    "bbox": {
+     "minX": 379.55467999999996,
+     "minY": 602.83592,
+     "maxX": 384.8329,
+     "maxY": 637.38211
+    },
+    "pins": [
+     {
+      "number": "1",
+      "name": "1",
+      "net": "LX",
+      "x": 380,
+      "y": 640
+     },
+     {
+      "number": "2",
+      "name": "2",
+      "net": "+3V3",
+      "x": 380,
+      "y": 600
+     }
+    ]
+   },
+   "pinStates": {}
+  },
+  {
+   "id": "R_CC1",
+   "measurement": {
+    "designator": "R3",
+    "x": 780,
+    "y": 605,
+    "rotation": 0,
+    "mirror": false,
+    "bbox": {
+     "minX": 769.5,
+     "minY": 600.5,
+     "maxX": 790.5,
+     "maxY": 609.5
+    },
+    "pins": [
+     {
+      "number": "1",
+      "name": "1",
+      "net": "CC1",
+      "x": 760,
+      "y": 605
+     },
+     {
+      "number": "2",
+      "name": "2",
+      "net": "GND",
+      "x": 800,
+      "y": 605
+     }
+    ]
+   },
+   "pinStates": {}
+  },
+  {
+   "id": "R_CC2",
+   "measurement": {
+    "designator": "R4",
+    "x": 885,
+    "y": 685,
+    "rotation": 0,
+    "mirror": false,
+    "bbox": {
+     "minX": 874.5,
+     "minY": 680.5,
+     "maxX": 895.5,
+     "maxY": 689.5
+    },
+    "pins": [
+     {
+      "number": "1",
+      "name": "1",
+      "net": "CC2",
+      "x": 865,
+      "y": 685
+     },
+     {
+      "number": "2",
+      "name": "2",
+      "net": "GND",
+      "x": 905,
+      "y": 685
+     }
+    ]
+   },
+   "pinStates": {}
+  },
+  {
+   "id": "R_FBB",
+   "measurement": {
+    "designator": "R2",
+    "x": 485,
+    "y": 690,
+    "rotation": 90,
+    "mirror": false,
+    "bbox": {
+     "minX": 480.5,
+     "minY": 679.5,
+     "maxX": 489.5,
+     "maxY": 700.5
+    },
+    "pins": [
+     {
+      "number": "1",
+      "name": "1",
+      "net": "FB",
+      "x": 485,
+      "y": 670
+     },
+     {
+      "number": "2",
+      "name": "2",
+      "net": "GND",
+      "x": 485,
+      "y": 710
+     }
+    ]
+   },
+   "pinStates": {}
+  },
+  {
+   "id": "R_FBT",
+   "measurement": {
+    "designator": "R1",
+    "x": 485,
+    "y": 625,
+    "rotation": 90,
+    "mirror": false,
+    "bbox": {
+     "minX": 480.5,
+     "minY": 614.5,
+     "maxX": 489.5,
+     "maxY": 635.5
+    },
+    "pins": [
+     {
+      "number": "1",
+      "name": "1",
+      "net": "+3V3",
+      "x": 485,
+      "y": 605
+     },
+     {
+      "number": "2",
+      "name": "2",
+      "net": "FB",
+      "x": 485,
+      "y": 645
+     }
+    ]
+   },
+   "pinStates": {}
+  },
+  {
+   "id": "U_BUCK",
+   "measurement": {
+    "designator": "U1",
+    "x": 435,
+    "y": 655,
+    "rotation": 0,
+    "mirror": false,
+    "bbox": {
+     "minX": 409.5,
+     "minY": 634.5,
+     "maxX": 460.5,
+     "maxY": 675.5
+    },
+    "pins": [
+     {
+      "number": "1",
+      "name": "EN",
+      "net": "VSYS_5V",
+      "x": 400,
+      "y": 665
+     },
+     {
+      "number": "2",
+      "name": "GND",
+      "net": "GND",
+      "x": 400,
+      "y": 655
+     },
+     {
+      "number": "3",
+      "name": "LX",
+      "net": "LX",
+      "x": 400,
+      "y": 645
+     },
+     {
+      "number": "4",
+      "name": "IN",
+      "net": "VSYS_5V",
+      "x": 470,
+      "y": 645
+     },
+     {
+      "number": "5",
+      "name": "FB",
+      "net": "FB",
+      "x": 470,
+      "y": 665
+     }
+    ]
+   },
+   "pinStates": {}
+  },
+  {
+   "id": "U_USB",
+   "measurement": {
+    "designator": "U2",
+    "x": 210,
+    "y": 305,
+    "rotation": 0,
+    "mirror": false,
+    "bbox": {
+     "minX": 174.5,
+     "minY": 259.5,
+     "maxX": 245.5,
+     "maxY": 350.5
+    },
+    "pins": [
+     {
+      "number": "1",
+      "name": "GND",
+      "net": "GND",
+      "x": 165,
+      "y": 340
+     },
+     {
+      "number": "10",
+      "name": "DSR#",
+      "net": "",
+      "x": 255,
+      "y": 280
+     },
+     {
+      "number": "11",
+      "name": "RI#",
+      "net": "",
+      "x": 255,
+      "y": 290
+     },
+     {
+      "number": "12",
+      "name": "DCD#",
+      "net": "",
+      "x": 255,
+      "y": 300
+     },
+     {
+      "number": "13",
+      "name": "DTR#",
+      "net": "DTR",
+      "x": 255,
+      "y": 310
+     },
+     {
+      "number": "14",
+      "name": "RTS#",
+      "net": "RTS",
+      "x": 255,
+      "y": 320
+     },
+     {
+      "number": "15",
+      "name": "R232",
+      "net": "",
+      "x": 255,
+      "y": 330
+     },
+     {
+      "number": "16",
+      "name": "VCC",
+      "net": "+3V3",
+      "x": 255,
+      "y": 340
+     },
+     {
+      "number": "2",
+      "name": "TXD",
+      "net": "U0RXD",
+      "x": 165,
+      "y": 330
+     },
+     {
+      "number": "3",
+      "name": "RXD",
+      "net": "U0TXD",
+      "x": 165,
+      "y": 320
+     },
+     {
+      "number": "4",
+      "name": "V3",
+      "net": "+3V3",
+      "x": 165,
+      "y": 310
+     },
+     {
+      "number": "5",
+      "name": "D+",
+      "net": "USB_DP",
+      "x": 165,
+      "y": 300
+     },
+     {
+      "number": "6",
+      "name": "D-",
+      "net": "USB_DM",
+      "x": 165,
+      "y": 290
+     },
+     {
+      "number": "7",
+      "name": "NC.",
+      "net": "",
+      "x": 165,
+      "y": 280
+     },
+     {
+      "number": "8",
+      "name": "OUT#",
+      "net": "",
+      "x": 165,
+      "y": 270
+     },
+     {
+      "number": "9",
+      "name": "CTS#",
+      "net": "",
+      "x": 255,
+      "y": 270
+     }
+    ]
+   },
+   "pinStates": {
+    "10": "nc",
+    "11": "nc",
+    "12": "nc",
+    "15": "nc",
+    "7": "nc",
+    "8": "nc",
+    "9": "nc"
+   }
+  }
+ ],
+ "netPolicies": {
+  "+3V3": "local_power",
+  "GND": "local_ground",
+  "VSYS_5V": "module_port",
+  "USB_DM": "module_port",
+  "USB_DP": "module_port",
+  "USB_VBUS": "module_port",
+  "+5V_TERM": "local_power",
+  "CC1": "direct",
+  "CC2": "direct",
+  "LX": "direct",
+  "FB": "direct",
+  "DTR": "direct",
+  "RTS": "direct",
+  "U0RXD": "direct",
+  "U0TXD": "direct"
+ },
+ "zones": [
+  {
+   "id": "PWR_IN",
+   "title": "PWR_IN",
+   "coreComponentId": "J_PWR",
+   "componentIds": [
+    "J_PWR",
+    "D_TERM",
+    "D_USB"
+   ]
+  },
+  {
+   "id": "BUCK",
+   "title": "BUCK",
+   "coreComponentId": "U_BUCK",
+   "componentIds": [
+    "U_BUCK",
+    "L_BUCK",
+    "R_FBT",
+    "R_FBB",
+    "C_IN",
+    "C_OUT",
+    "C_HF"
+   ]
+  },
+  {
+   "id": "USB_CONN",
+   "title": "USB_CONN",
+   "coreComponentId": "J_USB",
+   "componentIds": [
+    "J_USB",
+    "R_CC1",
+    "R_CC2"
+   ]
+  },
+  {
+   "id": "UART",
+   "title": "UART",
+   "coreComponentId": "U_USB",
+   "componentIds": [
+    "U_USB",
+    "C_VCC",
+    "D_ESD"
+   ]
+  }
+ ],
+ "maxCandidates": 200000
+}

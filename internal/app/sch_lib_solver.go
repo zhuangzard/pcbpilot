@@ -12,6 +12,16 @@ import (
 // The electrical graph and measured poses are immutable. Only translations,
 // routes and naming markers are searched, on a bounded five-raw grid.
 func planLibLayout(input libLayoutSource) (*schCompositionSource, error) {
+	return planLibLayoutWithReports(input, nil)
+}
+
+// libLayoutAestheticsReport is one module's Phase B beautify report.
+type libLayoutAestheticsReport struct {
+	Module string                     `json:"module"`
+	Report *SchematicAestheticsReport `json:"report"`
+}
+
+func planLibLayoutWithReports(input libLayoutSource, reports *[]libLayoutAestheticsReport) (*schCompositionSource, error) {
 	raw, err := json.Marshal(input)
 	if err != nil {
 		return nil, err
@@ -171,7 +181,7 @@ func planLibLayout(input libLayoutSource) (*schCompositionSource, error) {
 			}
 			hints[h.ComponentID] = h
 		}
-		input := SchematicLayoutInput{SchemaVersion: 1, CoreComponentID: intent.CoreComponentID, NetPolicies: netPolicies, Attachments: intent.Peripherals}
+		input := SchematicLayoutInput{SchemaVersion: 1, CoreComponentID: intent.CoreComponentID, NetPolicies: netPolicies, Attachments: intent.Peripherals, Aesthetics: src.Aesthetics}
 		for _, id := range members {
 			states := map[string]string{}
 			for _, pin := range byID[id].Pins {
@@ -186,6 +196,9 @@ func planLibLayout(input libLayoutSource) (*schCompositionSource, error) {
 		local, e := planSchematicLayoutWithBudget(input, &budget)
 		if e != nil {
 			return fail("module %s: %v", intent.ID, e)
+		}
+		if reports != nil && local.Aesthetics != nil {
+			*reports = append(*reports, libLayoutAestheticsReport{Module: intent.ID, Report: local.Aesthetics})
 		}
 		p := powerLayoutPlan{Placements: local.Placements, Wires: local.Wires, Flags: local.Flags}
 		result.Modules = append(result.Modules, schCompositionModule{ID: intent.ID, Title: intent.Title, Placements: p.Placements, Wires: p.Wires, Flags: p.Flags})

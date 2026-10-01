@@ -74,6 +74,8 @@ type SchematicLayoutInput struct {
 	Optimization    *SchematicLayoutOptimization `json:"optimization,omitempty"`
 	Routing         *SchematicRoutingOptions     `json:"routing,omitempty"`
 	MarkerAnchors   []SchematicMarkerAnchor      `json:"markerAnchors,omitempty"`
+	// Aesthetics enables the opt-in Phase B beautify pass (sch_layout_aesthetics.go).
+	Aesthetics *SchematicAestheticsOptions `json:"aesthetics,omitempty"`
 }
 type SchematicLayoutResult struct {
 	SchemaVersion      int                               `json:"schemaVersion"`
@@ -90,6 +92,7 @@ type SchematicLayoutResult struct {
 	OptimizationReport *SchematicOptimizationReport      `json:"optimizationReport,omitempty"`
 	FeasibilityReport  *SchematicFeasibilityReport       `json:"feasibilityReport,omitempty"`
 	Routing            *SchematicRoutingDiagnostics      `json:"routing,omitempty"`
+	Aesthetics         *SchematicAestheticsReport        `json:"aesthetics,omitempty"`
 }
 
 // PlanSchematicLayout is side-effect-free. No project, library, sheet, module
@@ -237,6 +240,14 @@ func planSchematicLayoutWithBudget(input SchematicLayoutInput, budget *int) (*Sc
 	}
 	if err := validateSchematicLayoutPeripheralDirect(result, input.CoreComponentID, peripheralNetRoles); err != nil {
 		return nil, err
+	}
+	if input.Aesthetics != nil {
+		// Opt-in beautify pass on the complete, validated zone. It keeps the
+		// incumbent unless every gate holds; re-run the ownership gate anyway.
+		result = applySchematicAesthetics(input, result, routing.policies, peripheralNetRoles, budget)
+		if err := validateSchematicLayoutPeripheralDirect(result, input.CoreComponentID, peripheralNetRoles); err != nil {
+			return nil, fmt.Errorf("aesthetics pass broke ownership (bug): %w", err)
+		}
 	}
 	if err := annotateSchematicMarkerAnchors(result, input.MarkerAnchors, ""); err != nil {
 		return nil, err

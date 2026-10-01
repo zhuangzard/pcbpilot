@@ -13,7 +13,8 @@ import (
 
 func newSchLayoutPlanCmd(stdout io.Writer) *cobra.Command {
 	var from, out, report string
-	var zones bool
+	var zones, nativeBus bool
+	var aesStyle string
 	c := &cobra.Command{Use: "layout-plan", Short: "Plan a measured component set offline without Lib or project metadata", Long: `Compute local placements, wires, markers and score from schemaVersion:1,
 coreComponentId, components:[{id,measurement,pinStates?,allowedRotations?}], netPolicies keyed by
 net NAME, optional attachments and maxCandidates. measurement contains explicit
@@ -58,7 +59,12 @@ zones or waive hard checks. Use sch zone-review to inspect without solving.
 Output contains independent local layouts/contentBounds and compact frame plans,
 not whole-page packing or rendered frames. Add identity/sheet evidence before compose/Apply.
 
+--aesthetics STYLE runs the opt-in schematic aesthetics Phase B beautify pass on each
+finished zone (same contract as sch lib-layout --aesthetics); the per-zone report is
+layout.aesthetics. Without it the output is unchanged.
+
 Example:
+  pcbpilot sch layout-plan --from measured-set.json --aesthetics balanced --out local-geometry.json
   pcbpilot sch layout-plan --from measured-set.json --out local-geometry.json --report report.json`, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 		if from == "" {
 			return fmt.Errorf("--from is required")
@@ -89,6 +95,9 @@ Example:
 		if zones {
 			var input SchematicZonesInput
 			input, err = decodeSchematicZonesInput(raw)
+			if err == nil && (aesStyle != "" || nativeBus) {
+				input.Aesthetics = schAesOptionsFromFlags(input.Aesthetics, aesStyle, nativeBus)
+			}
 			if err == nil {
 				phase = "zone-review"
 				var review *SchematicZoneReview
@@ -102,6 +111,9 @@ Example:
 		} else {
 			var input SchematicLayoutInput
 			input, err = decodeSchematicLayoutInput(raw)
+			if err == nil && (aesStyle != "" || nativeBus) {
+				input.Aesthetics = schAesOptionsFromFlags(input.Aesthetics, aesStyle, nativeBus)
+			}
 			if err == nil {
 				phase = "solve"
 				result, err = PlanSchematicLayout(input)
@@ -130,6 +142,8 @@ Example:
 		return os.WriteFile(out, raw, 0644)
 	}}
 	c.Flags().StringVar(&from, "from", "", "measured component-set JSON, without Lib metadata")
+	c.Flags().StringVar(&aesStyle, "aesthetics", "", "opt-in Phase B beautify pass per zone: functional | balanced | precision | auto (report in layout.aesthetics)")
+	c.Flags().BoolVar(&nativeBus, "native-bus", false, "with --aesthetics: add live-unverified native bus proposals for complete label lanes to the report (never applied)")
 	c.Flags().BoolVar(&zones, "zones", false, "plan explicitly owned per-core zones; unified spacing isolates per-zone budgets")
 	c.Flags().StringVar(&out, "out", "", "write local geometry only after validation; defaults to stdout")
 	c.Flags().StringVar(&report, "report", "", "write separate machine-readable diagnostics, including failed search evidence; failure still exits nonzero")

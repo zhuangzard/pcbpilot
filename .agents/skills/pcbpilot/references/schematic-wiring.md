@@ -152,7 +152,7 @@ stubs; `sch connect` stays for when you deliberately override the geometry.
 
 ---
 
-## 标签 vs 导线、总线与原理图美观度（只报告的软层）
+## 标签 vs 导线、总线与原理图美观度（软层：度量 + opt-in 生成）
 
 优先级固定：**连接正确性 > 可读性 > 美观**。以下规则只决定“同样正确的画法里选哪种”，
 不能为了好看移动已经正确的导线、改网名、拆核心/外围归属或放宽任何门禁。
@@ -197,3 +197,22 @@ pcbpilot sch aesthetics --project P --doc <page>        # 现场只读（live-un
 `skipped`（不算满分），布线组乘“已连引脚份额”（未连的引脚不能显得整齐）。权重 0、永远
 exit 0、不是门；分数只用来排 Phase B 生成器的改进，不用来签字。风格档与 `pcb aesthetics`
 同名（functional / balanced / precision / auto / custom），只改软目标。
+
+**生成（Phase B，opt-in）**：离线 `sch lib-layout --aesthetics STYLE` / `sch layout-plan [--zones]
+--aesthetics STYLE` 把上面的规则变成生成动作，每步过全部门禁、不过即回滚（流程与门禁细节见
+[auto-layout-sop.md](auto-layout-sop.md) §2「美化生成 Phase B」）：
+
+| 规则 | 生成动作 | 阈值（风格档 `generate`） |
+|---|---|---|
+| 少转折、少交叉 | trunk 重布：候选按 [异网交叉, 长度 + 转折代价] 预排；direct 网另走加权迷宫（`bendCostUnits` / `crossCostUnits`） | functional 10/40、balanced 20/80、precision 30/150 |
+| T 结点离拐点 ≥10、无四通 | 支路改落到岛上其他点（错开的 T）；被撞标记一并重放 | `junctionClearanceUnits` 10 |
+| 不穿本体/标签、同网不假交叉 | 标记重放 + 门禁（穿越、文字重叠计缺陷，先于总分） | — |
+| 落格 | 只在 5-unit 格生成；对齐位移本身取整到格 | — |
+| 长线 → 标签 | 仅标签策略网的非核心↔外围 trunk；拆后两岛各自就近命名 | `longWireUnits`/`longWireCrossings`、`labelSplit` |
+| 虚拟总线 | 同组标签统一方向 → 统一列 → ≥3 个时等节距（短外向 jog） | `busPitchUnits` 10 |
+| 行列对齐 | 同类外围平移吸附共享行/列，核心不动，只在空闲处 | `alignMoveUnits` 0 / 20 / 40 |
+
+自定义：`--style-file` 里的 `"generate":{…}` 覆盖以上键（范围校验；连接/归属/门禁类键仍拒绝）。
+实测（离线 fixture，balanced）：AMS1117 lib-layout 交叉 1→0、W5 0→100、总分 81.8→96.3；
+ESP32-v05 MCU 页 MCU 区缺陷 5→4、总分 50→71.6、PWR 页 BUCK 区缺陷 3→1。完整前后表与预览：
+`docs/reviews/2026-10-schematic-aesthetics/phaseB/`。

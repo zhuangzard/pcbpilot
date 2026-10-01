@@ -31,3 +31,17 @@ Known results (2026-09-28):
 
 Regression: `TestRouteOnlyMechHoleOnPartRefused`, `TestRouteOnlyNoOutlineNoPanic`,
 `TestESP32MiniIntentKeepsESDOnPath` (with `--place`).
+
+## Schematic zones (`zones-mcu.json`, `zones-pwr.json`)
+
+Offline `sch layout-plan --zones` inputs for the two schematic pages, used by the
+schematic aesthetics Phase B before/after evidence
+(`TestSchAesPhaseBArtifacts`, docs/reviews/2026-10-schematic-aesthetics/phaseB/).
+Derived mechanically by `derive-zones.py <sch-*.json> <groups*.json> <out>`:
+measured placements/pins/nets from the `sch-*.json` connectivity snapshot, one
+zone per `groups*.json` module, core = the member with the most pins, policies
+`local_ground` (GND*) / `local_power` (+…/VCC/VDD/VBUS/…V…) / `direct` (net inside
+one zone) / `module_port` (net spans zones); pins without a net are `nc`.
+This is a layout regression input, not a design answer (no BOM, no new nets).
+`zones-mcu.json` = `sch-950ae6609e91d753.json` + `groups2.json`;
+`zones-pwr.json` = `sch-905bb85957eaf435.json` + `groups1.json`.

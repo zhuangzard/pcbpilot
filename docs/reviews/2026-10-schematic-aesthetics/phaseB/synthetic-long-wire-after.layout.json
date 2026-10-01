@@ -1,0 +1,337 @@
+{
+ "schemaVersion": 0,
+ "componentIds": {
+  "R1": "r1",
+  "R2": "r2",
+  "U1": "core"
+ },
+ "pinStates": {
+  "core": null,
+  "r1": null,
+  "r2": null
+ },
+ "placements": [
+  {
+   "primitiveId": "",
+   "designator": "U1",
+   "x": 400,
+   "y": -200,
+   "rotation": 0,
+   "mirror": false,
+   "bbox": {
+    "minX": 380,
+    "minY": -220,
+    "maxX": 420,
+    "maxY": -180
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "",
+     "net": "GND",
+     "x": 400,
+     "y": -230,
+     "rotation": 270
+    },
+    {
+     "number": "2",
+     "name": "",
+     "net": "A",
+     "x": 370,
+     "y": -200,
+     "rotation": 180
+    },
+    {
+     "number": "3",
+     "name": "",
+     "net": "B",
+     "x": 430,
+     "y": -200,
+     "rotation": 0
+    }
+   ]
+  },
+  {
+   "primitiveId": "",
+   "designator": "R1",
+   "x": 0,
+   "y": 0,
+   "rotation": 0,
+   "mirror": false,
+   "bbox": {
+    "minX": -8.5,
+    "minY": -10.5,
+    "maxX": 8.5,
+    "maxY": 10.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "",
+     "net": "SIG",
+     "x": 0,
+     "y": 20,
+     "rotation": 90
+    },
+    {
+     "number": "2",
+     "name": "",
+     "net": "A",
+     "x": 0,
+     "y": -20,
+     "rotation": 270
+    }
+   ]
+  },
+  {
+   "primitiveId": "",
+   "designator": "R2",
+   "x": 800,
+   "y": 0,
+   "rotation": 0,
+   "mirror": false,
+   "bbox": {
+    "minX": 791.5,
+    "minY": -10.5,
+    "maxX": 808.5,
+    "maxY": 10.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "",
+     "net": "SIG",
+     "x": 800,
+     "y": 20,
+     "rotation": 90
+    },
+    {
+     "number": "2",
+     "name": "",
+     "net": "B",
+     "x": 800,
+     "y": -20,
+     "rotation": 270
+    }
+   ]
+  }
+ ],
+ "wires": [
+  {
+   "net": "A",
+   "points": [
+    [
+     0,
+     -20
+    ],
+    [
+     0,
+     -200
+    ]
+   ]
+  },
+  {
+   "net": "A",
+   "points": [
+    [
+     0,
+     -200
+    ],
+    [
+     370,
+     -200
+    ]
+   ]
+  },
+  {
+   "net": "B",
+   "points": [
+    [
+     800,
+     -20
+    ],
+    [
+     800,
+     -200
+    ]
+   ]
+  },
+  {
+   "net": "B",
+   "points": [
+    [
+     800,
+     -200
+    ],
+    [
+     430,
+     -200
+    ]
+   ]
+  },
+  {
+   "net": "SIG",
+   "points": [
+    [
+     0,
+     20
+    ],
+    [
+     0,
+     25
+    ]
+   ]
+  },
+  {
+   "net": "SIG",
+   "points": [
+    [
+     800,
+     20
+    ],
+    [
+     800,
+     25
+    ]
+   ]
+  }
+ ],
+ "flags": [
+  {
+   "net": "GND",
+   "kind": "ground",
+   "pinX": 400,
+   "pinY": -230,
+   "direction": "down",
+   "offset": 10
+  },
+  {
+   "net": "A",
+   "kind": "net_port_bi",
+   "pinX": 0,
+   "pinY": -100,
+   "direction": "left",
+   "offset": 10
+  },
+  {
+   "net": "B",
+   "kind": "net_port_bi",
+   "pinX": 800,
+   "pinY": -100,
+   "direction": "right",
+   "offset": 10
+  },
+  {
+   "net": "SIG",
+   "kind": "net_port_bi",
+   "pinX": 0,
+   "pinY": 25,
+   "direction": "left",
+   "offset": 10
+  },
+  {
+   "net": "SIG",
+   "kind": "net_port_bi",
+   "pinX": 800,
+   "pinY": 25,
+   "direction": "left",
+   "offset": 10
+  }
+ ],
+ "score": [
+  1160,
+  11,
+  0,
+  284182
+ ],
+ "candidatesUsed": 0,
+ "aesthetics": {
+  "style": "balanced",
+  "status": "improved",
+  "scoreBefore": 72.5,
+  "scoreAfter": 91.9,
+  "defectsBefore": 0,
+  "defectsAfter": 0,
+  "metricsBefore": {
+   "L1": 100,
+   "L2": 100,
+   "L3": 0,
+   "L6": 100,
+   "N1": 0,
+   "W1": 100,
+   "W2": 100,
+   "W3": 100,
+   "W4": 100,
+   "W5": 100,
+   "W6": 100,
+   "W7": 100,
+   "W8": 100,
+   "score": 72.5
+  },
+  "metricsAfter": {
+   "L1": 100,
+   "L2": 100,
+   "L3": 0,
+   "L6": 100,
+   "N1": 100,
+   "N2": 100,
+   "W1": 96.4,
+   "W2": 100,
+   "W3": 100,
+   "W4": 100,
+   "W5": 100,
+   "W6": 100,
+   "W7": 100,
+   "W8": 93.3,
+   "score": 91.9
+  },
+  "checkBefore": {
+   "lint-off-grid": 0,
+   "lint-overlap": 0,
+   "lint-pin-coincidence": 0,
+   "lint-tight": 0,
+   "marker-geometry": 0,
+   "reversed-net-flag": 0
+  },
+  "checkAfter": {
+   "lint-off-grid": 0,
+   "lint-overlap": 0,
+   "lint-pin-coincidence": 0,
+   "lint-tight": 0,
+   "marker-geometry": 0,
+   "reversed-net-flag": 0
+  },
+  "pinNetIdentical": true,
+  "connectivityIdentical": false,
+  "labelSplits": [
+   "SIG: 20-unit trunk [0 20]→[0 40] replaced by local labels"
+  ],
+  "passes": [
+   {
+    "pass": "marker",
+    "tried": 9,
+    "accepted": 0,
+    "rejected": {
+     "connectivity": 2,
+     "not-better": 7
+    }
+   },
+   {
+    "pass": "label-split",
+    "tried": 1,
+    "accepted": 1
+   },
+   {
+    "pass": "trunk",
+    "tried": 4,
+    "accepted": 0,
+    "rejected": {
+     "connectivity": 2,
+     "no-candidate": 2
+    }
+   }
+  ],
+  "evaluations": 145,
+  "priority": "connectivity \u003e readability \u003e aesthetics: every move re-passes geometry, nets, ownership and offline check/lint counts, else it is rolled back"
+ }
+}

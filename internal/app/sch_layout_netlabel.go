@@ -28,3 +28,12 @@ func libPortMarkerKind(policy string) string {
 	}
 	return "net_port_bi"
 }
+
+// libLabelSplitAllowed: may the Phase B beautify pass replace a long wire of
+// this (already ownership-promoted) policy by local labels? Only nets whose
+// policy is itself a naming policy qualify. direct/direct_label nets are real
+// wire trees by contract and never qualify; core↔peripheral links are kept
+// physically by the pass's fingerprint gate on top of this.
+func libLabelSplitAllowed(policy string) bool {
+	return libPortPolicy(policy) || policy == "local_power" || policy == "local_ground"
+}

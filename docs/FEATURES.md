@@ -24,6 +24,7 @@
 - PCB：`layout-lint`、`layout-score`、`pcb check` 与 DRC 分别报告布局、质量、制造和电气事实；它们不授权或拒绝普通 action。
 - PCB：`pcb aesthetics` 离线度量布局（P1–P9，含同构子电路对称检测）与布线（R1–R9）美观度，只报告、权重 0（2026-09 Phase A，见 `docs/reviews/2026-09-routing-aesthetics/`）。
 - 原理图：`sch aesthetics` 度量一页原理图的布线（W1–W8：转折、交叉、四通/同网歧义 X、共线重叠、T 结点、绕行比、穿本体/标签、落格）、版面（L1–L7：信号流向、标记朝向、行列对齐、间距、框整洁、文字重叠、均衡）与标签/总线（N1–N3：长线宜改标签、短程滥用标签、总线/虚拟总线泳道），只报告、权重 0、不是门；风格档与 `pcb aesthetics` 同名。离线快照（sch list / layout-plan / lib-layout / canonical）已离线验证；现场只读模式 `live-unverified`。`report design` 新增 §6C 原理图美观度（`--sch-snapshot`），不改结论与其他章节（2026-10 Phase A，见 `docs/reviews/2026-10-schematic-aesthetics/`）。
+- 原理图美观度生成（2026-10 Phase B，opt-in）：`sch lib-layout --aesthetics STYLE`、`sch layout-plan [--zones] --aesthetics STYLE` 在区求解通过后做对齐吸附、按转折/交叉代价重布线束（错开 T、去四通、去异网交叉）、标记重放、长线→局部标签（仅标签策略网，direct 与核心↔外围线永不拆）、虚拟总线泳道；每步过几何/网络/pin→net·NC·物理线岛/归属/离线 check·lint 门禁且 `sch aesthetics` 目标变好才保留，否则回滚；不加参数输出逐字节不变。离线验证（`docs/reviews/2026-10-schematic-aesthetics/phaseB/`）；现场 Apply 链路未单独验证（live-unverified）。`--native-bus` 只出 live-unverified 原生总线提议，不绘制。
 - 原理图原生总线：`schematic.bus.list/create/delete`（`sch bus list|create|delete`，官方 `sch_PrimitiveBus` @beta）**planned / live-unverified**——仅连接器离线单测与 CLI `--dry-run`，V3 3.2.x 与 V4 现场均未验证；API 无总线分支（bus entry）图元，成员接入走普通导线 + 网络标签。`sch bus candidates` 离线找索引网/SPI/I2C/UART/SDIO/MIPI/USB 组并评估“虚拟总线”标签泳道。
 - PCB 独立求解内核：公开 Go 包 `pkg/pcbrouting` 被晶振规划和 `pcb route solve/check` 共用，
   无额外 CLI 安装；当前为单层零过孔、直线/45°有界寻路与独立路径校验（离线能力）。

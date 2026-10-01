@@ -1,0 +1,358 @@
+{
+ "schemaVersion": 1,
+ "componentIds": {
+  "D1": "D_TERM",
+  "D2": "D_USB",
+  "J1": "J_PWR"
+ },
+ "pinStates": {
+  "D_TERM": null,
+  "D_USB": null,
+  "J_PWR": null
+ },
+ "placements": [
+  {
+   "primitiveId": "",
+   "designator": "J1",
+   "x": 0,
+   "y": 0,
+   "rotation": 0,
+   "mirror": false,
+   "bbox": {
+    "minX": -10.5,
+    "minY": -15.5,
+    "maxX": 10.5,
+    "maxY": 15.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1",
+     "net": "+5V_TERM",
+     "x": -20,
+     "y": 5
+    },
+    {
+     "number": "2",
+     "name": "2",
+     "net": "GND",
+     "x": -20,
+     "y": -5
+    }
+   ]
+  },
+  {
+   "primitiveId": "",
+   "designator": "D1",
+   "x": -55,
+   "y": 5,
+   "rotation": 0,
+   "mirror": false,
+   "bbox": {
+    "minX": -62.5,
+    "minY": -3.5,
+    "maxX": -49.5,
+    "maxY": 13.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "K",
+     "net": "VSYS_5V",
+     "x": -75,
+     "y": 5
+    },
+    {
+     "number": "2",
+     "name": "A",
+     "net": "+5V_TERM",
+     "x": -35,
+     "y": 5
+    }
+   ]
+  },
+  {
+   "primitiveId": "",
+   "designator": "D2",
+   "x": -105,
+   "y": 0,
+   "rotation": 0,
+   "mirror": false,
+   "bbox": {
+    "minX": -112.5,
+    "minY": -8.5,
+    "maxX": -99.5,
+    "maxY": 8.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "K",
+     "net": "VSYS_5V",
+     "x": -125,
+     "y": 0
+    },
+    {
+     "number": "2",
+     "name": "A",
+     "net": "USB_VBUS",
+     "x": -85,
+     "y": 0
+    }
+   ]
+  }
+ ],
+ "wires": [
+  {
+   "net": "VSYS_5V",
+   "points": [
+    [
+     -125,
+     0
+    ],
+    [
+     -130,
+     0
+    ]
+   ]
+  },
+  {
+   "net": "VSYS_5V",
+   "points": [
+    [
+     -130,
+     0
+    ],
+    [
+     -130,
+     10
+    ]
+   ]
+  },
+  {
+   "net": "VSYS_5V",
+   "points": [
+    [
+     -130,
+     10
+    ],
+    [
+     -80,
+     10
+    ]
+   ]
+  },
+  {
+   "net": "VSYS_5V",
+   "points": [
+    [
+     -80,
+     10
+    ],
+    [
+     -80,
+     5
+    ]
+   ]
+  },
+  {
+   "net": "VSYS_5V",
+   "points": [
+    [
+     -80,
+     5
+    ],
+    [
+     -75,
+     5
+    ]
+   ]
+  },
+  {
+   "net": "GND",
+   "points": [
+    [
+     -20,
+     -5
+    ],
+    [
+     -25,
+     -5
+    ]
+   ]
+  },
+  {
+   "net": "GND",
+   "points": [
+    [
+     -25,
+     -5
+    ],
+    [
+     -25,
+     -10
+    ]
+   ]
+  },
+  {
+   "net": "+5V_TERM",
+   "points": [
+    [
+     -35,
+     5
+    ],
+    [
+     -25,
+     5
+    ]
+   ]
+  },
+  {
+   "net": "+5V_TERM",
+   "points": [
+    [
+     -25,
+     5
+    ],
+    [
+     -20,
+     5
+    ]
+   ]
+  },
+  {
+   "net": "+5V_TERM",
+   "points": [
+    [
+     -25,
+     5
+    ],
+    [
+     -25,
+     10
+    ]
+   ]
+  },
+  {
+   "net": "USB_VBUS",
+   "points": [
+    [
+     -85,
+     0
+    ],
+    [
+     -80,
+     0
+    ]
+   ]
+  },
+  {
+   "net": "USB_VBUS",
+   "points": [
+    [
+     -80,
+     0
+    ],
+    [
+     -80,
+     -5
+    ]
+   ]
+  }
+ ],
+ "flags": [
+  {
+   "net": "GND",
+   "kind": "ground",
+   "pinX": -25,
+   "pinY": -10,
+   "direction": "down",
+   "offset": 10,
+   "anchor": {
+    "type": "wire_tree",
+    "zoneId": "PWR_IN",
+    "net": "GND",
+    "x": -25,
+    "y": -10
+   }
+  },
+  {
+   "net": "+5V_TERM",
+   "kind": "power",
+   "pinX": -25,
+   "pinY": 10,
+   "direction": "up",
+   "offset": 10,
+   "anchor": {
+    "type": "wire_tree",
+    "zoneId": "PWR_IN",
+    "net": "+5V_TERM",
+    "x": -25,
+    "y": 10
+   }
+  },
+  {
+   "net": "VSYS_5V",
+   "kind": "net_port_bi",
+   "pinX": -105,
+   "pinY": 10,
+   "direction": "up",
+   "offset": 10,
+   "anchor": {
+    "type": "wire_tree",
+    "zoneId": "PWR_IN",
+    "net": "VSYS_5V",
+    "x": -105,
+    "y": 10
+   }
+  },
+  {
+   "net": "USB_VBUS",
+   "kind": "net_port_bi",
+   "pinX": -80,
+   "pinY": -5,
+   "direction": "down",
+   "offset": 10,
+   "anchor": {
+    "type": "wire_tree",
+    "zoneId": "PWR_IN",
+    "net": "USB_VBUS",
+    "x": -80,
+    "y": -5
+   }
+  }
+ ],
+ "score": [
+  155,
+  16,
+  0,
+  37962
+ ],
+ "candidatesUsed": 1010,
+ "search": {
+  "strategy": "checkpoint-local-repair-v1",
+  "backtracks": 0,
+  "repairAttempts": 0,
+  "targetedRelocations": 0,
+  "movedComponents": [],
+  "branchLimit": 100000,
+  "conflictPasses": 1,
+  "skippedCheckpoints": 0,
+  "placementFailures": 0,
+  "dependencyShellJumps": 0,
+  "checkpointAlternatives": {
+   "D_TERM": 1,
+   "D_USB": 1
+  }
+ },
+ "routing": {
+  "strategy": "directional-grid-a-star-v1",
+  "maxExpandedNodes": 200000,
+  "maxNodesPerAttempt": 50000,
+  "expandedNodes": 0,
+  "maxReroutes": 4,
+  "reroutes": 0,
+  "completedJoins": 0,
+  "templateCacheHits": 0
+ }
+}

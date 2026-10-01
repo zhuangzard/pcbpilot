@@ -1,5 +1,31 @@
 # Changelog
 
+## [Unreleased]
+
+### Schematic aesthetics Phase B (generation, opt-in)
+
+No connector change; offline CLI only. Without the new flag every output is byte-identical.
+
+- **`sch lib-layout --aesthetics STYLE` / `sch layout-plan [--zones] --aesthetics STYLE`** (functional | balanced |
+  precision | auto, or `"aesthetics":{"style":…}` in the source) runs a beautify pass on each finished, validated zone:
+  bounded row/column snaps of peripherals (core fixed, free space only, wire forest regenerated); trunk rip-up and
+  re-route with bend/crossing costs (direct nets also through the maze with weighted cost) that re-lands branches as
+  staggered T junctions ≥10 units from bends and removes four-way junctions and foreign crossings; marker relocation
+  (off wires/labels, power up, ground down, ports horizontal); long non-direct wires → local labels (never a direct net,
+  never a core↔peripheral wire); virtual bus lanes (same direction, one column, equal pitch) for indexed / SPI / I2C /
+  UART / SDIO / MIPI groups.
+- **Every move is gated and rolled back otherwise**: `validateLibGeometry` + `validateSchCompositionNets`, identical
+  pin→net / NC / physical wire islands, the peripheral-direct ownership gate, offline sch check / layout-lint counts not
+  increased, and the `sch aesthetics` objective improved (readability defects first, then the style score). Reports in
+  `layout.aesthetics` / `--aesthetics-report`. Work is bounded by the style's `generate.maxEvaluations` (deterministic).
+- **Native buses stay opt-in and live-unverified**: `--native-bus` only adds a proposal (name + line) to the report for
+  complete lanes; nothing is drawn or applied.
+- **Style profiles** gain a `generate` block (`junctionClearanceUnits`, `bendCostUnits`, `crossCostUnits`, `labelSplit`,
+  `busPitchUnits`, `alignMoveUnits`, `maxEvaluations`), overridable via `--style-file`.
+- Offline evidence (balanced): AMS1117 lib-layout crossings 1 → 0, T-junction quality W5 0 → 100; ESP32-v05 MCU-page MCU
+  zone defects 5 → 4, PWR-page BUCK zone 3 → 1. Before/after tables and SVG/PNG previews in `docs/reviews/2026-10-schematic-aesthetics/phaseB/`;
+  `internal/app/testdata/esp32-v05/zones-{mcu,pwr}.json` are new derived `layout-plan --zones` inputs.
+
 ## [0.7.0] — 2026-10-01
 
 **Local web console, aesthetics measurement, and core electrical/safety routing fixes.** The connector code is

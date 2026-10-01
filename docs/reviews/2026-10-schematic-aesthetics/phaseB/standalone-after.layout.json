@@ -1,0 +1,275 @@
+{
+ "schemaVersion": 1,
+ "componentIds": {
+  "R1": "peripheral",
+  "U1": "anchor"
+ },
+ "pinStates": {
+  "anchor": {
+   "3": "nc"
+  },
+  "peripheral": null
+ },
+ "placements": [
+  {
+   "primitiveId": "",
+   "designator": "U1",
+   "x": 0,
+   "y": 0,
+   "rotation": 0,
+   "mirror": false,
+   "bbox": {
+    "minX": -20,
+    "minY": -20,
+    "maxX": 20,
+    "maxY": 20
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "",
+     "net": "SUPPLY",
+     "x": 30,
+     "y": 0
+    },
+    {
+     "number": "2",
+     "name": "",
+     "net": "RETURN",
+     "x": 0,
+     "y": -30
+    },
+    {
+     "number": "3",
+     "name": "",
+     "net": "",
+     "x": -30,
+     "y": 10
+    }
+   ]
+  },
+  {
+   "primitiveId": "",
+   "designator": "R1",
+   "x": 65,
+   "y": 0,
+   "rotation": 0,
+   "mirror": false,
+   "bbox": {
+    "minX": 55,
+    "minY": -10,
+    "maxX": 75,
+    "maxY": 10
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "",
+     "net": "SUPPLY",
+     "x": 45,
+     "y": 0
+    },
+    {
+     "number": "2",
+     "name": "",
+     "net": "RETURN",
+     "x": 85,
+     "y": 0
+    }
+   ]
+  }
+ ],
+ "wires": [
+  {
+   "net": "SUPPLY",
+   "points": [
+    [
+     30,
+     0
+    ],
+    [
+     45,
+     0
+    ]
+   ]
+  },
+  {
+   "net": "RETURN",
+   "points": [
+    [
+     85,
+     0
+    ],
+    [
+     90,
+     0
+    ]
+   ]
+  },
+  {
+   "net": "RETURN",
+   "points": [
+    [
+     90,
+     0
+    ],
+    [
+     90,
+     -10
+    ]
+   ]
+  }
+ ],
+ "flags": [
+  {
+   "net": "RETURN",
+   "kind": "ground",
+   "pinX": 0,
+   "pinY": -30,
+   "direction": "down",
+   "offset": 10,
+   "anchor": {
+    "type": "pin",
+    "componentId": "anchor",
+    "pinNumber": "2",
+    "net": "RETURN"
+   }
+  },
+  {
+   "net": "SUPPLY",
+   "kind": "power",
+   "pinX": 40,
+   "pinY": 0,
+   "direction": "up",
+   "offset": 15,
+   "anchor": {
+    "type": "wire_tree",
+    "net": "SUPPLY",
+    "x": 40,
+    "y": 0
+   }
+  },
+  {
+   "net": "RETURN",
+   "kind": "ground",
+   "pinX": 90,
+   "pinY": -10,
+   "direction": "down",
+   "offset": 10,
+   "anchor": {
+    "type": "wire_tree",
+    "net": "RETURN",
+    "x": 90,
+    "y": -10
+   }
+  }
+ ],
+ "score": [
+  65,
+  6,
+  0,
+  15096.5
+ ],
+ "candidatesUsed": 210,
+ "search": {
+  "strategy": "checkpoint-local-repair-v1",
+  "backtracks": 0,
+  "repairAttempts": 0,
+  "targetedRelocations": 0,
+  "movedComponents": [],
+  "branchLimit": 200000,
+  "conflictPasses": 1,
+  "skippedCheckpoints": 0,
+  "placementFailures": 0,
+  "dependencyShellJumps": 0,
+  "checkpointAlternatives": {
+   "peripheral": 1
+  }
+ },
+ "routing": {
+  "strategy": "directional-grid-a-star-v1",
+  "maxExpandedNodes": 200000,
+  "maxNodesPerAttempt": 50000,
+  "expandedNodes": 0,
+  "maxReroutes": 4,
+  "reroutes": 0,
+  "completedJoins": 0,
+  "templateCacheHits": 0
+ },
+ "aesthetics": {
+  "style": "balanced",
+  "status": "improved",
+  "scoreBefore": 78.9,
+  "scoreAfter": 99.6,
+  "defectsBefore": 1,
+  "defectsAfter": 0,
+  "metricsBefore": {
+   "L1": 66.7,
+   "L2": 100,
+   "L6": 0,
+   "N1": 100,
+   "W1": 100,
+   "W2": 100,
+   "W3": 100,
+   "W4": 100,
+   "W5": 0,
+   "W6": 100,
+   "W7": 100,
+   "W8": 75,
+   "score": 78.9
+  },
+  "metricsAfter": {
+   "L1": 100,
+   "L2": 100,
+   "L6": 100,
+   "N1": 100,
+   "W1": 100,
+   "W2": 100,
+   "W3": 100,
+   "W4": 100,
+   "W5": 100,
+   "W6": 100,
+   "W7": 100,
+   "W8": 94,
+   "score": 99.6
+  },
+  "checkBefore": {
+   "lint-off-grid": 0,
+   "lint-overlap": 0,
+   "lint-pin-coincidence": 0,
+   "lint-tight": 0,
+   "marker-geometry": 0,
+   "reversed-net-flag": 0
+  },
+  "checkAfter": {
+   "lint-off-grid": 0,
+   "lint-overlap": 0,
+   "lint-pin-coincidence": 0,
+   "lint-tight": 0,
+   "marker-geometry": 0,
+   "reversed-net-flag": 0
+  },
+  "pinNetIdentical": true,
+  "connectivityIdentical": true,
+  "passes": [
+   {
+    "pass": "trunk",
+    "tried": 3,
+    "accepted": 1,
+    "rejected": {
+     "not-better": 2
+    }
+   },
+   {
+    "pass": "marker",
+    "tried": 6,
+    "accepted": 1,
+    "rejected": {
+     "not-better": 5
+    }
+   }
+  ],
+  "evaluations": 155,
+  "priority": "connectivity \u003e readability \u003e aesthetics: every move re-passes geometry, nets, ownership and offline check/lint counts, else it is rolled back"
+ }
+}

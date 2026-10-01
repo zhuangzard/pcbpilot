@@ -1,0 +1,207 @@
+{
+ "schemaVersion": 0,
+ "componentIds": {
+  "U1": "core"
+ },
+ "pinStates": {
+  "core": null
+ },
+ "placements": [
+  {
+   "primitiveId": "",
+   "designator": "U1",
+   "x": 0,
+   "y": 0,
+   "rotation": 0,
+   "mirror": false,
+   "bbox": {
+    "minX": -30,
+    "minY": -50,
+    "maxX": 30,
+    "maxY": 50
+   },
+   "pins": [
+    {
+     "number": "9",
+     "name": "",
+     "net": "GND",
+     "x": 0,
+     "y": -60,
+     "rotation": 270
+    },
+    {
+     "number": "1",
+     "name": "",
+     "net": "D0",
+     "x": 40,
+     "y": 30,
+     "rotation": 0
+    },
+    {
+     "number": "2",
+     "name": "",
+     "net": "D1",
+     "x": 40,
+     "y": 10,
+     "rotation": 0
+    },
+    {
+     "number": "3",
+     "name": "",
+     "net": "D2",
+     "x": 40,
+     "y": -10,
+     "rotation": 0
+    },
+    {
+     "number": "4",
+     "name": "",
+     "net": "D3",
+     "x": 40,
+     "y": -30,
+     "rotation": 0
+    }
+   ]
+  }
+ ],
+ "wires": [],
+ "flags": [
+  {
+   "net": "GND",
+   "kind": "ground",
+   "pinX": 0,
+   "pinY": -60,
+   "direction": "down",
+   "offset": 10
+  },
+  {
+   "net": "D1",
+   "kind": "net_port_bi",
+   "pinX": 40,
+   "pinY": 10,
+   "direction": "right",
+   "offset": 30
+  },
+  {
+   "net": "D3",
+   "kind": "net_port_bi",
+   "pinX": 40,
+   "pinY": -30,
+   "direction": "right",
+   "offset": 30
+  },
+  {
+   "net": "D0",
+   "kind": "net_port_bi",
+   "pinX": 40,
+   "pinY": 30,
+   "direction": "right",
+   "offset": 30
+  },
+  {
+   "net": "D2",
+   "kind": "net_port_bi",
+   "pinX": 40,
+   "pinY": -10,
+   "direction": "right",
+   "offset": 30
+  }
+ ],
+ "score": [
+  130,
+  5,
+  0,
+  26723.25
+ ],
+ "candidatesUsed": 0,
+ "aesthetics": {
+  "style": "balanced",
+  "status": "improved",
+  "scoreBefore": 95,
+  "scoreAfter": 100,
+  "defectsBefore": 0,
+  "defectsAfter": 0,
+  "metricsBefore": {
+   "L1": 100,
+   "L2": 100,
+   "L6": 100,
+   "N1": 100,
+   "N3": 50,
+   "W1": 100,
+   "W2": 100,
+   "W3": 100,
+   "W4": 100,
+   "W5": 100,
+   "W6": 100,
+   "W7": 100,
+   "W8": 100,
+   "score": 95
+  },
+  "metricsAfter": {
+   "L1": 100,
+   "L2": 100,
+   "L6": 100,
+   "N1": 100,
+   "N3": 100,
+   "W1": 100,
+   "W2": 100,
+   "W3": 100,
+   "W4": 100,
+   "W5": 100,
+   "W6": 100,
+   "W7": 100,
+   "W8": 100,
+   "score": 100
+  },
+  "checkBefore": {
+   "lint-off-grid": 0,
+   "lint-overlap": 0,
+   "lint-pin-coincidence": 0,
+   "lint-tight": 0,
+   "marker-geometry": 0,
+   "reversed-net-flag": 0
+  },
+  "checkAfter": {
+   "lint-off-grid": 0,
+   "lint-overlap": 0,
+   "lint-pin-coincidence": 0,
+   "lint-tight": 0,
+   "marker-geometry": 0,
+   "reversed-net-flag": 0
+  },
+  "pinNetIdentical": true,
+  "connectivityIdentical": true,
+  "passes": [
+   {
+    "pass": "marker",
+    "tried": 10,
+    "accepted": 2,
+    "rejected": {
+     "not-better": 8
+    }
+   }
+  ],
+  "evaluations": 100,
+  "busLanes": [
+   {
+    "group": "D[0:3]",
+    "kind": "indexed",
+    "members": [
+     "D0",
+     "D1",
+     "D2",
+     "D3"
+    ],
+    "markers": 4,
+    "direction": "right",
+    "axis": "x",
+    "column": 70,
+    "pitch": 20,
+    "pitchCV": 0,
+    "aligned": 1,
+    "sameDir": 1
+   }
+  ],
+  "priority": "connectivity \u003e readability \u003e aesthetics: every move re-passes geometry, nets, ownership and offline check/lint counts, else it is rolled back"
+ }
+}

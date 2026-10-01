@@ -71,3 +71,33 @@ pcbpilot sch aesthetics --snapshot pkg/schaes/testdata/synthetic/esp32-mcu-point
    锚点份额低（多数器件锚点在 5 而非 10 的倍数上）。canonical 缺导线，所以分数只覆盖 3–5 项，判定恒为 `incomplete`。
 5. **防刷分**：`TestUnwiringNeverHelps`——删掉全部导线后布线组记 0、总分下降；删一半导线已连份额必降。
 6. **风格档**：precision 对 W1/W2/W3/L2/L3/N3 加权，好项越多分可能越高——跨档分数不可比，只在同档内比较。
+
+## Phase B 生成前后（2026-10）
+
+Phase A 的度量、阈值、黄金表**未改**（上表仍由 `golden_test.go` 锁定）；风格档只新增 `generate` 块（生成阈值与预算），
+不影响任何分数。Phase B 是 opt-in 美化 pass（`sch lib-layout|layout-plan --aesthetics STYLE`），下表为 balanced 档
+同一输入“不加 / 加 `--aesthetics balanced`”的前后对比，由 `TestSchAesPhaseBArtifacts` 生成（预览与原始数据在
+[phaseB/](phaseB/README.md)）。
+
+| fixture | score | defects | W1 | W2 | W3 | W4 | W5 | W6 | W7 | W8 | L1 | L2 | L3 | L4 | L6 | L7 | N1 | N2 | N3 | connectivity | check/lint | status | evals |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| ams1117-lib-layout | 81.8→96.3 | 1→0 | 85→95 | 60→100 | 100 | 100 | 0→100 | 100 | 100 | 82→98 | 100 | 100 | 0→67 | – | 100 | 77→79 | 100 | – | – | pin→net ✓, islands ✓ | wire-crossing 1→0 | improved | 415 |
+| standalone | 78.9→99.6 | 1→0 | 100 | 100 | 100 | 100 | 0→100 | 100 | 100 | 75→94 | 67→100 | 100 | – | – | 0→100 | – | 100 | – | – | pin→net ✓, islands ✓ | = | improved | 155 |
+| buck-zone | 79.2→85.0 | 7→4 | 88→90 | 30→65 | 100 | 100 | 67→87 | 98→93 | 76→88 | 82→84 | 33→67 | 77 | 75 | 53 | 44 | 100 | 100 | – | – | pin→net ✓, islands ✓ | wire-crossing 4→2 | improved | 696 |
+| mcu-zone | 63.8→66.6 | 21→14 | 68→72 | 0 | 100 | 100 | 56→69 | 100→86 | 74→91 | 82→83 | 20→40 | 86→95 | 45 | 100 | 100 | 100 | 0 | – | 50 | pin→net ✓, islands ✓ | wire-crossing 18→13 | improved | 947 |
+| esp32-mcu-mcu | 50.0→71.6 | 5→4 | 86→80 | 16→37 | 100 | 100 | 12→75 | 100→96 | 100 | 81 | 0→67 | 75→81 | 0 | – | 9 | 88 | 0→100 | – | 25→50 | pin→net ✓, islands ✓ | wire-crossing 4→3 | improved | 857 |
+| esp32-mcu-led | 80.8→98.9 | 0→0 | 100 | 100 | 100 | 100 | 0→100 | 100 | 100 | 85→83 | 0→100 | 80→100 | – | – | 100 | – | 100 | – | – | pin→net ✓, islands ✓ | = | improved | 174 |
+| esp32-mcu-autodl | 93.4→97.1 | 0→0 | 100→95 | 100 | 100 | 100 | 100 | 100 | 100 | 80→93 | – | 58→100 | 100 | – | 100 | 71 | 100 | – | – | pin→net ✓, islands ✓ | = | improved | 738 |
+| esp32-mcu-key_boot | 90.0→100.0 | 0→0 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 0→100 | 100 | – | – | 100 | – | 100 | – | – | pin→net ✓, islands ✓ | = | improved | 52 |
+| esp32-mcu-key_rst | 90.0→100.0 | 0→0 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 0→100 | 100 | – | – | 100 | – | 100 | – | – | pin→net ✓, islands ✓ | = | improved | 52 |
+| esp32-pwr-pwr_in | 89.2→94.8 | 0→0 | 75 | 100 | 100 | 100 | 50→100 | 100 | 100 | 83→82 | 100 | 67→100 | 67 | – | 100 | – | 100 | – | – | pin→net ✓, islands ✓ | = | improved | 356 |
+| esp32-pwr-buck | 75.4→86.7 | 3→1 | 96→75 | 76 | 75→100 | 100 | 60→86 | 100 | 100 | 75 | 14→71 | 100 | 29 | – | 0→100 | 69 | 100 | – | – | pin→net ✓, islands ✓ | = | improved | 1313 |
+| esp32-pwr-usb_conn | 43.8→50.6 | 17→14 | 61→67 | 0 | 100 | 100 | 20→40 | 0→21 | 36→47 | 83→84 | 33 | 85→92 | 0 | – | 100 | – | 0 | – | 25→50 | pin→net ✓, islands ✓ | wire-crossing 12→10 | improved | 418 |
+| esp32-pwr-uart | 67.1→72.5 | 5→5 | 93→96 | 53 | 100 | 100 | 60→80 | 100 | 43→39 | 80→81 | 20 | 84→90 | 0 | – | 100 | – | 100 | – | 25→62 | pin→net ✓, islands ✓ | = | improved | 631 |
+| synthetic-long-wire | 72.5→91.9 | 0→0 | 100→96 | 100 | 100 | 100 | 100 | 100 | 100 | 100→93 | 100 | 100 | 0 | – | 100 | – | 0→100 | –→100 | – | pin→net ✓, islands split by label (B2) | = | improved | 145 |
+| synthetic-bus-lane | 95.0→100.0 | 0→0 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | 100 | – | – | 100 | – | 100 | – | 50→100 | pin→net ✓, islands ✓ | = | improved | 100 |
+
+验收（`TestSchAesAMS1117Acceptance` 锁定）：AMS1117 lib-layout 交叉 1 → 0、W5 0 → 100（要求 ≥ 75）、pin→net/NC/物理线岛
+不变、离线 check/lint 无新增、compose 校验通过、两次运行结果相同。不加 `--aesthetics` 时输出与 Phase A fixture
+逐字节一致（`TestSchAesOffByDefaultIsUnchanged`）。B2/B3 负例与正例：`TestSchAesLongWireBecomesLabelsOnlyWhenPolicyAllows`
+（direct 网、核心↔外围线永不拆）、`TestSchAesBusLaneAlignsLabels`（N3 50 → 100；原生总线只出 live-unverified 提议）。

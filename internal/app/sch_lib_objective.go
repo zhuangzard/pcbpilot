@@ -154,3 +154,31 @@ func libAlignedCandidateLess(a, b *powerLayoutPlan, pair libAttachmentPair) bool
 	}
 	return libCandidateLess(a, b)
 }
+
+// libAesObjective is the Phase B beautify objective (sch_layout_aesthetics.go).
+// It never enters libCandidateScore/libCandidateLess: placement feasibility
+// and the historical objective stay authoritative. Defects are readability
+// counts measured by pkg/schaes on the same geometry — strict crossings
+// (W2), four-way/ambiguous junctions (W3), collinear overlaps (W4), wires
+// through bodies/markers/text (W7) and text overlaps (L6). A candidate may
+// never increase any single defect class; fewer defects in total wins; at
+// equal defects the higher profile score wins by a margin, never a tie.
+type libAesObjective struct {
+	Defects int     `json:"defects"`
+	Classes [5]int  `json:"classes"` // W2, W3, W4, W7, L6
+	Score   float64 `json:"score"`
+}
+
+const libAesScoreMargin = 0.05
+
+func (a libAesObjective) better(b libAesObjective) bool {
+	for i := range a.Classes {
+		if a.Classes[i] > b.Classes[i] {
+			return false
+		}
+	}
+	if a.Defects != b.Defects {
+		return a.Defects < b.Defects
+	}
+	return a.Score > b.Score+libAesScoreMargin
+}

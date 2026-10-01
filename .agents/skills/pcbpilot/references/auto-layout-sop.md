@@ -62,6 +62,25 @@ pcbpilot sch sheet-geometry --project <project> --json
 解出；10 件 SY8089 区 1.4 s。小区（< 6 件外围）仍走原搜索，结果不变。回归见
 `internal/app/sch_layout_bench_test.go`。
 
+**美化生成 Phase B（opt-in，2026-10）**：`sch layout-plan [--zones] --aesthetics STYLE` 与
+`sch lib-layout --aesthetics STYLE [--aesthetics-report aes.json]`（STYLE = functional | balanced |
+precision | auto，或源 JSON 的 `"aesthetics":{"style":…}`）在每个区**求解并通过全部门禁之后**跑一遍
+美化：① 对齐（同类外围平移吸附到共享行/列，≤ `alignMoveUnits`，核心不动、只在空闲处，整片线重建）；
+② 线束重布（拆一段 trunk 连同本岛标记、必要时连同被新线撞到的标记，按转折/交叉代价重走，可把支路
+改落到干净的 T 点，消除四通、拥挤 T、异网交叉）；③ 标记重放（离开导线/位号、电源朝上、地朝下、
+端口水平）；④ 长线 → 局部标签（仅 `module_port`/`net_label`/`local_power`/`local_ground`，`direct`
+永不，任何核心↔外围的真实线永不拆）；⑤ 虚拟总线泳道（同组标签同向、同列、等节距）。**每一步**
+都必须同时满足：`validateLibGeometry` + `validateSchCompositionNets`、pin→net/NC/物理线岛不变（④只
+允许拆非 direct 且不跨核心/外围的岛）、外围直连归属门、离线 check/lint 计数（marker 几何、反向旗、
+交叉、悬空、零长、overlap/pin 重合/tight/off-grid）不增加、`sch aesthetics` 目标变好（先少可读性
+缺陷：W2 交叉 + W3 四通/歧义 X + W4 共线重叠 + W7 穿越 + L6 文字重叠，再比风格档总分）；否则丢弃
+（回滚），在位结果永不丢。不加 `--aesthetics` 时输出逐字节不变。报告在 `layout.aesthetics`（lib-layout
+写 `--aesthetics-report`）：前后分数、缺陷、逐项、check/lint 计数、`connectivityIdentical`、每类候选的
+尝试/接受/拒绝原因。预算由风格档 `generate.maxEvaluations` 决定（确定性，与机器速度无关）；密集区
+常因无空闲位置而拒绝对齐（拒绝原因记 `reroute`/`check`），属正常。原生总线只在 `--native-bus` 时作为
+**live-unverified 提议**写进报告，从不画；现场验证清单通过前不得 `sch bus create`。证据与前后表见
+`docs/reviews/2026-10-schematic-aesthetics/phaseB/`。
+
 从设计意图生成 zones 源用 `sch zones-derive`（离线）：`--parts` 为每件的功能区与引脚连接
 （按引脚号或符号引脚名；只有数字名的符号用 `{"pin","source"}` 显式覆盖并写依据），`--list`/
 `--designators` 为临时页 0° 实测，`--rotations` 为实测位号姿态，`--power/--ground` 声明电源/地网。
@@ -210,7 +229,9 @@ diagnostic/blocked/partial 布局；先修复源数据、采集或算法，再�
 5. 可选、只报告：对离线 `layout-plan` / `lib-layout` 输出和保存后的 `sch list --include-pins
    --include-bbox --include-wires` 回读各跑一次 `sch aesthetics --snapshot …`，两次结果一并保留。
    它在 1–4 全部通过之后才有意义，权重 0、不是门；发现的交叉、四通结点、长线、短程标签、
-   标签泳道不齐等只回到源数据/规划算法（Phase B 生成器）修复后重算，不在现场逐根挪线。
+   标签泳道不齐等只回到源数据/规划算法（Phase B 生成器：离线重算时加 `--aesthetics STYLE`）修复后
+   重算，不在现场逐根挪线。美化后的源同样走 compose → Apply → 保存重载 → 回读，前后两份
+   `sch aesthetics` 与 `layout.aesthetics` 报告一并保留。
 
 只整理已有连线的小范围区域时，可按 [schematic-placement.md](schematic-placement.md)
 选带连接的移动工具；先记录源目标与变更，完成后同步源数据并保存前后 topology/NC/几何对照。

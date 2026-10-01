@@ -29,10 +29,13 @@ type libLayoutSource struct {
 	Measurements  []powerLayoutPlacement `json:"measurements"`
 	LayoutModules []libLayoutModule      `json:"layoutModules"`
 	MaxCandidates int                    `json:"maxCandidates,omitempty"`
+	// Aesthetics: opt-in Phase B beautify pass per module (see layout-plan).
+	Aesthetics *SchematicAestheticsOptions `json:"aesthetics,omitempty"`
 }
 
 func newSchLibLayoutCmd(stdout, stderr io.Writer) *cobra.Command {
-	var from, out string
+	var from, out, aesStyle, aesReport string
+	var nativeBus bool
 	c := &cobra.Command{Use: "lib-layout", Short: "Calculate Lib placement and wiring offline from canonical nets and measured pins", Long: `Plan translation-only modules from a declared core on a 5-raw grid. Input contains
 schemaVersion:1, connectivity, sheet, keepouts, measurements and layoutModules.
 Each layoutModule declares id/title/coreComponentId and netPolicies keyed by netId:
@@ -50,8 +53,20 @@ markers are assigned ground, power, then signals. Optional maxCandidates limits 
 without writing output. Output is a validated source for sch compose. Naming markers are local for power
 and ground islands; direct/module_port nets form an actual wire tree.
 
+--aesthetics STYLE (functional|balanced|precision|auto; or "aesthetics":{"style":…} in
+the input) runs the opt-in Phase B beautify pass on each finished module: bend/
+crossing-aware trunk re-routes, staggered T junctions ≥10 units from bends, no
+four-way junctions, marker relocation off wires/labels, long non-direct wires →
+local labels, virtual bus lanes and bounded row/column snaps. A move is kept
+only if geometry, pin→net/NC, physical islands, ownership and the offline
+sch check / layout-lint counts are unchanged-or-better and sch aesthetics
+improves; otherwise it is rolled back. Without the flag the output is
+unchanged. --native-bus adds live-unverified native bus proposals to the
+report only (never applied).
+
 Examples:
   pcbpilot sch lib-layout --from layout-input.json --out composition.json
+  pcbpilot sch lib-layout --from layout-input.json --aesthetics balanced --aesthetics-report aes.json --out composition.json
   pcbpilot sch compose --from composition.json --out plan.json`, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		if from == "" {
 			return fmt.Errorf("--from is required")
@@ -64,7 +79,17 @@ Examples:
 		if e != nil {
 			return e
 		}
-		result, e := planLibLayout(src)
+		if aesStyle != "" || nativeBus {
+			if src.Aesthetics == nil {
+				src.Aesthetics = &SchematicAestheticsOptions{}
+			}
+			if aesStyle != "" {
+				src.Aesthetics.Style = aesStyle
+			}
+			src.Aesthetics.NativeBus = src.Aesthetics.NativeBus || nativeBus
+		}
+		var reports []libLayoutAestheticsReport
+		result, e := planLibLayoutWithReports(src, &reports)
 		if e != nil {
 			return e
 		}
@@ -95,10 +120,27 @@ Examples:
 			markers += len(module.Flags)
 		}
 		fmt.Fprintf(stderr, "lib-layout: %d modules, %d parts, %d wires, %d markers; connectivity and measured poses preserved; compose source ready\n", len(result.Modules), parts, wires, markers)
+		for _, r := range reports {
+			a := r.Report
+			fmt.Fprintf(stderr, "aesthetics %s [%s] %s: score %.1f → %.1f, defects %d → %d, connectivity identical %v, evaluations %d\n",
+				r.Module, a.Style, a.Status, a.ScoreBefore, a.ScoreAfter, a.DefectsBefore, a.DefectsAfter, a.ConnectivityIdentical, a.Evaluations)
+		}
+		if aesReport != "" {
+			raw, err := json.MarshalIndent(reports, "", "  ")
+			if err != nil {
+				return err
+			}
+			if err = os.WriteFile(aesReport, append(raw, '\n'), 0644); err != nil {
+				return err
+			}
+		}
 		return nil
 	}}
 	c.Flags().StringVar(&from, "from", "", "canonical connectivity, measured geometry and module layout intent JSON")
 	c.Flags().StringVar(&out, "out", "", "write compose source only after complete validation")
+	c.Flags().StringVar(&aesStyle, "aesthetics", "", "opt-in Phase B beautify pass: functional | balanced | precision | auto")
+	c.Flags().StringVar(&aesReport, "aesthetics-report", "", "write the per-module beautify report (before/after metrics, gates, passes) as JSON")
+	c.Flags().BoolVar(&nativeBus, "native-bus", false, "add live-unverified native bus proposals for complete label lanes to the report (never applied)")
 	return c
 }
 

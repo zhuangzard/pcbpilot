@@ -1,0 +1,910 @@
+{
+ "schemaVersion": 1,
+ "componentIds": {
+  "C1": "C_IN",
+  "C2": "C_OUT",
+  "C3": "C_HF",
+  "L1": "L_BUCK",
+  "R1": "R_FBT",
+  "R2": "R_FBB",
+  "U1": "U_BUCK"
+ },
+ "pinStates": {
+  "C_HF": null,
+  "C_IN": null,
+  "C_OUT": null,
+  "L_BUCK": null,
+  "R_FBB": null,
+  "R_FBT": null,
+  "U_BUCK": null
+ },
+ "placements": [
+  {
+   "primitiveId": "",
+   "designator": "U1",
+   "x": 0,
+   "y": 0,
+   "rotation": 0,
+   "mirror": false,
+   "bbox": {
+    "minX": -25.5,
+    "minY": -20.5,
+    "maxX": 25.5,
+    "maxY": 20.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "EN",
+     "net": "VSYS_5V",
+     "x": -35,
+     "y": 10
+    },
+    {
+     "number": "2",
+     "name": "GND",
+     "net": "GND",
+     "x": -35,
+     "y": 0
+    },
+    {
+     "number": "3",
+     "name": "LX",
+     "net": "LX",
+     "x": -35,
+     "y": -10
+    },
+    {
+     "number": "4",
+     "name": "IN",
+     "net": "VSYS_5V",
+     "x": 35,
+     "y": -10
+    },
+    {
+     "number": "5",
+     "name": "FB",
+     "net": "FB",
+     "x": 35,
+     "y": 10
+    }
+   ]
+  },
+  {
+   "primitiveId": "",
+   "designator": "L1",
+   "x": -70,
+   "y": -30,
+   "rotation": 270,
+   "mirror": false,
+   "bbox": {
+    "minX": -70.44532000000004,
+    "minY": -47.16408000000001,
+    "maxX": -65.1671,
+    "maxY": -12.617889999999989
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1",
+     "net": "LX",
+     "x": -70,
+     "y": -10
+    },
+    {
+     "number": "2",
+     "name": "2",
+     "net": "+3V3",
+     "x": -70,
+     "y": -50
+    }
+   ]
+  },
+  {
+   "primitiveId": "",
+   "designator": "C2",
+   "x": -120,
+   "y": -55,
+   "rotation": 180,
+   "mirror": false,
+   "bbox": {
+    "minX": -130.5,
+    "minY": -63.5,
+    "maxX": -109.5,
+    "maxY": -46.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1",
+     "net": "+3V3",
+     "x": -100,
+     "y": -55
+    },
+    {
+     "number": "2",
+     "name": "2",
+     "net": "GND",
+     "x": -140,
+     "y": -55
+    }
+   ]
+  },
+  {
+   "primitiveId": "",
+   "designator": "C3",
+   "x": -40,
+   "y": -85,
+   "rotation": 0,
+   "mirror": false,
+   "bbox": {
+    "minX": -50.5,
+    "minY": -93.5,
+    "maxX": -29.5,
+    "maxY": -76.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1",
+     "net": "+3V3",
+     "x": -60,
+     "y": -85
+    },
+    {
+     "number": "2",
+     "name": "2",
+     "net": "GND",
+     "x": -20,
+     "y": -85
+    }
+   ]
+  },
+  {
+   "primitiveId": "",
+   "designator": "R1",
+   "x": 65,
+   "y": -10,
+   "rotation": 90,
+   "mirror": false,
+   "bbox": {
+    "minX": 60.5,
+    "minY": -20.5,
+    "maxX": 69.5,
+    "maxY": 0.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1",
+     "net": "+3V3",
+     "x": 65,
+     "y": -30
+    },
+    {
+     "number": "2",
+     "name": "2",
+     "net": "FB",
+     "x": 65,
+     "y": 10
+    }
+   ]
+  },
+  {
+   "primitiveId": "",
+   "designator": "R2",
+   "x": 65,
+   "y": 60,
+   "rotation": 90,
+   "mirror": false,
+   "bbox": {
+    "minX": 60.5,
+    "minY": 49.5,
+    "maxX": 69.5,
+    "maxY": 70.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1",
+     "net": "FB",
+     "x": 65,
+     "y": 40
+    },
+    {
+     "number": "2",
+     "name": "2",
+     "net": "GND",
+     "x": 65,
+     "y": 80
+    }
+   ]
+  },
+  {
+   "primitiveId": "",
+   "designator": "C1",
+   "x": -20,
+   "y": 55,
+   "rotation": 0,
+   "mirror": false,
+   "bbox": {
+    "minX": -30.5,
+    "minY": 46.5,
+    "maxX": -9.5,
+    "maxY": 63.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1",
+     "net": "VSYS_5V",
+     "x": -40,
+     "y": 55
+    },
+    {
+     "number": "2",
+     "name": "2",
+     "net": "GND",
+     "x": 0,
+     "y": 55
+    }
+   ]
+  }
+ ],
+ "wires": [
+  {
+   "net": "+3V3",
+   "points": [
+    [
+     -60,
+     -85
+    ],
+    [
+     -70,
+     -85
+    ]
+   ]
+  },
+  {
+   "net": "+3V3",
+   "points": [
+    [
+     -70,
+     -85
+    ],
+    [
+     -70,
+     -55
+    ]
+   ]
+  },
+  {
+   "net": "+3V3",
+   "points": [
+    [
+     -70,
+     -55
+    ],
+    [
+     -70,
+     -50
+    ]
+   ]
+  },
+  {
+   "net": "FB",
+   "points": [
+    [
+     65,
+     15
+    ],
+    [
+     40,
+     15
+    ]
+   ]
+  },
+  {
+   "net": "FB",
+   "points": [
+    [
+     40,
+     15
+    ],
+    [
+     40,
+     10
+    ]
+   ]
+  },
+  {
+   "net": "FB",
+   "points": [
+    [
+     40,
+     10
+    ],
+    [
+     35,
+     10
+    ]
+   ]
+  },
+  {
+   "net": "FB",
+   "points": [
+    [
+     65,
+     10
+    ],
+    [
+     65,
+     15
+    ]
+   ]
+  },
+  {
+   "net": "FB",
+   "points": [
+    [
+     65,
+     15
+    ],
+    [
+     65,
+     40
+    ]
+   ]
+  },
+  {
+   "net": "LX",
+   "points": [
+    [
+     -70,
+     -10
+    ],
+    [
+     -70,
+     -5
+    ]
+   ]
+  },
+  {
+   "net": "LX",
+   "points": [
+    [
+     -70,
+     -5
+    ],
+    [
+     -40,
+     -5
+    ]
+   ]
+  },
+  {
+   "net": "VSYS_5V",
+   "points": [
+    [
+     -40,
+     55
+    ],
+    [
+     -45,
+     55
+    ]
+   ]
+  },
+  {
+   "net": "VSYS_5V",
+   "points": [
+    [
+     -45,
+     55
+    ],
+    [
+     -45,
+     25
+    ]
+   ]
+  },
+  {
+   "net": "VSYS_5V",
+   "points": [
+    [
+     -45,
+     25
+    ],
+    [
+     -45,
+     10
+    ]
+   ]
+  },
+  {
+   "net": "VSYS_5V",
+   "points": [
+    [
+     -45,
+     10
+    ],
+    [
+     -35,
+     10
+    ]
+   ]
+  },
+  {
+   "net": "VSYS_5V",
+   "points": [
+    [
+     35,
+     -10
+    ],
+    [
+     45,
+     -10
+    ]
+   ]
+  },
+  {
+   "net": "VSYS_5V",
+   "points": [
+    [
+     45,
+     -10
+    ],
+    [
+     45,
+     25
+    ]
+   ]
+  },
+  {
+   "net": "VSYS_5V",
+   "points": [
+    [
+     45,
+     25
+    ],
+    [
+     -45,
+     25
+    ]
+   ]
+  },
+  {
+   "net": "+3V3",
+   "points": [
+    [
+     -100,
+     -55
+    ],
+    [
+     -95,
+     -55
+    ]
+   ]
+  },
+  {
+   "net": "+3V3",
+   "points": [
+    [
+     -95,
+     -55
+    ],
+    [
+     -70,
+     -55
+    ]
+   ]
+  },
+  {
+   "net": "+3V3",
+   "points": [
+    [
+     -95,
+     -55
+    ],
+    [
+     -95,
+     -50
+    ]
+   ]
+  },
+  {
+   "net": "LX",
+   "points": [
+    [
+     -40,
+     -10
+    ],
+    [
+     -35,
+     -10
+    ]
+   ]
+  },
+  {
+   "net": "LX",
+   "points": [
+    [
+     -40,
+     -35
+    ],
+    [
+     -40,
+     -10
+    ]
+   ]
+  },
+  {
+   "net": "LX",
+   "points": [
+    [
+     -40,
+     -10
+    ],
+    [
+     -40,
+     -5
+    ]
+   ]
+  }
+ ],
+ "flags": [
+  {
+   "net": "GND",
+   "kind": "ground",
+   "pinX": -35,
+   "pinY": 0,
+   "direction": "left",
+   "offset": 55,
+   "anchor": {
+    "type": "pin",
+    "componentId": "U_BUCK",
+    "pinNumber": "2",
+    "zoneId": "BUCK",
+    "net": "GND"
+   }
+  },
+  {
+   "net": "GND",
+   "kind": "ground",
+   "pinX": -140,
+   "pinY": -55,
+   "direction": "left",
+   "offset": 25,
+   "anchor": {
+    "type": "pin",
+    "componentId": "C_OUT",
+    "pinNumber": "2",
+    "zoneId": "BUCK",
+    "net": "GND"
+   }
+  },
+  {
+   "net": "GND",
+   "kind": "ground",
+   "pinX": -20,
+   "pinY": -85,
+   "direction": "right",
+   "offset": 25,
+   "anchor": {
+    "type": "pin",
+    "componentId": "C_HF",
+    "pinNumber": "2",
+    "zoneId": "BUCK",
+    "net": "GND"
+   }
+  },
+  {
+   "net": "GND",
+   "kind": "ground",
+   "pinX": 65,
+   "pinY": 80,
+   "direction": "up",
+   "offset": 10,
+   "anchor": {
+    "type": "pin",
+    "componentId": "R_FBB",
+    "pinNumber": "2",
+    "zoneId": "BUCK",
+    "net": "GND"
+   }
+  },
+  {
+   "net": "GND",
+   "kind": "ground",
+   "pinX": 0,
+   "pinY": 55,
+   "direction": "right",
+   "offset": 25,
+   "anchor": {
+    "type": "pin",
+    "componentId": "C_IN",
+    "pinNumber": "2",
+    "zoneId": "BUCK",
+    "net": "GND"
+   }
+  },
+  {
+   "net": "+3V3",
+   "kind": "power",
+   "pinX": -95,
+   "pinY": -50,
+   "direction": "up",
+   "offset": 10,
+   "anchor": {
+    "type": "wire_tree",
+    "zoneId": "BUCK",
+    "net": "+3V3",
+    "x": -95,
+    "y": -50
+   }
+  },
+  {
+   "net": "+3V3",
+   "kind": "power",
+   "pinX": 65,
+   "pinY": -30,
+   "direction": "down",
+   "offset": 10,
+   "anchor": {
+    "type": "pin",
+    "componentId": "R_FBT",
+    "pinNumber": "1",
+    "zoneId": "BUCK",
+    "net": "+3V3"
+   }
+  },
+  {
+   "net": "VSYS_5V",
+   "kind": "net_port_bi",
+   "pinX": -45,
+   "pinY": 40,
+   "direction": "left",
+   "offset": 10,
+   "anchor": {
+    "type": "wire_tree",
+    "zoneId": "BUCK",
+    "net": "VSYS_5V",
+    "x": -45,
+    "y": 40
+   }
+  },
+  {
+   "net": "LX",
+   "kind": "net_port_bi",
+   "pinX": -40,
+   "pinY": -35,
+   "direction": "right",
+   "offset": 10,
+   "anchor": {
+    "type": "wire_tree",
+    "zoneId": "BUCK",
+    "net": "LX",
+    "x": -40,
+    "y": -35
+   }
+  },
+  {
+   "net": "FB",
+   "kind": "net_port_bi",
+   "pinX": 65,
+   "pinY": 15,
+   "direction": "right",
+   "offset": 10,
+   "anchor": {
+    "type": "wire_tree",
+    "zoneId": "BUCK",
+    "net": "FB",
+    "x": 65,
+    "y": 15
+   }
+  }
+ ],
+ "score": [
+  600,
+  33,
+  5,
+  75200
+ ],
+ "candidatesUsed": 9396,
+ "search": {
+  "strategy": "checkpoint-local-repair-v1",
+  "backtracks": 0,
+  "repairAttempts": 0,
+  "targetedRelocations": 0,
+  "movedComponents": [],
+  "branchLimit": 191994,
+  "conflictPasses": 1,
+  "skippedCheckpoints": 0,
+  "placementFailures": 0,
+  "dependencyShellJumps": 0,
+  "checkpointAlternatives": {
+   "C_HF": 1,
+   "C_IN": 1,
+   "C_OUT": 1,
+   "L_BUCK": 1,
+   "R_FBB": 1,
+   "R_FBT": 1
+  }
+ },
+ "routing": {
+  "strategy": "directional-grid-a-star-v1",
+  "maxExpandedNodes": 200000,
+  "maxNodesPerAttempt": 50000,
+  "expandedNodes": 223,
+  "maxReroutes": 4,
+  "reroutes": 0,
+  "completedJoins": 2,
+  "templateCacheHits": 0,
+  "boundaryAttempts": [
+   {
+    "net": "FB",
+    "sourceIsland": "FB:5@35,10;2@65,10",
+    "targetIsland": "FB:1@65,40",
+    "expansionRaw": 40,
+    "expandedNodes": 6,
+    "result": "merged"
+   },
+   {
+    "net": "VSYS_5V",
+    "sourceIsland": "VSYS_5V:1@-35,10;1@-40,55",
+    "targetIsland": "VSYS_5V:4@35,-10",
+    "expansionRaw": 40,
+    "expandedNodes": 217,
+    "result": "merged"
+   }
+  ],
+  "rejectedEdges": [
+   {
+    "componentId": "U_BUCK",
+    "componentRef": "U1",
+    "net": "FB",
+    "reason": "foreign-pin",
+    "count": 4,
+    "attributionComplete": true
+   },
+   {
+    "componentId": "U_BUCK",
+    "componentRef": "U1",
+    "net": "LX",
+    "reason": "foreign-pin",
+    "count": 2,
+    "attributionComplete": true
+   },
+   {
+    "componentId": "U_BUCK",
+    "componentRef": "U1",
+    "net": "VSYS_5V",
+    "reason": "foreign-pin",
+    "count": 6,
+    "attributionComplete": true
+   },
+   {
+    "componentId": "U_BUCK",
+    "componentRef": "U1",
+    "net": "FB",
+    "reason": "foreign-stem",
+    "count": 4,
+    "attributionComplete": true
+   },
+   {
+    "componentId": "U_BUCK",
+    "componentRef": "U1",
+    "net": "LX",
+    "reason": "foreign-stem",
+    "count": 1,
+    "attributionComplete": true
+   },
+   {
+    "componentId": "U_BUCK",
+    "componentRef": "U1",
+    "net": "VSYS_5V",
+    "reason": "foreign-stem",
+    "count": 5,
+    "attributionComplete": true
+   },
+   {
+    "componentId": "R_FBB",
+    "componentRef": "R2",
+    "net": "FB",
+    "reason": "foreign-wire-contact",
+    "count": 4,
+    "attributionComplete": true
+   },
+   {
+    "componentId": "R_FBT",
+    "componentRef": "R1",
+    "net": "FB",
+    "reason": "foreign-wire-contact",
+    "count": 4,
+    "attributionComplete": true
+   },
+   {
+    "componentId": "U_BUCK",
+    "componentRef": "U1",
+    "net": "FB",
+    "reason": "foreign-wire-contact",
+    "count": 4,
+    "attributionComplete": true
+   },
+   {
+    "componentId": "U_BUCK",
+    "componentRef": "U1",
+    "net": "VSYS_5V",
+    "reason": "pin-exit-direction",
+    "count": 11,
+    "attributionComplete": true
+   },
+   {
+    "componentId": "U_BUCK",
+    "componentRef": "U1",
+    "net": "FB",
+    "reason": "pin-exit-foreign-wire",
+    "count": 6,
+    "attributionComplete": true
+   },
+   {
+    "componentId": "U_BUCK",
+    "componentRef": "U1",
+    "net": "VSYS_5V",
+    "reason": "pin-exit-foreign-wire",
+    "count": 6,
+    "attributionComplete": true
+   },
+   {
+    "componentId": "U_BUCK",
+    "componentRef": "U1",
+    "net": "VSYS_5V",
+    "reason": "wire-body",
+    "count": 46,
+    "attributionComplete": true
+   }
+  ],
+  "candidateSummaries": [
+   {
+    "net": "FB",
+    "sourceIsland": "FB:5@35,10;2@65,10",
+    "targetIsland": "FB:1@65,40",
+    "points": [
+     [
+      65,
+      40
+     ],
+     [
+      65,
+      15
+     ]
+    ],
+    "result": "merged"
+   },
+   {
+    "net": "VSYS_5V",
+    "sourceIsland": "VSYS_5V:1@-35,10;1@-40,55",
+    "targetIsland": "VSYS_5V:4@35,-10",
+    "points": [
+     [
+      35,
+      -10
+     ],
+     [
+      45,
+      -10
+     ],
+     [
+      45,
+      25
+     ],
+     [
+      -45,
+      25
+     ]
+    ],
+    "result": "merged"
+   }
+  ]
+ }
+}

@@ -1,8 +1,9 @@
 # 原理图美观度：Phase A（度量 + 数据模型 + 总线能力）（2026-10）
 
-状态：**Phase A 已实现，只报告**——`pcbpilot sch aesthetics`（`pkg/schaes`）、`sch bus list|create|delete|candidates`、
+状态：**Phase A 已实现（只报告）；Phase B 已实现（opt-in 生成，`--aesthetics STYLE`，离线验证，见
+[phaseB/](phaseB/README.md) 与 [baseline.md §Phase B](baseline.md#phase-b-生成前后2026-10)）**。Phase A：`pcbpilot sch aesthetics`（`pkg/schaes`）、`sch bus list|create|delete|candidates`、
 `report design` §6C。基线见 [baseline.md](baseline.md)。原生总线 action 为 **planned / live-unverified**
-（V3 3.2.x 与 V4 均未现场验证）。Phase B 起的生成改动待用户确认。PCB 侧见
+（V3 3.2.x 与 V4 均未现场验证）。Phase C 起待用户确认。PCB 侧见
 [2026-09-routing-aesthetics](../2026-09-routing-aesthetics/README.md)，两侧风格档同名。
 
 优先级不变：**连接正确性 > 可读性 > 美观**。`sch layout-lint`、`sch check`、`bridge-check`、
@@ -122,10 +123,18 @@ USB（DP/DM、D+/D−）与 MIPI/LVDS（`_P/_N` 对）只作“按对并行”�
 2. 可读性：无重叠、位号可见、标记顺线朝外、框包住内容（layout-lint / sch check / layout-score）。
 3. 美观：本报告。软、权重 0、永不为门，永不成为移动一根已正确导线的理由；任何美化 pass（Phase B）若使 1/2 任一检查变差即回退。
 
-## 5. 生成策略与 Phase B 计划（待用户确认后实施）
+## 5. 生成策略与 Phase B 计划（Phase B 已实施，见下方实现状态）
 
 每项验收都包含：目标指标改善；`sch layout-lint` / `sch check` 零新增；连接（component/pin→net/NC）与归属完全不变；
 现有 `sch_layout_*`、compose、frame、sheet-plan 测试全绿；`schaes` 合成单调性测试与基线表更新。
+
+Phase B 实现状态（2026-10）：B1–B4 均以**生成后美化 pass** 落地（`internal/app/sch_layout_aesthetics.go`），
+不改变求解器默认搜索（不加 `--aesthetics` 输出逐字节不变）。迷宫加了可选加权代价（`bendWeight`/`crossWeight`，
+默认 0）；B1 的线束重布、T 落点、四通消除、标记重放在 `sch_layout_engine_routes.go` 辅助函数 + pass 内；目标向量
+在 `sch_lib_objective.go`（`libAesObjective`，不进入 `libCandidateScore`）；B2 判据 `libLabelSplitAllowed`
+（`sch_layout_netlabel.go`）；B3 `sch_layout_bus_lane.go`；B4 吸附目标 `schAlignSnapTargets`（`sch_zone_compact.go`）+
+`alignPass`（`sch_layout_optimize.go`）。与原计划的差异：`sch_module_rows.go`（纸张层整区行排）未改——Phase B 只动区内；
+naming frontier 文件未改，B2 复用 `libVisitMarkerAt` 与求解器同一套命名门禁。
 
 | 阶段 | 内容 | 改动文件 | 验收测试 |
 |---|---|---|---|
