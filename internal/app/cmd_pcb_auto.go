@@ -62,7 +62,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 		c.Flags().IntVar(&in.maxLayers, "max-layers", 6, "cost cap for the layer decision")
 		c.Flags().Float64Var(&in.grid, "grid", 0, "routing grid in mil (0 = derived from the rules)")
 		c.Flags().DurationVar(&in.timeout, "timeout", 4*time.Minute, "routing time budget")
-		c.Flags().StringVar(&in.style, "style", "", "aesthetics style profile for the report-only aesthetics block: functional | balanced (default) | precision | auto (soft objectives only; never relaxes safety/electrical/DRC/completion)")
+		c.Flags().StringVar(&in.style, "style", "", "aesthetics style profile: functional (grid snap only) | balanced (default) | precision (25 mil grid, tight alignment, symmetry required) | auto — drives the placement aesthetics stage with --place and the report-only aesthetics block (soft objectives only; never relaxes safety/electrical/DRC/completion)")
 		c.Flags().StringVar(&in.styleFile, "style-file", "", "aesthetics style JSON (the 'aesthetics' object of pcbpilot.project.json, or the bare object; profile custom with per-metric weights/tolerances)")
 		c.Flags().StringVar(&in.pinCaps, "pin-caps", "", "extra pin-capability table merged over the built-in one (schema: .agents/skills/pcbpilot/references/pin-capabilities.json) — adds STM32/AT32/other remappable parts for schematic pin-swap feedback")
 	}
@@ -246,7 +246,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 	// ── run ──────────────────────────────────────────────────────────────
 	{
 		var outDir, replaceJournal, reportDir, reportName string
-		var place, noRoute, refine, macro bool
+		var place, noRoute, refine, macro, tidyOnly bool
 		var only []string
 		var seed int64
 		var loops int
@@ -267,6 +267,9 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 				}
 				if outDir == "" {
 					return fmt.Errorf("--out-dir is required")
+				}
+				if tidyOnly && !place {
+					return fmt.Errorf("--tidy-only needs --place (it moves parts of the current placement)")
 				}
 				if err := os.MkdirAll(outDir, 0o755); err != nil {
 					return err
@@ -293,6 +296,9 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 				holesBefore, keepBefore := len(b.Holes), len(b.Keepouts)
 				outlineBefore := append([]pcbauto.Point(nil), b.Outline...)
 				var frame *pcbauto.FrameSearch
+				if tidyOnly && pcbauto.NeedsAutoFrame(mech) {
+					return fmt.Errorf("--tidy-only keeps the current placement: give the mech spec a fixed board size instead of autoSize")
+				}
 				if place && pcbauto.NeedsAutoFrame(mech) {
 					// autoSize without a size: search the smallest frame the
 					// placer fills cleanly, then run as a fixed-size board.
@@ -309,7 +315,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 				var mc *pcbauto.Mechanics
 				if mech != nil {
 					apply := pcbauto.ApplyMech
-					if !place {
+					if !place || tidyOnly {
 						// Route-only: the playbook moves no part, so the model
 						// must keep the measured poses.
 						apply = pcbauto.ApplyMechInPlace
@@ -342,8 +348,10 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 				if place && !noRoute && loops == 0 {
 					// One placement, but a board with intent-declared pairs
 					// is placed and routed twice (with and without the pair
-					// corridors, pcbauto/placeab.go).
-					budget = (in.timeout*3 + 90*time.Second) * 2
+					// corridors, pcbauto/placeab.go), and a placement the
+					// aesthetics stage changed is routed once more without it
+					// (the routed guard).
+					budget = (in.timeout*3 + 90*time.Second) * 4
 				}
 				if place && !noRoute && loops > 0 {
 					// Every pass places (the annealer's own 90 s default) and then
@@ -352,7 +360,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 					// first pass and the command returned nothing. The first
 					// pass of a board with intent pairs places and routes twice
 					// (with and without the pair corridors): one pass more.
-					budget = (in.timeout*3 + 90*time.Second) * time.Duration(loops+1)
+					budget = (in.timeout*3 + 90*time.Second) * time.Duration(2*loops+1)
 				}
 				if pcbauto.VirtualClock() {
 					// Deterministic mode (PCBPILOT_BENCH_WORK): the router's
@@ -379,7 +387,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 				}
 				looped := false
 				if place && !noRoute && loops > 0 {
-					lr, err := pcbauto.PlaceRoute(ctx, b, pre, rep.Circuit, mc, pcbauto.PlaceOptions{Seed: seed, Refine: refine, Macro: macro, Only: only}, opts, pcbauto.LoopOptions{Passes: loops, Budget: in.timeout * time.Duration(loops+2)})
+					lr, err := pcbauto.PlaceRoute(ctx, b, pre, rep.Circuit, mc, pcbauto.PlaceOptions{Seed: seed, Refine: refine, Macro: macro, Only: only, Aesthetics: aesStyle, TidyOnly: tidyOnly}, opts, pcbauto.LoopOptions{Passes: loops, Budget: in.timeout * time.Duration(loops+2)})
 					if err != nil {
 						return err
 					}
@@ -389,7 +397,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 					}
 					fmt.Fprintf(stderr, "loop: best pass %d\n", lr.Best)
 				} else if place {
-					popt := pcbauto.PlaceOptions{Seed: seed, Refine: refine, Macro: macro, Only: only}
+					popt := pcbauto.PlaceOptions{Seed: seed, Refine: refine, Macro: macro, Only: only, Aesthetics: aesStyle, TidyOnly: tidyOnly}
 					if noRoute {
 						rep.Placement, err = pcbauto.Place(b, pre, rep.Circuit, mc, popt)
 					} else {
@@ -404,6 +412,15 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 					}
 					fmt.Fprintf(stderr, "placement: wirelength %.1f→%.1f in, overlaps %d, out-of-zone %d\n",
 						rep.Placement.Metrics.StartWireIn, rep.Placement.Metrics.WirelengthIn, rep.Placement.Metrics.Overlaps, rep.Placement.Metrics.OutOfZone)
+				}
+				if rep.Placement != nil && rep.Placement.Aesthetics != nil {
+					ar := rep.Placement.Aesthetics
+					guard := ar.Guard
+					if guard == "" {
+						guard = "not routed here"
+					}
+					fmt.Fprintf(stderr, "placement aesthetics (%s): %d part(s) moved, wire slack %.0f/%.0f mil; routed guard: %s\n",
+						ar.Profile, ar.Moved, ar.WireSpentMil, ar.WireBudgetMil, guard)
 				}
 				if noRoute {
 					an := pcbauto.Analyze(b, power, nil)
@@ -515,6 +532,16 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 					}
 					files["board.routed.json"] = func(w io.Writer) error { _, err := w.Write(append(routed, '\n')); return err }
 					names += ",board.routed.json"
+				} else if rr == nil && rep.Placement != nil && len(boardRaw) > 0 {
+					// Placed, not routed: the placement as a pcb dump, so `pcb
+					// aesthetics --board board.placed.json` (and layout-score)
+					// judge it offline.
+					placed, err := pcbauto.ExportPlacedSnapshot(boardRaw, b)
+					if err != nil {
+						return err
+					}
+					files["board.placed.json"] = func(w io.Writer) error { _, err := w.Write(append(placed, '\n')); return err }
+					names += ",board.placed.json"
 				}
 				for name, fn := range files {
 					if err := write(name, fn); err != nil {
@@ -549,6 +576,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 		c.Flags().BoolVar(&place, "place", false, "run the placer (mechanics, domain zones, blocks) before routing")
 		c.Flags().BoolVar(&refine, "refine", false, "with --place: refine the current placement instead of constructing one")
 		c.Flags().BoolVar(&macro, "macro", false, "with --place: experimental two-stage placement — freeze each core with its critical auxiliaries as a rigid macro, anneal macros + the rest, then polish (8-board A/B 2026-09-25: worse than the default single-stage anneal on 7/8)")
+		c.Flags().BoolVar(&tidyOnly, "tidy-only", false, "with --place: keep the current placement and run only the placement aesthetics stage on it (orientation, symmetry copies, row/column alignment, even pitch, grid snap) — every move judged against the safety/electrical tiers and the --style slack, then routed with and without it and kept only if it routes no worse")
 		c.Flags().StringSliceVar(&only, "only", nil, "with --place --refine: move only these designators (local adjustment of a confirmed layout), e.g. --only C7,D3")
 		c.Flags().BoolVar(&noRoute, "no-route", false, "stop after placement / stackup")
 		c.Flags().Int64Var(&seed, "seed", 0, "placement random seed (runs are reproducible per seed)")

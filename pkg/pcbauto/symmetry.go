@@ -64,6 +64,12 @@ type SymmetryGroup struct {
 	Error     float64        `json:"error"`
 	Score     float64        `json:"score"`
 	Pairs     []SymmetryPair `json:"pairs"`
+	// labels are the instance parts' Weisfeiler–Lehman labels (ref →
+	// label): the placer's symmetry seeding refits a pair with only the
+	// transforms it can build (placer_aes.go).
+	labels map[string]string
+	// core is the IC of a decap ring (its centre is the ring's centre).
+	core string
 }
 
 type symNode struct {
@@ -172,15 +178,7 @@ func DetectSymmetry(b *Board, an *Analysis, c *Circuit) []SymmetryGroup {
 		sort.Strings(v)
 		return h64(strings.Join(v, ","))
 	}
-	node := func(ref, label string) symNode {
-		p := b.Part(ref)
-		bd := p.Body()
-		n := symNode{ref: ref, label: label, pos: bd.Center(), rot: normDeg(p.Rotation), mod: 360, body: bd}
-		if symmetricPassive(p) || len(p.Pads) >= 3 {
-			n.mod = 180
-		}
-		return n
-	}
+	node := func(ref, label string) symNode { return symNodeOf(b.Part(ref), label) }
 
 	type inst struct {
 		refs []string
@@ -245,8 +243,11 @@ func DetectSymmetry(b *Board, an *Analysis, c *Circuit) []SymmetryGroup {
 			}
 			return ci.Y < cj.Y
 		})
-		g := SymmetryGroup{Kind: kind, Signature: signature}
+		g := SymmetryGroup{Kind: kind, Signature: signature, labels: map[string]string{}}
 		for _, x := range is {
+			for r, l := range x.lab {
+				g.labels[r] = l
+			}
 			r := append([]string(nil), x.refs...)
 			sort.Strings(r)
 			g.Instances = append(g.Instances, r)
@@ -494,7 +495,7 @@ func DetectSymmetry(b *Board, an *Analysis, c *Circuit) []SymmetryGroup {
 				}
 				sp := fitRing(ns, cc, core.Body())
 				g := SymmetryGroup{Kind: "decap-ring", Signature: bl.Core + " " + strings.SplitN(k, "@", 2)[1], Axis: sp.Axis, Error: sp.Error,
-					Score: aesRound(aesRamp(sp.Error, 0.05, 0.4)), Pairs: []SymmetryPair{sp}}
+					Score: aesRound(aesRamp(sp.Error, 0.05, 0.4)), Pairs: []SymmetryPair{sp}, core: bl.Core}
 				for _, r := range refs {
 					g.Instances = append(g.Instances, []string{r})
 				}
@@ -503,6 +504,53 @@ func DetectSymmetry(b *Board, an *Analysis, c *Circuit) []SymmetryGroup {
 		}
 	}
 	return groups
+}
+
+// symNodeOf is a part as the symmetry fit sees it: body centre, rotation
+// and the modulus its rotation is compared with (180 for symmetric passives
+// and ≥3-pin packages that cannot be mirrored, 360 for polar two-pin parts).
+func symNodeOf(p *Part, label string) symNode {
+	bd := p.Body()
+	n := symNode{ref: p.Ref, label: label, pos: bd.Center(), rot: normDeg(p.Rotation), mod: 360, body: bd}
+	if symmetricPassive(p) || len(p.Pads) >= 3 {
+		n.mod = 180
+	}
+	return n
+}
+
+// groupError re-measures a detected group's mean error on the current
+// placement (the same fits DetectSymmetry made).
+func (g *SymmetryGroup) groupError(b *Board) float64 {
+	nodes := func(refs []string, label func(string) string) []symNode {
+		var out []symNode
+		for _, r := range refs {
+			if p := b.Part(r); p != nil {
+				out = append(out, symNodeOf(p, label(r)))
+			}
+		}
+		return out
+	}
+	if g.Kind == "decap-ring" {
+		core := b.Part(g.core)
+		if core == nil {
+			return g.Error
+		}
+		var refs []string
+		for _, in := range g.Instances {
+			refs = append(refs, in...)
+		}
+		return fitRing(nodes(refs, func(string) string { return "decap" }), core.Body().Center(), core.Body()).Error
+	}
+	lab := func(r string) string { return g.labels[r] }
+	sum, n := 0.0, 0
+	for i := 0; i+1 < len(g.Instances); i++ {
+		sum += fitSymmetry(nodes(g.Instances[i], lab), nodes(g.Instances[i+1], lab), nil).Error
+		n++
+	}
+	if n == 0 {
+		return 0
+	}
+	return sum / float64(n)
 }
 
 func symMirror(t string, p Point, prm Point) Point {

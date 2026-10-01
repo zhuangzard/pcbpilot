@@ -100,8 +100,11 @@ func PlaceRoute(ctx context.Context, b *Board, an *Analysis, c *Circuit, m *Mech
 			if pr, err = Place(b, an, c, m, po); err != nil {
 				return nil, err
 			}
-			if out, err = Run(ctx, b, ropt); err == nil {
-				js = Joint(b, out.Analysis, c, out.Stackup, out.Route, out.DRC, JointOptions{PlacementScore: -1, Overlaps: pr.Metrics.Overlaps, Isolation: out.Isolation, Edge: out.Edge})
+			var v *abVariant
+			if v, err = routeVariant(ctx, b, an, c, pr, ropt); err == nil {
+				// The aesthetics stage must route no worse (placeab.go).
+				v = aesGuard(ctx, b, an, c, v, ropt)
+				pr, out, js = v.pr, v.out, v.js
 			}
 		}
 		if err != nil {

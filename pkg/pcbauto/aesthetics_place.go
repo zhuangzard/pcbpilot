@@ -29,23 +29,28 @@ type aPart struct {
 func aesParts(b *Board, c *Circuit) []*aPart {
 	var out []*aPart
 	for _, p := range b.Parts {
-		k := c.Kinds[p.Ref]
-		if k == "" {
-			k = ClassifyPart(p)
-		}
-		bd := p.Body()
-		// footprint signature in the part's own frame (rotation-free)
-		w, h := bd.W(), bd.H()
-		if r := math.Mod(normDeg(p.Rotation), 180); math.Abs(r-90) < 1 {
-			w, h = h, w
-		}
-		ap := &aPart{p: p, kind: k, c: bd.Center(), size: math.Max(bd.W(), bd.H()), bodyWH: [2]float64{w, h}}
-		ap.class = fmt.Sprintf("%s|%d|%.0fx%.0f", k, len(p.Pads), math.Round(w/10)*10, math.Round(h/10)*10)
-		ap.polar = !symmetricPassive(p)
-		ap.mech = k == KindMechanical || aesMechRe.MatchString(p.Ref)
-		out = append(out, ap)
+		out = append(out, aesPartOf(p, c))
 	}
 	return out
+}
+
+// aesPartOf is one part as the placement metrics see it.
+func aesPartOf(p *Part, c *Circuit) *aPart {
+	k := c.Kinds[p.Ref]
+	if k == "" {
+		k = ClassifyPart(p)
+	}
+	bd := p.Body()
+	// footprint signature in the part's own frame (rotation-free)
+	w, h := bd.W(), bd.H()
+	if r := math.Mod(normDeg(p.Rotation), 180); math.Abs(r-90) < 1 {
+		w, h = h, w
+	}
+	ap := &aPart{p: p, kind: k, c: bd.Center(), size: math.Max(bd.W(), bd.H()), bodyWH: [2]float64{w, h}}
+	ap.class = fmt.Sprintf("%s|%d|%.0fx%.0f", k, len(p.Pads), math.Round(w/10)*10, math.Round(h/10)*10)
+	ap.polar = !symmetricPassive(p)
+	ap.mech = k == KindMechanical || aesMechRe.MatchString(p.Ref)
+	return ap
 }
 
 func aesPlacement(rep *AestheticsReport, b *Board, an *Analysis, c *Circuit, in AesInput) {
