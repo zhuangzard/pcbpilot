@@ -24,6 +24,12 @@
 
 ### Routing (copper tracks + vias)
 
+**观感规则（与 `pcb auto run` 引擎同一口径，Phase B）**：扇出过孔放在焊盘中心的 0/45/90° 射线上，扇出线不比原来
+更长；入线从焊盘中心沿焊盘轴出（细长焊盘可 45°，方焊盘不走对角以免角部出线），拐角只用 45°；平行腿不留一格的 S 形
+错位；同宽共线段合成一段；自由段与走线过孔尽量落 5 mil 格。这些都排在安全、电气、DRC、布通之后：引擎在布通后才做，
+任何更高优先级的数字变差就回退；差分/RF/等长/高压网、隔离带与开槽附近、按电流的过孔阵列不做美化。
+细节与限度见 [pcb-auto.md](pcb-auto.md)「布线观感」；用 `pcb aesthetics --board <dump|board.routed.json>` 度量 R1–R9。
+
 ### 离线单层寻路与独立复验
 
 `pcbpilot pcb route solve --board board.json --from request.json --out plan.json`

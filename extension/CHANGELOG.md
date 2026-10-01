@@ -1,5 +1,32 @@
 # Changelog
 
+## [Unreleased]
+
+### Routing aesthetics (phase B)
+
+**Engine routing looks designed, without paying for it in anything that ranks higher.** No connector change; the
+routing itself (tracks, vias, completion) is unchanged from 0.7.0 — every change is a gated post-route pass.
+
+- **Post-route beautify pass** (`pkg/pcbauto/beautify.go`, run by `pcb auto run` after the IR re-route): single fan-out
+  vias moved onto the pad centre's eight 0/45/90° rays (stub never longer, only into free room, inside the plane region
+  that held them); pad entries rebuilt from the pad centre along the pad axis (45° on elongated pads, 45° corners only);
+  S-jogs put on one line; collinear pieces merged (a narrower piece only widened); free segments and route vias moved
+  onto the 5 mil grid by about one routing cell. Every candidate passes the exact DRC on its neighbourhood (0.05 mil
+  margin), never crosses its own net and never adds an S-jog; nets an electrical item measures along the copper never
+  get longer. Differential, RF, length-tuned and HV-clearance nets, copper near isolation moats and slots, and current
+  via arrays are left alone. ESP32 (fixed placement, deterministic): off-octilinear routed length 17.4 % → 2.3 %, axis/45° pad
+  entries 53 % → 94 %, S-jogs 7 → 6, vias/vertices on the 5 mil grid 0 % → 39 %, decap-loop 49.1 → 54.7 and hot-loop
+  86.0 → 88.4 (shorter fan-out stubs); the five fixture boards keep their completion, vias and DRC exactly.
+- **Gate.** The pass is kept only when DRC, disconnections, completion, via count, open plane connections, the
+  electrical group and each of its items, SI findings, isolation findings, delivery blockers and the raw DC power
+  integrity (IR violations, each net's worst drop, copper narrower than its current) are all no worse;
+  otherwise the largest set of nets whose changes pass together is kept (halving search), then a no-length-increase
+  retry, else nothing. `plan.json result.route.beautify` and a `beautify:` stderr line record the outcome.
+- **Tried, left off** (switches default off): fan-out vias on the rays while fanning out (perturbs the whole routing —
+  boards moved both ways), a pad-axis access cost and a jog penalty in A*, a via cost by layer count. On the
+  deterministic fixture bench the router costs lost completion on szpi (90.1 % → 84.9 / 79.6 / 89.1 %). See
+  `docs/reviews/2026-09-routing-aesthetics/baseline.md` §11.
+
 ## [0.7.0] — 2026-10-01
 
 **Local web console, aesthetics measurement, and core electrical/safety routing fixes.** The connector code is
