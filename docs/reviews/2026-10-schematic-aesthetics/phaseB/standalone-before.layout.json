@@ -1,0 +1,199 @@
+{
+ "schemaVersion": 1,
+ "componentIds": {
+  "R1": "peripheral",
+  "U1": "anchor"
+ },
+ "pinStates": {
+  "anchor": {
+   "3": "nc"
+  },
+  "peripheral": null
+ },
+ "placements": [
+  {
+   "primitiveId": "",
+   "designator": "U1",
+   "x": 0,
+   "y": 0,
+   "rotation": 0,
+   "mirror": false,
+   "bbox": {
+    "minX": -20,
+    "minY": -20,
+    "maxX": 20,
+    "maxY": 20
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "",
+     "net": "SUPPLY",
+     "x": 30,
+     "y": 0
+    },
+    {
+     "number": "2",
+     "name": "",
+     "net": "RETURN",
+     "x": 0,
+     "y": -30
+    },
+    {
+     "number": "3",
+     "name": "",
+     "net": "",
+     "x": -30,
+     "y": 10
+    }
+   ]
+  },
+  {
+   "primitiveId": "",
+   "designator": "R1",
+   "x": 65,
+   "y": 0,
+   "rotation": 0,
+   "mirror": false,
+   "bbox": {
+    "minX": 55,
+    "minY": -10,
+    "maxX": 75,
+    "maxY": 10
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "",
+     "net": "SUPPLY",
+     "x": 45,
+     "y": 0
+    },
+    {
+     "number": "2",
+     "name": "",
+     "net": "RETURN",
+     "x": 85,
+     "y": 0
+    }
+   ]
+  }
+ ],
+ "wires": [
+  {
+   "net": "SUPPLY",
+   "points": [
+    [
+     30,
+     0
+    ],
+    [
+     35,
+     0
+    ]
+   ]
+  },
+  {
+   "net": "SUPPLY",
+   "points": [
+    [
+     35,
+     0
+    ],
+    [
+     45,
+     0
+    ]
+   ]
+  },
+  {
+   "net": "SUPPLY",
+   "points": [
+    [
+     35,
+     0
+    ],
+    [
+     35,
+     5
+    ]
+   ]
+  }
+ ],
+ "flags": [
+  {
+   "net": "RETURN",
+   "kind": "ground",
+   "pinX": 0,
+   "pinY": -30,
+   "direction": "down",
+   "offset": 10,
+   "anchor": {
+    "type": "pin",
+    "componentId": "anchor",
+    "pinNumber": "2",
+    "net": "RETURN"
+   }
+  },
+  {
+   "net": "RETURN",
+   "kind": "ground",
+   "pinX": 85,
+   "pinY": 0,
+   "direction": "right",
+   "offset": 45,
+   "anchor": {
+    "type": "pin",
+    "componentId": "peripheral",
+    "pinNumber": "2",
+    "net": "RETURN"
+   }
+  },
+  {
+   "net": "SUPPLY",
+   "kind": "power",
+   "pinX": 35,
+   "pinY": 5,
+   "direction": "up",
+   "offset": 10,
+   "anchor": {
+    "type": "wire_tree",
+    "net": "SUPPLY",
+    "x": 35,
+    "y": 5
+   }
+  }
+ ],
+ "score": [
+  85,
+  6,
+  0,
+  19620
+ ],
+ "candidatesUsed": 210,
+ "search": {
+  "strategy": "checkpoint-local-repair-v1",
+  "backtracks": 0,
+  "repairAttempts": 0,
+  "targetedRelocations": 0,
+  "movedComponents": [],
+  "branchLimit": 200000,
+  "conflictPasses": 1,
+  "skippedCheckpoints": 0,
+  "placementFailures": 0,
+  "dependencyShellJumps": 0,
+  "checkpointAlternatives": {
+   "peripheral": 1
+  }
+ },
+ "routing": {
+  "strategy": "directional-grid-a-star-v1",
+  "maxExpandedNodes": 200000,
+  "maxNodesPerAttempt": 50000,
+  "expandedNodes": 0,
+  "maxReroutes": 4,
+  "reroutes": 0,
+  "completedJoins": 0,
+  "templateCacheHits": 0
+ }
+}

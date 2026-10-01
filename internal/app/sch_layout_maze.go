@@ -81,6 +81,11 @@ type schematicRoutingContext struct {
 	relocation      int
 	candidateBudget *int
 	namingReserve   int
+	// bendWeight / crossWeight (grid steps, 0 = off) turn the lexicographic
+	// [length, bends, crossings] order into a weighted cost. Only the Phase B
+	// beautify pass sets them (sch_layout_aesthetics.go); the default solver
+	// keeps both 0, so its search order is byte-identical.
+	bendWeight, crossWeight int
 }
 
 func (c *schematicRoutingContext) beginReroute() bool {
@@ -282,9 +287,16 @@ type mazeState struct {
 
 type mazeCost struct {
 	Length, Bends, Crossings int
+	// Weighted = Length + bendWeight·Bends + crossWeight·Crossings. With both
+	// weights 0 it equals Length, so the comparison below degenerates to the
+	// historical lexicographic order.
+	Weighted int
 }
 
 func mazeCostLess(a, b mazeCost) bool {
+	if a.Weighted != b.Weighted {
+		return a.Weighted < b.Weighted
+	}
 	if a.Length != b.Length {
 		return a.Length < b.Length
 	}
@@ -812,7 +824,8 @@ func libMazeRouteAccepted(p *powerLayoutPlan, source, target libIsland, routing 
 			state.Dir = 0
 			cost := mazeCost{}
 			best[state] = cost
-			heap.Push(queue, &mazeItem{state: state, g: cost, f: mazeCost{Length: mazeHeuristic(state, goalBounds)}, seq: seq})
+			h := mazeHeuristic(state, goalBounds)
+			heap.Push(queue, &mazeItem{state: state, g: cost, f: mazeCost{Length: h, Weighted: h}, seq: seq})
 			seq++
 		}
 		result := "no-path"
@@ -901,14 +914,21 @@ func libMazeRouteAccepted(p *powerLayoutPlan, source, target libIsland, routing 
 				if item.state.Dir != 0 && item.state.Dir != direction {
 					cost.Bends++
 				}
-				cost.Crossings += mazeCrossings(p, source.net, mazePoint(item.state), mazePoint(next))
+				crossings := mazeCrossings(p, source.net, mazePoint(item.state), mazePoint(next))
+				cost.Crossings += crossings
+				cost.Weighted += stepLength + crossings*routing.crossWeight
+				if item.state.Dir != 0 && item.state.Dir != direction {
+					cost.Weighted += routing.bendWeight
+				}
 				next.Dir = direction
 				if old, exists := best[next]; exists && !mazeCostLess(cost, old) {
 					continue
 				}
 				best[next], parent[next] = cost, item.state
 				priority := cost
-				priority.Length += mazeHeuristic(next, goalBounds)
+				h := mazeHeuristic(next, goalBounds)
+				priority.Length += h
+				priority.Weighted += h
 				heap.Push(queue, &mazeItem{state: next, g: cost, f: priority, seq: seq})
 				seq++
 			}

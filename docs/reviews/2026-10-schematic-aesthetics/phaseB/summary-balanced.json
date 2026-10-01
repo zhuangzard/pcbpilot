@@ -1,0 +1,1889 @@
+[
+ {
+  "after": {
+   "L1": 100,
+   "L2": 100,
+   "L3": 66.7,
+   "L6": 100,
+   "L7": 79,
+   "N1": 100,
+   "W1": 95,
+   "W2": 100,
+   "W3": 100,
+   "W4": 100,
+   "W5": 100,
+   "W6": 100,
+   "W7": 100,
+   "W8": 97.5,
+   "score": 96.3
+  },
+  "before": {
+   "L1": 100,
+   "L2": 100,
+   "L3": 0,
+   "L6": 100,
+   "L7": 77.4,
+   "N1": 100,
+   "W1": 85,
+   "W2": 60,
+   "W3": 100,
+   "W4": 100,
+   "W5": 0,
+   "W6": 100,
+   "W7": 100,
+   "W8": 81.5,
+   "score": 81.8
+  },
+  "fixture": "ams1117-lib-layout",
+  "report": {
+   "style": "balanced",
+   "status": "improved",
+   "scoreBefore": 81.8,
+   "scoreAfter": 96.3,
+   "defectsBefore": 1,
+   "defectsAfter": 0,
+   "metricsBefore": {
+    "L1": 100,
+    "L2": 100,
+    "L3": 0,
+    "L6": 100,
+    "L7": 77.4,
+    "N1": 100,
+    "W1": 85,
+    "W2": 60,
+    "W3": 100,
+    "W4": 100,
+    "W5": 0,
+    "W6": 100,
+    "W7": 100,
+    "W8": 81.5,
+    "score": 81.8
+   },
+   "metricsAfter": {
+    "L1": 100,
+    "L2": 100,
+    "L3": 66.7,
+    "L6": 100,
+    "L7": 79,
+    "N1": 100,
+    "W1": 95,
+    "W2": 100,
+    "W3": 100,
+    "W4": 100,
+    "W5": 100,
+    "W6": 100,
+    "W7": 100,
+    "W8": 97.5,
+    "score": 96.3
+   },
+   "checkBefore": {
+    "lint-off-grid": 0,
+    "lint-overlap": 0,
+    "lint-pin-coincidence": 0,
+    "lint-tight": 0,
+    "marker-geometry": 0,
+    "reversed-net-flag": 0,
+    "wire-crossing": 1
+   },
+   "checkAfter": {
+    "lint-off-grid": 0,
+    "lint-overlap": 0,
+    "lint-pin-coincidence": 0,
+    "lint-tight": 0,
+    "marker-geometry": 0,
+    "reversed-net-flag": 0
+   },
+   "pinNetIdentical": true,
+   "connectivityIdentical": true,
+   "passes": [
+    {
+     "pass": "align",
+     "tried": 2,
+     "accepted": 1,
+     "rejected": {
+      "check": 1
+     }
+    },
+    {
+     "pass": "trunk",
+     "tried": 12,
+     "accepted": 3,
+     "rejected": {
+      "no-candidate": 2,
+      "not-better": 7
+     }
+    },
+    {
+     "pass": "marker",
+     "tried": 12,
+     "accepted": 0,
+     "rejected": {
+      "not-better": 12
+     }
+    }
+   ],
+   "evaluations": 415,
+   "priority": "connectivity \u003e readability \u003e aesthetics: every move re-passes geometry, nets, ownership and offline check/lint counts, else it is rolled back"
+  }
+ },
+ {
+  "after": {
+   "L1": 100,
+   "L2": 100,
+   "L6": 100,
+   "N1": 100,
+   "W1": 100,
+   "W2": 100,
+   "W3": 100,
+   "W4": 100,
+   "W5": 100,
+   "W6": 100,
+   "W7": 100,
+   "W8": 94,
+   "score": 99.6
+  },
+  "before": {
+   "L1": 66.7,
+   "L2": 100,
+   "L6": 0,
+   "N1": 100,
+   "W1": 100,
+   "W2": 100,
+   "W3": 100,
+   "W4": 100,
+   "W5": 0,
+   "W6": 100,
+   "W7": 100,
+   "W8": 75,
+   "score": 78.9
+  },
+  "fixture": "standalone",
+  "report": {
+   "style": "balanced",
+   "status": "improved",
+   "scoreBefore": 78.9,
+   "scoreAfter": 99.6,
+   "defectsBefore": 1,
+   "defectsAfter": 0,
+   "metricsBefore": {
+    "L1": 66.7,
+    "L2": 100,
+    "L6": 0,
+    "N1": 100,
+    "W1": 100,
+    "W2": 100,
+    "W3": 100,
+    "W4": 100,
+    "W5": 0,
+    "W6": 100,
+    "W7": 100,
+    "W8": 75,
+    "score": 78.9
+   },
+   "metricsAfter": {
+    "L1": 100,
+    "L2": 100,
+    "L6": 100,
+    "N1": 100,
+    "W1": 100,
+    "W2": 100,
+    "W3": 100,
+    "W4": 100,
+    "W5": 100,
+    "W6": 100,
+    "W7": 100,
+    "W8": 94,
+    "score": 99.6
+   },
+   "checkBefore": {
+    "lint-off-grid": 0,
+    "lint-overlap": 0,
+    "lint-pin-coincidence": 0,
+    "lint-tight": 0,
+    "marker-geometry": 0,
+    "reversed-net-flag": 0
+   },
+   "checkAfter": {
+    "lint-off-grid": 0,
+    "lint-overlap": 0,
+    "lint-pin-coincidence": 0,
+    "lint-tight": 0,
+    "marker-geometry": 0,
+    "reversed-net-flag": 0
+   },
+   "pinNetIdentical": true,
+   "connectivityIdentical": true,
+   "passes": [
+    {
+     "pass": "trunk",
+     "tried": 3,
+     "accepted": 1,
+     "rejected": {
+      "not-better": 2
+     }
+    },
+    {
+     "pass": "marker",
+     "tried": 6,
+     "accepted": 1,
+     "rejected": {
+      "not-better": 5
+     }
+    }
+   ],
+   "evaluations": 155,
+   "priority": "connectivity \u003e readability \u003e aesthetics: every move re-passes geometry, nets, ownership and offline check/lint counts, else it is rolled back"
+  }
+ },
+ {
+  "after": {
+   "L1": 66.7,
+   "L2": 76.9,
+   "L3": 75,
+   "L4": 53.1,
+   "L6": 44.4,
+   "L7": 100,
+   "N1": 100,
+   "W1": 90.2,
+   "W2": 65.2,
+   "W3": 100,
+   "W4": 100,
+   "W5": 86.7,
+   "W6": 92.9,
+   "W7": 88.5,
+   "W8": 83.6,
+   "score": 85
+  },
+  "before": {
+   "L1": 33.3,
+   "L2": 76.9,
+   "L3": 75,
+   "L4": 53.1,
+   "L6": 44.4,
+   "L7": 100,
+   "N1": 100,
+   "W1": 88,
+   "W2": 30.4,
+   "W3": 100,
+   "W4": 100,
+   "W5": 66.7,
+   "W6": 98,
+   "W7": 76.2,
+   "W8": 82.5,
+   "score": 79.2
+  },
+  "fixture": "buck-zone",
+  "report": {
+   "style": "balanced",
+   "status": "improved",
+   "scoreBefore": 79.2,
+   "scoreAfter": 85,
+   "defectsBefore": 7,
+   "defectsAfter": 4,
+   "metricsBefore": {
+    "L1": 33.3,
+    "L2": 76.9,
+    "L3": 75,
+    "L4": 53.1,
+    "L6": 44.4,
+    "L7": 100,
+    "N1": 100,
+    "W1": 88,
+    "W2": 30.4,
+    "W3": 100,
+    "W4": 100,
+    "W5": 66.7,
+    "W6": 98,
+    "W7": 76.2,
+    "W8": 82.5,
+    "score": 79.2
+   },
+   "metricsAfter": {
+    "L1": 66.7,
+    "L2": 76.9,
+    "L3": 75,
+    "L4": 53.1,
+    "L6": 44.4,
+    "L7": 100,
+    "N1": 100,
+    "W1": 90.2,
+    "W2": 65.2,
+    "W3": 100,
+    "W4": 100,
+    "W5": 86.7,
+    "W6": 92.9,
+    "W7": 88.5,
+    "W8": 83.6,
+    "score": 85
+   },
+   "checkBefore": {
+    "lint-off-grid": 0,
+    "lint-overlap": 0,
+    "lint-pin-coincidence": 0,
+    "lint-tight": 0,
+    "marker-geometry": 0,
+    "reversed-net-flag": 0,
+    "wire-crossing": 4
+   },
+   "checkAfter": {
+    "lint-off-grid": 0,
+    "lint-overlap": 0,
+    "lint-pin-coincidence": 0,
+    "lint-tight": 0,
+    "marker-geometry": 0,
+    "reversed-net-flag": 0,
+    "wire-crossing": 2
+   },
+   "pinNetIdentical": true,
+   "connectivityIdentical": true,
+   "passes": [
+    {
+     "pass": "align",
+     "tried": 15,
+     "accepted": 0,
+     "rejected": {
+      "check": 1,
+      "reroute": 14
+     }
+    },
+    {
+     "pass": "trunk",
+     "tried": 39,
+     "accepted": 7,
+     "rejected": {
+      "no-candidate": 25,
+      "not-better": 7
+     }
+    },
+    {
+     "pass": "marker",
+     "tried": 8,
+     "accepted": 1,
+     "rejected": {
+      "not-better": 7
+     }
+    }
+   ],
+   "evaluations": 696,
+   "priority": "connectivity \u003e readability \u003e aesthetics: every move re-passes geometry, nets, ownership and offline check/lint counts, else it is rolled back"
+  }
+ },
+ {
+  "after": {
+   "L1": 40,
+   "L2": 95.2,
+   "L3": 45,
+   "L4": 100,
+   "L6": 100,
+   "L7": 100,
+   "N1": 0,
+   "N3": 50,
+   "W1": 71.6,
+   "W2": 0,
+   "W3": 100,
+   "W4": 100,
+   "W5": 68.8,
+   "W6": 86.3,
+   "W7": 91.1,
+   "W8": 82.9,
+   "score": 66.6
+  },
+  "before": {
+   "L1": 20,
+   "L2": 85.7,
+   "L3": 45,
+   "L4": 100,
+   "L6": 100,
+   "L7": 100,
+   "N1": 0,
+   "N3": 50,
+   "W1": 68.1,
+   "W2": 0,
+   "W3": 100,
+   "W4": 100,
+   "W5": 56.3,
+   "W6": 100,
+   "W7": 73.7,
+   "W8": 82.1,
+   "score": 63.8
+  },
+  "fixture": "mcu-zone",
+  "report": {
+   "style": "balanced",
+   "status": "improved",
+   "scoreBefore": 63.8,
+   "scoreAfter": 66.6,
+   "defectsBefore": 21,
+   "defectsAfter": 14,
+   "metricsBefore": {
+    "L1": 20,
+    "L2": 85.7,
+    "L3": 45,
+    "L4": 100,
+    "L6": 100,
+    "L7": 100,
+    "N1": 0,
+    "N3": 50,
+    "W1": 68.1,
+    "W2": 0,
+    "W3": 100,
+    "W4": 100,
+    "W5": 56.3,
+    "W6": 100,
+    "W7": 73.7,
+    "W8": 82.1,
+    "score": 63.8
+   },
+   "metricsAfter": {
+    "L1": 40,
+    "L2": 95.2,
+    "L3": 45,
+    "L4": 100,
+    "L6": 100,
+    "L7": 100,
+    "N1": 0,
+    "N3": 50,
+    "W1": 71.6,
+    "W2": 0,
+    "W3": 100,
+    "W4": 100,
+    "W5": 68.8,
+    "W6": 86.3,
+    "W7": 91.1,
+    "W8": 82.9,
+    "score": 66.6
+   },
+   "checkBefore": {
+    "lint-off-grid": 0,
+    "lint-overlap": 0,
+    "lint-pin-coincidence": 0,
+    "lint-tight": 0,
+    "marker-geometry": 0,
+    "reversed-net-flag": 0,
+    "wire-crossing": 18
+   },
+   "checkAfter": {
+    "lint-off-grid": 0,
+    "lint-overlap": 0,
+    "lint-pin-coincidence": 0,
+    "lint-tight": 0,
+    "marker-geometry": 0,
+    "reversed-net-flag": 0,
+    "wire-crossing": 13
+   },
+   "pinNetIdentical": true,
+   "connectivityIdentical": true,
+   "passes": [
+    {
+     "pass": "align",
+     "tried": 14,
+     "accepted": 0,
+     "rejected": {
+      "reroute": 14
+     }
+    },
+    {
+     "pass": "trunk",
+     "tried": 27,
+     "accepted": 6,
+     "rejected": {
+      "no-candidate": 20,
+      "not-better": 1
+     }
+    }
+   ],
+   "evaluations": 947,
+   "busLanes": [
+    {
+     "group": "U0_UART",
+     "kind": "uart",
+     "members": [
+      "U0RXD",
+      "U0TXD"
+     ],
+     "markers": 2,
+     "direction": "right",
+     "axis": "x",
+     "column": 165,
+     "pitch": 10,
+     "pitchCV": 0,
+     "aligned": 0.5,
+     "sameDir": 1
+    }
+   ],
+   "priority": "connectivity \u003e readability \u003e aesthetics: every move re-passes geometry, nets, ownership and offline check/lint counts, else it is rolled back"
+  }
+ },
+ {
+  "after": {
+   "L1": 66.7,
+   "L2": 81.3,
+   "L3": 0,
+   "L6": 9.1,
+   "L7": 88.1,
+   "N1": 100,
+   "N3": 50,
+   "W1": 80.3,
+   "W2": 36.8,
+   "W3": 100,
+   "W4": 100,
+   "W5": 75,
+   "W6": 96.2,
+   "W7": 100,
+   "W8": 81.2,
+   "score": 71.6
+  },
+  "before": {
+   "L1": 0,
+   "L2": 75,
+   "L3": 0,
+   "L6": 9.1,
+   "L7": 88.1,
+   "N1": 0,
+   "N3": 25,
+   "W1": 85.5,
+   "W2": 15.8,
+   "W3": 100,
+   "W4": 100,
+   "W5": 12.5,
+   "W6": 100,
+   "W7": 100,
+   "W8": 81.2,
+   "score": 50
+  },
+  "fixture": "esp32-mcu-mcu",
+  "report": {
+   "style": "balanced",
+   "status": "improved",
+   "scoreBefore": 50,
+   "scoreAfter": 71.6,
+   "defectsBefore": 5,
+   "defectsAfter": 4,
+   "metricsBefore": {
+    "L1": 0,
+    "L2": 75,
+    "L3": 0,
+    "L6": 9.1,
+    "L7": 88.1,
+    "N1": 0,
+    "N3": 25,
+    "W1": 85.5,
+    "W2": 15.8,
+    "W3": 100,
+    "W4": 100,
+    "W5": 12.5,
+    "W6": 100,
+    "W7": 100,
+    "W8": 81.2,
+    "score": 50
+   },
+   "metricsAfter": {
+    "L1": 66.7,
+    "L2": 81.3,
+    "L3": 0,
+    "L6": 9.1,
+    "L7": 88.1,
+    "N1": 100,
+    "N3": 50,
+    "W1": 80.3,
+    "W2": 36.8,
+    "W3": 100,
+    "W4": 100,
+    "W5": 75,
+    "W6": 96.2,
+    "W7": 100,
+    "W8": 81.2,
+    "score": 71.6
+   },
+   "checkBefore": {
+    "lint-off-grid": 0,
+    "lint-overlap": 0,
+    "lint-pin-coincidence": 0,
+    "lint-tight": 0,
+    "marker-geometry": 0,
+    "reversed-net-flag": 0,
+    "wire-crossing": 4
+   },
+   "checkAfter": {
+    "lint-off-grid": 0,
+    "lint-overlap": 0,
+    "lint-pin-coincidence": 0,
+    "lint-tight": 0,
+    "marker-geometry": 0,
+    "reversed-net-flag": 0,
+    "wire-crossing": 3
+   },
+   "pinNetIdentical": true,
+   "connectivityIdentical": true,
+   "passes": [
+    {
+     "pass": "align",
+     "tried": 6,
+     "accepted": 0,
+     "rejected": {
+      "not-better": 2,
+      "reroute": 4
+     }
+    },
+    {
+     "pass": "trunk",
+     "tried": 21,
+     "accepted": 4,
+     "rejected": {
+      "not-better": 17
+     }
+    },
+    {
+     "pass": "marker",
+     "tried": 11,
+     "accepted": 2,
+     "rejected": {
+      "not-better": 9
+     }
+    }
+   ],
+   "evaluations": 857,
+   "busLanes": [
+    {
+     "group": "U0_UART",
+     "kind": "uart",
+     "members": [
+      "U0RXD",
+      "U0TXD"
+     ],
+     "markers": 2,
+     "direction": "down",
+     "axis": "y",
+     "column": -25,
+     "pitchCV": 0,
+     "aligned": 0.5,
+     "sameDir": 0.5
+    }
+   ],
+   "priority": "connectivity \u003e readability \u003e aesthetics: every move re-passes geometry, nets, ownership and offline check/lint counts, else it is rolled back"
+  }
+ },
+ {
+  "after": {
+   "L1": 100,
+   "L2": 100,
+   "L6": 100,
+   "N1": 100,
+   "W1": 100,
+   "W2": 100,
+   "W3": 100,
+   "W4": 100,
+   "W5": 100,
+   "W6": 100,
+   "W7": 100,
+   "W8": 82.9,
+   "score": 98.9
+  },
+  "before": {
+   "L1": 0,
+   "L2": 80,
+   "L6": 100,
+   "N1": 100,
+   "W1": 100,
+   "W2": 100,
+   "W3": 100,
+   "W4": 100,
+   "W5": 0,
+   "W6": 100,
+   "W7": 100,
+   "W8": 85,
+   "score": 80.8
+  },
+  "fixture": "esp32-mcu-led",
+  "report": {
+   "style": "balanced",
+   "status": "improved",
+   "scoreBefore": 80.8,
+   "scoreAfter": 98.9,
+   "defectsBefore": 0,
+   "defectsAfter": 0,
+   "metricsBefore": {
+    "L1": 0,
+    "L2": 80,
+    "L6": 100,
+    "N1": 100,
+    "W1": 100,
+    "W2": 100,
+    "W3": 100,
+    "W4": 100,
+    "W5": 0,
+    "W6": 100,
+    "W7": 100,
+    "W8": 85,
+    "score": 80.8
+   },
+   "metricsAfter": {
+    "L1": 100,
+    "L2": 100,
+    "L6": 100,
+    "N1": 100,
+    "W1": 100,
+    "W2": 100,
+    "W3": 100,
+    "W4": 100,
+    "W5": 100,
+    "W6": 100,
+    "W7": 100,
+    "W8": 82.9,
+    "score": 98.9
+   },
+   "checkBefore": {
+    "lint-off-grid": 0,
+    "lint-overlap": 0,
+    "lint-pin-coincidence": 0,
+    "lint-tight": 0,
+    "marker-geometry": 0,
+    "reversed-net-flag": 0
+   },
+   "checkAfter": {
+    "lint-off-grid": 0,
+    "lint-overlap": 0,
+    "lint-pin-coincidence": 0,
+    "lint-tight": 0,
+    "marker-geometry": 0,
+    "reversed-net-flag": 0
+   },
+   "pinNetIdentical": true,
+   "connectivityIdentical": true,
+   "passes": [
+    {
+     "pass": "trunk",
+     "tried": 4,
+     "accepted": 1,
+     "rejected": {
+      "not-better": 3
+     }
+    },
+    {
+     "pass": "marker",
+     "tried": 6,
+     "accepted": 1,
+     "rejected": {
+      "not-better": 5
+     }
+    }
+   ],
+   "evaluations": 174,
+   "priority": "connectivity \u003e readability \u003e aesthetics: every move re-passes geometry, nets, ownership and offline check/lint counts, else it is rolled back"
+  }
+ },
+ {
+  "after": {
+   "L2": 100,
+   "L3": 100,
+   "L6": 100,
+   "L7": 70.6,
+   "N1": 100,
+   "W1": 95,
+   "W2": 100,
+   "W3": 100,
+   "W4": 100,
+   "W5": 100,
+   "W6": 100,
+   "W7": 100,
+   "W8": 93.2,
+   "score": 97.1
+  },
+  "before": {
+   "L2": 58.3,
+   "L3": 100,
+   "L6": 100,
+   "L7": 70.6,
+   "N1": 100,
+   "W1": 100,
+   "W2": 100,
+   "W3": 100,
+   "W4": 100,
+   "W5": 100,
+   "W6": 100,
+   "W7": 100,
+   "W8": 80,
+   "score": 93.4
+  },
+  "fixture": "esp32-mcu-autodl",
+  "report": {
+   "style": "balanced",
+   "status": "improved",
+   "scoreBefore": 93.4,
+   "scoreAfter": 97.1,
+   "defectsBefore": 0,
+   "defectsAfter": 0,
+   "metricsBefore": {
+    "L2": 58.3,
+    "L3": 100,
+    "L6": 100,
+    "L7": 70.6,
+    "N1": 100,
+    "W1": 100,
+    "W2": 100,
+    "W3": 100,
+    "W4": 100,
+    "W5": 100,
+    "W6": 100,
+    "W7": 100,
+    "W8": 80,
+    "score": 93.4
+   },
+   "metricsAfter": {
+    "L2": 100,
+    "L3": 100,
+    "L6": 100,
+    "L7": 70.6,
+    "N1": 100,
+    "W1": 95,
+    "W2": 100,
+    "W3": 100,
+    "W4": 100,
+    "W5": 100,
+    "W6": 100,
+    "W7": 100,
+    "W8": 93.2,
+    "score": 97.1
+   },
+   "checkBefore": {
+    "lint-off-grid": 0,
+    "lint-overlap": 0,
+    "lint-pin-coincidence": 0,
+    "lint-tight": 0,
+    "marker-geometry": 0,
+    "reversed-net-flag": 0
+   },
+   "checkAfter": {
+    "lint-off-grid": 0,
+    "lint-overlap": 0,
+    "lint-pin-coincidence": 0,
+    "lint-tight": 0,
+    "marker-geometry": 0,
+    "reversed-net-flag": 0
+   },
+   "pinNetIdentical": true,
+   "connectivityIdentical": true,
+   "passes": [
+    {
+     "pass": "marker",
+     "tried": 24,
+     "accepted": 4,
+     "rejected": {
+      "not-better": 20
+     }
+    },
+    {
+     "pass": "trunk",
+     "tried": 43,
+     "accepted": 4,
+     "rejected": {
+      "not-better": 39
+     }
+    }
+   ],
+   "evaluations": 738,
+   "priority": "connectivity \u003e readability \u003e aesthetics: every move re-passes geometry, nets, ownership and offline check/lint counts, else it is rolled back"
+  }
+ },
+ {
+  "after": {
+   "L1": 100,
+   "L2": 100,
+   "L6": 100,
+   "N1": 100,
+   "W1": 100,
+   "W2": 100,
+   "W3": 100,
+   "W4": 100,
+   "W5": 100,
+   "W6": 100,
+   "W7": 100,
+   "W8": 100,
+   "score": 100
+  },
+  "before": {
+   "L1": 0,
+   "L2": 100,
+   "L6": 100,
+   "N1": 100,
+   "W1": 100,
+   "W2": 100,
+   "W3": 100,
+   "W4": 100,
+   "W5": 100,
+   "W6": 100,
+   "W7": 100,
+   "W8": 100,
+   "score": 90
+  },
+  "fixture": "esp32-mcu-key_boot",
+  "report": {
+   "style": "balanced",
+   "status": "improved",
+   "scoreBefore": 90,
+   "scoreAfter": 100,
+   "defectsBefore": 0,
+   "defectsAfter": 0,
+   "metricsBefore": {
+    "L1": 0,
+    "L2": 100,
+    "L6": 100,
+    "N1": 100,
+    "W1": 100,
+    "W2": 100,
+    "W3": 100,
+    "W4": 100,
+    "W5": 100,
+    "W6": 100,
+    "W7": 100,
+    "W8": 100,
+    "score": 90
+   },
+   "metricsAfter": {
+    "L1": 100,
+    "L2": 100,
+    "L6": 100,
+    "N1": 100,
+    "W1": 100,
+    "W2": 100,
+    "W3": 100,
+    "W4": 100,
+    "W5": 100,
+    "W6": 100,
+    "W7": 100,
+    "W8": 100,
+    "score": 100
+   },
+   "checkBefore": {
+    "lint-off-grid": 0,
+    "lint-overlap": 0,
+    "lint-pin-coincidence": 0,
+    "lint-tight": 0,
+    "marker-geometry": 0,
+    "reversed-net-flag": 0
+   },
+   "checkAfter": {
+    "lint-off-grid": 0,
+    "lint-overlap": 0,
+    "lint-pin-coincidence": 0,
+    "lint-tight": 0,
+    "marker-geometry": 0,
+    "reversed-net-flag": 0
+   },
+   "pinNetIdentical": true,
+   "connectivityIdentical": true,
+   "passes": [
+    {
+     "pass": "marker",
+     "tried": 4,
+     "accepted": 1,
+     "rejected": {
+      "not-better": 3
+     }
+    },
+    {
+     "pass": "trunk",
+     "tried": 1,
+     "accepted": 0,
+     "rejected": {
+      "not-better": 1
+     }
+    }
+   ],
+   "evaluations": 52,
+   "priority": "connectivity \u003e readability \u003e aesthetics: every move re-passes geometry, nets, ownership and offline check/lint counts, else it is rolled back"
+  }
+ },
+ {
+  "after": {
+   "L1": 100,
+   "L2": 100,
+   "L6": 100,
+   "N1": 100,
+   "W1": 100,
+   "W2": 100,
+   "W3": 100,
+   "W4": 100,
+   "W5": 100,
+   "W6": 100,
+   "W7": 100,
+   "W8": 100,
+   "score": 100
+  },
+  "before": {
+   "L1": 0,
+   "L2": 100,
+   "L6": 100,
+   "N1": 100,
+   "W1": 100,
+   "W2": 100,
+   "W3": 100,
+   "W4": 100,
+   "W5": 100,
+   "W6": 100,
+   "W7": 100,
+   "W8": 100,
+   "score": 90
+  },
+  "fixture": "esp32-mcu-key_rst",
+  "report": {
+   "style": "balanced",
+   "status": "improved",
+   "scoreBefore": 90,
+   "scoreAfter": 100,
+   "defectsBefore": 0,
+   "defectsAfter": 0,
+   "metricsBefore": {
+    "L1": 0,
+    "L2": 100,
+    "L6": 100,
+    "N1": 100,
+    "W1": 100,
+    "W2": 100,
+    "W3": 100,
+    "W4": 100,
+    "W5": 100,
+    "W6": 100,
+    "W7": 100,
+    "W8": 100,
+    "score": 90
+   },
+   "metricsAfter": {
+    "L1": 100,
+    "L2": 100,
+    "L6": 100,
+    "N1": 100,
+    "W1": 100,
+    "W2": 100,
+    "W3": 100,
+    "W4": 100,
+    "W5": 100,
+    "W6": 100,
+    "W7": 100,
+    "W8": 100,
+    "score": 100
+   },
+   "checkBefore": {
+    "lint-off-grid": 0,
+    "lint-overlap": 0,
+    "lint-pin-coincidence": 0,
+    "lint-tight": 0,
+    "marker-geometry": 0,
+    "reversed-net-flag": 0
+   },
+   "checkAfter": {
+    "lint-off-grid": 0,
+    "lint-overlap": 0,
+    "lint-pin-coincidence": 0,
+    "lint-tight": 0,
+    "marker-geometry": 0,
+    "reversed-net-flag": 0
+   },
+   "pinNetIdentical": true,
+   "connectivityIdentical": true,
+   "passes": [
+    {
+     "pass": "marker",
+     "tried": 4,
+     "accepted": 1,
+     "rejected": {
+      "not-better": 3
+     }
+    },
+    {
+     "pass": "trunk",
+     "tried": 1,
+     "accepted": 0,
+     "rejected": {
+      "not-better": 1
+     }
+    }
+   ],
+   "evaluations": 52,
+   "priority": "connectivity \u003e readability \u003e aesthetics: every move re-passes geometry, nets, ownership and offline check/lint counts, else it is rolled back"
+  }
+ },
+ {
+  "after": {
+   "L1": 100,
+   "L2": 100,
+   "L3": 66.7,
+   "L6": 100,
+   "N1": 100,
+   "W1": 75,
+   "W2": 100,
+   "W3": 100,
+   "W4": 100,
+   "W5": 100,
+   "W6": 100,
+   "W7": 100,
+   "W8": 82,
+   "score": 94.8
+  },
+  "before": {
+   "L1": 100,
+   "L2": 66.7,
+   "L3": 66.7,
+   "L6": 100,
+   "N1": 100,
+   "W1": 75,
+   "W2": 100,
+   "W3": 100,
+   "W4": 100,
+   "W5": 50,
+   "W6": 100,
+   "W7": 100,
+   "W8": 82.9,
+   "score": 89.2
+  },
+  "fixture": "esp32-pwr-pwr_in",
+  "report": {
+   "style": "balanced",
+   "status": "improved",
+   "scoreBefore": 89.2,
+   "scoreAfter": 94.8,
+   "defectsBefore": 0,
+   "defectsAfter": 0,
+   "metricsBefore": {
+    "L1": 100,
+    "L2": 66.7,
+    "L3": 66.7,
+    "L6": 100,
+    "N1": 100,
+    "W1": 75,
+    "W2": 100,
+    "W3": 100,
+    "W4": 100,
+    "W5": 50,
+    "W6": 100,
+    "W7": 100,
+    "W8": 82.9,
+    "score": 89.2
+   },
+   "metricsAfter": {
+    "L1": 100,
+    "L2": 100,
+    "L3": 66.7,
+    "L6": 100,
+    "N1": 100,
+    "W1": 75,
+    "W2": 100,
+    "W3": 100,
+    "W4": 100,
+    "W5": 100,
+    "W6": 100,
+    "W7": 100,
+    "W8": 82,
+    "score": 94.8
+   },
+   "checkBefore": {
+    "lint-off-grid": 0,
+    "lint-overlap": 0,
+    "lint-pin-coincidence": 0,
+    "lint-tight": 0,
+    "marker-geometry": 0,
+    "reversed-net-flag": 0
+   },
+   "checkAfter": {
+    "lint-off-grid": 0,
+    "lint-overlap": 0,
+    "lint-pin-coincidence": 0,
+    "lint-tight": 0,
+    "marker-geometry": 0,
+    "reversed-net-flag": 0
+   },
+   "pinNetIdentical": true,
+   "connectivityIdentical": true,
+   "passes": [
+    {
+     "pass": "align",
+     "tried": 2,
+     "accepted": 0,
+     "rejected": {
+      "reroute": 2
+     }
+    },
+    {
+     "pass": "trunk",
+     "tried": 12,
+     "accepted": 2,
+     "rejected": {
+      "not-better": 10
+     }
+    },
+    {
+     "pass": "marker",
+     "tried": 12,
+     "accepted": 2,
+     "rejected": {
+      "not-better": 10
+     }
+    }
+   ],
+   "evaluations": 356,
+   "priority": "connectivity \u003e readability \u003e aesthetics: every move re-passes geometry, nets, ownership and offline check/lint counts, else it is rolled back"
+  }
+ },
+ {
+  "after": {
+   "L1": 71.4,
+   "L2": 100,
+   "L3": 29.2,
+   "L6": 100,
+   "L7": 68.9,
+   "N1": 100,
+   "W1": 75,
+   "W2": 76.5,
+   "W3": 100,
+   "W4": 100,
+   "W5": 85.7,
+   "W6": 100,
+   "W7": 100,
+   "W8": 74.9,
+   "score": 86.7
+  },
+  "before": {
+   "L1": 14.3,
+   "L2": 100,
+   "L3": 29.2,
+   "L6": 0,
+   "L7": 68.9,
+   "N1": 100,
+   "W1": 95.6,
+   "W2": 76.5,
+   "W3": 75,
+   "W4": 100,
+   "W5": 60,
+   "W6": 100,
+   "W7": 100,
+   "W8": 75,
+   "score": 75.4
+  },
+  "fixture": "esp32-pwr-buck",
+  "report": {
+   "style": "balanced",
+   "status": "improved",
+   "scoreBefore": 75.4,
+   "scoreAfter": 86.7,
+   "defectsBefore": 3,
+   "defectsAfter": 1,
+   "metricsBefore": {
+    "L1": 14.3,
+    "L2": 100,
+    "L3": 29.2,
+    "L6": 0,
+    "L7": 68.9,
+    "N1": 100,
+    "W1": 95.6,
+    "W2": 76.5,
+    "W3": 75,
+    "W4": 100,
+    "W5": 60,
+    "W6": 100,
+    "W7": 100,
+    "W8": 75,
+    "score": 75.4
+   },
+   "metricsAfter": {
+    "L1": 71.4,
+    "L2": 100,
+    "L3": 29.2,
+    "L6": 100,
+    "L7": 68.9,
+    "N1": 100,
+    "W1": 75,
+    "W2": 76.5,
+    "W3": 100,
+    "W4": 100,
+    "W5": 85.7,
+    "W6": 100,
+    "W7": 100,
+    "W8": 74.9,
+    "score": 86.7
+   },
+   "checkBefore": {
+    "lint-off-grid": 0,
+    "lint-overlap": 0,
+    "lint-pin-coincidence": 0,
+    "lint-tight": 0,
+    "marker-geometry": 0,
+    "reversed-net-flag": 0,
+    "wire-crossing": 1
+   },
+   "checkAfter": {
+    "lint-off-grid": 0,
+    "lint-overlap": 0,
+    "lint-pin-coincidence": 0,
+    "lint-tight": 0,
+    "marker-geometry": 0,
+    "reversed-net-flag": 0,
+    "wire-crossing": 1
+   },
+   "pinNetIdentical": true,
+   "connectivityIdentical": true,
+   "passes": [
+    {
+     "pass": "align",
+     "tried": 4,
+     "accepted": 0,
+     "rejected": {
+      "check": 3,
+      "connectivity": 1
+     }
+    },
+    {
+     "pass": "trunk",
+     "tried": 60,
+     "accepted": 2,
+     "rejected": {
+      "no-candidate": 20,
+      "not-better": 38
+     }
+    },
+    {
+     "pass": "marker",
+     "tried": 40,
+     "accepted": 7,
+     "rejected": {
+      "not-better": 33
+     }
+    }
+   ],
+   "evaluations": 1313,
+   "priority": "connectivity \u003e readability \u003e aesthetics: every move re-passes geometry, nets, ownership and offline check/lint counts, else it is rolled back"
+  }
+ },
+ {
+  "after": {
+   "L1": 33.3,
+   "L2": 92.3,
+   "L3": 0,
+   "L6": 100,
+   "N1": 0,
+   "N3": 50,
+   "W1": 66.7,
+   "W2": 0,
+   "W3": 100,
+   "W4": 100,
+   "W5": 40,
+   "W6": 21.4,
+   "W7": 46.7,
+   "W8": 83.7,
+   "score": 50.6
+  },
+  "before": {
+   "L1": 33.3,
+   "L2": 84.6,
+   "L3": 0,
+   "L6": 100,
+   "N1": 0,
+   "N3": 25,
+   "W1": 61.1,
+   "W2": 0,
+   "W3": 100,
+   "W4": 100,
+   "W5": 20,
+   "W6": 0,
+   "W7": 35.9,
+   "W8": 83,
+   "score": 43.8
+  },
+  "fixture": "esp32-pwr-usb_conn",
+  "report": {
+   "style": "balanced",
+   "status": "improved",
+   "scoreBefore": 43.8,
+   "scoreAfter": 50.6,
+   "defectsBefore": 17,
+   "defectsAfter": 14,
+   "metricsBefore": {
+    "L1": 33.3,
+    "L2": 84.6,
+    "L3": 0,
+    "L6": 100,
+    "N1": 0,
+    "N3": 25,
+    "W1": 61.1,
+    "W2": 0,
+    "W3": 100,
+    "W4": 100,
+    "W5": 20,
+    "W6": 0,
+    "W7": 35.9,
+    "W8": 83,
+    "score": 43.8
+   },
+   "metricsAfter": {
+    "L1": 33.3,
+    "L2": 92.3,
+    "L3": 0,
+    "L6": 100,
+    "N1": 0,
+    "N3": 50,
+    "W1": 66.7,
+    "W2": 0,
+    "W3": 100,
+    "W4": 100,
+    "W5": 40,
+    "W6": 21.4,
+    "W7": 46.7,
+    "W8": 83.7,
+    "score": 50.6
+   },
+   "checkBefore": {
+    "lint-off-grid": 0,
+    "lint-overlap": 0,
+    "lint-pin-coincidence": 0,
+    "lint-tight": 0,
+    "marker-geometry": 0,
+    "reversed-net-flag": 0,
+    "wire-crossing": 12
+   },
+   "checkAfter": {
+    "lint-off-grid": 0,
+    "lint-overlap": 0,
+    "lint-pin-coincidence": 0,
+    "lint-tight": 0,
+    "marker-geometry": 0,
+    "reversed-net-flag": 0,
+    "wire-crossing": 10
+   },
+   "pinNetIdentical": true,
+   "connectivityIdentical": true,
+   "passes": [
+    {
+     "pass": "trunk",
+     "tried": 43,
+     "accepted": 2,
+     "rejected": {
+      "no-candidate": 28,
+      "not-better": 13
+     }
+    }
+   ],
+   "evaluations": 418,
+   "busLanes": [
+    {
+     "group": "USB",
+     "kind": "usb",
+     "members": [
+      "USB_DM",
+      "USB_DP"
+     ],
+     "markers": 2,
+     "direction": "right",
+     "axis": "x",
+     "column": 140,
+     "pitch": 60,
+     "pitchCV": 0,
+     "aligned": 0.5,
+     "sameDir": 1
+    }
+   ],
+   "priority": "connectivity \u003e readability \u003e aesthetics: every move re-passes geometry, nets, ownership and offline check/lint counts, else it is rolled back"
+  }
+ },
+ {
+  "after": {
+   "L1": 20,
+   "L2": 89.5,
+   "L3": 0,
+   "L6": 100,
+   "N1": 100,
+   "N3": 62.5,
+   "W1": 95.6,
+   "W2": 52.9,
+   "W3": 100,
+   "W4": 100,
+   "W5": 80,
+   "W6": 100,
+   "W7": 39.4,
+   "W8": 80.6,
+   "score": 72.5
+  },
+  "before": {
+   "L1": 20,
+   "L2": 84.2,
+   "L3": 0,
+   "L6": 100,
+   "N1": 100,
+   "N3": 25,
+   "W1": 92.6,
+   "W2": 52.9,
+   "W3": 100,
+   "W4": 100,
+   "W5": 60,
+   "W6": 100,
+   "W7": 42.9,
+   "W8": 80.3,
+   "score": 67.1
+  },
+  "fixture": "esp32-pwr-uart",
+  "report": {
+   "style": "balanced",
+   "status": "improved",
+   "scoreBefore": 67.1,
+   "scoreAfter": 72.5,
+   "defectsBefore": 5,
+   "defectsAfter": 5,
+   "metricsBefore": {
+    "L1": 20,
+    "L2": 84.2,
+    "L3": 0,
+    "L6": 100,
+    "N1": 100,
+    "N3": 25,
+    "W1": 92.6,
+    "W2": 52.9,
+    "W3": 100,
+    "W4": 100,
+    "W5": 60,
+    "W6": 100,
+    "W7": 42.9,
+    "W8": 80.3,
+    "score": 67.1
+   },
+   "metricsAfter": {
+    "L1": 20,
+    "L2": 89.5,
+    "L3": 0,
+    "L6": 100,
+    "N1": 100,
+    "N3": 62.5,
+    "W1": 95.6,
+    "W2": 52.9,
+    "W3": 100,
+    "W4": 100,
+    "W5": 80,
+    "W6": 100,
+    "W7": 39.4,
+    "W8": 80.6,
+    "score": 72.5
+   },
+   "checkBefore": {
+    "lint-off-grid": 0,
+    "lint-overlap": 0,
+    "lint-pin-coincidence": 0,
+    "lint-tight": 0,
+    "marker-geometry": 0,
+    "reversed-net-flag": 0,
+    "wire-crossing": 2
+   },
+   "checkAfter": {
+    "lint-off-grid": 0,
+    "lint-overlap": 0,
+    "lint-pin-coincidence": 0,
+    "lint-tight": 0,
+    "marker-geometry": 0,
+    "reversed-net-flag": 0,
+    "wire-crossing": 2
+   },
+   "pinNetIdentical": true,
+   "connectivityIdentical": true,
+   "passes": [
+    {
+     "pass": "trunk",
+     "tried": 29,
+     "accepted": 2,
+     "rejected": {
+      "no-candidate": 11,
+      "not-better": 16
+     }
+    },
+    {
+     "pass": "marker",
+     "tried": 24,
+     "accepted": 0,
+     "rejected": {
+      "not-better": 24
+     }
+    }
+   ],
+   "evaluations": 631,
+   "busLanes": [
+    {
+     "group": "U0_UART",
+     "kind": "uart",
+     "members": [
+      "U0RXD",
+      "U0TXD"
+     ],
+     "markers": 2,
+     "direction": "left",
+     "axis": "x",
+     "column": -85,
+     "pitchCV": 0,
+     "aligned": 0.5,
+     "sameDir": 0.5
+    },
+    {
+     "group": "USB",
+     "kind": "usb",
+     "members": [
+      "USB_DM",
+      "USB_DP"
+     ],
+     "markers": 2,
+     "direction": "left",
+     "axis": "x",
+     "column": -170,
+     "pitch": 20,
+     "pitchCV": 0,
+     "aligned": 1,
+     "sameDir": 1
+    }
+   ],
+   "priority": "connectivity \u003e readability \u003e aesthetics: every move re-passes geometry, nets, ownership and offline check/lint counts, else it is rolled back"
+  }
+ },
+ {
+  "after": {
+   "L1": 100,
+   "L2": 100,
+   "L3": 0,
+   "L6": 100,
+   "N1": 100,
+   "N2": 100,
+   "W1": 96.4,
+   "W2": 100,
+   "W3": 100,
+   "W4": 100,
+   "W5": 100,
+   "W6": 100,
+   "W7": 100,
+   "W8": 93.3,
+   "score": 91.9
+  },
+  "before": {
+   "L1": 100,
+   "L2": 100,
+   "L3": 0,
+   "L6": 100,
+   "N1": 0,
+   "W1": 100,
+   "W2": 100,
+   "W3": 100,
+   "W4": 100,
+   "W5": 100,
+   "W6": 100,
+   "W7": 100,
+   "W8": 100,
+   "score": 72.5
+  },
+  "fixture": "synthetic-long-wire",
+  "report": {
+   "style": "balanced",
+   "status": "improved",
+   "scoreBefore": 72.5,
+   "scoreAfter": 91.9,
+   "defectsBefore": 0,
+   "defectsAfter": 0,
+   "metricsBefore": {
+    "L1": 100,
+    "L2": 100,
+    "L3": 0,
+    "L6": 100,
+    "N1": 0,
+    "W1": 100,
+    "W2": 100,
+    "W3": 100,
+    "W4": 100,
+    "W5": 100,
+    "W6": 100,
+    "W7": 100,
+    "W8": 100,
+    "score": 72.5
+   },
+   "metricsAfter": {
+    "L1": 100,
+    "L2": 100,
+    "L3": 0,
+    "L6": 100,
+    "N1": 100,
+    "N2": 100,
+    "W1": 96.4,
+    "W2": 100,
+    "W3": 100,
+    "W4": 100,
+    "W5": 100,
+    "W6": 100,
+    "W7": 100,
+    "W8": 93.3,
+    "score": 91.9
+   },
+   "checkBefore": {
+    "lint-off-grid": 0,
+    "lint-overlap": 0,
+    "lint-pin-coincidence": 0,
+    "lint-tight": 0,
+    "marker-geometry": 0,
+    "reversed-net-flag": 0
+   },
+   "checkAfter": {
+    "lint-off-grid": 0,
+    "lint-overlap": 0,
+    "lint-pin-coincidence": 0,
+    "lint-tight": 0,
+    "marker-geometry": 0,
+    "reversed-net-flag": 0
+   },
+   "pinNetIdentical": true,
+   "connectivityIdentical": false,
+   "labelSplits": [
+    "SIG: 20-unit trunk [0 20]→[0 40] replaced by local labels"
+   ],
+   "passes": [
+    {
+     "pass": "marker",
+     "tried": 9,
+     "accepted": 0,
+     "rejected": {
+      "connectivity": 2,
+      "not-better": 7
+     }
+    },
+    {
+     "pass": "label-split",
+     "tried": 1,
+     "accepted": 1
+    },
+    {
+     "pass": "trunk",
+     "tried": 4,
+     "accepted": 0,
+     "rejected": {
+      "connectivity": 2,
+      "no-candidate": 2
+     }
+    }
+   ],
+   "evaluations": 145,
+   "priority": "connectivity \u003e readability \u003e aesthetics: every move re-passes geometry, nets, ownership and offline check/lint counts, else it is rolled back"
+  }
+ },
+ {
+  "after": {
+   "L1": 100,
+   "L2": 100,
+   "L6": 100,
+   "N1": 100,
+   "N3": 100,
+   "W1": 100,
+   "W2": 100,
+   "W3": 100,
+   "W4": 100,
+   "W5": 100,
+   "W6": 100,
+   "W7": 100,
+   "W8": 100,
+   "score": 100
+  },
+  "before": {
+   "L1": 100,
+   "L2": 100,
+   "L6": 100,
+   "N1": 100,
+   "N3": 50,
+   "W1": 100,
+   "W2": 100,
+   "W3": 100,
+   "W4": 100,
+   "W5": 100,
+   "W6": 100,
+   "W7": 100,
+   "W8": 100,
+   "score": 95
+  },
+  "fixture": "synthetic-bus-lane",
+  "report": {
+   "style": "balanced",
+   "status": "improved",
+   "scoreBefore": 95,
+   "scoreAfter": 100,
+   "defectsBefore": 0,
+   "defectsAfter": 0,
+   "metricsBefore": {
+    "L1": 100,
+    "L2": 100,
+    "L6": 100,
+    "N1": 100,
+    "N3": 50,
+    "W1": 100,
+    "W2": 100,
+    "W3": 100,
+    "W4": 100,
+    "W5": 100,
+    "W6": 100,
+    "W7": 100,
+    "W8": 100,
+    "score": 95
+   },
+   "metricsAfter": {
+    "L1": 100,
+    "L2": 100,
+    "L6": 100,
+    "N1": 100,
+    "N3": 100,
+    "W1": 100,
+    "W2": 100,
+    "W3": 100,
+    "W4": 100,
+    "W5": 100,
+    "W6": 100,
+    "W7": 100,
+    "W8": 100,
+    "score": 100
+   },
+   "checkBefore": {
+    "lint-off-grid": 0,
+    "lint-overlap": 0,
+    "lint-pin-coincidence": 0,
+    "lint-tight": 0,
+    "marker-geometry": 0,
+    "reversed-net-flag": 0
+   },
+   "checkAfter": {
+    "lint-off-grid": 0,
+    "lint-overlap": 0,
+    "lint-pin-coincidence": 0,
+    "lint-tight": 0,
+    "marker-geometry": 0,
+    "reversed-net-flag": 0
+   },
+   "pinNetIdentical": true,
+   "connectivityIdentical": true,
+   "passes": [
+    {
+     "pass": "marker",
+     "tried": 10,
+     "accepted": 2,
+     "rejected": {
+      "not-better": 8
+     }
+    }
+   ],
+   "evaluations": 100,
+   "busLanes": [
+    {
+     "group": "D[0:3]",
+     "kind": "indexed",
+     "members": [
+      "D0",
+      "D1",
+      "D2",
+      "D3"
+     ],
+     "markers": 4,
+     "direction": "right",
+     "axis": "x",
+     "column": 70,
+     "pitch": 20,
+     "pitchCV": 0,
+     "aligned": 1,
+     "sameDir": 1
+    }
+   ],
+   "priority": "connectivity \u003e readability \u003e aesthetics: every move re-passes geometry, nets, ownership and offline check/lint counts, else it is rolled back"
+  }
+ }
+]

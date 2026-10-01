@@ -1,0 +1,383 @@
+{
+ "schemaVersion": 1,
+ "componentIds": {
+  "Q1": "Q1",
+  "Q2": "Q2",
+  "R8": "R_RTS",
+  "R9": "R_DTR"
+ },
+ "pinStates": {
+  "Q1": null,
+  "Q2": null,
+  "R_DTR": null,
+  "R_RTS": null
+ },
+ "placements": [
+  {
+   "primitiveId": "",
+   "designator": "Q1",
+   "x": 0,
+   "y": 0,
+   "rotation": 0,
+   "mirror": false,
+   "bbox": {
+    "minX": -0.5,
+    "minY": -10.5,
+    "maxX": 10.5,
+    "maxY": 10.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "B",
+     "net": "Q1_B",
+     "x": -10,
+     "y": 0
+    },
+    {
+     "number": "2",
+     "name": "E",
+     "net": "DTR",
+     "x": 10,
+     "y": -20
+    },
+    {
+     "number": "3",
+     "name": "C",
+     "net": "IO0",
+     "x": 10,
+     "y": 20
+    }
+   ]
+  },
+  {
+   "primitiveId": "",
+   "designator": "R8",
+   "x": -50,
+   "y": 0,
+   "rotation": 0,
+   "mirror": false,
+   "bbox": {
+    "minX": -60.5,
+    "minY": -4.5,
+    "maxX": -39.5,
+    "maxY": 4.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1",
+     "net": "RTS",
+     "x": -70,
+     "y": 0
+    },
+    {
+     "number": "2",
+     "name": "2",
+     "net": "Q1_B",
+     "x": -30,
+     "y": 0
+    }
+   ]
+  },
+  {
+   "primitiveId": "",
+   "designator": "Q2",
+   "x": -85,
+   "y": 40,
+   "rotation": 0,
+   "mirror": false,
+   "bbox": {
+    "minX": -85.5,
+    "minY": 29.5,
+    "maxX": -74.5,
+    "maxY": 50.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "B",
+     "net": "Q2_B",
+     "x": -95,
+     "y": 40
+    },
+    {
+     "number": "2",
+     "name": "E",
+     "net": "RTS",
+     "x": -75,
+     "y": 20
+    },
+    {
+     "number": "3",
+     "name": "C",
+     "net": "EN",
+     "x": -75,
+     "y": 60
+    }
+   ]
+  },
+  {
+   "primitiveId": "",
+   "designator": "R9",
+   "x": -135,
+   "y": 40,
+   "rotation": 0,
+   "mirror": false,
+   "bbox": {
+    "minX": -145.5,
+    "minY": 35.5,
+    "maxX": -124.5,
+    "maxY": 44.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1",
+     "net": "DTR",
+     "x": -155,
+     "y": 40
+    },
+    {
+     "number": "2",
+     "name": "2",
+     "net": "Q2_B",
+     "x": -115,
+     "y": 40
+    }
+   ]
+  }
+ ],
+ "wires": [
+  {
+   "net": "Q1_B",
+   "points": [
+    [
+     -30,
+     0
+    ],
+    [
+     -10,
+     0
+    ]
+   ]
+  },
+  {
+   "net": "Q2_B",
+   "points": [
+    [
+     -115,
+     40
+    ],
+    [
+     -95,
+     40
+    ]
+   ]
+  },
+  {
+   "net": "RTS",
+   "points": [
+    [
+     -75,
+     20
+    ],
+    [
+     -75,
+     0
+    ]
+   ]
+  },
+  {
+   "net": "RTS",
+   "points": [
+    [
+     -75,
+     0
+    ],
+    [
+     -70,
+     0
+    ]
+   ]
+  },
+  {
+   "net": "DTR",
+   "points": [
+    [
+     -155,
+     40
+    ],
+    [
+     -160,
+     40
+    ]
+   ]
+  },
+  {
+   "net": "DTR",
+   "points": [
+    [
+     -160,
+     40
+    ],
+    [
+     -160,
+     -25
+    ]
+   ]
+  },
+  {
+   "net": "DTR",
+   "points": [
+    [
+     -160,
+     -25
+    ],
+    [
+     10,
+     -25
+    ]
+   ]
+  },
+  {
+   "net": "DTR",
+   "points": [
+    [
+     10,
+     -25
+    ],
+    [
+     10,
+     -20
+    ]
+   ]
+  }
+ ],
+ "flags": [
+  {
+   "net": "Q1_B",
+   "kind": "net_port_bi",
+   "pinX": -20,
+   "pinY": 0,
+   "direction": "up",
+   "offset": 10,
+   "anchor": {
+    "type": "wire_tree",
+    "zoneId": "AUTODL",
+    "net": "Q1_B",
+    "x": -20,
+    "y": 0
+   }
+  },
+  {
+   "net": "DTR",
+   "kind": "net_port_bi",
+   "pinX": -75,
+   "pinY": -25,
+   "direction": "down",
+   "offset": 10,
+   "anchor": {
+    "type": "wire_tree",
+    "zoneId": "AUTODL",
+    "net": "DTR",
+    "x": -75,
+    "y": -25
+   }
+  },
+  {
+   "net": "IO0",
+   "kind": "net_port_bi",
+   "pinX": 10,
+   "pinY": 20,
+   "direction": "up",
+   "offset": 10,
+   "anchor": {
+    "type": "pin",
+    "componentId": "Q1",
+    "pinNumber": "3",
+    "zoneId": "AUTODL",
+    "net": "IO0"
+   }
+  },
+  {
+   "net": "RTS",
+   "kind": "net_port_bi",
+   "pinX": -75,
+   "pinY": 10,
+   "direction": "left",
+   "offset": 10,
+   "anchor": {
+    "type": "wire_tree",
+    "zoneId": "AUTODL",
+    "net": "RTS",
+    "x": -75,
+    "y": 10
+   }
+  },
+  {
+   "net": "Q2_B",
+   "kind": "net_port_bi",
+   "pinX": -105,
+   "pinY": 40,
+   "direction": "up",
+   "offset": 10,
+   "anchor": {
+    "type": "wire_tree",
+    "zoneId": "AUTODL",
+    "net": "Q2_B",
+    "x": -105,
+    "y": 40
+   }
+  },
+  {
+   "net": "EN",
+   "kind": "net_port_bi",
+   "pinX": -75,
+   "pinY": 60,
+   "direction": "up",
+   "offset": 10,
+   "anchor": {
+    "type": "pin",
+    "componentId": "Q2",
+    "pinNumber": "3",
+    "zoneId": "AUTODL",
+    "net": "EN"
+   }
+  }
+ ],
+ "score": [
+  370,
+  14,
+  0,
+  46632
+ ],
+ "candidatesUsed": 282,
+ "search": {
+  "strategy": "checkpoint-local-repair-v1",
+  "backtracks": 0,
+  "repairAttempts": 0,
+  "targetedRelocations": 0,
+  "movedComponents": [],
+  "branchLimit": 98164,
+  "conflictPasses": 1,
+  "skippedCheckpoints": 0,
+  "placementFailures": 0,
+  "dependencyShellJumps": 0,
+  "checkpointAlternatives": {
+   "Q2": 1,
+   "R_DTR": 1,
+   "R_RTS": 1
+  }
+ },
+ "routing": {
+  "strategy": "directional-grid-a-star-v1",
+  "maxExpandedNodes": 200000,
+  "maxNodesPerAttempt": 50000,
+  "expandedNodes": 0,
+  "maxReroutes": 4,
+  "reroutes": 0,
+  "completedJoins": 0,
+  "templateCacheHits": 0
+ }
+}

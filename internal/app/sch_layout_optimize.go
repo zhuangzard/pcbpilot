@@ -506,3 +506,61 @@ func plPlacementRigidEqual(a, b powerLayoutPlacement) bool {
 	}
 	return true
 }
+
+// alignPass (schematic aesthetics B4) snaps one peripheral at a time onto a
+// shared row/column with a same-class neighbour, inside its free space only:
+// the part is translated (never rotated/mirrored), the core never moves, the
+// whole wire forest is regenerated from the incumbent's physical islands, and
+// the candidate must pass every beautify gate (identical connectivity and
+// ownership, no new check/lint finding) and improve the objective.
+func (e *aesEngine) alignPass(p *powerLayoutPlan, obj libAesObjective, budget *int) (libAesObjective, bool) {
+	core := ""
+	for d, id := range e.componentIDs {
+		if id == e.coreID {
+			core = d
+		}
+	}
+	improved := false
+	tried := map[string]bool{}
+	for round := 0; round < 3 && e.budgetLeft(); round++ {
+		changed := false
+		for _, snap := range schAlignSnapTargets(p.Placements, core, e.profile.AlignTol, e.profile.Generate.AlignMove) {
+			if !e.budgetLeft() || *budget <= 0 {
+				break
+			}
+			key := fmt.Sprintf("%s:%g:%g", snap.Designator, snap.DX, snap.DY)
+			if tried[key] {
+				continue
+			}
+			tried[key] = true
+			placements := append([]powerLayoutPlacement(nil), p.Placements...)
+			for i := range placements {
+				if placements[i].Designator == snap.Designator {
+					placements[i] = plTranslate(placements[i], snap.DX, snap.DY)
+				}
+			}
+			local := *budget
+			if local > 4000 {
+				local = 4000
+			}
+			spent := local
+			baseline := &SchematicLayoutResult{ComponentIDs: e.componentIDs, Placements: p.Placements, Wires: p.Wires, Flags: p.Flags}
+			res, err := finishSchematicOptimizationPlacementsWithRouting(placements, e.policies, &local, nil, baseline)
+			*budget -= spent - local
+			if err != nil {
+				e.pass("align").Tried++
+				e.pass("align").Rejected["reroute"]++
+				continue
+			}
+			cand := &powerLayoutPlan{Placements: res.Placements, Wires: res.Wires, Flags: res.Flags}
+			if o, acc := e.try("align", p, obj, cand, false); acc {
+				obj, improved, changed = o, true, true
+				break // snap targets depend on the new placement
+			}
+		}
+		if !changed {
+			break
+		}
+	}
+	return obj, improved
+}

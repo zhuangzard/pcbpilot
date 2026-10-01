@@ -31,7 +31,34 @@ type Profile struct {
 	LongWire      float64            `json:"longWireUnits"`       // N1: wire tree longer → label candidate
 	LongCrossings int                `json:"longWireCrossings"`   // N1: wire tree with more crossings → label candidate
 	ShortLabel    float64            `json:"shortLabelSpanUnits"` // N2: signal net spanning less → a wire reads better
-	Auto          *AutoChoice        `json:"auto,omitempty"`
+	// Generate holds the Phase B generation thresholds (the beautify pass of
+	// sch lib-layout / layout-plan --aesthetics). Soft only: every move is
+	// still re-checked against the full geometry/connectivity gates.
+	Generate GenerateProfile `json:"generate"`
+	Auto     *AutoChoice     `json:"auto,omitempty"`
+}
+
+// GenerateProfile is the Phase B beautify budget/threshold set of one style.
+// Units are canvas units (0.01 in) unless stated.
+type GenerateProfile struct {
+	// JunctionClearance: a T-junction should sit at least this far from any
+	// other node/bend of its island (W5 judge; 2 × 5-unit connection grid).
+	JunctionClearance float64 `json:"junctionClearanceUnits"`
+	// BendCost / CrossCost: maze weights (in units of wire length) for one
+	// bend / one strict crossing of a foreign wire when the beautify pass
+	// re-routes a direct-net trunk.
+	BendCost  float64 `json:"bendCostUnits"`
+	CrossCost float64 `json:"crossCostUnits"`
+	// LabelSplit: allow long-wire → local label conversion (N1) for nets
+	// whose policy permits labels; direct nets are never converted.
+	LabelSplit bool `json:"labelSplit"`
+	// BusPitch: lane pitch for virtual bus labels (N3).
+	BusPitch float64 `json:"busPitchUnits"`
+	// AlignMove: largest translation of one peripheral when snapping it onto
+	// a shared row/column (L3); 0 disables part moves.
+	AlignMove float64 `json:"alignMoveUnits"`
+	// MaxEvaluations bounds candidate evaluations of the whole pass.
+	MaxEvaluations int `json:"maxEvaluations"`
 }
 
 // AutoChoice records why `auto` picked a preset.
@@ -48,11 +75,14 @@ var defaultGroupWeights = map[string]float64{GroupWiring: 0.5, GroupLayout: 0.3,
 var Profiles = map[string]Profile{
 	"functional": {Name: "functional", Weight: 0.05, GridUnits: 5, TargetGrid: 5, GridBlend: 0, AlignTol: 5, NearMissTol: 20,
 		LongWire: 800, LongCrossings: 3, ShortLabel: 80,
+		Generate:      GenerateProfile{JunctionClearance: 10, BendCost: 10, CrossCost: 40, LabelSplit: true, BusPitch: 10, AlignMove: 0, MaxEvaluations: 3000},
 		MetricWeights: map[string]float64{"L3": 0.5, "L4": 0.5, "L7": 0.5, "W8": 0.5, "N3": 0.5}},
 	"balanced": {Name: "balanced", Weight: 0.10, GridUnits: 5, TargetGrid: 10, GridBlend: 0.3, AlignTol: 2, NearMissTol: 15,
-		LongWire: 600, LongCrossings: 2, ShortLabel: 120},
+		LongWire: 600, LongCrossings: 2, ShortLabel: 120,
+		Generate: GenerateProfile{JunctionClearance: 10, BendCost: 20, CrossCost: 80, LabelSplit: true, BusPitch: 10, AlignMove: 20, MaxEvaluations: 6000}},
 	"precision": {Name: "precision", Weight: 0.20, GridUnits: 5, TargetGrid: 10, GridBlend: 0.6, AlignTol: 0.5, NearMissTol: 10,
 		LongWire: 400, LongCrossings: 1, ShortLabel: 150,
+		Generate:      GenerateProfile{JunctionClearance: 10, BendCost: 30, CrossCost: 150, LabelSplit: true, BusPitch: 10, AlignMove: 40, MaxEvaluations: 12000},
 		MetricWeights: map[string]float64{"W1": 1.5, "W2": 1.5, "W3": 1.5, "L2": 1.5, "L3": 1.5, "N3": 1.5}},
 }
 
@@ -128,6 +158,22 @@ func (p *Profile) Validate() error {
 	if p.LongWire <= 0 || p.LongCrossings < 0 || p.ShortLabel < 0 {
 		return fmt.Errorf("longWireUnits must be > 0, longWireCrossings/shortLabelSpanUnits ≥ 0")
 	}
+	g := p.Generate
+	if g.JunctionClearance < 0 || g.JunctionClearance > 50 || math.Mod(g.JunctionClearance, 5) != 0 {
+		return fmt.Errorf("generate.junctionClearanceUnits must be a multiple of 5 in 0…50")
+	}
+	if g.BendCost < 0 || g.BendCost > 200 || g.CrossCost < 0 || g.CrossCost > 1000 {
+		return fmt.Errorf("generate.bendCostUnits must be 0…200 and crossCostUnits 0…1000")
+	}
+	if g.BusPitch < 5 || g.BusPitch > 50 || math.Mod(g.BusPitch, 5) != 0 {
+		return fmt.Errorf("generate.busPitchUnits must be a multiple of 5 in 5…50")
+	}
+	if g.AlignMove < 0 || g.AlignMove > 100 || math.Mod(g.AlignMove, 5) != 0 {
+		return fmt.Errorf("generate.alignMoveUnits must be a multiple of 5 in 0…100")
+	}
+	if g.MaxEvaluations < 0 || g.MaxEvaluations > 200000 {
+		return fmt.Errorf("generate.maxEvaluations outside 0…200000")
+	}
 	return nil
 }
 
@@ -142,7 +188,7 @@ var hardKeys = map[string]string{
 
 var styleKeys = map[string]bool{"name": true, "profile": true, "base": true, "weight": true, "groupWeights": true,
 	"metricWeights": true, "gridUnits": true, "targetGridUnits": true, "gridBlend": true, "alignTolUnits": true,
-	"nearMissTolUnits": true, "longWireUnits": true, "longWireCrossings": true, "shortLabelSpanUnits": true}
+	"nearMissTolUnits": true, "longWireUnits": true, "longWireCrossings": true, "shortLabelSpanUnits": true, "generate": true}
 
 // ParseStyle reads a style object: either the bare object or one wrapped as
 // {"schematic":{…}} (the schematic half of a project "aesthetics" object).

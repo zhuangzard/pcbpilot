@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/zhuangzard/pcbpilot/internal/schguard"
 	"math"
@@ -739,4 +740,299 @@ func libWireContactNodes(wires []powerLayoutWire) map[[2]float64]bool {
 		}
 	}
 	return nodes
+}
+
+// ---------------------------------------------------------------------------
+// Phase B wire cleanup helpers (schematic aesthetics, sch_layout_aesthetics.go).
+// They only read or rebuild candidate geometry; every result is re-validated
+// by validateLibGeometry / validateSchCompositionNets before it can be kept.
+
+// libSplitWiresAtContacts splits every segment at same-net contact points
+// that lie strictly inside it, so each T/X contact is an explicit endpoint.
+func libSplitWiresAtContacts(wires []powerLayoutWire) []powerLayoutWire {
+	var out []powerLayoutWire
+	for _, w := range wires {
+		if len(w.Points) != 2 {
+			out = append(out, w)
+			continue
+		}
+		a, b := w.Points[0], w.Points[1]
+		points := [][2]float64{a, b}
+		for _, v := range wires {
+			if v.Net != w.Net || len(v.Points) != 2 {
+				continue
+			}
+			for _, q := range v.Points {
+				if q != a && q != b && plOnSegment(q, a, b) {
+					dup := false
+					for _, r := range points {
+						dup = dup || r == q
+					}
+					if !dup {
+						points = append(points, q)
+					}
+				}
+			}
+		}
+		axis := 0
+		if a[0] == b[0] {
+			axis = 1
+		}
+		sort.Slice(points, func(i, j int) bool {
+			if a[axis] < b[axis] {
+				return points[i][axis] < points[j][axis]
+			}
+			return points[i][axis] > points[j][axis]
+		})
+		for i := 1; i < len(points); i++ {
+			if points[i-1] != points[i] {
+				out = append(out, powerLayoutWire{Net: w.Net, Points: [][2]float64{points[i-1], points[i]}})
+			}
+		}
+	}
+	return out
+}
+
+// libWirePointDegree counts the wire arms meeting at q on net (a segment
+// passing through q strictly counts twice).
+func libWirePointDegree(wires []powerLayoutWire, net string, q [2]float64) int {
+	n := 0
+	for _, w := range wires {
+		if w.Net != net || len(w.Points) != 2 {
+			continue
+		}
+		a, b := w.Points[0], w.Points[1]
+		switch {
+		case a == q || b == q:
+			n++
+		case plOnSegment(q, a, b):
+			n += 2
+		}
+	}
+	return n
+}
+
+// libPinPointSet / libFlagPointSet are the terminal points a wire may end on.
+func libPinPointSet(p *powerLayoutPlan) map[[2]float64]string {
+	out := map[[2]float64]string{}
+	for _, c := range p.Placements {
+		for _, q := range c.Pins {
+			out[[2]float64{q.X, q.Y}] = q.Net
+		}
+	}
+	return out
+}
+
+func libFlagPointSet(p *powerLayoutPlan) map[[2]float64]bool {
+	out := map[[2]float64]bool{}
+	for _, f := range p.Flags {
+		out[[2]float64{f.PinX, f.PinY}] = true
+	}
+	return out
+}
+
+// libPruneDanglingWires removes wire segments ending in a free end (degree 1,
+// not a pin, not a marker attachment) until none is left. A dangling stub is
+// a sch check finding, so a candidate never keeps one after a removal.
+func libPruneDanglingWires(p *powerLayoutPlan) {
+	pins := libPinPointSet(p)
+	for {
+		flags := libFlagPointSet(p)
+		removed := false
+		var kept []powerLayoutWire
+		for _, w := range p.Wires {
+			dangling := false
+			if len(w.Points) == 2 {
+				for _, e := range w.Points {
+					if _, isPin := pins[e]; isPin || flags[e] {
+						continue
+					}
+					if libWirePointDegree(p.Wires, w.Net, e) <= 1 {
+						dangling = true
+					}
+				}
+				if w.Points[0] == w.Points[1] {
+					dangling = true
+				}
+			}
+			if dangling {
+				removed = true
+				continue
+			}
+			kept = append(kept, w)
+		}
+		p.Wires = kept
+		if !removed {
+			return
+		}
+	}
+}
+
+// libTrunk is a maximal wire chain between key points (pins, marker
+// attachments, junctions/ends); bends inside it have degree 2.
+type libTrunk struct {
+	net     string
+	a, b    [2]float64
+	indices []int
+	length  float64
+}
+
+func libWireTrunks(p *powerLayoutPlan) []libTrunk {
+	pins := libPinPointSet(p)
+	flags := libFlagPointSet(p)
+	key := func(net string, q [2]float64) bool {
+		if _, ok := pins[q]; ok || flags[q] {
+			return true
+		}
+		return libWirePointDegree(p.Wires, net, q) != 2
+	}
+	used := make([]bool, len(p.Wires))
+	var out []libTrunk
+	for start, w := range p.Wires {
+		if used[start] || len(w.Points) != 2 {
+			continue
+		}
+		// Walk both directions from this segment through degree-2 bends.
+		t := libTrunk{net: w.Net, indices: []int{start}}
+		used[start] = true
+		ends := [2][2]float64{w.Points[0], w.Points[1]}
+		for side := 0; side < 2; side++ {
+			at := ends[side]
+			for !key(w.Net, at) {
+				next := -1
+				for j, v := range p.Wires {
+					if used[j] || v.Net != w.Net || len(v.Points) != 2 {
+						continue
+					}
+					if v.Points[0] == at || v.Points[1] == at {
+						next = j
+						break
+					}
+				}
+				if next < 0 {
+					break
+				}
+				used[next] = true
+				t.indices = append(t.indices, next)
+				if p.Wires[next].Points[0] == at {
+					at = p.Wires[next].Points[1]
+				} else {
+					at = p.Wires[next].Points[0]
+				}
+			}
+			ends[side] = at
+		}
+		t.a, t.b = ends[0], ends[1]
+		for _, i := range t.indices {
+			q := p.Wires[i].Points
+			t.length += math.Abs(q[1][0]-q[0][0]) + math.Abs(q[1][1]-q[0][1])
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
+// libRouteTerminal is one end of a candidate route: a pin with its official
+// outward direction, or a point on an existing wire (dir "").
+type libRouteTerminal struct {
+	pt  [2]float64
+	dir string
+}
+
+// libTerminalRoutes enumerates bounded orthogonal routes between two
+// terminals: each pin first escapes along its own outward axis (escapes),
+// then the corridor joins with one bend (two corners) or a Z through a
+// middle/outside corridor. Same outward-first rule as libEscapeRoutes; the
+// caller validates every candidate.
+func libTerminalRoutes(net string, a, b libRouteTerminal, escapes []float64) [][]powerLayoutWire {
+	step := func(t libRouteTerminal, d float64) [2]float64 {
+		if t.dir == "" {
+			return t.pt
+		}
+		x, y := endpointFor(t.pt[0], t.pt[1], d, t.dir)
+		return [2]float64{x, y}
+	}
+	choices := func(t libRouteTerminal) []float64 {
+		if t.dir == "" {
+			return []float64{0}
+		}
+		return escapes
+	}
+	seen := map[string]bool{}
+	var routes [][]powerLayoutWire
+	add := func(points ...[2]float64) {
+		r := libPointsRoute(net, points...)
+		if len(r) == 0 {
+			return
+		}
+		raw, _ := json.Marshal(r)
+		if seen[string(raw)] {
+			return
+		}
+		seen[string(raw)] = true
+		routes = append(routes, r)
+	}
+	for _, da := range choices(a) {
+		for _, db := range choices(b) {
+			x, y := step(a, da), step(b, db)
+			if x[0] == y[0] || x[1] == y[1] {
+				add(a.pt, x, y, b.pt)
+			}
+			add(a.pt, x, [2]float64{x[0], y[1]}, y, b.pt)
+			add(a.pt, x, [2]float64{y[0], x[1]}, y, b.pt)
+			for _, e := range []float64{10, 20} {
+				for _, cy := range []float64{plFloor((x[1] + y[1]) / 2), math.Max(x[1], y[1]) + e, math.Min(x[1], y[1]) - e} {
+					add(a.pt, x, [2]float64{x[0], cy}, [2]float64{y[0], cy}, y, b.pt)
+				}
+				for _, cx := range []float64{plFloor((x[0] + y[0]) / 2), math.Max(x[0], y[0]) + e, math.Min(x[0], y[0]) - e} {
+					add(a.pt, x, [2]float64{cx, x[1]}, [2]float64{cx, y[1]}, y, b.pt)
+				}
+			}
+		}
+	}
+	return routes
+}
+
+// libRouteLeavesTerminals checks the outward-first rule at pin terminals.
+func libRouteLeavesTerminals(route []powerLayoutWire, terminals ...libRouteTerminal) bool {
+	for _, t := range terminals {
+		if t.dir == "" {
+			continue
+		}
+		dx, dy, _ := schguard.CardinalOutward(map[string]float64{"right": 0, "up": 90, "left": 180, "down": 270}[t.dir])
+		for _, w := range route {
+			for i := 1; i < len(w.Points); i++ {
+				a, b := w.Points[i-1], w.Points[i]
+				var other [2]float64
+				switch t.pt {
+				case a:
+					other = b
+				case b:
+					other = a
+				default:
+					continue
+				}
+				vx, vy := other[0]-t.pt[0], other[1]-t.pt[1]
+				if vx*dx+vy*dy <= 0 || vx*dy-vy*dx != 0 {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
+// libFourWayNodes lists same-net wire points with four or more arms (W3):
+// a cross junction reads ambiguously; the cleanup re-lands one branch as a
+// staggered T instead.
+func libFourWayNodes(p *powerLayoutPlan) map[[2]float64]string {
+	out := map[[2]float64]string{}
+	for _, w := range p.Wires {
+		for _, q := range w.Points {
+			if libWirePointDegree(p.Wires, w.Net, q) >= 4 {
+				out[q] = w.Net
+			}
+		}
+	}
+	return out
 }

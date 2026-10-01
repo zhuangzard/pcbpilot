@@ -1,0 +1,115 @@
+{
+ "schemaVersion": 1,
+ "componentIds": {
+  "U1": "core"
+ },
+ "pinStates": {},
+ "placements": [
+  {
+   "primitiveId": "",
+   "designator": "U1",
+   "x": 0,
+   "y": 0,
+   "rotation": 0,
+   "mirror": false,
+   "bbox": {
+    "minX": -30,
+    "minY": -50,
+    "maxX": 30,
+    "maxY": 50
+   },
+   "pins": [
+    {
+     "number": "9",
+     "name": "",
+     "net": "GND",
+     "x": 0,
+     "y": -60,
+     "rotation": 270
+    },
+    {
+     "number": "1",
+     "name": "",
+     "net": "D0",
+     "x": 40,
+     "y": 30,
+     "rotation": 0
+    },
+    {
+     "number": "2",
+     "name": "",
+     "net": "D1",
+     "x": 40,
+     "y": 10,
+     "rotation": 0
+    },
+    {
+     "number": "3",
+     "name": "",
+     "net": "D2",
+     "x": 40,
+     "y": -10,
+     "rotation": 0
+    },
+    {
+     "number": "4",
+     "name": "",
+     "net": "D3",
+     "x": 40,
+     "y": -30,
+     "rotation": 0
+    }
+   ]
+  }
+ ],
+ "wires": null,
+ "flags": [
+  {
+   "net": "GND",
+   "kind": "ground",
+   "pinX": 0,
+   "pinY": -60,
+   "direction": "down",
+   "offset": 10
+  },
+  {
+   "net": "D0",
+   "kind": "net_port_bi",
+   "pinX": 40,
+   "pinY": 30,
+   "direction": "right",
+   "offset": 10
+  },
+  {
+   "net": "D1",
+   "kind": "net_port_bi",
+   "pinX": 40,
+   "pinY": 10,
+   "direction": "right",
+   "offset": 30
+  },
+  {
+   "net": "D2",
+   "kind": "net_port_bi",
+   "pinX": 40,
+   "pinY": -10,
+   "direction": "right",
+   "offset": 10
+  },
+  {
+   "net": "D3",
+   "kind": "net_port_bi",
+   "pinX": 40,
+   "pinY": -30,
+   "direction": "right",
+   "offset": 30
+  }
+ ],
+ "score": [
+  0,
+  0,
+  0,
+  0
+ ],
+ "candidatesUsed": 0
+}

@@ -1,0 +1,249 @@
+{
+ "schemaVersion": 1,
+ "componentIds": {
+  "R1": "r1",
+  "R2": "r2",
+  "U1": "core"
+ },
+ "pinStates": {},
+ "placements": [
+  {
+   "primitiveId": "",
+   "designator": "U1",
+   "x": 400,
+   "y": -200,
+   "rotation": 0,
+   "mirror": false,
+   "bbox": {
+    "minX": 380,
+    "minY": -220,
+    "maxX": 420,
+    "maxY": -180
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "",
+     "net": "GND",
+     "x": 400,
+     "y": -230,
+     "rotation": 270
+    },
+    {
+     "number": "2",
+     "name": "",
+     "net": "A",
+     "x": 370,
+     "y": -200,
+     "rotation": 180
+    },
+    {
+     "number": "3",
+     "name": "",
+     "net": "B",
+     "x": 430,
+     "y": -200,
+     "rotation": 0
+    }
+   ]
+  },
+  {
+   "primitiveId": "",
+   "designator": "R1",
+   "x": 0,
+   "y": 0,
+   "rotation": 0,
+   "mirror": false,
+   "bbox": {
+    "minX": -8.5,
+    "minY": -10.5,
+    "maxX": 8.5,
+    "maxY": 10.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "",
+     "net": "SIG",
+     "x": 0,
+     "y": 20,
+     "rotation": 90
+    },
+    {
+     "number": "2",
+     "name": "",
+     "net": "A",
+     "x": 0,
+     "y": -20,
+     "rotation": 270
+    }
+   ]
+  },
+  {
+   "primitiveId": "",
+   "designator": "R2",
+   "x": 800,
+   "y": 0,
+   "rotation": 0,
+   "mirror": false,
+   "bbox": {
+    "minX": 791.5,
+    "minY": -10.5,
+    "maxX": 808.5,
+    "maxY": 10.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "",
+     "net": "SIG",
+     "x": 800,
+     "y": 20,
+     "rotation": 90
+    },
+    {
+     "number": "2",
+     "name": "",
+     "net": "B",
+     "x": 800,
+     "y": -20,
+     "rotation": 270
+    }
+   ]
+  }
+ ],
+ "wires": [
+  {
+   "net": "SIG",
+   "points": [
+    [
+     0,
+     20
+    ],
+    [
+     0,
+     40
+    ]
+   ]
+  },
+  {
+   "net": "SIG",
+   "points": [
+    [
+     0,
+     40
+    ],
+    [
+     800,
+     40
+    ]
+   ]
+  },
+  {
+   "net": "SIG",
+   "points": [
+    [
+     800,
+     40
+    ],
+    [
+     800,
+     20
+    ]
+   ]
+  },
+  {
+   "net": "A",
+   "points": [
+    [
+     0,
+     -20
+    ],
+    [
+     0,
+     -200
+    ]
+   ]
+  },
+  {
+   "net": "A",
+   "points": [
+    [
+     0,
+     -200
+    ],
+    [
+     370,
+     -200
+    ]
+   ]
+  },
+  {
+   "net": "B",
+   "points": [
+    [
+     800,
+     -20
+    ],
+    [
+     800,
+     -200
+    ]
+   ]
+  },
+  {
+   "net": "B",
+   "points": [
+    [
+     800,
+     -200
+    ],
+    [
+     430,
+     -200
+    ]
+   ]
+  }
+ ],
+ "flags": [
+  {
+   "net": "GND",
+   "kind": "ground",
+   "pinX": 400,
+   "pinY": -230,
+   "direction": "down",
+   "offset": 10
+  },
+  {
+   "net": "A",
+   "kind": "net_port_bi",
+   "pinX": 0,
+   "pinY": -100,
+   "direction": "left",
+   "offset": 10
+  },
+  {
+   "net": "B",
+   "kind": "net_port_bi",
+   "pinX": 800,
+   "pinY": -100,
+   "direction": "right",
+   "offset": 10
+  },
+  {
+   "net": "SIG",
+   "kind": "net_port_bi",
+   "pinX": 0,
+   "pinY": 40,
+   "direction": "left",
+   "offset": 10
+  }
+ ],
+ "score": [
+  0,
+  0,
+  0,
+  0
+ ],
+ "candidatesUsed": 0
+}

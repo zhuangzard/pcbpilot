@@ -1,0 +1,516 @@
+{
+ "schemaVersion": 1,
+ "componentIds": {
+  "C1": "cmp-C1",
+  "C2": "cmp-C2",
+  "C3": "cmp-C3",
+  "U1": "cmp-U1"
+ },
+ "pinStates": {},
+ "placements": [
+  {
+   "primitiveId": "",
+   "designator": "U1",
+   "x": 0,
+   "y": 0,
+   "rotation": 180,
+   "mirror": true,
+   "bbox": {
+    "minX": -35.49999999999994,
+    "minY": -20.5,
+    "maxX": 35.50000000000006,
+    "maxY": 20.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "GND",
+     "net": "GND",
+     "x": -45,
+     "y": -10
+    },
+    {
+     "number": "2",
+     "name": "VOUT",
+     "net": "+3V3",
+     "x": -45,
+     "y": 0
+    },
+    {
+     "number": "3",
+     "name": "VIN",
+     "net": "+5V",
+     "x": -45,
+     "y": 10
+    },
+    {
+     "number": "4",
+     "name": "VOUT",
+     "net": "+3V3",
+     "x": 45,
+     "y": 0
+    }
+   ]
+  },
+  {
+   "primitiveId": "",
+   "designator": "C2",
+   "value": "10uF",
+   "x": -80,
+   "y": -10,
+   "rotation": 270,
+   "mirror": false,
+   "bbox": {
+    "minX": -88.5,
+    "minY": -20.5,
+    "maxX": -71.5,
+    "maxY": 0.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1",
+     "net": "+5V",
+     "x": -80,
+     "y": 10
+    },
+    {
+     "number": "2",
+     "name": "2",
+     "net": "GND",
+     "x": -80,
+     "y": -30
+    }
+   ]
+  },
+  {
+   "primitiveId": "",
+   "designator": "C1",
+   "value": "100nF",
+   "x": 80,
+   "y": -10,
+   "rotation": 270,
+   "mirror": false,
+   "bbox": {
+    "minX": 71.5,
+    "minY": -20.500000000000114,
+    "maxX": 88.5,
+    "maxY": 0.4999999999998863
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1",
+     "net": "+3V3",
+     "x": 80,
+     "y": 10
+    },
+    {
+     "number": "2",
+     "name": "2",
+     "net": "GND",
+     "x": 80,
+     "y": -30
+    }
+   ]
+  },
+  {
+   "primitiveId": "",
+   "designator": "C3",
+   "value": "22uF",
+   "x": 50,
+   "y": -85,
+   "rotation": 270,
+   "mirror": false,
+   "bbox": {
+    "minX": 41.5,
+    "minY": -95.50000000000011,
+    "maxX": 58.5,
+    "maxY": -74.50000000000011
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1",
+     "net": "+3V3",
+     "x": 50,
+     "y": -65
+    },
+    {
+     "number": "2",
+     "name": "2",
+     "net": "GND",
+     "x": 50,
+     "y": -105
+    }
+   ]
+  }
+ ],
+ "wires": [
+  {
+   "net": "+3V3",
+   "points": [
+    [
+     45,
+     0
+    ],
+    [
+     50,
+     0
+    ]
+   ]
+  },
+  {
+   "net": "GND",
+   "points": [
+    [
+     -45,
+     -10
+    ],
+    [
+     -50,
+     -10
+    ]
+   ]
+  },
+  {
+   "net": "GND",
+   "points": [
+    [
+     -50,
+     -10
+    ],
+    [
+     -50,
+     -40
+    ]
+   ]
+  },
+  {
+   "net": "GND",
+   "points": [
+    [
+     -50,
+     -40
+    ],
+    [
+     -80,
+     -40
+    ]
+   ]
+  },
+  {
+   "net": "GND",
+   "points": [
+    [
+     -80,
+     -40
+    ],
+    [
+     -80,
+     -30
+    ]
+   ]
+  },
+  {
+   "net": "+5V",
+   "points": [
+    [
+     -45,
+     10
+    ],
+    [
+     -50,
+     10
+    ]
+   ]
+  },
+  {
+   "net": "+5V",
+   "points": [
+    [
+     -50,
+     10
+    ],
+    [
+     -50,
+     40
+    ]
+   ]
+  },
+  {
+   "net": "+5V",
+   "points": [
+    [
+     -50,
+     40
+    ],
+    [
+     -80,
+     40
+    ]
+   ]
+  },
+  {
+   "net": "+5V",
+   "points": [
+    [
+     -80,
+     40
+    ],
+    [
+     -80,
+     10
+    ]
+   ]
+  },
+  {
+   "net": "+3V3",
+   "points": [
+    [
+     -45,
+     0
+    ],
+    [
+     -65,
+     0
+    ]
+   ]
+  },
+  {
+   "net": "+3V3",
+   "points": [
+    [
+     50,
+     -65
+    ],
+    [
+     50,
+     0
+    ]
+   ]
+  },
+  {
+   "net": "+3V3",
+   "points": [
+    [
+     50,
+     0
+    ],
+    [
+     50,
+     20
+    ]
+   ]
+  },
+  {
+   "net": "+3V3",
+   "points": [
+    [
+     50,
+     20
+    ],
+    [
+     80,
+     20
+    ]
+   ]
+  },
+  {
+   "net": "+3V3",
+   "points": [
+    [
+     80,
+     20
+    ],
+    [
+     80,
+     10
+    ]
+   ]
+  }
+ ],
+ "flags": [
+  {
+   "net": "GND",
+   "kind": "ground",
+   "pinX": 80,
+   "pinY": -30,
+   "direction": "down",
+   "offset": 10,
+   "anchor": {
+    "type": "pin",
+    "componentId": "cmp-C1",
+    "pinNumber": "2",
+    "net": "GND"
+   }
+  },
+  {
+   "net": "GND",
+   "kind": "ground",
+   "pinX": 50,
+   "pinY": -105,
+   "direction": "down",
+   "offset": 10,
+   "anchor": {
+    "type": "pin",
+    "componentId": "cmp-C3",
+    "pinNumber": "2",
+    "net": "GND"
+   }
+  },
+  {
+   "net": "GND",
+   "kind": "ground",
+   "pinX": -50,
+   "pinY": -40,
+   "direction": "down",
+   "offset": 10,
+   "anchor": {
+    "type": "wire_tree",
+    "net": "GND",
+    "x": -50,
+    "y": -40
+   }
+  },
+  {
+   "net": "+3V3",
+   "kind": "power",
+   "pinX": -65,
+   "pinY": 0,
+   "direction": "up",
+   "offset": 10,
+   "anchor": {
+    "type": "wire_tree",
+    "net": "+3V3",
+    "x": -65,
+    "y": 0
+   }
+  },
+  {
+   "net": "+5V",
+   "kind": "power",
+   "pinX": -50,
+   "pinY": 40,
+   "direction": "up",
+   "offset": 10,
+   "anchor": {
+    "type": "wire_tree",
+    "net": "+5V",
+    "x": -50,
+    "y": 40
+   }
+  },
+  {
+   "net": "+3V3",
+   "kind": "power",
+   "pinX": 50,
+   "pinY": 20,
+   "direction": "up",
+   "offset": 10,
+   "anchor": {
+    "type": "wire_tree",
+    "net": "+3V3",
+    "x": 50,
+    "y": 20
+   }
+  }
+ ],
+ "score": [
+  0,
+  0,
+  0,
+  0
+ ],
+ "candidatesUsed": 0,
+ "aesthetics": {
+  "style": "balanced",
+  "status": "improved",
+  "scoreBefore": 81.8,
+  "scoreAfter": 96.3,
+  "defectsBefore": 1,
+  "defectsAfter": 0,
+  "metricsBefore": {
+   "L1": 100,
+   "L2": 100,
+   "L3": 0,
+   "L6": 100,
+   "L7": 77.4,
+   "N1": 100,
+   "W1": 85,
+   "W2": 60,
+   "W3": 100,
+   "W4": 100,
+   "W5": 0,
+   "W6": 100,
+   "W7": 100,
+   "W8": 81.5,
+   "score": 81.8
+  },
+  "metricsAfter": {
+   "L1": 100,
+   "L2": 100,
+   "L3": 66.7,
+   "L6": 100,
+   "L7": 79,
+   "N1": 100,
+   "W1": 95,
+   "W2": 100,
+   "W3": 100,
+   "W4": 100,
+   "W5": 100,
+   "W6": 100,
+   "W7": 100,
+   "W8": 97.5,
+   "score": 96.3
+  },
+  "checkBefore": {
+   "lint-off-grid": 0,
+   "lint-overlap": 0,
+   "lint-pin-coincidence": 0,
+   "lint-tight": 0,
+   "marker-geometry": 0,
+   "reversed-net-flag": 0,
+   "wire-crossing": 1
+  },
+  "checkAfter": {
+   "lint-off-grid": 0,
+   "lint-overlap": 0,
+   "lint-pin-coincidence": 0,
+   "lint-tight": 0,
+   "marker-geometry": 0,
+   "reversed-net-flag": 0
+  },
+  "pinNetIdentical": true,
+  "connectivityIdentical": true,
+  "passes": [
+   {
+    "pass": "align",
+    "tried": 2,
+    "accepted": 1,
+    "rejected": {
+     "check": 1
+    }
+   },
+   {
+    "pass": "trunk",
+    "tried": 12,
+    "accepted": 3,
+    "rejected": {
+     "no-candidate": 2,
+     "not-better": 7
+    }
+   },
+   {
+    "pass": "marker",
+    "tried": 12,
+    "accepted": 0,
+    "rejected": {
+     "not-better": 12
+    }
+   }
+  ],
+  "evaluations": 415,
+  "priority": "connectivity \u003e readability \u003e aesthetics: every move re-passes geometry, nets, ownership and offline check/lint counts, else it is rolled back"
+ }
+}
