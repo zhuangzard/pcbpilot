@@ -1,0 +1,1572 @@
+{
+  "schemaVersion": 1,
+  "generator": "pcbpilot intent derive",
+  "sources": {
+    "schematic": [
+      "testdata/stress/hs/pcie-m2/connectivity.json",
+      "testdata/stress/hs/pcie-m2/values.json"
+    ],
+    "sim": "in-process (pcbpilot sim power)",
+    "spec": "testdata/stress/hs/pcie-m2/spec.json",
+    "models": [
+      "../../.agents/skills/pcbpilot/references/power-models.json"
+    ]
+  },
+  "standard": {
+    "name": "IPC-2221B",
+    "insulation": "functional",
+    "mop": "",
+    "mopCount": 0,
+    "pollutionDegree": 2,
+    "materialGroup": "IIIa",
+    "altitudeM": 2000,
+    "overvoltageCategory": "II",
+    "coated": false,
+    "defaulted": [
+      "insulation",
+      "pollutionDegree",
+      "materialGroup",
+      "altitudeM",
+      "overvoltageCategory"
+    ]
+  },
+  "blocks": [
+    {
+      "id": "POWER_IN",
+      "function": "power-input",
+      "core": "J2",
+      "parts": [
+        "J2"
+      ],
+      "nets": [
+        "5V_IN"
+      ],
+      "summary": "J2 (5V_IN, terminal); 0.105 A worst (typical)",
+      "notes": [],
+      "domain": "SELV_5V",
+      "why": [
+        "input sources (sim connector-source): J2"
+      ]
+    },
+    {
+      "id": "LDO_3V3",
+      "function": "ldo",
+      "core": "U9",
+      "parts": [
+        "U9",
+        "C6",
+        "C8",
+        "C90"
+      ],
+      "nets": [
+        "+3V3"
+      ],
+      "summary": "5V_IN 4.998 V → +3V3 3.3 V LDO (AMS1117-3.3), 0.1 A peak / 0.1 A typical, η 63%, loss 0.195 W",
+      "notes": [
+        "Vout regulated to 3.3 V; Iin=Iout+Iq"
+      ],
+      "domain": "SELV_5V",
+      "powerW": 0.1948,
+      "why": [
+        "pcbauto core U9 (power block, 4 parts)",
+        "C6: decap — decouples +3V3 at U9.2",
+        "C8: decap — decouples +3V3 at U9.4",
+        "C90: decap — decouples 5V_IN at U9.3"
+      ]
+    },
+    {
+      "id": "MCU",
+      "function": "mcu",
+      "core": "U1",
+      "parts": [
+        "U1",
+        "C1",
+        "C2",
+        "C5",
+        "C7",
+        "C91",
+        "R1",
+        "R2"
+      ],
+      "nets": [
+        "PCIE_CLKREQ_N",
+        "PCIE_PERST_N",
+        "PCIE_REFCLK_N",
+        "PCIE_REFCLK_P",
+        "PCIE_RX_N",
+        "PCIE_RX_P",
+        "PCIE_TX_N",
+        "PCIE_TX_P",
+        "PCIE_WAKE_N"
+      ],
+      "summary": "ASM-PCIE-RC MCU on +3V3: 0.1 A typical, 0.1 A peak (0.33 W)",
+      "notes": [
+        "load current is ASSUMED (no power model) — add one to power-models.json"
+      ],
+      "domain": "SELV_5V",
+      "powerW": 0.33,
+      "why": [
+        "pcbauto core U1 (mcu block, 8 parts)",
+        "C5: decap — decouples +3V3 at U1.24",
+        "C7: decap — decouples +3V3 at U1.25",
+        "C91: decap — decouples +3V3 at U1.24",
+        "R1: pull — pull on U1.38 (PCIE_CLKREQ_N)",
+        "R2: pull — pull on U1.39 (PCIE_WAKE_N)",
+        "C1: signal — shares signal nets with U1",
+        "C2: signal — shares signal nets with U1"
+      ]
+    },
+    {
+      "id": "CONN_J1",
+      "function": "connector",
+      "core": "J1",
+      "parts": [
+        "J1"
+      ],
+      "nets": [
+        "PCIE_TXC_N",
+        "PCIE_TXC_P"
+      ],
+      "summary": "J1 (M.2-KEY-M-SOCKET): +3V3, PCIE_CLKREQ_N, PCIE_PERST_N, PCIE_REFCLK_N, PCIE_REFCLK_P, PCIE_RX_N, PCIE_RX_P, PCIE_TXC_N, PCIE_TXC_P, PCIE_WAKE_N",
+      "notes": [],
+      "domain": "SELV_5V",
+      "why": [
+        "pcbauto core J1 (interface block, 1 parts)"
+      ]
+    }
+  ],
+  "domains": [
+    {
+      "id": "SELV_5V",
+      "kind": "SELV",
+      "nets": [
+        "+3V3",
+        "5V_IN",
+        "GND",
+        "PCIE_CLKREQ_N",
+        "PCIE_PERST_N",
+        "PCIE_REFCLK_N",
+        "PCIE_REFCLK_P",
+        "PCIE_RX_N",
+        "PCIE_RX_P",
+        "PCIE_TXC_N",
+        "PCIE_TXC_P",
+        "PCIE_TX_N",
+        "PCIE_TX_P",
+        "PCIE_WAKE_N"
+      ],
+      "reference": "GND",
+      "workingVrms": 4.998,
+      "workingVpeak": 4.998,
+      "parts": [
+        "C1",
+        "C2",
+        "C5",
+        "C6",
+        "C7",
+        "C8",
+        "C90",
+        "C91",
+        "J1",
+        "J2",
+        "R1",
+        "R2",
+        "U1",
+        "U9"
+      ],
+      "why": [
+        "≤ 60 V DC / 30 Vrms: SELV (IEC 61140 / 62368-1 ES1)"
+      ]
+    }
+  ],
+  "nets": {
+    "+3V3": {
+      "role": "power",
+      "domain": "SELV_5V",
+      "block": "LDO_3V3",
+      "voltage": {
+        "nom": 3.3,
+        "min": 3.3,
+        "max": 3.3,
+        "peak": 3.3
+      },
+      "currentA": 0.1,
+      "currentSource": "simulated",
+      "pins": [
+        {
+          "ref": "C5",
+          "pin": "1",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "1",
+          "scenario": "typical"
+        },
+        {
+          "ref": "C6",
+          "pin": "1",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "1",
+          "scenario": "typical"
+        },
+        {
+          "ref": "C7",
+          "pin": "1",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "1",
+          "scenario": "typical"
+        },
+        {
+          "ref": "C8",
+          "pin": "1",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "1",
+          "scenario": "typical"
+        },
+        {
+          "ref": "C91",
+          "pin": "1",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "1",
+          "scenario": "typical"
+        },
+        {
+          "ref": "J1",
+          "pin": "2",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "2",
+          "scenario": "typical"
+        },
+        {
+          "ref": "J1",
+          "pin": "4",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "4",
+          "scenario": "typical"
+        },
+        {
+          "ref": "J1",
+          "pin": "12",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "12",
+          "scenario": "typical"
+        },
+        {
+          "ref": "J1",
+          "pin": "14",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "14",
+          "scenario": "typical"
+        },
+        {
+          "ref": "J1",
+          "pin": "16",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "16",
+          "scenario": "typical"
+        },
+        {
+          "ref": "J1",
+          "pin": "18",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "18",
+          "scenario": "typical"
+        },
+        {
+          "ref": "J1",
+          "pin": "70",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "70",
+          "scenario": "typical"
+        },
+        {
+          "ref": "J1",
+          "pin": "72",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "72",
+          "scenario": "typical"
+        },
+        {
+          "ref": "J1",
+          "pin": "74",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "74",
+          "scenario": "typical"
+        },
+        {
+          "ref": "R1",
+          "pin": "1",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "1",
+          "scenario": "typical"
+        },
+        {
+          "ref": "R2",
+          "pin": "1",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "1",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U1",
+          "pin": "24",
+          "currentA": 0.05,
+          "dir": "sink",
+          "name": "VDD",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U1",
+          "pin": "25",
+          "currentA": 0.05,
+          "dir": "sink",
+          "name": "VDD",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U9",
+          "pin": "2",
+          "currentA": 0.05,
+          "dir": "source",
+          "name": "VOUT",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U9",
+          "pin": "4",
+          "currentA": 0.05,
+          "dir": "source",
+          "name": "TAB",
+          "scenario": "typical"
+        }
+      ],
+      "widthMil": {
+        "outer": 10,
+        "inner": 10,
+        "min": 10
+      },
+      "viasPerTransition": 1,
+      "clearanceMil": 4,
+      "impedanceOhm": 0,
+      "diffPair": "",
+      "lengthGroup": "",
+      "netClass": "POWER",
+      "why": [
+        "sim: nom 3.3 V (typical), envelope 3.3…3.3 V over 2 scenario(s)",
+        "simulated worst/typical: 0.100A",
+        "IPC-2221/2152 0.10A ΔT10°C → 0.5mil outer (1.0oz), 1.0mil inner (0.5oz)",
+        "IPC-2221B 3.3 V peak needs ≤ 3.9 mil: fab clearance 4.0 mil governs"
+      ],
+      "scenario": "worst/typical",
+      "padCount": 20,
+      "priority": 4,
+      "via": {
+        "drillMil": 8,
+        "diaMil": 16,
+        "countPerTransition": 1,
+        "perViaA": 0.562,
+        "ampacityA": 0.562,
+        "currentA": 0.1,
+        "marginPct": 461.68,
+        "platingMil": 0.7,
+        "lengthMil": 62.99,
+        "resistanceMOhm": 2.229,
+        "dropMV": 0.223,
+        "source": "sized",
+        "why": "one 8.0/16.0 mil via carries 0.56 A ≥ 0.10 A × 120 % margin"
+      }
+    },
+    "5V_IN": {
+      "role": "power",
+      "domain": "SELV_5V",
+      "block": "POWER_IN",
+      "voltage": {
+        "nom": 4.9979,
+        "min": 4.9979,
+        "max": 4.9979,
+        "peak": 4.9979
+      },
+      "currentA": 0.105,
+      "currentSource": "simulated",
+      "pins": [
+        {
+          "ref": "C90",
+          "pin": "1",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "1",
+          "scenario": "typical"
+        },
+        {
+          "ref": "J2",
+          "pin": "1",
+          "currentA": 0.105,
+          "dir": "source",
+          "name": "1",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U9",
+          "pin": "3",
+          "currentA": 0.105,
+          "dir": "sink",
+          "name": "VIN",
+          "scenario": "typical"
+        }
+      ],
+      "widthMil": {
+        "outer": 10,
+        "inner": 10,
+        "min": 10
+      },
+      "viasPerTransition": 1,
+      "clearanceMil": 4,
+      "impedanceOhm": 0,
+      "diffPair": "",
+      "lengthGroup": "",
+      "netClass": "POWER",
+      "why": [
+        "sim: nom 4.998 V (typical), envelope 4.998…4.998 V over 2 scenario(s)",
+        "simulated worst/typical: 0.105A",
+        "IPC-2221/2152 0.10A ΔT10°C → 0.5mil outer (1.0oz), 1.1mil inner (0.5oz)",
+        "IPC-2221B 5 V peak needs ≤ 3.9 mil: fab clearance 4.0 mil governs"
+      ],
+      "scenario": "worst/typical",
+      "padCount": 3,
+      "priority": 4,
+      "via": {
+        "drillMil": 8,
+        "diaMil": 16,
+        "countPerTransition": 1,
+        "perViaA": 0.562,
+        "ampacityA": 0.562,
+        "currentA": 0.105,
+        "marginPct": 434.94,
+        "platingMil": 0.7,
+        "lengthMil": 62.99,
+        "resistanceMOhm": 2.229,
+        "dropMV": 0.234,
+        "source": "sized",
+        "why": "one 8.0/16.0 mil via carries 0.56 A ≥ 0.10 A × 120 % margin"
+      }
+    },
+    "GND": {
+      "role": "ground",
+      "domain": "SELV_5V",
+      "block": "",
+      "voltage": {
+        "nom": 0,
+        "min": 0,
+        "max": 0,
+        "peak": 0
+      },
+      "currentA": 0.105,
+      "currentSource": "simulated",
+      "pins": [
+        {
+          "ref": "C5",
+          "pin": "2",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "2",
+          "scenario": "typical"
+        },
+        {
+          "ref": "C6",
+          "pin": "2",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "2",
+          "scenario": "typical"
+        },
+        {
+          "ref": "C7",
+          "pin": "2",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "2",
+          "scenario": "typical"
+        },
+        {
+          "ref": "C8",
+          "pin": "2",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "2",
+          "scenario": "typical"
+        },
+        {
+          "ref": "C90",
+          "pin": "2",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "2",
+          "scenario": "typical"
+        },
+        {
+          "ref": "C91",
+          "pin": "2",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "2",
+          "scenario": "typical"
+        },
+        {
+          "ref": "J1",
+          "pin": "3",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "3",
+          "scenario": "typical"
+        },
+        {
+          "ref": "J1",
+          "pin": "5",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "5",
+          "scenario": "typical"
+        },
+        {
+          "ref": "J1",
+          "pin": "11",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "11",
+          "scenario": "typical"
+        },
+        {
+          "ref": "J1",
+          "pin": "17",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "17",
+          "scenario": "typical"
+        },
+        {
+          "ref": "J1",
+          "pin": "23",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "23",
+          "scenario": "typical"
+        },
+        {
+          "ref": "J1",
+          "pin": "29",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "29",
+          "scenario": "typical"
+        },
+        {
+          "ref": "J1",
+          "pin": "35",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "35",
+          "scenario": "typical"
+        },
+        {
+          "ref": "J1",
+          "pin": "39",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "39",
+          "scenario": "typical"
+        },
+        {
+          "ref": "J1",
+          "pin": "45",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "45",
+          "scenario": "typical"
+        },
+        {
+          "ref": "J1",
+          "pin": "51",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "51",
+          "scenario": "typical"
+        },
+        {
+          "ref": "J1",
+          "pin": "57",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "57",
+          "scenario": "typical"
+        },
+        {
+          "ref": "J1",
+          "pin": "71",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "71",
+          "scenario": "typical"
+        },
+        {
+          "ref": "J1",
+          "pin": "73",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "73",
+          "scenario": "typical"
+        },
+        {
+          "ref": "J1",
+          "pin": "75",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "75",
+          "scenario": "typical"
+        },
+        {
+          "ref": "J1",
+          "pin": "S1",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "S1",
+          "scenario": "typical"
+        },
+        {
+          "ref": "J1",
+          "pin": "S2",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "S2",
+          "scenario": "typical"
+        },
+        {
+          "ref": "J2",
+          "pin": "2",
+          "currentA": 0.105,
+          "dir": "sink",
+          "name": "2",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U1",
+          "pin": "13",
+          "currentA": 0.0166667,
+          "dir": "source",
+          "name": "GND",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U1",
+          "pin": "26",
+          "currentA": 0.0166667,
+          "dir": "source",
+          "name": "GND",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U1",
+          "pin": "40",
+          "currentA": 0.0166667,
+          "dir": "source",
+          "name": "GND",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U1",
+          "pin": "43",
+          "currentA": 0.0166667,
+          "dir": "source",
+          "name": "GND",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U1",
+          "pin": "46",
+          "currentA": 0.0166667,
+          "dir": "source",
+          "name": "GND",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U1",
+          "pin": "49",
+          "currentA": 0.0166667,
+          "dir": "source",
+          "name": "49",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U9",
+          "pin": "1",
+          "currentA": 0.005,
+          "dir": "source",
+          "name": "GND",
+          "scenario": "typical"
+        }
+      ],
+      "widthMil": {
+        "outer": 10,
+        "inner": 10,
+        "min": 10
+      },
+      "viasPerTransition": 1,
+      "clearanceMil": 4,
+      "impedanceOhm": 0,
+      "diffPair": "",
+      "lengthGroup": "",
+      "netClass": "GND",
+      "why": [
+        "sim: nom 0 V (typical), envelope 0…0 V over 2 scenario(s)",
+        "simulated worst/typical: 0.105A",
+        "IPC-2221/2152 0.10A ΔT10°C → 0.5mil outer (1.0oz), 1.1mil inner (0.5oz)"
+      ],
+      "scenario": "worst/typical",
+      "padCount": 30,
+      "priority": 6,
+      "via": {
+        "drillMil": 8,
+        "diaMil": 16,
+        "countPerTransition": 1,
+        "perViaA": 0.562,
+        "ampacityA": 0.562,
+        "currentA": 0.105,
+        "marginPct": 434.94,
+        "platingMil": 0.7,
+        "lengthMil": 62.99,
+        "resistanceMOhm": 2.229,
+        "dropMV": 0.234,
+        "source": "sized",
+        "why": "one 8.0/16.0 mil via carries 0.56 A ≥ 0.10 A × 120 % margin"
+      }
+    },
+    "PCIE_CLKREQ_N": {
+      "role": "clock",
+      "domain": "SELV_5V",
+      "block": "MCU",
+      "voltage": {
+        "nom": 3.3,
+        "min": 3.3,
+        "max": 3.3,
+        "peak": 3.3
+      },
+      "currentA": 0,
+      "currentSource": "simulated",
+      "pins": [
+        {
+          "ref": "J1",
+          "pin": "52",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "CLKREQ#",
+          "scenario": "typical"
+        },
+        {
+          "ref": "R1",
+          "pin": "2",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "2",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U1",
+          "pin": "38",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "CLKREQ",
+          "scenario": "typical"
+        }
+      ],
+      "widthMil": {
+        "outer": 4,
+        "inner": 4,
+        "min": 4
+      },
+      "viasPerTransition": 1,
+      "clearanceMil": 4,
+      "impedanceOhm": 0,
+      "diffPair": "",
+      "lengthGroup": "",
+      "netClass": "SIGNAL",
+      "why": [
+        "sim: nom 3.3 V (typical), envelope 3.3…3.3 V over 2 scenario(s)",
+        "simulated worst/typical: 0.000A",
+        "IPC-2221B 3.3 V peak needs ≤ 3.9 mil: fab clearance 4.0 mil governs"
+      ],
+      "scenario": "worst/typical",
+      "padCount": 3
+    },
+    "PCIE_PERST_N": {
+      "role": "signal",
+      "domain": "SELV_5V",
+      "block": "MCU",
+      "voltage": {
+        "nom": 0,
+        "min": 0,
+        "max": 3.3,
+        "peak": 3.3
+      },
+      "currentA": 0,
+      "currentSource": "simulated",
+      "pins": [
+        {
+          "ref": "J1",
+          "pin": "50",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "PERST#",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U1",
+          "pin": "37",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "PERST",
+          "scenario": "typical"
+        }
+      ],
+      "widthMil": {
+        "outer": 4,
+        "inner": 4,
+        "min": 4
+      },
+      "viasPerTransition": 1,
+      "clearanceMil": 4,
+      "impedanceOhm": 0,
+      "diffPair": "",
+      "lengthGroup": "",
+      "netClass": "SIGNAL",
+      "why": [
+        "no DC path in the simulation (floating signal): bounded by the supply rails of the connected parts, ≤ 3.3 V",
+        "simulation: no DC path (floating)",
+        "simulated worst/typical: 0.000A",
+        "IPC-2221B 3.3 V peak needs ≤ 3.9 mil: fab clearance 4.0 mil governs"
+      ],
+      "floating": true,
+      "scenario": "worst/typical",
+      "padCount": 2,
+      "priority": 5
+    },
+    "PCIE_REFCLK_N": {
+      "role": "diff",
+      "domain": "SELV_5V",
+      "block": "MCU",
+      "voltage": {
+        "nom": 0,
+        "min": 0,
+        "max": 3.3,
+        "peak": 3.3
+      },
+      "currentA": 0,
+      "currentSource": "simulated",
+      "pins": [
+        {
+          "ref": "J1",
+          "pin": "53",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "REFCLKn",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U1",
+          "pin": "42",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "REFCLKN",
+          "scenario": "typical"
+        }
+      ],
+      "widthMil": {
+        "outer": 10.2,
+        "inner": 10.2,
+        "min": 10.2
+      },
+      "viasPerTransition": 1,
+      "clearanceMil": 4,
+      "impedanceOhm": 85,
+      "diffPair": "PCIE_REFCLK_P",
+      "lengthGroup": "PCIE_REFCLK",
+      "netClass": "HS_DIFF",
+      "why": [
+        "no DC path in the simulation (floating signal): bounded by the supply rails of the connected parts, ≤ 3.3 V",
+        "simulation: no DC path (floating)",
+        "simulated worst/typical: 0.000A",
+        "PCIE: intra-pair skew ≤ 5 mil, ≤ 2 vias per net (PCIe design-guide default)",
+        "PCIe: 85 Ω differential (PCI-SIG CEM), ≤ 5 mil intra-pair skew: edge-coupled microstrip over h=8.28 mil, εr=4.40, t=1.38 mil → w=10.1 mil, gap=4.0 mil (pcbauto.SolveDiff on JLC04161H-7628 (4-layer 1.6 mm, L1→L2 7628 prepreg 0.2104 mm))",
+        "IPC-2221B 3.3 V peak needs ≤ 3.9 mil: fab clearance 4.0 mil governs"
+      ],
+      "pairGapMil": 4,
+      "floating": true,
+      "scenario": "worst/typical",
+      "interface": "PCIE",
+      "padCount": 2,
+      "priority": 1,
+      "maxSkewMil": 5,
+      "maxVias": 2
+    },
+    "PCIE_REFCLK_P": {
+      "role": "diff",
+      "domain": "SELV_5V",
+      "block": "MCU",
+      "voltage": {
+        "nom": 0,
+        "min": 0,
+        "max": 3.3,
+        "peak": 3.3
+      },
+      "currentA": 0,
+      "currentSource": "simulated",
+      "pins": [
+        {
+          "ref": "J1",
+          "pin": "55",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "REFCLKp",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U1",
+          "pin": "41",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "REFCLKP",
+          "scenario": "typical"
+        }
+      ],
+      "widthMil": {
+        "outer": 10.2,
+        "inner": 10.2,
+        "min": 10.2
+      },
+      "viasPerTransition": 1,
+      "clearanceMil": 4,
+      "impedanceOhm": 85,
+      "diffPair": "PCIE_REFCLK_N",
+      "lengthGroup": "PCIE_REFCLK",
+      "netClass": "HS_DIFF",
+      "why": [
+        "no DC path in the simulation (floating signal): bounded by the supply rails of the connected parts, ≤ 3.3 V",
+        "simulation: no DC path (floating)",
+        "simulated worst/typical: 0.000A",
+        "PCIE: intra-pair skew ≤ 5 mil, ≤ 2 vias per net (PCIe design-guide default)",
+        "PCIe: 85 Ω differential (PCI-SIG CEM), ≤ 5 mil intra-pair skew: edge-coupled microstrip over h=8.28 mil, εr=4.40, t=1.38 mil → w=10.1 mil, gap=4.0 mil (pcbauto.SolveDiff on JLC04161H-7628 (4-layer 1.6 mm, L1→L2 7628 prepreg 0.2104 mm))",
+        "IPC-2221B 3.3 V peak needs ≤ 3.9 mil: fab clearance 4.0 mil governs"
+      ],
+      "pairGapMil": 4,
+      "floating": true,
+      "scenario": "worst/typical",
+      "interface": "PCIE",
+      "padCount": 2,
+      "priority": 1,
+      "maxSkewMil": 5,
+      "maxVias": 2
+    },
+    "PCIE_RX_N": {
+      "role": "diff",
+      "domain": "SELV_5V",
+      "block": "MCU",
+      "voltage": {
+        "nom": 0,
+        "min": 0,
+        "max": 3.3,
+        "peak": 3.3
+      },
+      "currentA": 0,
+      "currentSource": "simulated",
+      "pins": [
+        {
+          "ref": "J1",
+          "pin": "47",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "PETn0",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U1",
+          "pin": "45",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "RXN",
+          "scenario": "typical"
+        }
+      ],
+      "widthMil": {
+        "outer": 10.2,
+        "inner": 10.2,
+        "min": 10.2
+      },
+      "viasPerTransition": 1,
+      "clearanceMil": 4,
+      "impedanceOhm": 85,
+      "diffPair": "PCIE_RX_P",
+      "lengthGroup": "PCIE_RX",
+      "netClass": "HS_DIFF",
+      "why": [
+        "no DC path in the simulation (floating signal): bounded by the supply rails of the connected parts, ≤ 3.3 V",
+        "simulation: no DC path (floating)",
+        "simulated worst/typical: 0.000A",
+        "PCIE: intra-pair skew ≤ 5 mil, ≤ 2 vias per net (PCIe design-guide default)",
+        "PCIe: 85 Ω differential (PCI-SIG CEM), ≤ 5 mil intra-pair skew: edge-coupled microstrip over h=8.28 mil, εr=4.40, t=1.38 mil → w=10.1 mil, gap=4.0 mil (pcbauto.SolveDiff on JLC04161H-7628 (4-layer 1.6 mm, L1→L2 7628 prepreg 0.2104 mm))",
+        "IPC-2221B 3.3 V peak needs ≤ 3.9 mil: fab clearance 4.0 mil governs"
+      ],
+      "pairGapMil": 4,
+      "floating": true,
+      "scenario": "worst/typical",
+      "interface": "PCIE",
+      "padCount": 2,
+      "priority": 1,
+      "maxSkewMil": 5,
+      "maxVias": 2
+    },
+    "PCIE_RX_P": {
+      "role": "diff",
+      "domain": "SELV_5V",
+      "block": "MCU",
+      "voltage": {
+        "nom": 0,
+        "min": 0,
+        "max": 3.3,
+        "peak": 3.3
+      },
+      "currentA": 0,
+      "currentSource": "simulated",
+      "pins": [
+        {
+          "ref": "J1",
+          "pin": "49",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "PETp0",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U1",
+          "pin": "44",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "RXP",
+          "scenario": "typical"
+        }
+      ],
+      "widthMil": {
+        "outer": 10.2,
+        "inner": 10.2,
+        "min": 10.2
+      },
+      "viasPerTransition": 1,
+      "clearanceMil": 4,
+      "impedanceOhm": 85,
+      "diffPair": "PCIE_RX_N",
+      "lengthGroup": "PCIE_RX",
+      "netClass": "HS_DIFF",
+      "why": [
+        "no DC path in the simulation (floating signal): bounded by the supply rails of the connected parts, ≤ 3.3 V",
+        "simulation: no DC path (floating)",
+        "simulated worst/typical: 0.000A",
+        "PCIE: intra-pair skew ≤ 5 mil, ≤ 2 vias per net (PCIe design-guide default)",
+        "PCIe: 85 Ω differential (PCI-SIG CEM), ≤ 5 mil intra-pair skew: edge-coupled microstrip over h=8.28 mil, εr=4.40, t=1.38 mil → w=10.1 mil, gap=4.0 mil (pcbauto.SolveDiff on JLC04161H-7628 (4-layer 1.6 mm, L1→L2 7628 prepreg 0.2104 mm))",
+        "IPC-2221B 3.3 V peak needs ≤ 3.9 mil: fab clearance 4.0 mil governs"
+      ],
+      "pairGapMil": 4,
+      "floating": true,
+      "scenario": "worst/typical",
+      "interface": "PCIE",
+      "padCount": 2,
+      "priority": 1,
+      "maxSkewMil": 5,
+      "maxVias": 2
+    },
+    "PCIE_TXC_N": {
+      "role": "diff",
+      "domain": "SELV_5V",
+      "block": "CONN_J1",
+      "voltage": {
+        "nom": 0,
+        "min": 0,
+        "max": 3.3,
+        "peak": 3.3
+      },
+      "currentA": 0,
+      "currentSource": "simulated",
+      "pins": [
+        {
+          "ref": "C2",
+          "pin": "2",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "2",
+          "scenario": "typical"
+        },
+        {
+          "ref": "J1",
+          "pin": "41",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "PERn0",
+          "scenario": "typical"
+        }
+      ],
+      "widthMil": {
+        "outer": 10.2,
+        "inner": 10.2,
+        "min": 10.2
+      },
+      "viasPerTransition": 1,
+      "clearanceMil": 4,
+      "impedanceOhm": 85,
+      "diffPair": "PCIE_TXC_P",
+      "lengthGroup": "PCIE_TXC",
+      "netClass": "HS_DIFF",
+      "why": [
+        "no DC path in the simulation (floating signal): bounded by the supply rails of the connected parts, ≤ 3.3 V",
+        "simulation: no DC path (floating)",
+        "simulated worst/typical: 0.000A",
+        "PCIE: intra-pair skew ≤ 5 mil, ≤ 2 vias per net (PCIe design-guide default)",
+        "PCIe: 85 Ω differential (PCI-SIG CEM), ≤ 5 mil intra-pair skew: edge-coupled microstrip over h=8.28 mil, εr=4.40, t=1.38 mil → w=10.1 mil, gap=4.0 mil (pcbauto.SolveDiff on JLC04161H-7628 (4-layer 1.6 mm, L1→L2 7628 prepreg 0.2104 mm))",
+        "IPC-2221B 3.3 V peak needs ≤ 3.9 mil: fab clearance 4.0 mil governs"
+      ],
+      "pairGapMil": 4,
+      "floating": true,
+      "scenario": "worst/typical",
+      "interface": "PCIE",
+      "padCount": 2,
+      "priority": 1,
+      "maxSkewMil": 5,
+      "maxVias": 2
+    },
+    "PCIE_TXC_P": {
+      "role": "diff",
+      "domain": "SELV_5V",
+      "block": "CONN_J1",
+      "voltage": {
+        "nom": 0,
+        "min": 0,
+        "max": 3.3,
+        "peak": 3.3
+      },
+      "currentA": 0,
+      "currentSource": "simulated",
+      "pins": [
+        {
+          "ref": "C1",
+          "pin": "2",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "2",
+          "scenario": "typical"
+        },
+        {
+          "ref": "J1",
+          "pin": "43",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "PERp0",
+          "scenario": "typical"
+        }
+      ],
+      "widthMil": {
+        "outer": 10.2,
+        "inner": 10.2,
+        "min": 10.2
+      },
+      "viasPerTransition": 1,
+      "clearanceMil": 4,
+      "impedanceOhm": 85,
+      "diffPair": "PCIE_TXC_N",
+      "lengthGroup": "PCIE_TXC",
+      "netClass": "HS_DIFF",
+      "why": [
+        "no DC path in the simulation (floating signal): bounded by the supply rails of the connected parts, ≤ 3.3 V",
+        "simulation: no DC path (floating)",
+        "simulated worst/typical: 0.000A",
+        "PCIE: intra-pair skew ≤ 5 mil, ≤ 2 vias per net (PCIe design-guide default)",
+        "PCIe: 85 Ω differential (PCI-SIG CEM), ≤ 5 mil intra-pair skew: edge-coupled microstrip over h=8.28 mil, εr=4.40, t=1.38 mil → w=10.1 mil, gap=4.0 mil (pcbauto.SolveDiff on JLC04161H-7628 (4-layer 1.6 mm, L1→L2 7628 prepreg 0.2104 mm))",
+        "IPC-2221B 3.3 V peak needs ≤ 3.9 mil: fab clearance 4.0 mil governs"
+      ],
+      "pairGapMil": 4,
+      "floating": true,
+      "scenario": "worst/typical",
+      "interface": "PCIE",
+      "padCount": 2,
+      "priority": 1,
+      "maxSkewMil": 5,
+      "maxVias": 2
+    },
+    "PCIE_TX_N": {
+      "role": "diff",
+      "domain": "SELV_5V",
+      "block": "MCU",
+      "voltage": {
+        "nom": 0,
+        "min": 0,
+        "max": 3.3,
+        "peak": 3.3
+      },
+      "currentA": 0,
+      "currentSource": "simulated",
+      "pins": [
+        {
+          "ref": "C2",
+          "pin": "1",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "1",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U1",
+          "pin": "48",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "TXN",
+          "scenario": "typical"
+        }
+      ],
+      "widthMil": {
+        "outer": 10.2,
+        "inner": 10.2,
+        "min": 10.2
+      },
+      "viasPerTransition": 1,
+      "clearanceMil": 4,
+      "impedanceOhm": 85,
+      "diffPair": "PCIE_TX_P",
+      "lengthGroup": "PCIE_TX",
+      "netClass": "HS_DIFF",
+      "why": [
+        "no DC path in the simulation (floating signal): bounded by the supply rails of the connected parts, ≤ 3.3 V",
+        "simulation: no DC path (floating)",
+        "simulated worst/typical: 0.000A",
+        "PCIE: intra-pair skew ≤ 5 mil, ≤ 2 vias per net (PCIe design-guide default)",
+        "PCIe: 85 Ω differential (PCI-SIG CEM), ≤ 5 mil intra-pair skew: edge-coupled microstrip over h=8.28 mil, εr=4.40, t=1.38 mil → w=10.1 mil, gap=4.0 mil (pcbauto.SolveDiff on JLC04161H-7628 (4-layer 1.6 mm, L1→L2 7628 prepreg 0.2104 mm))",
+        "IPC-2221B 3.3 V peak needs ≤ 3.9 mil: fab clearance 4.0 mil governs"
+      ],
+      "pairGapMil": 4,
+      "floating": true,
+      "scenario": "worst/typical",
+      "interface": "PCIE",
+      "padCount": 2,
+      "priority": 1,
+      "maxSkewMil": 5,
+      "maxVias": 2
+    },
+    "PCIE_TX_P": {
+      "role": "diff",
+      "domain": "SELV_5V",
+      "block": "MCU",
+      "voltage": {
+        "nom": 0,
+        "min": 0,
+        "max": 3.3,
+        "peak": 3.3
+      },
+      "currentA": 0,
+      "currentSource": "simulated",
+      "pins": [
+        {
+          "ref": "C1",
+          "pin": "1",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "1",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U1",
+          "pin": "47",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "TXP",
+          "scenario": "typical"
+        }
+      ],
+      "widthMil": {
+        "outer": 10.2,
+        "inner": 10.2,
+        "min": 10.2
+      },
+      "viasPerTransition": 1,
+      "clearanceMil": 4,
+      "impedanceOhm": 85,
+      "diffPair": "PCIE_TX_N",
+      "lengthGroup": "PCIE_TX",
+      "netClass": "HS_DIFF",
+      "why": [
+        "no DC path in the simulation (floating signal): bounded by the supply rails of the connected parts, ≤ 3.3 V",
+        "simulation: no DC path (floating)",
+        "simulated worst/typical: 0.000A",
+        "PCIE: intra-pair skew ≤ 5 mil, ≤ 2 vias per net (PCIe design-guide default)",
+        "PCIe: 85 Ω differential (PCI-SIG CEM), ≤ 5 mil intra-pair skew: edge-coupled microstrip over h=8.28 mil, εr=4.40, t=1.38 mil → w=10.1 mil, gap=4.0 mil (pcbauto.SolveDiff on JLC04161H-7628 (4-layer 1.6 mm, L1→L2 7628 prepreg 0.2104 mm))",
+        "IPC-2221B 3.3 V peak needs ≤ 3.9 mil: fab clearance 4.0 mil governs"
+      ],
+      "pairGapMil": 4,
+      "floating": true,
+      "scenario": "worst/typical",
+      "interface": "PCIE",
+      "padCount": 2,
+      "priority": 1,
+      "maxSkewMil": 5,
+      "maxVias": 2
+    },
+    "PCIE_WAKE_N": {
+      "role": "signal",
+      "domain": "SELV_5V",
+      "block": "MCU",
+      "voltage": {
+        "nom": 3.3,
+        "min": 3.3,
+        "max": 3.3,
+        "peak": 3.3
+      },
+      "currentA": 0,
+      "currentSource": "simulated",
+      "pins": [
+        {
+          "ref": "J1",
+          "pin": "54",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "PEWAKE#",
+          "scenario": "typical"
+        },
+        {
+          "ref": "R2",
+          "pin": "2",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "2",
+          "scenario": "typical"
+        },
+        {
+          "ref": "U1",
+          "pin": "39",
+          "currentA": 0,
+          "dir": "pass",
+          "name": "WAKE",
+          "scenario": "typical"
+        }
+      ],
+      "widthMil": {
+        "outer": 4,
+        "inner": 4,
+        "min": 4
+      },
+      "viasPerTransition": 1,
+      "clearanceMil": 4,
+      "impedanceOhm": 0,
+      "diffPair": "",
+      "lengthGroup": "",
+      "netClass": "SIGNAL",
+      "why": [
+        "sim: nom 3.3 V (typical), envelope 3.3…3.3 V over 2 scenario(s)",
+        "simulated worst/typical: 0.000A",
+        "IPC-2221B 3.3 V peak needs ≤ 3.9 mil: fab clearance 4.0 mil governs"
+      ],
+      "scenario": "worst/typical",
+      "padCount": 3,
+      "priority": 5
+    }
+  },
+  "pairs": [],
+  "netClasses": [
+    {
+      "name": "GND",
+      "nets": [
+        "GND"
+      ],
+      "trackMil": 10,
+      "clearanceMil": 4,
+      "viaDrillMil": 8,
+      "viaDiaMil": 16,
+      "innerTrackMil": 10,
+      "minTrackMil": 4,
+      "why": [
+        "widest member width 10.0 mil outer / 10.0 mil inner (IPC-2221/2152 at ΔT 10 °C), largest member clearance"
+      ]
+    },
+    {
+      "name": "POWER",
+      "nets": [
+        "+3V3",
+        "5V_IN"
+      ],
+      "trackMil": 10,
+      "clearanceMil": 4,
+      "viaDrillMil": 8,
+      "viaDiaMil": 16,
+      "innerTrackMil": 10,
+      "minTrackMil": 4,
+      "why": [
+        "widest member width 10.0 mil outer / 10.0 mil inner (IPC-2221/2152 at ΔT 10 °C), largest member clearance"
+      ]
+    },
+    {
+      "name": "HS_DIFF",
+      "nets": [
+        "PCIE_REFCLK_N",
+        "PCIE_REFCLK_P",
+        "PCIE_RX_N",
+        "PCIE_RX_P",
+        "PCIE_TXC_N",
+        "PCIE_TXC_P",
+        "PCIE_TX_N",
+        "PCIE_TX_P"
+      ],
+      "trackMil": 10.2,
+      "clearanceMil": 4,
+      "viaDrillMil": 8,
+      "viaDiaMil": 16,
+      "innerTrackMil": 10.2,
+      "minTrackMil": 4,
+      "diffGapMil": 4,
+      "impedanceOhm": 85,
+      "why": [
+        "impedance-controlled pairs 85 Ω: width 10.2 mil, gap 4.0 mil"
+      ]
+    },
+    {
+      "name": "SIGNAL",
+      "nets": [
+        "PCIE_CLKREQ_N",
+        "PCIE_PERST_N",
+        "PCIE_WAKE_N"
+      ],
+      "trackMil": 4,
+      "clearanceMil": 4,
+      "viaDrillMil": 8,
+      "viaDiaMil": 16,
+      "innerTrackMil": 4,
+      "minTrackMil": 4,
+      "why": [
+        "default signal class: fab track/clearance"
+      ]
+    }
+  ],
+  "findings": [
+    {
+      "severity": "warn",
+      "kind": "unknown-model",
+      "message": "U1 has no power model: its supply current is ASSUMED (generic load)",
+      "refs": [
+        "U1"
+      ],
+      "nets": [],
+      "suggestion": "add the part (typ/peak supply current from the datasheet) to references/power-models.json and re-derive"
+    },
+    {
+      "severity": "info",
+      "kind": "ac-coupling",
+      "message": "PCIE TX AC coupling: C1, C2",
+      "refs": [
+        "C1",
+        "C2"
+      ],
+      "nets": [
+        "PCIE_TXC_N",
+        "PCIE_TXC_P",
+        "PCIE_TX_N",
+        "PCIE_TX_P"
+      ],
+      "suggestion": "place each pair of caps side by side, same package and orientation, near the transmitter"
+    },
+    {
+      "severity": "info",
+      "kind": "impedance",
+      "message": "impedance-controlled nets: PCIE_REFCLK_N 85 Ω, PCIE_REFCLK_P 85 Ω, PCIE_RX_N 85 Ω, PCIE_RX_P 85 Ω, PCIE_TXC_N 85 Ω, PCIE_TXC_P 85 Ω, PCIE_TX_N 85 Ω, PCIE_TX_P 85 Ω — order the board with the stackup the widths were solved for (JLC04161H-7628 (4-layer 1.6 mm, L1→L2 7628 prepreg 0.2104 mm))",
+      "refs": [],
+      "nets": [],
+      "suggestion": ""
+    },
+    {
+      "severity": "info",
+      "kind": "regulator-headroom",
+      "message": "U9 LDO headroom 1.698 V ≥ dropout 1.1 V; dissipation (Vin−Vout)·I",
+      "refs": [
+        "U9"
+      ],
+      "nets": [
+        "5V_IN",
+        "+3V3"
+      ],
+      "suggestion": ""
+    }
+  ],
+  "copper": {
+    "layers": 4,
+    "outerOz": 1,
+    "innerOz": 0.5,
+    "tempRiseC": 10,
+    "refHeightMil": 8.28,
+    "er": 4.4,
+    "stackup": "JLC04161H-7628 (4-layer 1.6 mm, L1→L2 7628 prepreg 0.2104 mm)",
+    "minTrackMil": 4,
+    "clearanceMil": 4,
+    "viaDrillMil": 8,
+    "viaDiaMil": 16,
+    "viaPlatingMil": 0.7,
+    "viaMarginPct": 20
+  },
+  "simulation": {
+    "generator": "pcbpilot sim power",
+    "scenarios": [
+      "typical",
+      "peak",
+      "worst"
+    ],
+    "converged": true,
+    "warnings": [
+      "U1 (ASM-PCIE-RC): no power model — assumed 50 mA per supply pin (2 pins, 100 mA total); add it to power-models.json"
+    ],
+    "assumptions": [
+      "DC operating point (MNA + Newton-Raphson): capacitors open, inductors = DCR, switching regulators averaged by power balance; not a transient simulation",
+      "IC signal pins are high-impedance (no DC drive) unless a GPIO drives an LED network",
+      "loads are constant-current above a knee voltage and resistive below it (unpowered rails draw nothing)",
+      "J2: input source 5V_IN = 5.00 V (net name) with 0.02 Ω series resistance"
+    ]
+  },
+  "definitions": {
+    "voltage": "V over the solved DC scenarios: nom = typical, min/max = envelope, peak = highest instantaneous (switch node swings to Vin; AC = √2·Vrms)",
+    "currentA": "sizing current (A): simulated worst-case DC net current, switch-node ripple RMS, or a declared/heuristic budget (currentSource)",
+    "widthMil": "IPC-2221/2152 width for currentA at tempRiseC: outer on outerOz, inner on innerOz; min = narrowest allowed neck (largest single-pin branch current, class floor); diff/RF = impedance width",
+    "clearanceMil": "IPC-2221B B2 (B4 when coated) for the net's peak voltage to its own reference, never below the fab clearance; domain-to-domain insulation is in pairs[]",
+    "pairs": "insulation between domains that an isolation part bridges; numbers from SafetyDistances(pair, standard)"
+  },
+  "edge": {
+    "outerMil": 20,
+    "innerMil": 30,
+    "vcutMil": 0,
+    "edgeKind": "routed",
+    "why": [
+      "routed edge: outer copper ≥ 20 mil (0.5 mm), inner planes ≥ 30 mil (0.76 mm) — engineering default above the JLC 0.2 mm floor (docs/pcb-design-rules.md §5.4)",
+      "no hazardous, mains or patient domain: SELV copper uses the layer defaults"
+    ]
+  },
+  "analog": {
+    "generator": "pcbpilot sim analog",
+    "ngspice": "ngspice-47",
+    "blocks": 0,
+    "simulated": 0,
+    "targets": 0,
+    "failing": 0,
+    "changes": 0,
+    "status": "INFO"
+  }
+}

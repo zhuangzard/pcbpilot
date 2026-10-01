@@ -78,6 +78,21 @@ HDMI/TMDS、MIPI/DSI/CSI、LVDS、DDR/DQS、ETH/MDI/TRD/TXP…、USB/D+/DP/DM、
   ESP32 mini（seed 3，确定性 `PCBPILOT_BENCH_WORK=3e6`）：R4（CC）不再挡在 USBLC6 → CH340 之间，
   USB 对 0/0 过孔、单层、端部未耦合 438/500 mil，4 项对检查全过（dev：2/0 过孔、307/250 mil，3 项不过），
   ESD 支线 68 → 0 mil，联合 92.6 → 92.7。其他种子见 CHANGELOG（仍可能有 1–3 项不过，例如 USBLC6 落成行沿来向）。
+- **走廊不能以布通为代价**（2026-10-01，`placer_corridor.go` + `placeab.go`）。反例：HS 压测 pcie-m2（`--place --loops 0`，
+  6 个种子，确定性 `PCBPILOT_BENCH_WORK=3e6`）走廊上线后 seed 5/6 各丢一根腿（`no-legal-path`，84.6 / 92.3 %）。
+  根因不是走廊太宽，而是**只有带链（中间有 AC 电容/ESD/串阻）的对才有走廊**：TX 经 C1/C2 有链，RX、REFCLK 直连
+  J1 → U1 没有链，也就没有走廊。TX 的走廊/朝向/接入扭绞三项合起来把 U1 横移约 27 mil 去对齐 C1/C2，并把 CLKREQ# 上拉
+  R1 挤进 RX/REFCLK 的出线区——单独去掉三项中任何一项都恢复 100 %，说明是“一对独占全部松弛”而不是某一项本身错。修法：
+  1. **直连对也建走廊**：两根腿都只有“同一连接器的脚 → 同一 IC 的脚”时合成一条直连链，让它的出线区同样不许无关件进入；
+  2. **多对器件按对数分摊力**：一个器件（多对 IC、密脚连接器）承载 n 个对的走廊时，每个对施加在它身上的走廊与朝向力 ×1/n
+     （引脚/对密度越高，单个对能拿到的松弛越少），一个对不能再为自己把多对器件移开或转向；
+  3. **布线器终裁**：有走廊的板同时布“走廊布局”与“无走廊布局”（即 eb78993a 的布局），按 安全门槛 → 布通率 → 平面开路 →
+     DRC → 电气组（无走廊一方的差分对检查不得更差）→ 高速/差分 SI 发现数 择优，平手保留走廊。
+  结果（6 种子，失败检查 / 布通率，基线 = 走廊前 eb78993a）：pcie-m2 均值 2.83 / 100 % → 1.33 / 100 %（每个种子 ≤ 基线；
+  3ceaf3b1 为 3.50 / 96.1 %）；usb3-typec、gbe-rj45、ESP32 USB 对见 CHANGELOG v0.6.2。负例保留：不要用“把连接器和 IC
+  排除出朝向代价”来修——它修好 pcie 却让 ESP32 seed 3 联合分掉到 89.1（CH340 单对，朝向正是它需要的）；按对数分摊
+  对单对器件不起作用，所以 ESP32 不受影响。回归：`TestCorridorsCoverDirectPairs`、`TestCorridorABRanking`、
+  `TestPlaceThenRouteNeverLosesCompletion`；种子扫描用 `STRESS_HS_SEED=<n> STRESS_HS_MODES=place make stress-hs`。
 - **间距落到目标值**：栅格只能把跟随线放在“占位不与领线重叠”的最近格，比目标 pitch 多出 1–2 格
   （usb3-typec 2.4 mil 栅格：13 mil pitch 实际 16.8 mil，4 mil 间距变 7.8 mil）。布线收尾把跟随线上与领线平行、
   偏差在 3 格内的直线段平移到精确 pitch（相邻段沿自身方向滑动保持 45°；焊盘/过孔/T 接端点不动），精确 DRC

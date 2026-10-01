@@ -33,7 +33,28 @@
   77.1/81.3/92.7/70.6/81.0 → 94.4/87.7/92.7/83.6/82.8. Seed 3 (`TestESP32MiniIntentKeepsESDOnPath`, now also
   requires `diff-pair` ≥ 75): 2/0 → 0/0 vias, 307/250 → 438/500 mil uncoupled, all four checks pass. HS stress
   place mode over 6 seeds: usb3-typec 8.5 → 5.3 failed checks, gbe-rj45 equal, pcie-m2 2.8 → 3.5 with two seeds
-  losing a leg (`no-legal-path`, `--loops 0`) — open item; fixture bench (deterministic) identical on all 5 boards.
+  losing a leg (`no-legal-path`, `--loops 0`) — fixed in the next item; fixture bench (deterministic) identical on all 5 boards.
+- **Pair corridors never cost routability.** Root cause of the pcie-m2 regression: only pairs with a signal chain
+  (an in-line AC cap / ESD / series part) had a corridor. On the M.2 board TX runs through C1/C2, RX and REFCLK run
+  straight J1 → U1 and had none, so TX's corridor, flow and access-twist terms together took all the slack of the
+  shared breakout: the root port shifted ~27 mil to line TX up with its caps and the CLKREQ# pull-up was pushed into
+  the RX / REFCLK path (removing any one of the three terms restored 100 %; excluding connector and IC from the
+  orientation cost fixed pcie but dropped ESP32 seed 3 to 89.1). Now (a) direct intent pairs (connector pin → IC pin)
+  get corridors too; (b) a part carrying n pairs feels each pair's corridor and flow pull with 1/n of the force, so
+  one pair cannot move or turn a multi-pair IC / dense connector against the others (single-pair parts — the ESP32
+  CH340, USBLC6 — keep full force); (c) the router decides: `--place --loops 0` (`pcbauto.PlaceThenRoute`) and the
+  first loop pass place and route the board with and without its corridors and keep the better — safety gates,
+  completion, open plane connections, DRC, the electrical group (the plain placement may not win it at the cost of
+  a pair check), then HS/pair SI findings; a tie keeps the corridors. `placement.notes` records the A/B
+  (`pair corridors: kept|dropped …`); `placement.metrics.corridors` counts them. Boards without intent pairs are
+  unchanged (one placement, one routing). HS stress place mode, 6 seeds, `PCBPILOT_BENCH_WORK=3e6`
+  (failed checks / completion, eb78993a pre-corridor → 3ceaf3b1 → this): pcie-m2 2.83/100 % → 3.50/96.1 % →
+  1.33/100 % (every seed ≤ eb78993a); usb3-typec 8.50/98.8 % → 5.33/99.2 % → 6.50/99.2 % (every seed ≤ eb78993a);
+  gbe-rj45 (no corridor: no change possible) 5.00/93.2 % → 4.67/94.3 % → 5.00/93.8 % — its seed 6 is not
+  reproducible on either commit (93.8–100 % between identical runs). ESP32 mini USB pair (seeds 1–6): pair
+  findings 0/3/0/1/3/3 → 0/3/0/1/2/3, joint 94.4/87.7/92.7/83.6/82.8/76.2 → 94.4/87.7/92.7/83.6/90.0/86.9.
+  `STRESS_HS_SEED=<n>` sets the stress place-mode seed. Tests: `TestCorridorsCoverDirectPairs`,
+  `TestCorridorABRanking`, `TestPlaceThenRouteNeverLosesCompletion`.
 
 - **Via count by current is enforced per layer transition.** A current-carrying net (intent / `--sim`) whose via
   array came out short at a transition (HV flyback stress board: `VOUT_RAW` got 2 of the intent's 3 × 0.4 mm vias,
