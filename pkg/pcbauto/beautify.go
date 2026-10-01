@@ -501,12 +501,7 @@ func (z *bfy) eachChain(net string, fn func(*bchain)) {
 	sort.Ints(ls)
 	for _, l := range ls {
 		for _, c := range z.chains(net, l) {
-			j0 := z.chainJogs(c, c.pts, c.w)
-			p0 := append([]Point(nil), c.pts...)
 			fn(c)
-			if j := z.chainJogs(c, c.pts, c.w); j > j0 {
-				z.dbg("JOGS UP %s L%d %d→%d: %v → %v", net, l, j0, j, p0, c.pts)
-			}
 			if c.dirty {
 				z.commit(c)
 			}
