@@ -122,7 +122,10 @@ function serializeBus(b: BusPrim): Record<string, unknown> {
 }
 
 function busApi(method: 'getAll' | 'create' | 'get' | 'delete'): any {
-	const api = (globalThis as any).eda?.sch_PrimitiveBus;
+	// The host injects `eda` as a sandbox global, not a globalThis property:
+	// (globalThis as any).eda is undefined in the editor, which reported a bus
+	// API that V3 3.2.149 does have as unavailable (live 2026-10-01).
+	const api = typeof eda === 'undefined' ? undefined : (eda as any).sch_PrimitiveBus;
 	if (!api || typeof api[method] !== 'function') {
 		throw new ActionError(ErrorCodes.EDA_API_UNAVAILABLE, `eda.sch_PrimitiveBus.${method} is not available on this host (bus API is @beta; live-unverified)`);
 	}
