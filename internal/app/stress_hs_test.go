@@ -19,8 +19,9 @@ package app
 // report.md / preview.svg and summary.md for the whole run.
 //
 // Env: STRESS_HS_CASE=<case> runs one case; STRESS_HS_MODES=route,place;
-// STRESS_HS_TIMEOUT=2m routing budget; STRESS_HS_REAL=0 skips the
-// rk3568/k230 real-board pass.
+// STRESS_HS_TIMEOUT=2m routing budget; STRESS_HS_SEED=<n> placement seed
+// of the place mode (default 1; sweep seeds to compare placer changes);
+// STRESS_HS_REAL=0 skips the rk3568/k230 real-board pass.
 
 import (
 	"bytes"
@@ -245,7 +246,11 @@ func runStressCase(t *testing.T, dir, out string, modes []string) *hsRun {
 		args := []string{"pcb", "auto", "run", "--board", filepath.Join(dir, "board.json"), "--intent", intentPath,
 			"--out-dir", od, "--no-feedback", "--layers", fmt.Sprint(exp.Layers), "--timeout", stressTimeout()}
 		if mode == "place" {
-			args = append(args, "--place", "--loops", "0", "--seed", "1")
+			seed := os.Getenv("STRESS_HS_SEED")
+			if seed == "" {
+				seed = "1"
+			}
+			args = append(args, "--place", "--loops", "0", "--seed", seed)
 		}
 		start := time.Now()
 		_, stderr, err := runCLIOffline(args...)

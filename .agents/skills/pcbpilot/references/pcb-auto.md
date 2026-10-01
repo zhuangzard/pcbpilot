@@ -229,8 +229,11 @@ IO39–42、IO47/48 可换但带 `caution`（32k 晶振 / JTAG / 1.8 V），置�
   `verdict: deliverable`），`report.md` 综合评分节「不可交付」原因，`feedback.json notDeliverable[]`；联合评分
   `deliverable=false`，隔离与绝缘域板边与短路/重叠同为门槛（总分封顶 40），其余列为 `blockers`。**看到 NOT DELIVERABLE 不得
   交付或称完成**：按原因修参数/布局/器件后重跑。
-- **差分对走廊**：intent 声明的差分对，`--place` 让无关器件让出连接器 → ESD/串联件 → 芯片之间的走廊，并按来向摆正
-  直通件；SI 的耦合/对称发现计入联合评分电气组 `diff-pair` 项（[recipes/high-speed.md](recipes/high-speed.md) §4–5）。
+- **差分对走廊**：intent 声明的差分对（含无中间器件的直连对），`--place` 让无关器件让出连接器 → ESD/串联件 → 芯片之间的走廊，
+  并按来向摆正直通件；SI 的耦合/对称发现计入联合评分电气组 `diff-pair` 项（[recipes/high-speed.md](recipes/high-speed.md) §4–5）。
+  走廊只是假设：有声明差分对的板，`--loops 0` 与 loop 第 1 轮都**再布一遍不带走廊的布局**，择优（安全 → 布通率 → 平面开路 →
+  DRC → 电气组〔不得以差分对检查变差为代价〕→ SI 发现数，平手保留走廊）；`placement.notes` 的 `pair corridors: kept/dropped`
+  给出两边数字。代价：该板放置+布线时间约 ×2。
 - **确定性基准**：`RouteOptions.WorkRate` / 环境变量 `PCBPILOT_BENCH_WORK=<每预算秒的 A* 展开数>`（`make fixture-bench-det`；
   也可用于 `make stress-hs` 等任何布线调用）让布线器用“搜索工作量”计时，同一提交在任何负载下得同一布线结果（布局退火在
   预算 80 % 之后仍看墙钟）；实际运行不设它，仍按墙钟预算。比较两次运行必须用同一个值。

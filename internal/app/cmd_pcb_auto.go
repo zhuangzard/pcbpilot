@@ -339,12 +339,20 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 				opts := pcbauto.Options{Power: power, Stack: pcbauto.StackOptions{Force: in.layers, MaxLayers: in.maxLayers},
 					Route: pcbauto.RouteOptions{GridMil: in.grid, Timeout: in.timeout}}
 				budget := in.timeout * 3
+				if place && !noRoute && loops == 0 {
+					// One placement, but a board with intent-declared pairs
+					// is placed and routed twice (with and without the pair
+					// corridors, pcbauto/placeab.go).
+					budget = (in.timeout*3 + 90*time.Second) * 2
+				}
 				if place && !noRoute && loops > 0 {
 					// Every pass places (the annealer's own 90 s default) and then
 					// routes: the placement time was missing from the budget, so a
 					// slow high-voltage board hit "context deadline exceeded" in its
-					// first pass and the command returned nothing.
-					budget = (in.timeout*3 + 90*time.Second) * time.Duration(loops)
+					// first pass and the command returned nothing. The first
+					// pass of a board with intent pairs places and routes twice
+					// (with and without the pair corridors): one pass more.
+					budget = (in.timeout*3 + 90*time.Second) * time.Duration(loops+1)
 				}
 				if pcbauto.VirtualClock() {
 					// Deterministic mode (PCBPILOT_BENCH_WORK): the router's
@@ -371,7 +379,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 				}
 				looped := false
 				if place && !noRoute && loops > 0 {
-					lr, err := pcbauto.PlaceRoute(ctx, b, pre, rep.Circuit, mc, pcbauto.PlaceOptions{Seed: seed, Refine: refine, Macro: macro, Only: only}, opts, pcbauto.LoopOptions{Passes: loops, Budget: in.timeout * time.Duration(loops+1)})
+					lr, err := pcbauto.PlaceRoute(ctx, b, pre, rep.Circuit, mc, pcbauto.PlaceOptions{Seed: seed, Refine: refine, Macro: macro, Only: only}, opts, pcbauto.LoopOptions{Passes: loops, Budget: in.timeout * time.Duration(loops+2)})
 					if err != nil {
 						return err
 					}
@@ -381,7 +389,16 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 					}
 					fmt.Fprintf(stderr, "loop: best pass %d\n", lr.Best)
 				} else if place {
-					rep.Placement, err = pcbauto.Place(b, pre, rep.Circuit, mc, pcbauto.PlaceOptions{Seed: seed, Refine: refine, Macro: macro, Only: only})
+					popt := pcbauto.PlaceOptions{Seed: seed, Refine: refine, Macro: macro, Only: only}
+					if noRoute {
+						rep.Placement, err = pcbauto.Place(b, pre, rep.Circuit, mc, popt)
+					} else {
+						// Placed and routed together: with intent-declared
+						// pairs the corridor and the plain placement are both
+						// routed and the better kept (pcbauto/placeab.go).
+						rep.Placement, rep.Result, err = pcbauto.PlaceThenRoute(ctx, b, pre, rep.Circuit, mc, popt, opts)
+						looped = true
+					}
 					if err != nil {
 						return err
 					}

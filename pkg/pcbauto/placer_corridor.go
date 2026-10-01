@@ -21,6 +21,17 @@ import "math"
 // protection 5: an IC's decoupler next to the pair's pins and the ESD array
 // on the line stay put) and above the routing-comfort ones (pull 2, signal
 // 1.5): a pull-up, a CC resistor or an LED moves out of the way first.
+//
+// Every intent pair gets a corridor, also a direct one (connector pin → IC
+// pin, no part in between), and the pull of a corridor on the parts that
+// carry it is shared: an IC or a connector with n pairs feels each pair's
+// corridor and flow terms with 1/n of the force — the slack one pair has
+// to shift or turn a multi-pair part is what its neighbours need. With only
+// the AC-coupled TX pair of the PCIe M.2 board kept clear, the root port
+// moved to line TX up with its caps and the CLKREQ# pull-up was pushed into
+// the RX / REFCLK breakout: two of six seeds lost a leg (no legal path).
+// The router still has the last word: PlaceThenRoute and the first loop
+// pass route the plain placement too and keep the better (placeab.go).
 
 // corridorWeight is the cost per mil of corridor intrusion.
 const corridorWeight = 4.0
@@ -38,18 +49,25 @@ type corridorPoint struct {
 }
 
 // setupCorridors collects the intent-declared pairs whose chains run
-// through placeable parts.
+// through placeable parts, and the direct ones (connector pin → IC pin, no
+// in-line part): a direct pair has no signal chain — nothing whose order
+// can be wrong — but its breakout is the same space. Without its own
+// corridor it was free room for the parts pushed out of its neighbours'
+// (PCIe M.2: the CLKREQ# pull-up landed in the RX / REFCLK breakout once
+// only the AC-coupled TX pair kept a corridor, and those legs found no
+// path).
 func (pl *placer) setupCorridors() {
 	pl.corridors = nil
+	pl.corridorShare = map[*Part]int{}
+	if pl.opt.NoCorridors {
+		return
+	}
 	seen := map[*SignalChain]bool{}
-	for _, ch := range pl.c.Chains {
-		if ch.Pair == nil || seen[ch] || ch.conn == nil || ch.Pair.conn == nil {
-			continue
-		}
-		seen[ch], seen[ch.Pair] = true, true
+	chained := map[string]bool{}
+	add := func(ch *SignalChain) {
 		np, nn := pl.an.ByNet[ch.Nets[0]], pl.an.ByNet[ch.Pair.Nets[0]]
 		if np == nil || nn == nil || np.Interface == "" || nn.Interface == "" {
-			continue
+			return
 		}
 		nets := map[string]bool{}
 		for _, n := range append(append([]string(nil), ch.Nets...), ch.Pair.Nets...) {
@@ -62,12 +80,78 @@ func (pl *placer) setupCorridors() {
 			for _, pd := range q.Pads {
 				if nets[pd.Net] {
 					cr.related[q] = true
+					pl.corridorShare[q]++
 					break
 				}
 			}
 		}
 		pl.corridors = append(pl.corridors, cr)
 	}
+	for _, ch := range pl.c.Chains {
+		for _, n := range ch.Nets {
+			chained[n] = true
+		}
+		if ch.Pair == nil || seen[ch] || ch.conn == nil || ch.Pair.conn == nil {
+			continue
+		}
+		seen[ch], seen[ch.Pair] = true, true
+		add(ch)
+	}
+	for _, n := range pl.b.Nets() {
+		np := pl.an.ByNet[n.Name]
+		if np == nil || np.Interface == "" || np.PairWith == "" || n.Name > np.PairWith || chained[n.Name] || chained[np.PairWith] {
+			continue
+		}
+		if q := pl.an.ByNet[np.PairWith]; q == nil || q.Interface == "" {
+			continue
+		}
+		cp := pl.directChain(n.Name)
+		cn := pl.directChain(np.PairWith)
+		if cp == nil || cn == nil || cp.conn.Part != cn.conn.Part || cp.ic.Part != cn.ic.Part {
+			continue
+		}
+		cp.Pair, cn.Pair = cn, cp
+		add(cp)
+	}
+}
+
+// directChain is the connector → IC chain of a net that runs straight
+// from one connector pin to one IC pin (nil otherwise).
+func (pl *placer) directChain(net string) *SignalChain {
+	var conn, ic *Pad
+	for _, p := range pl.b.Parts {
+		for _, pd := range p.Pads {
+			if pd.Net != net {
+				continue
+			}
+			switch k := pl.c.Kinds[p.Ref]; {
+			case k == KindConnector && conn == nil:
+				conn = pd
+			case k == KindConnector && pd.Part == conn.Part:
+				// a receptacle carrying the leg twice (USB-C)
+			case (k == KindIC || k == KindModule) && ic == nil:
+				ic = pd
+			default:
+				return nil // another part on the line: not a direct pair
+			}
+		}
+	}
+	if conn == nil || ic == nil {
+		return nil
+	}
+	return &SignalChain{Connector: conn.Key(), IC: ic.Key(), Nets: []string{net}, Weight: 2, conn: conn, ic: ic}
+}
+
+// share is the part of a corridor's pull a related part feels: an IC or a
+// connector that carries several intent pairs is pulled by all of them,
+// each with 1/n of the force, so one pair cannot shift or turn the part
+// against the others (the PCIe root port moved 27 mil to line its TX pins
+// up with the AC caps and misaligned RX and REFCLK with the M.2 pins).
+func (pl *placer) share(p *Part) float64 {
+	if n := pl.corridorShare[p]; n > 1 {
+		return 1 / float64(n)
+	}
+	return 1
 }
 
 // corridorSkeleton is a leg's pad-to-pad path with the part of each point:
@@ -231,11 +315,13 @@ func (pl *placer) corridorCost(p *Part) float64 {
 			cost += corridorIntrusion(segs, p.Body())
 			continue
 		}
+		in := 0.0
 		for _, q := range pl.b.Parts {
 			if !cr.related[q] {
-				cost += corridorIntrusion(segs, q.Body())
+				in += corridorIntrusion(segs, q.Body())
 			}
 		}
+		cost += in * pl.share(p)
 	}
 	return corridorWeight * cost
 }
@@ -321,7 +407,7 @@ func (pl *placer) pairFlowCost(p *Part) float64 {
 				if al > 1e-6 {
 					facing = (acc.X*d.X + acc.Y*d.Y) / (al * dl)
 				}
-				cost += pairFlowMil * cr.p.Weight * (along + (1-facing)/2)
+				cost += pairFlowMil * cr.p.Weight * (along + (1-facing)/2) * pl.share(p)
 			}
 		}
 	}

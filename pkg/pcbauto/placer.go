@@ -39,6 +39,11 @@ type PlaceOptions struct {
 	// Only restricts the movable set to these designators (with Refine: a
 	// local adjustment of named parts on an otherwise confirmed layout).
 	Only []string `json:"only,omitempty"`
+	// NoCorridors places without the differential-pair corridor terms
+	// (corridor intrusion, in-line part flow, access-path twists) — the
+	// plain placement PlaceThenRoute and the place/route loop route next
+	// to the corridor one, keeping the better (placer_corridor.go).
+	NoCorridors bool `json:"noCorridors,omitempty"`
 }
 
 // Placement is a part's decided pose (anchor coordinates, like EasyEDA).
@@ -72,7 +77,10 @@ type PlaceMetrics struct {
 	BoardAreaIn2      float64 `json:"boardAreaIn2"`
 	PartAreaIn2       float64 `json:"partAreaIn2"`
 	Utilisation       float64 `json:"utilisation"`
-	Millis            int64   `json:"millis"`
+	// Corridors is the number of differential-pair corridors the placement
+	// kept clear (0 with PlaceOptions.NoCorridors or no intent pairs).
+	Corridors int   `json:"corridors,omitempty"`
+	Millis    int64 `json:"millis"`
 }
 
 // PlaceResult is the placer output.
@@ -130,6 +138,8 @@ type placer struct {
 	// corridors keep intent-declared differential pairs' runs clear of
 	// foreign parts (placer_corridor.go).
 	corridors []*pairCorridor
+	// corridorShare counts the corridors each part is related to.
+	corridorShare map[*Part]int
 }
 
 // intimateGap is the courtyard gap kept between parts that connect directly
@@ -1462,6 +1472,7 @@ func (pl *placer) metrics(res *PlaceResult) {
 	pl.rebuildBuckets()
 	m := &res.Metrics
 	m.WirelengthIn = pl.wirelength() / 1000
+	m.Corridors = len(pl.corridors)
 	parts := pl.b.Parts
 	for i, p := range parts {
 		bi := p.Body()

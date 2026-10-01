@@ -83,11 +83,27 @@ func PlaceRoute(ctx context.Context, b *Board, an *Analysis, c *Circuit, m *Mech
 		for k, v := range halo {
 			po.Halo[k] = v
 		}
-		pr, err := Place(b, an, c, m, po)
-		if err != nil {
-			return nil, err
+		var pr *PlaceResult
+		var out *Result
+		var js *JointScore
+		var err error
+		if pass == 1 {
+			// The first pass tests the pair corridors against the plain
+			// placement (placeab.go); later passes follow the kept one.
+			var v *abVariant
+			var corridors bool
+			if v, corridors, err = placeRouteAB(ctx, b, an, c, m, po, ropt); err == nil {
+				pr, out, js = v.pr, v.out, v.js
+				popt.NoCorridors = popt.NoCorridors || !corridors
+			}
+		} else {
+			if pr, err = Place(b, an, c, m, po); err != nil {
+				return nil, err
+			}
+			if out, err = Run(ctx, b, ropt); err == nil {
+				js = Joint(b, out.Analysis, c, out.Stackup, out.Route, out.DRC, JointOptions{PlacementScore: -1, Overlaps: pr.Metrics.Overlaps, Isolation: out.Isolation, Edge: out.Edge})
+			}
 		}
-		out, err := Run(ctx, b, ropt)
 		if err != nil {
 			if ctx.Err() != nil && res.Result != nil {
 				// Out of time in a later pass: keep the best finished one.
@@ -96,7 +112,6 @@ func PlaceRoute(ctx context.Context, b *Board, an *Analysis, c *Circuit, m *Mech
 			}
 			return nil, err
 		}
-		js := Joint(b, out.Analysis, c, out.Stackup, out.Route, out.DRC, JointOptions{PlacementScore: -1, Overlaps: pr.Metrics.Overlaps, Isolation: out.Isolation, Edge: out.Edge})
 		lp := LoopPass{Pass: pass, Completion: out.Route.Stats.Completion, DRC: len(out.DRC.Violations), Joint: js.Overall}
 		if js.Overall > bestScore {
 			bestScore = js.Overall
