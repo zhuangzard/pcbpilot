@@ -88,11 +88,13 @@ type bfy struct {
 	sensitive map[string]bool
 	cur       string // the net being worked on
 	planes    []PlaneRegion
+	// zones: isolation moats and milled slots — no new copper near them.
+	zones [][]Point
 }
 
 // beautify runs the passes over rr's copper and returns the new tracks and
 // vias (rr is not modified).
-func beautify(b *Board, an *Analysis, c *Circuit, st *Stackup, rr *RouteResult, strict bool) ([]Track, []Via, *BeautifyStats) {
+func beautify(b *Board, an *Analysis, c *Circuit, st *Stackup, rr *RouteResult, strict bool, slots ...[]Point) ([]Track, []Via, *BeautifyStats) {
 	_ = b.Part("") // index the parts before the window sub-boards share it
 	z := &bfy{b: b, an: an, st: st, strict: strict, stats: &BeautifyStats{Strict: strict}, sensitive: map[string]bool{}}
 	// Nets an electrical item of the joint score measures along the copper
@@ -117,6 +119,12 @@ func beautify(b *Board, an *Analysis, c *Circuit, st *Stackup, rr *RouteResult, 
 		}
 	}
 	z.planes = rr.Planes
+	z.zones = append(z.zones, slots...)
+	for _, h := range b.Holes {
+		if len(h.Poly) >= 3 && h.Owner == "" {
+			z.zones = append(z.zones, h.Poly)
+		}
+	}
 	z.ts = append([]Track(nil), rr.Tracks...)
 	z.dead = make([]bool, len(z.ts))
 	z.vs = append([]Via(nil), rr.Vias...)
@@ -140,12 +148,11 @@ func beautify(b *Board, an *Analysis, c *Circuit, st *Stackup, rr *RouteResult, 
 			for _, p := range an.Iso.Pairs {
 				maxClr = math.Max(maxClr, p.ClearanceMil)
 			}
-			for _, n := range an.Nets {
-				for _, o := range an.Nets {
-					if n.Net != o.Net && an.Iso.NetPair(n.Net, o.Net) != nil {
-						z.skipNet[n.Net] = true
-					}
-				}
+			// Copper near the isolation bands and slots follows creepage:
+			// nothing moves within two clearances of them (the per-pair
+			// clearance itself is in the exact check, creepage in the gate).
+			if len(an.Iso.Pairs) > 0 {
+				z.zones = append(z.zones, isoMoats(b, an.Iso)...)
 			}
 		}
 	}
@@ -705,6 +712,31 @@ func (z *bfy) okEdit(net string, skip map[int]bool, keep, add []Track, vi int, n
 	}
 	if win.Empty() {
 		return true
+	}
+	if len(z.zones) > 0 {
+		keep := 2 * z.b.Rules.Clearance
+		for _, t := range add {
+			for _, zn := range z.zones {
+				if !EmptyRect().AddPoint(t.A).AddPoint(t.B).Expand(t.Width/2 + keep).Overlaps(PolyBounds(zn)) {
+					continue
+				}
+				n := int(math.Ceil(t.A.Dist(t.B)/5)) + 1
+				for k := 0; k <= n; k++ {
+					p := t.A.Add(t.B.Sub(t.A).Scale(float64(k) / float64(n)))
+					if PolyContains(zn, p) || PolyEdgeDist(zn, p) < keep+t.Width/2 {
+						z.dbg("    refused: near an isolation band / slot")
+						return false
+					}
+				}
+			}
+		}
+		if vi >= 0 {
+			for _, zn := range z.zones {
+				if PolyContains(zn, nv) || PolyEdgeDist(zn, nv) < keep+z.vs[vi].Dia/2 {
+					return false
+				}
+			}
+		}
 	}
 	win = win.Expand(z.margin)
 	segBB := func(t Track) Rect { return EmptyRect().AddPoint(t.A).AddPoint(t.B).Expand(t.Width / 2) }
@@ -1579,7 +1611,11 @@ func beautifyRoute(b *Board, res *Result, slots []IsoSlot, notes []string, bad [
 	}
 	var last *BeautifyStats
 	for _, strict := range []bool{false, true} {
-		ts, vs, stats := beautify(b, an, c, st, rr, strict)
+		var slotPolys [][]Point
+		for _, sl := range slots {
+			slotPolys = append(slotPolys, sl.Poly)
+		}
+		ts, vs, stats := beautify(b, an, c, st, rr, strict, slotPolys...)
 		last = stats
 		if stats.changes() == 0 {
 			stats.Reason = "nothing to change"
