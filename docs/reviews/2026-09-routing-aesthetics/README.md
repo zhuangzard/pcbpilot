@@ -1,7 +1,7 @@
 # 布局/布线美观性：四方评审汇总（2026-09-28）
 
 参与：Claude 主持（先封存意见）、Claude agent（Opus，带实测脚本）、Fable、Kimi。四方拿同一份
-[brief](raw/brief.md)，互不可见。原文见 `raw/`，实测脚本见 `raw/scripts/`。状态：**Phase A（只度量、只报告）已实现**——`pcbpilot pcb aesthetics`、`joint.aesthetics`（权重 0），基线、对账与 tidy / USB 差分调查见 [baseline.md](baseline.md)；Phase B 起的生成改动仍待用户确认。
+[brief](raw/brief.md)，互不可见。原文见 `raw/`，实测脚本见 `raw/scripts/`。状态：**Phase A（只度量、只报告）已实现**——`pcbpilot pcb aesthetics`、`joint.aesthetics`（权重 0），基线、对账与 tidy / USB 差分调查见 [baseline.md](baseline.md)；Phase B 布局线（受守护的美观阶段 + 布线复核回退，`pkg/pcbauto/placer_aes.go`）已在 `v08/aes-place` 实现，结果见 [baseline.md §11](baseline.md)；布线线在 `v08/aes-route`。
 
 ## 1. 现状实测（ESP32 样例板 `esp32-v05-fixed.routed.json`，246 段 / 82 连接）
 

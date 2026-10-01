@@ -57,6 +57,35 @@ No connector change; offline CLI only. Without the new flag every output is byte
   zone defects 5 → 4, PWR-page BUCK zone 3 → 1. Before/after tables and SVG/PNG previews in `docs/reviews/2026-10-schematic-aesthetics/phaseB/`;
   `internal/app/testdata/esp32-v05/zones-{mcu,pwr}.json` are new derived `layout-plan --zones` inputs.
 
+### Placement aesthetics, Phase B (placer)
+
+- **The placer now finishes with a guarded aesthetics stage** (`pkg/pcbauto/placer_aes.go`) on top of v0.7's tidy:
+  electrically equivalent 180° folds, symmetry copies of the isomorphic groups the Phase A detector finds (translation
+  or 180° point copy for anything with a ≥3-pin package, mirrors only for two-pin groups; rotations correspond; a soft
+  `symCost` refinement where a rigid copy does not pass), class-majority orientation (symmetric passives vote on the
+  axis and keep their pad-net direction, polar parts on the direction), row/column alignment (1-D clusters within the
+  profile's near-miss band), even pitch for arrays of ≥3, and a grid snap that shoves flush neighbours onto the grid
+  with it (repeated instances and arrays move rigidly). Root causes of "tidy did nothing" are in baseline.md §5.
+- **Every move is a transaction** judged on the moved parts, their neighbours and their electrical relations: hard
+  cost (overlap, zones, keep-outs, holes, height, domain edge band, isolation / high-voltage pad gaps) never higher;
+  critical tethers, converter loops, signal chains / pair twists, pair corridors, port reserves never higher (the grid
+  snap alone gets a one-step quantisation allowance, never on safety); wire + comfort tethers only within the style's
+  slack; existing looks (P1 alignment, P2 pitch, P4 symmetry) never undone. Fixed, mechanical, bridge and pair-corridor
+  parts are not moved; a switcher's power stage moves only to copy a repeated
+  converter.
+- **Routed guard**: `PlaceThenRoute` and the place/route loop route every placement (each corridor variant) with and
+  without the stage and keep the aesthetic one only when gates, blockers, completion, open plane connections, DRC,
+  pair / high-speed findings and every electrical item are no worse; otherwise the stage is rerun with the parts behind
+  the regressed item (and everything within 250 mil) held still, then the grid-only stage, then the grid-only stage without its quantisation allowance, then the v0.7 placement (v0.7's tidy is kept verbatim as that baseline). `plan.json` →
+  `placement.aesthetics.routedGuard` says what was kept and why. Each placement is routed one to four more times (each rung only when the previous one routed worse).
+- **Style profiles drive it**: functional = grid snap + equivalent folds, zero slack; balanced (default) = everything,
+  2 % wire; precision = 25 mil grid with 5 mil fallback, 1 / 10 mil alignment tolerance, wider symmetry search, 5 %
+  wire. `pcb auto run --style/--style-file` now applies to placement too.
+- `pcb auto run --place --tidy-only` runs only the stage (plus the routed guard) on the current placement — a human or
+  confirmed layout; `--no-route` runs also write `board.placed.json` for `pcb aesthetics --board`.
+- Frame-search trial placements skip the stage (`PlaceOptions.NoAesthetics`). Results and before/after previews:
+  `docs/reviews/2026-09-routing-aesthetics/baseline.md` §11 and `phaseB/`.
+
 ## [0.7.0] — 2026-10-01
 
 **Local web console, aesthetics measurement, and core electrical/safety routing fixes.** The connector code is

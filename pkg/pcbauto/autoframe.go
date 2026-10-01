@@ -74,6 +74,9 @@ func AutoFrame(b *Board, an *Analysis, c *Circuit, spec *MechSpec, opt PlaceOpti
 	}
 	restore := snapshotBoard(b)
 	defer restore()
+	// Trial placements only test whether the parts fit a frame; the
+	// aesthetics stage runs once, on the real placement.
+	opt.NoAesthetics = true
 
 	partArea := 0.0
 	for _, p := range b.Parts {

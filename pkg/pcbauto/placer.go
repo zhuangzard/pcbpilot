@@ -44,6 +44,18 @@ type PlaceOptions struct {
 	// plain placement PlaceThenRoute and the place/route loop route next
 	// to the corridor one, keeping the better (placer_corridor.go).
 	NoCorridors bool `json:"noCorridors,omitempty"`
+	// Aesthetics is the style profile of the placement aesthetics stage
+	// (placer_aes.go): nil = DefaultAesProfile (balanced), Name "auto" =
+	// chosen from the board. Soft objectives only: every aesthetic move is
+	// judged against the safety, electrical and efficiency tiers.
+	Aesthetics *AesProfile `json:"-"`
+	// NoAesthetics skips the aesthetics stage (the frame search's trial
+	// placements: they only test whether the parts fit).
+	NoAesthetics bool `json:"noAesthetics,omitempty"`
+	// TidyOnly keeps the current placement (a human or confirmed layout)
+	// and runs only the aesthetics stage on it: no construction,
+	// legalisation, annealing or polish, no new isolation strips.
+	TidyOnly bool `json:"tidyOnly,omitempty"`
 }
 
 // Placement is a part's decided pose (anchor coordinates, like EasyEDA).
@@ -91,6 +103,8 @@ type PlaceResult struct {
 	Outline    []Point      `json:"outline,omitempty"` // set when auto-sized
 	Metrics    PlaceMetrics `json:"metrics"`
 	Notes      []string     `json:"notes,omitempty"`
+	// Aesthetics is what the aesthetics stage moved (nil when skipped).
+	Aesthetics *AesPlaceReport `json:"aesthetics,omitempty"`
 }
 
 type pnet struct {
@@ -140,6 +154,15 @@ type placer struct {
 	corridors []*pairCorridor
 	// corridorShare counts the corridors each part is related to.
 	corridorShare map[*Part]int
+	// aes is the aesthetics stage's state while it runs (placer_aes.go);
+	// aesHold are parts the stage must leave alone (the guard's rerun).
+	aes     *aesState
+	aesHold map[*Part]bool
+	// aesStrict: the stage runs without the grid quantisation allowance.
+	aesStrict bool
+	// wallClock: the anneal ran past 80 % of its time budget, where cooling
+	// follows the clock — the placement then depends on machine load.
+	wallClock bool
 }
 
 // intimateGap is the courtyard gap kept between parts that connect directly
@@ -179,23 +202,74 @@ func Place(b *Board, an *Analysis, c *Circuit, m *Mechanics, opt PlaceOptions) (
 	res := &PlaceResult{}
 	pl.setup(res)
 	res.Metrics.StartWireIn = pl.wirelength() / 1000
-	if !opt.Refine {
-		pl.construct()
+	if !opt.TidyOnly {
+		if !opt.Refine {
+			pl.construct()
+		}
+		pl.legalise()
+		if opt.Macro && len(opt.Only) == 0 {
+			// Stage 1: seat every critical auxiliary at its pin, then freeze it
+			// to its core. Stage 2 anneals macros + loose parts only, so a
+			// crystal or decap can no longer be dragged away from its pin (the
+			// szpi crystal ended 36 mm from its hub IC when it annealed alone).
+			pl.freezeMacros()
+		}
+		pl.anneal(start.Add(opt.Timeout))
+		if pl.wallClock {
+			res.Notes = append(res.Notes, "annealing ran past 80 % of its time budget: cooling followed the clock, so this placement depends on machine load (not reproducible move for move)")
+		}
+		pl.unfreezeMacros()
+		// Stage 3: local fine-tune in the gaps the macros left.
+		pl.legalise()
+		pl.polish()
+		pl.tidyV07()
 	}
-	pl.legalise()
-	if opt.Macro && len(opt.Only) == 0 {
-		// Stage 1: seat every critical auxiliary at its pin, then freeze it
-		// to its core. Stage 2 anneals macros + loose parts only, so a
-		// crystal or decap can no longer be dragged away from its pin (the
-		// szpi crystal ended 36 mm from its hub IC when it annealed alone).
-		pl.freezeMacros()
+	if !opt.NoAesthetics {
+		// The placement before the aesthetics stage: the routed guard
+		// (placeab.go) falls back to it when the aesthetic one routes worse.
+		raw := pl.aesSnapshot(res, nil)
+		prof := pl.resolveAesProfile()
+		// The lighter stages from the same start, the guard's next choices
+		// when the full stage routes worse: grid-only (functional: fold +
+		// snap, no slack), then grid-only without the snap's quantisation
+		// allowance (every tier strictly no worse).
+		var lites []*aesPoses
+		fp, _ := AesProfileByName("functional")
+		for _, strict := range []bool{false, true} {
+			if !strict && len(aesPasses(prof)) <= 2 {
+				continue // the full stage is the grid-only one
+			}
+			pl.aesStrict = strict
+			var lr PlaceResult
+			pl.aesthetics(&lr, fp)
+			pl.aesStrict = false
+			if lr.Aesthetics.Moved > 0 {
+				lr.Aesthetics.Strict = strict
+				lites = append(lites, pl.aesSnapshot(res, lr.Aesthetics))
+			}
+			raw.apply(b)
+		}
+		pl.aesthetics(res, prof)
+		ar := res.Aesthetics
+		ar.raw, ar.lites = raw, lites
+		full := map[*Part]savedPart{}
+		for _, p := range b.Parts {
+			full[p] = savedPart{p.Pos, p.Rotation}
+		}
+		base := res.Metrics
+		ar.rerun = func(hold map[*Part]bool) *aesPoses {
+			raw.apply(b)
+			pl.aesHold = hold
+			var r PlaceResult
+			r.Metrics = base
+			pl.aesthetics(&r, prof)
+			pl.aesHold = nil
+			return pl.aesSnapshot(&r, r.Aesthetics)
+		}
+		for p, ps := range full {
+			p.MoveTo(ps.pos, ps.rot)
+		}
 	}
-	pl.anneal(start.Add(opt.Timeout))
-	pl.unfreezeMacros()
-	// Stage 3: local fine-tune in the gaps the macros left.
-	pl.legalise()
-	pl.polish()
-	pl.tidy()
 	if m.AutoSize {
 		res.Outline = pl.autosize()
 	}
@@ -206,6 +280,9 @@ func Place(b *Board, an *Analysis, c *Circuit, m *Mechanics, opt PlaceOptions) (
 			Rot: p.Rotation, Side: p.Side, Fixed: p.Fixed, Block: c.BlockOf[p.Ref]})
 	}
 	res.Metrics.Millis = time.Since(start).Milliseconds()
+	if ar := res.Aesthetics; ar != nil && ar.Moved == 0 {
+		ar.raw, ar.lites, ar.rerun = nil, nil, nil // nothing to fall back to
+	}
 	return res, nil
 }
 
@@ -300,6 +377,13 @@ func (pl *placer) setup(res *PlaceResult) {
 		if np.ClearanceMil > pl.b.Rules.Clearance+hvExcessMil {
 			pl.hvReach = math.Max(pl.hvReach, np.ClearanceMil)
 		}
+	}
+	if pl.opt.TidyOnly {
+		// A kept placement keeps its own zones: no new isolation strips.
+		for _, p := range pl.movable {
+			pl.zoneOf[p] = pl.region
+		}
+		return
 	}
 	pl.zones(res)
 }
@@ -1238,6 +1322,7 @@ func (pl *placer) anneal(deadline time.Time) {
 		frac := float64(i) / float64(total)
 		if timeFrac > 0.8 {
 			frac = math.Max(frac, timeFrac)
+			pl.wallClock = true
 		}
 		// Cool geometrically; the last 15% is greedy descent.
 		t := temp * math.Pow(0.001, frac/0.85)
@@ -1619,12 +1704,13 @@ func symmetricPassive(p *Part) bool {
 	return false
 }
 
-// tidy makes the placement look designed: quarter-turns of symmetric
-// passives folded to 0°/90°, each designator group turned to its majority
-// orientation, and every anchor snapped to the 5 mil grid. Each change is
-// kept only when it adds no overlap/zone/keepout violation and costs at most
-// a little wirelength.
-func (pl *placer) tidy() {
+// tidyV07 is v0.7's tidy, kept verbatim as the placement every run had
+// before the aesthetics stage existed: the stage starts from it and the
+// routed guard falls back to it, so a roll-back is exactly the v0.7
+// placement. It rarely takes effect (baseline.md §5: its folds swap pad
+// nets, its snaps collide with flush neighbours and it requires a zero hard
+// cost); placer_aes.go is the working version.
+func (pl *placer) tidyV07() {
 	const grid = 5.0
 	pl.rebuildBuckets()
 	try := func(p *Part, pos Point, rot float64, slack float64) bool {
