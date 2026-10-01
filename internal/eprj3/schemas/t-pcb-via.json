@@ -1,0 +1,88 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "properties": {
+  "bottomSolderExpansion": {
+   "type": [
+    "number",
+    "null"
+   ]
+  },
+  "centerX": {
+   "type": "number"
+  },
+  "centerY": {
+   "type": "number"
+  },
+  "groupId": {
+   "type": "string"
+  },
+  "holeDiameter": {
+   "type": "number"
+  },
+  "locked": {
+   "type": "boolean"
+  },
+  "netName": {
+   "type": "string"
+  },
+  "partitionId": {
+   "type": [
+    "string",
+    "null"
+   ]
+  },
+  "propagationDelay": {
+   "type": "number"
+  },
+  "ruleName": {
+   "type": "string"
+  },
+  "topSolderExpansion": {
+   "type": [
+    "number",
+    "null"
+   ]
+  },
+  "unusedInnerLayers": {
+   "items": {
+    "type": "number"
+   },
+   "type": "array"
+  },
+  "viaDiameter": {
+   "type": "number"
+  },
+  "viaType": {
+   "enum": [
+    "NORMAL",
+    "BLIND",
+    "SUTURE"
+   ],
+   "type": "string"
+  },
+  "zIndex": {
+   "default": -1,
+   "type": [
+    "number",
+    "null"
+   ]
+  }
+ },
+ "required": [
+  "groupId",
+  "locked",
+  "zIndex",
+  "netName",
+  "ruleName",
+  "centerX",
+  "centerY",
+  "holeDiameter",
+  "viaDiameter",
+  "viaType",
+  "topSolderExpansion",
+  "bottomSolderExpansion",
+  "unusedInnerLayers",
+  "propagationDelay"
+ ],
+ "type": "object"
+}

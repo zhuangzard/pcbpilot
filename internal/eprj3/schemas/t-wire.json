@@ -1,0 +1,30 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "properties": {
+  "groupId": {
+   "type": "string"
+  },
+  "locked": {
+   "type": "boolean"
+  },
+  "yAxisDirection": {
+   "enum": [
+    "up",
+    "down"
+   ],
+   "type": "string"
+  },
+  "zIndex": {
+   "type": [
+    "number",
+    "null"
+   ]
+  }
+ },
+ "required": [
+  "groupId",
+  "locked",
+  "zIndex"
+ ],
+ "type": "object"
+}

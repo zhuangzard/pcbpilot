@@ -1,0 +1,110 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "properties": {
+  "groupId": {
+   "type": "string"
+  },
+  "keepIsland": {
+   "type": "boolean"
+  },
+  "layerId": {
+   "type": "number"
+  },
+  "locked": {
+   "type": "boolean"
+  },
+  "name": {
+   "type": "string"
+  },
+  "netName": {
+   "type": "string"
+  },
+  "order": {
+   "type": "number"
+  },
+  "partitionId": {
+   "type": [
+    "string",
+    "null"
+   ]
+  },
+  "path": {
+   "type": "array"
+  },
+  "pourType": {
+   "anyOf": [
+    {
+     "properties": {
+      "fineness": {
+       "type": "number"
+      },
+      "pourType": {
+       "enum": [
+        "SOLID"
+       ],
+       "type": "string"
+      }
+     },
+     "required": [
+      "pourType",
+      "fineness"
+     ],
+     "type": "object"
+    },
+    {
+     "properties": {
+      "angle": {
+       "type": "number"
+      },
+      "pourType": {
+       "enum": [
+        "GRID_LINE",
+        "HORIZONTAL_LINE",
+        "VERTICAL_LINE"
+       ],
+       "type": "string"
+      },
+      "strokeSpacing": {
+       "type": "number"
+      },
+      "strokeWidth": {
+       "type": "number"
+      }
+     },
+     "required": [
+      "pourType",
+      "angle",
+      "strokeWidth",
+      "strokeSpacing"
+     ],
+     "type": "object"
+    }
+   ],
+   "type": "object"
+  },
+  "width": {
+   "type": "number"
+  },
+  "zIndex": {
+   "default": -1,
+   "type": [
+    "number",
+    "null"
+   ]
+  }
+ },
+ "required": [
+  "groupId",
+  "layerId",
+  "locked",
+  "zIndex",
+  "netName",
+  "width",
+  "name",
+  "order",
+  "path",
+  "pourType",
+  "keepIsland"
+ ],
+ "type": "object"
+}

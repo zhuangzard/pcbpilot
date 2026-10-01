@@ -17,12 +17,14 @@ pcbpilot <domain> <action> [flags]
 | `pcbpilot pcb config` | 当前 PCB 配置：get / clearance / track / via / bind；局部参数修改、单位换算、dry-run 和真实回读 |
 | `pcbpilot bom` | BOM 导出与补全 |
 | `pcbpilot lib` | 器件库搜索、符号/封装/Device 资产创建与选型 |
-| `pcbpilot daemon` | 守护进程管理（start / stop / restart / health；restart 与 start 同为前台阻塞） |
+| `pcbpilot daemon` | 守护进程管理（start / stop / restart / health；restart 与 start 同为前台阻塞）；`health` 另含只读 `officialCli`（官方客户端 CLI 存在性/版本，不执行旧版二进制） |
 | `pcbpilot web` | Web 编辑器页面生命周期；`reload` 与 `doc reload` 区分，保存后等待新连接和同一文档可读（用户明确要求时使用，不作卡死恢复） |
 | `pcbpilot audit` | 操作日志查看 |
 | `pcbpilot update` | 一步全升级（别名 `upgrade`）：CLI → Skill → MCP → 仿真工具 → 重启 daemon → 下载连接器 → 校验/回滚；`--check` 只读，`--auto` 自动模式（默认开，由 daemon 执行），`--rollback` 回退 |
 | `pcbpilot mcp` | MCP server 安装 / 状态 / 各客户端注册（`update` 的 mcp 步骤同一实现） |
 | `pcbpilot skill` | skill 目录单独管理（status / sync；`update` 已含其能力） |
+| `pcbpilot project inspect-eprj3` | 离线只读解析 V4 本地 `.eprj3` 工程/文档（清单、计数、单位、版本标记、Schema 发现）；不连编辑器、不写工程 |
+| `pcbpilot api` | 离线 `eda.*` API 索引：`search` / `ls` / `show`、宿主 `probe`、`upstream-diff`（锁定版本 vs 新 pro-api-types / 官方 doc-api 导出；联网仅 `--fetch`） |
 | `pcbpilot debug` | 逃生舱（exec-js 等开发/调试命令） |
 
 ## 设计约束

@@ -1,0 +1,77 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "properties": {
+  "angle": {
+   "type": "number"
+  },
+  "attrs": {
+   "properties": {
+    "Channel ID": {},
+    "DeviceName": {},
+    "Devices": {},
+    "Footprints": {},
+    "Group ID": {},
+    "[key: string]": {}
+   },
+   "type": "object"
+  },
+  "footprintPrimitives": {
+   "default": true,
+   "type": "boolean"
+  },
+  "groupId": {
+   "type": "string"
+  },
+  "layerId": {
+   "type": "number"
+  },
+  "layerIdReplacements": {
+   "type": "object"
+  },
+  "locked": {
+   "type": "boolean"
+  },
+  "partitionId": {
+   "type": [
+    "string",
+    "null"
+   ]
+  },
+  "pinSwap": {
+   "default": false,
+   "type": "boolean"
+  },
+  "pinSwapInfo": {
+   "type": "object"
+  },
+  "specialColor": {
+   "pattern": "^$|^#[0-9A-Fa-f]{6}$",
+   "type": "string"
+  },
+  "x": {
+   "type": "number"
+  },
+  "y": {
+   "type": "number"
+  },
+  "zIndex": {
+   "default": -1,
+   "type": [
+    "number",
+    "null"
+   ]
+  }
+ },
+ "required": [
+  "groupId",
+  "layerId",
+  "locked",
+  "zIndex",
+  "x",
+  "y",
+  "angle",
+  "attrs",
+  "footprintPrimitives"
+ ],
+ "type": "object"
+}

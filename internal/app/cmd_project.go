@@ -18,6 +18,7 @@ func newProjectCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 	}
 	proj.PersistentFlags().StringVar(&window, "window", "", "EasyEDA window ID")
 	proj.AddCommand(newProjectExportSourceCmd(cfg, stdout, stderr, &window))
+	proj.AddCommand(newProjectInspectEprj3Cmd(stdout))
 
 	proj.AddCommand(
 		func() *cobra.Command {

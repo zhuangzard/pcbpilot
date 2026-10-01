@@ -314,6 +314,15 @@ EasyEDA 交互界面兜底。能力边界与未来 typed 验收见 [project-impo
 删除旧支路、创建新支路并回读；目标 finding 必须消失，范围外对象与旧 finding 必须不变。
 部分写入如实返回，不能重试或声称回滚。只由 `sch layout-edit --playbook` 生成；普通修线不手写。
 
+## 离线读取与 API 监测（无 typed action）
+
+| 目的 | CLI |
+|---|---|
+| 读 V4 本地 `.eprj3` 工程/文档（只读，不需编辑器） | `project inspect-eprj3 <目录\|X.eprj3\|文档> [--json]`；error 级发现才非 0 退出 |
+| 比较锁定的 `eda.*` 与更新的 pro-api-types / 官方 doc-api 导出 | `api upstream-diff <tgz\|d.ts\|目录\|json> [--json] [--fail-on-breaking]`；联网仅 `--fetch` |
+
+两者都不是写入路径，判读与边界见 [offline-format-api-watch.md](offline-format-api-watch.md)。
+
 ## 工程打开与原生导出
 
 | Action | 输入 | 结果与约束 |

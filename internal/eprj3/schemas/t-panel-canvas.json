@@ -1,0 +1,62 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "properties": {
+  "backgroundColor": {
+   "pattern": "^(#[0-9A-Fa-f]{6})|(rgb\\(\\d{1,3},\\d{1,3},\\d{1,3}\\))|(cmyk\\(\\d{1,3},\\d{1,3},\\d{1,3},\\d{1,3}\\))|$",
+   "type": "string"
+  },
+  "coverColor": {
+   "pattern": "^(#[0-9A-Fa-f]{6})|(rgb\\(\\d{1,3},\\d{1,3},\\d{1,3}\\))|(cmyk\\(\\d{1,3},\\d{1,3},\\d{1,3},\\d{1,3}\\))|$",
+   "type": "string"
+  },
+  "craft": {
+   "type": "string"
+  },
+  "desc": {
+   "type": "string"
+  },
+  "height": {
+   "type": "string"
+  },
+  "material": {
+   "type": "string"
+  },
+  "orderHeight": {
+   "type": "string"
+  },
+  "orderWidth": {
+   "type": "string"
+  },
+  "originX": {
+   "type": "number"
+  },
+  "originY": {
+   "type": "number"
+  },
+  "print": {
+   "type": "string"
+  },
+  "thickness": {
+   "type": "string"
+  },
+  "width": {
+   "type": "string"
+  }
+ },
+ "required": [
+  "originX",
+  "originY",
+  "width",
+  "height",
+  "material",
+  "thickness",
+  "print",
+  "craft",
+  "desc",
+  "coverColor",
+  "backgroundColor",
+  "orderWidth",
+  "orderHeight"
+ ],
+ "type": "object"
+}

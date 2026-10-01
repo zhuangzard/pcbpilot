@@ -1,0 +1,80 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "properties": {
+  "client": {
+   "pattern": "^[a-f0-9]{16}$",
+   "type": "string"
+  },
+  "docType": {
+   "enum": [
+    "DOCHEAD",
+    "EDIT_HEAD",
+    "SCH",
+    "SCH_PAGE",
+    "PCB",
+    "PANEL",
+    "PANEL_LIB",
+    "SYMBOL",
+    "FOOTPRINT",
+    "DEVICE",
+    "BLOB",
+    "INSTANCE",
+    "CONFIG",
+    "BOARD",
+    "FONT",
+    "VARIANT",
+    "COMPONENT_GROUP",
+    "COMPONENT_GROUP_DATA",
+    "SIMULATION",
+    "SIMULATION_SCH"
+   ],
+   "type": "string"
+  },
+  "editVersion": {
+   "type": "string"
+  },
+  "firstTicket": {
+   "type": "number"
+  },
+  "ticket": {
+   "type": "number"
+  },
+  "updateTime": {
+   "type": "number"
+  },
+  "user": {
+   "properties": {
+    "avatar": {
+     "type": "string"
+    },
+    "nickname": {
+     "type": "string"
+    },
+    "username": {
+     "type": "string"
+    },
+    "uuid": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "uuid",
+    "nickname",
+    "username"
+   ],
+   "type": "object"
+  },
+  "uuid": {
+   "type": "string"
+  },
+  "version": {
+   "type": "string"
+  }
+ },
+ "required": [
+  "docType",
+  "uuid",
+  "client"
+ ],
+ "type": "object"
+}

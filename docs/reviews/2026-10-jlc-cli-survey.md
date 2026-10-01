@@ -167,6 +167,13 @@ easyeda-pro --search <kw> | --mcp stdio | --mcp http --port 3030 --token <t>
 | 6 | **headless 会话用于无人值守回归** | 中 | 中 | 有 4.1.60+ 桌面客户端的 CI 机上，用 `open --headless --path <fixture.eprj3>` 打开样例工程跑只读检查（DRC/网表/截图）。这与“Agent 不自行启动宿主”的现行准则冲突，须用户明确批准后在专用测试机上做 |
 | 7 | 文档写法借鉴 | 低 | 低 | `cli-for-ai.md` 的“When to Use / 硬约束表 / 需向用户确认的信息 / 校验检查点”结构值得参照，精简我们 SKILL.md 的入口说明 |
 
+**实施状态（2026-10-01，分支 `v08/jlc-cli`）**：#1 `pcbpilot project inspect-eprj3`（只读；官方 Schema
+子集 MIT 内嵌，真实样例取自 kicad-to-easyeda-eprj3 Apache-2.0）、#2 `health.officialCli`（只读；只在
+Windows 4.1.60+ 运行 `doctor`，其余报告 `present (not probed)`）、#3 `pcbpilot api upstream-diff`（离线 tgz/d.ts/
+doc-api 导出，`--fetch` 才联网）已实现，均为 offline-verified；无 4.1.60+ 客户端，`doctor` 与 `doc api` 导出格式
+仍未实机验证。实施中发现内嵌 API 索引停在 0.2.63（gen.py 不认 0.4 的 `public`），已按 0.4.25 重新生成。
+`--fetch` 实测 0.4.25 → 0.4.26：`pcb_Document.autoLayout` alpha → beta，新增 `pcb_Tool`、`sys_ExternalApi` 等 4 类。
+
 不建议吸收：以任意 `invoke --code` 作为设计写入路径；以宿主 `autoLayout` / `autoRouting` 取代 `pcbauto`
 （可作为对照基线，但缺少我们的安全/电气约束）。
 

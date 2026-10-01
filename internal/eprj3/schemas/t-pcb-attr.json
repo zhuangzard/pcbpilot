@@ -1,0 +1,132 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "properties": {
+  "angle": {
+   "type": "number"
+  },
+  "bold": {
+   "type": "boolean"
+  },
+  "expansion": {
+   "type": "number"
+  },
+  "fontFamily": {
+   "type": [
+    "string",
+    "null"
+   ]
+  },
+  "fontSize": {
+   "type": [
+    "number",
+    "null"
+   ]
+  },
+  "groupId": {
+   "type": "string"
+  },
+  "italic": {
+   "type": [
+    "boolean",
+    "null"
+   ]
+  },
+  "key": {
+   "type": "string"
+  },
+  "keyVisible": {
+   "type": "boolean"
+  },
+  "layerId": {
+   "type": "number"
+  },
+  "locked": {
+   "type": "boolean"
+  },
+  "mirror": {
+   "type": "boolean"
+  },
+  "origin": {
+   "enum": [
+    "LEFT_BOTTOM",
+    "CENTER_BOTTOM",
+    "RIGHT_BOTTOM",
+    "LEFT_MIDDLE",
+    "CENTER_MIDDLE",
+    "RIGHT_MIDDLE",
+    "LEFT_TOP",
+    "CENTER_TOP",
+    "RIGHT_TOP"
+   ],
+   "type": "string"
+  },
+  "parentId": {
+   "type": "string"
+  },
+  "partitionId": {
+   "type": [
+    "string",
+    "null"
+   ]
+  },
+  "reverse": {
+   "type": "boolean"
+  },
+  "specialColor": {
+   "pattern": "^$|^#[0-9A-Fa-f]{6}$",
+   "type": "string"
+  },
+  "strokeWidth": {
+   "type": "number"
+  },
+  "value": {
+   "type": "string"
+  },
+  "valueVisible": {
+   "type": "boolean"
+  },
+  "x": {
+   "type": [
+    "number",
+    "null"
+   ]
+  },
+  "y": {
+   "type": [
+    "number",
+    "null"
+   ]
+  },
+  "zIndex": {
+   "default": -1,
+   "type": [
+    "number",
+    "null"
+   ]
+  }
+ },
+ "required": [
+  "groupId",
+  "layerId",
+  "locked",
+  "zIndex",
+  "parentId",
+  "x",
+  "y",
+  "key",
+  "value",
+  "keyVisible",
+  "valueVisible",
+  "fontFamily",
+  "fontSize",
+  "strokeWidth",
+  "bold",
+  "italic",
+  "origin",
+  "angle",
+  "reverse",
+  "expansion",
+  "mirror"
+ ],
+ "type": "object"
+}

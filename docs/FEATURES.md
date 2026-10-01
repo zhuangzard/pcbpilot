@@ -156,6 +156,17 @@ fixture 回归：中小板 89–100%，大型 BGA 板（RK3568、K230）55–62%
 | 本地 Agent 桥接（Claude Code / Codex 会话、子 Agent 与工具调用、权限提示转决策卡） | — | planned（v0.8） |
 | Tauri 托盘安装器 | — | planned（v0.9） |
 
+## 官方 CLI 调研吸收项 1–3（离线，2026-10）
+
+来源：[2026-10 JLC 官方客户端 CLI 调研](reviews/2026-10-jlc-cli-survey.md) §3.3。
+
+| 能力 | 入口 | 状态 |
+|---|---|---|
+| V4 本地 `.eprj3` 只读解析：清单、每文档计数（组件/导线/网络/铜线/过孔/铺铜，按最终一致性取胜者）、单位/坐标约定、版本标记、Schema 发现（官方 easyeda-format-skill 子集，MIT 内嵌）、结构发现 | `pcbpilot project inspect-eprj3 <dir\|X.eprj3\|doc> [--json]`（`internal/eprj3`） | offline-verified：编辑器写出的真实样例（kicad-to-easyeda-eprj3，Apache-2.0，4.1.36）解析干净 + 合成最小工程 + 畸形输入单测；不是写入路径 |
+| `health.officialCli`：`easyeda-pro`/`lceda-pro` 在 PATH 与默认位置的存在性、元数据版本；仅 Windows 4.1.60+ 运行 `doctor`（2 s 超时），其他情况 `present (not probed)` 并说明原因；从不让 health 失败 | `pcbpilot health` | offline-verified（注入式单测）；本机 macOS 3.2.149 实测为 `present-unsupported`、未执行任何程序；Windows `doctor` 路径未实机验证 |
+| 上游 API 监测：锁定的 `@jlceda/pro-api-types` 面 vs 新 tgz/d.ts/目录/api-index/官方 doc-api 导出或 `--fetch` npm latest；新增/删除/签名/写法/稳定性变化，标注 connector 使用与关注解锁（autoRouting、sch_PrimitiveBus、createNetLabel…） | `pcbpilot api upstream-diff` | offline-verified（合成快照 + httptest registry）；`--fetch` 0.4.25→0.4.26 实测 |
+| 修复：内嵌 `api-index.json` 此前停留在 0.2.63（gen.py 不认 0.4 的 `public` 修饰符），现按 connector 锁定的 0.4.25 重新生成，多行签名完整拼接；单测守护版本与 Go/Python 解析一致 | `pcbpilot api search/ls/show` | offline-verified |
+
 ## 已知不支持：Altium Designer 工程自动导入
 
 - `.SchDoc` / `.PcbDoc` 当前没有 typed action 或 CLI 导入入口；使用 EasyEDA Pro 的

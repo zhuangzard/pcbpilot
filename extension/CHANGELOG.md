@@ -2,6 +2,37 @@
 
 ## [Unreleased]
 
+### Official CLI survey absorb items 1–3 (offline)
+
+No connector change; CLI only. Source: `docs/reviews/2026-10-jlc-cli-survey.md` §3.3.
+
+- **`pcbpilot project inspect-eprj3 <dir|X.eprj3|document> [--json]`** — read-only parser for EasyEDA Pro V4
+  folder projects (`internal/eprj3`): index/profile inventory cross-checked against files, per-document live counts
+  (components, wires, nets, copper tracks, vias, pours) under the official eventual-consistency rule (larger ticket
+  wins, empty payload = deleted), documented units/axis/rotation conventions plus the file's CANVAS unit and
+  `yAxisDirection` markers, version markers (DOCHEAD `editVersion`, V3/V4 evidence), and advisory schema findings
+  against a vendored subset of the official `easyeda-format-skill` JSON Schemas (MIT, descriptions stripped,
+  `schemas/SOURCE.json` pins commit 9e42727). Error-level findings (malformed line, unreadable index, empty
+  document) exit non-zero. Fixtures: the editor-written sample from `kicad-to-easyeda-eprj3` (Apache-2.0, verbatim,
+  4.1.36) and a synthetic minimal project. V3→V4 differences (units, docType, DOCHEAD, booleans/colors, arcs,
+  encoding) are carried in the report's `conventions` table and the new Skill reference.
+- **`pcbpilot health` → `officialCli`** — read-only detection of `easyeda-pro` / `lceda-pro` (PATH + per-OS default
+  locations with provenance), version from install metadata without executing anything, and `doctor` (2 s timeout)
+  only on Windows 4.1.60+ where the docs show it as a non-launching probe; otherwise `present (not probed)` with the
+  reason. Never fails health; `PCBPILOT_OFFICIAL_CLI_PROBE=0` disables execution. The official CLI's
+  `invoke --code` is documented in the Skill as an arbitrary-JS channel, not a pcbpilot write path.
+- **`pcbpilot api upstream-diff <tgz|d.ts|dir|json>` / `--fetch`** — compares the pinned `eda.*` surface with a newer
+  `@jlceda/pro-api-types` (or a saved official `doc api` dump): added/removed classes and methods, signature changes
+  (re-spellings such as `{ [key: string]: T }` → `Record<string, T>` reported as `signature-cosmetic`), stability
+  changes; flags methods the connector references (embedded static scan of `extension/src`) and a watchlist of
+  unlocks (`pcb_Document.autoRouting/autoLayout`, `sch_PrimitiveBus`, `createNetLabel`). Network only with `--fetch`
+  (bounded by `--timeout`); `--fail-on-breaking` exits 3.
+- **Fix: stale API index.** `internal/apidoc/api-index.json` was still generated from pro-api-types 0.2.63 although
+  the connector has pinned 0.4.25 since 2026-09-21 — `gen.py` could not parse the 0.4 `public` modifiers. The
+  generator (and its Go port `apidoc.ParseDTS`) now accept access modifiers and generic methods, join multi-line
+  signatures, and record the package version; the index is regenerated from 0.4.25 (95 namespaces, 774 methods).
+  Tests pin index version == `extension/package-lock.json` and Go/Python parser equivalence.
+
 ### Schematic aesthetics Phase B (generation, opt-in)
 
 No connector change; offline CLI only. Without the new flag every output is byte-identical.
