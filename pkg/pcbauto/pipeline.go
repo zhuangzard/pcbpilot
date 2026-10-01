@@ -14,6 +14,8 @@ type Options struct {
 	Route RouteOptions `json:"route"`
 	// NoEscalate keeps the first stackup even when routing is incomplete.
 	NoEscalate bool `json:"noEscalate,omitempty"`
+	// NoBeautify skips the post-route aesthetics pass (beautify.go).
+	NoBeautify bool `json:"noBeautify,omitempty"`
 }
 
 // Result is everything the pipeline decided and produced.
@@ -76,6 +78,7 @@ func Run(ctx context.Context, b *Board, opt Options) (*Result, error) {
 		if n := MicroFix(b, an, st, rr); n > 0 {
 			rr.Notes = append(rr.Notes, sprintf("micro-fix: %d sub-0.25 mil clearance shortfall(s) cleared by shifting or narrowing a track", n))
 		}
+		rr.routed = append([]Track(nil), rr.Tracks...)
 		rr.Power = powerIntegrity(b, an, st, rr)
 		drc := CheckDRCStrict(b, an, st, rr.Tracks, rr.Vias)
 		res.Attempts = append(res.Attempts, Attempt{Stack: stackLabel(st) + label, Completion: rr.Stats.Completion,
@@ -170,6 +173,7 @@ func Run(ctx context.Context, b *Board, opt Options) (*Result, error) {
 					if n := MicroFix(b, an, res.Stackup, rr); n > 0 {
 						rr.Notes = append(rr.Notes, sprintf("micro-fix: %d sub-0.25 mil clearance shortfall(s) cleared by shifting or narrowing a track", n))
 					}
+					rr.routed = append([]Track(nil), rr.Tracks...)
 					rr.Power = powerIntegrity(b, an, res.Stackup, rr)
 					drc := CheckDRCStrict(b, an, res.Stackup, rr.Tracks, rr.Vias)
 					res.Attempts = append(res.Attempts, Attempt{Stack: stackLabel(res.Stackup) + label, Completion: rr.Stats.Completion,
@@ -192,6 +196,9 @@ func Run(ctx context.Context, b *Board, opt Options) (*Result, error) {
 	}
 	if err := irReroute(ctx, b, opt, res); err != nil {
 		return nil, err
+	}
+	if !opt.NoBeautify && !noBeautify {
+		beautifyRoute(b, res, isoSlots, isoNotes, isoBad)
 	}
 	isoNotes = append(isoNotes, clipPlanesToIso(b, res.Analysis, res.Route)...)
 	res.Isolation = isolationReport(b, res.Analysis, res.Route, isoSlots, isoNotes, isoBad)
@@ -249,6 +256,7 @@ func irReroute(ctx context.Context, b *Board, opt Options, res *Result) error {
 		if n := MicroFix(b, an, res.Stackup, rr); n > 0 {
 			rr.Notes = append(rr.Notes, sprintf("micro-fix: %d sub-0.25 mil clearance shortfall(s) cleared by shifting or narrowing a track", n))
 		}
+		rr.routed = append([]Track(nil), rr.Tracks...)
 		rr.Power = powerIntegrity(b, an, res.Stackup, rr)
 		drc := CheckDRCStrict(b, an, res.Stackup, rr.Tracks, rr.Vias)
 		res.Attempts = append(res.Attempts, Attempt{Stack: stackLabel(res.Stackup) + sprintf(" IR re-route %d", pass), Completion: rr.Stats.Completion,

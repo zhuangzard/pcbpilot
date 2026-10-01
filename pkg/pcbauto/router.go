@@ -100,8 +100,16 @@ type RouteResult struct {
 	// ViaShortfalls are transitions of current-carrying nets whose via
 	// array stayed short of the sizing after every alternative (viafix.go).
 	ViaShortfalls []ViaShortfall `json:"viaShortfalls,omitempty"`
+	// Beautify is the post-route aesthetics pass (beautify.go): what it
+	// changed, and whether the result was kept (it is rolled back whole
+	// when any DRC, electrical, SI, isolation, via or completion figure
+	// would get worse).
+	Beautify *BeautifyStats `json:"beautify,omitempty"`
 	// virtual: Stats.Millis is virtual time (RouteOptions.WorkRate).
 	virtual bool
+	// routed is the copper as routed, before the power-integrity pass
+	// tapered it (the beautify pass works on it and tapers its own result).
+	routed []Track
 }
 
 // rnet is the router's per-net state.
@@ -218,9 +226,16 @@ type router struct {
 	nets   []*rnet
 	byName map[string]*rnet
 	// A* scratch
-	gcost       []float32
-	parent      []int32
-	dir         []int8
+	gcost  []float32
+	parent []int32
+	dir    []int8
+	run    []uint8 // straight steps since the last bend (jog penalty)
+	// accDir: for a pad access node, the move directions along the pad's
+	// axes (bit d = dirs8[d]); leaving or entering a pad off them costs
+	// accessAxisPen cells (aesthetics phase B: pad entries along the axis).
+	accDir map[int32]uint8
+	// fanGrid: the fan-out is in its grid-only trial (tiled pads).
+	fanGrid     bool
 	stamp       []int32
 	closed      []int32
 	cur         int32
@@ -300,6 +315,9 @@ func Route(ctx context.Context, b *Board, st *Stackup, an *Analysis, opt RouteOp
 	}
 	if opt.ViaCostMil <= 0 {
 		opt.ViaCostMil = 60
+		if viaCostByLayers && st != nil {
+			opt.ViaCostMil = viaCostForLayers(st.Layers)
+		}
 	}
 	if opt.WrongDirCost <= 0 {
 		opt.WrongDirCost = 1.6
@@ -323,6 +341,7 @@ func Route(ctx context.Context, b *Board, st *Stackup, an *Analysis, opt RouteOp
 	r.gcost = make([]float32, n)
 	r.parent = make([]int32, n)
 	r.dir = make([]int8, n)
+	r.run = make([]uint8, n)
 	r.stamp = make([]int32, n)
 	r.closed = make([]int32, n)
 	r.heap.pos = make([]int32, n)
@@ -593,6 +612,13 @@ func (r *router) nodeOKBase(n *rnet, l, x, y int, rad float64) bool {
 		}
 		return true
 	}
+	return r.nodeOKScan(n, l, x, y, rad)
+}
+
+// nodeOKScan is nodeOKBase's direct test: the claim disk and its pad ring
+// scanned at the node, with no per-radius map (callers with one-off radii).
+func (r *router) nodeOKScan(n *rnet, l, x, y int, rad float64) bool {
+	gr := r.gr
 	offs, inner := gr.ring(rad)
 	near := false
 	for k, o := range offs {
@@ -976,6 +1002,39 @@ func (r *router) viaCost(n *rnet, x, y int) float64 {
 	return v
 }
 
+// rayViaOK is viaCostR's legality test for an off-grid fan-out site at
+// cell (x, y) grown to radius rad: the same checks, the disk scanned
+// directly (a static map per one-off radius costs a full-board pass —
+// a quarter of the HV boards' CPU time).
+func (r *router) rayViaOK(n *rnet, x, y int, rad float64) bool {
+	gr := r.gr
+	c := gr.center(x, y)
+	if gr.noVia[y*gr.W+x] || (n.noVias || len(n.viaBan) > 0) && r.viaBanned(n, c) {
+		return false
+	}
+	if n.viaDia > r.b.Rules.ViaDia+1e-6 && r.inNoViaKeepout(c, n.viaDia/2) {
+		return false
+	}
+	if r.holeBlk != nil && r.holeBlk[y*gr.W+x] {
+		return false
+	}
+	for l := range gr.layers {
+		ok := r.edgeOK(n, x, y, rad) && (r.iso == nil || n.isoDom < 0 || r.isoOK(n, l, x, y, rad-n.share)) && r.nodeOKScan(n, l, x, y, rad)
+		if !ok && r.relief && r.edgeOK(n, x, y, rad) && (r.iso == nil || n.isoDom < 0 || r.isoOK(n, l, x, y, rad-n.share)) {
+			ok = r.reliefOK(n, l, x, y, rad)
+		}
+		if !ok {
+			return false
+		}
+		if gr.routable[l] {
+			if occ, _ := r.nodeCong(l, x, y, rad); r.strict && occ > 0 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func (r *router) viaCostUncached(n *rnet, x, y int) float64 {
 	return r.viaCostR(n, x, y, n.viaR)
 }
@@ -1179,11 +1238,41 @@ func (r *router) access(n *rnet, pd *Pad) []int32 {
 			}
 			return cs[i].i < cs[j].i
 		})
+		mask := padAxisDirs(pd)
 		for k := 0; k < len(cs) && k < 9; k++ {
 			out = append(out, cs[k].i)
+			if accessAxisPen > 0 && mask != 0xff {
+				if r.accDir == nil {
+					r.accDir = map[int32]uint8{}
+				}
+				r.accDir[cs[k].i] = mask
+			}
 		}
 	}
 	return out
+}
+
+// accessAxisPen is the extra cost (cells) of leaving or entering a pad's
+// access node off the pad's axes (0 disables).
+var accessAxisPen float32 = 0
+
+// padAxisDirs is the dirs8 mask of moves along pad pd's axes: four
+// directions for a pad on an octilinear rotation, all eight for a round
+// pad or an odd rotation.
+func padAxisDirs(pd *Pad) uint8 {
+	if pd.Box.Round && math.Abs(pd.Box.W-pd.Box.H) < 0.5 {
+		return 0xff
+	}
+	rot := math.Mod(pd.Box.Rot+720, 360)
+	k := int(math.Round(rot / 45))
+	if math.Abs(rot-45*float64(k)) > 0.01 {
+		return 0xff
+	}
+	var m uint8
+	for j := 0; j < 4; j++ {
+		m |= 1 << uint((k+2*j)%8)
+	}
+	return m
 }
 
 // ---- A* -------------------------------------------------------------------
@@ -1311,7 +1400,7 @@ func (r *router) search(n *rnet, sources []int32, targets map[int32]bool, bounds
 			continue
 		}
 		open := r.stamp[s] == r.cur
-		r.stamp[s], r.gcost[s], r.parent[s], r.dir[s] = r.cur, 0, -1, -1
+		r.stamp[s], r.gcost[s], r.parent[s], r.dir[s], r.run[s] = r.cur, 0, -1, -1, jogFree
 		_, x, y := gr.xy(int(s))
 		q.set(pqItem{s, h(x, y)}, open)
 	}
@@ -1341,6 +1430,14 @@ func (r *router) search(n *rnet, sources []int32, targets map[int32]bool, bounds
 		l, x, y := gr.xy(int(i))
 		gi := r.gcost[i]
 		pd := r.dir[i]
+		ri := r.run[i]
+		// Leave a pad (a search source) along its axes.
+		srcMask := uint8(0xff)
+		if accessAxisPen > 0 && r.parent[i] < 0 && r.accDir != nil {
+			if m, ok := r.accDir[i]; ok {
+				srcMask = m
+			}
+		}
 		pref := r.st.Stack[l].Dir
 		for d := 0; d < 8; d++ {
 			if pd >= 0 {
@@ -1370,11 +1467,31 @@ func (r *router) search(n *rnet, sources []int32, targets map[int32]bool, bounds
 			} else if (pref == "h" && d%4 == 2) || (pref == "v" && d%4 == 0) {
 				step *= float32(r.opt.WrongDirCost)
 			}
+			rj := ri
 			if pd >= 0 && int(pd) != d {
 				if (d-int(pd)+8)%8 == 2 || (d-int(pd)+8)%8 == 6 {
 					step += 2 * g // 90° bend
 				} else {
 					step += 0.4 * g // 45° bend
+				}
+				// A bend again within jogCells of the last one is a jog
+				// (S-jog or zig-zag a cell wide): aesthetics phase B.
+				if jogPenalty > 0 && ri < jogCells {
+					step += jogPenalty * g
+				}
+				rj = 0
+			} else if rj < jogFree {
+				rj++
+			}
+			if srcMask&(1<<uint(d)) == 0 {
+				step += accessAxisPen * g
+			}
+			if accessAxisPen > 0 && r.accDir != nil {
+				// Enter a target pad along its axes.
+				if r.tgt[j] == r.cur {
+					if m, ok := r.accDir[j]; ok && m&(1<<uint(d)) == 0 {
+						step += accessAxisPen * g
+					}
 				}
 			}
 			if n.layerMul != nil {
@@ -1382,7 +1499,7 @@ func (r *router) search(n *rnet, sources []int32, targets map[int32]bool, bounds
 			}
 			ng := gi + step*c
 			if open := r.stamp[j] == r.cur; !open || ng < r.gcost[j] {
-				r.stamp[j], r.gcost[j], r.parent[j], r.dir[j] = r.cur, ng, i, int8(d)
+				r.stamp[j], r.gcost[j], r.parent[j], r.dir[j], r.run[j] = r.cur, ng, i, int8(d), rj
 				q.set(pqItem{j, ng + h(xx, yy)}, open)
 			}
 		}
@@ -1413,7 +1530,7 @@ func (r *router) search(n *rnet, sources []int32, targets map[int32]bool, bounds
 				}
 				ng := gi + viaCost*vc
 				if open := r.stamp[j] == r.cur; !open || ng < r.gcost[j] {
-					r.stamp[j], r.gcost[j], r.parent[j], r.dir[j] = r.cur, ng, i, -1
+					r.stamp[j], r.gcost[j], r.parent[j], r.dir[j], r.run[j] = r.cur, ng, i, -1, jogFree
 					q.set(pqItem{j, ng + h(x, y)}, open)
 				}
 			}
@@ -1421,6 +1538,34 @@ func (r *router) search(n *rnet, sources []int32, targets map[int32]bool, bounds
 	}
 	return nil
 }
+
+// Jog penalty (aesthetics phase B): a bend less than jogCells straight
+// steps after the previous bend costs jogPenalty cells on top of the bend
+// itself. The A* keeps one label per node, so this steers, it does not
+// forbid. 0 disables.
+var (
+	jogPenalty float32 = 0
+	jogCells   uint8   = 3
+)
+
+// viaCostByLayers prices a via by the board's layer count (aesthetics
+// phase B trial; off: the deterministic bench decides).
+var viaCostByLayers = false
+
+// viaCostForLayers: a via costs more where it is a larger share of the
+// board's routing resource (fewer layers).
+func viaCostForLayers(layers int) float64 {
+	switch {
+	case layers <= 2:
+		return 90
+	case layers <= 4:
+		return 75
+	}
+	return 60
+}
+
+// jogFree is the run length of a path start: no bend to count from.
+const jogFree = 255
 
 // ---- per-net routing ------------------------------------------------------
 
