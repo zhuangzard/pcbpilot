@@ -437,6 +437,14 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 					fmt.Fprintf(stderr, "routing: %d layers, signal %.1f%% (%d/%d)%s, vias %d+%d fan-out, DRC violations %d, %.1fs\n",
 						rep.Result.Stackup.Layers, s.Completion, s.Routed, s.Connections, plane, s.Vias, s.FanoutVias,
 						len(rep.Result.DRC.Violations), float64(s.Millis)/1000)
+					if bs := rep.Result.Route.Beautify; bs != nil {
+						if bs.Kept {
+							fmt.Fprintf(stderr, "beautify: %d pad entries, %d S-jogs, %d collinear merges, %d segments + %d vias onto the 5 mil grid (kept: DRC, electrical, SI, isolation, vias and completion no worse)\n",
+								bs.PadEntries, bs.SJogs, bs.Merged, bs.LinesSnapped, bs.ViasSnapped)
+						} else if bs.Reason != "" {
+							fmt.Fprintf(stderr, "beautify: not applied — %s\n", bs.Reason)
+						}
+					}
 					// The delivery verdict, safety findings first: no time
 					// budget may hide them (a fix-up that could not finish
 					// leaves its finding, and the board is not deliverable).

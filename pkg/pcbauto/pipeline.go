@@ -14,6 +14,8 @@ type Options struct {
 	Route RouteOptions `json:"route"`
 	// NoEscalate keeps the first stackup even when routing is incomplete.
 	NoEscalate bool `json:"noEscalate,omitempty"`
+	// NoBeautify skips the post-route aesthetics pass (beautify.go).
+	NoBeautify bool `json:"noBeautify,omitempty"`
 }
 
 // Result is everything the pipeline decided and produced.
@@ -192,6 +194,9 @@ func Run(ctx context.Context, b *Board, opt Options) (*Result, error) {
 	}
 	if err := irReroute(ctx, b, opt, res); err != nil {
 		return nil, err
+	}
+	if !opt.NoBeautify && !noBeautify {
+		beautifyRoute(b, res, isoSlots, isoNotes, isoBad)
 	}
 	isoNotes = append(isoNotes, clipPlanesToIso(b, res.Analysis, res.Route)...)
 	res.Isolation = isolationReport(b, res.Analysis, res.Route, isoSlots, isoNotes, isoBad)

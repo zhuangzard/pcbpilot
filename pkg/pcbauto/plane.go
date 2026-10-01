@@ -41,28 +41,151 @@ func (r *router) fanout(res *RouteResult) {
 			}
 		}
 	}
+	orig := map[*Pad]int{}
+	for i, pd := range pads {
+		orig[pd] = i
+	}
 	// Fine-pitch pads first: they have the fewest escape options.
+	// The tiles of a tiled exposed pad go from the field centre outwards:
+	// an inner tile has only the gaps between tiles for its via, the outer
+	// ones also reach past the field (ESP32 U3.41: the centre tile, last,
+	// found every gap taken).
+	tileD := map[*Pad]float64{}
+	for _, pd := range pads {
+		if p := r.b.Part(pd.Part); p != nil && tiledPad(p, pd) {
+			c, k := Point{}, 0.0
+			for _, q := range p.Pads {
+				if q.Number == pd.Number {
+					c, k = c.Add(q.Box.C), k+1
+				}
+			}
+			tileD[pd] = pd.Box.C.Dist(c.Scale(1 / k))
+		}
+	}
 	sort.SliceStable(pads, func(i, j int) bool {
 		ai, aj := math.Min(pads[i].Box.W, pads[i].Box.H), math.Min(pads[j].Box.W, pads[j].Box.H)
 		if ai != aj {
 			return ai < aj
 		}
-		return pads[i].Key() < pads[j].Key()
+		if ki, kj := pads[i].Key(), pads[j].Key(); ki != kj {
+			return ki < kj
+		}
+		return tileD[pads[i]] < tileD[pads[j]]-1e-6
 	})
-	for _, pd := range pads {
+	fanPad := func(pd *Pad) (placed, need int) {
 		n := r.byName[pd.Net]
 		li := gr.layerIndex(pd.Layer)
 		if li < 0 || !gr.routable[li] {
-			continue
+			return 0, 0
 		}
-		need := fanoutNeed(n.plan, pd, r.b.Rules, r.an.TempRiseC)
+		need = fanoutNeed(n.plan, pd, r.b.Rules, r.an.TempRiseC)
 		stubW := r.fanStubW(n, pd)
-		placed := r.placeFanoutVias(n, pd, li, need, stubW, res)
+		placed = r.placeFanoutVias(n, pd, li, need, stubW, res)
 		if placed == 0 && r.shareFanout(n, pd, li, stubW) {
 			placed = 1
 		}
 		if placed == 0 {
 			res.Notes = append(res.Notes, sprintf("fan-out: no via site for %s (%s); it will be routed as a track", pd.Key(), n.name))
+		}
+		return placed, need
+	}
+	// The tiles of one exposed pad are fanned out together and before the
+	// other pads: on the rays the IC's own pins otherwise take the gaps the
+	// tiles need (bbclaw U7.41: three tiles left without a via).
+	done := map[*Pad]bool{}
+	tilesFirst := append([]*Pad(nil), pads...)
+	if !fanoutNoRays {
+		sort.SliceStable(tilesFirst, func(i, j int) bool {
+			ti, tj := tileD[tilesFirst[i]] > 0 || isTile(r, tilesFirst[i]), tileD[tilesFirst[j]] > 0 || isTile(r, tilesFirst[j])
+			return ti && !tj
+		})
+	}
+	for _, pd := range tilesFirst {
+		if done[pd] {
+			continue
+		}
+		if p := r.b.Part(pd.Part); p != nil && tiledPad(p, pd) && !fanoutNoRays {
+			var grp []*Pad
+			for _, q := range pads {
+				if q.Part == pd.Part && q.Number == pd.Number && !done[q] {
+					grp = append(grp, q)
+					done[q] = true
+				}
+			}
+			r.fanTiles(grp, orig, fanPad, res)
+			continue
+		}
+		fanPad(pd)
+	}
+}
+
+// fanTiles fans out the tiles of one tiled exposed pad on the rays; when a
+// tile comes out short of vias the grid scan (old order) is tried instead
+// and the variant placing more vias is kept — thermal / return vias before
+// straight stubs (bbclaw U7.41: the rays left two tiles without a via).
+func (r *router) fanTiles(grp []*Pad, orig map[*Pad]int, fanPad func(*Pad) (int, int), res *RouteResult) {
+	n := r.byName[grp[0].Net]
+	type snap struct{ vias, shares, stat, notes int }
+	take := func() snap { return snap{len(n.fanVias), len(n.shareTracks), res.Stats.FanoutVias, len(res.Notes)} }
+	undo := func(s snap) {
+		for k := len(n.shareTracks) - 1; k >= s.shares; k-- {
+			r.dropShare(n, k)
+		}
+		r.keepFanouts(n, seq(s.vias))
+		res.Stats.FanoutVias = s.stat
+		res.Notes = res.Notes[:s.notes]
+		r.rebuildFanHoles()
+	}
+	run := func(grid bool) (short int) {
+		r.fanGrid = grid
+		defer func() { r.fanGrid = false }()
+		order := grp
+		if grid {
+			order = append([]*Pad(nil), grp...)
+			sort.SliceStable(order, func(i, j int) bool { return orig[order[i]] < orig[order[j]] })
+		}
+		for _, pd := range order {
+			if placed, need := fanPad(pd); placed < need {
+				short += need - placed
+			}
+		}
+		return short
+	}
+	s := take()
+	shortA := run(false)
+	if fanTileDebug != nil {
+		fanTileDebug(grp, shortA)
+	}
+	if shortA == 0 {
+		return
+	}
+	undo(s)
+	shortB := run(true)
+	if fanTileDebug != nil {
+		fanTileDebug(grp, -shortB-1)
+	}
+	if shortB < shortA {
+		res.Notes = append(res.Notes, sprintf("fan-out: %s tiles kept the grid sites (%d via(s) short on the rays, %d on the grid)", grp[0].Key(), shortA, shortB))
+		return
+	}
+	undo(s)
+	run(false)
+}
+
+// fanTileDebug observes the tiled-pad trials (diagnostics): short ≥ 0 for
+// the ray trial, −short−1 for the grid trial.
+var fanTileDebug func(grp []*Pad, short int)
+
+// rebuildFanHoles re-derives the fan-out hole index from the vias that
+// remain (a withdrawn trial must not keep blocking sites).
+func (r *router) rebuildFanHoles() {
+	r.fanHoles = nil
+	for i := range r.holeBlk {
+		r.holeBlk[i] = false
+	}
+	for _, n := range r.nets {
+		for _, v := range n.fanVias {
+			r.addFanHole(v)
 		}
 	}
 }
@@ -192,6 +315,94 @@ func (r *router) relocateFanout(n *rnet, k int, res *RouteResult, accept func() 
 	return true
 }
 
+// fanoutGridFallback ranks the grid-cell fan-out sites behind every ray
+// site (scores are mil-like: edge distance + 0.15 × distance + 25 towards
+// the body).
+const fanoutGridFallback = 1000
+
+// fanoutNoRays restores the grid-cell fan-out sites only (A/B diagnostics).
+var fanoutNoRays bool
+
+func isTile(r *router, pd *Pad) bool {
+	p := r.b.Part(pd.Part)
+	return p != nil && tiledPad(p, pd)
+}
+
+// tiledPad reports pd as one tile of an exposed pad split into several
+// copper tiles under one pad number.
+func tiledPad(p *Part, pd *Pad) bool {
+	for _, q := range p.Pads {
+		if q != pd && q.Number == pd.Number {
+			return true
+		}
+	}
+	return false
+}
+
+// rayOffset is the margin an off-grid via centre c adds to its claim and
+// legality radius at cell (x, y): its distance from the cell centre,
+// rounded up to a quarter cell (the claim disks stay few).
+func rayOffset(gr *grid, c Point, x, y int) float64 {
+	d := c.Dist(gr.center(x, y))
+	if d < 1e-9 {
+		return 0
+	}
+	q := gr.g / 4
+	return math.Ceil(d/q-1e-9) * q
+}
+
+type raySite struct {
+	c Point
+	s float64
+}
+
+// fanoutRaySites returns via sites outside pad pd on the eight octilinear
+// rays from its centre, out to maxR, 1 mil apart from the first site clear
+// of the pad copper. Score: the old site score (edge distance + 0.15 ×
+// centre distance, +25 towards the part body) plus a small preference for
+// the axis directions (a 45° stub is the second choice) and for the ray
+// pointing away from the body.
+func fanoutRaySites(pd *Pad, away Point, maxR float64) []raySite {
+	if fanoutNoRays {
+		return nil
+	}
+	var out []raySite
+	al := math.Hypot(away.X, away.Y)
+	for k := 0; k < 8; k++ {
+		u := Point{float64(dirs8[k][0]), float64(dirs8[k][1])}
+		u = u.Scale(1 / math.Hypot(u.X, u.Y))
+		// First distance clear of the pad copper (centre outside the pad).
+		d0 := 0.0
+		for d0 <= maxR && pd.Box.Dist(pd.Box.C.Add(u.Scale(d0))) == 0 {
+			d0 += 0.5
+		}
+		d0 = math.Ceil(d0)
+		for d := d0; d <= maxR; d++ {
+			c := pd.Box.C.Add(u.Scale(d))
+			c = Point{math.Round(c.X*1000) / 1000, math.Round(c.Y*1000) / 1000}
+			edge := pd.Box.Dist(c)
+			if edge == 0 {
+				continue
+			}
+			s := edge + 0.15*d
+			if k%2 == 1 {
+				s += 4 // 45° stub: second choice
+			}
+			if al > 0 {
+				dot := (u.X*away.X + u.Y*away.Y) / al
+				switch {
+				case dot < -1e-9:
+					s += 25 // towards the part body
+				case dot < 0.7:
+					s += 2 // sideways
+				}
+			}
+			out = append(out, raySite{c, s})
+		}
+	}
+	return out
+}
+
 func clampInt(v, lo, hi int) int {
 	if v < lo {
 		return lo
@@ -221,6 +432,7 @@ func (r *router) placeFanoutViasChecked(n *rnet, pd *Pad, li, need int, stubW fl
 		x, y int
 		c    Point
 		s    float64
+		ray  bool
 	}
 	maxR := math.Max(80, 3.5*n.viaDia)
 	cx, cy := gr.cellOf(pd.Box.C)
@@ -236,6 +448,22 @@ func (r *router) placeFanoutViasChecked(n *rnet, pd *Pad, li, need int, stubW fl
 	// so large passive pads may host vias there too: forbidding them cost
 	// the 6-layer K230 fixture 300 fan-out vias and 5 points of completion.
 	inPadOK := need > 1 && part != nil && (ClassifyPart(part) == KindIC || ClassifyPart(part) == KindModule || r.st != nil && r.st.Layers >= 6)
+	// Outside the pad the via sits on one of the pad centre's eight
+	// octilinear rays (off the grid if need be), so the stub is a straight
+	// 0/45/90° line (aesthetics phase B: the grid-cell sites of the old scan
+	// gave 18 % of the ESP32 routed length in skewed stubs, 0.5–22° off).
+	// The grid sites stay as a fallback behind every ray site: a pad whose
+	// rays are all blocked still gets its via (completion before looks).
+	for _, site := range fanoutRaySites(pd, away, maxR) {
+		if r.fanGrid {
+			break
+		}
+		x, y := gr.cellOf(site.c)
+		if !gr.in(x, y) {
+			continue
+		}
+		cs = append(cs, cand{x, y, site.c, site.s, true})
+	}
 	for dy := -rc; dy <= rc; dy += 1 {
 		for dx := -rc; dx <= rc; dx += 1 {
 			x, y := cx+dx, cy+dy
@@ -258,55 +486,91 @@ func (r *router) placeFanoutViasChecked(n *rnet, pd *Pad, li, need int, stubW fl
 					score += 25 // prefer escaping away from the part body
 				}
 			}
-			cs = append(cs, cand{x, y, c, score})
+			if edge > 0 && !fanoutNoRays && !r.fanGrid {
+				// Behind every ray site; among themselves the straighter
+				// stub first (½ per degree off 0/45/90°).
+				score += fanoutGridFallback + 0.5*octiDev(angDeg(pd.Box.C, c))
+			}
+			cs = append(cs, cand{x, y, c, score, false})
 		}
 	}
-	sort.Slice(cs, func(i, j int) bool {
+	sort.SliceStable(cs, func(i, j int) bool {
 		if cs[i].s != cs[j].s {
 			return cs[i].s < cs[j].s
 		}
-		return cs[i].y*gr.W+cs[i].x < cs[j].y*gr.W+cs[j].x
+		if cs[i].y*gr.W+cs[i].x != cs[j].y*gr.W+cs[j].x {
+			return cs[i].y*gr.W+cs[i].x < cs[j].y*gr.W+cs[j].x
+		}
+		if cs[i].c.X != cs[j].c.X {
+			return cs[i].c.X < cs[j].c.X
+		}
+		return cs[i].c.Y < cs[j].c.Y
 	})
-	placed := 0
-	for _, c := range cs {
-		if placed >= need {
-			break
-		}
-		inside := pd.Box.Dist(c.c) == 0
+	legal := func(c cand) bool {
 		if r.holeClash(c.c, n.viaDrill) {
-			continue
+			return false
 		}
-		if inside {
+		if pd.Box.Dist(c.c) == 0 {
 			// Thermal via inside an EPAD: only pad/hard checks, the via copper
 			// merges with the pad.
 			if !r.nodeOK(n, li, c.x, c.y, n.viaR) {
-				continue
+				return false
 			}
 			if occ, _ := r.nodeCong(li, c.x, c.y, n.viaR); occ > 0 {
-				continue
+				return false
 			}
-			ok := true
 			for l := range gr.layers {
 				if !r.nodeOK(n, l, c.x, c.y, n.viaR) {
-					ok = false
-					break
+					return false
 				}
 			}
-			if !ok {
-				continue
+			return true
+		}
+		// An off-grid ray site is judged at its cell with the offset added
+		// to the radius: conservative for every neighbour.
+		if off := rayOffset(gr, c.c, c.x, c.y); off > 0 {
+			if !r.rayViaOK(n, c.x, c.y, n.viaR+off) {
+				return false
 			}
-		} else {
-			if math.IsInf(r.viaCostUncached(n, c.x, c.y), 1) {
-				continue
-			}
-			if !r.segmentOK(n, li, pd.Box.C, c.c, stubW, true) {
-				continue
+		} else if math.IsInf(r.viaCostUncached(n, c.x, c.y), 1) {
+			return false
+		}
+		return r.segmentOK(n, li, pd.Box.C, c.c, stubW, true)
+	}
+	placed := 0
+	used := make([]bool, len(cs))
+	for placed < need {
+		// The grid site the old scan picks bounds the ray site's stub: a
+		// straight stub may not be longer than the skewed one it replaces
+		// (the decap / hot-loop lengths are electrical; iso-mains C1: a 9 mil
+		// longer +3V3 stub cost the decap-loop item 1.4 points).
+		gi := -1
+		for i, c := range cs {
+			if !c.ray && !used[i] && legal(c) {
+				gi = i
+				break
 			}
 		}
+		pick := gi
+		bound := math.Inf(1)
+		if gi >= 0 {
+			bound = cs[gi].c.Dist(pd.Box.C) + 1e-6
+		}
+		for i, c := range cs {
+			if c.ray && !used[i] && c.c.Dist(pd.Box.C) <= bound && legal(c) {
+				pick = i
+				break
+			}
+		}
+		if pick < 0 {
+			break
+		}
+		used[pick] = true
+		c := cs[pick]
 		if accept != nil && vetted >= 12 {
 			break
 		}
-		r.commitFanout(n, pd, li, c.x, c.y, c.c, stubW, inside, false)
+		r.commitFanout(n, pd, li, c.x, c.y, c.c, stubW, pd.Box.Dist(c.c) == 0, false)
 		if accept != nil {
 			vetted++
 			if !accept() {
@@ -331,6 +595,9 @@ func (r *router) commitFanout(n *rnet, pd *Pad, li, x, y int, c Point, stubW flo
 		rad = dia/2 + n.share
 	}
 	gr := r.gr
+	// An off-grid (ray) via claims its cell's disk grown by the offset, so
+	// the occupancy stays conservative around the true centre.
+	rad += rayOffset(gr, c, x, y)
 	var cl []int32
 	trackIdx := -1
 	if !inside {
