@@ -849,6 +849,27 @@ func (z *bfy) okEdit(net string, skip map[int]bool, keep, add []Track, vi int, n
 // lenOK: a change from old to new length is allowed. A net an electrical
 // item measures never gets longer (nor any net in the strict retry); a
 // plain signal may grow by max(4 mil, 10 %) of the piece replaced.
+// rsum is a polyline's series resistance in squares (Σ length / width).
+func rsum(pts []Point, w []float64) float64 {
+	r := 0.0
+	for i := 0; i+1 < len(pts) && i < len(w); i++ {
+		if w[i] > 0 {
+			r += pts[i].Dist(pts[i+1]) / w[i]
+		}
+	}
+	return r
+}
+
+// resOK: a net an electrical item measures may not gain resistance along
+// the changed piece (a neck may not get longer while a full-width piece
+// gets shorter: hv-flyback VOUT, five more 6 mil segments carrying 2 A).
+func (z *bfy) resOK(old, nw float64) bool {
+	if z.strict || z.sensitive[z.cur] {
+		return nw <= old*(1+1e-9)+1e-9
+	}
+	return true
+}
+
 func (z *bfy) lenOK(old, nw float64) bool {
 	if z.strict || z.sensitive[z.cur] {
 		return nw <= old+0.01
@@ -1113,7 +1134,7 @@ func (z *bfy) padEntry(c *bchain) {
 		for i := 1; i < len(cd.pts); i++ {
 			nl += cd.pts[i].Dist(cd.pts[i-1])
 		}
-		if !z.lenOK(ol, nl) {
+		if !z.lenOK(ol, nl) || !z.resOK(rsum(c.pts[:cd.k+1], c.w[:cd.k]), rsum(cd.pts, cd.w)) {
 			z.dbg("  len k=%d %.1f → %.1f %v", cd.k, ol, nl, cd.pts)
 			continue
 		}
@@ -1285,7 +1306,7 @@ func (z *bfy) sJog(c *bchain) bool {
 			for i := 1; i < len(o.pts); i++ {
 				nl += o.pts[i].Dist(o.pts[i-1])
 			}
-			if !z.lenOK(ol, nl) {
+			if !z.lenOK(ol, nl) || !z.resOK(rsum(c.pts[o.from:o.to+1], c.w[o.from:o.to]), rsum(o.pts, o.w)) {
 				continue
 			}
 			var add []Track
@@ -1374,7 +1395,7 @@ func (z *bfy) snapLines(c *bchain) {
 		}
 		ol := c.pts[i-1].Dist(c.pts[i]) + c.pts[i].Dist(c.pts[i+1]) + c.pts[i+1].Dist(c.pts[i+2])
 		nl := np[0].Dist(np[1]) + np[1].Dist(np[2]) + np[2].Dist(np[3])
-		if !z.lenOK(ol, nl) {
+		if !z.lenOK(ol, nl) || !z.resOK(rsum(c.pts[i-1:i+3], c.w[i-1:i+2]), rsum(np, c.w[i-1:i+2])) {
 			z.dbg("snap %s seg %d: longer %.2f → %.2f", c.net, i, ol, nl)
 			continue
 		}
@@ -1486,13 +1507,15 @@ func (z *bfy) snapVias(net string) {
 		if !okAll || found == 0 {
 			continue
 		}
-		ol, nl := 0.0, 0.0
+		ol, nl, or, nr := 0.0, 0.0, 0.0, 0.0
 		for ci, c := range cs {
 			n := len(c.pts) - 1
 			ol += c.pts[n-2].Dist(c.pts[n-1]) + c.pts[n-1].Dist(c.pts[n])
 			nl += adds[ci][0].A.Dist(adds[ci][0].B) + adds[ci][1].A.Dist(adds[ci][1].B)
+			or += rsum(c.pts[n-2:], c.w[n-2:])
+			nr += adds[ci][0].A.Dist(adds[ci][0].B)/adds[ci][0].Width + adds[ci][1].A.Dist(adds[ci][1].B)/adds[ci][1].Width
 		}
-		if !z.lenOK(ol, nl) {
+		if !z.lenOK(ol, nl) || !z.resOK(or, nr) {
 			continue
 		}
 		if !z.okMulti(cs, rng, adds, vi, gp) {
@@ -1517,6 +1540,12 @@ type routeFacts struct {
 	drc, disconnected, vias, planeOpen, si, iso, blockers int
 	completion, electrical                                float64
 	items                                                 map[string]float64
+	// DC power integrity, raw (the ir-drop item is clamped at 0 / 100):
+	// over-budget or open nets, each net's worst drop, and the copper
+	// narrower than its current needs (Σ deficit × length).
+	irViol     int
+	irMV       map[string]float64
+	underWidth float64
 }
 
 func measureRoute(b *Board, an *Analysis, c *Circuit, st *Stackup, rr *RouteResult, drc *DRCReport, iso func(*RouteResult) int) routeFacts {
@@ -1530,6 +1559,18 @@ func measureRoute(b *Board, an *Analysis, c *Circuit, st *Stackup, rr *RouteResu
 		}
 	}
 	f.si = len(CheckSI(b, an, st, rr).Findings)
+	if pw := rr.Power; pw != nil {
+		f.irViol = pw.Violations()
+		f.irMV = map[string]float64{}
+		for _, n := range pw.Nets {
+			f.irMV[n.Net] = n.WorstMV
+			for _, sg := range n.Segments {
+				if sg.WidthMil < sg.NeedMil-1e-6 {
+					f.underWidth += (sg.NeedMil - sg.WidthMil) * sg.LengthMil
+				}
+			}
+		}
+	}
 	if iso != nil {
 		f.iso = iso(rr)
 	}
@@ -1558,6 +1599,20 @@ func (a routeFacts) worseThan(b routeFacts) string {
 		return sprintf("isolation findings %d → %d", b.iso, a.iso)
 	case a.blockers > b.blockers:
 		return sprintf("delivery blockers %d → %d", b.blockers, a.blockers)
+	case a.irViol > b.irViol:
+		return sprintf("IR-drop violations %d → %d", b.irViol, a.irViol)
+	case a.underWidth > b.underWidth*(1+1e-6)+1e-6:
+		return sprintf("copper narrower than its current %.1f → %.1f mil²", b.underWidth, a.underWidth)
+	}
+	nets := make([]string, 0, len(b.irMV))
+	for n := range b.irMV {
+		nets = append(nets, n)
+	}
+	sort.Strings(nets)
+	for _, n := range nets {
+		if v, ok := a.irMV[n]; ok && v > b.irMV[n]*(1+1e-6)+1e-6 {
+			return sprintf("IR drop of %s %.2f → %.2f mV", n, b.irMV[n], v)
+		}
 	}
 	ids := make([]string, 0, len(b.items))
 	for id := range b.items {
@@ -1609,13 +1664,22 @@ func beautifyRoute(b *Board, res *Result, slots []IsoSlot, notes []string, bad [
 		drc2 := CheckDRCStrict(b, an, st, rr2.Tracks, rr2.Vias)
 		return &rr2, drc2, measureRoute(b, an, c, st, &rr2, drc2, iso).worseThan(before)
 	}
+	// The power-integrity pass tapers the tracks it is given (rr.Tracks are
+	// tapered already): the pass works on the copper as routed and the
+	// result is tapered by the same pass, like the original.
+	src := rr
+	if rr.routed != nil && rr.Power != nil {
+		cp := *rr
+		cp.Tracks = rr.routed
+		src = &cp
+	}
 	var last *BeautifyStats
 	for _, strict := range []bool{false, true} {
 		var slotPolys [][]Point
 		for _, sl := range slots {
 			slotPolys = append(slotPolys, sl.Poly)
 		}
-		ts, vs, stats := beautify(b, an, c, st, rr, strict, slotPolys...)
+		ts, vs, stats := beautify(b, an, c, st, src, strict, slotPolys...)
 		last = stats
 		if stats.changes() == 0 {
 			stats.Reason = "nothing to change"
@@ -1624,15 +1688,15 @@ func beautifyRoute(b *Board, res *Result, slots []IsoSlot, notes []string, bad [
 		rr2, drc2, why := try(ts, vs)
 		kept, total := 0, 0
 		if why != "" {
-			nets := changedNets(rr, ts, vs)
+			nets := changedNets(src, ts, vs)
 			total = len(nets)
 			keep := gateSearch(nets, func(set []string) bool {
-				t, v := composeNets(rr, ts, vs, set)
+				t, v := composeNets(src, ts, vs, set)
 				_, _, w := try(t, v)
 				return w == ""
 			})
 			if len(keep) > 0 {
-				t, v := composeNets(rr, ts, vs, keep)
+				t, v := composeNets(src, ts, vs, keep)
 				rr2, drc2, _ = try(t, v)
 				kept = len(keep)
 			}

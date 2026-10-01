@@ -78,6 +78,7 @@ func Run(ctx context.Context, b *Board, opt Options) (*Result, error) {
 		if n := MicroFix(b, an, st, rr); n > 0 {
 			rr.Notes = append(rr.Notes, sprintf("micro-fix: %d sub-0.25 mil clearance shortfall(s) cleared by shifting or narrowing a track", n))
 		}
+		rr.routed = append([]Track(nil), rr.Tracks...)
 		rr.Power = powerIntegrity(b, an, st, rr)
 		drc := CheckDRCStrict(b, an, st, rr.Tracks, rr.Vias)
 		res.Attempts = append(res.Attempts, Attempt{Stack: stackLabel(st) + label, Completion: rr.Stats.Completion,
@@ -172,7 +173,9 @@ func Run(ctx context.Context, b *Board, opt Options) (*Result, error) {
 					if n := MicroFix(b, an, res.Stackup, rr); n > 0 {
 						rr.Notes = append(rr.Notes, sprintf("micro-fix: %d sub-0.25 mil clearance shortfall(s) cleared by shifting or narrowing a track", n))
 					}
-					rr.Power = powerIntegrity(b, an, res.Stackup, rr)
+					rr.routed = append([]Track(nil), rr.Tracks...)
+					rr.routed = append([]Track(nil), rr.Tracks...)
+		rr.Power = powerIntegrity(b, an, res.Stackup, rr)
 					drc := CheckDRCStrict(b, an, res.Stackup, rr.Tracks, rr.Vias)
 					res.Attempts = append(res.Attempts, Attempt{Stack: stackLabel(res.Stackup) + label, Completion: rr.Stats.Completion,
 						Vias: rr.Stats.Vias + rr.Stats.FanoutVias, Violations: len(drc.Violations), Millis: attemptMillis(start, rr)})
@@ -254,6 +257,7 @@ func irReroute(ctx context.Context, b *Board, opt Options, res *Result) error {
 		if n := MicroFix(b, an, res.Stackup, rr); n > 0 {
 			rr.Notes = append(rr.Notes, sprintf("micro-fix: %d sub-0.25 mil clearance shortfall(s) cleared by shifting or narrowing a track", n))
 		}
+		rr.routed = append([]Track(nil), rr.Tracks...)
 		rr.Power = powerIntegrity(b, an, res.Stackup, rr)
 		drc := CheckDRCStrict(b, an, res.Stackup, rr.Tracks, rr.Vias)
 		res.Attempts = append(res.Attempts, Attempt{Stack: stackLabel(res.Stackup) + sprintf(" IR re-route %d", pass), Completion: rr.Stats.Completion,

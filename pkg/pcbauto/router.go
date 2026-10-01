@@ -107,6 +107,9 @@ type RouteResult struct {
 	Beautify *BeautifyStats `json:"beautify,omitempty"`
 	// virtual: Stats.Millis is virtual time (RouteOptions.WorkRate).
 	virtual bool
+	// routed is the copper as routed, before the power-integrity pass
+	// tapered it (the beautify pass works on it and tapers its own result).
+	routed []Track
 }
 
 // rnet is the router's per-net state.

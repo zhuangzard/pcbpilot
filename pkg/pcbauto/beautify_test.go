@@ -165,9 +165,11 @@ func TestBeautifyLeavesDiffPairs(t *testing.T) {
 
 // The gate refuses any figure that ranks above aesthetics getting worse.
 func TestBeautifyGateFacts(t *testing.T) {
-	base := routeFacts{drc: 0, vias: 10, completion: 100, electrical: 80, items: map[string]float64{"decap-loop": 50, "ir-drop": 100}}
+	base := routeFacts{drc: 0, vias: 10, completion: 100, electrical: 80, items: map[string]float64{"decap-loop": 50, "ir-drop": 100},
+		irMV: map[string]float64{"VOUT": 12}, underWidth: 3}
 	same := base
 	same.items = map[string]float64{"decap-loop": 50, "ir-drop": 100}
+	same.irMV = map[string]float64{"VOUT": 12}
 	if w := same.worseThan(base); w != "" {
 		t.Fatalf("equal facts judged worse: %s", w)
 	}
@@ -181,9 +183,13 @@ func TestBeautifyGateFacts(t *testing.T) {
 		"iso":        func(r *routeFacts) { r.iso++ },
 		"plane":      func(r *routeFacts) { r.planeOpen++ },
 		"disconn":    func(r *routeFacts) { r.disconnected++ },
+		"irviol":     func(r *routeFacts) { r.irViol++ },
+		"underwidth": func(r *routeFacts) { r.underWidth += 1 },
+		"irmv":       func(r *routeFacts) { r.irMV = map[string]float64{"VOUT": 12.5} },
 	} {
 		w := base
 		w.items = map[string]float64{"decap-loop": 50, "ir-drop": 100}
+		w.irMV = map[string]float64{"VOUT": 12}
 		f(&w)
 		if w.worseThan(base) == "" {
 			t.Errorf("%s: worse facts accepted", name)
