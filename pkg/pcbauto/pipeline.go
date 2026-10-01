@@ -29,6 +29,11 @@ type Result struct {
 	// Edge is the board-edge safety distance: the policy and the measured
 	// copper-to-edge minimum per layer of the plan.
 	Edge *EdgeCheck `json:"edge,omitempty"`
+	// Blockers are the safety and electrical reasons the result is not
+	// deliverable whatever its completion and DRC (verdict.go): isolation
+	// findings, board-edge ERRORs, via arrays short of their current, IR
+	// drop over budget. Empty when none.
+	Blockers []string `json:"blockers,omitempty"`
 }
 
 // Attempt records one stackup variant tried by the pipeline.
@@ -194,6 +199,8 @@ func Run(ctx context.Context, b *Board, opt Options) (*Result, error) {
 		res.Route.Notes = append(res.Route.Notes, enforcePlaneEdge(b, res.Analysis.edgePolicy(b), res.Route.Planes)...)
 	}
 	res.Edge = planEdgeCheck(b, res.Analysis, res.Stackup, res.Route)
+	sg, eb := deliveryBlockers(res.Isolation, res.Edge, res.Route)
+	res.Blockers = append(sg, eb...)
 	return res, nil
 }
 
@@ -276,15 +283,13 @@ func hsFindings(si *SIReport) int {
 	return n
 }
 
-// siDefect reports the SI finding kinds the joint score and the finer-grid
-// retries treat as defects: length/skew/via budgets and return-path splits.
-// The pair coupling / symmetry findings (pairsi.go) are reported by CheckSI,
-// pcb auto's report and feedback, but do not (yet) move the joint score or
-// pick among retries: the placer does not keep pair corridors clear, so on
-// boards whose placement blocks coupling (the ESP32 mini: a CC resistor in
-// the USB corridor, the USBLC6 rows across the flow) every candidate carries
-// them and ranking by them only trades other electrical results (the ESD
-// stub) for nothing.
+// siDefect reports the SI finding kinds the joint "high-speed" item and the
+// finer-grid retries treat as defects: length/skew/via budgets and
+// return-path splits. The pair coupling / symmetry findings (pairsi.go) of
+// intent-declared pairs are scored by their own "diff-pair" item of the
+// electrical group (joint.go) — the placer keeps those pairs' corridors
+// clear and orients their in-line parts with the flow, so a pair that still
+// does not couple is this layout's defect, not every candidate's.
 func siDefect(kind string) bool {
 	switch kind {
 	case "skew", "split-crossing", "vias", "group-skew":
@@ -368,7 +373,8 @@ func hasUnitPairs(an *Analysis) bool {
 }
 
 // pairUnitsWorse reports that the leg-by-leg routing (2) beats the unit
-// routing (1): more connections, else fewer DRC violations, else a better
+// routing (1): more connections, else fewer open plane/ground connections,
+// else fewer DRC violations, else a better
 // electrical group of the joint score (ESD stub, decoupling and hot loops,
 // IR drop, skew/split/via budgets — a pair routed as a unit must not buy
 // its coupling with a protection device pushed off the line: ESP32 mini
@@ -378,13 +384,19 @@ func pairUnitsWorse(b *Board, an1 *Analysis, st *Stackup, rr1 *RouteResult, drc1
 	if c1, c2 := rr1.Stats.Completion, rr2.Stats.Completion; c1 != c2 {
 		return c2 > c1
 	}
+	j1 := Joint(b, an1, Understand(b, an1), st, rr1, drc1, JointOptions{PlacementScore: -1})
+	j2 := Joint(b, an2, Understand(b, an2), st, rr2, drc2, JointOptions{PlacementScore: -1})
+	// Plane and ground connections are connections too: signal completion
+	// alone kept a unit result with a GND pad cut off its plane over a leg-by-
+	// leg one with none (hdmi-tx stress, once pair coupling scored in the
+	// electrical group).
+	if j1.PlaneOpen != j2.PlaneOpen {
+		return j2.PlaneOpen < j1.PlaneOpen
+	}
 	if v1, v2 := len(drc1.Violations), len(drc2.Violations); v1 != v2 {
 		return v2 < v1
 	}
-	elec := func(an *Analysis, rr *RouteResult, drc *DRCReport) float64 {
-		return Joint(b, an, Understand(b, an), st, rr, drc, JointOptions{PlacementScore: -1}).Groups["electrical"]
-	}
-	if e1, e2 := elec(an1, rr1, drc1), elec(an2, rr2, drc2); math.Abs(e1-e2) > 0.5 {
+	if e1, e2 := j1.Groups["electrical"], j2.Groups["electrical"]; math.Abs(e1-e2) > 0.5 {
 		return e2 > e1
 	}
 	bad := func(an *Analysis, rr *RouteResult) int {

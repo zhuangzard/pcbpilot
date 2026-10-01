@@ -35,7 +35,11 @@ type Feedback struct {
 	SchemaVersion int              `json:"schemaVersion"`
 	Source        string           `json:"source"`
 	Difficulty    FeedbackHardness `json:"difficulty"`
-	Items         []*FeedbackItem  `json:"items"`
+	// NotDeliverable are the reasons the routed board cannot be delivered
+	// (JointScore.NotDeliverable, else the pipeline's safety/electrical
+	// blockers): safety first. Empty when deliverable.
+	NotDeliverable []string        `json:"notDeliverable,omitempty"`
+	Items          []*FeedbackItem `json:"items"`
 	// Rejected are candidates the offline re-route did not confirm.
 	Rejected []*FeedbackItem `json:"rejected,omitempty"`
 	Loop     *FeedbackLoop   `json:"loop,omitempty"`
@@ -196,6 +200,11 @@ func BuildFeedback(ctx context.Context, b *Board, res *Result, js *JointScore, o
 	an := res.Analysis
 	base := routeMetrics(b, an, res, js)
 	fb.Difficulty = hardness(b, an, res, js)
+	if js != nil {
+		fb.NotDeliverable = js.NotDeliverable()
+	} else {
+		fb.NotDeliverable = append([]string(nil), res.Blockers...)
+	}
 
 	// a/b. pin swaps (MCU GPIO matrix, generic headers)
 	cands := SearchPinSwaps(b, an, opt.Caps)
@@ -321,6 +330,9 @@ func hardness(b *Board, an *Analysis, res *Result, js *JointScore) FeedbackHardn
 	if h.HSViaFindings > 0 {
 		h.Reasons = append(h.Reasons, fmt.Sprintf("高速网络过孔超限 %d 处", h.HSViaFindings))
 	}
+	if sg, _ := deliveryBlockers(res.Isolation, res.Edge, nil); len(sg) > 0 {
+		h.Reasons = append([]string{"安全未达标：" + strings.Join(sg, "；")}, h.Reasons...)
+	}
 	if n := len(res.Route.ViaShortfalls); n > 0 {
 		h.Reasons = append(h.Reasons, fmt.Sprintf("%d 条载流网络的换层过孔阵列不足（via-current）", n))
 	}
@@ -399,7 +411,7 @@ func rerouteSwaps(ctx context.Context, b *Board, res *Result, swaps []PinSwap, o
 	if err != nil {
 		return nil, err
 	}
-	js := Joint(nb, r2.Analysis, opt.Circuit, r2.Stackup, r2.Route, r2.DRC, JointOptions{PlacementScore: -1})
+	js := Joint(nb, r2.Analysis, opt.Circuit, r2.Stackup, r2.Route, r2.DRC, JointOptions{PlacementScore: -1, Isolation: r2.Isolation, Edge: r2.Edge})
 	return &rerouted{board: nb, res: r2, js: js, metrics: routeMetrics(nb, r2.Analysis, r2, js)}, nil
 }
 
@@ -941,6 +953,9 @@ func WriteFeedback(p func(string, ...any), fb *Feedback) {
 		return
 	}
 	p("## 6b. 回推原理图的建议\n\n")
+	if len(fb.NotDeliverable) > 0 {
+		p("**不可交付**：%s。\n\n", strings.Join(fb.NotDeliverable, "；"))
+	}
 	h := fb.Difficulty
 	if h.Hard {
 		p("布线难点：%s。\n\n", strings.Join(h.Reasons, "；"))

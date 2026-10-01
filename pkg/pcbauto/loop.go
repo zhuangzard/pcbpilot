@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 )
 
@@ -95,7 +96,7 @@ func PlaceRoute(ctx context.Context, b *Board, an *Analysis, c *Circuit, m *Mech
 			}
 			return nil, err
 		}
-		js := Joint(b, out.Analysis, c, out.Stackup, out.Route, out.DRC, JointOptions{PlacementScore: -1, Overlaps: pr.Metrics.Overlaps})
+		js := Joint(b, out.Analysis, c, out.Stackup, out.Route, out.DRC, JointOptions{PlacementScore: -1, Overlaps: pr.Metrics.Overlaps, Isolation: out.Isolation, Edge: out.Edge})
 		lp := LoopPass{Pass: pass, Completion: out.Route.Stats.Completion, DRC: len(out.DRC.Violations), Joint: js.Overall}
 		if js.Overall > bestScore {
 			bestScore = js.Overall
@@ -126,6 +127,35 @@ func PlaceRoute(ctx context.Context, b *Board, an *Analysis, c *Circuit, m *Mech
 		for _, v := range out.DRC.Violations {
 			for _, p := range b.Parts {
 				if !p.Fixed && distToRect(v.At, p.Body()) <= 30 {
+					targets[p] = true
+				}
+			}
+		}
+		// Safety findings the router could not avoid on this placement:
+		// the parts whose copper the finding names, and parts at the spot.
+		var safetyAt []Point
+		if iso := out.Isolation; iso != nil {
+			for _, f := range iso.Findings {
+				safetyAt = append(safetyAt, f.At)
+				for _, it := range []string{f.ItemA, f.ItemB} {
+					if i := strings.IndexByte(it, '.'); i > 0 {
+						if p := b.Part(it[:i]); p != nil && !p.Fixed {
+							targets[p] = true
+						}
+					}
+				}
+			}
+		}
+		if e := out.Edge; e != nil {
+			for _, f := range e.Findings {
+				if f.Level == "ERROR" {
+					safetyAt = append(safetyAt, f.At)
+				}
+			}
+		}
+		for _, at := range safetyAt {
+			for _, p := range b.Parts {
+				if !p.Fixed && distToRect(at, p.Body()) <= 30 {
 					targets[p] = true
 				}
 			}

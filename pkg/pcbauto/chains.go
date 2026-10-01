@@ -415,6 +415,23 @@ func chainSkeleton(b *Board, ch *SignalChain) []Point {
 }
 
 func chainSkeletonFrom(b *Board, ch *SignalChain, start *Pad) []Point {
+	var pts []Point
+	for _, sp := range chainSkeletonPads(b, ch, start) {
+		pts = append(pts, sp.pad.Box.C)
+	}
+	return pts
+}
+
+// skelPad is one pad of a chain skeleton: entry, exit (a pass-through or
+// series part's second pad) or both (connector, IC, a one-pad shunt).
+type skelPad struct {
+	pad   *Pad
+	entry bool // the line arrives here from the previous point
+	exit  bool // the line leaves here toward the next point
+}
+
+// chainSkeletonPads is chainSkeletonFrom with the pads themselves.
+func chainSkeletonPads(b *Board, ch *SignalChain, start *Pad) []skelPad {
 	if start == nil {
 		return nil
 	}
@@ -422,7 +439,7 @@ func chainSkeletonFrom(b *Board, ch *SignalChain, start *Pad) []Point {
 	for _, n := range ch.Nets {
 		nets[n] = true
 	}
-	pts := []Point{start.Box.C}
+	out := []skelPad{{pad: start, exit: true}}
 	for _, n := range ch.Nodes {
 		p := b.Part(n.Ref)
 		if p == nil {
@@ -437,17 +454,94 @@ func chainSkeletonFrom(b *Board, ch *SignalChain, start *Pad) []Point {
 		if len(pads) == 0 {
 			continue
 		}
-		cur := pts[len(pts)-1]
+		cur := out[len(out)-1].pad.Box.C
 		sort.Slice(pads, func(i, j int) bool { return pads[i].Box.C.Dist(cur) < pads[j].Box.C.Dist(cur) })
-		pts = append(pts, pads[0].Box.C)
 		if len(pads) > 1 {
-			pts = append(pts, pads[len(pads)-1].Box.C)
+			out = append(out, skelPad{pad: pads[0], entry: true}, skelPad{pad: pads[len(pads)-1], exit: true})
+		} else {
+			out = append(out, skelPad{pad: pads[0], entry: true, exit: true})
 		}
 	}
 	if ch.ic != nil {
-		pts = append(pts, ch.ic.Box.C)
+		out = append(out, skelPad{pad: ch.ic, entry: true})
+	}
+	return out
+}
+
+// padAccess is where copper reaches pd from outside its part: the pad
+// centre pushed out through the nearest side of the part body, 10 mil past
+// the body edge. Pads of a part without a body box are their own access.
+func padAccess(b *Board, pd *Pad) Point {
+	p := b.Part(pd.Part)
+	if p == nil {
+		return pd.Box.C
+	}
+	body := p.Body()
+	if body.W() <= 0 || body.H() <= 0 {
+		return pd.Box.C
+	}
+	c := pd.Box.C
+	// Distance to each side; the pad leaves through the nearest one.
+	dl, dr, db, dt := c.X-body.MinX, body.MaxX-c.X, c.Y-body.MinY, body.MaxY-c.Y
+	const past = 10
+	switch m := math.Min(math.Min(dl, dr), math.Min(db, dt)); m {
+	case dl:
+		return Point{body.MinX - past, c.Y}
+	case dr:
+		return Point{body.MaxX + past, c.Y}
+	case db:
+		return Point{c.X, body.MinY - past}
+	default:
+		return Point{c.X, body.MaxY + past}
+	}
+}
+
+// chainAccessPath is the skeleton through the pads' access points: a line
+// arriving at a pad first reaches its access point, a line leaving it
+// leaves through it. A pass-through part whose in-row lies along the flow
+// makes the far leg pass the near pin — the paths then cross.
+func chainAccessPath(b *Board, ch *SignalChain, start *Pad) []Point {
+	var pts []Point
+	for _, sp := range chainSkeletonPads(b, ch, start) {
+		a := padAccess(b, sp.pad)
+		if sp.entry {
+			pts = append(pts, a)
+		}
+		pts = append(pts, sp.pad.Box.C)
+		if sp.exit {
+			pts = append(pts, a)
+		}
 	}
 	return pts
+}
+
+// PairTwistAccess is PairTwist on the access paths: it also counts the
+// crossings a pair cannot avoid because of how its in-line parts face the
+// flow — a pin row lying along the approach (the far leg passes the near
+// pin), a row whose pin order is the partner's mirror image. The placer
+// prices it for intent-declared pairs, which it also keeps a corridor for.
+func PairTwistAccess(b *Board, ch *SignalChain) int {
+	if ch.Pair == nil {
+		return 0
+	}
+	best := -1
+	for _, sa := range connPadsOf(b, ch) {
+		for _, sc := range connPadsOf(b, ch.Pair) {
+			a, c := chainAccessPath(b, ch, sa), chainAccessPath(b, ch.Pair, sc)
+			n := 0
+			for i := 1; i < len(a); i++ {
+				for j := 1; j < len(c); j++ {
+					if segsIntersect(a[i-1], a[i], c[j-1], c[j]) {
+						n++
+					}
+				}
+			}
+			if best < 0 || n < best {
+				best = n
+			}
+		}
+	}
+	return max(best, 0)
 }
 
 // PairTwist counts how often a differential pair's two skeletons cross. Each

@@ -191,6 +191,15 @@ func (r *Report) WriteMarkdown(w io.Writer) {
 	}
 	writeIsolation(p, res.Isolation)
 	writeEdge(p, res.Edge)
+	if r.Joint == nil && len(res.Blockers) > 0 {
+		// No joint score (route-only paths): the safety / electrical
+		// verdict still stands on its own.
+		p("### 交付结论：不可交付\n\n")
+		for _, b := range res.Blockers {
+			p("- %s\n", b)
+		}
+		p("\n")
+	}
 
 	writeJoint(p, r)
 	if si := r.SI; si != nil && (len(si.Pairs) > 0 || len(si.Groups) > 0 || len(si.Findings) > 0) {
@@ -328,6 +337,12 @@ func writeJoint(p func(string, ...any), r *Report) {
 	}
 	for _, g := range j.Gates {
 		p("- 门槛未过：%s（总分封顶 40）\n", g)
+	}
+	for _, g := range j.Blockers {
+		p("- 电气未达标（不可交付）：%s\n", g)
+	}
+	if why := j.NotDeliverable(); len(why) > 0 {
+		p("\n**不可交付**（安全 > 电气 > DRC > 布通 > 美观）：%s。\n\n", strings.Join(why, "；"))
 	}
 	p("| 组 | 项 | 得分 | 实测 |\n|---|---|---|---|\n")
 	for _, it := range j.Items {

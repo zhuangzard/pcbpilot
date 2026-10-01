@@ -31,11 +31,15 @@ type isoField struct {
 	label     []int8
 	distT     [][]float32 // per domain: distance (mil) to its territory
 	partners  [][]isoPartner
+	// pads / pinched: per domain, its pads and those the territory fence
+	// does not keep the pair distance from (router only, setupIsoPads).
+	pads, pinched [][]*Pad
 }
 
 type isoPartner struct {
 	f            int
 	clear, creep float64 // mil
+	slotW        float64 // the pair's slot width: narrower cutouts do not break its creepage
 }
 
 // buildIsoField computes the territories of the paired domains over the
@@ -132,8 +136,8 @@ func buildIsoField(b *Board, iso *IsoRules, cell float64) *isoField {
 		if !has[a] || !has[bb] {
 			continue
 		}
-		f.partners[a] = append(f.partners[a], isoPartner{f: bb, clear: p.ClearanceMil, creep: p.CreepageMil})
-		f.partners[bb] = append(f.partners[bb], isoPartner{f: a, clear: p.ClearanceMil, creep: p.CreepageMil})
+		f.partners[a] = append(f.partners[a], isoPartner{f: bb, clear: p.ClearanceMil, creep: p.CreepageMil, slotW: p.SlotWidthMil})
+		f.partners[bb] = append(f.partners[bb], isoPartner{f: a, clear: p.ClearanceMil, creep: p.CreepageMil, slotW: p.SlotWidthMil})
 	}
 	return f
 }
@@ -260,6 +264,53 @@ func (r *router) setupIso() {
 			n.isoDom = d
 		}
 	}
+	if r.iso != nil {
+		r.setupIsoPads()
+	}
+}
+
+// setupIsoPads lists every paired domain's pads, and among them the
+// pinched ones: pads closer to another domain's territory than half the
+// largest requirement of their domain (bridge parts' rows, closely set
+// parts of two domains). The territory fence alone guarantees the pair
+// distance only to pads at least half the requirement inside their own
+// territory — copper half the requirement outside the partner territory
+// plus a pinched pad's shortfall is less than the requirement. The fence
+// checks the exact distance (and surface path round the slots) to these.
+func (r *router) setupIsoPads() {
+	f := r.iso
+	iso := r.an.Iso
+	f.pads = make([][]*Pad, len(f.doms))
+	f.pinched = make([][]*Pad, len(f.doms))
+	for _, p := range r.b.Parts {
+		for _, pd := range p.Pads {
+			d, ok := f.di[iso.NetDomain[pd.Net]]
+			if !ok || iso.NetDomain[pd.Net] == "" || len(f.partners[d]) == 0 {
+				continue
+			}
+			f.pads[d] = append(f.pads[d], pd)
+			half := 0.0
+			for _, pt := range f.partners[d] {
+				half = math.Max(half, math.Max(pt.clear, pt.creep)/2)
+			}
+			x, y := f.cellOf(pd.Box.C)
+			if x < 0 || y < 0 || x >= f.W || y >= f.H {
+				continue
+			}
+			// Distance from the pad's copper to the nearest cell of another
+			// territory (two cells short: the field is discrete).
+			edge := math.Inf(1)
+			for o := range f.doms {
+				if o != d && f.distT[o] != nil {
+					edge = math.Min(edge, float64(f.distT[o][y*f.W+x]))
+				}
+			}
+			edge -= math.Hypot(pd.Box.W, pd.Box.H)/2 + 2*f.g
+			if edge < half {
+				f.pinched[d] = append(f.pinched[d], pd)
+			}
+		}
+	}
 }
 
 // isoOK is the domain fence: copper of half extent hw of net n at node
@@ -274,7 +325,7 @@ func (r *router) isoOK(n *rnet, l, x, y int, hw float64) bool {
 	p := r.gr.center(x, y)
 	sp := r.iso.slack(n.isoDom, p, outer)
 	if sp >= hw {
-		return true
+		return r.isoPadsOK(n, l, x, y, p, hw, false)
 	}
 	if !r.inNeck(n, x, y) {
 		return false
@@ -295,8 +346,188 @@ func (r *router) isoOK(n *rnet, l, x, y int, hw float64) bool {
 	if own == nil {
 		return true
 	}
-	padSlack := r.iso.slack(n.isoDom, own.Box.C, outer) - math.Max(own.Box.W, own.Box.H)/2
-	return sp-hw >= padSlack
+	if sp-hw < r.padSlack(n, own, outer) {
+		return false
+	}
+	return r.isoPadsOK(n, l, x, y, p, hw, true)
+}
+
+// padSlack is the smallest fence margin over a pad's own copper outline:
+// how deep into the partner band the footprint itself reaches.
+func (r *router) padSlack(n *rnet, pd *Pad, outer bool) float64 {
+	k := 0
+	if outer {
+		k = 1
+	}
+	if v, ok := r.isoPadSlack[k][pd]; ok {
+		return v
+	}
+	s := math.Inf(1)
+	poly := padPoly(pd)
+	for i, a := range poly {
+		c := poly[(i+1)%len(poly)]
+		// The outline and its edges sampled at the field cell: the field is
+		// piecewise, a corner alone can miss the edge's closest cell.
+		steps := max(1, int(math.Ceil(a.Dist(c)/r.iso.g)))
+		for j := 0; j < steps; j++ {
+			q := a.Add(c.Sub(a).Scale(float64(j) / float64(steps)))
+			s = math.Min(s, r.iso.slack(n.isoDom, q, outer))
+		}
+	}
+	if r.isoPadSlack[k] == nil {
+		r.isoPadSlack[k] = map[*Pad]float64{}
+	}
+	r.isoPadSlack[k][pd] = s
+	return s
+}
+
+// isoPadsOK is the exact half of the fence, against partner-domain pads.
+// The territory field is a straight-line, half-and-half split: it keeps
+// copper the pair distance from a partner pad only where that pad sits at
+// least half the requirement inside its own territory. Bridge parts' rows
+// and closely set parts of two domains do not (pinched pads), and neither
+// does copper in the neck of its own pad, where the field yields:
+//
+//   - the mains/SELV opto's GND pad reaches 35 mil into the band towards the
+//     opto's own AC_N row across the slot, and a GND fan-out via used that
+//     allowance 29 mil below the pad, towards a transformer AC_N pin:
+//     155.9 mil surface path < 181.1 mil reinforced creepage;
+//   - an AC_N via 110 mil beside the opto's AC row, outside any neck, took
+//     the field's half of the band while the opto's ZC pad sat 80 mil from
+//     the slot midline: 180.2 mil round the slot end < 181.1 mil
+//     (2026-09-30, both seen when a loaded machine cut the placer's anneal
+//     short).
+//
+// So every partner pad within reach is measured exactly: on the outer
+// layers the surface path round the milled slots against the creepage
+// (and the straight gap against the clearance), inside the straight gap
+// against the clearance. Outside the neck the copper meets the requirement;
+// in the neck of its own pads it may come no closer than the net's own
+// nearest pad already is (a bridge part's rows, judged with their slot by
+// CheckIsolation). neck=false checks only the pinched pads — every other
+// partner pad is covered by the field.
+func (r *router) isoPadsOK(n *rnet, l, x, y int, p Point, hw float64, neck bool) bool {
+	f := r.iso
+	near := false
+	for _, pt := range f.partners[n.isoDom] {
+		pads := f.pinched[pt.f]
+		if neck {
+			pads = f.pads[pt.f]
+		}
+		reach := math.Max(pt.clear, pt.creep)
+		for _, pd := range pads {
+			if pd.Box.Dist(p)-hw < reach {
+				near = true
+				break
+			}
+		}
+		if near {
+			break
+		}
+	}
+	if !near {
+		return true
+	}
+	k := uint64(r.gr.idx(l, x, y))<<25 | uint64(math.Round(hw*100))&0xffffff<<1
+	if neck {
+		k |= 1
+	}
+	if v, ok := n.isoMemo[k]; ok {
+		return v
+	}
+	v := r.isoPadsExact(n, l, p, hw, neck)
+	if n.isoMemo == nil {
+		n.isoMemo = map[uint64]bool{}
+	}
+	n.isoMemo[k] = v
+	return v
+}
+
+func (r *router) isoPadsExact(n *rnet, l int, p Point, hw float64, neck bool) bool {
+	f := r.iso
+	id := r.gr.layers[l]
+	outer := id == LayerTop || id == LayerBottom
+	var cu []Point // the copper disk, circumscribed (never under-sized)
+	for _, pt := range f.partners[n.isoDom] {
+		pads := f.pinched[pt.f]
+		if neck {
+			pads = f.pads[pt.f]
+		}
+		for _, pd := range pads {
+			if !pd.OnLayer(id) {
+				continue
+			}
+			gap := pd.Box.Dist(p) - hw
+			if gap >= math.Max(pt.clear, pt.creep)-0.01 {
+				continue
+			}
+			path := gap
+			if outer && gap < pt.creep-0.01 {
+				if cu == nil {
+					cu = circlePoly(p, hw)
+				}
+				path = r.isoSurfacePath(cu, padPoly(pd), pt.slotW)
+			}
+			okClear := gap >= pt.clear-0.01
+			okCreep := !outer || path >= pt.creep-0.01
+			if okClear && okCreep {
+				continue
+			}
+			if !neck {
+				return false
+			}
+			ownGap, ownPath := r.isoOwnDist(n, pd, id, pt.slotW)
+			if !okClear && gap < math.Min(pt.clear, ownGap)-0.01 {
+				return false
+			}
+			if !okCreep && path < math.Min(pt.creep, ownPath)-0.01 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// isoSurfacePath is the surface path between two copper polygons round the
+// board's cutouts at least slotW wide.
+func (r *router) isoSurfacePath(a, c []Point, slotW float64) float64 {
+	if r.isoSlots == nil {
+		r.isoSlots = map[float64][][]Point{}
+	}
+	slots, ok := r.isoSlots[slotW]
+	if !ok {
+		slots = isoSlotPolys(r.b, nil, slotW)
+		r.isoSlots[slotW] = slots
+	}
+	d, pa, pc := polyDist(a, c)
+	path, _ := surfacePath(a, c, pa, pc, d, slots)
+	return path
+}
+
+// isoOwnDist is how close net n's own pads on layer id already are to the
+// partner pad pd: the straight gap and the surface path (round slots).
+func (r *router) isoOwnDist(n *rnet, pd *Pad, id int, slotW float64) (gap, path float64) {
+	gap, path = math.Inf(1), math.Inf(1)
+	for _, g := range n.groups {
+		for _, o := range g {
+			if !o.OnLayer(id) {
+				continue
+			}
+			k := [2]*Pad{o, pd}
+			v, ok := r.isoOwn[k]
+			if !ok {
+				a, c := padPoly(o), padPoly(pd)
+				d, _, _ := polyDist(a, c)
+				v = [2]float64{d, r.isoSurfacePath(a, c, slotW)}
+				if r.isoOwn == nil {
+					r.isoOwn = map[[2]*Pad][2]float64{}
+				}
+				r.isoOwn[k] = v
+			}
+			gap, path = math.Min(gap, v[0]), math.Min(path, v[1])
+		}
+	}
+	return gap, path
 }
 
 // ---- bridge geometry and slots ------------------------------------------------

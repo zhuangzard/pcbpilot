@@ -68,7 +68,16 @@ HDMI/TMDS、MIPI/DSI/CSI、LVDS、DDR/DQS、ETH/MDI/TRD/TXP…、USB/D+/DP/DM、
   依次比：布通率 → DRC → 联合评分的电气组（ESD 支线、去耦/热回路、IR、长度差/跨缝/过孔）→ 高速 + 差分对发现数；
   单元方式只有在不少布通、不多违规、不伤其他电气项时才保留（notes `differential pairs: routed as units …` /
   `leg-by-leg routing kept …`）；细栅格重试两种方式都试。完成度排在耦合前面：一条没布通的连接本身就是电气失败。
-  ESP32 mini（当前布局下 USB 对几何上耦合不起来）因此保持旧结果：ESD 支线 68 mil、联合 92.6，与 dev 相同。
+  这条保护在差分对计入联合评分后仍保留：单元方式只有在电气组（现在含 `diff-pair` 项）不变差时才保留。
+- **布局给差分对留走廊**（2026-09-30，`pkg/pcbauto/placer_corridor.go`；仅 intent 声明了接口的对）：沿该对的链
+  （连接器 → ESD/串联件 → 芯片）两根线骨架的中线、宽 = 两线间距 + 一个 pair pitch + 间距，不属于这对的器件
+  （CC 电阻、上拉、LED…）侵入走廊按每 mil ×4 计价——权重低于去耦（6–7）与端口保护（5），高于上拉（2）/信号（1.5），
+  所以先让开的是无关小件。链上的直通/串联件（USBLC6、串阻）另按**朝向**计价：入口/出口那一排两脚的连线应与
+  来向垂直、并从朝向来向的一侧接入（行沿来向摆放 = 远端那根要绕过近端引脚 → 换层），每端最多 150 mil；
+  扭绞按**接入路径**（焊盘经所在器件边外 10 mil 的接入点）计数（`PairTwistAccess`，每次交叉按 400 mil）。
+  ESP32 mini（seed 3，确定性 `PCBPILOT_BENCH_WORK=3e6`）：R4（CC）不再挡在 USBLC6 → CH340 之间，
+  USB 对 0/0 过孔、单层、端部未耦合 438/500 mil，4 项对检查全过（dev：2/0 过孔、307/250 mil，3 项不过），
+  ESD 支线 68 → 0 mil，联合 92.6 → 92.7。其他种子见 CHANGELOG（仍可能有 1–3 项不过，例如 USBLC6 落成行沿来向）。
 - **间距落到目标值**：栅格只能把跟随线放在“占位不与领线重叠”的最近格，比目标 pitch 多出 1–2 格
   （usb3-typec 2.4 mil 栅格：13 mil pitch 实际 16.8 mil，4 mil 间距变 7.8 mil）。布线收尾把跟随线上与领线平行、
   偏差在 3 格内的直线段平移到精确 pitch（相邻段沿自身方向滑动保持 45°；焊盘/过孔/T 接端点不动），精确 DRC
@@ -101,7 +110,7 @@ HDMI/TMDS、MIPI/DSI/CSI、LVDS、DDR/DQS、ETH/MDI/TRD/TXP…、USB/D+/DP/DM、
 | `split-crossing` | 走在分割电源平面的缝上方 | 该段改走 GND 平面邻层；或在跨缝处加缝合电容 |
 | `group-skew` | 等长组（HDMI 对间、DDR 字节通道/地址命令）最长−最短超容差（`si.groups[]` 给每组 min/max/spread） | 布局让组内各路两端距离接近；留出直线段给蛇形线；必要时放宽 `lengthTolMil` 须有芯片手册依据 |
 | `no-reference` | 需要参考平面的高速线走在没有相邻平面的层上（2 层板；混合 IN2 叠层的 BOTTOM） | 换 4 层以上、让高速对只走紧邻 GND 的层；不得当作“通过” |
-| `coupling` | 差分对“主体”（两端出线区以外）同层、间距在目标 ±max(40 %, 2 mil) 内的长度份额低于类下限（取两根里较低者） | 布局给这对留出走廊（挪开挡在两端连线之间的器件）；让两端引脚顺序一致（不需交叉） |
+| `coupling` | 差分对“主体”（两端出线区以外）同层、间距在目标 ±max(40 %, 2 mil) 内的长度份额低于类下限（取两根里较低者） | `--place` 已为 intent 对留走廊、按来向摆正直通件；仍报时看 `report.md`「布局依据」里挡在两端之间的器件与其归属，修 mech/groups 约束后按参数重跑（不手工挪件） |
 | `uncoupled` | 某一端出线区内（半径 = 类出线预算）一根线未耦合的长度超过该端预算（类预算 × 该端器件数：连接器 + ESD 算两处出线） | 两根线出引脚后尽快并拢；该端器件朝向让 P/N 顺序与走向一致 |
 | `via-asymmetry` | 两根过孔数不同 | 过孔成对放在同一换层处，或两根都留在一层（典型根因：一根要从另一根的焊盘行/穿通线下钻过） |
 | `layer-asymmetry` | 两根用的层集合不同（≥10 mil 才算一层） | 同上：同一换层序列 |
@@ -116,11 +125,13 @@ HDMI/TMDS、MIPI/DSI/CSI、LVDS、DDR/DQS、ETH/MDI/TRD/TXP…、USB/D+/DP/DM、
 
 依据：各接口布线指南（TI SPRAAR7 高速接口布线、USB 2.0 / PCIe / HDMI 板级设计指南）一致要求两根以恒定间距边耦合走完全程、
 过孔成对对称、同一换层序列，只在封装/连接器出线处允许分开；指南不给统一的百分比，数值为初值。对内长度差仍用类表的
-`maxSkewMil`（`skew`）。这些发现进 SI 报告、`report.md` 第 6 节和 feedback 困难度理由；**当前不计入联合评分**的
-高速项与细栅格重试的取舍（布局器还不会给差分对留走廊，ESP32 mini 这类布局下每个候选都带这些发现，按它们择优
-只会拿其他电气结果——ESD 支线——去换）。回归：`TestPairSIFlagsUncoupledESP32USB`（v0.5 现场板：USB_DM 2 孔 /
+`maxSkewMil`（`skew`）。这些发现进 SI 报告、`report.md` 第 6 节和 feedback 困难度理由；intent 声明的对还计入
+**联合评分电气组的 `diff-pair` 项**（权重 0.2，得分 = 4 项检查（耦合份额、端部未耦合、过孔对称、层对称）通过的
+比例；2026-09-30 起布局会给这些对留走廊，仍耦合不起来就是这块布局的缺陷）。只靠网名猜出的对仍只报告不计分，
+`high-speed` 项与细栅格重试仍只看长度差/跨缝/过孔。主体 < 50 mil（端点都在出线区内，如 ESP32 mini 的 USB 链）
+时耦合份额不判，只判端部未耦合与对称。回归：`TestPairSIFlagsUncoupledESP32USB`（v0.5 现场板：USB_DM 2 孔 /
 USB_DP 0 孔、整对 0 mil 耦合，过去报“干净”，现在必报 `uncoupled`、`via-asymmetry`、`layer-asymmetry`）、
-`TestPairCouplingSynthetic`。
+`TestPairCouplingSynthetic`、`TestESP32MiniIntentKeepsESDOnPath`（seed 3：ESD 支线 ≥ 89、联合 ≥ 92、USB 对 4 项全过）。
 
 apply 后把约束写进 EasyEDA，让原生 DRC 和报告也按差分对/等长组检查：
 
@@ -158,7 +169,31 @@ pcbpilot pcb report --project <P> --doc <PCB>        # 回读 skew / spread
 `intent.json`、`rules-plan.json`、`<mode>/plan.json|report.md|preview.svg` 与总表 `summary.md`。
 失败项就是引擎的待办——不得为通过而放宽判据；修引擎后补回归测试。
 
-### 当前基线（2026-09-30，确定性模式 `PCBPILOT_BENCH_WORK=3e6`，路由预算 2 min，route + place）
+### 当前基线（2026-10-01，差分对走廊 + `diff-pair` 计分；确定性 `PCBPILOT_BENCH_WORK=3e6`，路由预算 2 min）
+
+eb78993a（dev）与本分支同条件对比（route + place，seed 1，失败检查数）：
+
+| 用例 | 检查 | dev 失败 | 本分支失败 | 说明 |
+|---|---|---|---|---|
+| `ddr3-x16` | 74 | 16 | 16 | 相同（仅 DQ 过孔超限的网不同） |
+| `gbe-rj45` | 125 | 6 | 6 | 相同 |
+| `hdmi-tx` | 73 | 0 | 0 | 首版本分支在 route 模式掉到 2（单元方式保留了一个 GND 焊盘断开平面的结果）：单元/逐根择优现在先比平面/地连接开路数，已修复 |
+| `pcie-m2` | 67 | 6 | 5 | route 模式平面开路消失；place 模式 TX/TXC 长度差变大、`no-reference` 消失 |
+| `usb3-2layer-negative` | 60 | 2 | 2 | 相同 |
+| `usb3-typec` | 111 | 5 | 8 | place 模式 seed 1：USB_DP 一根未通（97.5 %） |
+
+布局是混沌的（一个种子说明不了趋势），place 模式另跑 6 个种子（seed 1–6）的均值：
+
+| 用例 | dev 失败 / 布通 | 本分支失败 / 布通 | 备注 |
+|---|---|---|---|
+| `usb3-typec` | 8.50 / 98.8 %（3 个种子未布通） | 5.33 / 99.2 %（2 个） | 变好 |
+| `pcie-m2` | 2.83 / 100 % | 3.50 / 96.1 %（seed 5、6 的 RX_N/REFCLK_N `no-legal-path`） | 变差，待办：只用 `--loops 0` 时无闭环补救 |
+| `gbe-rj45` | 4.83 / 94.8 % | 4.83 / 93.2 % | 仅 seed 1 不同（96.9 → 90.6 %） |
+
+试过把连接器/芯片排除在朝向计价之外：pcie 6 个种子全布通，但 ESP32 mini seed 3 的联合分掉到 89.1
+（回归门槛 92），未采用。
+
+### 上一基线（2026-09-30，确定性模式 `PCBPILOT_BENCH_WORK=3e6`，路由预算 2 min，route + place）
 
 dev（89382624，只加了虚拟时钟补丁）与本分支同条件对比，失败检查数相同；变化在布通率和差分对：
 
@@ -173,7 +208,7 @@ dev（89382624，只加了虚拟时钟补丁）与本分支同条件对比，失
 
 同一确定性条件下 5 块真板 fixture bench 两边逐项相同（mipi 100 / bbclaw 100 / szpi 90.1 / rk3568 57.2 / k230 71.1 %）。
 耦合判据报出的问题主要由布局决定（走廊里的器件、ESD 穿通方向与走向垂直、连接器引脚交错）：布线器能做的是在两种方式中取
-电气更好的一个并如实报告，走廊留空属于布局器待办。
+电气更好的一个并如实报告；走廊留空已由布局器承担（见上一节）。
 
 ### 历史基线（2026-09-27，stress/hs，无并行负载，路由预算 2 min）
 

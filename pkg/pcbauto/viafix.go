@@ -57,18 +57,20 @@ func (r *router) viaRated(n *rnet) bool {
 	return r.an.rated && n.plan != nil && n.plan.Via != nil && n.plan.Via.CurrentA > 0 && n.viaCount() > 1
 }
 
-// completeViaArrays runs the alternatives on every short, rated net.
+// completeViaArrays runs the alternatives on every short, rated net. The
+// via array is an electrical requirement (current per transition), so the
+// alternatives run on their own work budget (onWorkClock), never on what
+// the negotiation left of the routing budget: a loaded machine or a slow
+// board used to skip them all ("no time left in the routing budget") and
+// ship a short array only reported. Each net gets its own viaFixBudget of
+// search work; every alternative is a bounded sequence (ladder sizes,
+// viaFixMoves relocations, one single-layer re-route), so this always ends.
 func (r *router) completeViaArrays(outs map[*rnet]*netOut, collect func() ([]Track, []Via)) {
-	stop := r.now().Add(viaFixBudget)
 	for _, n := range r.nets {
 		if n.viaShort == 0 || len(n.paths) == 0 || !r.viaRated(n) || n.viaFix == viaFixFailed {
 			continue
 		}
-		if r.now().After(stop) || r.now().After(r.deadline) {
-			n.viaTried = append(n.viaTried, "no time left in the routing budget for alternatives")
-			continue
-		}
-		r.fixViaArray(n, outs, collect)
+		r.onWorkClock(viaFixBudget, func() { r.fixViaArray(n, outs, collect) })
 	}
 }
 
@@ -143,6 +145,7 @@ func (r *router) fixViaArray(n *rnet, outs map[*rnet]*netOut, collect func() ([]
 	}
 	reroute := func() {
 		deadline, strict := r.deadline, r.strict
+		// One attempt's share of the fix-up's own budget (onWorkClock).
 		r.deadline, r.strict, n.viaFixing = minTime(r.deadline, r.now().Add(viaFixAttempt)), true, true
 		r.rerouteTransitions(n, shortAt0)
 		r.deadline, r.strict, n.viaFixing = deadline, strict, false

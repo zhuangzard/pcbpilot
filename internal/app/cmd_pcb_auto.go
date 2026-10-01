@@ -404,7 +404,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 						overlaps = rep.Placement.Metrics.Overlaps
 					}
 					rep.Joint = pcbauto.Joint(b, rep.Result.Analysis, rep.Circuit, rep.Result.Stackup, rep.Result.Route, rep.Result.DRC,
-						pcbauto.JointOptions{PlacementScore: -1, Overlaps: overlaps, Aesthetics: true, Isolation: rep.Result.Isolation, AesProfile: aesStyle})
+						pcbauto.JointOptions{PlacementScore: -1, Overlaps: overlaps, Aesthetics: true, Isolation: rep.Result.Isolation, Edge: rep.Result.Edge, AesProfile: aesStyle})
 					fmt.Fprintf(stderr, "joint score %.1f (completion ×%.2f, quality %.0f)\n", rep.Joint.Overall, rep.Joint.CompletionFactor, rep.Joint.Quality)
 					if a := rep.Joint.Aesthetics; a != nil {
 						fmt.Fprintf(stderr, "aesthetics %.1f (placement %.1f, routing %.1f; report-only, weight %.2f — pcb aesthetics --board board.routed.json)\n",
@@ -420,6 +420,16 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 					fmt.Fprintf(stderr, "routing: %d layers, signal %.1f%% (%d/%d)%s, vias %d+%d fan-out, DRC violations %d, %.1fs\n",
 						rep.Result.Stackup.Layers, s.Completion, s.Routed, s.Connections, plane, s.Vias, s.FanoutVias,
 						len(rep.Result.DRC.Violations), float64(s.Millis)/1000)
+					// The delivery verdict, safety findings first: no time
+					// budget may hide them (a fix-up that could not finish
+					// leaves its finding, and the board is not deliverable).
+					if why := rep.Joint.NotDeliverable(); len(why) > 0 {
+						for _, w := range why {
+							fmt.Fprintf(stderr, "NOT DELIVERABLE: %s\n", w)
+						}
+					} else {
+						fmt.Fprintf(stderr, "verdict: deliverable (no safety, electrical, completion or DRC blocker)\n")
+					}
 					if pw := rep.Result.Route.Power; pw != nil {
 						var parts []string
 						for _, n := range pw.Nets {
@@ -596,7 +606,7 @@ Nothing is written to EasyEDA; apply a pin swap with 'pcbpilot sch pin-swap'.`,
 				}
 				if rep.Joint == nil {
 					rep.Joint = pcbauto.Joint(b, rep.Result.Analysis, rep.Circuit, rep.Result.Stackup, rep.Result.Route, rep.Result.DRC,
-						pcbauto.JointOptions{PlacementScore: -1, Aesthetics: true, Isolation: rep.Result.Isolation, AesProfile: aesStyle})
+						pcbauto.JointOptions{PlacementScore: -1, Aesthetics: true, Isolation: rep.Result.Isolation, Edge: rep.Result.Edge, AesProfile: aesStyle})
 				}
 				opts := pcbauto.Options{Power: power, Stack: pcbauto.StackOptions{Force: rep.Result.Stackup.Layers, MaxLayers: in.maxLayers},
 					Route: pcbauto.RouteOptions{GridMil: in.grid, Timeout: in.timeout}}

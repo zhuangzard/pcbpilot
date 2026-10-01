@@ -220,6 +220,17 @@ IO39–42、IO47/48 可换但带 `caution`（32k 晶振 / JTAG / 1.8 V），置�
   `layer-asymmetry`，[recipes/high-speed.md](recipes/high-speed.md) §4–5）。超出对内长度差预算时自动加蛇形线或 45° 凸起。
 - **载流换层**：带电流的网每个换层点按 intent/仿真定的数量与尺寸放过孔阵列；放不满依次试更大钻孔、滑动换层点、
   换位置重布、单层重布，仍不行写 `route.viaShortfalls[]` 与 feedback `via-current`（[pcb-routing.md](pcb-routing.md)）。
+  这些补救在**自己的工作量预算**上跑（每网 30 s × 3e6 次 A* 展开），不再吃协商剩下的路由时间——负载高或板子慢时
+  不会因“no time left in the routing budget”跳过。
+- **安全与电气不取决于时间预算**（2026-09-30）：隔离开槽、领地 + 夹挤焊盘精确围栏（外层按绕槽沿面路径判爬电）、
+  板边距离带是硬约束，预算不够只会少布通，不会放违规铜（[recipes/hv-isolation.md](recipes/hv-isolation.md) §4、§10）。
+  仍有安全/电气发现时，结果带显式**不可交付**结论：`plan.json result.blockers[]`（隔离 creepage/clearance、不可行桥、
+  绝缘域板边 ERROR、过孔阵列不足、IR 超预算/电源网未接通、SELV 铜低于工艺板边规则），stderr 每条一行 `NOT DELIVERABLE: …`（全部通过时打印
+  `verdict: deliverable`），`report.md` 综合评分节「不可交付」原因，`feedback.json notDeliverable[]`；联合评分
+  `deliverable=false`，隔离与绝缘域板边与短路/重叠同为门槛（总分封顶 40），其余列为 `blockers`。**看到 NOT DELIVERABLE 不得
+  交付或称完成**：按原因修参数/布局/器件后重跑。
+- **差分对走廊**：intent 声明的差分对，`--place` 让无关器件让出连接器 → ESD/串联件 → 芯片之间的走廊，并按来向摆正
+  直通件；SI 的耦合/对称发现计入联合评分电气组 `diff-pair` 项（[recipes/high-speed.md](recipes/high-speed.md) §4–5）。
 - **确定性基准**：`RouteOptions.WorkRate` / 环境变量 `PCBPILOT_BENCH_WORK=<每预算秒的 A* 展开数>`（`make fixture-bench-det`；
   也可用于 `make stress-hs` 等任何布线调用）让布线器用“搜索工作量”计时，同一提交在任何负载下得同一布线结果（布局退火在
   预算 80 % 之后仍看墙钟）；实际运行不设它，仍按墙钟预算。比较两次运行必须用同一个值。
