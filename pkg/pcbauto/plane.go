@@ -67,7 +67,7 @@ func (r *router) fanout(res *RouteResult) {
 		if ai != aj {
 			return ai < aj
 		}
-		if ki, kj := pads[i].Key(), pads[j].Key(); ki != kj {
+		if ki, kj := pads[i].Key(), pads[j].Key(); ki != kj || !fanoutRays {
 			return ki < kj
 		}
 		return tileD[pads[i]] < tileD[pads[j]]-1e-6
@@ -94,7 +94,7 @@ func (r *router) fanout(res *RouteResult) {
 	// tiles need (bbclaw U7.41: three tiles left without a via).
 	done := map[*Pad]bool{}
 	tilesFirst := append([]*Pad(nil), pads...)
-	if !fanoutNoRays {
+	if fanoutRays {
 		sort.SliceStable(tilesFirst, func(i, j int) bool {
 			ti, tj := tileD[tilesFirst[i]] > 0 || isTile(r, tilesFirst[i]), tileD[tilesFirst[j]] > 0 || isTile(r, tilesFirst[j])
 			return ti && !tj
@@ -104,7 +104,7 @@ func (r *router) fanout(res *RouteResult) {
 		if done[pd] {
 			continue
 		}
-		if p := r.b.Part(pd.Part); p != nil && tiledPad(p, pd) && !fanoutNoRays {
+		if p := r.b.Part(pd.Part); p != nil && tiledPad(p, pd) && fanoutRays {
 			var grp []*Pad
 			for _, q := range pads {
 				if q.Part == pd.Part && q.Number == pd.Number && !done[q] {
@@ -320,8 +320,13 @@ func (r *router) relocateFanout(n *rnet, k int, res *RouteResult, accept func() 
 // the body).
 const fanoutGridFallback = 1000
 
-// fanoutNoRays restores the grid-cell fan-out sites only (A/B diagnostics).
-var fanoutNoRays bool
+// fanoutRays places the fan-out vias on the pad centre's rays while fanning
+// out, before any signal is routed. Off: moving the vias perturbs the whole
+// routing (fixture bench and ESP32 seeds: some boards better, some worse in
+// electrical items and vias), so the stubs are straightened after routing
+// instead (beautify.go straightenFanouts), where the gate can hold every
+// higher-ranked figure. Kept for A/B diagnostics.
+var fanoutRays = false
 
 func isTile(r *router, pd *Pad) bool {
 	p := r.b.Part(pd.Part)
@@ -363,7 +368,7 @@ type raySite struct {
 // the axis directions (a 45° stub is the second choice) and for the ray
 // pointing away from the body.
 func fanoutRaySites(pd *Pad, away Point, maxR float64) []raySite {
-	if fanoutNoRays {
+	if !fanoutRays {
 		return nil
 	}
 	var out []raySite
@@ -486,7 +491,7 @@ func (r *router) placeFanoutViasChecked(n *rnet, pd *Pad, li, need int, stubW fl
 					score += 25 // prefer escaping away from the part body
 				}
 			}
-			if edge > 0 && !fanoutNoRays && !r.fanGrid {
+			if edge > 0 && fanoutRays && !r.fanGrid {
 				// Behind every ray site; among themselves the straighter
 				// stub first (½ per degree off 0/45/90°).
 				score += fanoutGridFallback + 0.5*octiDev(angDeg(pd.Box.C, c))

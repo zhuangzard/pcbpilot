@@ -439,8 +439,8 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 						len(rep.Result.DRC.Violations), float64(s.Millis)/1000)
 					if bs := rep.Result.Route.Beautify; bs != nil {
 						if bs.Kept {
-							fmt.Fprintf(stderr, "beautify: %d pad entries, %d S-jogs, %d collinear merges, %d segments + %d vias onto the 5 mil grid (kept: DRC, electrical, SI, isolation, vias and completion no worse)\n",
-								bs.PadEntries, bs.SJogs, bs.Merged, bs.LinesSnapped, bs.ViasSnapped)
+							fmt.Fprintf(stderr, "beautify: %d fan-out vias onto the pad rays, %d pad entries, %d S-jogs, %d collinear merges, %d segments + %d vias onto the 5 mil grid (kept: DRC, electrical, SI, isolation, vias and completion no worse)\n",
+								bs.Fanouts, bs.PadEntries, bs.SJogs, bs.Merged, bs.LinesSnapped, bs.ViasSnapped)
 						} else if bs.Reason != "" {
 							fmt.Fprintf(stderr, "beautify: not applied — %s\n", bs.Reason)
 						}

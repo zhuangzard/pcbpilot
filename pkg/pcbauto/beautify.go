@@ -34,6 +34,7 @@ import (
 
 // BeautifyStats reports the post-route beautification pass.
 type BeautifyStats struct {
+	Fanouts      int    `json:"fanouts"`      // fan-out vias moved onto the pad centre's rays
 	PadEntries   int    `json:"padEntries"`   // pad entries rebuilt along the pad axis (or at 45°)
 	SJogs        int    `json:"sJogs"`        // S-jogs put on one line
 	Merged       int    `json:"merged"`       // collinear vertices removed
@@ -47,7 +48,7 @@ type BeautifyStats struct {
 }
 
 func (s *BeautifyStats) changes() int {
-	return s.PadEntries + s.SJogs + s.Merged + s.Widened + s.LinesSnapped + s.ViasSnapped
+	return s.Fanouts + s.PadEntries + s.SJogs + s.Merged + s.Widened + s.LinesSnapped + s.ViasSnapped
 }
 
 // NoBeautify disables the post-route beautification (A/B diagnostics and
@@ -86,6 +87,7 @@ type bfy struct {
 	// sensitive: nets whose routed length an electrical item measures.
 	sensitive map[string]bool
 	cur       string // the net being worked on
+	planes    []PlaneRegion
 }
 
 // beautify runs the passes over rr's copper and returns the new tracks and
@@ -114,6 +116,7 @@ func beautify(b *Board, an *Analysis, c *Circuit, st *Stackup, rr *RouteResult, 
 			}
 		}
 	}
+	z.planes = rr.Planes
 	z.ts = append([]Track(nil), rr.Tracks...)
 	z.dead = make([]bool, len(z.ts))
 	z.vs = append([]Via(nil), rr.Vias...)
@@ -171,6 +174,7 @@ func beautify(b *Board, an *Analysis, c *Circuit, st *Stackup, rr *RouteResult, 
 		names = append(names, n)
 	}
 	sort.Strings(names)
+	z.straightenFanouts()
 	for _, net := range names {
 		z.net(net)
 	}
@@ -308,6 +312,141 @@ func (z *bfy) stLayers() []int {
 		}
 	}
 	return out
+}
+
+// ---- fan-out stubs ----------------------------------------------------------
+
+// straightenFanouts moves a fan-out via whose stub leaves its pad at a skew
+// onto one of the pad centre's eight octilinear rays — the axis away from
+// the part body first, the least displacement next — never farther from the
+// pad than it was (the stub length is part of the decap / hot loops), only
+// into room the routed copper leaves (exact check), and inside every plane
+// region that held it. A via other copper hangs on (shared stubs, escapes,
+// routed bridges) and the pads with several fan-out vias (current arrays)
+// stay. Done after routing so the routing itself is unchanged.
+func (z *bfy) straightenFanouts() {
+	n0 := len(z.ts)
+	for ti := 0; ti < n0; ti++ {
+		t := z.ts[ti]
+		if z.dead[ti] || t.Kind != "fanout" || z.skipNet[t.Net] || odir(t.A, t.B) >= 0 {
+			continue
+		}
+		pd := z.pix.at(t.A, t.Layer, t.Net)
+		if pd == nil || pd.Box.C.Dist(t.A) > 0.05 {
+			continue
+		}
+		vi := -1
+		for i, v := range z.vs {
+			if v.Net == t.Net && bk(v.C) == bk(t.B) {
+				if vi >= 0 {
+					vi = -2
+					break
+				}
+				vi = i
+			}
+		}
+		if vi < 0 {
+			continue
+		}
+		hang, fromPad := 0, 0
+		for i, o := range z.ts {
+			if z.dead[i] || o.Net != t.Net {
+				continue
+			}
+			if bk(o.A) == bk(t.B) || bk(o.B) == bk(t.B) {
+				hang++
+			}
+			if o.Kind == "fanout" && o.Layer == t.Layer && bk(o.A) == bk(t.A) {
+				fromPad++
+			}
+		}
+		if hang != 1 || fromPad != 1 {
+			continue
+		}
+		C, V := pd.Box.C, t.B
+		old := C.Dist(V)
+		var away Point
+		if p := z.b.Part(pd.Part); p != nil {
+			away = C.Sub(p.Body().Center())
+		}
+		al := math.Hypot(away.X, away.Y)
+		type cand struct {
+			c Point
+			s float64
+		}
+		var cs []cand
+		square := math.Abs(pd.Box.W-pd.Box.H) < t.Width
+		for k := 0; k < 8; k++ {
+			u := dunit(k)
+			rank := 0.0
+			if k%2 == 1 {
+				rank = 2
+				if square {
+					rank = 20 // out of a square pad's corner: last resort
+				}
+			}
+			if al > 0 {
+				dot := (u.X*away.X + u.Y*away.Y) / al
+				switch {
+				case dot < -0.3:
+					rank += 8
+				case dot < 0.7 && k%2 == 0:
+					rank += 1
+				}
+			}
+			for d := math.Floor(old*2) / 2; d > 0; d -= 0.5 {
+				c := C.Add(u.Scale(d))
+				c = Point{math.Round(c.X*1000) / 1000, math.Round(c.Y*1000) / 1000}
+				if pd.Box.Dist(c) == 0 {
+					break
+				}
+				cs = append(cs, cand{c, 10*rank + c.Dist(V)})
+			}
+		}
+		sort.SliceStable(cs, func(i, j int) bool { return cs[i].s < cs[j].s })
+		tried := 0
+		for _, cd := range cs {
+			if tried >= 40 {
+				break
+			}
+			if !z.inSamePlanes(t.Net, V, cd.c, z.vs[vi].Dia/2) {
+				continue
+			}
+			tried++
+			nt := t
+			nt.B = cd.c
+			if !z.okEdit(t.Net, map[int]bool{ti: true}, nil, []Track{nt}, vi, cd.c) {
+				z.stats.Rejected++
+				continue
+			}
+			z.dead[ti] = true
+			z.ts = append(z.ts, nt)
+			z.dead = append(z.dead, false)
+			z.vs[vi].C = cd.c
+			z.stats.Fanouts++
+			break
+		}
+	}
+}
+
+// inSamePlanes: a via moved from a to b stays inside every plane / pour
+// region of its net that held it, at least as far from the region edge as
+// it was (or a via radius).
+func (z *bfy) inSamePlanes(net string, a, b Point, rad float64) bool {
+	for _, pr := range z.planes {
+		if pr.Net != net {
+			continue
+		}
+		for _, poly := range pr.Polys {
+			if len(poly) < 3 || !PolyContains(poly, a) {
+				continue
+			}
+			if !PolyContains(poly, b) || PolyEdgeDist(poly, b) < math.Min(PolyEdgeDist(poly, a), rad) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // ---- chains ---------------------------------------------------------------
@@ -533,21 +672,10 @@ func (z *bfy) ok(c *bchain, from, to int, add []Track, vi int, nv Point) bool {
 }
 
 func (z *bfy) okMulti(cs []*bchain, rng [][2]int, adds [][]Track, vi int, nv Point) bool {
-	win := EmptyRect()
 	var add []Track
 	for _, a := range adds {
 		add = append(add, a...)
 	}
-	for _, t := range add {
-		win = win.AddPoint(t.A).AddPoint(t.B)
-	}
-	if vi >= 0 {
-		win = win.AddPoint(nv).AddPoint(z.vs[vi].C)
-	}
-	if win.Empty() {
-		return true
-	}
-	win = win.Expand(z.margin)
 	skip := map[int]bool{}
 	var keep []Track
 	for ci, c := range cs {
@@ -560,6 +688,25 @@ func (z *bfy) okMulti(cs []*bchain, rng [][2]int, adds [][]Track, vi int, nv Poi
 			}
 		}
 	}
+	return z.okEdit(cs[0].net, skip, keep, add, vi, nv)
+}
+
+// okEdit judges an edit of net's copper: the tracks in skip removed, keep
+// and add placed (add is the new copper) and via vi moved to nv (vi < 0:
+// none) — the exact DRC around it with a 0.05 mil margin, and no new copper
+// running over its own net away from a shared end or a tee.
+func (z *bfy) okEdit(net string, skip map[int]bool, keep, add []Track, vi int, nv Point) bool {
+	win := EmptyRect()
+	for _, t := range add {
+		win = win.AddPoint(t.A).AddPoint(t.B)
+	}
+	if vi >= 0 {
+		win = win.AddPoint(nv).AddPoint(z.vs[vi].C)
+	}
+	if win.Empty() {
+		return true
+	}
+	win = win.Expand(z.margin)
 	segBB := func(t Track) Rect { return EmptyRect().AddPoint(t.A).AddPoint(t.B).Expand(t.Width / 2) }
 	var ts []Track
 	for i, t := range z.ts {
@@ -575,7 +722,6 @@ func (z *bfy) okMulti(cs []*bchain, rng [][2]int, adds [][]Track, vi int, nv Poi
 	}
 	// Own-net crossings: a new segment may touch its own copper only where
 	// they share an end, and never runs back along it.
-	net, layer := cs[0].net, cs[0].layer
 	for _, a := range add {
 		for _, t := range ts {
 			if t.Net != net || t.Layer != a.Layer {
@@ -632,7 +778,6 @@ func (z *bfy) okMulti(cs []*bchain, rng [][2]int, adds [][]Track, vi int, nv Poi
 			}
 		}
 	}
-	_ = layer
 	first := len(ts)
 	ts = append(ts, add...)
 	var vs []Via
@@ -1465,8 +1610,8 @@ func beautifyRoute(b *Board, res *Result, slots []IsoSlot, notes []string, bad [
 			stats.Reason = sprintf("kept the changes of %d of %d nets (the full pass: %s)", kept, total, why)
 		}
 		rr2.Beautify = stats
-		note := sprintf("beautify: %d pad entries, %d S-jogs, %d collinear merges (%d widened), %d segments and %d vias onto the 5 mil grid; %d candidates refused by the exact check",
-			stats.PadEntries, stats.SJogs, stats.Merged, stats.Widened, stats.LinesSnapped, stats.ViasSnapped, stats.Rejected)
+		note := sprintf("beautify: %d fan-out vias onto the pad rays, %d pad entries, %d S-jogs, %d collinear merges (%d widened), %d segments and %d vias onto the 5 mil grid; %d candidates refused by the exact check",
+			stats.Fanouts, stats.PadEntries, stats.SJogs, stats.Merged, stats.Widened, stats.LinesSnapped, stats.ViasSnapped, stats.Rejected)
 		if strict {
 			note += " (no length increase)"
 		}
