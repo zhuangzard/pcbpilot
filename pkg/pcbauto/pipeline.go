@@ -174,8 +174,7 @@ func Run(ctx context.Context, b *Board, opt Options) (*Result, error) {
 						rr.Notes = append(rr.Notes, sprintf("micro-fix: %d sub-0.25 mil clearance shortfall(s) cleared by shifting or narrowing a track", n))
 					}
 					rr.routed = append([]Track(nil), rr.Tracks...)
-					rr.routed = append([]Track(nil), rr.Tracks...)
-		rr.Power = powerIntegrity(b, an, res.Stackup, rr)
+					rr.Power = powerIntegrity(b, an, res.Stackup, rr)
 					drc := CheckDRCStrict(b, an, res.Stackup, rr.Tracks, rr.Vias)
 					res.Attempts = append(res.Attempts, Attempt{Stack: stackLabel(res.Stackup) + label, Completion: rr.Stats.Completion,
 						Vias: rr.Stats.Vias + rr.Stats.FanoutVias, Violations: len(drc.Violations), Millis: attemptMillis(start, rr)})
