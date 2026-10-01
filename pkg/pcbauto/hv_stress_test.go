@@ -104,7 +104,10 @@ func TestHVFootprintRelief(t *testing.T) {
 	if an.ByNet["HVA"].ClearanceMil < 98 {
 		t.Fatalf("HVA clearance %.1f", an.ByNet["HVA"].ClearanceMil)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	// The work budget (virtual clock) decides the result; the wall deadline is
+	// only a hang guard and must not bite a heavily loaded runner (load 80–100
+	// pushed this past one minute, 2026-10-01).
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	res, err := Run(ctx, b, Options{Power: power, Stack: StackOptions{Force: 2}, Route: RouteOptions{Timeout: 20 * time.Second, WorkRate: 3e6}})
 	if err != nil {
