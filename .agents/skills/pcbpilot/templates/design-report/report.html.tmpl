@@ -66,7 +66,7 @@ code{font-size:12px;word-break:break-all}
 
 <nav class="toc"><ol start="0">
 <li><a href="#s0">封面</a></li><li><a href="#s1">执行摘要</a></li><li><a href="#s2">需求与设计意图</a></li><li><a href="#s3">电源仿真</a> · <a href="#s3a">3A 模拟仿真</a></li>
-<li><a href="#s4">器件可行性</a></li><li><a href="#s5">工程计算</a></li><li><a href="#s6">布局与布线</a></li><li><a href="#s6a">设计后仿真</a> · <a href="#s6b">6B 美观度</a></li><li><a href="#s7">验证状态</a></li>
+<li><a href="#s4">器件可行性</a></li><li><a href="#s5">工程计算</a></li><li><a href="#s6">布局与布线</a></li><li><a href="#s6a">设计后仿真</a> · <a href="#s6b">6B 美观度</a> · <a href="#s6c">6C 原理图美观度</a></li><li><a href="#s7">验证状态</a></li>
 <li><a href="#s8">测试点计划</a></li><li><a href="#s9">制造与装配</a></li><li><a href="#s10">调试上电流程</a></li><li><a href="#s11">附录</a></li>
 </ol></nav>
 
@@ -275,6 +275,15 @@ code{font-size:12px;word-break:break-all}
 {{- if .Exemptions}}<h3>电气优先豁免</h3><ul>{{range .Exemptions}}<li>{{.Label}}：{{.Value}} — <small>{{.Note}}</small></li>{{end}}</ul>{{end}}
 <details><summary>约束优先级（美观为最低一层软约束）</summary><ul>{{range .Priority}}<li>{{.Label}}（{{.Value}}）：{{.Note}}</li>{{end}}</ul></details>
 {{- else}}<p class="muted">本节不可用：未提供板级 dump / board.routed.json，plan.json 也没有 joint.aesthetics（只报告章节，不计入缺失项）。</p>{{end}}
+
+<h2 id="s6c">6C 原理图美观度 Schematic aesthetics（只报告）</h2>
+{{- with $R.SchAesthetics}}
+<p>风格 <code>{{.Profile}}</code>：<small>{{.ProfileNote}}</small></p>
+<p class="muted">边界：{{.Boundary}}</p>
+<table><thead><tr><th>页</th><th>来源</th><th>分</th><th>判定</th><th>布线</th><th>版面</th><th>标签</th><th>已连引脚份额</th><th>已测/未测</th></tr></thead><tbody>{{range .Pages}}<tr><td>{{.Label}}</td><td>{{.Source}}</td><td class="n">{{.Score}}</td><td>{{.Verdict}}</td><td class="n">{{.Wiring}}</td><td class="n">{{.Layout}}</td><td class="n">{{.Labels}}</td><td class="n">{{.WiredShare}}</td><td class="n">{{.Measured}}/{{.Skipped}}</td></tr>{{end}}</tbody></table>
+{{- range .Pages}}<details><summary>{{.Label}} 指标明细</summary><table><thead><tr><th>项</th><th>指标</th><th>值</th><th>分</th><th>说明</th></tr></thead><tbody>{{range .Metrics}}<tr><td>{{.ID}}</td><td>{{.Name}}</td><td class="n">{{.Value}}</td><td class="n">{{.Score}}</td><td><small>{{.Detail}}</small></td></tr>{{end}}</tbody></table>{{if .Lanes}}<ul>{{range .Lanes}}<li>{{.Label}}：{{.Value}} — <small>{{.Note}}</small></li>{{end}}</ul>{{end}}</details>{{end}}
+<details><summary>约束优先级（美观为最低一层）</summary><ul>{{range .Priority}}<li>{{.}}</li>{{end}}</ul></details>
+{{- else}}<p class="muted">本节不可用：未提供 <code>--sch-snapshot</code>（只报告章节，不计入缺失项）。</p>{{end}}
 
 <h2 id="s7">7 验证状态 Verification status</h2>
 <table><thead><tr><th>检查</th><th>结论</th><th>说明</th><th>证据文件</th></tr></thead><tbody>

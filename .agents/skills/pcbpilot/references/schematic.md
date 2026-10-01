@@ -13,6 +13,7 @@
 | XY、引脚方向、紧凑标题、存量布局工具 | [schematic-placement.md](schematic-placement.md) |
 | 计算 → Apply → 验证的操作顺序 | [auto-layout-sop.md](auto-layout-sop.md) |
 | 局部接线、端口与断连 | [schematic-wiring.md](schematic-wiring.md) |
+| 标签 vs 导线、总线、原理图美观度（只报告） | [schematic-wiring.md](schematic-wiring.md#标签-vs-导线总线与原理图美观度只报告的软层) |
 | 手写 Apply 或需要了解 action 返回值 | [actions.md](actions.md) |
 | 原理图到 PCB 的整板阶段 | [design-flow.md](design-flow.md)、[pcb.md](pcb.md) |
 
@@ -137,6 +138,9 @@ rebind 使用候选优先事务：先回读 Device association，候选创建且
   marker bbox 被统一内缩而漏检。只允许 marker 自身 lead 在自身 anchor 的精确收口。
 - `sch check --json` 的逐条问题在 `result.findings`。SDK DRC 可能只返回布尔/聚合值，
   不能单凭它宣称官方 UI 所有警告已清除；未运行或缺数据的检查列为未验证。
+- `sch aesthetics --snapshot page.json` 只报告布线/版面/标签/总线美观度（权重 0，不是门，
+  永远排在连接正确性与可读性之后）；它不替代上面任何一项检查，也不授权现场逐件美化。
+  原生总线 `sch bus …` 为 planned / live-unverified，规则见 [schematic-wiring.md](schematic-wiring.md#标签-vs-导线总线与原理图美观度只报告的软层)。
 - 用 `sch export-image` 导整页或指定 `--ids`；这是文档渲染，不依赖前台视口刷新。
   产物路径以响应 `artifacts[].path` 为准。BOM 和网表另用 `bom export`、`sch netlist`。
 

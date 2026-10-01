@@ -1,0 +1,1700 @@
+{
+ "source": "synthetic-drafted",
+ "parts": [
+  {
+   "id": "C_IN",
+   "ref": "C1",
+   "x": 525,
+   "y": 650,
+   "rotation": 0,
+   "bbox": {
+    "minX": 514.5,
+    "minY": 641.5,
+    "maxX": 535.5,
+    "maxY": 658.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1",
+     "net": "VSYS_5V",
+     "x": 505,
+     "y": 650,
+     "dir": "down"
+    },
+    {
+     "number": "2",
+     "name": "2",
+     "net": "GND",
+     "x": 545,
+     "y": 650,
+     "dir": "down"
+    }
+   ]
+  },
+  {
+   "id": "C_OUT",
+   "ref": "C2",
+   "x": 354.99999999999994,
+   "y": 585,
+   "rotation": 180,
+   "bbox": {
+    "minX": 344.49999999999994,
+    "minY": 576.5,
+    "maxX": 365.49999999999994,
+    "maxY": 593.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1",
+     "net": "+3V3",
+     "x": 374.99999999999994,
+     "y": 585,
+     "dir": "down"
+    },
+    {
+     "number": "2",
+     "name": "2",
+     "net": "GND",
+     "x": 334.99999999999994,
+     "y": 585,
+     "dir": "down"
+    }
+   ]
+  },
+  {
+   "id": "C_HF",
+   "ref": "C3",
+   "x": 445,
+   "y": 585,
+   "rotation": 0,
+   "bbox": {
+    "minX": 434.5,
+    "minY": 576.5,
+    "maxX": 455.5,
+    "maxY": 593.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1",
+     "net": "+3V3",
+     "x": 425,
+     "y": 585,
+     "dir": "down"
+    },
+    {
+     "number": "2",
+     "name": "2",
+     "net": "GND",
+     "x": 465,
+     "y": 585,
+     "dir": "down"
+    }
+   ]
+  },
+  {
+   "id": "C_VCC",
+   "ref": "C4",
+   "x": 285,
+   "y": 340,
+   "rotation": 0,
+   "bbox": {
+    "minX": 274.5,
+    "minY": 331.5,
+    "maxX": 295.5,
+    "maxY": 348.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1",
+     "net": "+3V3",
+     "x": 265,
+     "y": 340,
+     "dir": "down"
+    },
+    {
+     "number": "2",
+     "name": "2",
+     "net": "GND",
+     "x": 305,
+     "y": 340,
+     "dir": "down"
+    }
+   ]
+  },
+  {
+   "id": "D_TERM",
+   "ref": "D1",
+   "x": 135,
+   "y": 650,
+   "rotation": 0,
+   "bbox": {
+    "minX": 127.5,
+    "minY": 641.5,
+    "maxX": 140.5,
+    "maxY": 658.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "K",
+     "net": "VSYS_5V",
+     "x": 115,
+     "y": 650,
+     "dir": "down"
+    },
+    {
+     "number": "2",
+     "name": "A",
+     "net": "+5V_TERM",
+     "x": 155,
+     "y": 650,
+     "dir": "down"
+    }
+   ]
+  },
+  {
+   "id": "D_USB",
+   "ref": "D2",
+   "x": 100,
+   "y": 655,
+   "rotation": 0,
+   "bbox": {
+    "minX": 92.5,
+    "minY": 646.5,
+    "maxX": 105.5,
+    "maxY": 663.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "K",
+     "net": "VSYS_5V",
+     "x": 80,
+     "y": 655,
+     "dir": "down"
+    },
+    {
+     "number": "2",
+     "name": "A",
+     "net": "USB_VBUS",
+     "x": 120,
+     "y": 655,
+     "dir": "down"
+    }
+   ]
+  },
+  {
+   "id": "D_ESD",
+   "ref": "D3",
+   "x": 205,
+   "y": 385,
+   "rotation": 0,
+   "bbox": {
+    "minX": 169.5,
+    "minY": 364.5,
+    "maxX": 240.5,
+    "maxY": 405.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "I/O1",
+     "net": "USB_DM",
+     "x": 160,
+     "y": 395,
+     "dir": "left"
+    },
+    {
+     "number": "2",
+     "name": "GND",
+     "net": "GND",
+     "x": 160,
+     "y": 385,
+     "dir": "left"
+    },
+    {
+     "number": "3",
+     "name": "I/O2",
+     "net": "USB_DP",
+     "x": 160,
+     "y": 375,
+     "dir": "left"
+    },
+    {
+     "number": "4",
+     "name": "I/O2",
+     "net": "USB_DP",
+     "x": 250,
+     "y": 375,
+     "dir": "right"
+    },
+    {
+     "number": "5",
+     "name": "VBUS",
+     "net": "USB_VBUS",
+     "x": 250,
+     "y": 385,
+     "dir": "right"
+    },
+    {
+     "number": "6",
+     "name": "I/O1",
+     "net": "USB_DM",
+     "x": 250,
+     "y": 395,
+     "dir": "right"
+    }
+   ]
+  },
+  {
+   "id": "J_PWR",
+   "ref": "J1",
+   "x": 185,
+   "y": 645,
+   "rotation": 0,
+   "bbox": {
+    "minX": 174.5,
+    "minY": 629.5,
+    "maxX": 195.5,
+    "maxY": 660.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1",
+     "net": "+5V_TERM",
+     "x": 165,
+     "y": 650,
+     "dir": "left"
+    },
+    {
+     "number": "2",
+     "name": "2",
+     "net": "GND",
+     "x": 165,
+     "y": 640,
+     "dir": "left"
+    }
+   ]
+  },
+  {
+   "id": "J_USB",
+   "ref": "J2",
+   "x": 805,
+   "y": 665,
+   "rotation": 0,
+   "bbox": {
+    "minX": 774.5,
+    "minY": 624.5,
+    "maxX": 845.5,
+    "maxY": 695.5
+   },
+   "pins": [
+    {
+     "number": "10",
+     "name": "EP",
+     "net": "GND",
+     "x": 800,
+     "y": 615,
+     "dir": "down"
+    },
+    {
+     "number": "11",
+     "name": "EP",
+     "net": "GND",
+     "x": 820,
+     "y": 615,
+     "dir": "down"
+    },
+    {
+     "number": "8",
+     "name": "EP",
+     "net": "GND",
+     "x": 800,
+     "y": 705,
+     "dir": "up"
+    },
+    {
+     "number": "9",
+     "name": "EP",
+     "net": "GND",
+     "x": 820,
+     "y": 705,
+     "dir": "up"
+    },
+    {
+     "number": "A1B12",
+     "name": "GND",
+     "net": "GND",
+     "x": 855,
+     "y": 645,
+     "dir": "right"
+    },
+    {
+     "number": "A4B9",
+     "name": "VBUS",
+     "net": "USB_VBUS",
+     "x": 855,
+     "y": 635,
+     "dir": "right"
+    },
+    {
+     "number": "A5",
+     "name": "CC1",
+     "net": "CC1",
+     "x": 765,
+     "y": 635,
+     "dir": "left"
+    },
+    {
+     "number": "A6",
+     "name": "DP1",
+     "net": "USB_DP",
+     "x": 765,
+     "y": 645,
+     "dir": "left"
+    },
+    {
+     "number": "A7",
+     "name": "DN1",
+     "net": "USB_DM",
+     "x": 765,
+     "y": 655,
+     "dir": "left"
+    },
+    {
+     "number": "A8",
+     "name": "SBU1",
+     "x": 765,
+     "y": 665,
+     "dir": "left",
+     "nc": true
+    },
+    {
+     "number": "B1A12",
+     "name": "GND",
+     "net": "GND",
+     "x": 765,
+     "y": 685,
+     "dir": "left"
+    },
+    {
+     "number": "B4A9",
+     "name": "VBUS",
+     "net": "USB_VBUS",
+     "x": 765,
+     "y": 675,
+     "dir": "left"
+    },
+    {
+     "number": "B5",
+     "name": "CC2",
+     "net": "CC2",
+     "x": 855,
+     "y": 685,
+     "dir": "right"
+    },
+    {
+     "number": "B6",
+     "name": "DP2",
+     "net": "USB_DP",
+     "x": 855,
+     "y": 675,
+     "dir": "right"
+    },
+    {
+     "number": "B7",
+     "name": "DN2",
+     "net": "USB_DM",
+     "x": 855,
+     "y": 665,
+     "dir": "right"
+    },
+    {
+     "number": "B8",
+     "name": "SBU2",
+     "x": 855,
+     "y": 655,
+     "dir": "right",
+     "nc": true
+    }
+   ]
+  },
+  {
+   "id": "L_BUCK",
+   "ref": "L1",
+   "x": 380,
+   "y": 620,
+   "rotation": 270,
+   "bbox": {
+    "minX": 379.55467999999996,
+    "minY": 602.83592,
+    "maxX": 384.8329,
+    "maxY": 637.38211
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1",
+     "net": "LX",
+     "x": 380,
+     "y": 640,
+     "dir": "left"
+    },
+    {
+     "number": "2",
+     "name": "2",
+     "net": "+3V3",
+     "x": 380,
+     "y": 600,
+     "dir": "left"
+    }
+   ]
+  },
+  {
+   "id": "R_FBT",
+   "ref": "R1",
+   "x": 485,
+   "y": 625,
+   "rotation": 90,
+   "bbox": {
+    "minX": 480.5,
+    "minY": 614.5,
+    "maxX": 489.5,
+    "maxY": 635.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1",
+     "net": "+3V3",
+     "x": 485,
+     "y": 605,
+     "dir": "left"
+    },
+    {
+     "number": "2",
+     "name": "2",
+     "net": "FB",
+     "x": 485,
+     "y": 645,
+     "dir": "left"
+    }
+   ]
+  },
+  {
+   "id": "R_FBB",
+   "ref": "R2",
+   "x": 485,
+   "y": 690,
+   "rotation": 90,
+   "bbox": {
+    "minX": 480.5,
+    "minY": 679.5,
+    "maxX": 489.5,
+    "maxY": 700.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1",
+     "net": "FB",
+     "x": 485,
+     "y": 670,
+     "dir": "left"
+    },
+    {
+     "number": "2",
+     "name": "2",
+     "net": "GND",
+     "x": 485,
+     "y": 710,
+     "dir": "left"
+    }
+   ]
+  },
+  {
+   "id": "R_CC1",
+   "ref": "R3",
+   "x": 780,
+   "y": 605,
+   "rotation": 0,
+   "bbox": {
+    "minX": 769.5,
+    "minY": 600.5,
+    "maxX": 790.5,
+    "maxY": 609.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1",
+     "net": "CC1",
+     "x": 760,
+     "y": 605,
+     "dir": "down"
+    },
+    {
+     "number": "2",
+     "name": "2",
+     "net": "GND",
+     "x": 800,
+     "y": 605,
+     "dir": "down"
+    }
+   ]
+  },
+  {
+   "id": "R_CC2",
+   "ref": "R4",
+   "x": 885,
+   "y": 685,
+   "rotation": 0,
+   "bbox": {
+    "minX": 874.5,
+    "minY": 680.5,
+    "maxX": 895.5,
+    "maxY": 689.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "1",
+     "net": "CC2",
+     "x": 865,
+     "y": 685,
+     "dir": "down"
+    },
+    {
+     "number": "2",
+     "name": "2",
+     "net": "GND",
+     "x": 905,
+     "y": 685,
+     "dir": "down"
+    }
+   ]
+  },
+  {
+   "id": "U_BUCK",
+   "ref": "U1",
+   "x": 435,
+   "y": 655,
+   "rotation": 0,
+   "bbox": {
+    "minX": 409.5,
+    "minY": 634.5,
+    "maxX": 460.5,
+    "maxY": 675.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "EN",
+     "net": "VSYS_5V",
+     "x": 400,
+     "y": 665,
+     "dir": "left"
+    },
+    {
+     "number": "2",
+     "name": "GND",
+     "net": "GND",
+     "x": 400,
+     "y": 655,
+     "dir": "left"
+    },
+    {
+     "number": "3",
+     "name": "LX",
+     "net": "LX",
+     "x": 400,
+     "y": 645,
+     "dir": "left"
+    },
+    {
+     "number": "4",
+     "name": "IN",
+     "net": "VSYS_5V",
+     "x": 470,
+     "y": 645,
+     "dir": "right"
+    },
+    {
+     "number": "5",
+     "name": "FB",
+     "net": "FB",
+     "x": 470,
+     "y": 665,
+     "dir": "right"
+    }
+   ]
+  },
+  {
+   "id": "U_USB",
+   "ref": "U2",
+   "x": 210,
+   "y": 305,
+   "rotation": 0,
+   "bbox": {
+    "minX": 174.5,
+    "minY": 259.5,
+    "maxX": 245.5,
+    "maxY": 350.5
+   },
+   "pins": [
+    {
+     "number": "1",
+     "name": "GND",
+     "net": "GND",
+     "x": 165,
+     "y": 340,
+     "dir": "left"
+    },
+    {
+     "number": "10",
+     "name": "DSR#",
+     "x": 255,
+     "y": 280,
+     "dir": "right",
+     "nc": true
+    },
+    {
+     "number": "11",
+     "name": "RI#",
+     "x": 255,
+     "y": 290,
+     "dir": "right",
+     "nc": true
+    },
+    {
+     "number": "12",
+     "name": "DCD#",
+     "x": 255,
+     "y": 300,
+     "dir": "right",
+     "nc": true
+    },
+    {
+     "number": "13",
+     "name": "DTR#",
+     "net": "DTR",
+     "x": 255,
+     "y": 310,
+     "dir": "right"
+    },
+    {
+     "number": "14",
+     "name": "RTS#",
+     "net": "RTS",
+     "x": 255,
+     "y": 320,
+     "dir": "right"
+    },
+    {
+     "number": "15",
+     "name": "R232",
+     "x": 255,
+     "y": 330,
+     "dir": "right",
+     "nc": true
+    },
+    {
+     "number": "16",
+     "name": "VCC",
+     "net": "+3V3",
+     "x": 255,
+     "y": 340,
+     "dir": "right"
+    },
+    {
+     "number": "2",
+     "name": "TXD",
+     "net": "U0RXD",
+     "x": 165,
+     "y": 330,
+     "dir": "left"
+    },
+    {
+     "number": "3",
+     "name": "RXD",
+     "net": "U0TXD",
+     "x": 165,
+     "y": 320,
+     "dir": "left"
+    },
+    {
+     "number": "4",
+     "name": "V3",
+     "net": "+3V3",
+     "x": 165,
+     "y": 310,
+     "dir": "left"
+    },
+    {
+     "number": "5",
+     "name": "D+",
+     "net": "USB_DP",
+     "x": 165,
+     "y": 300,
+     "dir": "left"
+    },
+    {
+     "number": "6",
+     "name": "D-",
+     "net": "USB_DM",
+     "x": 165,
+     "y": 290,
+     "dir": "left"
+    },
+    {
+     "number": "7",
+     "name": "NC.",
+     "x": 165,
+     "y": 280,
+     "dir": "left",
+     "nc": true
+    },
+    {
+     "number": "8",
+     "name": "OUT#",
+     "x": 165,
+     "y": 270,
+     "dir": "left",
+     "nc": true
+    },
+    {
+     "number": "9",
+     "name": "CTS#",
+     "x": 255,
+     "y": 270,
+     "dir": "right",
+     "nc": true
+    }
+   ]
+  }
+ ],
+ "wires": [
+  {
+   "net": "+3V3",
+   "points": [
+    {
+     "x": 374.99999999999994,
+     "y": 585
+    },
+    {
+     "x": 374.99999999999994,
+     "y": 565
+    }
+   ]
+  },
+  {
+   "net": "+3V3",
+   "points": [
+    {
+     "x": 425,
+     "y": 585
+    },
+    {
+     "x": 425,
+     "y": 565
+    }
+   ]
+  },
+  {
+   "net": "+3V3",
+   "points": [
+    {
+     "x": 265,
+     "y": 340
+    },
+    {
+     "x": 265,
+     "y": 320
+    }
+   ]
+  },
+  {
+   "net": "+3V3",
+   "points": [
+    {
+     "x": 380,
+     "y": 600
+    },
+    {
+     "x": 370,
+     "y": 600
+    },
+    {
+     "x": 370,
+     "y": 640
+    }
+   ]
+  },
+  {
+   "net": "+3V3",
+   "points": [
+    {
+     "x": 485,
+     "y": 605
+    },
+    {
+     "x": 475,
+     "y": 605
+    },
+    {
+     "x": 475,
+     "y": 645
+    }
+   ]
+  },
+  {
+   "net": "+3V3",
+   "points": [
+    {
+     "x": 165,
+     "y": 310
+    },
+    {
+     "x": 155,
+     "y": 310
+    },
+    {
+     "x": 155,
+     "y": 330
+    }
+   ]
+  },
+  {
+   "net": "+5V_TERM",
+   "points": [
+    {
+     "x": 155,
+     "y": 650
+    },
+    {
+     "x": 155,
+     "y": 620
+    }
+   ]
+  },
+  {
+   "net": "CC1",
+   "points": [
+    {
+     "x": 765,
+     "y": 635
+    },
+    {
+     "x": 760,
+     "y": 635
+    },
+    {
+     "x": 760,
+     "y": 605
+    }
+   ]
+  },
+  {
+   "net": "CC2",
+   "points": [
+    {
+     "x": 855,
+     "y": 685
+    },
+    {
+     "x": 865,
+     "y": 685
+    }
+   ]
+  },
+  {
+   "net": "GND",
+   "points": [
+    {
+     "x": 545,
+     "y": 650
+    },
+    {
+     "x": 545,
+     "y": 630
+    }
+   ]
+  },
+  {
+   "net": "GND",
+   "points": [
+    {
+     "x": 334.99999999999994,
+     "y": 585
+    },
+    {
+     "x": 334.99999999999994,
+     "y": 565
+    }
+   ]
+  },
+  {
+   "net": "GND",
+   "points": [
+    {
+     "x": 465,
+     "y": 585
+    },
+    {
+     "x": 465,
+     "y": 565
+    }
+   ]
+  },
+  {
+   "net": "GND",
+   "points": [
+    {
+     "x": 305,
+     "y": 340
+    },
+    {
+     "x": 305,
+     "y": 320
+    }
+   ]
+  },
+  {
+   "net": "GND",
+   "points": [
+    {
+     "x": 820,
+     "y": 615
+    },
+    {
+     "x": 820,
+     "y": 595
+    }
+   ]
+  },
+  {
+   "net": "GND",
+   "points": [
+    {
+     "x": 800,
+     "y": 705
+    },
+    {
+     "x": 800,
+     "y": 725
+    }
+   ]
+  },
+  {
+   "net": "GND",
+   "points": [
+    {
+     "x": 820,
+     "y": 705
+    },
+    {
+     "x": 820,
+     "y": 725
+    }
+   ]
+  },
+  {
+   "net": "GND",
+   "points": [
+    {
+     "x": 855,
+     "y": 645
+    },
+    {
+     "x": 865,
+     "y": 645
+    },
+    {
+     "x": 865,
+     "y": 625
+    }
+   ]
+  },
+  {
+   "net": "GND",
+   "points": [
+    {
+     "x": 765,
+     "y": 685
+    },
+    {
+     "x": 755,
+     "y": 685
+    },
+    {
+     "x": 755,
+     "y": 665
+    }
+   ]
+  },
+  {
+   "net": "GND",
+   "points": [
+    {
+     "x": 800,
+     "y": 605
+    },
+    {
+     "x": 800,
+     "y": 585
+    }
+   ]
+  },
+  {
+   "net": "GND",
+   "points": [
+    {
+     "x": 905,
+     "y": 685
+    },
+    {
+     "x": 905,
+     "y": 665
+    }
+   ]
+  },
+  {
+   "net": "LX",
+   "points": [
+    {
+     "x": 380,
+     "y": 640
+    },
+    {
+     "x": 400,
+     "y": 640
+    },
+    {
+     "x": 400,
+     "y": 645
+    }
+   ]
+  },
+  {
+   "net": "USB_DM",
+   "points": [
+    {
+     "x": 160,
+     "y": 395
+    },
+    {
+     "x": 140,
+     "y": 395
+    }
+   ]
+  },
+  {
+   "net": "USB_DM",
+   "points": [
+    {
+     "x": 250,
+     "y": 395
+    },
+    {
+     "x": 270,
+     "y": 395
+    }
+   ]
+  },
+  {
+   "net": "USB_DM",
+   "points": [
+    {
+     "x": 165,
+     "y": 290
+    },
+    {
+     "x": 145,
+     "y": 290
+    }
+   ]
+  },
+  {
+   "net": "USB_DP",
+   "points": [
+    {
+     "x": 160,
+     "y": 375
+    },
+    {
+     "x": 140,
+     "y": 375
+    }
+   ]
+  },
+  {
+   "net": "USB_DP",
+   "points": [
+    {
+     "x": 250,
+     "y": 375
+    },
+    {
+     "x": 270,
+     "y": 375
+    }
+   ]
+  },
+  {
+   "net": "USB_DP",
+   "points": [
+    {
+     "x": 855,
+     "y": 675
+    },
+    {
+     "x": 875,
+     "y": 675
+    }
+   ]
+  },
+  {
+   "net": "USB_VBUS",
+   "points": [
+    {
+     "x": 120,
+     "y": 655
+    },
+    {
+     "x": 120,
+     "y": 635
+    }
+   ]
+  },
+  {
+   "net": "VSYS_5V",
+   "points": [
+    {
+     "x": 505,
+     "y": 650
+    },
+    {
+     "x": 505,
+     "y": 610
+    }
+   ]
+  },
+  {
+   "net": "VSYS_5V",
+   "points": [
+    {
+     "x": 80,
+     "y": 655
+    },
+    {
+     "x": 80,
+     "y": 635
+    }
+   ]
+  },
+  {
+   "net": "VSYS_5V",
+   "points": [
+    {
+     "x": 400,
+     "y": 665
+    },
+    {
+     "x": 390,
+     "y": 665
+    },
+    {
+     "x": 390,
+     "y": 685
+    }
+   ]
+  }
+ ],
+ "markers": [
+  {
+   "kind": "power",
+   "net": "+3V3",
+   "anchor": {
+    "x": 374.99999999999994,
+    "y": 565
+   },
+   "dir": "down",
+   "bbox": {
+    "minX": 362.99999999999994,
+    "minY": 542,
+    "maxX": 386.99999999999994,
+    "maxY": 565
+   },
+   "estimated": true
+  },
+  {
+   "kind": "power",
+   "net": "+3V3",
+   "anchor": {
+    "x": 425,
+    "y": 565
+   },
+   "dir": "down",
+   "bbox": {
+    "minX": 413,
+    "minY": 542,
+    "maxX": 437,
+    "maxY": 565
+   },
+   "estimated": true
+  },
+  {
+   "kind": "power",
+   "net": "+3V3",
+   "anchor": {
+    "x": 265,
+    "y": 320
+   },
+   "dir": "down",
+   "bbox": {
+    "minX": 253,
+    "minY": 297,
+    "maxX": 277,
+    "maxY": 320
+   },
+   "estimated": true
+  },
+  {
+   "kind": "power",
+   "net": "+3V3",
+   "anchor": {
+    "x": 370,
+    "y": 640
+   },
+   "dir": "up",
+   "bbox": {
+    "minX": 358,
+    "minY": 640,
+    "maxX": 382,
+    "maxY": 663
+   },
+   "estimated": true
+  },
+  {
+   "kind": "power",
+   "net": "+3V3",
+   "anchor": {
+    "x": 475,
+    "y": 645
+   },
+   "dir": "up",
+   "bbox": {
+    "minX": 463,
+    "minY": 645,
+    "maxX": 487,
+    "maxY": 668
+   },
+   "estimated": true
+  },
+  {
+   "kind": "power",
+   "net": "+3V3",
+   "anchor": {
+    "x": 155,
+    "y": 330
+   },
+   "dir": "up",
+   "bbox": {
+    "minX": 143,
+    "minY": 330,
+    "maxX": 167,
+    "maxY": 353
+   },
+   "estimated": true
+  },
+  {
+   "kind": "power",
+   "net": "+5V_TERM",
+   "anchor": {
+    "x": 155,
+    "y": 620
+   },
+   "dir": "down",
+   "bbox": {
+    "minX": 131,
+    "minY": 597,
+    "maxX": 179,
+    "maxY": 620
+   },
+   "estimated": true
+  },
+  {
+   "kind": "ground",
+   "net": "GND",
+   "anchor": {
+    "x": 545,
+    "y": 630
+   },
+   "dir": "down",
+   "bbox": {
+    "minX": 536,
+    "minY": 597,
+    "maxX": 554,
+    "maxY": 630
+   },
+   "estimated": true
+  },
+  {
+   "kind": "ground",
+   "net": "GND",
+   "anchor": {
+    "x": 334.99999999999994,
+    "y": 565
+   },
+   "dir": "down",
+   "bbox": {
+    "minX": 325.99999999999994,
+    "minY": 532,
+    "maxX": 343.99999999999994,
+    "maxY": 565
+   },
+   "estimated": true
+  },
+  {
+   "kind": "ground",
+   "net": "GND",
+   "anchor": {
+    "x": 465,
+    "y": 565
+   },
+   "dir": "down",
+   "bbox": {
+    "minX": 456,
+    "minY": 532,
+    "maxX": 474,
+    "maxY": 565
+   },
+   "estimated": true
+  },
+  {
+   "kind": "ground",
+   "net": "GND",
+   "anchor": {
+    "x": 305,
+    "y": 320
+   },
+   "dir": "down",
+   "bbox": {
+    "minX": 296,
+    "minY": 287,
+    "maxX": 314,
+    "maxY": 320
+   },
+   "estimated": true
+  },
+  {
+   "kind": "ground",
+   "net": "GND",
+   "anchor": {
+    "x": 820,
+    "y": 595
+   },
+   "dir": "down",
+   "bbox": {
+    "minX": 811,
+    "minY": 562,
+    "maxX": 829,
+    "maxY": 595
+   },
+   "estimated": true
+  },
+  {
+   "kind": "ground",
+   "net": "GND",
+   "anchor": {
+    "x": 800,
+    "y": 725
+   },
+   "dir": "up",
+   "bbox": {
+    "minX": 791,
+    "minY": 725,
+    "maxX": 809,
+    "maxY": 758
+   },
+   "estimated": true
+  },
+  {
+   "kind": "ground",
+   "net": "GND",
+   "anchor": {
+    "x": 820,
+    "y": 725
+   },
+   "dir": "up",
+   "bbox": {
+    "minX": 811,
+    "minY": 725,
+    "maxX": 829,
+    "maxY": 758
+   },
+   "estimated": true
+  },
+  {
+   "kind": "ground",
+   "net": "GND",
+   "anchor": {
+    "x": 865,
+    "y": 625
+   },
+   "dir": "down",
+   "bbox": {
+    "minX": 856,
+    "minY": 592,
+    "maxX": 874,
+    "maxY": 625
+   },
+   "estimated": true
+  },
+  {
+   "kind": "ground",
+   "net": "GND",
+   "anchor": {
+    "x": 755,
+    "y": 665
+   },
+   "dir": "down",
+   "bbox": {
+    "minX": 746,
+    "minY": 632,
+    "maxX": 764,
+    "maxY": 665
+   },
+   "estimated": true
+  },
+  {
+   "kind": "ground",
+   "net": "GND",
+   "anchor": {
+    "x": 800,
+    "y": 585
+   },
+   "dir": "down",
+   "bbox": {
+    "minX": 791,
+    "minY": 552,
+    "maxX": 809,
+    "maxY": 585
+   },
+   "estimated": true
+  },
+  {
+   "kind": "ground",
+   "net": "GND",
+   "anchor": {
+    "x": 905,
+    "y": 665
+   },
+   "dir": "down",
+   "bbox": {
+    "minX": 896,
+    "minY": 632,
+    "maxX": 914,
+    "maxY": 665
+   },
+   "estimated": true
+  },
+  {
+   "kind": "netport",
+   "net": "USB_DM",
+   "anchor": {
+    "x": 140,
+    "y": 395
+   },
+   "dir": "left",
+   "bbox": {
+    "minX": 96,
+    "minY": 389.5,
+    "maxX": 140,
+    "maxY": 400.5
+   },
+   "estimated": true
+  },
+  {
+   "kind": "netport",
+   "net": "USB_DM",
+   "anchor": {
+    "x": 270,
+    "y": 395
+   },
+   "dir": "right",
+   "bbox": {
+    "minX": 270,
+    "minY": 389.5,
+    "maxX": 314,
+    "maxY": 400.5
+   },
+   "estimated": true
+  },
+  {
+   "kind": "netport",
+   "net": "USB_DM",
+   "anchor": {
+    "x": 145,
+    "y": 290
+   },
+   "dir": "left",
+   "bbox": {
+    "minX": 101,
+    "minY": 284.5,
+    "maxX": 145,
+    "maxY": 295.5
+   },
+   "estimated": true
+  },
+  {
+   "kind": "netport",
+   "net": "USB_DP",
+   "anchor": {
+    "x": 140,
+    "y": 375
+   },
+   "dir": "left",
+   "bbox": {
+    "minX": 96,
+    "minY": 369.5,
+    "maxX": 140,
+    "maxY": 380.5
+   },
+   "estimated": true
+  },
+  {
+   "kind": "netport",
+   "net": "USB_DP",
+   "anchor": {
+    "x": 270,
+    "y": 375
+   },
+   "dir": "right",
+   "bbox": {
+    "minX": 270,
+    "minY": 369.5,
+    "maxX": 314,
+    "maxY": 380.5
+   },
+   "estimated": true
+  },
+  {
+   "kind": "netport",
+   "net": "USB_DP",
+   "anchor": {
+    "x": 875,
+    "y": 675
+   },
+   "dir": "right",
+   "bbox": {
+    "minX": 875,
+    "minY": 669.5,
+    "maxX": 919,
+    "maxY": 680.5
+   },
+   "estimated": true
+  },
+  {
+   "kind": "netport",
+   "net": "USB_VBUS",
+   "anchor": {
+    "x": 120,
+    "y": 635
+   },
+   "dir": "down",
+   "bbox": {
+    "minX": 114.5,
+    "minY": 579,
+    "maxX": 125.5,
+    "maxY": 635
+   },
+   "estimated": true
+  },
+  {
+   "kind": "power",
+   "net": "VSYS_5V",
+   "anchor": {
+    "x": 505,
+    "y": 610
+   },
+   "dir": "down",
+   "bbox": {
+    "minX": 484,
+    "minY": 587,
+    "maxX": 526,
+    "maxY": 610
+   },
+   "estimated": true
+  },
+  {
+   "kind": "power",
+   "net": "VSYS_5V",
+   "anchor": {
+    "x": 80,
+    "y": 635
+   },
+   "dir": "down",
+   "bbox": {
+    "minX": 59,
+    "minY": 612,
+    "maxX": 101,
+    "maxY": 635
+   },
+   "estimated": true
+  },
+  {
+   "kind": "power",
+   "net": "VSYS_5V",
+   "anchor": {
+    "x": 390,
+    "y": 685
+   },
+   "dir": "up",
+   "bbox": {
+    "minX": 369,
+    "minY": 685,
+    "maxX": 411,
+    "maxY": 708
+   },
+   "estimated": true
+  }
+ ],
+ "hasWires": true,
+ "hasMarkers": true,
+ "hasPins": true,
+ "hasTexts": false,
+ "hasFrames": false,
+ "hasBuses": false,
+ "notes": [
+  "drafted: no clean stub for +3V3",
+  "drafted: no clean stub for +5V_TERM",
+  "drafted: no clean stub for DTR",
+  "drafted: no clean stub for FB",
+  "drafted: no clean stub for FB",
+  "drafted: no clean stub for FB",
+  "drafted: no clean stub for GND",
+  "drafted: no clean stub for GND",
+  "drafted: no clean stub for GND",
+  "drafted: no clean stub for GND",
+  "drafted: no clean stub for GND",
+  "drafted: no clean stub for GND",
+  "drafted: no clean stub for RTS",
+  "drafted: no clean stub for U0RXD",
+  "drafted: no clean stub for U0TXD",
+  "drafted: no clean stub for USB_DM",
+  "drafted: no clean stub for USB_DM",
+  "drafted: no clean stub for USB_DP",
+  "drafted: no clean stub for USB_DP",
+  "drafted: no clean stub for USB_VBUS",
+  "drafted: no clean stub for USB_VBUS",
+  "drafted: no clean stub for USB_VBUS",
+  "drafted: no clean stub for VSYS_5V",
+  "drafted: no clean stub for VSYS_5V"
+ ]
+}

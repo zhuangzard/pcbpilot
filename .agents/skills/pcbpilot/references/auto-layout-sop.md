@@ -207,6 +207,10 @@ diagnostic/blocked/partial 布局；先修复源数据、采集或算法，再�
    `sch export-image` 仅辅助审阅；若发现漏检，先补原始数据采集、规则和回归再重算，
    不能用人工看图补签缺测项。覆盖不足不得称完整通过。
 4. `sch save` 返回 `saved:true`。保留输入、生成队列、回读和验证报告，报告仍未覆盖的限制。
+5. 可选、只报告：对离线 `layout-plan` / `lib-layout` 输出和保存后的 `sch list --include-pins
+   --include-bbox --include-wires` 回读各跑一次 `sch aesthetics --snapshot …`，两次结果一并保留。
+   它在 1–4 全部通过之后才有意义，权重 0、不是门；发现的交叉、四通结点、长线、短程标签、
+   标签泳道不齐等只回到源数据/规划算法（Phase B 生成器）修复后重算，不在现场逐根挪线。
 
 只整理已有连线的小范围区域时，可按 [schematic-placement.md](schematic-placement.md)
 选带连接的移动工具；先记录源目标与变更，完成后同步源数据并保存前后 topology/NC/几何对照。

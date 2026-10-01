@@ -87,6 +87,7 @@ metadata:
 | 历史模拟/练习题迁移 | [考题差异表](references/examples/exam-differences.md) |
 | 原理图源数据、参数化布局、Apply | [schematic-data.md](references/schematic-data.md)、[auto-layout-sop.md](references/auto-layout-sop.md) |
 | 已有原理图检查或小修 | [schematic.md](references/schematic.md)、[schematic-wiring.md](references/schematic-wiring.md) |
+| 原理图美观度（只报告）、标签 vs 导线、总线/虚拟总线（`sch aesthetics`、`sch bus`） | [schematic-wiring.md](references/schematic-wiring.md#标签-vs-导线总线与原理图美观度只报告的软层) |
 | PCB 布局 | [pcb.md](references/pcb.md)、[pcb-layout.md](references/pcb-layout.md) |
 | PCB 布线、铺铜、禁布区 | [pcb-routing.md](references/pcb-routing.md) |
 | 协作边界：原理图深入、PCB 默认只检查、精确版本门禁、WARN 判定（**每个 EDA 会话先读**） | [collaboration-workflow.md](references/collaboration-workflow.md) |

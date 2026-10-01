@@ -135,6 +135,8 @@ var verifiedWriteActions = map[string]bool{
 	"pcb.add_component":           true,
 	"pcb.net_class.add_nets":      true,
 	"schematic.text.create":       true,
+	"schematic.bus.create":        true,
+	"schematic.bus.delete":        true,
 }
 
 // unverifiedWriteError is the requestAction-side twin of the dispatch check: a

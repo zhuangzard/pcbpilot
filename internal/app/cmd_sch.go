@@ -2087,6 +2087,10 @@ the selection). Without --ids it exports the whole active page.`,
 	// 布局质量打分(诊断视角,不是门):折叠/反向/贴核心/长链可识别,归因带可
 	// 执行 fix 命令。门仍是 layout-lint + check。
 	sch.AddCommand(newSchLayoutScoreCmd(cfg, &window, stdout, stderr))
+	// 原理图美观度(只报告,权重 0,不是门):布线/版面/标签/总线泳道软指标。
+	// 连接正确性 > 可读性 > 美观;layout-lint / check / layout-score 不变且优先。
+	sch.AddCommand(newSchAestheticsCmd(cfg, &window, stdout, stderr))
+	sch.AddCommand(newSchBusCmd(cfg, &window, stdout, stderr))
 	// S5 校验门:把 layout-lint / check / bridge-check / drc 收成一条固定流水线。
 	// 四个单命令原样保留(专家 + 局部复查),但主干路径走 gate。
 	sch.AddCommand(newSchGateCmd(cfg, &window, stdout, stderr))

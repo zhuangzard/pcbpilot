@@ -75,6 +75,7 @@ var producers = map[string]string{
 	"image":        "report design --image (supplied file)",
 	"preview":      "pcbpilot pcb auto run (preview.svg)",
 	"report":       "pcbpilot report design",
+	"sch-snapshot": "pcbpilot sch list --include-pins --include-bbox --include-wires (or layout-plan / lib-layout / canonical)",
 }
 
 func newPkgFile(rel, role, producer, source string, data []byte) pkgFile {

@@ -49,6 +49,8 @@ type Inputs struct {
 	Refs []InputRef
 	// ProcessSkips comes from pcbpilot.project.json (optional).
 	ProcessSkips *ProcessSkips
+	// SchPages are schematic page snapshots for §6C (report-only).
+	SchPages []SchPage
 }
 
 // Board is the subset of a `pcb dump` document the report reads (units mil).
