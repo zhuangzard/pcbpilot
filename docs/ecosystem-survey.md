@@ -695,6 +695,16 @@ Schema 记录跳过验证；DOCHEAD 分支设置文档类型后立即 `continue`
 判断：这是重要的官方离线生成基础设施，能降低对实时编辑器的依赖；其当前价值集中在格式、
 模板和序列化，尚不能替代我们的数据驱动设计、几何/连接检查与真实回读。
 
+## 13. 官方桌面客户端 CLI（2026-09-30 发布，source-only）
+
+官方 [`easyeda/easyeda-client-cli`](https://github.com/easyeda/easyeda-client-cli) 于 2026-09-30 发布，
+它是桌面客户端 **V4.1.60+** 内置命令行（国际版 `easyeda-pro` / 国内版 `lceda-pro`）的文档仓库，
+没有源码。它提供 session/headless 窗口管理、`invoke` 任意 JS、`doc api` / `doc format` 宿主自带
+API 与格式参考，以及 MCP（stdio/http）。所谓“直接生成工程文件”仍需运行中的编辑器来建骨架、
+提供库文档并重载验收；真正无编辑器的生成路线仍是 §12。另：配套格式库已于 2026-09-28 改名为
+[`easyeda-format-skill`](https://github.com/easyeda/easyeda-format-skill)。不支持 Web 版，本机 3.2.149 未实测。
+完整分析、对比与吸收排序见 [reviews/2026-10-jlc-cli-survey.md](reviews/2026-10-jlc-cli-survey.md)。
+
 ## 来源
 
 - [EasyEDA 官方 GitHub 组织](https://github.com/easyeda) — 全部 eext-* 扩展开源
