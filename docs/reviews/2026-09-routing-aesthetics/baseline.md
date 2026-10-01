@@ -412,7 +412,7 @@ R4 转折密度在 szpi / rk3568 / k230 上下降（9.75→8.46、9.06→7.53、
 | 版图评分校准 / 协作入口 | `make layout-calibrate`、`make agent-check`、`make skill-check` | 均退出码 0 |
 | 5 板确定性 bench | `TestFixtureBench`，`PCBPILOT_BENCH_WORK=3e6`，每板一个进程（与 `make fixture-bench-det` 同一测试、同一环境变量） | 五板布通、过孔、断连、DRC 与 v0.7.0 完全相同（§11.5） |
 | 离线 e2e 链 | ESP32 + HV flyback（intent → sim → analog → auto → check → post-layout → aesthetics → report），`PCBPILOT_BENCH_WORK=3e6` | 全部步骤退出码 0；对比见 §11.3 |
-| HV 压力（确定性） | `TestStressHV`（build tag stress），每例一个进程，v0.7.0 与本分支同时跑 | cat3 / flyback / medical / negative 两边逐行相同（cat3 两边同一条原有失败）；inverter 见下 |
+| HV 压力（确定性） | `TestStressHV`（build tag stress），每例一个进程，v0.7.0 与本分支同时跑 | 5 例（cat3 / flyback / inverter / medical / negative）两边逐行相同（cat3 两边同一条原有失败，其余 0 失败）；cat3 只有“最紧间距”举例的走线编号不同，数值相同 |
 | HS 压力（确定性） | `TestStressHS`，`STRESS_HS_REAL=0`，每例一个进程，两边同时跑 | 6 例 summary 逐行相同（失败数 ddr3 16/16、gbe 6/6、pcie 1/1、usb3-typec 5/5、usb3-2layer-negative 2/2、hdmi 0/0，均为原有）；ddr3 的过孔预算行只是同数值时举例的网名不同 |
 | ESP32 多种子 | `pcb auto run --place --seed 1..6` | §11.4 |
 | iso-mains | Go 探针（`mainsSelvBoard` + intent，4 层） | §11.3 |
