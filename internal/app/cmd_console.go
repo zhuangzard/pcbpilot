@@ -61,6 +61,7 @@ func mountConsole(srv *daemon.Server, host string, log io.Writer) *console.Conso
 		return nil
 	}
 	srv.OnActivity(c.Observe)
+	srv.OnShutdown(c.Stop) // end SSE streams before the HTTP server drains
 	h := c.Handler()
 	srv.Handle("/ui/", h)
 	srv.Handle("/ui", h)

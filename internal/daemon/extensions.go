@@ -42,6 +42,7 @@ type serverExt struct {
 	port     atomic.Int64
 	started  atomic.Int64 // unix nanos
 	sinkOnce sync.Once
+	stops    []func()
 }
 
 type extRoute struct {
@@ -66,6 +67,25 @@ func (s *Server) mountExtensions(mux *http.ServeMux) {
 	defer s.ext.mu.Unlock()
 	for _, r := range s.ext.routes {
 		mux.Handle(r.pattern, r.handler)
+	}
+}
+
+// OnShutdown registers a callback run when the daemon starts shutting down,
+// before the HTTP server drains. Extensions with long-lived responses (the
+// console's SSE stream) must end them here, or Shutdown waits out its whole
+// deadline and the daemon exits with "context deadline exceeded".
+func (s *Server) OnShutdown(fn func()) {
+	s.ext.mu.Lock()
+	s.ext.stops = append(s.ext.stops, fn)
+	s.ext.mu.Unlock()
+}
+
+func (s *Server) runShutdownHooks() {
+	s.ext.mu.Lock()
+	stops := append([]func(){}, s.ext.stops...)
+	s.ext.mu.Unlock()
+	for _, fn := range stops {
+		fn()
 	}
 }
 

@@ -281,6 +281,23 @@ def service_entry(home=None):
     return None, None
 
 
+def daemon_up(port=61832, wait=30.0):
+    """True once the daemon's /health answers (polls up to wait seconds)."""
+    import time
+    import urllib.request
+    deadline = time.time() + wait
+    while True:
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=3) as r:
+                if r.status == 200:
+                    return True
+        except Exception:
+            pass
+        if time.time() >= deadline:
+            return False
+        time.sleep(1)
+
+
 def sim_tools_findings(report):
     """(ok, warn, bad) lines from `pcbpilot sim tools check --json` (schemaVersion 1).
 
@@ -324,6 +341,13 @@ def verify(pbin, server, repo):
         check(svc is not None and svc_bin and os.path.exists(svc_bin),
               f"daemon login service {svc} → {svc_bin}",
               f"daemon login service missing or stale ({svc or 'none'}) — run: pcbpilot daemon service install")
+        # ...and the daemon must actually be up: an installed-but-unloaded
+        # service (a bootstrap that lost the race with the old daemon's
+        # shutdown) left the daemon down while this check still passed.
+        if svc is not None and os.environ.get("PCBPILOT_VERIFY_SKIP_DAEMON") != "1":
+            up = daemon_up()
+            check(up, "daemon answering on 127.0.0.1:61832/health",
+                  "daemon not answering on 127.0.0.1:61832 (service installed but not running) — run: pcbpilot daemon service install")
     # per client: pcbpilot present + points at existing files, upstream absent
     def entry_ok(label, e):
         if not e:

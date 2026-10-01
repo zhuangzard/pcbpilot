@@ -298,6 +298,7 @@ func (s *Server) Run(ctx context.Context, log io.Writer) error {
 		// Unblock connector read loops so their handlers return and Shutdown
 		// does not wait the full timeout on long-lived WebSockets.
 		s.connCancel()
+		s.runShutdownHooks()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		return httpServer.Shutdown(shutdownCtx)

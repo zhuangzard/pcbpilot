@@ -230,11 +230,21 @@ func installDaemonService(goos, home, bin string, start bool, stdout io.Writer) 
 		if start {
 			domain := fmt.Sprintf("gui/%d", os.Getuid())
 			_, _ = daemonServiceRunner("launchctl", "bootout", domain+"/"+daemonServiceLabel)
-			// launchd finishes a bootout asynchronously; a bootstrap right
-			// behind it fails with "5: Input/output error" (seen live), so retry.
+			// launchd finishes a bootout asynchronously — the old daemon still
+			// has to drain (connector sockets, console streams) — and a
+			// bootstrap right behind it fails with "5: Input/output error".
+			// Wait for the job to be gone, then retry the bootstrap. A 5 s
+			// window was too short live (2026-09-30): setup-agent.sh --upgrade
+			// left the service installed but unloaded and the daemon down.
+			for i := 0; i < 60; i++ {
+				if _, err := daemonServiceRunner("launchctl", "print", domain+"/"+daemonServiceLabel); err != nil {
+					break
+				}
+				daemonServiceSleep(500 * time.Millisecond)
+			}
 			var out string
 			var err error
-			for i := 0; i < 10; i++ {
+			for i := 0; i < 60; i++ {
 				if out, err = daemonServiceRunner("launchctl", "bootstrap", domain, path); err == nil {
 					break
 				}
