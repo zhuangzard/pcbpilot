@@ -1,6 +1,58 @@
 # Changelog
 
-## [Unreleased] — v0.6.2 core routing fixes (development, not released)
+## [0.7.0] — 2026-10-01
+
+**Local web console, aesthetics measurement, and core electrical/safety routing fixes.** The connector code is
+unchanged; re-import 0.7.0 because the daemon requires the connector to match its release exactly. Upgrading from
+0.6.1 is automatic (the daemon applies it when EasyEDA is idle); the connector import is the only manual step.
+
+### Console (v0.7)
+
+**Local web cockpit served by the daemon.** No connector change.
+
+- **Console** at `/ui` (`pcbpilot console open|url`, `daemon start --console`, default on): monitor landing page (daemon
+  pid/uptime/port/autosave/login service, component version alignment, EasyEDA windows, every project worked on —
+  running/idle/finished with DRC/report outcome, duration, last error — and the live action stream over SSE with
+  automatic reconnect), activity, agent runs (registered runs + inferred CLI sessions; the v0.8 bridge is labelled
+  planned), decisions, and per-work-dir timeline / sim rounds with deltas / reports / resource library / process
+  template. Loopback only, per-install token, Host/Origin checks, no CORS, sandboxed file serving. Embedded static page,
+  no build step, works offline, light/dark.
+- **Project registry** derived from the audit log (incremental backfill) + the live stream, persisted under
+  `~/.pcbpilot/console/`. Audit rows now also carry `projectUuid/projectName/documentUuid/documentType/outputDir`.
+- **`pcbpilot project-config`** — `pcbpilot.project.json` process template (steps / sims / report sections +
+  constraints, guard-rule validation); `report design --project-config` lists skipped steps/sections in §11.5 and no
+  longer counts them as missing. The Skill reads it first.
+- **`pcbpilot kb`** — per-project resource library: pure-Go PDF text (pdftotext fallback), md/txt/html/docx, page-bounded
+  chunks, BM25 with CJK bigrams, sha256 dedupe, summary slots, tags; console drag-and-drop upload.
+- **`pcbpilot ask`** — decision cards answered in the console (long-poll, default on expiry, terminal fallback, decision log).
+- **Fix: console landing page stuck on “连接 daemon…” after a service reload.** `/api/status` (and the SSE hello) ran the
+  login-service probe synchronously under a mutex; right after `setup-agent.sh --upgrade` re-bootstraps the launchd job,
+  `launchctl print` can block for minutes, so every status request waited while `/health`, `/api/projects` and
+  `/api/events` answered. Reproduced with a temp HOME, a 494 MB synthetic audit dir, a 30 s fake `launchctl` and a
+  wedged self-updater: `/api/status` 30.46 s before, 0.2–0.3 s after (audit backfill and self-updater were not
+  involved). The service and `/health` probes now run in the background, single-flight, with a deadline (the hung
+  tool is killed, `WaitDelay` covers children holding the pipe) and a cached value; the page shows “检查中…” / the
+  cache age. `/health` itself: pruning a stale connector no longer waits up to 5 s for its websocket close handshake.
+- **Console component table follows the self-updater**: Skill rows use `selfupdate.Targets` (ZCode included; linked
+  source skills read `SKILL.md` `metadata.version` and show `linked`); the MCP row shows the release stamp
+  (`~/.pcbpilot/mcp/current/VERSION`) or `linked (source)`, like `pcbpilot update --check`, instead of
+  `mcp/package.json` 0.18.3 “info”.
+- **Fix: `pcb auto` router panic** (`nodeCong` indexed past the grid for a via disk at the board edge; ESP32 v05 board with
+  `--intent --sim`), found by the console end-to-end chain `scripts/console-e2e.sh`.
+
+### Aesthetics, measurement only (phase A)
+
+- **`pcbpilot pcb aesthetics`** — placement P1–P9 (row/column alignment, array pitch, orientation, **symmetry** of
+  repeated sub-circuits with a mirror axis and error, block shape, edge margin, whitespace, silkscreen, grid) and
+  routing R1–R9 (off-octilinear share, pad entry, S-jogs, bend density, layer direction, bundle spacing, grid landing,
+  detour, stubs); research outputs (intent necks, isolation bands, current via arrays, diff/RF/tuned nets) are
+  exempt. Report-only: weight 0 in the joint score, new report section 6B.
+- **Style profiles** `functional | balanced | precision | custom | auto` (`--style`, `--style-file`) move only soft
+  weights, tolerances and slack; a profile that names a hard constraint is rejected. `auto` picks by complexity.
+- **Constraint priority** in code and `docs/concepts.md`: safety > electrical > manufacturing > completion >
+  efficiency > placement > aesthetics. **`TestFlowContract`** guards every research step of the offline chain.
+
+### Core routing, safety and reliability fixes
 
 **Two electrical defects of the router fixed at the root.** Offline engine + Skill only; no connector change.
 
@@ -79,40 +131,6 @@
 - **Deterministic fixture bench**: `make fixture-bench-det` (`PCBPILOT_BENCH_WORK`, `RouteOptions.WorkRate`) runs
   the router on a virtual clock counted in search work, so scores no longer depend on machine load; the env var
   works for any routing run (stress suites too); real runs keep the wall-clock budget.
-
-## [Unreleased] — v0.7 console (development, not released)
-
-**Local web cockpit served by the daemon.** No connector change.
-
-- **Console** at `/ui` (`pcbpilot console open|url`, `daemon start --console`, default on): monitor landing page (daemon
-  pid/uptime/port/autosave/login service, component version alignment, EasyEDA windows, every project worked on —
-  running/idle/finished with DRC/report outcome, duration, last error — and the live action stream over SSE with
-  automatic reconnect), activity, agent runs (registered runs + inferred CLI sessions; the v0.8 bridge is labelled
-  planned), decisions, and per-work-dir timeline / sim rounds with deltas / reports / resource library / process
-  template. Loopback only, per-install token, Host/Origin checks, no CORS, sandboxed file serving. Embedded static page,
-  no build step, works offline, light/dark.
-- **Project registry** derived from the audit log (incremental backfill) + the live stream, persisted under
-  `~/.pcbpilot/console/`. Audit rows now also carry `projectUuid/projectName/documentUuid/documentType/outputDir`.
-- **`pcbpilot project-config`** — `pcbpilot.project.json` process template (steps / sims / report sections +
-  constraints, guard-rule validation); `report design --project-config` lists skipped steps/sections in §11.5 and no
-  longer counts them as missing. The Skill reads it first.
-- **`pcbpilot kb`** — per-project resource library: pure-Go PDF text (pdftotext fallback), md/txt/html/docx, page-bounded
-  chunks, BM25 with CJK bigrams, sha256 dedupe, summary slots, tags; console drag-and-drop upload.
-- **`pcbpilot ask`** — decision cards answered in the console (long-poll, default on expiry, terminal fallback, decision log).
-- **Fix: console landing page stuck on “连接 daemon…” after a service reload.** `/api/status` (and the SSE hello) ran the
-  login-service probe synchronously under a mutex; right after `setup-agent.sh --upgrade` re-bootstraps the launchd job,
-  `launchctl print` can block for minutes, so every status request waited while `/health`, `/api/projects` and
-  `/api/events` answered. Reproduced with a temp HOME, a 494 MB synthetic audit dir, a 30 s fake `launchctl` and a
-  wedged self-updater: `/api/status` 30.46 s before, 0.2–0.3 s after (audit backfill and self-updater were not
-  involved). The service and `/health` probes now run in the background, single-flight, with a deadline (the hung
-  tool is killed, `WaitDelay` covers children holding the pipe) and a cached value; the page shows “检查中…” / the
-  cache age. `/health` itself: pruning a stale connector no longer waits up to 5 s for its websocket close handshake.
-- **Console component table follows the self-updater**: Skill rows use `selfupdate.Targets` (ZCode included; linked
-  source skills read `SKILL.md` `metadata.version` and show `linked`); the MCP row shows the release stamp
-  (`~/.pcbpilot/mcp/current/VERSION`) or `linked (source)`, like `pcbpilot update --check`, instead of
-  `mcp/package.json` 0.18.3 “info”.
-- **Fix: `pcb auto` router panic** (`nodeCong` indexed past the grid for a via disk at the board edge; ESP32 v05 board with
-  `--intent --sim`), found by the console end-to-end chain `scripts/console-e2e.sh`.
 
 ## [0.6.1] — 2026-09-29
 

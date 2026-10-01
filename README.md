@@ -89,7 +89,7 @@ CAT III 600 V、400 V 逆变）与高速（USB3、HDMI、PCIe、千兆以太网�
   <img src="docs/assets/postsim-current-top.png" width="420" alt="设计后仿真：电流密度图"/>
 </p>
 
-### v0.7（开发中，未发布）：console 本地驾驶舱
+### v0.7：console 本地驾驶舱、美观度测量、核心安全修复
 
 daemon 在 `http://127.0.0.1:61832/ui/` 提供本地网页（`pcbpilot console open`，令牌在 `~/.pcbpilot/console.token`，仅回环）：
 **监控首页**实时显示 daemon（pid/运行时长/端口/自动保存/登录服务）、各组件版本对齐（CLI、Skill、MCP、每个窗口的 connector）、
@@ -98,6 +98,10 @@ EasyEDA 窗口、**系统做过的全部项目**（运行中/空闲/已结束、
 流程配置（`pcbpilot.project.json`，`pcbpilot project-config`，Skill 先读、跳过项写进报告）；`pcbpilot ask` 决策卡在页面上回答。
 console 从不编辑 EDA 工程，写入仍只走 typed action。本地 Agent（Claude Code / Codex）桥接是 v0.8 计划。
 设计与 API 见 [docs/console-design.md](docs/console-design.md)。
+
+同版还有：`pcbpilot pcb aesthetics` 布局/布线美观度测量（含对称检测与风格档位，只报告不计分，排在安全/电气之后）；
+核心修复——按电流的过孔阵列在每个换层处强制满足（不满足必报）、差分对成对布线与耦合/过孔对称检查、布局给差分对留通道、
+隔离/爬电/板边/过孔这些安全修复不再受时间预算影响（做不到就判 **NOT DELIVERABLE** 并写明原因）、守护进程重启更可靠。
 
 <p align="center"><img src="docs/assets/console/monitor.png" width="860" alt="console 监控首页"/></p>
 

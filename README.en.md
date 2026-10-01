@@ -140,7 +140,7 @@ stress suites and their known gaps are documented in the
 [HV isolation](.agents/skills/pcbpilot/references/recipes/hv-isolation.md) and
 [high-speed](.agents/skills/pcbpilot/references/recipes/high-speed.md) recipes.
 
-## v0.7 (in development, unreleased): the console
+## v0.7: the console, aesthetics measurement, core safety fixes
 
 The daemon serves a local cockpit at `http://127.0.0.1:61832/ui/` (`pcbpilot console open`; loopback only, per-install
 token in `~/.pcbpilot/console.token`). The **monitor** landing page streams the daemon (pid, uptime, port, autosave, login
@@ -152,6 +152,12 @@ process template (`pcbpilot.project.json`, `pcbpilot project-config`; the Skill 
 what was skipped). `pcbpilot ask` decision cards are answered in the page. The console never edits EDA projects; writes
 still go through typed actions only. Driving local agents (Claude Code / Codex) from the console is planned for v0.8.
 Design and API: [docs/console-design.md](docs/console-design.md).
+
+Also in this release: `pcbpilot pcb aesthetics` measures placement/routing aesthetics (symmetry detection, style
+profiles; report-only, ranked below safety and electrical). Core fixes: current-sized via arrays are enforced at every
+layer change (or reported), differential pairs are routed as coupled units and checked for coupling and via symmetry,
+placement keeps pair corridors clear, isolation/creepage/edge/via safety fix-ups no longer depend on the time budget
+(otherwise the result is **NOT DELIVERABLE** with reasons), and daemon restarts through the login service are reliable.
 
 ## Install
 
