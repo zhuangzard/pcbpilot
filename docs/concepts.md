@@ -687,7 +687,15 @@ net ID、全量 verification、provenance 和复杂 PCB constraints；否则保�
 | 7 | aesthetics 美观 | 软 | 布局 P1–P9、布线 R1–R9；Phase A 只报告（joint 权重 0） |
 
 落实方式：美观度量对差分、RF、等长、电流过孔/过孔阵列、intent 颈缩、隔离带与开槽、高压间距网在度量前
-**硬编码豁免**；未布通按 0 计入；任何美化改动使 1–6 层任一结果变差即回滚（Phase B 起）。流程契约测试
+**硬编码豁免**；未布通按 0 计入；任何美化改动使 1–6 层任一结果变差即回滚（Phase B 起）。
+
+**电气子项容差（2026-10-02 用户决定，option B）**：唯一的例外是第 2 层里 joint 电气组的**评分子项**（热环、去耦环、
+ESD 支线、RF 馈线、IR 压降分、差分分、高速分……）——美观阶段（布局美观阶段的布线复核、布线 beautify 闸门）可让
+每个子项各降至多 `AesElectricalTol = 0.5` 分（风格档字段 `electricalTolerance`：balanced/precision 0.5、functional 0），
+用来吸收路由对 2–5 mil 布局扰动的混沌响应；每笔交换都写进结果 notes、JSON（`electricalTrades`）与 report.md，绝不静默。
+**永不交换**：第 1 层全部（隔离/爬电/间隙发现、高压板边带、过孔电流、可交付结论）、第 3–4 层（DRC、布通、平面开路）、
+SI/差分/隔离发现**数**、过孔数（不增）、窄于电流的铜、超出预算的原始 IR 压降（预算内的上升按 IR 分走容差并报告）。
+容差不改变层级顺序：它是有界、可审计的余量，不是把美观提到电气之上。流程契约测试
 `TestFlowContract`（`internal/app/flow_contract_test.go`）保护 1–4 层的研究步骤仍在流程中且输出不变。
 
 ## 四、可信判据(reliable oracles)——判对错只信这些

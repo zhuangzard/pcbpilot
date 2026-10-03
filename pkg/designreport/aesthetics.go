@@ -25,6 +25,11 @@ type AestheticsSection struct {
 	Symmetry    []AesSymRow `json:"symmetry,omitempty"`
 	Exemptions  []KV        `json:"exemptions,omitempty"`
 	Priority    []KV        `json:"priority"`
+	// Trades are the electrical sub-scores the aesthetics stages of the
+	// pcb auto run lowered within their tolerance (placement routed guard,
+	// post-route beautify): one row per stage that ran, "无" when it traded
+	// nothing — never silent.
+	Trades []KV `json:"electricalTrades,omitempty"`
 }
 
 // AesRow is one metric.
@@ -103,6 +108,24 @@ func (c *ctx) buildAesthetics() {
 	}
 	for _, e := range rep.Exemptions {
 		s.Exemptions = append(s.Exemptions, KV{e.Kind + "（" + e.Metrics + "）", sprintf("%d 项", len(e.Items)), e.Why})
+	}
+	if pl := c.in.Plan; pl != nil {
+		zero := "安全（隔离/爬电/间隙、高压板边带、过孔电流、可交付结论）、布通、平面开路、DRC、SI/差分/隔离发现数、过孔数（不增）、超预算的原始压降：零容差"
+		row := func(stage string, tol float64, ts []pcbauto.AesTrade) {
+			v := "无"
+			if len(ts) > 0 {
+				v = pcbauto.AesTradesText(ts)
+			}
+			s.Trades = append(s.Trades, KV{sprintf("%s（每项容差 %s 分）", stage, f2(tol)), v, zero})
+		}
+		if pl.Placement != nil && pl.Placement.Aesthetics != nil && pl.Placement.Aesthetics.Guard != "" {
+			a := pl.Placement.Aesthetics
+			row("布局美观阶段", a.ElectricalTol, a.Trades)
+		}
+		if pl.Result != nil && pl.Result.Route != nil && pl.Result.Route.Beautify != nil && pl.Result.Route.Beautify.Kept {
+			bs := pl.Result.Route.Beautify
+			row("布线美化", bs.ElectricalTol, bs.Trades)
+		}
 	}
 	for _, t := range pcbauto.ConstraintPriority {
 		s.Priority = append(s.Priority, KV{sprintf("%d %s", t.Rank, t.Name), t.Kind, t.Covers})

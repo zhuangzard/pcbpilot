@@ -217,16 +217,20 @@ func TestAesGuardRollsBack(t *testing.T) {
 		}
 		return &abVariant{out: &Result{Route: rr, DRC: d}, js: &JointScore{Items: []JointItem{{Group: "electrical", ID: "decap-loop", Score: el}}}}
 	}
-	if w := aesRoutedWorse(mk(100, 0, 80), mk(100, 0, 80)); w != "" {
+	worse := func(a, b *abVariant) string {
+		w, _ := aesRoutedWorse(a, b, 0)
+		return w
+	}
+	if w := worse(mk(100, 0, 80), mk(100, 0, 80)); w != "" {
 		t.Errorf("equal: %q", w)
 	}
-	if w := aesRoutedWorse(mk(99, 0, 90), mk(100, 0, 80)); !strings.Contains(w, "completion") {
+	if w := worse(mk(99, 0, 90), mk(100, 0, 80)); !strings.Contains(w, "completion") {
 		t.Errorf("completion: %q", w)
 	}
-	if w := aesRoutedWorse(mk(100, 1, 90), mk(100, 0, 80)); !strings.Contains(w, "DRC") {
+	if w := worse(mk(100, 1, 90), mk(100, 0, 80)); !strings.Contains(w, "DRC") {
 		t.Errorf("drc: %q", w)
 	}
-	if w := aesRoutedWorse(mk(100, 0, 79.9), mk(100, 0, 80)); !strings.Contains(w, "decap-loop") {
+	if w := worse(mk(100, 0, 79.9), mk(100, 0, 80)); !strings.Contains(w, "decap-loop") {
 		t.Errorf("electrical: %q", w)
 	}
 }

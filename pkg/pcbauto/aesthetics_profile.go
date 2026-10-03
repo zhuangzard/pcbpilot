@@ -42,6 +42,11 @@ type AesProfile struct {
 	GridBlend        float64            `json:"gridBlend"`        // P9: share of the target grid in the score (rest: 5 mil audit)
 	SymmetryRequired bool               `json:"symmetryRequired"` // P4: worst group governs
 	Slack            AesSlack           `json:"slack"`
+	// ElectricalTol is how far an aesthetic stage may lower each electrical
+	// sub-score of the joint score (points; aesthetics_tolerance.go). Safety,
+	// completion, DRC, finding counts, vias and over-budget IR drop are
+	// never traded. At most AesElectricalTol.
+	ElectricalTol float64 `json:"electricalTolerance"`
 	// Auto is set when the profile was chosen by the complexity index.
 	Auto *AesAuto `json:"auto,omitempty"`
 }
@@ -60,14 +65,15 @@ var AesProfiles = map[string]AesProfile{
 	// area; loose tolerances so near-aligned is good enough.
 	"functional": {Name: "functional", Weight: 0.05, AlignTolMil: 4, NearMissTolMil: 20, PlacementGridMil: 5, GridBlend: 0,
 		MetricWeights: map[string]float64{"P2": 0.5, "P4": 0.5, "P9": 0.5, "R5": 0.5, "R6": 0.5, "R7": 0.5}},
+	// (functional trades no electrical sub-score: ElectricalTol 0.)
 	// Default. Reproduces the Phase A baseline (baseline.md) exactly.
 	"balanced": {Name: "balanced", Weight: 0.10, AlignTolMil: 2, NearMissTolMil: 15, PlacementGridMil: 25, GridBlend: 0.3,
-		Slack: AesSlack{WirelengthPct: 2}},
+		Slack: AesSlack{WirelengthPct: 2}, ElectricalTol: AesElectricalTol},
 	// "German / obsessive" tidiness: 25 mil grid, tight alignment, symmetry
 	// required when detected; may spend +5 % wire, +3 % area and 4 vias.
 	"precision": {Name: "precision", Weight: 0.20, AlignTolMil: 1, NearMissTolMil: 10, PlacementGridMil: 25, GridBlend: 1, SymmetryRequired: true,
 		MetricWeights: map[string]float64{"P1": 1.5, "P3": 1.5, "P4": 2, "P9": 1.5, "R1": 1.5, "R2": 1.5, "R3": 1.5},
-		Slack:         AesSlack{WirelengthPct: 5, AreaPct: 3, ExtraVias: 4}},
+		Slack:         AesSlack{WirelengthPct: 5, AreaPct: 3, ExtraVias: 4}, ElectricalTol: AesElectricalTol},
 }
 
 // DefaultAesProfile is the profile used when none is selected.
@@ -140,6 +146,7 @@ func (p *AesProfile) Validate() error {
 	chk(p.Slack.WirelengthPct >= 0 && p.Slack.WirelengthPct <= 10, "slack.wirelengthPct %.3g outside [0, 10]", p.Slack.WirelengthPct)
 	chk(p.Slack.AreaPct >= 0 && p.Slack.AreaPct <= 10, "slack.areaPct %.3g outside [0, 10]", p.Slack.AreaPct)
 	chk(p.Slack.ExtraVias >= 0 && p.Slack.ExtraVias <= 20, "slack.extraVias %d outside [0, 20]", p.Slack.ExtraVias)
+	chk(p.ElectricalTol >= 0 && p.ElectricalTol <= AesElectricalTol, "electricalTolerance %.3g outside [0, %.1f]: an aesthetics stage may trade at most %.1f point per electrical sub-score", p.ElectricalTol, AesElectricalTol, AesElectricalTol)
 	if len(errs) > 0 {
 		sort.Strings(errs)
 		return fmt.Errorf("aesthetics profile %q: %s", p.Name, strings.Join(errs, "; "))
@@ -161,7 +168,8 @@ var aesHardTokens = []struct {
 
 // aesStyleKeys are the only keys a style object may carry.
 var aesStyleKeys = map[string]bool{"profile": true, "base": true, "weight": true, "metricWeights": true, "alignTolMil": true,
-	"nearMissTolMil": true, "placementGridMil": true, "gridBlend": true, "symmetryRequired": true, "slack": true}
+	"nearMissTolMil": true, "placementGridMil": true, "gridBlend": true, "symmetryRequired": true, "slack": true,
+	"electricalTolerance": true}
 var aesSlackKeys = map[string]bool{"wirelengthPct": true, "areaPct": true, "extraVias": true}
 
 // ParseAesStyle reads a style document: either a pcbpilot.project.json
@@ -172,7 +180,8 @@ var aesSlackKeys = map[string]bool{"wirelengthPct": true, "areaPct": true, "extr
 //	 "base": "balanced", "weight": 0.12, "metricWeights": {"P4": 2},
 //	 "alignTolMil": 1.5, "nearMissTolMil": 10, "placementGridMil": 25,
 //	 "gridBlend": 0.5, "symmetryRequired": true,
-//	 "slack": {"wirelengthPct": 3, "areaPct": 1, "extraVias": 2}}
+//	 "slack": {"wirelengthPct": 3, "areaPct": 1, "extraVias": 2},
+//	 "electricalTolerance": 0.2}
 //
 // Any key naming a hard constraint (clearance, width, via, creepage, drc,
 // completion …) is rejected with its tier; unknown keys are rejected too.
@@ -205,6 +214,7 @@ func ParseAesStyle(raw []byte) (AesProfile, error) {
 		GridBlend        *float64           `json:"gridBlend"`
 		SymmetryRequired *bool              `json:"symmetryRequired"`
 		Slack            *AesSlack          `json:"slack"`
+		ElectricalTol    *float64           `json:"electricalTolerance"`
 	}
 	dec := json.NewDecoder(bytes.NewReader(obj))
 	dec.DisallowUnknownFields()
@@ -237,6 +247,7 @@ func ParseAesStyle(raw []byte) (AesProfile, error) {
 	set(&p.NearMissTolMil, doc.NearMissTolMil)
 	set(&p.PlacementGridMil, doc.PlacementGridMil)
 	set(&p.GridBlend, doc.GridBlend)
+	set(&p.ElectricalTol, doc.ElectricalTol)
 	if doc.SymmetryRequired != nil {
 		p.SymmetryRequired, custom = *doc.SymmetryRequired, true
 	}

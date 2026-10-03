@@ -387,7 +387,11 @@ input/evidence files in data/ (one self-contained package per version). */ -}}
 风格：{{md .ProfileNote}}
 
 > 边界：{{.Boundary}}
-
+{{if .Trades}}
+美观阶段交换的电气子项（每项容差见各行，逐项列出；{{(index .Trades 0).Note}}）：
+{{range .Trades}}
+- {{md .Label}}：{{md .Value}}{{end}}
+{{end}}
 | 项 | 指标 | 值 | 分 | 说明 |
 |---|---|---|---|---|
 {{- range .Metrics}}

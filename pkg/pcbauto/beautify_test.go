@@ -163,35 +163,35 @@ func TestBeautifyLeavesDiffPairs(t *testing.T) {
 	}
 }
 
-// The gate refuses any figure that ranks above aesthetics getting worse.
+// The gate refuses any figure that ranks above aesthetics getting worse
+// (at tolerance 0, the functional profile: nothing is traded).
 func TestBeautifyGateFacts(t *testing.T) {
-	base := routeFacts{drc: 0, vias: 10, completion: 100, electrical: 80, items: map[string]float64{"decap-loop": 50, "ir-drop": 100},
-		irMV: map[string]float64{"VOUT": 12}, underWidth: 3}
-	same := base
-	same.items = map[string]float64{"decap-loop": 50, "ir-drop": 100}
-	same.irMV = map[string]float64{"VOUT": 12}
-	if w := same.worseThan(base); w != "" {
+	mk := func() aesFacts {
+		return aesFacts{drc: 0, vias: 10, completion: 100, electrical: 80, items: map[string]float64{"decap-loop": 50, "ir-drop": 100},
+			irMV: map[string]float64{"VOUT": 12}, irBudget: map[string]float64{"VOUT": 100}, underWidth: 3}
+	}
+	strict := aesJudgeOpt{Tol: 0, SameLayout: true}
+	base := mk()
+	if w, _ := aesJudge(mk(), base, strict); w != "" {
 		t.Fatalf("equal facts judged worse: %s", w)
 	}
-	for name, f := range map[string]func(*routeFacts){
-		"drc":        func(r *routeFacts) { r.drc++ },
-		"vias":       func(r *routeFacts) { r.vias-- },
-		"completion": func(r *routeFacts) { r.completion -= 0.1 },
-		"electrical": func(r *routeFacts) { r.electrical -= 0.01 },
-		"item":       func(r *routeFacts) { r.items = map[string]float64{"decap-loop": 49.9, "ir-drop": 100} },
-		"si":         func(r *routeFacts) { r.si++ },
-		"iso":        func(r *routeFacts) { r.iso++ },
-		"plane":      func(r *routeFacts) { r.planeOpen++ },
-		"disconn":    func(r *routeFacts) { r.disconnected++ },
-		"irviol":     func(r *routeFacts) { r.irViol++ },
-		"underwidth": func(r *routeFacts) { r.underWidth += 1 },
-		"irmv":       func(r *routeFacts) { r.irMV = map[string]float64{"VOUT": 12.5} },
+	for name, f := range map[string]func(*aesFacts){
+		"drc":        func(r *aesFacts) { r.drc++ },
+		"vias":       func(r *aesFacts) { r.vias++ },
+		"completion": func(r *aesFacts) { r.completion -= 0.1 },
+		"electrical": func(r *aesFacts) { r.electrical -= 0.01 },
+		"item":       func(r *aesFacts) { r.items["decap-loop"] = 49.9 },
+		"si":         func(r *aesFacts) { r.si++ },
+		"iso":        func(r *aesFacts) { r.isoFindings++ },
+		"plane":      func(r *aesFacts) { r.planeOpen++ },
+		"disconn":    func(r *aesFacts) { r.disconnected++ },
+		"irviol":     func(r *aesFacts) { r.irViol++ },
+		"underwidth": func(r *aesFacts) { r.underWidth += 1 },
+		"irmv":       func(r *aesFacts) { r.irMV["VOUT"] = 12.5 },
 	} {
-		w := base
-		w.items = map[string]float64{"decap-loop": 50, "ir-drop": 100}
-		w.irMV = map[string]float64{"VOUT": 12}
+		w := mk()
 		f(&w)
-		if w.worseThan(base) == "" {
+		if why, _ := aesJudge(w, base, strict); why == "" {
 			t.Errorf("%s: worse facts accepted", name)
 		}
 	}
