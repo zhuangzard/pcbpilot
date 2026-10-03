@@ -21,7 +21,8 @@
 | 少量显式标记连接增量 | `sch plan <before.json> <after.json>`；不支持任意器件或导线 diff |
 | 转换/核验模块方框与标题 | `sch frame apply/check --from …` |
 | 度量原理图美观度（只报告，权重 0） | `sch aesthetics --snapshot page.json [--style …] [--json]` |
-| 原生总线 / 虚拟总线候选（live-unverified） | `sch bus list`、`sch bus create --name 'D[0:7]' --points … --dry-run`、`sch bus candidates --snapshot page.json` |
+| 原生总线（V3 3.2.149 已验证 / V4 未验证）/ 虚拟总线候选 | `sch bus list`、`sch bus create --name 'D[0:7]' --points … --dry-run`、`sch bus candidates --snapshot page.json` |
+| 按布局计划建 / 替换 / 回滚原生总线（成员标签须已存在） | `sch bus apply --plan plan.json [--dry-run] [--journal …]`、`sch bus apply --rollback`、`sch bus check [--snapshot …]`；compose 队列自动追加 |
 | 执行计划 | `sch apply <playbook.json>` |
 | 把电气意图写进原理图 | `sch intent-annotate --intent intent.json --page <uuid> [--dry-run]`：一个可替换文字块（每行一个 typed `schematic.text.create`），放在内框内空白处；ID 记入 journal，重跑只删 journal 内的文字，不碰器件/导线/连接。见 [pcb-config.md](pcb-config.md#电气意图--原生规则pcb-rules-apply) |
 
@@ -218,7 +219,9 @@ EasyEDA 交互界面兜底。能力边界与未来 typed 验收见 [project-impo
 - `schematic.bus.list` / `schematic.bus.create` / `schematic.bus.delete` — 官方 `sch_PrimitiveBus`（@beta）
   原生总线：只读列表（非数组即报错，不当空页）；建一条正交且互相连通的总线并回读名字与路径
   （不符 `partial:true`）；按 ID 删除并回读残留。总线不证明成员连通，API 无 bus entry。
-  CLI `sch bus list|create|delete [--dry-run]`。`planned` / `live-unverified`（V3、V4 均未现场验证）。
+  CLI `sch bus list|create|delete [--dry-run]`。V3 3.2.149 桌面版 live-verified（2026-10-01），V4 未验证。
+  布局计划的总线由 `sch bus apply` 组合这三个 action 落地（日志、替换、回滚、终态回读），见
+  [schematic-wiring.md](schematic-wiring.md#标签-vs-导线总线与原理图美观度软层度量--opt-in-生成)；apply 本身 live-unverified。
 
 - `pcb.documents.list` — 工程内所有 PCB 文档（uuid + name）
 - `pcb.components.list` — PCB 上的封装/器件；`includePads:true` 回传 pad 的原始

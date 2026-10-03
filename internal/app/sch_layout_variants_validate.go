@@ -143,7 +143,7 @@ func schematicVariantPhysicalPinIslands(layout *SchematicLayoutResult) (map[sche
 	if layout == nil {
 		return nil, fmt.Errorf("layout required")
 	}
-	p := powerLayoutPlan{Placements: layout.Placements, Wires: layout.Wires, Flags: layout.Flags}
+	p := powerLayoutPlan{Placements: layout.Placements, Wires: layout.Wires, Flags: layout.Flags, Buses: layout.Buses}
 	segments, err := schTerminalSegments(&p)
 	if err != nil {
 		return nil, err
@@ -261,7 +261,7 @@ func validateSchematicVariantGeometry(in SchematicRenderInput, owner SchematicRe
 	if err := validateCompleteLayoutPreview(preview); err != nil {
 		return err
 	}
-	p := powerLayoutPlan{Placements: layout.Placements, Wires: layout.Wires, Flags: layout.Flags}
+	p := powerLayoutPlan{Placements: layout.Placements, Wires: layout.Wires, Flags: layout.Flags, Buses: layout.Buses}
 	obstacles := powerLayoutContentObstacles(&p)
 	actual := powerLayoutContentBounds(&p)
 	if !schematicVariantBoxEqual(bounds, actual) {

@@ -184,6 +184,35 @@ stubs; `sch connect` stays for when you deliberately override the geometry.
   标签放同一列/行、等节距、同朝向。`sch bus candidates --snapshot page.json` 离线列出候选组与
   泳道质量（N3）；USB/MIPI 是差分对，按对并行，不合并成字母总线。
 
+**布局画原生总线（用户决定 2026-10-03）**：`sch layout-plan [--zones] / lib-layout --aesthetics
+balanced|precision` 默认把**完整**的标签泳道画成原生总线（`layout.buses` / `modules[].buses`，官方编码
+`busName` + `line` 嵌套多段线）；`functional` 默认不画，`--native-bus=false` 只留虚拟泳道。规则：
+
+- 资格：组成员数 ≥ 风格档 `generate.nativeBusMinMembers`（balanced 3、precision 2、functional 0=关；
+  `--native-bus` 显式开启时关档按 3）；每个成员在本区**恰好一个**标签/端口，全部同向、同列（aligned =
+  sameDir = 100%）；索引组编号必须连续。USB/MIPI 差分对永不成总线。不合格的泳道在
+  `busLanes[].native` 记 `skipped` + 原因，保持虚拟泳道。
+- 命名：索引组 `NAME[a:b]`（如 `D[0:7]`）；协议组用组名——前缀已含协议名用前缀（`SPI1`、`UART0`、
+  `I2C2`），否则 `PREFIX_KIND`（`U0_UART`、`ESP_UART`），无前缀用 `SPI`/`I2C`（`schaes.NativeBusName`）。
+  非 `NAME[a:b]` 名字的宿主语法尚未现场确认，`sch bus create` 只警告。
+- 几何：主干沿标签列外侧（距最远标签本体/文字 ≥ 15 units），每个成员一条梳齿、停在其标签前 5 units；
+  只有正交段、5-unit 格、梳齿起点在主干上。总线**不碰任何东西**：与器件本体、位号、引脚、标记（本体 +
+  文字带）、导线、标记引线、其他总线及其名字框都保持 ≥ 5 units（比“只在 tap 处接触”更严）；放不下就
+  外移最多 20 units、再试无梳齿主干，仍不行则记原因留虚拟泳道。
+- 连接：成员照旧是普通导线 + 同名标签/端口；总线永远不是连接证据。`validateSchNativeBuses`（compose）、
+  `sch bus check`、`sch aesthetics` 的 `busChecks` 都要求每个成员网在引脚上且有自己的标签/端口；否则
+  报 `member-without-label` / `member-without-pin`（error），N3 也不给该总线记分。
+- 宿主：`--bus-host absent`（health/api probe 无 `sch_PrimitiveBus`）→ 不画，`fallback-virtual`；
+  `--bus-host unverified`（V4 未现场验证）→ 照画，状态 `host-unverified`。
+- Apply：`sch compose --playbook` 在 `wire-tree-check` 之后、保存之前追加 `sch bus apply`：api probe
+  （缺 API → 回退虚拟总线、不写）→ 读页 → 日志分类（日志 ID 且名字 + 线段集合一致 = 本工具建的 → 按
+  ID 替换；日志 ID 已不在 → 剪除；不在日志 = 用户的 → 永不删除，完全相同的不重复建）→ 成员检查与“不碰
+  导线/引脚”检查（失败则不写）→ 删旧 → 逐条 create（连接器按无向线段集合回读）→ 每次写后落日志 →
+  终态回读（自建的等于计划、用户的未变、总数 = 用户 + 自建）。重跑只替换、不重复；
+  `sch bus apply --rollback` 按日志精确 ID 删除。`compose --replace` 若页上有日志证明不了的总线，编译时
+  拒绝（`sch clear` 会删掉它），由用户自己处理；日志默认 `<项目根>/.pcbpilot/bus-journal/<project>_<doc>.json`
+  （`--bus-journal` 覆盖）。现场验证流程见 `docs/reviews/2026-10-schematic-aesthetics/live/README.md`（待执行）。
+
 **度量命令（只报告）**：
 
 ```bash

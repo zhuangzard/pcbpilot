@@ -13,7 +13,7 @@
 | XY、引脚方向、紧凑标题、存量布局工具 | [schematic-placement.md](schematic-placement.md) |
 | 计算 → Apply → 验证的操作顺序 | [auto-layout-sop.md](auto-layout-sop.md) |
 | 局部接线、端口与断连 | [schematic-wiring.md](schematic-wiring.md) |
-| 标签 vs 导线、总线、原理图美观度（只报告） | [schematic-wiring.md](schematic-wiring.md#标签-vs-导线总线与原理图美观度只报告的软层) |
+| 标签 vs 导线、总线、原理图美观度（只报告） | [schematic-wiring.md](schematic-wiring.md#标签-vs-导线总线与原理图美观度软层度量--opt-in-生成) |
 | 手写 Apply 或需要了解 action 返回值 | [actions.md](actions.md) |
 | 原理图到 PCB 的整板阶段 | [design-flow.md](design-flow.md)、[pcb.md](pcb.md) |
 
@@ -140,7 +140,8 @@ rebind 使用候选优先事务：先回读 Device association，候选创建且
   不能单凭它宣称官方 UI 所有警告已清除；未运行或缺数据的检查列为未验证。
 - `sch aesthetics --snapshot page.json` 只报告布线/版面/标签/总线美观度（权重 0，不是门，
   永远排在连接正确性与可读性之后）；它不替代上面任何一项检查，也不授权现场逐件美化。
-  原生总线 `sch bus …` 为 planned / live-unverified，规则见 [schematic-wiring.md](schematic-wiring.md#标签-vs-导线总线与原理图美观度只报告的软层)。
+  原生总线 `sch bus …`（V3 3.2.149 已验证、V4 未验证；布局 balanced/precision 默认为完整标签泳道画总线，
+  `sch bus apply` 落地，总线永不是连接证据），规则见 [schematic-wiring.md](schematic-wiring.md#标签-vs-导线总线与原理图美观度软层度量--opt-in-生成)。
 - 用 `sch export-image` 导整页或指定 `--ids`；这是文档渲染，不依赖前台视口刷新。
   产物路径以响应 `artifacts[].path` 为准。BOM 和网表另用 `bom export`、`sch netlist`。
 

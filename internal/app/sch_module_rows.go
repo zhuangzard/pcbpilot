@@ -73,6 +73,7 @@ func translatePowerLayout(p *powerLayoutPlan, dx, dy float64) {
 	for i, f := range p.Frames {
 		p.Frames[i] = translateSchFrame(f, dx, dy)
 	}
+	translateNativeBuses(p.Buses, dx, dy)
 }
 
 func translateSchFrame(f schFrameSpec, dx, dy float64) schFrameSpec {

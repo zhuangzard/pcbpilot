@@ -50,4 +50,9 @@ W7 穿越段 + L6 文字重叠（各类单独不得增加）。check/lint = 离�
   module_port 且不跨核心/外围）。
 - 密集区（buck、mcu-zone、esp32 USB_CONN）只部分改善：评估预算（`generate.maxEvaluations`）先耗在线束重布上，
   对齐多数因无空闲位置被拒（`reroute` / `check`），属预期——美观永不以可读性或连接为代价。
-- 原生总线：未画；`--native-bus` 只在报告里给 live-unverified 提议。
+- 原生总线（2026-10-03 起默认画，balanced/precision）：只有 `synthetic-bus-lane` 形成完整泳道，after 预览多一条
+  `D[0:3]` 原生总线（粗线 + 名字；主干在端口列外侧，四条梳齿各停在端口前 5 units，不碰任何图元），N3 由泳道
+  分 100 变为原生总线记分 100，其余指标、check/lint、连接不变。esp32 与 mcu-zone 的唯一协议组 `U0_UART`
+  只有 2 个成员（balanced 门槛 3），precision（门槛 2）下其标签仍不同列/不同向，均在 `busLanes[].native`
+  记 `skipped` + 原因，几何与上一版逐字节一致（只多了这条报告字段）。真实板上尚无 ≥3 成员的完整泳道样例，
+  这是已知覆盖缺口：需要一块带 D0..D7 / SPI 组的源数据来做正例。

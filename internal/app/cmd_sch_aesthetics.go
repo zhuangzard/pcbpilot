@@ -45,7 +45,8 @@ func newSchAestheticsCmd(cfg *appConfig, window *string, stdout, stderr io.Write
 			"版面  L1 信号流向（电源上、地下、IN 左、OUT 右、接口件在左右边带）  L2 标记朝向一致\n" +
 			"      L3 行列对齐  L4 间距均匀  L5 模块框整洁  L6 文字重叠  L7 版面均衡\n" +
 			"标签  N1 长线宜改标签  N2 短程滥用标签  N3 总线/虚拟总线（索引网、SPI/I2C/UART/SDIO、\n" +
-			"      MIPI/USB 组的标签是否同列、等距、同向；有原生总线记满分）\n\n" +
+			"      MIPI/USB 组的标签是否同列、等距、同向；有原生总线且每个成员有自己的标签记满分）\n" +
+			"原生总线另做成员检查（busChecks）：名字对应的成员网须在引脚上且有自己的标签/端口。\n\n" +
 			"风格档与 pcb aesthetics 同名：functional | balanced（默认）| precision | auto（按器件/\n" +
 			"引脚/密度选档并打印理由）| custom（--style-file）。风格只改软目标；碰连接、NC、归属或\n" +
 			"任一门禁的键直接拒绝。\n\n" +
@@ -228,6 +229,19 @@ func RenderSchAesthetics(w io.Writer, rep *schaes.Report, all bool) {
 		fmt.Fprintf(w, "\nbus candidates (N3):\n")
 		for _, l := range rep.Lanes {
 			fmt.Fprintf(w, "  %-8s %-18s %-40s %s\n", l.Candidate.Kind, trunc(l.Candidate.Suggested, 18), trunc(strings.Join(l.Candidate.Members, ","), 40), l.Note)
+		}
+	}
+	if len(rep.BusChecks) > 0 {
+		fmt.Fprintf(w, "\nnative buses (member check — a bus is never connectivity):\n")
+		for _, c := range rep.BusChecks {
+			verdict := "ok"
+			if !c.OK {
+				verdict = "FAIL"
+			}
+			fmt.Fprintf(w, "  %-18s %-4s members %s\n", trunc(c.Name, 18), verdict, trunc(strings.Join(c.Members, ","), 50))
+			for _, f := range c.Findings {
+				fmt.Fprintf(w, "      · %s %s %s  %s\n", f.Severity, f.Rule, f.Net, f.Note)
+			}
 		}
 	}
 	fmt.Fprintf(w, "\n%d measured, %d skipped. %s\n", rep.Measured, rep.Skipped, rep.Boundary)

@@ -356,7 +356,7 @@ func measureSchematicZoneVariant(z SchematicZone, id string, layout *SchematicLa
 	copyLayout := *layout
 	copyLayout.Variants = nil
 	layout = &copyLayout
-	p := powerLayoutPlan{Placements: layout.Placements, Wires: layout.Wires, Flags: layout.Flags}
+	p := powerLayoutPlan{Placements: layout.Placements, Wires: layout.Wires, Flags: layout.Flags, Buses: layout.Buses}
 	boxes := powerLayoutContentObstacles(&p)
 	if len(boxes) == 0 {
 		return SchematicZoneVariant{}, fmt.Errorf("zone %s has no content geometry", z.ID)

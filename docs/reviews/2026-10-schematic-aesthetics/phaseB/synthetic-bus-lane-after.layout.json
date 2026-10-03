@@ -111,7 +111,7 @@
   130,
   5,
   0,
-  26723.25
+  36297
  ],
  "candidatesUsed": 0,
  "aesthetics": {
@@ -199,9 +199,92 @@
     "pitch": 20,
     "pitchCV": 0,
     "aligned": 1,
-    "sameDir": 1
+    "sameDir": 1,
+    "native": {
+     "name": "D[0:3]",
+     "line": [
+      [
+       150,
+       -30,
+       150,
+       30
+      ],
+      [
+       150,
+       -30,
+       140,
+       -30
+      ],
+      [
+       150,
+       -10,
+       140,
+       -10
+      ],
+      [
+       150,
+       10,
+       140,
+       10
+      ],
+      [
+       150,
+       30,
+       140,
+       30
+      ]
+     ],
+     "status": "planned"
+    }
    }
   ],
+  "nativeBuses": 1,
   "priority": "connectivity \u003e readability \u003e aesthetics: every move re-passes geometry, nets, ownership and offline check/lint counts, else it is rolled back"
- }
+ },
+ "buses": [
+  {
+   "busName": "D[0:3]",
+   "line": [
+    [
+     150,
+     -30,
+     150,
+     30
+    ],
+    [
+     150,
+     -30,
+     140,
+     -30
+    ],
+    [
+     150,
+     -10,
+     140,
+     -10
+    ],
+    [
+     150,
+     10,
+     140,
+     10
+    ],
+    [
+     150,
+     30,
+     140,
+     30
+    ]
+   ],
+   "group": "D[0:3]",
+   "kind": "indexed",
+   "members": [
+    "D0",
+    "D1",
+    "D2",
+    "D3"
+   ],
+   "status": "planned"
+  }
+ ]
 }

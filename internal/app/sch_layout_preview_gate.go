@@ -16,7 +16,7 @@ func validateCompleteLayoutPreview(in SchematicRenderInput) error {
 		if z.Status == "blocked" || z.Layout == nil || len(z.Layout.Placements) == 0 {
 			return fmt.Errorf("zone %s incomplete; solve the full layout first (diagnostics require --diagnostic)", z.ID)
 		}
-		p := powerLayoutPlan{Placements: z.Layout.Placements, Wires: z.Layout.Wires, Flags: z.Layout.Flags}
+		p := powerLayoutPlan{Placements: z.Layout.Placements, Wires: z.Layout.Wires, Flags: z.Layout.Flags, Buses: z.Layout.Buses}
 		for _, c := range p.Placements {
 			id := z.Layout.ComponentIDs[c.Designator]
 			if id == "" || seenIDs[id] {

@@ -200,8 +200,8 @@ func planLibLayoutWithReports(input libLayoutSource, reports *[]libLayoutAesthet
 		if reports != nil && local.Aesthetics != nil {
 			*reports = append(*reports, libLayoutAestheticsReport{Module: intent.ID, Report: local.Aesthetics})
 		}
-		p := powerLayoutPlan{Placements: local.Placements, Wires: local.Wires, Flags: local.Flags}
-		result.Modules = append(result.Modules, schCompositionModule{ID: intent.ID, Title: intent.Title, Placements: p.Placements, Wires: p.Wires, Flags: p.Flags})
+		p := powerLayoutPlan{Placements: local.Placements, Wires: local.Wires, Flags: local.Flags, Buses: local.Buses}
+		result.Modules = append(result.Modules, schCompositionModule{ID: intent.ID, Title: intent.Title, Placements: p.Placements, Wires: p.Wires, Flags: p.Flags, Buses: p.Buses})
 	}
 	if len(seenModules) != len(modules) {
 		return fail("layoutModules must cover every canonical module")

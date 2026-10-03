@@ -93,6 +93,9 @@ type SchematicLayoutResult struct {
 	FeasibilityReport  *SchematicFeasibilityReport       `json:"feasibilityReport,omitempty"`
 	Routing            *SchematicRoutingDiagnostics      `json:"routing,omitempty"`
 	Aesthetics         *SchematicAestheticsReport        `json:"aesthetics,omitempty"`
+	// Buses: native bus primitives drawn by the aesthetics pass (drawing
+	// only: members keep wire + label taps; see sch_native_bus.go).
+	Buses []SchematicNativeBus `json:"buses,omitempty"`
 }
 
 // PlanSchematicLayout is side-effect-free. No project, library, sheet, module

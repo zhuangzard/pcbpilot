@@ -29,6 +29,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/spf13/cobra"
+
 	"github.com/zhuangzard/pcbpilot/pkg/schaes"
 )
 
@@ -37,10 +39,17 @@ type SchematicAestheticsOptions struct {
 	// Style: functional | balanced | precision | auto (same names as
 	// sch aesthetics / pcb aesthetics). Empty = balanced.
 	Style string `json:"style,omitempty"`
-	// NativeBus additionally proposes a native bus line for every complete
-	// virtual bus lane (report only; Apply never draws it). The native bus
-	// actions are live-unverified, so this stays an explicit opt-in.
-	NativeBus bool `json:"nativeBus,omitempty"`
+	// NativeBus draws a native bus primitive (sch_PrimitiveBus, drawing
+	// only) for every complete virtual bus lane whose group reaches the
+	// profile's generate.nativeBusMinMembers. nil = profile default
+	// (balanced 3, precision 2, functional off); false = never; true = also
+	// on a profile whose default is off (threshold 3 there).
+	NativeBus *bool `json:"nativeBus,omitempty"`
+	// HostBusAPI is what the target host offers (health / api probe):
+	// "" or "verified" = live-verified bus API (V3 3.2.149); "unverified" =
+	// present but not live-verified (V4): buses are still planned, marked
+	// host-unverified; "absent" = no sch_PrimitiveBus: virtual bus lanes only.
+	HostBusAPI string `json:"hostBusApi,omitempty"`
 }
 
 // SchematicAestheticsPass counts the candidates of one move family.
@@ -74,7 +83,9 @@ type SchematicAestheticsReport struct {
 	Passes                []SchematicAestheticsPass `json:"passes"`
 	Evaluations           int                       `json:"evaluations"`
 	BusLanes              []SchematicBusLane        `json:"busLanes,omitempty"`
-	Priority              string                    `json:"priority"`
+	// NativeBuses counts the native bus primitives drawn (result.buses).
+	NativeBuses int    `json:"nativeBuses,omitempty"`
+	Priority    string `json:"priority"`
 }
 
 const schAesPriority = "connectivity > readability > aesthetics: every move re-passes geometry, nets, ownership and offline check/lint counts, else it is rolled back"
@@ -96,7 +107,8 @@ type aesEngine struct {
 	order        []string
 	splits       []string
 	kinds        map[string]string // net → marker kind seen in the solver output
-	nativeBus    bool
+	nativeBusMin int               // 0 = no native buses
+	hostBusAPI   string            // "" | verified | unverified | absent
 	lanes        []SchematicBusLane
 }
 
@@ -138,7 +150,8 @@ func (e *aesEngine) snapshot(p *powerLayoutPlan) (*schaes.Snapshot, error) {
 		Flags        []powerLayoutFlag            `json:"flags"`
 		ComponentIDs map[string]string            `json:"componentIds"`
 		PinStates    map[string]map[string]string `json:"pinStates"`
-	}{p.Placements, append([]powerLayoutWire{}, p.Wires...), append([]powerLayoutFlag{}, flags...), e.componentIDs, e.pinStates})
+		Buses        []SchematicNativeBus         `json:"buses,omitempty"`
+	}{p.Placements, append([]powerLayoutWire{}, p.Wires...), append([]powerLayoutFlag{}, flags...), e.componentIDs, e.pinStates, p.Buses})
 	if err != nil {
 		return nil, err
 	}
@@ -1169,13 +1182,20 @@ func applySchematicAesthetics(input SchematicLayoutInput, result *SchematicLayou
 		plan.Flags[i].Anchor = nil
 	}
 	e := &aesEngine{policies: policies, roles: roles, coreID: input.CoreComponentID, componentIDs: result.ComponentIDs, pinStates: result.PinStates,
-		passes: map[string]*SchematicAestheticsPass{}, kinds: map[string]string{}, nativeBus: opts.NativeBus}
+		passes: map[string]*SchematicAestheticsPass{}, kinds: map[string]string{}, hostBusAPI: opts.HostBusAPI}
 	for _, f := range plan.Flags {
 		e.kinds[f.Net] = f.Kind
 	}
 	snap, err := e.snapshot(plan)
 	if err == nil {
 		e.profile, err = resolveSchAesProfile(opts.Style, snap)
+	}
+	switch opts.HostBusAPI {
+	case "", "verified", "unverified", "absent":
+	default:
+		if err == nil {
+			err = fmt.Errorf("aesthetics.hostBusApi %q must be verified, unverified or absent", opts.HostBusAPI)
+		}
 	}
 	if err != nil {
 		report.Status, report.Reason = "skipped", err.Error()
@@ -1188,6 +1208,7 @@ func applySchematicAesthetics(input SchematicLayoutInput, result *SchematicLayou
 	}
 	e.evalLimit = e.profile.Generate.MaxEvaluations
 	g := e.profile.Generate
+	e.nativeBusMin = schAesNativeBusMin(opts, g)
 	components := make([]SchematicLayoutComponent, 0, len(plan.Placements))
 	for _, c := range plan.Placements {
 		components = append(components, SchematicLayoutComponent{ID: result.ComponentIDs[c.Designator], Measurement: c})
@@ -1235,8 +1256,8 @@ func applySchematicAesthetics(input SchematicLayoutInput, result *SchematicLayou
 			break
 		}
 	}
-	if e.nativeBus {
-		e.proposeNativeBuses(plan)
+	if e.nativeBusMin > 0 || e.hostBusAPI == "absent" {
+		plan.Buses = e.planNativeBuses(plan)
 	}
 	after, final := e.measure(plan)
 	report.ScoreAfter, report.DefectsAfter, report.MetricsAfter = after.Score, final.Defects, schAesMetricScores(after)
@@ -1253,10 +1274,14 @@ func applySchematicAesthetics(input SchematicLayoutInput, result *SchematicLayou
 		}
 		report.Passes = append(report.Passes, ps)
 	}
-	if final.better(start) {
+	// A native bus adds drawing only: keep it whenever the objective is not
+	// worse (the passes alone change the plan only through improving moves).
+	if final.better(start) || (len(plan.Buses) > 0 && !start.better(final)) {
 		report.Status = "improved"
+		report.NativeBuses = len(plan.Buses)
 		out := *result
 		out.Placements, out.Wires, out.Flags = plan.Placements, plan.Wires, plan.Flags
+		out.Buses = plan.Buses
 		out.Score = libCandidateScore(plan)
 		out.Aesthetics = report
 		return &out
@@ -1309,8 +1334,24 @@ func aesQuickKey(wires, others []powerLayoutWire, pr aesMarkerProposal, clearanc
 	return key
 }
 
+// schAesNativeBusMin resolves the native bus member threshold: the
+// profile's generate.nativeBusMinMembers unless --native-bus says otherwise.
+func schAesNativeBusMin(opts *SchematicAestheticsOptions, g schaes.GenerateProfile) int {
+	if opts.NativeBus != nil && !*opts.NativeBus {
+		return 0
+	}
+	if g.NativeBusMinMembers > 0 {
+		return g.NativeBusMinMembers
+	}
+	if opts.NativeBus != nil && *opts.NativeBus {
+		return 3
+	}
+	return 0
+}
+
 // schAesOptionsFromFlags merges CLI flags over an input's aesthetics object.
-func schAesOptionsFromFlags(in *SchematicAestheticsOptions, style string, nativeBus bool) *SchematicAestheticsOptions {
+// nativeBus nil = flag not given (keep the input / profile default).
+func schAesOptionsFromFlags(in *SchematicAestheticsOptions, style string, nativeBus *bool, hostBusAPI string) *SchematicAestheticsOptions {
 	out := &SchematicAestheticsOptions{}
 	if in != nil {
 		*out = *in
@@ -1318,6 +1359,44 @@ func schAesOptionsFromFlags(in *SchematicAestheticsOptions, style string, native
 	if style != "" {
 		out.Style = style
 	}
-	out.NativeBus = out.NativeBus || nativeBus
+	if nativeBus != nil {
+		v := *nativeBus
+		out.NativeBus = &v
+	}
+	if hostBusAPI != "" {
+		out.HostBusAPI = hostBusAPI
+	}
 	return out
+}
+
+// schAesBusFlags registers --native-bus / --bus-host on a layout command.
+type schAesBusFlags struct {
+	nativeBus bool
+	host      string
+	cmd       *cobra.Command
+}
+
+func (f *schAesBusFlags) register(c *cobra.Command) {
+	f.cmd = c
+	c.Flags().BoolVar(&f.nativeBus, "native-bus", true, "with --aesthetics: draw native bus primitives for complete label lanes (default on for balanced/precision, off for functional; --native-bus=false keeps virtual lanes only)")
+	c.Flags().StringVar(&f.host, "bus-host", "", "target host bus API from health / api probe: verified (V3 3.2.149, default) | unverified (V4: still planned, marked host-unverified) | absent (virtual lanes only)")
+}
+
+// active reports whether any bus flag was given.
+func (f *schAesBusFlags) active() bool {
+	return f.cmd != nil && (f.cmd.Flags().Changed("native-bus") || f.host != "")
+}
+
+func (f *schAesBusFlags) merge(in *SchematicAestheticsOptions, style string) (*SchematicAestheticsOptions, error) {
+	switch f.host {
+	case "", "verified", "unverified", "absent":
+	default:
+		return nil, fmt.Errorf("--bus-host must be verified, unverified or absent")
+	}
+	var nb *bool
+	if f.cmd != nil && f.cmd.Flags().Changed("native-bus") {
+		v := f.nativeBus
+		nb = &v
+	}
+	return schAesOptionsFromFlags(in, style, nb, f.host), nil
 }

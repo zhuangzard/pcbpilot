@@ -269,20 +269,21 @@ func TestSchAesBusLaneAlignsLabels(t *testing.T) {
 	if a.MetricsBefore["N3"] >= 90 || a.MetricsAfter["N3"] < 90 {
 		t.Fatalf("N3 %v → %v (want <90 → ≥90)", a.MetricsBefore["N3"], a.MetricsAfter["N3"])
 	}
-	if len(a.BusLanes) != 1 || a.BusLanes[0].Aligned != 1 || a.BusLanes[0].SameDir != 1 || a.BusLanes[0].Native != nil {
+	if len(a.BusLanes) != 1 || a.BusLanes[0].Aligned != 1 || a.BusLanes[0].SameDir != 1 {
 		t.Fatalf("lane %+v", a.BusLanes)
 	}
-	// Native bus is an opt-in, report-only, live-unverified proposal.
+	// balanced draws the complete lane as a native bus (drawing only).
+	if len(out.Buses) != 1 || out.Buses[0].BusName != "D[0:3]" || a.BusLanes[0].Native == nil || a.BusLanes[0].Native.Status != "planned" {
+		t.Fatalf("native bus %+v / %+v", out.Buses, a.BusLanes[0].Native)
+	}
+	// --native-bus=false keeps the virtual lane only and never draws a bus.
+	off := false
 	ids, p = busLaneFixture()
 	res := &SchematicLayoutResult{ComponentIDs: ids, PinStates: map[string]map[string]string{"core": nil}, Placements: p.Placements, Wires: p.Wires, Flags: p.Flags}
 	budget := 0
-	out = applySchematicAesthetics(SchematicLayoutInput{SchemaVersion: 1, CoreComponentID: "core", Aesthetics: &SchematicAestheticsOptions{Style: "balanced", NativeBus: true}}, res, policies, roles, &budget)
-	lanes := out.Aesthetics.BusLanes
-	if len(lanes) != 1 || lanes[0].Native == nil || lanes[0].Native.Status != "live-unverified" {
-		t.Fatalf("native proposal %+v", lanes)
-	}
-	if len(out.Wires) != 0 {
-		t.Fatalf("native bus proposal must never draw geometry: %+v", out.Wires)
+	out = applySchematicAesthetics(SchematicLayoutInput{SchemaVersion: 1, CoreComponentID: "core", Aesthetics: &SchematicAestheticsOptions{Style: "balanced", NativeBus: &off}}, res, policies, roles, &budget)
+	if len(out.Buses) != 0 || out.Aesthetics.BusLanes[0].Native != nil {
+		t.Fatalf("native bus off: %+v %+v", out.Buses, out.Aesthetics.BusLanes)
 	}
 }
 

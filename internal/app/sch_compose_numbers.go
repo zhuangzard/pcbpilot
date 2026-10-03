@@ -32,6 +32,13 @@ func normalizeSchCompositionGeometry(p *powerLayoutPlan) {
 		f := &p.Flags[i]
 		f.PinX, f.PinY, f.Offset = n(f.PinX), n(f.PinY), n(f.Offset)
 	}
+	for i := range p.Buses {
+		for k := range p.Buses[i].Line {
+			for j := range p.Buses[i].Line[k] {
+				p.Buses[i].Line[k][j] = n(p.Buses[i].Line[k][j])
+			}
+		}
+	}
 	for i := range p.Frames {
 		f := &p.Frames[i]
 		f.Rect = box(f.Rect)

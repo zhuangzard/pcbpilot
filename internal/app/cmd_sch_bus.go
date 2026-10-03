@@ -171,7 +171,11 @@ func newSchBusCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cob
 			"  list        只读：当前页全部总线（primitiveId/busName/line/color/lineWidth/lineType）\n" +
 			"  create      建一条总线（正交多段线，互相连通），写后回读名字与路径；--dry-run 只做离线校验\n" +
 			"  delete      按 ID 删总线并回读确认；--dry-run 只打印计划\n" +
-			"  candidates  离线：从快照找索引网/SPI/I2C/UART/SDIO/MIPI/USB 组，并评估其标签泳道\n\n" +
+			"  candidates  离线：从快照找索引网/SPI/I2C/UART/SDIO/MIPI/USB 组，并评估其标签泳道\n" +
+			"  apply       按布局计划建总线（成员标签须已存在；日志记 ID、按 ID+几何替换自己建的、永不删用户总线）\n" +
+			"  check       成员检查：名字对应的成员网在引脚上且有自己的标签/端口（error 时非零退出）\n\n" +
+			"布局生成（sch layout-plan / lib-layout --aesthetics balanced|precision）默认为完整标签泳道画原生总线\n" +
+			"（layout.buses）；sch compose --playbook 在 wire-tree 检查后追加 sch bus apply。\n\n" +
 			"扩展 API 没有总线分支（bus entry）图元：成员接入用普通正交导线 + 成员名网络标签/端口\n" +
 			"（connect_pin / autoconnect）。总线本身不建立电气连接的证据；成员网的连通仍以逐 pin\n" +
 			"网表和 sch check 为准。宿主不可用时退回「虚拟总线」：同组标签同列、等距、同向。",
@@ -252,6 +256,8 @@ func newSchBusCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cob
 		c.Flags().BoolVar(&dry, "dry-run", false, "print the payload; do not contact the daemon")
 		bus.AddCommand(c)
 	}
+	bus.AddCommand(newSchBusApplyCmd(cfg, window, stdout, stderr))
+	bus.AddCommand(newSchBusCheckCmd(cfg, window, stdout, stderr))
 	// candidates (offline)
 	{
 		var snapshot string
