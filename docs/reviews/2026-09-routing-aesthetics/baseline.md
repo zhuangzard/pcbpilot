@@ -615,3 +615,15 @@ ESP32 / HV 两条链的设计后热/IR（`sim post-layout`）两边 verdict 与�
 ### 13.5 预览
 
 `phaseB/esp32-optionB.png`：ESP32 种子 1（完整布局阶段在 0.5 容差下交付 + beautify），svg.go 渲染。
+
+### 13.6 质量矩阵（2026-10-02，本机 Apple Silicon；左 = dev `9e8290ca`，右 = 本分支，同机并跑）
+
+| 层级 | 命令 / 方式 | 结果 |
+|---|---|---|
+| 单测 | `make test` 两遍（第二遍 `GOFLAGS=-count=1`），含 `TestFlowContract`（未改动）与新 `TestAesTol*` | 两遍 25 个包 ok、退出码 0 |
+| 校准 / 协作入口 | `make layout-calibrate`、`make agent-check`、`make skill-check` | 均退出码 0 |
+| 5 板确定性 bench | `TestFixtureBench`，`PCBPILOT_BENCH_WORK=3e6`，每板一个进程 | 与 `9e8290ca` 逐项相同（§13.4） |
+| 离线 e2e 链 | ESP32 + HV flyback，8 步 × 2 | 全部退出码 0，两边相同（§13.3） |
+| HV 压力（确定性） | `TestStressHV`，每例一个进程，两边同时跑，2 h 上限相同 | cat3 / flyback / inverter / medical / negative：失败数两边相同（cat3 同一条原有 `route: completion 88.9%`，其余 0）；汇总行逐行相同，只有 cat3“最紧间距”举例的走线编号、flyback place 未布通网名不同（同为 73.6%）；inverter 两边都在 70 min 内跑完（未超时） |
+| HS 压力（确定性） | `TestStressHS`，`STRESS_HS_REAL=0`，每例一个进程，两边同时跑 | summary 的 ✗ 数两边相同：ddr3 16 / gbe 6 / pcie 1 / usb3-typec 5 / usb3-2layer-negative 2 / hdmi 0（均原有）；ddr3 只是同数值时举例的网名不同；hdmi place 的 skew/长度数值略变（全部 ✓） |
+| ESP32 多种子 / iso-mains / 人工布局 | §13.2 / §13.3 / §13.4 | 安全、布通、DRC、平面、SI 发现、交付全部不变；过孔从不增加 |

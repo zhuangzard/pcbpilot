@@ -24,8 +24,10 @@ No connector change; offline CLI only.
   a line in `report.md` §4 and §5, and the `report design` §6B list.
 - Measured (deterministic, `PCBPILOT_BENCH_WORK=3e6`; baseline.md §13): ESP32 seeds 1 / 2 now ship the full placement
   stage (P9 22→25/30 and 19→22/30, P3 11→13/16 on seed 1; traded decap loop −0.12 / −0.01); seeds 3 / 5 ship less than
-  9e8290ca because the full stage adds one via (zero tolerance); iso-mains ships the full stage (decap −0.36). Offline
-  e2e (ESP32, HV flyback), tidy-only human boards, fixture bench and HV/HS stress: no safety or completion change.
+  9e8290ca because the full stage adds one via (zero tolerance — seed 3 had shipped the full stage on 9e8290ca);
+  iso-mains ships the full stage (decap −0.36 against the no-stage placement, 0.89 below the grid-only rung 9e8290ca
+  shipped). Offline e2e (ESP32, HV flyback), tidy-only human boards, `make fixture-bench-det` and deterministic HV/HS
+  stress: safety, completion and failure counts identical to 9e8290ca.
 
 ### Official CLI survey absorb items 1–3 (offline)
 
