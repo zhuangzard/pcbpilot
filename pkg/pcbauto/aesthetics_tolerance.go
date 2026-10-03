@@ -28,7 +28,14 @@ package pcbauto
 //   - completion, disconnected connections, open plane connections, DRC;
 //   - SI finding counts (all SI findings, intent-pair findings, high-speed
 //     defects) and the isolation finding count;
-//   - the via count (may not increase);
+//   - the via count: the beautify gate adds no via; the PLACEMENT stage
+//     (the routed guard and every rung of its fallback ladder) may add at
+//     most the profile's PlacementViaAllowance (AesPlacementViaAllowance =
+//     1 for balanced and precision, functional 0; user decision 2026-10-03)
+//     and only when the electrical GROUP score does not drop at all — the
+//     extra via is reported as a trade ("vias +1 (83 → 84, ≤1 allowance,
+//     electrical group 92.74 → 93.27)"), each sub-score still within the
+//     0.5 tolerance;
 //   - copper narrower than its current (Σ deficit × length; the beautify
 //     gate, which edits the copper of one placement);
 //   - raw IR drop on power nets: no net may end over its drop budget where
@@ -51,22 +58,34 @@ import (
 // in AesProfile.ElectricalTol; a custom style may lower it, never raise it.
 const AesElectricalTol = 0.5
 
+// AesPlacementViaAllowance is THE most vias the placement aesthetics stage
+// may add over the placement without it (user decision 2026-10-03), and
+// only when the electrical group score does not drop. Profiles carry it in
+// AesProfile.PlacementViaAllowance (functional 0); a style may lower it,
+// never raise it. The beautify gate never adds a via.
+const AesPlacementViaAllowance = 1
+
 // aesScoreRound is the rounding floor of the placement guard: the report
 // prints scores to 0.1, so differences below 0.05 were never "worse" there
 // (functional keeps exactly this). The beautify gate has no floor.
 const aesScoreRound = 0.05
 
 // AesTrade is one electrical figure an aesthetic stage made worse within
-// the tolerance: an electrical item of the joint score (score points), or
-// the raw IR drop of a power net inside its budget (mV).
+// the tolerance: an electrical item of the joint score (score points), the
+// raw IR drop of a power net inside its budget (mV), or the via count of
+// the placement stage within its allowance (vias).
 type AesTrade struct {
 	Item string  `json:"item"`
 	From float64 `json:"from"`
 	To   float64 `json:"to"`
 	// Tolerance is the allowance the trade was judged against (points;
-	// for a raw IR drop, the net's budget in mV).
+	// for a raw IR drop, the net's budget in mV; for vias, the allowance).
 	Tolerance float64 `json:"tolerance"`
-	Unit      string  `json:"unit,omitempty"` // "" score points | "mV"
+	Unit      string  `json:"unit,omitempty"` // "" score points | "mV" | "vias"
+	// GroupFrom / GroupTo: the electrical group score without and with the
+	// stage (a via trade is only taken when it does not drop).
+	GroupFrom float64 `json:"groupFrom,omitempty"`
+	GroupTo   float64 `json:"groupTo,omitempty"`
 }
 
 // String renders the trade the way the notes and report.md print it, e.g.
@@ -76,6 +95,9 @@ func (t AesTrade) String() string {
 	prec := 2
 	if d < 0.01 {
 		prec = 3
+	}
+	if t.Unit == "vias" {
+		return fmt.Sprintf("vias +%.0f (%.0f → %.0f, ≤%.0f allowance, electrical group %.2f → %.2f)", -d, t.From, t.To, t.Tolerance, t.GroupFrom, t.GroupTo)
 	}
 	if t.Unit == "mV" {
 		return fmt.Sprintf("IR drop of %s +%.*f mV (%.2f → %.2f mV, within its %.0f mV budget)", strings.TrimPrefix(t.Item, "ir:"), prec, -d, t.From, t.To, t.Tolerance)
@@ -178,6 +200,11 @@ type aesJudgeOpt struct {
 	// (the routed guard) those raw figures move with routing noise: only
 	// the over-budget rule applies there, and the IR-drop score item.
 	SameLayout bool
+	// ViaAllowance is how many vias a may add over b (the placement stage:
+	// the profile's PlacementViaAllowance), only when the electrical group
+	// does not drop. Ignored (0) on SameLayout: the beautify gate adds no
+	// via.
+	ViaAllowance int
 }
 
 // aesJudge compares the aesthetic result a against the reference b. why
@@ -186,6 +213,10 @@ type aesJudgeOpt struct {
 // within the tolerance (reported, never silent).
 func aesJudge(a, b aesFacts, o aesJudgeOpt) (why string, trades []AesTrade) {
 	const eps = 1e-9
+	allow := o.ViaAllowance
+	if o.SameLayout || allow < 0 {
+		allow = 0
+	}
 	switch {
 	case a.gates > b.gates:
 		return fmt.Sprintf("safety gates %d > %d", a.gates, b.gates), nil
@@ -213,7 +244,10 @@ func aesJudge(a, b aesFacts, o aesJudgeOpt) (why string, trades []AesTrade) {
 		return fmt.Sprintf("high-speed findings %d > %d", a.hs, b.hs), nil
 	case a.si > b.si:
 		return fmt.Sprintf("SI findings %d > %d", a.si, b.si), nil
-	case a.vias > b.vias:
+	case a.vias > b.vias+allow:
+		if allow > 0 {
+			return fmt.Sprintf("vias %d > %d (+%d > %d allowance)", a.vias, b.vias, a.vias-b.vias, allow), nil
+		}
 		return fmt.Sprintf("vias %d > %d", a.vias, b.vias), nil
 	case a.irViol > b.irViol:
 		return fmt.Sprintf("IR-drop violations %d > %d", a.irViol, b.irViol), nil
@@ -264,6 +298,14 @@ func aesJudge(a, b aesFacts, o aesJudgeOpt) (why string, trades []AesTrade) {
 	}
 	if d := b.electrical - a.electrical; d > tol+eps {
 		return fmt.Sprintf("electrical group %.2f < %.2f", a.electrical, b.electrical), nil
+	}
+	if a.vias > b.vias {
+		// Within the placement allowance: only when the electrical group
+		// does not drop at all (no rounding, no tolerance).
+		if a.electrical < b.electrical-eps {
+			return fmt.Sprintf("vias %d > %d (+%d within the %d allowance needs the electrical group not to drop: %.2f < %.2f)", a.vias, b.vias, a.vias-b.vias, allow, a.electrical, b.electrical), nil
+		}
+		trades = append(trades, AesTrade{Item: "vias", From: float64(b.vias), To: float64(a.vias), Tolerance: float64(allow), Unit: "vias", GroupFrom: b.electrical, GroupTo: a.electrical})
 	}
 	return "", append(itemTrades, trades...)
 }

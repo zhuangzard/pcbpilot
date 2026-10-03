@@ -135,7 +135,7 @@ func (r *Report) WriteMarkdown(w io.Writer) {
 			p("- %s\n", n)
 		}
 		if ar := pl.Aesthetics; ar != nil && ar.Guard != "" {
-			p("- 布局美观阶段（%s 档）电气子项交换（每项容差 %.2g 分；安全/布通/DRC/发现数/过孔/超预算压降零容差）：%s\n", ar.Profile, ar.ElectricalTol, aesTradesCN(ar.Trades))
+			p("- 布局美观阶段（%s 档）电气子项交换（每项容差 %.2g 分；过孔至多 +%d 且电气组分不降；安全/布通/DRC/发现数/超预算压降零容差）：%s\n", ar.Profile, ar.ElectricalTol, ar.ViaAllowance, aesTradesCN(ar.Trades))
 		}
 		p("\n")
 		if f := r.Frame; f != nil {
@@ -190,7 +190,7 @@ func (r *Report) WriteMarkdown(w io.Writer) {
 			p("- %s\n", n)
 		}
 		if bs := rr.Beautify; bs != nil && bs.Kept {
-			p("- 布线美化电气子项交换（每项容差 %.2g 分；安全/布通/DRC/发现数/过孔/超预算压降零容差）：%s\n", bs.ElectricalTol, aesTradesCN(bs.Trades))
+			p("- 布线美化电气子项交换（每项容差 %.2g 分；过孔不增；安全/布通/DRC/发现数/超预算压降零容差）：%s\n", bs.ElectricalTol, aesTradesCN(bs.Trades))
 		}
 		p("\n")
 		writePowerIntegrity(p, rr.Power)
