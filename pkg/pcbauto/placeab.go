@@ -68,6 +68,13 @@ type abVariant struct {
 	// group-skew findings, and coupling / symmetry findings of the
 	// intent-declared pairs.
 	hs, pair int
+	// si is the variant's SI report (nil in unit tests).
+	si *SIReport
+}
+
+// facts are the routed figures the aesthetics guard judges v on.
+func (v *abVariant) facts() aesFacts {
+	return factsOf(v.js, v.out.Route, v.out.DRC, v.out.Isolation, v.out.Edge, v.si, v.pair, v.hs)
 }
 
 // abBetter reports that the plain variant y beats the corridor variant x:
@@ -120,7 +127,7 @@ func routeVariant(ctx context.Context, b *Board, an *Analysis, c *Circuit, pr *P
 	js := Joint(b, out.Analysis, c, out.Stackup, out.Route, out.DRC, JointOptions{PlacementScore: -1, Overlaps: pr.Metrics.Overlaps, Isolation: out.Isolation, Edge: out.Edge})
 	si := CheckSI(b, out.Analysis, out.Stackup, out.Route)
 	_, pair := intentPairDefects(out.Analysis, si)
-	return &abVariant{pr: pr, out: out, js: js, pose: snapshotPose(b), pre: pre, hs: hsFindings(si), pair: pair}, nil
+	return &abVariant{pr: pr, out: out, js: js, pose: snapshotPose(b), pre: pre, hs: hsFindings(si), pair: pair, si: si}, nil
 }
 
 // placeRouteCorridors is the corridor A/B of placeRouteAB.
@@ -194,51 +201,20 @@ func PlaceThenRoute(ctx context.Context, b *Board, an *Analysis, c *Circuit, m *
 // every move on the placer's own terms; the router is the judge of the
 // result. A placement the stage changed is routed a second time with the
 // poses it had before the stage, and the aesthetic one is kept only when it
-// routes no worse on every count: safety gates, delivery blockers, signal
-// completion, open plane connections, DRC, intent-pair and high-speed
-// findings, and each electrical item of the joint score (aesGuardTol is
-// rounding, not slack). Otherwise the board rolls back to the
-// pre-aesthetics placement, and the report says why.
-
-// aesGuardTol is the electrical-item tolerance of the routed guard: the
-// report rounds scores to 0.1, so smaller differences are not "worse".
-const aesGuardTol = 0.05
+// routes no worse on every zero-tolerance count — safety (gates, isolation,
+// board edge, via current, blockers, deliverability), completion, open
+// plane connections, DRC, SI / pair / high-speed finding counts, vias,
+// copper narrower than its current, power nets over their IR budget — and
+// lowers no electrical item of the joint score by more than the profile's
+// ElectricalTol (aesthetics_tolerance.go; never below the 0.05 rounding of
+// the report). Every item it does lower is reported as a trade. Otherwise
+// the board rolls back to the next rung, and the report says why.
 
 // aesRoutedWorse names the first count on which the aesthetic variant routes
-// worse than the raw one ("" = no worse anywhere).
-func aesRoutedWorse(aes, raw *abVariant) string {
-	ia, ir := aes.js, raw.js
-	switch {
-	case len(ia.Gates) > len(ir.Gates):
-		return fmt.Sprintf("safety gates %d > %d", len(ia.Gates), len(ir.Gates))
-	case len(ia.Blockers) > len(ir.Blockers):
-		return fmt.Sprintf("delivery blockers %d > %d", len(ia.Blockers), len(ir.Blockers))
-	case aes.out.Route.Stats.Completion < raw.out.Route.Stats.Completion:
-		return fmt.Sprintf("completion %.1f%% < %.1f%%", aes.out.Route.Stats.Completion, raw.out.Route.Stats.Completion)
-	case ia.PlaneOpen > ir.PlaneOpen:
-		return fmt.Sprintf("open plane connections %d > %d", ia.PlaneOpen, ir.PlaneOpen)
-	case len(aes.out.DRC.Violations) > len(raw.out.DRC.Violations):
-		return fmt.Sprintf("DRC %d > %d", len(aes.out.DRC.Violations), len(raw.out.DRC.Violations))
-	case aes.pair > raw.pair:
-		return fmt.Sprintf("pair findings %d > %d", aes.pair, raw.pair)
-	case aes.hs > raw.hs:
-		return fmt.Sprintf("high-speed findings %d > %d", aes.hs, raw.hs)
-	}
-	got := map[string]float64{}
-	for _, it := range ia.Items {
-		if it.Group == "electrical" {
-			got[it.ID] = it.Score
-		}
-	}
-	for _, it := range ir.Items {
-		if it.Group != "electrical" {
-			continue
-		}
-		if a, ok := got[it.ID]; !ok || a < it.Score-aesGuardTol {
-			return fmt.Sprintf("electrical %s %.1f < %.1f", it.ID, a, it.Score)
-		}
-	}
-	return ""
+// worse than the raw one beyond the tolerance tol ("" = acceptable), and
+// the electrical trades it makes within it.
+func aesRoutedWorse(aes, raw *abVariant, tol float64) (string, []AesTrade) {
+	return aesJudge(aes.facts(), raw.facts(), aesJudgeOpt{Tol: tol, Round: aesScoreRound})
 }
 
 // aesHoldRadius is how far around a regressed item the held-back rerun
@@ -246,10 +222,11 @@ func aesRoutedWorse(aes, raw *abVariant) string {
 const aesHoldRadius = 250.0
 
 // aesHoldFor names the parts behind the first count on which v routed worse
-// (why, from aesRoutedWorse) and every part within aesHoldRadius of them.
-// Empty for safety gates, blockers and board-wide items (IR drop): those go
+// (why, from aesRoutedWorse) and every part within aesHoldRadius of them
+// (for a via increase: the parts of the small nets that gained vias over
+// raw). Empty for safety gates, blockers and board-wide items (IR drop): those go
 // straight to the grid-only stage.
-func aesHoldFor(b *Board, an *Analysis, c *Circuit, v *abVariant, why string) map[*Part]bool {
+func aesHoldFor(b *Board, an *Analysis, c *Circuit, v, raw *abVariant, why string) map[*Part]bool {
 	var anchors []*Part
 	add := func(ref string) {
 		if p := b.Part(ref); p != nil {
@@ -296,6 +273,38 @@ func aesHoldFor(b *Board, an *Analysis, c *Circuit, v *abVariant, why string) ma
 	case strings.HasPrefix(why, "pair findings"), strings.HasPrefix(why, "high-speed"),
 		strings.HasPrefix(why, "electrical diff-pair"), strings.HasPrefix(why, "electrical high-speed"):
 		pairNets()
+	case strings.HasPrefix(why, "vias"):
+		// The parts of the nets that gained vias (nets of more than six
+		// parts — ground, rails — would hold half the board still).
+		count := func(x *abVariant) map[string]int {
+			m := map[string]int{}
+			for _, vi := range x.out.Route.Vias {
+				m[vi.Net]++
+			}
+			return m
+		}
+		var rawCount map[string]int
+		if raw != nil {
+			rawCount = count(raw)
+		}
+		for net, n := range count(v) {
+			if n <= rawCount[net] {
+				continue
+			}
+			var ps []*Part
+			seen := map[*Part]bool{}
+			for _, p := range b.Parts {
+				for _, pd := range p.Pads {
+					if pd.Net == net && !seen[p] {
+						seen[p] = true
+						ps = append(ps, p)
+					}
+				}
+			}
+			if len(ps) <= 6 {
+				anchors = append(anchors, ps...)
+			}
+		}
 	case strings.HasPrefix(why, "electrical hot-loop"):
 		for _, cv := range c.Converters {
 			for _, r := range append([]string{cv.Core, cv.Inductor, cv.HotCap, cv.Diode, cv.Bootstrap}, cv.Feedback...) {
@@ -345,7 +354,15 @@ func aesGuard(ctx context.Context, b *Board, an *Analysis, c *Circuit, v *abVari
 		return v
 	}
 	desc := func(x *abVariant) string {
-		return fmt.Sprintf("%.1f%%, plane open %d, DRC %d, electrical %.1f, gates %d", x.out.Route.Stats.Completion, x.js.PlaneOpen, len(x.out.DRC.Violations), x.js.Groups["electrical"], len(x.js.Gates))
+		return fmt.Sprintf("%.1f%%, plane open %d, DRC %d, vias %d, electrical %.1f, gates %d", x.out.Route.Stats.Completion, x.js.PlaneOpen, len(x.out.DRC.Violations), len(x.out.Route.Vias), x.js.Groups["electrical"], len(x.js.Gates))
+	}
+	tol := ar.ElectricalTol
+	// traded renders the electrical trades of a kept rung (never silent).
+	traded := func(ts []AesTrade) string {
+		if len(ts) == 0 {
+			return "; no electrical item traded"
+		}
+		return "; traded: " + AesTradesText(ts)
 	}
 	// variant routes the board at poses a (from the pre-routing board).
 	variant := func(a *aesPoses) (*abVariant, error) {
@@ -365,24 +382,26 @@ func aesGuard(ctx context.Context, b *Board, an *Analysis, c *Circuit, v *abVari
 		ar.Guard = "kept unverified: routing the placement without the aesthetics stage failed (" + err.Error() + ")"
 		return v
 	}
-	why := aesRoutedWorse(v, raw)
+	why, trades := aesRoutedWorse(v, raw, tol)
 	if why == "" {
 		v.pose.restore(b)
-		ar.Guard = fmt.Sprintf("kept: routes no worse than without the stage (with %s, without %s)", desc(v), desc(raw))
+		ar.Trades = trades
+		ar.Guard = fmt.Sprintf("kept: routes no worse than without the stage within the %.2g-point electrical tolerance (with %s, without %s)%s", tol, desc(v), desc(raw), traded(trades))
 		v.pr.Notes = append(v.pr.Notes, "aesthetics "+ar.Guard)
 		return v
 	}
 	full := fmt.Sprintf("the full stage routes worse (%s; with %s, without %s)", why, desc(v), desc(raw))
 	// Second choice: the stage again, holding still every part near what
 	// got worse (the parts behind the failing item and their surroundings).
-	if hold := aesHoldFor(b, an, c, v, why); len(hold) > 0 && ar.rerun != nil && ctx.Err() == nil {
+	if hold := aesHoldFor(b, an, c, v, raw, why); len(hold) > 0 && ar.rerun != nil && ctx.Err() == nil {
 		v.pre.restore(b)
 		local := ar.rerun(hold)
 		if local.rep != nil && local.rep.Moved > 0 {
 			if hv, err := variant(local); err == nil {
-				if hwhy := aesRoutedWorse(hv, raw); hwhy == "" {
+				if hwhy, htr := aesRoutedWorse(hv, raw, tol); hwhy == "" {
 					hr := *local.rep
-					hr.Guard = fmt.Sprintf("kept with %d part(s) near the regression held still: %s; held-back stage %s", len(hold), full, desc(hv))
+					hr.ElectricalTol, hr.Trades = tol, htr
+					hr.Guard = fmt.Sprintf("kept with %d part(s) near the regression held still: %s; held-back stage %s%s", len(hold), full, desc(hv), traded(htr))
 					hr.raw, hr.lites, hr.rerun = nil, nil, nil
 					hv.pr.Aesthetics = &hr
 					hv.pr.Notes = append(hv.pr.Notes, "aesthetics "+hr.Guard)
@@ -405,9 +424,10 @@ func aesGuard(ctx context.Context, b *Board, an *Analysis, c *Circuit, v *abVari
 		if err != nil {
 			continue
 		}
-		if lwhy := aesRoutedWorse(lv, raw); lwhy == "" {
+		if lwhy, ltr := aesRoutedWorse(lv, raw, tol); lwhy == "" {
 			lr := *lite.rep
-			lr.Guard = name + " stage kept: " + full + fmt.Sprintf("; %s %s", name, desc(lv))
+			lr.ElectricalTol, lr.Trades = tol, ltr
+			lr.Guard = name + " stage kept: " + full + fmt.Sprintf("; %s %s%s", name, desc(lv), traded(ltr))
 			lr.raw, lr.lites, lr.rerun = nil, nil, nil
 			lv.pr.Aesthetics = &lr
 			lv.pr.Notes = append(lv.pr.Notes, "aesthetics "+lr.Guard)

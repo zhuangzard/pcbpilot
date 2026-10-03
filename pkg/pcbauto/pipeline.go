@@ -16,6 +16,10 @@ type Options struct {
 	NoEscalate bool `json:"noEscalate,omitempty"`
 	// NoBeautify skips the post-route aesthetics pass (beautify.go).
 	NoBeautify bool `json:"noBeautify,omitempty"`
+	// Aesthetics is the style profile: its ElectricalTol is the beautify
+	// gate's electrical-item tolerance (nil = DefaultAesProfile; "auto" is
+	// resolved on the board).
+	Aesthetics *AesProfile `json:"-"`
 }
 
 // Result is everything the pipeline decided and produced.
@@ -198,7 +202,12 @@ func Run(ctx context.Context, b *Board, opt Options) (*Result, error) {
 		return nil, err
 	}
 	if !opt.NoBeautify && !noBeautify {
-		beautifyRoute(b, res, isoSlots, isoNotes, isoBad)
+		tol := aesElectricalTol(opt.Aesthetics)
+		if opt.Aesthetics != nil && opt.Aesthetics.Name == "auto" {
+			ap := AutoAesProfile(b, res.Analysis, b.CopperLayers)
+			tol = ap.ElectricalTol
+		}
+		beautifyRoute(b, res, isoSlots, isoNotes, isoBad, tol)
 	}
 	isoNotes = append(isoNotes, clipPlanesToIso(b, res.Analysis, res.Route)...)
 	res.Isolation = isolationReport(b, res.Analysis, res.Route, isoSlots, isoNotes, isoBad)

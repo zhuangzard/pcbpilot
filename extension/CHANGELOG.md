@@ -2,6 +2,33 @@
 
 ## [Unreleased]
 
+### Aesthetics electrical tolerance (option B, user decision 2026-10-02)
+
+No connector change; offline CLI only.
+
+- **One shared definition**: `pcbauto.AesElectricalTol = 0.5` and the style-profile field `electricalTolerance`
+  (balanced / precision 0.5, functional 0; a `--style-file` may lower it within [0, 0.5], never raise it). Both
+  aesthetic stages use it: the placement routed guard (`placeab.go`, every rung of the full → held-back → grid-only →
+  strict grid-only → pre-stage ladder) and the post-route beautify gate (`beautify.go`), through one judge
+  (`aesJudge`, `pkg/pcbauto/aesthetics_tolerance.go`).
+- **May be traded**: each electrical sub-score of the joint score (hot loop, decap loop, ESD stub, RF feed, IR-drop
+  score, diff pair, high speed …) by at most the tolerance; a power net's raw IR drop may rise only inside its budget.
+- **Never traded**: safety gates, isolation findings and infeasible bridges, board-edge findings (HV bands and the fab
+  edge rule), via-current shortfalls, delivery blockers and the deliverable verdict; completion, disconnected, open plane
+  connections, DRC; SI / pair / high-speed finding counts; the via count (may not grow); IR violations and any net over
+  its budget. The beautify gate additionally keeps copper narrower than its current and nets without a budget at zero.
+  The placement guard now also checks vias, total SI findings, isolation / edge / via-current counts and IR violations
+  (it did not before); a via increase holds the parts of the small nets that gained vias for the held-back rerun.
+- **Never silent**: `placement.aesthetics.electricalTolerance/electricalTrades`, `result.route.beautify.electricalTolerance/electricalTrades`,
+  the guard and beautify notes (`traded: decap loop −0.08 (82.48 → 82.40, ≤0.5 tolerance)` or `no electrical item traded`),
+  a line in `report.md` §4 and §5, and the `report design` §6B list.
+- Measured (deterministic, `PCBPILOT_BENCH_WORK=3e6`; baseline.md §13): ESP32 seeds 1 / 2 now ship the full placement
+  stage (P9 22→25/30 and 19→22/30, P3 11→13/16 on seed 1; traded decap loop −0.12 / −0.01); seeds 3 / 5 ship less than
+  9e8290ca because the full stage adds one via (zero tolerance — seed 3 had shipped the full stage on 9e8290ca);
+  iso-mains ships the full stage (decap −0.36 against the no-stage placement, 0.89 below the grid-only rung 9e8290ca
+  shipped). Offline e2e (ESP32, HV flyback), tidy-only human boards, `make fixture-bench-det` and deterministic HV/HS
+  stress: safety, completion and failure counts identical to 9e8290ca.
+
 ### Official CLI survey absorb items 1–3 (offline)
 
 No connector change; CLI only. Source: `docs/reviews/2026-10-jlc-cli-survey.md` §3.3.

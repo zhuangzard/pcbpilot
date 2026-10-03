@@ -80,7 +80,7 @@ func newPcbAestheticsCmd(stdout, stderr io.Writer) *cobra.Command {
 	c.Flags().BoolVar(&all, "all", false, "list every recorded offender, not just the top 3 per metric")
 	c.Flags().BoolVar(&noExempt, "no-exemptions", false, "diagnostic: measure diff/RF/tuned nets, via arrays and isolation copper too")
 	c.Flags().StringVar(&style, "style", "", "style profile: functional | balanced (default) | precision | auto (complexity index picks one)")
-	c.Flags().StringVar(&styleFile, "style-file", "", "style JSON: the 'aesthetics' object of pcbpilot.project.json or the bare object (profile custom: base, weight, metricWeights, alignTolMil, nearMissTolMil, placementGridMil, gridBlend, symmetryRequired, slack); hard-constraint keys are rejected")
+	c.Flags().StringVar(&styleFile, "style-file", "", "style JSON: the 'aesthetics' object of pcbpilot.project.json or the bare object (profile custom: base, weight, metricWeights, alignTolMil, nearMissTolMil, placementGridMil, gridBlend, symmetryRequired, slack, electricalTolerance ≤0.5 — the per-item electrical tolerance of the aesthetics stages); hard-constraint keys are rejected")
 	return c
 }
 

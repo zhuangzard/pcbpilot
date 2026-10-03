@@ -45,6 +45,11 @@ type BeautifyStats struct {
 	Strict       bool   `json:"strict,omitempty"`
 	Kept         bool   `json:"kept"`
 	Reason       string `json:"reason,omitempty"`
+	// ElectricalTol is the gate's per-item electrical tolerance (points);
+	// Trades every electrical item (and in-budget raw IR drop) the kept
+	// pass made worse within it (aesthetics_tolerance.go).
+	ElectricalTol float64    `json:"electricalTolerance"`
+	Trades        []AesTrade `json:"electricalTrades,omitempty"`
 }
 
 func (s *BeautifyStats) changes() int {
@@ -1530,121 +1535,47 @@ func (z *bfy) snapVias(net string) {
 
 // ---- the pipeline gate -----------------------------------------------------
 
-// routeFacts are the figures the beautification must not make worse.
-type routeFacts struct {
-	drc, disconnected, vias, planeOpen, si, iso, blockers int
-	completion, electrical                                float64
-	items                                                 map[string]float64
-	// DC power integrity, raw (the ir-drop item is clamped at 0 / 100):
-	// over-budget or open nets, each net's worst drop, and the copper
-	// narrower than its current needs (Σ deficit × length).
-	irViol     int
-	irMV       map[string]float64
-	underWidth float64
-}
-
-func measureRoute(b *Board, an *Analysis, c *Circuit, st *Stackup, rr *RouteResult, drc *DRCReport, iso func(*RouteResult) int) routeFacts {
-	f := routeFacts{drc: len(drc.Violations), disconnected: len(drc.Disconnected), vias: len(rr.Vias),
-		completion: rr.Stats.Completion, items: map[string]float64{}}
-	j := Joint(b, an, c, st, rr, drc, JointOptions{PlacementScore: -1})
-	f.planeOpen, f.electrical, f.blockers = j.PlaneOpen, j.Groups["electrical"], len(j.Blockers)
-	for _, it := range j.Items {
-		if it.Group == "electrical" {
-			f.items[it.ID] = it.Score
-		}
-	}
-	f.si = len(CheckSI(b, an, st, rr).Findings)
-	if pw := rr.Power; pw != nil {
-		f.irViol = pw.Violations()
-		f.irMV = map[string]float64{}
-		for _, n := range pw.Nets {
-			f.irMV[n.Net] = n.WorstMV
-			for _, sg := range n.Segments {
-				if sg.WidthMil < sg.NeedMil-1e-6 {
-					f.underWidth += (sg.NeedMil - sg.WidthMil) * sg.LengthMil
-				}
-			}
-		}
-	}
+// measureRoute collects the figures the beautification is judged on
+// (aesFacts, aesthetics_tolerance.go): the joint score with the isolation
+// report and the board-edge check of the routing, its SI findings and its
+// DC power integrity.
+func measureRoute(b *Board, an *Analysis, c *Circuit, st *Stackup, rr *RouteResult, drc *DRCReport, iso func(*RouteResult) *IsolationReport) aesFacts {
+	var ir *IsolationReport
 	if iso != nil {
-		f.iso = iso(rr)
+		ir = iso(rr)
 	}
-	return f
-}
-
-// worseThan names the first figure of a that is worse than b ("" = none).
-func (a routeFacts) worseThan(b routeFacts) string {
-	const eps = 1e-9
-	switch {
-	case a.drc > b.drc:
-		return sprintf("DRC %d → %d", b.drc, a.drc)
-	case a.disconnected > b.disconnected:
-		return sprintf("disconnected %d → %d", b.disconnected, a.disconnected)
-	case a.completion < b.completion-eps:
-		return sprintf("completion %.1f → %.1f", b.completion, a.completion)
-	case a.vias != b.vias:
-		return sprintf("vias %d → %d", b.vias, a.vias)
-	case a.planeOpen > b.planeOpen:
-		return sprintf("plane connections open %d → %d", b.planeOpen, a.planeOpen)
-	case a.electrical < b.electrical-eps:
-		return sprintf("electrical group %.3f → %.3f", b.electrical, a.electrical)
-	case a.si > b.si:
-		return sprintf("SI findings %d → %d", b.si, a.si)
-	case a.iso > b.iso:
-		return sprintf("isolation findings %d → %d", b.iso, a.iso)
-	case a.blockers > b.blockers:
-		return sprintf("delivery blockers %d → %d", b.blockers, a.blockers)
-	case a.irViol > b.irViol:
-		return sprintf("IR-drop violations %d → %d", b.irViol, a.irViol)
-	case a.underWidth > b.underWidth*(1+1e-6)+1e-6:
-		return sprintf("copper narrower than its current %.1f → %.1f mil²", b.underWidth, a.underWidth)
-	}
-	nets := make([]string, 0, len(b.irMV))
-	for n := range b.irMV {
-		nets = append(nets, n)
-	}
-	sort.Strings(nets)
-	for _, n := range nets {
-		if v, ok := a.irMV[n]; ok && v > b.irMV[n]*(1+1e-6)+1e-6 {
-			return sprintf("IR drop of %s %.2f → %.2f mV", n, b.irMV[n], v)
-		}
-	}
-	ids := make([]string, 0, len(b.items))
-	for id := range b.items {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	for _, id := range ids {
-		if a.items[id] < b.items[id]-eps {
-			return sprintf("electrical %s %.3f → %.3f", id, b.items[id], a.items[id])
-		}
-	}
-	return ""
+	edge := planEdgeCheck(b, an, st, rr)
+	j := Joint(b, an, c, st, rr, drc, JointOptions{PlacementScore: -1, Isolation: ir, Edge: edge})
+	si := CheckSI(b, an, st, rr)
+	_, pair := intentPairDefects(an, si)
+	return factsOf(j, rr, drc, ir, edge, si, pair, hsFindings(si))
 }
 
 // beautifyRoute runs the beautification on the pipeline's final routing and
-// keeps it only when nothing that ranks above aesthetics gets worse. When
+// keeps it only when nothing that ranks above aesthetics gets worse beyond
+// the profile's electrical tolerance tol (aesJudge: zero tolerance on
+// safety, completion, DRC, finding counts, vias, current-carrying width and
+// over-budget IR drop; each electrical sub-score may drop at most tol, and
+// at tol 0 no raw IR drop may grow). Every trade is reported. When
 // the whole pass fails the gate, the largest set of nets whose changes pass
 // together is searched by halving (each candidate set judged by the full
 // gate); then the pass is retried with no length increase anywhere; else
 // the routing stays as it was.
-func beautifyRoute(b *Board, res *Result, slots []IsoSlot, notes []string, bad []IsoInfeasible) {
+func beautifyRoute(b *Board, res *Result, slots []IsoSlot, notes []string, bad []IsoInfeasible, tol float64) {
 	rr, an, st := res.Route, res.Analysis, res.Stackup
 	if rr == nil || an == nil || res.DRC == nil {
 		return
 	}
-	var iso func(*RouteResult) int
+	var iso func(*RouteResult) *IsolationReport
 	if an.Iso != nil && len(an.Iso.Pairs) > 0 {
-		iso = func(r *RouteResult) int {
-			if rep := isolationReport(b, an, r, slots, notes, bad); rep != nil {
-				return len(rep.Findings)
-			}
-			return 0
+		iso = func(r *RouteResult) *IsolationReport {
+			return isolationReport(b, an, r, slots, notes, bad)
 		}
 	}
+	jo := aesJudgeOpt{Tol: tol, SameLayout: true}
 	c := Understand(b, an)
 	before := measureRoute(b, an, c, st, rr, res.DRC, iso)
-	try := func(ts []Track, vs []Via) (*RouteResult, *DRCReport, string) {
+	try := func(ts []Track, vs []Via) (*RouteResult, *DRCReport, string, []AesTrade) {
 		rr2 := *rr
 		rr2.Tracks, rr2.Vias = dedupTracks(append([]Track(nil), ts...)), append([]Via(nil), vs...)
 		rr2.Notes = append([]string(nil), rr.Notes...)
@@ -1657,7 +1588,8 @@ func beautifyRoute(b *Board, res *Result, slots []IsoSlot, notes []string, bad [
 		rr2.Stats.WireLengthIn = wl
 		rr2.Power = powerIntegrity(b, an, st, &rr2)
 		drc2 := CheckDRCStrict(b, an, st, rr2.Tracks, rr2.Vias)
-		return &rr2, drc2, measureRoute(b, an, c, st, &rr2, drc2, iso).worseThan(before)
+		why, trades := aesJudge(measureRoute(b, an, c, st, &rr2, drc2, iso), before, jo)
+		return &rr2, drc2, why, trades
 	}
 	// The power-integrity pass tapers the tracks it is given (rr.Tracks are
 	// tapered already): the pass works on the copper as routed and the
@@ -1680,19 +1612,19 @@ func beautifyRoute(b *Board, res *Result, slots []IsoSlot, notes []string, bad [
 			stats.Reason = "nothing to change"
 			break
 		}
-		rr2, drc2, why := try(ts, vs)
+		rr2, drc2, why, trades := try(ts, vs)
 		kept, total := 0, 0
 		if why != "" {
 			nets := changedNets(src, ts, vs)
 			total = len(nets)
 			keep := gateSearch(nets, func(set []string) bool {
 				t, v := composeNets(src, ts, vs, set)
-				_, _, w := try(t, v)
+				_, _, w, _ := try(t, v)
 				return w == ""
 			})
 			if len(keep) > 0 {
 				t, v := composeNets(src, ts, vs, keep)
-				rr2, drc2, _ = try(t, v)
+				rr2, drc2, _, trades = try(t, v)
 				kept = len(keep)
 			}
 		}
@@ -1701,6 +1633,7 @@ func beautifyRoute(b *Board, res *Result, slots []IsoSlot, notes []string, bad [
 			continue
 		}
 		stats.Kept = true
+		stats.ElectricalTol, stats.Trades = tol, trades
 		if why != "" {
 			stats.Reason = sprintf("kept the changes of %d of %d nets (the full pass: %s)", kept, total, why)
 		}
@@ -1712,6 +1645,11 @@ func beautifyRoute(b *Board, res *Result, slots []IsoSlot, notes []string, bad [
 		}
 		if stats.Reason != "" {
 			note += "; " + stats.Reason
+		}
+		if len(trades) > 0 {
+			note += sprintf("; electrical trades within the %.2g-point tolerance: %s", tol, AesTradesText(trades))
+		} else {
+			note += "; no electrical item traded"
 		}
 		rr2.Notes = append(rr2.Notes, note)
 		res.Route, res.DRC = rr2, drc2

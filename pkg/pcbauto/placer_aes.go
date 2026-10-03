@@ -26,8 +26,10 @@ package pcbauto
 //
 // A rejected transaction is rolled back exactly. The routed check comes
 // after: PlaceThenRoute / PlaceRoute route the board without this stage too
-// and keep the aesthetic placement only when it routes no worse
-// (aesRoutedWorse, placeab.go); else the grid-only stage (functional
+// and keep the aesthetic placement only when it routes no worse on every
+// zero-tolerance count and lowers no electrical sub-score by more than the
+// profile's ElectricalTol (aesRoutedWorse, placeab.go; trades reported,
+// aesthetics_tolerance.go); else the grid-only stage (functional
 // profile, computed here from the same start) is tried, else the v0.7
 // placement (tidyV07, placer.go) stands.
 //
@@ -73,6 +75,11 @@ type AesPlaceReport struct {
 	// Guard is the routed check's decision (PlaceThenRoute / PlaceRoute):
 	// "kept …", "rolled back …" or empty when the board was not routed here.
 	Guard string `json:"routedGuard,omitempty"`
+	// ElectricalTol is the guard's per-item electrical tolerance (the
+	// profile's, aesthetics_tolerance.go); Trades every electrical item
+	// (and in-budget raw IR drop) the kept placement made worse within it.
+	ElectricalTol float64    `json:"electricalTolerance"`
+	Trades        []AesTrade `json:"electricalTrades,omitempty"`
 	// Strict: the grid snap ran without its quantisation allowance.
 	Strict bool     `json:"strict,omitempty"`
 	Notes  []string `json:"notes,omitempty"`
@@ -203,7 +210,7 @@ func aesPasses(p AesProfile) []string {
 
 // aesthetics runs the stage on the current (legal) placement.
 func (pl *placer) aesthetics(res *PlaceResult, prof AesProfile) {
-	rep := &AesPlaceReport{Profile: prof.Name, Auto: prof.Auto, Accepted: map[string]int{}, Rejected: map[string]int{}}
+	rep := &AesPlaceReport{Profile: prof.Name, Auto: prof.Auto, ElectricalTol: prof.ElectricalTol, Accepted: map[string]int{}, Rejected: map[string]int{}}
 	res.Aesthetics = rep
 	pl.rebuildBuckets()
 	st := &aesState{prof: prof, rep: rep, excluded: map[*Part]bool{}, idx: map[*Part]int{}, moved: map[*Part]bool{}}

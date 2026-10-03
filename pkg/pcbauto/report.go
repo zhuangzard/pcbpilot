@@ -134,6 +134,9 @@ func (r *Report) WriteMarkdown(w io.Writer) {
 		for _, n := range pl.Notes {
 			p("- %s\n", n)
 		}
+		if ar := pl.Aesthetics; ar != nil && ar.Guard != "" {
+			p("- 布局美观阶段（%s 档）电气子项交换（每项容差 %.2g 分；安全/布通/DRC/发现数/过孔/超预算压降零容差）：%s\n", ar.Profile, ar.ElectricalTol, aesTradesCN(ar.Trades))
+		}
 		p("\n")
 		if f := r.Frame; f != nil {
 			p("板框自动尺寸：%.1f × %.1f %s（从密到疏逐一试放，取无重叠/出板/禁布/压孔、且加权线长 ≤ 宽松参考框 %.1f in 的 115%%、关键辅助件（去耦/热回路/功率级/晶振/保护/电源路径）超出牵引距离 ≤ 参考 %.0f mil + max(150, 50%%) 的最小矩形）\n\n| 宽 | 高 | 长宽比 | 填充率 | 线长 in | 关键牵引超出 mil | 结果 |\n|---|---|---|---|---|---|---|\n", f.Width, f.Height, f.Units, f.RefWireIn, f.RefTetherMil)
@@ -185,6 +188,9 @@ func (r *Report) WriteMarkdown(w io.Writer) {
 				continue
 			}
 			p("- %s\n", n)
+		}
+		if bs := rr.Beautify; bs != nil && bs.Kept {
+			p("- 布线美化电气子项交换（每项容差 %.2g 分；安全/布通/DRC/发现数/过孔/超预算压降零容差）：%s\n", bs.ElectricalTol, aesTradesCN(bs.Trades))
 		}
 		p("\n")
 		writePowerIntegrity(p, rr.Power)
@@ -495,4 +501,13 @@ func sortedDomainIDs(m map[string]*EdgeDomain) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// aesTradesCN renders the electrical trades of an aesthetics stage for
+// report.md ("无" when none: the line is printed either way, never silent).
+func aesTradesCN(ts []AesTrade) string {
+	if len(ts) == 0 {
+		return "无"
+	}
+	return AesTradesText(ts)
 }

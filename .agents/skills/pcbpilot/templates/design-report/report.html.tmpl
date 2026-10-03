@@ -270,6 +270,7 @@ code{font-size:12px;word-break:break-all}
 <p><strong>{{f1 .Score}}</strong>（布局 {{f1 .Placement}} / 布线 {{f1 .Routing}}，布通份额 {{f3 .RoutedShare}}）· 来源 {{.Source}} · 约束层级 {{.Tier}} · 风格 <code>{{.Profile}}</code></p>
 <p><small>风格：{{.ProfileNote}}</small></p>
 <p class="muted">边界：{{.Boundary}}</p>
+{{- if .Trades}}<h3>美观阶段交换的电气子项</h3><p class="muted">{{(index .Trades 0).Note}}</p><ul>{{range .Trades}}<li>{{.Label}}：{{.Value}}</li>{{end}}</ul>{{end}}
 <table><thead><tr><th>项</th><th>指标</th><th>值</th><th>分</th><th>说明</th></tr></thead><tbody>{{range .Metrics}}<tr><td>{{.ID}}</td><td>{{.Name}}</td><td class="n">{{.Value}}</td><td class="n">{{.Score}}</td><td><small>{{.Detail}}</small></td></tr>{{end}}</tbody></table>
 {{- if .Symmetry}}<h3>同构子电路（P4）</h3><table><thead><tr><th>类型</th><th>签名</th><th>实例</th><th>最佳变换</th><th>误差</th><th>分</th></tr></thead><tbody>{{range .Symmetry}}<tr><td>{{.Kind}}</td><td>{{.Signature}}</td><td><small>{{.Instances}}</small></td><td>{{.Axis}}</td><td class="n">{{.Error}}</td><td class="n">{{.Score}}</td></tr>{{end}}</tbody></table>{{end}}
 {{- if .Exemptions}}<h3>电气优先豁免</h3><ul>{{range .Exemptions}}<li>{{.Label}}：{{.Value}} — <small>{{.Note}}</small></li>{{end}}</ul>{{end}}

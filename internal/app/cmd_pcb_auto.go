@@ -62,7 +62,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 		c.Flags().IntVar(&in.maxLayers, "max-layers", 6, "cost cap for the layer decision")
 		c.Flags().Float64Var(&in.grid, "grid", 0, "routing grid in mil (0 = derived from the rules)")
 		c.Flags().DurationVar(&in.timeout, "timeout", 4*time.Minute, "routing time budget")
-		c.Flags().StringVar(&in.style, "style", "", "aesthetics style profile: functional (grid snap only) | balanced (default) | precision (25 mil grid, tight alignment, symmetry required) | auto — drives the placement aesthetics stage with --place and the report-only aesthetics block (soft objectives only; never relaxes safety/electrical/DRC/completion)")
+		c.Flags().StringVar(&in.style, "style", "", "aesthetics style profile: functional (grid snap only) | balanced (default) | precision (25 mil grid, tight alignment, symmetry required) | auto — drives the placement aesthetics stage with --place, the post-route beautify gate and the report-only aesthetics block; balanced/precision let an aesthetic stage lower each electrical sub-score by at most 0.5 point (reported), functional by none; safety, completion, DRC, finding counts, vias and over-budget IR drop are never traded")
 		c.Flags().StringVar(&in.styleFile, "style-file", "", "aesthetics style JSON (the 'aesthetics' object of pcbpilot.project.json, or the bare object; profile custom with per-metric weights/tolerances)")
 		c.Flags().StringVar(&in.pinCaps, "pin-caps", "", "extra pin-capability table merged over the built-in one (schema: .agents/skills/pcbpilot/references/pin-capabilities.json) — adds STM32/AT32/other remappable parts for schematic pin-swap feedback")
 	}
@@ -343,7 +343,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 					return err
 				}
 				opts := pcbauto.Options{Power: power, Stack: pcbauto.StackOptions{Force: in.layers, MaxLayers: in.maxLayers},
-					Route: pcbauto.RouteOptions{GridMil: in.grid, Timeout: in.timeout}}
+					Route: pcbauto.RouteOptions{GridMil: in.grid, Timeout: in.timeout}, Aesthetics: aesStyle}
 				budget := in.timeout * 3
 				if place && !noRoute && loops == 0 {
 					// One placement, but a board with intent-declared pairs
@@ -456,8 +456,12 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 						len(rep.Result.DRC.Violations), float64(s.Millis)/1000)
 					if bs := rep.Result.Route.Beautify; bs != nil {
 						if bs.Kept {
-							fmt.Fprintf(stderr, "beautify: %d fan-out vias onto the pad rays, %d pad entries, %d S-jogs, %d collinear merges, %d segments + %d vias onto the 5 mil grid (kept: DRC, electrical, SI, isolation, vias and completion no worse)\n",
-								bs.Fanouts, bs.PadEntries, bs.SJogs, bs.Merged, bs.LinesSnapped, bs.ViasSnapped)
+							traded := "no electrical item traded"
+							if len(bs.Trades) > 0 {
+								traded = "electrical trades within the tolerance: " + pcbauto.AesTradesText(bs.Trades)
+							}
+							fmt.Fprintf(stderr, "beautify: %d fan-out vias onto the pad rays, %d pad entries, %d S-jogs, %d collinear merges, %d segments + %d vias onto the 5 mil grid (kept: safety, DRC, completion, SI/isolation finding counts and vias no worse; each electrical item within %.2g point; %s)\n",
+								bs.Fanouts, bs.PadEntries, bs.SJogs, bs.Merged, bs.LinesSnapped, bs.ViasSnapped, bs.ElectricalTol, traded)
 						} else if bs.Reason != "" {
 							fmt.Fprintf(stderr, "beautify: not applied — %s\n", bs.Reason)
 						}
@@ -662,7 +666,7 @@ Nothing is written to EasyEDA; apply a pin swap with 'pcbpilot sch pin-swap'.`,
 						pcbauto.JointOptions{PlacementScore: -1, Aesthetics: true, Isolation: rep.Result.Isolation, Edge: rep.Result.Edge, AesProfile: aesStyle})
 				}
 				opts := pcbauto.Options{Power: power, Stack: pcbauto.StackOptions{Force: rep.Result.Stackup.Layers, MaxLayers: in.maxLayers},
-					Route: pcbauto.RouteOptions{GridMil: in.grid, Timeout: in.timeout}}
+					Route: pcbauto.RouteOptions{GridMil: in.grid, Timeout: in.timeout}, Aesthetics: aesStyle}
 				fb, err := feedback(cmd, b, &rep, opts, verify, loop, "pcb feedback")
 				if err != nil {
 					return err
