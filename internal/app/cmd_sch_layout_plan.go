@@ -13,7 +13,8 @@ import (
 
 func newSchLayoutPlanCmd(stdout io.Writer) *cobra.Command {
 	var from, out, report string
-	var zones, nativeBus bool
+	var zones bool
+	var busFlags schAesBusFlags
 	var aesStyle string
 	c := &cobra.Command{Use: "layout-plan", Short: "Plan a measured component set offline without Lib or project metadata", Long: `Compute local placements, wires, markers and score from schemaVersion:1,
 coreComponentId, components:[{id,measurement,pinStates?,allowedRotations?}], netPolicies keyed by
@@ -61,7 +62,12 @@ not whole-page packing or rendered frames. Add identity/sheet evidence before co
 
 --aesthetics STYLE runs the opt-in schematic aesthetics Phase B beautify pass on each
 finished zone (same contract as sch lib-layout --aesthetics); the per-zone report is
-layout.aesthetics. Without it the output is unchanged.
+layout.aesthetics. Without it the output is unchanged. With balanced/precision every
+complete label lane of an indexed / protocol group (≥ generate.nativeBusMinMembers) is
+also drawn as a native bus (layout.buses: trunk beside the label column, NAME[a:b] or
+the group name; members keep wire + label taps, the bus is never connectivity);
+--native-bus=false keeps virtual lanes only, --bus-host absent|unverified records the
+host's bus API (absent: virtual lanes; unverified: planned but marked host-unverified).
 
 Example:
   pcbpilot sch layout-plan --from measured-set.json --aesthetics balanced --out local-geometry.json
@@ -95,8 +101,8 @@ Example:
 		if zones {
 			var input SchematicZonesInput
 			input, err = decodeSchematicZonesInput(raw)
-			if err == nil && (aesStyle != "" || nativeBus) {
-				input.Aesthetics = schAesOptionsFromFlags(input.Aesthetics, aesStyle, nativeBus)
+			if err == nil && (aesStyle != "" || busFlags.active()) {
+				input.Aesthetics, err = busFlags.merge(input.Aesthetics, aesStyle)
 			}
 			if err == nil {
 				phase = "zone-review"
@@ -111,8 +117,8 @@ Example:
 		} else {
 			var input SchematicLayoutInput
 			input, err = decodeSchematicLayoutInput(raw)
-			if err == nil && (aesStyle != "" || nativeBus) {
-				input.Aesthetics = schAesOptionsFromFlags(input.Aesthetics, aesStyle, nativeBus)
+			if err == nil && (aesStyle != "" || busFlags.active()) {
+				input.Aesthetics, err = busFlags.merge(input.Aesthetics, aesStyle)
 			}
 			if err == nil {
 				phase = "solve"
@@ -143,7 +149,7 @@ Example:
 	}}
 	c.Flags().StringVar(&from, "from", "", "measured component-set JSON, without Lib metadata")
 	c.Flags().StringVar(&aesStyle, "aesthetics", "", "opt-in Phase B beautify pass per zone: functional | balanced | precision | auto (report in layout.aesthetics)")
-	c.Flags().BoolVar(&nativeBus, "native-bus", false, "with --aesthetics: add live-unverified native bus proposals for complete label lanes to the report (never applied)")
+	busFlags.register(c)
 	c.Flags().BoolVar(&zones, "zones", false, "plan explicitly owned per-core zones; unified spacing isolates per-zone budgets")
 	c.Flags().StringVar(&out, "out", "", "write local geometry only after validation; defaults to stdout")
 	c.Flags().StringVar(&report, "report", "", "write separate machine-readable diagnostics, including failed search evidence; failure still exits nonzero")

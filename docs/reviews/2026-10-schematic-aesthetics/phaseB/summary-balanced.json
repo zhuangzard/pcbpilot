@@ -508,7 +508,12 @@
      "pitch": 10,
      "pitchCV": 0,
      "aligned": 0.5,
-     "sameDir": 1
+     "sameDir": 1,
+     "native": {
+      "name": "U0_UART",
+      "status": "skipped",
+      "reason": "2 members \u003c profile threshold 3 (generate.nativeBusMinMembers)"
+     }
     }
    ],
    "priority": "connectivity \u003e readability \u003e aesthetics: every move re-passes geometry, nets, ownership and offline check/lint counts, else it is rolled back"
@@ -657,7 +662,12 @@
      "column": -25,
      "pitchCV": 0,
      "aligned": 0.5,
-     "sameDir": 0.5
+     "sameDir": 0.5,
+     "native": {
+      "name": "U0_UART",
+      "status": "skipped",
+      "reason": "2 members \u003c profile threshold 3 (generate.nativeBusMinMembers)"
+     }
     }
    ],
    "priority": "connectivity \u003e readability \u003e aesthetics: every move re-passes geometry, nets, ownership and offline check/lint counts, else it is rolled back"
@@ -1614,7 +1624,12 @@
      "column": -85,
      "pitchCV": 0,
      "aligned": 0.5,
-     "sameDir": 0.5
+     "sameDir": 0.5,
+     "native": {
+      "name": "U0_UART",
+      "status": "skipped",
+      "reason": "2 members \u003c profile threshold 3 (generate.nativeBusMinMembers)"
+     }
     },
     {
      "group": "USB",
@@ -1880,9 +1895,46 @@
      "pitch": 20,
      "pitchCV": 0,
      "aligned": 1,
-     "sameDir": 1
+     "sameDir": 1,
+     "native": {
+      "name": "D[0:3]",
+      "line": [
+       [
+        150,
+        -30,
+        150,
+        30
+       ],
+       [
+        150,
+        -30,
+        140,
+        -30
+       ],
+       [
+        150,
+        -10,
+        140,
+        -10
+       ],
+       [
+        150,
+        10,
+        140,
+        10
+       ],
+       [
+        150,
+        30,
+        140,
+        30
+       ]
+      ],
+      "status": "planned"
+     }
     }
    ],
+   "nativeBuses": 1,
    "priority": "connectivity \u003e readability \u003e aesthetics: every move re-passes geometry, nets, ownership and offline check/lint counts, else it is rolled back"
   }
  }

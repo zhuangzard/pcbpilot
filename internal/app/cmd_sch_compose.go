@@ -26,6 +26,7 @@ type schCompositionModule struct {
 	Wires        []powerLayoutWire        `json:"wires"`
 	Flags        []powerLayoutFlag        `json:"flags"`
 	Terminals    []schCompositionTerminal `json:"terminals,omitempty"`
+	Buses        []SchematicNativeBus     `json:"buses,omitempty"`
 }
 type schCompositionSource struct {
 	SchemaVersion int                    `json:"schemaVersion"`
@@ -51,6 +52,11 @@ type schCompositionPlan struct {
 	RowHeights              []float64             `json:"rowHeights"`
 	PageMargin              float64               `json:"pageMargin"`
 	ModuleGap               float64               `json:"moduleGap"`
+	// BusJournal is the per-page native bus journal the playbook's
+	// `sch bus apply` step uses; the --replace guard reads it to prove that
+	// every bus `sch clear` would delete was created by pcbpilot. Empty =
+	// the default <project root>/.pcbpilot/bus-journal/<project>_<doc>.json.
+	BusJournal string `json:"-"`
 }
 
 // The title block belongs to one target page, not to a placement zone. Keep
@@ -82,7 +88,7 @@ func validateSchCompositionTitleBlock(fields map[string]string) error {
 }
 
 func newSchComposeCmd(stdout, stderr io.Writer) *cobra.Command {
-	var from, out, before, playbookOut, layoutPage string
+	var from, out, before, playbookOut, layoutPage, busJournal string
 	var replace, preserveInstances bool
 	c := &cobra.Command{Use: "compose", Short: "Compose authored Lib circuits onto one sheet and compile a guarded SCH Apply", Long: `Read schemaVersion:1 composition data containing connectivity (complete 1.4 IR),
 sheet, keepouts, optional per-page titleBlock text and ordered modules
@@ -119,7 +125,13 @@ the source modules, canonical membership/pin intent and exact paper evidence, th
 preserves the supplied frames, titles, spacing and Z positions by rigid translation.
 It never reruns placement or chooses variants. A complete selected page without
 variants and explicit source sheetBorder/keepouts are required.
-No automatic pagination, symbol scaling or source-page deletion is performed.`, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+No automatic pagination, symbol scaling or source-page deletion is performed.
+Modules may carry native buses (lib-layout / layout-plan --aesthetics): they are
+validated (orthogonal, on grid, touching nothing, every member on a pin with its
+own label/port), translated with the module, and the playbook runs
+"sch bus apply" after the wire-tree check (journalled create + segment-set
+readback; a re-run replaces only journalled buses). A rebuild refuses to clear
+any bus the page's --bus-journal does not prove pcbpilot created.`, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		if from == "" {
 			return fmt.Errorf("--from is required")
 		}
@@ -171,6 +183,7 @@ No automatic pagination, symbol scaling or source-page deletion is performed.`, 
 			if err != nil {
 				return err
 			}
+			plan.BusJournal = busJournal
 			pb, err := schCompositionPlaybook(plan, b, replace, preserveInstances)
 			if err != nil {
 				return err
@@ -208,6 +221,7 @@ No automatic pagination, symbol scaling or source-page deletion is performed.`, 
 	c.Flags().StringVar(&playbookOut, "playbook", "", "also write ordered SCH Apply queue")
 	c.Flags().BoolVar(&replace, "replace", false, "compile a guarded reset of a differing target, preserving its sheet")
 	c.Flags().BoolVar(&preserveInstances, "preserve-instances", false, "with --replace, retain exact existing part IDs/properties and rebuild only drawing content")
+	c.Flags().StringVar(&busJournal, "bus-journal", "", "native bus journal of the target page (default <project root>/.pcbpilot/bus-journal/<project>_<doc>.json); --replace refuses to clear any bus not recorded there")
 	c.Flags().StringVar(&layoutPage, "layout-page", "", "selected complete layout-sheet-plan page: preserve its geometry, frames and spacing instead of repacking; requires matching source modules and explicit sheetBorder")
 	return c
 }
@@ -303,7 +317,7 @@ func planSchCompositionWithPage(src schCompositionSource, page *SchematicRenderI
 		if len(m.Placements) != len(members[m.ID]) {
 			return nil, fmt.Errorf("module %s member set differs from IR", m.ID)
 		}
-		p := powerLayoutPlan{SchemaVersion: 1, DocumentID: d.DocumentID, Placements: m.Placements, Wires: m.Wires, Flags: m.Flags}
+		p := powerLayoutPlan{SchemaVersion: 1, DocumentID: d.DocumentID, Placements: m.Placements, Wires: m.Wires, Flags: m.Flags, Buses: cloneNativeBuses(m.Buses)}
 		for i, c := range p.Placements {
 			canonical, ok := byRef[c.Designator]
 			if !ok || seen[c.Designator] || !members[m.ID][canonical.ID] {
@@ -369,6 +383,9 @@ func planSchCompositionWithPage(src schCompositionSource, page *SchematicRenderI
 		if err := validateSchCompositionPeripheralDirect(&p, d, m.ID); err != nil {
 			return nil, err
 		}
+		if err := validateSchNativeBuses(&p); err != nil {
+			return nil, fmt.Errorf("module %s: %w", m.ID, err)
+		}
 		obstacles, err := compositionMarkerGeometry(&p)
 		if err != nil {
 			return nil, fmt.Errorf("module %s: %w", m.ID, err)
@@ -417,6 +434,7 @@ func planSchCompositionWithPage(src schCompositionSource, page *SchematicRenderI
 		result.Layout.Placements = append(result.Layout.Placements, p.Placements...)
 		result.Layout.Wires = append(result.Layout.Wires, p.Wires...)
 		result.Layout.Flags = append(result.Layout.Flags, p.Flags...)
+		result.Layout.Buses = append(result.Layout.Buses, p.Buses...)
 		result.Layout.Frames = append(result.Layout.Frames, r.Frame)
 		result.Rows = r.Row + 1
 		height := r.Frame.Rect.MaxY - r.Frame.Rect.MinY
@@ -565,7 +583,7 @@ func schCompositionExpectation(p *schCompositionPlan, final bool) *schematicStat
 		e.Parts[c.Designator] = part
 	}
 	if final {
-		e.Drawing = &schematicDrawingExpectation{Wires: p.Layout.Wires, Flags: p.Layout.Flags}
+		e.Drawing = &schematicDrawingExpectation{Wires: p.Layout.Wires, Flags: p.Layout.Flags, MaxBuses: len(p.Layout.Buses)}
 		e.Ownership = &schematicOwnershipExpectation{ComponentIDs: map[string]string{}, Modules: p.Connectivity.Modules, NetRoles: schematicCanonicalNetRoles(p.Connectivity)}
 		for _, c := range p.Connectivity.Components {
 			e.Ownership.ComponentIDs[c.Ref] = c.ID
@@ -776,6 +794,11 @@ func schCompositionPlaybook(p *schCompositionPlan, before []byte, replace bool, 
 				return nil, err
 			}
 		}
+		if !reuseUnwired {
+			if err := schComposeUserBusGuard(pagePrimitives, schComposeBusJournal(p)); err != nil {
+				return nil, err
+			}
+		}
 
 		if preserved != nil {
 			ids := strings.Join(preserved.IDs, ",")
@@ -883,7 +906,18 @@ func schCompositionPlaybook(p *schCompositionPlan, before []byte, replace bool, 
 	if schLayoutHasCrossPagePorts(&p.Layout) {
 		gateFlags["defer-cross-page-drc"] = true
 	}
-	pb.Steps = append(pb.Steps, playbookStep{ID: "verify-all-pins-nets-nc", Action: "schematic.components.list", Payload: read, ExpectSchematic: final}, playbookStep{ID: "electrical-check", Action: "schematic.check", Assert: map[string]string{"$.passed": "true"}}, playbookStep{ID: "wire-tree-check", Action: "schematic.bridgeCheck", Assert: map[string]string{"$.passed": "true"}}, playbookStep{ID: "save-composition", Action: "schematic.save", Assert: map[string]string{"$.saved": "true"}}, playbookStep{ID: "strict-schematic-gate", Run: "sch gate", Flags: gateFlags})
+	pb.Steps = append(pb.Steps, playbookStep{ID: "verify-all-pins-nets-nc", Action: "schematic.components.list", Payload: read, ExpectSchematic: final}, playbookStep{ID: "electrical-check", Action: "schematic.check", Assert: map[string]string{"$.passed": "true"}}, playbookStep{ID: "wire-tree-check", Action: "schematic.bridgeCheck", Assert: map[string]string{"$.passed": "true"}})
+	// Native buses: drawing only, created after every member label exists
+	// and the electrical/wire-tree checks passed; journalled + read back by
+	// `sch bus apply`, which replaces only buses its journal proves are ours.
+	if len(p.Layout.Buses) > 0 {
+		raw, err := json.Marshal(p.Layout.Buses)
+		if err != nil {
+			return nil, err
+		}
+		pb.Steps = append(pb.Steps, playbookStep{ID: "native-buses", Run: "sch bus apply", Flags: map[string]any{"buses-b64": base64.StdEncoding.EncodeToString(raw), "journal": schComposeBusJournal(p)}})
+	}
+	pb.Steps = append(pb.Steps, playbookStep{ID: "save-composition", Action: "schematic.save", Assert: map[string]string{"$.saved": "true"}}, playbookStep{ID: "strict-schematic-gate", Run: "sch gate", Flags: gateFlags})
 	if preserved != nil {
 		pb.Steps = append(pb.Steps, playbookStep{ID: "verify-saved-instance-preservation", Action: "schematic.components.list", Payload: read, ExpectSchematic: final})
 	}

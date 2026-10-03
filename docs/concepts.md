@@ -278,6 +278,15 @@ EasyEDA Pro 3.2.186 的隔离页数据验证（2026-09-15）表明：严格位�
 
 稳定连接模型见 [`schematic-connectivity-model.md`](./schematic-connectivity-model.md)。布局算法只读该模型。
 
+### 原生总线（native bus）与虚拟总线泳道
+
+**原生总线**是官方 `sch_PrimitiveBus` 绘图对象（名字 + 正交多段线），**不是连接**：扩展 API 无 bus entry，
+成员网的连通只来自每个成员自己的导线 + 同名标签/端口（逐 pin 网表、`sch check`）。**虚拟总线泳道**是同组
+成员标签同列、等节距、同向的画法（N3）。布局生成（2026-10-03 起，balanced/precision）只把**完整**泳道画成
+原生总线，总线不碰任何图元；`sch bus apply` 用页日志区分“本工具建的”（日志 ID + 名字 + 线段集合一致，可替换/
+回滚）与“用户的”（永不删除）。宿主把多分支总线回读成一条往返折线，所以总线几何一律按无向线段集合比较。
+规则见 Skill [schematic-wiring.md](../.agents/skills/pcbpilot/references/schematic-wiring.md)。
+
 ### 已知悬空与未知引脚
 
 `pin.connectionState:"unconnected"` 表示已确认无网络、无 NC 的悬空物理脚，

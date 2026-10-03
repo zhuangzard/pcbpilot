@@ -212,7 +212,7 @@ func buildSchLayoutComposition(in schLayoutCompositionInput) (*schCompositionSou
 			return nil, fmt.Errorf("zone %s core %s is not a member", z.ID, z.CoreComponentID)
 		}
 		doc.Modules = append(doc.Modules, mod)
-		out.Modules = append(out.Modules, schCompositionModule{ID: z.ID, Title: z.Title, Placements: z.Layout.Placements, Wires: z.Layout.Wires, Flags: z.Layout.Flags})
+		out.Modules = append(out.Modules, schCompositionModule{ID: z.ID, Title: z.Title, Placements: z.Layout.Placements, Wires: z.Layout.Wires, Flags: z.Layout.Flags, Buses: cloneNativeBuses(z.Layout.Buses)})
 	}
 	names := make([]string, 0, len(nets))
 	for n := range nets {

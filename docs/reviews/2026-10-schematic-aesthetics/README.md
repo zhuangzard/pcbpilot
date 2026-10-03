@@ -2,8 +2,9 @@
 
 状态：**Phase A 已实现（只报告）；Phase B 已实现（opt-in 生成，`--aesthetics STYLE`，离线验证，见
 [phaseB/](phaseB/README.md) 与 [baseline.md §Phase B](baseline.md#phase-b-生成前后2026-10)）**。Phase A：`pcbpilot sch aesthetics`（`pkg/schaes`）、`sch bus list|create|delete|candidates`、
-`report design` §6C。基线见 [baseline.md](baseline.md)。原生总线 action 为 **planned / live-unverified**
-（V3 3.2.x 与 V4 均未现场验证）。Phase C 起待用户确认。PCB 侧见
+`report design` §6C。基线见 [baseline.md](baseline.md)。原生总线 action：V3 3.2.149 桌面版 **live-verified**
+（[live/](live/README.md)），V4 未验证。**2026-10-03 用户决定布局画原生总线**：balanced/precision 默认为完整
+标签泳道生成 `layout.buses`，`sch bus apply` 落地（日志/替换/回滚，live-unverified，现场流程见 live/README.md）。Phase C 起待用户确认。PCB 侧见
 [2026-09-routing-aesthetics](../2026-09-routing-aesthetics/README.md)，两侧风格档同名。
 
 优先级不变：**连接正确性 > 可读性 > 美观**。`sch layout-lint`、`sch check`、`bridge-check`、

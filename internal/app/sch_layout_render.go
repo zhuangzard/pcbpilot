@@ -72,7 +72,7 @@ func RenderSchematicLayoutSVG(in SchematicRenderInput) ([]byte, error) {
 		if z.Status != "" && z.Status != "planned" && z.Status != "blocked" {
 			return nil, fmt.Errorf("zone %s invalid status", z.ID)
 		}
-		p := powerLayoutPlan{Placements: z.Layout.Placements, Wires: z.Layout.Wires, Flags: z.Layout.Flags}
+		p := powerLayoutPlan{Placements: z.Layout.Placements, Wires: z.Layout.Wires, Flags: z.Layout.Flags, Buses: z.Layout.Buses}
 		for _, c := range p.Placements {
 			if c.Designator == "" || refs[c.Designator] || !plBoxValid(c.BBox) || !plFinite(c.X) || !plFinite(c.Y) || !plFinite(c.Rotation) || len(c.Pins) == 0 {
 				return nil, fmt.Errorf("invalid/duplicate placement %s", c.Designator)
@@ -120,6 +120,11 @@ func RenderSchematicLayoutSVG(in SchematicRenderInput) ([]byte, error) {
 			case "power", "ground", "net_port_bi", "net_port_in", "net_port_out", "net_label":
 			default:
 				return nil, fmt.Errorf("invalid marker kind")
+			}
+		}
+		for _, nb := range p.Buses {
+			if err := validateSchNativeBusShape(nb); err != nil {
+				return nil, err
 			}
 		}
 		boxes := powerLayoutContentObstacles(&p)
@@ -267,6 +272,15 @@ func RenderSchematicLayoutSVG(in SchematicRenderInput) ([]byte, error) {
 			x, y := endpointFor(m.PinX, m.PinY, m.Offset, m.Direction)
 			line([2]float64{m.PinX, m.PinY}, [2]float64{x, y}, "#07814d")
 			renderLayoutMarker(&b, m, X, Y)
+		}
+		// Native buses: a thick navy line plus the bus name (drawing only).
+		for _, nb := range z.Layout.Buses {
+			for _, s := range nb.segments() {
+				fmt.Fprintf(&b, `<path class="bus" d="M%g %g L%g %g" fill="none" stroke="#1d3f8f" stroke-width="2.6" stroke-linecap="square"/>`, X(s[0][0]), Y(s[0][1]), X(s[1][0]), Y(s[1][1]))
+			}
+			if nbx := schNativeBusNameBox(nb); plBoxValid(nbx) {
+				text(X(nbx.MinX)+2, Y(nbx.MinY)-2, 7, "#1d3f8f", nb.BusName, "start")
+			}
 		}
 		for _, q := range layoutJunctions(z.Layout) {
 			fmt.Fprintf(&b, `<circle class="junction" cx="%g" cy="%g" r="1.6" fill="#07814d"/>`, X(q[0]), Y(q[1]))

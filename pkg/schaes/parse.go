@@ -133,6 +133,8 @@ func mergeSnapshot(dst, src *Snapshot) {
 	dst.Wires = append(dst.Wires, src.Wires...)
 	dst.Markers = append(dst.Markers, src.Markers...)
 	dst.Texts = append(dst.Texts, src.Texts...)
+	dst.Buses = append(dst.Buses, src.Buses...)
+	dst.HasBuses = dst.HasBuses || src.HasBuses
 	dst.HasWires = dst.HasWires || src.HasWires
 	dst.HasMarkers = dst.HasMarkers || src.HasMarkers
 	dst.HasPins = dst.HasPins || src.HasPins
@@ -257,6 +259,7 @@ func parseLayout(m map[string]json.RawMessage, source string) (*Snapshot, error)
 		s.Markers = append(s.Markers, Marker{Kind: kind, Net: f.Net, Anchor: a, Dir: f.Direction,
 			Box: predictMarkerBox(kind, f.Net, a, f.Direction), Estimated: true})
 	}
+	parseBuses(m, s)
 	return s, nil
 }
 
@@ -466,6 +469,12 @@ func parseExtras(top map[string]json.RawMessage, s *Snapshot) {
 			s.Frames = append(s.Frames, fs...)
 		}
 	}
+	parseBuses(top, s)
+}
+
+// parseBuses reads a "buses" array in the official encoding (sch bus list,
+// layout plans: primitiveId, busName, line).
+func parseBuses(top map[string]json.RawMessage, s *Snapshot) {
 	if r, ok := top["buses"]; ok {
 		var bs []struct {
 			PrimitiveID string          `json:"primitiveId"`

@@ -35,7 +35,7 @@ type libLayoutSource struct {
 
 func newSchLibLayoutCmd(stdout, stderr io.Writer) *cobra.Command {
 	var from, out, aesStyle, aesReport string
-	var nativeBus bool
+	var busFlags schAesBusFlags
 	c := &cobra.Command{Use: "lib-layout", Short: "Calculate Lib placement and wiring offline from canonical nets and measured pins", Long: `Plan translation-only modules from a declared core on a 5-raw grid. Input contains
 schemaVersion:1, connectivity, sheet, keepouts, measurements and layoutModules.
 Each layoutModule declares id/title/coreComponentId and netPolicies keyed by netId:
@@ -61,8 +61,11 @@ local labels, virtual bus lanes and bounded row/column snaps. A move is kept
 only if geometry, pin→net/NC, physical islands, ownership and the offline
 sch check / layout-lint counts are unchanged-or-better and sch aesthetics
 improves; otherwise it is rolled back. Without the flag the output is
-unchanged. --native-bus adds live-unverified native bus proposals to the
-report only (never applied).
+unchanged. With balanced/precision a complete label lane of an indexed /
+protocol group is also drawn as a native bus (modules[].buses; drawing only,
+members keep wire + label taps); --native-bus=false keeps virtual lanes,
+--bus-host absent|unverified records the host's bus API. sch compose then
+appends "sch bus apply" to the playbook (journalled create, readback, replace).
 
 Examples:
   pcbpilot sch lib-layout --from layout-input.json --out composition.json
@@ -79,14 +82,10 @@ Examples:
 		if e != nil {
 			return e
 		}
-		if aesStyle != "" || nativeBus {
-			if src.Aesthetics == nil {
-				src.Aesthetics = &SchematicAestheticsOptions{}
+		if aesStyle != "" || busFlags.active() {
+			if src.Aesthetics, e = busFlags.merge(src.Aesthetics, aesStyle); e != nil {
+				return e
 			}
-			if aesStyle != "" {
-				src.Aesthetics.Style = aesStyle
-			}
-			src.Aesthetics.NativeBus = src.Aesthetics.NativeBus || nativeBus
 		}
 		var reports []libLayoutAestheticsReport
 		result, e := planLibLayoutWithReports(src, &reports)
@@ -140,7 +139,7 @@ Examples:
 	c.Flags().StringVar(&out, "out", "", "write compose source only after complete validation")
 	c.Flags().StringVar(&aesStyle, "aesthetics", "", "opt-in Phase B beautify pass: functional | balanced | precision | auto")
 	c.Flags().StringVar(&aesReport, "aesthetics-report", "", "write the per-module beautify report (before/after metrics, gates, passes) as JSON")
-	c.Flags().BoolVar(&nativeBus, "native-bus", false, "add live-unverified native bus proposals for complete label lanes to the report (never applied)")
+	busFlags.register(c)
 	return c
 }
 

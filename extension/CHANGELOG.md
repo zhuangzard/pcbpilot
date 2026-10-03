@@ -2,6 +2,33 @@
 
 ## [Unreleased]
 
+### Schematic layout draws native buses (user decision 2026-10-03)
+
+No connector change (the existing `schematic.bus.list/create/delete` actions are reused); CLI only.
+
+- **Generation**: `sch layout-plan [--zones]` / `sch lib-layout --aesthetics balanced|precision` now draw every
+  COMPLETE virtual bus lane (each member exactly one label/port, same direction, one column, contiguous indices,
+  group ≥ the new style field `generate.nativeBusMinMembers`: balanced 3, precision 2, functional 0 = off) as a native
+  bus in `layout.buses` / `modules[].buses` (official encoding `busName` + nested `line`). Trunk beside the label
+  column (≥15 units past the farthest label), one comb branch per member stopping 5 units short of its label;
+  orthogonal, 5-unit grid; the bus touches nothing (bodies, designators, pins, markers + text bands, wires, leads,
+  other buses, ≥5 units). Names: `NAME[a:b]` for indexed groups, the group name for protocol groups
+  (`schaes.NativeBusName`: `SPI1`, `UART0`, `U0_UART`, `SPI`); USB/MIPI pairs never. `--native-bus=false` keeps
+  virtual lanes; `--bus-host absent|unverified` falls back / marks `host-unverified`. Undrawn lanes record the reason
+  in `busLanes[].native`. Members keep wire + same-name label taps; a bus is never connectivity evidence.
+- **Apply**: new `pcbpilot sch bus apply` — api probe (absent → virtual-bus fallback, no write), member check and
+  no-touch check on the live page before any write, per-page journal (`.pcbpilot/bus-journal/<project>_<doc>.json`),
+  replaces only journalled buses whose id + name + segment set still match, never deletes or duplicates user buses,
+  journals after every write, final readback (segment-set comparison against the host's out-and-back flat path);
+  `--rollback` deletes journalled buses by exact id; `--dry-run [--bus-list]` offline. `sch compose --playbook` appends
+  it after `wire-tree-check`; the drawing expectation allows exactly the composition's bus count; `--replace` refuses
+  at compile time when the page holds a bus the journal (`--bus-journal`) does not prove pcbpilot created.
+- **Checks**: new `sch bus check` and `sch aesthetics` `busChecks` (members on pins with their own label/port,
+  bus touching wire/pin warned); N3 credits a native bus only by its native name and only when every member is
+  labelled. `sch layout-render` draws buses (thick line + name); frames/content bounds include them.
+- Evidence: `docs/reviews/2026-10-schematic-aesthetics/phaseB/` (synthetic-bus-lane after preview), offline tests incl.
+  a fake host returning the flat out-and-back readback; live procedure in `.../live/README.md` (not yet run).
+
 ### Aesthetics electrical tolerance (option B, user decision 2026-10-02)
 
 No connector change; offline CLI only.

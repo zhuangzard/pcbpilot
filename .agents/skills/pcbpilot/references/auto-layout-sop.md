@@ -77,9 +77,13 @@ precision | auto，或源 JSON 的 `"aesthetics":{"style":…}`）在每个区**
 （回滚），在位结果永不丢。不加 `--aesthetics` 时输出逐字节不变。报告在 `layout.aesthetics`（lib-layout
 写 `--aesthetics-report`）：前后分数、缺陷、逐项、check/lint 计数、`connectivityIdentical`、每类候选的
 尝试/接受/拒绝原因。预算由风格档 `generate.maxEvaluations` 决定（确定性，与机器速度无关）；密集区
-常因无空闲位置而拒绝对齐（拒绝原因记 `reroute`/`check`），属正常。原生总线只在 `--native-bus` 时作为
-**live-unverified 提议**写进报告，从不画；现场验证清单通过前不得 `sch bus create`。证据与前后表见
-`docs/reviews/2026-10-schematic-aesthetics/phaseB/`。
+常因无空闲位置而拒绝对齐（拒绝原因记 `reroute`/`check`），属正常。**原生总线**（用户决定 2026-10-03）：
+balanced/precision 默认把完整标签泳道（成员 ≥ `generate.nativeBusMinMembers`、每成员一个标签、同向同列、
+索引连续）画成 `layout.buses`（主干在标签列外侧、梳齿停在标签前 5 units、不碰任何图元；名字 `NAME[a:b]`
+或协议组名），成员仍是导线 + 同名标签，总线不是连接证据；`--native-bus=false` 只留虚拟泳道，
+`--bus-host absent|unverified` 按宿主 API 回退或标 `host-unverified`；未画的泳道在 `busLanes[].native`
+写原因。规则全文见 [schematic-wiring.md](schematic-wiring.md#标签-vs-导线总线与原理图美观度软层度量--opt-in-生成)。
+证据与前后表见 `docs/reviews/2026-10-schematic-aesthetics/phaseB/`。
 
 从设计意图生成 zones 源用 `sch zones-derive`（离线）：`--parts` 为每件的功能区与引脚连接
 （按引脚号或符号引脚名；只有数字名的符号用 `{"pin","source"}` 显式覆盖并写依据），`--list`/
@@ -203,6 +207,9 @@ pcbpilot sch apply apply.json --yes
 ```
 
 预览应显示正确的工程/页面、预计操作与全部守卫；`--yes` 仅用于已获授权的动作范围。
+计划带原生总线时队列在 `wire-tree-check` 之后多一步 `sch bus apply`（成员标签已存在才建；日志记 ID，
+重跑按日志 ID + 几何替换、不重复、永不删用户总线；缺 API 时回退虚拟总线不写）。整页 `--replace` 遇到
+日志证明不了的总线会在编译时拒绝；撤掉本工具建的总线用 `sch bus apply --rollback`。
 生成的保护队列必须完整执行，不能改目标、`--resume` 或 `--from/--to` 跳过验证。
 失败时保留 journal，读取实际结果后重生成计划；已成功的写不会自动回滚。
 

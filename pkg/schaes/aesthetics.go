@@ -98,12 +98,15 @@ type Report struct {
 	Metrics       []Metric       `json:"metrics"`
 	Lanes         []LaneRow      `json:"lanes,omitempty"`
 	BusCandidates []BusCandidate `json:"busCandidates"`
-	Counts        map[string]int `json:"counts"`
-	Measured      int            `json:"measured"`
-	Skipped       int            `json:"skipped"`
-	Priority      []string       `json:"priority"`
-	Boundary      string         `json:"boundary"`
-	Notes         []string       `json:"notes,omitempty"`
+	// BusChecks: per native bus, members exist on pins and carry their own
+	// label/port (a bus is never connectivity evidence).
+	BusChecks []BusCheck     `json:"busChecks,omitempty"`
+	Counts    map[string]int `json:"counts"`
+	Measured  int            `json:"measured"`
+	Skipped   int            `json:"skipped"`
+	Priority  []string       `json:"priority"`
+	Boundary  string         `json:"boundary"`
+	Notes     []string       `json:"notes,omitempty"`
 }
 
 // Metric returns a metric by id.
@@ -163,6 +166,7 @@ func Analyze(s *Snapshot, prof *Profile) *Report {
 		rep.Metrics = append(rep.Metrics, m)
 	}
 	rep.Lanes = a.lanes
+	rep.BusChecks = CheckBuses(s)
 	rep.BusCandidates = a.candidates()
 	// aggregate: group = weighted mean of measured metrics; overall = group-weighted mean
 	gs, gw := map[string]float64{}, map[string]float64{}
@@ -1204,11 +1208,8 @@ func (a *analyzer) n3() Metric {
 		for _, n := range c.Members {
 			mem[n] = true
 		}
-		for _, b := range a.s.Buses {
-			if c.Key != "" && strings.HasPrefix(strings.ToUpper(b.Name), strings.ToUpper(strings.TrimRight(c.Key, "_"))) {
-				row.NativeBus = b.Name
-			}
-		}
+		creditNote := ""
+		row.NativeBus, creditNote = a.busCredit(c)
 		var ms []Marker
 		for _, m := range a.s.Markers {
 			if mem[m.Net] && (m.Kind == KindNetPort || m.Kind == KindNetLabel) {
@@ -1269,6 +1270,9 @@ func (a *analyzer) n3() Metric {
 			row.SameDir = float64(mx) / float64(len(ms))
 			row.Score = round1(100 * row.Aligned * (1 - math.Min(1, row.PitchCV)) * row.SameDir)
 			row.Note = fmt.Sprintf("virtual lane: %d labels, aligned %.0f%%, pitch CV %.2f, same direction %.0f%%", len(ms), 100*row.Aligned, row.PitchCV, 100*row.SameDir)
+			if creditNote != "" {
+				row.Note += "; " + creditNote
+			}
 			if row.Score < 80 {
 				worst = append(worst, Offender{Net: c.Suggested, Value: row.Score, Note: row.Note})
 			}

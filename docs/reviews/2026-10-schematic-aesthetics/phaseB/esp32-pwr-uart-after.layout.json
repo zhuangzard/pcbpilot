@@ -2195,7 +2195,12 @@
     "column": -85,
     "pitchCV": 0,
     "aligned": 0.5,
-    "sameDir": 0.5
+    "sameDir": 0.5,
+    "native": {
+     "name": "U0_UART",
+     "status": "skipped",
+     "reason": "2 members \u003c profile threshold 3 (generate.nativeBusMinMembers)"
+    }
    },
    {
     "group": "USB",

@@ -76,6 +76,8 @@ type powerLayoutPlan struct {
 	Flags           []powerLayoutFlag      `json:"flags"`
 	ExpectedPinNets map[string]string      `json:"expectedPinNets"`
 	Frames          []schFrameSpec         `json:"frames"`
+	// Buses: native bus primitives (drawing only; see sch_native_bus.go).
+	Buses []SchematicNativeBus `json:"buses,omitempty"`
 }
 
 type powerLayoutSnapshot struct {

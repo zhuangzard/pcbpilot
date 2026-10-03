@@ -73,7 +73,7 @@ func sheetPreviewFrame(z SchematicRenderZone, spacingArg ...*float64) (schFrameS
 			if z.Layout == nil {
 				return schFrameSpec{}, fmt.Errorf("zone %s lacks layout", z.ID)
 			}
-			p := powerLayoutPlan{Placements: z.Layout.Placements, Wires: z.Layout.Wires, Flags: z.Layout.Flags}
+			p := powerLayoutPlan{Placements: z.Layout.Placements, Wires: z.Layout.Wires, Flags: z.Layout.Flags, Buses: z.Layout.Buses}
 			if err := validateSchematicFrameSpacing(*z.Frame, powerLayoutContentObstacles(&p), spacing); err != nil {
 				return schFrameSpec{}, err
 			}
@@ -83,7 +83,7 @@ func sheetPreviewFrame(z SchematicRenderZone, spacingArg ...*float64) (schFrameS
 	if z.Layout == nil {
 		return schFrameSpec{}, fmt.Errorf("zone %s lacks layout", z.ID)
 	}
-	p := powerLayoutPlan{Placements: z.Layout.Placements, Wires: z.Layout.Wires, Flags: z.Layout.Flags}
+	p := powerLayoutPlan{Placements: z.Layout.Placements, Wires: z.Layout.Wires, Flags: z.Layout.Flags, Buses: z.Layout.Buses}
 	return measureSchModuleFrameObstaclesSpacing(z.ID, z.Title, powerLayoutContentObstacles(&p), nil, nil, spacing)
 }
 func sheetPreviewRect(z SchematicRenderZone, spacingArg ...*float64) (SchematicBox, error) {

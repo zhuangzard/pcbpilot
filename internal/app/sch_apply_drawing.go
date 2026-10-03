@@ -14,6 +14,10 @@ import (
 type schematicDrawingExpectation struct {
 	Wires []powerLayoutWire `json:"wires"`
 	Flags []powerLayoutFlag `json:"flags"`
+	// MaxBuses bounds the native buses on the page: the composition's own
+	// buses (created by `sch bus apply`, whose journal and segment-set
+	// readback verify identity and geometry). 0 = no bus allowed (legacy).
+	MaxBuses int `json:"maxBuses,omitempty"`
 }
 
 func (e *schematicDrawingExpectation) validate() error {
@@ -132,8 +136,8 @@ func (e *schematicDrawingExpectation) check(result any) error {
 	if live.Summary == nil || live.Summary.Scope != "activePage" || live.Summary.Buses == nil || live.Summary.ShortSymbols == nil {
 		return fmt.Errorf("drawing requires active-page bus/short-symbol counts (includeConnectivitySummary:true)")
 	}
-	if *live.Summary.Buses != 0 || *live.Summary.ShortSymbols != 0 {
-		return fmt.Errorf("drawing contains unsupported buses/short symbols (%d/%d)", *live.Summary.Buses, *live.Summary.ShortSymbols)
+	if *live.Summary.Buses > e.MaxBuses || *live.Summary.ShortSymbols != 0 {
+		return fmt.Errorf("drawing contains unsupported buses/short symbols (%d/%d; composition buses allowed: %d)", *live.Summary.Buses, *live.Summary.ShortSymbols, e.MaxBuses)
 	}
 	if live.Wires == nil {
 		return fmt.Errorf("drawing requires measured wires (includeWires:true)")

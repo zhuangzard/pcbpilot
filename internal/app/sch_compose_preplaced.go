@@ -56,8 +56,8 @@ func validateSchCompositionPreplaced(src schCompositionSource, page SchematicRen
 		if !core || len(members) != len(z.Layout.Placements) {
 			return fmt.Errorf("zone %s core/member set differs from canonical module", z.ID)
 		}
-		if !reflect.DeepEqual(m.Placements, z.Layout.Placements) || !reflect.DeepEqual(m.Wires, z.Layout.Wires) || !reflect.DeepEqual(m.Flags, z.Layout.Flags) {
-			return fmt.Errorf("zone %s local placements/wires/flags differ from composition", z.ID)
+		if !reflect.DeepEqual(m.Placements, z.Layout.Placements) || !reflect.DeepEqual(m.Wires, z.Layout.Wires) || !reflect.DeepEqual(m.Flags, z.Layout.Flags) || !reflect.DeepEqual(m.Buses, z.Layout.Buses) {
+			return fmt.Errorf("zone %s local placements/wires/flags/buses differ from composition", z.ID)
 		}
 		for _, p := range z.Layout.Placements {
 			id := z.Layout.ComponentIDs[p.Designator]
@@ -86,7 +86,7 @@ func validateSchCompositionPreplaced(src schCompositionSource, page SchematicRen
 			return fmt.Errorf("zone %s selected geometry: %w", z.ID, err)
 		}
 		f := z.Frame
-		p := powerLayoutPlan{Placements: m.Placements, Wires: m.Wires, Flags: m.Flags}
+		p := powerLayoutPlan{Placements: m.Placements, Wires: m.Wires, Flags: m.Flags, Buses: m.Buses}
 		if f.FontSize != schModuleTitleFontSize || f.Color != "#AA00AA" || f.LineType != 1 || f.TitleLayout == nil || !reflect.DeepEqual(f.TitleLayout.Obstacles, powerLayoutContentObstacles(&p)) {
 			return fmt.Errorf("zone %s frame style/title occupancy must preserve complete selected geometry", z.ID)
 		}

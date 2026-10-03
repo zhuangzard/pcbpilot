@@ -59,6 +59,10 @@ type GenerateProfile struct {
 	AlignMove float64 `json:"alignMoveUnits"`
 	// MaxEvaluations bounds candidate evaluations of the whole pass.
 	MaxEvaluations int `json:"maxEvaluations"`
+	// NativeBusMinMembers: a complete virtual bus lane with at least this
+	// many members is also drawn as a native bus primitive (drawing only;
+	// members keep wire + label taps). 0 = no native buses by default.
+	NativeBusMinMembers int `json:"nativeBusMinMembers"`
 }
 
 // AutoChoice records why `auto` picked a preset.
@@ -75,14 +79,14 @@ var defaultGroupWeights = map[string]float64{GroupWiring: 0.5, GroupLayout: 0.3,
 var Profiles = map[string]Profile{
 	"functional": {Name: "functional", Weight: 0.05, GridUnits: 5, TargetGrid: 5, GridBlend: 0, AlignTol: 5, NearMissTol: 20,
 		LongWire: 800, LongCrossings: 3, ShortLabel: 80,
-		Generate:      GenerateProfile{JunctionClearance: 10, BendCost: 10, CrossCost: 40, LabelSplit: true, BusPitch: 10, AlignMove: 0, MaxEvaluations: 3000},
+		Generate:      GenerateProfile{JunctionClearance: 10, BendCost: 10, CrossCost: 40, LabelSplit: true, BusPitch: 10, AlignMove: 0, MaxEvaluations: 3000, NativeBusMinMembers: 0},
 		MetricWeights: map[string]float64{"L3": 0.5, "L4": 0.5, "L7": 0.5, "W8": 0.5, "N3": 0.5}},
 	"balanced": {Name: "balanced", Weight: 0.10, GridUnits: 5, TargetGrid: 10, GridBlend: 0.3, AlignTol: 2, NearMissTol: 15,
 		LongWire: 600, LongCrossings: 2, ShortLabel: 120,
-		Generate: GenerateProfile{JunctionClearance: 10, BendCost: 20, CrossCost: 80, LabelSplit: true, BusPitch: 10, AlignMove: 20, MaxEvaluations: 6000}},
+		Generate: GenerateProfile{JunctionClearance: 10, BendCost: 20, CrossCost: 80, LabelSplit: true, BusPitch: 10, AlignMove: 20, MaxEvaluations: 6000, NativeBusMinMembers: 3}},
 	"precision": {Name: "precision", Weight: 0.20, GridUnits: 5, TargetGrid: 10, GridBlend: 0.6, AlignTol: 0.5, NearMissTol: 10,
 		LongWire: 400, LongCrossings: 1, ShortLabel: 150,
-		Generate:      GenerateProfile{JunctionClearance: 10, BendCost: 30, CrossCost: 150, LabelSplit: true, BusPitch: 10, AlignMove: 40, MaxEvaluations: 12000},
+		Generate:      GenerateProfile{JunctionClearance: 10, BendCost: 30, CrossCost: 150, LabelSplit: true, BusPitch: 10, AlignMove: 40, MaxEvaluations: 12000, NativeBusMinMembers: 2},
 		MetricWeights: map[string]float64{"W1": 1.5, "W2": 1.5, "W3": 1.5, "L2": 1.5, "L3": 1.5, "N3": 1.5}},
 }
 
@@ -170,6 +174,9 @@ func (p *Profile) Validate() error {
 	}
 	if g.AlignMove < 0 || g.AlignMove > 100 || math.Mod(g.AlignMove, 5) != 0 {
 		return fmt.Errorf("generate.alignMoveUnits must be a multiple of 5 in 0…100")
+	}
+	if g.NativeBusMinMembers != 0 && (g.NativeBusMinMembers < 2 || g.NativeBusMinMembers > 64) {
+		return fmt.Errorf("generate.nativeBusMinMembers must be 0 (off) or 2…64")
 	}
 	if g.MaxEvaluations < 0 || g.MaxEvaluations > 200000 {
 		return fmt.Errorf("generate.maxEvaluations outside 0…200000")

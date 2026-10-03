@@ -245,6 +245,9 @@ func powerLayoutContentObstacles(plan *powerLayoutPlan) []layoutBBox {
 		// A symmetric radius incorrectly doubles the port's reserved length.
 		boxes = append(boxes, schTerminalMarkerBoxes(f)...)
 	}
+	for _, b := range plan.Buses {
+		boxes = append(boxes, schNativeBusObstacles(b)...)
+	}
 	return boxes
 }
 
