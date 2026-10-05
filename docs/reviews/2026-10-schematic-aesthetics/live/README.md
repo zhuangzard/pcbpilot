@@ -84,3 +84,4 @@ pcbpilot sch list --project $P --page $D --stay --include-pins --include-bbox --
 - 同时暴露两处缺陷并已修：apply 在 create 失败时仍报 `status: applied`（现为 `failed`）；dev.2 连接器打包早于线段集合核对修复，单段反向回读仍报 unverified（dev.3 带上修复）。
 - 规则调整：原生总线只画**带序号的组**（D0..D7 → `D[0:7]`）；SPI/I2C/UART/SDIO 等协议组没有 NAME0..NAMEn 成员，按 `[a:b]` 命名会暗示不存在的成员网，因此保持虚拟标签泳道并写明原因；`sch bus create` 与 apply 在写入前拒绝非 `NAME[a:b]` 名称。
 - P1 没有带序号的组，`apply` 全链路（日志/替换/保存重载/回滚）仍为 **offline-verified**；总线图元本身（create/readback/delete）为 live-verified。
+- 复测（connector 0.7.1-dev.3）：`TBUS[0:7]` 两分支 create → `verified: true`（回读往返折线按线段集合核对通过）；非 `NAME[a:b]` 名称在写入前被 CLI 拒绝；按 ID 删除 → 保存 → 重载 → 0 条；页面 51 器件 / 126 导线段与基线逐 ID、逐坐标一致。
