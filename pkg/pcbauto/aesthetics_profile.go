@@ -47,6 +47,12 @@ type AesProfile struct {
 	// completion, DRC, finding counts, vias and over-budget IR drop are
 	// never traded. At most AesElectricalTol.
 	ElectricalTol float64 `json:"electricalTolerance"`
+	// PlacementViaAllowance is how many vias the placement stage may add
+	// over the placement without it, only when the electrical group score
+	// does not drop (aesthetics_tolerance.go; the beautify gate adds none).
+	// At most AesPlacementViaAllowance; a style may lower a preset's, never
+	// raise it.
+	PlacementViaAllowance int `json:"placementViaAllowance"`
 	// Auto is set when the profile was chosen by the complexity index.
 	Auto *AesAuto `json:"auto,omitempty"`
 }
@@ -65,15 +71,16 @@ var AesProfiles = map[string]AesProfile{
 	// area; loose tolerances so near-aligned is good enough.
 	"functional": {Name: "functional", Weight: 0.05, AlignTolMil: 4, NearMissTolMil: 20, PlacementGridMil: 5, GridBlend: 0,
 		MetricWeights: map[string]float64{"P2": 0.5, "P4": 0.5, "P9": 0.5, "R5": 0.5, "R6": 0.5, "R7": 0.5}},
-	// (functional trades no electrical sub-score: ElectricalTol 0.)
+	// (functional trades no electrical sub-score and adds no via:
+	// ElectricalTol 0, PlacementViaAllowance 0.)
 	// Default. Reproduces the Phase A baseline (baseline.md) exactly.
 	"balanced": {Name: "balanced", Weight: 0.10, AlignTolMil: 2, NearMissTolMil: 15, PlacementGridMil: 25, GridBlend: 0.3,
-		Slack: AesSlack{WirelengthPct: 2}, ElectricalTol: AesElectricalTol},
+		Slack: AesSlack{WirelengthPct: 2}, ElectricalTol: AesElectricalTol, PlacementViaAllowance: AesPlacementViaAllowance},
 	// "German / obsessive" tidiness: 25 mil grid, tight alignment, symmetry
 	// required when detected; may spend +5 % wire, +3 % area and 4 vias.
 	"precision": {Name: "precision", Weight: 0.20, AlignTolMil: 1, NearMissTolMil: 10, PlacementGridMil: 25, GridBlend: 1, SymmetryRequired: true,
 		MetricWeights: map[string]float64{"P1": 1.5, "P3": 1.5, "P4": 2, "P9": 1.5, "R1": 1.5, "R2": 1.5, "R3": 1.5},
-		Slack:         AesSlack{WirelengthPct: 5, AreaPct: 3, ExtraVias: 4}, ElectricalTol: AesElectricalTol},
+		Slack:         AesSlack{WirelengthPct: 5, AreaPct: 3, ExtraVias: 4}, ElectricalTol: AesElectricalTol, PlacementViaAllowance: AesPlacementViaAllowance},
 }
 
 // DefaultAesProfile is the profile used when none is selected.
@@ -147,6 +154,7 @@ func (p *AesProfile) Validate() error {
 	chk(p.Slack.AreaPct >= 0 && p.Slack.AreaPct <= 10, "slack.areaPct %.3g outside [0, 10]", p.Slack.AreaPct)
 	chk(p.Slack.ExtraVias >= 0 && p.Slack.ExtraVias <= 20, "slack.extraVias %d outside [0, 20]", p.Slack.ExtraVias)
 	chk(p.ElectricalTol >= 0 && p.ElectricalTol <= AesElectricalTol, "electricalTolerance %.3g outside [0, %.1f]: an aesthetics stage may trade at most %.1f point per electrical sub-score", p.ElectricalTol, AesElectricalTol, AesElectricalTol)
+	chk(p.PlacementViaAllowance >= 0 && p.PlacementViaAllowance <= AesPlacementViaAllowance, "placementViaAllowance %d outside [0, %d]: the placement aesthetics stage may add at most %d via", p.PlacementViaAllowance, AesPlacementViaAllowance, AesPlacementViaAllowance)
 	if len(errs) > 0 {
 		sort.Strings(errs)
 		return fmt.Errorf("aesthetics profile %q: %s", p.Name, strings.Join(errs, "; "))
@@ -169,7 +177,7 @@ var aesHardTokens = []struct {
 // aesStyleKeys are the only keys a style object may carry.
 var aesStyleKeys = map[string]bool{"profile": true, "base": true, "weight": true, "metricWeights": true, "alignTolMil": true,
 	"nearMissTolMil": true, "placementGridMil": true, "gridBlend": true, "symmetryRequired": true, "slack": true,
-	"electricalTolerance": true}
+	"electricalTolerance": true, "placementViaAllowance": true}
 var aesSlackKeys = map[string]bool{"wirelengthPct": true, "areaPct": true, "extraVias": true}
 
 // ParseAesStyle reads a style document: either a pcbpilot.project.json
@@ -181,10 +189,12 @@ var aesSlackKeys = map[string]bool{"wirelengthPct": true, "areaPct": true, "extr
 //	 "alignTolMil": 1.5, "nearMissTolMil": 10, "placementGridMil": 25,
 //	 "gridBlend": 0.5, "symmetryRequired": true,
 //	 "slack": {"wirelengthPct": 3, "areaPct": 1, "extraVias": 2},
-//	 "electricalTolerance": 0.2}
+//	 "electricalTolerance": 0.2, "placementViaAllowance": 0}
 //
 // Any key naming a hard constraint (clearance, width, via, creepage, drc,
 // completion …) is rejected with its tier; unknown keys are rejected too.
+// placementViaAllowance may lower the base preset's allowance, never raise
+// it (functional stays at 0).
 // The returned profile has Name "auto" (resolve with AutoAesProfile) when
 // the document asks for it.
 func ParseAesStyle(raw []byte) (AesProfile, error) {
@@ -215,6 +225,7 @@ func ParseAesStyle(raw []byte) (AesProfile, error) {
 		SymmetryRequired *bool              `json:"symmetryRequired"`
 		Slack            *AesSlack          `json:"slack"`
 		ElectricalTol    *float64           `json:"electricalTolerance"`
+		ViaAllowance     *int               `json:"placementViaAllowance"`
 	}
 	dec := json.NewDecoder(bytes.NewReader(obj))
 	dec.DisallowUnknownFields()
@@ -248,6 +259,12 @@ func ParseAesStyle(raw []byte) (AesProfile, error) {
 	set(&p.PlacementGridMil, doc.PlacementGridMil)
 	set(&p.GridBlend, doc.GridBlend)
 	set(&p.ElectricalTol, doc.ElectricalTol)
+	if v := doc.ViaAllowance; v != nil {
+		if *v > p.PlacementViaAllowance {
+			return AesProfile{}, fmt.Errorf("aesthetics profile %q: placementViaAllowance %d raises the %s preset's %d: a style may only lower it", name, *v, p.Name, p.PlacementViaAllowance)
+		}
+		p.PlacementViaAllowance, custom = *v, true
+	}
 	if doc.SymmetryRequired != nil {
 		p.SymmetryRequired, custom = *doc.SymmetryRequired, true
 	}

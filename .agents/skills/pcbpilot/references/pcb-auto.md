@@ -387,9 +387,16 @@ pcbpilot pcb check --project <工程>
   **functional 为 0**（布局复核只留 0.05 分舍入，beautify 一点不让、电源网原始压降也不许增加）。`--style-file`
   的 `electricalTolerance` 只能在 [0, 0.5] 内调低，不能调高。
 - **永不交换（零容差）**：安全（隔离/爬电/间隙发现与不可行跨接、板边铜距——含高压板边带与制造边距、过孔电流不足、
-  安全门、交付阻断项、可交付结论）；布通率、断连、平面开路、DRC；SI / 差分 / 高速 / 隔离**发现数**；**过孔数不许增加**；
+  安全门、交付阻断项、可交付结论）；布通率、断连、平面开路、DRC；SI / 差分 / 高速 / 隔离**发现数**；**过孔数**（见下条）；
   窄于电流需要的铜；电源网原始压降**不得超出预算**且超预算/开路网数不增加——预算内的压降上升按 ir-drop 分走 0.5 分容差，
   并作为交换（mV）报告。
+- **过孔额度（2026-10-03 用户决定）**：**布局美观阶段**（布线复核及其整条回退阶梯：完整 → 固定附近重跑 → 只落格 →
+  严格只落格）相对“无美观阶段”的布局**最多多 1 个过孔**，且**仅当电气组分（electrical group）一点不降**时才行；每个子项
+  仍各自受 0.5 分容差。多 2 个、或多 1 个但组分下降 → 拒，落到下一级。**beautify 闸门一个过孔都不许加**；functional
+  不给额度。唯一定义 `pcbauto.AesPlacementViaAllowance = 1` 与风格档字段 `placementViaAllowance`（balanced/precision 1，
+  functional 0；`--style-file` 只能调低、不能高于所选基档）。用掉的额度和其它交换一样报告：
+  `traded: vias +1 (83 → 84, ≤1 allowance, electrical group 92.74 → 93.27)`（JSON `item: vias, unit: vias, groupFrom/groupTo`），
+  `placement.aesthetics.placementViaAllowance` 记该次额度。
 - **每一笔交换都写出来，绝不静默**：`plan.json` 的 `placement.aesthetics.electricalTrades` / `result.route.beautify.electricalTrades`
   （`item/from/to/tolerance/unit`）、`placement.notes` 与布线 notes（如 `traded: decap loop −0.08 (82.48 → 82.40, ≤0.5 tolerance)`，
   没交换时写 `no electrical item traded`）、`report.md` 第 4/5 节各一行、`report design` 第 6B 章“美观阶段交换的电气子项”。
@@ -415,8 +422,8 @@ pcbpilot pcb check --project <工程>
   只保留让 symCost 下降且守护全过的步。不进全局退火（避免改变电气布局的平衡）。
 - **布线复核（逐级回退）**：`PlaceThenRoute` / 布局↔布线闭环把每个候选布局（含差分走廊 A/B 的两个变体）
   **先**和无美观阶段的 v0.7 布局各布一次：完整美观版只有在零容差各项（安全、交付、布通、平面开路、DRC、
-  SI/差分/高速/隔离发现数、过孔数、超预算压降，见上节“电气子项容差”）都不差、且**每个电气子项**下降不超过风格档
-  容差（balanced/precision 0.5 分、functional 0.05 分舍入）时保留，交换的子项逐项写进 `routedGuard` 与
+  SI/差分/高速/隔离发现数、超预算压降，见上节“电气子项容差”）都不差、过孔至多多 1 个且此时电气组分不降
+  （functional 不多）、且**每个电气子项**下降不超过风格档容差（balanced/precision 0.5 分、functional 0.05 分舍入）时保留，交换的子项逐项写进 `routedGuard` 与
   `electricalTrades`；否则把变差项背后的器件
   （热环→电源模块，去耦环→去耦电容，ESD 支线→保护件，差分/高速→对上的件，未布通/DRC→所在器件）及其
   250 mil 内的件固定，重跑一次美观阶段再比；仍差再布“只落格”版（functional 档：等价折叠 + 落格），

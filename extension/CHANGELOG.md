@@ -28,6 +28,23 @@ No connector change (the existing `schematic.bus.list/create/delete` actions are
   labelled. `sch layout-render` draws buses (thick line + name); frames/content bounds include them.
 - Evidence: `docs/reviews/2026-10-schematic-aesthetics/phaseB/` (synthetic-bus-lane after preview), offline tests incl.
   a fake host returning the flat out-and-back readback; live procedure in `.../live/README.md` (not yet run).
+### Aesthetics placement via allowance (user decision 2026-10-03, refines option B)
+
+No connector change; offline CLI only.
+
+- **The placement aesthetics stage may add one via**: the routed guard and every rung of its fallback ladder (full →
+  held-back rerun → grid-only → strict grid-only) may end with at most `AesPlacementViaAllowance = 1` via more than the
+  no-stage placement, and only when the electrical **group** score does not drop at all (each sub-score still within the
+  0.5 tolerance). +2 vias, or +1 with a lower group, is refused (`vias 85 > 83 (+2 > 1 allowance)`,
+  `vias 84 > 83 (+1 within the 1 allowance needs the electrical group not to drop: …)`) and the ladder moves on.
+- **Shared judge + profile table**: `aesJudgeOpt.ViaAllowance` in `aesJudge`; profile field `placementViaAllowance`
+  (balanced / precision 1, functional 0). A `--style-file` may lower it, never raise it above its base preset.
+- **Still zero**: the beautify gate adds no via (the allowance is ignored on the same-layout judge); safety, completion,
+  DRC, plane-open, finding counts and IR over budget unchanged.
+- **Reported like every trade**: `traded: vias +1 (83 → 84, ≤1 allowance, electrical group 92.74 → 93.27)` in the guard
+  note, `placement.aesthetics.electricalTrades` (`item: vias`, `unit: vias`, `groupFrom` / `groupTo`) and
+  `placement.aesthetics.placementViaAllowance`, `report.md` §4 and `report design` §6B.
+- Measured: see baseline.md §13.7.
 
 ### Aesthetics electrical tolerance (option B, user decision 2026-10-02)
 

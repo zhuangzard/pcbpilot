@@ -703,7 +703,10 @@ ESD 支线、RF 馈线、IR 压降分、差分分、高速分……）——美�
 每个子项各降至多 `AesElectricalTol = 0.5` 分（风格档字段 `electricalTolerance`：balanced/precision 0.5、functional 0），
 用来吸收路由对 2–5 mil 布局扰动的混沌响应；每笔交换都写进结果 notes、JSON（`electricalTrades`）与 report.md，绝不静默。
 **永不交换**：第 1 层全部（隔离/爬电/间隙发现、高压板边带、过孔电流、可交付结论）、第 3–4 层（DRC、布通、平面开路）、
-SI/差分/隔离发现**数**、过孔数（不增）、窄于电流的铜、超出预算的原始 IR 压降（预算内的上升按 IR 分走容差并报告）。
+SI/差分/隔离发现**数**、窄于电流的铜、超出预算的原始 IR 压降（预算内的上升按 IR 分走容差并报告）。
+**过孔数**：beautify 不增；布局美观阶段（布线复核及回退阶梯）最多 +1（`AesPlacementViaAllowance = 1`，风格档字段
+`placementViaAllowance`：balanced/precision 1、functional 0，style 文件只能调低），且仅当电气**组分**不降（2026-10-03
+用户决定）；用掉的额度作为交换报告（`vias +1 (83 → 84, ≤1 allowance, electrical group …)`）。
 容差不改变层级顺序：它是有界、可审计的余量，不是把美观提到电气之上。流程契约测试
 `TestFlowContract`（`internal/app/flow_contract_test.go`）保护 1–4 层的研究步骤仍在流程中且输出不变。
 

@@ -110,21 +110,21 @@ func (c *ctx) buildAesthetics() {
 		s.Exemptions = append(s.Exemptions, KV{e.Kind + "（" + e.Metrics + "）", sprintf("%d 项", len(e.Items)), e.Why})
 	}
 	if pl := c.in.Plan; pl != nil {
-		zero := "安全（隔离/爬电/间隙、高压板边带、过孔电流、可交付结论）、布通、平面开路、DRC、SI/差分/隔离发现数、过孔数（不增）、超预算的原始压降：零容差"
-		row := func(stage string, tol float64, ts []pcbauto.AesTrade) {
+		zero := "安全（隔离/爬电/间隙、高压板边带、过孔电流、可交付结论）、布通、平面开路、DRC、SI/差分/隔离发现数、超预算的原始压降：零容差"
+		row := func(stage string, tol float64, ts []pcbauto.AesTrade, vias string) {
 			v := "无"
 			if len(ts) > 0 {
 				v = pcbauto.AesTradesText(ts)
 			}
-			s.Trades = append(s.Trades, KV{sprintf("%s（每项容差 %s 分）", stage, f2(tol)), v, zero})
+			s.Trades = append(s.Trades, KV{sprintf("%s（每项容差 %s 分）", stage, f2(tol)), v, vias + "；" + zero})
 		}
 		if pl.Placement != nil && pl.Placement.Aesthetics != nil && pl.Placement.Aesthetics.Guard != "" {
 			a := pl.Placement.Aesthetics
-			row("布局美观阶段", a.ElectricalTol, a.Trades)
+			row("布局美观阶段", a.ElectricalTol, a.Trades, sprintf("过孔数至多 +%d 且电气组分不降", a.ViaAllowance))
 		}
 		if pl.Result != nil && pl.Result.Route != nil && pl.Result.Route.Beautify != nil && pl.Result.Route.Beautify.Kept {
 			bs := pl.Result.Route.Beautify
-			row("布线美化", bs.ElectricalTol, bs.Trades)
+			row("布线美化", bs.ElectricalTol, bs.Trades, "过孔数不增")
 		}
 	}
 	for _, t := range pcbauto.ConstraintPriority {

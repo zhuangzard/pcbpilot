@@ -2,6 +2,7 @@ package pcbauto
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -186,5 +187,124 @@ func TestAesTolReportedInMarkdown(t *testing.T) {
 	}
 	if !strings.Contains(md, "布线美化电气子项交换") || !strings.Contains(md, "：无") {
 		t.Errorf("beautify no-trade line missing from report.md:\n%s", md)
+	}
+}
+
+// placementOpt is the routed guard's judge at a profile.
+func placementOpt(name string) aesJudgeOpt {
+	p, _ := AesProfileByName(name)
+	return aesJudgeOpt{Tol: p.ElectricalTol, Round: aesScoreRound, ViaAllowance: p.PlacementViaAllowance}
+}
+
+// User decision 2026-10-03: the placement stage may add one via when the
+// electrical group does not drop; reported as a trade.
+func TestAesViaAllowanceAcceptsPlusOneEqualOrBetterGroup(t *testing.T) {
+	for _, prof := range []string{"balanced", "precision"} {
+		for _, dg := range []float64{0, 0.53} { // equal, better
+			a := tolFacts()
+			a.vias++
+			a.electrical += dg
+			why, trades := aesJudge(a, tolFacts(), placementOpt(prof))
+			if why != "" {
+				t.Fatalf("%s group %+g: +1 via refused: %s", prof, dg, why)
+			}
+			if len(trades) != 1 || trades[0].Item != "vias" || trades[0].Unit != "vias" {
+				t.Fatalf("%s: trades %+v, want the via trade", prof, trades)
+			}
+			s := AesTradesText(trades)
+			want := fmt.Sprintf("vias +1 (20 → 21, ≤1 allowance, electrical group 85.00 → %.2f)", 85+dg)
+			if s != want {
+				t.Errorf("trade text %q, want %q", s, want)
+			}
+		}
+	}
+	// With an item traded inside the 0.5 tolerance too: both reported.
+	a := tolFacts()
+	a.vias++
+	a.items["decap-loop"] -= 0.3
+	a.items["hot-loop"] += 0.5
+	why, trades := aesJudge(a, tolFacts(), placementOpt("balanced"))
+	if why != "" || len(trades) != 2 {
+		t.Fatalf("+1 via with a 0.3 item trade: %q %+v", why, trades)
+	}
+}
+
+func TestAesViaAllowanceRejectsLowerGroup(t *testing.T) {
+	a := tolFacts()
+	a.vias++
+	a.electrical -= 0.01 // within the 0.5 item tolerance, but the group drops
+	why, _ := aesJudge(a, tolFacts(), placementOpt("balanced"))
+	if !strings.HasPrefix(why, "vias 21 > 20") || !strings.Contains(why, "electrical group not to drop") {
+		t.Errorf("+1 via with a lower group: why %q", why)
+	}
+	// Without the extra via the same 0.01 group drop is accepted.
+	a.vias--
+	if why, _ := aesJudge(a, tolFacts(), placementOpt("balanced")); why != "" {
+		t.Errorf("0.01 group drop without a via refused: %s", why)
+	}
+}
+
+func TestAesViaAllowanceRejectsPlusTwo(t *testing.T) {
+	a := tolFacts()
+	a.vias += 2
+	a.electrical += 3
+	why, _ := aesJudge(a, tolFacts(), placementOpt("precision"))
+	if !strings.HasPrefix(why, "vias 22 > 20") || !strings.Contains(why, "+2 > 1 allowance") {
+		t.Errorf("+2 vias: why %q", why)
+	}
+}
+
+// The beautify gate (same placement) adds no via, whatever the allowance.
+func TestAesViaAllowanceBeautifyRejectsPlusOne(t *testing.T) {
+	a := tolFacts()
+	a.vias++
+	a.electrical += 1
+	o := balancedOpt(0)
+	o.ViaAllowance = AesPlacementViaAllowance
+	if why, _ := aesJudge(a, tolFacts(), o); why != "vias 21 > 20" {
+		t.Errorf("beautify +1 via: why %q", why)
+	}
+}
+
+// Functional stays strict; a style lowers the allowance, never raises it.
+func TestAesViaAllowanceFunctionalAndStyle(t *testing.T) {
+	a := tolFacts()
+	a.vias++
+	a.electrical += 1
+	if why, _ := aesJudge(a, tolFacts(), placementOpt("functional")); why != "vias 21 > 20" {
+		t.Errorf("functional +1 via: why %q", why)
+	}
+	want := map[string]int{"functional": 0, "balanced": 1, "precision": 1}
+	for n, w := range want {
+		if p, _ := AesProfileByName(n); p.PlacementViaAllowance != w {
+			t.Errorf("%s allowance %d, want %d", n, p.PlacementViaAllowance, w)
+		}
+	}
+	if AesPlacementViaAllowance != 1 {
+		t.Errorf("AesPlacementViaAllowance %d, the user's decision is 1", AesPlacementViaAllowance)
+	}
+	if p, err := ParseAesStyle([]byte(`{"profile":"custom","base":"balanced","placementViaAllowance":0}`)); err != nil || p.PlacementViaAllowance != 0 || p.Name != "custom" {
+		t.Errorf("lowered to 0: %+v %v", p.PlacementViaAllowance, err)
+	}
+	for _, doc := range []string{
+		`{"profile":"custom","base":"functional","placementViaAllowance":1}`,
+		`{"profile":"custom","base":"balanced","placementViaAllowance":2}`,
+		`{"profile":"custom","base":"balanced","placementViaAllowance":-1}`,
+	} {
+		if _, err := ParseAesStyle([]byte(doc)); err == nil {
+			t.Errorf("%s accepted", doc)
+		}
+	}
+}
+
+// report.md prints a used via allowance like any other trade.
+func TestAesViaAllowanceReportedInMarkdown(t *testing.T) {
+	tr := []AesTrade{{Item: "vias", From: 83, To: 84, Tolerance: 1, Unit: "vias", GroupFrom: 92.74, GroupTo: 93.27}}
+	r := &Report{Placement: &PlaceResult{Aesthetics: &AesPlaceReport{Profile: "balanced", ElectricalTol: 0.5, ViaAllowance: 1, Guard: "kept", Trades: tr}}, Result: &Result{Route: &RouteResult{}}}
+	var buf bytes.Buffer
+	r.WriteMarkdown(&buf)
+	md := buf.String()
+	if !strings.Contains(md, "vias +1 (83 → 84, ≤1 allowance, electrical group 92.74 → 93.27)") || !strings.Contains(md, "过孔至多 +1 且电气组分不降") {
+		t.Errorf("via trade missing from report.md:\n%s", md)
 	}
 }

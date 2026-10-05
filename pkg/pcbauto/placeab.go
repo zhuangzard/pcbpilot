@@ -203,18 +203,20 @@ func PlaceThenRoute(ctx context.Context, b *Board, an *Analysis, c *Circuit, m *
 // poses it had before the stage, and the aesthetic one is kept only when it
 // routes no worse on every zero-tolerance count — safety (gates, isolation,
 // board edge, via current, blockers, deliverability), completion, open
-// plane connections, DRC, SI / pair / high-speed finding counts, vias,
-// copper narrower than its current, power nets over their IR budget — and
-// lowers no electrical item of the joint score by more than the profile's
-// ElectricalTol (aesthetics_tolerance.go; never below the 0.05 rounding of
-// the report). Every item it does lower is reported as a trade. Otherwise
-// the board rolls back to the next rung, and the report says why.
+// plane connections, DRC, SI / pair / high-speed finding counts, power
+// nets over their IR budget — adds at most the profile's
+// PlacementViaAllowance vias (1; only when the electrical group does not
+// drop) and lowers no electrical item of the joint score by more than the
+// profile's ElectricalTol (aesthetics_tolerance.go; never below the 0.05
+// rounding of the report). Every item it does lower, and a used via
+// allowance, is reported as a trade. Otherwise the board rolls back to the
+// next rung, and the report says why.
 
 // aesRoutedWorse names the first count on which the aesthetic variant routes
-// worse than the raw one beyond the tolerance tol ("" = acceptable), and
-// the electrical trades it makes within it.
-func aesRoutedWorse(aes, raw *abVariant, tol float64) (string, []AesTrade) {
-	return aesJudge(aes.facts(), raw.facts(), aesJudgeOpt{Tol: tol, Round: aesScoreRound})
+// worse than the raw one beyond the tolerance tol and the via allowance
+// allow ("" = acceptable), and the electrical trades it makes within them.
+func aesRoutedWorse(aes, raw *abVariant, tol float64, allow int) (string, []AesTrade) {
+	return aesJudge(aes.facts(), raw.facts(), aesJudgeOpt{Tol: tol, Round: aesScoreRound, ViaAllowance: allow})
 }
 
 // aesHoldRadius is how far around a regressed item the held-back rerun
@@ -356,7 +358,7 @@ func aesGuard(ctx context.Context, b *Board, an *Analysis, c *Circuit, v *abVari
 	desc := func(x *abVariant) string {
 		return fmt.Sprintf("%.1f%%, plane open %d, DRC %d, vias %d, electrical %.1f, gates %d", x.out.Route.Stats.Completion, x.js.PlaneOpen, len(x.out.DRC.Violations), len(x.out.Route.Vias), x.js.Groups["electrical"], len(x.js.Gates))
 	}
-	tol := ar.ElectricalTol
+	tol, allow := ar.ElectricalTol, ar.ViaAllowance
 	// traded renders the electrical trades of a kept rung (never silent).
 	traded := func(ts []AesTrade) string {
 		if len(ts) == 0 {
@@ -382,11 +384,11 @@ func aesGuard(ctx context.Context, b *Board, an *Analysis, c *Circuit, v *abVari
 		ar.Guard = "kept unverified: routing the placement without the aesthetics stage failed (" + err.Error() + ")"
 		return v
 	}
-	why, trades := aesRoutedWorse(v, raw, tol)
+	why, trades := aesRoutedWorse(v, raw, tol, allow)
 	if why == "" {
 		v.pose.restore(b)
 		ar.Trades = trades
-		ar.Guard = fmt.Sprintf("kept: routes no worse than without the stage within the %.2g-point electrical tolerance (with %s, without %s)%s", tol, desc(v), desc(raw), traded(trades))
+		ar.Guard = fmt.Sprintf("kept: routes no worse than without the stage within the %.2g-point electrical tolerance and the %d-via allowance (with %s, without %s)%s", tol, allow, desc(v), desc(raw), traded(trades))
 		v.pr.Notes = append(v.pr.Notes, "aesthetics "+ar.Guard)
 		return v
 	}
@@ -398,9 +400,9 @@ func aesGuard(ctx context.Context, b *Board, an *Analysis, c *Circuit, v *abVari
 		local := ar.rerun(hold)
 		if local.rep != nil && local.rep.Moved > 0 {
 			if hv, err := variant(local); err == nil {
-				if hwhy, htr := aesRoutedWorse(hv, raw, tol); hwhy == "" {
+				if hwhy, htr := aesRoutedWorse(hv, raw, tol, allow); hwhy == "" {
 					hr := *local.rep
-					hr.ElectricalTol, hr.Trades = tol, htr
+					hr.ElectricalTol, hr.ViaAllowance, hr.Trades = tol, allow, htr
 					hr.Guard = fmt.Sprintf("kept with %d part(s) near the regression held still: %s; held-back stage %s%s", len(hold), full, desc(hv), traded(htr))
 					hr.raw, hr.lites, hr.rerun = nil, nil, nil
 					hv.pr.Aesthetics = &hr
@@ -424,9 +426,9 @@ func aesGuard(ctx context.Context, b *Board, an *Analysis, c *Circuit, v *abVari
 		if err != nil {
 			continue
 		}
-		if lwhy, ltr := aesRoutedWorse(lv, raw, tol); lwhy == "" {
+		if lwhy, ltr := aesRoutedWorse(lv, raw, tol, allow); lwhy == "" {
 			lr := *lite.rep
-			lr.ElectricalTol, lr.Trades = tol, ltr
+			lr.ElectricalTol, lr.ViaAllowance, lr.Trades = tol, allow, ltr
 			lr.Guard = name + " stage kept: " + full + fmt.Sprintf("; %s %s%s", name, desc(lv), traded(ltr))
 			lr.raw, lr.lites, lr.rerun = nil, nil, nil
 			lv.pr.Aesthetics = &lr

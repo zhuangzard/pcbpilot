@@ -28,7 +28,8 @@ package pcbauto
 // after: PlaceThenRoute / PlaceRoute route the board without this stage too
 // and keep the aesthetic placement only when it routes no worse on every
 // zero-tolerance count and lowers no electrical sub-score by more than the
-// profile's ElectricalTol (aesRoutedWorse, placeab.go; trades reported,
+// profile's ElectricalTol, adding at most PlacementViaAllowance vias
+// (aesRoutedWorse, placeab.go; trades reported,
 // aesthetics_tolerance.go); else the grid-only stage (functional
 // profile, computed here from the same start) is tried, else the v0.7
 // placement (tidyV07, placer.go) stands.
@@ -80,6 +81,10 @@ type AesPlaceReport struct {
 	// (and in-budget raw IR drop) the kept placement made worse within it.
 	ElectricalTol float64    `json:"electricalTolerance"`
 	Trades        []AesTrade `json:"electricalTrades,omitempty"`
+	// ViaAllowance is how many vias the kept placement may add over the
+	// one without the stage (the profile's PlacementViaAllowance; only when
+	// the electrical group does not drop; a used allowance is a trade).
+	ViaAllowance int `json:"placementViaAllowance"`
 	// Strict: the grid snap ran without its quantisation allowance.
 	Strict bool     `json:"strict,omitempty"`
 	Notes  []string `json:"notes,omitempty"`
@@ -210,7 +215,7 @@ func aesPasses(p AesProfile) []string {
 
 // aesthetics runs the stage on the current (legal) placement.
 func (pl *placer) aesthetics(res *PlaceResult, prof AesProfile) {
-	rep := &AesPlaceReport{Profile: prof.Name, Auto: prof.Auto, ElectricalTol: prof.ElectricalTol, Accepted: map[string]int{}, Rejected: map[string]int{}}
+	rep := &AesPlaceReport{Profile: prof.Name, Auto: prof.Auto, ElectricalTol: prof.ElectricalTol, ViaAllowance: prof.PlacementViaAllowance, Accepted: map[string]int{}, Rejected: map[string]int{}}
 	res.Aesthetics = rep
 	pl.rebuildBuckets()
 	st := &aesState{prof: prof, rep: rep, excluded: map[*Part]bool{}, idx: map[*Part]int{}, moved: map[*Part]bool{}}
