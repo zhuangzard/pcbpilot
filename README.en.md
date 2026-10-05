@@ -159,6 +159,15 @@ layer change (or reported), differential pairs are routed as coupled units and c
 placement keeps pair corridors clear, isolation/creepage/edge/via safety fix-ups no longer depend on the time budget
 (otherwise the result is **NOT DELIVERABLE** with reasons), and daemon restarts through the login service are reliable.
 
+## v0.7.1: aesthetics generation (PCB + schematic) and native buses
+
+PCB placement aesthetics (alignment, orientation, pitch, symmetric copies, routed guard) and a post-route beautify pass
+(fan-out rays, pad-axis entries, S-jog removal, grid landing); schematic wire cleanup, long wire → label, virtual bus
+lanes and **native buses** (the host accepts only `NAME[a:b]`, indexed groups only, live-verified on V3 3.2.149).
+Aesthetic trades are bounded and reported (≤0.5 per electrical sub-score, ≤1 extra via in placement); safety,
+completion, DRC and finding counts are never traded. `project inspect-eprj3`, `health.officialCli` and
+`api upstream-diff` absorb format and API knowledge from JLC's official CLI.
+
 ## Install
 
 > **Full setup & usage notes: [Quick Start →](docs/quick-start.md)** — the

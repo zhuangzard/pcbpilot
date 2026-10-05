@@ -1,6 +1,10 @@
 # Changelog
 
-## [Unreleased]
+## [0.7.1] — 2026-10-04
+
+**Aesthetics generation for PCB and schematic, native schematic buses, official-CLI absorption.** Re-import the
+0.7.1 connector (bus API fix and segment-set readback). Safety, electrical correctness, DRC and completion stay above
+aesthetics; every aesthetic trade is bounded (≤0.5 per electrical sub-score, ≤1 via in placement) and reported.
 
 ### Schematic layout draws native buses (user decision 2026-10-03)
 
