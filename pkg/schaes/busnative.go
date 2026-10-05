@@ -17,29 +17,32 @@ import (
 	"strings"
 )
 
-// NativeBusName is the native bus name of a candidate group:
+// NativeBusName is the native bus name of a candidate group, or "" when the
+// group must stay a virtual label lane:
 //
 //   - indexed groups: NAME[a:b] (the candidate's suggested name, e.g. D[0:7]);
-//   - protocol groups: the group name, i.e. the shared prefix when it already
-//     names the protocol (SPI1, UART0, I2C2), PREFIX_KIND otherwise (ESP_UART),
-//     KIND alone when there is no prefix (SPI);
-//   - differential pairs (usb, mipi): "" — kept as parallel pairs, never a bus.
+//   - protocol groups (SPI/I2C/UART/SDIO …) and differential pairs: "". Live on
+//     V3 3.2.149 (2026-10-04) sch_PrimitiveBus.create returns an empty result
+//     for any name without a [a:b] range ("U0_UART" failed, "U0_UART[0:1]"
+//     was created), and a range name would imply member nets NAME0..NAMEn that
+//     a protocol group (U0RXD/U0TXD) does not have. See NativeBusSkipReason.
 func NativeBusName(c BusCandidate) string {
-	switch c.Kind {
-	case "usb", "mipi":
-		return ""
-	case "indexed":
+	if c.Kind == "indexed" && reBusRange.MatchString(c.Suggested) {
 		return c.Suggested
 	}
-	kind := strings.ToUpper(c.Kind)
-	key := strings.Trim(strings.ToUpper(c.Key), "_-")
+	return ""
+}
+
+// NativeBusSkipReason says why a group gets no native bus ("" when it does).
+func NativeBusSkipReason(c BusCandidate) string {
 	switch {
-	case key == "":
-		return kind
-	case strings.Contains(key, kind) || (c.Kind == "qspi" && strings.Contains(key, "SPI")):
-		return key
+	case NativeBusName(c) != "":
+		return ""
+	case c.Kind == "usb" || c.Kind == "mipi":
+		return "differential pair: kept as a parallel pair, never a bus"
+	default:
+		return "non-indexed " + c.Kind + " group: the host requires a NAME[a:b] bus name (live V3 3.2.149), so it stays a virtual label lane"
 	}
-	return key + "_" + kind
 }
 
 var reBusRange = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*?)\[(\d+)(?::|\.\.)(\d+)\]$`)

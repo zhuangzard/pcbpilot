@@ -11,17 +11,22 @@ func TestNativeBusName(t *testing.T) {
 		want string
 	}{
 		{BusCandidate{Kind: "indexed", Key: "D", Suggested: "D[0:7]"}, "D[0:7]"},
-		{BusCandidate{Kind: "spi", Key: "SPI1", Suggested: "SPI1_SPI"}, "SPI1"},
-		{BusCandidate{Kind: "qspi", Key: "FLASH_QSPI", Suggested: "FLASH_QSPI_QSPI"}, "FLASH_QSPI"},
-		{BusCandidate{Kind: "uart", Key: "ESP", Suggested: "ESP_UART"}, "ESP_UART"},
-		{BusCandidate{Kind: "uart", Key: "U0", Suggested: "U0_UART"}, "U0_UART"},
-		{BusCandidate{Kind: "i2c", Key: "", Suggested: "I2C_I2C"}, "I2C"},
-		{BusCandidate{Kind: "spi", Key: "", Suggested: "SPI_SPI"}, "SPI"},
+		{BusCandidate{Kind: "spi", Key: "SPI1", Suggested: "SPI1_SPI"}, ""},
+		{BusCandidate{Kind: "qspi", Key: "FLASH_QSPI", Suggested: "FLASH_QSPI_QSPI"}, ""},
+		{BusCandidate{Kind: "uart", Key: "ESP", Suggested: "ESP_UART"}, ""},
+		{BusCandidate{Kind: "uart", Key: "U0", Suggested: "U0_UART"}, ""},
+		{BusCandidate{Kind: "i2c", Key: "", Suggested: "I2C_I2C"}, ""},
+		{BusCandidate{Kind: "spi", Key: "", Suggested: "SPI_SPI"}, ""},
 		{BusCandidate{Kind: "usb", Key: "USB", Suggested: "USB"}, ""},
 		{BusCandidate{Kind: "mipi", Key: "CSI", Suggested: "CSI_LANES"}, ""},
 	} {
 		if got := NativeBusName(c.cand); got != c.want {
 			t.Errorf("%+v: got %q want %q", c.cand, got, c.want)
+		}
+		// Live V3 3.2.149 (2026-10-04): the host only accepts NAME[a:b];
+		// every group without a native name says why.
+		if c.want == "" && NativeBusSkipReason(c.cand) == "" {
+			t.Errorf("%+v: no skip reason", c.cand)
 		}
 	}
 }
@@ -35,8 +40,9 @@ func TestBusMemberNets(t *testing.T) {
 	if m, ok := BusMemberNets("A[0:2]", cands, nets); !ok || strings.Join(m, ",") != "A_0,A_1,A_2" {
 		t.Fatalf("A[0:2] → %v", m)
 	}
-	if m, ok := BusMemberNets("SPI1", cands, nets); !ok || len(m) != 3 {
-		t.Fatalf("SPI1 → %v", m)
+	// Protocol groups have no native bus name any more (host needs NAME[a:b]).
+	if m, ok := BusMemberNets("SPI1", cands, nets); ok {
+		t.Fatalf("SPI1 must not map to a native bus: %v", m)
 	}
 	if m, ok := BusMemberNets("D[0..5]", cands, nets); !ok || len(m) != 6 || m[5] != "D5" {
 		t.Fatalf("D[0..5] → %v", m)

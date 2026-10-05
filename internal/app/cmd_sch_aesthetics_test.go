@@ -85,9 +85,11 @@ func TestSchBusCreateDryRunValidatesOffline(t *testing.T) {
 			t.Fatalf("accepted %v", bad)
 		}
 	}
+	// Live V3 3.2.149 (2026-10-04): the host returns an empty result for a
+	// name without [a:b], so the CLI refuses it before writing.
 	out, errs, err := runSchCLI(t, "sch", "bus", "create", "--name", "DATA", "--points", "0,0,0,10", "--dry-run")
-	if err != nil || !strings.Contains(out, "NAME[a:b]") {
-		t.Fatalf("unconventional name must warn, not fail: %v %s %s", err, out, errs)
+	if err == nil || !strings.Contains(err.Error(), "NAME[a:b]") {
+		t.Fatalf("a name without [a:b] must fail: %v %s %s", err, out, errs)
 	}
 	out, _, err = runSchCLI(t, "sch", "bus", "delete", "--ids", "b1,b2", "--dry-run")
 	if err != nil || !strings.Contains(out, "schematic.bus.delete") {

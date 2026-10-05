@@ -351,8 +351,14 @@ func (e *aesEngine) planNativeBuses(p *powerLayoutPlan) []SchematicNativeBus {
 		l := &e.lanes[i]
 		c := cands[l.Group]
 		name := schaes.NativeBusName(c)
-		if l.Markers < 2 || name == "" {
-			continue // wired directly / off-page, or a differential pair
+		if l.Markers < 2 {
+			continue // wired directly / off-page
+		}
+		if name == "" {
+			if c.Kind != "usb" && c.Kind != "mipi" {
+				l.Native = &SchematicNativeBusProposal{Name: c.Suggested, Status: "skipped", Reason: schaes.NativeBusSkipReason(c)}
+			}
+			continue
 		}
 		prop := &SchematicNativeBusProposal{Name: name, Status: "skipped"}
 		l.Native = prop

@@ -165,6 +165,9 @@ func validateSchNativeBusShape(b SchematicNativeBus) error {
 	if name == "" || name != b.BusName || len([]rune(name)) > 64 {
 		return fmt.Errorf("bus name %q must be 1…64 characters without surrounding spaces", b.BusName)
 	}
+	if !busNameConvention.MatchString(name) {
+		return fmt.Errorf("bus name %q must be NAME[a:b] (e.g. D[0:7]): the host rejects other names (live V3 3.2.149)", name)
+	}
 	if b.PrimitiveID != "" {
 		return fmt.Errorf("bus %s: a plan must not carry a host primitiveId", name)
 	}

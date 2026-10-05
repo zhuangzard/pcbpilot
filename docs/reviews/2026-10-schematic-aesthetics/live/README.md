@@ -74,3 +74,13 @@ pcbpilot sch list --project $P --page $D --stay --include-pins --include-bbox --
 → 应以 “changed on the page … left untouched” 拒绝。
 
 结果记录：宿主形态与精确版本、connector 版本、每步 JSON（`$W/*.json`）、是否全部符合；V3 与 V4 分别计。
+
+
+## 2026-10-04 布局原生总线 Apply 现场结果（V3 3.2.149，connector 0.7.1-dev.2）
+
+- 第 1–3 步通过：API 四个方法均为 function；P1 基线 0 条总线；候选组只有 `U0_UART`（U0RXD/U0TXD，各有标签）与 USB 差分对（不画总线）。
+- 第 5 步 `apply` 失败：`sch_PrimitiveBus.create` 对名称 `U0_UART` 返回 **empty result**；单段复测 `U0_UART` 同样失败，`U0_UART[0:1]` 成功（5dee0aa5b9309e14，随后按 ID 删除、保存，页面回到 0 条）。
+  **结论：宿主只接受 `NAME[a:b]` 形式的总线名。**
+- 同时暴露两处缺陷并已修：apply 在 create 失败时仍报 `status: applied`（现为 `failed`）；dev.2 连接器打包早于线段集合核对修复，单段反向回读仍报 unverified（dev.3 带上修复）。
+- 规则调整：原生总线只画**带序号的组**（D0..D7 → `D[0:7]`）；SPI/I2C/UART/SDIO 等协议组没有 NAME0..NAMEn 成员，按 `[a:b]` 命名会暗示不存在的成员网，因此保持虚拟标签泳道并写明原因；`sch bus create` 与 apply 在写入前拒绝非 `NAME[a:b]` 名称。
+- P1 没有带序号的组，`apply` 全链路（日志/替换/保存重载/回滚）仍为 **offline-verified**；总线图元本身（create/readback/delete）为 live-verified。

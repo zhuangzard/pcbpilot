@@ -173,6 +173,9 @@ stubs; `sch connect` stays for when you deliberately override the geometry.
   四通结点计入 W3——改成错开的两个 T。T 结点不要落在引脚上、离其他拐点/结点 ≥ 10 units（W5）。
 
 **总线**（`sch bus …`，官方 `sch_PrimitiveBus` @beta，**V3 3.2.149 现场已验证，V4 未验证**；多分支回读为一条往返折线，核对按线段集合）：
+**宿主只接受 `NAME[a:b]` 总线名**（V3 3.2.149 实测：`U0_UART` 返回空结果，`U0_UART[0:1]` 成功）。所以原生总线只画
+**带序号的组**（D0..D7 → `D[0:7]`）；SPI/I2C/UART/SDIO 等协议组保持虚拟标签泳道（报告写明原因），`sch bus create`
+与 `sch bus apply` 在写入前拒绝其他名称。
 
 - 总线只是绘图对象，**不建立也不证明**成员连通；成员连通仍以逐 pin 网表、`sch check` 为准。
 - 扩展 API **没有总线分支（bus entry）图元**：成员用普通正交导线 + 成员名网络标签接入

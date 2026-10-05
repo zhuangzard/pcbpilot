@@ -133,7 +133,9 @@ func buildBusCreatePayload(name string, lines [][]float64, color string, width f
 	}
 	var warnings []string
 	if !busNameConvention.MatchString(name) {
-		warnings = append(warnings, fmt.Sprintf("bus name %q is not the conventional NAME[a:b] form; the host's bus-name grammar is live-unverified", name))
+		// Live V3 3.2.149 (2026-10-04): a name without [a:b] makes
+		// sch_PrimitiveBus.create return an empty result; refuse before writing.
+		return nil, nil, fmt.Errorf("bus name %q must be NAME[a:b] (e.g. D[0:7]): the host rejects other names", name)
 	}
 	payload := map[string]any{"busName": name}
 	if len(lines) == 1 {

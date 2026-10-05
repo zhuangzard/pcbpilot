@@ -647,6 +647,10 @@ func newSchBusApplyCmd(cfg *appConfig, window *string, stdout, stderr io.Writer)
 				return fmt.Errorf("--bus-list is for --dry-run only (live apply reads the page itself)")
 			}
 			rep, err := runSchBusApply(liveSchBusHost{cfg: cfg, window: *window}, plan, journal, rollback)
+			if rep != nil && err != nil && (rep.Status == "applied" || rep.Status == "rolled-back") {
+				// Live 2026-10-04: a failed create still printed "applied".
+				rep.Status = "failed"
+			}
 			if rep != nil {
 				_ = enc.Encode(rep)
 				for _, w := range rep.Warnings {
