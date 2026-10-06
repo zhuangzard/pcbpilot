@@ -39,10 +39,15 @@ type silkTightOpts struct {
 	LineWidth  float64 // project stroke; 0 = leave as is
 	FabMinLine float64 // fab minimum stroke (JLC 0.15 mm = 5.9 mil)
 	ViaOpening bool    // gate: vias are soldermask openings (not tented)
+	// Group labels for what has no own slot: members' footprints within
+	// GroupLink of each other form a group; its one text sits within
+	// GroupMaxDist of the group's box; NoGroups leaves them unresolved.
+	GroupLink, GroupMaxDist float64
+	NoGroups                bool
 }
 
 func defaultSilkTightOpts() silkTightOpts {
-	return silkTightOpts{Gap: 5, MaxDist: 30, PadClear: 6, LabelClear: 2, EdgeClear: 8, FabMinLine: 5.9}
+	return silkTightOpts{Gap: 5, MaxDist: 30, PadClear: 6, LabelClear: 2, EdgeClear: 8, FabMinLine: 5.9, GroupLink: 150, GroupMaxDist: 80}
 }
 
 type silkBox struct{ MinX, MinY, MaxX, MaxY float64 }
@@ -573,36 +578,244 @@ func refsOf(ms []silkLabel) string {
 	return strings.Join(s, ",")
 }
 
-// groupLabel suggests "C21–C24" for a consecutive run, else "R13/R14/R15".
+// groupLabel suggests the group text of ms (see groupText).
 func groupLabel(ms []silkLabel) string {
+	var refs []string
+	for _, m := range ms {
+		refs = append(refs, m.Ref)
+	}
+	return groupText(refs)
+}
+
+// groupText is "C21–C24" when the refs are one prefix with consecutive
+// numbers, else every ref sorted (prefix, number) joined by "/".
+func groupText(refs []string) string {
 	type rn struct {
 		p string
 		n int
+		s string
 	}
 	var rs []rn
-	for _, m := range ms {
-		sm := refPrefixRe.FindStringSubmatch(m.Ref)
-		if sm == nil {
-			return refsOf(ms)
+	for _, r := range refs {
+		if m := refPrefixRe.FindStringSubmatch(r); m != nil && m[0] == r {
+			n, _ := strconv.Atoi(m[2])
+			rs = append(rs, rn{strings.ToUpper(m[1]), n, r})
+		} else {
+			rs = append(rs, rn{r, -1, r})
 		}
-		n, _ := strconv.Atoi(sm[2])
-		rs = append(rs, rn{sm[1], n})
 	}
-	sort.Slice(rs, func(i, j int) bool { return rs[i].n < rs[j].n })
-	consec := true
-	for i := 1; i < len(rs); i++ {
-		if rs[i].p != rs[0].p || rs[i].n != rs[i-1].n+1 {
+	sort.Slice(rs, func(i, j int) bool {
+		if rs[i].p != rs[j].p {
+			return rs[i].p < rs[j].p
+		}
+		return rs[i].n < rs[j].n
+	})
+	consec := len(rs) > 1
+	for i := range rs {
+		if rs[i].n < 0 || rs[i].p != rs[0].p || (i > 0 && rs[i].n != rs[i-1].n+1) {
 			consec = false
 		}
 	}
 	if consec {
-		return fmt.Sprintf("%s%d–%s%d", rs[0].p, rs[0].n, rs[0].p, rs[len(rs)-1].n)
+		return rs[0].s + "–" + rs[len(rs)-1].s
 	}
-	var s []string
+	var out []string
 	for _, r := range rs {
-		s = append(s, fmt.Sprintf("%s%d", r.p, r.n))
+		out = append(out, r.s)
 	}
-	return strings.Join(s, "/")
+	return strings.Join(out, "/")
+}
+
+// groupRefs expands a group label text back to its refs ("" when the text
+// is not one: every part must be a ref or a ref range).
+func groupRefs(text string) []string {
+	var out []string
+	for _, part := range strings.Split(text, "/") {
+		part = strings.TrimSpace(part)
+		if a, b, ok := strings.Cut(strings.ReplaceAll(part, "–", "-"), "-"); ok {
+			ma, mb := refPrefixRe.FindStringSubmatch(a), refPrefixRe.FindStringSubmatch(b)
+			if ma == nil || mb == nil || ma[0] != a || mb[0] != b || !strings.EqualFold(ma[1], mb[1]) {
+				return nil
+			}
+			x, _ := strconv.Atoi(ma[2])
+			y, _ := strconv.Atoi(mb[2])
+			if y < x || y-x > 200 {
+				return nil
+			}
+			for n := x; n <= y; n++ {
+				out = append(out, fmt.Sprintf("%s%d", ma[1], n))
+			}
+			continue
+		}
+		if m := refPrefixRe.FindStringSubmatch(part); m == nil || m[0] != part {
+			return nil
+		}
+		out = append(out, part)
+	}
+	if len(out) < 2 {
+		return nil
+	}
+	return out
+}
+
+// silkGroup is one group label to draw: its text, where, and the
+// designators it replaces (hidden, never deleted).
+type silkGroup struct {
+	Text    string   `json:"text"`
+	Refs    []string `json:"refs"`
+	IDs     []string `json:"ids"`
+	Layer   int      `json:"layer"`
+	Box     silkBox  `json:"box"`
+	Rot     int      `json:"rotation"`
+	Placed  bool     `json:"placed"`
+	Members silkBox  `json:"members"`
+}
+
+// planSilkGroups groups the unresolved labels whose footprints lie within
+// GroupLink of each other and finds each group's text a slot within
+// GroupMaxDist of the group's box (nearest gap first, horizontal then
+// turned 90°). The members' own labels leave the board (hidden).
+func planSilkGroups(labels []silkLabel, sc silkScene, placed []silkPlaced, opt silkTightOpts) ([]silkGroup, []silkPlaced, []string) {
+	un := map[string]bool{}
+	for _, p := range placed {
+		if p.How == "unresolved" {
+			un[p.ID] = true
+		}
+	}
+	var ls []silkLabel
+	charW, chars, hgt := 0.0, 0, 0.0
+	for _, l := range labels {
+		charW += l.Len
+		chars += len([]rune(l.Ref))
+		hgt = math.Max(hgt, l.Hgt)
+		if un[l.ID] {
+			ls = append(ls, l)
+		}
+	}
+	if len(ls) == 0 {
+		return nil, placed, nil
+	}
+	charW /= float64(max(chars, 1))
+	// Union the unresolved labels by footprint distance.
+	parent := make([]int, len(ls))
+	for i := range parent {
+		parent[i] = i
+	}
+	var find func(int) int
+	find = func(i int) int {
+		if parent[i] != i {
+			parent[i] = find(parent[i])
+		}
+		return parent[i]
+	}
+	for i := range ls {
+		for j := i + 1; j < len(ls); j++ {
+			if ls[i].Layer == ls[j].Layer && ls[i].Own.dist(ls[j].Own) <= opt.GroupLink {
+				parent[find(i)] = find(j)
+			}
+		}
+	}
+	byRoot := map[int][]silkLabel{}
+	var roots []int
+	for i := range ls {
+		r := find(i)
+		if byRoot[r] == nil {
+			roots = append(roots, r)
+		}
+		byRoot[r] = append(byRoot[r], ls[i])
+	}
+	// The hidden labels no longer block anything.
+	var keep []silkPlaced
+	for _, p := range placed {
+		if !un[p.ID] {
+			keep = append(keep, p)
+		}
+	}
+	layerOf := map[string]int{}
+	for _, l := range labels {
+		layerOf[l.ID] = l.Layer
+	}
+	var groups []silkGroup
+	var notes []string
+	var back []silkPlaced // single unresolved labels stay as they were
+	single := func(m silkLabel) {
+		back = append(back, silkPlaced{ID: m.ID, Ref: m.Ref, Box: m.Cur, Rot: m.Rot, How: "unresolved"})
+		notes = append(notes, fmt.Sprintf("%s: no legal slot within %.0f mil and no group label fits (label left at (%.1f,%.1f)); leader line not drawn", m.Ref, opt.MaxDist, m.Cur.cx(), m.Cur.cy()))
+	}
+	// try places one group label; a group that does not fit, or whose text
+	// is longer than maxGroupChars, is split along its long axis and retried.
+	var try func(ms []silkLabel)
+	try = func(ms []silkLabel) {
+		if len(ms) < 2 {
+			for _, m := range ms {
+				single(m)
+			}
+			return
+		}
+		g := silkGroup{Text: groupLabel(ms), Layer: ms[0].Layer, Members: ms[0].Own}
+		for _, m := range ms {
+			g.Refs = append(g.Refs, m.Ref)
+			g.IDs = append(g.IDs, m.ID)
+			g.Members = silkBox{math.Min(g.Members.MinX, m.Own.MinX), math.Min(g.Members.MinY, m.Own.MinY), math.Max(g.Members.MaxX, m.Own.MaxX), math.Max(g.Members.MaxY, m.Own.MaxY)}
+		}
+		if len([]rune(g.Text)) <= maxGroupChars {
+			ln := charW * float64(len([]rune(g.Text)))
+		search:
+			for d := opt.Gap; d <= opt.GroupMaxDist; d += 2 {
+				for _, rot := range []int{0, 90} {
+					w, h := ln, hgt
+					if rot == 90 {
+						w, h = h, w
+					}
+					for _, s := range sideSlots(g.Members, w, h, d) {
+						if s.box.dist(g.Members) <= opt.GroupMaxDist && sc.legal(s.box, "", g.Layer, silkBox{}, append(keep, groupPlaced(groups)...), layerOf, opt) {
+							g.Box, g.Rot, g.Placed = s.box, rot, true
+							break search
+						}
+					}
+				}
+			}
+		}
+		if g.Placed {
+			layerOf[fmt.Sprintf("group-%d", len(groups))] = g.Layer
+			groups = append(groups, g)
+			notes = append(notes, fmt.Sprintf("group %q drawn at (%.1f,%.1f); %d designator(s) hidden", g.Text, g.Box.cx(), g.Box.cy(), len(ms)))
+			return
+		}
+		if len(ms) <= 2 {
+			notes = append(notes, fmt.Sprintf("group %q: no slot within %.0f mil of its parts", g.Text, opt.GroupMaxDist))
+			for _, m := range ms {
+				single(m)
+			}
+			return
+		}
+		row := g.Members.w() >= g.Members.h()
+		sort.SliceStable(ms, func(i, j int) bool {
+			if row {
+				return ms[i].Own.cx() < ms[j].Own.cx()
+			}
+			return ms[i].Own.cy() < ms[j].Own.cy()
+		})
+		h := len(ms) / 2
+		try(append([]silkLabel{}, ms[:h]...))
+		try(append([]silkLabel{}, ms[h:]...))
+	}
+	for _, r := range roots {
+		try(byRoot[r])
+	}
+	return groups, append(keep, back...), notes
+}
+
+// maxGroupChars bounds a group label's text ("C27/C46/C72/R60" is 15).
+const maxGroupChars = 24
+
+// groupPlaced turns placed groups into obstacles for the next ones.
+func groupPlaced(gs []silkGroup) []silkPlaced {
+	var out []silkPlaced
+	for i, g := range gs {
+		out = append(out, silkPlaced{ID: fmt.Sprintf("group-%d", i), Ref: g.Text, Box: g.Box})
+	}
+	return out
 }
 
 // silkGate judges the READBACK: every visible designator must keep off
@@ -617,6 +830,7 @@ func silkGate(snap *boardSnapshot, font float64, opt silkTightOpts) gateResult {
 	var bads []bad
 	add := func(sev float64, f string, a ...any) { bads = append(bads, bad{sev, fmt.Sprintf(f, a...)}) }
 	comps := map[string]boardComp{}
+	byRef := map[string]boardComp{}
 	var pads []struct {
 		b     silkBox
 		layer int
@@ -624,6 +838,7 @@ func silkGate(snap *boardSnapshot, font float64, opt silkTightOpts) gateResult {
 	}
 	for _, c := range snap.Components {
 		comps[c.ID] = c
+		byRef[c.Designator] = c
 		for _, p := range c.Pads {
 			pads = append(pads, struct {
 				b     silkBox
@@ -652,9 +867,68 @@ func silkGate(snap *boardSnapshot, font float64, opt silkTightOpts) gateResult {
 			texts = append(texts, t)
 		}
 	}
+	// Group labels ("C21–C24", "R62/R63/R65"): free strings naming refs.
+	type grp struct {
+		text    string
+		box     silkBox
+		members silkBox
+		ok      bool
+	}
+	groupOf := map[string][]grp{}
+	isGroup := map[int]grp{}
+	for i, t := range texts {
+		if t.Kind != "string" {
+			continue
+		}
+		refs := groupRefs(t.Text)
+		if refs == nil {
+			continue
+		}
+		g := grp{text: t.Text, box: silkBox(*t.BBox)}
+		for _, r := range refs {
+			if c, ok := byRef[r]; ok && c.BBox != nil {
+				cb := silkBox{c.BBox.MinX, c.BBox.MinY, c.BBox.MaxX, c.BBox.MaxY}
+				if !g.ok {
+					g.members, g.ok = cb, true
+				} else {
+					g.members = silkBox{math.Min(g.members.MinX, cb.MinX), math.Min(g.members.MinY, cb.MinY), math.Max(g.members.MaxX, cb.MaxX), math.Max(g.members.MaxY, cb.MaxY)}
+				}
+			}
+		}
+		isGroup[i] = g
+		for _, r := range refs {
+			groupOf[r] = append(groupOf[r], g)
+		}
+	}
+	var info []string
+	// A hidden designator of a part with pads must be named by a group
+	// label within GroupMaxDist of its group's parts (hidden, never deleted).
+	for _, t := range snap.Silk {
+		if !t.Hidden || t.Kind != "attribute" || !strings.EqualFold(t.Key, "Designator") || strings.TrimSpace(t.Text) == "" {
+			continue
+		}
+		c, ok := comps[t.CompID]
+		if !ok || len(c.Pads) == 0 || c.BBox == nil {
+			continue
+		}
+		cb := silkBox{c.BBox.MinX, c.BBox.MinY, c.BBox.MaxX, c.BBox.MaxY}
+		covered := ""
+		for _, g := range groupOf[t.Text] {
+			if g.ok && g.box.dist(g.members) <= opt.GroupMaxDist {
+				covered = g.text
+				break
+			}
+		}
+		if covered == "" {
+			add(85, "%s (%.1f,%.1f) designator hidden and named by no group label within %.0f mil", t.Text, cb.cx(), cb.cy(), opt.GroupMaxDist)
+		} else {
+			info = append(info, fmt.Sprintf("%s hidden, named by group label %q", t.Text, covered))
+		}
+	}
 	n := 0
 	for i, t := range texts {
-		if !isVisibleDesignator(t) {
+		g, group := isGroup[i]
+		if !isVisibleDesignator(t) && !group {
 			continue
 		}
 		n++
@@ -695,7 +969,13 @@ func silkGate(snap *boardSnapshot, font float64, opt silkTightOpts) gateResult {
 				add(95, "%s %s crosses the board edge", t.Text, at)
 			}
 		}
-		if c, ok := comps[t.CompID]; ok && c.BBox != nil {
+		if group {
+			if !g.ok {
+				add(70, "group label %q %s names no part on the board", t.Text, at)
+			} else if d := b.dist(g.members); d > opt.GroupMaxDist {
+				add(50+d/10, "group label %q %s is %.1f mil from its parts (max %.0f)", t.Text, at, d, opt.GroupMaxDist)
+			}
+		} else if c, ok := comps[t.CompID]; ok && c.BBox != nil {
 			if d := b.dist(silkBox{c.BBox.MinX, c.BBox.MinY, c.BBox.MaxX, c.BBox.MaxY}); d > opt.MaxDist {
 				add(50+d/10, "%s %s is %.1f mil from its footprint (max %.0f)", t.Text, at, d, opt.MaxDist)
 			}
@@ -708,8 +988,8 @@ func silkGate(snap *boardSnapshot, font float64, opt silkTightOpts) gateResult {
 		}
 	}
 	sort.SliceStable(bads, func(i, j int) bool { return bads[i].sev > bads[j].sev })
-	g := gateResult{Gate: "silkscreen", Pass: len(bads) == 0}
-	g.Detail = fmt.Sprintf("%d designator(s) checked on the readback, %d problem(s); project size %.1f mil, max %.0f mil from the footprint, fab stroke ≥ %.2f mil", n, len(bads), font, opt.MaxDist, opt.FabMinLine)
+	g := gateResult{Gate: "silkscreen", Pass: len(bads) == 0, Info: info}
+	g.Detail = fmt.Sprintf("%d designator / group label(s) checked on the readback, %d hidden designator(s) named by group labels, %d problem(s); project size %.1f mil, max %.0f mil from the footprint, fab stroke ≥ %.2f mil", n, len(info), len(bads), font, opt.MaxDist, opt.FabMinLine)
 	if n == 0 {
 		g.Pass = false
 		g.Detail = "no designator silk read back (pcb.silk.list unavailable?)"
@@ -731,7 +1011,10 @@ type silkTightReport struct {
 	Moved    int          `json:"moved"`
 	Placed   []silkPlaced `json:"placed,omitempty"`
 	Notes    []string     `json:"notes,omitempty"`
-	Gate     gateResult   `json:"gate"`
+	// Groups are the group labels drawn (their members' designators hidden).
+	Groups     []silkGroup `json:"groups,omitempty"`
+	GroupNotes []string    `json:"groupNotes,omitempty"`
+	Gate       gateResult  `json:"gate"`
 }
 
 // runSilkTight plans on the live board dump, applies the plan in two steps
@@ -752,6 +1035,12 @@ func runSilkTight(cfg *appConfig, window string, opt silkTightOpts, rounds int, 
 		labels, sc, font := silkTightInput(snap, opt)
 		rep.FontSize = font
 		placed, notes := planSilkTight(labels, sc, opt)
+		var groups []silkGroup
+		if !opt.NoGroups {
+			var gnotes []string
+			groups, placed, gnotes = planSilkGroups(labels, sc, placed, opt)
+			rep.GroupNotes = append(rep.GroupNotes, gnotes...)
+		}
 		rep.Placed, rep.Notes, rep.Rounds = placed, notes, round
 		byID := map[string]silkLabel{}
 		for _, l := range labels {
@@ -763,12 +1052,16 @@ func runSilkTight(cfg *appConfig, window string, opt silkTightOpts, rounds int, 
 				moves = append(moves, p)
 			}
 		}
-		fmt.Fprintf(stderr, "silk tight round %d: %d of %d designator(s) to move, %d note(s)\n", round, len(moves), len(labels), len(notes))
-		if dryRun || len(moves) == 0 {
+		fmt.Fprintf(stderr, "silk tight round %d: %d of %d designator(s) to move, %d group label(s), %d note(s)\n", round, len(moves), len(labels), len(groups), len(notes))
+		if dryRun {
+			rep.Groups = groups
+			break
+		}
+		if len(moves) == 0 && len(groups) == 0 {
 			break
 		}
 		// Step 1: rotation, size and stroke, batched by identical props.
-		groups := map[string][]string{}
+		batch := map[string][]string{}
 		props := map[string]map[string]any{}
 		for _, p := range moves {
 			l := byID[p.ID]
@@ -786,10 +1079,10 @@ func runSilkTight(cfg *appConfig, window string, opt silkTightOpts, rounds int, 
 				continue
 			}
 			k := fmt.Sprint(pr)
-			groups[k] = append(groups[k], p.ID)
+			batch[k] = append(batch[k], p.ID)
 			props[k] = pr
 		}
-		for k, ids := range groups {
+		for k, ids := range batch {
 			pl := map[string]any{"primitiveIds": ids}
 			for kk, v := range props[k] {
 				pl[kk] = v
@@ -819,6 +1112,39 @@ func runSilkTight(cfg *appConfig, window string, opt silkTightOpts, rounds int, 
 			}
 			rep.Moved++
 		}
+		// Group labels: one string each, then the members' designators
+		// hidden (the attribute, BOM and placement data stay).
+		for _, g := range groups {
+			lw := opt.LineWidth
+			if lw <= 0 {
+				lw = 6
+			}
+			res, err := requestAction(cfg, "pcb.silk.add", window, map[string]any{"text": g.Text, "x": g.Box.MinX, "y": g.Box.MinY,
+				"layer": g.Layer, "fontSize": font, "lineWidth": lw, "rotation": g.Rot})
+			if err != nil {
+				return rep, fmt.Errorf("group label %q: %w", g.Text, err)
+			}
+			id, _ := res.Result["primitiveId"].(string)
+			if bm, ok := res.Result["bbox"].(map[string]any); ok && id != "" {
+				minX, _ := asFloatOK(bm["minX"])
+				minY, _ := asFloatOK(bm["minY"])
+				maxX, _ := asFloatOK(bm["maxX"])
+				maxY, _ := asFloatOK(bm["maxY"])
+				ax, _ := asFloatOK(res.Result["x"])
+				ay, _ := asFloatOK(res.Result["y"])
+				if maxX > minX && maxY > minY {
+					x := g.Box.cx() - (maxX-minX)/2 + (ax - minX)
+					y := g.Box.cy() - (maxY-minY)/2 + (ay - minY)
+					if _, err := requestAction(cfg, "pcb.silk.set", window, map[string]any{"primitiveIds": []string{id}, "x": x, "y": y}); err != nil {
+						return rep, fmt.Errorf("group label %q move: %w", g.Text, err)
+					}
+				}
+			}
+			if _, err := requestAction(cfg, "pcb.silk.set", window, map[string]any{"primitiveIds": g.IDs, "valueVisible": false}); err != nil {
+				return rep, fmt.Errorf("hide %v under group label %q (the connector needs valueVisible support: rebuild and import it, 'make eext'): %w", g.Refs, g.Text, err)
+			}
+			rep.Groups = append(rep.Groups, g)
+		}
 		if snap, err = read(); err != nil {
 			return rep, err
 		}
@@ -841,4 +1167,7 @@ func addSilkTightFlags(c *cobra.Command, o *silkTightOpts, prefix string) {
 	c.Flags().Float64Var(&o.FabMinLine, prefix+"fab-min-line", o.FabMinLine, "fab minimum silk stroke (mil; JLC 0.15 mm)")
 	c.Flags().Float64Var(&o.PadClear, prefix+"pad-clear", o.PadClear, "designator to pad / via / hole clearance (mil; JLC silk-to-pad 0.15 mm)")
 	c.Flags().BoolVar(&o.ViaOpening, prefix+"via-openings", false, "gate: vias are soldermask openings (not tented)")
+	c.Flags().Float64Var(&o.GroupMaxDist, prefix+"group-max-dist", o.GroupMaxDist, "a group label (\"C21–C24\", \"R62/R63/R65\") sits within this of its parts' box (mil)")
+	c.Flags().Float64Var(&o.GroupLink, prefix+"group-link", o.GroupLink, "unplaceable designators whose footprints are within this of each other share one group label (mil)")
+	c.Flags().BoolVar(&o.NoGroups, prefix+"no-groups", false, "never draw group labels / hide designators: report what has no slot")
 }

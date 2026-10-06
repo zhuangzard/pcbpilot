@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.7.2] — 2026-10-06
+
+- `pcb.silk.list` reports each text's `lineWidth` (the silkscreen gate checks the fab stroke).
+- `pcb.silk.set` accepts `valueVisible` for component attributes: `pcb silk-align --tight` hides the
+  designators a group label ("C21–C24") names; the attribute, BOM and placement data stay.
+
 ## [0.7.1] — 2026-10-04
 
 **Aesthetics generation for PCB and schematic, native schematic buses, official-CLI absorption.** Re-import the
