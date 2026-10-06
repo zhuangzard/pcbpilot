@@ -26,8 +26,12 @@ type RequirementReport struct {
 	Classes    int      `json:"classesChanged"`
 	NewClasses int      `json:"classesAdded"`
 	Raised     []string `json:"raised,omitempty"`
-	// NoNeckdown are the DSN classes whose nets allow no neck-down; pass
-	// them to fastroute --no-neckdown-classes.
+	// NoNeckdown are the DSN classes whose nets forbid a neck-down that the
+	// global floor would otherwise allow (widthMil.min = outer > the
+	// narrowest min of any net); pass them to fastroute --no-neckdown-classes.
+	// Nets already at the floor (6 mil signals) are left out: the flag cannot
+	// change their width and only constrains the router (Gas Module v9: 128
+	// of 129 classes listed, routing got harder).
 	NoNeckdown []string `json:"noNeckdownClasses,omitempty"`
 	// MinTraceMil is the narrowest neck-down any net allows (0 = none given).
 	MinTraceMil float64 `json:"minTraceMil"`
@@ -83,7 +87,7 @@ func ApplyNetRequirements(dsn string, reqs map[string]NetRequirement) (string, R
 			want.OuterMil = math.Max(want.OuterMil, r.OuterMil)
 			want.InnerMil = math.Max(want.InnerMil, r.InnerMil)
 			want.ClearanceMil = math.Max(want.ClearanceMil, r.ClearanceMil)
-			if r.MinMil+reqEps < r.OuterMil {
+			if !forbidsNeckdown(r, rep.MinTraceMil) {
 				noNeck = false
 			}
 		}
@@ -124,7 +128,7 @@ func ApplyNetRequirements(dsn string, reqs map[string]NetRequirement) (string, R
 			n := &node{isList: true, List: []*node{{Atom: "class"}, {Atom: cls}, {Atom: name, Quoted: true}}}
 			raiseClass(n, r, inner)
 			add.WriteString("    " + writeSexpr(n) + "\n")
-			if r.MinMil+reqEps >= r.OuterMil {
+			if forbidsNeckdown(r, rep.MinTraceMil) {
 				rep.NoNeckdown = append(rep.NoNeckdown, cls)
 			}
 			rep.NewClasses++
@@ -135,6 +139,12 @@ func ApplyNetRequirements(dsn string, reqs map[string]NetRequirement) (string, R
 	sort.Strings(rep.NoNeckdown)
 	rep.NoNeckdown = slices.Compact(rep.NoNeckdown)
 	return dsn[:ns] + body + dsn[ne:], rep, nil
+}
+
+// forbidsNeckdown: the net may not neck down and its full width is above the
+// global neck-down floor, so the router must be told.
+func forbidsNeckdown(r NetRequirement, floor float64) bool {
+	return r.MinMil+reqEps >= r.OuterMil && r.OuterMil > floor+reqEps
 }
 
 // CheckNetRequirements re-reads the DSN and lists every net whose class

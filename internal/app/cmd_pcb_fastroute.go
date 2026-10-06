@@ -551,6 +551,7 @@ type fastrouteOpts struct {
 	multiStart int
 	minTraceUm float64
 	noNeckdown []string
+	threads    int
 	maxTime    time.Duration
 	rounds     int
 	timeout    time.Duration
@@ -559,11 +560,19 @@ type fastrouteOpts struct {
 // fastrouteArgs builds one fastroute invocation.
 func fastrouteArgs(o fastrouteOpts, dsn, ses, report, initial string) []string {
 	args := []string{"-de", dsn, "-do", ses, "--report=" + report, "--diagnose"}
-	if o.multiStart > 0 {
-		args = append(args, "--multi-start="+strconv.Itoa(o.multiStart))
+	ms := o.multiStart
+	if ms == 0 && o.threads == 1 {
+		ms = 1 // fastroute's default multi-start (4) runs its orders in parallel
+	}
+	if ms > 0 {
+		args = append(args, "--multi-start="+strconv.Itoa(ms))
 	}
 	if o.minTraceUm > 0 {
 		args = append(args, "--router.min_trace_width_um="+strconv.FormatFloat(o.minTraceUm, 'f', -1, 64))
+	}
+	if o.threads > 0 {
+		n := strconv.Itoa(o.threads)
+		args = append(args, "--router.autorouter.max_threads="+n, "--router.optimizer.max_threads="+n)
 	}
 	if len(o.noNeckdown) > 0 {
 		args = append(args, "--no-neckdown-classes="+strings.Join(o.noNeckdown, ","))
@@ -584,6 +593,12 @@ type fastrouteRun struct {
 	Seconds    float64 `json:"seconds"`
 	Unrouted   int     `json:"unrouted"`
 	Violations int     `json:"violations"`
+	// Status is ok | crashed | timeout. A run whose report could not be read
+	// has unknown counts (-1), never 0.
+	Status string `json:"status"`
+	Error  string `json:"error,omitempty"`
+	// Retry marks the single-threaded rerun after a crash.
+	Retry bool `json:"singleThreadRetry,omitempty"`
 	// Fixable are the clearance violations the router itself marks fixable
 	// (pre-existing pin-pin overlaps are unfixable); they reach native DRC.
 	Fixable     int      `json:"fixableViolations"`
@@ -642,52 +657,101 @@ func readFastrouteReport(path string) (frReport, error) {
 // runFastroute routes dsn, then continues from the last session with
 // --initial-session while connections remain unrouted or fixable clearance
 // violations remain — at most o.rounds continuation runs, and only while a
-// run improves on the previous one. It returns the last session written.
+// run improves on the previous one. A run that crashes (fastroute 0.1.7
+// panics in its parallel autorouter: "MinAreaTree ... free list corrupted",
+// Gas Module v9) is repeated once single-threaded; its counts are unknown
+// until a report exists. It returns the last good session.
 func runFastroute(o fastrouteOpts, dsn, base string, stderr io.Writer) (string, []fastrouteRun, error) {
 	var runs []fastrouteRun
 	initial := ""
 	for round := 0; round <= o.rounds; round++ {
 		ses := fmt.Sprintf("%s.r%d.ses", base, round)
 		report := fmt.Sprintf("%s.r%d-report.json", base, round)
-		args := fastrouteArgs(o, dsn, ses, report, initial)
-		fmt.Fprintf(stderr, "fastroute round %d: %s %s\n", round, o.bin, strings.Join(args, " "))
-		ctx, cancel := context.WithTimeout(context.Background(), o.timeout)
-		cmd := exec.CommandContext(ctx, o.bin, args...)
-		cmd.Stdout, cmd.Stderr = stderr, stderr
-		// fastroute writes its best board on SIGTERM; give it time to.
-		cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
-		cmd.WaitDelay = 30 * time.Second
-		start := time.Now()
-		err := cmd.Run()
-		cancel()
-		run := fastrouteRun{Round: round, Session: ses, Report: report, Seconds: time.Since(start).Round(time.Second).Seconds()}
-		if _, serr := os.Stat(ses); serr != nil {
-			if err == nil {
-				err = fmt.Errorf("fastroute wrote no session %s", ses)
-			}
-			return "", runs, fmt.Errorf("fastroute round %d: %w", round, err)
-		}
-		if err != nil {
-			fmt.Fprintf(stderr, "fastroute round %d ended with %v; using its best session so far\n", round, err)
-		}
-		rep, rerr := readFastrouteReport(report)
-		if rerr != nil {
+		run := fastrouteOnce(o, dsn, ses, report, initial, round, stderr)
+		if run.Status == "crashed" {
 			runs = append(runs, run)
-			return ses, runs, rerr
+			single := o
+			single.multiStart, single.threads = 1, 1
+			fmt.Fprintf(stderr, "fastroute round %d crashed (%s); retrying single-threaded\n", round, run.Error)
+			run = fastrouteOnce(single, dsn, ses, report, initial, round, stderr)
+			run.Retry = true
 		}
-		run.Unrouted, run.Violations, run.Fixable, run.FixableList = rep.Unrouted, rep.Violations, rep.Fixable, rep.FixableList
 		runs = append(runs, run)
-		fmt.Fprintf(stderr, "fastroute round %d: %d unrouted, %d violation(s) (%d fixable), %.0f s\n", round, rep.Unrouted, rep.Violations, rep.Fixable, run.Seconds)
-		if (rep.Unrouted == 0 && rep.Fixable == 0) || err != nil {
+		if run.Status != "ok" {
+			// No trustworthy result from this round: fall back to the last
+			// good one, or fail when there is none.
+			for i := len(runs) - 1; i >= 0; i-- {
+				if runs[i].Status == "ok" {
+					fmt.Fprintf(stderr, "fastroute round %d failed (%s); using round %d\n", round, run.Error, runs[i].Round)
+					return runs[i].Session, runs, nil
+				}
+			}
+			return "", runs, fmt.Errorf("fastroute round %d: %s", round, run.Error)
+		}
+		fmt.Fprintf(stderr, "fastroute round %d: %d unrouted, %d violation(s) (%d fixable), %.0f s\n", round, run.Unrouted, run.Violations, run.Fixable, run.Seconds)
+		if run.Unrouted == 0 && run.Fixable == 0 {
 			return ses, runs, nil
 		}
-		if n := len(runs); n >= 2 && !runImproved(runs[n-2], runs[n-1]) {
-			fmt.Fprintf(stderr, "fastroute round %d did not improve on round %d; stopping\n", round, round-1)
+		if prev := lastOK(runs[:len(runs)-1]); prev != nil && !runImproved(*prev, run) {
+			fmt.Fprintf(stderr, "fastroute round %d did not improve on round %d; stopping\n", round, prev.Round)
 			return ses, runs, nil
 		}
 		initial = ses
 	}
-	return runs[len(runs)-1].Session, runs, nil
+	return lastOK(runs).Session, runs, nil
+}
+
+func lastOK(runs []fastrouteRun) *fastrouteRun {
+	for i := len(runs) - 1; i >= 0; i-- {
+		if runs[i].Status == "ok" {
+			return &runs[i]
+		}
+	}
+	return nil
+}
+
+// fastrouteOnce runs fastroute once. Status ok needs a clean exit (or a
+// timeout that still wrote its report) plus a readable report and session.
+func fastrouteOnce(o fastrouteOpts, dsn, ses, report, initial string, round int, stderr io.Writer) fastrouteRun {
+	_ = os.Remove(report)
+	args := fastrouteArgs(o, dsn, ses, report, initial)
+	fmt.Fprintf(stderr, "fastroute round %d: %s %s\n", round, o.bin, strings.Join(args, " "))
+	ctx, cancel := context.WithTimeout(context.Background(), o.timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, o.bin, args...)
+	cmd.Stdout, cmd.Stderr = stderr, stderr
+	// fastroute writes its best board on SIGINT/SIGTERM; give it time to.
+	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
+	cmd.WaitDelay = 30 * time.Second
+	start := time.Now()
+	err := cmd.Run()
+	run := fastrouteRun{Round: round, Session: ses, Report: report, Seconds: time.Since(start).Round(time.Second).Seconds(),
+		Status: "ok", Unrouted: -1, Violations: -1, Fixable: -1}
+	switch {
+	case err != nil && ctx.Err() != nil:
+		run.Status, run.Error = "timeout", fmt.Sprintf("timed out after %s", o.timeout)
+	case err != nil:
+		run.Status, run.Error = "crashed", err.Error()
+	}
+	rep, rerr := readFastrouteReport(report)
+	if _, serr := os.Stat(ses); serr != nil && rerr == nil {
+		rerr = fmt.Errorf("no session %s", ses)
+	}
+	if rerr != nil {
+		if run.Status == "ok" {
+			run.Status = "crashed"
+		}
+		if run.Error == "" {
+			run.Error = rerr.Error()
+		} else {
+			run.Error += "; " + rerr.Error()
+		}
+		return run
+	}
+	// A timed-out run that wrote its report is a usable best-so-far result.
+	run.Status = "ok"
+	run.Unrouted, run.Violations, run.Fixable, run.FixableList = rep.Unrouted, rep.Violations, rep.Fixable, rep.FixableList
+	return run
 }
 
 // runImproved: fewer unrouted, or as many unrouted and fewer fixable violations.
@@ -719,10 +783,11 @@ type autorouteOpts struct {
 func (o *autorouteOpts) register(fs *pflag.FlagSet, router string, rounds int, ripUp bool) {
 	fs.StringVar(&o.routerCmd, "router", router, "'fastroute' (preset) or an external router command with {in}/{out} (or FREEROUTING_CMD env)")
 	fs.StringVar(&o.fastrouteBin, "fastroute-bin", "", "fastroute executable (default: $FASTROUTE_BIN, then PATH)")
-	fs.IntVar(&o.fo.multiStart, "multi-start", 0, "fastroute --multi-start=N (0 = fastroute default)")
+	fs.IntVar(&o.fo.multiStart, "multi-start", 0, "fastroute --multi-start=N (0 = 1 with --threads 1, else fastroute's default)")
 	fs.Float64Var(&o.fo.minTraceUm, "min-trace-um", 152, "fastroute --router.min_trace_width_um: never neck down below this (0 = not passed; with --intent the intent's narrowest widthMil.min is used unless this is set)")
 	fs.StringVar(&o.intentPath, "intent", "", "intent.json (intent derive): pre-route gate — write its rules (pcb rules apply), raise the DSN net classes to every net's outer/inner width and clearance, forbid neck-down where widthMil.min = outer; route only when every net passes")
 	fs.DurationVar(&o.fo.maxTime, "max-time", 0, "fastroute --max-time per run (0 = none)")
+	fs.IntVar(&o.fo.threads, "threads", 1, "fastroute autorouter and optimizer threads; 1 (default) also sets --multi-start=1 unless given. fastroute 0.1.7 panics in its parallel autorouter (MinAreaTree free list corrupted) — Gas Module v9: 8 threads crashed after 244 s, 1 thread routed in 102 s. 0 = fastroute default; a crashed run is always retried with 1")
 	fs.IntVar(&o.fo.rounds, "continue", rounds, "fastroute continuation runs (--initial-session) while connections remain unrouted")
 	fs.DurationVar(&o.fo.timeout, "router-timeout", 10*time.Minute, "hard limit per router run (default 45m with --router fastroute)")
 	fs.BoolVar(&o.rawDSN, "raw-dsn", false, "route the unmodified EasyEDA DSN (skip the export fixes)")
@@ -891,13 +956,13 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 			return false, err
 		}
 		sesPath = ses
-		if last := runs[len(runs)-1]; last.Unrouted > 0 && !o.noAutoEsc && !o.rawDSN {
-			if p, d, t, r2, ok := retryWithEscapes(cfg, window, o, rawText, dsnText, fixOpt, reqs, base, last, summary, &sessions, stderr); ok {
+		if last := lastOK(runs); last != nil && last.Unrouted > 0 && !o.noAutoEsc && !o.rawDSN {
+			if p, d, t, r2, ok := retryWithEscapes(cfg, window, o, rawText, dsnText, fixOpt, reqs, base, *last, summary, &sessions, stderr); ok {
 				sesPath, dsnPath, dsnText, runs = p, d, t, r2
 			}
 		}
-		if n := len(runs); n > 0 && runs[n-1].Unrouted > 0 {
-			fmt.Fprintf(stderr, "warning: %d connection(s) still unrouted after %d run(s); importing the best session\n", runs[n-1].Unrouted, n)
+		if last := lastOK(runs); last != nil && last.Unrouted > 0 {
+			fmt.Fprintf(stderr, "warning: %d connection(s) still unrouted after %d run(s); importing the best session\n", last.Unrouted, len(runs))
 		}
 	} else {
 		tmpl := o.routerCmd
@@ -1074,13 +1139,14 @@ func retryWithEscapes(cfg *appConfig, window string, o autorouteOpts, rawText, d
 			*sessions = append(*sessions, x.Session)
 		}
 		info["dsn"], info["runs"] = path, r
-		if err != nil || len(r) == 0 || !runImproved(best, r[len(r)-1]) {
+		got := lastOK(r)
+		if err != nil || got == nil || !runImproved(best, *got) {
 			fmt.Fprintf(stderr, "auto-escapes round %d: no improvement; stopping\n", round)
 			info["used"] = false
 			return
 		}
 		info["used"] = true
-		opt, best = next, r[len(r)-1]
+		opt, best = next, *got
 		ses, dsnPath, fixed, runs, ok = s, path, text, r, true
 	}
 	return

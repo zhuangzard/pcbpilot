@@ -274,8 +274,13 @@ Steps (stdout is one summary JSON, progress on stderr):
      `[{"net":"GND","layer":"TopLayer","widthMil":10,"path":[[4776.1,313.9],[4710.65,313.9]],"via":true}]`
      (mil, DSN layer names), or bare `[[[x1,y1],[x2,y2]], ...]` pairs = 10 mil GND on TopLayer with a via at the
      end. Choose escapes for GND pins between fine-pitch signal pins that fastroute's report lists as blocked.
-2. fastroute with `--report --diagnose`, `--router.min_trace_width_um=152` (`--min-trace-um`), optional
-   `--multi-start`/`--max-time`; while connections stay unrouted or the router reports fixable clearance
+2. fastroute with `--report --diagnose`, single-threaded by default (`--threads 1` also sets `--multi-start=1`):
+   fastroute 0.1.7 panics in its parallel autorouter ("MinAreaTree … free list corrupted"); on Gas Module v9 the
+   8-thread run crashed after 244 s while one thread routed the same DSN in 102 s. A crashed run is recorded as
+   `crashed` with unknown counts (-1), never 0, and repeated once single-threaded; with no good run the command
+   fails. `--threads N` opts into parallel routing. Neck-down floor from `--min-trace-um` or, with `--intent`, the
+   intent's narrowest `widthMil.min`; `--no-neckdown-classes` lists only nets whose `widthMil.min = outer` is above
+   that floor (Gas V5: 17 power/switch nets; signals already at 6 mil are left out). While connections stay unrouted or the router reports fixable clearance
    violations, up to `--continue` more runs from the last session (`--initial-session`), stopping when a run does
    not improve. Remaining fixable violations are listed per run (`fixableList`); the pin–pin overlaps between a
    mounting hole and its screw-head ring (EasyEDA exports both MULTI objects as pins) are unfixable and not counted.

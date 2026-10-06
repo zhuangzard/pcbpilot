@@ -1,6 +1,7 @@
 package app
 
 import (
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,6 +21,10 @@ func TestFastrouteArgs(t *testing.T) {
 	}
 	if got := strings.Join(fastrouteArgs(fastrouteOpts{}, "b.dsn", "b.ses", "r.json", ""), " "); got != "-de b.dsn -do b.ses --report=r.json --diagnose" {
 		t.Fatalf("minimal args = %s", got)
+	}
+	// Single-threaded (the default): no parallel multi-start either.
+	if got := strings.Join(fastrouteArgs(fastrouteOpts{threads: 1}, "b.dsn", "b.ses", "r.json", ""), " "); !strings.Contains(got, "--multi-start=1 ") || !strings.Contains(got, "--router.autorouter.max_threads=1 --router.optimizer.max_threads=1") {
+		t.Fatalf("single-threaded args = %s", got)
 	}
 }
 
@@ -159,12 +164,59 @@ func TestPrepareDSNGate(t *testing.T) {
 	if short, _ := specctra.CheckNetRequirements(text, reqs); len(short) != 0 {
 		t.Fatalf("prepared DSN still short: %v", short)
 	}
-	if rq.MinTraceMil != 6 || strings.Join(rq.NoNeckdown, ",") != "+12V,pcbpilot_req_1" {
+	if rq.MinTraceMil != 6 || strings.Join(rq.NoNeckdown, ",") != "+12V" { // SIG sits at the 6 mil floor
 		t.Fatalf("requirement report = %+v", rq)
 	}
 	// A DSN not in mil cannot be checked: the gate refuses rather than guess.
 	notMil := strings.Replace(string(raw), "(resolution mil 1000)", "(resolution um 10)", 1)
 	if _, _, _, err := prepareDSN(notMil, specctra.FixOptions{}, reqs); err == nil || !strings.Contains(err.Error(), "pre-route gate") {
 		t.Fatalf("non-mil DSN passed the gate: %v", err)
+	}
+}
+
+// fastroute 0.1.7 can panic in its parallel autorouter after writing a
+// checkpoint session but no report (Gas Module v9). The run must be recorded
+// as crashed with unknown counts and repeated once single-threaded.
+func TestRunFastrouteCrashRetry(t *testing.T) {
+	skipOnWindows(t)
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "fastroute")
+	script := `#!/bin/sh
+for a in "$@"; do
+  case "$a" in
+    -do) next=ses ;;
+    --report=*) report="${a#--report=}" ;;
+    --multi-start=1) single=1 ;;
+    *) if [ "$next" = ses ]; then ses="$a"; next=; fi ;;
+  esac
+done
+echo "(session x)" > "$ses"
+if [ -z "$single" ]; then echo "thread panicked: free list corrupted" >&2; exit 101; fi
+echo '{"stats":{"unrouted":0,"violations":0}}' > "$report"
+`
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var log strings.Builder
+	ses, runs, err := runFastroute(fastrouteOpts{bin: bin, multiStart: 8, timeout: time.Minute}, "b.dsn", filepath.Join(dir, "b"), &log)
+	if err != nil {
+		t.Fatalf("err = %v\n%s", err, log.String())
+	}
+	if len(runs) != 2 || runs[0].Status != "crashed" || runs[0].Unrouted != -1 || runs[0].Violations != -1 {
+		t.Fatalf("crashed run not recorded as unknown: %+v", runs)
+	}
+	if !runs[1].Retry || runs[1].Status != "ok" || runs[1].Unrouted != 0 || ses != runs[1].Session {
+		t.Fatalf("single-threaded retry = %+v (ses %s)", runs[1], ses)
+	}
+	if !strings.Contains(log.String(), "retrying single-threaded") {
+		t.Fatalf("log: %s", log.String())
+	}
+
+	// A binary that always crashes: round 0 has no good result -> error.
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 101\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, runs, err := runFastroute(fastrouteOpts{bin: bin, timeout: time.Minute}, "b.dsn", filepath.Join(dir, "c"), io.Discard); err == nil || runs[len(runs)-1].Unrouted != -1 {
+		t.Fatalf("always-crashing router accepted: %+v %v", runs, err)
 	}
 }

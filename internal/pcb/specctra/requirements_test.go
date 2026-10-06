@@ -49,8 +49,9 @@ func TestApplyNetRequirements(t *testing.T) {
 	if rep.Classes != 2 || rep.NewClasses != 1 {
 		t.Errorf("report = %+v", rep)
 	}
-	// +12V and the new SV1_DRV class forbid neck-down; GND does not.
-	if strings.Join(rep.NoNeckdown, ",") != "+12V,pcbpilot_req_1" {
+	// +12V forbids neck-down above the 10 mil floor; SV1_DRV (new class) is
+	// already at the floor and GND may neck down.
+	if strings.Join(rep.NoNeckdown, ",") != "+12V" {
 		t.Errorf("NoNeckdown = %v", rep.NoNeckdown)
 	}
 	if rep.MinTraceMil != 10 {
