@@ -334,12 +334,18 @@ func runManualGate(o manualGateOpts, stderr io.Writer) (gateResult, *manualRun) 
 	name := ""
 	if o.projectConfig != "none" {
 		dir := o.projectConfig
+		load := projectconfig.Load
 		if dir == "" {
 			dir = "."
 		} else if st, err := os.Stat(dir); err == nil && !st.IsDir() {
+			// A file names the config itself (pcbpilot.project.B.json):
+			// loading <dir>/pcbpilot.project.json instead gave board B
+			// board A's config and overwrote A's manual.
+			file := dir
 			dir = filepath.Dir(dir)
+			load = func(string) (*projectconfig.Config, error) { return projectconfig.LoadFile(file) }
 		}
-		c, err := projectconfig.Load(dir)
+		c, err := load(dir)
 		switch {
 		case err == nil:
 			projDir, name = dir, c.Name
@@ -398,7 +404,12 @@ func runManualGate(o manualGateOpts, stderr io.Writer) (gateResult, *manualRun) 
 	run := &manualRun{Dir: dir, Current: pub.Current, VerFile: pub.VerFile, Version: pub.Version, Bumped: pub.Bumped, Notes: notes}
 	if mc.Out != "" {
 		run.Extra = rel(mc.Out)
-		if b, err := os.ReadFile(pub.Current); err != nil {
+		// The extra copy is a published file of one board: write it only
+		// when the config names this board's document.
+		if why := manualOutRefusal(mc.Doc, o.doc); why != "" {
+			items = append(items, fmt.Sprintf("manual.out %s not written: %s", run.Extra, why))
+			run.Extra = ""
+		} else if b, err := os.ReadFile(pub.Current); err != nil {
 			items = append(items, "write failed: "+err.Error())
 		} else if err := os.MkdirAll(filepath.Dir(run.Extra), 0o755); err != nil {
 			items = append(items, "write failed: "+err.Error())
@@ -421,4 +432,18 @@ func runManualGate(o manualGateOpts, stderr io.Writer) (gateResult, *manualRun) 
 func addManualFlags(c *cobra.Command, noManual *bool, projectConfig *string) {
 	c.Flags().BoolVar(noManual, "no-manual", false, "skip the board user manual (board-manual gate); refused unless --waivers holds a signed {\"gate\":\"board-manual\",\"match\":\"--no-manual\"} entry")
 	c.Flags().StringVar(projectConfig, "project-config", "", "pcbpilot.project.json (file or work dir) whose \"manual\" block gives the manual notes / pin map / name / extra copy; default ./pcbpilot.project.json when present, \"none\" to ignore")
+}
+
+// manualOutRefusal says why manual.out may not be written for the board doc
+// ("" = it may): the config must name the board's document uuid.
+func manualOutRefusal(cfgDoc, boardDoc string) string {
+	switch {
+	case cfgDoc == "":
+		return "the project config's manual.doc is empty (set it to the board's PCB document uuid)"
+	case boardDoc == "":
+		return fmt.Sprintf("the board document is unknown (pass --doc %s)", cfgDoc)
+	case !strings.EqualFold(cfgDoc, boardDoc):
+		return fmt.Sprintf("the config is for document %s, this board is %s", cfgDoc, boardDoc)
+	}
+	return ""
 }

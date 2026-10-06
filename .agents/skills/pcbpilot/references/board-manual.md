@@ -17,12 +17,15 @@
   ```json
   {"schemaVersion": 1, "name": "GasModule_V5_A",
    "manual": {"notes": "pcbpilot.manual-notes.json", "pinMap": "../fpga/board_pins.tcl",
-              "analog": "../sim/analog.json", "name": "GasModule_V5_A", "out": "../05_Output/GasModule_V5_A_使用说明.html", "lang": "zh"}}
+              "analog": "../sim/analog.json", "name": "GasModule_V5_A", "out": "../05_Output/GasModule_V5_A_使用说明.html",
+              "doc": "1eb633d9222155fb", "lang": "zh"}}
   ```
 
   `notes` 缺省为 `<工作目录>/pcbpilot.manual-notes.json`；`--project-config` 指定文件/目录，`none` 不读。
 - 输出：`<out-dir>/manual/{<Board>_使用说明.html（当前版）, vN/<Board>_使用说明.html, index.json}`，配置了
-  `manual.out` 时再复制一份。
+  `manual.out` 时再复制一份——**只在** `manual.doc` 等于本次板子的 PCB 文档 uuid（`--doc`）时写；`doc` 为空、
+  未给 `--doc` 或不一致时不写并记为门禁失败项（2026-10-06：B 板跑时读了 A 的配置，覆盖了 A 的已发布说明书）。
+  同一工作目录的第二块板用 `--project-config pcbpilot.project.B.json`：给文件就读该文件本身。
 - `--no-manual` 只在 `--waivers` 里有签名条目 `{"gate":"board-manual","match":"--no-manual","reason":…,"by":…}`
   时才允许；否则命令直接拒绝。
 - 离线复跑（不连 EDA）：

@@ -65,6 +65,9 @@ type Manual struct {
 	Analog string `json:"analog,omitempty"`
 	// Name is the <Board> part of the file name (default: the config name).
 	Name string `json:"name,omitempty"`
+	// Doc is the PCB document uuid this config describes. Out is written
+	// only for that board (Gas Module V5: B's run overwrote A's manual).
+	Doc string `json:"doc,omitempty"`
 	Lang string `json:"lang,omitempty"` // zh (default) | en
 }
 
@@ -276,6 +279,19 @@ var ErrNotFound = errors.New("no " + FileName)
 // so a typo ("enable": false) cannot silently leave a step on.
 func Load(dir string) (*Config, error) {
 	b, err := os.ReadFile(Path(dir))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return Decode(b)
+}
+
+// LoadFile reads and decodes one config file (pcbpilot.project.B.json for a
+// second board in the same work dir).
+func LoadFile(path string) (*Config, error) {
+	b, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, ErrNotFound
 	}
