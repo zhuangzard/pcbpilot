@@ -541,6 +541,9 @@ func trialRoute(cfg *appConfig, window string, o autorouteOpts, budget time.Dura
 			return fastrouteRun{}, err
 		}
 		reqs = intentRequirements(in)
+		if err := markNarrowPads(cfg, window, reqs); err != nil {
+			return fastrouteRun{}, err
+		}
 	}
 	text, _, rq, err := prepareDSN(string(raw), opt, reqs)
 	if err != nil {

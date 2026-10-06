@@ -335,6 +335,11 @@ pcbpilot pcb auto route --playbook out/playbook.json --out-dir out/live --projec
 - 会话对账：一段在同层同网铜（走线圆头胶囊、过孔圆盘）覆盖其 90 % 宽度全长时视为在（v17：导入丢了夹在 2.2 mil 缝里的
   1.1 mil GND 短段；v18：EasyEDA 把 12.5 mil 宽 40 mil 的 SV1_DRV 短段并进了旁边的过孔和 40 mil 走线）。
 - `route-complete`（fastroute 布线时）：导入的会话必须 0 未布通、0 个可修复违规；v18 B 带 1 条未布通导入而没有门拦住。
+- 板边连接器：机械规格 `edge` 把器件体贴齐板边后，若焊盘进入板子的铜到板边间距（`copperToEdgeMil`）就整体内移
+  （v19 B：C124387 无外壳 2×5 排针 J2/J8 顶排通孔焊盘离板框 10.8 mil，原生 DRC 要 30）。
+- 不准颈缩的网若有焊盘比自己的线宽还窄（细间距 QFP 电源脚），不再放进 fastroute `--no-neckdown-classes`：满宽线
+  出不了这种焊盘，路由器只在焊盘处颈缩；主干仍由逐段线宽门与加宽到意图兜底（v19 B：+3V3 在 U8 0.5 mm 间距
+  11 mil 焊盘留下 4 个可修复违规和 1 条未布通）。
 - `native-drc` 逐条列出违规（类型、对象、层、网、坐标 mil、图元 id），不再只给计数。
 - 丝印（`silkscreen` 门，读回 `pcb.silk.list` 真实包围盒判）：`pcb auto route` 铺铜加宽后自动跑 `pcb silk-align --tight`
   的同一流程：位号放在自己封装旁最近的空位（先 `--silk-gap` 5 mil 四边横排，再转 90° 四边，从下或从右读），

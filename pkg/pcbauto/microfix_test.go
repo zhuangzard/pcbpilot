@@ -129,3 +129,27 @@ func TestApplyMechInPlaceKeepsPoses(t *testing.T) {
 		t.Fatal("setup: ApplyMech should have moved J1")
 	}
 }
+
+// Gas Module V5 B: an edge header whose body is barely larger than its
+// pads sat flush with the edge, its TH pads 10.8 mil from the outline
+// against a 30 mil rule. PlaceOnEdge keeps the pads outside the band.
+func TestPlaceOnEdgeKeepsPadsOffTheEdge(t *testing.T) {
+	spec, err := ParseMech([]byte(`{"units":"mm","board":{"width":76.2,"height":50.8},
+		"edge":[{"ref":"J1","edge":"left","at":25}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, clr := range []float64{30, 200} {
+		b := isoBoard()
+		b.Rules.EdgeClearance = clr
+		if _, err := ApplyMech(b, spec); err != nil {
+			t.Fatal(err)
+		}
+		bb := b.Bounds()
+		for _, pd := range b.Part("J1").Pads {
+			if d := pd.Box.Bounds().MinX - bb.MinX; d < clr-1e-6 {
+				t.Fatalf("clearance %v: pad %s %.2f mil from the edge", clr, pd.Key(), d)
+			}
+		}
+	}
+}

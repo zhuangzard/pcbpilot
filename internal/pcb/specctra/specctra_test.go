@@ -380,3 +380,20 @@ func TestPlanReconcileCoveredStub(t *testing.T) {
 		t.Fatalf("uncovered stub: %+v", r.MissingTracks)
 	}
 }
+
+// A no-neck-down net with a pad narrower than its width may neck at it
+// (Gas Module V5 B: +3V3 on an 11 mil QFP pad at 0.5 mm pitch).
+func TestForbidsNeckdownNarrowPad(t *testing.T) {
+	r := NetRequirement{OuterMil: 15, InnerMil: 15, MinMil: 15}
+	if !forbidsNeckdown(r, 6) {
+		t.Fatal("full-width net without pad data must forbid neck-down")
+	}
+	r.NarrowPadMil = 11
+	if forbidsNeckdown(r, 6) {
+		t.Fatal("an 11 mil pad cannot take a 15 mil exit")
+	}
+	r.NarrowPadMil = 20
+	if !forbidsNeckdown(r, 6) {
+		t.Fatal("pads wider than the track keep the no-neck-down rule")
+	}
+}

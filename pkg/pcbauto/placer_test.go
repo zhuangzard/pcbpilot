@@ -66,9 +66,15 @@ func TestPlaceIsolationZones(t *testing.T) {
 	if strip.W() < 190 {
 		t.Errorf("strip %.0f mil narrower than 5 mm reinforced creepage", strip.W())
 	}
-	// J1 must sit on the left edge.
-	if j := b.Part("J1").Body(); j.MinX > b.Bounds().MinX+1 {
-		t.Errorf("J1 not flush with the left edge: %+v", j)
+	// J1 must sit on the left edge: flush, or as close as the board's
+	// copper-to-edge rule lets its pads come (its body is its pads here).
+	j1 := b.Part("J1")
+	pads := j1.Pads[0].Box.Bounds()
+	for _, pd := range j1.Pads[1:] {
+		pads = pads.Union(pd.Box.Bounds())
+	}
+	if j := j1.Body(); j.MinX > b.Bounds().MinX+1 && pads.MinX > b.Bounds().MinX+b.Rules.EdgeClearance+1 {
+		t.Errorf("J1 not on the left edge: body %+v pads %+v", j, pads)
 	}
 }
 
