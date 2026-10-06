@@ -120,6 +120,13 @@ type Router interface{ Reroute(txn *board.Txn, c board.ConnID, w Weights) bool }
 func Run(db *board.DB, rs *rules.Resolver, r Router, b Budget) (Report, error)
 ```
 
+M0 froze these signatures in the package `doc.go` files with these adjustments: `board.DB`, `board.Txn` and
+`rules.Resolver` are interfaces, so they are passed by value, not by pointer; `search.Route` takes the read-only
+`board.View`, and `Request` lists `board.ItemID`s (there is no separate `ItemRef`); layers are `geom.LayerID`.
+In §2.2, `board.Item` has no separate `Width` (a track's width is its `geom.Seg`'s `2·HalfW`), and
+`rules.Resolver.Width(net, layer)` is the nominal width while `Neck(net, layer, pad)` returns the 04 §3.5 floor
+and zone, from which callers compute `WidthAt`.
+
 ### 2.4 Pipeline (engine v2)
 
 ```
@@ -465,7 +472,7 @@ sequential tail:          M15 integration → M16 performance → M17 acceptance
 | Q9 | Escape ordering λ (04 §3.4) default off. Turn it on for connector-bound buses? | M13b bench |
 | Q10 | Should pre-route escapes (`--escapes`) be given to both routers in the headline comparison, or to neither? Both are benched; which row is headline? | user, at M5 |
 | Q11 | Reference machine for C4's 432 s (the field record's machine vs the bench machine); is a machine factor acceptable? | user, at M5 |
-| Q12 | Can `pkg/pcbroute/dsn` import `internal/pcb/specctra` (it is legal in Go within the module), or should the S-expression code move to `pkg/`? | M3, lead decides |
+| Q12 | Can `pkg/pcbroute/dsn` import `internal/pcb/specctra` (it is legal in Go within the module), or should the S-expression code move to `pkg/`? | **Decided by the lead in M0 (2026-10-06): import.** `pkg/pcbroute/dsn` imports `internal/pcb/specctra`; no code moves. The S-expression reader there is unexported today, so M3 adds a small exported read API in `specctra` (pcbpilot's own MIT code, no clean-room issue) instead of copying it. Reason: one parser for EasyEDA DSN quirks; a `pkg/` move would only matter if pcbroute were imported from outside the module, which nothing needs |
 | Q13 | Arc support (D9) if a future EasyEDA import path accepts arcs | post-M17 |
 | Q14 | Blind, buried and micro-vias (D8): which future board needs them? | post-M17 |
 
