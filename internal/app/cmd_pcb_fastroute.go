@@ -157,6 +157,11 @@ type sesRepairSummary struct {
 	FixedViaList  []specctra.NewVia   `json:"fixedWiringViaCreate,omitempty"`
 	Failures      []map[string]string `json:"failures,omitempty"`
 	UnmatchedList []specctra.Track    `json:"unmatched,omitempty"`
+	// Reconcile is the pass against the session after the repair: missing
+	// pieces and vias created, stray tracks (layers the board lacks) deleted;
+	// Unresolved is what a second comparison still finds missing.
+	Reconcile  *specctra.Reconcile `json:"reconcile,omitempty"`
+	Unresolved *specctra.Reconcile `json:"unresolved,omitempty"`
 }
 
 func listPcbTracks(cfg *appConfig, window string) ([]specctra.Track, error) {
@@ -251,6 +256,92 @@ func createPcbTrack(cfg *appConfig, window string, t specctra.NewTrack) error {
 // fixed wiring that never reaches the session. The replaced tracks are
 // deleted before the new pieces are created (see replaceTracks).
 func repairImportedSession(cfg *appConfig, window string, ses, dsn string, dryRun bool, stderr io.Writer) (*sesRepairSummary, error) {
+	sum, err := repairImportSteps(cfg, window, ses, dsn, dryRun, stderr)
+	if err != nil || dryRun {
+		return sum, err
+	}
+	err = reconcileWithSession(cfg, window, ses, dsn, sum, stderr)
+	return sum, err
+}
+
+// reconcileWithSession makes the board carry every segment and via of the
+// session: after the importer and the repair, compare, create what is
+// missing, delete tracks on layers the board does not have, then compare
+// once more and record whatever is still missing as unresolved.
+func reconcileWithSession(cfg *appConfig, window, ses, dsn string, sum *sesRepairSummary, stderr io.Writer) error {
+	wiring, err := specctra.ParseSES(ses)
+	if err != nil {
+		return err
+	}
+	copper, err := fetchCopperLayerCount(cfg, window)
+	if err != nil {
+		return fmt.Errorf("reconcile: copper layer count: %w", err)
+	}
+	ids := specctra.CopperLayerIDs(copper)
+	viaDia := 0.0
+	if dsn != "" {
+		viaDia = specctra.ViaDiameterMil(dsn, specctra.ViaPadstack(dsn))
+	}
+	compare := func() (specctra.Reconcile, error) {
+		if err := saveAndReload(cfg, window); err != nil {
+			return specctra.Reconcile{}, err
+		}
+		tracks, err := listPcbTracks(cfg, window)
+		if err != nil {
+			return specctra.Reconcile{}, err
+		}
+		vpts, vnets, err := listPcbVias(cfg, window)
+		if err != nil {
+			return specctra.Reconcile{}, err
+		}
+		return specctra.PlanReconcile(wiring, tracks, vpts, vnets, ids, viaDia), nil
+	}
+	r, err := compare()
+	if err != nil {
+		return err
+	}
+	sum.Reconcile = &r
+	fmt.Fprintf(stderr, "reconcile: %d session segment(s) and %d via(s) missing on the board, %d stray track(s) on non-copper layers\n",
+		len(r.MissingTracks), len(r.MissingVias), len(r.Stray))
+	if len(r.MissingTracks)+len(r.MissingVias)+len(r.Stray) == 0 {
+		return nil
+	}
+	for _, v := range r.MissingVias {
+		payload := map[string]any{"x": v.X, "y": v.Y, "net": v.Net}
+		if v.DiameterMil > 0 {
+			payload["diameter"] = v.DiameterMil
+		}
+		if _, err := requestAction(cfg, "pcb.via.create", window, payload); err != nil {
+			sum.Failures = append(sum.Failures, map[string]string{"reconcileVia": v.Net, "error": err.Error()})
+		}
+	}
+	for _, t := range r.MissingTracks {
+		if err := createPcbTrack(cfg, window, t); err != nil {
+			sum.Failures = append(sum.Failures, map[string]string{"reconcileTrack": t.Net, "error": err.Error()})
+		}
+	}
+	if len(r.Stray) > 0 {
+		ids := make([]string, len(r.Stray))
+		for i, t := range r.Stray {
+			ids[i] = t.ID
+		}
+		if _, err := requestActionTimed(cfg, "pcb.route.delete", window, map[string]any{"primitiveIds": ids, "kind": "track"}, 5*time.Minute); err != nil {
+			sum.Failures = append(sum.Failures, map[string]string{"strayDelete": strings.Join(ids, ","), "error": err.Error()})
+		}
+	}
+	again, err := compare()
+	if err != nil {
+		return err
+	}
+	if len(again.MissingTracks)+len(again.MissingVias)+len(again.Stray) > 0 {
+		sum.Unresolved = &again
+		fmt.Fprintf(stderr, "reconcile: still %d segment(s), %d via(s) missing and %d stray track(s) after the fix\n",
+			len(again.MissingTracks), len(again.MissingVias), len(again.Stray))
+	}
+	return nil
+}
+
+func repairImportSteps(cfg *appConfig, window string, ses, dsn string, dryRun bool, stderr io.Writer) (*sesRepairSummary, error) {
 	wiring, err := specctra.ParseSES(ses)
 	if err != nil {
 		return nil, err
@@ -803,12 +894,12 @@ func (o *autorouteOpts) register(fs *pflag.FlagSet, router string, rounds int, r
 // runAutorouteFlow: export DSN → fix → route → import SES → repair. It fills
 // summary as it goes, so a caller can print what happened before a failure.
 // routed=false means no router was configured (DSN exported only).
-func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary map[string]any, stderr io.Writer) (routed bool, err error) {
+func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary map[string]any, stderr io.Writer) (routed bool, sessions []string, err error) {
 	preset := o.routerCmd == "fastroute"
 	if preset {
 		bin, err := resolveFastroute(o.fastrouteBin)
 		if err != nil {
-			return false, err
+			return false, sessions, err
 		}
 		o.fo.bin = bin
 		if !o.timeoutSet {
@@ -827,7 +918,7 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 			}
 			fmt.Fprintf(stderr, "stackup: %d PLANE inner layer(s) set to SIGNAL so they can be routed and poured\n", len(layers))
 			if _, err := requestActionTimed(cfg, "pcb.stackup.set", window, map[string]any{"layers": layers}, 2*time.Minute); err != nil {
-				return false, fmt.Errorf("set inner layers to signal: %w", err)
+				return false, sessions, fmt.Errorf("set inner layers to signal: %w", err)
 			}
 			summary["planesToSignal"] = layers
 		}
@@ -839,7 +930,7 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 	if o.intentPath != "" {
 		in, err := loadDesignIntent(o.intentPath)
 		if err != nil {
-			return false, fmt.Errorf("pre-route gate: %w", err)
+			return false, sessions, fmt.Errorf("pre-route gate: %w", err)
 		}
 		call := func(action string, payload any) (map[string]any, error) {
 			res, err := requestAction(cfg, action, window, payload)
@@ -854,7 +945,7 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 		rrep, err := runIntentRules(in, "apply", false, call, stderr)
 		summary["intentRules"] = map[string]any{"status": rrep.Status, "verified": rrep.Verified, "plan": rrep.Plan}
 		if err != nil {
-			return false, fmt.Errorf("pre-route gate: pcb rules apply --intent %s: %w", o.intentPath, err)
+			return false, sessions, fmt.Errorf("pre-route gate: pcb rules apply --intent %s: %w", o.intentPath, err)
 		}
 		fmt.Fprintf(stderr, "pre-route gate: intent rules %s\n", rrep.Status)
 		reqs = intentRequirements(in)
@@ -865,11 +956,11 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 	// 1. Export from a saved + reloaded board (placement and stackup writes
 	// may still be served stale otherwise), then fix.
 	if err := saveAndReload(cfg, window); err != nil {
-		return false, err
+		return false, sessions, err
 	}
 	res, err := requestActionTimed(cfg, "pcb.export.dsn", window, map[string]any{}, 5*time.Minute)
 	if err != nil {
-		return false, err
+		return false, sessions, err
 	}
 	dsnPath := ""
 	for _, a := range res.Artifacts {
@@ -879,13 +970,13 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 		}
 	}
 	if dsnPath == "" {
-		return false, fmt.Errorf("export-dsn returned no file (PCB empty or no nets? run `pcb import-changes` first)")
+		return false, sessions, fmt.Errorf("export-dsn returned no file (PCB empty or no nets? run `pcb import-changes` first)")
 	}
 	fmt.Fprintf(stderr, "DSN exported: %s\n", dsnPath)
 	summary["dsn"] = dsnPath
 	dsnBytes, err := os.ReadFile(dsnPath)
 	if err != nil {
-		return false, err
+		return false, sessions, err
 	}
 	dsnText := string(dsnBytes)
 	rawText := dsnText
@@ -893,7 +984,7 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 	if !o.rawDSN {
 		opt, err := o.fx.options()
 		if err != nil {
-			return false, err
+			return false, sessions, err
 		}
 		if opt.CopperLayers == 0 {
 			if n, lerr := fetchCopperLayerCount(cfg, window); lerr == nil {
@@ -911,7 +1002,7 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 		}
 		fixed, rep, rq, err := prepareDSN(dsnText, opt, reqs)
 		if err != nil {
-			return false, err
+			return false, sessions, err
 		}
 		if rq != nil {
 			summary["dsnRequirements"] = rq
@@ -924,7 +1015,7 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 		}
 		dsnPath = strings.TrimSuffix(dsnPath, ".dsn") + "-fixed.dsn"
 		if err := os.WriteFile(dsnPath, []byte(fixed), 0o644); err != nil {
-			return false, err
+			return false, sessions, err
 		}
 		dsnText, fixOpt = fixed, opt
 		summary["dsnFixed"], summary["dsnFix"] = dsnPath, rep
@@ -938,14 +1029,6 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 	// 2. Route.
 	base := strings.TrimSuffix(dsnPath, ".dsn")
 	var sesPath string
-	var sessions []string
-	if !o.keep {
-		defer func() {
-			for _, f := range sessions {
-				_ = os.Remove(f)
-			}
-		}()
-	}
 	if preset {
 		ses, runs, err := runFastroute(o.fo, dsnPath, base, stderr)
 		summary["router"], summary["routerRuns"] = "fastroute", runs
@@ -953,7 +1036,7 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 			sessions = append(sessions, r.Session)
 		}
 		if err != nil {
-			return false, err
+			return false, sessions, err
 		}
 		sesPath = ses
 		if last := lastOK(runs); last != nil && last.Unrouted > 0 && !o.noAutoEsc && !o.rawDSN {
@@ -972,7 +1055,7 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 		if tmpl == "" {
 			fmt.Fprintf(stderr, "no --router / FREEROUTING_CMD set — DSN exported, stopping.\n"+
 				"  route it externally (e.g. --router fastroute), then: pcbpilot pcb import-autoroute <file.ses> && pcbpilot pcb ses-repair <file.ses> --dsn %s\n", dsnPath)
-			return false, nil
+			return false, sessions, nil
 		}
 		sesPath = base + ".ses"
 		sessions = append(sessions, sesPath)
@@ -983,12 +1066,12 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 		defer cancelRouter()
 		if err := runExternalRouter(routerCtx, runStr, stderr); err != nil {
 			if routerCtx.Err() != nil {
-				return false, fmt.Errorf("external router timed out after %s: %w", o.fo.timeout, routerCtx.Err())
+				return false, sessions, fmt.Errorf("external router timed out after %s: %w", o.fo.timeout, routerCtx.Err())
 			}
-			return false, fmt.Errorf("external router failed: %w", err)
+			return false, sessions, fmt.Errorf("external router failed: %w", err)
 		}
 		if _, err := os.Stat(sesPath); err != nil {
-			return false, fmt.Errorf("router produced no SES at %s (check the command's {out})", sesPath)
+			return false, sessions, fmt.Errorf("router produced no SES at %s (check the command's {out})", sesPath)
 		}
 	}
 	summary["ses"] = sesPath
@@ -996,12 +1079,12 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 	// 3. Import, then repair.
 	data, err := os.ReadFile(sesPath)
 	if err != nil {
-		return false, fmt.Errorf("read SES: %w", err)
+		return false, sessions, fmt.Errorf("read SES: %w", err)
 	}
 	if o.ripUp {
 		fmt.Fprintln(stderr, "rip-up: removing existing unlocked routing before import")
 		if _, err := requestActionTimed(cfg, "pcb.route.rip_up", window, map[string]any{}, 10*time.Minute); err != nil {
-			return false, fmt.Errorf("rip-up: %w", err)
+			return false, sessions, fmt.Errorf("rip-up: %w", err)
 		}
 	}
 	fmt.Fprintf(stderr, "importing SES (%d bytes) → tracks/vias\n", len(data))
@@ -1010,16 +1093,16 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 		"format":     "ses",
 		"fileName":   filepath.Base(sesPath),
 	}, 30*time.Minute); err != nil {
-		return false, fmt.Errorf("import SES: %w", err)
+		return false, sessions, fmt.Errorf("import SES: %w", err)
 	}
 	if !o.noRepair {
 		rep, err := repairImportedSession(cfg, window, string(data), dsnText, false, stderr)
 		summary["repair"] = rep
 		if err != nil {
-			return false, fmt.Errorf("ses-repair: %w", err)
+			return false, sessions, fmt.Errorf("ses-repair: %w", err)
 		}
 	}
-	return true, nil
+	return true, sessions, nil
 }
 
 // intentRequirements turns the intent's per-net widths and clearances into
@@ -1061,6 +1144,12 @@ func prepareDSN(raw string, opt specctra.FixOptions, reqs map[string]specctra.Ne
 		return "", rep, &rq, fmt.Errorf("pre-route gate: %d net requirement(s) not met in the DSN: %s", len(short), strings.Join(short, "; "))
 	}
 	return text, rep, &rq, nil
+}
+
+func removeFiles(paths []string) {
+	for _, f := range paths {
+		_ = os.Remove(f)
+	}
 }
 
 // escapeContext reads what escape planning needs from the live board and
@@ -1197,7 +1286,7 @@ A summary JSON is printed to stdout; progress goes to stderr.
 			o.timeoutSet = cmd.Flags().Changed("router-timeout")
 			o.minTraceSet = cmd.Flags().Changed("min-trace-um")
 			summary := map[string]any{}
-			routed, err := runAutorouteFlow(cfg, *window, o, summary, stderr)
+			routed, sessions, err := runAutorouteFlow(cfg, *window, o, summary, stderr)
 			if err != nil || !routed {
 				_ = writeJSON(stdout, summary)
 				return err
@@ -1208,6 +1297,9 @@ A summary JSON is printed to stdout; progress goes to stderr.
 			}
 			post, err := postImportChecks(cfg, *window, schFiles, scriptPath, stderr)
 			summary["post"] = post
+			if err == nil && !o.keep {
+				removeFiles(sessions) // kept on any failure, for the diff
+			}
 			_ = writeJSON(stdout, summary)
 			return err
 		},

@@ -267,3 +267,59 @@ func TestPlanFixedWiring_SkipsWhatIsAlreadyOnBoard(t *testing.T) {
 		t.Errorf("vias to create = %+v", nv)
 	}
 }
+
+// Recorded on Gas Module v9 B: SV3_DRV routed the same segment on Inner1 and
+// Inner2; the importer put them on 21 and 22. Both must be moved, by the
+// importer's offset, instead of being left on layers the board lacks.
+func TestPlanImportRepair_SameSegmentOnBothInnerLayers(t *testing.T) {
+	w := &Wiring{Segments: []Segment{
+		{Net: "SV3_DRV", Layer: "Inner1", WidthMil: 10, A: [2]float64{3600.8, 2420.5}, B: [2]float64{3554.4, 2420.5}},
+		{Net: "SV3_DRV", Layer: "Inner2", WidthMil: 10, A: [2]float64{3600.8, 2420.5}, B: [2]float64{3554.4, 2420.5}},
+	}}
+	tracks := []Track{
+		{ID: "a", Net: "SV3_DRV", Layer: 21, X1: 3600.8, Y1: 2420.5, X2: 3554.4, Y2: 2420.5, Width: 10},
+		{ID: "b", Net: "SV3_DRV", Layer: 22, X1: 3600.8, Y1: 2420.5, X2: 3554.4, Y2: 2420.5, Width: 10},
+	}
+	plan := PlanImportRepair(tracks, w)
+	if len(plan.Unmatched) != 0 || len(plan.Fixes) != 2 {
+		t.Fatalf("plan = %+v", plan)
+	}
+	got := map[string]int{}
+	for _, f := range plan.Fixes {
+		got[f.Delete.ID] = f.Create[0].Layer
+	}
+	if got["a"] != 15 || got["b"] != 16 {
+		t.Fatalf("layers = %v, want a→15 b→16", got)
+	}
+}
+
+func TestPlanReconcile(t *testing.T) {
+	ses := &Wiring{
+		Segments: []Segment{
+			{Net: "+3V3", Layer: "TopLayer", WidthMil: 10, A: [2]float64{2055.8, 1002.5}, B: [2]float64{1837.7, 1002.5}},
+			{Net: "+3V3", Layer: "Inner2", WidthMil: 10, A: [2]float64{1837.7, 1002.5}, B: [2]float64{1803.6, 1036.6}},
+			{Net: "+3V3", Layer: "TopLayer", WidthMil: 10, A: [2]float64{1900, 1002.5}, B: [2]float64{2000, 1002.5}}, // inside the merged track above
+		},
+		Vias: []Via{{Net: "+3V3", At: [2]float64{1837.7, 1002.5}}},
+	}
+	tracks := []Track{
+		{ID: "top", Net: "+3V3", Layer: 1, X1: 2055.8, Y1: 1002.5, X2: 1837.7, Y2: 1002.5, Width: 10},
+		{ID: "stray", Net: "+3V3", Layer: 22, X1: 1837.7, Y1: 1002.5, X2: 1803.6, Y2: 1036.6, Width: 10},
+	}
+	r := PlanReconcile(ses, tracks, nil, nil, CopperLayerIDs(4), 24)
+	if len(r.MissingTracks) != 1 || r.MissingTracks[0].Layer != 16 {
+		t.Fatalf("missing tracks = %+v", r.MissingTracks)
+	}
+	if len(r.MissingVias) != 1 || r.MissingVias[0].DiameterMil != 24 {
+		t.Fatalf("missing vias = %+v", r.MissingVias)
+	}
+	if len(r.Stray) != 1 || r.Stray[0].ID != "stray" {
+		t.Fatalf("stray = %+v", r.Stray)
+	}
+	// Once the via and the Inner2 piece exist nothing is missing.
+	tracks = append(tracks, Track{Net: "+3V3", Layer: 16, X1: 1837.7, Y1: 1002.5, X2: 1803.6, Y2: 1036.6, Width: 10})
+	r = PlanReconcile(ses, tracks, [][2]float64{{1837.7, 1002.5}}, []string{"+3V3"}, CopperLayerIDs(4), 24)
+	if len(r.MissingTracks) != 0 || len(r.MissingVias) != 0 {
+		t.Fatalf("still missing: %+v", r)
+	}
+}

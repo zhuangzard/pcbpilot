@@ -166,7 +166,7 @@ func summarizeWidthViolations(vs []widthViolation) []string {
 
 // postRouteGates runs every gate on the live board after the post-import
 // checks (which already saved, reloaded, rebuilt pours and ran DRC).
-func postRouteGates(cfg *appConfig, window, intentPath string, post *postImportSummary, simVerdict string, simReasons []string, waivers []gateWaiver, stderr io.Writer) ([]gateResult, bool) {
+func postRouteGates(cfg *appConfig, window, intentPath string, post *postImportSummary, simVerdict string, simReasons []string, unresolved *specctra.Reconcile, waivers []gateWaiver, stderr io.Writer) ([]gateResult, bool) {
 	var gates []gateResult
 	add := func(g gateResult) {
 		applyWaivers(&g, waivers)
@@ -177,6 +177,20 @@ func postRouteGates(cfg *appConfig, window, intentPath string, post *postImportS
 		}
 		fmt.Fprintf(stderr, "post-route gate %-18s %s  %s\n", g.Gate, mark, g.Detail)
 	}
+
+	// 0. The board carries every segment and via of the routed session.
+	g0 := gateResult{Gate: "session-reconcile", Pass: unresolved == nil, Detail: "board matches the routed session"}
+	if unresolved != nil {
+		g0.Detail = fmt.Sprintf("%d segment(s) and %d via(s) of the session missing, %d track(s) on non-copper layers",
+			len(unresolved.MissingTracks), len(unresolved.MissingVias), len(unresolved.Stray))
+		for _, t := range unresolved.MissingTracks {
+			g0.Items = append(g0.Items, fmt.Sprintf("missing %s L%d (%.1f,%.1f)-(%.1f,%.1f)", t.Net, t.Layer, t.X1, t.Y1, t.X2, t.Y2))
+		}
+		for _, v := range unresolved.MissingVias {
+			g0.Items = append(g0.Items, fmt.Sprintf("missing via %s (%.1f,%.1f)", v.Net, v.X, v.Y))
+		}
+	}
+	add(g0)
 
 	// 1. Native DRC.
 	g := gateResult{Gate: "native-drc", Pass: post != nil && post.DRCTotal == 0 && post.DRCPassed}

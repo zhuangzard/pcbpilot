@@ -128,7 +128,7 @@ func widenNets(cfg *appConfig, window string, nets map[string]bool, maxMil, clea
 			return nil, err
 		}
 	}
-	snap, err := fetchBoardSnapshot(cfg, window, boardSnapshotOpts{withCopper: true, withRules: clearanceMil <= 0})
+	snap, err := fetchBoardSnapshot(cfg, window, boardSnapshotOpts{withCopper: true, withLayers: true, withRules: clearanceMil <= 0})
 	if err != nil {
 		return nil, err
 	}
@@ -153,6 +153,19 @@ func widenNets(cfg *appConfig, window string, nets map[string]bool, maxMil, clea
 	for _, c := range snap.Components {
 		pads = append(pads, c.Pads...)
 	}
+	// Never widen copper on a layer the board does not have (importer
+	// leftovers on 21/22, Gas Module v9): it is reconciled, not kept.
+	valid := map[int]bool{}
+	for _, l := range specctra.CopperLayerIDs(max(snap.CopperLayers, 2)) {
+		valid[l] = true
+	}
+	kept := tracks[:0]
+	for _, t := range tracks {
+		if valid[t.Layer] {
+			kept = append(kept, t)
+		}
+	}
+	tracks = kept
 	ops := planWiden(tracks, vias, pads, nets, maxMil, clearanceMil)
 	fmt.Fprintf(stderr, "widen: %d track(s) can grow (max %.1f mil, clearance %.1f mil)\n", len(ops), maxMil, clearanceMil)
 	if dryRun || len(ops) == 0 {

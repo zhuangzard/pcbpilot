@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/zhuangzard/pcbpilot/internal/pcb/specctra"
 )
 
 // fitPour pours net on layer over the board outline inset by that layer's
@@ -194,7 +195,7 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 			}
 
 			// 2. Route + import + repair.
-			routed, err := runAutorouteFlow(cfg, *window, o, summary, stderr)
+			routed, sessions, err := runAutorouteFlow(cfg, *window, o, summary, stderr)
 			if err != nil {
 				return finish(err)
 			}
@@ -302,7 +303,11 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 			}
 
 			// 7. Post-route gates: any failure fails the run.
-			gates, pass := postRouteGates(cfg, *window, o.intentPath, post, simVerdict, simReasons, waivers, stderr)
+			var unresolved *specctra.Reconcile
+			if rep, ok := summary["repair"].(*sesRepairSummary); ok && rep != nil {
+				unresolved = rep.Unresolved
+			}
+			gates, pass := postRouteGates(cfg, *window, o.intentPath, post, simVerdict, simReasons, unresolved, waivers, stderr)
 			summary["gates"], summary["pass"] = gates, pass
 			if !pass {
 				var failed []string
@@ -311,7 +316,11 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 						failed = append(failed, g.Gate)
 					}
 				}
+				summary["sessionsKept"] = sessions
 				return finish(fmt.Errorf("post-route gate failed: %s", strings.Join(failed, ", ")))
+			}
+			if !o.keep {
+				removeFiles(sessions)
 			}
 			return finish(nil)
 		},

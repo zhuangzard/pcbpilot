@@ -129,9 +129,17 @@ func PlanImportRepair(tracks []Track, ses *Wiring) RepairPlan {
 			// ends coincide with the track; failing that, the only layer
 			// any matching segment is on. (Same-net copper often overlaps
 			// on another layer, e.g. a Top GND stub above an Inner1 trunk.)
-			layer, ok := uniqueLayer(exactSegments(any, a, b, -1))
+			exact := exactSegments(any, a, b, -1)
+			layer, ok := uniqueLayer(exact)
 			if !ok {
 				layer, ok = uniqueLayer(any)
+			}
+			if !ok {
+				// The same segment on two inner layers (Gas Module v9:
+				// SV3_DRV on Inner1 and Inner2, imported to 21 and 22):
+				// EasyEDA's importer puts InnerN on 20+N, so the wrong id
+				// itself names the layer.
+				layer, ok = importerLayer(t.Layer, exact)
 			}
 			if !ok {
 				plan.Unmatched = append(plan.Unmatched, t)
@@ -295,6 +303,22 @@ func exactSegments(cands []seg, a, b [2]float64, width float64) []seg {
 	return out
 }
 
+// ImporterLayerOffset: EasyEDA's importAutoRouteSes puts InnerN tracks on
+// layer id 20+N instead of 14+N (observed on 3.2.149: Inner1 → 21, Inner2 → 22).
+const ImporterLayerOffset = 6
+
+// importerLayer picks, among exactly matching segments, the one on the layer
+// the importer's offset maps the track's wrong layer id back to.
+func importerLayer(wrong int, exact []seg) (int, bool) {
+	want := wrong - ImporterLayerOffset
+	for _, s := range exact {
+		if s.layer == want {
+			return want, true
+		}
+	}
+	return 0, false
+}
+
 func uniqueLayer(segs []seg) (int, bool) {
 	if len(segs) == 0 {
 		return 0, false
@@ -328,4 +352,74 @@ func lerp(a, b [2]float64, f float64) [2]float64 {
 		math.Round((a[0]+(b[0]-a[0])*f)*1000) / 1000,
 		math.Round((a[1]+(b[1]-a[1])*f)*1000) / 1000,
 	}
+}
+
+// Reconcile is what the board still lacks compared with the session after
+// the import and its repair, and the tracks left on layers the board does
+// not have.
+type Reconcile struct {
+	MissingTracks []NewTrack `json:"missingTracks,omitempty"`
+	MissingVias   []NewVia   `json:"missingVias,omitempty"`
+	Stray         []Track    `json:"strayTracks,omitempty"`
+}
+
+// PlanReconcile compares every session segment and via with the live copper:
+// a segment is present when a same-net track on its layer contains both of its
+// ends (EasyEDA merges collinear pieces), a via when a same-net via sits
+// within MatchTolMil. Tracks on a layer id outside copper are stray (Gas
+// Module v9: importer leftovers on 21/22 cut +3V3 and SV3_DRV; the vias at
+// those points were missing too). viaDia sizes the vias to create.
+func PlanReconcile(ses *Wiring, tracks []Track, vias [][2]float64, viaNets []string, copper []int, viaDia float64) Reconcile {
+	var r Reconcile
+	valid := map[int]bool{}
+	for _, l := range copper {
+		valid[l] = true
+	}
+	for _, s := range ses.Segments {
+		layer, ok := LayerID(s.Layer)
+		if !ok || !valid[layer] {
+			continue
+		}
+		found := false
+		for _, t := range tracks {
+			if t.Layer != layer || !strings.EqualFold(t.Net, s.Net) {
+				continue
+			}
+			ta, tb := [2]float64{t.X1, t.Y1}, [2]float64{t.X2, t.Y2}
+			if pointSegDist(s.A, ta, tb) <= MatchTolMil && pointSegDist(s.B, ta, tb) <= MatchTolMil {
+				found = true
+				break
+			}
+		}
+		if !found {
+			r.MissingTracks = append(r.MissingTracks, NewTrack{Net: s.Net, Layer: layer, X1: s.A[0], Y1: s.A[1], X2: s.B[0], Y2: s.B[1], Width: s.WidthMil})
+		}
+	}
+	for _, v := range ses.Vias {
+		found := false
+		for i, p := range vias {
+			if strings.EqualFold(viaNets[i], v.Net) && math.Hypot(p[0]-v.At[0], p[1]-v.At[1]) <= MatchTolMil {
+				found = true
+				break
+			}
+		}
+		if !found {
+			r.MissingVias = append(r.MissingVias, NewVia{Net: v.Net, X: v.At[0], Y: v.At[1], DiameterMil: viaDia})
+		}
+	}
+	for _, t := range tracks {
+		if !valid[t.Layer] {
+			r.Stray = append(r.Stray, t)
+		}
+	}
+	return r
+}
+
+// CopperLayerIDs returns the EasyEDA ids of a board's copper layers.
+func CopperLayerIDs(count int) []int {
+	ids := []int{1, 2}
+	for k := 1; k <= count-2; k++ {
+		ids = append(ids, 14+k)
+	}
+	return ids
 }

@@ -301,6 +301,13 @@ Steps (stdout is one summary JSON, progress on stderr):
    same-net, same-layer track and keeps only the widest (probed live 2026-10-06), so creating first lost the narrow
    pieces and made `pcb widen` delete ids that no longer existed. Tracks no session segment explains are left and
    listed under `unmatched`.
+   A track whose segment exists on two inner layers is placed by the importer's offset (21 → Inner1, 22 → Inner2).
+   Then the board is reconciled with the session: every session segment needs a same-net track on its layer
+   containing both ends, every session via a same-net via at its point; missing ones are created, tracks left on
+   layers the board lacks are deleted, and a second comparison records what is still missing (`reconcile`,
+   `unresolved`; gate `session-reconcile`). Gas Module v9: two importer leftovers on 21/22 and two missing vias cut
+   +3V3 and SV3_DRV; pad-net diff cannot see such breaks, post-layout sim did. `pcb widen` ignores tracks on
+   non-copper layers. Session files are kept whenever a step or gate fails.
    Reads that drive deletes also come after save + reload (before DSN export, the repair and fixed-wiring reads,
    `pcb widen`), since the editor can serve stale reads right after writes (`staleRisk`).
 4. pour rebuild → save → reload → pour rebuild → native DRC → `pad-net-diff.py` (needs `--sch-connectivity`,
