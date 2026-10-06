@@ -3,6 +3,7 @@
 DIST := dist
 .PHONY: local-build release-assets
 .PHONY: local-daemon-restart local-check
+.PHONY: cleanroom-check
 
 # Installed local runtime, not `go run`/git-describe. Restart is a recovery
 # operation: it must remain usable while the full runtime gate is NOT READY.
@@ -35,6 +36,9 @@ help: ## show this cheatsheet
 
 test: ## go test -short ./... (CI; skips the long routing fixture bench)
 	go test -short ./...
+
+cleanroom-check: ## router-v2 clean-room provenance check (CLEANROOM.md §6) over CLEANROOM_RANGE (default dev..HEAD)
+	scripts/cleanroom-check.sh $(CLEANROOM_RANGE)
 
 fixture-bench: ## full 5-board routing regression (~25 min): compare routed % with the last run (wall-clock budget: scores move with machine load; see fixture-bench-det)
 	go test ./pkg/pcbauto -run TestFixtureBench -timeout 3600s -v
