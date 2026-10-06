@@ -18,6 +18,11 @@ type NetRequirement struct {
 	InnerMil     float64 `json:"innerMil"`
 	MinMil       float64 `json:"minMil"`
 	ClearanceMil float64 `json:"clearanceMil"`
+	// NarrowPadMil is the net's narrowest pad (0 = unknown). A pad narrower
+	// than OuterMil cannot be left at full width, so the router may neck
+	// down at it even when MinMil = OuterMil (Gas Module V5 B: +3V3 on a
+	// 0.5 mm-pitch QFP pin, 11 mil pad, left 4 fixable violations).
+	NarrowPadMil float64 `json:"narrowPadMil,omitempty"`
 }
 
 // RequirementReport says how the DSN was brought up to the requirements.
@@ -141,9 +146,12 @@ func ApplyNetRequirements(dsn string, reqs map[string]NetRequirement) (string, R
 	return dsn[:ns] + body + dsn[ne:], rep, nil
 }
 
-// forbidsNeckdown: the net may not neck down and its full width is above the
-// global neck-down floor, so the router must be told.
+// forbidsNeckdown: the net may not neck down, its full width is above the
+// global neck-down floor and every pad can take it, so the router must be told.
 func forbidsNeckdown(r NetRequirement, floor float64) bool {
+	if r.NarrowPadMil > 0 && r.NarrowPadMil+reqEps < r.OuterMil {
+		return false
+	}
 	return r.MinMil+reqEps >= r.OuterMil && r.OuterMil > floor+reqEps
 }
 

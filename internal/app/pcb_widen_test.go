@@ -139,3 +139,11 @@ func TestIROverBudgetWiden(t *testing.T) {
 		t.Fatal("DRC failure must not trigger IR widening")
 	}
 }
+
+func TestSetNarrowPads(t *testing.T) {
+	reqs := map[string]specctra.NetRequirement{"+3V3": {OuterMil: 15, MinMil: 15}, "GND": {OuterMil: 20, MinMil: 10}}
+	setNarrowPads([]boardPad{{Net: "+3V3", W: 11, H: 70.9}, {Net: "+3V3", W: 35, H: 31}, {Net: "SIG", W: 5, H: 5}}, reqs)
+	if reqs["+3V3"].NarrowPadMil != 11 || reqs["GND"].NarrowPadMil != 0 {
+		t.Fatalf("%+v", reqs)
+	}
+}
