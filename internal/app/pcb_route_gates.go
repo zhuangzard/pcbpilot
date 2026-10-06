@@ -286,6 +286,11 @@ func postRouteGates(cfg *appConfig, window, intentPath string, post *postImportS
 			g.Items = append(g.Items, fmt.Sprintf("%s: %d", k, v))
 		}
 		sort.Strings(g.Items)
+		// Each violation with where and what (v18 B: "Clearance Error: 10"
+		// alone left the cause unknown).
+		for _, v := range post.DRCList {
+			g.Items = append(g.Items, drcItem(v))
+		}
 	} else {
 		g.Detail = "not run"
 	}
@@ -429,6 +434,10 @@ type qualityGateOpts struct {
 	unresolved                          *specctra.Reconcile
 	// silk: limits of the silkscreen gate (judged on the readback).
 	silk silkTightOpts
+	// routeChecked adds the route-complete gate on route (the imported
+	// fastroute session; nil = unknown, which fails).
+	routeChecked bool
+	route        *fastrouteRun
 }
 
 // runQualityGates: pour rebuild → save → reload → pour rebuild → native DRC →
@@ -474,6 +483,12 @@ func runQualityGates(cfg *appConfig, window string, o qualityGateOpts, summary m
 		viaOK = segmentViaOK(in, res)
 	}
 	gates, pass := postRouteGates(cfg, window, o.intent, post, res.Verdict.Status, res.Verdict.Reasons, o.sessionChecked, o.unresolved, o.waivers, segNeed, viaOK, stderr)
+	if o.routeChecked {
+		g := routeCompleteGate(o.route)
+		applyWaivers(&g, o.waivers)
+		gates = append(gates, g)
+		pass = pass && g.Pass
+	}
 	// Silkscreen: designators next to their own part, never on pads / holes /
 	// edge / other silk, never below the project size (readback).
 	_, _, font := silkTightInput(snap, o.silk)
@@ -738,4 +753,49 @@ func segmentViaOK(in *designIntent, res *postsim.Result) func([]string, string) 
 		return true, fmt.Sprintf("via-current %s (%s): group carries %.3f A (sim), rated %.2f A ≥ ×%.2f — not a trunk transition (net %.2f A)",
 			net, strings.Join(ids, ","), amps, cap, 1+margin, total)
 	}
+}
+
+// drcItem is one native violation as a gate item: class, object kinds,
+// layer, net, position (mil) and the primitive ids.
+func drcItem(v drcFlatViolation) string {
+	at := ""
+	if v.X != nil && v.Y != nil {
+		at = fmt.Sprintf(" at (%.1f,%.1f)", *v.X, *v.Y)
+	}
+	s := v.Rule
+	if v.ObjType != "" {
+		s += " [" + v.ObjType + "]"
+	}
+	if v.Layer != "" {
+		s += " " + v.Layer
+	}
+	if v.Net != "" {
+		s += " net " + v.Net
+	}
+	s += at
+	if len(v.Objs) > 0 {
+		s += " objs " + strings.Join(v.Objs, ",")
+	}
+	if v.Message != "" {
+		s += ": " + v.Message
+	}
+	return s
+}
+
+// routeCompleteGate: the imported session must route every connection and
+// carry no violation the router could have fixed (its unfixable ones are
+// pre-existing pin-pin overlaps; native DRC judges the copper).
+func routeCompleteGate(r *fastrouteRun) gateResult {
+	g := gateResult{Gate: "route-complete"}
+	if r == nil {
+		g.Detail = "no successful router run recorded"
+		return g
+	}
+	g.Pass = r.Unrouted == 0 && r.Fixable == 0
+	g.Detail = fmt.Sprintf("imported session: %d unrouted, %d violation(s) (%d fixable), round %d", r.Unrouted, r.Violations, r.Fixable, r.Round)
+	if r.Unrouted > 0 {
+		g.Items = append(g.Items, fmt.Sprintf("%d connection(s) unrouted (see %s)", r.Unrouted, r.Report))
+	}
+	g.Items = append(g.Items, r.FixableList...)
+	return g
 }

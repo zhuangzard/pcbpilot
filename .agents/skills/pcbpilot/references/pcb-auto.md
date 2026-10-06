@@ -332,7 +332,10 @@ pcbpilot pcb auto route --playbook out/playbook.json --out-dir out/live --projec
 - 压降闭环：若唯一失败的门是后仿真压降（`X drops N mV … over the B mV budget`），按 N/B ×1.15 加宽该网全部走线
   （上限 `--widen-max-mil`，间距与 DRC 守卫照旧），重新对账并重跑全部门禁，最多 2 轮；DRC、对账等其他门失败时不加宽。
   线宽门只按电流，压降还取决于长度：Gas Module V5 B v17 的 SV1_DRV 0.34 A 走内层 1551 mil × 10 mil，压降 57 mV（预算 30）。
-- 会话对账：两段同网共线走线的圆头重叠到仍有段宽 90 % 时视为连续铜（v17：导入丢了夹在 2.2 mil 缝里的 1.1 mil GND 短段）。
+- 会话对账：一段在同层同网铜（走线圆头胶囊、过孔圆盘）覆盖其 90 % 宽度全长时视为在（v17：导入丢了夹在 2.2 mil 缝里的
+  1.1 mil GND 短段；v18：EasyEDA 把 12.5 mil 宽 40 mil 的 SV1_DRV 短段并进了旁边的过孔和 40 mil 走线）。
+- `route-complete`（fastroute 布线时）：导入的会话必须 0 未布通、0 个可修复违规；v18 B 带 1 条未布通导入而没有门拦住。
+- `native-drc` 逐条列出违规（类型、对象、层、网、坐标 mil、图元 id），不再只给计数。
 - 丝印（`silkscreen` 门，读回 `pcb.silk.list` 真实包围盒判）：`pcb auto route` 铺铜加宽后自动跑 `pcb silk-align --tight`
   的同一流程：位号放在自己封装旁最近的空位（先 `--silk-gap` 5 mil 四边横排，再转 90° 四边，从下或从右读），
   密集簇（去耦电容排、电阻排）排成与器件一一对齐的行/列；**字号从不缩小**（小于项目字号的放大到项目字号，

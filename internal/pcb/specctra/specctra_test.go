@@ -361,3 +361,22 @@ func TestPlanReconcileBridgedGap(t *testing.T) {
 		t.Fatalf("10 mil gap: %+v", r.MissingTracks)
 	}
 }
+
+// Gas Module V5 B v18: EasyEDA dropped a 12.5 mil 40 mil-wide SV1_DRV stub
+// whose area a via and two 40 mil tracks already cover; it is present. The
+// same stub with the covering track removed is missing.
+func TestPlanReconcileCoveredStub(t *testing.T) {
+	ses := &Wiring{Segments: []Segment{{Net: "SV1_DRV", Layer: "TopLayer", WidthMil: 40, A: [2]float64{3082.8, 1652.5}, B: [2]float64{3082.8, 1640}}}}
+	tracks := []Track{
+		{Net: "SV1_DRV", Layer: 1, X1: 3090, Y1: 1645.3, X2: 3082.8, Y2: 1652.5, Width: 40},
+		{Net: "SV1_DRV", Layer: 1, X1: 3082.8, Y1: 1640, X2: 3081.4, Y2: 1638.7, Width: 40},
+	}
+	vias := [][2]float64{{3082.8, 1652.5}}
+	nets := []string{"SV1_DRV"}
+	if r := PlanReconcile(ses, tracks, vias, nets, CopperLayerIDs(4), 24); len(r.MissingTracks) != 0 {
+		t.Fatalf("covered stub reported missing: %+v", r.MissingTracks)
+	}
+	if r := PlanReconcile(ses, tracks[1:], nil, nil, CopperLayerIDs(4), 24); len(r.MissingTracks) != 1 {
+		t.Fatalf("uncovered stub: %+v", r.MissingTracks)
+	}
+}

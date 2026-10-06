@@ -330,7 +330,8 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 				return finish(fmt.Errorf("silk placement: %w", err))
 			}
 			gateOpts := qualityGateOpts{intent: o.intentPath, sim: simPath, sch: schFiles, script: scriptPath,
-				outDir: outDir, waivers: waivers, sessionChecked: true, unresolved: unresolved, widthBasis: widthBasis, source: "live board after pcb auto route", silk: silkOpt}
+				outDir: outDir, waivers: waivers, sessionChecked: true, unresolved: unresolved, widthBasis: widthBasis, source: "live board after pcb auto route", silk: silkOpt, routeChecked: summary["router"] == "fastroute"}
+			gateOpts.route, _ = summary["routeFinal"].(*fastrouteRun)
 			pass, err := runQualityGates(cfg, *window, gateOpts, summary, stderr)
 			if err != nil {
 				return finish(err)

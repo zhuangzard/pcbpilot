@@ -386,6 +386,13 @@ func PlanReconcile(ses *Wiring, tracks []Track, vias [][2]float64, viaNets []str
 		// Module v10: a GND segment split into 21.7 + 16.24 mil pieces was
 		// reported missing and then duplicated).
 		for _, gap := range uncovered(s, layer, tracks) {
+			// EasyEDA also merges a short piece into overlapping same-net
+			// copper that is not collinear (Gas Module V5 B v18: a 12.5 mil
+			// SV1_DRV stub between a via and two 40 mil tracks): present
+			// when same-net copper covers 90 % of its width all along.
+			if copperCovers(gap, s.WidthMil, s.Net, layer, tracks, vias, viaNets, viaDia) {
+				continue
+			}
 			r.MissingTracks = append(r.MissingTracks, NewTrack{Net: s.Net, Layer: layer, X1: gap[0][0], Y1: gap[0][1], X2: gap[1][0], Y2: gap[1][1], Width: s.WidthMil})
 		}
 	}
@@ -483,4 +490,49 @@ func uncovered(s Segment, layer int, tracks []Track) [][2][2]float64 {
 		emit(at, length)
 	}
 	return gaps
+}
+
+// copperCovers reports whether same-net tracks on layer and same-net vias
+// cover the stretch a→b of width w: sample points every 0.5 mil along it, on
+// its axis and at ±45 % of its width, each inside some track capsule or via.
+func copperCovers(seg [2][2]float64, w float64, net string, layer int, tracks []Track, vias [][2]float64, viaNets []string, viaDia float64) bool {
+	a, b := seg[0], seg[1]
+	l := math.Hypot(b[0]-a[0], b[1]-a[1])
+	if l == 0 {
+		return false
+	}
+	ux, uy := (b[0]-a[0])/l, (b[1]-a[1])/l
+	in := func(x, y float64) bool {
+		for _, t := range tracks {
+			if t.Layer == layer && strings.EqualFold(t.Net, net) && segDist(x, y, t.X1, t.Y1, t.X2, t.Y2) <= t.Width/2+1e-6 {
+				return true
+			}
+		}
+		for i, v := range vias {
+			if strings.EqualFold(viaNets[i], net) && math.Hypot(x-v[0], y-v[1]) <= viaDia/2+1e-6 {
+				return true
+			}
+		}
+		return false
+	}
+	n := int(math.Ceil(l/0.5)) + 1
+	for i := 0; i < n; i++ {
+		t := l * float64(i) / float64(n-1)
+		for _, o := range []float64{0, 0.45 * w, -0.45 * w} {
+			if !in(a[0]+ux*t-uy*o, a[1]+uy*t+ux*o) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func segDist(px, py, ax, ay, bx, by float64) float64 {
+	dx, dy := bx-ax, by-ay
+	l2 := dx*dx + dy*dy
+	t := 0.0
+	if l2 > 0 {
+		t = math.Max(0, math.Min(1, ((px-ax)*dx+(py-ay)*dy)/l2))
+	}
+	return math.Hypot(px-ax-t*dx, py-ay-t*dy)
 }

@@ -427,15 +427,17 @@ func repairImportSteps(cfg *appConfig, window string, ses, dsn string, dryRun bo
 // ── post-import checks ──────────────────────────────────────────────────────
 
 type postImportSummary struct {
-	PourRebuilt      bool           `json:"pourRebuilt"`
-	Saved            bool           `json:"saved"`
-	Reloaded         bool           `json:"reloaded"`
-	DRCPassed        bool           `json:"drcPassed"`
-	DRCTotal         int            `json:"drcViolations"`
-	DRCCounts        map[string]int `json:"drcCounts,omitempty"`
-	ConnectionErrors int            `json:"connectionErrors"`
-	PadNetDiff       any            `json:"padNetDiff"`
-	Notes            []string       `json:"notes"`
+	PourRebuilt bool           `json:"pourRebuilt"`
+	Saved       bool           `json:"saved"`
+	Reloaded    bool           `json:"reloaded"`
+	DRCPassed   bool           `json:"drcPassed"`
+	DRCTotal    int            `json:"drcViolations"`
+	DRCCounts   map[string]int `json:"drcCounts,omitempty"`
+	// DRCList is every native violation (class, objects, net, layer, mil).
+	DRCList          []drcFlatViolation `json:"drcList,omitempty"`
+	ConnectionErrors int                `json:"connectionErrors"`
+	PadNetDiff       any                `json:"padNetDiff"`
+	Notes            []string           `json:"notes"`
 }
 
 var padNetDiffAsset = skillAsset{
@@ -493,7 +495,7 @@ func postImportChecks(cfg *appConfig, window string, schFiles []string, scriptPa
 		return sum, drcTimeoutHint(err, stderr)
 	}
 	flat := flattenDrcResult(res.Result)
-	sum.DRCPassed, sum.DRCTotal, sum.DRCCounts = flat.Passed, flat.Total, flat.Counts
+	sum.DRCPassed, sum.DRCTotal, sum.DRCCounts, sum.DRCList = flat.Passed, flat.Total, flat.Counts, flat.Violations
 	sum.ConnectionErrors = flat.Counts["Connection Error"]
 	if sum.ConnectionErrors > 0 {
 		sum.Notes = append(sum.Notes, fmt.Sprintf(
@@ -1078,6 +1080,9 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 				sesPath, dsnPath, dsnText, runs = p, d, t, r2
 			}
 		}
+		// The imported session's counts: the route-complete gate of
+		// pcb auto route judges them (v18 B imported 1 unrouted silently).
+		summary["routeFinal"] = lastOK(runs)
 		if last := lastOK(runs); last != nil && last.Unrouted > 0 {
 			// Last resort before giving up: a fresh multi-start run (shuffled
 			// net orders) on the DSN that routed best; kept only if better.
