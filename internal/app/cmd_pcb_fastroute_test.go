@@ -220,3 +220,28 @@ echo '{"stats":{"unrouted":0,"violations":0}}' > "$report"
 		t.Fatalf("always-crashing router accepted: %+v %v", runs, err)
 	}
 }
+
+// LVDS-style constraints from the intent reach fastroute: pairs with their
+// gap, a skew group per pair, and the declared length groups.
+func TestIntentPairsAndTune(t *testing.T) {
+	in, err := parseDesignIntent([]byte(`{"schemaVersion":1,"nets":{
+ "LVDS_CLK_P":{"role":"signal","widthMil":{"outer":5,"min":5},"diffPair":"LVDS_CLK_N","pairGapMil":5,"maxSkewMil":5,"lengthGroup":"LVDS"},
+ "LVDS_CLK_N":{"role":"signal","widthMil":{"outer":5,"min":5},"diffPair":"LVDS_CLK_P","pairGapMil":5,"maxSkewMil":5,"lengthGroup":"LVDS"},
+ "LVDS_D0_P":{"role":"signal","widthMil":{"outer":5,"min":5},"lengthGroup":"LVDS","lengthTolMil":20},
+ "SIG":{"role":"signal","widthMil":{"outer":6,"min":6}}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pairs, tune := intentPairsAndTune(in)
+	if pairs != "pair LVDS_CLK_N LVDS_CLK_P gap=0.127\n" {
+		t.Fatalf("pairs = %q", pairs)
+	}
+	for _, want := range []string{"group LVDS tolerance=0.508\n", "  LVDS_D0_P\n", "group pair_LVDS_CLK_N_LVDS_CLK_P tolerance=0.127\n"} {
+		if !strings.Contains(tune, want) {
+			t.Fatalf("tune lacks %q:\n%s", want, tune)
+		}
+	}
+	if !strings.Contains(strings.Join(fastrouteArgs(fastrouteOpts{pairsFile: "p.txt", tuneFile: "t.txt"}, "b.dsn", "b.ses", "r.json", ""), " "), "--pairs=p.txt --tune=t.txt") {
+		t.Fatal("pairs/tune not passed to fastroute")
+	}
+}

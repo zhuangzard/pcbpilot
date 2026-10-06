@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -643,6 +644,8 @@ type fastrouteOpts struct {
 	minTraceUm float64
 	noNeckdown []string
 	threads    int
+	pairsFile  string
+	tuneFile   string
 	maxTime    time.Duration
 	rounds     int
 	timeout    time.Duration
@@ -664,6 +667,12 @@ func fastrouteArgs(o fastrouteOpts, dsn, ses, report, initial string) []string {
 	if o.threads > 0 {
 		n := strconv.Itoa(o.threads)
 		args = append(args, "--router.autorouter.max_threads="+n, "--router.optimizer.max_threads="+n)
+	}
+	if o.pairsFile != "" {
+		args = append(args, "--pairs="+o.pairsFile)
+	}
+	if o.tuneFile != "" {
+		args = append(args, "--tune="+o.tuneFile)
 	}
 	if len(o.noNeckdown) > 0 {
 		args = append(args, "--no-neckdown-classes="+strings.Join(o.noNeckdown, ","))
@@ -927,6 +936,7 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 	// Pre-route gate: the intent (schematic + simulation) is written to the
 	// board's native rules before anything is exported.
 	var reqs map[string]specctra.NetRequirement
+	var intent *designIntent
 	if o.intentPath != "" {
 		in, err := loadDesignIntent(o.intentPath)
 		if err != nil {
@@ -948,7 +958,7 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 			return false, sessions, fmt.Errorf("pre-route gate: pcb rules apply --intent %s: %w", o.intentPath, err)
 		}
 		fmt.Fprintf(stderr, "pre-route gate: intent rules %s\n", rrep.Status)
-		reqs = intentRequirements(in)
+		reqs, intent = intentRequirements(in), in
 	} else if preset {
 		fmt.Fprintln(stderr, "warning: no --intent — net widths/clearances come from whatever rules the board has; the intent is not enforced")
 	}
@@ -1012,6 +1022,23 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 			}
 			fmt.Fprintf(stderr, "pre-route gate: %d net requirement(s) met in the DSN (%d class(es) raised, %d added, %d without neck-down, min trace %.1f mil)\n",
 				rq.Nets, rq.Classes, rq.NewClasses, len(rq.NoNeckdown), rq.MinTraceMil)
+		}
+		if intent != nil {
+			pairs, tune := intentPairsAndTune(intent)
+			base := strings.TrimSuffix(dsnPath, ".dsn")
+			if pairs != "" {
+				o.fo.pairsFile = base + "-pairs.txt"
+				if err := os.WriteFile(o.fo.pairsFile, []byte(pairs), 0o644); err != nil {
+					return false, sessions, err
+				}
+			}
+			if tune != "" {
+				o.fo.tuneFile = base + "-tune.txt"
+				if err := os.WriteFile(o.fo.tuneFile, []byte(tune), 0o644); err != nil {
+					return false, sessions, err
+				}
+			}
+			summary["intentPairs"], summary["intentTune"] = pairs, tune
 		}
 		dsnPath = strings.TrimSuffix(dsnPath, ".dsn") + "-fixed.dsn"
 		if err := os.WriteFile(dsnPath, []byte(fixed), 0o644); err != nil {
@@ -1120,6 +1147,65 @@ func intentRequirements(in *designIntent) map[string]specctra.NetRequirement {
 		out[name] = r
 	}
 	return out
+}
+
+// intentPairsAndTune writes the intent's differential pairs and length
+// groups in fastroute's --pairs / --tune formats (mm). A pair with
+// maxSkewMil also becomes a length group of its two nets with that
+// tolerance. Empty strings when the intent has none.
+func intentPairsAndTune(in *designIntent) (pairs, tune string) {
+	mm := func(mil float64) string { return strconv.FormatFloat(math.Round(mil*0.0254*1000)/1000, 'f', -1, 64) }
+	var pb, tb strings.Builder
+	seen := map[string]bool{}
+	groups := map[string][]string{}
+	tol := map[string]float64{}
+	for _, name := range in.sortedNetNames() {
+		n := in.Nets[name]
+		if n.DiffPair != "" && in.Nets[n.DiffPair] != nil {
+			a, b := name, n.DiffPair
+			if b < a {
+				a, b = b, a
+			}
+			if !seen[a+"|"+b] {
+				seen[a+"|"+b] = true
+				fmt.Fprintf(&pb, "pair %s %s", a, b)
+				if n.PairGapMil > 0 {
+					fmt.Fprintf(&pb, " gap=%s", mm(n.PairGapMil))
+				}
+				pb.WriteString("\n")
+				if n.MaxSkewMil > 0 {
+					g := "pair_" + a + "_" + b
+					groups[g] = []string{a, b}
+					tol[g] = n.MaxSkewMil
+				}
+			}
+		}
+		if n.LengthGroup != "" {
+			groups[n.LengthGroup] = append(groups[n.LengthGroup], name)
+			if n.LengthTolMil > 0 && (tol[n.LengthGroup] == 0 || n.LengthTolMil < tol[n.LengthGroup]) {
+				tol[n.LengthGroup] = n.LengthTolMil
+			}
+		}
+	}
+	names := make([]string, 0, len(groups))
+	for g := range groups {
+		names = append(names, g)
+	}
+	sort.Strings(names)
+	for _, g := range names {
+		if len(groups[g]) < 2 {
+			continue
+		}
+		fmt.Fprintf(&tb, "group %s", g)
+		if tol[g] > 0 {
+			fmt.Fprintf(&tb, " tolerance=%s", mm(tol[g]))
+		}
+		tb.WriteString("\n")
+		for _, n := range groups[g] {
+			fmt.Fprintf(&tb, "  %s\n", n)
+		}
+	}
+	return pb.String(), tb.String()
 }
 
 // prepareDSN applies the export fixes and, with requirements, raises the net

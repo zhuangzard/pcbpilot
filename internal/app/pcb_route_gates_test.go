@@ -80,3 +80,22 @@ func TestCheckIntentWidthsPourBacked(t *testing.T) {
 		t.Fatalf("violations = %v", ids)
 	}
 }
+
+func TestCheckIntentLengths(t *testing.T) {
+	in, err := parseDesignIntent([]byte(`{"schemaVersion":1,"nets":{
+ "A_P":{"role":"signal","widthMil":{"outer":5},"diffPair":"A_N","maxSkewMil":5},
+ "A_N":{"role":"signal","widthMil":{"outer":5},"diffPair":"A_P","maxSkewMil":5},
+ "D0":{"role":"signal","widthMil":{"outer":5},"lengthGroup":"BUS","lengthTolMil":50},
+ "D1":{"role":"signal","widthMil":{"outer":5},"lengthGroup":"BUS","lengthTolMil":50}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tracks := []specctra.Track{
+		{Net: "A_P", X2: 1000}, {Net: "A_N", X2: 1003},
+		{Net: "D0", X2: 1000}, {Net: "D1", X2: 1100},
+	}
+	fails, n := checkIntentLengths(in, tracks)
+	if n != 2 || len(fails) != 1 || !strings.HasPrefix(fails[0], "group BUS: spread 100.0") {
+		t.Fatalf("fails = %v (%d groups)", fails, n)
+	}
+}

@@ -346,6 +346,11 @@ func postRouteGates(cfg *appConfig, window, intentPath string, post *postImportS
 		Detail: fmt.Sprintf("%d track(s) below the intent width outside pin neck-downs and own-net pours, or below the minimum", len(vs)),
 		Items:  summarizeWidthViolations(vs)})
 
+	if items, n := checkIntentLengths(in, tracks); n > 0 {
+		add(gateResult{Gate: "intent-lengths", Pass: len(items) == 0,
+			Detail: fmt.Sprintf("%d length group(s)/pair(s): routed length spread within tolerance", n), Items: items})
+	}
+
 	raw, err := json.Marshal(snap)
 	if err != nil {
 		add(gateResult{Gate: "pcb-check-intent", Detail: err.Error()})
@@ -527,4 +532,53 @@ Results: --out-dir/{gate.json, board-final.json, post.json, post.md}.`,
 	c.Flags().StringVar(&outDir, "out-dir", "pcb-gate", "directory for gate.json, board-final.json and post-layout results")
 	c.Flags().StringVar(&waiverPath, "waivers", "", "JSON list of signed waivers [{gate,match,reason,by}]")
 	return c
+}
+
+// checkIntentLengths compares routed track length per net within each intent
+// length group (lengthTolMil) and each differential pair (maxSkewMil).
+// Returns the failing groups and how many groups were checked.
+func checkIntentLengths(in *designIntent, tracks []specctra.Track) ([]string, int) {
+	length := map[string]float64{}
+	for _, t := range tracks {
+		length[t.Net] += math.Hypot(t.X2-t.X1, t.Y2-t.Y1)
+	}
+	type group struct {
+		nets []string
+		tol  float64
+	}
+	groups := map[string]*group{}
+	for _, name := range in.sortedNetNames() {
+		n := in.Nets[name]
+		if n.LengthGroup != "" && n.LengthTolMil > 0 {
+			g := groups["group "+n.LengthGroup]
+			if g == nil {
+				g = &group{tol: n.LengthTolMil}
+				groups["group "+n.LengthGroup] = g
+			}
+			g.nets = append(g.nets, name)
+			g.tol = math.Min(g.tol, n.LengthTolMil)
+		}
+		if n.DiffPair != "" && n.MaxSkewMil > 0 && name < n.DiffPair && in.Nets[n.DiffPair] != nil {
+			groups["pair "+name+"/"+n.DiffPair] = &group{nets: []string{name, n.DiffPair}, tol: n.MaxSkewMil}
+		}
+	}
+	var keys []string
+	for k, g := range groups {
+		if len(g.nets) >= 2 {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	var fails []string
+	for _, k := range keys {
+		g := groups[k]
+		lo, hi := math.Inf(1), 0.0
+		for _, n := range g.nets {
+			lo, hi = math.Min(lo, length[n]), math.Max(hi, length[n])
+		}
+		if hi-lo > g.tol+specctraEps {
+			fails = append(fails, fmt.Sprintf("%s: spread %.1f mil > %.1f mil (%.1f–%.1f)", k, hi-lo, g.tol, lo, hi))
+		}
+	}
+	return fails, len(keys)
 }
