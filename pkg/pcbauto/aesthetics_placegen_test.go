@@ -159,7 +159,7 @@ func TestAesWorseTiers(t *testing.T) {
 		"converter loop":            {hard: 10, crit: 5, conv: 3.1, chain: 2, flow: 1, res: 1, comfort: 4, wire: 100},
 		"signal chain":              {hard: 10, crit: 5, conv: 3, chain: 2.1, flow: 1, res: 1, comfort: 4, wire: 100},
 		"pair corridor":             {hard: 10, crit: 5, conv: 3, chain: 2, flow: 1.1, res: 1, comfort: 4, wire: 100},
-		"port reserve / keep-apart": {hard: 10, crit: 5, conv: 3, chain: 2, flow: 1, res: 1.1, comfort: 4, wire: 100},
+		"port reserve / keep-apart / designator room": {hard: 10, crit: 5, conv: 3, chain: 2, flow: 1, res: 1.1, comfort: 4, wire: 100},
 		"wire slack":                {hard: 10, crit: 5, conv: 3, chain: 2, flow: 1, res: 1, comfort: 4, wire: 106},
 	} {
 		if got := aesWorse(base, after, 5, aesCost{}); got != name {

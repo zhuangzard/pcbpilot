@@ -17,6 +17,7 @@ package app
 // drawn automatically.
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -26,6 +27,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
 )
 
 // silkTightOpts are the placement and gate limits (mil).
@@ -759,7 +761,9 @@ func planSilkGroups(labels []silkLabel, sc silkScene, placed []silkPlaced, opt s
 			g.Members = silkBox{math.Min(g.Members.MinX, m.Own.MinX), math.Min(g.Members.MinY, m.Own.MinY), math.Max(g.Members.MaxX, m.Own.MaxX), math.Max(g.Members.MaxY, m.Own.MaxY)}
 		}
 		if len([]rune(g.Text)) <= maxGroupChars {
-			ln := charW * float64(len([]rune(g.Text)))
+			// "/" and "–" render wider than the average designator glyph
+			// (v21 B: "C19/C49/D9/R38" drawn over C26's designator).
+			ln := 1.15 * charW * float64(len([]rune(g.Text)))
 		search:
 			for d := opt.Gap; d <= opt.GroupMaxDist; d += 2 {
 				for _, rot := range []int{0, 90} {
@@ -935,7 +939,9 @@ func silkGate(snap *boardSnapshot, font float64, opt silkTightOpts) gateResult {
 		b := silkBox(*t.BBox)
 		at := fmt.Sprintf("(%.1f,%.1f)", b.cx(), b.cy())
 		for j, o := range texts {
-			if j != i && o.Layer == t.Layer && b.overlaps(silkBox(*o.BBox)) && (j > i || !isVisibleDesignator(o)) {
+			_, og := isGroup[j]
+			pairOnce := !(isVisibleDesignator(o) || og) || t.Text+"\x00"+t.ID < o.Text+"\x00"+o.ID // one item per checked pair, named in text order
+			if j != i && o.Layer == t.Layer && b.overlaps(silkBox(*o.BBox)) && pairOnce {
 				add(100, "%s %s overlaps silk %q", t.Text, at, o.Text)
 			}
 		}
@@ -987,7 +993,15 @@ func silkGate(snap *boardSnapshot, font float64, opt silkTightOpts) gateResult {
 			add(80, "%s %s stroke %.2f mil below the fab minimum %.2f", t.Text, at, t.LineWidth, opt.FabMinLine)
 		}
 	}
-	sort.SliceStable(bads, func(i, j int) bool { return bads[i].sev > bads[j].sev })
+	// Worst first, then by text: the same board reads back the same items
+	// whatever order the host lists its silk in (A/B comparisons).
+	sort.SliceStable(bads, func(i, j int) bool {
+		if bads[i].sev != bads[j].sev {
+			return bads[i].sev > bads[j].sev
+		}
+		return bads[i].text < bads[j].text
+	})
+	sort.Strings(info)
 	g := gateResult{Gate: "silkscreen", Pass: len(bads) == 0, Info: info}
 	g.Detail = fmt.Sprintf("%d designator / group label(s) checked on the readback, %d hidden designator(s) named by group labels, %d problem(s); project size %.1f mil, max %.0f mil from the footprint, fab stroke ≥ %.2f mil", n, len(info), len(bads), font, opt.MaxDist, opt.FabMinLine)
 	if n == 0 {
@@ -1170,4 +1184,44 @@ func addSilkTightFlags(c *cobra.Command, o *silkTightOpts, prefix string) {
 	c.Flags().Float64Var(&o.GroupMaxDist, prefix+"group-max-dist", o.GroupMaxDist, "a group label (\"C21–C24\", \"R62/R63/R65\") sits within this of its parts' box (mil)")
 	c.Flags().Float64Var(&o.GroupLink, prefix+"group-link", o.GroupLink, "unplaceable designators whose footprints are within this of each other share one group label (mil)")
 	c.Flags().BoolVar(&o.NoGroups, prefix+"no-groups", false, "never draw group labels / hide designators: report what has no slot")
+}
+
+// silkOutlineMil is how far a footprint's EasyEDA box (silk outline
+// included) reaches beyond the placer's body.
+const silkOutlineMil = 8
+
+// labelSpecFromBoard sizes the designator room placement keeps from the
+// board dump's visible designators: the project height (most common font)
+// and the average rendered width per character. nil without silk.
+func labelSpecFromBoard(raw []byte) *pcbauto.LabelSpec {
+	var snap boardSnapshot
+	if len(raw) == 0 || json.Unmarshal(raw, &snap) != nil {
+		return nil
+	}
+	font := projectDesignatorFont(snap.Silk)
+	length, chars, height, n := 0.0, 0, 0.0, 0
+	for _, t := range snap.Silk {
+		if !isVisibleDesignator(t) || t.FontSize <= 0 || math.Abs(t.FontSize-font) > 0.05 {
+			continue
+		}
+		b := silkBox(*t.BBox)
+		ln, ht := b.w(), b.h()
+		if r := normRot(t.Rotation); r == 90 || r == 270 {
+			ln, ht = ht, ln
+		}
+		length += ln
+		chars += len([]rune(t.Text))
+		height += ht
+		n++
+	}
+	if n == 0 || chars == 0 {
+		return nil
+	}
+	// The silk step measures from EasyEDA's footprint box, which includes
+	// the silk outline: about silkOutlineMil beyond the placer's body on
+	// Gas Module V5 (0603: 119×66 vs 103×51). The placer's room must
+	// hold that margin or its "free" slot is blocked at silk time.
+	opt := defaultSilkTightOpts()
+	return &pcbauto.LabelSpec{Height: height / float64(n), CharW: length / float64(chars),
+		Gap: opt.Gap + silkOutlineMil, Clear: math.Max(opt.PadClear, silkOutlineMil)}
 }

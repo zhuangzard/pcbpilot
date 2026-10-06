@@ -138,6 +138,10 @@ func TestIROverBudgetWiden(t *testing.T) {
 	if irOverBudget(sum) == nil {
 		t.Fatal("an intent-widths failure must not block IR widening")
 	}
+	sum["gates"] = append(sum["gates"].([]gateResult), gateResult{Gate: "silkscreen", Items: []string{"C26"}}, gateResult{Gate: "board-manual", Items: []string{"n"}})
+	if irOverBudget(sum) == nil {
+		t.Fatal("silkscreen / board-manual failures must not block IR widening")
+	}
 	sum["gates"] = append(sum["gates"].([]gateResult), gateResult{Gate: "native-drc", Items: []string{"x"}})
 	if irOverBudget(sum) != nil {
 		t.Fatal("DRC failure must not trigger IR widening")

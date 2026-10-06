@@ -23,9 +23,12 @@ type SeedTrial struct {
 // times more picked a scattered placement on Gas Module V5 (seed 3: 136.5 in,
 // empty corners) over the compact one the user asked for (seed 2: 121.9 in);
 // the annealer already holds the critical relations by their tethers.
+//
+// A part with no room for its designator costs 1.5 in: the text may not be
+// shrunk, so a blocked label is a silk-gate failure later (Gas Module V5).
 func placeScore(m PlaceMetrics) (illegal int, score float64) {
 	illegal = m.Overlaps + m.OutOfBoard + m.OutOfZone + m.KeepoutHits + m.HeightHits
-	return illegal, m.WirelengthIn + m.TetherExcessMil/1000
+	return illegal, m.WirelengthIn + m.TetherExcessMil/1000 + 1.5*float64(m.LabelBlocked)
 }
 
 // better reports whether trial a beats trial b.

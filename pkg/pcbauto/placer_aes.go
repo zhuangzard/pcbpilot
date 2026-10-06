@@ -456,6 +456,7 @@ func (pl *placer) aesEval(scope []*Part, nets []int) aesCost {
 		c.chain += pl.chainCost(q)
 		c.flow += pl.corridorCost(q) + pl.pairFlowCost(q)
 		c.res += pl.reserveCost(q)
+		c.res += pl.labelCost(q) // a looks move may not take a designator's room
 		for _, pr := range pl.apart {
 			if pr[0] == q || pr[1] == q {
 				d := pr[0].Body().Center().Dist(pr[1].Body().Center())
@@ -486,7 +487,7 @@ func aesWorse(before, after aesCost, allow float64, q aesCost) string {
 	case after.flow > before.flow+q.flow+tol(before.flow):
 		return "pair corridor"
 	case after.res > before.res+tol(before.res):
-		return "port reserve / keep-apart"
+		return "port reserve / keep-apart / designator room"
 	case after.charge()-before.charge() > math.Max(0, allow)+tol(before.charge()):
 		return "wire slack"
 	}

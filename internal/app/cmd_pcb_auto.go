@@ -135,7 +135,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 			raw, err = os.ReadFile(in.board)
 		} else {
 			var snap *boardSnapshot
-			snap, err = fetchBoardSnapshot(cfg, *window, boardSnapshotOpts{withRules: true, withLayers: true, withCopper: true, withFootprintHoles: true})
+			snap, err = fetchBoardSnapshot(cfg, *window, boardSnapshotOpts{withRules: true, withLayers: true, withCopper: true, withFootprintHoles: true, withSilk: true})
 			if err == nil {
 				raw, err = json.Marshal(snap)
 			}
@@ -480,6 +480,12 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 					fmt.Fprintf(stderr, "loop: best pass %d\n", lr.Best)
 				} else if place {
 					popt := pcbauto.PlaceOptions{Seed: seed, Refine: refine, Macro: macro, Only: only, Aesthetics: aesStyle, TidyOnly: tidyOnly}
+					// Room for every designator at the project size (the
+					// text is never shrunk; the silk step needs a slot).
+					if ls := labelSpecFromBoard(boardRaw); ls != nil {
+						popt.Labels = ls
+						fmt.Fprintf(stderr, "placement: keeping room for each designator (%.1f mil high, %.1f mil per character)\n", ls.Height, ls.CharW)
+					}
 					if noRoute {
 						// Without the place↔route loop the annealer's luck is
 						// all there is: take the best of several seeds.

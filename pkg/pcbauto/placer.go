@@ -39,6 +39,9 @@ type PlaceOptions struct {
 	// Only restricts the movable set to these designators (with Refine: a
 	// local adjustment of named parts on an otherwise confirmed layout).
 	Only []string `json:"only,omitempty"`
+	// Labels makes every part keep room for its designator (placer_label.go);
+	// nil = off.
+	Labels *LabelSpec `json:"labels,omitempty"`
 	// NoCorridors places without the differential-pair corridor terms
 	// (corridor intrusion, in-line part flow, access-path twists) — the
 	// plain placement PlaceThenRoute and the place/route loop route next
@@ -91,8 +94,11 @@ type PlaceMetrics struct {
 	Utilisation       float64 `json:"utilisation"`
 	// Corridors is the number of differential-pair corridors the placement
 	// kept clear (0 with PlaceOptions.NoCorridors or no intent pairs).
-	Corridors int   `json:"corridors,omitempty"`
-	Millis    int64 `json:"millis"`
+	Corridors int `json:"corridors,omitempty"`
+	// LabelBlocked counts parts with no free slot for their designator
+	// (PlaceOptions.Labels; 0 when off).
+	LabelBlocked int   `json:"labelBlocked,omitempty"`
+	Millis       int64 `json:"millis"`
 }
 
 // PlaceResult is the placer output.
@@ -199,6 +205,9 @@ func Place(b *Board, an *Analysis, c *Circuit, m *Mechanics, opt PlaceOptions) (
 	}
 	if m == nil {
 		m = &Mechanics{Edge: map[string]MechEdge{}, Fixed: map[string]bool{}}
+	}
+	if !labelSpecValid(opt.Labels) {
+		opt.Labels = nil
 	}
 	pl := &placer{b: b, an: an, c: c, m: m, opt: opt, rng: rand.New(rand.NewSource(opt.Seed + 1)),
 		partNet: map[*Part][]int{}, zoneOf: map[*Part]Rect{}, decap: map[*Part]*Pad{}, spacing: opt.SpacingMil}
@@ -706,6 +715,7 @@ func (pl *placer) partCost(p *Part) float64 {
 		cost += pl.corridorCost(p)
 		cost += pl.pairFlowCost(p)
 		cost += pl.reserveCost(p)
+		cost += pl.labelCost(p)
 		for _, pr := range pl.apart {
 			if pr[0] == p || pr[1] == p {
 				d := pr[0].Body().Center().Dist(pr[1].Body().Center())
@@ -1567,6 +1577,7 @@ func (pl *placer) metrics(res *PlaceResult) {
 	m := &res.Metrics
 	m.WirelengthIn = pl.wirelength() / 1000
 	m.Corridors = len(pl.corridors)
+	m.LabelBlocked = pl.labelBlocked()
 	parts := pl.b.Parts
 	for i, p := range parts {
 		bi := p.Body()
