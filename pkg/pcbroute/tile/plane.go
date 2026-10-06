@@ -40,6 +40,8 @@ type Plane struct {
 
 	single map[geom.NetID][]geom.NetID // interned one-net owner sets
 	sets   map[string][]geom.NetID     // interned larger sets, by key
+
+	todo, work, touched []*Tile // scratch of paint and canon
 }
 
 // NewPlane returns a plane over bounds with one Space tile. step is the

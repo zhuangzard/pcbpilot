@@ -121,7 +121,7 @@ func setOwners(t *Tile, s []geom.NetID) {
 // must map interned sets to interned sets and be idempotent, since rs may
 // overlap.
 func (p *Plane) paint(rs []geom.Rect, f func([]geom.NetID) []geom.NetID) {
-	var todo, work []*Tile
+	todo, work := p.todo[:0], p.work[:0]
 	for _, r := range rs {
 		r = clip(r, p.bounds)
 		if r.Empty() {
@@ -153,6 +153,7 @@ func (p *Plane) paint(rs []geom.Rect, f func([]geom.NetID) []geom.NetID) {
 			work = append(work, t)
 		}
 	}
+	p.todo = todo
 	if len(work) > 0 {
 		p.canon(work)
 	}
@@ -169,7 +170,8 @@ func dead(t *Tile) bool { return t.Rect.Empty() }
 // owners touch side by side, and no two touch on top with equal x span, which
 // is the unique canonical form.
 func (p *Plane) canon(work []*Tile) {
-	touched := slices.Clone(work)
+	touched := append(p.touched[:0], work...)
+	defer func() { p.work, p.touched = work[:0], touched[:0] }()
 	push := func(ts ...*Tile) {
 		work = append(work, ts...)
 		touched = append(touched, ts...)
