@@ -2,6 +2,7 @@ package pcbauto
 
 import (
 	"math"
+	"strings"
 	"testing"
 	"time"
 )
@@ -71,5 +72,29 @@ func TestApplyStartPoses(t *testing.T) {
 	}
 	if d := p.Pads[0].Box.C.Sub(padBefore); math.Abs(d.X-100) > 1e-6 || math.Abs(d.Y-50) > 1e-6 {
 		t.Fatalf("pads did not follow: %v", d)
+	}
+}
+
+func TestWithPlacement(t *testing.T) {
+	pb := &Playbook{Version: 1, Meta: map[string]any{"name": "best"}, Steps: []Step{
+		{ID: "stackup"}, {ID: "outline"},
+		{ID: "place-U1", Action: "pcb.component.modify", Payload: map[string]any{"primitiveId": "u1"}},
+		{ID: "save"}, {ID: "drc"},
+	}}
+	original := map[string]Placement{"U1": {Ref: "U1", ID: "u1", X: 0, Y: 0}, "R1": {Ref: "R1", ID: "r1", X: 10, Y: 10}}
+	alt := &PlaceResult{Placements: []Placement{
+		{Ref: "U1", ID: "u1", X: 0, Y: 0},       // unmoved: no step
+		{Ref: "R1", ID: "r1", X: 50, Y: 10, Rot: 90},
+	}}
+	got := WithPlacement(pb, alt, original, "alt")
+	ids := []string{}
+	for _, s := range got.Steps {
+		ids = append(ids, s.ID)
+	}
+	if want := "stackup,outline,place-R1,save,drc"; strings.Join(ids, ",") != want {
+		t.Fatalf("steps = %v, want %s", ids, want)
+	}
+	if got.Meta["name"] != "alt" || pb.Meta["name"] != "best" || len(pb.Steps) != 5 {
+		t.Fatal("original playbook modified or name not set")
 	}
 }

@@ -253,7 +253,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 		var loops int
 		var noFeedback, postSim bool
 		var routerSel string
-		var placeSeeds int
+		var placeSeeds, candidates int
 		var startPoses string
 		var keepBoardFills bool
 		var fbVerify, fbLoop int
@@ -467,6 +467,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 					}
 				}
 				looped := false
+				var candOuts []pcbauto.SeedOutcome
 				if place && !noRoute && loops > 0 {
 					lr, err := pcbauto.PlaceRoute(ctx, b, pre, rep.Circuit, mc, pcbauto.PlaceOptions{Seed: seed, Refine: refine, Macro: macro, Only: only, Aesthetics: aesStyle, TidyOnly: tidyOnly}, opts, pcbauto.LoopOptions{Passes: loops, Budget: in.timeout * time.Duration(loops+2)})
 					if err != nil {
@@ -488,7 +489,15 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 							c, err := understand(bc, a)
 							return a, c, err
 						}
-						rep.Placement, trials, err = pcbauto.PlaceBest(b, prep, mc, popt, placeSeeds)
+						var outs []pcbauto.SeedOutcome
+						outs, trials, err = pcbauto.PlaceSeeds(b, prep, mc, popt, placeSeeds)
+						if err == nil {
+							*b = *outs[0].Board
+							rep.Placement = outs[0].Result
+							for i := 1; i < len(outs) && i < candidates; i++ {
+								candOuts = append(candOuts, outs[i])
+							}
+						}
 						if err == nil {
 							// b is now the winning copy: its analysis and
 							// circuit are the ones later stages must use.
@@ -664,6 +673,21 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 					}
 				}
 				fmt.Fprintf(stdout, "wrote %s/{%s} (%d playbook steps)\n", outDir, names, len(pb.Steps))
+				// Runner-up placements as playbooks of their own (same
+				// stackup / mechanics steps, their own poses) for
+				// 'pcb auto route --candidates' to trial-route.
+				for _, co := range candOuts {
+					dir := filepath.Join(outDir, "candidates", fmt.Sprintf("seed-%d", co.Trial.Seed))
+					if err := os.MkdirAll(dir, 0o755); err != nil {
+						return err
+					}
+					cpb := pcbauto.WithPlacement(pb, co.Result, original, fmt.Sprintf("pcbauto %s seed %d", filepath.Base(outDir), co.Trial.Seed))
+					blob, _ := json.MarshalIndent(cpb, "", "  ")
+					if err := os.WriteFile(filepath.Join(dir, "playbook.json"), append(blob, '\n'), 0o644); err != nil {
+						return err
+					}
+					fmt.Fprintf(stdout, "candidate: %s/playbook.json (seed %d, score %.1f)\n", dir, co.Trial.Seed, co.Trial.Score)
+				}
 				if useFastroute {
 					fmt.Fprintf(stdout, "next: pcbpilot pcb auto route --playbook %s --out-dir %s\n", filepath.Join(outDir, "playbook.json"), filepath.Join(outDir, "live"))
 				}
@@ -698,6 +722,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 		c.Flags().StringSliceVar(&only, "only", nil, "with --place --refine: move only these designators (local adjustment of a confirmed layout), e.g. --only C7,D3")
 		c.Flags().BoolVar(&noRoute, "no-route", false, "stop after placement / stackup")
 		c.Flags().StringVar(&startPoses, "start-poses", "", "with --place --refine: refine from the part poses (by designator) of another board's snapshot (pcb dump / board.placed.json); the playbook still uses this board's primitive ids")
+		c.Flags().IntVar(&candidates, "candidates", 3, "with --place-seeds: also write the next best placements as candidates/seed-N/playbook.json (this many in total, best included) for 'pcb auto route --candidates' to trial-route")
 		c.Flags().IntVar(&placeSeeds, "place-seeds", 6, "placement without engine routing (fastroute mode, --no-route): run this many seeds (from --seed) in parallel and keep the best — illegal counts, then critical relations, then wirelength (Gas V5: 121.9–156.5 in across 8 seeds from one start)")
 		c.Flags().StringVar(&routerSel, "router", "auto", "auto (fastroute when installed, else internal) | fastroute (placement/stackup plan; route live with 'pcb auto route') | internal (the built-in router)")
 		c.Flags().BoolVar(&keepBoardFills, "keep-board-fills", false, "with --mech --place: keep existing board MULTI fills and rule regions (default deletes hole-size fills and regions outside the new outline or under a new keep-out: leftovers from 'board copy')")

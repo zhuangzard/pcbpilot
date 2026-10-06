@@ -347,6 +347,12 @@ pcbpilot pcb auto route --playbook out/playbook.json --out-dir out/live --projec
 （重叠、出板、出区、禁布、限高），再比“线长 + 全部关联超距”（英寸，越小越紧凑），取最好的一个；每个 seed 的结果打印在
 stderr。关键关系超距权重曾设高十倍，结果选中了四角空、器件散的 seed 3，已改回同一量纲。
 
+**按可布通性挑布局（`--candidates`）。** 几何评分最好的布局不一定最好布：Gas Module V5 B 换 seed 7 后仍有 3–4 条
+布不通。`pcb auto run` 默认把前 3 名写成 `<out-dir>/candidates/seed-N/playbook.json`（与最优方案只差摆放步骤）；
+`pcb auto route --playbook <out-dir>/playbook.json --candidates <out-dir>/candidates --trial-time 2m` 依次摆放每个候选、
+按真实流程准备 DSN（修正、意图要求、预留逃线）并用 fastroute 试布一轮，留下未布通最少（其次可修违规最少）的那个，
+再走完整流程。
+
 `--mech --place` 换新板框时，在设新板框前删除 `board copy` 或旧方案留下的机械对象：
 - 机械规格添加了安装孔时，板上孔径相当（±25%）的板级 MULTI 填充全部删除（包括与新孔重合的）；
 - 板级 MULTI 规则区域只要不完全在新板框内，或与新规格要建的禁布区（含新孔的螺丝头环）重合，就删除。

@@ -3,6 +3,7 @@ package pcbauto
 import (
 	"fmt"
 	"math"
+	"sort"
 	"sync"
 )
 
@@ -47,17 +48,31 @@ func better(a, b SeedTrial) bool {
 // sharing the caller's crashed the annealer and would move the original's
 // parts.
 func PlaceBest(b *Board, prep func(*Board) (*Analysis, *Circuit, error), m *Mechanics, opt PlaceOptions, n int) (*PlaceResult, []SeedTrial, error) {
-	if n <= 1 {
-		an, c, err := prep(b)
-		if err != nil {
-			return nil, nil, err
-		}
-		r, err := Place(b, an, c, m, opt)
-		return r, nil, err
+	outs, trials, err := PlaceSeeds(b, prep, m, opt, n)
+	if err != nil {
+		return nil, trials, err
+	}
+	*b = *outs[0].Board
+	return outs[0].Result, trials, nil
+}
+
+// SeedOutcome is one placement of PlaceSeeds: its board copy and result.
+type SeedOutcome struct {
+	Trial  SeedTrial
+	Board  *Board
+	Result *PlaceResult
+}
+
+// PlaceSeeds runs the n seeds like PlaceBest and returns every successful
+// placement, best first (b itself is not changed). The best few can then be
+// trial-routed: a compact placement is not always the most routable (Gas
+// Module V5 B, seed 7 window: 3–4 unrouted while A's draw routed fully).
+func PlaceSeeds(b *Board, prep func(*Board) (*Analysis, *Circuit, error), m *Mechanics, opt PlaceOptions, n int) ([]SeedOutcome, []SeedTrial, error) {
+	if n < 1 {
+		n = 1
 	}
 	trials := make([]SeedTrial, n)
-	boards := make([]*Board, n)
-	results := make([]*PlaceResult, n)
+	outs := make([]*SeedOutcome, n)
 	var wg sync.WaitGroup
 	for i := 0; i < n; i++ {
 		wg.Add(1)
@@ -76,24 +91,26 @@ func PlaceBest(b *Board, prep func(*Board) (*Analysis, *Circuit, error), m *Mech
 				trials[i].Err, trials[i].Illegal, trials[i].Score = err.Error(), math.MaxInt32, math.Inf(1)
 				return
 			}
-			boards[i], results[i] = bc, r
 			trials[i].Metrics = r.Metrics
 			trials[i].Illegal, trials[i].Score = placeScore(r.Metrics)
+			outs[i] = &SeedOutcome{Trial: trials[i], Board: bc, Result: r}
 		}(i)
 	}
 	wg.Wait()
-	best := -1
-	for i := range trials {
-		if results[i] != nil && (best < 0 || better(trials[i], trials[best])) {
-			best = i
+	var ok []SeedOutcome
+	for _, o := range outs {
+		if o != nil {
+			ok = append(ok, *o)
 		}
 	}
-	if best < 0 {
+	if len(ok) == 0 {
 		return nil, trials, fmt.Errorf("placement failed for every seed: %s", trials[0].Err)
 	}
-	*b = *boards[best]
-	results[best].Notes = append(results[best].Notes, fmt.Sprintf("best of %d seeds: seed %d (score %.1f)", n, trials[best].Seed, trials[best].Score))
-	return results[best], trials, nil
+	sort.SliceStable(ok, func(i, j int) bool { return better(ok[i].Trial, ok[j].Trial) })
+	if n > 1 {
+		ok[0].Result.Notes = append(ok[0].Result.Notes, fmt.Sprintf("best of %d seeds: seed %d (score %.1f)", n, ok[0].Trial.Seed, ok[0].Trial.Score))
+	}
+	return ok, trials, nil
 }
 
 // ApplyStartPoses moves b's parts to the poses of the same designators in

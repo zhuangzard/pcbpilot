@@ -10,8 +10,10 @@ package app
 //   pour rebuild → native DRC → pad-net diff → sim post-layout.
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -94,7 +96,8 @@ func defaultPourLayers(copper int) (gnd []int, power int) {
 
 func newPcbAutoRouteCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {
 	var o autorouteOpts
-	var playbook, outDir, gndNet, powerNet, simPath, scriptPath, widenCSV, waiverPath, widthBasis string
+	var playbook, outDir, gndNet, powerNet, simPath, scriptPath, widenCSV, waiverPath, widthBasis, candDir string
+	var trialTime time.Duration
 	var gndLayers []int
 	var powerLayer int
 	var widenMax float64
@@ -165,11 +168,12 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 				return err
 			}
 
-			// 1. Placement playbook.
-			if playbook != "" {
-				fmt.Fprintf(stderr, "apply: %s\n", playbook)
+			// 1. Placement playbook (and, with --candidates, trial-route the
+			// runner-up placements and keep the most routable).
+			apply := func(path string) error {
+				fmt.Fprintf(stderr, "apply: %s\n", path)
 				ac := newApplyCmd(cfg, stderr, stderr)
-				a := []string{playbook, "--yes", "--quiet"}
+				a := []string{path, "--yes", "--quiet"}
 				if cfg.doc != "" {
 					a = append(a, "--doc", cfg.doc)
 				}
@@ -180,9 +184,26 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 				ac.SetOut(stderr)
 				ac.SetErr(stderr)
 				if err := ac.Execute(); err != nil {
-					return finish(fmt.Errorf("apply %s: %w", playbook, err))
+					return fmt.Errorf("apply %s: %w", path, err)
+				}
+				return nil
+			}
+			if playbook != "" {
+				if err := apply(playbook); err != nil {
+					return finish(err)
 				}
 				summary["playbook"] = playbook
+			}
+			if candDir != "" {
+				if playbook == "" {
+					return finish(fmt.Errorf("--candidates needs --playbook (the best placement, applied first)"))
+				}
+				chosen, trials, err := trialCandidates(cfg, *window, o, playbook, candDir, outDir, trialTime, apply, stderr)
+				summary["candidateTrials"] = trials
+				if err != nil {
+					return finish(err)
+				}
+				summary["playbook"] = chosen
 			}
 
 			// 2. Route + import + repair.
@@ -316,6 +337,8 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 		},
 	}
 	o.register(c.Flags(), "fastroute", 5, true)
+	c.Flags().StringVar(&candDir, "candidates", "", "directory of runner-up placement playbooks (pcb auto run writes <out-dir>/candidates): each is applied and trial-routed with fastroute for --trial-time, the most routable placement is kept (fewest unrouted, then fixable violations)")
+	c.Flags().DurationVar(&trialTime, "trial-time", 2*time.Minute, "fastroute time per candidate trial")
 	c.Flags().StringVar(&playbook, "playbook", "", "placement playbook from 'pcb auto run' to apply first")
 	c.Flags().StringVar(&outDir, "out-dir", "pcb-auto-route", "directory for summary.json, board-final.json and post-layout results")
 	c.Flags().StringVar(&gndNet, "gnd-net", "GND", "ground net to pour")
@@ -332,4 +355,163 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 	c.Flags().StringVar(&waiverPath, "waivers", "", "JSON list of signed waivers [{gate,match,reason,by}]: a failing gate passes only when every failing item matches one")
 	c.Flags().StringVar(&simPath, "sim", "", "sim.json (pcbpilot sim power): run sim post-layout on the finished live board")
 	return c
+}
+
+// candidateTrial is one placement's trial route.
+type candidateTrial struct {
+	Playbook string  `json:"playbook"`
+	Unrouted int     `json:"unrouted"`
+	Fixable  int     `json:"fixableViolations"`
+	Seconds  float64 `json:"seconds"`
+	Error    string  `json:"error,omitempty"`
+}
+
+// trialCandidates trial-routes the applied best placement and every runner-up
+// in candDir (their place-* steps only: poses are absolute and the mechanics
+// are already on the board), then re-applies the most routable one. A
+// geometrically better placement is not always more routable (Gas Module V5
+// B: the seed-7 window left 3–4 connections unrouted).
+func trialCandidates(cfg *appConfig, window string, o autorouteOpts, best, candDir, outDir string, budget time.Duration,
+	apply func(string) error, stderr io.Writer) (string, []candidateTrial, error) {
+	paths := []string{best}
+	ms, _ := filepath.Glob(filepath.Join(candDir, "*", "playbook.json"))
+	sort.Strings(ms)
+	paths = append(paths, ms...)
+	trialDir := filepath.Join(outDir, "trials")
+	if err := os.MkdirAll(trialDir, 0o755); err != nil {
+		return best, nil, err
+	}
+	placeOnly := func(path string, i int) (string, error) {
+		pb, _, err := loadPlaybook(path)
+		if err != nil {
+			return "", err
+		}
+		cp := *pb
+		cp.Steps = nil
+		for _, st := range pb.Steps {
+			if strings.HasPrefix(st.ID, "place-") || st.ID == "save" {
+				cp.Steps = append(cp.Steps, st)
+			}
+		}
+		out := filepath.Join(trialDir, fmt.Sprintf("place-%d.json", i))
+		blob, _ := json.MarshalIndent(&cp, "", "  ")
+		return out, os.WriteFile(out, append(blob, '\n'), 0o644)
+	}
+	var trials []candidateTrial
+	bestIdx := -1
+	last := 0
+	for i, p := range paths {
+		tr := candidateTrial{Playbook: p, Unrouted: -1, Fixable: -1}
+		if i > 0 {
+			po, err := placeOnly(p, i)
+			if err == nil {
+				err = apply(po)
+			}
+			if err != nil {
+				tr.Error = err.Error()
+				trials = append(trials, tr)
+				continue
+			}
+			last = i
+		}
+		run, err := trialRoute(cfg, window, o, budget, filepath.Join(trialDir, fmt.Sprintf("t%d", i)), stderr)
+		tr.Seconds = run.Seconds
+		if err != nil {
+			tr.Error = err.Error()
+		} else {
+			tr.Unrouted, tr.Fixable = run.Unrouted, run.Fixable
+		}
+		fmt.Fprintf(stderr, "candidate %d (%s): %d unrouted, %d fixable after %.0f s\n", i, filepath.Base(filepath.Dir(p)), tr.Unrouted, tr.Fixable, tr.Seconds)
+		trials = append(trials, tr)
+		if tr.Error == "" && (bestIdx < 0 || tr.Unrouted < trials[bestIdx].Unrouted ||
+			tr.Unrouted == trials[bestIdx].Unrouted && tr.Fixable < trials[bestIdx].Fixable) {
+			bestIdx = i
+		}
+	}
+	if bestIdx < 0 {
+		return best, trials, fmt.Errorf("no candidate placement could be trial-routed")
+	}
+	if bestIdx != last {
+		po, err := placeOnly(paths[bestIdx], bestIdx)
+		if err == nil {
+			err = apply(po)
+		}
+		if err != nil {
+			return paths[bestIdx], trials, err
+		}
+	}
+	fmt.Fprintf(stderr, "candidates: keeping %s (%d unrouted in the trial)\n", paths[bestIdx], trials[bestIdx].Unrouted)
+	return paths[bestIdx], trials, nil
+}
+
+// trialRoute exports the live board, prepares the DSN exactly as the real
+// flow does (fixes, intent requirements, pre-escapes) and runs fastroute
+// once for budget.
+func trialRoute(cfg *appConfig, window string, o autorouteOpts, budget time.Duration, base string, stderr io.Writer) (fastrouteRun, error) {
+	bin, err := resolveFastroute(o.fastrouteBin)
+	if err != nil {
+		return fastrouteRun{}, err
+	}
+	if err := saveAndReload(cfg, window); err != nil {
+		return fastrouteRun{}, err
+	}
+	res, err := requestActionTimed(cfg, "pcb.export.dsn", window, map[string]any{}, 5*time.Minute)
+	if err != nil {
+		return fastrouteRun{}, err
+	}
+	src := ""
+	for _, a := range res.Artifacts {
+		if a.Path != "" {
+			src = a.Path
+			break
+		}
+	}
+	raw, err := os.ReadFile(src)
+	if err != nil {
+		return fastrouteRun{}, fmt.Errorf("trial export: %w", err)
+	}
+	opt, err := o.fx.options()
+	if err != nil {
+		return fastrouteRun{}, err
+	}
+	if n, lerr := fetchCopperLayerCount(cfg, window); lerr == nil && opt.CopperLayers == 0 {
+		opt.CopperLayers = n
+	}
+	if !o.noPreEscape {
+		if pre, _, err := plannedPreEscapes(cfg, window, string(raw), opt.Escapes); err == nil {
+			opt.Escapes = append(opt.Escapes, pre...)
+		}
+	}
+	var reqs map[string]specctra.NetRequirement
+	if o.intentPath != "" {
+		in, err := loadDesignIntent(o.intentPath)
+		if err != nil {
+			return fastrouteRun{}, err
+		}
+		reqs = intentRequirements(in)
+	}
+	text, _, rq, err := prepareDSN(string(raw), opt, reqs)
+	if err != nil {
+		return fastrouteRun{}, err
+	}
+	fo := o.fo
+	fo.bin, fo.rounds, fo.maxTime, fo.timeout = bin, 0, budget, budget+5*time.Minute
+	if rq != nil {
+		fo.noNeckdown = rq.NoNeckdown
+		if !o.minTraceSet && rq.MinTraceMil > 0 {
+			fo.minTraceUm = math.Round(rq.MinTraceMil*25.4*10) / 10
+		}
+	}
+	dsn := base + ".dsn"
+	if err := os.WriteFile(dsn, []byte(text), 0o644); err != nil {
+		return fastrouteRun{}, err
+	}
+	_, runs, err := runFastroute(fo, dsn, base, stderr)
+	if err != nil {
+		return fastrouteRun{}, err
+	}
+	if r := lastOK(runs); r != nil {
+		return *r, nil
+	}
+	return fastrouteRun{}, fmt.Errorf("trial produced no result")
 }

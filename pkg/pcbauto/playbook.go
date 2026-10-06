@@ -171,17 +171,7 @@ func BuildPlaybook(in PlaybookInput) *Playbook {
 	}
 	// 3. Part poses (only parts that moved).
 	if in.Placement != nil {
-		for _, p := range in.Placement.Placements {
-			o, ok := in.Original[p.Ref]
-			if !ok || p.ID == "" {
-				continue
-			}
-			if math.Abs(o.X-p.X) < 0.01 && math.Abs(o.Y-p.Y) < 0.01 && o.Rot == p.Rot {
-				continue
-			}
-			add("place-"+p.Ref, "place "+p.Ref, "pcb.component.modify", map[string]any{
-				"primitiveId": p.ID, "patch": map[string]any{"x": p.X, "y": p.Y, "rotation": p.Rot}})
-		}
+		pb.Steps = append(pb.Steps, PlacementSteps(in.Placement, in.Original)...)
 	}
 	// 4. Copper.
 	if rr := res.Route; rr != nil {
@@ -400,4 +390,59 @@ func StaleBoardRegions(raw []byte, outline []Point, added []*Keepout) ([]string,
 		}
 	}
 	return stale, nil
+}
+
+// PlacementSteps are the playbook steps that move each placed part from its
+// original pose (only parts that moved). Poses are absolute, so a playbook of
+// another placement of the same board can swap them in (trial routing of
+// several placement candidates).
+func PlacementSteps(pl *PlaceResult, original map[string]Placement) []Step {
+	var out []Step
+	for _, p := range pl.Placements {
+		o, ok := original[p.Ref]
+		if !ok || p.ID == "" {
+			continue
+		}
+		if math.Abs(o.X-p.X) < 0.01 && math.Abs(o.Y-p.Y) < 0.01 && o.Rot == p.Rot {
+			continue
+		}
+		out = append(out, Step{ID: "place-" + p.Ref, Name: "place " + p.Ref, Action: "pcb.component.modify", Payload: map[string]any{
+			"primitiveId": p.ID, "patch": map[string]any{"x": p.X, "y": p.Y, "rotation": p.Rot}}})
+	}
+	return out
+}
+
+// WithPlacement returns a copy of pb whose place-* steps are those of pl.
+func WithPlacement(pb *Playbook, pl *PlaceResult, original map[string]Placement, name string) *Playbook {
+	cp := *pb
+	cp.Meta = map[string]any{}
+	for k, v := range pb.Meta {
+		cp.Meta[k] = v
+	}
+	cp.Meta["name"] = name
+	cp.Steps = nil
+	inserted := false
+	for _, st := range pb.Steps {
+		if strings.HasPrefix(st.ID, "place-") {
+			if !inserted {
+				cp.Steps = append(cp.Steps, PlacementSteps(pl, original)...)
+				inserted = true
+			}
+			continue
+		}
+		cp.Steps = append(cp.Steps, st)
+	}
+	if !inserted {
+		// No part moved in pb: insert before save.
+		var steps []Step
+		for _, st := range cp.Steps {
+			if st.ID == "save" && !inserted {
+				steps = append(steps, PlacementSteps(pl, original)...)
+				inserted = true
+			}
+			steps = append(steps, st)
+		}
+		cp.Steps = steps
+	}
+	return &cp
 }
