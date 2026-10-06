@@ -119,7 +119,9 @@ func FromPcbauto(b *pcbauto.Board, st *pcbauto.Stackup, a *pcbauto.Analysis, x P
 		// One value for every layer: the larger of the outer and inner bands.
 		edge = math.Max(math.Max(e.OuterMil, e.InnerMil), e.RuleMil)
 	}
-	bk.SetEdge(mil(edge))
+	if edge > 0 {
+		bk.SetEdge(mil(edge)) // otherwise DefaultEdge (D3)
+	}
 
 	mains := map[string]bool{}
 	if a.Iso != nil {

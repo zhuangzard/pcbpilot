@@ -166,6 +166,8 @@ func TestClearanceCacheMatchesCompute(t *testing.T) {
 		}
 		if rng.Intn(4) == 0 {
 			b.SetIntent(n, Intent{VoltageV: float64(rng.Intn(400)), VoltageKnown: rng.Intn(2) == 0})
+		} else if rng.Intn(3) == 0 {
+			b.SetIntent(n, Intent{Coated: true}) // coating alone changes the floor against a known voltage
 		}
 	}
 	b.Set(Scope{Kind: ScopeClassClass, Class: 1, Class2: 3}, RuleSet{Clearance: map[ClrType]int64{{A: Pin, B: Via}: 333_000}})

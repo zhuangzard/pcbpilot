@@ -80,7 +80,8 @@ func (t *table) profileSig(info *netInfo) string {
 		write(fmt.Sprint("n", l.ID), t.book.scope(scopeKey{kind: ScopeNetLayer, net: info.net, layer: l.ID}))
 		write(fmt.Sprint("i", l.ID), t.book.scope(scopeKey{kind: ScopeIntent, net: info.net, layer: l.ID}))
 	}
-	if in := info.intent; in != nil && (in.VoltageKnown || in.VoltageV != 0) {
+	// Coated counts on its own: it selects B4 against the other net's voltage.
+	if in := info.intent; in != nil && (in.VoltageKnown || in.VoltageV != 0 || in.Coated) {
 		fmt.Fprintf(&sb, "|v%g k%t c%t", in.VoltageV, in.VoltageKnown, in.Coated)
 	}
 	return sb.String()
