@@ -94,7 +94,7 @@ func defaultPourLayers(copper int) (gnd []int, power int) {
 
 func newPcbAutoRouteCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {
 	var o autorouteOpts
-	var playbook, outDir, gndNet, powerNet, simPath, scriptPath, widenCSV string
+	var playbook, outDir, gndNet, powerNet, simPath, scriptPath, widenCSV, waiverPath string
 	var gndLayers []int
 	var powerLayer int
 	var widenMax float64
@@ -133,6 +133,27 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 			o.minTraceSet = cmd.Flags().Changed("min-trace-um")
 			if o.intentPath == "" {
 				return fmt.Errorf("--intent is required: the intent (intent derive: schematic + simulation) is the pre-route gate for widths, clearances and neck-down")
+			}
+			if simPath == "" || len(schFiles) == 0 {
+				return fmt.Errorf("--sim and --sch-connectivity are required: post-layout simulation and the pad-net diff are post-route gates")
+			}
+			if noPost {
+				return fmt.Errorf("--no-post skips the post-route gates; use 'pcb autoroute' for an ungated run")
+			}
+			var waivers []gateWaiver
+			if waiverPath != "" {
+				raw, err := os.ReadFile(waiverPath)
+				if err != nil {
+					return err
+				}
+				if err := json.Unmarshal(raw, &waivers); err != nil {
+					return fmt.Errorf("parse --waivers %s: %w", waiverPath, err)
+				}
+				for i, w := range waivers {
+					if w.Gate == "" || w.Match == "" || w.Reason == "" || w.By == "" {
+						return fmt.Errorf("waiver %d: gate, match, reason and by are all required", i)
+					}
+				}
 			}
 			if err := os.MkdirAll(outDir, 0o755); err != nil {
 				return err
@@ -252,6 +273,8 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 			}
 
 			// 6. Post-layout sim on the live copper.
+			var simVerdict string
+			var simReasons []string
 			if simPath != "" {
 				snap, err := fetchBoardSnapshot(cfg, *window, boardSnapshotOpts{withRules: true, withLayers: true, withCopper: true, withFootprintHoles: true})
 				if err != nil {
@@ -270,11 +293,25 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 				if err != nil {
 					return finish(fmt.Errorf("sim post-layout: %w", err))
 				}
-				ps := map[string]any{"verdict": res.Verdict.Status, "out": po.out, "report": po.report}
+				simVerdict, simReasons = res.Verdict.Status, res.Verdict.Reasons
+				ps := map[string]any{"verdict": res.Verdict.Status, "reasons": res.Verdict.Reasons, "out": po.out, "report": po.report}
 				if res.Thermal != nil {
 					ps["maxBoardC"] = res.Thermal.MaxBoardC
 				}
 				summary["postSim"] = ps
+			}
+
+			// 7. Post-route gates: any failure fails the run.
+			gates, pass := postRouteGates(cfg, *window, o.intentPath, post, simVerdict, simReasons, waivers, stderr)
+			summary["gates"], summary["pass"] = gates, pass
+			if !pass {
+				var failed []string
+				for _, g := range gates {
+					if !g.Pass {
+						failed = append(failed, g.Gate)
+					}
+				}
+				return finish(fmt.Errorf("post-route gate failed: %s", strings.Join(failed, ", ")))
 			}
 			return finish(nil)
 		},
@@ -292,6 +329,7 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 	c.Flags().BoolVar(&noPost, "no-post", false, "skip pour rebuild / save / reload / DRC / pad-net diff / post-layout sim")
 	c.Flags().StringArrayVar(&schFiles, "sch-connectivity", nil, "schematic connectivity JSON for the pad-net diff (repeat per page)")
 	c.Flags().StringVar(&scriptPath, "pad-net-diff-script", "", "path to pad-net-diff.py (auto-detected if omitted)")
+	c.Flags().StringVar(&waiverPath, "waivers", "", "JSON list of signed waivers [{gate,match,reason,by}]: a failing gate passes only when every failing item matches one")
 	c.Flags().StringVar(&simPath, "sim", "", "sim.json (pcbpilot sim power): run sim post-layout on the finished live board")
 	return c
 }
