@@ -347,6 +347,9 @@ func repairImportSteps(cfg *appConfig, window string, ses, dsn string, dryRun bo
 	if err != nil {
 		return nil, err
 	}
+	for _, d := range wiring.Dots {
+		fmt.Fprintf(stderr, "ses-repair: skipped a one-point path (no length): %s\n", d)
+	}
 	if !dryRun {
 		if err := saveAndReload(cfg, window); err != nil {
 			return nil, err
