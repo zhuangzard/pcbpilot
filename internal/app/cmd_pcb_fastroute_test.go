@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/zhuangzard/pcbpilot/internal/pcb/specctra"
 )
 
 func TestFastrouteArgs(t *testing.T) {
@@ -122,5 +124,47 @@ func TestRunImproved(t *testing.T) {
 		if got := runImproved(a, c.b); got != c.want {
 			t.Errorf("runImproved(%+v, %+v) = %v", a, c.b, got)
 		}
+	}
+}
+
+func TestFastrouteArgsNoNeckdown(t *testing.T) {
+	got := strings.Join(fastrouteArgs(fastrouteOpts{noNeckdown: []string{"+12V", "SW5"}}, "b.dsn", "b.ses", "r.json", ""), " ")
+	if !strings.Contains(got, "--no-neckdown-classes=+12V,SW5") {
+		t.Fatalf("args = %s", got)
+	}
+}
+
+// The pre-route gate: intent nets become DSN requirements, the DSN is raised
+// to them and re-checked; a DSN that cannot carry them stops routing.
+func TestPrepareDSNGate(t *testing.T) {
+	raw, err := os.ReadFile("../pcb/specctra/testdata/easyeda-export.dsn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, err := parseDesignIntent([]byte(`{"schemaVersion":1,"nets":{
+ "+12V":{"role":"power","widthMil":{"outer":21.65,"inner":41.34,"min":21.65},"clearanceMil":6,"viasPerTransition":3},
+ "GND":{"role":"ground","widthMil":{"outer":21.65,"inner":43.31,"min":10},"clearanceMil":6},
+ "SIG":{"role":"signal","widthMil":{"outer":6,"min":6},"clearanceMil":6}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reqs := intentRequirements(in)
+	if reqs["SIG"].InnerMil != 6 || reqs["+12V"].InnerMil != 41.34 {
+		t.Fatalf("requirements = %+v", reqs)
+	}
+	text, _, rq, err := prepareDSN(string(raw), specctra.FixOptions{}, reqs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if short, _ := specctra.CheckNetRequirements(text, reqs); len(short) != 0 {
+		t.Fatalf("prepared DSN still short: %v", short)
+	}
+	if rq.MinTraceMil != 6 || strings.Join(rq.NoNeckdown, ",") != "+12V,pcbpilot_req_1" {
+		t.Fatalf("requirement report = %+v", rq)
+	}
+	// A DSN not in mil cannot be checked: the gate refuses rather than guess.
+	notMil := strings.Replace(string(raw), "(resolution mil 1000)", "(resolution um 10)", 1)
+	if _, _, _, err := prepareDSN(notMil, specctra.FixOptions{}, reqs); err == nil || !strings.Contains(err.Error(), "pre-route gate") {
+		t.Fatalf("non-mil DSN passed the gate: %v", err)
 	}
 }

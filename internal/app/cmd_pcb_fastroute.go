@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -540,6 +541,7 @@ type fastrouteOpts struct {
 	bin        string
 	multiStart int
 	minTraceUm float64
+	noNeckdown []string
 	maxTime    time.Duration
 	rounds     int
 	timeout    time.Duration
@@ -553,6 +555,9 @@ func fastrouteArgs(o fastrouteOpts, dsn, ses, report, initial string) []string {
 	}
 	if o.minTraceUm > 0 {
 		args = append(args, "--router.min_trace_width_um="+strconv.FormatFloat(o.minTraceUm, 'f', -1, 64))
+	}
+	if len(o.noNeckdown) > 0 {
+		args = append(args, "--no-neckdown-classes="+strings.Join(o.noNeckdown, ","))
 	}
 	if o.maxTime > 0 {
 		args = append(args, "--max-time="+strconv.Itoa(int(o.maxTime.Seconds())))
@@ -695,6 +700,8 @@ type autorouteOpts struct {
 	ripUp        bool
 	keep         bool
 	noAutoEsc    bool
+	intentPath   string
+	minTraceSet  bool
 }
 
 // register adds the flags; router, rounds and ripUp are the command's defaults.
@@ -702,7 +709,8 @@ func (o *autorouteOpts) register(fs *pflag.FlagSet, router string, rounds int, r
 	fs.StringVar(&o.routerCmd, "router", router, "'fastroute' (preset) or an external router command with {in}/{out} (or FREEROUTING_CMD env)")
 	fs.StringVar(&o.fastrouteBin, "fastroute-bin", "", "fastroute executable (default: $FASTROUTE_BIN, then PATH)")
 	fs.IntVar(&o.fo.multiStart, "multi-start", 0, "fastroute --multi-start=N (0 = fastroute default)")
-	fs.Float64Var(&o.fo.minTraceUm, "min-trace-um", 152, "fastroute --router.min_trace_width_um: never neck down below this (0 = not passed)")
+	fs.Float64Var(&o.fo.minTraceUm, "min-trace-um", 152, "fastroute --router.min_trace_width_um: never neck down below this (0 = not passed; with --intent the intent's narrowest widthMil.min is used unless this is set)")
+	fs.StringVar(&o.intentPath, "intent", "", "intent.json (intent derive): pre-route gate — write its rules (pcb rules apply), raise the DSN net classes to every net's outer/inner width and clearance, forbid neck-down where widthMil.min = outer; route only when every net passes")
 	fs.DurationVar(&o.fo.maxTime, "max-time", 0, "fastroute --max-time per run (0 = none)")
 	fs.IntVar(&o.fo.rounds, "continue", rounds, "fastroute continuation runs (--initial-session) while connections remain unrouted")
 	fs.DurationVar(&o.fo.timeout, "router-timeout", 10*time.Minute, "hard limit per router run (default 45m with --router fastroute)")
@@ -747,6 +755,35 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 		}
 	}
 
+	// Pre-route gate: the intent (schematic + simulation) is written to the
+	// board's native rules before anything is exported.
+	var reqs map[string]specctra.NetRequirement
+	if o.intentPath != "" {
+		in, err := loadDesignIntent(o.intentPath)
+		if err != nil {
+			return false, fmt.Errorf("pre-route gate: %w", err)
+		}
+		call := func(action string, payload any) (map[string]any, error) {
+			res, err := requestAction(cfg, action, window, payload)
+			if err != nil {
+				return nil, err
+			}
+			if res.Result == nil {
+				return map[string]any{}, nil
+			}
+			return res.Result, nil
+		}
+		rrep, err := runIntentRules(in, "apply", false, call, stderr)
+		summary["intentRules"] = map[string]any{"status": rrep.Status, "verified": rrep.Verified, "plan": rrep.Plan}
+		if err != nil {
+			return false, fmt.Errorf("pre-route gate: pcb rules apply --intent %s: %w", o.intentPath, err)
+		}
+		fmt.Fprintf(stderr, "pre-route gate: intent rules %s\n", rrep.Status)
+		reqs = intentRequirements(in)
+	} else if preset {
+		fmt.Fprintln(stderr, "warning: no --intent — net widths/clearances come from whatever rules the board has; the intent is not enforced")
+	}
+
 	// 1. Export from a saved + reloaded board (placement and stackup writes
 	// may still be served stale otherwise), then fix.
 	if err := saveAndReload(cfg, window); err != nil {
@@ -785,9 +822,18 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 				opt.CopperLayers = n
 			}
 		}
-		fixed, rep, err := specctra.FixDSN(dsnText, opt)
+		fixed, rep, rq, err := prepareDSN(dsnText, opt, reqs)
 		if err != nil {
-			return false, fmt.Errorf("dsn-fix: %w", err)
+			return false, err
+		}
+		if rq != nil {
+			summary["dsnRequirements"] = rq
+			o.fo.noNeckdown = rq.NoNeckdown
+			if !o.minTraceSet && rq.MinTraceMil > 0 {
+				o.fo.minTraceUm = math.Round(rq.MinTraceMil*25.4*10) / 10
+			}
+			fmt.Fprintf(stderr, "pre-route gate: %d net requirement(s) met in the DSN (%d class(es) raised, %d added, %d without neck-down, min trace %.1f mil)\n",
+				rq.Nets, rq.Classes, rq.NewClasses, len(rq.NoNeckdown), rq.MinTraceMil)
 		}
 		dsnPath = strings.TrimSuffix(dsnPath, ".dsn") + "-fixed.dsn"
 		if err := os.WriteFile(dsnPath, []byte(fixed), 0o644); err != nil {
@@ -824,7 +870,7 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 		}
 		sesPath = ses
 		if last := runs[len(runs)-1]; last.Unrouted > 0 && !o.noAutoEsc && !o.rawDSN {
-			if p, d, t, r2, ok := retryWithEscapes(cfg, window, o, rawText, dsnText, fixOpt, base, last, summary, &sessions, stderr); ok {
+			if p, d, t, r2, ok := retryWithEscapes(cfg, window, o, rawText, dsnText, fixOpt, reqs, base, last, summary, &sessions, stderr); ok {
 				sesPath, dsnPath, dsnText, runs = p, d, t, r2
 			}
 		}
@@ -889,13 +935,54 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 	return true, nil
 }
 
+// intentRequirements turns the intent's per-net widths and clearances into
+// DSN requirements (inner width defaults to the outer one).
+func intentRequirements(in *designIntent) map[string]specctra.NetRequirement {
+	out := map[string]specctra.NetRequirement{}
+	for name, n := range in.Nets {
+		if n == nil || n.WidthMil.Outer <= 0 {
+			continue
+		}
+		r := specctra.NetRequirement{OuterMil: n.WidthMil.Outer, InnerMil: n.WidthMil.Inner, MinMil: n.WidthMil.Min, ClearanceMil: n.ClearanceMil}
+		if r.InnerMil <= 0 {
+			r.InnerMil = r.OuterMil
+		}
+		out[name] = r
+	}
+	return out
+}
+
+// prepareDSN applies the export fixes and, with requirements, raises the net
+// classes to them and re-checks every net: any shortfall stops routing.
+func prepareDSN(raw string, opt specctra.FixOptions, reqs map[string]specctra.NetRequirement) (string, specctra.FixReport, *specctra.RequirementReport, error) {
+	text, rep, err := specctra.FixDSN(raw, opt)
+	if err != nil {
+		return "", rep, nil, fmt.Errorf("dsn-fix: %w", err)
+	}
+	if reqs == nil {
+		return text, rep, nil, nil
+	}
+	text, rq, err := specctra.ApplyNetRequirements(text, reqs)
+	if err != nil {
+		return "", rep, nil, fmt.Errorf("pre-route gate: %w", err)
+	}
+	short, err := specctra.CheckNetRequirements(text, reqs)
+	if err != nil {
+		return "", rep, &rq, fmt.Errorf("pre-route gate: %w", err)
+	}
+	if len(short) > 0 {
+		return "", rep, &rq, fmt.Errorf("pre-route gate: %d net requirement(s) not met in the DSN: %s", len(short), strings.Join(short, "; "))
+	}
+	return text, rep, &rq, nil
+}
+
 // retryWithEscapes plans inward escapes for the ground pins the last run
 // reports blocked on fine-pitch parts, adds them to the DSN as fixed wiring
 // and routes again from scratch. ok=true when that run leaves fewer
 // unrouted connections (or as many and fewer fixable violations); the caller
 // then imports it. The escapes are re-created after import by ses-repair
 // (they are not in the session).
-func retryWithEscapes(cfg *appConfig, window string, o autorouteOpts, rawText, dsnText string, fixOpt specctra.FixOptions, base string,
+func retryWithEscapes(cfg *appConfig, window string, o autorouteOpts, rawText, dsnText string, fixOpt specctra.FixOptions, reqs map[string]specctra.NetRequirement, base string,
 	last fastrouteRun, summary map[string]any, sessions *[]string, stderr io.Writer) (ses, dsnPath, fixed string, runs []fastrouteRun, ok bool) {
 	blocked, err := readFastrouteBlocked(last.Report)
 	if err != nil || len(blocked) == 0 {
@@ -923,7 +1010,7 @@ func retryWithEscapes(cfg *appConfig, window string, o autorouteOpts, rawText, d
 	fmt.Fprintf(stderr, "auto-escapes: %d blocked ground pin(s) get an inward stub + via; routing again\n", len(esc))
 	opt := fixOpt
 	opt.Escapes = append(append([]specctra.Escape(nil), fixOpt.Escapes...), esc...)
-	text, _, err := specctra.FixDSN(rawText, opt)
+	text, _, _, err := prepareDSN(rawText, opt, reqs)
 	if err != nil {
 		info["error"] = err.Error()
 		return
@@ -990,6 +1077,7 @@ A summary JSON is printed to stdout; progress goes to stderr.
   pcbpilot pcb autoroute --router 'java -jar freerouting.jar -de {in} -do {out}'`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			o.timeoutSet = cmd.Flags().Changed("router-timeout")
+			o.minTraceSet = cmd.Flags().Changed("min-trace-um")
 			summary := map[string]any{}
 			routed, err := runAutorouteFlow(cfg, *window, o, summary, stderr)
 			if err != nil || !routed {

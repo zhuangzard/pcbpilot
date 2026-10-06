@@ -94,7 +94,7 @@ func defaultPourLayers(copper int) (gnd []int, power int) {
 
 func newPcbAutoRouteCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {
 	var o autorouteOpts
-	var playbook, outDir, gndNet, powerNet, intentPath, simPath, scriptPath, widenCSV string
+	var playbook, outDir, gndNet, powerNet, simPath, scriptPath, widenCSV string
 	var gndLayers []int
 	var powerLayer int
 	var widenMax float64
@@ -130,6 +130,10 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
       --widen-net SV1_DRV,SV2_DRV --sim sim.json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			o.timeoutSet = cmd.Flags().Changed("router-timeout")
+			o.minTraceSet = cmd.Flags().Changed("min-trace-um")
+			if o.intentPath == "" {
+				return fmt.Errorf("--intent is required: the intent (intent derive: schematic + simulation) is the pre-route gate for widths, clearances and neck-down")
+			}
 			if err := os.MkdirAll(outDir, 0o755); err != nil {
 				return err
 			}
@@ -193,7 +197,7 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 				var pours []map[string]any
 				for _, l := range gndLayers {
 					fmt.Fprintf(stderr, "pour: %s on layer %d\n", gndNet, l)
-					p, err := fitPour(cfg, *window, gndNet, l, intentPath, stderr)
+					p, err := fitPour(cfg, *window, gndNet, l, o.intentPath, stderr)
 					if err != nil {
 						return finish(err)
 					}
@@ -212,7 +216,7 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 						fmt.Fprintln(stderr, "pour: no non-ground power net found; power layer left without a pour")
 					} else {
 						fmt.Fprintf(stderr, "pour: %s on layer %d\n", rail, powerLayer)
-						p, err := fitPour(cfg, *window, rail, powerLayer, intentPath, stderr)
+						p, err := fitPour(cfg, *window, rail, powerLayer, o.intentPath, stderr)
 						if err != nil {
 							return finish(err)
 						}
@@ -258,7 +262,7 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 				if err := os.WriteFile(boardPath, append(blob, '\n'), 0o644); err != nil {
 					return finish(err)
 				}
-				po := postSimOpts{board: boardPath, sim: simPath, intent: intentPath,
+				po := postSimOpts{board: boardPath, sim: simPath, intent: o.intentPath,
 					out: filepath.Join(outDir, "post.json"), report: filepath.Join(outDir, "post.md"), svgDir: filepath.Join(outDir, "heatmaps"),
 					cell: 0.5, ambient: 25, hTop: 10, hBottom: 10, kxy: 0.3, kz: 0.3, plating: 0.7, viaDT: 10, margin: 1.2,
 					source: "live board after pcb auto route (pcb dump --include-copper)"}
@@ -288,7 +292,6 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 	c.Flags().BoolVar(&noPost, "no-post", false, "skip pour rebuild / save / reload / DRC / pad-net diff / post-layout sim")
 	c.Flags().StringArrayVar(&schFiles, "sch-connectivity", nil, "schematic connectivity JSON for the pad-net diff (repeat per page)")
 	c.Flags().StringVar(&scriptPath, "pad-net-diff-script", "", "path to pad-net-diff.py (auto-detected if omitted)")
-	c.Flags().StringVar(&intentPath, "intent", "", "intent.json: board-edge distances for the pours, copper/stackup for post-layout sim")
 	c.Flags().StringVar(&simPath, "sim", "", "sim.json (pcbpilot sim power): run sim post-layout on the finished live board")
 	return c
 }
