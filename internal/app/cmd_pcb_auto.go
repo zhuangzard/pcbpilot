@@ -251,6 +251,8 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 		var seed int64
 		var loops int
 		var noFeedback, postSim bool
+		var routerSel string
+		var keepBoardFills bool
 		var fbVerify, fbLoop int
 		c := &cobra.Command{
 			Use:   "run",
@@ -270,6 +272,30 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 				}
 				if tidyOnly && !place {
 					return fmt.Errorf("--tidy-only needs --place (it moves parts of the current placement)")
+				}
+				// Routing is fastroute's job when it is installed: the engine
+				// then plans placement / stackup / mechanics only and
+				// `pcb auto route` routes, pours and verifies the live board.
+				useFastroute := false
+				switch routerSel {
+				case "internal":
+				case "fastroute":
+					if _, err := resolveFastroute(""); err != nil {
+						return err
+					}
+					useFastroute = true
+				case "auto", "":
+					if _, err := resolveFastroute(""); err == nil {
+						useFastroute = true
+					} else if !noRoute {
+						fmt.Fprintln(stderr, "router: fastroute not installed — routing with the internal engine (install it: scripts/install-fastroute.sh)")
+					}
+				default:
+					return fmt.Errorf("--router must be auto, fastroute or internal")
+				}
+				if useFastroute {
+					noRoute = true
+					fmt.Fprintln(stderr, "router: fastroute — this plan places and sets the stackup only; route the live board with 'pcb auto route --playbook <out-dir>/playbook.json'")
 				}
 				if err := os.MkdirAll(outDir, 0o755); err != nil {
 					return err
@@ -327,6 +353,17 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 						if err := pcbauto.MechHolesOnPads(b, holesBefore); err != nil {
 							return err
 						}
+					}
+				}
+				if mech != nil && place && !keepBoardFills {
+					// `board copy` brings the source board's mounting-hole fills
+					// along with their old ids: drop those the new mechanics do
+					// not reuse before the new outline goes in.
+					if stale := pcbauto.StaleMechFills(b, holesBefore); len(stale) > 0 {
+						replace.Fills = append(replace.Fills, stale...)
+						dh, _ := pcbauto.DropReplaced(b, pcbauto.MechReplace{Fills: stale})
+						holesBefore -= dh
+						fmt.Fprintf(stderr, "mechanics: %d stale board MULTI fill(s) (old mounting holes, e.g. from 'board copy') are deleted before the new outline\n", len(stale))
 					}
 				}
 				newHoles, newKeeps := b.Holes[holesBefore:], b.Keepouts[keepBefore:]
@@ -561,6 +598,9 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 					}
 				}
 				fmt.Fprintf(stdout, "wrote %s/{%s} (%d playbook steps)\n", outDir, names, len(pb.Steps))
+				if useFastroute {
+					fmt.Fprintf(stdout, "next: pcbpilot pcb auto route --playbook %s --out-dir %s\n", filepath.Join(outDir, "playbook.json"), filepath.Join(outDir, "live"))
+				}
 				postPath := ""
 				if postSim {
 					if postPath, err = autoPostSim(outDir, in.sim, in.intent, b, rep, stdout, stderr); err != nil {
@@ -591,6 +631,8 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 		c.Flags().BoolVar(&tidyOnly, "tidy-only", false, "with --place: keep the current placement and run only the placement aesthetics stage on it (orientation, symmetry copies, row/column alignment, even pitch, grid snap) — every move judged against the safety/electrical tiers and the --style slack, then routed with and without it and kept only if it routes no worse")
 		c.Flags().StringSliceVar(&only, "only", nil, "with --place --refine: move only these designators (local adjustment of a confirmed layout), e.g. --only C7,D3")
 		c.Flags().BoolVar(&noRoute, "no-route", false, "stop after placement / stackup")
+		c.Flags().StringVar(&routerSel, "router", "auto", "auto (fastroute when installed, else internal) | fastroute (placement/stackup plan; route live with 'pcb auto route') | internal (the built-in router)")
+		c.Flags().BoolVar(&keepBoardFills, "keep-board-fills", false, "with --mech --place: keep existing board MULTI fills the new mechanics do not reuse (default deletes them: stale mounting holes from 'board copy')")
 		c.Flags().Int64Var(&seed, "seed", 0, "placement random seed (runs are reproducible per seed)")
 		c.Flags().BoolVar(&postSim, "post-sim", false, "after routing, run the post-layout verification (sim post-layout) on this run's own routed board (board.routed.json, engine result — verify the live board again after apply with pcb dump → sim post-layout): post.json, post.md, heatmaps/, copper feedback merged into feedback.json; needs --sim")
 		c.Flags().BoolVar(&noFeedback, "no-feedback", false, "skip the schematic feedback (feedback.json / report section 回推原理图的建议)")
@@ -600,6 +642,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 		group.AddCommand(c)
 	}
 	group.AddCommand(newPcbAutoBenchCmd(stdout, stderr))
+	group.AddCommand(newPcbAutoRouteCmd(cfg, window, stdout, stderr))
 
 	// ── feedback ─────────────────────────────────────────────────────────
 	mkFeedback := func() *cobra.Command {

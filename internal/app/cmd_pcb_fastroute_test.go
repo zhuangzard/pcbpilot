@@ -2,6 +2,7 @@ package app
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -47,6 +48,9 @@ func TestResolveFastroute(t *testing.T) {
 	}
 	t.Setenv("PATH", dir)
 	t.Setenv("FASTROUTE_BIN", "")
+	saved := fastrouteLookPath
+	fastrouteLookPath = exec.LookPath
+	defer func() { fastrouteLookPath = saved }()
 	if got, err := resolveFastroute(""); err != nil || got != bin {
 		t.Fatalf("PATH lookup = %q %v", got, err)
 	}
@@ -76,8 +80,32 @@ func TestDsnFixFlagsEscapes(t *testing.T) {
 	if len(opt.Escapes) != 1 || !opt.Escapes[0].Via || opt.Escapes[0].Path[1][0] != 4710.65 {
 		t.Fatalf("escapes = %+v", opt.Escapes)
 	}
+	// Short form recorded on the Gas Module v6A3 run.
+	if err := os.WriteFile(p, []byte(`[[[2399.6, 1427.2], [2334.15, 1427.2]], [[1537.4, 1801.2], [1602.85, 1801.2]]]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opt, err = f.options()
+	if err != nil || len(opt.Escapes) != 2 || opt.Escapes[1].Net != "GND" || opt.Escapes[1].Layer != "TopLayer" || !opt.Escapes[1].Via || opt.Escapes[1].Path[1][0] != 1602.85 {
+		t.Fatalf("short-form escapes = %+v %v", opt.Escapes, err)
+	}
 	f.gndPlane = true
 	if opt, _ := f.options(); opt.PlaneNet != "GND" {
 		t.Error("--gnd-plane did not set the plane net")
+	}
+}
+
+func TestMainPowerRailAndPourLayers(t *testing.T) {
+	pads := []pcbPadP{{Net: "GND"}, {Net: "GND"}, {Net: "GND"}, {Net: "+12V"}, {Net: "+12V"}, {Net: "+3V3"}, {Net: "SIG"}, {Net: "SIG"}, {Net: "SIG"}}
+	if got := mainPowerRail(pads); got != "+12V" {
+		t.Fatalf("main rail = %q, want +12V", got)
+	}
+	if got := mainPowerRail([]pcbPadP{{Net: "GND"}, {Net: "SIG"}}); got != "" {
+		t.Fatalf("no rail = %q", got)
+	}
+	if g, p := defaultPourLayers(4); len(g) != 3 || g[0] != 1 || g[1] != 15 || g[2] != 2 || p != 16 {
+		t.Fatalf("4-layer pours = %v %d", g, p)
+	}
+	if g, p := defaultPourLayers(2); len(g) != 2 || p != 0 {
+		t.Fatalf("2-layer pours = %v %d", g, p)
 	}
 }

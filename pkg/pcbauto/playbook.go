@@ -324,3 +324,33 @@ func DropReplaced(b *Board, rp MechReplace) (holes, keeps int) {
 	b.Keepouts = ks
 	return holes, keeps
 }
+
+// StaleMechFills returns the primitiveIds of board-level MULTI fills (mounting
+// holes read from the live board, b.Holes[:holesBefore]) that match none of
+// the holes the mech spec added after holesBefore. `board copy` duplicates the
+// source board's mounting-hole fills with their old positions; a new outline
+// must not keep them. Footprint holes (Owner set or "ref:id" names) and exact
+// slot polygons are never returned. With no new holes nothing is stale.
+func StaleMechFills(b *Board, holesBefore int) []string {
+	added := b.Holes[holesBefore:]
+	if len(added) == 0 {
+		return nil
+	}
+	var stale []string
+	for _, h := range b.Holes[:holesBefore] {
+		if h.Owner != "" || h.Name == "" || strings.Contains(h.Name, ":") || h.Poly != nil {
+			continue
+		}
+		keep := false
+		for _, n := range added {
+			if math.Hypot(h.C.X-n.C.X, h.C.Y-n.C.Y) <= 1 && math.Abs(h.Dia-n.Dia) <= 1 {
+				keep = true
+				break
+			}
+		}
+		if !keep {
+			stale = append(stale, h.Name)
+		}
+	}
+	return stale
+}

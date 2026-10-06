@@ -184,9 +184,11 @@ S2 目标连接数据 ──S3/S4 Apply──▶ … P6 Layout 确认 ──▶ 
   要求；CAN 终端电阻保持跨接拓扑，近端 ESD 仍须靠近接口。
 - 从焊盘端部出线，窄焊盘按允许最小宽度缩颈，使用直线或 45°转折。电源按电流区分主干和支路；
   去耦必须对应真实电源脚，且保留短而清楚的回流路径。
-- 整板布线默认用内置电气感知引擎 `pcb auto run`（见 [pcb-auto.md](./pcb-auto.md)；2026-09-25 ESP32-S3
-  mini 板现场 30/30 布通、原生 DRC 通过；大型 BGA 板离线仅 55–62%）。`route-short`（短线启发式）、
-  原生自动布线和外部 Freerouting 都是可选执行手段。先保护已完成关键铜，完成后按网络
+- 整板布线默认交给外部 fastroute：`pcb auto run` 出摆放剧本，`pcb auto route` 应用并布线、铺铜、验收
+  （见 [pcb-auto.md](./pcb-auto.md)「布线交给 fastroute」；2026-10-06 Gas Module V5 compact 100%、原生 DRC 0，
+  同一摆放的内置布线 97.2%、62 个连接错误）。未安装 fastroute 时 `pcb auto run` 用内置电气感知引擎
+  （`--router internal`；2026-09-25 ESP32-S3 mini 板现场 30/30 布通；大型 BGA 板离线仅 55–62%）。
+  `route-short`（短线启发式）、原生自动布线和外部 Freerouting 都是可选执行手段。先保护已完成关键铜，完成后按网络
   回读并运行连接、间距与制造检查，不以“命令成功”代替布通。
 - 两层板按设计建立上下层 GND 铜和缝合；多层板依据已确认层叠处理内电层。via、plane 或铜面
   改动后运行 `pcb pour-rebuild`，再以实际 DRC 判断 anti-pad、热连接与连通。

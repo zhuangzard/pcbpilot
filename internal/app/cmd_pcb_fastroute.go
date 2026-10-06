@@ -47,7 +47,7 @@ func (f *dsnFixFlags) register(fs *pflag.FlagSet) {
 	fs.Float64Var(&f.edgeInnerMil, "edge-inner-mil", 30, "board-edge copper keep-out on inner layers (mil; 0 = none)")
 	fs.BoolVar(&f.gndPlane, "gnd-plane", false, "declare inner layers missing from the export as a plane of --plane-net (default: route that net as traces)")
 	fs.StringVar(&f.planeNet, "plane-net", "GND", "net of the plane used with --gnd-plane")
-	fs.StringVar(&f.escapesFile, "escapes", "", "JSON list of fixed escapes [{net,layer,widthMil,path:[[x,y],..],via}] (mil, DSN layer names)")
+	fs.StringVar(&f.escapesFile, "escapes", "", "JSON fixed escapes: [{net,layer,widthMil,path:[[x,y],..],via}] or bare [[start],[end]] pairs (= 10 mil GND on TopLayer + via at the end); mil, DSN layer names")
 }
 
 func (f *dsnFixFlags) options() (specctra.FixOptions, error) {
@@ -65,7 +65,16 @@ func (f *dsnFixFlags) options() (specctra.FixOptions, error) {
 			return opt, fmt.Errorf("read --escapes: %w", err)
 		}
 		if err := json.Unmarshal(data, &opt.Escapes); err != nil {
-			return opt, fmt.Errorf("parse --escapes %s: %w", f.escapesFile, err)
+			// Short form: bare [[start],[end]] pairs = a 10 mil GND stub on
+			// TopLayer ending in a via (the Gas Module v6A3-escapes.json shape).
+			opt.Escapes = nil
+			var pairs [][][2]float64
+			if json.Unmarshal(data, &pairs) != nil {
+				return opt, fmt.Errorf("parse --escapes %s: %w", f.escapesFile, err)
+			}
+			for _, p := range pairs {
+				opt.Escapes = append(opt.Escapes, specctra.Escape{Net: "GND", Layer: "TopLayer", WidthMil: 10, Path: p, Via: true})
+			}
 		}
 	}
 	return opt, nil
@@ -473,6 +482,10 @@ const fastrouteInstallHint = "fastroute is not installed (GPLv3, run as a separa
 	"Install it yourself: scripts/install-fastroute.sh (downloads one release asset and verifies SHA256SUMS.txt), " +
 	"or see .agents/skills/pcbpilot/references/pcb-routing.md#external-router-fastroute; then put it on PATH, set FASTROUTE_BIN, or pass --fastroute-bin."
 
+// fastrouteLookPath is exec.LookPath; tests replace it so `pcb auto run`
+// keeps the internal router whatever is installed on the machine.
+var fastrouteLookPath = exec.LookPath
+
 // resolveFastroute finds the binary: explicit flag, $FASTROUTE_BIN, PATH.
 func resolveFastroute(explicit string) (string, error) {
 	for _, p := range []string{explicit, os.Getenv("FASTROUTE_BIN")} {
@@ -484,7 +497,7 @@ func resolveFastroute(explicit string) (string, error) {
 		}
 		return p, nil
 	}
-	if p, err := exec.LookPath("fastroute"); err == nil {
+	if p, err := fastrouteLookPath("fastroute"); err == nil {
 		return p, nil
 	}
 	return "", errors.New(fastrouteInstallHint)
@@ -595,11 +608,203 @@ func runFastroute(o fastrouteOpts, dsn, base string, stderr io.Writer) (string, 
 
 // ── autoroute ───────────────────────────────────────────────────────────────
 
+// autorouteOpts are the knobs shared by `pcb autoroute` and `pcb auto route`.
+type autorouteOpts struct {
+	routerCmd    string
+	fastrouteBin string
+	fo           fastrouteOpts
+	timeoutSet   bool
+	fx           dsnFixFlags
+	rawDSN       bool
+	noRepair     bool
+	ripUp        bool
+	keep         bool
+}
+
+// register adds the flags; router, rounds and ripUp are the command's defaults.
+func (o *autorouteOpts) register(fs *pflag.FlagSet, router string, rounds int, ripUp bool) {
+	fs.StringVar(&o.routerCmd, "router", router, "'fastroute' (preset) or an external router command with {in}/{out} (or FREEROUTING_CMD env)")
+	fs.StringVar(&o.fastrouteBin, "fastroute-bin", "", "fastroute executable (default: $FASTROUTE_BIN, then PATH)")
+	fs.IntVar(&o.fo.multiStart, "multi-start", 0, "fastroute --multi-start=N (0 = fastroute default)")
+	fs.Float64Var(&o.fo.minTraceUm, "min-trace-um", 152, "fastroute --router.min_trace_width_um: never neck down below this (0 = not passed)")
+	fs.DurationVar(&o.fo.maxTime, "max-time", 0, "fastroute --max-time per run (0 = none)")
+	fs.IntVar(&o.fo.rounds, "continue", rounds, "fastroute continuation runs (--initial-session) while connections remain unrouted")
+	fs.DurationVar(&o.fo.timeout, "router-timeout", 10*time.Minute, "hard limit per router run (default 45m with --router fastroute)")
+	fs.BoolVar(&o.rawDSN, "raw-dsn", false, "route the unmodified EasyEDA DSN (skip the export fixes)")
+	fs.BoolVar(&o.noRepair, "no-repair", false, "skip the SES import repair")
+	fs.BoolVar(&o.ripUp, "rip-up", ripUp, "rip up existing unlocked routing before importing (the session already contains it)")
+	fs.BoolVar(&o.keep, "keep", false, "keep the routed SES file(s)")
+	o.fx.register(fs)
+}
+
+// runAutorouteFlow: export DSN → fix → route → import SES → repair. It fills
+// summary as it goes, so a caller can print what happened before a failure.
+// routed=false means no router was configured (DSN exported only).
+func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary map[string]any, stderr io.Writer) (routed bool, err error) {
+	preset := o.routerCmd == "fastroute"
+	if preset {
+		bin, err := resolveFastroute(o.fastrouteBin)
+		if err != nil {
+			return false, err
+		}
+		o.fo.bin = bin
+		if !o.timeoutSet {
+			o.fo.timeout = 45 * time.Minute
+		}
+	}
+
+	// 0. Negative (PLANE) inner layers are left out of EasyEDA's DSN and
+	// cannot carry tracks. Routing GND as traces needs them SIGNAL; pours go
+	// on them afterwards.
+	if !o.rawDSN && !o.fx.gndPlane {
+		if planes, perr := fetchPcbPlaneLayers(cfg, window); perr == nil && len(planes) > 0 {
+			var layers []map[string]any
+			for _, pl := range planes {
+				layers = append(layers, map[string]any{"id": pl.Layer, "type": "signal", "name": pl.Name})
+			}
+			fmt.Fprintf(stderr, "stackup: %d PLANE inner layer(s) set to SIGNAL so they can be routed and poured\n", len(layers))
+			if _, err := requestActionTimed(cfg, "pcb.stackup.set", window, map[string]any{"layers": layers}, 2*time.Minute); err != nil {
+				return false, fmt.Errorf("set inner layers to signal: %w", err)
+			}
+			summary["planesToSignal"] = layers
+		}
+	}
+
+	// 1. Export, then fix.
+	res, err := requestActionTimed(cfg, "pcb.export.dsn", window, map[string]any{}, 5*time.Minute)
+	if err != nil {
+		return false, err
+	}
+	dsnPath := ""
+	for _, a := range res.Artifacts {
+		if a.Path != "" {
+			dsnPath = a.Path
+			break
+		}
+	}
+	if dsnPath == "" {
+		return false, fmt.Errorf("export-dsn returned no file (PCB empty or no nets? run `pcb import-changes` first)")
+	}
+	fmt.Fprintf(stderr, "DSN exported: %s\n", dsnPath)
+	summary["dsn"] = dsnPath
+	dsnBytes, err := os.ReadFile(dsnPath)
+	if err != nil {
+		return false, err
+	}
+	dsnText := string(dsnBytes)
+	if !o.rawDSN {
+		opt, err := o.fx.options()
+		if err != nil {
+			return false, err
+		}
+		if opt.CopperLayers == 0 {
+			if n, lerr := fetchCopperLayerCount(cfg, window); lerr == nil {
+				opt.CopperLayers = n
+			}
+		}
+		fixed, rep, err := specctra.FixDSN(dsnText, opt)
+		if err != nil {
+			return false, fmt.Errorf("dsn-fix: %w", err)
+		}
+		dsnPath = strings.TrimSuffix(dsnPath, ".dsn") + "-fixed.dsn"
+		if err := os.WriteFile(dsnPath, []byte(fixed), 0o644); err != nil {
+			return false, err
+		}
+		dsnText = fixed
+		summary["dsnFixed"], summary["dsnFix"] = dsnPath, rep
+		fmt.Fprintf(stderr, "DSN fixed: %s (%d class name(s) re-quoted, layers %v added, %d padstack(s) patched, %d edge keep-out(s), %d escape(s))\n",
+			dsnPath, rep.QuotedClasses, rep.AddedLayers, rep.PatchedPadstacks, rep.EdgeKeepouts, rep.Escapes)
+		if opt.PlaneNet != "" {
+			fmt.Fprintln(stderr, "warning: --gnd-plane — "+viaToPourNote)
+		}
+	}
+
+	// 2. Route.
+	base := strings.TrimSuffix(dsnPath, ".dsn")
+	var sesPath string
+	var sessions []string
+	if !o.keep {
+		defer func() {
+			for _, f := range sessions {
+				_ = os.Remove(f)
+			}
+		}()
+	}
+	if preset {
+		ses, runs, err := runFastroute(o.fo, dsnPath, base, stderr)
+		summary["router"], summary["routerRuns"] = "fastroute", runs
+		for _, r := range runs {
+			sessions = append(sessions, r.Session)
+		}
+		if err != nil {
+			return false, err
+		}
+		sesPath = ses
+		if n := len(runs); n > 0 && runs[n-1].Unrouted > 0 {
+			fmt.Fprintf(stderr, "warning: %d connection(s) still unrouted after %d run(s); importing the best session\n", runs[n-1].Unrouted, n)
+		}
+	} else {
+		tmpl := o.routerCmd
+		if tmpl == "" {
+			tmpl = os.Getenv("FREEROUTING_CMD")
+		}
+		if tmpl == "" {
+			fmt.Fprintf(stderr, "no --router / FREEROUTING_CMD set — DSN exported, stopping.\n"+
+				"  route it externally (e.g. --router fastroute), then: pcbpilot pcb import-autoroute <file.ses> && pcbpilot pcb ses-repair <file.ses> --dsn %s\n", dsnPath)
+			return false, nil
+		}
+		sesPath = base + ".ses"
+		sessions = append(sessions, sesPath)
+		runStr := strings.NewReplacer("{in}", dsnPath, "{out}", sesPath).Replace(tmpl)
+		fmt.Fprintf(stderr, "routing: %s\n", runStr)
+		summary["router"] = runStr
+		routerCtx, cancelRouter := context.WithTimeout(context.Background(), o.fo.timeout)
+		defer cancelRouter()
+		if err := runExternalRouter(routerCtx, runStr, stderr); err != nil {
+			if routerCtx.Err() != nil {
+				return false, fmt.Errorf("external router timed out after %s: %w", o.fo.timeout, routerCtx.Err())
+			}
+			return false, fmt.Errorf("external router failed: %w", err)
+		}
+		if _, err := os.Stat(sesPath); err != nil {
+			return false, fmt.Errorf("router produced no SES at %s (check the command's {out})", sesPath)
+		}
+	}
+	summary["ses"] = sesPath
+
+	// 3. Import, then repair.
+	data, err := os.ReadFile(sesPath)
+	if err != nil {
+		return false, fmt.Errorf("read SES: %w", err)
+	}
+	if o.ripUp {
+		fmt.Fprintln(stderr, "rip-up: removing existing unlocked routing before import")
+		if _, err := requestActionTimed(cfg, "pcb.route.rip_up", window, map[string]any{}, 10*time.Minute); err != nil {
+			return false, fmt.Errorf("rip-up: %w", err)
+		}
+	}
+	fmt.Fprintf(stderr, "importing SES (%d bytes) → tracks/vias\n", len(data))
+	if _, err := requestActionTimed(cfg, "pcb.import_autoroute", window, map[string]any{
+		"fileBase64": base64.StdEncoding.EncodeToString(data),
+		"format":     "ses",
+		"fileName":   filepath.Base(sesPath),
+	}, 30*time.Minute); err != nil {
+		return false, fmt.Errorf("import SES: %w", err)
+	}
+	if !o.noRepair {
+		rep, err := repairImportedSession(cfg, window, string(data), dsnText, false, stderr)
+		summary["repair"] = rep
+		if err != nil {
+			return false, fmt.Errorf("ses-repair: %w", err)
+		}
+	}
+	return true, nil
+}
+
 func newPcbAutorouteCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {
-	var routerCmd, fastrouteBin, scriptPath string
-	var keep, rawDSN, noRepair, noPost, ripUp bool
-	var fx dsnFixFlags
-	var fo fastrouteOpts
+	var o autorouteOpts
+	var scriptPath string
+	var noPost bool
 	var schFiles []string
 	var forceReason, forceUnsafeReason string
 	c := &cobra.Command{
@@ -608,7 +813,8 @@ func newPcbAutorouteCmd(cfg *appConfig, window *string, stdout, stderr io.Writer
 		Long: `Orchestrate an external-router round-trip on the active PCB:
 
   1. export the DSN and repair EasyEDA's export defects (see 'pcb dsn-fix';
-     --raw-dsn skips);
+     --raw-dsn skips); PLANE inner layers are set to SIGNAL first unless
+     --gnd-plane;
   2. route it: --router fastroute (preset) or --router '<cmd> {in} {out}'
      (or FREEROUTING_CMD); without a router the DSN is exported and the
      command stops;
@@ -628,6 +834,7 @@ Measured on a 4-layer 150x110 mm board (199 parts, 463 connections):
 fastroute ~131 s for a first full route, 510–566 s with --multi-start 8,
 continuation runs closing the rest; pcb auto took 594–1840 s per variant.
 
+For a whole board from placement to post-layout sim use 'pcb auto route'.
 A summary JSON is printed to stdout; progress goes to stderr.
 
 ` + viaToPourNote,
@@ -636,179 +843,27 @@ A summary JSON is printed to stdout; progress goes to stderr.
   pcbpilot pcb autoroute --router fastroute --multi-start 8 --escapes u8-gnd-escapes.json
   pcbpilot pcb autoroute --router 'java -jar freerouting.jar -de {in} -do {out}'`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			o.timeoutSet = cmd.Flags().Changed("router-timeout")
 			summary := map[string]any{}
-			emit := func(err error) error {
+			routed, err := runAutorouteFlow(cfg, *window, o, summary, stderr)
+			if err != nil || !routed {
 				_ = writeJSON(stdout, summary)
 				return err
 			}
-			preset := routerCmd == "fastroute"
-			if preset {
-				bin, err := resolveFastroute(fastrouteBin)
-				if err != nil {
-					return err
-				}
-				fo.bin = bin
-				if !cmd.Flags().Changed("router-timeout") {
-					fo.timeout = 45 * time.Minute
-				}
-			}
-
-			// 1. Export, then fix.
-			res, err := requestActionTimed(cfg, "pcb.export.dsn", *window, map[string]any{}, 5*time.Minute)
-			if err != nil {
-				return err
-			}
-			dsnPath := ""
-			for _, a := range res.Artifacts {
-				if a.Path != "" {
-					dsnPath = a.Path
-					break
-				}
-			}
-			if dsnPath == "" {
-				return fmt.Errorf("export-dsn returned no file (PCB empty or no nets? run `pcb import-changes` first)")
-			}
-			fmt.Fprintf(stderr, "DSN exported: %s\n", dsnPath)
-			summary["dsn"] = dsnPath
-			dsnBytes, err := os.ReadFile(dsnPath)
-			if err != nil {
-				return err
-			}
-			dsnText := string(dsnBytes)
-			if !rawDSN {
-				opt, err := fx.options()
-				if err != nil {
-					return err
-				}
-				if opt.CopperLayers == 0 {
-					if n, lerr := fetchCopperLayerCount(cfg, *window); lerr == nil {
-						opt.CopperLayers = n
-					}
-				}
-				fixed, rep, err := specctra.FixDSN(dsnText, opt)
-				if err != nil {
-					return fmt.Errorf("dsn-fix: %w", err)
-				}
-				dsnPath = strings.TrimSuffix(dsnPath, ".dsn") + "-fixed.dsn"
-				if err := os.WriteFile(dsnPath, []byte(fixed), 0o644); err != nil {
-					return err
-				}
-				dsnText = fixed
-				summary["dsnFixed"], summary["dsnFix"] = dsnPath, rep
-				fmt.Fprintf(stderr, "DSN fixed: %s (%d class name(s) re-quoted, layers %v added, %d padstack(s) patched, %d edge keep-out(s), %d escape(s))\n",
-					dsnPath, rep.QuotedClasses, rep.AddedLayers, rep.PatchedPadstacks, rep.EdgeKeepouts, rep.Escapes)
-				if opt.PlaneNet != "" {
-					fmt.Fprintln(stderr, "warning: --gnd-plane — "+viaToPourNote)
-				}
-			}
-
-			// 2. Route.
-			base := strings.TrimSuffix(dsnPath, ".dsn")
-			var sesPath string
-			var sessions []string
-			if !keep {
-				defer func() {
-					for _, f := range sessions {
-						_ = os.Remove(f)
-					}
-				}()
-			}
-			if preset {
-				ses, runs, err := runFastroute(fo, dsnPath, base, stderr)
-				summary["router"], summary["routerRuns"] = "fastroute", runs
-				for _, r := range runs {
-					sessions = append(sessions, r.Session)
-				}
-				if err != nil {
-					return emit(err)
-				}
-				sesPath = ses
-				if n := len(runs); n > 0 && runs[n-1].Unrouted > 0 {
-					fmt.Fprintf(stderr, "warning: %d connection(s) still unrouted after %d run(s); importing the best session\n", runs[n-1].Unrouted, n)
-				}
-			} else {
-				tmpl := routerCmd
-				if tmpl == "" {
-					tmpl = os.Getenv("FREEROUTING_CMD")
-				}
-				if tmpl == "" {
-					fmt.Fprintf(stderr, "no --router / FREEROUTING_CMD set — DSN exported, stopping.\n"+
-						"  route it externally (e.g. --router fastroute), then: pcbpilot pcb import-autoroute <file.ses> && pcbpilot pcb ses-repair <file.ses> --dsn %s\n", dsnPath)
-					return emit(nil)
-				}
-				sesPath = base + ".ses"
-				runStr := strings.NewReplacer("{in}", dsnPath, "{out}", sesPath).Replace(tmpl)
-				fmt.Fprintf(stderr, "routing: %s\n", runStr)
-				summary["router"] = runStr
-				routerCtx, cancelRouter := context.WithTimeout(context.Background(), fo.timeout)
-				defer cancelRouter()
-				if err := runExternalRouter(routerCtx, runStr, stderr); err != nil {
-					if routerCtx.Err() != nil {
-						return fmt.Errorf("external router timed out after %s: %w", fo.timeout, routerCtx.Err())
-					}
-					return fmt.Errorf("external router failed: %w", err)
-				}
-				if _, err := os.Stat(sesPath); err != nil {
-					return fmt.Errorf("router produced no SES at %s (check the command's {out})", sesPath)
-				}
-			}
-			summary["ses"] = sesPath
-			if !preset {
-				sessions = append(sessions, sesPath)
-			}
-
-			// 3. Import, then repair.
-			data, err := os.ReadFile(sesPath)
-			if err != nil {
-				return emit(fmt.Errorf("read SES: %w", err))
-			}
-			if ripUp {
-				fmt.Fprintln(stderr, "rip-up: removing existing unlocked routing before import")
-				if _, err := requestActionTimed(cfg, "pcb.route.rip_up", *window, map[string]any{}, 10*time.Minute); err != nil {
-					return emit(fmt.Errorf("rip-up: %w", err))
-				}
-			}
-			fmt.Fprintf(stderr, "importing SES (%d bytes) → tracks/vias\n", len(data))
-			if _, err := requestActionTimed(cfg, "pcb.import_autoroute", *window, map[string]any{
-				"fileBase64": base64.StdEncoding.EncodeToString(data),
-				"format":     "ses",
-				"fileName":   filepath.Base(sesPath),
-			}, 30*time.Minute); err != nil {
-				return emit(fmt.Errorf("import SES: %w", err))
-			}
-			if !noRepair {
-				rep, err := repairImportedSession(cfg, *window, string(data), dsnText, false, stderr)
-				summary["repair"] = rep
-				if err != nil {
-					return emit(fmt.Errorf("ses-repair: %w", err))
-				}
-			}
-
-			// 4. Post-import checks.
 			if noPost {
 				fmt.Fprintln(stderr, "--no-post: skipped pour rebuild / save / reload / DRC; run them before trusting the board")
-				return emit(nil)
+				return writeJSON(stdout, summary)
 			}
 			post, err := postImportChecks(cfg, *window, schFiles, scriptPath, stderr)
 			summary["post"] = post
-			return emit(err)
+			_ = writeJSON(stdout, summary)
+			return err
 		},
 	}
-	c.Flags().StringVar(&routerCmd, "router", "", "'fastroute' (preset) or an external router command with {in}/{out} (or FREEROUTING_CMD env)")
-	c.Flags().StringVar(&fastrouteBin, "fastroute-bin", "", "fastroute executable (default: $FASTROUTE_BIN, then PATH)")
-	c.Flags().IntVar(&fo.multiStart, "multi-start", 0, "fastroute --multi-start=N (0 = fastroute default)")
-	c.Flags().Float64Var(&fo.minTraceUm, "min-trace-um", 152, "fastroute --router.min_trace_width_um: never neck down below this (0 = not passed)")
-	c.Flags().DurationVar(&fo.maxTime, "max-time", 0, "fastroute --max-time per run (0 = none)")
-	c.Flags().IntVar(&fo.rounds, "continue", 2, "fastroute continuation runs (--initial-session) while connections remain unrouted")
-	c.Flags().DurationVar(&fo.timeout, "router-timeout", 10*time.Minute, "hard limit per router run (default 45m with --router fastroute)")
-	c.Flags().BoolVar(&rawDSN, "raw-dsn", false, "route the unmodified EasyEDA DSN (skip the export fixes)")
-	c.Flags().BoolVar(&noRepair, "no-repair", false, "skip the SES import repair")
+	o.register(c.Flags(), "", 2, false)
 	c.Flags().BoolVar(&noPost, "no-post", false, "skip pour rebuild / save / reload / DRC / pad-net diff")
-	c.Flags().BoolVar(&ripUp, "rip-up", false, "rip up existing unlocked routing before importing (the session already contains it)")
 	c.Flags().StringArrayVar(&schFiles, "sch-connectivity", nil, "schematic connectivity JSON for the pad-net diff (repeat per page)")
 	c.Flags().StringVar(&scriptPath, "pad-net-diff-script", "", "path to pad-net-diff.py (auto-detected if omitted)")
-	c.Flags().BoolVar(&keep, "keep", false, "keep the routed SES file(s)")
-	fx.register(c.Flags())
 	c.Flags().StringVar(&forceReason, "force", "", "deprecated compatibility option; workflow stages no longer gate routing")
 	c.Flags().StringVar(&forceUnsafeReason, "force-unsafe", "", "deprecated compatibility option; workflow stages no longer gate routing")
 	return c

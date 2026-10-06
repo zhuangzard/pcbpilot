@@ -2872,6 +2872,7 @@ external router (Freerouting) would route under the antenna. The result reports
 	pcb.AddCommand(newPcbAutorouteCmd(cfg, &window, stdout, stderr))
 	pcb.AddCommand(newPcbDsnFixCmd(stdout, stderr))
 	pcb.AddCommand(newPcbSesRepairCmd(cfg, &window, stdout, stderr))
+	pcb.AddCommand(newPcbWidenCmd(cfg, &window, stdout, stderr))
 
 	// ── auto-place ────────────────────────────────────────────────────────
 	// Module-aware heuristic placement (daemon-side; see pcb_autoplace.go).

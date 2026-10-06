@@ -303,11 +303,44 @@ pcbpilot pcb auto run --board board.json --groups groups.json --place --out-dir 
 而没有布线步骤去重铺它（2026-09-25 修复，`TestPlaybookPlaceOnlyKeepsStackup`）。改动器件后仍要重新走
 Layout 两轮自检并请用户确认，确认后再布线。
 
-## 执行
+## 布线交给 fastroute（默认，2026-10-06 用户决定）
+
+`pcb auto run --router auto`（默认）在装了 fastroute 时只规划摆放、叠层和机械（等同 `--no-route`），
+布线、铺铜和验收交给现场命令 `pcb auto route`；没装时退回内置布线并在 stderr 提示。
+`--router internal` 保留内置引擎（含 place↔route 循环），`--router fastroute` 未安装即报错。
+fastroute 安装与许可见 [pcb-routing.md](pcb-routing.md#external-router-fastroute)。
+
+```bash
+pcbpilot pcb auto run --board board.json --mech mech.json --place --out-dir out/
+pcbpilot pcb auto route --playbook out/playbook.json --out-dir out/live --project <工程> \
+  --escapes escapes.json --sch-connectivity p1.json --sch-connectivity p2.json \
+  --widen-net SV1_DRV,SV2_DRV,SV3_DRV,PV1_DRV --sim sim.json
+```
+
+`pcb auto route` 依次：`apply --yes` 剧本 → PLANE 内层改 SIGNAL → 导出 DSN → `dsn-fix` → fastroute
+（`--continue 5` 次 `--initial-session` 续跑直到 0 未布通）→ 拆线 + 导入 → `ses-repair` → 铺铜
+（GND 在 TOP/IN1/BOTTOM，焊盘最多的非地电源网在 IN2；`--gnd-layers` / `--power-net` / `--power-layer` 可改）
+→ `--widen-net` 加宽（`pcb widen`）→ 重铺 → 保存 → 重载 → 重铺 → 原生 DRC → 逐焊盘对账 →
+`--sim` 时现场 dump 后跑 `sim post-layout`。结果写 `--out-dir/summary.json`。
+
+`--mech --place` 时，板上已有、但新机械规格没有复用的板级 MULTI 填充（旧安装孔）会在新板框前删除：
+`board copy` 会带着源板的安装孔填充（旧 ID），不删就会留在新板上。`--keep-board-fills` 保留。
+
+同一摆放的对比（Gas Module V5 compact，100×80 mm，4 层，199 件，U8 固定居中）：
+
+| 布线 | 布通 | 原生 DRC |
+|---|---|---|
+| fastroute | 100%，432 s | 0；`pcb check` 0 ERROR；逐焊盘对账 0 差异 |
+| pcbpilot 内置 | 97.2%（171/176） | 62 个连接错误 |
+
+验证状态：两块板的结果来自手动脚本流程（现场）；`pcb auto route` 与 `--router` 选择本身为
+offline-verified（单元测试），尚未整条现场跑过。
+
+## 执行（内置布线，`--router internal`）
 
 ```bash
 pcbpilot pcb dump --include-copper --out board.json --project <工程>
-pcbpilot pcb auto run --board board.json --mech mech.json --power power.json --place --out-dir out/
+pcbpilot pcb auto run --board board.json --mech mech.json --power power.json --place --router internal --out-dir out/
 # 先读 out/report.md 与 out/preview.svg，确认层数、电流、隔离与未布通项
 pcbpilot apply out/playbook.json --project <工程> --dry-run
 pcbpilot apply out/playbook.json --project <工程>

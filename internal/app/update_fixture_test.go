@@ -38,6 +38,9 @@ func TestMain(m *testing.M) {
 		return "", fmt.Errorf("test: refusing to run %s %v (install a fake daemonServiceRunner)", name, args)
 	}
 	os.Setenv("PCBPILOT_UPDATE_NOTICE", "0")
+	// `pcb auto run --router auto` must not switch to an installed fastroute.
+	os.Setenv("FASTROUTE_BIN", "")
+	fastrouteLookPath = func(string) (string, error) { return "", fmt.Errorf("test: fastroute lookup disabled") }
 	os.Setenv(selfupdate.GitHubProxyEnv, "off")
 	// …and no test may write ~/.pcbpilot (update.log, state, snapshots) or a
 	// client config of the real user: the whole package runs in a temp HOME.

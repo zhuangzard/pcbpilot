@@ -106,8 +106,8 @@ this build (`pcb_Document.autoRouting` is undefined — see `docs/ecosystem-surv
 whole-board routing uses pcbpilot's built-in engine **`pcb auto run`** (see
 [`pcb-auto.md`](./pcb-auto.md); live-verified 2026-09-25 on the ESP32-S3 mini board: 30/30
 routed, native DRC clean). 布线方式见 [`design-flow.md`](./design-flow.md) P7：整板默认
-`pcb auto run`；稀疏短线可逐段或 `route-short`；EasyEDA 原生自动布线与外部 Freerouting /
-fastroute（`pcb autoroute --router fastroute`，见 [External router: fastroute](#external-router-fastroute)）为可选替代。
+`pcb auto run` + `pcb auto route`（装了 fastroute 时由它布线，见 [External router: fastroute](#external-router-fastroute)；
+未安装时 `pcb auto run` 用内置引擎）；稀疏短线可逐段或 `route-short`；EasyEDA 原生自动布线与外部 Freerouting 为可选替代。
 完成后都按网回读并运行 DRC。
 
 - `pcb.line.create` — a copper **track** (导线): line segment on a copper layer
@@ -261,6 +261,8 @@ pcbpilot pcb autoroute --router fastroute --rip-up --multi-start 8 \
 
 Steps (stdout is one summary JSON, progress on stderr):
 
+0. PLANE inner layers are set to SIGNAL (EasyEDA leaves PLANE layers out of the DSN and they cannot carry
+   tracks); pours go on them afterwards. `--gnd-plane` keeps them.
 1. `pcb export-dsn`, then the `pcb dsn-fix` repairs (`--raw-dsn` skips):
    - class net names `'NET'` → `"NET"` (EasyEDA quotes with `'`, so every net-class width was ignored);
    - inner layers missing from the export are added (seen: Inner1 of a 4-layer board) and the layers are
@@ -270,7 +272,8 @@ Steps (stdout is one summary JSON, progress on stderr):
    - GND routed as traces by default; `--gnd-plane [--plane-net GND]` declares the missing inner layer as a plane;
    - `--escapes FILE`: fixed stub + via for pins the router cannot escape, e.g.
      `[{"net":"GND","layer":"TopLayer","widthMil":10,"path":[[4776.1,313.9],[4710.65,313.9]],"via":true}]`
-     (mil, DSN layer names).
+     (mil, DSN layer names), or bare `[[[x1,y1],[x2,y2]], ...]` pairs = 10 mil GND on TopLayer with a via at the
+     end. Choose escapes for GND pins between fine-pitch signal pins that fastroute's report lists as blocked.
 2. fastroute with `--report --diagnose`, `--router.min_trace_width_um=152` (`--min-trace-um`), optional
    `--multi-start`/`--max-time`; while connections stay unrouted, up to `--continue 2` more runs from the last
    session (`--initial-session`). `--router '<cmd> {in} {out}'` keeps working for any other router.
@@ -286,6 +289,12 @@ Steps (stdout is one summary JSON, progress on stderr):
    one `sch connectivity` file per page of this board; otherwise reported as skipped).
 
 `pcb dsn-fix` and `pcb ses-repair` also run alone, for a manual round-trip or another router.
+`pcb widen --net SV1_DRV,SV2_DRV --max-mil 40` widens high-current nets afterwards wherever the clearance to
+other-net tracks, vias and pads allows (only gains > 2 mil; then rebuild / save / reload / DRC).
+
+Whole board (placement → fastroute → pours → DRC → pad-net diff → post-layout sim): `pcb auto route`, see
+[pcb-auto.md](pcb-auto.md) "布线交给 fastroute". `pcb auto run` routes with fastroute by default when it is
+installed (`--router internal` keeps the built-in router).
 
 **Via-to-pour connectivity.** In the 2026-10-06 run (desktop 3.2.149) native DRC did not count a via that only
 touched a same-net copper pour as connected. Do not depend on it: route every net, GND included, as tracks (the

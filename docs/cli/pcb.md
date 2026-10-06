@@ -42,6 +42,8 @@
 | 关键网先行 | `pcb route-critical` | P7.0 一条命令:电源按层数走 planes/pour → 差分对双源识别成对布线+skew 实测 → 自动 `track-lock` |
 | 逐焊盘铜路径核查 | `pcb net-path --from REF.PAD [--through REF.PAD] --to REF.PAD [--layer 1]` | 只读按支持的原始 pad shape + track/arc/via 构图；`--layer` 在受限图求路并排除物理过孔，回报 requestedLayer/连续路径/层/线宽/过孔数；未知焊盘几何、缺失 arc 回读或 ordered proof 的重叠铜返回 unknown/error，同网名不等于连通，铺铜/PLANE 明确排除 |
 | 外部自动布线 | `pcb export-dsn` / `import-autoroute` / `pcb autoroute [--router fastroute]` / `pcb dsn-fix` / `pcb ses-repair` | Specctra DSN 往返(带禁布区注入)。`dsn-fix` 离线修 EasyEDA 导出缺陷(类网名引号、缺失内层与层序、通孔焊盘内层形状、板边禁布带、可选 GND 平面、固定逃线);`ses-repair` 在导入后修层号 21/22→15/16、恢复颈缩线宽、补建 DSN 固定走线;`autoroute` 串起导出→修→布线→导入→修复→铺铜/保存/重载/DRC/逐焊盘对账。fastroute(GPLv3)只作外部进程,用户自装,见 [pcb-routing](../../.agents/skills/pcbpilot/references/pcb-routing.md#external-router-fastroute)。Freerouting 与编辑器原生自动布线同为可选;默认整板布线用 `pcb auto run` |
+| 按净距加宽 | `pcb widen --net A,B --max-mil 40` | 大电流网在与异网铜的净距允许处加宽(只改增益 > 2 mil 的线),先建新线再删旧线,随后重铺/保存/重载/DRC |
+| 整板 fastroute 收尾 | `pcb auto route --playbook out/playbook.json` | 应用摆放剧本 → fastroute(续跑至 0 未布通)→ 导入修复 → 铺铜(GND TOP/IN1/BOTTOM、主电源 IN2)→ 加宽 → DRC → 逐焊盘对账 → 后仿真;`pcb auto run` 装了 fastroute 时默认只出摆放剧本(`--router internal` 用内置布线) |
 | 拆线 | `pcb rip-up` | 按网/按范围拆 |
 | 锁定 | `pcb track-lock` | 手布关键线锁死,防被自动布线/pour-rebuild 冲掉 |
 
