@@ -7,6 +7,38 @@
 // (M3) and the pcbauto adapter (M2) fill a Builder; every other package asks a
 // Resolver. M2 provides the implementation and a constructor for the Builder.
 // Lengths are int64 nanometres.
+//
+// NewBuilder returns a *Book, the Builder. Besides the interface it takes
+// SetIntent (a net's current, voltage and neck-down intent) and SetEdge (the
+// host or DSN board-edge rule), which the frozen interface has no method for.
+// Build validates and freezes the Book; FromPcbauto fills one from pcbauto's
+// Analysis and Stackup.
+//
+// Design choices that the specs leave open (M2):
+//
+//   - A plain (clearance X) is the Generic type. Up the scope chain, the first
+//     scope that has the queried type or a Generic value decides; a typed value
+//     beats the Generic one of the same scope only. Same-net specials never
+//     fall back to Generic, and other same-net pairs have clearance 0.
+//   - Width scopes: pcb < layer < class < class+layer < net < net+layer; the
+//     intent floor and the layer's fab minimum then raise the width. Region
+//     scopes affect clearance only (a width query has no position).
+//   - ScopeIntent sets (net, layer or AllLayers) are floors like the derived
+//     ones: only Width and Clearance are read, and both merge as max().
+//   - Voltage floors apply between conductors only, never against an Area.
+//     IPC-2221 rows for altitudes above 3050 m are not shipped (no input
+//     carries an altitude).
+//   - Neck-down (decision Q6): a net may not neck down when its intent says
+//     NoNeckDown (pcbauto intent widthMil.min >= widthMil.outer, the same test
+//     internal/pcb/specctra uses for its no-neck-down classes) or
+//     ControlledImpedance, or when its resolved MinWidth is not below its
+//     width. A DSN expresses a no-neck-down class as MinWidth = Width on that
+//     class; no new DSN keyword is needed.
+//   - Clearance cache: keyed by clearance profile (class plus any net-scope or
+//     intent clearance input) instead of class, lock-free atomic cells.
+//   - Board edge: SetEdge, else DefaultEdge (D3). FromPcbauto uses the larger
+//     of the intent edge policy's outer and inner bands, since Edge has no
+//     layer argument.
 package rules
 
 import "github.com/zhuangzard/pcbpilot/pkg/pcbroute/geom"
