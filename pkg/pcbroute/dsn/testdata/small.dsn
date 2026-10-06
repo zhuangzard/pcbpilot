@@ -1,0 +1,103 @@
+(PCB "small"
+  (parser
+    (host_cad "hand-written")
+    (host_version "1")
+  )
+  (resolution mil 1000)
+  (structure
+    (boundary (path signal 0 0 0 1000 0 1000 500 0 500 0 0))
+    (via via0)
+    (rule (clear 6))
+    (rule (clear 8 (type default_smd)))
+    (rule (clear 10 (type smd_smd)))
+    (rule (clearance 3 (type smd_via_same_net)))
+    (rule (clearance 4 (type buried_via_gap)))
+    (rule (width 10))
+    (layer TopLayer
+      (type signal)
+    )
+    (layer Inner1
+      (type power)
+      (rule (width 12))
+    )
+    (layer Inner2
+      (type signal)
+    )
+    (layer BottomLayer
+      (type signal)
+    )
+    (plane GND (polygon Inner1 0 0 0 1000 0 1000 500 0 500 0 0))
+    (keepout "k1" (rect signal 100 100 200 150))
+    (via_keepout (polygon TopLayer 0 300 300 400 300 400 400 300 400))
+    (region "r1" (rect signal 500 0 600 100) (region_net SIG) (rule (clearance 20)))
+  )
+  (placement
+    (component imgA
+      (place U1 100 200 front 0)
+      (place U2 500 200 back 90)
+    )
+  )
+  (library
+    (image imgA
+      (pin pth 1 0 0)
+      (pin psmd (rotate 90) 2 50 0)
+      (pin poval 3 0 50)
+      (pin pmix 4 -50 0)
+      (pin ppoly 5 0 -50)
+    )
+    (padstack pth
+      (shape (circle signal 60))
+      (attach off)
+    )
+    (padstack psmd
+      (shape (rect TopLayer -20 -10 20 10))
+    )
+    (padstack poval
+      (shape (path TopLayer 20 -10 0 10 0))
+    )
+    (padstack pmix
+      (shape (circle TopLayer 60))
+      (shape (circle Inner1 40))
+      (shape (circle Inner2 40))
+      (shape (circle BottomLayer 60))
+    )
+    (padstack ppoly
+      (shape (polygon TopLayer 0.1 -10 -10 10 -10 10 -10 10 10 -10 10 -10 -10))
+    )
+    (padstack via0
+      (shape (circle signal 24))
+    )
+  )
+  (network
+    (net GND
+      (pins U1-1 U2-1 U1-4)
+      (rule (width 25))
+      (layer_rule TopLayer (rule (width 30)))
+    )
+    (net SIG
+      (pins U1-2 U2-2)
+    )
+    (net "NET 3"
+      (pins U1-3 U2-3)
+    )
+    (class  ''
+      (circuit (use_via via0))
+      (rule (width 10) (clearance 4))
+    )
+    (class PWR 'GND'
+      (circuit (use_via via0) (use_array via0 2 3))
+      (rule (width 20) (clearance 7))
+      (layer_rule Inner1 Inner2 (rule (width 40)))
+    )
+    (class SIGS SIG "NET 3"
+      (rule (clearance 5 (type wire_wire) (type smd_default)))
+    )
+    (class_class (classes PWR SIGS) (rule (clearance 15)))
+  )
+  (wiring
+    (wire (path TopLayer 10 100 200 150 200 150 250) (net GND) (type fix))
+    (wire (path BottomLayer 10 500 200 500 300) (net GND) (type protect))
+    (wire (path Inner2 8 600 200 650 200) (net SIG) (type route))
+    (via via0 150 250 (net GND) (type fix))
+  )
+)
