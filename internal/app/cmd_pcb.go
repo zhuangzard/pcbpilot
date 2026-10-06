@@ -4210,6 +4210,8 @@ with 'pcb outline-get'; its rendered bbox includes the stroke. Run BEFORE pour/r
 		var side string
 		var refs []string
 		var rounds int
+		var tight, tightDry bool
+		tightOpt := defaultSilkTightOpts()
 		c := &cobra.Command{
 			Use:   "silk-align",
 			Short: "Align component designators (位号) with collision avoidance, verified on the readback",
@@ -4228,13 +4230,38 @@ still overlap another visible designator, with every other label fixed. The verd
 own planning model (2026-09-25: the planner reported 0 unresolved while 7 pairs
 overlapped). unresolvedPairs left after the last round mean the area is too dense
 for the label size: loosen placement, or place them with 'pcb silk-set'. Confirm
-with 'pcb check' (silk-overlap / silk-over-pad).`,
+with 'pcb check' (silk-overlap / silk-over-pad).
+
+--tight (the 'pcb auto route' step; usable on any finished board, no reroute):
+pcbpilot plans every designator next to its OWN footprint from the board dump —
+nearest free slot at --gap on all four sides, then turned 90° (reads from the
+right) on all four sides, then a dense cluster (decap row, resistor array) gets
+its labels as an ordered row/column beside the group, each on its own part.
+Text is never shrunk (labels below the project size grow to it). Labels keep off
+pads, vias, holes, other footprints, other silk and the board edge. It applies
+rotation first, reads the host's new anchor, then moves, reads back and repeats
+(--rounds). The verdict is the "silkscreen" gate on the readback (non-zero exit
+when it fails); unresolved labels are reported with a suggested group label —
+group labels and leader lines are never drawn automatically.`,
 			Args: cobra.NoArgs,
 			Example: `  pcbpilot pcb silk-align
   pcbpilot pcb silk-align --side bottom --offset 15
   pcbpilot pcb silk-align --refs U1 --refs LED1
   pcbpilot pcb silk-align --rounds 1          # single pass, still judged on the readback`,
 			RunE: func(cmd *cobra.Command, args []string) error {
+				if tight {
+					rep, err := runSilkTight(cfg, window, tightOpt, rounds, tightDry, stderr)
+					if err != nil {
+						return err
+					}
+					if err := writeJSON(stdout, rep); err != nil {
+						return err
+					}
+					if !tightDry && !rep.Gate.Pass {
+						return fmt.Errorf("silkscreen gate failed: %s", rep.Gate.Detail)
+					}
+					return nil
+				}
 				payload := map[string]any{}
 				if cmd.Flags().Changed("offset") {
 					payload["offset"] = offset
@@ -4274,6 +4301,9 @@ with 'pcb check' (silk-overlap / silk-over-pad).`,
 		c.Flags().StringVar(&side, "side", "", "bias which side of the footprint: top|bottom|left|right (soft hint)")
 		c.Flags().StringArrayVar(&refs, "refs", nil, "limit to these designators (repeatable); default = all")
 		c.Flags().IntVar(&rounds, "rounds", 3, "max align passes; after each, still-overlapping designators (real readback bboxes) are re-aligned with all others frozen")
+		c.Flags().BoolVar(&tight, "tight", false, "pcbpilot plans each designator next to its own footprint (never shrunk) and gates the readback (see above)")
+		c.Flags().BoolVar(&tightDry, "dry-run", false, "with --tight: print the plan and the current gate, change nothing")
+		addSilkTightFlags(c, &tightOpt, "")
 		pcb.AddCommand(c)
 	}
 

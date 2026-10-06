@@ -9123,6 +9123,7 @@ const pcbSilkList: Handler = async () => {
 				rotation: Number(a.getState_Rotation?.() ?? 0),
 				fontFamily: a.getState_FontFamily?.() ?? '',
 				fontSize: Number(a.getState_FontSize?.() ?? 0) || 0,
+				lineWidth: Number(a.getState_LineWidth?.() ?? 0) || 0,
 				componentId: pid,
 				componentLayer: compLayer.get(pid) ?? 0,
 				// Hidden Footprint/Device attributes sit on the silk layer too;
@@ -9156,6 +9157,7 @@ const pcbSilkList: Handler = async () => {
 				rotation: Number(s.getState_Rotation?.() ?? 0),
 				fontFamily: s.getState_FontFamily?.() ?? '',
 				fontSize: Number(s.getState_FontSize?.() ?? 0) || 0,
+				lineWidth: Number(s.getState_LineWidth?.() ?? 0) || 0,
 				componentId: '',
 				componentLayer: 0,
 				x: s.getState_X() ?? 0,

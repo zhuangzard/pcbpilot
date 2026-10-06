@@ -187,6 +187,7 @@ type pcbSilkText struct {
 	Reverse   bool    // reversed reading (left-right flipped) — reads backwards
 	Rotation  float64 // degrees; a designator should read upright (0°)
 	FontSize  float64 // mil; 0 = unknown (older connector) → estimate at 40
+	LineWidth float64 // stroke, mil; 0 = not reported (connector < 0.7.2)
 	CompID    string
 	CompLayer int
 	X, Y      float64 // stored BOTTOM-LEFT anchor, NOT the text center (#155)
@@ -2318,6 +2319,7 @@ func parsePcbSilkList(result map[string]any) []pcbSilkText {
 		reverse, _ := tm["reverse"].(bool)
 		rotation, _ := asFloatOK(tm["rotation"])
 		fontSize, _ := asFloatOK(tm["fontSize"]) // 0 = old connector → estimated
+		lineWidth, _ := asFloatOK(tm["lineWidth"])
 		compID, _ := tm["componentId"].(string)
 		compLayer, _ := asFloatOK(tm["componentLayer"])
 		x, _ := asFloatOK(tm["x"])
@@ -2338,7 +2340,7 @@ func parsePcbSilkList(result map[string]any) []pcbSilkText {
 		}
 		silk = append(silk, pcbSilkText{
 			ID: id, Kind: kind, Key: key, Text: text, Layer: int(layer), Mirror: mirror,
-			Reverse: reverse, Rotation: rotation, FontSize: fontSize, CompID: compID, CompLayer: int(compLayer), X: x, Y: y,
+			Reverse: reverse, Rotation: rotation, FontSize: fontSize, LineWidth: lineWidth, CompID: compID, CompLayer: int(compLayer), X: x, Y: y,
 			BBox: bbox, Hidden: hidden,
 		})
 	}

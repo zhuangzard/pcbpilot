@@ -98,6 +98,7 @@ func newPcbAutoRouteCmd(cfg *appConfig, window *string, stdout, stderr io.Writer
 	var o autorouteOpts
 	var playbook, outDir, gndNet, powerNet, simPath, scriptPath, widenCSV, waiverPath, widthBasis, candDir string
 	var trialTime time.Duration
+	silkOpt := defaultSilkTightOpts()
 	var gndLayers []int
 	var powerLayer int
 	var widenMax float64
@@ -321,8 +322,15 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 			if rep, ok := summary["repair"].(*sesRepairSummary); ok && rep != nil {
 				unresolved = rep.Unresolved
 			}
+			// Designators next to their own parts (never shrunk); the
+			// silkscreen gate below judges the readback.
+			silkRep, err := runSilkTight(cfg, *window, silkOpt, 3, false, stderr)
+			summary["silk"] = silkRep
+			if err != nil {
+				return finish(fmt.Errorf("silk placement: %w", err))
+			}
 			gateOpts := qualityGateOpts{intent: o.intentPath, sim: simPath, sch: schFiles, script: scriptPath,
-				outDir: outDir, waivers: waivers, sessionChecked: true, unresolved: unresolved, widthBasis: widthBasis, source: "live board after pcb auto route"}
+				outDir: outDir, waivers: waivers, sessionChecked: true, unresolved: unresolved, widthBasis: widthBasis, source: "live board after pcb auto route", silk: silkOpt}
 			pass, err := runQualityGates(cfg, *window, gateOpts, summary, stderr)
 			if err != nil {
 				return finish(err)
@@ -390,6 +398,7 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 	c.Flags().StringVar(&widthBasis, "width-basis", "segment", widthBasisHelp)
 	c.Flags().StringVar(&waiverPath, "waivers", "", "JSON list of signed waivers [{gate,match,reason,by}]: a failing gate passes only when every failing item matches one")
 	c.Flags().StringVar(&simPath, "sim", "", "sim.json (pcbpilot sim power): run sim post-layout on the finished live board")
+	addSilkTightFlags(c, &silkOpt, "silk-")
 	return c
 }
 

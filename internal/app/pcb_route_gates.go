@@ -427,6 +427,8 @@ type qualityGateOpts struct {
 	waivers                             []gateWaiver
 	sessionChecked                      bool
 	unresolved                          *specctra.Reconcile
+	// silk: limits of the silkscreen gate (judged on the readback).
+	silk silkTightOpts
 }
 
 // runQualityGates: pour rebuild → save → reload → pour rebuild → native DRC →
@@ -439,7 +441,7 @@ func runQualityGates(cfg *appConfig, window string, o qualityGateOpts, summary m
 	if err != nil {
 		return false, err
 	}
-	snap, err := fetchBoardSnapshot(cfg, window, boardSnapshotOpts{withRules: true, withLayers: true, withCopper: true, withFootprintHoles: true})
+	snap, err := fetchBoardSnapshot(cfg, window, boardSnapshotOpts{withRules: true, withLayers: true, withCopper: true, withFootprintHoles: true, withSilk: true})
 	if err != nil {
 		return false, fmt.Errorf("board dump: %w", err)
 	}
@@ -472,6 +474,13 @@ func runQualityGates(cfg *appConfig, window string, o qualityGateOpts, summary m
 		viaOK = segmentViaOK(in, res)
 	}
 	gates, pass := postRouteGates(cfg, window, o.intent, post, res.Verdict.Status, res.Verdict.Reasons, o.sessionChecked, o.unresolved, o.waivers, segNeed, viaOK, stderr)
+	// Silkscreen: designators next to their own part, never on pads / holes /
+	// edge / other silk, never below the project size (readback).
+	_, _, font := silkTightInput(snap, o.silk)
+	sg := silkGate(snap, font, o.silk)
+	applyWaivers(&sg, o.waivers)
+	gates = append(gates, sg)
+	pass = pass && sg.Pass
 	summary["gates"], summary["pass"] = gates, pass
 	return pass, nil
 }
@@ -510,6 +519,7 @@ func loadWaivers(path string) ([]gateWaiver, error) {
 
 func newPcbGateCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {
 	var intentPath, simPath, scriptPath, outDir, waiverPath, widthBasis string
+	silkOpt := defaultSilkTightOpts()
 	var schFiles []string
 	c := &cobra.Command{
 		Use:   "gate",
@@ -549,7 +559,7 @@ Results: --out-dir/{gate.json, board-final.json, post.json, post.md}.`,
 			}
 			summary := map[string]any{"intent": intentPath, "sim": simPath}
 			pass, err := runQualityGates(cfg, *window, qualityGateOpts{intent: intentPath, sim: simPath, sch: schFiles, script: scriptPath,
-				outDir: outDir, waivers: waivers, widthBasis: widthBasis, source: "live board (pcb gate)"}, summary, stderr)
+				outDir: outDir, waivers: waivers, widthBasis: widthBasis, silk: silkOpt, source: "live board (pcb gate)"}, summary, stderr)
 			if f, ferr := os.Create(filepath.Join(outDir, "gate.json")); ferr == nil {
 				_ = writeJSON(f, summary)
 				f.Close()
@@ -571,6 +581,7 @@ Results: --out-dir/{gate.json, board-final.json, post.json, post.md}.`,
 	c.Flags().StringVar(&outDir, "out-dir", "pcb-gate", "directory for gate.json, board-final.json and post-layout results")
 	c.Flags().StringVar(&waiverPath, "waivers", "", "JSON list of signed waivers [{gate,match,reason,by}]")
 	c.Flags().StringVar(&widthBasis, "width-basis", "segment", widthBasisHelp)
+	addSilkTightFlags(c, &silkOpt, "silk-")
 	return c
 }
 

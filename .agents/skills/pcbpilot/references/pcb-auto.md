@@ -333,6 +333,14 @@ pcbpilot pcb auto route --playbook out/playbook.json --out-dir out/live --projec
   （上限 `--widen-max-mil`，间距与 DRC 守卫照旧），重新对账并重跑全部门禁，最多 2 轮；DRC、对账等其他门失败时不加宽。
   线宽门只按电流，压降还取决于长度：Gas Module V5 B v17 的 SV1_DRV 0.34 A 走内层 1551 mil × 10 mil，压降 57 mV（预算 30）。
 - 会话对账：两段同网共线走线的圆头重叠到仍有段宽 90 % 时视为连续铜（v17：导入丢了夹在 2.2 mil 缝里的 1.1 mil GND 短段）。
+- 丝印（`silkscreen` 门，读回 `pcb.silk.list` 真实包围盒判）：`pcb auto route` 铺铜加宽后自动跑 `pcb silk-align --tight`
+  的同一流程：位号放在自己封装旁最近的空位（先 `--silk-gap` 5 mil 四边横排，再转 90° 四边，从下或从右读），
+  密集簇（去耦电容排、电阻排）排成与器件一一对齐的行/列；**字号从不缩小**（小于项目字号的放大到项目字号，
+  项目字号缺省取板上最常见的位号高度）；避开焊盘/过孔/孔（`--silk-pad-clear` 6 mil，JLC 0.15 mm）、别的封装、
+  别的丝印、板边。门在任一位号压丝印/焊盘或阻焊开窗/孔/板边、出板、离自己封装超 `--silk-max-dist`（30 mil）、
+  字号低于项目字号、线宽低于 `--silk-fab-min-line`（5.9 mil）时失败，列出最差的坐标。找不到位置的只报告并给出
+  建议的组标签（"C21–C24"），组标签与引线不自动画。连接器 0.7.2 起读回线宽，之前的版本不判线宽。
+  已布完的板直接跑 `pcb silk-align --tight [--dry-run]`，不用重布。
 - 豁免：`--waivers waivers.json`，每条 `{gate, match, reason, by}` 由人签字；只有一道门的全部失败项都被豁免覆盖
   时才放行，豁免内容写进 summary。没有失败项明细的门（如 DRC 数量）不能豁免。
 

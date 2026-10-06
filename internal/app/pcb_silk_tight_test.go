@@ -1,0 +1,244 @@
+package app
+
+import (
+	"encoding/json"
+	"fmt"
+	"math"
+	"os"
+	"strings"
+	"testing"
+)
+
+// applyPlanToSnap writes the planned boxes back as the silk readback would
+// show them (offline stand-in for the live round trip).
+func applyPlanToSnap(snap *boardSnapshot, placed []silkPlaced, font float64) {
+	by := map[string]silkPlaced{}
+	for _, p := range placed {
+		by[p.ID] = p
+	}
+	for i, t := range snap.Silk {
+		if p, ok := by[t.ID]; ok && p.Moved {
+			b := pcbRect(p.Box)
+			snap.Silk[i].BBox = &b
+			snap.Silk[i].Rotation = float64(p.Rot)
+			if t.FontSize < font {
+				snap.Silk[i].FontSize = font
+			}
+		}
+	}
+}
+
+// PCBPILOT_SILK_DUMP=board.json (a dump with silk, e.g. pcb auto run's
+// board-start.json): plan, apply offline, gate.
+func TestSilkTightDump(t *testing.T) {
+	path := os.Getenv("PCBPILOT_SILK_DUMP")
+	if path == "" {
+		t.Skip("PCBPILOT_SILK_DUMP not set")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snap boardSnapshot
+	if err := json.Unmarshal(raw, &snap); err != nil {
+		t.Fatal(err)
+	}
+	opt := defaultSilkTightOpts()
+	labels, sc, font := silkTightInput(&snap, opt)
+	before := silkGate(&snap, font, opt)
+	placed, notes := planSilkTight(labels, sc, opt)
+	how := map[string]int{}
+	for _, p := range placed {
+		how[strings.SplitN(p.How, "+", 2)[0]+map[bool]string{true: "+rot", false: ""}[strings.HasSuffix(p.How, "rotated")]]++
+	}
+	applyPlanToSnap(&snap, placed, font)
+	after := silkGate(&snap, font, opt)
+	t.Logf("labels %d font %.1f; before: %s; after: %s; how %v", len(labels), font, before.Detail, after.Detail, how)
+	for _, n := range notes {
+		t.Log("note:", n)
+	}
+	for i, it := range after.Items {
+		if i < 15 {
+			t.Log("after:", it)
+		}
+	}
+}
+
+// silkTestBoard: 2000×2000 board, parts given as (ref, bbox, pads) with a
+// 45 mil designator ("Rn" ≈ 70×45) parked far away.
+func silkTestBoard(parts ...boardComp) *boardSnapshot {
+	snap := &boardSnapshot{Outline: &boardOutline{BBox: layoutBBox{0, 0, 2000, 2000}}}
+	for i, c := range parts {
+		c.ID = "c" + c.Designator
+		c.Layer = pcbSideTop
+		snap.Components = append(snap.Components, c)
+		b := pcbRect{MinX: 1800, MinY: float64(100 + 60*i), MaxX: 1800 + 22*float64(len(c.Designator)), MaxY: float64(145 + 60*i)}
+		snap.Silk = append(snap.Silk, pcbSilkText{ID: "s" + c.Designator, Kind: "attribute", Key: "Designator", Text: c.Designator,
+			Layer: silkTopLayer, FontSize: 45, LineWidth: 6, CompID: c.ID, BBox: &b, X: b.MinX, Y: b.MinY})
+	}
+	return snap
+}
+
+func part0603(ref string, cx, cy float64) boardComp {
+	return boardComp{Designator: ref, BBox: &layoutBBox{cx - 60, cy - 33, cx + 60, cy + 33},
+		Pads: []boardPad{{Layer: pcbSideTop, X: cx - 30, Y: cy, W: 31, H: 35}, {Layer: pcbSideTop, X: cx + 30, Y: cy, W: 31, H: 35}}}
+}
+
+func planOf(t *testing.T, snap *boardSnapshot) (map[string]silkPlaced, []string, float64) {
+	t.Helper()
+	opt := defaultSilkTightOpts()
+	labels, sc, font := silkTightInput(snap, opt)
+	placed, notes := planSilkTight(labels, sc, opt)
+	m := map[string]silkPlaced{}
+	for _, p := range placed {
+		m[p.Ref] = p
+	}
+	return m, notes, font
+}
+
+// A lone part gets its label on the first side at the 5 mil gap.
+func TestSilkTightNearestSide(t *testing.T) {
+	snap := silkTestBoard(part0603("R1", 1000, 1000))
+	m, _, _ := planOf(t, snap)
+	p := m["R1"]
+	own := silkBox{940, 967, 1060, 1033}
+	if p.How != "top" || p.Rot != 0 || math.Abs(p.Box.dist(own)-5) > 1e-6 {
+		t.Fatalf("R1 %+v", p)
+	}
+	applyPlanToSnap(snap, []silkPlaced{p}, 45)
+	if g := silkGate(snap, 45, defaultSilkTightOpts()); !g.Pass {
+		t.Fatalf("gate: %+v", g)
+	}
+}
+
+// Neighbours above and below leave no room for the 88 mil "R101" lying
+// down, the side gaps are too narrow for it but wide enough standing: the
+// label turns 90° (reads from the right) beside the part.
+func TestSilkTightRotates(t *testing.T) {
+	snap := silkTestBoard(part0603("R101", 1000, 1000), part0603("R2", 1000, 1072), part0603("R3", 1000, 928),
+		part0603("R8", 815, 1000), part0603("R9", 1185, 1000))
+	m, _, _ := planOf(t, snap)
+	if p := m["R101"]; p.Rot != 90 || !strings.HasSuffix(p.How, "rotated") {
+		t.Fatalf("R101 %+v", p)
+	}
+}
+
+// A tight row of caps (pitch 80 mil < label length): the labels go as an
+// ordered row beside the group, each over its own cap.
+func TestSilkTightGroupRow(t *testing.T) {
+	var ps []boardComp
+	for i := 0; i < 5; i++ {
+		c := part0603(fmt.Sprintf("C%d", 21+i), 700+80*float64(i), 1000)
+		c.BBox = &layoutBBox{c.BBox.MinX + 25, c.BBox.MinY, c.BBox.MaxX - 25, c.BBox.MaxY}
+		c.Pads = []boardPad{{Layer: pcbSideTop, X: 700 + 80*float64(i), Y: 985, W: 30, H: 25}, {Layer: pcbSideTop, X: 700 + 80*float64(i), Y: 1015, W: 30, H: 25}}
+		ps = append(ps, c)
+	}
+	// a wall of parts right below the row
+	for i := 0; i < 5; i++ {
+		ps = append(ps, part0603(fmt.Sprintf("U%d", i+1), 700+130*float64(i)-40, 900))
+	}
+	snap := silkTestBoard(ps...)
+	m, notes, _ := planOf(t, snap)
+	for i := 0; i < 5; i++ {
+		ref := fmt.Sprintf("C%d", 21+i)
+		p := m[ref]
+		if p.How == "unresolved" {
+			t.Fatalf("%s unresolved: %v", ref, notes)
+		}
+		if p.Rot == 90 && math.Abs(p.Box.cx()-(700+80*float64(i))) > 1e-6 {
+			t.Fatalf("%s not over its cap: %+v", ref, p)
+		}
+	}
+	var got []silkPlaced
+	for _, p := range m {
+		got = append(got, p)
+	}
+	applyPlanToSnap(snap, got, 45)
+	if g := silkGate(snap, 45, defaultSilkTightOpts()); !g.Pass {
+		t.Fatalf("gate: %+v", g.Items)
+	}
+}
+
+// Text is never shrunk: a 50 mil label keeps 50; a 40 mil one grows to the
+// project size (45, the most common).
+func TestSilkTightNeverShrinks(t *testing.T) {
+	snap := silkTestBoard(part0603("R1", 500, 500), part0603("R2", 1000, 1000), part0603("R3", 1400, 1400), part0603("R4", 300, 1400))
+	snap.Silk[0].FontSize = 50
+	snap.Silk[2].FontSize = 40
+	opt := defaultSilkTightOpts()
+	labels, _, font := silkTightInput(snap, opt)
+	if font != 45 {
+		t.Fatalf("project font %v", font)
+	}
+	if labels[0].Hgt != 45 || labels[2].Hgt <= 45 {
+		t.Fatalf("sizes %+v %+v", labels[0], labels[2])
+	}
+	g := silkGate(snap, font, opt)
+	if g.Pass || !strings.Contains(strings.Join(g.Items, "\n"), "R3") || !strings.Contains(strings.Join(g.Items, "\n"), "below the project size") {
+		t.Fatalf("gate %+v", g.Items)
+	}
+}
+
+// The gate reads the readback: overlap, pad, outside, distance, stroke.
+func TestSilkGateFailures(t *testing.T) {
+	snap := silkTestBoard(part0603("R1", 1000, 1000), part0603("R2", 1300, 1000))
+	set := func(i int, b pcbRect) { snap.Silk[i].BBox = &b }
+	set(0, pcbRect{MinX: 980, MinY: 990, MaxX: 1050, MaxY: 1035}) // over R1's pad
+	set(1, pcbRect{MinX: 1960, MinY: 500, MaxX: 2030, MaxY: 545}) // off board, far from R2
+	snap.Silk[1].LineWidth = 4
+	g := silkGate(snap, 45, defaultSilkTightOpts())
+	all := strings.Join(g.Items, "\n")
+	for _, want := range []string{"R1 (1015.0,1012.5) overlaps a pad", "R2 (1995.0,522.5) crosses the board edge", "from its footprint", "stroke 4.00 mil below"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("missing %q in\n%s", want, all)
+		}
+	}
+	if g.Pass {
+		t.Fatal("gate passed")
+	}
+}
+
+func TestSilkGroupLabel(t *testing.T) {
+	ls := func(refs ...string) []silkLabel {
+		var o []silkLabel
+		for _, r := range refs {
+			o = append(o, silkLabel{Ref: r})
+		}
+		return o
+	}
+	if g := groupLabel(ls("C24", "C21", "C22", "C23")); g != "C21–C24" {
+		t.Fatal(g)
+	}
+	if g := groupLabel(ls("R15", "R13", "R14", "R17")); g != "R13/R14/R15/R17" {
+		t.Fatal(g)
+	}
+}
+
+// placeGroup lines a cluster's labels up beside the row, each centred on its
+// own part, in part order.
+func TestSilkPlaceGroupAligned(t *testing.T) {
+	var ps []boardComp
+	for i := 0; i < 4; i++ {
+		ps = append(ps, part0603(fmt.Sprintf("C%d", 21+i), 700+60*float64(i), 1000))
+	}
+	snap := silkTestBoard(ps...)
+	opt := defaultSilkTightOpts()
+	labels, sc, _ := silkTightInput(snap, opt)
+	ms := silkCluster(labels[2], labels)
+	if refsOf(ms) != "C21,C22,C23,C24" {
+		t.Fatalf("cluster %s", refsOf(ms))
+	}
+	layerOf := map[string]int{}
+	for _, l := range labels {
+		layerOf[l.ID] = l.Layer
+	}
+	grp, ok := placeGroup(ms, sc, nil, layerOf, opt)
+	if !ok || len(grp) != 4 {
+		t.Fatalf("group %v %+v", ok, grp)
+	}
+	for i, p := range grp {
+		if p.How != "group-row" || p.Rot != 90 || math.Abs(p.Box.cx()-(700+60*float64(i))) > 1e-6 {
+			t.Fatalf("%d %+v", i, p)
+		}
+	}
+}
