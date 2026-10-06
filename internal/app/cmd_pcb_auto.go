@@ -253,6 +253,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 		var loops int
 		var noFeedback, postSim bool
 		var routerSel string
+		var placeSeeds int
 		var keepBoardFills bool
 		var fbVerify, fbLoop int
 		c := &cobra.Command{
@@ -461,7 +462,29 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 				} else if place {
 					popt := pcbauto.PlaceOptions{Seed: seed, Refine: refine, Macro: macro, Only: only, Aesthetics: aesStyle, TidyOnly: tidyOnly}
 					if noRoute {
-						rep.Placement, err = pcbauto.Place(b, pre, rep.Circuit, mc, popt)
+						// Without the place↔route loop the annealer's luck is
+						// all there is: take the best of several seeds.
+						var trials []pcbauto.SeedTrial
+						prep := func(bc *pcbauto.Board) (*pcbauto.Analysis, *pcbauto.Circuit, error) {
+							a := pcbauto.Analyze(bc, power, nil)
+							c, err := understand(bc, a)
+							return a, c, err
+						}
+						rep.Placement, trials, err = pcbauto.PlaceBest(b, prep, mc, popt, placeSeeds)
+						if err == nil {
+							// b is now the winning copy: its analysis and
+							// circuit are the ones later stages must use.
+							pre = pcbauto.Analyze(b, power, nil)
+							rep.Circuit, err = understand(b, pre)
+						}
+						for _, t := range trials {
+							if t.Err != "" {
+								fmt.Fprintf(stderr, "placement seed %d: %s\n", t.Seed, t.Err)
+								continue
+							}
+							fmt.Fprintf(stderr, "placement seed %d: wirelength %.1f in, critical excess %.0f mil, illegal %d, score %.1f\n",
+								t.Seed, t.Metrics.WirelengthIn, t.Metrics.CriticalExcessMil, t.Illegal, t.Score)
+						}
 					} else {
 						// Placed and routed together: with intent-declared
 						// pairs the corridor and the plain placement are both
@@ -656,6 +679,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 		c.Flags().BoolVar(&tidyOnly, "tidy-only", false, "with --place: keep the current placement and run only the placement aesthetics stage on it (orientation, symmetry copies, row/column alignment, even pitch, grid snap) — every move judged against the safety/electrical tiers and the --style slack, then routed with and without it and kept only if it routes no worse")
 		c.Flags().StringSliceVar(&only, "only", nil, "with --place --refine: move only these designators (local adjustment of a confirmed layout), e.g. --only C7,D3")
 		c.Flags().BoolVar(&noRoute, "no-route", false, "stop after placement / stackup")
+		c.Flags().IntVar(&placeSeeds, "place-seeds", 6, "placement without engine routing (fastroute mode, --no-route): run this many seeds (from --seed) in parallel and keep the best — illegal counts, then critical relations, then wirelength (Gas V5: 121.9–156.5 in across 8 seeds from one start)")
 		c.Flags().StringVar(&routerSel, "router", "auto", "auto (fastroute when installed, else internal) | fastroute (placement/stackup plan; route live with 'pcb auto route') | internal (the built-in router)")
 		c.Flags().BoolVar(&keepBoardFills, "keep-board-fills", false, "with --mech --place: keep existing board MULTI fills and rule regions (default deletes hole-size fills and regions outside the new outline or under a new keep-out: leftovers from 'board copy')")
 		c.Flags().Int64Var(&seed, "seed", 0, "placement random seed (runs are reproducible per seed)")

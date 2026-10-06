@@ -70,3 +70,13 @@ func TestApplyNetRequirements(t *testing.T) {
 		t.Errorf("second pass not a no-op: %+v %v", rep2, err)
 	}
 }
+
+func TestAddClearanceMargin(t *testing.T) {
+	in := "(rule(clear 6.03))\n(rule(clear 6.03 (type smd_smd)))\n(rule \n (width 21.65)\n (clearance 6)\n)"
+	out := AddClearanceMargin(in, 0.2)
+	for _, want := range []string{"(rule(clear 6.23))", "(rule(clear 6.23 (type smd_smd)))", "(clearance 6.2)", "(width 21.65)"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output lacks %q:\n%s", want, out)
+		}
+	}
+}

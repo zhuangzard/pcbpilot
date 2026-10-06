@@ -149,7 +149,7 @@ func planViaArrays(tracks []specctra.Track, vias []widenVia, pads []boardPad, ne
 		}
 		have := 0
 		for _, o := range allVias {
-			if sameNet(o.Net, v.Net) && math.Hypot(o.X-P[0], o.Y-P[1]) <= 2.5*pitch {
+			if sameNet(o.Net, v.Net) && math.Hypot(o.X-P[0], o.Y-P[1]) <= 3.5*pitch {
 				have++
 			}
 		}
@@ -157,9 +157,12 @@ func planViaArrays(tracks []specctra.Track, vias []widenVia, pads []boardPad, ne
 			continue
 		}
 		var cands [][2]float64
-		for _, r := range []float64{pitch, 2 * pitch} {
-			for k := 0; k < 8; k++ {
-				a := float64(k) * math.Pi / 4
+		// Rings of 16 sites out to three pitches: a crowded transition
+		// (Gas v10 A, VIN_F) can still take its array a little further
+		// along or beside its tracks; nearest sites are tried first.
+		for _, r := range []float64{pitch, 1.5 * pitch, 2 * pitch, 3 * pitch} {
+			for k := 0; k < 16; k++ {
+				a := float64(k) * math.Pi / 8
 				cands = append(cands, [2]float64{round3(P[0] + r*math.Cos(a)), round3(P[1] + r*math.Sin(a))})
 			}
 		}

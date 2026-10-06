@@ -1,0 +1,97 @@
+package pcbauto
+
+import (
+	"fmt"
+	"math"
+	"sync"
+)
+
+// SeedTrial is one placement attempt of PlaceBest.
+type SeedTrial struct {
+	Seed    int64        `json:"seed"`
+	Metrics PlaceMetrics `json:"metrics"`
+	Score   float64      `json:"score"`
+	Illegal int          `json:"illegal"`
+	Err     string       `json:"error,omitempty"`
+}
+
+// placeScore ranks a placement: illegal counts first (overlaps, outside the
+// board / zone, keep-out and height hits), then weighted wirelength plus
+// every tether excess (critical relations included), both in inches — a
+// compact placement around its cores. Weighting the critical relations ten
+// times more picked a scattered placement on Gas Module V5 (seed 3: 136.5 in,
+// empty corners) over the compact one the user asked for (seed 2: 121.9 in);
+// the annealer already holds the critical relations by their tethers.
+func placeScore(m PlaceMetrics) (illegal int, score float64) {
+	illegal = m.Overlaps + m.OutOfBoard + m.OutOfZone + m.KeepoutHits + m.HeightHits
+	return illegal, m.WirelengthIn + m.TetherExcessMil/1000
+}
+
+// better reports whether trial a beats trial b.
+func better(a, b SeedTrial) bool {
+	if a.Illegal != b.Illegal {
+		return a.Illegal < b.Illegal
+	}
+	return a.Score < b.Score
+}
+
+// PlaceBest runs Place with seeds opt.Seed … opt.Seed+n-1 in parallel, each
+// on its own copy of b, and keeps the best (placeScore). The annealer is a
+// stochastic search: on Gas Module V5 one start state gave 121.9–156.5 in of
+// wirelength across eight seeds, so a single seed made placement quality a
+// lottery (the "first version" was seed 1 on one start; a later run on the
+// same start drew 139.5). b ends up as the winning copy.
+//
+// The analysis and circuit hold pointers to the board's parts, so every
+// copy gets its own from prep (Analyze + circuit understanding on the copy);
+// sharing the caller's crashed the annealer and would move the original's
+// parts.
+func PlaceBest(b *Board, prep func(*Board) (*Analysis, *Circuit, error), m *Mechanics, opt PlaceOptions, n int) (*PlaceResult, []SeedTrial, error) {
+	if n <= 1 {
+		an, c, err := prep(b)
+		if err != nil {
+			return nil, nil, err
+		}
+		r, err := Place(b, an, c, m, opt)
+		return r, nil, err
+	}
+	trials := make([]SeedTrial, n)
+	boards := make([]*Board, n)
+	results := make([]*PlaceResult, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			o := opt
+			o.Seed = opt.Seed + int64(i)
+			bc := b.Clone()
+			trials[i].Seed = o.Seed
+			an, c, err := prep(bc)
+			var r *PlaceResult
+			if err == nil {
+				r, err = Place(bc, an, c, m, o)
+			}
+			if err != nil {
+				trials[i].Err, trials[i].Illegal, trials[i].Score = err.Error(), math.MaxInt32, math.Inf(1)
+				return
+			}
+			boards[i], results[i] = bc, r
+			trials[i].Metrics = r.Metrics
+			trials[i].Illegal, trials[i].Score = placeScore(r.Metrics)
+		}(i)
+	}
+	wg.Wait()
+	best := -1
+	for i := range trials {
+		if results[i] != nil && (best < 0 || better(trials[i], trials[best])) {
+			best = i
+		}
+	}
+	if best < 0 {
+		return nil, trials, fmt.Errorf("placement failed for every seed: %s", trials[0].Err)
+	}
+	*b = *boards[best]
+	results[best].Notes = append(results[best].Notes, fmt.Sprintf("best of %d seeds: seed %d (score %.1f)", n, trials[best].Seed, trials[best].Score))
+	return results[best], trials, nil
+}

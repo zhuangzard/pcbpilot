@@ -338,6 +338,11 @@ pcbpilot pcb auto route --playbook out/playbook.json --out-dir out/live --projec
 → `--widen-net` 加宽（`pcb widen`）→ 重铺 → 保存 → 重载 → 重铺 → 原生 DRC → 逐焊盘对账 →
 `--sim` 时现场 dump 后跑 `sim post-layout`。结果写 `--out-dir/summary.json`。
 
+**多 seed 取最优（`--place-seeds 6`，默认）。** 不做引擎布线时（fastroute 模式、`--no-route`），退火摆放的结果全凭 seed：
+2026-10-06 Gas Module V5 同一起点 8 个 seed 的加权线长从 121.9 到 156.5 in。现在并行跑 6 个 seed（约 37 s），先比合法性
+（重叠、出板、出区、禁布、限高），再比“线长 + 全部关联超距”（英寸，越小越紧凑），取最好的一个；每个 seed 的结果打印在
+stderr。关键关系超距权重曾设高十倍，结果选中了四角空、器件散的 seed 3，已改回同一量纲。
+
 `--mech --place` 换新板框时，在设新板框前删除 `board copy` 或旧方案留下的机械对象：
 - 机械规格添加了安装孔时，板上孔径相当（±25%）的板级 MULTI 填充全部删除（包括与新孔重合的）；
 - 板级 MULTI 规则区域只要不完全在新板框内，或与新规格要建的禁布区（含新孔的螺丝头环）重合，就删除。

@@ -399,3 +399,24 @@ func writeSexpr(n *node) string {
 	}
 	return "(" + strings.Join(parts, " ") + ")"
 }
+
+// ClearanceMarginMil is added to every clearance handed to the router:
+// EasyEDA measures clearance a few hundredths of a mil tighter than
+// fastroute (Gas Module v10: 5.93 < 6.0 mil on a track fastroute placed at
+// exactly 6.0), so routing at the bare rule fails native DRC by rounding.
+const ClearanceMarginMil = 0.2
+
+var reClearValue = regexp.MustCompile(`\((clear|clearance)(\s+)([0-9.]+)`)
+
+// AddClearanceMargin raises every (clear X) / (clearance X) value in the DSN
+// by margin mil — the structure rules and every net class.
+func AddClearanceMargin(dsn string, margin float64) string {
+	return reClearValue.ReplaceAllStringFunc(dsn, func(m string) string {
+		p := reClearValue.FindStringSubmatch(m)
+		v, err := strconv.ParseFloat(p[3], 64)
+		if err != nil {
+			return m
+		}
+		return "(" + p[1] + p[2] + fnum(v+margin)
+	})
+}

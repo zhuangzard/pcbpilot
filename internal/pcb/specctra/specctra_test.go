@@ -323,3 +323,22 @@ func TestPlanReconcile(t *testing.T) {
 		t.Fatalf("still missing: %+v", r)
 	}
 }
+
+// Gas Module v10: EasyEDA split a GND session segment into collinear pieces
+// of different widths; it is present. A partly covered segment gets only
+// its uncovered stretch.
+func TestPlanReconcileCollinearPieces(t *testing.T) {
+	ses := &Wiring{Segments: []Segment{{Net: "GND", Layer: "TopLayer", WidthMil: 21.65, A: [2]float64{992.3, 1788.5}, B: [2]float64{840, 1788.5}}}}
+	split := []Track{
+		{Net: "GND", Layer: 1, X1: 989.1, Y1: 1788.5, X2: 840, Y2: 1788.5, Width: 21.7},
+		{Net: "GND", Layer: 1, X1: 992.3, Y1: 1788.5, X2: 989.1, Y2: 1788.5, Width: 16.24},
+	}
+	if r := PlanReconcile(ses, split, nil, nil, CopperLayerIDs(4), 24); len(r.MissingTracks) != 0 {
+		t.Fatalf("split segment reported missing: %+v", r.MissingTracks)
+	}
+	part := []Track{{Net: "GND", Layer: 1, X1: 940, Y1: 1788.5, X2: 840, Y2: 1788.5, Width: 21.65}}
+	r := PlanReconcile(ses, part, nil, nil, CopperLayerIDs(4), 24)
+	if len(r.MissingTracks) != 1 || r.MissingTracks[0].X1 != 992.3 || math.Abs(r.MissingTracks[0].X2-940.6) > 0.01 {
+		t.Fatalf("partial coverage: %+v", r.MissingTracks)
+	}
+}

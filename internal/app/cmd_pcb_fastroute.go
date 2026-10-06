@@ -1222,6 +1222,8 @@ func prepareDSN(raw string, opt specctra.FixOptions, reqs map[string]specctra.Ne
 	if err != nil {
 		return "", rep, nil, fmt.Errorf("dsn-fix: %w", err)
 	}
+	// Route a hair wider than the rules: EasyEDA's DRC rounds tighter.
+	text = specctra.AddClearanceMargin(text, specctra.ClearanceMarginMil)
 	if reqs == nil {
 		return text, rep, nil, nil
 	}

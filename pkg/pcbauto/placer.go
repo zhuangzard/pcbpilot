@@ -113,6 +113,9 @@ type pnet struct {
 }
 
 type placer struct {
+	// lastMove is the pose tryMove saved for undo (per placer: concurrent
+	// placements, PlaceBest, must not share it).
+	lastMove savedPose
 	hvReach float64 // largest high-voltage net clearance (0 = no HV nets)
 	b       *Board
 	an      *Analysis
@@ -1352,12 +1355,10 @@ type posePart struct {
 	rot float64
 }
 
-var lastMove savedPose
-
 // tryMove perturbs p (shift, rotate or swap) and returns the cost delta.
 // With keep=false the move is undone immediately.
 func (pl *placer) tryMove(p *Part, radius float64, keep bool) float64 {
-	lastMove = savedPose{pos: p.Pos, rot: p.Rotation}
+	pl.lastMove = savedPose{pos: p.Pos, rot: p.Rotation}
 	var q *Part
 	kind := pl.rng.Intn(10)
 	if kind == 9 {
@@ -1378,14 +1379,14 @@ func (pl *placer) tryMove(p *Part, radius float64, keep bool) float64 {
 		}
 		for _, d := range macro {
 			grp = append(grp, d)
-			lastMove.grp = append(lastMove.grp, posePart{d, d.Pos, d.Rotation})
+			pl.lastMove.grp = append(pl.lastMove.grp, posePart{d, d.Pos, d.Rotation})
 		}
 	} else if kind == 7 && len(pl.servedBy[p.Ref]) > 0 {
 		// Block move: the core carries its auxiliaries rigidly.
 		for _, d := range pl.servedBy[p.Ref] {
 			if !d.Fixed {
 				grp = append(grp, d)
-				lastMove.grp = append(lastMove.grp, posePart{d, d.Pos, d.Rotation})
+				pl.lastMove.grp = append(pl.lastMove.grp, posePart{d, d.Pos, d.Rotation})
 			}
 		}
 	} else if kind == 7 {
@@ -1415,7 +1416,7 @@ func (pl *placer) tryMove(p *Part, radius float64, keep bool) float64 {
 			pl.bucketOp(d, true)
 		}
 	case kind == 9:
-		lastMove.q, lastMove.qp, lastMove.qr = q, q.Pos, q.Rotation
+		pl.lastMove.q, pl.lastMove.qp, pl.lastMove.qr = q, q.Pos, q.Rotation
 		pc, qc := p.Body().Center(), q.Body().Center()
 		pl.bucketOp(p, false)
 		pl.bucketOp(q, false)
@@ -1467,7 +1468,7 @@ func (pl *placer) undo(p *Part) {
 	if pl.rudy != nil {
 		pl.rudy.revert()
 	}
-	s := lastMove
+	s := pl.lastMove
 	pl.bucketOp(p, false)
 	p.MoveTo(s.pos, s.rot)
 	pl.boxes[p] = pl.box(p)

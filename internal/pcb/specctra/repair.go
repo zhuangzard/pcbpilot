@@ -380,19 +380,13 @@ func PlanReconcile(ses *Wiring, tracks []Track, vias [][2]float64, viaNets []str
 		if !ok || !valid[layer] {
 			continue
 		}
-		found := false
-		for _, t := range tracks {
-			if t.Layer != layer || !strings.EqualFold(t.Net, s.Net) {
-				continue
-			}
-			ta, tb := [2]float64{t.X1, t.Y1}, [2]float64{t.X2, t.Y2}
-			if pointSegDist(s.A, ta, tb) <= MatchTolMil && pointSegDist(s.B, ta, tb) <= MatchTolMil {
-				found = true
-				break
-			}
-		}
-		if !found {
-			r.MissingTracks = append(r.MissingTracks, NewTrack{Net: s.Net, Layer: layer, X1: s.A[0], Y1: s.A[1], X2: s.B[0], Y2: s.B[1], Width: s.WidthMil})
+		// EasyEDA splits and merges collinear same-net pieces, so a session
+		// segment is present when the union of the collinear tracks on its
+		// layer covers it; only the uncovered stretches are missing (Gas
+		// Module v10: a GND segment split into 21.7 + 16.24 mil pieces was
+		// reported missing and then duplicated).
+		for _, gap := range uncovered(s, layer, tracks) {
+			r.MissingTracks = append(r.MissingTracks, NewTrack{Net: s.Net, Layer: layer, X1: gap[0][0], Y1: gap[0][1], X2: gap[1][0], Y2: gap[1][1], Width: s.WidthMil})
 		}
 	}
 	for _, v := range ses.Vias {
@@ -422,4 +416,59 @@ func CopperLayerIDs(count int) []int {
 		ids = append(ids, 14+k)
 	}
 	return ids
+}
+
+// uncovered returns the stretches of a session segment that no collinear
+// same-net track on its layer covers (each longer than MatchTolMil).
+func uncovered(s Segment, layer int, tracks []Track) [][2][2]float64 {
+	length := math.Hypot(s.B[0]-s.A[0], s.B[1]-s.A[1])
+	if length <= MatchTolMil {
+		return nil
+	}
+	ux, uy := (s.B[0]-s.A[0])/length, (s.B[1]-s.A[1])/length
+	lineDist := func(p [2]float64) float64 { return math.Abs((p[0]-s.A[0])*uy - (p[1]-s.A[1])*ux) }
+	along := func(p [2]float64) float64 { return (p[0]-s.A[0])*ux + (p[1]-s.A[1])*uy }
+	type iv struct{ a, b float64 }
+	var cover []iv
+	for _, t := range tracks {
+		if t.Layer != layer || !strings.EqualFold(t.Net, s.Net) {
+			continue
+		}
+		p, q := [2]float64{t.X1, t.Y1}, [2]float64{t.X2, t.Y2}
+		if lineDist(p) > MatchTolMil || lineDist(q) > MatchTolMil {
+			continue // not collinear
+		}
+		a, b := along(p), along(q)
+		if a > b {
+			a, b = b, a
+		}
+		cover = append(cover, iv{a - MatchTolMil, b + MatchTolMil})
+	}
+	sort.Slice(cover, func(i, j int) bool { return cover[i].a < cover[j].a })
+	var gaps [][2][2]float64
+	at := 0.0
+	emit := func(from, to float64) {
+		if to-from > MatchTolMil {
+			p := func(t float64) [2]float64 {
+				return [2]float64{math.Round((s.A[0]+ux*t)*1000) / 1000, math.Round((s.A[1]+uy*t)*1000) / 1000}
+			}
+			gaps = append(gaps, [2][2]float64{p(from), p(to)})
+		}
+	}
+	for _, c := range cover {
+		if c.b <= at {
+			continue
+		}
+		if c.a > at {
+			emit(at, math.Min(c.a, length))
+		}
+		at = math.Max(at, c.b)
+		if at >= length {
+			break
+		}
+	}
+	if at < length {
+		emit(at, length)
+	}
+	return gaps
 }
