@@ -1079,6 +1079,22 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 			}
 		}
 		if last := lastOK(runs); last != nil && last.Unrouted > 0 {
+			// Last resort before giving up: a fresh multi-start run (shuffled
+			// net orders) on the DSN that routed best; kept only if better.
+			ms := o.fo
+			ms.multiStart = 4
+			fmt.Fprintf(stderr, "multi-start: %d connection(s) still unrouted; one fresh run with --multi-start=4\n", last.Unrouted)
+			s2, r2, err2 := runFastroute(ms, dsnPath, strings.TrimSuffix(dsnPath, ".dsn")+"-ms", stderr)
+			for _, x := range r2 {
+				sessions = append(sessions, x.Session)
+			}
+			summary["multiStartRuns"] = r2
+			if got := lastOK(r2); err2 == nil && got != nil && runImproved(*last, *got) {
+				sesPath, runs = s2, r2
+				fmt.Fprintf(stderr, "multi-start: kept (%d unrouted)\n", got.Unrouted)
+			}
+		}
+		if last := lastOK(runs); last != nil && last.Unrouted > 0 {
 			fmt.Fprintf(stderr, "warning: %d connection(s) still unrouted after %d run(s); importing the best session\n", last.Unrouted, len(runs))
 		}
 	} else {
