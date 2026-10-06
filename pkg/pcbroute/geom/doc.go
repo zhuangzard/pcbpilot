@@ -8,6 +8,25 @@
 // M0 freezes the scalar IDs, the primitive types and the Shape interface below so
 // that rules, board and dsn can be written in parallel. M1 adds the kernels and
 // the index without changing these declarations.
+//
+// Design choices of M1 that the specs leave open:
+//   - Coordinates, radii and clearances are bounded by MaxCoord = 2³⁰-1 nm, not
+//     2³¹: at 2³¹ a cross product of two coordinate differences needs 65 bits.
+//     With the tighter bound every kernel is exact in int64 plus unsigned
+//     128-bit products (math/bits), and no math/big path is needed.
+//   - A Rect, being half-open on the integer lattice, is the closed box
+//     [Min, Max-1] when measured; every other shape is closed as declared.
+//   - Dist rounds the true distance down; Within(a, b, r) is the exact strict
+//     test Dist < r, which Collides and Clear use. Clearance violations are
+//     "closer than r"; touching at exactly r is legal.
+//   - Index is one object for all layers. AllLayers entries are stored once;
+//     a query on AllLayers sees every layer. Fixed entries live in a static
+//     STR R-tree per layer, routed ones in a bucket grid per layer whose edge
+//     buckets also hold copper outside the grid area. The grid reports an entry
+//     only from the bucket holding max(entry.Min, query.Min), so there are no
+//     duplicates and no visited set, and the order is fixed.
+//   - Octagon rounds the 45° offset r·√2 up, so the hull always contains the
+//     inflated shape.
 package geom
 
 // NetID numbers a net. 0 means "no net".
