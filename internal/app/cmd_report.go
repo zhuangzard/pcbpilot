@@ -43,6 +43,8 @@ type designReportOpts struct {
 	force                       bool
 	maxImageBytes               int
 	date                        string
+	// manual: the board user manual HTML (report manual) to package and link.
+	manual string
 	// projectConfig: "" = auto (./pcbpilot.project.json when present), "none",
 	// or a path to the file / its work dir.
 	projectConfig string
@@ -55,9 +57,13 @@ func newReportCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 		Long: `Reports assembled from the artifacts a pcbpilot run leaves behind.
 
   report design   intent / sim / pcb auto / board dump / DRC / check / images →
-                  reports/<name>/vN/{report.html,report.md,report.json} + index.json + CHANGELOG.md`,
+                  reports/<name>/vN/{report.html,report.md,report.json} + index.json + CHANGELOG.md
+  report manual   board dump (+ intent / sim / notes.json / pin map) → one self-contained
+                  user-manual HTML: board picture, connector pinouts, power, I/O, LEDs,
+                  test points, bring-up, software interface, doc-vs-board mismatches`,
 	}
 	g.AddCommand(newReportDesignCmd(stdout, stderr))
+	g.AddCommand(newReportManualCmd(stdout, stderr))
 	return g
 }
 
@@ -179,6 +185,7 @@ func addDesignReportFlags(c *cobra.Command, o *designReportOpts) {
 	f.BoolVar(&o.force, "force", false, "overwrite an existing version")
 	f.IntVar(&o.maxImageBytes, "max-image-bytes", designreport.DefaultMaxImageBytes, "raster images larger than this are halved until they fit")
 	f.StringVar(&o.date, "date", "", "generatedAt override (RFC3339); default SOURCE_DATE_EPOCH or now")
+	f.StringVar(&o.manual, "manual", "", "board user manual HTML (pcbpilot report manual / the board-manual gate: <out-dir>/manual/<Board>_使用说明.html): packaged as vN/manual/<file> and linked from the cover")
 	f.StringVar(&o.projectConfig, "project-config", "", "pcbpilot.project.json (file or work dir) whose skipped steps/sections the report lists; default ./pcbpilot.project.json when present, \"none\" to ignore")
 }
 
@@ -514,6 +521,16 @@ func runDesignReport(o designReportOpts, stderr io.Writer) (string, *designrepor
 	if !o.noZip {
 		rep.Package = zipFile
 	}
+	var manualFile *pkgFile
+	if o.manual != "" {
+		b, err := os.ReadFile(o.manual)
+		if err != nil {
+			return "", nil, fmt.Errorf("--manual: %w", err)
+		}
+		rel := "manual/" + filepath.Base(o.manual)
+		f := newPkgFile(rel, "manual", "pcbpilot report manual", o.manual, b)
+		manualFile, rep.Manual = &f, rel
+	}
 	cur := designreport.EntryOf(rep)
 	rep.Changes = designreport.Compare(idx.Latest(v), cur)
 	cur.Changes = rep.Changes
@@ -553,6 +570,9 @@ func runDesignReport(o designReportOpts, stderr io.Writer) (string, *designrepor
 		files = append(files, newPkgFile("assets/charts/"+n+".svg", "chart", producers["report"], "", []byte(charts[n]+"\n")))
 	}
 	files = append(files, packaged...)
+	if manualFile != nil {
+		files = append(files, *manualFile)
+	}
 	for _, af := range designreport.AnalogPackageFiles(in.Analog, o.analog) {
 		b, err := os.ReadFile(af.Src)
 		if err != nil {
