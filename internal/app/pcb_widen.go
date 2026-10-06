@@ -375,13 +375,15 @@ const irWidenRounds = 2
 var irDropRe = regexp.MustCompile(`^(\S+) drops ([0-9.]+) mV .* over the ([0-9.]+) mV budget`)
 
 // irOverBudget returns net → drop/budget for the post-layout sim's IR-drop
-// failures when that is the only failing gate (nil otherwise: widening
-// cannot fix a DRC or connectivity failure).
+// failures when the other failing gates are at most intent-widths (nil
+// otherwise: widening cannot fix a DRC or connectivity failure, and it helps
+// a width shortfall too — Gas Module V5 B v20 skipped the closure because a
+// +12V width failure sat next to the drop failures).
 func irOverBudget(summary map[string]any) map[string]float64 {
 	gates, _ := summary["gates"].([]gateResult)
 	var out map[string]float64
 	for _, g := range gates {
-		if g.Pass {
+		if g.Pass || g.Gate == "intent-widths" {
 			continue
 		}
 		if g.Gate != "post-layout-sim" {

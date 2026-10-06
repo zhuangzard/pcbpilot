@@ -408,8 +408,12 @@ type candidateTrial struct {
 	Playbook string  `json:"playbook"`
 	Unrouted int     `json:"unrouted"`
 	Fixable  int     `json:"fixableViolations"`
-	Seconds  float64 `json:"seconds"`
-	Error    string  `json:"error,omitempty"`
+	// LoopIR is Σ current × pad span (A·mil) of the intent's nets carrying
+	// ≥ 0.2 A: the tie-break among equally routable placements (Gas Module
+	// V5 B v20: seed-1 and seed-9 both routed, the kept one had long drains).
+	LoopIR  float64 `json:"loopIR"`
+	Seconds float64 `json:"seconds"`
+	Error   string  `json:"error,omitempty"`
 }
 
 // trialCandidates trial-routes the applied best placement and every runner-up
@@ -443,6 +447,12 @@ func trialCandidates(cfg *appConfig, window string, o autorouteOpts, best, candD
 		blob, _ := json.MarshalIndent(&cp, "", "  ")
 		return out, os.WriteFile(out, append(blob, '\n'), 0o644)
 	}
+	var currents map[string]float64
+	if o.intentPath != "" {
+		if in, err := loadDesignIntent(o.intentPath); err == nil {
+			currents = intentLoopCurrents(in)
+		}
+	}
 	var trials []candidateTrial
 	bestIdx := -1
 	last := 0
@@ -460,6 +470,11 @@ func trialCandidates(cfg *appConfig, window string, o autorouteOpts, best, candD
 			}
 			last = i
 		}
+		if currents != nil {
+			if snap, err := fetchBoardSnapshot(cfg, window, boardSnapshotOpts{}); err == nil {
+				tr.LoopIR = loopIR(snap, currents)
+			}
+		}
 		run, err := trialRoute(cfg, window, o, budget, filepath.Join(trialDir, fmt.Sprintf("t%d", i)), stderr)
 		tr.Seconds = run.Seconds
 		if err != nil {
@@ -467,10 +482,9 @@ func trialCandidates(cfg *appConfig, window string, o autorouteOpts, best, candD
 		} else {
 			tr.Unrouted, tr.Fixable = run.Unrouted, run.Fixable
 		}
-		fmt.Fprintf(stderr, "candidate %d (%s): %d unrouted, %d fixable after %.0f s\n", i, filepath.Base(filepath.Dir(p)), tr.Unrouted, tr.Fixable, tr.Seconds)
+		fmt.Fprintf(stderr, "candidate %d (%s): %d unrouted, %d fixable, loop I·span %.0f A·mil after %.0f s\n", i, filepath.Base(filepath.Dir(p)), tr.Unrouted, tr.Fixable, tr.LoopIR, tr.Seconds)
 		trials = append(trials, tr)
-		if tr.Error == "" && (bestIdx < 0 || tr.Unrouted < trials[bestIdx].Unrouted ||
-			tr.Unrouted == trials[bestIdx].Unrouted && tr.Fixable < trials[bestIdx].Fixable) {
+		if tr.Error == "" && (bestIdx < 0 || betterTrial(tr, trials[bestIdx])) {
 			bestIdx = i
 		}
 	}
@@ -535,9 +549,6 @@ func trialRoute(cfg *appConfig, window string, o autorouteOpts, budget time.Dura
 			return fastrouteRun{}, err
 		}
 		reqs = intentRequirements(in)
-		if err := markNarrowPads(cfg, window, reqs); err != nil {
-			return fastrouteRun{}, err
-		}
 	}
 	text, _, rq, err := prepareDSN(string(raw), opt, reqs)
 	if err != nil {
@@ -563,4 +574,53 @@ func trialRoute(cfg *appConfig, window string, o autorouteOpts, budget time.Dura
 		return *r, nil
 	}
 	return fastrouteRun{}, fmt.Errorf("trial produced no result")
+}
+
+// betterTrial ranks trial-routed placements: fewest unrouted, then fewest
+// fixable violations, then the shortest high-current loops (LoopIR).
+func betterTrial(a, b candidateTrial) bool {
+	if a.Unrouted != b.Unrouted {
+		return a.Unrouted < b.Unrouted
+	}
+	if a.Fixable != b.Fixable {
+		return a.Fixable < b.Fixable
+	}
+	return a.LoopIR < b.LoopIR
+}
+
+// intentLoopCurrents: the intent's non-ground nets carrying ≥ 0.2 A.
+func intentLoopCurrents(in *designIntent) map[string]float64 {
+	out := map[string]float64{}
+	for name, n := range in.Nets {
+		if n.CurrentA >= 0.2 && !strings.EqualFold(n.Role, "ground") {
+			out[name] = n.CurrentA
+		}
+	}
+	return out
+}
+
+// loopIR is Σ current × half-perimeter of the net's pads (A·mil): the IR
+// drop and loss a placement commits its high-current nets to.
+func loopIR(snap *boardSnapshot, currents map[string]float64) float64 {
+	type span struct{ minX, minY, maxX, maxY float64 }
+	sp := map[string]*span{}
+	for _, c := range snap.Components {
+		for _, p := range c.Pads {
+			if _, ok := currents[p.Net]; !ok {
+				continue
+			}
+			s := sp[p.Net]
+			if s == nil {
+				sp[p.Net] = &span{p.X, p.Y, p.X, p.Y}
+				continue
+			}
+			s.minX, s.minY = math.Min(s.minX, p.X), math.Min(s.minY, p.Y)
+			s.maxX, s.maxY = math.Max(s.maxX, p.X), math.Max(s.maxY, p.Y)
+		}
+	}
+	total := 0.0
+	for net, s := range sp {
+		total += currents[net] * ((s.maxX - s.minX) + (s.maxY - s.minY))
+	}
+	return total
 }

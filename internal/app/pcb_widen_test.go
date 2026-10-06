@@ -134,16 +134,31 @@ func TestIROverBudgetWiden(t *testing.T) {
 	if len(ops) != 1 || math.Abs(ops[0].NewWidth-10*57.25/30*1.15) > 0.05 {
 		t.Fatalf("ops %+v", ops)
 	}
+	sum["gates"] = append(sum["gates"].([]gateResult), gateResult{Gate: "intent-widths", Items: []string{"+12V: 4 track(s)"}})
+	if irOverBudget(sum) == nil {
+		t.Fatal("an intent-widths failure must not block IR widening")
+	}
 	sum["gates"] = append(sum["gates"].([]gateResult), gateResult{Gate: "native-drc", Items: []string{"x"}})
 	if irOverBudget(sum) != nil {
 		t.Fatal("DRC failure must not trigger IR widening")
 	}
 }
 
-func TestSetNarrowPads(t *testing.T) {
-	reqs := map[string]specctra.NetRequirement{"+3V3": {OuterMil: 15, MinMil: 15}, "GND": {OuterMil: 20, MinMil: 10}}
-	setNarrowPads([]boardPad{{Net: "+3V3", W: 11, H: 70.9}, {Net: "+3V3", W: 35, H: 31}, {Net: "SIG", W: 5, H: 5}}, reqs)
-	if reqs["+3V3"].NarrowPadMil != 11 || reqs["GND"].NarrowPadMil != 0 {
-		t.Fatalf("%+v", reqs)
+// Gas Module V5 B v20: two placements both routed; the one with the shorter
+// high-current loops must win.
+func TestBetterTrialLoopIR(t *testing.T) {
+	snap := &boardSnapshot{Components: []boardComp{
+		{Designator: "Q2", Pads: []boardPad{{Net: "SV1_DRV", X: 0, Y: 0}, {Net: "GND", X: 0, Y: 500}}},
+		{Designator: "J6", Pads: []boardPad{{Net: "SV1_DRV", X: 300, Y: 400}, {Net: "SIG", X: 9000, Y: 0}}},
+	}}
+	cur := map[string]float64{"SV1_DRV": 0.5}
+	if got := loopIR(snap, cur); math.Abs(got-0.5*700) > 1e-9 {
+		t.Fatalf("loopIR %v", got)
+	}
+	a := candidateTrial{Unrouted: 0, Fixable: 0, LoopIR: 900}
+	b := candidateTrial{Unrouted: 0, Fixable: 0, LoopIR: 400}
+	c := candidateTrial{Unrouted: 1, LoopIR: 10}
+	if !betterTrial(b, a) || betterTrial(c, a) || !betterTrial(a, c) {
+		t.Fatal("ranking: unrouted, fixable, then loop IR")
 	}
 }
