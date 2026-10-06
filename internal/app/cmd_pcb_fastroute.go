@@ -1019,11 +1019,6 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 				fmt.Fprintf(stderr, "pre-escapes: %d ground pin(s) of fine-pitch parts reserved (%d skipped)\n", len(pre), len(skipped))
 			}
 		}
-		if len(reqs) > 0 {
-			if err := markNarrowPads(cfg, window, reqs); err != nil {
-				fmt.Fprintf(stderr, "narrow pads: %v; no-neck-down list kept as derived\n", err)
-			}
-		}
 		fixed, rep, rq, err := prepareDSN(dsnText, opt, reqs)
 		if err != nil {
 			return false, sessions, err
@@ -1432,34 +1427,4 @@ A summary JSON is printed to stdout; progress goes to stderr.
 	c.Flags().StringVar(&forceReason, "force", "", "deprecated compatibility option; workflow stages no longer gate routing")
 	c.Flags().StringVar(&forceUnsafeReason, "force-unsafe", "", "deprecated compatibility option; workflow stages no longer gate routing")
 	return c
-}
-
-// markNarrowPads records each required net's narrowest pad (min of width and
-// height) from the live board, so forbidsNeckdown lets it neck at pads too
-// narrow for its full width.
-func markNarrowPads(cfg *appConfig, window string, reqs map[string]specctra.NetRequirement) error {
-	snap, err := fetchBoardSnapshot(cfg, window, boardSnapshotOpts{})
-	if err != nil {
-		return err
-	}
-	var pads []boardPad
-	for _, c := range snap.Components {
-		pads = append(pads, c.Pads...)
-	}
-	setNarrowPads(pads, reqs)
-	return nil
-}
-
-func setNarrowPads(pads []boardPad, reqs map[string]specctra.NetRequirement) {
-	for _, p := range pads {
-		r, ok := reqs[p.Net]
-		w := math.Min(p.W, p.H)
-		if !ok || w <= 0 {
-			continue
-		}
-		if r.NarrowPadMil == 0 || w < r.NarrowPadMil {
-			r.NarrowPadMil = w
-			reqs[p.Net] = r
-		}
-	}
 }
