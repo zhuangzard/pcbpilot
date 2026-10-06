@@ -83,3 +83,36 @@ func TestPlanWidenToIntent(t *testing.T) {
 		t.Fatalf("full-width inner track changed: %+v", ops)
 	}
 }
+
+func TestWidenStepBack(t *testing.T) {
+	orig := specctra.Track{ID: "old", Net: "GND", Layer: 1, X1: 0, X2: 100, Width: 10.82}
+	ops := []widenOp{{Track: orig, NewWidth: 21.65}}
+	live := []specctra.Track{
+		{ID: "w1", Net: "GND", Layer: 1, X1: 100, X2: 0, Width: 21.65}, // reversed ends: same track
+		{ID: "other", Net: "GND", Layer: 1, X1: 200, X2: 300, Width: 21.65},
+	}
+	bad := map[string]bool{"w1": true, "other": true}
+	half := widenStepBack(ops, live, bad, false)
+	if len(half) != 1 || half[0].Delete.ID != "w1" || half[0].Create[0].Width != 16.23 {
+		t.Fatalf("half step = %+v", half)
+	}
+	full := widenStepBack(ops, live, bad, true)
+	if len(full) != 1 || full[0].Create[0].Width != 10.82 {
+		t.Fatalf("final step = %+v", full)
+	}
+	if none := widenStepBack(ops, live, map[string]bool{"other": true}, false); len(none) != 0 {
+		t.Fatalf("unwidened track stepped back: %+v", none)
+	}
+}
+
+// A pad rotated 45°: its corner reaches further than an axis-aligned box of
+// the same W×H, so the widen limit must use the rotated shape.
+func TestPlanWidenRotatedPad(t *testing.T) {
+	drv := specctra.Track{ID: "d", Net: "SV1_DRV", Layer: 1, X1: 0, Y1: 0, X2: 400, Y2: 0, Width: 10}
+	pad := boardPad{Net: "GND", Layer: 1, X: 200, Y: 40, W: 20, H: 20, Rotation: 45}
+	// Rotated corner sits 40-14.14 = 25.86 mil from the centre line: 2*(25.86-8) = 35.7.
+	ops := planWiden([]specctra.Track{drv}, nil, []boardPad{pad}, map[string]bool{"SV1_DRV": true}, 40, 8)
+	if len(ops) != 1 || ops[0].NewWidth > 35.73 || ops[0].NewWidth < 35.6 {
+		t.Fatalf("ops = %+v", ops)
+	}
+}

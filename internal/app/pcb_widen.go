@@ -12,6 +12,7 @@ import (
 	"io"
 	"math"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/zhuangzard/pcbpilot/internal/pcb/specctra"
@@ -117,12 +118,12 @@ func planWidenTo(tracks []specctra.Track, vias []widenVia, pads []boardPad, targ
 			if p.Net == t.Net || (p.Layer != t.Layer && p.Layer != pcbLayerMulti) {
 				continue
 			}
-			w, h := p.W, p.H
-			if int(math.Round(p.Rotation))%180 == 90 {
-				w, h = h, w
-			}
+			// Distance to the pad rectangle in its own frame (any rotation).
+			sn, cs := math.Sincos(-p.Rotation * math.Pi / 180)
 			free = math.Min(free, minTo(func(q [2]float64) float64 {
-				return math.Hypot(math.Max(math.Abs(q[0]-p.X)-w/2, 0), math.Max(math.Abs(q[1]-p.Y)-h/2, 0))
+				dx, dy := q[0]-p.X, q[1]-p.Y
+				lx, ly := dx*cs-dy*sn, dx*sn+dy*cs
+				return math.Hypot(math.Max(math.Abs(lx)-p.W/2, 0), math.Max(math.Abs(ly)-p.H/2, 0))
 			}))
 		}
 		nw := math.Floor(math.Min(goal, 2*(free-clearanceMil))*100) / 100
@@ -235,7 +236,78 @@ func widenLive(cfg *appConfig, window string, plan func([]specctra.Track, []wide
 	} else if len(failures) > 0 {
 		return ops, fmt.Errorf("widen: %d track(s) could not be recreated: %v", len(failures), failures)
 	}
+	// DRC guard: the planner's pad model (axis-aligned W×H) is coarser than
+	// EasyEDA's (rotated, polygon, rounded corners) — Gas Module v12 A: two
+	// widened GND tracks measured 5.84 < 6.0 mil to an SMD pad. Any widened
+	// track in a clearance violation steps back half way, then to its old
+	// width, with native DRC after each step.
+	for round := 0; round < 2; round++ {
+		if err := saveAndReload(cfg, window); err != nil {
+			return ops, err
+		}
+		res, err := requestActionTimed(cfg, "pcb.drc.check", window, nil, 20*time.Minute)
+		if err != nil {
+			return ops, drcTimeoutHint(err, stderr)
+		}
+		bad := map[string]bool{}
+		for _, v := range flattenDrcResult(res.Result).Violations {
+			if strings.Contains(v.Rule, "Clearance") {
+				for _, id := range v.Objs {
+					bad[id] = true
+				}
+			}
+		}
+		live, err := listPcbTracks(cfg, window)
+		if err != nil {
+			return ops, err
+		}
+		back := widenStepBack(ops, live, bad, round == 1)
+		if len(back) == 0 {
+			break
+		}
+		fmt.Fprintf(stderr, "widen: %d widened track(s) in a DRC clearance violation step back (%s)\n", len(back), map[bool]string{false: "half way", true: "to the old width"}[round == 1])
+		if _, failures, err := replaceTracks(cfg, window, back); err != nil {
+			return ops, err
+		} else if len(failures) > 0 {
+			return ops, fmt.Errorf("widen step-back: %d track(s) could not be recreated: %v", len(failures), failures)
+		}
+		for i := range ops {
+			for _, f := range back {
+				if f.Delete.Net == ops[i].Track.Net && f.Delete.Layer == ops[i].Track.Layer && sameEnds(f.Delete, ops[i].Track) {
+					ops[i].NewWidth = f.Create[0].Width
+				}
+			}
+		}
+	}
 	return ops, nil
+}
+
+// widenStepBack finds the live copies of widened tracks that a DRC
+// clearance violation names and plans them narrower: half way back to the
+// old width, or (final) all the way back.
+func widenStepBack(ops []widenOp, live []specctra.Track, bad map[string]bool, final bool) []specctra.TrackFix {
+	var fixes []specctra.TrackFix
+	for _, op := range ops {
+		if op.NewWidth <= op.Track.Width {
+			continue
+		}
+		for _, t := range live {
+			if !bad[t.ID] || t.Net != op.Track.Net || t.Layer != op.Track.Layer || !sameEnds(t, op.Track) {
+				continue
+			}
+			w := op.Track.Width
+			if !final {
+				w = math.Floor((op.Track.Width+t.Width)/2*100) / 100
+			}
+			fixes = append(fixes, specctra.TrackFix{Delete: t, Create: []specctra.NewTrack{{Net: t.Net, Layer: t.Layer, X1: t.X1, Y1: t.Y1, X2: t.X2, Y2: t.Y2, Width: w}}})
+		}
+	}
+	return fixes
+}
+
+func sameEnds(a, b specctra.Track) bool {
+	near := func(x1, y1, x2, y2 float64) bool { return math.Hypot(x1-x2, y1-y2) <= specctra.MatchTolMil }
+	return (near(a.X1, a.Y1, b.X1, b.Y1) && near(a.X2, a.Y2, b.X2, b.Y2)) || (near(a.X1, a.Y1, b.X2, b.Y2) && near(a.X2, a.Y2, b.X1, b.Y1))
 }
 
 func newPcbWidenCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {
