@@ -9297,7 +9297,7 @@ const pcbSilkSet: Handler = async (payload) => {
 	else throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, 'Missing "primitiveIds" (string or string[]).');
 
 	const baseProps: Record<string, unknown> = {};
-	for (const k of ['x', 'y', 'rotation', 'fontFamily', 'fontSize', 'lineWidth', 'text'] as const) {
+	for (const k of ['x', 'y', 'rotation', 'fontFamily', 'fontSize', 'lineWidth', 'text', 'valueVisible'] as const) {
 		if (payload[k] !== undefined && payload[k] !== null) baseProps[k] = payload[k];
 	}
 
@@ -9315,7 +9315,7 @@ const pcbSilkSet: Handler = async (payload) => {
 		}
 	}
 	if (Object.keys(baseProps).length === 0 && !align) {
-		throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, 'nothing to do — provide x/y/rotation/fontFamily/fontSize/lineWidth/text, and/or --align (+ --ref).');
+		throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, 'nothing to do — provide x/y/rotation/fontFamily/fontSize/lineWidth/text/valueVisible, and/or --align (+ --ref).');
 	}
 	if (typeof baseProps.fontFamily === 'string' && baseProps.fontFamily !== 'default') {
 		try {
@@ -9367,6 +9367,9 @@ const pcbSilkSet: Handler = async (payload) => {
 				modified = await eda.pcb_PrimitiveAttribute.modify(id, props as never);
 			}
 			else {
+				// valueVisible is a component attribute property (designator
+				// hidden behind a group label); free strings have none.
+				delete props.valueVisible;
 				modified = await eda.pcb_PrimitiveString.modify(id, props as never);
 			}
 			if (!modified) {

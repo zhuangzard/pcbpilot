@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -51,7 +52,22 @@ func TestSilkTightDump(t *testing.T) {
 	for _, p := range placed {
 		how[strings.SplitN(p.How, "+", 2)[0]+map[bool]string{true: "+rot", false: ""}[strings.HasSuffix(p.How, "rotated")]]++
 	}
+	groups, placed, gnotes := planSilkGroups(labels, sc, placed, opt)
+	notes = append(notes, gnotes...)
 	applyPlanToSnap(&snap, placed, font)
+	hide := map[string]bool{}
+	for _, g := range groups {
+		for _, id := range g.IDs {
+			hide[id] = true
+		}
+		b := pcbRect(g.Box)
+		snap.Silk = append(snap.Silk, pcbSilkText{ID: "g" + g.Text, Kind: "string", Text: g.Text, Layer: g.Layer, FontSize: font, BBox: &b})
+	}
+	for i := range snap.Silk {
+		if hide[snap.Silk[i].ID] {
+			snap.Silk[i].Hidden = true
+		}
+	}
 	after := silkGate(&snap, font, opt)
 	t.Logf("labels %d font %.1f; before: %s; after: %s; how %v", len(labels), font, before.Detail, after.Detail, how)
 	for _, n := range notes {
@@ -240,5 +256,79 @@ func TestSilkPlaceGroupAligned(t *testing.T) {
 		if p.How != "group-row" || p.Rot != 90 || math.Abs(p.Box.cx()-(700+60*float64(i))) > 1e-6 {
 			t.Fatalf("%d %+v", i, p)
 		}
+	}
+}
+
+func TestSilkGroupText(t *testing.T) {
+	for _, c := range []struct {
+		in   []string
+		want string
+	}{
+		{[]string{"R65", "R62", "R63"}, "R62/R63/R65"},
+		{[]string{"C24", "C22", "C23", "C21"}, "C21–C24"},
+		{[]string{"R63", "C72", "R62", "C52"}, "C52/C72/R62/R63"},
+	} {
+		got := groupText(c.in)
+		if got != c.want {
+			t.Errorf("groupText(%v) = %q, want %q", c.in, got, c.want)
+		}
+		back := groupRefs(got)
+		sort.Strings(back)
+		in := append([]string{}, c.in...)
+		sort.Strings(in)
+		if strings.Join(back, ",") != strings.Join(in, ",") {
+			t.Errorf("groupRefs(%q) = %v", got, back)
+		}
+	}
+	for _, s := range []string{"VCC", "R1", "LOGO v2", "C1-X3"} {
+		if groupRefs(s) != nil {
+			t.Errorf("groupRefs(%q) = %v", s, groupRefs(s))
+		}
+	}
+}
+
+// Two parts boxed in on every side within 30 mil get one group label within
+// 80 mil; their designators are hidden. The gate accepts the hidden ones
+// named by the label and fails one hidden with no label.
+func TestSilkGroupDrawnAndGate(t *testing.T) {
+	ps := []boardComp{part0603("R62", 1000, 1000), part0603("R63", 1000, 1070)}
+	// a ring of big parts 12 mil around the pair
+	for _, w := range [][4]float64{{870, 925, 1130, 961}, {870, 1109, 1130, 1145}, {870, 961, 928, 1109}, {1072, 961, 1130, 1109}} {
+		ps = append(ps, boardComp{Designator: fmt.Sprintf("U%d", len(ps)), BBox: &layoutBBox{w[0], w[1], w[2], w[3]}})
+	}
+	snap := silkTestBoard(ps...)
+	opt := defaultSilkTightOpts()
+	labels, sc, font := silkTightInput(snap, opt)
+	placed, _ := planSilkTight(labels, sc, opt)
+	groups, rest, notes := planSilkGroups(labels, sc, placed, opt)
+	if len(groups) != 1 || groups[0].Text != "R62/R63" && groups[0].Text != "R62–R63" {
+		t.Fatalf("groups %+v notes %v", groups, notes)
+	}
+	g := groups[0]
+	if d := g.Box.dist(g.Members); d > opt.GroupMaxDist || d < opt.MaxDist {
+		t.Fatalf("group label %.1f mil from its parts", d)
+	}
+	for _, p := range rest {
+		if p.Ref == "R62" || p.Ref == "R63" {
+			t.Fatalf("member still placed: %+v", p)
+		}
+	}
+	// Readback after apply: members hidden, the group string drawn.
+	applyPlanToSnap(snap, rest, font)
+	for i := range snap.Silk {
+		if snap.Silk[i].Text == "R62" || snap.Silk[i].Text == "R63" {
+			snap.Silk[i].Hidden = true
+		}
+	}
+	b := pcbRect(g.Box)
+	snap.Silk = append(snap.Silk, pcbSilkText{ID: "grp", Kind: "string", Text: g.Text, Layer: silkTopLayer, FontSize: 45, LineWidth: 6, BBox: &b})
+	gr := silkGate(snap, font, opt)
+	if !gr.Pass || len(gr.Info) != 2 {
+		t.Fatalf("gate %+v", gr)
+	}
+	// A hidden designator no label names fails.
+	snap.Silk = snap.Silk[:len(snap.Silk)-1]
+	if gr := silkGate(snap, font, opt); gr.Pass || !strings.Contains(strings.Join(gr.Items, "\n"), "R62 (1000.0,1000.0) designator hidden") {
+		t.Fatalf("gate without group label %+v", gr.Items)
 	}
 }

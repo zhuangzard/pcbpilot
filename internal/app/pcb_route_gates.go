@@ -30,6 +30,9 @@ type gateResult struct {
 	Items  []string `json:"items,omitempty"`
 	// Waived lists the failing items a signed waiver accepted.
 	Waived []string `json:"waived,omitempty"`
+	// Info lists what passed by a rule worth seeing (silkscreen: hidden
+	// designators covered by a group label).
+	Info []string `json:"info,omitempty"`
 }
 
 // gateWaiver is a human decision to accept one known failure: every failing
