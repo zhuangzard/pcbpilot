@@ -166,3 +166,34 @@ func TestBetterTrialLoopIR(t *testing.T) {
 		t.Fatal("ranking: unrouted, fixable, then loop IR")
 	}
 }
+
+// v22 B rerun: re-applying a playbook added every mounting hole twice.
+// Existing shapes are skipped, except the ones the playbook deletes first.
+func TestDropExistingMechSteps(t *testing.T) {
+	circle := func(cx, cy, r float64) []any {
+		var pts []any
+		for i := 0; i < 24; i++ {
+			a := float64(i) * 2 * math.Pi / 24
+			pts = append(pts, []any{cx + r*math.Cos(a), cy + r*math.Sin(a)})
+		}
+		return pts
+	}
+	steps := []playbookStep{
+		{ID: "replace-fills", Action: "pcb.fill.delete", Payload: map[string]any{"primitiveIds": []any{"old1"}}},
+		{ID: "hole-1", Action: "pcb.fill.create", Payload: map[string]any{"layer": 12.0, "points": circle(157.48, 157.48, 63)}},
+		{ID: "hole-2", Action: "pcb.fill.create", Payload: map[string]any{"layer": 12.0, "points": circle(3779.53, 157.48, 63)}},
+		{ID: "place-C1", Action: "pcb.component.modify", Payload: map[string]any{}},
+	}
+	live := func(id string, cx float64) any {
+		return map[string]any{"primitiveId": id, "layer": 12.0, "bbox": map[string]any{"minX": cx - 63.5, "minY": 157.48 - 63.5, "maxX": cx + 63.5, "maxY": 157.48 + 63.5}}
+	}
+	// Rerun: hole-2's shape is on the board under a new id → skipped.
+	kept, skipped := dropExistingMechSteps(steps, []any{live("new2", 3779.53)}, nil)
+	if len(skipped) != 1 || skipped[0] != "hole-2" || len(kept) != 3 {
+		t.Fatalf("skipped %v kept %d", skipped, len(kept))
+	}
+	// First apply: the shape on the board is the one replace deletes → kept.
+	if _, skipped := dropExistingMechSteps(steps, []any{live("old1", 157.48)}, nil); len(skipped) != 0 {
+		t.Fatalf("replaced hole skipped: %v", skipped)
+	}
+}

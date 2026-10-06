@@ -368,6 +368,10 @@ pcbpilot pcb auto route --playbook out/playbook.json --out-dir out/live --projec
 新流程重做的 Board A（v15，`pcb auto route` + `pcb gate --width-basis segment`）全部门禁通过、未用豁免：DRC 0、
 逐焊盘对账、规则同步、线宽、板边/隔离/过孔载流、后仿真（阀驱动压降在预算内）。
 
+重跑安全（v22 B：中断后重跑把机械孔加了第二套、残留的原始导入进了 DSN）：`pcb auto route` 应用剧本前跳过板上已有
+同形（包围盒 1 mil 内）的 MULTI 层孔/禁布步骤（剧本自己 `--replace` 删掉的不算），应用后、试布和导出 DSN 前先拆掉
+全部未锁定布线；组标签按实际渲染尺寸复核，比估计大就按真实尺寸重新找位置。
+
 `pcb auto route` 依次：`apply --yes` 剧本 → PLANE 内层改 SIGNAL → 导出 DSN → `dsn-fix` → fastroute
 （`--continue 5` 次 `--initial-session` 续跑直到 0 未布通）→ 拆线 + 导入 → `ses-repair` → 铺铜
 （GND 在 TOP/IN1/BOTTOM，焊盘最多的非地电源网在 IN2；`--gnd-layers` / `--power-net` / `--power-layer` 可改）
