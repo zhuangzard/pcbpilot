@@ -129,3 +129,24 @@ func TestSegmentWidthNeed(t *testing.T) {
 		t.Fatalf("net basis = %+v", vs)
 	}
 }
+
+func TestSegmentViaOK(t *testing.T) {
+	in, err := parseDesignIntent([]byte(`{"schemaVersion":1,"nets":{"GND":{"role":"ground","currentA":1.51,"widthMil":{"outer":21.65},"via":{"drillMil":12,"diaMil":24,"countPerTransition":3,"marginPct":20}}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := &postsim.Result{
+		Nets: []*postsim.NetResult{{Net: "GND", CurrentA: 1.46}},
+		Vias: []postsim.ViaResult{{ID: "v1", Net: "GND", CurrentA: 0.004, AmpacityA: 0.74}, {ID: "v2", Net: "GND", CurrentA: 1.2, AmpacityA: 0.74}},
+	}
+	ok := segmentViaOK(in, res)
+	if pass, why := ok([]string{"v1"}, "GND"); !pass || why == "" {
+		t.Fatal("milliamp GND via should pass on its simulated current")
+	}
+	if pass, _ := ok([]string{"v2"}, "GND"); pass {
+		t.Fatal("a via carrying most of the net current must keep the net rating")
+	}
+	if pass, _ := ok([]string{"unknown"}, "GND"); pass {
+		t.Fatal("a via the sim does not know must not pass")
+	}
+}

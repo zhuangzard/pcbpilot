@@ -326,7 +326,8 @@ pcbpilot pcb auto route --playbook out/playbook.json --out-dir out/live --projec
 - 布线后：原生 DRC 0、逐焊盘对账 0 差异、`pcb rules check --intent` 同步、逐网逐层线宽对意图（低于要求的线段
   只在同网焊盘 50 mil 内且不低于 min 时算颈缩；`--width-basis segment` 为默认（用户 2026-10-06 决定“按每段实际电流算”）：
   承载不到网电流一半的走线，按后仿真算出的该段最坏电流 ×1.2 的 IPC-2221 线宽判，不低于 min，主干仍按网电流；
-  `net` 为旧口径）、`pcb check --intent` 无 ERROR（板边、隔离、过孔载流）、
+  `net` 为旧口径）、`pcb check --intent` 无 ERROR（板边、隔离、过孔载流；`segment` 口径下，一组过孔仿真电流之和
+  不到网电流一半时按该组仿真电流 ×（1 + `via.marginPct`，默认 20 %）判，否则按网电流）、
   `sim post-layout` 不为 fail。结果写进 `summary.json` 的 `gates[]`。
 - 豁免：`--waivers waivers.json`，每条 `{gate, match, reason, by}` 由人签字；只有一道门的全部失败项都被豁免覆盖
   时才放行，豁免内容写进 summary。没有失败项明细的门（如 DRC 数量）不能豁免。
@@ -346,6 +347,11 @@ pcbpilot pcb auto route --playbook out/playbook.json --out-dir out/live --projec
 2026-10-06 Gas Module V5 同一起点 8 个 seed 的加权线长从 121.9 到 156.5 in。现在并行跑 6 个 seed（约 37 s），先比合法性
 （重叠、出板、出区、禁布、限高），再比“线长 + 全部关联超距”（英寸，越小越紧凑），取最好的一个；每个 seed 的结果打印在
 stderr。关键关系超距权重曾设高十倍，结果选中了四角空、器件散的 seed 3，已改回同一量纲。
+
+**电流加权（摆放）。** 电流已知（仿真或声明，不含启发式默认值）且 ≥ 0.2 A 的非地网，摆放权重取
+max(原权重, min(1 + 4·I, 6))：压降门是 I·R，所以按电流线性加权。Gas Module V5 B 的阀驱动漏极（0.45 A）原来与
+5 mA 的电源轨同权（0.15），漏极回路被拉散，压降 33–100 mV 超 30 mV 门；加权后离线摆放 Σ I·HPWL 从 12279 降到
+8140 mil·A（SV1_DRV 2016→671、SV3_DRV 4091→566 mil），不加权总线长 149.5→148.8 in，核心件仍居中。
 
 **按可布通性挑布局（`--candidates`）。** 几何评分最好的布局不一定最好布：Gas Module V5 B 换 seed 7 后仍有 3–4 条
 布不通。`pcb auto run` 默认把前 3 名写成 `<out-dir>/candidates/seed-N/playbook.json`（与最优方案只差摆放步骤）；

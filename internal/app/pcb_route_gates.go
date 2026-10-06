@@ -248,7 +248,7 @@ func summarizeWidthViolations(vs []widthViolation) []string {
 
 // postRouteGates runs every gate on the live board after the post-import
 // checks (which already saved, reloaded, rebuilt pours and ran DRC).
-func postRouteGates(cfg *appConfig, window, intentPath string, post *postImportSummary, simVerdict string, simReasons []string, sessionChecked bool, unresolved *specctra.Reconcile, waivers []gateWaiver, segNeed func(specctra.Track) (float64, bool), stderr io.Writer) ([]gateResult, bool) {
+func postRouteGates(cfg *appConfig, window, intentPath string, post *postImportSummary, simVerdict string, simReasons []string, sessionChecked bool, unresolved *specctra.Reconcile, waivers []gateWaiver, segNeed func(specctra.Track) (float64, bool), viaOK func(primitives []string, net string) (bool, string), stderr io.Writer) ([]gateResult, bool) {
 	var gates []gateResult
 	add := func(g gateResult) {
 		applyWaivers(&g, waivers)
@@ -381,15 +381,27 @@ func postRouteGates(cfg *appConfig, window, intentPath string, post *postImportS
 			errs = append(errs, err.Error())
 		}
 	}
-	var items []string
+	var items, perGroup []string
 	for _, f := range rep.Findings {
-		if f.Level == "ERROR" {
-			items = append(items, f.Type+": "+f.Message)
+		if f.Level != "ERROR" {
+			continue
 		}
+		if f.Type == "via-current" && viaOK != nil {
+			if ok, why := viaOK(f.Primitives, f.Net); ok {
+				perGroup = append(perGroup, why)
+				continue
+			}
+		}
+		items = append(items, f.Type+": "+f.Message)
 	}
 	items = append(items, errs...)
-	add(gateResult{Gate: "pcb-check-intent", Pass: len(items) == 0,
-		Detail: fmt.Sprintf("%d error(s) (copper-to-edge, isolation, via current vs intent)", len(items)), Items: items})
+	g = gateResult{Gate: "pcb-check-intent", Pass: len(items) == 0,
+		Detail: fmt.Sprintf("%d error(s) (copper-to-edge, isolation, via current vs intent)", len(items)), Items: items}
+	if len(perGroup) > 0 {
+		g.Detail += fmt.Sprintf("; %d via group(s) rated by their simulated current (width basis segment)", len(perGroup))
+		g.Items = append(g.Items, perGroup...)
+	}
+	add(g)
 
 	// 6. Post-layout simulation on the live copper.
 	g = gateResult{Gate: "post-layout-sim", Pass: simVerdict == "pass" || simVerdict == "warn", Detail: "verdict " + simVerdict}
@@ -450,14 +462,16 @@ func runQualityGates(cfg *appConfig, window string, o qualityGateOpts, summary m
 	}
 	summary["postSim"] = ps
 	var segNeed func(specctra.Track) (float64, bool)
+	var viaOK func([]string, string) (bool, string)
 	if o.widthBasis == "segment" {
 		in, err := loadDesignIntent(o.intent)
 		if err != nil {
 			return false, err
 		}
 		segNeed = segmentWidthNeed(in, res)
+		viaOK = segmentViaOK(in, res)
 	}
-	gates, pass := postRouteGates(cfg, window, o.intent, post, res.Verdict.Status, res.Verdict.Reasons, o.sessionChecked, o.unresolved, o.waivers, segNeed, stderr)
+	gates, pass := postRouteGates(cfg, window, o.intent, post, res.Verdict.Status, res.Verdict.Reasons, o.sessionChecked, o.unresolved, o.waivers, segNeed, viaOK, stderr)
 	summary["gates"], summary["pass"] = gates, pass
 	return pass, nil
 }
@@ -674,3 +688,43 @@ func segmentWidthNeed(in *designIntent, res *postsim.Result) func(specctra.Track
 // widthBasisHelp: segment is the default by the user's decision of
 // 2026-10-06 ("按每段实际电流算").
 const widthBasisHelp = "intent-widths requirement: segment (default; a track carrying < 50 % of the net current per post-layout sim needs the IPC width of its own current × 1.2, never below widthMil.min; trunks keep the net's) | net (every track carries the net's intent current)"
+
+// segmentViaOK applies the per-segment basis to via current: a via group
+// whose simulated current (sum over its vias, worst scenario) is below half
+// the net's current passes when its summed ampacity covers that current with
+// the intent's via margin (default 20 %). Gas Module v16 B: a single GND via
+// near U8 carrying milliamps was rated against the 1.51 A net current.
+func segmentViaOK(in *designIntent, res *postsim.Result) func([]string, string) (bool, string) {
+	byID := map[string]postsim.ViaResult{}
+	for _, v := range res.Vias {
+		byID[v.ID] = v
+	}
+	netAmps := map[string]float64{}
+	for _, n := range res.Nets {
+		netAmps[strings.ToUpper(n.Net)] = n.CurrentA
+	}
+	margin := 0.2
+	return func(ids []string, net string) (bool, string) {
+		total := netAmps[strings.ToUpper(net)]
+		if n := in.Nets[net]; n != nil && n.CurrentA > total {
+			total = n.CurrentA
+		}
+		if n := in.Nets[net]; n != nil && n.Via != nil && n.Via.MarginPct > 0 {
+			margin = n.Via.MarginPct / 100
+		}
+		var amps, cap float64
+		for _, id := range ids {
+			v, ok := byID[id]
+			if !ok {
+				return false, ""
+			}
+			amps += v.CurrentA
+			cap += v.AmpacityA
+		}
+		if len(ids) == 0 || amps >= 0.5*total || cap < amps*(1+margin) {
+			return false, ""
+		}
+		return true, fmt.Sprintf("via-current %s (%s): group carries %.3f A (sim), rated %.2f A ≥ ×%.2f — not a trunk transition (net %.2f A)",
+			net, strings.Join(ids, ","), amps, cap, 1+margin, total)
+	}
+}
