@@ -17,7 +17,7 @@
   ```json
   {"schemaVersion": 1, "name": "GasModule_V5_A",
    "manual": {"notes": "pcbpilot.manual-notes.json", "pinMap": "../fpga/board_pins.tcl",
-              "name": "GasModule_V5_A", "out": "../05_Output/GasModule_V5_A_使用说明.html", "lang": "zh"}}
+              "analog": "../sim/analog.json", "name": "GasModule_V5_A", "out": "../05_Output/GasModule_V5_A_使用说明.html", "lang": "zh"}}
   ```
 
   `notes` 缺省为 `<工作目录>/pcbpilot.manual-notes.json`；`--project-config` 指定文件/目录，`none` 不读。
@@ -28,7 +28,7 @@
 - 离线复跑（不连 EDA）：
 
   ```
-  pcbpilot report manual --board gate/board-final.json --intent intent.json --sim sim.json \
+  pcbpilot report manual --board gate/board-final.json --intent intent.json --sim sim.json --post gate/post.json \
       --out-dir gate/ [--project-config <工作目录>] [--project-name P --doc-name PCB1] --gate
   ```
 
@@ -51,6 +51,7 @@
 | 逐脚说明 | 任一接口焊盘没有 `pinNotes`（器件与作用） |
 | LED | 任一 LED 没有含义（`hardware`，或 `firmwares[]` 里每个固件都有 `modes`） |
 | 电源输入 | 缺 `power.input.connector` / `polarity` / `recommendedSupply`，或接口不在板上 |
+| 仿真 | 缺 post.json（`sim post-layout`），或 post.json 的板数据 sha256（`inputs.boardSemanticSha256`）≠ 说明书所用板数据：说明书必须显示同一份铜皮的仿真 |
 | 机械 | 板框缺失、尺寸图缺失、没有安装孔、板厚未知（`mechanical.thicknessMm` 或 intent 叠层）、没有带来源的器件高度 |
 | TODO | 计算后的说明书任何字段仍含 “TODO”（只有 `openItems[]` 可以写未决项） |
 | 对账 | notes 里的接口/脚/网络/LED 阳极/测量点/引脚表与板数据不一致（`docPins` 文档网络 ≠ 板上网络、`expectedPins` ≠ 焊盘数……） |
@@ -61,7 +62,7 @@
 
 ## 章节
 
-1 概览（使用顺序）· 2 机械尺寸与安装孔 · 3 接头位置图 · 4 接口详细说明 · 5 电源要求 · 6 输入输出 · 7 LED ·
+1 概览（使用顺序）· 2 机械尺寸与安装孔 · 3 仿真结论 / 工作条件 · 4 接头位置图 · 4 接口详细说明 · 5 电源要求 · 6 输入输出 · 7 LED ·
 8 注意事项与跳线 · 9 仪器设备 · 10 测量点 · 11 上电步骤 · 12 软件接口 · 13 故障排查 · 14 文档与板数据对账 ·
 15 未决项 · 16 数据来源 · 17 变更记录。
 
@@ -72,6 +73,11 @@
   与最小间距、接头位置表（1 脚与本体中心 X/Y、旋转、最近板边、距边、伸出、插拔方向）、器件高度（`mechanical.heights[]`，
   必须写来源）。尺寸图 SVG 与孔表/接头表 CSV 可直接下载。安装孔识别：无主 footprint 孔、`H*`/`MH*` 器件、
   或无网络的多层（layer 12）圆形填充 Ø1.5–8 mm。
+- **仿真结论 / 工作条件**（`--post`，门禁自动传入；`--analog` 或 `manual.analog` 可选）：每项一行结论（温度/压降/
+  过孔/功率/模拟前端）；工作条件明说（环境 25 °C、裸板静止空气、无外壳）；各场景最高板温与位置/器件、各层最高/平均、
+  板温最高 10 个器件、内嵌 temp-TOP/BOTTOM 热图；允许最高环境温度 = 环境 + (限值 − 最高温)（板温上限或已知结温上限中
+  较小者，假设损耗不随温度变化），缺 θJB/θJC 或 Tj,max 的器件逐个列出；每条电源轨压降 vs 预算（含 4 个阀门漏极网络）；
+  利用率最高 5 个过孔；输入功率、板外负载（阀门）、板上损耗与推荐电源；滤波通道 fc/Q/增益 vs 目标。
 - **接头位置图**：方形画布；接头按角色着色并标“位号 角色 名称”+ 副标题，引线到最近板边外，1 脚白点，`partLabels`
   标注主要器件，底边 LED 行在板下方标注；角色无 notes 时按网络推断（TCK/TMS/TDI/TDO → JTAG，CANH/CANL → CAN，
   TXD/RXD → UART，只有 VIN/+nV 与 GND → POWER，2 脚 → JUMPER）。

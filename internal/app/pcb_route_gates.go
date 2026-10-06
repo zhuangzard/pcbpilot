@@ -478,7 +478,7 @@ func runQualityGates(cfg *appConfig, window string, o qualityGateOpts, summary m
 	gates, pass := postRouteGates(cfg, window, o.intent, post, res.Verdict.Status, res.Verdict.Reasons, o.sessionChecked, o.unresolved, o.waivers, segNeed, viaOK, stderr)
 	// The board manual is regenerated after every placement / routing /
 	// gate run (hard requirement); its gate joins gates[].
-	mg, run := runManualGate(manualGateOpts{board: boardPath, intent: o.intent, sim: o.sim, projectConfig: o.projectConfig,
+	mg, run := runManualGate(manualGateOpts{board: boardPath, intent: o.intent, sim: o.sim, post: po.out, projectConfig: o.projectConfig,
 		outDir: o.outDir, project: cfg.project, doc: cfg.doc, noManual: o.noManual, waivers: o.waivers}, stderr)
 	gates = append(gates, mg)
 	pass = pass && mg.Pass

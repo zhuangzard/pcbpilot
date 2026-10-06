@@ -11,7 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zhuangzard/pcbpilot/pkg/analogsim"
 	"github.com/zhuangzard/pcbpilot/pkg/intent"
+	"github.com/zhuangzard/pcbpilot/pkg/postsim"
 	"github.com/zhuangzard/pcbpilot/pkg/powersim"
 )
 
@@ -392,11 +394,69 @@ const completeNotes = `{"title":"Demo",
  "leds":[{"ref":"D1","name":"PWR","net":"LED0_A","hardware":"上电亮"},{"ref":"D2","name":"RUN","net":"LED1_A","modes":{"fw":"运行闪烁"}}],
  "openItems":["TODO 允许出现在未决项里"]}`
 
+func testPost(sha string) *postsim.Result {
+	return &postsim.Result{SchemaVersion: 1, Generator: "pcbpilot sim post-layout",
+		Inputs:      postsim.Inputs{BoardSemantic: sha},
+		Settings:    postsim.Settings{AmbientC: 25, BoardLimitC: 105},
+		Assumptions: []string{"boundary: the bare board in still air, no enclosure"},
+		Nets: []*postsim.NetResult{{Net: "VIN", CurrentA: 2.4, BudgetMV: 240, WorstMV: 60, WorstPad: "C1.1", Status: "ok"},
+			{Net: "SV1_DRV", CurrentA: 0.34, BudgetMV: 30, WorstMV: 20, Status: "ok"}},
+		Vias: []postsim.ViaResult{{Net: "VIN", X: 100, Y: 100, CurrentA: 0.5, AmpacityA: 1.5, UsePct: 33.3}, {Net: "GND", CurrentA: 0.1, AmpacityA: 1.5, UsePct: 6.7}},
+		Thermal: &postsim.ThermalResult{Scenario: "peak", MaxBoardC: 40, MaxAt: postsim.Hotspot{Layer: "TOP", X: 800, Y: 600, What: "U1"},
+			Layers:      []postsim.LayerTemp{{Layer: "TOP", MaxC: 40, MeanC: 30}},
+			Parts:       []postsim.PartThermal{{Ref: "U1", PowerW: 0.5, BoardMaxC: 40, Status: "needs-datasheet"}, {Ref: "C1", BoardMaxC: 31}},
+			PerScenario: []postsim.ScenarioHeat{{Scenario: "typical", MaxC: 38}, {Scenario: "peak", MaxC: 40}}},
+		Verdict: postsim.Verdict{Status: "pass"}}
+}
+
 func gateItems(t *testing.T, notes string) []string {
 	t.Helper()
 	in := testInputs(t, notes)
 	in.Intent = nil // no hazardous domain needed here
+	in.BoardSHA = "s1"
+	in.Post = testPost("s1")
 	return GateCheck(Build(in), in.Notes)
+}
+
+func TestSimSection(t *testing.T) {
+	in := testInputs(t, completeNotes)
+	in.BoardSHA, in.Post = "s1", testPost("s1")
+	in.Analog = &analogsim.Output{Summary: analogsim.Summary{Blocks: 1, Targets: 1, Met: 1, Status: "PASS"},
+		Blocks: []*analogsim.Block{{ID: "A1", Title: "LPF", Metrics: []analogsim.Metric{{Name: "fcHz", Label: "-3 dB", Unit: "Hz", Value: 106.9, Status: "PASS"}}}}}
+	m := Build(in)
+	s := m.Sim
+	if !s.HasPost || s.HotC != 40 || len(s.TopParts) != 2 || s.TopParts[0].Ref != "U1" || len(s.IR) != 2 || !s.IR[1].Valve || s.IR[0].UsePct != 25 {
+		t.Fatalf("sim %+v", s)
+	}
+	if !strings.Contains(s.AllowedAmb, "≤ 90 °C") || len(s.MissingLimits) != 1 || s.MissingLimits[0] != "U1" {
+		t.Errorf("allowed ambient %q missing %v", s.AllowedAmb, s.MissingLimits)
+	}
+	if len(s.Vias) != 2 || s.Vias[0].Used != 33.3 || len(s.Power) != 2 || s.Power[1].InputW < 28 || len(s.Analog) != 1 {
+		t.Errorf("vias %+v power %+v analog %+v", s.Vias, s.Power, s.Analog)
+	}
+	items := []string{}
+	for _, v := range s.Verdicts {
+		items = append(items, v.Item)
+	}
+	if len(items) != 5 {
+		t.Errorf("verdicts %v", items)
+	}
+	html, err := RenderHTML(m)
+	if err != nil || !strings.Contains(string(html), "仿真结论") || !strings.Contains(string(html), "允许最高环境温度") {
+		t.Errorf("render %v", err)
+	}
+}
+
+func TestGateSimulation(t *testing.T) {
+	in := testInputs(t, completeNotes)
+	in.Intent, in.BoardSHA = nil, "s1"
+	if items := strings.Join(GateCheck(Build(in), in.Notes), "\n"); !strings.Contains(items, "post.json") {
+		t.Errorf("missing post accepted: %s", items)
+	}
+	in.Post = testPost("other")
+	if items := strings.Join(GateCheck(Build(in), in.Notes), "\n"); !strings.Contains(items, "computed on board other") {
+		t.Errorf("stale post accepted: %s", items)
+	}
 }
 
 func TestGateFailureModes(t *testing.T) {

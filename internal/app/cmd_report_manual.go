@@ -2,6 +2,7 @@ package app
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -14,14 +15,18 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/zhuangzard/pcbpilot/internal/version"
+	"github.com/zhuangzard/pcbpilot/pkg/analogsim"
 	"github.com/zhuangzard/pcbpilot/pkg/boardmanual"
+	"github.com/zhuangzard/pcbpilot/pkg/designreport"
 	"github.com/zhuangzard/pcbpilot/pkg/intent"
+	"github.com/zhuangzard/pcbpilot/pkg/postsim"
 	"github.com/zhuangzard/pcbpilot/pkg/projectconfig"
 )
 
 // boardManualOpts are the inputs of `report manual`.
 type boardManualOpts struct {
 	board, intent, sim, notes, pinMap string
+	post, analog                      string
 	out, lang, date                   string
 	project, doc                      string
 	notesOptional                     bool
@@ -91,7 +96,7 @@ Schema of notes.json and the review checklist:
 				if o.board == "" {
 					return fmt.Errorf("--board is required")
 				}
-				g, run := runManualGate(manualGateOpts{board: o.board, intent: o.intent, sim: o.sim, projectConfig: o.projectConfig,
+				g, run := runManualGate(manualGateOpts{board: o.board, intent: o.intent, sim: o.sim, post: o.post, analog: o.analog, projectConfig: o.projectConfig,
 					notes: o.notes, pinMap: o.pinMap, outDir: o.outDir, project: o.project, doc: o.doc, date: o.date, lang: o.lang}, stderr)
 				res := map[string]any{"gates": []gateResult{g}, "pass": g.Pass}
 				if run != nil {
@@ -122,6 +127,8 @@ Schema of notes.json and the review checklist:
 	f.StringVar(&o.intent, "intent", "", "intent.json (pcbpilot intent derive)")
 	f.StringVar(&o.sim, "sim", "", "sim.json (pcbpilot sim power)")
 	f.StringVar(&o.notes, "notes", "", "notes.json with the project-specific human text")
+	f.StringVar(&o.post, "post", "", "post.json (pcbpilot sim post-layout) of this board: thermal / IR drop / via current; its temp-TOP/BOTTOM heat maps are embedded (required by the board-manual gate, same board sha256)")
+	f.StringVar(&o.analog, "analog", "", "analog.json (pcbpilot sim analog): filter fc / Q / gain vs target (default: pcbpilot.project.json manual.analog in --out-dir mode)")
 	f.StringVar(&o.pinMap, "pin-map", "", "FPGA/CPLD pin assignments: Quartus .tcl/.qsf or Vivado .xdc")
 	f.StringVar(&o.out, "out", "", "output HTML file (single-file mode)")
 	f.StringVar(&o.outDir, "out-dir", "", "versioned mode, as pcb gate / pcb auto route run it: <out-dir>/manual/{vN/<Board>_使用说明.html, <Board>_使用说明.html, index.json} + the board-manual gate (notes / pin map / name / extra copy from pcbpilot.project.json \"manual\")")
@@ -193,6 +200,23 @@ func loadManualInputs(o boardManualOpts) (in boardmanual.Inputs, notesMissing bo
 	} else {
 		notesMissing = true
 	}
+	if b, err := read("post", o.post); err != nil {
+		return in, false, err
+	} else if b != nil {
+		if in.Post, err = designreport.ParsePost(b); err != nil {
+			return in, false, fmt.Errorf("%s: %w", o.post, err)
+		}
+		in.HeatMaps = manualHeatMaps(in.Post, o.post)
+	}
+	if b, err := read("analog", o.analog); err != nil {
+		return in, false, err
+	} else if b != nil {
+		var a analogsim.Output
+		if err := json.Unmarshal(b, &a); err != nil {
+			return in, false, fmt.Errorf("%s: %w", o.analog, err)
+		}
+		in.Analog = &a
+	}
 	if b, err := read("pin-map", o.pinMap); err != nil {
 		return in, false, err
 	} else if b != nil {
@@ -201,6 +225,28 @@ func loadManualInputs(o boardManualOpts) (in boardmanual.Inputs, notesMissing bo
 		}
 	}
 	return in, notesMissing, nil
+}
+
+// manualHeatMaps embeds the TOP and BOTTOM temperature maps of post.json
+// (mapsDir as written, else next to post.json).
+func manualHeatMaps(p *postsim.Result, postPath string) []boardmanual.HeatMap {
+	var out []boardmanual.HeatMap
+	dirs := []string{p.MapsDir, filepath.Join(filepath.Dir(postPath), filepath.Base(p.MapsDir)), filepath.Join(filepath.Dir(postPath), "heatmaps")}
+	for _, mf := range p.Maps {
+		if mf.Kind != "temperature" || (mf.Layer != "TOP" && mf.Layer != "BOTTOM") {
+			continue
+		}
+		for _, d := range dirs {
+			if d == "" {
+				continue
+			}
+			if b, err := os.ReadFile(filepath.Join(d, mf.File)); err == nil {
+				out = append(out, boardmanual.HeatMap{Layer: mf.Layer, Kind: mf.Kind, DataURI: "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString(b)})
+				break
+			}
+		}
+	}
+	return out
 }
 
 func runBoardManual(o boardManualOpts) (*boardmanual.Manual, error) {
@@ -233,6 +279,7 @@ func runBoardManual(o boardManualOpts) (*boardmanual.Manual, error) {
 // manualGateOpts are the inputs of the board-manual gate.
 type manualGateOpts struct {
 	board, intent, sim string
+	post, analog       string
 	projectConfig      string // "" = ./pcbpilot.project.json when present, "none", or a path
 	notes, pinMap      string // overrides of the project config
 	outDir             string // the run's --out-dir; the manual goes to <outDir>/manual/
@@ -319,7 +366,11 @@ func runManualGate(o manualGateOpts, stderr io.Writer) (gateResult, *manualRun) 
 		pinMap = rel(mc.PinMap)
 	}
 	lang := firstNonEmptyStr(o.lang, mc.Lang, "zh")
-	in, notesMissing, err := loadManualInputs(boardManualOpts{board: o.board, intent: o.intent, sim: o.sim, notes: notes, notesOptional: true,
+	analog := o.analog
+	if analog == "" {
+		analog = rel(mc.Analog)
+	}
+	in, notesMissing, err := loadManualInputs(boardManualOpts{board: o.board, intent: o.intent, sim: o.sim, post: o.post, analog: analog, notes: notes, notesOptional: true,
 		pinMap: pinMap, lang: lang, date: o.date, project: o.project, doc: o.doc})
 	if err != nil {
 		return fail("generation failed: %v", err)

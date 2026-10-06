@@ -61,6 +61,8 @@ type Manual struct {
 	Out string `json:"out,omitempty"`
 	// PinMap is the FPGA/CPLD pin assignment file (Quartus .tcl/.qsf or .xdc).
 	PinMap string `json:"pinMap,omitempty"`
+	// Analog is the sim analog result (analog.json) shown in the manual.
+	Analog string `json:"analog,omitempty"`
 	// Name is the <Board> part of the file name (default: the config name).
 	Name string `json:"name,omitempty"`
 	Lang string `json:"lang,omitempty"` // zh (default) | en

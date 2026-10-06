@@ -107,6 +107,12 @@ func GateCheck(m *Manual, notes *Notes) []string {
 			add("mechanical: height of %s needs heightMm and a source", h.Ref)
 		}
 	}
+	switch {
+	case !m.Sim.HasPost:
+		add("simulation: post.json (sim post-layout of this board) missing")
+	case m.BoardSHA == "" || (m.Sim.PostBoardSHA != m.BoardSHA && m.Sim.PostFileSHA != m.BoardSHA):
+		add("simulation: post.json was computed on board %s, the manual's board is %s (re-run sim post-layout)", short12(m.Sim.PostBoardSHA), short12(m.BoardSHA))
+	}
 	for _, p := range todoPaths(m) {
 		add("TODO left in %s", p)
 	}
@@ -137,7 +143,7 @@ func todoPaths(m *Manual) []string {
 			sort.Strings(keys)
 			for _, k := range keys {
 				switch k {
-				case "BoardSVG", "ProbeSVG", "LEDSVG", "SVG", "SVGDataURI", "CSVDataURI", "TODO", "Sources", "NotesSources", "Changes", "Checks":
+				case "BoardSVG", "ProbeSVG", "LEDSVG", "SVG", "SVGDataURI", "CSVDataURI", "Maps", "Sim", "TODO", "Sources", "NotesSources", "Changes", "Checks":
 					continue
 				}
 				walk(path+"."+k, t[k])
@@ -154,4 +160,14 @@ func todoPaths(m *Manual) []string {
 	}
 	walk("", v)
 	return out
+}
+
+func short12(s string) string {
+	if s == "" {
+		return "(none)"
+	}
+	if len(s) > 12 {
+		return s[:12]
+	}
+	return s
 }

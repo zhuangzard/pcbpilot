@@ -74,14 +74,14 @@ figure.mech svg{width:auto;max-width:100%;height:auto;border:0}
 </header>
 
 <nav class="toc"><h3>{{t "toc"}}</h3><ol>
-<li><a href="#s1">{{t "s.overview"}}</a></li><li><a href="#s2">{{t "s.mech"}}</a></li><li><a href="#s3">{{t "s.board"}}</a></li>
-<li><a href="#s4">{{t "s.conns"}}</a></li><li><a href="#s5">{{t "s.power"}}</a></li>
-<li><a href="#s6">{{t "s.io"}}</a></li><li><a href="#s7">{{t "s.leds"}}</a></li>
-<li><a href="#s8">{{t "s.cautions"}}</a></li><li><a href="#s9">{{t "s.equipment"}}</a></li>
-<li><a href="#s10">{{t "s.measure"}}</a></li><li><a href="#s11">{{t "s.bringup"}}</a></li>
-<li><a href="#s12">{{t "s.software"}}</a></li><li><a href="#s13">{{t "s.debug"}}</a></li>
-<li><a href="#s14">{{t "s.checks"}}</a></li><li><a href="#s15">{{t "s.todo"}}</a></li>
-<li><a href="#s16">{{t "s.sources"}}</a></li>{{if .Version}}<li><a href="#s17">{{t "s.changes"}}</a></li>{{end}}
+<li><a href="#s1">{{t "s.overview"}}</a></li><li><a href="#s2">{{t "s.mech"}}</a></li><li><a href="#s3">{{t "s.sim"}}</a></li><li><a href="#s4">{{t "s.board"}}</a></li>
+<li><a href="#s5">{{t "s.conns"}}</a></li><li><a href="#s6">{{t "s.power"}}</a></li>
+<li><a href="#s7">{{t "s.io"}}</a></li><li><a href="#s8">{{t "s.leds"}}</a></li>
+<li><a href="#s9">{{t "s.cautions"}}</a></li><li><a href="#s10">{{t "s.equipment"}}</a></li>
+<li><a href="#s11">{{t "s.measure"}}</a></li><li><a href="#s12">{{t "s.bringup"}}</a></li>
+<li><a href="#s13">{{t "s.software"}}</a></li><li><a href="#s14">{{t "s.debug"}}</a></li>
+<li><a href="#s15">{{t "s.checks"}}</a></li><li><a href="#s16">{{t "s.todo"}}</a></li>
+<li><a href="#s17">{{t "s.sources"}}</a></li>{{if .Version}}<li><a href="#s18">{{t "s.changes"}}</a></li>{{end}}
 </ol></nav>
 
 <h2 id="s1" class="first">1 {{t "s.overview"}}</h2>
@@ -123,14 +123,53 @@ figure.mech svg{width:auto;max-width:100%;height:auto;border:0}
 {{if .Notes}}<ul>{{range .Notes}}<li>{{.}}</li>{{end}}</ul>{{end}}
 {{end}}
 
-<h2 id="s3">3 {{t "s.board"}}</h2>
+<h2 id="s3">3 {{t "s.sim"}}</h2>
+{{with .Sim}}
+{{if or .HasPost .Power}}
+<h3>{{t "simVerdicts"}}</h3>
+<div class="wrap"><table><tr><th>{{t "item"}}</th><th>{{t "status"}}</th><th>{{t "simVerdicts"}}</th></tr>
+{{range .Verdicts}}<tr{{if eq .Status "FAIL"}} class="bad"{{end}}><td>{{.Item}}</td><td><b>{{.Status}}</b></td><td>{{.Text}}</td></tr>
+{{end}}</table></div>
+{{end}}
+{{if .HasPost}}
+<h3>{{t "conditions"}}</h3>
+<div class="kv">
+ <div>{{t "ambient"}}</div><div><b>{{sprintf (t "plainCond") (mm .AmbientC)}}</b></div>
+ {{if .Boundary}}<div>{{t "boundaryL"}}</div><div>{{.Boundary}}</div>{{end}}
+ {{if .ThermalBasis}}<div>{{t "thermalBasisL"}}</div><div>{{.ThermalBasis}}</div>{{end}}
+ <div>{{t "hotspot"}}</div><div><b>{{mm .HotC}} °C</b> — {{.HotWhere}}</div>
+ {{if .CopperRiseC}}<div>{{t "copperRise"}}</div><div>{{mm .CopperRiseC}} °C</div>{{end}}
+ <div>{{t "allowedAmb"}}</div><div>{{dash .AllowedAmb}}{{if .MissingLimits}}<br><span class="note">{{sprintf (t "ambMissing") (join .MissingLimits ", ")}}</span>{{end}}</div>
+ <div>{{t "postFor"}}</div><div class="mono">{{.PostBoardSHA}}</div>
+</div>
+{{if .Scenarios}}<h4>{{t "perScenario"}}</h4><div class="wrap"><table><tr><th>{{t "scenario"}}</th><th class="num">{{t "maxC"}}</th><th class="num">{{t "lossW"}}</th></tr>
+{{range .Scenarios}}<tr><td>{{.Scenario}}</td><td class="num">{{mm .MaxC}}</td><td class="num">{{mm .LossW}}</td></tr>{{end}}</table></div>{{end}}
+{{if .Layers}}<h4>{{t "layerTemps"}}</h4><div class="wrap"><table><tr><th>{{t "layers"}}</th><th class="num">{{t "maxC"}}</th><th class="num">{{t "meanC"}}</th></tr>
+{{range .Layers}}<tr><td>{{.Layer}}</td><td class="num">{{mm .MaxC}}</td><td class="num">{{mm .MeanC}}</td></tr>{{end}}</table></div>{{end}}
+{{if .TopParts}}<h4>{{t "topParts"}}</h4><div class="wrap"><table><tr><th>{{t "ref"}}</th><th>{{t "device"}}</th><th>{{t "side"}}</th><th class="num">{{t "powerW"}}</th><th class="num">{{t "boardC"}}</th><th>{{t "status"}}</th></tr>
+{{range .TopParts}}<tr><td>{{.Ref}}</td><td>{{dash .Device}}</td><td>{{.Side}}</td><td class="num">{{mm .PowerW}}</td><td class="num">{{mm .BoardMaxC}}</td><td>{{.Status}}</td></tr>{{end}}</table></div>{{end}}
+{{if .Maps}}<h4>{{t "heatMaps"}}</h4>{{range .Maps}}<figure><img alt="{{.Kind}} {{.Layer}}" src="{{dataurl .DataURI}}" style="max-width:100%"><figcaption>{{.Layer}}</figcaption></figure>{{end}}{{end}}
+{{if .IR}}<h4>{{t "irTable"}}</h4><div class="wrap"><table><tr><th>{{t "railNet"}}</th><th>{{t "scenario"}}</th><th class="num">{{t "current"}}</th><th class="num">{{t "worstMV"}}</th><th class="num">{{t "budgetMV"}}</th><th class="num">{{t "usePct"}}</th><th>{{t "worstPad"}}</th><th>{{t "status"}}</th></tr>
+{{range .IR}}<tr{{if ne .Status "ok"}} class="bad"{{end}}><td class="mono">{{.Net}}</td><td>{{.Scenario}}</td><td class="num">{{mm .CurrentA}} A</td><td class="num">{{mm .WorstMV}}</td><td class="num">{{mm .BudgetMV}}</td><td class="num">{{mm .UsePct}}</td><td class="mono">{{dash .WorstPad}}</td><td>{{.Status}}</td></tr>{{end}}</table></div>{{end}}
+{{if .Vias}}<h4>{{t "viaWorst"}}（{{.ViaCount}}）</h4><div class="wrap"><table><tr><th>{{t "net"}}</th><th>X/Y mm</th><th class="num">{{t "current"}}</th><th class="num">{{t "ampacity"}}</th><th class="num">{{t "usePct"}}</th></tr>
+{{range .Vias}}<tr><td class="mono">{{.Net}}</td><td>({{mm .XMM}}, {{mm .YMM}})</td><td class="num">{{mm .CurrentA}} A</td><td class="num">{{mm .AmpacityA}}</td><td class="num">{{mm .Used}}</td></tr>{{end}}</table></div>{{end}}
+{{if .PostReasons}}<ul>{{range .PostReasons}}<li>{{.}}</li>{{end}}</ul>{{end}}
+{{else}}<p class="note bad">{{t "simNoPost"}}</p>{{end}}
+{{if .Power}}<h4>{{t "powerTable"}}</h4><div class="wrap"><table><tr><th>{{t "scenario"}}</th><th class="num">{{t "inputA"}}</th><th class="num">{{t "inputW"}}</th><th class="num">{{t "loadW"}}</th><th class="num">{{t "lossW"}}</th></tr>
+{{range .Power}}<tr><td>{{.Scenario}}</td><td class="num">{{mm .InputA}}</td><td class="num">{{mm .InputW}}</td><td class="num">{{mm .LoadW}}</td><td class="num">{{mm .LossW}}</td></tr>{{end}}</table></div>{{end}}
+{{if .Analog}}<h4>{{t "analogTable"}}（{{.AnalogStatus}}）</h4><div class="wrap"><table><tr><th>ID</th><th>{{t "name"}}</th><th>{{t "metric"}}</th><th>{{t "value"}}</th><th>{{t "target"}}</th><th>{{t "status"}}</th></tr>
+{{range .Analog}}{{$b := .}}{{range $i, $m := .Metrics}}<tr{{if eq $m.Status "FAIL"}} class="bad"{{end}}>{{if eq $i 0}}<td rowspan="{{len $b.Metrics}}">{{$b.ID}}</td><td rowspan="{{len $b.Metrics}}">{{$b.Title}}</td>{{end}}<td>{{$m.Label}}</td><td class="num">{{$m.Value}}</td><td>{{$m.Target}}</td><td>{{dash $m.Status}}</td></tr>{{end}}{{end}}
+</table></div>{{end}}
+{{end}}
+
+<h2 id="s4">4 {{t "s.board"}}</h2>
 <figure class="map">{{svg .BoardSVG}}<figcaption>{{t "boardCaption"}}</figcaption></figure>
 <div class="wrap"><table>
 <tr><th class="num">{{t "no"}}</th><th>{{t "ref"}}</th><th>{{t "role"}}</th><th>{{t "name"}}</th><th>{{t "device"}}</th><th class="num">{{t "pinCount"}}</th><th>{{t "position"}}</th><th>{{t "purpose"}}</th></tr>
 {{range .Connectors}}<tr><td class="num"><span class="badge">{{.Index}}</span></td><td><a href="#c-{{.Ref}}">{{.Ref}}</a></td><td><span class="sw" style="margin-left:0;background:{{.Color}}"></span>{{.Role}}</td><td{{if not .Name}} class="todo"{{end}}>{{if .Name}}{{.Name}}{{else}}{{t "todoMark"}}{{end}}</td><td>{{.Device}}</td><td class="num">{{.PadCount}}</td><td>({{mm .XMM}}, {{mm .YMM}})</td><td{{if todo .Purpose}} class="todo"{{end}}>{{dash .Purpose}}</td></tr>
 {{end}}</table></div>
 
-<h2 id="s4">4 {{t "s.conns"}}</h2>
+<h2 id="s5">5 {{t "s.conns"}}</h2>
 <p class="note">{{t "legend"}}：<span class="sw" style="background:#d62728"></span>{{t "role.power"}}<span class="sw" style="background:#222"></span>{{t "role.ground"}}<span class="sw" style="background:#1f5fbf"></span>{{t "role.signal"}}<span class="sw" style="background:#a8a8a8"></span>{{t "role.nc"}}</p>
 {{range .Connectors}}
 <section class="conn" id="c-{{.Ref}}">
@@ -154,7 +193,7 @@ figure.mech svg{width:auto;max-width:100%;height:auto;border:0}
 </section>
 {{end}}
 
-<h2 id="s5">5 {{t "s.power"}}</h2>
+<h2 id="s6">6 {{t "s.power"}}</h2>
 <h3>{{t "input"}}</h3>
 <div class="wrap"><table>
 <tr><th>{{t "inputConn"}}</th><td>{{dash .Power.InputRef}}{{if .Power.InputPins}}（{{.Power.InputPins}}）{{end}}</td></tr>
@@ -176,20 +215,20 @@ figure.mech svg{width:auto;max-width:100%;height:auto;border:0}
 {{range .Power.Rails}}<tr><td class="mono">{{.Net}}</td>{{range .Values}}<td class="num">{{.}}</td>{{end}}</tr>
 {{end}}</table></div>{{else}}<p class="note">{{t "noSim"}}</p>{{end}}
 
-<h2 id="s6">6 {{t "s.io"}}</h2>
+<h2 id="s7">7 {{t "s.io"}}</h2>
 {{if .IO}}<div class="wrap"><table>
 <tr><th>{{t "connector"}}</th><th class="num">{{t "pin"}}</th><th>{{t "signal"}}</th><th>{{t "net"}}</th><th>{{t "direction"}}</th><th>{{t "level"}}</th><th>{{t "maxCurrent"}}</th><th>{{t "note"}}</th></tr>
 {{range .IO}}<tr><td>{{.Connector}}</td><td class="num">{{.Pin}}</td><td>{{.Signal}}</td><td class="mono">{{dash .Net}}</td><td>{{dash .Direction}}</td><td{{if todo .Level}} class="todo"{{end}}>{{dash .Level}}</td><td{{if todo .MaxCurrent}} class="todo"{{end}}>{{dash .MaxCurrent}}</td><td{{if todo .Notes}} class="todo"{{end}}>{{.Notes}}</td></tr>
 {{end}}</table></div>{{else}}<p class="note">{{t "none"}}</p>{{end}}
 
-<h2 id="s7">7 {{t "s.leds"}}</h2>
+<h2 id="s8">8 {{t "s.leds"}}</h2>
 {{if .LEDSVG}}<figure>{{svg .LEDSVG}}<figcaption>{{t "ledCaption"}}</figcaption></figure>{{end}}
 {{if .LEDs}}<div class="wrap"><table>
 <tr><th>{{t "ref"}}</th><th>{{t "name"}}</th><th>{{t "colorCol"}}</th><th>{{t "ledNet"}}</th>{{range .Firmwares}}<th>{{t "firmware"}} {{.}}</th>{{end}}{{if not .Firmwares}}<th>{{t "note"}}</th>{{end}}</tr>
 {{$fw := .Firmwares}}{{range .LEDs}}<tr{{if .Mismatch}} class="bad"{{end}}><td>{{.Ref}}</td><td>{{dash .Name}}</td><td><span class="sw" style="margin-left:0;background:{{ledFill .Color}}"></span>{{dash .Color}}</td><td class="mono">{{dash .Net}}</td>{{if .Hardware}}<td colspan="{{if $fw}}{{len $fw}}{{else}}1{{end}}"><b>{{t "hwLED"}}</b>：{{.Hardware}}</td>{{else}}{{range .Modes}}<td{{if todo .}} class="todo"{{end}}>{{.}}</td>{{end}}{{if not $fw}}<td>—</td>{{end}}{{end}}</tr>
 {{end}}</table></div>{{else}}<p class="note">{{t "none"}}</p>{{end}}
 
-<h2 id="s8">8 {{t "s.cautions"}}</h2>
+<h2 id="s9">9 {{t "s.cautions"}}</h2>
 {{if .Cautions}}<h3>{{t "notesCautions"}}</h3><ul class="caut">{{range .Cautions}}{{if eq .Source "notes"}}<li{{if todo .Text}} class="todo"{{end}}>{{.Text}}</li>{{end}}{{end}}</ul>{{end}}
 {{if .ConnCaut}}<h3>{{t "connCautionSum"}}</h3><ul class="caut">{{range .ConnCaut}}<li{{if todo .Text}} class="todo"{{end}}>{{.Text}}</li>{{end}}</ul>{{end}}
 <h3>{{t "autoCautions"}}</h3><ul class="caut">{{range .Cautions}}{{if eq .Source "auto"}}<li>{{.Text}}</li>{{end}}{{end}}</ul>
@@ -198,12 +237,12 @@ figure.mech svg{width:auto;max-width:100%;height:auto;border:0}
 {{range .Jumpers}}<tr><td>{{.Ref}}</td><td>{{.Name}}</td><td{{if todo .Default}} class="todo"{{end}}>{{dash .Default}}</td><td>{{range $i, $s := .Settings}}{{if $i}}<br>{{end}}{{$s}}{{end}}</td><td{{if todo .Note}} class="todo"{{end}}>{{.Note}}</td></tr>
 {{end}}</table></div>{{else}}<p class="note">{{t "none"}}</p>{{end}}
 
-<h2 id="s9">9 {{t "s.equipment"}}</h2>
+<h2 id="s10">10 {{t "s.equipment"}}</h2>
 {{if .Equipment}}<div class="wrap"><table><tr><th>{{t "item"}}</th><th>{{t "spec"}}</th><th>{{t "purpose"}}</th></tr>
 {{range .Equipment}}<tr><td>{{.Item}}</td><td{{if todo .Spec}} class="todo"{{end}}>{{.Spec}}</td><td>{{.Purpose}}</td></tr>
 {{end}}</table></div>{{else}}<p class="note">{{t "none"}}</p>{{end}}
 
-<h2 id="s10">10 {{t "s.measure"}}</h2>
+<h2 id="s11">11 {{t "s.measure"}}</h2>
 {{if .ProbeSVG}}<figure>{{svg .ProbeSVG}}<figcaption>{{t "probeCaption"}}</figcaption></figure>{{end}}
 <h3>{{t "railsTable"}}</h3>
 {{if .RailProbes}}<div class="wrap"><table>
@@ -217,7 +256,7 @@ figure.mech svg{width:auto;max-width:100%;height:auto;border:0}
 {{end}}</table></div>{{else}}<p class="note">{{t "none"}}</p>{{end}}
 {{if .MeasNotes}}<ul>{{range .MeasNotes}}<li{{if todo .}} class="todo"{{end}}>{{.}}</li>{{end}}</ul>{{end}}
 
-<h2 id="s11">11 {{t "s.bringup"}}</h2>
+<h2 id="s12">12 {{t "s.bringup"}}</h2>
 {{if .Firmware}}{{if .Firmware.Images}}<h3>{{t "images"}}</h3><div class="wrap"><table><tr><th>{{t "name"}}</th><th>{{t "file"}}</th><th>{{t "tool"}}</th><th>{{t "purpose"}}</th></tr>
 {{range .Firmware.Images}}<tr><td>{{.Name}}</td><td class="mono{{if todo .File}} todo{{end}}">{{dash .File}}</td><td>{{dash .Tool}}</td><td>{{.Purpose}}</td></tr>
 {{end}}</table></div>{{end}}{{end}}
@@ -231,7 +270,7 @@ figure.mech svg{width:auto;max-width:100%;height:auto;border:0}
 {{if $s.Note}}<p class="note">{{$s.Note}}</p>{{end}}
 </div>{{else}}<p class="note">{{t "none"}}</p>{{end}}
 
-<h2 id="s12">12 {{t "s.software"}}</h2>
+<h2 id="s13">13 {{t "s.software"}}</h2>
 {{with .Software}}
 {{if .Interfaces}}<h3>{{t "interfaces"}}</h3><div class="wrap"><table><tr><th>{{t "name"}}</th><th>{{t "connector"}}</th><th>{{t "settings"}}</th><th>{{t "status"}}</th><th>{{t "note"}}</th></tr>
 {{range .Interfaces}}<tr><td>{{.Name}}</td><td>{{dash .Connector}}</td><td{{if todo .Settings}} class="todo"{{end}}>{{dash .Settings}}</td><td{{if todo .Status}} class="todo"{{end}}>{{dash .Status}}</td><td{{if todo .Notes}} class="todo"{{end}}>{{.Notes}}</td></tr>
@@ -254,25 +293,25 @@ figure.mech svg{width:auto;max-width:100%;height:auto;border:0}
 {{range .PinMap}}<tr{{if not .Match}} class="bad"{{end}}><td class="mono">{{.Signal}}</td><td class="num">{{.Pin}}</td><td class="mono">{{dash .Net}}</td><td>{{if .Match}}✓{{else}}✗{{end}}</td></tr>
 {{end}}</table></div>{{end}}
 
-<h2 id="s13">13 {{t "s.debug"}}</h2>
+<h2 id="s14">14 {{t "s.debug"}}</h2>
 {{if .Trouble}}<div class="wrap"><table><tr><th>{{t "symptom"}}</th><th>{{t "cause"}}</th><th>{{t "measureWhat"}}</th></tr>
 {{range .Trouble}}<tr><td>{{.Symptom}}</td><td{{if todo .Cause}} class="todo"{{end}}>{{.Cause}}</td><td{{if todo .Check}} class="todo"{{end}}>{{.Check}}</td></tr>
 {{end}}</table></div>{{else}}<p class="note">{{t "none"}}</p>{{end}}
 
-<h2 id="s14">14 {{t "s.checks"}}</h2>
+<h2 id="s15">15 {{t "s.checks"}}</h2>
 {{if .Checks}}<div class="wrap"><table><tr><th>{{t "where"}}</th><th>{{t "doc"}}</th><th>{{t "board"}}</th><th>{{t "note"}}</th></tr>
 {{range .Checks}}<tr class="bad"><td class="mono">{{.Where}}</td><td class="mono">{{.Doc}}</td><td class="mono">{{.Board}}</td><td>{{.Note}}</td></tr>
 {{end}}</table></div>{{else}}<p>{{t "noMismatch"}}</p>{{end}}
 
-<h2 id="s15">15 {{t "s.todo"}}</h2>
+<h2 id="s16">16 {{t "s.todo"}}</h2>
 {{if .TODO}}<ul>{{range .TODO}}<li class="todo">{{.}}</li>{{end}}</ul>{{else}}<p class="note">{{t "none"}}</p>{{end}}
 
-<h2 id="s16">16 {{t "s.sources"}}</h2>
+<h2 id="s17">17 {{t "s.sources"}}</h2>
 <div class="wrap"><table><tr><th>{{t "kind"}}</th><th>{{t "path"}}</th><th>sha256</th><th class="num">{{t "bytes"}}</th></tr>
 {{range .Sources}}<tr><td>{{.Kind}}</td><td class="mono">{{.Path}}</td><td class="mono">{{short .SHA256}}</td><td class="num">{{.Bytes}}</td></tr>
 {{end}}</table></div>
 {{if .NotesSources}}<p><b>{{t "notesSrc"}}</b></p><ul class="src">{{range .NotesSources}}<li>{{.}}</li>{{end}}</ul>{{end}}
-{{if .Version}}<h2 id="s17">17 {{t "s.changes"}}（v{{.Version}}）</h2>
+{{if .Version}}<h2 id="s18">18 {{t "s.changes"}}（v{{.Version}}）</h2>
 {{if .PrevVersion}}<p>{{sprintf (t "vsPrev") .PrevVersion}}</p>{{if .Changes}}<ul>{{range .Changes}}<li>{{.}}</li>{{end}}</ul>{{else}}<p>{{t "noChange"}}</p>{{end}}{{else}}<p>{{t "firstVersion"}}</p>{{end}}{{end}}
 </main>
 </body>

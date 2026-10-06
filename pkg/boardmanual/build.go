@@ -8,7 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zhuangzard/pcbpilot/pkg/analogsim"
 	"github.com/zhuangzard/pcbpilot/pkg/intent"
+	"github.com/zhuangzard/pcbpilot/pkg/postsim"
 	"github.com/zhuangzard/pcbpilot/pkg/powersim"
 )
 
@@ -21,6 +23,9 @@ type Inputs struct {
 	Intent      *intent.Intent
 	Sim         *powersim.Output
 	Notes       *Notes
+	Post        *postsim.Result   // sim post-layout of this board
+	Analog      *analogsim.Output // sim analog
+	HeatMaps    []HeatMap         // temperature maps of Post
 	PinMap      []PinAssign
 	Sources     []Source
 	Lang        string // zh (default) | en
@@ -60,6 +65,7 @@ type Manual struct {
 
 	Connectors []*Conn
 	Mech       MechSection
+	Sim        SimSection
 	Power      PowerSection
 	IO         []IORow
 	LEDs       []LEDRow
@@ -267,6 +273,8 @@ func Build(in Inputs) *Manual {
 	c.buildLEDs()
 	c.buildProbes()
 	c.buildPinMap()
+	c.buildSim()
+	c.m.Sim.Maps = in.HeatMaps
 	c.buildCautions()
 	c.buildSVGs()
 	return m
