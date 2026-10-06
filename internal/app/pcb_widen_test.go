@@ -61,3 +61,25 @@ func TestPlanWiden_AccountsForWidenedNeighbour(t *testing.T) {
 		t.Fatalf("widened neighbours too close: %v", gap)
 	}
 }
+
+// Gas Module v11 A: a fastroute neck-down left mid-run (GND 10.82 mil, 84 mil
+// from any pad) is grown back to the intent width where there is room.
+func TestPlanWidenToIntent(t *testing.T) {
+	reqs := map[string]specctra.NetRequirement{"GND": {OuterMil: 21.65, InnerMil: 43.31, MinMil: 10}}
+	gnd := specctra.Track{ID: "g", Net: "GND", Layer: 1, X1: 1371.3, Y1: 1975.2, X2: 1355.9, Y2: 1975.2, Width: 10.82}
+	ops := planWidenToIntent([]specctra.Track{gnd}, nil, nil, reqs, 6.2)
+	if len(ops) != 1 || ops[0].NewWidth != 21.65 {
+		t.Fatalf("open space: %+v", ops)
+	}
+	// Other-net copper 18 mil away (edge at 13): 2*(13-6.2)=13.6 — grows part way.
+	sig := specctra.Track{Net: "SIG", Layer: 1, X1: 1300, Y1: 1993.2, X2: 1400, Y2: 1993.2, Width: 10}
+	ops = planWidenToIntent([]specctra.Track{gnd, sig}, nil, nil, reqs, 6.2)
+	if len(ops) != 1 || ops[0].NewWidth != 13.6 {
+		t.Fatalf("limited: %+v", ops)
+	}
+	// Inner layers use the inner width; a track already wide enough is left.
+	inner := specctra.Track{Net: "GND", Layer: 15, X2: 100, Width: 43.31}
+	if ops := planWidenToIntent([]specctra.Track{inner}, nil, nil, reqs, 6.2); len(ops) != 0 {
+		t.Fatalf("full-width inner track changed: %+v", ops)
+	}
+}

@@ -279,6 +279,7 @@ func applyViaArrays(cfg *appConfig, window string, in *designIntent, stderr io.W
 	if snap.Rules != nil && snap.Rules.CopperToEdgeMil > edge {
 		edge = snap.Rules.CopperToEdgeMil
 	}
+	clr += specctra.ClearanceMarginMil // EasyEDA's DRC rounds tighter than the rule
 	b := snap.Outline.BBox
 	bounds := layoutBBox{MinX: b.MinX + edge, MinY: b.MinY + edge, MaxX: b.MaxX - edge, MaxY: b.MaxY - edge}
 	plan := planViaArrays(tracks, vias, pads, needs, clr, bounds)

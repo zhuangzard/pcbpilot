@@ -35,6 +35,39 @@ type widenOp struct {
 // earlier in this plan), other-net vias and other-net pads on the same layer
 // or MULTI. Pads use their axis-aligned rectangle (90° rotations swap W/H).
 func planWiden(tracks []specctra.Track, vias []widenVia, pads []boardPad, nets map[string]bool, maxMil, clearanceMil float64) []widenOp {
+	return planWidenTo(tracks, vias, pads, func(t specctra.Track) float64 {
+		if nets[t.Net] {
+			return maxMil
+		}
+		return 0
+	}, clearanceMil, 2)
+}
+
+// planWidenToIntent grows every track below its net's intent width (outer /
+// inner by layer) towards it, as far as the clearance allows — a fastroute
+// neck-down left mid-run (Gas Module v11 A: GND at 10.82 mil, 84 mil from
+// any pad). Tracks it cannot bring to full width stay listed by the gate.
+func planWidenToIntent(tracks []specctra.Track, vias []widenVia, pads []boardPad, reqs map[string]specctra.NetRequirement, clearanceMil float64) []widenOp {
+	return planWidenTo(tracks, vias, pads, func(t specctra.Track) float64 {
+		r, ok := reqs[t.Net]
+		if !ok {
+			return 0
+		}
+		need := r.OuterMil
+		if t.Layer >= 15 {
+			need = r.InnerMil
+		}
+		if t.Width+specctraEps >= need {
+			return 0
+		}
+		return need
+	}, clearanceMil, 0.1)
+}
+
+// planWidenTo widens each track towards target(t) (0 = leave it), limited by
+// the free space to other nets' copper minus clearanceMil; only gains above
+// minGain are kept.
+func planWidenTo(tracks []specctra.Track, vias []widenVia, pads []boardPad, target func(specctra.Track) float64, clearanceMil, minGain float64) []widenOp {
 	type wide struct {
 		a, b  [2]float64
 		layer int
@@ -44,7 +77,8 @@ func planWiden(tracks []specctra.Track, vias []widenVia, pads []boardPad, nets m
 	var widened []wide
 	var ops []widenOp
 	for _, t := range tracks {
-		if !nets[t.Net] || t.Locked {
+		goal := target(t)
+		if goal <= 0 || t.Locked {
 			continue
 		}
 		a, b := [2]float64{t.X1, t.Y1}, [2]float64{t.X2, t.Y2}
@@ -91,8 +125,8 @@ func planWiden(tracks []specctra.Track, vias []widenVia, pads []boardPad, nets m
 				return math.Hypot(math.Max(math.Abs(q[0]-p.X)-w/2, 0), math.Max(math.Abs(q[1]-p.Y)-h/2, 0))
 			}))
 		}
-		nw := math.Round(math.Min(maxMil, 2*(free-clearanceMil))*10) / 10
-		if nw > t.Width+2 {
+		nw := math.Floor(math.Min(goal, 2*(free-clearanceMil))*100) / 100
+		if nw > t.Width+minGain {
 			ops = append(ops, widenOp{Track: t, NewWidth: nw})
 			widened = append(widened, wide{a: a, b: b, layer: t.Layer, width: nw, net: t.Net})
 		}
@@ -122,6 +156,25 @@ func decodeAny(src []any, dst any) error {
 // widenNets plans and (unless dryRun) applies planWiden on the live board.
 // The originals are deleted, then recreated wider (see replaceTracks).
 func widenNets(cfg *appConfig, window string, nets map[string]bool, maxMil, clearanceMil float64, dryRun bool, stderr io.Writer) ([]widenOp, error) {
+	return widenLive(cfg, window, func(tr []specctra.Track, v []widenVia, p []boardPad, clr float64) []widenOp {
+		return planWiden(tr, v, p, nets, maxMil, clr)
+	}, fmt.Sprintf("max %.1f mil", maxMil), clearanceMil, dryRun, stderr)
+}
+
+// widenToIntent grows every under-width track of the intent's nets towards
+// its layer's intent width where clearance allows.
+func widenToIntent(cfg *appConfig, window string, in *designIntent, stderr io.Writer) ([]widenOp, error) {
+	reqs := intentRequirements(in)
+	return widenLive(cfg, window, func(tr []specctra.Track, v []widenVia, p []boardPad, clr float64) []widenOp {
+		return planWidenToIntent(tr, v, p, reqs, clr)
+	}, "to the intent width", 0, false, stderr)
+}
+
+// widenLive reads the board (after save + reload), plans with plan using the
+// board clearance plus specctra.ClearanceMarginMil (EasyEDA's DRC rounds a
+// few hundredths tighter: a widened drain track measured 5.93 < 6.0 mil on
+// Gas Module v11), and replaces the tracks.
+func widenLive(cfg *appConfig, window string, plan func([]specctra.Track, []widenVia, []boardPad, float64) []widenOp, what string, clearanceMil float64, dryRun bool, stderr io.Writer) ([]widenOp, error) {
 	if !dryRun {
 		// The ids below are deleted: read them from a reloaded board.
 		if err := saveAndReload(cfg, window); err != nil {
@@ -141,6 +194,7 @@ func widenNets(cfg *appConfig, window string, nets map[string]bool, maxMil, clea
 			clearanceMil = snap.Rules.ClearanceMil
 		}
 	}
+	clearanceMil += specctra.ClearanceMarginMil
 	var tracks []specctra.Track
 	var vias []widenVia
 	if err := decodeAny(snap.Copper.Lines, &tracks); err != nil {
@@ -166,8 +220,8 @@ func widenNets(cfg *appConfig, window string, nets map[string]bool, maxMil, clea
 		}
 	}
 	tracks = kept
-	ops := planWiden(tracks, vias, pads, nets, maxMil, clearanceMil)
-	fmt.Fprintf(stderr, "widen: %d track(s) can grow (max %.1f mil, clearance %.1f mil)\n", len(ops), maxMil, clearanceMil)
+	ops := plan(tracks, vias, pads, clearanceMil)
+	fmt.Fprintf(stderr, "widen: %d track(s) can grow (%s, clearance %.2f mil)\n", len(ops), what, clearanceMil)
 	if dryRun || len(ops) == 0 {
 		return ops, nil
 	}

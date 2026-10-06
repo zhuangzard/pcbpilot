@@ -202,6 +202,14 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 				return finish(err)
 			}
 
+			// 2c. Widen every under-width track towards its intent width.
+			wi, err := widenToIntent(cfg, *window, in, stderr)
+			summary["widenToIntent"] = len(wi)
+			if err != nil {
+				return finish(err)
+			}
+			widened := len(wi)
+
 			// 3. Pours.
 			if !noPours {
 				copper, err := fetchCopperLayerCount(cfg, *window)
@@ -260,9 +268,12 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 				if err != nil {
 					return finish(err)
 				}
-				// Widening deletes and recreates tracks: check the board
-				// still carries the whole session.
-				if rep, ok := summary["repair"].(*sesRepairSummary); ok && rep != nil && len(ops) > 0 {
+				widened += len(ops)
+			}
+			// Widening deletes and recreates tracks: check the board still
+			// carries the whole session.
+			{
+				if rep, ok := summary["repair"].(*sesRepairSummary); ok && rep != nil && widened > 0 {
 					sesPath, _ := summary["ses"].(string)
 					dsnPath, _ := summary["dsnFixed"].(string)
 					sesText, err1 := os.ReadFile(sesPath)
