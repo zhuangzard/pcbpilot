@@ -336,7 +336,7 @@ EdgeClearance                            // copper to board outline / slots
 | Via site not found in narrow tile | `viaSite == nil` | skip; the via is attempted from neighbouring tiles naturally |
 | Target unreachable on allowed layers | open set empty | `ErrNoPath`; report which layers were reachable |
 | Acute angle created at a junction with existing copper | geometry check on the attach angle | add a short 45° stub or attach at the other end of the target segment |
-| Numerical overflow | coordinates outside ±2^31 nm | reject board at load time |
+| Numerical overflow | coordinates outside ±(2^30−1) nm | reject board at load time |
 | Nondeterminism | — | heap ties broken by insertion counter; map iteration never drives order; same input ⇒ same output on any GOMAXPROCS |
 
 ## 6. Test scenarios and acceptance criteria
@@ -421,3 +421,8 @@ search / embedding / verification, cost breakdown (length, vias, bends).
   Lee & Preparata); removed the "KiCad-style" remark on units; corrected author lists of
   sources 5 and 8; marked source 9 as unverified; stated that the §3.2 cost defaults
   are pcbpilot's own values. No algorithm changed.
+
+
+## Changelog
+
+- 2026-10-06 (spec-edit, from M1): the coordinate bound is ±(2^30−1) nm (≈ 1.07 m), not ±2^31. At 2^31 a cross product of two coordinate differences needs 65 bits; at 2^30 every kernel is exact in int64 with unsigned 128-bit products (`math/bits`), so no `math/big` path is needed.

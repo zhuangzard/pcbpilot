@@ -466,7 +466,7 @@ sequential tail:          M15 integration → M16 performance → M17 acceptance
 | Q3 | Plane and pour nets: how v2 terminates connections on planes, and how the referee counts them against native DRC (R8) | M15 + spec 04 edit |
 | Q4 | Differential pairs: is post-route regeneration (03 §3.7) enough to match fastroute's "pairs routed first", or is pair-as-unit search needed (legacy `pairroute.go` idea)? | after M14 bench; spec edit if needed |
 | Q5 | Length matching during search (Ozdal & Wong) vs post-route meanders only (03 §3.6). Decide only if C3 fails | after M14 |
-| Q6 | Neck-down for controlled-impedance classes: 01 and 04 both forbid it. Confirm the intent flag name and the DSN mapping | M2 |
+| Q6 | Neck-down for controlled-impedance classes: 01 and 04 both forbid it. Confirm the intent flag name and the DSN mapping | **Decided (M2):** `rules.Intent.NoNeckDown`, set when intent `widthMil.min` ≥ `widthMil.outer` (same test as `specctra.forbidsNeckdown`) or for impedance / diff / RF nets; DSN maps it as class `MinWidth = Width`, so `Neck.Zone = 0` (no new keyword) |
 | Q7 | Default for `walkaroundSlack` (1.3) and `ripLengthRatio` (4), which are pcbpilot's own guesses | M11 sweep |
 | Q8 | Via-in-pad: only with `via_at_smd on`. Does any fixture's DSN from `pcb dsn-fix` set it? | M13a |
 | Q9 | Escape ordering λ (04 §3.4) default off. Turn it on for connector-bound buses? | M13b bench |
