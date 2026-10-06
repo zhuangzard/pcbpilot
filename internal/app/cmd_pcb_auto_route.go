@@ -328,7 +328,7 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 	c.Flags().BoolVar(&noPost, "no-post", false, "skip pour rebuild / save / reload / DRC / pad-net diff / post-layout sim")
 	c.Flags().StringArrayVar(&schFiles, "sch-connectivity", nil, "schematic connectivity JSON for the pad-net diff (repeat per page)")
 	c.Flags().StringVar(&scriptPath, "pad-net-diff-script", "", "path to pad-net-diff.py (auto-detected if omitted)")
-	c.Flags().StringVar(&widthBasis, "width-basis", "net", widthBasisHelp)
+	c.Flags().StringVar(&widthBasis, "width-basis", "segment", widthBasisHelp)
 	c.Flags().StringVar(&waiverPath, "waivers", "", "JSON list of signed waivers [{gate,match,reason,by}]: a failing gate passes only when every failing item matches one")
 	c.Flags().StringVar(&simPath, "sim", "", "sim.json (pcbpilot sim power): run sim post-layout on the finished live board")
 	return c

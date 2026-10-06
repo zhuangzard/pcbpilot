@@ -556,7 +556,7 @@ Results: --out-dir/{gate.json, board-final.json, post.json, post.md}.`,
 	c.Flags().StringVar(&scriptPath, "pad-net-diff-script", "", "path to pad-net-diff.py (auto-detected if omitted)")
 	c.Flags().StringVar(&outDir, "out-dir", "pcb-gate", "directory for gate.json, board-final.json and post-layout results")
 	c.Flags().StringVar(&waiverPath, "waivers", "", "JSON list of signed waivers [{gate,match,reason,by}]")
-	c.Flags().StringVar(&widthBasis, "width-basis", "net", widthBasisHelp)
+	c.Flags().StringVar(&widthBasis, "width-basis", "segment", widthBasisHelp)
 	return c
 }
 
@@ -671,4 +671,6 @@ func segmentWidthNeed(in *designIntent, res *postsim.Result) func(specctra.Track
 	}
 }
 
-const widthBasisHelp = "intent-widths requirement: net (every track carries the net's intent current) | segment (a track carrying < 50 % of the net current per post-layout sim needs only the IPC width of its own current × 1.2, never below widthMil.min)"
+// widthBasisHelp: segment is the default by the user's decision of
+// 2026-10-06 ("按每段实际电流算").
+const widthBasisHelp = "intent-widths requirement: segment (default; a track carrying < 50 % of the net current per post-layout sim needs the IPC width of its own current × 1.2, never below widthMil.min; trunks keep the net's) | net (every track carries the net's intent current)"

@@ -324,13 +324,17 @@ pcbpilot pcb auto route --playbook out/playbook.json --out-dir out/live --projec
   （`layer_rule`）和间距，逐网复核，有一个不达标就不布线；`widthMil.min = outer` 的网类不准颈缩
   （fastroute `--no-neckdown-classes`），全局颈缩下限取意图最小的 `widthMil.min`。
 - 布线后：原生 DRC 0、逐焊盘对账 0 差异、`pcb rules check --intent` 同步、逐网逐层线宽对意图（低于要求的线段
-  只在同网焊盘 50 mil 内且不低于 min 时算颈缩）、`pcb check --intent` 无 ERROR（板边、隔离、过孔载流）、
+  只在同网焊盘 50 mil 内且不低于 min 时算颈缩；`--width-basis segment` 为默认（用户 2026-10-06 决定“按每段实际电流算”）：
+  承载不到网电流一半的走线，按后仿真算出的该段最坏电流 ×1.2 的 IPC-2221 线宽判，不低于 min，主干仍按网电流；
+  `net` 为旧口径）、`pcb check --intent` 无 ERROR（板边、隔离、过孔载流）、
   `sim post-layout` 不为 fail。结果写进 `summary.json` 的 `gates[]`。
 - 豁免：`--waivers waivers.json`，每条 `{gate, match, reason, by}` 由人签字；只有一道门的全部失败项都被豁免覆盖
   时才放行，豁免内容写进 summary。没有失败项明细的门（如 DRC 数量）不能豁免。
 
 用新门禁回量 2026-10-06 已验收的 Board A（手工脚本流程，DRC 0）：72 段走线不符合意图（+12V 颈缩到 16.24 mil，
 意图不准颈缩；+3V3/+1V8 等最窄 7.5 mil，意图下限 10 mil；GND 29 段在离焊盘 50 mil 外只有 10.82 mil）。
+新流程重做的 Board A（v15，`pcb auto route` + `pcb gate --width-basis segment`）全部门禁通过、未用豁免：DRC 0、
+逐焊盘对账、规则同步、线宽、板边/隔离/过孔载流、后仿真（阀驱动压降在预算内）。
 
 `pcb auto route` 依次：`apply --yes` 剧本 → PLANE 内层改 SIGNAL → 导出 DSN → `dsn-fix` → fastroute
 （`--continue 5` 次 `--initial-session` 续跑直到 0 未布通）→ 拆线 + 导入 → `ses-repair` → 铺铜
