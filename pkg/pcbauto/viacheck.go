@@ -175,7 +175,7 @@ func checkViaCurrent(b *Board, tracks []Track, vias []viaCheckVia, in *Intent) *
 		for i := range idx {
 			for j := i + 1; j < len(idx); j++ {
 				a, c := vias[idx[i]], vias[idx[j]]
-				if a.C.Dist(c.C) <= math.Max(60, 2.5*math.Max(a.Dia, c.Dia)) {
+				if a.C.Dist(c.C) <= ViaGroupLinkMil(a.Dia, c.Dia) {
 					parent[find(i)] = find(j)
 				}
 			}
@@ -294,4 +294,11 @@ func checkViaCurrent(b *Board, tracks []Track, vias []viaCheckVia, in *Intent) *
 	}
 	out.Notes = append(out.Notes, sprintf("via-current: %d transition(s) rated (Σ via ampacity vs current, margin ≥ %.0f %%); %d via group(s) without a current to pass (plane stitching, zero-current pins) not rated", out.Groups, margin, skipped))
 	return out
+}
+
+// ViaGroupLinkMil is the distance under which two same-net vias belong to
+// one layer transition (single link): max(60 mil, 2.5 × the larger
+// diameter). Via arrays are placed within it so the check rates them as one.
+func ViaGroupLinkMil(diaA, diaB float64) float64 {
+	return math.Max(60, 2.5*math.Max(diaA, diaB))
 }

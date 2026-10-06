@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/zhuangzard/pcbpilot/internal/pcb/specctra"
+	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
 )
 
 // viaNeed is a net's via sizing from the intent.
@@ -166,6 +167,7 @@ func planViaArrays(tracks []specctra.Track, vias []widenVia, pads []boardPad, ne
 				cands = append(cands, [2]float64{round3(P[0] + r*math.Cos(a)), round3(P[1] + r*math.Sin(a))})
 			}
 		}
+		group := [][2]float64{P} // vias of this transition (grows as the array does)
 		layers := make([]int, 0, len(widthOn))
 		for l := range widthOn {
 			layers = append(layers, l)
@@ -176,6 +178,20 @@ func planViaArrays(tracks []specctra.Track, vias []widenVia, pads []boardPad, ne
 				break
 			}
 			if !viaFits(v.Net, q, dia) {
+				continue
+			}
+			// Stay within the via-current check's grouping link of a via of
+			// this transition, or the check rates the new via on its own
+			// (Gas Module v14: a via 60.4 mil from its neighbour failed as a
+			// single via).
+			linked := false
+			for _, o := range group {
+				if math.Hypot(o[0]-q[0], o[1]-q[1]) <= pcbauto.ViaGroupLinkMil(dia, dia)-0.5 {
+					linked = true
+					break
+				}
+			}
+			if !linked {
 				continue
 			}
 			var stubs []specctra.NewTrack
@@ -205,6 +221,7 @@ func planViaArrays(tracks []specctra.Track, vias []widenVia, pads []boardPad, ne
 			plan.Vias = append(plan.Vias, nv)
 			plan.Stubs = append(plan.Stubs, stubs...)
 			allVias = append(allVias, widenVia{Net: v.Net, X: q[0], Y: q[1], Diameter: dia})
+			group = append(group, q)
 			for _, s := range stubs {
 				cu = append(cu, copper{s.Net, s.Layer, [2]float64{s.X1, s.Y1}, [2]float64{s.X2, s.Y2}, s.Width / 2})
 			}
