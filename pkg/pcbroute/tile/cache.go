@@ -204,8 +204,13 @@ func (s *Set) build(pk planeKey, b *built) *Plane {
 			if k.Layer == geom.AllLayers && l != b.from || !blocks(k.Kind, b.obj) {
 				continue
 			}
-			r := b.half + s.clearance(b, 0, rules.Area, l)
-			obs = append(obs, Obstacle{ID: keepoutID | uint32(l-b.from)<<16 | uint32(i), Shape: k.Shape, R: r})
+			c := s.clearance(b, 0, rules.Area, l)
+			if k.Layer == geom.AllLayers { // one obstacle for the whole span
+				for m := b.from + 1; m <= b.to; m++ {
+					c = max(c, s.clearance(b, 0, rules.Area, m))
+				}
+			}
+			obs = append(obs, Obstacle{ID: keepoutID | uint32(l-b.from)<<16 | uint32(i), Shape: k.Shape, R: b.half + c})
 		}
 	}
 	// Insert in reading order so point location starts next to the last

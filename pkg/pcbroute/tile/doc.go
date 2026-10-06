@@ -44,6 +44,8 @@
 //   - Keep-outs come from the rules (with their kind); board Keepout items
 //     duplicate them and are skipped. The outline is an obstacle of net 0
 //     that also covers everything outside it, inflated by the edge clearance.
+//     A round outline (a DSN circle boundary) is replaced by an inscribed
+//     64-gon, which stays conservative.
 //   - A via plane spans the via's layers; pours on plane layers are not via
 //     obstacles (the antipad is the pour's rule, spec 01 §3.5).
 //   - Set planes cover the bounds of every item and keep-out grown by 1 mm;

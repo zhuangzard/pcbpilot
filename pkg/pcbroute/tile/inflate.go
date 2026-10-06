@@ -135,23 +135,32 @@ func floorDiv(a, b int64) int64 {
 	return q
 }
 
+// circleSides is the number of sides of the polygon inscribed in a round
+// outline; the inside it loses is at most C.R·(1-cos(π/64)), about 0.12 %.
+const circleSides = 64
+
 // Outline covers what a centreline of clearance R may not reach around the
-// board outline s (a Poly or Rect): every lattice point closer than R to the
-// outline and everything outside it, within bounds. Between two successive
-// vertex rows, the inside is shrunk to the columns that are inside on every
-// row of the band, so the cover is conservative.
+// board outline s (a Poly, Rect or Circle): every lattice point closer than R
+// to the outline and everything outside it, within bounds. Between two
+// successive vertex rows, the inside is shrunk to the columns that are inside
+// on every row of the band, so the cover is conservative. A Circle is
+// replaced by an inscribed polygon: a point inside it that is closer than R
+// to the circle is also closer than R to the polygon, so that stays
+// conservative too.
 func Outline(s geom.Shape, R, step int64, bounds geom.Rect) []geom.Rect {
 	var pts []geom.Pt
 	switch s := s.(type) {
 	case geom.Poly:
 		pts = s.Pts
+	case geom.Circle:
+		pts = inscribed(s)
 	case geom.Rect:
 		if s.Empty() {
 			return []geom.Rect{bounds}
 		}
 		pts = []geom.Pt{{X: s.MinX, Y: s.MinY}, {X: s.MaxX - 1, Y: s.MinY}, {X: s.MaxX - 1, Y: s.MaxY - 1}, {X: s.MinX, Y: s.MaxY - 1}}
 	default:
-		panic("tile: outline must be a Poly or a Rect")
+		panic("tile: outline must be a Poly, a Rect or a Circle")
 	}
 	if len(pts) < 3 {
 		return []geom.Rect{bounds}
@@ -224,4 +233,42 @@ func Outline(s geom.Shape, R, step int64, bounds geom.Rect) []geom.Rect {
 		}
 	}
 	return out
+}
+
+// inscribed is a polygon with integer vertices inside the closed disk c.
+func inscribed(c geom.Circle) []geom.Pt {
+	var pts []geom.Pt
+	for i := range circleSides {
+		a := 2 * math.Pi * float64(i) / circleSides
+		dx, dy := int64(float64(c.R)*math.Cos(a)), int64(float64(c.R)*math.Sin(a))
+		for dx*dx+dy*dy > c.R*c.R { // float rounding: pull the vertex in
+			if abs(dx) >= abs(dy) {
+				dx -= sign(dx)
+			} else {
+				dy -= sign(dy)
+			}
+		}
+		q := geom.Pt{X: c.C.X + dx, Y: c.C.Y + dy}
+		if len(pts) == 0 || pts[len(pts)-1] != q {
+			pts = append(pts, q)
+		}
+	}
+	if len(pts) > 1 && pts[0] == pts[len(pts)-1] {
+		pts = pts[:len(pts)-1]
+	}
+	return pts
+}
+
+func abs(v int64) int64 {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
+func sign(v int64) int64 {
+	if v < 0 {
+		return -1
+	}
+	return 1
 }
