@@ -128,20 +128,23 @@ type ScenarioDrop struct {
 
 // NetResult is the DC result of one net (worst over scenarios).
 type NetResult struct {
-	Net           string         `json:"net"`
-	Role          string         `json:"role"`
-	NominalV      float64        `json:"nominalV"`
-	CurrentA      float64        `json:"currentA"`
-	Scenario      string         `json:"scenario"`
-	Reference     string         `json:"reference"`
-	BudgetMV      float64        `json:"budgetMV,omitempty"`
-	WorstMV       float64        `json:"worstMV"`
-	WorstPad      string         `json:"worstPad,omitempty"`
-	Status        string         `json:"status"` // ok | over-budget | open | info | no-copper | no-reference
-	Pads          []PadResult    `json:"pads"`
-	MaxJAmm2      float64        `json:"maxJAmm2"`
-	Hotspots      []Hotspot      `json:"hotspots,omitempty"`
-	Segments      []Segment      `json:"topSegments,omitempty"`
+	Net       string      `json:"net"`
+	Role      string      `json:"role"`
+	NominalV  float64     `json:"nominalV"`
+	CurrentA  float64     `json:"currentA"`
+	Scenario  string      `json:"scenario"`
+	Reference string      `json:"reference"`
+	BudgetMV  float64     `json:"budgetMV,omitempty"`
+	WorstMV   float64     `json:"worstMV"`
+	WorstPad  string      `json:"worstPad,omitempty"`
+	Status    string      `json:"status"` // ok | over-budget | open | info | no-copper | no-reference
+	Pads      []PadResult `json:"pads"`
+	MaxJAmm2  float64     `json:"maxJAmm2"`
+	Hotspots  []Hotspot   `json:"hotspots,omitempty"`
+	Segments  []Segment   `json:"topSegments,omitempty"`
+	// AllSegments is every track piece with its worst current (not
+	// serialised): the per-segment width gate judges each track by it.
+	AllSegments   []Segment      `json:"-"`
 	LossMW        float64        `json:"lossMW"`
 	ViaCount      int            `json:"viaCount"`
 	MaxViaA       float64        `json:"maxViaA"`

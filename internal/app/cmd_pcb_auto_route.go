@@ -94,7 +94,7 @@ func defaultPourLayers(copper int) (gnd []int, power int) {
 
 func newPcbAutoRouteCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {
 	var o autorouteOpts
-	var playbook, outDir, gndNet, powerNet, simPath, scriptPath, widenCSV, waiverPath string
+	var playbook, outDir, gndNet, powerNet, simPath, scriptPath, widenCSV, waiverPath, widthBasis string
 	var gndLayers []int
 	var powerLayer int
 	var widenMax float64
@@ -139,6 +139,9 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 			}
 			if noPost {
 				return fmt.Errorf("--no-post skips the post-route gates; use 'pcb autoroute' for an ungated run")
+			}
+			if widthBasis != "net" && widthBasis != "segment" {
+				return fmt.Errorf("--width-basis must be net or segment")
 			}
 			waivers, err := loadWaivers(waiverPath)
 			if err != nil {
@@ -298,7 +301,7 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 				unresolved = rep.Unresolved
 			}
 			pass, err := runQualityGates(cfg, *window, qualityGateOpts{intent: o.intentPath, sim: simPath, sch: schFiles, script: scriptPath,
-				outDir: outDir, waivers: waivers, sessionChecked: true, unresolved: unresolved, source: "live board after pcb auto route"}, summary, stderr)
+				outDir: outDir, waivers: waivers, sessionChecked: true, unresolved: unresolved, widthBasis: widthBasis, source: "live board after pcb auto route"}, summary, stderr)
 			if err != nil {
 				return finish(err)
 			}
@@ -325,6 +328,7 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 	c.Flags().BoolVar(&noPost, "no-post", false, "skip pour rebuild / save / reload / DRC / pad-net diff / post-layout sim")
 	c.Flags().StringArrayVar(&schFiles, "sch-connectivity", nil, "schematic connectivity JSON for the pad-net diff (repeat per page)")
 	c.Flags().StringVar(&scriptPath, "pad-net-diff-script", "", "path to pad-net-diff.py (auto-detected if omitted)")
+	c.Flags().StringVar(&widthBasis, "width-basis", "net", widthBasisHelp)
 	c.Flags().StringVar(&waiverPath, "waivers", "", "JSON list of signed waivers [{gate,match,reason,by}]: a failing gate passes only when every failing item matches one")
 	c.Flags().StringVar(&simPath, "sim", "", "sim.json (pcbpilot sim power): run sim post-layout on the finished live board")
 	return c

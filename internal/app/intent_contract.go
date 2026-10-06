@@ -32,9 +32,17 @@ type designIntent struct {
 	// Edge is the additive board-edge safety distance (nil in intents
 	// derived before it existed: the consumers then use the defaults).
 	Edge *intentEdge `json:"edge,omitempty"`
+	// Copper is the producer's copper block (weights, allowed rise).
+	Copper *intentCopper `json:"copper,omitempty"`
 
 	// sha256 of the raw file bytes; provenance for reports and annotations.
 	sourceSHA string
+}
+
+type intentCopper struct {
+	OuterOz   float64 `json:"outerOz"`
+	InnerOz   float64 `json:"innerOz"`
+	TempRiseC float64 `json:"tempRiseC"`
 }
 
 type intentNet struct {

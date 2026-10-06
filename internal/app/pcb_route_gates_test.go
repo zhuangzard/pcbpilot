@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/zhuangzard/pcbpilot/internal/pcb/specctra"
+	"github.com/zhuangzard/pcbpilot/pkg/postsim"
 )
 
 func TestCheckIntentWidths(t *testing.T) {
@@ -97,5 +98,34 @@ func TestCheckIntentLengths(t *testing.T) {
 	fails, n := checkIntentLengths(in, tracks)
 	if n != 2 || len(fails) != 1 || !strings.HasPrefix(fails[0], "group BUS: spread 100.0") {
 		t.Fatalf("fails = %v (%d groups)", fails, n)
+	}
+}
+
+// Per-segment basis: a GND track carrying 0.2 A of a 1.46 A net needs only
+// its own IPC width (Gas Module v15 A: 14.75 mil tracks vs a 21.65 mil net
+// requirement); a trunk carrying most of the net current keeps the net's.
+func TestSegmentWidthNeed(t *testing.T) {
+	in, err := parseDesignIntent([]byte(`{"schemaVersion":1,"copper":{"outerOz":1,"innerOz":0.5,"tempRiseC":10},"nets":{
+ "GND":{"role":"ground","currentA":1.51,"widthMil":{"outer":21.65,"inner":43.31,"min":10}}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := &postsim.Result{Stackup: &postsim.Stackup{Layers: []postsim.StackLayer{{ID: 1, Name: "TOP"}}}, Nets: []*postsim.NetResult{{Net: "GND", CurrentA: 1.46,
+		AllSegments: []postsim.Segment{
+			{Layer: "TOP", A: postsim.Point{X: 0, Y: 0}, B: postsim.Point{X: 100, Y: 0}, CurrentA: 0.21},
+			{Layer: "TOP", A: postsim.Point{X: 0, Y: 500}, B: postsim.Point{X: 100, Y: 500}, CurrentA: 1.2},
+		}}}}
+	need := segmentWidthNeed(in, res)
+	reqs := intentRequirements(in)
+	tracks := []specctra.Track{
+		{ID: "stub", Net: "GND", Layer: 1, X1: 0, Y1: 0, X2: 100, Y2: 0, Width: 14.75},
+		{ID: "trunk", Net: "GND", Layer: 1, X1: 0, Y1: 500, X2: 100, Y2: 500, Width: 14.75},
+	}
+	vs := checkIntentWidths(tracks, nil, reqs, nil, need)
+	if len(vs) != 1 || vs[0].ID != "trunk" {
+		t.Fatalf("violations = %+v", vs)
+	}
+	if vs := checkIntentWidths(tracks, nil, reqs, nil); len(vs) != 2 {
+		t.Fatalf("net basis = %+v", vs)
 	}
 }

@@ -970,6 +970,7 @@ func (n *eNet) details(sol *eSolution, g *Grid, st *Stackup, nres *NetResult, jm
 		}
 	}
 	nres.MaxJAmm2 = round(nres.MaxJAmm2, 3)
+	nres.AllSegments = append([]Segment(nil), segs...)
 	sort.Slice(segs, func(i, j int) bool { return segs[i].PowerMW > segs[j].PowerMW })
 	if len(segs) > 8 {
 		segs = segs[:8]

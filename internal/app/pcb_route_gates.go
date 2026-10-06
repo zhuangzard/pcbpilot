@@ -19,6 +19,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/zhuangzard/pcbpilot/internal/pcb/specctra"
 	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
+	"github.com/zhuangzard/pcbpilot/pkg/postsim"
 )
 
 // gateResult is one post-route gate.
@@ -86,7 +87,10 @@ type widthViolation struct {
 // A track lying wholly inside its own net's poured copper on its layer is
 // carried by the pour (the current flows in the plane, not the track):
 // pourBacked reports those; it may be nil.
-func checkIntentWidths(tracks []specctra.Track, pads []boardPad, reqs map[string]specctra.NetRequirement, pourBacked func(specctra.Track) bool) []widthViolation {
+//
+// segNeed, when set (--width-basis segment), may lower the requirement of a
+// track to what its own simulated current needs (ok=false keeps the net's).
+func checkIntentWidths(tracks []specctra.Track, pads []boardPad, reqs map[string]specctra.NetRequirement, pourBacked func(specctra.Track) bool, segNeed ...func(specctra.Track) (float64, bool)) []widthViolation {
 	byNet := map[string][]boardPad{}
 	for _, p := range pads {
 		byNet[strings.ToUpper(p.Net)] = append(byNet[strings.ToUpper(p.Net)], p)
@@ -103,6 +107,11 @@ func checkIntentWidths(tracks []specctra.Track, pads []boardPad, reqs map[string
 		}
 		if t.Width+specctraEps >= need {
 			continue
+		}
+		if len(segNeed) > 0 && segNeed[0] != nil {
+			if own, ok := segNeed[0](t); ok && t.Width+specctraEps >= math.Max(own, r.MinMil) {
+				continue
+			}
 		}
 		v := widthViolation{Net: t.Net, Layer: t.Layer, ID: t.ID, WidthMil: t.Width, NeededMil: need}
 		switch {
@@ -239,7 +248,7 @@ func summarizeWidthViolations(vs []widthViolation) []string {
 
 // postRouteGates runs every gate on the live board after the post-import
 // checks (which already saved, reloaded, rebuilt pours and ran DRC).
-func postRouteGates(cfg *appConfig, window, intentPath string, post *postImportSummary, simVerdict string, simReasons []string, sessionChecked bool, unresolved *specctra.Reconcile, waivers []gateWaiver, stderr io.Writer) ([]gateResult, bool) {
+func postRouteGates(cfg *appConfig, window, intentPath string, post *postImportSummary, simVerdict string, simReasons []string, sessionChecked bool, unresolved *specctra.Reconcile, waivers []gateWaiver, segNeed func(specctra.Track) (float64, bool), stderr io.Writer) ([]gateResult, bool) {
 	var gates []gateResult
 	add := func(g gateResult) {
 		applyWaivers(&g, waivers)
@@ -341,9 +350,13 @@ func postRouteGates(cfg *appConfig, window, intentPath string, post *postImportS
 	for _, c := range snap.Components {
 		pads = append(pads, c.Pads...)
 	}
-	vs := checkIntentWidths(tracks, pads, intentRequirements(in), pouredLookup(snap.Copper.Poured))
+	vs := checkIntentWidths(tracks, pads, intentRequirements(in), pouredLookup(snap.Copper.Poured), segNeed)
+	basis := "net current"
+	if segNeed != nil {
+		basis = "each segment's simulated current below half the net current, else the net current"
+	}
 	add(gateResult{Gate: "intent-widths", Pass: len(vs) == 0,
-		Detail: fmt.Sprintf("%d track(s) below the intent width outside pin neck-downs and own-net pours, or below the minimum", len(vs)),
+		Detail: fmt.Sprintf("%d track(s) below the intent width (basis: %s) outside pin neck-downs and own-net pours, or below the minimum", len(vs), basis),
 		Items:  summarizeWidthViolations(vs)})
 
 	if items, n := checkIntentLengths(in, tracks); n > 0 {
@@ -396,6 +409,7 @@ func postRouteGates(cfg *appConfig, window, intentPath string, post *postImportS
 }
 
 type qualityGateOpts struct {
+	widthBasis                          string
 	intent, sim, script, outDir, source string
 	sch                                 []string
 	waivers                             []gateWaiver
@@ -435,7 +449,15 @@ func runQualityGates(cfg *appConfig, window string, o qualityGateOpts, summary m
 		ps["maxBoardC"] = res.Thermal.MaxBoardC
 	}
 	summary["postSim"] = ps
-	gates, pass := postRouteGates(cfg, window, o.intent, post, res.Verdict.Status, res.Verdict.Reasons, o.sessionChecked, o.unresolved, o.waivers, stderr)
+	var segNeed func(specctra.Track) (float64, bool)
+	if o.widthBasis == "segment" {
+		in, err := loadDesignIntent(o.intent)
+		if err != nil {
+			return false, err
+		}
+		segNeed = segmentWidthNeed(in, res)
+	}
+	gates, pass := postRouteGates(cfg, window, o.intent, post, res.Verdict.Status, res.Verdict.Reasons, o.sessionChecked, o.unresolved, o.waivers, segNeed, stderr)
 	summary["gates"], summary["pass"] = gates, pass
 	return pass, nil
 }
@@ -473,7 +495,7 @@ func loadWaivers(path string) ([]gateWaiver, error) {
 }
 
 func newPcbGateCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {
-	var intentPath, simPath, scriptPath, outDir, waiverPath string
+	var intentPath, simPath, scriptPath, outDir, waiverPath, widthBasis string
 	var schFiles []string
 	c := &cobra.Command{
 		Use:   "gate",
@@ -501,6 +523,9 @@ Results: --out-dir/{gate.json, board-final.json, post.json, post.md}.`,
 			if intentPath == "" || simPath == "" || len(schFiles) == 0 {
 				return fmt.Errorf("--intent, --sim and --sch-connectivity are required")
 			}
+			if widthBasis != "net" && widthBasis != "segment" {
+				return fmt.Errorf("--width-basis must be net or segment")
+			}
 			waivers, err := loadWaivers(waiverPath)
 			if err != nil {
 				return err
@@ -510,7 +535,7 @@ Results: --out-dir/{gate.json, board-final.json, post.json, post.md}.`,
 			}
 			summary := map[string]any{"intent": intentPath, "sim": simPath}
 			pass, err := runQualityGates(cfg, *window, qualityGateOpts{intent: intentPath, sim: simPath, sch: schFiles, script: scriptPath,
-				outDir: outDir, waivers: waivers, source: "live board (pcb gate)"}, summary, stderr)
+				outDir: outDir, waivers: waivers, widthBasis: widthBasis, source: "live board (pcb gate)"}, summary, stderr)
 			if f, ferr := os.Create(filepath.Join(outDir, "gate.json")); ferr == nil {
 				_ = writeJSON(f, summary)
 				f.Close()
@@ -531,6 +556,7 @@ Results: --out-dir/{gate.json, board-final.json, post.json, post.md}.`,
 	c.Flags().StringVar(&scriptPath, "pad-net-diff-script", "", "path to pad-net-diff.py (auto-detected if omitted)")
 	c.Flags().StringVar(&outDir, "out-dir", "pcb-gate", "directory for gate.json, board-final.json and post-layout results")
 	c.Flags().StringVar(&waiverPath, "waivers", "", "JSON list of signed waivers [{gate,match,reason,by}]")
+	c.Flags().StringVar(&widthBasis, "width-basis", "net", widthBasisHelp)
 	return c
 }
 
@@ -582,3 +608,67 @@ func checkIntentLengths(in *designIntent, tracks []specctra.Track) ([]string, in
 	}
 	return fails, len(keys)
 }
+
+// segmentWidthNeed returns, per routed track, the IPC-2221 width its own
+// worst simulated current needs (× 1.2 margin, intent copper weights and
+// allowed rise). Only tracks carrying less than half their net's current
+// get a per-segment requirement; trunks keep the net's (ok=false).
+func segmentWidthNeed(in *designIntent, res *postsim.Result) func(specctra.Track) (float64, bool) {
+	outerOz, innerOz, rise := 1.0, 0.5, 10.0
+	if c := in.Copper; c != nil {
+		if c.OuterOz > 0 {
+			outerOz = c.OuterOz
+		}
+		if c.InnerOz > 0 {
+			innerOz = c.InnerOz
+		}
+		if c.TempRiseC > 0 {
+			rise = c.TempRiseC
+		}
+	}
+	layerID := map[string]int{}
+	if res.Stackup != nil {
+		for _, l := range res.Stackup.Layers {
+			layerID[l.Name] = l.ID
+		}
+	}
+	type seg struct {
+		layer int
+		a, b  [2]float64
+		amps  float64
+	}
+	byNet := map[string][]seg{}
+	netAmps := map[string]float64{}
+	for _, n := range res.Nets {
+		netAmps[strings.ToUpper(n.Net)] = n.CurrentA
+		for _, sg := range n.AllSegments {
+			byNet[strings.ToUpper(n.Net)] = append(byNet[strings.ToUpper(n.Net)], seg{layerID[sg.Layer], [2]float64{sg.A.X, sg.A.Y}, [2]float64{sg.B.X, sg.B.Y}, sg.CurrentA})
+		}
+	}
+	return func(t specctra.Track) (float64, bool) {
+		key := strings.ToUpper(t.Net)
+		if in.Nets[t.Net] != nil && in.Nets[t.Net].CurrentA > netAmps[key] {
+			netAmps[key] = in.Nets[t.Net].CurrentA
+		}
+		a, b := [2]float64{t.X1, t.Y1}, [2]float64{t.X2, t.Y2}
+		amps, found := 0.0, false
+		for _, sg := range byNet[key] {
+			if sg.layer != t.Layer {
+				continue
+			}
+			if segDist(sg.a, a, b) <= specctra.MatchTolMil && segDist(sg.b, a, b) <= specctra.MatchTolMil {
+				amps, found = math.Max(amps, sg.amps), true
+			}
+		}
+		if !found || amps >= 0.5*netAmps[key] {
+			return 0, false
+		}
+		oz := outerOz
+		if t.Layer >= 15 {
+			oz = innerOz
+		}
+		return pcbauto.TraceWidthForCurrent(amps*1.2, rise, oz, t.Layer >= 15), true
+	}
+}
+
+const widthBasisHelp = "intent-widths requirement: net (every track carries the net's intent current) | segment (a track carrying < 50 % of the net current per post-layout sim needs only the IPC width of its own current × 1.2, never below widthMil.min)"
