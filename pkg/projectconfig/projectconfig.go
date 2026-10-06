@@ -67,7 +67,7 @@ type Manual struct {
 	Name string `json:"name,omitempty"`
 	// Doc is the PCB document uuid this config describes. Out is written
 	// only for that board (Gas Module V5: B's run overwrote A's manual).
-	Doc string `json:"doc,omitempty"`
+	Doc  string `json:"doc,omitempty"`
 	Lang string `json:"lang,omitempty"` // zh (default) | en
 }
 
