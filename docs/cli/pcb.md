@@ -41,7 +41,7 @@
 | 离线局部寻路 | `pcb route solve/check --board board.json --from request.json --out report.json` | 公共 Go 包 `pkg/pcbrouting`；TOP/BOTTOM 单层零过孔、直线/45°有界寻路。默认同时输出同名 SVG，显示整板障碍、搜索范围、路径线宽/净距和失败原因；`check` 另传 `--plan plan.json`，按独立需求重验；不连接编辑器、不是整板自动布线 |
 | 关键网先行 | `pcb route-critical` | P7.0 一条命令:电源按层数走 planes/pour → 差分对双源识别成对布线+skew 实测 → 自动 `track-lock` |
 | 逐焊盘铜路径核查 | `pcb net-path --from REF.PAD [--through REF.PAD] --to REF.PAD [--layer 1]` | 只读按支持的原始 pad shape + track/arc/via 构图；`--layer` 在受限图求路并排除物理过孔，回报 requestedLayer/连续路径/层/线宽/过孔数；未知焊盘几何、缺失 arc 回读或 ordered proof 的重叠铜返回 unknown/error，同网名不等于连通，铺铜/PLANE 明确排除 |
-| 外部自动布线 | `pcb export-dsn` / `import-autoroute` / `pcb autoroute` | Specctra DSN 往返(带禁布区注入),Freerouting 与编辑器原生自动布线均为可选替代,非必需;默认整板布线用 `pcb auto run` |
+| 外部自动布线 | `pcb export-dsn` / `import-autoroute` / `pcb autoroute [--router fastroute]` / `pcb dsn-fix` / `pcb ses-repair` | Specctra DSN 往返(带禁布区注入)。`dsn-fix` 离线修 EasyEDA 导出缺陷(类网名引号、缺失内层与层序、通孔焊盘内层形状、板边禁布带、可选 GND 平面、固定逃线);`ses-repair` 在导入后修层号 21/22→15/16、恢复颈缩线宽、补建 DSN 固定走线;`autoroute` 串起导出→修→布线→导入→修复→铺铜/保存/重载/DRC/逐焊盘对账。fastroute(GPLv3)只作外部进程,用户自装,见 [pcb-routing](../../.agents/skills/pcbpilot/references/pcb-routing.md#external-router-fastroute)。Freerouting 与编辑器原生自动布线同为可选;默认整板布线用 `pcb auto run` |
 | 拆线 | `pcb rip-up` | 按网/按范围拆 |
 | 锁定 | `pcb track-lock` | 手布关键线锁死,防被自动布线/pour-rebuild 冲掉 |
 

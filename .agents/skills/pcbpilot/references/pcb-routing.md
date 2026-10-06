@@ -106,7 +106,8 @@ this build (`pcb_Document.autoRouting` is undefined — see `docs/ecosystem-surv
 whole-board routing uses pcbpilot's built-in engine **`pcb auto run`** (see
 [`pcb-auto.md`](./pcb-auto.md); live-verified 2026-09-25 on the ESP32-S3 mini board: 30/30
 routed, native DRC clean). 布线方式见 [`design-flow.md`](./design-flow.md) P7：整板默认
-`pcb auto run`；稀疏短线可逐段或 `route-short`；EasyEDA 原生自动布线与外部 Freerouting 为可选替代。
+`pcb auto run`；稀疏短线可逐段或 `route-short`；EasyEDA 原生自动布线与外部 Freerouting /
+fastroute（`pcb autoroute --router fastroute`，见 [External router: fastroute](#external-router-fastroute)）为可选替代。
 完成后都按网回读并运行 DRC。
 
 - `pcb.line.create` — a copper **track** (导线): line segment on a copper layer
@@ -232,13 +233,81 @@ that "fixed" it were a red herring; the re-pour/recompute did the work.
 | via on a track's body (mid-segment) | ✅ |
 | pad ↔ track endpoint at pad center | ✅ |
 | net-bound FILL overlapping via + track | ✅ (works, but **not** required) |
-| pour (same net) flowing over via | ✅ (but pour reflow has its own traps — see pour section) |
+| pour (same net) flowing over via | ✅ 2026-07-07 (but pour reflow has its own traps — see pour section); ⚠️ 2026-10-06, 4-layer board, desktop 3.2.149: native DRC did **not** count a via touching only the pour as connected — route a track (see [fastroute](#external-router-fastroute)) |
 | via ON a pad | ⚠️ offset + stub anyway (a via centered on a pad is redundant, not a bond failure) |
 
 **Via-bridge SOP**: just route the hop with `pcb via-hop` — no bond fill needed. If DRC
 shows same-net (usually GND) Connection Errors after routing surgery, that's **stale
 pour connectivity**: run `pcb pour-rebuild`, let ratlines recompute, then re-judge — do
 **not** paper over it with fills.
+
+### External router: fastroute
+
+[fastroute](https://github.com/parisxmas/fastroute) is a Rust port of Freerouting (GPLv3). pcbpilot (MIT)
+only runs it as a separate process; it is never bundled, linked or downloaded by pcbpilot. Install it yourself:
+
+```bash
+scripts/install-fastroute.sh            # asks first; downloads one asset, checks SHA256SUMS.txt, installs ~/.local/bin/fastroute
+```
+
+Manual install (also Windows): download `fastroute-<ver>-<os>-<arch>.tar.gz` (Windows `.zip`) and `SHA256SUMS.txt`
+from the release page, compare `shasum -a 256 <asset>` (Windows `Get-FileHash <asset> -Algorithm SHA256`) with the
+asset's line, unpack, put `fastroute` on PATH or set `FASTROUTE_BIN` / pass `--fastroute-bin`.
+
+```bash
+pcbpilot pcb autoroute --router fastroute --rip-up --multi-start 8 \
+  --escapes escapes.json --sch-connectivity p1.json --sch-connectivity p2.json
+```
+
+Steps (stdout is one summary JSON, progress on stderr):
+
+1. `pcb export-dsn`, then the `pcb dsn-fix` repairs (`--raw-dsn` skips):
+   - class net names `'NET'` → `"NET"` (EasyEDA quotes with `'`, so every net-class width was ignored);
+   - inner layers missing from the export are added (seen: Inner1 of a 4-layer board) and the layers are
+     declared Top, Inner1..N, Bottom; the copper layer count comes from the live board;
+   - through-hole padstacks listing only Top/Bottom/InnerK get a shape on the missing inner layers;
+   - board-edge copper keep-out bands, one per outline edge and layer: `--edge-outer-mil 20`, `--edge-inner-mil 30`;
+   - GND routed as traces by default; `--gnd-plane [--plane-net GND]` declares the missing inner layer as a plane;
+   - `--escapes FILE`: fixed stub + via for pins the router cannot escape, e.g.
+     `[{"net":"GND","layer":"TopLayer","widthMil":10,"path":[[4776.1,313.9],[4710.65,313.9]],"via":true}]`
+     (mil, DSN layer names).
+2. fastroute with `--report --diagnose`, `--router.min_trace_width_um=152` (`--min-trace-um`), optional
+   `--multi-start`/`--max-time`; while connections stay unrouted, up to `--continue 2` more runs from the last
+   session (`--initial-session`). `--router '<cmd> {in} {out}'` keeps working for any other router.
+3. `--rip-up` removes unlocked routing first (the session already contains it), then the SES import and the
+   `pcb ses-repair` fixes (`--no-repair` skips):
+   - Inner1/Inner2 tracks land on layer ids 21/22 → recreated on 15/16 (the session's layer decides);
+   - neck-down widths are replaced by the net-rule width and collinear same-net pieces are merged keeping the
+     widest → the merged track is deleted and recreated piece by piece with the routed widths;
+   - the DSN's `(type fix)` wiring is not in the session → missing fixed tracks/vias are created.
+   New copper is created before the replaced track is deleted. Tracks no session segment explains are left and
+   listed under `unmatched`.
+4. pour rebuild → save → reload → pour rebuild → native DRC → `pad-net-diff.py` (needs `--sch-connectivity`,
+   one `sch connectivity` file per page of this board; otherwise reported as skipped).
+
+`pcb dsn-fix` and `pcb ses-repair` also run alone, for a manual round-trip or another router.
+
+**Via-to-pour connectivity.** In the 2026-10-06 run (desktop 3.2.149) native DRC did not count a via that only
+touched a same-net copper pour as connected. Do not depend on it: route every net, GND included, as tracks (the
+default). This differs from the 2026-07-07 truth table below; see the note there.
+
+Measured on a 4-layer 150 × 110 mm board (199 parts, 463 connections, fastroute 0.1.7, macOS arm64):
+
+| Run | Time |
+|---|---|
+| fastroute, first full route | about 131 s |
+| fastroute `--multi-start 8` | 510–566 s |
+| continuation runs (`--initial-session`) | closed the remaining connections |
+| `pcb auto run`, same board | 594–1840 s per variant |
+
+Final result of the manual run these commands automate: 463/463 routed, native DRC 0 violations, pad-net diff
+0 differences.
+
+Validation status: the manual flow was live-verified on that board. The automated commands are offline-verified:
+`dsn-fix` on the raw export of that board reproduces the hand-patched DSN (only keep-out shape and wire/via line
+order differ) and fastroute 0.1.7 routes it (3 unrouted after a 150 s cap, 1 after one 120 s continuation);
+the repair planner was replayed against that board's recorded session. `ses-repair` and the autoroute pipeline
+have not yet run against the live editor.
 
 ### Length constraints — differential pairs / equal-length groups (#176)
 

@@ -1,0 +1,91 @@
+(PCB "PCB1"
+  (parser
+    (host_cad "EasyEDA Pro")
+    (host_version "3.2.149.88089769")
+  )
+  (resolution mil 1000)
+  (structure
+    (boundary(path signal 0 1000 0 0 0 0 500 1000 500 1000 0 )
+    )
+    (via via0
+    )
+    (grid via   0.25)
+    (grid wire   0.25)
+    (grid place   0.25)
+    (rule(clear 6.03))
+    (rule(width 10.05))
+    (layer TopLayer
+      (type signal)
+    )
+    (layer BottomLayer
+      (type signal)
+    )
+    (layer Inner2
+      (type signal)
+    )
+
+    (keepout "region_keepout_1" (polygon signal 0 10 10 20 10 20 20 10 20 10 10))
+  )
+
+  (placement
+    (component u1
+      (place u1 0 0 front 0
+      )
+    )
+  )
+  (library
+    (image u1
+      (pin psmd smd1 100 100)
+      (pin pth th1 200 100)
+    )
+
+    (padstack via0
+      (shape(circle TopLayer 24))
+      (shape(circle BottomLayer 24))
+      (shape(circle Inner2 24))
+    )
+
+    (padstack psmd
+      (shape(polygon TopLayer 0.1 15.75 17.72 15.75 -17.72 -15.75 -17.72 -15.75 17.72 15.75 17.72))
+    )
+    (padstack pth
+      (shape(circle TopLayer 78.74 0 0))
+      (shape(circle BottomLayer 78.74 0 0))
+      (shape(circle Inner2 78.74 0 0))
+    )
+  )
+  (network
+    (net GND
+      (pins u1-smd1 u1-th1)
+    )
+    (class  ''
+      (circuit
+        (use_via via0)
+      )
+      (rule
+        (width 10)
+        (clearance 4.02)
+      )
+    )
+    (class +12V '+12V'
+      (circuit
+        (use_via via0)
+      )
+      (rule
+        (width 21.65)
+        (clearance 6)
+      )
+    )
+    (class GND 'GND'
+      (circuit
+        (use_via via0)
+      )
+      (rule
+        (width 21.65)
+        (clearance 6)
+      )
+    )
+  )
+  (wiring
+  )
+)

@@ -2866,118 +2866,12 @@ external router (Freerouting) would route under the antenna. The result reports
 	pcb.AddCommand(newPcbRefineCmd(cfg, &window, stdout, stderr))
 	// ── auto: offline electrical-aware engine (pkg/pcbauto) → apply playbook ──
 	pcb.AddCommand(newPcbAutoCmd(cfg, &window, stdout, stderr, pcb))
-	// ── autoroute: one-command Freerouting round-trip ────────────────────────
-	// export DSN → run an external Freerouting engine → import the routed SES → DRC.
-	// The engine is external (Freerouting needs Java 17+); decoupled via a command
-	// template so any router works. Without one configured it exports + stops
-	// (graceful degradation → route manually, then `pcb import-autoroute`).
-	{
-		var routerCmd string
-		var keep bool
-		var forceReason, forceUnsafeReason string
-		c := &cobra.Command{
-			Use:   "autoroute",
-			Short: "Auto-route the active PCB via an external Freerouting engine (DSN→route→SES→import→DRC)",
-			Long: `Orchestrate a DSN→route→SES→import→DRC round-trip. The routing ENGINE is
-external and pluggable (--router / FREEROUTING_CMD with {in}/{out}); we do NOT
-bundle one.
-
-NOTE — there is no built-in, no-popup, programmatically-callable autorouter today:
-  • eda.pcb_Document.autoRouting() is declared but @alpha / undefined at runtime.
-  • easyeda-pcb-router (official headless Freerouting) is a separate WS service you
-    must run yourself.
-  • the marketplace Freerouting extension can't be invoked from another extension.
-So this command needs an external engine YOU provide, and is SUPERSEDED once a
-native autoRouting() API ships. The building blocks (pcb export-dsn /
-import-autoroute / snapshot) work regardless.
-
-  pcbpilot pcb autoroute --router '<your-dsn→ses-router-cmd> {in} {out}'
-
-Without a router configured, autoroute exports the DSN and stops — route it
-externally, then run 'pcbpilot pcb import-autoroute <file.ses>'.
-
-PREREQUISITE: keep-out zones (antenna / board
-edge) MUST be in the DSN, else the router will route under the antenna. Verify the
-exported DSN contains keepout entries before trusting the result.`,
-			Args: cobra.NoArgs,
-			RunE: func(cmd *cobra.Command, args []string) error {
-				// Workflow stage state is historical diagnostic data only. Autoroute
-				// proceeds from the live board and its factual preflights below.
-				// 1. Export DSN, capture the persisted file path.
-				res, err := dispatchCapture(cfg, "pcb.export.dsn", window, map[string]any{}, stdout)
-				if err != nil {
-					return err
-				}
-				dsnPath := ""
-				for _, a := range res.Artifacts {
-					if a.Path != "" {
-						dsnPath = a.Path
-						break
-					}
-				}
-				if dsnPath == "" {
-					return fmt.Errorf("export-dsn returned no file (PCB empty or no nets? run `pcb import-changes` first)")
-				}
-				fmt.Fprintf(stderr, "DSN exported: %s\n", dsnPath)
-
-				tmpl := routerCmd
-				if tmpl == "" {
-					tmpl = os.Getenv("FREEROUTING_CMD")
-				}
-				if tmpl == "" {
-					fmt.Fprintf(stderr, "no --router / FREEROUTING_CMD set — DSN exported, stopping.\n"+
-						"  route it externally (Freerouting), then: pcbpilot pcb import-autoroute <file.ses>\n")
-					return nil
-				}
-
-				// 2. Run the external router: {in}=DSN, {out}=SES.
-				sesPath := strings.TrimSuffix(dsnPath, ".dsn") + ".ses"
-				runStr := strings.NewReplacer("{in}", dsnPath, "{out}", sesPath).Replace(tmpl)
-				fmt.Fprintf(stderr, "routing: %s\n", runStr)
-				routerCtx, cancelRouter := context.WithTimeout(context.Background(), 10*time.Minute)
-				defer cancelRouter()
-				if err := runExternalRouter(routerCtx, runStr, stderr); err != nil {
-					if routerCtx.Err() != nil {
-						return fmt.Errorf("external router timed out after 10m: %w", routerCtx.Err())
-					}
-					return fmt.Errorf("external router failed: %w", err)
-				}
-				if _, err := os.Stat(sesPath); err != nil {
-					return fmt.Errorf("router produced no SES at %s (check the command's {out})", sesPath)
-				}
-				if !keep {
-					defer func() { _ = os.Remove(sesPath) }()
-				}
-
-				// 3. Import the routed SES.
-				data, err := os.ReadFile(sesPath)
-				if err != nil {
-					return fmt.Errorf("read SES: %w", err)
-				}
-				fmt.Fprintf(stderr, "importing SES (%d bytes) → tracks/vias\n", len(data))
-				if err := dispatch(cfg, "pcb.import_autoroute", window, map[string]any{
-					"fileBase64": base64.StdEncoding.EncodeToString(data),
-					"format":     "ses",
-					"fileName":   filepath.Base(sesPath),
-				}, stdout, stderr); err != nil {
-					return err
-				}
-
-				// 4. DRC the result.
-				//
-				// 上一步刚导入整版铜，这一步 DRC 用于即时定位问题；若带 staleRisk，
-				// 保存并 reload 后重跑 `pcbpilot pcb drc` 才是权威判据。
-				fmt.Fprintln(stderr, "--- DRC after routing ---")
-				return dispatch(staleReadOptIn(cfg, "autoroute 写后回读:对刚导入的 SES 走线做收尾 DRC"),
-					"pcb.drc.check", window, nil, stdout, stderr)
-			},
-		}
-		c.Flags().StringVar(&routerCmd, "router", "", "external router command with {in}/{out} (or FREEROUTING_CMD env)")
-		c.Flags().BoolVar(&keep, "keep", false, "keep the intermediate SES file")
-		c.Flags().StringVar(&forceReason, "force", "", "deprecated compatibility option; workflow stages no longer gate routing")
-		c.Flags().StringVar(&forceUnsafeReason, "force-unsafe", "", "deprecated compatibility option; workflow stages no longer gate routing")
-		pcb.AddCommand(c)
-	}
+	// ── autoroute: one-command external-router round-trip ────────────────
+	// export DSN → fix → route (fastroute preset or a command template) →
+	// import SES → repair → pour/save/reload/DRC. See cmd_pcb_fastroute.go.
+	pcb.AddCommand(newPcbAutorouteCmd(cfg, &window, stdout, stderr))
+	pcb.AddCommand(newPcbDsnFixCmd(stdout, stderr))
+	pcb.AddCommand(newPcbSesRepairCmd(cfg, &window, stdout, stderr))
 
 	// ── auto-place ────────────────────────────────────────────────────────
 	// Module-aware heuristic placement (daemon-side; see pcb_autoplace.go).

@@ -1,0 +1,269 @@
+package specctra
+
+import (
+	"math"
+	"os"
+	"strings"
+	"testing"
+)
+
+func readFixture(t *testing.T, name string) string {
+	t.Helper()
+	b, err := os.ReadFile("testdata/" + name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+func TestFixDSN_QuotesClassNetNames(t *testing.T) {
+	out, rep, err := FixDSN(readFixture(t, "easyeda-export.dsn"), FixOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.QuotedClasses != 2 {
+		t.Fatalf("QuotedClasses = %d, want 2", rep.QuotedClasses)
+	}
+	for _, want := range []string{`(class +12V "+12V"`, `(class GND "GND"`, `(class  ''`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q", want)
+		}
+	}
+	if strings.Contains(out, `'GND'`) || strings.Contains(out, `'+12V'`) {
+		t.Error("single-quoted class net name survived")
+	}
+}
+
+func TestFixDSN_LayersInStackOrderWithMissingInner(t *testing.T) {
+	out, rep, err := FixDSN(readFixture(t, "easyeda-export.dsn"), FixOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(rep.LayerOrder, ","); got != "TopLayer,Inner1,Inner2,BottomLayer" {
+		t.Fatalf("LayerOrder = %s", got)
+	}
+	if strings.Join(rep.AddedLayers, ",") != "Inner1" {
+		t.Fatalf("AddedLayers = %v", rep.AddedLayers)
+	}
+	iTop, i1, i2, iBot := strings.Index(out, "(layer TopLayer"), strings.Index(out, "(layer Inner1"), strings.Index(out, "(layer Inner2"), strings.Index(out, "(layer BottomLayer")
+	if !(iTop < i1 && i1 < i2 && i2 < iBot) {
+		t.Fatalf("layer declarations out of order: %d %d %d %d", iTop, i1, i2, iBot)
+	}
+	if strings.Contains(out, "(plane") {
+		t.Error("plane emitted without PlaneNet")
+	}
+	if _, err := parseSexpr(out); err != nil {
+		t.Fatalf("patched DSN no longer parses: %v", err)
+	}
+}
+
+func TestFixDSN_PlaneOption(t *testing.T) {
+	out, rep, err := FixDSN(readFixture(t, "easyeda-export.dsn"), FixOptions{PlaneNet: "GND"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.PlaneNet != "GND" {
+		t.Fatalf("PlaneNet = %q", rep.PlaneNet)
+	}
+	if !strings.Contains(out, "(layer Inner1\n      (type power)") {
+		t.Error("missing inner layer not declared as power")
+	}
+	if !strings.Contains(out, "(plane GND (polygon Inner1 0 1000 0 0 0 0 500 1000 500 1000 0))") {
+		t.Error("GND plane over the board outline not emitted")
+	}
+}
+
+func TestFixDSN_PatchesThroughHolePadstacksOnly(t *testing.T) {
+	out, rep, err := FixDSN(readFixture(t, "easyeda-export.dsn"), FixOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.PatchedPadstacks != 2 { // via0 + pth; psmd is SMD
+		t.Fatalf("PatchedPadstacks = %d, want 2", rep.PatchedPadstacks)
+	}
+	for _, want := range []string{
+		"      (shape(circle Inner2 24))\n      (shape(circle Inner1 24))\n",
+		"      (shape(circle Inner2 78.74 0 0))\n      (shape(circle Inner1 78.74 0 0))\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q", want)
+		}
+	}
+	smd := out[strings.Index(out, "(padstack psmd"):strings.Index(out, "(padstack pth")]
+	if strings.Contains(smd, "Inner") {
+		t.Error("SMD padstack got an inner shape")
+	}
+	// Idempotent: a second pass changes nothing more.
+	again, rep2, err := FixDSN(out, FixOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep2.PatchedPadstacks != 0 || rep2.QuotedClasses != 0 || len(rep2.AddedLayers) != 0 || again != out {
+		t.Errorf("second pass not a no-op: %+v", rep2)
+	}
+}
+
+func TestFixDSN_EdgeKeepouts(t *testing.T) {
+	out, rep, err := FixDSN(readFixture(t, "easyeda-export.dsn"), FixOptions{EdgeOuterMil: 20, EdgeInnerMil: 30})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.EdgeKeepouts != 16 { // 4 edges x 4 layers
+		t.Fatalf("EdgeKeepouts = %d, want 16", rep.EdgeKeepouts)
+	}
+	// Bottom edge (1000,0)->(0,0) of a clockwise outline: band goes inward (+y).
+	for _, want := range []string{
+		`(keepout "pcbpilot_edge_TopLayer_0" (polygon TopLayer 0 1000 0 0 0 0 20 1000 20 1000 0))`,
+		`(keepout "pcbpilot_edge_Inner1_0" (polygon Inner1 0 1000 0 0 0 0 30 1000 30 1000 0))`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %s", want)
+		}
+	}
+	if !strings.Contains(out, `"region_keepout_1"`) {
+		t.Error("existing keepout dropped")
+	}
+}
+
+func TestFixDSN_FixedEscapes(t *testing.T) {
+	esc := []Escape{{Net: "GND", Layer: "TopLayer", WidthMil: 10, Path: [][2]float64{{4776.1, 313.9}, {4710.65, 313.9}}, Via: true}}
+	out, rep, err := FixDSN(readFixture(t, "easyeda-export.dsn"), FixOptions{Escapes: esc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Escapes != 1 {
+		t.Fatalf("Escapes = %d", rep.Escapes)
+	}
+	for _, want := range []string{
+		"(wire (path TopLayer 10 4776.1 313.9 4710.65 313.9) (net GND) (type fix))",
+		"(via via0 4710.65 313.9 (net GND) (type fix))",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %s", want)
+		}
+	}
+	fixed, err := ParseFixedWiring(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fixed.Segments) != 1 || len(fixed.Vias) != 1 || fixed.Vias[0].Net != "GND" {
+		t.Fatalf("fixed wiring read back = %+v", fixed)
+	}
+	if d := ViaDiameterMil(out, "via0"); d != 24 {
+		t.Errorf("via0 diameter = %v, want 24", d)
+	}
+	if _, _, err := FixDSN(readFixture(t, "easyeda-export.dsn"), FixOptions{Escapes: []Escape{{Net: "GND", Layer: "Inner9", WidthMil: 10, Path: [][2]float64{{0, 0}, {1, 0}}}}}); err == nil {
+		t.Error("escape on an undeclared layer accepted")
+	}
+}
+
+func TestParseSES_RecordedFastrouteSession(t *testing.T) {
+	w, err := ParseSES(readFixture(t, "fastroute-excerpt.ses"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// GND: 1 + 1 + 2 segments; CANL: 2 + 3; RS_C1N (quoted name): 1.
+	if len(w.Segments) != 10 {
+		t.Fatalf("segments = %d, want 10", len(w.Segments))
+	}
+	if len(w.Vias) != 1 || w.Vias[0].At != [2]float64{4551.69, 180.645} {
+		t.Fatalf("vias = %+v", w.Vias)
+	}
+	last := w.Segments[len(w.Segments)-1]
+	if last.Net != "RS_C1N" || last.WidthMil != 6 {
+		t.Fatalf("quoted net segment = %+v", last)
+	}
+}
+
+// The importer merges the 21.65 mil GND trunk and the 11.02 mil neck-down
+// piece into one 21.65 mil track and moves Inner1/Inner2 tracks to 21/22.
+func TestPlanImportRepair_LayersAndNeckDownWidths(t *testing.T) {
+	w, err := ParseSES(readFixture(t, "fastroute-excerpt.ses"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	imported := []Track{
+		{ID: "merged", Net: "GND", Layer: 1, X1: 4540.309, Y1: 727.325, X2: 4776.095, Y2: 727.325, Width: 21.65},
+		{ID: "in1", Net: "GND", Layer: 21, X1: 1920.51, Y1: 2245.175, X2: 1928.93, Y2: 2245.175, Width: 21.65},
+		{ID: "in2", Net: "CANL", Layer: 22, X1: 296.12, Y1: 2370.09, X2: 536.21, Y2: 2130, Width: 6},
+		{ID: "ok", Net: "CANL", Layer: 1, X1: 625, Y1: 2130, X2: 524.113, Y2: 2130, Width: 6},
+		{ID: "stray", Net: "CANL", Layer: 1, X1: 0, Y1: 0, X2: 50, Y2: 0, Width: 6},
+		{ID: "locked", Net: "GND", Layer: 22, X1: 0, Y1: 0, X2: 50, Y2: 0, Width: 6, Locked: true},
+	}
+	plan := PlanImportRepair(imported, w)
+	if plan.LayerMoves != 2 || plan.WidthRestores != 1 || len(plan.Fixes) != 3 {
+		t.Fatalf("plan = %+v", plan)
+	}
+	byID := map[string]TrackFix{}
+	for _, f := range plan.Fixes {
+		byID[f.Delete.ID] = f
+	}
+	if f := byID["in1"]; len(f.Create) != 1 || f.Create[0].Layer != 15 || f.Create[0].Width != 21.65 {
+		t.Errorf("Inner1 fix = %+v", f)
+	}
+	if f := byID["in2"]; len(f.Create) != 1 || f.Create[0].Layer != 16 || f.Create[0].Width != 6 {
+		t.Errorf("Inner2 fix = %+v", f)
+	}
+	m := byID["merged"]
+	if len(m.Create) != 2 {
+		t.Fatalf("merged track recreated as %d pieces, want 2: %+v", len(m.Create), m.Create)
+	}
+	trunk, neck := m.Create[0], m.Create[1]
+	if trunk.Width != 21.65 || math.Abs(trunk.X2-4724.36) > 1e-6 || trunk.Layer != 1 {
+		t.Errorf("trunk = %+v", trunk)
+	}
+	if math.Abs(neck.Width-11.018) > 1e-9 || neck.X1 != trunk.X2 || neck.X2 != 4776.095 {
+		t.Errorf("neck-down = %+v", neck)
+	}
+	if len(plan.Unmatched) != 1 || plan.Unmatched[0].ID != "stray" {
+		t.Errorf("unmatched = %+v", plan.Unmatched)
+	}
+}
+
+// fastroute can emit one segment twice at two widths (recorded: GND
+// 21.65 and 16.236 mil on the same ends). A track that is exactly one of
+// them was imported faithfully and must not be rewritten.
+func TestPlanImportRepair_FaithfulDuplicateUntouched(t *testing.T) {
+	w := &Wiring{Segments: []Segment{
+		{Net: "GND", Layer: "TopLayer", WidthMil: 21.65, A: [2]float64{1089.058, 1462.56}, B: [2]float64{1105, 1462.56}},
+		{Net: "GND", Layer: "TopLayer", WidthMil: 16.236, A: [2]float64{1105, 1462.56}, B: [2]float64{1089.058, 1462.56}},
+	}}
+	tracks := []Track{
+		{ID: "wide", Net: "GND", Layer: 1, X1: 1089.058, Y1: 1462.56, X2: 1105, Y2: 1462.56, Width: 21.65},
+		{ID: "narrow", Net: "GND", Layer: 1, X1: 1105, Y1: 1462.56, X2: 1089.058, Y2: 1462.56, Width: 16.236},
+	}
+	if plan := PlanImportRepair(tracks, w); len(plan.Fixes) != 0 {
+		t.Fatalf("faithful duplicate rewritten: %+v", plan.Fixes)
+	}
+}
+
+// Recorded: a Top GND stub lies on the same line as an Inner1 GND trunk, so
+// a trunk imported on layer 21 matches segments on two layers.
+func TestPlanImportRepair_WrongLayerWithOverlapOnAnotherLayer(t *testing.T) {
+	w := &Wiring{Segments: []Segment{
+		{Net: "GND", Layer: "TopLayer", WidthMil: 21.65, A: [2]float64{4855, 655.65}, B: [2]float64{4855, 589.525}},
+		{Net: "GND", Layer: "Inner1", WidthMil: 21.65, A: [2]float64{4855, 556.75}, B: [2]float64{4855, 655.65}},
+	}}
+	plan := PlanImportRepair([]Track{{ID: "t", Net: "GND", Layer: 21, X1: 4855, Y1: 556.75, X2: 4855, Y2: 655.65, Width: 21.65}}, w)
+	if len(plan.Fixes) != 1 || len(plan.Fixes[0].Create) != 1 || plan.Fixes[0].Create[0].Layer != 15 {
+		t.Fatalf("plan = %+v", plan)
+	}
+}
+
+func TestPlanFixedWiring_SkipsWhatIsAlreadyOnBoard(t *testing.T) {
+	fixed := &Wiring{
+		Segments: []Segment{
+			{Net: "GND", Layer: "TopLayer", WidthMil: 10, A: [2]float64{4776.1, 313.9}, B: [2]float64{4710.65, 313.9}},
+			{Net: "GND", Layer: "TopLayer", WidthMil: 10, A: [2]float64{4776.1, 412.4}, B: [2]float64{4710.65, 412.4}},
+		},
+		Vias: []Via{{Net: "GND", At: [2]float64{4710.65, 313.9}}, {Net: "GND", At: [2]float64{4710.65, 412.4}}},
+	}
+	tracks := []Track{{Net: "GND", Layer: 1, X1: 4710.65, Y1: 313.9, X2: 4776.1, Y2: 313.9, Width: 10}}
+	nt, nv := PlanFixedWiring(fixed, tracks, [][2]float64{{4710.65, 313.9}}, []string{"GND"}, 24)
+	if len(nt) != 1 || nt[0].Y1 != 412.4 {
+		t.Errorf("tracks to create = %+v", nt)
+	}
+	if len(nv) != 1 || nv[0].Y != 412.4 || nv[0].DiameterMil != 24 {
+		t.Errorf("vias to create = %+v", nv)
+	}
+}

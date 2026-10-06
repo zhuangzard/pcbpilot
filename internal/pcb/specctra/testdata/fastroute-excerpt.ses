@@ -1,0 +1,84 @@
+(session "fixture"
+  (base_design "fixture")
+  (placement
+    (resolution mil 1000)
+    (component u1
+      (place u1 0 0 front 0)
+    )
+  )
+  (was_is
+  )
+  (routes
+    (resolution mil 1000)
+    (parser
+      (host_cad "EasyEDA Pro")
+      (host_version "3.2.149.88089769")
+    )
+    (library_out
+      (padstack via0
+        (shape
+          (circle TopLayer 24000 0 0)
+        )
+        (shape
+          (circle Inner1 24000 0 0)
+        )
+        (shape
+          (circle Inner2 24000 0 0)
+        )
+        (shape
+          (circle BottomLayer 24000 0 0)
+        )
+      )
+    )
+    (network_out
+      (net GND
+        (via via0 4551690 180645
+        )
+        (wire
+          (path Inner1 21650
+            1920510 2245175
+            1928930 2245175
+          )
+        )
+        (wire
+          (path TopLayer 21650
+            4540309 727325
+            4724360 727325
+          )
+        )
+        (wire
+          (path TopLayer 11018
+            4724360 727325
+            4776095 727325
+            4776100 727320
+          )
+        )
+      )
+      (net CANL
+        (wire
+          (path Inner2 6000
+            296120 2370090
+            536210 2130000
+            625000 2130000
+          )
+        )
+        (wire
+          (path TopLayer 6000
+            625000 2130000
+            524113 2130000
+            480000 2085887
+            480000 2082360
+          )
+        )
+      )
+      (net "RS_C1N"
+        (wire
+          (path TopLayer 6000
+            100000 100000
+            120000 100000
+          )
+        )
+      )
+    )
+  )
+)
