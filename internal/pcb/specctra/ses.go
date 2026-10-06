@@ -26,6 +26,9 @@ type Via struct {
 type Wiring struct {
 	Segments []Segment `json:"segments"`
 	Vias     []Via     `json:"vias"`
+	// Dots are single-point paths the router wrote (no length): skipped,
+	// listed for the report ("net layer (x,y) width").
+	Dots []string `json:"dots,omitempty"`
 }
 
 // ParseSES reads the routed wiring of a Specctra session file. Coordinates
@@ -180,6 +183,19 @@ func addPath(w *Wiring, net string, path *node, scale toMil) error {
 		return fmt.Errorf("net %s: wire without (path)", net)
 	}
 	a := path.atoms()
+	if len(a) == 4 {
+		// A one-point path (fastroute 0.1.7, Gas Module V5 B v22: +12V
+		// "(path Inner1 21650 3052804 2435932)") has no length: a dot inside
+		// copper the session already carries. Skip it, keep a note.
+		x, err1 := strconv.ParseFloat(a[2], 64)
+		y, err2 := strconv.ParseFloat(a[3], 64)
+		wd, err3 := strconv.ParseFloat(a[1], 64)
+		if err1 != nil || err2 != nil || err3 != nil {
+			return fmt.Errorf("net %s: malformed path", net)
+		}
+		w.Dots = append(w.Dots, fmt.Sprintf("%s %s (%.3f,%.3f) %.2f mil", net, a[0], scale(x), scale(y), scale(wd)))
+		return nil
+	}
 	if len(a) < 6 || len(a)%2 != 0 {
 		return fmt.Errorf("net %s: malformed path", net)
 	}

@@ -380,3 +380,29 @@ func TestPlanReconcileCoveredStub(t *testing.T) {
 		t.Fatalf("uncovered stub: %+v", r.MissingTracks)
 	}
 }
+
+// Gas Module V5 B v22: fastroute 0.1.7 wrote a one-point +12V path at a
+// T-junction of three 41.34 mil tracks; ses-repair aborted ("malformed
+// path"). The dot is skipped and listed; the tracks parse.
+func TestParseSESOnePointPath(t *testing.T) {
+	src := `(session "b" (base_design "b")
+  (routes (resolution mil 1000)
+    (network_out
+      (net "+12V"
+        (wire (path Inner1 41340 3052804 2435932 3080562 2463690 3080562 2502360))
+        (wire (path Inner1 41340 3185227 2253717 3185227 2303508 3052804 2435932))
+        (wire (path Inner1 21650
+            3052804 2435932
+          ))
+      ))))`
+	w, err := ParseSES(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(w.Segments) != 4 || len(w.Dots) != 1 || !strings.Contains(w.Dots[0], "+12V Inner1 (3052.804,2435.932) 21.65 mil") {
+		t.Fatalf("segments %d dots %v", len(w.Segments), w.Dots)
+	}
+	if _, err := ParseSES(strings.Replace(src, "3052804 2435932\n", "3052804\n", 1)); err == nil {
+		t.Fatal("a three-atom path must stay an error")
+	}
+}
