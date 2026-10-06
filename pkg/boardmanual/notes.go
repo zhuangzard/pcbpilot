@@ -23,6 +23,7 @@ type Notes struct {
 
 	// PartLabels labels other parts on the board picture (ref → text, e.g. "U8": "CPLD").
 	PartLabels map[string]string   `json:"partLabels,omitempty"`
+	Mechanical *MechNotes          `json:"mechanical,omitempty"`
 	Power      PowerNotes          `json:"power,omitempty"`
 	Connectors map[string]ConnNote `json:"connectors,omitempty"`
 	Cautions   []string            `json:"cautions,omitempty"`
@@ -38,7 +39,38 @@ type Notes struct {
 	Bringup         []BringupStep  `json:"bringup,omitempty"`
 	Software        *Software      `json:"software,omitempty"`
 	Troubleshooting []Trouble      `json:"troubleshooting,omitempty"`
-	TODO            []string       `json:"todo,omitempty"`
+	// OpenItems are the tracked open items (未决项): the only place where an
+	// unresolved point may be written; any "TODO" elsewhere fails the
+	// board-manual gate.
+	OpenItems []string `json:"openItems,omitempty"`
+}
+
+// MechNotes completes the mechanical section (what a dump does not hold).
+type MechNotes struct {
+	// ThicknessMm is the finished board thickness (default: the intent stackup text).
+	ThicknessMm float64 `json:"thicknessMm,omitempty"`
+	// Heights are verified part heights above the board per side.
+	Heights []HeightNote `json:"heights,omitempty"`
+	// Mating is the mating direction per connector (ref → text).
+	Mating map[string]string `json:"mating,omitempty"`
+	// MountingHole describes the mounting holes (plating, function) when the dump cannot.
+	MountingHole *HoleNote `json:"mountingHole,omitempty"`
+	Notes        []string  `json:"notes,omitempty"`
+}
+
+// HeightNote is one part height.
+type HeightNote struct {
+	Ref      string  `json:"ref"`
+	Side     string  `json:"side,omitempty"` // top (default) | bottom
+	HeightMm float64 `json:"heightMm"`
+	Source   string  `json:"source"`
+}
+
+// HoleNote is human information about the mounting holes.
+type HoleNote struct {
+	Function string `json:"function,omitempty"`
+	Plated   string `json:"plated,omitempty"`
+	Screw    string `json:"screw,omitempty"`
 }
 
 // PowerNotes is the power-input description and per-rail measurement notes.

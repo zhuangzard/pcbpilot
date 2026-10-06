@@ -96,7 +96,8 @@ func defaultPourLayers(copper int) (gnd []int, power int) {
 
 func newPcbAutoRouteCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {
 	var o autorouteOpts
-	var playbook, outDir, gndNet, powerNet, simPath, scriptPath, widenCSV, waiverPath, widthBasis, candDir string
+	var playbook, outDir, gndNet, powerNet, simPath, scriptPath, widenCSV, waiverPath, widthBasis, candDir, projectConfig string
+	var noManual bool
 	var trialTime time.Duration
 	var gndLayers []int
 	var powerLayer int
@@ -148,6 +149,9 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 			}
 			waivers, err := loadWaivers(waiverPath)
 			if err != nil {
+				return err
+			}
+			if err := checkNoManual(noManual, waivers); err != nil {
 				return err
 			}
 			if err := os.MkdirAll(outDir, 0o755); err != nil {
@@ -322,7 +326,8 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 				unresolved = rep.Unresolved
 			}
 			pass, err := runQualityGates(cfg, *window, qualityGateOpts{intent: o.intentPath, sim: simPath, sch: schFiles, script: scriptPath,
-				outDir: outDir, waivers: waivers, sessionChecked: true, unresolved: unresolved, widthBasis: widthBasis, source: "live board after pcb auto route"}, summary, stderr)
+				outDir: outDir, waivers: waivers, sessionChecked: true, unresolved: unresolved, widthBasis: widthBasis, source: "live board after pcb auto route",
+				noManual: noManual, projectConfig: projectConfig}, summary, stderr)
 			if err != nil {
 				return finish(err)
 			}
@@ -354,6 +359,7 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 	c.Flags().StringVar(&widthBasis, "width-basis", "segment", widthBasisHelp)
 	c.Flags().StringVar(&waiverPath, "waivers", "", "JSON list of signed waivers [{gate,match,reason,by}]: a failing gate passes only when every failing item matches one")
 	c.Flags().StringVar(&simPath, "sim", "", "sim.json (pcbpilot sim power): run sim post-layout on the finished live board")
+	addManualFlags(c, &noManual, &projectConfig)
 	return c
 }
 

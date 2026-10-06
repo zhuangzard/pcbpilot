@@ -376,3 +376,147 @@ func TestNatLess(t *testing.T) {
 		t.Error("natural sort")
 	}
 }
+
+// completeNotes passes the board-manual gate on testBoard.
+const completeNotes = `{"title":"Demo",
+ "power":{"input":{"connector":"J1","polarity":"中心正","recommendedSupply":"12 V / 3 A"},
+   "rails":{"VIN":{"tolerance":"±5 %"},"+3V3":{"tolerance":"±2 %"}}},
+ "mechanical":{"thicknessMm":1.6,"heights":[{"ref":"J1","heightMm":11,"source":"datasheet"}]},
+ "connectors":{
+  "J1":{"name":"电源","purpose":"电源入口","connectsTo":"12 V 适配器","systemRole":"唯一电源","usage":["插上"],"cautions":["中心正"],"pinNotes":{"1":"+","2":"GND"}},
+  "J2":{"name":"串口","purpose":"串口","connectsTo":"PC","systemRole":"命令","usage":["115200"],"cautions":["RS232"],"pinNotes":{"1":"TX","2":"3V3","3":"NC"},
+        "docPins":{"1":{"net":"TX"}}},
+  "JP1":{"name":"配置","purpose":"跳线","connectsTo":"跳线帽","systemRole":"配置","usage":["插帽"],"cautions":["断电"],"pinNotes":{"1":"CFG","2":"GND"}}},
+ "io":[{"signal":"TX","connector":"J2","pin":"1","level":"3.3 V"}],
+ "firmwares":["fw"],
+ "leds":[{"ref":"D1","name":"PWR","net":"LED0_A","hardware":"上电亮"},{"ref":"D2","name":"RUN","net":"LED1_A","modes":{"fw":"运行闪烁"}}],
+ "openItems":["TODO 允许出现在未决项里"]}`
+
+func gateItems(t *testing.T, notes string) []string {
+	t.Helper()
+	in := testInputs(t, notes)
+	in.Intent = nil // no hazardous domain needed here
+	return GateCheck(Build(in), in.Notes)
+}
+
+func TestGateFailureModes(t *testing.T) {
+	if items := gateItems(t, completeNotes); len(items) != 0 {
+		t.Fatalf("complete notes fail the gate: %v", items)
+	}
+	b, _ := ParseBoard([]byte(testBoard))
+	if items := GateCheck(Build(Inputs{Board: b}), nil); len(items) != 1 || !strings.Contains(items[0], "notes file missing") {
+		t.Errorf("missing notes: %v", items)
+	}
+	cases := []struct{ name, from, to, want string }{
+		{"purpose", `"purpose":"串口",`, ``, "connector J2: missing 是什么"},
+		{"cautions", `"cautions":["断电"],`, ``, "connector JP1: missing 注意"},
+		{"pin note", `"pinNotes":{"1":"TX","2":"3V3","3":"NC"}`, `"pinNotes":{"1":"TX","2":"3V3"}`, "pin(s) 3 have no"},
+		{"led", `"modes":{"fw":"运行闪烁"}`, `"modes":{}`, "LED D2: no meaning"},
+		{"power", `"polarity":"中心正",`, ``, "power input: missing"},
+		{"todo", `"connectsTo":"PC"`, `"connectsTo":"TODO"`, "TODO left in Connectors"},
+		{"doc net", `"docPins":{"1":{"net":"TX"}}`, `"docPins":{"1":{"net":"TXD"}}`, "notes vs board J2.1"},
+		{"connector not on board", `"JP1":{`, `"J9":{"name":"x"},"JP1":{`, "notes vs board J9"},
+		{"heights", `"heights":[{"ref":"J1","heightMm":11,"source":"datasheet"}]`, `"heights":[]`, "no part heights"},
+		{"thickness", `"thicknessMm":1.6,`, ``, "board thickness unknown"},
+	}
+	for _, tc := range cases {
+		if !strings.Contains(completeNotes, tc.from) {
+			t.Fatalf("%s: fixture lacks %q", tc.name, tc.from)
+		}
+		items := gateItems(t, strings.Replace(completeNotes, tc.from, tc.to, 1))
+		if !strings.Contains(strings.Join(items, "\n"), tc.want) {
+			t.Errorf("%s: want %q in %v", tc.name, tc.want, items)
+		}
+	}
+}
+
+func TestMechanical(t *testing.T) {
+	in := testInputs(t, completeNotes)
+	m := Build(in)
+	ms := m.Mech
+	if ms.WidthMM != 40 || ms.HeightMM != 30 || len(ms.Holes) != 1 || ms.Holes[0].Drill != 3.2 || ms.Holes[0].Screw != "M3" {
+		t.Errorf("mech %+v holes %+v", ms, ms.Holes)
+	}
+	if ms.Thickness != "1.6 mm" || len(ms.ConnPos) != 3 || ms.Scale != "1:1" {
+		t.Errorf("mech %+v", ms)
+	}
+	if _, root := svgStats(t, ms.SVG); root == nil || !strings.Contains(ms.SVG, `width="`) || !strings.Contains(ms.SVG, "40 mm") {
+		t.Error("mechanical drawing")
+	}
+	if !strings.HasPrefix(ms.SVGDataURI, "data:image/svg+xml;base64,") || !strings.HasPrefix(ms.CSVDataURI, "data:text/csv") {
+		t.Error("downloads")
+	}
+}
+
+func TestPublishVersions(t *testing.T) {
+	dir := t.TempDir()
+	render := func(m *Manual) ([]byte, error) { return RenderHTML(m) }
+	build := func(sha string, mut func(*Inputs)) *Manual {
+		in := testInputs(t, completeNotes)
+		in.BoardSHA = sha
+		if mut != nil {
+			mut(&in)
+		}
+		return Build(in)
+	}
+	p1, err := Publish(dir, "Demo", build("aaa", nil), true, render)
+	if err != nil || p1.Version != 1 || !p1.Bumped {
+		t.Fatalf("v1 %+v %v", p1, err)
+	}
+	// same board sha256: no bump
+	p1b, err := Publish(dir, "Demo", build("aaa", nil), true, render)
+	if err != nil || p1b.Version != 1 || p1b.Bumped {
+		t.Fatalf("rebuild %+v %v", p1b, err)
+	}
+	// new board: J2.3 gets a net, JP1 removed
+	m2 := build("bbb", func(in *Inputs) {
+		b := *in.Board
+		b.Components = nil
+		for _, p := range in.Board.Components {
+			if p.Designator == "JP1" {
+				continue
+			}
+			if p.Designator == "J2" {
+				p.Pads = append([]Pad(nil), p.Pads...)
+				p.Pads[2].Net = "RX"
+			}
+			b.Components = append(b.Components, p)
+		}
+		in.Board = &b
+	})
+	p2, err := Publish(dir, "Demo", m2, false, render)
+	if err != nil || p2.Version != 2 || !p2.Bumped {
+		t.Fatalf("v2 %+v %v", p2, err)
+	}
+	ch := strings.Join(m2.Changes, "\n")
+	if m2.PrevVersion != 1 || !strings.Contains(ch, "J2.3 网络变更：NC → RX") || !strings.Contains(ch, "删除接口 JP1") {
+		t.Errorf("changes %q", ch)
+	}
+	ix, err := LoadIndex(dir)
+	if err != nil || len(ix.Versions) != 2 || ix.Versions[1].Pass || !ix.Versions[0].Pass {
+		t.Fatalf("index %+v %v", ix, err)
+	}
+	for _, f := range []string{"v1/Demo_使用说明.html", "v2/Demo_使用说明.html", "Demo_使用说明.html"} {
+		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
+			t.Error(err)
+		}
+	}
+	html, _ := os.ReadFile(filepath.Join(dir, "Demo_使用说明.html"))
+	if !strings.Contains(string(html), "<b>v2</b>") || !strings.Contains(string(html), "bbb") || !strings.Contains(string(html), "变更记录") {
+		t.Error("current copy lacks the v2 header / change log")
+	}
+	// rebuilding v2 (same sha) keeps the diff against v1
+	m2b := build("bbb", func(in *Inputs) { in.Board = m2.Board })
+	if p, err := Publish(dir, "Demo", m2b, true, render); err != nil || p.Version != 2 || m2b.PrevVersion != 1 || len(m2b.Changes) == 0 {
+		t.Errorf("rebuild v2 %+v %v %v", p, err, m2b.Changes)
+	}
+}
+
+func TestDiffConnectorAdded(t *testing.T) {
+	prev := Snapshot{Conns: map[string]map[string]string{"J1": {"1": "A"}}}
+	cur := Snapshot{Conns: map[string]map[string]string{"J1": {"1": "A"}, "J2": {"1": "B", "2": "C"}}, LEDs: map[string]string{"D1": "PWR | X"}}
+	d := strings.Join(Diff(prev, cur, "zh"), "\n")
+	if !strings.Contains(d, "新增接口 J2（2 脚）") || !strings.Contains(d, "LED D1") {
+		t.Errorf("diff %q", d)
+	}
+}

@@ -28,8 +28,18 @@ type Board struct {
 	} `json:"outline"`
 	CopperLayers int `json:"copperLayers"`
 	Copper       struct {
-		Fills []Fill `json:"fills"`
+		Fills   []Fill   `json:"fills"`
+		Regions []Region `json:"regions"`
+		Vias    []Via    `json:"vias"`
+		Lines   []struct {
+			LineWidth float64 `json:"lineWidth"`
+		} `json:"lines"`
 	} `json:"copper"`
+	Rules struct {
+		ClearanceMil     float64 `json:"clearanceMil"`
+		TrackTrackMil    float64 `json:"clearanceTrackTrackMil"`
+		TrackWidthMinMil float64 `json:"trackWidthMinMil"`
+	} `json:"rules"`
 	FootprintHoles []Hole `json:"footprintHoles"`
 	CapturedAt     string `json:"capturedAt"`
 	SemanticSHA256 string `json:"semanticSha256"`
@@ -116,6 +126,22 @@ type Fill struct {
 	BBox  BBox    `json:"bbox"`
 	Layer int     `json:"layer"`
 	Net   *string `json:"net"`
+}
+
+// Region is a rule region (keep-out) of the dump.
+type Region struct {
+	BBox          BBox     `json:"bbox"`
+	Layer         int      `json:"layer"`
+	RuleTypeNames []string `json:"ruleTypeNames"`
+}
+
+// Via is one via of the dump (mil).
+type Via struct {
+	X            float64 `json:"x"`
+	Y            float64 `json:"y"`
+	Diameter     float64 `json:"diameter"`
+	HoleDiameter float64 `json:"holeDiameter"`
+	Net          string  `json:"net"`
 }
 
 // MountHole is a mounting hole: a footprint hole with no owner / an H* part,

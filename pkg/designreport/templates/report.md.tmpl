@@ -5,7 +5,7 @@ input/evidence files in data/ (one self-contained package per version). */ -}}
 {{- $R := .R -}}
 # {{$R.Project}} 设计报告 {{$R.VersionLabel}}
 
-> **总体结论：{{$R.Verdict.Status}}** · 客户 {{or $R.Customer "—"}} · 生成 {{$R.GeneratedAt}} · pcbpilot {{$R.Tools.Pcbpilot}}{{with $R.Tools.Host}} · 宿主 {{.}}{{end}}{{with $R.Tools.Connector}} · connector {{.}}{{end}}
+> **总体结论：{{$R.Verdict.Status}}** · 客户 {{or $R.Customer "—"}} · 生成 {{$R.GeneratedAt}} · pcbpilot {{$R.Tools.Pcbpilot}}{{with $R.Tools.Host}} · 宿主 {{.}}{{end}}{{with $R.Tools.Connector}} · connector {{.}}{{end}}{{with $R.Manual}} · 使用说明书 [{{.}}]({{.}}){{end}}
 >
 > 输入摘要 `{{$R.InputsDigest}}`{{with $R.Changes}} · 相对 {{.Previous}}{{end}}
 {{if $R.Verdict.Reasons}}

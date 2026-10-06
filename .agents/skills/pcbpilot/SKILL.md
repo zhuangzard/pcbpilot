@@ -126,6 +126,10 @@ metadata:
 
 ## 不可省略的事实
 
+- **板卡使用说明书是硬要求**：每次布局、布线或设计修改后，`pcb auto route` / `pcb gate` 自动重新生成
+  `<out-dir>/manual/<Board>_使用说明.html`（版本化 vN），并在 `gates[]` 里给出 `board-manual` 结果。
+  `board-manual` 不通过的板不算完成；说明资料写在 `pcbpilot.manual-notes.json`，标准见
+  [board-manual.md](references/board-manual.md)。`--no-manual` 只能配签名 waiver 使用。
 - 原理图坐标 y 向上、网格 5 raw；PCB 命令通常用 mil。单位、原点、anchor 与 bbox center
   必须在参数中写明，不从截图猜坐标。
 - 核心与专属外围作为整体表达；同网、同框、零碰撞或高分不证明外围归属或真实直连正确。

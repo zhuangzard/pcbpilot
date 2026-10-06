@@ -44,11 +44,30 @@ type Config struct {
 	// Report maps report section ids ("3A", "6A", …) to a toggle.
 	Report      map[string]Toggle `json:"reportSections"`
 	Constraints Constraints       `json:"constraints"`
+	// Manual configures the board user manual that pcb auto route / pcb gate
+	// regenerate after every run (board-manual gate).
+	Manual *Manual `json:"manual,omitempty"`
 	// Resources is the resource-library directory relative to the work dir.
 	Resources string `json:"resourcesDir,omitempty"`
 	UpdatedAt string `json:"updatedAt,omitempty"`
 	UpdatedBy string `json:"updatedBy,omitempty"`
 }
+
+// Manual is the board-manual configuration. Paths are relative to the work dir.
+type Manual struct {
+	// Notes is the human text (default pcbpilot.manual-notes.json).
+	Notes string `json:"notes,omitempty"`
+	// Out is an extra copy of the current manual (e.g. 05_Output/<board>_使用说明.html).
+	Out string `json:"out,omitempty"`
+	// PinMap is the FPGA/CPLD pin assignment file (Quartus .tcl/.qsf or .xdc).
+	PinMap string `json:"pinMap,omitempty"`
+	// Name is the <Board> part of the file name (default: the config name).
+	Name string `json:"name,omitempty"`
+	Lang string `json:"lang,omitempty"` // zh (default) | en
+}
+
+// ManualNotesFile is the default notes file of the board manual.
+const ManualNotesFile = "pcbpilot.manual-notes.json"
 
 // EDABinding names the EasyEDA project this work dir belongs to.
 type EDABinding struct {

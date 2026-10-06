@@ -427,6 +427,10 @@ type qualityGateOpts struct {
 	waivers                             []gateWaiver
 	sessionChecked                      bool
 	unresolved                          *specctra.Reconcile
+	// board manual (board-manual gate): always built unless noManual
+	// (which needs a signed waiver, see checkNoManual).
+	noManual      bool
+	projectConfig string
 }
 
 // runQualityGates: pour rebuild → save → reload → pour rebuild → native DRC →
@@ -472,6 +476,15 @@ func runQualityGates(cfg *appConfig, window string, o qualityGateOpts, summary m
 		viaOK = segmentViaOK(in, res)
 	}
 	gates, pass := postRouteGates(cfg, window, o.intent, post, res.Verdict.Status, res.Verdict.Reasons, o.sessionChecked, o.unresolved, o.waivers, segNeed, viaOK, stderr)
+	// The board manual is regenerated after every placement / routing /
+	// gate run (hard requirement); its gate joins gates[].
+	mg, run := runManualGate(manualGateOpts{board: boardPath, intent: o.intent, sim: o.sim, projectConfig: o.projectConfig,
+		outDir: o.outDir, project: cfg.project, doc: cfg.doc, noManual: o.noManual, waivers: o.waivers}, stderr)
+	gates = append(gates, mg)
+	pass = pass && mg.Pass
+	if run != nil {
+		summary["manual"] = run
+	}
 	summary["gates"], summary["pass"] = gates, pass
 	return pass, nil
 }
@@ -509,7 +522,8 @@ func loadWaivers(path string) ([]gateWaiver, error) {
 }
 
 func newPcbGateCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {
-	var intentPath, simPath, scriptPath, outDir, waiverPath, widthBasis string
+	var intentPath, simPath, scriptPath, outDir, waiverPath, widthBasis, projectConfig string
+	var noManual bool
 	var schFiles []string
 	c := &cobra.Command{
 		Use:   "gate",
@@ -527,6 +541,10 @@ pour rebuild → native DRC → pad-net diff → live dump → sim post-layout, 
                      widthMil.min
   pcb-check-intent   no ERROR: copper-to-edge, isolation, via current
   post-layout-sim    verdict not fail (IR drop, opens, via current, heat)
+  board-manual       the board user manual is regenerated (versioned under
+                     <out-dir>/manual/) and complete: notes file present,
+                     every connector / pin / LED described, power input,
+                     no TODO, notes match the board (report manual --help)
 
 Any failing gate exits non-zero. --waivers takes signed {gate,match,reason,by}
 entries; a gate passes only when every failing item is covered.
@@ -544,12 +562,16 @@ Results: --out-dir/{gate.json, board-final.json, post.json, post.md}.`,
 			if err != nil {
 				return err
 			}
+			if err := checkNoManual(noManual, waivers); err != nil {
+				return err
+			}
 			if err := os.MkdirAll(outDir, 0o755); err != nil {
 				return err
 			}
 			summary := map[string]any{"intent": intentPath, "sim": simPath}
 			pass, err := runQualityGates(cfg, *window, qualityGateOpts{intent: intentPath, sim: simPath, sch: schFiles, script: scriptPath,
-				outDir: outDir, waivers: waivers, widthBasis: widthBasis, source: "live board (pcb gate)"}, summary, stderr)
+				outDir: outDir, waivers: waivers, widthBasis: widthBasis, source: "live board (pcb gate)",
+				noManual: noManual, projectConfig: projectConfig}, summary, stderr)
 			if f, ferr := os.Create(filepath.Join(outDir, "gate.json")); ferr == nil {
 				_ = writeJSON(f, summary)
 				f.Close()
@@ -571,6 +593,7 @@ Results: --out-dir/{gate.json, board-final.json, post.json, post.md}.`,
 	c.Flags().StringVar(&outDir, "out-dir", "pcb-gate", "directory for gate.json, board-final.json and post-layout results")
 	c.Flags().StringVar(&waiverPath, "waivers", "", "JSON list of signed waivers [{gate,match,reason,by}]")
 	c.Flags().StringVar(&widthBasis, "width-basis", "segment", widthBasisHelp)
+	addManualFlags(c, &noManual, &projectConfig)
 	return c
 }
 

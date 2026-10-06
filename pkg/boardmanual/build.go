@@ -26,6 +26,9 @@ type Inputs struct {
 	Lang        string // zh (default) | en
 	GeneratedAt time.Time
 	Tool        string // pcbpilot version
+	// BoardSHA is the board dump's identity (semanticSha256, else the file sha256).
+	BoardSHA     string
+	Project, Doc string
 }
 
 // Source is the provenance of one input file.
@@ -38,6 +41,11 @@ type Source struct {
 
 // Manual is the computed content the template renders.
 type Manual struct {
+	// Version is vN of the published manual (0 = not versioned).
+	Version, PrevVersion                      int
+	Changes                                   []string
+	BoardSHA, Tool, Project, Doc              string
+	Board                                     *Board `json:"-"`
 	Lang, Title, Subtitle, Revision, Overview string
 	Sequence                                  []string
 	Generated, Generator, CapturedAt          string
@@ -51,6 +59,7 @@ type Manual struct {
 	BoardSVG, ProbeSVG, LEDSVG string // inline SVG (escaped when built)
 
 	Connectors []*Conn
+	Mech       MechSection
 	Power      PowerSection
 	IO         []IORow
 	LEDs       []LEDRow
@@ -223,6 +232,11 @@ func Build(in Inputs) *Manual {
 		m.Generator += " " + in.Tool
 	}
 	m.CapturedAt = b.CapturedAt
+	m.Board, m.Tool, m.Project, m.Doc = b, in.Tool, in.Project, in.Doc
+	m.BoardSHA = in.BoardSHA
+	if m.BoardSHA == "" {
+		m.BoardSHA = b.SemanticSHA256
+	}
 	m.NotesSources = n.Sources
 	m.Sources = in.Sources
 	m.WidthMM, m.HeightMM = round1(c.ob.W()*MilToMM), round1(c.ob.H()*MilToMM)
@@ -241,12 +255,13 @@ func Build(in Inputs) *Manual {
 	m.Software = n.Software
 	m.Firmware = n.Firmware
 	m.Trouble = n.Troubleshooting
-	m.TODO = n.TODO
+	m.TODO = n.OpenItems
 	if n.Measurements != nil {
 		m.MeasNotes = n.Measurements.Notes
 	}
 
 	c.buildConnectors()
+	c.buildMech()
 	c.buildPower()
 	c.buildIO()
 	c.buildLEDs()
@@ -754,8 +769,8 @@ func (c *ctx) buildIO() {
 					break
 				}
 			}
-			if r.Role != "signal" && io == nil {
-				continue
+			if io == nil && (r.Role != "signal" || cc.Kind == "jumper" || cc.Role == "JUMPER") {
+				continue // jumpers carry no external signal
 			}
 			row := IORow{Connector: cc.Ref, Pin: r.Pin, Net: r.Net, Signal: r.Net, Direction: "—", Level: c.t("todoMark"), MaxCurrent: "—"}
 			if r.MaxCurrent != "" {

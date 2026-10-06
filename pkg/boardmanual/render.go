@@ -50,6 +50,8 @@ func RenderHTML(m *Manual) ([]byte, error) {
 			return s
 		},
 		"sprintf": fmt.Sprintf,
+		"dataurl": func(s string) htmltpl.URL { return htmltpl.URL(s) }, // data: URIs built from our own SVG/CSV
+		"mmil":    func(mil float64) string { return trimNum(round2(mil * MilToMM)) },
 	}
 	t, err := htmltpl.New("manual").Funcs(funcs).Parse(string(src))
 	if err != nil {
