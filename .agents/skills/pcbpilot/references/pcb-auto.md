@@ -323,10 +323,14 @@ pcbpilot pcb auto route --playbook out/playbook.json --out-dir out/live --projec
 → `--widen-net` 加宽（`pcb widen`）→ 重铺 → 保存 → 重载 → 重铺 → 原生 DRC → 逐焊盘对账 →
 `--sim` 时现场 dump 后跑 `sim post-layout`。结果写 `--out-dir/summary.json`。
 
-`--mech --place` 且机械规格添加了安装孔时，板上已有的孔径相当（±25%）的板级 MULTI 填充都在新板框前删除，
-包括与新孔位置重合的：`board copy` 会带着源板的安装孔填充（旧 ID），`--replace` 的日志里没有它们；不删就会和
-新孔叠在一起（2026-10-06 Gas Module V5 B：每个角两三个孔，fastroute 报四层 pin–pin 重叠）。封装内的孔、
-异形槽和明显不是孔径的开孔保留；`--keep-board-fills` 全部保留。
+`--mech --place` 换新板框时，在设新板框前删除 `board copy` 或旧方案留下的机械对象：
+- 机械规格添加了安装孔时，板上孔径相当（±25%）的板级 MULTI 填充全部删除（包括与新孔重合的）；
+- 板级 MULTI 规则区域只要不完全在新板框内，或与新规格要建的禁布区（含新孔的螺丝头环）重合，就删除。
+
+完全在板内、不与新规格重合的区域（如用户画的禁布区）和封装内的孔保留；`--keep-board-fills` 全部保留。
+2026-10-06 Gas Module V5 B：`--replace` 只删了日志里的 4 个区域，从 150×110 源板复制来的 8 个旧螺丝头环和
+板边带留在 100×80 新板上。EasyEDA 导出 DSN 时把 MULTI 区域当成引脚，fastroute 因此报四角 pin–pin 重叠；
+用同一快照离线回放后，12 个旧区域全部进入删除列表。
 
 同一摆放的对比（Gas Module V5 compact，100×80 mm，4 层，199 件，U8 固定居中）：
 

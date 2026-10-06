@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -365,7 +366,31 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 						holesBefore -= dh
 						fmt.Fprintf(stderr, "mechanics: %d stale board MULTI fill(s) (old mounting holes, e.g. from 'board copy') are deleted before the new outline\n", len(stale))
 					}
+					// Rule regions drawn for another outline (screw-head rings,
+					// inner-plane edge bands) or stacked under a keep-out this
+					// spec adds go too.
+					// The screw-head rings the playbook draws for the new holes
+					// count as keep-outs it adds.
+					added := append([]*pcbauto.Keepout(nil), b.Keepouts[keepBefore:]...)
+					for _, h := range b.Holes[holesBefore:] {
+						if r := h.Dia/2 + h.Keep; h.Keep > 0 {
+							added = append(added, &pcbauto.Keepout{Poly: pcbauto.Rect{MinX: h.C.X - r, MinY: h.C.Y - r, MaxX: h.C.X + r, MaxY: h.C.Y + r}.Corners()})
+						}
+					}
+					stale, err := pcbauto.StaleBoardRegions(boardRaw, b.Outline, added)
+					if err != nil {
+						return err
+					}
+					if len(stale) > 0 {
+						replace.Regions = append(replace.Regions, stale...)
+						_, dk := pcbauto.DropReplaced(b, pcbauto.MechReplace{Regions: stale})
+						keepBefore -= dk
+						fmt.Fprintf(stderr, "mechanics: %d stale board rule region(s) (outside the new outline or under a new keep-out, e.g. from 'board copy') are deleted before the new outline\n", len(stale))
+					}
 				}
+				slices.Sort(replace.Fills)
+				slices.Sort(replace.Regions)
+				replace.Fills, replace.Regions = slices.Compact(replace.Fills), slices.Compact(replace.Regions)
 				newHoles, newKeeps := b.Holes[holesBefore:], b.Keepouts[keepBefore:]
 				outlineChanged := mech != nil
 				if mech != nil && !place {
@@ -632,7 +657,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 		c.Flags().StringSliceVar(&only, "only", nil, "with --place --refine: move only these designators (local adjustment of a confirmed layout), e.g. --only C7,D3")
 		c.Flags().BoolVar(&noRoute, "no-route", false, "stop after placement / stackup")
 		c.Flags().StringVar(&routerSel, "router", "auto", "auto (fastroute when installed, else internal) | fastroute (placement/stackup plan; route live with 'pcb auto route') | internal (the built-in router)")
-		c.Flags().BoolVar(&keepBoardFills, "keep-board-fills", false, "with --mech --place: keep existing board MULTI fills the new mechanics do not reuse (default deletes them: stale mounting holes from 'board copy')")
+		c.Flags().BoolVar(&keepBoardFills, "keep-board-fills", false, "with --mech --place: keep existing board MULTI fills and rule regions (default deletes hole-size fills and regions outside the new outline or under a new keep-out: leftovers from 'board copy')")
 		c.Flags().Int64Var(&seed, "seed", 0, "placement random seed (runs are reproducible per seed)")
 		c.Flags().BoolVar(&postSim, "post-sim", false, "after routing, run the post-layout verification (sim post-layout) on this run's own routed board (board.routed.json, engine result — verify the live board again after apply with pcb dump → sim post-layout): post.json, post.md, heatmaps/, copper feedback merged into feedback.json; needs --sim")
 		c.Flags().BoolVar(&noFeedback, "no-feedback", false, "skip the schematic feedback (feedback.json / report section 回推原理图的建议)")

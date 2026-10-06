@@ -2,6 +2,7 @@ package pcbauto
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"sort"
 	"strings"
@@ -354,4 +355,49 @@ func StaleMechFills(b *Board, holesBefore int) []string {
 		}
 	}
 	return stale
+}
+
+// StaleBoardRegions returns the primitiveIds of board-level MULTI-layer rule
+// regions (raw `pcb dump` snapshot) that a new outline replaces: any region
+// not fully inside the new outline's bounds was drawn for another board
+// (`board copy` brings the source board's screw-head rings and inner-plane
+// edge bands along), and any region whose bounds match a keep-out the mech
+// spec adds (±1 mil) would be stacked under the new one. Gas Module V5 B,
+// 2026-10-06: eight such regions from the 150×110 source survived on the
+// 100×80 copy; EasyEDA exports MULTI regions as pins, so fastroute saw
+// overlapping pins at the corners. Regions fully inside the board that the
+// spec does not recreate (user keep-outs) are kept.
+func StaleBoardRegions(raw []byte, outline []Point, added []*Keepout) ([]string, error) {
+	var s snapshot
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return nil, fmt.Errorf("snapshot: %w", err)
+	}
+	if s.Copper == nil || len(outline) < 3 {
+		return nil, nil
+	}
+	board := PolyBounds(outline).Expand(1)
+	var stale []string
+	for _, r := range s.Copper.Regions {
+		id := str(r["primitiveId"])
+		if id == "" || int(num(r["layer"])) != LayerMulti {
+			continue
+		}
+		bb, ok := anyBBox(r["bbox"])
+		if !ok {
+			continue
+		}
+		inside := bb.MinX >= board.MinX && bb.MinY >= board.MinY && bb.MaxX <= board.MaxX && bb.MaxY <= board.MaxY
+		dup := false
+		for _, k := range added {
+			kb := PolyBounds(k.Poly)
+			if math.Abs(kb.MinX-bb.MinX) <= 1 && math.Abs(kb.MinY-bb.MinY) <= 1 && math.Abs(kb.MaxX-bb.MaxX) <= 1 && math.Abs(kb.MaxY-bb.MaxY) <= 1 {
+				dup = true
+				break
+			}
+		}
+		if !inside || dup {
+			stale = append(stale, id)
+		}
+	}
+	return stale, nil
 }
