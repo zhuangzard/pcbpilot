@@ -10,7 +10,6 @@ package app
 //   pour rebuild → native DRC → pad-net diff → sim post-layout.
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -141,20 +140,9 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 			if noPost {
 				return fmt.Errorf("--no-post skips the post-route gates; use 'pcb autoroute' for an ungated run")
 			}
-			var waivers []gateWaiver
-			if waiverPath != "" {
-				raw, err := os.ReadFile(waiverPath)
-				if err != nil {
-					return err
-				}
-				if err := json.Unmarshal(raw, &waivers); err != nil {
-					return fmt.Errorf("parse --waivers %s: %w", waiverPath, err)
-				}
-				for i, w := range waivers {
-					if w.Gate == "" || w.Match == "" || w.Reason == "" || w.By == "" {
-						return fmt.Errorf("waiver %d: gate, match, reason and by are all required", i)
-					}
-				}
+			waivers, err := loadWaivers(waiverPath)
+			if err != nil {
+				return err
 			}
 			if err := os.MkdirAll(outDir, 0o755); err != nil {
 				return err
@@ -201,6 +189,17 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 			}
 			if !routed {
 				return finish(fmt.Errorf("no router configured"))
+			}
+
+			in, err := loadDesignIntent(o.intentPath)
+			if err != nil {
+				return finish(err)
+			}
+			// 2b. Via arrays: every power transition gets the intent's via count.
+			va, err := applyViaArrays(cfg, *window, in, stderr)
+			summary["viaArrays"] = va
+			if err != nil {
+				return finish(err)
 			}
 
 			// 3. Pours.
@@ -261,63 +260,40 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 				if err != nil {
 					return finish(err)
 				}
+				// Widening deletes and recreates tracks: check the board
+				// still carries the whole session.
+				if rep, ok := summary["repair"].(*sesRepairSummary); ok && rep != nil && len(ops) > 0 {
+					sesPath, _ := summary["ses"].(string)
+					dsnPath, _ := summary["dsnFixed"].(string)
+					sesText, err1 := os.ReadFile(sesPath)
+					dsnText, err2 := os.ReadFile(dsnPath)
+					if err1 != nil || err2 != nil {
+						return finish(fmt.Errorf("reconcile after widen: %v %v", err1, err2))
+					}
+					rep.Unresolved = nil
+					if err := reconcileWithSession(cfg, *window, string(sesText), string(dsnText), rep, stderr); err != nil {
+						return finish(fmt.Errorf("reconcile after widen: %w", err))
+					}
+				}
 			}
 
-			// 5. Rebuild / save / reload / DRC / pad-net diff.
+			// 5–7. Rebuild / save / reload / DRC / pad-net diff, post-layout
+			// sim, post-route gates: any failure fails the run.
 			if noPost {
 				return finish(nil)
 			}
-			post, err := postImportChecks(cfg, *window, schFiles, scriptPath, stderr)
-			summary["post"] = post
-			if err != nil {
-				return finish(err)
-			}
-
-			// 6. Post-layout sim on the live copper.
-			var simVerdict string
-			var simReasons []string
-			if simPath != "" {
-				snap, err := fetchBoardSnapshot(cfg, *window, boardSnapshotOpts{withRules: true, withLayers: true, withCopper: true, withFootprintHoles: true})
-				if err != nil {
-					return finish(fmt.Errorf("board dump: %w", err))
-				}
-				boardPath := filepath.Join(outDir, "board-final.json")
-				blob, _ := json.MarshalIndent(snap, "", "  ")
-				if err := os.WriteFile(boardPath, append(blob, '\n'), 0o644); err != nil {
-					return finish(err)
-				}
-				po := postSimOpts{board: boardPath, sim: simPath, intent: o.intentPath,
-					out: filepath.Join(outDir, "post.json"), report: filepath.Join(outDir, "post.md"), svgDir: filepath.Join(outDir, "heatmaps"),
-					cell: 0.5, ambient: 25, hTop: 10, hBottom: 10, kxy: 0.3, kz: 0.3, plating: 0.7, viaDT: 10, margin: 1.2,
-					source: "live board after pcb auto route (pcb dump --include-copper)"}
-				res, err := runPostSim(po, stderr)
-				if err != nil {
-					return finish(fmt.Errorf("sim post-layout: %w", err))
-				}
-				simVerdict, simReasons = res.Verdict.Status, res.Verdict.Reasons
-				ps := map[string]any{"verdict": res.Verdict.Status, "reasons": res.Verdict.Reasons, "out": po.out, "report": po.report}
-				if res.Thermal != nil {
-					ps["maxBoardC"] = res.Thermal.MaxBoardC
-				}
-				summary["postSim"] = ps
-			}
-
-			// 7. Post-route gates: any failure fails the run.
 			var unresolved *specctra.Reconcile
 			if rep, ok := summary["repair"].(*sesRepairSummary); ok && rep != nil {
 				unresolved = rep.Unresolved
 			}
-			gates, pass := postRouteGates(cfg, *window, o.intentPath, post, simVerdict, simReasons, unresolved, waivers, stderr)
-			summary["gates"], summary["pass"] = gates, pass
+			pass, err := runQualityGates(cfg, *window, qualityGateOpts{intent: o.intentPath, sim: simPath, sch: schFiles, script: scriptPath,
+				outDir: outDir, waivers: waivers, sessionChecked: true, unresolved: unresolved, source: "live board after pcb auto route"}, summary, stderr)
+			if err != nil {
+				return finish(err)
+			}
 			if !pass {
-				var failed []string
-				for _, g := range gates {
-					if !g.Pass {
-						failed = append(failed, g.Gate)
-					}
-				}
 				summary["sessionsKept"] = sessions
-				return finish(fmt.Errorf("post-route gate failed: %s", strings.Join(failed, ", ")))
+				return finish(fmt.Errorf("post-route gate failed: %s", failedGates(summary)))
 			}
 			if !o.keep {
 				removeFiles(sessions)

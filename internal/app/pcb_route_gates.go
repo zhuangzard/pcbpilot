@@ -10,10 +10,15 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
+	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
+	"github.com/spf13/cobra"
 	"github.com/zhuangzard/pcbpilot/internal/pcb/specctra"
+	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
 )
 
 // gateResult is one post-route gate.
@@ -78,7 +83,10 @@ type widthViolation struct {
 // requirements: outer width on layers 1/2, inner width on inner layers,
 // never below widthMil.min, and below the full width only inside a pin
 // neck-down zone.
-func checkIntentWidths(tracks []specctra.Track, pads []boardPad, reqs map[string]specctra.NetRequirement) []widthViolation {
+// A track lying wholly inside its own net's poured copper on its layer is
+// carried by the pour (the current flows in the plane, not the track):
+// pourBacked reports those; it may be nil.
+func checkIntentWidths(tracks []specctra.Track, pads []boardPad, reqs map[string]specctra.NetRequirement, pourBacked func(specctra.Track) bool) []widthViolation {
 	byNet := map[string][]boardPad{}
 	for _, p := range pads {
 		byNet[strings.ToUpper(p.Net)] = append(byNet[strings.ToUpper(p.Net)], p)
@@ -100,8 +108,10 @@ func checkIntentWidths(tracks []specctra.Track, pads []boardPad, reqs map[string
 		switch {
 		case r.MinMil > 0 && t.Width+specctraEps < r.MinMil:
 			v.Reason = fmt.Sprintf("below the net's minimum %.2f mil", r.MinMil)
+		case pourBacked != nil && pourBacked(t):
+			continue
 		case !nearSameNetPad(t, byNet[strings.ToUpper(t.Net)]):
-			v.Reason = "narrower than required away from any pin (not a neck-down)"
+			v.Reason = "narrower than required away from any pin (not a neck-down) and not inside its net's pour"
 		default:
 			continue
 		}
@@ -117,6 +127,69 @@ func checkIntentWidths(tracks []specctra.Track, pads []boardPad, reqs map[string
 }
 
 const specctraEps = 0.05
+
+// pouredLookup indexes materialized poured copper (pcb dump copper.poured:
+// [{net, layer, fills:[{source}]}]) and answers whether a track's centre line
+// lies wholly inside its net's pour on its layer (even-odd over the fill's
+// contours, so pour cut-outs are outside).
+func pouredLookup(poured []any) func(specctra.Track) bool {
+	type key struct {
+		net   string
+		layer int
+	}
+	fills := map[key][][][]pcbauto.Point{}
+	for _, it := range poured {
+		m, ok := it.(map[string]any)
+		if !ok {
+			continue
+		}
+		layer, _ := strconv.Atoi(fmt.Sprint(m["layer"]))
+		k := key{strings.ToUpper(fmt.Sprint(m["net"])), layer}
+		fl, _ := m["fills"].([]any)
+		for _, f := range fl {
+			fm, ok := f.(map[string]any)
+			if !ok {
+				continue
+			}
+			if cs := pcbauto.SourceContours(fm["source"]); len(cs) > 0 {
+				fills[k] = append(fills[k], cs)
+			}
+		}
+	}
+	inside := func(cs [][]pcbauto.Point, x, y float64) bool {
+		in := false
+		for _, c := range cs {
+			for i, j := 0, len(c)-1; i < len(c); j, i = i, i+1 {
+				if (c[i].Y > y) != (c[j].Y > y) && x < (c[j].X-c[i].X)*(y-c[i].Y)/(c[j].Y-c[i].Y)+c[i].X {
+					in = !in
+				}
+			}
+		}
+		return in
+	}
+	return func(t specctra.Track) bool {
+		fs := fills[key{strings.ToUpper(t.Net), t.Layer}]
+		if len(fs) == 0 {
+			return false
+		}
+		n := max(2, int(math.Hypot(t.X2-t.X1, t.Y2-t.Y1)/10))
+		for k := 0; k <= n; k++ {
+			f := float64(k) / float64(n)
+			x, y := t.X1+(t.X2-t.X1)*f, t.Y1+(t.Y2-t.Y1)*f
+			hit := false
+			for _, cs := range fs {
+				if inside(cs, x, y) {
+					hit = true
+					break
+				}
+			}
+			if !hit {
+				return false
+			}
+		}
+		return true
+	}
+}
 
 func nearSameNetPad(t specctra.Track, pads []boardPad) bool {
 	for _, p := range pads {
@@ -166,7 +239,7 @@ func summarizeWidthViolations(vs []widthViolation) []string {
 
 // postRouteGates runs every gate on the live board after the post-import
 // checks (which already saved, reloaded, rebuilt pours and ran DRC).
-func postRouteGates(cfg *appConfig, window, intentPath string, post *postImportSummary, simVerdict string, simReasons []string, unresolved *specctra.Reconcile, waivers []gateWaiver, stderr io.Writer) ([]gateResult, bool) {
+func postRouteGates(cfg *appConfig, window, intentPath string, post *postImportSummary, simVerdict string, simReasons []string, sessionChecked bool, unresolved *specctra.Reconcile, waivers []gateWaiver, stderr io.Writer) ([]gateResult, bool) {
 	var gates []gateResult
 	add := func(g gateResult) {
 		applyWaivers(&g, waivers)
@@ -178,7 +251,9 @@ func postRouteGates(cfg *appConfig, window, intentPath string, post *postImportS
 		fmt.Fprintf(stderr, "post-route gate %-18s %s  %s\n", g.Gate, mark, g.Detail)
 	}
 
-	// 0. The board carries every segment and via of the routed session.
+	// 0. The board carries every segment and via of the routed session
+	// (only when there is one; continuity is also judged by the post-layout
+	// sim's open-path check).
 	g0 := gateResult{Gate: "session-reconcile", Pass: unresolved == nil, Detail: "board matches the routed session"}
 	if unresolved != nil {
 		g0.Detail = fmt.Sprintf("%d segment(s) and %d via(s) of the session missing, %d track(s) on non-copper layers",
@@ -190,7 +265,9 @@ func postRouteGates(cfg *appConfig, window, intentPath string, post *postImportS
 			g0.Items = append(g0.Items, fmt.Sprintf("missing via %s (%.1f,%.1f)", v.Net, v.X, v.Y))
 		}
 	}
-	add(g0)
+	if sessionChecked {
+		add(g0)
+	}
 
 	// 1. Native DRC.
 	g := gateResult{Gate: "native-drc", Pass: post != nil && post.DRCTotal == 0 && post.DRCPassed}
@@ -264,9 +341,9 @@ func postRouteGates(cfg *appConfig, window, intentPath string, post *postImportS
 	for _, c := range snap.Components {
 		pads = append(pads, c.Pads...)
 	}
-	vs := checkIntentWidths(tracks, pads, intentRequirements(in))
+	vs := checkIntentWidths(tracks, pads, intentRequirements(in), pouredLookup(snap.Copper.Poured))
 	add(gateResult{Gate: "intent-widths", Pass: len(vs) == 0,
-		Detail: fmt.Sprintf("%d track(s) below the intent width outside pin neck-downs or below the minimum", len(vs)),
+		Detail: fmt.Sprintf("%d track(s) below the intent width outside pin neck-downs and own-net pours, or below the minimum", len(vs)),
 		Items:  summarizeWidthViolations(vs)})
 
 	raw, err := json.Marshal(snap)
@@ -311,4 +388,143 @@ func postRouteGates(cfg *appConfig, window, intentPath string, post *postImportS
 		pass = pass && g.Pass
 	}
 	return gates, pass
+}
+
+type qualityGateOpts struct {
+	intent, sim, script, outDir, source string
+	sch                                 []string
+	waivers                             []gateWaiver
+	sessionChecked                      bool
+	unresolved                          *specctra.Reconcile
+}
+
+// runQualityGates: pour rebuild → save → reload → pour rebuild → native DRC →
+// pad-net diff → live dump → sim post-layout → post-route gates. Results go
+// into summary (post, postSim, gates, pass). err is an execution failure;
+// pass=false a failed gate.
+func runQualityGates(cfg *appConfig, window string, o qualityGateOpts, summary map[string]any, stderr io.Writer) (bool, error) {
+	post, err := postImportChecks(cfg, window, o.sch, o.script, stderr)
+	summary["post"] = post
+	if err != nil {
+		return false, err
+	}
+	snap, err := fetchBoardSnapshot(cfg, window, boardSnapshotOpts{withRules: true, withLayers: true, withCopper: true, withFootprintHoles: true})
+	if err != nil {
+		return false, fmt.Errorf("board dump: %w", err)
+	}
+	boardPath := filepath.Join(o.outDir, "board-final.json")
+	blob, _ := json.MarshalIndent(snap, "", "  ")
+	if err := os.WriteFile(boardPath, append(blob, '\n'), 0o644); err != nil {
+		return false, err
+	}
+	po := postSimOpts{board: boardPath, sim: o.sim, intent: o.intent,
+		out: filepath.Join(o.outDir, "post.json"), report: filepath.Join(o.outDir, "post.md"), svgDir: filepath.Join(o.outDir, "heatmaps"),
+		cell: 0.5, ambient: 25, hTop: 10, hBottom: 10, kxy: 0.3, kz: 0.3, plating: 0.7, viaDT: 10, margin: 1.2,
+		source: o.source + " (pcb dump --include-copper)"}
+	res, err := runPostSim(po, stderr)
+	if err != nil {
+		return false, fmt.Errorf("sim post-layout: %w", err)
+	}
+	ps := map[string]any{"verdict": res.Verdict.Status, "reasons": res.Verdict.Reasons, "out": po.out, "report": po.report}
+	if res.Thermal != nil {
+		ps["maxBoardC"] = res.Thermal.MaxBoardC
+	}
+	summary["postSim"] = ps
+	gates, pass := postRouteGates(cfg, window, o.intent, post, res.Verdict.Status, res.Verdict.Reasons, o.sessionChecked, o.unresolved, o.waivers, stderr)
+	summary["gates"], summary["pass"] = gates, pass
+	return pass, nil
+}
+
+func failedGates(summary map[string]any) string {
+	gates, _ := summary["gates"].([]gateResult)
+	var failed []string
+	for _, g := range gates {
+		if !g.Pass {
+			failed = append(failed, g.Gate)
+		}
+	}
+	return strings.Join(failed, ", ")
+}
+
+// loadWaivers reads and validates a signed waiver file ("" = none).
+func loadWaivers(path string) ([]gateWaiver, error) {
+	if path == "" {
+		return nil, nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var ws []gateWaiver
+	if err := json.Unmarshal(raw, &ws); err != nil {
+		return nil, fmt.Errorf("parse --waivers %s: %w", path, err)
+	}
+	for i, w := range ws {
+		if w.Gate == "" || w.Match == "" || w.Reason == "" || w.By == "" {
+			return nil, fmt.Errorf("waiver %d: gate, match, reason and by are all required", i)
+		}
+	}
+	return ws, nil
+}
+
+func newPcbGateCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {
+	var intentPath, simPath, scriptPath, outDir, waiverPath string
+	var schFiles []string
+	c := &cobra.Command{
+		Use:   "gate",
+		Short: "Hard quality gate for a finished board: every schematic/simulation constraint of the intent, from code",
+		Long: `Check a routed board on the live editor against the intent, however it was
+routed (pcb auto route, autoroute, by hand). Pour rebuild → save → reload →
+pour rebuild → native DRC → pad-net diff → live dump → sim post-layout, then:
+
+  native-drc         0 violations
+  pad-net-diff       0 differences against the schematic connectivity
+  intent-rules       the board's native rules match the intent
+  intent-widths      every track per net and layer >= widthMil outer/inner;
+                     narrower only as a pin neck-down (within 50 mil of a
+                     same-net pad) or inside its own net's pour, never below
+                     widthMil.min
+  pcb-check-intent   no ERROR: copper-to-edge, isolation, via current
+  post-layout-sim    verdict not fail (IR drop, opens, via current, heat)
+
+Any failing gate exits non-zero. --waivers takes signed {gate,match,reason,by}
+entries; a gate passes only when every failing item is covered.
+Results: --out-dir/{gate.json, board-final.json, post.json, post.md}.`,
+		Args:    cobra.NoArgs,
+		Example: `  pcbpilot pcb gate --intent intent.json --sim sim.json --sch-connectivity p1.json --sch-connectivity p2.json --out-dir gate/ --project P --doc PCB1_1`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if intentPath == "" || simPath == "" || len(schFiles) == 0 {
+				return fmt.Errorf("--intent, --sim and --sch-connectivity are required")
+			}
+			waivers, err := loadWaivers(waiverPath)
+			if err != nil {
+				return err
+			}
+			if err := os.MkdirAll(outDir, 0o755); err != nil {
+				return err
+			}
+			summary := map[string]any{"intent": intentPath, "sim": simPath}
+			pass, err := runQualityGates(cfg, *window, qualityGateOpts{intent: intentPath, sim: simPath, sch: schFiles, script: scriptPath,
+				outDir: outDir, waivers: waivers, source: "live board (pcb gate)"}, summary, stderr)
+			if f, ferr := os.Create(filepath.Join(outDir, "gate.json")); ferr == nil {
+				_ = writeJSON(f, summary)
+				f.Close()
+			}
+			_ = writeJSON(stdout, summary)
+			if err != nil {
+				return err
+			}
+			if !pass {
+				return fmt.Errorf("gate failed: %s", failedGates(summary))
+			}
+			return nil
+		},
+	}
+	c.Flags().StringVar(&intentPath, "intent", "", "intent.json (intent derive: schematic + simulation) — required")
+	c.Flags().StringVar(&simPath, "sim", "", "sim.json (sim power) — required")
+	c.Flags().StringArrayVar(&schFiles, "sch-connectivity", nil, "schematic connectivity JSON (repeat per page) — required")
+	c.Flags().StringVar(&scriptPath, "pad-net-diff-script", "", "path to pad-net-diff.py (auto-detected if omitted)")
+	c.Flags().StringVar(&outDir, "out-dir", "pcb-gate", "directory for gate.json, board-final.json and post-layout results")
+	c.Flags().StringVar(&waiverPath, "waivers", "", "JSON list of signed waivers [{gate,match,reason,by}]")
+	return c
 }

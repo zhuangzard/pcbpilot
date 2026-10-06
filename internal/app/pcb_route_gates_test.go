@@ -21,7 +21,7 @@ func TestCheckIntentWidths(t *testing.T) {
 		{ID: "below-min", Net: "GND", Layer: 1, X1: 0, Y1: 20, X2: 30, Y2: 20, Width: 6},
 		{ID: "unconstrained", Net: "SIG", Layer: 1, Width: 4},
 	}
-	vs := checkIntentWidths(tracks, pads, reqs)
+	vs := checkIntentWidths(tracks, pads, reqs, nil)
 	got := map[string]string{}
 	for _, v := range vs {
 		got[v.ID] = v.Reason
@@ -55,5 +55,28 @@ func TestApplyWaivers(t *testing.T) {
 	applyWaivers(&g, ws)
 	if g.Pass {
 		t.Fatal("waiver for another gate applied")
+	}
+}
+
+// A thin GND track running inside the GND pour of its layer is carried by
+// the pour; the same track outside it (or in a pour cut-out) is not.
+func TestCheckIntentWidthsPourBacked(t *testing.T) {
+	reqs := map[string]specctra.NetRequirement{"GND": {OuterMil: 21.65, InnerMil: 43.31, MinMil: 10}}
+	poured := []any{map[string]any{"net": "GND", "layer": "1", "fills": []any{map[string]any{"source": []any{
+		[]any{0.0, 0.0, "L", 1000.0, 0.0, 1000.0, 1000.0, 0.0, 1000.0},
+		[]any{400.0, 400.0, "L", 600.0, 400.0, 600.0, 600.0, 400.0, 600.0}, // cut-out
+	}}}}}
+	tracks := []specctra.Track{
+		{ID: "in-pour", Net: "GND", Layer: 1, X1: 100, Y1: 100, X2: 300, Y2: 100, Width: 16.24},
+		{ID: "through-cutout", Net: "GND", Layer: 1, X1: 300, Y1: 500, X2: 700, Y2: 500, Width: 16.24},
+		{ID: "other-layer", Net: "GND", Layer: 2, X1: 100, Y1: 100, X2: 300, Y2: 100, Width: 16.24},
+	}
+	vs := checkIntentWidths(tracks, nil, reqs, pouredLookup(poured))
+	ids := []string{}
+	for _, v := range vs {
+		ids = append(ids, v.ID)
+	}
+	if strings.Join(ids, ",") != "other-layer,through-cutout" {
+		t.Fatalf("violations = %v", ids)
 	}
 }
