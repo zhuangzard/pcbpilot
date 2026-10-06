@@ -325,12 +325,17 @@ func DropReplaced(b *Board, rp MechReplace) (holes, keeps int) {
 	return holes, keeps
 }
 
-// StaleMechFills returns the primitiveIds of board-level MULTI fills (mounting
-// holes read from the live board, b.Holes[:holesBefore]) that match none of
-// the holes the mech spec added after holesBefore. `board copy` duplicates the
-// source board's mounting-hole fills with their old positions; a new outline
-// must not keep them. Footprint holes (Owner set or "ref:id" names) and exact
-// slot polygons are never returned. With no new holes nothing is stale.
+// StaleMechFills returns the primitiveIds of board-level MULTI fills of
+// mounting-hole size (b.Holes[:holesBefore], read from the live board) that
+// the playbook must delete because the mech spec added its own holes after
+// holesBefore. `board copy` duplicates the source board's mounting-hole fills
+// with their old ids, at old positions or exactly where the new holes go;
+// either way the playbook creates (and journals) the new set, so every old
+// hole-sized fill goes — one that coincides with a new hole would otherwise be
+// stacked under it (Gas Module V5 B 2026-10-06: two or three fills per corner,
+// fastroute pin-pin violations on all layers). Footprint holes (Owner set or
+// "ref:id" names), exact slot polygons and fills whose size is not within 25 %
+// of a new hole's drill are kept. With no new holes nothing is stale.
 func StaleMechFills(b *Board, holesBefore int) []string {
 	added := b.Holes[holesBefore:]
 	if len(added) == 0 {
@@ -341,15 +346,11 @@ func StaleMechFills(b *Board, holesBefore int) []string {
 		if h.Owner != "" || h.Name == "" || strings.Contains(h.Name, ":") || h.Poly != nil {
 			continue
 		}
-		keep := false
 		for _, n := range added {
-			if math.Hypot(h.C.X-n.C.X, h.C.Y-n.C.Y) <= 1 && math.Abs(h.Dia-n.Dia) <= 1 {
-				keep = true
+			if n.Dia > 0 && math.Abs(h.Dia-n.Dia) <= 0.25*n.Dia {
+				stale = append(stale, h.Name)
 				break
 			}
-		}
-		if !keep {
-			stale = append(stale, h.Name)
 		}
 	}
 	return stale

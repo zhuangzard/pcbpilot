@@ -275,8 +275,14 @@ Steps (stdout is one summary JSON, progress on stderr):
      (mil, DSN layer names), or bare `[[[x1,y1],[x2,y2]], ...]` pairs = 10 mil GND on TopLayer with a via at the
      end. Choose escapes for GND pins between fine-pitch signal pins that fastroute's report lists as blocked.
 2. fastroute with `--report --diagnose`, `--router.min_trace_width_um=152` (`--min-trace-um`), optional
-   `--multi-start`/`--max-time`; while connections stay unrouted, up to `--continue 2` more runs from the last
-   session (`--initial-session`). `--router '<cmd> {in} {out}'` keeps working for any other router.
+   `--multi-start`/`--max-time`; while connections stay unrouted or the router reports fixable clearance
+   violations, up to `--continue` more runs from the last session (`--initial-session`), stopping when a run does
+   not improve. Remaining fixable violations are listed per run (`fixableList`). If ground connections stay
+   `blocked` on a fine-pitch part (nearest same-part pad < 32 mil), inward escapes are planned from the live pads
+   (pad centre → 30 mil past the pad's inner end, 10 mil, via; skipped when the via or stub would come within
+   clearance of another net's pad) and the board is routed again; the second result is used only if it is
+   better (`autoEscapes` in the summary; `--no-auto-escapes` turns it off). `--router '<cmd> {in} {out}'` keeps
+   working for any other router.
 3. `--rip-up` removes unlocked routing first (the session already contains it), then the SES import and the
    `pcb ses-repair` fixes (`--no-repair` skips):
    - Inner1/Inner2 tracks land on layer ids 21/22 → recreated on 15/16 (the session's layer decides);
@@ -285,6 +291,9 @@ Steps (stdout is one summary JSON, progress on stderr):
    - the DSN's `(type fix)` wiring is not in the session → missing fixed tracks/vias are created.
    New copper is created before the replaced track is deleted. Tracks no session segment explains are left and
    listed under `unmatched`.
+   Every read whose ids are later deleted comes after save + reload (before DSN export, before the repair and
+   the fixed-wiring reads, before `pcb widen`): right after writes the editor can serve stale reads (`staleRisk`);
+   on 2026-10-06 a line list taken after the repair still returned 38 deleted ids and the widen delete failed.
 4. pour rebuild → save → reload → pour rebuild → native DRC → `pad-net-diff.py` (needs `--sch-connectivity`,
    one `sch connectivity` file per page of this board; otherwise reported as skipped).
 

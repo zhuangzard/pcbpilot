@@ -25,17 +25,20 @@ func TestReadFastrouteReport(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "r.json")
 	// Shape of a fastroute 0.1.7 --report file (trimmed).
-	if err := os.WriteFile(p, []byte(`{"fastroute":"0.1.7","stats":{"layers":4,"connections":462,"unrouted":3,"violations":16},"unrouted":[]}`), 0o644); err != nil {
+	if err := os.WriteFile(p, []byte(`{"fastroute":"0.1.7","stats":{"layers":4,"connections":462,"unrouted":3,"violations":2},"unrouted":[],
+"clearance_violations":[
+ {"layer":"TopLayer","xy":[1.8334,-1.1437],"clearance_mm":0.006,"actual_mm":0.003,"unfixable":false,"first":{"kind":"trace","net":"GND"},"second":{"kind":"pin","component":"u1"}},
+ {"layer":"TopLayer","xy":[0.1575,-2.9921],"unfixable":true,"first":{"kind":"pin"},"second":{"kind":"pin"}}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	u, v, err := readFastrouteReport(p)
-	if err != nil || u != 3 || v != 16 {
-		t.Fatalf("got %d %d %v", u, v, err)
+	r, err := readFastrouteReport(p)
+	if err != nil || r.Unrouted != 3 || r.Violations != 2 || r.Fixable != 1 || r.FixableList[0] != "TopLayer at (1833.4, 1143.7) mil: trace GND / pin " {
+		t.Fatalf("got %+v %v", r, err)
 	}
 	if err := os.WriteFile(p, []byte(`{"stats":{}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := readFastrouteReport(p); err == nil {
+	if _, err := readFastrouteReport(p); err == nil {
 		t.Fatal("report without stats.unrouted accepted")
 	}
 }
@@ -107,5 +110,17 @@ func TestMainPowerRailAndPourLayers(t *testing.T) {
 	}
 	if g, p := defaultPourLayers(2); len(g) != 2 || p != 0 {
 		t.Fatalf("2-layer pours = %v %d", g, p)
+	}
+}
+
+func TestRunImproved(t *testing.T) {
+	a := fastrouteRun{Unrouted: 2, Fixable: 3}
+	for _, c := range []struct {
+		b    fastrouteRun
+		want bool
+	}{{fastrouteRun{Unrouted: 1, Fixable: 9}, true}, {fastrouteRun{Unrouted: 2, Fixable: 2}, true}, {fastrouteRun{Unrouted: 2, Fixable: 3}, false}, {fastrouteRun{Unrouted: 3}, false}} {
+		if got := runImproved(a, c.b); got != c.want {
+			t.Errorf("runImproved(%+v, %+v) = %v", a, c.b, got)
+		}
 	}
 }

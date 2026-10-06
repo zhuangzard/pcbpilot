@@ -123,6 +123,12 @@ func decodeAny(src []any, dst any) error {
 // widenNets plans and (unless dryRun) applies planWiden on the live board.
 // New tracks are created before the old ones are deleted.
 func widenNets(cfg *appConfig, window string, nets map[string]bool, maxMil, clearanceMil float64, dryRun bool, stderr io.Writer) ([]widenOp, error) {
+	if !dryRun {
+		// The ids below are deleted: read them from a reloaded board.
+		if err := saveAndReload(cfg, window); err != nil {
+			return nil, err
+		}
+	}
 	snap, err := fetchBoardSnapshot(cfg, window, boardSnapshotOpts{withCopper: true, withRules: clearanceMil <= 0})
 	if err != nil {
 		return nil, err

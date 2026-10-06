@@ -133,6 +133,16 @@ func ParseFixedWiring(dsn string) (*Wiring, error) {
 	return w, nil
 }
 
+// ViaPadstack returns the via padstack the DSN structure declares ("" if none).
+func ViaPadstack(dsn string) string {
+	if i := strings.Index(dsn, "(structure"); i >= 0 {
+		if m := reViaPadstack.FindStringSubmatch(dsn[i:]); m != nil {
+			return m[1]
+		}
+	}
+	return ""
+}
+
 // ViaDiameterMil returns the TopLayer circle diameter of a DSN padstack (0 if
 // the padstack or a circle shape is absent).
 func ViaDiameterMil(dsn, padstack string) float64 {

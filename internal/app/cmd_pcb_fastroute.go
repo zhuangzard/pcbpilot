@@ -212,6 +212,11 @@ func repairImportedSession(cfg *appConfig, window string, ses, dsn string, dryRu
 	if err != nil {
 		return nil, err
 	}
+	if !dryRun {
+		if err := saveAndReload(cfg, window); err != nil {
+			return nil, err
+		}
+	}
 	tracks, err := listPcbTracks(cfg, window)
 	if err != nil {
 		return nil, err
@@ -259,7 +264,10 @@ func repairImportedSession(cfg *appConfig, window string, ses, dsn string, dryRu
 	if len(fixed.Segments) == 0 && len(fixed.Vias) == 0 {
 		return sum, nil
 	}
-	if !dryRun {
+	if !dryRun && len(plan.Fixes) > 0 {
+		if err := saveAndReload(cfg, window); err != nil {
+			return sum, err
+		}
 		if tracks, err = listPcbTracks(cfg, window); err != nil {
 			return sum, err
 		}
@@ -319,6 +327,28 @@ var padNetDiffAsset = skillAsset{
 	flagHint: "--pad-net-diff-script",
 }
 
+// saveAndReload saves the active PCB and closes + reopens it. After writes
+// the editor may serve stale reads (staleRisk) until a reload: a line list
+// taken right after deleting tracks still returned the deleted ids (Gas
+// Module V5 B 2026-10-06, pcb widen). Every read that drives a delete goes
+// after one of these.
+func saveAndReload(cfg *appConfig, window string) error {
+	if _, err := requestActionTimed(cfg, "pcb.save", window, nil, 5*time.Minute); err != nil {
+		return fmt.Errorf("save: %w", err)
+	}
+	_, active, win, err := discoverDocs(cfg, window)
+	if err != nil {
+		return fmt.Errorf("reload: %w", err)
+	}
+	if active == "" {
+		return fmt.Errorf("reload: no active document")
+	}
+	if _, err := reloadDocumentByUUID(cfg, win, active); err != nil {
+		return fmt.Errorf("reload: %w", err)
+	}
+	return nil
+}
+
 // postImportChecks: pour rebuild → save → reload → pour rebuild → native DRC
 // → pad-net diff against the schematic connectivity (when given).
 func postImportChecks(cfg *appConfig, window string, schFiles []string, scriptPath string, stderr io.Writer) (*postImportSummary, error) {
@@ -329,23 +359,11 @@ func postImportChecks(cfg *appConfig, window string, schFiles []string, scriptPa
 	if _, err := requestActionTimed(cfg, "pcb.pour.rebuild", window, map[string]any{}, 20*time.Minute); err != nil {
 		return sum, fmt.Errorf("pour rebuild: %w", err)
 	}
-	step("save")
-	if _, err := requestActionTimed(cfg, "pcb.save", window, nil, 5*time.Minute); err != nil {
-		return sum, fmt.Errorf("save: %w", err)
+	step("save + reload")
+	if err := saveAndReload(cfg, window); err != nil {
+		return sum, err
 	}
-	sum.Saved = true
-	step("reload")
-	_, active, win, err := discoverDocs(cfg, window)
-	if err != nil {
-		return sum, fmt.Errorf("reload: %w", err)
-	}
-	if active == "" {
-		return sum, fmt.Errorf("reload: no active document")
-	}
-	if _, err := reloadDocumentByUUID(cfg, win, active); err != nil {
-		return sum, fmt.Errorf("reload: %w", err)
-	}
-	sum.Reloaded = true
+	sum.Saved, sum.Reloaded = true, true
 	step("pour rebuild (after reload)")
 	if _, err := requestActionTimed(cfg, "pcb.pour.rebuild", window, map[string]any{}, 20*time.Minute); err != nil {
 		return sum, fmt.Errorf("pour rebuild after reload: %w", err)
@@ -537,32 +555,65 @@ type fastrouteRun struct {
 	Seconds    float64 `json:"seconds"`
 	Unrouted   int     `json:"unrouted"`
 	Violations int     `json:"violations"`
+	// Fixable are the clearance violations the router itself marks fixable
+	// (pre-existing pin-pin overlaps are unfixable); they reach native DRC.
+	Fixable     int      `json:"fixableViolations"`
+	FixableList []string `json:"fixableList,omitempty"`
 }
 
-// readFastrouteReport extracts the counts of a fastroute --report file.
-func readFastrouteReport(path string) (unrouted, violations int, err error) {
+// frReport is what pcbpilot reads from a fastroute --report file.
+type frReport struct {
+	Unrouted, Violations, Fixable int
+	FixableList                   []string
+}
+
+// readFastrouteReport extracts the counts of a fastroute --report file. Its
+// xy are inches with y negated; FixableList gives them in DSN mil.
+func readFastrouteReport(path string) (frReport, error) {
+	var out frReport
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return 0, 0, err
+		return out, err
+	}
+	type item struct {
+		Kind string `json:"kind"`
+		Net  string `json:"net"`
 	}
 	var r struct {
 		Stats struct {
 			Unrouted   *int `json:"unrouted"`
 			Violations int  `json:"violations"`
 		} `json:"stats"`
+		Clearance []struct {
+			Layer     string     `json:"layer"`
+			XY        [2]float64 `json:"xy"`
+			Unfixable bool       `json:"unfixable"`
+			First     item       `json:"first"`
+			Second    item       `json:"second"`
+		} `json:"clearance_violations"`
 	}
 	if err := json.Unmarshal(data, &r); err != nil {
-		return 0, 0, fmt.Errorf("parse fastroute report %s: %w", path, err)
+		return out, fmt.Errorf("parse fastroute report %s: %w", path, err)
 	}
 	if r.Stats.Unrouted == nil {
-		return 0, 0, fmt.Errorf("fastroute report %s has no stats.unrouted", path)
+		return out, fmt.Errorf("fastroute report %s has no stats.unrouted", path)
 	}
-	return *r.Stats.Unrouted, r.Stats.Violations, nil
+	out.Unrouted, out.Violations = *r.Stats.Unrouted, r.Stats.Violations
+	for _, c := range r.Clearance {
+		if c.Unfixable {
+			continue
+		}
+		out.Fixable++
+		out.FixableList = append(out.FixableList, fmt.Sprintf("%s at (%.1f, %.1f) mil: %s %s / %s %s",
+			c.Layer, c.XY[0]*1000, -c.XY[1]*1000, c.First.Kind, c.First.Net, c.Second.Kind, c.Second.Net))
+	}
+	return out, nil
 }
 
 // runFastroute routes dsn, then continues from the last session with
-// --initial-session while connections remain unrouted (at most o.rounds
-// continuation runs). It returns the last session written.
+// --initial-session while connections remain unrouted or fixable clearance
+// violations remain — at most o.rounds continuation runs, and only while a
+// run improves on the previous one. It returns the last session written.
 func runFastroute(o fastrouteOpts, dsn, base string, stderr io.Writer) (string, []fastrouteRun, error) {
 	var runs []fastrouteRun
 	initial := ""
@@ -590,20 +641,29 @@ func runFastroute(o fastrouteOpts, dsn, base string, stderr io.Writer) (string, 
 		if err != nil {
 			fmt.Fprintf(stderr, "fastroute round %d ended with %v; using its best session so far\n", round, err)
 		}
-		u, v, rerr := readFastrouteReport(report)
+		rep, rerr := readFastrouteReport(report)
 		if rerr != nil {
 			runs = append(runs, run)
 			return ses, runs, rerr
 		}
-		run.Unrouted, run.Violations = u, v
+		run.Unrouted, run.Violations, run.Fixable, run.FixableList = rep.Unrouted, rep.Violations, rep.Fixable, rep.FixableList
 		runs = append(runs, run)
-		fmt.Fprintf(stderr, "fastroute round %d: %d unrouted, %d violation(s), %.0f s\n", round, u, v, run.Seconds)
-		if u == 0 || err != nil {
+		fmt.Fprintf(stderr, "fastroute round %d: %d unrouted, %d violation(s) (%d fixable), %.0f s\n", round, rep.Unrouted, rep.Violations, rep.Fixable, run.Seconds)
+		if (rep.Unrouted == 0 && rep.Fixable == 0) || err != nil {
+			return ses, runs, nil
+		}
+		if n := len(runs); n >= 2 && !runImproved(runs[n-2], runs[n-1]) {
+			fmt.Fprintf(stderr, "fastroute round %d did not improve on round %d; stopping\n", round, round-1)
 			return ses, runs, nil
 		}
 		initial = ses
 	}
 	return runs[len(runs)-1].Session, runs, nil
+}
+
+// runImproved: fewer unrouted, or as many unrouted and fewer fixable violations.
+func runImproved(prev, cur fastrouteRun) bool {
+	return cur.Unrouted < prev.Unrouted || (cur.Unrouted == prev.Unrouted && cur.Fixable < prev.Fixable)
 }
 
 // ── autoroute ───────────────────────────────────────────────────────────────
@@ -619,6 +679,7 @@ type autorouteOpts struct {
 	noRepair     bool
 	ripUp        bool
 	keep         bool
+	noAutoEsc    bool
 }
 
 // register adds the flags; router, rounds and ripUp are the command's defaults.
@@ -634,6 +695,7 @@ func (o *autorouteOpts) register(fs *pflag.FlagSet, router string, rounds int, r
 	fs.BoolVar(&o.noRepair, "no-repair", false, "skip the SES import repair")
 	fs.BoolVar(&o.ripUp, "rip-up", ripUp, "rip up existing unlocked routing before importing (the session already contains it)")
 	fs.BoolVar(&o.keep, "keep", false, "keep the routed SES file(s)")
+	fs.BoolVar(&o.noAutoEsc, "no-auto-escapes", false, "fastroute: do not add inward escapes for ground pins it reports blocked on fine-pitch parts")
 	o.fx.register(fs)
 }
 
@@ -670,7 +732,11 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 		}
 	}
 
-	// 1. Export, then fix.
+	// 1. Export from a saved + reloaded board (placement and stackup writes
+	// may still be served stale otherwise), then fix.
+	if err := saveAndReload(cfg, window); err != nil {
+		return false, err
+	}
 	res, err := requestActionTimed(cfg, "pcb.export.dsn", window, map[string]any{}, 5*time.Minute)
 	if err != nil {
 		return false, err
@@ -692,6 +758,8 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 		return false, err
 	}
 	dsnText := string(dsnBytes)
+	rawText := dsnText
+	var fixOpt specctra.FixOptions
 	if !o.rawDSN {
 		opt, err := o.fx.options()
 		if err != nil {
@@ -710,7 +778,7 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 		if err := os.WriteFile(dsnPath, []byte(fixed), 0o644); err != nil {
 			return false, err
 		}
-		dsnText = fixed
+		dsnText, fixOpt = fixed, opt
 		summary["dsnFixed"], summary["dsnFix"] = dsnPath, rep
 		fmt.Fprintf(stderr, "DSN fixed: %s (%d class name(s) re-quoted, layers %v added, %d padstack(s) patched, %d edge keep-out(s), %d escape(s))\n",
 			dsnPath, rep.QuotedClasses, rep.AddedLayers, rep.PatchedPadstacks, rep.EdgeKeepouts, rep.Escapes)
@@ -740,6 +808,11 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 			return false, err
 		}
 		sesPath = ses
+		if last := runs[len(runs)-1]; last.Unrouted > 0 && !o.noAutoEsc && !o.rawDSN {
+			if p, d, t, r2, ok := retryWithEscapes(cfg, window, o, rawText, dsnText, fixOpt, base, last, summary, &sessions, stderr); ok {
+				sesPath, dsnPath, dsnText, runs = p, d, t, r2
+			}
+		}
 		if n := len(runs); n > 0 && runs[n-1].Unrouted > 0 {
 			fmt.Fprintf(stderr, "warning: %d connection(s) still unrouted after %d run(s); importing the best session\n", runs[n-1].Unrouted, n)
 		}
@@ -799,6 +872,64 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 		}
 	}
 	return true, nil
+}
+
+// retryWithEscapes plans inward escapes for the ground pins the last run
+// reports blocked on fine-pitch parts, adds them to the DSN as fixed wiring
+// and routes again from scratch. ok=true when that run leaves fewer
+// unrouted connections (or as many and fewer fixable violations); the caller
+// then imports it. The escapes are re-created after import by ses-repair
+// (they are not in the session).
+func retryWithEscapes(cfg *appConfig, window string, o autorouteOpts, rawText, dsnText string, fixOpt specctra.FixOptions, base string,
+	last fastrouteRun, summary map[string]any, sessions *[]string, stderr io.Writer) (ses, dsnPath, fixed string, runs []fastrouteRun, ok bool) {
+	blocked, err := readFastrouteBlocked(last.Report)
+	if err != nil || len(blocked) == 0 {
+		return
+	}
+	pads, err := fetchPcbPads(cfg, window)
+	if err != nil {
+		fmt.Fprintf(stderr, "auto-escapes: pads unreadable (%v); skipped\n", err)
+		return
+	}
+	clr := fetchPcbRules(cfg, window).clearanceMil
+	if clr <= 0 {
+		clr = 6
+	}
+	via := specctra.ViaDiameterMil(dsnText, specctra.ViaPadstack(dsnText))
+	if via <= 0 {
+		via = 24
+	}
+	esc, skipped := planInwardEscapes(blocked, pads, isGndNetName, via, clr, 10)
+	info := map[string]any{"blockedEndpoints": len(blocked), "planned": esc, "skipped": skipped}
+	summary["autoEscapes"] = info
+	if len(esc) == 0 {
+		return
+	}
+	fmt.Fprintf(stderr, "auto-escapes: %d blocked ground pin(s) get an inward stub + via; routing again\n", len(esc))
+	opt := fixOpt
+	opt.Escapes = append(append([]specctra.Escape(nil), fixOpt.Escapes...), esc...)
+	text, _, err := specctra.FixDSN(rawText, opt)
+	if err != nil {
+		info["error"] = err.Error()
+		return
+	}
+	path := base + "-esc.dsn"
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		info["error"] = err.Error()
+		return
+	}
+	s, r, err := runFastroute(o.fo, path, base+"-esc", stderr)
+	for _, x := range r {
+		*sessions = append(*sessions, x.Session)
+	}
+	info["dsn"], info["runs"] = path, r
+	if err != nil || len(r) == 0 || !runImproved(last, r[len(r)-1]) {
+		fmt.Fprintln(stderr, "auto-escapes: no improvement; keeping the first result")
+		info["used"] = false
+		return
+	}
+	info["used"] = true
+	return s, path, text, r, true
 }
 
 func newPcbAutorouteCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {

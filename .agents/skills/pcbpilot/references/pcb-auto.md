@@ -323,8 +323,10 @@ pcbpilot pcb auto route --playbook out/playbook.json --out-dir out/live --projec
 → `--widen-net` 加宽（`pcb widen`）→ 重铺 → 保存 → 重载 → 重铺 → 原生 DRC → 逐焊盘对账 →
 `--sim` 时现场 dump 后跑 `sim post-layout`。结果写 `--out-dir/summary.json`。
 
-`--mech --place` 时，板上已有、但新机械规格没有复用的板级 MULTI 填充（旧安装孔）会在新板框前删除：
-`board copy` 会带着源板的安装孔填充（旧 ID），不删就会留在新板上。`--keep-board-fills` 保留。
+`--mech --place` 且机械规格添加了安装孔时，板上已有的孔径相当（±25%）的板级 MULTI 填充都在新板框前删除，
+包括与新孔位置重合的：`board copy` 会带着源板的安装孔填充（旧 ID），`--replace` 的日志里没有它们；不删就会和
+新孔叠在一起（2026-10-06 Gas Module V5 B：每个角两三个孔，fastroute 报四层 pin–pin 重叠）。封装内的孔、
+异形槽和明显不是孔径的开孔保留；`--keep-board-fills` 全部保留。
 
 同一摆放的对比（Gas Module V5 compact，100×80 mm，4 层，199 件，U8 固定居中）：
 
