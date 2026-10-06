@@ -621,7 +621,8 @@ const fastrouteInstallHint = "fastroute is not installed (GPLv3, run as a separa
 // keeps the internal router whatever is installed on the machine.
 var fastrouteLookPath = exec.LookPath
 
-// resolveFastroute finds the binary: explicit flag, $FASTROUTE_BIN, PATH.
+// resolveFastroute finds the binary: explicit flag, $FASTROUTE_BIN, the
+// adopted version (~/.pcbpilot/fastroute/current), PATH.
 func resolveFastroute(explicit string) (string, error) {
 	for _, p := range []string{explicit, os.Getenv("FASTROUTE_BIN")} {
 		if p == "" {
@@ -631,6 +632,12 @@ func resolveFastroute(explicit string) (string, error) {
 			return "", fmt.Errorf("fastroute binary %s: %w", p, err)
 		}
 		return p, nil
+	}
+	// The version adopted by scripts/fastroute-upgrade-check.sh.
+	if home, err := os.UserHomeDir(); err == nil {
+		if p, err := filepath.EvalSymlinks(filepath.Join(home, ".pcbpilot", "fastroute", "current")); err == nil {
+			return p, nil
+		}
 	}
 	if p, err := fastrouteLookPath("fastroute"); err == nil {
 		return p, nil
