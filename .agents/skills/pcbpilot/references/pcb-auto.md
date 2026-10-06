@@ -329,6 +329,10 @@ pcbpilot pcb auto route --playbook out/playbook.json --out-dir out/live --projec
   `net` 为旧口径）、`pcb check --intent` 无 ERROR（板边、隔离、过孔载流；`segment` 口径下，一组过孔仿真电流之和
   不到网电流一半时按该组仿真电流 ×（1 + `via.marginPct`，默认 20 %）判，否则按网电流）、
   `sim post-layout` 不为 fail。结果写进 `summary.json` 的 `gates[]`。
+- 压降闭环：若唯一失败的门是后仿真压降（`X drops N mV … over the B mV budget`），按 N/B ×1.15 加宽该网全部走线
+  （上限 `--widen-max-mil`，间距与 DRC 守卫照旧），重新对账并重跑全部门禁，最多 2 轮；DRC、对账等其他门失败时不加宽。
+  线宽门只按电流，压降还取决于长度：Gas Module V5 B v17 的 SV1_DRV 0.34 A 走内层 1551 mil × 10 mil，压降 57 mV（预算 30）。
+- 会话对账：两段同网共线走线的圆头重叠到仍有段宽 90 % 时视为连续铜（v17：导入丢了夹在 2.2 mil 缝里的 1.1 mil GND 短段）。
 - 豁免：`--waivers waivers.json`，每条 `{gate, match, reason, by}` 由人签字；只有一道门的全部失败项都被豁免覆盖
   时才放行，豁免内容写进 summary。没有失败项明细的门（如 DRC 数量）不能豁免。
 

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"math"
 	"testing"
 
 	"github.com/zhuangzard/pcbpilot/internal/pcb/specctra"
@@ -114,5 +115,27 @@ func TestPlanWidenRotatedPad(t *testing.T) {
 	ops := planWiden([]specctra.Track{drv}, nil, []boardPad{pad}, map[string]bool{"SV1_DRV": true}, 40, 8)
 	if len(ops) != 1 || ops[0].NewWidth > 35.73 || ops[0].NewWidth < 35.6 {
 		t.Fatalf("ops = %+v", ops)
+	}
+}
+
+// Gas Module V5 B v17: SV1_DRV dropped 57.25 mV of 30 on a 10 mil inner
+// track; the IR closure widens it by the ratio (+15 %), only when the drop
+// is the sole failure.
+func TestIROverBudgetWiden(t *testing.T) {
+	sum := map[string]any{"gates": []gateResult{
+		{Gate: "native-drc", Pass: true},
+		{Gate: "post-layout-sim", Items: []string{"SV1_DRV drops 57.25 mV at Q2.3 (typical) — over the 30.0 mV budget"}},
+	}}
+	r := irOverBudget(sum)
+	if math.Abs(r["SV1_DRV"]-57.25/30) > 1e-9 {
+		t.Fatalf("ratios %v", r)
+	}
+	ops := planWidenIR([]specctra.Track{{ID: "a", Net: "SV1_DRV", Layer: 15, X1: 0, Y1: 0, X2: 1000, Y2: 0, Width: 10}}, nil, nil, r, 40, 6.2)
+	if len(ops) != 1 || math.Abs(ops[0].NewWidth-10*57.25/30*1.15) > 0.05 {
+		t.Fatalf("ops %+v", ops)
+	}
+	sum["gates"] = append(sum["gates"].([]gateResult), gateResult{Gate: "native-drc", Items: []string{"x"}})
+	if irOverBudget(sum) != nil {
+		t.Fatal("DRC failure must not trigger IR widening")
 	}
 }

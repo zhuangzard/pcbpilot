@@ -342,3 +342,22 @@ func TestPlanReconcileCollinearPieces(t *testing.T) {
 		t.Fatalf("partial coverage: %+v", r.MissingTracks)
 	}
 }
+
+// Gas Module V5 B v17: EasyEDA dropped a 1.1 mil GND stub between two
+// collinear 21.65 mil tracks 2.2 mil apart; their round ends overlap, so the
+// copper is continuous. A real gap (10 mil) is still missing.
+func TestPlanReconcileBridgedGap(t *testing.T) {
+	ses := &Wiring{Segments: []Segment{{Net: "GND", Layer: "TopLayer", WidthMil: 21.65, A: [2]float64{1367.6, 1387.6}, B: [2]float64{1368.7, 1387.6}}}}
+	tracks := []Track{
+		{Net: "GND", Layer: 1, X1: 1350, Y1: 1387.6, X2: 1367.034, Y2: 1387.6, Width: 21.65},
+		{Net: "GND", Layer: 1, X1: 1382.1, Y1: 1387.6, X2: 1369.254, Y2: 1387.6, Width: 21.65},
+	}
+	if r := PlanReconcile(ses, tracks, nil, nil, CopperLayerIDs(4), 24); len(r.MissingTracks) != 0 {
+		t.Fatalf("bridged stub reported missing: %+v", r.MissingTracks)
+	}
+	ses.Segments[0].A, ses.Segments[0].B = [2]float64{1360, 1387.6}, [2]float64{1380, 1387.6}
+	tracks[0].X2, tracks[1].X2 = 1365, 1375
+	if r := PlanReconcile(ses, tracks, nil, nil, CopperLayerIDs(4), 24); len(r.MissingTracks) != 1 {
+		t.Fatalf("10 mil gap: %+v", r.MissingTracks)
+	}
+}

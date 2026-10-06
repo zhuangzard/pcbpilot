@@ -428,7 +428,11 @@ func uncovered(s Segment, layer int, tracks []Track) [][2][2]float64 {
 	ux, uy := (s.B[0]-s.A[0])/length, (s.B[1]-s.A[1])/length
 	lineDist := func(p [2]float64) float64 { return math.Abs((p[0]-s.A[0])*uy - (p[1]-s.A[1])*ux) }
 	along := func(p [2]float64) float64 { return (p[0]-s.A[0])*ux + (p[1]-s.A[1])*uy }
-	type iv struct{ a, b float64 }
+	// e is how far a track's round end still holds 90 % of the segment's
+	// width: two collinear pieces whose ends overlap that much are one
+	// continuous copper (Gas Module V5 B v17: a 1.1 mil GND stub dropped on
+	// import sat in a 2.2 mil gap between two 21.65 mil tracks).
+	type iv struct{ a, b, e float64 }
 	var cover []iv
 	for _, t := range tracks {
 		if t.Layer != layer || !strings.EqualFold(t.Net, s.Net) {
@@ -442,11 +446,16 @@ func uncovered(s Segment, layer int, tracks []Track) [][2][2]float64 {
 		if a > b {
 			a, b = b, a
 		}
-		cover = append(cover, iv{a - MatchTolMil, b + MatchTolMil})
+		r, h := t.Width/2, 0.45*s.WidthMil
+		e := 0.0
+		if r > h {
+			e = math.Sqrt(r*r - h*h)
+		}
+		cover = append(cover, iv{a - MatchTolMil, b + MatchTolMil, e})
 	}
 	sort.Slice(cover, func(i, j int) bool { return cover[i].a < cover[j].a })
 	var gaps [][2][2]float64
-	at := 0.0
+	at, atE, started := 0.0, 0.0, false
 	emit := func(from, to float64) {
 		if to-from > MatchTolMil {
 			p := func(t float64) [2]float64 {
@@ -459,10 +468,13 @@ func uncovered(s Segment, layer int, tracks []Track) [][2][2]float64 {
 		if c.b <= at {
 			continue
 		}
-		if c.a > at {
+		if c.a > at && !(started && c.a-at+2*MatchTolMil <= atE+c.e) {
 			emit(at, math.Min(c.a, length))
 		}
-		at = math.Max(at, c.b)
+		if c.b > at {
+			atE = c.e
+		}
+		at, started = math.Max(at, c.b), true
 		if at >= length {
 			break
 		}

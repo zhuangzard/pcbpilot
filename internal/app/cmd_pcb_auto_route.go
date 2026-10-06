@@ -321,10 +321,46 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 			if rep, ok := summary["repair"].(*sesRepairSummary); ok && rep != nil {
 				unresolved = rep.Unresolved
 			}
-			pass, err := runQualityGates(cfg, *window, qualityGateOpts{intent: o.intentPath, sim: simPath, sch: schFiles, script: scriptPath,
-				outDir: outDir, waivers: waivers, sessionChecked: true, unresolved: unresolved, widthBasis: widthBasis, source: "live board after pcb auto route"}, summary, stderr)
+			gateOpts := qualityGateOpts{intent: o.intentPath, sim: simPath, sch: schFiles, script: scriptPath,
+				outDir: outDir, waivers: waivers, sessionChecked: true, unresolved: unresolved, widthBasis: widthBasis, source: "live board after pcb auto route"}
+			pass, err := runQualityGates(cfg, *window, gateOpts, summary, stderr)
 			if err != nil {
 				return finish(err)
+			}
+			// IR closure: the width gate sizes by current, the drop gate
+			// also by length (Gas Module V5 B v17: SV1_DRV 0.34 A on a
+			// 1551 mil, 10 mil inner track dropped 57 mV of 30). Widen the
+			// over-budget nets by drop/budget and judge every gate again.
+			for round := 1; !pass && round <= irWidenRounds; round++ {
+				ratios := irOverBudget(summary)
+				if ratios == nil {
+					break
+				}
+				ops, err := widenLive(cfg, *window, func(tr []specctra.Track, v []widenVia, p []boardPad, clr float64) []widenOp {
+					return planWidenIR(tr, v, p, ratios, widenMax, clr)
+				}, fmt.Sprintf("IR closure round %d", round), 0, false, stderr)
+				summary[fmt.Sprintf("irWiden%d", round)] = ops
+				if err != nil {
+					return finish(err)
+				}
+				if len(ops) == 0 {
+					break
+				}
+				if rep, ok := summary["repair"].(*sesRepairSummary); ok && rep != nil {
+					sesText, err1 := os.ReadFile(summary["ses"].(string))
+					dsnText, err2 := os.ReadFile(summary["dsnFixed"].(string))
+					if err1 != nil || err2 != nil {
+						return finish(fmt.Errorf("reconcile after IR widen: %v %v", err1, err2))
+					}
+					rep.Unresolved = nil
+					if err := reconcileWithSession(cfg, *window, string(sesText), string(dsnText), rep, stderr); err != nil {
+						return finish(fmt.Errorf("reconcile after IR widen: %w", err))
+					}
+					gateOpts.unresolved = rep.Unresolved
+				}
+				if pass, err = runQualityGates(cfg, *window, gateOpts, summary, stderr); err != nil {
+					return finish(err)
+				}
 			}
 			if !pass {
 				summary["sessionsKept"] = sessions

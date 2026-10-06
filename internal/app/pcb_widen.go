@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -365,4 +367,54 @@ rebuild → save → reload → pour rebuild → native DRC (--no-post skips).`,
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "plan only")
 	c.Flags().BoolVar(&noPost, "no-post", false, "skip pour rebuild / save / reload / DRC")
 	return c
+}
+
+// irWidenRounds bounds the IR closure of pcb auto route.
+const irWidenRounds = 2
+
+var irDropRe = regexp.MustCompile(`^(\S+) drops ([0-9.]+) mV .* over the ([0-9.]+) mV budget`)
+
+// irOverBudget returns net → drop/budget for the post-layout sim's IR-drop
+// failures when that is the only failing gate (nil otherwise: widening
+// cannot fix a DRC or connectivity failure).
+func irOverBudget(summary map[string]any) map[string]float64 {
+	gates, _ := summary["gates"].([]gateResult)
+	var out map[string]float64
+	for _, g := range gates {
+		if g.Pass {
+			continue
+		}
+		if g.Gate != "post-layout-sim" {
+			return nil
+		}
+		for _, it := range g.Items {
+			m := irDropRe.FindStringSubmatch(it)
+			if m == nil {
+				return nil
+			}
+			drop, _ := strconv.ParseFloat(m[2], 64)
+			budget, _ := strconv.ParseFloat(m[3], 64)
+			if budget <= 0 {
+				return nil
+			}
+			if out == nil {
+				out = map[string]float64{}
+			}
+			out[m[1]] = math.Max(out[m[1]], drop/budget)
+		}
+	}
+	return out
+}
+
+// planWidenIR grows every track of an over-budget net by its drop/budget
+// ratio plus 15 % (resistance ∝ 1/width), up to maxMil, as far as the
+// clearance allows.
+func planWidenIR(tracks []specctra.Track, vias []widenVia, pads []boardPad, ratios map[string]float64, maxMil, clearanceMil float64) []widenOp {
+	return planWidenTo(tracks, vias, pads, func(t specctra.Track) float64 {
+		r, ok := ratios[t.Net]
+		if !ok {
+			return 0
+		}
+		return math.Min(t.Width*r*1.15, maxMil)
+	}, clearanceMil, 0.5)
 }
