@@ -764,21 +764,7 @@ func planSilkGroups(labels []silkLabel, sc silkScene, placed []silkPlaced, opt s
 			// "/" and "–" render wider than the average designator glyph
 			// (v21 B: "C19/C49/D9/R38" drawn over C26's designator).
 			ln := 1.15 * charW * float64(len([]rune(g.Text)))
-		search:
-			for d := opt.Gap; d <= opt.GroupMaxDist; d += 2 {
-				for _, rot := range []int{0, 90} {
-					w, h := ln, hgt
-					if rot == 90 {
-						w, h = h, w
-					}
-					for _, s := range sideSlots(g.Members, w, h, d) {
-						if s.box.dist(g.Members) <= opt.GroupMaxDist && sc.legal(s.box, "", g.Layer, silkBox{}, append(keep, groupPlaced(groups)...), layerOf, opt) {
-							g.Box, g.Rot, g.Placed = s.box, rot, true
-							break search
-						}
-					}
-				}
-			}
+			g.Box, g.Rot, g.Placed = findGroupSlot(g.Members, ln, hgt, []int{0, 90}, g.Layer, sc, append(keep, groupPlaced(groups)...), layerOf, opt)
 		}
 		if g.Placed {
 			layerOf[fmt.Sprintf("group-%d", len(groups))] = g.Layer
@@ -812,6 +798,25 @@ func planSilkGroups(labels []silkLabel, sc silkScene, placed []silkPlaced, opt s
 
 // maxGroupChars bounds a group label's text ("C27/C46/C72/R60" is 15).
 const maxGroupChars = 24
+
+// findGroupSlot is the nearest legal box for a group label of ln × hgt
+// (along × across its baseline) beside members, within GroupMaxDist.
+func findGroupSlot(members silkBox, ln, hgt float64, rots []int, layer int, sc silkScene, obstacles []silkPlaced, layerOf map[string]int, opt silkTightOpts) (silkBox, int, bool) {
+	for d := opt.Gap; d <= opt.GroupMaxDist; d += 2 {
+		for _, rot := range rots {
+			w, h := ln, hgt
+			if rot == 90 {
+				w, h = h, w
+			}
+			for _, s := range sideSlots(members, w, h, d) {
+				if s.box.dist(members) <= opt.GroupMaxDist && sc.legal(s.box, "", layer, silkBox{}, obstacles, layerOf, opt) {
+					return s.box, rot, true
+				}
+			}
+		}
+	}
+	return silkBox{}, 0, false
+}
 
 // groupPlaced turns placed groups into obstacles for the next ones.
 func groupPlaced(gs []silkGroup) []silkPlaced {
@@ -1057,8 +1062,10 @@ func runSilkTight(cfg *appConfig, window string, opt silkTightOpts, rounds int, 
 		}
 		rep.Placed, rep.Notes, rep.Rounds = placed, notes, round
 		byID := map[string]silkLabel{}
+		layerOf := map[string]int{}
 		for _, l := range labels {
 			byID[l.ID] = l
+			layerOf[l.ID] = l.Layer
 		}
 		var moves []silkPlaced
 		for _, p := range placed {
@@ -1147,6 +1154,24 @@ func runSilkTight(cfg *appConfig, window string, opt silkTightOpts, rounds int, 
 				ax, _ := asFloatOK(res.Result["x"])
 				ay, _ := asFloatOK(res.Result["y"])
 				if maxX > minX && maxY > minY {
+					// The rendered text decides: when it is larger than the
+					// estimate, look for a slot of its real size.
+					if aw, ah := maxX-minX, maxY-minY; aw > g.Box.w()+0.5 || ah > g.Box.h()+0.5 {
+						ln, ht := aw, ah
+						if g.Rot == 90 {
+							ln, ht = ah, aw
+						}
+						var others []silkPlaced
+						for _, o := range rep.Groups {
+							others = append(others, silkPlaced{ID: "group-" + o.Text, Ref: o.Text, Box: o.Box})
+							layerOf["group-"+o.Text] = o.Layer
+						}
+						if b, _, ok := findGroupSlot(g.Members, ln, ht, []int{g.Rot}, g.Layer, sc, append(append([]silkPlaced{}, placed...), others...), layerOf, opt); ok {
+							g.Box = b
+						} else {
+							rep.GroupNotes = append(rep.GroupNotes, fmt.Sprintf("group %q renders %.0f×%.0f mil, larger than planned; no slot of that size within %.0f mil (left at the planned centre)", g.Text, aw, ah, opt.GroupMaxDist))
+						}
+					}
 					x := g.Box.cx() - (maxX-minX)/2 + (ax - minX)
 					y := g.Box.cy() - (maxY-minY)/2 + (ay - minY)
 					if _, err := requestAction(cfg, "pcb.silk.set", window, map[string]any{"primitiveIds": []string{id}, "x": x, "y": y}); err != nil {

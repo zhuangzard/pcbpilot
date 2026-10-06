@@ -172,6 +172,15 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 			// 1. Placement playbook (and, with --candidates, trial-route the
 			// runner-up placements and keep the most routable).
 			apply := func(path string) error {
+				// Re-applying a playbook must not add its holes / keep-outs
+				// a second time (v22 B rerun: Slot Region to Slot Region at
+				// every mounting hole).
+				if p2, skipped, err := withoutExistingMech(cfg, *window, path, outDir); err != nil {
+					return err
+				} else if len(skipped) > 0 {
+					fmt.Fprintf(stderr, "apply: %d mechanics step(s) already on the board, skipped: %s\n", len(skipped), strings.Join(skipped, ", "))
+					path = p2
+				}
 				fmt.Fprintf(stderr, "apply: %s\n", path)
 				ac := newApplyCmd(cfg, stderr, stderr)
 				a := []string{path, "--yes", "--quiet"}
@@ -194,6 +203,16 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 					return finish(err)
 				}
 				summary["playbook"] = playbook
+			}
+			// Routing left on the board (an aborted run's raw import) would
+			// enter the DSN of every trial and the final route as existing
+			// wiring (v22 B rerun: 23–33 unrouted, 2252 violations): clear
+			// the unlocked routing before the first export.
+			if o.ripUp {
+				fmt.Fprintln(stderr, "rip-up: removing unlocked routing before the trials and the DSN export")
+				if _, err := requestActionTimed(cfg, "pcb.route.rip_up", *window, map[string]any{}, 10*time.Minute); err != nil {
+					return finish(fmt.Errorf("rip-up: %w", err))
+				}
 			}
 			if candDir != "" {
 				if playbook == "" {
@@ -623,4 +642,101 @@ func loopIR(snap *boardSnapshot, currents map[string]float64) float64 {
 		total += currents[net] * ((s.maxX - s.minX) + (s.maxY - s.minY))
 	}
 	return total
+}
+
+// withoutExistingMech returns a copy of the playbook (in outDir) without the
+// MULTI-layer fill / region steps whose shape the board already carries
+// (bounding box within 1 mil), and their ids. ("", nil) when nothing is on
+// the board yet.
+func withoutExistingMech(cfg *appConfig, window, path, outDir string) (string, []string, error) {
+	pb, _, err := loadPlaybook(path)
+	if err != nil {
+		return "", nil, err
+	}
+	snap, err := fetchBoardSnapshot(cfg, window, boardSnapshotOpts{withCopper: true})
+	if err != nil || snap.Copper == nil {
+		return "", nil, err
+	}
+	steps, skipped := dropExistingMechSteps(pb.Steps, snap.Copper.Fills, snap.Copper.Regions)
+	if len(skipped) == 0 {
+		return "", nil, nil
+	}
+	pb.Steps = steps
+	out := filepath.Join(outDir, strings.TrimSuffix(filepath.Base(path), ".json")+".nomech.json")
+	blob, _ := json.MarshalIndent(pb, "", "  ")
+	return out, skipped, os.WriteFile(out, append(blob, '\n'), 0o644)
+}
+
+// dropExistingMechSteps removes pcb.fill.create / pcb.region.create steps on
+// the MULTI layer whose points' box matches a live fill's / region's box.
+//
+// Shapes the playbook deletes itself (its --replace steps) do not count: a
+// first apply deletes the old holes and creates identical new ones.
+func dropExistingMechSteps(steps []playbookStep, fills, regions []any) ([]playbookStep, []string) {
+	deleted := map[string]bool{}
+	for _, st := range steps {
+		if st.Action == "pcb.fill.delete" || st.Action == "pcb.region.delete" {
+			ids, _ := st.Payload["primitiveIds"].([]any)
+			for _, id := range ids {
+				if s, ok := id.(string); ok {
+					deleted[s] = true
+				}
+			}
+		}
+	}
+	boxes := func(items []any) [][4]float64 {
+		var out [][4]float64
+		for _, it := range items {
+			m, _ := it.(map[string]any)
+			if id, _ := m["primitiveId"].(string); deleted[id] {
+				continue
+			}
+			bb, _ := m["bbox"].(map[string]any)
+			if l, _ := asFloatOK(m["layer"]); bb == nil || int(l) != pcbLayerMulti {
+				continue
+			}
+			x0, _ := asFloatOK(bb["minX"])
+			y0, _ := asFloatOK(bb["minY"])
+			x1, _ := asFloatOK(bb["maxX"])
+			y1, _ := asFloatOK(bb["maxY"])
+			out = append(out, [4]float64{x0, y0, x1, y1})
+		}
+		return out
+	}
+	live := map[string][][4]float64{"pcb.fill.create": boxes(fills), "pcb.region.create": boxes(regions)}
+	var kept []playbookStep
+	var skipped []string
+	for _, st := range steps {
+		have, mech := live[st.Action]
+		if l, _ := asFloatOK(st.Payload["layer"]); !mech || int(l) != pcbLayerMulti {
+			kept = append(kept, st)
+			continue
+		}
+		pts, _ := st.Payload["points"].([]any)
+		b := [4]float64{math.Inf(1), math.Inf(1), math.Inf(-1), math.Inf(-1)}
+		for _, p := range pts {
+			xy, _ := p.([]any)
+			if len(xy) < 2 {
+				continue
+			}
+			x, _ := asFloatOK(xy[0])
+			y, _ := asFloatOK(xy[1])
+			b = [4]float64{math.Min(b[0], x), math.Min(b[1], y), math.Max(b[2], x), math.Max(b[3], y)}
+		}
+		dup := false
+		for _, h := range have {
+			// The host's box includes the outline stroke (±0.5 mil).
+			if math.Abs((h[0]+h[2])/2-(b[0]+b[2])/2) <= 1 && math.Abs((h[1]+h[3])/2-(b[1]+b[3])/2) <= 1 &&
+				math.Abs((h[2]-h[0])-(b[2]-b[0])) <= 2 && math.Abs((h[3]-h[1])-(b[3]-b[1])) <= 2 {
+				dup = true
+				break
+			}
+		}
+		if dup {
+			skipped = append(skipped, st.ID)
+			continue
+		}
+		kept = append(kept, st)
+	}
+	return kept, skipped
 }
