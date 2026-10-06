@@ -55,9 +55,13 @@ func newReportCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 		Long: `Reports assembled from the artifacts a pcbpilot run leaves behind.
 
   report design   intent / sim / pcb auto / board dump / DRC / check / images →
-                  reports/<name>/vN/{report.html,report.md,report.json} + index.json + CHANGELOG.md`,
+                  reports/<name>/vN/{report.html,report.md,report.json} + index.json + CHANGELOG.md
+  report manual   board dump (+ intent / sim / notes.json / pin map) → one self-contained
+                  user-manual HTML: board picture, connector pinouts, power, I/O, LEDs,
+                  test points, bring-up, software interface, doc-vs-board mismatches`,
 	}
 	g.AddCommand(newReportDesignCmd(stdout, stderr))
+	g.AddCommand(newReportManualCmd(stdout, stderr))
 	return g
 }
 
