@@ -203,8 +203,13 @@ func listPcbVias(cfg *appConfig, window string) ([][2]float64, []string, error) 
 // Creating first therefore made `pcb widen` delete ids that no longer
 // existed and made the neck-down restore lose the narrow pieces, then delete
 // the wide track. Collinear pieces that only touch end to end do not merge.
-// A failed create is reported, not retried; the caller sees the count.
-func replaceTracks(cfg *appConfig, window string, del []string, create []specctra.NewTrack) (created int, failures []map[string]string, err error) {
+// When a replacement piece cannot be created, the original track is
+// recreated and the failure reported.
+func replaceTracks(cfg *appConfig, window string, fixes []specctra.TrackFix) (created int, failures []map[string]string, err error) {
+	del := make([]string, len(fixes))
+	for i, f := range fixes {
+		del[i] = f.Delete.ID
+	}
 	for i := 0; i < len(del); i += 200 {
 		chunk := del[i:min(i+200, len(del))]
 		if _, err := requestActionTimed(cfg, "pcb.route.delete", window,
@@ -212,12 +217,22 @@ func replaceTracks(cfg *appConfig, window string, del []string, create []specctr
 			return 0, nil, fmt.Errorf("delete replaced tracks: %w", err)
 		}
 	}
-	for _, nt := range create {
-		if err := createPcbTrack(cfg, window, nt); err != nil {
-			failures = append(failures, map[string]string{"net": nt.Net, "at": fmt.Sprintf("(%.1f,%.1f)-(%.1f,%.1f) L%d", nt.X1, nt.Y1, nt.X2, nt.Y2, nt.Layer), "error": err.Error()})
+	for _, f := range fixes {
+		var ferr error
+		for _, nt := range f.Create {
+			if ferr = createPcbTrack(cfg, window, nt); ferr != nil {
+				break
+			}
+			created++
+		}
+		if ferr == nil {
 			continue
 		}
-		created++
+		// Put the original back so no connection is lost; it overlaps the
+		// pieces already created and EasyEDA merges them.
+		o := f.Delete
+		restored := createPcbTrack(cfg, window, specctra.NewTrack{Net: o.Net, Layer: o.Layer, X1: o.X1, Y1: o.Y1, X2: o.X2, Y2: o.Y2, Width: o.Width}) == nil
+		failures = append(failures, map[string]string{"track": o.ID, "net": o.Net, "error": ferr.Error(), "restored": fmt.Sprint(restored)})
 	}
 	return created, failures, nil
 }
@@ -257,14 +272,8 @@ func repairImportedSession(cfg *appConfig, window string, ses, dsn string, dryRu
 	fmt.Fprintf(stderr, "ses-repair: %d track(s) to replace (%d layer move(s), %d width restore(s)), %d unmatched\n",
 		len(plan.Fixes), plan.LayerMoves, plan.WidthRestores, len(plan.Unmatched))
 	if !dryRun {
-		var del []string
-		var create []specctra.NewTrack
-		for _, f := range plan.Fixes {
-			del = append(del, f.Delete.ID)
-			create = append(create, f.Create...)
-		}
-		n, failures, err := replaceTracks(cfg, window, del, create)
-		sum.TracksDeleted, sum.TracksCreated, sum.Failures = len(del), n, failures
+		n, failures, err := replaceTracks(cfg, window, plan.Fixes)
+		sum.TracksDeleted, sum.TracksCreated, sum.Failures = len(plan.Fixes), n, failures
 		if err != nil {
 			return sum, err
 		}
@@ -700,6 +709,8 @@ type autorouteOpts struct {
 	ripUp        bool
 	keep         bool
 	noAutoEsc    bool
+	noPreEscape  bool
+	escapeRounds int
 	intentPath   string
 	minTraceSet  bool
 }
@@ -719,6 +730,8 @@ func (o *autorouteOpts) register(fs *pflag.FlagSet, router string, rounds int, r
 	fs.BoolVar(&o.ripUp, "rip-up", ripUp, "rip up existing unlocked routing before importing (the session already contains it)")
 	fs.BoolVar(&o.keep, "keep", false, "keep the routed SES file(s)")
 	fs.BoolVar(&o.noAutoEsc, "no-auto-escapes", false, "fastroute: do not add inward escapes for ground pins it reports blocked on fine-pitch parts")
+	fs.BoolVar(&o.noPreEscape, "no-pre-escape-gnd", false, "fastroute: do not reserve inward escapes for every ground pin of fine-pitch parts with more than 64 pins before the first route")
+	fs.IntVar(&o.escapeRounds, "escape-rounds", 3, "fastroute: at most this many re-routes adding escapes for newly blocked ground pins (each kept only if better)")
 	o.fx.register(fs)
 }
 
@@ -820,6 +833,15 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 		if opt.CopperLayers == 0 {
 			if n, lerr := fetchCopperLayerCount(cfg, window); lerr == nil {
 				opt.CopperLayers = n
+			}
+		}
+		if preset && !o.noPreEscape {
+			if pre, skipped, err := plannedPreEscapes(cfg, window, dsnText, opt.Escapes); err != nil {
+				fmt.Fprintf(stderr, "pre-escapes: %v; skipped\n", err)
+			} else {
+				opt.Escapes = append(opt.Escapes, pre...)
+				summary["preEscapes"] = map[string]any{"planned": len(pre), "skipped": skipped}
+				fmt.Fprintf(stderr, "pre-escapes: %d ground pin(s) of fine-pitch parts reserved (%d skipped)\n", len(pre), len(skipped))
 			}
 		}
 		fixed, rep, rq, err := prepareDSN(dsnText, opt, reqs)
@@ -976,62 +998,92 @@ func prepareDSN(raw string, opt specctra.FixOptions, reqs map[string]specctra.Ne
 	return text, rep, &rq, nil
 }
 
-// retryWithEscapes plans inward escapes for the ground pins the last run
-// reports blocked on fine-pitch parts, adds them to the DSN as fixed wiring
-// and routes again from scratch. ok=true when that run leaves fewer
-// unrouted connections (or as many and fewer fixable violations); the caller
-// then imports it. The escapes are re-created after import by ses-repair
-// (they are not in the session).
-func retryWithEscapes(cfg *appConfig, window string, o autorouteOpts, rawText, dsnText string, fixOpt specctra.FixOptions, reqs map[string]specctra.NetRequirement, base string,
-	last fastrouteRun, summary map[string]any, sessions *[]string, stderr io.Writer) (ses, dsnPath, fixed string, runs []fastrouteRun, ok bool) {
-	blocked, err := readFastrouteBlocked(last.Report)
-	if err != nil || len(blocked) == 0 {
-		return
-	}
+// escapeContext reads what escape planning needs from the live board and
+// the DSN: pads, the clearance rule and the via diameter.
+func escapeContext(cfg *appConfig, window, dsn string) ([]pcbPadP, float64, float64, error) {
 	pads, err := fetchPcbPads(cfg, window)
 	if err != nil {
-		fmt.Fprintf(stderr, "auto-escapes: pads unreadable (%v); skipped\n", err)
-		return
+		return nil, 0, 0, fmt.Errorf("pads unreadable: %w", err)
 	}
 	clr := fetchPcbRules(cfg, window).clearanceMil
 	if clr <= 0 {
 		clr = 6
 	}
-	via := specctra.ViaDiameterMil(dsnText, specctra.ViaPadstack(dsnText))
+	via := specctra.ViaDiameterMil(dsn, specctra.ViaPadstack(dsn))
 	if via <= 0 {
 		via = 24
 	}
-	esc, skipped := planInwardEscapes(blocked, pads, isGndNetName, via, clr, 10)
-	info := map[string]any{"blockedEndpoints": len(blocked), "planned": esc, "skipped": skipped}
-	summary["autoEscapes"] = info
-	if len(esc) == 0 {
-		return
-	}
-	fmt.Fprintf(stderr, "auto-escapes: %d blocked ground pin(s) get an inward stub + via; routing again\n", len(esc))
-	opt := fixOpt
-	opt.Escapes = append(append([]specctra.Escape(nil), fixOpt.Escapes...), esc...)
-	text, _, _, err := prepareDSN(rawText, opt, reqs)
+	return pads, clr, via, nil
+}
+
+// plannedPreEscapes reserves escapes for every ground pin of fine-pitch
+// parts with many pins (TQFP-144 GND pins on Gas Module V5) before the first
+// route: reacting to blocked pins one at a time only moved the congestion to
+// the next ground pin (v8: 5 → 4 unrouted).
+func plannedPreEscapes(cfg *appConfig, window, dsn string, have []specctra.Escape) ([]specctra.Escape, []string, error) {
+	pads, clr, via, err := escapeContext(cfg, window, dsn)
 	if err != nil {
-		info["error"] = err.Error()
+		return nil, nil, err
+	}
+	esc, skipped := planPreEscapes(pads, have, isGndNetName, via, clr, 10)
+	return esc, skipped, nil
+}
+
+// retryWithEscapes: while the last run still reports blocked ground pins on
+// fine-pitch parts, add escapes for them (around those already in the DSN)
+// and route again from scratch, up to o.escapeRounds times; a round is kept
+// only when it improves on the best so far. ok=true when any round was kept.
+// ses-repair re-creates the escapes after import (they are not in the SES).
+func retryWithEscapes(cfg *appConfig, window string, o autorouteOpts, rawText, dsnText string, fixOpt specctra.FixOptions, reqs map[string]specctra.NetRequirement, base string,
+	last fastrouteRun, summary map[string]any, sessions *[]string, stderr io.Writer) (ses, dsnPath, fixed string, runs []fastrouteRun, ok bool) {
+	pads, clr, via, err := escapeContext(cfg, window, dsnText)
+	if err != nil {
+		fmt.Fprintf(stderr, "auto-escapes: %v; skipped\n", err)
 		return
 	}
-	path := base + "-esc.dsn"
-	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
-		info["error"] = err.Error()
-		return
+	var rounds []map[string]any
+	defer func() { summary["autoEscapes"] = rounds }()
+	opt := fixOpt
+	best := last
+	for round := 1; round <= o.escapeRounds && best.Unrouted > 0; round++ {
+		blocked, err := readFastrouteBlocked(best.Report)
+		if err != nil || len(blocked) == 0 {
+			return
+		}
+		esc, skipped := planInwardEscapes(blocked, pads, opt.Escapes, isGndNetName, via, clr, 10)
+		info := map[string]any{"round": round, "blockedEndpoints": len(blocked), "planned": esc, "skipped": skipped}
+		rounds = append(rounds, info)
+		if len(esc) == 0 {
+			return
+		}
+		fmt.Fprintf(stderr, "auto-escapes round %d: %d blocked ground pin(s) get an inward stub + via; routing again\n", round, len(esc))
+		next := opt
+		next.Escapes = append(append([]specctra.Escape(nil), opt.Escapes...), esc...)
+		text, _, _, err := prepareDSN(rawText, next, reqs)
+		if err != nil {
+			info["error"] = err.Error()
+			return
+		}
+		path := fmt.Sprintf("%s-esc%d.dsn", base, round)
+		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+			info["error"] = err.Error()
+			return
+		}
+		s, r, err := runFastroute(o.fo, path, fmt.Sprintf("%s-esc%d", base, round), stderr)
+		for _, x := range r {
+			*sessions = append(*sessions, x.Session)
+		}
+		info["dsn"], info["runs"] = path, r
+		if err != nil || len(r) == 0 || !runImproved(best, r[len(r)-1]) {
+			fmt.Fprintf(stderr, "auto-escapes round %d: no improvement; stopping\n", round)
+			info["used"] = false
+			return
+		}
+		info["used"] = true
+		opt, best = next, r[len(r)-1]
+		ses, dsnPath, fixed, runs, ok = s, path, text, r, true
 	}
-	s, r, err := runFastroute(o.fo, path, base+"-esc", stderr)
-	for _, x := range r {
-		*sessions = append(*sessions, x.Session)
-	}
-	info["dsn"], info["runs"] = path, r
-	if err != nil || len(r) == 0 || !runImproved(last, r[len(r)-1]) {
-		fmt.Fprintln(stderr, "auto-escapes: no improvement; keeping the first result")
-		info["used"] = false
-		return
-	}
-	info["used"] = true
-	return s, path, text, r, true
+	return
 }
 
 func newPcbAutorouteCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {

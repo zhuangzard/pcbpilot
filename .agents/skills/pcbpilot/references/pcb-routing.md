@@ -277,11 +277,14 @@ Steps (stdout is one summary JSON, progress on stderr):
 2. fastroute with `--report --diagnose`, `--router.min_trace_width_um=152` (`--min-trace-um`), optional
    `--multi-start`/`--max-time`; while connections stay unrouted or the router reports fixable clearance
    violations, up to `--continue` more runs from the last session (`--initial-session`), stopping when a run does
-   not improve. Remaining fixable violations are listed per run (`fixableList`). If ground connections stay
-   `blocked` on a fine-pitch part (nearest same-part pad < 32 mil), inward escapes are planned from the live pads
-   (pad centre → 30 mil past the pad's inner end, 10 mil, via; skipped when the via or stub would come within
-   clearance of another net's pad) and the board is routed again; the second result is used only if it is
-   better (`autoEscapes` in the summary; `--no-auto-escapes` turns it off). `--router '<cmd> {in} {out}'` keeps
+   not improve. Remaining fixable violations are listed per run (`fixableList`); the pin–pin overlaps between a
+   mounting hole and its screw-head ring (EasyEDA exports both MULTI objects as pins) are unfixable and not counted.
+   Before the first route every ground pin of a fine-pitch part with more than 64 pins (nearest same-part pad
+   < 32 mil) gets an inward escape: pad centre → 30 mil past the pad's inner end, 10 mil, via; a via that would
+   crowd another escape via is staggered 40 mil deeper; skipped when the via or stub would come within clearance of
+   another net's pad (`--no-pre-escape-gnd` turns it off; Gas Module V5 U8: all 14 GND pins). If ground connections
+   still stay `blocked`, up to `--escape-rounds 3` re-routes add escapes for the newly blocked pins, each kept only
+   if better (`autoEscapes[]` in the summary; `--no-auto-escapes` turns it off). `--router '<cmd> {in} {out}'` keeps
    working for any other router.
 3. `--rip-up` removes unlocked routing first (the session already contains it), then the SES import and the
    `pcb ses-repair` fixes (`--no-repair` skips):

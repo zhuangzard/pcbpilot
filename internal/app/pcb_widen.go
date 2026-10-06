@@ -158,14 +158,12 @@ func widenNets(cfg *appConfig, window string, nets map[string]bool, maxMil, clea
 	if dryRun || len(ops) == 0 {
 		return ops, nil
 	}
-	del := make([]string, len(ops))
-	create := make([]specctra.NewTrack, len(ops))
+	fixes := make([]specctra.TrackFix, len(ops))
 	for i, op := range ops {
 		t := op.Track
-		del[i] = t.ID
-		create[i] = specctra.NewTrack{Net: t.Net, Layer: t.Layer, X1: t.X1, Y1: t.Y1, X2: t.X2, Y2: t.Y2, Width: op.NewWidth}
+		fixes[i] = specctra.TrackFix{Delete: t, Create: []specctra.NewTrack{{Net: t.Net, Layer: t.Layer, X1: t.X1, Y1: t.Y1, X2: t.X2, Y2: t.Y2, Width: op.NewWidth}}}
 	}
-	if _, failures, err := replaceTracks(cfg, window, del, create); err != nil {
+	if _, failures, err := replaceTracks(cfg, window, fixes); err != nil {
 		return ops, err
 	} else if len(failures) > 0 {
 		return ops, fmt.Errorf("widen: %d track(s) could not be recreated: %v", len(failures), failures)
