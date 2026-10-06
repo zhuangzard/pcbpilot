@@ -44,6 +44,18 @@ func TestSilkTightDump(t *testing.T) {
 	if err := json.Unmarshal(raw, &snap); err != nil {
 		t.Fatal(err)
 	}
+	if os.Getenv("PCBPILOT_SILK_RESET") != "" {
+		// An exported placement leaves the designators where they were;
+		// live, they move with their parts. Park them off the board so
+		// none is kept or blocks another.
+		for i, t := range snap.Silk {
+			if isVisibleDesignator(t) {
+				b := *t.BBox
+				b.MinX, b.MaxX = b.MinX+100000, b.MaxX+100000
+				snap.Silk[i].BBox = &b
+			}
+		}
+	}
 	opt := defaultSilkTightOpts()
 	labels, sc, font := silkTightInput(&snap, opt)
 	before := silkGate(&snap, font, opt)
@@ -330,5 +342,22 @@ func TestSilkGroupDrawnAndGate(t *testing.T) {
 	snap.Silk = snap.Silk[:len(snap.Silk)-1]
 	if gr := silkGate(snap, font, opt); gr.Pass || !strings.Contains(strings.Join(gr.Items, "\n"), "R62 (1000.0,1000.0) designator hidden") {
 		t.Fatalf("gate without group label %+v", gr.Items)
+	}
+}
+
+// The gate's items do not depend on the order the host lists silk in.
+func TestSilkGateDeterministic(t *testing.T) {
+	snap := silkTestBoard(part0603("R1", 1000, 1000), part0603("R2", 1300, 1000), part0603("R3", 1600, 1000))
+	for i := range snap.Silk {
+		b := pcbRect{MinX: 1960, MinY: float64(500 + 10*i), MaxX: 2030, MaxY: float64(545 + 10*i)} // all off the edge, overlapping
+		snap.Silk[i].BBox = &b
+	}
+	a := silkGate(snap, 45, defaultSilkTightOpts())
+	for i, j := 0, len(snap.Silk)-1; i < j; i, j = i+1, j-1 {
+		snap.Silk[i], snap.Silk[j] = snap.Silk[j], snap.Silk[i]
+	}
+	b := silkGate(snap, 45, defaultSilkTightOpts())
+	if strings.Join(a.Items, "\n") != strings.Join(b.Items, "\n") {
+		t.Fatalf("order-dependent:\n%s\n--\n%s", strings.Join(a.Items, "\n"), strings.Join(b.Items, "\n"))
 	}
 }

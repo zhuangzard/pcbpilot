@@ -331,7 +331,7 @@ pcbpilot pcb auto route --playbook out/playbook.json --out-dir out/live --projec
   `sim post-layout` 不为 fail。结果写进 `summary.json` 的 `gates[]`。
 - 候选布局排序：试布后先比未布通数，再比可修复违规，再比 `loopIR`（意图里 ≥ 0.2 A 的非地网：电流 × 焊盘半周长，
   A·mil，越小越好）；v20 B 两个候选都布通，原先留下的那个漏极回路长。
-- 压降闭环：若失败的门只有后仿真压降（可同时有 intent-widths）（`X drops N mV … over the B mV budget`），按 N/B ×1.15 加宽该网全部走线
+- 压降闭环：若失败的门只有后仿真压降（可同时有 intent-widths；silkscreen、board-manual 不碰铜，不阻挡）（`X drops N mV … over the B mV budget`），按 N/B ×1.15 加宽该网全部走线
   （上限 `--widen-max-mil`，间距与 DRC 守卫照旧），重新对账并重跑全部门禁，最多 2 轮；DRC、对账等其他门失败时不加宽。
   线宽门只按电流，压降还取决于长度：Gas Module V5 B v17 的 SV1_DRV 0.34 A 走内层 1551 mil × 10 mil，压降 57 mV（预算 30）。
 - 会话对账：一段在同层同网铜（走线圆头胶囊、过孔圆盘）覆盖其 90 % 宽度全长时视为在（v17：导入丢了夹在 2.2 mil 缝里的
@@ -354,7 +354,12 @@ pcbpilot pcb auto route --playbook out/playbook.json --out-dir out/live --projec
   内，组内位号**隐藏不删除**（位号属性、BOM、贴片数据不变）。门把被组标签点名、标签在距离内的隐藏位号算通过
   （列在 `info`），其余隐藏位号失败。仍放不下的单个位号/两个一组只报告，引线不自动画；`--silk-no-groups` 关闭分组。
   需要连接器 0.7.2（读回线宽、`pcb.silk.set` 支持 `valueVisible`）；旧连接器不判线宽，隐藏位号会报错。
-  已布完的板直接跑 `pcb silk-align --tight [--dry-run]`，不用重布。
+  已布完的板直接跑 `pcb silk-align --tight [--dry-run]`，不用重布。门的条目按严重度再按文本排序，与宿主列丝印的
+  顺序无关，A/B 两板可直接比。
+- 摆放给位号留位（`pcb auto run`）：从板上丝印取项目字高和平均字宽，每个器件在四边（横/竖、居中/齐两端共 24 个
+  候选）至少要有一个位号空位，空位离本体 5+8 mil（8 mil 是 EasyEDA 器件框含丝印外框比摆放本体大出的量），离别的
+  器件本体 8 mil；没有空位的器件按 2×标签面积计罚，美观阶段不得占掉位号空位，多 seed 评分每个无位位号加 1.5 in，
+  `labelBlocked` 写进 placement 指标。Gas Module V5 B 离线：丝印门问题 24 → 4（无位 17 → 2），加权线长 160 → 166 in。
 - 豁免：`--waivers waivers.json`，每条 `{gate, match, reason, by}` 由人签字；只有一道门的全部失败项都被豁免覆盖
   时才放行，豁免内容写进 summary。没有失败项明细的门（如 DRC 数量）不能豁免。
 

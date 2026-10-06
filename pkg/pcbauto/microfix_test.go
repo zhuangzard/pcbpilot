@@ -153,3 +153,23 @@ func TestPlaceOnEdgeKeepsPadsOffTheEdge(t *testing.T) {
 		}
 	}
 }
+
+// Placement keeps room for every designator: with LabelSpec set, no part
+// ends with all of its label slots blocked, and each slot list has the 24
+// candidates (4 sides × lying/standing × centre/both ends).
+func TestPlaceKeepsLabelRoom(t *testing.T) {
+	b := isoBoard()
+	an := Analyze(b, PowerSpec{}, nil)
+	c := Understand(b, an)
+	ls := &LabelSpec{Height: 45, CharW: 25, Gap: 13, Clear: 8}
+	if n := len(ls.labelSlots(b.Parts[0])); n != 24 {
+		t.Fatalf("%d slots", n)
+	}
+	pr, err := Place(b, an, c, nil, PlaceOptions{Seed: 1, Labels: ls})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pr.Metrics.LabelBlocked != 0 || pr.Metrics.Overlaps != 0 {
+		t.Fatalf("metrics %+v", pr.Metrics)
+	}
+}
