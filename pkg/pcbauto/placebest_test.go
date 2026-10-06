@@ -54,3 +54,22 @@ func TestPlaceBestConcurrent(t *testing.T) {
 		}
 	}
 }
+
+func TestApplyStartPoses(t *testing.T) {
+	b := aesPlaceBoard()
+	src := b.Clone()
+	ref := src.Parts[0].Ref
+	q := src.Part(ref)
+	q.MoveTo(Point{q.Pos.X + 100, q.Pos.Y + 50}, q.Rotation)
+	p := b.Part(ref)
+	padBefore := p.Pads[0].Box.C
+	if n := ApplyStartPoses(b, src); n != 1 {
+		t.Fatalf("moved %d parts, want 1", n)
+	}
+	if p.Pos != q.Pos {
+		t.Fatalf("pose not applied: %v vs %v", p.Pos, q.Pos)
+	}
+	if d := p.Pads[0].Box.C.Sub(padBefore); math.Abs(d.X-100) > 1e-6 || math.Abs(d.Y-50) > 1e-6 {
+		t.Fatalf("pads did not follow: %v", d)
+	}
+}

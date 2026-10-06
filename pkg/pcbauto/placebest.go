@@ -95,3 +95,23 @@ func PlaceBest(b *Board, prep func(*Board) (*Analysis, *Circuit, error), m *Mech
 	results[best].Notes = append(results[best].Notes, fmt.Sprintf("best of %d seeds: seed %d (score %.1f)", n, trials[best].Seed, trials[best].Score))
 	return results[best], trials, nil
 }
+
+// ApplyStartPoses moves b's parts to the poses of the same designators in
+// src (another board's snapshot: board-v6A.json, board.placed.json) so a
+// placement can start from a known good layout although the two boards'
+// primitiveIds differ. Fixed parts, parts missing in src and parts on the
+// other side keep their pose. Returns how many moved.
+func ApplyStartPoses(b, src *Board) int {
+	moved := 0
+	for _, p := range b.Parts {
+		q := src.Part(p.Ref)
+		if q == nil || p.Fixed || q.Side != p.Side {
+			continue
+		}
+		if q.Pos != p.Pos || q.Rotation != p.Rotation {
+			p.MoveTo(q.Pos, q.Rotation)
+			moved++
+		}
+	}
+	return moved
+}

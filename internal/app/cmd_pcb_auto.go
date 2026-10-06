@@ -254,6 +254,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 		var noFeedback, postSim bool
 		var routerSel string
 		var placeSeeds int
+		var startPoses string
 		var keepBoardFills bool
 		var fbVerify, fbLoop int
 		c := &cobra.Command{
@@ -309,6 +310,23 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 				original := map[string]pcbauto.Placement{}
 				for _, p := range b.Parts {
 					original[p.Ref] = pcbauto.Placement{Ref: p.Ref, ID: p.ID, X: p.Pos.X, Y: p.Pos.Y, Rot: p.Rotation, Side: p.Side}
+				}
+				if startPoses != "" && !refine {
+					fmt.Fprintln(stderr, "warning: --start-poses only matters with --refine: a fresh placement (no --refine) rebuilds the blocks on a grid around the fixed cores")
+				}
+				if startPoses != "" {
+					// Start from another board's layout (by designator): the
+					// playbook still moves this board's own primitives from
+					// their live poses (original above).
+					raw, err := os.ReadFile(startPoses)
+					if err != nil {
+						return err
+					}
+					src, err := pcbauto.FromSnapshot(raw)
+					if err != nil {
+						return fmt.Errorf("--start-poses %s: %w", startPoses, err)
+					}
+					fmt.Fprintf(stderr, "start poses: %d part(s) moved to their pose in %s\n", pcbauto.ApplyStartPoses(b, src), startPoses)
 				}
 				var replace pcbauto.MechReplace
 				if replaceJournal != "" {
@@ -679,6 +697,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
 		c.Flags().BoolVar(&tidyOnly, "tidy-only", false, "with --place: keep the current placement and run only the placement aesthetics stage on it (orientation, symmetry copies, row/column alignment, even pitch, grid snap) — every move judged against the safety/electrical tiers and the --style slack, then routed with and without it and kept only if it routes no worse")
 		c.Flags().StringSliceVar(&only, "only", nil, "with --place --refine: move only these designators (local adjustment of a confirmed layout), e.g. --only C7,D3")
 		c.Flags().BoolVar(&noRoute, "no-route", false, "stop after placement / stackup")
+		c.Flags().StringVar(&startPoses, "start-poses", "", "with --place --refine: refine from the part poses (by designator) of another board's snapshot (pcb dump / board.placed.json); the playbook still uses this board's primitive ids")
 		c.Flags().IntVar(&placeSeeds, "place-seeds", 6, "placement without engine routing (fastroute mode, --no-route): run this many seeds (from --seed) in parallel and keep the best — illegal counts, then critical relations, then wirelength (Gas V5: 121.9–156.5 in across 8 seeds from one start)")
 		c.Flags().StringVar(&routerSel, "router", "auto", "auto (fastroute when installed, else internal) | fastroute (placement/stackup plan; route live with 'pcb auto route') | internal (the built-in router)")
 		c.Flags().BoolVar(&keepBoardFills, "keep-board-fills", false, "with --mech --place: keep existing board MULTI fills and rule regions (default deletes hole-size fills and regions outside the new outline or under a new keep-out: leftovers from 'board copy')")
