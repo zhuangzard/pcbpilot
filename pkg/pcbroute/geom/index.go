@@ -139,8 +139,12 @@ func (ix *Index) Nearby(r Rect, layer LayerID, fn func(Entry) bool) bool {
 // every net, and a query with net 0 treats everything as foreign (spec 01 §4
 // "own net"). clr gives the clearance an entry needs (spec 03 §2: the pair
 // value of the two classes); nil means rmax for all. clr must not exceed rmax,
-// which bounds the search window. It returns false when fn stopped.
+// which bounds the search window. It returns false when fn stopped. It panics
+// when rmax exceeds MaxCoord, even if no entry is near.
 func (ix *Index) Hits(s Shape, layer LayerID, net NetID, rmax int64, clr func(Entry) int64, fn func(Entry) bool) bool {
+	if rmax > MaxCoord {
+		panic("geom: clearance outside MaxCoord")
+	}
 	if rmax <= 0 {
 		return true
 	}

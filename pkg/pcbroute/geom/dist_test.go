@@ -248,3 +248,22 @@ func TestOverflowAssertion(t *testing.T) {
 	}()
 	NewIndex([]Entry{{ID: 1, Shape: Circle{C: Pt{0, big}}}}, Rect{}, 1000)
 }
+
+// Out-of-range offsets panic instead of giving a wrong hull or a silent miss.
+func TestOffsetAssertions(t *testing.T) {
+	ix := NewIndex(nil, Rect{0, 0, 1000, 1000}, 100)
+	for name, f := range map[string]func(){
+		"Octagon d < 0":    func() { Octagon(Circle{R: 10}, -100) },
+		"Octagon r > Max":  func() { Octagon(Circle{R: MaxCoord}, 1) },
+		"Collides r > Max": func() { ix.Collides(Circle{}, 0, 1, MaxCoord+1) },
+	} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("%s did not panic", name)
+				}
+			}()
+			f()
+		}()
+	}
+}

@@ -63,7 +63,7 @@ func coreOf(s Shape, buf *[4]Pt) core {
 // that contains s grown by d ≥ 0: the 45°-hull that spec 02 §3.3 uses as a
 // shove obstacle. Vertices are counter-clockwise and integer; the containment
 // is exact because the diagonal offsets are rounded up. An empty shape gives
-// an empty Poly.
+// an empty Poly. It panics when d < 0 or the grown radius exceeds MaxCoord.
 func Octagon(s Shape, d int64) Poly {
 	var buf [4]Pt
 	c := coreOf(s, &buf)
@@ -71,6 +71,9 @@ func Octagon(s Shape, d int64) Poly {
 		return Poly{}
 	}
 	r := c.r + d
+	if d < 0 || r > MaxCoord {
+		panic("geom: octagon offset outside [0, MaxCoord]")
+	}
 	k := int64(ceilSqrt(2 * uint64(r) * uint64(r))) // r·√2 rounded up
 	p0 := c.pts[0]
 	x0, x1, y0, y1 := p0.X, p0.X, p0.Y, p0.Y
