@@ -123,3 +123,77 @@ func (p *sexprParser) parse() (*node, error) {
 		return &node{Atom: p.src[start:p.pos]}, nil
 	}
 }
+
+// Expr is the exported form of one S-expression, for readers outside this
+// package (pkg/pcbroute/dsn, PLAN.md Q12). An atom has IsList false.
+type Expr struct {
+	Atom   string
+	Quoted bool
+	List   []*Expr
+	IsList bool
+}
+
+// ParseExpr parses one top-level S-expression with the same rules as the
+// package's own DSN/SES readers.
+func ParseExpr(src string) (*Expr, error) {
+	n, err := parseSexpr(src)
+	if err != nil {
+		return nil, err
+	}
+	return exportNode(n), nil
+}
+
+func exportNode(n *node) *Expr {
+	e := &Expr{Atom: n.Atom, Quoted: n.Quoted, IsList: n.isList}
+	if n.isList {
+		e.List = make([]*Expr, len(n.List))
+		for i, c := range n.List {
+			e.List[i] = exportNode(c)
+		}
+	}
+	return e
+}
+
+// Head returns the first atom of a list ("" for atoms and empty lists).
+func (e *Expr) Head() string {
+	if !e.IsList || len(e.List) == 0 || e.List[0].IsList {
+		return ""
+	}
+	return e.List[0].Atom
+}
+
+// Children returns the sub-lists whose head is name.
+func (e *Expr) Children(name string) []*Expr {
+	var out []*Expr
+	for _, c := range e.List {
+		if c.IsList && c.Head() == name {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// Child returns the first sub-list whose head is name, or nil.
+func (e *Expr) Child(name string) *Expr {
+	for _, c := range e.List {
+		if c.IsList && c.Head() == name {
+			return c
+		}
+	}
+	return nil
+}
+
+// Atoms returns every atom after the head, skipping sub-lists (unlike the
+// internal atoms helper, which stops at the first list).
+func (e *Expr) Atoms() []string {
+	if len(e.List) < 2 {
+		return nil
+	}
+	var out []string
+	for _, c := range e.List[1:] {
+		if !c.IsList {
+			out = append(out, c.Atom)
+		}
+	}
+	return out
+}
