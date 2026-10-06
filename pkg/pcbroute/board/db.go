@@ -19,15 +19,22 @@ type builder struct {
 }
 
 // NewBuilder returns an empty board Builder. Items get IDs 1, 2, … in the
-// order they are added; nets get IDs 1, 2, ….
+// order they are added; nets get IDs 1, 2, …. The DB shares the builder's
+// slices, so adding after Build panics.
 func NewBuilder() Builder { return &builder{} }
 
 func (b *builder) AddNet(name string) geom.NetID {
+	if b.built {
+		panic("board: AddNet after Build")
+	}
 	b.nets = append(b.nets, name)
 	return geom.NetID(len(b.nets))
 }
 
 func (b *builder) AddItem(it Item) ItemID {
+	if b.built {
+		panic("board: AddItem after Build")
+	}
 	it.ID = ItemID(len(b.items) + 1)
 	b.items = append(b.items, it)
 	return it.ID
