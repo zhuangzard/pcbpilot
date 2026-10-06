@@ -12,7 +12,6 @@ import (
 	"io"
 	"math"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/zhuangzard/pcbpilot/internal/pcb/specctra"
@@ -121,7 +120,7 @@ func decodeAny(src []any, dst any) error {
 }
 
 // widenNets plans and (unless dryRun) applies planWiden on the live board.
-// New tracks are created before the old ones are deleted.
+// The originals are deleted, then recreated wider (see replaceTracks).
 func widenNets(cfg *appConfig, window string, nets map[string]bool, maxMil, clearanceMil float64, dryRun bool, stderr io.Writer) ([]widenOp, error) {
 	if !dryRun {
 		// The ids below are deleted: read them from a reloaded board.
@@ -159,16 +158,17 @@ func widenNets(cfg *appConfig, window string, nets map[string]bool, maxMil, clea
 	if dryRun || len(ops) == 0 {
 		return ops, nil
 	}
-	var del []string
-	for _, op := range ops {
+	del := make([]string, len(ops))
+	create := make([]specctra.NewTrack, len(ops))
+	for i, op := range ops {
 		t := op.Track
-		if err := createPcbTrack(cfg, window, specctra.NewTrack{Net: t.Net, Layer: t.Layer, X1: t.X1, Y1: t.Y1, X2: t.X2, Y2: t.Y2, Width: op.NewWidth}); err != nil {
-			return ops, fmt.Errorf("widen %s: %w", t.ID, err)
-		}
-		del = append(del, t.ID)
+		del[i] = t.ID
+		create[i] = specctra.NewTrack{Net: t.Net, Layer: t.Layer, X1: t.X1, Y1: t.Y1, X2: t.X2, Y2: t.Y2, Width: op.NewWidth}
 	}
-	if _, err := requestActionTimed(cfg, "pcb.route.delete", window, map[string]any{"primitiveIds": del, "kind": "track"}, 5*time.Minute); err != nil {
-		return ops, fmt.Errorf("delete widened originals: %w", err)
+	if _, failures, err := replaceTracks(cfg, window, del, create); err != nil {
+		return ops, err
+	} else if len(failures) > 0 {
+		return ops, fmt.Errorf("widen: %d track(s) could not be recreated: %v", len(failures), failures)
 	}
 	return ops, nil
 }

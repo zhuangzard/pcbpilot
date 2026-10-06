@@ -289,11 +289,12 @@ Steps (stdout is one summary JSON, progress on stderr):
    - neck-down widths are replaced by the net-rule width and collinear same-net pieces are merged keeping the
      widest → the merged track is deleted and recreated piece by piece with the routed widths;
    - the DSN's `(type fix)` wiring is not in the session → missing fixed tracks/vias are created.
-   New copper is created before the replaced track is deleted. Tracks no session segment explains are left and
+   The replaced track is deleted before its pieces are created: EasyEDA merges a new track into an overlapping
+   same-net, same-layer track and keeps only the widest (probed live 2026-10-06), so creating first lost the narrow
+   pieces and made `pcb widen` delete ids that no longer existed. Tracks no session segment explains are left and
    listed under `unmatched`.
-   Every read whose ids are later deleted comes after save + reload (before DSN export, before the repair and
-   the fixed-wiring reads, before `pcb widen`): right after writes the editor can serve stale reads (`staleRisk`);
-   on 2026-10-06 a line list taken after the repair still returned 38 deleted ids and the widen delete failed.
+   Reads that drive deletes also come after save + reload (before DSN export, the repair and fixed-wiring reads,
+   `pcb widen`), since the editor can serve stale reads right after writes (`staleRisk`).
 4. pour rebuild → save → reload → pour rebuild → native DRC → `pad-net-diff.py` (needs `--sch-connectivity`,
    one `sch connectivity` file per page of this board; otherwise reported as skipped).
 

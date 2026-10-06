@@ -194,6 +194,33 @@ func listPcbVias(cfg *appConfig, window string) ([][2]float64, []string, error) 
 	return pts, nets, nil
 }
 
+// replaceTracks deletes tracks, then creates their replacements. The order
+// matters: EasyEDA merges a new track into an existing same-net, same-layer
+// track it overlaps and keeps only the widest (probed live 2026-10-06 on
+// 3.2.149: a wider copy absorbs the old track and its id disappears; a
+// narrower copy, or a narrow piece inside a wide track, is itself absorbed).
+// Creating first therefore made `pcb widen` delete ids that no longer
+// existed and made the neck-down restore lose the narrow pieces, then delete
+// the wide track. Collinear pieces that only touch end to end do not merge.
+// A failed create is reported, not retried; the caller sees the count.
+func replaceTracks(cfg *appConfig, window string, del []string, create []specctra.NewTrack) (created int, failures []map[string]string, err error) {
+	for i := 0; i < len(del); i += 200 {
+		chunk := del[i:min(i+200, len(del))]
+		if _, err := requestActionTimed(cfg, "pcb.route.delete", window,
+			map[string]any{"primitiveIds": chunk, "kind": "track"}, 5*time.Minute); err != nil {
+			return 0, nil, fmt.Errorf("delete replaced tracks: %w", err)
+		}
+	}
+	for _, nt := range create {
+		if err := createPcbTrack(cfg, window, nt); err != nil {
+			failures = append(failures, map[string]string{"net": nt.Net, "at": fmt.Sprintf("(%.1f,%.1f)-(%.1f,%.1f) L%d", nt.X1, nt.Y1, nt.X2, nt.Y2, nt.Layer), "error": err.Error()})
+			continue
+		}
+		created++
+	}
+	return created, failures, nil
+}
+
 func createPcbTrack(cfg *appConfig, window string, t specctra.NewTrack) error {
 	_, err := requestAction(cfg, "pcb.line.create", window, map[string]any{
 		"net": t.Net, "layer": t.Layer, "lineWidth": t.Width,
@@ -205,8 +232,8 @@ func createPcbTrack(cfg *appConfig, window string, t specctra.NewTrack) error {
 // repairImportedSession fixes the EasyEDA importAutoRouteSes defects on the
 // live board: inner tracks on the wrong layer id, neck-down widths replaced
 // by the net-rule width (collinear merges keep the widest), and the DSN's
-// fixed wiring that never reaches the session. New copper is created before
-// the replaced track is deleted, so a failed call never loses a connection.
+// fixed wiring that never reaches the session. The replaced tracks are
+// deleted before the new pieces are created (see replaceTracks).
 func repairImportedSession(cfg *appConfig, window string, ses, dsn string, dryRun bool, stderr io.Writer) (*sesRepairSummary, error) {
 	wiring, err := specctra.ParseSES(ses)
 	if err != nil {
@@ -230,27 +257,15 @@ func repairImportedSession(cfg *appConfig, window string, ses, dsn string, dryRu
 		len(plan.Fixes), plan.LayerMoves, plan.WidthRestores, len(plan.Unmatched))
 	if !dryRun {
 		var del []string
+		var create []specctra.NewTrack
 		for _, f := range plan.Fixes {
-			ok := true
-			for _, nt := range f.Create {
-				if err := createPcbTrack(cfg, window, nt); err != nil {
-					sum.Failures = append(sum.Failures, map[string]string{"track": f.Delete.ID, "error": err.Error()})
-					ok = false
-					break
-				}
-				sum.TracksCreated++
-			}
-			if ok {
-				del = append(del, f.Delete.ID)
-			}
+			del = append(del, f.Delete.ID)
+			create = append(create, f.Create...)
 		}
-		for i := 0; i < len(del); i += 200 {
-			chunk := del[i:min(i+200, len(del))]
-			if _, err := requestActionTimed(cfg, "pcb.route.delete", window,
-				map[string]any{"primitiveIds": chunk, "kind": "track"}, 5*time.Minute); err != nil {
-				return sum, fmt.Errorf("delete replaced tracks: %w", err)
-			}
-			sum.TracksDeleted += len(chunk)
+		n, failures, err := replaceTracks(cfg, window, del, create)
+		sum.TracksDeleted, sum.TracksCreated, sum.Failures = len(del), n, failures
+		if err != nil {
+			return sum, err
 		}
 	}
 
