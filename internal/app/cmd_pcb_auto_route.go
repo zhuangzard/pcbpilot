@@ -204,7 +204,7 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 
 			// 2c. Widen every under-width track towards its intent width.
 			wi, err := widenToIntent(cfg, *window, in, stderr)
-			summary["widenToIntent"] = len(wi)
+			summary["widenToIntent"] = wi
 			if err != nil {
 				return finish(err)
 			}
@@ -264,7 +264,7 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 					}
 				}
 				ops, err := widenNets(cfg, *window, nets, widenMax, 0, false, stderr)
-				summary["widened"] = len(ops)
+				summary["widened"] = ops
 				if err != nil {
 					return finish(err)
 				}

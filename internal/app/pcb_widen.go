@@ -28,6 +28,8 @@ type widenVia struct {
 type widenOp struct {
 	Track    specctra.Track `json:"track"`
 	NewWidth float64        `json:"newWidth"`
+	// SteppedBack records the DRC guard's reductions (from→to).
+	SteppedBack []string `json:"steppedBack,omitempty"`
 }
 
 // planWiden returns the tracks of nets that can grow by more than 2 mil.
@@ -245,6 +247,12 @@ func widenLive(cfg *appConfig, window string, plan func([]specctra.Track, []wide
 		if err := saveAndReload(cfg, window); err != nil {
 			return ops, err
 		}
+		// Pours must flow around the wider tracks before DRC judges them:
+		// unrebuilt pours made 43 of 46 widened drain tracks look like
+		// clearance violations and step back (Gas Module v13 A).
+		if _, err := requestActionTimed(cfg, "pcb.pour.rebuild", window, map[string]any{}, 20*time.Minute); err != nil {
+			return ops, fmt.Errorf("pour rebuild before the widen DRC check: %w", err)
+		}
 		res, err := requestActionTimed(cfg, "pcb.drc.check", window, nil, 20*time.Minute)
 		if err != nil {
 			return ops, drcTimeoutHint(err, stderr)
@@ -274,6 +282,7 @@ func widenLive(cfg *appConfig, window string, plan func([]specctra.Track, []wide
 		for i := range ops {
 			for _, f := range back {
 				if f.Delete.Net == ops[i].Track.Net && f.Delete.Layer == ops[i].Track.Layer && sameEnds(f.Delete, ops[i].Track) {
+					ops[i].SteppedBack = append(ops[i].SteppedBack, fmt.Sprintf("%.2f→%.2f mil (DRC clearance)", f.Delete.Width, f.Create[0].Width))
 					ops[i].NewWidth = f.Create[0].Width
 				}
 			}
