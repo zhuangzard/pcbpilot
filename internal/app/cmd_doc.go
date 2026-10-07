@@ -472,7 +472,7 @@ func reloadDocumentByUUID(cfg *appConfig, win, target string) (string, error) {
 	if docType == "pcb" {
 		saveAction = "pcb.save"
 	}
-	if _, err := requestAction(cfg, saveAction, win, nil); err != nil {
+	if err := saveRetrying(cfg, win, saveAction, saveRetryBudget, nil); err != nil {
 		return docType, fmt.Errorf("save before reload failed: %w", err)
 	}
 	// The typed close action verifies BOTH live identities and captures the
@@ -529,5 +529,36 @@ func reloadDocumentByUUID(cfg *appConfig, win, target string) (string, error) {
 			return docType, fmt.Errorf("document %s did not become active within 10s after reopen", target)
 		}
 		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+// saveRetryBudget bounds how long a save waits for the connector to come
+// back (Gas Module V5 B v23: after 2.5 h of repair under load 151 the save
+// failed with "connector disconnected before responding" and the run died).
+var saveRetryBudget = 2 * time.Minute
+
+// saveRetrying runs a save action, and when it fails waits for the
+// connector to answer again (document.current) and saves once more, until
+// budget runs out. Saving is idempotent, so a repeat is safe.
+func saveRetrying(cfg *appConfig, win, action string, budget time.Duration, sleep func(time.Duration)) error {
+	if sleep == nil {
+		sleep = time.Sleep
+	}
+	deadline := time.Now().Add(budget)
+	for attempt := 1; ; attempt++ {
+		_, err := requestActionTimed(cfg, action, win, nil, 5*time.Minute)
+		if err == nil {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("%s failed after %d attempt(s): %w", action, attempt, err)
+		}
+		// Wait for the connector to answer a cheap read before retrying.
+		for time.Now().Before(deadline) {
+			sleep(5 * time.Second)
+			if _, perr := requestAction(cfg, "document.current", win, nil); perr == nil {
+				break
+			}
+		}
 	}
 }
