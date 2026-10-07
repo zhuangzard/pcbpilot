@@ -455,7 +455,7 @@ var padNetDiffAsset = skillAsset{
 // Module V5 B 2026-10-06, pcb widen). Every read that drives a delete goes
 // after one of these.
 func saveAndReload(cfg *appConfig, window string) error {
-	if _, err := requestActionTimed(cfg, "pcb.save", window, nil, 5*time.Minute); err != nil {
+	if err := saveRetrying(cfg, window, "pcb.save", saveRetryBudget, nil); err != nil {
 		return fmt.Errorf("save: %w", err)
 	}
 	_, active, win, err := discoverDocs(cfg, window)

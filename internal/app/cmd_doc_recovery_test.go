@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDocGuardRecoversMissingActivePCB(t *testing.T) {
@@ -116,5 +117,44 @@ func TestDocGuardLiveUUIDRequiresMatchingIdentity(t *testing.T) {
 				t.Fatal("inconsistent live identity accepted")
 			}
 		})
+	}
+}
+
+// Gas Module V5 B v23: the save after 2.5 h of repair failed once with the
+// connector gone; saveRetrying waits for it to answer and saves again.
+func TestSaveRetryingAfterDisconnect(t *testing.T) {
+	var calls []string
+	saves := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			_, _ = w.Write([]byte(`{"service":"pcbpilot","windows":[{"windowId":"w1"}]}`))
+			return
+		}
+		var req struct {
+			Action string `json:"action"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		calls = append(calls, req.Action)
+		ok := true
+		if req.Action == "pcb.save" {
+			saves++
+			ok = saves > 1
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": ok, "result": map[string]any{}, "context": map[string]any{"documentUuid": "pcb1", "documentType": "pcb"},
+			"error": map[string]any{"code": "CONNECTOR_DISCONNECTED", "message": "connector disconnected before responding"}})
+	}))
+	defer srv.Close()
+	host, port, _ := strings.Cut(strings.TrimPrefix(srv.URL, "http://"), ":")
+	cfg := &appConfig{host: host, ports: port + "-" + port}
+	if err := saveRetrying(cfg, "w1", "pcb.save", time.Minute, func(time.Duration) {}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(calls, ",") != "pcb.save,document.current,pcb.save" {
+		t.Fatalf("calls %v", calls)
+	}
+	// A save that keeps failing gives up at the budget.
+	saves = -1000
+	if err := saveRetrying(cfg, "w1", "pcb.save", 0, func(time.Duration) {}); err == nil {
+		t.Fatal("expected failure")
 	}
 }
