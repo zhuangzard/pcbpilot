@@ -411,7 +411,7 @@ func listWindows(cfg *appConfig) ([]healthWindow, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	scan := scanHealth(ctx, hostPortOptions{host: cfg.host, portStart: portStart, portEnd: portEnd})
+	scan := scanHealthWaiting(ctx, hostPortOptions{host: cfg.host, portStart: portStart, portEnd: portEnd})
 	if scan.Found == nil {
 		return nil, fmt.Errorf("no pcbpilot daemon found on %s:%s (start it with `pcbpilot daemon start`)", cfg.host, scan.Ports)
 	}
@@ -895,7 +895,7 @@ func postAction(cfg *appConfig, action, window string, payload any, timeout time
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	scan := scanHealth(ctx, hostPortOptions{host: cfg.host, portStart: portStart, portEnd: portEnd})
+	scan := scanHealthWaiting(ctx, hostPortOptions{host: cfg.host, portStart: portStart, portEnd: portEnd})
 	if scan.Found == nil {
 		return nil, fmt.Errorf("no pcbpilot daemon found on %s:%s (start it with `pcbpilot daemon start`)", cfg.host, scan.Ports)
 	}
@@ -1114,4 +1114,28 @@ func serviceName(body []byte) string {
 		return ""
 	}
 	return payload.Service
+}
+
+// daemonWaitBudget is how long a request keeps looking for a daemon that
+// does not answer its health check. 0 (the default) fails at once — an
+// interactive command with no daemon should say so. Long flows (pcb auto
+// run / route) set it: Gas Module V5 B's route died after 6865 s when the
+// live daemon, starved at load 115, missed one health scan.
+var daemonWaitBudget time.Duration
+
+// scanHealthWaiting is scanHealth, rescanned every 3 s up to
+// daemonWaitBudget while no daemon answers.
+func scanHealthWaiting(ctx context.Context, o hostPortOptions) healthResult {
+	scan := scanHealth(ctx, o)
+	if scan.Found != nil || daemonWaitBudget <= 0 {
+		return scan
+	}
+	deadline := time.Now().Add(daemonWaitBudget)
+	for scan.Found == nil && time.Now().Before(deadline) {
+		time.Sleep(3 * time.Second)
+		sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		scan = scanHealth(sctx, o)
+		cancel()
+	}
+	return scan
 }

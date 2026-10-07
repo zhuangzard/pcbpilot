@@ -266,6 +266,7 @@ preview.svg and report.md; execute with 'pcbpilot apply playbook.json'.`,
   pcbpilot apply out/playbook.json --project demo --dry-run`,
 			Args: cobra.NoArgs,
 			RunE: func(cmd *cobra.Command, _ []string) error {
+				daemonWaitBudget = 2 * time.Minute // a starved daemon must not end the run
 				aesStyle, serr := resolveAesStyle(in.style, in.styleFile)
 				if serr != nil {
 					return serr
