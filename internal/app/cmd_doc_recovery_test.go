@@ -2,6 +2,8 @@ package app
 
 import (
 	"encoding/json"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -156,5 +158,44 @@ func TestSaveRetryingAfterDisconnect(t *testing.T) {
 	saves = -1000
 	if err := saveRetrying(cfg, "w1", "pcb.save", 0, func(time.Duration) {}); err == nil {
 		t.Fatal("expected failure")
+	}
+}
+
+// Gas Module V5 B: the live daemon, starved at load 115, missed one health
+// scan and a 6865 s route died. With daemonWaitBudget set, a request keeps
+// scanning until the daemon answers.
+func TestDaemonWaitBudget(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			_, _ = w.Write([]byte(`{"service":"pcbpilot","windows":[{"windowId":"w1"}]}`))
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{}, "context": map[string]any{}})
+	})}
+	go func() {
+		time.Sleep(4 * time.Second)
+		l, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+		if err != nil {
+			return
+		}
+		_ = srv.Serve(l)
+	}()
+	defer srv.Close()
+	cfg := &appConfig{host: "127.0.0.1", ports: fmt.Sprintf("%d-%d", port, port)}
+	old := daemonWaitBudget
+	defer func() { daemonWaitBudget = old }()
+	daemonWaitBudget = 0
+	if _, err := requestAction(cfg, "document.current", "w1", nil); err == nil {
+		t.Fatal("no budget: a missing daemon must fail at once")
+	}
+	daemonWaitBudget = 30 * time.Second
+	if _, err := requestAction(cfg, "document.current", "w1", nil); err != nil {
+		t.Fatalf("with a budget the late daemon must be found: %v", err)
 	}
 }

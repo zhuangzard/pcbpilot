@@ -134,6 +134,8 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
       --escapes escapes.json --sch-connectivity p1.json --sch-connectivity p2.json \
       --widen-net SV1_DRV,SV2_DRV --sim sim.json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// A starved daemon must not end a run of hours (see daemonWaitBudget).
+			daemonWaitBudget = 2 * time.Minute
 			o.timeoutSet = cmd.Flags().Changed("router-timeout")
 			o.minTraceSet = cmd.Flags().Changed("min-trace-um")
 			if o.intentPath == "" {
@@ -197,7 +199,20 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 				ac.SetArgs(a)
 				ac.SetOut(stderr)
 				ac.SetErr(stderr)
-				if err := ac.Execute(); err != nil {
+				err := ac.Execute()
+				// A step that failed under load (v23 B: place-C7 of 188, the
+				// daemon starved) resumes from the journal instead of ending
+				// the run; the ok steps are not repeated.
+				for retry := 1; err != nil && retry <= applyResumes; retry++ {
+					fmt.Fprintf(stderr, "apply %s failed (%v); resuming from the journal in 30 s (%d/%d)\n", path, err, retry, applyResumes)
+					time.Sleep(30 * time.Second)
+					rc := newApplyCmd(cfg, stderr, stderr)
+					rc.SetArgs(append(append([]string{}, a...), "--resume"))
+					rc.SetOut(stderr)
+					rc.SetErr(stderr)
+					err = rc.Execute()
+				}
+				if err != nil {
 					return fmt.Errorf("apply %s: %w", path, err)
 				}
 				return nil
@@ -746,3 +761,6 @@ func dropExistingMechSteps(steps []playbookStep, fills, regions []any) ([]playbo
 	}
 	return kept, skipped
 }
+
+// applyResumes bounds how often pcb auto route resumes a failed playbook.
+const applyResumes = 2
