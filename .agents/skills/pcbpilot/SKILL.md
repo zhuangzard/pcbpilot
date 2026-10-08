@@ -100,6 +100,7 @@ metadata:
 | 原理图验收后推导设计意图：电路功能、每网电压/电流/线宽/间距/阻抗/网络类、电压域与绝缘对、设计提示（`intent derive` → `intent.json`） | [design-intent.md](references/design-intent.md) |
 | 布线完成后在**真实铜皮**上做设计后仿真：每负载焊盘压降、过孔电流 vs 载流量、电流密度与颈部/拐角、每层温度热图、器件板温/Tj、线宽/拐角/过孔修改建议、Elmer 交叉校验（`pcb dump --include-copper` → `sim post-layout` → `report design --post`） | [post-layout-sim.md](references/post-layout-sim.md) |
 | 每次运行后生成/更新客户设计报告（仿真图表、器件余量、工程计算、测试点计划、制造与上电注意；版本化 vN + 变更记录，`report design` / `--report-dir`） | [design-report.md](references/design-report.md)、[模板](templates/design-report/README.md) |
+| 给软件/调试/测试工程师的板卡使用说明书：接头位置图、逐接口脚表与焊盘图、电源要求、I/O、LED、测量点、上电步骤、软件接口、故障排查、文档与板数据对账（`report manual`，单个自包含 HTML） | [board-manual.md](references/board-manual.md)、[模板](templates/board-manual/manual.html.tmpl) |
 | 机械要求 → 板框/孔/接口/禁布区（`mech.json`） | [recipes/mech-spec.md](references/recipes/mech-spec.md) |
 | 高压/低压分区与隔离、爬电距离 | [recipes/hv-isolation.md](references/recipes/hv-isolation.md) |
 | 高速：差分、阻抗、等长、参考平面 | [recipes/high-speed.md](references/recipes/high-speed.md) |
@@ -125,6 +126,10 @@ metadata:
 
 ## 不可省略的事实
 
+- **板卡使用说明书是硬要求**：每次布局、布线或设计修改后，`pcb auto route` / `pcb gate` 自动重新生成
+  `<out-dir>/manual/<Board>_使用说明.html`（版本化 vN），并在 `gates[]` 里给出 `board-manual` 结果。
+  `board-manual` 不通过的板不算完成；说明资料写在 `pcbpilot.manual-notes.json`，标准见
+  [board-manual.md](references/board-manual.md)。`--no-manual` 只能配签名 waiver 使用。
 - 原理图坐标 y 向上、网格 5 raw；PCB 命令通常用 mil。单位、原点、anchor 与 bbox center
   必须在参数中写明，不从截图猜坐标。
 - 核心与专属外围作为整体表达；同网、同框、零碰撞或高分不证明外围归属或真实直连正确。

@@ -51,6 +51,7 @@ code{font-size:12px;word-break:break-all}
 <p><span class="badge verdict {{verdictClass $R.Verdict.Status}}">总体结论：{{$R.Verdict.Status}}</span></p>
 <div class="kv">
 <div>客户 Customer</div><div>{{or $R.Customer "—"}}</div>
+{{with $R.Manual}}<div>使用说明书 Manual</div><div><a href="{{.}}">{{.}}</a></div>{{end}}
 <div>版本 Version</div><div>{{$R.VersionLabel}}{{with $R.Changes}}（相对 {{.Previous}}）{{end}}</div>
 <div>生成时间</div><div>{{$R.GeneratedAt}}</div>
 <div>工具</div><div>pcbpilot {{$R.Tools.Pcbpilot}}{{with $R.Tools.Host}} · 宿主 {{.}}{{end}}{{with $R.Tools.Connector}} · connector {{.}}{{end}}</div>

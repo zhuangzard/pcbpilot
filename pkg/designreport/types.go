@@ -81,6 +81,9 @@ type Report struct {
 	Data map[string]string `json:"data,omitempty"`
 	// Package is the zip of this version (reports/<name>/<Package>).
 	Package string `json:"package,omitempty"`
+	// Manual is the board user manual inside this version (manual/…html,
+	// pcbpilot report manual), linked from the cover.
+	Manual string `json:"manual,omitempty"`
 	// Missing lists the sections (or parts of them) left out and why.
 	Missing []Missing `json:"missing,omitempty"`
 	// ProcessSkips lists the steps and sections the project's process
