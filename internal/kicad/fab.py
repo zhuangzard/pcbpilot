@@ -49,6 +49,8 @@ def set_pcb(path, assign, field, accepted):
             f = fp.GetField(name)
             if f is not None:
                 f.SetVisible(False)
+                # Keep the hidden field off the silkscreen layers.
+                f.SetLayer(pcbnew.B_Fab if fp.GetLayer() == pcbnew.B_Cu else pcbnew.F_Fab)
         changed[ref] = '%s: %s -> %s' % (name, old or '(none)', assign[ref])
     if changed:
         pcbnew.SaveBoard(path, board)

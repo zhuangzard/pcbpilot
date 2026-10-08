@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -151,6 +152,12 @@ func runLcscSet(stdout io.Writer, pcb, sch string, sets []string, field string) 
 		return err
 	}
 	res, err := kicad.SetLCSC(tools, pcb, sch, assign, field)
+	missingEverywhere := map[string]int{}
+	for _, r := range res {
+		for _, ref := range r.NotFound {
+			missingEverywhere[ref]++
+		}
+	}
 	for _, r := range res {
 		fmt.Fprintf(stdout, "%s: %d changed\n", r.File, len(r.Changed))
 		for ref, ch := range r.Changed {
@@ -160,7 +167,20 @@ func runLcscSet(stdout io.Writer, pcb, sch string, sets []string, field string) 
 			fmt.Fprintf(stdout, "  not found: %s\n", strings.Join(r.NotFound, ", "))
 		}
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	var unknown []string
+	for ref, n := range missingEverywhere {
+		if n == len(res) {
+			unknown = append(unknown, ref)
+		}
+	}
+	if len(unknown) > 0 {
+		sort.Strings(unknown)
+		return fmt.Errorf("designator(s) not found in any file: %s", strings.Join(unknown, ", "))
+	}
+	return nil
 }
 
 func runLcscSearch(stdout io.Writer, scriptPath, query string, offline bool, qty, limit int, asJSON bool) error {

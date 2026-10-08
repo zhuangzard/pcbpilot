@@ -4,7 +4,24 @@
 	(generator_version "10.0")
 	(uuid "aaaaaaaa-0000-0000-0000-000000000000")
 	(paper "A4")
-	(lib_symbols)
+	(lib_symbols
+		(symbol "Device:R"
+			(pin_names (offset 0))
+			(exclude_from_sim no)
+			(in_bom yes)
+			(on_board yes)
+			(property "Reference" "X" (at 0 2.54 0) (effects (font (size 1.27 1.27))))
+			(property "Value" "" (at 0 -2.54 0) (effects (font (size 1.27 1.27))))
+			(property "Footprint" "" (at 0 0 0) (effects (font (size 1.27 1.27)) (hide yes)))
+			(property "Datasheet" "" (at 0 0 0) (effects (font (size 1.27 1.27)) (hide yes)))
+			(property "Description" "pcbpilot test symbol" (at 0 0 0) (effects (font (size 1.27 1.27)) (hide yes)))
+			(symbol "R_1_1"
+				(rectangle (start -1.27 1.27) (end 1.27 -1.27) (stroke (width 0.254) (type default)) (fill (type none)))
+				(pin passive line (at -3.81 0 0) (length 2.54) (name "~" (effects (font (size 1.27 1.27)))) (number "1" (effects (font (size 1.27 1.27)))))
+				(pin passive line (at 3.81 0 180) (length 2.54) (name "~" (effects (font (size 1.27 1.27)))) (number "2" (effects (font (size 1.27 1.27)))))
+			)
+		)
+	)
 	(symbol
 		(lib_id "Device:R")
 		(at 50.8 50.8 0)

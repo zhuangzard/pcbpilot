@@ -145,9 +145,10 @@ func ReadSchematicParts(cli, sch string) ([]SchPart, error) {
 // MergeParts combines board footprints (the set of placed parts) with the
 // schematic rows. The schematic's LCSC field wins when both have one (the
 // schematic is the source the board is updated from); DNP / exclude flags are
-// OR-ed. With a schematic, a board footprint the schematic BOM does not list
-// is treated as excluded from the BOM (kicad-cli omits excluded-from-BOM
-// symbols) and reported as a warning so a board-only part is not silently lost.
+// OR-ed. A board footprint the schematic BOM does not list keeps the board's
+// own fields and flags (so it is still gated) and is reported as a warning:
+// kicad-cli omits excluded-from-BOM symbols, so an out-of-sync board must be
+// fixed rather than guessed at.
 func MergeParts(bd *Board, sch []SchPart, haveSch bool) ([]Part, []string) {
 	byRef := map[string]SchPart{}
 	for _, s := range sch {
@@ -167,10 +168,9 @@ func MergeParts(bd *Board, sch []SchPart, haveSch bool) ([]Part, []string) {
 		if haveSch {
 			s, ok := byRef[f.Ref]
 			if !ok {
-				if !p.ExcludeBOM && !p.DNP {
-					warns = append(warns, fmt.Sprintf("%s (%s) is on the board but not in the schematic BOM — treated as excluded from BOM", f.Ref, f.LibID))
+				if p.Assembled() {
+					warns = append(warns, fmt.Sprintf("%s (%s) is on the board but not in the schematic BOM (board-only part, or excluded from BOM only in the schematic) — using the board's fields; run Update PCB from Schematic if out of sync", f.Ref, f.LibID))
 				}
-				p.ExcludeBOM = true
 			} else {
 				p.DNP = p.DNP || s.DNP
 				p.ExcludeBOM = p.ExcludeBOM || s.ExcludeBOM
