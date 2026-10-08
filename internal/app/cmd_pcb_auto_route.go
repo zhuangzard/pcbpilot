@@ -173,6 +173,7 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 
 			// 1. Placement playbook (and, with --candidates, trial-route the
 			// runner-up placements and keep the most routable).
+			applySeq := 0
 			apply := func(path string) error {
 				// Re-applying a playbook must not add its holes / keep-outs
 				// a second time (v22 B rerun: Slot Region to Slot Region at
@@ -185,7 +186,14 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 				}
 				fmt.Fprintf(stderr, "apply: %s\n", path)
 				ac := newApplyCmd(cfg, stderr, stderr)
-				a := []string{path, "--yes", "--quiet"}
+				// Every apply keeps its own journal: a playbook applied before
+				// (a candidate trial) left "ok" rows that --resume counted as
+				// done, so the final re-apply skipped steps 102–188 and routed a
+				// half-moved board (v23 B live3: 44 unrouted).
+				applySeq++
+				journal := fmt.Sprintf("%s.run%d.journal.jsonl", strings.TrimSuffix(path, ".json"), applySeq)
+				_ = os.Remove(journal)
+				a := []string{path, "--yes", "--quiet", "--journal", journal}
 				if cfg.doc != "" {
 					a = append(a, "--doc", cfg.doc)
 				}

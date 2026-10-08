@@ -44,21 +44,21 @@ func TestVerifyProjectSourceArtifact(t *testing.T) {
 	res := &actionResult{OK: true, Result: map[string]any{
 		"uuid": "p", "fileType": "epro2", "size": float64(len(data)), "artifactId": "a",
 	}, Artifacts: []artifactRef{{ID: "a", Path: path, Size: int64(len(data)), SHA256: hex.EncodeToString(sum[:])}}}
-	if err := verifyProjectSourceArtifact(res, "p"); err != nil {
+	if err := verifyProjectSourceArtifact(res, "p", "epro2"); err != nil {
 		t.Fatalf("valid original rejected: %v", err)
 	}
 	res.Result["uuid"] = "wrong"
-	if err := verifyProjectSourceArtifact(res, "p"); err == nil {
+	if err := verifyProjectSourceArtifact(res, "p", "epro2"); err == nil {
 		t.Fatal("wrong project identity accepted")
 	}
 	res.Result["uuid"] = "p"
 	res.Artifacts[0].SHA256 = strings.Repeat("0", 64)
-	if err := verifyProjectSourceArtifact(res, "p"); err == nil {
+	if err := verifyProjectSourceArtifact(res, "p", "epro2"); err == nil {
 		t.Fatal("corrupt artifact hash accepted")
 	}
 	res.Artifacts[0].SHA256 = hex.EncodeToString(sum[:])
 	res.Artifacts[0].Size = maxProjectSourceBytes + 1
-	if err := verifyProjectSourceArtifact(res, "p"); err == nil {
+	if err := verifyProjectSourceArtifact(res, "p", "epro2"); err == nil {
 		t.Fatal("oversized artifact accepted")
 	}
 }

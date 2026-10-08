@@ -423,6 +423,12 @@ const projectCurrent: Handler = async () => {
 const MAX_PROJECT_SOURCE_BYTES = 8 << 20;
 const projectExportSource: Handler = async (payload) => {
 	const uuid = requireString(payload, 'uuid');
+	// epro2 = the native v3 archive; epro = the v2 layout (project.json +
+	// one file per document) that KiCad's EasyEDA Pro importer reads.
+	const fileType = (optionalString(payload, 'fileType') ?? 'epro2') as 'epro' | 'epro2';
+	if (fileType !== 'epro' && fileType !== 'epro2') {
+		throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, 'fileType must be epro or epro2.');
+	}
 	if (typeof eda.sys_FileManager?.getProjectFile !== 'function') {
 		throw new ActionError(ErrorCodes.EDA_API_UNAVAILABLE, 'Official project-file getter is unavailable in this EasyEDA build.');
 	}
@@ -431,7 +437,7 @@ const projectExportSource: Handler = async (payload) => {
 		const before = await withTimeout(eda.dmt_Project.getCurrentProjectInfo(), 7000,
 			'project source getCurrentProjectInfo timed out before export after 7000ms');
 		if (!before || before.uuid !== uuid) throw new ActionError(ErrorCodes.INVALID_STATE, 'Current project UUID does not match the requested project.');
-		file = await withTimeout(eda.sys_FileManager.getProjectFile('easyeda-agent-project.epro2', undefined, 'epro2'), 15000,
+		file = await withTimeout(eda.sys_FileManager.getProjectFile(`easyeda-agent-project.${fileType}`, undefined, fileType), 15000,
 			'project source getProjectFile timed out after 15000ms');
 		const after = await withTimeout(eda.dmt_Project.getCurrentProjectInfo(), 7000,
 			'project source getCurrentProjectInfo timed out after export after 7000ms');
@@ -445,8 +451,8 @@ const projectExportSource: Handler = async (payload) => {
 		throw new ActionError(ErrorCodes.INVALID_STATE,
 			`Official project file is missing, empty, or exceeds the ${MAX_PROJECT_SOURCE_BYTES}-byte transfer limit.`);
 	}
-	const artifact = await blobToArtifact(file, 'project_source', 'project-source.epro2', 'application/octet-stream');
-	return { result: { uuid, fileType: 'epro2', size: file.size, artifactId: artifact.id }, artifacts: [artifact] };
+	const artifact = await blobToArtifact(file, 'project_source', `project-source.${fileType}`, 'application/octet-stream');
+	return { result: { uuid, fileType, size: file.size, artifactId: artifact.id }, artifacts: [artifact] };
 };
 
 /** Reconcile a possibly partial create using only the official project read APIs. */

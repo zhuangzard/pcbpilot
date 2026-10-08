@@ -15,7 +15,7 @@ import (
 const maxProjectSourceBytes = 8 << 20
 
 func newProjectExportSourceCmd(cfg *appConfig, stdout, stderr io.Writer, window *string) *cobra.Command {
-	var uuid, out string
+	var uuid, out, format string
 	c := &cobra.Command{
 		Use:   "export-source",
 		Short: "Export the current project's original .epro2 file through the official read-only API",
@@ -27,12 +27,15 @@ func newProjectExportSourceCmd(cfg *appConfig, stdout, stderr io.Writer, window 
 			if uuid == "" {
 				return fmt.Errorf("--uuid is required")
 			}
+			if format != "epro2" && format != "epro" {
+				return fmt.Errorf("--format must be epro2 or epro")
+			}
 			res, err := requestActionTimed(cfg, "project.export_source", *window,
-				map[string]any{"uuid": uuid}, 60*time.Second)
+				map[string]any{"uuid": uuid, "fileType": format}, 60*time.Second)
 			if err != nil {
 				return err
 			}
-			if err := verifyProjectSourceArtifact(res, uuid); err != nil {
+			if err := verifyProjectSourceArtifact(res, uuid, format); err != nil {
 				return err
 			}
 			if out != "" {
@@ -47,14 +50,15 @@ func newProjectExportSourceCmd(cfg *appConfig, stdout, stderr io.Writer, window 
 	}
 	c.Flags().StringVar(&uuid, "uuid", "", "exact UUID of the current project (required)")
 	c.Flags().StringVar(&out, "out", "", "also copy the original archive to this path")
+	c.Flags().StringVar(&format, "format", "epro2", "epro2 (native v3 archive) or epro (v2 layout KiCad's EasyEDA Pro importer reads; connector >= 0.8.0)")
 	return c
 }
 
-func verifyProjectSourceArtifact(res *actionResult, uuid string) error {
+func verifyProjectSourceArtifact(res *actionResult, uuid, format string) error {
 	if res == nil || !res.OK || len(res.Artifacts) != 1 || res.Result == nil {
 		return fmt.Errorf("project source export returned no single persisted artifact")
 	}
-	if res.Result["uuid"] != uuid || res.Result["fileType"] != "epro2" {
+	if res.Result["uuid"] != uuid || res.Result["fileType"] != format {
 		return fmt.Errorf("project source export identity or format differs from the request")
 	}
 	a := res.Artifacts[0]
