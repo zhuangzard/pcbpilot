@@ -114,6 +114,14 @@ func AllActions() []ActionSpec {
 			VerifyWith:  []string{"project.current", "document.current"},
 		},
 		{
+			Name: "project.import_file", Domain: DomainProject, Phase: 1, NeedsWindow: true,
+			Mutates: true, NeedsConfirm: true,
+			Description: "Import a foreign project file (KiCad .zip of .kicad_pro/.kicad_sch/.kicad_pcb, EasyEDA Pro, Altium-family excluded) as a NEW project in the current team via sys_FileManager.importProjectByProjectFile, footprints/3D associated. Never modifies an existing project. Bounded to 16 MiB.",
+			Inputs:      []string{"fileBase64", "fileName", "fileType (KiCad|EasyEDA Pro|…)", "name (new project name)", "teamUuid optional"},
+			Outputs:     []string{"uuid", "name", "fileType", "size", "teamUuid"},
+			VerifyWith:  []string{"project.find"},
+		},
+		{
 			Name: "project.export", Domain: DomainProject, Phase: 1, NeedsWindow: true,
 			Description: "Export the active project as native epro2 bytes; checks project identity before and after export, bounds payload to 16 MiB. Save first. CLI validates ZIP/CRC and writes a new file; export does not verify restore.",
 			Inputs:      []string{"projectUuid"},

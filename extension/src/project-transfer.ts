@@ -1,6 +1,6 @@
 /// <reference types="@jlceda/pro-api-types" />
 import { ActionError, type ActionResult, ErrorCodes } from './protocol';
-import { requireString, uint8ToBase64 } from './util';
+import { optionalString, requireString, uint8ToBase64 } from './util';
 
 type Payload = Record<string, unknown>;
 const ARCHIVE_LIMIT = 16 * 1024 * 1024;
@@ -71,4 +71,36 @@ export async function projectExport(payload: Payload): Promise<ActionResult> {
 	if (!bytes.length || bytes.length > ARCHIVE_LIMIT || bytes.length !== file.size) fail('Project archive size changed while reading.');
 	await assertProject(target);
 	return { result: { uuid: target, format: 'epro2', size: bytes.length, base64: uint8ToBase64(bytes) } };
+}
+
+const IMPORT_TYPES = ['KiCad', 'EasyEDA Pro', 'EasyEDA', 'JLCEDA Pro', 'JLCEDA', 'Allegro', 'OrCAD', 'EAGLE', 'PADS', 'LTspice'] as const;
+type ImportType = typeof IMPORT_TYPES[number];
+
+/**
+ * Import a foreign project file (KiCad first: design happens in KiCad and the
+ * finished board is brought into EasyEDA once) as a NEW project in the current
+ * team through sys_FileManager.importProjectByProjectFile. Never touches an
+ * existing project.
+ */
+export async function projectImportFile(payload: Payload): Promise<ActionResult> {
+	const base64 = requireString(payload, 'fileBase64');
+	const fileName = requireString(payload, 'fileName');
+	const fileType = requireString(payload, 'fileType') as ImportType;
+	if (!IMPORT_TYPES.includes(fileType)) throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, `fileType must be one of ${IMPORT_TYPES.join(', ')}.`);
+	const name = requireString(payload, 'name');
+	if (!name.trim()) throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, 'name must not be blank.');
+	if (base64.length > ARCHIVE_LIMIT * 4 / 3 + 16) throw new ActionError(ErrorCodes.MISSING_PAYLOAD_FIELD, 'file exceeds the 16 MiB transfer limit.');
+	let teamUuid = optionalString(payload, 'teamUuid');
+	if (!teamUuid) {
+		const team = await eda.dmt_Team.getCurrentTeamInfo();
+		if (!team?.uuid) fail('No current team; pass teamUuid.');
+		teamUuid = team.uuid;
+	}
+	const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+	const file = new File([bytes], fileName);
+	const project = await eda.sys_FileManager.importProjectByProjectFile(file, fileType,
+		{ associateFootprint: true, associate3DModel: true } as never,
+		{ operation: 'New Project', newProjectOwnerTeamUuid: teamUuid, newProjectName: name, newProjectFriendlyName: name } as never);
+	if (!project?.uuid) fail('importProjectByProjectFile returned no project; check the EasyEDA import dialog/log.');
+	return { result: { uuid: project.uuid, name: (project as { friendlyName?: string }).friendlyName ?? name, fileType, size: bytes.length, teamUuid } };
 }
