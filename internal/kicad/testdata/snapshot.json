@@ -1,0 +1,50 @@
+{
+  "source": "kicad",
+  "components": [
+    {"primitiveId": "fp-r1", "designator": "R1", "name": "10k", "device": "10k", "value": "10k",
+     "footprint": "pcbpilot:R_1206_tiny", "lcsc": "C25804", "layer": 1, "side": "top",
+     "x": 590.5512, "y": -314.9606, "rotation": 0, "locked": false,
+     "bbox": {"minX": 503.937, "minY": -350.3937, "maxX": 677.1654, "maxY": -279.5276},
+     "pads": [
+       {"primitiveId": "p-r1-1", "padNumber": "1", "net": "VCC", "layer": 1, "x": 527.5591, "y": -314.9606,
+        "width": 47.2441, "height": 70.8661, "rotation": 0, "shape": ["RECT", 47.2441, 70.8661]},
+       {"primitiveId": "p-r1-2", "padNumber": "2", "net": "SIG_A", "layer": 1, "x": 653.5433, "y": -314.9606,
+        "width": 47.2441, "height": 70.8661, "rotation": 0, "shape": ["RECT", 47.2441, 70.8661]}
+     ]},
+    {"primitiveId": "fp-j1", "designator": "J1", "name": "HDR_1x3", "device": "HDR_1x3", "value": "HDR_1x3",
+     "footprint": "pcbpilot:PinHeader_1x3_tiny", "layer": 1, "side": "top",
+     "x": 196.8504, "y": -393.7008, "rotation": 0, "locked": false,
+     "bbox": {"minX": 163.3858, "minY": -594.4882, "maxX": 230.315, "maxY": -360.2362},
+     "pads": [
+       {"primitiveId": "p-j1-1", "padNumber": "1", "net": "VCC", "layer": 12, "x": 196.8504, "y": -393.7008,
+        "width": 66.9291, "height": 66.9291, "rotation": 0, "shape": ["RECT", 66.9291, 66.9291], "holeDiameter": 39.3701},
+       {"primitiveId": "p-j1-2", "padNumber": "2", "net": "GND", "layer": 12, "x": 196.8504, "y": -493.7008,
+        "width": 66.9291, "height": 66.9291, "rotation": 0, "shape": ["ELLIPSE", 66.9291, 66.9291], "holeDiameter": 39.3701}
+     ]}
+  ],
+  "footprintHoles": [{"owner": "H1", "componentId": "fp-h1", "sourceId": "p-h1", "x": 1417.3228, "y": -157.4803, "shape": "circle", "dia": 86.6142}],
+  "outline": {"bbox": {"minX": 0, "minY": -1181.1024, "maxX": 1574.8031, "maxY": 0},
+              "points": [[0, 0], [1574.8031, 0], [1574.8031, -1181.1024], [0, -1181.1024]], "source": "polygon", "format": "polyline"},
+  "copperLayers": 2,
+  "rules": {"clearanceMil": 5.9055, "clearanceTrackTrackMil": 5.9055, "trackWidthMil": 7.874, "powerWidthMil": 7.874,
+            "trackWidthMinMil": 5.9055, "viaDrillMil": 11.811, "viaDiameterMil": 23.622, "copperToEdgeMil": 19.685,
+            "holeToHoleMil": 9.8425, "source": "kicad"},
+  "netClassOf": {"VCC": "PP1_W20,Default", "GND": "Default", "SIG_A": "Default"},
+  "copper": {
+    "availability": {"routing": "available", "vias": "available", "pours": "available", "poured": "available", "regions": "available", "fills": "available"},
+    "lines": [
+      {"primitiveId": "t-vcc-neck", "net": "VCC", "layer": 1, "startX": 527.5591, "startY": -314.9606, "endX": 527.5591, "endY": -420.0, "lineWidth": 10, "locked": false},
+      {"primitiveId": "t-vcc-trunk", "net": "VCC", "layer": 1, "startX": 527.5591, "startY": -420.0, "endX": 400.0, "endY": -800.0, "lineWidth": 10, "locked": false},
+      {"primitiveId": "t-vcc-wide", "net": "VCC", "layer": 2, "startX": 400.0, "startY": -800.0, "endX": 196.8504, "endY": -393.7008, "lineWidth": 20, "locked": false},
+      {"primitiveId": "t-sig", "net": "SIG_A", "layer": 1, "startX": 653.5433, "startY": -314.9606, "endX": 900.0, "endY": -314.9606, "lineWidth": 6, "locked": false}
+    ],
+    "arcs": [],
+    "arcsAvailable": true,
+    "vias": [{"primitiveId": "v1", "net": "VCC", "x": 400.0, "y": -800.0, "diameter": 23.622, "holeDiameter": 11.811, "locked": false, "fromLayer": 1, "toLayer": 2}],
+    "pours": [{"primitiveId": "z-gnd", "name": "GND bottom", "net": "GND", "layer": 2, "source": [0, 0, "L", 1574.8031, 0, -0, -1181.1024], "geometryAvailable": true}],
+    "poured": [{"pourPrimitiveId": "z-gnd", "net": "GND", "layer": 2, "fills": [{"source": [[20, -20, "L", 1550, -20, 1550, -1160, 20, -1160]]}]}],
+    "regions": [],
+    "fills": []
+  },
+  "routedLines": 4
+}
