@@ -151,5 +151,6 @@ func newProjectCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 	)
 
 	proj.AddCommand(newProjectExportCmd(cfg, &window, stdout))
+	proj.AddCommand(newProjectImportCmd(cfg, &window, stdout, stderr))
 	return proj
 }

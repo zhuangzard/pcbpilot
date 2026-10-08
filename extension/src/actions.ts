@@ -1,4 +1,4 @@
-import { projectOpen, projectExport } from './project-transfer';
+import { projectOpen, projectExport, projectImportFile } from './project-transfer';
 import { schematicBusCreate, schematicBusDelete, schematicBusList } from './schematic-bus';
 /**
  * Typed-action dispatch. Each action maps to exactly one (occasionally a small
@@ -14681,6 +14681,7 @@ const HANDLERS: Record<string, Handler> = {
 	'project.create': projectCreate,
 	'project.open': projectOpen,
 	'project.export': projectExport,
+	'project.import_file': projectImportFile,
 	'document.current': documentCurrent,
 	'document.open': documentOpen,
 	'document.close': documentClose,
