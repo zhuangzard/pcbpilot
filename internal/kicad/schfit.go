@@ -50,21 +50,21 @@ func emptyBox() Box { return Box{math.Inf(1), math.Inf(1), math.Inf(-1), math.In
 
 // ---- minimal S-expression ---------------------------------------------------
 
-type sx struct {
+type sexp struct {
 	atom string
-	list []*sx
+	list []*sexp
 	beg  int // byte offsets of this list in the source (lists only)
 	end  int
 }
 
-func (n *sx) head() string {
+func (n *sexp) head() string {
 	if n == nil || len(n.list) == 0 {
 		return ""
 	}
 	return n.list[0].atom
 }
 
-func (n *sx) child(h string) *sx {
+func (n *sexp) child(h string) *sexp {
 	for _, c := range n.list {
 		if c.head() == h {
 			return c
@@ -73,7 +73,7 @@ func (n *sx) child(h string) *sx {
 	return nil
 }
 
-func (n *sx) num(i int) float64 {
+func (n *sexp) num(i int) float64 {
 	if i < len(n.list) {
 		v, _ := strconv.ParseFloat(n.list[i].atom, 64)
 		return v
@@ -81,10 +81,10 @@ func (n *sx) num(i int) float64 {
 	return 0
 }
 
-func parseSx(src string) (*sx, error) {
+func parseSx(src string) (*sexp, error) {
 	pos := 0
-	var parse func() (*sx, error)
-	parse = func() (*sx, error) {
+	var parse func() (*sexp, error)
+	parse = func() (*sexp, error) {
 		for pos < len(src) && strings.ContainsRune(" \t\r\n", rune(src[pos])) {
 			pos++
 		}
@@ -93,7 +93,7 @@ func parseSx(src string) (*sx, error) {
 		}
 		switch src[pos] {
 		case '(':
-			n := &sx{beg: pos}
+			n := &sexp{beg: pos}
 			pos++
 			for {
 				for pos < len(src) && strings.ContainsRune(" \t\r\n", rune(src[pos])) {
@@ -124,13 +124,13 @@ func parseSx(src string) (*sx, error) {
 			}
 			pos++
 			s, _ := strconv.Unquote(src[start:pos])
-			return &sx{atom: s}, nil
+			return &sexp{atom: s}, nil
 		default:
 			start := pos
 			for pos < len(src) && !strings.ContainsRune(" \t\r\n()", rune(src[pos])) {
 				pos++
 			}
-			return &sx{atom: src[start:pos]}, nil
+			return &sexp{atom: src[start:pos]}, nil
 		}
 	}
 	return parse()
@@ -140,10 +140,10 @@ func parseSx(src string) (*sx, error) {
 
 // libBox is a library symbol's extent in its own frame (y up in KiCad
 // symbol coordinates), pins included with their length.
-func libBox(sym *sx) Box {
+func libBox(sym *sexp) Box {
 	b := emptyBox()
-	var walk func(n *sx)
-	walk = func(n *sx) {
+	var walk func(n *sexp)
+	walk = func(n *sexp) {
 		switch n.head() {
 		case "xy", "start", "end", "center", "mid":
 			b.add(n.num(1), n.num(2))
@@ -178,7 +178,7 @@ func libBox(sym *sx) Box {
 
 // ContentBox returns the sheet content extent (mm, y down) and whether any
 // content was found.
-func ContentBox(root *sx) (Box, bool) {
+func ContentBox(root *sexp) (Box, bool) {
 	b, _, ok := contentItems(root)
 	return b, ok
 }
@@ -186,7 +186,7 @@ func ContentBox(root *sx) (Box, bool) {
 // contentItems returns the content extent and one box per drawn item, so the
 // title-block test can look at the items instead of their common bounding
 // box (content usually wraps the title block in an L).
-func contentItems(root *sx) (Box, []Box, bool) {
+func contentItems(root *sexp) (Box, []Box, bool) {
 	libs := map[string]Box{}
 	if ls := root.child("lib_symbols"); ls != nil {
 		for _, s := range ls.list {
@@ -205,9 +205,9 @@ func contentItems(root *sx) (Box, []Box, bool) {
 		found = true
 	}
 	pt := func(x, y float64) { item(Box{x - 1, y - 1, x + 1, y + 1}) }
-	addPts := func(n *sx) {
+	addPts := func(n *sexp) {
 		if pts := n.child("pts"); pts != nil {
-			var prev *sx
+			var prev *sexp
 			for _, p := range pts.list {
 				if p.head() != "xy" {
 					continue
@@ -299,10 +299,10 @@ func contentItems(root *sx) (Box, []Box, bool) {
 }
 
 // propertyHidden reports a symbol field hidden by (hide yes) or (effects … hide).
-func propertyHidden(p *sx) bool {
+func propertyHidden(p *sexp) bool {
 	var hidden bool
-	var walk func(n *sx)
-	walk = func(n *sx) {
+	var walk func(n *sexp)
+	walk = func(n *sexp) {
 		if n.head() == "hide" && (len(n.list) == 1 || n.list[1].atom == "yes") {
 			hidden = true
 		}
@@ -371,10 +371,10 @@ func FitSheet(src string) (string, FitResult, error) {
 			break
 		}
 		// Shifted to the top-left of the drawing area?
-		sx := math.Ceil((schBorder+schGap-box.MinX)/schShiftQuant) * schShiftQuant
+		sexp := math.Ceil((schBorder+schGap-box.MinX)/schShiftQuant) * schShiftQuant
 		sy := math.Ceil((schBorder+schGap-box.MinY)/schShiftQuant) * schShiftQuant
-		if fits(box, items, sx, sy, p) {
-			res.To, res.ShiftX, res.ShiftY = p.Name, sx, sy
+		if fits(box, items, sexp, sy, p) {
+			res.To, res.ShiftX, res.ShiftY = p.Name, sexp, sy
 			break
 		}
 	}
@@ -400,7 +400,7 @@ func FitSheet(src string) (string, FitResult, error) {
 // (not lib_symbols, not the sheet header) by dx, dy.
 var coordRe = regexp.MustCompile(`\((at|xy|start|end|center|mid) (-?[0-9.]+) (-?[0-9.]+)`)
 
-func shiftTopLevel(src string, root *sx, dx, dy float64) string {
+func shiftTopLevel(src string, root *sexp, dx, dy float64) string {
 	moved := map[string]bool{"symbol": true, "wire": true, "bus": true, "polyline": true, "bus_entry": true, "label": true,
 		"global_label": true, "hierarchical_label": true, "text": true, "junction": true, "no_connect": true, "sheet": true,
 		"rectangle": true, "text_box": true, "image": true, "circle": true, "arc": true, "netclass_flag": true}

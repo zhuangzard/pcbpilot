@@ -71,11 +71,3 @@ split the sheet" and left unchanged (non-zero exit).`,
 	_ = c.MarkFlagRequired("sch")
 	return c
 }
-
-// newKicadCmd is the `pcbpilot kicad` parent (KiCad is the design EDA since
-// 2026-10-09; EasyEDA only receives the finished project).
-func newKicadCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
-	k := &cobra.Command{Use: "kicad", Short: "Design in KiCad: schematic sheets, placement, routing, gates, fab output"}
-	k.AddCommand(newKicadSchFitCmd(stdout, stderr))
-	return k
-}

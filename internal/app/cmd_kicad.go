@@ -1,7 +1,7 @@
-// MINIMAL stand-in — replaced by kicad/core at merge (its `pcbpilot kicad`
-// parent). kicad/core's parent must add newKicadPlaceCmd.
-
 package app
+
+// cmd_kicad.go — `pcbpilot kicad`: design in KiCad (user decision
+// 2026-10-09; EasyEDA only receives the finished project via project import).
 
 import (
 	"io"
@@ -9,11 +9,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newKicadCmd(stdout, stderr io.Writer) *cobra.Command {
+func newKicadCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 	c := &cobra.Command{
 		Use:   "kicad",
-		Short: "KiCad boards through KiCad's own pcbnew python (offline)",
+		Short: "Design in KiCad: placement, schematic sheets, JLC fab output, LCSC parts",
 	}
-	c.AddCommand(newKicadPlaceCmd(stdout, stderr))
+	c.AddCommand(
+		newKicadPlaceCmd(stdout, stderr),
+		newKicadSchFitCmd(stdout, stderr),
+		newKiCadFabCmd(stdout, stderr),
+		newKiCadLcscCmd(stdout, stderr),
+	)
 	return c
 }

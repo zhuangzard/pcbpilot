@@ -1,0 +1,105 @@
+(kicad_sch
+	(version 20250114)
+	(generator "pcbpilot-test")
+	(generator_version "10.0")
+	(uuid "aaaaaaaa-0000-0000-0000-000000000000")
+	(paper "A4")
+	(lib_symbols
+		(symbol "Device:R"
+			(pin_names (offset 0))
+			(exclude_from_sim no)
+			(in_bom yes)
+			(on_board yes)
+			(property "Reference" "X" (at 0 2.54 0) (effects (font (size 1.27 1.27))))
+			(property "Value" "" (at 0 -2.54 0) (effects (font (size 1.27 1.27))))
+			(property "Footprint" "" (at 0 0 0) (effects (font (size 1.27 1.27)) (hide yes)))
+			(property "Datasheet" "" (at 0 0 0) (effects (font (size 1.27 1.27)) (hide yes)))
+			(property "Description" "pcbpilot test symbol" (at 0 0 0) (effects (font (size 1.27 1.27)) (hide yes)))
+			(symbol "R_1_1"
+				(rectangle (start -1.27 1.27) (end 1.27 -1.27) (stroke (width 0.254) (type default)) (fill (type none)))
+				(pin passive line (at -3.81 0 0) (length 2.54) (name "~" (effects (font (size 1.27 1.27)))) (number "1" (effects (font (size 1.27 1.27)))))
+				(pin passive line (at 3.81 0 180) (length 2.54) (name "~" (effects (font (size 1.27 1.27)))) (number "2" (effects (font (size 1.27 1.27)))))
+			)
+		)
+	)
+	(symbol
+		(lib_id "Device:R")
+		(at 50.8 50.8 0)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "aaaaaaaa-0000-0000-0000-000000000001")
+		(property "Reference" "R1"
+			(at 53.34 49.53 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "10k"
+			(at 53.34 52.07 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Footprint" "Resistor_SMD:R_0402_1005Metric"
+			(at 50.8 50.8 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(instances
+			(project "fab_root"
+				(path "/aaaaaaaa-0000-0000-0000-000000000000"
+					(reference "R1")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(sheet
+		(at 100 50)
+		(size 30 20)
+		(uuid "aaaaaaaa-0000-0000-0000-0000000000ff")
+		(property "Sheetname" "Sub"
+			(at 100 49.5 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "fab_sub.kicad_sch"
+			(at 100 70.5 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(instances
+			(project "fab_root"
+				(path "/aaaaaaaa-0000-0000-0000-000000000000"
+					(page "2")
+				)
+			)
+		)
+	)
+	(sheet_instances
+		(path "/"
+			(page "1")
+		)
+	)
+)
