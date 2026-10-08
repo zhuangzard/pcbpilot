@@ -1203,6 +1203,11 @@ func intentPairsAndTune(in *designIntent) (pairs, tune string) {
 				if n.PairGapMil > 0 {
 					fmt.Fprintf(&pb, " gap=%s", mm(n.PairGapMil))
 				}
+				// fastroute >= 0.1.13 meanders the shorter net of a pair
+				// down to skew= (its default is 0.1 mm).
+				if n.MaxSkewMil > 0 {
+					fmt.Fprintf(&pb, " skew=%s", mm(n.MaxSkewMil))
+				}
 				pb.WriteString("\n")
 				if n.MaxSkewMil > 0 {
 					g := "pair_" + a + "_" + b

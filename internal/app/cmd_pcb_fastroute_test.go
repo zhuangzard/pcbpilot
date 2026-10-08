@@ -233,7 +233,7 @@ func TestIntentPairsAndTune(t *testing.T) {
 		t.Fatal(err)
 	}
 	pairs, tune := intentPairsAndTune(in)
-	if pairs != "pair LVDS_CLK_N LVDS_CLK_P gap=0.127\n" {
+	if pairs != "pair LVDS_CLK_N LVDS_CLK_P gap=0.127 skew=0.127\n" {
 		t.Fatalf("pairs = %q", pairs)
 	}
 	for _, want := range []string{"group LVDS tolerance=0.508\n", "  LVDS_D0_P\n", "group pair_LVDS_CLK_N_LVDS_CLK_P tolerance=0.127\n"} {
