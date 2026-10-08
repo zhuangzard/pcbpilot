@@ -16,6 +16,9 @@ func TestLastVerdictJSON(t *testing.T) {
 	if !ok || v.Verdict != "fail" || len(v.Requirements) != 1 || v.Requirements[0].Evidence != "drop 0.4 V {x}" {
 		t.Fatalf("%v %+v", ok, v)
 	}
+	if _, ok := lastVerdictJSON(`echo: {"verdict":"pass|fail","requirements":[],"blocking":[],"advisory":[]} then nothing`); ok {
+		t.Fatal("the prompt's template was read as a verdict")
+	}
 	if _, ok := lastVerdictJSON("no json here"); ok {
 		t.Fatal("parsed nothing")
 	}
