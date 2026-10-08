@@ -1,0 +1,51 @@
+(kicad_sch
+	(version 20250114)
+	(generator "pcbpilot-test")
+	(generator_version "10.0")
+	(uuid "bbbbbbbb-0000-0000-0000-000000000000")
+	(paper "A4")
+	(lib_symbols)
+	(symbol
+		(lib_id "Regulator_Linear:LDO")
+		(at 60.96 60.96 0)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "bbbbbbbb-0000-0000-0000-000000000001")
+		(property "Reference" "U1"
+			(at 60.96 55.88 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "LDO"
+			(at 60.96 66.04 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC" ""
+			(at 60.96 60.96 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(instances
+			(project "fab_root"
+				(path "/aaaaaaaa-0000-0000-0000-000000000000/aaaaaaaa-0000-0000-0000-0000000000ff"
+					(reference "U1")
+					(unit 1)
+				)
+			)
+		)
+	)
+)

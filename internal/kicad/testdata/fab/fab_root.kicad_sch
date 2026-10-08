@@ -1,0 +1,88 @@
+(kicad_sch
+	(version 20250114)
+	(generator "pcbpilot-test")
+	(generator_version "10.0")
+	(uuid "aaaaaaaa-0000-0000-0000-000000000000")
+	(paper "A4")
+	(lib_symbols)
+	(symbol
+		(lib_id "Device:R")
+		(at 50.8 50.8 0)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "aaaaaaaa-0000-0000-0000-000000000001")
+		(property "Reference" "R1"
+			(at 53.34 49.53 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "10k"
+			(at 53.34 52.07 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Footprint" "Resistor_SMD:R_0402_1005Metric"
+			(at 50.8 50.8 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(instances
+			(project "fab_root"
+				(path "/aaaaaaaa-0000-0000-0000-000000000000"
+					(reference "R1")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(sheet
+		(at 100 50)
+		(size 30 20)
+		(uuid "aaaaaaaa-0000-0000-0000-0000000000ff")
+		(property "Sheetname" "Sub"
+			(at 100 49.5 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "fab_sub.kicad_sch"
+			(at 100 70.5 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(instances
+			(project "fab_root"
+				(path "/aaaaaaaa-0000-0000-0000-000000000000"
+					(page "2")
+				)
+			)
+		)
+	)
+	(sheet_instances
+		(path "/"
+			(page "1")
+		)
+	)
+)
