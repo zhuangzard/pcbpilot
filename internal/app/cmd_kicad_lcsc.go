@@ -38,8 +38,8 @@ type partsSelectHit struct {
 }
 
 func newKiCadLcscCmd(stdout, stderr io.Writer) *cobra.Command {
-	var pcb, sch, search, field, scriptPath string
-	var sets []string
+	var pcb, sch, search, field, scriptPath, libDir, libName string
+	var sets, imports []string
 	var check, offline, asJSON bool
 	var qty, limit int
 	c := &cobra.Command{
@@ -55,24 +55,33 @@ func newKiCadLcscCmd(stdout, stderr io.Writer) *cobra.Command {
                      KiCad's pcbnew; the schematic (and its sub-sheets) gets a minimal
                      text edit. Close the files in KiCad first.
   --search "query"   search the JLCPCB SMT catalog (live, via the skill's parts-select.py):
-                     LCSC number, basic/extended, stock, package, MPN, description.`,
+                     LCSC number, basic/extended, stock, package, MPN, description.
+  --import Cxxxx     fetch the part's EasyEDA symbol+footprint from JLC's EasyEDA server and
+                     convert them with KiCad's own EasyEDA importers into
+                     --lib-dir/<--lib-name>.kicad_sym and .pretty (symbol gets the
+                     Footprint link and a hidden "LCSC Part #"). Add the two libraries to
+                     KiCad's symbol/footprint library tables once. No 3D model; always
+                     review pins and pads against the datasheet.`,
 		Example: `  pcbpilot kicad lcsc --pcb b.kicad_pcb --sch b.kicad_sch --check
   pcbpilot kicad lcsc --pcb b.kicad_pcb --sch b.kicad_sch --set R1=C25744 --set C1=C1525,C2=C1525
   pcbpilot kicad lcsc --search "10k 0402"
-  pcbpilot kicad lcsc --search "AMS1117-3.3" --json`,
+  pcbpilot kicad lcsc --search "AMS1117-3.3" --json
+  pcbpilot kicad lcsc --import C6186 --import C25744 --lib-dir ./lib`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			modes := 0
-			for _, on := range []bool{check, len(sets) > 0, search != ""} {
+			for _, on := range []bool{check, len(sets) > 0, search != "", len(imports) > 0} {
 				if on {
 					modes++
 				}
 			}
 			if modes != 1 {
-				return fmt.Errorf("choose exactly one of --check, --set, --search")
+				return fmt.Errorf("choose exactly one of --check, --set, --search, --import")
 			}
 			switch {
 			case search != "":
 				return runLcscSearch(stdout, scriptPath, search, offline, qty, limit, asJSON)
+			case len(imports) > 0:
+				return runLcscImport(stdout, imports, libDir, libName)
 			case check:
 				return runLcscCheck(stdout, stderr, pcb, sch, asJSON)
 			default:
@@ -87,6 +96,9 @@ func newKiCadLcscCmd(stdout, stderr io.Writer) *cobra.Command {
 	f.StringArrayVar(&sets, "set", nil, "REF=Cxxxx assignment(s)")
 	f.StringVar(&field, "field", kicad.DefaultLCSCField, "field name to create when a part has none")
 	f.StringVar(&search, "search", "", "JLCPCB catalog query (value+package, MPN or C-number)")
+	f.StringArrayVar(&imports, "import", nil, "LCSC number(s) to import as KiCad symbol+footprint")
+	f.StringVar(&libDir, "lib-dir", "", "--import: directory for the KiCad libraries (required)")
+	f.StringVar(&libName, "lib-name", "lcsc", "--import: library nickname / file stem")
 	f.BoolVar(&offline, "offline", false, "--search: only the curated standard-parts.json (no network)")
 	f.IntVar(&qty, "qty", 100, "--search: build quantity for stock ranking")
 	f.IntVar(&limit, "limit", 10, "--search: rows to print")
@@ -243,4 +255,39 @@ func lcscTrunc(s string, n int) string {
 		return s
 	}
 	return string(r[:n-1]) + "…"
+}
+
+func runLcscImport(stdout io.Writer, imports []string, libDir, libName string) error {
+	if libDir == "" {
+		return fmt.Errorf("--import needs --lib-dir")
+	}
+	var ids []string
+	for _, v := range imports {
+		for _, id := range strings.Split(v, ",") {
+			if id = strings.ToUpper(strings.TrimSpace(id)); id != "" {
+				if !kicad.ValidLCSC(id) {
+					return fmt.Errorf("--import %q: not an LCSC part number", id)
+				}
+				ids = append(ids, id)
+			}
+		}
+	}
+	cli, err := kicad.ResolveFabCLI()
+	if err != nil {
+		return err
+	}
+	py, err := kicad.ResolveFabPython()
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		r, err := kicad.ImportLCSC(kicad.FabTools{CLI: cli, Python: py}, id, libDir, libName)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "%s %s (%s)\n  symbol    %s  → %s\n  footprint %s  → %s\n",
+			r.LCSC, r.Title, r.JLCPartClass, r.Symbol, r.SymbolLib, r.Footprint, r.FootprintLib)
+	}
+	fmt.Fprintln(stdout, "note: converted by KiCad's EasyEDA importers; no 3D model; check pins/pads against the datasheet")
+	return nil
 }

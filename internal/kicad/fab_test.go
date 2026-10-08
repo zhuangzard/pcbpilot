@@ -444,3 +444,40 @@ func TestLiveSchematicBOM(t *testing.T) {
 		t.Fatalf("hierarchy not resolved: %+v", rows)
 	}
 }
+
+func TestLiveImportLCSC(t *testing.T) {
+	tools := liveTools(t) // also needs network (JLC's EasyEDA server)
+	dir := t.TempDir()
+	for i := 0; i < 2; i++ { // second run must replace, not duplicate
+		r, err := ImportLCSC(tools, "C6186", dir, "lcsc")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.Symbol != "lcsc:AMS1117-3.3_C6186" || !strings.HasPrefix(r.Footprint, "lcsc:SOT-223") {
+			t.Fatalf("%+v", r)
+		}
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "lcsc.kicad_sym"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := parseSexpr(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	syms := root.children("symbol")
+	if len(syms) != 1 {
+		t.Fatalf("want 1 symbol, got %d", len(syms))
+	}
+	fields := map[string]string{}
+	for _, p := range syms[0].children("property") {
+		fields[p.arg(0)] = p.arg(1)
+	}
+	if v, _ := LookupLCSC(fields); v != "C6186" || !strings.HasPrefix(fields["Footprint"], "lcsc:SOT-223") {
+		t.Fatalf("fields %v", fields)
+	}
+	mods, _ := filepath.Glob(filepath.Join(dir, "lcsc.pretty", "*.kicad_mod"))
+	if len(mods) != 1 {
+		t.Fatalf("footprints %v", mods)
+	}
+}

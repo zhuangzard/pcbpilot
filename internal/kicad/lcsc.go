@@ -10,12 +10,15 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 // LCSCFieldNames are the symbol/footprint field names accepted as the LCSC
@@ -311,4 +314,100 @@ func SetLCSC(tools FabTools, pcb, sch string, assign map[string]string, field st
 		}
 	}
 	return results, nil
+}
+
+// ── importing KiCad symbol/footprint for an LCSC number ────────────────────
+
+// easyEDAHosts serve the EasyEDA (Std) library record for an LCSC number; it
+// is the endpoint JLC's own EasyEDA Std editor uses (undocumented, no key).
+// lceda.cn first: easyeda.com answered 403 from this network on 2026-10-09.
+var easyEDAHosts = []string{"https://lceda.cn", "https://easyeda.com"}
+
+// EasyEDAComponentURL is the library-record URL for one host.
+func EasyEDAComponentURL(host, lcsc string) string {
+	return host + "/api/products/" + lcsc + "/components?version=6.4.19.5"
+}
+
+// FetchEasyEDAComponent downloads the record and returns its "result" JSON.
+// Explicit opt-in only (`kicad lcsc --import`); never called implicitly.
+func FetchEasyEDAComponent(lcsc string) ([]byte, error) {
+	var errs []string
+	client := &http.Client{Timeout: 30 * time.Second}
+	for _, h := range easyEDAHosts {
+		req, _ := http.NewRequest(http.MethodGet, EasyEDAComponentURL(h, lcsc), nil)
+		req.Header.Set("User-Agent", "Mozilla/5.0 (pcbpilot kicad lcsc --import)")
+		resp, err := client.Do(req)
+		if err != nil {
+			errs = append(errs, h+": "+err.Error())
+			continue
+		}
+		b, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
+		resp.Body.Close()
+		if err != nil || resp.StatusCode != http.StatusOK {
+			errs = append(errs, fmt.Sprintf("%s: HTTP %d %v", h, resp.StatusCode, err))
+			continue
+		}
+		var env struct {
+			Success bool            `json:"success"`
+			Message string          `json:"message"`
+			Result  json.RawMessage `json:"result"`
+		}
+		if err := json.Unmarshal(b, &env); err != nil || !env.Success {
+			errs = append(errs, fmt.Sprintf("%s: %s %v", h, env.Message, err))
+			continue
+		}
+		return env.Result, nil
+	}
+	return nil, fmt.Errorf("%s: no EasyEDA library record (%s)", lcsc, strings.Join(errs, "; "))
+}
+
+// ImportResult is fab.py import-lcsc's reply.
+type ImportResult struct {
+	LCSC         string `json:"lcsc"`
+	Title        string `json:"title"`
+	Symbol       string `json:"symbol"`    // "<lib>:<name>"
+	Footprint    string `json:"footprint"` // "<lib>:<name>"
+	SymbolLib    string `json:"symbolLib"`
+	FootprintLib string `json:"footprintLib"`
+	JLCPartClass string `json:"jlcPartClass"`
+	Note         string `json:"note"`
+}
+
+// ImportLCSC converts the part's EasyEDA symbol + footprint with KiCad's own
+// EasyEDA importers into libDir/<libName>.kicad_sym and libDir/<libName>.pretty.
+func ImportLCSC(tools FabTools, lcsc, libDir, libName string) (*ImportResult, error) {
+	if !ValidLCSC(lcsc) {
+		return nil, fmt.Errorf("%q is not an LCSC part number", lcsc)
+	}
+	if tools.Python == "" || tools.CLI == "" {
+		return nil, fmt.Errorf("--import needs kicad-cli and KiCad's python")
+	}
+	rec, err := FetchEasyEDAComponent(lcsc)
+	if err != nil {
+		return nil, err
+	}
+	tmp, err := os.MkdirTemp("", "pcbpilot-kicad-import-")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(tmp)
+	script, comp := filepath.Join(tmp, "fab.py"), filepath.Join(tmp, lcsc+".json")
+	if err := os.WriteFile(script, fabPy, 0o644); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(comp, rec, 0o644); err != nil {
+		return nil, err
+	}
+	cmd := exec.Command(tools.Python, script, "import-lcsc", "--lcsc", lcsc, "--component", comp,
+		"--lib-dir", libDir, "--lib-name", libName, "--cli", tools.CLI)
+	var so, se bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &so, &se
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("import %s: %w\n%s", lcsc, err, se.String())
+	}
+	var r ImportResult
+	if err := json.Unmarshal(so.Bytes(), &r); err != nil {
+		return nil, fmt.Errorf("import %s: bad reply %q", lcsc, so.String())
+	}
+	return &r, nil
 }
