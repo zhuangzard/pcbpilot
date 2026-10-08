@@ -44,6 +44,8 @@ type kicadPlaceReport struct {
 	Seeds     []kicadPlaceSeed   `json:"seeds"`
 	Mechanics *pcbauto.Mechanics `json:"mechanics,omitempty"`
 	Notes     []string           `json:"notes,omitempty"`
+
+	path string // where the report was written
 }
 
 // kicadPlaceDeps are the KiCad side effects (stubbed in unit tests).
@@ -84,7 +86,7 @@ copper: tracks and vias are removed and zones unfilled in the output.`,
 					fmt.Fprintf(stdout, "wrote %s (seed %d, score %.1f, illegal %d, labelBlocked %d)\n", s.File, s.Seed, s.Score, s.Illegal, s.LabelBlocked)
 				}
 			}
-			fmt.Fprintf(stdout, "report: %s\n", o.report)
+			fmt.Fprintf(stdout, "report: %s\n", rep.path)
 			return nil
 		},
 	}
@@ -129,7 +131,7 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 	if err != nil {
 		return nil, err
 	}
-	rep := &kicadPlaceReport{PCB: o.pcb, Out: o.out, Fixed: fixed}
+	rep := &kicadPlaceReport{PCB: o.pcb, Out: o.out, Fixed: fixed, path: o.report}
 	var mc *pcbauto.Mechanics
 	if o.mech != "" {
 		mraw, err := os.ReadFile(o.mech)
