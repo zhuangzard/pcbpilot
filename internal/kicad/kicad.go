@@ -269,13 +269,14 @@ type NetClass struct {
 
 // NetclassResult is the bridge's netclasses result.
 type NetclassResult struct {
-	Out         string     `json:"out"`
-	Classes     []NetClass `json:"classes"`
-	MissingNets []string   `json:"missingNets"`
-	Kept        []string   `json:"kept"`
-	Mismatched  []string   `json:"mismatched"`
-	DRU         string     `json:"dru"`
-	DRURules    int        `json:"druRules"`
+	Out         string              `json:"out"`
+	Classes     []NetClass          `json:"classes"`
+	MissingNets []string            `json:"missingNets"`
+	Kept        []string            `json:"kept"`
+	Mismatched  []string            `json:"mismatched"`
+	Domains     map[string][]string `json:"domains,omitempty"`
+	DRU         string              `json:"dru"`
+	DRURules    int                 `json:"druRules"`
 }
 
 // Netclasses writes reqs as netclasses (one per distinct requirement) into
@@ -386,4 +387,50 @@ func (t *Tools) Pours(pcb string, ps []Pour, out string) (json.RawMessage, error
 		return nil, err
 	}
 	return t.RunBridge("pours", pcb, path, out)
+}
+
+// Version is `kicad-cli version`.
+func (t *Tools) Version() (string, error) {
+	out, err := exec.Command(t.CLI, "version").Output()
+	return strings.TrimSpace(string(out)), err
+}
+
+// Edit applies copper / silk edits to pcb (bridge edit) and saves out.
+func (t *Tools) Edit(pcb string, ops map[string]any, out string) (json.RawMessage, error) {
+	path := strings.TrimSuffix(out, filepath.Ext(out)) + fmt.Sprintf("-edit-%d.json", time.Now().UnixNano())
+	b, err := json.MarshalIndent(ops, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		return nil, err
+	}
+	return t.RunBridge("edit", pcb, path, out)
+}
+
+// NetclassesIso is Netclasses plus insulation pairs: [{a, b, aNets, bNets,
+// clearanceMm, creepageMm}] become domain netclasses PPD_<domain> and
+// clearance / creepage rules in the .kicad_dru.
+//
+// edges: [{domain, nets, mil}] become (constraint edge_clearance) rules on
+// the domain classes (insulated domains' edge distance, IEC 60664-1 /
+// 62368-1 / 60601-1 via pcbauto.EdgeFromIntent).
+func (t *Tools) NetclassesIso(pcb string, reqs map[string]NetRequirement, isolation, edges []map[string]any, out string) (*NetclassResult, error) {
+	path := strings.TrimSuffix(out, filepath.Ext(out)) + "-reqs.json"
+	b, err := json.MarshalIndent(map[string]any{"pcbpilotReqs": 2, "nets": reqs, "isolation": isolation, "edges": edges}, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		return nil, err
+	}
+	raw, err := t.RunBridge("netclasses", pcb, path, out)
+	if err != nil {
+		return nil, err
+	}
+	var res NetclassResult
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
 }

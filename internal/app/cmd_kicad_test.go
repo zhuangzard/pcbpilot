@@ -47,29 +47,51 @@ func TestKicadSnapshotFixtureDecodes(t *testing.T) {
 	}
 }
 
-func TestKicadIntentGates(t *testing.T) {
+func TestKicadSnapshotGates(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "kicad", "testdata", "snapshot.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	in, err := parseDesignIntent([]byte(`{"nets":{
+	dir := t.TempDir()
+	intent := filepath.Join(dir, "intent.json")
+	if err := os.WriteFile(intent, []byte(`{"nets":{
 		"VCC":{"role":"power","widthMil":{"outer":20,"inner":20,"min":8}},
 		"SIG_A":{"role":"signal","widthMil":{"outer":6,"inner":6,"min":6},"lengthGroup":"g","lengthTolMil":5},
-		"GND":{"role":"ground","widthMil":{"outer":30,"inner":30,"min":10}}}}`))
+		"GND":{"role":"ground","widthMil":{"outer":30,"inner":30,"min":10}}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	in, err := loadDesignIntent(intent)
 	if err != nil {
 		t.Fatal(err)
 	}
-	g, lengths, err := kicadIntentGates(raw, in, nil, "net current")
-	if err != nil {
+	var snap boardSnapshot
+	if err := json.Unmarshal(raw, &snap); err != nil {
 		t.Fatal(err)
+	}
+	var gates []gateResult
+	if !snapshotIntentGates(&snap, in, intent, "", nil, nil, nil, true, func(g gateResult) { gates = append(gates, g) }) {
+		t.Fatal("snapshot not judged")
+	}
+	names := []string{}
+	for _, g := range gates {
+		names = append(names, g.Gate)
+	}
+	if strings.Join(names, ",") != "intent-widths,copper-to-edge,isolation,via-current,post-layout-sim" {
+		t.Fatalf("gates %v", names)
 	}
 	// t-vcc-neck: 10 < 20 within 50 mil of R1.1 (neck-down, allowed);
 	// t-vcc-trunk: 10 < 20 away from any pad → violation; t-vcc-wide ok.
+	g := gates[0]
 	if g.Pass || len(g.Items) != 1 || !strings.HasPrefix(g.Items[0], "VCC: 1 track(s), worst 10.00 < 20.00 mil on layer 1") {
 		t.Fatalf("intent-widths: %+v", g)
 	}
-	if lengths != nil {
-		t.Fatalf("a one-net length group is not checked: %+v", lengths)
+	if gates[4].Pass || gates[4].Detail != "not run (needs --sim)" {
+		t.Fatalf("post-layout-sim without a sim must fail: %+v", gates[4])
+	}
+	// The silkscreen gate reads the same snapshot (no silk texts: nothing to judge).
+	_, _, font := silkTightInput(&snap, defaultSilkTightOpts())
+	if sg := silkGate(&snap, font, defaultSilkTightOpts()); sg.Gate != "silkscreen" {
+		t.Fatalf("silk gate %+v", sg)
 	}
 }
 

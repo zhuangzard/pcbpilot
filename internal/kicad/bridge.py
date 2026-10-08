@@ -449,11 +449,16 @@ def save_board(board, src, out):
 def netclasses(pcb, reqs_path, out):
     with open(reqs_path) as f:
         reqs = json.load(f)
+    isolation, edges = [], []
+    if isinstance(reqs, dict) and reqs.get("pcbpilotReqs") == 2:
+        isolation = reqs.get("isolation") or []
+        edges = reqs.get("edges") or []
+        reqs = reqs.get("nets") or {}
     board = pcbnew.LoadBoard(pcb)
     ns = board.GetDesignSettings().m_NetSettings
 
     # Idempotent: drop classes and patterns of an earlier run.
-    old = [str(n) for n in ns.GetNetclasses().keys() if re.match(r"^%s\d+_" % CLASS_PREFIX, str(n))]
+    old = [str(n) for n in ns.GetNetclasses().keys() if re.match(r"^%s(\d+_|D_)" % CLASS_PREFIX, str(n))]
     if old:
         keep = {}
         for n, nc in ns.GetNetclasses().items():
@@ -512,6 +517,24 @@ def netclasses(pcb, reqs_path, out):
             ns.SetNetclassPatternAssignment(net, name)
         classes.append({"name": name, "nets": groups[key], "trackWidthMil": w, "innerWidthMil": inner,
                         "minMil": mn, "clearanceMil": c, "intentOuterMil": outer})
+    # Insulation domains (intent pairs): one class per domain, below the
+    # width classes in priority, so the composite keeps the PP widths.
+    domains = {}
+    for pr in isolation:
+        for side in ("a", "b"):
+            dom = re.sub(r"[^A-Za-z0-9_]", "_", str(pr.get(side + "Name") or pr.get(side)))
+            domains.setdefault(dom, set()).update(n for n in pr.get(side + "Nets") or [] if n in names)
+    for ed in edges:
+        dom = re.sub(r"[^A-Za-z0-9_]", "_", str(ed.get("domain")))
+        domains.setdefault(dom, set()).update(n for n in ed.get("nets") or [] if n in names)
+    for i, dom in enumerate(sorted(domains)):
+        name = "%sD_%s" % (CLASS_PREFIX, dom)
+        nc = pcbnew.NETCLASS(name)
+        nc.SetPriority(-500000 + i)
+        nc.SetDescription("pcbpilot insulation domain %s" % dom)
+        ns.SetNetclass(name, nc)
+        for net in sorted(domains[dom]):
+            ns.SetNetclassPatternAssignment(net, name)
     ns.ClearAllCaches()
     board.SynchronizeNetsAndNetClasses(True)
 
@@ -544,6 +567,24 @@ def netclasses(pcb, reqs_path, out):
             lo = cl["minMil"] if cl["minMil"] > 0 else mil(board.GetDesignSettings().m_TrackMinWidth)
             rules.append('(rule "pcbpilot %s inner"\n  (layer inner)\n  (condition "A.hasNetclass(\'%s\')")\n  (constraint track_width (min %smm) (opt %smm)))'
                          % (cl["name"], cl["name"], mm(lo), mm(cl["innerWidthMil"])))
+    for pr in isolation:
+        da = "%sD_%s" % (CLASS_PREFIX, re.sub(r"[^A-Za-z0-9_]", "_", str(pr.get("aName") or pr.get("a"))))
+        db = "%sD_%s" % (CLASS_PREFIX, re.sub(r"[^A-Za-z0-9_]", "_", str(pr.get("bName") or pr.get("b"))))
+        cons = []
+        if pr.get("clearanceMm"):
+            cons.append("(constraint clearance (min %smm))" % ("%.4f" % pr["clearanceMm"]).rstrip("0").rstrip("."))
+        if pr.get("creepageMm"):
+            cons.append("(constraint creepage (min %smm))" % ("%.4f" % pr["creepageMm"]).rstrip("0").rstrip("."))
+        if not cons:
+            continue
+        rules.append('(rule "pcbpilot isolation %s|%s"\n  (condition "(A.hasNetclass(\'%s\') && B.hasNetclass(\'%s\')) || (A.hasNetclass(\'%s\') && B.hasNetclass(\'%s\'))")\n  %s)'
+                     % (da, db, da, db, db, da, "\n  ".join(cons)))
+    for ed in edges:
+        if not ed.get("mil"):
+            continue
+        d = "%sD_%s" % (CLASS_PREFIX, re.sub(r"[^A-Za-z0-9_]", "_", str(ed.get("domain"))))
+        rules.append('(rule "pcbpilot edge %s"\n  (condition "A.hasNetclass(\'%s\')")\n  (constraint edge_clearance (min %smm)))'
+                     % (d, d, ("%.4f" % (float(ed["mil"]) * 0.0254)).rstrip("0").rstrip(".")))
     if rules:
         if not re.search(r"\(version\s+\d+\)", text):
             text = "(version 1)\n" + text
@@ -556,7 +597,7 @@ def netclasses(pcb, reqs_path, out):
         os.remove(out_dru)
     save_board(board, pcb, out)
     return {"ok": True, "out": out, "classes": classes, "missingNets": missing, "kept": raised,
-            "mismatched": mismatched, "dru": out_dru if text.strip() else "", "druRules": len(rules)}
+            "mismatched": mismatched, "domains": {k: sorted(v) for k, v in domains.items()}, "dru": out_dru if text.strip() else "", "druRules": len(rules)}
 
 
 def list_patterns(pcb):
@@ -794,6 +835,30 @@ def edit(pcb, ops_path, out):
             t.SetVertJustify(pcbnew.GR_TEXT_V_ALIGN_CENTER)
         t.SetTextPos(pos(op["x"], op["y"]))
         done["setText"] += 1
+    done["addTexts"], done["hideTexts"] = 0, 0
+    for op in ops.get("addTexts") or []:
+        t = pcbnew.PCB_TEXT(board)
+        t.SetText(op["text"])
+        t.SetLayer(pcbnew.B_SilkS if int(op.get("layer", 3)) == 4 else pcbnew.F_SilkS)
+        h = nm(op.get("fontSize") or 40)
+        t.SetTextSize(pcbnew.VECTOR2I(h, h))
+        if op.get("lineWidth"):
+            t.SetTextThickness(nm(op["lineWidth"]))
+        if int(op.get("layer", 3)) == 4:
+            t.SetMirrored(True)
+        t.SetHorizJustify(pcbnew.GR_TEXT_H_ALIGN_CENTER)
+        t.SetVertJustify(pcbnew.GR_TEXT_V_ALIGN_CENTER)
+        t.SetTextAngleDegrees(float(op.get("rotation") or 0))
+        t.SetTextPos(pos(op["x"], op["y"]))
+        board.Add(t)
+        done["addTexts"] += 1
+    for tid in ops.get("hideTexts") or []:
+        t = texts.get(tid)
+        if t is None:
+            missing.append(tid)
+            continue
+        t.SetVisible(False)
+        done["hideTexts"] += 1
     zones = fill_zones(board) if (done["setWidth"] or done["addVias"] or done["addTracks"]) else 0
     save_board(board, pcb, out)
     return {"ok": not missing, "error": ("unknown ids: " + ",".join(missing[:10])) if missing else "",

@@ -57,16 +57,24 @@ func TestKicadLive(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := filepath.Join(dir, "route")
-	o := kicadRouteOpts{pcb: pcb, intent: intent, outDir: out, fastrouteBin: fr, widthBasis: "net", pours: "auto", gndNet: "GND", powerLayer: -1}
+	waivers := filepath.Join(dir, "waivers.json")
+	if err := os.WriteFile(waivers, []byte(`[{"gate":"design-review","match":"--no-review","reason":"live unit test","by":"test"},
+		{"gate":"board-manual","match":"--no-manual","reason":"live unit test","by":"test"}]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	o := kicadRouteOpts{pcb: pcb, intent: intent, outDir: out, fastrouteBin: fr, widthBasis: "net", pours: "auto", gndNet: "GND", powerLayer: -1,
+		silk: defaultSilkTightOpts(), noReview: true, noManual: true, waivers: waivers, projectName: "tiny", projectConfig: "none", widenMax: 40}
 	o.fo.threads, o.fo.rounds, o.fo.timeout = 1, 2, 5*time.Minute
 	var stdout, stderr bytes.Buffer
 	err = runKicadRoute(o, &stdout, &stderr)
 	t.Log(stderr.String())
-	if err != nil {
-		t.Fatalf("kicad route: %v\n%s", err, stdout.String())
+	// No --sim: post-layout-sim fails by design, so the run fails; the
+	// routing gates must pass.
+	data, rerr := os.ReadFile(filepath.Join(out, "summary.json"))
+	if rerr != nil {
+		t.Fatalf("no summary (%v): %v", err, rerr)
 	}
 	var sum struct {
-		Pass  bool         `json:"pass"`
 		Gates []gateResult `json:"gates"`
 		Final *struct {
 			Unrouted int `json:"unrouted"`
@@ -75,15 +83,28 @@ func TestKicadLive(t *testing.T) {
 			Total int `json:"total"`
 		} `json:"drc"`
 	}
-	data, err := os.ReadFile(filepath.Join(out, "summary.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	if err := json.Unmarshal(data, &sum); err != nil {
 		t.Fatal(err)
 	}
-	if !sum.Pass || sum.Final == nil || sum.Final.Unrouted != 0 || sum.DRC.Total != 0 || len(sum.Gates) < 3 {
+	if sum.Final == nil || sum.Final.Unrouted != 0 || sum.DRC.Total != 0 {
 		t.Fatalf("summary: %s", data)
+	}
+	got := map[string]bool{}
+	for _, g := range sum.Gates {
+		got[g.Gate] = g.Pass
+	}
+	for _, g := range []string{"design-review", "route-complete", "kicad-drc", "intent-rules", "intent-widths", "copper-to-edge", "isolation", "via-current"} {
+		if p, ok := got[g]; !ok || !p {
+			t.Errorf("gate %s: present %v pass %v\n%s", g, ok, p, data)
+		}
+	}
+	if p, ok := got["post-layout-sim"]; !ok || p {
+		t.Errorf("post-layout-sim without --sim must be present and fail")
+	}
+	for _, f := range []string{"routed.kicad_pcb", "routed.kicad_pro", "board-final.json", "drc.json", "report"} {
+		if _, err := os.Stat(filepath.Join(out, f)); err != nil {
+			t.Errorf("missing output %s", f)
+		}
 	}
 	// The input board is untouched.
 	a, _ := os.ReadFile(src)
