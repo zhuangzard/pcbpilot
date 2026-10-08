@@ -101,6 +101,7 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 		newNotifyCmd(cfg, stdout, stderr),
 		newCallCmd(cfg, stdout, stderr),
 		newApplyCmd(cfg, stdout, stderr),
+		newReviewPanelCmd(stdout, stderr),
 		newDaemonCmd(cfg, stdout, stderr),
 		newHealthAliasCmd(cfg, stdout, stderr),
 		newAuditCmd(stdout, stderr),

@@ -372,6 +372,12 @@ pcbpilot pcb auto route --playbook out/playbook.json --out-dir out/live --projec
 同形（包围盒 1 mil 内）的 MULTI 层孔/禁布步骤（剧本自己 `--replace` 删掉的不算），应用后、试布和导出 DSN 前先拆掉
 全部未锁定布线；组标签按实际渲染尺寸复核，比估计大就按真实尺寸重新找位置。
 
+**设计评审门（`design-review`，硬门，用户 2026-10-09）**：设计阶段必须多代理评审——`pcbpilot review-panel` 把项目自己的
+需求文档（`--requirements`，如 `03_Requirement/*.md`、`00_Project_Scope/SCOPE.md`）和设计证据（`--evidence`：intent、
+原理图连接/网表、仿真、门禁汇总、设计报告）拼成同一份自包含提示，并行交给 Codex、Kimi、Claude Code 三个独立 CLI；每家
+逐条需求给 met / not_met / cannot_judge 及证据，并列阻断项。三家都给出可解析的 JSON 判定、无 not_met、无阻断项才通过；
+某家缺席、超时、未登录或答不出 JSON 都算失败，只能用签名豁免。结果在 `--out-dir/{review.json, prompt.md, <reviewer>.md}`。
+
 `pcb auto route` 依次：`apply --yes` 剧本 → PLANE 内层改 SIGNAL → 导出 DSN → `dsn-fix` → fastroute
 （`--continue 5` 次 `--initial-session` 续跑直到 0 未布通）→ 拆线 + 导入 → `ses-repair` → 铺铜
 （GND 在 TOP/IN1/BOTTOM，焊盘最多的非地电源网在 IN2；`--gnd-layers` / `--power-net` / `--power-layer` 可改）
