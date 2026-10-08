@@ -1,10 +1,31 @@
 # Changelog
 
-## [0.7.2] — 2026-10-06
+## [0.8.0] — 2026-10-09
 
+**Hard gates for external routing, silk-aware placement, board manual. Re-import the 0.8.0 connector** (silk readback
+and designator hiding below; minor bump because the connector must be re-imported).
+
+Connector:
 - `pcb.silk.list` reports each text's `lineWidth` (the silkscreen gate checks the fab stroke).
 - `pcb.silk.set` accepts `valueVisible` for component attributes: `pcb silk-align --tight` hides the
   designators a group label ("C21–C24") names; the attribute, BOM and placement data stay.
+- `project.export_source` accepts `fileType` `epro` (v2 layout KiCad's EasyEDA Pro importer reads) besides `epro2`.
+
+CLI / daemon (no connector change):
+- fastroute (external, GPL, never vendored) is the release router behind hard gates: `pcb auto route` applies the
+  intent (schematic + simulation) as DSN classes, per-layer widths, no-neck-down classes, clearance margins, via
+  arrays, widen-to-intent, IR-drop closure, and judges the live board with code gates: session reconcile, native DRC
+  (each violation listed), pad-net diff, intent rules / widths / lengths, `pcb check --intent`, route-complete,
+  post-layout simulation, silkscreen and board manual (`pcb gate` re-runs them on any board).
+- Placement: electrical weight for known-current nets, best-of-N seeds, candidate trials ranked by routability then
+  high-current loop length, edge connectors keep pads off the copper-to-edge band, every part keeps room for its
+  designator at the project text size.
+- Silkscreen: `pcb silk-align --tight` (never shrinks text; four sides, 90°, aligned rows/columns, group labels) and
+  the readback `silkscreen` gate.
+- Board manual: generated and versioned on every route/gate run (`board-manual` gate).
+- Robust long runs: reruns are idempotent (mechanics dedupe, rip-up before trials, per-apply journals), saves and
+  daemon discovery wait for a starved connector/daemon, failed applies resume.
+- Clean-room router v2 groundwork (`pkg/pcbroute`: geom, rules, dsn, board, tile) — not yet a selectable engine.
 
 ## [0.7.1] — 2026-10-04
 
