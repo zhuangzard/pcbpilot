@@ -27,6 +27,7 @@
 #   fill PCB                        zone fill + save in place
 #   rules PCB RULES.json OUT        design rules + Default netclass (mil)
 #   pours PCB SPEC.json OUT         board-outline copper pours + fill
+#   edit PCB OPS.json OUT           track widths, vias, stubs, silk texts + fill
 
 import json
 import math
@@ -343,10 +344,57 @@ def snapshot(board):
         "pours": pours, "poured": poured, "regions": regions, "fills": fills,
     }
     snap["routedLines"] = len(lines) + len(arcs)
+    try:
+        snap["silk"] = silk_texts(board)
+    except Exception as e:  # silk is optional for the copper consumers
+        notes.append("silkscreen unreadable: %s" % e)
     snap["partial"] = notes
     if not notes:
         del snap["partial"]
     return snap
+
+
+def silk_texts(board):
+    """Silkscreen texts in the pcbpilot pcbSilkText shape (Go field names):
+    every footprint reference/value field and footprint/board text. Layer 3 =
+    F.Silkscreen, 4 = B.Silkscreen, 0 = not on silk (then Hidden)."""
+    out = []
+
+    def silk_layer(l):
+        if l == pcbnew.F_SilkS:
+            return 3
+        if l == pcbnew.B_SilkS:
+            return 4
+        return 0
+
+    def rec(t, kind, key, comp=None):
+        bb = box_mil(t.GetBoundingBox())
+        layer = silk_layer(t.GetLayer())
+        visible = t.IsVisible() if hasattr(t, "IsVisible") else True
+        r = {
+            "ID": t.m_Uuid.AsString(), "Kind": kind, "Key": key, "Text": t.GetShownText(False) if hasattr(t, "GetShownText") else t.GetText(),
+            "Layer": layer, "Mirror": bool(t.IsMirrored()), "Reverse": False,
+            "Rotation": round(t.GetTextAngleDegrees() % 360.0, 4),
+            "FontSize": mil(t.GetTextHeight()), "LineWidth": mil(t.GetTextThickness()),
+            "X": bb["minX"], "Y": bb["minY"],
+            "BBox": {"MinX": bb["minX"], "MinY": bb["minY"], "MaxX": bb["maxX"], "MaxY": bb["maxY"]},
+            "Hidden": (not visible) or layer == 0,
+        }
+        if comp is not None:
+            r["CompID"] = comp.m_Uuid.AsString()
+            r["CompLayer"] = 2 if comp.IsFlipped() else 1
+        return r
+
+    for fp in board.GetFootprints():
+        out.append(rec(fp.Reference(), "attribute", "Designator", fp))
+        out.append(rec(fp.Value(), "attribute", "Device", fp))
+        for item in fp.GraphicalItems():
+            if item.GetClass() in ("PCB_TEXT", "FP_TEXT") and silk_layer(item.GetLayer()):
+                out.append(rec(item, "string", "", fp))
+    for item in board.GetDrawings():
+        if item.GetClass() == "PCB_TEXT" and silk_layer(item.GetLayer()):
+            out.append(rec(item, "string", ""))
+    return out
 
 
 def arc_angle(s, m, e):
@@ -671,12 +719,93 @@ def pours(pcb, spec_path, out):
     return {"ok": True, "out": out, "pours": made, "zonesFilled": zones}
 
 
+def set_via_width(v, w):
+    try:
+        v.SetWidth(pcbnew.F_Cu, w)
+    except TypeError:
+        v.SetWidth(w)
+
+
+def edit(pcb, ops_path, out):
+    """Apply copper/silk edits (mil, y-up), fill the zones and save:
+    {"setWidth":[{"id","width"}], "addVias":[{"net","x","y","diameter","drill"}],
+     "addTracks":[{"net","layer","startX","startY","endX","endY","lineWidth"}],
+     "setText":[{"id","x","y","rotation","fontSize","lineWidth"}]}  (x, y = text centre)"""
+    with open(ops_path) as f:
+        ops = json.load(f)
+    board = pcbnew.LoadBoard(pcb)
+    tracks = {t.m_Uuid.AsString(): t for t in board.GetTracks()}
+    done = {"setWidth": 0, "addVias": 0, "addTracks": 0, "setText": 0}
+    missing = []
+    for op in ops.get("setWidth") or []:
+        t = tracks.get(op["id"])
+        if t is None or t.Type() == pcbnew.PCB_VIA_T:
+            missing.append(op["id"])
+            continue
+        t.SetWidth(nm(op["width"]))
+        done["setWidth"] += 1
+
+    def pos(x, y):
+        return pcbnew.VECTOR2I(nm(x), -nm(y))
+
+    for op in ops.get("addVias") or []:
+        net = board.FindNet(op["net"])
+        v = pcbnew.PCB_VIA(board)
+        v.SetPosition(pos(op["x"], op["y"]))
+        v.SetViaType(pcbnew.VIATYPE_THROUGH)
+        v.SetLayerPair(pcbnew.F_Cu, pcbnew.B_Cu)
+        if op.get("diameter"):
+            set_via_width(v, nm(op["diameter"]))
+        if op.get("drill"):
+            v.SetDrill(nm(op["drill"]))
+        if net is not None:
+            v.SetNet(net)
+        board.Add(v)
+        done["addVias"] += 1
+    for op in ops.get("addTracks") or []:
+        net = board.FindNet(op["net"])
+        t = pcbnew.PCB_TRACK(board)
+        t.SetStart(pos(op["startX"], op["startY"]))
+        t.SetEnd(pos(op["endX"], op["endY"]))
+        t.SetWidth(nm(op["lineWidth"]))
+        t.SetLayer(kicad_layer(int(op["layer"])))
+        if net is not None:
+            t.SetNet(net)
+        board.Add(t)
+        done["addTracks"] += 1
+    texts = {}
+    for fp in board.GetFootprints():
+        for t in (fp.Reference(), fp.Value()):
+            texts[t.m_Uuid.AsString()] = t
+    for op in ops.get("setText") or []:
+        t = texts.get(op["id"])
+        if t is None:
+            missing.append(op["id"])
+            continue
+        if op.get("rotation") is not None:
+            t.SetTextAngleDegrees(float(op["rotation"]))
+        if op.get("fontSize"):
+            t.SetTextHeight(nm(op["fontSize"]))
+            t.SetTextWidth(nm(op["fontSize"]))
+        if op.get("lineWidth"):
+            t.SetTextThickness(nm(op["lineWidth"]))
+        if hasattr(t, "SetHorizJustify"):
+            t.SetHorizJustify(pcbnew.GR_TEXT_H_ALIGN_CENTER)
+            t.SetVertJustify(pcbnew.GR_TEXT_V_ALIGN_CENTER)
+        t.SetTextPos(pos(op["x"], op["y"]))
+        done["setText"] += 1
+    zones = fill_zones(board) if (done["setWidth"] or done["addVias"] or done["addTracks"]) else 0
+    save_board(board, pcb, out)
+    return {"ok": not missing, "error": ("unknown ids: " + ",".join(missing[:10])) if missing else "",
+            "out": out, "done": done, "zonesFilled": zones}
+
+
 def main(argv):
-    usage = "usage: bridge.py snapshot PCB | netclasses PCB REQS OUT | ripup PCB OUT | dsn PCB OUT | ses PCB SES OUT | fill PCB | rules PCB RULES OUT | pours PCB SPEC OUT"
+    usage = "usage: bridge.py snapshot PCB | netclasses PCB REQS OUT | ripup PCB OUT | dsn PCB OUT | ses PCB SES OUT | fill PCB | rules PCB RULES OUT | pours PCB SPEC OUT | edit PCB OPS OUT"
     if len(argv) < 2:
         emit({"ok": False, "error": usage}, 2)
     cmd, args = argv[1], argv[2:]
-    want = {"snapshot": 1, "netclasses": 3, "ripup": 2, "dsn": 2, "ses": 3, "fill": 1, "rules": 3, "pours": 3}
+    want = {"snapshot": 1, "netclasses": 3, "ripup": 2, "dsn": 2, "ses": 3, "fill": 1, "rules": 3, "pours": 3, "edit": 3}
     if cmd not in want or len(args) != want[cmd]:
         emit({"ok": False, "error": usage}, 2)
     try:
@@ -695,6 +824,8 @@ def main(argv):
             res = rules(*args)
         elif cmd == "pours":
             res = pours(*args)
+        elif cmd == "edit":
+            res = edit(*args)
         else:
             res = fill(*args)
     except Exception as e:  # report, never a bare traceback on stdout
