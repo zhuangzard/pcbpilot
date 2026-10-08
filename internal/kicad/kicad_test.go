@@ -76,6 +76,13 @@ func TestPrepareDSN(t *testing.T) {
 	if !strings.Contains(out, `(class PP1_W20+Power VCC "/sub/V-"`) || !strings.Contains(out, `(class kicad_default "" SIG`) {
 		t.Fatalf("class headers not preserved:\n%s", out)
 	}
+	// 0.2 mil clearance margin in DSN units (um): 152.4 + 5.08.
+	if !strings.Contains(out, "(clearance 157.48)") || prep.ClearanceMarginMil != 0.2 {
+		t.Fatalf("clearance margin missing")
+	}
+	if math.Abs(prep.NarrowestClassMil-200/25.4) > 1e-6 {
+		t.Fatalf("narrowest class %v", prep.NarrowestClassMil)
+	}
 	if strings.Count(out, "(") != strings.Count(out, ")") {
 		t.Fatal("unbalanced output")
 	}
@@ -91,7 +98,7 @@ func TestPrepareDSN(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"GND: outer width 10 < 12 mil", "GND: inner width 10 < 12 mil", "GND: clearance 4 < 5 mil", "NC: no net class in the DSN"}
+	want := []string{"GND: outer width 10 < 12 mil", "GND: inner width 10 < 12 mil", "GND: clearance 4.2 < 5 mil", "NC: no net class in the DSN"}
 	for _, w := range want {
 		if !contains(prep.Short, w) {
 			t.Errorf("missing %q in %v", w, prep.Short)

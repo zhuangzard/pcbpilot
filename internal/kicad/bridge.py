@@ -25,6 +25,8 @@
 #   dsn PCB OUT.dsn                 ExportSpecctraDSN
 #   ses PCB IN.ses OUT.kicad_pcb    ImportSpecctraSES + zone fill + save
 #   fill PCB                        zone fill + save in place
+#   rules PCB RULES.json OUT        design rules + Default netclass (mil)
+#   pours PCB SPEC.json OUT         board-outline copper pours + fill
 
 import json
 import math
@@ -577,12 +579,104 @@ def fill(pcb):
     return {"ok": True, "out": pcb, "zonesFilled": zones}
 
 
+# ── project rules and pours ──────────────────────────────────────────────────
+
+def nm(v_mil):
+    return int(round(float(v_mil) * NM_PER_MIL))
+
+
+def rules(pcb, rules_path, out):
+    """Board design rules + Default netclass (mil). The caller makes sure a
+    .kicad_pro sits next to PCB (rules live in the project file)."""
+    with open(rules_path) as f:
+        r = json.load(f)
+    board = pcbnew.LoadBoard(pcb)
+    ds = board.GetDesignSettings()
+    dn = ds.m_NetSettings.GetDefaultNetclass()
+    if r.get("clearanceMil"):
+        ds.m_MinClearance = nm(r["clearanceMil"])
+        dn.SetClearance(nm(r["clearanceMil"]))
+    if r.get("minTrackMil"):
+        ds.m_TrackMinWidth = nm(r["minTrackMil"])
+    if r.get("trackMil"):
+        dn.SetTrackWidth(nm(r["trackMil"]))
+    if r.get("viaDiaMil"):
+        dn.SetViaDiameter(nm(r["viaDiaMil"]))
+        ds.m_ViasMinSize = min(ds.m_ViasMinSize, nm(r["viaDiaMil"]))
+    if r.get("viaDrillMil"):
+        dn.SetViaDrill(nm(r["viaDrillMil"]))
+        ds.m_MinThroughDrill = min(ds.m_MinThroughDrill, nm(r["viaDrillMil"]))
+    if r.get("edgeMil"):
+        ds.m_CopperEdgeClearance = nm(r["edgeMil"])
+    save_board(board, pcb, out)
+    return {"ok": True, "out": out, "rules": r}
+
+
+def kicad_layer(lid):
+    if lid == 1:
+        return pcbnew.F_Cu
+    if lid == 2:
+        return pcbnew.B_Cu
+    v = getattr(pcbnew, "In%d_Cu" % (lid - 14), None)
+    if v is None:
+        raise ValueError("no copper layer for id %d" % lid)
+    return v
+
+
+POUR_PREFIX = "pcbpilot pour"
+
+
+def pours(pcb, spec_path, out):
+    """Board-outline copper zones [{net, layer (pcbpilot id), clearanceMil}],
+    replacing earlier pcbpilot pours, then fill and save."""
+    with open(spec_path) as f:
+        spec = json.load(f)
+    board = pcbnew.LoadBoard(pcb)
+    for z in list(board.Zones()):
+        if z.GetZoneName().startswith(POUR_PREFIX):
+            board.Remove(z)
+    ps = pcbnew.SHAPE_POLY_SET()
+    try:
+        ok = board.GetBoardPolygonOutlines(ps, False)
+    except TypeError:
+        ok = board.GetBoardPolygonOutlines(ps)
+    if not ok or ps.OutlineCount() == 0:
+        return {"ok": False, "error": "no closed board outline (Edge.Cuts) to pour into"}
+    best = max(range(ps.OutlineCount()), key=lambda i: abs(ps.Outline(i).Area()))
+    chain = ps.Outline(best)
+    made = []
+    for zs in spec.get("zones", []):
+        net = board.FindNet(zs["net"])
+        if net is None:
+            return {"ok": False, "error": "pour net %s is not on the board" % zs["net"]}
+        z = pcbnew.ZONE(board)
+        z.SetLayer(kicad_layer(int(zs["layer"])))
+        z.SetNetCode(net.GetNetCode())
+        name = "%s %s L%d" % (POUR_PREFIX, zs["net"], int(zs["layer"]))
+        z.SetZoneName(name)
+        outline = z.Outline()
+        outline.NewOutline()
+        for i in range(chain.PointCount()):
+            p = chain.CPoint(i)
+            outline.Append(p.x, p.y)
+        if zs.get("clearanceMil"):
+            z.SetLocalClearance(nm(zs["clearanceMil"]))
+        if zs.get("minWidthMil"):
+            z.SetMinThickness(nm(zs["minWidthMil"]))
+        z.SetPadConnection(pcbnew.ZONE_CONNECTION_THERMAL)
+        board.Add(z)
+        made.append(name)
+    zones = fill_zones(board)
+    save_board(board, pcb, out)
+    return {"ok": True, "out": out, "pours": made, "zonesFilled": zones}
+
+
 def main(argv):
-    usage = "usage: bridge.py snapshot PCB | netclasses PCB REQS OUT | ripup PCB OUT | dsn PCB OUT | ses PCB SES OUT | fill PCB"
+    usage = "usage: bridge.py snapshot PCB | netclasses PCB REQS OUT | ripup PCB OUT | dsn PCB OUT | ses PCB SES OUT | fill PCB | rules PCB RULES OUT | pours PCB SPEC OUT"
     if len(argv) < 2:
         emit({"ok": False, "error": usage}, 2)
     cmd, args = argv[1], argv[2:]
-    want = {"snapshot": 1, "netclasses": 3, "ripup": 2, "dsn": 2, "ses": 3, "fill": 1}
+    want = {"snapshot": 1, "netclasses": 3, "ripup": 2, "dsn": 2, "ses": 3, "fill": 1, "rules": 3, "pours": 3}
     if cmd not in want or len(args) != want[cmd]:
         emit({"ok": False, "error": usage}, 2)
     try:
@@ -597,6 +691,10 @@ def main(argv):
             res = dsn(*args)
         elif cmd == "ses":
             res = ses(*args)
+        elif cmd == "rules":
+            res = rules(*args)
+        elif cmd == "pours":
+            res = pours(*args)
         else:
             res = fill(*args)
     except Exception as e:  # report, never a bare traceback on stdout

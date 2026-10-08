@@ -113,14 +113,17 @@ func TestCopyKicadBoard(t *testing.T) {
 	}
 	dst := filepath.Join(dir, "w", "b.kicad_pcb")
 	_ = os.MkdirAll(filepath.Dir(dst), 0o755)
-	if err := copyKicadBoard(src, dst); err != nil {
-		t.Fatal(err)
+	if has, err := copyKicadBoard(src, dst); err != nil || !has {
+		t.Fatal(has, err)
 	}
 	if b, _ := os.ReadFile(filepath.Join(dir, "w", "b.kicad_pro")); string(b) != ".kicad_pro" {
 		t.Fatalf("pro not copied: %q", b)
 	}
 	_ = os.Remove(filepath.Join(dir, "a.kicad_pro"))
-	if err := copyKicadBoard(src, dst); err == nil {
-		t.Fatal("missing .kicad_pro must fail")
+	if has, err := copyKicadBoard(src, dst); err != nil || has {
+		t.Fatal("missing .kicad_pro: want ok, hasPro=false", has, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "w", "b.kicad_pro")); !os.IsNotExist(err) {
+		t.Fatal("stale .kicad_pro left in the work copy")
 	}
 }

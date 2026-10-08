@@ -321,11 +321,14 @@ func (t *Tools) Fill(pcb string) (json.RawMessage, error) { return t.RunBridge("
 // DRC runs `kicad-cli pcb drc` (errors only, JSON) on pcb, writes the raw
 // report to out and returns it parsed. The board's .kicad_pro (and
 // .kicad_dru) must sit next to it for the project rules.
-func (t *Tools) DRC(pcb, out string) (*DRCReport, error) {
+func (t *Tools) DRC(pcb, out string) (*DRCReport, error) { return t.DRCSeverity(pcb, out, "error") }
+
+// DRCSeverity is DRC with a kicad-cli severity: error | warning | all.
+func (t *Tools) DRCSeverity(pcb, out, severity string) (*DRCReport, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), BridgeTimeout)
 	defer cancel()
 	_ = os.Remove(out)
-	cmd := exec.CommandContext(ctx, t.CLI, "pcb", "drc", "--format", "json", "--severity-error", "-o", out, pcb)
+	cmd := exec.CommandContext(ctx, t.CLI, "pcb", "drc", "--format", "json", "--severity-"+severity, "-o", out, pcb)
 	var buf bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &buf, &buf
 	err := cmd.Run()
@@ -337,4 +340,50 @@ func (t *Tools) DRC(pcb, out string) (*DRCReport, error) {
 		return nil, fmt.Errorf("kicad-cli pcb drc: %v: %s", err, strings.TrimSpace(buf.String()))
 	}
 	return ParseDRC(data)
+}
+
+// Rules are board design rules and the Default netclass (mil; 0 = keep).
+type Rules struct {
+	ClearanceMil float64 `json:"clearanceMil,omitempty"`
+	MinTrackMil  float64 `json:"minTrackMil,omitempty"`
+	TrackMil     float64 `json:"trackMil,omitempty"`
+	ViaDiaMil    float64 `json:"viaDiaMil,omitempty"`
+	ViaDrillMil  float64 `json:"viaDrillMil,omitempty"`
+	EdgeMil      float64 `json:"edgeMil,omitempty"`
+}
+
+// MinimalProject is the .kicad_pro written for a board that has none: KiCad
+// fills every other setting with its defaults on load, and the next
+// SaveBoard writes the complete project.
+func MinimalProject(pcbPath string) []byte {
+	name := strings.TrimSuffix(filepath.Base(pcbPath), ".kicad_pcb") + ".kicad_pro"
+	b, _ := json.MarshalIndent(map[string]any{"meta": map[string]any{"filename": name, "version": 3}}, "", "  ")
+	return append(b, '\n')
+}
+
+// SetRules writes r into a copy of pcb at out (its .kicad_pro must exist).
+func (t *Tools) SetRules(pcb string, r Rules, out string) (json.RawMessage, error) {
+	path := strings.TrimSuffix(out, filepath.Ext(out)) + "-rules.json"
+	b, _ := json.MarshalIndent(r, "", "  ")
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		return nil, err
+	}
+	return t.RunBridge("rules", pcb, path, out)
+}
+
+// Pour is one board-outline copper zone (layer: pcbpilot id 1/2/15+).
+type Pour struct {
+	Net          string  `json:"net"`
+	Layer        int     `json:"layer"`
+	ClearanceMil float64 `json:"clearanceMil,omitempty"`
+}
+
+// Pours replaces pcbpilot's pours on pcb with ps, fills and saves out.
+func (t *Tools) Pours(pcb string, ps []Pour, out string) (json.RawMessage, error) {
+	path := strings.TrimSuffix(out, filepath.Ext(out)) + "-pours.json"
+	b, _ := json.MarshalIndent(map[string]any{"zones": ps}, "", "  ")
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		return nil, err
+	}
+	return t.RunBridge("pours", pcb, path, out)
 }

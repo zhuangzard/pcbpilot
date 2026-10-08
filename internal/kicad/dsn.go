@@ -26,6 +26,11 @@ type DSNPrep struct {
 	NoNeckdown []string `json:"noNeckdownClasses,omitempty"`
 	// MinTraceMil is the narrowest widthMil.min of any net (0 = none).
 	MinTraceMil float64 `json:"minTraceMil"`
+	// NarrowestClassMil is the narrowest rule width of any DSN class with
+	// nets: a neck-down floor above it would forbid that class its own width.
+	NarrowestClassMil float64 `json:"narrowestClassMil"`
+	// ClearanceMarginMil was added to every clearance (see ClearanceMarginMil).
+	ClearanceMarginMil float64 `json:"clearanceMarginMil"`
 	// Short lists the nets whose DSN class misses their requirement (the
 	// pre-route gate: routing stops when it is not empty).
 	Short []string `json:"short,omitempty"`
@@ -34,6 +39,13 @@ type DSNPrep struct {
 
 const reqEps = 0.005
 
+// ClearanceMarginMil is added to every clearance in the DSN handed to
+// fastroute: KiCad's DRC measured 0.1484 mm against a 0.1501 mm netclass
+// clearance on a track fastroute had placed at the rule (PicoRick, KiCad
+// 10.0.7), so routing at the bare rule fails DRC by rounding. Same value as
+// the EasyEDA flow's specctra.ClearanceMarginMil.
+var ClearanceMarginMil = 0.2
+
 // forbidsNeckdown matches internal/pcb/specctra: the net may not neck down
 // and its full width is above the global neck-down floor.
 func forbidsNeckdown(r NetRequirement, floor float64) bool {
@@ -41,12 +53,13 @@ func forbidsNeckdown(r NetRequirement, floor float64) bool {
 }
 
 var (
-	reResolution  = regexp.MustCompile(`\(resolution\s+(\w+)`)
-	reLayerType   = regexp.MustCompile(`\(layer\s+("[^"]*"|[^\s()]+)\s*\(type\s+(\w+)`)
-	reWidth       = regexp.MustCompile(`\(width\s+([0-9.eE+-]+)\s*\)`)
-	reStringQuote = regexp.MustCompile(`\(string_quote\s+"\s*\)`)
-	reLayerRuleW  = regexp.MustCompile(`\(layer_rule\s[^()]*\(rule\s*\(width\s+([0-9.eE+-]+)`)
-	reClearance   = regexp.MustCompile(`\(clearance\s+([0-9.eE+-]+)\s*\)`)
+	reResolution   = regexp.MustCompile(`\(resolution\s+(\w+)`)
+	reLayerType    = regexp.MustCompile(`\(layer\s+("[^"]*"|[^\s()]+)\s*\(type\s+(\w+)`)
+	reWidth        = regexp.MustCompile(`\(width\s+([0-9.eE+-]+)\s*\)`)
+	reStringQuote  = regexp.MustCompile(`\(string_quote\s+"\s*\)`)
+	reLayerRuleW   = regexp.MustCompile(`\(layer_rule\s[^()]*\(rule\s*\(width\s+([0-9.eE+-]+)`)
+	reClearanceAny = regexp.MustCompile(`\((clear|clearance)(\s+)([0-9.]+)`)
+	reClearance    = regexp.MustCompile(`\(clearance\s+([0-9.eE+-]+)\s*\)`)
 )
 
 // unitToMil is the factor from a DSN resolution unit to mil.
@@ -81,6 +94,18 @@ func PrepareDSN(dsn string, classes []NetClass, reqs map[string]NetRequirement) 
 	toMil, err := unitToMil(m[1])
 	if err != nil {
 		return "", prep, err
+	}
+	if ClearanceMarginMil > 0 {
+		margin := ClearanceMarginMil / toMil
+		dsn = reClearanceAny.ReplaceAllStringFunc(dsn, func(m string) string {
+			p := reClearanceAny.FindStringSubmatch(m)
+			v, err := strconv.ParseFloat(p[3], 64)
+			if err != nil {
+				return m
+			}
+			return "(" + p[1] + p[2] + strconv.FormatFloat(math.Round((v+margin)*1000)/1000, 'f', -1, 64)
+		})
+		prep.ClearanceMarginMil = ClearanceMarginMil
 	}
 	for _, r := range reqs {
 		if r.MinMil > 0 && (prep.MinTraceMil == 0 || r.MinMil < prep.MinTraceMil) {
@@ -163,6 +188,9 @@ func PrepareDSN(dsn string, classes []NetClass, reqs map[string]NetRequirement) 
 		}
 		for _, n := range members {
 			byNet[n] = e
+		}
+		if len(members) > 0 && e.outer > 0 && (prep.NarrowestClassMil == 0 || e.outer < prep.NarrowestClassMil) {
+			prep.NarrowestClassMil = e.outer
 		}
 		// Only the name changes; members keep KiCad's own quoting.
 		header := text[:headEnd]

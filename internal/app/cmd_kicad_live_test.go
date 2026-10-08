@@ -26,7 +26,7 @@ func TestKicadLive(t *testing.T) {
 	src := filepath.Join("..", "kicad", "testdata", "tiny.kicad_pcb")
 	dir := t.TempDir()
 	pcb := filepath.Join(dir, "tiny.kicad_pcb")
-	if err := copyKicadBoard(src, pcb); err != nil {
+	if _, err := copyKicadBoard(src, pcb); err != nil {
 		t.Fatal(err)
 	}
 
@@ -57,7 +57,7 @@ func TestKicadLive(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := filepath.Join(dir, "route")
-	o := kicadRouteOpts{pcb: pcb, intent: intent, outDir: out, fastrouteBin: fr, widthBasis: "net"}
+	o := kicadRouteOpts{pcb: pcb, intent: intent, outDir: out, fastrouteBin: fr, widthBasis: "net", pours: "auto", gndNet: "GND", powerLayer: -1}
 	o.fo.threads, o.fo.rounds, o.fo.timeout = 1, 2, 5*time.Minute
 	var stdout, stderr bytes.Buffer
 	err = runKicadRoute(o, &stdout, &stderr)
