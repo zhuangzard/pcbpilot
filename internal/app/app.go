@@ -128,6 +128,7 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 		newProjectConfigCmd(stdout, stderr),
 		newKBCmd(stdout, stderr),
 		newAskCmd(cfg, stdout, stderr),
+		newKicadCmd(stdout, stderr),
 	)
 	installMissingSubcommandErrors(root)
 
