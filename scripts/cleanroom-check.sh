@@ -33,8 +33,9 @@ bulk_limit=1000
 fail=0
 err() { echo "FAIL: $*"; fail=1; }
 
-# 1 + 4: per-commit trailers and bulk drops.
-commits=$(git rev-list --reverse "$range" -- "${guarded[@]}")
+# 1 + 4: per-commit trailers and bulk drops. Merges add no content of their
+# own (their branch commits are in the range and checked one by one).
+commits=$(git rev-list --reverse --no-merges "$range" -- "${guarded[@]}")
 for c in $commits; do
 	short=$(git rev-parse --short "$c")
 	for key in Clean-room Clean-room-sources Clean-room-attest; do
