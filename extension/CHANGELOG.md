@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.9.0] — 2026-10-09
+
+**KiCad becomes the design EDA; EasyEDA is the submission tool. Re-import the 0.9.0 connector** (new action
+`project.import_file`).
+
+Connector:
+- `project.import_file`: import a KiCad (or other) project into EasyEDA as a NEW project via the official importer
+  (`pcbpilot project import --file <KiCad project> --name N`).
+
+CLI (offline, KiCad 10):
+- `pcbpilot kicad place`: pcbauto placement on a .kicad_pcb (best of N seeds, designator room, electrical weights).
+- `pcbpilot kicad fab`: JLCPCB Gerber/drill zip, BOM and CPL keyed by LCSC part numbers; parts without an LCSC number
+  block the output.
+- `pcbpilot kicad lcsc --check/--set/--search/--import`: LCSC (JLC) part numbers on KiCad designs; `--import` turns an
+  LCSC part into a KiCad symbol + footprint through KiCad's own EasyEDA importer.
+- `pcbpilot kicad sch-fit`: every schematic sheet sized to its content (smallest A4–A0 clear of the title block).
+- `pcbpilot review-panel`: design-review hard gate — Codex, Kimi and Claude Code review the design against the
+  project's requirement documents; passes only when all answer with no unmet requirement and no blocking finding.
+- fastroute 0.1.13 support: pair skew from the intent (`skew=`).
+- Robust long runs: per-apply journals (a resumed apply never skips steps of an earlier run).
+
 ## [0.8.0] — 2026-10-09
 
 **Hard gates for external routing, silk-aware placement, board manual. Re-import the 0.8.0 connector** (silk readback
