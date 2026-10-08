@@ -77,5 +77,7 @@ split the sheet" and left unchanged (non-zero exit).`,
 func newKicadCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 	k := &cobra.Command{Use: "kicad", Short: "Design in KiCad: schematic sheets, placement, routing, gates, fab output"}
 	k.AddCommand(newKicadSchFitCmd(stdout, stderr))
+	k.AddCommand(newKicadSchImportCmd(stdout, stderr))
+	k.AddCommand(newKicadSchNetlistCmd(stdout, stderr))
 	return k
 }

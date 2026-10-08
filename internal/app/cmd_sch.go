@@ -124,6 +124,8 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 		Short: "Schematic operations",
 	}
 	sch.PersistentFlags().StringVar(&window, "window", "", "EasyEDA window ID")
+	sch.PersistentFlags().String("backend", "easyeda", "editor backend for place/wire/netflag/no-connect/modify: easyeda (connector) or kicad (edits --kicad-sch; coordinates in KiCad mm, y down)")
+	sch.PersistentFlags().String("kicad-sch", "", "with --backend kicad: the .kicad_sch sheet to edit")
 	sch.AddCommand(newSchConnectivityCmd(cfg, &window, stdout, stderr))
 	sch.AddCommand(newSchIntentAnnotateCmd(cfg, &window, stdout, stderr))
 	sch.AddCommand(newSchConnectivityDiffCmd(stdout))
@@ -646,6 +648,8 @@ not relax guarded page replacement or clear.`,
 		var lib, uuid, designator string
 		var x, y, rotation float64
 		var mirror bool
+		var kSymbol, kSymLib, kValue, kFootprint, kLCSC string
+		var kUnit int
 		c := &cobra.Command{
 			Use:   "place",
 			Short: "Place a component from the device library at coordinates",
@@ -667,6 +671,12 @@ final placed state.`,
   pcbpilot sch place --lib <l> --uuid <u> --x 100 --y 200 --rotation 90 --mirror
   pcbpilot sch place --lib <l> --uuid <u> --x 100 --y 200 --designator R12`,
 			RunE: func(cmd *cobra.Command, args []string) error {
+				if path, ok, err := kicadSchTarget(cmd); err != nil || ok {
+					if err != nil {
+						return err
+					}
+					return kicadSchPlace(path, kSymbol, kSymLib, designator, kValue, kFootprint, kLCSC, kUnit, x, y, rotation, mirror, stdout)
+				}
 				if lib == "" {
 					return fmt.Errorf("--lib is required")
 				}
@@ -699,6 +709,12 @@ final placed state.`,
 		c.Flags().Float64Var(&rotation, "rotation", 0, "rotation in degrees (0/90/180/270)")
 		c.Flags().BoolVar(&mirror, "mirror", false, "mirror the component")
 		c.Flags().StringVar(&designator, "designator", "", "final designator to assign atomically after placement, e.g. R12 (avoids the place→list→modify round-trip; the response's component.designator reflects the assigned value)")
+		c.Flags().StringVar(&kSymbol, "symbol", "", "--backend kicad: library symbol Lib:Name (from --symbol-lib, <sheet dir>/Lib.kicad_sym or KiCad's stock libraries)")
+		c.Flags().StringVar(&kSymLib, "symbol-lib", "", "--backend kicad: .kicad_sym holding --symbol")
+		c.Flags().StringVar(&kValue, "value", "", "--backend kicad: Value field")
+		c.Flags().StringVar(&kFootprint, "footprint", "", "--backend kicad: Footprint field (Lib:Footprint)")
+		c.Flags().StringVar(&kLCSC, "lcsc", "", "--backend kicad: LCSC field (C-number)")
+		c.Flags().IntVar(&kUnit, "unit", 1, "--backend kicad: symbol unit")
 		sch.AddCommand(c)
 	}
 
@@ -772,6 +788,12 @@ platform still dropped is reported in result.notApplied (non-zero exit).`,
 				patch, overridden, err := buildModifyPatch(patchSource, overrides)
 				if err != nil {
 					return err
+				}
+				if path, ok, err := kicadSchTarget(cmd); err != nil || ok {
+					if err != nil {
+						return err
+					}
+					return kicadSchModify(path, id, patch, stdout)
 				}
 				if len(overridden) > 0 {
 					fmt.Fprintf(stderr, "note: flag value(s) override --patch key(s): %s\n", strings.Join(overridden, ", "))
@@ -1163,6 +1185,7 @@ Page-lazy-load law: only the active page's texts are returned — pass --page (o
 	// 无阻碍工作),改为在 help 里说清定位 + 落线后提示走 bridge-check 对账。
 	{
 		var pointsJSON, net, styleJSON string
+		var kThrough []string
 		c := &cobra.Command{
 			Use:   "wire",
 			Short: "Create a schematic wire polyline — ESCAPE HATCH; 常规布线走 `sch autoconnect` / `sch block-apply`",
@@ -1189,6 +1212,12 @@ netflag 桩线占用的 x),把所有引脚点当作**点障碍**绕行,画完必
   pcbpilot sch wire --points '[100,200,100,300]'            # flat (also accepted)
   pcbpilot sch wire --points '[[100,200],[100,300]]' --net VCC`,
 			RunE: func(cmd *cobra.Command, args []string) error {
+				if path, ok, err := kicadSchTarget(cmd); err != nil || ok {
+					if err != nil {
+						return err
+					}
+					return kicadSchWire(path, pointsJSON, kThrough, net, stdout)
+				}
 				if pointsJSON == "" {
 					return fmt.Errorf("--points is required")
 				}
@@ -1220,6 +1249,7 @@ netflag 桩线占用的 x),把所有引脚点当作**点障碍**绕行,画完必
 		c.Flags().StringVar(&pointsJSON, "points", "", `JSON coordinate list, nested '[[x,y],...]' or flat '[x1,y1,x2,y2,...]' (connector normalizes; required)`)
 		c.Flags().StringVar(&net, "net", "", "net name to assign to the wire")
 		c.Flags().StringVar(&styleJSON, "style", "", "JSON object with wire style overrides")
+		c.Flags().StringArrayVar(&kThrough, "through", nil, "--backend kicad: further points after --points (repeatable), each REF.PIN (that pin's end) or x,y in mm")
 		sch.AddCommand(c)
 	}
 
@@ -1368,7 +1398,7 @@ pull fresh ids before any follow-up mutation on it.`,
 	// ── netflag ───────────────────────────────────────────────────────────
 	// schematic.netflag.create
 	{
-		var kind, net, hostExperiment string
+		var kind, net, hostExperiment, kAt string
 		var x, y, rotation float64
 		c := &cobra.Command{
 			Use:   "netflag",
@@ -1386,6 +1416,12 @@ pull fresh ids before any follow-up mutation on it.`,
 				canonicalKind, err := resolveNetflagKind(kind)
 				if err != nil {
 					return err
+				}
+				if path, ok, err := kicadSchTarget(cmd); err != nil || ok {
+					if err != nil {
+						return err
+					}
+					return kicadSchNetflag(path, canonicalKind, net, kAt, x, y, rotation, stdout)
 				}
 				payload := map[string]any{
 					"kind": canonicalKind,
@@ -1408,6 +1444,7 @@ pull fresh ids before any follow-up mutation on it.`,
 		c.Flags().Float64Var(&y, "y", 0, "Y coordinate")
 		c.Flags().Float64Var(&rotation, "rotation", 0, "rotation in degrees")
 		c.Flags().StringVar(&hostExperiment, "host-experiment", "", "audited opt-in for an unverified host path; only v3-net-label (native net_label on a V3 host) exists")
+		c.Flags().StringVar(&kAt, "at", "", "--backend kicad: anchor on a pin end, REF.PIN (instead of --x/--y)")
 		sch.AddCommand(c)
 	}
 
@@ -1548,6 +1585,15 @@ pull fresh ids before any follow-up mutation on it.`,
 				}
 				if len(pins) == 0 {
 					return fmt.Errorf("--pin is required (one or more pin numbers)")
+				}
+				if path, ok, err := kicadSchTarget(cmd); err != nil || ok {
+					if err != nil {
+						return err
+					}
+					if clear {
+						return fmt.Errorf("--backend kicad: --clear is not supported yet")
+					}
+					return kicadSchNoConnect(path, designator, pins, stdout)
 				}
 				anyPins := make([]any, len(pins))
 				for i, p := range pins {
