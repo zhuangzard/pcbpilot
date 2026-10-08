@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -173,7 +174,7 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 	}
 	// The same options as `pcb auto run --place --no-route`.
 	popt := pcbauto.PlaceOptions{Seed: o.seed}
-	if ls := labelSpecFromBoard(raw); ls != nil {
+	if ls := kicadLabelSpec(raw); ls != nil {
 		popt.Labels, rep.Labels = ls, ls
 		fmt.Fprintf(stderr, "placement: keeping room for each designator (%.1f mil high, %.1f mil per character)\n", ls.Height, ls.CharW)
 	} else {
@@ -284,6 +285,36 @@ func kicadPlacePower(o kicadPlaceOpts) (pcbauto.PowerSpec, error) {
 		}
 	}
 	return power, nil
+}
+
+// kicadLabelSpec is labelSpecFromBoard with KiCad's glyph height: a KiCad
+// text box spans the line pitch (1.6 mm for 1 mm text), so the height
+// across the baseline is the designator field's text height plus its
+// stroke (KiCad's default stroke when the field has none: 15 %). The
+// per-character advance stays the measured box length.
+func kicadLabelSpec(raw []byte) *pcbauto.LabelSpec {
+	ls := labelSpecFromBoard(raw)
+	if ls == nil {
+		return nil
+	}
+	var snap boardSnapshot
+	if json.Unmarshal(raw, &snap) != nil {
+		return ls
+	}
+	font := projectDesignatorFont(snap.Silk)
+	stroke := 0.0
+	for _, t := range snap.Silk {
+		if isVisibleDesignator(t) && math.Abs(t.FontSize-font) <= 0.05 && t.LineWidth > stroke {
+			stroke = t.LineWidth
+		}
+	}
+	if stroke <= 0 {
+		stroke = 0.15 * font
+	}
+	if h := font + stroke; font > 0 && h < ls.Height {
+		ls.Height = h
+	}
+	return ls
 }
 
 // kicadSnapComp holds the snapshot extras FromSnapshot does not read.

@@ -195,3 +195,13 @@ func kicadPlaceKeys[V any](m map[string]V) []string {
 	}
 	return out
 }
+
+func TestKicadLabelSpecUsesGlyphHeight(t *testing.T) {
+	// KiCad's text box spans the line pitch: 1 mm text reads 63 mil high.
+	raw, _ := json.Marshal(map[string]any{"silk": []any{map[string]any{"Kind": "attribute", "Key": "Designator", "Text": "U303",
+		"Layer": 3, "FontSize": 39.37, "BBox": map[string]any{"MinX": 0, "MinY": 0, "MaxX": 160, "MaxY": 63}}}})
+	ls := kicadLabelSpec(raw)
+	if ls == nil || math.Abs(ls.Height-39.4*1.15) > 0.01 || math.Abs(ls.CharW-40) > 0.01 {
+		t.Fatalf("label spec %+v, want height 45.3 (text + 15%% stroke), 40 mil per character", ls)
+	}
+}
