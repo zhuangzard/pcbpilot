@@ -33,16 +33,30 @@ bulk_limit=1000
 fail=0
 err() { echo "FAIL: $*"; fail=1; }
 
-# 1 + 4: per-commit trailers and bulk drops. Merges add no content of their
-# own (their branch commits are in the range and checked one by one).
+# 1 + 4: per-commit trailers and bulk drops. A merge whose combined diff on
+# the guarded paths is empty adds no content of its own (its branch commits
+# are in the range and checked one by one); a merge that does (conflict
+# resolution, an "evil merge") is checked like any commit, its own delta
+# counted for the bulk check.
 commits=$(git rev-list --reverse --no-merges "$range" -- "${guarded[@]}")
+for m in $(git rev-list --reverse --merges "$range" -- "${guarded[@]}"); do
+	# "++" / "--": a line the merge added or removed against every parent.
+	own=$(git diff-tree --cc -p "$m" -- "${guarded[@]}" | grep -cE '^(\+\+|--)([^+-]|$)' || true)
+	if [ "$own" -gt 0 ]; then
+		commits="$commits $m"
+	fi
+done
 for c in $commits; do
 	short=$(git rev-parse --short "$c")
 	for key in Clean-room Clean-room-sources Clean-room-attest; do
 		val=$(git log -1 --format="%(trailers:key=$key,valueonly,separator=%x2C)" "$c" | tr -d '[:space:]')
 		[ -n "$val" ] || err "$short has no $key: trailer"
 	done
-	added=$(git show --numstat --format= "$c" -- "${guarded[@]}" | awk '$1 != "-" { n += $1 } END { print n + 0 }')
+	if [ "$(git rev-list --parents -n1 "$c" | wc -w)" -gt 2 ]; then
+		added=$(git diff-tree --cc -p "$c" -- "${guarded[@]}" | grep -cE '^\+\+([^+]|$)' || true)
+	else
+		added=$(git show --numstat --format= "$c" -- "${guarded[@]}" | awk '$1 != "-" { n += $1 } END { print n + 0 }')
+	fi
 	if [ "$added" -gt "$bulk_limit" ]; then
 		echo "REVIEW: $short adds $added lines to guarded paths (> $bulk_limit); needs manual CRO review"
 	fi
