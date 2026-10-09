@@ -183,6 +183,25 @@ type kicadRun struct {
 	// inputDRC: the input board's own DRC errors (rule|message), to mark
 	// what routing did not cause.
 	inputDRC map[string]bool
+	// times: wall clock per stage (summary.timings).
+	times []stageTime
+	last  time.Time
+}
+
+type stageTime struct {
+	Stage   string  `json:"stage"`
+	Seconds float64 `json:"seconds"`
+}
+
+// lap records the wall clock since the previous lap as stage.
+func (r *kicadRun) lap(stage string) {
+	now := time.Now()
+	if r.last.IsZero() {
+		r.last = now
+	}
+	r.times = append(r.times, stageTime{Stage: stage, Seconds: math.Round(now.Sub(r.last).Seconds()*10) / 10})
+	r.last = now
+	r.summary["timings"] = r.times
 }
 
 func (r *kicadRun) add(g gateResult) {
@@ -241,6 +260,7 @@ func runKicadRoute(o kicadRouteOpts, stdout, stderr io.Writer) error {
 	r := &kicadRun{o: o, in: in, waivers: waivers, stderr: stderr, work: filepath.Join(o.outDir, "work"),
 		summary: map[string]any{"pcb": o.pcb, "intent": o.intent, "sim": o.sim, "outDir": o.outDir}}
 	start := time.Now()
+	r.last = start
 	err = r.run()
 	pass := len(r.gates) > 0 && err == nil
 	for _, g := range r.gates {
@@ -307,6 +327,7 @@ func (r *kicadRun) run() error {
 		_ = writeJSONFile(filepath.Join(o.outDir, "sch-values.json"), nl.Values())
 	}
 
+	r.lap("setup (KiCad, fastroute, schematic netlist)")
 	// 0. Design review before anything is routed.
 	ev := []string{o.intent}
 	for _, p := range []string{o.sim, r.conn} {
@@ -319,6 +340,7 @@ func (r *kicadRun) run() error {
 		return nil // a failing design review stops the run (gates[] says why)
 	}
 
+	r.lap("design review")
 	// 1. Work copy, project rules, rip-up.
 	input := filepath.Join(r.work, "00-input.kicad_pcb")
 	hasPro, err := copyKicadBoard(o.pcb, input)
@@ -360,6 +382,7 @@ func (r *kicadRun) run() error {
 		}
 		board = out
 	}
+	r.lap("work copy, rules, rip-up")
 	if inSnap, _, err = r.snapshot(board); err != nil {
 		return err
 	}
@@ -372,6 +395,7 @@ func (r *kicadRun) run() error {
 		fmt.Fprintf(r.stderr, "input board DRC (before routing): %d error(s) %v\n", rep.Total, rep.Counts)
 	}
 
+	r.lap("input DRC")
 	// 2. Pre-route gate: intent + insulation → netclasses (+ .kicad_dru).
 	reqs := kicadRequirements(r.in)
 	iso := kicadIsolation(r.in)
@@ -395,10 +419,12 @@ func (r *kicadRun) run() error {
 	r.classes = ncRes.Classes
 	fmt.Fprintf(r.stderr, "pre-route gate: %d net(s) in %d netclass(es), %d insulation pair(s), %d custom rule(s)\n", len(reqs), len(ncRes.Classes), len(iso), ncRes.DRURules)
 
+	r.lap("netclasses + custom rules")
 	// 3. DSN → prepare → fastroute.
 	if err := r.doRoute(classed, reqs, inSnap); err != nil {
 		return err
 	}
+	r.lap("fastroute (incl. multi-start)")
 	ses, _ := r.summary["ses"].(string)
 	imported := r.next("imported")
 	imp, err := kt.ImportSES(classed, ses, imported)
@@ -408,10 +434,12 @@ func (r *kicadRun) run() error {
 	}
 	board = imported
 
+	r.lap("SES import + zone fill")
 	// 4. Post-route copper: via arrays, widen to intent, pours, widen nets, silk.
 	if board, err = r.viaArrays(board); err != nil {
 		return err
 	}
+	r.lap("via arrays")
 	reqsSp := intentRequirements(r.in)
 	ops, nb, err := r.widen(board, "widen to the intent width", func(tr []specctra.Track, v []widenVia, p []boardPad, clr float64) []widenOp {
 		return planWidenToIntent(tr, v, p, reqsSp, clr)
@@ -421,6 +449,7 @@ func (r *kicadRun) run() error {
 		return err
 	}
 	board = nb
+	r.lap("widen to intent (+ DRC step-back)")
 	if ps := kicadPourPlan(o, inSnap); len(ps) > 0 {
 		out := r.next("pours")
 		res, err := kt.Pours(board, ps, out)
@@ -434,6 +463,7 @@ func (r *kicadRun) run() error {
 			return err
 		}
 	}
+	r.lap("pours + zone fill + thermals")
 	if o.widenNets != "" {
 		nets := map[string]bool{}
 		for _, n := range strings.Split(o.widenNets, ",") {
@@ -450,17 +480,20 @@ func (r *kicadRun) run() error {
 		}
 		board = nb
 	}
+	r.lap("widen nets")
 	if !o.noSilkPlace {
 		if board, err = r.silkPlace(board); err != nil {
 			return err
 		}
 	}
 
+	r.lap("silkscreen placement")
 	// 5–6. Gates, IR closure.
 	pass, err := r.qualityGates(board)
 	if err != nil {
 		return err
 	}
+	r.lap("gates")
 	for round := 1; !pass && round <= irWidenRounds; round++ {
 		ratios := irOverBudget(map[string]any{"gates": r.closureGates()})
 		if ratios == nil {
@@ -482,8 +515,10 @@ func (r *kicadRun) run() error {
 		}
 	}
 
+	r.lap("IR closure")
 	// 7. Design report, 8. release review.
 	r.add(r.designReport(pass))
+	r.lap("design report")
 	r.summary["gates"] = r.gates
 	_ = writeJSONFile(filepath.Join(o.outDir, "summary.json"), r.summary)
 	relEv := append([]string{}, ev...)
@@ -494,6 +529,7 @@ func (r *kicadRun) run() error {
 		}
 	}
 	r.add(r.review("layout", relEv))
+	r.lap("release review")
 	return nil
 }
 
@@ -504,6 +540,7 @@ func (r *kicadRun) doRoute(classed string, reqs map[string]kicad.NetRequirement,
 	if _, err := r.kt.ExportDSN(classed, rawDSN); err != nil {
 		return err
 	}
+	r.lap("DSN export")
 	dsnText, err := os.ReadFile(rawDSN)
 	if err != nil {
 		return err
@@ -566,6 +603,7 @@ func (r *kicadRun) doRoute(classed string, reqs map[string]kicad.NetRequirement,
 	r.summary["intentPairs"], r.summary["intentTune"] = pairs, tune
 	fmt.Fprintf(r.stderr, "pre-route gate: DSN ok (%d no-neck-down class(es), %d inner rule(s), min trace %.1f µm)\n",
 		len(prep.NoNeckdown), len(prep.InnerRules), o.fo.minTraceUm)
+	r.lap("DSN prepare (requirements, keep-outs)")
 	ses, runs, err := runFastroute(o.fo, dsnPath, base, r.stderr)
 	r.summary["router"], r.summary["routerRuns"] = "fastroute", runs
 	if err != nil {
@@ -864,6 +902,7 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 		r.summary["drc"] = drcSum
 	}
 
+	r.lap("gate: kicad-cli DRC")
 	snap, raw, err := r.snapshot(routed)
 	if err != nil {
 		return false, err
@@ -873,6 +912,7 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 		return false, err
 	}
 	r.summary["boardFinal"] = boardPath
+	r.lap("gate: board-final snapshot")
 	if r.netlist != nil {
 		pads := map[[2]string]string{}
 		for _, c := range snap.Components {
@@ -902,12 +942,15 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 			verdict, reasons, postOut, segNeed, viaOK = ps.res.Verdict.Status, ps.res.Verdict.Reasons, ps.out, ps.segNeed, ps.viaOK
 		}
 	}
+	r.lap("gate: post-layout simulation")
 	snapshotIntentGates(snap, r.in, o.intent, verdict, reasons, segNeed, viaOK, true, r.add)
 	r.add(kicadRouteCompleteGate(r.route, drcRep, snap))
+	r.lap("gate: intent / safety snapshot gates")
 	for _, g := range tailGates(snap, boardPath, postOut, qo, o.projectName, "", r.summary, r.stderr) {
 		r.gates = append(r.gates, g) // tailGates applied the waivers
 		fmt.Fprintf(r.stderr, "gate %-16s %v  %s\n", g.Gate, map[bool]string{true: "PASS", false: "FAIL"}[g.Pass], g.Detail)
 	}
+	r.lap("gate: route-complete, silkscreen, board manual")
 	pass := true
 	for _, g := range r.gates {
 		pass = pass && g.Pass
