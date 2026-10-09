@@ -45,6 +45,7 @@ type kicadRouteOpts struct {
 	powerLayer              int
 	widenNets               string
 	widenMax                float64
+	optimizer               bool
 	silk                    silkTightOpts
 	noSilkPlace             bool
 	noManual                bool
@@ -78,8 +79,8 @@ calculations and gates as 'pcb auto route' + 'pcb gate':
     every net of the pair; DSN check per net (+0.2 mil clearance margin);
  3. fastroute: no-neck-down classes, min trace, intent pairs / length
     groups (skew), --multi-start (fastroute's own parallel seeded variants),
-    --no-optimizer / --optimizer-threshold, continuation runs (none when
-    --diagnose finds every unrouted connection blocked by geometry);
+    optimizer off unless --optimizer (--optimizer-threshold), continuation
+    runs (none when --diagnose finds every unrouted connection blocked);
  4. SES import → zone fill → via arrays (planViaArrays, intent via
     counts) → widen to intent (planWidenToIntent, KiCad-DRC step-back)
     → pours (GND on TOP/IN1/BOTTOM, main power rail on IN2; --pours auto
@@ -124,6 +125,7 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 			if o.widthBasis != "net" && o.widthBasis != "segment" {
 				return fmt.Errorf("--width-basis must be net or segment")
 			}
+			o.fo.noOptimizer = !o.optimizer
 			return runKicadRoute(o, stdout, stderr)
 		},
 	}
@@ -140,7 +142,7 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 	f.DurationVar(&o.fo.maxTime, "max-time", 0, "fastroute --max-time per run (0 = none)")
 	f.IntVar(&o.fo.threads, "threads", 1, "fastroute autorouter/optimizer threads (the --multi-start variants run in parallel regardless)")
 	f.IntVar(&o.fo.multiStart, "multi-start", 4, "fastroute --multi-start=N: N-1 differently seeded pass-1 orders rerun in parallel by fastroute when connections stay unrouted, best kept (1 = off)")
-	f.BoolVar(&o.fo.noOptimizer, "no-optimizer", false, "fastroute --router.optimizer.enabled=false (the optimizer's budget equals the routing stage, ≥ 60 s)")
+	f.BoolVar(&o.optimizer, "optimizer", false, "run fastroute's optimizer (its budget equals the whole routing stage incl. multi-start, ≥ 60 s; PicoRick --multi-start=4: 299 s with it, 134 s without, same 4 unrouted / 30 violations, 0.1 % shorter, 1 via fewer) — off by default")
 	f.Float64Var(&o.fo.optThreshold, "optimizer-threshold", 0, "fastroute --router.optimizer.optimization_improvement_threshold (percent per pass; 0 = fastroute's default)")
 	f.IntVar(&o.fo.rounds, "continue", 2, "fastroute continuation runs (--initial-session) while connections remain unrouted")
 	f.DurationVar(&o.fo.timeout, "router-timeout", 45*time.Minute, "hard limit per fastroute run")
