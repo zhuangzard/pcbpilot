@@ -259,3 +259,56 @@ func segParam(p, a, b Point) float64 {
 func dist(a, b Point) float64 { return math.Hypot(a.X-b.X, a.Y-b.Y) }
 
 func lerp(a, b Point, t float64) Point { return Point{a.X + (b.X-a.X)*t, a.Y + (b.Y-a.Y)*t} }
+
+// touchEps (mil) is the overlap below which copper counts as touching.
+const touchEps = 1e-3
+
+// segSegDist is the distance between segments ab and cd (0 when they cross).
+func segSegDist(a, b, c, d Point) float64 {
+	if segsCross(a, b, c, d) {
+		return 0
+	}
+	return math.Min(math.Min(segDist(a, c, d), segDist(b, c, d)), math.Min(segDist(c, a, b), segDist(d, a, b)))
+}
+
+// closestPair returns the closest points of segments ab and cd.
+func closestPair(a, b, c, d Point) (Point, Point) {
+	if segsCross(a, b, c, d) {
+		p := crossPoint(a, b, c, d)
+		return p, p
+	}
+	proj := func(p, s, e Point) Point {
+		return lerp(s, e, math.Max(0, math.Min(1, segParam(p, s, e))))
+	}
+	type cand struct{ p, q Point }
+	cs := []cand{{a, proj(a, c, d)}, {b, proj(b, c, d)}, {proj(c, a, b), c}, {proj(d, a, b), d}}
+	best := cs[0]
+	for _, x := range cs[1:] {
+		if dist(x.p, x.q) < dist(best.p, best.q) {
+			best = x
+		}
+	}
+	return best.p, best.q
+}
+
+func cross2(o, a, b Point) float64 { return (a.X-o.X)*(b.Y-o.Y) - (a.Y-o.Y)*(b.X-o.X) }
+
+// segsCross reports a proper or touching intersection of ab and cd.
+func segsCross(a, b, c, d Point) bool {
+	d1, d2 := cross2(c, d, a), cross2(c, d, b)
+	d3, d4 := cross2(a, b, c), cross2(a, b, d)
+	if ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0)) {
+		return true
+	}
+	return (d1 == 0 && segDist(a, c, d) < 1e-9) || (d2 == 0 && segDist(b, c, d) < 1e-9) ||
+		(d3 == 0 && segDist(c, a, b) < 1e-9) || (d4 == 0 && segDist(d, a, b) < 1e-9)
+}
+
+func crossPoint(a, b, c, d Point) Point {
+	den := (b.X-a.X)*(d.Y-c.Y) - (b.Y-a.Y)*(d.X-c.X)
+	if math.Abs(den) < 1e-12 {
+		return a
+	}
+	t := ((c.X-a.X)*(d.Y-c.Y) - (c.Y-a.Y)*(d.X-c.X)) / den
+	return lerp(a, b, t)
+}

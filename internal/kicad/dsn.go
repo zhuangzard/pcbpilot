@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/zhuangzard/pcbpilot/internal/pcb/specctra"
 )
 
 // DSNPrep says how PrepareDSN changed KiCad's DSN export.
@@ -39,10 +41,18 @@ type DSNPrep struct {
 	// and the mounting-hole keep-outs grown (KiCad's exporter carries no
 	// copper-to-edge rule: Gas V5 A routed inner tracks 13 mil from the edge).
 	EdgeKeepouts int `json:"edgeKeepouts"`
+	// EdgeWindows: band windows left open for edge-mounted connector pads.
+	EdgeWindows int `json:"edgeWindows,omitempty"`
 }
 
 // EdgeKeepout is the copper-to-edge distance per layer class (mil).
-type EdgeKeepout struct{ OuterMil, InnerMil float64 }
+// Exempt are boxes (mil, the DSN's y-up frame: minX, minY, maxX, maxY) the
+// bands leave open — the pads of edge-mounted connectors and their escape
+// (specctra.EdgeBandsExcept); the copper-to-edge gate still judges them.
+type EdgeKeepout struct {
+	OuterMil, InnerMil float64
+	Exempt             [][4]float64 `json:"exempt,omitempty"`
+}
 
 var (
 	reBoundaryPath = regexp.MustCompile(`\(boundary\s*\(path\s+pcb\s+[0-9.]+\s+([^()]*)\)`)
@@ -71,50 +81,25 @@ func coordsText(pts [][2]float64) string {
 	return strings.Join(parts, " ")
 }
 
-// bands returns one quadrilateral per polygon edge, w wide on the polygon's
-// inner side (w < 0: the outer side, for a cut-out).
-func bands(poly [][2]float64, w float64) [][][2]float64 {
-	n := len(poly)
-	if n > 1 && poly[0] == poly[n-1] {
-		n--
-	}
-	area := 0.0
-	for i := 0; i < n; i++ {
-		a, b := poly[i], poly[(i+1)%n]
-		area += a[0]*b[1] - b[0]*a[1]
-	}
-	sign := 1.0
-	if area < 0 {
-		sign = -1
-	}
-	var out [][][2]float64
-	for i := 0; i < n; i++ {
-		a, b := poly[i], poly[(i+1)%n]
-		dx, dy := b[0]-a[0], b[1]-a[1]
-		l := math.Hypot(dx, dy)
-		if l < 1e-6 {
-			continue
-		}
-		nx, ny := -dy/l*sign*w, dx/l*sign*w
-		out = append(out, [][2]float64{a, b, {b[0] + nx, b[1] + ny}, {a[0] + nx, a[1] + ny}, a})
-	}
-	return out
-}
-
 // addEdgeKeepouts adds keep-out bands inside the board boundary and around
 // every board cut-out (KiCad exports inner Edge.Cuts as signal keep-outs),
 // per copper layer with its outer / inner distance, and grows every
 // mounting-hole keep-out circle by the outer distance.
-func addEdgeKeepouts(dsn string, layers []string, e EdgeKeepout, toMil float64) (string, int, error) {
+func addEdgeKeepouts(dsn string, layers []string, e EdgeKeepout, toMil float64) (string, int, int, error) {
 	ss, se, err := listSpan(dsn, "structure")
 	if err != nil {
-		return dsn, 0, err
+		return dsn, 0, 0, err
 	}
 	st := dsn[ss:se]
 	bm := reBoundaryPath.FindStringSubmatch(st)
 	if bm == nil {
-		return dsn, 0, fmt.Errorf("DSN structure has no (boundary (path pcb ...))")
+		return dsn, 0, 0, fmt.Errorf("DSN structure has no (boundary (path pcb ...))")
 	}
+	exempt := make([][4]float64, len(e.Exempt))
+	for i, b := range e.Exempt {
+		exempt[i] = [4]float64{b[0] / toMil, b[1] / toMil, b[2] / toMil, b[3] / toMil}
+	}
+	windows := 0
 	outline := parseCoords(bm[1])
 	var cutouts [][][2]float64
 	for _, m := range reCutout.FindAllStringSubmatch(st, -1) {
@@ -131,12 +116,16 @@ func addEdgeKeepouts(dsn string, layers []string, e EdgeKeepout, toMil float64) 
 			continue
 		}
 		wu := w / toMil
-		for j, q := range bands(outline, wu) {
+		qs, cut := specctra.EdgeBandsExcept(outline, wu, exempt)
+		windows += cut
+		for j, q := range qs {
 			fmt.Fprintf(&decl, "    (keepout \"pcbpilot_edge_%s_%d\" (polygon %s 0 %s))\n", l, j, l, coordsText(q))
 			n++
 		}
 		for c, poly := range cutouts {
-			for j, q := range bands(poly, -wu) {
+			qs, cut := specctra.EdgeBandsExcept(poly, -wu, exempt)
+			windows += cut
+			for j, q := range qs {
 				fmt.Fprintf(&decl, "    (keepout \"pcbpilot_cutout%d_%s_%d\" (polygon %s 0 %s))\n", c, l, j, l, coordsText(q))
 				n++
 			}
@@ -145,7 +134,7 @@ func addEdgeKeepouts(dsn string, layers []string, e EdgeKeepout, toMil float64) 
 	// Insert after the boundary list.
 	sp := childSpans(st, "boundary")
 	if len(sp) == 0 {
-		return dsn, 0, fmt.Errorf("DSN structure has no (boundary)")
+		return dsn, 0, 0, fmt.Errorf("DSN structure has no (boundary)")
 	}
 	at := ss + sp[0][1]
 	dsn = dsn[:at] + "\n" + decl.String() + dsn[at:]
@@ -162,7 +151,7 @@ func addEdgeKeepouts(dsn string, layers []string, e EdgeKeepout, toMil float64) 
 			return fmt.Sprintf("(keepout \"\" (circle %s %s%s))", p[1], strconv.FormatFloat(math.Round((d+grow)*1000)/1000, 'f', -1, 64), p[3])
 		})
 	}
-	return dsn, n, nil
+	return dsn, n, windows, nil
 }
 
 const reqEps = 0.005
@@ -174,10 +163,17 @@ const reqEps = 0.005
 // the EasyEDA flow's specctra.ClearanceMarginMil.
 var ClearanceMarginMil = 0.2
 
-// forbidsNeckdown matches internal/pcb/specctra: the net may not neck down
-// and its full width is above the global neck-down floor.
+// forbidsNeckdown (same rule as internal/pcb/specctra): every intent net whose width is above the global
+// neck-down floor goes to fastroute --no-neckdown-classes. fastroute's
+// automatic neck-down (on by default) includes a "fanout micro neck-down"
+// that narrows ANY congested segment of a class to 3/4, 3/5 or 1/2 of its
+// width — not only at pins — and --router.min_trace_width_um is only a
+// floor, so an intent (current-carrying) width would be lost anywhere along
+// the net, below widthMil.min and outside the pin zones intent-widths
+// allows. Keeping the pin neck-down of a net with widthMil.min < outer is
+// not possible without that risk.
 func forbidsNeckdown(r NetRequirement, floor float64) bool {
-	return r.MinMil+reqEps >= r.OuterMil && r.OuterMil > floor+reqEps
+	return r.OuterMil > floor+reqEps
 }
 
 var (
@@ -257,12 +253,12 @@ func PrepareDSN(dsn string, classes []NetClass, reqs map[string]NetRequirement, 
 	}
 
 	if len(edge) > 0 && (edge[0].OuterMil > 0 || edge[0].InnerMil > 0) {
-		var n int
-		dsn, n, err = addEdgeKeepouts(dsn, layers, edge[0], toMil)
+		var n, w int
+		dsn, n, w, err = addEdgeKeepouts(dsn, layers, edge[0], toMil)
 		if err != nil {
 			return "", prep, err
 		}
-		prep.EdgeKeepouts = n
+		prep.EdgeKeepouts, prep.EdgeWindows = n, w
 	}
 	ns, ne, err := listSpan(dsn, "network")
 	if err != nil {

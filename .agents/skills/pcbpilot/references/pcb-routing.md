@@ -269,6 +269,9 @@ Steps (stdout is one summary JSON, progress on stderr):
      declared Top, Inner1..N, Bottom; the copper layer count comes from the live board;
    - through-hole padstacks listing only Top/Bottom/InnerK get a shape on the missing inner layers;
    - board-edge copper keep-out bands, one per outline edge and layer: `--edge-outer-mil 20`, `--edge-inner-mil 30`;
+     in `pcb autoroute` / `pcb auto route` the bands leave a full-depth window over each near-edge pad of an
+     edge-mounted part (footprint box reaching the outline — the copper-to-edge gate's rule), grown by the
+     clearance + 2 mil, so edge connectors stay routable (`summary.edgeExemptPads`); the gate still judges them;
    - GND routed as traces by default; `--gnd-plane [--plane-net GND]` declares the missing inner layer as a plane;
    - `--escapes FILE`: fixed stub + via for pins the router cannot escape, e.g.
      `[{"net":"GND","layer":"TopLayer","widthMil":10,"path":[[4776.1,313.9],[4710.65,313.9]],"via":true}]`
@@ -279,8 +282,10 @@ Steps (stdout is one summary JSON, progress on stderr):
    8-thread run crashed after 244 s while one thread routed the same DSN in 102 s. A crashed run is recorded as
    `crashed` with unknown counts (-1), never 0, and repeated once single-threaded; with no good run the command
    fails. `--threads N` opts into parallel routing. Neck-down floor from `--min-trace-um` or, with `--intent`, the
-   intent's narrowest `widthMil.min`; `--no-neckdown-classes` lists only nets whose `widthMil.min = outer` is above
-   that floor (Gas V5: 17 power/switch nets; signals already at 6 mil are left out). While connections stay unrouted or the router reports fixable clearance
+   intent's narrowest `widthMil.min`; `--no-neckdown-classes` lists every intent net whose width is above that
+   floor (signals already at the floor are left out): fastroute's automatic neck-down includes a "fanout micro
+   neck-down" that narrows ANY congested segment to 3/4, 3/5 or 1/2 of the class width, not only at pins, and
+   `--router.min_trace_width_um` is only a floor — so a net with `widthMil.min < outer` is listed too. While connections stay unrouted or the router reports fixable clearance
    violations, up to `--continue` more runs from the last session (`--initial-session`), stopping when a run does
    not improve. Remaining fixable violations are listed per run (`fixableList`); the pin–pin overlaps between a
    mounting hole and its screw-head ring (EasyEDA exports both MULTI objects as pins) are unfixable and not counted.

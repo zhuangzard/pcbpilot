@@ -5,6 +5,7 @@ import (
 	"math"
 	"regexp"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -20,6 +21,10 @@ type FixOptions struct {
 	// width on the outer (Top/Bottom) and inner layers. 0 = none.
 	EdgeOuterMil float64
 	EdgeInnerMil float64
+	// EdgeExempt are boxes (DSN units: minX, minY, maxX, maxY) the edge bands
+	// leave open: the pads of edge-mounted connectors grown by their escape
+	// margin (EdgeBandsExcept). Everything else keeps the band.
+	EdgeExempt [][4]float64
 	// PlaneNet, when set, declares the inner layers EasyEDA left out of the
 	// export as power layers carrying a plane of this net (the router then
 	// connects that net with vias to the plane). Empty = add them as signal
@@ -46,8 +51,10 @@ type FixReport struct {
 	LayerOrder       []string `json:"layerOrder"`
 	PatchedPadstacks int      `json:"patchedPadstacks"`
 	EdgeKeepouts     int      `json:"edgeKeepouts"`
-	PlaneNet         string   `json:"planeNet,omitempty"`
-	Escapes          int      `json:"escapes"`
+	// EdgeWindows: band windows left open for edge-mounted connector pads.
+	EdgeWindows int    `json:"edgeWindows,omitempty"`
+	PlaneNet    string `json:"planeNet,omitempty"`
+	Escapes     int    `json:"escapes"`
 }
 
 var (
@@ -157,7 +164,9 @@ func FixDSN(src string, opt FixOptions) (string, FixReport, error) {
 		if w <= 0 {
 			continue
 		}
-		for i, q := range edgeBands(boundary, w) {
+		qs, cut := EdgeBandsExcept(boundary, w, opt.EdgeExempt)
+		rep.EdgeWindows += cut
+		for i, q := range qs {
 			fmt.Fprintf(&decl, "    (keepout \"pcbpilot_edge_%s_%d\" (polygon %s 0 %s))\n", l, i, l, formatCoords(q))
 			rep.EdgeKeepouts++
 		}
@@ -326,6 +335,64 @@ func edgeBands(poly [][2]float64, w float64) [][][2]float64 {
 		out = append(out, [][2]float64{a, b, {b[0] + nx, b[1] + ny}, {a[0] + nx, a[1] + ny}, a})
 	}
 	return out
+}
+
+// EdgeBandsExcept is edgeBands (w < 0: the outer side, for a cut-out) with
+// a window cut wherever an exempt box reaches into a band: the band is split
+// along its edge around the box's extent, over the full band depth, so an
+// edge-mounted connector pad and its straight escape inward stay routable.
+// Returns the quads and the number of windows cut.
+func EdgeBandsExcept(poly [][2]float64, w float64, exempt [][4]float64) ([][][2]float64, int) {
+	full := edgeBands(poly, w)
+	if len(exempt) == 0 {
+		return full, 0
+	}
+	var out [][][2]float64
+	cuts := 0
+	for _, q := range full {
+		a, b, c := q[0], q[1], q[3] // c = a + normal·|w|
+		L := math.Hypot(b[0]-a[0], b[1]-a[1])
+		ux, uy := (b[0]-a[0])/L, (b[1]-a[1])/L
+		depth := math.Hypot(c[0]-a[0], c[1]-a[1])
+		nx, ny := (c[0]-a[0])/depth, (c[1]-a[1])/depth
+		type iv struct{ lo, hi float64 }
+		var ivs []iv
+		for _, e := range exempt {
+			tlo, thi, slo, shi := math.Inf(1), math.Inf(-1), math.Inf(1), math.Inf(-1)
+			for _, p := range [][2]float64{{e[0], e[1]}, {e[2], e[1]}, {e[2], e[3]}, {e[0], e[3]}} {
+				t := (p[0]-a[0])*ux + (p[1]-a[1])*uy
+				sv := (p[0]-a[0])*nx + (p[1]-a[1])*ny
+				tlo, thi, slo, shi = math.Min(tlo, t), math.Max(thi, t), math.Min(slo, sv), math.Max(shi, sv)
+			}
+			if shi <= 0 || slo >= depth || thi <= 0 || tlo >= L {
+				continue
+			}
+			ivs = append(ivs, iv{math.Max(0, tlo), math.Min(L, thi)})
+		}
+		if len(ivs) == 0 {
+			out = append(out, q)
+			continue
+		}
+		sort.Slice(ivs, func(i, j int) bool { return ivs[i].lo < ivs[j].lo })
+		merged := ivs[:1]
+		for _, v := range ivs[1:] {
+			if last := &merged[len(merged)-1]; v.lo <= last.hi {
+				last.hi = math.Max(last.hi, v.hi)
+			} else {
+				merged = append(merged, v)
+			}
+		}
+		cuts += len(merged)
+		at := func(t, d float64) [2]float64 { return [2]float64{a[0] + ux*t + nx*d, a[1] + uy*t + ny*d} }
+		pos := 0.0
+		for _, v := range append(merged, iv{L, L}) {
+			if v.lo > pos+1e-6 {
+				out = append(out, [][2]float64{at(pos, 0), at(v.lo, 0), at(v.lo, depth), at(pos, depth), at(pos, 0)})
+			}
+			pos = math.Max(pos, v.hi)
+		}
+	}
+	return out, cuts
 }
 
 func formatCoords(pts [][2]float64) string {

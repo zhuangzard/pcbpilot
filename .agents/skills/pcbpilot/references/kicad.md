@@ -87,13 +87,29 @@ pcbpilot kicad route --pcb GasV5_A.kicad_pcb --intent intent.json --sim sim.json
    - DSN：原生 `ExportSpecctraDSN`（um），再：复合类名的逗号改 `+`（`--no-neckdown-classes` 用逗号分隔）、加内层 layer_rule、
      所有间距 +0.2 mil（KiCad DRC 在 PicoRick 上量出 0.1484 < 0.1501 mm）、**板边禁布带**（边框内侧与每个 Edge.Cuts 挖空外侧，
      外层/内层各自距离，且不低于板规则；安装孔禁布圆按外层距离放大）——KiCad 导出器不带铜到板边规则（Gas V5 A 曾有内层线
-     离边 13 mil）。逐网复查类线宽/内层线宽/间距，不足即停。**不做** EasyEDA 的 dsn-fix / ses-repair / reconcile。
-3. **fastroute**：`runFastroute`（续跑、崩溃单线程重试）+ 一次 multi-start=4；`--no-neckdown-classes`、最小线宽 =
-   max(板最小线宽, min(最窄 `widthMil.min`, 最窄类线宽))、意图差分对/等长组（skew）文件。
+     离边 13 mil）。**板边连接器开窗**：板边安装件（封装框角点在板框外或距板框 < 1 mil，与 `copper-to-edge` 门禁同一判据）
+     的近边焊盘外扩（间距 + 2 mil）后，在禁布带上开全深度窗口（焊盘 + 向内直出的逃线），否则 USB/端子焊盘布不通；
+     `summary.edgeExemptPads` 列出，其余铜照常禁布，门禁照常判（这些焊盘不低于工厂下限时为 WARN）。逐网复查类线宽/内层线宽/间距，不足即停。**不做** EasyEDA 的 dsn-fix / ses-repair / reconcile。
+3. **fastroute**：一条 `runFastroute`（续跑、崩溃单线程重试）。`--multi-start`（默认 4）是 pcbpilot 设置：fastroute 自己
+   并行重跑 N−1 个不同种子的第 1 轮网序、按（未布通、冲突、−分数）取最好，pcbpilot 不再叠第二层并行。同一 DSN + 同一参数
+   结果逐字节相同（PicoRick：3 次 `--multi-start=1`、2 次 `--multi-start=4` 的 SES 完全一致）。优化器默认关（`--optimizer`
+   打开，`--optimizer-threshold`）：它的预算等于整个布线阶段（含 multi-start，至少 60 s）——PicoRick `--multi-start=4`
+   开 299 s / 关 134 s，同为 4 未布通 30 冲突，线长只差 0.1 %、过孔差 1；`--multi-start=1` 为 60 / 55 s、8 未布通。
+   `--diagnose` 把未布通分 blocked / congestion：全部 blocked 时不续跑（重布无用），`route-complete` 逐条写
+   「移动器件或加逃线」，`summary.blockedConnections` 列出。`--threads` 缺省 min(核数−1, 8)（PicoRick 8 线程连跑 3 次
+   SES 逐字节相同：14 未布通 / 3469 mm / 156 孔；单线程 13 / 3646 mm / 164 孔；机器高负载时墙钟 204–330 s 对 184 s，
+   空闲时首轮约 50 对 112 s）；`--threads 1` 用于跨 fastroute 版本可复现。多线程崩溃自动单线程重跑。
+   门禁与签核只读路由器无关的 `routeResult`（router、version、patchSha、args、session|board、unrouted/blocked 连接、
+   violations、fixable；`summary.routeResult`），fastroute 是目前唯一实现。
+   `--no-neckdown-classes` 列出线宽高于全局下限的**所有**意图网类（fastroute 的 fanout 微颈缩会把任意拥挤段收到类宽
+   3/4、3/5、1/2，`min_trace_width_um` 只是下限）；最小线宽 = max(板最小线宽, min(最窄 `widthMil.min`, 最窄类线宽))、
+   意图差分对/等长组（skew）文件。
+   报告坐标是 DSN 单位 / 1000（KiCad um → mm，EasyEDA mil → inch），按 `specctra.ReportMilPerUnit` 换成 mil。
 4. **导入后铜处理**（顺序同 `pcb auto route`）：SES 导入 + 重铺 → **过孔阵列**（`planViaArrays`，意图每次换层的过孔数）→
    **加宽到意图**（`planWidenToIntent`，KiCad DRC 报间距的加宽线先退一半再退回原宽）→ **铺铜**（GND 于 TOP/IN1/BOTTOM、
    主电源轨于 IN2，`defaultPourLayers`/`mainPowerRail`；`--pours auto` 只给没有铺铜的板铺；SMD 焊盘实连、通孔焊盘花焊盘，
-   避免单辐条 starved_thermal）→ `--widen-net` → **丝印摆放**（`planSilkTight` + 组标签，最多 3 轮）。
+   避免单辐条 starved_thermal）→ `--widen-net` → **丝印摆放**（`planSilkTight` + 组标签，最多 3 轮；降号的位号/组标签
+   写入 `--silk-min-font` 字号与 0.15 mm 线宽）。
 5. **门禁**（在 `<out-dir>/board-final.json` 上离线计算，`summary.json` 的 `gates[]` 与 `pcb auto route` 同契约）：
 
 | gate | 判据 |
@@ -107,18 +123,21 @@ pcbpilot kicad route --pcb GasV5_A.kicad_pcb --intent intent.json --sim sim.json
 | `copper-to-edge` / `isolation` / `via-current` | `pcb check` 的 edge、绝缘（电气间隙 + 爬电，开槽计入）、过孔电流规则（EasyEDA 合成一个 `pcb-check-intent`，KiCad 流程拆成三个门禁）；任何 ERROR 失败 |
 | `post-layout-sim` | `sim post-layout`（IR 压降、开路、过孔电流、热）；没有 `--sim` 即失败 |
 | `route-complete` | fastroute 会话 0 未布通、0 可修冲突；**唯一放宽**：剩余未布通连接全部属于已铺铜网、且 KiCad DRC 报 0 个 unconnected 时通过（铺铜已接上，逐条写在 info） |
-| `silkscreen` | `silkGate`（位号贴自身封装、不压焊盘/孔/板边/其它丝印、不小于项目字号） |
+| `silkscreen` | `silkGate`（位号贴自身封装、不压焊盘/孔/板边/其它丝印、字号不低于 min(项目字号, `--silk-min-font` 0.8 mm)，降号的列在 info） |
 | `board-manual` | `runManualGate` 生成 `<out-dir>/manual/<板名>_使用说明.html`（`--project-config` 给 notes/pinMap） |
 | `design-report` | `report design` 发布 `<out-dir>/report/vN/`（意图、仿真、board-final、DRC、post、说明书；有 `--sch` 再加网表对账与器件值）；缺 sim/post/说明书即失败 |
 
 6. **IR 收敛**：只剩 `post-layout-sim`（± `intent-widths` / `silkscreen` / `board-manual`）失败时，`planWidenIR` 按压降/预算加宽、
-   重跑第 5 步，最多 2 轮。
+   重跑第 5 步，最多 2 轮。仿真报「no copper path」但 KiCad DRC 对该网没有 unconnected 的条目标为 `SIM/KICAD MISMATCH`
+   （`summary.simKicadMismatch`；门禁仍失败，因为这些焊盘的压降没有被证明），不再挡住收敛；同网的超预算压降照常列出并加宽。
 7. **设计报告**（门禁 `design-report`）后，8. **发布评审**（review-panel `layout` 阶段，证据加上报告 JSON、`summary.json`、
    `board-final.json`）。任何门禁失败退出码非零。
 
 ## 发布签核（`pcbpilot signoff`，EasyEDA 与 KiCad 同一条）
 
-`kicad route` 最后一步自动运行；EasyEDA 流程对 `pcb auto route` / `pcb gate` 的 `--out-dir` 运行同一命令：
+`kicad route` 与 EasyEDA `pcb auto route` 最后一步都自动运行（同一 `signoffGate`；`pcb auto route` 先发布设计报告
+`<out-dir>/report`，design/layout 两次设计评审与 `kicad route` 相同），之后 `gate-set` 核对强制门禁集合；
+`pcb gate` 的 `--out-dir` 可手动运行：
 
 ```bash
 pcbpilot signoff --run-dir route/ --intent intent.json --sim sim.json --connectivity sch.json [--values values.json]
@@ -142,16 +161,32 @@ pcbpilot signoff --run-dir route/ --intent intent.json --sim sim.json --connecti
 `kicad route` 记录每段墙钟：设计评审、规则、输入 DRC、网络类、DSN 导出/准备、fastroute、SES 导入、过孔阵列、加宽、铺铜、丝印、
 每个门禁（DRC、快照、仿真、意图/安全、尾部门禁）、IR 收敛、报告、发布评审、签核。PicoRick（145 件，4 层，rip-up）实测
 303 s → 213 s：multi-start=4 改为与主布线**并行的推测运行**（≥2 核，`--parallel-multi-start`，255.7 → 164.7 s）；
-每轮门禁只跑一次 `kicad-cli` DRC（错误进门禁、警告只统计）；丝印轮次与上一轮相同即停止。剩余大头是 fastroute 本身与丝印规划
-（共用的 planSilkTight，约 12 s/轮）。`kicad route` 没有 `--candidates` 候选摆放试布（那是 `pcb auto route` 的功能）。
+每轮门禁只跑一次 `kicad-cli` DRC（错误进门禁、警告只统计）；丝印轮次与上一轮相同即停止。丝印规划（共用 planSilkTight）
+改为网格索引 + 每标签静态合法位缓存：PicoRick 规划 67 s → 0.9 s、Gas V5 A 88 s → 1.7 s（同一快照离线测，机器负载高），
+未解决位号 23 → 8、58 → 23。剩余大头是 fastroute 本身。
+
+kicad/pcb-fixes 前后（PicoRick 草稿副本，`--rip-up --no-review`，同一命令；机器负载 15–80，墙钟只作参考）：
+
+| | 前（de11806d） | 后 |
+|---|---|---|
+| 总计 / fastroute / 丝印 | 307 s / 231 s / 61 s | 821 s / 696 s / 23 s |
+| fastroute 未布通（blocked） | 2 | 11（全部 blocked，不再续跑） |
+| intent-widths | 23 段低于意图线宽（fastroute 微颈缩） | 0 |
+| silkscreen 问题 | 14 | 11 |
+| kicad-drc 错误 | 31 | 22 |
+
+未布通变多来自「所有意图网类不准颈缩」：同一 DSN、`--multi-start=1` 单独测，旧规则 5 未布通（1 blocked）、新规则 15（8 blocked），
+`--router.neck_width_um` 不改善——宽线进不了细间距焊盘。需要的是焊盘逃线（固定短桩，EasyEDA 流程已有 GND 预逃线，
+KiCad 流程尚无），不是放开颈缩。`kicad route` 没有 `--candidates` 候选摆放试布（那是 `pcb auto route` 的功能）。
 
 ## 已知限制与坑
 
 - 原生 DSN 把 KiCad「power」类型且整层铺铜的内层导成 plane，fastroute 不在其上走线。
 - `intent-widths` 只检查直线段（与 EasyEDA 一致）；fastroute 不产生圆弧。
 - 网名含 `*`/`?` 时 KiCad pattern 会按通配匹配；`netclasses.mismatched` 非空时布线前门禁直接失败。
-- fastroute 报告里的坐标在 KiCad DSN（um）下是 mm，但 `route-complete` 的可修冲突条目沿用 EasyEDA 的「mil」标注（共用代码）。
-- KiCad 的花焊盘铺铜在 postsim 栅格（0.5 mm）里可能丢掉细辐条连接；个别「no copper path」需对照 KiCad DRC 的 unconnected 判断。
+- KiCad 的花焊盘铺铜在 postsim 栅格（0.5 mm）里可能丢掉细辐条连接；焊盘/过孔/走线之间的精确相接已在栅格化前并网，
+  剩下的仿真开路若 KiCad 判连通会标 `SIM/KICAD MISMATCH`。
+- 丝印：焊盘/孔挡满 30 mil 范围的位号（密板 0402/0603 阵列）在最小字号下仍可能无位，组标签放不下时只报告。
 
 ## 验证记录（2026-10-09，KiCad 10.0.7，fastroute 0.1.13）
 

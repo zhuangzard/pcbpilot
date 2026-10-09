@@ -64,7 +64,7 @@ func TestReadFastrouteBlocked(t *testing.T) {
 	if err := os.WriteFile(p, []byte(report), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := readFastrouteBlocked(p)
+	got, err := readFastrouteBlocked(p, 1000)
 	if err != nil {
 		t.Fatal(err)
 	}

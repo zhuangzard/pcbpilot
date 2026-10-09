@@ -109,6 +109,25 @@ Results: --out-dir/{signoff.json, signoff.md, post.json}. Signed --waivers apply
 	return c
 }
 
+// signoffGate runs the release sign-off as one run gate ("signoff"): every
+// failing sign-off gate is an item. kicad route and pcb auto route end with it.
+func signoffGate(so signoffOpts, waivers []gateWaiver, stderr io.Writer) gateResult {
+	g := gateResult{Gate: "signoff"}
+	res, err := runSignoff(so, waivers, stderr)
+	if err != nil {
+		g.Detail = "signoff: " + err.Error()
+		return g
+	}
+	g.Pass = res.Pass
+	g.Detail = "pcbpilot signoff: " + filepath.Join(so.outDir, "signoff.md")
+	for _, x := range res.Gates {
+		if !x.Pass {
+			g.Items = append(g.Items, x.Gate+": "+x.Detail)
+		}
+	}
+	return g
+}
+
 func (o *signoffOpts) fillFromRunDir(dir string) {
 	def := func(p *string, v string) {
 		if *p == "" && v != "" && fileExists(v) {

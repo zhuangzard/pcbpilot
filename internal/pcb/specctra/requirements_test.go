@@ -49,9 +49,10 @@ func TestApplyNetRequirements(t *testing.T) {
 	if rep.Classes != 2 || rep.NewClasses != 1 {
 		t.Errorf("report = %+v", rep)
 	}
-	// +12V forbids neck-down above the 10 mil floor; SV1_DRV (new class) is
-	// already at the floor and GND may neck down.
-	if strings.Join(rep.NoNeckdown, ",") != "+12V" {
+	// +12V and GND sit above the 10 mil floor (GND's widthMil.min < outer no
+	// longer lets it neck down: fastroute's micro neck-down is not limited to
+	// pins); SV1_DRV (new class) is already at the floor.
+	if strings.Join(rep.NoNeckdown, ",") != "+12V,GND" {
 		t.Errorf("NoNeckdown = %v", rep.NoNeckdown)
 	}
 	if rep.MinTraceMil != 10 {

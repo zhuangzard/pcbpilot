@@ -141,10 +141,17 @@ func ApplyNetRequirements(dsn string, reqs map[string]NetRequirement) (string, R
 	return dsn[:ns] + body + dsn[ne:], rep, nil
 }
 
-// forbidsNeckdown: the net may not neck down and its full width is above the
-// global neck-down floor, so the router must be told.
+// forbidsNeckdown: every intent net whose width is above the global
+// neck-down floor goes to fastroute --no-neckdown-classes. fastroute's
+// automatic neck-down (on by default) includes a "fanout micro neck-down"
+// that narrows ANY congested segment of a class to 3/4, 3/5 or 1/2 of its
+// width — not only at pins — and --router.min_trace_width_um is only a
+// floor, so an intent (current-carrying) width would be lost anywhere along
+// the net, below widthMil.min and outside the pin zones intent-widths
+// allows. Keeping the pin neck-down of a net with widthMil.min < outer is
+// not possible without that risk.
 func forbidsNeckdown(r NetRequirement, floor float64) bool {
-	return r.MinMil+reqEps >= r.OuterMil && r.OuterMil > floor+reqEps
+	return r.OuterMil > floor+reqEps
 }
 
 // CheckNetRequirements re-reads the DSN and lists every net whose class

@@ -656,11 +656,16 @@ type fastrouteOpts struct {
 	minTraceUm float64
 	noNeckdown []string
 	threads    int
-	pairsFile  string
-	tuneFile   string
-	maxTime    time.Duration
-	rounds     int
-	timeout    time.Duration
+	// noOptimizer: --router.optimizer.enabled=false. optThreshold > 0:
+	// --router.optimizer.optimization_improvement_threshold (percent per
+	// pass below which the optimizer stops).
+	noOptimizer  bool
+	optThreshold float64
+	pairsFile    string
+	tuneFile     string
+	maxTime      time.Duration
+	rounds       int
+	timeout      time.Duration
 }
 
 // fastrouteArgs builds one fastroute invocation.
@@ -679,6 +684,12 @@ func fastrouteArgs(o fastrouteOpts, dsn, ses, report, initial string) []string {
 	if o.threads > 0 {
 		n := strconv.Itoa(o.threads)
 		args = append(args, "--router.autorouter.max_threads="+n, "--router.optimizer.max_threads="+n)
+	}
+	if o.noOptimizer {
+		args = append(args, "--router.optimizer.enabled=false")
+	}
+	if o.optThreshold > 0 {
+		args = append(args, "--router.optimizer.optimization_improvement_threshold="+strconv.FormatFloat(o.optThreshold, 'f', -1, 64))
 	}
 	if o.pairsFile != "" {
 		args = append(args, "--pairs="+o.pairsFile)
@@ -715,31 +726,60 @@ type fastrouteRun struct {
 	// (pre-existing pin-pin overlaps are unfixable); they reach native DRC.
 	Fixable     int      `json:"fixableViolations"`
 	FixableList []string `json:"fixableList,omitempty"`
+	// Blocked: unrouted connections fastroute --diagnose classed "blocked"
+	// (unroutable alone on the board; the rest are congestion).
+	Blocked     int      `json:"blocked"`
+	BlockedList []string `json:"blockedList,omitempty"`
+	// Version, UnroutedList, BlockedConns feed routeResult (fastrouteResult).
+	Version      string      `json:"version,omitempty"`
+	UnroutedList []routeConn `json:"unroutedList,omitempty"`
+	BlockedConns []routeConn `json:"-"`
 }
 
 // frReport is what pcbpilot reads from a fastroute --report file.
 type frReport struct {
 	Unrouted, Violations, Fixable int
 	FixableList                   []string
+	// Blocked: unrouted connections --diagnose found unroutable even alone
+	// on the loaded board (pins, keep-outs, fixed wiring) — placement or
+	// escapes must change; rerunning the router does not help them.
+	Blocked     int
+	BlockedList []string
+	Version     string
+	Conns       []routeConn // every unrouted connection
+	BlockedC    []routeConn
 }
 
 // readFastrouteReport extracts the counts of a fastroute --report file. Its
-// xy are inches with y negated; FixableList gives them in DSN mil.
-func readFastrouteReport(path string) (frReport, error) {
+// xy are DSN units / 1000 with y negated (inches on an EasyEDA DSN, mm on a
+// KiCad DSN); milPerUnit (specctra.ReportMilPerUnit) converts them, and
+// FixableList gives them in board mil.
+func readFastrouteReport(path string, milPerUnit float64) (frReport, error) {
 	var out frReport
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return out, err
 	}
 	type item struct {
-		Kind string `json:"kind"`
-		Net  string `json:"net"`
+		Kind      string `json:"kind"`
+		Net       string `json:"net"`
+		Component string `json:"component"`
+		Pin       string `json:"pin"`
 	}
 	var r struct {
-		Stats struct {
+		Fastroute string `json:"fastroute"`
+		Stats     struct {
 			Unrouted   *int `json:"unrouted"`
 			Violations int  `json:"violations"`
 		} `json:"stats"`
+		Unrouted []struct {
+			Net       string `json:"net"`
+			From      item   `json:"from"`
+			To        item   `json:"to"`
+			Diagnosis struct {
+				Class string `json:"class"`
+			} `json:"diagnosis"`
+		} `json:"unrouted"`
 		Clearance []struct {
 			Layer     string     `json:"layer"`
 			XY        [2]float64 `json:"xy"`
@@ -755,13 +795,23 @@ func readFastrouteReport(path string) (frReport, error) {
 		return out, fmt.Errorf("fastroute report %s has no stats.unrouted", path)
 	}
 	out.Unrouted, out.Violations = *r.Stats.Unrouted, r.Stats.Violations
+	out.Version = r.Fastroute
+	for _, u := range r.Unrouted {
+		c := routeConn{Net: u.Net, From: u.From.Component + "." + u.From.Pin, To: u.To.Component + "." + u.To.Pin}
+		out.Conns = append(out.Conns, c)
+		if u.Diagnosis.Class == "blocked" {
+			out.BlockedC = append(out.BlockedC, c)
+			out.Blocked++
+			out.BlockedList = append(out.BlockedList, fmt.Sprintf("%s %s.%s–%s.%s", u.Net, u.From.Component, u.From.Pin, u.To.Component, u.To.Pin))
+		}
+	}
 	for _, c := range r.Clearance {
 		if c.Unfixable {
 			continue
 		}
 		out.Fixable++
 		out.FixableList = append(out.FixableList, fmt.Sprintf("%s at (%.1f, %.1f) mil: %s %s / %s %s",
-			c.Layer, c.XY[0]*1000, -c.XY[1]*1000, c.First.Kind, c.First.Net, c.Second.Kind, c.Second.Net))
+			c.Layer, c.XY[0]*milPerUnit, -c.XY[1]*milPerUnit, c.First.Kind, c.First.Net, c.Second.Kind, c.Second.Net))
 	}
 	return out, nil
 }
@@ -804,6 +854,13 @@ func runFastroute(o fastrouteOpts, dsn, base string, stderr io.Writer) (string, 
 		if run.Unrouted == 0 && run.Fixable == 0 {
 			return ses, runs, nil
 		}
+		if run.Fixable == 0 && run.Blocked >= run.Unrouted {
+			// --diagnose: every remaining connection is blocked by geometry
+			// (pins, keep-outs, fixed wiring) — another router run cannot
+			// route it; placement / escapes must change.
+			fmt.Fprintf(stderr, "fastroute round %d: all %d unrouted connection(s) are blocked (--diagnose); no continuation run\n", round, run.Unrouted)
+			return ses, runs, nil
+		}
 		if prev := lastOK(runs[:len(runs)-1]); prev != nil && !runImproved(*prev, run) {
 			fmt.Fprintf(stderr, "fastroute round %d did not improve on round %d; stopping\n", round, prev.Round)
 			return ses, runs, nil
@@ -811,6 +868,19 @@ func runFastroute(o fastrouteOpts, dsn, base string, stderr io.Writer) (string, 
 		initial = ses
 	}
 	return lastOK(runs).Session, runs, nil
+}
+
+// reportMilPerUnit reads the DSN's unit (specctra.ReportMilPerUnit); an
+// unreadable DSN is taken as mil (EasyEDA).
+func reportMilPerUnit(dsnPath string) float64 {
+	f, err := os.Open(dsnPath)
+	if err != nil {
+		return 1000
+	}
+	defer f.Close()
+	buf := make([]byte, 4096)
+	n, _ := io.ReadFull(f, buf)
+	return specctra.ReportMilPerUnit(string(buf[:n]))
 }
 
 func lastOK(runs []fastrouteRun) *fastrouteRun {
@@ -845,7 +915,7 @@ func fastrouteOnce(o fastrouteOpts, dsn, ses, report, initial string, round int,
 	case err != nil:
 		run.Status, run.Error = "crashed", err.Error()
 	}
-	rep, rerr := readFastrouteReport(report)
+	rep, rerr := readFastrouteReport(report, reportMilPerUnit(dsn))
 	if _, serr := os.Stat(ses); serr != nil && rerr == nil {
 		rerr = fmt.Errorf("no session %s", ses)
 	}
@@ -863,6 +933,8 @@ func fastrouteOnce(o fastrouteOpts, dsn, ses, report, initial string, round int,
 	// A timed-out run that wrote its report is a usable best-so-far result.
 	run.Status = "ok"
 	run.Unrouted, run.Violations, run.Fixable, run.FixableList = rep.Unrouted, rep.Violations, rep.Fixable, rep.FixableList
+	run.Blocked, run.BlockedList = rep.Blocked, rep.BlockedList
+	run.Version, run.UnroutedList, run.BlockedConns = rep.Version, rep.Conns, rep.BlockedC
 	return run
 }
 
@@ -1013,6 +1085,20 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 				opt.CopperLayers = n
 			}
 		}
+		if opt.EdgeOuterMil > 0 || opt.EdgeInnerMil > 0 {
+			// Edge-mounted connector pads stay routable through the bands.
+			if snap, err := fetchBoardSnapshot(cfg, window, boardSnapshotOpts{}); err == nil {
+				clr := 6.0
+				if r := fetchPcbRules(cfg, window).clearanceMil; r > 0 {
+					clr = r
+				}
+				var names []string
+				opt.EdgeExempt, names = edgeExemptBoxes(snap, math.Max(opt.EdgeOuterMil, opt.EdgeInnerMil), clr+2)
+				summary["edgeExemptPads"] = names
+			} else {
+				fmt.Fprintf(stderr, "edge keep-out: board unreadable (%v); no connector windows\n", err)
+			}
+		}
 		if preset && !o.noPreEscape {
 			if pre, skipped, err := plannedPreEscapes(cfg, window, dsnText, opt.Escapes); err != nil {
 				fmt.Fprintf(stderr, "pre-escapes: %v; skipped\n", err)
@@ -1083,9 +1169,6 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 				sesPath, dsnPath, dsnText, runs = p, d, t, r2
 			}
 		}
-		// The imported session's counts: the route-complete gate of
-		// pcb auto route judges them (v18 B imported 1 unrouted silently).
-		summary["routeFinal"] = lastOK(runs)
 		if last := lastOK(runs); last != nil && last.Unrouted > 0 {
 			// Last resort before giving up: a fresh multi-start run (shuffled
 			// net orders) on the DSN that routed best; kept only if better.
@@ -1105,6 +1188,11 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 		if last := lastOK(runs); last != nil && last.Unrouted > 0 {
 			fmt.Fprintf(stderr, "warning: %d connection(s) still unrouted after %d run(s); importing the best session\n", last.Unrouted, len(runs))
 		}
+		// The imported session's counts (after the multi-start retry): the
+		// route-complete gate of pcb auto route judges them through the
+		// router-agnostic routeResult (v18 B imported 1 unrouted silently).
+		summary["routeFinal"] = lastOK(runs)
+		summary["routeResult"] = fastrouteResult(lastOK(runs), o.fo, dsnPath)
 	} else {
 		tmpl := o.routerCmd
 		if tmpl == "" {
@@ -1324,7 +1412,7 @@ func retryWithEscapes(cfg *appConfig, window string, o autorouteOpts, rawText, d
 	opt := fixOpt
 	best := last
 	for round := 1; round <= o.escapeRounds && best.Unrouted > 0; round++ {
-		blocked, err := readFastrouteBlocked(best.Report)
+		blocked, err := readFastrouteBlocked(best.Report, specctra.ReportMilPerUnit(dsnText))
 		if err != nil || len(blocked) == 0 {
 			return
 		}

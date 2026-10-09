@@ -374,6 +374,10 @@ const irWidenRounds = 2
 
 var irDropRe = regexp.MustCompile(`^(\S+) drops ([0-9.]+) mV .* over the ([0-9.]+) mV budget`)
 
+// simOpenHostConnected marks a post-layout-sim open ("no copper path") on a
+// net the host's own connectivity (KiCad DRC: no unconnected item) joins.
+const simOpenHostConnected = "SIM/KICAD MISMATCH"
+
 // irOverBudget returns net → drop/budget for the post-layout sim's IR-drop
 // failures when the other failing gates are at most intent-widths (nil
 // otherwise: widening cannot fix a DRC or connectivity failure, and it helps
@@ -392,6 +396,12 @@ func irOverBudget(summary map[string]any) map[string]float64 {
 			return nil
 		}
 		for _, it := range g.Items {
+			// A sim open that the host's connectivity (KiCad DRC) shows
+			// connected is a model mismatch, reported on its own: it must
+			// not stop the closure of the real drops.
+			if strings.Contains(it, simOpenHostConnected) {
+				continue
+			}
 			m := irDropRe.FindStringSubmatch(it)
 			if m == nil {
 				return nil

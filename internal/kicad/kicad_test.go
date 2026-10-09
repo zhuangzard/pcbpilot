@@ -67,7 +67,9 @@ func TestPrepareDSN(t *testing.T) {
 	if prep.Renamed["PP1_W20,Power"] != "PP1_W20+Power" || strings.Contains(out, "PP1_W20,Power") {
 		t.Fatalf("rename: %v", prep.Renamed)
 	}
-	if len(prep.NoNeckdown) != 1 || prep.NoNeckdown[0] != "PP1_W20+Power" || prep.MinTraceMil != 6 {
+	// Both intent classes sit above the 6 mil floor: fastroute's micro
+	// neck-down could narrow either anywhere, so both are passed.
+	if strings.Join(prep.NoNeckdown, ",") != "PP1_W20+Power,PP2_W10+Default" || prep.MinTraceMil != 6 {
 		t.Fatalf("no-neckdown %v floor %v", prep.NoNeckdown, prep.MinTraceMil)
 	}
 	if !strings.Contains(out, "(layer_rule In1.Cu In2.Cu (rule (width 762)))") || len(prep.InnerRules) != 1 {
@@ -228,5 +230,26 @@ func TestDRCSplitErrors(t *testing.T) {
 	errs, warn, n := rep.SplitErrors()
 	if errs.Total != 2 || errs.Counts["clearance"] != 1 || errs.Counts["unconnected_items"] != 1 || n != 2 || warn["silk_overlap"] != 2 {
 		t.Fatalf("%+v %v %d", errs, warn, n)
+	}
+}
+
+// PrepareDSN leaves a band window over an exempt (edge connector) pad.
+func TestPrepareDSNEdgeExempt(t *testing.T) {
+	dsn := `(pcb x (resolution um 10) (unit um)
+  (structure
+    (layer F.Cu (type signal))
+    (layer B.Cu (type signal))
+    (boundary (path pcb 0  0 0  50800 0  50800 25400  0 25400  0 0))
+  )
+  (network (class kicad_default "" (circuit (use_via V)) (rule (width 254) (clearance 152.4))))
+)`
+	_, prep, err := PrepareDSN(dsn, nil, nil, EdgeKeepout{OuterMil: 20, InnerMil: 30})
+	if err != nil || prep.EdgeKeepouts != 8 || prep.EdgeWindows != 0 {
+		t.Fatalf("plain: %+v %v", prep, err)
+	}
+	// A pad at x = 1000 mil on the bottom edge (y 0).
+	out, prep, err := PrepareDSN(dsn, nil, nil, EdgeKeepout{OuterMil: 20, InnerMil: 30, Exempt: [][4]float64{{980, -10, 1020, 25}}})
+	if err != nil || prep.EdgeWindows != 2 || prep.EdgeKeepouts != 10 || !strings.Contains(out, "pcbpilot_edge_F.Cu_4") {
+		t.Fatalf("exempt: %+v %v", prep, err)
 	}
 }

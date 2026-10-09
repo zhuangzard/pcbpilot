@@ -406,3 +406,45 @@ func TestParseSESOnePointPath(t *testing.T) {
 		t.Fatal("a three-atom path must stay an error")
 	}
 }
+
+func TestReportMilPerUnit(t *testing.T) {
+	for dsn, want := range map[string]float64{
+		"(PCB board (resolution mil 10) (unit mil))":                        1000,
+		"(pcb x (parser (host_cad \"KiCad\")) (resolution um 10) (unit um)": 1000 / 25.4,
+		"(pcb x (resolution mm 1000))":                                      1000 * 1000 / 25.4,
+		"(pcb x)":                                                           1000,
+	} {
+		if got := ReportMilPerUnit(dsn); math.Abs(got-want) > 1e-9 {
+			t.Errorf("%s: %v, want %v", dsn, got, want)
+		}
+	}
+}
+
+// A connector pad on the bottom edge opens a full-depth window in that
+// band; the other bands and the rest of the bottom band stay.
+func TestEdgeBandsExceptConnectorWindow(t *testing.T) {
+	sq := [][2]float64{{0, 0}, {1000, 0}, {1000, 1000}, {0, 1000}}
+	full, cut0 := EdgeBandsExcept(sq, 30, nil)
+	if len(full) != 4 || cut0 != 0 {
+		t.Fatalf("plain bands %d %d", len(full), cut0)
+	}
+	pad := [4]float64{480, -10, 520, 20} // pad over the edge, grown
+	qs, cut := EdgeBandsExcept(sq, 30, [][4]float64{pad, {2000, 2000, 2010, 2010}})
+	if cut != 1 || len(qs) != 5 {
+		t.Fatalf("got %d quads, %d windows", len(qs), cut)
+	}
+	for _, q := range qs {
+		minX, maxX, minY, maxY := math.Inf(1), math.Inf(-1), math.Inf(1), math.Inf(-1)
+		for _, p := range q {
+			minX, maxX, minY, maxY = math.Min(minX, p[0]), math.Max(maxX, p[0]), math.Min(minY, p[1]), math.Max(maxY, p[1])
+		}
+		if maxY <= 30+1e-9 && minY >= -1e-9 && minX < 520-1e-6 && maxX > 480+1e-6 && maxX-minX < 1000 {
+			t.Fatalf("band piece %v covers the connector window", q)
+		}
+	}
+	// Two overlapping pads make one window.
+	qs, cut = EdgeBandsExcept(sq, 30, [][4]float64{pad, {510, -5, 560, 25}})
+	if cut != 1 || len(qs) != 5 {
+		t.Fatalf("merged: %d quads, %d windows", len(qs), cut)
+	}
+}

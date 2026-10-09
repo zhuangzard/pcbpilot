@@ -1,6 +1,7 @@
 package specctra
 
 import (
+	"regexp"
 	"fmt"
 	"strconv"
 	"strings"
@@ -260,4 +261,23 @@ func unitToMil(u string) (float64, error) {
 		return 10000 / 25.4, nil
 	}
 	return 0, fmt.Errorf("unsupported Specctra unit %q", u)
+}
+
+var reResolutionUnit = regexp.MustCompile(`\(resolution\s+([A-Za-z]+)`)
+
+// ReportMilPerUnit is the mil per unit of a fastroute --report file's
+// geometry (xy, from_xy, to_xy) for a DSN: fastroute writes DSN units
+// divided by 1000 — inches for an EasyEDA DSN (mil), mm for a KiCad DSN (um).
+// A DSN without a readable (resolution) is taken as mil.
+func ReportMilPerUnit(dsn string) float64 {
+	head := dsn
+	if len(head) > 4096 {
+		head = head[:4096]
+	}
+	if m := reResolutionUnit.FindStringSubmatch(head); m != nil {
+		if u, err := unitToMil(m[1]); err == nil {
+			return 1000 * u
+		}
+	}
+	return 1000
 }

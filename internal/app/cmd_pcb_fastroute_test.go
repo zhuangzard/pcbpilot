@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -38,14 +39,20 @@ func TestReadFastrouteReport(t *testing.T) {
  {"layer":"TopLayer","xy":[0.1575,-2.9921],"unfixable":true,"first":{"kind":"pin"},"second":{"kind":"pin"}}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	r, err := readFastrouteReport(p)
+	r, err := readFastrouteReport(p, specctra.ReportMilPerUnit("(PCB x (resolution mil 10) (unit mil)"))
 	if err != nil || r.Unrouted != 3 || r.Violations != 2 || r.Fixable != 1 || r.FixableList[0] != "TopLayer at (1833.4, 1143.7) mil: trace GND / pin " {
 		t.Fatalf("got %+v %v", r, err)
+	}
+	// A KiCad DSN is in um: the same report numbers are mm (Gas V5 A:
+	// C78.2 at (20.32, -33.336) = board (800, 1312.44) mil).
+	r, err = readFastrouteReport(p, specctra.ReportMilPerUnit("(pcb x (parser) (resolution um 10) (unit um)"))
+	if err != nil || r.FixableList[0] != "TopLayer at (72.2, 45.0) mil: trace GND / pin " {
+		t.Fatalf("KiCad units: got %+v %v", r.FixableList, err)
 	}
 	if err := os.WriteFile(p, []byte(`{"stats":{}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := readFastrouteReport(p); err == nil {
+	if _, err := readFastrouteReport(p, 1000); err == nil {
 		t.Fatal("report without stats.unrouted accepted")
 	}
 }
@@ -164,7 +171,7 @@ func TestPrepareDSNGate(t *testing.T) {
 	if short, _ := specctra.CheckNetRequirements(text, reqs); len(short) != 0 {
 		t.Fatalf("prepared DSN still short: %v", short)
 	}
-	if rq.MinTraceMil != 6 || strings.Join(rq.NoNeckdown, ",") != "+12V" { // SIG sits at the 6 mil floor
+	if rq.MinTraceMil != 6 || strings.Join(rq.NoNeckdown, ",") != "+12V,GND" { // SIG sits at the 6 mil floor
 		t.Fatalf("requirement report = %+v", rq)
 	}
 	// A DSN not in mil cannot be checked: the gate refuses rather than guess.
@@ -243,5 +250,84 @@ func TestIntentPairsAndTune(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(fastrouteArgs(fastrouteOpts{pairsFile: "p.txt", tuneFile: "t.txt"}, "b.dsn", "b.ses", "r.json", ""), " "), "--pairs=p.txt --tune=t.txt") {
 		t.Fatal("pairs/tune not passed to fastroute")
+	}
+}
+
+// fakeFastroute writes a session and a report with unrouted connections,
+// the first blocked of them classed "blocked" by --diagnose; it logs one
+// line per call to calls.
+func fakeFastroute(t *testing.T, unrouted, blocked int) (bin, calls string) {
+	t.Helper()
+	dir := t.TempDir()
+	bin, calls = filepath.Join(dir, "fastroute"), filepath.Join(dir, "calls")
+	var items []string
+	for i := 0; i < unrouted; i++ {
+		cls := "congestion"
+		if i < blocked {
+			cls = "blocked"
+		}
+		items = append(items, fmt.Sprintf(`{"net":"N%d","from":{"component":"U1","pin":"%d"},"to":{"component":"R1","pin":"1"},"diagnosis":{"class":"%s"}}`, i, i+1, cls))
+	}
+	rep := fmt.Sprintf(`{"stats":{"unrouted":%d,"violations":0},"unrouted":[%s]}`, unrouted, strings.Join(items, ","))
+	script := "#!/bin/sh\necho call >> " + calls + "\nses=; rep=\nwhile [ $# -gt 0 ]; do case \"$1\" in -do) ses=$2; shift;; --report=*) rep=${1#--report=};; esac; shift; done\n" +
+		"echo '(session x)' > \"$ses\"\ncat > \"$rep\" <<'J'\n" + rep + "\nJ\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return bin, calls
+}
+
+// --diagnose: when every unrouted connection is blocked by geometry no
+// continuation run is made (it cannot help); congestion keeps continuing.
+func TestRunFastrouteStopsOnBlocked(t *testing.T) {
+	dir := t.TempDir()
+	dsn := filepath.Join(dir, "b.dsn")
+	_ = os.WriteFile(dsn, []byte("(pcb x (resolution um 10))"), 0o644)
+	for _, c := range []struct{ unrouted, blocked, wantCalls int }{{2, 2, 1}, {2, 1, 2}} {
+		bin, calls := fakeFastroute(t, c.unrouted, c.blocked)
+		_, runs, err := runFastroute(fastrouteOpts{bin: bin, threads: 1, rounds: 3, timeout: time.Minute}, dsn, filepath.Join(dir, fmt.Sprintf("r%d", c.blocked)), io.Discard)
+		raw, _ := os.ReadFile(calls)
+		if err != nil || strings.Count(string(raw), "call") != c.wantCalls || runs[0].Blocked != c.blocked {
+			t.Fatalf("%+v: calls %d runs %+v err %v", c, strings.Count(string(raw), "call"), runs, err)
+		}
+		g := routeCompleteGate(fastrouteResult(&runs[0], fastrouteOpts{bin: bin}, dsn))
+		if n := strings.Count(strings.Join(g.Items, "\n"), "blocked by geometry"); n != c.blocked {
+			t.Fatalf("gate items %v", g.Items)
+		}
+	}
+	got := strings.Join(fastrouteArgs(fastrouteOpts{multiStart: 4, threads: 1, noOptimizer: true, optThreshold: 2}, "b.dsn", "b.ses", "r.json", ""), " ")
+	for _, w := range []string{"--multi-start=4", "--router.optimizer.enabled=false", "--router.optimizer.optimization_improvement_threshold=2"} {
+		if !strings.Contains(got, w) {
+			t.Fatalf("args %s lack %s", got, w)
+		}
+	}
+}
+
+// Every intent class above the neck-down floor is passed to
+// --no-neckdown-classes, also when its widthMil.min < outer: fastroute's
+// fanout micro neck-down narrows congested segments anywhere (to 1/2 of the
+// class width at worst), and the global min trace is only a floor.
+func TestIntentClassesForbidNeckdown(t *testing.T) {
+	raw, err := os.ReadFile("../pcb/specctra/testdata/easyeda-export.dsn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, err := parseDesignIntent([]byte(`{"schemaVersion":1,"nets":{
+ "+12V":{"role":"power","widthMil":{"outer":30,"inner":30,"min":12},"clearanceMil":6},
+ "GND":{"role":"ground","widthMil":{"outer":21.65,"inner":21.65,"min":20},"clearanceMil":6},
+ "SIG":{"role":"signal","widthMil":{"outer":6,"min":6},"clearanceMil":6}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, rq, err := prepareDSN(string(raw), specctra.FixOptions{}, intentRequirements(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(rq.NoNeckdown, ",") != "+12V,GND" {
+		t.Fatalf("no-neckdown %v: every intent class above the floor must be listed", rq.NoNeckdown)
+	}
+	got := strings.Join(fastrouteArgs(fastrouteOpts{noNeckdown: rq.NoNeckdown}, "b.dsn", "b.ses", "r.json", ""), " ")
+	if !strings.Contains(got, "--no-neckdown-classes=+12V,GND") {
+		t.Fatalf("args %s", got)
 	}
 }

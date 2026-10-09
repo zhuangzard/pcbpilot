@@ -187,9 +187,11 @@ func TestSilkTightGroupRow(t *testing.T) {
 	}
 }
 
-// Text is never shrunk: a 50 mil label keeps 50; a 40 mil one grows to the
-// project size (45, the most common).
-func TestSilkTightNeverShrinks(t *testing.T) {
+// Text is never shrunk below the fab minimum: a 50 mil label keeps 50; a
+// 40 mil one is planned at the project size (45, the most common) but the
+// gate accepts it down to MinFont (JLC 0.8 mm = 31.5 mil) with an info line;
+// below that it fails.
+func TestSilkTightFontFloor(t *testing.T) {
 	snap := silkTestBoard(part0603("R1", 500, 500), part0603("R2", 1000, 1000), part0603("R3", 1400, 1400), part0603("R4", 300, 1400))
 	snap.Silk[0].FontSize = 50
 	snap.Silk[2].FontSize = 40
@@ -202,8 +204,50 @@ func TestSilkTightNeverShrinks(t *testing.T) {
 		t.Fatalf("sizes %+v %+v", labels[0], labels[2])
 	}
 	g := silkGate(snap, font, opt)
-	if g.Pass || !strings.Contains(strings.Join(g.Items, "\n"), "R3") || !strings.Contains(strings.Join(g.Items, "\n"), "below the project size") {
-		t.Fatalf("gate %+v", g.Items)
+	if strings.Contains(strings.Join(g.Items, "\n"), "mil below") || !strings.Contains(strings.Join(g.Info, "\n"), "R3 text 40.0 mil: below the project size") {
+		t.Fatalf("40 mil ≥ MinFont must pass with info: items %v info %v", g.Items, g.Info)
+	}
+	snap.Silk[2].FontSize = 30
+	g = silkGate(snap, font, opt)
+	if g.Pass || !strings.Contains(strings.Join(g.Items, "\n"), "below the fab minimum 31.5") {
+		t.Fatalf("30 mil < MinFont must fail: %+v", g.Items)
+	}
+	opt.MinFont = 0
+	snap.Silk[2].FontSize = 40
+	if g = silkGate(snap, font, opt); !strings.Contains(strings.Join(g.Items, "\n"), "below the project size") {
+		t.Fatalf("MinFont 0 = never shrink: %+v", g.Items)
+	}
+}
+
+// A label with no slot at the project size but one at the fab minimum is
+// planned there (+small, Font = MinFont); never smaller.
+func TestSilkTightShrinksToFabMinimum(t *testing.T) {
+	// R1 (940..1060 × 967..1033) sits in a 48 mil moat: walls of other
+	// parts on all four sides. The 45 mil label (44×45) needs 5 + 45; at
+	// 31.5 mil it needs 5 + 31.5.
+	wall := func(ref string, x0, y0, x1, y1 float64) boardComp {
+		return boardComp{Designator: ref, BBox: &layoutBBox{x0, y0, x1, y1}}
+	}
+	snap := silkTestBoard(part0603("R1", 1000, 1000), wall("U1", 800, 1081, 1200, 1200), wall("U2", 800, 800, 1200, 919),
+		wall("U3", 700, 919, 892, 1081), wall("U4", 1108, 919, 1300, 1081))
+	opt := defaultSilkTightOpts()
+	labels, sc, _ := silkTightInput(snap, opt)
+	placed, notes := planSilkTight(labels, sc, opt)
+	var p silkPlaced
+	for _, q := range placed {
+		if q.Ref == "R1" {
+			p = q
+		}
+	}
+	if p.Font != opt.MinFont || !strings.HasSuffix(p.How, "+small") || p.Box.h()+p.Box.w() > 1.01*(labels[0].Len+labels[0].Hgt)*opt.MinFont/45 {
+		t.Fatalf("R1 %+v (notes %v)", p, notes)
+	}
+	opt.MinFont = 0
+	placed, _ = planSilkTight(labels, sc, opt)
+	for _, q := range placed {
+		if q.Font != 0 {
+			t.Fatalf("MinFont 0 shrank %+v", q)
+		}
 	}
 }
 
@@ -359,5 +403,33 @@ func TestSilkGateDeterministic(t *testing.T) {
 	b := silkGate(snap, 45, defaultSilkTightOpts())
 	if strings.Join(a.Items, "\n") != strings.Join(b.Items, "\n") {
 		t.Fatalf("order-dependent:\n%s\n--\n%s", strings.Join(a.Items, "\n"), strings.Join(b.Items, "\n"))
+	}
+}
+
+// A label an earlier round shrank to the fab minimum stays where it is when
+// there is still no project-size slot (no churn between rounds).
+func TestSilkTightKeepsShrunkLabel(t *testing.T) {
+	wall := func(ref string, x0, y0, x1, y1 float64) boardComp {
+		return boardComp{Designator: ref, BBox: &layoutBBox{x0, y0, x1, y1}}
+	}
+	snap := silkTestBoard(part0603("R1", 1000, 1000), wall("U1", 800, 1081, 1200, 1200), wall("U2", 800, 800, 1200, 919),
+		wall("U3", 700, 919, 892, 1081), wall("U4", 1108, 919, 1300, 1081))
+	opt := defaultSilkTightOpts()
+	labels, sc, font := silkTightInput(snap, opt)
+	placed, _ := planSilkTight(labels, sc, opt)
+	applyPlanToSnap(snap, placed, font)
+	for i := range snap.Silk {
+		for _, p := range placed {
+			if p.ID == snap.Silk[i].ID && p.Font > 0 {
+				snap.Silk[i].FontSize = p.Font
+			}
+		}
+	}
+	labels, sc, _ = silkTightInput(snap, opt)
+	again, _ := planSilkTight(labels, sc, opt)
+	for _, p := range again {
+		if p.Ref == "R1" && (p.Moved || p.How != "kept+small") {
+			t.Fatalf("round 2 re-planned the shrunk label: %+v", p)
+		}
 	}
 }

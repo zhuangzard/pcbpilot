@@ -46,6 +46,7 @@ type kicadRouteOpts struct {
 	powerLayer              int
 	widenNets               string
 	widenMax                float64
+	optimizer               bool
 	silk                    silkTightOpts
 	noSilkPlace             bool
 	noManual                bool
@@ -55,7 +56,6 @@ type kicadRouteOpts struct {
 	noReview                bool
 	reviewTimeout           time.Duration
 	projectName, customer   string
-	parallelMS              bool
 }
 
 func newKicadRouteCmd(stdout, stderr io.Writer) *cobra.Command {
@@ -79,7 +79,9 @@ calculations and gates as 'pcb auto route' + 'pcb gate':
     clearance + creepage rules in .kicad_dru, and the pair clearance on
     every net of the pair; DSN check per net (+0.2 mil clearance margin);
  3. fastroute: no-neck-down classes, min trace, intent pairs / length
-    groups (skew), continuation runs, one multi-start=4 retry;
+    groups (skew), --multi-start (fastroute's own parallel seeded variants),
+    optimizer off unless --optimizer (--optimizer-threshold), continuation
+    runs (none when --diagnose finds every unrouted connection blocked);
  4. SES import → zone fill → via arrays (planViaArrays, intent via
     counts) → widen to intent (planWidenToIntent, KiCad-DRC step-back)
     → pours (GND on TOP/IN1/BOTTOM, main power rail on IN2; --pours auto
@@ -92,7 +94,9 @@ calculations and gates as 'pcb auto route' + 'pcb gate':
     copper-to-edge, isolation, via-current, post-layout-sim (needs --sim),
     route-complete, silkscreen, board-manual;
  6. IR closure: when only post-layout-sim (± intent-widths, silkscreen,
-    board-manual) fails, planWidenIR + re-gate, at most 2 rounds;
+    board-manual) fails, planWidenIR + re-gate, at most 2 rounds; a sim
+    open on a net KiCad's DRC shows connected is marked SIM/KICAD MISMATCH
+    (summary.simKicadMismatch; the gate still fails) and does not stop it;
  7. report design → <out-dir>/report (gate design-report);
  8. release review (review-panel, stage layout) with the report and
     summary.json added to the evidence.
@@ -122,6 +126,10 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 			if o.widthBasis != "net" && o.widthBasis != "segment" {
 				return fmt.Errorf("--width-basis must be net or segment")
 			}
+			o.fo.noOptimizer = !o.optimizer
+			if o.fo.threads <= 0 {
+				o.fo.threads = min(max(runtime.NumCPU()-1, 1), 8)
+			}
 			return runKicadRoute(o, stdout, stderr)
 		},
 	}
@@ -136,9 +144,10 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 	f.BoolVar(&o.ripUp, "rip-up", false, "remove unlocked tracks and vias before routing (route from scratch)")
 	f.StringVar(&o.fastrouteBin, "fastroute-bin", "", "fastroute executable (default: $FASTROUTE_BIN, ~/.pcbpilot/fastroute/current, PATH)")
 	f.DurationVar(&o.fo.maxTime, "max-time", 0, "fastroute --max-time per run (0 = none)")
-	f.IntVar(&o.fo.threads, "threads", 1, "fastroute autorouter/optimizer threads (1 also sets --multi-start=1)")
-	f.IntVar(&o.fo.multiStart, "multi-start", 0, "fastroute --multi-start=N (0 = 1 with --threads 1)")
-	f.BoolVar(&o.parallelMS, "parallel-multi-start", true, "run the multi-start=4 retry speculatively in parallel with the main fastroute run (needs ≥ 2 CPUs)")
+	f.IntVar(&o.fo.threads, "threads", 0, "fastroute autorouter/optimizer threads: 0 = min(cores-1, 8); 1 = single-threaded (reproducible across fastroute builds; a crashed multi-threaded run is retried single-threaded). PicoRick: 3 runs with 8 threads gave byte-identical sessions")
+	f.IntVar(&o.fo.multiStart, "multi-start", 4, "fastroute --multi-start=N: N-1 differently seeded pass-1 orders rerun in parallel by fastroute when connections stay unrouted, best kept (1 = off)")
+	f.BoolVar(&o.optimizer, "optimizer", false, "run fastroute's optimizer (its budget equals the whole routing stage incl. multi-start, ≥ 60 s; PicoRick --multi-start=4: 299 s with it, 134 s without, same 4 unrouted / 30 violations, 0.1 % shorter, 1 via fewer) — off by default")
+	f.Float64Var(&o.fo.optThreshold, "optimizer-threshold", 0, "fastroute --router.optimizer.optimization_improvement_threshold (percent per pass; 0 = fastroute's default)")
 	f.IntVar(&o.fo.rounds, "continue", 2, "fastroute continuation runs (--initial-session) while connections remain unrouted")
 	f.DurationVar(&o.fo.timeout, "router-timeout", 45*time.Minute, "hard limit per fastroute run")
 	f.Float64Var(&o.fo.minTraceUm, "min-trace-um", 0, "fastroute --router.min_trace_width_um (default: max(board minimum track width, min(narrowest widthMil.min, narrowest class width)))")
@@ -180,7 +189,7 @@ type kicadRun struct {
 	work    string
 	step    int
 	classes []kicad.NetClass
-	route   *fastrouteRun
+	route   *routeResult
 	conn    string // schematic connectivity JSON (with --sch)
 	netlist *kicad.SchNetlist
 	stderr  io.Writer
@@ -245,11 +254,8 @@ func runKicadRoute(o kicadRouteOpts, stdout, stderr io.Writer) error {
 	if err := checkNoManual(o.noManual, waivers); err != nil {
 		return err
 	}
-	if o.noReview && !hasWaiver(waivers, "design-review", noReviewMatch) {
-		return fmt.Errorf("--no-review skips the design-review gates: it needs a signed waiver in --waivers {\"gate\":\"design-review\",\"match\":%q,\"reason\":…,\"by\":…}", noReviewMatch)
-	}
-	if !o.noReview && len(o.requirements) == 0 {
-		return fmt.Errorf("--requirements is required: the design review judges the design against the project's own requirements (or --no-review with a signed waiver)")
+	if err := checkReviewOpts(reviewRunOpts{requirements: o.requirements, noReview: o.noReview}, waivers); err != nil {
+		return err
 	}
 	in, err := loadDesignIntent(o.intent)
 	if err != nil {
@@ -547,19 +553,8 @@ func (r *kicadRun) run() error {
 	if rep, _ := r.summary["report"].(map[string]any); rep != nil {
 		so.report, _ = rep["json"].(string)
 	}
-	g := gateResult{Gate: "signoff"}
-	if res, err := runSignoff(so, r.waivers, r.stderr); err != nil {
-		g.Detail = "signoff: " + err.Error()
-	} else {
-		g.Pass = res.Pass
-		g.Detail = "pcbpilot signoff: " + filepath.Join(so.outDir, "signoff.md")
-		for _, x := range res.Gates {
-			if !x.Pass {
-				g.Items = append(g.Items, x.Gate+": "+x.Detail)
-			}
-		}
-	}
-	r.add(g)
+	r.add(signoffGate(so, r.waivers, r.stderr))
+	r.add(gateSetGate(r.gates))
 	r.lap("signoff")
 	return nil
 }
@@ -587,7 +582,12 @@ func (r *kicadRun) doRoute(classed string, reqs map[string]kicad.NetRequirement,
 		edge.OuterMil = math.Max(edge.OuterMil, inSnap.Rules.CopperToEdgeMil)
 		edge.InnerMil = math.Max(edge.InnerMil, inSnap.Rules.CopperToEdgeMil)
 	}
-	r.summary["edgeKeepout"] = edge
+	// Edge-mounted connectors keep their pads routable: the bands leave a
+	// window over each pad near the edge (and its straight escape inward).
+	grow := clearanceOf(inSnap) + 2
+	var exempt []string
+	edge.Exempt, exempt = edgeExemptBoxes(inSnap, math.Max(edge.OuterMil, edge.InnerMil), grow)
+	r.summary["edgeKeepout"], r.summary["edgeExemptPads"] = edge, exempt
 	prepared, prep, err := kicad.PrepareDSN(string(dsnText), r.classes, reqs, edge)
 	r.summary["dsnRequirements"] = prep
 	if err != nil {
@@ -635,50 +635,23 @@ func (r *kicadRun) doRoute(classed string, reqs map[string]kicad.NetRequirement,
 	fmt.Fprintf(r.stderr, "pre-route gate: DSN ok (%d no-neck-down class(es), %d inner rule(s), min trace %.1f µm)\n",
 		len(prep.NoNeckdown), len(prep.InnerRules), o.fo.minTraceUm)
 	r.lap("DSN prepare (requirements, keep-outs)")
-	// The multi-start=4 retry is independent of the main run (a fresh run on
-	// the same DSN): with a spare core it runs speculatively in parallel and
-	// is used only when the main run leaves connections unrouted (PicoRick:
-	// 112 s + 143 s sequential → max of the two).
-	ms := o.fo
-	ms.multiStart = 4
-	parallel := o.parallelMS && runtime.NumCPU() >= 2
-	var (
-		msSes  string
-		msRuns []fastrouteRun
-		msErr  error
-		wg     sync.WaitGroup
-	)
-	logw := io.Writer(&syncWriter{w: r.stderr})
-	if parallel {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			msSes, msRuns, msErr = runFastroute(ms, dsnPath, base+"-ms", logw)
-		}()
-	}
-	ses, runs, err := runFastroute(o.fo, dsnPath, base, logw)
-	wg.Wait()
+	// One fastroute pipeline. --multi-start is a pcbpilot setting: fastroute
+	// itself reruns the autorouter with N-1 differently seeded pass-1 orders
+	// in parallel (keeping the best by unrouted, violations, score), so no
+	// second seed layer is added here.
+	ses, runs, err := runFastroute(o.fo, dsnPath, base, &syncWriter{w: r.stderr})
 	r.summary["router"], r.summary["routerRuns"] = "fastroute", runs
-	r.summary["multiStartParallel"] = parallel
+	r.summary["routerSettings"] = map[string]any{"multiStart": o.fo.multiStart, "threads": o.fo.threads, "optimizer": !o.fo.noOptimizer, "optimizerThresholdPct": o.fo.optThreshold}
 	if err != nil {
 		return err
 	}
-	if last := lastOK(runs); last != nil && last.Unrouted > 0 {
-		if !parallel {
-			fmt.Fprintf(r.stderr, "multi-start: %d connection(s) still unrouted; one fresh run with --multi-start=4\n", last.Unrouted)
-			msSes, msRuns, msErr = runFastroute(ms, dsnPath, base+"-ms", logw)
-		}
-		r.summary["multiStartRuns"] = msRuns
-		if got := lastOK(msRuns); msErr == nil && got != nil && runImproved(*last, *got) {
-			ses, runs = msSes, msRuns
-			fmt.Fprintf(r.stderr, "multi-start: kept (%d unrouted)\n", got.Unrouted)
-		}
-	} else if parallel {
-		r.summary["multiStartRuns"] = msRuns
-		r.summary["multiStartUnused"] = "main run routed everything; the speculative multi-start run was not used"
+	if last := lastOK(runs); last != nil && last.Blocked > 0 {
+		r.summary["blockedConnections"] = last.BlockedList
+		fmt.Fprintf(r.stderr, "fastroute: %d of %d unrouted connection(s) blocked by geometry (--diagnose): placement / escapes must change\n", last.Blocked, last.Unrouted)
 	}
-	r.route = lastOK(runs)
-	r.summary["routeFinal"], r.summary["ses"] = r.route, ses
+	r.summary["routeFinal"], r.summary["ses"] = lastOK(runs), ses
+	r.route = fastrouteResult(lastOK(runs), o.fo, dsnPath)
+	r.summary["routeResult"] = r.route
 	return nil
 }
 
@@ -874,10 +847,13 @@ func (r *kicadRun) silkPlace(board string) (string, error) {
 			}
 			l := byID[p.ID]
 			op := map[string]any{"id": p.ID, "x": p.Box.cx(), "y": p.Box.cy(), "rotation": p.Rot}
-			if l.Font > 0 && l.Font < font {
+			switch {
+			case p.Font > 0: // fab minimum size, fab minimum stroke
+				op["fontSize"], op["lineWidth"] = p.Font, math.Max(opt.LineWidth, opt.FabMinLine)
+			case l.Font > 0 && l.Font < font:
 				op["fontSize"] = font
 			}
-			if opt.LineWidth > 0 {
+			if opt.LineWidth > 0 && p.Font == 0 {
 				op["lineWidth"] = opt.LineWidth
 			}
 			set = append(set, op)
@@ -887,7 +863,11 @@ func (r *kicadRun) silkPlace(board string) (string, error) {
 			lw = 6
 		}
 		for _, g := range groups {
-			add = append(add, map[string]any{"text": g.Text, "x": g.Box.cx(), "y": g.Box.cy(), "layer": g.Layer, "rotation": g.Rot, "fontSize": font, "lineWidth": lw})
+			gf, gw := font, lw
+			if g.Font > 0 { // fab minimum size and stroke
+				gf, gw = g.Font, math.Max(lw, opt.FabMinLine)
+			}
+			add = append(add, map[string]any{"text": g.Text, "x": g.Box.cx(), "y": g.Box.cy(), "layer": g.Layer, "rotation": g.Rot, "fontSize": gf, "lineWidth": gw})
 			hide = append(hide, g.IDs...)
 			rep.Groups = append(rep.Groups, g)
 		}
@@ -994,7 +974,14 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 	}
 	r.lap("gate: post-layout simulation")
 	snapshotIntentGates(snap, r.in, o.intent, verdict, reasons, segNeed, viaOK, true, r.add)
-	r.add(kicadRouteCompleteGate(r.route, drcRep, snap))
+	if mm := markSimKicadMismatch(r.gates, all); len(mm) > 0 {
+		r.summary["simKicadMismatch"] = mm
+		fmt.Fprintf(r.stderr, "post-layout-sim: %d open(s) KiCad's connectivity shows connected (sim/KiCad mismatch; IR closure still runs)\n", len(mm))
+	} else {
+		delete(r.summary, "simKicadMismatch")
+	}
+	rc := kicadRouteCompleteGate(r.route, drcRep, snap)
+	qo.routeGate = &rc
 	r.lap("gate: intent / safety snapshot gates")
 	for _, g := range tailGates(snap, boardPath, postOut, qo, o.projectName, "", r.summary, r.stderr) {
 		r.gates = append(r.gates, g) // tailGates applied the waivers
@@ -1007,6 +994,51 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 	}
 	r.summary["gates"] = r.gates
 	return pass, nil
+}
+
+var reSimOpen = regexp.MustCompile(`^(\S+): no copper path from `)
+
+// markSimKicadMismatch marks every post-layout-sim open ("NET: no copper
+// path …") on a net KiCad's DRC reports no unconnected item for: KiCad's
+// connectivity joins the copper the sim model did not. The item stays (the
+// gate keeps failing: the drop of those pads is not proven) but carries the
+// simOpenHostConnected marker, so the IR closure still runs on the real
+// drops. Returns the marked items (nil without a DRC report).
+func markSimKicadMismatch(gates []gateResult, all *kicad.DRCReport) []string {
+	if all == nil {
+		return nil
+	}
+	open := map[string]bool{}
+	for _, v := range all.Violations {
+		if v.Section != "unconnected_items" && v.Rule != "unconnected_items" {
+			continue
+		}
+		for _, n := range strings.Split(v.Net, " / ") {
+			open[strings.TrimSpace(n)] = true
+		}
+		if v.Net == "" {
+			open["*"] = true // KiCad did not name the net: trust no open
+		}
+	}
+	var out []string
+	for gi := range gates {
+		g := &gates[gi]
+		if g.Gate != "post-layout-sim" || g.Pass {
+			continue
+		}
+		for i, it := range g.Items {
+			m := reSimOpen.FindStringSubmatch(it)
+			if m == nil || open[m[1]] || open["*"] || strings.Contains(it, simOpenHostConnected) {
+				continue
+			}
+			g.Items[i] = fmt.Sprintf("%s — %s: KiCad DRC reports no unconnected item on %s (KiCad connectivity: connected); the post-layout model misses a copper contact, the drop of these pads is not proven", it, simOpenHostConnected, m[1])
+			out = append(out, g.Items[i])
+		}
+		if len(out) > 0 {
+			g.Info = append(g.Info, fmt.Sprintf("%d sim open(s) KiCad shows connected: reported as a sim/KiCad mismatch; the IR closure still runs", len(out)))
+		}
+	}
+	return out
 }
 
 // designReport publishes the versioned design report (report design) from
@@ -1052,13 +1084,42 @@ func (r *kicadRun) designReport(pass bool) gateResult {
 
 func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
 
-// review returns the design-review gate for stage: a stored passing
-// review.json for exactly these inputs is reused, else the panel runs.
+// review returns the design-review gate for stage (designReviewGate).
 func (r *kicadRun) review(stage string, evidence []string) gateResult {
 	o := r.o
+	return designReviewGate(stage, reviewRunOpts{requirements: o.requirements, reviewers: o.reviewers, noReview: o.noReview,
+		timeout: o.reviewTimeout, outDir: o.outDir}, evidence, r.waivers, r.summary, r.stderr)
+}
+
+// reviewRunOpts are the design-review settings of a route command.
+type reviewRunOpts struct {
+	requirements []string
+	reviewers    string
+	noReview     bool
+	timeout      time.Duration
+	outDir       string
+}
+
+// checkReviewOpts: --requirements is required unless --no-review carries a
+// signed waiver.
+func checkReviewOpts(o reviewRunOpts, waivers []gateWaiver) error {
+	if o.noReview && !hasWaiver(waivers, "design-review", noReviewMatch) {
+		return fmt.Errorf("--no-review skips the design-review gates: it needs a signed waiver in --waivers {\"gate\":\"design-review\",\"match\":%q,\"reason\":…,\"by\":…}", noReviewMatch)
+	}
+	if !o.noReview && len(o.requirements) == 0 {
+		return fmt.Errorf("--requirements is required: the design review judges the design against the project's own requirements (or --no-review with a signed waiver)")
+	}
+	return nil
+}
+
+// designReviewGate is the design-review gate for stage (design before
+// routing, layout after the report) on every route path: a stored passing
+// <outDir>/review-<stage>/review.json for exactly these inputs is reused,
+// else the review panel runs.
+func designReviewGate(stage string, o reviewRunOpts, evidence []string, waivers []gateWaiver, summary map[string]any, stderr io.Writer) gateResult {
 	if o.noReview {
 		g := gateResult{Gate: "design-review", Detail: "skipped by --no-review", Items: []string{"design review skipped (" + noReviewMatch + ")"}}
-		applyWaivers(&g, r.waivers)
+		applyWaivers(&g, waivers)
 		return g
 	}
 	dir := filepath.Join(o.outDir, "review-"+stage)
@@ -1074,17 +1135,17 @@ func (r *kicadRun) review(stage string, evidence []string) gateResult {
 			old.Stage == stage && old.InputSHA256 == sha && old.Gate.Pass {
 			g := old.Gate
 			g.Detail = "reused " + filepath.Join(dir, "review.json") + " (same inputs): " + g.Detail
-			r.summary["review-"+stage] = filepath.Join(dir, "review.json")
+			summary["review-"+stage] = filepath.Join(dir, "review.json")
 			return g
 		}
 	}
-	rec, err := runReviewPanel(stage, o.requirements, evidence, reviewers, dir, o.reviewTimeout, reviewMaxBytes, r.waivers, r.stderr)
+	rec, err := runReviewPanel(stage, o.requirements, evidence, reviewers, dir, o.timeout, reviewMaxBytes, waivers, stderr)
 	if err != nil {
 		g := gateResult{Gate: "design-review", Detail: "review-panel: " + err.Error()}
-		applyWaivers(&g, r.waivers)
+		applyWaivers(&g, waivers)
 		return g
 	}
-	r.summary["review-"+stage] = filepath.Join(dir, "review.json")
+	summary["review-"+stage] = filepath.Join(dir, "review.json")
 	return rec.Gate
 }
 
@@ -1120,9 +1181,10 @@ func reviewInputSHA(stage string, reqFiles, evFiles []string, limit int) (string
 // the board and KiCad's DRC (the board's real connectivity) reports no
 // unconnected item at all — the pour carries it (Gas V5 A: GND C2.2–U8.115,
 // a fine-pitch ground pin, joined by the TOP GND pour).
-func kicadRouteCompleteGate(run *fastrouteRun, drc *kicad.DRCReport, snap *boardSnapshot) gateResult {
+func kicadRouteCompleteGate(run *routeResult, drc *kicad.DRCReport, snap *boardSnapshot) gateResult {
 	g := routeCompleteGate(run)
-	if g.Pass || run == nil || run.Fixable != 0 || run.Unrouted <= 0 || drc == nil || drc.Counts["unconnected_items"] != 0 || snap.Copper == nil {
+	if g.Pass || run == nil || run.Fixable != 0 || run.UnroutedCount <= 0 || len(run.Unrouted) != run.UnroutedCount ||
+		drc == nil || drc.Counts["unconnected_items"] != 0 || snap.Copper == nil {
 		return g
 	}
 	poured := map[string]bool{}
@@ -1131,34 +1193,16 @@ func kicadRouteCompleteGate(run *fastrouteRun, drc *kicad.DRCReport, snap *board
 			poured[fmt.Sprint(m["net"])] = true
 		}
 	}
-	data, err := os.ReadFile(run.Report)
-	if err != nil {
-		return g
-	}
-	var rep struct {
-		Unrouted []struct {
-			Net  string `json:"net"`
-			From struct {
-				Component, Pin string
-			} `json:"from"`
-			To struct {
-				Component, Pin string
-			} `json:"to"`
-		} `json:"unrouted"`
-	}
-	if json.Unmarshal(data, &rep) != nil || len(rep.Unrouted) != run.Unrouted {
-		return g
-	}
 	var items []string
-	for _, u := range rep.Unrouted {
+	for _, u := range run.Unrouted {
 		if !poured[u.Net] {
 			return g
 		}
-		items = append(items, fmt.Sprintf("%s %s.%s–%s.%s: unrouted by fastroute, joined by the %s pour (KiCad DRC: 0 unconnected items)", u.Net, u.From.Component, u.From.Pin, u.To.Component, u.To.Pin, u.Net))
+		items = append(items, fmt.Sprintf("%s: unrouted by %s, joined by the %s pour (KiCad DRC: 0 unconnected items)", u, run.Router, u.Net))
 	}
 	g.Pass, g.Items = true, nil
 	g.Info = items
-	g.Detail += fmt.Sprintf("; every unrouted connection is on a poured net and KiCad reports 0 unconnected items")
+	g.Detail += "; every unrouted connection is on a poured net and KiCad reports 0 unconnected items"
 	return g
 }
 
