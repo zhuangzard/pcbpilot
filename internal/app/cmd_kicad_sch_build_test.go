@@ -107,7 +107,7 @@ func TestSchBuildSmall(t *testing.T) {
 		t.Fatalf("build: %v", err)
 	}
 	t.Logf("small build: %v, timings %+v", time.Since(t0), res.Timings)
-	for _, g := range []string{"netlist", "erc", "quality", "connectivity", "intent", "page-fit"} {
+	for _, g := range []string{"netlist", "erc", "quality", "engineer-grade", "connectivity", "intent", "page-fit"} {
 		if s := sbGateStatus(res, g); s != "pass" {
 			t.Errorf("gate %s = %s: %+v", g, s, res.Gates)
 		}
@@ -263,5 +263,38 @@ func TestSchBuildESP32Bench(t *testing.T) {
 	}
 	if wall > 30*time.Second {
 		t.Errorf("wall %v > 30 s target", wall)
+	}
+}
+
+// TestSchBuildHardGateTransactional: a failing hard gate (here the quality
+// gate, injected) leaves --out untouched and exits non-zero.
+func TestSchBuildHardGateTransactional(t *testing.T) {
+	sbNeedKicad(t)
+	out := filepath.Join(t.TempDir(), "p")
+	spec := func() *sbSpec {
+		return &sbSpec{Parts: []sbPart{{Ref: "R1", Value: "1k", Symbol: "Device:R"}, {Ref: "R2", Value: "2k", Symbol: "Device:R"}},
+			Nets: []sbNet{{Name: "A", Pins: []string{"R1:1", "R2:1"}}, {Name: "GND", Pins: []string{"R1:2", "R2:2"}}}}
+	}
+	if _, err := runSchBuild(spec(), sbOptions{OutDir: out, NoIntent: true, PlannerBudget: 20000}, nil); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(filepath.Join(out, "p.kicad_sch"))
+	sbTestGateHook = func(rep *sbReport) { rep.gate("quality", "fail", "injected finding", nil) }
+	defer func() { sbTestGateHook = nil }()
+	s2 := spec()
+	s2.Parts[1].Value = "4k7"
+	rep, err := runSchBuild(s2, sbOptions{OutDir: out, NoIntent: true, PlannerBudget: 20000}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.OK || rep.Error == nil || rep.Error.Code != "GATE_FAILED" {
+		t.Fatalf("report ok=%v error=%+v", rep.OK, rep.Error)
+	}
+	if after, _ := os.ReadFile(filepath.Join(out, "p.kicad_sch")); !bytes.Equal(before, after) {
+		t.Fatal("a failed gate changed the committed sheet")
+	}
+	var so, se bytes.Buffer
+	if err := finishSbRun(rep, nil, "", &so, &se); err == nil {
+		t.Fatal("a failed hard gate must exit non-zero")
 	}
 }

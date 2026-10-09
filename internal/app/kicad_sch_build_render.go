@@ -177,6 +177,9 @@ func sbPartBoxes(dir string, files []string) map[string]sbBox {
 	return out
 }
 
+// sbTestGateHook lets tests inject a gate result before the commit decision.
+var sbTestGateHook func(rep *sbReport)
+
 // sbFailure is a refusal with a code and the fix.
 type sbFailure struct {
 	Code    string `json:"code"`
@@ -531,6 +534,9 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 	rep.gate(lay.Name, lay.Status, lay.Detail, lay.Data)
 	eg := sbEngineerGrade(stage, files, d)
 	rep.gate(eg.Name, eg.Status, eg.Detail, eg.Data)
+	if sbTestGateHook != nil {
+		sbTestGateHook(rep)
+	}
 	tm.mark("checks")
 	// hard gates are transactional: ERC errors, quality findings or a page
 	// that does not fit leave --out untouched
