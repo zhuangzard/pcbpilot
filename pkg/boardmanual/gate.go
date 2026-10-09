@@ -21,10 +21,12 @@ const GateName = "board-manual"
 //   - the power-input section is missing;
 //   - any field still contains "TODO" (openItems[] is the tracked list and
 //     is exempt);
-//   - a notes connector / pin / net / LED / probe disagrees with the board.
+//   - a notes connector / pin / net / LED / probe disagrees with the board;
+//   - (KiCad projects) a BOM part lacks its schematic symbol or its
+//     footprint in the cross-probe map, or a schematic page has no plot.
 func GateCheck(m *Manual, notes *Notes) []string {
 	if notes == nil {
-		return []string{"notes file missing: the manual has no human text (write pcbpilot.manual-notes.json)"}
+		return append([]string{"notes file missing: the manual has no human text (write pcbpilot.manual-notes.json)"}, crossProbeItems(m)...)
 	}
 	var out []string
 	add := func(f string, a ...any) { out = append(out, fmt.Sprintf(f, a...)) }
@@ -113,11 +115,23 @@ func GateCheck(m *Manual, notes *Notes) []string {
 	case m.BoardSHA == "" || (m.Sim.PostBoardSHA != m.BoardSHA && m.Sim.PostFileSHA != m.BoardSHA):
 		add("simulation: post.json was computed on board %s, the manual's board is %s (re-run sim post-layout)", short12(m.Sim.PostBoardSHA), short12(m.BoardSHA))
 	}
+	out = append(out, crossProbeItems(m)...)
 	for _, p := range todoPaths(m) {
 		add("TODO left in %s", p)
 	}
 	for _, ch := range m.Checks {
 		add("notes vs board %s: notes %q, board %q (%s)", ch.Where, ch.Doc, ch.Board, ch.Note)
+	}
+	return out
+}
+
+// crossProbeItems are the cross-probe map's gate items (none without one).
+func crossProbeItems(m *Manual) []string {
+	var out []string
+	if xp := m.CrossProbe; xp != nil {
+		for _, s := range xp.Missing {
+			out = append(out, "cross-probe: "+s)
+		}
 	}
 	return out
 }
@@ -143,7 +157,7 @@ func todoPaths(m *Manual) []string {
 			sort.Strings(keys)
 			for _, k := range keys {
 				switch k {
-				case "BoardSVG", "ProbeSVG", "LEDSVG", "SVG", "SVGDataURI", "CSVDataURI", "Maps", "Sim", "TODO", "Sources", "NotesSources", "Changes", "Checks":
+				case "BoardSVG", "ProbeSVG", "LEDSVG", "SVG", "SVGDataURI", "CSVDataURI", "Maps", "Sim", "TODO", "Sources", "NotesSources", "Changes", "Checks", "CrossProbe":
 					continue
 				}
 				walk(path+"."+k, t[k])

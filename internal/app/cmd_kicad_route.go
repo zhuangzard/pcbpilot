@@ -960,7 +960,8 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 	r.add(kicadIntentRulesGate(raw, r.classes))
 
 	qo := qualityGateOpts{intent: o.intent, sim: o.sim, outDir: o.outDir, waivers: r.waivers, widthBasis: o.widthBasis,
-		source: "kicad route (" + routed + ")", silk: o.silk, noManual: o.noManual, projectConfig: o.projectConfig}
+		source: "kicad route (" + routed + ")", silk: o.silk, noManual: o.noManual, projectConfig: o.projectConfig,
+		kicadSch: o.sch, kicadPcb: kicadLensPCB(o.sch, routed)}
 	verdict, reasons, postOut := "", []string(nil), ""
 	var segNeed func(specctra.Track) (float64, bool)
 	var viaOK func([]string, string) (bool, string)

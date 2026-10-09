@@ -79,6 +79,10 @@ func (e *ext) add(x, y float64) {
 type Part struct {
 	Designator string  `json:"designator"`
 	Device     string  `json:"device"`
+	Value      string  `json:"value"` // value … side: KiCad snapshot extras
+	Footprint  string  `json:"footprint"`
+	LCSC       string  `json:"lcsc"`
+	Side       string  `json:"side"`
 	Layer      int     `json:"layer"`
 	X          float64 `json:"x"`
 	Y          float64 `json:"y"`

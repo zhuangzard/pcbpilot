@@ -58,6 +58,7 @@
 | 机械 | 板框缺失、尺寸图缺失、没有安装孔、板厚未知（`mechanical.thicknessMm` 或 intent 叠层）、没有带来源的器件高度 |
 | TODO | 计算后的说明书任何字段仍含 “TODO”（只有 `openItems[]` 可以写未决项） |
 | 对账 | notes 里的接口/脚/网络/LED 阳极/测量点/引脚表与板数据不一致（`docPins` 文档网络 ≠ 板上网络、`expectedPins` ≠ 焊盘数……） |
+| 交叉探查（KiCad） | 给了 `--kicad-sch/--kicad-pcb`（`kicad route --sch` 自动传入）时：任一 BOM 器件只在一侧（PCB 上有封装无原理图符号，或原理图 `in_bom`+`on_board` 符号无封装），或某原理图页没有出图。`exclude_from_bom` / `board_only` 封装与没有铜焊盘的封装（仅 NPTH 的安装孔）不需要符号 |
 | 生成 | 读入、生成或写文件失败 |
 
 对账失败时**改错的一方**：文档写错就改文档（例 J_AUX 写 AGND，本板只有 GND），板子错就回到设计；不能删
@@ -65,7 +66,7 @@
 
 ## 章节
 
-1 概览（使用顺序）· 2 机械尺寸与安装孔 · 3 仿真结论 / 工作条件 · 4 接头位置图 · 4 接口详细说明 · 5 电源要求 · 6 输入输出 · 7 LED ·
+1 概览（使用顺序）· 2 机械尺寸与安装孔 · 3 仿真结论 / 工作条件 · 4 接头位置图（KiCad 工程另含原理图 ↔ PCB 对照）· 4 接口详细说明 · 5 电源要求 · 6 输入输出 · 7 LED ·
 8 注意事项与跳线 · 9 仪器设备 · 10 测量点 · 11 上电步骤 · 12 软件接口 · 13 故障排查 · 14 文档与板数据对账 ·
 15 未决项 · 16 数据来源 · 17 变更记录。
 
@@ -84,6 +85,19 @@
 - **接头位置图**：方形画布；接头按角色着色并标“位号 角色 名称”+ 副标题，引线到最近板边外，1 脚白点，`partLabels`
   标注主要器件，底边 LED 行在板下方标注；角色无 notes 时按网络推断（TCK/TMS/TDI/TDO → JTAG，CANH/CANL → CAN，
   TXD/RXD → UART，只有 VIN/+nV 与 GND → POWER，2 脚 → JUMPER）。
+- **原理图 ↔ PCB 对照（交叉探查，第 4 章 `#s4x`，仅 KiCad 工程）**：`report manual --kicad-sch root.kicad_sch
+  --kicad-pcb board.kicad_pcb`（`--board` 必须是这块 .kicad_pcb 的 `kicad snapshot`）；`kicad route --sch` 在门禁里
+  自动传入原理图与布好的板。kicad-cli 按页面坐标出图（1 单位 = 1 mm，原点 = 页面左上角，不画图框）：原理图每个
+  层次页一张，PCB 每层一张（B.Cu、F.Cu、F.Silkscreen、Edge.Cuts，黑白出图后在页面里按层着色），以 base64
+  data URI 嵌入，仍是单个离线 HTML（约 1–8 MB）。位号表（JSON）`ref → {schPage, schBoxes[], schRot, pcbBox,
+  pcbRot, rotation, nets[], findings[], lcsc, footprint, side}`：符号框 = 库符号本体+引脚经实例旋转/镜像（多单元
+  器件每单元一框），封装框 = 快照 bbox（mil、y 上 → mm、y 下）；`rotation = pcbRot − schRot`，让放大镜里的封装
+  与符号同向。每个网络带意图线宽（outer/min）、电流、post.json 的 IR 压降/预算/状态；`findings` 是 intent
+  （安全/爬电/额定值……）与 post-layout 中点名该器件、或不点名器件但点名其网络的发现。
+  交互：鼠标移到原理图器件 → 放大镜（默认圆形）显示该器件 PCB 区域（铜 + 丝印），虚线贝塞尔连到符号，两侧同时
+  高亮；移到 PCB 器件 → 反向显示原理图符号（必要时自动翻页）。单击固定，拖动放大镜移位，滚轮缩放（Shift+滚轮
+  15° 旋转），R / Shift+R 旋转 90°，O 圆形/矩形，+/- 缩放，Esc 关闭；两个视图可滚轮缩放、拖动平移，PCB 层可开关。
+  打印时隐藏放大镜。表格“已对照器件”列出全部位号（无法对照的标红）。
 - **接口页**：焊盘按真实位置与形状绘制（电源红、地黑、信号蓝、空脚灰，橙圈 = 1 脚），脚表含网络/类型/电压/最大电流/
   方向/文档网络/说明；`highlight` 显示为高亮说明框。
 
