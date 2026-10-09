@@ -46,6 +46,15 @@ Route / gates / sign-off (EasyEDA and KiCad, no connector change):
   (`summary.edgeExemptPads`; KiCad and EasyEDA DSNs); the copper-to-edge gate is unchanged.
 - Every intent net class above the neck-down floor goes to fastroute `--no-neckdown-classes` (its micro neck-down
   narrows any congested segment, not only at pins).
+- Intent pad escapes (`kicad route`, `pcb auto route` / autoroute with `--intent`): an SMD pad of an intent net whose
+  full width cannot leave it gets a fixed escape before routing — outward to where a full-width trace end fits, a
+  bridge to a same-net row neighbour, or inward to a via — as wide as clearance allows, never below `widthMil.min`
+  (`summary.intentEscapes`; KiCad adds them to the board after the SES import). PicoRick: 11 → 5 unrouted, KiCad
+  DRC 22 → 15, intent-widths 0, fastroute 696 → 91 s.
+- `intent-widths`: a narrower segment passes only as a pad escape — wholly within max(3 × width, 30 mil) of a
+  same-net pad and ≥ `widthMil.min` (was: one end within 50 mil).
+- `route-complete` / `routeResult.placementHints`: each blocked connection names the part to move, the direction
+  and a minimum distance.
 - `kicad route`: `--threads` defaults to min(cores−1, 8) (multi-threaded fastroute is deterministic: 3 PicoRick runs
   gave byte-identical sessions; `--threads 1` for reproducibility across builds); every gate reads the router-agnostic
   `routeResult` (`summary.routeResult`), fastroute being its only backend for now.
