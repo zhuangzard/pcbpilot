@@ -1028,6 +1028,20 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 				opt.CopperLayers = n
 			}
 		}
+		if opt.EdgeOuterMil > 0 || opt.EdgeInnerMil > 0 {
+			// Edge-mounted connector pads stay routable through the bands.
+			if snap, err := fetchBoardSnapshot(cfg, window, boardSnapshotOpts{}); err == nil {
+				clr := 6.0
+				if r := fetchPcbRules(cfg, window).clearanceMil; r > 0 {
+					clr = r
+				}
+				var names []string
+				opt.EdgeExempt, names = edgeExemptBoxes(snap, math.Max(opt.EdgeOuterMil, opt.EdgeInnerMil), clr+2)
+				summary["edgeExemptPads"] = names
+			} else {
+				fmt.Fprintf(stderr, "edge keep-out: board unreadable (%v); no connector windows\n", err)
+			}
+		}
 		if preset && !o.noPreEscape {
 			if pre, skipped, err := plannedPreEscapes(cfg, window, dsnText, opt.Escapes); err != nil {
 				fmt.Fprintf(stderr, "pre-escapes: %v; skipped\n", err)

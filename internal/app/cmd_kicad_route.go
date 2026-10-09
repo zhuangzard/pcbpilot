@@ -577,7 +577,12 @@ func (r *kicadRun) doRoute(classed string, reqs map[string]kicad.NetRequirement,
 		edge.OuterMil = math.Max(edge.OuterMil, inSnap.Rules.CopperToEdgeMil)
 		edge.InnerMil = math.Max(edge.InnerMil, inSnap.Rules.CopperToEdgeMil)
 	}
-	r.summary["edgeKeepout"] = edge
+	// Edge-mounted connectors keep their pads routable: the bands leave a
+	// window over each pad near the edge (and its straight escape inward).
+	grow := clearanceOf(inSnap) + 2
+	var exempt []string
+	edge.Exempt, exempt = edgeExemptBoxes(inSnap, math.Max(edge.OuterMil, edge.InnerMil), grow)
+	r.summary["edgeKeepout"], r.summary["edgeExemptPads"] = edge, exempt
 	prepared, prep, err := kicad.PrepareDSN(string(dsnText), r.classes, reqs, edge)
 	r.summary["dsnRequirements"] = prep
 	if err != nil {
@@ -864,10 +869,13 @@ func (r *kicadRun) silkPlace(board string) (string, error) {
 			}
 			l := byID[p.ID]
 			op := map[string]any{"id": p.ID, "x": p.Box.cx(), "y": p.Box.cy(), "rotation": p.Rot}
-			if l.Font > 0 && l.Font < font {
+			switch {
+			case p.Font > 0: // fab minimum size, fab minimum stroke
+				op["fontSize"], op["lineWidth"] = p.Font, math.Max(opt.LineWidth, opt.FabMinLine)
+			case l.Font > 0 && l.Font < font:
 				op["fontSize"] = font
 			}
-			if opt.LineWidth > 0 {
+			if opt.LineWidth > 0 && p.Font == 0 {
 				op["lineWidth"] = opt.LineWidth
 			}
 			set = append(set, op)
@@ -877,7 +885,11 @@ func (r *kicadRun) silkPlace(board string) (string, error) {
 			lw = 6
 		}
 		for _, g := range groups {
-			add = append(add, map[string]any{"text": g.Text, "x": g.Box.cx(), "y": g.Box.cy(), "layer": g.Layer, "rotation": g.Rot, "fontSize": font, "lineWidth": lw})
+			gf, gw := font, lw
+			if g.Font > 0 { // fab minimum size and stroke
+				gf, gw = g.Font, math.Max(lw, opt.FabMinLine)
+			}
+			add = append(add, map[string]any{"text": g.Text, "x": g.Box.cx(), "y": g.Box.cy(), "layer": g.Layer, "rotation": g.Rot, "fontSize": gf, "lineWidth": gw})
 			hide = append(hide, g.IDs...)
 			rep.Groups = append(rep.Groups, g)
 		}

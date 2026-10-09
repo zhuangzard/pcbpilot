@@ -58,3 +58,18 @@ func TestSignoffGateFromRunDir(t *testing.T) {
 		t.Fatalf("gate %+v", g)
 	}
 }
+
+// Only the pads of a part whose box reaches the outline (the copper-to-edge
+// gate's edge-mounted parts) near the edge are exempt from the DSN bands.
+func TestEdgeExemptBoxes(t *testing.T) {
+	snap := &boardSnapshot{Outline: &boardOutline{BBox: layoutBBox{0, 0, 2000, 1000}, Points: [][2]float64{{0, 0}, {2000, 0}, {2000, 1000}, {0, 1000}}}}
+	snap.Components = []boardComp{
+		{Designator: "J1", BBox: &layoutBBox{900, -40, 1100, 120}, Pads: []boardPad{
+			{Number: "1", X: 950, Y: 10, W: 20, H: 40}, {Number: "2", X: 1050, Y: 10, W: 20, H: 40}, {Number: "S", X: 1000, Y: 100, W: 30, H: 30}}},
+		{Designator: "R1", BBox: &layoutBBox{100, 5, 220, 70}, Pads: []boardPad{{Number: "1", X: 130, Y: 30, W: 30, H: 30}}},
+	}
+	boxes, names := edgeExemptBoxes(snap, 30, 8)
+	if strings.Join(names, ",") != "J1.1,J1.2" || len(boxes) != 2 || boxes[0] != [4]float64{932, -18, 968, 38} {
+		t.Fatalf("names %v boxes %v", names, boxes)
+	}
+}

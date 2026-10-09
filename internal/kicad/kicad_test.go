@@ -230,3 +230,24 @@ func TestDRCSplitErrors(t *testing.T) {
 		t.Fatalf("%+v %v %d", errs, warn, n)
 	}
 }
+
+// PrepareDSN leaves a band window over an exempt (edge connector) pad.
+func TestPrepareDSNEdgeExempt(t *testing.T) {
+	dsn := `(pcb x (resolution um 10) (unit um)
+  (structure
+    (layer F.Cu (type signal))
+    (layer B.Cu (type signal))
+    (boundary (path pcb 0  0 0  50800 0  50800 25400  0 25400  0 0))
+  )
+  (network (class kicad_default "" (circuit (use_via V)) (rule (width 254) (clearance 152.4))))
+)`
+	_, prep, err := PrepareDSN(dsn, nil, nil, EdgeKeepout{OuterMil: 20, InnerMil: 30})
+	if err != nil || prep.EdgeKeepouts != 8 || prep.EdgeWindows != 0 {
+		t.Fatalf("plain: %+v %v", prep, err)
+	}
+	// A pad at x = 1000 mil on the bottom edge (y 0).
+	out, prep, err := PrepareDSN(dsn, nil, nil, EdgeKeepout{OuterMil: 20, InnerMil: 30, Exempt: [][4]float64{{980, -10, 1020, 25}}})
+	if err != nil || prep.EdgeWindows != 2 || prep.EdgeKeepouts != 10 || !strings.Contains(out, "pcbpilot_edge_F.Cu_4") {
+		t.Fatalf("exempt: %+v %v", prep, err)
+	}
+}
