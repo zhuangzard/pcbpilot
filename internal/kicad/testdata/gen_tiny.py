@@ -1,112 +1,98 @@
-# gen_tiny.py — builds testdata/tiny.kicad_pcb (pcbpilot's own MIT fixture)
-# with KiCad's Python: a 2-layer 40 x 30 mm board, five two-pad SMD parts,
-# one through-hole header and an NPTH mounting hole, nets VCC / GND / SIG_A /
-# SIG_B, no tracks. Re-run after a KiCad format change:
+# Generates tiny.kicad_pcb, the synthetic live-test board of `kicad place`
+# (MIT, pcbpilot's own): a 50 x 40 mm 2-layer board with an 8-pad IC,
+# decaps, resistors (R3 on the bottom), a locked header, a mounting hole
+# and one track.
 #
-#   <KiCad python> internal/kicad/testdata/gen_tiny.py internal/kicad/testdata/tiny.kicad_pcb
+#   <KiCad python3> gen_tiny.py tiny.kicad_pcb
 import sys
 
 import pcbnew
 
-MM = pcbnew.FromMM
+mm = pcbnew.FromMM
+board = pcbnew.BOARD()
+nets = {}
 
 
-def vec(x, y):
-    return pcbnew.VECTOR2I(MM(x), MM(y))
+def net(name):
+    if name not in nets:
+        n = pcbnew.NETINFO_ITEM(board, name)
+        board.Add(n)
+        nets[name] = n
+    return nets[name]
 
 
-def add_net(board, name):
-    net = pcbnew.NETINFO_ITEM(board, name)
-    board.Add(net)
-    return net
+def edge(x0, y0, x1, y1):
+    s = pcbnew.PCB_SHAPE(board)
+    s.SetShape(pcbnew.SHAPE_T_RECT)
+    s.SetStart(pcbnew.VECTOR2I(mm(x0), mm(y0)))
+    s.SetEnd(pcbnew.VECTOR2I(mm(x1), mm(y1)))
+    s.SetLayer(pcbnew.Edge_Cuts)
+    s.SetWidth(mm(0.1))
+    board.Add(s)
 
 
-def two_pad(board, ref, value, x, y, rot, nets, lcsc=""):
+def footprint(ref, lib, x, y, rot, pads, court, kind=pcbnew.PAD_ATTRIB_SMD, size=(0.9, 0.9)):
     fp = pcbnew.FOOTPRINT(board)
     fp.SetReference(ref)
-    fp.SetValue(value)
-    fp.SetFPIDAsString("pcbpilot:R_1206_tiny")
-    for i, (dx, net) in enumerate(((-1.6, nets[0]), (1.6, nets[1]))):
-        p = pcbnew.PAD(fp)
-        p.SetNumber(str(i + 1))
-        p.SetAttribute(pcbnew.PAD_ATTRIB_SMD)
-        p.SetShape(pcbnew.PAD_SHAPE_RECT)
-        p.SetSize(vec(1.2, 1.8))
-        p.SetLayerSet(p.SMDMask())
-        p.SetPosition(vec(dx, 0))
-        p.SetNet(net)
-        fp.Add(p)
-    if lcsc:
-        fp.SetField("LCSC", lcsc)
+    fp.SetValue(ref)
+    fp.SetFPID(pcbnew.LIB_ID(lib.split(":")[0], lib.split(":")[1]))
+    fp.SetPosition(pcbnew.VECTOR2I(mm(x), mm(y)))  # first: children are added in board coordinates
+    fp.Reference().SetTextSize(pcbnew.VECTOR2I(mm(1), mm(1)))
+    fp.Reference().SetTextThickness(mm(0.15))
+    fp.Reference().SetPosition(pcbnew.VECTOR2I(mm(x), mm(y - court[1] - 1)))
     board.Add(fp)
-    fp.SetPosition(vec(x, y))
-    fp.SetOrientationDegrees(rot)
+    for num, netname, dx, dy in pads:
+        p = pcbnew.PAD(fp)
+        p.SetNumber(num)
+        p.SetAttribute(kind)
+        if kind == pcbnew.PAD_ATTRIB_SMD:
+            p.SetLayerSet(p.SMDMask())
+            p.SetShape(pcbnew.F_Cu, pcbnew.PAD_SHAPE_RECT) if hasattr(pcbnew, "PADSTACK") else p.SetShape(pcbnew.PAD_SHAPE_RECT)
+        else:
+            p.SetLayerSet(p.PTHMask() if kind == pcbnew.PAD_ATTRIB_PTH else p.UnplatedHoleMask())
+            d = mm(size[0] * 0.6 if kind == pcbnew.PAD_ATTRIB_PTH else size[0])
+            p.SetDrillSize(pcbnew.VECTOR2I(d, d))
+        p.SetSize(pcbnew.VECTOR2I(mm(size[0]), mm(size[1])))
+        p.SetPosition(pcbnew.VECTOR2I(mm(x + dx), mm(y + dy)))
+        if netname:
+            p.SetNet(net(netname))
+        fp.Add(p)
+    s = pcbnew.PCB_SHAPE(fp)
+    s.SetShape(pcbnew.SHAPE_T_RECT)
+    s.SetStart(pcbnew.VECTOR2I(mm(x - court[0]), mm(y - court[1])))
+    s.SetEnd(pcbnew.VECTOR2I(mm(x + court[0]), mm(y + court[1])))
+    s.SetLayer(pcbnew.F_CrtYd)
+    s.SetWidth(mm(0.05))
+    fp.Add(s)
+    if rot:
+        fp.SetOrientationDegrees(rot)
     return fp
 
 
-def header(board, ref, x, y, nets):
-    fp = pcbnew.FOOTPRINT(board)
-    fp.SetReference(ref)
-    fp.SetValue("HDR_1x3")
-    fp.SetFPIDAsString("pcbpilot:PinHeader_1x3_tiny")
-    for i, net in enumerate(nets):
-        p = pcbnew.PAD(fp)
-        p.SetNumber(str(i + 1))
-        p.SetAttribute(pcbnew.PAD_ATTRIB_PTH)
-        p.SetShape(pcbnew.PAD_SHAPE_RECT if i == 0 else pcbnew.PAD_SHAPE_CIRCLE)
-        p.SetSize(vec(1.7, 1.7))
-        p.SetDrillSize(vec(1.0, 1.0))
-        p.SetLayerSet(p.PTHMask())
-        p.SetPosition(vec(0, i * 2.54))
-        p.SetNet(net)
-        fp.Add(p)
-    board.Add(fp)
-    fp.SetPosition(vec(x, y))
-    return fp
+def two(a, b):
+    return [("1", a, -0.8, 0), ("2", b, 0.8, 0)]
 
 
-def mounting_hole(board, ref, x, y):
-    fp = pcbnew.FOOTPRINT(board)
-    fp.SetReference(ref)
-    fp.SetValue("MountingHole_2.2mm")
-    fp.SetFPIDAsString("pcbpilot:MountingHole_tiny")
-    p = pcbnew.PAD(fp)
-    p.SetNumber("")
-    p.SetAttribute(pcbnew.PAD_ATTRIB_NPTH)
-    p.SetShape(pcbnew.PAD_SHAPE_CIRCLE)
-    p.SetSize(vec(2.2, 2.2))
-    p.SetDrillSize(vec(2.2, 2.2))
-    p.SetLayerSet(p.UnplatedHoleMask())
-    fp.Add(p)
-    board.Add(fp)
-    fp.SetPosition(vec(x, y))
-
-
-def main(out):
-    board = pcbnew.BOARD()
-    board.SetCopperLayerCount(2)
-    vcc, gnd, a, b = (add_net(board, n) for n in ("VCC", "GND", "SIG_A", "SIG_B"))
-    corners = [(0, 0), (40, 0), (40, 30), (0, 30)]
-    for i in range(4):
-        s = pcbnew.PCB_SHAPE(board)
-        s.SetShape(pcbnew.SHAPE_T_SEGMENT)
-        s.SetLayer(pcbnew.Edge_Cuts)
-        s.SetWidth(MM(0.1))
-        s.SetStart(vec(*corners[i]))
-        s.SetEnd(vec(*corners[(i + 1) % 4]))
-        board.Add(s)
-    header(board, "J1", 5, 10, [vcc, gnd, a])
-    two_pad(board, "R1", "10k", 15, 8, 0, [vcc, a], lcsc="C25804")
-    two_pad(board, "R2", "10k", 15, 16, 90, [a, b])
-    two_pad(board, "C1", "100nF", 25, 8, 0, [vcc, gnd], lcsc="C14663")
-    two_pad(board, "R3", "1k", 30, 18, 0, [b, gnd])
-    two_pad(board, "C2", "1uF", 30, 24, 180, [vcc, gnd])
-    mounting_hole(board, "H1", 36, 4)
-    ds = board.GetDesignSettings()
-    ds.m_TrackMinWidth = MM(0.15)
-    ds.m_MinClearance = MM(0.15)
-    pcbnew.SaveBoard(out, board)
-
-
-if __name__ == "__main__":
-    main(sys.argv[1])
+edge(0, 0, 50, 40)
+ic = [(str(i + 1), n, -2.5 if i < 4 else 2.5, -1.9 + 1.27 * (i % 4)) for i, n in enumerate(["VCC", "A", "B", "GND", "C", "D", "VCC", "GND"])]
+footprint("U1", "pcbpilot_test:IC8", 25, 20, 0, ic, (3.6, 2.8), size=(1.4, 0.6))
+footprint("C1", "pcbpilot_test:C0603", 10, 8, 0, two("VCC", "GND"), (1.5, 0.8))
+footprint("C2", "pcbpilot_test:C0603", 40, 8, 90, two("VCC", "GND"), (1.5, 0.8))
+footprint("R1", "pcbpilot_test:R0603", 10, 32, 0, two("A", "C"), (1.5, 0.8))
+footprint("R2", "pcbpilot_test:R0603", 40, 32, 30, two("B", "D"), (1.5, 0.8))
+r3 = footprint("R3", "pcbpilot_test:R0603", 25, 8, 0, two("A", "GND"), (1.5, 0.8))
+r3.Flip(r3.GetPosition(), pcbnew.FLIP_DIRECTION_LEFT_RIGHT)
+r3.SetOrientationDegrees(45)
+j1 = footprint("J1", "pcbpilot_test:Header1x02", 3, 20, 90, [("1", "VCC", 0, -1.27), ("2", "GND", 0, 1.27)], (1.3, 2.6),
+               kind=pcbnew.PAD_ATTRIB_PTH, size=(1.7, 1.7))
+j1.SetLocked(True)
+footprint("H1", "MountingHole:MountingHole_3.2mm_M3", 46, 36, 0, [("", "", 0, 0)], (3.0, 3.0),
+          kind=pcbnew.PAD_ATTRIB_NPTH, size=(3.2, 3.2))
+t = pcbnew.PCB_TRACK(board)
+t.SetStart(pcbnew.VECTOR2I(mm(10.8), mm(8)))
+t.SetEnd(pcbnew.VECTOR2I(mm(22.5), mm(18.1)))
+t.SetWidth(mm(0.25))
+t.SetLayer(pcbnew.F_Cu)
+t.SetNet(net("GND"))
+board.Add(t)
+board.Save(sys.argv[1])

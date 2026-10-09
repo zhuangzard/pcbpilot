@@ -195,6 +195,13 @@ def snapshot(board):
         lcsc = lcsc_of(fp)
         if lcsc:
             comp["lcsc"] = lcsc
+        try:
+            fp.BuildCourtyardCaches()
+            cy = fp.GetCourtyard(pcbnew.B_CrtYd if fp.IsFlipped() else pcbnew.F_CrtYd)
+            if cy.OutlineCount() > 0:
+                comp["courtyard"] = box_mil(cy.BBox())
+        except Exception:
+            pass
         for p in fp.Pads():
             attr = p.GetAttribute()
             px, py = xy(p.GetPosition())

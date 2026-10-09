@@ -23,9 +23,9 @@ func TestKicadLive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	src := filepath.Join("..", "kicad", "testdata", "tiny.kicad_pcb")
+	src := filepath.Join("..", "kicad", "testdata", "tiny-route.kicad_pcb")
 	dir := t.TempDir()
-	pcb := filepath.Join(dir, "tiny.kicad_pcb")
+	pcb := filepath.Join(dir, "tiny-route.kicad_pcb")
 	if _, err := copyKicadBoard(src, pcb); err != nil {
 		t.Fatal(err)
 	}

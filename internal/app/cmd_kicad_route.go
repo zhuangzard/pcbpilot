@@ -178,7 +178,7 @@ type kicadRun struct {
 	classes []kicad.NetClass
 	route   *fastrouteRun
 	conn    string // schematic connectivity JSON (with --sch)
-	netlist *kicad.Netlist
+	netlist *kicad.SchNetlist
 	stderr  io.Writer
 	// inputDRC: the input board's own DRC errors (rule|message), to mark
 	// what routing did not cause.
@@ -311,12 +311,11 @@ func (r *kicadRun) run() error {
 
 	// Schematic netlist (pad-net diff, review evidence).
 	if o.sch != "" {
-		xmlPath := filepath.Join(o.outDir, "sch-netlist.xml")
-		nl, err := kt.ExportNetlist(o.sch, xmlPath)
+		nl, err := kicad.ExportSchNetlist(o.sch)
 		if err != nil {
 			return err
 		}
-		doc, err := nl.ToConnectivity(o.projectName)
+		doc, err := nl.ToConnectivityDoc(o.projectName)
 		if err != nil {
 			return err
 		}
@@ -324,7 +323,7 @@ func (r *kicadRun) run() error {
 		if err := writeJSONFile(r.conn, doc); err != nil {
 			return err
 		}
-		_ = writeJSONFile(filepath.Join(o.outDir, "sch-values.json"), nl.Values())
+		_ = writeJSONFile(filepath.Join(o.outDir, "sch-values.json"), schValues(nl))
 	}
 
 	r.lap("setup (KiCad, fastroute, schematic netlist)")
@@ -914,18 +913,7 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 	r.summary["boardFinal"] = boardPath
 	r.lap("gate: board-final snapshot")
 	if r.netlist != nil {
-		pads := map[[2]string]string{}
-		for _, c := range snap.Components {
-			for _, p := range c.Pads {
-				if p.Net != "" {
-					pads[[2]string{c.Designator, p.Number}] = p.Net
-				}
-			}
-		}
-		d := r.netlist.DiffPads(pads)
-		_ = writeJSONFile(filepath.Join(o.outDir, "net-diff.json"), d)
-		g := gateResult{Gate: "pad-net-diff", Pass: d.Passed, Detail: fmt.Sprintf("%d schematic pin(s), %d difference(s) against %s", d.Pins, len(d.Diffs), o.sch), Items: d.Diffs}
-		r.add(g)
+		r.add(padNetDiffGate(r.netlist.PinNets(), snap, o.sch, filepath.Join(o.outDir, "net-diff.json")))
 	}
 	r.add(kicadIntentRulesGate(raw, r.classes))
 
@@ -1184,4 +1172,68 @@ func (r *kicadRun) closureGates() []gateResult {
 		out = append(out, g)
 	}
 	return out
+}
+
+// boardPinNets maps "REF.PIN" → net of every board pad that has a net.
+func boardPinNets(snap *boardSnapshot) map[string]string {
+	out := map[string]string{}
+	for _, c := range snap.Components {
+		for _, p := range c.Pads {
+			if p.Net != "" {
+				out[c.Designator+"."+p.Number] = p.Net
+			}
+		}
+	}
+	return out
+}
+
+// padNetDiffGate compares the schematic's pin→net partition with the
+// board's pad nets (kicad.ComparePinNets); the result also goes to path.
+func padNetDiffGate(sch map[string]string, snap *boardSnapshot, source, path string) gateResult {
+	d := kicad.ComparePinNets(sch, boardPinNets(snap), nil)
+	if path != "" {
+		_ = writeJSONFile(path, map[string]any{"passed": d.Equal, "compare": d, "diffs": padNetDiffItems(d)})
+	}
+	g := gateResult{Gate: "pad-net-diff", Pass: d.Equal,
+		Detail: fmt.Sprintf("schematic %d net(s) / %d pin(s) vs board %d net(s) / %d pad(s): %d net(s) identical (%s)", d.NetsA, d.PinsA, d.NetsB, d.PinsB, d.NetsEqual, source),
+		Items:  padNetDiffItems(d)}
+	for _, rn := range d.RenamedNets {
+		g.Info = append(g.Info, "same pins, renamed: "+rn)
+	}
+	return g
+}
+
+func padNetDiffItems(d kicad.NetCompare) []string {
+	var items []string
+	for _, n := range d.Mismatched {
+		items = append(items, "schematic net "+n+": pin set differs on the board")
+	}
+	for _, p := range d.OnlyA {
+		items = append(items, p+": in the schematic, no such pad (with a net) on the board")
+	}
+	for _, p := range d.OnlyB {
+		items = append(items, p+": board pad with a net, not in the schematic")
+	}
+	return items
+}
+
+// schValues is {"parts":{ref:{value,lcsc,mpn}}} from the schematic fields.
+func schValues(nl *kicad.SchNetlist) map[string]any {
+	parts := map[string]any{}
+	for _, c := range nl.Components {
+		if strings.HasPrefix(c.Ref, "#") {
+			continue
+		}
+		v := map[string]string{"value": c.Value}
+		for k, x := range c.Fields {
+			switch strings.ToLower(strings.TrimSpace(k)) {
+			case "lcsc", "lcsc part", "lcsc part #", "jlcpcb part #", "jlcpcb part":
+				v["lcsc"] = x
+			case "mpn", "manufacturer part", "manufacturer part number":
+				v["mpn"] = x
+			}
+		}
+		parts[c.Ref] = v
+	}
+	return map[string]any{"parts": parts}
 }

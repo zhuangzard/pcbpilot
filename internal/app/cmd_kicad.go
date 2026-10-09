@@ -19,25 +19,34 @@ import (
 	"io"
 	"math"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/zhuangzard/pcbpilot/internal/connectivity"
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
 	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
 )
 
-func newKicadCmd(stdout, stderr io.Writer) *cobra.Command {
+func newKicadCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 	c := &cobra.Command{
 		Use:   "kicad",
-		Short: "KiCad backend: snapshot, netlist, route (fastroute) and gate .kicad_pcb boards through KiCad's Python and kicad-cli",
-		Long: `Work on KiCad 10 boards (.kicad_pcb + .kicad_pro) without the EasyEDA connector.
-KiCad is found at $PCBPILOT_KICAD_APP (default /Applications/KiCad/KiCad.app on
-macOS); $PCBPILOT_KICAD_PYTHON / $PCBPILOT_KICAD_CLI override the two tools.
-Input boards are never modified: every write goes to --out-dir.`,
+		Short: "Design in KiCad: placement, schematic sheets / import / netlist, snapshot, route + gates (fastroute), JLC fab output, LCSC parts",
+		Long: `Work on KiCad 10 boards (.kicad_pcb + .kicad_pro) and schematics without the EasyEDA
+connector (user decision 2026-10-09; EasyEDA only receives the finished project
+via project import). KiCad is found at $PCBPILOT_KICAD_APP (default
+/Applications/KiCad/KiCad.app on macOS); $PCBPILOT_KICAD_PYTHON / $PCBPILOT_KICAD_CLI
+override the two tools. Input boards are never modified by route: every write
+goes to --out-dir.`,
 	}
-	c.AddCommand(newKicadSnapshotCmd(stdout), newKicadNetlistCmd(stdout, stderr), newKicadRouteCmd(stdout, stderr))
+	c.AddCommand(
+		newKicadPlaceCmd(stdout, stderr),
+		newKicadSchFitCmd(stdout, stderr),
+		newKiCadFabCmd(stdout, stderr),
+		newKiCadLcscCmd(stdout, stderr),
+		newKicadSchImportCmd(stdout, stderr),
+		newKicadSchNetlistCmd(stdout, stderr),
+		newKicadSnapshotCmd(stdout),
+		newKicadRouteCmd(stdout, stderr),
+	)
 	return c
 }
 
@@ -61,75 +70,6 @@ func newKicadSnapshotCmd(stdout io.Writer) *cobra.Command {
 	}
 	c.Flags().StringVar(&out, "out", "", "write the snapshot here instead of stdout")
 	return c
-}
-
-func newKicadNetlistCmd(stdout, stderr io.Writer) *cobra.Command {
-	var sch, out, values, xmlOut string
-	c := &cobra.Command{
-		Use:   "netlist",
-		Short: "Schematic connectivity JSON (the sch connectivity 1.4 IR intent derive reads) from a .kicad_sch",
-		Long: `Runs 'kicad-cli sch export netlist --format kicadxml' on --sch (the root sheet;
-hierarchical sheets are included) and converts it into pcbpilot's schematic
-connectivity IR (schemaVersion 1.4: components with pins, nets, connections —
-the shape 'sch connectivity' writes and 'intent derive --connectivity', sim power
-and the pad-net diff read). A pin alone on KiCad's "unconnected-(…)" net gets
-no connection: noConnected when it carries a no-connect flag, else
-connectionState "unconnected". --values writes {"parts":{ref:{value,mpn,lcsc}}}
-for 'intent derive --values' (LCSC from the LCSC / LCSC Part / JLCPCB Part # field).`,
-		Args: cobra.NoArgs,
-		Example: `  pcbpilot kicad netlist --sch board.kicad_sch --out sch-connectivity.json --values values.json
-  pcbpilot intent derive --connectivity sch-connectivity.json --values values.json --out intent.json`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if sch == "" {
-				return fmt.Errorf("--sch is required")
-			}
-			kt, err := kicad.Locate()
-			if err != nil {
-				return err
-			}
-			if xmlOut == "" {
-				f, err := os.CreateTemp("", "pcbpilot-netlist-*.xml")
-				if err != nil {
-					return err
-				}
-				f.Close()
-				xmlOut = f.Name()
-				defer os.Remove(xmlOut)
-			}
-			doc, vals, err := kicadConnectivity(kt, sch, xmlOut)
-			if err != nil {
-				return err
-			}
-			if values != "" {
-				if err := writeJSONFile(values, vals); err != nil {
-					return err
-				}
-			}
-			fmt.Fprintf(stderr, "netlist: %d component(s), %d net(s), %d connection(s)\n", len(doc.Components), len(doc.Nets), len(doc.Connections))
-			if out != "" {
-				return writeJSONFile(out, doc)
-			}
-			return writeJSON(stdout, doc)
-		},
-	}
-	c.Flags().StringVar(&sch, "sch", "", "root .kicad_sch (required)")
-	c.Flags().StringVar(&out, "out", "", "connectivity JSON (default stdout)")
-	c.Flags().StringVar(&values, "values", "", "also write part values {\"parts\":{ref:{value,mpn,lcsc}}} here")
-	c.Flags().StringVar(&xmlOut, "xml", "", "keep the kicadxml netlist here")
-	return c
-}
-
-// kicadConnectivity exports and converts a schematic netlist.
-func kicadConnectivity(kt *kicad.Tools, sch, xmlOut string) (*connectivity.Document, map[string]any, error) {
-	nl, err := kt.ExportNetlist(sch, xmlOut)
-	if err != nil {
-		return nil, nil, err
-	}
-	doc, err := nl.ToConnectivity(strings.TrimSuffix(filepath.Base(sch), ".kicad_sch"))
-	if err != nil {
-		return nil, nil, err
-	}
-	return doc, nl.Values(), nil
 }
 
 // kicadSiblings are the files that travel with a board.

@@ -9,11 +9,12 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/zhuangzard/pcbpilot/internal/connectivity"
+	"github.com/zhuangzard/pcbpilot/internal/kicad"
 )
 
 func newSchLayoutPlanCmd(stdout io.Writer) *cobra.Command {
 	var from, out, report string
-	var zones bool
+	var zones, kicadFit bool
 	var busFlags schAesBusFlags
 	var aesStyle string
 	c := &cobra.Command{Use: "layout-plan", Short: "Plan a measured component set offline without Lib or project metadata", Long: `Compute local placements, wires, markers and score from schemaVersion:1,
@@ -69,8 +70,19 @@ the group name; members keep wire + label taps, the bus is never connectivity);
 --native-bus=false keeps virtual lanes only, --bus-host absent|unverified records the
 host's bus API (absent: virtual lanes; unverified: planned but marked host-unverified).
 
+--backend kicad --kicad-sch X.kicad_sch (single layout, not --zones) re-measures every
+component from the KiCad sheet by designator (position, rotation, mirror, bbox, pins;
+pin nets and policies stay from --from; host text boxes are dropped), plans, and applies
+the placements to the sheet in one write: the core keeps its position, every symbol
+gets the planned offset and the rotation whose pins land on the planned pins; wire
+ends, labels, no-connects, junctions and power symbols on moved pins follow (wires may
+turn diagonal — the planned wires/markers are not drawn). The file is written only if
+kicad-cli's netlist of the result equals the one before (else non-zero, file untouched);
+--fit sizes the page after. The apply report goes to stdout, the layout to --out.
+
 Example:
   pcbpilot sch layout-plan --from measured-set.json --aesthetics balanced --out local-geometry.json
+  pcbpilot sch layout-plan --from measured-set.json --backend kicad --kicad-sch power.kicad_sch --fit
   pcbpilot sch layout-plan --from measured-set.json --out local-geometry.json --report report.json`, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 		if from == "" {
 			return fmt.Errorf("--from is required")
@@ -92,6 +104,13 @@ Example:
 				}
 			}
 		}()
+		kpath, kicadApply, err := kicadSchTarget(cmd)
+		if err != nil {
+			return err
+		}
+		if kicadApply && zones {
+			return fmt.Errorf("--backend kicad applies a single layout; --zones is not supported")
+		}
 		raw, err := os.ReadFile(from)
 		if err != nil {
 			return err
@@ -120,9 +139,30 @@ Example:
 			if err == nil && (aesStyle != "" || busFlags.active()) {
 				input.Aesthetics, err = busFlags.merge(input.Aesthetics, aesStyle)
 			}
+			var ked *kicad.SchEditor
+			var ksc *kicad.SchScene
+			if err == nil && kicadApply {
+				phase = "kicad-measure"
+				if ked, err = kicad.OpenSchematicFile(kpath); err == nil {
+					if ksc, err = ked.Scene(); err == nil {
+						input, err = kicadMeasureLayoutInput(ksc, input)
+					}
+				}
+			}
 			if err == nil {
 				phase = "solve"
-				result, err = PlanSchematicLayout(input)
+				var layout *SchematicLayoutResult
+				layout, err = PlanSchematicLayout(input)
+				result = layout
+				if err == nil && kicadApply {
+					if out != "" {
+						if err := writeLayoutJSON(from, out, layout); err != nil {
+							return err
+						}
+					}
+					phase = "kicad-apply"
+					return kicadApplyLayout(kpath, ked, ksc, input, layout, kicadFit, stdout)
+				}
 			}
 		}
 		if err != nil {
@@ -138,16 +178,10 @@ Example:
 			_, err = stdout.Write(raw)
 			return err
 		}
-		a, _ := filepath.Abs(from)
-		b, _ := filepath.Abs(out)
-		fi, _ := os.Stat(from)
-		fo, _ := os.Stat(out)
-		if a == b || (fi != nil && fo != nil && os.SameFile(fi, fo)) {
-			return fmt.Errorf("--out must not overwrite measured input")
-		}
-		return os.WriteFile(out, raw, 0644)
+		return writeLayoutJSON(from, out, result)
 	}}
 	c.Flags().StringVar(&from, "from", "", "measured component-set JSON, without Lib metadata")
+	c.Flags().BoolVar(&kicadFit, "fit", false, "--backend kicad: size the sheet to its content after applying (kicad sch-fit)")
 	c.Flags().StringVar(&aesStyle, "aesthetics", "", "opt-in Phase B beautify pass per zone: functional | balanced | precision | auto (report in layout.aesthetics)")
 	busFlags.register(c)
 	c.Flags().BoolVar(&zones, "zones", false, "plan explicitly owned per-core zones; unified spacing isolates per-zone budgets")
@@ -315,4 +349,21 @@ func validateLayoutOptimizationJSON(fields map[string]json.RawMessage) error {
 		}
 	}
 	return nil
+}
+
+// writeLayoutJSON writes the layout to out, never over the measured input.
+func writeLayoutJSON(from, out string, result any) error {
+	raw, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return err
+	}
+	raw = append(raw, '\n')
+	a, _ := filepath.Abs(from)
+	b, _ := filepath.Abs(out)
+	fi, _ := os.Stat(from)
+	fo, _ := os.Stat(out)
+	if a == b || (fi != nil && fo != nil && os.SameFile(fi, fo)) {
+		return fmt.Errorf("--out must not overwrite measured input")
+	}
+	return os.WriteFile(out, raw, 0644)
 }

@@ -4,7 +4,7 @@ description: "通过本地 pcbpilot CLI、daemon 和连接器操作嘉立创EDA�
 license: MIT
 metadata:
   author: "zhuangzard (pcbpilot); original easyeda-agent by zhoushoujianwork"
-  version: "0.8.0"
+  version: "0.9.0"
   homepage: "https://github.com/zhuangzard/pcbpilot"
 ---
 
@@ -111,6 +111,7 @@ metadata:
 | 从需求到整板 | [design-flow.md](references/design-flow.md)、[design-decisions.md](references/design-decisions.md) |
 | **开工先读**项目流程模板 `pcbpilot.project.json`（跳过的步骤/仿真/报告章节 + 约束；`project-config show`）；查资料库（`kb search --docs → --doc → kb show --pages`，引用 `kb:<id>#p<页>`）；需要用户取舍时发决策卡（`pcbpilot ask`） | [design-flow.md#开工前项目配置资料库与决策卡](references/design-flow.md#开工前项目配置资料库与决策卡) |
 | 选型、标准电路、库器件 | [part-selection.md](references/part-selection.md)、[library-authoring.md](references/library-authoring.md)、[standard-parts.json](references/standard-parts.json) |
+| KiCad 设计流：LCSC 选件/写号/检查、C 号 → KiCad 符号封装、JLCPCB Gerber/钻孔/BOM/CPL（`kicad lcsc`、`kicad fab`） | [kicad-jlc.md](references/kicad-jlc.md) |
 | action 或队列字段 | [actions.md](references/actions.md)；未知官方接口先 `pcbpilot api search/show` |
 | 离线读 V4 本地 `.eprj3` 工程（清单/计数/单位/版本/Schema，`project inspect-eprj3`）；上游 API 变化监测（`api upstream-diff`）；官方客户端 CLI 探测（`health.officialCli`，其 `invoke --code` 不是写入路径） | [offline-format-api-watch.md](references/offline-format-api-watch.md) |
 

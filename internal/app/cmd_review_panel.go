@@ -128,7 +128,9 @@ func lastVerdictJSON(out string) (reviewVerdict, bool) {
 				depth--
 				if depth == 0 {
 					var v reviewVerdict
-					if json.Unmarshal([]byte(out[i:j+1]), &v) == nil && v.Verdict != "" {
+					// Only a real verdict counts: an echoed prompt carries the
+					// "pass|fail" template, which must never be read as an answer.
+					if json.Unmarshal([]byte(out[i:j+1]), &v) == nil && (v.Verdict == "pass" || v.Verdict == "fail") {
 						best, found = v, true
 					}
 					j = len(out)

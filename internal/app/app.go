@@ -102,6 +102,7 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 		newCallCmd(cfg, stdout, stderr),
 		newApplyCmd(cfg, stdout, stderr),
 		newReviewPanelCmd(stdout, stderr),
+		newKicadCmd(cfg, stdout, stderr),
 		newDaemonCmd(cfg, stdout, stderr),
 		newHealthAliasCmd(cfg, stdout, stderr),
 		newAuditCmd(stdout, stderr),
@@ -129,7 +130,6 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 		newProjectConfigCmd(stdout, stderr),
 		newKBCmd(stdout, stderr),
 		newAskCmd(cfg, stdout, stderr),
-		newKicadCmd(stdout, stderr),
 	)
 	installMissingSubcommandErrors(root)
 

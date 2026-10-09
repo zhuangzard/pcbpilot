@@ -126,6 +126,8 @@ type acReport struct {
 	Connections           []acConnResult `json:"connections"`
 	TitleBlockProvisional bool           `json:"titleBlockProvisional,omitempty"`
 	Note                  string         `json:"note,omitempty"`
+	// Kicad is the --backend kicad outcome (file, netlist verification, fit).
+	Kicad map[string]any `json:"kicad,omitempty"`
 }
 
 // buildScene pulls real geometry from schematic.components.list and assembles the
@@ -382,7 +384,7 @@ func runAutoconnect(cfg *appConfig, window string, conns []acConnSpec, rules aut
 // runAutoconnectOpts 是真正的运行核心,返回整份报告(Succeeded/Failed 清单),
 // 让调用方(如 group-move 的失败恢复段)拿到结构化的成败,而不是解析错误文案。
 func runAutoconnectOpts(cfg *appConfig, window string, conns []acConnSpec, rules autoconnectRules, opts acRunOpts, stdout, stderr io.Writer) (acReport, error) {
-	allPages, dryRun, replace, asJSON := opts.AllPages, opts.DryRun, opts.Replace, opts.JSON
+	allPages, dryRun, asJSON := opts.AllPages, opts.DryRun, opts.JSON
 	// Validate the entire batch before creating any stubs, even in --dry-run.
 	// Pin the same window for the capability check and all following actions.
 	for _, c := range conns {
@@ -428,9 +430,6 @@ func runAutoconnectOpts(cfg *appConfig, window string, conns []acConnSpec, rules
 	if err != nil {
 		return acReport{}, err
 	}
-	// 同侧 lane 台账:器件+方向 → 该侧已用的最大 offset。逐 pin 贪心在相邻脚上
-	// 必然失败(见 applyLaneStagger),必须记住同一侧已经落到哪儿了。
-	lanes := map[string]float64{}
 	scene := buildScene(res.Result)
 	// 电路说明(自由文本)也是页面上的占位对象 —— components.list **不返回文本**,
 	// 必须单独拉一次 text.list,否则 marker 会直接压在说明上(ADR-0003:注释与器件
@@ -448,6 +447,66 @@ func runAutoconnectOpts(cfg *appConfig, window string, conns []acConnSpec, rules
 	// connection is an ordinary unambiguous pin-number spec.
 	conns = expandPinFanouts(scene, conns)
 
+	report := newAcReport(scene, rules)
+	planAutoconnectBatch(&scene, conns, rules, opts, &report, acConnectHooks{
+		disconnect: func(pin acPin) error {
+			_, err := requestAction(cfg, "schematic.pin.disconnect", window, map[string]any{
+				"pinX": pin.X,
+				"pinY": pin.Y,
+			})
+			return err
+		},
+		connect: func(pin acPin, canonicalKind, net string, selected acCandidate, cr *acConnResult) error {
+			payload := map[string]any{
+				"pinX":      pin.X,
+				"pinY":      pin.Y,
+				"kind":      canonicalKind,
+				"net":       net,
+				"direction": selected.Direction,
+				"offset":    selected.Offset,
+			}
+			cres, cerr, retried := acConnectPinWithRetry(cfg, window, payload)
+			cr.Retried = retried
+			if cerr != nil {
+				return cerr
+			}
+			cr.WirePrimitiveID = asString(cres.Result["wirePrimitiveId"])
+			cr.FlagPrimitiveID = asString(cres.Result["flagPrimitiveId"])
+			return nil
+		},
+	})
+
+	// Create-after real-bbox backstop (issue #147 DoD2): the scorer hard-rejects a
+	// title-block intrusion using a NOMINAL label box, but the REAL rendered marker
+	// (its width scales with the net-name text) can still spill into the hard
+	// keep-out even when the plan looked clear. Read the created markers' real bboxes
+	// back; delete any that intrude the title block and fail that connection — the
+	// command must never RETURN SUCCESS while leaving a marker on the 图签.
+	if !dryRun && scene.TitleBlock != nil {
+		backstopTitleBlockIntrusion(cfg, window, scene.TitleBlock, &report, stderr)
+	}
+
+	// Partial-run bookkeeping (issue #146): split the pins into succeeded/failed so a
+	// caller retrying an interrupted batch re-does ONLY the failures.
+	report.Succeeded, report.Failed, report.Partial = splitConnResults(report.Connections, dryRun)
+
+	if asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			return report, err
+		}
+	} else {
+		renderAutoconnectReport(report, dryRun, stdout)
+	}
+	if !report.OK {
+		return report, fmt.Errorf("autoconnect: %d connection(s) failed", countFailed(report))
+	}
+	return report, nil
+}
+
+// newAcReport starts a run report with the scene-level notes.
+func newAcReport(scene acScene, rules autoconnectRules) acReport {
 	report := acReport{OK: true, TitleBlockProvisional: scene.TitleBlockProvisional}
 	if scene.TitleBlockProvisional && rules.AvoidTitleBlock {
 		report.Note = "no sheet bbox exposed — title-block keep-out is provisional and was NOT geometrically enforced"
@@ -461,6 +520,28 @@ func runAutoconnectOpts(cfg *appConfig, window string, conns []acConnSpec, rules
 			report.Note = amb
 		}
 	}
+	return report
+}
+
+// acConnectHooks are the backend side of one autoconnect batch: the EasyEDA
+// connector (connect_pin / pin.disconnect) or the .kicad_sch editor.
+type acConnectHooks struct {
+	// disconnect removes a pin's old stub before a --replace reconnect; nil
+	// when the backend cannot.
+	disconnect func(pin acPin) error
+	// connect lands the selected stub + marker and records ids/retries on cr.
+	connect func(pin acPin, canonicalKind, net string, selected acCandidate, cr *acConnResult) error
+}
+
+// planAutoconnectBatch plans every connection against scene (in order,
+// staggering later labels off earlier ones) and hands each selected
+// candidate to hooks.connect unless opts.DryRun. scene grows with the
+// planned stubs and markers.
+func planAutoconnectBatch(scene *acScene, conns []acConnSpec, rules autoconnectRules, opts acRunOpts, report *acReport, hooks acConnectHooks) {
+	dryRun, replace := opts.DryRun, opts.Replace
+	// 同侧 lane 台账:器件+方向 → 该侧已用的最大 offset。逐 pin 贪心在相邻脚上
+	// 必然失败(见 applyLaneStagger),必须记住同一侧已经落到哪儿了。
+	lanes := map[string]float64{}
 
 	for _, c := range conns {
 		cr := acConnResult{Net: c.Net, Kind: c.Kind, DryRun: dryRun}
@@ -479,7 +560,7 @@ func runAutoconnectOpts(cfg *appConfig, window string, conns []acConnSpec, rules
 			pin = acPin{X: *c.X, Y: *c.Y}
 		} else if c.PinRef != "" {
 			cr.Pin = c.PinRef
-			p, perr := resolvePinCoord(scene, c.PinRef)
+			p, perr := resolvePinCoord(*scene, c.PinRef)
 			if perr != nil {
 				cr.Error = perr.Error()
 				report.OK = false
@@ -521,10 +602,13 @@ func runAutoconnectOpts(cfg *appConfig, window string, conns []acConnSpec, rules
 			// report the intent.
 			cr.Replaced = true
 			if !dryRun {
-				if _, derr := requestAction(cfg, "schematic.pin.disconnect", window, map[string]any{
-					"pinX": pin.X,
-					"pinY": pin.Y,
-				}); derr != nil {
+				if hooks.disconnect == nil {
+					cr.Error = fmt.Sprintf("pin already connected to net %q, not %q; --replace is not supported on this backend", pin.Net, c.Net)
+					report.OK = false
+					report.Connections = append(report.Connections, cr)
+					continue
+				}
+				if derr := hooks.disconnect(pin); derr != nil {
 					cr.Error = fmt.Sprintf("replace: failed to disconnect old net %q: %v", pin.Net, derr)
 					report.OK = false
 					report.Connections = append(report.Connections, cr)
@@ -545,7 +629,7 @@ func runAutoconnectOpts(cfg *appConfig, window string, conns []acConnSpec, rules
 				laneFloor = need
 			}
 		}
-		all := planConnection(pin, canonicalKind, c.Net, scene, rules, laneFloor)
+		all := planConnection(pin, canonicalKind, c.Net, *scene, rules, laneFloor)
 		selected := applyLaneStagger(all, lanes, pin.Designator, c.Net, canonicalKind)
 		cr.Selected = &selected
 		cr.Rejected = summarizeRejected(all, selected)
@@ -571,24 +655,12 @@ func runAutoconnectOpts(cfg *appConfig, window string, conns []acConnSpec, rules
 		}
 
 		if !dryRun {
-			payload := map[string]any{
-				"pinX":      pin.X,
-				"pinY":      pin.Y,
-				"kind":      canonicalKind,
-				"net":       c.Net,
-				"direction": selected.Direction,
-				"offset":    selected.Offset,
-			}
-			cres, cerr, retried := acConnectPinWithRetry(cfg, window, payload)
-			cr.Retried = retried
-			if cerr != nil {
+			if cerr := hooks.connect(pin, canonicalKind, c.Net, selected, &cr); cerr != nil {
 				cr.Error = cerr.Error()
 				report.OK = false
 				report.Connections = append(report.Connections, cr)
 				continue
 			}
-			cr.WirePrimitiveID = asString(cres.Result["wirePrimitiveId"])
-			cr.FlagPrimitiveID = asString(cres.Result["flagPrimitiveId"])
 		}
 
 		lanes[laneKeyOf(pin.Designator, selected.Direction)] = selected.Offset
@@ -615,34 +687,6 @@ func runAutoconnectOpts(cfg *appConfig, window string, conns []acConnSpec, rules
 
 		report.Connections = append(report.Connections, cr)
 	}
-
-	// Create-after real-bbox backstop (issue #147 DoD2): the scorer hard-rejects a
-	// title-block intrusion using a NOMINAL label box, but the REAL rendered marker
-	// (its width scales with the net-name text) can still spill into the hard
-	// keep-out even when the plan looked clear. Read the created markers' real bboxes
-	// back; delete any that intrude the title block and fail that connection — the
-	// command must never RETURN SUCCESS while leaving a marker on the 图签.
-	if !dryRun && scene.TitleBlock != nil {
-		backstopTitleBlockIntrusion(cfg, window, scene.TitleBlock, &report, stderr)
-	}
-
-	// Partial-run bookkeeping (issue #146): split the pins into succeeded/failed so a
-	// caller retrying an interrupted batch re-does ONLY the failures.
-	report.Succeeded, report.Failed, report.Partial = splitConnResults(report.Connections, dryRun)
-
-	if asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(report); err != nil {
-			return report, err
-		}
-	} else {
-		renderAutoconnectReport(report, dryRun, stdout)
-	}
-	if !report.OK {
-		return report, fmt.Errorf("autoconnect: %d connection(s) failed", countFailed(report))
-	}
-	return report, nil
 }
 
 // acScoreWarnThreshold 是「选中候选也要打 WARN」的软阈值。依据成本表
@@ -895,7 +939,7 @@ func newAutoconnectCmd(cfg *appConfig, window *string, stdout, stderr io.Writer)
 		offsetMin, offsetMax, step   float64
 		offsetCap                    float64
 		allPages, dryRun, asJSON     bool
-		replace, strict              bool
+		replace, strict, fit         bool
 	)
 	c := &cobra.Command{
 		Use:   "autoconnect",
@@ -921,7 +965,15 @@ without mutating.
 Idempotent by default: before connecting, each pin's CURRENT net is checked.
 A pin already on the target net is SKIPPED (already-connected), so re-running the
 same spec never stacks duplicate flags+wires. A pin on a DIFFERENT net is an error
-unless you pass --replace, which deletes the old flag+wire and reconnects.`,
+unless you pass --replace, which deletes the old flag+wire and reconnects.
+
+--backend kicad --kicad-sch X.kicad_sch plans the same way from the sheet's
+geometry (no connector) and writes every stub + marker in ONE file write
+(power/ground → power symbols, net ports → global labels, net_label → label),
+after kicad-cli's netlist of a copy showed each pin on its planned net and no
+other net changed; otherwise the file is left untouched (non-zero exit).
+--x/--y are KiCad mm; the report's geometry is in planner units (10 mil, y up).
+--replace and --all-pages are not supported there; --fit runs kicad sch-fit.`,
 		Args: cobra.NoArgs,
 		Example: `  pcbpilot sch autoconnect --pin U1:41 --kind gnd --net GND
   pcbpilot sch autoconnect --x 720 --y 670 --kind gnd --net GND
@@ -986,9 +1038,14 @@ unless you pass --replace, which deletes the old flag+wire and reconnects.`,
 				return fmt.Errorf("--offset-cap must be finite, positive and at least --offset-min")
 			}
 
-			_, err := runAutoconnectOpts(cfg, *window, conns, rules,
-				acRunOpts{AllPages: allPages, DryRun: dryRun, Replace: replace, JSON: asJSON, Strict: strict},
-				stdout, stderr)
+			opts := acRunOpts{AllPages: allPages, DryRun: dryRun, Replace: replace, JSON: asJSON, Strict: strict}
+			if path, ok, err := kicadSchTarget(cmd); err != nil || ok {
+				if err != nil {
+					return err
+				}
+				return kicadSchAutoconnect(path, conns, rules, opts, fit, stdout, stderr)
+			}
+			_, err := runAutoconnectOpts(cfg, *window, conns, rules, opts, stdout, stderr)
 			return err
 		},
 	}
@@ -1011,6 +1068,7 @@ unless you pass --replace, which deletes the old flag+wire and reconnects.`,
 	c.Flags().BoolVar(&replace, "replace", false, "when a pin is already on a DIFFERENT net, delete its old flag+wire and reconnect (without --replace such pins error out; pins already on the target net are always skipped)")
 	c.Flags().BoolVar(&strict, "strict", false, "fail (and do NOT place) any connection whose selected candidate is tainted — score above the soft threshold or collision-class penalties; without --strict such connections succeed with a WARN")
 	c.Flags().BoolVar(&asJSON, "json", false, "emit the report as JSON")
+	c.Flags().BoolVar(&fit, "fit", false, "--backend kicad: size the sheet to its content after writing (kicad sch-fit)")
 	return c
 }
 

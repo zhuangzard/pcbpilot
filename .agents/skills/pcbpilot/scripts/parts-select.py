@@ -292,6 +292,7 @@ def select(keyword, qty=100, n=20):
             'mpn': c.get('componentModelEn'),
             'brand': c.get('componentBrandEn'),
             'desc': c.get('describe') or c.get('componentSpecificationEn'),
+            'package': c.get('componentSpecificationEn'),
             'relevance': relevance(c, qterms) + int(resistance_query),
             'base': c.get('componentLibraryType') == 'base',
             'preferred': bool(c.get('preferredComponentFlag')),
