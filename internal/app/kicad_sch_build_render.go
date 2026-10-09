@@ -96,15 +96,16 @@ type sbGate struct {
 }
 
 type sbZoneReport struct {
-	ID     string    `json:"id"`
-	Page   string    `json:"page"`
-	Parts  []string  `json:"parts"`
-	Method string    `json:"method"`
-	Reused bool      `json:"reused,omitempty"`
-	Moved  bool      `json:"moved,omitempty"`
-	Box    []float64 `json:"boxMm"` // absolute minX,minY,maxX,maxY
-	Ms     float64   `json:"ms,omitempty"`
-	Notes  []string  `json:"notes,omitempty"`
+	ID       string    `json:"id"`
+	Page     string    `json:"page"`
+	Parts    []string  `json:"parts"`
+	Method   string    `json:"method"`
+	Reused   bool      `json:"reused,omitempty"`
+	Moved    bool      `json:"moved,omitempty"`
+	Box      []float64 `json:"boxMm"` // absolute minX,minY,maxX,maxY
+	Ms       float64   `json:"ms,omitempty"`
+	Notes    []string  `json:"notes,omitempty"`
+	Findings []string  `json:"qualityFindings,omitempty"`
 }
 
 type sbReport struct {
@@ -276,7 +277,7 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 		for _, p := range zi.Parts {
 			refs = append(refs, p.Ref)
 		}
-		zr := sbZoneReport{ID: zi.Zone.ID, Page: zi.Zone.Page, Parts: refs, Method: zl.Method, Ms: zl.Ms, Notes: zl.Notes,
+		zr := sbZoneReport{ID: zi.Zone.ID, Page: zi.Zone.Page, Parts: refs, Method: zl.Method, Ms: zl.Ms, Notes: zl.Notes, Findings: zl.Findings,
 			Box:   []float64{sbRound2(zl.Box.MinX + t.X), sbRound2(zl.Box.MinY + t.Y), sbRound2(zl.Box.MaxX + t.X), sbRound2(zl.Box.MaxY + t.Y)},
 			Moved: moved[zi.Zone.ID]}
 		if r := reuse[zi.Zone.ID]; r != nil && r == zl {
@@ -320,7 +321,12 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() { defer wg.Done(); nl, nlErr = kicad.ExportSchNetlist(root) }()
-	go func() { defer wg.Done(); erc, ercErr = kicad.RunERC(root, filepath.Join(stage, "erc.json")) }()
+	go func() {
+		defer wg.Done()
+		if erc, ercErr = kicad.RunERC(root); ercErr == nil {
+			_ = writeJSONFile(filepath.Join(stage, "erc.json"), erc)
+		}
+	}()
 	wg.Wait()
 	tm.mark("netlist+erc")
 	if nlErr != nil {
@@ -348,13 +354,15 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 			status = "warn"
 		}
 		var top []kicad.ERCViolation
+		byType := map[string]int{}
 		for _, v := range erc.Violations {
+			byType[v.Type]++
 			if v.Severity == "error" && len(top) < 20 {
 				top = append(top, v)
 			}
 		}
 		rep.gate("erc", status, fmt.Sprintf("kicad-cli ERC: %d error(s), %d warning(s)", erc.Errors, erc.Warnings),
-			map[string]any{"byType": erc.ByType, "errors": top})
+			map[string]any{"byType": byType, "errors": top})
 	}
 	if len(fitBad) > 0 {
 		rep.gate("page-fit", "fail", "content does not fit A0 on "+strings.Join(fitBad, ", ")+" — split into more pages", nil)
@@ -366,7 +374,7 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 		sort.Strings(sizes)
 		rep.gate("page-fit", "pass", strings.Join(sizes, " "), nil)
 	}
-	lay := sbLayoutCheck(stage, files)
+	lay := sbQualityCheck(stage, files)
 	rep.Gates = append(rep.Gates, lay)
 	tm.mark("checks")
 
@@ -566,7 +574,7 @@ func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layou
 			sheets = append(sheets, sheetRef{pg, file, su, pageNo})
 			pageNo++
 		}
-		tb := d.Spec.Title
+		tb := d.Spec.Title.kicad()
 		if tb.Title == "" {
 			tb.Title = name
 		}
@@ -577,12 +585,13 @@ func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layou
 			}
 			tb.Title = tb.Title + " — " + t
 		}
-		e, err := kicad.OpenSchematic(kicad.NewSheetText("A4", uuid, !multi, tb))
+		e, err := sbNewSheet(uuid, !multi, tb)
 		if err != nil {
 			return nil, nil, err
 		}
 		e.Project, e.InstancePath = name, inst
 		e.SetPowerRefNext(pwr)
+		e.SetFlagFloor(flg)
 		var flagNets []string
 		for n, p := range flagPage {
 			if p == pg.ID {
@@ -590,7 +599,7 @@ func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layou
 			}
 		}
 		sort.Strings(flagNets)
-		if err := renderSbPage(e, d, st, pg, zis, layouts, trans, flagNets, &flg); err != nil {
+		if err := renderSbPage(e, d, st, pg, zis, layouts, trans, flagNets); err != nil {
 			return nil, nil, fmt.Errorf("page %s: %w", pg.ID, err)
 		}
 		pwr = e.PowerRefNext()
@@ -598,6 +607,7 @@ func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layou
 		if err != nil {
 			return nil, nil, fmt.Errorf("page %s: %w", pg.ID, err)
 		}
+		flg = max(flg, kicad.MaxFlagRef(text)+1)
 		text, fr, err := kicad.FitSheet(text)
 		if err != nil {
 			return nil, nil, err
@@ -613,11 +623,11 @@ func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layou
 		}
 	}
 	if multi {
-		tb := d.Spec.Title
+		tb := d.Spec.Title.kicad()
 		if tb.Title == "" {
 			tb.Title = name
 		}
-		re, err := kicad.OpenSchematic(kicad.NewSheetText("A4", st.RootUUID, true, tb))
+		re, err := sbNewSheet(st.RootUUID, true, tb)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -679,7 +689,7 @@ func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layou
 		}
 		libs[p.LibName][p.SymName] = mustRename(p.SymText, p.SymName)
 	}
-	powerSyms["PWR_FLAG"] = kicad.PwrFlagText()
+	powerSyms["PWR_FLAG"] = kicad.PwrFlagSymbolText()
 	libs["pcbpilot_power"] = powerSyms
 	symTable := map[string]string{}
 	var libNames []string
@@ -724,6 +734,22 @@ func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layou
 	return files, fits, nil
 }
 
+// sbNewSheet is an empty A4 sheet with its title block (kicad SetTitleBlock).
+func sbNewSheet(uuid string, root bool, tb kicad.TitleBlock) (*kicad.SchEditor, error) {
+	e, err := kicad.OpenSchematic(kicad.NewSchematicText("A4", uuid, root))
+	if err != nil {
+		return nil, err
+	}
+	if err := e.SetTitleBlock(tb); err != nil {
+		return nil, err
+	}
+	text, err := e.Render()
+	if err != nil {
+		return nil, err
+	}
+	return kicad.OpenSchematic(text)
+}
+
 func mustRename(sym, id string) string {
 	t, err := kicad.RenameLibSymbol(sym, id)
 	if err != nil {
@@ -734,7 +760,7 @@ func mustRename(sym, id string) string {
 
 // renderSbPage draws the zones of one page: symbols, wires, junctions,
 // markers, no-connects, zone frames + titles, PWR_FLAGs.
-func renderSbPage(e *kicad.SchEditor, d *sbDesign, st *sbState, pg sbPage, zis []*sbZoneIn, layouts map[string]*sbZoneLayout, trans map[string]kicad.Pt, flagNets []string, flg *int) error {
+func renderSbPage(e *kicad.SchEditor, d *sbDesign, st *sbState, pg sbPage, zis []*sbZoneIn, layouts map[string]*sbZoneLayout, trans map[string]kicad.Pt, flagNets []string) error {
 	m := &sbMeasure{cache: map[string]kicad.SceneSymbol{}}
 	var segs [][2]kicad.Pt
 	pinPts := map[kicad.Pt]int{}
@@ -877,17 +903,16 @@ func renderSbPage(e *kicad.SchEditor, d *sbDesign, st *sbState, pg sbPage, zis [
 		}
 		p := kicad.Pt{X: sbSnap(x), Y: y}
 		ground := d.NetKind[n] == "ground"
-		rot := 180.0
+		if _, err := e.AddPower(n, p, 0, ground); err != nil {
+			return err
+		}
+		dir := 3 // flag below a supply symbol, above a ground symbol
 		if ground {
-			rot = 0
+			dir = 1
 		}
-		if _, err := e.AddPower(n, p, rot, ground); err != nil {
+		if _, err := e.AddPwrFlag(p, dir, 2.54); err != nil {
 			return err
 		}
-		if _, err := e.AddPwrFlag(p, *flg); err != nil {
-			return err
-		}
-		*flg++
 		x += math.Max(15.24, sbTextW(n)+7.62)
 	}
 	return nil
@@ -1041,68 +1066,45 @@ func compareSbNetlist(d *sbDesign, nl *kicad.SchNetlist) sbNetDiff {
 
 // ── offline layout checks ───────────────────────────────────────────────────
 
-// sbLayoutCheck reads the written sheets back: part bodies overlapping
-// each other, labels on part bodies, zone frames overlapping.
-func sbLayoutCheck(dir string, files []string) sbGate {
-	type finding struct {
-		Sheet string `json:"sheet"`
-		Kind  string `json:"kind"`
-		What  string `json:"what"`
+// sbQualityCheck runs the KiCad schematic quality checks of `kicad
+// sch-check` (kicad.CheckSchematic) on every written sheet.
+func sbQualityCheck(dir string, files []string) sbGate {
+	type sheet struct {
+		File     string          `json:"file"`
+		Findings []kicad.Finding `json:"findings"`
 	}
-	var fs []finding
+	var out []sheet
+	n := 0
+	counts := map[string]int{}
 	for _, f := range files {
 		if !strings.HasSuffix(f, ".kicad_sch") {
 			continue
 		}
-		e, err := kicad.OpenSchematicFile(filepath.Join(dir, f))
+		b, err := os.ReadFile(filepath.Join(dir, f))
 		if err != nil {
-			fs = append(fs, finding{f, "read", err.Error()})
-			continue
+			return sbGate{Name: "quality", Status: "fail", Detail: err.Error()}
 		}
-		sc, err := e.Scene()
-		if err != nil {
-			fs = append(fs, finding{f, "read", err.Error()})
-			continue
+		fs := kicad.CheckSchematic(string(b), kicad.CheckOptions{})
+		for _, x := range fs {
+			counts[x.Kind]++
 		}
-		body := func(s kicad.SceneSymbol) kicad.Box { return sbGrow(s.Box, -0.3) }
-		var parts []kicad.SceneSymbol
-		for _, s := range sc.Symbols {
-			if !s.Power && s.HasBox {
-				parts = append(parts, s)
+		n += len(fs)
+		if len(fs) > 0 {
+			if len(fs) > 25 {
+				fs = fs[:25]
 			}
-		}
-		for i := 0; i < len(parts); i++ {
-			for j := i + 1; j < len(parts); j++ {
-				if sbOverlap(body(parts[i]), body(parts[j])) {
-					fs = append(fs, finding{f, "part-overlap", parts[i].Ref + " / " + parts[j].Ref})
-				}
-			}
-		}
-		for _, l := range sc.Labels {
-			lb := sbGrow(l.Box, -0.4)
-			for _, s := range parts {
-				if sbOverlap(lb, sbGrow(s.Box, -1.0)) {
-					fs = append(fs, finding{f, "label-on-part", l.Name + " on " + s.Ref})
-				}
-			}
+			out = append(out, sheet{f, fs})
 		}
 	}
-	if len(fs) == 0 {
-		return sbGate{Name: "layout", Status: "pass", Detail: "no overlapping parts or labels on parts"}
-	}
-	counts := map[string]int{}
-	for _, x := range fs {
-		counts[x.Kind]++
+	if n == 0 {
+		return sbGate{Name: "quality", Status: "pass", Detail: "kicad sch-check quality: no findings"}
 	}
 	var cs []string
-	for k, n := range counts {
-		cs = append(cs, fmt.Sprintf("%s %d", k, n))
+	for k, v := range counts {
+		cs = append(cs, fmt.Sprintf("%s %d", k, v))
 	}
 	sort.Strings(cs)
-	if len(fs) > 30 {
-		fs = fs[:30]
-	}
-	return sbGate{Name: "layout", Status: "warn", Detail: strings.Join(cs, ", "), Data: fs}
+	return sbGate{Name: "quality", Status: "fail", Detail: fmt.Sprintf("kicad sch-check quality: %d finding(s): %s", n, strings.Join(cs, ", ")), Data: out}
 }
 
 // ── dry-run plan ────────────────────────────────────────────────────────────

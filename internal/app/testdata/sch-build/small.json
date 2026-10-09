@@ -27,7 +27,7 @@
     {"ref": "C3", "value": "100nF", "zone": "mcu", "symbol": "Device:C"},
     {"ref": "R1", "value": "10k", "zone": "mcu", "symbol": "Device:R"},
     {"ref": "R2", "value": "330", "zone": "led", "symbol": "Device:R"},
-    {"ref": "D1", "value": "RED", "zone": "led", "symbol": "Device:LED"}
+    {"ref": "D1", "value": "RED", "zone": "led", "symbol": "Device:D"}
   ],
   "nets": [
     {"name": "+5V", "pins": ["J1:1", "U1:VIN", "C1:1"], "voltage": 5, "currentA": 0.3},

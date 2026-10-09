@@ -9,12 +9,10 @@ package kicad
 // erc --format json`.
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -212,38 +210,6 @@ func GenericSymbolText(name, refPrefix string, pins []GenPin) string {
 		Q(name+"_0_1"), strings.Join(body, " "), Q(name+"_1_1"), strings.Join(pinsTxt, "\n\t\t\t"))
 }
 
-// PwrFlagText is KiCad's PWR_FLAG (a power_out pin that marks a net driven).
-func PwrFlagText() string {
-	return `(symbol "PWR_FLAG"
-		(power)
-		(pin_numbers (hide yes))
-		(pin_names (offset 0) (hide yes))
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(property "Reference" "#FLG" (at 0 1.905 0) (hide yes) (effects (font (size 1.27 1.27))))
-		(property "Value" "PWR_FLAG" (at 0 3.81 0) (effects (font (size 1.27 1.27))))
-		(property "Footprint" "" (at 0 0 0) (hide yes) (effects (font (size 1.27 1.27))))
-		(property "Datasheet" "~" (at 0 0 0) (hide yes) (effects (font (size 1.27 1.27))))
-		(property "Description" "Special symbol for telling ERC where power comes from" (at 0 0 0) (hide yes) (effects (font (size 1.27 1.27))))
-		(symbol "PWR_FLAG_0_0" (pin power_out line (at 0 0 90) (length 0) (name "~" (effects (font (size 1.27 1.27)))) (number "1" (effects (font (size 1.27 1.27))))))
-		(symbol "PWR_FLAG_0_1" (polyline (pts (xy 0 0) (xy 0 1.27) (xy -1.016 1.905) (xy 0 2.54) (xy 1.016 1.905) (xy 0 1.27)) (stroke (width 0) (type default)) (fill (type none))))
-	)`
-}
-
-// AddPwrFlag places a PWR_FLAG with its pin at p and returns its reference.
-func (e *SchEditor) AddPwrFlag(p Pt, n int) (string, error) {
-	const id = "pcbpilot_power:PWR_FLAG"
-	if err := e.AddLibSymbol(id, PwrFlagText()); err != nil {
-		return "", err
-	}
-	ref := fmt.Sprintf("#FLG%04d", n)
-	va := Pt{p.X, p.Y - 3.81}
-	_, err := e.PlaceSymbol(SymbolInstance{LibID: id, Ref: ref, At: p, Value: "PWR_FLAG",
-		Fields: []Field{{Name: "Value", Value: "PWR_FLAG", At: &va}}})
-	return ref, err
-}
-
 // LibSymbolBox is a library symbol's extent (symbol frame, y up), pins
 // included, and whether it is a power symbol.
 func LibSymbolBox(sym string) (Box, error) {
@@ -336,142 +302,6 @@ func LibTableText(kind string, libs map[string]string) string {
 	}
 	b.WriteString(")\n")
 	return b.String()
-}
-
-// ── ERC ─────────────────────────────────────────────────────────────────────
-
-// ERCViolation is one kicad-cli ERC item.
-type ERCViolation struct {
-	Type        string   `json:"type"`
-	Severity    string   `json:"severity"`
-	Description string   `json:"description"`
-	Sheet       string   `json:"sheet,omitempty"`
-	Items       []string `json:"items,omitempty"`
-}
-
-// ERCReport is a parsed `kicad-cli sch erc --format json` report.
-type ERCReport struct {
-	Errors     int            `json:"errors"`
-	Warnings   int            `json:"warnings"`
-	ByType     map[string]int `json:"byType"`
-	Violations []ERCViolation `json:"violations"`
-}
-
-// ParseERC reads a kicad-cli ERC JSON report.
-func ParseERC(data []byte) (*ERCReport, error) {
-	var raw struct {
-		Sheets []struct {
-			Path       string `json:"path"`
-			Violations []struct {
-				Type        string `json:"type"`
-				Severity    string `json:"severity"`
-				Description string `json:"description"`
-				Items       []struct {
-					Description string `json:"description"`
-				} `json:"items"`
-			} `json:"violations"`
-		} `json:"sheets"`
-	}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, fmt.Errorf("parse ERC report: %w", err)
-	}
-	r := &ERCReport{ByType: map[string]int{}}
-	for _, s := range raw.Sheets {
-		for _, v := range s.Violations {
-			ev := ERCViolation{Type: v.Type, Severity: v.Severity, Description: v.Description, Sheet: s.Path}
-			for _, it := range v.Items {
-				ev.Items = append(ev.Items, it.Description)
-			}
-			r.Violations = append(r.Violations, ev)
-			r.ByType[v.Type]++
-			if v.Severity == "error" {
-				r.Errors++
-			} else {
-				r.Warnings++
-			}
-		}
-	}
-	return r, nil
-}
-
-// RunERC runs kicad-cli ERC (all severities) on the root sheet; raw is the
-// written report path (kept when non-empty).
-func RunERC(root, raw string) (*ERCReport, error) {
-	cli, err := KicadCLI()
-	if err != nil {
-		return nil, err
-	}
-	out := raw
-	if out == "" {
-		dir, err := os.MkdirTemp("", "pcbpilot-erc-")
-		if err != nil {
-			return nil, err
-		}
-		defer os.RemoveAll(dir)
-		out = filepath.Join(dir, "erc.json")
-	}
-	var buf bytes.Buffer
-	cmd := exec.Command(cli, "sch", "erc", "--format", "json", "--severity-all", "--units", "mm", "-o", out, root)
-	cmd.Stdout, cmd.Stderr = &buf, &buf
-	if err := cmd.Run(); err != nil {
-		if _, serr := os.Stat(out); serr != nil {
-			return nil, fmt.Errorf("kicad-cli sch erc: %v: %s", err, strings.TrimSpace(buf.String()))
-		}
-	}
-	data, err := os.ReadFile(out)
-	if err != nil {
-		return nil, err
-	}
-	return ParseERC(data)
-}
-
-// ── title block ─────────────────────────────────────────────────────────────
-
-// TitleBlock is the sheet title block.
-type TitleBlock struct {
-	Title    string   `json:"title,omitempty"`
-	Date     string   `json:"date,omitempty"`
-	Rev      string   `json:"rev,omitempty"`
-	Company  string   `json:"company,omitempty"`
-	Comments []string `json:"comments,omitempty"`
-}
-
-// Text is the `(title_block …)` S-expression ("" when empty).
-func (t TitleBlock) Text() string {
-	var parts []string
-	if t.Title != "" {
-		parts = append(parts, "(title "+Q(t.Title)+")")
-	}
-	if t.Date != "" {
-		parts = append(parts, "(date "+Q(t.Date)+")")
-	}
-	if t.Rev != "" {
-		parts = append(parts, "(rev "+Q(t.Rev)+")")
-	}
-	if t.Company != "" {
-		parts = append(parts, "(company "+Q(t.Company)+")")
-	}
-	for i, c := range t.Comments {
-		if i >= 9 {
-			break
-		}
-		if c != "" {
-			parts = append(parts, fmt.Sprintf("(comment %d %s)", i+1, Q(c)))
-		}
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return "(title_block\n\t\t" + strings.Join(parts, "\n\t\t") + "\n\t)"
-}
-
-// NewSheetText is NewSchematicText with a title block.
-func NewSheetText(paper, uuid string, root bool, tb TitleBlock) string {
-	s := NewSchematicText(paper, uuid, root)
-	if t := tb.Text(); t != "" {
-		s = strings.Replace(s, "(paper "+Q(paper)+")", "(paper "+Q(paper)+")\n\t"+t, 1)
-	}
-	return s
 }
 
 // PowerRefNext is the number the next power symbol reference (#PWRnnnn)

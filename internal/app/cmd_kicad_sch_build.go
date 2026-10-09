@@ -36,7 +36,7 @@ const sbSchema = "pcbpilot.kicad.sch-build/1"
 type sbSpec struct {
 	Schema    string           `json:"schema,omitempty"`
 	Name      string           `json:"name,omitempty"`
-	Title     kicad.TitleBlock `json:"title,omitempty"`
+	Title     sbTitle          `json:"title,omitempty"`
 	Pages     []sbPage         `json:"pages,omitempty"`
 	Zones     []sbZone         `json:"zones,omitempty"`
 	Parts     []sbPart         `json:"parts"`
@@ -51,6 +51,25 @@ type sbSpec struct {
 	// Intent is passed to `intent derive --spec` (standard, layers, rules …);
 	// rails/net voltage+current from this spec are merged into its rails.
 	Intent json.RawMessage `json:"intent,omitempty"`
+}
+
+// sbTitle is the title block (written with kicad's SetTitleBlock).
+type sbTitle struct {
+	Title    string   `json:"title,omitempty"`
+	Date     string   `json:"date,omitempty"`
+	Rev      string   `json:"rev,omitempty"`
+	Company  string   `json:"company,omitempty"`
+	Comments []string `json:"comments,omitempty"` // comment 1…9
+}
+
+func (t sbTitle) kicad() kicad.TitleBlock {
+	tb := kicad.TitleBlock{Title: t.Title, Date: t.Date, Rev: t.Rev, Company: t.Company, Comments: map[int]string{}}
+	for i, c := range t.Comments {
+		if i < 9 && c != "" {
+			tb.Comments[i+1] = c
+		}
+	}
+	return tb
 }
 
 type sbPage struct {

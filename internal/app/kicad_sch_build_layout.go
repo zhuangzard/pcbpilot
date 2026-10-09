@@ -49,6 +49,31 @@ type sbZoneLayout struct {
 	Box        kicad.Box           `json:"box"`
 	Notes      []string            `json:"notes,omitempty"`
 	Ms         float64             `json:"ms"`
+	Findings   []string            `json:"findings,omitempty"` // sch-check quality findings of the zone alone
+}
+
+// sbZoneFindings renders one zone alone on a scratch sheet and runs the
+// kicad sch-check quality checks on it.
+func sbZoneFindings(d *sbDesign, zi *sbZoneIn, zl *sbZoneLayout) []string {
+	e, err := kicad.OpenSchematic(kicad.NewSchematicText("A0", kicad.NewUUID(), true))
+	if err != nil {
+		return []string{err.Error()}
+	}
+	e.Project, e.InstancePath = "zone", "/x"
+	t := kicad.Pt{X: sbSnap(60 - zl.Box.MinX), Y: sbSnap(60 - zl.Box.MinY)}
+	if err := renderSbPage(e, d, newSbState(), sbPage{ID: zi.Zone.Page}, []*sbZoneIn{zi},
+		map[string]*sbZoneLayout{zi.Zone.ID: zl}, map[string]kicad.Pt{zi.Zone.ID: t}, nil); err != nil {
+		return []string{err.Error()}
+	}
+	text, err := e.Render()
+	if err != nil {
+		return []string{err.Error()}
+	}
+	var out []string
+	for _, f := range kicad.CheckSchematic(text, kicad.CheckOptions{}) {
+		out = append(out, f.Kind+": "+f.Message)
+	}
+	return out
 }
 
 func sbShortHash(s string) string {
@@ -582,16 +607,18 @@ func sbMarkerBox(mk sbMarker) kicad.Box {
 	p := mk.At
 	switch mk.Kind {
 	case "power", "ground":
-		l := math.Max(3.81, sbTextW(mk.Net)/2+0.5)
+		// body + value text (the text turns with the symbol: it runs across
+		// the stub, centred ~3.6 mm out)
+		half, reach := math.Max(1.9, sbTextW(mk.Net)/2+0.6), 5.6
 		switch mk.Dir {
 		case "up":
-			return kicad.Box{MinX: p.X - l, MinY: p.Y - 5, MaxX: p.X + l, MaxY: p.Y}
+			return kicad.Box{MinX: p.X - half, MinY: p.Y - reach, MaxX: p.X + half, MaxY: p.Y}
 		case "down":
-			return kicad.Box{MinX: p.X - l, MinY: p.Y, MaxX: p.X + l, MaxY: p.Y + 5}
+			return kicad.Box{MinX: p.X - half, MinY: p.Y, MaxX: p.X + half, MaxY: p.Y + reach}
 		case "left":
-			return kicad.Box{MinX: p.X - 5 - sbTextW(mk.Net), MinY: p.Y - 1.6, MaxX: p.X, MaxY: p.Y + 1.6}
+			return kicad.Box{MinX: p.X - reach, MinY: p.Y - half, MaxX: p.X, MaxY: p.Y + half}
 		default:
-			return kicad.Box{MinX: p.X, MinY: p.Y - 1.6, MaxX: p.X + 5 + sbTextW(mk.Net), MaxY: p.Y + 1.6}
+			return kicad.Box{MinX: p.X, MinY: p.Y - half, MaxX: p.X + reach, MaxY: p.Y + half}
 		}
 	}
 	w := sbTextW(mk.Net) + 2
@@ -615,7 +642,7 @@ func sbSnap(v float64) float64 { return math.Round(v/sbGrid) * sbGrid }
 // gridZone places the zone's parts in columns right of the core and
 // connects every pin with the autoconnect planner (power/ground symbols and
 // labels on short stubs). Pins the planner cannot land get a plain stub.
-func gridZone(d *sbDesign, zi *sbZoneIn, m *sbMeasure) (*sbZoneLayout, error) {
+func gridZone(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant) (*sbZoneLayout, error) {
 	zl := &sbZoneLayout{Method: "grid-autoconnect", Parts: map[string][]sbPose{}}
 	type unitRef struct {
 		p    *sbRPart
@@ -638,7 +665,7 @@ func gridZone(d *sbDesign, zi *sbZoneIn, m *sbMeasure) (*sbZoneLayout, error) {
 			}
 		}
 	}
-	room := sbSnap(maxLabel + 10) // stub + label on a side with pins
+	room := sbSnap((maxLabel + 10) * v.Room) // stub + label on a side with pins
 	// per-side room: only sides with pins need space for stubs + labels
 	foot := func(s kicad.SceneSymbol) kicad.Box {
 		sides := map[string]bool{}
@@ -715,6 +742,9 @@ func gridZone(d *sbDesign, zi *sbZoneIn, m *sbMeasure) (*sbZoneLayout, error) {
 				continue
 			}
 			kind := "net_label"
+			if len(d.NetPages[n]) > 1 {
+				kind = "net_port_bi" // drawn as a (larger) global label
+			}
 			switch d.NetKind[n] {
 			case "power":
 				kind = "power"
@@ -726,6 +756,9 @@ func gridZone(d *sbDesign, zi *sbZoneIn, m *sbMeasure) (*sbZoneLayout, error) {
 	}
 	rules := defaultAutoconnectRules()
 	rules.AvoidTitleBlock = false
+	if v.OffsetMin > 0 {
+		rules.OffsetMin = v.OffsetMin
+	}
 	report := newAcReport(scene, rules)
 	done := map[string]bool{}
 	planAutoconnectBatch(&scene, conns, rules, acRunOpts{}, &report, acConnectHooks{
@@ -792,14 +825,79 @@ func gridZone(d *sbDesign, zi *sbZoneIn, m *sbMeasure) (*sbZoneLayout, error) {
 		}
 	}
 	syms := map[string]kicad.SceneSymbol{}
+	var bodies []kicad.Box
 	for _, it := range items {
 		if it.unit == 1 {
 			syms[it.p.Ref] = it.s
 		}
+		for _, ps := range zl.Parts[it.p.Ref] {
+			if ps.Unit == it.unit {
+				bodies = append(bodies, sbXformBox(it.s.Box, ps))
+				f := sbFields(it.s, ps, it.p.Ref, it.p.Value)
+				bodies = append(bodies, f.RefBox, f.VBox)
+			}
+		}
 	}
+	sbDeconflict(zl, bodies)
 	zl.Box = zoneBox(zl, zi, syms, m)
 	return zl, nil
 }
+
+// sbDeconflict lengthens marker stubs (2.54 mm steps along the stub) until a
+// marker's drawn extent clears the markers before it and the part bodies
+// and field texts (obstacles).
+func sbDeconflict(zl *sbZoneLayout, obstacles []kicad.Box) {
+	var placed []kicad.Box
+	for i := range zl.Markers {
+		mk := &zl.Markers[i]
+		if mk.OnWire {
+			placed = append(placed, sbMarkerBox(*mk))
+			continue
+		}
+		wi := -1
+		for j, w := range zl.Wires {
+			if len(w) == 2 && w[1] == mk.At {
+				wi = j
+			}
+		}
+		clear := func(b kicad.Box) bool {
+			b = sbGrow(b, -0.2)
+			for _, p := range placed {
+				if sbOverlap(b, p) {
+					return false
+				}
+			}
+			for _, o := range obstacles {
+				if sbOverlap(b, o) {
+					return false
+				}
+			}
+			return true
+		}
+		for step := 0; step < 8 && wi >= 0 && !clear(sbMarkerBox(*mk)); step++ {
+			d := kicad.Pt{}
+			switch mk.Dir {
+			case "up":
+				d.Y = -sbGrid
+			case "down":
+				d.Y = sbGrid
+			case "left":
+				d.X = -sbGrid
+			default:
+				d.X = sbGrid
+			}
+			mk.At = kicad.Pt{X: sbRound4(mk.At.X + d.X), Y: sbRound4(mk.At.Y + d.Y)}
+			zl.Wires[wi][1] = mk.At
+		}
+		placed = append(placed, sbMarkerBox(*mk))
+	}
+}
+
+// sbGridVariant spaces the grid fallback: Room scales the label room,
+// OffsetMin the autoconnect stub start (planner units).
+type sbGridVariant struct{ Room, OffsetMin float64 }
+
+var sbGridVariants = []sbGridVariant{{1, 0}, {1.5, 0}, {1, 30}, {1.8, 30}, {2.4, 40}}
 
 func sbOutwardDir(deg float64) string {
 	switch int(math.Round(math.Mod(deg+360, 360)/90)) % 4 {
@@ -847,27 +945,47 @@ func layoutZones(d *sbDesign, zis []*sbZoneIn, reuse map[string]*sbZoneLayout, o
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			t0 := time.Now()
-			var zl *sbZoneLayout
+			var cands []*sbZoneLayout
 			var perr error
 			if !o.NoPlanner {
-				zl, perr = planZoneTimeout(d, zi, m, o.Budget, o.Timeout)
+				var zp *sbZoneLayout
+				if zp, perr = planZoneTimeout(d, zi, m, o.Budget, o.Timeout); zp != nil {
+					zp.Hash = hp
+					cands = append(cands, zp)
+				}
 			}
-			hash := hp
-			if zl == nil {
-				var err error
-				zl, err = gridZone(d, zi, m)
-				hash = hg
+			// the quality checks of kicad sch-check pick the cleaner drawing:
+			// the planner's, else the first clean grid variant
+			var zl *sbZoneLayout
+			for _, c := range cands {
+				c.Findings = sbZoneFindings(d, zi, c)
+				zl = c
+			}
+			var gerr error
+			for _, v := range sbGridVariants {
+				if zl != nil && len(zl.Findings) == 0 {
+					break
+				}
+				zg, err := gridZone(d, zi, m, v)
 				if err != nil {
-					mu.Lock()
-					notes = append(notes, fmt.Sprintf("zone %s: %v", zi.Zone.ID, err))
-					mu.Unlock()
-					return
+					gerr = err
+					continue
 				}
+				zg.Hash = hg
 				if perr != nil {
-					zl.Notes = append(zl.Notes, "planner: "+sbClip(perr.Error(), 900))
+					zg.Notes = append(zg.Notes, "planner: "+sbClip(perr.Error(), 900))
+				}
+				zg.Findings = sbZoneFindings(d, zi, zg)
+				if zl == nil || len(zg.Findings) < len(zl.Findings) {
+					zl = zg
 				}
 			}
-			zl.Hash = hash
+			if zl == nil {
+				mu.Lock()
+				notes = append(notes, fmt.Sprintf("zone %s: %v", zi.Zone.ID, gerr))
+				mu.Unlock()
+				return
+			}
 			zl.Ms = float64(time.Since(t0).Microseconds()) / 1000
 			mu.Lock()
 			out[zi.Zone.ID] = zl
@@ -923,6 +1041,32 @@ const (
 	sbPageOrigin = 25.4
 )
 
+// sbPackFresh packs a fresh page with the zones apply's packer
+// (kicadPackZones: rows in reading order inside the drawing area of the
+// smallest paper that holds them, clear of the title block).
+func sbPackFresh(ids []string, layouts map[string]*sbZoneLayout) map[string]kicad.Pt {
+	var zs []SchematicZoneResult
+	for _, id := range ids {
+		fp := sbFootprint(layouts[id].Box, kicad.Pt{})
+		zs = append(zs, SchematicZoneResult{ID: id, Title: id, Frame: schFrameSpec{ID: id, Rect: boxToEE(fp)}})
+	}
+	for _, p := range kicad.Papers {
+		page := kicad.Box{MinX: 10, MinY: 10, MaxX: p.W - 10, MaxY: p.H - 10}
+		title := kicad.Box{MinX: p.W - 10 - 112, MinY: p.H - 10 - 34, MaxX: p.W - 10, MaxY: p.H - 10}
+		frames, ok := kicadPackZones(zs, page, title, nil)
+		if !ok {
+			continue
+		}
+		out := map[string]kicad.Pt{}
+		for _, f := range frames {
+			// the frame's zone origin, snapped to the 2.54 mm grid
+			out[f.ID] = kicad.Pt{X: sbSnap(f.core.X), Y: sbSnap(f.core.Y)}
+		}
+		return out
+	}
+	return nil
+}
+
 // sbFootprint is the zone's frame (content box + margin + title band) at
 // translation t.
 func sbFootprint(box kicad.Box, t kicad.Pt) kicad.Box {
@@ -933,6 +1077,11 @@ func sbFootprint(box kicad.Box, t kicad.Pt) kicad.Box {
 // packZones assigns each zone of one page a translation: kept ones (keep)
 // stay; the rest are packed in rows (fresh build) or put in free space.
 func packZones(ids []string, layouts map[string]*sbZoneLayout, keep map[string]kicad.Pt) map[string]kicad.Pt {
+	if len(keep) == 0 {
+		if out := sbPackFresh(ids, layouts); out != nil {
+			return out
+		}
+	}
 	out := map[string]kicad.Pt{}
 	var placed []kicad.Box
 	for _, id := range ids {
