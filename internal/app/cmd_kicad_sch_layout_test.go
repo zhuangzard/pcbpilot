@@ -226,3 +226,38 @@ func TestKicadSchCheckFixPwrFlag(t *testing.T) {
 		t.Fatalf("PWR_FLAG changed the netlist: %+v", cmp)
 	}
 }
+
+func TestKicadDestaggerApply(t *testing.T) {
+	if _, err := kicad.KicadCLI(); err != nil {
+		t.Skip(err)
+	}
+	sheet := richFixture(t)
+	e, _ := kicad.OpenSchematicFile(sheet)
+	// R3 pin 2: a long label whose text runs over R5's VREF stub wire
+	e.AddWire(kicad.Pt{X: 88.9, Y: 92.71}, kicad.Pt{X: 88.9, Y: 95.25})
+	if err := e.AddLabel(kicad.LabelLocal, "A_VERY_LONG_NET_NAME", kicad.Pt{X: 88.9, Y: 95.25}, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	text, _ := e.Render()
+	_ = os.WriteFile(sheet, []byte(text), 0o644)
+	if fs := kicad.CheckSchematic(text, kicad.CheckOptions{}); len(fs) == 0 {
+		t.Fatal("fixture has nothing to destagger")
+	}
+	before := pinNets(t, sheet)
+	orig, _ := os.ReadFile(sheet)
+	out, errs, code := runSch(t, sheet, "destagger")
+	if code != 0 || !strings.Contains(out, `"applied": false`) {
+		t.Fatalf("dry run: exit %d %s %s", code, out, errs)
+	}
+	if now, _ := os.ReadFile(sheet); !bytes.Equal(orig, now) {
+		t.Fatal("dry run wrote")
+	}
+	out, errs, code = runSch(t, sheet, "destagger", "--apply")
+	if code != 0 || !strings.Contains(out, `"verified": true`) {
+		t.Fatalf("apply: exit %d %s %s", code, out, errs)
+	}
+	assertCleanSheet(t, sheet)
+	if cmp := kicad.ComparePinNets(before, pinNets(t, sheet), nil); !cmp.Equal || cmp.NamesEqual != cmp.NetsA {
+		t.Fatalf("netlist changed: %+v", cmp)
+	}
+}

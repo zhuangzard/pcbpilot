@@ -617,3 +617,38 @@ func kicadSchTitleblock(path string, f kicadTitleFlags, dataJSON string, stdout 
 		return map[string]any{"titleBlock": tb}, nil
 	})
 }
+
+// ---- sch destagger --backend kicad ---------------------------------------------
+
+func kicadSchDestagger(path string, apply bool, maxMoves int, stdout io.Writer) error {
+	src, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	r, err := kicad.Destagger(string(src), maxMoves)
+	if err != nil {
+		return err
+	}
+	out := map[string]any{"ok": true, "file": path, "backend": "kicad", "applied": false,
+		"findingsBefore": r.Before, "findingsAfter": r.After, "moves": r.Moves, "stuck": r.Stuck}
+	if apply && len(r.Moves) > 0 {
+		before, err := kicadBeforeNets(path)
+		if err != nil {
+			return fmt.Errorf("--backend kicad needs the KiCad netlist to verify the moves: %w", err)
+		}
+		info, err := kicadSchCommitVerified(path, r.Text, false, func(after map[string]string) error {
+			if cmp := kicad.ComparePinNets(before, after, stripSheetPath); !cmp.Equal || cmp.NamesEqual != cmp.NetsA {
+				return fmt.Errorf("destagger changes the KiCad netlist (%v %v)", cmp.Mismatched, cmp.RenamedNets)
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		for k, v := range info {
+			out[k] = v
+		}
+		out["applied"] = true
+	}
+	return writeJSON(stdout, out)
+}

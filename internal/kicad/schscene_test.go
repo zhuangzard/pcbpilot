@@ -158,3 +158,35 @@ func TestSetTitleBlock(t *testing.T) {
 		t.Fatal("comment 10 accepted")
 	}
 }
+
+func TestDestaggerFixesOverlap(t *testing.T) {
+	// R3's pin 1 gets a long label pointing right over R2… no: a label whose
+	// text runs onto R3's own Reference field; destagger must turn it.
+	e := openAuto(t)
+	e.AddWire(Pt{88.9, 85.09}, Pt{88.9, 82.55})
+	if err := e.AddLabel(LabelLocal, "A_LONG_LABEL_NAME", Pt{88.9, 82.55}, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	e.AddWire(Pt{88.9, 92.71}, Pt{88.9, 95.25})
+	if _, err := e.AddPower("GND", Pt{88.9, 95.25}, 0, true); err != nil {
+		t.Fatal(err)
+	}
+	// a second label right of R3 that the first one runs into
+	e.AddWire(Pt{101.6, 82.55}, Pt{101.6, 80.01})
+	text, err := e.Render()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fs := CheckSchematic(text, CheckOptions{Ignore: []string{FDiagonalWire}})
+	if len(fs) == 0 {
+		t.Fatal("fixture has no finding to fix")
+	}
+	r, err := Destagger(text, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Moves) == 0 || r.After >= r.Before {
+		t.Fatalf("%+v (findings %s)", r, Summary(fs, 5))
+	}
+	t.Logf("%+v", r.Moves)
+}

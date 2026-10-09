@@ -40,6 +40,7 @@ const (
 	FDiagonalWire    = "diagonal-wire"
 	FOffGrid         = "off-grid"
 	FLabelOverlap    = "label-overlap"
+	FLabelOnWire     = "label-on-wire"
 	FPinInLabel      = "pin-in-label"
 	FTextOverSymbol  = "text-over-symbol"
 	FTextOverlap     = "text-overlap"
@@ -81,24 +82,34 @@ func segBox(a, b Pt) Box {
 	return Box{math.Min(a.X, b.X), math.Min(a.Y, b.Y), math.Max(a.X, b.X), math.Max(a.Y, b.Y)}
 }
 
-// labelCheckBox is a tighter label box than the router's (adjacent pins
-// 2.54 mm apart may carry labels).
+// labelCheckBox is the text box of a label: a local label's text sits on
+// the reading side of its anchor line (KiCad's bottom justification, text
+// never upside down), a global/hierarchical label's shape is centred on it.
 func labelCheckBox(l SceneLabel) Box {
 	w := 0.4 + 1.27*0.8*float64(len([]rune(l.Name)))
-	h := 0.75
 	if l.Kind != LabelLocal {
 		w += 2.0 // the shape
-		h = 1.1
+		const h = 1.1
+		switch dirOf(l.Angle) {
+		case 1:
+			return Box{l.At.X - h, l.At.Y - w, l.At.X + h, l.At.Y}
+		case 2:
+			return Box{l.At.X - w, l.At.Y - h, l.At.X, l.At.Y + h}
+		case 3:
+			return Box{l.At.X - h, l.At.Y, l.At.X + h, l.At.Y + w}
+		}
+		return Box{l.At.X, l.At.Y - h, l.At.X + w, l.At.Y + h}
 	}
+	const lo, hi = 0.15, 1.5 // from the anchor line to the top of the text
 	switch dirOf(l.Angle) {
-	case 1: // up
-		return Box{l.At.X - h, l.At.Y - w, l.At.X + h, l.At.Y}
+	case 1:
+		return Box{l.At.X - hi, l.At.Y - w, l.At.X - lo, l.At.Y}
 	case 2:
-		return Box{l.At.X - w, l.At.Y - h, l.At.X, l.At.Y + h}
+		return Box{l.At.X - w, l.At.Y - hi, l.At.X, l.At.Y - lo}
 	case 3:
-		return Box{l.At.X - h, l.At.Y, l.At.X + h, l.At.Y + w}
+		return Box{l.At.X - hi, l.At.Y, l.At.X - lo, l.At.Y + w}
 	}
-	return Box{l.At.X, l.At.Y - h, l.At.X + w, l.At.Y + h}
+	return Box{l.At.X, l.At.Y - hi, l.At.X + w, l.At.Y - lo}
 }
 
 func symName(s SceneSymbol) string {
@@ -231,6 +242,12 @@ func (sc *SchScene) Check(opt CheckOptions) []Finding {
 		}
 	}
 	for i, l := range sc.Labels {
+		for _, w := range sc.Wires {
+			if segThroughBox(w[0], w[1], lb[i]) {
+				add(FLabelOnWire, "label "+l.Name, fmt.Sprintf("a wire runs through the text of label %s", l.Name), &Pt{w[0].X, w[0].Y})
+				break
+			}
+		}
 		for j := i + 1; j < len(sc.Labels); j++ {
 			if overlaps(lb[i], lb[j]) {
 				add(FLabelOverlap, pair("label "+l.Name, "label "+sc.Labels[j].Name), fmt.Sprintf("labels %s and %s overlap", l.Name, sc.Labels[j].Name), nil)
