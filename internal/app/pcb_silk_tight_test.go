@@ -405,3 +405,31 @@ func TestSilkGateDeterministic(t *testing.T) {
 		t.Fatalf("order-dependent:\n%s\n--\n%s", strings.Join(a.Items, "\n"), strings.Join(b.Items, "\n"))
 	}
 }
+
+// A label an earlier round shrank to the fab minimum stays where it is when
+// there is still no project-size slot (no churn between rounds).
+func TestSilkTightKeepsShrunkLabel(t *testing.T) {
+	wall := func(ref string, x0, y0, x1, y1 float64) boardComp {
+		return boardComp{Designator: ref, BBox: &layoutBBox{x0, y0, x1, y1}}
+	}
+	snap := silkTestBoard(part0603("R1", 1000, 1000), wall("U1", 800, 1081, 1200, 1200), wall("U2", 800, 800, 1200, 919),
+		wall("U3", 700, 919, 892, 1081), wall("U4", 1108, 919, 1300, 1081))
+	opt := defaultSilkTightOpts()
+	labels, sc, font := silkTightInput(snap, opt)
+	placed, _ := planSilkTight(labels, sc, opt)
+	applyPlanToSnap(snap, placed, font)
+	for i := range snap.Silk {
+		for _, p := range placed {
+			if p.ID == snap.Silk[i].ID && p.Font > 0 {
+				snap.Silk[i].FontSize = p.Font
+			}
+		}
+	}
+	labels, sc, _ = silkTightInput(snap, opt)
+	again, _ := planSilkTight(labels, sc, opt)
+	for _, p := range again {
+		if p.Ref == "R1" && (p.Moved || p.How != "kept+small") {
+			t.Fatalf("round 2 re-planned the shrunk label: %+v", p)
+		}
+	}
+}

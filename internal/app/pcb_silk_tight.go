@@ -508,12 +508,19 @@ func planSilkTight(labels []silkLabel, sc silkScene, opt silkTightOpts) ([]silkP
 	for i, l := range labels {
 		cur[i] = silkPlaced{ID: l.ID, Ref: l.Ref, Box: l.Cur, Rot: l.Rot}
 	}
+	// keepSmall: labels already legal at the fab minimum (an earlier round
+	// shrank them); they stay there unless a project-size slot is found.
+	keepSmall := map[string]bool{}
 	for i, l := range labels {
 		others := append(append([]silkPlaced{}, cur[:i]...), cur[i+1:]...)
 		sized := l.Cur.w()+l.Cur.h() >= l.Len+l.Hgt-0.5
-		if sized && (l.Rot == 0 || l.Rot == 90) && l.Cur.dist(l.Own) <= opt.MaxDist && sc.legal(l.Cur, l.Ref, l.Layer, l.Own, others, layerOf, opt) {
+		ok := (l.Rot == 0 || l.Rot == 90) && l.Cur.dist(l.Own) <= opt.MaxDist && sc.legal(l.Cur, l.Ref, l.Layer, l.Own, others, layerOf, opt)
+		if sized && ok {
 			placed = append(placed, silkPlaced{ID: l.ID, Ref: l.Ref, Box: l.Cur, Rot: l.Rot, How: "kept"})
 			continue
+		}
+		if sl, can := shrunkLabel(l, opt); ok && can && l.Font >= opt.MinFont-0.05 && l.Cur.w()+l.Cur.h() >= sl.Len+sl.Hgt-0.5 {
+			keepSmall[l.ID] = true
 		}
 		todo = append(todo, l)
 	}
@@ -550,10 +557,23 @@ func planSilkTight(labels []silkLabel, sc silkScene, opt silkTightOpts) ([]silkP
 	}
 	var notes []string
 	for _, l := range todo {
+		if small[l.ID] && keepSmall[l.ID] && sc.freeOfPlaced(byID[l.ID].Cur.grow(opt.LabelClear), l.Ref, l.Layer, placed, layerOf) {
+			// Only the fab-minimum size fits and the label already sits
+			// legally at it: keep it (no churn between rounds).
+			c := byID[l.ID]
+			placed = append(placed, silkPlaced{ID: l.ID, Ref: l.Ref, Box: c.Cur, Rot: c.Rot, How: "kept+small", Font: c.Font})
+			continue
+		}
 		if p, ok := placeOne(l, placed, cache); ok {
 			placed = append(placed, p)
 		} else if np, ok := placeEvicting(l, byID, placed, cache); ok {
 			placed = np
+		} else if keepSmall[l.ID] && sc.freeOfPlaced(byID[l.ID].Cur.grow(opt.LabelClear), l.Ref, l.Layer, placed, layerOf) {
+			// No project-size slot: stay at the fab minimum where it is
+			// (no churn between rounds).
+			c := byID[l.ID]
+			placed = append(placed, silkPlaced{ID: l.ID, Ref: l.Ref, Box: c.Cur, Rot: c.Rot, How: "kept+small", Font: c.Font})
+			continue
 		} else {
 			if small[l.ID] {
 				l = byID[l.ID] // the cluster pass works at the project size
