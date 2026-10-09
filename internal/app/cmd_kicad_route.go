@@ -549,19 +549,7 @@ func (r *kicadRun) run() error {
 	if rep, _ := r.summary["report"].(map[string]any); rep != nil {
 		so.report, _ = rep["json"].(string)
 	}
-	g := gateResult{Gate: "signoff"}
-	if res, err := runSignoff(so, r.waivers, r.stderr); err != nil {
-		g.Detail = "signoff: " + err.Error()
-	} else {
-		g.Pass = res.Pass
-		g.Detail = "pcbpilot signoff: " + filepath.Join(so.outDir, "signoff.md")
-		for _, x := range res.Gates {
-			if !x.Pass {
-				g.Items = append(g.Items, x.Gate+": "+x.Detail)
-			}
-		}
-	}
-	r.add(g)
+	r.add(signoffGate(so, r.waivers, r.stderr))
 	r.lap("signoff")
 	return nil
 }

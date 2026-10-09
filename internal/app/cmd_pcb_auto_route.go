@@ -96,7 +96,7 @@ func defaultPourLayers(copper int) (gnd []int, power int) {
 
 func newPcbAutoRouteCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {
 	var o autorouteOpts
-	var playbook, outDir, gndNet, powerNet, simPath, scriptPath, widenCSV, waiverPath, widthBasis, candDir, projectConfig string
+	var playbook, outDir, gndNet, powerNet, simPath, scriptPath, widenCSV, waiverPath, widthBasis, candDir, projectConfig, reviewPath string
 	var noManual bool
 	var trialTime time.Duration
 	silkOpt := defaultSilkTightOpts()
@@ -122,7 +122,11 @@ playbook):
   4. --widen-net: widen those nets up to --widen-max-mil (see 'pcb widen');
   5. pour rebuild → save → reload → pour rebuild → native DRC → pad-net diff
      (--sch-connectivity);
-  6. --sim: dump the live board (with copper) and run sim post-layout.
+  6. --sim: dump the live board (with copper) and run sim post-layout;
+  7. IR closure (planWidenIR, ≤ 2 rounds) when only the drop fails;
+  8. design report (<out-dir>/report) and the release sign-off
+     ('pcbpilot signoff', <out-dir>/signoff — the same hard sign-off kicad
+     route ends with; --review or <out-dir>/review-design/review.json).
 
 Everything is written to --out-dir (summary.json, board-final.json, post.*).
 fastroute is never downloaded: see 'pcb autoroute --help'.
@@ -418,6 +422,20 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 					return finish(err)
 				}
 			}
+			// 8. Design report and the one release sign-off — the same
+			// 'pcbpilot signoff' kicad route ends with, from this run's files.
+			gates, _ := summary["gates"].([]gateResult)
+			rg := autoRouteDesignReport(outDir, o.intentPath, simPath, projectConfig, summary, stderr)
+			so := signoffOpts{intent: o.intentPath, sim: simPath, connectivity: schFiles, review: reviewPath}
+			so.fillFromRunDir(outDir)
+			sg := signoffGate(so, waivers, stderr)
+			for _, g := range []gateResult{rg, sg} {
+				applyWaivers(&g, waivers)
+				fmt.Fprintf(stderr, "gate %-16s %v  %s\n", g.Gate, map[bool]string{true: "PASS", false: "FAIL"}[g.Pass], g.Detail)
+				gates = append(gates, g)
+				pass = pass && g.Pass
+			}
+			summary["gates"], summary["pass"] = gates, pass
 			if !pass {
 				summary["sessionsKept"] = sessions
 				return finish(fmt.Errorf("post-route gate failed: %s", failedGates(summary)))
@@ -446,6 +464,7 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 	c.Flags().StringVar(&widthBasis, "width-basis", "segment", widthBasisHelp)
 	c.Flags().StringVar(&waiverPath, "waivers", "", "JSON list of signed waivers [{gate,match,reason,by}]: a failing gate passes only when every failing item matches one")
 	c.Flags().StringVar(&simPath, "sim", "", "sim.json (pcbpilot sim power): run sim post-layout on the finished live board")
+	c.Flags().StringVar(&reviewPath, "review", "", "design-stage review.json (review-panel) for the sign-off (default <out-dir>/review-design/review.json)")
 	addSilkTightFlags(c, &silkOpt, "silk-")
 	addManualFlags(c, &noManual, &projectConfig)
 	return c
@@ -772,3 +791,33 @@ func dropExistingMechSteps(steps []playbookStep, fills, regions []any) ([]playbo
 
 // applyResumes bounds how often pcb auto route resumes a failed playbook.
 const applyResumes = 2
+
+// autoRouteDesignReport publishes the design report of a pcb auto route run
+// (report design on <out-dir>/board-final.json, post.json, the manual) as the
+// "design-report" gate; the sign-off reads its report.json.
+func autoRouteDesignReport(outDir, intent, sim, projectConfig string, summary map[string]any, stderr io.Writer) gateResult {
+	g := gateResult{Gate: "design-report"}
+	ro := designReportOpts{outDir: filepath.Join(outDir, "report"), version: "auto", host: "EasyEDA Pro", intent: intent, sim: sim,
+		board: filepath.Join(outDir, "board-final.json"), projectConfig: projectConfig}
+	if p := filepath.Join(outDir, "post.json"); fileExists(p) {
+		ro.post = p
+	}
+	if m, ok := summary["manual"].(*manualRun); ok && m != nil && m.Current != "" {
+		ro.manual = m.Current
+	}
+	dir, rep, err := runDesignReport(ro, stderr)
+	if err != nil {
+		g.Detail = "report design: " + err.Error()
+		return g
+	}
+	summary["report"] = map[string]any{"dir": dir, "html": filepath.Join(dir, "report.html"), "json": filepath.Join(dir, "report.json"), "verdict": rep.Verdict.Status, "version": rep.VersionLabel}
+	g.Pass = ro.post != "" && ro.manual != ""
+	g.Detail = fmt.Sprintf("%s published in %s (report verdict %s)", rep.VersionLabel, dir, rep.Verdict.Status)
+	if ro.post == "" {
+		g.Items = append(g.Items, "report input missing: post.json")
+	}
+	if ro.manual == "" {
+		g.Items = append(g.Items, "report input missing: manual")
+	}
+	return g
+}

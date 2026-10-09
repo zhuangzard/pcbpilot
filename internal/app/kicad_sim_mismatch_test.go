@@ -1,6 +1,8 @@
 package app
 
 import (
+	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -39,5 +41,20 @@ func TestSimKicadMismatchKeepsIRClosure(t *testing.T) {
 	// Without a KiCad report nothing is marked.
 	if markSimKicadMismatch(gates, nil) != nil {
 		t.Fatal("no DRC report: no mismatch claim")
+	}
+}
+
+// The sign-off as a run gate (kicad route and pcb auto route): an error or
+// a failing sign-off gate fails it; missing inputs are named.
+func TestSignoffGateFromRunDir(t *testing.T) {
+	dir := t.TempDir()
+	so := signoffOpts{intent: filepath.Join(dir, "missing-intent.json")}
+	so.fillFromRunDir(dir)
+	if so.outDir != filepath.Join(dir, "signoff") {
+		t.Fatalf("outDir %q", so.outDir)
+	}
+	g := signoffGate(so, nil, io.Discard)
+	if g.Pass || g.Gate != "signoff" || !strings.Contains(g.Detail, "intent") {
+		t.Fatalf("gate %+v", g)
 	}
 }
