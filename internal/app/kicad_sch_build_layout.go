@@ -638,31 +638,35 @@ func gridZone(d *sbDesign, zi *sbZoneIn, m *sbMeasure) (*sbZoneLayout, error) {
 			}
 		}
 	}
-	room := sbSnap(maxLabel + 12) // stub + label each side
-	coreH := items[0].s.Box.H()
-	colH := math.Max(coreH, 60)
-	x := 0.0
-	y := 0.0
-	colW := 0.0
-	for i, it := range items {
-		b := it.s.Box
-		w, h := b.W()+2*room, b.H()+2*room*0.5+5.08
-		if i == 0 {
-			pose := sbPose{At: kicad.Pt{X: 0, Y: 0}, Unit: it.unit}
-			zl.Parts[it.p.Ref] = append(zl.Parts[it.p.Ref], pose)
-			x = sbSnap(b.MaxX + room + 5.08)
-			y = sbSnap(b.MinY)
-			continue
+	room := sbSnap(maxLabel + 10) // stub + label on a side with pins
+	// per-side room: only sides with pins need space for stubs + labels
+	foot := func(s kicad.SceneSymbol) kicad.Box {
+		sides := map[string]bool{}
+		for _, q := range s.Pins {
+			sides[sbOutwardDir(q.Outward)] = true
 		}
-		if y > sbSnap(items[0].s.Box.MinY) && y+h > items[0].s.Box.MinY+colH {
-			x = sbSnap(x + colW + 5.08)
-			y = sbSnap(items[0].s.Box.MinY)
-			colW = 0
+		r := func(side string) float64 {
+			if sides[side] {
+				return room
+			}
+			return 2.54
 		}
-		at := kicad.Pt{X: sbSnap(x + room - b.MinX), Y: sbSnap(y + room*0.5 - b.MinY)}
+		b := s.Box
+		return kicad.Box{MinX: b.MinX - r("left"), MinY: b.MinY - r("up") - 2.54, MaxX: b.MaxX + r("right"), MaxY: b.MaxY + r("down") + 2.54}
+	}
+	core := foot(items[0].s)
+	zl.Parts[items[0].p.Ref] = append(zl.Parts[items[0].p.Ref], sbPose{At: kicad.Pt{}, Unit: items[0].unit})
+	colH := math.Max(core.H(), 90)
+	x, y, colW := core.MaxX+2.54, core.MinY, 0.0
+	for _, it := range items[1:] {
+		f := foot(it.s)
+		if y > core.MinY && y+f.H() > core.MinY+colH {
+			x, y, colW = x+colW+2.54, core.MinY, 0
+		}
+		at := kicad.Pt{X: sbSnap(x - f.MinX), Y: sbSnap(y - f.MinY)}
 		zl.Parts[it.p.Ref] = append(zl.Parts[it.p.Ref], sbPose{At: at, Unit: it.unit})
-		y += h
-		colW = math.Max(colW, w)
+		y += f.H()
+		colW = math.Max(colW, f.W())
 	}
 	// scratch sheet holding the zone (offset to positive coordinates)
 	off := kicad.Pt{X: 254, Y: 254}

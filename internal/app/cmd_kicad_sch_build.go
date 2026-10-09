@@ -94,7 +94,10 @@ type sbBlock struct {
 	Zone     string            `json:"zone,omitempty"`
 	Page     string            `json:"page,omitempty"`
 	Bind     map[string]string `json:"bind,omitempty"`
-	Refs     map[string]string `json:"refs,omitempty"` // allocated designator → wanted designator
+	Refs     map[string]string `json:"refs,omitempty"`    // role → designator
+	LCSC     map[string]string `json:"lcsc,omitempty"`    // role → LCSC number (replaces the library part's)
+	Values   map[string]string `json:"values,omitempty"`  // role → value
+	Symbols  map[string]string `json:"symbols,omitempty"` // role → Lib:Name
 }
 
 type sbNet struct {
@@ -103,6 +106,9 @@ type sbNet struct {
 	Kind     string   `json:"kind,omitempty"` // power | ground | signal (default: by name)
 	VoltageV float64  `json:"voltage,omitempty"`
 	CurrentA float64  `json:"currentA,omitempty"`
+	// Soft pins (from blocks) may be absent from the LCSC symbol (an EPAD
+	// the EasyEDA device had); they are dropped with a warning.
+	Soft []string `json:"-"`
 }
 
 type sbRail struct {
@@ -292,8 +298,18 @@ func expandBlocks(s *sbSpec, partsPath string) error {
 		}
 		if len(sb.Refs) > 0 {
 			ren := map[string]string{}
-			for from, to := range sb.Refs {
-				ren[strings.ToUpper(from)] = to
+			for _, pl := range plan.Placements {
+				if to, ok := sb.Refs[pl.Role]; ok && to != pl.Designator {
+					if existing[strings.ToUpper(to)] {
+						return fmt.Errorf("blocks[%d] %s: refs %s=%s is already used", bi, sb.Block, pl.Role, to)
+					}
+					ren[strings.ToUpper(pl.Designator)] = to
+				}
+			}
+			for role := range sb.Refs {
+				if _, ok := b.Parts[role]; !ok {
+					return fmt.Errorf("blocks[%d] %s: refs names unknown role %q", bi, sb.Block, role)
+				}
 			}
 			bapRemapDesignators(&plan, ren)
 		}
@@ -310,8 +326,15 @@ func expandBlocks(s *sbSpec, partsPath string) error {
 			if val == "" {
 				val = dev.MPN
 			}
+			lcsc, mpn := dev.LCSC, dev.MPN
+			if c, ok := sb.LCSC[pl.Role]; ok {
+				lcsc, mpn = c, ""
+			}
+			if v, ok := sb.Values[pl.Role]; ok {
+				val = v
+			}
 			existing[strings.ToUpper(pl.Designator)] = true
-			s.Parts = append(s.Parts, sbPart{Ref: pl.Designator, Value: val, LCSC: dev.LCSC, MPN: dev.MPN,
+			s.Parts = append(s.Parts, sbPart{Ref: pl.Designator, Value: val, LCSC: lcsc, MPN: mpn, Symbol: sb.Symbols[pl.Role],
 				Zone: zone, Page: sb.Page, Block: b.ID + "#" + plan.Instance, Role: pl.Role})
 		}
 		for _, n := range plan.Nets {
@@ -328,13 +351,14 @@ func expandBlocks(s *sbSpec, partsPath string) error {
 			}
 			if i, ok := netIdx[n.Net]; ok {
 				s.Nets[i].Pins = append(s.Nets[i].Pins, pins...)
+				s.Nets[i].Soft = append(s.Nets[i].Soft, pins...)
 				if s.Nets[i].Kind == "" {
 					s.Nets[i].Kind = kind
 				}
 				continue
 			}
 			netIdx[n.Net] = len(s.Nets)
-			s.Nets = append(s.Nets, sbNet{Name: n.Net, Pins: pins, Kind: kind})
+			s.Nets = append(s.Nets, sbNet{Name: n.Net, Pins: pins, Kind: kind, Soft: pins})
 		}
 	}
 	s.Blocks = nil
@@ -521,6 +545,9 @@ func resolveSymbols(parts []*sbRPart, opts sbResolveOpts, libDirs []string) (sbR
 		default:
 			return st, fmt.Errorf("%s: no symbol, lcsc or pins", p.Ref)
 		}
+		if strings.HasPrefix(src, "lcsc") {
+			text = sbPassivePins(text, p.Ref)
+		}
 		pins, err := kicad.LibSymbolPins(text)
 		if err != nil {
 			return st, fmt.Errorf("%s: %w", p.Ref, err)
@@ -552,6 +579,23 @@ func resolveSymbols(parts []*sbRPart, opts sbResolveOpts, libDirs []string) (sbR
 		}
 	}
 	return st, nil
+}
+
+// sbPassiveRefs are designator classes whose pins are electrically passive.
+var sbPassiveRefs = map[string]bool{"R": true, "C": true, "L": true, "FB": true, "SW": true, "F": true, "Y": true, "X": true,
+	"D": true, "LED": true, "J": true, "CN": true, "P": true, "TP": true, "RN": true, "K": true, "BZ": true}
+
+// sbPassivePins retypes the pins of a converted EasyEDA symbol of a passive
+// class (EasyEDA symbols carry no reliable pin type: resistors come in as
+// "input") so ERC judges real drivers only.
+func sbPassivePins(sym, ref string) string {
+	if !sbPassiveRefs[sbRefPrefix(ref)] {
+		return sym
+	}
+	for _, t := range []string{"input", "output", "bidirectional", "unspecified", "tri_state"} {
+		sym = strings.ReplaceAll(sym, "(pin "+t+" ", "(pin passive ")
+	}
+	return sym
 }
 
 // sbGenName is the generated symbol's name: value (or MPN) made safe, plus a
@@ -693,6 +737,10 @@ func buildDesign(s *sbSpec, opts sbResolveOpts) (*sbDesign, sbResolveStats, erro
 			}
 			nums, err := p.resolvePins(pin)
 			if err != nil {
+				if sbContains(n.Soft, tok) {
+					d.Warnings = append(d.Warnings, fmt.Sprintf("net %s: block pin %s dropped: %v", name, tok, err))
+					continue
+				}
 				return nil, st, fmt.Errorf("net %s: %w", name, err)
 			}
 			for _, num := range nums {
