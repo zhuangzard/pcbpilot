@@ -724,8 +724,10 @@ type frReport struct {
 }
 
 // readFastrouteReport extracts the counts of a fastroute --report file. Its
-// xy are inches with y negated; FixableList gives them in DSN mil.
-func readFastrouteReport(path string) (frReport, error) {
+// xy are DSN units / 1000 with y negated (inches on an EasyEDA DSN, mm on a
+// KiCad DSN); milPerUnit (specctra.ReportMilPerUnit) converts them, and
+// FixableList gives them in board mil.
+func readFastrouteReport(path string, milPerUnit float64) (frReport, error) {
 	var out frReport
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -761,7 +763,7 @@ func readFastrouteReport(path string) (frReport, error) {
 		}
 		out.Fixable++
 		out.FixableList = append(out.FixableList, fmt.Sprintf("%s at (%.1f, %.1f) mil: %s %s / %s %s",
-			c.Layer, c.XY[0]*1000, -c.XY[1]*1000, c.First.Kind, c.First.Net, c.Second.Kind, c.Second.Net))
+			c.Layer, c.XY[0]*milPerUnit, -c.XY[1]*milPerUnit, c.First.Kind, c.First.Net, c.Second.Kind, c.Second.Net))
 	}
 	return out, nil
 }
@@ -813,6 +815,19 @@ func runFastroute(o fastrouteOpts, dsn, base string, stderr io.Writer) (string, 
 	return lastOK(runs).Session, runs, nil
 }
 
+// reportMilPerUnit reads the DSN's unit (specctra.ReportMilPerUnit); an
+// unreadable DSN is taken as mil (EasyEDA).
+func reportMilPerUnit(dsnPath string) float64 {
+	f, err := os.Open(dsnPath)
+	if err != nil {
+		return 1000
+	}
+	defer f.Close()
+	buf := make([]byte, 4096)
+	n, _ := io.ReadFull(f, buf)
+	return specctra.ReportMilPerUnit(string(buf[:n]))
+}
+
 func lastOK(runs []fastrouteRun) *fastrouteRun {
 	for i := len(runs) - 1; i >= 0; i-- {
 		if runs[i].Status == "ok" {
@@ -845,7 +860,7 @@ func fastrouteOnce(o fastrouteOpts, dsn, ses, report, initial string, round int,
 	case err != nil:
 		run.Status, run.Error = "crashed", err.Error()
 	}
-	rep, rerr := readFastrouteReport(report)
+	rep, rerr := readFastrouteReport(report, reportMilPerUnit(dsn))
 	if _, serr := os.Stat(ses); serr != nil && rerr == nil {
 		rerr = fmt.Errorf("no session %s", ses)
 	}
@@ -1324,7 +1339,7 @@ func retryWithEscapes(cfg *appConfig, window string, o autorouteOpts, rawText, d
 	opt := fixOpt
 	best := last
 	for round := 1; round <= o.escapeRounds && best.Unrouted > 0; round++ {
-		blocked, err := readFastrouteBlocked(best.Report)
+		blocked, err := readFastrouteBlocked(best.Report, specctra.ReportMilPerUnit(dsnText))
 		if err != nil || len(blocked) == 0 {
 			return
 		}

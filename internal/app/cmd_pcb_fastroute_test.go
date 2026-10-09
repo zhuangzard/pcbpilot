@@ -38,14 +38,20 @@ func TestReadFastrouteReport(t *testing.T) {
  {"layer":"TopLayer","xy":[0.1575,-2.9921],"unfixable":true,"first":{"kind":"pin"},"second":{"kind":"pin"}}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	r, err := readFastrouteReport(p)
+	r, err := readFastrouteReport(p, specctra.ReportMilPerUnit("(PCB x (resolution mil 10) (unit mil)"))
 	if err != nil || r.Unrouted != 3 || r.Violations != 2 || r.Fixable != 1 || r.FixableList[0] != "TopLayer at (1833.4, 1143.7) mil: trace GND / pin " {
 		t.Fatalf("got %+v %v", r, err)
+	}
+	// A KiCad DSN is in um: the same report numbers are mm (Gas V5 A:
+	// C78.2 at (20.32, -33.336) = board (800, 1312.44) mil).
+	r, err = readFastrouteReport(p, specctra.ReportMilPerUnit("(pcb x (parser) (resolution um 10) (unit um)"))
+	if err != nil || r.FixableList[0] != "TopLayer at (72.2, 45.0) mil: trace GND / pin " {
+		t.Fatalf("KiCad units: got %+v %v", r.FixableList, err)
 	}
 	if err := os.WriteFile(p, []byte(`{"stats":{}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := readFastrouteReport(p); err == nil {
+	if _, err := readFastrouteReport(p, 1000); err == nil {
 		t.Fatal("report without stats.unrouted accepted")
 	}
 }

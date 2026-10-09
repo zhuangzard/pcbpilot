@@ -406,3 +406,16 @@ func TestParseSESOnePointPath(t *testing.T) {
 		t.Fatal("a three-atom path must stay an error")
 	}
 }
+
+func TestReportMilPerUnit(t *testing.T) {
+	for dsn, want := range map[string]float64{
+		"(PCB board (resolution mil 10) (unit mil))":                        1000,
+		"(pcb x (parser (host_cad \"KiCad\")) (resolution um 10) (unit um)": 1000 / 25.4,
+		"(pcb x (resolution mm 1000))":                                      1000 * 1000 / 25.4,
+		"(pcb x)":                                                           1000,
+	} {
+		if got := ReportMilPerUnit(dsn); math.Abs(got-want) > 1e-9 {
+			t.Errorf("%s: %v, want %v", dsn, got, want)
+		}
+	}
+}

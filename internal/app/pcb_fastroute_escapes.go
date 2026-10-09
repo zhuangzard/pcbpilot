@@ -26,8 +26,9 @@ type frEndpoint struct {
 
 // readFastrouteBlocked returns both endpoints of every unrouted connection
 // the report's --diagnose classified as "blocked". fastroute reports xy in
-// inches with y negated relative to the DSN.
-func readFastrouteBlocked(path string) ([]frEndpoint, error) {
+// DSN units / 1000 with y negated relative to the DSN; milPerUnit
+// (specctra.ReportMilPerUnit) converts them to mil.
+func readFastrouteBlocked(path string, milPerUnit float64) ([]frEndpoint, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -63,8 +64,8 @@ func readFastrouteBlocked(path string) ([]frEndpoint, error) {
 			continue
 		}
 		out = append(out,
-			frEndpoint{Net: u.Net, Mil: [2]float64{u.FromXY[0] * 1000, -u.FromXY[1] * 1000}, Layer: layer(u.From.Layers)},
-			frEndpoint{Net: u.Net, Mil: [2]float64{u.ToXY[0] * 1000, -u.ToXY[1] * 1000}, Layer: layer(u.To.Layers)})
+			frEndpoint{Net: u.Net, Mil: [2]float64{u.FromXY[0] * milPerUnit, -u.FromXY[1] * milPerUnit}, Layer: layer(u.From.Layers)},
+			frEndpoint{Net: u.Net, Mil: [2]float64{u.ToXY[0] * milPerUnit, -u.ToXY[1] * milPerUnit}, Layer: layer(u.To.Layers)})
 	}
 	return out, nil
 }
