@@ -344,6 +344,24 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 	}
 	tm.mark("resolve")
 	rep.Warnings = append(rep.Warnings, d.Warnings...)
+	// EG-22: a complete title block (defaults are reported)
+	var defs []string
+	if spec.Title.Title == "" {
+		spec.Title.Title, defs = name, append(defs, "title="+name)
+	}
+	if spec.Title.Date == "" {
+		spec.Title.Date = time.Now().Format("2006-01-02")
+		defs = append(defs, "date="+spec.Title.Date)
+	}
+	if spec.Title.Rev == "" {
+		spec.Title.Rev, defs = "A", append(defs, "rev=A")
+	}
+	if spec.Title.Company == "" {
+		spec.Title.Company, defs = "pcbpilot", append(defs, "company=pcbpilot")
+	}
+	if len(defs) > 0 {
+		rep.Warnings = append(rep.Warnings, "title block defaults: "+strings.Join(defs, ", ")+" (set title.* in the spec)")
+	}
 	rep.Warnings = append(rep.Warnings, rs.Notes...)
 	rep.Parts, rep.Nets, rep.Pins, rep.NoConnect = len(d.Parts), len(d.Nets), len(d.PinNet), len(d.NC)
 	for _, pg := range d.Pages {
@@ -511,6 +529,8 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 	}
 	lay := sbQualityCheck(stage, files)
 	rep.gate(lay.Name, lay.Status, lay.Detail, lay.Data)
+	eg := sbEngineerGrade(stage, files, d)
+	rep.gate(eg.Name, eg.Status, eg.Detail, eg.Data)
 	tm.mark("checks")
 	// hard gates are transactional: ERC errors, quality findings or a page
 	// that does not fit leave --out untouched
@@ -1114,6 +1134,21 @@ func renderSbPage(e *kicad.SchEditor, d *sbDesign, st *sbState, pg sbPage, zis [
 				if err := e.AddLabel(kind, mk.Net, at, ang, ""); err != nil {
 					return err
 				}
+				continue
+			}
+			if mk.Kind == "power" || mk.Kind == "ground" {
+				// supply symbols always point up, ground symbols down (EG-05):
+				// a stub that arrives the other way gets a short jog
+				if (mk.Kind == "power" && mk.Dir == "down") || (mk.Kind == "ground" && mk.Dir == "up") {
+					j := kicad.Pt{X: at.X + 2.54, Y: at.Y}
+					e.AddWire(at, j)
+					segs = append(segs, [2]kicad.Pt{at, j})
+					at = j
+				}
+				if _, err := e.AddPower(mk.Net, at, 0, mk.Kind == "ground"); err != nil {
+					return err
+				}
+				pinPts[at]++
 				continue
 			}
 			kind := mk.Kind

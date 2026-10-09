@@ -73,6 +73,16 @@ func sbZoneFindings(d *sbDesign, zi *sbZoneIn, zl *sbZoneLayout) []string {
 	for _, f := range kicad.CheckSchematic(text, kicad.CheckOptions{}) {
 		out = append(out, f.Kind+": "+f.Message)
 	}
+	if pg, ok := sbEGPageOf("zone", text, d, nil); ok { // the engineer-grade hard rules too
+		for _, h := range pg.Hard {
+			if !strings.HasPrefix(h, "EG-06") {
+				out = append(out, h)
+			}
+		}
+		for _, c := range pg.Decoupling { // one finding per far cap, weighted
+			out = append(out, "EG-06 "+c, "EG-06 "+c)
+		}
+	}
 	return out
 }
 
@@ -310,6 +320,41 @@ func (d *sbDesign) zoneInputs() []*sbZoneIn {
 		}
 		out = append(out, zi)
 	}
+	// reading order follows the power / signal flow: connectors and inputs,
+	// regulators, the main controller, then peripherals (stable otherwise)
+	rank := func(zi *sbZoneIn) int {
+		core := zi.Parts[0]
+		hasConn, hasReg := false, false
+		for _, p := range zi.Parts {
+			switch sbRefPrefix(p.Ref) {
+			case "J", "CN", "P", "USB":
+				hasConn = true
+			case "L":
+				hasReg = true
+			}
+			if len(p.PowerPins) > 0 && len(p.LPins) <= 8 {
+				hasReg = true
+			}
+		}
+		maxPins := 0
+		for _, q := range out {
+			if q.Zone.Page == zi.Zone.Page {
+				maxPins = max(maxPins, len(q.Parts[0].LPins))
+			}
+		}
+		switch {
+		case hasConn && len(core.LPins) < maxPins:
+			return 0
+		case hasReg:
+			return 1
+		case len(core.LPins) == maxPins && maxPins > 8:
+			return 2
+		}
+		return 3
+	}
+	if !d.ZoneOrderFixed {
+		sort.SliceStable(out, func(i, j int) bool { return rank(out[i]) < rank(out[j]) })
+	}
 	return out
 }
 
@@ -420,6 +465,13 @@ func planZone(d *sbDesign, zi *sbZoneIn, m *sbMeasure, budget int) (*sbZoneLayou
 		in.Components = append(in.Components, comp)
 	}
 	in.CoreComponentID = zi.Parts[0].Ref
+	// the planner's own beautify and bounded rotation refinement (buses are
+	// not drawn on KiCad: off)
+	if len(syms[zi.Parts[0].Ref].Pins) <= 16 { // both passes are costly around a big core
+		noBus := false
+		in.Aesthetics = &SchematicAestheticsOptions{Style: "balanced", NativeBus: &noBus}
+		in.Optimization = &SchematicLayoutOptimization{MaxVariants: 2, MaxAttempts: 8}
+	}
 	res, err := PlanSchematicLayout(in)
 	if err != nil {
 		return nil, err
@@ -607,19 +659,16 @@ func sbMarkerBox(mk sbMarker) kicad.Box {
 	p := mk.At
 	switch mk.Kind {
 	case "power", "ground":
-		// body + value text (the text turns with the symbol: it runs across
-		// the stub, centred ~3.6 mm out)
+		// drawn upright (supply up, ground down; a stub arriving the other
+		// way jogs 2.54 mm right first): body + value text
 		half, reach := math.Max(1.9, sbTextW(mk.Net)/2+0.6), 5.6
-		switch mk.Dir {
-		case "up":
-			return kicad.Box{MinX: p.X - half, MinY: p.Y - reach, MaxX: p.X + half, MaxY: p.Y}
-		case "down":
-			return kicad.Box{MinX: p.X - half, MinY: p.Y, MaxX: p.X + half, MaxY: p.Y + reach}
-		case "left":
-			return kicad.Box{MinX: p.X - reach, MinY: p.Y - half, MaxX: p.X, MaxY: p.Y + half}
-		default:
-			return kicad.Box{MinX: p.X, MinY: p.Y - half, MaxX: p.X + reach, MaxY: p.Y + half}
+		if (mk.Kind == "power" && mk.Dir == "down") || (mk.Kind == "ground" && mk.Dir == "up") {
+			p.X += 2.54
 		}
+		if mk.Kind == "power" {
+			return kicad.Box{MinX: p.X - half, MinY: p.Y - reach, MaxX: p.X + half, MaxY: p.Y}
+		}
+		return kicad.Box{MinX: p.X - half, MinY: p.Y, MaxX: p.X + half, MaxY: p.Y + reach}
 	}
 	w := sbTextW(mk.Net) + 2
 	switch mk.Dir {
@@ -643,6 +692,27 @@ func sbSnap(v float64) float64 { return math.Round(v/sbGrid) * sbGrid }
 // connects every pin with the autoconnect planner (power/ground symbols and
 // labels on short stubs). Pins the planner cannot land get a plain stub.
 func gridZone(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant) (*sbZoneLayout, error) {
+	// a part whose attach wire leaves another pin no clean stub is placed
+	// without attaching, and the zone is redrawn (a few rounds)
+	exclude := map[string]bool{}
+	var last error
+	for round := 0; round < 5; round++ {
+		zl, bad, err := gridZoneOnce(d, zi, m, v, exclude)
+		if err == nil {
+			return zl, nil
+		}
+		last = err
+		if len(bad) == 0 {
+			break
+		}
+		for _, r := range bad {
+			exclude[r] = true
+		}
+	}
+	return nil, last
+}
+
+func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, exclude map[string]bool) (*sbZoneLayout, []string, error) {
 	zl := &sbZoneLayout{Method: "grid-autoconnect", Parts: map[string][]sbPose{}}
 	type unitRef struct {
 		p    *sbRPart
@@ -655,7 +725,7 @@ func gridZone(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant) (*sbZone
 		for _, u := range sbUnits(p) {
 			s, err := m.get(p, u)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			items = append(items, unitRef{p, u, s})
 		}
@@ -667,21 +737,29 @@ func gridZone(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant) (*sbZone
 	}
 	room := sbSnap((maxLabel + 10) * v.Room) // stub + label on a side with pins
 	// per-side room: only sides with pins need space for stubs + labels
-	foot := func(s kicad.SceneSymbol) kicad.Box {
-		sides := map[string]bool{}
+	foot := func(s kicad.SceneSymbol, ref string) kicad.Box {
+		sides := map[string]float64{}
 		for _, q := range s.Pins {
-			sides[sbOutwardDir(q.Outward)] = true
+			need := 2.54 // NC pin: just its flag
+			if n, ok := d.PinNet[sbPinKey(ref, q.Number)]; ok {
+				need = room
+				if k := d.NetKind[n]; k == "power" || k == "ground" {
+					need = 7.62 // a supply / ground symbol on a short stub
+				}
+			}
+			side := sbOutwardDir(q.Outward)
+			sides[side] = math.Max(sides[side], need)
 		}
 		r := func(side string) float64 {
-			if sides[side] {
-				return room
+			if v, ok := sides[side]; ok {
+				return v
 			}
 			return 2.54
 		}
 		b := s.Box
 		return kicad.Box{MinX: b.MinX - r("left"), MinY: b.MinY - r("up") - 2.54, MaxX: b.MaxX + r("right"), MaxY: b.MaxY + r("down") + 2.54}
 	}
-	core := foot(items[0].s)
+	core := foot(items[0].s, items[0].p.Ref)
 	zl.Parts[items[0].p.Ref] = append(zl.Parts[items[0].p.Ref], sbPose{At: kicad.Pt{}, Unit: items[0].unit})
 	placed := []kicad.Box{sbGrow(items[0].s.Box, 2.54)} // the core's body; its labels are re-checked after
 	owner := []string{items[0].p.Ref}
@@ -718,6 +796,21 @@ func gridZone(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant) (*sbZone
 	// attach: each part faces the placed pin it shares a net with (the
 	// near hint first, then signal and supply nets before ground), at a
 	// short real wire; decoupling caps sit beside the IC pin they serve
+	type attachWire struct {
+		ref string
+		w   []kicad.Pt
+	}
+	var attachWires []attachWire
+	isDecap := func(p *sbRPart) bool {
+		if sbRefPrefix(p.Ref) != "C" || len(p.LPins) != 2 {
+			return false
+		}
+		k := map[string]bool{}
+		for _, q := range p.LPins {
+			k[d.NetKind[d.PinNet[sbPinKey(p.Ref, q.Number)]]] = true
+		}
+		return k["power"] && k["ground"]
+	}
 	attach := func(it unitRef) bool {
 		var targets []string
 		if it.p.Near != "" {
@@ -781,6 +874,9 @@ func gridZone(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant) (*sbZone
 							qp := kicad.Pt{X: t.at.X + dv.X*gap + pv.X*off, Y: t.at.Y + dv.Y*gap + pv.Y*off}
 							pose := sbPose{At: kicad.Pt{X: sbSnap(qp.X - qrel.X), Y: sbSnap(qp.Y - qrel.Y)}, Rot: rot, Unit: it.unit}
 							qp = sbXform(q.At, pose)
+							if isDecap(it.p) && sbBoxPointDist(sbXformBox(it.s.Box, pose), t.at) > 22.86 {
+								continue // decoupling stays within reach of its pin (EG-06)
+							}
 							fb := sbGrow(sbXformBox(it.s.Box, pose), 2.54)
 							// label room on the sides with other pins
 							for _, o := range it.s.Pins {
@@ -808,12 +904,20 @@ func gridZone(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant) (*sbZone
 							if !ok {
 								continue
 							}
-							mid := kicad.Pt{X: sbSnapHalf(t.at.X + dv.X*gap/2), Y: sbSnapHalf(t.at.Y + dv.Y*gap/2)}
+							// orthogonal: straight when aligned, else out along the pin,
+							// across, and in
 							var wire []kicad.Pt
-							if off == 0 {
+							if (dv.X != 0 && math.Abs(qp.Y-t.at.Y) < 1e-6) || (dv.Y != 0 && math.Abs(qp.X-t.at.X) < 1e-6) {
 								wire = []kicad.Pt{t.at, qp}
+							} else if dv.X != 0 {
+								mx := sbSnapHalf(t.at.X + dv.X*gap/2)
+								wire = []kicad.Pt{t.at, {X: mx, Y: t.at.Y}, {X: mx, Y: qp.Y}, qp}
 							} else {
-								wire = []kicad.Pt{t.at, mid, {X: mid.X + pv.X*(qp.X-mid.X), Y: mid.Y + pv.Y*(qp.Y-mid.Y)}, qp}
+								my := sbSnapHalf(t.at.Y + dv.Y*gap/2)
+								wire = []kicad.Pt{t.at, {X: t.at.X, Y: my}, {X: qp.X, Y: my}, qp}
+							}
+							if (dv.X != 0 && (qp.X-t.at.X)*dv.X <= 2.54) || (dv.Y != 0 && (qp.Y-t.at.Y)*dv.Y <= 2.54) {
+								continue // the part must sit out along the pin
 							}
 							skip := map[string]bool{t.ref: true}
 							clear := true
@@ -821,12 +925,22 @@ func gridZone(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant) (*sbZone
 							// crosses no pin ray, the new part's pin rays cross no wire
 							var rays [][]kicad.Pt
 							for k, pa := range pins {
-								if k != tk && !direct[k] && pa.dir != "" {
+								if _, hasNet := d.PinNet[k]; hasNet && k != tk && !direct[k] && pa.dir != "" {
 									rays = append(rays, []kicad.Pt{pa.at, {X: pa.at.X + vec[pa.dir].X*10.16, Y: pa.at.Y + vec[pa.dir].Y*10.16}})
 								}
 							}
 							for i := 0; i+1 < len(wire) && clear; i++ {
 								if sbTouchesWires(wire[i], wire[i+1], rays, kicad.Pt{X: math.NaN()}) {
+									clear = false
+								}
+							}
+							body := sbGrow(sbXformBox(it.s.Box, pose), 0.6)
+							for k, pa := range pins { // the body stays out of other pins' stub + label room
+								nn, hasNet := d.PinNet[k]
+								if !clear || !hasNet || k == tk || direct[k] || pa.dir == "" {
+									continue
+								}
+								if sbOverlap(body, sbPinRoom(pa.at, pa.dir, nn, d.NetKind[nn], room)) {
 									clear = false
 								}
 							}
@@ -849,17 +963,15 @@ func gridZone(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant) (*sbZone
 							if !clear {
 								continue
 							}
-							zl.Parts[it.p.Ref] = append(zl.Parts[it.p.Ref], pose)
-							zl.Wires = append(zl.Wires, wire)
-							direct[qk], direct[tk] = true, true
 							// the island's name rides on the wire: a label on it, or a
-							// supply / ground symbol on a short tee
+							// supply / ground symbol on a short tee (no room: next spot)
 							a, b := wire[0], wire[1] // a = the target pin
-							// the tee sits near the attached part, away from the dense pin row
 							tm := kicad.Pt{X: sbSnapHalf(b.X - dv.X*2.54), Y: sbSnapHalf(b.Y - dv.Y*2.54)}
-							if off != 0 || tm == a {
+							if len(wire) != 2 || tm == a {
 								tm = kicad.Pt{X: sbSnapHalf((a.X + b.X) / 2), Y: sbSnapHalf((a.Y + b.Y) / 2)}
 							}
+							var tee []kicad.Pt
+							var mk sbMarker
 							switch d.NetKind[n] {
 							case "power", "ground":
 								dir := "up"
@@ -870,18 +982,31 @@ func gridZone(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant) (*sbZone
 									dir = "right"
 								}
 								end := kicad.Pt{X: tm.X + vec[dir].X*2.54, Y: tm.Y + vec[dir].Y*2.54}
-								if sbTouchesWires(tm, end, zl.Wires[:len(zl.Wires)-1], kicad.Pt{X: math.NaN()}) {
-									// no room for a tee: the target pin gets its own marker
-									direct[tk] = false
-									break
+								if sbTouchesWires(tm, end, zl.Wires, kicad.Pt{X: math.NaN()}) || sbTouchesWires(tm, end, rays, kicad.Pt{X: math.NaN()}) {
+									continue
 								}
-								zl.Wires = append(zl.Wires, []kicad.Pt{tm, end})
-								zl.Markers = append(zl.Markers, sbMarker{Kind: d.NetKind[n], Net: n, At: end, Dir: dir})
+								mb := sbMarkerBox(sbMarker{Kind: d.NetKind[n], Net: n, At: end, Dir: dir})
+								hit := false
+								for _, pb := range placed {
+									hit = hit || sbOverlap(mb, sbGrow(pb, -1.5))
+								}
+								if hit || sbOverlap(mb, sbXformBox(it.s.Box, pose)) {
+									continue
+								}
+								tee = []kicad.Pt{tm, end}
+								mk = sbMarker{Kind: d.NetKind[n], Net: n, At: end, Dir: dir}
 							default:
-								// anchored just off the target pin, reading away from it
 								at := kicad.Pt{X: sbSnapHalf(a.X + dv.X*1.27), Y: sbSnapHalf(a.Y + dv.Y*1.27)}
-								zl.Markers = append(zl.Markers, sbMarker{Kind: "label", Net: n, At: at, Dir: t.dir, OnWire: true})
+								mk = sbMarker{Kind: "label", Net: n, At: at, Dir: t.dir, OnWire: true}
 							}
+							zl.Parts[it.p.Ref] = append(zl.Parts[it.p.Ref], pose)
+							zl.Wires = append(zl.Wires, wire)
+							attachWires = append(attachWires, attachWire{it.p.Ref, wire})
+							direct[qk], direct[tk] = true, true
+							if tee != nil {
+								zl.Wires = append(zl.Wires, tee)
+							}
+							zl.Markers = append(zl.Markers, mk)
 							placed, owner = append(placed, fb), append(owner, it.p.Ref)
 							addPins(it, pose)
 							return true
@@ -892,13 +1017,145 @@ func gridZone(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant) (*sbZone
 		}
 		return false
 	}
-	var rest []unitRef
-	todo := append([]unitRef(nil), items[1:]...)
+	// beside the core pin a part serves (decoupling next to its supply
+	// pin), power pin up / ground pin down for two-pin parts
+	coreRef := items[0].p.Ref
+	sidePlace := func(it unitRef) bool {
+		rot := sbTwoPinRot(d, it.p, it.s)
+		pose0 := sbPose{Rot: rot, Unit: it.unit}
+		var anchor *pinAt
+		for _, pass := range []string{"power", "signal", "ground"} {
+			for _, q := range it.s.Pins {
+				n, ok := d.PinNet[sbPinKey(it.p.Ref, q.Number)]
+				if !ok || d.NetKind[n] != pass {
+					continue
+				}
+				for k, pa := range pins {
+					if pa.ref == coreRef && d.PinNet[k] == n && (anchor == nil || pa.at.Y < anchor.at.Y) {
+						a := pa
+						anchor = &a
+					}
+				}
+			}
+			if anchor != nil {
+				break
+			}
+		}
+		if anchor == nil || it.p.Multi || v.NoAttach {
+			return false
+		}
+		side := anchor.dir
+		if side == "up" || side == "down" {
+			side = "right"
+		}
+		fb0 := sbXformBox(foot(sbRotScene(it.s, rot), it.p.Ref), sbPose{})
+		cb := sbGrow(items[0].s.Box, 0)
+		// candidate spots: beside the pin on its side, or above / below the
+		// core near the pin; nearest to the pin first
+		type cand struct {
+			at   kicad.Pt
+			dist float64
+		}
+		var cands []cand
+		gap0 := math.Min(room, 12.7)
+		if isDecap(it.p) { // supply up / ground down: no label room needed sideways
+			gap0 = 5.08
+		}
+		add := func(at kicad.Pt) {
+			at = kicad.Pt{X: sbSnap(at.X), Y: sbSnap(at.Y)}
+			body := sbXformBox(sbRotScene(it.s, rot).Box, sbPose{At: at})
+			cands = append(cands, cand{at, sbBoxPointDist(body, anchor.at)})
+		}
+		for dxStep := 0; dxStep < 8; dxStep++ {
+			g := gap0 + float64(dxStep)*2.54
+			for step := -16; step <= 16; step++ {
+				dy := float64(step) * 2.54
+				y := anchor.at.Y + dy - (fb0.MinY+fb0.MaxY)/2
+				if side == "left" {
+					add(kicad.Pt{X: cb.MinX - g - fb0.MaxX, Y: y})
+				} else {
+					add(kicad.Pt{X: cb.MaxX + g - fb0.MinX, Y: y})
+				}
+				x := anchor.at.X + dy - (fb0.MinX+fb0.MaxX)/2
+				add(kicad.Pt{X: x, Y: cb.MinY - g - fb0.MaxY})
+				add(kicad.Pt{X: x, Y: cb.MaxY + g - fb0.MinY})
+			}
+		}
+		sort.SliceStable(cands, func(i, j int) bool { return cands[i].dist < cands[j].dist })
+		found := false
+		for _, c := range cands {
+			if found {
+				break
+			}
+			at := c.at
+			f := kicad.Box{MinX: fb0.MinX + at.X, MinY: fb0.MinY + at.Y, MaxX: fb0.MaxX + at.X, MaxY: fb0.MaxY + at.Y}
+			ok := true
+			for _, pb := range placed {
+				if sbOverlap(f, pb) {
+					ok = false
+					break
+				}
+			}
+			for k, pa := range pins { // keep the stub + marker room of connected pins free
+				n, hasNet := d.PinNet[k]
+				if !ok || !hasNet || direct[k] || pa.dir == "" {
+					continue
+				}
+				if sbOverlap(f, sbPinRoom(pa.at, pa.dir, n, d.NetKind[n], room)) {
+					ok = false
+				}
+			}
+			if ok {
+				pose := pose0
+				pose.At = at
+				zl.Parts[it.p.Ref] = append(zl.Parts[it.p.Ref], pose)
+				placed, owner = append(placed, f), append(owner, it.p.Ref)
+				addPins(it, pose)
+				found = true
+				// an upright two-pin part takes its supply / ground symbol
+				// straight on the pin (no autoconnect search)
+				if len(it.s.Pins) == 2 {
+					for _, q := range it.s.Pins {
+						k := sbPinKey(it.p.Ref, q.Number)
+						kind := d.NetKind[d.PinNet[k]]
+						dir := sbOutwardDir(math.Mod(q.Outward+rot+360, 360))
+						if !((kind == "power" && dir == "up") || (kind == "ground" && dir == "down")) {
+							continue
+						}
+						a := sbXform(q.At, pose)
+						b := kicad.Pt{X: a.X, Y: a.Y + vec[dir].Y*2.54}
+						zl.Wires = append(zl.Wires, []kicad.Pt{a, b})
+						zl.Markers = append(zl.Markers, sbMarker{Kind: kind, Net: d.PinNet[k], At: b, Dir: dir})
+						direct[k] = true
+					}
+				}
+			}
+		}
+		return found
+	}
+	// decoupling first, so it gets the room next to the supply pins
+	var others, rest, far []unitRef
+	for _, it := range items[1:] {
+		if !isDecap(it.p) || it.p.Multi {
+			others = append(others, it)
+			continue
+		}
+		// a row of upright caps (supply up, ground down) beside the pin, else
+		// a short wire to it
+		if !v.NoAttach && sidePlace(it) {
+			continue
+		}
+		if !v.NoAttach && !exclude[it.p.Ref] && attach(it) {
+			continue
+		}
+		rest = append(rest, it)
+	}
+	todo := others
 	for progress := true; progress && len(todo) > 0; {
 		progress = false
 		var next []unitRef
 		for _, it := range todo {
-			if !v.NoAttach && !it.p.Multi && attach(it) {
+			if !v.NoAttach && !exclude[it.p.Ref] && !it.p.Multi && attach(it) {
 				progress = true
 			} else {
 				next = append(next, it)
@@ -906,21 +1163,25 @@ func gridZone(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant) (*sbZone
 		}
 		todo = next
 	}
-	rest = todo
-	// what found no partner: columns right of everything placed
+	for _, it := range append(rest, todo...) {
+		if v.NoAttach || it.p.Multi || !sidePlace(it) {
+			far = append(far, it)
+		}
+	}
 	colH := math.Max(core.H(), 90)
 	maxX := core.MaxX
 	for _, pb := range placed {
 		maxX = math.Max(maxX, pb.MaxX)
 	}
 	x, y, colW := maxX+2.54, core.MinY, 0.0
-	for _, it := range rest {
-		f := foot(it.s)
+	for _, it := range far {
+		rot := sbTwoPinRot(d, it.p, it.s)
+		f := foot(sbRotScene(it.s, rot), it.p.Ref)
 		if y > core.MinY && y+f.H() > core.MinY+colH {
 			x, y, colW = x+colW+2.54, core.MinY, 0
 		}
 		at := kicad.Pt{X: sbSnap(x - f.MinX), Y: sbSnap(y - f.MinY)}
-		zl.Parts[it.p.Ref] = append(zl.Parts[it.p.Ref], sbPose{At: at, Unit: it.unit})
+		zl.Parts[it.p.Ref] = append(zl.Parts[it.p.Ref], sbPose{At: at, Rot: rot, Unit: it.unit})
 		y += f.H()
 		colW = math.Max(colW, f.W())
 	}
@@ -928,11 +1189,11 @@ func gridZone(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant) (*sbZone
 	off := kicad.Pt{X: 254, Y: 254}
 	e, err := kicad.OpenSchematic(kicad.NewSchematicText("A0", kicad.NewUUID(), true))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for _, it := range items {
 		if err := e.AddLibSymbol(it.p.LibID, it.p.SymText); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	for _, it := range items {
@@ -944,7 +1205,7 @@ func gridZone(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant) (*sbZone
 		}
 		if _, err := e.PlaceSymbol(kicad.SymbolInstance{LibID: it.p.LibID, Ref: it.p.Ref, Unit: it.unit,
 			At: kicad.Pt{X: pose.At.X + off.X, Y: pose.At.Y + off.Y}, Rot: pose.Rot}); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	for _, w := range zl.Wires { // the attach wires are obstacles for the stubs
@@ -956,15 +1217,15 @@ func gridZone(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant) (*sbZone
 	}
 	text, err := e.Render()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	e2, err := kicad.OpenSchematic(text)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	sc, err := e2.Scene()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	sc.TitleBlock = nil
 	scene, pinMM := kicadAcScene(sc, nil)
@@ -1088,15 +1349,36 @@ func gridZone(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant) (*sbZone
 		}
 	}
 	if bad := sbFixStubs(zl, pinNet, bodies); len(bad) > 0 {
-		return nil, fmt.Errorf("%d stub(s) would touch a foreign wire or pin: %s", len(bad), strings.Join(bad, "; "))
+		var refs, desc []string
+		for _, b := range bad {
+			desc = append(desc, b.Desc)
+			for _, aw := range attachWires {
+				for i := 0; i+1 < len(aw.w); i++ {
+					if sbTouchesWires(aw.w[i], aw.w[i+1], [][]kicad.Pt{{b.A, b.B}}, kicad.Pt{X: math.NaN()}) {
+						refs = append(refs, aw.ref)
+					}
+				}
+			}
+			if _, pk, ok := strings.Cut(pinNet[b.A], "#"); ok {
+				if r, _, _ := strings.Cut(pk, "."); r != "" && r != items[0].p.Ref {
+					refs = append(refs, r)
+				}
+			}
+		}
+		return nil, refs, fmt.Errorf("%d stub(s) would touch a foreign wire or pin: %s", len(bad), strings.Join(desc, "; "))
 	}
 	zl.Box = zoneBox(zl, zi, syms, m)
-	return zl, nil
+	return zl, nil, nil
 }
 
 // sbFixStubs moves every marker stub that touches another wire, another
 // pin or another marker to the first clear direction / length.
-func sbFixStubs(zl *sbZoneLayout, pinNet map[kicad.Pt]string, bodies []kicad.Box) (unresolved []string) {
+type sbBadStub struct {
+	Desc string
+	A, B kicad.Pt
+}
+
+func sbFixStubs(zl *sbZoneLayout, pinNet map[kicad.Pt]string, bodies []kicad.Box) (unresolved []sbBadStub) {
 	vec := map[string]kicad.Pt{"up": {Y: -1}, "down": {Y: 1}, "left": {X: -1}, "right": {X: 1}}
 	for mi := range zl.Markers {
 		mk := &zl.Markers[mi]
@@ -1130,8 +1412,9 @@ func sbFixStubs(zl *sbZoneLayout, pinNet map[kicad.Pt]string, bodies []kicad.Box
 				}
 			}
 			mb := sbGrow(sbMarkerBox(sbMarker{Kind: mk.Kind, Net: mk.Net, At: b, Dir: mk.Dir}), -0.3)
+			sbx := kicad.Box{MinX: math.Min(a.X, b.X), MinY: math.Min(a.Y, b.Y), MaxX: math.Max(a.X, b.X), MaxY: math.Max(a.Y, b.Y)}
 			for _, bb := range bodies {
-				if sbOverlap(mb, sbGrow(bb, -0.5)) {
+				if sbOverlap(mb, sbGrow(bb, -0.5)) || sbOverlap(sbGrow(sbx, 0.05), sbGrow(bb, -0.5)) {
 					return true
 				}
 			}
@@ -1190,13 +1473,13 @@ func sbFixStubs(zl *sbZoneLayout, pinNet map[kicad.Pt]string, bodies []kicad.Box
 			}
 		}
 		if sbTouchesWires(start, mk.At, foreign, start) {
-			unresolved = append(unresolved, fmt.Sprintf("%s stub at %v touches a wire", mk.Net, start))
+			unresolved = append(unresolved, sbBadStub{fmt.Sprintf("%s stub at %v touches a wire", mk.Net, start), start, mk.At})
 			continue
 		}
 		own := pinNet[start]
 		for p, n := range pinNet {
 			if p != start && n != own && (p == mk.At || sbOnInterior(p, [2]kicad.Pt{start, mk.At})) {
-				unresolved = append(unresolved, fmt.Sprintf("%s stub at %v touches pin %s", mk.Net, start, n))
+				unresolved = append(unresolved, sbBadStub{fmt.Sprintf("%s stub at %v touches pin %s", mk.Net, start, n), start, mk.At})
 				break
 			}
 		}
@@ -1277,6 +1560,72 @@ func sbTouchesWires(a, b kicad.Pt, wires [][]kicad.Pt, allow kicad.Pt) bool {
 	return false
 }
 
+// sbPinRoom is what a pin's own connection will occupy: a stub with a
+// supply / ground symbol (upright, value text included) or a label.
+func sbPinRoom(at kicad.Pt, dir, net, kind string, room float64) kicad.Box {
+	vec := map[string]kicad.Pt{"up": {Y: -1}, "down": {Y: 1}, "left": {X: -1}, "right": {X: 1}}
+	if kind == "power" || kind == "ground" {
+		e := kicad.Pt{X: at.X + vec[dir].X*5.08, Y: at.Y + vec[dir].Y*5.08}
+		seg := kicad.Box{MinX: math.Min(at.X, e.X) - 0.6, MinY: math.Min(at.Y, e.Y) - 0.6, MaxX: math.Max(at.X, e.X) + 0.6, MaxY: math.Max(at.Y, e.Y) + 0.6}
+		return sbBoxUnion(seg, sbGrow(sbMarkerBox(sbMarker{Kind: kind, Net: net, At: e, Dir: dir}), 0.6))
+	}
+	l := room + 2.54
+	e := kicad.Pt{X: at.X + vec[dir].X*l, Y: at.Y + vec[dir].Y*l}
+	return kicad.Box{MinX: math.Min(at.X, e.X) - 1.6, MinY: math.Min(at.Y, e.Y) - 1.6, MaxX: math.Max(at.X, e.X) + 1.6, MaxY: math.Max(at.Y, e.Y) + 1.6}
+}
+
+// sbTwoPinRot: a two-pin part with exactly one pin on a supply or ground
+// net turns so the supply pin points up / the ground pin down (a supply-
+// to-ground part: supply up). Everything else keeps 0°.
+func sbTwoPinRot(d *sbDesign, p *sbRPart, s kicad.SceneSymbol) float64 {
+	if len(s.Pins) != 2 {
+		return 0
+	}
+	want := map[string]string{} // pin → wanted outward
+	for _, q := range s.Pins {
+		switch d.NetKind[d.PinNet[sbPinKey(p.Ref, q.Number)]] {
+		case "power":
+			want[q.Number] = "up"
+		case "ground":
+			want[q.Number] = "down"
+		}
+	}
+	if len(want) == 0 {
+		return 0
+	}
+	if len(want) == 2 && want[s.Pins[0].Number] == want[s.Pins[1].Number] {
+		return 0
+	}
+	for _, rot := range []float64{0, 90, 180, 270} {
+		ok := true
+		for _, q := range s.Pins {
+			if w, has := want[q.Number]; has && sbOutwardDir(math.Mod(q.Outward+rot+360, 360)) != w {
+				ok = false
+			}
+		}
+		if ok {
+			return rot
+		}
+	}
+	return 0
+}
+
+// sbRotScene is s turned by rot (box and pin outward directions).
+func sbRotScene(s kicad.SceneSymbol, rot float64) kicad.SceneSymbol {
+	if rot == 0 {
+		return s
+	}
+	r := s
+	r.Box = sbXformBox(s.Box, sbPose{Rot: rot})
+	r.Pins = nil
+	for _, q := range s.Pins {
+		q.At = sbXform(q.At, sbPose{Rot: rot})
+		q.Outward = math.Mod(q.Outward+rot+360, 360)
+		r.Pins = append(r.Pins, q)
+	}
+	return r
+}
+
 // sbGridVariant spaces the grid fallback: Room scales the label room,
 // OffsetMin the autoconnect stub start (planner units).
 type sbGridVariant struct {
@@ -1284,7 +1633,7 @@ type sbGridVariant struct {
 	NoAttach        bool // plain columns (no part faces its partner pin)
 }
 
-var sbGridVariants = []sbGridVariant{{1, 0, false}, {1.5, 0, false}, {1, 30, false}, {1.8, 30, false}, {1.5, 0, true}, {2.4, 40, true}}
+var sbGridVariants = []sbGridVariant{{1, 0, false}, {1.5, 0, false}, {1, 30, false}, {1.8, 30, false}, {1.5, 0, true}, {2.4, 40, true}, {1, 0, true}}
 
 func sbOutwardDir(deg float64) string {
 	switch int(math.Round(math.Mod(deg+360, 360)/90)) % 4 {

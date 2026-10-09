@@ -46,8 +46,11 @@ type sbSpec struct {
 	NoConnect []string  `json:"noConnect,omitempty"`
 	// UnusedPins: "nc" (default) puts a no-connect flag on every pin no net
 	// names; "open" leaves them (ERC then reports pin_not_connected).
-	UnusedPins string   `json:"unusedPins,omitempty"`
-	LibDirs    []string `json:"libDirs,omitempty"`
+	UnusedPins string `json:"unusedPins,omitempty"`
+	// ZoneOrder: "flow" (default: connectors → regulators → controller →
+	// peripherals) or "spec" (the zones list order).
+	ZoneOrder string   `json:"zoneOrder,omitempty"`
+	LibDirs   []string `json:"libDirs,omitempty"`
 	// Intent is passed to `intent derive --spec` (standard, layers, rules …);
 	// rails/net voltage+current from this spec are merged into its rails.
 	Intent json.RawMessage `json:"intent,omitempty"`
@@ -188,6 +191,9 @@ type sbDesign struct {
 	Pages    []sbPage          // ordered
 	NetPages map[string]map[string]bool
 	Warnings []string
+	// ZoneOrderFixed keeps the spec's zone order on the page (spec
+	// "zoneOrder": "spec"); default: ordered by power / signal flow.
+	ZoneOrderFixed bool
 }
 
 func sbPinKey(ref, num string) string { return ref + "." + num }
@@ -836,7 +842,7 @@ func buildDesign(s *sbSpec, opts sbResolveOpts) (*sbDesign, sbResolveStats, erro
 	if len(s.Parts) == 0 {
 		return nil, st, fmt.Errorf("spec has no parts")
 	}
-	d := &sbDesign{Spec: s, ByRef: map[string]*sbRPart{}, PinNet: map[string]string{}, NetKind: map[string]string{},
+	d := &sbDesign{Spec: s, ZoneOrderFixed: s.ZoneOrder == "spec", ByRef: map[string]*sbRPart{}, PinNet: map[string]string{}, NetKind: map[string]string{},
 		NC: map[string]bool{}, NetPages: map[string]map[string]bool{}}
 	for i := range s.Parts {
 		p := &sbRPart{sbPart: s.Parts[i]}
