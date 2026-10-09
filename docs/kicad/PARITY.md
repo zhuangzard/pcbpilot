@@ -31,10 +31,11 @@ KiCad 对等 = **为同一动作协议实现 KiCad 后端**（`--backend kicad`�
 | 原理图写后端（`internal/kicad/schwrite.go`） | 连接器写入 | 放置库符号实例、导线、结点、标签（局部/全局/层次）、电源符号、非连接标志、文本/矩形、设字段、改位号、移动；拼接写入，其余文本逐字节保留，写后重解析 | 完成（单测 + kicad-cli 网表回读） |
 | `sch place / wire / netflag / no-connect / modify` | 连接器写入 | 同一命令加 `--backend kicad --kicad-sch X`（坐标为 KiCad mm、y 向下；`--symbol Lib:Name`、`--through REF.PIN`、`--at REF.PIN`） | 完成（分支 kicad/sch） |
 | `sch autoconnect / connect`（引脚短桩 + 电源/地/端口/标签） | 连接器逐脚 connect_pin（每脚约 4 s，常见“connector did not respond”） | 同一命令加 `--backend kicad --kicad-sch X [--fit]`：同一规划器读 `.kicad_sch` 几何（`internal/kicad/schscene.go`），全部短桩与标记一次写入；写前在项目副本上跑 kicad-cli 网表，每脚落在计划网络且其他网络不变才替换原文件，否则非零退出、原文件不动 | 完成（分支 kicad/sch-auto；单测 + kicad-cli 网表回读；3 脚批次约 0.4 s） |
-| `sch layout-plan` 落地 | 连接器 Apply 队列（188 步级） | `--backend kicad --kicad-sch X [--fit]`：按位号从 KiCad 图重测器件后规划，核心不动、其余按计划偏移与旋转（以引脚落点反求 KiCad 旋转）一次写入；导线端点、标签、非连接、结点、电源符号随引脚移动，网表前后一致才落盘 | 完成（分支 kicad/sch-auto；单布局，`--zones` 未接；计划导线/标记不画，拖动后的导线可能变斜） |
-| 原理图美观度/块复用（sch aesthetics/block-apply/group-move…） | 连接器写入 | 接到上面的写后端 | 待做 |
+| `sch layout-plan [--zones]` 落地 | 连接器 Apply 队列（188 步级；zones 85–111 s） | `--backend kicad --kicad-sch X [--fit]`：按位号（多单元用 `REF:UNIT`）从 KiCad 图重测后规划；整组锚点在核心处或按评分（与不动器件碰撞、图签禁区、页边）选最近的干净偏移；导线岛整体随动（桩、标签、电源符号刚体移动），其余碰到被移引脚的网在 1.27 mm 栅格上正交重布（A*，绕本体/字段/标签/文字/图签，不沿外网导线走、不碰外网引脚/线端，T 处加结点，引脚沿外向出线），线上局部标签放回新树，布不通的网改为引脚上的网络标签；`--zones` 把区框按行排进页面（`--fit` 选最小纸张）、画虚线框+区名（替换旧框）；写前严格门禁 + 网表一致 | 完成（分支 kicad/sch-quality；Gas A 实页 group-move 实测） |
+| `sch group-move` / `sch destagger` / `sch titleblock` | 连接器（group-move 曾“报失败不回滚”F13、destagger 共线短路 F14） | `--backend kicad`：group-move `--refs R1,U1:2 --dx --dy`（mm）整体事务；destagger 只改单脚直桩的方向/长度，严格减少发现且不新增；titleblock `--title/--rev/--date/--company/--comment N=` 或 `--data` | 完成（分支 kicad/sch-quality） |
+| 原理图美观度/块复用（sch aesthetics/block-apply…） | 连接器写入 | 接到上面的写后端 | 待做 |
 | 旧原理图迁移 EasyEDA → KiCad | — | `kicad sch-import --epro X --board B --out DIR [--pcb board]`（每页一张子图 + 层次根图；符号/单元/图形、位号、值、封装、LCSC、导线、电源、网络端口、非连接；导出后自动与 EasyEDA 连接性逐网逐脚比对） | 完成（分支 kicad/sch；Gas A/B：224/224 网络、686 脚一致，与板焊盘 129/129 网络同名一致；KiCad 自带 EasyEDA Pro 导入器只能在 GUI 中用，kicad-cli 不能读 .epro） |
-| 原理图检查（sch check/gate/ERC） | 连接器 + 自检 | `kicad-cli sch erc` + 现有离线检查 | 待做（`kicad sch-import` 结果 ERC 可跑：仅 10 条 power_pin_not_driven——缺 PWR_FLAG——和封装库未登记的警告） |
+| 原理图检查（sch check/gate/ERC） | 连接器 + 自检 | `pcbpilot kicad sch-check --sch root.kicad_sch [--fix-pwr-flag] [--ignore KIND]`：kicad-cli ERC（JSON）+ pcbpilot 质量检查（符号重叠、导线穿本体、斜线/离栅格/重叠导线、线端或引脚落在导线中段（KiCad 不连）、标签/字段文字压物、标签压线、引脚压标签、图签/出页），JSON 报告，ERC 错误或任一发现即非零；`--fix-pwr-flag` 每个未驱动电源网接一个 PWR_FLAG（逐页门禁 + 网表校验） | 完成（Gas A 导入：10 条 power_pin_not_driven → 0 ERC 错误；剩 199 条封装库未登记警告、92 条美观发现是导入页现状） |
 | 意图推导（intent derive，含安全表） | 离线 | 离线（输入改为 KiCad connectivity） | 进行中 |
 | 仿真 power/analog/post-layout | 离线 | 离线（board-final.json 来自 KiCad） | 进行中 |
 | 布局（pcb auto run / place） | 连接器剧本 | `kicad place`（pcbnew） | 已实现，紧凑度/居中待调 |
@@ -57,12 +58,36 @@ KiCad 对等 = **为同一动作协议实现 KiCad 后端**（`--backend kicad`�
 3. 丝印、说明书、报告在 KiCad 快照上全部跑通；`project import` 实测。
 4. v0.9.0 发布：以本矩阵全部“完成”为前提。
 
+## 原理图写入的事务与门禁（分支 kicad/sch-quality）
+
+每个多对象 KiCad 写入（autoconnect、connect、layout-plan、zones、group-move、destagger、PWR_FLAG）都是一次事务：
+先在内存中生成计划页 → **严格门禁**（`kicad.GateSchematic`：计划页的每条质量发现都必须是原页已有的，按键计数；
+新增任何一条即拒写）→ 在项目副本上跑 kicad-cli 网表，与预期一致（移动类：分区不变、网名不变，仅布不通改标签时
+允许 `Net-(…)` 自动名改名并上报）→ 原子替换文件。任何一步失败：非零退出，原文件一字节不动（F13/F14 的“报失败但
+已写坏”在 KiCad 后端不存在）。KiCad 10 连接语义实测：引脚或线端落在导线中段**不连**（需结点），标签落在线中段连。
+
+### 单项耗时（`go test ./internal/app -run TestKicadSchOpTimings -v`，rich fixture，M 系列 Mac，负载均值 ~27）
+
+| 操作 | KiCad 后端 | 连接器旧数 |
+|---|---|---|
+| kicad-cli 网表导出 | 0.4–0.6 s | — |
+| autoconnect 2 脚（一次校验写入） | 1.3 s | ~4 s/脚 |
+| group-move 刚体 / 需重布 | 0.8–1.6 s | — |
+| layout-plan --zones 落地（2 区） | 1.3 s | 85–111 s |
+| titleblock / destagger 规划 | <10 ms | — |
+| sch-check --fix-pwr-flag（fixture，2 个旗） | 3.7 s | — |
+| sch-check --fix-pwr-flag（Gas A 5 页，10 个旗） | 24 s | — |
+
+时间几乎全在 kicad-cli（每次写入 2 次网表导出；ERC 约 1.3 s/次）。
+
 ## 原理图（分支 kicad/sch）尚未完成
 
 - `--backend kicad` 还没接的命令：`sch disconnect`、`autoconnect --replace/--all-pages`、`block-apply`、
-  `layout-plan --zones` 落地（及按计划重画导线/标记）、`group-move`、`zone*`、`titleblock`、`page-new/rename/delete`（新增子图）、`prim-delete`（删除图元）、`rebind-*`、`replace`、
-  `no-connect --clear`；`sch check/gate` 对 KiCad 用 ERC + 离线检查。
-- 写后端：删除/修改已有导线与标签、拖动时导线跟随、`extends` 派生库符号、按 EasyEDA 单位（10 mil、y 向上）输入坐标。
+  `zone*`（zone-arrange 的 KiCad 落地走 `layout-plan --zones`）、`page-new/rename/delete`（新增子图）、`prim-delete`（删除图元）、`rebind-*`、`replace`、
+  `no-connect --clear`。
+- 重布路由：线上非引脚处的电源符号/全局标签当作固定端点（会拉回原位置）；Prim 顺序 + 单网 A*，不做全局交叉最小化；
+  `--zones` 不处理 `embedIn` 子区、多页；字段文字框为估算（0.8 em/字）。
+- 写后端：`extends` 派生库符号、按 EasyEDA 单位（10 mil、y 向上）输入坐标。
 - `kicad sch-import`：镜像元件的方向只按 KiCad 变换搜索（Gas 工程里没有镜像件，未实测）；不导入总线、图片、表格；
-  字段对齐方式未迁移（位置照搬）；未自动加 PWR_FLAG。
+  字段对齐方式未迁移（位置照搬）；PWR_FLAG 由 `kicad sch-check --fix-pwr-flag` 补，sch-import 本身不加。
 - `kicad netlist` 与 kicad/core 分支的同名命令重叠，合并时保留一个（字段形状相同：connectivity 1.4）。
