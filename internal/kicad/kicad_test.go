@@ -221,3 +221,12 @@ func TestPrepareDSNEdgeKeepouts(t *testing.T) {
 		t.Fatal("unbalanced")
 	}
 }
+
+func TestDRCSplitErrors(t *testing.T) {
+	rep := &DRCReport{Violations: []Violation{{Rule: "clearance", Severity: "error"}, {Rule: "silk_overlap", Severity: "warning"},
+		{Rule: "silk_overlap", Severity: "warning"}, {Rule: "unconnected_items", Severity: "error"}}}
+	errs, warn, n := rep.SplitErrors()
+	if errs.Total != 2 || errs.Counts["clearance"] != 1 || errs.Counts["unconnected_items"] != 1 || n != 2 || warn["silk_overlap"] != 2 {
+		t.Fatalf("%+v %v %d", errs, warn, n)
+	}
+}

@@ -136,3 +136,22 @@ func contains(xs []string, s string) bool {
 	}
 	return false
 }
+
+// SplitErrors returns the error-severity part of a report (the gate) and
+// the warning counts by rule (reported, not gated).
+func (r *DRCReport) SplitErrors() (*DRCReport, map[string]int, int) {
+	errs := &DRCReport{KiCadVersion: r.KiCadVersion, Units: r.Units, Counts: map[string]int{}}
+	warn := map[string]int{}
+	n := 0
+	for _, v := range r.Violations {
+		if v.Severity == "" || v.Severity == "error" {
+			errs.Violations = append(errs.Violations, v)
+			errs.Counts[v.Rule]++
+			continue
+		}
+		warn[v.Rule]++
+		n++
+	}
+	errs.Total = len(errs.Violations)
+	return errs, warn, n
+}

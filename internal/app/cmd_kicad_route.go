@@ -20,8 +20,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -53,6 +55,7 @@ type kicadRouteOpts struct {
 	noReview                bool
 	reviewTimeout           time.Duration
 	projectName, customer   string
+	parallelMS              bool
 }
 
 func newKicadRouteCmd(stdout, stderr io.Writer) *cobra.Command {
@@ -135,6 +138,7 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 	f.DurationVar(&o.fo.maxTime, "max-time", 0, "fastroute --max-time per run (0 = none)")
 	f.IntVar(&o.fo.threads, "threads", 1, "fastroute autorouter/optimizer threads (1 also sets --multi-start=1)")
 	f.IntVar(&o.fo.multiStart, "multi-start", 0, "fastroute --multi-start=N (0 = 1 with --threads 1)")
+	f.BoolVar(&o.parallelMS, "parallel-multi-start", true, "run the multi-start=4 retry speculatively in parallel with the main fastroute run (needs ≥ 2 CPUs)")
 	f.IntVar(&o.fo.rounds, "continue", 2, "fastroute continuation runs (--initial-session) while connections remain unrouted")
 	f.DurationVar(&o.fo.timeout, "router-timeout", 45*time.Minute, "hard limit per fastroute run")
 	f.Float64Var(&o.fo.minTraceUm, "min-trace-um", 0, "fastroute --router.min_trace_width_um (default: max(board minimum track width, min(narrowest widthMil.min, narrowest class width)))")
@@ -529,6 +533,33 @@ func (r *kicadRun) run() error {
 	}
 	r.add(r.review("layout", relEv))
 	r.lap("release review")
+
+	// 9. The one release sign-off (same command for EasyEDA runs).
+	so := signoffOpts{board: filepath.Join(o.outDir, "board-final.json"), intent: o.intent, sim: o.sim,
+		review: filepath.Join(o.outDir, "review-design", "review.json"), outDir: filepath.Join(o.outDir, "signoff")}
+	if r.conn != "" {
+		so.connectivity = []string{r.conn}
+	}
+	if m, ok := r.summary["manual"].(*manualRun); ok && m != nil {
+		so.manual = m.Current
+	}
+	if rep, _ := r.summary["report"].(map[string]any); rep != nil {
+		so.report, _ = rep["json"].(string)
+	}
+	g := gateResult{Gate: "signoff"}
+	if res, err := runSignoff(so, r.waivers, r.stderr); err != nil {
+		g.Detail = "signoff: " + err.Error()
+	} else {
+		g.Pass = res.Pass
+		g.Detail = "pcbpilot signoff: " + filepath.Join(so.outDir, "signoff.md")
+		for _, x := range res.Gates {
+			if !x.Pass {
+				g.Items = append(g.Items, x.Gate+": "+x.Detail)
+			}
+		}
+	}
+	r.add(g)
+	r.lap("signoff")
 	return nil
 }
 
@@ -603,20 +634,47 @@ func (r *kicadRun) doRoute(classed string, reqs map[string]kicad.NetRequirement,
 	fmt.Fprintf(r.stderr, "pre-route gate: DSN ok (%d no-neck-down class(es), %d inner rule(s), min trace %.1f µm)\n",
 		len(prep.NoNeckdown), len(prep.InnerRules), o.fo.minTraceUm)
 	r.lap("DSN prepare (requirements, keep-outs)")
-	ses, runs, err := runFastroute(o.fo, dsnPath, base, r.stderr)
+	// The multi-start=4 retry is independent of the main run (a fresh run on
+	// the same DSN): with a spare core it runs speculatively in parallel and
+	// is used only when the main run leaves connections unrouted (PicoRick:
+	// 112 s + 143 s sequential → max of the two).
+	ms := o.fo
+	ms.multiStart = 4
+	parallel := o.parallelMS && runtime.NumCPU() >= 2
+	var (
+		msSes  string
+		msRuns []fastrouteRun
+		msErr  error
+		wg     sync.WaitGroup
+	)
+	logw := io.Writer(&syncWriter{w: r.stderr})
+	if parallel {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			msSes, msRuns, msErr = runFastroute(ms, dsnPath, base+"-ms", logw)
+		}()
+	}
+	ses, runs, err := runFastroute(o.fo, dsnPath, base, logw)
+	wg.Wait()
 	r.summary["router"], r.summary["routerRuns"] = "fastroute", runs
+	r.summary["multiStartParallel"] = parallel
 	if err != nil {
 		return err
 	}
 	if last := lastOK(runs); last != nil && last.Unrouted > 0 {
-		ms := o.fo
-		ms.multiStart = 4
-		fmt.Fprintf(r.stderr, "multi-start: %d connection(s) still unrouted; one fresh run with --multi-start=4\n", last.Unrouted)
-		s2, r2, err2 := runFastroute(ms, dsnPath, base+"-ms", r.stderr)
-		r.summary["multiStartRuns"] = r2
-		if got := lastOK(r2); err2 == nil && got != nil && runImproved(*last, *got) {
-			ses, runs = s2, r2
+		if !parallel {
+			fmt.Fprintf(r.stderr, "multi-start: %d connection(s) still unrouted; one fresh run with --multi-start=4\n", last.Unrouted)
+			msSes, msRuns, msErr = runFastroute(ms, dsnPath, base+"-ms", logw)
 		}
+		r.summary["multiStartRuns"] = msRuns
+		if got := lastOK(msRuns); msErr == nil && got != nil && runImproved(*last, *got) {
+			ses, runs = msSes, msRuns
+			fmt.Fprintf(r.stderr, "multi-start: kept (%d unrouted)\n", got.Unrouted)
+		}
+	} else if parallel {
+		r.summary["multiStartRuns"] = msRuns
+		r.summary["multiStartUnused"] = "main run routed everything; the speculative multi-start run was not used"
 	}
 	r.route = lastOK(runs)
 	r.summary["routeFinal"], r.summary["ses"] = r.route, ses
@@ -783,6 +841,7 @@ func (r *kicadRun) widen(board, what string, plan func([]specctra.Track, []widen
 func (r *kicadRun) silkPlace(board string) (string, error) {
 	opt := r.o.silk
 	rep := &silkTightReport{}
+	prev := ""
 	for round := 1; round <= 3; round++ {
 		s, _, err := r.snapshot(board)
 		if err != nil {
@@ -835,6 +894,14 @@ func (r *kicadRun) silkPlace(board string) (string, error) {
 		if len(set)+len(add) == 0 {
 			break
 		}
+		// No progress: the same moves as the last round (labels the planner
+		// cannot resolve cycle between the same slots) — stop, skip the edit.
+		key, _ := json.Marshal([]any{set, add})
+		if string(key) == prev {
+			fmt.Fprintf(r.stderr, "silk round %d repeats round %d; stopped\n", round, round-1)
+			break
+		}
+		prev = string(key)
 		rep.Moved += len(set)
 		out := r.next("silk")
 		if _, err := r.kt.Edit(board, map[string]any{"setText": set, "addTexts": add, "hideTexts": hide}, out); err != nil {
@@ -866,12 +933,18 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 	r.summary["routed"] = routed
 
 	// KiCad DRC (errors gate; warnings reported).
+	// One kicad-cli run (all severities): the errors gate and the reported
+	// warnings come from the same report.
 	drcPath := filepath.Join(o.outDir, "drc.json")
-	rep, err := r.kt.DRC(routed, drcPath)
-	drcRep := rep
+	allPath := filepath.Join(o.outDir, "drc-all.json")
+	all, err := r.kt.DRCSeverity(routed, allPath, "all")
+	var drcRep *kicad.DRCReport
 	if err != nil {
 		r.add(gateResult{Gate: "kicad-drc", Detail: err.Error()})
 	} else {
+		rep, warn, nWarn := all.SplitErrors()
+		drcRep = rep
+		_ = writeJSONFile(drcPath, rep)
 		g := kicadDRCGate(rep, drcPath)
 		pre := map[string]int{}
 		for _, v := range rep.Violations {
@@ -885,23 +958,8 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 		sort.Strings(g.Info)
 		r.add(g)
 		_ = writeJSONFile(filepath.Join(o.outDir, "drc-flat.json"), kicadDRCFlat(rep))
-		drcSum := map[string]any{"file": drcPath, "total": rep.Total, "counts": rep.Counts}
-		allPath := filepath.Join(o.outDir, "drc-all.json")
-		if all, aerr := r.kt.DRCSeverity(routed, allPath, "all"); aerr == nil {
-			warn := map[string]int{}
-			n := 0
-			for _, v := range all.Violations {
-				if v.Severity != "error" {
-					warn[v.Rule]++
-					n++
-				}
-			}
-			drcSum["warnings"], drcSum["warningCounts"], drcSum["allFile"] = n, warn, allPath
-		}
-		r.summary["drc"] = drcSum
+		r.summary["drc"] = map[string]any{"file": drcPath, "allFile": allPath, "total": rep.Total, "counts": rep.Counts, "warnings": nWarn, "warningCounts": warn}
 	}
-
-	r.lap("gate: kicad-cli DRC")
 	snap, raw, err := r.snapshot(routed)
 	if err != nil {
 		return false, err
@@ -913,7 +971,7 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 	r.summary["boardFinal"] = boardPath
 	r.lap("gate: board-final snapshot")
 	if r.netlist != nil {
-		r.add(padNetDiffGate(r.netlist.PinNets(), snap, o.sch, filepath.Join(o.outDir, "net-diff.json")))
+		r.add(padNetDiffGate(r.netlist.PinNets(), boardPinNets(snap), o.sch, filepath.Join(o.outDir, "net-diff.json")))
 	}
 	r.add(kicadIntentRulesGate(raw, r.classes))
 
@@ -1189,8 +1247,8 @@ func boardPinNets(snap *boardSnapshot) map[string]string {
 
 // padNetDiffGate compares the schematic's pin→net partition with the
 // board's pad nets (kicad.ComparePinNets); the result also goes to path.
-func padNetDiffGate(sch map[string]string, snap *boardSnapshot, source, path string) gateResult {
-	d := kicad.ComparePinNets(sch, boardPinNets(snap), nil)
+func padNetDiffGate(sch, board map[string]string, source, path string) gateResult {
+	d := kicad.ComparePinNets(sch, board, nil)
 	if path != "" {
 		_ = writeJSONFile(path, map[string]any{"passed": d.Equal, "compare": d, "diffs": padNetDiffItems(d)})
 	}
@@ -1236,4 +1294,16 @@ func schValues(nl *kicad.SchNetlist) map[string]any {
 		parts[c.Ref] = v
 	}
 	return map[string]any{"parts": parts}
+}
+
+// syncWriter serialises writes from concurrent router runs.
+type syncWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (s *syncWriter) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.w.Write(p)
 }
