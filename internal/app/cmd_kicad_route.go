@@ -462,8 +462,7 @@ func (r *kicadRun) run() error {
 		return err
 	}
 	for round := 1; !pass && round <= irWidenRounds; round++ {
-		r.summary["gates"] = r.gates
-		ratios := irOverBudget(r.summary)
+		ratios := irOverBudget(map[string]any{"gates": r.closureGates()})
 		if ratios == nil {
 			break
 		}
@@ -1108,4 +1107,38 @@ func (r *kicadRun) starvedThermals(board string) (string, error) {
 	fmt.Fprintf(r.stderr, "thermals: %d pad(s) whose spokes reached only an isolated pour island taken out of the pour\n", len(ops))
 	r.summary["starvedThermals"] = map[string]any{"pads": ops, "applied": true}
 	return out, nil
+}
+
+// placementDRC are KiCad DRC rules that copper widening cannot cause or fix
+// (footprint placement and library data).
+var placementDRC = map[string]bool{"courtyards_overlap": true, "malformed_courtyard": true, "missing_courtyard": true,
+	"lib_footprint_issues": true, "lib_footprint_mismatch": true, "footprint_type_mismatch": true, "duplicate_footprints": true,
+	"extra_footprint": true, "missing_footprint": true, "footprint": true, "footprint_symbol_mismatch": true}
+
+// closureGates is r.gates as the IR closure judges them: a kicad-drc gate
+// failing only on placement / footprint rules does not hold the closure
+// back (widening cannot change it; the gate still fails the run). The
+// design-review gate is not copper either.
+func (r *kicadRun) closureGates() []gateResult {
+	var out []gateResult
+	for _, g := range r.gates {
+		if g.Gate == "design-review" {
+			continue
+		}
+		if g.Gate == "kicad-drc" && !g.Pass {
+			onlyPlacement := true
+			if c, ok := r.summary["drc"].(map[string]any); ok {
+				if counts, ok := c["counts"].(map[string]int); ok {
+					for rule := range counts {
+						onlyPlacement = onlyPlacement && placementDRC[rule]
+					}
+				}
+			}
+			if onlyPlacement {
+				continue
+			}
+		}
+		out = append(out, g)
+	}
+	return out
 }
