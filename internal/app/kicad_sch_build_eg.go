@@ -31,7 +31,10 @@ type sbEGPage struct {
 	FillRatio       float64  `json:"fillRatio"`               // soft
 	Decoupling      []string `json:"decouplingFar,omitempty"` // EG-06 hard: cap > 25.4 mm from its IC supply pin
 	DecouplingCount int      `json:"decouplingCaps"`
-	Flow            string   `json:"signalFlow"` // soft: driver left of receiver
+	Flow            string   `json:"signalFlow"`            // soft: driver left of receiver
+	TextClashes     []string `json:"textClashes,omitempty"` // EG-14/17 hard: text/symbol/label boxes closer than 0.25 mm
+	WireThrough     []string `json:"wireThrough,omitempty"` // hard: a wire through another net's power symbol or label
+	Zones           int      `json:"zones"`
 	Hard            []string `json:"hard,omitempty"`
 }
 
@@ -63,6 +66,16 @@ func sbEngineerGrade(dir string, files []string, d *sbDesign) sbGate {
 		pg, ok := sbEGPageOf(f, string(raw), d, specNames)
 		if !ok {
 			continue
+		}
+		// EG-03 density: smallest paper and ≥ 40 % of the drawable area
+		// used, unless the page holds one small zone
+		for _, z := range d.Zones {
+			if len(d.Pages) <= 1 || sbSheetFile(z.Page) == f {
+				pg.Zones++
+			}
+		}
+		if pg.FillRatio > 0 && pg.FillRatio < 0.40 && pg.Zones > 1 {
+			pg.Hard = append(pg.Hard, fmt.Sprintf("EG-03 page fill %.2f < 0.40 (spread the zones or use smaller paper)", pg.FillRatio))
 		}
 		hard += len(pg.Hard)
 		pages = append(pages, pg)
@@ -274,15 +287,23 @@ func sbEGPageOf(f, raw string, d *sbDesign, specNames map[string]bool) (sbEGPage
 	sort.Strings(pg.Decoupling)
 	// soft: signal flow (typed drivers left of receivers), fill ratio
 	pg.Flow = sbFlow(d, pinAt)
-	if cb, ok := sbContent(sc); ok && sc.TitleBlock != nil {
+	cb, hasContent := sbContent(sc)
+	if hasContent && sc.TitleBlock != nil {
 		pw, ph := sc.TitleBlock.MaxX+10, sc.TitleBlock.MaxY+10
-		area := (pw - 20) * (ph - 20)
+		area := (pw-20)*(ph-20) - sc.TitleBlock.W()*sc.TitleBlock.H() // drawable, title block excluded
 		if area > 0 {
 			pg.FillRatio = math.Round(cb.W()*cb.H()/area*100) / 100
 		}
 	}
+	pg.TextClashes, pg.WireThrough = sbTextClashes(sc)
 	if pg.PowerInverted > 0 {
 		pg.Hard = append(pg.Hard, fmt.Sprintf("EG-05 %d inverted power/ground symbol(s)", pg.PowerInverted))
+	}
+	if len(pg.TextClashes) > 0 {
+		pg.Hard = append(pg.Hard, fmt.Sprintf("EG-14 %d text/symbol clash(es) < 0.25 mm: %s", len(pg.TextClashes), sbFirst(pg.TextClashes, 6)))
+	}
+	if len(pg.WireThrough) > 0 {
+		pg.Hard = append(pg.Hard, fmt.Sprintf("EG-14 %d wire(s) through another net's symbol/label: %s", len(pg.WireThrough), sbFirst(pg.WireThrough, 6)))
 	}
 	if pg.Crossings > 1 {
 		pg.Hard = append(pg.Hard, fmt.Sprintf("EG-08 %d wire crossings (≤ 1)", pg.Crossings))
@@ -415,4 +436,114 @@ func sbContent(sc *kicad.SchScene) (kicad.Box, bool) {
 		add(l.Box)
 	}
 	return b, !math.IsInf(b.MinX, 1)
+}
+
+func sbFirst(xs []string, n int) string {
+	if len(xs) <= n {
+		return strings.Join(xs, "; ")
+	}
+	return strings.Join(xs[:n], "; ") + fmt.Sprintf("; … %d more", len(xs)-n)
+}
+
+// sbTextBox measures a 1.27 mm KiCad stroke-font run: 0.6 em per glyph
+// plus the stroke.
+func sbTextW127(n int) float64 { return float64(n)*0.762 + 0.2 }
+
+// sbLabelBox is a label's text extent (local: text from the anchor along
+// the angle; hierarchical/global: plus the flag shape).
+func sbLabelBox(l kicad.SceneLabel) kicad.Box {
+	w := sbTextW127(len([]rune(l.Name)))
+	if l.Kind != kicad.LabelLocal {
+		w += 2.6
+	}
+	a := l.At
+	switch int(math.Mod(math.Mod(l.Angle, 360)+360, 360)) {
+	case 90:
+		return kicad.Box{MinX: a.X - 1.6, MinY: a.Y - w, MaxX: a.X + 0.1, MaxY: a.Y}
+	case 180:
+		return kicad.Box{MinX: a.X - w, MinY: a.Y - 1.6, MaxX: a.X, MaxY: a.Y + 0.1}
+	case 270:
+		return kicad.Box{MinX: a.X - 1.6, MinY: a.Y, MaxX: a.X + 0.1, MaxY: a.Y + w}
+	}
+	return kicad.Box{MinX: a.X, MinY: a.Y - 1.6, MaxX: a.X + w, MaxY: a.Y + 0.1}
+}
+
+// sbTextClashes checks every pair of drawn things a reader must tell apart —
+// part and power-symbol bodies, visible field texts (real font metrics) and
+// labels — for 0.25 mm clearance, and wires through another net's power
+// symbol or label.
+func sbTextClashes(sc *kicad.SchScene) (clashes, through []string) {
+	type item struct {
+		owner, what string
+		box         kicad.Box
+		text        bool
+		anchor      []kicad.Pt
+	}
+	var items []item
+	for i, s := range sc.Symbols {
+		owner := fmt.Sprintf("s%d", i)
+		name := s.Ref
+		if s.Power {
+			name = "power " + s.Ref
+			for _, f := range s.Fields {
+				if f.Name == "Value" {
+					name = "power " + f.Value
+				}
+			}
+		}
+		var anchors []kicad.Pt
+		for _, q := range s.Pins {
+			anchors = append(anchors, q.At)
+		}
+		if s.HasBox {
+			items = append(items, item{owner, name, s.Body, false, anchors})
+		}
+		for _, f := range s.Fields {
+			c := kicad.Pt{X: (f.Box.MinX + f.Box.MaxX) / 2, Y: (f.Box.MinY + f.Box.MaxY) / 2}
+			w := sbTextW127(len([]rune(f.Value)))
+			b := kicad.Box{MinX: c.X - w/2, MinY: c.Y - 0.7, MaxX: c.X + w/2, MaxY: c.Y + 0.7}
+			if f.Box.H() > f.Box.W() { // vertical
+				b = kicad.Box{MinX: c.X - 0.7, MinY: c.Y - w/2, MaxX: c.X + 0.7, MaxY: c.Y + w/2}
+			}
+			items = append(items, item{owner, name + " " + f.Name, b, true, anchors})
+		}
+	}
+	for i, l := range sc.Labels {
+		items = append(items, item{fmt.Sprintf("l%d", i), "label " + l.Name, sbLabelBox(l), true, []kicad.Pt{l.At}})
+	}
+	const clr = 0.125 // each side: 0.25 mm between two things
+	for i := 0; i < len(items); i++ {
+		for j := i + 1; j < len(items); j++ {
+			a, b := items[i], items[j]
+			if a.owner == b.owner || (!a.text && !b.text) { // body/body is the quality gate's
+				continue
+			}
+			if sbOverlap(sbGrow(a.box, clr), sbGrow(b.box, clr)) {
+				clashes = append(clashes, a.what+" / "+b.what)
+			}
+		}
+	}
+	// wires through power symbols and labels they do not end on
+	for _, it := range items {
+		if !(strings.HasPrefix(it.what, "power ") && !strings.Contains(it.what, " Value") || strings.HasPrefix(it.what, "label ")) {
+			continue
+		}
+		for _, w := range sc.Wires {
+			own := false
+			for _, p := range it.anchor {
+				own = own || w[0] == p || w[1] == p || sbOnInterior(p, w)
+			}
+			if own {
+				continue
+			}
+			sb := kicad.Box{MinX: math.Min(w[0].X, w[1].X), MinY: math.Min(w[0].Y, w[1].Y), MaxX: math.Max(w[0].X, w[1].X), MaxY: math.Max(w[0].Y, w[1].Y)}
+			if sbOverlap(sbGrow(sb, 0.05), sbGrow(it.box, -0.1)) {
+				through = append(through, it.what)
+				break
+			}
+		}
+	}
+	sort.Strings(clashes)
+	sort.Strings(through)
+	return clashes, through
 }
