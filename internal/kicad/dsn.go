@@ -455,3 +455,28 @@ func childSpans(text, name string) [][2]int {
 	}
 	return out
 }
+
+// DSNLayers returns a DSN's copper layer names in stack order and the factor
+// from mil to its resolution unit (for specctra.AppendEscapes).
+func DSNLayers(dsn string) ([]string, float64, error) {
+	m := reResolution.FindStringSubmatch(dsn)
+	if m == nil {
+		return nil, 0, fmt.Errorf("DSN has no (resolution ...)")
+	}
+	toMil, err := unitToMil(m[1])
+	if err != nil {
+		return nil, 0, err
+	}
+	ss, se, err := listSpan(dsn, "structure")
+	if err != nil {
+		return nil, 0, err
+	}
+	var layers []string
+	for _, lm := range reLayerType.FindAllStringSubmatch(dsn[ss:se], -1) {
+		layers = append(layers, strings.Trim(lm[1], `"`))
+	}
+	if len(layers) == 0 {
+		return nil, 0, fmt.Errorf("DSN structure declares no layers")
+	}
+	return layers, 1 / toMil, nil
+}

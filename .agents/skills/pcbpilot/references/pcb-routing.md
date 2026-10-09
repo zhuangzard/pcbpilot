@@ -296,6 +296,22 @@ Steps (stdout is one summary JSON, progress on stderr):
    still stay `blocked`, up to `--escape-rounds 3` re-routes add escapes for the newly blocked pins, each kept only
    if better (`autoEscapes[]` in the summary; `--no-auto-escapes` turns it off). `--router '<cmd> {in} {out}'` keeps
    working for any other router.
+   **Intent pad escapes** (with `--intent`; same planner in `kicad route`): every SMD pad of an intent net with
+   `widthMil.min < outer` whose full width cannot leave it straight out to its courtyard gets a fixed escape
+   (`summary.intentEscapes`), as wide as clearance allows (pad rects, track capsules, via discs, the router margin,
+   the larger net clearance), never below `widthMil.min`: **outward** from inside the outer tip to 1 mil past the
+   point where a full-width trace end fits (checked as a square — fastroute's octagon end cap; a circle-fit end 8.5 mil
+   past a 0.4 mm-pitch pad did not insert, ~15 mil did), else the courtyard exit; else a **bridge** to an adjacent
+   same-net pad of the row across the inner ends; else **inward to a via** kept a clearance off every SMD pad incl.
+   its own (via-at-SMD). Pads with a same-net row neighbour plan first; later candidates hold a `widthMil.min`
+   reservation (0.4 mm pitch: +3V3 next to +1V1 cannot both leave outward at 10 mil, 2·(15.75 − 6.1) < 20).
+   fastroute models a fixed-wire end inside a pad as starting at the pad centre (conservative; reported as
+   pre-existing unfixable). Pads that already have an escape are left alone. Connections still `blocked` get
+   placement hints (`routeResult.placementHints`, `route-complete` items): the part in the trapped pad's escape
+   corridor and which way / how far to move it. PicoRick: 11 → 4–5 unrouted, KiCad DRC 22 → 13–15, intent-widths 0.
+   `intent-widths` accepts a narrower segment only as a pad escape: the **whole** segment within max(3 × width,
+   30 mil) of one same-net pad's copper and ≥ `widthMil.min` (the internal router's neck-down zone); a narrow run
+   that only starts at a pad fails.
 3. `--rip-up` removes unlocked routing first (the session already contains it), then the SES import and the
    `pcb ses-repair` fixes (`--no-repair` skips):
    - Inner1/Inner2 tracks land on layer ids 21/22 → recreated on 15/16 (the session's layer decides);

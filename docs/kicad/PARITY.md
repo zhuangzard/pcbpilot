@@ -118,3 +118,40 @@ KiCad 对等 = **为同一动作协议实现 KiCad 后端**（`--backend kicad`�
 | 7b | fastroute 微颈缩可收窄任意拥挤段 | 高于全局下限的所有意图网类进 `--no-neckdown-classes` | `forbidsNeckdown`（共用） |
 | 7c | 非 fastroute 路径缺门禁 | `route-complete` 对外部 `--router`、`--router internal`、`pcb gate` 用板铜连通性判；`pcb auto route` 加 design/layout 评审；两条路径以 `gate-set` 收尾，强制门禁集合缺一即失败（`TestRouteGateSetContract`） | `route_gate_set.go`、`pcb auto route` |
 | 8 | 计时 | `summary.timings` 保留；前后对比见 `.agents/skills/pcbpilot/references/kicad.md`「计时与提速」 | — |
+
+## 意图网焊盘逃线（分支 kicad/escape-stubs，2026-10-09）
+
+所有意图网类进 `--no-neckdown-classes` 后，满宽走线出不了细间距焊盘（PicoRick RP2040 U303 QFN-56 0.4 mm，
++3V3 / +1V1 15.75 mil：11 条连接 blocked）。不重开颈缩，改为**布线前预布固定逃线**（`planIntentEscapes`，
+`kicad route` 与 EasyEDA `pcb auto route` / autoroute 共用；EasyEDA 原有 GND 预逃线照旧，已有逃线的焊盘跳过）：
+
+- 候选：意图网的 SMD 焊盘，`widthMil.min < outer`，满宽从焊盘中心直出到封装 courtyard 外不满足间距。
+- 宽度：在 DRC 同一几何（焊盘矩形、走线胶囊、过孔圆，间距 + 0.2 mil 布线余量，取两网 netclass / 意图间距较大者）下
+  能放下的最大值，上限满宽，**不低于 widthMil.min**。
+- 形状按序尝试：**外出**（从焊盘外端内缩 w/2 起，直出到满宽线端——按方形核，包住 fastroute 的八边形端帽——
+  第一次放得下处再 +1 mil，否则到 courtyard 外）；**同网桥**（外出被占时，与同排相邻同网焊盘在内端相连：RP2040 43–44、48–49）；
+  **内收 + 过孔**（两者都不行时向封装体内到过孔，过孔离开同网 SMD 焊盘一个间距——fastroute/Freerouting via-at-SMD 规则）。
+- 有同网邻焊盘的候选先规划；后面的候选先占一条 widthMil.min 的外出预留，0.4 mm 间距上 +3V3/+1V1 相邻不会互相挤掉。
+- 逃线以 `(type fix)` 写入 DSN（`specctra.AppendEscapes`：由 FixDSN 推广，mil→DSN 单位换算，带引号的过孔名）；
+  fastroute 不把固定走线写回 SES，KiCad 在 SES 导入后由 `addEscapes` 把桩与过孔加到板上（`summary.intentEscapes` /
+  `intentEscapesAdded`）。实测：fastroute 把落在焊盘内的固定走线端点按焊盘中心建模（比实板保守，报为
+  pre-existing unfixable）；满宽线端在圆核刚放下处（离焊盘端 8.5 mil）插不进，到方核位置（约 15 mil）可布通。
+- `intent-widths`：窄于全宽的段只有**整段**落在本网某焊盘铜 max(3×宽, 30 mil) 内（内部布线器颈缩区）且 ≥ widthMil.min
+  才算焊盘逃线；从焊盘出发一直窄下去的段不再放过（原规则：一端在 50 mil 内即可）。
+- 后仿真：逃线是板上真实铜，窄段进入 IR 模型（`TestEscapeStubNarrowsIRPath`）。
+- 布不通反馈：`routeResult.placementHints` 与 `route-complete` 条目给出每条 blocked 连接该挪哪个件、往哪挪、至少多远
+  （逃线走廊里挡着的件；走廊空则把另一端件拉向逃线出口；同件同网脚、远端连接不编造挪件）。
+
+PicoRick 草稿副本，`kicad route --rip-up --no-review --threads 1`，同一命令、同一意图（墙钟受机器负载影响，只作参考）：
+
+| | 前（dev 897c4041） | 后（r4，最终代码） | r3（无 via-at-SMD 规则） |
+|---|---|---|---|
+| 总计 / fastroute / 丝印 | 821 s / 696 s / 23 s | 106 s / 91 s / 3.7 s | 105 s / 90 s / 3.7 s |
+| 逃线 | — | 15 焊盘（外出 11、同网桥 3、内收过孔 1），1 个焊盘放不下 min | 同左 |
+| fastroute 未布通（blocked） | 11（11） | 5（5） | 4（4） |
+| intent-widths | 0 | 0 | 0 |
+| kicad-drc 错误 | 22（clearance 11 + unconnected 11） | 15（10 + 5） | 13（9 + 4） |
+
+剩余 clearance 全是用户 `Analog` 网类（0.2 mm）与 fastroute 走线之间，与逃线无关（前后都有）。剩余 blocked 集中在
+U303 右侧 USB 串阻 R303/R304 与左侧去耦 C314 的逃线走廊里，摆放提示：R303 右移 ≥ 16 mil、C314 左移 ≥ 37 mil、
+R304 向左上靠近 U303.46 出口等——这些是摆放问题，不再是线宽规则问题。

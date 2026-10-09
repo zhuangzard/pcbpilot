@@ -1075,6 +1075,7 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 	dsnText := string(dsnBytes)
 	rawText := dsnText
 	var fixOpt specctra.FixOptions
+	var escEnv *escapeEnv
 	if !o.rawDSN {
 		opt, err := o.fx.options()
 		if err != nil {
@@ -1106,6 +1107,16 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 				opt.Escapes = append(opt.Escapes, pre...)
 				summary["preEscapes"] = map[string]any{"planned": len(pre), "skipped": skipped}
 				fmt.Fprintf(stderr, "pre-escapes: %d ground pin(s) of fine-pitch parts reserved (%d skipped)\n", len(pre), len(skipped))
+			}
+		}
+		if len(reqs) > 0 {
+			if esc, skipped, env, err := plannedIntentEscapes(cfg, window, dsnText, reqs, opt.Escapes); err != nil {
+				fmt.Fprintf(stderr, "intent escapes: %v; skipped\n", err)
+			} else {
+				opt.Escapes = append(opt.Escapes, esc...)
+				escEnv = env
+				summary["intentEscapes"] = map[string]any{"planned": esc, "skipped": skipped}
+				fmt.Fprintf(stderr, "intent escapes: %d pad(s) get a fixed escape stub (full width does not leave the pad), %d cannot reach widthMil.min\n", len(esc), len(skipped))
 			}
 		}
 		fixed, rep, rq, err := prepareDSN(dsnText, opt, reqs)
@@ -1192,7 +1203,11 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 		// route-complete gate of pcb auto route judges them through the
 		// router-agnostic routeResult (v18 B imported 1 unrouted silently).
 		summary["routeFinal"] = lastOK(runs)
-		summary["routeResult"] = fastrouteResult(lastOK(runs), o.fo, dsnPath)
+		rr := fastrouteResult(lastOK(runs), o.fo, dsnPath)
+		if rr != nil && len(rr.Blocked) > 0 && escEnv != nil {
+			rr.PlacementHints = placementHints(rr.Blocked, escEnv, reqs)
+		}
+		summary["routeResult"] = rr
 	} else {
 		tmpl := o.routerCmd
 		if tmpl == "" {
@@ -1380,6 +1395,46 @@ func escapeContext(cfg *appConfig, window, dsn string) ([]pcbPadP, float64, floa
 		via = 24
 	}
 	return pads, clr, via, nil
+}
+
+// plannedIntentEscapes plans the intent pad escapes (planIntentEscapes) on
+// the live board, around the escapes already planned (have), as DSN fixed
+// wires (EasyEDA DSN: mil, TopLayer / BottomLayer). The escape env is
+// returned for the placement hints.
+func plannedIntentEscapes(cfg *appConfig, window, dsn string, reqs map[string]specctra.NetRequirement, have []specctra.Escape) ([]specctra.Escape, []string, *escapeEnv, error) {
+	pads, clr, via, err := escapeContext(cfg, window, dsn)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	env := &escapeEnv{pads: pads, clr: clr + specctra.ClearanceMarginMil, margin: specctra.ClearanceMarginMil, netClr: map[string]float64{}, viaDia: via}
+	for n, r := range reqs {
+		env.netClr[strings.ToUpper(n)] = r.ClearanceMil
+	}
+	for _, e := range have {
+		if len(e.Path) >= 2 {
+			l := 1
+			if e.Layer == "BottomLayer" {
+				l = 2
+			}
+			end := e.Path[len(e.Path)-1]
+			env.planned = append(env.planned, intentEscape{Net: e.Net, Layer: l, WidthMil: e.WidthMil, From: e.Path[0], To: end})
+			if e.Via {
+				env.vias = append(env.vias, widenVia{Net: e.Net, X: end[0], Y: end[1], Diameter: via})
+			}
+		}
+	}
+	esc, skipped := planIntentEscapes(env, reqs, escapeSeeded(have))
+	name := func(l int) string {
+		if l == 2 {
+			return "BottomLayer"
+		}
+		return "TopLayer"
+	}
+	out := make([]specctra.Escape, len(esc))
+	for i, e := range esc {
+		out[i] = e.specctraEscape(name)
+	}
+	return out, skipped, env, nil
 }
 
 // plannedPreEscapes reserves escapes for every ground pin of fine-pitch
