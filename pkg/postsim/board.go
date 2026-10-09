@@ -52,6 +52,69 @@ func (p *Pad) contains(q Point, margin float64) bool {
 	return math.Hypot(x, y-cy) <= hw
 }
 
+// local maps q into the pad frame (centre origin, unrotated).
+func (p *Pad) local(q Point) Point {
+	a := -p.Rot * math.Pi / 180
+	dx, dy := q.X-p.C.X, q.Y-p.C.Y
+	return Point{dx*math.Cos(a) - dy*math.Sin(a), dx*math.Sin(a) + dy*math.Cos(a)}
+}
+
+// core is the pad in its own frame as a segment swept by radius r (a stadium;
+// r = 0 for a rectangle, whose half extents are then hw, hh).
+func (p *Pad) core() (a, b Point, r float64) {
+	hw, hh := p.W/2, p.H/2
+	if !p.Round {
+		return Point{}, Point{}, 0
+	}
+	if hw >= hh {
+		return Point{-(hw - hh), 0}, Point{hw - hh, 0}, hh
+	}
+	return Point{0, -(hh - hw)}, Point{0, hh - hw}, hw
+}
+
+// dist is the exact distance from q to the pad copper (0 inside).
+func (p *Pad) dist(q Point) float64 {
+	l := p.local(q)
+	if p.Round {
+		a, b, r := p.core()
+		return math.Max(0, segDist(l, a, b)-r)
+	}
+	dx := math.Max(0, math.Abs(l.X)-p.W/2)
+	dy := math.Max(0, math.Abs(l.Y)-p.H/2)
+	return math.Hypot(dx, dy)
+}
+
+// segDist is the exact distance from segment ab to the pad copper.
+func (p *Pad) segDist(a, b Point) float64 {
+	la, lb := p.local(a), p.local(b)
+	if p.Round {
+		c, d, r := p.core()
+		return math.Max(0, segSegDist(la, lb, c, d)-r)
+	}
+	if p.dist(a) == 0 || p.dist(b) == 0 {
+		return 0
+	}
+	hw, hh := p.W/2, p.H/2
+	cs := []Point{{-hw, -hh}, {hw, -hh}, {hw, hh}, {-hw, hh}}
+	best := math.Inf(1)
+	for i := range cs {
+		best = math.Min(best, segSegDist(la, lb, cs[i], cs[(i+1)%4]))
+	}
+	return best
+}
+
+// closestOn is the point of segment ab nearest the pad copper.
+func (p *Pad) closestOn(a, b Point) Point {
+	best, bd := a, math.Inf(1)
+	for i := 0; i <= 64; i++ {
+		q := lerp(a, b, float64(i)/64)
+		if d := p.dist(q); d < bd {
+			best, bd = q, d
+		}
+	}
+	return best
+}
+
 func (p *Pad) bounds() Rect {
 	r := math.Hypot(p.W, p.H) / 2
 	return Rect{p.C.X - r, p.C.Y - r, p.C.X + r, p.C.Y + r}

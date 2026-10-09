@@ -365,6 +365,51 @@ func buildNet(b *Board, g *Grid, st *Stackup, net string, platingMm float64) *eN
 			}
 		}
 	}
+	// Exact geometric overlap (KiCad's connectivity rule: copper that touches
+	// is connected) seeds the union before the raster probes: a via ring that
+	// overlaps a pad edge by a fraction of a mil, a track end cap on a pad or
+	// on another track's edge. The raster (≥ ¼ cell sub-samples) and the
+	// centre tests above miss such overlaps and report a false open.
+	near := func(x *tr, p Point) int {
+		u := segParam(p, x.t.A, x.t.B)
+		best, bd := 0, math.Inf(1)
+		for i, v := range x.params {
+			if d := math.Abs(v - u); d < bd {
+				best, bd = i, d
+			}
+		}
+		return x.nodes[best]
+	}
+	for vi, v := range n.vias {
+		for k, l := range st.Layers {
+			for _, pd := range n.pads {
+				if pd.OnLayer(l.ID) && pd.dist(v.C) <= v.Dia/2+touchEps {
+					n.uf.union(n.viaN[vi][k], n.pad[pd])
+				}
+			}
+		}
+	}
+	for xi, x := range trs {
+		a, bb, w := x.t.A, x.t.B, x.t.W
+		lid := st.Layers[x.k].ID
+		for _, pd := range n.pads {
+			if pd.OnLayer(lid) && pd.segDist(a, bb) <= w/2+touchEps {
+				n.uf.union(near(x, pd.closestOn(a, bb)), n.pad[pd])
+			}
+		}
+		for vi, v := range n.vias {
+			if segDist(v.C, a, bb) <= w/2+v.Dia/2+touchEps {
+				n.uf.union(near(x, v.C), n.viaN[vi][x.k])
+			}
+		}
+		for _, y := range trs[xi+1:] {
+			if y.k != x.k || segSegDist(a, bb, y.t.A, y.t.B) > (w+y.t.W)/2+touchEps {
+				continue
+			}
+			pa, pb := closestPair(a, bb, y.t.A, y.t.B)
+			n.uf.union(near(x, pa), near(y, pb))
+		}
+	}
 	for _, q := range pts {
 		lid := st.Layers[q.k].ID
 		for _, pd := range n.pads {
