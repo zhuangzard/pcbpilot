@@ -457,7 +457,16 @@ func newSchDestaggerCommand(cfg *appConfig, window *string, stdout, stderr io.Wr
      还原本轮,非零退出;还原结果如实上报,绝不无条件宣称"页面已复原"。
 
 挤不下时**宁可不动**(记 no-free-slot),不硬塞一个还撞的位置。
-单页作用域(桩线只能从激活页读)——跨页请逐页 ` + "`doc switch`" + ` 后各跑一次。`,
+单页作用域(桩线只能从激活页读)——跨页请逐页 ` + "`doc switch`" + ` 后各跑一次。
+
+--backend kicad --kicad-sch X.kicad_sch: the same idea on a KiCad sheet. A label or
+power symbol at the end of a straight stub from one pin that takes part in a quality
+finding (labels/texts/symbols overlapping, a wire through its text, title block, off
+page — see ` + "`pcbpilot kicad sch-check`" + `) gets the stub direction/length (2.54–15.24 mm)
+that strictly reduces the findings and adds none, the marker turned to read along it;
+greedy, re-planned after each move (--max-moves, default 200). The pin never moves.
+--apply writes once, after the strict gate and kicad-cli's netlist (unchanged) pass;
+otherwise the plan is printed and nothing is written.`,
 		Args: cobra.NoArgs,
 		Example: `  pcbpilot sch destagger                    # 只算不动(dry-run)
   pcbpilot sch destagger --json
@@ -466,6 +475,16 @@ func newSchDestaggerCommand(cfg *appConfig, window *string, stdout, stderr io.Wr
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if apply && dryRun {
 				return fmt.Errorf("--dry-run and --apply are mutually exclusive")
+			}
+			if path, ok, err := kicadSchTarget(cmd); err != nil || ok {
+				if err != nil {
+					return err
+				}
+				n := maxMoves
+				if !cmd.Flags().Changed("max-moves") || n <= 0 {
+					n = 200
+				}
+				return kicadSchDestagger(path, apply, n, stdout)
 			}
 			if maxRounds < 1 {
 				return fmt.Errorf("--max-rounds must be ≥ 1")

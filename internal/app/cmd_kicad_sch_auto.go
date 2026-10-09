@@ -171,8 +171,12 @@ func kicadBeforeNets(path string) (map[string]string, error) {
 }
 
 // kicadSchCommitVerified writes text (optionally page-fitted) to path only
-// after the netlist of a copy of the project with the edit in place passed
-// check; on any failure the original file is untouched.
+// after (1) the strict quality gate passed on the planned page — no overlap,
+// wire through a body, diagonal or off-grid wire, label/pin collision, text
+// on a symbol, title-block or off-page item the page did not already have
+// (kicad.GateSchematic) — and (2) the netlist of a copy of the project with
+// the edit in place passed check. On any failure the original file is
+// untouched: every multi-object KiCad edit is one transaction.
 func kicadSchCommitVerified(path, text string, fit bool, check func(after map[string]string) error) (map[string]any, error) {
 	info := map[string]any{}
 	if fit {
@@ -184,6 +188,15 @@ func kicadSchCommitVerified(path, text string, fit bool, check func(after map[st
 			return nil, fmt.Errorf("--fit: content %.0f×%.0f mm does not fit A0 — split the sheet (nothing written)", r.Content.W(), r.Content.H())
 		}
 		text, info["fit"] = out, r
+	}
+	orig, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	gate := kicad.GateSchematic(string(orig), text, kicad.CheckOptions{})
+	info["gate"] = map[string]any{"ok": gate.OK, "new": len(gate.New), "preexisting": len(gate.Preexisting)}
+	if !gate.OK {
+		return info, &kicadGateError{gate: gate, path: path}
 	}
 	root, err := kicad.RootSheetFor(path)
 	if err != nil {
@@ -239,6 +252,16 @@ func kicadSchCommitVerified(path, text string, fit bool, check func(after map[st
 	}
 	info["verified"] = true
 	return info, nil
+}
+
+// kicadGateError is a planned page refused by the strict quality gate.
+type kicadGateError struct {
+	gate kicad.GateResult
+	path string
+}
+
+func (e *kicadGateError) Error() string {
+	return fmt.Sprintf("strict gate: the planned page adds %d quality finding(s): %s — %s left unchanged", len(e.gate.New), kicad.Summary(e.gate.New, 6), e.path)
 }
 
 // kicadExpectNets checks the netlist after an edit that put each planned
@@ -489,155 +512,4 @@ func kicadSchConnect(path, pinRef string, x, y float64, canonicalKind, net, dire
 		res[k] = v
 	}
 	return writeJSON(stdout, res)
-}
-
-// ---- sch layout-plan --backend kicad ----------------------------------------------
-
-// kicadMeasureLayoutInput replaces every component's measurement (position,
-// rotation, mirror, bbox, pin positions and outward angles) with the KiCad
-// sheet's, in planner units, keyed by designator. Pin nets and the rest of
-// the input are kept. Host-measured text boxes do not describe the KiCad
-// fields and are dropped.
-func kicadMeasureLayoutInput(sc *kicad.SchScene, in SchematicLayoutInput) (SchematicLayoutInput, error) {
-	byRef := map[string][]kicad.SceneSymbol{}
-	for _, s := range sc.Symbols {
-		if !s.Power {
-			byRef[s.Ref] = append(byRef[s.Ref], s)
-		}
-	}
-	for i := range in.Components {
-		m := &in.Components[i].Measurement
-		ss := byRef[m.Designator]
-		if len(ss) != 1 {
-			return in, fmt.Errorf("component %s: %d symbol instances of %q on the KiCad sheet (want exactly 1)", in.Components[i].ID, len(ss), m.Designator)
-		}
-		s := ss[0]
-		m.X, m.Y = mmToEE(s.At)
-		m.Rotation = math.Mod(math.Mod(s.Rot, 360)+360, 360)
-		m.Mirror = s.Mirror != ""
-		if s.HasBox {
-			m.BBox = boxToEE(s.Box)
-		}
-		m.TextBBoxes, m.TextBBoxesByRotation = nil, nil
-		at := map[string]kicad.ScenePin{}
-		for _, p := range s.Pins {
-			at[p.Number] = p
-		}
-		for j := range m.Pins {
-			p, ok := at[m.Pins[j].Number]
-			if !ok {
-				return in, fmt.Errorf("%s has no pin %s on the KiCad sheet", m.Designator, m.Pins[j].Number)
-			}
-			m.Pins[j].X, m.Pins[j].Y = mmToEE(p.At)
-			r := p.Outward
-			m.Pins[j].Rotation = &r
-		}
-		if a := in.Components[i].AllowedRotations; len(a) > 0 {
-			found := false
-			for _, v := range a {
-				found = found || v == m.Rotation
-			}
-			if !found {
-				return in, fmt.Errorf("component %s: allowedRotations %v lack the KiCad rotation %g", in.Components[i].ID, a, m.Rotation)
-			}
-		}
-	}
-	return in, nil
-}
-
-// kicadApplyLayout moves the planned symbols on the KiCad sheet: the core
-// stays where it is, every other placement keeps its planned offset from
-// it; each symbol's KiCad rotation is the one whose pins land on the planned
-// pin positions. Wires, labels and power symbols on moved pins follow; the
-// write happens only when the netlist is unchanged.
-func kicadApplyLayout(path string, e *kicad.SchEditor, sc *kicad.SchScene, in SchematicLayoutInput, res *SchematicLayoutResult, fit bool, stdout io.Writer) error {
-	core := ""
-	var coreX, coreY float64
-	for _, c := range in.Components {
-		if c.ID == in.CoreComponentID {
-			core, coreX, coreY = c.Measurement.Designator, c.Measurement.X, c.Measurement.Y
-		}
-	}
-	var dx, dy float64
-	found := false
-	for _, p := range res.Placements {
-		if p.Designator == core {
-			dx, dy, found = coreX-p.X, coreY-p.Y, true
-		}
-	}
-	if !found {
-		return fmt.Errorf("the layout has no placement for the core %q", core)
-	}
-	syms := map[string]kicad.SceneSymbol{}
-	for _, s := range sc.Symbols {
-		syms[s.Ref] = s
-	}
-	poses := map[string]kicad.SymPose{}
-	for _, p := range res.Placements {
-		s, ok := syms[p.Designator]
-		if !ok {
-			return fmt.Errorf("placement %s is not on the KiCad sheet", p.Designator)
-		}
-		at := eeToMM(p.X+dx, p.Y+dy)
-		want := map[string]kicad.Pt{}
-		for _, pin := range p.Pins {
-			want[pin.Number] = eeToMM(pin.X+dx, pin.Y+dy)
-		}
-		rot, ok := -1.0, false
-		for _, r := range []float64{math.Mod(p.Rotation+360, 360), 0, 90, 180, 270} {
-			pins, err := e.PinsAt(s.LibID, s.Unit, at, r, s.Mirror)
-			if err != nil {
-				return err
-			}
-			match := len(pins) > 0
-			for _, q := range pins {
-				w, has := want[q.Number]
-				if has && (math.Abs(w.X-q.At.X) > 0.01 || math.Abs(w.Y-q.At.Y) > 0.01) {
-					match = false
-					break
-				}
-			}
-			if match {
-				rot, ok = r, true
-				break
-			}
-		}
-		if !ok {
-			return fmt.Errorf("placement %s: the planned pin positions match the KiCad symbol at no rotation", p.Designator)
-		}
-		if math.Abs(at.X-s.At.X) < 1e-4 && math.Abs(at.Y-s.At.Y) < 1e-4 && math.Mod(rot-s.Rot+360, 360) == 0 {
-			continue
-		}
-		poses[p.Designator] = kicad.SymPose{At: at, Rot: rot}
-	}
-	if len(poses) == 0 {
-		return writeJSON(stdout, map[string]any{"ok": true, "file": path, "backend": "kicad", "moved": kicad.DragResult{}, "placements": len(res.Placements), "score": res.Score, "note": "every symbol is already where the layout puts it; nothing written"})
-	}
-	before, err := kicadBeforeNets(path)
-	if err != nil {
-		return fmt.Errorf("--backend kicad needs the KiCad netlist to verify the layout: %w", err)
-	}
-	drag, err := e.DragSymbols(poses)
-	if err != nil {
-		return err
-	}
-	text, err := e.Render()
-	if err != nil {
-		return err
-	}
-	info, err := kicadSchCommitVerified(path, text, fit, func(after map[string]string) error {
-		cmp := kicad.ComparePinNets(before, after, stripSheetPath)
-		if !cmp.Equal {
-			return fmt.Errorf("the layout changes the KiCad netlist (nets %v, only before %v, only after %v)", cmp.Mismatched, cmp.OnlyA, cmp.OnlyB)
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	out := map[string]any{"ok": true, "file": path, "backend": "kicad", "moved": drag, "placements": len(res.Placements), "score": res.Score}
-	for k, v := range info {
-		out[k] = v
-	}
-	return writeJSON(stdout, out)
 }

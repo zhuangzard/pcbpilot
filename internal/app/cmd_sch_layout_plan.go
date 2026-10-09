@@ -70,19 +70,28 @@ the group name; members keep wire + label taps, the bus is never connectivity);
 --native-bus=false keeps virtual lanes only, --bus-host absent|unverified records the
 host's bus API (absent: virtual lanes; unverified: planned but marked host-unverified).
 
---backend kicad --kicad-sch X.kicad_sch (single layout, not --zones) re-measures every
-component from the KiCad sheet by designator (position, rotation, mirror, bbox, pins;
-pin nets and policies stay from --from; host text boxes are dropped), plans, and applies
-the placements to the sheet in one write: the core keeps its position, every symbol
-gets the planned offset and the rotation whose pins land on the planned pins; wire
-ends, labels, no-connects, junctions and power symbols on moved pins follow (wires may
-turn diagonal — the planned wires/markers are not drawn). The file is written only if
-kicad-cli's netlist of the result equals the one before (else non-zero, file untouched);
---fit sizes the page after. The apply report goes to stdout, the layout to --out.
+--backend kicad --kicad-sch X.kicad_sch re-measures every component from the KiCad
+sheet by designator (or REF:UNIT for one unit of a multi-unit symbol: position,
+rotation, mirror, bbox, pins; pin nets and policies stay from --from; host text boxes
+are dropped), plans, and applies the placements in one transaction: every symbol gets
+the planned offset and the rotation whose pins land on the planned pins. The set is
+anchored at the core, or at the nearest offset clear of the symbols that stay, the
+title block and the page edge. Wire islands whose pins all move together move
+rigidly (stubs, labels, power symbols); every other wire touching a moved pin is
+re-routed orthogonally on the 1.27 mm grid around bodies, fields and labels (a net
+that cannot be routed cleanly gets net labels on its pins instead). The planned page
+must pass the strict quality gate (no new overlap, wire through a body, diagonal or
+off-grid wire, label/pin collision, text on a symbol, title-block or off-page item)
+and kicad-cli's netlist of the result must equal the one before; otherwise non-zero
+and the file is untouched. --zones packs the zone frames in rows (the smallest
+paper that holds them with --fit), places each zone at its frame and draws the dashed
+frame + title (replacing earlier pcbpilot frames of those zones). --fit sizes the
+page. The apply report goes to stdout, the layout to --out.
 
 Example:
   pcbpilot sch layout-plan --from measured-set.json --aesthetics balanced --out local-geometry.json
   pcbpilot sch layout-plan --from measured-set.json --backend kicad --kicad-sch power.kicad_sch --fit
+  pcbpilot sch layout-plan --zones --from zones.json --backend kicad --kicad-sch power.kicad_sch --fit
   pcbpilot sch layout-plan --from measured-set.json --out local-geometry.json --report report.json`, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) (runErr error) {
 		if from == "" {
 			return fmt.Errorf("--from is required")
@@ -108,9 +117,6 @@ Example:
 		if err != nil {
 			return err
 		}
-		if kicadApply && zones {
-			return fmt.Errorf("--backend kicad applies a single layout; --zones is not supported")
-		}
 		raw, err := os.ReadFile(from)
 		if err != nil {
 			return err
@@ -129,9 +135,30 @@ Example:
 				review, err = reviewSchematicZonesJSON(raw)
 				printSchematicZoneReview(cmd.ErrOrStderr(), review)
 			}
+			var ked *kicad.SchEditor
+			var ksc *kicad.SchScene
+			if err == nil && kicadApply {
+				phase = "kicad-measure"
+				if ked, err = kicad.OpenSchematicFile(kpath); err == nil {
+					if ksc, err = ked.Scene(); err == nil {
+						input, err = kicadMeasureZonesInput(ksc, input)
+					}
+				}
+			}
 			if err == nil {
 				phase = "solve"
-				result, err = PlanSchematicZones(input)
+				var zr *SchematicZonesResult
+				zr, err = PlanSchematicZones(input)
+				result = zr
+				if err == nil && kicadApply {
+					if out != "" {
+						if err := writeLayoutJSON(from, out, zr); err != nil {
+							return err
+						}
+					}
+					phase = "kicad-apply"
+					return kicadApplyZones(kpath, ked, ksc, zr, kicadFit, stdout)
+				}
 			}
 		} else {
 			var input SchematicLayoutInput

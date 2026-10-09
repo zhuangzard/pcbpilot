@@ -313,10 +313,7 @@ func zfGenPassive(g zfGroup) (zfPlacedGroup, error) {
 			}
 			return dir
 		})
-		if err := zfCheckPassiveOpposed(out); err != nil {
-			return out, err
-		}
-		return out, zfCheckTermOverlap(out)
+		return zfSettlePassive(out)
 	}
 	top, bot := zfAssignEnds(g.Terms)
 	cx := bw / 2
@@ -340,10 +337,99 @@ func zfGenPassive(g zfGroup) (zfPlacedGroup, error) {
 	}
 	place(top, true)
 	place(bot, false)
-	if err := zfCheckPassiveOpposed(out); err != nil {
-		return out, err
+	return zfSettlePassive(out)
+}
+
+// zfSettlePassive runs the two hard invariants (R5 terminal overlap and
+// collinear same-direction flags) on a planned two-pin part; when one fails
+// it tries, before giving up, a staggered stub on one terminal (longer
+// offset along its own direction) and then the terminal on another side of
+// the body (any side for a flag, left/right for a port; never a stub into
+// the body), first one terminal, then both (F7, e2e-round-2026-08-25: the
+// planner used to reject its own regenerated stubs and the page produced
+// nothing). Geometry still comes only from zfTermGeom, so the repaired plan
+// is what connect_pin(direction, offset) draws. Two terminals on the same
+// pin point stay a hard failure — no stub can separate them.
+func zfSettlePassive(out zfPlacedGroup) (zfPlacedGroup, error) {
+	check := func(g zfPlacedGroup) error {
+		if err := zfCheckPassiveOpposed(g); err != nil {
+			return err
+		}
+		return zfCheckTermOverlap(g)
 	}
-	return out, zfCheckTermOverlap(out)
+	first := check(out)
+	if first == nil || len(out.Terms) != 2 {
+		return out, first
+	}
+	a, b := out.Terms[0], out.Terms[1]
+	if absF(a.PinX-b.PinX) <= schMarkerOverlapEps && absF(a.PinY-b.PinY) <= schMarkerOverlapEps {
+		return out, first
+	}
+	type opt struct {
+		dir string
+		off float64
+	}
+	options := func(t zfPlacedTerm) []opt {
+		dirs := []string{t.Dir}
+		cand := []string{"up", "down", "left", "right"}
+		if t.Kind == "netport" {
+			cand = []string{"left", "right"}
+		}
+		for _, d := range cand {
+			if d != t.Dir {
+				dirs = append(dirs, d)
+			}
+		}
+		var out []opt
+		for _, d := range dirs {
+			for k := 0; k < 6; k++ {
+				out = append(out, opt{d, zfStub + float64(k)*2*acSchGrid})
+			}
+		}
+		return out
+	}
+	with := func(g zfPlacedGroup, i int, o opt) (zfPlacedGroup, bool) {
+		t := g.Terms[i]
+		t.Dir, t.Offset = o.dir, o.off
+		wire, marker := zfTermGeom(t.PinX, t.PinY, t.Offset, t.Dir, t.Kind, t.Net, t.SpreadX)
+		inner := zfInflate(g.Body, -0.5)
+		if zfBoxesCross(wire, inner) || zfBoxesCross(marker, inner) {
+			return g, false // a stub or marker on the body
+		}
+		t.BBox = marker
+		ng := g
+		ng.Terms = append([]zfPlacedTerm(nil), g.Terms...)
+		ng.Wires = append([]layoutBBox(nil), g.Wires...)
+		ng.Terms[i] = t
+		if i < len(ng.Wires) {
+			ng.Wires[i] = wire
+		}
+		return ng, true
+	}
+	for _, i := range []int{1, 0} {
+		for _, o := range options(out.Terms[i]) {
+			if ng, ok := with(out, i, o); ok && check(ng) == nil {
+				return ng, nil
+			}
+		}
+	}
+	for _, oa := range options(out.Terms[0]) {
+		ga, ok := with(out, 0, oa)
+		if !ok {
+			continue
+		}
+		for _, ob := range options(out.Terms[1]) {
+			if ng, ok := with(ga, 1, ob); ok && check(ng) == nil {
+				return ng, nil
+			}
+		}
+	}
+	return out, first
+}
+
+// zfBoxesCross reports a positive-area intersection.
+func zfBoxesCross(a, b layoutBBox) bool {
+	return minF(a.MaxX, b.MaxX) > maxF(a.MinX, b.MinX) && minF(a.MaxY, b.MaxY) > maxF(a.MinY, b.MinY)
 }
 
 // zfAllHavePins:这一组的端子是不是全都带实测引脚坐标。**全有才用** ——
