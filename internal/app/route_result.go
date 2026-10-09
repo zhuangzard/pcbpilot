@@ -37,10 +37,14 @@ type routeResult struct {
 	// backend found unroutable on the board as loaded (placement / escapes
 	// must change). UnroutedCount is authoritative when the backend gives a
 	// count without the list.
-	Unrouted      []routeConn `json:"unrouted,omitempty"`
-	Blocked       []routeConn `json:"blocked,omitempty"`
-	UnroutedCount int         `json:"unroutedCount"`
-	Violations    int         `json:"violations"`
+	Unrouted []routeConn `json:"unrouted,omitempty"`
+	Blocked  []routeConn `json:"blocked,omitempty"`
+	// PlacementHints: for each blocked connection, the part to move and
+	// which way (placementHints; filled by the route command, not the
+	// backend).
+	PlacementHints []placementHint `json:"placementHints,omitempty"`
+	UnroutedCount  int             `json:"unroutedCount"`
+	Violations     int             `json:"violations"`
 	// Fixable are routing-caused clearance violations (named).
 	Fixable     int      `json:"fixable"`
 	FixableList []string `json:"fixableList,omitempty"`

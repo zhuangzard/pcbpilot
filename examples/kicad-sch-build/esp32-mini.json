@@ -1,0 +1,55 @@
+{
+  "schema": "pcbpilot.kicad.sch-build/1",
+  "name": "esp32-mini",
+  "title": {
+    "title": "ESP32-S3 mini (esp32MiniRequire.md)",
+    "rev": "A",
+    "company": "pcbpilot",
+    "date": "2026-10-09",
+    "comments": ["5V terminal + USB-C OR, SY8089 3V3 buck, CH340C, ESP32-S3-WROOM-1", "built by pcbpilot kicad sch-build"]
+  },
+  "pages": [
+    {"id": "power", "title": "Power + USB"},
+    {"id": "mcu", "title": "MCU"}
+  ],
+  "zones": [
+    {"id": "usb", "title": "USB-C + CH340C", "page": "power"},
+    {"id": "power_in", "title": "5V terminal + OR", "page": "power"},
+    {"id": "buck", "title": "SY8089 5V to 3V3", "page": "power"},
+    {"id": "mcu", "title": "ESP32-S3-WROOM-1", "page": "mcu"},
+    {"id": "autodl", "title": "Auto download", "page": "mcu"},
+    {"id": "keys", "title": "BOOT / RESET", "page": "mcu"},
+    {"id": "led", "title": "Status LED", "page": "mcu"}
+  ],
+  "parts": [
+    {"ref": "J2", "value": "KF301-5.0-2P", "lcsc": "C474881", "zone": "power_in"},
+    {"ref": "D1", "value": "SS34", "lcsc": "C8678", "zone": "power_in"},
+    {"ref": "D2", "value": "SS34", "lcsc": "C8678", "zone": "power_in"}
+  ],
+  "blocks": [
+    {"block": "block.ch340c_usb_serial", "instance": "USB", "zone": "usb",
+     "refs": {"U": "U1", "J_USB": "J1"}, "lcsc": {"J_USB": "C2765186"},
+     "bind": {"VBUS_5V": "USB_VBUS"}},
+    {"block": "block.sy8089_buck_3v3", "instance": "BUCK", "zone": "buck",
+     "refs": {"U": "U2"}, "bind": {"VIN": "VSYS_5V", "EN": "VSYS_5V", "3V3": "+3V3"}},
+    {"block": "block.esp32s3_wroom1_module", "instance": "MCU", "zone": "mcu",
+     "refs": {"U": "U3"}, "lcsc": {"U": "C2913202"}, "bind": {"3V3": "+3V3"}},
+    {"block": "block.esp32_autodownload", "instance": "AUTO", "zone": "autodl"},
+    {"block": "block.tactile_boot_reset", "instance": "KEYS", "zone": "keys"},
+    {"block": "block.led_indicator_gpio", "instance": "LED", "zone": "led", "bind": {"CTRL": "LED_CTRL"}}
+  ],
+  "nets": [
+    {"name": "USB_VBUS", "pins": ["D1:A"], "kind": "power"},
+    {"name": "+5V_TERM", "pins": ["J2:1", "D2:A"]},
+    {"name": "VSYS_5V", "pins": ["D1:K", "D2:K"]},
+    {"name": "GND", "pins": ["J2:2"]},
+    {"name": "LED_CTRL", "pins": ["U3:IO2"]}
+  ],
+  "rails": [
+    {"net": "+5V_TERM", "voltage": 5, "currentA": 1.0},
+    {"net": "USB_VBUS", "voltage": 5, "currentA": 0.5},
+    {"net": "VSYS_5V", "voltage": 4.6, "currentA": 0.6},
+    {"net": "+3V3", "voltage": 3.3, "currentA": 0.5}
+  ],
+  "intent": {"layers": 4}
+}

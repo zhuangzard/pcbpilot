@@ -3,6 +3,19 @@
 ## [Unreleased]
 
 CLI (offline, KiCad 10):
+- `pcbpilot kicad sch-build --spec design.json --out DIR` — one deterministic call from a design spec (parts, nets,
+  rails, blocks, pages/zones, title block, intent annotations; no coordinates) to a complete KiCad project: LCSC
+  symbols/footprints (cached under `~/.pcbpilot/cache/kicad-lcsc`, imported in parallel), block expansion with
+  readable internal net names, per-zone layout (offline planner + a deterministic grid that puts decoupling caps
+  upright beside their supply pin and attaches parts to the pin they serve with a short orthogonal wire), supply
+  symbols up / ground down, hierarchical sheets with sheet pins, title block, PWR_FLAGs, page fit, library tables.
+  Hard, transactional gates: KiCad netlist == spec, ERC errors, `kicad sch-check` quality, engineer-grade rules
+  (EG-01/05/06/08/09/13/20/22); then connectivity.json + in-process intent derive, and review-panel (stage
+  schematic) when `--requirements` is given (`--no-review` needs a signed waiver). Per-stage timings in the report;
+  ESP32-mini (31 parts) ≈ 8 s cold, 1.3–7 s cached. `--from-connectivity` regenerates EasyEDA designs in KiCad.
+- `pcbpilot kicad sch-edit --project DIR --spec delta.json` (add/remove/replace parts and blocks, connect/disconnect by
+  pin name, rename nets, move zones, set value/field/title; only affected zones are redrawn, uuids kept; dry-run plan),
+  `kicad sch-read` (compact parts/nets spec with bounding boxes), `kicad sch-checkpoint list|restore N`.
 - `sch autoconnect` / `sch connect --backend kicad --kicad-sch X.kicad_sch [--fit]`: the same planner, fed from the
   sheet's geometry instead of the connector; every stub and marker (power/ground symbols, global labels, labels) lands in
   one file write, made only after kicad-cli's netlist of a project copy shows each pin on its planned net and no other net
@@ -46,6 +59,15 @@ Route / gates / sign-off (EasyEDA and KiCad, no connector change):
   (`summary.edgeExemptPads`; KiCad and EasyEDA DSNs); the copper-to-edge gate is unchanged.
 - Every intent net class above the neck-down floor goes to fastroute `--no-neckdown-classes` (its micro neck-down
   narrows any congested segment, not only at pins).
+- Intent pad escapes (`kicad route`, `pcb auto route` / autoroute with `--intent`): an SMD pad of an intent net whose
+  full width cannot leave it gets a fixed escape before routing — outward to where a full-width trace end fits, a
+  bridge to a same-net row neighbour, or inward to a via — as wide as clearance allows, never below `widthMil.min`
+  (`summary.intentEscapes`; KiCad adds them to the board after the SES import). PicoRick: 11 → 5 unrouted, KiCad
+  DRC 22 → 15, intent-widths 0, fastroute 696 → 91 s.
+- `intent-widths`: a narrower segment passes only as a pad escape — wholly within max(3 × width, 30 mil) of a
+  same-net pad and ≥ `widthMil.min` (was: one end within 50 mil).
+- `route-complete` / `routeResult.placementHints`: each blocked connection names the part to move, the direction
+  and a minimum distance.
 - `kicad route`: `--threads` defaults to min(cores−1, 8) (multi-threaded fastroute is deterministic: 3 PicoRick runs
   gave byte-identical sessions; `--threads 1` for reproducibility across builds); every gate reads the router-agnostic
   `routeResult` (`summary.routeResult`), fastroute being its only backend for now.

@@ -39,6 +39,9 @@
 
 ## 原理图 S0–S6
 
+> **KiCad 工程**：S1–S6 合并为一次 `pcbpilot kicad sch-build --spec design.json --out dir/`（S0 的选型/决策写进 spec，
+> 不写坐标），之后 review-panel；修改用 `kicad sch-edit`。见 [kicad-sch-build.md](kicad-sch-build.md)。下面的分步流程适用于 EasyEDA。
+
 ### S0：需求与来源
 
 记录供电、接口、电气要求、机械限制和未决项。按核心器件划分功能模块，把专属去耦、

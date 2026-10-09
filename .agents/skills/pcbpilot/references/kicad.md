@@ -7,6 +7,9 @@
 > fastroute 安装与参数见 [pcb-routing.md](pcb-routing.md#external-router-fastroute)，意图来源见
 > [design-intent.md](design-intent.md)。
 
+> 原理图：用 `kicad sch-build`（spec → 完整工程，一次调用，见 [kicad-sch-build.md](kicad-sch-build.md)），
+> 不再逐步调用 `sch place / autoconnect --backend kicad`。
+
 ## 工作方式
 
 `pcbpilot kicad` 不经 daemon / 连接器，直接对 `.kicad_pcb` / `.kicad_sch` 文件工作：
@@ -176,8 +179,10 @@ kicad/pcb-fixes 前后（PicoRick 草稿副本，`--rip-up --no-review`，同一
 | kicad-drc 错误 | 31 | 22 |
 
 未布通变多来自「所有意图网类不准颈缩」：同一 DSN、`--multi-start=1` 单独测，旧规则 5 未布通（1 blocked）、新规则 15（8 blocked），
-`--router.neck_width_um` 不改善——宽线进不了细间距焊盘。需要的是焊盘逃线（固定短桩，EasyEDA 流程已有 GND 预逃线，
-KiCad 流程尚无），不是放开颈缩。`kicad route` 没有 `--candidates` 候选摆放试布（那是 `pcb auto route` 的功能）。
+`--router.neck_width_um` 不改善——宽线进不了细间距焊盘。需要的是焊盘逃线（固定短桩），不是放开颈缩；
+kicad/escape-stubs 已加意图网焊盘逃线（外出 / 同网桥 / 内收过孔，见 `pcb-routing.md` 与 `docs/kicad/PARITY.md`）：
+同一命令 11 → 5 未布通（剩余全是 R303/R304/C314 摆放挡道，route-complete 给出挪件提示），KiCad DRC 22 → 15，
+fastroute 696 → 91 s。`kicad route` 没有 `--candidates` 候选摆放试布（那是 `pcb auto route` 的功能）。
 
 ## 已知限制与坑
 
