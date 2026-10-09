@@ -96,7 +96,11 @@ pcbpilot kicad route --pcb GasV5_A.kicad_pcb --intent intent.json --sim sim.json
    打开，`--optimizer-threshold`）：它的预算等于整个布线阶段（含 multi-start，至少 60 s）——PicoRick `--multi-start=4`
    开 299 s / 关 134 s，同为 4 未布通 30 冲突，线长只差 0.1 %、过孔差 1；`--multi-start=1` 为 60 / 55 s、8 未布通。
    `--diagnose` 把未布通分 blocked / congestion：全部 blocked 时不续跑（重布无用），`route-complete` 逐条写
-   「移动器件或加逃线」，`summary.blockedConnections` 列出。
+   「移动器件或加逃线」，`summary.blockedConnections` 列出。`--threads` 缺省 min(核数−1, 8)（PicoRick 8 线程连跑 3 次
+   SES 逐字节相同：14 未布通 / 3469 mm / 156 孔；单线程 13 / 3646 mm / 164 孔；机器高负载时墙钟 204–330 s 对 184 s，
+   空闲时首轮约 50 对 112 s）；`--threads 1` 用于跨 fastroute 版本可复现。多线程崩溃自动单线程重跑。
+   门禁与签核只读路由器无关的 `routeResult`（router、version、patchSha、args、session|board、unrouted/blocked 连接、
+   violations、fixable；`summary.routeResult`），fastroute 是目前唯一实现。
    `--no-neckdown-classes` 列出线宽高于全局下限的**所有**意图网类（fastroute 的 fanout 微颈缩会把任意拥挤段收到类宽
    3/4、3/5、1/2，`min_trace_width_um` 只是下限）；最小线宽 = max(板最小线宽, min(最窄 `widthMil.min`, 最窄类线宽))、
    意图差分对/等长组（skew）文件。

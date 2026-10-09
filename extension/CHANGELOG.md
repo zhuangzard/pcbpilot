@@ -26,6 +26,9 @@ Route / gates / sign-off (EasyEDA and KiCad, no connector change):
   (`summary.edgeExemptPads`; KiCad and EasyEDA DSNs); the copper-to-edge gate is unchanged.
 - Every intent net class above the neck-down floor goes to fastroute `--no-neckdown-classes` (its micro neck-down
   narrows any congested segment, not only at pins).
+- `kicad route`: `--threads` defaults to min(cores−1, 8) (multi-threaded fastroute is deterministic: 3 PicoRick runs
+  gave byte-identical sessions; `--threads 1` for reproducibility across builds); every gate reads the router-agnostic
+  `routeResult` (`summary.routeResult`), fastroute being its only backend for now.
 - `kicad route`: `--multi-start` (default 4) is a pcbpilot setting, fastroute's optimizer is off by default
   (`--optimizer`, `--optimizer-threshold`; PicoRick 299 → 134 s at the same 4 unrouted); `--diagnose` blocked
   connections stop continuation runs and are named in `route-complete` (`summary.blockedConnections`).

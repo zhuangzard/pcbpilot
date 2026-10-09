@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -126,6 +127,9 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 				return fmt.Errorf("--width-basis must be net or segment")
 			}
 			o.fo.noOptimizer = !o.optimizer
+			if o.fo.threads <= 0 {
+				o.fo.threads = min(max(runtime.NumCPU()-1, 1), 8)
+			}
 			return runKicadRoute(o, stdout, stderr)
 		},
 	}
@@ -140,7 +144,7 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 	f.BoolVar(&o.ripUp, "rip-up", false, "remove unlocked tracks and vias before routing (route from scratch)")
 	f.StringVar(&o.fastrouteBin, "fastroute-bin", "", "fastroute executable (default: $FASTROUTE_BIN, ~/.pcbpilot/fastroute/current, PATH)")
 	f.DurationVar(&o.fo.maxTime, "max-time", 0, "fastroute --max-time per run (0 = none)")
-	f.IntVar(&o.fo.threads, "threads", 1, "fastroute autorouter/optimizer threads (the --multi-start variants run in parallel regardless)")
+	f.IntVar(&o.fo.threads, "threads", 0, "fastroute autorouter/optimizer threads: 0 = min(cores-1, 8); 1 = single-threaded (reproducible across fastroute builds; a crashed multi-threaded run is retried single-threaded). PicoRick: 3 runs with 8 threads gave byte-identical sessions")
 	f.IntVar(&o.fo.multiStart, "multi-start", 4, "fastroute --multi-start=N: N-1 differently seeded pass-1 orders rerun in parallel by fastroute when connections stay unrouted, best kept (1 = off)")
 	f.BoolVar(&o.optimizer, "optimizer", false, "run fastroute's optimizer (its budget equals the whole routing stage incl. multi-start, ≥ 60 s; PicoRick --multi-start=4: 299 s with it, 134 s without, same 4 unrouted / 30 violations, 0.1 % shorter, 1 via fewer) — off by default")
 	f.Float64Var(&o.fo.optThreshold, "optimizer-threshold", 0, "fastroute --router.optimizer.optimization_improvement_threshold (percent per pass; 0 = fastroute's default)")
