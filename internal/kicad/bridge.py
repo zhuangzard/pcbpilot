@@ -883,7 +883,20 @@ def edit(pcb, ops_path, out):
             continue
         t.SetVisible(False)
         done["hideTexts"] += 1
-    zones = fill_zones(board) if (done["setWidth"] or done["addVias"] or done["addTracks"]) else 0
+    done["padZoneNone"] = 0
+    for op in ops.get("padZoneNone") or []:
+        fp = board.FindFootprintByReference(op["ref"])
+        hit = False
+        if fp is not None:
+            for p in fp.Pads():
+                if p.GetNumber() == str(op["pad"]):
+                    p.SetLocalZoneConnection(pcbnew.ZONE_CONNECTION_NONE)
+                    hit = True
+        if not hit:
+            missing.append("%s.%s" % (op["ref"], op["pad"]))
+        else:
+            done["padZoneNone"] += 1
+    zones = fill_zones(board) if (done["setWidth"] or done["addVias"] or done["addTracks"] or done["padZoneNone"]) else 0
     save_board(board, pcb, out)
     return {"ok": not missing, "error": ("unknown ids: " + ",".join(missing[:10])) if missing else "",
             "out": out, "done": done, "zonesFilled": zones}

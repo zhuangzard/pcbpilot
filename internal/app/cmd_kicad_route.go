@@ -19,6 +19,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -429,6 +430,9 @@ func (r *kicadRun) run() error {
 		}
 		board = out
 		fmt.Fprintf(r.stderr, "pours: %d zone(s) added and filled\n", len(ps))
+		if board, err = r.starvedThermals(board); err != nil {
+			return err
+		}
 	}
 	if o.widenNets != "" {
 		nets := map[string]bool{}
@@ -1064,4 +1068,44 @@ func kicadRouteCompleteGate(run *fastrouteRun, drc *kicad.DRCReport, snap *board
 	g.Info = items
 	g.Detail += fmt.Sprintf("; every unrouted connection is on a poured net and KiCad reports 0 unconnected items")
 	return g
+}
+
+var reStarvedPad = regexp.MustCompile(`[Pp]ad (\S+) \[[^\]]*\] of (\S+)`)
+
+// starvedThermals: a pad whose thermal spokes reach only an isolated pour
+// island (KiCad starved_thermal) is taken out of the pour (zone connection
+// none) — its island then disappears and the pad keeps its tracks. Kept
+// only when KiCad then reports no more unconnected items than before.
+func (r *kicadRun) starvedThermals(board string) (string, error) {
+	rep, err := r.kt.DRC(board, filepath.Join(r.work, fmt.Sprintf("%02d-pours-drc.json", r.step)))
+	if err != nil {
+		return board, err
+	}
+	seen := map[string]bool{}
+	var ops []map[string]any
+	for _, v := range rep.Violations {
+		if v.Rule != "starved_thermal" {
+			continue
+		}
+		if m := reStarvedPad.FindStringSubmatch(v.Message); m != nil && !seen[m[2]+"."+m[1]] {
+			seen[m[2]+"."+m[1]] = true
+			ops = append(ops, map[string]any{"ref": m[2], "pad": m[1]})
+		}
+	}
+	if len(ops) == 0 {
+		return board, nil
+	}
+	out := r.next("thermals")
+	if _, err := r.kt.Edit(board, map[string]any{"padZoneNone": ops}, out); err != nil {
+		return board, err
+	}
+	after, err := r.kt.DRC(out, filepath.Join(r.work, fmt.Sprintf("%02d-thermals-drc.json", r.step)))
+	if err != nil || after.Counts["unconnected_items"] > rep.Counts["unconnected_items"] {
+		fmt.Fprintf(r.stderr, "thermals: taking %d starved pad(s) out of the pour would disconnect copper; kept\n", len(ops))
+		r.summary["starvedThermals"] = map[string]any{"pads": ops, "applied": false}
+		return board, nil
+	}
+	fmt.Fprintf(r.stderr, "thermals: %d pad(s) whose spokes reached only an isolated pour island taken out of the pour\n", len(ops))
+	r.summary["starvedThermals"] = map[string]any{"pads": ops, "applied": true}
+	return out, nil
 }
