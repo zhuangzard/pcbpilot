@@ -7,6 +7,9 @@
 > fastroute 安装与参数见 [pcb-routing.md](pcb-routing.md#external-router-fastroute)，意图来源见
 > [design-intent.md](design-intent.md)。
 
+> 原理图：用 `kicad sch-build`（spec → 完整工程，一次调用，见 [kicad-sch-build.md](kicad-sch-build.md)），
+> 不再逐步调用 `sch place / autoconnect --backend kicad`。
+
 ## 工作方式
 
 `pcbpilot kicad` 不经 daemon / 连接器，直接对 `.kicad_pcb` / `.kicad_sch` 文件工作：

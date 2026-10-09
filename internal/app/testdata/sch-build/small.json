@@ -1,0 +1,40 @@
+{
+  "schema": "pcbpilot.kicad.sch-build/1",
+  "name": "small",
+  "title": {"title": "sch-build small test", "rev": "A", "company": "pcbpilot", "date": "2026-10-09"},
+  "zones": [
+    {"id": "power", "title": "3V3 LDO"},
+    {"id": "mcu", "title": "MCU"},
+    {"id": "led", "title": "Status LED"}
+  ],
+  "parts": [
+    {"ref": "J1", "value": "5V IN", "zone": "power", "symbol": "Connector_Generic:Conn_01x02"},
+    {"ref": "U1", "value": "LDO-3V3", "zone": "power", "pins": [
+      {"number": "1", "name": "GND", "type": "power_in"},
+      {"number": "2", "name": "VOUT", "type": "power_out"},
+      {"number": "3", "name": "VIN", "type": "power_in"}]},
+    {"ref": "C1", "value": "10uF", "zone": "power", "symbol": "Device:C"},
+    {"ref": "C2", "value": "22uF", "zone": "power", "symbol": "Device:C"},
+    {"ref": "U2", "value": "MCU-8", "zone": "mcu", "pins": [
+      {"number": "1", "name": "VDD", "type": "power_in"},
+      {"number": "2", "name": "PA0", "type": "bidirectional"},
+      {"number": "3", "name": "PA1", "type": "bidirectional"},
+      {"number": "4", "name": "NRST", "type": "input"},
+      {"number": "5", "name": "SWDIO", "type": "bidirectional"},
+      {"number": "6", "name": "SWCLK", "type": "input"},
+      {"number": "7", "name": "PA2", "type": "bidirectional"},
+      {"number": "8", "name": "VSS", "type": "power_in"}]},
+    {"ref": "C3", "value": "100nF", "zone": "mcu", "symbol": "Device:C"},
+    {"ref": "R1", "value": "10k", "zone": "mcu", "symbol": "Device:R"},
+    {"ref": "R2", "value": "330", "zone": "led", "symbol": "Device:R"},
+    {"ref": "D1", "value": "RED", "zone": "led", "symbol": "Device:D"}
+  ],
+  "nets": [
+    {"name": "+5V", "pins": ["J1:1", "U1:VIN", "C1:1"], "voltage": 5, "currentA": 0.3},
+    {"name": "+3V3", "pins": ["U1:VOUT", "C2:1", "U2:VDD", "C3:1", "R1:1"], "voltage": 3.3, "currentA": 0.1},
+    {"name": "GND", "pins": ["J1:2", "U1:GND", "C1:2", "C2:2", "U2:VSS", "C3:2", "D1:K"]},
+    {"name": "NRST", "pins": ["U2:NRST", "R1:2"]},
+    {"name": "LED_DRV", "pins": ["U2:PA0", "R2:1"]},
+    {"name": "LED_A", "pins": ["R2:2", "D1:A"]}
+  ]
+}

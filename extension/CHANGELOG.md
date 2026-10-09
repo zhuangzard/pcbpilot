@@ -3,6 +3,19 @@
 ## [Unreleased]
 
 CLI (offline, KiCad 10):
+- `pcbpilot kicad sch-build --spec design.json --out DIR` — one deterministic call from a design spec (parts, nets,
+  rails, blocks, pages/zones, title block, intent annotations; no coordinates) to a complete KiCad project: LCSC
+  symbols/footprints (cached under `~/.pcbpilot/cache/kicad-lcsc`, imported in parallel), block expansion with
+  readable internal net names, per-zone layout (offline planner + a deterministic grid that puts decoupling caps
+  upright beside their supply pin and attaches parts to the pin they serve with a short orthogonal wire), supply
+  symbols up / ground down, hierarchical sheets with sheet pins, title block, PWR_FLAGs, page fit, library tables.
+  Hard, transactional gates: KiCad netlist == spec, ERC errors, `kicad sch-check` quality, engineer-grade rules
+  (EG-01/05/06/08/09/13/20/22); then connectivity.json + in-process intent derive, and review-panel (stage
+  schematic) when `--requirements` is given (`--no-review` needs a signed waiver). Per-stage timings in the report;
+  ESP32-mini (31 parts) ≈ 8 s cold, 1.3–7 s cached. `--from-connectivity` regenerates EasyEDA designs in KiCad.
+- `pcbpilot kicad sch-edit --project DIR --spec delta.json` (add/remove/replace parts and blocks, connect/disconnect by
+  pin name, rename nets, move zones, set value/field/title; only affected zones are redrawn, uuids kept; dry-run plan),
+  `kicad sch-read` (compact parts/nets spec with bounding boxes), `kicad sch-checkpoint list|restore N`.
 - `sch autoconnect` / `sch connect --backend kicad --kicad-sch X.kicad_sch [--fit]`: the same planner, fed from the
   sheet's geometry instead of the connector; every stub and marker (power/ground symbols, global labels, labels) lands in
   one file write, made only after kicad-cli's netlist of a project copy shows each pin on its planned net and no other net
