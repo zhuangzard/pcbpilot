@@ -131,3 +131,30 @@ func TestDragSymbols(t *testing.T) {
 		t.Fatalf("drag changed the netlist: %+v", cmp)
 	}
 }
+
+func TestSetTitleBlock(t *testing.T) {
+	e := openAuto(t)
+	if err := e.SetTitleBlock(TitleBlock{Title: "Gas Module", Rev: "B", Date: "2026-10-09", Company: "ACME", Comments: map[int]string{2: "checked"}}); err != nil {
+		t.Fatal(err)
+	}
+	text, err := e.Render()
+	if err != nil {
+		t.Fatal(err)
+	}
+	e2, _ := OpenSchematic(text)
+	if err := e2.SetTitleBlock(TitleBlock{Rev: "C"}); err != nil {
+		t.Fatal(err)
+	}
+	text, _ = e2.Render()
+	e3, _ := OpenSchematic(text)
+	tb := e3.TitleBlock()
+	if tb.Title != "Gas Module" || tb.Rev != "C" || tb.Date != "2026-10-09" || tb.Company != "ACME" || tb.Comments[2] != "checked" {
+		t.Fatalf("%+v", tb)
+	}
+	if strings.Count(text, "(title_block") != 1 {
+		t.Fatal("title block duplicated")
+	}
+	if e.SetTitleBlock(TitleBlock{Comments: map[int]string{10: "x"}}) == nil {
+		t.Fatal("comment 10 accepted")
+	}
+}

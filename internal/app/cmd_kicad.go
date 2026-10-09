@@ -21,6 +21,7 @@ func newKicadCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 		newKiCadLcscCmd(stdout, stderr),
 		newKicadSchImportCmd(stdout, stderr),
 		newKicadSchNetlistCmd(stdout, stderr),
+		newKicadSchCheckCmd(stdout, stderr),
 	)
 	return c
 }

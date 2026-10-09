@@ -80,6 +80,7 @@ type SchEditor struct {
 	repl                  []textEdit
 	pwrNext               int
 	bodies                map[string]Box // lib_id → graphics-only box (set by Scene)
+	flgFloor              int
 }
 
 type textEdit struct {

@@ -10,13 +10,16 @@ package app
 // that stay, the title block and the page before any is tried.
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
+	"github.com/spf13/cobra"
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
 )
 
@@ -543,4 +546,74 @@ func kicadGroupMove(path string, refs []string, dx, dy float64, fit bool, stdout
 		out[k] = v
 	}
 	return writeJSON(stdout, out)
+}
+
+// ---- sch titleblock --backend kicad --------------------------------------------
+
+type kicadTitleFlags struct {
+	title, rev, date, company string
+	comments                  []string
+}
+
+func (f *kicadTitleFlags) register(c *cobra.Command) {
+	c.Flags().StringVar(&f.title, "title", "", "--backend kicad: title")
+	c.Flags().StringVar(&f.rev, "rev", "", "--backend kicad: revision")
+	c.Flags().StringVar(&f.date, "date", "", "--backend kicad: date (e.g. 2026-10-09)")
+	c.Flags().StringVar(&f.company, "company", "", "--backend kicad: company")
+	c.Flags().StringArrayVar(&f.comments, "comment", nil, "--backend kicad: comment N=TEXT (N 1–9, repeatable)")
+}
+
+// kicadSchTitleblock writes the title block of a KiCad sheet.
+func kicadSchTitleblock(path string, f kicadTitleFlags, dataJSON string, stdout io.Writer) error {
+	tb := kicad.TitleBlock{Title: f.title, Rev: f.rev, Date: f.date, Company: f.company, Comments: map[int]string{}}
+	for _, c := range f.comments {
+		k, v, ok := strings.Cut(c, "=")
+		n, err := strconv.Atoi(strings.TrimSpace(k))
+		if !ok || err != nil {
+			return fmt.Errorf("--comment %q: want N=TEXT", c)
+		}
+		tb.Comments[n] = v
+	}
+	if dataJSON != "" {
+		var data map[string]any
+		if err := json.Unmarshal([]byte(dataJSON), &data); err != nil {
+			return fmt.Errorf("invalid --data json: %w", err)
+		}
+		for k, raw := range data {
+			v, ok := raw.(string)
+			if m, isMap := raw.(map[string]any); isMap {
+				v, ok = m["value"].(string)
+			}
+			if !ok {
+				return fmt.Errorf("--data %s: want a string or {\"value\": string}", k)
+			}
+			switch lk := strings.ToLower(strings.ReplaceAll(k, " ", "")); {
+			case lk == "title" || lk == "name":
+				tb.Title = v
+			case lk == "date":
+				tb.Date = v
+			case lk == "rev" || lk == "revision" || lk == "version":
+				tb.Rev = v
+			case lk == "company":
+				tb.Company = v
+			case strings.HasPrefix(lk, "comment"):
+				n, err := strconv.Atoi(strings.TrimPrefix(lk, "comment"))
+				if err != nil {
+					return fmt.Errorf("--data %s: want Comment1…Comment9", k)
+				}
+				tb.Comments[n] = v
+			default:
+				return fmt.Errorf("--data %s: KiCad's title block has Title, Date, Rev, Company, Comment1…9", k)
+			}
+		}
+	}
+	if tb.Title == "" && tb.Rev == "" && tb.Date == "" && tb.Company == "" && len(tb.Comments) == 0 {
+		return fmt.Errorf("pass --title/--rev/--date/--company/--comment or --data")
+	}
+	return kicadSchEdit(path, stdout, func(e *kicad.SchEditor) (map[string]any, error) {
+		if err := e.SetTitleBlock(tb); err != nil {
+			return nil, err
+		}
+		return map[string]any{"titleBlock": tb}, nil
+	})
 }

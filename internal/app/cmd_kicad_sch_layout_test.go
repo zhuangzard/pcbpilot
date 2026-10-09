@@ -165,3 +165,64 @@ func TestKicadLayoutPlanZonesApply(t *testing.T) {
 		t.Fatalf("%d DIVIDER titles after two runs", n)
 	}
 }
+
+func TestKicadSchTitleblock(t *testing.T) {
+	sheet := autoFixture(t)
+	if out, errs, code := runSch(t, sheet, "titleblock", "--title", "Power", "--rev", "B", "--date", "2026-10-09", "--company", "ACME", "--comment", "1=first"); code != 0 {
+		t.Fatalf("exit %d: %s %s", code, out, errs)
+	}
+	if out, errs, code := runSch(t, sheet, "titleblock", "--data", `{"Rev":{"value":"C"},"Comment2":"second"}`); code != 0 {
+		t.Fatalf("exit %d: %s %s", code, out, errs)
+	}
+	e, _ := kicad.OpenSchematicFile(sheet)
+	tb := e.TitleBlock()
+	if tb.Title != "Power" || tb.Rev != "C" || tb.Company != "ACME" || tb.Comments[1] != "first" || tb.Comments[2] != "second" {
+		t.Fatalf("%+v", tb)
+	}
+	if _, _, code := runSch(t, sheet, "titleblock", "--data", `{"Designer":"x"}`); code == 0 {
+		t.Fatal("unknown KiCad title-block key accepted")
+	}
+}
+
+func TestKicadSchCheckFixPwrFlag(t *testing.T) {
+	if _, err := kicad.KicadCLI(); err != nil {
+		t.Skip(err)
+	}
+	sheet := richFixture(t)
+	before := pinNets(t, sheet)
+	var out, errb bytes.Buffer
+	if code := Run([]string{"kicad", "sch-check", "--sch", sheet}, &out, &errb); code == 0 {
+		t.Fatal("undriven power nets and unconnected R3 passed the gate")
+	}
+	var r kicadSchCheckReport
+	if err := json.Unmarshal(out.Bytes(), &r); err != nil {
+		t.Fatal(err)
+	}
+	undriven := func(r kicadSchCheckReport) int {
+		n := 0
+		for _, v := range r.ERC.Violations {
+			if v.Type == "power_pin_not_driven" {
+				n++
+			}
+		}
+		return n
+	}
+	if undriven(r) == 0 || r.Findings != 0 {
+		t.Fatalf("before the fix: %d undriven, %d findings", undriven(r), r.Findings)
+	}
+	out.Reset()
+	Run([]string{"kicad", "sch-check", "--sch", sheet, "--fix-pwr-flag"}, &out, &errb)
+	r = kicadSchCheckReport{}
+	if err := json.Unmarshal(out.Bytes(), &r); err != nil {
+		t.Fatal(err)
+	}
+	if undriven(r) != 0 || len(r.Fixed) != 2 || r.Findings != 0 {
+		t.Fatalf("after the fix: %d undriven, fixed %+v, findings %d", undriven(r), r.Fixed, r.Findings)
+	}
+	if r.ERC.Errors != 2 { // R3's two unconnected pins remain, as they should
+		t.Fatalf("ERC errors %d", r.ERC.Errors)
+	}
+	if cmp := kicad.ComparePinNets(before, pinNets(t, sheet), nil); !cmp.Equal || cmp.NamesEqual != cmp.NetsA {
+		t.Fatalf("PWR_FLAG changed the netlist: %+v", cmp)
+	}
+}

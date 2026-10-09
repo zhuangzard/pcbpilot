@@ -209,6 +209,7 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 	{
 		var dataJSON string
 		var show, hide bool
+		var kTB kicadTitleFlags
 		c := &cobra.Command{
 			Use:   "titleblock",
 			Short: "Adjust the focused page's 明细表 (title block): visibility and/or fields",
@@ -225,12 +226,27 @@ in result.unknownKeys — for those, fix the key, do not retry.
 
 The title block CANNOT set paper size. EasyEDA Pro exposes no set-paper-size API,
 and Size / Width / Height / "Page Size" are not title-block items. Run
-` + "`pcbpilot sch titleblock-get`" + ` first to see the keys this page actually has.`,
+` + "`pcbpilot sch titleblock-get`" + ` first to see the keys this page actually has.
+
+--backend kicad --kicad-sch X.kicad_sch writes the sheet's title block: --title, --rev,
+--date, --company, --comment N=TEXT (1–9), or --data with keys Title/Name, Date,
+Rev/Revision/Version, Company, Comment1…Comment9 (string or {"value": …}); fields not
+named keep their value. --show/--hide do not apply (KiCad always draws it).`,
 			Args: cobra.NoArgs,
 			Example: `  pcbpilot sch titleblock --show
   pcbpilot sch titleblock --hide
-  pcbpilot sch titleblock --data '{"Title":{"value":"电源模块"},"Designer":{"value":"Mika"}}'`,
+  pcbpilot sch titleblock --data '{"Title":{"value":"电源模块"},"Designer":{"value":"Mika"}}'
+  pcbpilot sch titleblock --backend kicad --kicad-sch power.kicad_sch --title "Power" --rev B --date 2026-10-09 --company ACME`,
 			RunE: func(cmd *cobra.Command, args []string) error {
+				if path, ok, err := kicadSchTarget(cmd); err != nil || ok {
+					if err != nil {
+						return err
+					}
+					if show || hide {
+						return fmt.Errorf("--backend kicad: --show/--hide do not apply (KiCad always draws the title block)")
+					}
+					return kicadSchTitleblock(path, kTB, dataJSON, stdout)
+				}
 				if show && hide {
 					return fmt.Errorf("--show and --hide are mutually exclusive")
 				}
@@ -326,6 +342,7 @@ and Size / Width / Height / "Page Size" are not title-block items. Run
 		c.Flags().BoolVar(&show, "show", false, "show the title block")
 		c.Flags().BoolVar(&hide, "hide", false, "hide the title block")
 		c.Flags().StringVar(&dataJSON, "data", "", `JSON of fields to patch, e.g. '{"Title":{"value":"..."}}'`)
+		kTB.register(c)
 		sch.AddCommand(c)
 	}
 
