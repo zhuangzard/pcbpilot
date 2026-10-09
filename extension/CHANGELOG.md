@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+CLI (offline, KiCad 10):
+- `sch autoconnect` / `sch connect --backend kicad --kicad-sch X.kicad_sch [--fit]`: the same planner, fed from the
+  sheet's geometry instead of the connector; every stub and marker (power/ground symbols, global labels, labels) lands in
+  one file write, made only after kicad-cli's netlist of a project copy shows each pin on its planned net and no other net
+  changed (otherwise non-zero exit, file untouched). No per-pin connect_pin round trips.
+- `sch layout-plan --backend kicad --kicad-sch X.kicad_sch [--fit]`: re-measures the components from the KiCad sheet,
+  plans, and applies the placements (positions + rotations) in one write; wire ends, labels, no-connects, junctions and
+  power symbols on moved pins follow; written only when the netlist is unchanged. Single layouts only (not `--zones`).
+
 ## [0.9.0] — 2026-10-09
 
 **KiCad becomes the design EDA; EasyEDA is the submission tool. Re-import the 0.9.0 connector** (new action
