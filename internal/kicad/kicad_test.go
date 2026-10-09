@@ -162,3 +162,62 @@ func TestArcAngleInBridge(t *testing.T) {
 		}
 	}
 }
+
+func TestPrepareDSNEdgeKeepouts(t *testing.T) {
+	dsn := `(pcb board.dsn
+  (parser
+    (string_quote ")
+  )
+  (resolution um 10)
+  (unit um)
+  (structure
+    (layer F.Cu (type signal))
+    (layer In1.Cu (type signal))
+    (layer In2.Cu (type signal))
+    (layer B.Cu (type signal))
+    (boundary
+      (path pcb 0  0 0  100000 0  100000 50000  0 50000  0 0)
+    )
+    (keepout "" (polygon signal 0  40000 20000  42000 20000  42000 22000  40000 22000  40000 20000))
+    (via "Via[0-3]_600:300_um")
+    (rule (width 200) (clearance 150))
+  )
+  (library
+    (image MH
+      (keepout "" (circle F.Cu 3200))
+      (keepout "" (circle B.Cu 3200 0 0))
+    )
+  )
+  (network
+    (net A (pins R1-1))
+  )
+  (wiring
+  )
+)`
+	out, prep, err := PrepareDSN(dsn, nil, nil, EdgeKeepout{OuterMil: 20, InnerMil: 30})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 4 layers × (4 outline bands + 4 cut-out bands) + 2 grown circles.
+	if prep.EdgeKeepouts != 34 {
+		t.Fatalf("keepouts %d\n%s", prep.EdgeKeepouts, out)
+	}
+	// Outer band 20 mil = 508 um inward from the bottom edge (CCW outline).
+	if !strings.Contains(out, `(keepout "pcbpilot_edge_F.Cu_0" (polygon F.Cu 0 0 0 100000 0 100000 508 0 508 0 0))`) {
+		t.Fatalf("outer band missing:\n%s", out)
+	}
+	if !strings.Contains(out, `(keepout "pcbpilot_edge_In1.Cu_0" (polygon In1.Cu 0 0 0 100000 0 100000 762 0 762 0 0))`) {
+		t.Fatalf("inner band missing")
+	}
+	// Cut-out band outside the cut-out (y below 20000).
+	if !strings.Contains(out, `(keepout "pcbpilot_cutout0_F.Cu_0" (polygon F.Cu 0 40000 20000 42000 20000 42000 19492 40000 19492 40000 20000))`) {
+		t.Fatalf("cut-out band missing:\n%s", out)
+	}
+	// Mounting hole circles grow by 2 × 20 mil = 1016 um.
+	if !strings.Contains(out, `(circle F.Cu 4216)`) || !strings.Contains(out, `(circle B.Cu 4216 0 0)`) {
+		t.Fatalf("hole circles not grown:\n%s", out)
+	}
+	if strings.Count(out, "(") != strings.Count(out, ")") {
+		t.Fatal("unbalanced")
+	}
+}

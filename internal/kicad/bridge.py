@@ -150,15 +150,34 @@ def pad_kind(shape):
     return PAD_KIND.get(shape, "POLYGON")
 
 
+def comp_keys(board):
+    """Unique component ids: the footprint uuid, or "ref:<designator>" when
+    the board repeats a uuid (converted boards do: Gas V5 A had 203
+    footprints on 39 uuids)."""
+    seen = {}
+    for fp in board.GetFootprints():
+        u = fp.m_Uuid.AsString()
+        seen[u] = seen.get(u, 0) + 1
+    return {fp.GetReference(): (fp.m_Uuid.AsString() if seen[fp.m_Uuid.AsString()] == 1 else "ref:" + fp.GetReference())
+            for fp in board.GetFootprints()}, sum(n - 1 for n in seen.values())
+
+
+def field_id(key, which):
+    return key + "#" + which
+
+
 def snapshot(board):
     snap = {"components": [], "partial": [], "source": "kicad"}
     notes = snap["partial"]
+    keys, dups = comp_keys(board)
+    if dups:
+        notes.append("%d footprint(s) share a uuid with another: their ids are ref:<designator>" % dups)
     holes = []
     for fp in board.GetFootprints():
         ref = fp.GetReference()
         x, y = xy(fp.GetPosition())
         comp = {
-            "primitiveId": fp.m_Uuid.AsString(),
+            "primitiveId": keys[ref],
             "designator": ref,
             "name": fp.GetValue(),
             "device": fp.GetValue(),
@@ -345,7 +364,7 @@ def snapshot(board):
     }
     snap["routedLines"] = len(lines) + len(arcs)
     try:
-        snap["silk"] = silk_texts(board)
+        snap["silk"] = silk_texts(board, keys)
     except Exception as e:  # silk is optional for the copper consumers
         notes.append("silkscreen unreadable: %s" % e)
     snap["partial"] = notes
@@ -354,7 +373,7 @@ def snapshot(board):
     return snap
 
 
-def silk_texts(board):
+def silk_texts(board, keys):
     """Silkscreen texts in the pcbpilot pcbSilkText shape (Go field names):
     every footprint reference/value field and footprint/board text. Layer 3 =
     F.Silkscreen, 4 = B.Silkscreen, 0 = not on silk (then Hidden)."""
@@ -367,12 +386,12 @@ def silk_texts(board):
             return 4
         return 0
 
-    def rec(t, kind, key, comp=None):
+    def rec(t, kind, key, comp=None, tid=None):
         bb = box_mil(t.GetBoundingBox())
         layer = silk_layer(t.GetLayer())
         visible = t.IsVisible() if hasattr(t, "IsVisible") else True
         r = {
-            "ID": t.m_Uuid.AsString(), "Kind": kind, "Key": key, "Text": t.GetShownText(False) if hasattr(t, "GetShownText") else t.GetText(),
+            "ID": tid or t.m_Uuid.AsString(), "Kind": kind, "Key": key, "Text": t.GetShownText(False) if hasattr(t, "GetShownText") else t.GetText(),
             "Layer": layer, "Mirror": bool(t.IsMirrored()), "Reverse": False,
             "Rotation": round(t.GetTextAngleDegrees() % 360.0, 4),
             "FontSize": mil(t.GetTextHeight()), "LineWidth": mil(t.GetTextThickness()),
@@ -381,13 +400,14 @@ def silk_texts(board):
             "Hidden": (not visible) or layer == 0,
         }
         if comp is not None:
-            r["CompID"] = comp.m_Uuid.AsString()
+            r["CompID"] = keys[comp.GetReference()]
             r["CompLayer"] = 2 if comp.IsFlipped() else 1
         return r
 
     for fp in board.GetFootprints():
-        out.append(rec(fp.Reference(), "attribute", "Designator", fp))
-        out.append(rec(fp.Value(), "attribute", "Device", fp))
+        k = keys[fp.GetReference()]
+        out.append(rec(fp.Reference(), "attribute", "Designator", fp, field_id(k, "ref")))
+        out.append(rec(fp.Value(), "attribute", "Device", fp, field_id(k, "value")))
         for item in fp.GraphicalItems():
             if item.GetClass() in ("PCB_TEXT", "FP_TEXT") and silk_layer(item.GetLayer()):
                 out.append(rec(item, "string", "", fp))
@@ -752,7 +772,9 @@ def pours(pcb, spec_path, out):
             z.SetLocalClearance(nm(zs["clearanceMil"]))
         if zs.get("minWidthMil"):
             z.SetMinThickness(nm(zs["minWidthMil"]))
-        z.SetPadConnection(pcbnew.ZONE_CONNECTION_THERMAL)
+        # SMD pads solid, through-hole pads thermal: a one-spoke SMD thermal
+        # is a KiCad starved_thermal error (Gas V5 A: U8.115, C50.2).
+        z.SetPadConnection(pcbnew.ZONE_CONNECTION_THT_THERMAL)
         board.Add(z)
         made.append(name)
     zones = fill_zones(board)
@@ -815,9 +837,11 @@ def edit(pcb, ops_path, out):
         board.Add(t)
         done["addTracks"] += 1
     texts = {}
+    keys, _ = comp_keys(board)
     for fp in board.GetFootprints():
-        for t in (fp.Reference(), fp.Value()):
-            texts[t.m_Uuid.AsString()] = t
+        k = keys[fp.GetReference()]
+        texts[field_id(k, "ref")] = fp.Reference()
+        texts[field_id(k, "value")] = fp.Value()
     for op in ops.get("setText") or []:
         t = texts.get(op["id"])
         if t is None:

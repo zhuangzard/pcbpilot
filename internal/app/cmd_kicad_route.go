@@ -19,12 +19,14 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
 	"github.com/zhuangzard/pcbpilot/internal/pcb/specctra"
+	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
 )
 
 type kicadRouteOpts struct {
@@ -177,6 +179,9 @@ type kicadRun struct {
 	conn    string // schematic connectivity JSON (with --sch)
 	netlist *kicad.Netlist
 	stderr  io.Writer
+	// inputDRC: the input board's own DRC errors (rule|message), to mark
+	// what routing did not cause.
+	inputDRC map[string]bool
 }
 
 func (r *kicadRun) add(g gateResult) {
@@ -357,6 +362,14 @@ func (r *kicadRun) run() error {
 	if inSnap, _, err = r.snapshot(board); err != nil {
 		return err
 	}
+	if rep, err := kt.DRC(board, filepath.Join(r.work, "input-drc.json")); err == nil {
+		r.inputDRC = map[string]bool{}
+		for _, v := range rep.Violations {
+			r.inputDRC[v.Rule+"|"+v.Message] = true
+		}
+		r.summary["inputDrc"] = map[string]any{"total": rep.Total, "counts": rep.Counts}
+		fmt.Fprintf(r.stderr, "input board DRC (before routing): %d error(s) %v\n", rep.Total, rep.Counts)
+	}
 
 	// 2. Pre-route gate: intent + insulation → netclasses (+ .kicad_dru).
 	reqs := kicadRequirements(r.in)
@@ -492,7 +505,19 @@ func (r *kicadRun) doRoute(classed string, reqs map[string]kicad.NetRequirement,
 	if err != nil {
 		return err
 	}
-	prepared, prep, err := kicad.PrepareDSN(string(dsnText), r.classes, reqs)
+	// Copper-to-edge: the intent's per-layer distance (pcbauto.EdgeFromIntent),
+	// never below the board's own copper-to-edge rule.
+	edge := kicad.EdgeKeepout{}
+	if pi, err := loadEdgeIntent(o.intent); err == nil {
+		p := pcbauto.EdgeFromIntent(pi, nil)
+		edge = kicad.EdgeKeepout{OuterMil: p.LayerReq(pcbauto.LayerTop), InnerMil: p.LayerReq(pcbauto.LayerInner1)}
+	}
+	if inSnap.Rules != nil {
+		edge.OuterMil = math.Max(edge.OuterMil, inSnap.Rules.CopperToEdgeMil)
+		edge.InnerMil = math.Max(edge.InnerMil, inSnap.Rules.CopperToEdgeMil)
+	}
+	r.summary["edgeKeepout"] = edge
+	prepared, prep, err := kicad.PrepareDSN(string(dsnText), r.classes, reqs, edge)
 	r.summary["dsnRequirements"] = prep
 	if err != nil {
 		return fmt.Errorf("pre-route gate: %w", err)
@@ -803,10 +828,22 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 	// KiCad DRC (errors gate; warnings reported).
 	drcPath := filepath.Join(o.outDir, "drc.json")
 	rep, err := r.kt.DRC(routed, drcPath)
+	drcRep := rep
 	if err != nil {
 		r.add(gateResult{Gate: "kicad-drc", Detail: err.Error()})
 	} else {
-		r.add(kicadDRCGate(rep, drcPath))
+		g := kicadDRCGate(rep, drcPath)
+		pre := map[string]int{}
+		for _, v := range rep.Violations {
+			if r.inputDRC[v.Rule+"|"+v.Message] {
+				pre[v.Rule]++
+			}
+		}
+		for k, n := range pre {
+			g.Info = append(g.Info, fmt.Sprintf("%s: %d of these already in the input board (placement / footprints, not routing)", k, n))
+		}
+		sort.Strings(g.Info)
+		r.add(g)
 		_ = writeJSONFile(filepath.Join(o.outDir, "drc-flat.json"), kicadDRCFlat(rep))
 		drcSum := map[string]any{"file": drcPath, "total": rep.Total, "counts": rep.Counts}
 		allPath := filepath.Join(o.outDir, "drc-all.json")
@@ -850,7 +887,7 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 	r.add(kicadIntentRulesGate(raw, r.classes))
 
 	qo := qualityGateOpts{intent: o.intent, sim: o.sim, outDir: o.outDir, waivers: r.waivers, widthBasis: o.widthBasis,
-		source: "kicad route (" + routed + ")", silk: o.silk, routeChecked: true, route: r.route, noManual: o.noManual, projectConfig: o.projectConfig}
+		source: "kicad route (" + routed + ")", silk: o.silk, noManual: o.noManual, projectConfig: o.projectConfig}
 	verdict, reasons, postOut := "", []string(nil), ""
 	var segNeed func(specctra.Track) (float64, bool)
 	var viaOK func([]string, string) (bool, string)
@@ -863,6 +900,7 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 		}
 	}
 	snapshotIntentGates(snap, r.in, o.intent, verdict, reasons, segNeed, viaOK, true, r.add)
+	r.add(kicadRouteCompleteGate(r.route, drcRep, snap))
 	for _, g := range tailGates(snap, boardPath, postOut, qo, o.projectName, "", r.summary, r.stderr) {
 		r.gates = append(r.gates, g) // tailGates applied the waivers
 		fmt.Fprintf(r.stderr, "gate %-16s %v  %s\n", g.Gate, map[bool]string{true: "PASS", false: "FAIL"}[g.Pass], g.Detail)
@@ -979,4 +1017,51 @@ func reviewInputSHA(stage string, reqFiles, evFiles []string, limit int) (string
 		return "", err
 	}
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(reviewPrompt(stage, reqs, ev, limit)))), nil
+}
+
+// kicadRouteCompleteGate is routeCompleteGate with one KiCad fact added: a
+// connection fastroute left unrouted passes only when its net is poured on
+// the board and KiCad's DRC (the board's real connectivity) reports no
+// unconnected item at all — the pour carries it (Gas V5 A: GND C2.2–U8.115,
+// a fine-pitch ground pin, joined by the TOP GND pour).
+func kicadRouteCompleteGate(run *fastrouteRun, drc *kicad.DRCReport, snap *boardSnapshot) gateResult {
+	g := routeCompleteGate(run)
+	if g.Pass || run == nil || run.Fixable != 0 || run.Unrouted <= 0 || drc == nil || drc.Counts["unconnected_items"] != 0 || snap.Copper == nil {
+		return g
+	}
+	poured := map[string]bool{}
+	for _, p := range snap.Copper.Poured {
+		if m, ok := p.(map[string]any); ok {
+			poured[fmt.Sprint(m["net"])] = true
+		}
+	}
+	data, err := os.ReadFile(run.Report)
+	if err != nil {
+		return g
+	}
+	var rep struct {
+		Unrouted []struct {
+			Net  string `json:"net"`
+			From struct {
+				Component, Pin string
+			} `json:"from"`
+			To struct {
+				Component, Pin string
+			} `json:"to"`
+		} `json:"unrouted"`
+	}
+	if json.Unmarshal(data, &rep) != nil || len(rep.Unrouted) != run.Unrouted {
+		return g
+	}
+	var items []string
+	for _, u := range rep.Unrouted {
+		if !poured[u.Net] {
+			return g
+		}
+		items = append(items, fmt.Sprintf("%s %s.%s–%s.%s: unrouted by fastroute, joined by the %s pour (KiCad DRC: 0 unconnected items)", u.Net, u.From.Component, u.From.Pin, u.To.Component, u.To.Pin, u.Net))
+	}
+	g.Pass, g.Items = true, nil
+	g.Info = items
+	g.Detail += fmt.Sprintf("; every unrouted connection is on a poured net and KiCad reports 0 unconnected items")
+	return g
 }

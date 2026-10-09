@@ -35,6 +35,134 @@ type DSNPrep struct {
 	// pre-route gate: routing stops when it is not empty).
 	Short []string `json:"short,omitempty"`
 	Nets  int      `json:"nets"`
+	// EdgeKeepouts counts the board-edge / cut-out keep-out bands added
+	// and the mounting-hole keep-outs grown (KiCad's exporter carries no
+	// copper-to-edge rule: Gas V5 A routed inner tracks 13 mil from the edge).
+	EdgeKeepouts int `json:"edgeKeepouts"`
+}
+
+// EdgeKeepout is the copper-to-edge distance per layer class (mil).
+type EdgeKeepout struct{ OuterMil, InnerMil float64 }
+
+var (
+	reBoundaryPath = regexp.MustCompile(`\(boundary\s*\(path\s+pcb\s+[0-9.]+\s+([^()]*)\)`)
+	reCutout       = regexp.MustCompile(`\(keepout\s+"[^"]*"\s+\(polygon\s+signal\s+[0-9.]+\s+([^()]*)\)\)`)
+	reHoleCircle   = regexp.MustCompile(`\(keepout\s+"[^"]*"\s+\(circle\s+(\S+)\s+([0-9.]+)((?:\s+[-0-9.]+\s+[-0-9.]+)?)\)\)`)
+)
+
+func parseCoords(s string) [][2]float64 {
+	f := strings.Fields(s)
+	var out [][2]float64
+	for i := 0; i+1 < len(f); i += 2 {
+		x, e1 := strconv.ParseFloat(f[i], 64)
+		y, e2 := strconv.ParseFloat(f[i+1], 64)
+		if e1 == nil && e2 == nil {
+			out = append(out, [2]float64{x, y})
+		}
+	}
+	return out
+}
+
+func coordsText(pts [][2]float64) string {
+	parts := make([]string, 0, 2*len(pts))
+	for _, p := range pts {
+		parts = append(parts, strconv.FormatFloat(math.Round(p[0]*1000)/1000, 'f', -1, 64), strconv.FormatFloat(math.Round(p[1]*1000)/1000, 'f', -1, 64))
+	}
+	return strings.Join(parts, " ")
+}
+
+// bands returns one quadrilateral per polygon edge, w wide on the polygon's
+// inner side (w < 0: the outer side, for a cut-out).
+func bands(poly [][2]float64, w float64) [][][2]float64 {
+	n := len(poly)
+	if n > 1 && poly[0] == poly[n-1] {
+		n--
+	}
+	area := 0.0
+	for i := 0; i < n; i++ {
+		a, b := poly[i], poly[(i+1)%n]
+		area += a[0]*b[1] - b[0]*a[1]
+	}
+	sign := 1.0
+	if area < 0 {
+		sign = -1
+	}
+	var out [][][2]float64
+	for i := 0; i < n; i++ {
+		a, b := poly[i], poly[(i+1)%n]
+		dx, dy := b[0]-a[0], b[1]-a[1]
+		l := math.Hypot(dx, dy)
+		if l < 1e-6 {
+			continue
+		}
+		nx, ny := -dy/l*sign*w, dx/l*sign*w
+		out = append(out, [][2]float64{a, b, {b[0] + nx, b[1] + ny}, {a[0] + nx, a[1] + ny}, a})
+	}
+	return out
+}
+
+// addEdgeKeepouts adds keep-out bands inside the board boundary and around
+// every board cut-out (KiCad exports inner Edge.Cuts as signal keep-outs),
+// per copper layer with its outer / inner distance, and grows every
+// mounting-hole keep-out circle by the outer distance.
+func addEdgeKeepouts(dsn string, layers []string, e EdgeKeepout, toMil float64) (string, int, error) {
+	ss, se, err := listSpan(dsn, "structure")
+	if err != nil {
+		return dsn, 0, err
+	}
+	st := dsn[ss:se]
+	bm := reBoundaryPath.FindStringSubmatch(st)
+	if bm == nil {
+		return dsn, 0, fmt.Errorf("DSN structure has no (boundary (path pcb ...))")
+	}
+	outline := parseCoords(bm[1])
+	var cutouts [][][2]float64
+	for _, m := range reCutout.FindAllStringSubmatch(st, -1) {
+		cutouts = append(cutouts, parseCoords(m[1]))
+	}
+	var decl strings.Builder
+	n := 0
+	for i, l := range layers {
+		w := e.InnerMil
+		if i == 0 || i == len(layers)-1 {
+			w = e.OuterMil
+		}
+		if w <= 0 {
+			continue
+		}
+		wu := w / toMil
+		for j, q := range bands(outline, wu) {
+			fmt.Fprintf(&decl, "    (keepout \"pcbpilot_edge_%s_%d\" (polygon %s 0 %s))\n", l, j, l, coordsText(q))
+			n++
+		}
+		for c, poly := range cutouts {
+			for j, q := range bands(poly, -wu) {
+				fmt.Fprintf(&decl, "    (keepout \"pcbpilot_cutout%d_%s_%d\" (polygon %s 0 %s))\n", c, l, j, l, coordsText(q))
+				n++
+			}
+		}
+	}
+	// Insert after the boundary list.
+	sp := childSpans(st, "boundary")
+	if len(sp) == 0 {
+		return dsn, 0, fmt.Errorf("DSN structure has no (boundary)")
+	}
+	at := ss + sp[0][1]
+	dsn = dsn[:at] + "\n" + decl.String() + dsn[at:]
+	// Mounting holes (image keep-out circles): copper keeps the edge distance.
+	if e.OuterMil > 0 {
+		grow := 2 * e.OuterMil / toMil
+		dsn = reHoleCircle.ReplaceAllStringFunc(dsn, func(m string) string {
+			p := reHoleCircle.FindStringSubmatch(m)
+			d, err := strconv.ParseFloat(p[2], 64)
+			if err != nil {
+				return m
+			}
+			n++
+			return fmt.Sprintf("(keepout \"\" (circle %s %s%s))", p[1], strconv.FormatFloat(math.Round((d+grow)*1000)/1000, 'f', -1, 64), p[3])
+		})
+	}
+	return dsn, n, nil
 }
 
 const reqEps = 0.005
@@ -84,7 +212,7 @@ func unitToMil(unit string) (float64, error) {
 // required net is checked against its class (width, inner width,
 // clearance). classes are the bridge's netclasses (names PPn_...), reqs the
 // intent per net (only nets present on the board).
-func PrepareDSN(dsn string, classes []NetClass, reqs map[string]NetRequirement) (string, *DSNPrep, error) {
+func PrepareDSN(dsn string, classes []NetClass, reqs map[string]NetRequirement, edge ...EdgeKeepout) (string, *DSNPrep, error) {
 	prep := &DSNPrep{Renamed: map[string]string{}, Nets: len(reqs)}
 	m := reResolution.FindStringSubmatch(dsn)
 	if m == nil {
@@ -128,6 +256,14 @@ func PrepareDSN(dsn string, classes []NetClass, reqs map[string]NetRequirement) 
 		ours[c.Name] = c
 	}
 
+	if len(edge) > 0 && (edge[0].OuterMil > 0 || edge[0].InnerMil > 0) {
+		var n int
+		dsn, n, err = addEdgeKeepouts(dsn, layers, edge[0], toMil)
+		if err != nil {
+			return "", prep, err
+		}
+		prep.EdgeKeepouts = n
+	}
 	ns, ne, err := listSpan(dsn, "network")
 	if err != nil {
 		return "", prep, err
