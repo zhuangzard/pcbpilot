@@ -185,7 +185,7 @@ type kicadRun struct {
 	work    string
 	step    int
 	classes []kicad.NetClass
-	route   *fastrouteRun
+	route   *routeResult
 	conn    string // schematic connectivity JSON (with --sch)
 	netlist *kicad.SchNetlist
 	stderr  io.Writer
@@ -645,8 +645,9 @@ func (r *kicadRun) doRoute(classed string, reqs map[string]kicad.NetRequirement,
 		r.summary["blockedConnections"] = last.BlockedList
 		fmt.Fprintf(r.stderr, "fastroute: %d of %d unrouted connection(s) blocked by geometry (--diagnose): placement / escapes must change\n", last.Blocked, last.Unrouted)
 	}
-	r.route = lastOK(runs)
-	r.summary["routeFinal"], r.summary["ses"] = r.route, ses
+	r.summary["routeFinal"], r.summary["ses"] = lastOK(runs), ses
+	r.route = fastrouteResult(lastOK(runs), o.fo, dsnPath)
+	r.summary["routeResult"] = r.route
 	return nil
 }
 
@@ -1176,9 +1177,10 @@ func reviewInputSHA(stage string, reqFiles, evFiles []string, limit int) (string
 // the board and KiCad's DRC (the board's real connectivity) reports no
 // unconnected item at all — the pour carries it (Gas V5 A: GND C2.2–U8.115,
 // a fine-pitch ground pin, joined by the TOP GND pour).
-func kicadRouteCompleteGate(run *fastrouteRun, drc *kicad.DRCReport, snap *boardSnapshot) gateResult {
+func kicadRouteCompleteGate(run *routeResult, drc *kicad.DRCReport, snap *boardSnapshot) gateResult {
 	g := routeCompleteGate(run)
-	if g.Pass || run == nil || run.Fixable != 0 || run.Unrouted <= 0 || drc == nil || drc.Counts["unconnected_items"] != 0 || snap.Copper == nil {
+	if g.Pass || run == nil || run.Fixable != 0 || run.UnroutedCount <= 0 || len(run.Unrouted) != run.UnroutedCount ||
+		drc == nil || drc.Counts["unconnected_items"] != 0 || snap.Copper == nil {
 		return g
 	}
 	poured := map[string]bool{}
@@ -1187,34 +1189,16 @@ func kicadRouteCompleteGate(run *fastrouteRun, drc *kicad.DRCReport, snap *board
 			poured[fmt.Sprint(m["net"])] = true
 		}
 	}
-	data, err := os.ReadFile(run.Report)
-	if err != nil {
-		return g
-	}
-	var rep struct {
-		Unrouted []struct {
-			Net  string `json:"net"`
-			From struct {
-				Component, Pin string
-			} `json:"from"`
-			To struct {
-				Component, Pin string
-			} `json:"to"`
-		} `json:"unrouted"`
-	}
-	if json.Unmarshal(data, &rep) != nil || len(rep.Unrouted) != run.Unrouted {
-		return g
-	}
 	var items []string
-	for _, u := range rep.Unrouted {
+	for _, u := range run.Unrouted {
 		if !poured[u.Net] {
 			return g
 		}
-		items = append(items, fmt.Sprintf("%s %s.%s–%s.%s: unrouted by fastroute, joined by the %s pour (KiCad DRC: 0 unconnected items)", u.Net, u.From.Component, u.From.Pin, u.To.Component, u.To.Pin, u.Net))
+		items = append(items, fmt.Sprintf("%s: unrouted by %s, joined by the %s pour (KiCad DRC: 0 unconnected items)", u, run.Router, u.Net))
 	}
 	g.Pass, g.Items = true, nil
 	g.Info = items
-	g.Detail += fmt.Sprintf("; every unrouted connection is on a poured net and KiCad reports 0 unconnected items")
+	g.Detail += "; every unrouted connection is on a poured net and KiCad reports 0 unconnected items"
 	return g
 }
 

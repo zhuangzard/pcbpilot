@@ -492,7 +492,7 @@ type qualityGateOpts struct {
 	// session; nil = unknown, which fails); otherwise the board's own copper
 	// connectivity (boardRouteCompleteGate).
 	routeChecked bool
-	route        *fastrouteRun
+	route        *routeResult
 	// routeGate, when set, is the route-complete gate the caller computed
 	// (kicad route: fastroute report + KiCad connectivity).
 	routeGate *gateResult
@@ -943,21 +943,21 @@ func boardRouteCompleteGate(boardPath string) gateResult {
 	return g
 }
 
-func routeCompleteGate(r *fastrouteRun) gateResult {
+func routeCompleteGate(r *routeResult) gateResult {
 	g := gateResult{Gate: "route-complete"}
 	if r == nil {
 		g.Detail = "no successful router run recorded"
 		return g
 	}
-	g.Pass = r.Unrouted == 0 && r.Fixable == 0
-	g.Detail = fmt.Sprintf("imported session: %d unrouted, %d violation(s) (%d fixable), round %d", r.Unrouted, r.Violations, r.Fixable, r.Round)
-	if r.Unrouted > 0 {
-		g.Items = append(g.Items, fmt.Sprintf("%d connection(s) unrouted (see %s)", r.Unrouted, r.Report))
+	g.Pass = r.UnroutedCount == 0 && r.Fixable == 0
+	g.Detail = fmt.Sprintf("%s result: %d unrouted, %d violation(s) (%d fixable), round %d", r.Router, r.UnroutedCount, r.Violations, r.Fixable, r.Round)
+	if r.UnroutedCount > 0 {
+		g.Items = append(g.Items, fmt.Sprintf("%d connection(s) unrouted (see %s)", r.UnroutedCount, r.Report))
 	}
-	// --diagnose: blocked connections need a placement / escape change, the
-	// rest are congestion (another start, more room).
-	for _, b := range r.BlockedList {
-		g.Items = append(g.Items, "blocked by geometry (move the part or add an escape; rerouting cannot fix it): "+b)
+	// Blocked connections need a placement / escape change, the rest are
+	// congestion (another start, more room).
+	for _, b := range r.Blocked {
+		g.Items = append(g.Items, "blocked by geometry (move the part or add an escape; rerouting cannot fix it): "+b.String())
 	}
 	g.Items = append(g.Items, r.FixableList...)
 	return g

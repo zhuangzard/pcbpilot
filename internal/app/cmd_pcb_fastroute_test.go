@@ -290,7 +290,7 @@ func TestRunFastrouteStopsOnBlocked(t *testing.T) {
 		if err != nil || strings.Count(string(raw), "call") != c.wantCalls || runs[0].Blocked != c.blocked {
 			t.Fatalf("%+v: calls %d runs %+v err %v", c, strings.Count(string(raw), "call"), runs, err)
 		}
-		g := routeCompleteGate(&runs[0])
+		g := routeCompleteGate(fastrouteResult(&runs[0], fastrouteOpts{bin: bin}, dsn))
 		if n := strings.Count(strings.Join(g.Items, "\n"), "blocked by geometry"); n != c.blocked {
 			t.Fatalf("gate items %v", g.Items)
 		}

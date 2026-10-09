@@ -730,6 +730,10 @@ type fastrouteRun struct {
 	// (unroutable alone on the board; the rest are congestion).
 	Blocked     int      `json:"blocked"`
 	BlockedList []string `json:"blockedList,omitempty"`
+	// Version, UnroutedList, BlockedConns feed routeResult (fastrouteResult).
+	Version      string      `json:"version,omitempty"`
+	UnroutedList []routeConn `json:"unroutedList,omitempty"`
+	BlockedConns []routeConn `json:"-"`
 }
 
 // frReport is what pcbpilot reads from a fastroute --report file.
@@ -741,6 +745,9 @@ type frReport struct {
 	// escapes must change; rerunning the router does not help them.
 	Blocked     int
 	BlockedList []string
+	Version     string
+	Conns       []routeConn // every unrouted connection
+	BlockedC    []routeConn
 }
 
 // readFastrouteReport extracts the counts of a fastroute --report file. Its
@@ -760,7 +767,8 @@ func readFastrouteReport(path string, milPerUnit float64) (frReport, error) {
 		Pin       string `json:"pin"`
 	}
 	var r struct {
-		Stats struct {
+		Fastroute string `json:"fastroute"`
+		Stats     struct {
 			Unrouted   *int `json:"unrouted"`
 			Violations int  `json:"violations"`
 		} `json:"stats"`
@@ -787,8 +795,12 @@ func readFastrouteReport(path string, milPerUnit float64) (frReport, error) {
 		return out, fmt.Errorf("fastroute report %s has no stats.unrouted", path)
 	}
 	out.Unrouted, out.Violations = *r.Stats.Unrouted, r.Stats.Violations
+	out.Version = r.Fastroute
 	for _, u := range r.Unrouted {
+		c := routeConn{Net: u.Net, From: u.From.Component + "." + u.From.Pin, To: u.To.Component + "." + u.To.Pin}
+		out.Conns = append(out.Conns, c)
 		if u.Diagnosis.Class == "blocked" {
+			out.BlockedC = append(out.BlockedC, c)
 			out.Blocked++
 			out.BlockedList = append(out.BlockedList, fmt.Sprintf("%s %s.%s–%s.%s", u.Net, u.From.Component, u.From.Pin, u.To.Component, u.To.Pin))
 		}
@@ -922,6 +934,7 @@ func fastrouteOnce(o fastrouteOpts, dsn, ses, report, initial string, round int,
 	run.Status = "ok"
 	run.Unrouted, run.Violations, run.Fixable, run.FixableList = rep.Unrouted, rep.Violations, rep.Fixable, rep.FixableList
 	run.Blocked, run.BlockedList = rep.Blocked, rep.BlockedList
+	run.Version, run.UnroutedList, run.BlockedConns = rep.Version, rep.Conns, rep.BlockedC
 	return run
 }
 
@@ -1156,9 +1169,6 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 				sesPath, dsnPath, dsnText, runs = p, d, t, r2
 			}
 		}
-		// The imported session's counts: the route-complete gate of
-		// pcb auto route judges them (v18 B imported 1 unrouted silently).
-		summary["routeFinal"] = lastOK(runs)
 		if last := lastOK(runs); last != nil && last.Unrouted > 0 {
 			// Last resort before giving up: a fresh multi-start run (shuffled
 			// net orders) on the DSN that routed best; kept only if better.
@@ -1178,6 +1188,11 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 		if last := lastOK(runs); last != nil && last.Unrouted > 0 {
 			fmt.Fprintf(stderr, "warning: %d connection(s) still unrouted after %d run(s); importing the best session\n", last.Unrouted, len(runs))
 		}
+		// The imported session's counts (after the multi-start retry): the
+		// route-complete gate of pcb auto route judges them through the
+		// router-agnostic routeResult (v18 B imported 1 unrouted silently).
+		summary["routeFinal"] = lastOK(runs)
+		summary["routeResult"] = fastrouteResult(lastOK(runs), o.fo, dsnPath)
 	} else {
 		tmpl := o.routerCmd
 		if tmpl == "" {
