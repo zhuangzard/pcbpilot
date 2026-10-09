@@ -349,7 +349,9 @@ func postRouteGates(cfg *appConfig, window, intentPath string, post *postImportS
 		add(gateResult{Gate: "intent-widths", Detail: fmt.Sprintf("board snapshot unreadable: %v", err)})
 		return gates, false
 	}
-	if !snapshotIntentGates(snap, in, intentPath, simVerdict, simReasons, segNeed, viaOK, false, add) {
+	// Split like kicad route: copper-to-edge, isolation and via-current are
+	// separate gates on every route path (one mandatory gate set).
+	if !snapshotIntentGates(snap, in, intentPath, simVerdict, simReasons, segNeed, viaOK, true, add) {
 		return gates, false
 	}
 
@@ -386,10 +388,15 @@ func snapshotIntentGates(snap *boardSnapshot, in *designIntent, intentPath, simV
 		Detail: fmt.Sprintf("%d track(s) below the intent width (basis: %s) outside pin neck-downs and own-net pours, or below the minimum", len(vs), basis),
 		Items:  summarizeWidthViolations(vs)})
 
-	if items, n := checkIntentLengths(in, tracks); n > 0 {
-		add(gateResult{Gate: "intent-lengths", Pass: len(items) == 0,
-			Detail: fmt.Sprintf("%d length group(s)/pair(s): routed length spread within tolerance", n), Items: items})
+	// Always reported (a mandatory gate on every route path): passes with
+	// nothing to match when the intent has no length group or pair skew.
+	items, n := checkIntentLengths(in, tracks)
+	lg := gateResult{Gate: "intent-lengths", Pass: len(items) == 0,
+		Detail: fmt.Sprintf("%d length group(s)/pair(s): routed length spread within tolerance", n), Items: items}
+	if n == 0 {
+		lg.Detail = "the intent has no length group or pair skew"
 	}
+	add(lg)
 
 	raw, err := json.Marshal(snap)
 	if err != nil {
@@ -481,10 +488,14 @@ type qualityGateOpts struct {
 	unresolved                          *specctra.Reconcile
 	// silk: limits of the silkscreen gate (judged on the readback).
 	silk silkTightOpts
-	// routeChecked adds the route-complete gate on route (the imported
-	// fastroute session; nil = unknown, which fails).
+	// routeChecked: route-complete judges route (the imported fastroute
+	// session; nil = unknown, which fails); otherwise the board's own copper
+	// connectivity (boardRouteCompleteGate).
 	routeChecked bool
 	route        *fastrouteRun
+	// routeGate, when set, is the route-complete gate the caller computed
+	// (kicad route: fastroute report + KiCad connectivity).
+	routeGate *gateResult
 	// board manual (board-manual gate): always built unless noManual
 	// (which needs a signed waiver, see checkNoManual).
 	noManual      bool
@@ -572,11 +583,20 @@ func postSimForGates(boardPath string, o qualityGateOpts, summary map[string]any
 // board manual — judged on the snapshot / board-final.json alone.
 func tailGates(snap *boardSnapshot, boardPath, postOut string, o qualityGateOpts, project, doc string, summary map[string]any, stderr io.Writer) []gateResult {
 	var gates []gateResult
-	if o.routeChecked {
-		g := routeCompleteGate(o.route)
-		applyWaivers(&g, o.waivers)
-		gates = append(gates, g)
+	// route-complete for every router: fastroute's own session report, else
+	// (an external --router command, the built-in router, hand routing) the
+	// copper connectivity of board-final.json.
+	var g gateResult
+	switch {
+	case o.routeGate != nil:
+		g = *o.routeGate
+	case o.routeChecked:
+		g = routeCompleteGate(o.route)
+	default:
+		g = boardRouteCompleteGate(boardPath)
 	}
+	applyWaivers(&g, o.waivers)
+	gates = append(gates, g)
 	// Silkscreen: designators next to their own part, never on pads / holes /
 	// edge / other silk, never below the project size (readback).
 	_, _, font := silkTightInput(snap, o.silk)
@@ -889,6 +909,40 @@ func drcItem(v drcFlatViolation) string {
 // routeCompleteGate: the imported session must route every connection and
 // carry no violation the router could have fixed (its unfixable ones are
 // pre-existing pin-pin overlaps; native DRC judges the copper).
+// boardRouteCompleteGate judges completeness from the board itself
+// (postsim.CopperConnectivity: pads, tracks, vias and real area copper joined
+// by exact geometry); every net whose pads form more than one island fails it.
+func boardRouteCompleteGate(boardPath string) gateResult {
+	g := gateResult{Gate: "route-complete"}
+	raw, err := os.ReadFile(boardPath)
+	if err != nil {
+		g.Detail = "board snapshot unreadable: " + err.Error()
+		return g
+	}
+	b, err := postsim.ParseBoard(raw)
+	if err != nil {
+		g.Detail = "board snapshot: " + err.Error()
+		return g
+	}
+	if !b.Copper {
+		g.Detail = "board snapshot has no copper: completeness cannot be judged"
+		return g
+	}
+	open := postsim.CopperConnectivity(b)
+	n := 0
+	for _, o := range open {
+		n += o.Unrouted
+		var isl []string
+		for _, i := range o.Islands {
+			isl = append(isl, "{"+strings.Join(i, " ")+"}")
+		}
+		g.Items = append(g.Items, fmt.Sprintf("%s: %d unrouted connection(s) between copper islands %s", o.Net, o.Unrouted, strings.Join(isl, " ")))
+	}
+	g.Pass = n == 0
+	g.Detail = fmt.Sprintf("board copper connectivity (no router report): %d unrouted connection(s) on %d net(s) (%s)", n, len(open), boardPath)
+	return g
+}
+
 func routeCompleteGate(r *fastrouteRun) gateResult {
 	g := gateResult{Gate: "route-complete"}
 	if r == nil {

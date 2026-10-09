@@ -96,7 +96,8 @@ func defaultPourLayers(copper int) (gnd []int, power int) {
 
 func newPcbAutoRouteCmd(cfg *appConfig, window *string, stdout, stderr io.Writer) *cobra.Command {
 	var o autorouteOpts
-	var playbook, outDir, gndNet, powerNet, simPath, scriptPath, widenCSV, waiverPath, widthBasis, candDir, projectConfig, reviewPath string
+	var playbook, outDir, gndNet, powerNet, simPath, scriptPath, widenCSV, waiverPath, widthBasis, candDir, projectConfig string
+	var rv reviewRunOpts
 	var noManual bool
 	var trialTime time.Duration
 	silkOpt := defaultSilkTightOpts()
@@ -124,9 +125,17 @@ playbook):
      (--sch-connectivity);
   6. --sim: dump the live board (with copper) and run sim post-layout;
   7. IR closure (planWidenIR, ≤ 2 rounds) when only the drop fails;
-  8. design report (<out-dir>/report) and the release sign-off
-     ('pcbpilot signoff', <out-dir>/signoff — the same hard sign-off kicad
-     route ends with; --review or <out-dir>/review-design/review.json).
+  0. design review (review-panel, stage design; --requirements, reused when
+     <out-dir>/review-design/review.json passed for the same inputs;
+     --no-review needs a signed waiver) before anything is applied;
+  8. design report (<out-dir>/report), release review (stage layout), the
+     release sign-off ('pcbpilot signoff', <out-dir>/signoff) and the
+     mandatory gate set (gate-set) — the same steps kicad route ends with.
+
+--router internal applies a 'pcb auto run --router internal' playbook (its
+copper included, no rip-up, no fastroute) and runs the same pours, gates,
+report, reviews and sign-off; route-complete is then judged from the
+board's copper connectivity, as for an external --router command.
 
 Everything is written to --out-dir (summary.json, board-final.json, post.*).
 fastroute is never downloaded: see 'pcb autoroute --help'.
@@ -161,6 +170,14 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 			if err := checkNoManual(noManual, waivers); err != nil {
 				return err
 			}
+			rv.outDir = outDir
+			if err := checkReviewOpts(rv, waivers); err != nil {
+				return err
+			}
+			internal := o.routerCmd == "internal"
+			if internal && candDir != "" {
+				return fmt.Errorf("--candidates trial-routes with fastroute; it does not apply to --router internal")
+			}
 			if err := os.MkdirAll(outDir, 0o755); err != nil {
 				return err
 			}
@@ -177,6 +194,17 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 				}
 				_ = writeJSON(stdout, summary)
 				return err
+			}
+
+			// 0. Design review (design stage) before anything is placed or
+			// routed — the same gate as kicad route; a passing review.json
+			// for the same inputs is reused.
+			ev := append([]string{o.intentPath, simPath}, schFiles...)
+			reviewDesign := designReviewGate("design", rv, ev, waivers, summary, stderr)
+			fmt.Fprintf(stderr, "gate %-16s %v  %s\n", reviewDesign.Gate, map[bool]string{true: "PASS", false: "FAIL"}[reviewDesign.Pass], reviewDesign.Detail)
+			if !reviewDesign.Pass {
+				summary["gates"], summary["pass"] = []gateResult{reviewDesign}, false
+				return finish(fmt.Errorf("design review failed: routing not started"))
 			}
 
 			// 1. Placement playbook (and, with --candidates, trial-route the
@@ -239,7 +267,7 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 			// enter the DSN of every trial and the final route as existing
 			// wiring (v22 B rerun: 23–33 unrouted, 2252 violations): clear
 			// the unlocked routing before the first export.
-			if o.ripUp {
+			if o.ripUp && !internal {
 				fmt.Fprintln(stderr, "rip-up: removing unlocked routing before the trials and the DSN export")
 				if _, err := requestActionTimed(cfg, "pcb.route.rip_up", *window, map[string]any{}, 10*time.Minute); err != nil {
 					return finish(fmt.Errorf("rip-up: %w", err))
@@ -257,13 +285,25 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 				summary["playbook"] = chosen
 			}
 
-			// 2. Route + import + repair.
-			routed, sessions, err := runAutorouteFlow(cfg, *window, o, summary, stderr)
-			if err != nil {
-				return finish(err)
-			}
-			if !routed {
-				return finish(fmt.Errorf("no router configured"))
+			// 2. Route + import + repair. --router internal: the playbook of
+			// 'pcb auto run --router internal' already carries the built-in
+			// router's copper; it gets the same tail and gates (route-complete
+			// from the board's copper connectivity).
+			var sessions []string
+			if internal {
+				if playbook == "" {
+					return finish(fmt.Errorf("--router internal needs --playbook (pcb auto run --router internal)"))
+				}
+				summary["router"] = "internal"
+			} else {
+				routed, ss, err := runAutorouteFlow(cfg, *window, o, summary, stderr)
+				sessions = ss
+				if err != nil {
+					return finish(err)
+				}
+				if !routed {
+					return finish(fmt.Errorf("no router configured"))
+				}
 			}
 
 			in, err := loadDesignIntent(o.intentPath)
@@ -422,19 +462,30 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 					return finish(err)
 				}
 			}
-			// 8. Design report and the one release sign-off — the same
-			// 'pcbpilot signoff' kicad route ends with, from this run's files.
-			gates, _ := summary["gates"].([]gateResult)
-			rg := autoRouteDesignReport(outDir, o.intentPath, simPath, projectConfig, summary, stderr)
-			so := signoffOpts{intent: o.intentPath, sim: simPath, connectivity: schFiles, review: reviewPath}
-			so.fillFromRunDir(outDir)
-			sg := signoffGate(so, waivers, stderr)
-			for _, g := range []gateResult{rg, sg} {
+			// 8. Design report, release review (layout stage) and the one
+			// release sign-off — the same steps kicad route ends with — then
+			// the mandatory gate set.
+			gates := append([]gateResult{reviewDesign}, summary["gates"].([]gateResult)...)
+			addGate := func(g gateResult) {
 				applyWaivers(&g, waivers)
 				fmt.Fprintf(stderr, "gate %-16s %v  %s\n", g.Gate, map[bool]string{true: "PASS", false: "FAIL"}[g.Pass], g.Detail)
 				gates = append(gates, g)
 				pass = pass && g.Pass
 			}
+			addGate(autoRouteDesignReport(outDir, o.intentPath, simPath, projectConfig, summary, stderr))
+			summary["gates"] = gates
+			_ = writeJSONFile(filepath.Join(outDir, "summary.json"), summary)
+			relEv := append(append([]string{}, ev...), filepath.Join(outDir, "summary.json"), filepath.Join(outDir, "board-final.json"))
+			if rep, _ := summary["report"].(map[string]any); rep != nil {
+				if p, _ := rep["json"].(string); p != "" {
+					relEv = append(relEv, p)
+				}
+			}
+			addGate(designReviewGate("layout", rv, relEv, waivers, summary, stderr))
+			so := signoffOpts{intent: o.intentPath, sim: simPath, connectivity: schFiles}
+			so.fillFromRunDir(outDir)
+			addGate(signoffGate(so, waivers, stderr))
+			addGate(gateSetGate(gates))
 			summary["gates"], summary["pass"] = gates, pass
 			if !pass {
 				summary["sessionsKept"] = sessions
@@ -464,7 +515,10 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 	c.Flags().StringVar(&widthBasis, "width-basis", "segment", widthBasisHelp)
 	c.Flags().StringVar(&waiverPath, "waivers", "", "JSON list of signed waivers [{gate,match,reason,by}]: a failing gate passes only when every failing item matches one")
 	c.Flags().StringVar(&simPath, "sim", "", "sim.json (pcbpilot sim power): run sim post-layout on the finished live board")
-	c.Flags().StringVar(&reviewPath, "review", "", "design-stage review.json (review-panel) for the sign-off (default <out-dir>/review-design/review.json)")
+	c.Flags().StringArrayVar(&rv.requirements, "requirements", nil, "project requirement document for the design reviews (repeatable; required unless --no-review)")
+	c.Flags().StringVar(&rv.reviewers, "reviewers", "codex,kimi,claude", "design review reviewer CLIs, comma-separated (all must pass)")
+	c.Flags().BoolVar(&rv.noReview, "no-review", false, "skip the design reviews; refused unless --waivers holds a signed {\"gate\":\"design-review\",\"match\":\"--no-review\"} entry")
+	c.Flags().DurationVar(&rv.timeout, "review-timeout", 20*time.Minute, "per-reviewer time limit")
 	addSilkTightFlags(c, &silkOpt, "silk-")
 	addManualFlags(c, &noManual, &projectConfig)
 	return c

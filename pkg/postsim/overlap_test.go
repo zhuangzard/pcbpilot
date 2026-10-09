@@ -84,3 +84,35 @@ func TestOpenDoesNotHideOverBudget(t *testing.T) {
 		t.Fatalf("findings %+v: want both open and ir-drop", r.Findings)
 	}
 }
+
+// CopperConnectivity: pads joined by a track, a via chain and a poured fill
+// are one island; a pad with no copper to the rest is a second island.
+func TestCopperConnectivity(t *testing.T) {
+	b := newTB(2000, 1000, 2)
+	b.part("S", 1, pad("1", "VIN", 1, 200, 150, 10, 10))
+	b.part("L", 1, pad("1", "VIN", 1, 1800, 150, 10, 10))
+	b.part("M", 2, pad("1", "VIN", 2, 1000, 600, 20, 20))
+	b.part("X", 1, pad("1", "VIN", 1, 1500, 900, 10, 10)) // isolated
+	b.line("VIN", 1, 200, 150, 700, 150, 10)
+	b.via("VIN", 700, 150, 24, 12)
+	b.line("VIN", 2, 700, 150, 1000, 600, 10)
+	b.rectFill("VIN", 1, 1300, 100, 1900, 200) // joins L, and the track end below
+	b.line("VIN", 1, 700, 150, 1350, 150, 10)
+	brd, err := ParseBoard(b.json())
+	if err != nil {
+		t.Fatal(err)
+	}
+	open := CopperConnectivity(brd)
+	if len(open) != 1 || open[0].Net != "VIN" || open[0].Unrouted != 1 || len(open[0].Islands[1]) != 1 || open[0].Islands[1][0] != "X.1" {
+		t.Fatalf("open %+v", open)
+	}
+	// A 0.5 mil gap breaks the chain.
+	b2 := newTB(2000, 1000, 2)
+	b2.part("S", 1, pad("1", "VIN", 1, 200, 150, 10, 10))
+	b2.part("L", 1, pad("1", "VIN", 1, 1000, 150, 10, 10))
+	b2.line("VIN", 1, 200, 150, 989.5, 150, 10) // cap ends at 994.5, pad edge 995
+	brd2, _ := ParseBoard(b2.json())
+	if o := CopperConnectivity(brd2); len(o) != 1 {
+		t.Fatalf("gap: %+v", o)
+	}
+}

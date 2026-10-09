@@ -248,11 +248,8 @@ func runKicadRoute(o kicadRouteOpts, stdout, stderr io.Writer) error {
 	if err := checkNoManual(o.noManual, waivers); err != nil {
 		return err
 	}
-	if o.noReview && !hasWaiver(waivers, "design-review", noReviewMatch) {
-		return fmt.Errorf("--no-review skips the design-review gates: it needs a signed waiver in --waivers {\"gate\":\"design-review\",\"match\":%q,\"reason\":…,\"by\":…}", noReviewMatch)
-	}
-	if !o.noReview && len(o.requirements) == 0 {
-		return fmt.Errorf("--requirements is required: the design review judges the design against the project's own requirements (or --no-review with a signed waiver)")
+	if err := checkReviewOpts(reviewRunOpts{requirements: o.requirements, noReview: o.noReview}, waivers); err != nil {
+		return err
 	}
 	in, err := loadDesignIntent(o.intent)
 	if err != nil {
@@ -551,6 +548,7 @@ func (r *kicadRun) run() error {
 		so.report, _ = rep["json"].(string)
 	}
 	r.add(signoffGate(so, r.waivers, r.stderr))
+	r.add(gateSetGate(r.gates))
 	r.lap("signoff")
 	return nil
 }
@@ -975,7 +973,8 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 	} else {
 		delete(r.summary, "simKicadMismatch")
 	}
-	r.add(kicadRouteCompleteGate(r.route, drcRep, snap))
+	rc := kicadRouteCompleteGate(r.route, drcRep, snap)
+	qo.routeGate = &rc
 	r.lap("gate: intent / safety snapshot gates")
 	for _, g := range tailGates(snap, boardPath, postOut, qo, o.projectName, "", r.summary, r.stderr) {
 		r.gates = append(r.gates, g) // tailGates applied the waivers
@@ -1078,13 +1077,42 @@ func (r *kicadRun) designReport(pass bool) gateResult {
 
 func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
 
-// review returns the design-review gate for stage: a stored passing
-// review.json for exactly these inputs is reused, else the panel runs.
+// review returns the design-review gate for stage (designReviewGate).
 func (r *kicadRun) review(stage string, evidence []string) gateResult {
 	o := r.o
+	return designReviewGate(stage, reviewRunOpts{requirements: o.requirements, reviewers: o.reviewers, noReview: o.noReview,
+		timeout: o.reviewTimeout, outDir: o.outDir}, evidence, r.waivers, r.summary, r.stderr)
+}
+
+// reviewRunOpts are the design-review settings of a route command.
+type reviewRunOpts struct {
+	requirements []string
+	reviewers    string
+	noReview     bool
+	timeout      time.Duration
+	outDir       string
+}
+
+// checkReviewOpts: --requirements is required unless --no-review carries a
+// signed waiver.
+func checkReviewOpts(o reviewRunOpts, waivers []gateWaiver) error {
+	if o.noReview && !hasWaiver(waivers, "design-review", noReviewMatch) {
+		return fmt.Errorf("--no-review skips the design-review gates: it needs a signed waiver in --waivers {\"gate\":\"design-review\",\"match\":%q,\"reason\":…,\"by\":…}", noReviewMatch)
+	}
+	if !o.noReview && len(o.requirements) == 0 {
+		return fmt.Errorf("--requirements is required: the design review judges the design against the project's own requirements (or --no-review with a signed waiver)")
+	}
+	return nil
+}
+
+// designReviewGate is the design-review gate for stage (design before
+// routing, layout after the report) on every route path: a stored passing
+// <outDir>/review-<stage>/review.json for exactly these inputs is reused,
+// else the review panel runs.
+func designReviewGate(stage string, o reviewRunOpts, evidence []string, waivers []gateWaiver, summary map[string]any, stderr io.Writer) gateResult {
 	if o.noReview {
 		g := gateResult{Gate: "design-review", Detail: "skipped by --no-review", Items: []string{"design review skipped (" + noReviewMatch + ")"}}
-		applyWaivers(&g, r.waivers)
+		applyWaivers(&g, waivers)
 		return g
 	}
 	dir := filepath.Join(o.outDir, "review-"+stage)
@@ -1100,17 +1128,17 @@ func (r *kicadRun) review(stage string, evidence []string) gateResult {
 			old.Stage == stage && old.InputSHA256 == sha && old.Gate.Pass {
 			g := old.Gate
 			g.Detail = "reused " + filepath.Join(dir, "review.json") + " (same inputs): " + g.Detail
-			r.summary["review-"+stage] = filepath.Join(dir, "review.json")
+			summary["review-"+stage] = filepath.Join(dir, "review.json")
 			return g
 		}
 	}
-	rec, err := runReviewPanel(stage, o.requirements, evidence, reviewers, dir, o.reviewTimeout, reviewMaxBytes, r.waivers, r.stderr)
+	rec, err := runReviewPanel(stage, o.requirements, evidence, reviewers, dir, o.timeout, reviewMaxBytes, waivers, stderr)
 	if err != nil {
 		g := gateResult{Gate: "design-review", Detail: "review-panel: " + err.Error()}
-		applyWaivers(&g, r.waivers)
+		applyWaivers(&g, waivers)
 		return g
 	}
-	r.summary["review-"+stage] = filepath.Join(dir, "review.json")
+	summary["review-"+stage] = filepath.Join(dir, "review.json")
 	return rec.Gate
 }
 
