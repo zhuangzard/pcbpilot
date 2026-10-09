@@ -44,6 +44,7 @@ goes to --out-dir.`,
 		newKiCadLcscCmd(stdout, stderr),
 		newKicadSchImportCmd(stdout, stderr),
 		newKicadSchNetlistCmd(stdout, stderr),
+		newKicadSchBuildCmd(stdout, stderr),
 		newKicadSnapshotCmd(stdout),
 		newKicadRouteCmd(stdout, stderr),
 	)
