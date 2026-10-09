@@ -321,8 +321,9 @@ pcbpilot pcb auto route --playbook out/playbook.json --out-dir out/live --projec
 `--sim`、`--sch-connectivity`；任何一道门不过，命令返回非零。
 
 - 布线前：`pcb rules apply --intent` 写入原生规则并回读；DSN 每个网类按意图抬到外层线宽、内层线宽
-  （`layer_rule`）和间距，逐网复核，有一个不达标就不布线；`widthMil.min = outer` 的网类不准颈缩
-  （fastroute `--no-neckdown-classes`），全局颈缩下限取意图最小的 `widthMil.min`。
+  （`layer_rule`）和间距，逐网复核，有一个不达标就不布线；线宽高于全局颈缩下限的意图网类一律不准颈缩
+  （fastroute `--no-neckdown-classes`；fastroute 的 fanout 微颈缩会把任意拥挤段收到类宽 3/4、3/5、1/2，不只在焊盘处，
+  `min_trace_width` 只是下限），全局颈缩下限取意图最小的 `widthMil.min`。
 - 布线后：原生 DRC 0、逐焊盘对账 0 差异、`pcb rules check --intent` 同步、逐网逐层线宽对意图（低于要求的线段
   只在同网焊盘 50 mil 内且不低于 min 时算颈缩；`--width-basis segment` 为默认（用户 2026-10-06 决定“按每段实际电流算”）：
   承载不到网电流一半的走线，按后仿真算出的该段最坏电流 ×1.2 的 IPC-2221 线宽判，不低于 min，主干仍按网电流；
@@ -333,9 +334,17 @@ pcbpilot pcb auto route --playbook out/playbook.json --out-dir out/live --projec
   A·mil，越小越好）；v20 B 两个候选都布通，原先留下的那个漏极回路长。
 - 压降闭环：若失败的门只有后仿真压降（可同时有 intent-widths；silkscreen、board-manual 不碰铜，不阻挡）（`X drops N mV … over the B mV budget`），按 N/B ×1.15 加宽该网全部走线
   （上限 `--widen-max-mil`，间距与 DRC 守卫照旧），重新对账并重跑全部门禁，最多 2 轮；DRC、对账等其他门失败时不加宽。
-- 收尾：发布设计报告（`<out-dir>/report/vN`，门禁 `design-report`），再运行与 `kicad route` 同一条发布签核
-  `pcbpilot signoff`（门禁 `signoff`，结果在 `<out-dir>/signoff/`；设计评审取 `--review`，缺省
-  `<out-dir>/review-design/review.json`，没有即 `signoff-review` 失败）。签核不过，命令非零。
+- 设计评审（与 `kicad route` 同一 `designReviewGate`）：应用剧本前跑 design 阶段（`--requirements` 必给；
+  `<out-dir>/review-design/review.json` 输入 SHA 相同且通过则复用；`--no-review` 需签名豁免），失败即不布线；
+  报告后跑 layout 阶段。
+- `route-complete` 对所有布线器都跑：fastroute 用它的会话报告；外部 `--router` 命令、`--router internal`（应用
+  `pcb auto run --router internal` 的剧本，不拆线、不跑 fastroute）和 `pcb gate` 用 board-final.json 的铜连通性
+  （`postsim.CopperConnectivity`：焊盘/走线/过孔/真实铺铜按精确几何相接，每网岛数−1 即未布通）。
+- 收尾：发布设计报告（`<out-dir>/report/vN`，门禁 `design-report`）→ layout 评审 → 与 `kicad route` 同一条发布签核
+  `pcbpilot signoff`（门禁 `signoff`，结果在 `<out-dir>/signoff/`）→ `gate-set`：强制门禁集合（design-review、DRC、
+  pad-net-diff、intent-rules、intent-widths、intent-lengths、copper-to-edge、isolation、via-current、post-layout-sim、
+  route-complete、silkscreen、board-manual、design-report、signoff）缺任何一个即失败。安全检查与 KiCad 一样拆成
+  copper-to-edge / isolation / via-current 三个门（原 `pcb-check-intent`）。任何门不过，命令非零。
   线宽门只按电流，压降还取决于长度：Gas Module V5 B v17 的 SV1_DRV 0.34 A 走内层 1551 mil × 10 mil，压降 57 mV（预算 30）。
 - 会话对账：一段在同层同网铜（走线圆头胶囊、过孔圆盘）覆盖其 90 % 宽度全长时视为在（v17：导入丢了夹在 2.2 mil 缝里的
   1.1 mil GND 短段；v18：EasyEDA 把 12.5 mil 宽 40 mil 的 SV1_DRV 短段并进了旁边的过孔和 40 mil 走线）。
@@ -388,7 +397,8 @@ pcbpilot pcb auto route --playbook out/playbook.json --out-dir out/live --projec
 （GND 在 TOP/IN1/BOTTOM，焊盘最多的非地电源网在 IN2；`--gnd-layers` / `--power-net` / `--power-layer` 可改）
 → `--widen-net` 加宽（`pcb widen`）→ 重铺 → 保存 → 重载 → 重铺 → 原生 DRC → 逐焊盘对账 →
 `--sim` 时现场 dump 后跑 `sim post-layout` → 门禁 → IR 收敛 → 设计报告 → `pcbpilot signoff`。结果写 `--out-dir/summary.json`。
-仍有未布通时最后一次 fastroute 新运行的 `--multi-start` 按 CPU 核数取 4–8（进程内并行打乱网序），按「未布通、再冲突」更少才换用。
+fastroute 报告的 `--diagnose` 把未布通分为 blocked（几何堵死：单独布也布不通）与 congestion；全部是 blocked 时不再续跑，
+`route-complete` 逐条写「移动器件或加逃线」。
 
 **多 seed 取最优（`--place-seeds 6`，默认）。** 不做引擎布线时（fastroute 模式、`--no-route`），退火摆放的结果全凭 seed：
 2026-10-06 Gas Module V5 同一起点 8 个 seed 的加权线长从 121.9 到 156.5 in。现在并行跑 6 个 seed（约 37 s），先比合法性

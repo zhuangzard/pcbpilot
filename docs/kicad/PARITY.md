@@ -80,5 +80,7 @@ KiCad 对等 = **为同一动作协议实现 KiCad 后端**（`--backend kicad`�
 | 4 | 密板丝印规划失败、每轮约 12 s | 八方位 × 横/竖 + 封装内居中；盖阻焊过孔作为第二档；无位时降到 JLC 最小 0.8 mm / 0.15 mm（`--silk-min-font`）；组标签也可降号；一次最多挪开 3 个挡位标签；网格索引 + 每标签静态合法位缓存。门禁仍硬：字号低于 min(项目字号, 最小字号) 失败 | `pcb_silk_tight.go`（共用） |
 | 5 | EasyEDA `pcb auto route` 末尾没有签核 | 末尾发布设计报告并运行同一 `pcbpilot signoff`（`--review` 或 `<out-dir>/review-design/review.json`） | `pcb auto route` |
 | 6 | DSN 板边禁布带挡住板边连接器焊盘 | 板边安装件（铜到板边门禁的同一判据：封装框到达板框）的近边焊盘在禁布带上开全深度窗口（焊盘 + 向内直出逃线，外扩间距 + 2 mil）；其余铜照常禁布，门禁不变 | `specctra.EdgeBandsExcept`（KiCad 与 EasyEDA 共用） |
-| 7 | fastroute 多次运行结果不同 | fastroute 0.1.13 无种子参数且同 DSN + 同参数结果逐字节相同；改为两个起点并行（配置的运行 + 按剩余核数定 `--multi-start` 4–8 的运行，CPU 预算 = 核数 − 1，`--max-cpu`），取未布通最少、再冲突最少者 | `runFastrouteStarts`（共用） |
+| 7 | fastroute 多次运行结果不同 / 太慢 | 同 DSN + 同参数结果逐字节相同；fastroute 自己并行跑 multi-start 变体，不再叠第二层并行：`--multi-start`（默认 4）成为 pcbpilot 设置；优化器默认关（`--optimizer`），PicoRick 299 → 134 s、同为 4 未布通；`--diagnose` 全部 blocked 时不续跑，route-complete 写明需改摆放/逃线 | `kicad route`、`runFastroute` |
+| 7b | fastroute 微颈缩可收窄任意拥挤段 | 高于全局下限的所有意图网类进 `--no-neckdown-classes` | `forbidsNeckdown`（共用） |
+| 7c | 非 fastroute 路径缺门禁 | `route-complete` 对外部 `--router`、`--router internal`、`pcb gate` 用板铜连通性判；`pcb auto route` 加 design/layout 评审；两条路径以 `gate-set` 收尾，强制门禁集合缺一即失败（`TestRouteGateSetContract`） | `route_gate_set.go`、`pcb auto route` |
 | 8 | 计时 | `summary.timings` 保留；前后对比见 `.agents/skills/pcbpilot/references/kicad.md`「计时与提速」 | — |

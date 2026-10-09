@@ -11,6 +11,30 @@ CLI (offline, KiCad 10):
   plans, and applies the placements (positions + rotations) in one write; wire ends, labels, no-connects, junctions and
   power symbols on moved pins follow; written only when the netlist is unchanged. Single layouts only (not `--zones`).
 
+Route / gates / sign-off (EasyEDA and KiCad, no connector change):
+- `sim post-layout`: copper that touches (a via ring overlapping a pad edge by 0.5 mil, a track end cap on a pad or
+  track edge) is joined from exact geometry before the 0.5 mm raster — no more false "no copper path"; an open no
+  longer hides an over-budget drop on the same net.
+- `kicad route`: a sim open on a net KiCad's DRC shows connected is marked `SIM/KICAD MISMATCH`
+  (`summary.simKicadMismatch`, gate still fails) and no longer stops the IR closure.
+- fastroute report geometry converted from the DSN's unit (mm on KiCad, inch on EasyEDA) before it is labelled mil.
+- Silkscreen planner: eight positions × horizontal/rotated, then inside the own footprint, tented vias as a second
+  tier, fab-minimum font fallback (`--silk-min-font`, JLC 0.8 mm / 0.15 mm stroke; the gate fails below
+  min(project size, min font)), group labels at the minimum too, up to 3 labels evicted, grid index + per-label slot
+  cache: PicoRick 23 → 8 unresolved (67 s → 0.9 s), Gas V5 A 58 → 23 (88 s → 1.7 s).
+- DSN board-edge keep-out bands leave a full-depth window over the near-edge pads of edge-mounted connectors
+  (`summary.edgeExemptPads`; KiCad and EasyEDA DSNs); the copper-to-edge gate is unchanged.
+- Every intent net class above the neck-down floor goes to fastroute `--no-neckdown-classes` (its micro neck-down
+  narrows any congested segment, not only at pins).
+- `kicad route`: `--multi-start` (default 4) is a pcbpilot setting, fastroute's optimizer is off by default
+  (`--optimizer`, `--optimizer-threshold`; PicoRick 299 → 134 s at the same 4 unrouted); `--diagnose` blocked
+  connections stop continuation runs and are named in `route-complete` (`summary.blockedConnections`).
+- `pcb auto route` ends like `kicad route`: design review before routing (`--requirements`, `--reviewers`,
+  `--no-review` with a signed waiver), design report, layout review, `pcbpilot signoff`, and the `gate-set` check of
+  the mandatory gates; `--router internal` delivers a `pcb auto run --router internal` playbook through the same
+  gates. `route-complete` runs for every router (board copper connectivity without a router report); the EasyEDA
+  safety gate is split into `copper-to-edge`, `isolation`, `via-current`; `intent-lengths` is always reported.
+
 ## [0.9.0] — 2026-10-09
 
 **KiCad becomes the design EDA; EasyEDA is the submission tool. Re-import the 0.9.0 connector** (new action

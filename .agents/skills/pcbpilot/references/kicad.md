@@ -90,12 +90,16 @@ pcbpilot kicad route --pcb GasV5_A.kicad_pcb --intent intent.json --sim sim.json
      离边 13 mil）。**板边连接器开窗**：板边安装件（封装框角点在板框外或距板框 < 1 mil，与 `copper-to-edge` 门禁同一判据）
      的近边焊盘外扩（间距 + 2 mil）后，在禁布带上开全深度窗口（焊盘 + 向内直出的逃线），否则 USB/端子焊盘布不通；
      `summary.edgeExemptPads` 列出，其余铜照常禁布，门禁照常判（这些焊盘不低于工厂下限时为 WARN）。逐网复查类线宽/内层线宽/间距，不足即停。**不做** EasyEDA 的 dsn-fix / ses-repair / reconcile。
-3. **fastroute**：两个起点**并行**（`runFastrouteStarts`，各自 `runFastroute`：续跑、崩溃单线程重试）——配置的运行，和一个
-   `--multi-start=N` 的新运行（N 按 CPU 预算剩余核数取 4–8；fastroute 在进程内并行跑 N−1 个打乱网序的变体）；CPU 预算 =
-   核数 − 1（`--max-cpu`），超预算则顺序跑、前一个全布通就跳过后一个；取**未布通最少、再冲突最少**者（`summary.routerStarts`）。
-   fastroute 0.1.13 没有种子参数，同一 DSN + 同一参数结果逐字节相同（PicoRick：3 次 `--multi-start=1` 与 2 次
-   `--multi-start=4` 的 SES 完全一致，8 对 4 条未布通），所以靠不同 `--multi-start` 而不是重复同一进程。
-   `--no-neckdown-classes`、最小线宽 = max(板最小线宽, min(最窄 `widthMil.min`, 最窄类线宽))、意图差分对/等长组（skew）文件。
+3. **fastroute**：一条 `runFastroute`（续跑、崩溃单线程重试）。`--multi-start`（默认 4）是 pcbpilot 设置：fastroute 自己
+   并行重跑 N−1 个不同种子的第 1 轮网序、按（未布通、冲突、−分数）取最好，pcbpilot 不再叠第二层并行。同一 DSN + 同一参数
+   结果逐字节相同（PicoRick：3 次 `--multi-start=1`、2 次 `--multi-start=4` 的 SES 完全一致）。优化器默认关（`--optimizer`
+   打开，`--optimizer-threshold`）：它的预算等于整个布线阶段（含 multi-start，至少 60 s）——PicoRick `--multi-start=4`
+   开 299 s / 关 134 s，同为 4 未布通 30 冲突，线长只差 0.1 %、过孔差 1；`--multi-start=1` 为 60 / 55 s、8 未布通。
+   `--diagnose` 把未布通分 blocked / congestion：全部 blocked 时不续跑（重布无用），`route-complete` 逐条写
+   「移动器件或加逃线」，`summary.blockedConnections` 列出。
+   `--no-neckdown-classes` 列出线宽高于全局下限的**所有**意图网类（fastroute 的 fanout 微颈缩会把任意拥挤段收到类宽
+   3/4、3/5、1/2，`min_trace_width_um` 只是下限）；最小线宽 = max(板最小线宽, min(最窄 `widthMil.min`, 最窄类线宽))、
+   意图差分对/等长组（skew）文件。
    报告坐标是 DSN 单位 / 1000（KiCad um → mm，EasyEDA mil → inch），按 `specctra.ReportMilPerUnit` 换成 mil。
 4. **导入后铜处理**（顺序同 `pcb auto route`）：SES 导入 + 重铺 → **过孔阵列**（`planViaArrays`，意图每次换层的过孔数）→
    **加宽到意图**（`planWidenToIntent`，KiCad DRC 报间距的加宽线先退一半再退回原宽）→ **铺铜**（GND 于 TOP/IN1/BOTTOM、
@@ -128,7 +132,8 @@ pcbpilot kicad route --pcb GasV5_A.kicad_pcb --intent intent.json --sim sim.json
 ## 发布签核（`pcbpilot signoff`，EasyEDA 与 KiCad 同一条）
 
 `kicad route` 与 EasyEDA `pcb auto route` 最后一步都自动运行（同一 `signoffGate`；`pcb auto route` 先发布设计报告
-`<out-dir>/report`，设计评审用 `--review` 或 `<out-dir>/review-design/review.json`）；`pcb gate` 的 `--out-dir` 可手动运行：
+`<out-dir>/report`，design/layout 两次设计评审与 `kicad route` 相同），之后 `gate-set` 核对强制门禁集合；
+`pcb gate` 的 `--out-dir` 可手动运行：
 
 ```bash
 pcbpilot signoff --run-dir route/ --intent intent.json --sim sim.json --connectivity sch.json [--values values.json]

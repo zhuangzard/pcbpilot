@@ -282,8 +282,10 @@ Steps (stdout is one summary JSON, progress on stderr):
    8-thread run crashed after 244 s while one thread routed the same DSN in 102 s. A crashed run is recorded as
    `crashed` with unknown counts (-1), never 0, and repeated once single-threaded; with no good run the command
    fails. `--threads N` opts into parallel routing. Neck-down floor from `--min-trace-um` or, with `--intent`, the
-   intent's narrowest `widthMil.min`; `--no-neckdown-classes` lists only nets whose `widthMil.min = outer` is above
-   that floor (Gas V5: 17 power/switch nets; signals already at 6 mil are left out). While connections stay unrouted or the router reports fixable clearance
+   intent's narrowest `widthMil.min`; `--no-neckdown-classes` lists every intent net whose width is above that
+   floor (signals already at the floor are left out): fastroute's automatic neck-down includes a "fanout micro
+   neck-down" that narrows ANY congested segment to 3/4, 3/5 or 1/2 of the class width, not only at pins, and
+   `--router.min_trace_width_um` is only a floor — so a net with `widthMil.min < outer` is listed too. While connections stay unrouted or the router reports fixable clearance
    violations, up to `--continue` more runs from the last session (`--initial-session`), stopping when a run does
    not improve. Remaining fixable violations are listed per run (`fixableList`); the pin–pin overlaps between a
    mounting hole and its screw-head ring (EasyEDA exports both MULTI objects as pins) are unfixable and not counted.
