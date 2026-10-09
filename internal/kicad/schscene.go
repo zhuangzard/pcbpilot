@@ -26,6 +26,7 @@ type ScenePin struct {
 // SceneSymbol is one placed symbol instance (unit).
 type SceneSymbol struct {
 	Ref, LibID string
+	Key        string // instance key: Ref, or "Ref:Unit" when the reference has several units here
 	Unit       int
 	At         Pt
 	Rot        float64
@@ -33,7 +34,15 @@ type SceneSymbol struct {
 	Power      bool // power symbol (#PWR…)
 	Box        Box  // body + pins; zero when the library symbol is unknown
 	HasBox     bool
+	Body       Box // graphics only (no pins); valid when HasBox
 	Pins       []ScenePin
+	Fields     []SceneField // visible, non-empty fields
+}
+
+// SceneField is a visible symbol field with an estimated text box.
+type SceneField struct {
+	Name, Value string
+	Box         Box
 }
 
 // SceneLabel is a net label of any kind (label, global_label,
@@ -52,7 +61,10 @@ type SchScene struct {
 	Wires      [][2]Pt
 	Labels     []SceneLabel
 	Texts      []Box
+	Junctions  []Pt
+	NoConnects []Pt
 	TitleBlock *Box // nil when the paper size is unknown
+	Page       *Box // the drawing area inside the border; nil when unknown
 }
 
 // Scene reads the sheet's existing items (pending edits are not included).
@@ -68,6 +80,7 @@ func (e *SchEditor) Scene() (*SchScene, error) {
 					w, h = h, w
 				}
 				sc.TitleBlock = &Box{w - schBorder - schTitleW, h - schBorder - schTitleH, w - schBorder, h - schBorder}
+				sc.Page = &Box{schBorder, schBorder, w - schBorder, h - schBorder}
 			}
 		}
 	}
@@ -75,6 +88,11 @@ func (e *SchEditor) Scene() (*SchScene, error) {
 	for id, s := range e.libs {
 		libs[id] = libBox(s)
 	}
+	e.bodies = map[string]Box{}
+	for id, s := range e.libs {
+		e.bodies[id] = libBodyBox(s)
+	}
+	keys := instKeys(e.root)
 	for _, n := range e.root.list {
 		switch n.head() {
 		case "symbol":
@@ -82,6 +100,7 @@ func (e *SchEditor) Scene() (*SchScene, error) {
 			if err != nil {
 				return nil, err
 			}
+			s.Key = keys[n]
 			sc.Symbols = append(sc.Symbols, s)
 		case "wire":
 			pts := wirePts(n)
@@ -96,6 +115,14 @@ func (e *SchEditor) Scene() (*SchScene, error) {
 			l := SceneLabel{Kind: n.head(), Name: n.list[1].atom, At: Pt{at.num(1), at.num(2)}, Angle: at.num(3)}
 			l.Box = textBox(l.At, l.Angle, len([]rune(l.Name)))
 			sc.Labels = append(sc.Labels, l)
+		case "junction", "no_connect":
+			if at := n.child("at"); at != nil {
+				if n.head() == "junction" {
+					sc.Junctions = append(sc.Junctions, Pt{at.num(1), at.num(2)})
+				} else {
+					sc.NoConnects = append(sc.NoConnects, Pt{at.num(1), at.num(2)})
+				}
+			}
 		case "text", "text_box":
 			if at := n.child("at"); at != nil && len(n.list) > 1 {
 				lines := strings.Split(n.list[1].atom, "\n")
@@ -158,6 +185,33 @@ func (e *SchEditor) sceneSymbol(n *sexp, libs map[string]Box) (SceneSymbol, erro
 		s.Power = lib.child("power") != nil
 	}
 	s.Box, s.HasBox = instanceBox(n, libs)
+	if s.HasBox && e.bodies != nil {
+		if bb, ok := e.bodies[s.LibID]; ok && !math.IsInf(bb.MinX, 0) {
+			s.Body = boxAt(bb, s.At, s.Rot, s.Mirror)
+		} else {
+			s.Body = s.Box
+		}
+	}
+	for _, p := range n.list {
+		if p.head() != "property" || len(p.list) < 3 || p.list[2].atom == "" || propertyHidden(p) {
+			continue
+		}
+		pa := p.child("at")
+		if pa == nil {
+			continue
+		}
+		size := 1.27
+		if f := findDeep(p, "size"); f != nil && f.num(1) > 0 {
+			size = f.num(1)
+		}
+		just := ""
+		if j := findDeep(p, "justify"); j != nil && len(j.list) > 1 {
+			just = j.list[1].atom
+		}
+		vertical := math.Mod(normAngle(pa.num(3)+s.Rot), 180) == 90
+		s.Fields = append(s.Fields, SceneField{Name: p.list[1].atom, Value: p.list[2].atom,
+			Box: fieldBox(Pt{pa.num(1), pa.num(2)}, vertical, len([]rune(p.list[2].atom)), size, just)})
+	}
 	pins, err := e.LibPins(s.LibID)
 	if err != nil {
 		return s, nil // unknown library symbol: no pins
@@ -194,158 +248,6 @@ func (e *SchEditor) PinsAt(libID string, unit int, at Pt, rot float64, mirror st
 	return placePins(pins, unit, at, rot, mirror), nil
 }
 
-// SymPose is a symbol position and rotation (degrees, counter-clockwise).
-type SymPose struct {
-	At  Pt
-	Rot float64
-}
-
-// DragResult counts what DragSymbols changed.
-type DragResult struct {
-	Symbols    int `json:"symbols"`
-	WirePoints int `json:"wirePoints"`
-	Labels     int `json:"labels"`
-	Powers     int `json:"powerSymbols"`
-	Markers    int `json:"markers"` // no-connects and junctions
-}
-
-const dragEps = 1e-3
-
-func samePt(a, b Pt) bool { return math.Abs(a.X-b.X) < dragEps && math.Abs(a.Y-b.Y) < dragEps }
-
-// DragSymbols moves the symbols (by reference; mirror kept) to their poses.
-// Everything sitting on a moved pin follows it: wire end points, labels,
-// no-connect flags, junctions and power symbols. Multi-unit references and
-// two moved pins that touch each other are refused.
-func (e *SchEditor) DragSymbols(poses map[string]SymPose) (DragResult, error) {
-	var res DragResult
-	type move struct{ from, to Pt }
-	var moves []move
-	insts := map[string][]*sexp{}
-	for _, n := range e.root.list {
-		if n.head() == "symbol" {
-			insts[symRef(n)] = append(insts[symRef(n)], n)
-		}
-	}
-	movedNode := map[*sexp]bool{}
-	for ref, pose := range poses {
-		ns := insts[ref]
-		switch {
-		case len(ns) == 0:
-			return res, fmt.Errorf("no symbol %s on this sheet", ref)
-		case len(ns) > 1:
-			return res, fmt.Errorf("%s has %d units on this sheet; moving multi-unit symbols is not supported", ref, len(ns))
-		}
-		n := ns[0]
-		s, err := e.sceneSymbol(n, nil)
-		if err != nil {
-			return res, err
-		}
-		np, err := e.PinsAt(s.LibID, s.Unit, pose.At, pose.Rot, s.Mirror)
-		if err != nil {
-			return res, err
-		}
-		to := map[string]Pt{}
-		for _, p := range np {
-			to[p.Number] = p.At
-		}
-		for _, p := range s.Pins {
-			moves = append(moves, move{p.At, to[p.Number]})
-		}
-		e.repl = append(e.repl, symbolMoveEdits(n, s.At, s.Rot, pose.At, pose.Rot)...)
-		movedNode[n] = true
-		res.Symbols++
-	}
-	for i := range moves {
-		for j := i + 1; j < len(moves); j++ {
-			if samePt(moves[i].from, moves[j].from) && !samePt(moves[i].to, moves[j].to) {
-				return res, fmt.Errorf("pins at (%s, %s) touch directly and would be torn apart; wire them first", F(moves[i].from.X), F(moves[i].from.Y))
-			}
-		}
-	}
-	target := func(p Pt) (Pt, bool) {
-		for _, m := range moves {
-			if samePt(p, m.from) {
-				return m.to, true
-			}
-		}
-		return Pt{}, false
-	}
-	for _, n := range e.root.list {
-		switch h := n.head(); h {
-		case "wire":
-			if pts := n.child("pts"); pts != nil {
-				for _, p := range pts.list {
-					if p.head() != "xy" {
-						continue
-					}
-					if t, ok := target(Pt{p.num(1), p.num(2)}); ok {
-						e.repl = append(e.repl, textEdit{p.beg, p.end, fmt.Sprintf("(xy %s %s)", F(t.X), F(t.Y))})
-						res.WirePoints++
-					}
-				}
-			}
-		case LabelLocal, LabelGlobal, LabelHier, "no_connect", "junction":
-			at := n.child("at")
-			if at == nil {
-				continue
-			}
-			t, ok := target(Pt{at.num(1), at.num(2)})
-			if !ok {
-				continue
-			}
-			ang := ""
-			if len(at.list) > 3 {
-				ang = " " + F(at.num(3))
-			}
-			e.repl = append(e.repl, textEdit{at.beg, at.end, fmt.Sprintf("(at %s %s%s)", F(t.X), F(t.Y), ang)})
-			if h == "no_connect" || h == "junction" {
-				res.Markers++
-			} else {
-				res.Labels++
-			}
-		case "symbol":
-			if movedNode[n] {
-				continue
-			}
-			s, err := e.sceneSymbol(n, nil)
-			if err != nil || !s.Power || len(s.Pins) == 0 {
-				continue
-			}
-			t, ok := target(s.Pins[0].At)
-			if !ok {
-				continue
-			}
-			d := Pt{t.X - s.Pins[0].At.X, t.Y - s.Pins[0].At.Y}
-			e.repl = append(e.repl, symbolMoveEdits(n, s.At, s.Rot, Pt{s.At.X + d.X, s.At.Y + d.Y}, s.Rot)...)
-			res.Powers++
-		}
-	}
-	return res, nil
-}
-
-// symbolMoveEdits moves a symbol instance from (at, rot) to (to, toRot);
-// field positions turn with it about the anchor (their text angle is kept).
-func symbolMoveEdits(n *sexp, at Pt, rot float64, to Pt, toRot float64) []textEdit {
-	a := n.child("at")
-	out := []textEdit{{a.beg, a.end, fmt.Sprintf("(at %s %s %s)", F(to.X), F(to.Y), F(math.Mod(toRot+360, 360)))}}
-	d := (toRot - rot) * math.Pi / 180
-	c, s := math.Round(math.Cos(d)), math.Round(math.Sin(d))
-	for _, p := range n.list {
-		if p.head() != "property" {
-			continue
-		}
-		pa := p.child("at")
-		if pa == nil {
-			continue
-		}
-		x, y := pa.num(1)-at.X, pa.num(2)-at.Y
-		x, y = x*c+y*s, -x*s+y*c // counter-clockwise on screen (y down)
-		out = append(out, textEdit{pa.beg, pa.end, fmt.Sprintf("(at %s %s %s)", F(to.X+x), F(to.Y+y), F(pa.num(3)))})
-	}
-	return out
-}
-
 // RootSheetFor returns the root sheet of the hierarchy holding path: path
 // itself when it is a root sheet, else the root .kicad_sch in its directory
 // whose hierarchy includes it.
@@ -379,4 +281,72 @@ func RootSheetFor(path string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("%s is a sub-sheet and no root .kicad_sch next to it references it", path)
+}
+
+// libBodyBox is a library symbol's graphics extent (no pins, no fields) in
+// its own frame (y up); empty (Inf) when it draws nothing.
+func libBodyBox(sym *sexp) Box {
+	b := emptyBox()
+	var walk func(n *sexp)
+	walk = func(n *sexp) {
+		switch n.head() {
+		case "xy", "start", "end", "center", "mid":
+			b.add(n.num(1), n.num(2))
+		case "circle":
+			if c, r := n.child("center"), n.child("radius"); c != nil && r != nil {
+				b.add(c.num(1)-r.num(1), c.num(2)-r.num(1))
+				b.add(c.num(1)+r.num(1), c.num(2)+r.num(1))
+			}
+			return
+		case "pin", "property", "text":
+			return
+		}
+		for _, c := range n.list {
+			if c.atom == "" {
+				walk(c)
+			}
+		}
+	}
+	walk(sym)
+	return b
+}
+
+// boxAt places a library-frame box (y up) at a symbol pose (sheet, y down).
+func boxAt(lb Box, at Pt, rot float64, mirror string) Box {
+	sb := emptyBox()
+	for _, c := range []Pt{{lb.MinX, lb.MinY}, {lb.MaxX, lb.MinY}, {lb.MinX, lb.MaxY}, {lb.MaxX, lb.MaxY}} {
+		q := symbolXformRaw(c, at, rot, mirror)
+		sb.add(q.X, q.Y)
+	}
+	return sb
+}
+
+// fieldBox estimates the text box of a field (KiCad stroke font, ≈0.8 em
+// per character); fields are centred unless justified.
+func fieldBox(at Pt, vertical bool, chars int, size float64, just string) Box {
+	w, hh := float64(chars)*size*0.8+0.3, size*0.6
+	lo, hi := -w/2, w/2
+	switch just {
+	case "left":
+		lo, hi = 0, w
+	case "right":
+		lo, hi = -w, 0
+	}
+	if vertical { // reads bottom to top
+		return Box{at.X - hh, at.Y - hi, at.X + hh, at.Y - lo}
+	}
+	return Box{at.X + lo, at.Y - hh, at.X + hi, at.Y + hh}
+}
+
+// SymbolBoxAt is the body+pins box of library symbol libID placed at a pose.
+func (e *SchEditor) SymbolBoxAt(libID string, at Pt, rot float64, mirror string) (Box, bool) {
+	lib, ok := e.libs[libID]
+	if !ok {
+		return Box{}, false
+	}
+	lb := libBox(lib)
+	if math.IsInf(lb.MinX, 0) {
+		return Box{}, false
+	}
+	return boxAt(lb, at, rot, mirror), true
 }

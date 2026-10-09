@@ -79,6 +79,7 @@ type SchEditor struct {
 	items                 []string
 	repl                  []textEdit
 	pwrNext               int
+	bodies                map[string]Box // lib_id → graphics-only box (set by Scene)
 }
 
 type textEdit struct {
@@ -827,4 +828,41 @@ func (e *SchEditor) Render() (string, error) {
 		return "", fmt.Errorf("edited sheet does not re-parse: %w", err)
 	}
 	return s, nil
+}
+
+// SetPaper sets the sheet's paper size (landscape).
+func (e *SchEditor) SetPaper(name string) {
+	if p := e.root.child("paper"); p != nil {
+		e.repl = append(e.repl, textEdit{p.beg, p.end, "(paper " + Q(name) + ")"})
+	}
+}
+
+// DeleteZoneDecor removes the zone frames pcbpilot drew earlier: free texts
+// whose content is one of titles, and the rectangles that hold such a text.
+func (e *SchEditor) DeleteZoneDecor(titles map[string]bool) {
+	var anchors []Pt
+	for _, n := range e.root.list {
+		if n.head() == "text" && len(n.list) > 1 && titles[n.list[1].atom] {
+			if at := n.child("at"); at != nil {
+				anchors = append(anchors, Pt{at.num(1), at.num(2)})
+			}
+			e.deleteNode(n)
+		}
+	}
+	for _, n := range e.root.list {
+		if n.head() != "rectangle" {
+			continue
+		}
+		s, en := n.child("start"), n.child("end")
+		if s == nil || en == nil {
+			continue
+		}
+		b := Box{math.Min(s.num(1), en.num(1)), math.Min(s.num(2), en.num(2)), math.Max(s.num(1), en.num(1)), math.Max(s.num(2), en.num(2))}
+		for _, a := range anchors {
+			if a.X >= b.MinX && a.X <= b.MaxX && a.Y >= b.MinY && a.Y <= b.MaxY {
+				e.deleteNode(n)
+				break
+			}
+		}
+	}
 }

@@ -65,13 +65,13 @@ func TestSchScene(t *testing.T) {
 
 func TestDragSymbols(t *testing.T) {
 	e := openAuto(t)
-	res, err := e.DragSymbols(map[string]SymPose{"R2": {At: Pt{62.23, 49.53}, Rot: 90}, "R1": {At: Pt{50.8, 50.8}}})
+	res, err := e.DragSymbolsOpt(map[string]SymPose{"R2": {At: Pt{62.23, 49.53}, Rot: 90}, "R1": {At: Pt{50.8, 50.8}}}, DragOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// R1 stays (its label, wire end and power symbol too); R2's pin 1 wire end
-	// and pin 2 power symbol follow it.
-	if res.Symbols != 2 || res.WirePoints != 2 || res.Labels != 1 || res.Powers != 2 {
+	// R1 stays; the SIG wire between R1 and the moved R2 is re-routed, R2's
+	// GND symbol (directly on pin 2) turns with it.
+	if res.Symbols != 1 || res.Rerouted != 1 || res.Powers != 1 || res.NewWires == 0 || len(res.Fallback) != 0 {
 		t.Fatalf("%+v", res)
 	}
 	text, err := e.Render()
@@ -86,6 +86,12 @@ func TestDragSymbols(t *testing.T) {
 	ends := map[Pt]bool{}
 	for _, w := range sc.Wires {
 		ends[w[0]], ends[w[1]] = true, true
+		if w[0].X != w[1].X && w[0].Y != w[1].Y {
+			t.Errorf("diagonal wire %v", w)
+		}
+		if !OnGrid(w[0]) || !OnGrid(w[1]) {
+			t.Errorf("off-grid wire %v", w)
+		}
 	}
 	pins, _ := e2.SymbolPinPositions("R2")
 	if !samePt(pins["1"], Pt{58.42, 49.53}) || !ends[pins["1"]] {
@@ -98,6 +104,9 @@ func TestDragSymbols(t *testing.T) {
 	}
 	if !strings.Contains(text, "(at 62.23 49.53 90)") {
 		t.Error("R2 not rotated")
+	}
+	if fs := CheckSchematic(text, CheckOptions{}); len(fs) > 0 {
+		t.Errorf("quality findings after the drag: %+v", fs)
 	}
 	if _, err := openAuto(t).DragSymbols(map[string]SymPose{"R9": {}}); err == nil {
 		t.Error("unknown reference accepted")

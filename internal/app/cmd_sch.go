@@ -1263,9 +1263,10 @@ netflag 桩线占用的 x),把所有引脚点当作**点障碍**绕行,画完必
 	// that field has zero extension-API surface — no primitive type, no
 	// getter/setter, not smuggled into OtherProperty either).
 	{
-		var idsRaw, groupRef, groupsRaw string
+		var idsRaw, groupRef, groupsRaw, kRefs string
 		var dx, dy float64
 		var groupMoveMaxAttempts int
+		var kFit bool
 		c := &cobra.Command{
 			Use:   "group-move",
 			Short: "Translate components+wires together as one rigid assembly (dx,dy) — by --ids or persistent --group/--groups",
@@ -1303,12 +1304,39 @@ pin, then retry.
 Components translate via a plain position modify (same primitiveId survives).
 Wires have no modify-in-place, so each is deleted and recreated at the shifted
 endpoints (net/color/width/lineType preserved) — a wire's primitiveId CHANGES;
-pull fresh ids before any follow-up mutation on it.`,
+pull fresh ids before any follow-up mutation on it.
+
+--backend kicad --kicad-sch X.kicad_sch --refs R1,C2,U1 --dx/--dy (mm, snapped to the
+1.27 mm grid): the named symbols (every unit of a reference; REF:UNIT for one unit)
+move as one transaction. Wires among them and their stubs, labels and power symbols
+move rigidly; wires to symbols that stay are re-routed orthogonally (net labels when
+no clean path exists). Written only if the planned page passes the strict quality
+gate and kicad-cli's netlist is unchanged — otherwise non-zero and the file is
+untouched (never a half move).`,
 			Args: cobra.NoArgs,
 			Example: `  pcbpilot sch group-move --ids idComp1,idWire1,idWire2 --dx 200 --dy 0
   pcbpilot sch group-move --group g1 --dx 100 --dy 0   # members + stubs + flags auto-expanded
-  pcbpilot sch group-move --groups g2,g3 --dx 0 --dy -80   # 同块多子组:一次内核调用整体移动`,
+  pcbpilot sch group-move --groups g2,g3 --dx 0 --dy -80   # 同块多子组:一次内核调用整体移动
+  pcbpilot sch group-move --backend kicad --kicad-sch power.kicad_sch --refs R1,R2 --dx 25.4 --dy 0`,
 			RunE: func(cmd *cobra.Command, args []string) error {
+				if path, ok, err := kicadSchTarget(cmd); err != nil || ok {
+					if err != nil {
+						return err
+					}
+					if kRefs == "" {
+						return fmt.Errorf("--backend kicad: pass --refs R1,R2,U1 (designators; REF:UNIT for one unit)")
+					}
+					if !cmd.Flags().Changed("dx") && !cmd.Flags().Changed("dy") {
+						return fmt.Errorf("at least one of --dx / --dy is required (a zero-move is a no-op)")
+					}
+					var refs []string
+					for _, r := range strings.Split(kRefs, ",") {
+						if r = strings.TrimSpace(r); r != "" {
+							refs = append(refs, r)
+						}
+					}
+					return kicadGroupMove(path, refs, dx, dy, kFit, stdout)
+				}
 				var groupRefs []string
 				if groupRef != "" {
 					groupRefs = append(groupRefs, groupRef)
@@ -1387,8 +1415,10 @@ pull fresh ids before any follow-up mutation on it.`,
 		c.Flags().StringVar(&idsRaw, "ids", "", "primitiveIds (components and/or wires) to move together — CSV: id1,id2 (mutually exclusive with --group)")
 		c.Flags().StringVar(&groupRef, "group", "", "persistent group id/name (`sch group list`) — members' stub wires + flags are auto-included")
 		c.Flags().StringVar(&groupsRaw, "groups", "", "多个持久组一次整体移动 — CSV: g2,g3(同块多子组必须一次调用,逐组 move 会撕裂共享导线;可与 --group 并用取并集)")
-		c.Flags().Float64Var(&dx, "dx", 0, "X translation (mil)")
-		c.Flags().Float64Var(&dy, "dy", 0, "Y translation (mil)")
+		c.Flags().Float64Var(&dx, "dx", 0, "X translation (mil; --backend kicad: mm)")
+		c.Flags().Float64Var(&dy, "dy", 0, "Y translation (mil; --backend kicad: mm, y down)")
+		c.Flags().StringVar(&kRefs, "refs", "", "--backend kicad: designators to move (CSV; REF:UNIT for one unit of a multi-unit symbol)")
+		c.Flags().BoolVar(&kFit, "fit", false, "--backend kicad: size the sheet to its content after the move")
 		c.Flags().IntVar(&groupMoveMaxAttempts, "max-attempts", schConvergeDefaultMaxAttempts,
 			"**跨调用**上限(仅 --group/--groups):同一个组连续多少次得到同一个失败结果(位移被钳到 0 等)后停手并给结论(0 = 不限)。"+
 				"组本身比整幅可用区还大时,拒绝消息会换成真话(独立成页/拆页),而不是那条走不通的「减小位移试试」")
