@@ -67,6 +67,55 @@ func sbEngineerGrade(dir string, files []string, d *sbDesign) sbGate {
 		hard += len(pg.Hard)
 		pages = append(pages, pg)
 	}
+	data := map[string]any{"pages": pages}
+	var msgs []string
+	for _, pg := range pages {
+		for _, h := range pg.Hard {
+			msgs = append(msgs, pg.Sheet+": "+h)
+		}
+	}
+	// EG-01: hierarchy consistent (every sheet pin has its hierarchical
+	// label and back), no global labels for signals
+	if len(d.Pages) > 1 {
+		pinRe := regexp.MustCompile(`\(pin "((?:[^"\\]|\\.)*)" bidirectional`)
+		hierRe := regexp.MustCompile(`\(hierarchical_label "((?:[^"\\]|\\.)*)"`)
+		pinSet, hierSet := map[string]bool{}, map[string]bool{}
+		globals := 0
+		for _, f := range files {
+			if !strings.HasSuffix(f, ".kicad_sch") {
+				continue
+			}
+			p, err := sbSafeJoin(dir, f)
+			if err != nil {
+				continue
+			}
+			raw, _ := os.ReadFile(p)
+			for _, m := range pinRe.FindAllStringSubmatch(string(raw), -1) {
+				pinSet[m[1]] = true
+			}
+			for _, m := range hierRe.FindAllStringSubmatch(string(raw), -1) {
+				hierSet[m[1]] = true
+			}
+			globals += strings.Count(string(raw), "(global_label ")
+		}
+		var diff []string
+		for n := range pinSet {
+			if !hierSet[n] {
+				diff = append(diff, "pin "+n+" without label")
+			}
+		}
+		for n := range hierSet {
+			if !pinSet[n] {
+				diff = append(diff, "label "+n+" without sheet pin")
+			}
+		}
+		sort.Strings(diff)
+		if len(diff) > 0 || globals > 0 {
+			hard++
+			msgs = append(msgs, fmt.Sprintf("EG-01 hierarchy: %d mismatch(es) %v, %d global label(s)", len(diff), diff, globals))
+		}
+		data["hierarchy"] = map[string]any{"sheetPins": len(pinSet), "hierLabels": len(hierSet), "globalLabels": globals}
+	}
 	// EG-22: title block filled
 	var tbMissing []string
 	tb := d.Spec.Title
@@ -76,13 +125,7 @@ func sbEngineerGrade(dir string, files []string, d *sbDesign) sbGate {
 		}
 	}
 	sort.Strings(tbMissing)
-	data := map[string]any{"pages": pages}
-	var msgs []string
-	for _, pg := range pages {
-		for _, h := range pg.Hard {
-			msgs = append(msgs, pg.Sheet+": "+h)
-		}
-	}
+
 	if len(tbMissing) > 0 {
 		hard++
 		msgs = append(msgs, "EG-22 title block lacks "+strings.Join(tbMissing, ", "))

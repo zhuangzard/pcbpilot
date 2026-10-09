@@ -916,24 +916,108 @@ func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layou
 		if err != nil {
 			return nil, nil, err
 		}
+		// the root shows the functional blocks: one sheet symbol per page,
+		// a sheet pin per cross-page signal net (nets shared with an earlier
+		// page on the left edge, the rest on the right), each pin on a short
+		// stub with the net's label; supplies stay power symbols
+		pageIdx := map[string]int{}
 		for i, s := range sheets {
-			x, y := 25.4+float64(i%4)*63.5, 38.1+float64(i/4)*30.48
-			title := s.page.Title
-			if title == "" {
-				title = s.page.ID
+			pageIdx[s.page.ID] = i
+		}
+		type sheetPins struct {
+			left, right []string
+			x, w, h     float64
+			title       string
+		}
+		sp := make([]sheetPins, len(sheets))
+		for i, s := range sheets {
+			for _, n := range d.Nets {
+				pg := d.NetPages[n.Name]
+				if len(pg) < 2 || !pg[s.page.ID] || d.NetKind[n.Name] != "signal" {
+					continue
+				}
+				earlier := false
+				for p := range pg {
+					earlier = earlier || pageIdx[p] < i
+				}
+				if earlier {
+					sp[i].left = append(sp[i].left, n.Name)
+				} else {
+					sp[i].right = append(sp[i].right, n.Name)
+				}
+			}
+			sort.Strings(sp[i].left)
+			sort.Strings(sp[i].right)
+			sp[i].title = s.page.Title
+			if sp[i].title == "" {
+				sp[i].title = s.page.ID
+			}
+		}
+		same := func(a, b []string) bool { return len(a) > 0 && strings.Join(a, "\x00") == strings.Join(b, "\x00") }
+		x := 25.4
+		for i := range sp {
+			lw, rw := 0.0, 0.0
+			for _, n := range sp[i].left {
+				lw = math.Max(lw, sbTextW(n))
+			}
+			for _, n := range sp[i].right {
+				rw = math.Max(rw, sbTextW(n))
+			}
+			sp[i].w = math.Max(50.8, sbSnap(math.Max(sbTextW(sp[i].title), lw+rw+10.16)))
+			sp[i].h = sbSnap(math.Max(15.24, float64(max(len(sp[i].left), len(sp[i].right))+1)*2.54+2.54))
+			if i == 0 || !same(sp[i-1].right, sp[i].left) {
+				x += sbSnap(lw + 7.62 + 2.54)
+			}
+			sp[i].x = x
+			x += sp[i].w + 25.4
+			if i+1 < len(sp) && !same(sp[i].right, sp[i+1].left) {
+				x += sbSnap(rw + 7.62 + 2.54)
+			}
+		}
+		const y = 38.1
+		for i, s := range sheets {
+			var pins strings.Builder
+			addPin := func(net string, px, py, ang float64, just string, stub bool) {
+				fmt.Fprintf(&pins, "\n\t\t(pin %s bidirectional (at %s %s %s) (uuid %s) (effects (font (size 1.27 1.27)) (justify %s)))",
+					kicad.Q(net), kicad.F(px), kicad.F(py), kicad.F(ang), kicad.Q(st.uuid(st.SheetSymUUIDs, s.page.ID+"#pin#"+net)), just)
+				if !stub {
+					return
+				}
+				dx := 5.08
+				if ang == 180 {
+					dx = -5.08
+				}
+				re.AddWire(kicad.Pt{X: px, Y: py}, kicad.Pt{X: px + dx, Y: py})
+				la := 0.0
+				if dx < 0 {
+					la = 180
+				}
+				_ = re.AddLabel(kicad.LabelLocal, net, kicad.Pt{X: px + dx, Y: py}, la, "")
+			}
+			wiredLeft := i > 0 && same(sp[i-1].right, sp[i].left)
+			wiredRight := i+1 < len(sp) && same(sp[i].right, sp[i+1].left)
+			for k, n := range sp[i].left {
+				addPin(n, sp[i].x, y+2.54*float64(k+1), 180, "left", !wiredLeft)
+			}
+			for k, n := range sp[i].right {
+				py := y + 2.54*float64(k+1)
+				addPin(n, sp[i].x+sp[i].w, py, 0, "right", !wiredRight)
+				if wiredRight { // facing blocks: one short wire per interface net
+					re.AddWire(kicad.Pt{X: sp[i].x + sp[i].w, Y: py}, kicad.Pt{X: sp[i+1].x, Y: py})
+				}
 			}
 			re.AddRaw(fmt.Sprintf(`(sheet
 		(at %s %s)
-		(size 50.8 15.24)
+		(size %s %s)
 		(exclude_from_sim no) (in_bom yes) (on_board yes) (dnp no)
 		(stroke (width 0.1524) (type solid))
 		(fill (color 0 0 0 0.0000))
 		(uuid %s)
 		(property "Sheetname" %s (at %s %s 0) (effects (font (size 1.27 1.27)) (justify left bottom)))
-		(property "Sheetfile" %s (at %s %s 0) (effects (font (size 1.27 1.27)) (justify left top)))
+		(property "Sheetfile" %s (at %s %s 0) (effects (font (size 1.27 1.27)) (justify left top)))%s
 		(instances (project %s (path %s (page %s))))
-	)`, kicad.F(x), kicad.F(y), kicad.Q(s.symUUID), kicad.Q(title), kicad.F(x), kicad.F(y-0.7), kicad.Q(s.file), kicad.F(x), kicad.F(y+15.84),
-				kicad.Q(name), kicad.Q("/"+st.RootUUID), kicad.Q(strconv.Itoa(s.no))))
+	)`, kicad.F(sp[i].x), kicad.F(y), kicad.F(sp[i].w), kicad.F(sp[i].h), kicad.Q(s.symUUID), kicad.Q(sp[i].title), kicad.F(sp[i].x), kicad.F(y-0.7), kicad.Q(s.file), kicad.F(sp[i].x), kicad.F(y+sp[i].h+0.6),
+				pins.String(), kicad.Q(name), kicad.Q("/"+st.RootUUID), kicad.Q(strconv.Itoa(s.no))))
 		}
 		rt, err := re.Render()
 		if err != nil {
@@ -1127,11 +1211,11 @@ func renderSbPage(e *kicad.SchEditor, d *sbDesign, st *sbState, pg sbPage, zis [
 			at := mv(mk.At)
 			if mk.OnWire {
 				ang := map[string]float64{"right": 0, "up": 90, "left": 180, "down": 270}[mk.Dir]
-				kind := kicad.LabelLocal
-				if len(d.NetPages[mk.Net]) > 1 {
-					kind = kicad.LabelGlobal
+				kind, shape := kicad.LabelLocal, ""
+				if len(d.NetPages[mk.Net]) > 1 { // reaches the root through a sheet pin
+					kind, shape = kicad.LabelHier, "bidirectional"
 				}
-				if err := e.AddLabel(kind, mk.Net, at, ang, ""); err != nil {
+				if err := e.AddLabel(kind, mk.Net, at, ang, shape); err != nil {
 					return err
 				}
 				continue
@@ -1151,14 +1235,14 @@ func renderSbPage(e *kicad.SchEditor, d *sbDesign, st *sbState, pg sbPage, zis [
 				pinPts[at]++
 				continue
 			}
-			kind := mk.Kind
-			if kind == "label" {
-				kind = "net_label"
-				if len(d.NetPages[mk.Net]) > 1 {
-					kind = "net_port_bi"
+			if len(d.NetPages[mk.Net]) > 1 { // cross-page signal: hierarchical label → sheet pin
+				ang := map[string]float64{"right": 0, "up": 90, "left": 180, "down": 270}[mk.Dir]
+				if err := e.AddLabel(kicad.LabelHier, mk.Net, at, ang, "bidirectional"); err != nil {
+					return err
 				}
+				continue
 			}
-			if _, err := kicadPlaceMarker(e, kind, mk.Net, at, mk.Dir, nil); err != nil {
+			if _, err := kicadPlaceMarker(e, "net_label", mk.Net, at, mk.Dir, nil); err != nil {
 				return err
 			}
 		}
