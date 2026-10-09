@@ -34,6 +34,8 @@ type Inputs struct {
 	// BoardSHA is the board dump's identity (semanticSha256, else the file sha256).
 	BoardSHA     string
 	Project, Doc string
+	// CrossProbe is the KiCad schematic + PCB plot input (nil: no lens).
+	CrossProbe *CrossProbeInput
 }
 
 // Source is the provenance of one input file.
@@ -85,6 +87,8 @@ type Manual struct {
 	Trouble    []Trouble
 	Checks     []Check
 	TODO       []string
+	// CrossProbe is the schematic ↔ PCB lens map (KiCad projects only).
+	CrossProbe *CrossProbe
 }
 
 // Conn is one connector, jumper or header.
@@ -277,6 +281,7 @@ func Build(in Inputs) *Manual {
 	c.m.Sim.Maps = in.HeatMaps
 	c.buildCautions()
 	c.buildSVGs()
+	c.buildCrossProbe()
 	return m
 }
 

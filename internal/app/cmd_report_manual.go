@@ -29,6 +29,7 @@ type boardManualOpts struct {
 	post, analog                      string
 	out, lang, date                   string
 	project, doc                      string
+	kicadSch, kicadPcb                string // KiCad project of the cross-probe lens
 	notesOptional                     bool
 	// versioned gate mode
 	outDir, projectConfig string
@@ -81,6 +82,10 @@ SECTIONS (generated where the data exists, from --notes otherwise)
   11 软件接口（命令、遥测、引脚表） 12 故障排查
   13 文档与板数据对账: every docPins / expectedPins / LED net / probe /
                     pin-map entry that disagrees with the board netlist
+   (4) 原理图 ↔ PCB 对照 with --kicad-sch/--kicad-pcb: hover a symbol and a
+                    lens shows its PCB copper + silkscreen (and back), with
+                    the part's nets, intent widths, IR drop, findings, LCSC;
+                    the gate requires every BOM ref on both sides
   14 TODO  15 数据来源 (path + sha256)
 
 Schema of notes.json and the review checklist:
@@ -97,7 +102,8 @@ Schema of notes.json and the review checklist:
 					return fmt.Errorf("--board is required")
 				}
 				g, run := runManualGate(manualGateOpts{board: o.board, intent: o.intent, sim: o.sim, post: o.post, analog: o.analog, projectConfig: o.projectConfig,
-					notes: o.notes, pinMap: o.pinMap, outDir: o.outDir, project: o.project, doc: o.doc, date: o.date, lang: o.lang}, stderr)
+					notes: o.notes, pinMap: o.pinMap, outDir: o.outDir, project: o.project, doc: o.doc, date: o.date, lang: o.lang,
+					kicadSch: o.kicadSch, kicadPcb: o.kicadPcb}, stderr)
 				res := map[string]any{"gates": []gateResult{g}, "pass": g.Pass}
 				if run != nil {
 					res["manual"] = run
@@ -129,6 +135,8 @@ Schema of notes.json and the review checklist:
 	f.StringVar(&o.notes, "notes", "", "notes.json with the project-specific human text")
 	f.StringVar(&o.post, "post", "", "post.json (pcbpilot sim post-layout) of this board: thermal / IR drop / via current; its temp-TOP/BOTTOM heat maps are embedded (required by the board-manual gate, same board sha256)")
 	f.StringVar(&o.analog, "analog", "", "analog.json (pcbpilot sim analog): filter fc / Q / gain vs target (default: pcbpilot.project.json manual.analog in --out-dir mode)")
+	f.StringVar(&o.kicadSch, "kicad-sch", "", "root .kicad_sch of a KiCad project: adds the schematic ↔ PCB cross-probe lens (needs --kicad-pcb, the .kicad_pcb --board was dumped from; kicad-cli plots both)")
+	f.StringVar(&o.kicadPcb, "kicad-pcb", "", ".kicad_pcb of the cross-probe lens (with --kicad-sch)")
 	f.StringVar(&o.pinMap, "pin-map", "", "FPGA/CPLD pin assignments: Quartus .tcl/.qsf or Vivado .xdc")
 	f.StringVar(&o.out, "out", "", "output HTML file (single-file mode)")
 	f.StringVar(&o.outDir, "out-dir", "", "versioned mode, as pcb gate / pcb auto route run it: <out-dir>/manual/{vN/<Board>_使用说明.html, <Board>_使用说明.html, index.json} + the board-manual gate (notes / pin map / name / extra copy from pcbpilot.project.json \"manual\")")
@@ -224,6 +232,19 @@ func loadManualInputs(o boardManualOpts) (in boardmanual.Inputs, notesMissing bo
 			return in, false, fmt.Errorf("%s: %w", o.pinMap, err)
 		}
 	}
+	if (o.kicadSch == "") != (o.kicadPcb == "") {
+		return in, false, fmt.Errorf("--kicad-sch and --kicad-pcb go together (the cross-probe lens needs both)")
+	}
+	if o.kicadSch != "" {
+		for _, f := range []struct{ kind, path string }{{"kicad-sch", o.kicadSch}, {"kicad-pcb", o.kicadPcb}} {
+			if _, err := read(f.kind, f.path); err != nil {
+				return in, false, err
+			}
+		}
+		if in.CrossProbe, err = loadCrossProbe(o.kicadSch, o.kicadPcb); err != nil {
+			return in, false, fmt.Errorf("cross-probe: %w", err)
+		}
+	}
 	return in, notesMissing, nil
 }
 
@@ -284,6 +305,7 @@ type manualGateOpts struct {
 	notes, pinMap      string // overrides of the project config
 	outDir             string // the run's --out-dir; the manual goes to <outDir>/manual/
 	project, doc, date string
+	kicadSch, kicadPcb string // KiCad project: cross-probe lens
 	noManual           bool
 	waivers            []gateWaiver
 	lang               string
@@ -377,7 +399,7 @@ func runManualGate(o manualGateOpts, stderr io.Writer) (gateResult, *manualRun) 
 		analog = rel(mc.Analog)
 	}
 	in, notesMissing, err := loadManualInputs(boardManualOpts{board: o.board, intent: o.intent, sim: o.sim, post: o.post, analog: analog, notes: notes, notesOptional: true,
-		pinMap: pinMap, lang: lang, date: o.date, project: o.project, doc: o.doc})
+		pinMap: pinMap, lang: lang, date: o.date, project: o.project, doc: o.doc, kicadSch: o.kicadSch, kicadPcb: o.kicadPcb})
 	if err != nil {
 		return fail("generation failed: %v", err)
 	}

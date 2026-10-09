@@ -503,6 +503,9 @@ type qualityGateOpts struct {
 	// (which needs a signed waiver, see checkNoManual).
 	noManual      bool
 	projectConfig string
+	// kicadSch / kicadPcb: the KiCad project of the manual's cross-probe
+	// lens ("" = no lens).
+	kicadSch, kicadPcb string
 }
 
 // runQualityGates: pour rebuild → save → reload → pour rebuild → native DRC →
@@ -609,7 +612,7 @@ func tailGates(snap *boardSnapshot, boardPath, postOut string, o qualityGateOpts
 	// The board manual is regenerated after every placement / routing /
 	// gate run (hard requirement); its gate joins gates[].
 	mg, run := runManualGate(manualGateOpts{board: boardPath, intent: o.intent, sim: o.sim, post: postOut, projectConfig: o.projectConfig,
-		outDir: o.outDir, project: project, doc: doc, noManual: o.noManual, waivers: o.waivers}, stderr)
+		outDir: o.outDir, project: project, doc: doc, noManual: o.noManual, waivers: o.waivers, kicadSch: o.kicadSch, kicadPcb: o.kicadPcb}, stderr)
 	gates = append(gates, mg)
 	if run != nil {
 		summary["manual"] = run

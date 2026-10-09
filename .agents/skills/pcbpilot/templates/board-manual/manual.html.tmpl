@@ -37,7 +37,32 @@ pre{background:var(--head);padding:8px 10px;overflow-x:auto;border-radius:4px}
 .wrap{overflow-x:auto}
 figure.mech svg{width:auto;max-width:100%;height:auto;border:0}
 .hlbox{border-left:5px solid var(--accent);background:#fff3e6;padding:8px 12px;margin:10px 0;white-space:pre-line}
+.xp{position:relative;display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:10px;margin:10px 0}
+.xp-pane{border:1px solid var(--line);border-radius:4px;overflow:hidden;background:#fff}
+.xp-bar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:4px 8px;background:var(--head);font-size:12px}
+.xp-bar button,.xp-card button{font:inherit;font-size:12px;padding:1px 7px;border:1px solid var(--line);border-radius:3px;background:#fff;cursor:pointer}
+.xp-bar button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.xp-view{display:block;width:100%;height:440px;cursor:grab;touch-action:none}
+#xp-pcb{background:#1b1f1d}
+.xp-hit{fill:transparent;stroke:transparent;cursor:pointer;vector-effect:non-scaling-stroke;stroke-width:1.5px}
+.xp-hit:hover{stroke:#ff9800}
+.xp-hit.on{fill:rgba(255,152,0,.18);stroke:#ff9800;stroke-width:2.5px}
+.xp-leader{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible;z-index:4}
+.xp-leader path{fill:none;stroke:#ff9800;stroke-width:2;stroke-dasharray:6 4}
+.xp-leader circle{fill:#ff9800}
+.xp-lens{position:absolute;z-index:5;width:240px}
+.xp-card{width:340px}.xp-card table{width:auto}.xp-card td,.xp-card th{white-space:nowrap}
+.xp-glass{width:240px;height:240px;border:3px solid #ff9800;border-radius:6px;overflow:hidden;background:#1b1f1d;box-shadow:0 6px 22px rgba(0,0,0,.35);cursor:move;touch-action:none}
+.xp-lens.round .xp-glass{border-radius:50%}
+.xp-lens.sch .xp-glass{background:#fff}
+.xp-glass svg{display:block;width:100%;height:100%}
+.xp-card{margin-top:6px;background:#fff;border:1px solid var(--line);border-radius:4px;padding:5px 7px;font-size:11.5px;box-shadow:0 3px 10px rgba(0,0,0,.18);max-height:220px;overflow:auto}
+.xp-card table{margin:3px 0;font-size:11px}.xp-card td,.xp-card th{padding:1px 4px}
+.xp-card .sev-error,.xp-card .sev-fail{color:#b3261e}.xp-card .sev-warn{color:#a15c00}
+.xp-card .over{background:var(--bad)}
+@media (max-width:800px){.xp{grid-template-columns:1fr}.xp-view{height:340px}}
 @media print{
+ .xp-lens,.xp-leader,.xp-bar button{display:none}
  @page{size:A4;margin:14mm 12mm}
  body{font-size:11px}main{max-width:none;padding:0}
  h2{break-before:page;margin-top:0}h2.first{break-before:auto}
@@ -74,7 +99,7 @@ figure.mech svg{width:auto;max-width:100%;height:auto;border:0}
 </header>
 
 <nav class="toc"><h3>{{t "toc"}}</h3><ol>
-<li><a href="#s1">{{t "s.overview"}}</a></li><li><a href="#s2">{{t "s.mech"}}</a></li><li><a href="#s3">{{t "s.sim"}}</a></li><li><a href="#s4">{{t "s.board"}}</a></li>
+<li><a href="#s1">{{t "s.overview"}}</a></li><li><a href="#s2">{{t "s.mech"}}</a></li><li><a href="#s3">{{t "s.sim"}}</a></li><li><a href="#s4">{{t "s.board"}}</a>{{if .CrossProbe}} · <a href="#s4x">{{t "xp.title"}}</a>{{end}}</li>
 <li><a href="#s5">{{t "s.conns"}}</a></li><li><a href="#s6">{{t "s.power"}}</a></li>
 <li><a href="#s7">{{t "s.io"}}</a></li><li><a href="#s8">{{t "s.leds"}}</a></li>
 <li><a href="#s9">{{t "s.cautions"}}</a></li><li><a href="#s10">{{t "s.equipment"}}</a></li>
@@ -168,6 +193,277 @@ figure.mech svg{width:auto;max-width:100%;height:auto;border:0}
 <tr><th class="num">{{t "no"}}</th><th>{{t "ref"}}</th><th>{{t "role"}}</th><th>{{t "name"}}</th><th>{{t "device"}}</th><th class="num">{{t "pinCount"}}</th><th>{{t "position"}}</th><th>{{t "purpose"}}</th></tr>
 {{range .Connectors}}<tr><td class="num"><span class="badge">{{.Index}}</span></td><td><a href="#c-{{.Ref}}">{{.Ref}}</a></td><td><span class="sw" style="margin-left:0;background:{{.Color}}"></span>{{.Role}}</td><td{{if not .Name}} class="todo"{{end}}>{{if .Name}}{{.Name}}{{else}}{{t "todoMark"}}{{end}}</td><td>{{.Device}}</td><td class="num">{{.PadCount}}</td><td>({{mm .XMM}}, {{mm .YMM}})</td><td{{if todo .Purpose}} class="todo"{{end}}>{{dash .Purpose}}</td></tr>
 {{end}}</table></div>
+
+{{with .CrossProbe}}
+<h3 id="s4x">{{t "xp.title"}}</h3>
+<p class="note">{{t "xp.help"}}</p>
+<div class="xp" id="xp">
+<div class="xp-pane"><div class="xp-bar"><b>{{t "xp.sch"}}</b><span id="xp-tabs"></span></div><svg id="xp-sch" class="xp-view" xmlns="http://www.w3.org/2000/svg"></svg></div>
+<div class="xp-pane"><div class="xp-bar"><b>{{t "xp.pcb"}}</b><span id="xp-layers"></span></div><svg id="xp-pcb" class="xp-view" xmlns="http://www.w3.org/2000/svg"></svg></div>
+<svg class="xp-leader" id="xp-leader" xmlns="http://www.w3.org/2000/svg"></svg>
+<div class="xp-lens" id="xp-lens" hidden><div class="xp-glass" id="xp-glass"><svg id="xp-lsvg" xmlns="http://www.w3.org/2000/svg"></svg></div><div class="xp-card" id="xp-card"></div></div>
+</div>
+{{if .Missing}}<h4>{{t "xp.missing"}}</h4><ul>{{range .Missing}}<li class="bad">{{.}}</li>{{end}}</ul>{{end}}
+<details><summary>{{t "xp.parts"}}（{{len .Parts}}）</summary><div class="wrap"><table>
+<tr><th>{{t "ref"}}</th><th>{{t "xp.value"}}</th><th>LCSC</th><th>{{t "xp.sch"}}</th><th>{{t "xp.nets"}}</th></tr>
+{{range .Parts}}<tr{{if or (lt .SchPage 0) (not .PCBBox)}} class="bad"{{end}}><td><a href="#s4x" data-xp="{{.Ref}}">{{.Ref}}</a></td><td>{{.Value}}</td><td class="mono">{{dash .LCSC}}</td><td class="num">{{if ge .SchPage 0}}{{add .SchPage 1}}{{else}}—{{end}}</td><td>{{range $i, $n := .Nets}}{{if $i}}, {{end}}{{$n.Name}}{{end}}</td></tr>
+{{end}}</table></div></details>
+<script>
+(function(){
+var XP = {{.}};
+var L = {nets: {{t "xp.nets"}}, findings: {{t "xp.findings"}}, width: {{t "xp.width"}}, ir: {{t "xp.ir"}}, shape: {{t "xp.shape"}}, rotate: {{t "xp.rotate"}}, pin: {{t "xp.pin"}}};
+var NS = "http://www.w3.org/2000/svg";
+var root = document.getElementById("xp"), schSvg = document.getElementById("xp-sch"), pcbSvg = document.getElementById("xp-pcb");
+var leader = document.getElementById("xp-leader"), lens = document.getElementById("xp-lens"), glass = document.getElementById("xp-glass");
+var lsvg = document.getElementById("xp-lsvg"), card = document.getElementById("xp-card");
+var byRef = {};
+XP.parts.forEach(function(p){ byRef[p.ref] = p; });
+var page = 0, layerOn = XP.layers.map(function(){ return true; });
+var st = {ref: null, from: null, pinned: false, zoom: 1, rot: 0, round: true, pos: null, hideT: 0};
+
+function el(tag, attrs, parent){
+  var e = document.createElementNS(NS, tag);
+  for (var k in attrs) { e.setAttribute(k, attrs[k]); }
+  if (parent) { parent.appendChild(e); }
+  return e;
+}
+function h(tag, cls, text, parent){
+  var e = document.createElement(tag);
+  if (cls) { e.className = cls; }
+  if (text != null) { e.textContent = text; }
+  if (parent) { parent.appendChild(e); }
+  return e;
+}
+function tintDefs(svg, pfx){
+  var defs = el("defs", {}, svg);
+  XP.layers.forEach(function(l, i){
+    var f = el("filter", {id: pfx + i, x: "0", y: "0", width: "1", height: "1", "color-interpolation-filters": "sRGB"}, defs);
+    el("feColorMatrix", {type: "matrix", values: "0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  -0.333 -0.333 -0.333 1 0", result: "a"}, f);
+    el("feFlood", {"flood-color": l.color || "#ccc"}, f);
+    el("feComposite", {operator: "in", in2: "a"}, f);
+  });
+}
+function pcbLayers(g, pfx){
+  var b = XP.board;
+  el("rect", {x: b[0], y: b[1], width: b[2], height: b[3], fill: "#123d26"}, g);
+  XP.layers.forEach(function(l, i){
+    if (!layerOn[i]) { return; }
+    el("image", {href: l.uri, x: 0, y: 0, width: l.w, height: l.h, filter: "url(#" + pfx + i + ")", preserveAspectRatio: "none"}, g);
+  });
+}
+function schImage(g, n){
+  var pg = XP.pages[n];
+  el("rect", {x: 0, y: 0, width: pg.w, height: pg.h, fill: "#fff"}, g);
+  if (pg.uri) { el("image", {href: pg.uri, x: 0, y: 0, width: pg.w, height: pg.h, preserveAspectRatio: "none"}, g); }
+}
+function setVB(svg, vb){ svg._vb = vb; svg.setAttribute("viewBox", vb.join(" ")); }
+function fit(box, m){ return [box[0] - m, box[1] - m, box[2] + 2 * m, box[3] + 2 * m]; }
+
+function drawSch(){
+  schSvg.textContent = "";
+  var pg = XP.pages[page], u = null;
+  schImage(el("g", {}, schSvg), page);
+  XP.parts.forEach(function(p){
+    if (p.schPage !== page) { return; }
+    p.schBoxes.forEach(function(b){
+      el("rect", {"class": "xp-hit", x: b[0], y: b[1], width: b[2], height: b[3], "data-ref": p.ref, "data-v": "sch"}, schSvg);
+      u = u ? [Math.min(u[0], b[0]), Math.min(u[1], b[1]), Math.max(u[2], b[0] + b[2]), Math.max(u[3], b[1] + b[3])] : [b[0], b[1], b[0] + b[2], b[1] + b[3]];
+    });
+  });
+  setVB(schSvg, u ? fit([u[0], u[1], u[2] - u[0], u[3] - u[1]], 20) : [0, 0, pg.w, pg.h]);
+  var tabs = document.getElementById("xp-tabs");
+  tabs.textContent = "";
+  if (XP.pages.length > 1) {
+    XP.pages.forEach(function(pg, i){
+      var bt = h("button", i === page ? "on" : "", (i + 1) + " " + pg.name, tabs);
+      bt.onclick = function(){ page = i; drawSch(); mark(); };
+    });
+  }
+}
+function drawPcb(){
+  pcbSvg.textContent = "";
+  tintDefs(pcbSvg, "xp-t");
+  pcbLayers(el("g", {}, pcbSvg), "xp-t");
+  XP.parts.forEach(function(p){
+    if (!p.pcbBox) { return; }
+    var b = p.pcbBox;
+    el("rect", {"class": "xp-hit", x: b[0], y: b[1], width: b[2], height: b[3], "data-ref": p.ref, "data-v": "pcb"}, pcbSvg);
+  });
+  if (!pcbSvg._vb) { setVB(pcbSvg, fit(XP.board, 3)); } else { setVB(pcbSvg, pcbSvg._vb); }
+  var bar = document.getElementById("xp-layers");
+  bar.textContent = "";
+  XP.layers.forEach(function(l, i){
+    var bt = h("button", layerOn[i] ? "on" : "", l.name, bar);
+    bt.onclick = function(){ layerOn[i] = !layerOn[i]; drawPcb(); mark(); if (st.ref) { drawLens(); } };
+  });
+}
+function mark(){
+  [schSvg, pcbSvg].forEach(function(svg){
+    var hs = svg.querySelectorAll(".xp-hit");
+    for (var i = 0; i < hs.length; i++) { hs[i].classList.toggle("on", hs[i].getAttribute("data-ref") === st.ref); }
+  });
+}
+
+// ---- lens ----
+function srcRect(){
+  var svg = st.from === "sch" ? schSvg : pcbSvg, rs = svg.querySelectorAll('.xp-hit[data-ref="' + st.ref + '"]');
+  var c = root.getBoundingClientRect(), r = null;
+  for (var i = 0; i < rs.length; i++) {
+    var q = rs[i].getBoundingClientRect();
+    r = r ? {l: Math.min(r.l, q.left), t: Math.min(r.t, q.top), r: Math.max(r.r, q.right), b: Math.max(r.b, q.bottom)} : {l: q.left, t: q.top, r: q.right, b: q.bottom};
+  }
+  if (!r) { return null; }
+  var v = svg.getBoundingClientRect();
+  r.l = Math.max(r.l, v.left); r.r = Math.min(r.r, v.right); r.t = Math.max(r.t, v.top); r.b = Math.min(r.b, v.bottom);
+  return {x: (r.l + r.r) / 2 - c.left, y: (r.t + r.b) / 2 - c.top, w: Math.max(r.r - r.l, 0), h: Math.max(r.b - r.t, 0)};
+}
+function drawLens(){
+  var p = byRef[st.ref], toPcb = st.from === "sch";
+  lsvg.textContent = "";
+  lens.classList.toggle("sch", !toPcb);
+  lens.classList.toggle("round", st.round);
+  var boxes = toPcb ? (p.pcbBox ? [p.pcbBox] : []) : p.schBoxes;
+  if (!boxes.length) { lsvg.appendChild(el("text", {x: 50, y: 50, "text-anchor": "middle", fill: "#f99", "font-size": 8})).textContent = "—"; lsvg.setAttribute("viewBox", "0 0 100 100"); return; }
+  var b = boxes[0], cx = b[0] + b[2] / 2, cy = b[1] + b[3] / 2;
+  var s = (Math.max(b[2], b[3]) / 2 * 1.35 + (toPcb ? 1.2 : 3)) / st.zoom;
+  lsvg.setAttribute("viewBox", [cx - s, cy - s, 2 * s, 2 * s].join(" "));
+  var g = el("g", {transform: "rotate(" + st.rot + " " + cx + " " + cy + ")"}, lsvg);
+  if (toPcb) { tintDefs(lsvg, "xp-l"); pcbLayers(g, "xp-l"); } else { schImage(g, p.schPage); }
+  boxes.forEach(function(q){
+    el("rect", {x: q[0], y: q[1], width: q[2], height: q[3], fill: "none", stroke: "#ff9800", "stroke-width": 2, "vector-effect": "non-scaling-stroke", "stroke-dasharray": "5 3"}, g);
+  });
+}
+function drawCard(){
+  var p = byRef[st.ref];
+  card.textContent = "";
+  var hd = h("div", "", null, card), b = h("b", "", p.ref, hd);
+  hd.appendChild(document.createTextNode(" " + (p.value || "") + (p.lcsc ? "  · LCSC " + p.lcsc : "") + (p.side === "bottom" ? "  · bottom" : "")));
+  var bar = h("div", "", null, card);
+  [["↻", L.rotate, function(){ st.rot = (st.rot + 90) % 360; drawLens(); }], ["◯/▢", L.shape, function(){ st.round = !st.round; drawLens(); line(); }],
+   [st.pinned ? "📌" : "📍", L.pin, function(){ st.pinned = !st.pinned; drawCard(); }], ["✕", "Esc", hide]].forEach(function(a){
+    var bt = h("button", "", a[0], bar); bt.title = a[1]; bt.onclick = a[2];
+  });
+  if (p.footprint) { h("div", "mono", p.footprint, card); }
+  if (p.nets.length) {
+    var t = h("table", "", null, card), r = h("tr", "", null, t);
+    [L.nets, "pin", L.width, "A", L.ir].forEach(function(x){ h("th", "", x, r); });
+    p.nets.forEach(function(n){
+      var tr = h("tr", n.irStatus && n.irStatus !== "ok" && n.irStatus !== "info" ? "over" : "", null, t);
+      h("td", "", n.name + (n.role ? " (" + n.role + ")" : ""), tr);
+      var ps = n.pins.split(","), pc = h("td", "", ps.length > 4 ? ps.slice(0, 4).join(",") + "…(" + ps.length + ")" : n.pins, tr);
+      pc.title = n.pins;
+      h("td", "num", n.widthMm ? n.widthMm + " mm" + (n.minMm ? " ≥" + n.minMm : "") : "—", tr);
+      h("td", "num", n.currentA ? String(n.currentA) : "—", tr);
+      h("td", "num", n.irStatus ? n.irMv + " mV" + (n.budgetMv ? " / " + n.budgetMv : "") + " " + n.irStatus : "—", tr);
+    });
+  }
+  if (p.findings.length) {
+    h("div", "", L.findings + ":", card);
+    var ul = h("ul", "", null, card);
+    p.findings.forEach(function(f){ h("li", "sev-" + f.severity, "[" + f.source + " " + f.severity + "] " + f.kind + ": " + f.message, ul); });
+  }
+}
+function line(){
+  leader.textContent = "";
+  if (lens.hidden || !st.ref) { return; }
+  var s = srcRect();
+  if (!s) { return; }
+  var gx = lens.offsetLeft + glass.offsetWidth / 2, gy = lens.offsetTop + glass.offsetHeight / 2, rr = glass.offsetWidth / 2;
+  var dx = s.x - gx, dy = s.y - gy, d = Math.sqrt(dx * dx + dy * dy) || 1;
+  var ex = gx + dx / d * rr, ey = gy + dy / d * rr;
+  if (!st.round) { var k = rr / Math.max(Math.abs(dx), Math.abs(dy), 1); ex = gx + dx * k; ey = gy + dy * k; }
+  var mx = (s.x + ex) / 2;
+  el("path", {d: "M" + s.x + "," + s.y + " C" + mx + "," + s.y + " " + mx + "," + ey + " " + ex + "," + ey}, leader);
+  el("circle", {cx: s.x, cy: s.y, r: 3.5}, leader);
+}
+function place(){
+  var s = srcRect(), c = root.getBoundingClientRect(), w = lens.offsetWidth || 240, gh = glass.offsetHeight || 240;
+  if (st.pos) { lens.style.left = st.pos[0] + "px"; lens.style.top = st.pos[1] + "px"; return; }
+  if (!s) { return; }
+  // beside the part (right, else left), level with it, inside the figure
+  var x = s.x + s.w / 2 + 110, y = s.y - gh / 2;
+  if (x + w > c.width) { x = s.x - s.w / 2 - 110 - w; }
+  if (x < 0) { x = Math.min(Math.max(s.x - w / 2, 0), c.width - w); y = s.y + s.h / 2 + 30; }
+  lens.style.left = x + "px"; lens.style.top = Math.max(0, Math.min(y, c.height - gh)) + "px";
+}
+function show(ref, from){
+  var p = byRef[ref];
+  if (!p) { return; }
+  clearTimeout(st.hideT);
+  if (st.ref === ref && st.from === from && !lens.hidden) { return; }
+  if (st.ref !== ref || st.from !== from) { st.zoom = 1; st.pos = null; }
+  st.ref = ref; st.from = from;
+  st.rot = from === "sch" ? p.rotation : (360 - p.rotation) % 360;
+  if (from === "pcb" && p.schPage >= 0 && p.schPage !== page) { page = p.schPage; drawSch(); }
+  mark();
+  lens.hidden = false;
+  drawLens(); drawCard(); place(); line();
+}
+function hide(){ st.pinned = false; st.ref = null; lens.hidden = true; mark(); line(); }
+function hideSoon(){ if (st.pinned) { return; } clearTimeout(st.hideT); st.hideT = setTimeout(hide, 350); }
+
+// ---- views: hover / click / pan / zoom ----
+function svgPt(svg, e){ var m = svg.getScreenCTM().inverse(), p = svg.createSVGPoint(); p.x = e.clientX; p.y = e.clientY; return p.matrixTransform(m); }
+[schSvg, pcbSvg].forEach(function(svg){
+  var v = svg === schSvg ? "sch" : "pcb", drag = null;
+  svg.addEventListener("mouseover", function(e){ var r = e.target.getAttribute && e.target.getAttribute("data-ref"); if (r && !drag && !st.pinned) { show(r, v); } });
+  svg.addEventListener("mouseout", function(e){ if (e.target.getAttribute && e.target.getAttribute("data-ref")) { hideSoon(); } });
+  svg.addEventListener("click", function(e){
+    if (svg._moved) { return; }
+    var r = e.target.getAttribute && e.target.getAttribute("data-ref");
+    if (r) { st.pinned = false; show(r, v); st.pinned = true; drawCard(); } else if (st.pinned) { hide(); }
+  });
+  svg.addEventListener("wheel", function(e){
+    e.preventDefault();
+    var p = svgPt(svg, e), vb = svg._vb, k = e.deltaY > 0 ? 1.15 : 1 / 1.15;
+    setVB(svg, [p.x - (p.x - vb[0]) * k, p.y - (p.y - vb[1]) * k, vb[2] * k, vb[3] * k]); line();
+  }, {passive: false});
+  svg.addEventListener("pointerdown", function(e){ drag = {x: e.clientX, y: e.clientY, vb: svg._vb.slice(), s: svg.getScreenCTM().a}; svg._moved = false; });
+  window.addEventListener("pointermove", function(e){
+    if (!drag) { return; }
+    var dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (Math.abs(dx) + Math.abs(dy) > 3) { svg._moved = true; }
+    if (svg._moved) { setVB(svg, [drag.vb[0] - dx / drag.s, drag.vb[1] - dy / drag.s, drag.vb[2], drag.vb[3]]); line(); }
+  });
+  window.addEventListener("pointerup", function(){ drag = null; });
+});
+lens.addEventListener("mouseenter", function(){ clearTimeout(st.hideT); });
+lens.addEventListener("mouseleave", hideSoon);
+(function(){
+  var d = null;
+  glass.addEventListener("pointerdown", function(e){ d = {x: e.clientX - lens.offsetLeft, y: e.clientY - lens.offsetTop}; st.pinned = true; e.preventDefault(); });
+  window.addEventListener("pointermove", function(e){ if (!d) { return; } st.pos = [e.clientX - d.x, e.clientY - d.y]; place(); line(); });
+  window.addEventListener("pointerup", function(){ if (d) { d = null; drawCard(); } });
+  glass.addEventListener("wheel", function(e){
+    e.preventDefault();
+    if (e.shiftKey) { st.rot = (st.rot + (e.deltaY > 0 ? 15 : 345)) % 360; } else { st.zoom = Math.min(12, Math.max(0.25, st.zoom * (e.deltaY > 0 ? 1 / 1.2 : 1.2))); }
+    drawLens();
+  }, {passive: false});
+})();
+document.addEventListener("keydown", function(e){
+  if (lens.hidden || ["INPUT", "TEXTAREA", "SELECT"].indexOf(document.activeElement.tagName) >= 0) { return; }
+  if (e.key === "Escape") { hide(); }
+  else if (e.key === "r" || e.key === "R") { st.rot = (st.rot + (e.shiftKey ? 270 : 90)) % 360; drawLens(); }
+  else if (e.key === "o" || e.key === "O") { st.round = !st.round; drawLens(); line(); }
+  else if (e.key === "+" || e.key === "=") { st.zoom = Math.min(12, st.zoom * 1.2); drawLens(); }
+  else if (e.key === "-") { st.zoom = Math.max(0.25, st.zoom / 1.2); drawLens(); }
+});
+window.addEventListener("resize", function(){ if (!lens.hidden) { place(); line(); } });
+var links = document.querySelectorAll("a[data-xp]");
+for (var i = 0; i < links.length; i++) {
+  links[i].addEventListener("click", function(e){
+    var p = byRef[this.getAttribute("data-xp")];
+    if (!p) { return; }
+    var from = p.schPage >= 0 ? "sch" : "pcb";
+    if (from === "sch" && p.schPage !== page) { page = p.schPage; drawSch(); }
+    setTimeout(function(){ st.pinned = false; show(p.ref, from); st.pinned = true; drawCard(); }, 50);
+  });
+}
+drawSch(); drawPcb();
+window.XPLens = {show: show, hide: hide, state: st};
+})();
+</script>
+{{end}}
 
 <h2 id="s5">5 {{t "s.conns"}}</h2>
 <p class="note">{{t "legend"}}：<span class="sw" style="background:#d62728"></span>{{t "role.power"}}<span class="sw" style="background:#222"></span>{{t "role.ground"}}<span class="sw" style="background:#1f5fbf"></span>{{t "role.signal"}}<span class="sw" style="background:#a8a8a8"></span>{{t "role.nc"}}</p>
