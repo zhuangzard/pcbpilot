@@ -12,13 +12,15 @@ import (
 func newKicadCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 	c := &cobra.Command{
 		Use:   "kicad",
-		Short: "Design in KiCad: placement, schematic sheets, JLC fab output, LCSC parts",
+		Short: "Design in KiCad: placement, schematic sheets, schematic import/netlist, JLC fab output, LCSC parts",
 	}
 	c.AddCommand(
 		newKicadPlaceCmd(stdout, stderr),
 		newKicadSchFitCmd(stdout, stderr),
 		newKiCadFabCmd(stdout, stderr),
 		newKiCadLcscCmd(stdout, stderr),
+		newKicadSchImportCmd(stdout, stderr),
+		newKicadSchNetlistCmd(stdout, stderr),
 	)
 	return c
 }
