@@ -34,9 +34,12 @@ import (
 
 type kicadRouteOpts struct {
 	pcb, intent, sim, sch, outDir, waivers, fastrouteBin, widthBasis string
-	ripUp                                                            bool
-	fo                                                               fastrouteOpts
-	minTraceSet                                                      bool
+	// router: fastroute | tracemaker | both (see kicad_route_backends.go).
+	router      string
+	tm          tracemakerOpts
+	ripUp       bool
+	fo          fastrouteOpts
+	minTraceSet bool
 	// rules: explicit flags (0 = not given); ruleFlags = any was given.
 	rules     kicad.Rules
 	ruleFlags bool
@@ -117,6 +120,9 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 			if o.pours != "auto" && o.pours != "on" && o.pours != "off" {
 				return fmt.Errorf("--pours must be auto, on or off")
 			}
+			if !validRouter(o.router) {
+				return fmt.Errorf("--router must be fastroute, tracemaker or both")
+			}
 			if o.widthBasis == "" {
 				o.widthBasis = "net"
 				if o.sim != "" {
@@ -142,6 +148,9 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 	f.StringVar(&o.waivers, "waivers", "", "JSON list of signed waivers [{gate,match,reason,by}]")
 	f.StringVar(&o.widthBasis, "width-basis", "", "intent-widths basis: segment (default with --sim) | net (default without)")
 	f.BoolVar(&o.ripUp, "rip-up", false, "remove unlocked tracks and vias before routing (route from scratch)")
+	f.StringVar(&o.router, "router", routerFastroute, "routing backend: fastroute | tracemaker | both (both run at once; the first result that is complete with no new DRC error is gated first, a result that fails any gate hands over to the other — no gate is relaxed)")
+	f.StringVar(&o.tm.bin, "tracemaker-bin", "", "tracemaker executable (default: $TRACEMAKER_BIN, ~/.pcbpilot/tracemaker/current, PATH)")
+	f.DurationVar(&o.tm.timeout, "tracemaker-time", 300*time.Second, "tracemaker --time budget (it also sets the lattice pitch: ≥ 300 s gave 0.05 mm and a complete PicoRick, 90–180 s gave 0.1 mm and 2 open connections)")
 	f.StringVar(&o.fastrouteBin, "fastroute-bin", "", "fastroute executable (default: $FASTROUTE_BIN, ~/.pcbpilot/fastroute/current, PATH)")
 	f.DurationVar(&o.fo.maxTime, "max-time", 0, "fastroute --max-time per run (0 = none)")
 	f.IntVar(&o.fo.threads, "threads", 0, "fastroute autorouter/optimizer threads: 0 = min(cores-1, 8); 1 = single-threaded (reproducible across fastroute builds; a crashed multi-threaded run is retried single-threaded). PicoRick: 3 runs with 8 threads gave byte-identical sessions")
@@ -308,6 +317,9 @@ func hasWaiver(ws []gateWaiver, gate, match string) bool {
 }
 
 func (r *kicadRun) run() error {
+	if r.o.router == "" {
+		r.o.router = routerFastroute
+	}
 	o := r.o
 	kt, err := kicad.Locate()
 	r.summary["kicad"] = kt
@@ -318,12 +330,22 @@ func (r *kicadRun) run() error {
 	if v, err := kt.Version(); err == nil {
 		r.summary["kicadVersion"] = v
 	}
-	bin, err := resolveFastroute(o.fastrouteBin)
-	if err != nil {
-		return err
+	if o.router != routerTracemaker {
+		bin, err := resolveFastroute(o.fastrouteBin)
+		if err != nil {
+			return err
+		}
+		r.o.fo.bin = bin
+		r.summary["fastroute"] = bin
 	}
-	r.o.fo.bin = bin
-	r.summary["fastroute"] = bin
+	if o.router != routerFastroute {
+		bin, err := resolveTracemaker(o.tm.bin)
+		if err != nil {
+			return err
+		}
+		r.o.tm.bin = bin
+		r.summary["tracemakerBin"] = bin
+	}
 
 	// Schematic netlist (pad-net diff, review evidence).
 	if o.sch != "" {
@@ -435,105 +457,55 @@ func (r *kicadRun) run() error {
 	fmt.Fprintf(r.stderr, "pre-route gate: %d net(s) in %d netclass(es), %d insulation pair(s), %d custom rule(s)\n", len(reqs), len(ncRes.Classes), len(iso), ncRes.DRURules)
 
 	r.lap("netclasses + custom rules")
-	// 3. DSN → prepare → fastroute.
-	if err := r.doRoute(classed, reqs, inSnap); err != nil {
-		return err
-	}
-	r.lap("fastroute (incl. multi-start)")
-	ses, _ := r.summary["ses"].(string)
-	imported := r.next("imported")
-	imp, err := kt.ImportSES(classed, ses, imported)
-	r.summary["sesImport"] = imp
+	// 3. Route with the chosen backend(s), then the full post-route pipeline
+	// on the first candidate; a candidate that fails any gate hands over to
+	// the next one (--router both), never to a relaxed gate.
+	cands, err := r.routeBackends(classed, reqs, inSnap)
 	if err != nil {
 		return err
 	}
-	board = imported
-	if board, err = r.addEscapes(board, ses); err != nil {
-		return err
-	}
-
-	r.lap("SES import + zone fill")
-	// 4. Post-route copper: via arrays, widen to intent, pours, widen nets, silk.
-	if board, err = r.viaArrays(board); err != nil {
-		return err
-	}
-	r.lap("via arrays")
-	reqsSp := intentRequirements(r.in)
-	ops, nb, err := r.widen(board, "widen to the intent width", func(tr []specctra.Track, v []widenVia, p []boardPad, clr float64) []widenOp {
-		return planWidenToIntent(tr, v, p, reqsSp, clr)
-	})
-	r.summary["widenToIntent"] = ops
-	if err != nil {
-		return err
-	}
-	board = nb
-	r.lap("widen to intent (+ DRC step-back)")
-	if ps := kicadPourPlan(o, inSnap); len(ps) > 0 {
-		out := r.next("pours")
-		res, err := kt.Pours(board, ps, out)
-		r.summary["pours"] = map[string]any{"plan": ps, "result": res}
-		if err != nil {
-			return err
-		}
-		board = out
-		fmt.Fprintf(r.stderr, "pours: %d zone(s) added and filled\n", len(ps))
-		if board, err = r.starvedThermals(board); err != nil {
-			return err
-		}
-	}
-	r.lap("pours + zone fill + thermals")
-	if o.widenNets != "" {
-		nets := map[string]bool{}
-		for _, n := range strings.Split(o.widenNets, ",") {
-			if n = strings.TrimSpace(n); n != "" {
-				nets[n] = true
+	var pass, have bool
+	for i, c := range cands {
+		if c.Res == nil && (c.Err == nil || c.Cancelled) {
+			if err := r.rerunCandidate(c); err != nil {
+				fmt.Fprintf(r.stderr, "router %s: %v\n", c.Name, err)
 			}
 		}
-		ops, nb, err := r.widen(board, fmt.Sprintf("widen nets to %.1f mil", o.widenMax), func(tr []specctra.Track, v []widenVia, p []boardPad, clr float64) []widenOp {
-			return planWiden(tr, v, p, nets, o.widenMax, clr)
-		})
-		r.summary["widened"] = ops
+		if c.Err != nil || c.Res == nil {
+			if i == len(cands)-1 && !have {
+				return fmt.Errorf("router %s: %v", c.Name, c.Err)
+			}
+			continue
+		}
+		if c.Board == "" {
+			if c.Board, err = c.commit(c.Res); err != nil {
+				c.Err = err
+				if i == len(cands)-1 && !have {
+					return err
+				}
+				continue
+			}
+		}
+		r.useCandidate(c, cands)
+		r.lap("router " + c.Name + " (committed)")
+		nb, ok, err := r.postRoute(c.Board, inSnap)
+		c.Tried, c.FullPass = true, ok
 		if err != nil {
-			return err
+			fmt.Fprintf(r.stderr, "router %s: post-route failed: %v\n", c.Name, err)
+			if i == len(cands)-1 && !have {
+				return err
+			}
+			continue
 		}
-		board = nb
-	}
-	r.lap("widen nets")
-	if !o.noSilkPlace {
-		if board, err = r.silkPlace(board); err != nil {
-			return err
-		}
-	}
-
-	r.lap("silkscreen placement")
-	// 5–6. Gates, IR closure.
-	pass, err := r.qualityGates(board)
-	if err != nil {
-		return err
-	}
-	r.lap("gates")
-	for round := 1; !pass && round <= irWidenRounds; round++ {
-		ratios := irOverBudget(map[string]any{"gates": r.closureGates()})
-		if ratios == nil {
+		board, pass, have = nb, ok, true
+		if ok {
 			break
 		}
-		ops, nb, err := r.widen(board, fmt.Sprintf("IR closure round %d", round), func(tr []specctra.Track, v []widenVia, p []boardPad, clr float64) []widenOp {
-			return planWidenIR(tr, v, p, ratios, o.widenMax, clr)
-		})
-		r.summary[fmt.Sprintf("irWiden%d", round)] = ops
-		if err != nil {
-			return err
-		}
-		if len(ops) == 0 {
-			break
-		}
-		board = nb
-		if pass, err = r.qualityGates(board); err != nil {
-			return err
+		if i < len(cands)-1 {
+			fmt.Fprintf(r.stderr, "router %s did not pass every gate (%s); trying %s\n", c.Name, failedGateList(r.gates), cands[i+1].Name)
 		}
 	}
-
-	r.lap("IR closure")
+	r.summary["routerCandidates"] = candidateSummary(cands)
 	// 7. Design report, 8. release review.
 	r.add(r.designReport(pass))
 	r.lap("design report")
@@ -568,17 +540,109 @@ func (r *kicadRun) run() error {
 	return nil
 }
 
-// route exports the DSN, prepares it and runs fastroute (+ multi-start).
-func (r *kicadRun) doRoute(classed string, reqs map[string]kicad.NetRequirement, inSnap *boardSnapshot) error {
+// postRoute runs everything after routing on one routed board: via arrays,
+// widen to intent, pours, widen nets, silkscreen, every quality gate and the
+// IR closure. It returns the final board and whether every gate passed.
+func (r *kicadRun) postRoute(board string, inSnap *boardSnapshot) (string, bool, error) {
+	o := r.o
+	var err error
+	// 4. Post-route copper: via arrays, widen to intent, pours, widen nets, silk.
+	if board, err = r.viaArrays(board); err != nil {
+		return board, false, err
+	}
+	r.lap("via arrays")
+	reqsSp := intentRequirements(r.in)
+	ops, nb, err := r.widen(board, "widen to the intent width", func(tr []specctra.Track, v []widenVia, p []boardPad, clr float64) []widenOp {
+		return planWidenToIntent(tr, v, p, reqsSp, clr)
+	})
+	r.summary["widenToIntent"] = ops
+	if err != nil {
+		return board, false, err
+	}
+	board = nb
+	r.lap("widen to intent (+ DRC step-back)")
+	if ps := kicadPourPlan(o, inSnap); len(ps) > 0 {
+		out := r.next("pours")
+		res, err := r.kt.Pours(board, ps, out)
+		r.summary["pours"] = map[string]any{"plan": ps, "result": res}
+		if err != nil {
+			return board, false, err
+		}
+		board = out
+		fmt.Fprintf(r.stderr, "pours: %d zone(s) added and filled\n", len(ps))
+		if board, err = r.starvedThermals(board); err != nil {
+			return board, false, err
+		}
+	}
+	r.lap("pours + zone fill + thermals")
+	if o.widenNets != "" {
+		nets := map[string]bool{}
+		for _, n := range strings.Split(o.widenNets, ",") {
+			if n = strings.TrimSpace(n); n != "" {
+				nets[n] = true
+			}
+		}
+		ops, nb, err := r.widen(board, fmt.Sprintf("widen nets to %.1f mil", o.widenMax), func(tr []specctra.Track, v []widenVia, p []boardPad, clr float64) []widenOp {
+			return planWiden(tr, v, p, nets, o.widenMax, clr)
+		})
+		r.summary["widened"] = ops
+		if err != nil {
+			return board, false, err
+		}
+		board = nb
+	}
+	r.lap("widen nets")
+	if !o.noSilkPlace {
+		if board, err = r.silkPlace(board); err != nil {
+			return board, false, err
+		}
+	}
+
+	r.lap("silkscreen placement")
+	// 5–6. Gates, IR closure.
+	pass, err := r.qualityGates(board)
+	if err != nil {
+		return board, false, err
+	}
+	r.lap("gates")
+	for round := 1; !pass && round <= irWidenRounds; round++ {
+		ratios := irOverBudget(map[string]any{"gates": r.closureGates()})
+		if ratios == nil {
+			break
+		}
+		ops, nb, err := r.widen(board, fmt.Sprintf("IR closure round %d", round), func(tr []specctra.Track, v []widenVia, p []boardPad, clr float64) []widenOp {
+			return planWidenIR(tr, v, p, ratios, o.widenMax, clr)
+		})
+		r.summary[fmt.Sprintf("irWiden%d", round)] = ops
+		if err != nil {
+			return board, false, err
+		}
+		if len(ops) == 0 {
+			break
+		}
+		board = nb
+		if pass, err = r.qualityGates(board); err != nil {
+			return board, false, err
+		}
+	}
+
+	r.lap("IR closure")
+	return board, pass, nil
+}
+
+// prepareRoute exports the DSN and prepares it (net requirements, keep-outs,
+// pad escapes, fastroute settings): the pre-route gate every backend shares.
+// It returns the prepared DSN path and the DSN's no-neck-down floor (mil).
+func (r *kicadRun) prepareRoute(classed string, reqs map[string]kicad.NetRequirement, inSnap *boardSnapshot) (dsnPath string, floorMil float64, err error) {
 	o := &r.o
 	rawDSN := filepath.Join(o.outDir, "route-kicad.dsn")
 	if _, err := r.kt.ExportDSN(classed, rawDSN); err != nil {
-		return err
+		return "", 0, err
 	}
 	r.lap("DSN export")
 	dsnText, err := os.ReadFile(rawDSN)
 	if err != nil {
-		return err
+		return "", 0, err
 	}
 	// Copper-to-edge: the intent's per-layer distance (pcbauto.EdgeFromIntent),
 	// never below the board's own copper-to-edge rule.
@@ -600,19 +664,19 @@ func (r *kicadRun) doRoute(classed string, reqs map[string]kicad.NetRequirement,
 	prepared, prep, err := kicad.PrepareDSN(string(dsnText), r.classes, reqs, edge)
 	r.summary["dsnRequirements"] = prep
 	if err != nil {
-		return fmt.Errorf("pre-route gate: %w", err)
+		return "", 0, fmt.Errorf("pre-route gate: %w", err)
 	}
 	if len(prep.Short) > 0 {
-		return fmt.Errorf("pre-route gate: %d net requirement(s) not met in the DSN: %s", len(prep.Short), strings.Join(prep.Short, "; "))
+		return "", 0, fmt.Errorf("pre-route gate: %d net requirement(s) not met in the DSN: %s", len(prep.Short), strings.Join(prep.Short, "; "))
 	}
 	// Pre-routed pad escapes for intent nets whose full width cannot leave
 	// a fine-pitch pad (every intent class is no-neck-down).
 	if prepared, err = r.planEscapes(inSnap, prepared); err != nil {
-		return fmt.Errorf("pre-route gate: escapes: %w", err)
+		return "", 0, fmt.Errorf("pre-route gate: escapes: %w", err)
 	}
-	dsnPath := filepath.Join(o.outDir, "route.dsn")
+	dsnPath = filepath.Join(o.outDir, "route.dsn")
 	if err := os.WriteFile(dsnPath, []byte(prepared), 0o644); err != nil {
-		return err
+		return "", 0, err
 	}
 	r.summary["dsn"] = dsnPath
 	o.fo.noNeckdown = prep.NoNeckdown
@@ -636,43 +700,21 @@ func (r *kicadRun) doRoute(classed string, reqs map[string]kicad.NetRequirement,
 	if pairs != "" {
 		o.fo.pairsFile = base + "-pairs.txt"
 		if err := os.WriteFile(o.fo.pairsFile, []byte(pairs), 0o644); err != nil {
-			return err
+			return "", 0, err
 		}
 	}
 	if tune != "" {
 		o.fo.tuneFile = base + "-tune.txt"
 		if err := os.WriteFile(o.fo.tuneFile, []byte(tune), 0o644); err != nil {
-			return err
+			return "", 0, err
 		}
 	}
 	r.summary["intentPairs"], r.summary["intentTune"] = pairs, tune
 	fmt.Fprintf(r.stderr, "pre-route gate: DSN ok (%d no-neck-down class(es), %d inner rule(s), min trace %.1f µm)\n",
 		len(prep.NoNeckdown), len(prep.InnerRules), o.fo.minTraceUm)
 	r.lap("DSN prepare (requirements, keep-outs)")
-	// One fastroute pipeline. --multi-start is a pcbpilot setting: fastroute
-	// itself reruns the autorouter with N-1 differently seeded pass-1 orders
-	// in parallel (keeping the best by unrouted, violations, score), so no
-	// second seed layer is added here.
-	ses, runs, err := runFastroute(o.fo, dsnPath, base, &syncWriter{w: r.stderr})
-	r.summary["router"], r.summary["routerRuns"] = "fastroute", runs
-	r.summary["routerSettings"] = map[string]any{"multiStart": o.fo.multiStart, "threads": o.fo.threads, "optimizer": !o.fo.noOptimizer, "optimizerThresholdPct": o.fo.optThreshold}
-	if err != nil {
-		return err
-	}
-	if last := lastOK(runs); last != nil && last.Blocked > 0 {
-		r.summary["blockedConnections"] = last.BlockedList
-		fmt.Fprintf(r.stderr, "fastroute: %d of %d unrouted connection(s) blocked by geometry (--diagnose): placement / escapes must change\n", last.Blocked, last.Unrouted)
-	}
-	r.summary["routeFinal"], r.summary["ses"] = lastOK(runs), ses
-	r.route = fastrouteResult(lastOK(runs), o.fo, dsnPath)
-	if r.route != nil && len(r.route.Blocked) > 0 && r.escEnv != nil {
-		r.route.PlacementHints = placementHints(r.route.Blocked, r.escEnv, intentRequirements(r.in))
-		for _, h := range r.route.PlacementHints {
-			fmt.Fprintf(r.stderr, "placement hint: %s\n", h)
-		}
-	}
-	r.summary["routeResult"] = r.route
-	return nil
+	floorMil = prep.MinTraceMil // the DSN's own no-neck-down floor, so both backends judge the same nets
+	return dsnPath, floorMil, nil
 }
 
 // copperOf decodes a snapshot's tracks, vias and pads.

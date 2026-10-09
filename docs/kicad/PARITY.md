@@ -115,6 +115,7 @@ KiCad 对等 = **为同一动作协议实现 KiCad 后端**（`--backend kicad`�
 | 7 | fastroute 多次运行结果不同 / 太慢 | 同 DSN + 同参数结果逐字节相同；fastroute 自己并行跑 multi-start 变体，不再叠第二层并行：`--multi-start`（默认 4）成为 pcbpilot 设置；优化器默认关（`--optimizer`），PicoRick 299 → 134 s、同为 4 未布通；`--diagnose` 全部 blocked 时不续跑，route-complete 写明需改摆放/逃线 | `kicad route`、`runFastroute` |
 | 7a | 主运行单线程过慢 | `--threads` 缺省 min(核数−1, 8)（8 线程 3 次结果逐字节相同）；`--threads 1` 可复现 | `kicad route` |
 | 7d | 门禁读 fastroute 专有字段 | 路由器无关 `routeResult`（`route_result.go`），route-complete（含铺铜放宽）只读它；fastroute 为唯一实现，留给第二后端 | 共用 |
+| 7e | 只有 fastroute 一个后端 | `kicad route --router fastroute\|tracemaker\|both`：TraceMaker 直接写 `.kicad_pcb`（`routeResult.Board`），约束来自意图（`tracemakerConstraints`）；`both` 并行跑、先过快检（完整且无新增 DRC 错误）者先进全量门禁，失败换下一个，门禁不变。TraceMaker 缓存「已布铜只擦到 margin 判阻塞」的误判（U303.22 被封）已在 fork 修复 | `kicad_route_backends.go`、`kicad_route_tracemaker.go`、`kicad_route_candidates.go` |
 | 7b | fastroute 微颈缩可收窄任意拥挤段 | 高于全局下限的所有意图网类进 `--no-neckdown-classes` | `forbidsNeckdown`（共用） |
 | 7c | 非 fastroute 路径缺门禁 | `route-complete` 对外部 `--router`、`--router internal`、`pcb gate` 用板铜连通性判；`pcb auto route` 加 design/layout 评审；两条路径以 `gate-set` 收尾，强制门禁集合缺一即失败（`TestRouteGateSetContract`） | `route_gate_set.go`、`pcb auto route` |
 | 8 | 计时 | `summary.timings` 保留；前后对比见 `.agents/skills/pcbpilot/references/kicad.md`「计时与提速」 | — |

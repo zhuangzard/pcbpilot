@@ -651,6 +651,8 @@ func resolveFastroute(explicit string) (string, error) {
 }
 
 type fastrouteOpts struct {
+	// ctx ends the whole run (kicad route --router both cancels the loser); nil = never.
+	ctx        context.Context
 	bin        string
 	multiStart int
 	minTraceUm float64
@@ -827,6 +829,9 @@ func runFastroute(o fastrouteOpts, dsn, base string, stderr io.Writer) (string, 
 	var runs []fastrouteRun
 	initial := ""
 	for round := 0; round <= o.rounds; round++ {
+		if o.ctx != nil && o.ctx.Err() != nil {
+			return "", runs, o.ctx.Err()
+		}
 		ses := fmt.Sprintf("%s.r%d.ses", base, round)
 		report := fmt.Sprintf("%s.r%d-report.json", base, round)
 		run := fastrouteOnce(o, dsn, ses, report, initial, round, stderr)
@@ -898,7 +903,11 @@ func fastrouteOnce(o fastrouteOpts, dsn, ses, report, initial string, round int,
 	_ = os.Remove(report)
 	args := fastrouteArgs(o, dsn, ses, report, initial)
 	fmt.Fprintf(stderr, "fastroute round %d: %s %s\n", round, o.bin, strings.Join(args, " "))
-	ctx, cancel := context.WithTimeout(context.Background(), o.timeout)
+	parent := o.ctx
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, o.timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, o.bin, args...)
 	cmd.Stdout, cmd.Stderr = stderr, stderr
