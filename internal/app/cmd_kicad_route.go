@@ -20,7 +20,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -56,6 +55,7 @@ type kicadRouteOpts struct {
 	reviewTimeout           time.Duration
 	projectName, customer   string
 	parallelMS              bool
+	maxCPU                  int
 }
 
 func newKicadRouteCmd(stdout, stderr io.Writer) *cobra.Command {
@@ -79,7 +79,10 @@ calculations and gates as 'pcb auto route' + 'pcb gate':
     clearance + creepage rules in .kicad_dru, and the pair clearance on
     every net of the pair; DSN check per net (+0.2 mil clearance margin);
  3. fastroute: no-neck-down classes, min trace, intent pairs / length
-    groups (skew), continuation runs, one multi-start=4 retry;
+    groups (skew), continuation runs; two starts in parallel within the CPU
+    budget (--max-cpu): the configured run and a fresh run whose
+    --multi-start (4–8 shuffled net orders, run in parallel by fastroute) is
+    sized to the cores left; the best kept (fewest unrouted, then violations);
  4. SES import → zone fill → via arrays (planViaArrays, intent via
     counts) → widen to intent (planWidenToIntent, KiCad-DRC step-back)
     → pours (GND on TOP/IN1/BOTTOM, main power rail on IN2; --pours auto
@@ -140,7 +143,8 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 	f.DurationVar(&o.fo.maxTime, "max-time", 0, "fastroute --max-time per run (0 = none)")
 	f.IntVar(&o.fo.threads, "threads", 1, "fastroute autorouter/optimizer threads (1 also sets --multi-start=1)")
 	f.IntVar(&o.fo.multiStart, "multi-start", 0, "fastroute --multi-start=N (0 = 1 with --threads 1)")
-	f.BoolVar(&o.parallelMS, "parallel-multi-start", true, "run the multi-start=4 retry speculatively in parallel with the main fastroute run (needs ≥ 2 CPUs)")
+	f.BoolVar(&o.parallelMS, "parallel-multi-start", true, "run the fastroute starts in parallel (false = one after another, a later start only while connections remain unrouted)")
+	f.IntVar(&o.maxCPU, "max-cpu", 0, "cores the fastroute starts may keep busy together (0 = all but one); also sizes the multi-start run's --multi-start (4–8)")
 	f.IntVar(&o.fo.rounds, "continue", 2, "fastroute continuation runs (--initial-session) while connections remain unrouted")
 	f.DurationVar(&o.fo.timeout, "router-timeout", 45*time.Minute, "hard limit per fastroute run")
 	f.Float64Var(&o.fo.minTraceUm, "min-trace-um", 0, "fastroute --router.min_trace_width_um (default: max(board minimum track width, min(narrowest widthMil.min, narrowest class width)))")
@@ -630,48 +634,39 @@ func (r *kicadRun) doRoute(classed string, reqs map[string]kicad.NetRequirement,
 	fmt.Fprintf(r.stderr, "pre-route gate: DSN ok (%d no-neck-down class(es), %d inner rule(s), min trace %.1f µm)\n",
 		len(prep.NoNeckdown), len(prep.InnerRules), o.fo.minTraceUm)
 	r.lap("DSN prepare (requirements, keep-outs)")
-	// The multi-start=4 retry is independent of the main run (a fresh run on
-	// the same DSN): with a spare core it runs speculatively in parallel and
-	// is used only when the main run leaves connections unrouted (PicoRick:
-	// 112 s + 143 s sequential → max of the two).
+	// Multi-start: start 0 is the configured run, start 1 a fresh run with
+	// fastroute's own --multi-start sized to the CPU left (N-1 shuffled net
+	// orders in parallel), both at once within the budget; the best is kept
+	// (fewest unrouted, then violations). PicoRick: --multi-start=1 left 8
+	// unrouted, =4 left 4 (same DSN, deterministic per flag set).
+	budget := fastrouteCPUBudget()
+	if o.maxCPU > 0 {
+		budget = min(budget, o.maxCPU)
+	}
+	if !o.parallelMS {
+		budget = 1
+	}
 	ms := o.fo
-	ms.multiStart = 4
-	parallel := o.parallelMS && runtime.NumCPU() >= 2
-	var (
-		msSes  string
-		msRuns []fastrouteRun
-		msErr  error
-		wg     sync.WaitGroup
-	)
+	ms.multiStart = multiStartFor(budget, startWeight(o.fo, budget))
+	opts := []fastrouteOpts{o.fo, ms}
+	if o.fo.multiStart >= ms.multiStart {
+		opts = opts[:1] // the configured run already is the larger multi-start
+	}
 	logw := io.Writer(&syncWriter{w: r.stderr})
-	if parallel {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			msSes, msRuns, msErr = runFastroute(ms, dsnPath, base+"-ms", logw)
-		}()
-	}
-	ses, runs, err := runFastroute(o.fo, dsnPath, base, logw)
-	wg.Wait()
-	r.summary["router"], r.summary["routerRuns"] = "fastroute", runs
-	r.summary["multiStartParallel"] = parallel
-	if err != nil {
-		return err
-	}
-	if last := lastOK(runs); last != nil && last.Unrouted > 0 {
-		if !parallel {
-			fmt.Fprintf(r.stderr, "multi-start: %d connection(s) still unrouted; one fresh run with --multi-start=4\n", last.Unrouted)
-			msSes, msRuns, msErr = runFastroute(ms, dsnPath, base+"-ms", logw)
+	starts, best := runFastrouteStarts(opts, dsnPath, base, budget, logw)
+	r.summary["router"], r.summary["routerStarts"] = "fastroute", starts
+	r.summary["routerCpuBudget"] = budget
+	if best < 0 {
+		for _, st := range starts {
+			if st.Error != "" {
+				return fmt.Errorf("fastroute: %s", st.Error)
+			}
 		}
-		r.summary["multiStartRuns"] = msRuns
-		if got := lastOK(msRuns); msErr == nil && got != nil && runImproved(*last, *got) {
-			ses, runs = msSes, msRuns
-			fmt.Fprintf(r.stderr, "multi-start: kept (%d unrouted)\n", got.Unrouted)
-		}
-	} else if parallel {
-		r.summary["multiStartRuns"] = msRuns
-		r.summary["multiStartUnused"] = "main run routed everything; the speculative multi-start run was not used"
+		return fmt.Errorf("fastroute: no start produced a session")
 	}
+	ses, runs := starts[best].Session, starts[best].Runs
+	r.summary["routerRuns"] = runs
+	fmt.Fprintf(r.stderr, "multi-start: %d start(s), CPU budget %d; kept start %d (%d unrouted, %d violation(s))\n", len(starts), budget, best, starts[best].Final.Unrouted, starts[best].Final.Violations)
 	r.route = lastOK(runs)
 	r.summary["routeFinal"], r.summary["ses"] = r.route, ses
 	return nil

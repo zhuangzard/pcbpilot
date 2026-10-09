@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -249,5 +250,54 @@ func TestIntentPairsAndTune(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(fastrouteArgs(fastrouteOpts{pairsFile: "p.txt", tuneFile: "t.txt"}, "b.dsn", "b.ses", "r.json", ""), " "), "--pairs=p.txt --tune=t.txt") {
 		t.Fatal("pairs/tune not passed to fastroute")
+	}
+}
+
+// fakeFastroute writes a session and a report whose unrouted count is
+// unrouted[--multi-start value] (default key "1").
+func fakeFastroute(t *testing.T, unrouted map[string]int) string {
+	t.Helper()
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "fastroute")
+	script := "#!/bin/sh\nms=1; ses=; rep=\nwhile [ $# -gt 0 ]; do case \"$1\" in -do) ses=$2; shift;; --report=*) rep=${1#--report=};; --multi-start=*) ms=${1#--multi-start=};; esac; shift; done\n" +
+		"echo '(session x)' > \"$ses\"\ncase $ms in\n"
+	for k, v := range unrouted {
+		script += fmt.Sprintf("%s) u=%d;;\n", k, v)
+	}
+	script += "*) u=9;;\nesac\nprintf '{\"stats\":{\"unrouted\":%d,\"violations\":3}}' $u > \"$rep\"\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return bin
+}
+
+// Two starts (the configured run, a larger --multi-start) run within the
+// CPU budget; the one with fewer unrouted is kept. A start that has not
+// begun is skipped once another routed everything.
+func TestRunFastrouteStarts(t *testing.T) {
+	dir := t.TempDir()
+	dsn := filepath.Join(dir, "b.dsn")
+	_ = os.WriteFile(dsn, []byte("(pcb x (resolution um 10))"), 0o644)
+	base := fastrouteOpts{bin: fakeFastroute(t, map[string]int{"1": 8, "6": 4}), threads: 1, rounds: 0, timeout: time.Minute}
+	ms := base
+	ms.multiStart = 6
+	for _, budget := range []int{1, 8} {
+		starts, best := runFastrouteStarts([]fastrouteOpts{base, ms}, dsn, filepath.Join(dir, fmt.Sprintf("r%d", budget)), budget, io.Discard)
+		if best != 1 || !starts[1].Kept || starts[0].Final == nil || starts[0].Final.Unrouted != 8 || starts[1].Final.Unrouted != 4 {
+			t.Fatalf("budget %d: best %d starts %+v", budget, best, starts)
+		}
+	}
+	// Start 0 routes everything: with a budget of 1 core start 1 never runs.
+	base.bin = fakeFastroute(t, map[string]int{"1": 0, "6": 0})
+	ms.bin = base.bin
+	starts, best := runFastrouteStarts([]fastrouteOpts{base, ms}, dsn, filepath.Join(dir, "z"), 1, io.Discard)
+	if best != 0 || starts[1].Skipped == "" {
+		t.Fatalf("best %d starts %+v", best, starts)
+	}
+	if got := multiStartFor(9, 1); got != 8 {
+		t.Fatalf("multiStartFor(9,1) = %d", got)
+	}
+	if got := multiStartFor(3, 1); got != 4 {
+		t.Fatalf("multiStartFor(3,1) = %d", got)
 	}
 }
