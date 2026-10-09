@@ -67,7 +67,9 @@ func TestPrepareDSN(t *testing.T) {
 	if prep.Renamed["PP1_W20,Power"] != "PP1_W20+Power" || strings.Contains(out, "PP1_W20,Power") {
 		t.Fatalf("rename: %v", prep.Renamed)
 	}
-	if len(prep.NoNeckdown) != 1 || prep.NoNeckdown[0] != "PP1_W20+Power" || prep.MinTraceMil != 6 {
+	// Both intent classes sit above the 6 mil floor: fastroute's micro
+	// neck-down could narrow either anywhere, so both are passed.
+	if strings.Join(prep.NoNeckdown, ",") != "PP1_W20+Power,PP2_W10+Default" || prep.MinTraceMil != 6 {
 		t.Fatalf("no-neckdown %v floor %v", prep.NoNeckdown, prep.MinTraceMil)
 	}
 	if !strings.Contains(out, "(layer_rule In1.Cu In2.Cu (rule (width 762)))") || len(prep.InnerRules) != 1 {

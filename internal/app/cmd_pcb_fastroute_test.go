@@ -171,7 +171,7 @@ func TestPrepareDSNGate(t *testing.T) {
 	if short, _ := specctra.CheckNetRequirements(text, reqs); len(short) != 0 {
 		t.Fatalf("prepared DSN still short: %v", short)
 	}
-	if rq.MinTraceMil != 6 || strings.Join(rq.NoNeckdown, ",") != "+12V" { // SIG sits at the 6 mil floor
+	if rq.MinTraceMil != 6 || strings.Join(rq.NoNeckdown, ",") != "+12V,GND" { // SIG sits at the 6 mil floor
 		t.Fatalf("requirement report = %+v", rq)
 	}
 	// A DSN not in mil cannot be checked: the gate refuses rather than guess.
@@ -299,5 +299,34 @@ func TestRunFastrouteStarts(t *testing.T) {
 	}
 	if got := multiStartFor(3, 1); got != 4 {
 		t.Fatalf("multiStartFor(3,1) = %d", got)
+	}
+}
+
+// Every intent class above the neck-down floor is passed to
+// --no-neckdown-classes, also when its widthMil.min < outer: fastroute's
+// fanout micro neck-down narrows congested segments anywhere (to 1/2 of the
+// class width at worst), and the global min trace is only a floor.
+func TestIntentClassesForbidNeckdown(t *testing.T) {
+	raw, err := os.ReadFile("../pcb/specctra/testdata/easyeda-export.dsn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, err := parseDesignIntent([]byte(`{"schemaVersion":1,"nets":{
+ "+12V":{"role":"power","widthMil":{"outer":30,"inner":30,"min":12},"clearanceMil":6},
+ "GND":{"role":"ground","widthMil":{"outer":21.65,"inner":21.65,"min":20},"clearanceMil":6},
+ "SIG":{"role":"signal","widthMil":{"outer":6,"min":6},"clearanceMil":6}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, rq, err := prepareDSN(string(raw), specctra.FixOptions{}, intentRequirements(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(rq.NoNeckdown, ",") != "+12V,GND" {
+		t.Fatalf("no-neckdown %v: every intent class above the floor must be listed", rq.NoNeckdown)
+	}
+	got := strings.Join(fastrouteArgs(fastrouteOpts{noNeckdown: rq.NoNeckdown}, "b.dsn", "b.ses", "r.json", ""), " ")
+	if !strings.Contains(got, "--no-neckdown-classes=+12V,GND") {
+		t.Fatalf("args %s", got)
 	}
 }
