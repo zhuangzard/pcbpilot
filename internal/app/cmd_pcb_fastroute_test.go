@@ -253,52 +253,53 @@ func TestIntentPairsAndTune(t *testing.T) {
 	}
 }
 
-// fakeFastroute writes a session and a report whose unrouted count is
-// unrouted[--multi-start value] (default key "1").
-func fakeFastroute(t *testing.T, unrouted map[string]int) string {
+// fakeFastroute writes a session and a report with unrouted connections,
+// the first blocked of them classed "blocked" by --diagnose; it logs one
+// line per call to calls.
+func fakeFastroute(t *testing.T, unrouted, blocked int) (bin, calls string) {
 	t.Helper()
 	dir := t.TempDir()
-	bin := filepath.Join(dir, "fastroute")
-	script := "#!/bin/sh\nms=1; ses=; rep=\nwhile [ $# -gt 0 ]; do case \"$1\" in -do) ses=$2; shift;; --report=*) rep=${1#--report=};; --multi-start=*) ms=${1#--multi-start=};; esac; shift; done\n" +
-		"echo '(session x)' > \"$ses\"\ncase $ms in\n"
-	for k, v := range unrouted {
-		script += fmt.Sprintf("%s) u=%d;;\n", k, v)
+	bin, calls = filepath.Join(dir, "fastroute"), filepath.Join(dir, "calls")
+	var items []string
+	for i := 0; i < unrouted; i++ {
+		cls := "congestion"
+		if i < blocked {
+			cls = "blocked"
+		}
+		items = append(items, fmt.Sprintf(`{"net":"N%d","from":{"component":"U1","pin":"%d"},"to":{"component":"R1","pin":"1"},"diagnosis":{"class":"%s"}}`, i, i+1, cls))
 	}
-	script += "*) u=9;;\nesac\nprintf '{\"stats\":{\"unrouted\":%d,\"violations\":3}}' $u > \"$rep\"\n"
+	rep := fmt.Sprintf(`{"stats":{"unrouted":%d,"violations":0},"unrouted":[%s]}`, unrouted, strings.Join(items, ","))
+	script := "#!/bin/sh\necho call >> " + calls + "\nses=; rep=\nwhile [ $# -gt 0 ]; do case \"$1\" in -do) ses=$2; shift;; --report=*) rep=${1#--report=};; esac; shift; done\n" +
+		"echo '(session x)' > \"$ses\"\ncat > \"$rep\" <<'J'\n" + rep + "\nJ\n"
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	return bin
+	return bin, calls
 }
 
-// Two starts (the configured run, a larger --multi-start) run within the
-// CPU budget; the one with fewer unrouted is kept. A start that has not
-// begun is skipped once another routed everything.
-func TestRunFastrouteStarts(t *testing.T) {
+// --diagnose: when every unrouted connection is blocked by geometry no
+// continuation run is made (it cannot help); congestion keeps continuing.
+func TestRunFastrouteStopsOnBlocked(t *testing.T) {
 	dir := t.TempDir()
 	dsn := filepath.Join(dir, "b.dsn")
 	_ = os.WriteFile(dsn, []byte("(pcb x (resolution um 10))"), 0o644)
-	base := fastrouteOpts{bin: fakeFastroute(t, map[string]int{"1": 8, "6": 4}), threads: 1, rounds: 0, timeout: time.Minute}
-	ms := base
-	ms.multiStart = 6
-	for _, budget := range []int{1, 8} {
-		starts, best := runFastrouteStarts([]fastrouteOpts{base, ms}, dsn, filepath.Join(dir, fmt.Sprintf("r%d", budget)), budget, io.Discard)
-		if best != 1 || !starts[1].Kept || starts[0].Final == nil || starts[0].Final.Unrouted != 8 || starts[1].Final.Unrouted != 4 {
-			t.Fatalf("budget %d: best %d starts %+v", budget, best, starts)
+	for _, c := range []struct{ unrouted, blocked, wantCalls int }{{2, 2, 1}, {2, 1, 2}} {
+		bin, calls := fakeFastroute(t, c.unrouted, c.blocked)
+		_, runs, err := runFastroute(fastrouteOpts{bin: bin, threads: 1, rounds: 3, timeout: time.Minute}, dsn, filepath.Join(dir, fmt.Sprintf("r%d", c.blocked)), io.Discard)
+		raw, _ := os.ReadFile(calls)
+		if err != nil || strings.Count(string(raw), "call") != c.wantCalls || runs[0].Blocked != c.blocked {
+			t.Fatalf("%+v: calls %d runs %+v err %v", c, strings.Count(string(raw), "call"), runs, err)
+		}
+		g := routeCompleteGate(&runs[0])
+		if n := strings.Count(strings.Join(g.Items, "\n"), "blocked by geometry"); n != c.blocked {
+			t.Fatalf("gate items %v", g.Items)
 		}
 	}
-	// Start 0 routes everything: with a budget of 1 core start 1 never runs.
-	base.bin = fakeFastroute(t, map[string]int{"1": 0, "6": 0})
-	ms.bin = base.bin
-	starts, best := runFastrouteStarts([]fastrouteOpts{base, ms}, dsn, filepath.Join(dir, "z"), 1, io.Discard)
-	if best != 0 || starts[1].Skipped == "" {
-		t.Fatalf("best %d starts %+v", best, starts)
-	}
-	if got := multiStartFor(9, 1); got != 8 {
-		t.Fatalf("multiStartFor(9,1) = %d", got)
-	}
-	if got := multiStartFor(3, 1); got != 4 {
-		t.Fatalf("multiStartFor(3,1) = %d", got)
+	got := strings.Join(fastrouteArgs(fastrouteOpts{multiStart: 4, threads: 1, noOptimizer: true, optThreshold: 2}, "b.dsn", "b.ses", "r.json", ""), " ")
+	for _, w := range []string{"--multi-start=4", "--router.optimizer.enabled=false", "--router.optimizer.optimization_improvement_threshold=2"} {
+		if !strings.Contains(got, w) {
+			t.Fatalf("args %s lack %s", got, w)
+		}
 	}
 }
 

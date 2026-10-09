@@ -38,10 +38,11 @@ KiCad 对等 = **为同一动作协议实现 KiCad 后端**（`--backend kicad`�
 | 意图推导（intent derive，含安全表） | 离线 | 离线（输入改为 KiCad connectivity） | 进行中 |
 | 仿真 power/analog/post-layout | 离线 | 离线（board-final.json 来自 KiCad） | 进行中 |
 | 布局（pcb auto run / place） | 连接器剧本 | `kicad place`（pcbnew） | 已实现，紧凑度/居中待调 |
-| 布线（fastroute + 意图规则 + 宽度/过孔阵/IR 闭环） | 连接器 + dsn-fix/ses-repair | `kicad route`（原生 DSN/SES） | 进行中（kicad/core） |
+| 布线（fastroute + 意图规则 + 宽度/过孔阵/IR 闭环） | 连接器 + dsn-fix/ses-repair | `kicad route`（原生 DSN/SES） | 进行中（kicad/core；kicad/pcb-fixes 修了实板缺陷，见下） |
 | 铺铜/电源平面 | pcb.pour.* | pcbnew ZONE + ZONE_FILLER | 进行中 |
 | 全部硬门禁（DRC、意图、安全/隔离、仿真、丝印、说明书、报告、设计评审） | runQualityGates | 同一门禁代码跑在 KiCad 快照上 | 进行中 |
-| 丝印位号（silk-align --tight、组标签） | pcb.silk.* | pcbnew 字段位置/可见性 | 待做 |
+| 发布签核 `pcbpilot signoff` | `pcb auto route` 末尾自动运行（设计报告 + 签核，kicad/pcb-fixes） | `kicad route` 末尾自动运行 | 完成（两端同一 `signoffGate`） |
+| 丝印位号（silk-align --tight、组标签） | pcb.silk.* | `kicad route` 内同一规划器（planSilkTight + 组标签）经桥接写字段位置/字号/可见性 | 进行中（规划器改进见下；独立 `kicad silk` 命令未做） |
 | 制造输出（Gerber/钻孔/BOM/CPL，LCSC） | EasyEDA 下单 | `kicad fab` | 完成（分支 kicad/fab） |
 | 器件搜索与建库（LCSC） | lib by-lcsc | `kicad lcsc --search/--import` | 完成（分支 kicad/fab） |
 | 设计评审（Codex/Kimi/Claude） | review-panel | 同（与 EDA 无关） | 完成 |
@@ -66,3 +67,18 @@ KiCad 对等 = **为同一动作协议实现 KiCad 后端**（`--backend kicad`�
 - `kicad sch-import`：镜像元件的方向只按 KiCad 变换搜索（Gas 工程里没有镜像件，未实测）；不导入总线、图片、表格；
   字段对齐方式未迁移（位置照搬）；未自动加 PWR_FLAG。
 - `kicad netlist` 与 kicad/core 分支的同名命令重叠，合并时保留一个（字段形状相同：connectivity 1.4）。
+
+## `kicad route` 实板缺陷修复（分支 kicad/pcb-fixes，2026-10-09）
+
+在 Gas V5 A / PicoRick 草稿副本上跑 `kicad route` 发现的共用代码缺陷，均已修复并有单测：
+
+| # | 缺陷 | 修复 | 位置 |
+|---|---|---|---|
+| 1 | 设计后仿真误报「no copper path」：过孔环只压焊盘边约 0.5 mil，0.5 mm 栅格看不到，KiCad 判连通 | 栅格化前按精确几何（矩形/跑道形焊盘、胶囊形走线、过孔圆）把相接的焊盘/过孔/走线并入同一节点；0.5 mil 缝隙仍判开路 | `pkg/postsim`（共用） |
+| 2 | 仿真误开路挡住 IR 收敛 | KiCad DRC 对该网无 unconnected 的开路标 `SIM/KICAD MISMATCH`（`summary.simKicadMismatch`，门禁仍失败），IR 收敛照常；同网开路不再掩盖超预算压降 | `kicad route`、`irOverBudget`、`pkg/postsim` |
+| 3 | fastroute 报告坐标在 KiCad DSN 下是 mm，却按 mil 标注 | 按 DSN 分辨率单位换算（`specctra.ReportMilPerUnit`：mil→inch、um→mm），fixableList 与自动逃线坐标同用 | 共用 |
+| 4 | 密板丝印规划失败、每轮约 12 s | 八方位 × 横/竖 + 封装内居中；盖阻焊过孔作为第二档；无位时降到 JLC 最小 0.8 mm / 0.15 mm（`--silk-min-font`）；组标签也可降号；一次最多挪开 3 个挡位标签；网格索引 + 每标签静态合法位缓存。门禁仍硬：字号低于 min(项目字号, 最小字号) 失败 | `pcb_silk_tight.go`（共用） |
+| 5 | EasyEDA `pcb auto route` 末尾没有签核 | 末尾发布设计报告并运行同一 `pcbpilot signoff`（`--review` 或 `<out-dir>/review-design/review.json`） | `pcb auto route` |
+| 6 | DSN 板边禁布带挡住板边连接器焊盘 | 板边安装件（铜到板边门禁的同一判据：封装框到达板框）的近边焊盘在禁布带上开全深度窗口（焊盘 + 向内直出逃线，外扩间距 + 2 mil）；其余铜照常禁布，门禁不变 | `specctra.EdgeBandsExcept`（KiCad 与 EasyEDA 共用） |
+| 7 | fastroute 多次运行结果不同 | fastroute 0.1.13 无种子参数且同 DSN + 同参数结果逐字节相同；改为两个起点并行（配置的运行 + 按剩余核数定 `--multi-start` 4–8 的运行，CPU 预算 = 核数 − 1，`--max-cpu`），取未布通最少、再冲突最少者 | `runFastrouteStarts`（共用） |
+| 8 | 计时 | `summary.timings` 保留；前后对比见 `.agents/skills/pcbpilot/references/kicad.md`「计时与提速」 | — |

@@ -333,6 +333,9 @@ pcbpilot pcb auto route --playbook out/playbook.json --out-dir out/live --projec
   A·mil，越小越好）；v20 B 两个候选都布通，原先留下的那个漏极回路长。
 - 压降闭环：若失败的门只有后仿真压降（可同时有 intent-widths；silkscreen、board-manual 不碰铜，不阻挡）（`X drops N mV … over the B mV budget`），按 N/B ×1.15 加宽该网全部走线
   （上限 `--widen-max-mil`，间距与 DRC 守卫照旧），重新对账并重跑全部门禁，最多 2 轮；DRC、对账等其他门失败时不加宽。
+- 收尾：发布设计报告（`<out-dir>/report/vN`，门禁 `design-report`），再运行与 `kicad route` 同一条发布签核
+  `pcbpilot signoff`（门禁 `signoff`，结果在 `<out-dir>/signoff/`；设计评审取 `--review`，缺省
+  `<out-dir>/review-design/review.json`，没有即 `signoff-review` 失败）。签核不过，命令非零。
   线宽门只按电流，压降还取决于长度：Gas Module V5 B v17 的 SV1_DRV 0.34 A 走内层 1551 mil × 10 mil，压降 57 mV（预算 30）。
 - 会话对账：一段在同层同网铜（走线圆头胶囊、过孔圆盘）覆盖其 90 % 宽度全长时视为在（v17：导入丢了夹在 2.2 mil 缝里的
   1.1 mil GND 短段；v18：EasyEDA 把 12.5 mil 宽 40 mil 的 SV1_DRV 短段并进了旁边的过孔和 40 mil 走线）。
@@ -344,13 +347,15 @@ pcbpilot pcb auto route --playbook out/playbook.json --out-dir out/live --projec
   fastroute 的颈缩不只在本网焊盘处，已撤回。
 - `native-drc` 逐条列出违规（类型、对象、层、网、坐标 mil、图元 id），不再只给计数。
 - 丝印（`silkscreen` 门，读回 `pcb.silk.list` 真实包围盒判）：`pcb auto route` 铺铜加宽后自动跑 `pcb silk-align --tight`
-  的同一流程：位号放在自己封装旁最近的空位（先 `--silk-gap` 5 mil 四边横排，再转 90° 四边，从下或从右读），
-  密集簇（去耦电容排、电阻排）排成与器件一一对齐的行/列；**字号从不缩小**（小于项目字号的放大到项目字号，
-  项目字号缺省取板上最常见的位号高度）；避开焊盘/过孔/孔（`--silk-pad-clear` 6 mil，JLC 0.15 mm）、别的封装、
-  别的丝印、板边。门在任一位号压丝印/焊盘或阻焊开窗/孔/板边、出板、离自己封装超 `--silk-max-dist`（30 mil）、
-  字号低于项目字号、线宽低于 `--silk-fab-min-line`（5.9 mil）时失败，列出最差的坐标。
+  的同一流程：位号放在自己封装旁最近的空位（先 `--silk-gap` 5 mil 四边横排，再转 90° 四边，从下或从右读；再
+  四个角（横/竖），最后封装框内居中）；密集簇（去耦电容排、电阻排）排成与器件一一对齐的行/列；项目字号放不下时
+  **降到工厂最小字号**（`--silk-min-font` 31.5 mil = JLC 0.8 mm，线宽 0.15 mm；`0` 关闭，不再更小），小于项目字号的
+  其余位号放大到项目字号（项目字号缺省取板上最常见的位号高度）；避开焊盘/孔（`--silk-pad-clear` 6 mil，JLC 0.15 mm）、
+  别的封装、别的丝印、板边，盖阻焊的过孔只作第二档（`--silk-via-openings` 时与焊盘同等）；挡位的已放位号一次最多挪开 3 个。
+  门在任一位号压丝印/焊盘或阻焊开窗/孔/板边、出板、离自己封装超 `--silk-max-dist`（30 mil）、
+  字号低于 min(项目字号, `--silk-min-font`)、线宽低于 `--silk-fab-min-line`（5.9 mil）时失败，列出最差的坐标；降号的在 info。
   仍无位置的位号：封装相距 `--silk-group-link`（150 mil）内的归成一组，画一个组标签（同前缀连号 "C21–C24"，否则
-  "R62/R63/R65"，不超过 24 字符，放不下就沿长轴对半拆开重试），放在该组器件包围盒 `--silk-group-max-dist`（80 mil）
+  "R62/R63/R65"，不超过 24 字符，项目字号放不下再试最小字号，仍放不下就沿长轴对半拆开重试），放在该组器件包围盒 `--silk-group-max-dist`（80 mil）
   内，组内位号**隐藏不删除**（位号属性、BOM、贴片数据不变）。门把被组标签点名、标签在距离内的隐藏位号算通过
   （列在 `info`），其余隐藏位号失败。仍放不下的单个位号/两个一组只报告，引线不自动画；`--silk-no-groups` 关闭分组。
   需要连接器 0.7.2（读回线宽、`pcb.silk.set` 支持 `valueVisible`）；旧连接器不判线宽，隐藏位号会报错。
@@ -382,7 +387,8 @@ pcbpilot pcb auto route --playbook out/playbook.json --out-dir out/live --projec
 （`--continue 5` 次 `--initial-session` 续跑直到 0 未布通）→ 拆线 + 导入 → `ses-repair` → 铺铜
 （GND 在 TOP/IN1/BOTTOM，焊盘最多的非地电源网在 IN2；`--gnd-layers` / `--power-net` / `--power-layer` 可改）
 → `--widen-net` 加宽（`pcb widen`）→ 重铺 → 保存 → 重载 → 重铺 → 原生 DRC → 逐焊盘对账 →
-`--sim` 时现场 dump 后跑 `sim post-layout`。结果写 `--out-dir/summary.json`。
+`--sim` 时现场 dump 后跑 `sim post-layout` → 门禁 → IR 收敛 → 设计报告 → `pcbpilot signoff`。结果写 `--out-dir/summary.json`。
+仍有未布通时最后一次 fastroute 新运行的 `--multi-start` 按 CPU 核数取 4–8（进程内并行打乱网序），按「未布通、再冲突」更少才换用。
 
 **多 seed 取最优（`--place-seeds 6`，默认）。** 不做引擎布线时（fastroute 模式、`--no-route`），退火摆放的结果全凭 seed：
 2026-10-06 Gas Module V5 同一起点 8 个 seed 的加权线长从 121.9 到 156.5 in。现在并行跑 6 个 seed（约 37 s），先比合法性

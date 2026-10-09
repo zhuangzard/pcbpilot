@@ -269,6 +269,9 @@ Steps (stdout is one summary JSON, progress on stderr):
      declared Top, Inner1..N, Bottom; the copper layer count comes from the live board;
    - through-hole padstacks listing only Top/Bottom/InnerK get a shape on the missing inner layers;
    - board-edge copper keep-out bands, one per outline edge and layer: `--edge-outer-mil 20`, `--edge-inner-mil 30`;
+     in `pcb autoroute` / `pcb auto route` the bands leave a full-depth window over each near-edge pad of an
+     edge-mounted part (footprint box reaching the outline — the copper-to-edge gate's rule), grown by the
+     clearance + 2 mil, so edge connectors stay routable (`summary.edgeExemptPads`); the gate still judges them;
    - GND routed as traces by default; `--gnd-plane [--plane-net GND]` declares the missing inner layer as a plane;
    - `--escapes FILE`: fixed stub + via for pins the router cannot escape, e.g.
      `[{"net":"GND","layer":"TopLayer","widthMil":10,"path":[[4776.1,313.9],[4710.65,313.9]],"via":true}]`

@@ -900,6 +900,11 @@ func routeCompleteGate(r *fastrouteRun) gateResult {
 	if r.Unrouted > 0 {
 		g.Items = append(g.Items, fmt.Sprintf("%d connection(s) unrouted (see %s)", r.Unrouted, r.Report))
 	}
+	// --diagnose: blocked connections need a placement / escape change, the
+	// rest are congestion (another start, more room).
+	for _, b := range r.BlockedList {
+		g.Items = append(g.Items, "blocked by geometry (move the part or add an escape; rerouting cannot fix it): "+b)
+	}
 	g.Items = append(g.Items, r.FixableList...)
 	return g
 }

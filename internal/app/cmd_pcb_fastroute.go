@@ -22,11 +22,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -658,11 +656,16 @@ type fastrouteOpts struct {
 	minTraceUm float64
 	noNeckdown []string
 	threads    int
-	pairsFile  string
-	tuneFile   string
-	maxTime    time.Duration
-	rounds     int
-	timeout    time.Duration
+	// noOptimizer: --router.optimizer.enabled=false. optThreshold > 0:
+	// --router.optimizer.optimization_improvement_threshold (percent per
+	// pass below which the optimizer stops).
+	noOptimizer  bool
+	optThreshold float64
+	pairsFile    string
+	tuneFile     string
+	maxTime      time.Duration
+	rounds       int
+	timeout      time.Duration
 }
 
 // fastrouteArgs builds one fastroute invocation.
@@ -681,6 +684,12 @@ func fastrouteArgs(o fastrouteOpts, dsn, ses, report, initial string) []string {
 	if o.threads > 0 {
 		n := strconv.Itoa(o.threads)
 		args = append(args, "--router.autorouter.max_threads="+n, "--router.optimizer.max_threads="+n)
+	}
+	if o.noOptimizer {
+		args = append(args, "--router.optimizer.enabled=false")
+	}
+	if o.optThreshold > 0 {
+		args = append(args, "--router.optimizer.optimization_improvement_threshold="+strconv.FormatFloat(o.optThreshold, 'f', -1, 64))
 	}
 	if o.pairsFile != "" {
 		args = append(args, "--pairs="+o.pairsFile)
@@ -717,12 +726,21 @@ type fastrouteRun struct {
 	// (pre-existing pin-pin overlaps are unfixable); they reach native DRC.
 	Fixable     int      `json:"fixableViolations"`
 	FixableList []string `json:"fixableList,omitempty"`
+	// Blocked: unrouted connections fastroute --diagnose classed "blocked"
+	// (unroutable alone on the board; the rest are congestion).
+	Blocked     int      `json:"blocked"`
+	BlockedList []string `json:"blockedList,omitempty"`
 }
 
 // frReport is what pcbpilot reads from a fastroute --report file.
 type frReport struct {
 	Unrouted, Violations, Fixable int
 	FixableList                   []string
+	// Blocked: unrouted connections --diagnose found unroutable even alone
+	// on the loaded board (pins, keep-outs, fixed wiring) — placement or
+	// escapes must change; rerunning the router does not help them.
+	Blocked     int
+	BlockedList []string
 }
 
 // readFastrouteReport extracts the counts of a fastroute --report file. Its
@@ -736,14 +754,24 @@ func readFastrouteReport(path string, milPerUnit float64) (frReport, error) {
 		return out, err
 	}
 	type item struct {
-		Kind string `json:"kind"`
-		Net  string `json:"net"`
+		Kind      string `json:"kind"`
+		Net       string `json:"net"`
+		Component string `json:"component"`
+		Pin       string `json:"pin"`
 	}
 	var r struct {
 		Stats struct {
 			Unrouted   *int `json:"unrouted"`
 			Violations int  `json:"violations"`
 		} `json:"stats"`
+		Unrouted []struct {
+			Net       string `json:"net"`
+			From      item   `json:"from"`
+			To        item   `json:"to"`
+			Diagnosis struct {
+				Class string `json:"class"`
+			} `json:"diagnosis"`
+		} `json:"unrouted"`
 		Clearance []struct {
 			Layer     string     `json:"layer"`
 			XY        [2]float64 `json:"xy"`
@@ -759,6 +787,12 @@ func readFastrouteReport(path string, milPerUnit float64) (frReport, error) {
 		return out, fmt.Errorf("fastroute report %s has no stats.unrouted", path)
 	}
 	out.Unrouted, out.Violations = *r.Stats.Unrouted, r.Stats.Violations
+	for _, u := range r.Unrouted {
+		if u.Diagnosis.Class == "blocked" {
+			out.Blocked++
+			out.BlockedList = append(out.BlockedList, fmt.Sprintf("%s %s.%s–%s.%s", u.Net, u.From.Component, u.From.Pin, u.To.Component, u.To.Pin))
+		}
+	}
 	for _, c := range r.Clearance {
 		if c.Unfixable {
 			continue
@@ -806,6 +840,13 @@ func runFastroute(o fastrouteOpts, dsn, base string, stderr io.Writer) (string, 
 		}
 		fmt.Fprintf(stderr, "fastroute round %d: %d unrouted, %d violation(s) (%d fixable), %.0f s\n", round, run.Unrouted, run.Violations, run.Fixable, run.Seconds)
 		if run.Unrouted == 0 && run.Fixable == 0 {
+			return ses, runs, nil
+		}
+		if run.Fixable == 0 && run.Blocked >= run.Unrouted {
+			// --diagnose: every remaining connection is blocked by geometry
+			// (pins, keep-outs, fixed wiring) — another router run cannot
+			// route it; placement / escapes must change.
+			fmt.Fprintf(stderr, "fastroute round %d: all %d unrouted connection(s) are blocked (--diagnose); no continuation run\n", round, run.Unrouted)
 			return ses, runs, nil
 		}
 		if prev := lastOK(runs[:len(runs)-1]); prev != nil && !runImproved(*prev, run) {
@@ -880,126 +921,8 @@ func fastrouteOnce(o fastrouteOpts, dsn, ses, report, initial string, round int,
 	// A timed-out run that wrote its report is a usable best-so-far result.
 	run.Status = "ok"
 	run.Unrouted, run.Violations, run.Fixable, run.FixableList = rep.Unrouted, rep.Violations, rep.Fixable, rep.FixableList
+	run.Blocked, run.BlockedList = rep.Blocked, rep.BlockedList
 	return run
-}
-
-// fastrouteStart is one independent fastroute pipeline (runFastroute with
-// its continuation rounds) of a multi-start set.
-type fastrouteStart struct {
-	Start      int            `json:"start"`
-	MultiStart int            `json:"multiStart"`
-	Session    string         `json:"session,omitempty"`
-	Final      *fastrouteRun  `json:"final,omitempty"`
-	Runs       []fastrouteRun `json:"runs,omitempty"`
-	Seconds    float64        `json:"seconds"`
-	Skipped    string         `json:"skipped,omitempty"`
-	Error      string         `json:"error,omitempty"`
-	Kept       bool           `json:"kept,omitempty"`
-}
-
-// fastrouteCPUBudget is the cores the multi-start set may keep busy: all
-// but one (never below 1).
-func fastrouteCPUBudget() int { return max(1, runtime.NumCPU()-1) }
-
-// startWeight is the cores one fastroute process uses: its thread count, or
-// its --multi-start parallelism (fastroute 0.1.13: "rerun the autorouter
-// with N-1 shuffled orders in parallel"; 0 = its default 4).
-func startWeight(o fastrouteOpts, budget int) int {
-	w := max(o.threads, 1)
-	ms := o.multiStart
-	if ms == 0 && o.threads != 1 {
-		ms = 4
-	}
-	return min(max(w, ms-1), budget)
-}
-
-// multiStartFor sizes fastroute's own --multi-start to the cores left in
-// budget beside a start of weight used: N-1 shuffled net orders routed in
-// parallel inside one process, at least 4 (the former fixed retry), at most
-// 8. fastroute 0.1.13 is deterministic for one DSN and flag set (three
-// --multi-start=1 runs and two --multi-start=4 runs of PicoRick gave
-// byte-identical sessions) and has no seed option, so more variants come
-// from a larger N, not from repeating the same process.
-func multiStartFor(budget, used int) int {
-	return min(8, max(4, budget-used+1))
-}
-
-// runFastrouteStarts runs every opts[i] as an independent start on dsn
-// (start 0 at base, start i at base-s<i>), in parallel as far as the CPU
-// budget allows (a start weighs startWeight cores). A start that has not
-// begun is skipped once another one routed everything with no fixable
-// violation. It returns the starts and the best one (fewest unrouted, then
-// fewest violations, then fewest fixable; -1 when none produced a session).
-// Starts must differ in their flags: fastroute 0.1.13 has no seed option and
-// repeats a run exactly (see multiStartFor).
-func runFastrouteStarts(opts []fastrouteOpts, dsn, base string, budget int, stderr io.Writer) ([]fastrouteStart, int) {
-	starts := make([]fastrouteStart, len(opts))
-	var mu sync.Mutex
-	cond := sync.NewCond(&mu)
-	free := budget
-	done := false // a start routed everything cleanly
-	var wg sync.WaitGroup
-	for i := range opts {
-		w := startWeight(opts[i], budget)
-		mu.Lock()
-		for free < w && !done {
-			cond.Wait()
-		}
-		if done {
-			starts[i] = fastrouteStart{Start: i, MultiStart: opts[i].multiStart, Skipped: "an earlier start routed everything"}
-			mu.Unlock()
-			continue
-		}
-		free -= w
-		mu.Unlock()
-		wg.Add(1)
-		go func(i, w int) {
-			defer wg.Done()
-			b := base
-			if i > 0 {
-				b = fmt.Sprintf("%s-s%d", base, i)
-			}
-			t0 := time.Now()
-			ses, runs, err := runFastroute(opts[i], dsn, b, stderr)
-			st := fastrouteStart{Start: i, MultiStart: opts[i].multiStart, Session: ses, Runs: runs, Final: lastOK(runs), Seconds: time.Since(t0).Round(time.Second).Seconds()}
-			if err != nil {
-				st.Error = err.Error()
-			}
-			mu.Lock()
-			starts[i] = st
-			free += w
-			if st.Final != nil && st.Final.Unrouted == 0 && st.Final.Fixable == 0 {
-				done = true
-			}
-			cond.Broadcast()
-			mu.Unlock()
-		}(i, w)
-	}
-	wg.Wait()
-	best := -1
-	for i, st := range starts {
-		if st.Final == nil || st.Session == "" {
-			continue
-		}
-		if best < 0 || betterFinal(*st.Final, *starts[best].Final) {
-			best = i
-		}
-	}
-	if best >= 0 {
-		starts[best].Kept = true
-	}
-	return starts, best
-}
-
-// betterFinal: fewer unrouted, then fewer violations, then fewer fixable.
-func betterFinal(a, b fastrouteRun) bool {
-	if a.Unrouted != b.Unrouted {
-		return a.Unrouted < b.Unrouted
-	}
-	if a.Violations != b.Violations {
-		return a.Violations < b.Violations
-	}
-	return a.Fixable < b.Fixable
 }
 
 // runImproved: fewer unrouted, or as many unrouted and fewer fixable violations.
@@ -1240,14 +1163,14 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 			// Last resort before giving up: a fresh multi-start run (shuffled
 			// net orders) on the DSN that routed best; kept only if better.
 			ms := o.fo
-			ms.multiStart = multiStartFor(fastrouteCPUBudget(), 0)
-			fmt.Fprintf(stderr, "multi-start: %d connection(s) still unrouted; one fresh run with --multi-start=%d (shuffled orders in parallel, sized to the CPU budget)\n", last.Unrouted, ms.multiStart)
+			ms.multiStart = 4
+			fmt.Fprintf(stderr, "multi-start: %d connection(s) still unrouted; one fresh run with --multi-start=4\n", last.Unrouted)
 			s2, r2, err2 := runFastroute(ms, dsnPath, strings.TrimSuffix(dsnPath, ".dsn")+"-ms", stderr)
 			for _, x := range r2 {
 				sessions = append(sessions, x.Session)
 			}
 			summary["multiStartRuns"] = r2
-			if got := lastOK(r2); err2 == nil && got != nil && betterFinal(*got, *last) {
+			if got := lastOK(r2); err2 == nil && got != nil && runImproved(*last, *got) {
 				sesPath, runs = s2, r2
 				fmt.Fprintf(stderr, "multi-start: kept (%d unrouted)\n", got.Unrouted)
 			}
