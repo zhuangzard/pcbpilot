@@ -9,7 +9,27 @@ CLI (offline, KiCad 10):
   changed (otherwise non-zero exit, file untouched). No per-pin connect_pin round trips.
 - `sch layout-plan --backend kicad --kicad-sch X.kicad_sch [--fit]`: re-measures the components from the KiCad sheet,
   plans, and applies the placements (positions + rotations) in one write; wire ends, labels, no-connects, junctions and
-  power symbols on moved pins follow; written only when the netlist is unchanged. Single layouts only (not `--zones`).
+  power symbols on moved pins follow; written only when the netlist is unchanged.
+- KiCad moves are one transaction with no diagonal wires: a wire island whose pins all move together moves rigidly;
+  any other wire touching a moved pin is re-routed orthogonally on the 1.27 mm grid (around bodies, fields, labels,
+  texts and the title block; never along or onto a foreign wire or pin; junction on each T); local labels on it are put
+  back on the new route; a net with no clean route gets net labels / power symbols on its pins. Multi-unit symbols are
+  addressed as `REF:UNIT`.
+- Strict gate before every KiCad write (autoconnect, connect, layout-plan, zones, group-move, destagger): the planned
+  page may not add a quality finding (overlaps, wire through a body, diagonal/off-grid/overlapping wire, pin or wire end
+  on a wire's middle, label/field text on things, title block, off page); then the kicad-cli netlist check. Otherwise
+  non-zero and the file is untouched.
+- `sch layout-plan --backend kicad`: the layout's anchor is scored against the symbols that stay, the title-block
+  keep-out and the page edge; `--zones` now applies (zone frames packed in rows, smallest paper with `--fit`, dashed
+  frame + title drawn and replaced on re-run).
+- `sch group-move --backend kicad --refs R1,U1:2 --dx/--dy` (mm), `sch destagger --backend kicad [--apply]`,
+  `sch titleblock --backend kicad --title/--rev/--date/--company/--comment N=TEXT` (or `--data`).
+- `pcbpilot kicad sch-check --sch root.kicad_sch [--fix-pwr-flag]`: kicad-cli ERC (JSON) + the quality checks on every
+  sheet, non-zero on any ERC error or finding; `--fix-pwr-flag` wires one PWR_FLAG per undriven power net.
+
+CLI (shared engine):
+- `zone-arrange` phase A no longer rejects its own regenerated stubs (F7): a two-pin part failing the R5 overlap or
+  collinear-flag invariant first gets a staggered stub or a terminal on another body side.
 
 ## [0.9.0] — 2026-10-09
 
