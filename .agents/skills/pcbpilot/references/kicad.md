@@ -159,7 +159,21 @@ pcbpilot signoff --run-dir route/ --intent intent.json --sim sim.json --connecti
 303 s → 213 s：multi-start=4 改为与主布线**并行的推测运行**（≥2 核，`--parallel-multi-start`，255.7 → 164.7 s）；
 每轮门禁只跑一次 `kicad-cli` DRC（错误进门禁、警告只统计）；丝印轮次与上一轮相同即停止。丝印规划（共用 planSilkTight）
 改为网格索引 + 每标签静态合法位缓存：PicoRick 规划 67 s → 0.9 s、Gas V5 A 88 s → 1.7 s（同一快照离线测，机器负载高），
-未解决位号 23 → 8、58 → 23。剩余大头是 fastroute 本身。`kicad route` 没有 `--candidates` 候选摆放试布（那是 `pcb auto route` 的功能）。
+未解决位号 23 → 8、58 → 23。剩余大头是 fastroute 本身。
+
+kicad/pcb-fixes 前后（PicoRick 草稿副本，`--rip-up --no-review`，同一命令；机器负载 15–80，墙钟只作参考）：
+
+| | 前（de11806d） | 后 |
+|---|---|---|
+| 总计 / fastroute / 丝印 | 307 s / 231 s / 61 s | 821 s / 696 s / 23 s |
+| fastroute 未布通（blocked） | 2 | 11（全部 blocked，不再续跑） |
+| intent-widths | 23 段低于意图线宽（fastroute 微颈缩） | 0 |
+| silkscreen 问题 | 14 | 11 |
+| kicad-drc 错误 | 31 | 22 |
+
+未布通变多来自「所有意图网类不准颈缩」：同一 DSN、`--multi-start=1` 单独测，旧规则 5 未布通（1 blocked）、新规则 15（8 blocked），
+`--router.neck_width_um` 不改善——宽线进不了细间距焊盘。需要的是焊盘逃线（固定短桩，EasyEDA 流程已有 GND 预逃线，
+KiCad 流程尚无），不是放开颈缩。`kicad route` 没有 `--candidates` 候选摆放试布（那是 `pcb auto route` 的功能）。
 
 ## 已知限制与坑
 
