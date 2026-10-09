@@ -124,7 +124,7 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 		Short: "Schematic operations",
 	}
 	sch.PersistentFlags().StringVar(&window, "window", "", "EasyEDA window ID")
-	sch.PersistentFlags().String("backend", "easyeda", "editor backend for place/wire/netflag/no-connect/modify/connect/autoconnect/layout-plan: easyeda (connector) or kicad (edits --kicad-sch; coordinates in KiCad mm, y down)")
+	sch.PersistentFlags().String("backend", "easyeda", "editor backend for place/wire/netflag/no-connect/modify/connect/autoconnect/layout-plan/group-move/destagger/titleblock: easyeda (connector) or kicad (edits --kicad-sch; coordinates in KiCad mm, y down)")
 	sch.PersistentFlags().String("kicad-sch", "", "with --backend kicad: the .kicad_sch sheet to edit")
 	sch.AddCommand(newSchConnectivityCmd(cfg, &window, stdout, stderr))
 	sch.AddCommand(newSchIntentAnnotateCmd(cfg, &window, stdout, stderr))

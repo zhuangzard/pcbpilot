@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -96,6 +97,9 @@ imported sheet whose parts sit off the 1.27 mm grid).`,
 					return err
 				}
 				fs := kicad.CheckSchematic(string(b), kicad.CheckOptions{Ignore: ignore})
+				if fs == nil {
+					fs = []kicad.Finding{}
+				}
 				rep.Quality = append(rep.Quality, kicadSheetFindings{File: f, Findings: fs})
 				rep.Findings += len(fs)
 			}
@@ -160,7 +164,7 @@ func kicadFixPwrFlags(root string, erc *kicad.ERCReport) []kicadPwrFlagFix {
 		done := false
 		for _, s := range byNet[net] {
 			fix.File, fix.At = s.file, s.at
-			ref, err := kicadPlacePwrFlag(s.file, s.at, floor)
+			ref, err := kicadPlacePwrFlag(s.file, s.at, floor, nets)
 			if err == nil {
 				fix.Ref, done = ref, true
 				floor++
@@ -174,20 +178,27 @@ func kicadFixPwrFlags(root string, erc *kicad.ERCReport) []kicadPwrFlagFix {
 		}
 		out = append(out, fix)
 	}
+	for _, f := range out {
+		if f.Ref != "" {
+			if err := kicad.EnsurePwrFlagInLib(filepath.Dir(root)); err != nil {
+				out = append(out, kicadPwrFlagFix{Err: err.Error()})
+			}
+			break
+		}
+	}
 	return out
 }
 
 // kicadPlacePwrFlag tries stubs of 2.54/5.08/7.62 mm right, left, down, up
 // from at; the first whose page passes the strict gate is committed (netlist
 // unchanged).
-func kicadPlacePwrFlag(file string, at kicad.Pt, floor int) (string, error) {
+func kicadPlacePwrFlag(file string, at kicad.Pt, floor int, before map[string]string) (string, error) {
 	orig, err := os.ReadFile(file)
 	if err != nil {
 		return "", err
 	}
-	before, err := kicadBeforeNets(file)
-	if err != nil {
-		return "", err
+	if before == nil {
+		return "", fmt.Errorf("no KiCad netlist of the design to verify the PWR_FLAG against")
 	}
 	var last string
 	for _, stub := range []float64{2.54, 5.08, 7.62} {

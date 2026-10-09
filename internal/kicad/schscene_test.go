@@ -190,3 +190,69 @@ func TestDestaggerFixesOverlap(t *testing.T) {
 	}
 	t.Logf("%+v", r.Moves)
 }
+
+const dualSym = `(symbol "DUAL"
+		(exclude_from_sim no) (in_bom yes) (on_board yes)
+		(property "Reference" "U" (at 0 5.08 0) (effects (font (size 1.27 1.27))))
+		(property "Value" "DUAL" (at 0 -5.08 0) (effects (font (size 1.27 1.27))))
+		(symbol "DUAL_1_1" (rectangle (start -2.54 2.54) (end 2.54 -2.54) (stroke (width 0.254) (type default)) (fill (type none)))
+			(pin input line (at -5.08 0 0) (length 2.54) (name "A" (effects (font (size 1.27 1.27)))) (number "1" (effects (font (size 1.27 1.27)))))
+			(pin output line (at 5.08 0 180) (length 2.54) (name "Y" (effects (font (size 1.27 1.27)))) (number "2" (effects (font (size 1.27 1.27))))))
+		(symbol "DUAL_2_1" (rectangle (start -2.54 2.54) (end 2.54 -2.54) (stroke (width 0.254) (type default)) (fill (type none)))
+			(pin input line (at -5.08 0 0) (length 2.54) (name "A" (effects (font (size 1.27 1.27)))) (number "3" (effects (font (size 1.27 1.27)))))
+			(pin output line (at 5.08 0 180) (length 2.54) (name "Y" (effects (font (size 1.27 1.27)))) (number "4" (effects (font (size 1.27 1.27))))))
+	)`
+
+func TestDragMultiUnit(t *testing.T) {
+	e := openAuto(t)
+	if err := e.AddLibSymbol("my:DUAL", dualSym); err != nil {
+		t.Fatal(err)
+	}
+	for u, at := range map[int]Pt{1: {152.4, 101.6}, 2: {152.4, 127}} {
+		if _, err := e.PlaceSymbol(SymbolInstance{LibID: "my:DUAL", Ref: "U1", Unit: u, Value: "DUAL", At: at}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// unit 1 output to unit 2 input, a bent wire
+	e.AddWire(Pt{157.48, 101.6}, Pt{162.56, 101.6}, Pt{162.56, 114.3}, Pt{142.24, 114.3}, Pt{142.24, 127}, Pt{147.32, 127})
+	text, err := e.Render()
+	if err != nil {
+		t.Fatal(err)
+	}
+	e2, _ := OpenSchematic(text)
+	if _, err := e2.DragSymbols(map[string]SymPose{"U1": {At: Pt{177.8, 127}}}); err == nil || !strings.Contains(err.Error(), "U1:1, U1:2") {
+		t.Fatalf("ambiguous U1 accepted: %v", err)
+	}
+	res, err := e2.DragSymbolsOpt(map[string]SymPose{"U1:2": {At: Pt{177.8, 127}}}, DragOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Symbols != 1 || res.Rerouted != 1 {
+		t.Fatalf("%+v", res)
+	}
+	moved, _ := e2.Render()
+	if fs := CheckSchematic(moved, CheckOptions{}); len(fs) > 0 {
+		t.Fatalf("findings: %s", Summary(fs, 5))
+	}
+	if _, err := KicadCLI(); err != nil {
+		t.Skip(err)
+	}
+	dir := t.TempDir()
+	a, b := filepath.Join(dir, "a.kicad_sch"), filepath.Join(dir, "b.kicad_sch")
+	_ = os.WriteFile(a, []byte(text), 0o644)
+	_ = os.WriteFile(b, []byte(moved), 0o644)
+	na, err := ExportSchNetlist(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nb, err := ExportSchNetlist(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmp := ComparePinNets(na.PinNets(), nb.PinNets(), nil); !cmp.Equal {
+		t.Fatalf("netlist changed: %+v", cmp)
+	}
+	if na.PinNets()["U1.2"] != na.PinNets()["U1.3"] {
+		t.Fatal("fixture: unit 1 Y not wired to unit 2 A")
+	}
+}

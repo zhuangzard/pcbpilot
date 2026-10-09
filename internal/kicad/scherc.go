@@ -235,3 +235,22 @@ func MaxFlagRef(text string) int {
 	}
 	return n
 }
+
+// EnsurePwrFlagInLib adds PWR_FLAG to a project's pcbpilot_power.kicad_sym
+// (written by sch-import) when it lacks it, so ERC finds the library symbol.
+// A missing library file is not an error.
+func EnsurePwrFlagInLib(dir string) error {
+	p := filepath.Join(dir, "pcbpilot_power.kicad_sym")
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return nil
+	}
+	if strings.Contains(string(b), `(symbol "PWR_FLAG"`) {
+		return nil
+	}
+	i := strings.LastIndex(string(b), ")")
+	if i < 0 {
+		return fmt.Errorf("%s: not a symbol library", p)
+	}
+	return os.WriteFile(p, []byte(string(b[:i])+"\t"+PwrFlagSymbolText()+"\n)\n"), 0o644)
+}
