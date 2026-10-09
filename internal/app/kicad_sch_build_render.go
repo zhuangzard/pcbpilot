@@ -8,8 +8,10 @@ package app
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -130,7 +132,99 @@ type sbReport struct {
 	Checkpoint int               `json:"checkpoint,omitempty"`
 	Edit       any               `json:"edit,omitempty"`
 	Plan       *sbPlan           `json:"plan,omitempty"`
+	PartBoxes  map[string]sbBox  `json:"partBoxes,omitempty"`
+	Error      *sbFailure        `json:"error,omitempty"`
+	Undo       string            `json:"undo,omitempty"`
 	Next       []string          `json:"next,omitempty"`
+}
+
+// sbBox is a part's drawn extent on its sheet (mm).
+type sbBox struct {
+	Sheet string    `json:"sheet"`
+	Box   []float64 `json:"bboxMm"`
+}
+
+// sbPartBoxes reads every sheet back: ref → body box (all units).
+func sbPartBoxes(dir string, files []string) map[string]sbBox {
+	out := map[string]sbBox{}
+	for _, f := range files {
+		if !strings.HasSuffix(f, ".kicad_sch") {
+			continue
+		}
+		p, err := sbSafeJoin(dir, f)
+		if err != nil {
+			continue
+		}
+		e, err := kicad.OpenSchematicFile(p)
+		if err != nil {
+			continue
+		}
+		sc, err := e.Scene()
+		if err != nil {
+			continue
+		}
+		for _, s := range sc.Symbols {
+			if s.Power || !s.HasBox || strings.HasPrefix(s.Ref, "#") {
+				continue
+			}
+			b := s.Box
+			if old, ok := out[s.Ref]; ok {
+				b = sbBoxUnion(b, kicad.Box{MinX: old.Box[0], MinY: old.Box[1], MaxX: old.Box[2], MaxY: old.Box[3]})
+			}
+			out[s.Ref] = sbBox{Sheet: f, Box: []float64{sbRound2(b.MinX), sbRound2(b.MinY), sbRound2(b.MaxX), sbRound2(b.MaxY)}}
+		}
+	}
+	return out
+}
+
+// sbFailure is a refusal with a code and the fix.
+type sbFailure struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Fix     string `json:"fix"`
+}
+
+// sbProjectSHA hashes the files a build owns (compare-and-swap).
+func sbProjectSHA(out string, st *sbState) string {
+	h := sha256.New()
+	for _, f := range st.Files {
+		if p, err := sbSafeJoin(out, f); err == nil {
+			b, _ := os.ReadFile(p)
+			fmt.Fprintf(h, "%s\x00%d\x00", f, len(b))
+			h.Write(b)
+		}
+	}
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+func sbCheckUnchanged(out string, st *sbState, start string) error {
+	if now := sbProjectSHA(out, st); now != start {
+		return fmt.Errorf("%s changed while sch-build ran (sha256 %s → %s)", out, start[:12], now[:12])
+	}
+	return nil
+}
+
+// sbLock serializes writers of one project (O_EXCL lock file; a lock older
+// than 10 minutes is stale).
+func sbLock(out string) (func(), error) {
+	if err := os.MkdirAll(sbMetaDir(out), 0o755); err != nil {
+		return nil, err
+	}
+	p := filepath.Join(sbMetaDir(out), "lock")
+	for i := 0; i < 2; i++ {
+		f, err := os.OpenFile(p, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err == nil {
+			fmt.Fprintf(f, "%d %s\n", os.Getpid(), time.Now().Format(time.RFC3339))
+			f.Close()
+			return func() { os.Remove(p) }, nil
+		}
+		if st, serr := os.Stat(p); serr == nil && time.Since(st.ModTime()) > 10*time.Minute {
+			os.Remove(p)
+			continue
+		}
+		return nil, fmt.Errorf("another sch-build/sch-edit is writing %s (lock %s)", out, p)
+	}
+	return nil, fmt.Errorf("cannot lock %s", out)
 }
 
 // sbPlan is the --dry-run output: everything that would be drawn.
@@ -171,8 +265,16 @@ func (r *sbReport) gate(name, status, detail string, data any) {
 // ── build ───────────────────────────────────────────────────────────────────
 
 type sbEditCtx struct {
-	Rename  map[string]string // old net → new net (cached layouts relabel)
+	Rename  map[string]string   // old net → new net (cached layouts relabel)
+	ZoneAt  map[string]kicad.Pt // zone → frame top-left (mm)
 	Summary any
+}
+
+func (ec *sbEditCtx) zoneAt() map[string]kicad.Pt {
+	if ec == nil {
+		return nil
+	}
+	return ec.ZoneAt
 }
 
 func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
@@ -190,7 +292,21 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 	}
 	st, _ := loadSbState(out)
 	if st == nil || o.Fresh {
+		old := st
 		st = newSbState()
+		if old != nil {
+			st.Files = old.Files // still owned: replaced or removed on commit
+		}
+	}
+	startSHA := sbProjectSHA(out, st)
+	if !o.DryRun {
+		unlock, err := sbLock(out)
+		if err != nil {
+			rep.OK = false
+			rep.Error = &sbFailure{Code: "LOCKED", Message: err.Error(), Fix: "wait for the other writer, or delete the stale lock file"}
+			return rep, nil
+		}
+		defer unlock()
 	}
 	name := o.Name
 	if name == "" {
@@ -200,12 +316,26 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 		name = st.Name
 	}
 	if name == "" {
-		name = sbSanitize(filepath.Base(out))
+		name = filepath.Base(out)
+	}
+	name = strings.Trim(sbSanitize(name), "._-") // file names below --out come from it
+	if name == "" {
+		name = "pcbpilot"
 	}
 	if name == "" {
 		name = "pcbpilot"
 	}
 	st.Name, rep.Name = name, name
+	waivers, err := loadWaivers(o.Waivers)
+	if err != nil {
+		return rep, err
+	}
+	if len(o.Requirements) > 0 && o.NoReview && !hasWaiver(waivers, "design-review", noReviewMatch) {
+		rep.OK = false
+		rep.Error = &sbFailure{Code: "REVIEW_WAIVER_REQUIRED", Message: "--no-review with --requirements skips the schematic design review",
+			Fix: `add a signed waiver to --waivers: {"gate":"design-review","match":"--no-review","reason":…,"by":…}, or drop --no-review`}
+		return rep, nil
+	}
 
 	d, rs, err := buildDesign(spec, sbResolveOpts{OutDir: out, Offline: o.Offline, Jobs: o.Jobs, PartsPath: o.PartsPath})
 	rep.Resolve = rs
@@ -237,7 +367,7 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 			reuse[id] = &l
 		}
 	}
-	layouts, notes := layoutZones(d, zis, reuse, sbLayoutOpts{NoPlanner: o.NoPlanner, Budget: o.PlannerBudget, Jobs: o.Jobs})
+	layouts, notes := layoutZones(d, zis, reuse, sbLayoutOpts{NoPlanner: o.NoPlanner, Budget: o.PlannerBudget, Jobs: o.Jobs, Timeout: o.PlannerTimeout})
 	rep.Warnings = append(rep.Warnings, notes...)
 	for _, zi := range zis {
 		if layouts[zi.Zone.ID] == nil {
@@ -259,6 +389,10 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 			ids = append(ids, zi.Zone.ID)
 			if zs := st.Zones[zi.Zone.ID]; zs != nil && zs.Page == pg.ID && !o.Fresh {
 				keep[zi.Zone.ID] = zs.T
+			}
+			if at, ok := ec.zoneAt()[zi.Zone.ID]; ok { // sch-edit move_zone --at: frame top-left
+				b := layouts[zi.Zone.ID].Box
+				keep[zi.Zone.ID] = kicad.Pt{X: sbSnap(at.X + sbZoneMargin - b.MinX), Y: sbSnap(at.Y + sbZoneMargin + sbZoneTitle - b.MinY)}
 			}
 		}
 		for id, t := range packZones(ids, layouts, keep) {
@@ -335,6 +469,7 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 	diff := compareSbNetlist(d, nl)
 	if !diff.Equal {
 		rep.gate("netlist", "fail", diff.summary(), diff)
+		rep.Error = &sbFailure{Code: "NETLIST_MISMATCH", Message: diff.summary(), Fix: "nothing was written; this is a pcbpilot drawing bug — report it with the failed build, or retry with --no-planner"}
 		failed := filepath.Join(sbMetaDir(out), "failed")
 		_ = os.RemoveAll(failed)
 		if err := copySbFiles(stage, failed, append(files, "erc.json")); err == nil {
@@ -375,8 +510,33 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 		rep.gate("page-fit", "pass", strings.Join(sizes, " "), nil)
 	}
 	lay := sbQualityCheck(stage, files)
-	rep.Gates = append(rep.Gates, lay)
+	rep.gate(lay.Name, lay.Status, lay.Detail, lay.Data)
 	tm.mark("checks")
+	// hard gates are transactional: ERC errors, quality findings or a page
+	// that does not fit leave --out untouched
+	if !rep.OK {
+		var bad []string
+		for _, g := range rep.Gates {
+			if g.Status == "fail" {
+				bad = append(bad, g.Name+": "+g.Detail)
+			}
+		}
+		failed := filepath.Join(sbMetaDir(out), "failed")
+		_ = os.RemoveAll(failed)
+		if err := copySbFiles(stage, failed, append(files, "erc.json")); err == nil {
+			rep.Outputs["failedBuild"] = failed
+		}
+		rep.Timings, rep.TotalMs = tm.Steps, tm.total()
+		rep.Error = &sbFailure{Code: "GATE_FAILED", Message: strings.Join(bad, "; "),
+			Fix: "nothing was written; fix the spec (or zone/page split) and rebuild — the failed project is in " + failed}
+		return rep, nil
+	}
+	// compare-and-swap: the project must not have changed while we built
+	if err := sbCheckUnchanged(out, st, startSHA); err != nil {
+		rep.OK = false
+		rep.Error = &sbFailure{Code: "CONCURRENT_CHANGE", Message: err.Error(), Fix: "re-run: another writer changed the project during this build"}
+		return rep, nil
+	}
 
 	// commit
 	if err := os.MkdirAll(out, 0o755); err != nil {
@@ -384,7 +544,9 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 	}
 	for _, f := range st.Files { // files a previous build wrote that this one does not
 		if !sbContains(files, f) {
-			_ = os.Remove(filepath.Join(out, f))
+			if p, err := sbSafeJoin(out, f); err == nil {
+				_ = os.Remove(p)
+			}
 		}
 	}
 	if err := copySbFiles(stage, out, append(files, "erc.json")); err != nil {
@@ -400,6 +562,7 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 		}
 	}
 	rep.Outputs["erc"] = filepath.Join(out, "erc.json")
+	rep.PartBoxes = sbPartBoxes(out, files)
 	tm.mark("commit")
 
 	// connectivity.json + intent
@@ -477,6 +640,11 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 		rep.Warnings = append(rep.Warnings, "checkpoint: "+err.Error())
 	}
 	rep.Checkpoint = n
+	sbReviewGate(rep, o, out, waivers)
+	tm.mark("review")
+	if n > 1 {
+		rep.Undo = fmt.Sprintf("pcbpilot kicad sch-checkpoint restore %d --project %s", n-1, out)
+	}
 	tm.mark("state+checkpoint")
 	rep.Timings, rep.TotalMs = tm.Steps, tm.total()
 	rep.Next = []string{
@@ -485,6 +653,58 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 		"pcbpilot kicad sch-read --project " + out + " (compact parts/nets JSON)",
 	}
 	return rep, nil
+}
+
+// sbReviewGate is the schematic design review (review-panel, stage
+// schematic) on the project requirements: on by default when --requirements
+// is given; --no-review needs a signed waiver (checked before the build).
+func sbReviewGate(rep *sbReport, o sbOptions, out string, waivers []gateWaiver) {
+	if len(o.Requirements) == 0 {
+		rep.gate("design-review", "skip", "no --requirements given (the review judges the schematic against the project requirement documents)", nil)
+		return
+	}
+	if o.NoReview {
+		rep.gate("design-review", "pass", "skipped by --no-review under a signed waiver", nil)
+		return
+	}
+	var ev []string
+	for _, k := range []string{"connectivity", "values", "intentSpec", "intentReport", "erc"} {
+		if p := rep.Outputs[k]; p != "" {
+			ev = append(ev, p)
+		}
+	}
+	ev = append(ev, filepath.Join(sbMetaDir(out), "spec.json"))
+	var reviewers []string
+	for _, r := range strings.Split(o.Reviewers, ",") {
+		if r = strings.TrimSpace(r); r != "" {
+			reviewers = append(reviewers, r)
+		}
+	}
+	dir := filepath.Join(out, "review-schematic")
+	if sha, err := reviewInputSHA("schematic", o.Requirements, ev, reviewMaxBytes); err == nil {
+		var old reviewRecord
+		if b, err := os.ReadFile(filepath.Join(dir, "review.json")); err == nil && json.Unmarshal(b, &old) == nil &&
+			old.Stage == "schematic" && old.InputSHA256 == sha && old.Gate.Pass {
+			rep.Outputs["review"] = filepath.Join(dir, "review.json")
+			rep.gate("design-review", "pass", "reused "+filepath.Join(dir, "review.json")+" (same inputs): "+old.Gate.Detail, nil)
+			return
+		}
+	}
+	timeout := o.ReviewTimeout
+	if timeout <= 0 {
+		timeout = 20 * time.Minute
+	}
+	rec, err := runReviewPanel("schematic", o.Requirements, ev, reviewers, dir, timeout, reviewMaxBytes, waivers, io.Discard)
+	if err != nil {
+		rep.gate("design-review", "fail", "review-panel: "+err.Error(), nil)
+		return
+	}
+	rep.Outputs["review"] = filepath.Join(dir, "review.json")
+	status := "pass"
+	if !rec.Gate.Pass {
+		status = "fail"
+	}
+	rep.gate("design-review", status, rec.Gate.Detail, rec.Gate.Items)
 }
 
 func (ec *sbEditCtx) renameMap() map[string]string {
@@ -512,7 +732,49 @@ func sbLastLine(s string) string {
 
 // ── rendering ───────────────────────────────────────────────────────────────
 
-func sbSheetFile(page string) string { return sbSanitize(page) + ".kicad_sch" }
+func sbSheetFile(page string) string {
+	n := sbSanitize(page)
+	if n == "" {
+		n = "page-" + sbShortHash(page)
+	}
+	return n + ".kicad_sch"
+}
+
+// sbSafeName reports whether s is a plain file-name component: a safe
+// charset, no path separator, no "..", not empty.
+func sbSafeName(s string) bool {
+	if s == "" || s == "." || strings.Contains(s, "..") || len(s) > 200 {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '-' || r == '_' || r == '.' || r == '+' || r == '(' || r == ')' || r == ' ' || r == ',' || r == '=':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// sbSafeJoin joins rel below base and refuses anything that escapes it
+// (absolute paths, "..", separators smuggled through spec fields).
+func sbSafeJoin(base, rel string) (string, error) {
+	if rel == "" || filepath.IsAbs(rel) || strings.Contains(rel, "\\") {
+		return "", fmt.Errorf("unsafe path %q", rel)
+	}
+	for _, part := range strings.Split(rel, "/") {
+		if !sbSafeName(part) {
+			return "", fmt.Errorf("unsafe path %q", rel)
+		}
+	}
+	target := filepath.Join(base, filepath.FromSlash(rel))
+	r, err := filepath.Rel(base, target)
+	if err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) || filepath.IsAbs(r) {
+		return "", fmt.Errorf("path %q escapes %s", rel, base)
+	}
+	return target, nil
+}
 
 // writeSbProject renders every sheet and writes the project into dir.
 // Returns the written files (relative) and each sheet's fit result.
@@ -525,7 +787,10 @@ func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layou
 	fits := map[string]kicad.FitResult{}
 	var files []string
 	write := func(rel string, data []byte) error {
-		p := filepath.Join(dir, rel)
+		p, err := sbSafeJoin(dir, rel)
+		if err != nil {
+			return err
+		}
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 			return err
 		}
@@ -684,6 +949,9 @@ func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layou
 		if p.LibName == "" {
 			continue
 		}
+		if !sbSafeName(p.LibName) || strings.ContainsAny(p.LibName, " ") {
+			return nil, nil, fmt.Errorf("%s: library nickname %q is not a safe file name", p.Ref, p.LibName)
+		}
 		if libs[p.LibName] == nil {
 			libs[p.LibName] = map[string]string{}
 		}
@@ -712,7 +980,10 @@ func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layou
 			continue
 		}
 		lib, fp, _ := strings.Cut(p.Footprint, ":")
-		rel := filepath.Join(lib+".pretty", fp+".kicad_mod")
+		if !sbSafeName(lib) || !sbSafeName(fp) {
+			return nil, nil, fmt.Errorf("%s: footprint %q is not a safe file name", p.Ref, p.Footprint)
+		}
+		rel := lib + ".pretty/" + fp + ".kicad_mod"
 		if sbContains(files, rel) {
 			continue
 		}
@@ -835,10 +1106,7 @@ func renderSbPage(e *kicad.SchEditor, d *sbDesign, st *sbState, pg sbPage, zis [
 		for _, mk := range zl.Markers {
 			at := mv(mk.At)
 			if mk.OnWire {
-				ang := 0.0
-				if mk.Dir == "up" {
-					ang = 90
-				}
+				ang := map[string]float64{"right": 0, "up": 90, "left": 180, "down": 270}[mk.Dir]
 				kind := kicad.LabelLocal
 				if len(d.NetPages[mk.Net]) > 1 {
 					kind = kicad.LabelGlobal
@@ -939,14 +1207,21 @@ func sbOnInterior(p kicad.Pt, s [2]kicad.Pt) bool {
 
 func copySbFiles(from, to string, files []string) error {
 	for _, f := range files {
-		b, err := os.ReadFile(filepath.Join(from, f))
+		src, err := sbSafeJoin(from, f)
+		if err != nil {
+			return err
+		}
+		b, err := os.ReadFile(src)
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue
 			}
 			return err
 		}
-		dst := filepath.Join(to, f)
+		dst, err := sbSafeJoin(to, f)
+		if err != nil {
+			return err
+		}
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			return err
 		}
@@ -1080,7 +1355,11 @@ func sbQualityCheck(dir string, files []string) sbGate {
 		if !strings.HasSuffix(f, ".kicad_sch") {
 			continue
 		}
-		b, err := os.ReadFile(filepath.Join(dir, f))
+		fp, err := sbSafeJoin(dir, f)
+		if err != nil {
+			return sbGate{Name: "quality", Status: "fail", Detail: err.Error()}
+		}
+		b, err := os.ReadFile(fp)
 		if err != nil {
 			return sbGate{Name: "quality", Status: "fail", Detail: err.Error()}
 		}

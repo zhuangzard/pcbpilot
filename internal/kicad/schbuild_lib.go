@@ -77,7 +77,7 @@ type CachedPart struct {
 
 // SymbolText is the cached `(symbol "Name" …)` text.
 func (c *CachedPart) SymbolText() (string, error) {
-	return LibSymbolFromFile(filepath.Join(c.Dir, "lcsc.kicad_sym"), c.SymbolName)
+	return LibSymbolCached(filepath.Join(c.Dir, "lcsc.kicad_sym"), c.SymbolName)
 }
 
 // FootprintFile is the cached .kicad_mod path.
@@ -320,11 +320,17 @@ var libFileCache = struct {
 	m map[string]map[string]string
 }{m: map[string]map[string]string{}}
 
-// LibSymbolCached is LibSymbolFromFile with the library parsed once per
-// process (KiCad's stock libraries are megabytes).
+// LibSymbolCached is LibSymbolFromFile with each library parsed once per
+// (path, mtime, size) — KiCad's stock libraries are megabytes; a rewritten
+// project library is parsed again.
 func LibSymbolCached(path, name string) (string, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	key := fmt.Sprintf("%s\x00%d\x00%d", path, fi.ModTime().UnixNano(), fi.Size())
 	libFileCache.Lock()
-	syms, ok := libFileCache.m[path]
+	syms, ok := libFileCache.m[key]
 	libFileCache.Unlock()
 	if !ok {
 		b, err := os.ReadFile(path)
@@ -343,19 +349,15 @@ func LibSymbolCached(path, name string) (string, error) {
 			}
 		}
 		libFileCache.Lock()
-		libFileCache.m[path] = syms
+		libFileCache.m[key] = syms
 		libFileCache.Unlock()
 	}
 	t, ok := syms[name]
 	if !ok {
 		return "", fmt.Errorf("symbol %q not in %s", name, path)
 	}
+	if n, err := parseSx(t); err == nil && n.child("extends") != nil {
+		return "", fmt.Errorf("%s:%s extends another symbol (not supported; flatten it in the symbol editor)", path, name)
+	}
 	return t, nil
-}
-
-// ForgetLibFile drops a library from the parse cache (after it changed).
-func ForgetLibFile(path string) {
-	libFileCache.Lock()
-	delete(libFileCache.m, path)
-	libFileCache.Unlock()
 }

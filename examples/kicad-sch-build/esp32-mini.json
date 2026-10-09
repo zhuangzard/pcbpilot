@@ -42,7 +42,7 @@
     {"name": "USB_VBUS", "pins": ["D1:A"], "kind": "power"},
     {"name": "+5V_TERM", "pins": ["J2:1", "D2:A"]},
     {"name": "VSYS_5V", "pins": ["D1:K", "D2:K"]},
-    {"name": "GND", "pins": ["J2:2", "J1:EH"]},
+    {"name": "GND", "pins": ["J2:2"]},
     {"name": "LED_CTRL", "pins": ["U3:IO2"]}
   ],
   "rails": [

@@ -34,16 +34,16 @@ const sbSchema = "pcbpilot.kicad.sch-build/1"
 
 // sbSpec is the only thing the AI writes.
 type sbSpec struct {
-	Schema    string           `json:"schema,omitempty"`
-	Name      string           `json:"name,omitempty"`
-	Title     sbTitle          `json:"title,omitempty"`
-	Pages     []sbPage         `json:"pages,omitempty"`
-	Zones     []sbZone         `json:"zones,omitempty"`
-	Parts     []sbPart         `json:"parts"`
-	Blocks    []sbBlock        `json:"blocks,omitempty"`
-	Nets      []sbNet          `json:"nets"`
-	Rails     []sbRail         `json:"rails,omitempty"`
-	NoConnect []string         `json:"noConnect,omitempty"`
+	Schema    string    `json:"schema,omitempty"`
+	Name      string    `json:"name,omitempty"`
+	Title     sbTitle   `json:"title,omitempty"`
+	Pages     []sbPage  `json:"pages,omitempty"`
+	Zones     []sbZone  `json:"zones,omitempty"`
+	Parts     []sbPart  `json:"parts"`
+	Blocks    []sbBlock `json:"blocks,omitempty"`
+	Nets      []sbNet   `json:"nets"`
+	Rails     []sbRail  `json:"rails,omitempty"`
+	NoConnect []string  `json:"noConnect,omitempty"`
 	// UnusedPins: "nc" (default) puts a no-connect flag on every pin no net
 	// names; "open" leaves them (ERC then reports pin_not_connected).
 	UnusedPins string   `json:"unusedPins,omitempty"`
@@ -78,10 +78,11 @@ type sbPage struct {
 }
 
 type sbZone struct {
-	ID    string `json:"id"`
-	Title string `json:"title,omitempty"`
-	Page  string `json:"page,omitempty"`
-	Core  string `json:"core,omitempty"`
+	ID    string    `json:"id"`
+	Title string    `json:"title,omitempty"`
+	Page  string    `json:"page,omitempty"`
+	Core  string    `json:"core,omitempty"`
+	BBox  []float64 `json:"bboxMm,omitempty"` // informational (sch-read)
 }
 
 type sbPart struct {
@@ -96,9 +97,15 @@ type sbPart struct {
 	Pins      []sbPin           `json:"pins,omitempty"`
 	Fields    map[string]string `json:"fields,omitempty"`
 	DNP       bool              `json:"dnp,omitempty"`
+	// Near is a placement relation (never coordinates): "U2:VIN" puts the
+	// part beside that pin, joined by a short wire when they share a net.
+	Near string `json:"near,omitempty"`
 	// Block / Role trace a part back to the block instance it came from.
 	Block string `json:"block,omitempty"`
 	Role  string `json:"role,omitempty"`
+	// BBox is informational (sch-read output: minX,minY,maxX,maxY mm on
+	// its sheet); the build ignores it.
+	BBox []float64 `json:"bboxMm,omitempty"`
 }
 
 type sbPin struct {
@@ -125,9 +132,6 @@ type sbNet struct {
 	Kind     string   `json:"kind,omitempty"` // power | ground | signal (default: by name)
 	VoltageV float64  `json:"voltage,omitempty"`
 	CurrentA float64  `json:"currentA,omitempty"`
-	// Soft pins (from blocks) may be absent from the LCSC symbol (an EPAD
-	// the EasyEDA device had); they are dropped with a warning.
-	Soft []string `json:"-"`
 }
 
 type sbRail struct {
@@ -245,6 +249,49 @@ func (p *sbRPart) resolvePins(tok string) ([]string, error) {
 	return nil, fmt.Errorf("%s has no pin %q (pins: %s)", p.Ref, tok, strings.Join(names, " "))
 }
 
+// sbPadNames are the names an exposed / thermal pad or a shield goes by.
+var sbPadNames = []string{"EP", "EPAD", "PAD", "TAB", "EH", "SHELL", "SH", "THERMAL", "GNDPAD", "MH"}
+
+// padAlias resolves a thermal-pad / shield pin a block names (EP*, EPAD)
+// on a symbol that calls it differently (EH shell pins of a USB-C, the
+// numbered pad): pins named like a pad, or — on a ground net — a pad the
+// symbol already merged into its GND pins (note says which).
+func (p *sbRPart) padAlias(tok, net string, pinNet map[string]string) ([]string, string) {
+	t := strings.ToUpper(strings.TrimRight(tok, "*"))
+	isPad := false
+	for _, a := range sbPadNames {
+		isPad = isPad || t == a || strings.HasPrefix(t, a)
+	}
+	if !isPad {
+		return nil, ""
+	}
+	var nums []string
+	for _, q := range p.LPins {
+		n := strings.ToUpper(q.Name)
+		for _, a := range sbPadNames {
+			if n == a || (len(n) > len(a) && strings.HasPrefix(n, a) && n[len(a)] >= '0' && n[len(a)] <= '9') {
+				nums = append(nums, q.Number)
+				break
+			}
+		}
+	}
+	if len(nums) > 0 {
+		return nums, fmt.Sprintf("→ pad pins %s", strings.Join(nums, ","))
+	}
+	if kicad.IsGroundNet(net) {
+		var gnd []string
+		for _, q := range p.LPins {
+			if kicad.IsGroundNet(q.Name) {
+				gnd = append(gnd, q.Number)
+			}
+		}
+		if len(gnd) > 0 {
+			return gnd, fmt.Sprintf("→ the symbol has no separate pad; its GND pins %s carry it (check the footprint's exposed pad is GND)", strings.Join(gnd, ","))
+		}
+	}
+	return nil, ""
+}
+
 func sbPinLess(a, b string) bool {
 	var ai, bi int
 	_, ea := fmt.Sscanf(a, "%d", &ai)
@@ -356,6 +403,15 @@ func expandBlocks(s *sbSpec, partsPath string) error {
 			s.Parts = append(s.Parts, sbPart{Ref: pl.Designator, Value: val, LCSC: lcsc, MPN: mpn, Symbol: sb.Symbols[pl.Role],
 				Zone: zone, Page: sb.Page, Block: b.ID + "#" + plan.Instance, Role: pl.Role})
 		}
+		roleKey := map[string]string{}
+		for _, pl := range plan.Placements {
+			roleKey[pl.Designator] = pl.PartKey
+		}
+		for i := range plan.Nets {
+			if plan.Nets[i].Port == "" { // instance-internal: a readable name from its pins
+				plan.Nets[i].Net = sbReadableNet(plan.Instance, plan.Nets[i].Members, roleKey, netIdx)
+			}
+		}
 		for _, n := range plan.Nets {
 			var pins []string
 			for _, m := range n.Members {
@@ -368,20 +424,101 @@ func expandBlocks(s *sbSpec, partsPath string) error {
 			case "power":
 				kind = "power"
 			}
-			if i, ok := netIdx[n.Net]; ok {
+			if i, ok := netIdx[n.Net]; ok && i >= 0 {
 				s.Nets[i].Pins = append(s.Nets[i].Pins, pins...)
-				s.Nets[i].Soft = append(s.Nets[i].Soft, pins...)
 				if s.Nets[i].Kind == "" {
 					s.Nets[i].Kind = kind
 				}
 				continue
 			}
 			netIdx[n.Net] = len(s.Nets)
-			s.Nets = append(s.Nets, sbNet{Name: n.Net, Pins: pins, Kind: kind, Soft: pins})
+			s.Nets = append(s.Nets, sbNet{Name: n.Net, Pins: pins, Kind: kind})
 		}
 	}
 	s.Blocks = nil
 	return nil
+}
+
+// sbPinWord turns a pin name into a net-name word (D+ → DP, LX → SW, + → A).
+func sbPinWord(pin string) string {
+	switch strings.ToUpper(strings.TrimRight(pin, "*")) {
+	case "D+", "DP", "USB_DP":
+		return "DP"
+	case "D-", "DM", "DN", "USB_DM", "USB_DN":
+		return "DN"
+	case "LX", "SW", "PH":
+		return "SW"
+	case "+":
+		return "A"
+	case "-":
+		return "K"
+	}
+	var b strings.Builder
+	for _, r := range strings.ToUpper(pin) {
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+var sbTransistorPin = map[string]string{"B": "BASE", "E": "EMITTER", "C": "COLLECTOR", "G": "GATE", "D": "DRAIN", "S": "SOURCE"}
+
+// sbReadableNet names a block-internal net from its pins instead of the
+// planner's INSTANCE_Nk: the IC pin (USB_DP, BUCK_SW, BUCK_FB), a
+// transistor terminal (Q1_BASE), a connector pin (USB_CC1), else REF_PIN.
+func sbReadableNet(inst string, members []string, partKey map[string]string, taken map[string]int) string {
+	rank := func(desig string) int {
+		pre, _ := bapPrefixFor(partKey[desig])
+		switch pre {
+		case "U":
+			return 0
+		case "Q":
+			return 1
+		case "J":
+			return 2
+		case "D", "LED":
+			return 3
+		}
+		return 4
+	}
+	ms := append([]string(nil), members...)
+	sort.SliceStable(ms, func(i, j int) bool {
+		di, _, _ := strings.Cut(ms[i], ":")
+		dj, _, _ := strings.Cut(ms[j], ":")
+		if rank(di) != rank(dj) {
+			return rank(di) < rank(dj)
+		}
+		return ms[i] < ms[j]
+	})
+	name := ""
+	if len(ms) > 0 {
+		desig, pin, _ := strings.Cut(ms[0], ":")
+		w := sbPinWord(pin)
+		switch r := rank(desig); {
+		case r == 1:
+			if t, ok := sbTransistorPin[strings.ToUpper(pin)]; ok {
+				w = t
+			}
+			name = desig + "_" + w
+		case (r == 0 || r == 2) && w != "" && (w[0] < '0' || w[0] > '9'):
+			name = strings.ToUpper(inst) + "_" + w
+		default:
+			name = desig + "_" + w
+		}
+	}
+	if name == "" || strings.HasSuffix(name, "_") {
+		name = strings.ToUpper(inst) + "_NET"
+	}
+	base := name
+	for k := 2; ; k++ {
+		if _, used := taken[name]; !used {
+			break
+		}
+		name = fmt.Sprintf("%s_%d", base, k)
+	}
+	taken[name] = -1 // reserved; the real index is set when the net is added
+	return name
 }
 
 // ── symbol resolution ───────────────────────────────────────────────────────
@@ -413,13 +550,13 @@ func sbFindSymbol(id string, dirs []string) (text, file string, stock bool, err 
 		return "", "", false, fmt.Errorf("symbol %q: want Lib:Name", id)
 	}
 	if strings.HasSuffix(lib, ".kicad_sym") { // explicit file path
-		t, err := kicad.LibSymbolFromFile(lib, name)
+		t, err := kicad.LibSymbolCached(lib, name)
 		return t, lib, false, err
 	}
 	for _, d := range dirs {
 		f := filepath.Join(d, lib+".kicad_sym")
 		if _, err := os.Stat(f); err == nil {
-			if t, err := kicad.LibSymbolFromFile(f, name); err == nil {
+			if t, err := kicad.LibSymbolCached(f, name); err == nil {
 				return t, f, false, nil
 			}
 		}
@@ -448,15 +585,21 @@ func sbRefPrefix(ref string) string {
 // resolveSymbols gives every part a library symbol: an explicit symbol, the
 // LCSC conversion (cache, then network import in parallel), or a generated
 // box from the spec pin list.
-func resolveSymbols(parts []*sbRPart, opts sbResolveOpts, libDirs []string) (sbResolveStats, error) {
-	var st sbResolveStats
+func resolveSymbols(parts []*sbRPart, opts sbResolveOpts, libDirs []string) (st sbResolveStats, rerr error) {
+	var diags []sbDiag
+	defer func() {
+		if rerr == nil && len(diags) > 0 {
+			rerr = &sbDiagErr{diags}
+		}
+	}()
 	dirs := append([]string{opts.OutDir}, libDirs...)
 	// LCSC parts without an explicit symbol: fetch distinct numbers in parallel.
 	need := map[string]bool{}
 	for _, p := range parts {
 		if p.Symbol == "" && p.LCSC != "" {
 			if !kicad.ValidLCSC(p.LCSC) {
-				return st, fmt.Errorf("%s: %q is not an LCSC number", p.Ref, p.LCSC)
+				diags = append(diags, sbDiag{Code: "LCSC_INVALID", Message: fmt.Sprintf("%s: %q is not an LCSC number", p.Ref, p.LCSC), Fix: "use C followed by digits"})
+				continue
 			}
 			need[p.LCSC] = true
 		}
@@ -512,16 +655,30 @@ func resolveSymbols(parts []*sbRPart, opts sbResolveOpts, libDirs []string) (sbR
 		case p.Symbol != "":
 			t, file, stock, err := sbFindSymbol(p.Symbol, dirs)
 			if err != nil {
-				return st, fmt.Errorf("%s: %w", p.Ref, err)
+				diags = append(diags, sbDiag{Code: "SYMBOL_NOT_FOUND", Message: fmt.Sprintf("%s: %v", p.Ref, err), Fix: "check Lib:Name, add libDirs, or give lcsc/pins"})
+				continue
 			}
 			if parent := kicad.SymbolExtends(t); parent != "" {
-				return st, fmt.Errorf("%s: symbol %s extends %s (derived symbols are not supported; use the parent, an LCSC number or a pin list)", p.Ref, p.Symbol, parent)
+				diags = append(diags, sbDiag{Code: "SYMBOL_DERIVED", Message: fmt.Sprintf("%s: symbol %s extends %s (derived symbols are not supported; use the parent, an LCSC number or a pin list)", p.Ref, p.Symbol, parent), Fix: "use the parent symbol, an LCSC number or a pin list"})
+				continue
 			}
 			lib, name, _ := strings.Cut(p.Symbol, ":")
 			if strings.HasSuffix(lib, ".kicad_sym") {
 				lib = strings.TrimSuffix(filepath.Base(lib), ".kicad_sym")
 			}
 			p.SymName, text = name, t
+			if fl, ff, ok := strings.Cut(p.Footprint, ":"); ok && p.FPFile == "" && !stock {
+				// a project library's footprint travels with the symbol
+				if f := filepath.Join(filepath.Dir(file), fl+".pretty", ff+".kicad_mod"); fileExists(f) {
+					p.FPFile = f
+				}
+			} else if p.Footprint == "" && !stock {
+				if fl, ff, ok := strings.Cut(kicad.LibSymbolProperty(t, "Footprint"), ":"); ok {
+					if f := filepath.Join(filepath.Dir(file), fl+".pretty", ff+".kicad_mod"); fileExists(f) {
+						p.Footprint, p.FPFile = fl+":"+ff, f
+					}
+				}
+			}
 			if stock {
 				p.LibID, src = lib+":"+name, "stock"
 				st.Stock++
@@ -533,7 +690,8 @@ func resolveSymbols(parts []*sbRPart, opts sbResolveOpts, libDirs []string) (sbR
 			cp := cached[p.LCSC]
 			t, err := cp.SymbolText()
 			if err != nil {
-				return st, fmt.Errorf("%s: cached %s: %w", p.Ref, p.LCSC, err)
+				diags = append(diags, sbDiag{Code: "LCSC_CACHE", Message: fmt.Sprintf("%s: cached %s: %v", p.Ref, p.LCSC, err), Fix: "delete the part's cache directory and rebuild"})
+				continue
 			}
 			p.SymName, p.LibName, p.LibID, text = cp.SymbolName, "lcsc", "lcsc:"+cp.SymbolName, t
 			if p.Footprint == "" {
@@ -560,16 +718,19 @@ func resolveSymbols(parts []*sbRPart, opts sbResolveOpts, libDirs []string) (sbR
 			text, src = kicad.GenericSymbolText(name, sbRefPrefix(p.Ref), gp), "generated"
 			st.Generated++
 		case p.LCSC != "":
-			return st, fmt.Errorf("%s: LCSC %s: %v (give \"symbol\" or \"pins\" to build without it)", p.Ref, p.LCSC, failed[p.LCSC])
+			diags = append(diags, sbDiag{Code: "LCSC_UNAVAILABLE", Message: fmt.Sprintf("%s: LCSC %s: %v (give \"symbol\" or \"pins\" to build without it)", p.Ref, p.LCSC, failed[p.LCSC]), Fix: "give symbol or pins, or retry online"})
+			continue
 		default:
-			return st, fmt.Errorf("%s: no symbol, lcsc or pins", p.Ref)
+			diags = append(diags, sbDiag{Code: "PART_NO_SYMBOL", Message: fmt.Sprintf("%s: no symbol, lcsc or pins", p.Ref), Fix: "give symbol, lcsc or pins"})
+			continue
 		}
 		if strings.HasPrefix(src, "lcsc") {
 			text = sbPassivePins(text, p.Ref)
 		}
 		pins, err := kicad.LibSymbolPins(text)
 		if err != nil {
-			return st, fmt.Errorf("%s: %w", p.Ref, err)
+			diags = append(diags, sbDiag{Code: "SYMBOL_PARSE", Message: fmt.Sprintf("%s: %v", p.Ref, err), Fix: "fix the library symbol"})
+			continue
 		}
 		units := map[int]bool{}
 		for _, q := range pins {
@@ -639,6 +800,28 @@ func sbGenName(p *sbRPart) string {
 		h += q.Number + "=" + q.Name + "/" + q.Type + ";"
 	}
 	return fmt.Sprintf("%s_%dP_%s", b.String(), len(p.Pins), sbShortHash(h))
+}
+
+// sbDiag is one spec problem with a code and the fix.
+type sbDiag struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Fix     string `json:"fix"`
+}
+
+// sbDiagErr carries every spec problem found in one pass.
+type sbDiagErr struct{ Diags []sbDiag }
+
+func (e *sbDiagErr) Error() string {
+	var s []string
+	for i, d := range e.Diags {
+		if i == 36 {
+			s = append(s, fmt.Sprintf("… %d more", len(e.Diags)-36))
+			break
+		}
+		s = append(s, d.Code+": "+d.Message)
+	}
+	return fmt.Sprintf("%d spec problem(s): %s", len(e.Diags), strings.Join(s, "; "))
 }
 
 // ── expansion + checks ──────────────────────────────────────────────────────
@@ -729,15 +912,18 @@ func buildDesign(s *sbSpec, opts sbResolveOpts) (*sbDesign, sbResolveStats, erro
 	for _, p := range d.Parts {
 		p.PageID = zonePage[p.ZoneID]
 	}
-	// nets
+	// nets: every problem is collected (one round of fixes for the AI)
+	var diags []sbDiag
 	seenNet := map[string]int{}
 	for _, n := range s.Nets {
 		name := strings.TrimSpace(n.Name)
 		if name == "" {
-			return nil, st, fmt.Errorf("a net has no name (pins %v)", n.Pins)
+			diags = append(diags, sbDiag{Code: "NET_NO_NAME", Message: fmt.Sprintf("a net has no name (pins %v)", n.Pins), Fix: "name every net"})
+			continue
 		}
 		if strings.ContainsAny(name, "\n\"") {
-			return nil, st, fmt.Errorf("net name %q has a quote or newline", name)
+			diags = append(diags, sbDiag{Code: "NET_BAD_NAME", Message: fmt.Sprintf("net name %q has a quote or newline", name), Fix: "drop quotes/newlines from the net name"})
+			continue
 		}
 		idx, merged := seenNet[name]
 		if !merged {
@@ -748,24 +934,32 @@ func buildDesign(s *sbSpec, opts sbResolveOpts) (*sbDesign, sbResolveStats, erro
 		for _, tok := range n.Pins {
 			ref, pin, ok := sbSplitPin(tok)
 			if !ok {
-				return nil, st, fmt.Errorf("net %s: bad pin %q (want REF:PIN)", name, tok)
+				diags = append(diags, sbDiag{Code: "PIN_BAD_REF", Message: fmt.Sprintf("net %s: bad pin %q (want REF:PIN)", name, tok), Fix: "write pins as REF:PIN"})
+				continue
 			}
 			p := d.ByRef[ref]
 			if p == nil {
-				return nil, st, fmt.Errorf("net %s: unknown part %s", name, ref)
+				diags = append(diags, sbDiag{Code: "PIN_UNKNOWN_PART", Message: fmt.Sprintf("net %s: unknown part %s", name, ref), Fix: "add the part or fix the ref"})
+				continue
 			}
 			nums, err := p.resolvePins(pin)
 			if err != nil {
-				if sbContains(n.Soft, tok) {
-					d.Warnings = append(d.Warnings, fmt.Sprintf("net %s: block pin %s dropped: %v", name, tok, err))
-					continue
+				if alias, note := p.padAlias(pin, name, d.PinNet); alias != nil || note != "" {
+					if note != "" {
+						d.Warnings = append(d.Warnings, fmt.Sprintf("net %s: %s %s", name, tok, note))
+					}
+					nums, err = alias, nil
 				}
-				return nil, st, fmt.Errorf("net %s: %w", name, err)
+			}
+			if err != nil {
+				diags = append(diags, sbDiag{Code: "PIN_NOT_ON_SYMBOL", Message: fmt.Sprintf("net %s: %v", name, err), Fix: "use a pin number or name the resolved symbol has (listed)"})
+				continue
 			}
 			for _, num := range nums {
 				k := sbPinKey(ref, num)
 				if prev, ok := d.PinNet[k]; ok && prev != name {
-					return nil, st, fmt.Errorf("pin %s (%s) is on two nets: %s and %s", k, tok, prev, name)
+					diags = append(diags, sbDiag{Code: "PIN_TWO_NETS", Message: fmt.Sprintf("pin %s (%s) is on two nets: %s and %s", k, tok, prev, name), Fix: "keep each pin on one net"})
+					continue
 				} else if ok {
 					continue
 				}
@@ -777,7 +971,8 @@ func buildDesign(s *sbSpec, opts sbResolveOpts) (*sbDesign, sbResolveStats, erro
 	for i := range d.Nets {
 		n := &d.Nets[i]
 		if len(n.Pins) == 0 {
-			return nil, st, fmt.Errorf("net %s has no pins", n.Name)
+			diags = append(diags, sbDiag{Code: "NET_NO_PINS", Message: fmt.Sprintf("net %s has no pins", n.Name), Fix: "give the net pins or remove it"})
+			continue
 		}
 		d.NetKind[n.Name] = netKindOf(*n)
 		d.NetPages[n.Name] = map[string]bool{}
@@ -788,7 +983,8 @@ func buildDesign(s *sbSpec, opts sbResolveOpts) (*sbDesign, sbResolveStats, erro
 	}
 	for _, r := range s.Rails {
 		if _, ok := seenNet[r.Net]; !ok {
-			return nil, st, fmt.Errorf("rails: net %s is not in nets", r.Net)
+			diags = append(diags, sbDiag{Code: "RAIL_UNKNOWN_NET", Message: fmt.Sprintf("rails: net %s is not in nets", r.Net), Fix: "declare the rail's net in nets"})
+			continue
 		}
 		if d.NetKind[r.Net] == "signal" {
 			d.NetKind[r.Net] = "power"
@@ -800,19 +996,30 @@ func buildDesign(s *sbSpec, opts sbResolveOpts) (*sbDesign, sbResolveStats, erro
 	for _, tok := range s.NoConnect {
 		ref, pin, ok := sbSplitPin(tok)
 		if !ok || d.ByRef[ref] == nil {
-			return nil, st, fmt.Errorf("noConnect: bad pin %q", tok)
+			diags = append(diags, sbDiag{Code: "NC_BAD_PIN", Message: fmt.Sprintf("noConnect: bad pin %q", tok), Fix: "write REF:PIN"})
+			continue
 		}
 		nums, err := d.ByRef[ref].resolvePins(pin)
 		if err != nil {
-			return nil, st, fmt.Errorf("noConnect: %w", err)
+			diags = append(diags, sbDiag{Code: "NC_BAD_PIN", Message: fmt.Sprintf("noConnect: %v", err), Fix: "use a pin the symbol has"})
+			continue
 		}
 		for _, num := range nums {
 			k := sbPinKey(ref, num)
 			if n, ok := d.PinNet[k]; ok {
-				return nil, st, fmt.Errorf("noConnect %s: pin is on net %s", tok, n)
+				diags = append(diags, sbDiag{Code: "NC_ON_NET", Message: fmt.Sprintf("noConnect %s: pin is on net %s", tok, n), Fix: "remove the pin from the net or from noConnect"})
+				continue
 			}
 			d.NC[k] = true
 		}
+	}
+	for _, n := range d.Nets {
+		if len(n.Pins) == 1 {
+			d.Warnings = append(d.Warnings, fmt.Sprintf("NET_SINGLE_PIN: net %s has one pin (%s) — a test point or a missing connection?", n.Name, n.Pins[0]))
+		}
+	}
+	if len(diags) > 0 {
+		return nil, st, &sbDiagErr{diags}
 	}
 	switch s.UnusedPins {
 	case "", "nc":
@@ -845,7 +1052,7 @@ func (d *sbDesign) normalizedSpec() *sbSpec {
 	s.Parts = nil
 	for _, p := range d.Parts {
 		sp := p.sbPart
-		sp.Zone, sp.Page = p.ZoneID, ""
+		sp.Zone, sp.Page, sp.BBox = p.ZoneID, "", nil
 		if sp.Symbol == "" && p.Source == "generated" {
 			// keep the pins: the generated symbol is rebuilt from them
 		} else if sp.Symbol == "" && p.LibID != "" && !strings.HasPrefix(p.Source, "lcsc") {
@@ -853,7 +1060,11 @@ func (d *sbDesign) normalizedSpec() *sbSpec {
 		}
 		s.Parts = append(s.Parts, sp)
 	}
-	s.Zones = d.Zones
+	s.Zones = nil
+	for _, z := range d.Zones {
+		z.BBox = nil
+		s.Zones = append(s.Zones, z)
+	}
 	s.Pages = d.Pages
 	s.Nets = nil
 	for _, n := range d.Nets {
@@ -891,6 +1102,31 @@ type sbOptions struct {
 	PartsPath                      string
 	Jobs                           int
 	PlannerBudget                  int
+	PlannerTimeout                 time.Duration
+	Requirements                   []string
+	Reviewers, Waivers             string
+	NoReview                       bool
+	ReviewTimeout                  time.Duration
+}
+
+// sbFlags registers the options sch-build and sch-edit share.
+func sbFlags(c *cobra.Command, o *sbOptions) {
+	f := c.Flags()
+	f.StringVar(&o.Report, "report", "", "also write the report JSON here")
+	f.BoolVar(&o.DryRun, "dry-run", false, "print the full plan (parts, zones, coordinates, connections, gates) and write nothing")
+	f.BoolVar(&o.Offline, "offline", false, "never use the network (LCSC parts must be cached, else use pins)")
+	f.BoolVar(&o.NoIntent, "no-intent", false, "skip intent derive (connectivity.json is still written)")
+	f.BoolVar(&o.Analog, "analog", false, "run the analog SPICE step inside intent derive (slower)")
+	f.BoolVar(&o.NoPlanner, "no-planner", false, "skip the layout planner (grid + autoconnect for every zone)")
+	f.StringVar(&o.PartsPath, "parts", "", "standard-parts.json for blocks (default: the installed skill's)")
+	f.IntVar(&o.Jobs, "jobs", 8, "parallel LCSC imports / zone plans")
+	f.IntVar(&o.PlannerBudget, "planner-budget", 20000, "layout planner candidate budget per zone (bounds one planner run)")
+	f.DurationVar(&o.PlannerTimeout, "planner-timeout", 20*time.Second, "wall-time budget of the layout stage: zones not started by then use the grid")
+	f.StringArrayVar(&o.Requirements, "requirements", nil, "project requirement document(s): the schematic design review (review-panel, stage schematic) runs on them")
+	f.StringVar(&o.Reviewers, "review", "codex,kimi,claude", "design-review reviewer CLIs (all must pass); runs when --requirements is given")
+	f.BoolVar(&o.NoReview, "no-review", false, "skip the design review despite --requirements; needs a signed waiver {\"gate\":\"design-review\",\"match\":\"--no-review\"} in --waivers")
+	f.StringVar(&o.Waivers, "waivers", "", "JSON list of signed waivers [{gate,match,reason,by}]")
+	f.DurationVar(&o.ReviewTimeout, "review-timeout", 20*time.Minute, "per-reviewer time limit")
 }
 
 func newKicadSchBuildCmd(stdout, stderr io.Writer) *cobra.Command {
@@ -955,16 +1191,8 @@ with kicad sch-edit, read it compactly with kicad sch-read.`,
 	f.StringArrayVar(&o.FromConn, "from-connectivity", nil, "EasyEDA connectivity IR 1.4 JSON (repeat: one per page)")
 	f.StringVar(&o.OutDir, "out", "", "project directory to write")
 	f.StringVar(&o.Name, "name", "", "project name (default: spec name, else the --out directory name)")
-	f.StringVar(&o.Report, "report", "", "also write the report JSON here (default <out>/sch-build-report.json)")
-	f.BoolVar(&o.DryRun, "dry-run", false, "print the full plan (parts, zones, coordinates, connections, gates) and write nothing")
-	f.BoolVar(&o.Offline, "offline", false, "never use the network (LCSC parts must be cached, else use pins)")
-	f.BoolVar(&o.NoIntent, "no-intent", false, "skip intent derive (connectivity.json is still written)")
-	f.BoolVar(&o.Analog, "analog", false, "run the analog SPICE step inside intent derive (slower)")
 	f.BoolVar(&o.Fresh, "fresh", false, "ignore the layout/uuid state of an existing build in --out")
-	f.BoolVar(&o.NoPlanner, "no-planner", false, "skip the layout planner (grid + autoconnect for every zone)")
-	f.StringVar(&o.PartsPath, "parts", "", "standard-parts.json for blocks (default: the installed skill's)")
-	f.IntVar(&o.Jobs, "jobs", 8, "parallel LCSC imports / zone plans")
-	f.IntVar(&o.PlannerBudget, "planner-budget", 20000, "layout planner candidate budget per zone")
+	sbFlags(c, &o)
 	return c
 }
 
@@ -1099,10 +1327,6 @@ func sbSanitize(s string) string {
 			b.WriteRune(r)
 		case r == ' ' || r == '.' || r == '/':
 			b.WriteRune('_')
-		default:
-			if r > 127 {
-				b.WriteRune(r)
-			}
 		}
 	}
 	return b.String()
