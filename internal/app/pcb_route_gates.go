@@ -68,11 +68,6 @@ func applyWaivers(g *gateResult, ws []gateWaiver) {
 	g.Pass, g.Waived = true, waived
 }
 
-// neckZoneMil: a track narrower than its net's required width is a pin
-// neck-down only when one end lies within this distance of a same-net pad's
-// copper (and it is not below widthMil.min).
-const neckZoneMil = 50
-
 // widthViolation is a routed track that does not meet its net's intent.
 type widthViolation struct {
 	Net       string  `json:"net"`
@@ -85,8 +80,8 @@ type widthViolation struct {
 
 // checkIntentWidths compares every routed track of a net with intent
 // requirements: outer width on layers 1/2, inner width on inner layers,
-// never below widthMil.min, and below the full width only inside a pin
-// neck-down zone.
+// never below widthMil.min, and below the full width only as a pad escape
+// (padEscape: wholly within max(3 widths, 30 mil) of its own pad).
 // A track lying wholly inside its own net's poured copper on its layer is
 // carried by the pour (the current flows in the plane, not the track):
 // pourBacked reports those; it may be nil.
@@ -122,8 +117,8 @@ func checkIntentWidths(tracks []specctra.Track, pads []boardPad, reqs map[string
 			v.Reason = fmt.Sprintf("below the net's minimum %.2f mil", r.MinMil)
 		case pourBacked != nil && pourBacked(t):
 			continue
-		case !nearSameNetPad(t, byNet[strings.ToUpper(t.Net)]):
-			v.Reason = "narrower than required away from any pin (not a neck-down) and not inside its net's pour"
+		case !padEscape(t, need, byNet[strings.ToUpper(t.Net)]):
+			v.Reason = fmt.Sprintf("narrower than required outside the pad-escape zone (within %.1f mil of its own pad) and not inside its net's pour", padEscapeReachMil(need))
 		default:
 			continue
 		}
@@ -203,16 +198,24 @@ func pouredLookup(poured []any) func(specctra.Track) bool {
 	}
 }
 
-func nearSameNetPad(t specctra.Track, pads []boardPad) bool {
+// padEscape reports whether a narrow track is a pad escape: the whole
+// segment lies within padEscapeReachMil(need) of one same-net pad's copper
+// on its layer — the internal router's neck-down zone (max(3 widths,
+// 30 mil)) and the zone pre-routed intent escape stubs stay inside. A
+// segment that only starts at a pad and runs on narrow is not one.
+func padEscape(t specctra.Track, need float64, pads []boardPad) bool {
+	reach := padEscapeReachMil(need)
 	for _, p := range pads {
 		if p.Layer != t.Layer && p.Layer != pcbLayerMulti {
 			continue
 		}
+		in := true
 		for _, e := range [][2]float64{{t.X1, t.Y1}, {t.X2, t.Y2}} {
 			d := math.Hypot(math.Max(math.Abs(e[0]-p.X)-p.W/2, 0), math.Max(math.Abs(e[1]-p.Y)-p.H/2, 0))
-			if d <= neckZoneMil {
-				return true
-			}
+			in = in && d <= reach+specctraEps
+		}
+		if in {
+			return true
 		}
 	}
 	return false
@@ -958,6 +961,9 @@ func routeCompleteGate(r *routeResult) gateResult {
 	// congestion (another start, more room).
 	for _, b := range r.Blocked {
 		g.Items = append(g.Items, "blocked by geometry (move the part or add an escape; rerouting cannot fix it): "+b.String())
+	}
+	for _, h := range r.PlacementHints {
+		g.Items = append(g.Items, "placement hint: "+h.String())
 	}
 	g.Items = append(g.Items, r.FixableList...)
 	return g

@@ -670,6 +670,9 @@ func trialRoute(cfg *appConfig, window string, o autorouteOpts, budget time.Dura
 			return fastrouteRun{}, err
 		}
 		reqs = intentRequirements(in)
+		if esc, _, _, err := plannedIntentEscapes(cfg, window, string(raw), reqs, opt.Escapes); err == nil {
+			opt.Escapes = append(opt.Escapes, esc...)
+		}
 	}
 	text, _, rq, err := prepareDSN(string(raw), opt, reqs)
 	if err != nil {

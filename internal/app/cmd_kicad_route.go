@@ -196,6 +196,12 @@ type kicadRun struct {
 	// inputDRC: the input board's own DRC errors (rule|message), to mark
 	// what routing did not cause.
 	inputDRC map[string]bool
+	// inRaw: the routed-from board's snapshot JSON (courtyards, netclasses).
+	inRaw []byte
+	// escapes: the pre-routed intent pad escapes written into the DSN as
+	// fixed wiring (not in the SES; added to the board after the import).
+	escapes []intentEscape
+	escEnv  *escapeEnv
 	// times: wall clock per stage (summary.timings).
 	times []stageTime
 	last  time.Time
@@ -392,7 +398,7 @@ func (r *kicadRun) run() error {
 		board = out
 	}
 	r.lap("work copy, rules, rip-up")
-	if inSnap, _, err = r.snapshot(board); err != nil {
+	if inSnap, r.inRaw, err = r.snapshot(board); err != nil {
 		return err
 	}
 	if rep, err := kt.DRC(board, filepath.Join(r.work, "input-drc.json")); err == nil {
@@ -442,6 +448,9 @@ func (r *kicadRun) run() error {
 		return err
 	}
 	board = imported
+	if board, err = r.addEscapes(board, ses); err != nil {
+		return err
+	}
 
 	r.lap("SES import + zone fill")
 	// 4. Post-route copper: via arrays, widen to intent, pours, widen nets, silk.
@@ -596,6 +605,11 @@ func (r *kicadRun) doRoute(classed string, reqs map[string]kicad.NetRequirement,
 	if len(prep.Short) > 0 {
 		return fmt.Errorf("pre-route gate: %d net requirement(s) not met in the DSN: %s", len(prep.Short), strings.Join(prep.Short, "; "))
 	}
+	// Pre-routed pad escapes for intent nets whose full width cannot leave
+	// a fine-pitch pad (every intent class is no-neck-down).
+	if prepared, err = r.planEscapes(inSnap, prepared); err != nil {
+		return fmt.Errorf("pre-route gate: escapes: %w", err)
+	}
 	dsnPath := filepath.Join(o.outDir, "route.dsn")
 	if err := os.WriteFile(dsnPath, []byte(prepared), 0o644); err != nil {
 		return err
@@ -651,6 +665,12 @@ func (r *kicadRun) doRoute(classed string, reqs map[string]kicad.NetRequirement,
 	}
 	r.summary["routeFinal"], r.summary["ses"] = lastOK(runs), ses
 	r.route = fastrouteResult(lastOK(runs), o.fo, dsnPath)
+	if r.route != nil && len(r.route.Blocked) > 0 && r.escEnv != nil {
+		r.route.PlacementHints = placementHints(r.route.Blocked, r.escEnv, intentRequirements(r.in))
+		for _, h := range r.route.PlacementHints {
+			fmt.Fprintf(r.stderr, "placement hint: %s\n", h)
+		}
+	}
 	r.summary["routeResult"] = r.route
 	return nil
 }
@@ -1354,4 +1374,132 @@ func (s *syncWriter) Write(p []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.w.Write(p)
+}
+
+// kicadEscapeEnv is the escape planner's view of a KiCad snapshot: pads,
+// courtyards, per-net clearances (board netclasses and the intent), and the
+// copper already on the board.
+func kicadEscapeEnv(s *boardSnapshot, raw []byte, reqs map[string]specctra.NetRequirement) *escapeEnv {
+	env := &escapeEnv{court: map[string]layoutBBox{}, netClr: map[string]float64{}, clr: clearanceOf(s), margin: kicad.ClearanceMarginMil}
+	if s.Rules != nil {
+		// The snapshot's mil values are rounded (23.622 mil = 0.599999 mm
+		// fails a 0.6 mm minimum): up to the next whole µm.
+		up := func(mil float64) float64 { return math.Ceil(mil*25.4-1e-6) / 25.4 }
+		env.viaDia, env.viaDrill = up(s.Rules.ViaDiameterMil), up(s.Rules.ViaDrillMil)
+	}
+	for _, c := range s.Components {
+		for _, p := range c.Pads {
+			env.pads = append(env.pads, pcbPadP{ID: p.ID, Designator: c.Designator, Number: p.Number, Net: p.Net, Layer: p.Layer, X: p.X, Y: p.Y, W: p.W, H: p.H})
+		}
+	}
+	var extra struct {
+		Components []struct {
+			Designator string      `json:"designator"`
+			Courtyard  *layoutBBox `json:"courtyard"`
+		} `json:"components"`
+		Netclasses []struct {
+			Name         string  `json:"name"`
+			ClearanceMil float64 `json:"clearanceMil"`
+		} `json:"netclasses"`
+		NetClassOf map[string]string `json:"netClassOf"`
+	}
+	_ = json.Unmarshal(raw, &extra)
+	for _, c := range extra.Components {
+		if c.Courtyard != nil {
+			env.court[c.Designator] = *c.Courtyard
+		}
+	}
+	clrOf := map[string]float64{}
+	for _, c := range extra.Netclasses {
+		clrOf[c.Name] = c.ClearanceMil
+	}
+	for net, cls := range extra.NetClassOf {
+		for _, n := range strings.Split(cls, ",") {
+			if v := clrOf[strings.TrimSpace(n)]; v > env.netClr[strings.ToUpper(net)] {
+				env.netClr[strings.ToUpper(net)] = v
+			}
+		}
+	}
+	for n, r := range reqs {
+		if r.ClearanceMil > env.netClr[strings.ToUpper(n)] {
+			env.netClr[strings.ToUpper(n)] = r.ClearanceMil
+		}
+	}
+	if tracks, vias, _, err := copperOf(s); err == nil {
+		env.tracks, env.vias = tracks, vias
+	}
+	return env
+}
+
+// planEscapes plans the intent pad escapes on the routed-from board and
+// writes them into the prepared DSN as fixed wiring.
+func (r *kicadRun) planEscapes(s *boardSnapshot, dsn string) (string, error) {
+	reqs := intentRequirements(r.in)
+	r.escEnv = kicadEscapeEnv(s, r.inRaw, reqs)
+	esc, skipped := planIntentEscapes(r.escEnv, reqs, nil)
+	r.escapes = esc
+	r.summary["intentEscapes"] = map[string]any{"planned": esc, "skipped": skipped}
+	fmt.Fprintf(r.stderr, "intent escapes: %d pad(s) get a fixed escape stub (full width does not leave the pad), %d cannot reach widthMil.min\n", len(esc), len(skipped))
+	if len(esc) == 0 {
+		return dsn, nil
+	}
+	layers, perMil, err := kicad.DSNLayers(dsn)
+	if err != nil {
+		return dsn, err
+	}
+	name := func(l int) string {
+		if l == 2 {
+			return layers[len(layers)-1]
+		}
+		return layers[0]
+	}
+	sp := make([]specctra.Escape, len(esc))
+	for i, e := range esc {
+		sp[i] = e.specctraEscape(name)
+	}
+	out, _, err := specctra.AppendEscapes(dsn, sp, layers, perMil)
+	return out, err
+}
+
+// addEscapes puts the fixed escapes (stubs and their vias) on the imported
+// board: the router keeps fixed wiring but does not write it into the
+// session. A stub the session already carries (same net, both ends within
+// 0.6 mil) is skipped; a session never carries the fixed vias.
+func (r *kicadRun) addEscapes(board, ses string) (string, error) {
+	if len(r.escapes) == 0 {
+		return board, nil
+	}
+	var have []specctra.Segment
+	if b, err := os.ReadFile(ses); err == nil {
+		if w, err := specctra.ParseSES(string(b)); err == nil {
+			have = w.Segments
+		}
+	}
+	near := func(a, b [2]float64) bool { return math.Hypot(a[0]-b[0], a[1]-b[1]) <= specctra.MatchTolMil }
+	var add, vias []map[string]any
+	for _, e := range r.escapes {
+		if e.Via {
+			vias = append(vias, map[string]any{"net": e.Net, "x": e.To[0], "y": e.To[1], "diameter": e.ViaDiaMil, "drill": e.ViaDrillMil})
+		}
+		dup := false
+		for _, g := range have {
+			if strings.EqualFold(g.Net, e.Net) && (near(g.A, e.From) && near(g.B, e.To) || near(g.A, e.To) && near(g.B, e.From)) {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			add = append(add, map[string]any{"net": e.Net, "layer": e.Layer, "startX": e.From[0], "startY": e.From[1], "endX": e.To[0], "endY": e.To[1], "lineWidth": e.WidthMil})
+		}
+	}
+	r.summary["intentEscapesAdded"] = map[string]int{"tracks": len(add), "vias": len(vias)}
+	if len(add)+len(vias) == 0 {
+		return board, nil
+	}
+	out := r.next("escapes")
+	if _, err := r.kt.Edit(board, map[string]any{"addTracks": add, "addVias": vias}, out); err != nil {
+		return board, err
+	}
+	fmt.Fprintf(r.stderr, "intent escapes: %d stub(s) and %d via(s) added to the imported board\n", len(add), len(vias))
+	return out, nil
 }

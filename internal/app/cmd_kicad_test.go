@@ -79,10 +79,12 @@ func TestKicadSnapshotGates(t *testing.T) {
 	if strings.Join(names, ",") != "intent-widths,intent-lengths,copper-to-edge,isolation,via-current,post-layout-sim" {
 		t.Fatalf("gates %v", names)
 	}
-	// t-vcc-neck: 10 < 20 within 50 mil of R1.1 (neck-down, allowed);
+	// t-vcc-neck: 10 < 20 starting on R1.1 but ending 69.6 mil past its
+	// copper, beyond the pad-escape zone max(3 × 20, 30) = 60 mil → violation
+	// (a narrow run that merely starts at a pad is not an escape);
 	// t-vcc-trunk: 10 < 20 away from any pad → violation; t-vcc-wide ok.
 	g := gates[0]
-	if g.Pass || len(g.Items) != 1 || !strings.HasPrefix(g.Items[0], "VCC: 1 track(s), worst 10.00 < 20.00 mil on layer 1") {
+	if g.Pass || len(g.Items) != 1 || !strings.HasPrefix(g.Items[0], "VCC: 2 track(s), worst 10.00 < 20.00 mil on layer 1") {
 		t.Fatalf("intent-widths: %+v", g)
 	}
 	if !gates[1].Pass || gates[1].Detail != "the intent has no length group or pair skew" {

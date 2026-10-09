@@ -448,3 +448,27 @@ func TestEdgeBandsExceptConnectorWindow(t *testing.T) {
 		t.Fatalf("merged: %d quads, %d windows", len(qs), cut)
 	}
 }
+
+func TestAppendEscapesScalesToDSNUnits(t *testing.T) {
+	src := "(pcb x\n  (structure\n    (layer F.Cu (type signal))\n    (via \"Via[0-3]_600:300_um\")\n  )\n  (wiring\n  )\n)\n"
+	esc := []Escape{{Net: "/Power/HV_IN", Layer: "F.Cu", WidthMil: 10, Path: [][2]float64{{1, 2}, {3, 4}}, Via: true}}
+	out, n, err := AppendEscapes(src, esc, []string{"F.Cu", "B.Cu"}, 25.4)
+	if err != nil || n != 1 {
+		t.Fatal(n, err)
+	}
+	for _, want := range []string{
+		`(wire (path F.Cu 254 25.4 50.8 76.2 101.6) (net "/Power/HV_IN") (type fix))`,
+		`(via "Via[0-3]_600:300_um" 76.2 101.6 (net "/Power/HV_IN") (type fix))`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %s in\n%s", want, out)
+		}
+	}
+	w, err := ParseFixedWiring("(pcb x (resolution um 10)" + out[len("(pcb x"):])
+	if err != nil || len(w.Segments) != 1 || math.Abs(w.Segments[0].WidthMil-10) > 1e-9 || math.Abs(w.Segments[0].B[1]-4) > 1e-9 {
+		t.Fatalf("fixed wiring read back = %+v, %v", w, err)
+	}
+	if _, _, err := AppendEscapes(src, []Escape{{Net: "A", Layer: "Inner9", WidthMil: 1, Path: [][2]float64{{0, 0}, {1, 1}}}}, []string{"F.Cu"}, 1); err == nil {
+		t.Fatal("unknown layer accepted")
+	}
+}

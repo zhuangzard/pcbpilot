@@ -64,7 +64,7 @@ var (
 	reShapeLine   = regexp.MustCompile(`^[ \t]*\(shape[ \t]*\([ \t]*\w+[ \t]+(\S+)`)
 	rePadstack    = regexp.MustCompile(`^[ \t]*\(padstack[ \t]+\S+`)
 	reBoundary    = regexp.MustCompile(`\(boundary[ \t]*\([ \t]*path[ \t]+\S+[ \t]+\S+((?:[ \t]+-?[0-9.]+)+)`)
-	reViaPadstack = regexp.MustCompile(`\(via[ \t]+(\S+)`)
+	reViaPadstack = regexp.MustCompile(`\(via[ \t]+("[^"]*"|[^\s()]+)`)
 )
 
 // FixDSN applies the EasyEDA export repairs to src.
@@ -181,35 +181,55 @@ func FixDSN(src string, opt FixOptions) (string, FixReport, error) {
 	src, rep.PatchedPadstacks = patchPadstacks(src, order)
 
 	// 1e. Fixed escapes.
-	if len(opt.Escapes) > 0 {
-		via := ""
-		if m := reViaPadstack.FindStringSubmatch(src[strings.Index(src, "(structure"):]); m != nil {
-			via = m[1]
-		}
-		var w strings.Builder
-		for i, e := range opt.Escapes {
-			if len(e.Path) < 2 || e.Net == "" || e.WidthMil <= 0 {
-				return "", rep, fmt.Errorf("escape %d: need net, widthMil > 0 and at least two path points", i)
-			}
-			if !slices.Contains(order, e.Layer) {
-				return "", rep, fmt.Errorf("escape %d: layer %q is not one of %v", i, e.Layer, order)
-			}
-			fmt.Fprintf(&w, "    (wire (path %s %s %s) (net %s) (type fix))\n", e.Layer, fnum(e.WidthMil), formatCoords(e.Path), quoteIfNeeded(e.Net))
-			if e.Via {
-				if via == "" {
-					return "", rep, fmt.Errorf("escape %d asks for a via but the DSN declares no via padstack", i)
-				}
-				end := e.Path[len(e.Path)-1]
-				fmt.Fprintf(&w, "    (via %s %s %s (net %s) (type fix))\n", via, fnum(end[0]), fnum(end[1]), quoteIfNeeded(e.Net))
-			}
-			rep.Escapes++
-		}
-		src, err = appendWiring(src, w.String())
-		if err != nil {
-			return "", rep, err
-		}
+	src, rep.Escapes, err = AppendEscapes(src, opt.Escapes, order, 1)
+	if err != nil {
+		return "", rep, err
 	}
 	return src, rep, nil
+}
+
+// AppendEscapes writes escapes as (type fix) wires (and vias at their ends)
+// into the DSN's wiring. Escape coordinates and widths are mil; milToUnit
+// converts them to the DSN's resolution unit (1 for an EasyEDA export,
+// 25.4 for KiCad's um). layers are the DSN's copper layer names.
+func AppendEscapes(src string, esc []Escape, layers []string, milToUnit float64) (string, int, error) {
+	if len(esc) == 0 {
+		return src, 0, nil
+	}
+	via := ""
+	if i := strings.Index(src, "(structure"); i >= 0 {
+		if m := reViaPadstack.FindStringSubmatch(src[i:]); m != nil {
+			via = m[1]
+		}
+	}
+	scaled := func(pts [][2]float64) [][2]float64 {
+		out := make([][2]float64, len(pts))
+		for i, p := range pts {
+			out[i] = [2]float64{p[0] * milToUnit, p[1] * milToUnit}
+		}
+		return out
+	}
+	var w strings.Builder
+	n := 0
+	for i, e := range esc {
+		if len(e.Path) < 2 || e.Net == "" || e.WidthMil <= 0 {
+			return "", n, fmt.Errorf("escape %d: need net, widthMil > 0 and at least two path points", i)
+		}
+		if !slices.Contains(layers, e.Layer) {
+			return "", n, fmt.Errorf("escape %d: layer %q is not one of %v", i, e.Layer, layers)
+		}
+		fmt.Fprintf(&w, "    (wire (path %s %s %s) (net %s) (type fix))\n", e.Layer, fnum(e.WidthMil*milToUnit), formatCoords(scaled(e.Path)), quoteIfNeeded(e.Net))
+		if e.Via {
+			if via == "" {
+				return "", n, fmt.Errorf("escape %d asks for a via but the DSN declares no via padstack", i)
+			}
+			end := e.Path[len(e.Path)-1]
+			fmt.Fprintf(&w, "    (via %s %s %s (net %s) (type fix))\n", via, fnum(end[0]*milToUnit), fnum(end[1]*milToUnit), quoteIfNeeded(e.Net))
+		}
+		n++
+	}
+	out, err := appendWiring(src, w.String())
+	return out, n, err
 }
 
 func patchPadstacks(src string, order []string) (string, int) {
