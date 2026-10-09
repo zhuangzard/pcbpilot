@@ -7,6 +7,7 @@ Cobra 子命令暴露(`--help` 自描述),机器可读真值是 `pcbpilot action
 |---|---|---|---|
 | **原理图**(`pcbpilot sch` + `blocks`) | ✅ 已支持(40+ 子命令) | [schematic.md](./schematic.md) | 器件/连线/布局/持久编组/分区三件套/校验门/电路块库/导出,含布局质量五维打分(归因带可执行 fix) |
 | **PCB**(`pcbpilot pcb` + `workflow`) | ✅ 已支持(50+ 子命令) | [pcb.md](./pcb.md) | 同步/布局/布线/铺铜/丝印/叠层规则/制造导出,九维布局诊断 + 兼容流程记录 |
+| **KiCad 后端**(`pcbpilot kicad`) | 🧪 开发中(v0.9.0) | [pcb.md §3](./pcb.md#3-布线) | `.kicad_pcb` 快照、KiCad 原理图网表→连接 IR、与 EasyEDA 同套计算与门禁的 fastroute 布线(评审/安全/仿真/报告/说明书);不经 daemon/连接器 |
 
 ## 通用约定(全域一致)
 

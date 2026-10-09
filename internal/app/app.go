@@ -103,6 +103,7 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 		newApplyCmd(cfg, stdout, stderr),
 		newReviewPanelCmd(stdout, stderr),
 		newKicadCmd(cfg, stdout, stderr),
+		newSignoffCmd(stdout, stderr),
 		newDaemonCmd(cfg, stdout, stderr),
 		newHealthAliasCmd(cfg, stdout, stderr),
 		newAuditCmd(stdout, stderr),

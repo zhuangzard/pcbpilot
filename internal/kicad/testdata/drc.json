@@ -1,0 +1,40 @@
+{
+  "$schema": "https://schemas.kicad.org/drc.v1.json",
+  "coordinate_units": "mm",
+  "date": "2026-10-09T12:00:00",
+  "ignored_checks": [],
+  "included_severities": ["error"],
+  "kicad_version": "10.0.6",
+  "schematic_parity": [],
+  "source": "tiny.kicad_pcb",
+  "unconnected_items": [
+    {
+      "description": "Missing connection between items",
+      "items": [
+        {"description": "Pad 1 [VCC] of R1 on F.Cu", "pos": {"x": 10.0, "y": 20.0}, "uuid": "u-pad-r1-1"},
+        {"description": "Pad 2 [VCC] of C1 on F.Cu", "pos": {"x": 15.0, "y": 20.0}, "uuid": "u-pad-c1-2"}
+      ],
+      "severity": "error",
+      "type": "unconnected_items"
+    }
+  ],
+  "violations": [
+    {
+      "description": "Clearance violation (netclass 'PP1_W20' clearance 0.2032 mm; actual 0.1555 mm)",
+      "items": [
+        {"description": "Track [VCC] on F.Cu, length 2.5932 mm", "pos": {"x": 25.4, "y": 50.8}, "uuid": "u-track-1"},
+        {"description": "Via [GND] on F.Cu - B.Cu", "pos": {"x": 26.0, "y": 51.0}, "uuid": "u-via-1"}
+      ],
+      "severity": "error",
+      "type": "clearance"
+    },
+    {
+      "description": "Track width (netclass 'PP1_W20' min width 0.5080 mm; actual 0.1524 mm)",
+      "items": [
+        {"description": "Track [VCC] on B.Cu, length 1.0000 mm", "pos": {"x": 1.0, "y": 2.0}, "uuid": "u-track-2"}
+      ],
+      "severity": "error",
+      "type": "track_width"
+    }
+  ]
+}

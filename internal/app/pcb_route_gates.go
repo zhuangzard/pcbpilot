@@ -349,10 +349,29 @@ func postRouteGates(cfg *appConfig, window, intentPath string, post *postImportS
 		add(gateResult{Gate: "intent-widths", Detail: fmt.Sprintf("board snapshot unreadable: %v", err)})
 		return gates, false
 	}
+	if !snapshotIntentGates(snap, in, intentPath, simVerdict, simReasons, segNeed, viaOK, false, add) {
+		return gates, false
+	}
+
+	pass := true
+	for _, g := range gates {
+		pass = pass && g.Pass
+	}
+	return gates, pass
+}
+
+// snapshotIntentGates are the post-route gates computed from a board
+// snapshot alone (EDA-neutral; shared by pcb auto route / pcb gate and
+// kicad route): intent-widths, intent-lengths, the intent pcb checks
+// (copper-to-edge, isolation, via current) and the post-layout sim verdict.
+// split=false keeps them as one pcb-check-intent gate (the EasyEDA
+// contract); split=true gives copper-to-edge, isolation and via-current a
+// gate each. It returns false when the snapshot could not be judged.
+func snapshotIntentGates(snap *boardSnapshot, in *designIntent, intentPath, simVerdict string, simReasons []string, segNeed func(specctra.Track) (float64, bool), viaOK func(primitives []string, net string) (bool, string), split bool, add func(gateResult)) bool {
 	var tracks []specctra.Track
 	if err := decodeAny(snap.Copper.Lines, &tracks); err != nil {
 		add(gateResult{Gate: "intent-widths", Detail: "decode tracks: " + err.Error()})
-		return gates, false
+		return false
 	}
 	var pads []boardPad
 	for _, c := range snap.Components {
@@ -375,20 +394,53 @@ func postRouteGates(cfg *appConfig, window, intentPath string, post *postImportS
 	raw, err := json.Marshal(snap)
 	if err != nil {
 		add(gateResult{Gate: "pcb-check-intent", Detail: err.Error()})
-		return gates, false
+		return false
 	}
-	rep := &pcbCheckReport{}
-	var errs []string
 	edgeIntent, _ := loadEdgeIntent(intentPath)
-	for _, f := range []func() error{
-		func() error { return addEdgeFindings(rep, raw, edgeIntent, "") },
-		func() error { return addIsolationFindings(rep, raw, intentPath) },
-		func() error { return addViaCurrentFindings(rep, raw, intentPath) },
-	} {
-		if err := f(); err != nil {
-			errs = append(errs, err.Error())
-		}
+	checks := []struct {
+		gate, detail string
+		run          func(*pcbCheckReport) error
+	}{
+		{"copper-to-edge", "copper-to-edge / plane pull-back vs the intent edge distances", func(r *pcbCheckReport) error { return addEdgeFindings(r, raw, edgeIntent, "") }},
+		{"isolation", "insulation pairs: clearance on every shared layer, creepage (slots credited)", func(r *pcbCheckReport) error { return addIsolationFindings(r, raw, intentPath) }},
+		{"via-current", "via groups vs the intent current", func(r *pcbCheckReport) error { return addViaCurrentFindings(r, raw, intentPath) }},
 	}
+	if split {
+		for _, c := range checks {
+			rep := &pcbCheckReport{}
+			var errs []string
+			if err := c.run(rep); err != nil {
+				errs = append(errs, err.Error())
+			}
+			add(intentCheckGate(c.gate, c.detail, rep, errs, viaOK))
+		}
+	} else {
+		rep := &pcbCheckReport{}
+		var errs []string
+		for _, c := range checks {
+			if err := c.run(rep); err != nil {
+				errs = append(errs, err.Error())
+			}
+		}
+		add(intentCheckGate("pcb-check-intent", "", rep, errs, viaOK))
+	}
+
+	// 6. Post-layout simulation on the live copper.
+	g := gateResult{Gate: "post-layout-sim", Pass: simVerdict == "pass" || simVerdict == "warn", Detail: "verdict " + simVerdict}
+	if !g.Pass {
+		g.Items = simReasons
+	}
+	if simVerdict == "" {
+		g.Detail = "not run (needs --sim)"
+	}
+	add(g)
+	return true
+}
+
+// intentCheckGate turns pcb check findings into a gate: every ERROR fails
+// it, except via-current findings the per-segment basis rates (viaOK).
+// detail "" = the pcb-check-intent wording.
+func intentCheckGate(name, detail string, rep *pcbCheckReport, errs []string, viaOK func([]string, string) (bool, string)) gateResult {
 	var items, perGroup []string
 	for _, f := range rep.Findings {
 		if f.Level != "ERROR" {
@@ -403,29 +455,21 @@ func postRouteGates(cfg *appConfig, window, intentPath string, post *postImportS
 		items = append(items, f.Type+": "+f.Message)
 	}
 	items = append(items, errs...)
-	g = gateResult{Gate: "pcb-check-intent", Pass: len(items) == 0,
-		Detail: fmt.Sprintf("%d error(s) (copper-to-edge, isolation, via current vs intent)", len(items)), Items: items}
+	g := gateResult{Gate: name, Pass: len(items) == 0, Items: items}
+	if detail == "" {
+		g.Detail = fmt.Sprintf("%d error(s) (copper-to-edge, isolation, via current vs intent)", len(items))
+	} else {
+		g.Detail = fmt.Sprintf("%d error(s): %s", len(items), detail)
+	}
+	g.Info = rep.Limitations
+	if name == "pcb-check-intent" {
+		g.Info = nil // the EasyEDA gate contract carries no info lines
+	}
 	if len(perGroup) > 0 {
 		g.Detail += fmt.Sprintf("; %d via group(s) rated by their simulated current (width basis segment)", len(perGroup))
 		g.Items = append(g.Items, perGroup...)
 	}
-	add(g)
-
-	// 6. Post-layout simulation on the live copper.
-	g = gateResult{Gate: "post-layout-sim", Pass: simVerdict == "pass" || simVerdict == "warn", Detail: "verdict " + simVerdict}
-	if !g.Pass {
-		g.Items = simReasons
-	}
-	if simVerdict == "" {
-		g.Detail = "not run (needs --sim)"
-	}
-	add(g)
-
-	pass := true
-	for _, g := range gates {
-		pass = pass && g.Pass
-	}
-	return gates, pass
+	return g
 }
 
 type qualityGateOpts struct {
@@ -461,40 +505,77 @@ func runQualityGates(cfg *appConfig, window string, o qualityGateOpts, summary m
 	if err != nil {
 		return false, fmt.Errorf("board dump: %w", err)
 	}
-	boardPath := filepath.Join(o.outDir, "board-final.json")
-	blob, _ := json.MarshalIndent(snap, "", "  ")
-	if err := os.WriteFile(boardPath, append(blob, '\n'), 0o644); err != nil {
+	boardPath, err := writeBoardFinal(snap, o.outDir)
+	if err != nil {
 		return false, err
 	}
+	ps, err := postSimForGates(boardPath, o, summary, stderr)
+	if err != nil {
+		return false, err
+	}
+	gates, pass := postRouteGates(cfg, window, o.intent, post, ps.res.Verdict.Status, ps.res.Verdict.Reasons, o.sessionChecked, o.unresolved, o.waivers, ps.segNeed, ps.viaOK, stderr)
+	tail := tailGates(snap, boardPath, ps.out, o, cfg.project, cfg.doc, summary, stderr)
+	for _, g := range tail {
+		pass = pass && g.Pass
+	}
+	gates = append(gates, tail...)
+	summary["gates"], summary["pass"] = gates, pass
+	return pass, nil
+}
+
+// writeBoardFinal writes the gate snapshot to <outDir>/board-final.json.
+func writeBoardFinal(snap *boardSnapshot, outDir string) (string, error) {
+	boardPath := filepath.Join(outDir, "board-final.json")
+	blob, _ := json.MarshalIndent(snap, "", "  ")
+	return boardPath, os.WriteFile(boardPath, append(blob, '\n'), 0o644)
+}
+
+// gateSim is the post-layout simulation the gates use.
+type gateSim struct {
+	res          *postsim.Result
+	out          string
+	segNeed      func(specctra.Track) (float64, bool)
+	viaOK        func([]string, string) (bool, string)
+	segmentBasis bool
+}
+
+// postSimForGates runs sim post-layout on boardPath (offline) and returns
+// the per-segment width / via ratings when o.widthBasis is segment.
+func postSimForGates(boardPath string, o qualityGateOpts, summary map[string]any, stderr io.Writer) (*gateSim, error) {
 	po := postSimOpts{board: boardPath, sim: o.sim, intent: o.intent,
 		out: filepath.Join(o.outDir, "post.json"), report: filepath.Join(o.outDir, "post.md"), svgDir: filepath.Join(o.outDir, "heatmaps"),
 		cell: 0.5, ambient: 25, hTop: 10, hBottom: 10, kxy: 0.3, kz: 0.3, plating: 0.7, viaDT: 10, margin: 1.2,
 		source: o.source + " (pcb dump --include-copper)"}
 	res, err := runPostSim(po, stderr)
 	if err != nil {
-		return false, fmt.Errorf("sim post-layout: %w", err)
+		return nil, fmt.Errorf("sim post-layout: %w", err)
 	}
 	ps := map[string]any{"verdict": res.Verdict.Status, "reasons": res.Verdict.Reasons, "out": po.out, "report": po.report}
 	if res.Thermal != nil {
 		ps["maxBoardC"] = res.Thermal.MaxBoardC
 	}
 	summary["postSim"] = ps
-	var segNeed func(specctra.Track) (float64, bool)
-	var viaOK func([]string, string) (bool, string)
+	g := &gateSim{res: res, out: po.out}
 	if o.widthBasis == "segment" {
 		in, err := loadDesignIntent(o.intent)
 		if err != nil {
-			return false, err
+			return nil, err
 		}
-		segNeed = segmentWidthNeed(in, res)
-		viaOK = segmentViaOK(in, res)
+		g.segNeed = segmentWidthNeed(in, res)
+		g.viaOK = segmentViaOK(in, res)
+		g.segmentBasis = true
 	}
-	gates, pass := postRouteGates(cfg, window, o.intent, post, res.Verdict.Status, res.Verdict.Reasons, o.sessionChecked, o.unresolved, o.waivers, segNeed, viaOK, stderr)
+	return g, nil
+}
+
+// tailGates: route-complete (when routed by fastroute), silkscreen and the
+// board manual — judged on the snapshot / board-final.json alone.
+func tailGates(snap *boardSnapshot, boardPath, postOut string, o qualityGateOpts, project, doc string, summary map[string]any, stderr io.Writer) []gateResult {
+	var gates []gateResult
 	if o.routeChecked {
 		g := routeCompleteGate(o.route)
 		applyWaivers(&g, o.waivers)
 		gates = append(gates, g)
-		pass = pass && g.Pass
 	}
 	// Silkscreen: designators next to their own part, never on pads / holes /
 	// edge / other silk, never below the project size (readback).
@@ -502,18 +583,15 @@ func runQualityGates(cfg *appConfig, window string, o qualityGateOpts, summary m
 	sg := silkGate(snap, font, o.silk)
 	applyWaivers(&sg, o.waivers)
 	gates = append(gates, sg)
-	pass = pass && sg.Pass
 	// The board manual is regenerated after every placement / routing /
 	// gate run (hard requirement); its gate joins gates[].
-	mg, run := runManualGate(manualGateOpts{board: boardPath, intent: o.intent, sim: o.sim, post: po.out, projectConfig: o.projectConfig,
-		outDir: o.outDir, project: cfg.project, doc: cfg.doc, noManual: o.noManual, waivers: o.waivers}, stderr)
+	mg, run := runManualGate(manualGateOpts{board: boardPath, intent: o.intent, sim: o.sim, post: postOut, projectConfig: o.projectConfig,
+		outDir: o.outDir, project: project, doc: doc, noManual: o.noManual, waivers: o.waivers}, stderr)
 	gates = append(gates, mg)
-	pass = pass && mg.Pass
 	if run != nil {
 		summary["manual"] = run
 	}
-	summary["gates"], summary["pass"] = gates, pass
-	return pass, nil
+	return gates
 }
 
 func failedGates(summary map[string]any) string {

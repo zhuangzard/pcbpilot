@@ -44,6 +44,7 @@
 | 外部自动布线 | `pcb export-dsn` / `import-autoroute` / `pcb autoroute [--router fastroute]` / `pcb dsn-fix` / `pcb ses-repair` | Specctra DSN 往返(带禁布区注入)。`dsn-fix` 离线修 EasyEDA 导出缺陷(类网名引号、缺失内层与层序、通孔焊盘内层形状、板边禁布带、可选 GND 平面、固定逃线);`ses-repair` 在导入后修层号 21/22→15/16、恢复颈缩线宽、补建 DSN 固定走线;`autoroute` 串起导出→修→布线→导入→修复→铺铜/保存/重载/DRC/逐焊盘对账。fastroute(GPLv3)只作外部进程,用户自装,见 [pcb-routing](../../.agents/skills/pcbpilot/references/pcb-routing.md#external-router-fastroute)。Freerouting 与编辑器原生自动布线同为可选;默认整板布线用 `pcb auto run` |
 | 按净距加宽 | `pcb widen --net A,B --max-mil 40` | 大电流网在与异网铜的净距允许处加宽(只改增益 > 2 mil 的线),先建新线再删旧线,随后重铺/保存/重载/DRC |
 | 整板 fastroute 收尾 | `pcb auto route --playbook out/playbook.json` | 应用摆放剧本 → fastroute(续跑至 0 未布通)→ 导入修复 → 铺铜(GND TOP/IN1/BOTTOM、主电源 IN2)→ 加宽 → DRC → 逐焊盘对账 → 后仿真;`pcb auto run` 装了 fastroute 时默认只出摆放剧本(`--router internal` 用内置布线) |
+| KiCad 后端 | `kicad route --pcb X.kicad_pcb --intent intent.json --sim sim.json --requirements REQ.md [--sch X.kicad_sch]` / `kicad snapshot` / `kicad netlist --sch` | 不经 EasyEDA,与 `pcb auto route`+`pcb gate` 同序同算:设计评审→意图/绝缘网络类与 `.kicad_dru`(内层线宽、颈缩下限、电气间隙/爬电/板边)→原生 DSN(板边禁布带)→fastroute→SES 导入→过孔阵列→加宽到意图→GND/电源铺铜→丝印摆放→门禁(kicad-drc、pad-net-diff、intent-rules/widths/lengths、copper-to-edge、isolation、via-current、post-layout-sim、route-complete、silkscreen、board-manual、design-report)→IR 收敛→设计报告→发布评审;`kicad netlist` 把 KiCad 原理图转成 `intent derive` 读的连接 IR。见 [kicad](../../.agents/skills/pcbpilot/references/kicad.md) |
 | 拆线 | `pcb rip-up` | 按网/按范围拆 |
 | 锁定 | `pcb track-lock` | 手布关键线锁死,防被自动布线/pour-rebuild 冲掉 |
 
@@ -72,6 +73,7 @@
 | 叠层 | `pcb stackup` | 2–32 铜层 + 内层类型(信号↔内电层) |
 | 规则 | `pcb drc-rules` / `drc-rules-set --from` / `net-class list/create` / `net-classes` | 完整规则与真实 EasyEDA 网络类可写入、回读和失败回滚；复数 `net-classes` 是路由器的启发式线宽表，不能冒充持久化网络类 |
 | 检查 | `pcb drc` / `pcb check` / `pcb net-path` | 官方 DRC + 重建的逐项检查 + 指定焊盘间的只读铜路径证据；dangling pad anchor 按 shape/rotation，legacy 尺寸只用保守几何并在 `limitations` 说明(报错带 `[规范 §N]` 指向手册章节) |
+| 发布签核 | `signoff --run-dir D --intent I --sim S --connectivity C` | EasyEDA 与 KiCad 同一条硬签核:设计评审、LCSC 料号、绝缘/板边安全、逐段线宽/过孔、设计后仿真、原理图↔PCB 连通与意图规则追溯表、说明书(含仿真章节)与设计报告齐全;任一不过非零退出。见 [kicad](../../.agents/skills/pcbpilot/references/kicad.md#发布签核pcbpilot-signoffeasyeda-与-kicad-同一条) |
 | 历史流程记录 | `workflow status/advance` | 兼容读取/记录 `outline_confirmed`、`pre_route_passed`、`post_route_checked`；typed action 不再据此拒绝执行 |
 
 ## 二、待支持 / 路线
