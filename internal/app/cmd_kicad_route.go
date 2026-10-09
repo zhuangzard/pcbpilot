@@ -539,6 +539,7 @@ func (r *kicadRun) run() error {
 		review: filepath.Join(o.outDir, "review-design", "review.json"), outDir: filepath.Join(o.outDir, "signoff")}
 	if r.conn != "" {
 		so.connectivity = []string{r.conn}
+		so.values = []string{filepath.Join(o.outDir, "sch-values.json")}
 	}
 	if m, ok := r.summary["manual"].(*manualRun); ok && m != nil {
 		so.manual = m.Current
@@ -964,8 +965,11 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	boardPath, err := writeBoardFinal(snap, o.outDir)
-	if err != nil {
+	// The bridge snapshot itself (the pcb dump shape plus KiCad extras:
+	// lcsc, value, footprint, courtyard) — re-marshalling boardSnapshot
+	// would drop the extras the sign-off reads.
+	boardPath := filepath.Join(o.outDir, "board-final.json")
+	if err := os.WriteFile(boardPath, append(raw, '\n'), 0o644); err != nil {
 		return false, err
 	}
 	r.summary["boardFinal"] = boardPath

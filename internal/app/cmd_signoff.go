@@ -38,7 +38,7 @@ import (
 
 type signoffOpts struct {
 	board, intent, sim, review, manual, report, outDir, waivers string
-	connectivity                                                []string
+	connectivity, values                                        []string
 }
 
 func newSignoffCmd(stdout, stderr io.Writer) *cobra.Command {
@@ -100,6 +100,7 @@ Results: --out-dir/{signoff.json, signoff.md, post.json}. Signed --waivers apply
 	f.StringVar(&o.intent, "intent", "", "intent.json (required)")
 	f.StringVar(&o.sim, "sim", "", "sim.json (required: post-layout simulation)")
 	f.StringArrayVar(&o.connectivity, "connectivity", nil, "schematic connectivity JSON (sch connectivity / kicad netlist; repeat per page) — required")
+	f.StringArrayVar(&o.values, "values", nil, "part values with LCSC numbers (sch list JSON or {\"parts\":{ref:{value,mpn,lcsc}}}; repeatable)")
 	f.StringVar(&o.review, "review", "", "design-stage review.json (review-panel)")
 	f.StringVar(&o.manual, "manual", "", "board manual HTML")
 	f.StringVar(&o.report, "report", "", "design report report.json")
@@ -120,6 +121,9 @@ func (o *signoffOpts) fillFromRunDir(dir string) {
 	def(&o.report, newestGlob(filepath.Join(dir, "report", "v*", "report.json")))
 	if len(o.connectivity) == 0 && fileExists(filepath.Join(dir, "sch-connectivity.json")) {
 		o.connectivity = []string{filepath.Join(dir, "sch-connectivity.json")}
+	}
+	if len(o.values) == 0 && fileExists(filepath.Join(dir, "sch-values.json")) {
+		o.values = []string{filepath.Join(dir, "sch-values.json")}
 	}
 	if o.outDir == "" {
 		o.outDir = filepath.Join(dir, "signoff")
@@ -267,10 +271,27 @@ func runSignoff(o signoffOpts, waivers []gateWaiver, stderr io.Writer) (*signoff
 	}
 	for _, d := range docs {
 		for _, c := range d.Components {
-			if c.Device.SupplierID != "" {
+			if c.Device.SupplierID != "" && (reLCSC.MatchString(c.Device.SupplierID) || lcsc[c.Ref] == "") {
 				lcsc[c.Ref] = c.Device.SupplierID
 			} else if _, ok := lcsc[c.Ref]; !ok {
 				lcsc[c.Ref] = ""
+			}
+		}
+	}
+	for _, p := range o.values {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return nil, err
+		}
+		vals, err := powersim.ParseValues(b)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", p, err)
+		}
+		for ref, v := range vals {
+			if v.LCSC != "" {
+				lcsc[ref] = v.LCSC
+			} else if _, ok := lcsc[ref]; !ok {
+				lcsc[ref] = ""
 			}
 		}
 	}

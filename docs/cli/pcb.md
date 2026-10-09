@@ -73,6 +73,7 @@
 | 叠层 | `pcb stackup` | 2–32 铜层 + 内层类型(信号↔内电层) |
 | 规则 | `pcb drc-rules` / `drc-rules-set --from` / `net-class list/create` / `net-classes` | 完整规则与真实 EasyEDA 网络类可写入、回读和失败回滚；复数 `net-classes` 是路由器的启发式线宽表，不能冒充持久化网络类 |
 | 检查 | `pcb drc` / `pcb check` / `pcb net-path` | 官方 DRC + 重建的逐项检查 + 指定焊盘间的只读铜路径证据；dangling pad anchor 按 shape/rotation，legacy 尺寸只用保守几何并在 `limitations` 说明(报错带 `[规范 §N]` 指向手册章节) |
+| 发布签核 | `signoff --run-dir D --intent I --sim S --connectivity C` | EasyEDA 与 KiCad 同一条硬签核:设计评审、LCSC 料号、绝缘/板边安全、逐段线宽/过孔、设计后仿真、原理图↔PCB 连通与意图规则追溯表、说明书(含仿真章节)与设计报告齐全;任一不过非零退出。见 [kicad](../../.agents/skills/pcbpilot/references/kicad.md#发布签核pcbpilot-signoffeasyeda-与-kicad-同一条) |
 | 历史流程记录 | `workflow status/advance` | 兼容读取/记录 `outline_confirmed`、`pre_route_passed`、`post_route_checked`；typed action 不再据此拒绝执行 |
 
 ## 二、待支持 / 路线

@@ -116,6 +116,35 @@ pcbpilot kicad route --pcb GasV5_A.kicad_pcb --intent intent.json --sim sim.json
 7. **设计报告**（门禁 `design-report`）后，8. **发布评审**（review-panel `layout` 阶段，证据加上报告 JSON、`summary.json`、
    `board-final.json`）。任何门禁失败退出码非零。
 
+## 发布签核（`pcbpilot signoff`，EasyEDA 与 KiCad 同一条）
+
+`kicad route` 最后一步自动运行；EasyEDA 流程对 `pcb auto route` / `pcb gate` 的 `--out-dir` 运行同一命令：
+
+```bash
+pcbpilot signoff --run-dir route/ --intent intent.json --sim sim.json --connectivity sch.json [--values values.json]
+```
+
+只读文件（board-final.json、意图、仿真、原理图连接、review.json、说明书、设计报告），任何一项不过即非零退出：
+
+| 门禁 | 覆盖的核心卖点 |
+|---|---|
+| `signoff-review` | 设计阶段 Codex + Kimi + Claude 评审通过（review.json，stage=design） |
+| `signoff-parts` | 每个 BOM 器件都有合法 LCSC C 号（原理图 supplierId / `--values` / 板上 LCSC 字段；安装孔、Mark、测试点、Logo 跳过） |
+| `signoff-safety` | 绝缘对电气间隙 / 爬电（开槽计入）+ 铜到板边（pkg/safety：IEC 60664-1、62368-1、60601-1 MOOP/MOPP、61010-1） |
+| `signoff-copper` | 按每段仿真电流的线宽、不低于 `widthMil.min`（禁止颈缩处）、过孔组载流 |
+| `signoff-ir` | 设计后仿真结论 pass/warn（IR 压降、开路、过孔电流、温升） |
+| `signoff-continuity` | 原理图 pin→net 划分 == 板上焊盘网络（`ComparePinNets`） |
+| `signoff-trace` | 每条意图规则可追溯到原理图网络、器件和板上焊盘；表格写在 `signoff.md` |
+| `signoff-artifacts` | post.json、带设计后仿真章节的说明书 HTML、设计报告 report.json 均存在 |
+
+## 计时与提速（`summary.timings`）
+
+`kicad route` 记录每段墙钟：设计评审、规则、输入 DRC、网络类、DSN 导出/准备、fastroute、SES 导入、过孔阵列、加宽、铺铜、丝印、
+每个门禁（DRC、快照、仿真、意图/安全、尾部门禁）、IR 收敛、报告、发布评审、签核。PicoRick（145 件，4 层，rip-up）实测
+303 s → 213 s：multi-start=4 改为与主布线**并行的推测运行**（≥2 核，`--parallel-multi-start`，255.7 → 164.7 s）；
+每轮门禁只跑一次 `kicad-cli` DRC（错误进门禁、警告只统计）；丝印轮次与上一轮相同即停止。剩余大头是 fastroute 本身与丝印规划
+（共用的 planSilkTight，约 12 s/轮）。`kicad route` 没有 `--candidates` 候选摆放试布（那是 `pcb auto route` 的功能）。
+
 ## 已知限制与坑
 
 - 原生 DSN 把 KiCad「power」类型且整层铺铜的内层导成 plane，fastroute 不在其上走线。
@@ -126,5 +155,16 @@ pcbpilot kicad route --pcb GasV5_A.kicad_pcb --intent intent.json --sim sim.json
 
 ## 验证记录（2026-10-09，KiCad 10.0.7，fastroute 0.1.13）
 
-见仓库提交说明与开发会话报告；固定回归：`PCBPILOT_KICAD_LIVE=1 PCBPILOT_FASTROUTE_LIVE=<fastroute> go test ./internal/app -run TestKicadLive`
+- **Gas Module V5 A**（转换来的 KiCad 板，203 封装/199 有 LCSC，4 层，无 .kicad_pro，草稿副本）：设计评审**未通过**
+  （三家一致：J2/J8 与 CONNECTOR_PINOUT.md 不符；Codex 另有 R-12 BAT54S 钳位、ADC VD>VA 等），按规则停止布线；
+  为验证布线管线另用标注为测试用途的 waiver 跑通：0 → 2 条 fastroute 未布通（1 条由 GND 铺铜接上，1 条 +5V_SENS 真开路，
+  KiCad unconnected 1）；KiCad DRC 14 = 13 条输入板原有的 courtyards_overlap（摆放问题）+ 1 unconnected；copper-to-edge、
+  isolation、via-current、intent-rules、intent-widths（segment）通过；post-layout-sim 失败（SV1/SV3/PV1_DRV IR 超预算，
+  另有 1 条 +3V3「no copper path」为仿真栅格对过孔贴焊盘边的误判，KiCad 判定连通）；丝印 68 处（密板，规划器未解决的标签）；
+  说明书、设计报告生成。单次约 18 min（评审复用时）。`pcbpilot signoff`（以 EasyEDA 原理图连接 pre-connectivity.json 对照）：
+  review / parts（199/199 LCSC）/ safety / copper / trace / artifacts 通过，ir 与 continuity 失败
+  （Q1–Q5 第 1 脚在板上有网、原理图连接里没有：栅极网络脚号与 JLC 封装不一致，需原理图侧核对）。
+- **PicoRick One revA**（草稿副本，145 件 4 层，rip-up，无 sim/评审）：2 条未布通，见上文计时。
+
+固定回归：固定回归：`PCBPILOT_KICAD_LIVE=1 PCBPILOT_FASTROUTE_LIVE=<fastroute> go test ./internal/app -run TestKicadLive`
 （自带 MIT 小板 `internal/kicad/testdata/tiny.kicad_pcb`，由同目录 `gen_tiny.py` 生成）。

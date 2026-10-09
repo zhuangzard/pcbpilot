@@ -90,7 +90,7 @@ metadata:
 | 原理图美观度（只报告）、标签 vs 导线、总线/虚拟总线（`sch aesthetics`、`sch bus`） | [schematic-wiring.md](references/schematic-wiring.md#标签-vs-导线总线与原理图美观度软层度量--opt-in-生成) |
 | PCB 布局 | [pcb.md](references/pcb.md)、[pcb-layout.md](references/pcb-layout.md) |
 | PCB 布线、铺铜、禁布区 | [pcb-routing.md](references/pcb-routing.md) |
-| KiCad 后端：`.kicad_pcb` 快照、KiCad 原理图→连接 IR、与 EasyEDA 同套计算和门禁的 fastroute 布线（设计评审、意图/安全规则、过孔阵列、加宽、铺铜、丝印、设计后仿真、IR 收敛、设计报告、说明书；`kicad snapshot` / `kicad netlist` / `kicad route`） | [kicad.md](references/kicad.md) |
+| KiCad 后端：`.kicad_pcb` 快照、KiCad 原理图→连接 IR、与 EasyEDA 同套计算和门禁的 fastroute 布线（设计评审、意图/安全规则、过孔阵列、加宽、铺铜、丝印、设计后仿真、IR 收敛、设计报告、说明书；`kicad snapshot` / `kicad netlist` / `kicad route`）；发布前统一签核 `pcbpilot signoff`（EasyEDA 同用） | [kicad.md](references/kicad.md) |
 | 协作边界：原理图深入、PCB 默认只检查、精确版本门禁、WARN 判定（**每个 EDA 会话先读**） | [collaboration-workflow.md](references/collaboration-workflow.md) |
 | 把一句需求翻译成精确的数据文件与命令（契约：单位/坐标/锚点/层号/溯源） | [recipes/index.md](references/recipes/index.md) |
 | 原理图 → PCB 交接与逐焊盘对账 | [recipes/schematic-to-pcb.md](references/recipes/schematic-to-pcb.md)、[`scripts/pad-net-diff.py`](scripts/pad-net-diff.py) |
