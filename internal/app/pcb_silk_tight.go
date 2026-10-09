@@ -8,13 +8,14 @@ package app
 // is computed here from the board dump so it can be tested offline; the
 // verdict always comes from the real rendered boxes read back afterwards.
 //
-// Order of resolution (user decision 2026-10-06): the nearest free slot on
-// any of the four sides (label horizontal), then the label turned 90° on the
-// four sides, then a dense cluster (decap row, resistor array) gets its
-// labels as an ordered row / column beside the group, each label on its own
-// part. Text is never shrunk. What still has no slot is reported with a
-// suggested group label ("C21–C24"); group labels and leader lines are not
-// drawn automatically.
+// Order of resolution (user decisions 2026-10-06, 2026-10-09): the nearest
+// free slot on any of the four sides or four corners (label horizontal),
+// then the label turned 90°, then a dense cluster (decap row, resistor
+// array) gets its labels as an ordered row / column beside the group, each
+// label on its own part; then the label at the fab minimum size (MinFont,
+// JLC 0.8 mm height / 0.15 mm stroke) on the same slots; then group labels
+// ("C21–C24", planSilkGroups). Obstacles sit in a uniform-grid index
+// (silkIndex), so a candidate slot costs only its neighbourhood.
 
 import (
 	"encoding/json"
@@ -41,6 +42,10 @@ type silkTightOpts struct {
 	LineWidth  float64 // project stroke; 0 = leave as is
 	FabMinLine float64 // fab minimum stroke (JLC 0.15 mm = 5.9 mil)
 	ViaOpening bool    // gate: vias are soldermask openings (not tented)
+	// MinFont: a label with no slot at the project size may shrink to this
+	// height (fab minimum, JLC 0.8 mm = 31.5 mil; 0 = never shrink). The
+	// gate fails below min(project size, MinFont).
+	MinFont float64
 	// Group labels for what has no own slot: members' footprints within
 	// GroupLink of each other form a group; its one text sits within
 	// GroupMaxDist of the group's box; NoGroups leaves them unresolved.
@@ -49,7 +54,7 @@ type silkTightOpts struct {
 }
 
 func defaultSilkTightOpts() silkTightOpts {
-	return silkTightOpts{Gap: 5, MaxDist: 30, PadClear: 6, LabelClear: 2, EdgeClear: 8, FabMinLine: 5.9, GroupLink: 150, GroupMaxDist: 80}
+	return silkTightOpts{Gap: 5, MaxDist: 30, PadClear: 6, LabelClear: 2, EdgeClear: 8, FabMinLine: 5.9, MinFont: 31.5, GroupLink: 150, GroupMaxDist: 80}
 }
 
 type silkBox struct{ MinX, MinY, MaxX, MaxY float64 }
@@ -102,6 +107,7 @@ type silkLabel struct {
 	Cur      silkBox // current rendered box
 	Rot      int     // current rotation 0/90/180/270
 	Font     float64 // current font size
+	Target   float64 // project size Len/Hgt are measured at (0 = unknown)
 	Fixed    bool    // not moved (no own footprint known)
 }
 
@@ -110,8 +116,11 @@ type silkPlaced struct {
 	ID, Ref string
 	Box     silkBox
 	Rot     int    // 0 or 90
-	How     string // side / rotated / group-row / group-col / unresolved
+	How     string // side / rotated / group-row / group-col / unresolved (+small)
 	Moved   bool
+	// Font is the shrunk height when no slot fits at the project size
+	// (MinFont); 0 = the project size.
+	Font float64 `json:",omitempty"`
 }
 
 // silkScene is everything a label must keep off, per silk layer.
@@ -121,6 +130,100 @@ type silkScene struct {
 	Bodies  map[int][]silkBox // footprint boxes, per silk layer, with owner ref
 	BodyRef map[int][]string
 	Fixed   map[int][]silkBox // free strings and labels not moved
+	// Vias: tented vias (grown by PadClear) — obstacles unless overVias.
+	Vias     map[int][]silkBox
+	overVias bool
+	// idx: the static obstacles above per silk layer (buildIndex); nil =
+	// linear scans.
+	idx map[int]*silkIndex
+}
+
+// silkIndex is a uniform grid over one layer's static obstacles.
+type silkIndex struct {
+	cell  float64
+	items []silkObstacle
+	grid  map[[2]int][]int32
+	stamp []uint32
+	gen   uint32
+}
+
+type silkObstacle struct {
+	b    silkBox
+	kind uint8 // 0 hard (pad / via / hole), 1 body (ref), 2 fixed silk, 3 tented via
+	ref  string
+}
+
+const silkIndexCell = 100.0 // mil
+
+func (x *silkIndex) cells(b silkBox) (int, int, int, int) {
+	return int(math.Floor(b.MinX / x.cell)), int(math.Floor(b.MinY / x.cell)), int(math.Floor(b.MaxX / x.cell)), int(math.Floor(b.MaxY / x.cell))
+}
+
+func (x *silkIndex) add(o silkObstacle) {
+	i := int32(len(x.items))
+	x.items = append(x.items, o)
+	x0, y0, x1, y1 := x.cells(o.b)
+	for cx := x0; cx <= x1; cx++ {
+		for cy := y0; cy <= y1; cy++ {
+			k := [2]int{cx, cy}
+			x.grid[k] = append(x.grid[k], i)
+		}
+	}
+}
+
+// any reports whether fn holds for an obstacle whose cells meet q.
+func (x *silkIndex) any(q silkBox, fn func(*silkObstacle) bool) bool {
+	if len(x.stamp) < len(x.items) {
+		x.stamp = make([]uint32, len(x.items))
+	}
+	x.gen++
+	x0, y0, x1, y1 := x.cells(q)
+	for cx := x0; cx <= x1; cx++ {
+		for cy := y0; cy <= y1; cy++ {
+			for _, i := range x.grid[[2]int{cx, cy}] {
+				if x.stamp[i] == x.gen {
+					continue
+				}
+				x.stamp[i] = x.gen
+				if fn(&x.items[i]) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// buildIndex indexes Hard, Bodies and Fixed per layer (call after the scene
+// is complete; legal then never scans them linearly).
+func (sc *silkScene) buildIndex() {
+	sc.idx = map[int]*silkIndex{}
+	get := func(l int) *silkIndex {
+		if sc.idx[l] == nil {
+			sc.idx[l] = &silkIndex{cell: silkIndexCell, grid: map[[2]int][]int32{}}
+		}
+		return sc.idx[l]
+	}
+	for l, bs := range sc.Hard {
+		for _, b := range bs {
+			get(l).add(silkObstacle{b: b, kind: 0})
+		}
+	}
+	for l, bs := range sc.Bodies {
+		for i, b := range bs {
+			get(l).add(silkObstacle{b: b, kind: 1, ref: sc.BodyRef[l][i]})
+		}
+	}
+	for l, bs := range sc.Fixed {
+		for _, b := range bs {
+			get(l).add(silkObstacle{b: b, kind: 2})
+		}
+	}
+	for l, bs := range sc.Vias {
+		for _, b := range bs {
+			get(l).add(silkObstacle{b: b, kind: 3})
+		}
+	}
 }
 
 var refPrefixRe = regexp.MustCompile(`^([A-Za-z]+)(\d+)`)
@@ -128,7 +231,7 @@ var refPrefixRe = regexp.MustCompile(`^([A-Za-z]+)(\d+)`)
 // silkTightInput builds labels and the scene from a board dump (components
 // with pads and bbox, silk, vias, footprint holes, outline).
 func silkTightInput(snap *boardSnapshot, opt silkTightOpts) ([]silkLabel, silkScene, float64) {
-	sc := silkScene{Board: snap.Outline, Hard: map[int][]silkBox{}, Bodies: map[int][]silkBox{}, BodyRef: map[int][]string{}, Fixed: map[int][]silkBox{}}
+	sc := silkScene{Board: snap.Outline, Hard: map[int][]silkBox{}, Bodies: map[int][]silkBox{}, BodyRef: map[int][]string{}, Fixed: map[int][]silkBox{}, Vias: map[int][]silkBox{}}
 	sideSilk := func(side int) int {
 		if side == pcbSideBottom {
 			return silkBottomLayer
@@ -164,7 +267,15 @@ func silkTightInput(snap *boardSnapshot, opt silkTightOpts) ([]silkLabel, silkSc
 		var vias []widenVia
 		if decodeAny(snap.Copper.Vias, &vias) == nil {
 			for _, v := range vias {
-				both(silkBoxAt(v.X, v.Y, v.Diameter, v.Diameter).grow(opt.PadClear))
+				b := silkBoxAt(v.X, v.Y, v.Diameter, v.Diameter).grow(opt.PadClear)
+				if opt.ViaOpening {
+					both(b) // soldermask openings: like pads
+					continue
+				}
+				// Tented vias: silk may print over them (the gate does not
+				// check them); a slot clear of them is still preferred.
+				sc.Vias[silkTopLayer] = append(sc.Vias[silkTopLayer], b)
+				sc.Vias[silkBottomLayer] = append(sc.Vias[silkBottomLayer], b)
 			}
 		}
 	}
@@ -202,7 +313,7 @@ func silkTightInput(snap *boardSnapshot, opt silkTightOpts) ([]silkLabel, silkSc
 		if t.FontSize > 0 && t.FontSize < font {
 			ln, hg = ln*font/t.FontSize, hg*font/t.FontSize // never shrink: only grow to the project size
 		}
-		l := silkLabel{ID: t.ID, Ref: t.Text, Layer: t.Layer, Len: ln, Hgt: hg, Cur: cur, Rot: rot, Font: t.FontSize}
+		l := silkLabel{ID: t.ID, Ref: t.Text, Layer: t.Layer, Len: ln, Hgt: hg, Cur: cur, Rot: rot, Font: t.FontSize, Target: math.Max(font, t.FontSize)}
 		if c, ok := comps[t.CompID]; ok && c.BBox != nil {
 			l.Own = silkBox{c.BBox.MinX, c.BBox.MinY, c.BBox.MaxX, c.BBox.MaxY}
 		} else {
@@ -212,6 +323,7 @@ func silkTightInput(snap *boardSnapshot, opt silkTightOpts) ([]silkLabel, silkSc
 		}
 		labels = append(labels, l)
 	}
+	sc.buildIndex()
 	return labels, sc, font
 }
 
@@ -245,8 +357,32 @@ func (sc *silkScene) legal(b silkBox, ref string, layer int, own silkBox, placed
 	if b.overlaps(own) {
 		return false
 	}
+	g := b.grow(opt.LabelClear)
+	if x := sc.idx[layer]; x != nil {
+		if x.any(g, func(o *silkObstacle) bool {
+			switch o.kind {
+			case 0:
+				return b.overlaps(o.b)
+			case 1:
+				return o.ref != ref && b.overlaps(o.b)
+			case 3:
+				return !sc.overVias && b.overlaps(o.b)
+			}
+			return g.overlaps(o.b)
+		}) {
+			return false
+		}
+		return sc.freeOfPlaced(g, ref, layer, placed, layerOf)
+	} else if sc.idx != nil {
+		return sc.freeOfPlaced(g, ref, layer, placed, layerOf)
+	}
 	for _, o := range sc.Hard[layer] {
 		if b.overlaps(o) {
+			return false
+		}
+	}
+	for _, o := range sc.Vias[layer] {
+		if !sc.overVias && b.overlaps(o) {
 			return false
 		}
 	}
@@ -255,12 +391,17 @@ func (sc *silkScene) legal(b silkBox, ref string, layer int, own silkBox, placed
 			return false
 		}
 	}
-	g := b.grow(opt.LabelClear)
 	for _, o := range sc.Fixed[layer] {
 		if g.overlaps(o) {
 			return false
 		}
 	}
+	return sc.freeOfPlaced(g, ref, layer, placed, layerOf)
+}
+
+// freeOfPlaced: g (a label grown by LabelClear) meets no placed label of
+// another ref on layer.
+func (sc *silkScene) freeOfPlaced(g silkBox, ref string, layer int, placed []silkPlaced, layerOf map[string]int) bool {
 	for _, p := range placed {
 		if p.Ref != ref && layerOf[p.ID] == layer && g.overlaps(p.Box) {
 			return false
@@ -305,6 +446,53 @@ func sideSlots(own silkBox, w, h, g float64) []struct {
 	return out
 }
 
+// cornerSlots are the four diagonal positions at gap g on both axes.
+func cornerSlots(own silkBox, w, h, g float64) []struct {
+	side string
+	box  silkBox
+} {
+	return []struct {
+		side string
+		box  silkBox
+	}{
+		{"top-right", silkBoxAt(own.MaxX+g+w/2, own.MaxY+g+h/2, w, h)},
+		{"top-left", silkBoxAt(own.MinX-g-w/2, own.MaxY+g+h/2, w, h)},
+		{"bottom-right", silkBoxAt(own.MaxX+g+w/2, own.MinY-g-h/2, w, h)},
+		{"bottom-left", silkBoxAt(own.MinX-g-w/2, own.MinY-g-h/2, w, h)},
+	}
+}
+
+// silkSlot is one candidate box of a label.
+type silkSlot struct {
+	box silkBox
+	rot int
+	how string
+}
+
+// labelSlots are a label's candidates at gap g in preference order: the
+// four sides horizontal, the four sides turned 90°, then the four corners
+// horizontal and turned (the eight positions × two orientations).
+func labelSlots(own silkBox, ln, hg, g float64, rots []int) []silkSlot {
+	var out []silkSlot
+	for _, corners := range []bool{false, true} {
+		for _, rot := range rots {
+			w, h := ln, hg
+			suffix := ""
+			if rot == 90 {
+				w, h, suffix = hg, ln, "+rotated"
+			}
+			ss := sideSlots(own, w, h, g)
+			if corners {
+				ss = cornerSlots(own, w, h, g)
+			}
+			for _, s := range ss {
+				out = append(out, silkSlot{s.box, rot, s.side + suffix})
+			}
+		}
+	}
+	return out
+}
+
 // planSilkTight places every label. Labels already legal and within reach
 // stay; the rest are placed most-constrained first.
 func planSilkTight(labels []silkLabel, sc silkScene, opt silkTightOpts) ([]silkPlaced, []string) {
@@ -330,17 +518,16 @@ func planSilkTight(labels []silkLabel, sc silkScene, opt silkTightOpts) ([]silkP
 		todo = append(todo, l)
 	}
 	// Most constrained first: fewest legal slots against the static scene.
+	// The static-legal slots are computed once per label (and size); every
+	// later try only checks them against the labels placed so far.
+	cache := &silkSlotCache{sc: sc, layerOf: layerOf, opt: opt, m: map[string][]silkSlot{}}
 	free := map[string]int{}
-	for _, l := range todo {
-		n := 0
-		for g := opt.Gap; g <= opt.MaxDist; g += 2 {
-			for _, s := range append(sideSlots(l.Own, l.Len, l.Hgt, g), sideSlots(l.Own, l.Hgt, l.Len, g)...) {
-				if sc.legal(s.box, l.Ref, l.Layer, l.Own, nil, layerOf, opt) {
-					n++
-				}
-			}
+	small := map[string]bool{} // no static slot at the project size: plan at MinFont from the start
+	for i, l := range todo {
+		free[l.ID] = len(cache.of(l))
+		if sl, ok := shrunkLabel(l, opt); ok && free[l.ID] == 0 && len(cache.of(sl)) > 0 {
+			todo[i], small[l.ID], free[l.ID] = sl, true, len(cache.of(sl))
 		}
-		free[l.ID] = n
 	}
 	sort.SliceStable(todo, func(i, j int) bool {
 		if free[todo[i].ID] != free[todo[j].ID] {
@@ -353,17 +540,33 @@ func planSilkTight(labels []silkLabel, sc silkScene, opt silkTightOpts) ([]silkP
 	for _, l := range labels {
 		byID[l.ID] = l
 	}
+	markSmall := func(id string) {
+		for i := range placed {
+			if placed[i].ID == id && placed[i].Font == 0 {
+				placed[i].Font = opt.MinFont
+				placed[i].How += "+small"
+			}
+		}
+	}
+	var notes []string
 	for _, l := range todo {
-		if p, ok := placeOne(l, sc, placed, layerOf, opt); ok {
+		if p, ok := placeOne(l, placed, cache); ok {
 			placed = append(placed, p)
-		} else if np, ok := placeEvicting(l, byID, sc, placed, layerOf, opt); ok {
+		} else if np, ok := placeEvicting(l, byID, placed, cache); ok {
 			placed = np
 		} else {
+			if small[l.ID] {
+				l = byID[l.ID] // the cluster pass works at the project size
+			}
 			failed = append(failed, l)
+			continue
+		}
+		if small[l.ID] {
+			markSmall(l.ID)
+			notes = append(notes, fmt.Sprintf("%s: placed at the fab minimum %.1f mil (project %.1f): no slot at the project size", l.Ref, opt.MinFont, byID[l.ID].Target))
 		}
 	}
 	// Clusters: re-place a failed label's whole row / column together.
-	var notes []string
 	done := map[string]bool{}
 	for _, l := range failed {
 		if done[l.ID] {
@@ -392,6 +595,24 @@ func planSilkTight(labels []silkLabel, sc silkScene, opt silkTightOpts) ([]silkP
 			notes = append(notes, fmt.Sprintf("cluster %s: no aligned row/column fits; suggested group label %q (not drawn)", refsOf(members), groupLabel(members)))
 		}
 	}
+	// Fab minimum size: the same slots for the label at MinFont.
+	for _, l := range failed {
+		sl, can := shrunkLabel(l, opt)
+		if done[l.ID] || !can {
+			continue
+		}
+		p, ok := placeOne(sl, placed, cache)
+		if ok {
+			placed = append(placed, p)
+		} else if np, ok2 := placeEvicting(sl, byID, placed, cache); ok2 {
+			placed, ok = np, true
+		}
+		if ok {
+			markSmall(l.ID)
+			done[l.ID] = true
+			notes = append(notes, fmt.Sprintf("%s: placed at the fab minimum %.1f mil (project %.1f): no slot at the project size", l.Ref, opt.MinFont, l.Target))
+		}
+	}
 	for _, l := range failed {
 		if !done[l.ID] {
 			notes = append(notes, fmt.Sprintf("%s: no legal slot within %.0f mil (label left at (%.1f,%.1f)); leader line not drawn", l.Ref, opt.MaxDist, l.Cur.cx(), l.Cur.cy()))
@@ -402,74 +623,154 @@ func planSilkTight(labels []silkLabel, sc silkScene, opt silkTightOpts) ([]silkP
 	return placed, notes
 }
 
-// placeOne: nearest gap first; at each gap the four sides horizontal, then
-// the four sides turned 90° (reads from the right).
-func placeOne(l silkLabel, sc silkScene, placed []silkPlaced, layerOf map[string]int, opt silkTightOpts) (silkPlaced, bool) {
-	for g := opt.Gap; g <= opt.MaxDist; g += 2 {
-		for _, rot := range []int{0, 90} {
-			w, h := l.Len, l.Hgt
-			if rot == 90 {
-				w, h = h, w
-			}
-			for _, s := range sideSlots(l.Own, w, h, g) {
-				if s.box.dist(l.Own) <= opt.MaxDist && sc.legal(s.box, l.Ref, l.Layer, l.Own, placed, layerOf, opt) {
-					how := s.side
-					if rot == 90 {
-						how += "+rotated"
+// shrunkLabel is l at the fab minimum height (ok = false when MinFont is
+// off or not below the label's project size).
+func shrunkLabel(l silkLabel, opt silkTightOpts) (silkLabel, bool) {
+	if opt.MinFont <= 0 || l.Target <= opt.MinFont+0.05 {
+		return l, false
+	}
+	k := opt.MinFont / l.Target
+	l.Len, l.Hgt = l.Len*k, l.Hgt*k
+	return l, true
+}
+
+// silkSlotCache holds each label's candidate slots (labelSlots over every
+// gap, within MaxDist) that are legal against the static scene, in
+// preference order, keyed by label and size.
+type silkSlotCache struct {
+	sc      silkScene
+	layerOf map[string]int
+	opt     silkTightOpts
+	m       map[string][]silkSlot
+}
+
+func (c *silkSlotCache) of(l silkLabel) []silkSlot {
+	key := fmt.Sprintf("%s|%.3f|%.3f", l.ID, l.Len, l.Hgt)
+	if v, ok := c.m[key]; ok {
+		return v
+	}
+	out := []silkSlot{}
+	// Clear of tented vias first; then (tented vias only) over them.
+	over := c.sc
+	over.overVias = true
+	for pass, sc := range []*silkScene{&c.sc, &over} {
+		if pass == 1 && len(c.sc.Vias[l.Layer]) == 0 {
+			break
+		}
+		clean := func(b silkBox, own silkBox) bool {
+			return pass == 0 || !c.sc.legal(b, l.Ref, l.Layer, own, nil, c.layerOf, c.opt)
+		}
+		for g := c.opt.Gap; g <= c.opt.MaxDist; g += 2 {
+			for _, s := range labelSlots(l.Own, l.Len, l.Hgt, g, []int{0, 90}) {
+				if s.box.dist(l.Own) <= c.opt.MaxDist && clean(s.box, l.Own) && sc.legal(s.box, l.Ref, l.Layer, l.Own, nil, c.layerOf, c.opt) {
+					if pass == 1 {
+						s.how += "+over-via"
 					}
-					return silkPlaced{ID: l.ID, Ref: l.Ref, Box: s.box, Rot: rot, How: how, Moved: true}, true
+					out = append(out, s)
 				}
 			}
+		}
+		// Last: inside the own footprint box, centred (an IC body, a large
+		// connector), clear of its pads like every slot.
+		for _, s := range insideSlots(l.Own, l.Len, l.Hgt) {
+			if clean(s.box, silkBox{}) && sc.legal(s.box, l.Ref, l.Layer, silkBox{}, nil, c.layerOf, c.opt) {
+				if pass == 1 {
+					s.how += "+over-via"
+				}
+				out = append(out, s)
+			}
+		}
+	}
+	c.m[key] = out
+	return out
+}
+
+// insideSlots: the label centred in own, horizontal and turned 90°, when
+// own can hold it.
+func insideSlots(own silkBox, ln, hg float64) []silkSlot {
+	var out []silkSlot
+	for _, rot := range []int{0, 90} {
+		w, h, how := ln, hg, "inside"
+		if rot == 90 {
+			w, h, how = hg, ln, "inside+rotated"
+		}
+		if w <= own.w() && h <= own.h() {
+			out = append(out, silkSlot{silkBoxAt(own.cx(), own.cy(), w, h), rot, how})
+		}
+	}
+	return out
+}
+
+// placeOne: nearest gap first; at each gap the four sides horizontal, the
+// four sides turned 90° (reads from the right), then the four corners.
+func placeOne(l silkLabel, placed []silkPlaced, c *silkSlotCache) (silkPlaced, bool) {
+	for _, s := range c.of(l) {
+		if c.sc.freeOfPlaced(s.box.grow(c.opt.LabelClear), l.Ref, l.Layer, placed, c.layerOf) {
+			return silkPlaced{ID: l.ID, Ref: l.Ref, Box: s.box, Rot: s.rot, How: s.how, Moved: true}, true
 		}
 	}
 	return silkPlaced{}, false
 }
 
-// placeEvicting finds a slot of l that only one placed label blocks and
-// moves that label to another legal slot of its own (one level deep).
-func placeEvicting(l silkLabel, byID map[string]silkLabel, sc silkScene, placed []silkPlaced, layerOf map[string]int, opt silkTightOpts) ([]silkPlaced, bool) {
-	for g := opt.Gap; g <= opt.MaxDist; g += 2 {
-		for _, rot := range []int{0, 90} {
-			w, h := l.Len, l.Hgt
-			if rot == 90 {
-				w, h = h, w
-			}
-			for _, s := range sideSlots(l.Own, w, h, g) {
-				if s.box.dist(l.Own) > opt.MaxDist || !sc.legal(s.box, l.Ref, l.Layer, l.Own, nil, layerOf, opt) {
-					continue
+// placeEvicting finds a slot of l that at most silkMaxEvict placed labels
+// block and moves each of them to another legal slot of its own (one level
+// deep; a blocker with no slot at the project size may take one at the fab
+// minimum, MinFont).
+func placeEvicting(l silkLabel, byID map[string]silkLabel, placed []silkPlaced, c *silkSlotCache) ([]silkPlaced, bool) {
+	for _, s := range c.of(l) {
+		gb := s.box.grow(c.opt.LabelClear)
+		var block []int
+		for i, p := range placed {
+			if p.Ref != l.Ref && c.layerOf[p.ID] == l.Layer && gb.overlaps(p.Box) {
+				if block = append(block, i); len(block) > silkMaxEvict {
+					break
 				}
-				block := -1
-				gb := s.box.grow(opt.LabelClear)
-				for i, p := range placed {
-					if layerOf[p.ID] == l.Layer && gb.overlaps(p.Box) {
-						if block >= 0 {
-							block = -2
-							break
-						}
-						block = i
+			}
+		}
+		if len(block) == 0 || len(block) > silkMaxEvict {
+			continue
+		}
+		out := []silkPlaced{}
+		isBlock := map[int]bool{}
+		for _, i := range block {
+			isBlock[i] = true
+		}
+		for i, p := range placed {
+			if !isBlock[i] {
+				out = append(out, p)
+			}
+		}
+		out = append(out, silkPlaced{ID: l.ID, Ref: l.Ref, Box: s.box, Rot: s.rot, How: s.how, Moved: true})
+		ok := true
+		for _, i := range block {
+			v, known := byID[placed[i].ID]
+			if !known {
+				ok = false
+				break
+			}
+			p, got := placeOne(v, out, c)
+			if !got {
+				if sv, can := shrunkLabel(v, c.opt); can {
+					if p, got = placeOne(sv, out, c); got {
+						p.Font, p.How = c.opt.MinFont, p.How+"+small"
 					}
 				}
-				if block < 0 {
-					continue
-				}
-				v, ok := byID[placed[block].ID]
-				if !ok {
-					continue
-				}
-				how := s.side
-				if rot == 90 {
-					how += "+rotated"
-				}
-				mine := silkPlaced{ID: l.ID, Ref: l.Ref, Box: s.box, Rot: rot, How: how, Moved: true}
-				rest := append(append(append([]silkPlaced{}, placed[:block]...), placed[block+1:]...), mine)
-				if p, ok := placeOne(v, sc, rest, layerOf, opt); ok {
-					return append(rest, p), true
-				}
 			}
+			if !got {
+				ok = false
+				break
+			}
+			out = append(out, p)
+		}
+		if ok {
+			return out, true
 		}
 	}
 	return nil, false
 }
+
+// silkMaxEvict bounds the labels one placement may move away.
+const silkMaxEvict = 3
 
 // silkCluster is l's row or column: same prefix, same layer, neighbouring
 // footprints of similar size whose centres line up, chained.
@@ -671,6 +972,9 @@ type silkGroup struct {
 	Rot     int      `json:"rotation"`
 	Placed  bool     `json:"placed"`
 	Members silkBox  `json:"members"`
+	// Font: the fab minimum height when the text fits only at MinFont
+	// (0 = the project size).
+	Font float64 `json:"fontSize,omitempty"`
 }
 
 // planSilkGroups groups the unresolved labels whose footprints lie within
@@ -764,7 +1068,15 @@ func planSilkGroups(labels []silkLabel, sc silkScene, placed []silkPlaced, opt s
 			// "/" and "–" render wider than the average designator glyph
 			// (v21 B: "C19/C49/D9/R38" drawn over C26's designator).
 			ln := 1.15 * charW * float64(len([]rune(g.Text)))
-			g.Box, g.Rot, g.Placed = findGroupSlot(g.Members, ln, hgt, []int{0, 90}, g.Layer, sc, append(keep, groupPlaced(groups)...), layerOf, opt)
+			obst := append(append([]silkPlaced{}, keep...), groupPlaced(groups)...)
+			g.Box, g.Rot, g.Placed = findGroupSlot(g.Members, ln, hgt, []int{0, 90}, g.Layer, sc, obst, layerOf, opt)
+			// Then the group text at the fab minimum height.
+			if t := ms[0].Target; !g.Placed && opt.MinFont > 0 && t > opt.MinFont+0.05 {
+				k := opt.MinFont / t
+				if g.Box, g.Rot, g.Placed = findGroupSlot(g.Members, ln*k, hgt*k, []int{0, 90}, g.Layer, sc, obst, layerOf, opt); g.Placed {
+					g.Font = opt.MinFont
+				}
+			}
 		}
 		if g.Placed {
 			layerOf[fmt.Sprintf("group-%d", len(groups))] = g.Layer
@@ -803,15 +1115,9 @@ const maxGroupChars = 24
 // (along × across its baseline) beside members, within GroupMaxDist.
 func findGroupSlot(members silkBox, ln, hgt float64, rots []int, layer int, sc silkScene, obstacles []silkPlaced, layerOf map[string]int, opt silkTightOpts) (silkBox, int, bool) {
 	for d := opt.Gap; d <= opt.GroupMaxDist; d += 2 {
-		for _, rot := range rots {
-			w, h := ln, hgt
-			if rot == 90 {
-				w, h = h, w
-			}
-			for _, s := range sideSlots(members, w, h, d) {
-				if s.box.dist(members) <= opt.GroupMaxDist && sc.legal(s.box, "", layer, silkBox{}, obstacles, layerOf, opt) {
-					return s.box, rot, true
-				}
+		for _, s := range labelSlots(members, ln, hgt, d, rots) {
+			if s.box.dist(members) <= opt.GroupMaxDist && sc.legal(s.box, "", layer, silkBox{}, obstacles, layerOf, opt) {
+				return s.box, s.rot, true
 			}
 		}
 	}
@@ -991,8 +1297,14 @@ func silkGate(snap *boardSnapshot, font float64, opt silkTightOpts) gateResult {
 				add(50+d/10, "%s %s is %.1f mil from its footprint (max %.0f)", t.Text, at, d, opt.MaxDist)
 			}
 		}
-		if font > 0 && t.FontSize > 0 && t.FontSize < font-0.05 {
-			add(80, "%s %s text %.1f mil below the project size %.1f", t.Text, at, t.FontSize, font)
+		if floor := silkFontFloor(font, opt); floor > 0 && t.FontSize > 0 && t.FontSize < floor-0.05 {
+			if floor < font {
+				add(80, "%s %s text %.1f mil below the fab minimum %.1f (project size %.1f)", t.Text, at, t.FontSize, floor, font)
+			} else {
+				add(80, "%s %s text %.1f mil below the project size %.1f", t.Text, at, t.FontSize, font)
+			}
+		} else if t.FontSize > 0 && t.FontSize < font-0.05 {
+			info = append(info, fmt.Sprintf("%s text %.1f mil: below the project size %.1f, not below the fab minimum %.1f (shrunk to fit)", t.Text, t.FontSize, font, opt.MinFont))
 		}
 		if t.LineWidth > 0 && t.LineWidth < opt.FabMinLine-0.05 {
 			add(80, "%s %s stroke %.2f mil below the fab minimum %.2f", t.Text, at, t.LineWidth, opt.FabMinLine)
@@ -1021,6 +1333,15 @@ func silkGate(snap *boardSnapshot, font float64, opt silkTightOpts) gateResult {
 		g.Items = append(g.Items, b.text)
 	}
 	return g
+}
+
+// silkFontFloor is the smallest designator height the gate accepts: the
+// project size, or the fab minimum MinFont when that is smaller.
+func silkFontFloor(font float64, opt silkTightOpts) float64 {
+	if opt.MinFont > 0 && opt.MinFont < font {
+		return opt.MinFont
+	}
+	return font
 }
 
 // silkTightReport is the result of runSilkTight.
@@ -1090,10 +1411,13 @@ func runSilkTight(cfg *appConfig, window string, opt silkTightOpts, rounds int, 
 			if l.Rot != p.Rot {
 				pr["rotation"] = p.Rot
 			}
-			if l.Font > 0 && l.Font < font {
+			if p.Font > 0 {
+				pr["fontSize"] = p.Font
+				pr["lineWidth"] = math.Max(opt.LineWidth, opt.FabMinLine)
+			} else if l.Font > 0 && l.Font < font {
 				pr["fontSize"] = font
 			}
-			if opt.LineWidth > 0 {
+			if opt.LineWidth > 0 && p.Font == 0 {
 				pr["lineWidth"] = opt.LineWidth
 			}
 			if len(pr) == 0 {
@@ -1140,8 +1464,12 @@ func runSilkTight(cfg *appConfig, window string, opt silkTightOpts, rounds int, 
 			if lw <= 0 {
 				lw = 6
 			}
+			gf := font
+			if g.Font > 0 {
+				gf, lw = g.Font, math.Max(lw, opt.FabMinLine)
+			}
 			res, err := requestAction(cfg, "pcb.silk.add", window, map[string]any{"text": g.Text, "x": g.Box.MinX, "y": g.Box.MinY,
-				"layer": g.Layer, "fontSize": font, "lineWidth": lw, "rotation": g.Rot})
+				"layer": g.Layer, "fontSize": gf, "lineWidth": lw, "rotation": g.Rot})
 			if err != nil {
 				return rep, fmt.Errorf("group label %q: %w", g.Text, err)
 			}
@@ -1204,6 +1532,7 @@ func addSilkTightFlags(c *cobra.Command, o *silkTightOpts, prefix string) {
 	c.Flags().Float64Var(&o.FontSize, prefix+"font-size", 0, "project designator height (mil); 0 = the most common on the board. Never shrunk; the gate fails below it")
 	c.Flags().Float64Var(&o.LineWidth, prefix+"line-width", 0, "set moved designators to this stroke (mil); 0 = leave")
 	c.Flags().Float64Var(&o.FabMinLine, prefix+"fab-min-line", o.FabMinLine, "fab minimum silk stroke (mil; JLC 0.15 mm)")
+	c.Flags().Float64Var(&o.MinFont, prefix+"min-font", o.MinFont, "a designator with no slot at the project size may shrink to this height (mil; JLC minimum 0.8 mm = 31.5; 0 = never); the gate fails below it")
 	c.Flags().Float64Var(&o.PadClear, prefix+"pad-clear", o.PadClear, "designator to pad / via / hole clearance (mil; JLC silk-to-pad 0.15 mm)")
 	c.Flags().BoolVar(&o.ViaOpening, prefix+"via-openings", false, "gate: vias are soldermask openings (not tented)")
 	c.Flags().Float64Var(&o.GroupMaxDist, prefix+"group-max-dist", o.GroupMaxDist, "a group label (\"C21–C24\", \"R62/R63/R65\") sits within this of its parts' box (mil)")
