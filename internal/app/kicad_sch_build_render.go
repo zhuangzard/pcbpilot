@@ -14,6 +14,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -589,6 +590,17 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 	}
 	rep.Outputs["erc"] = filepath.Join(out, "erc.json")
 	rep.PartBoxes = sbPartBoxes(out, files)
+	if o.Render { // one SVG per sheet for a human / visual review
+		if cli, err := kicad.KicadCLI(); err == nil {
+			dir := filepath.Join(out, "render")
+			_ = os.MkdirAll(dir, 0o755)
+			if b, err := exec.Command(cli, "sch", "export", "svg", "--output", dir, rep.Root).CombinedOutput(); err != nil {
+				rep.Warnings = append(rep.Warnings, "render: "+sbClip(string(b), 200))
+			} else {
+				rep.Outputs["render"] = dir
+			}
+		}
+	}
 	tm.mark("commit")
 
 	// connectivity.json + intent

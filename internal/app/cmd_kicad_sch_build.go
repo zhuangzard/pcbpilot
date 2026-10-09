@@ -1111,7 +1111,7 @@ type sbOptions struct {
 	PlannerTimeout                 time.Duration
 	Requirements                   []string
 	Reviewers, Waivers             string
-	NoReview                       bool
+	NoReview, Render               bool
 	ReviewTimeout                  time.Duration
 }
 
@@ -1133,6 +1133,7 @@ func sbFlags(c *cobra.Command, o *sbOptions) {
 	f.BoolVar(&o.NoReview, "no-review", false, "skip the design review despite --requirements; needs a signed waiver {\"gate\":\"design-review\",\"match\":\"--no-review\"} in --waivers")
 	f.StringVar(&o.Waivers, "waivers", "", "JSON list of signed waivers [{gate,match,reason,by}]")
 	f.DurationVar(&o.ReviewTimeout, "review-timeout", 20*time.Minute, "per-reviewer time limit")
+	f.BoolVar(&o.Render, "render", false, "also export one SVG per sheet to <out>/render (kicad-cli sch export svg)")
 }
 
 func newKicadSchBuildCmd(stdout, stderr io.Writer) *cobra.Command {
