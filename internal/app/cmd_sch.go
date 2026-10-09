@@ -124,7 +124,7 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 		Short: "Schematic operations",
 	}
 	sch.PersistentFlags().StringVar(&window, "window", "", "EasyEDA window ID")
-	sch.PersistentFlags().String("backend", "easyeda", "editor backend for place/wire/netflag/no-connect/modify: easyeda (connector) or kicad (edits --kicad-sch; coordinates in KiCad mm, y down)")
+	sch.PersistentFlags().String("backend", "easyeda", "editor backend for place/wire/netflag/no-connect/modify/connect/autoconnect/layout-plan: easyeda (connector) or kicad (edits --kicad-sch; coordinates in KiCad mm, y down)")
 	sch.PersistentFlags().String("kicad-sch", "", "with --backend kicad: the .kicad_sch sheet to edit")
 	sch.AddCommand(newSchConnectivityCmd(cfg, &window, stdout, stderr))
 	sch.AddCommand(newSchIntentAnnotateCmd(cfg, &window, stdout, stderr))
@@ -1453,12 +1453,14 @@ pull fresh ids before any follow-up mutation on it.`,
 	{
 		var kind, net, direction, pinRef string
 		var x, y, offset, rotation float64
+		var connectFit bool
 		c := &cobra.Command{
 			Use:   "connect",
 			Short: "Stub a wire out of a pin and place a netflag/netport at its far end",
 			Args:  cobra.NoArgs,
 			Example: `  pcbpilot sch connect --pin U1:5 --kind power --net VCC
-  pcbpilot sch connect --x 100 --y 200 --kind gnd --net GND --direction down --offset 40`,
+  pcbpilot sch connect --x 100 --y 200 --kind gnd --net GND --direction down --offset 40
+  pcbpilot sch connect --backend kicad --kicad-sch power.kicad_sch --pin U1:5 --kind power --net +3V3  # mm; netlist-verified write`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if kind == "" {
 					return fmt.Errorf("--kind is required")
@@ -1472,6 +1474,19 @@ pull fresh ids before any follow-up mutation on it.`,
 				}
 				if err := validatePinTarget(pinRef != "", cmd.Flags().Changed("x"), cmd.Flags().Changed("y")); err != nil {
 					return err
+				}
+				if path, ok, err := kicadSchTarget(cmd); err != nil || ok {
+					if err != nil {
+						return err
+					}
+					if !cmd.Flags().Changed("offset") {
+						offset = 7.62
+					}
+					var rot *float64
+					if cmd.Flags().Changed("rotation") {
+						rot = &rotation
+					}
+					return kicadSchConnect(path, pinRef, x, y, canonicalKind, net, direction, offset, rot, connectFit, stdout)
 				}
 				if pinRef != "" {
 					x, y, err = resolveSchPinXY(cfg, window, pinRef)
@@ -1516,8 +1531,9 @@ pull fresh ids before any follow-up mutation on it.`,
 		c.Flags().StringVar(&kind, "kind", "", netflagKindHelp)
 		c.Flags().StringVar(&net, "net", "", "net name (required)")
 		c.Flags().StringVar(&direction, "direction", "", "visual stub direction (up=higher on canvas, down=lower): up, down, left, right")
-		c.Flags().Float64Var(&offset, "offset", 0, "wire length in schematic units")
+		c.Flags().Float64Var(&offset, "offset", 0, "wire length in schematic units (--backend kicad: mm, default 7.62)")
 		c.Flags().Float64Var(&rotation, "rotation", 0, "flag rotation override in degrees")
+		c.Flags().BoolVar(&connectFit, "fit", false, "--backend kicad: size the sheet to its content after writing (kicad sch-fit)")
 		sch.AddCommand(c)
 	}
 

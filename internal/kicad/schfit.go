@@ -231,28 +231,10 @@ func contentItems(root *sexp) (Box, []Box, bool) {
 			if at == nil {
 				continue
 			}
-			x, y, rot := at.num(1), at.num(2), at.num(3)
-			lb, ok := Box{}, false
-			if id := n.child("lib_id"); id != nil && len(id.list) > 1 {
-				lb, ok = libs[id.list[1].atom]
-			}
-			if !ok || math.IsInf(lb.MinX, 0) {
-				pt(x, y)
+			sb, ok := instanceBox(n, libs)
+			if !ok {
+				pt(at.num(1), at.num(2))
 				continue
-			}
-			mx, my := 1.0, 1.0
-			if m := n.child("mirror"); m != nil && len(m.list) > 1 {
-				if m.list[1].atom == "x" {
-					my = -1
-				} else {
-					mx = -1
-				}
-			}
-			a := -rot * math.Pi / 180 // symbol frame is y-up
-			sb := emptyBox()
-			for _, c := range [][2]float64{{lb.MinX, lb.MinY}, {lb.MaxX, lb.MinY}, {lb.MinX, lb.MaxY}, {lb.MaxX, lb.MaxY}} {
-				px, py := c[0]*mx, -c[1]*my
-				sb.add(x+px*math.Cos(a)-py*math.Sin(a), y+px*math.Sin(a)+py*math.Cos(a))
 			}
 			item(sb)
 			for _, p := range n.list {
@@ -296,6 +278,38 @@ func contentItems(root *sexp) (Box, []Box, bool) {
 		}
 	}
 	return b, items, found
+}
+
+// instanceBox is a placed symbol's body+pins extent on the sheet (mm, y
+// down); false when its library symbol is unknown or empty.
+func instanceBox(n *sexp, libs map[string]Box) (Box, bool) {
+	at := n.child("at")
+	if at == nil {
+		return Box{}, false
+	}
+	x, y, rot := at.num(1), at.num(2), at.num(3)
+	lb, ok := Box{}, false
+	if id := n.child("lib_id"); id != nil && len(id.list) > 1 {
+		lb, ok = libs[id.list[1].atom]
+	}
+	if !ok || math.IsInf(lb.MinX, 0) {
+		return Box{}, false
+	}
+	mx, my := 1.0, 1.0
+	if m := n.child("mirror"); m != nil && len(m.list) > 1 {
+		if m.list[1].atom == "x" {
+			my = -1
+		} else {
+			mx = -1
+		}
+	}
+	a := -rot * math.Pi / 180 // symbol frame is y-up
+	sb := emptyBox()
+	for _, c := range [][2]float64{{lb.MinX, lb.MinY}, {lb.MaxX, lb.MinY}, {lb.MinX, lb.MaxY}, {lb.MaxX, lb.MaxY}} {
+		px, py := c[0]*mx, -c[1]*my
+		sb.add(x+px*math.Cos(a)-py*math.Sin(a), y+px*math.Sin(a)+py*math.Cos(a))
+	}
+	return sb, true
 }
 
 // propertyHidden reports a symbol field hidden by (hide yes) or (effects … hide).
