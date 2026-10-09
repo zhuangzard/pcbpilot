@@ -61,3 +61,26 @@ func TestViaRingGapStaysOpen(t *testing.T) {
 		t.Errorf("0.5 mil gap: VIN status %s, want open", n.Status)
 	}
 }
+
+// An open load next to an over-budget one: both findings are reported (the
+// open must not hide the drop the IR closure widens by).
+func TestOpenDoesNotHideOverBudget(t *testing.T) {
+	b := newTB(4000, 300, 2)
+	b.part("S", 1, pad("1", "VIN", 1, 100, 150, 10, 10))
+	b.part("L", 1, pad("1", "VIN", 1, 3900, 150, 10, 10))
+	b.part("M", 1, pad("1", "VIN", 1, 2000, 280, 10, 10)) // no copper to it
+	b.line("VIN", 1, 100, 150, 3900, 150, 4)
+	sim := simDoc(map[string][][4]any{"VIN": {{"S", "1", "source", 3.0}, {"L", "1", "sink", 2.0}, {"M", "1", "sink", 1.0}}}, nil, nil)
+	r, err := Run(b.json(), sim, DefaultOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var open, drop bool
+	for _, f := range r.Findings {
+		open = open || f.Kind == "open"
+		drop = drop || (f.Kind == "ir-drop" && f.Severity == "fail")
+	}
+	if !open || !drop {
+		t.Fatalf("findings %+v: want both open and ir-drop", r.Findings)
+	}
+}

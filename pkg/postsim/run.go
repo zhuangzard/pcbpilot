@@ -1257,6 +1257,11 @@ func (res *Result) findings(o Options) {
 				}
 			}
 			add("fail", "open", fmt.Sprintf("%s: no copper path from %s to %s", n.Net, n.Reference, strings.Join(pads, ", ")), nil, []string{n.Net})
+			// The connected pads still have a drop: an open must not hide an
+			// over-budget drop (the IR closure widens by it).
+			if n.Role == "power" && n.BudgetMV > 0 && n.WorstMV > n.BudgetMV {
+				add("fail", "ir-drop", fmt.Sprintf("%s drops %.2f mV at %s (%s) — over the %.1f mV budget", n.Net, n.WorstMV, n.WorstPad, n.Scenario, n.BudgetMV), nil, []string{n.Net})
+			}
 		case "ok":
 			if n.BudgetMV > 0 && n.WorstMV > 0.8*n.BudgetMV {
 				add("warn", "ir-drop", fmt.Sprintf("%s drop %.2f mV is %.0f %% of the %.1f mV budget", n.Net, n.WorstMV, 100*n.WorstMV/n.BudgetMV, n.BudgetMV), nil, []string{n.Net})

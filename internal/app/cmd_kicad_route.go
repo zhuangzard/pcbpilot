@@ -92,7 +92,9 @@ calculations and gates as 'pcb auto route' + 'pcb gate':
     copper-to-edge, isolation, via-current, post-layout-sim (needs --sim),
     route-complete, silkscreen, board-manual;
  6. IR closure: when only post-layout-sim (± intent-widths, silkscreen,
-    board-manual) fails, planWidenIR + re-gate, at most 2 rounds;
+    board-manual) fails, planWidenIR + re-gate, at most 2 rounds; a sim
+    open on a net KiCad's DRC shows connected is marked SIM/KICAD MISMATCH
+    (summary.simKicadMismatch; the gate still fails) and does not stop it;
  7. report design → <out-dir>/report (gate design-report);
  8. release review (review-panel, stage layout) with the report and
     summary.json added to the evidence.
@@ -994,6 +996,12 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 	}
 	r.lap("gate: post-layout simulation")
 	snapshotIntentGates(snap, r.in, o.intent, verdict, reasons, segNeed, viaOK, true, r.add)
+	if mm := markSimKicadMismatch(r.gates, all); len(mm) > 0 {
+		r.summary["simKicadMismatch"] = mm
+		fmt.Fprintf(r.stderr, "post-layout-sim: %d open(s) KiCad's connectivity shows connected (sim/KiCad mismatch; IR closure still runs)\n", len(mm))
+	} else {
+		delete(r.summary, "simKicadMismatch")
+	}
 	r.add(kicadRouteCompleteGate(r.route, drcRep, snap))
 	r.lap("gate: intent / safety snapshot gates")
 	for _, g := range tailGates(snap, boardPath, postOut, qo, o.projectName, "", r.summary, r.stderr) {
@@ -1007,6 +1015,51 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 	}
 	r.summary["gates"] = r.gates
 	return pass, nil
+}
+
+var reSimOpen = regexp.MustCompile(`^(\S+): no copper path from `)
+
+// markSimKicadMismatch marks every post-layout-sim open ("NET: no copper
+// path …") on a net KiCad's DRC reports no unconnected item for: KiCad's
+// connectivity joins the copper the sim model did not. The item stays (the
+// gate keeps failing: the drop of those pads is not proven) but carries the
+// simOpenHostConnected marker, so the IR closure still runs on the real
+// drops. Returns the marked items (nil without a DRC report).
+func markSimKicadMismatch(gates []gateResult, all *kicad.DRCReport) []string {
+	if all == nil {
+		return nil
+	}
+	open := map[string]bool{}
+	for _, v := range all.Violations {
+		if v.Section != "unconnected_items" && v.Rule != "unconnected_items" {
+			continue
+		}
+		for _, n := range strings.Split(v.Net, " / ") {
+			open[strings.TrimSpace(n)] = true
+		}
+		if v.Net == "" {
+			open["*"] = true // KiCad did not name the net: trust no open
+		}
+	}
+	var out []string
+	for gi := range gates {
+		g := &gates[gi]
+		if g.Gate != "post-layout-sim" || g.Pass {
+			continue
+		}
+		for i, it := range g.Items {
+			m := reSimOpen.FindStringSubmatch(it)
+			if m == nil || open[m[1]] || open["*"] || strings.Contains(it, simOpenHostConnected) {
+				continue
+			}
+			g.Items[i] = fmt.Sprintf("%s — %s: KiCad DRC reports no unconnected item on %s (KiCad connectivity: connected); the post-layout model misses a copper contact, the drop of these pads is not proven", it, simOpenHostConnected, m[1])
+			out = append(out, g.Items[i])
+		}
+		if len(out) > 0 {
+			g.Info = append(g.Info, fmt.Sprintf("%d sim open(s) KiCad shows connected: reported as a sim/KiCad mismatch; the IR closure still runs", len(out)))
+		}
+	}
+	return out
 }
 
 // designReport publishes the versioned design report (report design) from
