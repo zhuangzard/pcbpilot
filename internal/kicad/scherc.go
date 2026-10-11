@@ -187,6 +187,12 @@ func PwrFlagSymbolText() string {
 // along direction dir (0 right, 1 up, 2 left, 3 down), the flag's body
 // pointing the same way. Returns its reference.
 func (e *SchEditor) AddPwrFlag(at Pt, dir int, stub float64) (string, error) {
+	return e.AddPwrFlagH(at, dir, stub, false)
+}
+
+// AddPwrFlagH is AddPwrFlag with the "PWR_FLAG" value text optionally
+// hidden (a flag set inside a drawing, where the text would only clutter).
+func (e *SchEditor) AddPwrFlagH(at Pt, dir int, stub float64, hideValue bool) (string, error) {
 	if err := e.AddLibSymbol(PwrFlagLibID, PwrFlagSymbolText()); err != nil {
 		return "", err
 	}
@@ -198,7 +204,7 @@ func (e *SchEditor) AddPwrFlag(at Pt, dir int, stub float64) (string, error) {
 	ref := fmt.Sprintf("#FLG%04d", n)
 	va := SymbolXform(Pt{0, 3.81}, end, rot, "")
 	_, err := e.PlaceSymbol(SymbolInstance{LibID: PwrFlagLibID, Ref: ref, At: end, Rot: rot, Value: "PWR_FLAG",
-		Fields: []Field{{Name: "Value", Value: "PWR_FLAG", At: &va}}})
+		Fields: []Field{{Name: "Value", Value: "PWR_FLAG", At: &va, Hide: hideValue}}})
 	return ref, err
 }
 

@@ -348,7 +348,12 @@ type kicadZoneFrame struct {
 // rows inside the drawing area of a paper, keeping out of the title block and
 // off the symbols that stay (static). Returns false when they do not fit.
 func kicadPackZones(zones []SchematicZoneResult, page, title kicad.Box, static []kicad.Box) ([]kicadZoneFrame, bool) {
-	const gap, margin = 5.08, 5.08
+	return kicadPackZonesGap(zones, page, title, static, 5.08, 5.08)
+}
+
+// kicadPackZonesGap is kicadPackZones with the frame gap and the margin to
+// the page border given (sch-build packs tighter: its density gate EG-03).
+func kicadPackZonesGap(zones []SchematicZoneResult, page, title kicad.Box, static []kicad.Box, gap, margin float64) ([]kicadZoneFrame, bool) {
 	snap := func(v float64) float64 { return math.Ceil(v/1.27-1e-6) * 1.27 }
 	x0, y0 := snap(page.MinX+margin), snap(page.MinY+margin)
 	x, y, rowH := x0, y0, 0.0

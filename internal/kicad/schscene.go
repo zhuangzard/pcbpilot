@@ -113,7 +113,7 @@ func (e *SchEditor) Scene() (*SchScene, error) {
 				continue
 			}
 			l := SceneLabel{Kind: n.head(), Name: n.list[1].atom, At: Pt{at.num(1), at.num(2)}, Angle: at.num(3)}
-			l.Box = textBox(l.At, l.Angle, len([]rune(l.Name)))
+			l.Box = textBox(l.At, l.Angle, TextWidth(l.Name, 1.27)+0.2)
 			sc.Labels = append(sc.Labels, l)
 		case "junction", "no_connect":
 			if at := n.child("at"); at != nil {
@@ -126,9 +126,9 @@ func (e *SchEditor) Scene() (*SchScene, error) {
 		case "text", "text_box":
 			if at := n.child("at"); at != nil && len(n.list) > 1 {
 				lines := strings.Split(n.list[1].atom, "\n")
-				w := 0
+				w := 0.0
 				for _, s := range lines {
-					w = max(w, len([]rune(s)))
+					w = max(w, TextWidth(s, 1.27)+0.2)
 				}
 				b := textBox(Pt{at.num(1), at.num(2)}, at.num(3), w)
 				b.MinY -= 2.54 * float64(len(lines)-1)
@@ -139,9 +139,10 @@ func (e *SchEditor) Scene() (*SchScene, error) {
 	return sc, nil
 }
 
-// textBox estimates a 1.27 mm text run from at along angle (≈1 mm/char).
-func textBox(at Pt, angle float64, chars int) Box {
-	w := 1.0 + 1.0*float64(chars)
+// textBox is a 1.27 mm text run of drawn length tw from at along angle
+// (a little slack at both ends for the anchor and the flag).
+func textBox(at Pt, angle float64, tw float64) Box {
+	w := 1.0 + tw
 	switch math.Mod(math.Mod(angle, 360)+360, 360) {
 	case 90:
 		return Box{at.X - 1.5, at.Y - w, at.X + 1.5, at.Y + 1}
@@ -210,7 +211,7 @@ func (e *SchEditor) sceneSymbol(n *sexp, libs map[string]Box) (SceneSymbol, erro
 		}
 		vertical := math.Mod(normAngle(pa.num(3)+s.Rot), 180) == 90
 		s.Fields = append(s.Fields, SceneField{Name: p.list[1].atom, Value: p.list[2].atom,
-			Box: fieldBox(Pt{pa.num(1), pa.num(2)}, vertical, len([]rune(p.list[2].atom)), size, just)})
+			Box: fieldBox(Pt{pa.num(1), pa.num(2)}, vertical, p.list[2].atom, size, just)})
 	}
 	pins, err := e.LibPins(s.LibID)
 	if err != nil {
@@ -321,10 +322,9 @@ func boxAt(lb Box, at Pt, rot float64, mirror string) Box {
 	return sb
 }
 
-// fieldBox estimates the text box of a field (KiCad stroke font, ≈0.8 em
-// per character); fields are centred unless justified.
-func fieldBox(at Pt, vertical bool, chars int, size float64, just string) Box {
-	w, hh := float64(chars)*size*0.8+0.3, size*0.6
+// fieldBox is the text box of a field (KiCad stroke font metrics, TextWidth); fields are centred unless justified.
+func fieldBox(at Pt, vertical bool, text string, size float64, just string) Box {
+	w, hh := TextWidth(text, size)+0.2, size*0.6
 	lo, hi := -w/2, w/2
 	switch just {
 	case "left":

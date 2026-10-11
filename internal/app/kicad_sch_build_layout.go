@@ -40,32 +40,23 @@ type sbMarker struct {
 
 // sbZoneLayout is one zone drawn relative to its core.
 type sbZoneLayout struct {
-	Hash       string              `json:"hash"`
-	Method     string              `json:"method"` // planner | grid-autoconnect
-	Parts      map[string][]sbPose `json:"parts"`
-	Wires      [][]kicad.Pt        `json:"wires"`
-	Markers    []sbMarker          `json:"markers"`
-	NoConnects []kicad.Pt          `json:"noConnects,omitempty"`
-	Box        kicad.Box           `json:"box"`
-	Notes      []string            `json:"notes,omitempty"`
-	Ms         float64             `json:"ms"`
-	Findings   []string            `json:"findings,omitempty"` // sch-check quality findings of the zone alone
+	Hash       string                  `json:"hash"`
+	Method     string                  `json:"method"` // planner | grid-autoconnect
+	Parts      map[string][]sbPose     `json:"parts"`
+	Wires      [][]kicad.Pt            `json:"wires"`
+	Markers    []sbMarker              `json:"markers"`
+	NoConnects []kicad.Pt              `json:"noConnects,omitempty"`
+	Box        kicad.Box               `json:"box"`
+	Notes      []string                `json:"notes,omitempty"`
+	Ms         float64                 `json:"ms"`
+	Findings   []string                `json:"findings,omitempty"` // sch-check quality findings of the zone alone
+	Fields     map[string]sbFieldShift `json:"fields,omitempty"`   // repaired Reference / Value text spots
 }
 
 // sbZoneFindings renders one zone alone on a scratch sheet and runs the
 // kicad sch-check quality checks on it.
 func sbZoneFindings(d *sbDesign, zi *sbZoneIn, zl *sbZoneLayout) []string {
-	e, err := kicad.OpenSchematic(kicad.NewSchematicText("A0", kicad.NewUUID(), true))
-	if err != nil {
-		return []string{err.Error()}
-	}
-	e.Project, e.InstancePath = "zone", "/x"
-	t := kicad.Pt{X: sbSnap(60 - zl.Box.MinX), Y: sbSnap(60 - zl.Box.MinY)}
-	if err := renderSbPage(e, d, newSbState(), sbPage{ID: zi.Zone.Page}, []*sbZoneIn{zi},
-		map[string]*sbZoneLayout{zi.Zone.ID: zl}, map[string]kicad.Pt{zi.Zone.ID: t}, nil); err != nil {
-		return []string{err.Error()}
-	}
-	text, err := e.Render()
+	text, err := sbZoneText(d, zi, zl)
 	if err != nil {
 		return []string{err.Error()}
 	}
@@ -84,6 +75,38 @@ func sbZoneFindings(d *sbDesign, zi *sbZoneIn, zl *sbZoneLayout) []string {
 		}
 	}
 	return out
+}
+
+// sbZoneText renders one zone alone on a scratch A0 sheet.
+func sbZoneText(d *sbDesign, zi *sbZoneIn, zl *sbZoneLayout) (string, error) {
+	e, err := kicad.OpenSchematic(kicad.NewSchematicText("A0", kicad.NewUUID(), true))
+	if err != nil {
+		return "", err
+	}
+	e.Project, e.InstancePath = "zone", "/x"
+	t := kicad.Pt{X: sbSnap(60 - zl.Box.MinX), Y: sbSnap(60 - zl.Box.MinY)}
+	if err := renderSbPage(e, d, newSbState(), sbPage{ID: zi.Zone.Page}, []*sbZoneIn{zi},
+		map[string]*sbZoneLayout{zi.Zone.ID: zl}, map[string]kicad.Pt{zi.Zone.ID: t}, nil); err != nil {
+		return "", err
+	}
+	return e.Render()
+}
+
+// sbZoneScene is the rendered zone's scene and its page translation.
+func sbZoneScene(d *sbDesign, zi *sbZoneIn, zl *sbZoneLayout) (*kicad.SchScene, kicad.Pt, bool) {
+	text, err := sbZoneText(d, zi, zl)
+	if err != nil {
+		return nil, kicad.Pt{}, false
+	}
+	e, err := kicad.OpenSchematic(text)
+	if err != nil {
+		return nil, kicad.Pt{}, false
+	}
+	sc, err := e.Scene()
+	if err != nil {
+		return nil, kicad.Pt{}, false
+	}
+	return sc, kicad.Pt{X: sbSnap(60 - zl.Box.MinX), Y: sbSnap(60 - zl.Box.MinY)}, true
 }
 
 func sbShortHash(s string) string {
@@ -193,7 +216,7 @@ func sbOverlap(a, b kicad.Box) bool {
 }
 
 // sbTextW estimates a 1.27 mm text width.
-func sbTextW(s string) float64 { return 1.1*float64(len([]rune(s))) + 0.6 }
+func sbTextW(s string) float64 { return kicad.TextWidth(s, 1.27) + 0.6 }
 
 // sbFieldPlan places Reference / Value next to the body (absolute mm):
 // above/below when those sides carry no pins, else beside it.
@@ -564,6 +587,13 @@ func planZone(d *sbDesign, zi *sbZoneIn, m *sbMeasure, budget int) (*sbZoneLayou
 			}
 		}
 	}
+	var bodies []kicad.Box
+	for _, p := range zi.Parts {
+		pose := zl.Parts[p.Ref][0]
+		f := sbFields(syms[p.Ref], pose, p.Ref, p.Value)
+		bodies = append(bodies, sbXformBox(syms[p.Ref].Box, pose), f.RefBox, f.VBox)
+	}
+	sbDeconflict(zl, bodies)
 	zl.Box = zoneBox(zl, zi, syms, m)
 	return zl, nil
 }
@@ -635,7 +665,7 @@ func zoneBox(zl *sbZoneLayout, zi *sbZoneIn, syms map[string]kicad.SceneSymbol, 
 				s, _ = m.get(p, max(pose.Unit, 1))
 			}
 			add(sbXformBox(s.Box, pose))
-			f := sbFields(s, pose, p.Ref, p.Value)
+			f := zl.fieldPlan(s, pose, p.Ref, p.Value)
 			add(f.RefBox)
 			add(f.VBox)
 		}
@@ -1516,6 +1546,18 @@ func sbDeconflict(zl *sbZoneLayout, obstacles []kicad.Box) {
 					return false
 				}
 			}
+			// no foreign wire through the marker's text or symbol
+			for j, w := range zl.Wires {
+				if j == wi {
+					continue
+				}
+				for k := 0; k+1 < len(w); k++ {
+					sb := kicad.Box{MinX: math.Min(w[k].X, w[k+1].X), MinY: math.Min(w[k].Y, w[k+1].Y), MaxX: math.Max(w[k].X, w[k+1].X), MaxY: math.Max(w[k].Y, w[k+1].Y)}
+					if sbOverlap(sbGrow(sb, 0.05), b) && w[k] != mk.At && w[k+1] != mk.At {
+						return false
+					}
+				}
+			}
 			return true
 		}
 		for step := 0; step < 8 && wi >= 0 && !clear(sbMarkerBox(*mk)); step++ {
@@ -1698,6 +1740,8 @@ func layoutZones(d *sbDesign, zis []*sbZoneIn, reuse map[string]*sbZoneLayout, o
 			// the planner's, else the first clean grid variant
 			var zl *sbZoneLayout
 			for _, c := range cands {
+				sbRepairFields(d, zi, c)
+				c.Box = sbRecomputeBox(d, zi, c, m)
 				c.Findings = sbZoneFindings(d, zi, c)
 				zl = c
 			}
@@ -1715,6 +1759,8 @@ func layoutZones(d *sbDesign, zis []*sbZoneIn, reuse map[string]*sbZoneLayout, o
 				if perr != nil {
 					zg.Notes = append(zg.Notes, "planner: "+sbClip(perr.Error(), 900))
 				}
+				sbRepairFields(d, zi, zg)
+				zg.Box = sbRecomputeBox(d, zi, zg, m)
 				zg.Findings = sbZoneFindings(d, zi, zg)
 				if zl == nil || len(zg.Findings) < len(zl.Findings) {
 					zl = zg
@@ -1771,29 +1817,81 @@ const (
 )
 
 // sbPackFresh packs a fresh page with the zones apply's packer
-// (kicadPackZones: rows in reading order inside the drawing area of the
-// smallest paper that holds them, clear of the title block).
-func sbPackFresh(ids []string, layouts map[string]*sbZoneLayout) map[string]kicad.Pt {
-	var zs []SchematicZoneResult
+// (kicadPackZones: rows in reading order inside the drawing area of a
+// paper, clear of the title block). Every zone order (all permutations up to
+// seven zones, else three heuristic orders) is tried on each paper, smallest
+// first: the smallest paper that holds them wins, then the order that keeps
+// the zones with connectors in the left part of the page (left), then the
+// smallest content box (the densest page).
+func sbPackFresh(ids []string, layouts map[string]*sbZoneLayout, left map[string]bool) map[string]kicad.Pt {
+	zone := map[string]SchematicZoneResult{}
 	for _, id := range ids {
 		fp := sbFootprint(layouts[id].Box, kicad.Pt{})
-		zs = append(zs, SchematicZoneResult{ID: id, Title: id, Frame: schFrameSpec{ID: id, Rect: boxToEE(fp)}})
+		zone[id] = SchematicZoneResult{ID: id, Title: id, Frame: schFrameSpec{ID: id, Rect: boxToEE(fp)}}
 	}
 	for _, p := range kicad.Papers {
 		page := kicad.Box{MinX: 10, MinY: 10, MaxX: p.W - 10, MaxY: p.H - 10}
 		title := kicad.Box{MinX: p.W - 10 - 112, MinY: p.H - 10 - 34, MaxX: p.W - 10, MaxY: p.H - 10}
-		frames, ok := kicadPackZones(zs, page, title, nil)
-		if !ok {
-			continue
+		var best map[string]kicad.Pt
+		bestViol, bestArea := 1<<30, math.Inf(1)
+		try := func(order []string) {
+			var zs []SchematicZoneResult
+			for _, id := range order {
+				zs = append(zs, zone[id])
+			}
+			frames, ok := kicadPackZonesGap(zs, page, title, nil, 3.81, 2.54)
+			if !ok {
+				return
+			}
+			bb := kicad.Box{MinX: math.Inf(1), MinY: math.Inf(1), MaxX: math.Inf(-1), MaxY: math.Inf(-1)}
+			for _, f := range frames {
+				bb = sbBoxUnion(bb, f.Rect)
+			}
+			viol := 0
+			for _, f := range frames {
+				if left[f.ID] && (f.Rect.MinX+f.Rect.MaxX)/2 > bb.MinX+0.4*bb.W() {
+					viol++
+				}
+			}
+			area := bb.W() * bb.H()
+			if viol < bestViol || (viol == bestViol && area < bestArea-1e-6) {
+				bestViol, bestArea = viol, area
+				best = map[string]kicad.Pt{}
+				for _, f := range frames {
+					// the frame's zone origin, snapped to the 2.54 mm grid
+					best[f.ID] = kicad.Pt{X: sbSnap(f.core.X), Y: sbSnap(f.core.Y)}
+				}
+			}
 		}
-		out := map[string]kicad.Pt{}
-		for _, f := range frames {
-			// the frame's zone origin, snapped to the 2.54 mm grid
-			out[f.ID] = kicad.Pt{X: sbSnap(f.core.X), Y: sbSnap(f.core.Y)}
+		if len(ids) <= 7 {
+			sbPermute(append([]string(nil), ids...), 0, try)
+		} else {
+			try(ids)
+			byH := append([]string(nil), ids...)
+			sort.SliceStable(byH, func(i, j int) bool { return layouts[byH[i]].Box.H() > layouts[byH[j]].Box.H() })
+			try(byH)
+			byW := append([]string(nil), ids...)
+			sort.SliceStable(byW, func(i, j int) bool { return layouts[byW[i]].Box.W() > layouts[byW[j]].Box.W() })
+			try(byW)
 		}
-		return out
+		if best != nil {
+			return best
+		}
 	}
 	return nil
+}
+
+// sbPermute calls fn with every permutation of a[k:] (a is reused).
+func sbPermute(a []string, k int, fn func([]string)) {
+	if k == len(a) {
+		fn(a)
+		return
+	}
+	for i := k; i < len(a); i++ {
+		a[k], a[i] = a[i], a[k]
+		sbPermute(a, k+1, fn)
+		a[k], a[i] = a[i], a[k]
+	}
 }
 
 // sbFootprint is the zone's frame (content box + margin + title band) at
@@ -1805,9 +1903,9 @@ func sbFootprint(box kicad.Box, t kicad.Pt) kicad.Box {
 
 // packZones assigns each zone of one page a translation: kept ones (keep)
 // stay; the rest are packed in rows (fresh build) or put in free space.
-func packZones(ids []string, layouts map[string]*sbZoneLayout, keep map[string]kicad.Pt) map[string]kicad.Pt {
+func packZones(ids []string, layouts map[string]*sbZoneLayout, keep map[string]kicad.Pt, left map[string]bool) map[string]kicad.Pt {
 	if len(keep) == 0 {
-		if out := sbPackFresh(ids, layouts); out != nil {
+		if out := sbPackFresh(ids, layouts, left); out != nil {
 			return out
 		}
 	}

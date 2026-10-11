@@ -404,11 +404,17 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 	for _, pg := range d.Pages {
 		var ids []string
 		keep := map[string]kicad.Pt{}
+		left := map[string]bool{} // zones with a connector: the left side of the page (EG-23)
 		for _, zi := range zis {
 			if zi.Zone.Page != pg.ID {
 				continue
 			}
 			ids = append(ids, zi.Zone.ID)
+			for _, p := range zi.Parts {
+				if sbIsConnector(p) {
+					left[zi.Zone.ID] = true
+				}
+			}
 			if zs := st.Zones[zi.Zone.ID]; zs != nil && zs.Page == pg.ID && !o.Fresh {
 				keep[zi.Zone.ID] = zs.T
 			}
@@ -417,7 +423,7 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 				keep[zi.Zone.ID] = kicad.Pt{X: sbSnap(at.X + sbZoneMargin - b.MinX), Y: sbSnap(at.Y + sbZoneMargin + sbZoneTitle - b.MinY)}
 			}
 		}
-		for id, t := range packZones(ids, layouts, keep) {
+		for id, t := range packZones(ids, layouts, keep, left) {
 			trans[id] = t
 			if k, ok := keep[id]; ok && k != t {
 				moved[id] = true
@@ -1158,6 +1164,12 @@ func renderSbPage(e *kicad.SchEditor, d *sbDesign, st *sbState, pg sbPage, zis [
 	var segs [][2]kicad.Pt
 	pinPts := map[kicad.Pt]int{}
 	bottom := sbPageOrigin
+	pinPos := map[string]kicad.Pt{} // "REF.NUM" → pin end on the page
+	var bodies []kicad.Box          // part bodies, for the PWR_FLAG clearance check
+	var supply []sbPlacedSupply     // placed supply / ground symbols
+	var obs []kicad.Box             // net labels and frames' title bands, for the standalone PWR_FLAG spot
+	var frames []kicad.Box          // zone frames of the page
+	zoneOfRef := map[string]int{}   // part → index into frames
 	for _, zi := range zis {
 		if zi.Zone.Page != pg.ID {
 			continue
@@ -1175,7 +1187,7 @@ func renderSbPage(e *kicad.SchEditor, d *sbDesign, st *sbState, pg sbPage, zis [
 					return err
 				}
 				ap := sbPose{At: mv(pose.At), Rot: pose.Rot, Unit: unit}
-				f := sbFields(s, ap, p.Ref, p.Value)
+				f := zl.fieldPlan(s, ap, p.Ref, p.Value)
 				ang := 0.0
 				if math.Mod(pose.Rot, 180) == 90 {
 					ang = 90
@@ -1210,7 +1222,9 @@ func renderSbPage(e *kicad.SchEditor, d *sbDesign, st *sbState, pg sbPage, zis [
 				}
 				for _, q := range s.Pins {
 					pinPts[sbXform(q.At, ap)]++
+					pinPos[sbPinKey(p.Ref, q.Number)] = sbXform(q.At, ap)
 				}
+				bodies = append(bodies, sbXformBox(s.Box, ap), f.RefBox, f.VBox)
 			}
 		}
 		for _, w := range zl.Wires {
@@ -1226,6 +1240,9 @@ func renderSbPage(e *kicad.SchEditor, d *sbDesign, st *sbState, pg sbPage, zis [
 			}
 		}
 		for _, mk := range zl.Markers {
+			if mk.Kind != "power" && mk.Kind != "ground" {
+				obs = append(obs, sbMarkerBox(sbMarker{Kind: mk.Kind, Net: mk.Net, At: mv(mk.At), Dir: mk.Dir, OnWire: mk.OnWire}))
+			}
 			at := mv(mk.At)
 			if mk.OnWire {
 				ang := map[string]float64{"right": 0, "up": 90, "left": 180, "down": 270}[mk.Dir]
@@ -1251,6 +1268,7 @@ func renderSbPage(e *kicad.SchEditor, d *sbDesign, st *sbState, pg sbPage, zis [
 					return err
 				}
 				pinPts[at]++
+				supply = append(supply, sbPlacedSupply{Net: mk.Net, At: at, Ground: mk.Kind == "ground", Arrive: sbOutward(mk.Dir)})
 				continue
 			}
 			if len(d.NetPages[mk.Net]) > 1 { // cross-page signal: hierarchical label → sheet pin
@@ -1268,6 +1286,10 @@ func renderSbPage(e *kicad.SchEditor, d *sbDesign, st *sbState, pg sbPage, zis [
 			e.AddNoConnect(mv(p))
 		}
 		fp := sbFootprint(zl.Box, t)
+		frames = append(frames, fp)
+		for _, p := range zi.Parts {
+			zoneOfRef[p.Ref] = len(frames) - 1
+		}
 		e.AddRect(kicad.Pt{X: sbSnapHalf(fp.MinX), Y: sbSnapHalf(fp.MinY + sbZoneTitle)}, kicad.Pt{X: sbSnapHalf(fp.MaxX), Y: sbSnapHalf(fp.MaxY)})
 		title := zi.Zone.Title
 		e.AddText(title, kicad.Pt{X: sbSnapHalf(fp.MinX + 1.27), Y: sbSnapHalf(fp.MinY + sbZoneTitle - 1.27)}, 0, 1.778)
@@ -1300,9 +1322,20 @@ func renderSbPage(e *kicad.SchEditor, d *sbDesign, st *sbState, pg sbPage, zis [
 	for _, p := range junc {
 		e.AddJunction(p)
 	}
-	// PWR_FLAGs: one per undriven power net, in a row under the zones
+	// PWR_FLAGs: one per undriven power net, beside the net's entry (EG-24);
+	// a net without a clean spot there goes to a row under the zones
+	var bank []string
+	for _, n := range flagNets {
+		if sbFlagAtEntry(e, d, n, pinPos, bodies, supply, segs) {
+			continue
+		}
+		if sbFlagNearEntry(e, d, n, pinPos, bodies, obs, frames, zoneOfRef, &supply, segs) {
+			continue
+		}
+		bank = append(bank, n)
+	}
 	x, y := sbPageOrigin+5.08, sbSnap(bottom+12.7)
-	for i, n := range flagNets {
+	for i, n := range bank {
 		if i == 0 {
 			e.AddText("PWR_FLAG (ERC: power source of each rail)", kicad.Pt{X: sbPageOrigin, Y: y - 7.62}, 0, 1.27)
 		}
@@ -1321,6 +1354,211 @@ func renderSbPage(e *kicad.SchEditor, d *sbDesign, st *sbState, pg sbPage, zis [
 		x += math.Max(15.24, sbTextW(n)+7.62)
 	}
 	return nil
+}
+
+// sbPlacedSupply is a supply or ground symbol drawn on a page; Arrive is the
+// direction (a unit vector) from which its stub reaches it.
+type sbPlacedSupply struct {
+	Net    string
+	At     kicad.Pt
+	Ground bool
+	Arrive kicad.Pt
+}
+
+// sbOutward is the unit vector of a stub direction word.
+func sbOutward(dir string) kicad.Pt {
+	switch dir {
+	case "up":
+		return kicad.Pt{Y: -1}
+	case "down":
+		return kicad.Pt{Y: 1}
+	case "left":
+		return kicad.Pt{X: -1}
+	}
+	return kicad.Pt{X: 1}
+}
+
+// sbEntryPin is the pin a rail enters the design at: a connector pin of the
+// net, else the first pin by reference (EG-24).
+func sbEntryPin(d *sbDesign, net string) string {
+	var first string
+	for _, k := range d.netPins(net) {
+		r, _, _ := strings.Cut(k, ".")
+		p := d.ByRef[r]
+		if p == nil {
+			continue
+		}
+		if sbIsConnector(p) {
+			return k
+		}
+		if first == "" {
+			first = k
+		}
+	}
+	return first
+}
+
+// sbFlagAtEntry puts the PWR_FLAG of net on the supply symbol nearest the
+// net's entry pin, beside it (a horizontal stub on the side the symbol's own
+// stub does not use) when that spot is clear of bodies, other symbols and
+// wires. False: no clean spot (the caller falls back to the bank).
+func sbFlagAtEntry(e *kicad.SchEditor, d *sbDesign, net string, pinPos map[string]kicad.Pt, bodies []kicad.Box, supply []sbPlacedSupply, segs [][2]kicad.Pt) bool {
+	entry, ok := pinPos[sbEntryPin(d, net)]
+	if !ok {
+		return false
+	}
+	var cands []sbPlacedSupply
+	for _, s := range supply {
+		if s.Net == net {
+			cands = append(cands, s)
+		}
+	}
+	sort.SliceStable(cands, func(i, j int) bool {
+		return math.Hypot(cands[i].At.X-entry.X, cands[i].At.Y-entry.Y) < math.Hypot(cands[j].At.X-entry.X, cands[j].At.Y-entry.Y)
+	})
+	for _, c := range cands {
+		if math.Hypot(c.At.X-entry.X, c.At.Y-entry.Y) > sbFlagMaxDist {
+			break
+		}
+		for dir, v := range []kicad.Pt{{X: 1}, {Y: -1}, {X: -1}, {Y: 1}} { // 0 right, 1 up, 2 left, 3 down (AddPwrFlag)
+			// not back along the stub that reaches the symbol, not into its body
+			if (v.X == -c.Arrive.X && v.Y == -c.Arrive.Y) || (!c.Ground && v.Y == -1) || (c.Ground && v.Y == 1) {
+				continue
+			}
+			l := 6.4
+			box := kicad.Box{MinX: math.Min(c.At.X, c.At.X+v.X*l) - 2.2, MinY: math.Min(c.At.Y, c.At.Y+v.Y*l) - 1.4, MaxX: math.Max(c.At.X, c.At.X+v.X*l) + 1.4, MaxY: math.Max(c.At.Y, c.At.Y+v.Y*l) + 1.4}
+			if v.X != 0 {
+				box.MinY, box.MaxY = c.At.Y-1.4, c.At.Y+1.4
+			} else {
+				box.MinX, box.MaxX = c.At.X-1.4, c.At.X+1.4
+			}
+			clear := true
+			for _, b := range bodies {
+				if sbOverlap(box, sbGrow(b, 0.25)) {
+					clear = false
+				}
+			}
+			for _, o := range supply {
+				if o.At != c.At && sbOverlap(box, sbSupplyBox(o)) {
+					clear = false
+				}
+			}
+			for _, sg := range segs {
+				sb := kicad.Box{MinX: math.Min(sg[0].X, sg[1].X) - 0.1, MinY: math.Min(sg[0].Y, sg[1].Y) - 0.1, MaxX: math.Max(sg[0].X, sg[1].X) + 0.1, MaxY: math.Max(sg[0].Y, sg[1].Y) + 0.1}
+				if sbOverlap(box, sb) && sg[0] != c.At && sg[1] != c.At {
+					clear = false
+				}
+			}
+			if os.Getenv("SB_DEBUG_FLAG") != "" {
+				fmt.Fprintf(os.Stderr, "flag %s at %v dir %d clear=%v entry=%v\n", net, c.At, dir, clear, entry)
+			}
+			if !clear {
+				continue
+			}
+			if _, err := e.AddPwrFlagH(c.At, dir, 2.54, true); err != nil {
+				return false
+			}
+			return true
+		}
+	}
+	return false
+}
+
+// sbFlagNearEntry draws the net's supply symbol with its PWR_FLAG on a clear
+// spot within sbFlagMaxDist of the entry pin, inside the entry part's zone
+// frame when there is room (a supply symbol joins its net by name, no wire).
+func sbFlagNearEntry(e *kicad.SchEditor, d *sbDesign, net string, pinPos map[string]kicad.Pt, bodies, obs, frames []kicad.Box, zoneOfRef map[string]int, supply *[]sbPlacedSupply, segs [][2]kicad.Pt) bool {
+	key := sbEntryPin(d, net)
+	entry, ok := pinPos[key]
+	if !ok {
+		return false
+	}
+	ref, _, _ := strings.Cut(key, ".")
+	ground := d.NetKind[net] == "ground"
+	half := math.Max(1.9, sbTextW(net)/2+0.6)
+	type spot struct {
+		p    kicad.Pt
+		dist float64
+	}
+	var spots []spot
+	for dx := -sbFlagMaxDist; dx <= sbFlagMaxDist; dx += 2.54 {
+		for dy := -sbFlagMaxDist; dy <= sbFlagMaxDist; dy += 2.54 {
+			p := kicad.Pt{X: sbSnap(entry.X + dx), Y: sbSnap(entry.Y + dy)}
+			if dist := math.Hypot(p.X-entry.X, p.Y-entry.Y); dist <= sbFlagMaxDist {
+				spots = append(spots, spot{p, dist})
+			}
+		}
+	}
+	sort.SliceStable(spots, func(i, j int) bool { return spots[i].dist < spots[j].dist })
+	for pass := 0; pass < 2; pass++ { // pass 0: inside the entry zone's frame; pass 1: anywhere clear of frames
+		for _, sp := range spots {
+			box := kicad.Box{MinX: sp.p.X - half, MaxX: sp.p.X + half, MinY: sp.p.Y - 5.6, MaxY: sp.p.Y + 7.0}
+			if ground {
+				box.MinY, box.MaxY = sp.p.Y-7.0, sp.p.Y+5.6
+			}
+			inside := false
+			if zi, ok := zoneOfRef[ref]; ok && zi < len(frames) {
+				f := frames[zi]
+				inside = box.MinX >= f.MinX+1 && box.MaxX <= f.MaxX-1 && box.MinY >= f.MinY+sbZoneTitle+1 && box.MaxY <= f.MaxY-1
+			}
+			if pass == 0 && !inside {
+				continue
+			}
+			clear := true
+			for i, f := range frames {
+				if pass == 1 || i != zoneOfRef[ref] {
+					if sbOverlap(sbGrow(box, 1), f) {
+						clear = false
+					}
+				}
+			}
+			for _, b := range append(append([]kicad.Box(nil), bodies...), obs...) {
+				if sbOverlap(box, sbGrow(b, 0.25)) {
+					clear = false
+				}
+			}
+			for _, o := range *supply {
+				if sbOverlap(box, sbGrow(sbSupplyBox(o), 0.25)) {
+					clear = false
+				}
+			}
+			for _, sg := range segs {
+				sb := kicad.Box{MinX: math.Min(sg[0].X, sg[1].X) - 0.1, MinY: math.Min(sg[0].Y, sg[1].Y) - 0.1, MaxX: math.Max(sg[0].X, sg[1].X) + 0.1, MaxY: math.Max(sg[0].Y, sg[1].Y) + 0.1}
+				if sbOverlap(box, sb) {
+					clear = false
+				}
+			}
+			if !clear {
+				continue
+			}
+			if _, err := e.AddPower(net, sp.p, 0, ground); err != nil {
+				return false
+			}
+			dir := 3
+			if ground {
+				dir = 1
+			}
+			if _, err := e.AddPwrFlagH(sp.p, dir, 2.54, true); err != nil {
+				return false
+			}
+			*supply = append(*supply, sbPlacedSupply{Net: net, At: sp.p, Ground: ground, Arrive: kicad.Pt{Y: map[bool]float64{true: 1, false: -1}[ground]}})
+			return true
+		}
+	}
+	return false
+}
+
+// sbFlagMaxDist is how far a PWR_FLAG may sit from the pin its rail enters
+// at (mm, EG-24).
+const sbFlagMaxDist = 30.0
+
+// sbSupplyBox is the room a drawn supply / ground symbol takes.
+func sbSupplyBox(s sbPlacedSupply) kicad.Box {
+	half := math.Max(1.9, sbTextW(s.Net)/2+0.6)
+	if s.Ground {
+		return kicad.Box{MinX: s.At.X - half, MinY: s.At.Y, MaxX: s.At.X + half, MaxY: s.At.Y + 5.6}
+	}
+	return kicad.Box{MinX: s.At.X - half, MinY: s.At.Y - 5.6, MaxX: s.At.X + half, MaxY: s.At.Y}
 }
 
 func sbRound4(v float64) float64 { return math.Round(v*1e4) / 1e4 }
