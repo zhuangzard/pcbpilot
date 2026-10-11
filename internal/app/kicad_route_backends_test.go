@@ -114,6 +114,17 @@ echo '{"connections":5,"routed":4,"seconds":1.5,"unrouted":[{"net":"N","from":"U
 			t.Errorf("args %q lack %q", joined, want)
 		}
 	}
+	// exit 3 = finished with unrouted connections: an incomplete result, not an error
+	inc := fakeTracemaker(t, `
+out=""; json=""
+while [ $# -gt 0 ]; do case "$1" in -o) out=$2; shift;; --json) json=$2; shift;; esac; shift; done
+echo routed > "$out"
+echo '{"connections":5,"routed":3,"seconds":2,"unrouted":[{"net":"N","from":"U1.1","to":"U2.2","blocked":false},{"net":"M","from":"U1.2","to":"U2.3","blocked":false}]}' > "$json"
+exit 3
+`)
+	if r3, err := runTracemaker(context.Background(), tracemakerOpts{bin: inc, timeout: 10 * time.Second}, in, out, cons, rep, io.Discard); err != nil || r3.UnroutedCount != 2 {
+		t.Fatalf("exit 3 must give the incomplete result: %v %+v", err, r3)
+	}
 	// a crash is an error, never an empty success
 	bad := fakeTracemaker(t, "exit 1\n")
 	if _, err := runTracemaker(context.Background(), tracemakerOpts{bin: bad}, in, out, cons, rep, io.Discard); err == nil {

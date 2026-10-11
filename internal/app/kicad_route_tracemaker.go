@@ -208,6 +208,10 @@ func tracemakerResult(rep *tmReport, args []string, version, sha, board, reportP
 	return res
 }
 
+// tracemakerExitUnrouted is TraceMaker's exit code for a finished run that left
+// connections unrouted (PCBPILOT.md); the JSON report names them.
+const tracemakerExitUnrouted = 3
+
 // runTracemaker routes `in` (a classed board with its .kicad_pro / .kicad_dru
 // beside it) into `out`. The run is killed when ctx ends.
 func runTracemaker(ctx context.Context, o tracemakerOpts, in, out, constraints, report string, stderr io.Writer) (*routeResult, error) {
@@ -229,7 +233,10 @@ func runTracemaker(ctx context.Context, o tracemakerOpts, in, out, constraints, 
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	if err != nil {
+	// exit 3 = some connections unrouted: a usable (incomplete) result whose
+	// unrouted[] the report lists; every other failure is a crash
+	var xe *exec.ExitError
+	if err != nil && !(errors.As(err, &xe) && xe.ExitCode() == tracemakerExitUnrouted) {
 		return nil, fmt.Errorf("tracemaker: %w", err)
 	}
 	if _, serr := os.Stat(out); serr != nil {
