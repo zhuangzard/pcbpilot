@@ -93,9 +93,13 @@ func checkIntentWidths(tracks []specctra.Track, pads []boardPad, reqs map[string
 	for _, p := range pads {
 		byNet[strings.ToUpper(p.Net)] = append(byNet[strings.ToUpper(p.Net)], p)
 	}
+	upper := make(map[string]specctra.NetRequirement, len(reqs))
+	for n, r := range reqs {
+		upper[strings.ToUpper(n)] = r
+	}
 	var out []widthViolation
 	for _, t := range tracks {
-		r, ok := reqs[t.Net]
+		r, ok := upper[strings.ToUpper(t.Net)]
 		if !ok {
 			continue
 		}
@@ -201,24 +205,99 @@ func pouredLookup(poured []any) func(specctra.Track) bool {
 // padEscape reports whether a narrow track is a pad escape: the whole
 // segment lies within padEscapeReachMil(need) of one same-net pad's copper
 // on its layer — the internal router's neck-down zone (max(3 widths,
-// 30 mil)) and the zone pre-routed intent escape stubs stay inside. A
-// segment that only starts at a pad and runs on narrow is not one.
+// 30 mil)) and the zone pre-routed intent escape stubs stay inside — and at
+// least one end lies within neckZoneMil (v0.9.0's pin neck-down distance) of
+// that pad, so the allowed set is never wider than v0.9.0's (a segment that
+// only starts at a pad and runs on narrow is not an escape either). Distances
+// are to the pad's real copper (padCopperDist), never its bounding box.
 func padEscape(t specctra.Track, need float64, pads []boardPad) bool {
 	reach := padEscapeReachMil(need)
 	for _, p := range pads {
 		if p.Layer != t.Layer && p.Layer != pcbLayerMulti {
 			continue
 		}
-		in := true
-		for _, e := range [][2]float64{{t.X1, t.Y1}, {t.X2, t.Y2}} {
-			d := math.Hypot(math.Max(math.Abs(e[0]-p.X)-p.W/2, 0), math.Max(math.Abs(e[1]-p.Y)-p.H/2, 0))
-			in = in && d <= reach+specctraEps
-		}
-		if in {
+		d1 := padCopperDist(p, t.X1, t.Y1)
+		d2 := padCopperDist(p, t.X2, t.Y2)
+		if d1 <= reach+specctraEps && d2 <= reach+specctraEps && math.Min(d1, d2) <= neckZoneMil+specctraEps {
 			return true
 		}
 	}
 	return false
+}
+
+// neckZoneMil is v0.9.0's pin neck-down distance: a narrow track needed an
+// end within this distance of a same-net pad's copper. It still caps the
+// pad-escape rule so the rule can only be stricter than v0.9.0's.
+const neckZoneMil = 50
+
+// padCopperDist is the distance (mil) from a point to a pad's copper, never
+// below the true distance (so a gate using it cannot be looser than the real
+// copper): cardinal ELLIPSE/OVAL/rounded-RECT pads use their exact outline,
+// NGON its inscribed circle, plain cardinal rectangles the rectangle itself;
+// a pad rotated off the axes uses the inscribed circle of its own shape
+// tuple, and polygon / special / unsized pads their centre point.
+func padCopperDist(p boardPad, x, y float64) float64 {
+	centre := math.Hypot(x-p.X, y-p.Y)
+	if p.W <= 0 || p.H <= 0 || p.SpecialPad != nil {
+		return centre
+	}
+	kind, sw, sh, sr, sides := "", 0.0, 0.0, 0.0, 0
+	if shape, ok := p.Shape.([]any); ok && len(shape) >= 2 {
+		kind, _ = shape[0].(string)
+		kind = strings.ToUpper(strings.TrimSpace(kind))
+		num := func(i int) float64 {
+			if i < len(shape) {
+				if v, ok := asFloatOK(shape[i]); ok && v > 0 {
+					return v
+				}
+			}
+			return 0
+		}
+		switch kind {
+		case "RECT":
+			sw, sh = num(1), num(2)
+			if len(shape) > 3 {
+				sr, _ = asFloatOK(shape[3])
+			}
+		case "ELLIPSE", "OVAL":
+			sw, sh = num(1), num(2)
+		case "NGON":
+			sw = num(1)
+			sh, sides = sw, int(num(2))
+		}
+	}
+	if kind == "POLYGON" || (kind != "" && kind != "RECT" && kind != "ELLIPSE" && kind != "OVAL" && kind != "NGON") {
+		return centre
+	}
+	if kind == "NGON" {
+		if sw <= 0 || sides < 3 {
+			return centre
+		}
+		return math.Max(0, centre-sw/2*math.Cos(math.Pi/float64(sides)))
+	}
+	if !netPathCardinalRotation(p.Rotation) {
+		m := math.Min(sw, sh)
+		if m <= 0 {
+			return centre
+		}
+		return math.Max(0, centre-m/2)
+	}
+	dx, dy := math.Abs(x-p.X), math.Abs(y-p.Y)
+	switch kind {
+	case "ELLIPSE":
+		return netPathEllipsePointDistance(dx, dy, p.W/2, p.H/2)
+	case "OVAL":
+		r := math.Min(p.W, p.H) / 2
+		hx, hy := math.Max(p.W/2-r, 0), math.Max(p.H/2-r, 0)
+		return math.Max(0, math.Hypot(math.Max(dx-hx, 0), math.Max(dy-hy, 0))-r)
+	case "RECT":
+		r := math.Min(sr, math.Min(p.W, p.H)/2)
+		if r > 0 {
+			hx, hy := p.W/2-r, p.H/2-r
+			return math.Max(0, math.Hypot(math.Max(dx-hx, 0), math.Max(dy-hy, 0))-r)
+		}
+	}
+	return math.Hypot(math.Max(dx-p.W/2, 0), math.Max(dy-p.H/2, 0))
 }
 
 // summarizeWidthViolations groups violations per net for the summary.
