@@ -297,3 +297,28 @@ func TestCeilNetclassWidths(t *testing.T) {
 		}
 	}
 }
+
+func TestBestFailedCandidate(t *testing.T) {
+	mk := func(name string, unrouted, drc int, tried bool) *routeCandidate {
+		return &routeCandidate{Name: name, Res: &routeResult{UnroutedCount: unrouted}, NewDRC: drc, Tried: tried, Board: "b"}
+	}
+	fr, tm := mk("fastroute", 5, 0, true), mk("tracemaker", 2, 0, true)
+	if got := bestFailedCandidate([]*routeCandidate{fr, tm}); got != tm {
+		t.Fatalf("want tracemaker, got %v", got.Name)
+	}
+	if got := bestFailedCandidate([]*routeCandidate{mk("a", 1, 0, false)}); got != nil {
+		t.Fatal("untried candidate must not be chosen")
+	}
+}
+
+func TestDefaultRouteThreads(t *testing.T) {
+	for _, c := range []struct {
+		cpus int
+		both bool
+		want int
+	}{{12, false, 8}, {12, true, 5}, {4, true, 2}, {2, false, 1}} {
+		if got := defaultRouteThreads(c.cpus, c.both); got != c.want {
+			t.Errorf("cpus=%d both=%v: got %d want %d", c.cpus, c.both, got, c.want)
+		}
+	}
+}

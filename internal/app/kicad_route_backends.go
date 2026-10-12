@@ -207,9 +207,6 @@ func (r *kicadRun) tracemakerCandidate(classed string, reqs map[string]kicad.Net
 		}
 		tmo := o.tm
 		tmo.threads = o.fo.threads
-		if tmo.threads == 0 && o.router == routerBoth {
-			tmo.threads = 4 // leave cores to the other router
-		}
 		res, err := runTracemaker(ctx, tmo, in, out, cons, report, &syncWriter{w: r.stderr})
 		if err != nil {
 			return nil, err

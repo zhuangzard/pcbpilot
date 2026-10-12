@@ -130,3 +130,20 @@ func rankCandidates(cs []*routeCandidate, winner *routeCandidate) []*routeCandid
 	})
 	return out
 }
+
+// bestFailedCandidate is, among the candidates that went through the post-route
+// pipeline, the one with the fewest unrouted connections, then the fewest new
+// DRC errors (first in rank order on a tie). nil when none was tried.
+func bestFailedCandidate(cs []*routeCandidate) *routeCandidate {
+	var best *routeCandidate
+	for _, c := range cs {
+		if !c.Tried || c.Res == nil || c.Board == "" {
+			continue
+		}
+		if best == nil || c.Res.UnroutedCount < best.Res.UnroutedCount ||
+			(c.Res.UnroutedCount == best.Res.UnroutedCount && c.NewDRC < best.NewDRC) {
+			best = c
+		}
+	}
+	return best
+}

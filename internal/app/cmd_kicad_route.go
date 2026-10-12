@@ -134,7 +134,7 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 			}
 			o.fo.noOptimizer = !o.optimizer
 			if o.fo.threads <= 0 {
-				o.fo.threads = min(max(runtime.NumCPU()-1, 1), 8)
+				o.fo.threads = defaultRouteThreads(runtime.NumCPU(), o.router == routerBoth)
 			}
 			return runKicadRoute(o, stdout, stderr)
 		},
@@ -503,6 +503,20 @@ func (r *kicadRun) run() error {
 		}
 		if i < len(cands)-1 {
 			fmt.Fprintf(r.stderr, "router %s did not pass every gate (%s); trying %s\n", c.Name, failedGateList(r.gates), cands[i+1].Name)
+		}
+	}
+	// Nobody passed: the run's outputs must describe the best-ranked result
+	// (fewest unrouted), not whichever candidate happened to be tried last.
+	if !pass && have {
+		if best := bestFailedCandidate(cands); best != nil && best != cands[len(cands)-1] {
+			fmt.Fprintf(r.stderr, "no router passed every gate; reporting the best result (%s)\n", best.Name)
+			r.useCandidate(best, cands)
+			if nb, ok, err := r.postRoute(best.Board, inSnap); err == nil {
+				board, pass = nb, ok
+				best.FullPass = ok
+			} else {
+				fmt.Fprintf(r.stderr, "router %s: post-route failed: %v\n", best.Name, err)
+			}
 		}
 	}
 	r.summary["routerCandidates"] = candidateSummary(cands)
@@ -1545,4 +1559,14 @@ func (r *kicadRun) addEscapes(board, ses string) (string, error) {
 	}
 	fmt.Fprintf(r.stderr, "intent escapes: %d stub(s) and %d via(s) added to the imported board\n", len(add), len(vias))
 	return out, nil
+}
+
+// defaultRouteThreads is the per-router thread count when --threads is not
+// given: one core is left to the system, and with --router both the two
+// routers split the rest instead of fighting over it.
+func defaultRouteThreads(cpus int, both bool) int {
+	if both {
+		return max((cpus-1)/2, 2)
+	}
+	return min(max(cpus-1, 1), 8)
 }
