@@ -98,6 +98,11 @@ type tmConstraints struct {
 
 func mmOfMil(mil float64) float64 { return math.Round(mil*0.0254*1000) / 1000 }
 
+// mmCeilMil is mil in mm rounded UP to 1 µm: TraceMaker keeps widths on that
+// grid, and a minimum rounded down would sit under the same minimum in the
+// .kicad_dru.
+func mmCeilMil(mil float64) float64 { return math.Ceil(mil*0.0254*1000-1e-9) / 1000 }
+
 // tracemakerConstraints turns the intent requirements into tracemaker's
 // constraints. A net with an intent minimum below its class width may neck
 // down at the pads, to that minimum and no further (min_width_mm — the
@@ -115,7 +120,7 @@ func tracemakerConstraints(reqs map[string]kicad.NetRequirement, floorMil float6
 		r := reqs[n]
 		switch {
 		case r.MinMil > 0 && r.MinMil < r.OuterMil-0.01:
-			c.Nets[n] = tmNet{MinWidthMM: mmOfMil(r.MinMil)}
+			c.Nets[n] = tmNet{MinWidthMM: mmCeilMil(r.MinMil)}
 		case r.OuterMil > floorMil+0.01:
 			c.Nets[n] = tmNet{NoNeckdown: true}
 		}

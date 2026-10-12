@@ -83,6 +83,13 @@ func TestPlanWidenToIntent(t *testing.T) {
 	if ops := planWidenToIntent([]specctra.Track{inner}, nil, nil, reqs, 6.2); len(ops) != 0 {
 		t.Fatalf("full-width inner track changed: %+v", ops)
 	}
+	// a router that writes widths to 1 µm (0.5 mm for 0.500126) lands a hair
+	// under the rule minimum: brought to the goal exactly
+	pr := map[string]specctra.NetRequirement{"PROBE": {OuterMil: 19.69, InnerMil: 19.69}}
+	hair := specctra.Track{ID: "p", Net: "PROBE", Layer: 1, X2: 100, Width: 0.5 / 0.0254}
+	if ops := planWidenToIntent([]specctra.Track{hair}, nil, nil, pr, 6.2); len(ops) != 1 || ops[0].NewWidth != 19.69 {
+		t.Fatalf("hair-under track: %+v", ops)
+	}
 }
 
 func TestWidenStepBack(t *testing.T) {

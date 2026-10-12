@@ -62,7 +62,7 @@ func planWidenToIntent(tracks []specctra.Track, vias []widenVia, pads []boardPad
 		if t.Layer >= 15 {
 			need = r.InnerMil
 		}
-		if t.Width+specctraEps >= need {
+		if t.Width >= need-1e-4 {
 			return 0
 		}
 		return need
@@ -131,6 +131,15 @@ func planWidenTo(tracks []specctra.Track, vias []widenVia, pads []boardPad, targ
 			}))
 		}
 		nw := math.Floor(math.Min(goal, 2*(free-clearanceMil))*100) / 100
+		// a track a hair below its goal (a router that writes widths to 1 µm
+		// lands under the rule minimum the .kicad_dru carries to 0.1 µm) is
+		// brought to the goal exactly when the free space allows it
+		if goal-t.Width <= minGain && goal-t.Width > 1e-4 && 2*(free-clearanceMil) >= goal {
+			nw = goal
+			ops = append(ops, widenOp{Track: t, NewWidth: nw})
+			widened = append(widened, wide{a, b, t.Layer, nw, t.Net})
+			continue
+		}
 		if nw > t.Width+minGain {
 			ops = append(ops, widenOp{Track: t, NewWidth: nw})
 			widened = append(widened, wide{a: a, b: b, layer: t.Layer, width: nw, net: t.Net})
