@@ -503,6 +503,7 @@ func (r *kicadRun) run() error {
 		if !ok && c.Name == routerTracemaker && !c.retried && gateFailed(r.gates, "intent-widths") {
 			if nets := r.narrowIntentNets(nb); len(nets) > 0 {
 				c.retried, c.noNeck = true, nets
+				first, firstBoard, firstOut, firstPass := c.Res, c.Board, board, ok
 				fmt.Fprintf(r.stderr, "router %s: %d net(s) narrower than intent outside the pad zone; routing again without neck-down on them\n", c.Name, len(nets))
 				if err := r.rerunCandidate(c); err == nil {
 					if b2, err := c.commit(c.Res); err == nil {
@@ -511,6 +512,18 @@ func (r *kicadRun) run() error {
 						if nb2, ok2, err := r.postRoute(b2, inSnap); err == nil {
 							board, pass, c.FullPass = nb2, ok2, ok2
 							ok = ok2
+						}
+						// The second round only stands when it passes: a no-neckdown
+						// power net that no longer fits leaves more connections unrouted.
+						if !ok {
+							fmt.Fprintf(r.stderr, "router %s: the no-neck-down round did not pass either (%d unrouted vs %d); keeping the first result\n", c.Name, c.Res.UnroutedCount, first.UnroutedCount)
+							c.Res, c.Board = first, firstBoard
+							r.useCandidate(c, cands)
+							if nb3, ok3, err := r.postRoute(firstBoard, inSnap); err == nil {
+								board, pass, c.FullPass, ok = nb3, ok3, ok3, ok3
+							} else {
+								board, pass, ok = firstOut, firstPass, firstPass
+							}
 						}
 					}
 				}
