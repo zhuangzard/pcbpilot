@@ -171,6 +171,7 @@ func (t *Tools) RunBridge(args ...string) (json.RawMessage, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), BridgeTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, t.Python, append([]string{script}, args...)...)
+	ownGroup(cmd)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	runErr := cmd.Run()
@@ -350,6 +351,7 @@ func (t *Tools) DRCSeverity(pcb, out, severity string) (*DRCReport, error) {
 	defer cancel()
 	_ = os.Remove(out)
 	cmd := exec.CommandContext(ctx, t.CLI, "pcb", "drc", "--format", "json", "--severity-"+severity, "-o", out, pcb)
+	ownGroup(cmd)
 	var buf bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &buf, &buf
 	err := cmd.Run()

@@ -799,7 +799,7 @@ def set_via_width(v, w):
 def edit(pcb, ops_path, out):
     """Apply copper/silk edits (mil, y-up), fill the zones and save:
     {"setWidth":[{"id","width"}], "addVias":[{"net","x","y","diameter","drill"}],
-     "addTracks":[{"net","layer","startX","startY","endX","endY","lineWidth"}],
+     "addTracks":[{"net","layer","startX","startY","endX","endY","lineWidth","locked"?}],
      "setText":[{"id","x","y","rotation","fontSize","lineWidth"}],
      "removeNets":[net…], "lockNets":[net…]}  (x, y = text centre)
     removeNets deletes the tracks and vias of those nets; lockNets sets them locked
@@ -845,6 +845,8 @@ def edit(pcb, ops_path, out):
         t.SetLayer(kicad_layer(int(op["layer"])))
         if net is not None:
             t.SetNet(net)
+        if op.get("locked"):
+            t.SetLocked(True)
         board.Add(t)
         done["addTracks"] += 1
     texts = {}
