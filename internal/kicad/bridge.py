@@ -798,7 +798,7 @@ def set_via_width(v, w):
 
 def edit(pcb, ops_path, out):
     """Apply copper/silk edits (mil, y-up), fill the zones and save:
-    {"setWidth":[{"id","width"}], "addVias":[{"net","x","y","diameter","drill"}],
+    {"setWidth":[{"id","width"}], "addVias":[{"net","x","y","diameter","drill","locked"?}],
      "addTracks":[{"net","layer","startX","startY","endX","endY","lineWidth","locked"?}],
      "setText":[{"id","x","y","rotation","fontSize","lineWidth"}],
      "removeNets":[net…], "lockNets":[net…]}  (x, y = text centre)
@@ -834,6 +834,8 @@ def edit(pcb, ops_path, out):
             v.SetDrill(nm(op["drill"]))
         if net is not None:
             v.SetNet(net)
+        if op.get("locked"):
+            v.SetLocked(True)
         board.Add(v)
         done["addVias"] += 1
     for op in ops.get("addTracks") or []:

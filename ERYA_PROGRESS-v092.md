@@ -9,3 +9,11 @@
 - 11:06 更正：上条「已启动」不实（macOS 无 setsid，运行未起）；现已用 nohup 真正启动 /tmp/pico4/run.sh（pid 54614）。
 - 11:13 桥板 fastroute 完成：未布通 5→3，但 DRC 错 9→15（clearance 4→12），桥处无违规。结果带随机性，已起噪声对照：未桥基线重跑 + tracemaker 桥/未桥（run2.sh A/B，2 并发）。
 - 11:30 全部完成：fastroute 重跑与首跑逐条一致（确定性）；tracemaker 无桥 2 / 有桥 5 未布通。报告 REPORT-v0.9.2-prebridge.md，结论：不建议产品化。
+
+# v0.9.2 阶段三进度（单引脚逃线预置 escape-stubs）
+
+- 2026-10-12 起步。实现 `pcbpilot kicad escape-stubs`（internal/app/kicad_escapestubs.go、cmd_kicad_escapestubs.go；bridge.py addVias 新增 locked）。
+  规划：channelOf 度量选 tight 焊盘（viaDirs<=2 或 run<阈值）→ 8 方向找最短可行「桩+过孔」→ 以净空余量/远离器件体评分；最受限者先放（每轮重算可行方向数）。
+  过孔：板规则过孔，环 clearance+0.25mil 安全余量，同网 SMD 焊盘回避，孔到孔≥max(过孔径, 钻孔+9.85mil)。
+- 首次 dry-run：viaDirs<=2 在裸板上选中 72 个焊盘（含 IC101/102），U303.22 被相邻桩挤掉 → 改为动态最受限优先；性能待查（二次方重算）。
+- 11:50 已启动 /tmp/pico5/run.sh A（fastroute 全桩→U303 桩）与 B（tracemaker 全桩→无桩基线），2 并发
