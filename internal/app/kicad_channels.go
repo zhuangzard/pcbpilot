@@ -127,17 +127,22 @@ func padEdgeDist(q pcbPadP, d [2]float64) float64 {
 // courtyards (a part without one counts as its pad extent grown by the
 // default excess).
 func (env *escapeEnv) density(q pcbPadP, half float64) float64 {
-	sq := layoutBBox{MinX: q.X - half, MinY: q.Y - half, MaxX: q.X + half, MaxY: q.Y + half}
-	byRef := map[string][]pcbPadP{}
-	for _, p := range env.pads {
-		byRef[p.Designator] = append(byRef[p.Designator], p)
+	if env.courtCache == nil {
+		byRef := map[string][]pcbPadP{}
+		for _, p := range env.pads {
+			byRef[p.Designator] = append(byRef[p.Designator], p)
+		}
+		env.courtCache = make(map[string]layoutBBox, len(byRef))
+		for ref, part := range byRef {
+			env.courtCache[ref] = env.courtyardOf(ref, part)
+		}
 	}
+	sq := layoutBBox{MinX: q.X - half, MinY: q.Y - half, MaxX: q.X + half, MaxY: q.Y + half}
 	area := 0.0
-	for ref, part := range byRef {
+	for ref, c := range env.courtCache {
 		if ref == q.Designator {
 			continue
 		}
-		c := env.courtyardOf(ref, part)
 		w := math.Min(c.MaxX, sq.MaxX) - math.Max(c.MinX, sq.MinX)
 		h := math.Min(c.MaxY, sq.MaxY) - math.Max(c.MinY, sq.MinY)
 		if w > 0 && h > 0 {

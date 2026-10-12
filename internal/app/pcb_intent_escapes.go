@@ -82,6 +82,8 @@ type escapeEnv struct {
 	planned     []intentEscape
 	// viaDia / viaDrill: the via an inward escape ends in (0 = none).
 	viaDia, viaDrill float64
+	// courtCache: every part's courtyard, built once for density (kicad_channels.go).
+	courtCache map[string]layoutBBox
 }
 
 // defaultCourtyardMil: IPC-7351 nominal courtyard excess over the pads.

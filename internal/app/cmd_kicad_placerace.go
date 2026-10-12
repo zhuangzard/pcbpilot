@@ -203,6 +203,10 @@ func runPlaceRace(pcb, outDir, intent, power, sim, variantSpec string, seeds, to
 			fmt.Fprintf(stderr, "place-race: variant %s: %v\n", v.Name, err)
 			continue
 		}
+		if rep.Baseline.WireIn == 0 {
+			// the placer's own weighted wirelength of the input placement
+			rep.Baseline.WireIn = outs[0].Result.Metrics.StartWireIn
+		}
 		for _, oc := range outs {
 			id := fmt.Sprintf("%s#%d", v.Name, oc.Trial.Seed)
 			rc, _ := score(id, v.Name, oc.Board)

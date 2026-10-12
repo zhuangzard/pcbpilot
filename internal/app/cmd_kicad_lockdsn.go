@@ -64,3 +64,39 @@ after). Nothing is read from or written to a board.`,
 	c.Flags().StringVar(&out, "out", "", "output DSN (required)")
 	return c
 }
+
+func newKicadStageDSNCmd(stdout io.Writer) *cobra.Command {
+	var dsn, nets, out string
+	c := &cobra.Command{
+		Use:   "stage-dsn",
+		Short: "Split a DSN's net classes into a first-stage copy and the rest (layered routing, experiment)",
+		Long: `Moves --nets into copies "<class>__first" of their classes (same circuit and
+rule) and writes --out. Route with --router.autorouter.ignore_net_classes set to
+the printed restClasses and only the first-stage nets are routed; freeze that
+copper with lock-dsn and route again for the rest.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if dsn == "" || nets == "" || out == "" {
+				return fmt.Errorf("--dsn, --nets and --out are required")
+			}
+			src, err := os.ReadFile(dsn)
+			if err != nil {
+				return err
+			}
+			res, rep, err := specctra.SplitClassesForStage(string(src), strings.Split(nets, ","))
+			if err != nil {
+				return err
+			}
+			if err := os.WriteFile(out, []byte(res), 0o644); err != nil {
+				return err
+			}
+			blob, _ := json.Marshal(rep)
+			fmt.Fprintln(stdout, string(blob))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&dsn, "dsn", "", "input Specctra DSN (required)")
+	c.Flags().StringVar(&nets, "nets", "", "first-stage nets, comma-separated (required)")
+	c.Flags().StringVar(&out, "out", "", "output DSN (required)")
+	return c
+}

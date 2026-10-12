@@ -507,3 +507,62 @@ func TestLockWiringWritesFixedCopperOfChosenNetsOnly(t *testing.T) {
 		t.Fatal("unknown layer accepted")
 	}
 }
+
+const stageDSN = `(pcb x
+  (network
+    (net A (pins U1-1 R1-1))
+    (class kicad_default
+      (circuit
+        (use_via "V")
+      )
+      (rule
+        (width 200)
+        (clearance 150)
+      )
+    )
+    (class PWR "+3V3" +1V1 GND
+      (circuit
+        (use_via "V")
+      )
+      (rule
+        (width 400)
+      )
+    )
+  )
+)
+`
+
+func TestSplitClassesForStageMovesOnlyMembership(t *testing.T) {
+	out, rep, err := SplitClassesForStage(stageDSN, []string{"+3v3", "+1V1", "NOPE"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.FirstClasses) != 1 || rep.FirstClasses[0] != "PWR__first" {
+		t.Fatalf("first classes %v", rep.FirstClasses)
+	}
+	if strings.Join(rep.RestClasses, ",") != "PWR,kicad_default" {
+		t.Fatalf("rest classes %v", rep.RestClasses)
+	}
+	if len(rep.Missing) != 1 || rep.Missing[0] != "NOPE" {
+		t.Fatalf("missing %v", rep.Missing)
+	}
+	// The copy carries the original rule and the quoted net name intact.
+	i := strings.Index(out, "(class PWR__first")
+	if i < 0 || !strings.Contains(out[i:], `"+3V3" +1V1`) || !strings.Contains(out[i:], "(width 400)") {
+		t.Fatalf("first-stage class wrong:\n%s", out)
+	}
+	j := strings.Index(out, "(class PWR GND")
+	if j < 0 || !strings.Contains(out[j:i], "(width 400)") {
+		t.Fatalf("remaining class wrong:\n%s", out)
+	}
+	// Still a parseable DSN with the same nets and balanced parentheses.
+	if strings.Count(out, "(") != strings.Count(out, ")") {
+		t.Fatalf("unbalanced:\n%s", out)
+	}
+	if !strings.Contains(out, "(net A (pins U1-1 R1-1))") {
+		t.Fatal("net section changed")
+	}
+	if _, _, err := SplitClassesForStage(stageDSN, []string{"ZZZ"}); err == nil {
+		t.Fatal("staging nothing should be an error")
+	}
+}
