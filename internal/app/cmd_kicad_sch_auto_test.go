@@ -49,6 +49,9 @@ func pinNets(t *testing.T, sheet string) map[string]string {
 const autoSpec = `{"connections":[{"pin":"R3:1","kind":"power","net":"+3V3"},{"pin":"R3:2","kind":"gnd","net":"GND"},{"pin":"R2:1","kind":"net_label","net":"SIG"}]}`
 
 func TestKicadAutoconnectPlanFromSheet(t *testing.T) {
+	if _, err := kicad.KicadCLI(); err != nil {
+		t.Skip("kicad-cli not installed") // the plan needs the KiCad netlist of the sheet
+	}
 	sheet := autoFixture(t)
 	spec := filepath.Join(filepath.Dir(sheet), "spec.json")
 	_ = os.WriteFile(spec, []byte(autoSpec), 0o644)
