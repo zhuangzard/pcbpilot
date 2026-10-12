@@ -325,7 +325,7 @@ pcbpilot pcb auto route --playbook out/playbook.json --out-dir out/live --projec
   （fastroute `--no-neckdown-classes`；fastroute 的 fanout 微颈缩会把任意拥挤段收到类宽 3/4、3/5、1/2，不只在焊盘处，
   `min_trace_width` 只是下限），全局颈缩下限取意图最小的 `widthMil.min`。
 - 布线后：原生 DRC 0、逐焊盘对账 0 差异、`pcb rules check --intent` 同步、逐网逐层线宽对意图（低于要求的线段
-  只在同网焊盘 50 mil 内且不低于 min 时算颈缩；`--width-basis segment` 为默认（用户 2026-10-06 决定“按每段实际电流算”）：
+  只有**整段**落在同网某焊盘真实铜 max(3×宽, 30 mil) 内、且至少一端在 50 mil 内（不比 v0.9.0 的 50 mil 规则更宽）、不低于 min 时算焊盘逃线；`--width-basis segment` 为默认（用户 2026-10-06 决定“按每段实际电流算”）：
   承载不到网电流一半的走线，按后仿真算出的该段最坏电流 ×1.2 的 IPC-2221 线宽判，不低于 min，主干仍按网电流；
   `net` 为旧口径）、`pcb check --intent` 无 ERROR（板边、隔离、过孔载流；`segment` 口径下，一组过孔仿真电流之和
   不到网电流一半时按该组仿真电流 ×（1 + `via.marginPct`，默认 20 %）判，否则按网电流）、

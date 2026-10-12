@@ -462,13 +462,15 @@ func snapshotIntentGates(snap *boardSnapshot, in *designIntent, intentPath, simV
 		pads = append(pads, c.Pads...)
 	}
 	vs := checkIntentWidths(tracks, pads, intentRequirements(in), pouredLookup(snap.Copper.Poured), segNeed)
-	basis := "net current"
+	basis := "WIDTH BASIS net: every track carries the net's intent current"
+	var info []string
 	if segNeed != nil {
-		basis = "each segment's simulated current below half the net current, else the net current"
+		basis = "WIDTH BASIS segment: a track carrying under half the net current is judged by its own simulated current, else the net current"
+		info = []string{"width basis is segment: the intent's outer width is not a hard floor on every track (a lightly loaded segment may be narrower, never below widthMil.min); pass --width-basis net for the strict per-net reading"}
 	}
 	add(gateResult{Gate: "intent-widths", Pass: len(vs) == 0,
-		Detail: fmt.Sprintf("%d track(s) below the intent width (basis: %s) outside pin neck-downs and own-net pours, or below the minimum", len(vs), basis),
-		Items:  summarizeWidthViolations(vs)})
+		Detail: fmt.Sprintf("%d track(s) below the intent width (%s) outside pad escapes and own-net pours, or below the minimum", len(vs), basis),
+		Items:  summarizeWidthViolations(vs), Info: info})
 
 	// Always reported (a mandatory gate on every route path): passes with
 	// nothing to match when the intent has no length group or pair skew.
@@ -747,9 +749,11 @@ pour rebuild → native DRC → pad-net diff → live dump → sim post-layout, 
   pad-net-diff       0 differences against the schematic connectivity
   intent-rules       the board's native rules match the intent
   intent-widths      every track per net and layer >= widthMil outer/inner;
-                     narrower only as a pin neck-down (within 50 mil of a
-                     same-net pad) or inside its own net's pour, never below
-                     widthMil.min
+                     narrower only as a pad escape (the whole segment within
+                     max(3 widths, 30 mil) of one same-net pad's copper and an
+                     end within 50 mil of it) or inside its own net's pour,
+                     never below widthMil.min; --width-basis segment (default)
+                     lets a lightly loaded segment follow its own current
   pcb-check-intent   no ERROR: copper-to-edge, isolation, via current
   post-layout-sim    verdict not fail (IR drop, opens, via current, heat)
   board-manual       the board user manual is regenerated (versioned under
