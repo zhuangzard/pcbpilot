@@ -6,3 +6,6 @@
   方案：Go 规划器（宽度 = min(意图宽, 对异网焊盘 5.9mil 间距允许的最大宽) 且 >= 意图 min）+ `kicad prebridge` 子命令。
 - 2026-10-12 11:05 prebridge 子命令+规划器+3 个单测过；U303 dry-run 规划出 43-44、48-49 两座 +3V3 桥（11.82mil，受 5.9mil 间距缩颈，意图 15.75/min 10）。下一步：写桥板 → 同配方 fastroute 对比。
 - 11:05 已启动桥板 fastroute 运行：/tmp/pico4/run.sh（等 times.txt ALLDONE）
+- 11:06 更正：上条「已启动」不实（macOS 无 setsid，运行未起）；现已用 nohup 真正启动 /tmp/pico4/run.sh（pid 54614）。
+- 11:13 桥板 fastroute 完成：未布通 5→3，但 DRC 错 9→15（clearance 4→12），桥处无违规。结果带随机性，已起噪声对照：未桥基线重跑 + tracemaker 桥/未桥（run2.sh A/B，2 并发）。
+- 11:30 全部完成：fastroute 重跑与首跑逐条一致（确定性）；tracemaker 无桥 2 / 有桥 5 未布通。报告 REPORT-v0.9.2-prebridge.md，结论：不建议产品化。
