@@ -31,6 +31,11 @@ type DSNPrep struct {
 	// NarrowestClassMil is the narrowest rule width of any DSN class with
 	// nets: a neck-down floor above it would forbid that class its own width.
 	NarrowestClassMil float64 `json:"narrowestClassMil"`
+	// ClassPairs is the number of (class_class ...) clearances written: KiCad
+	// keeps the larger of the two objects' netclass clearances, while the
+	// router used the class of one of them (a track of a 0.205 mm class sat
+	// 0.160 mm from a pad of a 0.155 mm class).
+	ClassPairs int `json:"classPairs,omitempty"`
 	// ClearanceMarginMil was added to every clearance (see ClearanceMarginMil).
 	ClearanceMarginMil float64 `json:"clearanceMarginMil"`
 	// Short lists the nets whose DSN class misses their requirement (the
@@ -269,6 +274,11 @@ func PrepareDSN(dsn string, classes []NetClass, reqs map[string]NetRequirement, 
 		outer, inner, clr float64
 	}
 	byNet := map[string]eff{}
+	type classClr struct {
+		name string
+		clr  float64
+	}
+	var clrs []classClr
 	var out strings.Builder
 	last := 0
 	for _, sp := range childSpans(network, "class") {
@@ -318,6 +328,9 @@ func PrepareDSN(dsn string, classes []NetClass, reqs map[string]NetRequirement, 
 				prep.NoNeckdown = append(prep.NoNeckdown, newName)
 			}
 		}
+		if e.clr > 0 && !strings.ContainsAny(newName, " \t\"()") {
+			clrs = append(clrs, classClr{newName, e.clr / toMil})
+		}
 		for _, n := range members {
 			byNet[n] = e
 		}
@@ -335,6 +348,24 @@ func PrepareDSN(dsn string, classes []NetClass, reqs map[string]NetRequirement, 
 		last = sp[1]
 	}
 	out.WriteString(network[last:])
+	var pairs strings.Builder
+	for i, a := range clrs {
+		for _, b := range clrs[i+1:] {
+			if a.clr == b.clr {
+				continue
+			}
+			pairs.WriteString(fmt.Sprintf("    (class_class (classes %s %s) (rule (clearance %s)))\n", a.name, b.name,
+				strconv.FormatFloat(math.Max(a.clr, b.clr), 'f', -1, 64)))
+			prep.ClassPairs++
+		}
+	}
+	if prep.ClassPairs > 0 {
+		o := out.String()
+		if end := strings.LastIndexByte(o, ')'); end >= 0 {
+			out.Reset()
+			out.WriteString(o[:end] + pairs.String() + "  " + o[end:])
+		}
+	}
 
 	names := make([]string, 0, len(reqs))
 	for n := range reqs {
