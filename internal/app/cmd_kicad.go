@@ -39,6 +39,8 @@ goes to --out-dir.`,
 	}
 	c.AddCommand(
 		newKicadPlaceCmd(stdout, stderr),
+		newKicadChannelsCmd(stdout, stderr),
+		newKicadPlaceRaceCmd(stdout, stderr),
 		newKicadSchFitCmd(stdout, stderr),
 		newKiCadFabCmd(stdout, stderr),
 		newKiCadLcscCmd(stdout, stderr),
