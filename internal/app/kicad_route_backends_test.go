@@ -326,3 +326,43 @@ func TestDefaultRouteThreads(t *testing.T) {
 		}
 	}
 }
+
+// A router that finishes after the winner is not committed (its board does
+// not exist yet) but keeps its result: when the winner then fails a full
+// gate it goes through commit + the full gates, never skipped, never read as
+// the winner's.
+func TestRaceLateFinisherStaysUncommittedFallback(t *testing.T) {
+	released := make(chan struct{})
+	a := fakeCand("a", 0, &routeResult{Router: "a"}, nil)
+	committedB := false
+	b := &routeCandidate{Name: "b",
+		exec: func(ctx context.Context) (*routeResult, error) {
+			<-released // ignores ctx: finishes after the winner was chosen
+			return &routeResult{Router: "b", UnroutedCount: 1}, nil
+		},
+		commit: func(*routeResult) (string, error) { committedB = true; return "b.kicad_pcb", nil }}
+	w := raceCandidates(context.Background(), []*routeCandidate{a, b}, func(x *routeCandidate) {
+		x.Quick, _ = quickCheck(x.Res, 0)
+		close(released)
+	})
+	if w != a {
+		t.Fatalf("winner %v", w)
+	}
+	if committedB || b.Board != "" || b.Res == nil || b.Err != nil {
+		t.Fatalf("late finisher must keep its result uncommitted: %+v committed=%v", b, committedB)
+	}
+	r := rankCandidates([]*routeCandidate{b, a}, w)
+	if r[0] != a || r[1] != b {
+		t.Fatalf("order %s %s", r[0].Name, r[1].Name)
+	}
+}
+
+// A candidate whose post-route pipeline crashed (Tried false) is never the
+// "best result" the run's outputs are re-judged on.
+func TestBestFailedCandidateIgnoresCrashed(t *testing.T) {
+	crashed := &routeCandidate{Name: "tracemaker", Res: &routeResult{UnroutedCount: 0}, Board: "b", Tried: false}
+	judged := &routeCandidate{Name: "fastroute", Res: &routeResult{UnroutedCount: 5}, Board: "b", Tried: true}
+	if got := bestFailedCandidate([]*routeCandidate{crashed, judged}); got != judged {
+		t.Fatalf("got %v", got)
+	}
+}

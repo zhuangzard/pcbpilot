@@ -465,6 +465,10 @@ func (r *kicadRun) run() error {
 		return err
 	}
 	var pass, have bool
+	// live is the candidate whose result r.route / r.gates currently describe
+	// (the last one that went through postRoute); the run's outputs must
+	// describe the candidate that passes, or else the best one.
+	var live *routeCandidate
 	for i, c := range cands {
 		if c.Res == nil && (c.Err == nil || c.Cancelled) {
 			if err := r.rerunCandidate(c); err != nil {
@@ -487,9 +491,10 @@ func (r *kicadRun) run() error {
 			}
 		}
 		r.useCandidate(c, cands)
+		live = c
 		r.lap("router " + c.Name + " (committed)")
 		nb, ok, err := r.postRoute(c.Board, inSnap)
-		c.Tried, c.FullPass = true, ok
+		c.Tried, c.FullPass = err == nil, ok // Tried: the pipeline judged it (a crashed one has no gate results)
 		if err != nil {
 			fmt.Fprintf(r.stderr, "router %s: post-route failed: %v\n", c.Name, err)
 			if i == len(cands)-1 && !have {
@@ -539,14 +544,16 @@ func (r *kicadRun) run() error {
 	// Nobody passed: the run's outputs must describe the best-ranked result
 	// (fewest unrouted), not whichever candidate happened to be tried last.
 	if !pass && have {
-		if best := bestFailedCandidate(cands); best != nil && best != cands[len(cands)-1] {
+		if best := bestFailedCandidate(cands); best != nil && best != live {
 			fmt.Fprintf(r.stderr, "no router passed every gate; reporting the best result (%s)\n", best.Name)
 			r.useCandidate(best, cands)
 			if nb, ok, err := r.postRoute(best.Board, inSnap); err == nil {
 				board, pass = nb, ok
 				best.FullPass = ok
 			} else {
-				fmt.Fprintf(r.stderr, "router %s: post-route failed: %v\n", best.Name, err)
+				// r.route / r.gates now describe a half-run candidate: never
+				// write them out as the result.
+				return fmt.Errorf("router %s: post-route failed while re-judging the best result: %w", best.Name, err)
 			}
 		}
 	}
