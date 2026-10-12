@@ -202,7 +202,13 @@ func (r *kicadRun) tracemakerCandidate(classed string, reqs map[string]kicad.Net
 		if err := ceilNetclassWidths(strings.TrimSuffix(in, ".kicad_pcb") + ".kicad_pro"); err != nil {
 			return nil, fmt.Errorf("tracemaker class widths: %w", err)
 		}
-		if err := writeJSONFile(cons, tracemakerConstraints(reqs, floorMil, r.in)); err != nil {
+		tc := tracemakerConstraints(reqs, floorMil, r.in)
+		for n := range c.noNeck {
+			if rq, ok := reqs[n]; ok {
+				tc.Nets[n] = tmNet{NoNeckdown: true, WidthMM: mmCeilMil(rq.OuterMil)}
+			}
+		}
+		if err := writeJSONFile(cons, tc); err != nil {
 			return nil, err
 		}
 		tmo := o.tm
@@ -236,4 +242,32 @@ func (r *kicadRun) tracemakerCandidate(classed string, reqs map[string]kicad.Net
 		return board, nil
 	}
 	return c
+}
+
+// narrowIntentNets lists the nets that have copper narrower than their intent
+// width outside the pad-escape zone on the board (what the intent-widths gate
+// rejects), so a second routing round can forbid neck-down on them.
+func (r *kicadRun) narrowIntentNets(board string) map[string]bool {
+	s, _, err := r.snapshot(board)
+	if err != nil || s.Copper == nil {
+		return nil
+	}
+	tracks, _, pads, err := copperOf(s)
+	if err != nil {
+		return nil
+	}
+	nets := map[string]bool{}
+	for _, v := range checkIntentWidths(tracks, pads, intentRequirements(r.in), pouredLookup(s.Copper.Poured)) {
+		nets[v.Net] = true
+	}
+	return nets
+}
+
+func gateFailed(gs []gateResult, name string) bool {
+	for _, g := range gs {
+		if g.Gate == name && !g.Pass {
+			return true
+		}
+	}
+	return false
 }

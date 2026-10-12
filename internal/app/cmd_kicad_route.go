@@ -498,6 +498,24 @@ func (r *kicadRun) run() error {
 			continue
 		}
 		board, pass, have = nb, ok, true
+		// TraceMaker may neck a power net down anywhere; the intent-widths gate
+		// only accepts that at the pads. Route those nets again without it.
+		if !ok && c.Name == routerTracemaker && !c.retried && gateFailed(r.gates, "intent-widths") {
+			if nets := r.narrowIntentNets(nb); len(nets) > 0 {
+				c.retried, c.noNeck = true, nets
+				fmt.Fprintf(r.stderr, "router %s: %d net(s) narrower than intent outside the pad zone; routing again without neck-down on them\n", c.Name, len(nets))
+				if err := r.rerunCandidate(c); err == nil {
+					if b2, err := c.commit(c.Res); err == nil {
+						c.Board = b2
+						r.useCandidate(c, cands)
+						if nb2, ok2, err := r.postRoute(b2, inSnap); err == nil {
+							board, pass, c.FullPass = nb2, ok2, ok2
+							ok = ok2
+						}
+					}
+				}
+			}
+		}
 		if ok {
 			break
 		}

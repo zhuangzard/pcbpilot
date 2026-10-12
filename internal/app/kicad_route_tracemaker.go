@@ -77,6 +77,7 @@ func (o tracemakerOpts) budget() time.Duration {
 }
 
 type tmNet struct {
+	WidthMM    float64 `json:"width_mm,omitempty"`
 	MinWidthMM float64 `json:"min_width_mm,omitempty"`
 	NoNeckdown bool    `json:"no_neckdown,omitempty"`
 }
@@ -120,9 +121,11 @@ func tracemakerConstraints(reqs map[string]kicad.NetRequirement, floorMil float6
 		r := reqs[n]
 		switch {
 		case r.MinMil > 0 && r.MinMil < r.OuterMil-0.01:
-			c.Nets[n] = tmNet{MinWidthMM: mmCeilMil(r.MinMil)}
+			c.Nets[n] = tmNet{MinWidthMM: mmCeilMil(r.MinMil), WidthMM: mmCeilMil(r.OuterMil)}
 		case r.OuterMil > floorMil+0.01:
-			c.Nets[n] = tmNet{NoNeckdown: true}
+			// width_mm is explicit: TraceMaker snaps a class width read from the
+			// .kicad_pro (0.5001 mm) down to 0.5000, under the .kicad_dru minimum
+			c.Nets[n] = tmNet{NoNeckdown: true, WidthMM: mmCeilMil(r.OuterMil)}
 		}
 	}
 	if in == nil {

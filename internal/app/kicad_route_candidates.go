@@ -32,6 +32,10 @@ type routeCandidate struct {
 	NewDRC    int    // DRC errors not present on the input board
 	Tried     bool   // the post-route pipeline has run on it
 	FullPass  bool
+	// noNeck: nets the next exec must route without neck-down (second round
+	// after the intent-widths gate found narrow copper outside the pad zone).
+	noNeck  map[string]bool
+	retried bool
 }
 
 // quickCheck judges a materialised candidate: complete (no unrouted
