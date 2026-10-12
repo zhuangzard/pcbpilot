@@ -135,14 +135,18 @@ func TestBenchAcceptance(t *testing.T) {
 	}
 	const n = 1_000_000
 	qs := benchQueries(b, n)
-	t0 := time.Now()
+	query := time.Duration(1 << 62)
 	hits := 0
-	for _, q := range qs {
-		if ix.Collides(q.s, q.layer, q.net, 200_000) {
-			hits++
+	for rep := 0; rep < 3; rep++ { // best of 3, like the build: a loaded CI host must not fail a speed bound
+		t0 := time.Now()
+		hits = 0
+		for _, q := range qs {
+			if ix.Collides(q.s, q.layer, q.net, 200_000) {
+				hits++
+			}
 		}
+		query = min(query, time.Since(t0))
 	}
-	query := time.Since(t0)
 	t.Logf("board %s: %d entries; static build %v; %d Collides in %v (%.0f ns/query, %d hits)",
 		src, len(b.entries), build, n, query, float64(query.Nanoseconds())/n, hits)
 	if build > 50*time.Millisecond {
