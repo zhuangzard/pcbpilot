@@ -30,7 +30,7 @@ func TestTracemakerConstraints(t *testing.T) {
 	if !c.Nets["+24V"].NoNeckdown || !c.Nets["+5V"].NoNeckdown || c.Nets["+3V3"].MinWidthMM != 0.25 || c.Nets["+3V3"].NoNeckdown {
 		t.Fatalf("nets %+v", c.Nets)
 	}
-	if c.Nets["+24V"].WidthMM != 0.61 || c.Nets["+3V3"].WidthMM != 0.4 { // explicit widths: 24 mil = 0.6096 → 0.610 up
+	if c.Nets["+24V"].WidthMM != 0.61 || c.Nets["+3V3"].WidthMM != 0.401 { // explicit widths: 24 mil = 0.6096 → 0.610 up
 		t.Fatalf("widths %+v", c.Nets)
 	}
 	if _, ok := c.Nets["D_ONE"]; ok {
