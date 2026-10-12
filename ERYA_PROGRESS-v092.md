@@ -17,3 +17,4 @@
   过孔：板规则过孔，环 clearance+0.25mil 安全余量，同网 SMD 焊盘回避，孔到孔≥max(过孔径, 钻孔+9.85mil)。
 - 首次 dry-run：viaDirs<=2 在裸板上选中 72 个焊盘（含 IC101/102），U303.22 被相邻桩挤掉 → 改为动态最受限优先；性能待查（二次方重算）。
 - 11:50 已启动 /tmp/pico5/run.sh A（fastroute 全桩→U303 桩）与 B（tracemaker 全桩→无桩基线），2 并发
+- 12:11 全部完成：fastroute 全桩 5/5 未布通（DRC 9→5），U303 桩 5（DRC 6），tracemaker 2→19。结论无效，报告 REPORT-v0.9.2-escape-stubs.md
