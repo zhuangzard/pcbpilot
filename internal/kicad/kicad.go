@@ -135,11 +135,31 @@ func bridgeScript() (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, bridgeSource, 0o644); err != nil {
+	// A unique temp name: concurrent pcbpilot processes (two routes started
+	// together) all extract the same bridge, and a shared ".tmp" made the
+	// second rename fail with "no such file" (v0.9.2 E2).
+	f, err := os.CreateTemp(dir, filepath.Base(path)+".*.tmp")
+	if err != nil {
 		return "", err
 	}
-	return path, os.Rename(tmp, path)
+	tmp := f.Name()
+	_, werr := f.Write(bridgeSource)
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr != nil {
+		os.Remove(tmp)
+		return "", werr
+	}
+	if err := os.Chmod(tmp, 0o644); err != nil {
+		os.Remove(tmp)
+		return "", err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return "", err
+	}
+	return path, nil
 }
 
 // RunBridge runs one bridge subcommand and returns its result object.

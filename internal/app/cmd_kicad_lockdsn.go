@@ -100,3 +100,48 @@ copper with lock-dsn and route again for the rest.`,
 	c.Flags().StringVar(&out, "out", "", "output DSN (required)")
 	return c
 }
+
+func newKicadNetCopperCmd(stdout io.Writer) *cobra.Command {
+	var pcb, out, remove, lock string
+	c := &cobra.Command{
+		Use:   "net-copper",
+		Short: "Remove or lock the tracks and vias of chosen nets on a KiCad board (layered routing, experiment)",
+		Long: `Writes --out: --pcb with the tracks and vias of --remove-nets deleted and those
+of --lock-nets set locked. A router that treats locked copper as fixed (TraceMaker)
+then routes only what is left; nothing else on the board changes (zones are not
+refilled). The input is never modified.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if pcb == "" || out == "" || (remove == "" && lock == "") {
+				return fmt.Errorf("--pcb, --out and one of --remove-nets / --lock-nets are required")
+			}
+			if mustAbs(pcb) == mustAbs(out) {
+				return fmt.Errorf("--out must differ from --pcb")
+			}
+			split := func(s string) []string {
+				if s == "" {
+					return nil
+				}
+				return strings.Split(s, ",")
+			}
+			t, err := kicad.Locate()
+			if err != nil {
+				return err
+			}
+			res, err := t.Edit(pcb, map[string]any{"removeNets": split(remove), "lockNets": split(lock)}, out)
+			if err != nil {
+				return err
+			}
+			if err := copyKicadPro(pcb, out); err != nil {
+				return err
+			}
+			fmt.Fprintln(stdout, string(res))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&pcb, "pcb", "", "input .kicad_pcb (required; never modified)")
+	c.Flags().StringVar(&out, "out", "", "output .kicad_pcb (required)")
+	c.Flags().StringVar(&remove, "remove-nets", "", "nets whose tracks and vias are deleted, comma-separated")
+	c.Flags().StringVar(&lock, "lock-nets", "", "nets whose tracks and vias are locked, comma-separated")
+	return c
+}

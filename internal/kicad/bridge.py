@@ -800,7 +800,10 @@ def edit(pcb, ops_path, out):
     """Apply copper/silk edits (mil, y-up), fill the zones and save:
     {"setWidth":[{"id","width"}], "addVias":[{"net","x","y","diameter","drill"}],
      "addTracks":[{"net","layer","startX","startY","endX","endY","lineWidth"}],
-     "setText":[{"id","x","y","rotation","fontSize","lineWidth"}]}  (x, y = text centre)"""
+     "setText":[{"id","x","y","rotation","fontSize","lineWidth"}],
+     "removeNets":[net…], "lockNets":[net…]}  (x, y = text centre)
+    removeNets deletes the tracks and vias of those nets; lockNets sets them locked
+    (layered routing: a router keeps locked copper as fixed obstacles)."""
     with open(ops_path) as f:
         ops = json.load(f)
     board = pcbnew.LoadBoard(pcb)
@@ -903,6 +906,18 @@ def edit(pcb, ops_path, out):
             missing.append("%s.%s" % (op["ref"], op["pad"]))
         else:
             done["padZoneNone"] += 1
+    done["removeNets"], done["lockNets"] = 0, 0
+    rm = {n for n in (ops.get("removeNets") or [])}
+    lk = {n for n in (ops.get("lockNets") or [])}
+    if rm or lk:
+        for t in list(board.GetTracks()):
+            name = t.GetNetname()
+            if name in rm:
+                board.Remove(t)
+                done["removeNets"] += 1
+            elif name in lk:
+                t.SetLocked(True)
+                done["lockNets"] += 1
     zones = fill_zones(board) if (done["setWidth"] or done["addVias"] or done["addTracks"] or done["padZoneNone"]) else 0
     save_board(board, pcb, out)
     return {"ok": not missing, "error": ("unknown ids: " + ",".join(missing[:10])) if missing else "",

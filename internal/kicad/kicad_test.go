@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -251,5 +252,26 @@ func TestPrepareDSNEdgeExempt(t *testing.T) {
 	out, prep, err := PrepareDSN(dsn, nil, nil, EdgeKeepout{OuterMil: 20, InnerMil: 30, Exempt: [][4]float64{{980, -10, 1020, 25}}})
 	if err != nil || prep.EdgeWindows != 2 || prep.EdgeKeepouts != 10 || !strings.Contains(out, "pcbpilot_edge_F.Cu_4") {
 		t.Fatalf("exempt: %+v %v", prep, err)
+	}
+}
+
+func TestBridgeScriptConcurrentExtraction(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	var wg sync.WaitGroup
+	errs := make(chan error, 16)
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := bridgeScript(); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Errorf("concurrent bridge extraction: %v", err)
 	}
 }
