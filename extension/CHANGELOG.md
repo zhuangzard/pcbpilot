@@ -19,8 +19,9 @@ TraceMaker as a second router (`kicad route`, no connector change):
   without neck-down is tried on nets the intent-widths gate finds narrow outside the pad zone and kept only if it passes.
   Differential-pair gap is rounded up and skew down to 1 µm.
 - `route-complete` is cross-checked against KiCad: any `unconnected_items` in KiCad's DRC fails it whatever the router
-  reports. A connection a router left open passes only as a pour credit (net poured, router counters consistent, no
-  fixable violation, no track below its minimum, KiCad 0 unconnected items); credited connections are named in the gate
+  reports. Pour credit (a connection the router left open, on a poured net, with KiCad reporting 0 unconnected items) is now
+  opt-in (`--pour-credit`, off by default so `route-complete` is as strict as v0.9.0); even then the router's counters must
+  be consistent with no fixable violation and no track below its minimum, and credited connections are named in the gate
   (`POUR-CREDITED …`, `summary.pourCredited`).
 
 Gates:

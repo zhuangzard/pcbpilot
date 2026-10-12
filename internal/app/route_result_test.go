@@ -19,7 +19,7 @@ func TestRouteResultSeam(t *testing.T) {
 	}
 	// KiCad: the unrouted connection on a poured net with 0 unconnected items passes.
 	snap := &boardSnapshot{Copper: &boardCopperSnapshot{Poured: []any{map[string]any{"net": "GND"}}}}
-	kg := kicadRouteCompleteGate(r, &kicad.DRCReport{Counts: map[string]int{}}, snap)
+	kg := kicadRouteCompleteGate(r, &kicad.DRCReport{Counts: map[string]int{}}, snap, true)
 	if !kg.Pass || !strings.Contains(strings.Join(kg.Info, ""), "GND C2.2–U8.115: unrouted by other, joined by the GND pour") {
 		t.Fatalf("kicad gate %+v", kg)
 	}
@@ -47,50 +47,54 @@ func TestKicadRouteCompletePourCreditPreconditions(t *testing.T) {
 	mk := func() *routeResult {
 		return &routeResult{Router: "tracemaker", UnroutedCount: 1, Unrouted: []routeConn{{Net: "GND", From: "C2.2", To: "U8.115"}}}
 	}
-	if g := kicadRouteCompleteGate(mk(), clean, poured); !g.Pass || len(g.Info) != 1 || !strings.Contains(g.Info[0], "POUR-CREDITED") || !strings.Contains(g.Detail, "credited to a pour") {
+	if g := kicadRouteCompleteGate(mk(), clean, poured, true); !g.Pass || len(g.Info) != 1 || !strings.Contains(g.Info[0], "POUR-CREDITED") || !strings.Contains(g.Detail, "credited to a pour") {
 		t.Fatalf("base case must pass and say so: %+v", g)
+	}
+	// off by default: the gate is then exactly routeCompleteGate (v0.9.0's strictness)
+	if g := kicadRouteCompleteGate(mk(), clean, poured, false); g.Pass || len(g.Info) != 0 {
+		t.Fatalf("pour credit must be opt-in: %+v", g)
 	}
 	// 1. fixable violations
 	r := mk()
 	r.Fixable = 1
-	if g := kicadRouteCompleteGate(r, clean, poured); g.Pass {
+	if g := kicadRouteCompleteGate(r, clean, poured, true); g.Pass {
 		t.Fatalf("Fixable != 0 credited: %+v", g)
 	}
 	// 1b. a track below the minimum width
 	r = mk()
 	r.BelowMinWidthNets = 1
-	if g := kicadRouteCompleteGate(r, clean, poured); g.Pass {
+	if g := kicadRouteCompleteGate(r, clean, poured, true); g.Pass {
 		t.Fatalf("below-min-width credited: %+v", g)
 	}
 	// 2. counters that do not agree with the list
 	r = mk()
 	r.UnroutedCount = 3
-	if g := kicadRouteCompleteGate(r, clean, poured); g.Pass {
+	if g := kicadRouteCompleteGate(r, clean, poured, true); g.Pass {
 		t.Fatalf("inconsistent counts credited: %+v", g)
 	}
 	// 3. an unrouted connection whose net is not poured
 	r = mk()
 	r.Unrouted = append(r.Unrouted, routeConn{Net: "+3V3", From: "U1.1", To: "C1.1"})
 	r.UnroutedCount = 2
-	if g := kicadRouteCompleteGate(r, clean, poured); g.Pass {
+	if g := kicadRouteCompleteGate(r, clean, poured, true); g.Pass {
 		t.Fatalf("unpoured net credited: %+v", g)
 	}
 	// 4. KiCad DRC reports unconnected items; and no DRC report at all
-	if g := kicadRouteCompleteGate(mk(), &kicad.DRCReport{Counts: map[string]int{"unconnected_items": 1}}, poured); g.Pass {
+	if g := kicadRouteCompleteGate(mk(), &kicad.DRCReport{Counts: map[string]int{"unconnected_items": 1}}, poured, true); g.Pass {
 		t.Fatalf("unconnected_items credited: %+v", g)
 	}
-	if g := kicadRouteCompleteGate(mk(), nil, poured); g.Pass {
+	if g := kicadRouteCompleteGate(mk(), nil, poured, true); g.Pass {
 		t.Fatalf("credited without a DRC report: %+v", g)
 	}
-	if g := kicadRouteCompleteGate(mk(), clean, &boardSnapshot{}); g.Pass {
+	if g := kicadRouteCompleteGate(mk(), clean, &boardSnapshot{}, true); g.Pass {
 		t.Fatalf("credited without copper data: %+v", g)
 	}
 	// Independent backstop: the router says all routed, KiCad disagrees.
 	all := &routeResult{Router: "tracemaker"}
-	if g := kicadRouteCompleteGate(all, &kicad.DRCReport{Counts: map[string]int{"unconnected_items": 2}}, poured); g.Pass || !strings.Contains(g.Detail, "unconnected") {
+	if g := kicadRouteCompleteGate(all, &kicad.DRCReport{Counts: map[string]int{"unconnected_items": 2}}, poured, true); g.Pass || !strings.Contains(g.Detail, "unconnected") {
 		t.Fatalf("router-claimed-complete with unconnected items passed: %+v", g)
 	}
-	if g := kicadRouteCompleteGate(all, clean, poured); !g.Pass {
+	if g := kicadRouteCompleteGate(all, clean, poured, true); !g.Pass {
 		t.Fatalf("complete and clean must pass: %+v", g)
 	}
 }

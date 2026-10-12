@@ -139,7 +139,7 @@ KiCad 对等 = **为同一动作协议实现 KiCad 后端**（`--backend kicad`�
   pre-existing unfixable）；满宽线端在圆核刚放下处（离焊盘端 8.5 mil）插不进，到方核位置（约 15 mil）可布通。
 - `intent-widths`：窄于全宽的段只有**整段**落在本网某焊盘铜 max(3×宽, 30 mil) 内（内部布线器颈缩区）且 ≥ widthMil.min
   才算焊盘逃线，且至少一端在 50 mil 内——允许集合永远是 v0.9.0「一端在 50 mil 内」规则的子集（`TestPadEscapeNeverWiderThanLegacy`）；距离按焊盘真实铜形状（椭圆/长圆/圆角矩形/NGON 内切圆；非正交旋转取内切圆；多边形/特殊焊盘取中心），不再用外接矩形；从焊盘出发一直窄下去的段不再放过。
-- `route-complete`：TraceMaker 报告 `tracks_below_min_width_nets` 非 0 即失败；报告自相矛盾（routed>connections、routed==connections 却有 blocked/unrouted 等）按失败处理；KiCad DRC 的 unconnected_items 非 0 时无论布线器怎么说都失败；仅当计数自洽、无 fixable/低于最小线宽、DRC 无 unconnected 且未布通连接的网都已铺铜时才「铺铜记账」，记入 gate Info 与 summary.pourCredited。
+- `route-complete`：TraceMaker 报告 `tracks_below_min_width_nets` 非 0 即失败；报告自相矛盾（routed>connections、routed==connections 却有 blocked/unrouted 等）按失败处理；KiCad DRC 的 unconnected_items 非 0 时无论布线器怎么说都失败；「铺铜记账」（布线器报未布通、但该网已铺铜且 KiCad 0 unconnected）**默认关闭**，只有 `--pour-credit` 才启用——关闭时 route-complete 与 v0.9.0 一样严；启用时还要计数自洽、无 fixable/低于最小线宽，记入 gate Info（`POUR-CREDITED …`）与 summary.pourCredited。
 - 后仿真：逃线是板上真实铜，窄段进入 IR 模型（`TestEscapeStubNarrowsIRPath`）。
 - 布不通反馈：`routeResult.placementHints` 与 `route-complete` 条目给出每条 blocked 连接该挪哪个件、往哪挪、至少多远
   （逃线走廊里挡着的件；走廊空则把另一端件拉向逃线出口；同件同网脚、远端连接不编造挪件）。

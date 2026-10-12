@@ -52,6 +52,7 @@ type kicadRouteOpts struct {
 	optimizer               bool
 	silk                    silkTightOpts
 	noSilkPlace             bool
+	pourCredit              bool
 	noManual                bool
 	projectConfig           string
 	requirements            []string
@@ -174,6 +175,7 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 	f.StringVar(&o.widenNets, "widen-net", "", "nets to widen after routing, comma-separated (see 'pcb widen')")
 	f.Float64Var(&o.widenMax, "widen-max-mil", 40, "maximum width for --widen-net and the IR closure (mil)")
 	f.BoolVar(&o.noSilkPlace, "no-silk-place", false, "do not move designators before the silkscreen gate")
+	f.BoolVar(&o.pourCredit, "pour-credit", false, "route-complete may credit a connection the router left unrouted when its net is poured, the router's counters are consistent and KiCad's DRC reports 0 unconnected items (off by default: route-complete is then as strict as v0.9.0; credited connections are listed in the gate and summary.pourCredited)")
 	f.StringArrayVar(&o.requirements, "requirements", nil, "project requirement document for the design review (repeatable; required unless --no-review)")
 	f.StringVar(&o.reviewers, "reviewers", "codex,kimi,claude", "design review reviewer CLIs, comma-separated (all must pass)")
 	f.BoolVar(&o.noReview, "no-review", false, "skip the design reviews; refused unless --waivers holds a signed {\"gate\":\"design-review\",\"match\":\"--no-review\"} entry")
@@ -1095,7 +1097,7 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 	} else {
 		delete(r.summary, "simKicadMismatch")
 	}
-	rc := kicadRouteCompleteGate(r.route, drcRep, snap)
+	rc := kicadRouteCompleteGate(r.route, drcRep, snap, o.pourCredit)
 	if rc.Pass && len(rc.Info) > 0 {
 		r.summary["pourCredited"] = rc.Info // shown by the design report next to the gate
 	}
@@ -1300,14 +1302,14 @@ func reviewInputSHA(stage string, reqFiles, evFiles []string, limit int) (string
 // reporting any unconnected item fails the gate whatever the router claims —
 // a backend that says "all routed" is not taken at its word.
 //
-// Pour credit: a connection the router left unrouted passes only when every
-// precondition holds — the router's counters are self-consistent (the listed
+// Pour credit (opt-in, --pour-credit; off = as strict as v0.9.0): a connection the
+// router left unrouted passes only when every precondition holds — the router's counters are self-consistent (the listed
 // connections are exactly the counted ones), it reports no fixable violation
 // and no track below its minimum width, KiCad's DRC reports no unconnected
 // item at all, and each unrouted connection's net is poured on the board
 // (Gas V5 A: GND C2.2–U8.115, a fine-pitch ground pin, joined by the TOP GND
 // pour). Every credited connection is listed in the gate's Info.
-func kicadRouteCompleteGate(run *routeResult, drc *kicad.DRCReport, snap *boardSnapshot) gateResult {
+func kicadRouteCompleteGate(run *routeResult, drc *kicad.DRCReport, snap *boardSnapshot, pourCredit bool) gateResult {
 	g := routeCompleteGate(run)
 	if run != nil && drc != nil && drc.Counts["unconnected_items"] > 0 && g.Pass {
 		g.Pass = false
@@ -1315,7 +1317,7 @@ func kicadRouteCompleteGate(run *routeResult, drc *kicad.DRCReport, snap *boardS
 		g.Items = append(g.Items, fmt.Sprintf("KiCad connectivity disagrees with the router: %d unconnected item(s)", drc.Counts["unconnected_items"]))
 		return g
 	}
-	if g.Pass || run == nil || run.Fixable != 0 || run.BelowMinWidthNets != 0 || run.UnroutedCount <= 0 || len(run.Unrouted) != run.UnroutedCount ||
+	if !pourCredit || g.Pass || run == nil || run.Fixable != 0 || run.BelowMinWidthNets != 0 || run.UnroutedCount <= 0 || len(run.Unrouted) != run.UnroutedCount ||
 		drc == nil || drc.Counts["unconnected_items"] != 0 || snap == nil || snap.Copper == nil {
 		return g
 	}
