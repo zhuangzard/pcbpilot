@@ -148,7 +148,7 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 	f.StringVar(&o.waivers, "waivers", "", "JSON list of signed waivers [{gate,match,reason,by}]")
 	f.StringVar(&o.widthBasis, "width-basis", "", "intent-widths basis: segment (default with --sim) | net (default without)")
 	f.BoolVar(&o.ripUp, "rip-up", false, "remove unlocked tracks and vias before routing (route from scratch)")
-	f.StringVar(&o.router, "router", routerFastroute, "routing backend: fastroute | tracemaker | both (both run at once; the first result that is complete with no new DRC error is gated first, a result that fails any gate hands over to the other — no gate is relaxed)")
+	f.StringVar(&o.router, "router", routerFastroute, "routing backend: fastroute | tracemaker | both (both run at once; the first result that is complete with no new DRC error is gated first, a result that fails any gate hands over to the other — no gate is relaxed; the outputs describe the first result that passes every gate, else the best judged one, fewest unrouted)")
 	f.StringVar(&o.tm.bin, "tracemaker-bin", "", "tracemaker executable (default: $TRACEMAKER_BIN, ~/.pcbpilot/tracemaker/current, PATH)")
 	f.DurationVar(&o.tm.timeout, "tracemaker-time", 300*time.Second, "tracemaker --time budget (it also sets the lattice pitch: ≥ 300 s gave 0.05 mm and a complete PicoRick, 90–180 s gave 0.1 mm and 2 open connections)")
 	f.StringVar(&o.fastrouteBin, "fastroute-bin", "", "fastroute executable (default: $FASTROUTE_BIN, ~/.pcbpilot/fastroute/current, PATH)")
