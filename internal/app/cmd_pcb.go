@@ -3910,6 +3910,7 @@ Rules:
   • duplicate-segment — collinear overlapping (redundant) copper   → WARN
   • parallel-coupling — different-net traces closer than N×W (3W rule) → WARN
   • netless-pour      — copper pour bound to no net (dead copper)      → WARN
+  • pour-layer-mismatch — AUTO_<net>_L<id> pour sitting on another layer → ERROR
   • via-crosses-plane — a via whose net ≠ an inner PLANE(内电层)'s net → WARN
                         (anti-pad risk, easyeda/pro-api-sdk#32: a via created
                         AFTER the plane exists gets no anti-pad; fix = remove it

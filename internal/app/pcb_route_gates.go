@@ -495,6 +495,10 @@ func snapshotIntentGates(snap *boardSnapshot, in *designIntent, intentPath, simV
 		{"copper-to-edge", "copper-to-edge / plane pull-back vs the intent edge distances", func(r *pcbCheckReport) error { return addEdgeFindings(r, raw, edgeIntent, "") }},
 		{"isolation", "insulation pairs: clearance on every shared layer, creepage (slots credited)", func(r *pcbCheckReport) error { return addIsolationFindings(r, raw, intentPath) }},
 		{"via-current", "via groups vs the intent current", func(r *pcbCheckReport) error { return addViaCurrentFindings(r, raw, intentPath) }},
+		{"pour-layer-mismatch", "every AUTO_<net>_L<id> pour sits on layer <id>", func(r *pcbCheckReport) error {
+			r.Findings = append(r.Findings, pourLayerMismatchFromSnapshot(snap)...)
+			return nil
+		}},
 	}
 	if split {
 		for _, c := range checks {
@@ -754,7 +758,8 @@ pour rebuild → native DRC → pad-net diff → live dump → sim post-layout, 
                      end within 50 mil of it) or inside its own net's pour,
                      never below widthMil.min; --width-basis segment (default)
                      lets a lightly loaded segment follow its own current
-  pcb-check-intent   no ERROR: copper-to-edge, isolation, via current
+  pcb-check-intent   no ERROR: copper-to-edge, isolation, via current,
+                     pour-layer-mismatch (AUTO_<net>_L<id> pour on another layer)
   post-layout-sim    verdict not fail (IR drop, opens, via current, heat)
   board-manual       the board user manual is regenerated (versioned under
                      <out-dir>/manual/) and complete: notes file present,

@@ -17,6 +17,9 @@
   `pkg/pcbauto/edge.go`）执行，取代旧的 `copper-near-edge`（只看走线/过孔、按板框 bbox、10mil，
   从未对 14mil 灌铜报过错）；`via-current` §2.4 过孔载流（`internal/app/pcb_check_viacurrent.go` →
   `pkg/pcbauto/viacheck.go`，公式/阶梯/选择顺序的唯一实现在 `pkg/pcbauto/viasize.go`）。
+- `pour-layer-mismatch`（ERROR，`internal/app/pcb_check_pourlayer.go`；`pcb check` + `pcb gate` / `pcb auto route` /
+  `kicad route` 的强制 gate）：名为 `AUTO_<net>_L<id>` 的铺铜必须在图层 `<id>` 上。US-Zed2（2026-10-12）三块
+  `AUTO_GND_L15*` 落在顶层（layer 1），整板 GND 铜盖住顶层其它网络的线，JLC 反馈顶层线路和顶层阻焊对不上/乱线短路。
 - 数值型工艺极限的机器可读版：`.agents/skills/pcbpilot/references/fab-rules-jlcpcb.json`
   （daemon 的 DRC fallback 基线，`internal/app/pcb_rules.go`）。
 - net-class 线宽阶梯的代码正本：`internal/app/pcb_netclass.go`。

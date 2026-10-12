@@ -26,6 +26,7 @@ var mandatoryRouteGates = []struct {
 	{"copper-to-edge", []string{"copper-to-edge"}},
 	{"isolation", []string{"isolation"}},
 	{"via-current", []string{"via-current"}},
+	{"pour-layer-mismatch", []string{"pour-layer-mismatch"}},
 	{"post-layout-sim", []string{"post-layout-sim"}},
 	{"route-complete", []string{"route-complete"}},
 	{"silkscreen", []string{"silkscreen"}},

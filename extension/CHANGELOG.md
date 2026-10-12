@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+**Pour-layer gate (US-Zed2 incident, 2026-10-12).** A shipped board had `AUTO_GND_L15`, `AUTO_GND_L15_1`, `AUTO_GND_L15_2`
+(net GND) with layer id 1 instead of 15: a full-board GND pour on Top over every other net's tracks, so JLC reported the
+top-layer lines shorted (顶层线路和顶层阻焊对不上/乱线短路). `pcb pour-list` never showed those three (26 POUR rows in the saved
+file, 23 returned); that omission is not explained yet (see below).
+- New hard check `pour-layer-mismatch` (ERROR): a pour named `AUTO_<net>_L<id>` whose layer id is not `<id>`. It runs in
+  `pcb check` (so `post_route_checked` blocks on it) and as its own mandatory gate in `pcb gate`, `pcb auto route` and
+  `kicad route` (`pour-layer-mismatch`, part of the gate set). No existing gate was relaxed.
+- Connector `pcb.pour.create` reads the layer back: a pour that landed on another layer than requested (the known
+  inner-PLANE fall-back to Top) is deleted and the action fails, instead of leaving full-board copper on the wrong layer.
+  `pcb power-planes` now reports such a failed pour in `warnings`. **Needs a connector release** (connector and CLI
+  versions must stay aligned).
+- Not fixed: why `pcb.pour.list` omitted the three layer-1 pours (the handler is a plain `getAll()` with no filter or dedupe;
+  the three share one boundary). Re-check with `pcb dump --include-copper` against the saved file.
+
 ## [0.9.1] — 2026-10-12
 
 **CLI, daemon, Skill and MCP move to 0.9.1. The connector runtime is unchanged, but it is version-locked to the CLI:

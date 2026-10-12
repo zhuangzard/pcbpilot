@@ -413,6 +413,14 @@ and re-pours; passing raw points to the bare `eda.*` create fails ("无法创建
 - `pcb pour-clean --netless` (daemon-side) — remove pours bound to **no net** (net:"" dead
   copper that `pour-fit --replace` can't clear — it only matches same-net pours). `--dry-run`
   lists them first. Detected by `pcb check` (netless-pour rule).
+- **`pour-layer-mismatch` (hard gate, ERROR)** — a pour named `AUTO_<net>_L<id>` must sit on layer `<id>`. The platform names
+  the pour after the REQUESTED layer but can silently land an inner-PLANE pour on layer 1 (US-Zed2, 2026-10-12:
+  `AUTO_GND_L15[_1/_2]` on Top → full-board GND copper over the top tracks, JLC: 顶层线路和顶层阻焊对不上/乱线短路). Checked by `pcb check`
+  (blocks `post_route_checked`) and as the `pour-layer-mismatch` gate of `pcb gate` / `pcb auto route` / `kicad route`.
+  Fix: delete the pour, re-pour while the layer is SIGNAL, flip to PLANE, `pcb pour-rebuild` (`pcb power-planes` does this).
+  `pcb.pour.create` now verifies the landed layer and removes a misplaced pour. Do not trust `pcb pour-list` alone for this:
+  PLANE-layer pours are invisible after reload (#110) and three layer-1 pours were missing from it in US-Zed2 — compare with
+  `pcb drc` and a board dump.
 - `pcb.pour.rebuild` — re-pour all (or by net) after moving components/routing so the
   copper reflows around new obstacles.
 - `pcb pour-fit` (daemon-side) — **auto-size a pour to the board**: reads the outline's

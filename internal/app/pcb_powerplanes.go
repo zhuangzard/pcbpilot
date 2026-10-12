@@ -201,6 +201,11 @@ func runPowerPlanes(cfg *appConfig, window string, gndLayer, powerLayer int, gnd
 		pres, perr := requestAction(cfg, "pcb.pour.create", window, map[string]any{
 			"net": p.Net, "layer": p.Layer, "points": boundary,
 		})
+		if perr != nil {
+			// e.g. the connector's layer readback caught a pour that fell back to
+			// Top instead of the requested layer (it removes that pour).
+			warnings = append(warnings, fmt.Sprintf("net %q: pour on layer %d failed: %v", p.Net, p.Layer, perr))
+		}
 		if perr == nil && pres != nil {
 			if b, ok := mnav(pres.Result, "poured").(bool); ok {
 				p.Poured = b
