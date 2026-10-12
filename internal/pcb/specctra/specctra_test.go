@@ -472,3 +472,38 @@ func TestAppendEscapesScalesToDSNUnits(t *testing.T) {
 		t.Fatal("unknown layer accepted")
 	}
 }
+
+func TestLockWiringWritesFixedCopperOfChosenNetsOnly(t *testing.T) {
+	src := "(pcb x\n  (structure\n    (layer F.Cu (type signal))\n  )\n  (wiring\n  )\n)\n"
+	w := &Wiring{
+		Segments: []Segment{
+			{Net: "+3V3", Layer: "F.Cu", WidthMil: 15.75, A: [2]float64{1, 2}, B: [2]float64{3, 4}},
+			{Net: "SIG", Layer: "F.Cu", WidthMil: 6, A: [2]float64{5, 6}, B: [2]float64{7, 8}},
+		},
+		Vias: []Via{{Net: "+3V3", Padstack: "Via[0-3]_600:300_um", At: [2]float64{3, 4}}, {Net: "SIG", Padstack: "V", At: [2]float64{9, 9}}},
+	}
+	out, rep, err := LockWiring(src, w, []string{"+3v3"}, []string{"F.Cu", "B.Cu"}, 25.4)
+	if err != nil || rep.Segments != 1 || rep.Vias != 1 || len(rep.Nets) != 1 {
+		t.Fatalf("%+v %v", rep, err)
+	}
+	if strings.Contains(out, "SIG") {
+		t.Fatalf("an unlocked net leaked into the DSN:\n%s", out)
+	}
+	fixed, err := ParseFixedWiring("(pcb x (resolution um 10)" + out[len("(pcb x"):])
+	if err != nil || len(fixed.Segments) != 1 || len(fixed.Vias) != 1 {
+		t.Fatalf("read back %+v %v", fixed, err)
+	}
+	if math.Abs(fixed.Segments[0].WidthMil-15.75) > 1e-6 || math.Abs(fixed.Segments[0].B[0]-3) > 1e-6 {
+		t.Fatalf("round trip lost geometry: %+v", fixed.Segments[0])
+	}
+	// Nothing to lock: the DSN is returned unchanged.
+	same, rep2, err := LockWiring(src, w, []string{"NOPE"}, []string{"F.Cu"}, 1)
+	if err != nil || same != src || rep2.Segments != 0 {
+		t.Fatalf("no-op changed the DSN: %v %+v", err, rep2)
+	}
+	// A segment on a layer the DSN does not have is an error.
+	w.Segments[0].Layer = "In9.Cu"
+	if _, _, err := LockWiring(src, w, []string{"+3V3"}, []string{"F.Cu"}, 1); err == nil {
+		t.Fatal("unknown layer accepted")
+	}
+}
