@@ -1089,6 +1089,9 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 		delete(r.summary, "simKicadMismatch")
 	}
 	rc := kicadRouteCompleteGate(r.route, drcRep, snap)
+	if rc.Pass && len(rc.Info) > 0 {
+		r.summary["pourCredited"] = rc.Info // shown by the design report next to the gate
+	}
 	qo.routeGate = &rc
 	r.lap("gate: intent / safety snapshot gates")
 	for _, g := range tailGates(snap, boardPath, postOut, qo, o.projectName, "", r.summary, r.stderr) {
@@ -1284,33 +1287,47 @@ func reviewInputSHA(stage string, reqFiles, evFiles []string, limit int) (string
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(reviewPrompt(stage, reqs, ev, limit)))), nil
 }
 
-// kicadRouteCompleteGate is routeCompleteGate with one KiCad fact added: a
-// connection fastroute left unrouted passes only when its net is poured on
-// the board and KiCad's DRC (the board's real connectivity) reports no
-// unconnected item at all — the pour carries it (Gas V5 A: GND C2.2–U8.115,
-// a fine-pitch ground pin, joined by the TOP GND pour).
+// kicadRouteCompleteGate is routeCompleteGate with two KiCad facts added.
+//
+// Independent backstop: KiCad's own DRC (the board's real connectivity)
+// reporting any unconnected item fails the gate whatever the router claims —
+// a backend that says "all routed" is not taken at its word.
+//
+// Pour credit: a connection the router left unrouted passes only when every
+// precondition holds — the router's counters are self-consistent (the listed
+// connections are exactly the counted ones), it reports no fixable violation
+// and no track below its minimum width, KiCad's DRC reports no unconnected
+// item at all, and each unrouted connection's net is poured on the board
+// (Gas V5 A: GND C2.2–U8.115, a fine-pitch ground pin, joined by the TOP GND
+// pour). Every credited connection is listed in the gate's Info.
 func kicadRouteCompleteGate(run *routeResult, drc *kicad.DRCReport, snap *boardSnapshot) gateResult {
 	g := routeCompleteGate(run)
-	if g.Pass || run == nil || run.Fixable != 0 || run.UnroutedCount <= 0 || len(run.Unrouted) != run.UnroutedCount ||
-		drc == nil || drc.Counts["unconnected_items"] != 0 || snap.Copper == nil {
+	if run != nil && drc != nil && drc.Counts["unconnected_items"] > 0 && g.Pass {
+		g.Pass = false
+		g.Detail += fmt.Sprintf("; KiCad DRC reports %d unconnected item(s) although %s reports every connection routed", drc.Counts["unconnected_items"], run.Router)
+		g.Items = append(g.Items, fmt.Sprintf("KiCad connectivity disagrees with the router: %d unconnected item(s)", drc.Counts["unconnected_items"]))
+		return g
+	}
+	if g.Pass || run == nil || run.Fixable != 0 || run.BelowMinWidthNets != 0 || run.UnroutedCount <= 0 || len(run.Unrouted) != run.UnroutedCount ||
+		drc == nil || drc.Counts["unconnected_items"] != 0 || snap == nil || snap.Copper == nil {
 		return g
 	}
 	poured := map[string]bool{}
 	for _, p := range snap.Copper.Poured {
 		if m, ok := p.(map[string]any); ok {
-			poured[fmt.Sprint(m["net"])] = true
+			poured[strings.ToUpper(fmt.Sprint(m["net"]))] = true
 		}
 	}
 	var items []string
 	for _, u := range run.Unrouted {
-		if !poured[u.Net] {
+		if !poured[strings.ToUpper(u.Net)] {
 			return g
 		}
-		items = append(items, fmt.Sprintf("%s: unrouted by %s, joined by the %s pour (KiCad DRC: 0 unconnected items)", u, run.Router, u.Net))
+		items = append(items, fmt.Sprintf("POUR-CREDITED %s: unrouted by %s, joined by the %s pour (KiCad DRC: 0 unconnected items)", u, run.Router, u.Net))
 	}
 	g.Pass, g.Items = true, nil
 	g.Info = items
-	g.Detail += "; every unrouted connection is on a poured net and KiCad reports 0 unconnected items"
+	g.Detail += fmt.Sprintf("; %d unrouted connection(s) credited to a pour: every one is on a poured net and KiCad reports 0 unconnected items", len(items))
 	return g
 }
 

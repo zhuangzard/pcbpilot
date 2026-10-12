@@ -33,10 +33,11 @@ func TestTracemakerConstraints(t *testing.T) {
 	if c.Nets["+24V"].WidthMM != 0.61 || c.Nets["+3V3"].WidthMM != 0.401 { // explicit widths: 24 mil = 0.6096 → 0.610 up
 		t.Fatalf("widths %+v", c.Nets)
 	}
-	if _, ok := c.Nets["D_ONE"]; ok {
-		t.Fatalf("unconstrained net listed: %+v", c.Nets)
+	// a net at or under the floor still gets an explicit, non-necking entry
+	if d := c.Nets["D_ONE"]; !d.NoNeckdown || d.WidthMM != 0.153 {
+		t.Fatalf("floor net entry %+v", d)
 	}
-	if len(c.Pairs) != 1 || c.Pairs[0].P != "USB_DM" || c.Pairs[0].N != "USB_DP" || c.Pairs[0].GapMM != 0.152 || c.Pairs[0].SkewMM != 0.102 {
+	if len(c.Pairs) != 1 || c.Pairs[0].P != "USB_DM" || c.Pairs[0].N != "USB_DP" || c.Pairs[0].GapMM != 0.153 || c.Pairs[0].SkewMM != 0.101 {
 		t.Fatalf("pairs %+v", c.Pairs)
 	}
 	b, _ := json.Marshal(c)

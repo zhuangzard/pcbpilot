@@ -97,7 +97,9 @@ type tmConstraints struct {
 	Pairs   []tmPair         `json:"pairs,omitempty"`
 }
 
-func mmOfMil(mil float64) float64 { return math.Round(mil*0.0254*1000) / 1000 }
+// mmFloorMil is mil in mm rounded DOWN to 1 µm, for limits that must not be
+// exceeded (a maximum skew): rounding to nearest could loosen them.
+func mmFloorMil(mil float64) float64 { return math.Floor(mil*0.0254*1000+1e-9) / 1000 }
 
 // mmCeilMil is mil in mm rounded UP to 1 µm: TraceMaker keeps widths on that
 // grid, and a minimum rounded down would sit under the same minimum in the
@@ -122,9 +124,13 @@ func tracemakerConstraints(reqs map[string]kicad.NetRequirement, floorMil float6
 		switch {
 		case r.MinMil > 0 && r.MinMil < r.OuterMil-0.01:
 			c.Nets[n] = tmNet{MinWidthMM: mmCeilMil(r.MinMil), WidthMM: mmCeilMil(r.OuterMil)}
-		case r.OuterMil > floorMil+0.01:
+		case r.OuterMil > 0:
 			// width_mm is explicit: TraceMaker snaps a class width read from the
-			// .kicad_pro (0.5001 mm) down to 0.5000, under the .kicad_dru minimum
+			// .kicad_pro (0.5001 mm) down to 0.5000, under the .kicad_dru minimum.
+			// Every other net (wider than the DSN floor, or at it) never necks
+			// down: no net is left without an entry. Inner-layer widths
+			// (widthMil.inner) stay in the .kicad_dru `(layer inner)` rules the
+			// router reads.
 			c.Nets[n] = tmNet{NoNeckdown: true, WidthMM: mmCeilMil(r.OuterMil)}
 		}
 	}
@@ -147,10 +153,10 @@ func tracemakerConstraints(reqs map[string]kicad.NetRequirement, floorMil float6
 		seen[a+"|"+b] = true
 		p := tmPair{P: a, N: b}
 		if n.PairGapMil > 0 {
-			p.GapMM = mmOfMil(n.PairGapMil)
+			p.GapMM = mmCeilMil(n.PairGapMil) // a minimum: never rounded down
 		}
 		if n.MaxSkewMil > 0 {
-			p.SkewMM = mmOfMil(n.MaxSkewMil)
+			p.SkewMM = mmFloorMil(n.MaxSkewMil) // a maximum: never rounded up
 		}
 		c.Pairs = append(c.Pairs, p)
 	}
@@ -191,20 +197,43 @@ func readTracemakerReport(path string) (*tmReport, error) {
 	if err := json.Unmarshal(data, &r); err != nil {
 		return nil, fmt.Errorf("parse tracemaker report %s: %w", path, err)
 	}
-	if r.Connections <= 0 {
-		return nil, fmt.Errorf("tracemaker report %s has no connection count", path)
+	if err := r.consistent(); err != nil {
+		return nil, fmt.Errorf("tracemaker report %s: %w", path, err)
 	}
 	return &r, nil
 }
 
+// consistent rejects a report whose counters contradict each other: a result
+// whose numbers cannot all be true is never read as "everything routed".
+// Blocked counts connections proven blocked, so it cannot exceed what
+// unrouted[] lists.
+func (r *tmReport) consistent() error {
+	switch {
+	case r.Connections <= 0:
+		return fmt.Errorf("no connection count")
+	case r.Routed < 0 || r.Blocked < 0 || r.TracksBelowMinWidthNets < 0:
+		return fmt.Errorf("negative counter (routed %d, blocked %d, below-min nets %d)", r.Routed, r.Blocked, r.TracksBelowMinWidthNets)
+	case r.Routed > r.Connections:
+		return fmt.Errorf("routed %d exceeds connections %d", r.Routed, r.Connections)
+	case len(r.Unrouted) > r.Connections-r.Routed:
+		return fmt.Errorf("%d unrouted entries but only %d connections are not routed (routed %d of %d)", len(r.Unrouted), r.Connections-r.Routed, r.Routed, r.Connections)
+	case r.Routed == r.Connections && (r.Blocked > 0 || len(r.Unrouted) > 0):
+		return fmt.Errorf("routed == connections (%d) but blocked %d, unrouted %d", r.Routed, r.Blocked, len(r.Unrouted))
+	case r.Blocked > len(r.Unrouted):
+		return fmt.Errorf("blocked %d but only %d unrouted entries are listed", r.Blocked, len(r.Unrouted))
+	}
+	return nil
+}
+
 // tracemakerResult maps a tracemaker report to the router-agnostic result.
 // Fixable stays 0: tracemaker does not report violations, KiCad's DRC gate
-// is the judge.
+// is the judge; a track under its net's minimum width (the report's
+// tracks_below_min_width_nets) fails route-complete.
 func tracemakerResult(rep *tmReport, args []string, version, sha, board, reportPath string) *routeResult {
 	res := &routeResult{Router: "tracemaker", Version: version, PatchSHA: sha, Args: args, Board: board, Report: reportPath,
-		UnroutedCount: len(rep.Unrouted), Seconds: rep.Seconds}
-	if res.UnroutedCount == 0 && rep.Routed < rep.Connections {
-		res.UnroutedCount = rep.Connections - rep.Routed
+		UnroutedCount: len(rep.Unrouted), Seconds: rep.Seconds, BelowMinWidthNets: rep.TracksBelowMinWidthNets}
+	if n := rep.Connections - rep.Routed; n > res.UnroutedCount {
+		res.UnroutedCount = n // the report counts more open connections than it lists
 	}
 	for _, u := range rep.Unrouted {
 		c := routeConn{Net: u.Net, From: u.From, To: u.To}

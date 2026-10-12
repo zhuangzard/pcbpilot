@@ -1034,8 +1034,12 @@ func routeCompleteGate(r *routeResult) gateResult {
 		g.Detail = "no successful router run recorded"
 		return g
 	}
-	g.Pass = r.UnroutedCount == 0 && r.Fixable == 0
+	g.Pass = r.UnroutedCount == 0 && r.Fixable == 0 && r.BelowMinWidthNets == 0
 	g.Detail = fmt.Sprintf("%s result: %d unrouted, %d violation(s) (%d fixable), round %d", r.Router, r.UnroutedCount, r.Violations, r.Fixable, r.Round)
+	if r.BelowMinWidthNets > 0 {
+		g.Detail += fmt.Sprintf(", %d net(s) with a track below the minimum width", r.BelowMinWidthNets)
+		g.Items = append(g.Items, fmt.Sprintf("%s reports %d net(s) with a track below the net's minimum width", r.Router, r.BelowMinWidthNets))
+	}
 	if r.UnroutedCount > 0 {
 		g.Items = append(g.Items, fmt.Sprintf("%d connection(s) unrouted (see %s)", r.UnroutedCount, r.Report))
 	}

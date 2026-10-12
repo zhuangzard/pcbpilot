@@ -48,9 +48,12 @@ type routeResult struct {
 	// Fixable are routing-caused clearance violations (named).
 	Fixable     int      `json:"fixable"`
 	FixableList []string `json:"fixableList,omitempty"`
-	Report      string   `json:"report,omitempty"` // the backend's own report (evidence only)
-	Round       int      `json:"round"`
-	Seconds     float64  `json:"seconds"`
+	// BelowMinWidthNets counts nets with a track under their minimum width as
+	// the backend itself reports it (tracemaker tracks_below_min_width_nets).
+	BelowMinWidthNets int     `json:"belowMinWidthNets,omitempty"`
+	Report            string  `json:"report,omitempty"` // the backend's own report (evidence only)
+	Round             int     `json:"round"`
+	Seconds           float64 `json:"seconds"`
 }
 
 // fastrouteResult turns the kept fastroute run into a routeResult.
