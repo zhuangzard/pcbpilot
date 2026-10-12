@@ -2,6 +2,42 @@
 
 ## [Unreleased]
 
+## [0.9.1] — 2026-10-12
+
+**CLI, daemon, Skill and MCP move to 0.9.1. The connector runtime is unchanged, but it is version-locked to the CLI:
+import the new `pcbpilot-connector.eext` (uninstall the old "PCB Pilot Connector" first, reload EasyEDA) or the daemon
+refuses design actions until the versions match.**
+
+TraceMaker as a second router (`kicad route`, no connector change):
+- `--router fastroute|tracemaker|both` (default fastroute, unchanged behaviour: PicoRick 5 unrouted / KiCad DRC 9 on the
+  same input before and after). `both` runs the two at once with the cores split; the first result that is complete with no
+  new DRC error goes through the full gates first, a result that fails any gate hands over to the other; when no router
+  passes, the outputs describe the best judged result (fewest unrouted). `--tracemaker-bin`, `--tracemaker-time`.
+- TraceMaker results are judged like any other: the report must be self-consistent (routed ≤ connections, blocked ≤
+  listed, routed == connections means nothing unrouted/blocked), `tracks_below_min_width_nets` fails `route-complete`,
+  the zones are refilled and KiCad DRC always runs; widths are explicit per net (1 µm grid, rounded up), a second round
+  without neck-down is tried on nets the intent-widths gate finds narrow outside the pad zone and kept only if it passes.
+  Differential-pair gap is rounded up and skew down to 1 µm.
+- `route-complete` is cross-checked against KiCad: any `unconnected_items` in KiCad's DRC fails it whatever the router
+  reports. A connection a router left open passes only as a pour credit (net poured, router counters consistent, no
+  fixable violation, no track below its minimum, KiCad 0 unconnected items); credited connections are named in the gate
+  (`POUR-CREDITED …`, `summary.pourCredited`).
+
+Gates:
+- `intent-widths`: a narrower segment is a pad escape only if it lies wholly within max(3 × width, 30 mil) of one
+  same-net pad's real copper (ellipse / oval / rounded rectangle / polygon-safe distance, not the bounding box) and has an
+  end within 50 mil of it — never wider than v0.9.0's rule. Intent net names match board nets case-insensitively. The
+  gate's detail starts with `WIDTH BASIS segment|net` and says what that means for the outer width.
+- Schematic cross-probe lens in the board manual (schematic ↔ PCB, draggable / zoomable / rotatable, per-part width,
+  drop, safety and LCSC data) — single offline HTML, `board-manual` gate unchanged.
+
+Known limits (PicoRick, RP2040 QFN-56 0.4 mm): neither router completes it under the full intent constraints yet
+(fastroute 5 unrouted + 4 Analog clearance errors at IC101; tracemaker 2–3 unrouted + 8–9 narrow segments near U303);
+no gate was relaxed to hide them. Layered, locked routing is planned for 0.9.2.
+
+
+Earlier changes in this release (KiCad schematic build, routing gates, sign-off):
+
 CLI (offline, KiCad 10):
 - `pcbpilot kicad sch-build --spec design.json --out DIR` — one deterministic call from a design spec (parts, nets,
   rails, blocks, pages/zones, title block, intent annotations; no coordinates) to a complete KiCad project: LCSC
@@ -65,7 +101,7 @@ Route / gates / sign-off (EasyEDA and KiCad, no connector change):
   (`summary.intentEscapes`; KiCad adds them to the board after the SES import). PicoRick: 11 → 5 unrouted, KiCad
   DRC 22 → 15, intent-widths 0, fastroute 696 → 91 s.
 - `intent-widths`: a narrower segment passes only as a pad escape — wholly within max(3 × width, 30 mil) of a
-  same-net pad and ≥ `widthMil.min` (was: one end within 50 mil).
+  same-net pad, an end within 50 mil of it, and ≥ `widthMil.min`.
 - `route-complete` / `routeResult.placementHints`: each blocked connection names the part to move, the direction
   and a minimum distance.
 - `kicad route`: `--threads` defaults to min(cores−1, 8) (multi-threaded fastroute is deterministic: 3 PicoRick runs
