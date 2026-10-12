@@ -64,8 +64,8 @@ func TestPrepareDSN(t *testing.T) {
 	if len(prep.Short) != 0 {
 		t.Fatalf("short: %v", prep.Short)
 	}
-	// ordinary classes are raised to the largest ordinary class clearance
-	if prep.ClassPairs == 0 {
+	// classes of different clearance get a class_class pair at the larger one
+	if prep.ClassPairs == 0 || !strings.Contains(out, "(class_class (classes ") {
 		t.Fatalf("no class pairs: %d", prep.ClassPairs)
 	}
 	if prep.Renamed["PP1_W20,Power"] != "PP1_W20+Power" || strings.Contains(out, "PP1_W20,Power") {

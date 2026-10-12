@@ -31,8 +31,10 @@ type DSNPrep struct {
 	// NarrowestClassMil is the narrowest rule width of any DSN class with
 	// nets: a neck-down floor above it would forbid that class its own width.
 	NarrowestClassMil float64 `json:"narrowestClassMil"`
-	// ClassPairs is the number of classes whose clearance was raised to the
-	// ordinary-class maximum (see PrepareDSN).
+	// ClassPairs is the number of (class_class ...) clearances written: KiCad
+	// keeps the larger of the two objects' netclass clearances, while the
+	// router used the class of one of them (a track of a 0.205 mm class sat
+	// 0.160 mm from a pad of a 0.155 mm class).
 	ClassPairs int `json:"classPairs,omitempty"`
 	// ClearanceMarginMil was added to every clearance (see ClearanceMarginMil).
 	ClearanceMarginMil float64 `json:"clearanceMarginMil"`
@@ -275,7 +277,6 @@ func PrepareDSN(dsn string, classes []NetClass, reqs map[string]NetRequirement, 
 	type classClr struct {
 		name string
 		clr  float64
-		raw  string
 	}
 	var clrs []classClr
 	var out strings.Builder
@@ -297,9 +298,7 @@ func PrepareDSN(dsn string, classes []NetClass, reqs map[string]NetRequirement, 
 			e.outer, _ = strconv.ParseFloat(wm[1], 64)
 			e.outer *= toMil
 		}
-		clrRaw := ""
 		if cm := reClearance.FindStringSubmatch(text); cm != nil {
-			clrRaw = cm[1]
 			e.clr, _ = strconv.ParseFloat(cm[1], 64)
 			e.clr *= toMil
 		}
@@ -330,7 +329,7 @@ func PrepareDSN(dsn string, classes []NetClass, reqs map[string]NetRequirement, 
 			}
 		}
 		if e.clr > 0 && !strings.ContainsAny(newName, " \t\"()") {
-			clrs = append(clrs, classClr{newName, e.clr / toMil, clrRaw})
+			clrs = append(clrs, classClr{newName, e.clr / toMil})
 		}
 		for _, n := range members {
 			byNet[n] = e
@@ -349,36 +348,23 @@ func PrepareDSN(dsn string, classes []NetClass, reqs map[string]NetRequirement, 
 		last = sp[1]
 	}
 	out.WriteString(network[last:])
-	// KiCad keeps the larger of the two objects' netclass clearances; fastroute
-	// measured a track against a pad with the pad's own class (a 0.205 mm class
-	// track sat 0.160 mm from a 0.155 mm class pad — a class_class pair changed
-	// nothing). Every ordinary class is therefore raised to the largest ordinary
-	// class clearance; classes more than twice the smallest (high-voltage
-	// isolation) keep theirs.
-	if len(clrs) > 0 {
-		lo := clrs[0].clr
-		for _, c := range clrs {
-			lo = math.Min(lo, c.clr)
-		}
-		floor, floorRaw := lo, ""
-		for _, c := range clrs {
-			if c.clr <= 2*lo && c.clr >= floor {
-				floor, floorRaw = c.clr, c.raw
-			}
-		}
-		o := out.String()
-		for _, c := range clrs {
-			if c.clr >= floor || c.clr > 2*lo {
+	var pairs strings.Builder
+	for i, a := range clrs {
+		for _, b := range clrs[i+1:] {
+			if a.clr == b.clr {
 				continue
 			}
-			re := regexp.MustCompile(`(\(class ` + regexp.QuoteMeta(c.name) + `\s[^\n]*\n(?:[^\n]*\n)*?\s*\(rule\s*\n(?:[^\n]*\n)*?\s*\(clearance )` + regexp.QuoteMeta(c.raw) + `\)`)
-			if loc := re.FindStringSubmatchIndex(o); loc != nil {
-				o = o[:loc[3]] + floorRaw + ")" + o[loc[1]:]
-				prep.ClassPairs++
-			}
+			pairs.WriteString(fmt.Sprintf("    (class_class (classes %s %s) (rule (clearance %s)))\n", a.name, b.name,
+				strconv.FormatFloat(math.Max(a.clr, b.clr), 'f', -1, 64)))
+			prep.ClassPairs++
 		}
-		out.Reset()
-		out.WriteString(o)
+	}
+	if prep.ClassPairs > 0 {
+		o := out.String()
+		if end := strings.LastIndexByte(o, ')'); end >= 0 {
+			out.Reset()
+			out.WriteString(o[:end] + pairs.String() + "  " + o[end:])
+		}
 	}
 
 	names := make([]string, 0, len(reqs))
