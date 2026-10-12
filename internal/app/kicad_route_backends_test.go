@@ -366,3 +366,18 @@ func TestBestFailedCandidateIgnoresCrashed(t *testing.T) {
 		t.Fatalf("got %v", got)
 	}
 }
+
+// widthMil.inner stays in the .kicad_dru `(layer inner)` rule (bridge.py) the
+// router reads; the constraints file carries the outer width and never a
+// narrower value because of it.
+func TestTracemakerConstraintsInnerWidthKept(t *testing.T) {
+	c := tracemakerConstraints(map[string]kicad.NetRequirement{"VCC": {OuterMil: 20, InnerMil: 30, MinMil: 20}}, 8, nil)
+	n := c.Nets["VCC"]
+	if !n.NoNeckdown || n.WidthMM != mmCeilMil(20) {
+		t.Fatalf("VCC %+v", n)
+	}
+	src, err := os.ReadFile("../kicad/bridge.py")
+	if err != nil || !strings.Contains(string(src), "(layer inner)") {
+		t.Fatalf("the inner-layer track_width rule must come from the .kicad_dru writer: %v", err)
+	}
+}
