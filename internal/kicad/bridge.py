@@ -803,7 +803,8 @@ def edit(pcb, ops_path, out):
      "setText":[{"id","x","y","rotation","fontSize","lineWidth"}],
      "removeNets":[net…], "lockNets":[net…]}  (x, y = text centre)
     removeNets deletes the tracks and vias of those nets; lockNets sets them locked
-    (layered routing: a router keeps locked copper as fixed obstacles)."""
+    (layered routing: a router keeps locked copper as fixed obstacles);
+    "*" in lockNets locks every remaining net."""
     with open(ops_path) as f:
         ops = json.load(f)
     board = pcbnew.LoadBoard(pcb)
@@ -915,7 +916,7 @@ def edit(pcb, ops_path, out):
             if name in rm:
                 board.Remove(t)
                 done["removeNets"] += 1
-            elif name in lk:
+            elif name in lk or "*" in lk:
                 t.SetLocked(True)
                 done["lockNets"] += 1
     zones = fill_zones(board) if (done["setWidth"] or done["addVias"] or done["addTracks"] or done["padZoneNone"]) else 0
