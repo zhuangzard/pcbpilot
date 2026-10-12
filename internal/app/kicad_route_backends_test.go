@@ -268,3 +268,32 @@ func TestValidRouter(t *testing.T) {
 		t.Fatal("only the three backends")
 	}
 }
+
+func TestCeilNetclassWidths(t *testing.T) {
+	pro := filepath.Join(t.TempDir(), "in.kicad_pro")
+	src := `{"net_settings":{"classes":[{"name":"PP3_W19p69","track_width":0.500126},{"name":"PP1","track_width":0.254},{"name":"Default","track_width":0.2001}]},"x":1}`
+	if err := os.WriteFile(pro, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ceilNetclassWidths(pro); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(pro)
+	var doc struct {
+		NS struct {
+			Classes []struct {
+				Name string  `json:"name"`
+				W    float64 `json:"track_width"`
+			} `json:"classes"`
+		} `json:"net_settings"`
+	}
+	if err := json.Unmarshal(b, &doc); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]float64{"PP3_W19p69": 0.501, "PP1": 0.254, "Default": 0.2001}
+	for _, c := range doc.NS.Classes {
+		if c.W != want[c.Name] {
+			t.Errorf("%s width %v, want %v", c.Name, c.W, want[c.Name])
+		}
+	}
+}

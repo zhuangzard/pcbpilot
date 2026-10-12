@@ -199,6 +199,9 @@ func (r *kicadRun) tracemakerCandidate(classed string, reqs map[string]kicad.Net
 		if _, err := copyKicadBoard(classed, in); err != nil {
 			return nil, err
 		}
+		if err := ceilNetclassWidths(strings.TrimSuffix(in, ".kicad_pcb") + ".kicad_pro"); err != nil {
+			return nil, fmt.Errorf("tracemaker class widths: %w", err)
+		}
 		if err := writeJSONFile(cons, tracemakerConstraints(reqs, floorMil, r.in)); err != nil {
 			return nil, err
 		}

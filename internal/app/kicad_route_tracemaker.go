@@ -260,3 +260,41 @@ func runTracemaker(ctx context.Context, o tracemakerOpts, in, out, constraints, 
 	}
 	return tracemakerResult(rep, args, version, executableSHA256(o.bin), out, report), nil
 }
+
+// ceilNetclassWidths rounds every pcbpilot netclass (PP…) track width of a
+// .kicad_pro up to 1 µm: TraceMaker keeps widths on that grid and would draw
+// 0.500126 mm as 0.500, under the 0.5001 mm minimum the .kicad_dru holds. Only
+// the scratch copy handed to TraceMaker is touched; a wider class never
+// loosens a width.
+func ceilNetclassWidths(pro string) error {
+	b, err := os.ReadFile(pro)
+	if err != nil {
+		return err
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(b, &doc); err != nil {
+		return err
+	}
+	ns, _ := doc["net_settings"].(map[string]any)
+	classes, _ := ns["classes"].([]any)
+	changed := false
+	for _, c := range classes {
+		m, _ := c.(map[string]any)
+		name, _ := m["name"].(string)
+		w, ok := m["track_width"].(float64)
+		if !ok || !strings.HasPrefix(name, "PP") {
+			continue
+		}
+		if nw := math.Ceil(w*1000-1e-6) / 1000; nw != w {
+			m["track_width"], changed = nw, true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	out, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(pro, out, 0o644)
+}
