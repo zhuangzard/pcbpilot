@@ -36,6 +36,9 @@ type Tools struct {
 	App    string `json:"app"`
 	Python string `json:"python"`
 	CLI    string `json:"cli"`
+	// RefillZones: kicad-cli pcb drc --refill-zones (set by `kicad route` when
+	// an explicit power plane is on the board).
+	RefillZones bool `json:"refillZones,omitempty"`
 }
 
 // Env overrides (all optional):
@@ -329,7 +332,11 @@ func (t *Tools) DRCSeverity(pcb, out, severity string) (*DRCReport, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), BridgeTimeout)
 	defer cancel()
 	_ = os.Remove(out)
-	cmd := exec.CommandContext(ctx, t.CLI, "pcb", "drc", "--format", "json", "--severity-"+severity, "-o", out, pcb)
+	args := []string{"pcb", "drc", "--format", "json", "--severity-" + severity, "-o", out}
+	if t.RefillZones {
+		args = append(args, "--refill-zones") // judge connectivity on freshly filled zones
+	}
+	cmd := exec.CommandContext(ctx, t.CLI, append(args, pcb)...)
 	var buf bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &buf, &buf
 	err := cmd.Run()
@@ -377,6 +384,9 @@ type Pour struct {
 	Net          string  `json:"net"`
 	Layer        int     `json:"layer"`
 	ClearanceMil float64 `json:"clearanceMil,omitempty"`
+	// Replace: also remove the full-board copper zone(s) already on Layer (an
+	// explicit plane decision; the removed zones are reported by the bridge).
+	Replace bool `json:"replace,omitempty"`
 }
 
 // Pours replaces pcbpilot's pours on pcb with ps, fills and saves out.

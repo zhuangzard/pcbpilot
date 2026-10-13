@@ -34,9 +34,19 @@ type designIntent struct {
 	Edge *intentEdge `json:"edge,omitempty"`
 	// Copper is the producer's copper block (weights, allowed rise).
 	Copper *intentCopper `json:"copper,omitempty"`
+	// PowerPlanes are explicit plane decisions: Net becomes the full-board
+	// zone on Layer (replacing the zone there). `kicad route` never makes a
+	// plane without this key or --power-plane.
+	PowerPlanes []intentPowerPlane `json:"power_planes,omitempty"`
 
 	// sha256 of the raw file bytes; provenance for reports and annotations.
 	sourceSHA string
+}
+
+// intentPowerPlane is one explicit plane decision ("In2" / "In2.Cu" / layer id).
+type intentPowerPlane struct {
+	Net   string `json:"net"`
+	Layer string `json:"layer"`
 }
 
 type intentCopper struct {

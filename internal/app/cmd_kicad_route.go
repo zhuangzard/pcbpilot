@@ -53,6 +53,14 @@ type kicadRouteOpts struct {
 	silk                    silkTightOpts
 	noSilkPlace             bool
 	pourCredit              bool
+	// noPowerStubs disables the default joint stub + via pass for fine-pitch
+	// power pads; stubViaAtPad is its own-pad via rule (off | touch | in-pad).
+	noPowerStubs bool
+	stubViaAtPad string
+	// powerPlanes: explicit plane decisions "NET:LAYER" (CLI, repeatable); the
+	// intent's power_planes is used when none is given.
+	powerPlanes []string
+	planes      []powerPlane // resolved powerPlanes / intent power_planes
 	noManual                bool
 	projectConfig           string
 	requirements            []string
@@ -175,6 +183,9 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 	f.StringVar(&o.widenNets, "widen-net", "", "nets to widen after routing, comma-separated (see 'pcb widen')")
 	f.Float64Var(&o.widenMax, "widen-max-mil", 40, "maximum width for --widen-net and the IR closure (mil)")
 	f.BoolVar(&o.noSilkPlace, "no-silk-place", false, "do not move designators before the silkscreen gate")
+	f.BoolVar(&o.noPowerStubs, "no-power-stubs", false, "do not pre-place the jointly solved stub + via on power/ground pads of fine-pitch parts (pitch <= 0.5 mm) whose full intent width cannot leave the pad (default: on; summary.powerStubs lists pads, widths, vias and geometry-blocked pads)")
+	f.StringVar(&o.stubViaAtPad, "power-stubs-via-at-pad", "off", "power stub vias vs the net's own SMD pads: off (clear of them, the sequential planner's rule) | touch (may touch, never overlap their copper) | in-pad (via-in-pad; the fab must plug / cap it)")
+	f.StringArrayVar(&o.powerPlanes, "power-plane", nil, "NET:LAYER (e.g. +3V3:In2, repeatable; intent power_planes is the file form): make NET a full-board plane on LAYER, REPLACING the full-board zone there (the replaced zone is printed). Never done without this flag / key; layer change of the stackup is the user's decision")
 	f.BoolVar(&o.pourCredit, "pour-credit", false, "route-complete may credit a connection the router left unrouted when its net is poured, the router's counters are consistent and KiCad's DRC reports 0 unconnected items (off by default: route-complete is then as strict as v0.9.0; credited connections are listed in the gate and summary.pourCredited)")
 	f.StringArrayVar(&o.requirements, "requirements", nil, "project requirement document for the design review (repeatable; required unless --no-review)")
 	f.StringVar(&o.reviewers, "reviewers", "codex,kimi,claude", "design review reviewer CLIs, comma-separated (all must pass)")
@@ -212,6 +223,9 @@ type kicadRun struct {
 	// escapes: the pre-routed intent pad escapes written into the DSN as
 	// fixed wiring (not in the SES; added to the board after the import).
 	escapes []intentEscape
+	// powerStubRep: the joint power stub plan; inRules: the input board's rules.
+	powerStubRep *powerStubReport
+	inRules      *boardRules
 	escEnv  *escapeEnv
 	// times: wall clock per stage (summary.timings).
 	times []stageTime
@@ -421,10 +435,26 @@ func (r *kicadRun) run() error {
 		}
 		board = out
 	}
+	// An explicit power plane (--power-plane / intent power_planes) is made
+	// before anything else reads the board: the DSN then declares the plane.
+	r.inRules = inSnap.Rules
+	if inSnap.CopperLayers > 0 {
+		planes, err := r.resolvePlanes(inSnap.CopperLayers)
+		if err != nil {
+			return err
+		}
+		r.o.planes = planes
+		if len(planes) > 0 {
+			if board, err = r.applyPlanes(board, planes); err != nil {
+				return err
+			}
+		}
+	}
 	r.lap("work copy, rules, rip-up")
 	if inSnap, r.inRaw, err = r.snapshot(board); err != nil {
 		return err
 	}
+	r.inRules = inSnap.Rules
 	if rep, err := kt.DRC(board, filepath.Join(r.work, "input-drc.json")); err == nil {
 		r.inputDRC = map[string]bool{}
 		for _, v := range rep.Violations {
@@ -1550,11 +1580,29 @@ func kicadEscapeEnv(s *boardSnapshot, raw []byte, reqs map[string]specctra.NetRe
 func (r *kicadRun) planEscapes(s *boardSnapshot, dsn string) (string, error) {
 	reqs := intentRequirements(r.in)
 	r.escEnv = kicadEscapeEnv(s, r.inRaw, reqs)
-	esc, skipped := planIntentEscapes(r.escEnv, reqs, nil)
-	r.escapes = esc
+	// Joint stub + via for the fine-pitch pads whose full width cannot leave
+	// (default on; --no-power-stubs): planned first, the sequential planner
+	// takes the rest and any pad the joint solve found no site for.
+	var stubs []intentEscape
+	var skipJoint func(pcbPadP) bool
+	if !r.o.noPowerStubs {
+		var rep powerStubReport
+		stubs, rep = planPowerStubs(r.escEnv, escapeCandidates(r.escEnv, reqs, nil), powerStubOpts{ViaAtPad: r.o.stubViaAtPad})
+		skipJoint = escapeSkipSet(stubs)
+		r.powerStubRep = &rep
+	}
+	esc, skipped := planIntentEscapes(r.escEnv, reqs, skipJoint)
+	r.escapes = append(append([]intentEscape(nil), stubs...), esc...)
 	r.summary["intentEscapes"] = map[string]any{"planned": esc, "skipped": skipped}
 	fmt.Fprintf(r.stderr, "intent escapes: %d pad(s) get a fixed escape stub (full width does not leave the pad), %d cannot reach widthMil.min\n", len(esc), len(skipped))
-	if len(esc) == 0 {
+	if rep := r.powerStubRep; rep != nil && rep.Candidates > 0 {
+		rep.settle(esc, skipped)
+		r.summary["powerStubs"] = rep
+		fmt.Fprintf(r.stderr, "power stubs: %d fine-pitch pad(s) need a stub; %d stub(s) on %d via(s) planned jointly, %d geometry-blocked, %d left to the sequential planner\n",
+			rep.Candidates, len(rep.Planned), rep.Vias, len(rep.GeometryBlocked), len(rep.Sequential))
+	}
+	r.planeAdvice(s)
+	if len(r.escapes) == 0 {
 		return dsn, nil
 	}
 	layers, perMil, err := kicad.DSNLayers(dsn)
@@ -1567,8 +1615,8 @@ func (r *kicadRun) planEscapes(s *boardSnapshot, dsn string) (string, error) {
 		}
 		return layers[0]
 	}
-	sp := make([]specctra.Escape, len(esc))
-	for i, e := range esc {
+	sp := make([]specctra.Escape, len(r.escapes))
+	for i, e := range r.escapes {
 		sp[i] = e.specctraEscape(name)
 	}
 	out, _, err := specctra.AppendEscapes(dsn, sp, layers, perMil)

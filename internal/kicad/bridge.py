@@ -760,11 +760,29 @@ def pours(pcb, spec_path, out):
         return {"ok": False, "error": "no closed board outline (Edge.Cuts) to pour into"}
     best = max(range(ps.OutlineCount()), key=lambda i: abs(ps.Outline(i).Area()))
     chain = ps.Outline(best)
-    made = []
+    made, replaced = [], []
+    bxs = [chain.CPoint(i).x for i in range(chain.PointCount())]
+    bys = [chain.CPoint(i).y for i in range(chain.PointCount())]
     for zs in spec.get("zones", []):
         net = board.FindNet(zs["net"])
         if net is None:
             return {"ok": False, "error": "pour net %s is not on the board" % zs["net"]}
+        if zs.get("replace"):
+            # An explicit plane decision: the full-board copper zone(s) already on
+            # this layer (>= 90 % of the board's extent) are replaced. Smaller
+            # zones and rule areas stay. Every removed zone is reported.
+            kl = kicad_layer(int(zs["layer"]))
+            for oz in list(board.Zones()):
+                if oz.GetIsRuleArea() or oz.GetLayer() != kl or len(list(oz.GetLayerSet().CuStack())) != 1:
+                    continue
+                if oz.Outline().OutlineCount() == 0:
+                    continue
+                oc = oz.Outline().Outline(0)
+                ox = [oc.CPoint(i).x for i in range(oc.PointCount())]
+                oy = [oc.CPoint(i).y for i in range(oc.PointCount())]
+                if (max(ox) - min(ox)) >= 0.9 * (max(bxs) - min(bxs)) and (max(oy) - min(oy)) >= 0.9 * (max(bys) - min(bys)):
+                    replaced.append({"name": oz.GetZoneName(), "net": oz.GetNetname(), "layer": int(zs["layer"])})
+                    board.Remove(oz)
         z = pcbnew.ZONE(board)
         z.SetLayer(kicad_layer(int(zs["layer"])))
         z.SetNetCode(net.GetNetCode())
@@ -786,7 +804,7 @@ def pours(pcb, spec_path, out):
         made.append(name)
     zones = fill_zones(board)
     save_board(board, pcb, out)
-    return {"ok": True, "out": out, "pours": made, "zonesFilled": zones}
+    return {"ok": True, "out": out, "pours": made, "replaced": replaced, "zonesFilled": zones}
 
 
 def set_via_width(v, w):

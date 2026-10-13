@@ -19,6 +19,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -246,6 +247,20 @@ func kicadPourPlan(o kicadRouteOpts, in *boardSnapshot) []kicad.Pour {
 	}
 	if power > 0 && net != "" && has[net] {
 		ps = append(ps, kicad.Pour{Net: net, Layer: power, ClearanceMil: clr})
+	}
+	if len(o.planes) > 0 && len(ps) > 0 {
+		// pours replaces every pcbpilot pour incl. the explicit plane: keep it,
+		// and let no recipe zone take its layer.
+		var keep []kicad.Pour
+		for _, p := range ps {
+			if !slices.ContainsFunc(o.planes, func(pl powerPlane) bool { return pl.LayerID == p.Layer }) {
+				keep = append(keep, p)
+			}
+		}
+		for _, pl := range o.planes {
+			keep = append(keep, kicad.Pour{Net: pl.Net, Layer: pl.LayerID, ClearanceMil: clr})
+		}
+		ps = keep
 	}
 	return ps
 }

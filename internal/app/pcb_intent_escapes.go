@@ -262,14 +262,10 @@ func (c escapeCand) along(t float64) [2]float64 {
 	return [2]float64{round3(c.pad.X + c.dir[0]*t), round3(c.pad.Y + c.dir[1]*t)}
 }
 
-// planIntentEscapes plans an escape for every SMD pad of an intent net
-// whose pitch / pad cannot take the net's full outer width straight out.
-// Pads with a same-net row neighbour are planned first (they can still
-// bridge to it); the pads still to be planned hold a widthMil.min outward
-// stub meanwhile, so adjacent different-net pads do not take each other's
-// room. skip(pad) excludes pads that already have an escape (--escapes,
-// ground pre-escapes). skipped lists the pads that cannot get widthMil.min.
-func planIntentEscapes(env *escapeEnv, reqs map[string]specctra.NetRequirement, skip func(pcbPadP) bool) (esc []intentEscape, skipped []string) {
+// escapeCandidates are the SMD pads of intent nets whose full outer width
+// does not leave the pad straight out to the courtyard (the pads that need
+// an escape), in part / pad-number order. skip(pad) excludes pads.
+func escapeCandidates(env *escapeEnv, reqs map[string]specctra.NetRequirement, skip func(pcbPadP) bool) []escapeCand {
 	byRef := map[string][]pcbPadP{}
 	for _, q := range env.pads {
 		byRef[q.Designator] = append(byRef[q.Designator], q)
@@ -308,6 +304,18 @@ func planIntentEscapes(env *escapeEnv, reqs map[string]specctra.NetRequirement, 
 		c.mate = rowMate(pad, part, dir)
 		cands = append(cands, c)
 	}
+	return cands
+}
+
+// planIntentEscapes plans an escape for every SMD pad of an intent net
+// whose pitch / pad cannot take the net's full outer width straight out.
+// Pads with a same-net row neighbour are planned first (they can still
+// bridge to it); the pads still to be planned hold a widthMil.min outward
+// stub meanwhile, so adjacent different-net pads do not take each other's
+// room. skip(pad) excludes pads that already have an escape (--escapes,
+// ground pre-escapes). skipped lists the pads that cannot get widthMil.min.
+func planIntentEscapes(env *escapeEnv, reqs map[string]specctra.NetRequirement, skip func(pcbPadP) bool) (esc []intentEscape, skipped []string) {
+	cands := escapeCandidates(env, reqs, skip)
 	sort.SliceStable(cands, func(i, j int) bool { return cands[i].mate != nil && cands[j].mate == nil })
 	held := make([]intentEscape, len(cands))
 	for i, c := range cands {
