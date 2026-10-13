@@ -57,9 +57,14 @@ type reviewRecord struct {
 // reviewerRun runs one reviewer CLI on prompt and returns its stdout.
 type reviewerRun func(ctx context.Context, prompt string) (string, error)
 
+// The prompt (requirements + evidence, often hundreds of kB) never goes on the
+// command line: Windows caps a command line at 32 767 characters ("The filename
+// or extension is too long"). codex and claude read it from stdin; kimi only
+// takes -p, so it gets a short instruction to read prompt.md in its own
+// working directory.
 var reviewerRunners = map[string]reviewerRun{
 	"codex": func(ctx context.Context, prompt string) (string, error) {
-		return runReviewerCLI(ctx, "", "codex", "exec", "--skip-git-repo-check", prompt)
+		return runReviewerCLI(ctx, "", prompt, "codex", "exec", "--skip-git-repo-check", "-")
 	},
 	"kimi": func(ctx context.Context, prompt string) (string, error) {
 		dir, err := os.MkdirTemp("", "pcbpilot-kimi-")
@@ -67,7 +72,10 @@ var reviewerRunners = map[string]reviewerRun{
 			return "", err
 		}
 		defer os.RemoveAll(dir)
-		return runReviewerCLI(ctx, dir, "kimi", "-p", prompt)
+		if err := os.WriteFile(filepath.Join(dir, reviewPromptFile), []byte(prompt), 0o600); err != nil {
+			return "", err
+		}
+		return runReviewerCLI(ctx, dir, "", "kimi", "-p", kimiPromptPointer)
 	},
 	"claude": func(ctx context.Context, prompt string) (string, error) {
 		dir, err := os.MkdirTemp("", "pcbpilot-claude-")
@@ -75,16 +83,27 @@ var reviewerRunners = map[string]reviewerRun{
 			return "", err
 		}
 		defer os.RemoveAll(dir)
-		return runReviewerCLI(ctx, dir, "claude", "-p", prompt)
+		return runReviewerCLI(ctx, dir, prompt, "claude", "-p")
 	},
 }
 
-func runReviewerCLI(ctx context.Context, dir, name string, args ...string) (string, error) {
+const reviewPromptFile = "prompt.md"
+
+// kimiPromptPointer is the whole command-line prompt kimi gets.
+const kimiPromptPointer = "The complete review task is in the file prompt.md in the current working directory. " +
+	"Read that whole file first, then do exactly what it asks and answer only in the format it specifies."
+
+// runReviewerCLI runs a reviewer; stdin (when not empty) carries the prompt.
+func runReviewerCLI(ctx context.Context, dir, stdin, name string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
-	cmd.Stdin = nil
+	if stdin != "" {
+		cmd.Stdin = strings.NewReader(stdin)
+	} else {
+		cmd.Stdin = nil
+	}
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() != nil {
 		return string(out), fmt.Errorf("%s timed out", name)
