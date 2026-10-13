@@ -29,6 +29,9 @@ pcbpilot kicad sch-checkpoint list --project build/                     # 回退
 给了 `--requirements` 还有 review-panel 设计评审（跳过要签名豁免）。产物：工程文件、`connectivity.json`、
 `intent.json`、`erc.json`、报告里每阶段计时。
 
+别的工具画的 KiCad 工程也能过同一套工程级门禁：`pcbpilot kicad sch-check --sch root.kicad_sch --engineer-grade --spec design.json`
+（spec 提供网类型、区、页、标题栏；EG-06 按区找 IC 电源脚）。
+
 delta 例子（只写意图，脚名即可）：
 
 ```json

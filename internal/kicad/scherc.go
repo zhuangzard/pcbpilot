@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -43,7 +44,8 @@ type ERCReport struct {
 }
 
 type ercJSON struct {
-	Sheets []struct {
+	CoordinateUnits string `json:"coordinate_units"`
+	Sheets          []struct {
 		Path       string `json:"path"`
 		UUIDPath   string `json:"uuid_path"`
 		Violations []struct {
@@ -86,12 +88,21 @@ func RunERC(root string) (*ERCReport, error) {
 		return nil, fmt.Errorf("parse ERC report: %w", err)
 	}
 	files, _ := SheetPaths(root)
+	var maxAbs float64
+	for _, s := range x.Sheets {
+		for _, v := range s.Violations {
+			for _, it := range v.Items {
+				maxAbs = math.Max(maxAbs, math.Max(math.Abs(it.Pos.X), math.Abs(it.Pos.Y)))
+			}
+		}
+	}
+	scale := ercPosScale(x.CoordinateUnits, maxAbs)
 	r := &ERCReport{}
 	for _, s := range x.Sheets {
 		for _, v := range s.Violations {
 			ev := ERCViolation{Sheet: s.Path, UUIDPath: s.UUIDPath, File: files[s.UUIDPath], Type: v.Type, Severity: v.Severity, Description: v.Description}
 			for _, it := range v.Items {
-				ev.Items = append(ev.Items, ERCItem{Description: it.Description, Pos: Pt{it.Pos.X, it.Pos.Y}, UUID: it.UUID})
+				ev.Items = append(ev.Items, ERCItem{Description: it.Description, Pos: Pt{it.Pos.X * scale, it.Pos.Y * scale}, UUID: it.UUID})
 			}
 			switch v.Severity {
 			case "error":
@@ -103,6 +114,26 @@ func RunERC(root string) (*ERCReport, error) {
 		}
 	}
 	return r, nil
+}
+
+// ercPosScale converts ERC item positions to millimetres. kicad-cli's
+// schematic ERC JSON (KiCad 10.0.x) labels its coordinates "mm" but writes them
+// in units of 100 mm (schematic IU 100 nm through the PCB 1 nm scale): a pin at
+// (49.53, 64.77) mm is reported as (0.4953, 0.6477). Every schematic coordinate
+// lies on a sheet of at least A4 (297 mm), so a report whose largest coordinate
+// is below 12 (A0 = 1189 mm / 100) is the scaled form; true millimetre reports
+// (other versions, or a fixed kicad-cli) pass through unchanged.
+func ercPosScale(units string, maxAbs float64) float64 {
+	switch strings.ToLower(units) {
+	case "in", "inch", "inches":
+		return 25.4
+	case "mils", "mil":
+		return 0.0254
+	}
+	if maxAbs > 0 && maxAbs < 12 {
+		return 100
+	}
+	return 1
 }
 
 // SheetPaths maps each sheet instance's uuid path ("/root", "/root/sheet")

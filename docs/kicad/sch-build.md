@@ -138,6 +138,11 @@ LCSC 符号，否则按 IR 的引脚表生成）、网、不连接、模块 → 
 | `intent` | 硬（可 `--no-intent` 跳过） | 进程内 intent derive 成功。 |
 | `design-review` | 硬（有 `--requirements` 时） | review-panel stage schematic。 |
 
+同一组门禁也可以对**任何工具画的** KiCad 工程单独运行（不重画）：`pcbpilot kicad sch-check --sch root.kicad_sch
+--engineer-grade --spec design.json`。sheet 本身不含的信息（网的电源/地类型、区、页、标题栏）由 spec
+（`pcbpilot.kicad.sch-build/1`，符号离线解析）提供；报告多一个 `engineerGrade` 门禁项，不通过时退出码非零。
+EG-06 只在同一区内找 IC 电源脚，所以 spec 的 `zone` 要与图上的功能区一致。
+
 ## sch-edit（增量修改，一次调用）
 
 delta 只描述意图：

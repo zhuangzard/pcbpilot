@@ -38,11 +38,15 @@ type kicadSchCheckReport struct {
 	Quality  []kicadSheetFindings `json:"quality"`
 	Findings int                  `json:"qualityFindings"`
 	Fixed    []kicadPwrFlagFix    `json:"pwrFlags,omitempty"`
+	// EngineerGrade: the engineer-grade gate of kicad sch-build, run on an
+	// existing project with --engineer-grade --spec.
+	EngineerGrade *sbGate `json:"engineerGrade,omitempty"`
 }
 
 func newKicadSchCheckCmd(stdout, stderr io.Writer) *cobra.Command {
 	var sch string
-	var fixPwr bool
+	var fixPwr, eg bool
+	var specPath string
 	var ignore []string
 	c := &cobra.Command{
 		Use:   "sch-check",
@@ -63,7 +67,15 @@ write is netlist-verified (unchanged connectivity) or left untouched. ERC runs
 again afterwards.
 
 --ignore KIND (repeatable) drops a quality finding kind (e.g. off-grid on an
-imported sheet whose parts sit off the 1.27 mm grid).`,
+imported sheet whose parts sit off the 1.27 mm grid).
+
+--engineer-grade --spec design.json: also run the engineer-grade gate of
+kicad sch-build (EG-01 hierarchy, EG-05 power/ground symbols upright, EG-06
+decoupling <= 25.4 mm from its IC supply pin in the same zone, EG-08 crossings,
+EG-09 four-way junctions, EG-13 dangling labels, EG-20 automatic net names,
+EG-22 title block) on a project drawn by any tool. The spec
+(pcbpilot.kicad.sch-build/1) supplies what a sheet cannot: net kinds, zones,
+pages and the title block; its symbols are resolved offline.`,
 		Args: cobra.NoArgs,
 		Example: `  pcbpilot kicad sch-check --sch board.kicad_sch
   pcbpilot kicad sch-check --sch board.kicad_sch --fix-pwr-flag`,
@@ -104,11 +116,23 @@ imported sheet whose parts sit off the 1.27 mm grid).`,
 				rep.Findings += len(fs)
 			}
 			rep.OK = erc.Errors == 0 && rep.Findings == 0
+			if eg {
+				g, err := kicadSchCheckEG(root, files, specPath)
+				if err != nil {
+					return err
+				}
+				rep.EngineerGrade = &g
+				rep.OK = rep.OK && g.Status == "pass"
+			}
 			if err := writeJSON(stdout, rep); err != nil {
 				return err
 			}
 			if !rep.OK {
-				return fmt.Errorf("sch-check: %d ERC error(s), %d warning(s), %d quality finding(s)", erc.Errors, erc.Warnings, rep.Findings)
+				egs := ""
+				if rep.EngineerGrade != nil && rep.EngineerGrade.Status != "pass" {
+					egs = "; engineer-grade: " + rep.EngineerGrade.Detail
+				}
+				return fmt.Errorf("sch-check: %d ERC error(s), %d warning(s), %d quality finding(s)%s", erc.Errors, erc.Warnings, rep.Findings, egs)
 			}
 			return nil
 		},
@@ -116,7 +140,41 @@ imported sheet whose parts sit off the 1.27 mm grid).`,
 	c.Flags().StringVar(&sch, "sch", "", "a .kicad_sch of the design (its root sheet is found next to it)")
 	c.Flags().BoolVar(&fixPwr, "fix-pwr-flag", false, "wire a PWR_FLAG to every power net ERC reports as not driven")
 	c.Flags().StringArrayVar(&ignore, "ignore", nil, "quality finding kind to skip (repeatable)")
+	c.Flags().BoolVar(&eg, "engineer-grade", false, "also run the kicad sch-build engineer-grade gate (needs --spec)")
+	c.Flags().StringVar(&specPath, "spec", "", "design spec (pcbpilot.kicad.sch-build/1) for --engineer-grade: net kinds, zones, pages, title")
 	return c
+}
+
+// kicadSchCheckEG runs sbEngineerGrade on an existing project: the design
+// (net kinds, zones, pages, title) comes from the spec, the sheets from disk.
+func kicadSchCheckEG(root string, files []string, specPath string) (sbGate, error) {
+	if specPath == "" {
+		return sbGate{}, fmt.Errorf("--engineer-grade needs --spec (pcbpilot.kicad.sch-build/1)")
+	}
+	spec, err := loadSbSpec(specPath)
+	if err != nil {
+		return sbGate{}, err
+	}
+	tmp, err := os.MkdirTemp("", "pcbpilot-eg-")
+	if err != nil {
+		return sbGate{}, err
+	}
+	defer os.RemoveAll(tmp)
+	d, _, err := buildDesign(spec, sbResolveOpts{OutDir: tmp, Offline: true, Jobs: 4})
+	if err != nil {
+		return sbGate{}, fmt.Errorf("--spec %s: %w", specPath, err)
+	}
+	dir := filepath.Dir(root)
+	var rel []string
+	for _, f := range files {
+		r, err := filepath.Rel(dir, f)
+		if err != nil || strings.HasPrefix(r, "..") {
+			continue
+		}
+		rel = append(rel, filepath.ToSlash(r))
+	}
+	sort.Strings(rel)
+	return sbEngineerGrade(dir, rel, d), nil
 }
 
 // kicadFixPwrFlags places one PWR_FLAG per undriven power net.
