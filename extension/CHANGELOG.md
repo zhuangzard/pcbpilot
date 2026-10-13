@@ -1,6 +1,14 @@
 # Changelog
 
-## [Unreleased]
+## [0.9.2] — 2026-10-13
+
+**CLI, daemon, Skill and MCP move to 0.9.2. The connector runtime CHANGED (`pcb.pour.create` layer readback): import the new
+`pcbpilot-connector.eext` (uninstall the old "PCB Pilot Connector" first, reload EasyEDA); the daemon refuses design actions
+until the connector version matches.**
+
+Summary of this release: one new hard gate (`pour-layer-mismatch`), macOS ad-hoc signing on install, and two opt-in /
+read-only routing diagnostics. No existing gate was relaxed or removed; every existing `kicad route` option keeps its
+default.
 
 **Pour-layer gate (US-Zed2 incident, 2026-10-12).** A shipped board had `AUTO_GND_L15`, `AUTO_GND_L15_1`, `AUTO_GND_L15_2`
 (net GND) with layer id 1 instead of 15: a full-board GND pour on Top over every other net's tracks, so JLC reported the
@@ -15,6 +23,32 @@ file, 23 returned); that omission is not explained yet (see below).
   versions must stay aligned).
 - Not fixed: why `pcb.pour.list` omitted the three layer-1 pours (the handler is a plain `getAll()` with no filter or dedupe;
   the three share one boundary). Re-check with `pcb dump --include-copper` against the saved file.
+
+**macOS: ad-hoc signing on install/update.** the self-updater (`pcbpilot update`) now ad-hoc signs a downloaded
+macOS binary that fails `codesign --verify` (darwin/amd64 Go builds are unsigned) before installing it (`codesign --force
+--sign -`, best effort); an already valid signature and non-macOS hosts are left untouched.
+This does NOT by itself fix the Intel-Mac `kicad-cli` hang seen on one host (`pcbpilot kicad fab` blocks in
+`LIBRARY_MANAGER::LoadGlobalTables` / `opendir`, waiting on a macOS privacy (TCC) grant nobody can answer). That hang
+persisted after signing and after changing HOME; it needs the privacy grant on the machine. Running `kicad-cli` directly from
+the agent shell works.
+
+**`kicad route`: opt-in pad-local neck-down and exit-feasibility report.**
+- `--pad-neck-floor-mil N` (default 0 = off, behaviour identical to 0.9.1). Intent nets whose `widthMil.min <= max(N,
+  narrowest min)` may neck down at pads; fastroute's neck floor becomes that value (never below a net's own minimum); full
+  width outside the pad zone is still restored by widen-to-intent and enforced by the hard `intent-widths` gate, so a run that
+  leaves narrow copper is not shipped. Also lets escape vias sit next to own-net SMD pads. Untested on real boards beyond the
+  unit tests; no claim that it fixes a board.
+- `summary.json` gains a read-only `exitFeasibility` section: per SMD pad of an intent net, the widest legal straight
+  outward exit (capped at the net's width), the escape the planner would pick, and a class (full / neck / IMPOSSIBLE) against
+  `widthMil.min`. It changes no routing decision.
+
+**Findings (evidence, not yet automated).** On PicoRick (RP2040 QFN-56, 0.4 mm pitch, 0.875 x 0.2 mm pads) power/GND pads on
+fine-pitch ICs fail as full-width tracks: the widest legal straight exit is 0.2952 mm, below the 15.75 mil class width. A manual
+experiment (In2 GND -> +3V3 plane, 10 mil stubs + 0.6/0.3 vias at every U303 power pin) took the direct-fastroute pipeline
+from 13 unrouted / 13 DRC items to 1 unrouted / 1 DRC item (two runs each). Caveats: baseline is direct fastroute, not the full
+pcbpilot flow (5 unrouted); GND return quality and the 0.127 mm mask check were not evaluated; on a second board (GasV5_A,
+TQFP-144 0.5 mm) the failures are congestion, not exit geometry. This release does NOT automate stub + via + plane; replacing
+a plane net remains an explicit user decision.
 
 ## [0.9.1] — 2026-10-12
 
