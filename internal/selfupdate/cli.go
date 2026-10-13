@@ -424,5 +424,6 @@ func replaceBinary(tmp, dst string) error {
 		_ = os.Remove(old) // fails while still running; harmless leftover
 		return nil
 	}
+	_ = ensureLocalSignature(tmp) // best effort: an unsigned Intel macOS binary cannot be identified by tccd
 	return os.Rename(tmp, dst)
 }
