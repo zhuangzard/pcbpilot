@@ -405,8 +405,26 @@ named keep their value. --show/--hide do not apply (KiCad always draws it).`,
 				if page == "" {
 					return fmt.Errorf("--page is required")
 				}
-				return dispatch(cfg, "schematic.page.delete", window,
-					map[string]any{"pageUuid": page}, stdout, stderr)
+				// The platform's delete return is not evidence: live 2026-10-13 it
+				// returned true yet the page stayed listed (unopenable, and its parts
+				// still fed import-changes); a retry returned false under an outer ok.
+				// Only the page list read back after the call decides.
+				res, err := requestAction(cfg, "schematic.page.delete", window, map[string]any{"pageUuid": page})
+				if err != nil {
+					return err
+				}
+				pages, err := requestAction(cfg, "schematic.pages.list", window, nil)
+				if err != nil {
+					return fmt.Errorf("page-delete sent (platform ok=%v) but the page list could not be read back: %w", res.Result["ok"], err)
+				}
+				for _, p := range mapsField(pages.Result, "pages") {
+					if strField(p, "uuid") == page {
+						return fmt.Errorf("page %s (%s) is still listed after page-delete (platform ok=%v) — not deleted; stop writing to this project and keep the page uuid as evidence",
+							page, strField(p, "name"), res.Result["ok"])
+					}
+				}
+				fmt.Fprintf(stdout, "✓ deleted page %s (absent from the page list read back)\n", page)
+				return nil
 			},
 		}
 		c.Flags().StringVar(&page, "page", "", "schematic page UUID (required)")
