@@ -1,8 +1,8 @@
 # Changelog
 
-## [0.9.2] — 2026-10-13
+## [0.10.0] — 2026-10-13
 
-**CLI, daemon, Skill and MCP move to 0.9.2. The connector runtime CHANGED (`pcb.pour.create` layer readback): import the new
+**CLI, daemon, Skill and MCP move to 0.10.0. The connector runtime CHANGED (`pcb.pour.create` layer readback): import the new
 `pcbpilot-connector.eext` (uninstall the old "PCB Pilot Connector" first, reload EasyEDA); the daemon refuses design actions
 until the connector version matches.**
 
