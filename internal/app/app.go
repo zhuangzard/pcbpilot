@@ -76,6 +76,8 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 		// adds the `-v` shorthand. Same output as the `version` subcommand.
 		Version: version.Version,
 	}
+	// Record which subcommand issued the actions (audit attribution only).
+	root.PersistentPreRun = func(cmd *cobra.Command, _ []string) { cfg.command = cmd.CommandPath() }
 	root.SetVersionTemplate(version.Name + " {{.Version}}\n")
 	root.Flags().BoolP("version", "v", false, "print version and exit")
 

@@ -41,6 +41,10 @@ var errActionFailed = errors.New("action returned ok=false")
 // action subcommands. The fields are bound directly to Cobra persistent
 // flags so they are populated before any RunE executes.
 type appConfig struct {
+	// command is the invoking CLI command path (e.g. "pcbpilot sch connect"),
+	// sent with every action so the audit log can attribute calls to the
+	// subcommand that issued them — the evidence for pruning unused commands.
+	command string
 	host    string
 	ports   string // "61832-61841"
 	project string // optional stable routing hint (project name/uuid) → windowId
@@ -911,6 +915,9 @@ func postAction(cfg *appConfig, action, window string, payload any, timeout time
 	// Identify this client process for audit attribution and the daemon's
 	// concurrent-writer advisory (issue #108).
 	body["clientId"] = cliClientID()
+	if cfg.command != "" {
+		body["command"] = cfg.command
+	}
 	// Send the round-trip budget: the daemon shortens its connector wait to
 	// (budget - grace) so it answers with a structured DISPATCH_FAILED *before*
 	// this HTTP client times out — instead of both sides hanging to their own
