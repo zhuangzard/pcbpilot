@@ -28,6 +28,11 @@ type DSNPrep struct {
 	NoNeckdown []string `json:"noNeckdownClasses,omitempty"`
 	// MinTraceMil is the narrowest widthMil.min of any net (0 = none).
 	MinTraceMil float64 `json:"minTraceMil"`
+	// NeckFloorMil is the fastroute neck-down floor when PadNeckFloorMil is
+	// on (0 = off): max(narrowest widthMil.min, PadNeckFloorMil). Every net
+	// left out of NoNeckdown has widthMil.min <= it, so no neck-down the
+	// engine makes can go below the net's own minimum.
+	NeckFloorMil float64 `json:"neckFloorMil,omitempty"`
 	// NarrowestClassMil is the narrowest rule width of any DSN class with
 	// nets: a neck-down floor above it would forbid that class its own width.
 	NarrowestClassMil float64 `json:"narrowestClassMil"`
@@ -176,6 +181,13 @@ func forbidsNeckdown(r NetRequirement, floor float64) bool {
 	return r.OuterMil > floor+reqEps
 }
 
+// forbidsNeckdownTo is forbidsNeckdown with a pad-neck floor: the net keeps
+// its full width when it is wider than the floor and its widthMil.min is
+// unknown or above the floor (the engine would neck it below the minimum).
+func forbidsNeckdownTo(r NetRequirement, floor float64) bool {
+	return r.OuterMil > floor+reqEps && (r.MinMil <= 0 || r.MinMil > floor+reqEps)
+}
+
 var (
 	reResolution   = regexp.MustCompile(`\(resolution\s+(\w+)`)
 	reLayerType    = regexp.MustCompile(`\(layer\s+("[^"]*"|[^\s()]+)\s*\(type\s+(\w+)`)
@@ -202,6 +214,17 @@ func unitToMil(unit string) (float64, error) {
 	}
 	return 0, fmt.Errorf("DSN resolution unit %q not supported", unit)
 }
+
+// PadNeckFloorMil (0 = off, the default) lets intent classes neck down at
+// pads. Every intent class is otherwise in fastroute's --no-neckdown-classes
+// (the engine's neck-down is pin-local AND "micro": any congested segment,
+// and its only floor is one global width). With a floor F set, a net whose
+// widthMil.min <= max(F, narrowest min) is left out of that list, the engine
+// floor is that value (never below any listed-out net's own minimum), and
+// the full width outside the pad zone is still enforced afterwards by
+// planWidenToIntent and the hard intent-widths gate. A net without
+// widthMil.min, or with a minimum above the floor, stays no-neck-down.
+var PadNeckFloorMil float64
 
 // PrepareDSN brings a KiCad DSN export in line with the intent: composite
 // class names lose their commas, inner widths become layer_rules, and every
@@ -235,6 +258,9 @@ func PrepareDSN(dsn string, classes []NetClass, reqs map[string]NetRequirement, 
 		if r.MinMil > 0 && (prep.MinTraceMil == 0 || r.MinMil < prep.MinTraceMil) {
 			prep.MinTraceMil = r.MinMil
 		}
+	}
+	if PadNeckFloorMil > 0 {
+		prep.NeckFloorMil = math.Max(prep.MinTraceMil, PadNeckFloorMil)
 	}
 	// Copper layers in stack order; inner = all but the first and last.
 	var layers []string
@@ -308,10 +334,21 @@ func PrepareDSN(dsn string, classes []NetClass, reqs map[string]NetRequirement, 
 		}
 		if isOurs {
 			no := len(cls.Nets) > 0
-			for _, n := range cls.Nets {
-				r, ok := reqs[n]
-				if !ok || !forbidsNeckdown(r, prep.MinTraceMil) {
-					no = false
+			if prep.NeckFloorMil > 0 {
+				// One floor serves the class: a single intent net that may not
+				// neck to it keeps the whole class at full width.
+				no = false
+				for _, n := range cls.Nets {
+					if r, ok := reqs[n]; ok && forbidsNeckdownTo(r, prep.NeckFloorMil) {
+						no = true
+					}
+				}
+			} else {
+				for _, n := range cls.Nets {
+					r, ok := reqs[n]
+					if !ok || !forbidsNeckdown(r, prep.MinTraceMil) {
+						no = false
+					}
 				}
 			}
 			if no {
