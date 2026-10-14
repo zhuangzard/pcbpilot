@@ -303,7 +303,15 @@ func (c *ctx) buildNets() {
 			floor = math.Max(floor, 20)
 		}
 		np.WidthMil.Min = floor
-		if maxPin > 0 {
+		if pp.Role == pcbauto.RoleGround && maxPin > 0 {
+			// A ground is poured: its trunk current flows in the plane and each
+			// pad reaches it through a fan-out. Raising the minimum to the widest
+			// pin (JDB-1: PS1 −VOUT returns 2.4 A → 41 mil) forced that width on
+			// every fan-out of a 0.5 mm-pitch pad and blocked 124 escapes. The
+			// segment-basis intent-widths gate still holds each routed segment to
+			// its own simulated current.
+			np.Why = append(np.Why, fmt.Sprintf("ground (poured): minimum width stays %s mil; the widest pin (%s) is held by the segment-basis width gate", trimFloat(floor, 2), fmtA(maxPin)))
+		} else if maxPin > 0 {
 			if w := pcbauto.TraceWidthForCurrent(maxPin, c.tempRise, c.outerOz, false); w > floor {
 				np.WidthMil.Min = metricRoundMil(w)
 			}
