@@ -351,11 +351,11 @@ func discoverDocs(cfg *appConfig, window string) (docs []openableDoc, activeUUID
 // can activate an inventory UUID. Keep the exception narrow so transport,
 // project-context, and arbitrary document.current failures still fail closed.
 //
-// The current connector reports this condition with the generic
-// EDA_CALL_FAILED code, so the stable message is also checked. A future
-// dedicated error code can be added here without changing the CLI flow.
+// Connectors ≥1.11.1 report it as PRECONDITION_REFUSED (a state, excluded from
+// write-health); older ones used the generic EDA_CALL_FAILED, so both codes are
+// accepted and the stable message decides.
 func isNoActiveDocument(res *actionResult) bool {
-	if res == nil || res.errorCode != "EDA_CALL_FAILED" {
+	if res == nil || (res.errorCode != "PRECONDITION_REFUSED" && res.errorCode != "EDA_CALL_FAILED") {
 		return false
 	}
 	message := strings.TrimSpace(res.errorMsg)

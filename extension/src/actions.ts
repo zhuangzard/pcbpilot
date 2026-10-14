@@ -566,7 +566,10 @@ const documentCurrent: Handler = async () => {
 		throw edaError(err, 'Failed to read current document info.');
 	}
 	if (!doc) {
-		throw new ActionError(ErrorCodes.EDA_CALL_FAILED, 'No active document.');
+		// A state (all tabs closed, or mid doc reload/switch), not a host failure:
+		// PRECONDITION_REFUSED keeps it out of write-health, which flagged the
+		// connector DEGRADED on every reload.
+		throw new ActionError(ErrorCodes.PRECONDITION_REFUSED, 'No active document.');
 	}
 	return {
 		result: {
