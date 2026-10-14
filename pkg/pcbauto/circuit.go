@@ -292,6 +292,22 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 				gparent[gfind(a)] = gfind(bb)
 			}
 		}
+		// A 4-pin common-mode choke carries the return line through one
+		// winding (1–4 / 2–3): the connector-side ground (GND_J) is the same
+		// domain as the board ground. Left apart, the inlet nets formed their
+		// own SELV domain with no insulation pair to the patient side (JDB-1).
+		if k == KindInductor && len(p.Pads) == 4 {
+			byNum := map[string]string{}
+			for _, pd := range p.Pads {
+				byNum[pd.Number] = pd.Net
+			}
+			for _, w := range [][2]string{{"1", "4"}, {"2", "3"}} {
+				a, bb := byNum[w[0]], byNum[w[1]]
+				if a != "" && bb != "" && a != bb && an.Plan(a, b.Rules).Role == RoleGround && an.Plan(bb, b.Rules).Role == RoleGround {
+					gparent[gfind(a)] = gfind(bb)
+				}
+			}
+		}
 	}
 	// Mains nets with no ground of their own form a "MAINS" domain.
 	hasMains := false
