@@ -812,8 +812,13 @@ write that resets them. Disable with --no-sync-designators.`,
 				// confirm=applied（连接器确认点击了「应用修改」且弹框已关闭）才说明
 				// 落地了；其余状态下跑后续同步读到的是导入前的板面，会静默空跑一遍
 				// 然后在用户手动点击后原样复现问题。
+				// An already-synced board raises no dialog; the connector verifies that
+				// no-op (noChanges) — nothing landed and nothing needs to.
+				noChanges, _ := res.Result["noChanges"].(bool)
 				landed := imported && confirmState == "applied"
-				if imported && !landed {
+				if noChanges && confirmState == "no-dialog" {
+					fmt.Fprintln(stderr, "✓ 原理图与 PCB 已同步，无需导入（no-dialog，器件清单未变）")
+				} else if imported && !landed {
 					fmt.Fprintf(stderr, "⚠ import resolved but the apply was NOT confirmed (confirm=%s) — expected 应用修改 / Apply Changes; stop and inspect the dialog/readback, then fix the typed import handler before retrying\n", confirmState)
 				}
 				// attrs 在前、位号在后：attrs_backfill 的 Designator 键泄漏 bug 已在
