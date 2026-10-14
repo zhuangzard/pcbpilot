@@ -45,6 +45,7 @@ type SchNetlist struct {
 // SchNetComp is one component (all units merged by KiCad).
 type SchNetComp struct {
 	Ref, Value, Footprint, Lib, Part, Sheet string
+	DNP                                     bool // <property name="dnp"/>
 	Fields                                  map[string]string
 	Pins                                    []SchNetPin // library pins (libparts)
 }
@@ -77,6 +78,9 @@ type schNetXML struct {
 		Sheet struct {
 			Names string `xml:"names,attr"`
 		} `xml:"sheetpath"`
+		Props []struct {
+			Name string `xml:"name,attr"`
+		} `xml:"property"`
 	} `xml:"components>comp"`
 	LibParts []struct {
 		Lib  string `xml:"lib,attr"`
@@ -117,6 +121,11 @@ func ParseSchNetlist(data []byte) (*SchNetlist, error) {
 			Sheet: c.Sheet.Names, Fields: map[string]string{}, Pins: lp[c.Lib.Lib+":"+c.Lib.Part]}
 		for _, f := range c.Fields {
 			sc.Fields[f.Name] = strings.TrimSpace(f.Value)
+		}
+		for _, pr := range c.Props {
+			if pr.Name == "dnp" {
+				sc.DNP = true
+			}
 		}
 		nl.Components = append(nl.Components, sc)
 	}
@@ -205,7 +214,7 @@ func (nl *SchNetlist) ToConnectivityDoc(projectID string) (*connectivity.Documen
 				break
 			}
 		}
-		comp := connectivity.Component{ID: "cmp-" + c.Ref, Ref: c.Ref, Device: dev, Footprint: c.Footprint, PageName: c.Sheet}
+		comp := connectivity.Component{ID: "cmp-" + c.Ref, Ref: c.Ref, Device: dev, Footprint: c.Footprint, PageName: c.Sheet, DNP: c.DNP}
 		pinIdx[c.Ref] = map[string]int{}
 		for _, p := range c.Pins {
 			if _, dup := pinIdx[c.Ref][p.Number]; dup {
