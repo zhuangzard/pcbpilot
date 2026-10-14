@@ -161,6 +161,9 @@ type healthSample struct {
 	ok        bool
 	verdict   effectVerdict
 	at        time.Time
+	// err is the failing response's "CODE: message" (empty when ok) — what
+	// health shows as lastFailureError, so a red window says why, not just which.
+	err string
 	// seq is this window's monotonic outcome counter at push time — the clock
 	// the per-action horizon runs on (see writeHealthActionHorizon).
 	seq uint64
@@ -194,6 +197,8 @@ type outcome struct {
 	// ErrorCode is the failing response's code (empty when ok). Used ONLY to
 	// drop request-refusal samples — see requestRefusalCodes.
 	ErrorCode string
+	// ErrorMsg is the failing response's "CODE: message" for lastFailureError.
+	ErrorMsg string
 }
 
 // requestRefusalCodes 是「**请求本身讲不通,而且一个字节都没写**」的错误码。
@@ -223,6 +228,19 @@ func responseErrorCode(resp *protocol.Response) string {
 		return ""
 	}
 	return resp.Error.Code
+}
+
+// responseErrorMsg is the failing response's "CODE: message", bounded so one
+// long platform error cannot bloat /health.
+func responseErrorMsg(resp *protocol.Response) string {
+	if resp == nil || resp.Error == nil {
+		return ""
+	}
+	msg := resp.Error.Code + ": " + resp.Error.Message
+	if r := []rune(msg); len(r) > 300 {
+		msg = string(r[:300]) + "…"
+	}
+	return msg
 }
 
 // ActionWriteHealth is one action's slice of a window's health — the bucket that
@@ -258,6 +276,9 @@ type WindowWriteHealth struct {
 	FakeFailures      int    `json:"fakeFailures,omitempty"`
 	LastFailureAction string `json:"lastFailureAction,omitempty"`
 	LastFailureAt     string `json:"lastFailureAt,omitempty"`
+	// LastFailureError is that failure's "CODE: message"; a fake success (ok
+	// reply, read-back proved nothing landed) has no error and says so.
+	LastFailureError string `json:"lastFailureError,omitempty"`
 	// DegradedActions names the per-action buckets over threshold — the roads
 	// that are not working, even when the mixed average looks fine.
 	DegradedActions []string `json:"degradedActions,omitempty"`
@@ -330,6 +351,7 @@ func (t *writeHealthTracker) observe(windowID string, o outcome) {
 		ok:        o.OK,
 		verdict:   o.Verdict,
 		at:        time.Now().UTC(),
+		err:       o.ErrorMsg,
 	})
 }
 
@@ -495,6 +517,10 @@ func snapshotLocked(st *windowHealthState) WindowWriteHealth {
 		if st.recent[i].failed() {
 			s.LastFailureAction = st.recent[i].action
 			s.LastFailureAt = st.recent[i].at.Format(time.RFC3339)
+			s.LastFailureError = st.recent[i].err
+			if st.recent[i].fakeSuccess() {
+				s.LastFailureError = "reported ok, but read-back proved it did not land"
+			}
 			break
 		}
 	}
@@ -750,7 +776,7 @@ func forwardWithAdaptiveRetry(ctx context.Context, req protocol.Request, dispatc
 	resp, err := dispatch(ctx, req)
 	ok := err == nil && resp != nil && resp.OK
 	if h.observe != nil {
-		h.observe(outcome{Action: req.Action, RequestID: req.ID, OK: ok, Verdict: effectFromResponse(&req, resp), ErrorCode: responseErrorCode(resp)})
+		h.observe(outcome{Action: req.Action, RequestID: req.ID, OK: ok, Verdict: effectFromResponse(&req, resp), ErrorCode: responseErrorCode(resp), ErrorMsg: responseErrorMsg(resp)})
 	}
 	if ok || errors.Is(err, errConnectorDisconnected) || !retryableOnFailure[req.Action] {
 		return resp, err, false
@@ -786,7 +812,7 @@ func forwardWithAdaptiveRetry(ctx context.Context, req protocol.Request, dispatc
 	resp2, err2 := dispatch(ctx, req)
 	ok2 := err2 == nil && resp2 != nil && resp2.OK
 	if h.observe != nil {
-		h.observe(outcome{Action: req.Action, RequestID: req.ID, OK: ok2, Verdict: effectFromResponse(&req, resp2), ErrorCode: responseErrorCode(resp2)})
+		h.observe(outcome{Action: req.Action, RequestID: req.ID, OK: ok2, Verdict: effectFromResponse(&req, resp2), ErrorCode: responseErrorCode(resp2), ErrorMsg: responseErrorMsg(resp2)})
 	}
 	if ok2 {
 		resp2.Warnings = append(resp2.Warnings, fmt.Sprintf(

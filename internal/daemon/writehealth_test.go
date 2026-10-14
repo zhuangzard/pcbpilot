@@ -764,3 +764,19 @@ func TestWriteHealthRefusalsDoNotDiluteRate(t *testing.T) {
 		t.Fatalf("refusals must not dilute the real failure rate, got %+v", h)
 	}
 }
+
+// #279: a red window must say why — the last failure's "CODE: message" — not
+// only which action failed.
+func TestWriteHealthReportsLastFailureError(t *testing.T) {
+	tr := newWriteHealthTracker()
+	resp := &protocol.Response{Error: &protocol.ErrorInfo{Code: "EDA_CALL_FAILED", Message: "Footprint build rejected: pad 3 overlaps pad 4"}}
+	tr.observe("w1", outcome{Action: "library.footprint.build", OK: false, ErrorCode: responseErrorCode(resp), ErrorMsg: responseErrorMsg(resp)})
+	h := tr.snapshot("w1")
+	if h.LastFailureAction != "library.footprint.build" || h.LastFailureError != "EDA_CALL_FAILED: Footprint build rejected: pad 3 overlaps pad 4" {
+		t.Fatalf("last failure = %q / %q", h.LastFailureAction, h.LastFailureError)
+	}
+	long := &protocol.Response{Error: &protocol.ErrorInfo{Code: "X", Message: strings.Repeat("é", 400)}}
+	if got := []rune(responseErrorMsg(long)); len(got) != 301 {
+		t.Fatalf("error message must be bounded to 300 runes + ellipsis, got %d", len(got))
+	}
+}
