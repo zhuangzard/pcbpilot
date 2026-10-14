@@ -231,6 +231,13 @@ func (e *Engine) build(sc scenario) *run {
 			}
 			add(b, &resistor{t: [2]Terminal{t0, t1}, r: v}, fmt.Sprintf("%s %g", p.Ref, v))
 		case KindInductor, KindFerrite, KindFuse:
+			if b.kind == KindInductor && len(p.Pins) == 4 {
+				// Common-mode choke: each winding is its own series DCR. Two-terminal
+				// handling left the part open, cutting the input of every board with
+				// a CMC (JDB-1: 24 V inlet and both motor lines simulated at 0 V).
+				e.stampWindings(c, r, b, add)
+				continue
+			}
 			t0, t1, ok := two(b)
 			if !ok {
 				continue
@@ -259,6 +266,11 @@ func (e *Engine) build(sc scenario) *run {
 			add(b, &resistor{t: [2]Terminal{t0, t1}, r: rr}, fmt.Sprintf("%s DCR", p.Ref))
 		case KindSwitch:
 			nets, groups := byNet(p.Pins)
+			if in, out := p.pinsNamed(roleNames(m, "in")), p.pinsNamed(roleNames(m, "out")); len(in) > 0 && len(out) > 0 {
+				// Pass element with control pins (eFuse, load switch, P-FET):
+				// only the in → out path carries the load current.
+				nets, groups = []string{in[0].Net, out[0].Net}, map[string][]Pin{in[0].Net: in, out[0].Net: out}
+			}
 			if len(nets) != 2 {
 				continue
 			}
@@ -952,4 +964,44 @@ func sortedKeys[M ~map[string]V, V any](m M) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// stampWindings adds one series DCR per winding of a 4-pin inductor
+// (Model.Windings, default 1–4 / 2–3 — the usual CMC pinout).
+func (e *Engine) stampWindings(c *Circuit, r *run, b *binding, add func(*binding, element, string)) {
+	p, m := b.part, b.model
+	ws := m.Windings
+	if len(ws) == 0 {
+		ws = [][2]string{{"1", "4"}, {"2", "3"}}
+		e.assumef("%s: 4-pin inductor taken as a common-mode choke, windings 1–4 and 2–3", p.Ref)
+	}
+	rr := m.DCROhm
+	if rr == 0 {
+		if v, ok := valueFromDescription(p.Description, "dcr"); ok && v > 0 {
+			rr = v
+			e.assumef("%s: DCR %.3g Ω per winding from the part description", p.Ref, rr)
+		} else {
+			rr = e.def.InductorDCROhm
+			e.assumef("%s: inductor DCR %.3g Ω per winding assumed (no model)", p.Ref, rr)
+		}
+	}
+	for _, w := range ws {
+		a, z := p.pinsNamed([]string{w[0]}), p.pinsNamed([]string{w[1]})
+		if len(a) == 0 || len(z) == 0 {
+			r.warnf("%s: winding %s–%s: pin not found — left open", p.Ref, w[0], w[1])
+			continue
+		}
+		t0, ok0 := e.term(c, p.Ref, a)
+		t1, ok1 := e.term(c, p.Ref, z)
+		if !ok0 || !ok1 {
+			continue
+		}
+		if t0.Node == Ground && t1.Node == Ground && a[0].Net != z[0].Net {
+			// Every ground net is the reference node, so a winding between two
+			// ground nets (CMC return line GND_J–GND_SYS) carries no solved
+			// current: declare that net's current in the spec instead.
+			e.assumef("%s: winding %s–%s joins ground nets %s and %s — its return current is not solved (declare it)", p.Ref, w[0], w[1], a[0].Net, z[0].Net)
+		}
+		add(b, &resistor{t: [2]Terminal{t0, t1}, r: rr}, fmt.Sprintf("%s DCR %s–%s", p.Ref, w[0], w[1]))
+	}
 }
