@@ -93,7 +93,7 @@ func TestKicadLive(t *testing.T) {
 	for _, g := range sum.Gates {
 		got[g.Gate] = g.Pass
 	}
-	for _, g := range []string{"design-review", "route-complete", "kicad-drc", "intent-rules", "intent-widths", "copper-to-edge", "isolation", "via-current"} {
+	for _, g := range []string{"design-review", "route-complete", "kicad-drc", "intent-rules", "intent-widths", "copper-to-edge", "isolation", "via-current", "pour-layer-mismatch"} {
 		if p, ok := got[g]; !ok || !p {
 			t.Errorf("gate %s: present %v pass %v\n%s", g, ok, p, data)
 		}

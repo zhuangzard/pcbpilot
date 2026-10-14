@@ -253,3 +253,56 @@ func TestPrepareDSNEdgeExempt(t *testing.T) {
 		t.Fatalf("exempt: %+v %v", prep, err)
 	}
 }
+
+// Pad-neck mode: a net whose widthMil.min is at or below the floor leaves
+// --no-neckdown-classes and the engine floor covers it; a class holding a
+// net that may not neck that low stays listed; off = unchanged.
+func TestPrepareDSNPadNeck(t *testing.T) {
+	data, err := os.ReadFile("testdata/classes.dsn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	classes := []NetClass{
+		{Name: "PP1_W20", Nets: []string{"VCC", "/sub/V-"}, TrackWidthMil: 20, InnerWidthMil: 30, MinMil: 12, ClearanceMil: 6},
+		{Name: "PP2_W10", Nets: []string{"GND"}, TrackWidthMil: 10, InnerWidthMil: 10, MinMil: 6, ClearanceMil: 4},
+	}
+	reqs := map[string]NetRequirement{
+		"VCC":     {OuterMil: 20, InnerMil: 30, MinMil: 12, ClearanceMil: 6},
+		"/sub/V-": {OuterMil: 20, InnerMil: 30, MinMil: 12, ClearanceMil: 6},
+		"GND":     {OuterMil: 10, InnerMil: 10, MinMil: 6, ClearanceMil: 4},
+	}
+	defer func(v float64) { PadNeckFloorMil = v }(PadNeckFloorMil)
+
+	PadNeckFloorMil = 0
+	_, prep, _ := PrepareDSN(string(data), classes, reqs)
+	if len(prep.NoNeckdown) != 2 || prep.NeckFloorMil != 0 {
+		t.Fatalf("off: %v floor %v", prep.NoNeckdown, prep.NeckFloorMil)
+	}
+
+	PadNeckFloorMil = 12
+	_, prep, err = PrepareDSN(string(data), classes, reqs)
+	if err != nil || len(prep.Short) != 0 {
+		t.Fatal(err, prep.Short)
+	}
+	if len(prep.NoNeckdown) != 0 || prep.NeckFloorMil != 12 {
+		t.Fatalf("on: no-neckdown %v floor %v", prep.NoNeckdown, prep.NeckFloorMil)
+	}
+
+	// The floor never drops below the narrowest widthMil.min of any net.
+	PadNeckFloorMil = 3
+	_, prep, _ = PrepareDSN(string(data), classes, reqs)
+	if prep.NeckFloorMil != 6 {
+		t.Fatalf("floor %v, want the narrowest min 6", prep.NeckFloorMil)
+	}
+	if got := strings.Join(prep.NoNeckdown, ","); got != "PP1_W20+Power" {
+		t.Fatalf("floor 6: %q (VCC min 12 > 6 must stay full width)", got)
+	}
+
+	// A net with no widthMil.min is never necked; one net in a class keeps the class.
+	PadNeckFloorMil = 12
+	reqs["/sub/V-"] = NetRequirement{OuterMil: 20, InnerMil: 30, ClearanceMil: 6}
+	_, prep, _ = PrepareDSN(string(data), classes, reqs)
+	if got := strings.Join(prep.NoNeckdown, ","); got != "PP1_W20+Power" {
+		t.Fatalf("unknown min: %q", got)
+	}
+}

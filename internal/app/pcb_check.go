@@ -249,6 +249,7 @@ type pcbCheckSummary struct {
 	ParallelCoupling  int `json:"parallelCoupling"`
 	AntennaKeepout    int `json:"antennaKeepout"`
 	NetlessPours      int `json:"netlessPours"`
+	PourLayerMismatch int `json:"pourLayerMismatch"`
 	ViaCrossesPlane   int `json:"viaCrossesPlane"`
 	FloatingIslands   int `json:"floatingIslands"`
 	PowerNotPoured    int `json:"powerNotPoured"`
@@ -1274,6 +1275,7 @@ func findSilkscreenFlipped(silk []pcbSilkText) []pcbCheckFinding {
 type pcbPourP struct {
 	ID    string
 	Net   string
+	Name  string
 	Layer int
 }
 
@@ -1419,10 +1421,7 @@ func fetchPcbPours(cfg *appConfig, window string) ([]pcbPourP, error) {
 		if !ok {
 			continue
 		}
-		id, _ := pm["primitiveId"].(string)
-		net, _ := pm["net"].(string)
-		layer, _ := asFloatOK(pm["layer"])
-		pours = append(pours, pcbPourP{ID: id, Net: net, Layer: int(layer)})
+		pours = append(pours, pourFromListRow(pm))
 	}
 	return pours, nil
 }
@@ -2097,6 +2096,13 @@ func gatherPcbCheckReportEdge(cfg *appConfig, window string, couplingW float64, 
 			rep.Summary.Warnings++
 			rep.Summary.Total++
 		}
+		for _, f := range findPourLayerMismatch(pours) {
+			rep.Findings = append(rep.Findings, f)
+			rep.Summary.PourLayerMismatch++
+			rep.Summary.Errors++
+			rep.Summary.Warnings++
+			rep.Summary.Total++
+		}
 		if len(planes) > 0 {
 			for _, f := range findViaCrossesPlane(vias, planes) {
 				rep.Findings = append(rep.Findings, f)
@@ -2491,9 +2497,9 @@ func renderPcbCheckReport(rep pcbCheckReport, w io.Writer) {
 		fmt.Fprintln(w, "  ✓ no DFM issues found")
 		return
 	}
-	fmt.Fprintf(w, "  ERROR=%d WARN=%d  |  dangling=%d acute=%d nonOrtho=%d overPad=%d clearance=%d silkFlipped=%d overlapVia=%d singleLayerVia=%d widthMismatch=%d dupSegment=%d coupling=%d antennaKeepout=%d netlessPour=%d viaCrossesPlane=%d floatingIsland=%d powerNotPoured=%d netlessViaInPad=%d widthUnderSpec=%d silkOverPad=%d silkOverlap=%d decapTooFar=%d viaInPad=%d copperToEdge=%d fiducialMissing=%d zoneViolation=%d internalOnEdge=%d plugClearance=%d matingBlocked=%d\n",
+	fmt.Fprintf(w, "  ERROR=%d WARN=%d  |  dangling=%d acute=%d nonOrtho=%d overPad=%d clearance=%d silkFlipped=%d overlapVia=%d singleLayerVia=%d widthMismatch=%d dupSegment=%d coupling=%d antennaKeepout=%d netlessPour=%d pourLayerMismatch=%d viaCrossesPlane=%d floatingIsland=%d powerNotPoured=%d netlessViaInPad=%d widthUnderSpec=%d silkOverPad=%d silkOverlap=%d decapTooFar=%d viaInPad=%d copperToEdge=%d fiducialMissing=%d zoneViolation=%d internalOnEdge=%d plugClearance=%d matingBlocked=%d\n",
 		s.Errors, s.Warnings-s.Errors,
-		s.DanglingEnds, s.AcuteAngles, s.NonOrthogonal, s.TrackOverPad, s.Clearance, s.SilkscreenFlipped, s.OverlappingVias, s.SingleLayerVias, s.WidthMismatches, s.DuplicateSegments, s.ParallelCoupling, s.AntennaKeepout, s.NetlessPours, s.ViaCrossesPlane, s.FloatingIslands, s.PowerNotPoured, s.NetlessViaInPad, s.WidthUnderSpec, s.SilkOverPad, s.SilkOverlap, s.DecapTooFar, s.ViaInPad, s.CopperToEdge, s.FiducialMissing, s.ZoneViolation, s.InternalOnEdge, s.ConnectorPlugClearance, s.ConnectorMatingBlocked)
+		s.DanglingEnds, s.AcuteAngles, s.NonOrthogonal, s.TrackOverPad, s.Clearance, s.SilkscreenFlipped, s.OverlappingVias, s.SingleLayerVias, s.WidthMismatches, s.DuplicateSegments, s.ParallelCoupling, s.AntennaKeepout, s.NetlessPours, s.PourLayerMismatch, s.ViaCrossesPlane, s.FloatingIslands, s.PowerNotPoured, s.NetlessViaInPad, s.WidthUnderSpec, s.SilkOverPad, s.SilkOverlap, s.DecapTooFar, s.ViaInPad, s.CopperToEdge, s.FiducialMissing, s.ZoneViolation, s.InternalOnEdge, s.ConnectorPlugClearance, s.ConnectorMatingBlocked)
 	for _, f := range rep.Findings {
 		loc := ""
 		if f.At != nil {

@@ -40,6 +40,8 @@ type kicadRouteOpts struct {
 	ripUp       bool
 	fo          fastrouteOpts
 	minTraceSet bool
+	// padNeckFloor (mil, 0 = off): see kicad.PadNeckFloorMil.
+	padNeckFloor float64
 	// rules: explicit flags (0 = not given); ruleFlags = any was given.
 	rules     kicad.Rules
 	ruleFlags bool
@@ -137,6 +139,10 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 			if o.fo.threads <= 0 {
 				o.fo.threads = defaultRouteThreads(runtime.NumCPU(), o.router == routerBoth)
 			}
+			if o.padNeckFloor < 0 {
+				return fmt.Errorf("--pad-neck-floor-mil must be >= 0")
+			}
+			kicad.PadNeckFloorMil = o.padNeckFloor
 			return runKicadRoute(o, stdout, stderr)
 		},
 	}
@@ -161,6 +167,7 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 	f.IntVar(&o.fo.rounds, "continue", 2, "fastroute continuation runs (--initial-session) while connections remain unrouted")
 	f.DurationVar(&o.fo.timeout, "router-timeout", 45*time.Minute, "hard limit per fastroute run")
 	f.Float64Var(&o.fo.minTraceUm, "min-trace-um", 0, "fastroute --router.min_trace_width_um (default: max(board minimum track width, min(narrowest widthMil.min, narrowest class width)))")
+	f.Float64Var(&o.padNeckFloor, "pad-neck-floor-mil", 0, "let intent nets neck down at pads (off by default: every intent class is --no-neckdown-classes). Nets with widthMil.min <= max(this, narrowest min) leave that list and fastroute's neck floor becomes that value, so no neck goes below the net's own minimum; full width outside the pad zone is restored by widen-to-intent and enforced by the intent-widths gate (a failing run is not shipped). Also lets escape vias sit next to own-net SMD pads (fastroute allows it). PicoRick: 10")
 	f.Float64Var(&o.rules.ClearanceMil, "clearance-mil", 0, "board minimum clearance + Default netclass clearance (default for a board without .kicad_pro: intent copper.clearanceMil)")
 	f.Float64Var(&o.rules.TrackMil, "track-mil", 0, "Default netclass track width")
 	f.Float64Var(&o.rules.MinTrackMil, "min-track-mil", 0, "board minimum track width (default for a board without .kicad_pro: intent copper.minTrackMil)")
@@ -734,7 +741,15 @@ func (r *kicadRun) prepareRoute(classed string, reqs map[string]kicad.NetRequire
 	}
 	r.summary["dsn"] = dsnPath
 	o.fo.noNeckdown = prep.NoNeckdown
-	if !o.minTraceSet {
+	if prep.NeckFloorMil > 0 && !o.minTraceSet {
+		// Pad-neck mode: the floor is the one value no listed-out net's
+		// widthMil.min exceeds (a class narrower than it just cannot neck).
+		floor := prep.NeckFloorMil
+		if inSnap.Rules != nil {
+			floor = math.Max(floor, inSnap.Rules.TrackWidthMinMil)
+		}
+		o.fo.minTraceUm = math.Ceil(floor*25.4*10) / 10
+	} else if !o.minTraceSet {
 		// fastroute has one global neck-down floor: the narrowest widthMil.min,
 		// never above the narrowest class width (that class could not route
 		// at its own width) and never below the board minimum.
@@ -1550,6 +1565,8 @@ func kicadEscapeEnv(s *boardSnapshot, raw []byte, reqs map[string]specctra.NetRe
 func (r *kicadRun) planEscapes(s *boardSnapshot, dsn string) (string, error) {
 	reqs := intentRequirements(r.in)
 	r.escEnv = kicadEscapeEnv(s, r.inRaw, reqs)
+	r.escEnv.ownViaAtSMD = kicad.PadNeckFloorMil > 0
+	r.summary["exitFeasibility"] = exitFeasibility(r.escEnv, reqs)
 	esc, skipped := planIntentEscapes(r.escEnv, reqs, nil)
 	r.escapes = esc
 	r.summary["intentEscapes"] = map[string]any{"planned": esc, "skipped": skipped}

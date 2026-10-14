@@ -76,7 +76,7 @@ func TestKicadSnapshotGates(t *testing.T) {
 	for _, g := range gates {
 		names = append(names, g.Gate)
 	}
-	if strings.Join(names, ",") != "intent-widths,intent-lengths,copper-to-edge,isolation,via-current,post-layout-sim" {
+	if strings.Join(names, ",") != "intent-widths,intent-lengths,copper-to-edge,isolation,via-current,pour-layer-mismatch,post-layout-sim" {
 		t.Fatalf("gates %v", names)
 	}
 	// t-vcc-neck: 10 < 20 starting on R1.1 but ending 69.6 mil past its
@@ -90,8 +90,8 @@ func TestKicadSnapshotGates(t *testing.T) {
 	if !gates[1].Pass || gates[1].Detail != "the intent has no length group or pair skew" {
 		t.Fatalf("intent-lengths: %+v", gates[1])
 	}
-	if gates[5].Pass || gates[5].Detail != "not run (needs --sim)" {
-		t.Fatalf("post-layout-sim without a sim must fail: %+v", gates[5])
+	if gates[6].Pass || gates[6].Detail != "not run (needs --sim)" {
+		t.Fatalf("post-layout-sim without a sim must fail: %+v", gates[6])
 	}
 	// The silkscreen gate reads the same snapshot (no silk texts: nothing to judge).
 	_, _, font := silkTightInput(&snap, defaultSilkTightOpts())

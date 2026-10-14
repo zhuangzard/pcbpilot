@@ -82,6 +82,11 @@ type escapeEnv struct {
 	planned     []intentEscape
 	// viaDia / viaDrill: the via an inward escape ends in (0 = none).
 	viaDia, viaDrill float64
+	// ownViaAtSMD: an escape via may sit within clearance of a same-net SMD pad
+	// as long as it does not touch the pad's copper (fastroute allows vias at
+	// the SMD pads of a net: control.rs attach_smd_allowed). Off = the
+	// conservative planner rule: keep the via a clearance away.
+	ownViaAtSMD bool
 }
 
 // defaultCourtyardMil: IPC-7351 nominal courtyard excess over the pads.
@@ -459,11 +464,15 @@ func (env *escapeEnv) escapeOne(c escapeCand) (intentEscape, string) {
 // clearance of: routers keep vias off SMD pads of their own net too
 // (fastroute / Freerouting via_at_smd off; a via there wicks the paste).
 func (env *escapeEnv) viaAtSMD(net string, v [2]float64) string {
+	need := env.pairClr(net, net)
+	if env.ownViaAtSMD {
+		need = 0 // same net: copper may touch, but a via on the pad wicks the paste
+	}
 	for _, q := range env.pads {
 		if q.Layer == pcbLayerMulti || !strings.EqualFold(q.Net, net) {
 			continue
 		}
-		if rectPtDist(q.X-q.W/2, q.Y-q.H/2, q.X+q.W/2, q.Y+q.H/2, v[0], v[1])-env.viaDia/2 < env.pairClr(net, net) {
+		if rectPtDist(q.X-q.W/2, q.Y-q.H/2, q.X+q.W/2, q.Y+q.H/2, v[0], v[1])-env.viaDia/2 < need {
 			return q.Designator + "." + q.Number + " (own net, via at SMD)"
 		}
 	}
@@ -481,7 +490,7 @@ func (env *escapeEnv) near(c escapeCand) *escapeEnv {
 	in := func(x0, y0, x1, y1 float64) bool {
 		return math.Max(x0, x1) >= c.pad.X-r && math.Min(x0, x1) <= c.pad.X+r && math.Max(y0, y1) >= c.pad.Y-r && math.Min(y0, y1) <= c.pad.Y+r
 	}
-	out := &escapeEnv{court: env.court, clr: env.clr, margin: env.margin, netClr: env.netClr, viaDia: env.viaDia, viaDrill: env.viaDrill}
+	out := &escapeEnv{court: env.court, clr: env.clr, margin: env.margin, netClr: env.netClr, viaDia: env.viaDia, viaDrill: env.viaDrill, ownViaAtSMD: env.ownViaAtSMD}
 	for _, q := range env.pads {
 		if in(q.X-q.W/2, q.Y-q.H/2, q.X+q.W/2, q.Y+q.H/2) {
 			out.pads = append(out.pads, q)

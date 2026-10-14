@@ -4178,3 +4178,31 @@ test('pcb.components.list: carries the placed footprint instance ref', async () 
 	const res: any = await withEda({ pcb_PrimitiveComponent: { getAll: async () => [comp] } }, () => pcbComponentsList({}));
 	assert.deepEqual(res.result.components[0].footprint, { uuid: '10066e9574936036', libraryUuid: 'lib', name: 'USB-C-SMD_TYPE-C-16PIN' });
 });
+
+test('pcb.pour.create removes and rejects a pour that landed on another layer than requested', async () => {
+	const deleted: string[] = [];
+	const mk = (layer: number) => ({
+		getState_PrimitiveId: () => 'pour-bad',
+		getState_Layer: () => layer,
+		rebuildCopperRegion: async () => true,
+	});
+	(globalThis as any).eda = {
+		pcb_MathPolygon: { createPolygon: () => ({}) },
+		pcb_PrimitivePour: {
+			create: async () => mk(1), // requested 15 (PLANE) → platform lands it on Top
+			delete: async (id: string) => { deleted.push(id); return true; },
+		},
+	};
+	try {
+		const pts = [[0, 0], [100, 0], [100, 100], [0, 100]];
+		await assert.rejects(
+			runAction('pcb.pour.create', { net: 'GND', layer: 15, points: pts }),
+			/landed on layer 1 instead of the requested layer 15/);
+		assert.deepEqual(deleted, ['pour-bad']);
+		(globalThis as any).eda.pcb_PrimitivePour.create = async () => mk(15);
+		const ok: any = await runAction('pcb.pour.create', { net: 'GND', layer: 15, points: pts });
+		assert.equal(ok.result.layer, 15);
+		assert.deepEqual(deleted, ['pour-bad'], 'a correctly placed pour is never deleted');
+	}
+	finally { delete (globalThis as any).eda; }
+});

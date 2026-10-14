@@ -12735,6 +12735,22 @@ const pcbPourCreate: Handler = async (payload) => {
 		throw new ActionError(ErrorCodes.EDA_CALL_FAILED, 'Copper pour creation returned no primitive (check layer/net/points).');
 	}
 
+	// The platform names an auto pour AUTO_<net>_L<requested layer> but, when the
+	// requested layer is a PLANE (内电层), silently lands it on layer 1 instead
+	// (US-Zed2 2026-10-12: AUTO_GND_L15 on Top → whole-board GND copper over the
+	// top-layer tracks). Read the layer back; never leave a misplaced pour behind.
+	let landed: number | undefined;
+	try { landed = Number(pour.getState_Layer()); }
+	catch { /* readback unavailable — keep the pour; `pcb check` pour-layer-mismatch still audits it */ }
+	if (landed !== undefined && landed !== Number(layer)) {
+		const badId = pour.getState_PrimitiveId();
+		let removed = false;
+		try { removed = !!(await eda.pcb_PrimitivePour.delete(badId)); }
+		catch { /* reported below */ }
+		throw new ActionError(ErrorCodes.EDA_CALL_FAILED,
+			`Copper pour landed on layer ${landed} instead of the requested layer ${Number(layer)} (the target is probably an inner PLANE — pour while the layer is SIGNAL, then flip to PLANE and pour-rebuild). The misplaced pour ${badId} was ${removed ? 'removed' : 'NOT removed — delete it manually'}.`);
+	}
+
 	let poured = false;
 	try { poured = !!(await pour.rebuildCopperRegion()); }
 	catch { /* rebuild best-effort — the pour region exists even if the fill compute fails */ }
