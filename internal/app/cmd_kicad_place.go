@@ -145,7 +145,7 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 		if pcbauto.NeedsAutoFrame(mech) {
 			return nil, fmt.Errorf("--mech autoSize: kicad place keeps the KiCad outline — give the board's size or drop autoSize")
 		}
-		if mc, err = pcbauto.ApplyMech(b, mech); err != nil {
+		if mc, err = pcbauto.ApplyMechAnchored(b, mech); err != nil {
 			return nil, err
 		}
 		for ref := range mc.Fixed {
