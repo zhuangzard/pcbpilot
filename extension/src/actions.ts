@@ -6052,6 +6052,14 @@ async function preflightV4DeviceVariant(libraryUuid: string, uuid: string): Prom
 	let device: unknown;
 	try { device = await api.get(uuid, libraryUuid); }
 	catch { return; } // identity/readback code retains its existing error handling
+	// An unknown device makes sch_PrimitiveComponent.create hang forever (no
+	// throw, nothing placed) and wedges the action queue — refuse up front.
+	if (device === undefined || device === null || device === false) {
+		throw new ActionError(
+			ErrorCodes.PRECONDITION_REFUSED,
+			`Device "${uuid}" was not found in library "${libraryUuid}". Placement was not attempted; resolve the 32-char device uuid with \`pcbpilot lib search\` / \`lib by-lcsc\` (a component's 16-char symbol id is not a device uuid).`,
+		);
+	}
 	const issue = unsupportedV4DeviceVariant(device);
 	if (issue) {
 		throw new ActionError(

@@ -1186,6 +1186,22 @@ test('V4 plural device variants fail closed before create or placement mutation'
 	finally { delete (globalThis as any).eda; }
 });
 
+test('unknown device is refused before sch create (create would hang forever)', async () => {
+	let placements = 0;
+	(globalThis as any).eda = {
+		lib_Device: { get: async () => undefined },
+		sch_PrimitiveComponent: { create: async () => { placements++; return mockComponent(); } },
+	};
+	try {
+		await assert.rejects(
+			() => runAction('schematic.component.place', { libraryUuid: 'LIB-D', uuid: 'SYMBOL-16CHAR', x: 0, y: 0 }),
+			(err: any) => err.code === 'PRECONDITION_REFUSED' && /not found/.test(err.message),
+		);
+		assert.equal(placements, 0);
+	}
+	finally { delete (globalThis as any).eda; }
+});
+
 test('library Device delete requires exact expected name and verifies absence', async () => {
 	let live: any = { uuid: 'DEV-1', name: 'EA_AGENT__TEST' };
 	let deleteCalls = 0;
