@@ -2163,8 +2163,12 @@ the selection). Without --ids it exports the whole active page.`,
 					}
 					payload["primitiveIds"] = ids
 				}
-				if format != "" {
-					payload["format"] = format
+				f, err := exportImageFormat(format, out)
+				if err != nil {
+					return err
+				}
+				if f != "" {
+					payload["format"] = f
 				}
 				if scope != "" {
 					payload["scope"] = scope
@@ -2356,4 +2360,22 @@ func connectLanded(result map[string]any, designator, pin, net string) bool {
 		}
 	}
 	return false
+}
+
+// exportImageFormat infers the export format from --out's extension when
+// --format is omitted, and refuses a mismatch: the default (svg) once wrote SVG
+// bytes into page.png.
+func exportImageFormat(format, out string) (string, error) {
+	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(out)), ".")
+	if ext != "svg" && ext != "png" && ext != "pdf" {
+		ext = ""
+	}
+	f := strings.ToLower(format)
+	switch {
+	case f == "":
+		return ext, nil
+	case ext != "" && ext != f:
+		return "", fmt.Errorf("--format %s conflicts with --out extension .%s", format, ext)
+	}
+	return f, nil
 }
