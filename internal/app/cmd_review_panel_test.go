@@ -78,6 +78,14 @@ func TestRunReviewPanelFake(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "out", "review.json")); err != nil {
 		t.Fatal(err)
 	}
+	// Raw replies are reviewer_<name>.md — never <name>.md, so a reviewer named
+	// claude cannot collide with a CLAUDE.md on a case-insensitive filesystem.
+	if _, err := os.Stat(filepath.Join(dir, "out", "reviewer_a.md")); err != nil {
+		t.Fatal(err)
+	}
+	if got := reviewerRawFile("claude"); strings.EqualFold(got, "CLAUDE.md") {
+		t.Fatalf("raw reply file %q collides with CLAUDE.md", got)
+	}
 	if _, err := runReviewPanel("design", nil, nil, []string{"a"}, dir, time.Minute, 0, nil, io.Discard); err == nil {
 		t.Fatal("ran without requirements")
 	}

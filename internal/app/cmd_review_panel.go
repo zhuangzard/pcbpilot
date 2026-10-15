@@ -336,7 +336,9 @@ func runReviewPanel(stage string, reqFiles, evFiles, reviewers []string, outDir 
 			ctx, cancel := context.WithTimeout(context.Background(), timeout)
 			defer cancel()
 			out, err := run(ctx, prompt)
-			raw := filepath.Join(outDir, name+".md")
+			// reviewer_<name>.md, not <name>.md: on a case-insensitive filesystem
+			// (Windows, macOS) claude.md is the same file as a CLAUDE.md agent memo.
+			raw := filepath.Join(outDir, reviewerRawFile(name))
 			_ = os.WriteFile(raw, []byte(out), 0o644)
 			v.RawFile = raw
 			if err != nil {
@@ -377,7 +379,7 @@ schematic connectivity / netlist, sim results, gate summary, design report …).
 Each returns a JSON verdict per requirement ID. The gate PASSES only when all
 reviewers answered and none reports a not_met requirement or a blocking
 finding; a missing, timed-out or unparsable reviewer FAILS it. Results:
---out-dir/{review.json, prompt.md, <reviewer>.md}. Signed waivers
+--out-dir/{review.json, prompt.md, reviewer_<name>.md}. Signed waivers
 ({gate:"design-review", match, reason, by}) are the only override.`,
 		Args: cobra.NoArgs,
 		Example: `  pcbpilot review-panel --stage design \
@@ -418,3 +420,6 @@ finding; a missing, timed-out or unparsable reviewer FAILS it. Results:
 	c.Flags().StringVar(&waiverPath, "waivers", "", "signed waivers JSON")
 	return c
 }
+
+// reviewerRawFile is the file a reviewer's raw reply is saved to.
+func reviewerRawFile(name string) string { return "reviewer_" + name + ".md" }

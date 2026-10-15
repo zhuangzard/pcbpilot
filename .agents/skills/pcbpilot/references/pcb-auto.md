@@ -390,7 +390,7 @@ pcbpilot pcb auto route --playbook out/playbook.json --out-dir out/live --projec
 需求文档（`--requirements`，如 `03_Requirement/*.md`、`00_Project_Scope/SCOPE.md`）和设计证据（`--evidence`：intent、
 原理图连接/网表、仿真、门禁汇总、设计报告）拼成同一份自包含提示，并行交给 Codex、Kimi、Claude Code 三个独立 CLI；每家
 逐条需求给 met / not_met / cannot_judge 及证据，并列阻断项。三家都给出可解析的 JSON 判定、无 not_met、无阻断项才通过；
-某家缺席、超时、未登录或答不出 JSON 都算失败，只能用签名豁免。结果在 `--out-dir/{review.json, prompt.md, <reviewer>.md}`。
+某家缺席、超时、未登录或答不出 JSON 都算失败，只能用签名豁免。结果在 `--out-dir/{review.json, prompt.md, reviewer_<name>.md}`。
 
 `pcb auto route` 依次：`apply --yes` 剧本 → PLANE 内层改 SIGNAL → 导出 DSN → `dsn-fix` → fastroute
 （`--continue 5` 次 `--initial-session` 续跑直到 0 未布通）→ 拆线 + 导入 → `ses-repair` → 铺铜
