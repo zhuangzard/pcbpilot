@@ -195,6 +195,11 @@ func ExportCrossProbeSVGs(sch, pcb string, pages []SchPage, dir string) (pageSVG
 	run := func(args ...string) error {
 		var buf bytes.Buffer
 		cmd := exec.Command(cli, args...)
+		if args[0] == "sch" { // isolated global lib tables (kicadenv.go)
+			c, cancel := SchCLICommand(cli, args...)
+			defer cancel()
+			cmd = c
+		}
 		cmd.Stdout, cmd.Stderr = &buf, &buf
 		if err := cmd.Run(); err != nil {
 			return fmt.Errorf("kicad-cli %s: %v: %s", strings.Join(args[:3], " "), err, strings.TrimSpace(buf.String()))

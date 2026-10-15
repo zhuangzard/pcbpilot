@@ -597,11 +597,13 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 		if cli, err := kicad.KicadCLI(); err == nil {
 			dir := filepath.Join(out, "render")
 			_ = os.MkdirAll(dir, 0o755)
-			if b, err := exec.Command(cli, "sch", "export", "svg", "--output", dir, rep.Root).CombinedOutput(); err != nil {
+			cmd, cancel := kicad.SchCLICommand(cli, "sch", "export", "svg", "--output", dir, rep.Root)
+			if b, err := cmd.CombinedOutput(); err != nil {
 				rep.Warnings = append(rep.Warnings, "render: "+sbClip(string(b), 200))
 			} else {
 				rep.Outputs["render"] = dir
 			}
+			cancel()
 		}
 	}
 	tm.mark("commit")
