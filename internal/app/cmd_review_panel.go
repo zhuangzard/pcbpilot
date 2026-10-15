@@ -94,8 +94,9 @@ func reviewerInvocation(name, dir, prompt string) (reviewerCall, error) {
 		return reviewerCall{Bin: "claude", Args: []string{"-p"}, Stdin: prompt}, nil
 	case "kimi":
 		// kimi -p has no stdin mode: hand it the prompt as a file in its own
-		// directory (--add-dir grants the read).
-		return reviewerCall{Bin: "kimi", Args: []string{"--auto", "--add-dir", dir, "-p", reviewerFileAsk}, PromptFile: reviewerPromptFile}, nil
+		// directory (--add-dir grants the read). Not --auto: kimi refuses -p
+		// combined with --auto (field workflow note, 2026-10-15).
+		return reviewerCall{Bin: "kimi", Args: []string{"--add-dir", dir, "-p", reviewerFileAsk}, PromptFile: reviewerPromptFile}, nil
 	}
 	return reviewerCall{}, fmt.Errorf("unknown reviewer %q", name)
 }

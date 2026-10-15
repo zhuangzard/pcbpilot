@@ -119,6 +119,10 @@ func TestReviewerInvocationKeepsLargePromptOffCommandLine(t *testing.T) {
 			t.Fatalf("%s: prompt is delivered neither by stdin nor by file", name)
 		}
 	}
+	// kimi exits with "Cannot combine --prompt with --auto." (checked 2026-10-15).
+	if k, _ := reviewerInvocation("kimi", "d", prompt); strings.Contains(strings.Join(k.Args, " "), "--auto") {
+		t.Fatalf("kimi -p must not be combined with --auto: %v", k.Args)
+	}
 	if _, err := reviewerInvocation("nope", "", prompt); err == nil {
 		t.Fatal("unknown reviewer accepted")
 	}
