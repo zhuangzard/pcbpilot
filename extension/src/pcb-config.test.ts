@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import fixture from './testdata/pcb-config-web-3.2.203.json';
-import { pcbRulesEqual, planPcbConfig } from './pcb-config';
+import { pcbRuleCanonicalLength, pcbRulesEqual, planPcbConfig } from './pcb-config';
 import { runAction } from './actions';
 
 const fresh = (): any => structuredClone(fixture);
@@ -117,7 +117,8 @@ async function withHost(run: (host: any) => Promise<void>) {
 			if (!host.drop) state.ruleConfiguration = structuredClone(rules);
 			if (host.roundoff || host.corrupt) {
 				const data = state.ruleConfiguration.Spacing['Safe Spacing'].copperThickness1oz.tables['1'].content;
-				data[0][0] -= host.corrupt ? 1e-9 : Number.EPSILON * data[0][0];
+				// corrupt drift must exceed the host's own 0.0001-mil length grid (~2.5e-6 mm) to be real (#258)
+				data[0][0] -= host.corrupt ? 1e-5 : Number.EPSILON * data[0][0];
 			}
 			return true;
 		},
@@ -186,4 +187,14 @@ test('live host roundoff is accepted but missing fields, unit changes and real n
 			assert.equal(host.writes, writes);
 		}
 	});
+});
+
+test('rule lengths compare in the host canonical form: 0.3 mm read back as 0.2999994 is the same value, real drift is not (#258)', () => {
+	assert.equal(pcbRuleCanonicalLength(0.3, 'mm'), 11.811 * 0.0254);
+	assert.equal(pcbRulesEqual({ unit: 'mm', hole2Hole: 0.3 }, { unit: 'mm', hole2Hole: 0.29999939999999997 }), true);
+	assert.equal(pcbRulesEqual({ unit: 'mm', hole2Hole: 0.3 }, { unit: 'mm', hole2Hole: 0.29999 }), false);
+	assert.equal(pcbRulesEqual({ unit: 'mil', w: 11.811 }, { unit: 'mil', w: 11.81100004 }), true);
+	assert.equal(pcbRulesEqual({ unit: 'mil', w: 11.811 }, { unit: 'mil', w: 11.812 }), false);
+	// No declared unit: plain machine-roundoff comparison, as before.
+	assert.equal(pcbRulesEqual({ hole2Hole: 0.3 }, { hole2Hole: 0.29999939999999997 }), false);
 });
