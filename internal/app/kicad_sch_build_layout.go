@@ -410,6 +410,33 @@ func (zi *sbZoneIn) hash(d *sbDesign, method string) string {
 
 func sbFieldText(p *sbRPart) string { return p.Ref + "/" + p.Value }
 
+// markersCurrent reports whether a cached layout's labels and power symbols
+// still name nets this zone's pins connect to, with the same power/ground
+// kind. The hash numbers nets canonically on purpose — sch-edit renames are
+// applied to the cached markers before reuse — so a net renamed in the SPEC
+// keeps the hash while the cached markers still draw the old name, and the
+// netlist gate failed until --fresh (field report 2026-10-15). Such a layout is a
+// cache miss.
+func (zi *sbZoneIn) markersCurrent(d *sbDesign, r *sbZoneLayout) bool {
+	nets := map[string]bool{}
+	for _, p := range zi.Parts {
+		for _, q := range p.LPins {
+			if n, ok := d.PinNet[sbPinKey(p.Ref, q.Number)]; ok {
+				nets[n] = true
+			}
+		}
+	}
+	for _, mk := range r.Markers {
+		if !nets[mk.Net] {
+			return false
+		}
+		if (mk.Kind == "power" || mk.Kind == "ground") && d.NetKind[mk.Net] != mk.Kind {
+			return false
+		}
+	}
+	return true
+}
+
 // ── planner path ────────────────────────────────────────────────────────────
 
 func ptsToEE(p kicad.Pt) (float64, float64) { return mmToEE(p) }
@@ -1675,7 +1702,7 @@ func layoutZones(d *sbDesign, zis []*sbZoneIn, reuse map[string]*sbZoneLayout, o
 	}
 	for _, zi := range zis {
 		hp, hg := zi.hash(d, "planner"), zi.hash(d, "grid-autoconnect")
-		if r := reuse[zi.Zone.ID]; r != nil && (r.Hash == hp || r.Hash == hg) {
+		if r := reuse[zi.Zone.ID]; r != nil && (r.Hash == hp || r.Hash == hg) && zi.markersCurrent(d, r) {
 			out[zi.Zone.ID] = r
 			continue
 		}

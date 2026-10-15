@@ -313,3 +313,74 @@ func TestSbSheetFileAvoidsWindowsReservedNames(t *testing.T) {
 	}
 }
 
+// A net renamed in the SPEC keeps the canonical zone hash, so the cached
+// layout must be rejected by its stale marker names (field report 2026-10-15: the
+// netlist gate failed until --fresh).
+func TestSbMarkersCurrent(t *testing.T) {
+	d := &sbDesign{
+		PinNet:  map[string]string{"U1.1": "+3V3", "U1.2": "GND", "U1.3": "LED_X"},
+		NetKind: map[string]string{"+3V3": "power", "GND": "ground"},
+	}
+	zi := &sbZoneIn{Parts: []*sbRPart{{LPins: []kicad.LibPin{{Number: "1"}, {Number: "2"}, {Number: "3"}}}}}
+	zi.Parts[0].Ref = "U1"
+	cached := func(ms ...sbMarker) *sbZoneLayout { return &sbZoneLayout{Markers: ms} }
+	if !zi.markersCurrent(d, cached(sbMarker{Kind: "power", Net: "+3V3"}, sbMarker{Kind: "ground", Net: "GND"}, sbMarker{Kind: "label", Net: "LED_X"})) {
+		t.Fatal("an up-to-date layout was rejected")
+	}
+	if zi.markersCurrent(d, cached(sbMarker{Kind: "label", Net: "LED_A"})) {
+		t.Fatal("a layout drawing a renamed-away net was reused")
+	}
+	if zi.markersCurrent(d, cached(sbMarker{Kind: "power", Net: "LED_X"})) {
+		t.Fatal("a power symbol on a net that is no longer a power net was reused")
+	}
+}
+
+// End to end: rename a net in the spec and rebuild into the same --out
+// without --fresh — the netlist gate must pass and the zone must re-plan.
+func TestSchBuildSpecNetRenameInvalidatesCache(t *testing.T) {
+	sbNeedKicad(t)
+	t.Setenv(kicad.EnvCacheDir, t.TempDir())
+	out := filepath.Join(t.TempDir(), "small")
+	spec, err := loadSbSpec("testdata/sch-build/small.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runSchBuild(spec, sbOptions{OutDir: out, NoIntent: true, Jobs: 4, PlannerBudget: 20000}, nil); err != nil {
+		t.Fatalf("first build: %v", err)
+	}
+	// Only a zone whose cached drawing names LED_A must re-plan; a net drawn
+	// as a bare wire carries no name and may be reused.
+	st, _ := loadSbState(out)
+	if st == nil {
+		t.Fatal("first build left no state")
+	}
+	drawsLEDA := map[string]bool{}
+	for id, z := range st.Zones {
+		if z == nil || z.Layout == nil {
+			continue
+		}
+		for _, mk := range z.Layout.Markers {
+			if mk.Net == "LED_A" {
+				drawsLEDA[id] = true
+			}
+		}
+	}
+	renamed := false
+	for i := range spec.Nets {
+		if spec.Nets[i].Name == "LED_A" {
+			spec.Nets[i].Name, renamed = "LED_X", true
+		}
+	}
+	if !renamed {
+		t.Fatal("fixture has no LED_A net")
+	}
+	res, err := runSchBuild(spec, sbOptions{OutDir: out, NoIntent: true, Jobs: 4, PlannerBudget: 20000}, nil)
+	if err != nil || sbGateStatus(res, "netlist") != "pass" {
+		t.Fatalf("rebuild after spec rename: %v %+v", err, res)
+	}
+	for _, z := range res.Zones {
+		if drawsLEDA[z.ID] && z.Reused {
+			t.Errorf("zone %s reused a layout that still draws LED_A", z.ID)
+		}
+	}
+}
