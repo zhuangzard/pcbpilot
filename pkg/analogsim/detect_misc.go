@@ -849,17 +849,36 @@ func (c *circuit) lcBlocks() []*Block {
 			continue
 		}
 		// Input side = the side with a source (connector / regulator output) or higher sim current.
+		// A series damping R behind the ferrite counts with the capacitance it
+		// leads to — otherwise FB → R → C reads as "no output caps" and the
+		// filter is skipped or turned round (field report 2026-10-15).
+		damp := map[string]seriesDamp{}
+		eff := func(n, other string) float64 {
+			s := c.capSum(n)
+			if sd, ok := c.seriesDampOf(n, other); ok {
+				damp[n] = sd
+				s += c.capSum(sd.Net)
+			}
+			return s
+		}
 		in, outN := a, bnet
-		if c.capSum(bnet) < c.capSum(a) {
+		if eff(bnet, a) < eff(a, bnet) {
 			in, outN = bnet, a
 		}
-		if c.capSum(outN) == 0 {
+		if eff(outN, in) == 0 {
 			continue
 		}
+		sd, damped := damp[outN]
 		b := newBlockCtx()
 		b.setRole(ref, "L")
 		b.addPassives(ref)
-		for _, side := range []string{in, outN} {
+		sides := []string{in, outN}
+		if damped {
+			b.addPassives(sd.Ref)
+			b.setRole(sd.Ref, "Rdamp")
+			sides = append(sides, sd.Net)
+		}
+		for _, side := range sides {
 			for _, e := range c.edges[side] {
 				if e.Kind == "C" && c.ground[e.Other] {
 					b.addPassives(e.Ref)
@@ -867,6 +886,11 @@ func (c *circuit) lcBlocks() []*Block {
 					b.rails[e.Other] = 0
 				}
 			}
+		}
+		// A pure damping branch (only R + caps) is measured at the ferrite
+		// output; an R in the supply path moves the output behind it.
+		if damped && !sd.Branch {
+			outN = sd.Net
 		}
 		// Load: simulated current of the output net.
 		if c.sim != nil {
@@ -881,23 +905,83 @@ func (c *circuit) lcBlocks() []*Block {
 		b.stim, b.out = in, outN
 		b.ac, b.resp = true, "lp"
 		cout := c.capSum(outN)
+		if damped {
+			cout = c.capSum(sd.Net)
+			if sd.Branch {
+				cout += c.capSum(outN)
+			} else {
+				cout += c.capSum(sd.From)
+			}
+		}
 		lv := pv.Value
 		b.eval = func(v map[string]float64) map[string]float64 {
 			l := v[ref]
 			if l == 0 {
 				l = lv
 			}
-			return map[string]float64{"f0Hz": 1 / (twoPi() * math.Sqrt(l*cout))}
+			m := map[string]float64{"f0Hz": 1 / (twoPi() * math.Sqrt(l*cout))}
+			if damped {
+				// series R-L-C: Q = sqrt(L/C)/R, with the inductor DCR the
+				// netlist models (0.01 Ω).
+				m["q"] = math.Sqrt(l/cout) / (v[sd.Ref] + 0.01)
+			}
+			return m
 		}
 		b.mcMetrics = nil
-		blk := &Block{Core: ref, Class: ClassLCFilter, c: b, Input: in, Output: outN,
-			Topology: fmt.Sprintf("%s %s from %s into %s with %s to GND", map[bool]string{true: "ferrite", false: "inductor"}[strings.HasPrefix(strings.ToUpper(ref), "FB")], ref, in, outN, FormatValue(cout, "C"))}
+		topo := fmt.Sprintf("%s %s from %s into %s with %s to GND", map[bool]string{true: "ferrite", false: "inductor"}[strings.HasPrefix(strings.ToUpper(ref), "FB")], ref, in, outN, FormatValue(cout, "C"))
+		if damped {
+			topo += fmt.Sprintf(", damped by series %s %s", sd.Ref, FormatValue(sd.Value, "R"))
+		}
+		blk := &Block{Core: ref, Class: ClassLCFilter, c: b, Input: in, Output: outN, Topology: topo}
 		blk.Parts = sortRefs(b.passives)
 		blk.Nets = []string{in, outN}
+		if damped && sd.Branch {
+			blk.Nets = append(blk.Nets, sd.Net)
+		} else if damped {
+			blk.Nets = []string{in, sd.From, outN}
+		}
 		blk.Title = titleFor(ClassLCFilter, ref, in, outN)
 		out = append(out, blk)
 	}
 	return out
+}
+
+// seriesDamp is a resistor from a ferrite output net to a capacitor node.
+type seriesDamp struct {
+	Ref   string
+	Value float64
+	Net   string // the node behind the resistor
+	From  string // the ferrite net the resistor hangs on
+	// Branch: the node holds only the resistor and capacitors to ground (a
+	// shunt R-C damping branch); otherwise the resistor sits in the supply path.
+	Branch bool
+}
+
+// seriesDampOf finds the one resistor on ferrite net n (other = the
+// ferrite's far net) that leads to capacitance to ground.
+func (c *circuit) seriesDampOf(n, other string) (seriesDamp, bool) {
+	var found []seriesDamp
+	for _, e := range c.edges[n] {
+		if e.Kind != "R" || e.Other == other || e.Other == n || c.ground[e.Other] || c.capSum(e.Other) == 0 {
+			continue
+		}
+		branch := true
+		for _, pr := range c.netPins[e.Other] {
+			if pr.Ref == e.Ref {
+				continue
+			}
+			pv := c.passive[pr.Ref]
+			if pv == nil || pv.Kind != "C" || !(c.ground[pv.Nets[0]] || c.ground[pv.Nets[1]]) {
+				branch = false
+				break
+			}
+		}
+		found = append(found, seriesDamp{Ref: e.Ref, Value: e.Value, Net: e.Other, From: n, Branch: branch})
+	}
+	if len(found) != 1 { // none, or ambiguous: keep the undamped model
+		return seriesDamp{}, false
+	}
+	return found[0], true
 }
 
 func (c *circuit) capSum(n string) float64 {
