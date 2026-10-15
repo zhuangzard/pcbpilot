@@ -761,32 +761,44 @@ def pours(pcb, spec_path, out):
     best = max(range(ps.OutlineCount()), key=lambda i: abs(ps.Outline(i).Area()))
     chain = ps.Outline(best)
     made = []
+    board_pts = [(chain.CPoint(i).x, chain.CPoint(i).y) for i in range(chain.PointCount())]
     for zs in spec.get("zones", []):
         net = board.FindNet(zs["net"])
         if net is None:
             return {"ok": False, "error": "pour net %s is not on the board" % zs["net"]}
-        z = pcbnew.ZONE(board)
-        z.SetLayer(kicad_layer(int(zs["layer"])))
-        z.SetNetCode(net.GetNetCode())
-        name = "%s %s L%d" % (POUR_PREFIX, zs["net"], int(zs["layer"]))
-        z.SetZoneName(name)
-        outline = z.Outline()
-        outline.NewOutline()
-        for i in range(chain.PointCount()):
-            p = chain.CPoint(i)
-            outline.Append(p.x, p.y)
-        if zs.get("clearanceMil"):
-            z.SetLocalClearance(nm(zs["clearanceMil"]))
-        if zs.get("minWidthMil"):
-            z.SetMinThickness(nm(zs["minWidthMil"]))
-        # SMD pads solid, through-hole pads thermal: a one-spoke SMD thermal
-        # is a KiCad starved_thermal error (Gas V5 A: U8.115, C50.2).
-        z.SetPadConnection(pcbnew.ZONE_CONNECTION_THT_THERMAL)
-        board.Add(z)
-        made.append(name)
+        # A pour clipped to its insulation domain arrives as polygons (mil, y-up):
+        # one zone each; otherwise the board outline.
+        shapes = [[(nm(x), nm(-y)) for x, y in poly] for poly in zs.get("polys") or []] or [board_pts]
+        for k, pts in enumerate(shapes):
+            z = make_pour_zone(board, zs, net, pts, k if len(shapes) > 1 else None)
+            board.Add(z)
+            made.append(z.GetZoneName())
     zones = fill_zones(board)
     save_board(board, pcb, out)
     return {"ok": True, "out": out, "pours": made, "zonesFilled": zones}
+
+
+def make_pour_zone(board, zs, net, pts, idx):
+    """One pcbpilot pour zone on pts (KiCad nm, y-down)."""
+    z = pcbnew.ZONE(board)
+    z.SetLayer(kicad_layer(int(zs["layer"])))
+    z.SetNetCode(net.GetNetCode())
+    name = "%s %s L%d" % (POUR_PREFIX, zs["net"], int(zs["layer"]))
+    if idx is not None:
+        name += " #%d" % (idx + 1)
+    z.SetZoneName(name)
+    outline = z.Outline()
+    outline.NewOutline()
+    for x, y in pts:
+        outline.Append(x, y)
+    if zs.get("clearanceMil"):
+        z.SetLocalClearance(nm(zs["clearanceMil"]))
+    if zs.get("minWidthMil"):
+        z.SetMinThickness(nm(zs["minWidthMil"]))
+    # SMD pads solid, through-hole pads thermal: a one-spoke SMD thermal
+    # is a KiCad starved_thermal error (Gas V5 A: U8.115, C50.2).
+    z.SetPadConnection(pcbnew.ZONE_CONNECTION_THT_THERMAL)
+    return z
 
 
 def set_via_width(v, w):

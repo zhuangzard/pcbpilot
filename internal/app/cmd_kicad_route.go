@@ -623,6 +623,9 @@ func (r *kicadRun) postRoute(board string, inSnap *boardSnapshot) (string, bool,
 	board = nb
 	r.lap("widen to intent (+ DRC step-back)")
 	if ps := kicadPourPlan(o, inSnap); len(ps) > 0 {
+		if ps, err = r.clipPoursToIso(board, ps); err != nil {
+			return board, false, err
+		}
 		out := r.next("pours")
 		res, err := r.kt.Pours(board, ps, out)
 		r.summary["pours"] = map[string]any{"plan": ps, "result": res}
@@ -1643,4 +1646,55 @@ func defaultRouteThreads(cpus int, both bool) int {
 		return max((cpus-1)/2, 2)
 	}
 	return min(max(cpus-1, 1), 8)
+}
+
+// clipPoursToIso trims the board-outline pours to their net's insulation
+// domain (pcbauto.ClipPoursToIso). Without it the patient GND / +3V3 pours of
+// JDB-1 covered the SELV strip: 1030 isolation errors on a 2 x MOPP board.
+func (r *kicadRun) clipPoursToIso(board string, ps []kicad.Pour) ([]kicad.Pour, error) {
+	if r.o.intent == "" {
+		return ps, nil
+	}
+	iraw, err := os.ReadFile(r.o.intent)
+	if err != nil {
+		return ps, err
+	}
+	in, err := pcbauto.ParseIntent(iraw)
+	if err != nil || len(in.Pairs) == 0 {
+		return ps, nil
+	}
+	_, raw, err := r.snapshot(board)
+	if err != nil {
+		return ps, err
+	}
+	planes := make([]pcbauto.PlaneRegion, len(ps))
+	for i, p := range ps {
+		planes[i] = pcbauto.PlaneRegion{Net: p.Net, Layer: p.Layer}
+	}
+	clipped, notes, err := pcbauto.ClipPoursToIso(raw, in, planes)
+	if err != nil {
+		return ps, err
+	}
+	var out []kicad.Pour
+	for _, pl := range clipped {
+		var src kicad.Pour
+		for _, p := range ps {
+			if p.Net == pl.Net && p.Layer == pl.Layer {
+				src = p
+			}
+		}
+		for _, poly := range pl.Polys {
+			var pts [][2]float64
+			for _, pt := range poly {
+				pts = append(pts, [2]float64{pt.X, pt.Y})
+			}
+			src.Polys = append(src.Polys, pts)
+		}
+		out = append(out, src)
+	}
+	for _, n := range notes {
+		fmt.Fprintln(r.stderr, "pours: "+n)
+	}
+	r.summary["pourClip"] = notes
+	return out, nil
 }

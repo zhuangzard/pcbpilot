@@ -377,6 +377,9 @@ type Pour struct {
 	Net          string  `json:"net"`
 	Layer        int     `json:"layer"`
 	ClearanceMil float64 `json:"clearanceMil,omitempty"`
+	// Polys (mil, y-up) replace the board outline: one zone per polygon
+	// (a pour clipped to its insulation domain).
+	Polys [][][2]float64 `json:"polys,omitempty"`
 }
 
 // Pours replaces pcbpilot's pours on pcb with ps, fills and saves out.
