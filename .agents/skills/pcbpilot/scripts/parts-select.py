@@ -352,7 +352,24 @@ def print_online(ranked, query, qty):
         print("   选定后请把该件补进 references/standard-parts.json,下次即可离线命中")
 
 
+def _utf8_stdio():
+    """Print UTF-8 regardless of the console code page.
+
+    The report text is Chinese (and the JSON keeps non-ASCII via
+    ensure_ascii=False); on a Windows cp1252 console every such print raised
+    UnicodeEncodeError unless PYTHONIOENCODING=utf-8 was set (field report 2026-10-15).
+    """
+    for stream in (sys.stdout, sys.stderr):
+        enc = (getattr(stream, 'encoding', None) or '').lower().replace('-', '')
+        if enc != 'utf8' and hasattr(stream, 'reconfigure'):
+            try:
+                stream.reconfigure(encoding='utf-8')
+            except (ValueError, OSError):
+                pass
+
+
 def main():
+    _utf8_stdio()
     av = sys.argv[1:]
     if '--help' in av or '-h' in av:
         print(USAGE)

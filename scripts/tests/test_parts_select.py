@@ -213,5 +213,22 @@ class PartsResistanceTests(unittest.TestCase):
             self.assertEqual(selector.main(), 0)
 
 
+class ConsoleEncodingTest(unittest.TestCase):
+    def test_cp1252_console_does_not_crash(self):
+        # field report 2026-10-15: the Chinese report raised UnicodeEncodeError on a
+        # Windows cp1252 console unless PYTHONIOENCODING=utf-8 was set.
+        import os
+        import subprocess
+        env = dict(os.environ, PYTHONIOENCODING="cp1252")
+        env.pop("PYTHONUTF8", None)
+        proc = subprocess.run(
+            [sys.executable, str(SCRIPT), "no-such-part-zzz"],
+            capture_output=True, env=env, timeout=120,
+        )
+        self.assertNotIn(b"UnicodeEncodeError", proc.stderr, proc.stderr.decode("utf-8", "replace"))
+        self.assertEqual(proc.returncode, 0, proc.stderr.decode("utf-8", "replace"))
+        self.assertIn("本地标准件库无匹配", proc.stdout.decode("utf-8"))
+
+
 if __name__ == "__main__":
     unittest.main()
