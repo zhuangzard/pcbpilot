@@ -298,3 +298,18 @@ func TestSchBuildHardGateTransactional(t *testing.T) {
 		t.Fatal("a failed hard gate must exit non-zero")
 	}
 }
+
+// field report 2026-10-15: page id "aux" produced aux.kicad_sch, a Windows reserved
+// device name that can be neither created nor added to git.
+func TestSbSheetFileAvoidsWindowsReservedNames(t *testing.T) {
+	for page, want := range map[string]string{
+		"aux": "aux_.kicad_sch", "AUX": "AUX_.kicad_sch", "con": "con_.kicad_sch", "nul": "nul_.kicad_sch",
+		"prn": "prn_.kicad_sch", "com1": "com1_.kicad_sch", "LPT9": "LPT9_.kicad_sch",
+		"auxiliary": "auxiliary.kicad_sch", "com10": "com10.kicad_sch", "power": "power.kicad_sch",
+	} {
+		if got := sbSheetFile(page); got != want {
+			t.Errorf("sbSheetFile(%q) = %q, want %q", page, got, want)
+		}
+	}
+}
+

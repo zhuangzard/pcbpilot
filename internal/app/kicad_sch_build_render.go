@@ -323,6 +323,9 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 		name = filepath.Base(out)
 	}
 	name = strings.Trim(sbSanitize(name), "._-") // file names below --out come from it
+	if name != "" {
+		name = sbAvoidReservedName(name)
+	}
 	if name == "" {
 		name = "pcbpilot"
 	}
@@ -775,7 +778,28 @@ func sbSheetFile(page string) string {
 	if n == "" {
 		n = "page-" + sbShortHash(page)
 	}
-	return n + ".kicad_sch"
+	return sbAvoidReservedName(n) + ".kicad_sch"
+}
+
+// sbAvoidReservedName keeps a generated file stem off the Windows reserved
+// device names. field report 2026-10-15: page id "aux" produced aux.kicad_sch, which
+// Windows can neither create nor add to git (the name is reserved with ANY
+// extension, case-insensitively). Such a stem gets a "_" suffix on every OS so
+// one spec always yields the same file names.
+func sbAvoidReservedName(stem string) string {
+	base := stem
+	if i := strings.IndexByte(base, '.'); i >= 0 {
+		base = base[:i]
+	}
+	base = strings.ToUpper(strings.TrimRight(base, " "))
+	switch base {
+	case "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$":
+		return stem + "_"
+	}
+	if len(base) == 4 && (strings.HasPrefix(base, "COM") || strings.HasPrefix(base, "LPT")) && base[3] >= '0' && base[3] <= '9' {
+		return stem + "_"
+	}
+	return stem
 }
 
 // sbSafeName reports whether s is a plain file-name component: a safe
