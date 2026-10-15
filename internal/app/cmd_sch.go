@@ -649,7 +649,7 @@ not permission to substitute a similar symbol.`,
 		c.Flags().BoolVar(&includePagePrimitives, "include-page-primitives", false, "include complete active-page primitive IDs and native drawing state for guarded replacement")
 		c.Flags().BoolVar(&includeDeviceIdentity, "include-device-identity", false, "resolve exact 32-character device-library identity for replay and composition guards (60s request budget)")
 		c.Flags().BoolVar(&includeBBox, "include-bbox", false, "attach each component's rendered extent {minX,minY,maxX,maxY}")
-		c.Flags().BoolVar(&includePins, "include-pins", false, "attach each pin's {pinName,pinNumber,x,y,noConnected,net} — the data plane for routing/connectivity checks (net is the pin's current authoritative net, null when the netlist is unavailable; output grows, esp. with --all-pages)")
+		c.Flags().BoolVar(&includePins, "include-pins", false, "attach each pin's {pinName,pinNumber,x,y,noConnected,net} — the data plane for routing/connectivity checks (net is the pin's current authoritative net, null when the netlist is unavailable; a part or reuse-block instance absent from the netlist gets netSource=wire-geometry: net from the wire touching the pin, else net=null with netUnresolved naming why; output grows, esp. with --all-pages)")
 		sch.AddCommand(c)
 	}
 

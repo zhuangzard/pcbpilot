@@ -173,3 +173,18 @@ export function assertLegacySimpleWireOperation(segments: ObservedWireSegment[],
 	}
 	return plans;
 }
+
+/**
+ * Net of a pin resolved from the wires touching it — for parts the netlist has
+ * no record of (a reuse-block instance's ports appear only as instance-prefixed
+ * net names on real parts, #244). One distinct non-empty wire net resolves; no
+ * touching wire, only unnamed wires, or disagreeing nets stay unresolved with
+ * the reason, never a silent null.
+ */
+export function resolvePinNetFromWires(pin: WireAnchor, segments: ReadonlyArray<{ seg: WireSegment; net: string }>): { net: string } | { unresolved: 'no-touching-wire' | 'unnamed-wire' | 'conflicting-wire-nets' } {
+	const touching = segments.filter(s => wirePointOnSegment(pin, s.seg));
+	if (!touching.length) return { unresolved: 'no-touching-wire' };
+	const nets = [...new Set(touching.map(s => s.net).filter(n => n))];
+	if (nets.length === 1) return { net: nets[0] };
+	return { unresolved: nets.length ? 'conflicting-wire-nets' : 'unnamed-wire' };
+}

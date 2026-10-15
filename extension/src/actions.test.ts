@@ -1484,6 +1484,49 @@ test('components.list: complete page inventory loads unvisited pages and rejects
 	}
 });
 
+test('components.list: a block instance absent from the netlist resolves pins from touching wires, never a silent null (#244)', async () => {
+	const pin = (id: string, num: string, x: number, y: number) => ({
+		getState_PrimitiveId: () => id, getState_PinNumber: () => num, getState_PinName: () => `P${num}`,
+		getState_X: () => x, getState_Y: () => y, getState_Rotation: () => 0, getState_NoConnected: () => false,
+	});
+	const wire = (id: string, line: number[], net: string) => ({ getState_PrimitiveId: () => id, getState_Line: () => line, getState_Net: () => net });
+	const components = [
+		mockComponent({ PrimitiveId: 'blk', ComponentType: 'block_symbol', Designator: 'CBB1' }),
+		mockComponent({ PrimitiveId: 'r1', ComponentType: 'part', Designator: 'R1' }),
+	];
+	const pins: Record<string, unknown[]> = {
+		blk: [pin('b1', '1', 0, 0), pin('b2', '2', 0, 20), pin('b3', '3', 0, 40), pin('b4', '4', 0, 60)],
+		r1: [pin('r1p1', '1', 100, 0)],
+	};
+	(globalThis as any).eda = {
+		sch_PrimitiveComponent: { getAll: async () => components, getAllPinsByPrimitiveId: async (id: string) => pins[id] },
+		sch_PrimitiveWire: { getAll: async () => [
+			wire('w1', [0, 0, 100, 0], '3V3'), // b1 → named net
+			wire('w2', [0, 20, -40, 20], ''), // b2 → unnamed wire
+			wire('w3', [0, 60, -40, 60], 'A'), wire('w4', [0, 60, 40, 60], 'B'), // b4 → disagreeing nets
+		] },
+		dmt_SelectControl: { getCurrentDocumentInfo: async () => ({ uuid: 'page', tabId: 'page@project' }) },
+		dmt_EditorControl: { activateDocument: async () => true },
+		sch_ManufactureData: { getNetlistFile: async () => ({ text: async () => JSON.stringify({ components: {
+			c1: { props: { Designator: 'R1' }, pinInfoMap: { p0: { number: '1', net: '3V3' } } },
+		} }) }) },
+	};
+	try {
+		const res: any = await schematicComponentsList({ includePins: true });
+		const blk = res.result.components.find((c: any) => c.primitiveId === 'blk');
+		assert.equal(blk.netSource, 'wire-geometry');
+		const byNum = Object.fromEntries(blk.pins.map((p: any) => [p.pinNumber, p]));
+		assert.equal(byNum['1'].net, '3V3');
+		assert.deepEqual([byNum['2'].net, byNum['2'].netUnresolved], [null, 'unnamed-wire']);
+		assert.deepEqual([byNum['3'].net, byNum['3'].netUnresolved], [null, 'no-touching-wire']);
+		assert.deepEqual([byNum['4'].net, byNum['4'].netUnresolved], [null, 'conflicting-wire-nets']);
+		const r1 = res.result.components.find((c: any) => c.primitiveId === 'r1');
+		assert.equal(r1.netSource, undefined, 'netlist-backed parts keep netlist nets');
+		assert.equal(r1.pins[0].net, '3V3');
+	}
+	finally { delete (globalThis as any).eda; }
+});
+
 test('components.list: includePins distinguishes empty success, unavailable data, and failure', async () => {
 	const components = [
 		mockComponent({ PrimitiveId: 'pins-empty', ComponentType: 'part', Designator: 'U1' }),

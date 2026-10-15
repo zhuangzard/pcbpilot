@@ -21,6 +21,7 @@ import {
 	isDegenerateWireSegment,
 	physicalWireIslands,
 	readObservedWireSegments,
+	resolvePinNetFromWires,
 	WIRE_CONTACT_EPS,
 	wirePointOnSegment,
 	type ObservedWireSegment,
@@ -1307,6 +1308,14 @@ export const schematicComponentsList: Handler = async (payload) => {
 	// for block instances while the real cause was a muted netlist export).
 	let pinNetsAvailable = false;
 	let pinNetsError: string | undefined;
+	// Current-page wires, read once, for parts absent from the netlist (#244).
+	// Wire enumeration is page-scoped, so an all-pages listing cannot use it.
+	let wireSegmentsPromise: Promise<ObservedWireSegment[] | undefined> | undefined;
+	const pageWireSegments = (): Promise<ObservedWireSegment[] | undefined> => wireSegmentsPromise ??= (async () => {
+		if (allPages) return undefined;
+		try { return readObservedWireSegments(await eda.sch_PrimitiveWire.getAll()); }
+		catch { return undefined; }
+	})();
 	if (includePins && includePinNets) {
 		try {
 			const collected = await collectNetlistPinNets();
@@ -1410,8 +1419,24 @@ export const schematicComponentsList: Handler = async (payload) => {
 				const ambiguous = ambiguousDesignators.has(designator);
 				if (ambiguous) record.netAmbiguous = true;
 				const netByNumber = ambiguous ? null : (pinNetsByDesignator?.get(designator) ?? null);
+				// Netlist readable but this part has no record in it (a reuse-block
+				// instance, #244): resolve its pins from touching wires instead of a
+				// silent null that reads like "floating".
+				const symbolKind = String(component.getState_ComponentType?.() ?? '');
+				const absentFromNetlist = includePinNets && pinNetsAvailable && !ambiguous && netByNumber === null
+					&& (symbolKind === 'part' || symbolKind === 'block_symbol');
+				const wireSegments = absentFromNetlist ? await pageWireSegments() : undefined;
+				if (absentFromNetlist) record.netSource = 'wire-geometry';
 				record.pins = pins.map((pin) => {
 					const rec = serializePin(pin);
+					if (absentFromNetlist) {
+						const resolved = wireSegments
+							? resolvePinNetFromWires({ x: Number(rec.x), y: Number(rec.y) }, wireSegments)
+							: { unresolved: allPages ? 'not-in-netlist' as const : 'wires-unreadable' as const };
+						if ('net' in resolved) rec.net = resolved.net;
+						else { rec.net = null; rec.netUnresolved = resolved.unresolved; }
+						return rec;
+					}
 					// null (not '') distinguishes "known floating" from "netlist unavailable"
 					// — and a cross-page-collided designator's nets are FORCED to null
 					// (netAmbiguous) rather than confidently wrong (issue #136).
