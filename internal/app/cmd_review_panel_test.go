@@ -82,3 +82,36 @@ func TestRunReviewPanelFake(t *testing.T) {
 		t.Fatal("ran without requirements")
 	}
 }
+
+// field report 2026-10-15: a 537 KB prompt passed as an argument failed every
+// reviewer on Windows ("The filename or extension is too long"). The prompt
+// must travel by stdin or file; the command line must stay far below the
+// 8 191-char limit that applies through a .cmd shim (codex.cmd).
+func TestReviewerInvocationKeepsLargePromptOffCommandLine(t *testing.T) {
+	prompt := strings.Repeat("requirement R-1: the board shall … ", 1500) // ~54 KB > 32 KB
+	if len(prompt) <= 32*1024 {
+		t.Fatalf("test prompt is only %d bytes", len(prompt))
+	}
+	for _, name := range []string{"codex", "kimi", "claude"} {
+		call, err := reviewerInvocation(name, filepath.Join("C:", "tmp", "pcbpilot-"+name), prompt)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		cmdLine := len(call.Bin)
+		for _, a := range call.Args {
+			cmdLine += len(a) + 1
+			if strings.Contains(a, "requirement R-1") {
+				t.Fatalf("%s: prompt text leaked into argv", name)
+			}
+		}
+		if cmdLine > 2048 {
+			t.Fatalf("%s: command line is %d chars", name, cmdLine)
+		}
+		if call.Stdin != prompt && call.PromptFile == "" {
+			t.Fatalf("%s: prompt is delivered neither by stdin nor by file", name)
+		}
+	}
+	if _, err := reviewerInvocation("nope", "", prompt); err == nil {
+		t.Fatal("unknown reviewer accepted")
+	}
+}

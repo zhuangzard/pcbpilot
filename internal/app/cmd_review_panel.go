@@ -57,40 +57,95 @@ type reviewRecord struct {
 // reviewerRun runs one reviewer CLI on prompt and returns its stdout.
 type reviewerRun func(ctx context.Context, prompt string) (string, error)
 
-var reviewerRunners = map[string]reviewerRun{
-	"codex": func(ctx context.Context, prompt string) (string, error) {
-		return runReviewerCLI(ctx, "", "codex", "exec", "--skip-git-repo-check", prompt)
-	},
-	"kimi": func(ctx context.Context, prompt string) (string, error) {
-		dir, err := os.MkdirTemp("", "pcbpilot-kimi-")
-		if err != nil {
-			return "", err
-		}
-		defer os.RemoveAll(dir)
-		return runReviewerCLI(ctx, dir, "kimi", "-p", prompt)
-	},
-	"claude": func(ctx context.Context, prompt string) (string, error) {
-		dir, err := os.MkdirTemp("", "pcbpilot-claude-")
-		if err != nil {
-			return "", err
-		}
-		defer os.RemoveAll(dir)
-		return runReviewerCLI(ctx, dir, "claude", "-p", prompt)
-	},
+// reviewerCall is how one reviewer CLI receives the prompt.
+//
+// The prompt is NEVER put on the command line: a real review prompt is
+// hundreds of KB, and Windows caps a whole command line at 32 767 chars (8 191
+// through a .cmd shim such as codex.cmd). field report 2026-10-15: a 537 KB prompt
+// made every reviewer fail with "fork/exec …: The filename or extension is too
+// long". Codex and Claude read the prompt from stdin; Kimi gets a short
+// instruction to read prompt.md, which is written into its working directory.
+type reviewerCall struct {
+	Bin   string
+	Args  []string
+	Stdin string
+	// PromptFile, when set, is the file name (inside the call's working
+	// directory) the prompt must be written to before the CLI starts.
+	PromptFile string
 }
 
-func runReviewerCLI(ctx context.Context, dir, name string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
+const reviewerPromptFile = "prompt.md"
+
+// reviewerFileAsk is the whole command-line payload for a reviewer that reads
+// the prompt from disk.
+const reviewerFileAsk = "Read the file " + reviewerPromptFile + " in the current directory completely (it is long; read all of it) " +
+	"and perform the design review it describes. Do NOT modify, create or delete any file and do not run commands other than reading files. " +
+	"End your reply with exactly ONE JSON object in the format the prompt specifies."
+
+// reviewerInvocation builds the call for one reviewer. dir is the reviewer's
+// private working directory ("" = inherit).
+func reviewerInvocation(name, dir, prompt string) (reviewerCall, error) {
+	switch name {
+	case "codex":
+		// `codex exec -` reads the prompt from stdin.
+		return reviewerCall{Bin: "codex", Args: []string{"exec", "--skip-git-repo-check", "-"}, Stdin: prompt}, nil
+	case "claude":
+		// `claude -p` with no prompt argument reads it from stdin.
+		return reviewerCall{Bin: "claude", Args: []string{"-p"}, Stdin: prompt}, nil
+	case "kimi":
+		// kimi -p has no stdin mode: hand it the prompt as a file in its own
+		// directory (--add-dir grants the read).
+		return reviewerCall{Bin: "kimi", Args: []string{"--auto", "--add-dir", dir, "-p", reviewerFileAsk}, PromptFile: reviewerPromptFile}, nil
+	}
+	return reviewerCall{}, fmt.Errorf("unknown reviewer %q", name)
+}
+
+// reviewerRunner runs reviewer name in a private temp directory (codex keeps
+// the caller's directory, as before).
+func reviewerRunner(name string) reviewerRun {
+	return func(ctx context.Context, prompt string) (string, error) {
+		dir := ""
+		if name != "codex" {
+			d, err := os.MkdirTemp("", "pcbpilot-"+name+"-")
+			if err != nil {
+				return "", err
+			}
+			defer os.RemoveAll(d)
+			dir = d
+		}
+		call, err := reviewerInvocation(name, dir, prompt)
+		if err != nil {
+			return "", err
+		}
+		if call.PromptFile != "" {
+			if err := os.WriteFile(filepath.Join(dir, call.PromptFile), []byte(prompt), 0o644); err != nil {
+				return "", err
+			}
+		}
+		return runReviewerCLI(ctx, dir, call)
+	}
+}
+
+var reviewerRunners = map[string]reviewerRun{
+	"codex":  reviewerRunner("codex"),
+	"kimi":   reviewerRunner("kimi"),
+	"claude": reviewerRunner("claude"),
+}
+
+func runReviewerCLI(ctx context.Context, dir string, call reviewerCall) (string, error) {
+	cmd := exec.CommandContext(ctx, call.Bin, call.Args...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
-	cmd.Stdin = nil
+	if call.Stdin != "" {
+		cmd.Stdin = strings.NewReader(call.Stdin)
+	}
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() != nil {
-		return string(out), fmt.Errorf("%s timed out", name)
+		return string(out), fmt.Errorf("%s timed out", call.Bin)
 	}
 	if err != nil {
-		return string(out), fmt.Errorf("%s: %v: %s", name, err, tail(string(out), 300))
+		return string(out), fmt.Errorf("%s: %v: %s", call.Bin, err, tail(string(out), 300))
 	}
 	return string(out), nil
 }
