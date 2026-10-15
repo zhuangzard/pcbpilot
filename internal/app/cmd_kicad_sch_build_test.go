@@ -384,3 +384,55 @@ func TestSchBuildSpecNetRenameInvalidatesCache(t *testing.T) {
 		}
 	}
 }
+
+// Decoupling caps go through sidePlace, which used to anchor every cap of a
+// rail at the topmost core pin of that rail and ignore `near` (a field project
+// 2026-10-15). Two caps hinted at two different VDD pins must not end up in
+// one row beside one pin; a hint must also change the zone hash so an edited
+// hint redraws the zone.
+func TestSbGridHonorsNearForDecaps(t *testing.T) {
+	gen2 := []sbPin{{Number: "1", Name: "1", Type: "passive"}, {Number: "2", Name: "2", Type: "passive"}}
+	spec := func(withNear bool) *sbSpec {
+		c1, c2 := sbPart{Ref: "C1", Value: "100nF", Zone: "mcu", Pins: gen2}, sbPart{Ref: "C2", Value: "100nF", Zone: "mcu", Pins: gen2}
+		if withNear {
+			c1.Near, c2.Near = "U1:VDD1", "U1:VDD2"
+		}
+		return &sbSpec{
+			Name:  "near",
+			Zones: []sbZone{{ID: "mcu", Title: "MCU"}},
+			Parts: []sbPart{{Ref: "U1", Value: "MCU", Zone: "mcu", Pins: []sbPin{
+				{Number: "1", Name: "VDD1", Type: "power_in"}, {Number: "2", Name: "PA0", Type: "bidirectional"},
+				{Number: "3", Name: "PA1", Type: "bidirectional"}, {Number: "4", Name: "PA2", Type: "bidirectional"},
+				{Number: "5", Name: "PA3", Type: "bidirectional"}, {Number: "6", Name: "PA4", Type: "bidirectional"},
+				{Number: "7", Name: "VDD2", Type: "power_in"}, {Number: "8", Name: "VSS", Type: "power_in"}}}, c1, c2},
+			Nets: []sbNet{
+				{Name: "+3V3", Pins: []string{"U1:VDD1", "U1:VDD2", "C1:1", "C2:1"}},
+				{Name: "GND", Pins: []string{"U1:VSS", "C1:2", "C2:2"}},
+			},
+		}
+	}
+	layout := func(withNear bool) (*sbZoneLayout, string) {
+		d, _, err := buildDesign(spec(withNear), sbResolveOpts{Offline: true})
+		if err != nil {
+			t.Fatalf("design: %v", err)
+		}
+		zi := d.zoneInputs()[0]
+		zl, err := gridZone(d, zi, &sbMeasure{cache: map[string]kicad.SceneSymbol{}}, sbGridVariants[0])
+		if err != nil {
+			t.Fatalf("grid: %v", err)
+		}
+		return zl, zi.hash(d, "grid-autoconnect")
+	}
+	hinted, hHash := layout(true)
+	_, plainHash := layout(false)
+	if hHash == plainHash {
+		t.Error("a near hint must change the zone hash")
+	}
+	p1, p2 := hinted.Parts["C1"], hinted.Parts["C2"]
+	if len(p1) == 0 || len(p2) == 0 {
+		t.Fatalf("caps not placed: %+v", hinted.Parts)
+	}
+	if p1[0].At.Y == p2[0].At.Y {
+		t.Errorf("C1 (near VDD1) and C2 (near VDD2) share one row at y=%v — the hints were ignored", p1[0].At.Y)
+	}
+}

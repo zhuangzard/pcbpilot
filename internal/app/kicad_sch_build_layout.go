@@ -395,6 +395,9 @@ func (zi *sbZoneIn) hash(d *sbDesign, method string) string {
 			}
 		}
 		fmt.Fprintf(&b, "%d|", len(sbFieldText(p)))
+		if p.Near != "" { // a placement hint shapes the drawing; absent = old hash
+			fmt.Fprintf(&b, "near=%s|", p.Near)
+		}
 	}
 	// label lengths of ports shape the layout too
 	var ports []string
@@ -1047,11 +1050,47 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 	// beside the core pin a part serves (decoupling next to its supply
 	// pin), power pin up / ground pin down for two-pin parts
 	coreRef := items[0].p.Ref
+	// nearAnchor resolves a part's `near` hint to an already placed pin that
+	// shares a net with the part. Decoupling caps go through sidePlace BEFORE
+	// attach (the only other reader of `near`), and sidePlace used to anchor
+	// every cap on a rail at the topmost core pin of that rail — so each
+	// generator-supplied "near":"U1:VDD2" was silently ignored and all caps of
+	// one rail stacked at one pin (field report 2026-10-15).
+	nearAnchor := func(it unitRef) *pinAt {
+		if it.p.Near == "" {
+			return nil
+		}
+		r, pin, ok := sbSplitPin(it.p.Near)
+		if !ok || d.ByRef[r] == nil {
+			return nil
+		}
+		nums, err := d.ByRef[r].resolvePins(pin)
+		if err != nil {
+			return nil
+		}
+		own := map[string]bool{}
+		for _, q := range it.s.Pins {
+			if n, ok := d.PinNet[sbPinKey(it.p.Ref, q.Number)]; ok {
+				own[n] = true
+			}
+		}
+		for _, num := range nums {
+			k := sbPinKey(r, num)
+			if pa, placed := pins[k]; placed && own[d.PinNet[k]] {
+				a := pa
+				return &a
+			}
+		}
+		return nil
+	}
 	sidePlace := func(it unitRef) bool {
 		rot := sbTwoPinRot(d, it.p, it.s)
 		pose0 := sbPose{Rot: rot, Unit: it.unit}
-		var anchor *pinAt
+		anchor := nearAnchor(it)
 		for _, pass := range []string{"power", "signal", "ground"} {
+			if anchor != nil {
+				break
+			}
 			for _, q := range it.s.Pins {
 				n, ok := d.PinNet[sbPinKey(it.p.Ref, q.Number)]
 				if !ok || d.NetKind[n] != pass {
