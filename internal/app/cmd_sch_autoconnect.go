@@ -123,6 +123,7 @@ type acScene struct {
 	Wires                 []wireSegment // existing wire segments (issue #64)
 	Components            []acComponent // every part seen (by designator), even pin-less off-page ones
 	TitleBlock            *layoutBBox   // derived keep-out (nil if not applied)
+	Usable                *layoutBBox   // printable sheet area (sheet inset by sheetEdgeMinGap); nil when no sheet
 	TitleBlockProvisional bool          // true when no sheet bbox was found (keep-out NOT geometrically applied)
 	// AmbiguousDesignators are designators the connector flagged as colliding
 	// across pages (issue #136): their pin→net attribution is untrustworthy, so
@@ -644,6 +645,14 @@ func scoreCandidate(pin acPin, dir string, offset float64, canonicalKind, target
 	// the keep-out — makes runAutoconnect refuse to place rather than intrude it.
 	if rules.AvoidTitleBlock && scene.TitleBlock != nil && boxesOverlap(lbl, *scene.TitleBlock) {
 		reasons = append(reasons, acReason{costHardReject, "label enters title-block keep-out (hard reject)"})
+	}
+
+	// HARD REJECT: label leaves the printable sheet area — the same hard boundary as
+	// the title block, and the same `out-of-sheet` ERROR `sch check` raises after the
+	// fact. Live 2026-10-16: the W25Q64's right-side labels were staggered to offset
+	// 98 and ended 2 raw past the usable edge while offset 18 stayed inside.
+	if rules.AvoidTitleBlock && scene.Usable != nil && !boxInside(lbl, *scene.Usable) {
+		reasons = append(reasons, acReason{costHardReject, "label leaves the usable sheet area (hard reject)"})
 	}
 
 	// HARD REJECT: stub crosses a non-target pin (issue #64). EasyEDA trims and
