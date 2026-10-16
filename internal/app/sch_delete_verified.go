@@ -9,9 +9,9 @@ package app
 // 幸存者再补删一轮,仍活着才算真幸存。
 //
 // 本文件是那个姿势的唯一 Go 侧实现;调用方自带「怎么删一个」和「怎么读活体集」
-// (component.delete / primitives.delete / exec_js 各不相同),判定逻辑共享。
-// zone-draw 的删除发生在 exec_js 的 JS 里,同一套「逐个删+回读+重试」以 JS 形式
-// 内联在 buildZoneClearJS(单次连接器往返,不走本 helper,语义一致)。
+// (component.delete / primitives.delete 各不相同),判定逻辑共享。zone-draw 清框
+// 也走本 helper(typedZoneFrameClear);它原先内联在 exec_js 里、删完立刻回读,
+// 未落定的快照把刚建的框误报成 survived。
 
 import (
 	"fmt"

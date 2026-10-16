@@ -1790,9 +1790,10 @@ func runPartitionDraw(cfg *appConfig, window string, opts partitionOpts, fontSiz
 	exec := func(phase, code string) (map[string]any, error) {
 		return execAutolayoutZoneJS(pinnedCfg, win, docUUID, phase, code)
 	}
+	clearFrames := typedZoneFrameClear(pinnedCfg, win, docUUID)
 
 	if clear {
-		hadPrevious, cerr := clearPriorZoneFrames(st, docUUID, exec, stderr)
+		hadPrevious, cerr := clearPriorZoneFrames(st, docUUID, clearFrames, stderr)
 		if cerr != nil {
 			return cerr
 		}
@@ -1821,7 +1822,7 @@ func runPartitionDraw(cfg *appConfig, window string, opts partitionOpts, fontSiz
 	if fontSize <= 0 {
 		fontSize = defaultPartitionZoneFontSize
 	}
-	if _, err := clearPriorZoneFrames(st, docUUID, exec, stderr); err != nil {
+	if _, err := clearPriorZoneFrames(st, docUUID, clearFrames, stderr); err != nil {
 		return err
 	}
 	// **清了旧框之后,画失败就是净损失** —— 实拍:`cleared 8 previous zone-frame
@@ -1846,11 +1847,11 @@ func runPartitionDraw(cfg *appConfig, window string, opts partitionOpts, fontSiz
 	}
 	frames, verr := validateZoneDrawResult(v, len(plan.Partitions))
 	if verr != nil {
-		return compensateZoneDraw(pinnedCfg, win, docUUID, st, "partition", exec, frames, verr)
+		return compensateZoneDraw(pinnedCfg, win, docUUID, st, "partition", clearFrames, frames, verr)
 	}
 	setRecordedZoneFrames(st, docUUID, "partition", frames)
 	if err := savePcbStageState(st); err != nil {
-		return compensateZoneDraw(pinnedCfg, win, docUUID, st, "partition", exec, frames,
+		return compensateZoneDraw(pinnedCfg, win, docUUID, st, "partition", clearFrames, frames,
 			fmt.Errorf("persist partition-frame ids: %w", err))
 	}
 	if err := saveZoneDocument(pinnedCfg, win, docUUID, "save partition zone frames"); err != nil {

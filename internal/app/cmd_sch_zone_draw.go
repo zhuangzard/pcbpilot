@@ -11,16 +11,17 @@ package app
 //
 // Implementation note: the schematic graphics API (eda.sch_PrimitiveRectangle /
 // sch_PrimitiveText — full CRUD, probed live 2026-07-19 on ceshi) has no typed
-// action yet, so this goes through the debug.exec_js hatch, the documented path
-// for scriptable behavior that doesn't warrant a connector re-import. Created
-// primitive ids are recorded in the project workflow state so redraw/--clear
-// removes exactly what this tool created and never touches user graphics.
+// action yet, so DRAWING goes through the debug.exec_js hatch. Clearing uses the
+// typed schematic.primitives.delete + includePagePrimitives readback
+// (typedZoneFrameClear). Created primitive ids are recorded in the project
+// workflow state so redraw/--clear removes exactly what this tool created and
+// never touches user graphics.
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/zhuangzard/pcbpilot/internal/workflow"
@@ -165,51 +166,6 @@ func writeZoneDrawEpilogue(b *strings.Builder) {
 }`)
 }
 
-// buildZoneClearJS deletes only recorded ids and verifies them against the live
-// page. The platform's delete boolean is not authoritative (large/no-op deletes
-// may still return true), so a survivor makes the operation fail closed.
-//
-// Deletion goes through the GENERIC `sch_PrimitiveObject` class (issue #164):
-// `sch_PrimitiveText.delete()` only drops the text from the in-memory index, so
-// the labels came back on the next `doc reload` — and because the survivor check
-// below re-reads IMMEDIATELY, it saw them gone and reported a clean sweep. Live
-// run before the fix: "cleared 6 previous zone-frame primitive(s)" while all 3
-// labels were still on the page. `sch_PrimitiveObject.delete()` persists.
-//
-// 缺陷 3(P1):**批量** delete 不可靠 —— 真机实锤本命令批量删旧框报 survived=4,
-// 而逐个删成功率 100%(平台大批量静默 no-op 仍返 true 的已知病)。删除因此改成
-// **逐个删 + 回读证实 + 幸存者重试一次**(与 Go 侧 deleteVerifiedOneByOne 同一套
-// 语义,内联在单次 exec_js 里跑,免去逐 id 的连接器往返)。判定只信回读。
-func buildZoneClearJS(f *workflow.SchZoneFrames) string {
-	rects, _ := json.Marshal(f.Rects)
-	texts, _ := json.Marshal(f.Texts)
-	return fmt.Sprintf(`const rects=%s, texts=%s;
-const generic = eda.sch_PrimitiveObject && typeof eda.sch_PrimitiveObject.delete === 'function'
-  ? eda.sch_PrimitiveObject : null;
-const aliveSets = async () => ({
-  rect: new Set(await eda.sch_PrimitiveRectangle.getAllPrimitiveId()),
-  text: new Set(await eda.sch_PrimitiveText.getAllPrimitiveId()),
-});
-let alive = await aliveSets();
-const foundRects = rects.filter(id => alive.rect.has(id));
-const foundTexts = texts.filter(id => alive.text.has(id));
-const found = foundRects.length + foundTexts.length;
-const deleteErrors = [];
-const delOne = async (id, cls) => {
-  try { await (generic ?? cls).delete([id]); }
-  catch (err) { deleteErrors.push(id + ': ' + (err instanceof Error ? err.message : String(err))); }
-};
-for (const id of foundRects) await delOne(id, eda.sch_PrimitiveRectangle);
-for (const id of foundTexts) await delOne(id, eda.sch_PrimitiveText);
-alive = await aliveSets();
-const retried = [];
-for (const id of foundRects) if (alive.rect.has(id)) { retried.push(id); await delOne(id, eda.sch_PrimitiveRectangle); }
-for (const id of foundTexts) if (alive.text.has(id)) { retried.push(id); await delOne(id, eda.sch_PrimitiveText); }
-if (retried.length) alive = await aliveSets();
-const survived = [...rects.filter(id => alive.rect.has(id)), ...texts.filter(id => alive.text.has(id))];
-return {ok:survived.length===0, requested:rects.length+texts.length, found, deleted:found-survived.length, survived, retried, deleteErrors, viaGeneric: !!generic};`, rects, texts)
-}
-
 func asStringSlice(v any) []string {
 	if raw, ok := v.([]string); ok {
 		return append([]string(nil), raw...)
@@ -288,14 +244,6 @@ func setRecordedZoneFrames(st *pcbStageState, docUUID, mode string, f *workflow.
 	st.SchZoneFrameIdsByPage[docUUID] = f
 }
 
-func verifyZoneClearResult(v map[string]any) (int, error) {
-	survived := asStringSlice(v["survived"])
-	if !asBool(v["ok"]) || len(survived) > 0 {
-		return int(asFloat(v["found"])), fmt.Errorf("zone frame delete was not verified; survived=%v", survived)
-	}
-	return int(asFloat(v["found"])), nil
-}
-
 func validateZoneDrawResult(v map[string]any, expected int) (*workflow.SchZoneFrames, error) {
 	f := &workflow.SchZoneFrames{
 		Rects: asStringSlice(v["rects"]),
@@ -322,34 +270,106 @@ func validateZoneDrawResult(v map[string]any, expected int) (*workflow.SchZoneFr
 
 type zoneJSExecutor func(phase, code string) (map[string]any, error)
 
-func clearZoneFrames(exec zoneJSExecutor, f *workflow.SchZoneFrames, phase string) (int, error) {
-	v, err := exec(phase, buildZoneClearJS(f))
-	if err != nil {
-		return 0, err
+// zoneFrameClearFn deletes a recorded frame set and returns how many of its ids
+// were present on the page. A survivor is an error (fail closed).
+type zoneFrameClearFn func(f *workflow.SchZoneFrames, phase string) (int, error)
+
+// typedZoneFrameClear clears frames through typed actions pinned to docUUID:
+// schematic.primitives.delete one id at a time (it routes page graphics through
+// the persisting sch_PrimitiveObject delete, #164) and an includePagePrimitives
+// read as the alive set. The former exec_js clear re-read immediately after the
+// deletes, so an unsettled snapshot reported fresh frames as survivors and
+// zone move failed its redraw intermittently (v1.13.0 acceptance, 2026-10-16).
+func typedZoneFrameClear(cfg *appConfig, window, docUUID string) zoneFrameClearFn {
+	return func(f *workflow.SchZoneFrames, phase string) (int, error) {
+		deleteOne := func(id string) error {
+			_, err := requestAutolayoutActionTimed(cfg, "schematic.primitives.delete", window,
+				map[string]any{"primitiveIds": []string{id}}, 30*time.Second, docUUID, phase)
+			return err
+		}
+		alive := func() (map[string]bool, error) {
+			res, err := requestAutolayoutActionTimed(cfg, "schematic.components.list", window,
+				map[string]any{"includePagePrimitives": true}, 30*time.Second, docUUID, phase+" (verify)")
+			if err != nil {
+				return nil, err
+			}
+			return zoneFrameAliveSet(res.Result)
+		}
+		return clearZoneFramesWith(f, deleteOne, alive)
 	}
-	return verifyZoneClearResult(v)
+}
+
+// zoneFrameAliveSet collects live rectangle and text ids from a components.list
+// pagePrimitives read; a missing inventory is an error, never "all deleted".
+func zoneFrameAliveSet(result map[string]any) (map[string]bool, error) {
+	pp, _ := result["pagePrimitives"].(map[string]any)
+	if pp == nil {
+		return nil, fmt.Errorf("page primitive inventory unavailable")
+	}
+	alive := map[string]bool{}
+	for _, kind := range []string{"rectangles", "texts"} {
+		items, ok := pp[kind].([]any)
+		if !ok {
+			return nil, fmt.Errorf("page primitive inventory has no %s list", kind)
+		}
+		for _, it := range items {
+			if m, ok := it.(map[string]any); ok {
+				if id := strField(m, "primitiveId"); id != "" {
+					alive[id] = true
+				}
+			}
+		}
+	}
+	return alive, nil
+}
+
+// clearZoneFramesWith deletes the recorded ids that are present on the page with
+// the repository's single verified-delete routine (one by one, settled readback,
+// one retry). Ids already absent are not deleted and not counted.
+func clearZoneFramesWith(f *workflow.SchZoneFrames, deleteOne func(string) error, alive func() (map[string]bool, error)) (int, error) {
+	live, err := alive()
+	if err != nil {
+		return 0, fmt.Errorf("read zone frames before delete: %w", err)
+	}
+	var present []string
+	for _, id := range append(append([]string(nil), f.Rects...), f.Texts...) {
+		if live[id] {
+			present = append(present, id)
+		}
+	}
+	if len(present) == 0 {
+		return 0, nil
+	}
+	res, err := deleteVerifiedOneByOne(present, deleteOne, alive)
+	if err != nil {
+		return len(present), err
+	}
+	if len(res.Survived) > 0 {
+		return len(present), fmt.Errorf("zone frame delete was not verified; survived=%v errors=%v", res.Survived, res.Errors)
+	}
+	return len(present), nil
 }
 
 // cleanupNewZoneFrames is the compensation path for count/state failures after a
 // draw. It never changes workflow state; callers preserve the old record so a
 // retry remains recoverable.
-func cleanupNewZoneFrames(exec zoneJSExecutor, f *workflow.SchZoneFrames) error {
+func cleanupNewZoneFrames(clear zoneFrameClearFn, f *workflow.SchZoneFrames) error {
 	if zoneFramesEmpty(f) {
 		return nil
 	}
-	_, err := clearZoneFrames(exec, f, "clean up incomplete zone draw")
+	_, err := clear(f, "clean up incomplete zone draw")
 	return err
 }
 
 // clearPriorZoneFrames removes this page's prior record in memory only after a
 // verified delete. Callers persist state at the same checkpoint as the new draw
 // (or after schematic.save for --clear).
-func clearPriorZoneFrames(st *pcbStageState, docUUID string, exec zoneJSExecutor, stderr io.Writer) (bool, error) {
+func clearPriorZoneFrames(st *pcbStageState, docUUID string, clear zoneFrameClearFn, stderr io.Writer) (bool, error) {
 	prev, source := recordedZoneFrames(st, docUUID)
 	if prev == nil {
 		return false, nil
 	}
-	found, err := clearZoneFrames(exec, prev, "clear previous zone frames")
+	found, err := clear(prev, "clear previous zone frames")
 	if err != nil {
 		return false, fmt.Errorf("clear previous zone frames: %w", err)
 	}
@@ -378,11 +398,11 @@ func compensateZoneDraw(
 	window, docUUID string,
 	st *pcbStageState,
 	mode string,
-	exec zoneJSExecutor,
+	clear zoneFrameClearFn,
 	f *workflow.SchZoneFrames,
 	cause error,
 ) error {
-	if cerr := cleanupNewZoneFrames(exec, f); cerr != nil {
+	if cerr := cleanupNewZoneFrames(clear, f); cerr != nil {
 		setRecordedZoneFrames(st, docUUID, mode, f)
 		if perr := savePcbStageState(st); perr != nil {
 			return fmt.Errorf("%v; cleanup also failed: %v; recovery ids=%v/%v; persist recovery record failed: %w",
