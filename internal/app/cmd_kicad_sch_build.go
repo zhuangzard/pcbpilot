@@ -796,10 +796,20 @@ func sbGenName(p *sbRPart) string {
 	}
 	var b strings.Builder
 	for _, r := range base {
-		if r == ':' || r == '"' || r == '/' || r == '\\' || r == ' ' {
-			r = '_'
+		switch {
+		// field report 2026-10-15: MPN "a diode MPN (VR >= 200 V, VERIFY)" — a symbol
+		// name with < or > makes KiCad 10 fail to load the whole sheet, and
+		// `kicad-cli sch export netlist` on the root still exits 0 with that
+		// page simply absent.
+		case r == '<':
+			b.WriteString("lt")
+		case r == '>':
+			b.WriteString("gt")
+		case r == ':' || r == '"' || r == '/' || r == '\\' || r == ' ' || r < 0x20 || r == 0x7f:
+			b.WriteByte('_')
+		default:
+			b.WriteRune(r)
 		}
-		b.WriteRune(r)
 	}
 	h := ""
 	for _, q := range p.Pins {

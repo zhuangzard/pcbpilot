@@ -494,6 +494,14 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 	if !diff.Equal {
 		rep.gate("netlist", "fail", diff.summary(), diff)
 		rep.Error = &sbFailure{Code: "NETLIST_MISMATCH", Message: diff.summary(), Fix: "nothing was written; this is a pcbpilot drawing bug — report it with the failed build, or retry with --no-planner"}
+		if dropped := sbDroppedPages(d, nl); len(dropped) > 0 {
+			// Not a drawing bug: KiCad could not load these sheets at all and
+			// the root export still exited 0 (field report 2026-10-15). Pointing at
+			// --no-planner sent people the wrong way.
+			msg := fmt.Sprintf("KiCad did not load page(s) %s: none of their parts is in the netlist", strings.Join(dropped, ", "))
+			rep.Error = &sbFailure{Code: "SHEET_NOT_LOADED", Message: msg,
+				Fix: "nothing was written; run `kicad-cli sch export netlist <page>.kicad_sch` on the failed build's sheet to see the load error, and report it with the failed build (a symbol/field text KiCad cannot parse is the usual cause)"}
+		}
 		failed := filepath.Join(sbMetaDir(out), "failed")
 		_ = os.RemoveAll(failed)
 		if err := copySbFiles(stage, failed, append(files, "erc.json")); err == nil {
@@ -1704,4 +1712,30 @@ func listSbCheckpoints(out string) ([]sbCheckpointMeta, error) {
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].N < list[j].N })
 	return list, nil
+}
+
+// sbDroppedPages lists spec pages none of whose parts reached the KiCad
+// netlist — the sheet failed to load, which the root export does not report.
+func sbDroppedPages(d *sbDesign, nl *kicad.SchNetlist) []string {
+	present := map[string]bool{}
+	for _, c := range nl.Components {
+		present[c.Ref] = true
+	}
+	total, seen := map[string]int{}, map[string]int{}
+	for _, p := range d.Parts {
+		if strings.HasPrefix(p.Ref, "#") {
+			continue
+		}
+		total[p.PageID]++
+		if present[p.Ref] {
+			seen[p.PageID]++
+		}
+	}
+	var out []string
+	for _, pg := range d.Pages {
+		if total[pg.ID] > 0 && seen[pg.ID] == 0 {
+			out = append(out, pg.ID)
+		}
+	}
+	return out
 }

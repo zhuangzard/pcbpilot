@@ -436,3 +436,39 @@ func TestSbGridHonorsNearForDecaps(t *testing.T) {
 		t.Errorf("C1 (near VDD1) and C2 (near VDD2) share one row at y=%v — the hints were ignored", p1[0].At.Y)
 	}
 }
+
+// field report 2026-10-15: MPN "Diode X (VR >= 200 V)" gave a
+// generated symbol name with '>', KiCad could not load the sheet, and the
+// root netlist export silently left the whole page out (94 "missing" pins).
+func TestSbGenNameIsKicadSafe(t *testing.T) {
+	for _, mpn := range []string{"Diode X (VR >= 200 V)", "A<B", "tab\there", "nl\nx"} {
+		p := &sbRPart{}
+		p.Ref, p.MPN = "D1", mpn
+		p.Pins = []sbPin{{Number: "1"}, {Number: "2"}}
+		name := sbGenName(p)
+		if strings.ContainsAny(name, `<>:"/\ `+"\t\r\n") {
+			t.Errorf("sbGenName(%q) = %q contains a character KiCad cannot load", mpn, name)
+		}
+	}
+	a, b := &sbRPart{}, &sbRPart{}
+	a.Ref, a.MPN, b.Ref, b.MPN = "D1", "X>=1", "D2", "X<=1"
+	if sbGenName(a) == sbGenName(b) {
+		t.Error("'>' and '<' must not map to the same name")
+	}
+}
+
+func TestSbDroppedPages(t *testing.T) {
+	mk := func(ref, page string) *sbRPart { p := &sbRPart{PageID: page}; p.Ref = ref; return p }
+	d := &sbDesign{
+		Pages: []sbPage{{ID: "P01"}, {ID: "P02"}},
+		Parts: []*sbRPart{mk("R1", "P01"), mk("C1", "P02"), mk("C2", "P02"), mk("#PWR01", "P02")},
+	}
+	nl := &kicad.SchNetlist{Components: []kicad.SchNetComp{{Ref: "R1"}}}
+	if got := sbDroppedPages(d, nl); len(got) != 1 || got[0] != "P02" {
+		t.Fatalf("dropped = %v, want [P02]", got)
+	}
+	nl.Components = append(nl.Components, kicad.SchNetComp{Ref: "C2"})
+	if got := sbDroppedPages(d, nl); len(got) != 0 {
+		t.Fatalf("a page with any part present is not dropped: %v", got)
+	}
+}
