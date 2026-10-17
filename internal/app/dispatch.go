@@ -398,7 +398,11 @@ type healthWindow struct {
 	ConnectorVersion string    `json:"connectorVersion"`
 	EasyEDAVersion   string    `json:"easyedaVersion"`
 	ConnectedAt      time.Time `json:"connectedAt"`
-	Context          struct {
+	Host             struct {
+		Kind      string `json:"kind"`
+		UserAgent string `json:"userAgent"`
+	} `json:"host"`
+	Context struct {
 		ProjectUUID  string `json:"projectUuid"`
 		ProjectName  string `json:"projectName"`
 		DocumentUUID string `json:"documentUuid"`
@@ -472,7 +476,7 @@ func selectWindow(windows []healthWindow, project, window string) (string, error
 			if id, ok := newestDuplicateWindow(matches); ok {
 				return id, nil
 			}
-			return "", fmt.Errorf("project %q maps to %d windows — pass --window <id>", project, len(matches))
+			return "", fmt.Errorf("project %q maps to %d windows — pass --window <id>: %s", project, len(matches), describeWindows(matches))
 		}
 	}
 	switch len(windows) {
@@ -498,11 +502,31 @@ func newestDuplicateWindow(matches []healthWindow) (string, bool) {
 		if w.Context.ProjectUUID != first.Context.ProjectUUID || w.Context.DocumentUUID != first.Context.DocumentUUID || w.Context.DocumentType != first.Context.DocumentType || w.Context.TabID != first.Context.TabID {
 			return "", false
 		}
+		// The tab id is "<doc>@<project>", identical in every host. A browser tab
+		// and the edadesk shell on the same document are two live editors, not a
+		// reload leftover, so only same-host registrations count as duplicates.
+		if w.Host.UserAgent != first.Host.UserAgent {
+			return "", false
+		}
 		if w.ConnectedAt.After(newest.ConnectedAt) {
 			newest = w
 		}
 	}
 	return newest.WindowID, true
+}
+
+// describeWindows lists candidate windows with host and document for an
+// ambiguity error, so the caller can pick --window without another health call.
+func describeWindows(ws []healthWindow) string {
+	parts := make([]string, 0, len(ws))
+	for _, w := range ws {
+		host := w.Host.Kind
+		if host == "" {
+			host = "unknown"
+		}
+		parts = append(parts, fmt.Sprintf("%s [host=%s doc=%s]", w.WindowID, host, w.Context.DocumentType))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // cliClientID identifies this CLI process to the daemon, computed once per
