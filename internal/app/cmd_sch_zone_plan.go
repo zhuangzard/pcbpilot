@@ -228,6 +228,10 @@ type partitionPlan struct {
 	// SheetAssumed:页上没有图框图元,按 A4-only 域界假定 1170×825 规划
 	// (图框需人工在 UI 重放;见 schSheetOrA4)。
 	SheetAssumed bool `json:"sheetAssumed,omitempty"`
+	// FrameGap is the clear space required between two partition frames
+	// (partitionOpts.Gutter). Frames that share an edge stop reading as separate
+	// modules — the dashed frame loses its point (user, 2026-10-17).
+	FrameGap float64 `json:"frameGap,omitempty"`
 }
 
 type partitionOpts struct {
@@ -389,7 +393,7 @@ func planPartitions(sheet layoutBBox, keepout *layoutBBox, modules []partitionMo
 // 说明又不在带里,那正是根因 C 自增长反馈环的翻版。
 func planPartitionsWithNotes(sheet layoutBBox, keepout *layoutBBox, modules []partitionModule,
 	opts partitionOpts, noteObstacles []layoutBBox) partitionPlan {
-	plan := partitionPlan{Sheet: sheet, Keepout: keepout}
+	plan := partitionPlan{Sheet: sheet, Keepout: keepout, FrameGap: opts.Gutter}
 	plan.Capacity = diagnoseZoneCapacity(sheet, keepout, modules, opts)
 	usable := layoutBBox{
 		MinX: sheet.MinX + opts.Margin, MinY: sheet.MinY + opts.Margin,
@@ -506,7 +510,7 @@ func planPartitionsWithNotes(sheet layoutBBox, keepout *layoutBBox, modules []pa
 	// 第一遍半:邻框也吃「可让的余量」(见 tightenPartitionFrames)。必须排在
 	// reserveNoteAreas 之前 —— 说明扩边的边界钉在 BaseBBox 上,收紧后的基础框才是
 	// `sch note`(登记前)与 planner(登记后)都能算出的同一个基准。
-	tightenPartitionFrames(plan.Partitions, floors, opts.TitleBand)
+	tightenPartitionFrames(plan.Partitions, floors, opts.TitleBand, plan.FrameGap)
 	reserveNoteAreas(&plan, noteNeeds, sheet, keepout, opts, noteObstacles)
 	plan.Validation = validatePartitions(plan, modules, keepout)
 	return plan
@@ -543,7 +547,7 @@ func planPartitionsWithNotes(sheet layoutBBox, keepout *layoutBBox, modules []pa
 //
 // **框不重叠这条红线不靠本函数**:它由 validatePartitions + partitionDrawGate 守着,
 // 收紧只是把「本来就不该判违规的那一类」还原成合法计划;收不动的照旧 blocked。
-func tightenPartitionFrames(ps []partitionRect, floors []layoutBBox, titleBand float64) {
+func tightenPartitionFrames(ps []partitionRect, floors []layoutBBox, titleBand, gap float64) {
 	if len(ps) != len(floors) || len(ps) < 2 {
 		return
 	}
@@ -553,11 +557,11 @@ func tightenPartitionFrames(ps []partitionRect, floors []layoutBBox, titleBand f
 	}
 	for i := 0; i < len(ps); i++ {
 		for j := i + 1; j < len(ps); j++ {
-			if !boxesOverlap(ps[i].BBox, ps[j].BBox) {
+			if !boxesGapOverlap(ps[i].BBox, ps[j].BBox, gap) {
 				continue
 			}
 			axis, aFirst, loLim, hiLim := partitionGapSplit(
-				ps[i].contentRect(), ps[j].contentRect(), floors[i], floors[j])
+				ps[i].contentRect(), ps[j].contentRect(), floors[i], floors[j], gap)
 			lo, hi := i, j
 			if !aFirst {
 				lo, hi = j, i
@@ -616,7 +620,7 @@ func tightenPartitionFrames(ps []partitionRect, floors []layoutBBox, titleBand f
 // 返回 "" —— 那是挪件才能解决的病。
 //
 // 纯函数、与顺序无关:交换 a/b 只翻转 aFirst,axis 与两个界不变。
-func partitionGapSplit(ca, cb, fa, fb layoutBBox) (axis string, aFirst bool, loLimit, hiLimit float64) {
+func partitionGapSplit(ca, cb, fa, fb layoutBBox, gap float64) (axis string, aFirst bool, loLimit, hiLimit float64) {
 	// 一条轴上的判定:内容区间 [caLo,caHi] / [cbLo,cbHi],下界 [faLo,faHi] / [fbLo,fbHi]。
 	split := func(caLo, caHi, cbLo, cbHi, faLo, faHi, fbLo, fbHi float64) (slack, lo, hi float64, first, ok bool) {
 		var floorLoMax, floorHiMin float64
@@ -628,7 +632,10 @@ func partitionGapSplit(ca, cb, fa, fb layoutBBox) (axis string, aFirst bool, loL
 		default:
 			return 0, 0, 0, false, false
 		}
-		slack = floorHiMin - floorLoMax
+		// The gap between the frames is kept first; only what is left over is
+		// split. Short of it, each side stops at its floor and the residue is
+		// what the validator reports.
+		slack = floorHiMin - floorLoMax - gap
 		half := math.Max(0, slack) / 2
 		return slack, floorLoMax + half, floorHiMin - half, first, true
 	}
@@ -841,10 +848,10 @@ func validatePartitionsWithJudge(plan partitionPlan, modules []partitionModule,
 	}
 	for i := 0; i < len(ps); i++ {
 		for j := i + 1; j < len(ps); j++ {
-			if boxesOverlap(ps[i].BBox, ps[j].BBox) {
+			if boxesGapOverlap(ps[i].BBox, ps[j].BBox, plan.FrameGap) {
 				v.PartitionOverlap++
 				v.PartitionOverlapDetail = append(v.PartitionOverlapDetail,
-					partitionOverlapDetail(plan.Sheet, ps[i], ps[j]))
+					partitionOverlapDetail(plan.Sheet, ps[i], ps[j], plan.FrameGap))
 			}
 		}
 	}
@@ -1029,9 +1036,10 @@ func zoneSeparationHint(sheet layoutBBox, a, b partitionRect, axis string, need 
 
 // partitionOverlapDetail 逐对说清:谁顶谁、重叠多少、**是内容真交叠还是版式预留
 // 顶住**(两种病修法不同)、以及最小挪动。
-func partitionOverlapDetail(sheet layoutBBox, a, b partitionRect) string {
-	ox := math.Min(a.BBox.MaxX, b.BBox.MaxX) - math.Max(a.BBox.MinX, b.BBox.MinX)
-	oy := math.Min(a.BBox.MaxY, b.BBox.MaxY) - math.Max(a.BBox.MinY, b.BBox.MinY)
+func partitionOverlapDetail(sheet layoutBBox, a, b partitionRect, gap float64) string {
+	// Measured with the required frame gap: the advised move must leave it.
+	ox := math.Min(a.BBox.MaxX, b.BBox.MaxX) - math.Max(a.BBox.MinX, b.BBox.MinX) + gap
+	oy := math.Min(a.BBox.MaxY, b.BBox.MaxY) - math.Max(a.BBox.MinY, b.BBox.MinY) + gap
 	cause := "两区的成员体积本身就交叠 —— 不存在既包住各自内容、又互不重叠的一组框,只能挪件"
 	if !boxesOverlap(a.contentRect(), b.contentRect()) {
 		cause = "两区体积并不交叠,顶住的是版式预留(区名带/说明带 + 边距);可让的边距已经对半让到底,仍差这么多"
@@ -1042,8 +1050,8 @@ func partitionOverlapDetail(sheet layoutBBox, a, b partitionRect) string {
 	if oy < ox {
 		axes = []string{"y", "x"}
 	}
-	return fmt.Sprintf("区 %q ↔ 区 %q:框重叠 %.0f×%.0f,%s。%s;或%s",
-		partitionZoneName(a), partitionZoneName(b), ox, oy, cause,
+	return fmt.Sprintf("区 %q ↔ 区 %q:框重叠或间距不足 %.0f×%.0f(须留 %.0f),%s。%s;或%s",
+		partitionZoneName(a), partitionZoneName(b), ox, oy, gap, cause,
 		zoneSeparationHint(sheet, a, b, axes[0], needs[axes[0]]),
 		zoneSeparationHint(sheet, a, b, axes[1], needs[axes[1]]))
 }
