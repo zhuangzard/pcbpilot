@@ -520,3 +520,44 @@ func TestPackZonesRepacksWhenKeptLayoutOverflows(t *testing.T) {
 		t.Fatalf("overflowing kept layout not repacked: %v", out)
 	}
 }
+
+// Identical input must draw identical schematics: the decap anchor used to be
+// chosen by ranging over a map, so two same-height supply pins let Go's random
+// map order pick the side (field report 2026-10-19, EG-08 flipping run to run).
+func TestSbGridZoneIsDeterministic(t *testing.T) {
+	gen2 := []sbPin{{Number: "1", Name: "1", Type: "passive"}, {Number: "2", Name: "2", Type: "passive"}}
+	spec := &sbSpec{
+		Name:  "det",
+		Zones: []sbZone{{ID: "mcu", Title: "MCU"}},
+		Parts: []sbPart{{Ref: "U1", Value: "MCU", Zone: "mcu", Pins: []sbPin{
+			{Number: "1", Name: "VDDL", Type: "power_in"}, {Number: "2", Name: "PA0", Type: "bidirectional"},
+			{Number: "3", Name: "PA1", Type: "bidirectional"}, {Number: "4", Name: "VSSL", Type: "power_in"},
+			{Number: "5", Name: "VSSR", Type: "power_in"}, {Number: "6", Name: "PB0", Type: "bidirectional"},
+			{Number: "7", Name: "PB1", Type: "bidirectional"}, {Number: "8", Name: "VDDR", Type: "power_in"}}},
+			{Ref: "C1", Value: "100nF", Zone: "mcu", Pins: gen2}, {Ref: "C2", Value: "100nF", Zone: "mcu", Pins: gen2}},
+		Nets: []sbNet{
+			{Name: "+3V3", Pins: []string{"U1:VDDL", "U1:VDDR", "C1:1", "C2:1"}},
+			{Name: "GND", Pins: []string{"U1:VSSL", "U1:VSSR", "C1:2", "C2:2"}},
+		},
+	}
+	var first string
+	for i := 0; i < 40; i++ {
+		d, _, err := buildDesign(spec, sbResolveOpts{Offline: true})
+		if err != nil {
+			t.Fatalf("design: %v", err)
+		}
+		zl, err := gridZone(d, d.zoneInputs()[0], &sbMeasure{cache: map[string]kicad.SceneSymbol{}}, sbGridVariants[0])
+		if err != nil {
+			t.Fatalf("grid: %v", err)
+		}
+		got, _ := json.Marshal(struct {
+			P any
+			W any
+		}{zl.Parts, zl.Wires})
+		if i == 0 {
+			first = string(got)
+		} else if string(got) != first {
+			t.Fatalf("run %d drew a different zone for identical input", i)
+		}
+	}
+}

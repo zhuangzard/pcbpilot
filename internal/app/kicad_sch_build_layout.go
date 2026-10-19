@@ -1096,10 +1096,16 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 				if !ok || d.NetKind[n] != pass {
 					continue
 				}
+				// Topmost pin wins; a Y tie (e.g. left and right supply pins at the
+				// same height) is broken by pin key — ranging over the map alone
+				// let Go's random order pick the side, so identical input drew
+				// different wires and EG-08 passed or failed run to run (a field project
+				// 01B 2026-10-19).
+				anchorKey := ""
 				for k, pa := range pins {
-					if pa.ref == coreRef && d.PinNet[k] == n && (anchor == nil || pa.at.Y < anchor.at.Y) {
+					if pa.ref == coreRef && d.PinNet[k] == n && (anchor == nil || pa.at.Y < anchor.at.Y || (pa.at.Y == anchor.at.Y && k < anchorKey)) {
 						a := pa
-						anchor = &a
+						anchor, anchorKey = &a, k
 					}
 				}
 			}
