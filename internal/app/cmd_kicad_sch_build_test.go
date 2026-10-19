@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -470,5 +471,52 @@ func TestSbDroppedPages(t *testing.T) {
 	nl.Components = append(nl.Components, kicad.SchNetComp{Ref: "C2"})
 	if got := sbDroppedPages(d, nl); len(got) != 0 {
 		t.Fatalf("a page with any part present is not dropped: %v", got)
+	}
+}
+
+// field report 2026-10-18: a rebuild without --fresh rejected the fresh build's
+// own zone positions (packed closer than the old keep check allowed), placed
+// those zones past A0 and the sheets came back as A4. Packing must be
+// idempotent: re-packing with the previous translations keeps every one.
+func TestPackZonesKeepsItsOwnFreshPositions(t *testing.T) {
+	for seed := 1; seed <= 40; seed++ {
+		layouts := map[string]*sbZoneLayout{}
+		var ids []string
+		n := 4 + seed%9
+		for i := 0; i < n; i++ {
+			id := fmt.Sprintf("z%02d", i)
+			w := 30 + float64((seed*7+i*13)%90) + 0.37*float64(i)
+			h := 20 + float64((seed*11+i*5)%70) + 0.61*float64(seed%3)
+			layouts[id] = &sbZoneLayout{Box: kicad.Box{MinX: -w / 3, MinY: -h / 2, MaxX: 2 * w / 3, MaxY: h / 2}}
+			ids = append(ids, id)
+		}
+		t0 := packZones(ids, layouts, nil)
+		if len(t0) != n {
+			t.Fatalf("seed %d: fresh pack placed %d of %d zones", seed, len(t0), n)
+		}
+		t1 := packZones(ids, layouts, t0)
+		for _, id := range ids {
+			if t1[id] != t0[id] {
+				t.Fatalf("seed %d: zone %s moved on an unchanged rebuild: %v → %v", seed, id, t0[id], t1[id])
+			}
+		}
+	}
+}
+
+// Kept positions that no longer fit the largest sheet are repacked instead of
+// being shipped off-page.
+func TestPackZonesRepacksWhenKeptLayoutOverflows(t *testing.T) {
+	layouts := map[string]*sbZoneLayout{
+		"a": {Box: kicad.Box{MaxX: 100, MaxY: 80}},
+		"b": {Box: kicad.Box{MaxX: 100, MaxY: 80}},
+	}
+	keep := map[string]kicad.Pt{"a": {X: 20, Y: 30}, "b": {X: 1500, Y: 30}} // b far past A0
+	out := packZones([]string{"a", "b"}, layouts, keep)
+	var frames []kicad.Box
+	for id, tr := range out {
+		frames = append(frames, sbFootprint(layouts[id].Box, tr))
+	}
+	if len(out) != 2 || !sbFitsLargestPaper(frames) {
+		t.Fatalf("overflowing kept layout not repacked: %v", out)
 	}
 }

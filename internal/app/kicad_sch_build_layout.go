@@ -1884,7 +1884,14 @@ func packZones(ids []string, layouts map[string]*sbZoneLayout, keep map[string]k
 			fp := sbFootprint(layouts[id].Box, t)
 			clash := false
 			for _, b := range placed {
-				if sbOverlap(sbGrow(fp, sbZoneGap/2), b) {
+				// A kept zone is dropped only on a REAL overlap. sbPackFresh
+				// packs frames 5.08 mm apart and then snaps each origin, so
+				// neighbours can end up ~1.3 mm apart; the old sbZoneGap/2
+				// (3.81 mm) test rejected a fresh build's own positions on the
+				// next rebuild and re-placed those zones past A0 (a field board
+				// 2026-10-18: A0 sheets came back as A4 with thousands of
+				// off-page findings unless --fresh).
+				if sbOverlap(fp, b) {
 					clash = true
 				}
 			}
@@ -1940,5 +1947,26 @@ func packZones(ids []string, layouts map[string]*sbZoneLayout, keep map[string]k
 		x += w + sbZoneGap
 		rowH = math.Max(rowH, h)
 	}
+	if !fresh && !sbFitsLargestPaper(placed) {
+		// incremental placement overflowed the largest sheet: repack the
+		// page from scratch rather than ship content that cannot fit
+		if f := sbPackFresh(ids, layouts); f != nil {
+			return f
+		}
+	}
 	return out
+}
+
+// sbFitsLargestPaper reports whether zone frames fit inside the drawing area
+// of the largest paper (border 10 mm on every side).
+func sbFitsLargestPaper(frames []kicad.Box) bool {
+	if len(frames) == 0 {
+		return true
+	}
+	big := kicad.Papers[len(kicad.Papers)-1]
+	u := frames[0]
+	for _, b := range frames[1:] {
+		u = kicad.Box{MinX: math.Min(u.MinX, b.MinX), MinY: math.Min(u.MinY, b.MinY), MaxX: math.Max(u.MaxX, b.MaxX), MaxY: math.Max(u.MaxY, b.MaxY)}
+	}
+	return u.MinX >= 10 && u.MinY >= 10 && u.MaxX <= big.W-10 && u.MaxY <= big.H-10
 }
