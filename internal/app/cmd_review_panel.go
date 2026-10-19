@@ -87,11 +87,13 @@ const reviewerFileAsk = "Read the file " + reviewerPromptFile + " in the current
 func reviewerInvocation(name, dir, prompt string) (reviewerCall, error) {
 	switch name {
 	case "codex":
-		// `codex exec -` reads the prompt from stdin.
-		return reviewerCall{Bin: "codex", Args: []string{"exec", "--skip-git-repo-check", "-"}, Stdin: prompt}, nil
+		// `codex exec -` reads the prompt from stdin; -C pins its workspace to
+		// the private directory and the sandbox is read-only.
+		return reviewerCall{Bin: "codex", Args: []string{"exec", "--skip-git-repo-check", "--ephemeral", "-s", "read-only", "-C", dir, "-"}, Stdin: prompt}, nil
 	case "claude":
-		// `claude -p` with no prompt argument reads it from stdin.
-		return reviewerCall{Bin: "claude", Args: []string{"-p"}, Stdin: prompt}, nil
+		// `claude -p` with no prompt argument reads it from stdin. The prompt
+		// is self-contained, so the reviewer gets no tools at all.
+		return reviewerCall{Bin: "claude", Args: []string{"-p", "--tools", ""}, Stdin: prompt}, nil
 	case "kimi":
 		// kimi -p has no stdin mode: hand it the prompt as a file in its own
 		// directory (--add-dir grants the read). Not --auto: kimi refuses -p
@@ -101,19 +103,18 @@ func reviewerInvocation(name, dir, prompt string) (reviewerCall, error) {
 	return reviewerCall{}, fmt.Errorf("unknown reviewer %q", name)
 }
 
-// reviewerRunner runs reviewer name in a private temp directory (codex keeps
-// the caller's directory, as before).
+// reviewerRunner runs reviewer name in a private, otherwise empty temp
+// directory. External review CLIs must never get the project repository as
+// cwd / -C / --add-dir: field report 2026-10-19 had a review CLI read confidential
+// files from the working directory, and codex used to inherit the caller's
+// cwd (the project) here. The prompt already carries every input it needs.
 func reviewerRunner(name string) reviewerRun {
 	return func(ctx context.Context, prompt string) (string, error) {
-		dir := ""
-		if name != "codex" {
-			d, err := os.MkdirTemp("", "pcbpilot-"+name+"-")
-			if err != nil {
-				return "", err
-			}
-			defer os.RemoveAll(d)
-			dir = d
+		dir, err := os.MkdirTemp("", "pcbpilot-review-"+name+"-")
+		if err != nil {
+			return "", err
 		}
+		defer os.RemoveAll(dir)
 		call, err := reviewerInvocation(name, dir, prompt)
 		if err != nil {
 			return "", err

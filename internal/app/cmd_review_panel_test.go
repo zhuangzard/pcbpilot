@@ -127,3 +127,31 @@ func TestReviewerInvocationKeepsLargePromptOffCommandLine(t *testing.T) {
 		t.Fatal("unknown reviewer accepted")
 	}
 }
+
+// field report 2026-10-19: a review CLI read confidential files from the project
+// working directory. Every reviewer is confined to its private prompt-only
+// directory: codex is pinned there with -C and a read-only sandbox, claude
+// gets no tools, kimi only that directory via --add-dir.
+func TestReviewerInvocationIsConfinedToPrivateDir(t *testing.T) {
+	const dir = "PRIVATE-DIR"
+	codex, _ := reviewerInvocation("codex", dir, "p")
+	if a := strings.Join(codex.Args, " "); !strings.Contains(a, "-C "+dir) || !strings.Contains(a, "-s read-only") {
+		t.Errorf("codex not pinned to the private dir read-only: %v", codex.Args)
+	}
+	claude, _ := reviewerInvocation("claude", dir, "p")
+	tools := -1
+	for i, a := range claude.Args {
+		if a == "--tools" && i+1 < len(claude.Args) && claude.Args[i+1] == "" {
+			tools = i
+		}
+	}
+	if tools < 0 {
+		t.Errorf("claude reviewer must run with --tools \"\": %v", claude.Args)
+	}
+	kimi, _ := reviewerInvocation("kimi", dir, "p")
+	for i, a := range kimi.Args {
+		if a == "--add-dir" && (i+1 >= len(kimi.Args) || kimi.Args[i+1] != dir) {
+			t.Errorf("kimi --add-dir must be the private dir: %v", kimi.Args)
+		}
+	}
+}
