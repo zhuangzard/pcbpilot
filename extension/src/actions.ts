@@ -1291,15 +1291,18 @@ export const schematicComponentsList: Handler = async (payload) => {
 	// tell "already connected to the target net" (skip) from "connected to a DIFFERENT
 	// net" (conflict) from "floating" (new connect). See issue #50.
 	let pinNetsByDesignator: Map<string, Map<string, string>> | null = null;
-	// Designators that resolve to MORE THAN ONE distinct device identity across
-	// the whole document (issue #136: cross-page designator collision). The
-	// netlist is keyed by designator.pin DOCUMENT-wide, so a collided designator's
-	// pin→net attribution is poisoned — autoconnect would misread "already
-	// connected to <some other page's net>". For those we report net:null
-	// (unknown) + netAmbiguous:true instead of a confidently-wrong net. Sub-parts
-	// of one physical device (U1.A/U1.B) share the device identity and are NOT
-	// flagged.
-	const ambiguousDesignators = new Set<string>();
+	// Designators carried by more than one component of the current schematic's
+	// netlist (issue #136: cross-page designator collision). The netlist is keyed
+	// by designator.pin, so a collided designator's pin→net attribution is
+	// poisoned — autoconnect would misread "already connected to <some other
+	// page's net>". For those we report net:null (unknown) + netAmbiguous:true
+	// instead of a confidently-wrong net. The netlist folds sub-parts of one
+	// physical device (U1.A/U1.B) into one component, so they are NOT flagged.
+	// Taken from the netlist rather than getAll(undefined, true): that call spans
+	// every LOADED page of the PROJECT, so a second schematic reusing a
+	// designator (RK3568 board V0.3/V1.0, 2026-10-23) blanked a real part's nets,
+	// and only after the other schematic's page happened to be opened.
+	let ambiguousDesignators = new Set<string>();
 	// Whether the netlist behind every pin's `net` was actually fetched+parsed. When
 	// it was not, `net` is FORCED to null on every pin of every component. Reporting
 	// that flag is not cosmetic: a run of nulls used to read as "all these pins are
@@ -1320,36 +1323,13 @@ export const schematicComponentsList: Handler = async (payload) => {
 		try {
 			const collected = await collectNetlistPinNets();
 			pinNetsByDesignator = collected.byDesignator;
+			ambiguousDesignators = collected.ambiguous;
 			pinNetsAvailable = collected.available;
 			pinNetsError = collected.error;
 		}
 		catch (err) {
 			pinNetsByDesignator = null;
 			pinNetsError = describeThrown(err);
-		}
-		if (pinNetsByDesignator) {
-			try {
-				const everywhere = allPages ? components : await eda.sch_PrimitiveComponent.getAll(undefined, true);
-				const identByDesig = new Map<string, Set<string>>();
-				for (const c of everywhere ?? []) {
-					let type = '';
-					try { type = String(c.getState_ComponentType?.() ?? ''); }
-					catch { continue; }
-					if (type !== 'part' && type !== '') continue;
-					const d = String(c.getState_Designator?.() ?? '');
-					if (!d) continue;
-					let ident = '';
-					try { ident = JSON.stringify(c.getState_Component?.() ?? '') || String(c.getState_Name?.() ?? ''); }
-					catch { ident = ''; }
-					const set = identByDesig.get(d) ?? new Set<string>();
-					set.add(ident);
-					identByDesig.set(d, set);
-				}
-				for (const [d, idents] of identByDesig) {
-					if (idents.size > 1) ambiguousDesignators.add(d);
-				}
-			}
-			catch { /* best-effort — no ambiguity info degrades to prior behavior */ }
 		}
 	}
 
@@ -3954,6 +3934,12 @@ export function connectivityWireSegments(segments: CheckWireSegment[]): CheckWir
 // and manufacture geom-net-mismatch false reports.
 interface NetlistPinNets {
 	byDesignator: Map<string, Map<string, string>>;
+	/** Designators carried by MORE THAN ONE netlist component (issue #136). The
+	 * export covers exactly the current schematic and folds a multi-part device's
+	 * sub-symbols into one component, so this is the collision set at the right
+	 * scope: another schematic of the same project reusing the designator is not
+	 * a collision. */
+	ambiguous: Set<string>;
 	available: boolean;
 	/** Why the netlist could not be fetched/parsed. Set only when available===false,
 	 * so callers can report a CAUSE instead of silently degrading to "no nets". */
@@ -3962,8 +3948,9 @@ interface NetlistPinNets {
 
 async function collectNetlistPinNets(_allPages = false): Promise<NetlistPinNets> {
 	const byDesignator = new Map<string, Map<string, string>>();
+	const ambiguous = new Set<string>();
 	const muted = (error?: string): NetlistPinNets =>
-		({ byDesignator, available: false, ...(error ? { error } : {}) });
+		({ byDesignator, ambiguous, available: false, ...(error ? { error } : {}) });
 	let file: File | undefined;
 	try { file = await eda.sch_ManufactureData.getNetlistFile(); }
 	catch (err) { return muted(describeThrown(err)); }
@@ -3976,6 +3963,7 @@ async function collectNetlistPinNets(_allPages = false): Promise<NetlistPinNets>
 	for (const comp of Object.values(components)) {
 		const designator = String(comp.props?.Designator ?? '');
 		if (!designator || !comp.pinInfoMap) continue;
+		if (byDesignator.has(designator)) ambiguous.add(designator);
 		const pins = byDesignator.get(designator) ?? new Map<string, string>();
 		for (const pin of Object.values(comp.pinInfoMap)) {
 			const number = String((pin as { number?: unknown })?.number ?? '');
@@ -3984,7 +3972,7 @@ async function collectNetlistPinNets(_allPages = false): Promise<NetlistPinNets>
 		}
 		byDesignator.set(designator, pins);
 	}
-	return { byDesignator, available: true };
+	return { byDesignator, ambiguous, available: true };
 }
 
 // ─── Polarity-convention outlier (#183 phase 1) ─────────────────────────────

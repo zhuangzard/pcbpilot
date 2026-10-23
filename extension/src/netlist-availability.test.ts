@@ -144,3 +144,50 @@ test('read: a healthy netlist carries available=true and builds the net table', 
 	assert.deepEqual(out.result.floatingPins, []);
 	assert.deepEqual(out.result.nets.map((n: any) => [n.net, n.degree]).sort(), [['GND', 1], ['VCC', 1]]);
 });
+
+// ─── Designator-collision scope (#136, RK3568 board 2026-10-23) ───────────────
+//
+// Live context: the open-source RK3568 project holds TWO schematics (board V0.3
+// and V1.0), both with a PMIC U11 whose device identity differs. Reading V1.0's
+// PMIC page after V0.3's had been opened blanked all 69 of U11's pin nets
+// (netAmbiguous) — and re-reading V0.3 then blanked V0.3's U11 too — because the
+// collision check used getAll(undefined, true), which spans every LOADED page of
+// the PROJECT. The official netlist export showed U11 fully connected.
+
+function partAs(designator: string, device: string, sub = ''): unknown {
+	return { ...(part(designator, 0, 0) as object), getState_Component: () => ({ uuid: device, name: device }), getState_SubPartName: () => sub };
+}
+
+/** Current page holds `onPage`; getAll(_, true) returns `everywhere` (other schematics included). */
+function installScoped(t: { after: (f: () => void) => void }, onPage: unknown[], everywhere: unknown[], netlistComponents: Record<string, unknown>): void {
+	install(t, async () => ({ text: async () => JSON.stringify({ components: netlistComponents }) }));
+	(globalThis as any).eda.sch_PrimitiveComponent.getAll = async (_type: unknown, allPages?: boolean) => allPages ? everywhere : onPage;
+}
+
+const u11 = { props: { Designator: 'U11' }, pinInfoMap: { p1: { number: '1', net: 'I2C0_SCL_PMIC' }, p2: { number: '2', net: 'I2C0_SDA_PMIC' } } };
+
+test('list: the same designator in ANOTHER schematic of the project is not a collision', async t => {
+	const current = partAs('U11', 'rk809-v10');
+	installScoped(t, [current], [current, partAs('U11', 'rk809-v03')], { gge1: u11 });
+	const out: any = await schematicComponentsList({ includePins: true });
+	const c = out.result.components[0];
+	assert.equal(c.netAmbiguous, undefined);
+	assert.deepEqual(c.pins.map((p: any) => p.net), ['I2C0_SCL_PMIC', 'I2C0_SDA_PMIC']);
+});
+
+test('list: two netlist components sharing a designator are still ambiguous (#136)', async t => {
+	const current = partAs('U11', 'rk809');
+	installScoped(t, [current], [current], { gge1: u11, gge2: { props: { Designator: 'U11' }, pinInfoMap: { p1: { number: '1', net: 'OTHER' } } } });
+	const out: any = await schematicComponentsList({ includePins: true });
+	const c = out.result.components[0];
+	assert.equal(c.netAmbiguous, true);
+	assert.ok(c.pins.every((p: any) => p.net === null));
+});
+
+test('list: sub-parts of one device share one netlist component and are not ambiguous', async t => {
+	const a = partAs('U11', 'rk809', 'RK809-2.1'), b = partAs('U11', 'rk809', 'RK809-2.2');
+	installScoped(t, [a, b], [a, b], { gge1: u11 });
+	const out: any = await schematicComponentsList({ includePins: true });
+	assert.ok(out.result.components.every((c: any) => c.netAmbiguous === undefined));
+	assert.deepEqual(out.result.components[1].pins.map((p: any) => p.net), ['I2C0_SCL_PMIC', 'I2C0_SDA_PMIC']);
+});
