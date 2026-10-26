@@ -391,8 +391,16 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 			reuse[id] = &l
 		}
 	}
-	layouts, notes := layoutZones(d, zis, reuse, sbLayoutOpts{NoPlanner: o.NoPlanner, Budget: o.PlannerBudget, Jobs: o.Jobs, Timeout: o.PlannerTimeout})
+	lo := sbLayoutOpts{NoPlanner: o.NoPlanner, Budget: o.PlannerBudget, Jobs: o.Jobs, Timeout: o.PlannerTimeout}
+	layouts, notes := layoutZones(d, zis, reuse, lo)
 	rep.Warnings = append(rep.Warnings, notes...)
+	if !o.NoAutoSplit {
+		// a zone with no clean drawing is split into one sub-zone per IC
+		// (kicad_sch_build_split.go); kept only when strictly better
+		var splitNotes []string
+		zis, splitNotes = sbAutoSplitZones(d, zis, layouts, reuse, lo)
+		rep.Warnings = append(rep.Warnings, splitNotes...)
+	}
 	for _, zi := range zis {
 		if layouts[zi.Zone.ID] == nil {
 			return rep, fmt.Errorf("zone %s could not be laid out", zi.Zone.ID)

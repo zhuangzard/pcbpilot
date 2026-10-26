@@ -69,7 +69,7 @@ func sbZoneFindings(d *sbDesign, zi *sbZoneIn, zl *sbZoneLayout) []string {
 	if err != nil {
 		return []string{err.Error()}
 	}
-	var out []string
+	out := sbSheetShorts(text, d) // a short disqualifies the drawing (layoutZones)
 	for _, f := range kicad.CheckSchematic(text, kicad.CheckOptions{}) {
 		out = append(out, f.Kind+": "+f.Message)
 	}
@@ -84,6 +84,16 @@ func sbZoneFindings(d *sbDesign, zi *sbZoneIn, zl *sbZoneLayout) []string {
 		}
 	}
 	return out
+}
+
+// sbHasShort reports a zone drawing that joins two nets (sbSheetShorts).
+func sbHasShort(findings []string) bool {
+	for _, f := range findings {
+		if strings.HasPrefix(f, "short: ") {
+			return true
+		}
+	}
+	return false
 }
 
 func sbShortHash(s string) string {
@@ -1026,6 +1036,12 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 								tee = []kicad.Pt{tm, end}
 								mk = sbMarker{Kind: d.NetKind[n], Net: n, At: end, Dir: dir}
 							default:
+								// the label rides on the first segment: it must be long
+								// enough for the text, or the next bend runs through it
+								// (label-on-wire; a field board's dense supply zone a signal label on 6.35 mm)
+								if math.Hypot(a.X-b.X, a.Y-b.Y) < sbTextW(n)+2.54 {
+									continue
+								}
 								at := kicad.Pt{X: sbSnapHalf(a.X + dv.X*1.27), Y: sbSnapHalf(a.Y + dv.Y*1.27)}
 								mk = sbMarker{Kind: "label", Net: n, At: at, Dir: t.dir, OnWire: true}
 							}
@@ -1501,11 +1517,15 @@ func sbFixStubs(zl *sbZoneLayout, pinNet map[kicad.Pt]string, bodies []kicad.Box
 		// so a zone with a multi-pin same-net IC side had no legal stub at all
 		// and "could not be laid out" (field report 2026-10-26).
 		ownNet := sbPinNetName(pinNet[start])
-		var others [][]kicad.Pt
+		// others: wires that would SHORT this stub (foreign nets only);
+		// allOthers: every other wire — none may run through the marker or its
+		// text, same net or not (that is a label-on-wire defect, not a short)
+		var others, allOthers [][]kicad.Pt
 		for j, w := range zl.Wires {
 			if j == wi {
 				continue
 			}
+			allOthers = append(allOthers, w)
 			if ownNet != "" && sbWireNet(w, pinNet, zl.Markers) == ownNet {
 				continue
 			}
@@ -1535,7 +1555,7 @@ func sbFixStubs(zl *sbZoneLayout, pinNet map[kicad.Pt]string, bodies []kicad.Box
 					return true
 				}
 			}
-			for _, w := range others { // no wire through the marker or its text
+			for _, w := range allOthers { // no wire through the marker or its text
 				for i := 0; i+1 < len(w); i++ {
 					sb := kicad.Box{MinX: math.Min(w[i].X, w[i+1].X), MinY: math.Min(w[i].Y, w[i+1].Y), MaxX: math.Max(w[i].X, w[i+1].X), MaxY: math.Max(w[i].Y, w[i+1].Y)}
 					if sbOverlap(sbGrow(sb, 0.2), mb) && !(w[i] == b || w[i+1] == b) {
@@ -1746,24 +1766,30 @@ func sbPinNetName(v string) string {
 	return n
 }
 
-// sbWireNet is the net a wire carries when one of its ends sits on a
-// connected pin or on a power/ground/label marker; "" when unknown (an
-// unknown wire stays foreign — the conservative choice).
-func sbWireNet(w []kicad.Pt, pinNet map[kicad.Pt]string, markers []sbMarker) string {
+// sbWireNet is the net a wire carries, read from the PINS at its ends only;
+// "" when no end is on a connected pin or the ends disagree. An unknown wire
+// stays foreign — the conservative choice.
+//
+// Markers are deliberately not evidence: a stub's own power symbol can sit on
+// the end of a foreign wire, and reading the net from that symbol called the
+// foreign wire "same net" and let +5V merge into a ground net (full-board run
+// 2026-10-26, caught by the KiCad netlist gate).
+func sbWireNet(w []kicad.Pt, pinNet map[kicad.Pt]string, _ []sbMarker) string {
 	if len(w) == 0 {
 		return ""
 	}
+	net := ""
 	for _, end := range []kicad.Pt{w[0], w[len(w)-1]} {
-		if n := sbPinNetName(pinNet[end]); n != "" {
-			return n
+		n := sbPinNetName(pinNet[end])
+		if n == "" {
+			continue
 		}
-		for _, mk := range markers {
-			if mk.At == end && mk.Net != "" {
-				return mk.Net
-			}
+		if net != "" && n != net {
+			return ""
 		}
+		net = n
 	}
-	return ""
+	return net
 }
 
 func sbTouchesWires(a, b kicad.Pt, wires [][]kicad.Pt, allow kicad.Pt) bool {
@@ -1926,6 +1952,10 @@ func layoutZones(d *sbDesign, zis []*sbZoneIn, reuse map[string]*sbZoneLayout, o
 			var zl *sbZoneLayout
 			for _, c := range cands {
 				c.Findings = sbZoneFindings(d, zi, c)
+				if sbHasShort(c.Findings) {
+					perr = fmt.Errorf("planner drawing rejected: %s", c.Findings[0])
+					continue
+				}
 				zl = c
 			}
 			var gerr error
@@ -1943,6 +1973,10 @@ func layoutZones(d *sbDesign, zis []*sbZoneIn, reuse map[string]*sbZoneLayout, o
 					zg.Notes = append(zg.Notes, "planner: "+sbClip(perr.Error(), 900))
 				}
 				zg.Findings = sbZoneFindings(d, zi, zg)
+				if sbHasShort(zg.Findings) {
+					gerr = fmt.Errorf("grid drawing rejected: %s", zg.Findings[0])
+					continue
+				}
 				if zl == nil || len(zg.Findings) < len(zl.Findings) {
 					zl = zg
 				}

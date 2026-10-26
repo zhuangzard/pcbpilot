@@ -624,3 +624,173 @@ func TestFinishSbRunFailureIsNotOK(t *testing.T) {
 		t.Fatalf("a failed run must report ok:false with the error, got %s", b)
 	}
 }
+
+// Auto-split clustering (a field board's dense supply zone): every passive lands with the
+// IC it belongs to — near hint first, then shared signal nets, then a shared
+// supply (decoupling), then a signal-net neighbour; the rest go to the core.
+func TestSbClusterZone(t *testing.T) {
+	two := []sbPin{{Number: "1", Name: "1", Type: "passive"}, {Number: "2", Name: "2", Type: "passive"}}
+	ic := func(ref string, n int) sbPart {
+		var ps []sbPin
+		for i := 1; i <= n; i++ {
+			ps = append(ps, sbPin{Number: fmt.Sprint(i), Name: fmt.Sprintf("P%d", i), Type: "passive"})
+		}
+		return sbPart{Ref: ref, Value: ref, Zone: "z", Pins: ps}
+	}
+	cp := func(ref string) sbPart { return sbPart{Ref: ref, Value: "1u", Zone: "z", Pins: two} }
+	c4 := cp("C4")
+	c4.Near = "U2:P1"
+	spec := &sbSpec{
+		Name:  "cluster",
+		Zones: []sbZone{{ID: "z", Title: "Z"}},
+		Parts: []sbPart{ic("U1", 6), ic("U2", 4), cp("R1"), cp("R2"), cp("C3"), c4, cp("R5"), cp("R6")},
+		Nets: []sbNet{
+			{Name: "SIG1", Pins: []string{"U1:1", "R1:1"}}, // R1 → U1 (signal)
+			{Name: "SIG2", Pins: []string{"U2:2", "R2:1"}}, // R2 → U2 (signal)
+			{Name: "+5V", Pins: []string{"U1:3", "U2:1", "C3:1", "C4:1"}, Kind: "power"},
+			{Name: "GND", Pins: []string{"U1:4", "U2:3", "C3:2", "C4:2", "R6:2"}, Kind: "ground"},
+			{Name: "MID", Pins: []string{"R2:2", "R5:1"}},  // R5 → R2 → U2
+			{Name: "LONE", Pins: []string{"R6:1", "R5:2"}}, // R6 → R5 → U2
+			{Name: "S3", Pins: []string{"U1:2", "U2:4"}},
+		},
+	}
+	d, _, err := buildDesign(spec, sbResolveOpts{Offline: true})
+	if err != nil {
+		t.Fatalf("design: %v", err)
+	}
+	zi := d.zoneInputs()[0]
+	got := sbClusterZone(d, zi)
+	want := map[string]string{"U1": "U1", "U2": "U2", "R1": "U1", "R2": "U2", "C4": "U2", "R5": "U2", "R6": "U2"}
+	for ref, ic := range want {
+		if got[ref] != ic {
+			t.Errorf("%s → %s, want %s (all: %v)", ref, got[ref], ic, got)
+		}
+	}
+	if got["C3"] == "" {
+		t.Errorf("C3 (decap on a shared rail) unassigned: %v", got)
+	}
+	// a zone with one IC is never split
+	one := &sbSpec{Name: "one", Zones: []sbZone{{ID: "z"}}, Parts: []sbPart{ic("U1", 6), cp("R1")},
+		Nets: []sbNet{{Name: "A", Pins: []string{"U1:1", "R1:1"}}}}
+	d1, _, err := buildDesign(one, sbResolveOpts{Offline: true})
+	if err != nil {
+		t.Fatalf("design: %v", err)
+	}
+	if a := sbClusterZone(d1, d1.zoneInputs()[0]); a != nil {
+		t.Errorf("single-IC zone must not be split: %v", a)
+	}
+}
+
+// Review findings (Codex / Kimi 2026-10-26): supply evidence must not win
+// before signal propagation (LDO feedback divider reached through another
+// resistor), a long passive chain must follow its IC whatever the part order,
+// and generated sub-zone ids must never collide with existing zones.
+func TestSbClusterZoneStagedEvidence(t *testing.T) {
+	two := []sbPin{{Number: "1", Name: "1", Type: "passive"}, {Number: "2", Name: "2", Type: "passive"}}
+	ic := func(ref string, n int) sbPart {
+		var ps []sbPin
+		for i := 1; i <= n; i++ {
+			ps = append(ps, sbPin{Number: fmt.Sprint(i), Name: fmt.Sprintf("P%d", i), Type: "passive"})
+		}
+		return sbPart{Ref: ref, Value: ref, Zone: "z", Pins: ps}
+	}
+	r := func(ref string) sbPart { return sbPart{Ref: ref, Value: "10k", Zone: "z", Pins: two} }
+	// U2 has more pins (core, first in order); U1 is the LDO whose FB is
+	// reached through RSER. RTOP touches +3V3 (both ICs) and FBX.
+	parts := []sbPart{ic("U1", 4), ic("U2", 8), r("RTOP"), r("RSER")}
+	nets := []sbNet{
+		{Name: "+3V3", Pins: []string{"U1:1", "U2:1", "RTOP:1"}, Kind: "power"},
+		{Name: "GND", Pins: []string{"U1:2", "U2:2"}, Kind: "ground"},
+		{Name: "FB", Pins: []string{"U1:3", "RSER:2"}},
+		{Name: "FBX", Pins: []string{"RSER:1", "RTOP:2"}},
+	}
+	// a 6-resistor chain hanging off U1, listed in reverse order
+	prev := "U1:4"
+	var chain []string
+	for i := 6; i >= 1; i-- {
+		chain = append(chain, fmt.Sprintf("RC%d", i))
+	}
+	for i := len(chain) - 1; i >= 0; i-- {
+		parts = append(parts, r(chain[i]))
+	}
+	for i := len(chain) - 1; i >= 0; i-- {
+		nets = append(nets, sbNet{Name: fmt.Sprintf("CH%d", i), Pins: []string{prev, chain[i] + ":1"}})
+		prev = chain[i] + ":2"
+	}
+	spec := &sbSpec{Name: "staged", Zones: []sbZone{{ID: "z"}}, Parts: parts, Nets: nets}
+	d, _, err := buildDesign(spec, sbResolveOpts{Offline: true})
+	if err != nil {
+		t.Fatalf("design: %v", err)
+	}
+	zi := d.zoneInputs()[0]
+	if zi.Parts[0].Ref != "U2" {
+		t.Fatalf("test assumes U2 is the core, got %s", zi.Parts[0].Ref)
+	}
+	got := sbClusterZone(d, zi)
+	for _, ref := range append([]string{"RTOP", "RSER"}, chain...) {
+		if got[ref] != "U1" {
+			t.Errorf("%s → %s, want U1 (all: %v)", ref, got[ref], got)
+		}
+	}
+
+	ics := []*sbRPart{d.ByRef["U1"], d.ByRef["U2"]}
+	ids := sbSubZoneIDs([]sbZone{{ID: "z"}, {ID: "z_U1"}, {ID: "z_U1_2"}}, "z", ics)
+	if ids["U1"] == "z_U1" || ids["U1"] == "z_U1_2" || ids["U2"] != "z_U2" || ids["U1"] == ids["U2"] {
+		t.Errorf("sub-zone ids collide with existing zones: %v", ids)
+	}
+}
+
+// A stub's own power symbol may sit on the end of a FOREIGN wire. Reading the
+// wire's net from that symbol made the foreign wire "same net" and merged +5V
+// into a ground net on a full-board run (2026-10-26). Only pins are evidence.
+func TestSbWireNetUsesPinsOnly(t *testing.T) {
+	pinNet := map[kicad.Pt]string{{X: 0, Y: 0}: "GNDX#C1.2", {X: 20, Y: 0}: "+5V#C2.1"}
+	markers := []sbMarker{{Kind: "power", Net: "+5V", At: kicad.Pt{X: 10, Y: 0}}}
+	if n := sbWireNet([]kicad.Pt{{X: 0, Y: 0}, {X: 10, Y: 0}}, pinNet, markers); n != "GNDX" {
+		t.Errorf("wire from a GNDX pin to a +5V symbol is %q, want GNDX", n)
+	}
+	if n := sbWireNet([]kicad.Pt{{X: 5, Y: 5}, {X: 10, Y: 0}}, pinNet, markers); n != "" {
+		t.Errorf("a wire known only from a marker must stay unknown (foreign), got %q", n)
+	}
+	if n := sbWireNet([]kicad.Pt{{X: 0, Y: 0}, {X: 20, Y: 0}}, pinNet, markers); n != "" {
+		t.Errorf("a wire between two different nets must be unknown, got %q", n)
+	}
+}
+
+// sbSheetShorts flags a wire island that carries two different nets (a
+// supply symbol and a ground symbol on one wire) and stays quiet for a clean
+// island — the layout stage rejects a shorted zone drawing with it.
+func TestSbSheetShorts(t *testing.T) {
+	sheet := func(short bool) string {
+		e, err := kicad.OpenSchematic(kicad.NewSchematicText("A4", kicad.NewUUID(), true))
+		if err != nil {
+			t.Fatal(err)
+		}
+		e.AddWire(kicad.Pt{X: 50.8, Y: 50.8}, kicad.Pt{X: 76.2, Y: 50.8})
+		if _, err := e.AddPower("+5V", kicad.Pt{X: 50.8, Y: 50.8}, 0, false); err != nil {
+			t.Fatal(err)
+		}
+		other := kicad.Pt{X: 101.6, Y: 50.8} // off the wire
+		if short {
+			other = kicad.Pt{X: 76.2, Y: 50.8}
+		}
+		if _, err := e.AddPower("GND", other, 0, true); err != nil {
+			t.Fatal(err)
+		}
+		txt, err := e.Render()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return txt
+	}
+	d := &sbDesign{PinNet: map[string]string{}}
+	if got := sbSheetShorts(sheet(true), d); len(got) != 1 || !strings.Contains(got[0], "+5V") || !strings.Contains(got[0], "GND") {
+		t.Fatalf("supply and ground on one wire not reported: %v", got)
+	}
+	if got := sbSheetShorts(sheet(false), d); len(got) != 0 {
+		t.Fatalf("clean sheet reported a short: %v", got)
+	}
+	if !sbHasShort([]string{"text-overlap: x", "short: one wire island joins A + B"}) || sbHasShort([]string{"label-on-wire: y"}) {
+		t.Fatal("sbHasShort misclassifies findings")
+	}
+}

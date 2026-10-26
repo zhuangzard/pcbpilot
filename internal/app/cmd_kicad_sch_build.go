@@ -1115,6 +1115,7 @@ type sbOptions struct {
 	FromConn                       []string
 	Offline, DryRun, NoIntent      bool
 	Analog, Fresh, NoPlanner       bool
+	NoAutoSplit                    bool
 	PartsPath                      string
 	Jobs                           int
 	PlannerBudget                  int
@@ -1134,6 +1135,7 @@ func sbFlags(c *cobra.Command, o *sbOptions) {
 	f.BoolVar(&o.NoIntent, "no-intent", false, "skip intent derive (connectivity.json is still written)")
 	f.BoolVar(&o.Analog, "analog", false, "run the analog SPICE step inside intent derive (slower)")
 	f.BoolVar(&o.NoPlanner, "no-planner", false, "skip the layout planner (grid + autoconnect for every zone)")
+	f.BoolVar(&o.NoAutoSplit, "no-auto-split", false, "keep every zone whole: never split a zone whose layout fails the gates into per-IC sub-zones")
 	f.StringVar(&o.PartsPath, "parts", "", "standard-parts.json for blocks (default: the installed skill's)")
 	f.IntVar(&o.Jobs, "jobs", 8, "parallel LCSC imports / zone plans")
 	f.IntVar(&o.PlannerBudget, "planner-budget", 20000, "layout planner candidate budget per zone (bounds one planner run)")
