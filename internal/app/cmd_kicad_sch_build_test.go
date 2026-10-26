@@ -817,8 +817,8 @@ func TestSbPaginate(t *testing.T) {
 	for _, z := range d.Zones {
 		zis = append(zis, &sbZoneIn{Zone: z})
 	}
-	b := newSbPageBases(d)
-	changed, _ := sbPaginate(d, zis, layouts, b)
+	b := newSbPageBases(d, zis, "P-3.kicad_sch") // the root sheet already uses P-3's file name
+	changed, _ := sbPaginate(d, layouts, b)
 	if !changed {
 		t.Fatal("an overfull page was not split")
 	}
@@ -826,8 +826,8 @@ func TestSbPaginate(t *testing.T) {
 	for _, pg := range d.Pages {
 		ids, titles = append(ids, pg.ID), append(titles, pg.Title)
 	}
-	if strings.Join(ids, ",") != "P,P-2_2,P-3,P-2" {
-		t.Errorf("pages %v, want P,P-2_2,P-3,P-2 (the spec already uses P-2)", ids)
+	if strings.Join(ids, ",") != "P,P-2_2,P-3_2,P-2" {
+		t.Errorf("pages %v, want P,P-2_2,P-3_2,P-2 (the spec uses P-2, the root file is P-3.kicad_sch)", ids)
 	}
 	if titles[0] != "Power (1/3)" || titles[2] != "Power (3/3)" || titles[3] != "Taken" {
 		t.Errorf("titles %v", titles)
@@ -838,16 +838,56 @@ func TestSbPaginate(t *testing.T) {
 	if len(d.NetPages["S"]) != 2 {
 		t.Errorf("NetPages not recomputed: %v", d.NetPages["S"])
 	}
-	zis = nil
-	for _, z := range d.Zones {
-		zis = append(zis, &sbZoneIn{Zone: z})
-	}
-	if changed, _ := sbPaginate(d, zis, layouts, b); changed {
+	if changed, _ := sbPaginate(d, layouts, b); changed {
 		var again []string
 		for _, pg := range d.Pages {
 			again = append(again, pg.ID+"="+pg.Title)
 		}
 		t.Errorf("second pagination is not a fixed point: %v", again)
+	}
+	// the saved spec keeps the author's pages (sch-edit reads it back)
+	d.Spec = &sbSpec{}
+	ns := d.normalizedSpec()
+	var sp []string
+	for _, pg := range ns.Pages {
+		sp = append(sp, pg.ID+"="+pg.Title)
+	}
+	if strings.Join(sp, ",") != "P=Power,P-2=Taken" {
+		t.Errorf("saved spec pages %v, want the spec's P=Power,P-2=Taken", sp)
+	}
+	for _, z := range ns.Zones {
+		if (z.ID == "z2" || z.ID == "z3") && z.Page != "P" {
+			t.Errorf("saved spec moved zone %s to generated page %s", z.ID, z.Page)
+		}
+	}
+}
+
+// Three pages sharing one signal net: every root occurrence (labelled stub
+// or direct wire between same-row neighbours) must join one net — KiCad's
+// netlist is the judge (Codex review: an unlabelled direct wire was an
+// island when a third sheet carried the net too).
+func TestSchBuildThreePagesShareNet(t *testing.T) {
+	sbNeedKicad(t)
+	t.Setenv(kicad.EnvCacheDir, t.TempDir())
+	two := []sbPin{{Number: "1", Name: "1", Type: "passive"}, {Number: "2", Name: "2", Type: "passive"}}
+	r := func(ref, zone string) sbPart { return sbPart{Ref: ref, Value: "10k", Zone: zone, Pins: two} }
+	spec := &sbSpec{
+		Name:  "threepg",
+		Pages: []sbPage{{ID: "A"}, {ID: "B"}, {ID: "C"}},
+		Zones: []sbZone{{ID: "za", Page: "A"}, {ID: "zb", Page: "B"}, {ID: "zc", Page: "C"}},
+		Parts: []sbPart{r("R1", "za"), r("R2", "zb"), r("R3", "zc"), r("R4", "zb")},
+		Nets: []sbNet{
+			{Name: "S", Pins: []string{"R1:1", "R2:1", "R3:1"}}, // on all three pages
+			{Name: "T", Pins: []string{"R4:1", "R3:2"}},
+			{Name: "U", Pins: []string{"R1:2", "R2:2", "R4:2"}},
+		},
+	}
+	res, err := runSchBuild(spec, sbOptions{OutDir: filepath.Join(t.TempDir(), "o"), NoIntent: true, NoReview: true, Jobs: 2, PlannerBudget: 2000}, nil)
+	if err != nil && (res == nil || sbGateStatus(res, "netlist") != "pass") {
+		t.Fatalf("build: %v", err)
+	}
+	if s := sbGateStatus(res, "netlist"); s != "pass" {
+		t.Fatalf("netlist gate %s", s)
 	}
 }
 

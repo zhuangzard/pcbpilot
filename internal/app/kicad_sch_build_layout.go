@@ -2166,5 +2166,16 @@ func sbFitsLargestPaper(frames []kicad.Box) bool {
 	for _, b := range frames[1:] {
 		u = kicad.Box{MinX: math.Min(u.MinX, b.MinX), MinY: math.Min(u.MinY, b.MinY), MaxX: math.Max(u.MaxX, b.MaxX), MaxY: math.Max(u.MaxY, b.MaxY)}
 	}
-	return u.MinX >= 10 && u.MinY >= 10 && u.MaxX <= big.W-10 && u.MaxY <= big.H-10
+	if !(u.MinX >= 10 && u.MinY >= 10 && u.MaxX <= big.W-10 && u.MaxY <= big.H-10) {
+		return false
+	}
+	// the same predicate the fresh packer uses: nothing in the title block
+	// (a kept zone there passed this check, then failed page-fit — Kimi review)
+	title := kicad.Box{MinX: big.W - 10 - 112, MinY: big.H - 10 - 34, MaxX: big.W - 10, MaxY: big.H - 10}
+	for _, f := range frames {
+		if sbOverlap(f, title) {
+			return false
+		}
+	}
+	return true
 }

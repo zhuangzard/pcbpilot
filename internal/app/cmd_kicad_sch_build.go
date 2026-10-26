@@ -191,6 +191,13 @@ type sbDesign struct {
 	Pages    []sbPage          // ordered
 	NetPages map[string]map[string]bool
 	Warnings []string
+	// SpecPages / ZoneSpecPage keep the pages before automatic pagination:
+	// the saved spec (normalizedSpec, read back by sch-edit) must hold the
+	// author's pages, never the generated "<id>-2" ones (Kimi review
+	// 2026-10-26: generated pages saved as source split again into
+	// "(1/2) (1/3)" titles and could never merge back).
+	SpecPages    []sbPage
+	ZoneSpecPage map[string]string
 	// ZoneOrderFixed keeps the spec's zone order on the page (spec
 	// "zoneOrder": "spec"); default: ordered by power / signal flow.
 	ZoneOrderFixed bool
@@ -1079,9 +1086,15 @@ func (d *sbDesign) normalizedSpec() *sbSpec {
 	s.Zones = nil
 	for _, z := range d.Zones {
 		z.BBox = nil
+		if pg, ok := d.ZoneSpecPage[z.ID]; ok {
+			z.Page = pg
+		}
 		s.Zones = append(s.Zones, z)
 	}
 	s.Pages = d.Pages
+	if d.SpecPages != nil {
+		s.Pages = d.SpecPages
+	}
 	s.Nets = nil
 	for _, n := range d.Nets {
 		nn := n

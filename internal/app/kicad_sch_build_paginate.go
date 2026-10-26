@@ -61,14 +61,31 @@ func sbZoneCrossSig(d *sbDesign, zi *sbZoneIn) string {
 // titles (Codex design review 2026-10-26).
 type sbPageBases struct {
 	order     []sbPage          // the spec pages, in order
+	zoneOrder []string          // reading order of the zones, frozen at the start
 	zoneBase  map[string]string // zone id → base page id
 	pageBase  map[string]string // any page id → base page id
 	baseTitle map[string]string
+	files     map[string]bool // sheet file names of the base pages and the root (fixed)
 }
 
-func newSbPageBases(d *sbDesign) *sbPageBases {
-	b := &sbPageBases{zoneBase: map[string]string{}, pageBase: map[string]string{}, baseTitle: map[string]string{}}
+// newSbPageBases freezes the spec pages, the zones' base pages and their
+// reading order (zoneInputs ranks zones by page-dependent facts, so taking
+// the order again after a split could reorder groups and oscillate — Codex /
+// Kimi review 2026-10-26), and records them on d for the saved spec.
+func newSbPageBases(d *sbDesign, zis []*sbZoneIn, rootFile string) *sbPageBases {
+	b := &sbPageBases{zoneBase: map[string]string{}, pageBase: map[string]string{}, baseTitle: map[string]string{}, files: map[string]bool{rootFile: true}}
+	for _, zi := range zis {
+		b.zoneOrder = append(b.zoneOrder, zi.Zone.ID)
+	}
+	if d.SpecPages == nil {
+		d.SpecPages = append([]sbPage(nil), d.Pages...)
+		d.ZoneSpecPage = map[string]string{}
+		for _, z := range d.Zones {
+			d.ZoneSpecPage[z.ID] = z.Page
+		}
+	}
 	for _, pg := range d.Pages {
+		b.files[sbSheetFile(pg.ID)] = true
 		b.order = append(b.order, pg)
 		b.pageBase[pg.ID] = pg.ID
 		t := pg.Title
@@ -83,16 +100,32 @@ func newSbPageBases(d *sbDesign) *sbPageBases {
 	return b
 }
 
+// pageID allocates the id of fragment k (2, 3…) of base page base: unique
+// as a page id AND as a sheet file name (ids are sanitised into file names,
+// and the root sheet has one too). ids / files hold what this round already
+// handed out; the same inputs always give the same id, so a stable grouping
+// keeps its ids round after round.
+func (b *sbPageBases) pageID(base string, k int, ids, files map[string]bool) string {
+	id := fmt.Sprintf("%s-%d", base, k)
+	for n := 2; ids[id] || files[sbSheetFile(id)]; n++ {
+		id = fmt.Sprintf("%s-%d_%d", base, k, n)
+	}
+	return id
+}
+
 // sbPaginate regroups every base page's zones next-fit in zis order (the
 // reading order): zones are added to the current group while the packer
 // still fits them on the largest paper. The first group keeps the base id,
 // the others get "<id>-2", "<id>-3"… (never an id of another base page) and
 // follow it. It rewrites d.Pages, zone pages, part page ids and NetPages and
 // reports whether the assignment changed.
-func sbPaginate(d *sbDesign, zis []*sbZoneIn, layouts map[string]*sbZoneLayout, b *sbPageBases) (bool, []string) {
-	reserved := map[string]bool{}
+func sbPaginate(d *sbDesign, layouts map[string]*sbZoneLayout, b *sbPageBases) (bool, []string) {
+	taken, files := map[string]bool{}, map[string]bool{} // handed out this round
 	for _, pg := range b.order {
-		reserved[pg.ID] = true
+		taken[pg.ID] = true
+	}
+	for f := range b.files {
+		files[f] = true
 	}
 	oldPage := map[string]string{}
 	for _, z := range d.Zones {
@@ -103,9 +136,9 @@ func sbPaginate(d *sbDesign, zis []*sbZoneIn, layouts map[string]*sbZoneLayout, 
 	var notes []string
 	for _, base := range b.order {
 		var ids []string
-		for _, zi := range zis {
-			if b.zoneBase[zi.Zone.ID] == base.ID && layouts[zi.Zone.ID] != nil {
-				ids = append(ids, zi.Zone.ID)
+		for _, zid := range b.zoneOrder {
+			if b.zoneBase[zid] == base.ID && layouts[zid] != nil {
+				ids = append(ids, zid)
 			}
 		}
 		var groups [][]string
@@ -125,11 +158,9 @@ func sbPaginate(d *sbDesign, zis []*sbZoneIn, layouts map[string]*sbZoneLayout, 
 			np := base
 			if len(groups) > 1 {
 				if gi > 0 {
-					id := fmt.Sprintf("%s-%d", base.ID, gi+1)
-					for n := 2; reserved[id]; n++ {
-						id = fmt.Sprintf("%s-%d_%d", base.ID, gi+1, n)
-					}
-					np.ID = id
+					np.ID = b.pageID(base.ID, gi+1, taken, files)
+					taken[np.ID] = true
+					files[sbSheetFile(np.ID)] = true
 				}
 				np.Title = fmt.Sprintf("%s (%d/%d)", b.baseTitle[base.ID], gi+1, len(groups))
 			}
@@ -174,17 +205,17 @@ func sbPaginate(d *sbDesign, zis []*sbZoneIn, layouts map[string]*sbZoneLayout, 
 	return changed, notes
 }
 
-// sbPaginateMaxRounds bounds the paginate ↔ re-layout loop. Every round can
-// only add cross-page labels (zones grow, pages split further), so a real
-// design settles in a few rounds; running out is an error, never a reason to
-// ship a layout drawn for the wrong labels.
+// sbPaginateMaxRounds guards the paginate ↔ re-layout loop (a guard, not a
+// convergence proof: regrouping can move boundaries and a re-laid zone can
+// change size either way). Running out is an error, never a reason to ship a
+// layout drawn for the wrong labels.
 const sbPaginateMaxRounds = 8
 
 // sbPaginateAndRelayout paginates until the page assignment is stable,
 // re-laying out every zone whose cross-page signal nets changed after each
 // round. It returns the zone inputs for the final pages and the notes.
-func sbPaginateAndRelayout(d *sbDesign, zis []*sbZoneIn, layouts map[string]*sbZoneLayout, lo sbLayoutOpts) ([]*sbZoneIn, []string, error) {
-	b := newSbPageBases(d)
+func sbPaginateAndRelayout(d *sbDesign, zis []*sbZoneIn, layouts, reuse map[string]*sbZoneLayout, lo sbLayoutOpts, rootFile string) ([]*sbZoneIn, []string, error) {
+	b := newSbPageBases(d, zis, rootFile)
 	var notes, last []string
 	for round := 1; ; round++ {
 		if round > sbPaginateMaxRounds {
@@ -194,7 +225,7 @@ func sbPaginateAndRelayout(d *sbDesign, zis []*sbZoneIn, layouts map[string]*sbZ
 		for _, zi := range zis {
 			before[zi.Zone.ID] = sbZoneCrossSig(d, zi)
 		}
-		changed, n := sbPaginate(d, zis, layouts, b)
+		changed, n := sbPaginate(d, layouts, b)
 		last = n
 		zis = d.zoneInputs()
 		var redo []*sbZoneIn
@@ -204,7 +235,9 @@ func sbPaginateAndRelayout(d *sbDesign, zis []*sbZoneIn, layouts map[string]*sbZ
 			}
 		}
 		if len(redo) > 0 {
-			fresh, ln := layoutZones(d, redo, nil, lo)
+			// the saved drawing of the previous build carries the final
+			// cross-page flags in its hash: reuse it instead of re-planning
+			fresh, ln := layoutZones(d, redo, reuse, lo)
 			for _, zi := range redo {
 				if l := fresh[zi.Zone.ID]; l != nil {
 					layouts[zi.Zone.ID] = l
@@ -235,18 +268,22 @@ func sbRootRows(n int, size func(int) (lroom, w, rroom, h float64), setX func(in
 	sy, rowOf := make([]float64, n), make([]int, n)
 	place := func(order []int) bool {
 		x, y, rowH, row := left, top, 0.0, 0
+		fits := true
 		for k, i := range order {
 			lr, w, rr, h := size(i)
 			fw := lr + w + rr
 			if k > 0 && x+fw > maxX {
 				x, y, rowH, row = left, y+rowH+gapY, 0, row+1
 			}
+			if x+fw > maxX {
+				fits = false // wider than a whole row (Codex review)
+			}
 			setX(i, x+lr)
 			sy[i], rowOf[i] = y, row
 			x += fw + gapX
 			rowH = math.Max(rowH, h+5.08) // + the Sheetfile field below the symbol
 		}
-		return y+rowH <= maxY
+		return fits && y+rowH <= maxY
 	}
 	order := make([]int, n)
 	for i := range order {

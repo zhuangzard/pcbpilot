@@ -413,7 +413,7 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 	// (kicad_sch_build_paginate.go); the hierarchy follows from NetPages
 	var pageNotes []string
 	var perr error
-	zis, pageNotes, perr = sbPaginateAndRelayout(d, zis, layouts, lo)
+	zis, pageNotes, perr = sbPaginateAndRelayout(d, zis, layouts, reuse, lo, name+".kicad_sch")
 	rep.Warnings = append(rep.Warnings, pageNotes...)
 	if perr != nil {
 		return rep, perr
@@ -1045,7 +1045,9 @@ func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layou
 			for _, n := range sp[i].right {
 				rw = math.Max(rw, sbTextW(n))
 			}
-			sp[i].w = math.Max(50.8, sbSnap(math.Max(sbTextW(sp[i].title), lw+rw+10.16)))
+			// as wide as its Sheetname and Sheetfile texts too (both start at
+			// the symbol's left edge — Codex review)
+			sp[i].w = math.Max(50.8, sbSnap(math.Max(math.Max(sbTextW(sp[i].title), sbTextW(sheets[i].file)), lw+rw+10.16)))
 			sp[i].h = sbSnap(math.Max(15.24, float64(max(len(sp[i].left), len(sp[i].right))+1)*2.54+2.54))
 			if len(sp[i].left) > 0 {
 				lroom[i] = sbSnap(lw + 7.62 + 2.54)
@@ -1101,6 +1103,10 @@ func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layou
 				addPin(n, sp[i].x+sp[i].w, py, 0, "right", !wiredRight)
 				if wiredRight { // facing blocks: one short wire per interface net
 					re.AddWire(kicad.Pt{X: sp[i].x + sp[i].w, Y: py}, kicad.Pt{X: sp[next[i]].x, Y: py})
+					// the wire carries the net's label as well: a third sheet
+					// with the same net reaches it only through that label
+					// (Codex review: an unlabelled direct wire was an island)
+					_ = re.AddLabel(kicad.LabelLocal, n, kicad.Pt{X: sp[i].x + sp[i].w + 2.54, Y: py}, 0, "")
 				}
 			}
 			re.AddRaw(fmt.Sprintf(`(sheet
