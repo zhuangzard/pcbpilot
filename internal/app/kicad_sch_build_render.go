@@ -409,6 +409,24 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 			return rep, fmt.Errorf("zone %s could not be laid out", zi.Zone.ID)
 		}
 	}
+	// a page whose zones do not fit A0 becomes several pages
+	// (kicad_sch_build_paginate.go); the hierarchy follows from NetPages
+	var pageNotes []string
+	var perr error
+	zis, pageNotes, perr = sbPaginateAndRelayout(d, zis, layouts, lo)
+	rep.Warnings = append(rep.Warnings, pageNotes...)
+	if perr != nil {
+		return rep, perr
+	}
+	for _, zi := range zis {
+		if layouts[zi.Zone.ID] == nil {
+			return rep, fmt.Errorf("zone %s could not be laid out", zi.Zone.ID)
+		}
+	}
+	rep.Pages = rep.Pages[:0]
+	for _, pg := range d.Pages {
+		rep.Pages = append(rep.Pages, pg.ID)
+	}
 	tm.mark("layout")
 
 	// positions per page
@@ -1016,7 +1034,9 @@ func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layou
 			}
 		}
 		same := func(a, b []string) bool { return len(a) > 0 && strings.Join(a, "\x00") == strings.Join(b, "\x00") }
-		x := 25.4
+		// sizes, with every label's room reserved: a row break turns a wired
+		// interface into labelled stubs, so the room must already be there
+		lroom, rroom := make([]float64, len(sp)), make([]float64, len(sp))
 		for i := range sp {
 			lw, rw := 0.0, 0.0
 			for _, n := range sp[i].left {
@@ -1027,17 +1047,30 @@ func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layou
 			}
 			sp[i].w = math.Max(50.8, sbSnap(math.Max(sbTextW(sp[i].title), lw+rw+10.16)))
 			sp[i].h = sbSnap(math.Max(15.24, float64(max(len(sp[i].left), len(sp[i].right))+1)*2.54+2.54))
-			if i == 0 || !same(sp[i-1].right, sp[i].left) {
-				x += sbSnap(lw + 7.62 + 2.54)
+			if len(sp[i].left) > 0 {
+				lroom[i] = sbSnap(lw + 7.62 + 2.54)
 			}
-			sp[i].x = x
-			x += sp[i].w + 25.4
-			if i+1 < len(sp) && !same(sp[i].right, sp[i+1].left) {
-				x += sbSnap(rw + 7.62 + 2.54)
+			if len(sp[i].right) > 0 {
+				rroom[i] = sbSnap(rw + 7.62 + 2.54)
 			}
 		}
-		const y = 38.1
+		// rows inside the A0 drawing area (2026-10-26: 25 sheet symbols in ONE
+		// row reached x = 3383 mm). Reading order first; if those rows are too
+		// tall, shelves by decreasing height. Sheet numbers keep the order.
+		sy, rowOf, order := sbRootRows(len(sp), func(i int) (float64, float64, float64, float64) {
+			return lroom[i], sp[i].w, rroom[i], sp[i].h
+		}, func(i int, x float64) { sp[i].x = x })
+		next, prevOf := make([]int, len(sp)), make([]int, len(sp))
+		for i := range next {
+			next[i], prevOf[i] = -1, -1
+		}
+		for k := 0; k+1 < len(order); k++ {
+			if rowOf[order[k]] == rowOf[order[k+1]] {
+				next[order[k]], prevOf[order[k+1]] = order[k+1], order[k]
+			}
+		}
 		for i, s := range sheets {
+			y := sy[i]
 			var pins strings.Builder
 			addPin := func(net string, px, py, ang float64, just string, stub bool) {
 				fmt.Fprintf(&pins, "\n\t\t(pin %s bidirectional (at %s %s %s) (uuid %s) (effects (font (size 1.27 1.27)) (justify %s)))",
@@ -1056,8 +1089,10 @@ func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layou
 				}
 				_ = re.AddLabel(kicad.LabelLocal, net, kicad.Pt{X: px + dx, Y: py}, la, "")
 			}
-			wiredLeft := i > 0 && same(sp[i-1].right, sp[i].left)
-			wiredRight := i+1 < len(sp) && same(sp[i].right, sp[i+1].left)
+			// direct wires only between neighbours of one row: same top, so
+			// identical pin lists line up pin for pin
+			wiredLeft := prevOf[i] >= 0 && same(sp[prevOf[i]].right, sp[i].left)
+			wiredRight := next[i] >= 0 && same(sp[i].right, sp[next[i]].left)
 			for k, n := range sp[i].left {
 				addPin(n, sp[i].x, y+2.54*float64(k+1), 180, "left", !wiredLeft)
 			}
@@ -1065,7 +1100,7 @@ func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layou
 				py := y + 2.54*float64(k+1)
 				addPin(n, sp[i].x+sp[i].w, py, 0, "right", !wiredRight)
 				if wiredRight { // facing blocks: one short wire per interface net
-					re.AddWire(kicad.Pt{X: sp[i].x + sp[i].w, Y: py}, kicad.Pt{X: sp[i+1].x, Y: py})
+					re.AddWire(kicad.Pt{X: sp[i].x + sp[i].w, Y: py}, kicad.Pt{X: sp[next[i]].x, Y: py})
 				}
 			}
 			re.AddRaw(fmt.Sprintf(`(sheet

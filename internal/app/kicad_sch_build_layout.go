@@ -400,6 +400,9 @@ func (zi *sbZoneIn) hash(d *sbDesign, method string) string {
 					canon[n] = len(canon)
 				}
 				fmt.Fprintf(&b, "%s:%d/%s/%s,", q.Number, canon[n], zi.Policy[n], d.NetKind[n])
+				if d.NetKind[n] != "power" && d.NetKind[n] != "ground" && len(d.NetPages[n]) > 1 {
+					b.WriteString("x,") // drawn as a (larger) cross-page label
+				}
 			} else if d.NC[k] {
 				fmt.Fprintf(&b, "%s:nc,", q.Number)
 			}

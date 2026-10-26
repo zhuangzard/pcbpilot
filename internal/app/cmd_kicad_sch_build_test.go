@@ -794,3 +794,82 @@ func TestSbSheetShorts(t *testing.T) {
 		t.Fatal("sbHasShort misclassifies findings")
 	}
 }
+
+// Automatic pagination: a page whose zones do not fit A0 is split next-fit
+// in reading order, zones kept whole; new ids never collide with spec pages;
+// a second run is a fixed point (no "-2-2" ids, no stacked "(1/2)" titles).
+func TestSbPaginate(t *testing.T) {
+	big := func() *sbZoneLayout { return &sbZoneLayout{Box: kicad.Box{MaxX: 700, MaxY: 500}} } // one per A0
+	d := &sbDesign{
+		Pages: []sbPage{{ID: "P", Title: "Power"}, {ID: "P-2", Title: "Taken"}},
+		Zones: []sbZone{{ID: "z1", Page: "P"}, {ID: "z2", Page: "P"}, {ID: "z3", Page: "P"}, {ID: "q", Page: "P-2"}},
+		ByRef: map[string]*sbRPart{},
+	}
+	for i, z := range []string{"z1", "z2", "z3", "q"} {
+		p := &sbRPart{ZoneID: z, PageID: d.Zones[i].Page}
+		p.Ref = fmt.Sprintf("R%d", i+1)
+		d.Parts = append(d.Parts, p)
+		d.ByRef[p.Ref] = p
+	}
+	d.Nets = []sbNet{{Name: "S", Pins: []string{"R1.1", "R3.1"}}}
+	layouts := map[string]*sbZoneLayout{"z1": big(), "z2": big(), "z3": big(), "q": {Box: kicad.Box{MaxX: 50, MaxY: 50}}}
+	var zis []*sbZoneIn
+	for _, z := range d.Zones {
+		zis = append(zis, &sbZoneIn{Zone: z})
+	}
+	b := newSbPageBases(d)
+	changed, _ := sbPaginate(d, zis, layouts, b)
+	if !changed {
+		t.Fatal("an overfull page was not split")
+	}
+	var ids, titles []string
+	for _, pg := range d.Pages {
+		ids, titles = append(ids, pg.ID), append(titles, pg.Title)
+	}
+	if strings.Join(ids, ",") != "P,P-2_2,P-3,P-2" {
+		t.Errorf("pages %v, want P,P-2_2,P-3,P-2 (the spec already uses P-2)", ids)
+	}
+	if titles[0] != "Power (1/3)" || titles[2] != "Power (3/3)" || titles[3] != "Taken" {
+		t.Errorf("titles %v", titles)
+	}
+	if d.ByRef["R2"].PageID != "P-2_2" || d.ByRef["R4"].PageID != "P-2" {
+		t.Errorf("part pages not updated: R2=%s R4=%s", d.ByRef["R2"].PageID, d.ByRef["R4"].PageID)
+	}
+	if len(d.NetPages["S"]) != 2 {
+		t.Errorf("NetPages not recomputed: %v", d.NetPages["S"])
+	}
+	zis = nil
+	for _, z := range d.Zones {
+		zis = append(zis, &sbZoneIn{Zone: z})
+	}
+	if changed, _ := sbPaginate(d, zis, layouts, b); changed {
+		var again []string
+		for _, pg := range d.Pages {
+			again = append(again, pg.ID+"="+pg.Title)
+		}
+		t.Errorf("second pagination is not a fixed point: %v", again)
+	}
+}
+
+// The root sheet wraps its sheet symbols into rows inside A0; with two very
+// tall symbols the reading-order rows overflow, and the height shelves fit.
+func TestSbRootRowsFitA0(t *testing.T) {
+	const n = 25
+	h := make([]float64, n)
+	for i := range h {
+		h[i] = 30 + float64(i%6)*15
+	}
+	h[18], h[24] = 325, 350
+	x := make([]float64, n)
+	sy, rowOf, order := sbRootRows(n, func(i int) (float64, float64, float64, float64) { return 35, 70, 35, h[i] },
+		func(i int, v float64) { x[i] = v })
+	a0 := kicad.Papers[len(kicad.Papers)-1]
+	for i := 0; i < n; i++ {
+		if x[i]+70+35 > a0.W-10 || sy[i]+h[i] > a0.H-10-34 {
+			t.Fatalf("sheet %d at (%.1f, %.1f) h=%.0f is outside A0 (order %v rows %v)", i, x[i], sy[i], h[i], order, rowOf)
+		}
+	}
+	if rowOf[order[len(order)-1]] == 0 {
+		t.Fatal("25 sheet symbols must wrap into several rows")
+	}
+}
