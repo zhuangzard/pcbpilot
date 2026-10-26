@@ -55,6 +55,18 @@ class TrackedSkillPackageTests(unittest.TestCase):
         pack.pack_skill(self.repo, output)
         self.assertEqual(output.read_bytes(), original)
 
+    def test_executable_bit_comes_from_git_index(self):
+        # A Windows checkout has no executable bits; the archive must still
+        # mark helpers that git records as 100755.
+        (self.skill / "tool.sh").write_text("#!/bin/sh\n")
+        self.run_git("add", ".agents/skills/pcbpilot/tool.sh")
+        self.run_git("update-index", "--chmod=+x", ".agents/skills/pcbpilot/tool.sh")
+        output = self.repo / "dist/skills.tar.gz"
+        pack.pack_skill(self.repo, output)
+        with tarfile.open(output) as archive:
+            self.assertEqual(archive.getmember("pcbpilot/tool.sh").mode, 0o755)
+            self.assertEqual(archive.getmember("pcbpilot/SKILL.md").mode, 0o644)
+
     def test_local_link_to_untracked_file_fails(self):
         (self.skill / "scratch.md").write_text("Unreviewed\n")
         (self.skill / "references/guide.md").write_text("[Scratch](../scratch.md)\n")
