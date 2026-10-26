@@ -29,6 +29,19 @@ pcbpilot kicad sch-checkpoint list --project build/                     # 回退
 给了 `--requirements` 还有 review-panel 设计评审（跳过要签名豁免）。产物：工程文件、`connectivity.json`、
 `intent.json`、`erc.json`、报告里每阶段计时。
 
+### 大板与分页（v0.10.1 起）
+
+- **自动分页**：某页的区放不进 A0 时自动拆成 `<页>-2`、`<页>-3`…（区不拆开，按阅读顺序装页，标题加 `(k/n)`），
+  跨页网自动变层次标签 + 根图图纸引脚；根图符号自动换行进 A0。保存的 spec 仍是你写的原始分页。
+  报告 `warnings` 列出 `page … split into N pages`；单个区自己就超过 A0 会点名，要在 spec 里拆这个区。
+- **密集区**：一个区画不干净（质量/EG-06 失败）时可试 `--auto-split`（按 IC 拆子区，只在问题变少时保留；默认关，
+  会更慢、可能多走线交叉）。最稳的写法仍是在 spec 里每个 IC 簇一个区。
+- **失败如实报告**：任何失败报告都是 `ok:false` + `error`。`SHEET_NOT_LOADED` = KiCad 加载不了某页（通常是
+  MPN/value 里有 KiCad 不接受的字符），不是布局问题，不要用 `--no-planner` 去绕。
+- **ERC 用隔离的 KiCad 配置**（空的全局库表，避免加载全部官方库卡死）；用户自设 `KICAD_CONFIG_HOME` 优先，
+  `PCBPILOT_KICAD_ISOLATE=0` 关闭。
+- **可复现**：`--planner-timeout` 按墙钟决定哪些区用 planner；同一 spec 要逐字节可复现时用 `--no-planner --fresh`。
+
 delta 例子（只写意图，脚名即可）：
 
 ```json

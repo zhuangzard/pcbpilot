@@ -1,5 +1,53 @@
 # Changelog
 
+## [0.10.1] — 2026-10-26
+
+**CLI, daemon, Skill and MCP move to 0.10.1. The connector runtime is UNCHANGED (only its version number moves); import the
+0.10.1 `pcbpilot-connector.eext` so the versions match — the daemon pauses design actions until they do.**
+
+Summary: KiCad schematic builds of large boards. `kicad sch-build` no longer fails on dense zones, paginates boards that
+overflow A0, never reports a failed build as `ok:true`, and no longer hangs ERC. Verified on a 2605-part / 1686-net board
+(KiCad 10.0.6): netlist gate and page-fit pass (28 pages, root sheet on A0). Its remaining drawing-quality / EG findings are
+pre-existing and unchanged. No gate was relaxed. Code reviewed by Codex and Kimi K3.1 Pro.
+
+**`kicad sch-build`**
+- **Multi-pin same-net IC sides lay out.** A zone with two same-net pins side by side (e.g. a load switch's two VOUT pins) failed
+  with "zone could not be laid out". Root causes: pin and wire coordinates from different arithmetic (15.24 vs
+  15.240000000000009) broke exact point matching; same-net pins/wires were treated as foreign; decaps ignored the redraw
+  exclusions. Points are rounded to 1e-4 mm, same-net contacts are allowed, adjacent same-net pins of one part are tied and share
+  one label.
+- **Every zone drawing is checked for shorts before use** (wire islands joining two nets on the rendered sheet). A shorted
+  candidate is rejected and the next one is used — a planner drawing that put +5V on a ground net is no longer emitted.
+- **Automatic pagination.** A page whose zones overflow A0 becomes `<page>-2`, `<page>-3`… (zones kept whole, reading order,
+  titles `(k/n)`); cross-page nets become hierarchical labels and root sheet pins. The root sheet wraps its sheet symbols into
+  rows on A0. The saved spec keeps the author's pages.
+- **Failures report `ok:false`** with an `error` object (they used to return the half-filled report). A sheet KiCad cannot load
+  (e.g. `<`/`>` in a generated symbol name) fails as `SHEET_NOT_LOADED` instead of a misleading netlist mismatch; generated symbol
+  names no longer contain `<`, `>` or control characters.
+- Rebuilds keep their own zone positions instead of overflowing A0 (sheets were rewritten as A4 with thousands of off-page
+  findings unless `--fresh`); a spec net rename invalidates the cached zone layout; decoupling caps honour `near`; decap side
+  ties break deterministically (EG-08 no longer flips run to run because of map order); Windows reserved names (`aux`, `con`,
+  `nul`, `com1`…) get a `_` suffix.
+- **Opt-in `--auto-split`**: a zone with no clean drawing is split into one sub-zone per IC, kept only when strictly better. Off by
+  default (on a large board it improved text-over-symbol and EG-06 but added crossings and 9× layout time).
+- Still open: `--planner-timeout` is wall-clock, so which zones get the planner depends on machine load (`--no-planner --fresh`
+  for reproducible output).
+
+**KiCad**
+- Schematic `kicad-cli` runs (ERC, netlist, SVG) use an isolated config with empty global library tables and a 10-minute
+  timeout: KiCad 10's default global table made `sch erc` hang (reproduced: 300 s timeout vs 16 s). A user-set
+  `KICAD_CONFIG_HOME` wins; `PCBPILOT_KICAD_ISOLATE=0` opts out.
+
+**`review-panel`**
+- The prompt goes by stdin / file, never on the command line (a 537 KB prompt exceeded Windows' 32 KB limit); `kimi -p` no
+  longer gets `--auto`; raw replies are `reviewer_<name>.md` (not `claude.md`, which collides with `CLAUDE.md`).
+- **Every reviewer CLI runs in a private, prompt-only temp directory** (codex `-C <dir> -s read-only --ephemeral`, claude
+  `--tools ""`, kimi `--add-dir <dir>`): codex used to run in the caller's directory, i.e. the project repository.
+
+**Other**
+- `sim analog`: a series damping resistor behind an LC filter's ferrite is part of the filter (no false peaking).
+- `parts-select.py` prints UTF-8 on any console code page.
+
 ## [0.10.0] — 2026-10-13
 
 **CLI, daemon, Skill and MCP move to 0.10.0. The connector runtime CHANGED (`pcb.pour.create` layer readback): import the new
