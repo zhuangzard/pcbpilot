@@ -191,6 +191,13 @@ type sbDesign struct {
 	Pages    []sbPage          // ordered
 	NetPages map[string]map[string]bool
 	Warnings []string
+	// SpecPages / ZoneSpecPage keep the pages before automatic pagination:
+	// the saved spec (normalizedSpec, read back by sch-edit) must hold the
+	// author's pages, never the generated "<id>-2" ones (Kimi review
+	// 2026-10-26: generated pages saved as source split again into
+	// "(1/2) (1/3)" titles and could never merge back).
+	SpecPages    []sbPage
+	ZoneSpecPage map[string]string
 	// ZoneOrderFixed keeps the spec's zone order on the page (spec
 	// "zoneOrder": "spec"); default: ordered by power / signal flow.
 	ZoneOrderFixed bool
@@ -796,10 +803,20 @@ func sbGenName(p *sbRPart) string {
 	}
 	var b strings.Builder
 	for _, r := range base {
-		if r == ':' || r == '"' || r == '/' || r == '\\' || r == ' ' {
-			r = '_'
+		switch {
+		// field report 2026-10-15: MPN "a diode MPN (VR >= 200 V, VERIFY)" — a symbol
+		// name with < or > makes KiCad 10 fail to load the whole sheet, and
+		// `kicad-cli sch export netlist` on the root still exits 0 with that
+		// page simply absent.
+		case r == '<':
+			b.WriteString("lt")
+		case r == '>':
+			b.WriteString("gt")
+		case r == ':' || r == '"' || r == '/' || r == '\\' || r == ' ' || r < 0x20 || r == 0x7f:
+			b.WriteByte('_')
+		default:
+			b.WriteRune(r)
 		}
-		b.WriteRune(r)
 	}
 	h := ""
 	for _, q := range p.Pins {
@@ -1069,9 +1086,15 @@ func (d *sbDesign) normalizedSpec() *sbSpec {
 	s.Zones = nil
 	for _, z := range d.Zones {
 		z.BBox = nil
+		if pg, ok := d.ZoneSpecPage[z.ID]; ok {
+			z.Page = pg
+		}
 		s.Zones = append(s.Zones, z)
 	}
 	s.Pages = d.Pages
+	if d.SpecPages != nil {
+		s.Pages = d.SpecPages
+	}
 	s.Nets = nil
 	for _, n := range d.Nets {
 		nn := n
@@ -1105,6 +1128,7 @@ type sbOptions struct {
 	FromConn                       []string
 	Offline, DryRun, NoIntent      bool
 	Analog, Fresh, NoPlanner       bool
+	AutoSplit                      bool
 	PartsPath                      string
 	Jobs                           int
 	PlannerBudget                  int
@@ -1124,6 +1148,7 @@ func sbFlags(c *cobra.Command, o *sbOptions) {
 	f.BoolVar(&o.NoIntent, "no-intent", false, "skip intent derive (connectivity.json is still written)")
 	f.BoolVar(&o.Analog, "analog", false, "run the analog SPICE step inside intent derive (slower)")
 	f.BoolVar(&o.NoPlanner, "no-planner", false, "skip the layout planner (grid + autoconnect for every zone)")
+	f.BoolVar(&o.AutoSplit, "auto-split", false, "split a zone whose layout fails the gates into one sub-zone per IC (kept only when strictly better; slower, may add crossings / page area)")
 	f.StringVar(&o.PartsPath, "parts", "", "standard-parts.json for blocks (default: the installed skill's)")
 	f.IntVar(&o.Jobs, "jobs", 8, "parallel LCSC imports / zone plans")
 	f.IntVar(&o.PlannerBudget, "planner-budget", 20000, "layout planner candidate budget per zone (bounds one planner run)")
@@ -1205,6 +1230,16 @@ with kicad sch-edit, read it compactly with kicad sch-read.`,
 
 // finishSbRun prints the report and maps hard-gate failures to the exit code.
 func finishSbRun(res *sbReport, err error, reportPath string, stdout, stderr io.Writer) error {
+	if res != nil && err != nil {
+		// A run that failed must never report ok:true. Early failures (e.g. a
+		// zone that could not be laid out) returned the half-filled report
+		// with its default OK and no error object (field report 2026-10-26).
+		res.OK = false
+		if res.Error == nil {
+			res.Error = &sbFailure{Code: "BUILD_FAILED", Message: err.Error(),
+				Fix: "see the warnings for the failing zone or stage and report it with the spec"}
+		}
+	}
 	if res != nil {
 		if reportPath != "" {
 			_ = writeJSONFile(reportPath, res)

@@ -254,6 +254,28 @@ func TestDetectClasses(t *testing.T) {
 					t.Error("no f0")
 				}
 			}},
+		// field report 2026-10-15: a series damping R after the ferrite was dropped, so
+		// the filter was measured undamped (false peaking) or even turned round.
+		{"lc-filter-damping-branch", []*powersim.Part{part("L1", "", "1uH", "", pn{"1", "1", "+5V"}, pn{"2", "2", "+5V_F"}),
+			capa("C3", "100nF", "+5V", "GND"), capa("C1", "1uF", "+5V_F", "GND"), res("R1", "1", "+5V_F", "DAMP"), capa("C2", "10uF", "DAMP", "GND")},
+			ClassLCFilter, func(t *testing.T, b *Block) {
+				if b.Input != "+5V" || b.Output != "+5V_F" {
+					t.Errorf("direction: %s → %s", b.Input, b.Output)
+				}
+				if !strings.Contains(strings.Join(b.Parts, ","), "R1") || !strings.Contains(strings.Join(b.Parts, ","), "C2") {
+					t.Errorf("damping branch not in the block: %v", b.Parts)
+				}
+				near(t, "q", b.Analytic["q"], math.Sqrt(1e-6/11e-6)/1.01, 1e-3)
+			}},
+		{"lc-filter-series-r", []*powersim.Part{part("L1", "", "1uH", "", pn{"1", "1", "+5V"}, pn{"2", "2", "+5V_F"}),
+			capa("C3", "100nF", "+5V", "GND"), res("R1", "1", "+5V_F", "+5V_A"), capa("C1", "10uF", "+5V_A", "GND"),
+			part("U1", "MCU", "MCU", "", pn{"1", "VDD", "+5V_A"}, pn{"2", "VSS", "GND"})},
+			ClassLCFilter, func(t *testing.T, b *Block) {
+				if b.Input != "+5V" || b.Output != "+5V_A" {
+					t.Errorf("direction: %s → %s (the 10 µF behind R1 is the output side)", b.Input, b.Output)
+				}
+				near(t, "q", b.Analytic["q"], math.Sqrt(1e-6/10e-6)/1.01, 1e-3)
+			}},
 		{"rc-lowpass", []*powersim.Part{res("R1", "10k", "DRV", "FILT"), capa("C1", "15.9nF", "FILT", "GND"),
 			part("U1", "MCU", "MCU", "", pn{"1", "TX", "DRV"}, pn{"2", "RX", "FILT"}, pn{"3", "VDD", "+3V3"}, pn{"4", "VSS", "GND"})},
 			ClassRCLowPass, func(t *testing.T, b *Block) { near(t, "fc", b.Analytic["fcHz"], 1/(2*math.Pi*10e3*15.9e-9), 1e-5) }},

@@ -152,7 +152,8 @@ func ExportSchNetlist(sch string) (*SchNetlist, error) {
 	defer os.RemoveAll(dir)
 	out := filepath.Join(dir, "net.xml")
 	var buf bytes.Buffer
-	cmd := exec.Command(cli, "sch", "export", "netlist", "--format", "kicadxml", "-o", out, sch)
+	cmd, cancel := SchCLICommand(cli, "sch", "export", "netlist", "--format", "kicadxml", "-o", out, sch)
+	defer cancel()
 	cmd.Stdout, cmd.Stderr = &buf, &buf
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("kicad-cli sch export netlist: %v: %s", err, strings.TrimSpace(buf.String()))

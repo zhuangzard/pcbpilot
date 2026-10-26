@@ -57,59 +57,97 @@ type reviewRecord struct {
 // reviewerRun runs one reviewer CLI on prompt and returns its stdout.
 type reviewerRun func(ctx context.Context, prompt string) (string, error)
 
-// The prompt (requirements + evidence, often hundreds of kB) never goes on the
-// command line: Windows caps a command line at 32 767 characters ("The filename
-// or extension is too long"). codex and claude read it from stdin; kimi only
-// takes -p, so it gets a short instruction to read prompt.md in its own
-// working directory.
-var reviewerRunners = map[string]reviewerRun{
-	"codex": func(ctx context.Context, prompt string) (string, error) {
-		return runReviewerCLI(ctx, "", prompt, "codex", "exec", "--skip-git-repo-check", "-")
-	},
-	"kimi": func(ctx context.Context, prompt string) (string, error) {
-		dir, err := os.MkdirTemp("", "pcbpilot-kimi-")
-		if err != nil {
-			return "", err
-		}
-		defer os.RemoveAll(dir)
-		if err := os.WriteFile(filepath.Join(dir, reviewPromptFile), []byte(prompt), 0o600); err != nil {
-			return "", err
-		}
-		return runReviewerCLI(ctx, dir, "", "kimi", "-p", kimiPromptPointer)
-	},
-	"claude": func(ctx context.Context, prompt string) (string, error) {
-		dir, err := os.MkdirTemp("", "pcbpilot-claude-")
-		if err != nil {
-			return "", err
-		}
-		defer os.RemoveAll(dir)
-		return runReviewerCLI(ctx, dir, prompt, "claude", "-p")
-	},
+// reviewerCall is how one reviewer CLI receives the prompt.
+//
+// The prompt is NEVER put on the command line: a real review prompt is
+// hundreds of KB, and Windows caps a whole command line at 32 767 chars (8 191
+// through a .cmd shim such as codex.cmd). field report 2026-10-15: a 537 KB prompt
+// made every reviewer fail with "fork/exec …: The filename or extension is too
+// long". Codex and Claude read the prompt from stdin; Kimi gets a short
+// instruction to read prompt.md, which is written into its working directory.
+type reviewerCall struct {
+	Bin   string
+	Args  []string
+	Stdin string
+	// PromptFile, when set, is the file name (inside the call's working
+	// directory) the prompt must be written to before the CLI starts.
+	PromptFile string
 }
 
-const reviewPromptFile = "prompt.md"
+const reviewerPromptFile = "prompt.md"
 
-// kimiPromptPointer is the whole command-line prompt kimi gets.
-const kimiPromptPointer = "The complete review task is in the file prompt.md in the current working directory. " +
-	"Read that whole file first, then do exactly what it asks and answer only in the format it specifies."
+// reviewerFileAsk is the whole command-line payload for a reviewer that reads
+// the prompt from disk.
+const reviewerFileAsk = "Read the file " + reviewerPromptFile + " in the current directory completely (it is long; read all of it) " +
+	"and perform the design review it describes. Do NOT modify, create or delete any file and do not run commands other than reading files. " +
+	"End your reply with exactly ONE JSON object in the format the prompt specifies."
 
-// runReviewerCLI runs a reviewer; stdin (when not empty) carries the prompt.
-func runReviewerCLI(ctx context.Context, dir, stdin, name string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
+// reviewerInvocation builds the call for one reviewer. dir is the reviewer's
+// private working directory ("" = inherit).
+func reviewerInvocation(name, dir, prompt string) (reviewerCall, error) {
+	switch name {
+	case "codex":
+		// `codex exec -` reads the prompt from stdin; -C pins its workspace to
+		// the private directory and the sandbox is read-only.
+		return reviewerCall{Bin: "codex", Args: []string{"exec", "--skip-git-repo-check", "--ephemeral", "-s", "read-only", "-C", dir, "-"}, Stdin: prompt}, nil
+	case "claude":
+		// `claude -p` with no prompt argument reads it from stdin. The prompt
+		// is self-contained, so the reviewer gets no tools at all.
+		return reviewerCall{Bin: "claude", Args: []string{"-p", "--tools", ""}, Stdin: prompt}, nil
+	case "kimi":
+		// kimi -p has no stdin mode: hand it the prompt as a file in its own
+		// directory (--add-dir grants the read). Not --auto: kimi refuses -p
+		// combined with --auto (field workflow note, 2026-10-15).
+		return reviewerCall{Bin: "kimi", Args: []string{"--add-dir", dir, "-p", reviewerFileAsk}, PromptFile: reviewerPromptFile}, nil
+	}
+	return reviewerCall{}, fmt.Errorf("unknown reviewer %q", name)
+}
+
+// reviewerRunner runs reviewer name in a private, otherwise empty temp
+// directory. External review CLIs must never get the project repository as
+// cwd / -C / --add-dir: field report 2026-10-19 had a review CLI read confidential
+// files from the working directory, and codex used to inherit the caller's
+// cwd (the project) here. The prompt already carries every input it needs.
+func reviewerRunner(name string) reviewerRun {
+	return func(ctx context.Context, prompt string) (string, error) {
+		dir, err := os.MkdirTemp("", "pcbpilot-review-"+name+"-")
+		if err != nil {
+			return "", err
+		}
+		defer os.RemoveAll(dir)
+		call, err := reviewerInvocation(name, dir, prompt)
+		if err != nil {
+			return "", err
+		}
+		if call.PromptFile != "" {
+			if err := os.WriteFile(filepath.Join(dir, call.PromptFile), []byte(prompt), 0o644); err != nil {
+				return "", err
+			}
+		}
+		return runReviewerCLI(ctx, dir, call)
+	}
+}
+
+var reviewerRunners = map[string]reviewerRun{
+	"codex":  reviewerRunner("codex"),
+	"kimi":   reviewerRunner("kimi"),
+	"claude": reviewerRunner("claude"),
+}
+
+func runReviewerCLI(ctx context.Context, dir string, call reviewerCall) (string, error) {
+	cmd := exec.CommandContext(ctx, call.Bin, call.Args...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
-	if stdin != "" {
-		cmd.Stdin = strings.NewReader(stdin)
-	} else {
-		cmd.Stdin = nil
+	if call.Stdin != "" {
+		cmd.Stdin = strings.NewReader(call.Stdin)
 	}
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() != nil {
-		return string(out), fmt.Errorf("%s timed out", name)
+		return string(out), fmt.Errorf("%s timed out", call.Bin)
 	}
 	if err != nil {
-		return string(out), fmt.Errorf("%s: %v: %s", name, err, tail(string(out), 300))
+		return string(out), fmt.Errorf("%s: %v: %s", call.Bin, err, tail(string(out), 300))
 	}
 	return string(out), nil
 }
@@ -300,7 +338,9 @@ func runReviewPanel(stage string, reqFiles, evFiles, reviewers []string, outDir 
 			ctx, cancel := context.WithTimeout(context.Background(), timeout)
 			defer cancel()
 			out, err := run(ctx, prompt)
-			raw := filepath.Join(outDir, name+".md")
+			// reviewer_<name>.md, not <name>.md: on a case-insensitive filesystem
+			// (Windows, macOS) claude.md is the same file as a CLAUDE.md agent memo.
+			raw := filepath.Join(outDir, reviewerRawFile(name))
 			_ = os.WriteFile(raw, []byte(out), 0o644)
 			v.RawFile = raw
 			if err != nil {
@@ -390,7 +430,7 @@ schematic connectivity / netlist, sim results, gate summary, design report …).
 Each returns a JSON verdict per requirement ID. The gate PASSES only when all
 reviewers answered and none reports a not_met requirement or a blocking
 finding; a missing, timed-out or unparsable reviewer FAILS it. Results:
---out-dir/{review.json, prompt.md, <reviewer>.md}. Signed waivers
+--out-dir/{review.json, prompt.md, reviewer_<name>.md}. Signed waivers
 ({gate:"design-review", match, reason, by}) are the only override.
 
 --reapply-waivers recomputes the gate of --out-dir/review.json with --waivers
@@ -441,3 +481,6 @@ byte-identical to the reviewed input (the prompt SHA-256 is checked).`,
 	c.Flags().BoolVar(&reapply, "reapply-waivers", false, "recompute the gate of --out-dir/review.json with --waivers (same input, reviewers not run again)")
 	return c
 }
+
+// reviewerRawFile is the file a reviewer's raw reply is saved to.
+func reviewerRawFile(name string) string { return "reviewer_" + name + ".md" }

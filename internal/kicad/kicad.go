@@ -45,6 +45,10 @@ type Tools struct {
 //	                       Windows: e.g. C:\Program Files\KiCad\10.0)
 //	PCBPILOT_KICAD_PYTHON  Python that can `import pcbnew`
 //	PCBPILOT_KICAD_CLI     kicad-cli
+//	PCBPILOT_KICAD_ISOLATE 0 = schematic kicad-cli runs (ERC, netlist/SVG
+//	                       export) keep the user's global library tables
+//	                       instead of an empty isolated KICAD_CONFIG_HOME
+//	                       (kicadenv.go); a user-set KICAD_CONFIG_HOME wins
 const (
 	EnvApp    = "PCBPILOT_KICAD_APP"
 	EnvPython = "PCBPILOT_KICAD_PYTHON"

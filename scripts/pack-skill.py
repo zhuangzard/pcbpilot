@@ -22,6 +22,18 @@ def tracked_skill_files(repo: Path) -> list[Path]:
     return sorted(set(files))
 
 
+def tracked_executables(repo: Path) -> set[Path]:
+    # Git's index mode is the source of truth: a Windows checkout has no
+    # executable bits, so stat() alone would ship every helper as 0644.
+    raw = subprocess.check_output(["git", "-C", str(repo), "ls-files", "-s", "-z", "--", str(SKILL)])
+    out = set()
+    for item in raw.split(b"\0"):
+        meta, _, name = item.partition(b"\t")
+        if name and meta.startswith(b"100755"):
+            out.add(Path(os.fsdecode(name)))
+    return out
+
+
 def check_skill(repo: Path) -> list[Path]:
     repo = repo.resolve()
     root = repo / SKILL
@@ -63,6 +75,7 @@ def pack_skill(repo: Path, output: Path) -> int:
         raise ValueError("output archive must be outside the public skill")
     # Git's timestamp gives repeated builds of the same source the same archive.
     stamp = int(subprocess.check_output(["git", "-C", str(repo), "show", "-s", "--format=%ct", "HEAD"]).strip())
+    executable = tracked_executables(repo)
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("wb") as stream, gzip.GzipFile(filename="", mode="wb", fileobj=stream, mtime=stamp) as compressed:
         with tarfile.open(fileobj=compressed, mode="w") as archive:
@@ -74,7 +87,7 @@ def pack_skill(repo: Path, output: Path) -> int:
                 # extractor then treats as one flat filename.
                 entry = tarfile.TarInfo((Path("pcbpilot") / file.relative_to(SKILL)).as_posix())
                 entry.size, entry.mtime = len(content), stamp
-                entry.mode = 0o755 if path.stat().st_mode & 0o111 else 0o644
+                entry.mode = 0o755 if file in executable else 0o644
                 archive.addfile(entry, io.BytesIO(content))
     return len(files)
 

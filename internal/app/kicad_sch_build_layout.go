@@ -69,7 +69,7 @@ func sbZoneFindings(d *sbDesign, zi *sbZoneIn, zl *sbZoneLayout) []string {
 	if err != nil {
 		return []string{err.Error()}
 	}
-	var out []string
+	out := sbSheetShorts(text, d) // a short disqualifies the drawing (layoutZones)
 	for _, f := range kicad.CheckSchematic(text, kicad.CheckOptions{}) {
 		out = append(out, f.Kind+": "+f.Message)
 	}
@@ -84,6 +84,16 @@ func sbZoneFindings(d *sbDesign, zi *sbZoneIn, zl *sbZoneLayout) []string {
 		}
 	}
 	return out
+}
+
+// sbHasShort reports a zone drawing that joins two nets (sbSheetShorts).
+func sbHasShort(findings []string) bool {
+	for _, f := range findings {
+		if strings.HasPrefix(f, "short: ") {
+			return true
+		}
+	}
+	return false
 }
 
 func sbShortHash(s string) string {
@@ -390,11 +400,17 @@ func (zi *sbZoneIn) hash(d *sbDesign, method string) string {
 					canon[n] = len(canon)
 				}
 				fmt.Fprintf(&b, "%s:%d/%s/%s,", q.Number, canon[n], zi.Policy[n], d.NetKind[n])
+				if d.NetKind[n] != "power" && d.NetKind[n] != "ground" && len(d.NetPages[n]) > 1 {
+					b.WriteString("x,") // drawn as a (larger) cross-page label
+				}
 			} else if d.NC[k] {
 				fmt.Fprintf(&b, "%s:nc,", q.Number)
 			}
 		}
 		fmt.Fprintf(&b, "%d|", len(sbFieldText(p)))
+		if p.Near != "" { // a placement hint shapes the drawing; absent = old hash
+			fmt.Fprintf(&b, "near=%s|", p.Near)
+		}
 	}
 	// label lengths of ports shape the layout too
 	var ports []string
@@ -409,6 +425,33 @@ func (zi *sbZoneIn) hash(d *sbDesign, method string) string {
 }
 
 func sbFieldText(p *sbRPart) string { return p.Ref + "/" + p.Value }
+
+// markersCurrent reports whether a cached layout's labels and power symbols
+// still name nets this zone's pins connect to, with the same power/ground
+// kind. The hash numbers nets canonically on purpose — sch-edit renames are
+// applied to the cached markers before reuse — so a net renamed in the SPEC
+// keeps the hash while the cached markers still draw the old name, and the
+// netlist gate failed until --fresh (field report 2026-10-15). Such a layout is a
+// cache miss.
+func (zi *sbZoneIn) markersCurrent(d *sbDesign, r *sbZoneLayout) bool {
+	nets := map[string]bool{}
+	for _, p := range zi.Parts {
+		for _, q := range p.LPins {
+			if n, ok := d.PinNet[sbPinKey(p.Ref, q.Number)]; ok {
+				nets[n] = true
+			}
+		}
+	}
+	for _, mk := range r.Markers {
+		if !nets[mk.Net] {
+			return false
+		}
+		if (mk.Kind == "power" || mk.Kind == "ground") && d.NetKind[mk.Net] != mk.Kind {
+			return false
+		}
+	}
+	return true
+}
 
 // ── planner path ────────────────────────────────────────────────────────────
 
@@ -996,6 +1039,12 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 								tee = []kicad.Pt{tm, end}
 								mk = sbMarker{Kind: d.NetKind[n], Net: n, At: end, Dir: dir}
 							default:
+								// the label rides on the first segment: it must be long
+								// enough for the text, or the next bend runs through it
+								// (label-on-wire; a field board's dense supply zone a signal label on 6.35 mm)
+								if math.Hypot(a.X-b.X, a.Y-b.Y) < sbTextW(n)+2.54 {
+									continue
+								}
 								at := kicad.Pt{X: sbSnapHalf(a.X + dv.X*1.27), Y: sbSnapHalf(a.Y + dv.Y*1.27)}
 								mk = sbMarker{Kind: "label", Net: n, At: at, Dir: t.dir, OnWire: true}
 							}
@@ -1020,20 +1069,62 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 	// beside the core pin a part serves (decoupling next to its supply
 	// pin), power pin up / ground pin down for two-pin parts
 	coreRef := items[0].p.Ref
+	// nearAnchor resolves a part's `near` hint to an already placed pin that
+	// shares a net with the part. Decoupling caps go through sidePlace BEFORE
+	// attach (the only other reader of `near`), and sidePlace used to anchor
+	// every cap on a rail at the topmost core pin of that rail — so each
+	// generator-supplied "near":"U1:VDD2" was silently ignored and all caps of
+	// one rail stacked at one pin (field report 2026-10-15).
+	nearAnchor := func(it unitRef) *pinAt {
+		if it.p.Near == "" {
+			return nil
+		}
+		r, pin, ok := sbSplitPin(it.p.Near)
+		if !ok || d.ByRef[r] == nil {
+			return nil
+		}
+		nums, err := d.ByRef[r].resolvePins(pin)
+		if err != nil {
+			return nil
+		}
+		own := map[string]bool{}
+		for _, q := range it.s.Pins {
+			if n, ok := d.PinNet[sbPinKey(it.p.Ref, q.Number)]; ok {
+				own[n] = true
+			}
+		}
+		for _, num := range nums {
+			k := sbPinKey(r, num)
+			if pa, placed := pins[k]; placed && own[d.PinNet[k]] {
+				a := pa
+				return &a
+			}
+		}
+		return nil
+	}
 	sidePlace := func(it unitRef) bool {
 		rot := sbTwoPinRot(d, it.p, it.s)
 		pose0 := sbPose{Rot: rot, Unit: it.unit}
-		var anchor *pinAt
+		anchor := nearAnchor(it)
 		for _, pass := range []string{"power", "signal", "ground"} {
+			if anchor != nil {
+				break
+			}
 			for _, q := range it.s.Pins {
 				n, ok := d.PinNet[sbPinKey(it.p.Ref, q.Number)]
 				if !ok || d.NetKind[n] != pass {
 					continue
 				}
+				// Topmost pin wins; a Y tie (e.g. left and right supply pins at the
+				// same height) is broken by pin key — ranging over the map alone
+				// let Go's random order pick the side, so identical input drew
+				// different wires and EG-08 passed or failed run to run (a field project
+				// 01B 2026-10-19).
+				anchorKey := ""
 				for k, pa := range pins {
-					if pa.ref == coreRef && d.PinNet[k] == n && (anchor == nil || pa.at.Y < anchor.at.Y) {
+					if pa.ref == coreRef && d.PinNet[k] == n && (anchor == nil || pa.at.Y < anchor.at.Y || (pa.at.Y == anchor.at.Y && k < anchorKey)) {
 						a := pa
-						anchor = &a
+						anchor, anchorKey = &a, k
 					}
 				}
 			}
@@ -1142,7 +1233,12 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 		}
 		// a row of upright caps (supply up, ground down) beside the pin, else
 		// a short wire to it
-		if !v.NoAttach && sidePlace(it) {
+		// exclude applies to the side row too: a cap whose side-row stub could
+		// not be drawn used to be side-placed at the same spot every round, so
+		// the redraw rounds never converged and only the attach-free variants
+		// (all caps far away, EG-06) could lay the zone out (a field board
+		// zone Z, a cap)
+		if !v.NoAttach && !exclude[it.p.Ref] && sidePlace(it) {
 			continue
 		}
 		if !v.NoAttach && !exclude[it.p.Ref] && attach(it) {
@@ -1164,7 +1260,7 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 		todo = next
 	}
 	for _, it := range append(rest, todo...) {
-		if v.NoAttach || it.p.Multi || !sidePlace(it) {
+		if v.NoAttach || it.p.Multi || exclude[it.p.Ref] || !sidePlace(it) {
 			far = append(far, it)
 		}
 	}
@@ -1337,6 +1433,15 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 	}
 	sbDeconflict(zl, bodies)
 	// no stub may end on or cross a foreign wire or pin (a silent short)
+	//
+	// Every check below matches points by EXACT equality (a wire end on a pin,
+	// a stub start on its own island). Pin positions and wire points come from
+	// different arithmetic, so the same pin could read -15.24 here and
+	// -15.240000000000009 there: the stub no longer knew its own pin or net,
+	// every same-net wire looked foreign and the zone "could not be laid out"
+	// (field report 2026-10-26, zone Z: a load switch pins 5+6 + a diode on VSW).
+	// Normalise all points to 1e-4 mm first.
+	sbRoundLayoutPoints(zl)
 	pinNet := map[kicad.Pt]string{}
 	for _, it := range items {
 		for _, ps := range zl.Parts[it.p.Ref] {
@@ -1344,7 +1449,7 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 				continue
 			}
 			for _, q := range it.s.Pins {
-				pinNet[sbXform(q.At, ps)] = d.PinNet[sbPinKey(it.p.Ref, q.Number)] + "#" + it.p.Ref + "." + q.Number
+				pinNet[sbRoundPt(sbXform(q.At, ps))] = d.PinNet[sbPinKey(it.p.Ref, q.Number)] + "#" + it.p.Ref + "." + q.Number
 			}
 		}
 	}
@@ -1380,29 +1485,64 @@ type sbBadStub struct {
 
 func sbFixStubs(zl *sbZoneLayout, pinNet map[kicad.Pt]string, bodies []kicad.Box) (unresolved []sbBadStub) {
 	vec := map[string]kicad.Pt{"up": {Y: -1}, "down": {Y: 1}, "left": {X: -1}, "right": {X: 1}}
+	// same-net sibling ties: a pin whose marker was dropped (dropped) must not
+	// become another pin's tie target, and a target keeps its own marker
+	dropMarker := map[int]bool{}
+	dropped, anchored := map[kicad.Pt]bool{}, map[kicad.Pt]bool{}
 	for mi := range zl.Markers {
 		mk := &zl.Markers[mi]
 		if mk.OnWire {
 			continue
 		}
-		wi := -1
+		// The marker's own stub: the 2-point wire ending on it whose start pin
+		// carries the marker's net; matching by end point alone takes whichever
+		// wire comes last when two stubs end on one point.
+		wi, wiAny := -1, -1
 		for j, w := range zl.Wires {
 			if len(w) == 2 && w[1] == mk.At {
-				wi = j
+				wiAny = j
+				if sbPinNetName(pinNet[w[0]]) == mk.Net {
+					wi = j
+				}
 			}
+		}
+		if wi < 0 {
+			wi = wiAny
 		}
 		if wi < 0 {
 			continue
 		}
 		start := zl.Wires[wi][0]
-		others := append(append([][]kicad.Pt(nil), zl.Wires[:wi]...), zl.Wires[wi+1:]...)
+		// Only a FOREIGN net is a short. A pin of the same net (e.g. a load switch
+		// pins 5+6 and the diode all on VSW) or a wire already carrying that net
+		// may be touched: it is the same node. Comparing the whole
+		// "NET#REF.PIN" key made every sibling pin and same-net wire foreign,
+		// so a zone with a multi-pin same-net IC side had no legal stub at all
+		// and "could not be laid out" (field report 2026-10-26).
+		ownNet := sbPinNetName(pinNet[start])
+		// others: wires that would SHORT this stub (foreign nets only);
+		// allOthers: every other wire — none may run through the marker or its
+		// text, same net or not (that is a label-on-wire defect, not a short)
+		var others, allOthers [][]kicad.Pt
+		for j, w := range zl.Wires {
+			if j == wi {
+				continue
+			}
+			allOthers = append(allOthers, w)
+			if ownNet != "" && sbWireNet(w, pinNet, zl.Markers) == ownNet {
+				continue
+			}
+			others = append(others, w)
+		}
 		bad := func(a, b kicad.Pt) bool {
 			if sbTouchesWires(a, b, others, a) {
 				return true
 			}
-			own := pinNet[a]
-			for p, n := range pinNet {
-				if p != a && n != own && (p == b || sbOnInterior(p, [2]kicad.Pt{a, b})) {
+			// a stub never runs through or ends on ANOTHER pin, same net or not:
+			// through a same-net pin is legal but a pin-on-wire defect — such
+			// pins are tied below instead
+			for p := range pinNet {
+				if p != a && (p == b || sbOnInterior(p, [2]kicad.Pt{a, b})) {
 					return true
 				}
 			}
@@ -1418,7 +1558,7 @@ func sbFixStubs(zl *sbZoneLayout, pinNet map[kicad.Pt]string, bodies []kicad.Box
 					return true
 				}
 			}
-			for _, w := range others { // no wire through the marker or its text
+			for _, w := range allOthers { // no wire through the marker or its text
 				for i := 0; i+1 < len(w); i++ {
 					sb := kicad.Box{MinX: math.Min(w[i].X, w[i+1].X), MinY: math.Min(w[i].Y, w[i+1].Y), MaxX: math.Max(w[i].X, w[i+1].X), MaxY: math.Max(w[i].Y, w[i+1].Y)}
 					if sbOverlap(sbGrow(sb, 0.2), mb) && !(w[i] == b || w[i+1] == b) {
@@ -1472,17 +1612,82 @@ func sbFixStubs(zl *sbZoneLayout, pinNet map[kicad.Pt]string, bodies []kicad.Box
 				foreign = append(foreign, w)
 			}
 		}
-		if sbTouchesWires(start, mk.At, foreign, start) {
-			unresolved = append(unresolved, sbBadStub{fmt.Sprintf("%s stub at %v touches a wire", mk.Net, start), start, mk.At})
-			continue
+		touchesForeignPin := func(a, b kicad.Pt) string {
+			for p, n := range pinNet {
+				if p != a && (ownNet == "" || sbPinNetName(n) != ownNet) && (p == b || sbOnInterior(p, [2]kicad.Pt{a, b})) {
+					return n
+				}
+			}
+			return ""
 		}
-		own := pinNet[start]
+		wireHit := sbTouchesWires(start, mk.At, foreign, start)
+		pinHit := ""
+		if !wireHit {
+			pinHit = touchesForeignPin(start, mk.At)
+		}
+		sameNetPin := false // runs through a same-net pin: no short, but untidy
 		for p, n := range pinNet {
-			if p != start && n != own && (p == mk.At || sbOnInterior(p, [2]kicad.Pt{start, mk.At})) {
-				unresolved = append(unresolved, sbBadStub{fmt.Sprintf("%s stub at %v touches pin %s", mk.Net, start, n), start, mk.At})
-				break
+			if p != start && ownNet != "" && sbPinNetName(n) == ownNet && (p == mk.At || sbOnInterior(p, [2]kicad.Pt{start, mk.At})) {
+				sameNetPin = true
 			}
 		}
+		if !wireHit && pinHit == "" && !sameNetPin {
+			continue
+		}
+		// No clean stub of its own: tie the pin to an adjacent same-net pin of
+		// the same part with a straight wire and drop this marker — two
+		// same-net pins side by side (a load switch VOUT pins 5+6) share one label,
+		// as a human would draw it, instead of two labels fighting for room.
+		if ownNet != "" && !anchored[start] { // a tie target keeps its marker: the group needs one
+			_, ownRef, _ := strings.Cut(pinNet[start], "#")
+			ownRef, _, _ = strings.Cut(ownRef, ".")
+			var sib []kicad.Pt
+			for p, n := range pinNet {
+				_, rp, _ := strings.Cut(n, "#")
+				rp, _, _ = strings.Cut(rp, ".")
+				if p != start && rp == ownRef && sbPinNetName(n) == ownNet && !dropped[p] && (p.X == start.X || p.Y == start.Y) {
+					sib = append(sib, p)
+				}
+			}
+			sort.Slice(sib, func(i, j int) bool {
+				di, dj := math.Abs(sib[i].X-start.X)+math.Abs(sib[i].Y-start.Y), math.Abs(sib[j].X-start.X)+math.Abs(sib[j].Y-start.Y)
+				if di != dj {
+					return di < dj
+				}
+				return sib[i].X < sib[j].X || (sib[i].X == sib[j].X && sib[i].Y < sib[j].Y)
+			})
+			linked := false
+			for _, p := range sib {
+				if !sbTouchesWires(start, p, foreign, start) && touchesForeignPin(start, p) == "" {
+					zl.Wires[wi] = []kicad.Pt{start, p}
+					dropMarker[mi] = true
+					dropped[start] = true
+					anchored[p] = true
+					linked = true
+					break
+				}
+			}
+			if linked {
+				continue
+			}
+		}
+		if !wireHit && pinHit == "" {
+			continue // only a same-net pin on the way and no tie possible: keep it
+		}
+		if wireHit {
+			unresolved = append(unresolved, sbBadStub{fmt.Sprintf("%s stub at %v touches a wire", mk.Net, start), start, mk.At})
+		} else {
+			unresolved = append(unresolved, sbBadStub{fmt.Sprintf("%s stub at %v touches pin %s", mk.Net, start, pinHit), start, mk.At})
+		}
+	}
+	if len(dropMarker) > 0 {
+		kept := zl.Markers[:0]
+		for i, mk := range zl.Markers {
+			if !dropMarker[i] {
+				kept = append(kept, mk)
+			}
+		}
+		zl.Markers = kept
 	}
 	return unresolved
 }
@@ -1539,6 +1744,57 @@ func sbDeconflict(zl *sbZoneLayout, obstacles []kicad.Box) {
 
 // sbTouchesWires reports whether the axis-aligned segment a–b shares a
 // point with any wire segment, except at allow.
+func sbRoundPt(p kicad.Pt) kicad.Pt { return kicad.Pt{X: sbRound4(p.X), Y: sbRound4(p.Y)} }
+
+// sbRoundLayoutPoints rounds every wire point and marker anchor of a zone
+// layout to 1e-4 mm, so equality-based connectivity checks are exact.
+func sbRoundLayoutPoints(zl *sbZoneLayout) {
+	for _, w := range zl.Wires {
+		for i := range w {
+			w[i] = sbRoundPt(w[i])
+		}
+	}
+	for i := range zl.Markers {
+		zl.Markers[i].At = sbRoundPt(zl.Markers[i].At)
+	}
+	for i := range zl.NoConnects {
+		zl.NoConnects[i] = sbRoundPt(zl.NoConnects[i])
+	}
+}
+
+// sbPinNetName is the net part of a pinNet value ("NET#REF.PIN"); "" for an
+// unconnected pin, which is never "the same net" as anything.
+func sbPinNetName(v string) string {
+	n, _, _ := strings.Cut(v, "#")
+	return n
+}
+
+// sbWireNet is the net a wire carries, read from the PINS at its ends only;
+// "" when no end is on a connected pin or the ends disagree. An unknown wire
+// stays foreign — the conservative choice.
+//
+// Markers are deliberately not evidence: a stub's own power symbol can sit on
+// the end of a foreign wire, and reading the net from that symbol called the
+// foreign wire "same net" and let +5V merge into a ground net (full-board run
+// 2026-10-26, caught by the KiCad netlist gate).
+func sbWireNet(w []kicad.Pt, pinNet map[kicad.Pt]string, _ []sbMarker) string {
+	if len(w) == 0 {
+		return ""
+	}
+	net := ""
+	for _, end := range []kicad.Pt{w[0], w[len(w)-1]} {
+		n := sbPinNetName(pinNet[end])
+		if n == "" {
+			continue
+		}
+		if net != "" && n != net {
+			return ""
+		}
+		net = n
+	}
+	return net
+}
+
 func sbTouchesWires(a, b kicad.Pt, wires [][]kicad.Pt, allow kicad.Pt) bool {
 	const e = 1e-6
 	sa := kicad.Box{MinX: math.Min(a.X, b.X) - e, MinY: math.Min(a.Y, b.Y) - e, MaxX: math.Max(a.X, b.X) + e, MaxY: math.Max(a.Y, b.Y) + e}
@@ -1675,7 +1931,7 @@ func layoutZones(d *sbDesign, zis []*sbZoneIn, reuse map[string]*sbZoneLayout, o
 	}
 	for _, zi := range zis {
 		hp, hg := zi.hash(d, "planner"), zi.hash(d, "grid-autoconnect")
-		if r := reuse[zi.Zone.ID]; r != nil && (r.Hash == hp || r.Hash == hg) {
+		if r := reuse[zi.Zone.ID]; r != nil && (r.Hash == hp || r.Hash == hg) && zi.markersCurrent(d, r) {
 			out[zi.Zone.ID] = r
 			continue
 		}
@@ -1699,6 +1955,10 @@ func layoutZones(d *sbDesign, zis []*sbZoneIn, reuse map[string]*sbZoneLayout, o
 			var zl *sbZoneLayout
 			for _, c := range cands {
 				c.Findings = sbZoneFindings(d, zi, c)
+				if sbHasShort(c.Findings) {
+					perr = fmt.Errorf("planner drawing rejected: %s", c.Findings[0])
+					continue
+				}
 				zl = c
 			}
 			var gerr error
@@ -1716,6 +1976,10 @@ func layoutZones(d *sbDesign, zis []*sbZoneIn, reuse map[string]*sbZoneLayout, o
 					zg.Notes = append(zg.Notes, "planner: "+sbClip(perr.Error(), 900))
 				}
 				zg.Findings = sbZoneFindings(d, zi, zg)
+				if sbHasShort(zg.Findings) {
+					gerr = fmt.Errorf("grid drawing rejected: %s", zg.Findings[0])
+					continue
+				}
 				if zl == nil || len(zg.Findings) < len(zl.Findings) {
 					zl = zg
 				}
@@ -1818,7 +2082,14 @@ func packZones(ids []string, layouts map[string]*sbZoneLayout, keep map[string]k
 			fp := sbFootprint(layouts[id].Box, t)
 			clash := false
 			for _, b := range placed {
-				if sbOverlap(sbGrow(fp, sbZoneGap/2), b) {
+				// A kept zone is dropped only on a REAL overlap. sbPackFresh
+				// packs frames 5.08 mm apart and then snaps each origin, so
+				// neighbours can end up ~1.3 mm apart; the old sbZoneGap/2
+				// (3.81 mm) test rejected a fresh build's own positions on the
+				// next rebuild and re-placed those zones past A0 (a field board
+				// 2026-10-18: A0 sheets came back as A4 with thousands of
+				// off-page findings unless --fresh).
+				if sbOverlap(fp, b) {
 					clash = true
 				}
 			}
@@ -1874,5 +2145,37 @@ func packZones(ids []string, layouts map[string]*sbZoneLayout, keep map[string]k
 		x += w + sbZoneGap
 		rowH = math.Max(rowH, h)
 	}
+	if !fresh && !sbFitsLargestPaper(placed) {
+		// incremental placement overflowed the largest sheet: repack the
+		// page from scratch rather than ship content that cannot fit
+		if f := sbPackFresh(ids, layouts); f != nil {
+			return f
+		}
+	}
 	return out
+}
+
+// sbFitsLargestPaper reports whether zone frames fit inside the drawing area
+// of the largest paper (border 10 mm on every side).
+func sbFitsLargestPaper(frames []kicad.Box) bool {
+	if len(frames) == 0 {
+		return true
+	}
+	big := kicad.Papers[len(kicad.Papers)-1]
+	u := frames[0]
+	for _, b := range frames[1:] {
+		u = kicad.Box{MinX: math.Min(u.MinX, b.MinX), MinY: math.Min(u.MinY, b.MinY), MaxX: math.Max(u.MaxX, b.MaxX), MaxY: math.Max(u.MaxY, b.MaxY)}
+	}
+	if !(u.MinX >= 10 && u.MinY >= 10 && u.MaxX <= big.W-10 && u.MaxY <= big.H-10) {
+		return false
+	}
+	// the same predicate the fresh packer uses: nothing in the title block
+	// (a kept zone there passed this check, then failed page-fit — Kimi review)
+	title := kicad.Box{MinX: big.W - 10 - 112, MinY: big.H - 10 - 34, MaxX: big.W - 10, MaxY: big.H - 10}
+	for _, f := range frames {
+		if sbOverlap(f, title) {
+			return false
+		}
+	}
+	return true
 }

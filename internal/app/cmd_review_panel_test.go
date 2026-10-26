@@ -78,7 +78,80 @@ func TestRunReviewPanelFake(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "out", "review.json")); err != nil {
 		t.Fatal(err)
 	}
+	// Raw replies are reviewer_<name>.md — never <name>.md, so a reviewer named
+	// claude cannot collide with a CLAUDE.md on a case-insensitive filesystem.
+	if _, err := os.Stat(filepath.Join(dir, "out", "reviewer_a.md")); err != nil {
+		t.Fatal(err)
+	}
+	if got := reviewerRawFile("claude"); strings.EqualFold(got, "CLAUDE.md") {
+		t.Fatalf("raw reply file %q collides with CLAUDE.md", got)
+	}
 	if _, err := runReviewPanel("design", nil, nil, []string{"a"}, dir, time.Minute, 0, nil, io.Discard); err == nil {
 		t.Fatal("ran without requirements")
+	}
+}
+
+// field report 2026-10-15: a 537 KB prompt passed as an argument failed every
+// reviewer on Windows ("The filename or extension is too long"). The prompt
+// must travel by stdin or file; the command line must stay far below the
+// 8 191-char limit that applies through a .cmd shim (codex.cmd).
+func TestReviewerInvocationKeepsLargePromptOffCommandLine(t *testing.T) {
+	prompt := strings.Repeat("requirement R-1: the board shall … ", 1500) // ~54 KB > 32 KB
+	if len(prompt) <= 32*1024 {
+		t.Fatalf("test prompt is only %d bytes", len(prompt))
+	}
+	for _, name := range []string{"codex", "kimi", "claude"} {
+		call, err := reviewerInvocation(name, filepath.Join("C:", "tmp", "pcbpilot-"+name), prompt)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		cmdLine := len(call.Bin)
+		for _, a := range call.Args {
+			cmdLine += len(a) + 1
+			if strings.Contains(a, "requirement R-1") {
+				t.Fatalf("%s: prompt text leaked into argv", name)
+			}
+		}
+		if cmdLine > 2048 {
+			t.Fatalf("%s: command line is %d chars", name, cmdLine)
+		}
+		if call.Stdin != prompt && call.PromptFile == "" {
+			t.Fatalf("%s: prompt is delivered neither by stdin nor by file", name)
+		}
+	}
+	// kimi exits with "Cannot combine --prompt with --auto." (checked 2026-10-15).
+	if k, _ := reviewerInvocation("kimi", "d", prompt); strings.Contains(strings.Join(k.Args, " "), "--auto") {
+		t.Fatalf("kimi -p must not be combined with --auto: %v", k.Args)
+	}
+	if _, err := reviewerInvocation("nope", "", prompt); err == nil {
+		t.Fatal("unknown reviewer accepted")
+	}
+}
+
+// field report 2026-10-19: a review CLI read confidential files from the project
+// working directory. Every reviewer is confined to its private prompt-only
+// directory: codex is pinned there with -C and a read-only sandbox, claude
+// gets no tools, kimi only that directory via --add-dir.
+func TestReviewerInvocationIsConfinedToPrivateDir(t *testing.T) {
+	const dir = "PRIVATE-DIR"
+	codex, _ := reviewerInvocation("codex", dir, "p")
+	if a := strings.Join(codex.Args, " "); !strings.Contains(a, "-C "+dir) || !strings.Contains(a, "-s read-only") {
+		t.Errorf("codex not pinned to the private dir read-only: %v", codex.Args)
+	}
+	claude, _ := reviewerInvocation("claude", dir, "p")
+	tools := -1
+	for i, a := range claude.Args {
+		if a == "--tools" && i+1 < len(claude.Args) && claude.Args[i+1] == "" {
+			tools = i
+		}
+	}
+	if tools < 0 {
+		t.Errorf("claude reviewer must run with --tools \"\": %v", claude.Args)
+	}
+	kimi, _ := reviewerInvocation("kimi", dir, "p")
+	for i, a := range kimi.Args {
+		if a == "--add-dir" && (i+1 >= len(kimi.Args) || kimi.Args[i+1] != dir) {
+			t.Errorf("kimi --add-dir must be the private dir: %v", kimi.Args)
+		}
 	}
 }

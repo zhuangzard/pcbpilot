@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -74,7 +73,8 @@ func RunERC(root string) (*ERCReport, error) {
 	defer os.RemoveAll(dir)
 	out := filepath.Join(dir, "erc.json")
 	var buf bytes.Buffer
-	cmd := exec.Command(cli, "sch", "erc", "--format", "json", "--severity-all", "-o", out, root)
+	cmd, cancel := SchCLICommand(cli, "sch", "erc", "--format", "json", "--severity-all", "-o", out, root)
+	defer cancel()
 	cmd.Stdout, cmd.Stderr = &buf, &buf
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("kicad-cli sch erc: %v: %s", err, strings.TrimSpace(buf.String()))
