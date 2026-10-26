@@ -1,17 +1,20 @@
 package app
 
-// kicad_sch_build_split.go — automatic zone split for zones the layout cannot
-// draw cleanly.
+// kicad_sch_build_split.go — opt-in automatic zone split (sch-build
+// --auto-split) for zones the layout cannot draw cleanly.
 //
-// A dense functional zone (a field board's dense supply zone: LDO + load switch + inverter
-// + transistor + 14 passives) has no grid or planner drawing that passes the
+// A dense functional zone on a field board (LDO + load switch + inverter +
+// transistor + 14 passives) had no grid or planner drawing that passes the
 // quality / EG-06 gates: labels, texts and decoupling caps fight for the same
-// room. The a field project boards worked around it by hand with one zone per IC
-// cluster, which then passes every gate. This file does the same
-// automatically: a zone whose best layout still has findings (or none at
-// all) and that holds at least two ICs is split into one sub-zone per IC with
-// the passives that belong to it, the sub-zones are laid out, and the split
-// is kept only when it is strictly better.
+// room. Users worked around it by hand with one zone per IC cluster. This
+// file does the same automatically: a zone whose best layout still has
+// findings (or none at all) and that holds at least two ICs is split into one
+// sub-zone per IC with the passives that belong to it, the sub-zones are laid
+// out, and the split is kept only when it is strictly better.
+//
+// Off by default: on a 2605-part board it improved text-over-symbol and
+// EG-06 but added EG-08 crossings, one more over-full page and 9x the layout
+// time. A better acceptance rule (no new crossings, page fit) is open.
 
 import (
 	"fmt"

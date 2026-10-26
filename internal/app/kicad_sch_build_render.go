@@ -394,9 +394,12 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 	lo := sbLayoutOpts{NoPlanner: o.NoPlanner, Budget: o.PlannerBudget, Jobs: o.Jobs, Timeout: o.PlannerTimeout}
 	layouts, notes := layoutZones(d, zis, reuse, lo)
 	rep.Warnings = append(rep.Warnings, notes...)
-	if !o.NoAutoSplit {
-		// a zone with no clean drawing is split into one sub-zone per IC
-		// (kicad_sch_build_split.go); kept only when strictly better
+	if o.AutoSplit {
+		// opt-in: a zone with no clean drawing is split into one sub-zone per
+		// IC (kicad_sch_build_split.go); kept only when strictly better. Off by
+		// default: on a 2605-part board it cut text-over-symbol 245 -> 122 and
+		// EG-06 pages 9 -> 4 but raised EG-08 pages 2 -> 10, overflowed one
+		// more page and took 9x the layout time.
 		var splitNotes []string
 		zis, splitNotes = sbAutoSplitZones(d, zis, layouts, reuse, lo)
 		rep.Warnings = append(rep.Warnings, splitNotes...)
