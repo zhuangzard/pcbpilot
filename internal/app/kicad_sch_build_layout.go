@@ -1214,7 +1214,12 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 		}
 		// a row of upright caps (supply up, ground down) beside the pin, else
 		// a short wire to it
-		if !v.NoAttach && sidePlace(it) {
+		// exclude applies to the side row too: a cap whose side-row stub could
+		// not be drawn used to be side-placed at the same spot every round, so
+		// the redraw rounds never converged and only the attach-free variants
+		// (all caps far away, EG-06) could lay the zone out (a field board
+		// zone Z, a cap)
+		if !v.NoAttach && !exclude[it.p.Ref] && sidePlace(it) {
 			continue
 		}
 		if !v.NoAttach && !exclude[it.p.Ref] && attach(it) {
@@ -1236,7 +1241,7 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 		todo = next
 	}
 	for _, it := range append(rest, todo...) {
-		if v.NoAttach || it.p.Multi || !sidePlace(it) {
+		if v.NoAttach || it.p.Multi || exclude[it.p.Ref] || !sidePlace(it) {
 			far = append(far, it)
 		}
 	}
@@ -1409,6 +1414,15 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 	}
 	sbDeconflict(zl, bodies)
 	// no stub may end on or cross a foreign wire or pin (a silent short)
+	//
+	// Every check below matches points by EXACT equality (a wire end on a pin,
+	// a stub start on its own island). Pin positions and wire points come from
+	// different arithmetic, so the same pin could read -15.24 here and
+	// -15.240000000000009 there: the stub no longer knew its own pin or net,
+	// every same-net wire looked foreign and the zone "could not be laid out"
+	// (field report 2026-10-26, zone Z: a load switch pins 5+6 + a diode on VSW).
+	// Normalise all points to 1e-4 mm first.
+	sbRoundLayoutPoints(zl)
 	pinNet := map[kicad.Pt]string{}
 	for _, it := range items {
 		for _, ps := range zl.Parts[it.p.Ref] {
@@ -1416,7 +1430,7 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 				continue
 			}
 			for _, q := range it.s.Pins {
-				pinNet[sbXform(q.At, ps)] = d.PinNet[sbPinKey(it.p.Ref, q.Number)] + "#" + it.p.Ref + "." + q.Number
+				pinNet[sbRoundPt(sbXform(q.At, ps))] = d.PinNet[sbPinKey(it.p.Ref, q.Number)] + "#" + it.p.Ref + "." + q.Number
 			}
 		}
 	}
@@ -1452,29 +1466,60 @@ type sbBadStub struct {
 
 func sbFixStubs(zl *sbZoneLayout, pinNet map[kicad.Pt]string, bodies []kicad.Box) (unresolved []sbBadStub) {
 	vec := map[string]kicad.Pt{"up": {Y: -1}, "down": {Y: 1}, "left": {X: -1}, "right": {X: 1}}
+	// same-net sibling ties: a pin whose marker was dropped (dropped) must not
+	// become another pin's tie target, and a target keeps its own marker
+	dropMarker := map[int]bool{}
+	dropped, anchored := map[kicad.Pt]bool{}, map[kicad.Pt]bool{}
 	for mi := range zl.Markers {
 		mk := &zl.Markers[mi]
 		if mk.OnWire {
 			continue
 		}
-		wi := -1
+		// The marker's own stub: the 2-point wire ending on it whose start pin
+		// carries the marker's net; matching by end point alone takes whichever
+		// wire comes last when two stubs end on one point.
+		wi, wiAny := -1, -1
 		for j, w := range zl.Wires {
 			if len(w) == 2 && w[1] == mk.At {
-				wi = j
+				wiAny = j
+				if sbPinNetName(pinNet[w[0]]) == mk.Net {
+					wi = j
+				}
 			}
+		}
+		if wi < 0 {
+			wi = wiAny
 		}
 		if wi < 0 {
 			continue
 		}
 		start := zl.Wires[wi][0]
-		others := append(append([][]kicad.Pt(nil), zl.Wires[:wi]...), zl.Wires[wi+1:]...)
+		// Only a FOREIGN net is a short. A pin of the same net (e.g. a load switch
+		// pins 5+6 and the diode all on VSW) or a wire already carrying that net
+		// may be touched: it is the same node. Comparing the whole
+		// "NET#REF.PIN" key made every sibling pin and same-net wire foreign,
+		// so a zone with a multi-pin same-net IC side had no legal stub at all
+		// and "could not be laid out" (field report 2026-10-26).
+		ownNet := sbPinNetName(pinNet[start])
+		var others [][]kicad.Pt
+		for j, w := range zl.Wires {
+			if j == wi {
+				continue
+			}
+			if ownNet != "" && sbWireNet(w, pinNet, zl.Markers) == ownNet {
+				continue
+			}
+			others = append(others, w)
+		}
 		bad := func(a, b kicad.Pt) bool {
 			if sbTouchesWires(a, b, others, a) {
 				return true
 			}
-			own := pinNet[a]
-			for p, n := range pinNet {
-				if p != a && n != own && (p == b || sbOnInterior(p, [2]kicad.Pt{a, b})) {
+			// a stub never runs through or ends on ANOTHER pin, same net or not:
+			// through a same-net pin is legal but a pin-on-wire defect — such
+			// pins are tied below instead
+			for p := range pinNet {
+				if p != a && (p == b || sbOnInterior(p, [2]kicad.Pt{a, b})) {
 					return true
 				}
 			}
@@ -1544,17 +1589,82 @@ func sbFixStubs(zl *sbZoneLayout, pinNet map[kicad.Pt]string, bodies []kicad.Box
 				foreign = append(foreign, w)
 			}
 		}
-		if sbTouchesWires(start, mk.At, foreign, start) {
-			unresolved = append(unresolved, sbBadStub{fmt.Sprintf("%s stub at %v touches a wire", mk.Net, start), start, mk.At})
-			continue
+		touchesForeignPin := func(a, b kicad.Pt) string {
+			for p, n := range pinNet {
+				if p != a && (ownNet == "" || sbPinNetName(n) != ownNet) && (p == b || sbOnInterior(p, [2]kicad.Pt{a, b})) {
+					return n
+				}
+			}
+			return ""
 		}
-		own := pinNet[start]
+		wireHit := sbTouchesWires(start, mk.At, foreign, start)
+		pinHit := ""
+		if !wireHit {
+			pinHit = touchesForeignPin(start, mk.At)
+		}
+		sameNetPin := false // runs through a same-net pin: no short, but untidy
 		for p, n := range pinNet {
-			if p != start && n != own && (p == mk.At || sbOnInterior(p, [2]kicad.Pt{start, mk.At})) {
-				unresolved = append(unresolved, sbBadStub{fmt.Sprintf("%s stub at %v touches pin %s", mk.Net, start, n), start, mk.At})
-				break
+			if p != start && ownNet != "" && sbPinNetName(n) == ownNet && (p == mk.At || sbOnInterior(p, [2]kicad.Pt{start, mk.At})) {
+				sameNetPin = true
 			}
 		}
+		if !wireHit && pinHit == "" && !sameNetPin {
+			continue
+		}
+		// No clean stub of its own: tie the pin to an adjacent same-net pin of
+		// the same part with a straight wire and drop this marker — two
+		// same-net pins side by side (a load switch VOUT pins 5+6) share one label,
+		// as a human would draw it, instead of two labels fighting for room.
+		if ownNet != "" && !anchored[start] { // a tie target keeps its marker: the group needs one
+			_, ownRef, _ := strings.Cut(pinNet[start], "#")
+			ownRef, _, _ = strings.Cut(ownRef, ".")
+			var sib []kicad.Pt
+			for p, n := range pinNet {
+				_, rp, _ := strings.Cut(n, "#")
+				rp, _, _ = strings.Cut(rp, ".")
+				if p != start && rp == ownRef && sbPinNetName(n) == ownNet && !dropped[p] && (p.X == start.X || p.Y == start.Y) {
+					sib = append(sib, p)
+				}
+			}
+			sort.Slice(sib, func(i, j int) bool {
+				di, dj := math.Abs(sib[i].X-start.X)+math.Abs(sib[i].Y-start.Y), math.Abs(sib[j].X-start.X)+math.Abs(sib[j].Y-start.Y)
+				if di != dj {
+					return di < dj
+				}
+				return sib[i].X < sib[j].X || (sib[i].X == sib[j].X && sib[i].Y < sib[j].Y)
+			})
+			linked := false
+			for _, p := range sib {
+				if !sbTouchesWires(start, p, foreign, start) && touchesForeignPin(start, p) == "" {
+					zl.Wires[wi] = []kicad.Pt{start, p}
+					dropMarker[mi] = true
+					dropped[start] = true
+					anchored[p] = true
+					linked = true
+					break
+				}
+			}
+			if linked {
+				continue
+			}
+		}
+		if !wireHit && pinHit == "" {
+			continue // only a same-net pin on the way and no tie possible: keep it
+		}
+		if wireHit {
+			unresolved = append(unresolved, sbBadStub{fmt.Sprintf("%s stub at %v touches a wire", mk.Net, start), start, mk.At})
+		} else {
+			unresolved = append(unresolved, sbBadStub{fmt.Sprintf("%s stub at %v touches pin %s", mk.Net, start, pinHit), start, mk.At})
+		}
+	}
+	if len(dropMarker) > 0 {
+		kept := zl.Markers[:0]
+		for i, mk := range zl.Markers {
+			if !dropMarker[i] {
+				kept = append(kept, mk)
+			}
+		}
+		zl.Markers = kept
 	}
 	return unresolved
 }
@@ -1611,6 +1721,51 @@ func sbDeconflict(zl *sbZoneLayout, obstacles []kicad.Box) {
 
 // sbTouchesWires reports whether the axis-aligned segment a–b shares a
 // point with any wire segment, except at allow.
+func sbRoundPt(p kicad.Pt) kicad.Pt { return kicad.Pt{X: sbRound4(p.X), Y: sbRound4(p.Y)} }
+
+// sbRoundLayoutPoints rounds every wire point and marker anchor of a zone
+// layout to 1e-4 mm, so equality-based connectivity checks are exact.
+func sbRoundLayoutPoints(zl *sbZoneLayout) {
+	for _, w := range zl.Wires {
+		for i := range w {
+			w[i] = sbRoundPt(w[i])
+		}
+	}
+	for i := range zl.Markers {
+		zl.Markers[i].At = sbRoundPt(zl.Markers[i].At)
+	}
+	for i := range zl.NoConnects {
+		zl.NoConnects[i] = sbRoundPt(zl.NoConnects[i])
+	}
+}
+
+// sbPinNetName is the net part of a pinNet value ("NET#REF.PIN"); "" for an
+// unconnected pin, which is never "the same net" as anything.
+func sbPinNetName(v string) string {
+	n, _, _ := strings.Cut(v, "#")
+	return n
+}
+
+// sbWireNet is the net a wire carries when one of its ends sits on a
+// connected pin or on a power/ground/label marker; "" when unknown (an
+// unknown wire stays foreign — the conservative choice).
+func sbWireNet(w []kicad.Pt, pinNet map[kicad.Pt]string, markers []sbMarker) string {
+	if len(w) == 0 {
+		return ""
+	}
+	for _, end := range []kicad.Pt{w[0], w[len(w)-1]} {
+		if n := sbPinNetName(pinNet[end]); n != "" {
+			return n
+		}
+		for _, mk := range markers {
+			if mk.At == end && mk.Net != "" {
+				return mk.Net
+			}
+		}
+	}
+	return ""
+}
+
 func sbTouchesWires(a, b kicad.Pt, wires [][]kicad.Pt, allow kicad.Pt) bool {
 	const e = 1e-6
 	sa := kicad.Box{MinX: math.Min(a.X, b.X) - e, MinY: math.Min(a.Y, b.Y) - e, MaxX: math.Max(a.X, b.X) + e, MaxY: math.Max(a.Y, b.Y) + e}

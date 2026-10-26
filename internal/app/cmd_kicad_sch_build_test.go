@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -559,5 +560,67 @@ func TestSbGridZoneIsDeterministic(t *testing.T) {
 		} else if string(got) != first {
 			t.Fatalf("run %d drew a different zone for identical input", i)
 		}
+	}
+}
+
+// field report 2026-10-26: a zone "could not be laid out" — a load switch
+// pins 5+6 and the diode share VSW, and every stub of one VSW pin was
+// rejected for touching its sibling pin / same-net wire as if it were foreign.
+func TestSbGridZoneMultiPinSameNet(t *testing.T) {
+	two := func(a, b string) []sbPin {
+		return []sbPin{{Number: "1", Name: a, Type: "passive"}, {Number: "2", Name: b, Type: "passive"}}
+	}
+	spec := &sbSpec{
+		Name:  "supply",
+		Zones: []sbZone{{ID: "supply", Title: "Primary supply"}},
+		Parts: []sbPart{
+			{Ref: "U2", Value: "a load switch", Zone: "supply", Pins: []sbPin{
+				{Number: "1", Name: "VIN", Type: "power_in"}, {Number: "2", Name: "GND", Type: "power_in"},
+				{Number: "3", Name: "EN", Type: "input"}, {Number: "4", Name: "CT", Type: "passive"},
+				{Number: "5", Name: "VOUT", Type: "power_out"}, {Number: "6", Name: "VOUT", Type: "power_out"}}},
+			{Ref: "D1", Value: "BAT54", Zone: "supply", Pins: two("A", "K")},
+			{Ref: "C1", Value: "1uF", Zone: "supply", Pins: two("1", "2")},
+			{Ref: "C2", Value: "10uF", Zone: "supply", Pins: two("1", "2")},
+			{Ref: "C3", Value: "1nF", Zone: "supply", Pins: two("1", "2")},
+			{Ref: "R1", Value: "100k", Zone: "supply", Pins: two("1", "2")},
+		},
+		Nets: []sbNet{
+			{Name: "+12V", Pins: []string{"U2:VIN", "C1:1", "R1:1"}, Kind: "power"},
+			{Name: "VSW", Pins: []string{"U2:5", "U2:6", "D1:K", "C2:1"}, Kind: "power"},
+			{Name: "EN", Pins: []string{"U2:EN", "R1:2"}},
+			{Name: "CT", Pins: []string{"U2:CT", "C3:1"}},
+			{Name: "AUX", Pins: []string{"D1:A"}},
+			{Name: "GND", Pins: []string{"U2:GND", "C1:2", "C2:2", "C3:2"}},
+		},
+	}
+	d, _, err := buildDesign(spec, sbResolveOpts{Offline: true})
+	if err != nil {
+		t.Fatalf("design: %v", err)
+	}
+	zi := d.zoneInputs()[0]
+	var errs []string
+	for _, v := range sbGridVariants {
+		if _, err := gridZone(d, zi, &sbMeasure{cache: map[string]kicad.SceneSymbol{}}, v); err == nil {
+			return
+		} else {
+			errs = append(errs, err.Error())
+		}
+	}
+	t.Fatalf("no grid variant could lay out a zone with a multi-pin same-net IC side:\n%s", strings.Join(errs, "\n"))
+}
+
+func TestFinishSbRunFailureIsNotOK(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "r.json")
+	err := finishSbRun(&sbReport{OK: true}, fmt.Errorf("zone z could not be laid out"), path, io.Discard, io.Discard)
+	if err == nil {
+		t.Fatal("error swallowed")
+	}
+	var got struct {
+		OK    bool       `json:"ok"`
+		Error *sbFailure `json:"error"`
+	}
+	b, _ := os.ReadFile(path)
+	if json.Unmarshal(b, &got) != nil || got.OK || got.Error == nil || !strings.Contains(got.Error.Message, "could not be laid out") {
+		t.Fatalf("a failed run must report ok:false with the error, got %s", b)
 	}
 }

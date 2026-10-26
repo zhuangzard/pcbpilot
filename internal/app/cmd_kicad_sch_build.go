@@ -1215,6 +1215,16 @@ with kicad sch-edit, read it compactly with kicad sch-read.`,
 
 // finishSbRun prints the report and maps hard-gate failures to the exit code.
 func finishSbRun(res *sbReport, err error, reportPath string, stdout, stderr io.Writer) error {
+	if res != nil && err != nil {
+		// A run that failed must never report ok:true. Early failures (e.g. a
+		// zone that could not be laid out) returned the half-filled report
+		// with its default OK and no error object (field report 2026-10-26).
+		res.OK = false
+		if res.Error == nil {
+			res.Error = &sbFailure{Code: "BUILD_FAILED", Message: err.Error(),
+				Fix: "see the warnings for the failing zone or stage and report it with the spec"}
+		}
+	}
 	if res != nil {
 		if reportPath != "" {
 			_ = writeJSONFile(reportPath, res)
