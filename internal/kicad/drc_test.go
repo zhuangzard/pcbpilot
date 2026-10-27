@@ -188,8 +188,8 @@ func TestReadDRCPolicy(t *testing.T) {
 		p.Exclusions[2].Rule != "via_dangling" || p.Exclusions[2].Comment != "" {
 		t.Fatalf("exclusions: %+v", p.Exclusions)
 	}
-	if strings.Join(p.Ignored, ",") != "annular_width,missing_courtyard,track_width,unconnected_items" ||
-		strings.Join(p.Downgraded, ",") != "drill_out_of_range,missing_footprint,silk_overlap" {
+	if strings.Join(p.Ignored, ",") != "annular_width,made_up_rule,missing_courtyard,track_width,unconnected_items" ||
+		strings.Join(p.Downgraded, ",") != "drill_out_of_range,missing_footprint,pth_inside_courtyard,silk_overlap" {
 		t.Fatalf("ignored %v downgraded %v", p.Ignored, p.Downgraded)
 	}
 	bad := filepath.Join(t.TempDir(), "bad.kicad_pro")

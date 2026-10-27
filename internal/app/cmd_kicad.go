@@ -377,19 +377,39 @@ func kicadDRCGate(rep *kicad.DRCReport, path string) gateResult {
 	return g
 }
 
-// drcCriticalRules are KiCad DRC rules that are never cosmetic for a routed
-// board even where KiCad's default severity is a warning: the schematic
-// parity checks.
-var drcCriticalRules = map[string]bool{
-	"schematic_parity": true, "missing_footprint": true, "extra_footprint": true, "duplicate_footprints": true,
+// drcHardRules are the electrical and fabrication DRC rules a project may
+// not silence on a routed board (exclusion, "ignore", or a downgrade of an
+// error to "warning"): shorts, the clearance family, unconnected items,
+// schematic parity, copper / drill size rules, thermals, zones, solder mask
+// bridges. Silencing one fails kicad-drc unless a signed waiver matches.
+var drcHardRules = map[string]bool{
+	"shorting_items": true, "tracks_crossing": true,
+	"clearance": true, "hole_clearance": true, "copper_edge_clearance": true, "creepage": true, "hole_to_hole": true, "edge_clearance": true,
+	"unconnected_items": true,
+	"schematic_parity":  true, "missing_footprint": true, "extra_footprint": true, "duplicate_footprints": true,
 	"net_conflict": true, "footprint_symbol_mismatch": true,
+	"track_width": true, "via_diameter": true, "drill_out_of_range": true, "annular_width": true, "connection_width": true,
+	"microvia_drill_out_of_range": true,
+	"starved_thermal":             true, "zones_intersect": true, "solder_mask_bridge": true,
 }
 
-// kicadNonErrorRules are the rules KiCad 10 does not report as errors by
-// default (warning or ignore in a fresh project's rule_severities): silk,
-// text, library and other cosmetic or advisory checks. Every other rule,
-// including any KiCad adds later, is error-level here (fail closed).
-var kicadNonErrorRules = map[string]bool{
+// drcSoftRules are the other rules KiCad 10 reports as errors by default
+// (placement, courtyard, outline, length / skew tuning, library): silencing
+// one is listed as "silenced" in the gate detail and summary.drcPolicy but
+// does not fail the gate.
+var drcSoftRules = map[string]bool{
+	"courtyards_overlap": true, "diff_pair_gap_out_of_range": true, "diff_pair_uncoupled_length_too_long": true,
+	"footprint": true, "invalid_outline": true, "item_on_disabled_layer": true, "items_not_allowed": true,
+	"length_out_of_range": true, "malformed_courtyard": true, "npth_inside_courtyard": true, "pth_inside_courtyard": true,
+	"overlapping_pads": true, "skew_out_of_range": true, "text_on_edge_cuts": true, "through_hole_pad_without_hole": true,
+	"too_many_vias": true, "track_angle": true, "track_on_post_machined_layer": true, "track_segment_length": true,
+	"unresolved_variable": true,
+}
+
+// kicadWarningRules are the rules KiCad 10 does not report as errors by
+// default (warning or ignore in a fresh project's rule_severities). Those
+// not in drcHardRules are cosmetic or advisory: silencing them is info.
+var kicadWarningRules = map[string]bool{
 	"connection_width": true, "copper_sliver": true, "footprint_symbol_field_mismatch": true, "hole_to_hole": true,
 	"holes_co_located": true, "isolated_copper": true, "lib_footprint_issues": true, "lib_footprint_mismatch": true,
 	"mirrored_text_on_front_layer": true, "missing_tuning_profile": true, "nonmirrored_text_on_back_layer": true,
@@ -397,23 +417,44 @@ var kicadNonErrorRules = map[string]bool{
 	"text_thickness": true, "track_dangling": true, "via_dangling": true,
 	"footprint_filters_mismatch": true, "footprint_type_mismatch": true, "missing_courtyard": true,
 	"track_not_centered_on_via": true, "tuning_profile_track_geometries": true,
+	// Parity checks: warnings by KiCad's default (and hard rules here).
+	"missing_footprint": true, "extra_footprint": true, "duplicate_footprints": true, "net_conflict": true,
+	"footprint_symbol_mismatch": true,
 }
 
-// drcRuleIsError: the rule is error-level by KiCad's default (or a parity
-// check), whatever severity the project itself gives it.
-func drcRuleIsError(rule string) bool { return drcCriticalRules[rule] || !kicadNonErrorRules[rule] }
+// drcRuleClass: "hard" (fails unless waived), "soft" (listed as silenced),
+// or "info". A rule in none of the tables is hard (fail closed).
+func drcRuleClass(rule string) string {
+	switch {
+	case drcHardRules[rule]:
+		return "hard"
+	case drcSoftRules[rule]:
+		return "soft"
+	case kicadWarningRules[rule]:
+		return "info"
+	}
+	return "hard"
+}
+
+// drcSilenced is one error-level check the project silences without
+// failing the gate (summary.drcPolicy.silenced).
+type drcSilenced struct {
+	Rule  string `json:"rule"`
+	How   string `json:"how"` // excluded | ignored | downgraded
+	Where string `json:"where"`
+}
 
 // applyDRCPolicy adds the project's DRC policy (its .kicad_pro
-// drc_exclusions and rule_severities) to the kicad-drc gate: an exclusion
-// of an error-level rule ("EXCLUDED <key>"), an error-level rule set to
-// ignore ("IGNORED <rule>") or lowered to warning ("DOWNGRADED <rule>") is a
-// failing item, which only a {"gate":"kicad-drc","match":...} waiver can
-// accept; exclusions and ignores of warning-level rules are listed in Info.
-// excluded are the report's excluded items (kicad-cli --severity-all), for
-// their positions.
-func applyDRCPolicy(g *gateResult, pol *kicad.DRCPolicy, excluded []kicad.Violation) {
+// drc_exclusions and rule_severities) to the kicad-drc gate. An exclusion
+// ("EXCLUDED <key>"), an "ignore" ("IGNORED <rule>") or a downgrade of a
+// KiCad error to "warning" ("DOWNGRADED <rule>") of a hard rule is a failing
+// item that only a {"gate":"kicad-drc","match":...} waiver can accept; of a
+// soft rule it is returned as silenced and named in the detail and info; of
+// a warning-level rule it is info. excluded are the report's excluded items
+// (kicad-cli --severity-all), for their positions.
+func applyDRCPolicy(g *gateResult, pol *kicad.DRCPolicy, excluded []kicad.Violation) []drcSilenced {
 	if pol == nil {
-		return
+		return nil
 	}
 	where := map[string]string{} // rule|first uuid -> description
 	for _, v := range excluded {
@@ -421,12 +462,17 @@ func applyDRCPolicy(g *gateResult, pol *kicad.DRCPolicy, excluded []kicad.Violat
 			where[v.Rule+"|"+v.Objs[0]] = v.Message
 		}
 	}
-	critical := 0
-	put := func(rule, it string) {
-		if drcRuleIsError(rule) {
+	hard := 0
+	var silenced []drcSilenced
+	put := func(rule, how, at, it string) {
+		switch drcRuleClass(rule) {
+		case "hard":
 			g.Items = append(g.Items, it)
-			critical++
-		} else {
+			hard++
+		case "soft":
+			silenced = append(silenced, drcSilenced{Rule: rule, How: how, Where: at})
+			g.Info = append(g.Info, "SILENCED "+it)
+		default:
 			g.Info = append(g.Info, it)
 		}
 	}
@@ -439,25 +485,35 @@ func applyDRCPolicy(g *gateResult, pol *kicad.DRCPolicy, excluded []kicad.Violat
 		if e.Comment != "" {
 			it += fmt.Sprintf(" (comment: %q)", e.Comment)
 		}
+		at := e.Key
 		if desc != "" {
 			it += ": " + desc
+			at += ": " + desc
 		}
-		put(e.Rule, it+" (.kicad_pro drc_exclusions)")
+		put(e.Rule, "excluded", at, it+" (.kicad_pro drc_exclusions)")
 	}
 	for _, rule := range pol.Ignored {
-		put(rule, fmt.Sprintf("IGNORED %s (.kicad_pro rule_severities: ignore; KiCad's DRC does not report it at all)", rule))
+		put(rule, "ignored", ".kicad_pro rule_severities", fmt.Sprintf("IGNORED %s (.kicad_pro rule_severities: ignore; KiCad's DRC does not report it at all)", rule))
 	}
 	for _, rule := range pol.Downgraded {
-		// Only a rule KiCad itself reports as an error: the parity checks
-		// are warnings by KiCad's default, so "warning" is no downgrade there.
-		if !kicadNonErrorRules[rule] && !drcCriticalRules[rule] {
-			put(rule, fmt.Sprintf("DOWNGRADED %s (.kicad_pro rule_severities: warning; the gate only counts errors)", rule))
+		// Only a rule KiCad itself reports as an error: "warning" is the
+		// default of the warning-level rules (parity checks included).
+		if !kicadWarningRules[rule] {
+			put(rule, "downgraded", ".kicad_pro rule_severities", fmt.Sprintf("DOWNGRADED %s (.kicad_pro rule_severities: warning; the gate only counts errors)", rule))
 		}
 	}
-	if critical > 0 {
+	if hard > 0 {
 		g.Pass = false
-		g.Detail += fmt.Sprintf("; %d error-level DRC check(s) excluded, ignored or downgraded by the project (sign a kicad-drc waiver to accept one)", critical)
+		g.Detail += fmt.Sprintf("; %d electrical / fabrication DRC check(s) excluded, ignored or downgraded by the project (sign a kicad-drc waiver to accept one)", hard)
 	}
+	if len(silenced) > 0 {
+		var rules []string
+		for _, s := range silenced {
+			rules = append(rules, s.Rule+" ("+s.How+")")
+		}
+		g.Detail += fmt.Sprintf("; WARNING: %d other error-level check(s) silenced by the project: %s", len(silenced), strings.Join(dedupeStrings(rules), ", "))
+	}
+	return silenced
 }
 
 func kicadFlat(v kicad.Violation) drcFlatViolation {

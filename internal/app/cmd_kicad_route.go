@@ -1413,8 +1413,8 @@ func (r *kicadRun) routedDRCGate(routed string) (all, errs *kicad.DRCReport) {
 	// fails it unless a signed waiver matches.
 	pro := strings.TrimSuffix(routed, ".kicad_pcb") + ".kicad_pro"
 	if pol, err := kicad.ReadDRCPolicy(pro); err == nil {
-		applyDRCPolicy(&g, pol, all.Excluded())
-		r.summary["drcPolicy"] = pol
+		silenced := applyDRCPolicy(&g, pol, all.Excluded())
+		r.summary["drcPolicy"] = map[string]any{"exclusions": pol.Exclusions, "ignored": pol.Ignored, "downgraded": pol.Downgraded, "silenced": silenced}
 	} else if !os.IsNotExist(err) {
 		g.Pass = false
 		g.Detail += "; cannot read the project's DRC exclusions / severities: " + err.Error()

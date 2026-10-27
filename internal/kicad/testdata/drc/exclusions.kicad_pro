@@ -36,7 +36,9 @@
         "track_width": "ignore",
         "annular_width": "ignore",
         "drill_out_of_range": "warning",
-        "missing_footprint": "warning"
+        "missing_footprint": "warning",
+        "pth_inside_courtyard": "warning",
+        "made_up_rule": "ignore"
       }
     }
   }

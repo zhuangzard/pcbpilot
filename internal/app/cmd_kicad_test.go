@@ -288,14 +288,28 @@ func TestKicadDRCGateProjectPolicy(t *testing.T) {
 	if !g.Pass {
 		t.Fatalf("clean report: %+v", g)
 	}
-	applyDRCPolicy(&g, pol, rep.Excluded())
+	silenced := applyDRCPolicy(&g, pol, rep.Excluded())
+	// Hard: electrical / fabrication rules, size rules, and a rule pcbpilot
+	// does not know (fail closed).
 	critical := []string{"EXCLUDED clearance|10000000", "IGNORED unconnected_items", "EXCLUDED unconnected_items|30000000",
 		"EXCLUDED extra_footprint|5000000",
-		// Board size rules and every other error-level rule too (fail closed).
-		"EXCLUDED courtyards_overlap|", "EXCLUDED via_diameter|", "EXCLUDED track_width|",
-		"IGNORED track_width", "IGNORED annular_width", "DOWNGRADED drill_out_of_range"}
+		"EXCLUDED via_diameter|", "EXCLUDED track_width|",
+		"IGNORED track_width", "IGNORED annular_width", "DOWNGRADED drill_out_of_range", "IGNORED made_up_rule"}
 	if g.Pass || len(g.Items) != len(critical) {
 		t.Fatalf("critical exclusion / ignore passed: %+v", g)
+	}
+	// Soft: other error-level rules are a warning (detail, info, summary),
+	// not a failure.
+	if len(silenced) != 2 || silenced[0].Rule != "courtyards_overlap" || silenced[0].How != "excluded" || !strings.Contains(silenced[0].Where, "Footprint J601") ||
+		silenced[1].Rule != "pth_inside_courtyard" || silenced[1].How != "downgraded" {
+		t.Fatalf("silenced: %+v", silenced)
+	}
+	if !strings.Contains(g.Detail, "WARNING: 2 other error-level check(s) silenced") || !strings.Contains(g.Detail, "courtyards_overlap (excluded)") ||
+		!strings.Contains(g.Detail, "pth_inside_courtyard (downgraded)") {
+		t.Fatalf("detail: %s", g.Detail)
+	}
+	if !strings.Contains(strings.Join(g.Info, "\n"), "SILENCED EXCLUDED courtyards_overlap|") {
+		t.Fatalf("info: %v", g.Info)
 	}
 	joined := strings.Join(g.Items, "\n")
 	for _, want := range append([]string{"too close on purpose", "Track [GND]", "joined by the pour", "Footprint FID1"}, critical...) {
@@ -343,4 +357,29 @@ func mustRead(t *testing.T, p string) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+
+// Only courtyard / placement-class silencing: the gate warns and passes.
+func TestKicadDRCGateSoftPolicyPasses(t *testing.T) {
+	g := gateResult{Gate: "kicad-drc", Pass: true, Detail: "0 error(s)"}
+	pol := &kicad.DRCPolicy{
+		Exclusions: []kicad.DRCExclusion{{Rule: "courtyards_overlap", Key: "courtyards_overlap|1|2|a|b", Comment: "Intentional Overlap"}},
+		Ignored:    []string{"npth_inside_courtyard", "silk_overlap"},
+		Downgraded: []string{"overlapping_pads", "missing_footprint"},
+	}
+	s := applyDRCPolicy(&g, pol, nil)
+	if !g.Pass || len(g.Items) != 0 || len(s) != 3 || !strings.Contains(g.Detail, "WARNING: 3 other") {
+		t.Fatalf("soft policy: %+v silenced %+v", g, s)
+	}
+	for _, r := range []string{"via_diameter", "drill_out_of_range", "track_width", "annular_width", "hole_to_hole", "connection_width",
+		"solder_mask_bridge", "starved_thermal", "zones_intersect", "microvia_drill_out_of_range", "edge_clearance", "no_such_rule"} {
+		if drcRuleClass(r) != "hard" {
+			t.Errorf("%s is %s, want hard", r, drcRuleClass(r))
+		}
+	}
+	for _, r := range []string{"courtyards_overlap", "pth_inside_courtyard", "npth_inside_courtyard", "overlapping_pads", "footprint"} {
+		if drcRuleClass(r) != "soft" {
+			t.Errorf("%s is %s, want soft", r, drcRuleClass(r))
+		}
+	}
 }
