@@ -1,6 +1,7 @@
 package kicad
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -162,6 +163,13 @@ func TestERCPosScale(t *testing.T) {
 		{"broken, large sheet", "", at(Pt{15, 12.7}), on(Pt{1500, 1270}), 100},
 		{"off-0.01-grid pin", "", at(Pt{0.8890, 0.8509}), on(Pt{88.9025, 85.09}), 100},
 		{"majority broken, one stray", "", at(Pt{0.508, 0.5461}, Pt{0.889, 0.8509}, Pt{0.2, 0.3}), sheet, 100},
+		// the boundary: more than half must fit, the other scale at most a third as many
+		{"half fit", "", at(Pt{0.508, 0.5461}, Pt{3, 4}), sheet, 0},
+		{"half fit of four", "", at(Pt{0.508, 0.5461}, Pt{0.889, 0.8509}, Pt{3, 4}, Pt{5, 6}), sheet, 0},
+		{"two of three", "", at(Pt{0.508, 0.5461}, Pt{0.889, 0.8509}, Pt{3, 4}), sheet, 100},
+		{"three of four, one contrary", "", at(Pt{0.508, 0.5461}, Pt{0.889, 0.8509}, Pt{1.27, 0.508}, Pt{50.8, 54.61}), sheet, 100},
+		{"three of five, two contrary", "", at(Pt{0.508, 0.5461}, Pt{0.889, 0.8509}, Pt{1.27, 0.508}, Pt{50.8, 54.61}, Pt{88.9, 85.09}), sheet, 0},
+		{"mm, one contrary", "", at(Pt{50.8, 54.61}, Pt{88.9, 85.09}, Pt{127, 50.8}, Pt{0.508, 0.5461}), sheet, 1},
 		{"neither", "", at(Pt{3, 4}), sheet, 0},
 		{"both (origin)", "", at(Pt{0, 0}), on(Pt{0, 0}), 0},
 		{"no geometry", "garbage", tiny, nil, 0},
@@ -230,6 +238,184 @@ func TestERCPinPointRepeatedSheet(t *testing.T) {
 	} {
 		if got, err := e.ERCPinPoint("", c.path, c.ref, c.pin, &rep); err == nil {
 			t.Errorf("%s: resolved to %+v", c.name, got)
+		}
+	}
+}
+
+// testPW is a two-unit part with power-input pins off its origin in both
+// axes (rotation or mirror errors move them): unit 1 pins 1 at (2.54,
+// 1.27) and 2 at (-5.08, -2.54), unit 2 pin 3 at (0, 5.08) (library y up).
+const testPW = `(symbol "PW"
+	(exclude_from_sim no) (in_bom yes) (on_board yes)
+	(property "Reference" "U" (at 0 7.62 0) (effects (font (size 1.27 1.27))))
+	(property "Value" "PW" (at 0 -7.62 0) (effects (font (size 1.27 1.27))))
+	(symbol "PW_1_1"
+		(rectangle (start -2.54 2.54) (end 2.54 -2.54) (stroke (width 0.254) (type default)) (fill (type none)))
+		(pin power_in line (at 2.54 1.27 180) (length 1.27) (name "VA" (effects (font (size 1.27 1.27)))) (number "1" (effects (font (size 1.27 1.27)))))
+		(pin power_in line (at -5.08 -2.54 0) (length 2.54) (name "VB" (effects (font (size 1.27 1.27)))) (number "2" (effects (font (size 1.27 1.27)))))
+	)
+	(symbol "PW_2_1"
+		(rectangle (start -2.54 2.54) (end 2.54 -2.54) (stroke (width 0.254) (type default)) (fill (type none)))
+		(pin power_in line (at 0 5.08 270) (length 2.54) (name "VC" (effects (font (size 1.27 1.27)))) (number "3" (effects (font (size 1.27 1.27)))))
+	)
+)`
+
+// pwPlacements are placed testPW instances and the connection points of
+// their pins (sheet mm, y down), worked out by hand from KiCad's
+// transform (rotate counter-clockwise on screen, then mirror) and checked
+// against kicad-cli's ERC in TestERCPinPointKicadGeometry.
+var pwPlacements = []struct {
+	si   SymbolInstance
+	pins map[string]Pt
+}{
+	{SymbolInstance{Ref: "U1", At: Pt{50.8, 50.8}}, map[string]Pt{"1": {53.34, 49.53}, "2": {45.72, 53.34}}},
+	{SymbolInstance{Ref: "U2", At: Pt{76.2, 50.8}, Rot: 90}, map[string]Pt{"1": {74.93, 48.26}, "2": {78.74, 55.88}}},
+	{SymbolInstance{Ref: "U3", At: Pt{101.6, 50.8}, Rot: 180}, map[string]Pt{"1": {99.06, 52.07}, "2": {106.68, 48.26}}},
+	{SymbolInstance{Ref: "U4", At: Pt{127, 50.8}, Rot: 270}, map[string]Pt{"1": {128.27, 53.34}, "2": {124.46, 45.72}}},
+	{SymbolInstance{Ref: "U5", At: Pt{50.8, 88.9}, Mirror: "x"}, map[string]Pt{"1": {53.34, 90.17}, "2": {45.72, 86.36}}},
+	{SymbolInstance{Ref: "U6", At: Pt{76.2, 88.9}, Mirror: "y"}, map[string]Pt{"1": {73.66, 87.63}, "2": {81.28, 91.44}}},
+	{SymbolInstance{Ref: "U7", At: Pt{101.6, 88.9}, Rot: 90, Mirror: "x"}, map[string]Pt{"1": {100.33, 91.44}, "2": {104.14, 83.82}}},
+	// one part, two units: pin 3 only on unit 2
+	{SymbolInstance{Ref: "U8", At: Pt{127, 88.9}, Unit: 1}, map[string]Pt{"1": {129.54, 87.63}, "2": {121.92, 91.44}}},
+	{SymbolInstance{Ref: "U8", At: Pt{152.4, 88.9}, Unit: 2, Rot: 180}, map[string]Pt{"3": {152.4, 93.98}}},
+}
+
+// pwSheet writes a sheet of pwPlacements; returns its file and uuid path.
+func pwSheet(t *testing.T) (string, string) {
+	t.Helper()
+	uuid := NewUUID()
+	e, err := OpenSchematic(NewSchematicText("A4", uuid, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Project, e.InstancePath = "pw", "/"+uuid
+	if err := e.AddLibSymbol("t:PW", testPW); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range pwPlacements {
+		si := p.si
+		si.LibID, si.Value = "t:PW", "PW"
+		if _, err := e.PlaceSymbol(si); err != nil {
+			t.Fatal(err)
+		}
+	}
+	text, err := e.Render()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(t.TempDir(), "pw.kicad_sch")
+	if err := os.WriteFile(f, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return f, "/" + uuid
+}
+
+// pinUUIDs maps "ref.pin" to the pin uuid stored on the placed symbol.
+func pinUUIDs(t *testing.T, e *SchEditor, path string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	for _, n := range e.root.list {
+		if n.head() != "symbol" {
+			continue
+		}
+		ref := instRefs(n)[path]
+		for _, c := range n.list {
+			if u := c.child("uuid"); c.head() == "pin" && u != nil && len(c.list) > 1 {
+				out[ref+"."+c.list[1].atom] = u.list[1].atom
+			}
+		}
+	}
+	return out
+}
+
+// Rotated, mirrored and multi-unit symbols resolve to the pin's
+// connection point, by uuid and by reference.
+func TestERCPinPointTransforms(t *testing.T) {
+	f, path := pwSheet(t)
+	e, err := OpenSchematicFile(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uuids := pinUUIDs(t, e, path)
+	for _, p := range pwPlacements {
+		for pin, want := range p.pins {
+			for _, uuid := range []string{uuids[p.si.Ref+"."+pin], ""} {
+				got, err := e.ERCPinPoint(uuid, path, p.si.Ref, pin, nil)
+				if err != nil || got.At != want {
+					t.Errorf("%s.%s (uuid %q): %+v %v, want %+v", p.si.Ref, pin, uuid, got, err, want)
+				}
+			}
+		}
+	}
+}
+
+// The hand-worked pin points are where kicad-cli puts them: every
+// unconnected power-input pin ERC reports sits there (×100 on 10.0.6).
+func TestERCPinPointKicadGeometry(t *testing.T) {
+	if _, err := KicadCLI(); err != nil {
+		t.Skip(err)
+	}
+	f, path := pwSheet(t)
+	r, err := RunERC(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.PosScale == 0 {
+		t.Fatalf("units unknown: %s", r.PosNote)
+	}
+	want := map[string]Pt{}
+	for _, p := range pwPlacements {
+		for pin, at := range p.pins {
+			want[p.si.Ref+"."+pin] = at
+		}
+	}
+	e, err := OpenSchematicFile(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, v := range r.Violations {
+		for _, it := range v.Items {
+			ref, pin, _, ok := ERCPin(it.Description)
+			w, mine := want[ref+"."+pin]
+			if !ok || !mine {
+				continue
+			}
+			seen[ref+"."+pin] = true
+			if math.Abs(it.Pos.X-w.X) > 0.006 || math.Abs(it.Pos.Y-w.Y) > 0.006 {
+				t.Errorf("%s.%s: ERC (%s) at %+v, worked out %+v", ref, pin, v.Type, it.Pos, w)
+			}
+			if got, err := e.ERCPinPoint(it.UUID, path, ref, pin, &it.Pos); err != nil || got.At != w || got.By != "uuid" {
+				t.Errorf("%s.%s: resolved %+v %v", ref, pin, got, err)
+			}
+		}
+	}
+	if len(seen) != len(want) {
+		t.Errorf("ERC reported %d of the %d pins: %v", len(seen), len(want), seen)
+	}
+}
+
+func TestPickPin(t *testing.T) {
+	a, b := Pt{10, 10}, Pt{12.54, 10}
+	near := func(p Pt) *Pt { return &p }
+	for _, c := range []struct {
+		name string
+		pts  []Pt
+		near *Pt
+		want Pt
+		ok   bool
+	}{
+		{"one", []Pt{a}, nil, a, true},
+		{"stacked pins at one point", []Pt{a, a, {10.00001, 10}}, nil, a, true},
+		{"two, no position", []Pt{a, b}, nil, Pt{}, false},
+		{"two, one nearby", []Pt{a, b}, near(Pt{10.1, 10}), a, true},
+		{"two nearby", []Pt{a, {11, 10}}, near(Pt{10.5, 10}), Pt{}, false},
+		{"two, none nearby", []Pt{a, b}, near(Pt{50, 50}), Pt{}, false},
+		{"none", nil, near(a), Pt{}, false},
+	} {
+		got, err := pickPin(c.pts, c.near, "U1 pin 1")
+		if (err == nil) != c.ok || got != c.want {
+			t.Errorf("%s: %+v %v", c.name, got, err)
 		}
 	}
 }

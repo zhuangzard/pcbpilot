@@ -179,10 +179,10 @@ var ercVerRe = regexp.MustCompile(`(\d+)\.(\d+)\.(\d+)`)
 // 10.0.6 are 100, 10.0.7+, later 10.x releases and 11+ are 1 — sheet
 // geometry is not consulted (an item off the page is legal and proves
 // nothing). An unknown or unparsable version (9.x, a 10.99 nightly, none)
-// is decided by geometry: the scale under which a clear majority of the
-// positions land on a pin, symbol, wire end, label, junction, no-connect or
-// sheet pin of their sheet (ercAnchorTol) and the other scale lands on
-// almost none. Neither or both: 0 — consumers that place parts at reported
+// is decided by geometry: the scale under which a strict majority (more
+// than half) of the positions land on a pin, symbol, wire end, label,
+// junction, no-connect or sheet pin of their sheet (ercAnchorTol), the
+// other scale on at most a third as many. Neither or both: 0 — consumers that place parts at reported
 // positions must refuse rather than guess.
 func ercPosScale(version string, pos []ercPos, anchors func(file string) []Pt) (float64, string) {
 	if m := ercVerRe.FindStringSubmatch(version); m != nil {
@@ -201,7 +201,8 @@ func ercPosScale(version string, pos []ercPos, anchors func(file string) []Pt) (
 	}
 	m1, m100 := ercAnchorHits(pos, anchors)
 	n := len(pos)
-	clear := func(a, b int) bool { return a > 0 && 2*a >= n && 3*b <= a }
+	// a strict majority for one scale, the other at most a third of it
+	clear := func(a, b int) bool { return 2*a > n && 3*b <= a }
 	switch {
 	case clear(m100, m1):
 		return ercBugScale, fmt.Sprintf("KiCad version %q not known for ERC positions; %d of %d positions land on sheet items only when scaled ×100 (#25582): scaled ×100 to mm", version, m100, n)
