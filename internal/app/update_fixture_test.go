@@ -32,6 +32,10 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	// The test binary doubles as a fake kicad-cli for the KiCad DRC tests.
+	if os.Getenv("PCBPILOT_FAKE_KICAD_DRC") != "" {
+		os.Exit(fakeKiCadDRC(os.Args[1:]))
+	}
 	// Safety net: no test may drive the real launchd/systemd/registry. Tests
 	// that exercise service commands install their own recorder.
 	daemonServiceRunner = func(name string, args ...string) (string, error) {

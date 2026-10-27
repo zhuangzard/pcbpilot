@@ -362,6 +362,8 @@ func ParseBoard(b []byte) (*Board, error) {
 					f.ExcludeBOM = true
 				case "exclude_from_pos_files":
 					f.ExcludePos = true
+				case "virtual": // KiCad 6: neither bought nor placed
+					f.ExcludeBOM, f.ExcludePos = true, true
 				}
 			}
 		}
@@ -730,6 +732,8 @@ type FabReport struct {
 	Overrides    []string      `json:"cplOverridesApplied,omitempty"`
 	Missing      []MissingLCSC `json:"missingLcsc,omitempty"`
 	Invalid      []MissingLCSC `json:"invalidLcsc,omitempty"`
+	CPLOmitted   []string      `json:"cplOmitted,omitempty"` // in kicad-cli's pos file, not assembled
+	Problems     []FabProblem  `json:"problems,omitempty"`
 	Warnings     []string      `json:"warnings,omitempty"`
 	RotationNote string        `json:"rotationNote,omitempty"`
 }
@@ -758,10 +762,11 @@ func runCLI(cli string, args []string, log io.Writer) error {
 	return nil
 }
 
-// RunFab generates the JLC file set. On a missing/invalid LCSC number it
-// still writes nothing for assembly and returns an error wrapping
-// ErrMissingLCSC with the report filled in (Gerbers are produced first only
-// when the LCSC gate passes, so a failed run never looks like a finished one).
+// RunFab generates the JLC file set. A missing/invalid LCSC number
+// (ErrMissingLCSC) or a BOM/CPL designator mismatch (ErrBOMCPLMismatch)
+// returns the error with the report filled in and writes nothing to OutDir,
+// so a failed run never looks like a finished one. Outputs are staged and
+// published together; see publishFab for what a rerun replaces.
 func RunFab(o FabOptions) (*FabReport, error) {
 	if o.Log == nil {
 		o.Log = io.Discard
@@ -796,41 +801,81 @@ func RunFab(o FabOptions) (*FabReport, error) {
 		return nil, err
 	}
 
-	gdir := filepath.Join(o.OutDir, "gerber")
-	if err := os.MkdirAll(gdir, 0o755); err != nil {
+	// Everything is generated into a fresh staging directory first, so the zip
+	// holds exactly this run's kicad-cli output (never a Gerber left in OUT by
+	// an earlier run with more layers or another board name) and a failed
+	// check publishes nothing. publishFab then moves the files into OUT.
+	// One normalized OUT everywhere: "link/" (trailing separator) would make
+	// Lstat follow the link the check is meant to catch.
+	o.OutDir = filepath.Clean(o.OutDir)
+	if err := checkFabOutDirs(o.OutDir); err != nil {
 		return nil, err
 	}
-	if err := runCLI(o.Tools.CLI, GerberArgs(o.PCB, gdir, rep.Layers), o.Log); err != nil {
+	if err := os.MkdirAll(o.OutDir, 0o755); err != nil {
 		return nil, err
 	}
-	if err := runCLI(o.Tools.CLI, DrillArgs(o.PCB, gdir), o.Log); err != nil {
-		return nil, err
-	}
-	ents, err := os.ReadDir(gdir)
+	// Held from reading the manifest until publish (or its rollback) is done.
+	unlock, err := lockFabOut(o.OutDir)
 	if err != nil {
 		return nil, err
 	}
-	var zipList []string
+	defer unlock()
+	if err := checkFabOutDirs(o.OutDir); err != nil {
+		return nil, err
+	}
+	prev, err := readFabManifest(o.OutDir)
+	if err != nil {
+		return nil, err
+	}
+	stage, err := os.MkdirTemp(o.OutDir, ".pcbpilot-fab-")
+	if err != nil {
+		return nil, err
+	}
+	keepStage := false
+	defer func() {
+		if !keepStage {
+			os.RemoveAll(stage)
+		}
+	}()
+	sgdir := filepath.Join(stage, "gerber")
+	if err := os.MkdirAll(sgdir, 0o755); err != nil {
+		return nil, err
+	}
+	if err := runCLI(o.Tools.CLI, GerberArgs(o.PCB, sgdir, rep.Layers), o.Log); err != nil {
+		return nil, err
+	}
+	if err := runCLI(o.Tools.CLI, DrillArgs(o.PCB, sgdir), o.Log); err != nil {
+		return nil, err
+	}
+	ents, err := os.ReadDir(sgdir)
+	if err != nil {
+		return nil, err
+	}
+	var gerbers, zipList []string
 	for _, e := range ents {
-		if !e.IsDir() && isFabFile(e.Name()) {
-			zipList = append(zipList, filepath.Join(gdir, e.Name()))
+		if e.IsDir() {
+			continue
+		}
+		gerbers = append(gerbers, e.Name())
+		if isFabFile(e.Name()) {
+			zipList = append(zipList, filepath.Join(sgdir, e.Name()))
 			rep.ZipFiles = append(rep.ZipFiles, e.Name())
 		}
 	}
 	if len(zipList) == 0 {
-		return nil, fmt.Errorf("kicad-cli produced no Gerber/drill files in %s", gdir)
+		return nil, fmt.Errorf("kicad-cli produced no Gerber/drill files for %s", o.PCB)
 	}
-	rep.Zip = filepath.Join(o.OutDir, base+"-gerber.zip")
-	if err := ZipFiles(rep.Zip, zipList); err != nil {
+	files := []string{base + "-gerber.zip"} // published names, relative to OutDir
+	if err := ZipFiles(filepath.Join(stage, files[0]), zipList); err != nil {
 		return nil, err
 	}
 
 	if !o.NoAssembly {
-		posPath := filepath.Join(o.OutDir, base+"-kicad-pos.csv")
-		if err := runCLI(o.Tools.CLI, PosArgs(o.PCB, posPath), o.Log); err != nil {
+		posName := base + "-kicad-pos.csv"
+		if err := runCLI(o.Tools.CLI, PosArgs(o.PCB, filepath.Join(stage, posName)), o.Log); err != nil {
 			return nil, err
 		}
-		pf, err := os.Open(posPath)
+		pf, err := os.Open(filepath.Join(stage, posName))
 		if err != nil {
 			return nil, err
 		}
@@ -843,30 +888,168 @@ func RunFab(o FabOptions) (*FabReport, error) {
 		if err != nil {
 			return nil, err
 		}
+		rows, rep.CPLOmitted = AssembledCPL(rows, parts)
+		// JLC matches BOM and CPL by designator: a mismatch is a rejected
+		// order or a part placed without being supplied, so it stops the run.
+		if rep.Problems = CheckBOMCPL(parts, rows); len(rep.Problems) > 0 {
+			return rep, fmt.Errorf("%w: %d problem(s); nothing was written to %s", ErrBOMCPLMismatch, len(rep.Problems), o.OutDir)
+		}
 		rep.Overrides = applied
-		rep.CPL = filepath.Join(o.OutDir, base+"-cpl.csv")
 		rep.CPLParts = len(rows) - 1
-		if err := WriteCSV(rep.CPL, rows); err != nil {
-			return nil, err
-		}
 		bom := BuildBOM(parts)
-		rep.BOM = filepath.Join(o.OutDir, base+"-bom.csv")
 		rep.BOMLines = len(bom) - 1
-		if err := WriteCSV(rep.BOM, bom); err != nil {
+		cplName, bomName := base+"-cpl.csv", base+"-bom.csv"
+		if err := WriteCSV(filepath.Join(stage, cplName), rows); err != nil {
 			return nil, err
 		}
-		// A BOM designator missing from the CPL makes JLC reject the order.
-		inCPL := map[string]bool{}
-		for _, r := range rows[1:] {
-			inCPL[r[0]] = true
+		if err := WriteCSV(filepath.Join(stage, bomName), bom); err != nil {
+			return nil, err
 		}
-		for _, p := range parts {
-			if p.Assembled() && !inCPL[p.Ref] {
-				rep.Warnings = append(rep.Warnings, fmt.Sprintf("%s is in the BOM but not in the CPL", p.Ref))
-			}
+		files = append(files, posName, cplName, bomName)
+		rep.CPL, rep.BOM = filepath.Join(o.OutDir, cplName), filepath.Join(o.OutDir, bomName)
+	}
+	rep.Zip = filepath.Join(o.OutDir, files[0])
+	// Checked before anything in OUT is touched.
+	if c := fabCollisions(o.OutDir, prev, append(append([]string{}, files...), fabReportName), gerbers); len(c) > 0 {
+		return rep, fmt.Errorf("%w: %s (fix: move or delete them — outputs of a pcbpilot without %s count as foreign — or choose another --out)",
+			ErrFabCollision, strings.Join(c, ", "), fabManifestName)
+	}
+	stale, err := foreignFabFiles(o.OutDir, prev, gerbers)
+	if err != nil {
+		return nil, err
+	}
+	if len(stale) > 0 {
+		rep.Warnings = append(rep.Warnings, fmt.Sprintf("%s holds Gerber/drill file(s) this run did not produce and pcbpilot did not write (not in the zip; delete them if they are leftovers): %s",
+			filepath.Join(o.OutDir, "gerber"), strings.Join(stale, ", ")))
+	}
+	if err := WriteReport(filepath.Join(stage, fabReportName), rep); err != nil {
+		return nil, err
+	}
+	files = append(files, fabReportName)
+	keepStage, err = publishFab(o.OutDir, stage, prev, files, gerbers)
+	if err != nil {
+		return nil, err
+	}
+	return rep, nil
+}
+
+// ── BOM / CPL consistency ──────────────────────────────────────────────────
+
+// FabProblem is one hard fab failure, in the repo's code/message/fix shape.
+type FabProblem struct {
+	Code    string `json:"code"`
+	Ref     string `json:"ref,omitempty"`
+	Message string `json:"message"`
+	Fix     string `json:"fix"`
+}
+
+// ErrBOMCPLMismatch is returned (wrapped) when the BOM and the CPL do not
+// list the same designators exactly once each; FabReport.Problems says why.
+var ErrBOMCPLMismatch = errors.New("BOM and CPL designators disagree")
+
+// AssembledCPL drops the CPL rows of parts JLC is not to assemble: kicad-cli
+// pos leaves out only board-DNP and exclude-from-position-files footprints,
+// so a part excluded from the BOM (a mounting pad, a solder jumper) or DNP
+// only in the schematic is still in its file. A designator shared with an
+// assembled part, or unknown to the board, is kept for CheckBOMCPL.
+func AssembledCPL(cpl [][]string, parts []Part) (kept [][]string, omitted []string) {
+	assembled, known := map[string]bool{}, map[string]bool{}
+	for _, p := range parts {
+		known[p.Ref] = true
+		if p.Assembled() {
+			assembled[p.Ref] = true
 		}
 	}
-	return rep, WriteReport(filepath.Join(o.OutDir, "fab-report.json"), rep)
+	for i, r := range cpl {
+		if i > 0 && len(r) > 0 {
+			if ref := strings.TrimSpace(r[0]); ref != "" && known[ref] && !assembled[ref] {
+				omitted = append(omitted, ref)
+				continue
+			}
+		}
+		kept = append(kept, r)
+	}
+	return kept, omitted
+}
+
+// CheckBOMCPL compares the assembled parts (the BOM) with the CPL rows
+// (header first, as AssembledCPL leaves them). Both must name the same
+// designators, each once and non-empty. DNP / exclude-from-BOM /
+// exclude-from-position-files (and KiCad 6 virtual) parts are in neither
+// list after AssembledCPL; given unfiltered rows, such a part is reported
+// with the attribute to fix.
+func CheckBOMCPL(parts []Part, cpl [][]string) []FabProblem {
+	var probs []FabProblem
+	add := func(code, ref, msg, fix string) {
+		probs = append(probs, FabProblem{Code: code, Ref: ref, Message: msg, Fix: fix})
+	}
+	byRef := map[string]Part{}
+	bomN := map[string]int{}
+	for _, p := range parts {
+		if _, ok := byRef[p.Ref]; !ok || p.Assembled() {
+			byRef[p.Ref] = p
+		}
+		if p.Assembled() {
+			bomN[p.Ref]++
+		}
+	}
+	const reannotate = "annotate the schematic so every designator is unique, then Update PCB from Schematic"
+	cplN := map[string]int{}
+	var cplOrder []string
+	for i, r := range cpl {
+		if i == 0 || len(r) == 0 {
+			continue
+		}
+		ref := strings.TrimSpace(r[0])
+		if ref == "" {
+			add("CPL_EMPTY_REF", "", fmt.Sprintf("CPL row %d has no designator (%s)", i, strings.Join(r[1:], ", ")),
+				"give the footprint a reference designator ("+reannotate+"), or set its Exclude from position files attribute")
+			continue
+		}
+		if cplN[ref] == 0 {
+			cplOrder = append(cplOrder, ref)
+		}
+		cplN[ref]++
+	}
+	for _, ref := range cplOrder {
+		if cplN[ref] > 1 {
+			add("CPL_DUPLICATE_REF", ref, fmt.Sprintf("%s is placed %d times in the CPL", ref, cplN[ref]), reannotate)
+			continue
+		}
+		if bomN[ref] > 0 {
+			continue
+		}
+		p, known := byRef[ref]
+		switch {
+		case !known:
+			add("CPL_NOT_IN_BOM", ref, fmt.Sprintf("%s is in the CPL but is not a board part the BOM was built from", ref),
+				"run Update PCB from Schematic and check the footprint's reference")
+		case p.DNP:
+			add("CPL_NOT_IN_BOM", ref, fmt.Sprintf("%s is DNP in the schematic but not on the board, so the CPL still places it", ref),
+				"run Update PCB from Schematic so the footprint carries DNP too")
+		case p.ExcludeBOM:
+			add("CPL_NOT_IN_BOM", ref, fmt.Sprintf("%s is excluded from the BOM but not from position files, so the CPL places a part the BOM does not supply", ref),
+				"also set Exclude from position files on it, or clear Exclude from BOM")
+		default:
+			add("CPL_NOT_IN_BOM", ref, fmt.Sprintf("%s is in the CPL but not in the BOM", ref),
+				"check its DNP / Exclude from BOM / Exclude from position files attributes on board and schematic")
+		}
+	}
+	var bomRefs []string
+	for ref := range bomN {
+		bomRefs = append(bomRefs, ref)
+	}
+	sortRefs(bomRefs)
+	for _, ref := range bomRefs {
+		switch {
+		case bomN[ref] > 1 && cplN[ref] <= 1:
+			add("BOM_DUPLICATE_REF", ref, fmt.Sprintf("%s names %d assembled board parts", ref, bomN[ref]), reannotate)
+		case cplN[ref] == 0:
+			add("BOM_NOT_IN_CPL", ref, fmt.Sprintf("%s (%s) is in the BOM but kicad-cli left it out of the CPL", ref, byRef[ref].Footprint),
+				"check the footprint's DNP / Exclude from position files attributes on the board, or mark it DNP / Exclude from BOM in the schematic")
+		}
+	}
+	return probs
 }
 
 // WriteReport writes rep as indented JSON.

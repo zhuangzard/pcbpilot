@@ -1,7 +1,9 @@
 package kicad
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -54,24 +56,77 @@ var (
 	reItemKind  = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9 ]*?)(?: \[| of | on |,|$)`)
 )
 
+// ErrDRCReport marks a DRC report that cannot be checked: empty, truncated,
+// not JSON, or not the kicad-cli schema. Callers must treat it as "DRC did
+// not run", never as a clean board.
+var ErrDRCReport = errors.New("cannot check kicad-cli DRC report")
+
+// DRCParseOptions names the sections a report must carry beyond the two
+// kicad-cli always writes (violations, unconnected_items).
+type DRCParseOptions struct {
+	SchematicParity bool // the run passed --schematic-parity
+}
+
 // ParseDRC reads a kicad-cli DRC JSON report (any severities it holds).
-func ParseDRC(data []byte) (*DRCReport, error) {
+// It is ParseDRCWith without --schematic-parity.
+func ParseDRC(data []byte) (*DRCReport, error) { return ParseDRCWith(data, DRCParseOptions{}) }
+
+// ParseDRCWith parses strictly: a required section that is missing, null or
+// not an array, an entry that is not an object, or unknown coordinate units
+// is an ErrDRCReport — an empty list is the only way a section reads clean.
+func ParseDRCWith(data []byte, o DRCParseOptions) (*DRCReport, error) {
+	bad := func(format string, a ...any) error {
+		return fmt.Errorf("%w: %s (fix: rerun kicad-cli pcb drc --format json; do not edit the report)", ErrDRCReport, fmt.Sprintf(format, a...))
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return nil, bad("empty file")
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(data, &top); err != nil {
+		return nil, bad("not a JSON object: %v", err)
+	}
+	if top == nil {
+		return nil, bad("not a JSON object: null")
+	}
+	need := []string{"violations", "unconnected_items"}
+	if o.SchematicParity {
+		need = append(need, "schematic_parity")
+	}
+	sections := map[string][]drcJSONViolation{}
+	for _, key := range []string{"violations", "unconnected_items", "schematic_parity"} {
+		raw, ok := top[key]
+		if !ok {
+			if contains(need, key) {
+				return nil, bad("no %q section", key)
+			}
+			continue
+		}
+		raw = bytes.TrimSpace(raw)
+		if len(raw) == 0 || raw[0] != '[' {
+			return nil, bad("%q is %s, not an array", key, jsonKind(raw))
+		}
+		vs, err := decodeDRCEntries(raw)
+		if err != nil {
+			return nil, bad("%q %v", key, err)
+		}
+		sections[key] = vs
+	}
 	var r struct {
-		Version     string             `json:"kicad_version"`
-		Units       string             `json:"coordinate_units"`
-		Violations  []drcJSONViolation `json:"violations"`
-		Unconnected []drcJSONViolation `json:"unconnected_items"`
-		Parity      []drcJSONViolation `json:"schematic_parity"`
+		Version string `json:"kicad_version"`
+		Units   string `json:"coordinate_units"`
 	}
 	if err := json.Unmarshal(data, &r); err != nil {
-		return nil, fmt.Errorf("parse kicad DRC report: %w", err)
+		return nil, bad("header: %v", err)
 	}
 	scale := 1 / 0.0254 // mm → mil
 	switch strings.ToLower(r.Units) {
+	case "", "mm":
 	case "mils", "mil":
 		scale = 1
 	case "in", "inch", "inches":
 		scale = 1000
+	default:
+		return nil, bad("unknown coordinate_units %q", r.Units)
 	}
 	rep := &DRCReport{KiCadVersion: r.Version, Units: r.Units, Counts: map[string]int{}}
 	add := func(section string, vs []drcJSONViolation) {
@@ -111,9 +166,9 @@ func ParseDRC(data []byte) (*DRCReport, error) {
 			rep.Counts[fv.Rule]++
 		}
 	}
-	add("violations", r.Violations)
-	add("unconnected_items", r.Unconnected)
-	add("schematic_parity", r.Parity)
+	add("violations", sections["violations"])
+	add("unconnected_items", sections["unconnected_items"])
+	add("schematic_parity", sections["schematic_parity"])
 	rep.Total = len(rep.Violations)
 	return rep, nil
 }
@@ -126,6 +181,108 @@ func (r *DRCReport) SortedCounts() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// decodeDRCEntries decodes one section, entry by entry: each must be an
+// object with string type, description and severity and an items array of
+// objects (kicad-cli's drc.v1 schema). A null or partial entry would decode
+// as a blank violation and could be miscounted, so it is rejected instead.
+func decodeDRCEntries(raw []byte) ([]drcJSONViolation, error) {
+	var entries []json.RawMessage
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return nil, fmt.Errorf("entries: %v", err)
+	}
+	out := make([]drcJSONViolation, 0, len(entries))
+	for i, e := range entries {
+		e = bytes.TrimSpace(e)
+		if len(e) == 0 || e[0] != '{' {
+			return nil, fmt.Errorf("entry %d is %s, not an object", i, jsonKind(e))
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(e, &fields); err != nil {
+			return nil, fmt.Errorf("entry %d: %v", i, err)
+		}
+		for _, k := range []string{"type", "description", "severity"} {
+			if v := bytes.TrimSpace(fields[k]); len(v) == 0 || v[0] != '"' {
+				return nil, fmt.Errorf("entry %d: %q is %s, not a string", i, k, jsonKind(v))
+			}
+		}
+		var items []json.RawMessage
+		if v := bytes.TrimSpace(fields["items"]); len(v) == 0 || v[0] != '[' {
+			return nil, fmt.Errorf("entry %d: %q is %s, not an array", i, "items", jsonKind(v))
+		} else if err := json.Unmarshal(v, &items); err != nil {
+			return nil, fmt.Errorf("entry %d items: %v", i, err)
+		}
+		for j, it := range items {
+			if err := checkDRCItem(it); err != nil {
+				return nil, fmt.Errorf("entry %d item %d %v", i, j, err)
+			}
+		}
+		var v drcJSONViolation
+		if err := json.Unmarshal(e, &v); err != nil {
+			return nil, fmt.Errorf("entry %d: %v", i, err)
+		}
+		if !drcSeverities[v.Severity] {
+			return nil, fmt.Errorf("entry %d: unknown severity %q", i, v.Severity)
+		}
+		out = append(out, v)
+	}
+	return out, nil
+}
+
+// drcSeverities are the severities kicad-cli 10 writes into a DRC report
+// (the values of its --severity-error/-warning/-exclusion flags, and of the
+// report's included_severities).
+var drcSeverities = map[string]bool{"error": true, "warning": true, "exclusion": true}
+
+// checkDRCItem: an item is an object with a string description and uuid and
+// a pos object with numeric x and y, as kicad-cli 10 writes every item.
+func checkDRCItem(raw json.RawMessage) error {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || raw[0] != '{' {
+		return fmt.Errorf("is %s, not an object", jsonKind(raw))
+	}
+	var it map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &it); err != nil {
+		return err
+	}
+	for _, k := range []string{"description", "uuid"} {
+		if v := bytes.TrimSpace(it[k]); len(v) == 0 || v[0] != '"' {
+			return fmt.Errorf("%q is %s, not a string", k, jsonKind(v))
+		}
+	}
+	var pos map[string]json.RawMessage
+	if v := bytes.TrimSpace(it["pos"]); len(v) == 0 || v[0] != '{' {
+		return fmt.Errorf("%q is %s, not an object", "pos", jsonKind(v))
+	} else if err := json.Unmarshal(v, &pos); err != nil {
+		return err
+	}
+	for _, k := range []string{"x", "y"} {
+		if v := bytes.TrimSpace(pos[k]); jsonKind(v) != "a number" {
+			return fmt.Errorf("pos %q is %s, not a number", k, jsonKind(v))
+		}
+	}
+	return nil
+}
+
+// jsonKind names a raw JSON value's type for an error message.
+func jsonKind(raw []byte) string {
+	if len(raw) == 0 {
+		return "empty"
+	}
+	switch raw[0] {
+	case '{':
+		return "an object"
+	case '"':
+		return "a string"
+	case 't', 'f':
+		return "a boolean"
+	case 'n':
+		return "null"
+	case '[':
+		return "an array"
+	}
+	return "a number"
 }
 
 func contains(xs []string, s string) bool {

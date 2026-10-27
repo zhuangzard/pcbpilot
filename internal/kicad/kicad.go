@@ -332,19 +332,28 @@ func (t *Tools) DRC(pcb, out string) (*DRCReport, error) { return t.DRCSeverity(
 func (t *Tools) DRCSeverity(pcb, out, severity string) (*DRCReport, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), BridgeTimeout)
 	defer cancel()
-	_ = os.Remove(out)
+	// A report left by an earlier run must never be read as this run's.
+	if err := os.Remove(out); err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("%w: cannot remove the previous report: %v", ErrDRCReport, err)
+	}
 	cmd := exec.CommandContext(ctx, t.CLI, "pcb", "drc", "--format", "json", "--severity-"+severity, "-o", out, pcb)
 	var buf bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &buf, &buf
 	err := cmd.Run()
 	data, rerr := os.ReadFile(out)
-	if rerr != nil {
+	// Without --exit-code-violations a non-zero exit is kicad-cli failing
+	// (board load, crash, timeout), so whatever it left in out is not a result.
+	if err != nil || rerr != nil {
 		if err == nil {
 			err = rerr
 		}
-		return nil, fmt.Errorf("kicad-cli pcb drc: %v: %s", err, strings.TrimSpace(buf.String()))
+		return nil, fmt.Errorf("%w: kicad-cli pcb drc: %v: %s", ErrDRCReport, err, strings.TrimSpace(buf.String()))
 	}
-	return ParseDRC(data)
+	rep, err := ParseDRC(data)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", out, err)
+	}
+	return rep, nil
 }
 
 // Rules are board design rules and the Default netclass (mil; 0 = keep).
