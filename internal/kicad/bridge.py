@@ -384,8 +384,13 @@ def snapshot(board):
         "trackWidthMil": mil(dn.GetTrackWidth()),
         "powerWidthMil": mil(dn.GetTrackWidth()),
         "trackWidthMinMil": mil(ds.m_TrackMinWidth),
-        "viaDrillMil": mil(dn.GetViaDrill()),
-        "viaDiameterMil": mil(dn.GetViaDiameter()),
+        # A new via must satisfy both the Default netclass and the board's own
+        # minimums (min hole, min via diameter, min annular ring).
+        "viaDrillMil": mil(via_floor(ds, dn.GetViaDiameter(), dn.GetViaDrill())[1]),
+        "viaDiameterMil": mil(via_floor(ds, dn.GetViaDiameter(), dn.GetViaDrill())[0]),
+        "minViaDrillMil": mil(ds.m_MinThroughDrill),
+        "minViaDiameterMil": mil(ds.m_ViasMinSize),
+        "minViaAnnularMil": mil(ds.m_ViasMinAnnularWidth),
         "copperToEdgeMil": mil(ds.m_CopperEdgeClearance),
         "holeToHoleMil": mil(ds.m_HoleToHoleMin),
         "source": "kicad",
@@ -615,8 +620,8 @@ def validate_netclasses(reqs):
         bad.append("nets: must map each net name to an object")
         reqs = {}
     else:
-        bad += check_fields("nets", [reqs[n] for n in sorted(reqs)], opt=("outerMil", "innerMil", "minMil", "clearanceMil"),
-                            positive=("outerMil", "innerMil", "minMil", "clearanceMil"))
+        bad += check_fields("nets", [reqs[n] for n in sorted(reqs)], opt=("outerMil", "innerMil", "minMil", "clearanceMil", "viaDiaMil", "viaDrillMil"),
+                            positive=("outerMil", "innerMil", "minMil", "clearanceMil", "viaDiaMil", "viaDrillMil"))
     bad += check_fields("isolation", isolation, opt=("clearanceMm", "creepageMm"), positive=("clearanceMm", "creepageMm"))
     bad += check_fields("edges", edges, opt=("mil",), positive=("mil",))
     for what, lst, keys in (("isolation", isolation, ("aNets", "bNets")), ("edges", edges, ("nets",))):
@@ -630,6 +635,26 @@ def validate_netclasses(reqs):
     return bad, reqs, isolation, edges
 
 
+def via_floor(ds, dia, drill):
+    """(diameter, drill) in nm raised to the board's own minimums: drill >=
+    min through hole, diameter >= min via diameter and >= drill + 2 x min
+    annular ring. A fresh NETCLASS carries KiCad's built-in 0.6 / 0.3 mm via,
+    which is below many boards' rules (interf_u: min hole 0.5, min via 0.9)."""
+    drill = max(int(drill or 0), int(ds.m_MinThroughDrill))
+    dia = max(int(dia or 0), int(ds.m_ViasMinSize), drill + 2 * int(ds.m_ViasMinAnnularWidth))
+    return dia, drill
+
+
+def empty_netclass(name):
+    """A NETCLASS with no values of its own: every field it does not set comes
+    from the next matching class / Default in the composite, never from
+    KiCad's built-in defaults (KiCad < 9 has no such constructor)."""
+    try:
+        return pcbnew.NETCLASS(name, False)
+    except TypeError:
+        return pcbnew.NETCLASS(name)
+
+
 def netclasses(pcb, reqs_path, out):
     with open(reqs_path) as f:
         reqs = json.load(f)
@@ -637,7 +662,8 @@ def netclasses(pcb, reqs_path, out):
     if bad:
         return reject("netclasses", bad)
     board = pcbnew.LoadBoard(pcb)
-    ns = board.GetDesignSettings().m_NetSettings
+    ds = board.GetDesignSettings()
+    ns = ds.m_NetSettings
 
     # Idempotent: drop classes and patterns of an earlier run.
     old = [str(n) for n in ns.GetNetclasses().keys() if re.match(r"^%s(\d+_|D_)" % CLASS_PREFIX, str(n))]
@@ -658,6 +684,20 @@ def netclasses(pcb, reqs_path, out):
             ns.SetNetclassPatternAssignment(p, c)
         ns.ClearAllCaches()
 
+    # A class whose own via is below the board minimums would make the router
+    # place vias KiCad's DRC rejects: raise it on the work copy and say so.
+    floored = []
+    for cname, nc in list(ns.GetNetclasses().items()) + [("Default", ns.GetDefaultNetclass())]:
+        if not (nc.HasViaDiameter() and nc.HasViaDrill()):
+            continue
+        dia, drill = via_floor(ds, nc.GetViaDiameter(), nc.GetViaDrill())
+        if dia != nc.GetViaDiameter() or drill != nc.GetViaDrill():
+            floored.append("%s: via %s/%s mil raised to %s/%s mil (board minimums)" % (
+                cname, mil(nc.GetViaDiameter()), mil(nc.GetViaDrill()), mil(dia), mil(drill)))
+            nc.SetViaDiameter(dia)
+            nc.SetViaDrill(drill)
+    ns.ClearAllCaches()
+
     names = {str(n) for n in board.GetNetsByName().keys()}
     missing, groups, raised = [], {}, []
     eps = 0.005
@@ -673,23 +713,29 @@ def netclasses(pcb, reqs_path, out):
         inner = float(r.get("innerMil") or 0) or outer
         mn = float(r.get("minMil") or 0)
         clr = float(r.get("clearanceMil") or 0)
-        w = max(outer, have_w)
-        c = max(clr, have_c)
+        w = max(outer, have_w, mil(ds.m_TrackMinWidth))
+        c = max(clr, have_c, mil(ds.m_MinClearance))
+        # Via: the larger of the intent's and the net's current class, then
+        # the board minimums.
+        vdia, vdrill = via_floor(ds, max(nm(r.get("viaDiaMil") or 0), eff.GetViaDiameter() if eff.HasViaDiameter() else 0),
+                                 max(nm(r.get("viaDrillMil") or 0), eff.GetViaDrill() if eff.HasViaDrill() else 0))
         if have_w > outer + eps:
             raised.append("%s: width kept at %s mil (class %s; intent %s)" % (net, have_w, eff.GetName(), outer))
         if have_c > clr + eps:
             raised.append("%s: clearance kept at %s mil (class %s; intent %s)" % (net, have_c, eff.GetName(), clr))
-        key = (round(w, 2), round(inner, 2), round(mn, 2), round(c, 2), round(outer, 2))
+        key = (round(w, 2), round(inner, 2), round(mn, 2), round(c, 2), round(outer, 2), vdia, vdrill)
         groups.setdefault(key, []).append(net)
 
     classes = []
     for i, key in enumerate(sorted(groups)):
-        w, inner, mn, c, outer = key
+        w, inner, mn, c, outer, vdia, vdrill = key
         name = "%s%d_W%s" % (CLASS_PREFIX, i + 1, fmt_mil(w))
-        nc = pcbnew.NETCLASS(name)
+        nc = empty_netclass(name)
         nc.SetTrackWidth(int(round(w * NM_PER_MIL)))
         if c > 0:
             nc.SetClearance(int(round(c * NM_PER_MIL)))
+        nc.SetViaDiameter(vdia)
+        nc.SetViaDrill(vdrill)
         # Highest priority: our values win over any user class that also
         # matches the net (KiCad then builds a composite "PPn_...,User").
         nc.SetPriority(-1000000 + i)
@@ -698,7 +744,8 @@ def netclasses(pcb, reqs_path, out):
         for net in groups[key]:
             ns.SetNetclassPatternAssignment(net, name)
         classes.append({"name": name, "nets": groups[key], "trackWidthMil": w, "innerWidthMil": inner,
-                        "minMil": mn, "clearanceMil": c, "intentOuterMil": outer})
+                        "minMil": mn, "clearanceMil": c, "intentOuterMil": outer,
+                        "viaDiameterMil": mil(vdia), "viaDrillMil": mil(vdrill)})
     # Insulation domains (intent pairs): one class per domain, below the
     # width classes in priority, so the composite keeps the PP widths.
     # Domain nets not on the board cannot carry the rule: reported in
@@ -717,7 +764,9 @@ def netclasses(pcb, reqs_path, out):
         dom_missing.update("%s: %s" % (dom, n) for n in want if n not in names)
     for i, dom in enumerate(sorted(domains)):
         name = "%sD_%s" % (CLASS_PREFIX, dom)
-        nc = pcbnew.NETCLASS(name)
+        # Name only (the .kicad_dru rules key on it): a defaulted class here
+        # would override the nets' widths, clearances and vias.
+        nc = empty_netclass(name)
         nc.SetPriority(-500000 + i)
         nc.SetDescription("pcbpilot insulation domain %s" % dom)
         ns.SetNetclass(name, nc)
@@ -785,7 +834,7 @@ def netclasses(pcb, reqs_path, out):
         os.remove(out_dru)
     save_board(board, pcb, out)
     return {"ok": True, "out": out, "classes": classes, "missingNets": missing, "missingDomainNets": sorted(dom_missing), "kept": raised,
-            "mismatched": mismatched, "domains": {k: sorted(v) for k, v in domains.items()}, "dru": out_dru if text.strip() else "", "druRules": len(rules)}
+            "viaFloored": floored, "mismatched": mismatched, "domains": {k: sorted(v) for k, v in domains.items()}, "dru": out_dru if text.strip() else "", "druRules": len(rules)}
 
 
 def list_patterns(pcb):

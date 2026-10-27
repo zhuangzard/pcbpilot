@@ -92,9 +92,15 @@ pcbpilot kicad route --pcb GasV5_A.kicad_pcb --intent intent.json --sim sim.json
 1. **项目与规则**：板旁没有 `.kicad_pro` 时自动建一个最小项目并写板级规则：间距/最小线宽/过孔取意图 `copper` 块，
    铜到板边取 `pcbauto.EdgeFromIntent` 的 max(外层, 内层)（意图无 edge 时用默认 20/30 mil）；
    `--clearance-mil` 等显式参数优先。已有项目时，意图的板边距离仍是下限（只升不降）。随后跑一次**输入板 DRC** 作基线。
+   已有项目时，显式 `--via-dia-mil` / `--via-drill-mil` / `--track-mil` 低于该项目自己的最小过孔直径 / 最小孔径 / 最小环宽 /
+   最小线宽即**在启动阶段拒绝**（`RULE_BELOW_BOARD_MINIMUM`，评审与输入 DRC 之前）；不给这些参数时用板自己的网络类尺寸。
 2. **布线前门禁：意图 → KiCad 网络类 + 自定义规则**（必须在导出 DSN 之前）：
    - 每网 `{outer, inner, min, clearance}` 按取值分组为 `PP<n>_W<线宽>` 网络类（精确网名 pattern，优先级最高；
      用户类更宽的值保留，记 `netclasses.kept`）。
+     **过孔**取 max(意图 `netClasses` 的过孔、该网原网络类过孔、板最小孔径 / 最小过孔直径 / 孔径 + 2×最小环宽)，线宽、间距也不低于
+     板最小值；KiCad 新建网络类自带 0.6/0.3 mm 过孔，旧版因此在 interf_u（最小孔 0.5、最小过孔 0.9 mm）上布出 16 个
+     drill_out_of_range + 16 个 via_diameter。已有网络类（含 Default）过孔低于板最小值时在工作副本上抬高，记 `netclasses.viaFloored`。
+     `PPD_<域>` 类只有名字（不带尺寸），不覆盖网自身的线宽/间距/过孔。
    - **内层线宽**：KiCad 网络类只有一个线宽。取最接近的官方机制：DSN 里加 `(layer_rule In1.Cu … (rule (width W)))`
      让 fastroute 内层按内层宽走；`.kicad_dru` 写 `(layer inner)` 的 `track_width (min <widthMil.min>) (opt <inner>)`；
      有 `widthMil.min` 的类再加全层 `track_width (min …)`。规则写在 `# pcbpilot:begin … # pcbpilot:end` 块里。
@@ -109,6 +115,9 @@ pcbpilot kicad route --pcb GasV5_A.kicad_pcb --intent intent.json --sim sim.json
      离边 13 mil）。**板边连接器开窗**：板边安装件（封装框角点在板框外或距板框 < 1 mil，与 `copper-to-edge` 门禁同一判据）
      的近边焊盘外扩（间距 + 2 mil）后，在禁布带上开全深度窗口（焊盘 + 向内直出的逃线），否则 USB/端子焊盘布不通；
      `summary.edgeExemptPads` 列出，其余铜照常禁布，门禁照常判（这些焊盘不低于工厂下限时为 WARN）。逐网复查类线宽/内层线宽/间距，不足即停。**不做** EasyEDA 的 dsn-fix / ses-repair / reconcile。
+   路由器可执行文件：`--fastroute-bin` / `$FASTROUTE_BIN` / `~/.pcbpilot/fastroute/current` / PATH（tracemaker 同理）。`current`
+   或显式路径是目录时（Windows 解压布局 `0.1.14/fastroute-0.1.14-windows-x64/fastroute.exe`）解析到其中、`bin/` 或下一层
+   子目录里唯一的可执行文件；找不到或有多个即在启动阶段报错。
 3a. **`--router fastroute|tracemaker|both`**（默认 fastroute）：TraceMaker 是第二个后端（`~/.pcbpilot/tracemaker/current`、
    `$TRACEMAKER_BIN` 或 `--tracemaker-bin`；`--tracemaker-time` 默认 300 s——它同时决定格点间距，PicoRick 上 ≥300 s 为 0.05 mm
    全通 359/359，90–180 s 为 0.1 mm、2 条未布通）。直接读 classed 板（含 `.kicad_pro/.kicad_dru`）写出布好的板，不走 DSN/SES；

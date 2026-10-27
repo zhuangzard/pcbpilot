@@ -19,6 +19,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -162,6 +163,74 @@ func mergeRules(def, explicit kicad.Rules) kicad.Rules {
 		ViaDrillMil: pick(def.ViaDrillMil, explicit.ViaDrillMil), EdgeMil: pick(def.EdgeMil, explicit.EdgeMil)}
 }
 
+// kicadRuleFloors are a project's own design-rule minimums (mil; 0 = none),
+// board.design_settings.rules of its .kicad_pro (where KiCad 6+ keeps them).
+type kicadRuleFloors struct {
+	ViaDiaMil     float64 `json:"minViaDiameterMil"`
+	ViaDrillMil   float64 `json:"minThroughHoleMil"`
+	ViaAnnularMil float64 `json:"minViaAnnularMil"`
+	TrackMil      float64 `json:"minTrackMil"`
+}
+
+// readKicadRuleFloors reads the minimums from a .kicad_pro.
+func readKicadRuleFloors(pro string) (kicadRuleFloors, error) {
+	data, err := os.ReadFile(pro)
+	if err != nil {
+		return kicadRuleFloors{}, err
+	}
+	var raw struct {
+		Board struct {
+			DesignSettings struct {
+				Rules struct {
+					MinViaDiameter         float64 `json:"min_via_diameter"`
+					MinThroughHoleDiameter float64 `json:"min_through_hole_diameter"`
+					MinViaAnnularWidth     float64 `json:"min_via_annular_width"`
+					MinTrackWidth          float64 `json:"min_track_width"`
+				} `json:"rules"`
+			} `json:"design_settings"`
+		} `json:"board"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return kicadRuleFloors{}, fmt.Errorf("%s: %w", pro, err)
+	}
+	r := raw.Board.DesignSettings.Rules
+	mil := func(mm float64) float64 { return mm / 0.0254 }
+	return kicadRuleFloors{ViaDiaMil: mil(r.MinViaDiameter), ViaDrillMil: mil(r.MinThroughHoleDiameter),
+		ViaAnnularMil: mil(r.MinViaAnnularWidth), TrackMil: mil(r.MinTrackWidth)}, nil
+}
+
+// checkRuleFloors refuses explicit Default-netclass values below the
+// board's own minimums: KiCad's DRC would reject every via / track the
+// router makes with them (interf_u: 0.3 mm drill vs min hole 0.5 mm gave
+// 16 drill_out_of_range + 16 via_diameter errors). --min-track-mil
+// replaces the board's minimum track width, so --track-mil is checked
+// against it when given.
+func checkRuleFloors(r kicad.Rules, f kicadRuleFloors) error {
+	const eps = 1e-3
+	mm := func(mil float64) string { return strconv.FormatFloat(math.Round(mil*25.4)/1000, 'f', -1, 64) + " mm" }
+	var bad []string
+	if r.ViaDiaMil > 0 && r.ViaDiaMil+eps < f.ViaDiaMil {
+		bad = append(bad, fmt.Sprintf("--via-dia-mil %g (%s) is below the board's min via diameter %.2f mil (%s)", r.ViaDiaMil, mm(r.ViaDiaMil), f.ViaDiaMil, mm(f.ViaDiaMil)))
+	}
+	if r.ViaDrillMil > 0 && r.ViaDrillMil+eps < f.ViaDrillMil {
+		bad = append(bad, fmt.Sprintf("--via-drill-mil %g (%s) is below the board's min through-hole %.2f mil (%s)", r.ViaDrillMil, mm(r.ViaDrillMil), f.ViaDrillMil, mm(f.ViaDrillMil)))
+	}
+	if r.ViaDiaMil > 0 && r.ViaDrillMil > 0 && r.ViaDiaMil+eps < r.ViaDrillMil+2*f.ViaAnnularMil {
+		bad = append(bad, fmt.Sprintf("--via-dia-mil %g leaves an annular ring below the board's min %.2f mil around --via-drill-mil %g", r.ViaDiaMil, f.ViaAnnularMil, r.ViaDrillMil))
+	}
+	floor := f.TrackMil
+	if r.MinTrackMil > 0 {
+		floor = r.MinTrackMil
+	}
+	if r.TrackMil > 0 && r.TrackMil+eps < floor {
+		bad = append(bad, fmt.Sprintf("--track-mil %g is below the board's min track width %.2f mil", r.TrackMil, floor))
+	}
+	if len(bad) == 0 {
+		return nil
+	}
+	return fmt.Errorf("RULE_BELOW_BOARD_MINIMUM: %s (fix: use values at or above the board's design rules in its .kicad_pro, or omit the flag to use the board's own netclass sizes)", strings.Join(bad, "; "))
+}
+
 // kicadIsolation turns the intent's insulation pairs into the bridge's
 // domain classes and clearance / creepage rules.
 func kicadIsolation(in *designIntent) []map[string]any {
@@ -185,8 +254,18 @@ func kicadIsolation(in *designIntent) []map[string]any {
 // class; KiCad's DRC checks the pair rule itself).
 func kicadRequirements(in *designIntent) map[string]kicad.NetRequirement {
 	reqs := map[string]kicad.NetRequirement{}
+	// The intent's via per net: its netClasses entry (largest when a net is
+	// in several). The bridge raises it to the net's class and the board
+	// minimums; it never lowers either.
+	viaDia, viaDrill := map[string]float64{}, map[string]float64{}
+	for _, c := range in.NetClasses {
+		for _, n := range c.Nets {
+			viaDia[n], viaDrill[n] = math.Max(viaDia[n], c.ViaDiaMil), math.Max(viaDrill[n], c.ViaDrillMil)
+		}
+	}
 	for net, r := range intentRequirements(in) {
-		reqs[net] = kicad.NetRequirement{OuterMil: r.OuterMil, InnerMil: r.InnerMil, MinMil: r.MinMil, ClearanceMil: r.ClearanceMil}
+		reqs[net] = kicad.NetRequirement{OuterMil: r.OuterMil, InnerMil: r.InnerMil, MinMil: r.MinMil, ClearanceMil: r.ClearanceMil,
+			ViaDiaMil: viaDia[net], ViaDrillMil: viaDrill[net]}
 	}
 	nets := map[string][]string{}
 	for _, d := range in.Domains {

@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -152,5 +153,101 @@ func TestCopyKicadBoard(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "w", "b.kicad_pro")); !os.IsNotExist(err) {
 		t.Fatal("stale .kicad_pro left in the work copy")
+	}
+}
+
+// interfUPro is KiCad's shipped interf_u demo project ("" when KiCad's demos
+// are not installed next to kicad-cli or under %LOCALAPPDATA%).
+func interfUPro() string {
+	var cands []string
+	if v := os.Getenv("PCBPILOT_KICAD_DEMOS"); v != "" {
+		cands = append(cands, v)
+	}
+	if cli, err := kicad.KicadCLI(); err == nil {
+		cands = append(cands, filepath.Join(filepath.Dir(cli), "..", "share", "kicad", "demos"))
+	}
+	if la := os.Getenv("LOCALAPPDATA"); la != "" {
+		m, _ := filepath.Glob(filepath.Join(la, "Programs", "KiCad", "*", "share", "kicad", "demos"))
+		cands = append(cands, m...)
+	}
+	for _, c := range cands {
+		p := filepath.Join(c, "interf_u", "interf_u.kicad_pro")
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
+}
+
+// interf_u's rules: min hole 0.5 mm, min via 0.9 mm, min annulus 0.05 mm,
+// min track 0.2 mm. A synthetic project with the same rules always runs;
+// the real demo file is read too when it is installed.
+func TestKicadRuleFloorsRefuseBelowBoardMinimum(t *testing.T) {
+	syn := filepath.Join(t.TempDir(), "b.kicad_pro")
+	if err := os.WriteFile(syn, []byte(`{"board":{"design_settings":{"rules":{"min_through_hole_diameter":0.5,"min_via_diameter":0.9,"min_via_annular_width":0.05,"min_track_width":0.2}}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pros := []string{syn}
+	if p := interfUPro(); p != "" {
+		pros = append(pros, p)
+	} else {
+		t.Log("interf_u demo not installed: synthetic rules only")
+	}
+	for _, pro := range pros {
+		f, err := readKicadRuleFloors(pro)
+		if err != nil {
+			t.Fatal(err)
+		}
+		near := func(a, b float64) bool { return math.Abs(a-b) < 1e-3 }
+		if !near(f.ViaDiaMil, 0.9/0.0254) || !near(f.ViaDrillMil, 0.5/0.0254) || !near(f.ViaAnnularMil, 0.05/0.0254) || !near(f.TrackMil, 0.2/0.0254) {
+			t.Fatalf("%s: floors %+v", pro, f)
+		}
+		// What `kicad route --via-drill-mil 11.81 --via-dia-mil 23.62` (0.3 / 0.6
+		// mm) used to write onto this board.
+		err = checkRuleFloors(kicad.Rules{ViaDiaMil: 23.62, ViaDrillMil: 11.81}, f)
+		if err == nil || !strings.Contains(err.Error(), "RULE_BELOW_BOARD_MINIMUM") || !strings.Contains(err.Error(), "--via-drill-mil") ||
+			!strings.Contains(err.Error(), "--via-dia-mil") || !strings.Contains(err.Error(), "0.5 mm") || !strings.Contains(err.Error(), "fix:") {
+			t.Fatalf("%s: 0.6/0.3 mm via accepted or unclear: %v", pro, err)
+		}
+		if err := checkRuleFloors(kicad.Rules{TrackMil: 6}, f); err == nil || !strings.Contains(err.Error(), "--track-mil") {
+			t.Fatalf("%s: 6 mil track below 0.2 mm accepted: %v", pro, err)
+		}
+		// Thick enough drill, diameter leaves < 0.05 mm ring.
+		if err := checkRuleFloors(kicad.Rules{ViaDiaMil: 35.5, ViaDrillMil: 35}, f); err == nil || !strings.Contains(err.Error(), "annular") {
+			t.Fatalf("%s: thin annulus accepted: %v", pro, err)
+		}
+		for _, ok := range []kicad.Rules{
+			{},
+			{ViaDiaMil: 0.9 / 0.0254, ViaDrillMil: 0.5 / 0.0254}, // exactly the minimums (mm → mil rounding)
+			{ViaDiaMil: 55.12, ViaDrillMil: 23.62, TrackMil: 15.75},
+			{TrackMil: 6, MinTrackMil: 6}, // --min-track-mil replaces the board minimum
+		} {
+			if err := checkRuleFloors(ok, f); err != nil {
+				t.Errorf("%s: %+v refused: %v", pro, ok, err)
+			}
+		}
+	}
+}
+
+// The intent's netClasses via reaches the bridge request per net (largest
+// when a net is in two classes); nets outside any class carry none.
+func TestKicadRequirementsCarryIntentVia(t *testing.T) {
+	in := &designIntent{
+		Nets: map[string]*intentNet{"VBUS": {WidthMil: intentWidth{Outer: 20}}, "SIG": {WidthMil: intentWidth{Outer: 8}}},
+		NetClasses: []intentNetClass{
+			{Name: "PWR", Nets: []string{"VBUS"}, ViaDiaMil: 24, ViaDrillMil: 12},
+			{Name: "HV", Nets: []string{"VBUS"}, ViaDiaMil: 40, ViaDrillMil: 20},
+		},
+	}
+	reqs := kicadRequirements(in)
+	if r := reqs["VBUS"]; r.ViaDiaMil != 40 || r.ViaDrillMil != 20 {
+		t.Fatalf("VBUS via %+v", r)
+	}
+	if r := reqs["SIG"]; r.ViaDiaMil != 0 || r.ViaDrillMil != 0 {
+		t.Fatalf("SIG via %+v", r)
+	}
+	b, _ := json.Marshal(reqs["SIG"])
+	if strings.Contains(string(b), "via") {
+		t.Fatalf("no intent via must stay out of the bridge request: %s", b)
 	}
 }

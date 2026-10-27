@@ -7,6 +7,8 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -616,5 +618,115 @@ func TestBridgeDuplicateTrackUUIDLive(t *testing.T) {
 	}
 	if after, _ := os.ReadFile(pcb); !bytes.Equal(before, after) {
 		t.Fatal("rejected in-place edit changed the board")
+	}
+}
+
+// interfCopy copies KiCad's interf_u demo board + project into dir (the demo
+// itself is read-only); a skip when the demos are not installed.
+func interfCopy(t *testing.T, dir string) string {
+	t.Helper()
+	demos := kicadDemosDir()
+	if demos == "" {
+		t.Skipf("KiCad demos not found (set %s)", EnvKiCadDemos)
+	}
+	for _, ext := range []string{".kicad_pcb", ".kicad_pro"} {
+		b, err := os.ReadFile(filepath.Join(demos, "interf_u", "interf_u"+ext))
+		if err != nil {
+			t.Skipf("interf_u demo: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "interf_u"+ext), b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return filepath.Join(dir, "interf_u.kicad_pcb")
+}
+
+// interf_u's project sets min hole 0.5 mm, min via diameter 0.9 mm. The
+// pcbpilot netclasses used to carry KiCad's built-in 0.6 / 0.3 mm via, so
+// every routed via of an intent net failed DRC (drill_out_of_range,
+// via_diameter). Every class and every via padstack of the DSN the router
+// reads must now meet the board's minimums, and an insulation-domain class
+// must not override the nets' own sizes.
+func TestBridgeNetclassViasMeetBoardMinimumsLive(t *testing.T) {
+	tools := bridgeLiveTools(t)
+	dir := t.TempDir()
+	pcb := interfCopy(t, dir)
+	reqs := map[string]NetRequirement{
+		"/ACK":  {OuterMil: 10, InnerMil: 10, ClearanceMil: 8},
+		"/BIT0": {OuterMil: 12, InnerMil: 12, ClearanceMil: 8, ViaDiaMil: 23.62, ViaDrillMil: 11.81}, // 0.6 / 0.3 mm intent
+		"/BIT1": {OuterMil: 12, InnerMil: 12, ClearanceMil: 8, ViaDiaMil: 70.87, ViaDrillMil: 31.5},  // 1.8 / 0.8 mm intent
+	}
+	iso := []map[string]any{{"a": "lo", "b": "hi", "aNets": []string{"/BIT2"}, "bNets": []string{"/BIT3"}, "clearanceMm": 1.0}}
+	out := filepath.Join(dir, "classed.kicad_pcb")
+	res, err := tools.NetclassesIso(pcb, reqs, iso, nil, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const minDia, minDrill = 0.9 / 0.0254, 0.5 / 0.0254
+	vias := map[string][2]float64{}
+	for _, c := range res.Classes {
+		if c.ViaDiameterMil+1e-3 < minDia || c.ViaDrillMil+1e-3 < minDrill {
+			t.Errorf("class %s via %.2f/%.2f mil below the board minimums %.2f/%.2f", c.Name, c.ViaDiameterMil, c.ViaDrillMil, minDia, minDrill)
+		}
+		for _, n := range c.Nets {
+			vias[n] = [2]float64{c.ViaDiameterMil, c.ViaDrillMil}
+		}
+	}
+	// Default is 1.4 / 0.6 mm: kept for /ACK and the small intent via; the
+	// larger intent via wins for /BIT1.
+	near := func(a, b float64) bool { return math.Abs(a-b) < 0.05 }
+	if v := vias["/ACK"]; !near(v[0], 1.4/0.0254) || !near(v[1], 0.6/0.0254) {
+		t.Errorf("/ACK via %v, want the Default class 1.4/0.6 mm", v)
+	}
+	if v := vias["/BIT0"]; !near(v[0], 1.4/0.0254) || !near(v[1], 0.6/0.0254) {
+		t.Errorf("/BIT0 via %v: a smaller intent via must not lower the class", v)
+	}
+	if v := vias["/BIT1"]; !near(v[0], 70.87) || !near(v[1], 31.5) {
+		t.Errorf("/BIT1 via %v, want the intent 1.8/0.8 mm", v)
+	}
+	dsn := filepath.Join(dir, "classed.dsn")
+	if _, err := tools.ExportDSN(out, dsn); err != nil {
+		t.Fatal(err)
+	}
+	text, err := os.ReadFile(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ps := regexp.MustCompile(`Via\[\d+-\d+\]_(\d+):(\d+)_um`).FindAllStringSubmatch(string(text), -1)
+	if len(ps) == 0 {
+		t.Fatal("DSN declares no via padstack")
+	}
+	for _, m := range ps {
+		d, _ := strconv.Atoi(m[1])
+		h, _ := strconv.Atoi(m[2])
+		if d < 900 || h < 500 {
+			t.Errorf("DSN via padstack %s below min via 900 um / min hole 500 um", m[0])
+		}
+	}
+	// The domain class carries only its name: /BIT2 keeps Default's sizes.
+	snap, err := tools.Snapshot(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s struct {
+		Rules struct {
+			ViaDrillMil    float64 `json:"viaDrillMil"`
+			ViaDiameterMil float64 `json:"viaDiameterMil"`
+		} `json:"rules"`
+		Netclasses []struct {
+			Name          string   `json:"name"`
+			TrackWidthMil *float64 `json:"trackWidthMil"`
+		} `json:"netclasses"`
+	}
+	if err := json.Unmarshal(snap, &s); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range s.Netclasses {
+		if strings.HasPrefix(c.Name, "PPD_") && c.TrackWidthMil != nil {
+			t.Errorf("domain class %s sets its own track width %.2f mil", c.Name, *c.TrackWidthMil)
+		}
+	}
+	if s.Rules.ViaDrillMil+1e-3 < minDrill || s.Rules.ViaDiameterMil+1e-3 < minDia {
+		t.Errorf("snapshot rules via %.2f/%.2f below the board minimums", s.Rules.ViaDiameterMil, s.Rules.ViaDrillMil)
 	}
 }
