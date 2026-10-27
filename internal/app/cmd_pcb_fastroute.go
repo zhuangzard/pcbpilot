@@ -692,20 +692,43 @@ func installedBinary(name, p, flag string) (string, error) {
 			exe = append(exe, name+ext)
 		}
 	}
-	var found []string
-	for _, pat := range []string{"", "bin", "*"} {
-		for _, e := range exe {
-			ms, _ := filepath.Glob(filepath.Join(abs, pat, e))
-			sort.Strings(ms)
-			for _, m := range ms {
-				if st, err := os.Stat(m); err == nil && !st.IsDir() && isExecutable(m, st) {
-					found = append(found, m)
+	// Directories searched in order: p, p/bin, then each subdirectory.
+	dirs := []string{abs, filepath.Join(abs, "bin")}
+	if ents, err := os.ReadDir(abs); err == nil {
+		for _, e := range ents {
+			if e.IsDir() && !strings.EqualFold(e.Name(), "bin") {
+				dirs = append(dirs, filepath.Join(abs, e.Name()))
+			}
+		}
+	}
+	level := func(ds []string) []string {
+		var found []string
+		for _, e := range exe { // name.exe wins over name.com in the same place
+			for _, d := range ds {
+				ents, err := os.ReadDir(d)
+				if err != nil {
+					continue
+				}
+				for _, ent := range ents {
+					// Windows file names are case-insensitive (FASTROUTE.EXE).
+					same := ent.Name() == e || (runtime.GOOS == "windows" && strings.EqualFold(ent.Name(), e))
+					if !same || ent.IsDir() {
+						continue
+					}
+					m := filepath.Join(d, ent.Name())
+					if st, err := os.Stat(m); err == nil && !st.IsDir() && isExecutable(m, st) {
+						found = append(found, m)
+					}
 				}
 			}
 			if len(found) > 0 {
-				break // name.exe wins over name.bat in the same place
+				break
 			}
 		}
+		return found
+	}
+	for _, ds := range [][]string{dirs[:1], dirs[1:2], dirs[2:]} {
+		found := level(ds)
 		if len(found) == 1 {
 			return found[0], nil
 		}
@@ -716,8 +739,10 @@ func installedBinary(name, p, flag string) (string, error) {
 	return "", fmt.Errorf("%s: %s is a directory without a %s executable (looked in it, bin/ and its subdirectories); unpack the release there or pass %s with the executable", name, p, strings.Join(exe, " / "), flag)
 }
 
-// winExecExts are the extensions Windows runs directly.
-var winExecExts = []string{".exe", ".com", ".bat", ".cmd"}
+// winExecExts are the extensions CreateProcess (exec.Command) runs
+// directly. A .bat / .cmd needs cmd.exe and its own argument quoting, so it
+// is refused rather than run with arguments cmd.exe could misparse.
+var winExecExts = []string{".exe", ".com"}
 
 // isExecutable: an x bit on Unix, an executable extension on Windows.
 func isExecutable(p string, st os.FileInfo) bool {
@@ -735,7 +760,7 @@ func isExecutable(p string, st os.FileInfo) bool {
 
 func executableRule() string {
 	if runtime.GOOS == "windows" {
-		return "Windows runs " + strings.Join(winExecExts, " / ") + " files"
+		return "Windows runs " + strings.Join(winExecExts, " / ") + " files directly; a .bat / .cmd wrapper is not accepted"
 	}
 	return "no execute permission"
 }

@@ -278,17 +278,23 @@ func TestKicadDRCGateProjectPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	errs, _, _ := rep.SplitErrors()
+	// The excluded unconnected / parity items are not report errors: only the
+	// policy below judges them (once).
+	if errs.Total != 1 || errs.Counts["invalid_outline"] != 1 {
+		t.Fatalf("errors: %+v", errs)
+	}
 	errs.Violations, errs.Total, errs.Counts = nil, 0, map[string]int{} // only the policy under test
 	g := kicadDRCGate(errs, "drc.json")
 	if !g.Pass {
 		t.Fatalf("clean report: %+v", g)
 	}
 	applyDRCPolicy(&g, pol, rep.Excluded())
-	if g.Pass || len(g.Items) != 2 {
+	if g.Pass || len(g.Items) != 4 {
 		t.Fatalf("critical exclusion / ignore passed: %+v", g)
 	}
 	joined := strings.Join(g.Items, "\n")
-	for _, want := range []string{"EXCLUDED clearance", "too close on purpose", "Track [GND]", "IGNORED unconnected_items"} {
+	for _, want := range []string{"EXCLUDED clearance", "too close on purpose", "Track [GND]", "IGNORED unconnected_items",
+		"EXCLUDED unconnected_items|30000000", "joined by the pour", "EXCLUDED extra_footprint|5000000", "Footprint FID1"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("items lack %q:\n%s", want, joined)
 		}
@@ -299,7 +305,7 @@ func TestKicadDRCGateProjectPolicy(t *testing.T) {
 			t.Errorf("info lacks %q:\n%s", want, info)
 		}
 	}
-	// One waiver is not enough; both are.
+	// Some waivers are not enough; one per item is.
 	one := g
 	applyWaivers(&one, []gateWaiver{{Gate: "kicad-drc", Match: "EXCLUDED clearance|10000000", Reason: "reviewed", By: "test"}})
 	if one.Pass {
@@ -307,8 +313,10 @@ func TestKicadDRCGateProjectPolicy(t *testing.T) {
 	}
 	both := g
 	applyWaivers(&both, []gateWaiver{{Gate: "kicad-drc", Match: "EXCLUDED clearance|10000000", Reason: "reviewed", By: "test"},
-		{Gate: "kicad-drc", Match: "IGNORED unconnected_items", Reason: "pours connect it", By: "test"}})
-	if !both.Pass || len(both.Waived) != 2 {
+		{Gate: "kicad-drc", Match: "IGNORED unconnected_items", Reason: "pours connect it", By: "test"},
+		{Gate: "kicad-drc", Match: "EXCLUDED unconnected_items|30000000", Reason: "pour", By: "test"},
+		{Gate: "kicad-drc", Match: "EXCLUDED extra_footprint|5000000", Reason: "fiducial", By: "test"}})
+	if !both.Pass || len(both.Waived) != 4 {
 		t.Fatalf("fully waived policy: %+v", both)
 	}
 	// No policy file: nothing added.

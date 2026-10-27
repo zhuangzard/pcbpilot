@@ -217,6 +217,58 @@ func TestResolveFastrouteRefusesNonExecutableFile(t *testing.T) {
 	}
 }
 
+// cmdExe is a real Windows program to launch in tests (copied under another
+// name), or a skip.
+func cmdExe(t *testing.T) []byte {
+	t.Helper()
+	sh := os.Getenv("ComSpec")
+	if sh == "" {
+		sh = filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe")
+	}
+	b, err := os.ReadFile(sh)
+	if err != nil {
+		t.Skipf("no cmd.exe to copy: %v", err)
+	}
+	return b
+}
+
+// Windows: a .bat / .cmd cannot be started by exec.Command without cmd.exe
+// (and its quoting), so it is refused; a directory entry is matched without
+// regard to case (FASTROUTE.EXE) and the resolved file really launches.
+func TestResolveFastrouteWindowsExecutables(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows executable rules")
+	}
+	dir := t.TempDir()
+	for _, n := range []string{"fastroute.bat", "fastroute.cmd"} {
+		p := filepath.Join(dir, n)
+		if err := os.WriteFile(p, []byte("@echo off\r\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := resolveFastroute(p); err == nil || !strings.Contains(err.Error(), "not an executable") || !strings.Contains(err.Error(), ".bat / .cmd") {
+			t.Fatalf("%s accepted: %v", n, err)
+		}
+	}
+	// A directory holding only the wrapper has no executable.
+	if _, err := resolveFastroute(dir); err == nil || !strings.Contains(err.Error(), "without a fastroute") {
+		t.Fatalf("wrapper-only dir: %v", err)
+	}
+	rel := filepath.Join(dir, "fastroute-0.1.14-windows-x64")
+	if err := os.MkdirAll(rel, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rel, "FASTROUTE.EXE"), cmdExe(t), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := resolveFastroute(dir)
+	if err != nil || !strings.EqualFold(filepath.Base(got), "fastroute.exe") || !filepath.IsAbs(got) {
+		t.Fatalf("upper-case exe: got %q %v", got, err)
+	}
+	if out, err := exec.Command(got, "/c", "exit 0").CombinedOutput(); err != nil {
+		t.Fatalf("launch %s: %v\n%s", got, err, out)
+	}
+}
+
 // A relative --fastroute-bin resolves to an absolute path, so exec runs
 // that file: neither exec.ErrDot nor a same-named binary earlier on PATH.
 func TestResolveFastrouteRelativeExplicitIsAbsolute(t *testing.T) {
@@ -224,14 +276,7 @@ func TestResolveFastrouteRelativeExplicitIsAbsolute(t *testing.T) {
 	name, args := "fastroute", []string{}
 	if runtime.GOOS == "windows" {
 		// A real program to launch: a copy of cmd.exe named fastroute.exe.
-		sh := os.Getenv("ComSpec")
-		if sh == "" {
-			sh = filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe")
-		}
-		b, err := os.ReadFile(sh)
-		if err != nil {
-			t.Skipf("no cmd.exe to copy: %v", err)
-		}
+		b := cmdExe(t)
 		name, args = "fastroute.exe", []string{"/c", "echo %CD%"}
 		for _, d := range []string{work, other} {
 			if err := os.WriteFile(filepath.Join(d, name), b, 0o755); err != nil {

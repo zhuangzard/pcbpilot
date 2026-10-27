@@ -165,8 +165,13 @@ func TestParseDRCExcludedItems(t *testing.T) {
 		t.Fatal(err)
 	}
 	ex := rep.Excluded()
-	if len(ex) != 2 || ex[0].Rule != "courtyards_overlap" || ex[0].Comment != "Intentional Overlap" || ex[1].Rule != "clearance" {
+	if len(ex) != 4 || ex[0].Rule != "courtyards_overlap" || ex[0].Comment != "Intentional Overlap" || ex[1].Rule != "clearance" ||
+		ex[2].Rule != "unconnected_items" || ex[2].Section != "unconnected_items" || ex[3].Rule != "extra_footprint" || ex[3].Section != "schematic_parity" {
 		t.Fatalf("excluded: %+v", ex)
+	}
+	// Excluded items of every section stay out of the report's totals.
+	if rep.Total != 2 || rep.Counts["unconnected_items"] != 0 || rep.Counts["extra_footprint"] != 0 || rep.Counts["clearance"] != 0 {
+		t.Fatalf("report counts excluded items: %d %v", rep.Total, rep.Counts)
 	}
 	errs, warn, n := rep.SplitErrors()
 	if errs.Total != 1 || errs.Counts["invalid_outline"] != 1 || n != 1 || warn["via_dangling"] != 1 {
@@ -179,7 +184,7 @@ func TestReadDRCPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(p.Exclusions) != 3 || p.Exclusions[1].Rule != "clearance" || p.Exclusions[1].Comment != "too close on purpose" ||
+	if len(p.Exclusions) != 5 || p.Exclusions[1].Rule != "clearance" || p.Exclusions[1].Comment != "too close on purpose" ||
 		p.Exclusions[2].Rule != "via_dangling" || p.Exclusions[2].Comment != "" {
 		t.Fatalf("exclusions: %+v", p.Exclusions)
 	}

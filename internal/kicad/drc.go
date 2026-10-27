@@ -38,6 +38,10 @@ type DRCReport struct {
 	Total        int            `json:"total"`
 	Counts       map[string]int `json:"counts"`
 	Violations   []Violation    `json:"violations"`
+	// ExcludedItems are the items of any section the project's
+	// drc_exclusions cover: never in Violations, Total or Counts; callers
+	// judge them by the project's DRCPolicy.
+	ExcludedItems []Violation `json:"excludedItems,omitempty"`
 }
 
 type drcJSONItem struct {
@@ -170,6 +174,10 @@ func ParseDRCWith(data []byte, o DRCParseOptions) (*DRCReport, error) {
 			// The item descriptions carry what the summary line does not.
 			for _, it := range v.Items {
 				fv.Message += "; " + it.Description
+			}
+			if fv.Excluded {
+				rep.ExcludedItems = append(rep.ExcludedItems, fv)
+				continue
 			}
 			rep.Violations = append(rep.Violations, fv)
 			rep.Counts[fv.Rule]++
@@ -310,9 +318,6 @@ func (r *DRCReport) SplitErrors() (*DRCReport, map[string]int, int) {
 	warn := map[string]int{}
 	n := 0
 	for _, v := range r.Violations {
-		if v.Excluded {
-			continue // judged by the exclusion policy (DRCPolicy), not as an error
-		}
 		if v.Severity == "" || v.Severity == "error" {
 			errs.Violations = append(errs.Violations, v)
 			errs.Counts[v.Rule]++
@@ -325,16 +330,8 @@ func (r *DRCReport) SplitErrors() (*DRCReport, map[string]int, int) {
 	return errs, warn, n
 }
 
-// Excluded lists the report's excluded items.
-func (r *DRCReport) Excluded() []Violation {
-	var out []Violation
-	for _, v := range r.Violations {
-		if v.Excluded {
-			out = append(out, v)
-		}
-	}
-	return out
-}
+// Excluded lists the report's excluded items, from every section.
+func (r *DRCReport) Excluded() []Violation { return r.ExcludedItems }
 
 // DRCExclusion is one board.design_settings.drc_exclusions entry of a
 // .kicad_pro: "<rule>|<x>|<y>|<uuid>|<uuid>" and its comment.

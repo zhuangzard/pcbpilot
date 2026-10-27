@@ -662,6 +662,9 @@ func TestBridgeNetclassViasMeetBoardMinimumsLive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(res.Mismatched) > 0 {
+		t.Fatalf("effective sizes differ from the written classes: %v", res.Mismatched)
+	}
 	const minDia, minDrill = 0.9 / 0.0254, 0.5 / 0.0254
 	vias := map[string][2]float64{}
 	for _, c := range res.Classes {
@@ -764,6 +767,9 @@ func TestBridgeNetclassFloorsLowDefaultLive(t *testing.T) {
 	res, err := tools.NetclassesIso(pcb, map[string]NetRequirement{"/ACK": {OuterMil: 10, InnerMil: 10, ClearanceMil: 8}}, nil, nil, out)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(res.Mismatched) > 0 {
+		t.Fatalf("effective sizes differ from the written classes / floors: %v", res.Mismatched)
 	}
 	if len(res.ViaFloored) == 0 {
 		t.Fatalf("no via floor reported: %+v", res)

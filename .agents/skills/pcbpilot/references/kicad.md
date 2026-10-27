@@ -99,7 +99,7 @@ pcbpilot kicad route --pcb GasV5_A.kicad_pcb --intent intent.json --sim sim.json
      用户类更宽的值保留，记 `netclasses.kept`）。
      **过孔**取 max(意图 `netClasses` 的过孔、该网原网络类过孔、板最小孔径 / 最小过孔直径 / 孔径 + 2×最小环宽)，线宽、间距也不低于
      板最小值；KiCad 新建网络类自带 0.6/0.3 mm 过孔，旧版因此在 interf_u（最小孔 0.5、最小过孔 0.9 mm）上布出 16 个
-     drill_out_of_range + 16 个 via_diameter。Default 过孔低于板最小值时在工作副本上抬高；其他网按**有效**过孔对（多类合成、部分类由 Default 补齐）判，低于最小值的加只带过孔的 `PPV_<径>_<孔>` 类；都记 `netclasses.viaFloored`。全程整数 nm 比较（0.2 mm 不会被 7.87 mil 的舍入削掉），内层线宽同样不低于板最小线宽。KiCad 9 以下没有无值网络类，`netclasses` 直接拒绝。
+     drill_out_of_range + 16 个 via_diameter。Default 的线宽/间距/过孔低于板最小值时在工作副本上抬高；其他每个网（含只在绝缘域里的网）按**有效**线宽、间距、过孔（多类合成、部分类由 Default 补齐）判，低于最小值的加 `PPF_<线宽>_<间距>_<径>_<孔>`（全 nm）类；都记 `netclasses.viaFloored`。生成的 PP / PPF / PPD 类优先级高于工程里所有类；写完后逐网复查有效线宽/间距/过孔，不符即 `mismatched` 停止。全程整数 nm 比较（0.2 mm 不会被 7.87 mil 的舍入削掉），内层线宽同样不低于板最小线宽。KiCad 9 以下没有无值网络类，`netclasses` 直接拒绝。
      `PPD_<域>` 类只有名字（不带尺寸），不覆盖网自身的线宽/间距/过孔。
    - **内层线宽**：KiCad 网络类只有一个线宽。取最接近的官方机制：DSN 里加 `(layer_rule In1.Cu … (rule (width W)))`
      让 fastroute 内层按内层宽走；`.kicad_dru` 写 `(layer inner)` 的 `track_width (min <widthMil.min>) (opt <inner>)`；
