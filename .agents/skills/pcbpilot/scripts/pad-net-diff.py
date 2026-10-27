@@ -23,8 +23,9 @@ path dropped, "{slash}" read as '/'). Never cut at '/' inside a label. A KiCad
 Reports parts missing on the PCB, extra PCB parts, pins without a pad, pads
 without a pin, and net mismatches. A schematic no-connect matches an empty
 PCB net. Nets that differ only in letter case (EasyEDA may upper-case net
-names on the PCB side) are listed as warnings, not errors - for nets
-without fullName only; KiCad names are case-sensitive. Distinct schematic
+names on the PCB side) are listed as warnings, not errors - on the
+EasyEDA path only: KiCad names are case-sensitive (a net with fullName, a
+kicad netlist document, a kicad snapshot board, or --strict-case). Distinct schematic
 nets (by page + net id; equal names on different pages are one net) that
 reach one PCB net are a short: netCollision.
 Exit 0 = identical, 2 = only case warnings (report them, not "passed"),
@@ -73,11 +74,14 @@ def unwrap(doc):
 
 
 def schematic_map(doc, page=0):
-    """pin -> (name, has fullName, (page, net id)) | NC | None. fullName is
-    the identity; a bare name may still need resolving against the board.
-    The (page, net id) source keeps distinct schematic nets apart."""
+    """pin -> (name, has fullName, (page, net id), KiCad doc) | NC | None.
+    fullName is the identity; a bare name may still need resolving against
+    the board. The (page, net id) source keeps distinct schematic nets
+    apart. A KiCad document (kicad netlist: documentId "kicad-sch", even
+    from before fullName existed) has case-sensitive names."""
     doc = unwrap(doc)
-    net_name = {n["id"]: ((n.get("fullName") or n.get("name") or n["id"]), bool(n.get("fullName")), (page, n["id"]))
+    kicad = doc.get("documentId") == "kicad-sch"
+    net_name = {n["id"]: ((n.get("fullName") or n.get("name") or n["id"]), bool(n.get("fullName")), (page, n["id"]), kicad)
                 for n in doc.get("nets") or []}
     comp_ref = {c["id"]: c.get("ref", "") for c in doc.get("components") or []}
     pins = {}
@@ -90,7 +94,7 @@ def schematic_map(doc, page=0):
         ref = comp_ref.get(conn.get("componentId"), "")
         key = (ref, str(conn.get("pinNumber", "")))
         nid = conn.get("netId")
-        pins[key] = net_name.get(nid, (nid, False, (page, nid)))
+        pins[key] = net_name.get(nid, (nid, False, (page, nid), kicad))
     return pins
 
 
@@ -125,15 +129,15 @@ def to_identities(sch, pcb):
     nets that would become one identity (two "VCC" records, or "VCC" and
     "/pwr/VCC") keep distinct labels, so their pads mismatch, and are
     returned as collisions (a short on the board). Also returns the pins
-    whose net came with a fullName (KiCad: names are case-sensitive)."""
+    whose net is KiCad's (fullName or a KiCad document: case-sensitive)."""
     resolve = resolver(pcb.values())
     nets = {v for v in sch.values() if isinstance(v, tuple)}
     ids_by_name = {}
-    for name, _, (page, nid) in nets:
+    for name, _, (page, nid), _ in nets:
         ids_by_name.setdefault(name, {}).setdefault(page, set()).add(nid)
 
     def source(v):
-        name, _, (page, nid) = v
+        name, _, (page, nid), _ = v
         if all(len(ids) == 1 for ids in ids_by_name[name].values()):
             return ("name", name)
         return ("net", page, nid, name)
@@ -151,14 +155,21 @@ def to_identities(sch, pcb):
     for key, v in sch.items():
         if isinstance(v, tuple):
             out[key] = label(source(v)) if ident[v] in clash else ident[v]
-            if v[1]:
+            if v[1] or v[3]:
                 strict.add(key)
         else:
             out[key] = v
     return out, collisions, strict
 
 
-def diff(sch, pcb, ignore=()):
+def board_is_kicad(board):
+    """A `kicad snapshot` board: its names are case-sensitive."""
+    rules = board.get("rules") if isinstance(board, dict) else None
+    return isinstance(board, dict) and (board.get("source") == "kicad" or (isinstance(rules, dict) and rules.get("source") == "kicad"))
+
+
+def diff(sch, pcb, ignore=(), strict_case=False):
+    """strict_case: no case folding at all (a KiCad board, --strict-case)."""
     sch, collisions, strict = to_identities(sch, pcb)
     sch_refs = {r for r, _ in sch if r not in ignore}
     pcb_refs = {r for r, _ in pcb if r not in ignore}
@@ -186,7 +197,7 @@ def diff(sch, pcb, ignore=()):
             want = "" if net == NC else net
         # Case folding only for EasyEDA names: KiCad names (fullName) are
         # case-sensitive, a case-only difference is a different net.
-        if pad_net != want and (ref, pin) not in strict and pad_net.lower() == want.lower():
+        if pad_net != want and not strict_case and (ref, pin) not in strict and pad_net.lower() == want.lower():
             out["netCaseOnly"].append({"pad": f"{ref}.{pin}", "schematic": want, "pcb": pad_net})
         elif pad_net != want:
             out["netMismatch"].append({"pad": f"{ref}.{pin}", "schematic": net or "", "pcb": pad_net})
@@ -206,6 +217,8 @@ def main():
     ap.add_argument("--pcb", required=True)
     ap.add_argument("--ignore-refs", default="", help="comma list of designators to skip (mounting holes, logos)")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--strict-case", action="store_true",
+                    help="never treat case-only differences as warnings (automatic for KiCad documents and kicad snapshot boards)")
     a = ap.parse_args()
     sch = {}
     for page, path in enumerate(a.sch):
@@ -215,9 +228,10 @@ def main():
                 if sch.get(key) is None:
                     sch[key] = net
     with open(a.pcb, encoding="utf-8") as f:
-        pcb = pcb_map(unwrap_board(json.load(f)))
+        board = unwrap_board(json.load(f))
+    pcb = pcb_map(board)
     ignore = {r.strip() for r in a.ignore_refs.split(",") if r.strip()}
-    rep = diff(sch, pcb, ignore)
+    rep = diff(sch, pcb, ignore, strict_case=a.strict_case or board_is_kicad(board))
     if a.json:
         json.dump(rep, sys.stdout, ensure_ascii=False, indent=2)
         print()

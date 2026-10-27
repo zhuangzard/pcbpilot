@@ -89,17 +89,53 @@ type widthViolation struct {
 // segNeed, when set (--width-basis segment), may lower the requirement of a
 // track to what its own simulated current needs (ok=false keeps the net's).
 func checkIntentWidths(tracks []specctra.Track, pads []boardPad, reqs map[string]specctra.NetRequirement, pourBacked func(specctra.Track) bool, segNeed ...func(specctra.Track) (float64, bool)) []widthViolation {
+	return checkIntentWidthsKeyed(strings.ToUpper, tracks, pads, reqs, pourBacked, segNeed...)
+}
+
+// netCaseKey is how net names are compared on a board: KiCad names are
+// case-sensitive (/io/SDA and /io/sda are two nets); EasyEDA may upper-case
+// net names on the PCB side, so its lookups fold case.
+func netCaseKey(kicad bool) func(string) string {
+	if kicad {
+		return func(s string) string { return s }
+	}
+	return strings.ToUpper
+}
+
+// kicadNames reports a `kicad snapshot` board (case-sensitive net names).
+func (s *boardSnapshot) kicadNames() bool {
+	return s != nil && (s.Source == "kicad" || s.Rules != nil && s.Rules.Source == "kicad")
+}
+
+// boardFileKiCad reports whether a board JSON file is a `kicad snapshot`.
+func boardFileKiCad(path string) bool {
+	var b struct {
+		Source string `json:"source"`
+		Rules  *struct {
+			Source string `json:"source"`
+		} `json:"rules"`
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil || json.Unmarshal(raw, &b) != nil {
+		return false
+	}
+	return b.Source == "kicad" || b.Rules != nil && b.Rules.Source == "kicad"
+}
+
+// checkIntentWidthsKeyed is checkIntentWidths with the board's net-name
+// comparison (netCaseKey).
+func checkIntentWidthsKeyed(key func(string) string, tracks []specctra.Track, pads []boardPad, reqs map[string]specctra.NetRequirement, pourBacked func(specctra.Track) bool, segNeed ...func(specctra.Track) (float64, bool)) []widthViolation {
 	byNet := map[string][]boardPad{}
 	for _, p := range pads {
-		byNet[strings.ToUpper(p.Net)] = append(byNet[strings.ToUpper(p.Net)], p)
+		byNet[key(p.Net)] = append(byNet[key(p.Net)], p)
 	}
 	upper := make(map[string]specctra.NetRequirement, len(reqs))
 	for n, r := range reqs {
-		upper[strings.ToUpper(n)] = r
+		upper[key(n)] = r
 	}
 	var out []widthViolation
 	for _, t := range tracks {
-		r, ok := upper[strings.ToUpper(t.Net)]
+		r, ok := upper[key(t.Net)]
 		if !ok {
 			continue
 		}
@@ -121,7 +157,7 @@ func checkIntentWidths(tracks []specctra.Track, pads []boardPad, reqs map[string
 			v.Reason = fmt.Sprintf("below the net's minimum %.2f mil", r.MinMil)
 		case pourBacked != nil && pourBacked(t):
 			continue
-		case !padEscape(t, need, byNet[strings.ToUpper(t.Net)]):
+		case !padEscape(t, need, byNet[key(t.Net)]):
 			v.Reason = fmt.Sprintf("narrower than required outside the pad-escape zone (within %.1f mil of its own pad) and not inside its net's pour", padEscapeReachMil(need))
 		default:
 			continue
@@ -144,6 +180,11 @@ const specctraEps = 0.05
 // lies wholly inside its net's pour on its layer (even-odd over the fill's
 // contours, so pour cut-outs are outside).
 func pouredLookup(poured []any) func(specctra.Track) bool {
+	return pouredLookupKeyed(strings.ToUpper, poured)
+}
+
+// pouredLookupKeyed is pouredLookup with the board's net-name comparison.
+func pouredLookupKeyed(nk func(string) string, poured []any) func(specctra.Track) bool {
 	type key struct {
 		net   string
 		layer int
@@ -155,7 +196,7 @@ func pouredLookup(poured []any) func(specctra.Track) bool {
 			continue
 		}
 		layer, _ := strconv.Atoi(fmt.Sprint(m["layer"]))
-		k := key{strings.ToUpper(fmt.Sprint(m["net"])), layer}
+		k := key{nk(fmt.Sprint(m["net"])), layer}
 		fl, _ := m["fills"].([]any)
 		for _, f := range fl {
 			fm, ok := f.(map[string]any)
@@ -179,7 +220,7 @@ func pouredLookup(poured []any) func(specctra.Track) bool {
 		return in
 	}
 	return func(t specctra.Track) bool {
-		fs := fills[key{strings.ToUpper(t.Net), t.Layer}]
+		fs := fills[key{nk(t.Net), t.Layer}]
 		if len(fs) == 0 {
 			return false
 		}
@@ -466,7 +507,8 @@ func snapshotIntentGates(snap *boardSnapshot, in *designIntent, intentPath, simV
 		add(gateResult{Gate: "intent-widths", Detail: err.Error()})
 		return false
 	}
-	vs := checkIntentWidths(tracks, pads, intentRequirements(in), pouredLookup(snap.Copper.Poured), segNeed)
+	nk := netCaseKey(snap.kicadNames())
+	vs := checkIntentWidthsKeyed(nk, tracks, pads, intentRequirements(in), pouredLookupKeyed(nk, snap.Copper.Poured), segNeed)
 	basis := "WIDTH BASIS net: every track carries the net's intent current"
 	var info []string
 	if segNeed != nil {
@@ -668,8 +710,9 @@ func postSimForGates(boardPath string, o qualityGateOpts, summary map[string]any
 		if err != nil {
 			return nil, err
 		}
-		g.segNeed = segmentWidthNeed(in, res)
-		g.viaOK = segmentViaOK(in, res)
+		nk := netCaseKey(boardFileKiCad(boardPath))
+		g.segNeed = segmentWidthNeedKeyed(nk, in, res)
+		g.viaOK = segmentViaOKKeyed(nk, in, res)
 		g.segmentBasis = true
 	}
 	return g, nil
@@ -877,6 +920,12 @@ func checkIntentLengths(in *designIntent, tracks []specctra.Track) ([]string, in
 // allowed rise). Only tracks carrying less than half their net's current
 // get a per-segment requirement; trunks keep the net's (ok=false).
 func segmentWidthNeed(in *designIntent, res *postsim.Result) func(specctra.Track) (float64, bool) {
+	return segmentWidthNeedKeyed(strings.ToUpper, in, res)
+}
+
+// segmentWidthNeedKeyed is segmentWidthNeed with the board's net-name
+// comparison (netCaseKey).
+func segmentWidthNeedKeyed(nk func(string) string, in *designIntent, res *postsim.Result) func(specctra.Track) (float64, bool) {
 	outerOz, innerOz, rise := 1.0, 0.5, 10.0
 	if c := in.Copper; c != nil {
 		if c.OuterOz > 0 {
@@ -903,13 +952,13 @@ func segmentWidthNeed(in *designIntent, res *postsim.Result) func(specctra.Track
 	byNet := map[string][]seg{}
 	netAmps := map[string]float64{}
 	for _, n := range res.Nets {
-		netAmps[strings.ToUpper(n.Net)] = n.CurrentA
+		netAmps[nk(n.Net)] = n.CurrentA
 		for _, sg := range n.AllSegments {
-			byNet[strings.ToUpper(n.Net)] = append(byNet[strings.ToUpper(n.Net)], seg{layerID[sg.Layer], [2]float64{sg.A.X, sg.A.Y}, [2]float64{sg.B.X, sg.B.Y}, sg.CurrentA})
+			byNet[nk(n.Net)] = append(byNet[nk(n.Net)], seg{layerID[sg.Layer], [2]float64{sg.A.X, sg.A.Y}, [2]float64{sg.B.X, sg.B.Y}, sg.CurrentA})
 		}
 	}
 	return func(t specctra.Track) (float64, bool) {
-		key := strings.ToUpper(t.Net)
+		key := nk(t.Net)
 		if in.Nets[t.Net] != nil && in.Nets[t.Net].CurrentA > netAmps[key] {
 			netAmps[key] = in.Nets[t.Net].CurrentA
 		}
@@ -944,17 +993,22 @@ const widthBasisHelp = "intent-widths requirement: segment (default; a track car
 // the intent's via margin (default 20 %). Gas Module v16 B: a single GND via
 // near U8 carrying milliamps was rated against the 1.51 A net current.
 func segmentViaOK(in *designIntent, res *postsim.Result) func([]string, string) (bool, string) {
+	return segmentViaOKKeyed(strings.ToUpper, in, res)
+}
+
+// segmentViaOKKeyed is segmentViaOK with the board's net-name comparison.
+func segmentViaOKKeyed(nk func(string) string, in *designIntent, res *postsim.Result) func([]string, string) (bool, string) {
 	byID := map[string]postsim.ViaResult{}
 	for _, v := range res.Vias {
 		byID[v.ID] = v
 	}
 	netAmps := map[string]float64{}
 	for _, n := range res.Nets {
-		netAmps[strings.ToUpper(n.Net)] = n.CurrentA
+		netAmps[nk(n.Net)] = n.CurrentA
 	}
 	margin := 0.2
 	return func(ids []string, net string) (bool, string) {
-		total := netAmps[strings.ToUpper(net)]
+		total := netAmps[nk(net)]
 		if n := in.Nets[net]; n != nil && n.CurrentA > total {
 			total = n.CurrentA
 		}

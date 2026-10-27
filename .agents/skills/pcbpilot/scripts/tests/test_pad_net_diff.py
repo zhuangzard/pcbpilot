@@ -152,5 +152,26 @@ class HierarchicalNetIdentityTest(unittest.TestCase):
         self.assertEqual(rep["netMismatch"][0]["pad"], "R1.1")
 
 
+    def test_legacy_kicad_doc_and_board_are_case_sensitive(self):
+        # kicad netlist output from before fullName: documentId kicad-sch.
+        legacy = {"documentId": "kicad-sch",
+                  "components": [{"id": "c", "ref": "R1", "pins": [{"number": "1"}]}],
+                  "nets": [{"id": "a", "name": "sda"}],
+                  "connections": [{"componentId": "c", "pinNumber": "1", "netId": "a"}]}
+        pcb = {"components": [{"designator": "R1", "pads": [{"padNumber": "1", "net": "SDA"}]}]}
+        rep = pnd.diff(pnd.schematic_map(legacy), pnd.pcb_map(pcb))
+        self.assertFalse(rep["ok"], rep)
+        self.assertEqual(rep["netCaseOnly"], [])
+        # An EasyEDA doc (no documentId kicad-sch) still folds case ...
+        easy = {**legacy, "documentId": "page1"}
+        self.assertTrue(pnd.diff(pnd.schematic_map(easy), pnd.pcb_map(pcb))["ok"])
+        # ... unless the board is a kicad snapshot or --strict-case is set.
+        kboard = {**pcb, "source": "kicad"}
+        self.assertTrue(pnd.board_is_kicad(kboard))
+        rep = pnd.diff(pnd.schematic_map(easy), pnd.pcb_map(kboard), strict_case=pnd.board_is_kicad(kboard))
+        self.assertFalse(rep["ok"], rep)
+        self.assertEqual(rep["netMismatch"][0]["pad"], "R1.1")
+
+
 if __name__ == "__main__":
     unittest.main()

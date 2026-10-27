@@ -282,6 +282,9 @@ func (o *boardOutline) containsPoint(x, y float64) bool {
 // 报错），下游据此降级并在报告里说明——**绝不能因为某段数据缺失就静默跳过一整维
 // 却仍然给满分**，那会让"好板得高分"的校准判据失去意义。
 type boardSnapshot struct {
+	// Source is "kicad" for a `kicad snapshot` board ("" = EasyEDA dump):
+	// KiCad net names are case-sensitive (netCaseKey).
+	Source       string        `json:"source,omitempty"`
 	Components   []boardComp   `json:"components"`
 	Outline      *boardOutline `json:"outline,omitempty"`
 	Silk         []pcbSilkText `json:"silk,omitempty"`
@@ -871,6 +874,7 @@ func boardSnapshotSemanticSHA256(s *boardSnapshot) (string, error) {
 	// baselines stay valid across this CLI upgrade.
 	clone.FootprintHoles = nil
 	clone.PlaneLayers = nil // stackup layer types (2026-09-28): keep existing baselines valid
+	clone.Source = ""       // provenance only
 	if s.Rules != nil {
 		r := *s.Rules
 		r.SlotClearanceMil = 0
