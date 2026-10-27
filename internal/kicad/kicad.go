@@ -338,13 +338,19 @@ func (t *Tools) DRCSeverity(pcb, out, severity string) (*DRCReport, error) {
 	cmd.Stdout, cmd.Stderr = &buf, &buf
 	err := cmd.Run()
 	data, rerr := os.ReadFile(out)
-	if rerr != nil {
+	// Without --exit-code-violations a non-zero exit is kicad-cli failing
+	// (board load, crash, timeout), so whatever it left in out is not a result.
+	if err != nil || rerr != nil {
 		if err == nil {
 			err = rerr
 		}
-		return nil, fmt.Errorf("kicad-cli pcb drc: %v: %s", err, strings.TrimSpace(buf.String()))
+		return nil, fmt.Errorf("%w: kicad-cli pcb drc: %v: %s", ErrDRCReport, err, strings.TrimSpace(buf.String()))
 	}
-	return ParseDRC(data)
+	rep, err := ParseDRC(data)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", out, err)
+	}
+	return rep, nil
 }
 
 // Rules are board design rules and the Default netclass (mil; 0 = keep).

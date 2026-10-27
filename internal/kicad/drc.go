@@ -1,7 +1,9 @@
 package kicad
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -54,24 +56,77 @@ var (
 	reItemKind  = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9 ]*?)(?: \[| of | on |,|$)`)
 )
 
+// ErrDRCReport marks a DRC report that cannot be checked: empty, truncated,
+// not JSON, or not the kicad-cli schema. Callers must treat it as "DRC did
+// not run", never as a clean board.
+var ErrDRCReport = errors.New("cannot check kicad-cli DRC report")
+
+// DRCParseOptions names the sections a report must carry beyond the two
+// kicad-cli always writes (violations, unconnected_items).
+type DRCParseOptions struct {
+	SchematicParity bool // the run passed --schematic-parity
+}
+
 // ParseDRC reads a kicad-cli DRC JSON report (any severities it holds).
-func ParseDRC(data []byte) (*DRCReport, error) {
+// It is ParseDRCWith without --schematic-parity.
+func ParseDRC(data []byte) (*DRCReport, error) { return ParseDRCWith(data, DRCParseOptions{}) }
+
+// ParseDRCWith parses strictly: a required section that is missing, null or
+// not an array, an entry that is not an object, or unknown coordinate units
+// is an ErrDRCReport — an empty list is the only way a section reads clean.
+func ParseDRCWith(data []byte, o DRCParseOptions) (*DRCReport, error) {
+	bad := func(format string, a ...any) error {
+		return fmt.Errorf("%w: %s (fix: rerun kicad-cli pcb drc --format json; do not edit the report)", ErrDRCReport, fmt.Sprintf(format, a...))
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return nil, bad("empty file")
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(data, &top); err != nil {
+		return nil, bad("not a JSON object: %v", err)
+	}
+	if top == nil {
+		return nil, bad("not a JSON object: null")
+	}
+	need := []string{"violations", "unconnected_items"}
+	if o.SchematicParity {
+		need = append(need, "schematic_parity")
+	}
+	sections := map[string][]drcJSONViolation{}
+	for _, key := range []string{"violations", "unconnected_items", "schematic_parity"} {
+		raw, ok := top[key]
+		if !ok {
+			if contains(need, key) {
+				return nil, bad("no %q section", key)
+			}
+			continue
+		}
+		raw = bytes.TrimSpace(raw)
+		if len(raw) == 0 || raw[0] != '[' {
+			return nil, bad("%q is %s, not an array", key, jsonKind(raw))
+		}
+		var vs []drcJSONViolation
+		if err := json.Unmarshal(raw, &vs); err != nil {
+			return nil, bad("%q entries: %v", key, err)
+		}
+		sections[key] = vs
+	}
 	var r struct {
-		Version     string             `json:"kicad_version"`
-		Units       string             `json:"coordinate_units"`
-		Violations  []drcJSONViolation `json:"violations"`
-		Unconnected []drcJSONViolation `json:"unconnected_items"`
-		Parity      []drcJSONViolation `json:"schematic_parity"`
+		Version string `json:"kicad_version"`
+		Units   string `json:"coordinate_units"`
 	}
 	if err := json.Unmarshal(data, &r); err != nil {
-		return nil, fmt.Errorf("parse kicad DRC report: %w", err)
+		return nil, bad("header: %v", err)
 	}
 	scale := 1 / 0.0254 // mm → mil
 	switch strings.ToLower(r.Units) {
+	case "", "mm":
 	case "mils", "mil":
 		scale = 1
 	case "in", "inch", "inches":
 		scale = 1000
+	default:
+		return nil, bad("unknown coordinate_units %q", r.Units)
 	}
 	rep := &DRCReport{KiCadVersion: r.Version, Units: r.Units, Counts: map[string]int{}}
 	add := func(section string, vs []drcJSONViolation) {
@@ -111,9 +166,9 @@ func ParseDRC(data []byte) (*DRCReport, error) {
 			rep.Counts[fv.Rule]++
 		}
 	}
-	add("violations", r.Violations)
-	add("unconnected_items", r.Unconnected)
-	add("schematic_parity", r.Parity)
+	add("violations", sections["violations"])
+	add("unconnected_items", sections["unconnected_items"])
+	add("schematic_parity", sections["schematic_parity"])
 	rep.Total = len(rep.Violations)
 	return rep, nil
 }
@@ -126,6 +181,24 @@ func (r *DRCReport) SortedCounts() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// jsonKind names a raw JSON value's type for an error message.
+func jsonKind(raw []byte) string {
+	if len(raw) == 0 {
+		return "empty"
+	}
+	switch raw[0] {
+	case '{':
+		return "an object"
+	case '"':
+		return "a string"
+	case 't', 'f':
+		return "a boolean"
+	case 'n':
+		return "null"
+	}
+	return "a number"
 }
 
 func contains(xs []string, s string) bool {

@@ -439,6 +439,10 @@ func (r *kicadRun) run() error {
 		}
 		r.summary["inputDrc"] = map[string]any{"total": rep.Total, "counts": rep.Counts}
 		fmt.Fprintf(r.stderr, "input board DRC (before routing): %d error(s) %v\n", rep.Total, rep.Counts)
+	} else {
+		// No baseline: every routed-board violation then counts as new.
+		r.summary["inputDrc"] = map[string]any{"error": err.Error()}
+		fmt.Fprintf(r.stderr, "input board DRC (before routing) could not be checked: %v\n", err)
 	}
 
 	r.lap("input DRC")
