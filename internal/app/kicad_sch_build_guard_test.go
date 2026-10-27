@@ -47,7 +47,7 @@ func sbGuardAppend(t *testing.T, path string) []byte {
 	return edited
 }
 
-func sbGuardCheckpoints(t *testing.T, out string) []sbCheckpointMeta {
+func sbTestCheckpoints(t *testing.T, out string) []sbCheckpointMeta {
 	t.Helper()
 	list, _ := listSbCheckpoints(out)
 	return list
@@ -58,7 +58,7 @@ func TestSchEditRefusesExternalEdit(t *testing.T) {
 	out := sbGuardBuild(t)
 	sheet := filepath.Join(out, "p.kicad_sch")
 	edited := sbGuardAppend(t, sheet)
-	nCP := len(sbGuardCheckpoints(t, out))
+	nCP := len(sbTestCheckpoints(t, out))
 
 	rep, err := runSchEdit(sbOptions{OutDir: out, NoIntent: true, PlannerBudget: 20000}, sbGuardOps)
 	if err != nil {
@@ -76,7 +76,7 @@ func TestSchEditRefusesExternalEdit(t *testing.T) {
 	if b, _ := os.ReadFile(sheet); !bytes.Equal(b, edited) {
 		t.Fatal("a refused edit changed the sheet")
 	}
-	if n := len(sbGuardCheckpoints(t, out)); n != nCP {
+	if n := len(sbTestCheckpoints(t, out)); n != nCP {
 		t.Fatalf("a refused edit took a checkpoint (%d → %d)", nCP, n)
 	}
 	var so, se bytes.Buffer
@@ -210,7 +210,11 @@ func sbDetect(t *testing.T, out string, st *sbState, touch []string) *sbExternal
 	if err != nil {
 		t.Fatal(err)
 	}
-	return sbDiff(snap, sbLoadBasis(out, st, snap), touch)
+	b, err := sbLoadBasis(out, st, snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sbDiff(snap, b, touch)
 }
 
 func sbWriteRel(t *testing.T, out, rel, s string) {
@@ -397,7 +401,7 @@ func TestSchEditRaceWithKicad(t *testing.T) {
 	defer func() { sbTestBeforeCommit, sbTestAfterPublish = nil, nil }()
 	built, _ := os.ReadFile(sheet)
 	stBefore, _ := os.ReadFile(filepath.Join(sbMetaDir(out), "state.json"))
-	nCP := len(sbGuardCheckpoints(t, out))
+	nCP := len(sbTestCheckpoints(t, out))
 
 	for _, discard := range []bool{false, true} {
 		var edited []byte
@@ -413,7 +417,7 @@ func TestSchEditRaceWithKicad(t *testing.T) {
 		if b, _ := os.ReadFile(filepath.Join(sbMetaDir(out), "state.json")); !bytes.Equal(b, stBefore) {
 			t.Fatal("an aborted commit changed state.json")
 		}
-		if n := len(sbGuardCheckpoints(t, out)); n != nCP {
+		if n := len(sbTestCheckpoints(t, out)); n != nCP {
 			t.Fatal("an aborted commit took a checkpoint")
 		}
 		// the racing save is an edit for the next run
@@ -452,14 +456,25 @@ func TestSchEditRaceWithKicad(t *testing.T) {
 // A user library in --out (recorded in the manifest, never written by
 // pcbpilot) that the next build would generate: refused at commit; the
 // override checkpoints it first.
+// On Windows/macOS the user's MYLIB.kicad_sym is the generated mylib.kicad_sym.
 func TestSchBuildRefusesToOverwriteForeignLibrary(t *testing.T) {
 	sbNeedKicad(t)
+	names := []string{"mylib.kicad_sym"}
+	if sbFoldCase {
+		names = append(names, "MYLIB.kicad_sym")
+	}
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) { sbForeignLibraryCase(t, name) })
+	}
+}
+
+func sbForeignLibraryCase(t *testing.T, name string) {
 	out := filepath.Join(t.TempDir(), "p")
-	sbWriteRel(t, out, "mylib.kicad_sym", testSymLib)
+	sbWriteRel(t, out, name, testSymLib)
 	if rep, err := runSchBuild(sbGuardSpec(), sbOptions{OutDir: out, NoIntent: true, PlannerBudget: 20000}, nil); err != nil || !rep.OK {
 		t.Fatalf("build: %v %+v", err, rep.Error)
 	}
-	if st := mustSbState(t, out); st.Manifest["mylib.kicad_sym"] == "" || sbContains(st.Files, "mylib.kicad_sym") {
+	if st := mustSbState(t, out); st.Manifest[name] == "" || sbContains(st.Files, name) {
 		t.Fatalf("foreign library must be recorded, not owned: %+v", st)
 	}
 	spec := sbGuardSpec()
@@ -468,10 +483,10 @@ func TestSchBuildRefusesToOverwriteForeignLibrary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rep.Error == nil || rep.Error.Code != "EXTERNAL_EDIT" || strings.Join(rep.External.Overwrites, ",") != "mylib.kicad_sym" {
+	if rep.Error == nil || rep.Error.Code != "EXTERNAL_EDIT" || strings.Join(rep.External.Overwrites, ",") != name {
 		t.Fatalf("overwriting a user library: %+v %+v", rep.Error, rep.External)
 	}
-	if b, _ := os.ReadFile(filepath.Join(out, "mylib.kicad_sym")); string(b) != testSymLib {
+	if b, _ := os.ReadFile(filepath.Join(out, name)); string(b) != testSymLib {
 		t.Fatal("refused build changed the user library")
 	}
 	rep, err = runSchBuild(spec, sbOptions{OutDir: out, NoIntent: true, PlannerBudget: 20000, DiscardExternal: true}, nil)
@@ -479,12 +494,12 @@ func TestSchBuildRefusesToOverwriteForeignLibrary(t *testing.T) {
 		t.Fatalf("override: %v %+v %+v", err, rep.Error, rep.External)
 	}
 	cp := filepath.Join(sbCheckpointDir(out), strconv.Itoa(rep.External.Checkpoint))
-	for _, f := range []string{"mylib.kicad_sym", "p.kicad_sch", "p.kicad_pro", "sym-lib-table"} {
+	for _, f := range []string{name, "p.kicad_sch", "p.kicad_pro", "sym-lib-table"} {
 		if !fileExists(filepath.Join(cp, f)) {
 			t.Errorf("pre-discard checkpoint lacks %s", f)
 		}
 	}
-	if b, _ := os.ReadFile(filepath.Join(cp, "mylib.kicad_sym")); string(b) != testSymLib {
+	if b, _ := os.ReadFile(filepath.Join(cp, name)); string(b) != testSymLib {
 		t.Error("checkpoint does not hold the user library")
 	}
 }
@@ -515,5 +530,103 @@ func TestSchBuildLegacyNoStateDiscardCheckpointsAll(t *testing.T) {
 		if !fileExists(filepath.Join(cp, filepath.FromSlash(f))) {
 			t.Errorf("pre-discard checkpoint lacks %s", f)
 		}
+	}
+}
+
+// Case folding without depending on the host file system.
+func TestSbDiffFoldsCase(t *testing.T) {
+	defer func(v bool) { sbFoldCase = v }(sbFoldCase)
+	sbFoldCase = true
+	snap := &sbSnapshot{Files: map[string]string{"P.kicad_sch": "h1", "MYLIB.kicad_sym": "u"}}
+	b := &sbBasis{Name: "manifest", Hashes: map[string]string{"p.kicad_sch": "h1", "MYLIB.kicad_sym": "u"}, Owned: []string{"p.kicad_sch"}}
+	if x := sbDiff(snap, b, nil); x.any() {
+		t.Fatalf("same files, other case: %+v", x)
+	}
+	if x := sbDiff(snap, b, []string{"p.kicad_sch", "mylib.kicad_sym"}); strings.Join(x.Overwrites, ",") != "MYLIB.kicad_sym" {
+		t.Fatalf("generated mylib over the user's MYLIB: %+v", x)
+	}
+	if m := sbMoved(snap, &sbSnapshot{Files: map[string]string{"p.kicad_sch": "h1", "mylib.kicad_sym": "u"}}); len(m) != 0 {
+		t.Fatalf("respelled snapshot: %v", m)
+	}
+	sbFoldCase = false
+	if x := sbDiff(snap, b, []string{"p.kicad_sch", "mylib.kicad_sym"}); len(x.Overwrites) != 0 || strings.Join(x.Removed, ",") != "p.kicad_sch" || strings.Join(x.Added, ",") != "P.kicad_sch" {
+		t.Fatalf("case-sensitive file system: %+v", x)
+	}
+}
+
+// A checkpoint the comparison cannot fully read refuses: a missing copy of
+// the edited sheet used to make that sheet look unchanged.
+func TestSchEditRefusesPartialCheckpoint(t *testing.T) {
+	out := sbGuardBuild(t)
+	statePath := filepath.Join(sbMetaDir(out), "state.json")
+	var raw map[string]any
+	b, _ := os.ReadFile(statePath)
+	if err := json.Unmarshal(b, &raw); err != nil {
+		t.Fatal(err)
+	}
+	delete(raw, "manifest")
+	if err := writeJSONFile(statePath, raw); err != nil {
+		t.Fatal(err)
+	}
+	edited := sbGuardAppend(t, filepath.Join(out, "p.kicad_sch"))
+	cpSheet := filepath.Join(sbCheckpointDir(out), "1", "p.kicad_sch")
+	if err := os.Remove(cpSheet); err != nil {
+		t.Fatal(err)
+	}
+	for _, discard := range []bool{false, true} {
+		rep, err := runSchEdit(sbOptions{OutDir: out, NoIntent: true, PlannerBudget: 20000, DiscardExternal: discard}, sbGuardOps)
+		if err != nil || rep.Error == nil || rep.Error.Code != "PROJECT_UNREADABLE" {
+			t.Fatalf("discard=%v: missing checkpoint copy: %v %+v", discard, err, rep.Error)
+		}
+		if got, _ := os.ReadFile(filepath.Join(out, "p.kicad_sch")); !bytes.Equal(got, edited) {
+			t.Fatal("refused edit changed the sheet")
+		}
+	}
+	// unreadable (not missing) copy, and an unreadable checkpoint.json
+	_ = os.WriteFile(cpSheet, []byte("x"), 0o644)
+	defer func() { sbReadFile = os.ReadFile }()
+	for _, bad := range []string{cpSheet, filepath.Join(sbCheckpointDir(out), "1", "checkpoint.json")} {
+		sbReadFile = func(p string) ([]byte, error) {
+			if filepath.Clean(p) == filepath.Clean(bad) {
+				return nil, os.ErrPermission
+			}
+			return os.ReadFile(p)
+		}
+		if _, f := sbGuardStart(out, mustSbState(t, out), sbOptions{}, &sbReport{}); f == nil || f.Code != "PROJECT_UNREADABLE" {
+			t.Fatalf("unreadable %s: %+v", bad, f)
+		}
+	}
+	sbReadFile = os.ReadFile
+	_ = os.Remove(filepath.Join(sbCheckpointDir(out), "1", "checkpoint.json"))
+	if _, f := sbGuardStart(out, mustSbState(t, out), sbOptions{}, &sbReport{}); f == nil || f.Code != "PROJECT_UNREADABLE" {
+		t.Fatalf("checkpoint without checkpoint.json: %+v", f)
+	}
+}
+
+// The live re-check is the last step: a save while the discard checkpoint
+// is taken or the staged files are hashed still aborts the commit.
+func TestSchEditSaveDuringCommitPreparation(t *testing.T) {
+	out := sbGuardBuild(t)
+	sheet := filepath.Join(out, "p.kicad_sch")
+	defer func() { sbTestDuringPrepare = nil }()
+	// plain edit (nothing to discard)
+	var edited []byte
+	sbTestDuringPrepare = func(string) { edited = sbGuardAppend(t, sheet) }
+	rep, err := runSchEdit(sbOptions{OutDir: out, NoIntent: true, PlannerBudget: 20000}, sbGuardOps)
+	if err != nil || rep.Error == nil || rep.Error.Code != "CONCURRENT_CHANGE" {
+		t.Fatalf("save during staged hashing: %v %+v", err, rep.Error)
+	}
+	if got, _ := os.ReadFile(sheet); !bytes.Equal(got, edited) {
+		t.Fatal("commit replaced a sheet saved during preparation")
+	}
+	// discard: the checkpoint is taken, then a second save aborts
+	nCP := len(sbTestCheckpoints(t, out))
+	sbTestDuringPrepare = func(string) { edited = sbGuardAppend(t, sheet) }
+	rep, err = runSchEdit(sbOptions{OutDir: out, NoIntent: true, PlannerBudget: 20000, DiscardExternal: true}, sbGuardOps)
+	if err != nil || rep.Error == nil || rep.Error.Code != "CONCURRENT_CHANGE" || rep.External == nil || rep.External.Checkpoint != nCP+1 {
+		t.Fatalf("save during the discard checkpoint: %v %+v %+v", err, rep.Error, rep.External)
+	}
+	if got, _ := os.ReadFile(sheet); !bytes.Equal(got, edited) {
+		t.Fatal("commit replaced a sheet saved during the discard checkpoint")
 	}
 }

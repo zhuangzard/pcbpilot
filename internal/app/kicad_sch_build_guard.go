@@ -9,15 +9,17 @@ package app
 //  1. before generation: snapshot every project file + KiCad lock in --out
 //     (the baseline) and compare it with what pcbpilot last wrote (the
 //     state manifest, else a checkpoint) — fail fast;
-//  2. right before commit: re-snapshot; any difference from the baseline
-//     (a GUI save, a new lock) aborts with nothing replaced; then the
-//     complete write/delete set is checked against the record, and the
-//     manifest of this commit is hashed from the staged bytes, never from
-//     the live files after publication.
+//  2. at commit: the complete write/delete set is checked against the
+//     record, the --discard-external-edits checkpoint (every baseline
+//     project file) is taken and the manifest of this commit is hashed from
+//     the staged bytes, never from the live files after publication; as
+//     the very last step a re-snapshot that differs from the baseline in
+//     any file or lock (a GUI save, KiCad opening the project) aborts with
+//     nothing replaced.
 //
-// --discard-external-edits overwrites conflicts after checkpointing every
-// project file of the baseline. A window of milliseconds between phase 2
-// and the file copies remains (KiCad offers no lock pcbpilot could take).
+// Paths are compared case-insensitively where the file system is (Windows,
+// macOS). A window of milliseconds between the re-snapshot and the file
+// copies remains (KiCad offers no lock pcbpilot could take).
 
 import (
 	"crypto/sha256"
@@ -26,6 +28,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -33,10 +36,11 @@ import (
 
 // test seams: I/O errors (fail closed) and saves at the racy points
 var (
-	sbReadFile         = os.ReadFile
-	sbReadDir          = os.ReadDir
-	sbTestBeforeCommit func(out string) // after generation and gates, before phase 2
-	sbTestAfterPublish func(out string) // after the files are copied into --out
+	sbReadFile          = os.ReadFile
+	sbReadDir           = os.ReadDir
+	sbTestBeforeCommit  func(out string) // after generation and gates, before phase 2
+	sbTestAfterPublish  func(out string) // after the files are copied into --out
+	sbTestDuringPrepare func(out string) // after the discard checkpoint and staged hashing, before the live re-check
 )
 
 // sbExternalEdits is what changed in --out since pcbpilot last wrote it.
@@ -214,6 +218,29 @@ func (s *sbSnapshot) paths() []string {
 	return ps
 }
 
+// sbFoldCase: the file system ignores case (Windows, macOS default), so
+// MYLIB.kicad_sym and a generated mylib.kicad_sym are the same file.
+var sbFoldCase = runtime.GOOS == "windows" || runtime.GOOS == "darwin"
+
+// sbPathKey is a path's identity on this file system; reports keep the
+// original spelling.
+func sbPathKey(p string) string {
+	if sbFoldCase {
+		return strings.ToLower(p)
+	}
+	return p
+}
+
+// sbKeyed re-keys a path → hash map by identity, remembering the spelling.
+func sbKeyed(m map[string]string) (hashes, names map[string]string) {
+	hashes, names = map[string]string{}, map[string]string{}
+	for f, h := range m {
+		k := sbPathKey(f)
+		hashes[k], names[k] = h, f
+	}
+	return hashes, names
+}
+
 // sbBasis is the record of what pcbpilot last wrote.
 type sbBasis struct {
 	Name   string
@@ -224,69 +251,123 @@ type sbBasis struct {
 	NoRecord bool
 }
 
-func sbCheckpointHashes(out string, meta sbCheckpointMeta) map[string]string {
+// sbGuardCheckpoints lists the checkpoints for the comparison; unlike
+// listSbCheckpoints it fails on anything it cannot read.
+func sbGuardCheckpoints(out string) ([]sbCheckpointMeta, error) {
+	ents, err := sbReadDir(sbCheckpointDir(out))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var list []sbCheckpointMeta
+	for _, e := range ents {
+		if !e.IsDir() {
+			continue
+		}
+		p := filepath.Join(sbCheckpointDir(out), e.Name(), "checkpoint.json")
+		b, err := sbReadFile(p)
+		if err != nil {
+			return nil, fmt.Errorf("checkpoint %s: %w", e.Name(), err)
+		}
+		var m sbCheckpointMeta
+		if err := json.Unmarshal(b, &m); err != nil || m.N <= 0 {
+			return nil, fmt.Errorf("checkpoint %s: unreadable %s", e.Name(), p)
+		}
+		list = append(list, m)
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].N < list[j].N })
+	return list, nil
+}
+
+// sbCheckpointHashes hashes checkpoint n's copies; a copy that is missing,
+// unreadable or names an unsafe path fails: a partial checkpoint would make
+// the files it lacks look unchanged.
+func sbCheckpointHashes(out string, meta sbCheckpointMeta) (map[string]string, error) {
 	dir := filepath.Join(sbCheckpointDir(out), strconv.Itoa(meta.N))
 	m := map[string]string{}
 	for _, f := range meta.Files {
-		if p, err := sbSafeJoin(dir, f); err == nil {
-			if b, err := sbReadFile(p); err == nil {
-				m[f] = sbContentHash(f, b)
-			}
+		p, err := sbSafeJoin(dir, f)
+		if err != nil {
+			return nil, fmt.Errorf("checkpoint %d: %w", meta.N, err)
 		}
+		b, err := sbReadFile(p)
+		if err != nil {
+			return nil, fmt.Errorf("checkpoint %d: %w", meta.N, err)
+		}
+		m[f] = sbContentHash(f, b)
 	}
-	return m
+	return m, nil
 }
 
 // sbLoadBasis: the state manifest, else (a project built before manifests)
 // the newest checkpoint the files still match — a restored older
 // checkpoint is not an edit — else the latest checkpoint, else nothing.
-func sbLoadBasis(out string, st *sbState, snap *sbSnapshot) *sbBasis {
+func sbLoadBasis(out string, st *sbState, snap *sbSnapshot) (*sbBasis, error) {
 	if st != nil && st.Manifest != nil {
-		return &sbBasis{Name: "manifest", Hashes: st.Manifest, Owned: st.Files}
+		return &sbBasis{Name: "manifest", Hashes: st.Manifest, Owned: st.Files}, nil
 	}
-	list, _ := listSbCheckpoints(out)
+	list, err := sbGuardCheckpoints(out)
+	if err != nil {
+		return nil, err
+	}
 	var latest *sbBasis
 	for i := len(list) - 1; i >= 0; i-- {
-		b := &sbBasis{Name: "checkpoint " + strconv.Itoa(list[i].N), Hashes: sbCheckpointHashes(out, list[i]), Owned: list[i].Files}
+		h, err := sbCheckpointHashes(out, list[i])
+		if err != nil {
+			return nil, err
+		}
+		b := &sbBasis{Name: "checkpoint " + strconv.Itoa(list[i].N), Hashes: h, Owned: list[i].Files}
 		if latest == nil {
 			latest = b
 		}
 		if !sbDiff(snap, b, nil).any() {
-			return b
+			return b, nil
 		}
 	}
 	if latest != nil {
-		return latest
+		return latest, nil
 	}
 	b := &sbBasis{Name: "none", Hashes: map[string]string{}, NoRecord: st == nil}
 	if st != nil {
 		b.Owned = st.Files
 	}
-	return b
+	return b, nil
 }
 
 // sbDiff compares a snapshot with the record. touch is the complete set this
 // build writes or deletes (nil before generation: the files last owned).
+// Paths are compared by identity (sbPathKey).
 func sbDiff(snap *sbSnapshot, b *sbBasis, touch []string) *sbExternalEdits {
 	x := &sbExternalEdits{Basis: b.Name, Locks: snap.Locks}
+	cur, names := sbKeyed(snap.Files)
+	rec, _ := sbKeyed(b.Hashes)
 	owned := map[string]bool{}
 	for _, f := range b.Owned {
-		owned[f] = true
+		owned[sbPathKey(f)] = true
+	}
+	spell := func(k, f string) string {
+		if n, ok := names[k]; ok {
+			return n
+		}
+		return f
 	}
 	seen := map[string]bool{}
 	check := func(f string) {
-		if seen[f] {
+		k := sbPathKey(f)
+		if seen[k] {
 			return
 		}
-		seen[f] = true
-		cur, has := snap.Files[f]
-		rec, inRec := b.Hashes[f]
+		seen[k] = true
+		c, has := cur[k]
+		r, inRec := rec[k]
 		switch {
-		case has && !owned[f]:
-			x.Overwrites = append(x.Overwrites, f)
-		case has && inRec && cur != rec:
-			x.Changed = append(x.Changed, f)
-		case !has && inRec && owned[f]:
+		case has && !owned[k]:
+			x.Overwrites = append(x.Overwrites, spell(k, f))
+		case has && inRec && c != r:
+			x.Changed = append(x.Changed, spell(k, f))
+		case !has && inRec && owned[k]:
 			x.Removed = append(x.Removed, f)
 		}
 	}
@@ -297,17 +378,17 @@ func sbDiff(snap *sbSnapshot, b *sbBasis, touch []string) *sbExternalEdits {
 		check(f) // rewritten, or deleted when no longer generated
 	}
 	if !b.NoRecord {
-		for _, f := range snap.paths() {
-			if _, ok := b.Hashes[f]; !ok && !seen[f] {
-				x.Added = append(x.Added, f)
+		for k, n := range names {
+			if _, ok := rec[k]; !ok && !seen[k] {
+				x.Added = append(x.Added, n)
 			}
 		}
 		if b.Name == "none" { // a pcbpilot state with nothing to compare with
 			x.Added = append(x.Added, x.Overwrites...)
 			x.Overwrites = nil
-			for f := range snap.Files {
-				if owned[f] && !sbContains(x.Added, f) {
-					x.Added = append(x.Added, f)
+			for k, n := range names {
+				if owned[k] && !sbContains(x.Added, n) {
+					x.Added = append(x.Added, n)
 				}
 			}
 		}
@@ -316,6 +397,25 @@ func sbDiff(snap *sbSnapshot, b *sbBasis, touch []string) *sbExternalEdits {
 		sort.Strings(*l)
 	}
 	return x
+}
+
+// sbMoved lists what differs between two snapshots of the same --out.
+func sbMoved(a, b *sbSnapshot) []string {
+	ah, an := sbKeyed(a.Files)
+	bh, bn := sbKeyed(b.Files)
+	var moved []string
+	for k, h := range bh {
+		if ah[k] != h {
+			moved = append(moved, bn[k])
+		}
+	}
+	for k := range ah {
+		if _, ok := bh[k]; !ok {
+			moved = append(moved, an[k])
+		}
+	}
+	sort.Strings(moved)
+	return moved
 }
 
 // sbGuard carries the baseline from before generation to the commit.
@@ -328,7 +428,7 @@ type sbGuard struct {
 
 func sbUnreadable(out string, err error) *sbFailure {
 	return &sbFailure{Code: "PROJECT_UNREADABLE", Message: "cannot check " + out + " for edits made outside pcbpilot: " + err.Error(),
-		Fix: "nothing was written; fix the file permissions (or close the program holding the file) and re-run"}
+		Fix: "nothing was written; fix the file permissions (or close the program holding the file), or move a damaged checkpoint out of .pcbpilot/checkpoints, and re-run"}
 }
 
 func sbLockedByKicad(out string, locks []string) *sbFailure {
@@ -360,7 +460,11 @@ func sbGuardStart(out string, st *sbState, o sbOptions, rep *sbReport) (*sbGuard
 	if err != nil {
 		return nil, sbUnreadable(out, err)
 	}
-	g := &sbGuard{out: out, o: o, baseline: snap, basis: sbLoadBasis(out, st, snap)}
+	basis, err := sbLoadBasis(out, st, snap)
+	if err != nil {
+		return nil, sbUnreadable(out, err)
+	}
+	g := &sbGuard{out: out, o: o, baseline: snap, basis: basis}
 	x := sbDiff(snap, g.basis, nil)
 	if len(x.Locks) > 0 {
 		if o.DryRun {
@@ -384,34 +488,13 @@ func sbGuardStart(out string, st *sbState, o sbOptions, rep *sbReport) (*sbGuard
 }
 
 // beforeCommit is phase 2. files are the staged outputs (in stage), deletes
-// the files of the last build this one no longer writes. It returns the
-// manifest to record after the commit.
+// the files of the last build this one no longer writes. The slow parts
+// (the discard checkpoint, hashing the staged files) come first; the live
+// re-check of every file and lock is the last step before publication. It
+// returns the manifest to record after the commit.
 func (g *sbGuard) beforeCommit(stage string, files, deletes []string, rep *sbReport) (map[string]string, *sbFailure) {
 	if sbTestBeforeCommit != nil {
 		sbTestBeforeCommit(g.out)
-	}
-	now, err := sbTakeSnapshot(g.out)
-	if err != nil {
-		return nil, sbUnreadable(g.out, err)
-	}
-	if len(now.Locks) > 0 {
-		return nil, sbLockedByKicad(g.out, now.Locks)
-	}
-	var moved []string
-	for f, h := range now.Files {
-		if g.baseline.Files[f] != h {
-			moved = append(moved, f)
-		}
-	}
-	for f := range g.baseline.Files {
-		if _, ok := now.Files[f]; !ok {
-			moved = append(moved, f)
-		}
-	}
-	if len(moved) > 0 {
-		sort.Strings(moved)
-		return nil, &sbFailure{Code: "CONCURRENT_CHANGE", Message: g.out + " changed while sch-build ran: " + strings.Join(moved, ", "),
-			Fix: "nothing was written; if KiCad has the project open, save and close it there, then re-run"}
 	}
 	touch := append(append([]string(nil), files...), deletes...)
 	x := sbDiff(g.baseline, g.basis, touch)
@@ -444,10 +527,33 @@ func (g *sbGuard) beforeCommit(stage string, files, deletes []string, rep *sbRep
 		}
 		man[f] = sbContentHash(f, b)
 	}
+	written := map[string]bool{}
+	for _, f := range touch {
+		written[sbPathKey(f)] = true
+	}
 	for f, h := range g.baseline.Files {
-		if _, ok := man[f]; !ok && !sbContains(deletes, f) {
+		if !written[sbPathKey(f)] {
 			man[f] = h
 		}
+	}
+	if sbTestDuringPrepare != nil {
+		sbTestDuringPrepare(g.out)
+	}
+	// last step before publication: nothing live changed since the baseline
+	now, err := sbTakeSnapshot(g.out)
+	if err != nil {
+		return nil, sbUnreadable(g.out, err)
+	}
+	if len(now.Locks) > 0 {
+		return nil, sbLockedByKicad(g.out, now.Locks)
+	}
+	if moved := sbMoved(g.baseline, now); len(moved) > 0 {
+		msg := g.out + " changed while sch-build ran: " + strings.Join(moved, ", ")
+		if x.Checkpoint > 0 {
+			msg += fmt.Sprintf(" (checkpoint %d was taken first and is kept)", x.Checkpoint)
+		}
+		return nil, &sbFailure{Code: "CONCURRENT_CHANGE", Message: msg,
+			Fix: "nothing was written; if KiCad has the project open, save and close it there, then re-run"}
 	}
 	return man, nil
 }
