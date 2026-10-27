@@ -1146,7 +1146,7 @@ func TestSbPaginateCountsPwrFlagRow(t *testing.T) {
 func TestSbFitTitleCountsWideGlyphs(t *testing.T) {
 	narrow := kicad.Box{MaxY: 50}
 	ascii, cjk := sbFitTitle(narrow, "abcdefghijkl"), sbFitTitle(narrow, "电源、去耦。滤波「电容」电源")
-	if got, want := cjk.MaxX, ascii.MaxX+1.2*12; ascii.MaxX <= 0 || got < want-1e-9 {
+	if got, want := cjk.MaxX, ascii.MaxX+1.2*(2*14-12); ascii.MaxX <= 0 || got < want-1e-9 {
 		t.Fatalf("CJK title box %.2f mm wide, want at least %.2f", got, want)
 	}
 }
