@@ -38,9 +38,10 @@ func NewUUID() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
-// Q quotes s as a KiCad string.
+// Q quotes s as a KiCad string, escaping what KiCad's own formatter escapes
+// (backslash, quote, LF, CR); tab and UTF-8 stay raw.
 func Q(s string) string {
-	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`)
+	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\r", `\r`)
 	return `"` + r.Replace(s) + `"`
 }
 
@@ -266,7 +267,7 @@ func RenameLibSymbol(sym, id string) (string, error) {
 	if m == nil {
 		return "", fmt.Errorf("library symbol text must start with (symbol \"Name\"")
 	}
-	oldName, _ := strconv.Unquote(`"` + m[1] + `"`)
+	oldName := unescapeKiCad(m[1])
 	bare := id
 	if i := strings.LastIndex(id, ":"); i >= 0 {
 		bare = id[i+1:]
@@ -725,14 +726,16 @@ func (e *SchEditor) SetField(ref, name, value string) error {
 	return e.setFieldOn(inst, name, value)
 }
 
+// propHeadRe matches the `(property "Name" "Value"` head of a property.
+var propHeadRe = regexp.MustCompile(`^\(property\s+"(?:[^"\\]|\\.)*"\s+"(?:[^"\\]|\\.)*"`)
+
 func (e *SchEditor) setFieldOn(inst *sexp, name, value string) error {
 	for _, c := range inst.list {
 		if c.head() == "property" && len(c.list) > 2 && c.list[1].atom == name {
 			v := c.list[2]
 			// the value atom has no offsets: re-emit the property head.
 			head := e.src[c.beg:c.end]
-			re := regexp.MustCompile(`^\(property\s+"(?:[^"\\]|\\.)*"\s+"(?:[^"\\]|\\.)*"`)
-			loc := re.FindStringIndex(head)
+			loc := propHeadRe.FindStringIndex(head)
 			if loc == nil {
 				return fmt.Errorf("cannot rewrite property %s", name)
 			}
@@ -790,14 +793,46 @@ func (e *SchEditor) MoveSymbol(ref string, to Pt, rot float64) error {
 	return fmt.Errorf("no symbol %s on this sheet (pending symbols cannot be moved)", ref)
 }
 
-func (e *SchEditor) apply() string {
-	edits := append([]textEdit(nil), e.repl...)
-	sort.SliceStable(edits, func(i, j int) bool { return edits[i].beg > edits[j].beg })
-	s := e.src
-	for _, ed := range edits {
-		s = s[:ed.beg] + ed.text + s[ed.end:]
+func (e *SchEditor) apply() string { return applyEdits(e.src, e.repl) }
+
+// applyEdits splices edits into src as if applied from the last offset to
+// the first (edits at one offset: the later one ends up first). Disjoint
+// edits are copied in one pass; overlapping ones (never produced on
+// purpose) keep the old one-splice-at-a-time result.
+func applyEdits(src string, edits []textEdit) string {
+	idx := make([]int, len(edits))
+	for i := range idx {
+		idx[i] = i
 	}
-	return s
+	sort.SliceStable(idx, func(a, b int) bool {
+		ea, eb := edits[idx[a]], edits[idx[b]]
+		if ea.beg != eb.beg {
+			return ea.beg < eb.beg
+		}
+		return idx[a] > idx[b]
+	})
+	var b strings.Builder
+	cur := 0
+	for _, i := range idx {
+		ed := edits[i]
+		if ed.beg < cur || ed.end < ed.beg {
+			return applyEditsSlow(src, edits)
+		}
+		b.WriteString(src[cur:ed.beg])
+		b.WriteString(ed.text)
+		cur = ed.end
+	}
+	b.WriteString(src[cur:])
+	return b.String()
+}
+
+func applyEditsSlow(src string, edits []textEdit) string {
+	edits = append([]textEdit(nil), edits...)
+	sort.SliceStable(edits, func(i, j int) bool { return edits[i].beg > edits[j].beg })
+	for _, ed := range edits {
+		src = src[:ed.beg] + ed.text + src[ed.end:]
+	}
+	return src
 }
 
 // Render returns the edited text; it re-parses before returning.
@@ -820,13 +855,15 @@ func (e *SchEditor) Render() (string, error) {
 		}
 		edits = append(edits, textEdit{pos, pos, strings.Join(e.items, "\n\t") + "\n\t"})
 	}
-	sort.SliceStable(edits, func(i, j int) bool { return edits[i].beg > edits[j].beg })
-	s := e.src
-	for _, ed := range edits {
-		s = s[:ed.beg] + ed.text + s[ed.end:]
-	}
-	if _, err := parseSx(s); err != nil {
+	s := applyEdits(e.src, edits)
+	r, err := parseSx(s)
+	if err != nil {
 		return "", fmt.Errorf("edited sheet does not re-parse: %w", err)
+	}
+	// Edits sit inside the root list, so whatever followed it is unchanged;
+	// a root that now ends elsewhere means an edit was unbalanced.
+	if want := len(s) - (len(e.src) - e.root.end); r.end != want {
+		return "", fmt.Errorf("edited sheet does not re-parse: the top-level list ends at byte %d instead of %d (unbalanced edit)", r.end, want)
 	}
 	return s, nil
 }
