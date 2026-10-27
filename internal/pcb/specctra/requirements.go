@@ -105,8 +105,12 @@ func ApplyNetRequirements(dsn string, reqs map[string]NetRequirement) (string, R
 		for _, s := range notes {
 			rep.Raised = append(rep.Raised, strings.Trim(name, `"'`)+": "+s)
 		}
+		w, err := writeSexpr(n)
+		if err != nil {
+			return "", rep, err
+		}
 		out.WriteString(net[last:sp[0]])
-		out.WriteString(writeSexpr(n))
+		out.WriteString(w)
 		last = sp[1]
 	}
 	out.WriteString(net[last:])
@@ -127,7 +131,11 @@ func ApplyNetRequirements(dsn string, reqs map[string]NetRequirement) (string, R
 			cls := fmt.Sprintf("pcbpilot_req_%d", i+1)
 			n := &node{isList: true, List: []*node{{Atom: "class"}, {Atom: cls}, {Atom: name, Quoted: true}}}
 			raiseClass(n, r, inner)
-			add.WriteString("    " + writeSexpr(n) + "\n")
+			w, err := writeSexpr(n)
+			if err != nil {
+				return "", rep, fmt.Errorf("net %q: %w", name, err)
+			}
+			add.WriteString("    " + w + "\n")
 			if forbidsNeckdown(r, rep.MinTraceMil) {
 				rep.NoNeckdown = append(rep.NoNeckdown, cls)
 			}
@@ -395,18 +403,32 @@ func childSpans(text, name string) [][2]int {
 // writeSexpr serialises a node on one line; quoted atoms keep their quotes.
 // DSN strings have no escapes, so the text goes between the quotes as read
 // (Go quoting would turn a backslash into two).
-func writeSexpr(n *node) string {
+//
+// A quoted atom containing '"', or a bare atom that is empty or contains
+// whitespace or a parenthesis, has no DSN spelling: that is an error rather
+// than a file the router would split differently.
+func writeSexpr(n *node) (string, error) {
 	if !n.isList {
 		if n.Quoted {
-			return `"` + n.Atom + `"`
+			if strings.Contains(n.Atom, `"`) {
+				return "", fmt.Errorf(`DSN string %q contains '"', which DSN cannot quote`, n.Atom)
+			}
+			return `"` + n.Atom + `"`, nil
 		}
-		return n.Atom
+		if n.Atom == "" || strings.ContainsAny(n.Atom, " \t\r\n()") {
+			return "", fmt.Errorf("DSN atom %q must be non-empty without whitespace or parentheses", n.Atom)
+		}
+		return n.Atom, nil
 	}
 	parts := make([]string, len(n.List))
 	for i, c := range n.List {
-		parts[i] = writeSexpr(c)
+		w, err := writeSexpr(c)
+		if err != nil {
+			return "", err
+		}
+		parts[i] = w
 	}
-	return "(" + strings.Join(parts, " ") + ")"
+	return "(" + strings.Join(parts, " ") + ")", nil
 }
 
 // ClearanceMarginMil is added to every clearance handed to the router:

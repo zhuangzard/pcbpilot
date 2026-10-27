@@ -55,12 +55,15 @@ func FuzzParseSexpr(f *testing.F) {
 		if !n.isList {
 			return // writeSexpr round-trips lists; a bare root atom is not a DSN
 		}
-		out := writeSexpr(n)
+		out, err := writeSexpr(n)
+		if err != nil {
+			t.Fatalf("a parsed tree must be writable: %v", err)
+		}
 		m, err := parseSexpr(out)
 		if err != nil {
 			t.Fatalf("re-parse of %q: %v", out, err)
 		}
-		if again := writeSexpr(m); again != out {
+		if again, _ := writeSexpr(m); again != out {
 			t.Fatalf("round trip changed:\n%s\n%s", out, again)
 		}
 	})
@@ -73,8 +76,40 @@ func TestWriteSexprKeepsStringBytes(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := writeSexpr(n); got != in {
-			t.Errorf("got %s, want %s", got, in)
+		if got, err := writeSexpr(n); err != nil || got != in {
+			t.Errorf("got %s (%v), want %s", got, err, in)
 		}
+	}
+}
+
+// Constructed nodes DSN cannot spell are refused instead of written as a
+// file the router would split differently.
+func TestWriteSexprRejectsUnrepresentable(t *testing.T) {
+	bad := []*node{
+		{isList: true, List: []*node{{Atom: "class"}, {Atom: `a"b`, Quoted: true}}},
+		{isList: true, List: []*node{{Atom: "net"}, {Atom: "a b"}}},
+		{isList: true, List: []*node{{Atom: "net"}, {Atom: "x)"}}},
+		{isList: true, List: []*node{{Atom: ""}}},
+	}
+	for _, n := range bad {
+		if got, err := writeSexpr(n); err == nil {
+			t.Errorf("wrote %s, want an error", got)
+		}
+	}
+	ok := &node{isList: true, List: []*node{{Atom: "class"}, {Atom: "c1"}, {Atom: `A\B (x)`, Quoted: true}, {isList: true}}}
+	if got, err := writeSexpr(ok); err != nil || got != `(class c1 "A\B (x)" ())` {
+		t.Errorf("got %s, %v", got, err)
+	}
+}
+
+// A requirement on a net whose name DSN cannot quote fails the rewrite.
+func TestApplyNetRequirementsRejectsQuoteInName(t *testing.T) {
+	b, err := os.ReadFile("testdata/easyeda-export.dsn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = ApplyNetRequirements(string(b), map[string]NetRequirement{`BAD"NET`: {OuterMil: 10}})
+	if err == nil || !strings.Contains(err.Error(), "cannot quote") {
+		t.Errorf("err = %v", err)
 	}
 }

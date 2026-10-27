@@ -1,6 +1,7 @@
 package kicad
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -42,6 +43,44 @@ func kicadDemosDir() string {
 	return ""
 }
 
+// findDemoFiles lists the files under dir with one of exts; a traversal
+// error (unreadable directory, dir missing) is returned, not dropped.
+func findDemoFiles(dir string, exts ...string) ([]string, error) {
+	var out []string
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			for _, e := range exts {
+				if strings.HasSuffix(p, e) {
+					out = append(out, p)
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("reading KiCad demos %s: %w", dir, err)
+	}
+	return out, nil
+}
+
+// liveDemoProjects is the opted-in (PCBPILOT_KICAD_LIVE=1) lookup: a
+// traversal error or a demo set without any project is an error.
+func liveDemoProjects(dir string) ([]string, error) {
+	pros, err := findDemoFiles(dir, ".kicad_pro")
+	if err != nil {
+		return nil, err
+	}
+	if len(pros) == 0 {
+		return nil, fmt.Errorf("no .kicad_pro under KiCad demos %s", dir)
+	}
+	return pros, nil
+}
+
+// demoFiles is the lookup for the ordinary corpus test: it skips with
+// -short, without demos or when none match, and fails on a traversal error.
 func demoFiles(t *testing.T, exts ...string) (string, []string) {
 	t.Helper()
 	if testing.Short() {
@@ -51,21 +90,29 @@ func demoFiles(t *testing.T, exts ...string) (string, []string) {
 	if dir == "" {
 		t.Skipf("KiCad demos not found (install KiCad 10 or set %s)", EnvKiCadDemos)
 	}
-	var out []string
-	_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
-		if err == nil && !d.IsDir() {
-			for _, e := range exts {
-				if strings.HasSuffix(p, e) {
-					out = append(out, p)
-				}
-			}
-		}
-		return nil
-	})
+	out, err := findDemoFiles(dir, exts...)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(out) == 0 {
 		t.Skipf("no %v files under %s", exts, dir)
 	}
 	return dir, out
+}
+
+// The live netlist test must fail, not skip, on an existing but empty demo
+// directory and on one it cannot read.
+func TestLiveDemoProjectsEmptyOrMissing(t *testing.T) {
+	empty := t.TempDir()
+	if files, err := findDemoFiles(empty, ".kicad_pro"); err != nil || len(files) != 0 {
+		t.Errorf("empty dir: %v %v", files, err)
+	}
+	if _, err := liveDemoProjects(empty); err == nil || !strings.Contains(err.Error(), "no .kicad_pro") {
+		t.Errorf("empty dir: err = %v", err)
+	}
+	if _, err := liveDemoProjects(filepath.Join(empty, "missing")); err == nil || !strings.Contains(err.Error(), "reading KiCad demos") {
+		t.Errorf("missing dir: err = %v", err)
+	}
 }
 
 // identityEdits sets every field of every placed symbol to its current
@@ -216,12 +263,17 @@ func TestKiCadDemoNetlistUnchanged(t *testing.T) {
 	if os.Getenv("PCBPILOT_KICAD_LIVE") != "1" {
 		t.Skip("runs kicad-cli twice per demo project (~15 min); set PCBPILOT_KICAD_LIVE=1")
 	}
-	// Opted in: a missing KiCad, demo set or kicad-cli failure on an
-	// unedited demo is an environment fault and fails the test.
-	if kicadDemosDir() == "" {
+	// Opted in: a missing KiCad, an unreadable or project-less demo set, or
+	// a kicad-cli failure on an unedited demo is an environment fault and
+	// fails the test.
+	dir := kicadDemosDir()
+	if dir == "" {
 		t.Fatalf("PCBPILOT_KICAD_LIVE=1 but KiCad demos not found (set %s)", EnvKiCadDemos)
 	}
-	dir, pros := demoFiles(t, ".kicad_pro")
+	pros, err := liveDemoProjects(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	cli, err := KicadCLI()
 	if err != nil {
 		t.Fatal(err)
