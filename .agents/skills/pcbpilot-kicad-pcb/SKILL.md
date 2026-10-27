@@ -4,7 +4,7 @@ description: "用 pcbpilot 离线完成 KiCad 板子的布局、布线与签核�
 license: MIT
 metadata:
   author: "zhuangzard (pcbpilot); original easyeda-agent by zhoushoujianwork"
-  version: "0.10.1"
+  version: "0.10.2"
   homepage: "https://github.com/zhuangzard/pcbpilot"
 ---
 

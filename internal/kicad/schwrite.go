@@ -239,11 +239,6 @@ func samePath(a, b string) bool {
 	return err1 == nil && err2 == nil && os.SameFile(sa, sb)
 }
 
-func fileExists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
-}
-
 // resolveSheetFile resolves a sheet symbol's Sheetfile: relative to the
 // sheet holding it, else to the project (root sheet) directory.
 func resolveSheetFile(parent, root, sf string) string {
