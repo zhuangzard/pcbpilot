@@ -103,7 +103,6 @@ type FPLibTables struct {
 	// not (kicad_common.json, the project and global tables, nested
 	// tables): what a caller snapshots to know the resolution still holds.
 	Files []string `json:"files,omitempty"`
-
 }
 
 // FPRef is a resolved footprint.
