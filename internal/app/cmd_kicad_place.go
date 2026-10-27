@@ -71,7 +71,9 @@ of --place-seeds seeds) and writes the poses back with pcbnew:
 
 --mech constrains the model only (fixed / edge parts, keep-outs, zones,
 holes); the board outline and holes in the written file stay KiCad's.
-Locked footprints and mounting holes stay put. Moving parts invalidates the
+Locked footprints and mounting holes stay put, and so do footprints whose
+designator is shared (two H1) or a placeholder (REF**, G***, R?): they are
+fixed obstacles, listed in the report notes. Moving parts invalidates the
 copper: tracks and vias are removed and zones unfilled in the output.`,
 		Example: `  pcbpilot kicad place --pcb board.kicad_pcb --out placed/board.kicad_pcb
   pcbpilot kicad place --pcb board.kicad_pcb --out placed/board.kicad_pcb --mech mech.json --intent intent.json --place-seeds 8`,
@@ -132,6 +134,10 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 		return nil, err
 	}
 	rep := &kicadPlaceReport{PCB: o.pcb, Out: o.out, Fixed: fixed, path: o.report}
+	for _, n := range kicadKeptNotes(fixed) {
+		rep.Notes = append(rep.Notes, n)
+		fmt.Fprintf(stderr, "placement: %s\n", n)
+	}
 	var mc *pcbauto.Mechanics
 	if o.mech != "" {
 		mraw, err := os.ReadFile(o.mech)
@@ -334,7 +340,16 @@ var reMountRef = regexp.MustCompile(`^M?H\d+$`)
 // courtyards, and the dump's silk-shrunk bbox would let them overlap — and
 // mounting holes are fixed (KiCad models them as footprints). Returns the
 // fixed designators.
+//
+// A designator on more than one footprint (two H1, several REF** logos)
+// or a placeholder designator (REF**, G***, R?) cannot be posed by name:
+// such parts enter the model as "<designator>@kiid:<primitiveId>", fixed,
+// so they stay where they are, keep their room, and get no pose.
 func kicadBoard(raw []byte) (*pcbauto.Board, []string, error) {
+	raw, err := kicadKeepShared(raw)
+	if err != nil {
+		return nil, nil, err
+	}
 	b, err := pcbauto.FromSnapshot(raw)
 	if err != nil {
 		return nil, nil, err
@@ -364,6 +379,97 @@ func kicadBoard(raw []byte) (*pcbauto.Board, []string, error) {
 	return b, fixed, nil
 }
 
+// kicadKeptSep joins a shared or placeholder designator and the
+// footprint's snapshot id into its unique, fixed model ref.
+const kicadKeptSep = "@kiid:"
+
+// reKicadPlaceholder matches bridge.py's PLACEHOLDER_REF: an unannotated
+// footprint (REF**, R?) or a logo (G***).
+var reKicadPlaceholder = regexp.MustCompile(`^[A-Za-z_]*[*?]+$`)
+
+// kicadKeepShared rewrites the snapshot for the placer: every component
+// whose designator is shared or a placeholder gets the unique designator
+// "<designator>@kiid:<primitiveId>" and is locked; footprint holes follow
+// their owner by componentId.
+func kicadKeepShared(raw []byte) ([]byte, error) {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &top); err != nil {
+		return nil, fmt.Errorf("snapshot: %w", err)
+	}
+	var comps []map[string]any
+	if c, ok := top["components"]; ok {
+		if err := json.Unmarshal(c, &comps); err != nil {
+			return nil, fmt.Errorf("snapshot components: %w", err)
+		}
+	}
+	count := map[string]int{}
+	for _, c := range comps {
+		ref, _ := c["designator"].(string)
+		count[ref]++
+	}
+	renamed := map[string]string{} // primitiveId → model ref
+	for _, c := range comps {
+		ref, _ := c["designator"].(string)
+		id, _ := c["primitiveId"].(string)
+		if ref == "" || (count[ref] < 2 && !reKicadPlaceholder.MatchString(ref)) {
+			continue
+		}
+		if id == "" {
+			return nil, fmt.Errorf("snapshot: designator %s is shared or a placeholder and the footprint has no primitiveId", ref)
+		}
+		c["designator"], c["locked"] = ref+kicadKeptSep+id, true
+		renamed[id] = c["designator"].(string)
+	}
+	if len(renamed) == 0 {
+		return raw, nil
+	}
+	var err error
+	var holes []map[string]any
+	if h, ok := top["footprintHoles"]; ok {
+		if err := json.Unmarshal(h, &holes); err != nil {
+			return nil, fmt.Errorf("snapshot footprintHoles: %w", err)
+		}
+		for _, h := range holes {
+			if id, _ := h["componentId"].(string); renamed[id] != "" {
+				h["owner"] = renamed[id]
+			}
+		}
+		if top["footprintHoles"], err = json.Marshal(holes); err != nil {
+			return nil, err
+		}
+	}
+	if top["components"], err = json.Marshal(comps); err != nil {
+		return nil, err
+	}
+	return json.Marshal(top)
+}
+
+// kicadKeptNotes explains the parts kicadKeepShared fixed, one note per
+// designator.
+func kicadKeptNotes(fixed []string) []string {
+	ids := map[string][]string{}
+	var order []string
+	for _, f := range fixed {
+		ref, id, ok := strings.Cut(f, kicadKeptSep)
+		if !ok {
+			continue
+		}
+		if ids[ref] == nil {
+			order = append(order, ref)
+		}
+		ids[ref] = append(ids[ref], id)
+	}
+	var notes []string
+	for _, ref := range order {
+		why := fmt.Sprintf("designator %q is on %d footprints", ref, len(ids[ref]))
+		if reKicadPlaceholder.MatchString(ref) {
+			why = fmt.Sprintf("placeholder designator %q (%d footprint(s))", ref, len(ids[ref]))
+		}
+		notes = append(notes, fmt.Sprintf("%s: kept in place, not placed (ids %s); annotate unique designators to place them", why, strings.Join(ids[ref], ", ")))
+	}
+	return notes
+}
+
 // isMountingHole: a MountingHole library footprint, or an H<n>/MH<n> part
 // with no connected pad.
 func isMountingHole(c kicadSnapComp) bool {
@@ -388,6 +494,9 @@ func isMountingHole(c kicadSnapComp) bool {
 func posesFromBoard(b *pcbauto.Board) map[string]kicad.Pose {
 	out := make(map[string]kicad.Pose, len(b.Parts))
 	for _, p := range b.Parts {
+		if strings.Contains(p.Ref, kicadKeptSep) {
+			continue // shared / placeholder designator: kept in place (kicadBoard)
+		}
 		side := "top"
 		if p.Side == pcbauto.LayerBottom {
 			side = "bottom"

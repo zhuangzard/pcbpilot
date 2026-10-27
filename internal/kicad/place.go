@@ -26,7 +26,9 @@ type Pose struct {
 	Side        string  `json:"side"`
 }
 
-// PlaceResult is place.py's summary.
+// PlaceResult is place.py's summary. Missing stays for older readers: a
+// key that names no footprint now rejects the run (*PlaceError), so a
+// written board always has it empty.
 type PlaceResult struct {
 	Moved         int      `json:"moved"`
 	Flipped       int      `json:"flipped"`
@@ -35,9 +37,26 @@ type PlaceResult struct {
 	Locked        []string `json:"locked,omitempty"`
 }
 
-// Place writes outPath: pcbPath with every designator in poses moved (and
-// flipped on a side change). Locked footprints stay; tracks and vias are
-// removed and copper zones unfilled (the placement invalidates them).
+// PlaceError is a rejected placement: outPath was not written. Missing
+// keys name no footprint; Ambiguous maps a designator shared by several
+// footprints to their uuids (pose one of them as UUIDPoseKey(uuid)).
+type PlaceError struct {
+	Msg       string              `json:"error"`
+	Missing   []string            `json:"missing,omitempty"`
+	Ambiguous map[string][]string `json:"ambiguous,omitempty"`
+}
+
+func (e *PlaceError) Error() string { return "kicad place: " + e.Msg }
+
+// UUIDPoseKey is the poses key that addresses one footprint by its uuid
+// (for a designator on more than one footprint).
+func UUIDPoseKey(uuid string) string { return "uuid:" + uuid }
+
+// Place writes outPath: pcbPath with every footprint in poses (keyed by
+// designator or UUIDPoseKey) moved, and flipped on a side change. Locked
+// footprints stay; tracks and vias are removed and copper zones unfilled
+// (the placement invalidates them). A key naming no footprint or a shared
+// designator rejects the whole run (*PlaceError) and writes nothing.
 func Place(pcbPath string, poses map[string]Pose, outPath string) (*PlaceResult, error) {
 	dir, err := os.MkdirTemp("", "pcbpilot-kicad-place")
 	if err != nil {
@@ -49,17 +68,27 @@ func Place(pcbPath string, poses map[string]Pose, outPath string) (*PlaceResult,
 	if err := os.WriteFile(pf, blob, 0o644); err != nil {
 		return nil, err
 	}
-	out, err := runPlacePython(placePy, "place.py", "place", pcbPath, pf, outPath)
-	if err != nil {
-		return nil, err
-	}
-	var r PlaceResult
+	out, runErr := runPlacePython(placePy, "place.py", "place", pcbPath, pf, outPath)
 	line := ""
 	for _, l := range strings.Split(string(out), "\n") {
 		if rest, ok := strings.CutPrefix(l, "PCBPILOT_RESULT "); ok {
-			line = rest
+			line = strings.TrimSpace(rest)
 		}
 	}
+	var head struct {
+		OK *bool `json:"ok"`
+	}
+	if line != "" && json.Unmarshal([]byte(line), &head) == nil && head.OK != nil && !*head.OK {
+		var pe PlaceError
+		if err := json.Unmarshal([]byte(line), &pe); err != nil {
+			return nil, fmt.Errorf("place.py output: %w", err)
+		}
+		return nil, &pe
+	}
+	if runErr != nil {
+		return nil, runErr
+	}
+	var r PlaceResult
 	if err := json.Unmarshal([]byte(line), &r); err != nil {
 		return nil, fmt.Errorf("place.py output: %w", err)
 	}
@@ -96,7 +125,8 @@ func compareVersionDirs(a, b string) int {
 	return len(va) - len(vb)
 }
 
-// runPlacePython runs an embedded script with KiCad's python and returns stdout.
+// runPlacePython runs an embedded script with KiCad's python and returns
+// stdout, also on failure (a rejecting script explains itself there).
 // pcbnew's wx asserts on stderr are noise unless the script fails.
 func runPlacePython(script []byte, name string, args ...string) ([]byte, error) {
 	dir, err := os.MkdirTemp("", "pcbpilot-kicad")
@@ -112,7 +142,7 @@ func runPlacePython(script []byte, name string, args ...string) ([]byte, error) 
 	cmd := exec.Command(placePythonBin(), append([]string{path}, args...)...)
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+		return stdout.Bytes(), fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.Bytes(), nil
 }

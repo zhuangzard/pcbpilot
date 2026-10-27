@@ -459,6 +459,9 @@ func (r *kicadRun) run() error {
 	if len(ncRes.MissingNets) > 0 {
 		fmt.Fprintf(r.stderr, "warning: %d intent net(s) not on the board (ignored): %s\n", len(ncRes.MissingNets), strings.Join(ncRes.MissingNets, ", "))
 	}
+	if len(ncRes.MissingDomainNets) > 0 {
+		fmt.Fprintf(r.stderr, "warning: %d insulation/edge domain net(s) not on the board (no rule covers them): %s\n", len(ncRes.MissingDomainNets), strings.Join(ncRes.MissingDomainNets, ", "))
+	}
 	for _, n := range ncRes.MissingNets {
 		delete(reqs, n)
 	}
@@ -1516,13 +1519,27 @@ func kicadEscapeEnv(s *boardSnapshot, raw []byte, reqs map[string]specctra.NetRe
 		up := func(mil float64) float64 { return math.Ceil(mil*25.4-1e-6) / 25.4 }
 		env.viaDia, env.viaDrill = up(s.Rules.ViaDiameterMil), up(s.Rules.ViaDrillMil)
 	}
+	// A designator on several footprints (two H1) groups the planner's
+	// parts by "<designator>@kiid:<primitiveId>": one part's pads and
+	// courtyard never merge with another's.
+	shared := map[string]int{}
+	for _, c := range s.Components {
+		shared[c.Designator]++
+	}
+	partKey := func(ref, id string) string {
+		if shared[ref] > 1 && id != "" {
+			return ref + kicadKeptSep + id
+		}
+		return ref
+	}
 	for _, c := range s.Components {
 		for _, p := range c.Pads {
-			env.pads = append(env.pads, pcbPadP{ID: p.ID, Designator: c.Designator, Number: p.Number, Net: p.Net, Layer: p.Layer, X: p.X, Y: p.Y, W: p.W, H: p.H})
+			env.pads = append(env.pads, pcbPadP{ID: p.ID, Designator: partKey(c.Designator, c.ID), Number: p.Number, Net: p.Net, Layer: p.Layer, X: p.X, Y: p.Y, W: p.W, H: p.H})
 		}
 	}
 	var extra struct {
 		Components []struct {
+			ID         string      `json:"primitiveId"`
 			Designator string      `json:"designator"`
 			Courtyard  *layoutBBox `json:"courtyard"`
 		} `json:"components"`
@@ -1535,7 +1552,7 @@ func kicadEscapeEnv(s *boardSnapshot, raw []byte, reqs map[string]specctra.NetRe
 	_ = json.Unmarshal(raw, &extra)
 	for _, c := range extra.Components {
 		if c.Courtyard != nil {
-			env.court[c.Designator] = *c.Courtyard
+			env.court[partKey(c.Designator, c.ID)] = *c.Courtyard
 		}
 	}
 	clrOf := map[string]float64{}

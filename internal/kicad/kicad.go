@@ -273,14 +273,17 @@ type NetClass struct {
 
 // NetclassResult is the bridge's netclasses result.
 type NetclassResult struct {
-	Out         string              `json:"out"`
-	Classes     []NetClass          `json:"classes"`
-	MissingNets []string            `json:"missingNets"`
-	Kept        []string            `json:"kept"`
-	Mismatched  []string            `json:"mismatched"`
-	Domains     map[string][]string `json:"domains,omitempty"`
-	DRU         string              `json:"dru"`
-	DRURules    int                 `json:"druRules"`
+	Out         string     `json:"out"`
+	Classes     []NetClass `json:"classes"`
+	MissingNets []string   `json:"missingNets"`
+	// MissingDomainNets are insulation / edge domain nets not on the board
+	// ("<domain>: <net>"): their rules cannot cover them.
+	MissingDomainNets []string            `json:"missingDomainNets,omitempty"`
+	Kept              []string            `json:"kept"`
+	Mismatched        []string            `json:"mismatched"`
+	Domains           map[string][]string `json:"domains,omitempty"`
+	DRU               string              `json:"dru"`
+	DRURules          int                 `json:"druRules"`
 }
 
 // Netclasses writes reqs as netclasses (one per distinct requirement) into

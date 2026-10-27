@@ -36,6 +36,17 @@ pcbpilot ──▶ KiCad 自带 Python + pcbnew（internal/kicad/bridge.py，go:
 - pcbnew 的 `SaveBoard` **不覆盖**已存在的 `.kicad_pro`（10.0.6 实测），bridge 写新板前先删目标的 `.kicad_pro/.kicad_prl`；
   swig 不暴露 netclass pattern 列表，用户 pattern 从 `.kicad_pro` 读回保留。
 
+- **bridge 写操作全有或全无**：`edit`（加线/过孔、改线宽、丝印、`padZoneNone`）、`pours` 先校验全部网名、
+  层号、对象 id 与位号；任一网不在板上（不会再静默落到 0 号无网）、id 不存在或位号对应多个封装，整批拒绝、
+  **不保存**，错误列出每一项（大小写不同的网名给出 `did you mean`）。`padZoneNone` 可用 `id`（快照
+  primitiveId）指定封装。`netclasses` 的意图网不在板上仍是忽略并告警（`missingNets`），绝缘/板边域里缺的网
+  另列 `missingDomainNets` 并告警。
+- **位号重复 / 占位位号**（两个 `H1`、多个 `REF**`/`G***` logo、未标注的 `R?`）：快照里各自独立成条（各有
+  primitiveId 与 uuid，标 `duplicateDesignator` / `placeholder`），顶层 `duplicateDesignators` 列出位号与全部 id
+  并在 `partial` 里说明（按位号索引的读者会混淆它们），占位位号另列 `placeholderDesignators`（不算降级），不再互相覆盖。`kicad place` 把这些封装作为固定障碍原地保留、不出位姿，报告 `notes` 逐个
+  列出；place.py 收到重复位号或不存在的键时整批拒绝、不写板，单个封装用 `uuid:<uuid>` 键指定。要让它们参与
+  布局，先在原理图/PCB 里重新标注唯一位号。
+
 ## 快照（`kicad snapshot board.kicad_pcb [--out board.json]`）
 
 形状与 `pcb dump --include-copper` 一致（Go：`kicad.Snapshot(pcbPath) ([]byte, error)`），`boardSnapshot`、
@@ -45,7 +56,7 @@ pcbpilot ──▶ KiCad 自带 Python + pcbnew（internal/kicad/bridge.py，go:
 |---|---|
 | 单位/坐标 | mil，**y 向上**（y = −y_KiCad）；旋转仍是度、逆时针 |
 | 铜层号 | pcbpilot 的 EasyEDA 编号：F.Cu=1、B.Cu=2、InN.Cu=14+N（In1=15）、通孔焊盘=12 |
-| 器件 | primitiveId（封装 uuid；**板上 uuid 重复时改用 `ref:<位号>`**——转换来的 Gas V5 A 203 个封装只有 39 个不同 uuid）/ designator / value / footprint / `lcsc`（字段 LCSC、LCSC Part、LCSC Part #、JLCPCB Part #）/ layer / x,y,rotation / bbox / pads |
+| 器件 | primitiveId（封装 uuid；**板上 uuid 重复时改用 `ref:<位号>`**，位号也重复时 `fp:<uuid>:<序号>`——转换来的板曾见 203 个封装只有 39 个不同 uuid）/ uuid / designator / value / footprint / `lcsc`（字段 LCSC、LCSC Part、LCSC Part #、JLCPCB Part #）/ layer / x,y,rotation / bbox / pads |
 | 焊盘 | padNumber / net / layer / x,y / width,height（轴对齐外包）/ rotation / shape `[RECT\|ELLIPSE\|OVAL\|POLYGON, w, h]` / 通孔 holeDiameter |
 | NPTH | 进 `footprintHoles`（圆孔 dia；槽孔为包络多边形） |
 | 板框 | Edge.Cuts 合成多边形取面积最大者；内部挖空写成 layer 12 的 `copper.fills` |
