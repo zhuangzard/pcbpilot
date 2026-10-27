@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -231,14 +232,93 @@ func TestSyncNetlistBadInput(t *testing.T) {
 		{"(export (components", NetlistKicadSexpr},
 		{"(fp_lib_table)", NetlistKicadSexpr},
 		{"(export)", "orcadpcb2"},
+		// Required sections missing.
+		{"<export/>", NetlistKicadXML},
+		{"<export><components/></export>", NetlistKicadXML},
+		{"<export><nets/></export>", NetlistKicadXML},
+		{"(export)", NetlistKicadSexpr},
+		{`(export (version "E") (components (comp (ref "R1"))))`, NetlistKicadSexpr},
+		{"(export (nets))", NetlistKicadSexpr},
 	} {
 		if _, err := ParseSyncNetlist([]byte(c.data), c.format); err == nil {
 			t.Errorf("%q as %s: want error", c.data, c.format)
 		}
 	}
-	// Optional sections absent: empty, not a panic.
-	nl, err := ParseSyncNetlist([]byte(`(export (version "E") (components (comp (ref "R1"))))`), "")
+	// Empty component and net lists are a valid (empty) design.
+	for _, data := range []string{"<export><components/><nets/></export>", "(export (components) (nets))"} {
+		nl, err := ParseSyncNetlist([]byte(data), "")
+		if err != nil || len(nl.Components) != 0 || len(nl.Nets) != 0 || len(nl.Validate()) != 0 {
+			t.Errorf("%q: %+v %v %v", data, nl, err, nl.Validate())
+		}
+	}
+	// Optional parts of a component absent: parsed, not a panic.
+	nl, err := ParseSyncNetlist([]byte(`(export (version "E") (components (comp (ref "R1"))) (nets))`), "")
 	if err != nil || len(nl.Components) != 1 || nl.Components[0].Ref != "R1" || len(nl.Nets) != 0 {
 		t.Errorf("minimal sexpr: %+v %v", nl, err)
+	}
+}
+
+// replaceFirst replaces the first match of re in s.
+func replaceFirst(t *testing.T, s, re, repl string) string {
+	t.Helper()
+	loc := regexp.MustCompile(re).FindStringIndex(s)
+	if loc == nil {
+		t.Fatalf("fixture edit: %s not found", re)
+	}
+	return s[:loc[0]] + repl + s[loc[1]:]
+}
+
+func TestSyncNetlistValidate(t *testing.T) {
+	for _, name := range []string{"ecc83-pp-flags.kicadxml.net", "ecc83-pp-flags.kicadsexpr.net",
+		"complex_hierarchy.kicadxml.net.gz", "complex_hierarchy.kicadsexpr.net.gz"} {
+		if issues := parseNetFixture(t, name, "").Validate(); len(issues) != 0 {
+			t.Errorf("%s: real export must validate, got %+v", name, issues)
+		}
+	}
+	// Per format: regexps locating C2's ref, C2's UUID, C1's sheetpath and
+	// C2's tstamps element (C1, C2 are the first two components).
+	type edits struct{ ref, c2uuid, c1sheet, c2tstamps string }
+	forms := map[string]edits{
+		"ecc83-pp-flags.kicadxml.net": {`ref="C2"`, `<tstamps>00000000-0000-0000-0000-00004549f3be</tstamps>`,
+			`<sheetpath names="/" tstamps="/"/>`, `<tstamps>00000000-0000-0000-0000-00004549f3be</tstamps>`},
+		"ecc83-pp-flags.kicadsexpr.net": {`\(ref "C2"\)`, `\(tstamps "00000000-0000-0000-0000-00004549f3be"\)`,
+			`\(sheetpath\s*\(names "/"\)\s*\(tstamps "/"\)\s*\)`, `\(tstamps "00000000-0000-0000-0000-00004549f3be"\)`},
+	}
+	for name, e := range forms {
+		base := string(readNetFixture(t, name))
+		xmlForm := strings.HasSuffix(name, "kicadxml.net")
+		pick := func(xmlText, sexText string) string {
+			if xmlForm {
+				return xmlText
+			}
+			return sexText
+		}
+		cases := []struct {
+			what, text, code, ref string
+		}{
+			{"duplicate ref", replaceFirst(t, base, e.ref, pick(`ref="C1"`, `(ref "C1")`)), ErrDupRef, "C1"},
+			{"unannotated", replaceFirst(t, base, e.ref, pick(`ref="C?"`, `(ref "C?")`)), ErrUnannotated, "C?"},
+			{"empty ref", replaceFirst(t, base, e.ref, pick(`ref=""`, `(ref "")`)), ErrNetlistInvalid, ""},
+			{"duplicate key", replaceFirst(t, base, e.c2uuid,
+				pick(`<tstamps>00000000-0000-0000-0000-00004549f4be</tstamps>`, `(tstamps "00000000-0000-0000-0000-00004549f4be")`)), ErrDupKey, "C2"},
+			{"no sheet path", replaceFirst(t, base, e.c1sheet, ""), ErrNetlistInvalid, "C1"},
+			{"no UUID", replaceFirst(t, base, e.c2tstamps, ""), ErrNetlistInvalid, "C2"},
+		}
+		for _, c := range cases {
+			nl, err := ParseSyncNetlist([]byte(c.text), "")
+			if err != nil {
+				t.Fatalf("%s %s: %v", name, c.what, err)
+			}
+			found := false
+			for _, is := range nl.Validate() {
+				found = found || (is.Code == c.code && is.Ref == c.ref)
+			}
+			if !found {
+				t.Errorf("%s %s: want %s on %q, got %+v", name, c.what, c.code, c.ref, nl.Validate())
+			}
+			if c.what == "duplicate ref" && nl.Component("C1") != nil {
+				t.Errorf("%s: Component must not pick one of two C1s", name)
+			}
+		}
 	}
 }

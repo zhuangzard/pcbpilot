@@ -14,6 +14,7 @@ import (
 type fpFixture struct {
 	t                    *testing.T
 	root, cfg, stock, pj string
+	goos                 string
 	env                  map[string]string
 }
 
@@ -28,6 +29,7 @@ func newFPFixture(t *testing.T) *fpFixture {
 		}
 	}
 	f.env = map[string]string{"KICAD_CONFIG_HOME": f.cfg}
+	f.goos = runtime.GOOS
 	return f
 }
 
@@ -55,16 +57,20 @@ func (f *fpFixture) lib(dir string, fps ...string) string {
 
 func (f *fpFixture) load() *FPLibTables {
 	f.t.Helper()
-	env := fpLibEnv{
-		lookupEnv: func(k string) (string, bool) { v, ok := f.env[k]; return v, ok },
-		goos:      runtime.GOOS, home: f.root,
-		stockDir: func() string { return f.stock },
-	}
-	tabs, err := loadFPLibTables(f.pj, env)
+	tabs, err := f.tryLoad()
 	if err != nil {
 		f.t.Fatal(err)
 	}
 	return tabs
+}
+
+func (f *fpFixture) tryLoad() (*FPLibTables, error) {
+	env := fpLibEnv{
+		lookupEnv: func(k string) (string, bool) { v, ok := f.env[k]; return v, ok },
+		goos:      f.goos, home: f.root,
+		stockDir: func() string { return f.stock },
+	}
+	return loadFPLibTables(f.pj, env)
 }
 
 func table(rows ...string) string {
@@ -128,6 +134,10 @@ func TestFPLibVariables(t *testing.T) {
 		if got := tabs.Vars[name].Source; got != src {
 			t.Errorf("Vars[%s].Source = %q, want %q", name, got, src)
 		}
+	}
+	// The legacy alias is never silent.
+	if len(tabs.Warnings) != 1 || tabs.Warnings[0].Code != WarnFPLibLegacyVar || tabs.Warnings[0].Var != "KICAD6_FOOTPRINT_DIR" {
+		t.Errorf("want one legacy-variable warning, got %+v", tabs.Warnings)
 	}
 	// KICAD10_FOOTPRINT_DIR from kicad_common.json beats the install.
 	other := f.lib(filepath.Join(f.root, "other", "Resistor_SMD.pretty"), "R_0603")
@@ -199,7 +209,7 @@ func TestFPLibNestedTable(t *testing.T) {
 			t.Errorf("Resolve(%s) through nested tables: %+v %v", id, ref, err)
 		}
 	}
-	if _, disabled := tabs.Lookup("KiCad"); disabled {
+	if lib, _, _ := tabs.find("KiCad"); lib != nil {
 		t.Errorf("a Table row is not itself a library")
 	}
 	if len(tabs.Problems) != 1 || !strings.Contains(tabs.Problems[0].Detail, "nests itself") {
@@ -292,48 +302,189 @@ func TestKiCadConfigDir(t *testing.T) {
 	}
 }
 
-// TestFPLibRealKiCadDemos reads this machine's real global table and
-// KiCad's shipped demo projects (read-only): every footprint the ecc83
-// board uses must resolve, project ("Footprints:") and stock alike, and the
-// video demo's legacy ${KICAD6_FOOTPRINT_DIR} rows must resolve too.
-func TestFPLibRealKiCadDemos(t *testing.T) {
+func TestFPLibFootprintNameCannotEscape(t *testing.T) {
+	f := newFPFixture(t)
+	lib := f.lib(filepath.Join(f.pj, "a.pretty"), "Ok")
+	f.lib(filepath.Join(f.pj, "Other.pretty"), "X")
+	f.write(filepath.Join(f.pj, "secret.kicad_mod"), "(footprint \"secret\")\n")
+	f.write(filepath.Join(f.pj, "fp-lib-table"), table(row("A", "KiCad", "${KIPRJMOD}/a.pretty")))
+	tabs := f.load()
+	for _, name := range []string{
+		"../Other.pretty/X", "../secret", "..", ".", "sub/X", `..\Other.pretty\X`, `sub\X`,
+		"/etc/passwd", `C:\Windows\x`, "C:x", `\server\share\x`, "", "X\x00",
+	} {
+		_, err := tabs.Resolve("A:" + name)
+		if fe := fpErrCode(t, err); fe.Code != ErrFPLibUnresolved {
+			t.Errorf("A:%q: %+v, want %s", name, fe, ErrFPLibUnresolved)
+		}
+	}
+	if ref, err := tabs.Resolve("A:Ok"); err != nil || filepath.Dir(ref.Path) != lib {
+		t.Errorf("A:Ok: %+v %v", ref, err)
+	}
+}
+
+func TestFPLibVariableCycles(t *testing.T) {
+	f := newFPFixture(t)
+	f.lib(filepath.Join(f.root, "real", "x.pretty"), "X")
+	f.env["SELF"] = "${SELF}/lib"
+	f.env["PING"] = "$(PONG)"
+	f.env["PONG"] = "${PING}"
+	f.env["CHAIN"] = "${BASE}/real" // values may reference other variables
+	f.env["BASE"] = filepath.ToSlash(f.root)
+	f.env["OPEN"] = "${BASE"
+	f.write(filepath.Join(f.pj, "fp-lib-table"), table(
+		row("Self", "KiCad", "${SELF}/x.pretty"),
+		row("Mutual", "KiCad", "${PING}/x.pretty"),
+		row("Chain", "KiCad", "${CHAIN}/x.pretty"),
+		row("Open", "KiCad", "${OPEN}/x.pretty"),
+		row("Unterminated", "KiCad", "${KIPRJMOD/x.pretty"),
+	))
+	tabs := f.load()
+	for id, wantVar := range map[string]string{"Self:X": "SELF", "Mutual:X": "PING", "Open:X": "", "Unterminated:X": ""} {
+		_, err := tabs.Resolve(id)
+		fe := fpErrCode(t, err)
+		if fe.Code != ErrFPLibUnresolved || fe.Var != wantVar || strings.Contains(fe.Path, "${") && fe.Var != "" {
+			t.Errorf("%s: %+v, want %s var %q", id, fe, ErrFPLibUnresolved, wantVar)
+		}
+		if wantVar != "" && !strings.Contains(fe.Detail, "refers to itself") {
+			t.Errorf("%s: detail must name the cycle: %s", id, fe.Detail)
+		}
+	}
+	if _, err := tabs.Resolve("Chain:X"); err != nil {
+		t.Errorf("Chain:X: %v", err)
+	}
+}
+
+func TestFPLibBrokenTablesFailClosed(t *testing.T) {
+	// A broken top-level table is a load error, never a silent fallback.
+	for _, broken := range []string{"(fp_lib_table (lib (name \"A\")", "(sym_lib_table)", "not a table"} {
+		f := newFPFixture(t)
+		f.write(filepath.Join(f.pj, "fp-lib-table"), broken)
+		if _, err := f.tryLoad(); err == nil || fpErrCode(t, err).Code != ErrFPLibUnresolved {
+			t.Errorf("project table %q: err %v, want %s", broken, err, ErrFPLibUnresolved)
+		}
+		g := newFPFixture(t)
+		g.write(filepath.Join(g.cfg, FPLibVersion, "fp-lib-table"), broken)
+		if _, err := g.tryLoad(); err == nil {
+			t.Errorf("global table %q: want a load error", broken)
+		}
+	}
+	// An unreadable nested table blocks every nickname not found before it.
+	f := newFPFixture(t)
+	early := f.lib(filepath.Join(f.root, "early.pretty"), "E")
+	late := f.lib(filepath.Join(f.root, "late.pretty"), "L")
+	f.write(filepath.Join(f.root, "bad-table"), "(fp_lib_table (lib")
+	f.write(filepath.Join(f.cfg, FPLibVersion, "fp-lib-table"), table(
+		row("Early", "KiCad", filepath.ToSlash(early)),
+		row("Bad", "Table", filepath.ToSlash(filepath.Join(f.root, "bad-table"))),
+		row("Missing", "Table", filepath.ToSlash(filepath.Join(f.root, "no-such-table"))),
+		row("UndefTable", "Table", "${NOPE}/fp-lib-table"),
+		row("Late", "KiCad", filepath.ToSlash(late)),
+	))
+	tabs := f.load()
+	if len(tabs.Problems) != 3 {
+		t.Errorf("want 3 nested-table problems, got %+v", tabs.Problems)
+	}
+	if _, err := tabs.Resolve("Early:E"); err != nil {
+		t.Errorf("a row before the broken table still resolves: %v", err)
+	}
+	for _, id := range []string{"Late:L", "Unknown:X"} {
+		_, err := tabs.Resolve(id)
+		if fe := fpErrCode(t, err); fe.Code != ErrFPLibUnresolved || !strings.Contains(fe.Detail, "nested table") {
+			t.Errorf("%s must fail on the broken nested table: %+v", id, fe)
+		}
+	}
+	if got := strings.Join(tabs.Nicknames("global"), ","); got != "Early,Late" {
+		t.Errorf("Nicknames(global) = %s", got)
+	}
+}
+
+func TestFPLibTableCycleCaseFolding(t *testing.T) {
+	for goos, fold := range map[string]bool{"windows": true, "darwin": true, "linux": false} {
+		f := newFPFixture(t)
+		f.goos = goos
+		if got := f.load().foldCase; got != fold {
+			t.Errorf("%s: foldCase %v, want %v", goos, got, fold)
+		}
+	}
+	if runtime.GOOS != "windows" {
+		return // only Windows guarantees a case-insensitive file system here
+	}
+	f := newFPFixture(t)
+	inner := filepath.Join(f.root, "inner-table")
+	f.write(inner, table(row("Back", "Table", filepath.ToSlash(strings.ToUpper(inner)))))
+	f.write(filepath.Join(f.cfg, FPLibVersion, "fp-lib-table"), table(row("In", "Table", filepath.ToSlash(inner))))
+	tabs := f.load()
+	if len(tabs.Problems) != 1 || !strings.Contains(tabs.Problems[0].Detail, "nests itself") {
+		t.Errorf("case-variant path must be the same table: %+v", tabs.Problems)
+	}
+}
+
+// TestFPLibKiCadDemos resolves the footprints of KiCad's shipped demos
+// (read-only) against an isolated global table that, like a stock install,
+// only nests the install's template table. PCBPILOT_TEST_REAL_KICAD_CONFIG=1
+// additionally checks this machine's real global table.
+func TestFPLibKiCadDemos(t *testing.T) {
 	stock := StockFootprintDir()
 	if stock == "" {
 		t.Skip("KiCad stock footprints not installed")
 	}
 	demos := filepath.Join(filepath.Dir(stock), "demos")
-	if !dirExists(filepath.Join(demos, "ecc83")) {
-		t.Skip("KiCad demos not installed")
+	template := filepath.Join(filepath.Dir(stock), "template", "fp-lib-table")
+	if !dirExists(filepath.Join(demos, "ecc83")) || !fileExists(template) {
+		t.Skip("KiCad demos or template table not installed")
 	}
-	tabs, err := LoadFPLibTables(filepath.Join(demos, "ecc83"))
-	if err != nil {
+	cfg := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cfg, FPLibVersion), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if tabs.GlobalTable == "" {
-		t.Skip("no global fp-lib-table")
-	}
-	bd, err := ReadBoard(filepath.Join(demos, "ecc83", "ecc83-pp.kicad_pcb"))
-	if err != nil {
+	if err := os.WriteFile(filepath.Join(cfg, FPLibVersion, "fp-lib-table"),
+		[]byte(table(row("KiCad", "Table", filepath.ToSlash(template)))), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if len(bd.Footprints) == 0 {
-		t.Fatal("ecc83 board has no footprints")
+	isolated := fpLibEnv{lookupEnv: func(k string) (string, bool) {
+		if k == "KICAD_CONFIG_HOME" {
+			return cfg, true
+		}
+		return "", false
+	}, goos: runtime.GOOS, home: cfg, stockDir: func() string { return stock }}
+	load := map[string]func(string) (*FPLibTables, error){
+		"isolated": func(dir string) (*FPLibTables, error) { return loadFPLibTables(dir, isolated) },
 	}
-	for _, fp := range bd.Footprints {
-		ref, err := tabs.Resolve(fp.LibID)
+	if os.Getenv("PCBPILOT_TEST_REAL_KICAD_CONFIG") == "1" {
+		load["real"] = LoadFPLibTables
+	}
+	for mode, ld := range load {
+		tabs, err := ld(filepath.Join(demos, "ecc83"))
 		if err != nil {
-			t.Errorf("%s %s: %v", fp.Ref, fp.LibID, err)
-			continue
+			t.Fatalf("%s: %v", mode, err)
 		}
-		if wantScope := map[bool]string{true: "project", false: "global"}[strings.HasPrefix(fp.LibID, "Footprints:")]; ref.Scope != wantScope {
-			t.Errorf("%s: scope %s, want %s", fp.LibID, ref.Scope, wantScope)
+		bd, err := ReadBoard(filepath.Join(demos, "ecc83", "ecc83-pp.kicad_pcb"))
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	vt, err := LoadFPLibTables(filepath.Join(demos, "video"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := vt.Resolve("Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical"); err != nil {
-		t.Errorf("video demo legacy KICAD6 row: %v", err)
+		if len(bd.Footprints) == 0 {
+			t.Fatal("ecc83 board has no footprints")
+		}
+		for _, fp := range bd.Footprints {
+			ref, err := tabs.Resolve(fp.LibID)
+			if err != nil {
+				t.Errorf("%s %s %s: %v", mode, fp.Ref, fp.LibID, err)
+				continue
+			}
+			if wantScope := map[bool]string{true: "project", false: "global"}[strings.HasPrefix(fp.LibID, "Footprints:")]; ref.Scope != wantScope {
+				t.Errorf("%s %s: scope %s, want %s", mode, fp.LibID, ref.Scope, wantScope)
+			}
+		}
+		vt, err := ld(filepath.Join(demos, "video"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := vt.Resolve("Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical"); err != nil {
+			t.Errorf("%s: video demo legacy KICAD6 row: %v", mode, err)
+		}
+		if len(vt.Warnings) == 0 {
+			t.Errorf("%s: video demo's ${KICAD6_FOOTPRINT_DIR} must be reported", mode)
+		}
 	}
 }

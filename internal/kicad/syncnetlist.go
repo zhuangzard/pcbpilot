@@ -15,6 +15,7 @@ package kicad
 import (
 	"bytes"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -154,46 +155,50 @@ type syncNetXML struct {
 			Tstamps string `xml:"tstamps,attr"`
 		} `xml:"sheet"`
 	} `xml:"design"`
-	Comps []struct {
-		Ref       string `xml:"ref,attr"`
-		Value     string `xml:"value"`
-		Footprint string `xml:"footprint"`
-		Fields    []struct {
+	Comps *struct {
+		Comp []struct {
+			Ref       string `xml:"ref,attr"`
+			Value     string `xml:"value"`
+			Footprint string `xml:"footprint"`
+			Fields    []struct {
+				Name  string `xml:"name,attr"`
+				Value string `xml:",chardata"`
+			} `xml:"fields>field"`
+			Lib struct {
+				Lib         string `xml:"lib,attr"`
+				Part        string `xml:"part,attr"`
+				Description string `xml:"description,attr"`
+			} `xml:"libsource"`
+			Props []struct {
+				Name  string `xml:"name,attr"`
+				Value string `xml:"value,attr"`
+			} `xml:"property"`
+			Sheet struct {
+				Names   string `xml:"names,attr"`
+				Tstamps string `xml:"tstamps,attr"`
+			} `xml:"sheetpath"`
+			Tstamps string `xml:"tstamps"`
+			Units   []struct {
+				Name string `xml:"name,attr"`
+				Pins []struct {
+					Num string `xml:"num,attr"`
+				} `xml:"pins>pin"`
+			} `xml:"units>unit"`
+		} `xml:"comp"`
+	} `xml:"components"`
+	Nets *struct {
+		Net []struct {
+			Code  string `xml:"code,attr"`
 			Name  string `xml:"name,attr"`
-			Value string `xml:",chardata"`
-		} `xml:"fields>field"`
-		Lib struct {
-			Lib         string `xml:"lib,attr"`
-			Part        string `xml:"part,attr"`
-			Description string `xml:"description,attr"`
-		} `xml:"libsource"`
-		Props []struct {
-			Name  string `xml:"name,attr"`
-			Value string `xml:"value,attr"`
-		} `xml:"property"`
-		Sheet struct {
-			Names   string `xml:"names,attr"`
-			Tstamps string `xml:"tstamps,attr"`
-		} `xml:"sheetpath"`
-		Tstamps string `xml:"tstamps"`
-		Units   []struct {
-			Name string `xml:"name,attr"`
-			Pins []struct {
-				Num string `xml:"num,attr"`
-			} `xml:"pins>pin"`
-		} `xml:"units>unit"`
-	} `xml:"components>comp"`
-	Nets []struct {
-		Code  string `xml:"code,attr"`
-		Name  string `xml:"name,attr"`
-		Class string `xml:"class,attr"`
-		Nodes []struct {
-			Ref  string `xml:"ref,attr"`
-			Pin  string `xml:"pin,attr"`
-			Func string `xml:"pinfunction,attr"`
-			Type string `xml:"pintype,attr"`
-		} `xml:"node"`
-	} `xml:"nets>net"`
+			Class string `xml:"class,attr"`
+			Nodes []struct {
+				Ref  string `xml:"ref,attr"`
+				Pin  string `xml:"pin,attr"`
+				Func string `xml:"pinfunction,attr"`
+				Type string `xml:"pintype,attr"`
+			} `xml:"node"`
+		} `xml:"net"`
+	} `xml:"nets"`
 }
 
 func parseSyncNetlistXML(data []byte) (*SyncNetlist, error) {
@@ -201,12 +206,15 @@ func parseSyncNetlistXML(data []byte) (*SyncNetlist, error) {
 	if err := xml.Unmarshal(data, &x); err != nil {
 		return nil, fmt.Errorf("parse KiCad kicadxml netlist: %w", err)
 	}
+	if x.Comps == nil || x.Nets == nil {
+		return nil, fmt.Errorf("parse KiCad kicadxml netlist: %w", errNetlistSections)
+	}
 	nl := &SyncNetlist{Source: x.Design.Source, Tool: x.Design.Tool,
 		Sheets: []SyncSheet{}, Components: []SyncComp{}, Nets: []SyncNet{}}
 	for _, s := range x.Design.Sheets {
 		nl.Sheets = append(nl.Sheets, SyncSheet{s.Number, s.Name, s.Tstamps})
 	}
-	for _, c := range x.Comps {
+	for _, c := range x.Comps.Comp {
 		sc := SyncComp{Ref: c.Ref, Value: c.Value, Footprint: c.Footprint, Lib: c.Lib.Lib, Part: c.Lib.Part,
 			Description: c.Lib.Description, SheetNames: c.Sheet.Names, SheetTstamps: c.Sheet.Tstamps,
 			Tstamps: strings.Fields(c.Tstamps), Fields: map[string]string{}, Properties: map[string]string{}}
@@ -226,7 +234,7 @@ func parseSyncNetlistXML(data []byte) (*SyncNetlist, error) {
 		sc.setFlags()
 		nl.Components = append(nl.Components, sc)
 	}
-	for _, n := range x.Nets {
+	for _, n := range x.Nets.Net {
 		sn := SyncNet{Code: n.Code, Name: n.Name, Class: n.Class, Nodes: []SyncNode{}}
 		for _, d := range n.Nodes {
 			sn.Nodes = append(sn.Nodes, SyncNode{d.Ref, d.Pin, d.Func, d.Type})
@@ -247,6 +255,9 @@ func parseSyncNetlistSexpr(data []byte) (*SyncNetlist, error) {
 	}
 	if root.head() != "export" {
 		return nil, fmt.Errorf("parse KiCad kicadsexpr netlist: top-level form is %q, want export", root.head())
+	}
+	if root.child("components") == nil || root.child("nets") == nil {
+		return nil, fmt.Errorf("parse KiCad kicadsexpr netlist: %w", errNetlistSections)
 	}
 	val := func(n *sx, name string) string { return sxChild(n, name).arg(0) }
 	nl := &SyncNetlist{Sheets: []SyncSheet{}, Components: []SyncComp{}, Nets: []SyncNet{}}
@@ -336,12 +347,85 @@ func (nl *SyncNetlist) OnBoard() *SyncNetlist {
 	return out
 }
 
-// Component returns the component with ref, or nil.
+// Component returns the component with ref, or nil when there is none or
+// the ref is ambiguous (duplicates are a Validate error).
 func (nl *SyncNetlist) Component(ref string) *SyncComp {
+	var hit *SyncComp
 	for i := range nl.Components {
 		if nl.Components[i].Ref == ref {
-			return &nl.Components[i]
+			if hit != nil {
+				return nil
+			}
+			hit = &nl.Components[i]
 		}
 	}
-	return nil
+	return hit
+}
+
+// Netlist validation codes (SyncNetlistIssue.Code).
+const (
+	ErrNetlistInvalid = "E_NETLIST_INVALID" // a component without ref / UUID / sheet path, a node without its component
+	ErrDupRef         = "E_DUP_REF"         // two components share a reference
+	ErrDupKey         = "E_DUP_KEY"         // two units/components share a footprint path key
+	ErrUnannotated    = "E_UNANNOTATED"     // a reference still ends in '?'
+)
+
+var errNetlistSections = errors.New("missing <components> or <nets> section (not a complete kicad-cli netlist export)")
+
+// SyncNetlistIssue is one reason a netlist cannot drive a board sync.
+type SyncNetlistIssue struct {
+	Code   string `json:"code"`
+	Ref    string `json:"ref,omitempty"`
+	Key    string `json:"key,omitempty"`
+	Detail string `json:"detail"`
+}
+
+// Validate reports what makes the netlist unusable for matching
+// footprints: components without a reference, symbol UUID or sheet path,
+// unannotated or duplicate references, duplicate footprint path keys, and
+// net nodes naming no component (kicadsexpr drops exclude_from_board
+// symbols together with their nodes, so that never fires on a real export).
+// Empty component and net lists are valid. Issues are in netlist order.
+func (nl *SyncNetlist) Validate() []SyncNetlistIssue {
+	var out []SyncNetlistIssue
+	add := func(code, ref, key, format string, a ...any) {
+		out = append(out, SyncNetlistIssue{Code: code, Ref: ref, Key: key, Detail: fmt.Sprintf(format, a...)})
+	}
+	refs := map[string]int{}
+	keys := map[string]string{}
+	for i, c := range nl.Components {
+		if c.Ref == "" {
+			add(ErrNetlistInvalid, "", "", "component #%d (%s) has no reference", i+1, c.LibID())
+			continue
+		}
+		if refs[c.Ref]++; refs[c.Ref] == 2 {
+			add(ErrDupRef, c.Ref, "", "reference %s is used by more than one symbol", c.Ref)
+		}
+		if strings.HasSuffix(c.Ref, "?") {
+			add(ErrUnannotated, c.Ref, "", "%s is not annotated", c.Ref)
+		}
+		if !strings.HasPrefix(c.SheetTstamps, "/") {
+			add(ErrNetlistInvalid, c.Ref, "", "%s has no sheet path tstamps", c.Ref)
+			continue
+		}
+		if len(c.Tstamps) == 0 {
+			add(ErrNetlistInvalid, c.Ref, "", "%s has no symbol UUID (tstamps)", c.Ref)
+			continue
+		}
+		for _, k := range c.Keys() {
+			if prev, dup := keys[k]; dup {
+				add(ErrDupKey, c.Ref, k, "path %s belongs to both %s and %s", k, prev, c.Ref)
+				continue
+			}
+			keys[k] = c.Ref
+		}
+	}
+	for _, n := range nl.Nets {
+		for _, d := range n.Nodes {
+			if refs[d.Ref] == 0 {
+				add(ErrNetlistInvalid, d.Ref, "", "net %q has a node on %s.%s, which is not a component", n.Name, d.Ref, d.Pin)
+			}
+		}
+	}
+	return out
 }
