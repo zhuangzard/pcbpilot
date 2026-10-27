@@ -971,7 +971,12 @@ func (h HolesSpec) Validate() []BoardIssue {
 	for i, a := range h.Holes {
 		for j := 0; j < i; j++ {
 			b := h.Holes[j]
-			if math.Hypot(a.X-b.X, a.Y-b.Y) < (a.outer()+b.outer())/2 {
+			// Two PTHs on one net may share copper; only their drills clash.
+			reach := (a.outer() + b.outer()) / 2
+			if a.Type == "pth" && b.Type == "pth" && a.Net != "" && a.Net == b.Net {
+				reach = (a.Drill + b.Drill) / 2
+			}
+			if math.Hypot(a.X-b.X, a.Y-b.Y) < reach {
 				bad = append(bad, bdIssue(ErrBoardOverlap, fmt.Sprintf("holes[%d]", i), "move the holes apart",
 					"overlaps holes[%d] at (%g, %g)", j, b.X, b.Y))
 			}
@@ -1298,6 +1303,9 @@ type BoardItem struct {
 	Kind string `json:"kind"`
 	UUID string `json:"uuid"`
 	Name string `json:"name,omitempty"`
+	// Parts are the uuids of the object's own items (a hole's pad), which
+	// DRC names instead of the footprint.
+	Parts []string `json:"parts,omitempty"`
 }
 
 // BoardVerification is the reload check board.py ran on the saved file.

@@ -16,8 +16,11 @@
 - `--report` 只能是单独的 JSON 文件：指向板、工程、规则、`.kicad_prl`、锁文件（大小写/相对路径/硬链接都算同一文件）
   一律 `E_BOARD_ARG` 拒绝，什么都不跑、不写。
 - `--spec FILE.json` 与形状参数互斥；JSON 的字段写法见各子命令 `--help`，多余字段直接拒绝。
-- `--drc`：在输入和结果上各跑一次 `kicad-cli pcb drc`（error 级，隔离的空全局库表，库检查不参与），结果多出任何
-  error 即失败、不写；`drc.new[].ours` 标出是否指向本次新建的对象。逐步搭板时每步都加 `--drc`。
+- **DRC 默认开且说了算**：`outline` / `stackup` / `holes` / `keepout` / `zone` 总在输入和结果上各跑一次
+  `kicad-cli pcb drc`（error 级，带输入的 `.kicad_pro` / `.kicad_dru`：网络类、自定义规则都算；隔离的空全局库表，库检查不参与），
+  结果多出任何 error 即失败（退出码 6）、不写；`drc.new[].ours` 标出是否指向本次新建的对象（含孔的焊盘）。pcbpilot 自己的预检
+  只拦确定的物理冲突（钻孔穿铜、焊环压别的网的铜，按焊盘真实铜形状算），所有间距都交给 DRC。`--no-drc` 跳过 DRC：结果
+  「未验证」，退出码 5、不写；`--no-drc --force-unverified` 才写（仍是退出码 5、`ok: false`）。`text` / `new` 只在 `--drc` 时跑。
 - 报告是一段 JSON（stdout，`--report` 另存）：`ok`、`verdict`、`checks[]`（`pcbnew-reload`、
   `kicad-cli-stats`、`kicad-drc-no-new-errors`）、`issues[]`（`code`/`field`/`detail`/`fix`）、`created[]`（uuid）、
   `removed[]`、`summary`、`warnings`、`written`。
@@ -31,9 +34,9 @@
 | `outline --rect W,H [--origin X,Y] [--corner-radius R]` / `--polygon "x,y …"` / `--circle X,Y,D` | Edge.Cuts 板框（线段 + 真圆弧） | 已有板框 → `E_BOARD_OUTLINE_EXISTS`，只有 `--replace` 才删掉板级 Edge.Cuts 重画；自交/重复点/零面积 → `E_BOARD_GEOMETRY` |
 | `outline … --slot X1,Y1,X2,Y2,W` / `--cutout-circle` / `--cutout-rect` / `--cutout-polygon` | 槽孔、挖空 | 必须整个在板内且互不重叠；不给外形时加到现有板框上（没有闭合板框 → `E_BOARD_NO_OUTLINE`）；板边缺口画进外形多边形 |
 | `stackup --layers 2\|4\|6 [--thickness 1.6] [--outer-copper 0.035] [--inner-copper 0.0175] [--dielectric t1,t2,…] [--finish ENIG]` | 层数 + 物理层叠 | 介质 core/prepreg 交替、默认 FR4 εr 4.5；板厚 = 全部层之和（含阻焊）；减层时被删的内层上还有走线/铺铜/图形，或有焊盘显式用到它（SMD、连接器焊盘、只在部分层上的孔；贯穿全部铜层的通孔焊盘不算）→ `E_BOARD_LAYER_IN_USE` |
-| `holes --at X,Y … --drill D [--type pth --pad P --net GND] [--ref H5]` | 安装孔 | 每孔一个锁定、board-only 的 `pcbpilot:MountingHole_*` 封装；必须先有闭合板框（否则 `E_BOARD_NO_OUTLINE`）；NPTH 不能带网/焊环；PTH 必须给 `--pad`；出板、碰到或包住挖空、压焊盘或过孔铜、离已有钻孔（焊盘孔、过孔、本批其他孔）小于板子的孔间距；NPTH 离任何走线/圆弧铜小于孔间隙、PTH 焊环离别的网走线小于铜间距 → 拒绝 |
+| `holes --at X,Y … --drill D [--type pth --pad P --net GND] [--ref H5]` | 安装孔 | 每孔一个锁定、board-only 的 `pcbpilot:MountingHole_*` 封装；必须先有闭合板框（否则 `E_BOARD_NO_OUTLINE`）；NPTH 不能带网/焊环；PTH 必须给 `--pad`；出板、碰到或包住挖空、钻孔与已有钻孔重叠、钻孔穿过任何铜（焊盘真实形状、过孔、走线/圆弧）、PTH 焊环压到别的网（或无网）的铜 → `E_BOARD_OVERLAP`；孔间距、孔间隙、铜间距（含网络类与自定义规则）由 DRC 判 |
 | `keepout --rect X,Y,W,H\|--polygon\|--circle [--layers F.Cu,B.Cu] [--forbid tracks,vias,pads,pours,footprints] [--name]` | 规则区 | 默认全部铜层、五项全禁 |
-| `zone --rect …\|--polygon\|--circle\|--board-outline --net GND --layers In1.Cu [--clearance --min-width --thermal-gap --spoke-width --connection thermal\|solid\|none\|tht-thermal --priority N] [--no-fill]` | 铺铜 + 灌铜 | 灌铜按 KiCad「全部重灌」做（报告写明重灌了几个区）；灌出来面积为 0（在板外、或整个落在禁铺区里）→ `E_BOARD_VERIFY`，不提交 |
+| `zone --rect …\|--polygon\|--circle\|--board-outline --net GND --layers In1.Cu [--clearance --min-width --thermal-gap --spoke-width --connection thermal\|solid\|none\|tht-thermal --priority N] [--no-fill]` | 铺铜 + 灌铜 | 灌铜按 KiCad「全部重灌」做（报告写明重灌了几个区）；任一请求层灌出来面积为 0（在板外、或在该层整个落在禁铺区里）→ `E_BOARD_VERIFY` 并写明哪一层，不提交 |
 | `text --text "rev A" --at X,Y [--layer F.Silkscreen\|B.Silkscreen\|F.Fab\|B.Fab] [--size 1 --thickness 0.15 --rotation --justify]` | 板上文字 | 背面层自动镜像；低于板子最小丝印字高/线宽给警告 |
 
 几何判定是精确的（线段/圆弧/圆的真实距离与包含，两个边界相距 ≤ 0.001 mm 算相碰）；与板上已有 Edge.Cuts 比较时，
@@ -48,15 +51,15 @@
 
 ```bash
 pcbpilot kicad board new --out work/board.kicad_pcb --layers 2          # 或从已同步的板开始
-pcbpilot kicad board outline --pcb work/board.kicad_pcb --in-place --drc --rect 80,50 --corner-radius 3 --slot 20,30,40,30,2
-pcbpilot kicad board stackup --pcb work/board.kicad_pcb --in-place --drc --layers 4 --thickness 1.6 --finish ENIG
-pcbpilot kicad board zone    --pcb work/board.kicad_pcb --in-place --drc --board-outline --net GND --layers In1.Cu
-pcbpilot kicad board holes   --pcb work/board.kicad_pcb --in-place --drc --drill 3.2 --at 4,4 --at 76,4 --at 4,46 --at 76,46
-pcbpilot kicad board keepout --pcb work/board.kicad_pcb --in-place --drc --rect 55,5,12,8 --name antenna
+pcbpilot kicad board outline --pcb work/board.kicad_pcb --in-place --rect 80,50 --corner-radius 3 --slot 20,30,40,30,2
+pcbpilot kicad board stackup --pcb work/board.kicad_pcb --in-place --layers 4 --thickness 1.6 --finish ENIG
+pcbpilot kicad board zone    --pcb work/board.kicad_pcb --in-place --board-outline --net GND --layers In1.Cu
+pcbpilot kicad board holes   --pcb work/board.kicad_pcb --in-place --drill 3.2 --at 4,4 --at 76,4 --at 4,46 --at 76,46
+pcbpilot kicad board keepout --pcb work/board.kicad_pcb --in-place --rect 55,5,12,8 --name antenna
 pcbpilot kicad board text    --pcb work/board.kicad_pcb --in-place --drc --text "rev A" --at 40,44
 ```
 
-先铺铜再加带网 PTH 孔：孔会随自动重灌接到铺铜上；反过来，孔在灌铜前是孤立的，`--drc` 会报
+先铺铜再加带网 PTH 孔：孔会随自动重灌接到铺铜上；反过来，孔在灌铜前是孤立的，DRC 会报
 `unconnected_items` 并拒写。完成后 `kicad snapshot` 复核 `outline`、`copperLayers`，必要时
 `kicad-cli pcb export svg` 出图给用户看。
 

@@ -76,12 +76,13 @@ pcbpilot ──▶ KiCad 自带 Python + pcbnew（internal/kicad/bridge.py，go:
 - 提交：输入连同 `.kicad_pro`/`.kicad_dru` 先复制到暂存目录再改，结果旁边放回同一份工程/规则后才做 stats/DRC 校验；
   全部检查通过才经 kfile 事务提交（`--out` 新建板 + 校验过的工程/规则字节、`--in-place` 锁检查 + 基准哈希 CAS），源工程/规则
   提交前再比一次哈希。`--report` 不得与任何板/工程/规则/锁文件同名（含大小写、硬链接）。`outline` / `stackup` / `holes` 另用 `kicad-cli pcb export stats` 回读板尺寸、
-  板厚、NPTH/PTH 数；`--drc` 对比改前改后的 error 级 DRC。
+  板厚、NPTH/PTH 数；加/改铜或孔的 op（outline/stackup/holes/keepout/zone）默认对比改前改后的 error 级 DRC 并以它为准
+  （`--no-drc` = 未验证，退出码 5，只有 `--force-unverified` 才写），`text` / `new` 用 `--drc` 开。
 - 层叠：KiCad 10.0.6 的 Python 没有导出 stackup（`GetStackupDescriptor` 是不透明对象），所以 `SetCopperLayerCount`
   + `SetBoardThickness` 后把 `(stackup …)` 块写进保存后文件的 `(setup …)`，再由 pcbnew 加载、保存一遍规范化并核对
   `m_HasStackup`、板厚与铜层列表。板厚按 KiCad 的算法含阻焊层。
 - 几何是精确判定（`board_geom.go`：线段/圆弧距离、有符号距离包含，容差 0.001 mm），board.py 用同一套公式对板上
-  Edge.Cuts（KiCad 的折线近似）判孔/挖空；孔还对已有过孔（铜 + 孔间距）、焊盘孔做孔间距检查。写后回读逐项比对
+  Edge.Cuts（KiCad 的折线近似）判孔/挖空；孔的预检只拦确定的物理重叠（钻孔与钻孔、钻孔穿铜、焊环压别的网的铜；焊盘用 `GetEffectivePolygon` 的真实形状），间距全归 DRC。写后回读逐项比对
   每个请求属性；灌铜先 UnFill 再 `ZONE_FILLER.Fill`，返回失败/异常/仍未灌 → `E_BOARD_VERIFY`。
 - 10.0 的 `GetLayerID` 不再认 `F.SilkS` 这类旧短名（返回 -1），board.py 自带旧名映射。安装孔是锁定、board-only、
   不进 BOM/坐标文件的单焊盘封装。`outline` / `holes` / `keepout` 遇到已灌铜的板会全部重灌。

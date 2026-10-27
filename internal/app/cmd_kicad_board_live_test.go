@@ -316,7 +316,8 @@ func TestKicadBoardLiveRefusals(t *testing.T) {
 
 	seedVia(t, tools, pcb, "GND", 60, 25)
 	boardLiveRefused(t, tools, "holes", in, &kicad.HolesSpec{Holes: []kicad.HoleSpec{{X: 61, Y: 25, Drill: 2.2, Pad: 3.5, Type: "pth", Net: "GND"}}}, 2, kicad.ErrBoardOverlap)
-	boardLiveRefused(t, tools, "holes", in, &kicad.HolesSpec{Holes: []kicad.HoleSpec{{X: 61.5, Y: 25, Drill: 2}}}, 2, kicad.ErrBoardOverlap)
+	// Clear of the via's copper but inside the hole clearance: DRC refuses it.
+	boardLiveRefused(t, tools, "holes", in, &kicad.HolesSpec{Holes: []kicad.HoleSpec{{X: 61.5, Y: 25, Drill: 2}}}, 6, kicad.ErrBoardVerify)
 	boardLiveOp(t, tools, "holes", pcb, &kicad.HolesSpec{Holes: []kicad.HoleSpec{{X: 70, Y: 25, Drill: 2}}})
 
 	// Tracks: an NPTH through a trace (segment or arc), a PTH ring on a
@@ -336,6 +337,78 @@ track(b0.FindNet("GND"), pcbnew.F_Cu, (10, 40), (20, 40), mid=(15, 35))
 	boardLiveRefused(t, tools, "holes", in, &kicad.HolesSpec{Holes: []kicad.HoleSpec{{X: 15, Y: 35, Drill: 1}}}, 2, kicad.ErrBoardOverlap)
 	boardLiveRefused(t, tools, "holes", in, &kicad.HolesSpec{Holes: []kicad.HoleSpec{{X: 47, Y: 11.5, Drill: 2.2, Pad: 3.5, Type: "pth", Net: "GND"}}}, 2, kicad.ErrBoardOverlap)
 	boardLiveOp(t, tools, "holes", pcb, &kicad.HolesSpec{Holes: []kicad.HoleSpec{{X: 15, Y: 39, Drill: 1}}}) // inside the arc's bow, clear of it
+
+	// Clearances are DRC's (pre-checks see no overlap): a mounting pad
+	// 0.01 mm from a SIG via, and one 0.5 mm from a track whose netclass
+	// asks 1.0 mm (the board default is 0.2 mm).
+	seedPy(t, tools, pcb, `
+sig = b0.FindNet("SIG")
+v = pcbnew.PCB_VIA(b0); v.SetPosition(P(25, 20)); v.SetWidth(pcbnew.FromMM(0.8)); v.SetDrill(pcbnew.FromMM(0.4)); v.SetNet(sig); b0.Add(v)
+sig2 = pcbnew.NETINFO_ITEM(b0, "SIG2"); b0.Add(sig2)
+t = pcbnew.PCB_TRACK(b0); t.SetStart(P(5, 25)); t.SetEnd(P(15, 25)); t.SetWidth(pcbnew.FromMM(0.25)); t.SetLayer(pcbnew.F_Cu); t.SetNet(sig2); b0.Add(t)
+`)
+	proPath := strings.TrimSuffix(pcb, ".kicad_pcb") + ".kicad_pro"
+	var pro map[string]any
+	raw, err := os.ReadFile(proPath)
+	if err != nil || json.Unmarshal(raw, &pro) != nil {
+		t.Fatalf("project: %v", err)
+	}
+	ns := pro["net_settings"].(map[string]any)
+	classes := ns["classes"].([]any)
+	wide := map[string]any{}
+	for k, v := range classes[0].(map[string]any) {
+		wide[k] = v
+	}
+	wide["name"], wide["clearance"], wide["priority"] = "WIDE", 1.0, 0
+	ns["classes"] = append(classes, wide)
+	ns["netclass_patterns"] = []any{map[string]any{"netclass": "WIDE", "pattern": "SIG2"}}
+	if raw, err = json.MarshalIndent(pro, "", "  "); err != nil || os.WriteFile(proPath, raw, 0o644) != nil {
+		t.Fatal("write project")
+	}
+	clearance := func(rep *kicadBoardReport) {
+		t.Helper()
+		for _, n := range rep.DRC.New {
+			if strings.Contains(n.Rule, "clearance") && n.Ours {
+				return
+			}
+		}
+		t.Errorf("no new clearance violation on the hole: %+v", rep.DRC.New)
+	}
+	clearance(boardLiveRefused(t, tools, "holes", in, &kicad.HolesSpec{Holes: []kicad.HoleSpec{{X: 25 + 1.75 + 0.4 + 0.01, Y: 20, Drill: 2.2, Pad: 3.5, Type: "pth"}}}, 6, kicad.ErrBoardVerify))
+	clearance(boardLiveRefused(t, tools, "holes", in, &kicad.HolesSpec{Holes: []kicad.HoleSpec{{X: 10, Y: 25 + 0.125 + 1.75 + 0.5, Drill: 2.2, Pad: 3.5, Type: "pth"}}}, 6, kicad.ErrBoardVerify))
+
+	// A hole in the opening of a ring-shaped pad: its bounding box covers
+	// the hole, its copper does not.
+	seedPy(t, tools, pcb, `
+import math
+fp = pcbnew.FOOTPRINT(b0); fp.SetReference("RING1"); fp.SetPosition(P(50, 30))
+p = pcbnew.PAD(fp); p.SetAttribute(pcbnew.PAD_ATTRIB_SMD); p.SetShape(pcbnew.F_Cu, pcbnew.PAD_SHAPE_CUSTOM)
+p.SetAnchorPadShape(pcbnew.F_Cu, pcbnew.PAD_SHAPE_CIRCLE); p.SetSize(pcbnew.VECTOR2I(pcbnew.FromMM(0.5), pcbnew.FromMM(0.5)))
+ls = pcbnew.LSET(); ls.AddLayer(pcbnew.F_Cu); p.SetLayerSet(ls); p.SetPosition(P(53.5, 30)); p.SetNumber("1")
+ring = pcbnew.SHAPE_POLY_SET(); ring.NewOutline()
+for k in range(64):
+    a = 2 * math.pi * k / 64; ring.Append(pcbnew.FromMM(-3.5 + 4 * math.cos(a)), pcbnew.FromMM(4 * math.sin(a)))
+ring.NewHole()
+for k in range(64):
+    a = -2 * math.pi * k / 64; ring.Append(pcbnew.FromMM(-3.5 + 3 * math.cos(a)), pcbnew.FromMM(3 * math.sin(a)), -1, 0)
+p.AddPrimitivePoly(pcbnew.F_Cu, ring, 0, True)
+fp.Add(p); fp.SetAttributes(pcbnew.FP_BOARD_ONLY); b0.Add(fp)
+`)
+	boardLiveOp(t, tools, "holes", pcb, &kicad.HolesSpec{Holes: []kicad.HoleSpec{{X: 50, Y: 30, Drill: 2}}})
+	boardLiveRefused(t, tools, "holes", in, &kicad.HolesSpec{Holes: []kicad.HoleSpec{{X: 53.5, Y: 30, Drill: 1}}}, 2, kicad.ErrBoardOverlap) // on the ring
+
+	// A two-layer pour with a no-pour keepout on one layer: the failing layer is named.
+	boardLiveOp(t, tools, "keepout", pcb, &kicad.KeepoutSpec{Shape: kicad.BoardShape{Rect: &kicad.BoardRect{X: 36, Y: 11, Width: 8, Height: 8}},
+		Layers: []string{"B.Cu"}, Forbid: []string{"pours"}})
+	zr := boardLiveRefused(t, tools, "zone", in, &kicad.ZoneSpec{Shape: kicad.BoardShape{Rect: &kicad.BoardRect{X: 37, Y: 12, Width: 6, Height: 6}},
+		Net: "GND", Layers: []string{"F.Cu", "B.Cu"}}, 6, kicad.ErrBoardVerify)
+	named := false
+	for _, is := range zr.Issues {
+		named = named || (strings.Contains(is.Detail, "on B.Cu") && !strings.Contains(is.Detail, "on F.Cu"))
+	}
+	if !named {
+		t.Errorf("zone failure does not name B.Cu alone: %+v", zr.Issues)
+	}
 
 	// Zones that fill to nothing: outside the board, inside a no-pour keepout.
 	boardLiveRefused(t, tools, "zone", in, &kicad.ZoneSpec{Shape: kicad.BoardShape{Rect: &kicad.BoardRect{X: 100, Y: 100, Width: 10, Height: 10}},

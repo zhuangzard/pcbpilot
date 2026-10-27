@@ -721,45 +721,73 @@ def via_width(v):
 
 
 def hole_conflicts(board, h):
-    """Why the new hole h cannot go where it is: an existing pad's copper,
-    a via's copper, or a drill closer than the board's hole-to-hole minimum
-    (an NPTH also keeps the hole clearance from via copper)."""
-    ds = board.GetDesignSettings()
-    h2h, hclr = mm(ds.m_HoleToHoleMin), mm(ds.m_HoleClearance)
+    """Why the new hole h cannot go where it is — only definite physical
+    conflicts, never a clearance: KiCad's DRC (netclasses, custom rules,
+    hole-to-hole, hole clearance) runs on the result and decides those. A
+    conflict is a drill overlapping another drill or any copper, or a PTH
+    ring overlapping copper of another net (or of no net)."""
     x, y, rd, rp = h["x"], h["y"], h["drill"] / 2, h["pad"] / 2
-    pth = h["type"] == "pth"
-    clr = max(mm(ds.m_MinClearance), mm(ds.m_NetSettings.GetDefaultNetclass().GetClearance()))
+    pth, net = h["type"] == "pth", h.get("net") or ""
+    # A PTH ring may touch same-net copper (a stitched mounting hole).
+    ring = lambda other: pth and not (net and other == net)
     out = []
     for t in board.GetTracks():
         if t.Type() != pcbnew.PCB_VIA_T:
-            why = track_conflict(t, x, y, rd, rp, pth, h.get("net") or "", clr, hclr)
-            if why:
-                out.append(why)
+            d = track_dist(t, (x, y)) - mm(t.GetWidth()) / 2
+            at = "the %s on %s at (%s, %s)-(%s, %s)" % ("arc" if t.Type() == pcbnew.PCB_ARC_T else "track", pcbnew.LayerName(t.GetLayer()),
+                                                          fmt_num(mm(t.GetStart().x)), fmt_num(mm(t.GetStart().y)), fmt_num(mm(t.GetEnd().x)), fmt_num(mm(t.GetEnd().y)))
+            if d < rd:
+                out.append("the drill cuts the copper of %s" % at)
+            elif ring(t.GetNetname()) and d < rp:
+                out.append("the pad overlaps %s (net %s)" % (at, t.GetNetname() or "none"))
             continue
         vx, vy = mm(t.GetPosition().x), mm(t.GetPosition().y)
         d = math.hypot(vx - x, vy - y)
         vcu, vdr = mm(via_width(t)) / 2, mm(t.GetDrillValue()) / 2
-        if pth and d < rp + vcu:
-            out.append("the pad overlaps the copper of the via at (%s, %s)" % (fmt_num(vx), fmt_num(vy)))
-        elif d - rd - vdr < h2h:
-            out.append("the drill is %.3f mm from the via drill at (%s, %s); the board's hole-to-hole minimum is %g mm" % (d - rd - vdr, fmt_num(vx), fmt_num(vy), h2h))
-        elif not pth and d - rd - vcu < hclr:
-            out.append("the hole is %.3f mm from the copper of the via at (%s, %s); the board's hole clearance is %g mm" % (d - rd - vcu, fmt_num(vx), fmt_num(vy), hclr))
+        at = "the via at (%s, %s)" % (fmt_num(vx), fmt_num(vy))
+        if d < rd + vdr:
+            out.append("the drill overlaps the drill of %s" % at)
+        elif d < rd + vcu:
+            out.append("the drill cuts the copper of %s" % at)
+        elif ring(t.GetNetname()) and d < rp + vcu:
+            out.append("the pad overlaps the copper of %s (net %s)" % (at, t.GetNetname() or "none"))
+    enabled = set(board.GetEnabledLayers().CuStack())
     for fp in board.GetFootprints():
         for p in fp.Pads():
-            bb = p.GetBoundingBox()
-            x0, y0 = mm(bb.GetX()), mm(bb.GetY())
-            x1, y1 = x0 + mm(bb.GetWidth()), y0 + mm(bb.GetHeight())
-            if math.hypot(max(x0 - x, 0, x - x1), max(y0 - y, 0, y - y1)) < rp:
-                out.append("it lands on a pad of %s" % fp.GetReference())
+            px, py = mm(p.GetPosition().x), mm(p.GetPosition().y)
+            pd = mm(max(p.GetDrillSizeX(), p.GetDrillSizeY())) / 2
+            if pd > 0 and math.hypot(px - x, py - y) < rd + pd:
+                out.append("the drill overlaps the drill of %s pad %s" % (fp.GetReference(), p.GetNumber()))
                 break
-            if p.GetDrillSizeX() > 0:
-                px, py = mm(p.GetPosition().x), mm(p.GetPosition().y)
-                gap = math.hypot(px - x, py - y) - rd - mm(max(p.GetDrillSizeX(), p.GetDrillSizeY())) / 2
-                if gap < h2h:
-                    out.append("the drill is %.3f mm from the drill of %s pad %s; the board's hole-to-hole minimum is %g mm" % (gap, fp.GetReference(), p.GetNumber(), h2h))
-                    break
+            r = rp if ring(p.GetNetname()) else rd
+            if pth and not ring(p.GetNetname()):
+                continue  # same net: copper may touch; DRC judges the drill
+            if any(pad_copper_hits(p, l, x, y, r) for l in p.GetLayerSet().CuStack() if l in enabled):
+                what = "pad" if pth else "drill"
+                out.append("the %s overlaps the copper of %s pad %s (net %s)" % (what, fp.GetReference(), p.GetNumber(), p.GetNetname() or "none"))
+                break
     return out
+
+
+def pad_copper_hits(p, layer, x, y, r):
+    """The disk (x, y, r) meets the pad's real copper on layer. KiCad's
+    effective polygon (custom shapes, rings, rounded corners; error inside
+    the true shape, so never larger) is tested exactly; a pad without one
+    is left to DRC."""
+    try:
+        ps = p.GetEffectivePolygon(layer, pcbnew.ERROR_INSIDE)
+    except Exception:
+        return False
+    if ps is None or ps.OutlineCount() == 0:
+        return False
+    if ps.Contains(vec((x, y))):
+        return True
+    for i in range(ps.OutlineCount()):
+        for c in [chain_mm(ps.Outline(i))] + [chain_mm(ps.Hole(i, j)) for j in range(ps.HoleCount(i))]:
+            for k in range(len(c)):
+                if pt_seg((x, y), c[k], c[(k + 1) % len(c)]) < r:
+                    return True
+    return False
 
 
 def track_dist(t, p):
@@ -777,23 +805,6 @@ def track_dist(t, p):
             arc[4] = sw - 2 * math.pi  # the arc runs the other way round
         return pt_arc(p, arc)
     return pt_seg(p, a, b)
-
-
-def track_conflict(t, x, y, rd, rp, pth, net, clr, hclr):
-    """Why a new hole at (x, y) (drill radius rd, pad radius rp) cannot sit
-    by track t: an NPTH drill within the hole clearance of the track copper
-    (any net), a PTH ring within the copper clearance of a track of another
-    net, or a PTH drill within the hole clearance of any track."""
-    d = track_dist(t, (x, y)) - mm(t.GetWidth()) / 2
-    at = "the %s on %s at (%s, %s)-(%s, %s)" % ("arc" if t.Type() == pcbnew.PCB_ARC_T else "track", pcbnew.LayerName(t.GetLayer()),
-                                                  fmt_num(mm(t.GetStart().x)), fmt_num(mm(t.GetStart().y)), fmt_num(mm(t.GetEnd().x)), fmt_num(mm(t.GetEnd().y)))
-    if pth and t.GetNetname() != net and d - rp < clr:
-        return "the pad is %.3f mm from %s (net %s); the copper clearance is %g mm" % (d - rp, at, t.GetNetname() or "none", clr)
-    if not pth and d - rd < hclr:
-        return "the hole is %.3f mm from %s; the board's hole clearance is %g mm" % (d - rd, at, hclr)
-    if pth and t.GetNetname() == net and net and d - rd < hclr:
-        return "the drill is %.3f mm from %s; the board's hole clearance is %g mm" % (d - rd, at, hclr)
-    return ""
 
 
 def next_refs(board, count, taken):
@@ -816,7 +827,6 @@ def op_holes(board, spec, P):
         P.add("E_BOARD_NO_OUTLINE", "holes", "%s: hole positions cannot be checked" % what,
               "draw a closed outline first (`kicad board outline`)")
         return None
-    h2h = mm(board.GetDesignSettings().m_HoleToHoleMin)
     used = {fp.GetReference() for fp in board.GetFootprints()}
     nets = []
     for i, h in enumerate(holes):
@@ -832,12 +842,7 @@ def op_holes(board, spec, P):
         if why:
             P.add("E_BOARD_GEOMETRY", f, "%s does not fit on the board: %s" % (at, why), "move it inside the outline, away from the edge and cutouts")
         for why in hole_conflicts(board, h):
-            P.add("E_BOARD_OVERLAP", f, "%s: %s" % (at, why), "move the hole clear of existing pads, vias and holes")
-        for j in range(i):
-            o = holes[j]
-            gap = math.hypot(o["x"] - h["x"], o["y"] - h["y"]) - (o["drill"] + h["drill"]) / 2
-            if gap < h2h:
-                P.add("E_BOARD_OVERLAP", f, "%s is %.3f mm from holes[%d]; the board's hole-to-hole minimum is %g mm" % (at, gap, j, h2h), "move the holes apart")
+            P.add("E_BOARD_OVERLAP", f, "%s: %s" % (at, why), "move the hole clear of existing pads, vias, tracks and holes (clearances are then checked by DRC)")
     if P:
         return None
     auto = next_refs(board, sum(1 for h in holes if not h.get("ref")), [h["ref"] for h in holes if h.get("ref")])
@@ -886,7 +891,7 @@ def op_holes(board, spec, P):
         fp.SetAttributes(pcbnew.FP_BOARD_ONLY | pcbnew.FP_EXCLUDE_FROM_BOM | pcbnew.FP_EXCLUDE_FROM_POS_FILES)
         fp.SetLocked(True)
         board.Add(fp)
-        created.append({"kind": "mounting-hole", "uuid": uuid_of(fp), "name": ref})
+        created.append({"kind": "mounting-hole", "uuid": uuid_of(fp), "name": ref, "parts": [uuid_of(pad)]})
     return refill_filled(board, {"created": created, "removed": []})
 
 
@@ -1073,10 +1078,14 @@ def verify_zone(board, spec, res, V):
         return
     V += compare("zone", expect_zone(spec, res["summary"]["layers"], res["expectPolygon"]), read_zone(board, z))
     if spec["fill"]:
-        area = sum(abs(z.GetFilledPolysList(l).Area()) for l in z.GetLayerSet().CuStack() if z.HasFilledPolysForLayer(l))
-        res["summary"]["filledAreaMm2"] = round(area / 1e12, 3)
-        if area <= 0:
-            V.append("the zone filled to nothing (outside the board, or covered by a keepout that forbids pours): give it a shape on the board")
+        per = {}
+        for l in z.GetLayerSet().CuStack():
+            per[board.GetLayerName(l)] = round(abs(z.GetFilledPolysList(l).Area()) / 1e12, 3) if z.HasFilledPolysForLayer(l) else 0.0
+        res["summary"]["filledAreaMm2"] = round(sum(per.values()), 3)
+        res["summary"]["filledAreaByLayerMm2"] = per
+        for name in res["summary"]["layers"]:
+            if per.get(name, 0) <= 0:
+                V.append("the zone filled to nothing on %s (outside the board, or covered there by a keepout that forbids pours)" % name)
 
 
 # ── text ────────────────────────────────────────────────────────────────────

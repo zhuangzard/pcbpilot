@@ -456,3 +456,44 @@ func TestKicadBoardReportAlias(t *testing.T) {
 		t.Errorf("report of the refused run: %s", b)
 	}
 }
+
+func TestKicadBoardDRCByDefault(t *testing.T) {
+	_, pcb := boardFixture(t)
+	orig, _ := os.ReadFile(pcb)
+	keep := &kicad.KeepoutSpec{Shape: kicad.BoardShape{Rect: &kicad.BoardRect{X: 1, Y: 1, Width: 2, Height: 2}}}
+	// A copper/hole op runs DRC without --drc, and a new error refuses it.
+	f := &fakeBoardTools{drc: []*kicad.DRCReport{{}, {Violations: []kicad.Violation{{Rule: "clearance", Objs: []string{"u-new"}, Section: "violations"}}}}}
+	rep := &kicadBoardReport{}
+	runKicadBoard(rep, "keepout", keep, kicadBoardOpts{pcb: pcb, inPlace: true}, f)
+	if rep.exit != 6 || len(f.druSeen) != 2 || len(rep.Written) != 0 {
+		t.Fatalf("default DRC: exit %d, %d DRC runs, written %v", rep.exit, len(f.druSeen), rep.Written)
+	}
+	// --no-drc: unverified, exit 5, nothing written.
+	f = &fakeBoardTools{}
+	rep = &kicadBoardReport{}
+	runKicadBoard(rep, "keepout", keep, kicadBoardOpts{pcb: pcb, inPlace: true, noDRC: true}, f)
+	if rep.exit != 5 || rep.Verdict != gate.Skip || rep.OK || len(rep.Written) != 0 || len(f.druSeen) != 0 {
+		t.Fatalf("--no-drc: exit %d verdict %s ok %v written %v", rep.exit, rep.Verdict, rep.OK, rep.Written)
+	}
+	if b, _ := os.ReadFile(pcb); !bytes.Equal(b, orig) {
+		t.Fatal("--no-drc wrote the board")
+	}
+	// --no-drc --force-unverified: written, still exit 5 and not ok.
+	rep = &kicadBoardReport{}
+	runKicadBoard(rep, "keepout", keep, kicadBoardOpts{pcb: pcb, inPlace: true, noDRC: true, forceUnverified: true}, f)
+	if rep.exit != 5 || rep.OK || len(rep.Written) != 1 {
+		t.Fatalf("--force-unverified: exit %d ok %v written %v", rep.exit, rep.OK, rep.Written)
+	}
+	// --force-unverified alone is refused; text runs DRC only with --drc.
+	rep = &kicadBoardReport{}
+	runKicadBoard(rep, "keepout", keep, kicadBoardOpts{pcb: pcb, inPlace: true, forceUnverified: true}, f)
+	if rep.exit != 2 {
+		t.Errorf("--force-unverified without --no-drc: exit %d", rep.exit)
+	}
+	f = &fakeBoardTools{}
+	rep = &kicadBoardReport{}
+	runKicadBoard(rep, "text", textSpec(), kicadBoardOpts{pcb: pcb, inPlace: true}, f)
+	if !rep.OK || len(f.druSeen) != 0 {
+		t.Errorf("text without --drc ran DRC %d times", len(f.druSeen))
+	}
+}

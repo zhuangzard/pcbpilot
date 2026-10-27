@@ -43,7 +43,15 @@ const (
 type kicadBoardOpts struct {
 	pcb, out, report, spec string
 	inPlace, drc           bool
+	// noDRC skips the default DRC of a copper/hole op: the result is
+	// unverified (exit 5) and is committed only with forceUnverified.
+	noDRC, forceUnverified bool
 }
+
+// boardDRCOps add or change copper or holes: their before/after DRC runs
+// by default and decides (pcbpilot's own pre-checks only catch definite
+// overlaps, never clearances).
+var boardDRCOps = map[string]bool{"outline": true, "stackup": true, "holes": true, "keepout": true, "zone": true}
 
 // kicadBoardTools are the KiCad side effects (stubbed in unit tests).
 type kicadBoardTools interface {
@@ -106,11 +114,18 @@ Writes: --out NEW.kicad_pcb (default; the input is never modified; the project
 lock check, and only if the file still has the bytes the op was computed from).
 The result is saved by pcbnew, loaded again and verified before it is committed;
 outline, stackup and holes are also read back with kicad-cli pcb export stats.
---drc runs kicad-cli DRC on the input and the result and fails on any new
-error-level violation. One JSON report on stdout (and --report FILE).
+
+DRC decides: outline, stackup, holes, keepout and zone run kicad-cli DRC on the
+input and on the result (with the input's .kicad_pro / .kicad_dru: netclasses,
+custom rules) and refuse any new error-level violation. pcbpilot's own checks
+only catch definite overlaps (a drill through copper, a ring on another net's
+copper); every clearance is DRC's. --no-drc skips it: the result is unverified
+(exit 5) and is written only with --force-unverified. text and new run DRC only
+with --drc. One JSON report on stdout (and --report FILE).
 
 Exit status: 0 written, 2 input refused, 4 locked or changed, 5 a check could
-not run, 6 a check failed (nothing written in 2/4/5/6), 1 other errors.`
+not run or was skipped, 6 a check failed (nothing written in 2/4/5/6, except
+--no-drc --force-unverified: written, exit 5), 1 other errors.`
 
 func newKicadBoardCmd(stdout io.Writer) *cobra.Command {
 	c := &cobra.Command{
@@ -129,7 +144,12 @@ func boardCommonFlags(c *cobra.Command, o *kicadBoardOpts, specHelp string) {
 	c.Flags().StringVar(&o.out, "out", "", "write the result to this new .kicad_pcb (with its .kicad_pro); the input is not modified")
 	c.Flags().BoolVar(&o.inPlace, "in-place", false, "replace --pcb itself (KiCad lock check + compare-and-swap)")
 	c.Flags().StringVar(&o.report, "report", "", "also write the JSON report to this file")
-	c.Flags().BoolVar(&o.drc, "drc", false, "run kicad-cli DRC before and after; fail on any new error-level violation")
+	if boardDRCOps[c.Name()] {
+		c.Flags().BoolVar(&o.noDRC, "no-drc", false, "skip the before/after DRC (the result is unverified: exit 5, not written without --force-unverified)")
+		c.Flags().BoolVar(&o.forceUnverified, "force-unverified", false, "with --no-drc: write the unverified result anyway (still exit 5)")
+	} else {
+		c.Flags().BoolVar(&o.drc, "drc", false, "run kicad-cli DRC before and after; fail on any new error-level violation")
+	}
 	if specHelp != "" {
 		c.Flags().StringVar(&o.spec, "spec", "", specHelp)
 	}
@@ -336,12 +356,21 @@ func runKicadBoard(rep *kicadBoardReport, op string, spec kicad.BoardOpSpec, o k
 		rep.Stackup = st.Rows()
 	}
 	rep.Checks = append(rep.Checks, boardStatsChecks(op, spec, tools, stagedIn, stagedOut)...)
-	if o.drc {
+	unverified := false
+	switch {
+	case boardDRCOps[op] && o.noDRC:
+		rep.Checks = append(rep.Checks, gate.Result{Name: "kicad-drc-no-new-errors", Status: gate.Skip,
+			Detail: "--no-drc: clearances, netclasses and custom rules were not checked; the result is unverified"})
+		unverified = o.forceUnverified
+	case boardDRCOps[op] || o.drc:
 		chk, d := boardDRCCheck(tools, op, stagedIn, stagedOut, res.Created, stage)
 		rep.Checks, rep.DRC = append(rep.Checks, chk), d
 	}
 	rep.Verdict = gate.Aggregate(rep.Checks...)
-	if !rep.Verdict.OK() {
+	if unverified && rep.Verdict == gate.Skip {
+		rep.exit = rep.Verdict.ExitCode()
+		rep.Warnings = append(rep.Warnings, "--no-drc --force-unverified: written without DRC; run kicad-cli pcb drc before relying on it")
+	} else if !rep.Verdict.OK() {
 		rep.exit = rep.Verdict.ExitCode()
 		rep.Issues = append(rep.Issues, kicad.BoardIssue{Code: kicad.ErrBoardVerify, Detail: "a check did not pass (see checks); nothing was written",
 			Fix: "fix the cause named in the failing check and run the op again"})
@@ -357,13 +386,16 @@ func runKicadBoard(rep *kicadBoardReport, op string, spec kicad.BoardOpSpec, o k
 		rep.Written = append(rep.Written, c.Path)
 	}
 	rep.Revision = plan.Revision
-	rep.OK = true
+	rep.OK = !unverified
 }
 
 // boardCheckPaths: --pcb / --out / --in-place make sense for op.
 func boardCheckPaths(op string, o kicadBoardOpts) error {
 	bad := func(field, detail, fix string) error {
 		return &kicad.BoardError{Op: op, Issues: []kicad.BoardIssue{{Code: kicad.ErrBoardArg, Field: field, Detail: detail, Fix: fix}}}
+	}
+	if o.forceUnverified && !o.noDRC {
+		return bad("force-unverified", "--force-unverified only goes with --no-drc", "drop --force-unverified (the op is verified by DRC by default)")
 	}
 	if op == "new" {
 		if o.pcb != "" || o.inPlace {
@@ -613,6 +645,9 @@ func boardDRCCheck(tools kicadBoardTools, op, in, out string, created []kicad.Bo
 	ours := map[string]bool{}
 	for _, c := range created {
 		ours[c.UUID] = true
+		for _, u := range c.Parts {
+			ours[u] = true
+		}
 	}
 	for _, v := range after.Violations {
 		k := drcKey(v)
