@@ -9,6 +9,7 @@ package app
 import (
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -128,6 +129,7 @@ func kicadFixPwrFlags(root string, erc *kicad.ERCReport) []kicadPwrFlagFix {
 	}
 	byNet := map[string][]spot{}
 	var order []string
+	pins := ercPinSnap{}
 	for _, v := range erc.Violations {
 		if v.Type != "power_pin_not_driven" || v.File == "" {
 			continue
@@ -146,7 +148,7 @@ func kicadFixPwrFlags(root string, erc *kicad.ERCReport) []kicadPwrFlagFix {
 			if _, seen := byNet[net]; !seen {
 				order = append(order, net)
 			}
-			byNet[net] = append(byNet[net], spot{v.File, it.Pos})
+			byNet[net] = append(byNet[net], spot{v.File, pins.at(v.File, ref, pin, it.Pos)})
 		}
 	}
 	floor := 1
@@ -187,6 +189,34 @@ func kicadFixPwrFlags(root string, erc *kicad.ERCReport) []kicadPwrFlagFix {
 		}
 	}
 	return out
+}
+
+// ercPinSnap resolves an ERC pin item to the pin's exact sheet point. The
+// report's position is rounded to 0.0001 of its unit — 0.01 mm on KiCad
+// <= 10.0.6, whose positions are 1/100 mm (kicad.ercPosScale) — so a pin
+// off the 0.01 mm grid would be missed by a wire drawn there. The pin of
+// that reference on that sheet is taken when it lies within 1.27 mm of the
+// report (a multi-instance sheet can carry another instance's reference);
+// otherwise the report's position stands.
+type ercPinSnap map[string]*kicad.SchEditor
+
+func (c ercPinSnap) at(file, ref, pin string, reported kicad.Pt) kicad.Pt {
+	e, ok := c[file]
+	if !ok {
+		e, _ = kicad.OpenSchematicFile(file)
+		c[file] = e
+	}
+	if e == nil {
+		return reported
+	}
+	pp, err := e.SymbolPinPositions(ref)
+	if err != nil {
+		return reported
+	}
+	if p, ok := pp[pin]; ok && math.Hypot(p.X-reported.X, p.Y-reported.Y) <= 1.27 {
+		return p
+	}
+	return reported
 }
 
 // kicadPlacePwrFlag tries stubs of 2.54/5.08/7.62 mm right, left, down, up

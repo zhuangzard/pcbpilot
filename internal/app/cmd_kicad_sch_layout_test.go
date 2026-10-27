@@ -219,11 +219,37 @@ func TestKicadSchCheckFixPwrFlag(t *testing.T) {
 	if undriven(r) != 0 || len(r.Fixed) != 2 || r.Findings != 0 {
 		t.Fatalf("after the fix: %d undriven, fixed %+v, findings %d", undriven(r), r.Fixed, r.Findings)
 	}
+	// each flag hangs off the reported pin itself — on KiCad <= 10.0.6 the
+	// raw report puts them 100× too close to the origin (KiCad #25582)
+	pinAt := map[string]kicad.Pt{"GND": {X: 50.8, Y: 54.61}, "+3V3": {X: 63.5, Y: 92.71}}
+	for _, f := range r.Fixed {
+		if f.At != pinAt[f.Net] {
+			t.Errorf("PWR_FLAG on %s at %+v, want %+v (ERC posScale %v, %s)", f.Net, f.At, pinAt[f.Net], r.ERC.PosScale, r.ERC.KicadVersion)
+		}
+	}
 	if r.ERC.Errors != 2 { // R3's two unconnected pins remain, as they should
 		t.Fatalf("ERC errors %d", r.ERC.Errors)
 	}
 	if cmp := kicad.ComparePinNets(before, pinNets(t, sheet), nil); !cmp.Equal || cmp.NamesEqual != cmp.NetsA {
 		t.Fatalf("PWR_FLAG changed the netlist: %+v", cmp)
+	}
+}
+
+func TestERCPinSnap(t *testing.T) {
+	sheet := autoFixture(t) // R3 at (88.9, 88.9), pin 1 at (88.9, 85.09)
+	c := ercPinSnap{}
+	for _, x := range []struct {
+		ref, pin  string
+		rep, want kicad.Pt
+	}{
+		{"R3", "1", kicad.Pt{X: 88.9, Y: 85.1}, kicad.Pt{X: 88.9, Y: 85.09}},      // rounded report → the pin
+		{"R3", "1", kicad.Pt{X: 0.889, Y: 0.8509}, kicad.Pt{X: 0.889, Y: 0.8509}}, // far off: the report stands
+		{"R9", "1", kicad.Pt{X: 88.9, Y: 85.1}, kicad.Pt{X: 88.9, Y: 85.1}},       // no such symbol
+		{"R3", "7", kicad.Pt{X: 88.9, Y: 85.1}, kicad.Pt{X: 88.9, Y: 85.1}},       // no such pin
+	} {
+		if got := c.at(sheet, x.ref, x.pin, x.rep); got != x.want {
+			t.Errorf("%s.%s at %+v → %+v, want %+v", x.ref, x.pin, x.rep, got, x.want)
+		}
 	}
 }
 

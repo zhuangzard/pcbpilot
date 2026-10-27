@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -34,15 +35,22 @@ type ERCViolation struct {
 	Items       []ERCItem `json:"items"`
 }
 
-// ERCReport is kicad-cli's ERC of a hierarchy.
+// ERCReport is kicad-cli's ERC of a hierarchy. Item positions are sheet
+// millimetres: PosScale is the factor applied to what kicad-cli reported
+// (100 for KiCad <= 10.0.6, see ercPosScale), PosNote says why.
 type ERCReport struct {
-	Errors     int            `json:"errors"`
-	Warnings   int            `json:"warnings"`
-	Violations []ERCViolation `json:"violations"`
+	Errors       int            `json:"errors"`
+	Warnings     int            `json:"warnings"`
+	KicadVersion string         `json:"kicadVersion,omitempty"`
+	PosScale     float64        `json:"posScale"`
+	PosNote      string         `json:"posNote,omitempty"`
+	Violations   []ERCViolation `json:"violations"`
 }
 
 type ercJSON struct {
-	Sheets []struct {
+	KicadVersion    string `json:"kicad_version"`
+	CoordinateUnits string `json:"coordinate_units"`
+	Sheets          []struct {
 		Path       string `json:"path"`
 		UUIDPath   string `json:"uuid_path"`
 		Violations []struct {
@@ -81,17 +89,44 @@ func RunERC(root string) (*ERCReport, error) {
 	if err != nil {
 		return nil, fmt.Errorf("kicad-cli wrote no ERC report: %s", strings.TrimSpace(buf.String()))
 	}
+	files, _ := SheetPaths(root)
+	// a report without kicad_version (older kicad-cli) asks the binary
+	return ParseERCReport(data, files, func() string {
+		vc, vcancel := SchCLICommand(cli, "version")
+		defer vcancel()
+		b, _ := vc.Output()
+		return strings.TrimSpace(string(b))
+	})
+}
+
+// ParseERCReport parses kicad-cli's ERC JSON; files maps uuid paths to sheet
+// files (SheetPaths), cliVersion (may be nil) is asked only when the report
+// names no kicad_version. Item positions come out in mm (ercPosScale).
+func ParseERCReport(data []byte, files map[string]string, cliVersion func() string) (*ERCReport, error) {
 	var x ercJSON
 	if err := json.Unmarshal(data, &x); err != nil {
 		return nil, fmt.Errorf("parse ERC report: %w", err)
 	}
-	files, _ := SheetPaths(root)
-	r := &ERCReport{}
+	ver := strings.TrimSpace(x.KicadVersion)
+	if ver == "" && cliVersion != nil {
+		ver = cliVersion()
+	}
+	var pos []Pt
+	for _, s := range x.Sheets {
+		for _, v := range s.Violations {
+			for _, it := range v.Items {
+				pos = append(pos, Pt{it.Pos.X, it.Pos.Y})
+			}
+		}
+	}
+	scale, note := ercPosScale(ver, pos)
+	r := &ERCReport{KicadVersion: ver, PosScale: scale, PosNote: note}
 	for _, s := range x.Sheets {
 		for _, v := range s.Violations {
 			ev := ERCViolation{Sheet: s.Path, UUIDPath: s.UUIDPath, File: files[s.UUIDPath], Type: v.Type, Severity: v.Severity, Description: v.Description}
 			for _, it := range v.Items {
-				ev.Items = append(ev.Items, ERCItem{Description: it.Description, Pos: Pt{it.Pos.X, it.Pos.Y}, UUID: it.UUID})
+				at := Pt{round4mm(it.Pos.X * scale), round4mm(it.Pos.Y * scale)}
+				ev.Items = append(ev.Items, ERCItem{Description: it.Description, Pos: at, UUID: it.UUID})
 			}
 			switch v.Severity {
 			case "error":
@@ -103,6 +138,56 @@ func RunERC(root string) (*ERCReport, error) {
 		}
 	}
 	return r, nil
+}
+
+// kicad-cli up to 10.0.6 writes ERC item positions in 1/100 mm units while
+// the report says "coordinate_units": "mm" (KiCad issue #25582, fixed in
+// 10.0.7): a pin at (50.8, 54.61) is reported at (0.508, 0.5461).
+const ercBugScale = 100
+
+// ercMaxPageMM is KiCad's largest schematic page (120000 mil): a coordinate
+// beyond it divided by 100 cannot be a scaled-down report.
+const ercMaxPageMM = 3048.0
+
+// ercTinyMM bounds a scaled-down report of an unknown version: every item
+// within 12 mm of the origin (A0 is 1189 mm wide, 11.89 scaled). Real items
+// sit inside the 10 mm frame border, so a genuine mm report never has all
+// of them in that corner.
+const ercTinyMM = 12.0
+
+var ercVerRe = regexp.MustCompile(`(\d+)\.(\d+)\.(\d+)`)
+
+// ercPosScale is the factor that turns a report's item positions into mm.
+// Known-affected versions (10.0.0–10.0.6) get 100 unless a position is
+// too far out to be scaled down (a patched build); 10.0.7+, later 10.x
+// releases and 11+ get 1. An unknown or unparsable version (9.x, a 10.99
+// nightly, none) is decided from the positions: 100 only when every one is
+// within ercTinyMM of the origin — wrongly scaling a real report would
+// throw flags 100× off the page, the guard keeps that from happening.
+func ercPosScale(version string, pos []Pt) (float64, string) {
+	maxAbs := 0.0
+	for _, p := range pos {
+		maxAbs = max(maxAbs, math.Abs(p.X), math.Abs(p.Y))
+	}
+	m := ercVerRe.FindStringSubmatch(version)
+	if m != nil {
+		major, _ := strconv.Atoi(m[1])
+		minor, _ := strconv.Atoi(m[2])
+		patch, _ := strconv.Atoi(m[3])
+		if major == 10 && minor == 0 && patch <= 6 {
+			if maxAbs*ercBugScale > ercMaxPageMM {
+				return 1, fmt.Sprintf("KiCad %s normally reports ERC positions 100× too small (#25582), but this report has a position at %s mm: taken as mm", version, F(maxAbs))
+			}
+			return ercBugScale, fmt.Sprintf("KiCad %s reports ERC positions 100× too small (#25582, fixed in 10.0.7): scaled ×100 to mm", version)
+		}
+		if (major == 10 && minor < 99) || major > 10 {
+			return 1, ""
+		}
+	}
+	if len(pos) > 0 && maxAbs <= ercTinyMM {
+		return ercBugScale, fmt.Sprintf("KiCad version %q not known for ERC positions; every position is within %s mm of the origin, so they are taken as 1/100 mm (#25582) and scaled ×100", version, F(ercTinyMM))
+	}
+	return 1, ""
 }
 
 // SheetPaths maps each sheet instance's uuid path ("/root", "/root/sheet")
