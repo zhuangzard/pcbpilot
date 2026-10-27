@@ -698,3 +698,82 @@ func TestSbGuardChecksUnclassifiedTargets(t *testing.T) {
 		t.Fatal("checkpoint lacks the unclassified target")
 	}
 }
+
+// erc.json (and the other reports) go through the same guard as the sheets.
+func TestSchEditRefusesEditedReport(t *testing.T) {
+	out := sbGuardBuild(t)
+	if st := mustSbState(t, out); !sbContains(st.Reports, "erc.json") || st.Manifest["erc.json"] == "" {
+		t.Fatalf("erc.json not recorded: %+v", st.Reports)
+	}
+	erc := filepath.Join(out, "erc.json")
+	if err := os.WriteFile(erc, []byte(`{"note":"my annotated ERC"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := runSchEdit(sbOptions{OutDir: out, NoIntent: true, PlannerBudget: 20000}, sbGuardOps)
+	if err != nil || rep.Error == nil || rep.Error.Code != "EXTERNAL_EDIT" || strings.Join(rep.External.Changed, ",") != "erc.json" {
+		t.Fatalf("edited erc.json: %v %+v %+v", err, rep.Error, rep.External)
+	}
+	if b, _ := os.ReadFile(erc); string(b) != `{"note":"my annotated ERC"}` {
+		t.Fatal("refused edit replaced erc.json")
+	}
+	rep, err = runSchEdit(sbOptions{OutDir: out, NoIntent: true, PlannerBudget: 20000, DiscardExternal: true}, sbGuardOps)
+	if err != nil || !rep.OK || rep.External == nil {
+		t.Fatalf("override: %v %+v", err, rep.Error)
+	}
+	if b, _ := os.ReadFile(filepath.Join(sbCheckpointDir(out), strconv.Itoa(rep.External.Checkpoint), "erc.json")); string(b) != `{"note":"my annotated ERC"}` {
+		t.Fatal("pre-discard checkpoint lacks the edited erc.json")
+	}
+	if ents, _ := filepath.Glob(filepath.Join(sbMetaDir(out), "publish-backup-*")); len(ents) != 0 {
+		t.Fatalf("backup left after a successful commit: %v", ents)
+	}
+}
+
+func TestSbKicadLockNames(t *testing.T) {
+	out := t.TempDir()
+	sbWriteRel(t, out, "notes.lck", "not KiCad")
+	sbWriteRel(t, out, "sub/build.lck", "not KiCad")
+	if x := sbDetect(t, out, nil, nil); len(x.Locks) != 0 {
+		t.Fatalf("a stray *.lck counted as a KiCad lock: %v", x.Locks)
+	}
+	sbWriteRel(t, out, "~p.kicad_sch.lck", "KiCad")
+	if x := sbDetect(t, out, nil, nil); strings.Join(x.Locks, ",") != "~p.kicad_sch.lck" {
+		t.Fatalf("KiCad lock: %v", x.Locks)
+	}
+}
+
+// A save to a sheet the final snapshot already read: publication moves each
+// target aside first, sees the hash differ, puts everything back and aborts.
+func TestSchEditSaveDuringFinalSnapshot(t *testing.T) {
+	out := sbGuardBuild(t)
+	sheet := filepath.Join(out, "p.kicad_sch")
+	before := map[string][]byte{}
+	for _, f := range []string{"p.kicad_pro", "sym-lib-table", "erc.json"} {
+		before[f], _ = os.ReadFile(filepath.Join(out, f))
+	}
+	defer func() { sbTestDuringPrepare, sbTestScanFile = nil, nil }()
+	var edited []byte
+	sbTestDuringPrepare = func(string) {
+		sbTestScanFile = func(rel string) {
+			if rel == "p.kicad_sch" {
+				sbTestScanFile = nil
+				edited = sbGuardAppend(t, sheet)
+			}
+		}
+	}
+	rep, err := runSchEdit(sbOptions{OutDir: out, NoIntent: true, PlannerBudget: 20000}, sbGuardOps)
+	sbTestDuringPrepare, sbTestScanFile = nil, nil
+	if err != nil || rep.Error == nil || rep.Error.Code != "CONCURRENT_CHANGE" || !strings.Contains(rep.Error.Message, "p.kicad_sch") {
+		t.Fatalf("save during the final snapshot: %v %+v", err, rep.Error)
+	}
+	if b, _ := os.ReadFile(sheet); !bytes.Equal(b, edited) {
+		t.Fatal("the saved sheet was overwritten")
+	}
+	for f, want := range before {
+		if b, _ := os.ReadFile(filepath.Join(out, f)); !bytes.Equal(b, want) {
+			t.Errorf("%s was not put back", f)
+		}
+	}
+	if ents, _ := filepath.Glob(filepath.Join(sbMetaDir(out), "publish-backup-*")); len(ents) != 1 {
+		t.Errorf("the backup of an aborted publication must be kept: %v", ents)
+	}
+}

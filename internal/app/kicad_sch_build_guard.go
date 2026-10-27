@@ -32,6 +32,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // test seams: I/O errors (fail closed) and saves at the racy points
@@ -40,6 +41,7 @@ var (
 	sbReadDir           = os.ReadDir
 	sbTestBeforeCommit  func(out string) // after generation and gates, before phase 2
 	sbTestAfterPublish  func(out string) // after the files are copied into --out
+	sbTestScanFile      func(rel string) // after each file a snapshot read
 	sbTestDuringPrepare func(out string) // after the discard checkpoint and staged hashing, before the live re-check
 )
 
@@ -174,7 +176,7 @@ func sbTakeSnapshot(out string) (*sbSnapshot, error) {
 				}
 				continue
 			}
-			if strings.HasSuffix(ln, ".lck") {
+			if sbKicadLock(ln) {
 				s.Locks = append(s.Locks, r)
 				continue
 			}
@@ -187,6 +189,9 @@ func sbTakeSnapshot(out string) (*sbSnapshot, error) {
 				return fmt.Errorf("read %s: %w", filepath.Join(dir, n), err)
 			}
 			s.Files[r] = sbContentHash(r, b)
+			if sbTestScanFile != nil {
+				sbTestScanFile(r)
+			}
 			if strings.HasSuffix(ln, ".kicad_sch") {
 				for _, m := range sbSheetFileRe.FindAllSubmatch(b, -1) {
 					refs = append(refs, filepath.Join(dir, filepath.FromSlash(string(m[1]))))
@@ -259,6 +264,24 @@ type sbBasis struct {
 	// NoRecord: --out holds no pcbpilot build at all; only files the build
 	// would overwrite conflict.
 	NoRecord bool
+	// LegacyReports: the record predates report tracking (sbState.Reports);
+	// pcbpilot's own report files count as owned.
+	LegacyReports bool
+}
+
+// sbReportNames are the reports sch-build writes into --out besides the
+// project (render/*.svg too).
+var sbReportNames = []string{"erc.json", "connectivity.json", "values.json", "intent-spec.json", "intent.json", "intent.md"}
+
+func sbIsReport(f string) bool {
+	f = sbFoldName(f)
+	return sbContains(sbReportNames, f) || strings.HasPrefix(f, "render/")
+}
+
+// sbKicadLock: KiCad's lock files are ~<file>.lck; another *.lck is not one.
+func sbKicadLock(name string) bool {
+	name = sbFoldName(name)
+	return strings.HasPrefix(name, "~") && strings.HasSuffix(name, ".lck")
 }
 
 // sbGuardCheckpoints lists the checkpoints for the comparison; unlike
@@ -316,7 +339,7 @@ func sbCheckpointHashes(out string, meta sbCheckpointMeta) (map[string]string, e
 // checkpoint is not an edit — else the latest checkpoint, else nothing.
 func sbLoadBasis(out string, st *sbState, snap *sbSnapshot) (*sbBasis, error) {
 	if st != nil && st.Manifest != nil {
-		return &sbBasis{Name: "manifest", Hashes: st.Manifest, Owned: st.Files}, nil
+		return &sbBasis{Name: "manifest", Hashes: st.Manifest, Owned: append(append([]string(nil), st.Files...), st.Reports...), LegacyReports: st.Reports == nil}, nil
 	}
 	list, err := sbGuardCheckpoints(out)
 	if err != nil {
@@ -328,7 +351,7 @@ func sbLoadBasis(out string, st *sbState, snap *sbSnapshot) (*sbBasis, error) {
 		if err != nil {
 			return nil, err
 		}
-		b := &sbBasis{Name: "checkpoint " + strconv.Itoa(list[i].N), Hashes: h, Owned: list[i].Files}
+		b := &sbBasis{Name: "checkpoint " + strconv.Itoa(list[i].N), Hashes: h, Owned: list[i].Files, LegacyReports: true}
 		if latest == nil {
 			latest = b
 		}
@@ -339,9 +362,9 @@ func sbLoadBasis(out string, st *sbState, snap *sbSnapshot) (*sbBasis, error) {
 	if latest != nil {
 		return latest, nil
 	}
-	b := &sbBasis{Name: "none", Hashes: map[string]string{}, NoRecord: st == nil}
+	b := &sbBasis{Name: "none", Hashes: map[string]string{}, NoRecord: st == nil, LegacyReports: st != nil}
 	if st != nil {
-		b.Owned = st.Files
+		b.Owned = append(append([]string(nil), st.Files...), st.Reports...)
 	}
 	return b, nil
 }
@@ -372,12 +395,15 @@ func sbDiff(snap *sbSnapshot, b *sbBasis, touch []string) *sbExternalEdits {
 		seen[k] = true
 		c, has := cur[k]
 		r, inRec := rec[k]
+		if b.LegacyReports && sbIsReport(f) {
+			owned[k] = true
+		}
 		switch {
 		case has && !owned[k]:
 			x.Overwrites = append(x.Overwrites, spell(k, f))
 		case has && inRec && c != r:
 			x.Changed = append(x.Changed, spell(k, f))
-		case !has && inRec && owned[k]:
+		case !has && inRec && owned[k] && !sbIsReport(f): // a deleted report is no edit
 			x.Removed = append(x.Removed, f)
 		}
 	}
@@ -434,6 +460,7 @@ type sbGuard struct {
 	o        sbOptions
 	basis    *sbBasis
 	baseline *sbSnapshot
+	base     *sbSnapshot // baseline + existing write/delete targets (beforeCommit)
 }
 
 func sbUnreadable(out string, err error) *sbFailure {
@@ -520,6 +547,7 @@ func (g *sbGuard) beforeCommit(stage string, files, deletes []string, rep *sbRep
 	for f, h := range extra {
 		base.Files[f] = h
 	}
+	g.base = base
 	x := sbDiff(base, g.basis, touch)
 	x.Locks = nil
 	if x.any() {
@@ -612,4 +640,98 @@ func sbReadTargets(out string, snap *sbSnapshot, targets []string) (map[string]s
 		extra[f] = sbContentHash(f, b)
 	}
 	return extra, nil
+}
+
+// publish replaces the targets with the staged files and removes deletes,
+// recoverably: each existing target is first moved into a per-run backup
+// under .pcbpilot and its hash compared with the checked baseline (a save
+// after the final snapshot read that file). On a mismatch or an error
+// everything already replaced is put back, the backup is kept and the
+// commit aborts; after success the backup is removed.
+func (g *sbGuard) publish(stage string, targets, deletes []string) *sbFailure {
+	backup := filepath.Join(sbMetaDir(g.out), "publish-backup-"+strconv.FormatInt(time.Now().UnixNano(), 36))
+	base, _ := sbKeyed(g.base.Files)
+	type done struct {
+		f        string
+		had, put bool
+	}
+	var log []done
+	rollback := func(why string) *sbFailure {
+		for i := len(log) - 1; i >= 0; i-- {
+			d := log[i]
+			dst, _ := sbSafeJoin(g.out, d.f)
+			if d.put {
+				_ = os.Remove(dst)
+			}
+			if d.had {
+				src, _ := sbSafeJoin(backup, d.f)
+				_ = os.Rename(src, dst)
+			}
+		}
+		return &sbFailure{Code: "CONCURRENT_CHANGE", Message: g.out + " changed while sch-build published it: " + why + "; every file was put back",
+			Fix: "nothing was written (a file that could not be put back stays in " + backup + "); if KiCad has the project open, save and close it there, then re-run"}
+	}
+	step := func(f string, write bool) *sbFailure {
+		dst, err := sbSafeJoin(g.out, f)
+		if err != nil {
+			return rollback(err.Error())
+		}
+		d := done{f: f}
+		want, inBase := base[sbPathKey(f)]
+		if _, err := os.Lstat(dst); err == nil {
+			bk, _ := sbSafeJoin(backup, f)
+			if err := os.MkdirAll(filepath.Dir(bk), 0o755); err != nil {
+				return rollback(err.Error())
+			}
+			if err := os.Rename(dst, bk); err != nil {
+				return rollback(f + ": " + err.Error())
+			}
+			d.had = true
+			log = append(log, d)
+			b, err := sbReadFile(bk)
+			if err != nil {
+				return rollback(f + ": " + err.Error())
+			}
+			if !inBase || sbContentHash(f, b) != want {
+				return rollback(f + " was saved after the final check")
+			}
+		} else if inBase {
+			return rollback(f + " was removed after the final check")
+		} else {
+			log = append(log, d)
+		}
+		if !write {
+			return nil
+		}
+		src, _ := sbSafeJoin(stage, f)
+		b, err := os.ReadFile(src)
+		if err != nil {
+			return rollback(err.Error())
+		}
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return rollback(err.Error())
+		}
+		tmp := dst + ".pcbpilot-tmp"
+		if err := os.WriteFile(tmp, b, 0o644); err != nil {
+			return rollback(err.Error())
+		}
+		log[len(log)-1].put = true
+		if err := os.Rename(tmp, dst); err != nil {
+			_ = os.Remove(tmp)
+			return rollback(err.Error())
+		}
+		return nil
+	}
+	for _, f := range deletes {
+		if fail := step(f, false); fail != nil {
+			return fail
+		}
+	}
+	for _, f := range targets {
+		if fail := step(f, true); fail != nil {
+			return fail
+		}
+	}
+	_ = os.RemoveAll(backup)
+	return nil
 }
