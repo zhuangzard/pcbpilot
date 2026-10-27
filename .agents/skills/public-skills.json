@@ -8,6 +8,7 @@
     "pcbpilot-kicad-pcb",
     "pcbpilot-kicad-schematic",
     "pcbpilot-library",
-    "pcbpilot-review"
+    "pcbpilot-review",
+    "pcbpilot-sim-report"
   ]
 }
