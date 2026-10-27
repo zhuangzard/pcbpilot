@@ -147,7 +147,7 @@ pcbpilot kicad pcb-sync ... --in-place --apply-plan plan.json --revision <rev>
   （dnp、exclude_from_bom）→ `setPadNet` → `orphan`。`--update values,footprints,fields,refs,dnp` 选类别（焊盘网总是同步），
   `--fields-ignore` 排除字段，`--rename-nets=false` 关改名。
 - **孤儿**：没有符号认领的封装（含 exclude_from_board 符号的封装）默认 `--orphans flag` 只报告；`remove` 删除，**锁定的
-  永不删**（降级为 flag）；板专用（board-only）封装永远不算孤儿、不被改动。走线和铺铜永远不移动、不删除：焊盘离开了有铜的网
+  永不删**（降级为 flag），在 group 里的先移出 group 再删；板专用（board-only）封装永远不算孤儿、不被改动。走线和铺铜永远不移动、不删除：焊盘离开了有铜的网
   → `danglingCopper`，网上一个焊盘都不剩 → `removeNet`（仅报告）。
 - **写入**：新增/换入的库封装文件在规划时记 sha256（`fpSha`，计入 revision），应用时只装这份字节（复制进暂存目录再加载），
   规划后库文件被改 → 退出 4。源板、`.kicad_pro`、`.kicad_dru` 读入时记下字节与哈希；bridge 加载的是复制进暂存目录的这份字节，应用前和提交前
@@ -169,7 +169,8 @@ pcbpilot kicad pcb-sync ... --in-place --apply-plan plan.json --revision <rev>
   5 有门禁没能验证（含 `--no-parity`）· 6 门禁失败（`--out` 输出保留，`--in-place` 未提交）。
 - 原理图按真实依赖图收集：根图 + 图纸符号的 Sheetfile 递归（含 `../` 外部子图；绝对路径的图纸 → `E_SHEET_PATH` 拒绝），
   连同根图旁的 `.kicad_pro` 读一次、记哈希、按原目录结构复制到临时目录；网表导出与 parity 都用这份副本。这些文件和
-  `--netlist` 在应用前、提交前（不提交时在返回成功前）与板一起再核对（被改 → 退出 4）。`--in-place` 无事可做时也验证读入字节的
+  `--netlist` 在应用前、提交前（不提交时在返回成功前；`--check` / `--dry-run` / `--plan-out` 在给出结论或写计划前，库封装文件
+  也一并核对）与板一起再核对（被改 → 退出 4）。`--in-place` 无事可做时也验证读入字节的
   暂存副本，不读活文件。revision 还包含实际发布的工程与规则、将被覆盖的目标板 / 工程 / 规则的哈希或不存在状态，以及每个库封装的
   哈希。
 - **报告** `pcbpilot.kicad.pcb-sync/1`，总是打印到 stdout；`--report` / `--plan-out` 必须以 `.json` 结尾，已存在的文件必须是

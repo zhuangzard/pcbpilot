@@ -2001,6 +2001,11 @@ def sync_apply(pcb, plan_path, out):
                 if p.GetNumber() == op["pad"]:
                     p.SetNet(net_of(board, op["net"], made))
         elif kind == "orphan":
+            # Out of its group first (as a swap does): a group must not keep
+            # a member that left the board.
+            grp = fp.GetParentGroup()
+            if grp is not None:
+                grp.RemoveItem(fp)
             detach(board, fp)
             cur.pop(op["fp"], None)
         done[kind] += 1

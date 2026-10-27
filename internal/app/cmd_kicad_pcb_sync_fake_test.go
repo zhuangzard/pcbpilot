@@ -56,6 +56,7 @@ type fakeSync struct {
 	onParity     func()
 	paritySheets []string
 	onRead       func()
+	onFPInfo     func() // runs inside every footprint-library read
 	reads        []string
 }
 
@@ -79,6 +80,9 @@ func (f *fakeSync) SyncRead(pcb string) (*kicad.SyncInventory, error) {
 }
 
 func (f *fakeSync) FPInfo(refs []kicad.FPRef) (map[string]kicad.SyncFPInfo, []kicad.SyncError, error) {
+	if f.onFPInfo != nil {
+		f.onFPInfo()
+	}
 	m := map[string]kicad.SyncFPInfo{}
 	for _, r := range refs {
 		m[r.Lib+":"+r.Name] = kicad.SyncFPInfo{Pads: []kicad.SyncPad{{Number: "1", Type: "smd"}, {Number: "2", Type: "smd"}},
@@ -818,5 +822,73 @@ func TestPcbSyncRevisionCoversTarget(t *testing.T) {
 	a.applyPlan, a.revision = plan, rep.Revision
 	if rep, code, _ = runSyncCode(t, a); code != 4 || rep.Errors[len(rep.Errors)-1].Code != string(kfile.CodeRevision) {
 		t.Fatalf("target edited after the plan: exit %d %+v", code, rep.Errors)
+	}
+}
+
+// TestPcbSyncReadOnlyRechecksInputs: --check, --dry-run and --plan-out
+// answer only for unchanged inputs. An edit of the root sheet, an external
+// sheet, the supplied netlist or the board while the board is read, or of
+// the board or a library footprint while footprints are read, is exit 4 —
+// also for a --check that plans nothing — and no plan is written.
+func TestPcbSyncReadOnlyRechecksInputs(t *testing.T) {
+	type tc struct {
+		mode    string // check | dry-run | plan-out
+		netlist string
+		when    string // read | fpinfo
+		file    func(dir string) string
+	}
+	ext := func(dir string) string {
+		return filepath.Join(filepath.Dir(dir), "ext-"+filepath.Base(dir), "c.kicad_sch")
+	}
+	in := func(n string) func(string) string { return func(dir string) string { return filepath.Join(dir, n) } }
+	cases := map[string]tc{
+		"check, root sheet":       {"check", fakeNetlist(), "read", in("a.kicad_sch")},
+		"check, external sheet":   {"check", fakeNetlist(), "read", ext},
+		"check, netlist":          {"check", fakeNetlist(), "read", in("net.xml")},
+		"check, board":            {"check", fakeNetlist(), "read", in("a.kicad_pcb")},
+		"dry-run, project":        {"dry-run", fakeNetlist(), "read", in("a.kicad_pro")},
+		"dry-run, board/fp read":  {"dry-run", fakeNetlistR2(), "fpinfo", in("a.kicad_pcb")},
+		"dry-run, library/fp":     {"dry-run", fakeNetlistR2(), "fpinfo", in(filepath.Join("L.pretty", "R.kicad_mod"))},
+		"plan-out, rules":         {"plan-out", fakeNetlist(), "read", in("a.kicad_dru")},
+		"plan-out, sheet/fp read": {"plan-out", fakeNetlistR2(), "fpinfo", in(filepath.Join("sub", "b.kicad_sch"))},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir, o, fake := fakeProject(t, c.netlist)
+			fake.value = "1k" // nothing to change: a zero-op --check
+			switch c.mode {
+			case "check":
+				o.check = true
+			case "dry-run":
+				o.dryRun = true
+			default:
+				o.planOut = filepath.Join(dir, "plan.json")
+			}
+			edit := func() {
+				p := c.file(dir)
+				b, _ := os.ReadFile(p)
+				if err := os.WriteFile(p, append(b, ' '), 0o644); err != nil {
+					t.Error(err)
+				}
+			}
+			if c.when == "read" {
+				fake.onRead = edit
+			} else {
+				fake.onFPInfo = edit
+			}
+			rep, code, _ := runSyncCode(t, o)
+			if code != 4 || rep.OK || rep.Errors[len(rep.Errors)-1].Code != string(kfile.CodeChanged) {
+				t.Fatalf("exit %d %+v", code, rep.Errors)
+			}
+			if fileExists(filepath.Join(dir, "plan.json")) {
+				t.Fatal("a plan was written from changed inputs")
+			}
+		})
+	}
+	// Unchanged inputs: a zero-op --check still succeeds.
+	_, o, fake := fakeProject(t, fakeNetlist())
+	fake.value, o.check = "1k", true
+	if rep, code, _ := runSyncCode(t, o); code != 0 || rep.Verdict != "in-sync" {
+		t.Fatalf("unchanged: exit %d %s", code, rep.Verdict)
 	}
 }

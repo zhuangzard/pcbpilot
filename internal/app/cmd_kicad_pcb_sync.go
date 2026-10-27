@@ -680,6 +680,11 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 	if err != nil {
 		if r, ok := kicad.IsSyncRefusal(err); ok {
 			rep.Errors = append(rep.Errors, r.Errors...)
+			for _, e := range r.Errors {
+				if e.Code == string(kfile.CodeChanged) {
+					return finish("refused", 4) // a file changed while it was read
+				}
+			}
 			return finish("refused", 1)
 		}
 		return fail(errSyncBridge, "", err.Error(), "", 1)
@@ -705,6 +710,28 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 		state("project", effPro), state("rules", effDru),
 		snapState("target-board", targetSnap), snapState("target-project", targetProSnap), snapState("target-rules", targetDruSnap))
 
+	// A read-only answer speaks only for the inputs it was computed from:
+	// every snapshot (board, project, rules, sheets, netlist, target files)
+	// and every library footprint planned with is re-checked before it is
+	// returned (and before a plan is written).
+	if readOnly {
+		if err := sourceUnchanged(); err != nil {
+			return fileErr(err)
+		}
+		if err := targetUnchanged(); err != nil {
+			return fileErr(err)
+		}
+		for _, op := range plan.Ops {
+			if (op.Op != "addFootprint" && op.Op != "swapFootprint") || op.FPSha == "" {
+				continue
+			}
+			src := filepath.Join(op.LibDir, op.Name+".kicad_mod")
+			if sha := fileSHAOrEmpty(src); sha != op.FPSha {
+				return fail(string(kfile.CodeChanged), src, fmt.Sprintf("library footprint %s changed while it was planned (sha256 %s, planned %s)", op.FPID, short12(sha), short12(op.FPSha)),
+					"run pcb-sync again", 4)
+			}
+		}
+	}
 	// Findings of the plan (a netlist pin without its pad) mean the board
 	// cannot be brought in line: --check, --dry-run and --plan-out fail.
 	if readOnly && len(plan.Errors) > 0 {

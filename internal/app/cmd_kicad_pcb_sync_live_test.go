@@ -926,3 +926,40 @@ pcbnew.SaveBoard(sys.argv[1], b)
 		t.Fatalf("exit %d counts %+v ops %+v", code, rep.Counts, rep.Ops)
 	}
 }
+
+// TestPcbSyncLiveRemoveGroupedOrphan: --orphans remove takes a grouped
+// footprint out of its group before deleting it; the group keeps its other
+// members and the saved board reloads cleanly.
+func TestPcbSyncLiveRemoveGroupedOrphan(t *testing.T) {
+	kt := pcbSyncLive(t)
+	_, sch, pcb := ecc83Synced(t)
+	pcbnewScript(t, kt, pcb, `g = pcbnew.PCB_GROUP(b)
+g.SetName("amp")
+b.Add(g)
+for f in b.GetFootprints():
+    if f.GetReference() in ("C2", "R1", "R2"):
+        g.AddItem(f)
+pcbnew.SaveBoard(sys.argv[1], b)
+`)
+	editSch(t, sch, func(e *kicad.SchEditor) {
+		if _, err := e.DeleteSymbol("R2"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	o := syncOpts(sch, pcb)
+	o.inPlace, o.orphans = true, "remove"
+	rep, code := runSync(t, o)
+	if code != 0 || !rep.Committed || rep.Counts.OrphanRemove != 1 {
+		t.Fatalf("exit %d %+v %+v", code, rep.Counts, rep.Errors)
+	}
+	got := scriptResult(t, pcbnewScript(t, kt, pcb, `refs = sorted(f.GetReference() for f in b.GetFootprints())
+groups = [[g.GetName(), sorted(i.GetReference() for i in g.GetItems() if hasattr(i, "GetReference"))] for g in b.Groups()]
+print("RESULT" + json.dumps({"refs": refs, "groups": groups}))
+`))
+	if fmt.Sprint(got["groups"]) != "[[amp [C2 R1]]]" || strings.Contains(fmt.Sprint(got["refs"]), "R2") {
+		t.Fatalf("after removing the grouped orphan: %v", got)
+	}
+	if _, err := kt.SyncRead(pcb); err != nil {
+		t.Fatalf("the saved board does not reload: %v", err)
+	}
+}
