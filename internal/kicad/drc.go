@@ -8,6 +8,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -31,6 +32,9 @@ type Violation struct {
 	Comment  string `json:"comment,omitempty"`
 	// Items are the report's items in order (Objs keeps only their uuids).
 	Items []DRCItem `json:"items,omitempty"`
+	// Description is KiCad's own description, verbatim (Message also
+	// carries the item descriptions after it).
+	Description string `json:"description,omitempty"`
 }
 
 // DRCItem is one object of a violation: KiCad's description ("Footprint
@@ -154,7 +158,7 @@ func ParseDRCWith(data []byte, o DRCParseOptions) (*DRCReport, error) {
 	rep := &DRCReport{KiCadVersion: r.Version, Units: r.Units, Counts: map[string]int{}}
 	add := func(section string, vs []drcJSONViolation) {
 		for _, v := range vs {
-			fv := Violation{Rule: v.Type, Severity: v.Severity, Message: v.Description, Section: section,
+			fv := Violation{Rule: v.Type, Severity: v.Severity, Message: v.Description, Description: v.Description, Section: section,
 				Excluded: v.Excluded || v.Severity == "exclusion", Comment: v.Comment}
 			if fv.Rule == "" {
 				fv.Rule = section
@@ -373,6 +377,29 @@ type DRCPolicy struct {
 type DRUIgnored struct {
 	Name        string   `json:"name"`
 	Constraints []string `json:"constraints"`
+	// Rule is the whole rule in a canonical form (atoms, quoting and
+	// nesting kept, whitespace and comments dropped): name, condition,
+	// layer, severity and every constraint with its values. Its policy
+	// item carries it, so a changed condition is a different item.
+	Rule string `json:"rule"`
+}
+
+// canonicalSexpr renders n with single spaces and quoted atoms re-quoted.
+func canonicalSexpr(n *sx) string {
+	if n == nil {
+		return ""
+	}
+	if !n.isList {
+		if n.Quoted {
+			return strconv.Quote(n.Atom)
+		}
+		return n.Atom
+	}
+	parts := make([]string, len(n.Kids))
+	for i, k := range n.Kids {
+		parts[i] = canonicalSexpr(k)
+	}
+	return "(" + strings.Join(parts, " ") + ")"
 }
 
 // ReadDRUIgnored lists the (severity ignore) rules of a .kicad_dru.
@@ -390,7 +417,7 @@ func ReadDRUIgnored(dru string) ([]DRUIgnored, error) {
 		if s := rule.child("severity"); s == nil || s.arg(0) != "ignore" {
 			continue
 		}
-		ig := DRUIgnored{Name: rule.arg(0)}
+		ig := DRUIgnored{Name: rule.arg(0), Rule: canonicalSexpr(rule)}
 		for _, c := range rule.children("constraint") {
 			ig.Constraints = append(ig.Constraints, c.arg(0))
 		}

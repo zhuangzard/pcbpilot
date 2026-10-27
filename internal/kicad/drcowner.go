@@ -291,7 +291,10 @@ func (ix *BoardIndex) Attribute(v Violation) DRCOwner {
 	// verbatim, tells them apart (parity messages carry names, values and
 	// pin numbers, not measurements).
 	if o.Class == "schematic-parity" {
-		summary, _, _ := strings.Cut(v.Message, "; ")
+		summary := v.Description
+		if summary == "" { // a report written before Description existed
+			summary, _, _ = strings.Cut(v.Message, "; ")
+		}
 		o.Key += "|" + strings.TrimSpace(summary)
 	}
 	return o

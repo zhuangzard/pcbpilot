@@ -407,3 +407,45 @@ func TestKicadFabPreflightIgnoredCustomRule(t *testing.T) {
 		t.Fatalf("waived: %v", s)
 	}
 }
+
+// An ignored custom rule is identified by the whole rule: against a
+// baseline, a changed or removed condition, or a second identical rule, is
+// a new policy failure; the unchanged rule is not.
+func TestKicadDRCIgnoredCustomRuleBaseline(t *testing.T) {
+	fakeKicadCLIEnv(t, "drc/clean.json", "0")
+	rule := func(cond string) string {
+		r := "(rule \"no keepout\" (severity ignore) (constraint disallow track)"
+		if cond != "" {
+			r += " (condition \"A.insideArea('" + cond + "')\")"
+		}
+		return r + ")\n"
+	}
+	board := func(rules ...string) string {
+		pcb := copyDRCBoard(t)
+		dru := strings.TrimSuffix(pcb, ".kicad_pcb") + ".kicad_dru"
+		b, _ := os.ReadFile(dru)
+		_ = os.WriteFile(dru, append(b, []byte(strings.Join(rules, ""))...), 0o644)
+		return pcb
+	}
+	old := board(rule("KO1"))
+	newPolicy := func(pcb string) int {
+		t.Helper()
+		rep, _ := runDRCReport(t, "--pcb", pcb, "--baseline-pcb", old)
+		if rep.Baseline == nil {
+			t.Fatalf("no baseline: %+v", rep.Checks)
+		}
+		return len(rep.Baseline.NewPolicy)
+	}
+	if n := newPolicy(board(rule("KO1"))); n != 0 {
+		t.Errorf("unchanged rule: %d new", n)
+	}
+	for name, pcb := range map[string]string{
+		"condition KO1 -> KO2":          board(rule("KO2")),
+		"condition removed":             board(rule("")),
+		"second identical ignored rule": board(rule("KO1"), rule("KO1")),
+	} {
+		if n := newPolicy(pcb); n != 1 {
+			t.Errorf("%s: %d new policy item(s), want 1", name, n)
+		}
+	}
+}

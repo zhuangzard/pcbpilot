@@ -561,7 +561,7 @@ func TestDiffDRCParityDiscriminator(t *testing.T) {
 	ix := mustIndex(t)
 	field := func(msg string) []OwnedViolation {
 		v := viol("footprint_symbol_field_mismatch", "schematic_parity", item("Footprint R1", "fp-r1", 10, 10))
-		v.Message = msg + "; Footprint R1"
+		v.Message, v.Description = msg+"; Footprint R1", msg
 		return ix.Own([]Violation{v})
 	}
 	base := field("Value field '10k' doesn't match symbol '4k7'")
@@ -587,6 +587,10 @@ func TestDiffDRCParityDiscriminator(t *testing.T) {
 		if d := DiffDRC(field(pair[0]), field(pair[1]), 0.5); len(d.New) != 1 || len(d.Resolved) != 1 {
 			t.Errorf("%q -> %q: %+v", pair[0], pair[1], d)
 		}
+	}
+	// KiCad's description is kept whole, "; " inside a value included.
+	if d := DiffDRC(field("Value field 'part; revision A' doesn't match symbol"), field("Value field 'part; revision B' doesn't match symbol"), 0.5); len(d.New) != 1 || len(d.Resolved) != 1 {
+		t.Errorf("'; ' inside a value: %+v", d)
 	}
 	if d := DiffDRC(field("No pad found for pin 3 (GND) in schematic"), field("  No pad found for pin 3 (GND) in schematic "), 0.5); d.Matched != 1 {
 		t.Errorf("same summary, whitespace only: %+v", d)

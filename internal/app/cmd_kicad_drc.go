@@ -382,15 +382,18 @@ func judgeKicadDRC(rep *kicadDRCReport, o kicadDRCOptions, cur *kicad.DRCRun, cu
 		res := pol.DRCPolicyResult
 		items := res.Hard
 		if rep.Baseline != nil && baseKnown {
-			inBase := map[string]bool{}
+			// A multiset: a second identical silencing is new too.
+			inBase := map[string]int{}
 			for _, h := range basePolicy {
-				inBase[h] = true
+				inBase[h]++
 			}
 			items = nil
 			for _, h := range res.Hard {
-				if !inBase[h] {
-					items = append(items, h)
+				if inBase[h] > 0 {
+					inBase[h]--
+					continue
 				}
+				items = append(items, h)
 			}
 			rep.Baseline.NewPolicy = items
 		}

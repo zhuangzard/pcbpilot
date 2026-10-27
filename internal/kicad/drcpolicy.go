@@ -155,7 +155,7 @@ func EvalDRCPolicy(pol *DRCPolicy, excluded []Violation) *DRCPolicyResult {
 		}
 		for _, c := range cs {
 			put(druConstraintRule(c), "ignored", ".kicad_dru rule "+ig.Name,
-				fmt.Sprintf("IGNORED custom rule %q constraint %s (.kicad_dru severity ignore: DRC does not report it where its condition holds)", ig.Name, c))
+				fmt.Sprintf("IGNORED custom rule %q constraint %s (.kicad_dru severity ignore: DRC does not report it where its condition holds) rule: %s", ig.Name, c, ig.Rule))
 		}
 	}
 	for _, rule := range pol.Ignored {
