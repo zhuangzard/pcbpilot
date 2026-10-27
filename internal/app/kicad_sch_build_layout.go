@@ -712,7 +712,7 @@ func sbFitTitle(b kicad.Box, title string) kicad.Box {
 		n := 0
 		for _, r := range title {
 			n++
-			if r >= 0x1100 && unicode.In(r, unicode.Han, unicode.Hangul, unicode.Hiragana, unicode.Katakana) || r >= 0xFF00 && r <= 0xFFEF {
+			if r >= 0x1100 && unicode.In(r, unicode.Han, unicode.Hangul, unicode.Hiragana, unicode.Katakana) || r >= 0x3000 && r <= 0x303F || r >= 0xFF00 && r <= 0xFFEF {
 				n++
 			}
 		}
