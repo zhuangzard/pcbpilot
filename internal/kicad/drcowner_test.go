@@ -282,6 +282,17 @@ func TestReadEffectiveRulesUnproven(t *testing.T) {
 			func(r *EffectiveRules) bool {
 				return len(r.Space.Unknown) == 1 && strings.Contains(r.Space.Unknown[0], "zone")
 			}},
+		// A same-net physical clearance lowers the copper spacing minimum.
+		{"same-net physical clearance", okPro, "(version 1)\n(rule \"same net\" (constraint physical_clearance (min 0.05mm)) (condition \"A.Net == B.Net\"))\n", "",
+			func(r *EffectiveRules) bool {
+				return near(r.Space.MinMm, 0.05) && r.Space.Covered() && len(r.Space.Unknown) == 0
+			}},
+		{"physical hole clearance", okPro, "(version 1)\n(rule ph (constraint physical_hole_clearance (min 0.08mm)))\n", "",
+			func(r *EffectiveRules) bool { return near(r.Space.MinMm, 0.08) }},
+		{"uninterpreted spacing constraint", okPro, "(version 1)\n(rule z (constraint zone_clearance_future (min 0.1mm)))\n", "",
+			func(r *EffectiveRules) bool { return len(r.Space.Unknown) == 1 }},
+		{"edge clearance is not min-space", okPro, "(version 1)\n(rule e (constraint edge_clearance (min 0.3mm)))\n", "",
+			func(r *EffectiveRules) bool { return len(r.Space.Unknown) == 0 && near(r.Space.MinMm, 0.1) }},
 		{"error severity unconditional rule covers", `{}`, "(version 1)\n(rule e (severity error) (constraint track_width (min 0.15mm)))\n", "",
 			func(r *EffectiveRules) bool { return r.Track.Covered() && len(r.Track.Unknown) == 0 }},
 	}

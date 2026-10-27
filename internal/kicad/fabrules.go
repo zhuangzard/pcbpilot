@@ -254,7 +254,17 @@ func (r *EffectiveRules) addProject(b []byte) error {
 }
 
 // druConstraintItem maps the custom-rule constraints a contract bounds.
-var druConstraintItem = map[string]string{"track_width": "track", "clearance": "space", "hole_size": "drill", "annular_width": "annular"}
+// physical_clearance / physical_hole_clearance (same-net and copper-to-hole
+// spacing included) and hole_clearance / creepage bound the copper spacing
+// too: they only ever lower min-space.
+var druConstraintItem = map[string]string{"track_width": "track", "clearance": "space", "hole_size": "drill", "annular_width": "annular",
+	"physical_clearance": "space", "physical_hole_clearance": "space", "hole_clearance": "space", "creepage": "space"}
+
+// druOtherConstraints are the custom-rule constraints that bound none of the
+// four contract items (edge / hole-to-hole are other fab limits, checked by
+// DRC itself; silk and courtyard are not fabrication); any other constraint
+// with "clearance" in its name is spacing pcbpilot does not interpret.
+var druOtherConstraints = map[string]bool{"edge_clearance": true, "hole_to_hole": true, "silk_clearance": true, "courtyard_clearance": true}
 
 func (r *EffectiveRules) item(name string) *EffectiveMin {
 	switch name {
@@ -292,6 +302,9 @@ func (r *EffectiveRules) addDRU(b []byte) {
 		for _, c := range rule.children("constraint") {
 			item, ok := druConstraintItem[c.arg(0)]
 			if !ok {
+				if strings.Contains(c.arg(0), "clearance") && !druOtherConstraints[c.arg(0)] {
+					r.Space.Unknown = append(r.Space.Unknown, fmt.Sprintf("rule %q constraint %s: a spacing constraint pcbpilot does not interpret", name, c.arg(0)))
+				}
 				continue
 			}
 			e := r.item(item)
