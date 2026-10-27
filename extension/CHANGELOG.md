@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.10.3] — 2026-10-27
+
+**CLI, daemon, Skill and MCP move to 0.10.3. The connector runtime is UNCHANGED (only its version number moves); import the
+0.10.3 `pcbpilot-connector.eext` so the versions match — the daemon pauses design actions until they do.**
+
+Summary: fixes a v0.10.2 regression in `kicad sch-build` on large boards. A 1500-part board that passed every gate on v0.10.0
+failed on v0.10.2 with "pagination did not settle in 8 rounds"; it passes again. Reviewed by Codex and Kimi K3.1 Pro until
+neither reported a blocker.
+
+**`kicad sch-build`**
+- **Automatic pagination always settles.** Zones only move to later page fragments, so a split page no longer flips back and
+  forth when re-laid zones change size; the round limit is computed from the zone count. A page that fits is never split or
+  re-laid out.
+- **Page-fit and pagination agree.** Zone titles longer than a narrow zone widen its box (wide CJK glyphs count double), and the
+  PWR_FLAG row drawn under a page's zones is reserved when packing; both used to overflow A0 on pages pagination had accepted.
+  A zone that fits A0 only without its PWR_FLAG row is reported in the notes.
+- **Grid zones of decoupling caps lay out again** (no more "N stub(s) would touch a foreign wire or pin"): stacked caps get their
+  supply/ground symbol on the pin, and the column width includes the reference/value text.
+- Runs of neighbouring same-net IC pins are tied along the pin ends and share one connection (no EG-08 crossings); the stub fixer
+  never ties a pin to its own run and drops the only label.
+- Cross-page hierarchical labels sit on a short tee instead of on the wire (no label-on-wire findings), and label boxes no longer
+  push neighbouring stubs out by tens of millimetres.
+
 ## [0.10.2] — 2026-10-27
 
 **CLI, daemon, Skill and MCP move to 0.10.2. The connector runtime is UNCHANGED (only its version number moves); import the
