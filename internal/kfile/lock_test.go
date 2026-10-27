@@ -1,0 +1,335 @@
+package kfile
+
+import (
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"runtime"
+	"testing"
+)
+
+func fakeEnv(procs ...string) *Env {
+	return &Env{Host: "box", User: "alice", Procs: func() ([]Proc, error) {
+		out := []Proc{{PID: 1, Name: "init"}}
+		for i, n := range procs {
+			out = append(out, Proc{PID: 100 + i, Name: n})
+		}
+		return out, nil
+	}}
+}
+
+func writeLock(t *testing.T, target, body string) string {
+	t.Helper()
+	p := LockPath(target)
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// lockBody is the believed KiCad 10 content (see the note in lock.go).
+const lockBody = `{"hostname":"BOX","username":"alice"}`
+
+func TestLockPath(t *testing.T) {
+	got := LockPath(filepath.Join("a", "b", "ecc83-pp.kicad_pcb"))
+	if want := filepath.Join("a", "b", "~ecc83-pp.kicad_pcb.lck"); got != want {
+		t.Fatalf("LockPath = %q, want %q", got, want)
+	}
+}
+
+func TestParseLock(t *testing.T) {
+	cases := []struct {
+		name, body string
+		ok         bool
+	}{
+		{"kicad json", lockBody, true},
+		{"bom and spaces", "\xef\xbb\xbf  {\"hostname\": \"box\", \"username\": \"alice\"}\n", true},
+		{"short keys", `{"host":"box","user":"alice"}`, true},
+		{"empty", "", false},
+		{"whitespace", "  \n", false},
+		{"truncated", `{"hostname":"box","user`, false},
+		{"garbage", "\x00\x01lock", false},
+		{"plain text", "alice@box", false},
+		{"missing user", `{"hostname":"box"}`, false},
+		{"non-string", `{"hostname":1,"username":2}`, false},
+		{"array", `["box","alice"]`, false},
+	}
+	for _, c := range cases {
+		h, u, ok := parseLock([]byte(c.body))
+		if ok != c.ok {
+			t.Errorf("%s: ok = %v (host %q user %q)", c.name, ok, h, u)
+		}
+	}
+}
+
+func TestLockStates(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "x.kicad_pcb")
+	cases := []struct {
+		name, body string
+		env        *Env
+		want       LockState
+	}{
+		{"same user, no kicad", lockBody, fakeEnv("explorer.exe", "kicad-cli.exe", "python.exe"), LockStaleCandidate},
+		{"same user, pcbnew running", lockBody, fakeEnv("PCBNEW.EXE"), LockLive},
+		{"same user, kicad running (path)", lockBody, fakeEnv("/Applications/KiCad/KiCad.app/Contents/MacOS/kicad"), LockLive},
+		{"same user, eeschema running", lockBody, fakeEnv("eeschema"), LockLive},
+		{"same user, no process list", lockBody, &Env{Host: "box", User: "alice", Procs: func() ([]Proc, error) { return nil, errors.New("denied") }}, LockLive},
+		{"short host recorded, fqdn here", lockBody, &Env{Host: "box.lab.lan", User: "alice", Procs: fakeEnv().Procs}, LockStaleCandidate},
+		{"fqdn recorded, short here", `{"hostname":"box.lab.lan","username":"alice"}`, fakeEnv(), LockForeign},
+		{"same short name, other domain", `{"hostname":"box.a.example","username":"alice"}`, &Env{Host: "box.b.example", User: "alice", Procs: fakeEnv().Procs}, LockForeign},
+		{"domain user vs bare user", `{"hostname":"box","username":"CORP\\alice"}`, fakeEnv(), LockLive},
+		{"other user here", `{"hostname":"box","username":"bob"}`, fakeEnv(), LockLive},
+		{"other host", `{"hostname":"far","username":"alice"}`, fakeEnv(), LockForeign},
+		{"unreadable", "garbage", fakeEnv(), LockUnreadable},
+	}
+	for _, c := range cases {
+		writeLock(t, target, c.body)
+		ls := mustLocks(t, []string{target}, c.env)
+		if len(ls) != 1 || ls[0].State != c.want || ls[0].Kind != "file" || ls[0].Target != target {
+			t.Errorf("%s: got %+v, want one %s file lock", c.name, ls, c.want)
+		}
+	}
+}
+
+func TestGuardPolicies(t *testing.T) {
+	type tc struct {
+		state  string
+		policy BreakPolicy
+		broke  bool
+	}
+	bodies := map[string]string{
+		"stale":      lockBody,
+		"live":       `{"hostname":"box","username":"bob"}`,
+		"foreign":    `{"hostname":"far","username":"alice"}`,
+		"unreadable": "",
+	}
+	cases := []tc{
+		{"stale", BreakNone, false}, {"stale", BreakStale, true}, {"stale", BreakAny, true},
+		{"live", BreakStale, false}, {"live", BreakAny, true},
+		{"foreign", BreakStale, false}, {"foreign", BreakAny, true},
+		{"unreadable", BreakStale, false}, {"unreadable", BreakAny, true},
+	}
+	for _, c := range cases {
+		dir := t.TempDir()
+		target := filepath.Join(dir, "x.kicad_sch")
+		lck := writeLock(t, target, bodies[c.state])
+		locks, err := Guard([]string{target}, c.policy, fakeEnv())
+		if len(locks) != 1 || locks[0].Broke != c.broke {
+			t.Errorf("%s/%s: locks %+v", c.state, c.policy, locks)
+		}
+		_, statErr := os.Stat(lck)
+		if c.broke {
+			if err != nil || statErr == nil {
+				t.Errorf("%s/%s: err %v, lock still there: %v", c.state, c.policy, err, statErr == nil)
+			}
+			continue
+		}
+		var ke *Error
+		if !errors.As(err, &ke) || ke.Code != CodeLocked || ke.Fix == "" || len(ke.Locks) != 1 || ExitCode(err) != 4 {
+			t.Errorf("%s/%s: err = %v", c.state, c.policy, err)
+		}
+		if statErr != nil {
+			t.Errorf("%s/%s: lock removed without permission", c.state, c.policy)
+		}
+	}
+	if locks, err := Guard([]string{filepath.Join(t.TempDir(), "free.kicad_pcb")}, BreakNone, fakeEnv()); err != nil || len(locks) != 0 {
+		t.Errorf("no lock: %v %v", locks, err)
+	}
+}
+
+func TestProjectAndRootSheetLocks(t *testing.T) {
+	dir := t.TempDir()
+	for _, f := range []string{"demo.kicad_pro", "demo.kicad_sch", "demo.kicad_pcb"} {
+		os.WriteFile(filepath.Join(dir, f), []byte("x"), 0o644)
+	}
+	sub := filepath.Join(dir, "sheets")
+	os.Mkdir(sub, 0o755)
+	child := filepath.Join(sub, "power.kicad_sch")
+	os.WriteFile(child, []byte("x"), 0o644)
+
+	writeLock(t, filepath.Join(dir, "demo.kicad_pro"), lockBody)
+	writeLock(t, filepath.Join(dir, "demo.kicad_sch"), lockBody)
+
+	ls := mustLocks(t, []string{child}, fakeEnv("eeschema.exe"))
+	kinds := map[string]string{}
+	for _, l := range ls {
+		kinds[filepath.Base(l.Path)] = l.Kind
+		if l.State != LockLive {
+			t.Errorf("%s: %s", l.Path, l.State)
+		}
+	}
+	if kinds["~demo.kicad_pro.lck"] != "project" || kinds["~demo.kicad_sch.lck"] != "root-sheet" || len(ls) != 2 {
+		t.Fatalf("child sheet locks = %+v", ls)
+	}
+	// A board gets the project lock but not the root sheet lock.
+	ls = mustLocks(t, []string{filepath.Join(dir, "demo.kicad_pcb")}, fakeEnv())
+	if len(ls) != 1 || ls[0].Kind != "project" {
+		t.Fatalf("board locks = %+v", ls)
+	}
+	// The root sheet's own lock is reported once.
+	ls = mustLocks(t, []string{filepath.Join(dir, "demo.kicad_sch"), child}, fakeEnv())
+	if len(ls) != 2 {
+		t.Fatalf("dedupe: %+v", ls)
+	}
+}
+
+func TestParseBreakPolicy(t *testing.T) {
+	for in, want := range map[string]BreakPolicy{"": BreakNone, "none": BreakNone, "Stale": BreakStale, "any": BreakAny} {
+		if got, err := ParseBreakPolicy(in); err != nil || got != want {
+			t.Errorf("ParseBreakPolicy(%q) = %q, %v", in, got, err)
+		}
+	}
+	if _, err := ParseBreakPolicy("all"); err == nil {
+		t.Error("ParseBreakPolicy(all) accepted")
+	}
+}
+
+func TestSystemProcsSeesSelf(t *testing.T) {
+	ps, err := SystemProcs()
+	if err != nil {
+		t.Skipf("process list unavailable: %v", err)
+	}
+	for _, p := range ps {
+		if p.PID == os.Getpid() {
+			return
+		}
+	}
+	t.Fatalf("own pid %d not in %d processes", os.Getpid(), len(ps))
+}
+
+func mustLocks(t *testing.T, targets []string, env *Env) []LockInfo {
+	t.Helper()
+	ls, err := CheckLocks(targets, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ls
+}
+
+// A lock check that cannot complete must block, not report "no lock".
+func TestLockCheckFailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "demo.kicad_pro"), []byte("x"), 0o644)
+	target := filepath.Join(dir, "demo.kicad_pcb")
+	os.WriteFile(target, []byte("x"), 0o644)
+	denied := &fs.PathError{Op: "stat", Path: "x", Err: fs.ErrPermission}
+
+	cases := map[string]func(){
+		"stat error": func() {
+			statFn = func(string) (fs.FileInfo, error) { return nil, denied }
+		},
+		"readdir error": func() {
+			readDirFn = func(string) ([]fs.DirEntry, error) { return nil, denied }
+		},
+		"directory at lock path": func() {
+			os.Mkdir(LockPath(target), 0o755)
+		},
+	}
+	for name, inject := range cases {
+		oldStat, oldRead := statFn, readDirFn
+		inject()
+		_, err := CheckLocks([]string{target}, fakeEnv())
+		_, gerr := Guard([]string{target}, BreakAny, fakeEnv())
+		_, werr := WriteFile(target, []byte("new"), Opts{Env: fakeEnv(), Locks: BreakAny})
+		statFn, readDirFn = oldStat, oldRead
+		os.Remove(LockPath(target))
+		if CodeOf(err) != CodeLocked || CodeOf(gerr) != CodeLocked || CodeOf(werr) != CodeLocked {
+			t.Errorf("%s: CheckLocks %v, Guard %v, WriteFile %v", name, err, gerr, werr)
+		}
+		if b, _ := os.ReadFile(target); string(b) != "x" {
+			t.Errorf("%s: wrote through an unverifiable lock", name)
+		}
+	}
+	// A directory that does not exist yet is not an error.
+	if _, err := CheckLocks([]string{filepath.Join(dir, "new", "sub", "x.kicad_sch")}, fakeEnv()); err != nil {
+		t.Errorf("missing dir: %v", err)
+	}
+}
+
+func TestHostUserIdentity(t *testing.T) {
+	hosts := []struct {
+		rec, local string
+		same       bool
+	}{
+		{"BOX", "box", true},
+		{"box", "box.lab.lan", true},
+		{"box.lab.lan", "BOX.LAB.LAN", true},
+		{"box.lab.lan", "box", false},
+		{"box.a.example", "box.b.example", false},
+		{"other", "box.lab.lan", false},
+		{"", "box", false},
+	}
+	for _, c := range hosts {
+		if got := sameHost(c.rec, c.local); got != c.same {
+			t.Errorf("sameHost(%q, %q) = %v", c.rec, c.local, got)
+		}
+	}
+	caseless := runtime.GOOS == "windows"
+	users := []struct {
+		rec, local string
+		same       bool
+	}{
+		{"alice", "alice", true},
+		{"Alice", "alice", caseless},
+		{`CORP\alice`, "alice", false},
+		{`CORP\alice`, `corp\ALICE`, caseless},
+		{"", "", false},
+	}
+	for _, c := range users {
+		if got := sameUser(c.rec, c.local); got != c.same {
+			t.Errorf("sameUser(%q, %q) = %v", c.rec, c.local, got)
+		}
+	}
+}
+
+// The project lock is found however deep the target sits below the project.
+func TestDeepProjectLock(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "demo.kicad_pro"), []byte("x"), 0o644)
+	writeLock(t, filepath.Join(dir, "demo.kicad_pro"), lockBody)
+	deep := dir
+	for i := 0; i < 12; i++ {
+		deep = filepath.Join(deep, fmt.Sprintf("s%d", i))
+	}
+	os.MkdirAll(deep, 0o755)
+	ls := mustLocks(t, []string{filepath.Join(deep, "x.kicad_sch")}, fakeEnv())
+	if len(ls) != 1 || ls[0].Kind != "project" || ls[0].Target != filepath.Join(dir, "demo.kicad_pro") {
+		t.Fatalf("deep target locks: %+v", ls)
+	}
+}
+
+// A stale lock rewritten (KiCad restarted) between the check and the delete
+// is not removed.
+func TestStaleLockRewrittenBeforeRemove(t *testing.T) {
+	for _, how := range []string{"rewritten", "kicad started"} {
+		dir := t.TempDir()
+		target := filepath.Join(dir, "x.kicad_pcb")
+		lck := writeLock(t, target, lockBody)
+		procs := []string{}
+		env := &Env{Host: "box", User: "alice", Procs: func() ([]Proc, error) {
+			var out []Proc
+			for i, n := range procs {
+				out = append(out, Proc{PID: 10 + i, Name: n})
+			}
+			return out, nil
+		}}
+		beforeLockRemove = func(p string) {
+			if how == "rewritten" {
+				os.WriteFile(p, []byte(`{"hostname":"box","username":"alice","pid":"new session"}`), 0o644)
+			} else {
+				procs = append(procs, "kicad.exe")
+			}
+		}
+		_, err := Guard([]string{target}, BreakStale, env)
+		beforeLockRemove = nil
+		if CodeOf(err) != CodeLocked {
+			t.Errorf("%s: %v", how, err)
+		}
+		if _, serr := os.Stat(lck); serr != nil {
+			t.Errorf("%s: lock removed", how)
+		}
+	}
+}
