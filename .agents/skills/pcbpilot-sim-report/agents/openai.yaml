@@ -1,0 +1,4 @@
+interface:
+  display_name: "PCB Pilot Simulation & Reports"
+  short_description: "Power, analog and post-layout simulation plus design reports and board manuals"
+  default_prompt: "Use $pcbpilot-sim-report to simulate the power tree, analog blocks or routed copper of a pcbpilot (EasyEDA or KiCad) design, read the results against the shared verdicts, and publish the design report and board manual."
