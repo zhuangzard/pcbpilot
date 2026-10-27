@@ -268,7 +268,7 @@ func TestPlanFixedWiring_SkipsWhatIsAlreadyOnBoard(t *testing.T) {
 	}
 }
 
-// Recorded on Gas Module v9 B: SV3_DRV routed the same segment on Inner1 and
+// Recorded on Board-B v9 B: SV3_DRV routed the same segment on Inner1 and
 // Inner2; the importer put them on 21 and 22. Both must be moved, by the
 // importer's offset, instead of being left on layers the board lacks.
 func TestPlanImportRepair_SameSegmentOnBothInnerLayers(t *testing.T) {
@@ -324,7 +324,7 @@ func TestPlanReconcile(t *testing.T) {
 	}
 }
 
-// Gas Module v10: EasyEDA split a GND session segment into collinear pieces
+// Board-B v10: EasyEDA split a GND session segment into collinear pieces
 // of different widths; it is present. A partly covered segment gets only
 // its uncovered stretch.
 func TestPlanReconcileCollinearPieces(t *testing.T) {
@@ -343,7 +343,7 @@ func TestPlanReconcileCollinearPieces(t *testing.T) {
 	}
 }
 
-// Gas Module V5 B v17: EasyEDA dropped a 1.1 mil GND stub between two
+// Board-B V5 B v17: EasyEDA dropped a 1.1 mil GND stub between two
 // collinear 21.65 mil tracks 2.2 mil apart; their round ends overlap, so the
 // copper is continuous. A real gap (10 mil) is still missing.
 func TestPlanReconcileBridgedGap(t *testing.T) {
@@ -362,7 +362,7 @@ func TestPlanReconcileBridgedGap(t *testing.T) {
 	}
 }
 
-// Gas Module V5 B v18: EasyEDA dropped a 12.5 mil 40 mil-wide SV1_DRV stub
+// Board-B V5 B v18: EasyEDA dropped a 12.5 mil 40 mil-wide SV1_DRV stub
 // whose area a via and two 40 mil tracks already cover; it is present. The
 // same stub with the covering track removed is missing.
 func TestPlanReconcileCoveredStub(t *testing.T) {
@@ -381,7 +381,7 @@ func TestPlanReconcileCoveredStub(t *testing.T) {
 	}
 }
 
-// Gas Module V5 B v22: fastroute 0.1.7 wrote a one-point +12V path at a
+// Board-B V5 B v22: fastroute 0.1.7 wrote a one-point +12V path at a
 // T-junction of three 41.34 mil tracks; ses-repair aborted ("malformed
 // path"). The dot is skipped and listed; the tracks parse.
 func TestParseSESOnePointPath(t *testing.T) {

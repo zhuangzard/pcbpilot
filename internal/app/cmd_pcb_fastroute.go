@@ -69,7 +69,7 @@ func (f *dsnFixFlags) options() (specctra.FixOptions, error) {
 		}
 		if err := json.Unmarshal(data, &opt.Escapes); err != nil {
 			// Short form: bare [[start],[end]] pairs = a 10 mil GND stub on
-			// TopLayer ending in a via (the Gas Module v6A3-escapes.json shape).
+			// TopLayer ending in a via (the Board-B v6A3-escapes.json shape).
 			opt.Escapes = nil
 			var pairs [][][2]float64
 			if json.Unmarshal(data, &pairs) != nil {
@@ -983,7 +983,7 @@ func readFastrouteReport(path string, milPerUnit float64) (frReport, error) {
 // violations remain — at most o.rounds continuation runs, and only while a
 // run improves on the previous one. A run that crashes (fastroute 0.1.7
 // panics in its parallel autorouter: "MinAreaTree ... free list corrupted",
-// Gas Module v9) is repeated once single-threaded; its counts are unknown
+// Board-B v9) is repeated once single-threaded; its counts are unknown
 // until a report exists. It returns the last good session.
 func runFastroute(o fastrouteOpts, dsn, base string, stderr io.Writer) (string, []fastrouteRun, error) {
 	var runs []fastrouteRun
@@ -1140,7 +1140,7 @@ func (o *autorouteOpts) register(fs *pflag.FlagSet, router string, rounds int, r
 	fs.Float64Var(&o.fo.minTraceUm, "min-trace-um", 152, "fastroute --router.min_trace_width_um: never neck down below this (0 = not passed; with --intent the intent's narrowest widthMil.min is used unless this is set)")
 	fs.StringVar(&o.intentPath, "intent", "", "intent.json (intent derive): pre-route gate — write its rules (pcb rules apply), raise the DSN net classes to every net's outer/inner width and clearance, forbid neck-down where widthMil.min = outer; route only when every net passes")
 	fs.DurationVar(&o.fo.maxTime, "max-time", 0, "fastroute --max-time per run (0 = none)")
-	fs.IntVar(&o.fo.threads, "threads", 1, "fastroute autorouter and optimizer threads; 1 (default) also sets --multi-start=1 unless given. fastroute 0.1.7 panics in its parallel autorouter (MinAreaTree free list corrupted) — Gas Module v9: 8 threads crashed after 244 s, 1 thread routed in 102 s. 0 = fastroute default; a crashed run is always retried with 1")
+	fs.IntVar(&o.fo.threads, "threads", 1, "fastroute autorouter and optimizer threads; 1 (default) also sets --multi-start=1 unless given. fastroute 0.1.7 panics in its parallel autorouter (MinAreaTree free list corrupted) — Board-B v9: 8 threads crashed after 244 s, 1 thread routed in 102 s. 0 = fastroute default; a crashed run is always retried with 1")
 	fs.IntVar(&o.fo.rounds, "continue", rounds, "fastroute continuation runs (--initial-session) while connections remain unrouted")
 	fs.DurationVar(&o.fo.timeout, "router-timeout", 10*time.Minute, "hard limit per router run (default 45m with --router fastroute)")
 	fs.BoolVar(&o.rawDSN, "raw-dsn", false, "route the unmodified EasyEDA DSN (skip the export fixes)")
@@ -1607,7 +1607,7 @@ func plannedIntentEscapes(cfg *appConfig, window, dsn string, reqs map[string]sp
 }
 
 // plannedPreEscapes reserves escapes for every ground pin of fine-pitch
-// parts with many pins (TQFP-144 GND pins on Gas Module V5) before the first
+// parts with many pins (TQFP-144 GND pins on Board-B V5) before the first
 // route: reacting to blocked pins one at a time only moved the congestion to
 // the next ground pin (v8: 5 → 4 unrouted).
 func plannedPreEscapes(cfg *appConfig, window, dsn string, have []specctra.Escape) ([]specctra.Escape, []string, error) {

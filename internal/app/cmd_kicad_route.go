@@ -111,7 +111,7 @@ calculations and gates as 'pcb auto route' + 'pcb gate':
 Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by}
 (--no-manual and --no-review need one). The input board is never written.`,
 		Args: cobra.NoArgs,
-		Example: `  pcbpilot kicad route --pcb GasV5_A.kicad_pcb --intent intent.json --sim sim.json \
+		Example: `  pcbpilot kicad route --pcb board-b-v5a.kicad_pcb --intent intent.json --sim sim.json \
       --requirements REQUIREMENTS.md --out-dir route/ --clearance-mil 5.98 --track-mil 10 --edge-mil 30`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if o.pcb == "" || o.intent == "" {
@@ -158,17 +158,17 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 	f.BoolVar(&o.ripUp, "rip-up", false, "remove unlocked tracks and vias before routing (route from scratch)")
 	f.StringVar(&o.router, "router", routerFastroute, "routing backend: fastroute | tracemaker | both (both run at once; the first result that is complete with no new DRC error is gated first, a result that fails any gate hands over to the other — no gate is relaxed; the outputs describe the first result that passes every gate, else the best judged one, fewest unrouted)")
 	f.StringVar(&o.tm.bin, "tracemaker-bin", "", "tracemaker executable (default: $TRACEMAKER_BIN, ~/.pcbpilot/tracemaker/current, PATH)")
-	f.DurationVar(&o.tm.timeout, "tracemaker-time", 300*time.Second, "tracemaker --time budget (it also sets the lattice pitch: ≥ 300 s gave 0.05 mm and a complete PicoRick, 90–180 s gave 0.1 mm and 2 open connections)")
+	f.DurationVar(&o.tm.timeout, "tracemaker-time", 300*time.Second, "tracemaker --time budget (it also sets the lattice pitch: ≥ 300 s gave 0.05 mm and a complete Board-A, 90–180 s gave 0.1 mm and 2 open connections)")
 	f.StringVar(&o.fastrouteBin, "fastroute-bin", "", "fastroute executable (default: $FASTROUTE_BIN, ~/.pcbpilot/fastroute/current, PATH)")
 	f.DurationVar(&o.fo.maxTime, "max-time", 0, "fastroute --max-time per run (0 = none)")
-	f.IntVar(&o.fo.threads, "threads", 0, "fastroute autorouter/optimizer threads: 0 = min(cores-1, 8); 1 = single-threaded (reproducible across fastroute builds; a crashed multi-threaded run is retried single-threaded). PicoRick: 3 runs with 8 threads gave byte-identical sessions")
+	f.IntVar(&o.fo.threads, "threads", 0, "fastroute autorouter/optimizer threads: 0 = min(cores-1, 8); 1 = single-threaded (reproducible across fastroute builds; a crashed multi-threaded run is retried single-threaded). Board-A: 3 runs with 8 threads gave byte-identical sessions")
 	f.IntVar(&o.fo.multiStart, "multi-start", 4, "fastroute --multi-start=N: N-1 differently seeded pass-1 orders rerun in parallel by fastroute when connections stay unrouted, best kept (1 = off)")
-	f.BoolVar(&o.optimizer, "optimizer", false, "run fastroute's optimizer (its budget equals the whole routing stage incl. multi-start, ≥ 60 s; PicoRick --multi-start=4: 299 s with it, 134 s without, same 4 unrouted / 30 violations, 0.1 % shorter, 1 via fewer) — off by default")
+	f.BoolVar(&o.optimizer, "optimizer", false, "run fastroute's optimizer (its budget equals the whole routing stage incl. multi-start, ≥ 60 s; Board-A --multi-start=4: 299 s with it, 134 s without, same 4 unrouted / 30 violations, 0.1 % shorter, 1 via fewer) — off by default")
 	f.Float64Var(&o.fo.optThreshold, "optimizer-threshold", 0, "fastroute --router.optimizer.optimization_improvement_threshold (percent per pass; 0 = fastroute's default)")
 	f.IntVar(&o.fo.rounds, "continue", 2, "fastroute continuation runs (--initial-session) while connections remain unrouted")
 	f.DurationVar(&o.fo.timeout, "router-timeout", 45*time.Minute, "hard limit per fastroute run")
 	f.Float64Var(&o.fo.minTraceUm, "min-trace-um", 0, "fastroute --router.min_trace_width_um (default: max(board minimum track width, min(narrowest widthMil.min, narrowest class width)))")
-	f.Float64Var(&o.padNeckFloor, "pad-neck-floor-mil", 0, "let intent nets neck down at pads (off by default: every intent class is --no-neckdown-classes). Nets with widthMil.min <= max(this, narrowest min) leave that list and fastroute's neck floor becomes that value, so no neck goes below the net's own minimum; full width outside the pad zone is restored by widen-to-intent and enforced by the intent-widths gate (a failing run is not shipped). Also lets escape vias sit next to own-net SMD pads (fastroute allows it). PicoRick: 10")
+	f.Float64Var(&o.padNeckFloor, "pad-neck-floor-mil", 0, "let intent nets neck down at pads (off by default: every intent class is --no-neckdown-classes). Nets with widthMil.min <= max(this, narrowest min) leave that list and fastroute's neck floor becomes that value, so no neck goes below the net's own minimum; full width outside the pad zone is restored by widen-to-intent and enforced by the intent-widths gate (a failing run is not shipped). Also lets escape vias sit next to own-net SMD pads (fastroute allows it). Board-A: 10")
 	f.Float64Var(&o.rules.ClearanceMil, "clearance-mil", 0, "board minimum clearance + Default netclass clearance (default for a board without .kicad_pro: intent copper.clearanceMil)")
 	f.Float64Var(&o.rules.TrackMil, "track-mil", 0, "Default netclass track width; refused below the board minimum (--min-track-mil, else the project's)")
 	f.Float64Var(&o.rules.MinTrackMil, "min-track-mil", 0, "board minimum track width (default for a board without .kicad_pro: intent copper.minTrackMil)")
@@ -1333,7 +1333,7 @@ func reviewInputSHA(stage string, reqFiles, evFiles []string, limit int) (string
 // connections are exactly the counted ones), it reports no fixable violation
 // and no track below its minimum width, KiCad's DRC reports no unconnected
 // item at all, and each unrouted connection's net is poured on the board
-// (Gas V5 A: GND C2.2–U8.115, a fine-pitch ground pin, joined by the TOP GND
+// (Board-B V5 A: GND C2.2–U8.115, a fine-pitch ground pin, joined by the TOP GND
 // pour). Every credited connection is listed in the gate's Info.
 func kicadRouteCompleteGate(run *routeResult, drc *kicad.DRCReport, snap *boardSnapshot, pourCredit bool) gateResult {
 	g := routeCompleteGate(run)
@@ -1753,7 +1753,7 @@ func defaultRouteThreads(cpus int, both bool) int {
 
 // clipPoursToIso trims the board-outline pours to their net's insulation
 // domain (pcbauto.ClipPoursToIso). Without it the patient GND / +3V3 pours of
-// JDB-1 covered the SELV strip: 1030 isolation errors on a 2 x MOPP board.
+// Board-C covered the SELV strip: 1030 isolation errors on a 2 x MOPP board.
 func (r *kicadRun) clipPoursToIso(board string, ps []kicad.Pour) ([]kicad.Pour, error) {
 	if r.o.intent == "" {
 		return ps, nil

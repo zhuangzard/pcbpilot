@@ -13,7 +13,7 @@
 protocol of gap-analysis §4.
 
 **Success criterion.** Every criterion of gap-analysis §4.6 holds on the median of 3 runs. The test runs on the
-Gas Module V5 compact board (T4), the other field variants, and the fixture set T1–T3. It is judged by one
+Board-B V5 compact board (T4), the other field variants, and the fixture set T1–T3. It is judged by one
 referee, pcbpilot's `CheckDRCStrict` plus `checkConnectivity` plus the intent gates. The criteria are:
 
 | # | Criterion | Threshold |
@@ -21,7 +21,7 @@ referee, pcbpilot's `CheckDRCStrict` plus `checkConnectivity` plus the intent ga
 | C1 | completion (`completion_all`) | ≥ fastroute on every board; 100 % wherever fastroute reaches 100 % |
 | C2 | correctness | `drc_strict` = 0 on every board; T4 native EasyEDA DRC = 0 and pad-net diff = 0 |
 | C3 | intent gates | every gate that passes for fastroute passes for v2, with no extra failing items |
-| C4 | runtime | total over T1–T4 ≤ fastroute; each board ≤ 1.25× fastroute; Gas V5 time-to-100 % ≤ 432 s on the reference machine |
+| C4 | runtime | total over T1–T4 ≤ fastroute; each board ≤ 1.25× fastroute; Board-B V5 time-to-100 % ≤ 432 s on the reference machine |
 | C5 | quality | vias ≤ 1.10× and wire length ≤ 1.05× fastroute per board; geometric mean ≤ 1.0× |
 | C6 | determinism | completion range ≤ 0.5 points over runs; byte-identical output for the same seed at any `GOMAXPROCS` |
 
@@ -39,7 +39,7 @@ with the milestones.
 | Gate | Condition | Reached at |
 |---|---|---|
 | G1 | T1 + T2 = 100 %, DRC 0, ≤ 2× fastroute time | M11 |
-| G2 | Gas V5 compact = 100 %, native DRC 0, pad-net diff 0, ≤ 600 s | M15 |
+| G2 | Board-B V5 compact = 100 %, native DRC 0, pad-net diff 0, ≤ 600 s | M15 |
 | G3 | T3 (BGA) within 5 points of fastroute | M16 |
 | GA | full acceptance C1–C6 | M17 |
 
@@ -202,7 +202,7 @@ Conventions:
 - **Unit tests:** every distance kernel against a brute-force float64 oracle on 10⁵ random cases (error ≤ 1 nm);
   45° segments keep |dx| == |dy| exactly; R-tree `Nearby` equals a linear scan; bucket insert/delete/query
   equals a linear scan; `Collides` with a net filter; overflow assertion beyond ±2³¹ nm.
-- **Bench acceptance (micro):** load all copper of Gas V5 (from the M3 reader, or a JSON dump of the pcbauto
+- **Bench acceptance (micro):** load all copper of Board-B V5 (from the M3 reader, or a JSON dump of the pcbauto
   board until then): static index build ≤ 50 ms; 10⁶ `Collides` queries ≤ 1 s on one core.
 - **Depends on:** M0. **Parallel group:** P1.
 
@@ -227,9 +227,9 @@ Conventions:
   `internal/pcb/specctra/sexpr.go` by import. If `pkg` must not import `internal` by policy, move the generic
   S-expression code to `pkg/pcbroute/dsn/sexpr.go` (pcbpilot's own MIT code; no clean-room issue).
 - **Unit tests:** 04-T13 (SES round-trip, byte-deterministic); DSN → board → DSN → board fixpoint on every
-  fixture; parse the Gas V5 fixed DSN without errors.
-- **Bench acceptance:** for Gas V5 and every fixture, the reader's pad, net and connection counts equal those that
-  fastroute reports for the same file in its JSON report (black box, CLEANROOM §4). Gas V5: 462–463 connections.
+  fixture; parse the Board-B V5 fixed DSN without errors.
+- **Bench acceptance:** for Board-B V5 and every fixture, the reader's pad, net and connection counts equal those that
+  fastroute reports for the same file in its JSON report (black box, CLEANROOM §4). Board-B V5: 462–463 connections.
 - **Depends on:** M0; M2's exported scope API (stubbed in M0). **Parallel group:** P1.
 
 ### M4: `board`: routing database
@@ -240,7 +240,7 @@ Conventions:
 - **Unit tests:** transaction commit/rollback restores byte-identical state; nested shove-style overlays; snapshot
   restore; connectivity after random add/remove equals a brute-force BFS; deterministic iteration order (no map
   order).
-- **Bench acceptance:** load fastroute's Gas V5 SES (black box) plus the DSN into the DB. Union-find connectivity
+- **Bench acceptance:** load fastroute's Board-B V5 SES (black box) plus the DSN into the DB. Union-find connectivity
   must equal `pcbauto.checkConnectivity` on the same copper. This proves the DB and the referee agree before any
   routing exists.
 - **Depends on:** M1, M2 interfaces. **Parallel group:** P2.
@@ -257,8 +257,8 @@ Conventions:
 - **Unit tests:** the referee on a hand-made board with known violations; fastroute missing ⇒ rows `skipped`;
   the JSONL schema is stable.
 - **Bench acceptance:** commit `baseline.jsonl` with fastroute and legacy rows for T1–T4 (3 runs each). The
-  fastroute Gas V5 row must reproduce the field record: 100 %, `drc_strict` 0, time within ±20 % of 432 s on
-  this machine (otherwise record the machine factor). Legacy Gas V5 shows the ≈97 % signal completion seen in
+  fastroute Board-B V5 row must reproduce the field record: 100 %, `drc_strict` 0, time within ±20 % of 432 s on
+  this machine (otherwise record the machine factor). Legacy Board-B V5 shows the ≈97 % signal completion seen in
   the field.
 - **Depends on:** M3 (Board→DSN writer). **Parallel group:** P2.
 
@@ -271,7 +271,7 @@ Conventions:
   are maximal, the tiles cover the area exactly once); conservativeness property (no Space-tile point lies within
   the exact inflated distance of an obstacle, checked with `geom`); point location equals brute force; local
   refinement opens 01-T3's 0.65 mm gap.
-- **Bench acceptance (micro):** Gas V5 4 layers × all inflation keys: plane build ≤ 300 ms total; incremental
+- **Bench acceptance (micro):** Board-B V5 4 layers × all inflation keys: plane build ≤ 300 ms total; incremental
   insert of one routed track ≤ 50 µs median.
 - **Depends on:** M1, M2. **Parallel group:** P2.
 
@@ -283,7 +283,7 @@ Conventions:
 - **Unit tests:** 01-T1 … 01-T14 (T11 is the Lee/Hadlock oracle; T13 is determinism at GOMAXPROCS 1/8).
 - **Bench acceptance:** sequential routing only (no rip-up), driven by a test-only loop over connections:
   `drc_strict` = 0 on **every** board of T1–T4 (correct by construction); 01-T12 numbers (≥ 95 % on the synthetic
-  board, ≤ 5 s); Gas V5 single sequential pass recorded (expected 80–92 %) with median search time per connection
+  board, ≤ 5 s); Board-B V5 single sequential pass recorded (expected 80–92 %) with median search time per connection
   ≤ 5 ms.
 - **Depends on:** M4, M6. **Parallel group:** P3.
 
@@ -297,7 +297,7 @@ Conventions:
   adapter's nm↔mil round-trip keeps joints (connectivity unchanged); `RouteDSN` writes SES that `specctra.ParseSES`
   reads.
 - **Bench acceptance:** first v2 rows in `results.jsonl` for T1–T4 with `drc_strict` = 0 everywhere. T1 completion
-  ≥ 85 %; Gas V5 ≥ 85 % in ≤ 120 s.
+  ≥ 85 %; Board-B V5 ≥ 85 % in ≤ 120 s.
 - **Depends on:** M5, M7. **Sequential.**
 
 ### M9: `global` + `negotiate`: Phase A, ordering, keep-best, rollback
@@ -307,7 +307,7 @@ Conventions:
 - **Files:** `pkg/pcbroute/global/{gcell.go, capacity.go}`, `pkg/pcbroute/negotiate/{cong.go, pathfinder.go,
   order.go, snapshot.go, stall.go}` + tests; `search` gets a corridor `CostFn`.
 - **Unit tests:** 02-T1, 02-T2, 02-T3, 02-T7; the parameter sweep in §3.1 runs as a table test; determinism.
-- **Bench acceptance:** T1 ≥ 98 %, T2 ≥ 95 %, Gas V5 ≥ legacy's referee completion on the same input
+- **Bench acceptance:** T1 ≥ 98 %, T2 ≥ 95 %, Board-B V5 ≥ legacy's referee completion on the same input
   (`completion_all`), all with `drc_strict` = 0 and runtime ≤ 3× fastroute.
 - **Depends on:** M8. **Sequential.**
 
@@ -331,7 +331,7 @@ Conventions:
 - **Files:** `pkg/pcbroute/rrr/{passes.go, obstacles.go, canrip.go, taboo.go, endgame.go}`,
   `pkg/pcbroute/negotiate/multistart.go` + tests.
 - **Unit tests:** 02-T7 (with Phase B), 02-T8, 02-T9, 02-T10, 02-T11.
-- **Bench acceptance:** **gate G1**: T1 + T2 = 100 %, `drc_strict` 0, ≤ 2× fastroute time. Gas V5 ≥ 99.5 %.
+- **Bench acceptance:** **gate G1**: T1 + T2 = 100 %, `drc_strict` 0, ≤ 2× fastroute time. Board-B V5 ≥ 99.5 %.
 - **Depends on:** M9, M10. **Sequential.**
 
 ### M12: `optimize`: score and geometric passes
@@ -354,7 +354,7 @@ Conventions:
   necked retry), §3.7 (via arrays), §4.4–4.5, §5 rows 1, 4, 6, 7.
 - **Files:** `pkg/pcbroute/escape/{detect.go, peripheral.go, dogbone.go, neck.go, viaarray.go, softfix.go}` + tests.
 - **Unit tests:** 04-T1, 04-T3, 04-T4, 04-T5, 04-T8, 04-T9, 04-T11.
-- **Bench acceptance:** Gas V5 U8 GND pins escape **without** hand-made `--escapes` (bench setting "no
+- **Bench acceptance:** Board-B V5 U8 GND pins escape **without** hand-made `--escapes` (bench setting "no
   pre-escapes" for both routers). After M11, T3 completion is ≥ 10 points higher than v2 with escape disabled.
 - **Depends on:** M4, M2. **Parallel group:** P3.
 
@@ -390,7 +390,7 @@ Conventions:
   `docs/cli/pcb.md`, `docs/pcbauto.md` (opt-in documentation).
 - **Unit tests:** resume from a session gives the same final result as an uninterrupted run with the same total
   budget (virtual clock); the dispatcher's default is still `legacy`; CLI help.
-- **Bench acceptance:** **gate G2**: Gas V5 compact 100 %, `drc_strict` 0; live EasyEDA import, pour rebuild,
+- **Bench acceptance:** **gate G2**: Board-B V5 compact 100 %, `drc_strict` 0; live EasyEDA import, pour rebuild,
   native DRC 0, pad-net diff 0; ≤ 600 s.
 - **Depends on:** M11, M12, M13a, M14 (M13b optional). **Sequential.**
 
@@ -401,7 +401,7 @@ Conventions:
   (02 §2.2), search budget tuning, and parameter sweeps (02 §3.1 ranges, 03 weights). No new algorithms without a
   spec edit (CLEANROOM §5).
 - **Files:** existing packages only; `docs/router-cleanroom/tuning.md` (sweep results).
-- **Bench acceptance:** **gate G3**: T3 within 5 points of fastroute; per-board runtime ≤ 1.25× fastroute; Gas V5
+- **Bench acceptance:** **gate G3**: T3 within 5 points of fastroute; per-board runtime ≤ 1.25× fastroute; Board-B V5
   time-to-100 % ≤ 432 s; determinism C6.
 - **Depends on:** M15, M13b. **Sequential** (it may be split by package if profiles show independent hot spots).
 
@@ -446,7 +446,7 @@ sequential tail:          M15 integration → M16 performance → M17 acceptance
 | R2 | Embedding failures in narrow gaps (staircase over-approximation, octilinearisation) | completion loss on fine pitch | 01 §5 replan ladder; local `StairStep` refinement; tracked as a per-board `replans` metric |
 | R3 | Phase A on GCells (D1) gives corridors that the detailed search cannot realise | non-convergence like the legacy router's (gap §3.1) | capacities computed from exact free space; corridor is a cost bonus, not a hard wall; Phase B/C repair; measured by M9's bench |
 | R4 | Shove geometry robustness (hull walking, via drag chains) | DRC escapes or a slow Phase B | atomic apply with exact recheck; limits (02 §3.3); M10 property tests; fall back to rip |
-| R5 | Runtime: fastroute does Gas V5 in 432 s, while legacy needs 594–1840 s, mostly from pipeline multiplication | C4 fails | v2 runs once with session resume; no escalation or grid retries (M15); virtual-clock profiling (M16) |
+| R5 | Runtime: fastroute does Board-B V5 in 432 s, while legacy needs 594–1840 s, mostly from pipeline multiplication | C4 fails | v2 runs once with session resume; no escalation or grid retries (M15); virtual-clock profiling (M16) |
 | R6 | Determinism versus parallelism | C6 fails; flaky bench | fixed `Starts` (D7), seeded RNG, stable sorts, fixed commit order; GOMAXPROCS 1/8 tests in every milestone |
 | R7 | LLM implementers reproduce code memorised from training data | licence contamination that the exposure log cannot catch | specs as the only input; reviewers ask where every constant comes from; optional similarity audit by a **separate auditor** who is not an implementer. The auditor runs an automated code-similarity tool over our code against the forbidden code and reports only our file and line. The auditor is then exposed and is excluded from implementing (CLEANROOM §8) |
 | R8 | Referee mismatch with native EasyEDA DRC: a via touching only a pour is not counted as connected in desktop 3.2.149 (gap §3.2) | G2 passes offline but fails live | bench column `plane-dependent`; live T4 confirmation in M15; plane-terminating connections end on real copper by default |

@@ -2,7 +2,7 @@ package pcbauto
 
 // placer_label.go — every part keeps room for its own designator.
 //
-// Why: on Gas Module V5 A and B the silk step (pcb silk-align --tight)
+// Why: on Board-B V5 A and B the silk step (pcb silk-align --tight)
 // found no legal slot within 30 mil for 18–25 designators in dense spots
 // (decaps around the CPLD, RC filters), and the user forbids shrinking the
 // text. Room for the label has to be made while placing: a part whose

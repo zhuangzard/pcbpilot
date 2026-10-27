@@ -6,7 +6,7 @@ import (
 )
 
 // kicad route pours a board-outline zone per net/layer; on an insulated
-// board it must stay inside its own domain (JDB-1: the patient GND pour
+// board it must stay inside its own domain (Board-C: the patient GND pour
 // covered the SELV strip, 1030 isolation errors).
 func TestClipPoursToIso(t *testing.T) {
 	in := loadIntent(t, "iso-mains-selv.intent.json")

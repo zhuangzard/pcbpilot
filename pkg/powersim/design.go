@@ -269,7 +269,7 @@ func BuildDesign(pages []*ConnDoc, values map[string]PartValues) (*Design, []str
 				ref = c.ID
 			}
 			// A not-fitted part carries no current: simulating it fitted made
-			// JDB-1's R105 (0R, DNP) ground the 50 MHz oscillator enable and a
+			// Board-C's R105 (0R, DNP) ground the 50 MHz oscillator enable and a
 			// reviewer flagged the FPGA clock as disabled.
 			if c.DNP || values[ref].DNP {
 				dnp[ref] = true

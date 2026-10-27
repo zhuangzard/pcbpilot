@@ -5,7 +5,7 @@ import "testing"
 // A 24 V inlet through a 4-pin common-mode choke, an eFuse (pass element
 // with control pins) and a P-FET into a 1 A load. Before 2026-10-14 the
 // 4-pin choke was left open (two-terminal handling only) and a switch
-// with more than two nets was skipped: JDB-1 simulated every rail at 0 V.
+// with more than two nets was skipped: Board-C simulated every rail at 0 V.
 const cmcLib = `{"schemaVersion":1,"models":[
  {"id":"dc","kind":"connector-source","match":{"mpn":["DC24"]},"supplyPins":["1"],"returnPins":["2"],"voltageV":24,"rsOhm":0.05,"sourceName":"dc"},
  {"id":"cmc","kind":"inductor","match":{"mpn":["CMC"]},"windings":[["1","4"],["2","3"]],"dcrOhm":0.03},

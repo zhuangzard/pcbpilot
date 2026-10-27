@@ -63,7 +63,7 @@ func TestPlanWiden_AccountsForWidenedNeighbour(t *testing.T) {
 	}
 }
 
-// Gas Module v11 A: a fastroute neck-down left mid-run (GND 10.82 mil, 84 mil
+// Board-B v11 A: a fastroute neck-down left mid-run (GND 10.82 mil, 84 mil
 // from any pad) is grown back to the intent width where there is room.
 func TestPlanWidenToIntent(t *testing.T) {
 	reqs := map[string]specctra.NetRequirement{"GND": {OuterMil: 21.65, InnerMil: 43.31, MinMil: 10}}
@@ -125,7 +125,7 @@ func TestPlanWidenRotatedPad(t *testing.T) {
 	}
 }
 
-// Gas Module V5 B v17: SV1_DRV dropped 57.25 mV of 30 on a 10 mil inner
+// Board-B V5 B v17: SV1_DRV dropped 57.25 mV of 30 on a 10 mil inner
 // track; the IR closure widens it by the ratio (+15 %), only when the drop
 // is the sole failure.
 func TestIROverBudgetWiden(t *testing.T) {
@@ -155,7 +155,7 @@ func TestIROverBudgetWiden(t *testing.T) {
 	}
 }
 
-// Gas Module V5 B v20: two placements both routed; the one with the shorter
+// Board-B V5 B v20: two placements both routed; the one with the shorter
 // high-current loops must win.
 func TestBetterTrialLoopIR(t *testing.T) {
 	snap := &boardSnapshot{Components: []boardComp{

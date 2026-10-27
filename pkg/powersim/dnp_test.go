@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// A DNP part (KiCad "dnp" property → IR "dnp": true) is not fitted: JDB-1's
+// A DNP part (KiCad "dnp" property → IR "dnp": true) is not fitted: Board-C's
 // R105 (0R to GND, DNP) grounded the oscillator enable in the simulation and
 // a reviewer reported the FPGA clock disabled.
 func TestBuildDesignSkipsDNP(t *testing.T) {

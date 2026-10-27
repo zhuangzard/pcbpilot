@@ -234,7 +234,7 @@ func (e *Engine) build(sc scenario) *run {
 			if b.kind == KindInductor && len(p.Pins) == 4 {
 				// Common-mode choke: each winding is its own series DCR. Two-terminal
 				// handling left the part open, cutting the input of every board with
-				// a CMC (JDB-1: 24 V inlet and both motor lines simulated at 0 V).
+				// a CMC (Board-C: 24 V inlet and both motor lines simulated at 0 V).
 				e.stampWindings(c, r, b, add)
 				continue
 			}

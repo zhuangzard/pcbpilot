@@ -278,7 +278,7 @@ Steps (stdout is one summary JSON, progress on stderr):
      (mil, DSN layer names), or bare `[[[x1,y1],[x2,y2]], ...]` pairs = 10 mil GND on TopLayer with a via at the
      end. Choose escapes for GND pins between fine-pitch signal pins that fastroute's report lists as blocked.
 2. fastroute with `--report --diagnose`, single-threaded by default (`--threads 1` also sets `--multi-start=1`):
-   fastroute 0.1.7 panics in its parallel autorouter ("MinAreaTree … free list corrupted"); on Gas Module v9 the
+   fastroute 0.1.7 panics in its parallel autorouter ("MinAreaTree … free list corrupted"); on Board-B v9 the
    8-thread run crashed after 244 s while one thread routed the same DSN in 102 s. A crashed run is recorded as
    `crashed` with unknown counts (-1), never 0, and repeated once single-threaded; with no good run the command
    fails. `--threads N` opts into parallel routing. Neck-down floor from `--min-trace-um` or, with `--intent`, the
@@ -292,7 +292,7 @@ Steps (stdout is one summary JSON, progress on stderr):
    Before the first route every ground pin of a fine-pitch part with more than 64 pins (nearest same-part pad
    < 32 mil) gets an inward escape: pad centre → 30 mil past the pad's inner end, 10 mil, via; a via that would
    crowd another escape via is staggered 40 mil deeper; skipped when the via or stub would come within clearance of
-   another net's pad (`--no-pre-escape-gnd` turns it off; Gas Module V5 U8: all 14 GND pins). If ground connections
+   another net's pad (`--no-pre-escape-gnd` turns it off; Board-B V5 U8: all 14 GND pins). If ground connections
    still stay `blocked`, up to `--escape-rounds 3` re-routes add escapes for the newly blocked pins, each kept only
    if better (`autoEscapes[]` in the summary; `--no-auto-escapes` turns it off). `--router '<cmd> {in} {out}'` keeps
    working for any other router.
@@ -308,7 +308,7 @@ Steps (stdout is one summary JSON, progress on stderr):
    fastroute models a fixed-wire end inside a pad as starting at the pad centre (conservative; reported as
    pre-existing unfixable). Pads that already have an escape are left alone. Connections still `blocked` get
    placement hints (`routeResult.placementHints`, `route-complete` items): the part in the trapped pad's escape
-   corridor and which way / how far to move it. PicoRick: 11 → 4–5 unrouted, KiCad DRC 22 → 13–15, intent-widths 0.
+   corridor and which way / how far to move it. Board-A: 11 → 4–5 unrouted, KiCad DRC 22 → 13–15, intent-widths 0.
    `intent-widths` accepts a narrower segment only as a pad escape: the **whole** segment within max(3 × width,
    30 mil) of one same-net pad's copper and ≥ `widthMil.min` (the internal router's neck-down zone); a narrow run
    that only starts at a pad fails.
@@ -326,7 +326,7 @@ Steps (stdout is one summary JSON, progress on stderr):
    Then the board is reconciled with the session: every session segment needs a same-net track on its layer
    containing both ends, every session via a same-net via at its point; missing ones are created, tracks left on
    layers the board lacks are deleted, and a second comparison records what is still missing (`reconcile`,
-   `unresolved`; gate `session-reconcile`). Gas Module v9: two importer leftovers on 21/22 and two missing vias cut
+   `unresolved`; gate `session-reconcile`). Board-B v9: two importer leftovers on 21/22 and two missing vias cut
    +3V3 and SV3_DRV; pad-net diff cannot see such breaks, post-layout sim did. `pcb widen` ignores tracks on
    non-copper layers. Session files are kept whenever a step or gate fails.
    Reads that drive deletes also come after save + reload (before DSN export, the repair and fixed-wiring reads,

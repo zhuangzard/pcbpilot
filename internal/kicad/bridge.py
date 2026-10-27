@@ -1085,7 +1085,7 @@ def pours(pcb, spec_path, out):
         net = board.FindNet(zs["net"])
         # A pour clipped to its insulation domain arrives as polygons (mil, y-up),
         # merged into ONE zone (separate touching zones are KiCad zones_intersect
-        # errors: 166 on JDB-1); otherwise the board outline.
+        # errors: 166 on Board-C); otherwise the board outline.
         z = make_pour_zone(board, zs, net, board_pts)
         if zs.get("polys"):
             merged = pcbnew.SHAPE_POLY_SET()
@@ -1120,7 +1120,7 @@ def make_pour_zone(board, zs, net, pts):
     if zs.get("minWidthMil"):
         z.SetMinThickness(nm(zs["minWidthMil"]))
     # SMD pads solid, through-hole pads thermal: a one-spoke SMD thermal
-    # is a KiCad starved_thermal error (Gas V5 A: U8.115, C50.2).
+    # is a KiCad starved_thermal error (Board-B V5 A: U8.115, C50.2).
     z.SetPadConnection(pcbnew.ZONE_CONNECTION_THT_THERMAL)
     return z
 

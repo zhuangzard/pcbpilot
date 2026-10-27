@@ -130,7 +130,7 @@ func TestApplyMechInPlaceKeepsPoses(t *testing.T) {
 	}
 }
 
-// Gas Module V5 B: an edge header whose body is barely larger than its
+// Board-B V5 B: an edge header whose body is barely larger than its
 // pads sat flush with the edge, its TH pads 10.8 mil from the outline
 // against a 30 mil rule. PlaceOnEdge keeps the pads outside the band.
 func TestPlaceOnEdgeKeepsPadsOffTheEdge(t *testing.T) {

@@ -559,7 +559,7 @@ func copyKicadPro(pcb, out string) error {
 }
 
 // kicadPlaceHalo is the uniform routing-room keep-clear of --halo-mil /
-// --halo-ic-mil. JDB-1 (353 parts, 4 layers): packed for wirelength only, the
+// --halo-ic-mil. Board-C (353 parts, 4 layers): packed for wirelength only, the
 // patient side left 140 SMD pins without a fan-out and 131 connections
 // unrouted while a third of the board stayed empty.
 func kicadPlaceHalo(b *pcbauto.Board, all, ic float64) map[string]float64 {

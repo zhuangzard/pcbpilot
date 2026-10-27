@@ -1659,7 +1659,7 @@ func isoPartnerDist(b *Board, iso *IsoRules, rr *RouteResult, f *isoField, doms 
 // net's insulated domain like a planned plane (clipPlanesToIso): a pour of a
 // net with no insulation pair comes back unchanged. Each pour is returned as
 // the merged row rectangles of the kept area (mil, y-up); a pour that keeps
-// nothing is dropped. JDB-1: the patient GND pour on In1/F.Cu/B.Cu and the
+// nothing is dropped. Board-C: the patient GND pour on In1/F.Cu/B.Cu and the
 // +3V3 pour on In2 covered the SELV strip — 0 mil from the 24 V inlet,
 // RS-232 and CAN pads, 1030 isolation errors.
 func ClipPoursToIso(raw []byte, in *Intent, pours []PlaneRegion) ([]PlaneRegion, []string, error) {

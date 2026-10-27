@@ -4,7 +4,7 @@ import "testing"
 
 // The return line of a 24 V inlet runs through one winding of a 4-pin
 // common-mode choke (GND_J on the connector, GND on the board). It is one
-// circuit: JDB-1 got a separate "SELV_24V" domain for the inlet nets with
+// circuit: Board-C got a separate "SELV_24V" domain for the inlet nets with
 // no insulation pair to the patient side, so its copper was never held to
 // the 2 × MOPP creepage.
 func TestCMCReturnWindingIsOneDomain(t *testing.T) {

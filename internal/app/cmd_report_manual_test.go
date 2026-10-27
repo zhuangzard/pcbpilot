@@ -58,7 +58,7 @@ func TestManualGateMissingNotes(t *testing.T) {
 	}
 }
 
-// Gas Module V5: B's run with --project-config pcbpilot.project.B.json loaded
+// Board-B V5: B's run with --project-config pcbpilot.project.B.json loaded
 // ./pcbpilot.project.json (board A) and overwrote A's published manual. A
 // config file is loaded itself, and manual.out is written only for the
 // document the config names.

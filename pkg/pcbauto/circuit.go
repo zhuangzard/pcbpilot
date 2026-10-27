@@ -295,7 +295,7 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 		// A 4-pin common-mode choke carries the return line through one
 		// winding (1–4 / 2–3): the connector-side ground (GND_J) is the same
 		// domain as the board ground. Left apart, the inlet nets formed their
-		// own SELV domain with no insulation pair to the patient side (JDB-1).
+		// own SELV domain with no insulation pair to the patient side (Board-C).
 		if k == KindInductor && len(p.Pads) == 4 {
 			byNum := map[string]string{}
 			for _, pd := range p.Pads {

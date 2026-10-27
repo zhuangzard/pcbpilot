@@ -135,7 +135,7 @@ func PlanImportRepair(tracks []Track, ses *Wiring) RepairPlan {
 				layer, ok = uniqueLayer(any)
 			}
 			if !ok {
-				// The same segment on two inner layers (Gas Module v9:
+				// The same segment on two inner layers (Board-B v9:
 				// SV3_DRV on Inner1 and Inner2, imported to 21 and 22):
 				// EasyEDA's importer puts InnerN on 20+N, so the wrong id
 				// itself names the layer.
@@ -387,7 +387,7 @@ func PlanReconcile(ses *Wiring, tracks []Track, vias [][2]float64, viaNets []str
 		// reported missing and then duplicated).
 		for _, gap := range uncovered(s, layer, tracks) {
 			// EasyEDA also merges a short piece into overlapping same-net
-			// copper that is not collinear (Gas Module V5 B v18: a 12.5 mil
+			// copper that is not collinear (Board-B V5 B v18: a 12.5 mil
 			// SV1_DRV stub between a via and two 40 mil tracks): present
 			// when same-net copper covers 90 % of its width all along.
 			if copperCovers(gap, s.WidthMil, s.Net, layer, tracks, vias, viaNets, viaDia) {
@@ -437,7 +437,7 @@ func uncovered(s Segment, layer int, tracks []Track) [][2][2]float64 {
 	along := func(p [2]float64) float64 { return (p[0]-s.A[0])*ux + (p[1]-s.A[1])*uy }
 	// e is how far a track's round end still holds 90 % of the segment's
 	// width: two collinear pieces whose ends overlap that much are one
-	// continuous copper (Gas Module V5 B v17: a 1.1 mil GND stub dropped on
+	// continuous copper (Board-B V5 B v17: a 1.1 mil GND stub dropped on
 	// import sat in a 2.2 mil gap between two 21.65 mil tracks).
 	type iv struct{ a, b, e float64 }
 	var cover []iv

@@ -86,7 +86,7 @@ func mainPowerRail(pads []pcbPadP) string {
 }
 
 // defaultPourLayers: GND on TOP, IN1 and BOTTOM and the main rail on IN2 for
-// 4+ layers (the Gas Module V5 recipe); GND on TOP and BOTTOM for 2 layers.
+// 4+ layers (the Board-B V5 recipe); GND on TOP and BOTTOM for 2 layers.
 func defaultPourLayers(copper int) (gnd []int, power int) {
 	if copper >= 4 {
 		return []int{1, 15, 2}, 16
@@ -428,7 +428,7 @@ fastroute is never downloaded: see 'pcb autoroute --help'.
 				return finish(err)
 			}
 			// IR closure: the width gate sizes by current, the drop gate
-			// also by length (Gas Module V5 B v17: SV1_DRV 0.34 A on a
+			// also by length (Board-B V5 B v17: SV1_DRV 0.34 A on a
 			// 1551 mil, 10 mil inner track dropped 57 mV of 30). Widen the
 			// over-budget nets by drop/budget and judge every gate again.
 			for round := 1; !pass && round <= irWidenRounds; round++ {
@@ -530,7 +530,7 @@ type candidateTrial struct {
 	Unrouted int     `json:"unrouted"`
 	Fixable  int     `json:"fixableViolations"`
 	// LoopIR is Σ current × pad span (A·mil) of the intent's nets carrying
-	// ≥ 0.2 A: the tie-break among equally routable placements (Gas Module
+	// ≥ 0.2 A: the tie-break among equally routable placements (Board-B
 	// V5 B v20: seed-1 and seed-9 both routed, the kept one had long drains).
 	LoopIR  float64 `json:"loopIR"`
 	Seconds float64 `json:"seconds"`
@@ -540,7 +540,7 @@ type candidateTrial struct {
 // trialCandidates trial-routes the applied best placement and every runner-up
 // in candDir (their place-* steps only: poses are absolute and the mechanics
 // are already on the board), then re-applies the most routable one. A
-// geometrically better placement is not always more routable (Gas Module V5
+// geometrically better placement is not always more routable (Board-B V5
 // B: the seed-7 window left 3–4 connections unrouted).
 func trialCandidates(cfg *appConfig, window string, o autorouteOpts, best, candDir, outDir string, budget time.Duration,
 	apply func(string) error, stderr io.Writer) (string, []candidateTrial, error) {

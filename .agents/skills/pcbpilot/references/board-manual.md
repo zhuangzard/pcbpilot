@@ -5,7 +5,7 @@
 [templates/board-manual/manual.html.tmpl](../templates/board-manual/manual.html.tmpl)；Go 包 `pkg/boardmanual`
 用 `go:embed` 嵌入副本，`TestTemplateMatchesSkill` 要求两份逐字节相同（改模板后
 `cp .agents/skills/pcbpilot/templates/board-manual/manual.html.tmpl pkg/boardmanual/templates/`）。
-状态：`offline-verified`（Gas Module V5 Board A：gate-A-final 板数据，`board-manual` PASS）。
+状态：`offline-verified`（Board-B V5 Board A：gate-A-final 板数据，`board-manual` PASS）。
 
 ## 硬要求：每次设计更新自动重生成
 
@@ -15,9 +15,9 @@
   引脚表、名称和额外副本（路径相对工作目录）：
 
   ```json
-  {"schemaVersion": 1, "name": "GasModule_V5_A",
+  {"schemaVersion": 1, "name": "board-b-v5a",
    "manual": {"notes": "pcbpilot.manual-notes.json", "pinMap": "../fpga/board_pins.tcl",
-              "analog": "../sim/analog.json", "name": "GasModule_V5_A", "out": "../05_Output/GasModule_V5_A_使用说明.html",
+              "analog": "../sim/analog.json", "name": "board-b-v5a", "out": "../05_Output/board-b-v5a_使用说明.html",
               "doc": "1eb633d9222155fb", "lang": "zh"}}
   ```
 
@@ -101,7 +101,7 @@
 - **接口页**：焊盘按真实位置与形状绘制（电源红、地黑、信号蓝、空脚灰，橙圈 = 1 脚），脚表含网络/类型/电压/最大电流/
   方向/文档网络/说明；`highlight` 显示为高亮说明框。
 
-## 写作标准（以 Gas Module V5 Board A 为样例）
+## 写作标准（以 Board-B V5 Board A 为样例）
 
 样例：`GasControl_PCB/04_Code/hardware/pcb/pcbpilot.manual-notes.json`，J6 引脚表文字来自
 `03_Requirement/CONNECTOR_PINOUT.md`。
