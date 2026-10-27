@@ -353,20 +353,36 @@ func (t *FPLibTables) Resolve(id string) (FPRef, error) {
 		e.Name = name
 		return FPRef{}, &e
 	}
-	if !dirExists(lib.Dir) {
+	fix := "fix the library URI (" + lib.URI + ") in " + lib.Table
+	switch st, err := fpStat(lib.Dir); {
+	case errors.Is(err, fs.ErrNotExist):
 		return FPRef{}, &FPLibError{Code: ErrFPLibUnresolved, Lib: nick, Name: name, Path: lib.Dir,
-			Detail: fmt.Sprintf("library %q points at %s, which is not a directory", nick, lib.Dir),
-			Fix:    "fix the library URI (" + lib.URI + ") in " + lib.Table}
+			Detail: fmt.Sprintf("library %q points at %s, which does not exist", nick, lib.Dir), Fix: fix}
+	case err != nil:
+		return FPRef{}, &FPLibError{Code: ErrFPLibUnresolved, Lib: nick, Name: name, Path: lib.Dir,
+			Detail: fmt.Sprintf("cannot check library %q: %v", nick, err), Fix: "check the folder's permissions"}
+	case !st.IsDir():
+		return FPRef{}, &FPLibError{Code: ErrFPLibUnresolved, Lib: nick, Name: name, Path: lib.Dir,
+			Detail: fmt.Sprintf("library %q points at %s, which is not a directory", nick, lib.Dir), Fix: fix}
 	}
 	p := filepath.Join(lib.Dir, name+".kicad_mod")
 	if rel, err := filepath.Rel(lib.Dir, p); err != nil || rel != filepath.Base(p) {
 		return FPRef{}, &FPLibError{Code: ErrFPLibUnresolved, Lib: nick, Name: name, Path: p,
 			Detail: fmt.Sprintf("footprint %q escapes library %q", name, nick), Fix: "use a plain footprint name"}
 	}
-	if !fileExists(p) {
+	// E_FP_NOT_FOUND only when the file does not exist; anything else
+	// (permission, I/O, a directory in its place) is unresolved.
+	switch st, err := fpStat(p); {
+	case errors.Is(err, fs.ErrNotExist):
 		return FPRef{}, &FPLibError{Code: ErrFPNotFound, Lib: nick, Name: name, Path: p,
 			Detail: fmt.Sprintf("library %q (%s) has no footprint %q", nick, lib.Dir, name),
 			Fix:    "check the footprint name in the symbol's Footprint field"}
+	case err != nil:
+		return FPRef{}, &FPLibError{Code: ErrFPLibUnresolved, Lib: nick, Name: name, Path: p,
+			Detail: fmt.Sprintf("cannot check footprint %q in library %q: %v", name, nick, err), Fix: "check the file's permissions"}
+	case st.IsDir():
+		return FPRef{}, &FPLibError{Code: ErrFPLibUnresolved, Lib: nick, Name: name, Path: p,
+			Detail: fmt.Sprintf("%s is a directory, not a footprint file", p), Fix: "remove or rename the directory"}
 	}
 	return FPRef{Lib: nick, Name: name, LibDir: lib.Dir, Path: p, Scope: lib.Scope}, nil
 }

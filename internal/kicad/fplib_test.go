@@ -345,6 +345,7 @@ func TestKiCadConfigDirMustBeDirectory(t *testing.T) {
 		{"windows", map[string]string{"APPDATA": filepath.Join(root, "appdata")}, filepath.Join(root, "appdata", "kicad", FPLibVersion)},
 		{"darwin", nil, filepath.Join(root, "Library", "Preferences", "kicad", FPLibVersion)},
 		{"linux", nil, filepath.Join(root, ".config", "kicad", FPLibVersion)},
+		{"linux", map[string]string{"XDG_CONFIG_HOME": filepath.Join(root, "xdg")}, filepath.Join(root, "xdg", "kicad", FPLibVersion)},
 		{"linux", map[string]string{"KICAD_CONFIG_HOME": filepath.Join(root, "kch")}, filepath.Join(root, "kch", FPLibVersion)},
 	}
 	for _, b := range branches {
@@ -375,6 +376,29 @@ func TestKiCadConfigDirMustBeDirectory(t *testing.T) {
 			fpStat, fpLstat, fpReadFile = os.Stat, os.Lstat, os.ReadFile
 		}
 	}
+	// The flat KICAD_CONFIG_HOME fallback (tables directly inside, no 10.0)
+	// is selected only for a real directory too.
+	flat := filepath.Join(root, "flat")
+	if err := os.MkdirAll(flat, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(flat, "fp-lib-table"), []byte(table()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	flatEnv := mk("linux", map[string]string{"KICAD_CONFIG_HOME": flat})
+	if got, err := kicadConfigDir(flatEnv); err != nil || got != flat {
+		t.Errorf("flat fallback: %s %v, want %s", got, err, flat)
+	}
+	for name, statErr := range map[string]error{"dangling": fs.ErrNotExist,
+		"permission": &fs.PathError{Op: "stat", Path: flat, Err: fs.ErrPermission}} {
+		// The table is checked first (present), then the selected directory fails.
+		injectStat(t, flat, statErr, nil)
+		if _, err := kicadConfigDir(flatEnv); err == nil || err.Code != ErrFPLibUnresolved || err.Path != flat {
+			t.Errorf("flat fallback %s: %v", name, err)
+		}
+		fpStat, fpLstat, fpReadFile = os.Stat, os.Lstat, os.ReadFile
+	}
+
 	// And through the loader: a file at the default 10.0 path fails the load.
 	f := newFPFixture(t)
 	if err := os.RemoveAll(filepath.Join(f.cfg, FPLibVersion)); err != nil {
@@ -467,6 +491,41 @@ func TestFPLibSettingsPathsFailClosed(t *testing.T) {
 	g.write(common(g), `{"environment":{"vars":null}}`) // what KiCad writes with no user paths
 	if _, err := g.tryLoad(); err != nil {
 		t.Errorf("vars null: %v", err)
+	}
+}
+
+// Only a missing footprint file is E_FP_NOT_FOUND; permission / I/O errors
+// on the library folder or the file are E_FP_LIB_UNRESOLVED with the cause.
+func TestFPLibResolveStatErrors(t *testing.T) {
+	f := newFPFixture(t)
+	lib := f.lib(filepath.Join(f.pj, "a.pretty"), "Ok")
+	if err := os.MkdirAll(filepath.Join(lib, "Dir.kicad_mod"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f.write(filepath.Join(f.pj, "fp-lib-table"), table(row("A", "KiCad", "${KIPRJMOD}/a.pretty")))
+	tabs := f.load()
+	errIO := &fs.PathError{Op: "stat", Path: "x", Err: errors.New("I/O error")}
+	errPerm := &fs.PathError{Op: "stat", Path: "x", Err: fs.ErrPermission}
+	for _, c := range []struct {
+		what, path, id string
+		err            error
+		code, detail   string
+	}{
+		{"library dir permission", lib, "A:Ok", errPerm, ErrFPLibUnresolved, "permission"},
+		{"library dir I/O", lib, "A:Ok", errIO, ErrFPLibUnresolved, "I/O error"},
+		{"file permission", filepath.Join(lib, "Ok.kicad_mod"), "A:Ok", errPerm, ErrFPLibUnresolved, "permission"},
+		{"file I/O", filepath.Join(lib, "Ok.kicad_mod"), "A:Ok", errIO, ErrFPLibUnresolved, "I/O error"},
+		{"file missing", "", "A:Missing", nil, ErrFPNotFound, "has no footprint"},
+		{"directory in place of the file", "", "A:Dir", nil, ErrFPLibUnresolved, "is a directory"},
+	} {
+		if c.path != "" {
+			injectStat(t, c.path, c.err, nil)
+		}
+		_, err := tabs.Resolve(c.id)
+		if fe := fpErrCode(t, err); fe.Code != c.code || !strings.Contains(fe.Detail, c.detail) {
+			t.Errorf("%s: %+v, want %s %q", c.what, fe, c.code, c.detail)
+		}
+		fpStat, fpLstat, fpReadFile = os.Stat, os.Lstat, os.ReadFile
 	}
 }
 
