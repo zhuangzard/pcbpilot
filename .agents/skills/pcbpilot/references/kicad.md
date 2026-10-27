@@ -137,6 +137,8 @@ pcbpilot kicad render --out build/render --compare old/render              # 只
   默认层 `F.Cu,F.Mask,F.Silkscreen,Edge.Cuts`，`--side bottom` 用 B.* 并镜像。
 - PNG：只有板有（`kicad-cli pcb render` 3D 光追，按板框尺寸 × `--dpi` 定像素）。光追**不可逐字节复现**（10.0.6 实测同一板两次
   像素不同），所以 `--compare` 只列出不比较。原理图没有 PNG：kicad-cli 不出原理图位图，pcbpilot 也不带 SVG 光栅化库。
+  这一步的诊断同样阻断，只放过“3D 模型加载不了”这一类消息（可选模型，只影响预览）；PNG 必须能解码，尺寸略小于请求值
+  （KiCad 10 实测 640x400 → 616x368，每边允许小 48 像素以内），`render.json` 记实际尺寸。
 - `--out` 写 SVG + `render.json`（文件、sha256、绘制元素数）。再次渲染到同一目录只替换 `render.json` 列出的文件；目录里有其他
   文件/子目录/链接（`RENDER_OUT_NOT_EMPTY` / `RENDER_OUT_UNSAFE`），或 `render.json` 列了渲染器不会写的名字（只允许纯文件名
   `.svg`/`.png`，`RENDER_OUT_BAD_MANIFEST`），一律拒绝、什么都不删。`--compare` 与 `--out` 是同一目录（含链接/联接）也拒绝；
@@ -144,8 +146,10 @@ pcbpilot kicad render --out build/render --compare old/render              # 只
   `--out`，`render.json` 里记为 `kind: report`，`--compare` 忽略它；没给 `--out`、只做比较或渲染失败时报告只打到 stdout。
   链接形式的 `.kicad_pro`/库表按解析后的内容复制，解析不到判 cannot-check。kicad-cli 消息按整行判定（"Loading…" 开头或超长路径
   也不会漏判），只截短显示。路径数据只有 move 没有画线段的 path、被 `display="none"`/`visibility="hidden"`/不透明度 0 隐藏，或
-  没有可见颜料（fill 与 stroke 都是 none，或只有宽度 0 的 stroke；属性或 style，含继承与 `<use>`）的图形都不算画了东西；SVG 必须恰好一个 `<svg>` 根元素。`--compare` 不跟随链接：链接目录或
-  非普通文件的 `.svg` 记 unreadable（cannot-check）。
+  没有可见颜料（fill 与 stroke 都是 none，或只有宽度 0 的 stroke；属性或 style，含继承与 `<use>`）的图形都不算画了东西；fill 只在
+  能围出面积的图形上算数（曲线/圆弧、三个不共线点、有尺寸的 rect/circle/ellipse），直线 path、两点 polygon 必须有可见 stroke。
+  SVG 必须恰好一个 `<svg>` 根元素。**这个“画了东西”的检查只是防空白输出的启发式判断，不是完整的 SVG 渲染器**（不算裁剪、
+  遮挡、变换到画布外等），通过它不等于画面正确。`--compare` 不跟随链接：链接目录或非普通文件的 `.svg` 记 unreadable（cannot-check）。
 - `--compare` 逐文件：`identical`（规范化后字节相同）/ `changed`（结构化 SVG 比较：每个绘制元素连同排序后的属性、文字和所在
   `<g>` 的样式作多重集合比较，给 `elementsAdded/elementsRemoved/changedElements` 和几条样例；只换了绘制顺序记 `reordered`）/
   `added` / `removed` / `unreadable`（解析不了、没画东西——两份相同的空图也不算通过——或 `render.json` 列了却不存在）。

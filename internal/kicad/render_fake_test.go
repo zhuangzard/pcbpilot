@@ -4,11 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	"image/png"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -66,6 +69,9 @@ func fakeRenderCLI(args []string) int {
 			"<g style=\"stroke:#840000\">\r\n<path d=\"M-0.0000 1.0000 L2 -0.5\" />\r\n" +
 			"<text x=\"1\">Path: " + filepath.Dir(in) + string(os.PathSeparator) + filepath.Base(in) + "</text>\r\n" +
 			"<text x=\"2\">-0</text>\r\n<text x=\"3\">V=-0.0</text>\r\n</g>\r\n</svg>\r\n"
+	}
+	if args[0] == "pcb" && args[1] == "render" {
+		return fakePCBRender(args, mode)
 	}
 	if args[0] == "pcb" {
 		o := ""
@@ -644,5 +650,75 @@ func TestRenderPublishTransactional(t *testing.T) {
 	renderPublishHook = func(string, string) error { return nil }
 	if _, err := Render(RenderOptions{Sch: root, OutDir: out}); renderCode(err) != "RENDER_OUT_PARTIAL" {
 		t.Fatalf("render into an interrupted publish: %v", err)
+	}
+}
+
+// fakePCBRender plays `kicad-cli pcb render`: a PNG a few pixels under the
+// requested -w x -h (as KiCad 10 does), after a missing-3D-model message
+// (optional, exempt). Modes: png-wrong / png-small (bad sizes), png-diag (a
+// missing footprint library).
+func fakePCBRender(args []string, mode string) int {
+	flag := func(name string) string {
+		for i := 0; i+1 < len(args); i++ {
+			if args[i] == name {
+				return args[i+1]
+			}
+		}
+		return ""
+	}
+	w, _ := strconv.Atoi(flag("-w"))
+	h, _ := strconv.Atoi(flag("-h"))
+	fmt.Println("Loading 3D models...")
+	fmt.Println("Could not load 3D model C:/models/Resistor_THT.3dshapes/R_Axial.step: file not found")
+	switch mode {
+	case "png-wrong": // larger than asked for
+		w++
+	case "png-small": // far below the request
+		w = 2
+	default: // kicad-cli 10 trims a few pixels
+		w, h = w-8, h-4
+	case "png-diag":
+		fmt.Println("Error: footprint library 'Resistor_THT' not found")
+	}
+	f, err := os.Create(flag("-o"))
+	if err != nil {
+		return 1
+	}
+	defer f.Close()
+	if err := png.Encode(f, image.NewGray(image.Rect(0, 0, w, h))); err != nil {
+		return 1
+	}
+	return 0
+}
+
+// The 3D raster keeps diagnostic blocking except for optional 3D models,
+// and its PNG must decode at the requested size.
+func TestRenderFakePNG(t *testing.T) {
+	for _, c := range []struct{ mode, want string }{{"", ""}, {"png-wrong", "RENDER_BAD_PNG"}, {"png-small", "RENDER_BAD_PNG"}, {"png-diag", "RENDER_KICAD_DIAGNOSTIC"}} {
+		t.Run("mode="+c.mode, func(t *testing.T) {
+			fakeRenderCLIEnv(t, c.mode)
+			ws := t.TempDir()
+			pcb := filepath.Join(ws, "b.kicad_pcb")
+			writeFile(t, pcb, "(kicad_pcb)\n")
+			m, err := Render(RenderOptions{PCB: pcb, PNG: true, OutDir: filepath.Join(ws, "out")})
+			if renderCode(err) != c.want && !(c.want == "" && err == nil) {
+				t.Fatalf("err %v, want %q", err, c.want)
+			}
+			if c.want != "" {
+				return
+			}
+			var got *RenderFile
+			for i := range m.Files {
+				if m.Files[i].Kind == "pcb-3d" {
+					got = &m.Files[i]
+				}
+			}
+			if got == nil || got.Width != 56 || got.Height != 60 {
+				t.Fatalf("PNG entry %+v", got)
+			}
+			if !strings.Contains(strings.Join(m.Warnings, " "), "3D model") {
+				t.Errorf("model message not kept as a warning: %v", m.Warnings)
+			}
+		})
 	}
 }

@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image/png"
 	"io"
 	"math"
 	"os"
@@ -490,6 +491,11 @@ func copyFile(src, dst string) error {
 	return w.Close()
 }
 
+// renderModelMsgRE matches kicad-cli's messages about an optional 3D model
+// it could not load, matched narrowly: "could not / cannot / unable to /
+// failed to  load|find|open  [the] 3D model …" at the start of the line.
+var renderModelMsgRE = regexp.MustCompile(`(?i)^(warning: |error: )?(could not|cannot|unable to|failed to) (load|find|open) (the )?3d[ -]?model\b`)
+
 var (
 	// kicad-cli progress lines that carry no finding.
 	renderQuietRE = regexp.MustCompile(`^(Plotted to |Done\.|Loading|Build |Create |Simplif|Calculating|Load Raytracing|Loading 3D|Reload time|Rendering|Successfully created)`)
@@ -504,10 +510,11 @@ var (
 )
 
 // runRenderCLI runs kicad-cli with the isolated config and timeout and
-// returns its messages (progress lines dropped). blocking: a message about
-// a missing sheet / symbol / footprint / library turns into a
-// RENDER_KICAD_DIAGNOSTIC error even when kicad-cli exits 0.
-func runRenderCLI(cli string, blocking bool, args ...string) ([]string, error) {
+// returns its messages (progress lines dropped). A message with failure
+// wording turns into a RENDER_KICAD_DIAGNOSTIC error even when kicad-cli
+// exits 0, unless exempt (non-nil) matches it: the only exemption is the
+// 3D raster's optional models (renderModelMsgRE).
+func runRenderCLI(cli string, exempt *regexp.Regexp, args ...string) ([]string, error) {
 	cmd, cancel := SchCLICommand(cli, args...)
 	defer cancel()
 	var buf bytes.Buffer
@@ -532,7 +539,7 @@ func runRenderCLI(cli string, blocking bool, args ...string) ([]string, error) {
 			shown = string(r[:300]) + "…"
 		}
 		msgs = append(msgs, what+": "+shown)
-		if miss {
+		if miss && !(exempt != nil && exempt.MatchString(l)) {
 			missing = append(missing, shown)
 		}
 	}
@@ -540,7 +547,7 @@ func runRenderCLI(cli string, blocking bool, args ...string) ([]string, error) {
 		return msgs, renderErr("RENDER_KICAD_FAILED", "open the file in KiCad 10 once to check it loads; for a hang keep the default isolated config",
 			"%s: %v: %s", what, err, strings.Join(msgs, " | "))
 	}
-	if blocking && len(missing) > 0 {
+	if len(missing) > 0 {
 		return msgs, renderErr("RENDER_KICAD_DIAGNOSTIC", "fix what kicad-cli could not load (or make it reachable from the project) and render again",
 			"%s: %s", what, strings.Join(missing, " | "))
 	}
@@ -567,7 +574,7 @@ func RenderSchSVG(cli, sch, outDir, from, to string) ([]RenderFile, []string, er
 		return nil, nil, err
 	}
 	defer os.RemoveAll(raw)
-	warns, err := runRenderCLI(cli, true, "sch", "export", "svg", "--output", raw, sch)
+	warns, err := runRenderCLI(cli, nil, "sch", "export", "svg", "--output", raw, sch)
 	if err != nil {
 		return nil, warns, err
 	}
@@ -677,7 +684,7 @@ func renderPCB(cli, pcb string, o RenderOptions, layers []string, stage, from, t
 		if o.Side == "bottom" {
 			args = append(args, "--mirror")
 		}
-		msgs, err := runRenderCLI(cli, true, append(args, pcb)...)
+		msgs, err := runRenderCLI(cli, nil, append(args, pcb)...)
 		warns = append(warns, msgs...)
 		if err != nil {
 			return RenderFile{}, err
@@ -738,8 +745,9 @@ func renderPCB(cli, pcb string, o RenderOptions, layers []string, stage, from, t
 	}
 	name := base + "-3d-" + o.Side + ".png"
 	out := filepath.Join(stage, name)
-	// Missing 3D models only blank parts of the preview: listed, not blocking.
-	msgs, err := runRenderCLI(cli, false, "pcb", "render", "--side", o.Side, "-w", strconv.Itoa(w), "-h", strconv.Itoa(h),
+	// A missing optional 3D model only blanks a part of the preview: that
+	// message alone is listed, not blocking; every other one still blocks.
+	msgs, err := runRenderCLI(cli, renderModelMsgRE, "pcb", "render", "--side", o.Side, "-w", strconv.Itoa(w), "-h", strconv.Itoa(h),
 		"--quality", "basic", "-o", out, pcb)
 	warns = append(warns, msgs...)
 	if err != nil {
@@ -749,8 +757,17 @@ func renderPCB(cli, pcb string, o RenderOptions, layers []string, stage, from, t
 	if err != nil || len(b) == 0 {
 		return nil, warns, renderErr("RENDER_KICAD_FAILED", "check kicad-cli pcb render on this board", "no PNG written: %v", err)
 	}
+	// kicad-cli 10 trims a few pixels off the requested size (measured:
+	// 640x400 -> 616x368, 1600x900 -> 1568x872), so the PNG must decode,
+	// be non-empty and fall within a small margin below the request.
+	cfg, err := png.DecodeConfig(bytes.NewReader(b))
+	near := func(got, want int) bool { return got > 0 && got <= want && want-got <= 48 }
+	if err != nil || !near(cfg.Width, w) || !near(cfg.Height, h) {
+		return nil, warns, renderErr("RENDER_BAD_PNG", "check kicad-cli pcb render on this board",
+			"%s: want a PNG of about %dx%d, got %dx%d (%v)", name, w, h, cfg.Width, cfg.Height, err)
+	}
 	sum := sha256.Sum256(b)
-	files = append(files, RenderFile{File: name, Kind: "pcb-3d", SHA256: hex.EncodeToString(sum[:]), Bytes: len(b), Width: w, Height: h})
+	files = append(files, RenderFile{File: name, Kind: "pcb-3d", SHA256: hex.EncodeToString(sum[:]), Bytes: len(b), Width: cfg.Width, Height: cfg.Height})
 	warns = append(warns, "png: 3D raytrace preview, not bit-reproducible; --compare ignores it")
 	return files, warns, nil
 }

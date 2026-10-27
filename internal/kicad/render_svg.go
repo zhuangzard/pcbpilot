@@ -219,6 +219,116 @@ func svgGeometry(name string, attr map[string]string, text string) bool {
 	return false
 }
 
+// svgFillArea reports whether a fill can show for this element: it must
+// be able to enclose area — a path with a curve / arc or three
+// non-collinear points, a polygon / polyline with three non-collinear
+// points, a sized rect / circle / ellipse, text glyphs or an image. A
+// straight path, a two-point polygon or a line have none.
+func svgFillArea(name string, attr map[string]string) bool {
+	switch name {
+	case "rect", "circle", "ellipse", "text", "image":
+		return true // svgGeometry already required a non-zero size / content
+	case "polygon", "polyline":
+		var pts [][2]float64
+		nums := svgNumRE.FindAllString(attr["points"], -1)
+		for i := 0; i+1 < len(nums); i += 2 {
+			x, _ := strconv.ParseFloat(nums[i], 64)
+			y, _ := strconv.ParseFloat(nums[i+1], 64)
+			pts = append(pts, [2]float64{x, y})
+		}
+		return svgNonCollinear(pts)
+	case "path":
+		pts, curve := svgPathPoints(attr["d"])
+		return curve || svgNonCollinear(pts)
+	}
+	return false
+}
+
+// svgNonCollinear: some three of pts span a non-zero area.
+func svgNonCollinear(pts [][2]float64) bool {
+	if len(pts) < 3 {
+		return false
+	}
+	a := pts[0]
+	for i := 1; i < len(pts); i++ {
+		b := pts[i]
+		if b == a {
+			continue
+		}
+		for _, c := range pts[i+1:] {
+			if cross := (b[0]-a[0])*(c[1]-a[1]) - (b[1]-a[1])*(c[0]-a[0]); cross > 1e-12 || cross < -1e-12 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// svgPathPoints follows path data (absolute and relative M/L/H/V/Z) and
+// returns the points it visits, and whether it has a curve or arc
+// (C/S/Q/T/A), which encloses area of its own.
+func svgPathPoints(d string) ([][2]float64, bool) {
+	var pts [][2]float64
+	var cmd byte
+	var cx, cy, sx, sy float64
+	var args []float64
+	curve := false
+	flush := func() {
+		rel := cmd >= 'a'
+		up := cmd &^ 0x20
+		switch up {
+		case 'M', 'L':
+			for i := 0; i+1 < len(args); i += 2 {
+				x, y := args[i], args[i+1]
+				if rel {
+					x, y = cx+x, cy+y
+				}
+				cx, cy = x, y
+				if up == 'M' && i == 0 {
+					sx, sy = x, y
+				}
+				pts = append(pts, [2]float64{x, y})
+			}
+		case 'H':
+			for _, x := range args {
+				if rel {
+					x += cx
+				}
+				cx = x
+				pts = append(pts, [2]float64{cx, cy})
+			}
+		case 'V':
+			for _, y := range args {
+				if rel {
+					y += cy
+				}
+				cy = y
+				pts = append(pts, [2]float64{cx, cy})
+			}
+		case 'Z':
+			cx, cy = sx, sy
+		case 'C', 'S', 'Q', 'T', 'A':
+			curve = true
+		}
+		args = args[:0]
+	}
+	for _, t := range svgPathTokRE.FindAllString(d, -1) {
+		if c := t[0]; (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') {
+			if cmd != 0 {
+				flush()
+			}
+			cmd = c
+			continue
+		}
+		f, _ := strconv.ParseFloat(t, 64)
+		args = append(args, f)
+	}
+	if cmd != 0 {
+		flush()
+	}
+	return pts, curve
+}
+
 var (
 	svgPathTokRE = regexp.MustCompile(`[A-Za-z]|[-+]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][-+]?[0-9]+)?`)
 	svgPathSepRE = regexp.MustCompile(`^[\s,]*$`)
@@ -365,13 +475,13 @@ func (s svgPaint) child(attr map[string]string) svgPaint {
 // hidden: nothing below is drawn whatever its paint.
 func (s svgPaint) hidden() bool { return s.none || s.opZero || s.visHidden }
 
-// paints reports whether an element of this kind is drawn with visible ink:
-// a fill (not for a line, which has no area) or a stroke of some width.
-func (s svgPaint) paints(name string) bool {
+// paints reports whether an element is drawn with visible ink: a fill on
+// a shape that can enclose area (svgFillArea), or a stroke of some width.
+func (s svgPaint) paints(name string, attr map[string]string) bool {
 	if s.hidden() {
 		return false
 	}
-	fill := !s.fillNone && s.fillOp > 0 && name != "line"
+	fill := !s.fillNone && s.fillOp > 0 && svgFillArea(name, attr)
 	stroke := !s.strokeNone && s.strokeOp > 0 && s.width > 0
 	return fill || stroke || name == "image"
 }
@@ -403,7 +513,8 @@ func SVGElements(b []byte) ([]string, error) {
 	// element down to it, re-applied to a <use>'s paint.
 	type geom struct {
 		name  string
-		chain []map[string]string
+		attr  map[string]string
+		chain []map[string]string // from the id'd element down to it
 	}
 	type use struct {
 		target string
@@ -489,7 +600,7 @@ func SVGElements(b []byte) ([]string, error) {
 			if !svgGeometry(f.name, f.attr, txt) {
 				continue
 			}
-			if !f.hidden && f.paint.paints(f.name) {
+			if !f.hidden && f.paint.paints(f.name, f.attr) {
 				visible++
 			}
 			// Record it for every id'd ancestor (and itself) a <use> may name.
@@ -497,7 +608,7 @@ func SVGElements(b []byte) ([]string, error) {
 			for a := f; a != nil; a = a.parent {
 				chain = append([]map[string]string{a.attr}, chain...)
 				if a.id != "" {
-					idGeoms[a.id] = append(idGeoms[a.id], geom{f.name, append([]map[string]string(nil), chain...)})
+					idGeoms[a.id] = append(idGeoms[a.id], geom{f.name, f.attr, append([]map[string]string(nil), chain...)})
 				}
 			}
 		}
@@ -511,7 +622,7 @@ func SVGElements(b []byte) ([]string, error) {
 			for _, a := range g.chain {
 				p = p.child(a)
 			}
-			if p.paints(g.name) {
+			if p.paints(g.name, g.attr) {
 				visible++
 			}
 		}

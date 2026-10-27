@@ -21,9 +21,9 @@ func TestKicadRenderCompareExitCodes(t *testing.T) {
 		}
 	}
 	base, same, moved := filepath.Join(root, "base"), filepath.Join(root, "same"), filepath.Join(root, "moved")
-	write(base, "p.svg", `<path d="M1 1 L2 2"/>`)
-	write(same, "p.svg", `<path d="M1 1 L2 2"/>`)
-	write(moved, "p.svg", `<path d="M1 2 L2 3"/>`)
+	write(base, "p.svg", `<path stroke="#000" d="M1 1 L2 2"/>`)
+	write(same, "p.svg", `<path stroke="#000" d="M1 1 L2 2"/>`)
+	write(moved, "p.svg", `<path stroke="#000" d="M1 2 L2 3"/>`)
 	for _, c := range []struct {
 		out, verdict string
 		code         int
@@ -104,7 +104,7 @@ func TestKicadRenderReportName(t *testing.T) {
 	cur := filepath.Join(root, "cur")
 	for _, d := range []string{base, cur} {
 		_ = os.MkdirAll(d, 0o755)
-		_ = os.WriteFile(filepath.Join(d, "p.svg"), []byte(`<svg><path d="M1 1 L2 2"/></svg>`), 0o644)
+		_ = os.WriteFile(filepath.Join(d, "p.svg"), []byte(`<svg><path stroke="#000" d="M1 1 L2 2"/></svg>`), 0o644)
 	}
 	for _, bad := range []string{filepath.Join(root, "r.json"), "../r.json", "sub/r.json", "render.json", "r.txt"} {
 		stdout, _, code := runCLI(t, "kicad", "render", "--out", cur, "--compare", base, "--report", bad)

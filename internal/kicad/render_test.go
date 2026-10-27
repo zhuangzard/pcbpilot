@@ -74,7 +74,7 @@ func writeSVG(t *testing.T, dir, name, body string) {
 func TestCompareRenders(t *testing.T) {
 	root := t.TempDir()
 	base, cur := filepath.Join(root, "base"), filepath.Join(root, "cur")
-	p1, p2, p3 := `<path d="M1 1 L2 2" />`+"\n", `<path d="M3 3 L4 4" />`+"\n", `<circle cx="1" cy="1" r="0.5" />`+"\n"
+	p1, p2, p3 := `<path stroke="#000" d="M1 1 L2 2" />`+"\n", `<path d="M3 3 L4 4" />`+"\n", `<circle cx="1" cy="1" r="0.5" />`+"\n"
 	writeSVG(t, base, "same.svg", p1+p2)
 	writeSVG(t, cur, "same.svg", p1+p2)
 	writeSVG(t, base, "moved.svg", p1+p2+p3)
@@ -241,9 +241,9 @@ func TestSVGElementsNeedsGeometry(t *testing.T) {
 		}
 	}
 	for _, good := range []string{
-		`<svg><defs><path id="p" d="M1 1 L2 2"/></defs><use xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#p"/></svg>`,
-		`<svg><g><text x="1">R1</text></g></svg>`, `<svg><path d="M1 1 2 2"/></svg>`, `<svg><path d="m0,0h5"/></svg>`,
-		`<svg><path d="M0 0 C1 1 2 2 3 3 Z"/></svg>`, `<svg><path d="M1e1 2 L-.5 3.5e-1"/></svg>`, `<svg><rect width="1" height="2"/></svg>`, `<svg><polygon points="0,0 1,1"/></svg>`,
+		`<svg><defs><path id="p" d="M1 1 L2 2"/></defs><use xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#p" stroke="#000"/></svg>`,
+		`<svg><g><text x="1">R1</text></g></svg>`, `<svg><path stroke="#000" d="M1 1 2 2"/></svg>`, `<svg><path stroke="#000" d="m0,0h5"/></svg>`,
+		`<svg><path d="M0 0 C1 1 2 2 3 3 Z"/></svg>`, `<svg><path stroke="#000" d="M1e1 2 L-.5 3.5e-1"/></svg>`, `<svg><rect width="1" height="2"/></svg>`, `<svg><polygon stroke="#000" points="0,0 1,1"/></svg>`,
 	} {
 		if _, err := SVGElements([]byte(good)); err != nil {
 			t.Errorf("%s rejected: %v", good, err)
@@ -292,7 +292,7 @@ func TestNormalizeSVGHeaderOnly(t *testing.T) {
 // Exactly one root <svg>, nothing but whitespace (and prolog) around it;
 // two identical such files are not a passing compare.
 func TestSVGElementsSingleRoot(t *testing.T) {
-	const ok = `<svg><path d="M1 1 L2 2"/></svg>`
+	const ok = `<svg><path stroke="#000" d="M1 1 L2 2"/></svg>`
 	for _, bad := range []string{ok + ok, ok + "<path d=\"M1 1 L2 2\"/>", ok + "junk", "junk" + ok, ok + "<x/>"} {
 		if _, err := SVGElements([]byte(bad)); err == nil {
 			t.Errorf("%q accepted", bad)
@@ -315,7 +315,7 @@ func TestSVGElementsSingleRoot(t *testing.T) {
 // A compare never follows links: a linked directory or a linked .svg on
 // either side is unreadable (cannot-check), even without render.json.
 func TestCompareRendersRefusesLinks(t *testing.T) {
-	const svg = `<svg><path d="M1 1 L2 2"/></svg>`
+	const svg = `<svg><path stroke="#000" d="M1 1 L2 2"/></svg>`
 	root := t.TempDir()
 	base, cur, elsewhere := filepath.Join(root, "base"), filepath.Join(root, "cur"), filepath.Join(root, "elsewhere")
 	for _, d := range []string{base, cur} {
@@ -347,7 +347,7 @@ func TestCompareRendersRefusesLinks(t *testing.T) {
 // Geometry hidden by display, visibility or zero opacity (attribute or
 // style, inherited, also through <use>) is not drawing.
 func TestSVGElementsHiddenGeometry(t *testing.T) {
-	const p = `<path d="M1 1 L2 2"/>`
+	const p = `<path stroke="#000" d="M1 1 L2 2"/>`
 	for _, bad := range []string{
 		`<svg><g display="none">` + p + `</g></svg>`,
 		`<svg><g style="display: none">` + p + `</g></svg>`,
@@ -384,7 +384,7 @@ func TestSVGElementsHiddenGeometry(t *testing.T) {
 func TestCompareRendersUpperCaseListed(t *testing.T) {
 	root := t.TempDir()
 	for _, d := range []string{"a", "b"} {
-		writeFile(t, filepath.Join(root, d, "page1.svg"), `<svg><path d="M1 1 L2 2"/></svg>`)
+		writeFile(t, filepath.Join(root, d, "page1.svg"), `<svg><path stroke="#000" d="M1 1 L2 2"/></svg>`)
 		writeFile(t, filepath.Join(root, d, RenderManifestName), `{"schemaVersion":1,"kind":"sch","files":[`+
 			`{"file":"page1.svg","kind":"sch-page","sha256":"","bytes":0},{"file":"page2.SVG","kind":"sch-page","sha256":"","bytes":0}]}`)
 	}
@@ -427,6 +427,43 @@ func TestSVGElementsUnpainted(t *testing.T) {
 		`<svg><line stroke="#000" x1="0" y1="0" x2="1" y2="1"/></svg>`,
 		`<svg><defs><path id="a" d="M1 1 L2 2"/></defs><use href="#a" fill="none" stroke="red"/></svg>`,
 		`<svg><text x="1">R1</text></svg>`,
+	} {
+		if _, err := SVGElements([]byte(good)); err != nil {
+			t.Errorf("%s rejected: %v", good, err)
+		}
+	}
+}
+
+// A fill counts only on a shape that can enclose area; a <use> paints its
+// target from its own state, not from the target's ancestors.
+func TestSVGElementsFillNeedsArea(t *testing.T) {
+	for _, bad := range []string{
+		`<svg><path d="M1 1 L2 2"/></svg>`,
+		`<svg><path d="M0 0 L1 1 L2 2 Z"/></svg>`,
+		`<svg><polygon points="0,0 1,1"/></svg>`,
+		`<svg><polygon points="0,0 1,1 2,2"/></svg>`,
+		`<svg><polyline points="0 0 0 5 0 9"/></svg>`,
+		`<svg><path d="M0 0 h5 h-2"/></svg>`,
+		`<svg fill="red"><defs><path id="p" d="M0 0 L1 0 L0 1 Z"/></defs><use href="#p" fill="none"/></svg>`,
+	} {
+		if _, err := SVGElements([]byte(bad)); err == nil {
+			t.Errorf("%s accepted as a drawing", bad)
+		}
+		root := t.TempDir()
+		for _, d := range []string{"a", "b"} {
+			writeFile(t, filepath.Join(root, d, "p.svg"), bad)
+		}
+		if r := CompareRenders(filepath.Join(root, "a"), filepath.Join(root, "b")); r.Verdict != gate.CannotCheck {
+			t.Errorf("identical fill-only %s: %s", bad, r.Verdict)
+		}
+	}
+	for _, good := range []string{
+		`<svg><path d="M0 0 L1 0 L0 1 Z"/></svg>`,
+		`<svg><path d="m0 0 h5 v5"/></svg>`,
+		`<svg><path d="M0 0 C1 1 2 0 3 1"/></svg>`,
+		`<svg><polygon points="0,0 1,0 0,1"/></svg>`,
+		`<svg><rect width="1" height="1"/></svg>`,
+		`<svg><defs><path id="p" d="M0 0 L1 0 L0 1 Z"/></defs><use href="#p"/></svg>`,
 	} {
 		if _, err := SVGElements([]byte(good)); err != nil {
 			t.Errorf("%s rejected: %v", good, err)
