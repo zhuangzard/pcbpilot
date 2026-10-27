@@ -257,7 +257,8 @@ func (r *kicadRun) narrowIntentNets(board string) map[string]bool {
 		return nil
 	}
 	nets := map[string]bool{}
-	for _, v := range checkIntentWidths(tracks, pads, intentRequirements(r.in), pouredLookup(s.Copper.Poured)) {
+	nk := netCaseKey(true) // a KiCad board: case-sensitive net names
+	for _, v := range checkIntentWidthsKeyed(nk, tracks, pads, intentRequirements(r.in), pouredLookupKeyed(nk, s.Copper.Poured)) {
 		nets[v.Net] = true
 	}
 	return nets

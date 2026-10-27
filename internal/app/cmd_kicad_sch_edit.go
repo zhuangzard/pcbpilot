@@ -378,7 +378,10 @@ REF:PIN with a pin number or a pin NAME (all pins of that name; NAME* = prefix).
 
 Same gates as sch-build; KiCad netlist == edited spec is transactional (nothing written on a
 mismatch). Each successful edit saves a checkpoint (kicad sch-checkpoint list|restore N).
---dry-run prints the plan (zones re-planned/reused, coordinates, connections) and writes nothing.`,
+--dry-run prints the plan (zones re-planned/reused, coordinates, connections) and writes nothing.
+The edit redraws the project from the stored spec: when its files were changed in the KiCad
+GUI since the last build it is refused (EXTERNAL_EDIT; KICAD_OPEN while KiCad has it open) —
+import the edits with sch-read, or overwrite them with --discard-external-edits.`,
 		Example: `  pcbpilot kicad sch-edit --project build/ --spec delta.json
   pcbpilot kicad sch-edit --project build/ --spec delta.json --dry-run`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -544,7 +547,8 @@ func newKicadSchReadCmd(stdout io.Writer) *cobra.Command {
 		Short: "Compact parts/nets JSON of a KiCad schematic (a valid sch-build spec; read this, not the S-expression)",
 		Args:  cobra.NoArgs,
 		Long: `Reads a KiCad schematic through kicad-cli's netlist and prints a small JSON: parts (ref,
-value, lcsc, symbol, footprint, zone), nets (name, pins REF:NUMBER) and no-connect pins.
+value, lcsc, symbol, footprint, zone; units = the placed units of a partly placed multi-unit
+symbol, so a rebuild places only those), nets (name, pins REF:NUMBER) and no-connect pins.
 It is a pcbpilot.kicad.sch-build/1 spec: kicad sch-build --spec turns it back into the
 same netlist (project libraries are referenced through libDirs). On a project built by
 sch-build the zones, pages, title block and rails come from its stored spec.`,
@@ -666,6 +670,9 @@ func readSbSpec(project, sch string) (*sbSpec, error) {
 		for i := range s.Parts {
 			if b, ok := boxes[s.Parts[i].Ref]; ok {
 				s.Parts[i].BBox = b.Box
+				if len(b.Units) < b.LibUnits { // partly placed: the build must not add units
+					s.Parts[i].Units = b.Units
+				}
 				if z := s.Parts[i].Zone; z != "" {
 					zb[z] = sbBoxUnion(zb[z], kicad.Box{MinX: b.Box[0], MinY: b.Box[1], MaxX: b.Box[2], MaxY: b.Box[3]})
 				}

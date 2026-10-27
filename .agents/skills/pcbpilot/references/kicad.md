@@ -9,6 +9,18 @@
 
 > 原理图：用 `kicad sch-build`（spec → 完整工程，一次调用，见 [kicad-sch-build.md](kicad-sch-build.md)），
 > 不再逐步调用 `sch place / autoconnect --backend kicad`。
+> 仍需逐件改单张图时（`--backend kicad --kicad-sch X`），多单元器件每个单元是一个实例：`sch place` 同一
+> `--designator` 加 `--unit 2/3…` 逐个放（新单元继承已放单元的字段；已放单元之间字段不一致，或
+> `--value/--footprint/--lcsc` 与之不同、已放单元没有，都拒绝——先 `sch modify --id U1` 给全部单元设上）；
+> `sch modify --id U1` 的字段与改位号作用于全部单元，移动要写 `--id U1:2`（只写 `U1` 且有多个单元时拒绝）；
+> `sch prim-delete --ids U1` 删全部单元，`U1:2` 只删该单元；`REF.PIN` 可指任何已放单元的脚（按实例的
+> body style 取脚位）。改位号（`--designator` 或 Reference 字段）先校验：非空、无 `:` `.` 空白/控制字符，且不与
+> 本图或工程其他图纸上的位号重名，否则拒绝且文件不变。**层次图**：一个件的单元分在几张图上时，改字段/改位号/
+> 删全部单元一律拒绝（先把单元放到同一张图）；被多个图纸符号复用的子图上不放置、不改位号、不删除（一个符号就是各次复用的 U201/U301；
+> 改字段时其每个复用位号都要通过上面的跨图检查）。
+> 层次从 `.kicad_pro` 的根图沿图纸树遍历（含子目录里的子图，硬/软链接算同一张图）；找不到工程、多个工程
+> （含嵌套工程：子目录工程的根图又是外层工程的子图）都含该图或有图纸读不了时，
+> 放置/改位号/删全部单元拒绝（报出原因），普通字段修改照常。
 
 ## 工作方式
 
@@ -36,6 +48,22 @@ pcbpilot ──▶ KiCad 自带 Python + pcbnew（internal/kicad/bridge.py，go:
 - pcbnew 的 `SaveBoard` **不覆盖**已存在的 `.kicad_pro`（10.0.6 实测），bridge 写新板前先删目标的 `.kicad_pro/.kicad_prl`；
   swig 不暴露 netclass pattern 列表，用户 pattern 从 `.kicad_pro` 读回保留。
 
+- **bridge 写操作全有或全无**：`edit`（加线/过孔、改线宽、丝印、`padZoneNone`）、`pours` 先校验全部网名、
+  层号（必须是精确整数，`1.9`/`true` 拒绝；丝印文字层只能 3/4）、数值字段、对象 id 与位号；任一网不在板上（不会再静默落到 0 号无网）、id 不存在或位号对应多个封装，整批拒绝、
+  **不保存**，错误列出每一项（大小写不同的网名给出 `did you mean`）。`padZoneNone` 用且只用一个选择器指定封装：
+  `ref`（只匹配位号）/ `id`（只匹配快照 primitiveId）/ `uuid`（只匹配封装 uuid），命名空间互不混用。各操作字段必须是数组（`null`/缺省 = 空；对象、字符串、数字一律拒绝），网名与 id
+  必须是字符串；`setText` / `hideTexts` 可寻址快照 `silk` 里的每条文字（字段、封装图形文字、板上文字），但图形文字
+  KiCad 不保存隐藏状态，`hideTexts` 对它直接拒绝。`fp:<uuid>:<序号>` 只对未改动的文件稳定（保存会重排封装），
+  每次写入后重新取快照再寻址。`netclasses` 的意图网不在板上仍是忽略并告警（`missingNets`），绝缘/板边域里缺的网
+  另列 `missingDomainNets` 并告警。
+- **位号重复 / 占位位号**（两个 `H1`、多个 `REF**`/`G***` logo、未标注的 `R?`）：快照里各自独立成条（各有
+  primitiveId 与 uuid，标 `duplicateDesignator` / `placeholder`），顶层 `duplicateDesignators` 列出位号与全部 id
+  并在 `partial` 里说明（按位号索引的读者会混淆它们），占位位号另列 `placeholderDesignators`（不算降级），不再互相覆盖。`kicad place` 把这些封装作为固定障碍原地保留、不出位姿，报告 `notes` 逐个
+  列出；place.py 收到重复位号或不存在的键时整批拒绝、不写板，位姿文件是带类型的记录
+  `{"pcbpilotPoses":2,"poses":[{"ref":…}|{"uuid":…}, …]}`（Go：`kicad.PlaceTargets`），单个封装用 `uuid` 记录指定；
+  旧的 `{位号: 位姿}` 仍可读，但键一律按位号解释（位号可以就叫 `uuid:…`）。要让它们参与
+  布局，先在原理图/PCB 里重新标注唯一位号。
+
 ## 快照（`kicad snapshot board.kicad_pcb [--out board.json]`）
 
 形状与 `pcb dump --include-copper` 一致（Go：`kicad.Snapshot(pcbPath) ([]byte, error)`），`boardSnapshot`、
@@ -45,7 +73,7 @@ pcbpilot ──▶ KiCad 自带 Python + pcbnew（internal/kicad/bridge.py，go:
 |---|---|
 | 单位/坐标 | mil，**y 向上**（y = −y_KiCad）；旋转仍是度、逆时针 |
 | 铜层号 | pcbpilot 的 EasyEDA 编号：F.Cu=1、B.Cu=2、InN.Cu=14+N（In1=15）、通孔焊盘=12 |
-| 器件 | primitiveId（封装 uuid；**板上 uuid 重复时改用 `ref:<位号>`**——转换来的 Gas V5 A 203 个封装只有 39 个不同 uuid）/ designator / value / footprint / `lcsc`（字段 LCSC、LCSC Part、LCSC Part #、JLCPCB Part #）/ layer / x,y,rotation / bbox / pads |
+| 器件 | primitiveId（封装 uuid；**板上 uuid 重复时改用 `ref:<位号>`**，位号也重复时 `fp:<uuid>:<序号>`——转换来的板曾见 203 个封装只有 39 个不同 uuid）/ uuid / designator / value / footprint / `lcsc`（字段 LCSC、LCSC Part、LCSC Part #、JLCPCB Part #）/ layer / x,y,rotation / bbox / pads |
 | 焊盘 | padNumber / net / layer / x,y / width,height（轴对齐外包）/ rotation / shape `[RECT\|ELLIPSE\|OVAL\|POLYGON, w, h]` / 通孔 holeDiameter |
 | NPTH | 进 `footprintHoles`（圆孔 dia；槽孔为包络多边形） |
 | 板框 | Edge.Cuts 合成多边形取面积最大者；内部挖空写成 layer 12 的 `copper.fills` |
@@ -59,7 +87,24 @@ pcbpilot ──▶ KiCad 自带 Python + pcbnew（internal/kicad/bridge.py，go:
 与 `sch connectivity` 同形：components+pins、nets、connections），`intent derive --connectivity` / `sim power` /
 pad-net diff 直接读。单独挂在 KiCad `unconnected-(…)` 网上的脚不产生连接：带 no-connect 标记的记 `noConnected`，
 否则 `connectionState: "unconnected"`。`--values` 写 `{"parts":{ref:{value,mpn,lcsc}}}` 给 `intent derive --values`。
-从 KiCad 起步的设计由此得到与 EasyEDA 相同的意图 / 安全推导。
+从 KiCad 起步的设计由此得到与 EasyEDA 相同的意图 / 安全推导。每个器件都有 `pins` 列表（无引脚的安装孔为 `[]`）。
+
+**网络身份（唯一规则，`pkg/netname`）**：网的身份是 KiCad 自己的完整层次名，按 KiCad 转义写法——与 `.kicad_pcb`、
+`kicad snapshot` 完全相同：子图局部网 `/pic_sockets/VCC_PIC`，根图局部标签 `VPP/MCLR` 为 `/VPP{slash}MCLR`，
+全局/电源网 `GND`。`kicad netlist` 每个网写 `fullName`（身份，新增字段）和 `name`（仅显示名：去掉图纸路径、
+`{slash}` 还原为 `/`，在全设计唯一时才用短名，否则等于 fullName）。**绝不在标签内部的 `/` 处截断**（旧版把
+`/VPP/MCLR` 截成 `MCLR`）。`unconnected-(…)` 是"无网"，两侧比较都按无网处理。匹配方（pad-net-diff、
+`signoff` 的 continuity/trace、`sim post-layout` 的脚↔焊盘检查与铜网查找、`kicad route` 的网络类、intent-widths）
+一律先用 `fullName`；只有 `name` 的旧文档 / intent / sim 用显示名解析到板上**唯一**对应的网，同名多图纸时不猜：
+sim 判 `sim-board-mismatch`、intent 报错、signoff-trace 判"ambiguous"失败（不再退回到板上去找）。两个名字解析到同一块板网
+（如 `VCC_PIC` 与 `/pic_sockets/VCC_PIC` 同时出现）一律拒绝，绝不合并。kicad-cli XML 不转义 `/`，`/pic_sockets/VCC_PIC`
+可能是子图标签 `VCC_PIC`，也可能是根图标签 `pic_sockets/VCC_PIC`：读法只按标签证据定（各图纸文件里的标签/层次标签/图纸引脚
+恰好只有一种读法存在）；引脚在哪张图不算证据（网经层次端口跨图）。无证据、多种读法都有标签、或两个网读成同一身份时
+`kicad netlist` 直接报 `ErrNetAmbiguous`（附修法：改标签名）。旧连接文档（无 fullName）按每个原理图网（文档 + 网 id）解析；
+多页文档按网名合并（与 sim power / intent derive 同规则：不同页同名 = 同一网，但同一页上同名的多个网记录各自独立）。
+两个不同原理图网（同页两条 `VCC` 记录，或 `VCC` 与 `/pwr/VCC`）落到同一块板网时 pad-net-diff 报 `netCollision`、
+signoff-continuity 失败（板上短路），不合并。显示名 `name` 只在能唯一解析回本网时才缩短，绝不等于别的网的身份或显示名。
+pad-net-diff 的大小写宽容只用于 EasyEDA 名（无 fullName）；KiCad 网名区分大小写。
 
 ## 布线（`kicad route`）——与 `pcb auto route` + `pcb gate` 同序同算
 
@@ -76,9 +121,15 @@ pcbpilot kicad route --pcb GasV5_A.kicad_pcb --intent intent.json --sim sim.json
 1. **项目与规则**：板旁没有 `.kicad_pro` 时自动建一个最小项目并写板级规则：间距/最小线宽/过孔取意图 `copper` 块，
    铜到板边取 `pcbauto.EdgeFromIntent` 的 max(外层, 内层)（意图无 edge 时用默认 20/30 mil）；
    `--clearance-mil` 等显式参数优先。已有项目时，意图的板边距离仍是下限（只升不降）。随后跑一次**输入板 DRC** 作基线。
+   已有项目时，显式 `--via-dia-mil` / `--via-drill-mil` / `--track-mil` 低于该项目自己的最小过孔直径 / 最小孔径 / 最小环宽 /
+   最小线宽即**在启动阶段拒绝**（只给一个过孔参数时与 Default 网络类的另一半配对检查环宽）（`RULE_BELOW_BOARD_MINIMUM`，评审与输入 DRC 之前）；不给这些参数时用板自己的网络类尺寸。
 2. **布线前门禁：意图 → KiCad 网络类 + 自定义规则**（必须在导出 DSN 之前）：
    - 每网 `{outer, inner, min, clearance}` 按取值分组为 `PP<n>_W<线宽>` 网络类（精确网名 pattern，优先级最高；
      用户类更宽的值保留，记 `netclasses.kept`）。
+     **过孔**取 max(意图 `netClasses` 的过孔、该网原网络类过孔、板最小孔径 / 最小过孔直径 / 孔径 + 2×最小环宽)，线宽、间距也不低于
+     板最小值；KiCad 新建网络类自带 0.6/0.3 mm 过孔，旧版因此在 interf_u（最小孔 0.5、最小过孔 0.9 mm）上布出 16 个
+     drill_out_of_range + 16 个 via_diameter。Default 的线宽/间距/过孔低于板最小值时在工作副本上抬高；其他每个网（含只在绝缘域里的网）按**有效**线宽、间距、过孔（多类合成、部分类由 Default 补齐）判，低于最小值的加 `PPF_<线宽>_<间距>_<径>_<孔>`（全 nm）类；都记 `netclasses.viaFloored`。生成的 PP / PPF / PPD 类优先级高于工程里所有类；写完后逐网复查有效线宽/间距/过孔，不符即 `mismatched` 停止。全程整数 nm 比较（0.2 mm 不会被 7.87 mil 的舍入削掉），内层线宽同样不低于板最小线宽。KiCad 9 以下没有无值网络类，`netclasses` 直接拒绝。
+     `PPD_<域>` 类只有名字（不带尺寸），不覆盖网自身的线宽/间距/过孔。
    - **内层线宽**：KiCad 网络类只有一个线宽。取最接近的官方机制：DSN 里加 `(layer_rule In1.Cu … (rule (width W)))`
      让 fastroute 内层按内层宽走；`.kicad_dru` 写 `(layer inner)` 的 `track_width (min <widthMil.min>) (opt <inner>)`；
      有 `widthMil.min` 的类再加全层 `track_width (min …)`。规则写在 `# pcbpilot:begin … # pcbpilot:end` 块里。
@@ -93,6 +144,9 @@ pcbpilot kicad route --pcb GasV5_A.kicad_pcb --intent intent.json --sim sim.json
      离边 13 mil）。**板边连接器开窗**：板边安装件（封装框角点在板框外或距板框 < 1 mil，与 `copper-to-edge` 门禁同一判据）
      的近边焊盘外扩（间距 + 2 mil）后，在禁布带上开全深度窗口（焊盘 + 向内直出的逃线），否则 USB/端子焊盘布不通；
      `summary.edgeExemptPads` 列出，其余铜照常禁布，门禁照常判（这些焊盘不低于工厂下限时为 WARN）。逐网复查类线宽/内层线宽/间距，不足即停。**不做** EasyEDA 的 dsn-fix / ses-repair / reconcile。
+   路由器可执行文件：`--fastroute-bin` / `$FASTROUTE_BIN` / `~/.pcbpilot/fastroute/current` / PATH（tracemaker 同理）。`current`
+   或显式路径是目录时（Windows 解压布局 `0.1.14/fastroute-0.1.14-windows-x64/fastroute.exe`）解析到其中、`bin/` 或下一层
+   子目录里唯一的可执行文件；找不到或有多个即在启动阶段报错。
 3a. **`--router fastroute|tracemaker|both`**（默认 fastroute）：TraceMaker 是第二个后端（`~/.pcbpilot/tracemaker/current`、
    `$TRACEMAKER_BIN` 或 `--tracemaker-bin`；`--tracemaker-time` 默认 300 s——它同时决定格点间距，PicoRick 上 ≥300 s 为 0.05 mm
    全通 359/359，90–180 s 为 0.1 mm、2 条未布通）。直接读 classed 板（含 `.kicad_pro/.kicad_dru`）写出布好的板，不走 DSN/SES；
@@ -125,7 +179,7 @@ pcbpilot kicad route --pcb GasV5_A.kicad_pcb --intent intent.json --sim sim.json
 | gate | 判据 |
 |---|---|
 | `design-review` | 见第 0 步（design / layout 两条） |
-| `kicad-drc` | `kicad-cli pcb drc --severity-error`：violations + unconnected + parity 合计 0；逐条列出；`info` 标出输入板原本就有的错误（摆放/封装问题，非布线所致）。警告（丝印重叠等）只记在 `summary.drc.warnings`，不进门禁 |
+| `kicad-drc` | `kicad-cli pcb drc --severity-all`（含被排除项 `excluded: true`）：未排除的 error 级 violations + unconnected + parity 合计 0；逐条列出；`info` 标出输入板原本就有的错误（摆放/封装问题，非布线所致）。警告（丝印重叠等）只记在 `summary.drc.warnings`，不进门禁。**工程自己的静默**也进门禁（`.kicad_pro` 的 `drc_exclusions` 排除、`rule_severities` 设为 `ignore`、或把 KiCad 默认为 error 的规则降为 `warning`）。**电气与制造规则**——短路（shorting_items、tracks_crossing）、间距族（clearance、hole_clearance、copper_edge_clearance、creepage、hole_to_hole、edge_clearance）、unconnected_items、原理图一致性（missing/extra/duplicate_footprints、net_conflict、footprint_symbol_mismatch）、尺寸（track_width、via_diameter、drill_out_of_range、annular_width、connection_width、microvia_drill_out_of_range）、starved_thermal、zones_intersect、solder_mask_bridge、自定义禁布（items_not_allowed）、板框/层/孔制造检查（invalid_outline、item_on_disabled_layer、track_on_post_machined_layer、through_hole_pad_without_hole），以及 pcbpilot 不认识的规则——被静默即列为 `EXCLUDED <key>` / `IGNORED <rule>` / `DOWNGRADED <rule>` 并**判失败**，只有逐条签名 waiver 能放行；其余 KiCad 默认 error 级规则（courtyards_overlap、pth/npth_inside_courtyard、overlapping_pads、长度/偏斜调谐、封装/库检查等）被静默时**不判失败**，但写进 detail 的 `WARNING` 与 `summary.drcPolicy.silenced`（规则、方式、位置）；丝印/文字等 warning 级规则只进 `info` |
 | `pad-net-diff` | 有 `--sch` 时：板上每个焊盘的网 vs 原理图网表 |
 | `intent-rules` | 每个意图网在布好的板上仍解析到它的 PP 网络类，类宽/间距不低于意图 |
 | `intent-widths` | `checkIntentWidths`；有 `--sim` 时按每段仿真电流（segment，`segmentWidthNeed`），否则按网 |

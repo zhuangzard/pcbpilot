@@ -1,0 +1,158 @@
+{
+    "$schema": "https://schemas.kicad.org/erc.v1.json",
+    "coordinate_units": "mm",
+    "date": "2026-10-26T19:49:50",
+    "ignored_checks": [
+        {
+            "description": "Global label only appears once in the schematic",
+            "key": "single_global_label"
+        },
+        {
+            "description": "Four connection points are joined together",
+            "key": "four_way_junction"
+        },
+        {
+            "description": "SPICE model issue",
+            "key": "simulation_model_issue"
+        },
+        {
+            "description": "Assigned footprint doesn't match footprint filters",
+            "key": "footprint_filter"
+        }
+    ],
+    "included_severities": [
+        "error",
+        "warning",
+        "exclusion"
+    ],
+    "kicad_version": "10.0.6",
+    "sheets": [
+        {
+            "path": "/",
+            "uuid_path": "/6f1c1d40-0000-4000-8000-000000000001",
+            "violations": [
+                {
+                    "description": "Input Power pin not driven by any Output Power pins",
+                    "items": [
+                        {
+                            "description": "Symbol #PWR0001 Hidden pin 1 [GND, Power input, Line]",
+                            "pos": {
+                                "x": 0.508,
+                                "y": 0.5461
+                            },
+                            "uuid": "23686c86-232e-4996-9b7f-315f8db97828"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "power_pin_not_driven"
+                },
+                {
+                    "description": "Pin not connected",
+                    "items": [
+                        {
+                            "description": "Symbol R3 Pin 1 [~, Passive, Line]",
+                            "pos": {
+                                "x": 0.889,
+                                "y": 0.8509
+                            },
+                            "uuid": "3335ca2c-6813-45e6-b4e6-8674a5772037"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "pin_not_connected"
+                },
+                {
+                    "description": "Pin not connected",
+                    "items": [
+                        {
+                            "description": "Symbol R3 Pin 2 [~, Passive, Line]",
+                            "pos": {
+                                "x": 0.889,
+                                "y": 0.9271
+                            },
+                            "uuid": "7d02fea4-7c6e-4b82-848f-3711f3a48867"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "pin_not_connected"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library 'my'",
+                    "items": [
+                        {
+                            "description": "Symbol R1 [R]",
+                            "pos": {
+                                "x": 0.508,
+                                "y": 0.508
+                            },
+                            "uuid": "adbadd37-ef60-4c5f-b564-cf11daff246a"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library 'pcbpilot_power'",
+                    "items": [
+                        {
+                            "description": "Symbol #PWR0001 [GND]",
+                            "pos": {
+                                "x": 0.508,
+                                "y": 0.5461
+                            },
+                            "uuid": "0239eab2-ff23-4b26-9311-3af1cd05f8b8"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library 'my'",
+                    "items": [
+                        {
+                            "description": "Symbol R3 [R]",
+                            "pos": {
+                                "x": 0.889,
+                                "y": 0.889
+                            },
+                            "uuid": "eee822a6-1508-4698-af05-4480358e027e"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library 'my'",
+                    "items": [
+                        {
+                            "description": "Symbol R2 [R]",
+                            "pos": {
+                                "x": 1.27,
+                                "y": 0.508
+                            },
+                            "uuid": "0ae3d86c-5b05-4f66-923a-f9c30b85e000"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library 'pcbpilot_power'",
+                    "items": [
+                        {
+                            "description": "Symbol #PWR0002 [GND]",
+                            "pos": {
+                                "x": 1.27,
+                                "y": 0.5461
+                            },
+                            "uuid": "dcff80ce-8fc8-4530-926b-616b099f3e04"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                }
+            ]
+        }
+    ],
+    "source": "auto.kicad_sch"
+}

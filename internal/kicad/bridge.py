@@ -28,6 +28,12 @@
 #   rules PCB RULES.json OUT        design rules + Default netclass (mil)
 #   pours PCB SPEC.json OUT         board-outline copper pours + fill
 #   edit PCB OPS.json OUT           track widths, vias, stubs, silk texts + fill
+#
+# Writes are all or nothing: edit and pours check every net, layer, item id
+# and footprint first; an unknown net, a missing id or a designator on more
+# than one footprint rejects the operation ({"ok": false, "problems": [...]})
+# and nothing is saved. Footprints are keyed by footprint_index(), never by
+# designator alone (several REF** logos, two H1 holes).
 
 import json
 import math
@@ -150,16 +156,87 @@ def pad_kind(shape):
     return PAD_KIND.get(shape, "POLYGON")
 
 
+# Placeholder designators: a footprint never annotated ("REF**", KiCad's
+# library default) or a logo/graphic ("G***"); "R?" is an unannotated part.
+PLACEHOLDER_REF = re.compile(r"^[A-Za-z_]*[*?]+$")
+
+
+def is_placeholder(ref):
+    return not ref or bool(PLACEHOLDER_REF.match(ref))
+
+
+def footprint_index(board):
+    """One entry per footprint, in board order: {fp, key, ref, uuid}. The key
+    is unique on the board: the footprint uuid; "ref:<designator>" when the
+    board repeats the uuid (converted boards do: 203 footprints on 39 uuids
+    seen) and the designator is unique; else "fp:<uuid>:<n>" (n-th footprint
+    with that uuid in file order, stable for an unchanged file). Footprints
+    are never keyed by designator alone: several "REF**" logos or two "H1"
+    holes would overwrite each other."""
+    fps = list(board.GetFootprints())
+    by_uuid, by_ref = {}, {}
+    for fp in fps:
+        u, r = fp.m_Uuid.AsString(), fp.GetReference()
+        by_uuid[u] = by_uuid.get(u, 0) + 1
+        by_ref[r] = by_ref.get(r, 0) + 1
+    entries, nth = [], {}
+    for fp in fps:
+        u, r = fp.m_Uuid.AsString(), fp.GetReference()
+        if by_uuid[u] == 1:
+            key = u
+        elif by_ref[r] == 1:
+            key = "ref:" + r
+        else:
+            nth[u] = nth.get(u, 0) + 1
+            key = "fp:%s:%d" % (u, nth[u])
+        entries.append({"fp": fp, "key": key, "ref": r, "uuid": u})
+    return entries
+
+
 def comp_keys(board):
-    """Unique component ids: the footprint uuid, or "ref:<designator>" when
-    the board repeats a uuid (converted boards do: Gas V5 A had 203
-    footprints on 39 uuids)."""
+    """(entries, footprints sharing a uuid with an earlier one)."""
+    entries = footprint_index(board)
     seen = {}
-    for fp in board.GetFootprints():
-        u = fp.m_Uuid.AsString()
-        seen[u] = seen.get(u, 0) + 1
-    return {fp.GetReference(): (fp.m_Uuid.AsString() if seen[fp.m_Uuid.AsString()] == 1 else "ref:" + fp.GetReference())
-            for fp in board.GetFootprints()}, sum(n - 1 for n in seen.values())
+    for e in entries:
+        seen[e["uuid"]] = seen.get(e["uuid"], 0) + 1
+    return entries, sum(n - 1 for n in seen.values())
+
+
+def duplicate_refs(entries):
+    """{designator: [entries]} for every designator on 2+ footprints."""
+    groups = {}
+    for e in entries:
+        groups.setdefault(e["ref"], []).append(e)
+    return {r: es for r, es in groups.items() if len(es) > 1}
+
+
+FOOTPRINT_SELECTORS = ("ref", "id", "uuid")
+
+
+def resolve_footprint(entries, kind, want):
+    """The one entry a typed selector names: kind "ref" matches designators
+    only, "id" the snapshot primitiveId only, "uuid" the footprint uuid only
+    (namespaces never mix: a designator may read "ref:C1" or "uuid:..."). Returns
+    (entry, None) or (None, why); why is "missing" or "ambiguous: <ids>"."""
+    field = {"ref": "ref", "id": "key", "uuid": "uuid"}[kind]
+    hits = [e for e in entries if e[field] == want]
+    if not hits:
+        return None, "missing"
+    if len(hits) > 1:
+        return None, "ambiguous: %d footprints (%s); address one by its id" % (len(hits), ", ".join(e["key"] for e in hits))
+    return hits[0], None
+
+
+def footprint_selector(op):
+    """(kind, value, problem) of an op naming one footprint by exactly one
+    of "ref" (designator), "id" (primitiveId) or "uuid"."""
+    given = [k for k in FOOTPRINT_SELECTORS if op.get(k) is not None]
+    if len(given) != 1:
+        return None, None, "give exactly one of ref / id / uuid (got %s)" % (", ".join(given) or "none")
+    k = given[0]
+    if not isinstance(op[k], str) or not op[k]:
+        return None, None, "%s %r is not a non-empty string" % (k, op[k])
+    return k, op[k], None
 
 
 def field_id(key, which):
@@ -169,15 +246,29 @@ def field_id(key, which):
 def snapshot(board):
     snap = {"components": [], "partial": [], "source": "kicad"}
     notes = snap["partial"]
-    keys, dups = comp_keys(board)
+    entries, dups = comp_keys(board)
     if dups:
-        notes.append("%d footprint(s) share a uuid with another: their ids are ref:<designator>" % dups)
+        notes.append("%d footprint(s) share a uuid with another: their ids are ref:<designator> (or fp:<uuid>:<n>)" % dups)
+    # Shared designators stay separate list entries (own primitiveId and
+    # uuid); duplicateDesignators names them so no consumer has to guess.
+    dup = duplicate_refs(entries)
+    if dup:
+        snap["duplicateDesignators"] = [{"designator": r, "ids": [e["key"] for e in dup[r]], "placeholder": is_placeholder(r)}
+                                        for r in sorted(dup)]
+        notes.append("designator(s) on more than one footprint: %s — address these footprints by primitiveId, not designator"
+                     % ", ".join("%s x%d" % (r, len(dup[r])) for r in sorted(dup)))
+    # Placeholders (a lone REF** logo is common) are listed, not a "partial"
+    # degradation: the snapshot itself is complete.
+    holder = sorted({e["ref"] for e in entries if is_placeholder(e["ref"])})
+    if holder:
+        snap["placeholderDesignators"] = holder
     holes = []
-    for fp in board.GetFootprints():
-        ref = fp.GetReference()
+    for e in entries:
+        fp, ref = e["fp"], e["ref"]
         x, y = xy(fp.GetPosition())
         comp = {
-            "primitiveId": keys[ref],
+            "primitiveId": e["key"],
+            "uuid": e["uuid"],
             "designator": ref,
             "name": fp.GetValue(),
             "device": fp.GetValue(),
@@ -192,6 +283,10 @@ def snapshot(board):
             "bbox": box_mil(fp.GetBoundingBox(False)),
             "pads": [],
         }
+        if ref in dup:
+            comp["duplicateDesignator"] = True
+        if is_placeholder(ref):
+            comp["placeholder"] = True
         lcsc = lcsc_of(fp)
         if lcsc:
             comp["lcsc"] = lcsc
@@ -289,8 +384,13 @@ def snapshot(board):
         "trackWidthMil": mil(dn.GetTrackWidth()),
         "powerWidthMil": mil(dn.GetTrackWidth()),
         "trackWidthMinMil": mil(ds.m_TrackMinWidth),
-        "viaDrillMil": mil(dn.GetViaDrill()),
-        "viaDiameterMil": mil(dn.GetViaDiameter()),
+        # A new via must satisfy both the Default netclass and the board's own
+        # minimums (min hole, min via diameter, min annular ring).
+        "viaDrillMil": mil(via_floor(ds, dn.GetViaDiameter(), dn.GetViaDrill())[1]),
+        "viaDiameterMil": mil(via_floor(ds, dn.GetViaDiameter(), dn.GetViaDrill())[0]),
+        "minViaDrillMil": mil(ds.m_MinThroughDrill),
+        "minViaDiameterMil": mil(ds.m_ViasMinSize),
+        "minViaAnnularMil": mil(ds.m_ViasMinAnnularWidth),
         "copperToEdgeMil": mil(ds.m_CopperEdgeClearance),
         "holeToHoleMil": mil(ds.m_HoleToHoleMin),
         "source": "kicad",
@@ -370,8 +470,13 @@ def snapshot(board):
         "pours": pours, "poured": poured, "regions": regions, "fills": fills,
     }
     snap["routedLines"] = len(lines) + len(arcs)
+    rep_ids = sorted(u for u, ts in copper_by_uuid(board).items() if len(ts) > 1)
+    if rep_ids:
+        snap["copper"]["duplicateIds"] = rep_ids
+        notes.append("%d copper id(s) shared by several tracks/vias (%s): edits by those ids are refused"
+                     % (len(rep_ids), ", ".join(rep_ids[:5]) + (", ..." if len(rep_ids) > 5 else "")))
     try:
-        snap["silk"] = silk_texts(board, keys)
+        snap["silk"] = silk_texts(board, entries)
     except Exception as e:  # silk is optional for the copper consumers
         notes.append("silkscreen unreadable: %s" % e)
     snap["partial"] = notes
@@ -380,25 +485,62 @@ def snapshot(board):
     return snap
 
 
-def silk_texts(board, keys):
+def silk_layer(l):
+    """pcbpilot silk layer id: 3 = F.Silkscreen, 4 = B.Silkscreen, 0 = other."""
+    if l == pcbnew.F_SilkS:
+        return 3
+    if l == pcbnew.B_SilkS:
+        return 4
+    return 0
+
+
+def text_index(board, entries):
+    """Every text silk_texts() reports, as [id, text, kind, key, entry]
+    (entry = the owning footprint_index() entry, None for board text). Ids:
+    "<component id>#ref" / "#value" for the fields; a graphic text's uuid,
+    or "<component id | board>#text:<uuid>:<n>" when the uuid repeats (a
+    duplicated footprint carries its texts' uuids along). edit addresses
+    texts by these same ids."""
+    items = []
+    for e in entries:
+        fp, k = e["fp"], e["key"]
+        items.append([field_id(k, "ref"), fp.Reference(), "attribute", "Designator", e])
+        items.append([field_id(k, "value"), fp.Value(), "attribute", "Device", e])
+        for item in fp.GraphicalItems():
+            if item.GetClass() in ("PCB_TEXT", "FP_TEXT") and silk_layer(item.GetLayer()):
+                items.append([None, item, "string", "", e])
+    for item in board.GetDrawings():
+        if item.GetClass() == "PCB_TEXT" and silk_layer(item.GetLayer()):
+            items.append([None, item, "string", "", None])
+    n, nth = {}, {}
+    for it in items:
+        if it[0] is None:
+            u = it[1].m_Uuid.AsString()
+            n[u] = n.get(u, 0) + 1
+    for it in items:
+        if it[0] is None:
+            u = it[1].m_Uuid.AsString()
+            if n[u] == 1:
+                it[0] = u
+            else:
+                base = "%s#text:%s" % (it[4]["key"] if it[4] else "board", u)
+                nth[base] = nth.get(base, 0) + 1
+                it[0] = "%s:%d" % (base, nth[base])
+    return items
+
+
+def silk_texts(board, entries):
     """Silkscreen texts in the pcbpilot pcbSilkText shape (Go field names):
-    every footprint reference/value field and footprint/board text. Layer 3 =
-    F.Silkscreen, 4 = B.Silkscreen, 0 = not on silk (then Hidden)."""
+    every footprint reference/value field and footprint/board text
+    (text_index). Layer 3 = F.Silkscreen, 4 = B.Silkscreen, 0 = not on silk
+    (then Hidden)."""
     out = []
-
-    def silk_layer(l):
-        if l == pcbnew.F_SilkS:
-            return 3
-        if l == pcbnew.B_SilkS:
-            return 4
-        return 0
-
-    def rec(t, kind, key, comp=None, tid=None):
+    for tid, t, kind, key, e in text_index(board, entries):
         bb = box_mil(t.GetBoundingBox())
         layer = silk_layer(t.GetLayer())
         visible = t.IsVisible() if hasattr(t, "IsVisible") else True
         r = {
-            "ID": tid or t.m_Uuid.AsString(), "Kind": kind, "Key": key, "Text": t.GetShownText(False) if hasattr(t, "GetShownText") else t.GetText(),
+            "ID": tid, "Kind": kind, "Key": key, "Text": t.GetShownText(False) if hasattr(t, "GetShownText") else t.GetText(),
             "Layer": layer, "Mirror": bool(t.IsMirrored()), "Reverse": False,
             "Rotation": round(t.GetTextAngleDegrees() % 360.0, 4),
             "FontSize": mil(t.GetTextHeight()), "LineWidth": mil(t.GetTextThickness()),
@@ -406,21 +548,10 @@ def silk_texts(board, keys):
             "BBox": {"MinX": bb["minX"], "MinY": bb["minY"], "MaxX": bb["maxX"], "MaxY": bb["maxY"]},
             "Hidden": (not visible) or layer == 0,
         }
-        if comp is not None:
-            r["CompID"] = keys[comp.GetReference()]
-            r["CompLayer"] = 2 if comp.IsFlipped() else 1
-        return r
-
-    for fp in board.GetFootprints():
-        k = keys[fp.GetReference()]
-        out.append(rec(fp.Reference(), "attribute", "Designator", fp, field_id(k, "ref")))
-        out.append(rec(fp.Value(), "attribute", "Device", fp, field_id(k, "value")))
-        for item in fp.GraphicalItems():
-            if item.GetClass() in ("PCB_TEXT", "FP_TEXT") and silk_layer(item.GetLayer()):
-                out.append(rec(item, "string", "", fp))
-    for item in board.GetDrawings():
-        if item.GetClass() == "PCB_TEXT" and silk_layer(item.GetLayer()):
-            out.append(rec(item, "string", ""))
+        if e is not None:
+            r["CompID"] = e["key"]
+            r["CompLayer"] = 2 if e["fp"].IsFlipped() else 1
+        out.append(r)
     return out
 
 
@@ -473,19 +604,212 @@ def save_board(board, src, out):
         shutil.copyfile(dru_path(src), dru_path(out))
 
 
+def validate_netclasses(reqs):
+    """(problems, nets, isolation, edges) of a netclasses request: the v1
+    shape {net: {outerMil, innerMil, minMil, clearanceMil}} or v2
+    {"pcbpilotReqs": 2, "nets", "isolation", "edges"}."""
+    bad, isolation, edges = [], [], []
+    if isinstance(reqs, dict) and reqs.get("pcbpilotReqs") == 2:
+        lists, bad = op_lists("netclasses", {k: v for k, v in reqs.items() if k not in ("pcbpilotReqs", "nets")},
+                              ("isolation", "edges"))
+        isolation, edges = lists["isolation"], lists["edges"]
+        reqs = reqs.get("nets")
+        if reqs is None:
+            reqs = {}
+    if not isinstance(reqs, dict) or any(not isinstance(r, dict) for r in reqs.values()):
+        bad.append("nets: must map each net name to an object")
+        reqs = {}
+    else:
+        bad += check_fields("nets", [reqs[n] for n in sorted(reqs)], opt=("outerMil", "innerMil", "minMil", "clearanceMil", "viaDiaMil", "viaDrillMil"),
+                            positive=("outerMil", "innerMil", "minMil", "clearanceMil", "viaDiaMil", "viaDrillMil"))
+    bad += check_fields("isolation", isolation, opt=("clearanceMm", "creepageMm"), positive=("clearanceMm", "creepageMm"))
+    bad += check_fields("edges", edges, opt=("mil",), positive=("mil",))
+    for what, lst, keys in (("isolation", isolation, ("aNets", "bNets")), ("edges", edges, ("nets",))):
+        for i, it in enumerate(lst):
+            if not isinstance(it, dict):
+                continue
+            for k in keys:
+                v = it.get(k)
+                if v is not None and (not isinstance(v, list) or any(not isinstance(n, str) for n in v)):
+                    bad.append("%s[%d].%s: not a list of net names" % (what, i, k))
+    return bad, reqs, isolation, edges
+
+
+def via_floor(ds, dia, drill):
+    """(diameter, drill) in nm raised to the board's own minimums: drill >=
+    min through hole, diameter >= min via diameter and >= drill + 2 x min
+    annular ring. A fresh NETCLASS carries KiCad's built-in 0.6 / 0.3 mm via,
+    which is below many boards' rules (interf_u: min hole 0.5, min via 0.9)."""
+    drill = max(int(drill or 0), int(ds.m_MinThroughDrill))
+    dia = max(int(dia or 0), int(ds.m_ViasMinSize), drill + 2 * int(ds.m_ViasMinAnnularWidth))
+    return dia, drill
+
+
+class UnsupportedKiCad(Exception):
+    pass
+
+
+def empty_netclass(name):
+    """A NETCLASS with no values of its own: every field it does not set comes
+    from the next matching class / Default in the composite, never from
+    KiCad's built-in defaults. KiCad < 9 has neither the constructor nor
+    optional netclass fields: a class there always carries every value, so
+    it would override the nets' own sizes. Refused, not approximated."""
+    try:
+        return pcbnew.NETCLASS(name, False)
+    except TypeError:
+        raise UnsupportedKiCad("this KiCad has no value-less netclasses (pcbnew.NETCLASS(name, False)); "
+                               "pcbpilot netclasses need KiCad 9 or newer")
+
+
+def mm_of_nm(v):
+    return ("%.6f" % (v / 1e6)).rstrip("0").rstrip(".")
+
+
+def effective_sizes(ns, net):
+    """(effective class, track, clearance, via diameter, via drill) in nm of
+    net: the composite of every class matching it, Default filling what
+    none of them sets."""
+    eff = ns.GetEffectiveNetClass(net)
+    dn = ns.GetDefaultNetclass()
+    pick = lambda f: int(getattr(eff, "Get" + f)() if getattr(eff, "Has" + f)() else getattr(dn, "Get" + f)())
+    return eff, pick("TrackWidth"), pick("Clearance"), pick("ViaDiameter"), pick("ViaDrill")
+
+
+def size_floor(ds, track, clr, dia, drill):
+    """(track, clearance, via diameter, via drill) in nm raised to the
+    board's own minimums."""
+    dia, drill = via_floor(ds, dia, drill)
+    return max(track, int(ds.m_TrackMinWidth)), max(clr, int(ds.m_MinClearance)), dia, drill
+
+
+def class_priorities(ns):
+    """Priority bases for the generated classes (lower wins): PP width
+    classes, then PPF floor classes, then PPD domain classes, all above every
+    class the project already has, so no project class can override them."""
+    top = 0
+    for _, nc in ns.GetNetclasses().items():
+        try:
+            top = min(top, int(nc.GetPriority()))
+        except (AttributeError, TypeError):
+            pass
+    return {"PP": top - 3000000, "PPF": top - 2000000, "PPD": top - 1000000}
+
+
+def class_plan(ds, ns, names, reqs, missing, raised, prio=None):
+    """The pcbpilot classes of a board, in integer nm: ({(track, inner, min,
+    clearance, intent outer, via diameter, via drill): [nets]}, floor notes).
+    Intent nets get max(intent, effective class, board minimums) on every
+    value. Every other board net (domain-only nets included) keeps its
+    effective sizes unless one is below the board minimums (a partial class,
+    a low Default, several matching classes): such nets get a PPF_ class
+    carrying the floored sizes, named by their exact nm values."""
+    prio = prio or class_priorities(ns)
+    floored = []
+    # Default is floored in place: the DSN declares its padstack (KiCad's
+    # kicad_default class) even with no net left in it.
+    dn = ns.GetDefaultNetclass()
+    have = (int(dn.GetTrackWidth()), int(dn.GetClearance()), int(dn.GetViaDiameter()), int(dn.GetViaDrill()))
+    want = size_floor(ds, *have)
+    if want != have:
+        dn.SetTrackWidth(want[0])
+        dn.SetClearance(want[1])
+        dn.SetViaDiameter(want[2])
+        dn.SetViaDrill(want[3])
+        ns.ClearAllCaches()
+        floored.append("Default: track/clearance/via %s mil raised to %s mil (board minimums)" % (
+            "/".join(str(mil(v)) for v in have), "/".join(str(mil(v)) for v in want)))
+    groups = {}
+    for net in sorted(reqs):
+        r = reqs[net]
+        if net not in names:
+            missing.append(net)
+            continue
+        eff, ew, ec, edia, edrill = effective_sizes(ns, net)
+        outer = nm(r.get("outerMil") or 0)
+        inner = nm(r.get("innerMil") or 0) or outer
+        mn = nm(r.get("minMil") or 0)
+        clr = nm(r.get("clearanceMil") or 0)
+        w, c, vdia, vdrill = size_floor(ds, max(outer, ew), max(clr, ec),
+                                        max(nm(r.get("viaDiaMil") or 0), edia), max(nm(r.get("viaDrillMil") or 0), edrill))
+        inner = max(inner, int(ds.m_TrackMinWidth))
+        if mn:
+            mn = max(mn, int(ds.m_TrackMinWidth))
+        if ew > outer:
+            raised.append("%s: width kept at %s mil (class %s; intent %s)" % (net, mil(ew), eff.GetName(), mil(outer)))
+        if ec > clr:
+            raised.append("%s: clearance kept at %s mil (class %s; intent %s)" % (net, mil(ec), eff.GetName(), mil(clr)))
+        groups.setdefault((w, inner, mn, c, outer, vdia, vdrill), []).append(net)
+    low = {}
+    for net in sorted(set(names) - set(reqs)):
+        if not net:
+            continue
+        have = effective_sizes(ns, net)[1:]
+        want = size_floor(ds, *have)
+        if want != have:
+            low.setdefault(want, {}).setdefault(have, []).append(net)
+    for i, (want, src) in enumerate(sorted(low.items())):
+        name = "%sF_%d_%d_%d_%d" % ((CLASS_PREFIX,) + want)
+        nc = empty_netclass(name)
+        nc.SetTrackWidth(want[0])
+        nc.SetClearance(want[1])
+        nc.SetViaDiameter(want[2])
+        nc.SetViaDrill(want[3])
+        nc.SetPriority(prio["PPF"] + i)
+        nc.SetDescription("pcbpilot floor (board minimums)")
+        ns.SetNetclass(name, nc)
+        for have, nets in sorted(src.items()):
+            for net in nets:
+                ns.SetNetclassPatternAssignment(net, name)
+            floored.append("%d net(s) (%s): track/clearance/via %s mil raised to %s mil (board minimums), class %s" % (
+                len(nets), ", ".join(nets[:5]) + (", ..." if len(nets) > 5 else ""),
+                "/".join(str(mil(v)) for v in have), "/".join(str(mil(v)) for v in want), name))
+    ns.ClearAllCaches()
+    return groups, floored
+
+
+def check_effective(ds, ns, names, classes):
+    """Every effective value after the classes are written: an intent net
+    has exactly its PP class's sizes, every board net meets the board
+    minimums. Anything else (a project class outranking ours) is listed."""
+    bad = []
+    want = {}
+    for cl in classes:
+        q = cl["nm"]
+        for net in cl["nets"]:
+            want[net] = (cl["name"], (q["track"], q["clearance"], q["viaDiameter"], q["viaDrill"]))
+    for net in sorted(names):
+        if not net:
+            continue
+        eff, *have = effective_sizes(ns, net)
+        have = tuple(have)
+        if net in want:
+            name, exp = want[net]
+            if eff.GetName().split(",")[0] != name or have != exp:
+                bad.append("%s: effective class %s track/clearance/via %s mil, written %s %s mil" % (
+                    net, eff.GetName(), "/".join(str(mil(v)) for v in have), name, "/".join(str(mil(v)) for v in exp)))
+        elif size_floor(ds, *have) != have:
+            bad.append("%s: effective class %s track/clearance/via %s mil below the board minimums" % (
+                net, eff.GetName(), "/".join(str(mil(v)) for v in have)))
+    return bad
+
+
 def netclasses(pcb, reqs_path, out):
     with open(reqs_path) as f:
         reqs = json.load(f)
-    isolation, edges = [], []
-    if isinstance(reqs, dict) and reqs.get("pcbpilotReqs") == 2:
-        isolation = reqs.get("isolation") or []
-        edges = reqs.get("edges") or []
-        reqs = reqs.get("nets") or {}
+    bad, reqs, isolation, edges = validate_netclasses(reqs)
+    if bad:
+        return reject("netclasses", bad)
+    try:
+        empty_netclass("pcbpilot-probe")
+    except UnsupportedKiCad as e:
+        return reject("netclasses", [str(e)])
     board = pcbnew.LoadBoard(pcb)
-    ns = board.GetDesignSettings().m_NetSettings
+    ds = board.GetDesignSettings()
+    ns = ds.m_NetSettings
 
     # Idempotent: drop classes and patterns of an earlier run.
-    old = [str(n) for n in ns.GetNetclasses().keys() if re.match(r"^%s(\d+_|D_)" % CLASS_PREFIX, str(n))]
+    old = [str(n) for n in ns.GetNetclasses().keys() if re.match(r"^%s(\d+_|D_|V_|F_)" % CLASS_PREFIX, str(n))]
     if old:
         keep = {}
         for n, nc in ns.GetNetclasses().items():
@@ -505,59 +829,55 @@ def netclasses(pcb, reqs_path, out):
 
     names = {str(n) for n in board.GetNetsByName().keys()}
     missing, groups, raised = [], {}, []
-    eps = 0.005
-    for net in sorted(reqs):
-        r = reqs[net]
-        if net not in names:
-            missing.append(net)
-            continue
-        eff = ns.GetEffectiveNetClass(net)
-        have_w = mil(eff.GetTrackWidth()) if eff.HasTrackWidth() else 0.0
-        have_c = mil(eff.GetClearance()) if eff.HasClearance() else 0.0
-        outer = float(r.get("outerMil") or 0)
-        inner = float(r.get("innerMil") or 0) or outer
-        mn = float(r.get("minMil") or 0)
-        clr = float(r.get("clearanceMil") or 0)
-        w = max(outer, have_w)
-        c = max(clr, have_c)
-        if have_w > outer + eps:
-            raised.append("%s: width kept at %s mil (class %s; intent %s)" % (net, have_w, eff.GetName(), outer))
-        if have_c > clr + eps:
-            raised.append("%s: clearance kept at %s mil (class %s; intent %s)" % (net, have_c, eff.GetName(), clr))
-        key = (round(w, 2), round(inner, 2), round(mn, 2), round(c, 2), round(outer, 2))
-        groups.setdefault(key, []).append(net)
+    # Integer nm from here on: the board floors apply after the mil -> nm
+    # conversion, so no rounding can undo them (0.2 mm is 7.874 mil; rounded
+    # to 7.87 mil it would be 199898 nm).
+    prio = class_priorities(ns)
+    groups, floored = class_plan(ds, ns, names, reqs, missing, raised, prio)
 
     classes = []
     for i, key in enumerate(sorted(groups)):
-        w, inner, mn, c, outer = key
-        name = "%s%d_W%s" % (CLASS_PREFIX, i + 1, fmt_mil(w))
-        nc = pcbnew.NETCLASS(name)
-        nc.SetTrackWidth(int(round(w * NM_PER_MIL)))
+        w, inner, mn, c, outer, vdia, vdrill = key
+        name = "%s%d_W%s" % (CLASS_PREFIX, i + 1, fmt_mil(mil(w)))
+        nc = empty_netclass(name)
+        nc.SetTrackWidth(w)
         if c > 0:
-            nc.SetClearance(int(round(c * NM_PER_MIL)))
+            nc.SetClearance(c)
+        nc.SetViaDiameter(vdia)
+        nc.SetViaDrill(vdrill)
         # Highest priority: our values win over any user class that also
         # matches the net (KiCad then builds a composite "PPn_...,User").
-        nc.SetPriority(-1000000 + i)
-        nc.SetDescription("pcbpilot intent: outer %s / inner %s / min %s / clearance %s mil" % (outer, inner, mn, c))
+        nc.SetPriority(prio["PP"] + i)
+        nc.SetDescription("pcbpilot intent: outer %s / inner %s / min %s / clearance %s mil" % (mil(outer), mil(inner), mil(mn), mil(c)))
         ns.SetNetclass(name, nc)
         for net in groups[key]:
             ns.SetNetclassPatternAssignment(net, name)
-        classes.append({"name": name, "nets": groups[key], "trackWidthMil": w, "innerWidthMil": inner,
-                        "minMil": mn, "clearanceMil": c, "intentOuterMil": outer})
+        classes.append({"name": name, "nets": groups[key], "trackWidthMil": mil(w), "innerWidthMil": mil(inner),
+                        "minMil": mil(mn), "clearanceMil": mil(c), "intentOuterMil": mil(outer),
+                        "viaDiameterMil": mil(vdia), "viaDrillMil": mil(vdrill),
+                        "nm": {"track": w, "inner": inner, "min": mn, "clearance": c, "viaDiameter": vdia, "viaDrill": vdrill}})
     # Insulation domains (intent pairs): one class per domain, below the
     # width classes in priority, so the composite keeps the PP widths.
-    domains = {}
+    # Domain nets not on the board cannot carry the rule: reported in
+    # missingDomainNets (the caller warns), never dropped silently.
+    domains, dom_missing = {}, set()
     for pr in isolation:
         for side in ("a", "b"):
             dom = re.sub(r"[^A-Za-z0-9_]", "_", str(pr.get(side + "Name") or pr.get(side)))
-            domains.setdefault(dom, set()).update(n for n in pr.get(side + "Nets") or [] if n in names)
+            want = pr.get(side + "Nets") or []
+            domains.setdefault(dom, set()).update(n for n in want if n in names)
+            dom_missing.update("%s: %s" % (dom, n) for n in want if n not in names)
     for ed in edges:
         dom = re.sub(r"[^A-Za-z0-9_]", "_", str(ed.get("domain")))
-        domains.setdefault(dom, set()).update(n for n in ed.get("nets") or [] if n in names)
+        want = ed.get("nets") or []
+        domains.setdefault(dom, set()).update(n for n in want if n in names)
+        dom_missing.update("%s: %s" % (dom, n) for n in want if n not in names)
     for i, dom in enumerate(sorted(domains)):
         name = "%sD_%s" % (CLASS_PREFIX, dom)
-        nc = pcbnew.NETCLASS(name)
-        nc.SetPriority(-500000 + i)
+        # Name only (the .kicad_dru rules key on it): a defaulted class here
+        # would override the nets' widths, clearances and vias.
+        nc = empty_netclass(name)
+        nc.SetPriority(prio["PPD"] + i)
         nc.SetDescription("pcbpilot insulation domain %s" % dom)
         ns.SetNetclass(name, nc)
         for net in sorted(domains[dom]):
@@ -565,14 +885,10 @@ def netclasses(pcb, reqs_path, out):
     ns.ClearAllCaches()
     board.SynchronizeNetsAndNetClasses(True)
 
-    mismatched = []
+    mismatched = check_effective(ds, ns, names, classes)
     for cl in classes:
         for net in cl["nets"]:
-            eff = ns.GetEffectiveNetClass(net)
-            first = eff.GetName().split(",")[0]
-            if first != cl["name"] or abs(mil(eff.GetTrackWidth()) - cl["trackWidthMil"]) > eps:
-                mismatched.append("%s: effective class %s width %s mil" % (net, eff.GetName(), mil(eff.GetTrackWidth())))
-            cl.setdefault("effective", {})[net] = eff.GetName()
+            cl.setdefault("effective", {})[net] = ns.GetEffectiveNetClass(net).GetName()
 
     # Custom DRC rules: KiCad netclasses carry one width, so the inner width
     # becomes a (layer inner) track_width rule whose opt is the inner width
@@ -586,14 +902,14 @@ def netclasses(pcb, reqs_path, out):
     text = re.sub(re.escape(DRU_BEGIN) + r".*?" + re.escape(DRU_END) + r"\n?", "", text, flags=re.S)
     rules = []
     for cl in classes:
-        mm = lambda v: ("%.4f" % (v * 0.0254)).rstrip("0").rstrip(".")
-        if cl["minMil"] > 0:
+        q = cl.pop("nm")
+        if q["min"] > 0:
             rules.append('(rule "pcbpilot %s min"\n  (condition "A.hasNetclass(\'%s\')")\n  (constraint track_width (min %smm)))'
-                         % (cl["name"], cl["name"], mm(cl["minMil"])))
-        if cl["innerWidthMil"] > cl["trackWidthMil"] + eps:
-            lo = cl["minMil"] if cl["minMil"] > 0 else mil(board.GetDesignSettings().m_TrackMinWidth)
+                         % (cl["name"], cl["name"], mm_of_nm(q["min"])))
+        if q["inner"] > q["track"]:
+            lo = q["min"] if q["min"] > 0 else int(ds.m_TrackMinWidth)
             rules.append('(rule "pcbpilot %s inner"\n  (layer inner)\n  (condition "A.hasNetclass(\'%s\')")\n  (constraint track_width (min %smm) (opt %smm)))'
-                         % (cl["name"], cl["name"], mm(lo), mm(cl["innerWidthMil"])))
+                         % (cl["name"], cl["name"], mm_of_nm(lo), mm_of_nm(q["inner"])))
     for pr in isolation:
         da = "%sD_%s" % (CLASS_PREFIX, re.sub(r"[^A-Za-z0-9_]", "_", str(pr.get("aName") or pr.get("a"))))
         db = "%sD_%s" % (CLASS_PREFIX, re.sub(r"[^A-Za-z0-9_]", "_", str(pr.get("bName") or pr.get("b"))))
@@ -623,8 +939,8 @@ def netclasses(pcb, reqs_path, out):
     elif os.path.exists(out_dru) and os.path.abspath(out_dru) != os.path.abspath(src_dru):
         os.remove(out_dru)
     save_board(board, pcb, out)
-    return {"ok": True, "out": out, "classes": classes, "missingNets": missing, "kept": raised,
-            "mismatched": mismatched, "domains": {k: sorted(v) for k, v in domains.items()}, "dru": out_dru if text.strip() else "", "druRules": len(rules)}
+    return {"ok": True, "out": out, "classes": classes, "missingNets": missing, "missingDomainNets": sorted(dom_missing), "kept": raised,
+            "viaFloored": floored, "mismatched": mismatched, "domains": {k: sorted(v) for k, v in domains.items()}, "dru": out_dru if text.strip() else "", "druRules": len(rules)}
 
 
 def list_patterns(pcb):
@@ -748,6 +1064,9 @@ def pours(pcb, spec_path, out):
     with open(spec_path) as f:
         spec = json.load(f)
     board = pcbnew.LoadBoard(pcb)
+    bad = validate_pours(board, spec)
+    if bad:
+        return reject("pours", bad)
     for z in list(board.Zones()):
         if z.GetZoneName().startswith(POUR_PREFIX):
             board.Remove(z)
@@ -762,10 +1081,8 @@ def pours(pcb, spec_path, out):
     chain = ps.Outline(best)
     made = []
     board_pts = [(chain.CPoint(i).x, chain.CPoint(i).y) for i in range(chain.PointCount())]
-    for zs in spec.get("zones", []):
+    for zs in spec.get("zones") or []:
         net = board.FindNet(zs["net"])
-        if net is None:
-            return {"ok": False, "error": "pour net %s is not on the board" % zs["net"]}
         # A pour clipped to its insulation domain arrives as polygons (mil, y-up),
         # merged into ONE zone (separate touching zones are KiCad zones_intersect
         # errors: 166 on JDB-1); otherwise the board outline.
@@ -808,6 +1125,168 @@ def make_pour_zone(board, zs, net, pts):
     return z
 
 
+def validate_pours(board, spec):
+    """Every problem of a pours spec {"zones": [{net, layer, clearanceMil,
+    minWidthMil, polys}]}, before any change."""
+    lists, bad = op_lists("pours", spec, ("zones",))
+    zs = lists["zones"]
+    bad += check_fields("zones", zs, opt=("clearanceMil", "minWidthMil"), positive=("clearanceMil", "minWidthMil"))
+    for i, z in enumerate(zs):
+        if isinstance(z, dict):
+            bad += check_polys("zones[%d].polys" % i, z.get("polys"))
+    zs = [z for z in zs if isinstance(z, dict)]
+    return bad + check_nets(board, [z.get("net") for z in zs]) + check_layers(board, [z.get("layer") for z in zs])
+
+
+def check_polys(what, polys):
+    """Problems with a pour's optional clip polygons (mil, y-up): null or a
+    list of polygons, each a list of at least 3 [x, y] finite numbers."""
+    if polys is None:
+        return []
+    if not isinstance(polys, list):
+        return ["%s: a %s, not a list of polygons" % (what, type(polys).__name__)]
+    bad = []
+    for j, poly in enumerate(polys):
+        if not isinstance(poly, list) or len(poly) < 3:
+            bad.append("%s[%d]: not a list of at least 3 points" % (what, j))
+            continue
+        for k, pt in enumerate(poly):
+            if not (isinstance(pt, list) and len(pt) == 2 and is_num(pt[0]) and is_num(pt[1])):
+                bad.append("%s[%d][%d]: %r is not an [x, y] pair of numbers" % (what, j, k, pt))
+                break
+    return bad
+
+
+def check_nets(board, names):
+    """Problems with the nets copper is asked to carry: every name must be a
+    non-empty net on the board (FindNet of an unknown name is None, and the
+    item would silently land on net 0, the unconnected net)."""
+    have = {str(n) for n in board.GetNetsByName().keys() if str(n)}
+    bad = []
+    for n in distinct(names):
+        if not isinstance(n, str):
+            bad.append("net %r: not a net name string" % (n,))
+        elif not n:
+            bad.append("net '': empty")
+        elif n not in have:
+            near = sorted(h for h in have if h.lower() == n.lower())
+            bad.append("net %s: not on the board%s" % (n, (" (did you mean %s?)" % ", ".join(near)) if near else ""))
+    return bad
+
+
+def check_layers(board, lids):
+    """Problems with pcbpilot copper layer ids: each must name an enabled
+    copper layer of the board."""
+    enabled = set(board.GetEnabledLayers().CuStack())
+    bad = []
+    for lid in distinct(lids):
+        if not is_int(lid):
+            bad.append("layer %r: not an integer layer id" % (lid,))
+            continue
+        try:
+            l = kicad_layer(lid)
+        except ValueError:
+            bad.append("layer %r: no copper layer with that id" % (lid,))
+            continue
+        if l not in enabled:
+            bad.append("layer %r: not enabled on this %d-layer board" % (lid, board.GetCopperLayerCount()))
+    return bad
+
+
+def is_int(v):
+    """An exact JSON integer: not a bool (True == 1), not 1.9 or "1"."""
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def is_num(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
+def distinct(vals):
+    """vals without repeats, by type and value (1, 1.0 and True stay apart)."""
+    seen, out = set(), []
+    for v in vals:
+        k = (type(v).__name__, repr(v))
+        if k not in seen:
+            seen.add(k)
+            out.append(v)
+    return out
+
+
+# Silk text layers (pcbpilot ids): 3 = F.Silkscreen, 4 = B.Silkscreen.
+TEXT_LAYERS = (3, 4)
+
+
+def check_text_layers(lids):
+    """Problems with silk text layer ids (absent = 3, F.Silkscreen)."""
+    return ["text layer %r: not 3 (F.Silkscreen) or 4 (B.Silkscreen)" % (lid,)
+            for lid in distinct(lids) if not (is_int(lid) and lid in TEXT_LAYERS)]
+
+
+def check_fields(what, ops, need=(), opt=(), positive=(), strings=()):
+    """Problems with the numeric / text fields an op list carries: need =
+    required finite numbers, opt = optional (null/absent ok) finite numbers,
+    positive = of those, the ones that must not be negative (required ones
+    not 0 either; an optional 0 means "default"), strings = required
+    non-empty strings."""
+    bad = []
+    for i, op in enumerate(ops):
+        if not isinstance(op, dict):
+            bad.append("%s[%d]: not an object" % (what, i))
+            continue
+        for k in need:
+            if not is_num(op.get(k)):
+                bad.append("%s[%d].%s: %r is not a number" % (what, i, k, op.get(k)))
+        for k in opt:
+            if op.get(k) is not None and not is_num(op.get(k)):
+                bad.append("%s[%d].%s: %r is not a number" % (what, i, k, op.get(k)))
+        for k in positive:
+            v = op.get(k)
+            if is_num(v) and (v < 0 or (v == 0 and k in need)):
+                bad.append("%s[%d].%s: %r is negative or a required zero" % (what, i, k, op.get(k)))
+        for k in strings:
+            if not isinstance(op.get(k), str) or not op.get(k):
+                bad.append("%s[%d].%s: %r is not a non-empty string" % (what, i, k, op.get(k)))
+    return bad
+
+
+def op_lists(what, spec, keys):
+    """({key: list}, problems) of a request object whose every key is one of
+    keys and holds a list (absent or null = empty). Anything else is a
+    problem, never coerced: {"setWidth": {}} or "hideTexts": "" must not
+    read as "nothing to do"."""
+    lists = {k: [] for k in keys}
+    if not isinstance(spec, dict):
+        return lists, ["%s: the request is a %s, not an object" % (what, type(spec).__name__)]
+    bad = ["%s: unknown field %r" % (what, k) for k in sorted(spec, key=str) if k not in keys]
+    for k in keys:
+        v = spec.get(k)
+        if isinstance(v, list):
+            lists[k] = v
+        elif v is not None:
+            bad.append("%s.%s: a %s, not a list" % (what, k, type(v).__name__))
+    return lists, bad
+
+
+def check_ids(what, ids, known, label="id"):
+    """Problems with ids that must be strings naming a known object."""
+    bad = []
+    for i, v in enumerate(ids):
+        if not isinstance(v, str) or not v:
+            bad.append("%s[%d]: %s %r is not a non-empty string" % (what, i, label, v))
+        elif v not in known:
+            bad.append("%s[%d]: no such %s %s" % (what, i, "text" if label == "text id" else "object", v))
+    return bad
+
+
+def reject(what, bad):
+    """The bridge's answer to an operation with bad input: nothing applied,
+    nothing saved, every problem listed."""
+    return {"ok": False, "error": "%s rejected, board not saved: %d problem(s): %s" % (what, len(bad), "; ".join(bad[:20])
+                                                                                       + ("; ..." if len(bad) > 20 else "")),
+            "problems": bad}
+
+
 def set_via_width(v, w):
     try:
         v.SetWidth(pcbnew.F_Cu, w)
@@ -815,30 +1294,110 @@ def set_via_width(v, w):
         v.SetWidth(w)
 
 
+def copper_by_uuid(board):
+    """{uuid: [tracks, arcs and vias with it]} in board order."""
+    out = {}
+    for t in board.GetTracks():
+        out.setdefault(t.m_Uuid.AsString(), []).append(t)
+    return out
+
+
+EDIT_OPS = ("setWidth", "addVias", "addTracks", "setText", "addTexts", "hideTexts", "padZoneNone")
+
+
+def validate_edit(board, ops):
+    """(problems, plan) of an edit request, before any change: every field
+    the apply phase reads is checked here, so it cannot stop half way or
+    coerce a bad value (int(1.9) == 1 would put a track on F.Cu). plan =
+    {lists, tracks, texts, zonePads} for the apply phase."""
+    L, bad = op_lists("edit", ops, EDIT_OPS)
+    # uuid → every track/arc/via carrying it: a converted or hand-merged
+    # board can repeat one, and a dict would keep only the last item.
+    copper = copper_by_uuid(board)
+    tracks = {u: ts[0] for u, ts in copper.items() if len(ts) == 1}
+    entries = footprint_index(board)
+    text_index_cache = text_index(board, entries)
+    texts = {it[0]: it[1] for it in text_index_cache}
+    plan = {"lists": L, "tracks": tracks, "texts": texts, "zonePads": []}
+    bad += check_fields("setWidth", L["setWidth"], need=("width",), positive=("width",))
+    bad += check_fields("addVias", L["addVias"], need=("x", "y"), opt=("diameter", "drill"), positive=("diameter", "drill"))
+    bad += check_fields("addTracks", L["addTracks"], need=("startX", "startY", "endX", "endY", "lineWidth"), positive=("lineWidth",))
+    bad += check_fields("setText", L["setText"], need=("x", "y"), opt=("rotation", "fontSize", "lineWidth"), positive=("fontSize", "lineWidth"))
+    bad += check_fields("addTexts", L["addTexts"], need=("x", "y"), opt=("rotation", "fontSize", "lineWidth"),
+                        positive=("fontSize", "lineWidth"), strings=("text",))
+    bad += check_fields("padZoneNone", L["padZoneNone"])
+    obj = {k: [op for op in L[k] if isinstance(op, dict)] for k in EDIT_OPS if k != "hideTexts"}
+    bad += check_text_layers([op.get("layer", 3) for op in obj["addTexts"]])
+    for i, op in enumerate(L["setWidth"]):
+        if not isinstance(op, dict):
+            continue
+        tid = op.get("id")
+        if not isinstance(tid, str) or not tid:
+            bad.append("setWidth[%d]: id %r is not a non-empty string" % (i, tid))
+        elif len(copper.get(tid, [])) > 1:
+            bad.append("setWidth[%d]: id %s is ambiguous: %d tracks/vias share that uuid" % (i, tid, len(copper[tid])))
+        elif tid not in tracks:
+            bad.append("setWidth[%d]: no such track %s" % (i, tid))
+        elif tracks[tid].Type() == pcbnew.PCB_VIA_T:
+            bad.append("setWidth[%d]: %s is a via, not a track" % (i, tid))
+    bad += check_nets(board, [op.get("net") for op in obj["addVias"] + obj["addTracks"]])
+    bad += check_layers(board, [op.get("layer") for op in obj["addTracks"]])
+    bad += check_ids("setText", [op.get("id") for op in obj["setText"]], texts, "text id")
+    bad += check_ids("hideTexts", L["hideTexts"], texts, "text id")
+    fields = {it[0] for it in text_index_cache if it[2] == "attribute"}
+    for i, tid in enumerate(L["hideTexts"]):
+        if isinstance(tid, str) and tid in texts and tid not in fields:
+            # KiCad 10 saves no visibility for a graphic text (only fields
+            # carry "hide"): SetVisible(False) would be lost on save.
+            bad.append("hideTexts[%d]: %s is a graphic text; KiCad keeps no hidden state for it" % (i, tid))
+    for i, op in enumerate(obj["padZoneNone"]):
+        kind, want, why = footprint_selector(op)
+        pad = op.get("pad")
+        if why:
+            bad.append("padZoneNone[%d]: %s" % (i, why))
+            continue
+        if not (isinstance(pad, str) or is_int(pad)):
+            bad.append("padZoneNone[%d] %s: pad %r is not a pad number" % (i, want, pad))
+            continue
+        e, why = resolve_footprint(entries, kind, want)
+        if e is None:
+            bad.append("padZoneNone %s.%s: footprint %s" % (want, pad, why))
+            continue
+        hit = [p for p in e["fp"].Pads() if p.GetNumber() == str(pad)]
+        if not hit:
+            bad.append("padZoneNone %s.%s: no such pad" % (want, pad))
+        plan["zonePads"] += hit
+    return bad, plan
+
+
 def edit(pcb, ops_path, out):
     """Apply copper/silk edits (mil, y-up), fill the zones and save:
     {"setWidth":[{"id","width"}], "addVias":[{"net","x","y","diameter","drill"}],
      "addTracks":[{"net","layer","startX","startY","endX","endY","lineWidth"}],
-     "setText":[{"id","x","y","rotation","fontSize","lineWidth"}]}  (x, y = text centre)"""
+     "setText":[{"id","x","y","rotation","fontSize","lineWidth"}],  (x, y = text centre)
+     "addTexts":[{"text","x","y","layer","rotation","fontSize","lineWidth"}],
+     "hideTexts":["id"], "padZoneNone":[{"ref" | "id" | "uuid", "pad"}]}
+    All or nothing: every id, net, layer and footprint is checked first; one
+    unknown net, missing id or ambiguous designator rejects the whole edit
+    and nothing is saved (the result lists every problem)."""
     with open(ops_path) as f:
         ops = json.load(f)
     board = pcbnew.LoadBoard(pcb)
-    tracks = {t.m_Uuid.AsString(): t for t in board.GetTracks()}
+    bad, plan = validate_edit(board, ops)
+    if bad:
+        return reject("edit", bad)
+    L, tracks, texts, zone_pads = plan["lists"], plan["tracks"], plan["texts"], plan["zonePads"]
+
+    # 2. Apply.
     done = {"setWidth": 0, "addVias": 0, "addTracks": 0, "setText": 0}
-    missing = []
-    for op in ops.get("setWidth") or []:
-        t = tracks.get(op["id"])
-        if t is None or t.Type() == pcbnew.PCB_VIA_T:
-            missing.append(op["id"])
-            continue
-        t.SetWidth(nm(op["width"]))
+    for op in L["setWidth"]:
+        tracks[op["id"]].SetWidth(nm(op["width"]))
         done["setWidth"] += 1
 
     def pos(x, y):
         return pcbnew.VECTOR2I(nm(x), -nm(y))
 
-    for op in ops.get("addVias") or []:
-        net = board.FindNet(op["net"])
+    for op in L["addVias"]:
         v = pcbnew.PCB_VIA(board)
         v.SetPosition(pos(op["x"], op["y"]))
         v.SetViaType(pcbnew.VIATYPE_THROUGH)
@@ -847,32 +1406,20 @@ def edit(pcb, ops_path, out):
             set_via_width(v, nm(op["diameter"]))
         if op.get("drill"):
             v.SetDrill(nm(op["drill"]))
-        if net is not None:
-            v.SetNet(net)
+        v.SetNet(board.FindNet(op["net"]))
         board.Add(v)
         done["addVias"] += 1
-    for op in ops.get("addTracks") or []:
-        net = board.FindNet(op["net"])
+    for op in L["addTracks"]:
         t = pcbnew.PCB_TRACK(board)
         t.SetStart(pos(op["startX"], op["startY"]))
         t.SetEnd(pos(op["endX"], op["endY"]))
         t.SetWidth(nm(op["lineWidth"]))
-        t.SetLayer(kicad_layer(int(op["layer"])))
-        if net is not None:
-            t.SetNet(net)
+        t.SetLayer(kicad_layer(op["layer"]))
+        t.SetNet(board.FindNet(op["net"]))
         board.Add(t)
         done["addTracks"] += 1
-    texts = {}
-    keys, _ = comp_keys(board)
-    for fp in board.GetFootprints():
-        k = keys[fp.GetReference()]
-        texts[field_id(k, "ref")] = fp.Reference()
-        texts[field_id(k, "value")] = fp.Value()
-    for op in ops.get("setText") or []:
-        t = texts.get(op["id"])
-        if t is None:
-            missing.append(op["id"])
-            continue
+    for op in L["setText"]:
+        t = texts[op["id"]]
         if op.get("rotation") is not None:
             t.SetTextAngleDegrees(float(op["rotation"]))
         if op.get("fontSize"):
@@ -886,15 +1433,15 @@ def edit(pcb, ops_path, out):
         t.SetTextPos(pos(op["x"], op["y"]))
         done["setText"] += 1
     done["addTexts"], done["hideTexts"] = 0, 0
-    for op in ops.get("addTexts") or []:
+    for op in L["addTexts"]:
         t = pcbnew.PCB_TEXT(board)
         t.SetText(op["text"])
-        t.SetLayer(pcbnew.B_SilkS if int(op.get("layer", 3)) == 4 else pcbnew.F_SilkS)
+        t.SetLayer(pcbnew.B_SilkS if op.get("layer", 3) == 4 else pcbnew.F_SilkS)
         h = nm(op.get("fontSize") or 40)
         t.SetTextSize(pcbnew.VECTOR2I(h, h))
         if op.get("lineWidth"):
             t.SetTextThickness(nm(op["lineWidth"]))
-        if int(op.get("layer", 3)) == 4:
+        if op.get("layer", 3) == 4:
             t.SetMirrored(True)
         t.SetHorizJustify(pcbnew.GR_TEXT_H_ALIGN_CENTER)
         t.SetVertJustify(pcbnew.GR_TEXT_V_ALIGN_CENTER)
@@ -902,30 +1449,15 @@ def edit(pcb, ops_path, out):
         t.SetTextPos(pos(op["x"], op["y"]))
         board.Add(t)
         done["addTexts"] += 1
-    for tid in ops.get("hideTexts") or []:
-        t = texts.get(tid)
-        if t is None:
-            missing.append(tid)
-            continue
-        t.SetVisible(False)
+    for tid in L["hideTexts"]:
+        texts[tid].SetVisible(False)
         done["hideTexts"] += 1
-    done["padZoneNone"] = 0
-    for op in ops.get("padZoneNone") or []:
-        fp = board.FindFootprintByReference(op["ref"])
-        hit = False
-        if fp is not None:
-            for p in fp.Pads():
-                if p.GetNumber() == str(op["pad"]):
-                    p.SetLocalZoneConnection(pcbnew.ZONE_CONNECTION_NONE)
-                    hit = True
-        if not hit:
-            missing.append("%s.%s" % (op["ref"], op["pad"]))
-        else:
-            done["padZoneNone"] += 1
+    for p in zone_pads:
+        p.SetLocalZoneConnection(pcbnew.ZONE_CONNECTION_NONE)
+    done["padZoneNone"] = len(L["padZoneNone"])
     zones = fill_zones(board) if (done["setWidth"] or done["addVias"] or done["addTracks"] or done["padZoneNone"]) else 0
     save_board(board, pcb, out)
-    return {"ok": not missing, "error": ("unknown ids: " + ",".join(missing[:10])) if missing else "",
-            "out": out, "done": done, "zonesFilled": zones}
+    return {"ok": True, "error": "", "out": out, "done": done, "zonesFilled": zones}
 
 
 def main(argv):

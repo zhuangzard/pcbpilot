@@ -8,13 +8,13 @@ package app
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -37,6 +37,13 @@ type sbState struct {
 	SymUUIDs      map[string]string       `json:"symbolUuids"` // "REF/unit"
 	Zones         map[string]*sbZoneState `json:"zones"`
 	Files         []string                `json:"files"` // files this build owns in --out
+	// Manifest is sha256 of the project files in --out at the last commit
+	// (kicad_sch_build_guard.go): the next in-place run refuses when they
+	// were edited outside pcbpilot.
+	Manifest map[string]string `json:"manifest,omitempty"`
+	// Reports are the report files sch-build published into --out
+	// (erc.json, connectivity.json, intent.*, render/*.svg).
+	Reports []string `json:"reports,omitempty"`
 }
 
 type sbZoneState struct {
@@ -131,6 +138,7 @@ type sbReport struct {
 	Outputs    map[string]string `json:"outputs,omitempty"`
 	Checkpoint int               `json:"checkpoint,omitempty"`
 	Edit       any               `json:"edit,omitempty"`
+	External   *sbExternalEdits  `json:"externalEdits,omitempty"`
 	Plan       *sbPlan           `json:"plan,omitempty"`
 	PartBoxes  map[string]sbBox  `json:"partBoxes,omitempty"`
 	Error      *sbFailure        `json:"error,omitempty"`
@@ -140,11 +148,14 @@ type sbReport struct {
 
 // sbBox is a part's drawn extent on its sheet (mm).
 type sbBox struct {
-	Sheet string    `json:"sheet"`
-	Box   []float64 `json:"bboxMm"`
+	Sheet    string    `json:"sheet"`
+	Box      []float64 `json:"bboxMm"`
+	Units    []int     `json:"units,omitempty"`    // placed units, ascending
+	LibUnits int       `json:"libUnits,omitempty"` // units of the library symbol
 }
 
-// sbPartBoxes reads every sheet back: ref → body box (all units).
+// sbPartBoxes reads every sheet back: ref → body box (all units) and the
+// units placed.
 func sbPartBoxes(dir string, files []string) map[string]sbBox {
 	out := map[string]sbBox{}
 	for _, f := range files {
@@ -167,11 +178,25 @@ func sbPartBoxes(dir string, files []string) map[string]sbBox {
 			if s.Power || !s.HasBox || strings.HasPrefix(s.Ref, "#") {
 				continue
 			}
-			b := s.Box
-			if old, ok := out[s.Ref]; ok {
-				b = sbBoxUnion(b, kicad.Box{MinX: old.Box[0], MinY: old.Box[1], MaxX: old.Box[2], MaxY: old.Box[3]})
+			total, _ := e.LibUnitCount(s.LibID)
+			refs := s.Refs // a sheet used twice: every use's reference gets the unit
+			if len(refs) == 0 {
+				refs = []string{s.Ref}
 			}
-			out[s.Ref] = sbBox{Sheet: f, Box: []float64{sbRound2(b.MinX), sbRound2(b.MinY), sbRound2(b.MaxX), sbRound2(b.MaxY)}}
+			for _, ref := range refs {
+				b := s.Box
+				units := []int{s.Unit}
+				if old, ok := out[ref]; ok {
+					b = sbBoxUnion(b, kicad.Box{MinX: old.Box[0], MinY: old.Box[1], MaxX: old.Box[2], MaxY: old.Box[3]})
+					if !slices.Contains(old.Units, s.Unit) {
+						units = append(append([]int(nil), old.Units...), s.Unit)
+					} else {
+						units = old.Units
+					}
+					sort.Ints(units)
+				}
+				out[ref] = sbBox{Sheet: f, Box: []float64{sbRound2(b.MinX), sbRound2(b.MinY), sbRound2(b.MaxX), sbRound2(b.MaxY)}, Units: units, LibUnits: total}
+			}
 		}
 	}
 	return out
@@ -185,26 +210,6 @@ type sbFailure struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 	Fix     string `json:"fix"`
-}
-
-// sbProjectSHA hashes the files a build owns (compare-and-swap).
-func sbProjectSHA(out string, st *sbState) string {
-	h := sha256.New()
-	for _, f := range st.Files {
-		if p, err := sbSafeJoin(out, f); err == nil {
-			b, _ := os.ReadFile(p)
-			fmt.Fprintf(h, "%s\x00%d\x00", f, len(b))
-			h.Write(b)
-		}
-	}
-	return fmt.Sprintf("%x", h.Sum(nil))
-}
-
-func sbCheckUnchanged(out string, st *sbState, start string) error {
-	if now := sbProjectSHA(out, st); now != start {
-		return fmt.Errorf("%s changed while sch-build ran (sha256 %s → %s)", out, start[:12], now[:12])
-	}
-	return nil
 }
 
 // sbLock serializes writers of one project (O_EXCL lock file; a lock older
@@ -293,15 +298,14 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 	if o.DryRun {
 		rep.Mode += "+dry-run"
 	}
-	st, _ := loadSbState(out)
+	loaded, _ := loadSbState(out)
+	st := loaded
 	if st == nil || o.Fresh {
-		old := st
 		st = newSbState()
-		if old != nil {
-			st.Files = old.Files // still owned: replaced or removed on commit
+		if loaded != nil {
+			st.Files = loaded.Files // still owned: replaced or removed on commit
 		}
 	}
-	startSHA := sbProjectSHA(out, st)
 	if !o.DryRun {
 		unlock, err := sbLock(out)
 		if err != nil {
@@ -310,6 +314,12 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 			return rep, nil
 		}
 		defer unlock()
+	}
+	// edits made in the KiCad GUI since the last build would be overwritten
+	guard, gf := sbGuardStart(out, loaded, o, rep)
+	if gf != nil {
+		rep.OK, rep.Error = false, gf
+		return rep, nil
 	}
 	name := o.Name
 	if name == "" {
@@ -551,14 +561,37 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 		}
 		var top []kicad.ERCViolation
 		byType := map[string]int{}
+		own := sbOwnLibs(d, files)
+		ownBad := map[string]int{}
 		for _, v := range erc.Violations {
 			byType[v.Type]++
 			if v.Severity == "error" && len(top) < 20 {
 				top = append(top, v)
 			}
+			// a library the project ships itself must resolve: the isolated
+			// ERC config only lacks KiCad's stock libraries
+			if v.Type == "footprint_link_issues" || v.Type == "lib_symbol_issues" {
+				for _, lib := range own {
+					if strings.Contains(v.Description, "'"+lib+"'") {
+						ownBad[lib]++
+						if len(top) < 20 {
+							top = append(top, v)
+						}
+					}
+				}
+			}
 		}
-		rep.gate("erc", status, fmt.Sprintf("kicad-cli ERC: %d error(s), %d warning(s)", erc.Errors, erc.Warnings),
-			map[string]any{"byType": byType, "errors": top})
+		detail := fmt.Sprintf("kicad-cli ERC: %d error(s), %d warning(s)", erc.Errors, erc.Warnings)
+		if len(ownBad) > 0 {
+			status = "fail"
+			var libs []string
+			for l, n := range ownBad {
+				libs = append(libs, fmt.Sprintf("%s (%d)", l, n))
+			}
+			sort.Strings(libs)
+			detail += "; the project's own libraries do not resolve: " + strings.Join(libs, ", ")
+		}
+		rep.gate("erc", status, detail, map[string]any{"byType": byType, "errors": top})
 	}
 	if len(fitBad) > 0 {
 		rep.gate("page-fit", "fail", "content does not fit A0 on "+strings.Join(fitBad, ", ")+" — split into more pages", nil)
@@ -597,10 +630,30 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 			Fix: "nothing was written; fix the spec (or zone/page split) and rebuild — the failed project is in " + failed}
 		return rep, nil
 	}
-	// compare-and-swap: the project must not have changed while we built
-	if err := sbCheckUnchanged(out, st, startSHA); err != nil {
-		rep.OK = false
-		rep.Error = &sbFailure{Code: "CONCURRENT_CHANGE", Message: err.Error(), Fix: "re-run: another writer changed the project during this build"}
+	// reports (connectivity.json + intent, render/*.svg) are written into the
+	// stage too: one publication list goes through the guard and the commit
+	reports := sbStageReports(stage, out, name, nl, d, o, rep)
+	tm.mark("connectivity+intent")
+
+	// compare-and-swap: nothing in --out changed while we built (KiCad does
+	// not honour sbLock), and nothing this commit replaces was edited
+	// deletes by identity: a case-only rename (P.kicad_sch → p.kicad_sch on
+	// Windows/macOS) is a write of the same file, not a delete
+	writes := map[string]bool{}
+	for _, f := range append(append([]string(nil), files...), reports...) {
+		writes[sbPathKey(f)] = true
+	}
+	var deletes []string
+	for _, f := range st.Files {
+		if !writes[sbPathKey(f)] {
+			deletes = append(deletes, f)
+		}
+	}
+	targets := append(append([]string(nil), files...), reports...)
+	manifest, gf := guard.beforeCommit(stage, targets, deletes, rep)
+	if gf != nil {
+		rep.OK, rep.Error = false, gf
+		rep.Timings, rep.TotalMs = tm.Steps, tm.total()
 		return rep, nil
 	}
 
@@ -608,18 +661,26 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 	if err := os.MkdirAll(out, 0o755); err != nil {
 		return rep, err
 	}
-	for _, f := range st.Files { // files a previous build wrote that this one does not
-		if !sbContains(files, f) {
-			if p, err := sbSafeJoin(out, f); err == nil {
-				_ = os.Remove(p)
-			}
-		}
+	if gf := guard.publish(stage, targets, deletes); gf != nil {
+		rep.OK, rep.Error = false, gf
+		rep.Timings, rep.TotalMs = tm.Steps, tm.total()
+		return rep, nil
 	}
-	if err := copySbFiles(stage, out, append(files, "erc.json")); err != nil {
-		return rep, err
+	if sbTestAfterPublish != nil {
+		sbTestAfterPublish(out)
 	}
 	_ = os.RemoveAll(filepath.Join(sbMetaDir(out), "failed"))
 	st.Files = files
+	st.Manifest = manifest
+	for _, r := range reports {
+		if !sbContains(st.Reports, r) {
+			st.Reports = append(st.Reports, r)
+		}
+	}
+	if st.Reports == nil {
+		st.Reports = []string{}
+	}
+	sort.Strings(st.Reports)
 	rep.Project = filepath.Join(out, name+".kicad_pro")
 	rep.Root = filepath.Join(out, name+".kicad_sch")
 	for _, f := range files {
@@ -627,68 +688,8 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 			rep.Sheets = append(rep.Sheets, filepath.Join(out, f))
 		}
 	}
-	rep.Outputs["erc"] = filepath.Join(out, "erc.json")
 	rep.PartBoxes = sbPartBoxes(out, files)
-	if o.Render { // one SVG per sheet for a human / visual review
-		if cli, err := kicad.KicadCLI(); err == nil {
-			dir := filepath.Join(out, "render")
-			_ = os.MkdirAll(dir, 0o755)
-			cmd, cancel := kicad.SchCLICommand(cli, "sch", "export", "svg", "--output", dir, rep.Root)
-			if b, err := cmd.CombinedOutput(); err != nil {
-				rep.Warnings = append(rep.Warnings, "render: "+sbClip(string(b), 200))
-			} else {
-				rep.Outputs["render"] = dir
-			}
-			cancel()
-		}
-	}
 	tm.mark("commit")
-
-	// connectivity.json + intent
-	conn, err := nl.ToConnectivityDoc(name)
-	if err != nil {
-		rep.gate("connectivity", "fail", err.Error(), nil)
-	} else {
-		cp := filepath.Join(out, "connectivity.json")
-		if err := writeJSONFile(cp, conn); err != nil {
-			return rep, err
-		}
-		rep.Outputs["connectivity"] = cp
-		rep.gate("connectivity", "pass", fmt.Sprintf("connectivity IR 1.4: %d components, %d nets", len(conn.Components), len(conn.Nets)), nil)
-		vp := filepath.Join(out, "values.json")
-		if err := writeJSONFile(vp, d.values()); err != nil {
-			return rep, err
-		}
-		rep.Outputs["values"] = vp
-		ip := filepath.Join(out, "intent-spec.json")
-		if err := writeJSONFile(ip, d.intentSpec()); err != nil {
-			return rep, err
-		}
-		rep.Outputs["intentSpec"] = ip
-		if o.NoIntent {
-			rep.gate("intent", "skip", "--no-intent", nil)
-		} else {
-			args := []string{"--connectivity", cp, "--values", vp, "--spec", ip, "--out", filepath.Join(out, "intent.json"), "--report", filepath.Join(out, "intent.md")}
-			if !o.Analog {
-				args = append(args, "--no-analog")
-			}
-			var so, se bytes.Buffer
-			window := ""
-			c := newIntentDeriveCmd(&appConfig{}, &window, &so, &se)
-			c.SetArgs(args)
-			c.SetOut(&so)
-			c.SetErr(&se)
-			c.SilenceUsage, c.SilenceErrors = true, true
-			if err := c.Execute(); err != nil {
-				rep.gate("intent", "fail", "intent derive: "+sbClip(err.Error()+" "+se.String(), 600), nil)
-			} else {
-				rep.Outputs["intent"] = filepath.Join(out, "intent.json")
-				rep.Outputs["intentReport"] = filepath.Join(out, "intent.md")
-				rep.gate("intent", "pass", strings.TrimSpace(sbLastLine(se.String())), nil)
-			}
-		}
-	}
-	tm.mark("connectivity+intent")
 
 	// state, spec, checkpoint
 	for _, zi := range zis {
@@ -714,7 +715,7 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 	if err := writeJSONFile(filepath.Join(sbMetaDir(out), "state.json"), st); err != nil {
 		return rep, err
 	}
-	n, err := saveSbCheckpoint(out, files, rep.Mode)
+	n, err := saveSbCheckpoint(out, append(append([]string(nil), files...), reports...), rep.Mode)
 	if err != nil {
 		rep.Warnings = append(rep.Warnings, "checkpoint: "+err.Error())
 	}
@@ -1790,4 +1791,134 @@ func sbDroppedPages(d *sbDesign, nl *kicad.SchNetlist) []string {
 		}
 	}
 	return out
+}
+
+// sbOwnLibs are the libraries a built project carries itself: every
+// <lib>.kicad_sym / <lib>.pretty it writes, and the footprint library of
+// every part whose symbol is not KiCad's stock one (an LCSC or project
+// part's footprint must ship with it, e.g. lcsc).
+func sbOwnLibs(d *sbDesign, files []string) []string {
+	set := map[string]bool{}
+	for _, f := range files {
+		if lib, ok := strings.CutSuffix(f, ".kicad_sym"); ok && !strings.Contains(lib, "/") {
+			set[lib] = true
+		}
+		if lib, _, ok := strings.Cut(f, ".pretty/"); ok {
+			set[lib] = true
+		}
+	}
+	for _, p := range d.Parts {
+		if p.LibName == "" { // stock symbol: its footprint may be a stock one
+			continue
+		}
+		if lib, _, ok := strings.Cut(p.Footprint, ":"); ok && (p.FPFile != "" || lib == p.LibName || lib == "lcsc") {
+			set[lib] = true
+		}
+	}
+	out := make([]string, 0, len(set))
+	for l := range set {
+		out = append(out, l)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// sbStageReports writes erc.json's companions into the stage: connectivity.json,
+// values.json, intent-spec.json, intent derive's intent.json / intent.md and
+// (--render) one SVG per sheet. Paths inside them name --out, not the stage.
+// Returns the report files present in the stage (erc.json included).
+func sbStageReports(stage, out, name string, nl *kicad.SchNetlist, d *sbDesign, o sbOptions, rep *sbReport) []string {
+	var reports []string
+	have := func(rel, key string) {
+		if fileExists(filepath.Join(stage, filepath.FromSlash(rel))) {
+			reports = append(reports, rel)
+			if key != "" {
+				rep.Outputs[key] = filepath.Join(out, filepath.FromSlash(rel))
+			}
+		}
+	}
+	have("erc.json", "erc")
+	if o.Render { // one SVG per sheet for a human / visual review
+		if cli, err := kicad.KicadCLI(); err == nil {
+			dir := filepath.Join(stage, "render")
+			_ = os.MkdirAll(dir, 0o755)
+			cmd, cancel := kicad.SchCLICommand(cli, "sch", "export", "svg", "--output", dir, filepath.Join(stage, name+".kicad_sch"))
+			if b, err := cmd.CombinedOutput(); err != nil {
+				rep.Warnings = append(rep.Warnings, "render: "+sbClip(string(b), 200))
+			} else if ents, err := os.ReadDir(dir); err == nil {
+				for _, e := range ents {
+					if !e.IsDir() && sbSafeName(e.Name()) {
+						sbRelocate(filepath.Join(dir, e.Name()), stage, out)
+						reports = append(reports, "render/"+e.Name())
+					}
+				}
+				rep.Outputs["render"] = filepath.Join(out, "render")
+			}
+			cancel()
+		}
+	}
+	conn, err := nl.ToConnectivityDoc(name)
+	if err != nil {
+		rep.gate("connectivity", "fail", err.Error(), nil)
+		return reports
+	}
+	cp, vp, ip := filepath.Join(stage, "connectivity.json"), filepath.Join(stage, "values.json"), filepath.Join(stage, "intent-spec.json")
+	if err := writeJSONFile(cp, conn); err != nil {
+		rep.gate("connectivity", "fail", err.Error(), nil)
+		return reports
+	}
+	have("connectivity.json", "connectivity")
+	rep.gate("connectivity", "pass", fmt.Sprintf("connectivity IR 1.4: %d components, %d nets", len(conn.Components), len(conn.Nets)), nil)
+	if err := writeJSONFile(vp, d.values()); err == nil {
+		have("values.json", "values")
+	}
+	if err := writeJSONFile(ip, d.intentSpec()); err == nil {
+		have("intent-spec.json", "intentSpec")
+	}
+	if o.NoIntent {
+		rep.gate("intent", "skip", "--no-intent", nil)
+		return reports
+	}
+	args := []string{"--connectivity", cp, "--values", vp, "--spec", ip, "--out", filepath.Join(stage, "intent.json"), "--report", filepath.Join(stage, "intent.md")}
+	if !o.Analog {
+		args = append(args, "--no-analog")
+	}
+	var so, se bytes.Buffer
+	window := ""
+	c := newIntentDeriveCmd(&appConfig{}, &window, &so, &se)
+	c.SetArgs(args)
+	c.SetOut(&so)
+	c.SetErr(&se)
+	c.SilenceUsage, c.SilenceErrors = true, true
+	if err := c.Execute(); err != nil {
+		rep.gate("intent", "fail", "intent derive: "+sbClip(err.Error()+" "+se.String(), 600), nil)
+		return reports
+	}
+	for _, f := range []string{"intent.json", "intent.md"} {
+		sbRelocate(filepath.Join(stage, f), stage, out)
+	}
+	have("intent.json", "intent")
+	have("intent.md", "intentReport")
+	rep.gate("intent", "pass", strings.TrimSpace(sbLastLine(strings.ReplaceAll(se.String(), stage, out))), nil)
+	return reports
+}
+
+// sbRelocate rewrites the stage directory to --out inside a staged report
+// (raw, JSON-escaped and forward-slash spellings).
+func sbRelocate(path, stage, out string) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	t := string(b)
+	for _, pair := range [][2]string{
+		{stage, out},
+		{strings.ReplaceAll(stage, `\`, `\\`), strings.ReplaceAll(out, `\`, `\\`)},
+		{filepath.ToSlash(stage), filepath.ToSlash(out)},
+	} {
+		t = strings.ReplaceAll(t, pair[0], pair[1])
+	}
+	if t != string(b) {
+		_ = os.WriteFile(path, []byte(t), 0o644)
+	}
 }

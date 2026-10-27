@@ -131,6 +131,17 @@ revA 的板文件没有任何 LCSC 字段，`kicad fab` 正确地列出 145 个�
 PTH/NPTH）。安装孔这类封装若没勾“排除 BOM/坐标文件”也会被要求 C 号——去 KiCad 里勾上，
 不要随手填号。
 
+BOM/CPL 一致性门禁：两者必须列出同一组位号、每个恰好一次。CPL 里未贴装件（排除 BOM 或只在
+原理图标 DNP，kicad-cli pos 仍会输出）自动剔除并在 `cplOmitted` 里列出；其余不一致是硬失败、
+**不写任何文件**，错误码 `BOM_NOT_IN_CPL` / `CPL_NOT_IN_BOM` / `CPL_DUPLICATE_REF` /
+`BOM_DUPLICATE_REF` / `CPL_EMPTY_REF`，每条带 `fix`（多为重新标注后 Update PCB from Schematic）。
+
+重复出图：所有文件先生成到 OUT 内的临时目录，zip 只装本次 kicad-cli 产物；发布时只替换/删除
+上次运行记在 `OUT/.pcbpilot-fab-manifest.json` 里的文件（板子从 4 层改 2 层后，旧内层 Gerber
+会被删），OUT 里其它文件不动；`gerber/` 里不归 pcbpilot 的 Gerber 只告警、不进 zip。
+本次要写的文件若已存在却不在清单里（用户文件，或旧版 pcbpilot 无清单时的产物）→ 动手前就报冲突退出，
+删掉/挪走或换 `--out`；`OUT` 或 `OUT/gerber` 是符号链接/目录联接时拒绝。安装中途失败会把上次的文件放回。同一 OUT 同时只允许一个 fab 运行（`OUT/.pcbpilot-fab.lock`，第二个直接报忙）。
+
 ### CPL 旋转角：不发明偏移表
 
 CPL 的坐标与角度就是 KiCad 的封装位置/角度（底层件的角度也原样输出，例如板上 270°、
@@ -159,7 +170,7 @@ pcbpilot kicad fab --pcb b.kicad_pcb --out fab/ --cpl-overrides jlc-rot.json
 
 ## 5. 输出与核对
 
-- `OUT/fab-report.json`：层清单、zip 内文件、BOM 行数、CPL 件数、告警、已用覆盖。
+- `OUT/fab-report.json`：层清单、zip 内文件、BOM 行数、CPL 件数、剔除的未贴装件、告警、已用覆盖。
 - 上传前用 Gerber 查看器（或 JLC 上传后的在线预览）核对：板框闭合、内层顺序、孔与层
   对齐、过孔盖油与设计一致、丝印正常（JLC KiCad 8/9 文章的检查清单）。
 - 上传 BOM/CPL 后在 JLC 的贴片预览逐个看方向，再决定是否写覆盖文件。

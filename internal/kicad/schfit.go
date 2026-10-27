@@ -51,10 +51,12 @@ func emptyBox() Box { return Box{math.Inf(1), math.Inf(1), math.Inf(-1), math.In
 // ---- minimal S-expression ---------------------------------------------------
 
 type sexp struct {
-	atom string
-	list []*sexp
-	beg  int // byte offsets of this list in the source (lists only)
-	end  int
+	atom   string
+	list   []*sexp
+	beg    int // byte offsets of this list in the source (lists only)
+	end    int
+	isList bool // tells () from "" (both have atom "" and no list)
+	quoted bool // atom was a quoted string
 }
 
 func (n *sexp) head() string {
@@ -81,59 +83,34 @@ func (n *sexp) num(i int) float64 {
 	return 0
 }
 
+// parseSx reads one top-level expression with the shared KiCad tokenizer
+// (sexpr.go); text after it is ignored, as KiCad does.
 func parseSx(src string) (*sexp, error) {
-	pos := 0
-	var parse func() (*sexp, error)
-	parse = func() (*sexp, error) {
-		for pos < len(src) && strings.ContainsRune(" \t\r\n", rune(src[pos])) {
-			pos++
+	var stack []*sexp
+	var root *sexp
+	add := func(n *sexp) {
+		if len(stack) == 0 {
+			root = n
+			return
 		}
-		if pos >= len(src) {
-			return nil, fmt.Errorf("unexpected end")
-		}
-		switch src[pos] {
-		case '(':
-			n := &sexp{beg: pos}
-			pos++
-			for {
-				for pos < len(src) && strings.ContainsRune(" \t\r\n", rune(src[pos])) {
-					pos++
-				}
-				if pos >= len(src) {
-					return nil, fmt.Errorf("unclosed list at %d", n.beg)
-				}
-				if src[pos] == ')' {
-					pos++
-					n.end = pos
-					return n, nil
-				}
-				c, err := parse()
-				if err != nil {
-					return nil, err
-				}
-				n.list = append(n.list, c)
-			}
-		case '"':
-			start := pos
-			pos++
-			for pos < len(src) && src[pos] != '"' {
-				if src[pos] == '\\' {
-					pos++
-				}
-				pos++
-			}
-			pos++
-			s, _ := strconv.Unquote(src[start:pos])
-			return &sexp{atom: s}, nil
-		default:
-			start := pos
-			for pos < len(src) && !strings.ContainsRune(" \t\r\n()", rune(src[pos])) {
-				pos++
-			}
-			return &sexp{atom: src[start:pos]}, nil
-		}
+		top := stack[len(stack)-1]
+		top.list = append(top.list, n)
 	}
-	return parse()
+	err := sexprEvents(src,
+		func(off int) {
+			n := &sexp{isList: true, beg: off}
+			add(n)
+			stack = append(stack, n)
+		},
+		func(end int) {
+			stack[len(stack)-1].end = end
+			stack = stack[:len(stack)-1]
+		},
+		func(val string, quoted bool, _ int) { add(&sexp{atom: val, quoted: quoted}) })
+	if err != nil {
+		return nil, err
+	}
+	return root, nil
 }
 
 // ---- content box ---------------------------------------------------------------

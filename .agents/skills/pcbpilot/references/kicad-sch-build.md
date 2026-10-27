@@ -11,7 +11,13 @@
 2. 器件优先给 LCSC C 号（`kicad lcsc --search` 选件）；没有 C 号或离线时给 `pins`（生成方框符号），
    或 `symbol: "Device:R"` 这类 KiCad 自带符号。标准电路用块（`pcbpilot blocks search …`）。
 3. 网的引脚写 `REF:脚名` 或 `REF:脚号`；电源网写 `rails`（电压、电流 → intent derive 的线宽/IR/安全）。
-4. 一次构建失败时读 `error.code` / `error.fix`；spec 问题是一次全部列出的（例如 `PIN_NOT_ON_SYMBOL` 会给出
+4. **多单元器件**（双运放、四与非门、带独立电源单元的器件）：spec 里只写一个件，`REF:脚号` 可指任何单元的脚
+   （`U1:5` 是 B 单元，`U1:8`/`U1:4` 是电源单元）；sch-build 画出**全部**单元（含电源单元，ERC 不报缺单元）。
+   KiCad 派生符号（`Amplifier_Operational:LM358`、`74xx:74HC00` 这类 `extends` 的）自动展平后使用。
+   只放部分单元时在件上写 `"units": [1, 3]`（未列出的单元不画，其脚不能进网）；sch-read 只对**部分放置**的件
+   输出 `units`，回读再构建不会多出单元。`set_value` / `set_field` / `remove_part` 作用于该位号的全部单元。
+   公共（unit 0）电源脚的件不能只放部分单元：KiCad ERC 报 `missing_power_pin`（错误）。
+5. 一次构建失败时读 `error.code` / `error.fix`；spec 问题是一次全部列出的（例如 `PIN_NOT_ON_SYMBOL` 会给出
    符号真实的脚号脚名），一轮改完再跑。门禁失败时 `--out` 不会被改动。
 
 ## 流程
@@ -42,8 +48,26 @@ pcbpilot kicad sch-checkpoint list --project build/                     # 回退
 - **失败如实报告**：任何失败报告都是 `ok:false` + `error`。`SHEET_NOT_LOADED` = KiCad 加载不了某页（通常是
   MPN/value 里有 KiCad 不接受的字符），不是布局问题，不要用 `--no-planner` 去绕。
 - **ERC 用隔离的 KiCad 配置**（空的全局库表，避免加载全部官方库卡死）；用户自设 `KICAD_CONFIG_HOME` 优先，
-  `PCBPILOT_KICAD_ISOLATE=0` 关闭。
+  `PCBPILOT_KICAD_ISOLATE=0` 关闭。因此 ERC 对官方库只报 warning；但**工程自带的库**（`lcsc`、项目库、
+  `pcbpilot_*`）报 footprint/符号链接问题时 ERC 门禁失败（v0.10.1 的 sch-edit 会丢 `fp-lib-table` 和
+  `lcsc.pretty`，已修复）。
 - **可复现**：`--planner-timeout` 按墙钟决定哪些区用 planner；同一 spec 要逐字节可复现时用 `--no-planner --fresh`。
+
+### GUI 改动保护（v0.10.2 起）
+
+- sch-edit 和对已有 `--out` 的 sch-build 会从存储的 spec 重画整个工程。上次构建后在 KiCad GUI 里改过的
+  图纸/工程/库文件（改动、新增、删除；含子目录，以及会覆盖一个不是 pcbpilot 写的文件）会被拒绝：`EXTERNAL_EDIT`，
+  列出文件，什么都不写。比对依据是构建时按暂存内容记录的 sha256 清单（`state.json` 的 `manifest`）；旧工程没有
+  清单时比对 checkpoint，都没有也拒绝。构建期间工程被保存 = `CONCURRENT_CHANGE`；读不了文件 = `PROJECT_UNREADABLE`。
+- 要保留 GUI 改动：`sch-read --project build/ --out edited.json` 导入成 spec，构建到新的 `--out`。确定要丢弃：
+  加 `--discard-external-edits`（报告列出将覆盖的文件，并先把全部工程文件存一个 checkpoint，可 `sch-checkpoint restore N` 找回）。
+- 任一 `~*.lck` 锁文件 = 工程还在 KiCad 里打开：`KICAD_OPEN`，先在 KiCad 保存并关闭（覆盖开关不跳过它）。
+  `.kicad_prl`、`_autosave-*`、`*-bak`、`*-backups/`、`.history/` 等 KiCad 附属文件不算改动；kicad-cli 不改 `.kicad_pro`。
+- 只有 `.kicad_pro` 变了：KiCad 保存工程（如保存 PCB）时会把全部默认设置写进去。没在 KiCad 改工程设置（网络类、
+  文本变量、板设置）时 `--discard-external-edits` 是安全的。
+- 报告文件（`erc.json`、`connectivity.json`、`values.json`、`intent-spec.json`、`intent.json/md`、`render/*.svg`）
+  不是设计数据：被改过或旧工程没记录过时不拒绝，先存进 checkpoint，报告 `warnings` 里 `WARNING: report(s) …`
+  点名并给出 checkpoint 目录，再重新生成。要找回就从那个目录手工拷回（不要整体 restore 那个 checkpoint）。
 
 delta 例子（只写意图，脚名即可）：
 

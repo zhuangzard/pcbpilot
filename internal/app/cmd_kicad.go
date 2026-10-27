@@ -19,6 +19,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -162,6 +163,105 @@ func mergeRules(def, explicit kicad.Rules) kicad.Rules {
 		ViaDrillMil: pick(def.ViaDrillMil, explicit.ViaDrillMil), EdgeMil: pick(def.EdgeMil, explicit.EdgeMil)}
 }
 
+// kicadRuleFloors are a project's own design-rule minimums and its Default
+// netclass via, in integer nm (0 = none), from the .kicad_pro
+// (board.design_settings.rules and net_settings.classes, where KiCad 6+
+// keeps them).
+type kicadRuleFloors struct {
+	ViaDia     int64 `json:"minViaDiameterNm"`
+	ViaDrill   int64 `json:"minThroughHoleNm"`
+	ViaAnnular int64 `json:"minViaAnnularNm"`
+	Track      int64 `json:"minTrackNm"`
+	// DefaultViaDia / DefaultViaDrill: the Default netclass via, the
+	// partner of a single --via-dia-mil or --via-drill-mil.
+	DefaultViaDia   int64 `json:"defaultViaDiameterNm"`
+	DefaultViaDrill int64 `json:"defaultViaDrillNm"`
+}
+
+func nmOfMm(mm float64) int64   { return int64(math.Round(mm * 1e6)) }
+func nmOfMil(mil float64) int64 { return int64(math.Round(mil * 25400)) }
+func mmOfNm(v int64) string     { return strconv.FormatFloat(float64(v)/1e6, 'f', -1, 64) + " mm" }
+
+// readKicadRuleFloors reads the minimums and the Default via from a .kicad_pro.
+func readKicadRuleFloors(pro string) (kicadRuleFloors, error) {
+	data, err := os.ReadFile(pro)
+	if err != nil {
+		return kicadRuleFloors{}, err
+	}
+	var raw struct {
+		Board struct {
+			DesignSettings struct {
+				Rules struct {
+					MinViaDiameter         float64 `json:"min_via_diameter"`
+					MinThroughHoleDiameter float64 `json:"min_through_hole_diameter"`
+					MinViaAnnularWidth     float64 `json:"min_via_annular_width"`
+					MinTrackWidth          float64 `json:"min_track_width"`
+				} `json:"rules"`
+			} `json:"design_settings"`
+		} `json:"board"`
+		NetSettings struct {
+			Classes []struct {
+				Name        string  `json:"name"`
+				ViaDiameter float64 `json:"via_diameter"`
+				ViaDrill    float64 `json:"via_drill"`
+			} `json:"classes"`
+		} `json:"net_settings"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return kicadRuleFloors{}, fmt.Errorf("%s: %w", pro, err)
+	}
+	r := raw.Board.DesignSettings.Rules
+	f := kicadRuleFloors{ViaDia: nmOfMm(r.MinViaDiameter), ViaDrill: nmOfMm(r.MinThroughHoleDiameter),
+		ViaAnnular: nmOfMm(r.MinViaAnnularWidth), Track: nmOfMm(r.MinTrackWidth)}
+	for _, c := range raw.NetSettings.Classes {
+		if c.Name == "Default" {
+			f.DefaultViaDia, f.DefaultViaDrill = nmOfMm(c.ViaDiameter), nmOfMm(c.ViaDrill)
+		}
+	}
+	return f, nil
+}
+
+// checkRuleFloors refuses explicit Default-netclass values below the
+// board's own minimums: KiCad's DRC would reject every via / track the
+// router makes with them (interf_u: 0.3 mm drill vs min hole 0.5 mm gave
+// 16 drill_out_of_range + 16 via_diameter errors). Each via flag is checked
+// with its partner as it will be written: the other flag, else the Default
+// netclass value, so a single flag cannot make a pair whose annular ring is
+// below the minimum. --min-track-mil replaces the board's minimum track
+// width, so --track-mil is checked against it when given. Integer nm.
+func checkRuleFloors(r kicad.Rules, f kicadRuleFloors) error {
+	var bad []string
+	dia, drill := f.DefaultViaDia, f.DefaultViaDrill
+	if r.ViaDiaMil > 0 {
+		dia = nmOfMil(r.ViaDiaMil)
+		if dia < f.ViaDia {
+			bad = append(bad, fmt.Sprintf("--via-dia-mil %g (%s) is below the board's min via diameter %s", r.ViaDiaMil, mmOfNm(dia), mmOfNm(f.ViaDia)))
+		}
+	}
+	if r.ViaDrillMil > 0 {
+		drill = nmOfMil(r.ViaDrillMil)
+		if drill < f.ViaDrill {
+			bad = append(bad, fmt.Sprintf("--via-drill-mil %g (%s) is below the board's min through-hole %s", r.ViaDrillMil, mmOfNm(drill), mmOfNm(f.ViaDrill)))
+		}
+	}
+	if (r.ViaDiaMil > 0 || r.ViaDrillMil > 0) && dia > 0 && drill > 0 && dia < drill+2*f.ViaAnnular {
+		src := map[bool]string{true: "flag", false: "Default netclass"}
+		bad = append(bad, fmt.Sprintf("via %s (%s) / drill %s (%s) leaves an annular ring of %s, below the board's min %s",
+			mmOfNm(dia), src[r.ViaDiaMil > 0], mmOfNm(drill), src[r.ViaDrillMil > 0], mmOfNm((dia-drill)/2), mmOfNm(f.ViaAnnular)))
+	}
+	floor := f.Track
+	if r.MinTrackMil > 0 {
+		floor = nmOfMil(r.MinTrackMil)
+	}
+	if r.TrackMil > 0 && nmOfMil(r.TrackMil) < floor {
+		bad = append(bad, fmt.Sprintf("--track-mil %g (%s) is below the board's min track width %s", r.TrackMil, mmOfNm(nmOfMil(r.TrackMil)), mmOfNm(floor)))
+	}
+	if len(bad) == 0 {
+		return nil
+	}
+	return fmt.Errorf("RULE_BELOW_BOARD_MINIMUM: %s (fix: use values at or above the board's design rules in its .kicad_pro, or omit the flag to use the board's own netclass sizes)", strings.Join(bad, "; "))
+}
+
 // kicadIsolation turns the intent's insulation pairs into the bridge's
 // domain classes and clearance / creepage rules.
 func kicadIsolation(in *designIntent) []map[string]any {
@@ -185,8 +285,18 @@ func kicadIsolation(in *designIntent) []map[string]any {
 // class; KiCad's DRC checks the pair rule itself).
 func kicadRequirements(in *designIntent) map[string]kicad.NetRequirement {
 	reqs := map[string]kicad.NetRequirement{}
+	// The intent's via per net: its netClasses entry (largest when a net is
+	// in several). The bridge raises it to the net's class and the board
+	// minimums; it never lowers either.
+	viaDia, viaDrill := map[string]float64{}, map[string]float64{}
+	for _, c := range in.NetClasses {
+		for _, n := range c.Nets {
+			viaDia[n], viaDrill[n] = math.Max(viaDia[n], c.ViaDiaMil), math.Max(viaDrill[n], c.ViaDrillMil)
+		}
+	}
 	for net, r := range intentRequirements(in) {
-		reqs[net] = kicad.NetRequirement{OuterMil: r.OuterMil, InnerMil: r.InnerMil, MinMil: r.MinMil, ClearanceMil: r.ClearanceMil}
+		reqs[net] = kicad.NetRequirement{OuterMil: r.OuterMil, InnerMil: r.InnerMil, MinMil: r.MinMil, ClearanceMil: r.ClearanceMil,
+			ViaDiaMil: viaDia[net], ViaDrillMil: viaDrill[net]}
 	}
 	nets := map[string][]string{}
 	for _, d := range in.Domains {
@@ -250,6 +360,12 @@ func kicadPourPlan(o kicadRouteOpts, in *boardSnapshot) []kicad.Pour {
 	return ps
 }
 
+// kicadDRCCannotCheck is the kicad-drc gate when kicad-cli produced no
+// readable report: failed, with no items (so no waiver can pass it).
+func kicadDRCCannotCheck(err error) gateResult {
+	return gateResult{Gate: "kicad-drc", Detail: "cannot check: " + err.Error()}
+}
+
 // kicadDRCGate: 0 DRC errors, 0 unconnected items, every one listed.
 func kicadDRCGate(rep *kicad.DRCReport, path string) gateResult {
 	g := gateResult{Gate: "kicad-drc", Pass: rep.Total == 0,
@@ -259,6 +375,147 @@ func kicadDRCGate(rep *kicad.DRCReport, path string) gateResult {
 		g.Items = append(g.Items, drcItem(kicadFlat(v)))
 	}
 	return g
+}
+
+// drcHardRules are the electrical and fabrication DRC rules a project may
+// not silence on a routed board (exclusion, "ignore", or a downgrade of an
+// error to "warning"): shorts, the clearance family, unconnected items,
+// schematic parity, copper / drill size rules, thermals, zones, solder mask
+// bridges, custom disallow rules and the outline / layer / hole checks a
+// fab builds from. Silencing one fails kicad-drc unless a signed waiver
+// matches.
+var drcHardRules = map[string]bool{
+	"shorting_items": true, "tracks_crossing": true,
+	"clearance": true, "hole_clearance": true, "copper_edge_clearance": true, "creepage": true, "hole_to_hole": true, "edge_clearance": true,
+	"unconnected_items": true,
+	"schematic_parity":  true, "missing_footprint": true, "extra_footprint": true, "duplicate_footprints": true,
+	"net_conflict": true, "footprint_symbol_mismatch": true,
+	"track_width": true, "via_diameter": true, "drill_out_of_range": true, "annular_width": true, "connection_width": true,
+	"microvia_drill_out_of_range": true,
+	"starved_thermal":             true, "zones_intersect": true, "solder_mask_bridge": true,
+	"items_not_allowed": true, "through_hole_pad_without_hole": true, "invalid_outline": true,
+	"item_on_disabled_layer": true, "track_on_post_machined_layer": true,
+}
+
+// drcSoftRules are the other rules KiCad 10 reports as errors by default
+// (placement, courtyard, length / skew tuning, library): silencing one is
+// listed as "silenced" in the gate detail and summary.drcPolicy but does not
+// fail the gate.
+var drcSoftRules = map[string]bool{
+	"courtyards_overlap": true, "diff_pair_gap_out_of_range": true, "diff_pair_uncoupled_length_too_long": true,
+	"footprint": true, "length_out_of_range": true, "malformed_courtyard": true, "npth_inside_courtyard": true,
+	"pth_inside_courtyard": true, "overlapping_pads": true, "skew_out_of_range": true, "text_on_edge_cuts": true,
+	"too_many_vias": true, "track_angle": true, "track_segment_length": true, "unresolved_variable": true,
+}
+
+// kicadWarningRules are the rules KiCad 10 does not report as errors by
+// default (warning or ignore in a fresh project's rule_severities). Those
+// not in drcHardRules are cosmetic or advisory: silencing them is info.
+var kicadWarningRules = map[string]bool{
+	"connection_width": true, "copper_sliver": true, "footprint_symbol_field_mismatch": true, "hole_to_hole": true,
+	"holes_co_located": true, "isolated_copper": true, "lib_footprint_issues": true, "lib_footprint_mismatch": true,
+	"mirrored_text_on_front_layer": true, "missing_tuning_profile": true, "nonmirrored_text_on_back_layer": true,
+	"padstack": true, "silk_edge_clearance": true, "silk_over_copper": true, "silk_overlap": true, "text_height": true,
+	"text_thickness": true, "track_dangling": true, "via_dangling": true,
+	"footprint_filters_mismatch": true, "footprint_type_mismatch": true, "missing_courtyard": true,
+	"track_not_centered_on_via": true, "tuning_profile_track_geometries": true,
+	// Parity checks: warnings by KiCad's default (and hard rules here).
+	"missing_footprint": true, "extra_footprint": true, "duplicate_footprints": true, "net_conflict": true,
+	"footprint_symbol_mismatch": true,
+}
+
+// drcRuleClass: "hard" (fails unless waived), "soft" (listed as silenced),
+// or "info". A rule in none of the tables is hard (fail closed).
+func drcRuleClass(rule string) string {
+	switch {
+	case drcHardRules[rule]:
+		return "hard"
+	case drcSoftRules[rule]:
+		return "soft"
+	case kicadWarningRules[rule]:
+		return "info"
+	}
+	return "hard"
+}
+
+// drcSilenced is one error-level check the project silences without
+// failing the gate (summary.drcPolicy.silenced).
+type drcSilenced struct {
+	Rule  string `json:"rule"`
+	How   string `json:"how"` // excluded | ignored | downgraded
+	Where string `json:"where"`
+}
+
+// applyDRCPolicy adds the project's DRC policy (its .kicad_pro
+// drc_exclusions and rule_severities) to the kicad-drc gate. An exclusion
+// ("EXCLUDED <key>"), an "ignore" ("IGNORED <rule>") or a downgrade of a
+// KiCad error to "warning" ("DOWNGRADED <rule>") of a hard rule is a failing
+// item that only a {"gate":"kicad-drc","match":...} waiver can accept; of a
+// soft rule it is returned as silenced and named in the detail and info; of
+// a warning-level rule it is info. excluded are the report's excluded items
+// (kicad-cli --severity-all), for their positions.
+func applyDRCPolicy(g *gateResult, pol *kicad.DRCPolicy, excluded []kicad.Violation) []drcSilenced {
+	if pol == nil {
+		return nil
+	}
+	where := map[string]string{} // rule|first uuid -> description
+	for _, v := range excluded {
+		if len(v.Objs) > 0 {
+			where[v.Rule+"|"+v.Objs[0]] = v.Message
+		}
+	}
+	hard := 0
+	var silenced []drcSilenced
+	put := func(rule, how, at, it string) {
+		switch drcRuleClass(rule) {
+		case "hard":
+			g.Items = append(g.Items, it)
+			hard++
+		case "soft":
+			silenced = append(silenced, drcSilenced{Rule: rule, How: how, Where: at})
+			g.Info = append(g.Info, "SILENCED "+it)
+		default:
+			g.Info = append(g.Info, it)
+		}
+	}
+	for _, e := range pol.Exclusions {
+		desc := ""
+		if parts := strings.Split(e.Key, "|"); len(parts) >= 4 {
+			desc = where[e.Rule+"|"+parts[3]]
+		}
+		it := "EXCLUDED " + e.Key
+		if e.Comment != "" {
+			it += fmt.Sprintf(" (comment: %q)", e.Comment)
+		}
+		at := e.Key
+		if desc != "" {
+			it += ": " + desc
+			at += ": " + desc
+		}
+		put(e.Rule, "excluded", at, it+" (.kicad_pro drc_exclusions)")
+	}
+	for _, rule := range pol.Ignored {
+		put(rule, "ignored", ".kicad_pro rule_severities", fmt.Sprintf("IGNORED %s (.kicad_pro rule_severities: ignore; KiCad's DRC does not report it at all)", rule))
+	}
+	for _, rule := range pol.Downgraded {
+		// Only a rule KiCad itself reports as an error: "warning" is the
+		// default of the warning-level rules (parity checks included).
+		if !kicadWarningRules[rule] {
+			put(rule, "downgraded", ".kicad_pro rule_severities", fmt.Sprintf("DOWNGRADED %s (.kicad_pro rule_severities: warning; the gate only counts errors)", rule))
+		}
+	}
+	if hard > 0 {
+		g.Pass = false
+		g.Detail += fmt.Sprintf("; %d electrical / fabrication DRC check(s) excluded, ignored or downgraded by the project (sign a kicad-drc waiver to accept one)", hard)
+	}
+	if len(silenced) > 0 {
+		var rules []string
+		for _, s := range silenced {
+			rules = append(rules, s.Rule+" ("+s.How+")")
+		}
+		g.Detail += fmt.Sprintf("; WARNING: %d other error-level check(s) silenced by the project: %s", len(silenced), strings.Join(dedupeStrings(rules), ", "))
+	}
+	return silenced
 }
 
 func kicadFlat(v kicad.Violation) drcFlatViolation {

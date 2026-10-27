@@ -25,6 +25,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/zhuangzard/pcbpilot/pkg/netname"
 	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
 	"github.com/zhuangzard/pcbpilot/pkg/powersim"
 )
@@ -215,6 +216,11 @@ func Run(boardRaw, simRaw []byte, o Options) (*Result, error) {
 	} else {
 		res.Assumptions = append(res.Assumptions, "thermal: the sim file carries no time-averaged thermal power (written before v0.6.1) — every scenario's operating-point power is treated as continuous (peak bursts overstate the temperature); re-run pcbpilot sim power")
 	}
+	renamed, nameFindings := simNetsOnBoard(b, sim.Results)
+	if len(renamed) > 0 {
+		res.Assumptions = append(res.Assumptions, "sim nets named by their schematic display name matched to the board's net names (pkg/netname: KiCad's full hierarchical name): "+strings.Join(renamed, ", "))
+	}
+	res.Findings = append(res.Findings, nameFindings...)
 	res.Findings = append(res.Findings, crossCheck(b, scen)...)
 
 	// Roles and ground nets.
@@ -555,6 +561,79 @@ func Run(boardRaw, simRaw []byte, o Options) (*Result, error) {
 	res.Model = modelNotes(o, st)
 	res.findings(o)
 	return res, nil
+}
+
+// simNetsOnBoard renames the sim nets (and their ripple entries) to the
+// board's net identities (pkg/netname): a sim derived from a hierarchical
+// KiCad schematic's display names ("VCC_PIC", "VPP/MCLR") names the board's
+// "/pic_sockets/VCC_PIC" / "/VPP{slash}MCLR". Without it the pin↔pad check
+// reports a false sim-board-mismatch and the net's copper is not found.
+// Names already on the board and unknown names stay. Never merged: two sim
+// nets resolving to one board net (or onto a sim net already named so),
+// and a sim net (any role) whose name fits several board nets, stay
+// unrenamed and are sim-board-mismatch failures.
+func simNetsOnBoard(b *Board, results []powersim.Result) ([]string, []Finding) {
+	var ids []string
+	for _, pt := range b.Parts {
+		for _, pd := range pt.Pads {
+			ids = append(ids, pd.Net)
+		}
+	}
+	for _, t := range b.Tracks {
+		ids = append(ids, t.Net)
+	}
+	for _, a := range b.Areas {
+		ids = append(ids, a.Net)
+	}
+	r := netname.NewResolver(ids)
+	done := map[string]bool{}
+	var renamed []string
+	collide, ambiguous := map[string][]string{}, map[string][]string{}
+	for i := range results {
+		res := &results[i]
+		dest := map[string][]string{} // board net → sim nets resolving to it
+		for n := range res.Nets {
+			switch id, m := r.Resolve(n); {
+			case m == netname.Found && id != n:
+				dest[id] = append(dest[id], n)
+			case m == netname.Ambiguous:
+				ambiguous[n] = r.Candidates(n)
+			}
+		}
+		for id, srcs := range dest {
+			sort.Strings(srcs)
+			_, rippleTaken := res.Ripple[id]
+			if len(srcs) > 1 || res.Nets[id] != nil || rippleTaken {
+				if res.Nets[id] != nil || rippleTaken {
+					srcs = append(srcs, id)
+				}
+				collide[id] = srcs
+				continue
+			}
+			n := srcs[0]
+			res.Nets[id] = res.Nets[n]
+			delete(res.Nets, n)
+			if e, ok := res.Ripple[n]; ok {
+				res.Ripple[id] = e
+				delete(res.Ripple, n)
+			}
+			if !done[n] {
+				done[n] = true
+				renamed = append(renamed, n+" → "+id)
+			}
+		}
+	}
+	sort.Strings(renamed)
+	var out []Finding
+	for _, id := range sortedStrings(collide) {
+		out = append(out, Finding{Severity: "fail", Kind: "sim-board-mismatch", Nets: collide[id],
+			Message: fmt.Sprintf("sim nets %s all name board net %s — not merged (their currents would be added or lost): give them distinct names in the schematic and re-run sim power", strings.Join(collide[id], ", "), id)})
+	}
+	for _, n := range sortedStrings(ambiguous) {
+		out = append(out, Finding{Severity: "fail", Kind: "sim-board-mismatch", Nets: append([]string{n}, ambiguous[n]...),
+			Message: fmt.Sprintf("sim net %s could be board net %s — not guessed: re-run sim power on a kicad netlist (its fullName) or rename the labels", n, strings.Join(ambiguous[n], " or "))})
+	}
+	return renamed, out
 }
 
 // crossCheck verifies that the sim file and the board are the same design
@@ -1304,6 +1383,12 @@ func (res *Result) findings(o Options) {
 			}
 		}
 	}
+	// Nothing simulated (no net with a solved IR drop, no heat on the
+	// board) verifies nothing: "unverified", never a pass.
+	nothing := res.nothingSimulated()
+	if nothing != "" {
+		add("warn", "not-verified", nothing, nil, nil)
+	}
 	v := Verdict{Status: "pass"}
 	for _, f := range res.Findings {
 		switch f.Severity {
@@ -1317,7 +1402,37 @@ func (res *Result) findings(o Options) {
 			v.Reasons = append(v.Reasons, f.Message)
 		}
 	}
+	if nothing != "" && v.Status != "fail" {
+		v.Status = "unverified"
+	}
 	res.Verdict = v
+}
+
+// nothingSimulated explains why the run verified nothing — the IR table
+// has no solved net and no scenario puts heat on the board — or is "".
+func (res *Result) nothingSimulated() string {
+	for _, n := range res.Nets {
+		switch n.Status {
+		case "ok", "over-budget", "open", "info":
+			return ""
+		}
+	}
+	if t := res.Thermal; t != nil {
+		for _, s := range t.PerScenario {
+			if s.PartsW+s.JouleW > 0 {
+				return ""
+			}
+		}
+	}
+	why := "no power/ground net of the sim carries current"
+	if len(res.Nets) > 0 {
+		var ns []string
+		for _, n := range res.Nets {
+			ns = append(ns, n.Net+" "+n.Status)
+		}
+		why = "no net's IR drop could be solved (" + strings.Join(ns, ", ") + ")"
+	}
+	return "nothing simulated: " + why + " and no part or copper dissipates heat on the board — the post-layout check verified nothing (status unverified: check that sim power ran on this board's schematic and that its net names match the board)"
 }
 
 func modelNotes(o Options, st *Stackup) []string {

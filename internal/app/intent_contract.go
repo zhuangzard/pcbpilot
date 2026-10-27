@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/zhuangzard/pcbpilot/pkg/netname"
 	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
 	"github.com/zhuangzard/pcbpilot/pkg/safety"
 )
@@ -285,6 +286,117 @@ func validIntentName(name string) error {
 		return fmt.Errorf("name %q contains control or quote characters", name)
 	}
 	return nil
+}
+
+// onBoard is the intent with every net name resolved to the board's net
+// identity (pkg/netname): an intent derived from display names ("VCC_PIC",
+// "VPP/MCLR") names the hierarchical KiCad board's "/pic_sockets/VCC_PIC" /
+// "/VPP{slash}MCLR". Names already on the board and unknown names stay.
+// Never merged, never guessed: every net reference (nets, diff pairs, net
+// classes, domains, blocks) is resolved first, and distinct names reaching
+// one board net (aliases, or an alias next to the exact identity) or a
+// name fitting several board nets is an error before anything is
+// rewritten. The receiver is not changed; renamed lists "intent → board".
+func (in *designIntent) onBoard(boardNets []string) (*designIntent, []string, error) {
+	if in == nil {
+		return in, nil, nil
+	}
+	refs := map[string]bool{}
+	for name, n := range in.Nets {
+		refs[name] = true
+		if n != nil && n.DiffPair != "" {
+			refs[n.DiffPair] = true
+		}
+	}
+	for _, nc := range in.NetClasses {
+		for _, n := range nc.Nets {
+			refs[n] = true
+		}
+	}
+	for _, d := range in.Domains {
+		for _, n := range d.Nets {
+			refs[n] = true
+		}
+	}
+	for _, b := range in.Blocks {
+		for _, n := range b.Nets {
+			refs[n] = true
+		}
+	}
+	r := netname.NewResolver(boardNets)
+	var problems []string
+	dest := map[string][]string{} // board net → distinct intent names reaching it
+	for _, name := range sortedKeysOf(refs) {
+		switch id, m := r.Resolve(name); m {
+		case netname.Ambiguous:
+			problems = append(problems, fmt.Sprintf("%q could be board net %s", name, strings.Join(r.Candidates(name), " or ")))
+		case netname.Found:
+			dest[id] = append(dest[id], name)
+		}
+	}
+	to := map[string]string{}
+	for _, id := range sortedKeysOf(dest) {
+		if srcs := dest[id]; len(srcs) > 1 {
+			problems = append(problems, fmt.Sprintf("intent names %s all name board net %s", strings.Join(srcs, ", "), id))
+		} else if srcs[0] != id {
+			to[srcs[0]] = id
+		}
+	}
+	if len(problems) > 0 {
+		return nil, nil, fmt.Errorf("intent nets do not resolve to one board net each (pkg/netname; never merged or guessed): %s (fix: name each intent net by the board's full net name, e.g. re-derive the intent from kicad netlist output)", strings.Join(problems, "; "))
+	}
+	var renamed []string
+	for _, n := range sortedKeysOf(to) {
+		renamed = append(renamed, n+" → "+to[n])
+	}
+	if len(to) == 0 {
+		return in, nil, nil
+	}
+	conv := func(n string) string {
+		if id, ok := to[n]; ok {
+			return id
+		}
+		return n
+	}
+	list := func(ns []string) []string {
+		out := make([]string, len(ns))
+		for i, n := range ns {
+			out[i] = conv(n)
+		}
+		return out
+	}
+	cp := *in
+	cp.Nets = make(map[string]*intentNet, len(in.Nets))
+	for name, n := range in.Nets {
+		if n != nil && n.DiffPair != "" {
+			x := *n
+			x.DiffPair = conv(n.DiffPair)
+			n = &x
+		}
+		cp.Nets[conv(name)] = n
+	}
+	cp.NetClasses = append([]intentNetClass(nil), in.NetClasses...)
+	for i := range cp.NetClasses {
+		cp.NetClasses[i].Nets = list(cp.NetClasses[i].Nets)
+	}
+	cp.Blocks = append([]intentBlock(nil), in.Blocks...)
+	for i := range cp.Blocks {
+		cp.Blocks[i].Nets = list(cp.Blocks[i].Nets)
+	}
+	cp.Domains = append([]intentDomain(nil), in.Domains...)
+	for i := range cp.Domains {
+		cp.Domains[i].Nets = list(cp.Domains[i].Nets)
+	}
+	return &cp, renamed, nil
+}
+
+func sortedKeysOf[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // sortedNetNames returns intent net names in a stable order.

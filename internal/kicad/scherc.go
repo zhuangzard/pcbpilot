@@ -35,14 +35,22 @@ type ERCViolation struct {
 	Items       []ERCItem `json:"items"`
 }
 
-// ERCReport is kicad-cli's ERC of a hierarchy.
+// ERCReport is kicad-cli's ERC of a hierarchy. Item positions are sheet
+// millimetres: PosScale is the factor applied to what kicad-cli reported
+// (100 for KiCad <= 10.0.6, see ercPosScale), PosNote says why. PosScale 0:
+// the units could not be told, positions are as reported — not to place
+// anything by.
 type ERCReport struct {
-	Errors     int            `json:"errors"`
-	Warnings   int            `json:"warnings"`
-	Violations []ERCViolation `json:"violations"`
+	Errors       int            `json:"errors"`
+	Warnings     int            `json:"warnings"`
+	KicadVersion string         `json:"kicadVersion,omitempty"`
+	PosScale     float64        `json:"posScale"`
+	PosNote      string         `json:"posNote,omitempty"`
+	Violations   []ERCViolation `json:"violations"`
 }
 
 type ercJSON struct {
+	KicadVersion    string `json:"kicad_version"`
 	CoordinateUnits string `json:"coordinate_units"`
 	Sheets          []struct {
 		Path       string `json:"path"`
@@ -83,26 +91,60 @@ func RunERC(root string) (*ERCReport, error) {
 	if err != nil {
 		return nil, fmt.Errorf("kicad-cli wrote no ERC report: %s", strings.TrimSpace(buf.String()))
 	}
+	files, _ := SheetPaths(root)
+	return ParseERCReport(data, ERCParseOptions{
+		Files: files,
+		// a report without kicad_version (older kicad-cli) asks the binary
+		CLIVersion: func() string {
+			vc, vcancel := SchCLICommand(cli, "version")
+			defer vcancel()
+			b, _ := vc.Output()
+			return strings.TrimSpace(string(b))
+		},
+		Anchors: SheetAnchors,
+	})
+}
+
+// ERCParseOptions is what ParseERCReport needs besides the JSON.
+type ERCParseOptions struct {
+	Files      map[string]string      // uuid path → sheet file (SheetPaths)
+	CLIVersion func() string          // asked only when the report names no kicad_version
+	Anchors    func(file string) []Pt // a sheet's item points (SheetAnchors), for an unknown version
+}
+
+// ParseERCReport parses kicad-cli's ERC JSON. Item positions come out in mm
+// (PosScale 100 or 1), or as reported with PosScale 0 when the units cannot
+// be told (see ercPosScale).
+func ParseERCReport(data []byte, opt ERCParseOptions) (*ERCReport, error) {
 	var x ercJSON
 	if err := json.Unmarshal(data, &x); err != nil {
 		return nil, fmt.Errorf("parse ERC report: %w", err)
 	}
-	files, _ := SheetPaths(root)
-	var maxAbs float64
+	ver := strings.TrimSpace(x.KicadVersion)
+	if ver == "" && opt.CLIVersion != nil {
+		ver = opt.CLIVersion()
+	}
+	u := ercUnitMM(x.CoordinateUnits)
+	var pos []ercPos
 	for _, s := range x.Sheets {
 		for _, v := range s.Violations {
 			for _, it := range v.Items {
-				maxAbs = math.Max(maxAbs, math.Max(math.Abs(it.Pos.X), math.Abs(it.Pos.Y)))
+				pos = append(pos, ercPos{opt.Files[s.UUIDPath], Pt{it.Pos.X * u, it.Pos.Y * u}})
 			}
 		}
 	}
-	scale := ercPosScale(x.CoordinateUnits, maxAbs)
-	r := &ERCReport{}
+	scale, note := ercPosScale(ver, pos, opt.Anchors)
+	r := &ERCReport{KicadVersion: ver, PosScale: scale, PosNote: note}
+	k := scale
+	if k == 0 {
+		k = 1
+	}
 	for _, s := range x.Sheets {
 		for _, v := range s.Violations {
-			ev := ERCViolation{Sheet: s.Path, UUIDPath: s.UUIDPath, File: files[s.UUIDPath], Type: v.Type, Severity: v.Severity, Description: v.Description}
+			ev := ERCViolation{Sheet: s.Path, UUIDPath: s.UUIDPath, File: opt.Files[s.UUIDPath], Type: v.Type, Severity: v.Severity, Description: v.Description}
 			for _, it := range v.Items {
-				ev.Items = append(ev.Items, ERCItem{Description: it.Description, Pos: Pt{it.Pos.X * scale, it.Pos.Y * scale}, UUID: it.UUID})
+				at := Pt{round4mm(it.Pos.X * u * k), round4mm(it.Pos.Y * u * k)}
+				ev.Items = append(ev.Items, ERCItem{Description: it.Description, Pos: at, UUID: it.UUID})
 			}
 			switch v.Severity {
 			case "error":
@@ -116,24 +158,106 @@ func RunERC(root string) (*ERCReport, error) {
 	return r, nil
 }
 
-// ercPosScale converts ERC item positions to millimetres. kicad-cli's
-// schematic ERC JSON (KiCad 10.0.x) labels its coordinates "mm" but writes them
-// in units of 100 mm (schematic IU 100 nm through the PCB 1 nm scale): a pin at
-// (49.53, 64.77) mm is reported as (0.4953, 0.6477). Every schematic coordinate
-// lies on a sheet of at least A4 (297 mm), so a report whose largest coordinate
-// is below 12 (A0 = 1189 mm / 100) is the scaled form; true millimetre reports
-// (other versions, or a fixed kicad-cli) pass through unchanged.
-func ercPosScale(units string, maxAbs float64) float64 {
-	switch strings.ToLower(units) {
+// ercUnitMM is the factor from a report's "coordinate_units" to mm
+// (kicad-cli sch erc --units in|mils); "mm", none or unknown is 1. It is
+// applied before ercPosScale, which works in (possibly 1/100) mm.
+func ercUnitMM(units string) float64 {
+	switch strings.ToLower(strings.TrimSpace(units)) {
 	case "in", "inch", "inches":
 		return 25.4
 	case "mils", "mil":
 		return 0.0254
 	}
-	if maxAbs > 0 && maxAbs < 12 {
-		return 100
-	}
 	return 1
+}
+
+// ercPos is a reported item position and its sheet file.
+type ercPos struct {
+	File string
+	At   Pt
+}
+
+// kicad-cli up to 10.0.6 writes ERC item positions in 1/100 mm units while
+// the report says "coordinate_units": "mm" (KiCad issue #25582, fixed in
+// 10.0.7): a pin at (50.8, 54.61) is reported at (0.508, 0.5461).
+const ercBugScale = 100
+
+// ercAnchorTol is how close a scaled position must come to a sheet item:
+// a 10.0.6 position is rounded to 0.0001 of 1/100 mm (0.005 mm after ×100).
+const ercAnchorTol = 0.02
+
+var ercVerRe = regexp.MustCompile(`(\d+)\.(\d+)\.(\d+)`)
+
+// ercPosScale is the factor that turns a report's item positions into mm,
+// 0 when it cannot be told. The version decides when it is known: 10.0.0–
+// 10.0.6 are 100, 10.0.7+, later 10.x releases and 11+ are 1 — sheet
+// geometry is not consulted (an item off the page is legal and proves
+// nothing). An unknown or unparsable version (9.x, a 10.99 nightly, none)
+// is decided by geometry: the scale under which a strict majority (more
+// than half) of the positions land on a pin, symbol, wire end, label,
+// junction, no-connect or sheet pin of their sheet (ercAnchorTol), the
+// other scale on at most a third as many. Neither or both: 0 — consumers that place parts at reported
+// positions must refuse rather than guess.
+func ercPosScale(version string, pos []ercPos, anchors func(file string) []Pt) (float64, string) {
+	if m := ercVerRe.FindStringSubmatch(version); m != nil {
+		major, _ := strconv.Atoi(m[1])
+		minor, _ := strconv.Atoi(m[2])
+		patch, _ := strconv.Atoi(m[3])
+		if major == 10 && minor == 0 && patch <= 6 {
+			return ercBugScale, fmt.Sprintf("KiCad %s reports ERC positions 100× too small (#25582, fixed in 10.0.7): scaled ×100 to mm", version)
+		}
+		if (major == 10 && minor < 99) || major > 10 {
+			return 1, ""
+		}
+	}
+	if len(pos) == 0 {
+		return 1, ""
+	}
+	m1, m100 := ercAnchorHits(pos, anchors)
+	n := len(pos)
+	// a strict majority for one scale, the other at most a third of it
+	clear := func(a, b int) bool { return 2*a > n && 3*b <= a }
+	switch {
+	case clear(m100, m1):
+		return ercBugScale, fmt.Sprintf("KiCad version %q not known for ERC positions; %d of %d positions land on sheet items only when scaled ×100 (#25582): scaled ×100 to mm", version, m100, n)
+	case clear(m1, m100):
+		return 1, fmt.Sprintf("KiCad version %q not known for ERC positions; %d of %d land on sheet items as mm", version, m1, n)
+	}
+	return 0, fmt.Sprintf("KiCad version %q not known for ERC positions and the sheets do not tell mm from 1/100 mm (%d of %d positions on sheet items as mm, %d ×100): positions are as reported, units unknown", version, m1, n, m100)
+}
+
+// ercAnchorHits counts the positions that land on an item of their sheet
+// as reported and scaled ×100.
+func ercAnchorHits(pos []ercPos, anchors func(file string) []Pt) (m1, m100 int) {
+	if anchors == nil {
+		return 0, 0
+	}
+	cache := map[string][]Pt{}
+	near := func(pts []Pt, p Pt) bool {
+		for _, a := range pts {
+			if math.Abs(a.X-p.X) <= ercAnchorTol && math.Abs(a.Y-p.Y) <= ercAnchorTol {
+				return true
+			}
+		}
+		return false
+	}
+	for _, p := range pos {
+		if p.File == "" {
+			continue
+		}
+		pts, ok := cache[p.File]
+		if !ok {
+			pts = anchors(p.File)
+			cache[p.File] = pts
+		}
+		if near(pts, p.At) {
+			m1++
+		}
+		if near(pts, Pt{p.At.X * ercBugScale, p.At.Y * ercBugScale}) {
+			m100++
+		}
+	}
+	return m1, m100
 }
 
 // SheetPaths maps each sheet instance's uuid path ("/root", "/root/sheet")

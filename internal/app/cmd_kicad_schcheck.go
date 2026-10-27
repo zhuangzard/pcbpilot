@@ -9,6 +9,7 @@ package app
 import (
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -29,6 +30,8 @@ type kicadPwrFlagFix struct {
 	At   kicad.Pt `json:"at"`
 	Ref  string   `json:"ref,omitempty"`
 	Err  string   `json:"error,omitempty"`
+	Code string   `json:"code,omitempty"` // why no flag was placed
+	Fix  string   `json:"fix,omitempty"`
 }
 
 type kicadSchCheckReport struct {
@@ -177,15 +180,20 @@ func kicadSchCheckEG(root string, files []string, specPath string) (sbGate, erro
 	return sbEngineerGrade(dir, rel, d), nil
 }
 
-// kicadFixPwrFlags places one PWR_FLAG per undriven power net.
+// kicadFixPwrFlags places one PWR_FLAG per undriven power net, at the
+// exact pin ERC names (ercPinSnap); an item whose pin cannot be resolved
+// and checked against the report is skipped, never placed at a guess.
 func kicadFixPwrFlags(root string, erc *kicad.ERCReport) []kicadPwrFlagFix {
 	nets, _ := kicadBeforeNets(root)
 	type spot struct {
 		file string
 		at   kicad.Pt
+		code string // why the pin is not resolved (err)
+		err  error
 	}
 	byNet := map[string][]spot{}
 	var order []string
+	pins := ercPinSnap{}
 	for _, v := range erc.Violations {
 		if v.Type != "power_pin_not_driven" || v.File == "" {
 			continue
@@ -204,8 +212,19 @@ func kicadFixPwrFlags(root string, erc *kicad.ERCReport) []kicadPwrFlagFix {
 			if _, seen := byNet[net]; !seen {
 				order = append(order, net)
 			}
-			byNet[net] = append(byNet[net], spot{v.File, it.Pos})
+			at, code, err := pins.at(v.File, v.UUIDPath, it, ref, pin)
+			byNet[net] = append(byNet[net], spot{v.File, at, code, err})
 		}
+	}
+	if erc.PosScale == 0 {
+		// the report's units are unknown: its positions cannot be checked
+		// against the pins they name
+		var out []kicadPwrFlagFix
+		for _, net := range order {
+			out = append(out, kicadPwrFlagFix{Net: net, Code: "ERC_UNITS_UNKNOWN", Err: "cannot check: " + erc.PosNote,
+				Fix: "no PWR_FLAG placed; run with a released KiCad 10 kicad-cli (its version tells the units), or wire a PWR_FLAG to the net by hand"})
+		}
+		return out
 	}
 	floor := 1
 	if files, err := kicad.SheetFiles(root); err == nil {
@@ -220,8 +239,15 @@ func kicadFixPwrFlags(root string, erc *kicad.ERCReport) []kicadPwrFlagFix {
 		fix := kicadPwrFlagFix{Net: net}
 		var errs []string
 		done := false
+		code, tried := "", false
 		for _, s := range byNet[net] {
 			fix.File, fix.At = s.file, s.at
+			if s.err != nil {
+				errs = append(errs, s.err.Error())
+				code = s.code
+				continue
+			}
+			tried = true
 			ref, err := kicadPlacePwrFlag(s.file, s.at, floor, nets)
 			if err == nil {
 				fix.Ref, done = ref, true
@@ -233,6 +259,10 @@ func kicadFixPwrFlags(root string, erc *kicad.ERCReport) []kicadPwrFlagFix {
 		if !done {
 			sort.Strings(errs)
 			fix.Err = strings.Join(errs, "; ")
+			if !tried { // no pin of the net could be resolved: nothing was placed
+				fix.Code = code
+				fix.Fix = "no PWR_FLAG placed; wire a PWR_FLAG to this net by hand (or check that kicad-cli and the sheet files are of the same design)"
+			}
 		}
 		out = append(out, fix)
 	}
@@ -245,6 +275,37 @@ func kicadFixPwrFlags(root string, erc *kicad.ERCReport) []kicadPwrFlagFix {
 		}
 	}
 	return out
+}
+
+// ercPinSnap resolves an ERC pin item to the pin's exact sheet point
+// (kicad.ERCPinPoint: the pin uuid, else the reference of that sheet
+// instance — a repeated sheet's file stores one instance's reference in
+// its Reference field). The report's position is only good to 0.01 mm on
+// KiCad <= 10.0.6 (1/100 mm units, rounded), so a wire drawn there could
+// miss an off-grid pin. The pin must lie within 1.27 mm of the report's
+// position; farther off (a patched build, a mis-scaled report) the item is
+// refused.
+type ercPinSnap map[string]*kicad.SchEditor
+
+func (c ercPinSnap) at(file, sheetPath string, it kicad.ERCItem, ref, pin string) (kicad.Pt, string, error) {
+	e, ok := c[file]
+	if !ok {
+		e, _ = kicad.OpenSchematicFile(file)
+		c[file] = e
+	}
+	if e == nil {
+		return it.Pos, "ERC_PIN_UNRESOLVED", fmt.Errorf("%s pin %s: cannot read %s", ref, pin, file)
+	}
+	rep := it.Pos
+	p, err := e.ERCPinPoint(it.UUID, sheetPath, ref, pin, &rep)
+	if err != nil {
+		return it.Pos, "ERC_PIN_UNRESOLVED", fmt.Errorf("%s pin %s in %s: %v", ref, pin, file, err)
+	}
+	if d := math.Hypot(p.At.X-rep.X, p.At.Y-rep.Y); d > 1.27 {
+		return it.Pos, "ERC_POS_MISMATCH", fmt.Errorf("%s pin %s is at (%s, %s) in %s but ERC reports (%s, %s)", ref, pin,
+			kicad.F(p.At.X), kicad.F(p.At.Y), file, kicad.F(rep.X), kicad.F(rep.Y))
+	}
+	return p.At, "", nil
 }
 
 // kicadPlacePwrFlag tries stubs of 2.54/5.08/7.62 mm right, left, down, up

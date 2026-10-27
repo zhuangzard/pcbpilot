@@ -29,6 +29,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
 	"github.com/zhuangzard/pcbpilot/internal/pcb/specctra"
+	"github.com/zhuangzard/pcbpilot/pkg/netname"
 	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
 )
 
@@ -169,10 +170,10 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 	f.Float64Var(&o.fo.minTraceUm, "min-trace-um", 0, "fastroute --router.min_trace_width_um (default: max(board minimum track width, min(narrowest widthMil.min, narrowest class width)))")
 	f.Float64Var(&o.padNeckFloor, "pad-neck-floor-mil", 0, "let intent nets neck down at pads (off by default: every intent class is --no-neckdown-classes). Nets with widthMil.min <= max(this, narrowest min) leave that list and fastroute's neck floor becomes that value, so no neck goes below the net's own minimum; full width outside the pad zone is restored by widen-to-intent and enforced by the intent-widths gate (a failing run is not shipped). Also lets escape vias sit next to own-net SMD pads (fastroute allows it). PicoRick: 10")
 	f.Float64Var(&o.rules.ClearanceMil, "clearance-mil", 0, "board minimum clearance + Default netclass clearance (default for a board without .kicad_pro: intent copper.clearanceMil)")
-	f.Float64Var(&o.rules.TrackMil, "track-mil", 0, "Default netclass track width")
+	f.Float64Var(&o.rules.TrackMil, "track-mil", 0, "Default netclass track width; refused below the board minimum (--min-track-mil, else the project's)")
 	f.Float64Var(&o.rules.MinTrackMil, "min-track-mil", 0, "board minimum track width (default for a board without .kicad_pro: intent copper.minTrackMil)")
-	f.Float64Var(&o.rules.ViaDiaMil, "via-dia-mil", 0, "Default netclass via diameter (default without .kicad_pro: intent copper.viaDiaMil)")
-	f.Float64Var(&o.rules.ViaDrillMil, "via-drill-mil", 0, "Default netclass via drill (default without .kicad_pro: intent copper.viaDrillMil)")
+	f.Float64Var(&o.rules.ViaDiaMil, "via-dia-mil", 0, "Default netclass via diameter (default without .kicad_pro: intent copper.viaDiaMil); refused below the project's min via diameter / annular ring")
+	f.Float64Var(&o.rules.ViaDrillMil, "via-drill-mil", 0, "Default netclass via drill (default without .kicad_pro: intent copper.viaDrillMil); refused below the project's min through-hole")
 	f.Float64Var(&o.rules.EdgeMil, "edge-mil", 0, "copper-to-board-edge clearance (default without .kicad_pro: max(intent edge.outerMil, edge.innerMil))")
 	f.StringVar(&o.pours, "pours", "auto", "pours after the SES import: auto (only when the input has no copper zones) | on | off")
 	f.StringVar(&o.gndNet, "gnd-net", "GND", "ground pour net")
@@ -356,6 +357,18 @@ func (r *kicadRun) run() error {
 		r.summary["tracemakerBin"] = bin
 	}
 
+	// Explicit rule flags must not undercut the board's own minimums
+	// (checked here, before the design review and the input DRC).
+	if pro := strings.TrimSuffix(o.pcb, ".kicad_pcb") + ".kicad_pro"; o.ruleFlags {
+		if floors, err := readKicadRuleFloors(pro); err == nil {
+			if err := checkRuleFloors(o.rules, floors); err != nil {
+				return err
+			}
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("board rules: %w", err)
+		}
+	}
+
 	// Schematic netlist (pad-net diff, review evidence).
 	if o.sch != "" {
 		nl, err := kicad.ExportSchNetlist(o.sch)
@@ -432,6 +445,18 @@ func (r *kicadRun) run() error {
 	if inSnap, r.inRaw, err = r.snapshot(board); err != nil {
 		return err
 	}
+	// Intent nets named by their display name ("VCC_PIC") are the board's
+	// hierarchical nets ("/pic_sockets/VCC_PIC"): one identity for every
+	// rule below (netclasses, isolation, widths, gates).
+	in, renamed, err := r.in.onBoard(boardNetIDs(inSnap))
+	if err != nil {
+		return fmt.Errorf("pre-route gate: %w", err)
+	}
+	r.in = in
+	if len(renamed) > 0 {
+		r.summary["intentNetsOnBoard"] = renamed
+		fmt.Fprintf(r.stderr, "intent nets resolved to the board's net names: %s\n", strings.Join(renamed, ", "))
+	}
 	if rep, err := kt.DRC(board, filepath.Join(r.work, "input-drc.json")); err == nil {
 		r.inputDRC = map[string]bool{}
 		for _, v := range rep.Violations {
@@ -439,6 +464,10 @@ func (r *kicadRun) run() error {
 		}
 		r.summary["inputDrc"] = map[string]any{"total": rep.Total, "counts": rep.Counts}
 		fmt.Fprintf(r.stderr, "input board DRC (before routing): %d error(s) %v\n", rep.Total, rep.Counts)
+	} else {
+		// No baseline: every routed-board violation then counts as new.
+		r.summary["inputDrc"] = map[string]any{"error": err.Error()}
+		fmt.Fprintf(r.stderr, "input board DRC (before routing) could not be checked: %v\n", err)
 	}
 
 	r.lap("input DRC")
@@ -458,6 +487,9 @@ func (r *kicadRun) run() error {
 	}
 	if len(ncRes.MissingNets) > 0 {
 		fmt.Fprintf(r.stderr, "warning: %d intent net(s) not on the board (ignored): %s\n", len(ncRes.MissingNets), strings.Join(ncRes.MissingNets, ", "))
+	}
+	if len(ncRes.MissingDomainNets) > 0 {
+		fmt.Fprintf(r.stderr, "warning: %d insulation/edge domain net(s) not on the board (no rule covers them): %s\n", len(ncRes.MissingDomainNets), strings.Join(ncRes.MissingDomainNets, ", "))
 	}
 	for _, n := range ncRes.MissingNets {
 		delete(reqs, n)
@@ -1050,31 +1082,7 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 	// KiCad DRC (errors gate; warnings reported).
 	// One kicad-cli run (all severities): the errors gate and the reported
 	// warnings come from the same report.
-	drcPath := filepath.Join(o.outDir, "drc.json")
-	allPath := filepath.Join(o.outDir, "drc-all.json")
-	all, err := r.kt.DRCSeverity(routed, allPath, "all")
-	var drcRep *kicad.DRCReport
-	if err != nil {
-		r.add(gateResult{Gate: "kicad-drc", Detail: err.Error()})
-	} else {
-		rep, warn, nWarn := all.SplitErrors()
-		drcRep = rep
-		_ = writeJSONFile(drcPath, rep)
-		g := kicadDRCGate(rep, drcPath)
-		pre := map[string]int{}
-		for _, v := range rep.Violations {
-			if r.inputDRC[v.Rule+"|"+v.Message] {
-				pre[v.Rule]++
-			}
-		}
-		for k, n := range pre {
-			g.Info = append(g.Info, fmt.Sprintf("%s: %d of these already in the input board (placement / footprints, not routing)", k, n))
-		}
-		sort.Strings(g.Info)
-		r.add(g)
-		_ = writeJSONFile(filepath.Join(o.outDir, "drc-flat.json"), kicadDRCFlat(rep))
-		r.summary["drc"] = map[string]any{"file": drcPath, "allFile": allPath, "total": rep.Total, "counts": rep.Counts, "warnings": nWarn, "warningCounts": warn}
-	}
+	all, drcRep := r.routedDRCGate(routed)
 	snap, raw, err := r.snapshot(routed)
 	if err != nil {
 		return false, err
@@ -1398,6 +1406,51 @@ func (r *kicadRun) starvedThermals(board string) (string, error) {
 	return out, nil
 }
 
+// routedDRCGate runs kicad-cli DRC (all severities) on the routed board and
+// adds the kicad-drc gate: errors gate, warnings reported. It returns the
+// full report and its error part; a report that cannot be read adds a
+// failing "cannot check" gate and returns nils.
+func (r *kicadRun) routedDRCGate(routed string) (all, errs *kicad.DRCReport) {
+	drcPath := filepath.Join(r.o.outDir, "drc.json")
+	allPath := filepath.Join(r.o.outDir, "drc-all.json")
+	all, err := r.kt.DRCSeverity(routed, allPath, "all")
+	if err != nil {
+		// No counts: closureGates must not read a stale or absent report
+		// as "placement-only".
+		r.summary["drc"] = map[string]any{"file": allPath, "error": err.Error()}
+		r.add(kicadDRCCannotCheck(err))
+		return nil, nil
+	}
+	rep, warn, nWarn := all.SplitErrors()
+	_ = writeJSONFile(drcPath, rep)
+	g := kicadDRCGate(rep, drcPath)
+	// What the project tells DRC not to report is part of the gate: an
+	// excluded or ignored short / clearance / unconnected / parity check
+	// fails it unless a signed waiver matches.
+	pro := strings.TrimSuffix(routed, ".kicad_pcb") + ".kicad_pro"
+	if pol, err := kicad.ReadDRCPolicy(pro); err == nil {
+		silenced := applyDRCPolicy(&g, pol, all.Excluded())
+		r.summary["drcPolicy"] = map[string]any{"exclusions": pol.Exclusions, "ignored": pol.Ignored, "downgraded": pol.Downgraded, "silenced": silenced}
+	} else if !os.IsNotExist(err) {
+		g.Pass = false
+		g.Detail += "; cannot read the project's DRC exclusions / severities: " + err.Error()
+	}
+	pre := map[string]int{}
+	for _, v := range rep.Violations {
+		if r.inputDRC[v.Rule+"|"+v.Message] {
+			pre[v.Rule]++
+		}
+	}
+	for k, n := range pre {
+		g.Info = append(g.Info, fmt.Sprintf("%s: %d of these already in the input board (placement / footprints, not routing)", k, n))
+	}
+	sort.Strings(g.Info)
+	r.add(g)
+	_ = writeJSONFile(filepath.Join(r.o.outDir, "drc-flat.json"), kicadDRCFlat(rep))
+	r.summary["drc"] = map[string]any{"file": drcPath, "allFile": allPath, "total": rep.Total, "counts": rep.Counts, "warnings": nWarn, "warningCounts": warn}
+	return all, rep
+}
+
 // placementDRC are KiCad DRC rules that copper widening cannot cause or fix
 // (footprint placement and library data).
 var placementDRC = map[string]bool{"courtyards_overlap": true, "malformed_courtyard": true, "missing_courtyard": true,
@@ -1415,9 +1468,12 @@ func (r *kicadRun) closureGates() []gateResult {
 			continue
 		}
 		if g.Gate == "kicad-drc" && !g.Pass {
-			onlyPlacement := true
+			// Only a report that was read and names its rules can be
+			// placement-only; a DRC that could not be checked never is.
+			onlyPlacement := false
 			if c, ok := r.summary["drc"].(map[string]any); ok {
-				if counts, ok := c["counts"].(map[string]int); ok {
+				if counts, ok := c["counts"].(map[string]int); ok && len(counts) > 0 {
+					onlyPlacement = true
 					for rule := range counts {
 						onlyPlacement = onlyPlacement && placementDRC[rule]
 					}
@@ -1433,6 +1489,20 @@ func (r *kicadRun) closureGates() []gateResult {
 }
 
 // boardPinNets maps "REF.PIN" → net of every board pad that has a net.
+// boardNetIDs lists the board's net names (its net identities, pkg/netname).
+func boardNetIDs(snap *boardSnapshot) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, n := range boardPinNets(snap) {
+		if !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 func boardPinNets(snap *boardSnapshot) map[string]string {
 	out := map[string]string{}
 	for _, c := range snap.Components {
@@ -1508,6 +1578,37 @@ func (s *syncWriter) Write(p []byte) (int, error) {
 	return s.w.Write(p)
 }
 
+// kicadPlannerKeys is one unique planner part key per component (same
+// order): the designator when it is unique, else "<designator>@kiid:<id>"
+// ("#<index>" without an id), allocated against every designator on the
+// board and every key already handed out (a real footprint may be named
+// "H1@kiid:abc"), so pads and courtyards of different footprints never
+// merge.
+func kicadPlannerKeys(comps []boardComp) []string {
+	count, taken := map[string]int{}, map[string]bool{}
+	for _, c := range comps {
+		count[c.Designator]++
+		taken[c.Designator] = true
+	}
+	keys := make([]string, len(comps))
+	for i, c := range comps {
+		if count[c.Designator] == 1 {
+			keys[i] = c.Designator
+			continue
+		}
+		base := c.Designator + kicadKeptSep + c.ID
+		if c.ID == "" {
+			base = fmt.Sprintf("%s%s#%d", c.Designator, kicadKeptSep, i)
+		}
+		k := base
+		for n := 2; taken[k]; n++ {
+			k = fmt.Sprintf("%s~%d", base, n)
+		}
+		taken[k], keys[i] = true, k
+	}
+	return keys
+}
+
 // kicadEscapeEnv is the escape planner's view of a KiCad snapshot: pads,
 // courtyards, per-net clearances (board netclasses and the intent), and the
 // copper already on the board.
@@ -1519,13 +1620,15 @@ func kicadEscapeEnv(s *boardSnapshot, raw []byte, reqs map[string]specctra.NetRe
 		up := func(mil float64) float64 { return math.Ceil(mil*25.4-1e-6) / 25.4 }
 		env.viaDia, env.viaDrill = up(s.Rules.ViaDiameterMil), up(s.Rules.ViaDrillMil)
 	}
-	for _, c := range s.Components {
+	keys := kicadPlannerKeys(s.Components)
+	for i, c := range s.Components {
 		for _, p := range c.Pads {
-			env.pads = append(env.pads, pcbPadP{ID: p.ID, Designator: c.Designator, Number: p.Number, Net: p.Net, Layer: p.Layer, X: p.X, Y: p.Y, W: p.W, H: p.H})
+			env.pads = append(env.pads, pcbPadP{ID: p.ID, Designator: keys[i], Number: p.Number, Net: p.Net, Layer: p.Layer, X: p.X, Y: p.Y, W: p.W, H: p.H})
 		}
 	}
 	var extra struct {
 		Components []struct {
+			ID         string      `json:"primitiveId"`
 			Designator string      `json:"designator"`
 			Courtyard  *layoutBBox `json:"courtyard"`
 		} `json:"components"`
@@ -1536,9 +1639,9 @@ func kicadEscapeEnv(s *boardSnapshot, raw []byte, reqs map[string]specctra.NetRe
 		NetClassOf map[string]string `json:"netClassOf"`
 	}
 	_ = json.Unmarshal(raw, &extra)
-	for _, c := range extra.Components {
-		if c.Courtyard != nil {
-			env.court[c.Designator] = *c.Courtyard
+	for i, c := range extra.Components { // the same array as s.Components
+		if c.Courtyard != nil && i < len(keys) {
+			env.court[keys[i]] = *c.Courtyard
 		}
 	}
 	clrOf := map[string]float64{}
@@ -1663,10 +1766,13 @@ func (r *kicadRun) clipPoursToIso(board string, ps []kicad.Pour) ([]kicad.Pour, 
 	if err != nil || len(in.Pairs) == 0 {
 		return ps, nil
 	}
-	_, raw, err := r.snapshot(board)
+	snap, raw, err := r.snapshot(board)
 	if err != nil {
 		return ps, err
 	}
+	// the same board net identities as r.in (onBoard): an intent domain
+	// naming "VCC_PIC" must clip the pour of "/pic_sockets/VCC_PIC"
+	in = pcbautoIntentOnBoard(in, boardNetIDs(snap))
 	planes := make([]pcbauto.PlaneRegion, len(ps))
 	for i, p := range ps {
 		planes[i] = pcbauto.PlaneRegion{Net: p.Net, Layer: p.Layer}
@@ -1697,4 +1803,58 @@ func (r *kicadRun) clipPoursToIso(board string, ps []kicad.Pour) ([]kicad.Pour, 
 	}
 	r.summary["pourClip"] = notes
 	return out, nil
+}
+
+// pcbautoIntentOnBoard is in with every domain (nets, reference ground),
+// net, diff-pair, floats-on and net-class net name resolved to the board's net identity
+// (pkg/netname), as designIntent.onBoard does for r.in (which has already
+// refused ambiguous or merging names). Unknown names stay; in is not
+// changed.
+func pcbautoIntentOnBoard(in *pcbauto.Intent, boardNets []string) *pcbauto.Intent {
+	if in == nil {
+		return in
+	}
+	res := netname.NewResolver(boardNets)
+	conv := func(n string) string {
+		if id, m := res.Resolve(n); m == netname.Found {
+			return id
+		}
+		return n
+	}
+	list := func(ns []string) []string {
+		out := make([]string, len(ns))
+		for i, n := range ns {
+			out[i] = conv(n)
+		}
+		return out
+	}
+	cp := *in
+	cp.Domains = append([]pcbauto.IntentDomain(nil), in.Domains...)
+	for i := range cp.Domains {
+		cp.Domains[i].Nets = list(cp.Domains[i].Nets)
+		if cp.Domains[i].Reference != "" {
+			cp.Domains[i].Reference = conv(cp.Domains[i].Reference)
+		}
+	}
+	cp.NetClasses = append([]pcbauto.IntentNetClass(nil), in.NetClasses...)
+	for i := range cp.NetClasses {
+		cp.NetClasses[i].Nets = list(cp.NetClasses[i].Nets)
+	}
+	if in.Nets != nil {
+		cp.Nets = make(map[string]*pcbauto.IntentNet, len(in.Nets))
+		for name, n := range in.Nets {
+			if n != nil {
+				x := *n
+				if x.DiffPair != "" {
+					x.DiffPair = conv(x.DiffPair)
+				}
+				if x.FloatsOn != "" {
+					x.FloatsOn = conv(x.FloatsOn)
+				}
+				n = &x
+			}
+			cp.Nets[conv(name)] = n
+		}
+	}
+	return &cp
 }

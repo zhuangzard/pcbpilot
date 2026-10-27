@@ -109,6 +109,9 @@ type sbPart struct {
 	// BBox is informational (sch-read output: minX,minY,maxX,maxY mm on
 	// its sheet); the build ignores it.
 	BBox []float64 `json:"bboxMm,omitempty"`
+	// Units places only these units of a multi-unit symbol (sch-read
+	// writes it for a partly placed component); empty = every unit.
+	Units []int `json:"units,omitempty"`
 }
 
 type sbPin struct {
@@ -671,10 +674,8 @@ func resolveSymbols(parts []*sbRPart, opts sbResolveOpts, libDirs []string) (st 
 				diags = append(diags, sbDiag{Code: "SYMBOL_NOT_FOUND", Message: fmt.Sprintf("%s: %v", p.Ref, err), Fix: "check Lib:Name, add libDirs, or give lcsc/pins"})
 				continue
 			}
-			if parent := kicad.SymbolExtends(t); parent != "" {
-				diags = append(diags, sbDiag{Code: "SYMBOL_DERIVED", Message: fmt.Sprintf("%s: symbol %s extends %s (derived symbols are not supported; use the parent, an LCSC number or a pin list)", p.Ref, p.Symbol, parent), Fix: "use the parent symbol, an LCSC number or a pin list"})
-				continue
-			}
+			// t is flattened: a derived symbol (LM358 extends LM2904) carries
+			// its parent's units and pins under its own name.
 			lib, name, _ := strings.Cut(p.Symbol, ":")
 			if strings.HasSuffix(lib, ".kicad_sym") {
 				lib = strings.TrimSuffix(filepath.Base(lib), ".kicad_sym")
@@ -709,7 +710,13 @@ func resolveSymbols(parts []*sbRPart, opts sbResolveOpts, libDirs []string) (st 
 			p.SymName, p.LibName, p.LibID, text = cp.SymbolName, "lcsc", "lcsc:"+cp.SymbolName, t
 			if p.Footprint == "" {
 				p.Footprint = "lcsc:" + cp.FootprintName
-				p.FPFile = cp.FootprintFile()
+			}
+			// the footprint file travels with the project: also for a spec that
+			// already names it (the stored spec of sch-edit, sch-read output) —
+			// without the file the rebuilt project lost fp-lib-table and
+			// lcsc.pretty (v0.10.1)
+			if fl, ff, ok := strings.Cut(p.Footprint, ":"); ok && fl == "lcsc" && p.FPFile == "" {
+				p.FPFile = sbLCSCFootprintFile(ff, cp, cached, opts.OutDir)
 			}
 			if cp.FromCache {
 				src = "lcsc-cache"
@@ -752,7 +759,24 @@ func resolveSymbols(parts []*sbRPart, opts sbResolveOpts, libDirs []string) (st 
 			}
 		}
 		p.Multi = len(units) > 1
+		// an explicit units list places only those units (a partly placed
+		// component read back by sch-read); default: every unit
+		want := map[int]bool{}
+		badUnit := false
+		for _, u := range p.Units {
+			if !units[u] && !(u == 1 && len(units) <= 1) {
+				diags = append(diags, sbDiag{Code: "UNIT_NOT_ON_SYMBOL", Message: fmt.Sprintf("%s: unit %d is not a unit of %s (units with pins: %v)", p.Ref, u, p.LibID, sbSortedUnits(units)), Fix: "fix the part's units list or drop it (every unit)"})
+				badUnit = true
+			}
+			want[u] = true
+		}
+		if badUnit {
+			continue
+		}
 		for _, q := range pins {
+			if len(want) > 0 && q.Unit > 0 && !want[q.Unit] {
+				continue
+			}
 			if q.Unit == 0 || q.Unit == 1 || p.Multi {
 				p.LPins = append(p.LPins, q)
 			}
@@ -1059,7 +1083,9 @@ func buildDesign(s *sbSpec, opts sbResolveOpts) (*sbDesign, sbResolveStats, erro
 		return nil, st, fmt.Errorf("unusedPins %q: want nc or open", s.UnusedPins)
 	}
 	for _, p := range d.Parts {
-		if p.Multi {
+		if p.Multi && len(p.Units) > 0 {
+			d.Warnings = append(d.Warnings, fmt.Sprintf("%s: multi-unit symbol — units %v placed as the spec lists (grid layout)", p.Ref, sbUnits(p)))
+		} else if p.Multi {
 			d.Warnings = append(d.Warnings, fmt.Sprintf("%s: multi-unit symbol — every unit is placed (grid layout)", p.Ref))
 		}
 	}
@@ -1136,6 +1162,7 @@ type sbOptions struct {
 	Requirements                   []string
 	Reviewers, Waivers             string
 	NoReview, Render               bool
+	DiscardExternal                bool
 	ReviewTimeout                  time.Duration
 }
 
@@ -1158,6 +1185,7 @@ func sbFlags(c *cobra.Command, o *sbOptions) {
 	f.BoolVar(&o.NoReview, "no-review", false, "skip the design review despite --requirements; needs a signed waiver {\"gate\":\"design-review\",\"match\":\"--no-review\"} in --waivers")
 	f.StringVar(&o.Waivers, "waivers", "", "JSON list of signed waivers [{gate,match,reason,by}]")
 	f.DurationVar(&o.ReviewTimeout, "review-timeout", 20*time.Minute, "per-reviewer time limit")
+	f.BoolVar(&o.DiscardExternal, "discard-external-edits", false, "overwrite edits made in --out outside pcbpilot since its last build (refused by default: EXTERNAL_EDIT); the current files are checkpointed first")
 	f.BoolVar(&o.Render, "render", false, "also export one SVG per sheet to <out>/render (kicad-cli sch export svg)")
 }
 
@@ -1190,7 +1218,9 @@ IR 1.4, pcbpilot sch connectivity) in KiCad: parts by LCSC number (else generate
 the pin list), nets, no-connects, modules → zones.
 
 Every build saves a checkpoint (<out>/.pcbpilot/checkpoints/N); change the design later
-with kicad sch-edit, read it compactly with kicad sch-read.`,
+with kicad sch-edit, read it compactly with kicad sch-read. A rebuild into an existing --out
+whose files were edited outside pcbpilot is refused (EXTERNAL_EDIT) unless
+--discard-external-edits is given.`,
 		Example: `  pcbpilot kicad sch-build --spec design.json --out build/
   pcbpilot kicad sch-build --spec design.json --out build/ --dry-run
   pcbpilot kicad sch-build --from-connectivity p1.json --from-connectivity p2.json --out gas/ --name gas`,
@@ -1258,7 +1288,11 @@ func finishSbRun(res *sbReport, err error, reportPath string, stdout, stderr io.
 				bad = append(bad, g.Name)
 			}
 		}
-		fmt.Fprintf(stderr, "sch-build: gate(s) failed: %s\n", strings.Join(bad, ", "))
+		if len(bad) == 0 && res.Error != nil { // refused before any gate ran
+			fmt.Fprintf(stderr, "sch-build: %s: %s\n", res.Error.Code, res.Error.Message)
+		} else {
+			fmt.Fprintf(stderr, "sch-build: gate(s) failed: %s\n", strings.Join(bad, ", "))
+		}
 		return errActionFailed
 	}
 	return nil
@@ -1398,3 +1432,37 @@ func (t *sbTimer) mark(stage string) {
 }
 
 func (t *sbTimer) total() float64 { return float64(time.Since(t.start).Microseconds()) / 1000 }
+
+func sbSortedUnits(units map[int]bool) []int {
+	out := make([]int, 0, len(units))
+	for u := range units {
+		out = append(out, u)
+	}
+	sort.Ints(out)
+	return out
+}
+
+// sbLCSCFootprintFile finds the .kicad_mod of footprint lcsc:name: the
+// part's own cached conversion, another cached part's (a shared package),
+// or the project's lcsc.pretty from an earlier build. "" when none has it.
+func sbLCSCFootprintFile(name string, cp *kicad.CachedPart, cached map[string]*kicad.CachedPart, out string) string {
+	if cp != nil && cp.FootprintName == name && fileExists(cp.FootprintFile()) {
+		return cp.FootprintFile()
+	}
+	keys := make([]string, 0, len(cached))
+	for k := range cached {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if c := cached[k]; c != nil && c.FootprintName == name && fileExists(c.FootprintFile()) {
+			return c.FootprintFile()
+		}
+	}
+	if out != "" && sbSafeName(name) {
+		if f := filepath.Join(out, "lcsc.pretty", name+".kicad_mod"); fileExists(f) {
+			return f
+		}
+	}
+	return ""
+}

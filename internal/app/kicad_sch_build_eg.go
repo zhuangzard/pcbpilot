@@ -224,7 +224,7 @@ func sbEGPageOf(f, raw string, d *sbDesign, specNames map[string]bool) (sbEGPage
 		}
 	}
 	// EG-06: decoupling caps near the supply pin of an IC
-	pinAt := map[string]kicad.Pt{}
+	pinAt := map[string][]kicad.Pt{} // a pin common to every unit is drawn on each
 	boxes := map[string]kicad.Box{}
 	for _, s := range sc.Symbols {
 		if s.Power {
@@ -232,7 +232,7 @@ func sbEGPageOf(f, raw string, d *sbDesign, specNames map[string]bool) (sbEGPage
 		}
 		boxes[s.Ref] = s.Box
 		for _, q := range s.Pins {
-			pinAt[sbPinKey(s.Ref, q.Number)] = q.At
+			pinAt[sbPinKey(s.Ref, q.Number)] = append(pinAt[sbPinKey(s.Ref, q.Number)], q.At)
 		}
 	}
 	for ref, b := range boxes {
@@ -257,11 +257,13 @@ func sbEGPageOf(f, raw string, d *sbDesign, specNames map[string]bool) (sbEGPage
 		for _, k := range d.netPins(rail) {
 			r, _, _ := strings.Cut(k, ".")
 			ic := d.ByRef[r]
-			at, ok := pinAt[k]
+			ats, ok := pinAt[k]
 			if ic == nil || !ok || len(ic.LPins) < 3 || ic.ZoneID != p.ZoneID {
 				continue
 			}
-			best = math.Min(best, sbBoxPointDist(b, at))
+			for _, at := range ats {
+				best = math.Min(best, sbBoxPointDist(b, at))
+			}
 		}
 		if math.IsInf(best, 1) {
 			continue // no IC on this sheet/zone uses the rail
@@ -273,7 +275,11 @@ func sbEGPageOf(f, raw string, d *sbDesign, specNames map[string]bool) (sbEGPage
 	}
 	sort.Strings(pg.Decoupling)
 	// soft: signal flow (typed drivers left of receivers), fill ratio
-	pg.Flow = sbFlow(d, pinAt)
+	firstAt := map[string]kicad.Pt{}
+	for k, ats := range pinAt {
+		firstAt[k] = ats[0]
+	}
+	pg.Flow = sbFlow(d, firstAt)
 	if cb, ok := sbContent(sc); ok && sc.TitleBlock != nil {
 		pw, ph := sc.TitleBlock.MaxX+10, sc.TitleBlock.MaxY+10
 		area := (pw - 20) * (ph - 20)

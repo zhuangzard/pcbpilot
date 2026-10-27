@@ -1,5 +1,85 @@
 # Changelog
 
+## [0.10.2] — 2026-10-27
+
+**CLI, daemon, Skill and MCP move to 0.10.2. The connector runtime is UNCHANGED (only its version number moves); import the
+0.10.2 `pcbpilot-connector.eext` so the versions match — the daemon pauses design actions until they do.**
+
+Summary: KiCad correctness and data safety. Fixes a v0.10.1 bug where `kicad sch-edit` silently dropped the project's LCSC
+footprints, stops `sch-edit` / in-place `sch-build` from overwriting edits made in the KiCad GUI, makes routed boards respect the
+board's own design-rule minimums, and closes several cases where a check could report "clean" without having checked. Every
+change was reviewed by Codex and Kimi K3.1 Pro until neither reported a blocker. Full `go test -short ./...` on Windows: no new
+failures versus v0.10.1.
+
+**Fixes to v0.10.1 behaviour**
+- `kicad sch-edit` (and `sch-build` from `sch-read` output) no longer deletes `fp-lib-table` and empties `lcsc.pretty/`. The ERC
+  gate now fails when the project's own libraries do not resolve instead of reporting `ok:true`.
+- `kicad sch-check --fix-pwr-flag` places PWR_FLAGs on the right pin with KiCad ≤ 10.0.6, whose ERC JSON reports positions 100×
+  too small while labelled mm (KiCad #25582). Units come from the report's KiCad version, or from matching positions against the
+  sheet; when they cannot be determined no flag is placed (`ERC_UNITS_UNKNOWN`). Flags snap to the resolved pin
+  (`ERC_PIN_UNRESOLVED` / `ERC_POS_MISMATCH` otherwise). ERC reports record `kicadVersion`, `posScale`, `posNote`.
+
+**`kicad sch-edit` / `kicad sch-build` (schematics)**
+- **GUI edits are protected.** Each build records sha256 of what it wrote. Changed, added or removed sheets, project or library
+  files refuse with `EXTERNAL_EDIT` (fix: import with `sch-read`, or rebuild into a new `--out`); `--discard-external-edits`
+  overwrites after a checkpoint. A KiCad lock (`~*.lck`) refuses with `KICAD_OPEN`. Every file and lock is re-checked right
+  before writing, files are installed with a no-replace move, and a save made while pcbpilot writes is kept and the run aborts
+  (`CONCURRENT_CHANGE`). Read errors refuse (`PROJECT_UNREADABLE`); a filesystem without hard links refuses
+  (`NO_ATOMIC_REPLACE`). pcbpilot's own reports (`erc.json`, `connectivity.json`, `intent.*`, `render/*.svg`) are checkpointed
+  and regenerated with a warning. Projects built before 0.10.2 are compared with their checkpoints.
+- **Multi-unit and derived symbols.** Derived library symbols (`extends`, e.g. `Amplifier_Operational:LM358`, `74xx:74HC00`) are
+  flattened the way KiCad embeds them and work in `sch-build` and `sch place --backend kicad`. `parts[].units` places a subset;
+  `sch-read` reports partly placed units. `sch place --unit N`, `modify --id REF:UNIT`, `prim-delete --ids REF[:UNIT]`; fields
+  and renames apply to every unit and must agree. Every placed copy of a pin shared by all units is wired. Decoupling caps of
+  multi-unit ICs sit beside the power unit (EG-06). De Morgan pins are no longer counted twice. Hierarchy checks follow the
+  project's sheet tree and refuse renames / deletes that would split a component or edit a reused sheet; references shared by
+  several symbols (unannotated) are refused until annotated.
+- **One KiCad S-expression tokenizer** following KiCad 10's rules: unterminated strings, unbalanced `)` and runaway nesting are
+  errors instead of panics; escapes and UTF-8 decode identically everywhere; overlapping edits are rejected. Fuzz targets and a
+  byte-identical round trip over KiCad's 162 demo files (and a committed fixture corpus) guard it. DSN rewrites no longer double
+  backslashes and refuse names DSN cannot quote.
+
+**KiCad net identity**
+- `kicad netlist`, `kicad snapshot`, `signoff` (continuity/trace), `sim post-layout`, `kicad route` and `pad-net-diff.py` now
+  match nets by KiCad's full hierarchical name as on the board (`/Sheet/NAME`, `{slash}` for `/` in a label). `kicad netlist`
+  adds `fullName`; `name` is a display name and no longer cuts labels containing `/`. Undecidable names fail with
+  `ErrNetAmbiguous`; distinct nets landing on one board net are reported as a short, never merged. KiCad names are
+  case-sensitive. Removes false mismatches on hierarchical designs (pic_programmer demo: 117 → 0).
+- `sim post-layout` reports `unverified` instead of PASS when nothing was simulated; `signoff-ir` fails on it.
+- `kicad netlist` writes `"pins": []` for pinless parts (pad-net-diff no longer crashes).
+
+**`kicad route`**
+- Every net's track width, clearance and via are floored at the board's own minimums (min hole, via diameter, annular ring,
+  track, clearance), in integer nm; generated netclasses outrank project classes and are re-checked after writing. Explicit
+  `--via-*` / `--track-mil` below the minimums are refused (`RULE_BELOW_BOARD_MINIMUM`). (interf_u demo: 32 via-size DRC errors →
+  0.)
+- The `kicad-drc` gate reads the project's DRC exclusions and severities: excluding, ignoring or downgrading an electrical or
+  fabrication rule (shorts, clearances, unconnected, parity, copper/drill sizes, thermals, zones, solder-mask bridges, outline,
+  disallow rules, unknown rules) fails unless a signed waiver matches; other silenced error-level rules are listed as a
+  WARNING.
+- fastroute / tracemaker: an install directory resolves to the one executable inside (absolute path, `.exe`/`.com` only on
+  Windows, case-insensitive); ambiguous or broken installs fail at setup instead of after the input DRC.
+
+**`kicad fab` and DRC**
+- Outputs are generated in a staging folder; the Gerber zip holds only this run's files (stale inner layers no longer shipped).
+  Publishing is transactional, refuses files pcbpilot did not write (`.pcbpilot-fab-manifest.json`), refuses linked output
+  folders and locks OUT against concurrent runs.
+- A BOM/CPL designator mismatch (missing either way, duplicate, empty) is a hard failure; parts not assembled are left out of the
+  CPL and listed in `cplOmitted`.
+- The kicad-cli DRC reader is strict: empty, truncated or malformed reports, missing sections, invalid entries, a stale report
+  or a non-zero exit are "cannot check", never clean.
+
+**KiCad PCB bridge and `kicad place`**
+- `edit`, `pours` and `netclasses` validate every net, layer, id and numeric field before changing anything; unknown nets,
+  missing ids, non-integer layers or malformed fields reject the whole request and nothing is saved (before, copper could land
+  on no net and a partly applied board was saved).
+- Footprints sharing a designator (several `REF**`, duplicated `H1`) stay separate (`uuid`, `duplicateDesignators`,
+  `placeholderDesignators`); `kicad place` keeps them fixed; pose files name footprints by typed `ref` / `uuid` records;
+  tracks sharing a uuid are refused for edits.
+
+**Skill**
+- The KiCad references (`kicad.md`, `kicad-sch-build.md`, `kicad-jlc.md`) describe all of the above ("v0.10.2 起").
+
 ## [0.10.1] — 2026-10-26
 
 **CLI, daemon, Skill and MCP move to 0.10.1. The connector runtime is UNCHANGED (only its version number moves); import the
