@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -73,7 +74,7 @@ func tinyKicadSnapshot() []byte {
 }
 
 func TestKicadBoardCourtyardAndMountingHoles(t *testing.T) {
-	b, fixed, err := kicadBoard(tinyKicadSnapshot())
+	b, fixed, _, err := kicadBoard(tinyKicadSnapshot())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,12 +92,12 @@ func TestKicadBoardCourtyardAndMountingHoles(t *testing.T) {
 }
 
 func TestPosesFromBoardFlipsYKeepsAngleAndSide(t *testing.T) {
-	b, _, err := kicadBoard(tinyKicadSnapshot())
+	b, _, kept, err := kicadBoard(tinyKicadSnapshot())
 	if err != nil {
 		t.Fatal(err)
 	}
 	b.Part("R3").MoveTo(pcbauto.Point{X: 700, Y: -900}, 270)
-	p := posesFromBoard(b)
+	p := posesFromBoard(b, kept)
 	if got := p["R3"]; got != (kicad.Pose{XMil: 700, YMil: 900, RotationDeg: 270, Side: "bottom"}) {
 		t.Fatalf("R3 pose %+v", got)
 	}
@@ -203,5 +204,198 @@ func TestKicadLabelSpecUsesGlyphHeight(t *testing.T) {
 	ls := kicadLabelSpec(raw)
 	if ls == nil || math.Abs(ls.Height-39.4*1.15) > 0.01 || math.Abs(ls.CharW-40) > 0.01 {
 		t.Fatalf("label spec %+v, want height 45.3 (text + 15%% stroke), 40 mil per character", ls)
+	}
+}
+
+// tinyKicadSnapshotShared is tinyKicadSnapshot plus a second footprint
+// "H1" and two "REF**" logos: designators the placer cannot pose by name.
+func tinyKicadSnapshotShared(t *testing.T) []byte {
+	t.Helper()
+	var snap map[string]any
+	if err := json.Unmarshal(tinyKicadSnapshot(), &snap); err != nil {
+		t.Fatal(err)
+	}
+	comps := snap["components"].([]any)
+	extra := func(id, ref string, x, y float64) map[string]any {
+		box := map[string]any{"minX": x - 70, "minY": y - 70, "maxX": x + 70, "maxY": y + 70}
+		return map[string]any{"primitiveId": id, "designator": ref, "footprint": "MountingHole:MountingHole_3.2mm_M3",
+			"layer": 1, "x": x, "y": y, "bbox": box, "courtyard": box}
+	}
+	comps = append(comps, extra("id-H1-b", "H1", 150, -150), extra("id-logo-a", "REF**", 1850, -1450), extra("id-logo-b", "REF**", 150, -1450))
+	snap["components"] = comps
+	snap["footprintHoles"] = []any{
+		map[string]any{"owner": "H1", "componentId": "id-H1", "sourceId": "pad1", "shape": "circle", "x": 1850, "y": -150, "dia": 126},
+		map[string]any{"owner": "H1", "componentId": "id-H1-b", "sourceId": "pad1", "shape": "circle", "x": 150, "y": -150, "dia": 126},
+	}
+	raw, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+func TestKicadBoardKeepsSharedDesignatorsApart(t *testing.T) {
+	b, fixed, kept, err := kicadBoard(tinyKicadSnapshotShared(t))
+	if err != nil {
+		t.Fatalf("kicadBoard on shared designators: %v", err)
+	}
+	for _, want := range []string{"H1@kiid:id-H1", "H1@kiid:id-H1-b", "REF**@kiid:id-logo-a", "REF**@kiid:id-logo-b"} {
+		p := b.Part(want)
+		if p == nil || !p.Fixed {
+			t.Fatalf("%s: part %v, want a fixed model part (fixed list %v)", want, p, fixed)
+		}
+		if !slices.Contains(fixed, want) {
+			t.Fatalf("%s missing from fixed %v", want, fixed)
+		}
+	}
+	if b.Part("H1") != nil || b.Part("REF**") != nil {
+		t.Fatal("a shared designator must not name a model part")
+	}
+	// Each hole follows its own footprint.
+	for _, h := range b.Holes {
+		if h.Owner != "H1@kiid:id-H1" && h.Owner != "H1@kiid:id-H1-b" {
+			t.Fatalf("hole %s owned by %q", h.Name, h.Owner)
+		}
+	}
+	poses := posesFromBoard(b, kept)
+	for k := range poses {
+		if strings.Contains(k, kicadKeptSep) || k == "H1" || k == "REF**" {
+			t.Fatalf("pose for kept part %s", k)
+		}
+	}
+	if _, ok := poses["U1"]; !ok {
+		t.Fatal("U1 lost its pose")
+	}
+	notes := kicadKeptNotes(kept)
+	if len(notes) != 2 || !strings.Contains(notes[0], `"H1" is on 2 footprints`) || !strings.Contains(notes[1], `placeholder designator "REF**"`) {
+		t.Fatalf("notes %q", notes)
+	}
+}
+
+func TestRunKicadPlaceSkipsSharedDesignators(t *testing.T) {
+	dir := t.TempDir()
+	pcb := filepath.Join(dir, "in.kicad_pcb")
+	var poses map[string]kicad.Pose
+	deps := kicadPlaceDeps{
+		snapshot: func(string) ([]byte, error) { return tinyKicadSnapshotShared(t), nil },
+		place: func(_ string, p map[string]kicad.Pose, _ string) (*kicad.PlaceResult, error) {
+			poses = p
+			return &kicad.PlaceResult{Moved: len(p)}, nil
+		},
+	}
+	rep, err := runKicadPlace(kicadPlaceOpts{pcb: pcb, out: filepath.Join(dir, "out", "b.kicad_pcb"), placeSeeds: 1, candidates: 1, seed: 1}, deps, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := poses["H1"]; ok || len(poses) != 7 {
+		t.Fatalf("poses %v, want the 7 uniquely named parts only", kicadPlaceKeys(poses))
+	}
+	if !slices.ContainsFunc(rep.Notes, func(n string) bool { return strings.Contains(n, `"H1" is on 2 footprints`) }) {
+		t.Fatalf("report notes %q lack the shared H1", rep.Notes)
+	}
+}
+
+// Empty designators are placeholders too: one or several, each becomes a
+// unique fixed model part and gets no pose.
+func TestKicadBoardKeepsEmptyDesignators(t *testing.T) {
+	for _, n := range []int{1, 3} {
+		var snap map[string]any
+		if err := json.Unmarshal(tinyKicadSnapshot(), &snap); err != nil {
+			t.Fatal(err)
+		}
+		comps := snap["components"].([]any)
+		for i := 0; i < n; i++ {
+			x := 300 + 200*float64(i)
+			box := map[string]any{"minX": x - 40, "minY": -1500, "maxX": x + 40, "maxY": -1420}
+			comps = append(comps, map[string]any{"primitiveId": fmt.Sprintf("id-empty-%d", i), "designator": "",
+				"footprint": "Symbol:Logo", "layer": 1, "x": x, "y": -1460, "bbox": box, "courtyard": box})
+		}
+		snap["components"] = comps
+		raw, _ := json.Marshal(snap)
+		b, fixed, kept, err := kicadBoard(raw)
+		if err != nil {
+			t.Fatalf("%d empty: %v", n, err)
+		}
+		for i := 0; i < n; i++ {
+			ref := kicadKeptSep + fmt.Sprintf("id-empty-%d", i)
+			if p := b.Part(ref); p == nil || !p.Fixed || !slices.Contains(fixed, ref) {
+				t.Fatalf("%d empty: %s not a fixed model part (fixed %v)", n, ref, fixed)
+			}
+		}
+		poses := posesFromBoard(b, kept)
+		if len(poses) != 8 { // the tiny board's own parts only
+			t.Fatalf("%d empty: poses %v", n, kicadPlaceKeys(poses))
+		}
+		notes := kicadKeptNotes(kept)
+		if len(notes) != 1 || !strings.Contains(notes[0], fmt.Sprintf(`placeholder designator "" (%d footprint(s))`, n)) {
+			t.Fatalf("%d empty: notes %q", n, notes)
+		}
+	}
+}
+
+// A real designator that happens to contain "@kiid:" is an ordinary part:
+// only the refs kicadKeepShared generated are skipped.
+func TestPosesFromBoardSkipsOnlyGeneratedRefs(t *testing.T) {
+	var snap map[string]any
+	if err := json.Unmarshal(tinyKicadSnapshotShared(t), &snap); err != nil {
+		t.Fatal(err)
+	}
+	box := map[string]any{"minX": 960, "minY": -1460, "maxX": 1040, "maxY": -1420}
+	snap["components"] = append(snap["components"].([]any), map[string]any{"primitiveId": "id-odd", "designator": "U@kiid:1",
+		"footprint": "Resistor_SMD:R_0603", "layer": 1, "x": 1000, "y": -1440, "bbox": box, "courtyard": box,
+		"pads": []any{map[string]any{"padNumber": "1", "net": "A", "x": 970.0, "y": -1440.0, "width": 30.0, "height": 30.0, "layer": 1}}})
+	raw, _ := json.Marshal(snap)
+	b, fixed, kept, err := kicadBoard(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := b.Part("U@kiid:1"); p == nil || p.Fixed || slices.Contains(fixed, "U@kiid:1") {
+		t.Fatalf("U@kiid:1: %+v, want an ordinary movable part", p)
+	}
+	if len(kept) != 4 {
+		t.Fatalf("kept %v, want the two H1 and two REF** only", kept)
+	}
+	poses := posesFromBoard(b, kept)
+	if _, ok := poses["U@kiid:1"]; !ok {
+		t.Fatalf("U@kiid:1 lost its pose: %v", kicadPlaceKeys(poses))
+	}
+	for k := range kept {
+		if _, ok := poses[k]; ok {
+			t.Fatalf("generated ref %s got a pose", k)
+		}
+	}
+	if notes := kicadKeptNotes(kept); len(notes) != 2 || strings.Contains(strings.Join(notes, " "), "U@kiid:1") {
+		t.Fatalf("notes %q", notes)
+	}
+}
+
+// The escape planner's part keys never collide: two "H1" plus a real
+// footprint named "H1@kiid:abc" (the key the first H1 would get) stay
+// three parts, each with its own pads and courtyard.
+func TestKicadEscapeEnvKeysDoNotCollide(t *testing.T) {
+	comp := func(id, ref string, x float64) map[string]any {
+		box := map[string]any{"minX": x - 50, "minY": -50, "maxX": x + 50, "maxY": 50}
+		return map[string]any{"primitiveId": id, "designator": ref, "layer": 1, "x": x, "y": 0, "courtyard": box,
+			"pads": []any{map[string]any{"primitiveId": id + "-p1", "padNumber": "1", "net": "GND", "layer": 1, "x": x, "y": 0, "width": 30, "height": 30}}}
+	}
+	raw, _ := json.Marshal(map[string]any{"components": []any{comp("abc", "H1", 0), comp("def", "H1", 500), comp("real", "H1@kiid:abc", 1000), comp("u", "U1", 1500)}})
+	var s boardSnapshot
+	if err := json.Unmarshal(raw, &s); err != nil {
+		t.Fatal(err)
+	}
+	keys := kicadPlannerKeys(s.Components)
+	if keys[2] != "H1@kiid:abc" || keys[3] != "U1" || keys[1] != "H1@kiid:def" || keys[0] == keys[2] || keys[0] == "" {
+		t.Fatalf("keys %q", keys)
+	}
+	env := kicadEscapeEnv(&s, raw, nil)
+	byKey := map[string]int{}
+	for _, p := range env.pads {
+		byKey[p.Designator]++
+	}
+	if len(byKey) != 4 || len(env.court) != 4 {
+		t.Fatalf("pads by key %v, courtyards %d: parts merged", byKey, len(env.court))
+	}
+	if c := env.court["H1@kiid:abc"]; c.MinX != 950 {
+		t.Fatalf("the real H1@kiid:abc courtyard was overwritten: %+v", c)
 	}
 }

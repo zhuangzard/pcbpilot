@@ -48,7 +48,7 @@ func TestKicadPlaceLive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b0, _, err := kicadBoard(raw0)
+	b0, _, _, err := kicadBoard(raw0)
 	if err != nil {
 		t.Fatal(err)
 	}
