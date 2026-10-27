@@ -100,4 +100,10 @@ func TestPcbSyncPadNetGate(t *testing.T) {
 	if g := pcbSyncPadNetGate(nl, inv("VCC")); g.Status != gate.Fail {
 		t.Fatalf("a pad on the wrong net must fail: %+v", g)
 	}
+	// Two pads numbered 1, one on VCC (right), one without a net.
+	dup := inv("/SIG")
+	dup.Footprints[0].Pads = append(dup.Footprints[0].Pads, kicad.SyncPad{Number: "1", Net: "", Type: "pth"})
+	if g := pcbSyncPadNetGate(nl, dup); g.Status != gate.Fail || !strings.Contains(strings.Join(g.Items, "\n"), "pads numbered 1") {
+		t.Fatalf("a same-number pad left unconnected must fail: %+v", g)
+	}
 }

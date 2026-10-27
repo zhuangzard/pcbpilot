@@ -154,11 +154,12 @@ pcbpilot kicad pcb-sync ... --in-place --apply-plan plan.json --revision <rev>
   `.pcbpilot-stage-*/`（`PCBPILOT_STAGE_DIR` 之外一律拒绝）；三道门禁在暂存板上跑完后由 kfile 事务提交（锁文件、读后被改
   `E_FILE_CHANGED`、计划 revision）。`--in-place` 只有 pad-net 与 idempotent 通过、parity 没失败才提交，否则板子一字节不动；
   `--out` 只要暂存板能读回就保留输出。`--in-place` 不改 `.kicad_pro`（缺失时才写）；`--out` 发布的 `.kicad_pro` 是源工程的原字节（不是
-  SaveBoard 重写的，非默认设置都保留；parity 也用它），并带 `.kicad_dru`；源没有 `.kicad_pro` 时目标已有的那份保持不动，只有目标
-  也没有才写 SaveBoard 生成的默认工程。`--create`：`--pcb` 不存在时从空板起（全部新件暂存在
+  SaveBoard 重写的，非默认设置都保留；parity 也用它）；源没有 `.kicad_pro` 时目标已有的那份保持不动，只有目标也没有才写
+  SaveBoard 生成的默认工程。`.kicad_dru` 同理：源有就发布源的（覆盖目标已有的，基哈希校验），源没有就保留目标的。改名检查、parity
+  与提交都用**实际发布**的这份工程和规则，保留的目标文件提交前也再核对（被改 → 退出 4）。`--create`：`--pcb` 不存在时从空板起（全部新件暂存在
   原点起的行里）；没有源板可查版本，就核对 bridge 应用时的 pcbnew 版本，不是 10.x → cannot-check 退出 5。
 - **门禁**（`internal/gate`，没验证就不是 pass）：`pad-net`（暂存板上与符号挂钩的封装焊盘网 vs 网表引脚网，
-  `ComparePinNets` / `padNetDiffGate`；NPTH 与无编号焊盘不算）、`schematic-parity`（暂存板 + 工程 + 全部 `.kicad_sch`
+  `ComparePinNets` / `padNetDiffGate`；NPTH 与无编号焊盘不算；同编号的焊盘必须同网，没有网的也算）、`schematic-parity`（暂存板 + 工程 + 全部 `.kicad_sch`
   复制到临时目录、板改名为根图名，`kicad-cli pcb drc --schematic-parity --severity-all`；任一 parity 项失败，只有被 flag 的
   孤儿的 `extra_footprint` 记为 info；kicad-cli 缺失/崩溃/报告读不出 = cannot-check）、`idempotent`（暂存板重新规划 0 个操作）。
   `--no-parity` 是用户跳过，结论是 skip、退出 5，永远不是 pass。

@@ -231,6 +231,12 @@ func (t *Tools) RunParity(pcb, pro, schRoot string, expected func(Violation) boo
 			}
 		}
 	}
+	// The rules beside the board (the effective ones the sync publishes).
+	if dru := strings.TrimSuffix(pcb, filepath.Ext(pcb)) + ".kicad_dru"; fileExists(dru) {
+		if err := copyPlain(dru, filepath.Join(dir, base+".kicad_dru")); err != nil {
+			return cc("copy rules: %v", err)
+		}
+	}
 	root := filepath.Dir(schRoot)
 	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {

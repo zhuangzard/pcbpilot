@@ -325,7 +325,16 @@ func TestPcbSyncLiveEcc83Edits(t *testing.T) {
 func TestPcbSyncLiveFootprintSwap(t *testing.T) {
 	kt := pcbSyncLive(t)
 	_, sch, pcb := ecc83Synced(t)
+	// C2 carries a Footprint field naming its footprint (older boards do).
+	pcbnewScript(t, kt, pcb, `fp = [f for f in b.GetFootprints() if f.GetReference() == "C2"][0]
+fp.SetField("Footprint", str(fp.GetFPID().GetUniStringLibId()))
+pcbnew.SaveBoard(sys.argv[1], b)
+`)
 	before, _ := footprintsByRef(t, kt, pcb)
+	stale := `(property "Footprint" "` + before["C2"].FPID + `"`
+	if b, _ := os.ReadFile(pcb); !strings.Contains(string(b), stale) {
+		t.Fatal("fixture: no Footprint property written")
+	}
 	editSch(t, sch, func(e *kicad.SchEditor) {
 		if err := e.SetField("C2", "Footprint", "Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P5.00mm"); err != nil {
 			t.Fatal(err)
@@ -341,6 +350,14 @@ func TestPcbSyncLiveFootprintSwap(t *testing.T) {
 	b, a := before["C2"], after["C2"]
 	if a.FPID != "Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P5.00mm" || a.X != b.X || a.Y != b.Y || a.Rot != b.Rot || a.Side != b.Side || a.Path != b.Path {
 		t.Fatalf("swap: before %+v after %+v", b, a)
+	}
+	// KiCad 10 drops a stored Footprint property on load; whatever field
+	// the result carries must name the new footprint, never the old one.
+	if v, ok := a.Fields["Footprint"]; ok && v != a.FPID {
+		t.Fatalf("the Footprint field must name the new footprint: %q (FPID %s)", v, a.FPID)
+	}
+	if b, _ := os.ReadFile(pcb); strings.Contains(string(b), stale) {
+		t.Fatal("the board still names the old footprint in a Footprint property")
 	}
 }
 

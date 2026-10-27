@@ -1965,6 +1965,9 @@ def sync_apply(pcb, plan_path, out):
                 if not nf.HasField(name):
                     nf.SetField(name, of.GetText())
                 copy_field(nf.GetField(name), of)
+            # A Footprint field keeps its layout but names the new footprint.
+            if nf.HasField("Footprint"):
+                nf.GetField("Footprint").SetText(op["fpid"])
             drop_extra_fields(nf, {of.GetName() for of in fp.GetFields()})
             nf.SetPath(fp.GetPath())
             nf.SetSheetname(fp.GetSheetname())

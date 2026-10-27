@@ -47,6 +47,8 @@ type fakeSync struct {
 	version string // pcbnew version the "bridge" reports
 	onApply func(stage string)
 	after   *kicad.SyncInventory
+	// parityDru: the rules beside the board the parity check was given.
+	parityDru []byte
 }
 
 func (f *fakeSync) inventory(value string) *kicad.SyncInventory {
@@ -110,6 +112,7 @@ func (f *fakeSync) SyncApply(pcb string, plan *kicad.SyncPlan, stage, base strin
 }
 
 func (f *fakeSync) RunParity(pcb, pro, sch string, expected func(kicad.Violation) bool) kicad.ParityResult {
+	f.parityDru, _ = os.ReadFile(boardSibling(pcb, ".kicad_dru"))
 	return kicad.ParityResult{Status: gate.Pass, Detail: "fake parity"}
 }
 
@@ -472,5 +475,77 @@ func TestPcbSyncOutKeepsTargetProject(t *testing.T) {
 		if strings.HasSuffix(f.Path, ".kicad_pro") {
 			t.Fatalf("project in the transaction: %+v", rep.Files)
 		}
+	}
+}
+
+// TestPcbSyncRenameCheckedAgainstPublishedProject: without a source
+// project --out keeps the target's; a rename that project references is
+// refused, and the kept project changing before the commit is refused too.
+func TestPcbSyncRenameCheckedAgainstPublishedProject(t *testing.T) {
+	dir, o, fake := fakeProject(t, strings.Replace(fakeNetlist(), `name="VCC"`, `name="/V5"`, 1))
+	fake.value = "1k"
+	if err := os.Remove(filepath.Join(dir, "a.kicad_pro")); err != nil {
+		t.Fatal(err)
+	}
+	o.out = filepath.Join(dir, "out", "o.kicad_pcb")
+	tpro := filepath.Join(dir, "out", "o.kicad_pro")
+	if err := os.MkdirAll(filepath.Dir(tpro), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tpro, []byte(`{"net_settings":{"netclass_assignments":{"VCC":"Power"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep, code, _ := runSyncCode(t, o)
+	if code != 1 || rep.Errors[len(rep.Errors)-1].Code != kicad.ErrRenameReferenced || fileExists(o.out) {
+		t.Fatalf("rename referenced by the kept target project: exit %d %+v", code, rep.Errors)
+	}
+	// An unreferencing target project, edited while the bridge runs.
+	if err := os.WriteFile(tpro, []byte(`{"meta":{}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fake.onApply = func(string) {
+		if err := os.WriteFile(tpro, []byte(`{"meta":{"edited":true}}`), 0o644); err != nil {
+			t.Error(err)
+		}
+	}
+	rep, code, _ = runSyncCode(t, o)
+	if code != 4 || rep.Errors[len(rep.Errors)-1].Code != string(kfile.CodeChanged) || fileExists(o.out) {
+		t.Fatalf("kept project changed before the commit: exit %d %+v", code, rep.Errors)
+	}
+}
+
+// TestPcbSyncOutPublishesSourceRules: an output whose rules differ from
+// the source's gets the source's (parity checks with them); with no source
+// rules the output's stay.
+func TestPcbSyncOutPublishesSourceRules(t *testing.T) {
+	dir, o, fake := fakeProject(t, fakeNetlist())
+	o.out = filepath.Join(dir, "out", "o.kicad_pcb")
+	tdru := filepath.Join(dir, "out", "o.kicad_dru")
+	if err := os.MkdirAll(filepath.Dir(tdru), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tdru, []byte("(version 1)\n(rule stale)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep, code, _ := runSyncCode(t, o)
+	if code != 0 || !rep.Committed {
+		t.Fatalf("exit %d %+v", code, rep.Errors)
+	}
+	if b, _ := os.ReadFile(tdru); string(b) != "(version 1)\n" || string(fake.parityDru) != "(version 1)\n" {
+		t.Fatalf("published rules %q, parity rules %q", b, fake.parityDru)
+	}
+	// No source rules: the output's are kept and checked with.
+	if err := os.Remove(filepath.Join(dir, "a.kicad_dru")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tdru, []byte("(version 1)\n(rule mine)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fake.value = "3k"
+	if rep, code, _ = runSyncCode(t, o); code != 0 {
+		t.Fatalf("exit %d %+v", code, rep.Errors)
+	}
+	if b, _ := os.ReadFile(tdru); string(b) != "(version 1)\n(rule mine)\n" || string(fake.parityDru) != string(b) {
+		t.Fatalf("kept rules %q, parity rules %q", b, fake.parityDru)
 	}
 }

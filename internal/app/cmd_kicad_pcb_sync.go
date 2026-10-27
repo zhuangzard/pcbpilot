@@ -21,6 +21,7 @@ package app
 // failed (--out keeps the output; --in-place leaves the board unchanged).
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -498,6 +499,7 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 	}
 	targetSnap := boardSnap
 	targetProSnap, targetProData := proSnap, proData
+	targetDruSnap, targetDruData := druSnap, druData
 	if o.out != "" {
 		if targetSnap, err = kfile.Stat(o.out); err != nil {
 			return fileErr(err)
@@ -505,6 +507,31 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 		if targetProData, targetProSnap, err = readOpt(boardSibling(o.out, ".kicad_pro")); err != nil {
 			return fileErr(err)
 		}
+		if targetDruData, targetDruSnap, err = readOpt(boardSibling(o.out, ".kicad_dru")); err != nil {
+			return fileErr(err)
+		}
+	}
+	// The project and rules the result will carry: the source's when it has
+	// them, else (--out) the target's, which are kept. Rename safety, the
+	// parity check and the commit all use exactly these bytes.
+	effPro, effDru := proData, druData
+	if o.out != "" {
+		if effPro == nil {
+			effPro = targetProData
+		}
+		if effDru == nil {
+			effDru = targetDruData
+		}
+	}
+	targetUnchanged := func() error {
+		for _, sn := range []kfile.Snapshot{targetProSnap, targetDruSnap} {
+			if sn.Path != "" {
+				if err := sn.Check(); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
 	}
 
 	// Netlist.
@@ -602,7 +629,7 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 		return fail(errSyncBridge, "", err.Error(), "", 1)
 	}
 	rep.fill(plan)
-	if refs := kicad.RenameReferences(proData, druData, plan); len(refs) > 0 {
+	if refs := kicad.RenameReferences(effPro, effDru, plan); len(refs) > 0 {
 		rep.Errors = append(rep.Errors, refs...)
 		return finish("refused", 1)
 	}
@@ -733,12 +760,17 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 		// used by the parity check) is the source's, byte for byte.
 		// Without a source project, an existing target project is kept
 		// (and checked with), never replaced by SaveBoard's default one.
-		pub := proData
-		if pub == nil && o.out != "" && targetProSnap.Exists {
-			pub = targetProData
+		if effPro != nil {
+			if err := os.WriteFile(stagedPro, effPro, 0o600); err != nil {
+				return fileErr(err)
+			}
 		}
-		if pub != nil {
-			if err := os.WriteFile(stagedPro, pub, 0o600); err != nil {
+		// The effective rules sit beside the staged board (parity runs with
+		// them); SaveBoard writes none.
+		stagedDru := filepath.Join(stage, base+".kicad_dru")
+		_ = os.Remove(stagedDru)
+		if effDru != nil {
+			if err := os.WriteFile(stagedDru, effDru, 0o600); err != nil {
 				return fileErr(err)
 			}
 		}
@@ -776,6 +808,9 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 		if err := sourceUnchanged(); err != nil {
 			return fileErr(err)
 		}
+		if err := targetUnchanged(); err != nil {
+			return fileErr(err)
+		}
 		txn := kfile.NewTxn(filepath.Dir(target))
 		if err := txn.StageFile(target, staged, &targetSnap); err != nil {
 			txn.Abort()
@@ -788,8 +823,10 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 				return fileErr(err)
 			}
 		}
-		if tdru := boardSibling(target, ".kicad_dru"); o.out != "" && druData != nil && !fileExists(tdru) {
-			if err := txn.Stage(tdru, druData, nil); err != nil {
+		// --out publishes the source's rules over any the target had (base
+		// hash checked); without source rules the target's stay.
+		if tdru := boardSibling(target, ".kicad_dru"); o.out != "" && druData != nil && !bytes.Equal(druData, targetDruData) {
+			if err := txn.Stage(tdru, druData, &targetDruSnap); err != nil {
 				txn.Abort()
 				return fileErr(err)
 			}
@@ -946,22 +983,32 @@ func pcbSyncPadNetGate(nl *kicad.SyncNetlist, inv *kicad.SyncInventory) pcbSyncG
 			}
 		}
 	}
+	// Every numbered copper pad counts, unconnected ones included: pads
+	// sharing a number must all carry the pin's net (a second "1" left
+	// without a net is a difference, not a pad to skip).
 	board := map[string]string{}
+	seen := map[string]string{}
 	var conflicts []string
 	for _, f := range inv.Footprints {
 		if f.BoardOnly || !keys[f.Path] {
 			continue
 		}
 		for _, p := range f.Pads {
-			if p.Number == "" || p.Type == "npth" || p.Net == "" {
+			if p.Number == "" || p.Type == "npth" {
 				continue
 			}
 			k := f.Ref + "." + p.Number
-			if prev, ok := board[k]; ok && prev != p.Net {
-				conflicts = append(conflicts, fmt.Sprintf("%s: pads numbered %s are on %s and %s", f.Ref, p.Number, prev, p.Net))
+			if prev, ok := seen[k]; ok && prev != p.Net {
+				conflicts = append(conflicts, fmt.Sprintf("%s: pads numbered %s are on %q and %q", f.Ref, p.Number, prev, p.Net))
 				continue
 			}
-			board[k] = p.Net
+			seen[k] = p.Net
+			if want, ok := sch[k]; ok && p.Net == "" {
+				conflicts = append(conflicts, fmt.Sprintf("%s pad %s has no net; the schematic puts it on %s", f.Ref, p.Number, want))
+			}
+			if p.Net != "" {
+				board[k] = p.Net
+			}
 		}
 	}
 	g := padNetDiffGate(sch, board, "staged board vs schematic netlist", "")
