@@ -821,6 +821,13 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 	}
 	addPins(items[0], sbPose{Unit: items[0].unit})
 	direct := map[string]bool{} // pins joined by a short wire (no own marker)
+	// wiredAt: pin positions that got a wire. A pin common to every unit
+	// (unit 0) is drawn on each placed unit, but pins/direct/done hold one
+	// position per REF.PIN; every other copy is wired by its own stub below.
+	wiredAt := map[[2]int64]bool{}
+	ptKey := func(p kicad.Pt) [2]int64 {
+		return [2]int64{int64(math.Round(p.X * 1000)), int64(math.Round(p.Y * 1000))}
+	}
 	opp := map[string]string{"up": "down", "down": "up", "left": "right", "right": "left"}
 	vec := map[string]kicad.Pt{"up": {Y: -1}, "down": {Y: 1}, "left": {X: -1}, "right": {X: 1}}
 	segClear := func(a, b kicad.Pt, skip map[string]bool, net string) bool {
@@ -1053,6 +1060,7 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 							zl.Wires = append(zl.Wires, wire)
 							attachWires = append(attachWires, attachWire{it.p.Ref, wire})
 							direct[qk], direct[tk] = true, true
+							wiredAt[ptKey(t.at)], wiredAt[ptKey(wire[0])], wiredAt[ptKey(wire[len(wire)-1])] = true, true, true
 							if tee != nil {
 								zl.Wires = append(zl.Wires, tee)
 							}
@@ -1224,6 +1232,7 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 						zl.Wires = append(zl.Wires, []kicad.Pt{a, b})
 						zl.Markers = append(zl.Markers, sbMarker{Kind: kind, Net: d.PinNet[k], At: b, Dir: dir})
 						direct[k] = true
+						wiredAt[ptKey(a)] = true
 					}
 				}
 			}
@@ -1390,13 +1399,15 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 	scene, pinMM := kicadAcScene(sc, nil)
 	scene.TitleBlockProvisional = false
 	var conns []acConnSpec
+	connSeen := map[string]bool{} // a common pin is planned once (its other copies: stubs below)
 	for _, it := range items {
 		for _, q := range it.s.Pins {
 			k := sbPinKey(it.p.Ref, q.Number)
 			n, ok := d.PinNet[k]
-			if !ok || direct[k] {
+			if !ok || direct[k] || connSeen[k] {
 				continue
 			}
+			connSeen[k] = true
 			kind := "net_label"
 			if len(d.NetPages[n]) > 1 {
 				kind = "net_port_bi" // drawn as a (larger) global label
@@ -1437,10 +1448,22 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 			}
 			zl.Markers = append(zl.Markers, sbMarker{Kind: kind, Net: net, At: to, Dir: sel.Direction})
 			done[key] = true
+			wiredAt[ptKey(from)] = true
 			return nil
 		},
 	})
-	// plain outward stubs for anything the planner left
+	// plain outward stubs for anything the planner left, and for every copy
+	// of a common (unit 0) pin of a multi-unit part not wired yet
+	common := map[string]bool{}
+	for _, it := range items {
+		if it.p.Multi {
+			for _, q := range it.p.LPins {
+				if q.Unit == 0 {
+					common[sbPinKey(it.p.Ref, q.Number)] = true
+				}
+			}
+		}
+	}
 	for _, it := range items {
 		var pose sbPose
 		for _, ps := range zl.Parts[it.p.Ref] {
@@ -1456,9 +1479,13 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 				continue
 			}
 			n, ok := d.PinNet[k]
-			if !ok || done[k] || direct[k] {
+			if !ok || wiredAt[ptKey(at)] {
 				continue
 			}
+			if (done[k] || direct[k]) && !common[k] {
+				continue
+			}
+			wiredAt[ptKey(at)] = true
 			dir := sbOutwardDir(q.Outward)
 			to := at
 			switch dir {

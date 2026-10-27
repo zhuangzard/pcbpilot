@@ -71,6 +71,21 @@ func TestSchKicadBackendMultiUnit(t *testing.T) {
 	if n := strings.Count(string(src), `(property "LCSC" "C7950"`); n != 3 {
 		t.Errorf("LCSC on %d units, want 3 (inherited)", n)
 	}
+	// exactly one Value and one Footprint per unit, with the placed units' values
+	if e, err := kicad.OpenSchematicFile(sheet); err == nil {
+		for u, fs := range e.SymbolUnitFields("U1") {
+			n := map[string]int{}
+			for _, f := range fs {
+				n[f.Name]++
+				if f.Name == "Value" && f.Value != "OPA2X" {
+					t.Errorf("unit %d Value %q", u, f.Value)
+				}
+			}
+			if n["Value"] != 1 || n["Footprint"] != 1 || n["LCSC"] != 1 {
+				t.Errorf("unit %d fields %v", u, n)
+			}
+		}
+	}
 	// pins of unit 2 and of the power unit answer to U1
 	run(false, "netflag", "--kind", "power", "--net", "VCC", "--at", "U1.8")
 	run(false, "wire", "--through", "U1.1", "--through", "U1.5")
@@ -279,6 +294,10 @@ func TestSchBuildPartialUnitsLive(t *testing.T) {
 		if u := e.SymbolUnits("U1"); len(u) != 2 || u[0] != 1 || u[1] != 3 {
 			t.Errorf("%s: units %v", what, u)
 		}
+		// every copy of the common pins 7/14 is wired: no pin left unconnected
+		if erc, _ := os.ReadFile(filepath.Join(dir, "erc.json")); bytes.Contains(erc, []byte("pin_not_connected")) {
+			t.Errorf("%s: ERC reports pin_not_connected", what)
+		}
 	}
 	res, err := runSchBuild(spec([]int{1, 3}), sbOptions{OutDir: out, NoIntent: true, Jobs: 2, PlannerBudget: 20000}, nil)
 	check(out, "build", res, err)
@@ -336,13 +355,25 @@ func TestSchReadReusedSheetPartialUnits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.DeleteSymbol("U201:2"); err != nil {
-		t.Fatal(err)
+	// pcbpilot refuses to delete on a reused sheet (U201:2 is U301:2 too):
+	// deleting one reference must not silently delete another
+	before, _ := os.ReadFile(ampli)
+	for _, ids := range []string{"U201:2", "U301", "U201"} {
+		var out, errb bytes.Buffer
+		code := Run([]string{"sch", "prim-delete", "--backend", "kicad", "--kicad-sch", ampli, "--ids", ids}, &out, &errb)
+		if code == 0 || !strings.Contains(out.String()+errb.String(), "several sheet symbols") {
+			t.Errorf("prim-delete %s on a reused sheet: exit %d %s%s", ids, code, out.String(), errb.String())
+		}
+		if now, _ := os.ReadFile(ampli); !bytes.Equal(now, before) {
+			t.Fatalf("refused prim-delete %s changed the sheet", ids)
+		}
 	}
-	text, err := e.Render()
-	if err != nil {
-		t.Fatal(err)
+	// the fixture cuts the unit out of the text instead
+	if _, err := e.DeleteSymbol("U201:2"); err == nil {
+		t.Fatal("deleting on a reused sheet accepted")
 	}
+	srcText, _ := os.ReadFile(ampli)
+	text := sbCutSymbol(t, string(srcText), "complex_hierarchy:LM358N", 2)
 	_ = os.WriteFile(ampli, []byte(text), 0o644)
 	rd, err := readSbSpec(dir, "")
 	if err != nil {
@@ -460,6 +491,60 @@ func TestSchBuildMultiUnitDecouplingLive(t *testing.T) {
 		res, err := runSchBuild(spec, sbOptions{OutDir: filepath.Join(t.TempDir(), name), NoIntent: true, Jobs: 2, PlannerBudget: 20000}, nil)
 		if err != nil || !res.OK || sbGateStatus(res, "engineer-grade") != "pass" {
 			t.Errorf("%s: %v %+v", name, err, res.Gates)
+		}
+	}
+}
+
+// TestSchBuildCommonPinCopiesWiredLive: a pin common to every unit (unit
+// 0, here power_in VCC/GND of the triple gate) is drawn on each placed
+// unit; R3 joins VCC to GND with a direct wire to one copy. Every other copy
+// must still get its own wire — before, it dangled (ERC pin_not_connected,
+// different_unit_net) while the netlist looked right.
+func TestSchBuildCommonPinCopiesWiredLive(t *testing.T) {
+	sbNeedKicad(t)
+	t.Setenv(kicad.EnvCacheDir, t.TempDir())
+	libDir := t.TempDir()
+	lib := strings.ReplaceAll(testTripleLib, "(pin passive line (at 0 ", "(pin power_in line (at 0 ")
+	if err := os.WriteFile(filepath.Join(libDir, "my.kicad_sym"), []byte(lib), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	spec := &sbSpec{Name: "cp", LibDirs: []string{libDir},
+		Parts: []sbPart{{Ref: "U1", Symbol: "my:TRI"}, {Ref: "R1", Value: "1k", Symbol: "Device:R"}, {Ref: "R3", Value: "10k", Symbol: "Device:R"}},
+		Nets: []sbNet{
+			{Name: "VCC", Kind: "power", Pins: []string{"U1:14", "R1:1", "R3:1"}},
+			{Name: "GND", Kind: "ground", Pins: []string{"U1:7", "R3:2"}},
+			{Name: "SIG", Pins: []string{"U1:2", "U1:3", "R1:2"}},
+		}}
+	out := filepath.Join(t.TempDir(), "cp")
+	res, err := runSchBuild(spec, sbOptions{OutDir: out, NoIntent: true, Jobs: 2, PlannerBudget: 20000}, nil)
+	if err != nil || !res.OK || sbGateStatus(res, "netlist") != "pass" {
+		t.Fatalf("build: %v %+v", err, res)
+	}
+	erc, _ := os.ReadFile(filepath.Join(out, "erc.json"))
+	for _, bad := range []string{"pin_not_connected", "different_unit_net", "power_pin_not_driven"} {
+		if bytes.Contains(erc, []byte(bad)) {
+			t.Errorf("ERC reports %s", bad)
+		}
+	}
+	// physically: a wire ends on every copy of pins 7 and 14
+	e, err := kicad.OpenSchematicFile(filepath.Join(out, "cp.kicad_sch"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc, _ := e.Scene()
+	ends := map[kicad.Pt]bool{}
+	for _, w := range sc.Wires {
+		ends[w[0]], ends[w[1]] = true, true
+	}
+	for _, u := range []string{"U1:1", "U1:2", "U1:3"} {
+		pins, err := e.SymbolPinPositions(u)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, n := range []string{"7", "14"} {
+			if !ends[pins[n]] {
+				t.Errorf("%s pin %s at %v has no wire", u, n, pins[n])
+			}
 		}
 	}
 }

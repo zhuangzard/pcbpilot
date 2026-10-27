@@ -1024,6 +1024,32 @@ func (e *SchEditor) RepeatedSheet() bool {
 	return false
 }
 
+// otherUseRefs lists the instance references of the symbols keys name
+// other than the keys' own (the other uses of a reused sheet).
+func (e *SchEditor) otherUseRefs(keys []string) string {
+	asked := map[string]bool{}
+	for _, k := range keys {
+		r, _, _ := SplitUnitKey(k)
+		asked[r] = true
+	}
+	var out []string
+	for _, k := range keys {
+		r, _, _ := SplitUnitKey(k)
+		for _, in := range e.instancesOf(r) {
+			for _, o := range instRefs(in.n, "") {
+				if !asked[o] && !slices.Contains(out, o) {
+					out = append(out, o)
+				}
+			}
+		}
+	}
+	if len(out) == 0 {
+		return "none named"
+	}
+	sort.Strings(out)
+	return strings.Join(out, ", ")
+}
+
 // errAcrossSheets refuses an edit of ref that would leave the units placed
 // on the project's other sheets inconsistent.
 func (e *SchEditor) errAcrossSheets(ref, what string) error {
@@ -1347,6 +1373,11 @@ func (e *SchEditor) DeleteSymbols(keys []string) (map[string][]int, error) {
 		in  symInst
 		ref string
 	}
+	if len(keys) > 0 && e.RepeatedSheet() {
+		// one symbol here is every use's symbol (U201 and U301): deleting it
+		// for one reference deletes it for all
+		return nil, fmt.Errorf("cannot delete %s: this sheet is used by several sheet symbols, so a symbol on it belongs to every use (other references: %s); delete it in the KiCad project, not per sheet file", strings.Join(keys, ", "), e.otherUseRefs(keys))
+	}
 	var picks []pick
 	seen := map[*sexp]bool{}
 	seenItem := map[int]bool{}
@@ -1561,8 +1592,19 @@ func (e *SchEditor) SetField(ref, name, value string) error {
 		if err := e.checkRename(ref, value); err != nil {
 			return err
 		}
-	} else if err := e.errAcrossSheets(ref, "editing fields of"); err != nil {
-		return err
+	} else {
+		// a symbol on a reused sheet is every use's: each of its instance
+		// references must be safe to edit, not only the one asked for
+		for _, in := range insts {
+			for _, r := range append(instRefs(in.n, e.Project), ref) {
+				if err := e.errAcrossSheets(r, "editing fields of"); err != nil {
+					if r != ref {
+						return fmt.Errorf("%s is the same symbol as %s on this reused sheet: %w", ref, r, err)
+					}
+					return err
+				}
+			}
+		}
 	}
 	for _, in := range insts {
 		if in.item < 0 {

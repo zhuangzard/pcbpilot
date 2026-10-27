@@ -271,9 +271,21 @@ func kicadSchPlace(path string, libID, symLib, ref, value, footprint, lcsc strin
 					return nil, fmt.Errorf("%s unit %d is already on this sheet (placed units: %v; pass --unit N for another)", ref, unit, placed)
 				}
 			}
-			var err error
-			if fields, err = kicadInheritUnitFields(e.SymbolUnitFields(ref), ref, value, footprint, lcsc); err != nil {
+			inherited, err := kicadInheritUnitFields(e.SymbolUnitFields(ref), ref, value, footprint, lcsc)
+			if err != nil {
 				return nil, err
+			}
+			// the standard fields come through Value/Footprint (one each, with
+			// the library's position); the rest are passed as extra fields
+			for _, f := range inherited {
+				switch f.Name {
+				case "Value":
+					value = f.Value
+				case "Footprint":
+					footprint = f.Value
+				default:
+					fields = append(fields, f)
+				}
 			}
 		} else if lcsc != "" {
 			fields = append(fields, kicad.Field{Name: "LCSC", Value: lcsc, Hide: true})

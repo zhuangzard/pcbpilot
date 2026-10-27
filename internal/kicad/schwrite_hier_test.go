@@ -507,3 +507,44 @@ func TestSheetAliases(t *testing.T) {
 		}
 	}
 }
+
+// A symbol on a reused sheet is every use's: a field edit through its first
+// reference is refused when only its second reference (another use) also
+// has units on another sheet.
+func TestReusedSheetFieldEditChecksEveryReference(t *testing.T) {
+	p := t.TempDir()
+	writeProject(t, p, "ru", map[string]string{"A": "sub.kicad_sch", "B": "sub.kicad_sch", "C": "other.kicad_sch"})
+	s, _ := OpenSchematic(NewSchematicText("A4", NewUUID(), false))
+	s.Project, s.InstancePath = "ru", "/r/a"
+	_ = s.AddLibSymbol("my:DUAL", dualSym)
+	if _, err := s.PlaceSymbol(SymbolInstance{LibID: "my:DUAL", Ref: "U1", Value: "DUAL", At: Pt{50.8, 50.8}}); err != nil {
+		t.Fatal(err)
+	}
+	text, _ := s.Render()
+	// the second use names it U2
+	text = strings.Replace(text, "\t\t\t\t(path \"/r/a\"\n\t\t\t\t\t(reference \"U1\")\n\t\t\t\t\t(unit 1)\n\t\t\t\t)",
+		"\t\t\t\t(path \"/r/a\"\n\t\t\t\t\t(reference \"U1\")\n\t\t\t\t\t(unit 1)\n\t\t\t\t)\n\t\t\t\t(path \"/r/b\"\n\t\t\t\t\t(reference \"U2\")\n\t\t\t\t\t(unit 1)\n\t\t\t\t)", 1)
+	if !strings.Contains(text, `(reference "U2")`) {
+		t.Fatal("fixture: second instance path not added")
+	}
+	_ = os.WriteFile(filepath.Join(p, "sub.kicad_sch"), []byte(text), 0o644)
+	o, _ := OpenSchematic(NewSchematicText("A4", NewUUID(), false))
+	o.Project, o.InstancePath = "ru", "/r/c"
+	_ = o.AddLibSymbol("my:DUAL", dualSym)
+	_, _ = o.PlaceSymbol(SymbolInstance{LibID: "my:DUAL", Ref: "U2", Unit: 2, Value: "DUAL", At: Pt{50.8, 50.8}})
+	ot, _ := o.Render()
+	_ = os.WriteFile(filepath.Join(p, "other.kicad_sch"), []byte(ot), 0o644)
+	e, err := OpenSchematicFile(filepath.Join(p, "sub.kicad_sch"))
+	if err != nil || e.HierarchyErr() != nil {
+		t.Fatalf("%v / %v", err, e.HierarchyErr())
+	}
+	if err := e.SetField("U1", "Value", "X"); err == nil || !strings.Contains(err.Error(), "U2") || !strings.Contains(err.Error(), "other.kicad_sch") {
+		t.Errorf("field edit through U1 while U2 has units elsewhere: %v", err)
+	}
+	if out, _ := e.Render(); out != text {
+		t.Error("a refused edit queued changes")
+	}
+	if _, err := e.DeleteSymbol("U1:1"); err == nil {
+		t.Error("delete on a reused sheet accepted")
+	}
+}
