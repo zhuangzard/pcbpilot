@@ -710,7 +710,13 @@ func resolveSymbols(parts []*sbRPart, opts sbResolveOpts, libDirs []string) (st 
 			p.SymName, p.LibName, p.LibID, text = cp.SymbolName, "lcsc", "lcsc:"+cp.SymbolName, t
 			if p.Footprint == "" {
 				p.Footprint = "lcsc:" + cp.FootprintName
-				p.FPFile = cp.FootprintFile()
+			}
+			// the footprint file travels with the project: also for a spec that
+			// already names it (the stored spec of sch-edit, sch-read output) —
+			// without the file the rebuilt project lost fp-lib-table and
+			// lcsc.pretty (v0.10.1)
+			if fl, ff, ok := strings.Cut(p.Footprint, ":"); ok && fl == "lcsc" && p.FPFile == "" {
+				p.FPFile = sbLCSCFootprintFile(ff, cp, cached, opts.OutDir)
 			}
 			if cp.FromCache {
 				src = "lcsc-cache"
@@ -1426,4 +1432,29 @@ func sbSortedUnits(units map[int]bool) []int {
 	}
 	sort.Ints(out)
 	return out
+}
+
+// sbLCSCFootprintFile finds the .kicad_mod of footprint lcsc:name: the
+// part's own cached conversion, another cached part's (a shared package),
+// or the project's lcsc.pretty from an earlier build. "" when none has it.
+func sbLCSCFootprintFile(name string, cp *kicad.CachedPart, cached map[string]*kicad.CachedPart, out string) string {
+	if cp != nil && cp.FootprintName == name && fileExists(cp.FootprintFile()) {
+		return cp.FootprintFile()
+	}
+	keys := make([]string, 0, len(cached))
+	for k := range cached {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if c := cached[k]; c != nil && c.FootprintName == name && fileExists(c.FootprintFile()) {
+			return c.FootprintFile()
+		}
+	}
+	if out != "" && sbSafeName(name) {
+		if f := filepath.Join(out, "lcsc.pretty", name+".kicad_mod"); fileExists(f) {
+			return f
+		}
+	}
+	return ""
 }

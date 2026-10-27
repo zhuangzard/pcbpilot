@@ -45,7 +45,9 @@ pcbpilot kicad sch-checkpoint list --project build/                     # 回退
 - **失败如实报告**：任何失败报告都是 `ok:false` + `error`。`SHEET_NOT_LOADED` = KiCad 加载不了某页（通常是
   MPN/value 里有 KiCad 不接受的字符），不是布局问题，不要用 `--no-planner` 去绕。
 - **ERC 用隔离的 KiCad 配置**（空的全局库表，避免加载全部官方库卡死）；用户自设 `KICAD_CONFIG_HOME` 优先，
-  `PCBPILOT_KICAD_ISOLATE=0` 关闭。
+  `PCBPILOT_KICAD_ISOLATE=0` 关闭。因此 ERC 对官方库只报 warning；但**工程自带的库**（`lcsc`、项目库、
+  `pcbpilot_*`）报 footprint/符号链接问题时 ERC 门禁失败（v0.10.1 的 sch-edit 会丢 `fp-lib-table` 和
+  `lcsc.pretty`，已修复）。
 - **可复现**：`--planner-timeout` 按墙钟决定哪些区用 planner；同一 spec 要逐字节可复现时用 `--no-planner --fresh`。
 
 delta 例子（只写意图，脚名即可）：

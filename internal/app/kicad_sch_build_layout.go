@@ -810,12 +810,13 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 		at  kicad.Pt
 		dir string
 		ref string
+		box kicad.Box // body of the placed unit carrying the pin
 	}
 	pins := map[string]pinAt{} // "REF.NUM" of placed units
 	addPins := func(it unitRef, pose sbPose) {
 		for _, q := range it.s.Pins {
 			r := math.Mod(q.Outward+pose.Rot+360, 360)
-			pins[sbPinKey(it.p.Ref, q.Number)] = pinAt{sbXform(q.At, pose), sbOutwardDir(r), it.p.Ref}
+			pins[sbPinKey(it.p.Ref, q.Number)] = pinAt{sbXform(q.At, pose), sbOutwardDir(r), it.p.Ref, sbXformBox(it.s.Box, pose)}
 		}
 	}
 	addPins(items[0], sbPose{Unit: items[0].unit})
@@ -1141,6 +1142,11 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 		}
 		fb0 := sbXformBox(foot(sbRotScene(it.s, rot), it.p.Ref), sbPose{})
 		cb := sbGrow(items[0].s.Box, 0)
+		if ap := d.ByRef[anchor.ref]; ap != nil && ap.Multi {
+			// beside the unit that carries the pin: an op-amp's or a gate's
+			// supply pin is on its power unit, not on the core's first unit
+			cb = anchor.box
+		}
 		// candidate spots: beside the pin on its side, or above / below the
 		// core near the pin; nearest to the pin first
 		type cand struct {
@@ -1224,10 +1230,67 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 		}
 		return found
 	}
+	// the units of multi-unit parts go first, in columns right of the core:
+	// a decoupling cap must find the supply pin it serves, and on an op-amp
+	// or a gate that pin is on another unit (the power unit) than the core's
+	// first — placed last, the caps found no pin and went to the far column
+	// (EG-06: "C1 47.0 mm from its +5V pin")
+	{
+		// rails a decoupling cap of this zone serves; a unit with a pin on
+		// one gets a column of its own with room on its right for the caps
+		capRails := map[string]bool{}
+		for _, p := range zi.Parts {
+			if isDecap(p) {
+				for _, q := range p.LPins {
+					if n := d.PinNet[sbPinKey(p.Ref, q.Number)]; d.NetKind[n] == "power" {
+						capRails[n] = true
+					}
+				}
+			}
+		}
+		servesCap := func(s kicad.SceneSymbol, ref string) bool {
+			for _, q := range s.Pins {
+				if capRails[d.PinNet[sbPinKey(ref, q.Number)]] {
+					return true
+				}
+			}
+			return false
+		}
+		const capRoom = 12.7 // a cap beside the pin + its gap
+		colH := math.Max(core.H(), 90)
+		x := core.MaxX + 2.54
+		if servesCap(items[0].s, items[0].p.Ref) {
+			x += capRoom // the core's caps keep their spot right of it
+		}
+		y, colW := core.MinY, 0.0
+		for _, it := range items[1:] {
+			if !it.p.Multi {
+				continue
+			}
+			f := foot(it.s, it.p.Ref)
+			own := servesCap(it.s, it.p.Ref)
+			if y > core.MinY && (own || y+f.H() > core.MinY+colH) {
+				x, y, colW = x+colW+2.54, core.MinY, 0
+			}
+			pose := sbPose{At: kicad.Pt{X: sbSnap(x - f.MinX), Y: sbSnap(y - f.MinY)}, Unit: it.unit}
+			zl.Parts[it.p.Ref] = append(zl.Parts[it.p.Ref], pose)
+			placed = append(placed, sbGrow(sbXformBox(it.s.Box, pose), 2.54))
+			owner = append(owner, it.p.Ref)
+			addPins(it, pose)
+			y += f.H()
+			colW = math.Max(colW, f.W())
+			if own { // its caps go right of it: close the column with room
+				x, y, colW = x+colW+2.54+capRoom, core.MinY, 0
+			}
+		}
+	}
 	// decoupling first, so it gets the room next to the supply pins
 	var others, rest, far []unitRef
 	for _, it := range items[1:] {
-		if !isDecap(it.p) || it.p.Multi {
+		if it.p.Multi {
+			continue // placed above
+		}
+		if !isDecap(it.p) {
 			others = append(others, it)
 			continue
 		}

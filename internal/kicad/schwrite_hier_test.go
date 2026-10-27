@@ -477,3 +477,33 @@ func TestNestedReusedSheet(t *testing.T) {
 		t.Error("sub/child.kicad_sch used by two sheet symbols not seen as repeated")
 	}
 }
+
+// A sheet reached through a link (hard link, or symlink where allowed) is
+// the same node as the sheet: both uses count.
+func TestSheetAliases(t *testing.T) {
+	for _, kind := range []string{"hardlink", "symlink"} {
+		p := t.TempDir()
+		writeProject(t, p, "al", map[string]string{"A": "sub/child.kicad_sch", "B": "sub/alias.kicad_sch"})
+		_ = os.MkdirAll(filepath.Join(p, "sub"), 0o755)
+		child := filepath.Join(p, "sub", "child.kicad_sch")
+		_ = os.WriteFile(child, []byte(NewSchematicText("A4", NewUUID(), false)), 0o644)
+		alias := filepath.Join(p, "sub", "alias.kicad_sch")
+		var err error
+		if kind == "hardlink" {
+			err = os.Link(child, alias)
+		} else {
+			err = os.Symlink("child.kicad_sch", alias)
+		}
+		if err != nil {
+			t.Logf("%s not available: %v", kind, err)
+			continue
+		}
+		e, err := OpenSchematicFile(child)
+		if err != nil || e.HierarchyErr() != nil {
+			t.Fatalf("%s: %v / %v", kind, err, e.HierarchyErr())
+		}
+		if !e.RepeatedSheet() || e.sheetUses != 2 {
+			t.Errorf("%s: a sheet and its alias: repeated=%v uses=%d", kind, e.RepeatedSheet(), e.sheetUses)
+		}
+	}
+}

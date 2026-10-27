@@ -269,6 +269,40 @@ type sheetTree struct {
 	selfAt  string              // instance path of the first use of self ("" if not reached)
 	reached bool                // self is in the tree
 	broken  []string            // sheets the walk could not read
+	alias   map[string]string   // pathKey → node key (see key)
+	ids     []sheetID
+}
+
+// key is the node key of a sheet file: one per file identity, so a
+// symlink or hard link to a sheet and the sheet itself are one node and
+// every use accumulates on it.
+func (t *sheetTree) key(p string) string {
+	pk := pathKey(p)
+	if k, ok := t.alias[pk]; ok {
+		return k
+	}
+	if t.alias == nil {
+		t.alias = map[string]string{}
+	}
+	k := pk
+	if fi, err := os.Stat(p); err == nil {
+		for _, id := range t.ids {
+			if os.SameFile(id.fi, fi) {
+				k = id.key
+				break
+			}
+		}
+		if k == pk {
+			t.ids = append(t.ids, sheetID{pk, fi})
+		}
+	}
+	t.alias[pk] = k
+	return k
+}
+
+type sheetID struct {
+	key string
+	fi  os.FileInfo
 }
 
 // walkSheetTree walks every sheet reachable from root, carrying each
@@ -277,7 +311,7 @@ func walkSheetTree(root, self string) *sheetTree {
 	t := &sheetTree{root: root, files: map[string]*sexp{}, names: map[string]string{}, parents: map[string][]string{}}
 	var walk func(f, instPath string)
 	walk = func(f, instPath string) {
-		k := pathKey(f)
+		k := t.key(f)
 		if samePath(f, self) {
 			t.reached = true
 			if t.selfAt == "" {
@@ -308,7 +342,8 @@ func walkSheetTree(root, self string) *sheetTree {
 				continue
 			}
 			child := resolveSheetFile(f, root, propVal(s, "Sheetfile"))
-			t.parents[pathKey(child)] = append(t.parents[pathKey(child)], k)
+			ck := t.key(child)
+			t.parents[ck] = append(t.parents[ck], k)
 			cp := instPath
 			if u := s.child("uuid"); u != nil && len(u.list) > 1 {
 				cp += "/" + u.list[1].atom
@@ -328,9 +363,9 @@ func walkSheetTree(root, self string) *sheetTree {
 func findSheetTree(path string) (*sheetTree, error) {
 	self := cleanAbs(path)
 	var tried []string
+	var hits []*sheetTree // every project, in any ancestor directory, whose tree holds the sheet
 	for dir := filepath.Dir(self); ; {
 		pros, _ := filepath.Glob(filepath.Join(dir, "*.kicad_pro"))
-		var hits []*sheetTree
 		for _, pro := range pros {
 			root := strings.TrimSuffix(pro, ".kicad_pro") + ".kicad_sch"
 			if !fileExists(root) {
@@ -341,24 +376,24 @@ func findSheetTree(path string) (*sheetTree, error) {
 				hits = append(hits, t)
 			}
 		}
-		if len(hits) > 1 {
-			var roots []string
-			for _, h := range hits {
-				roots = append(roots, h.root)
-			}
-			return nil, fmt.Errorf("%s belongs to several projects (%s)", self, strings.Join(roots, ", "))
-		}
-		if len(hits) == 1 {
-			if len(hits[0].broken) > 0 {
-				return hits[0], fmt.Errorf("sheet(s) of the hierarchy unreadable: %s", strings.Join(hits[0].broken, ", "))
-			}
-			return hits[0], nil
-		}
 		up := filepath.Dir(dir)
 		if up == dir {
 			break
 		}
 		dir = up
+	}
+	if len(hits) > 1 { // a nested project used as a sheet of an outer one, …
+		var roots []string
+		for _, h := range hits {
+			roots = append(roots, h.root)
+		}
+		return nil, fmt.Errorf("%s belongs to several projects (%s)", self, strings.Join(roots, ", "))
+	}
+	if len(hits) == 1 {
+		if len(hits[0].broken) > 0 {
+			return hits[0], fmt.Errorf("sheet(s) of the hierarchy unreadable: %s", strings.Join(hits[0].broken, ", "))
+		}
+		return hits[0], nil
 	}
 	if b, err := os.ReadFile(self); err == nil && strings.Contains(string(b), "(sheet_instances") {
 		t := walkSheetTree(self, self)
@@ -387,12 +422,7 @@ func (e *SchEditor) scanProject(path string) {
 	if t == nil {
 		return
 	}
-	self := pathKey(path)
-	for k, name := range t.names { // the same file under another spelling
-		if samePath(name, path) {
-			self = k
-		}
-	}
+	self := t.key(path) // the same file under another spelling or link is one node
 	if e.InstancePath == "" && t.selfAt != "" && strings.Count(t.selfAt, "/") > 1 {
 		e.InstancePath = t.selfAt
 	}
@@ -1198,6 +1228,23 @@ func (e *SchEditor) SymbolFields(ref string) []Field {
 		if c.head() == "property" && len(c.list) > 2 {
 			out = append(out, Field{Name: c.list[1].atom, Value: c.list[2].atom, Hide: propertyHidden(c)})
 		}
+	}
+	return out
+}
+
+// SymbolUnitFields returns the properties of every placed unit of ref
+// (unit → fields in file order, Reference included), queued field edits not
+// applied.
+func (e *SchEditor) SymbolUnitFields(ref string) map[int][]Field {
+	out := map[int][]Field{}
+	for _, in := range e.instancesOf(ref) {
+		var fs []Field
+		for _, c := range in.n.list {
+			if c.head() == "property" && len(c.list) > 2 {
+				fs = append(fs, Field{Name: c.list[1].atom, Value: c.list[2].atom, Hide: propertyHidden(c)})
+			}
+		}
+		out[instUnit(in.n)] = fs
 	}
 	return out
 }

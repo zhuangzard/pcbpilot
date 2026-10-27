@@ -367,3 +367,99 @@ func TestSchReadReusedSheetPartialUnits(t *testing.T) {
 		}
 	}
 }
+
+func TestKicadInheritUnitFields(t *testing.T) {
+	f := func(kv ...string) []kicad.Field {
+		out := []kicad.Field{{Name: "Reference", Value: "U1"}}
+		for i := 0; i+1 < len(kv); i += 2 {
+			out = append(out, kicad.Field{Name: kv[i], Value: kv[i+1]})
+		}
+		return out
+	}
+	agree := map[int][]kicad.Field{1: f("Value", "OPA2", "MPN", "X1"), 2: f("Value", "OPA2", "MPN", "X1")}
+	if got, err := kicadInheritUnitFields(agree, "U1", "OPA2", "", ""); err != nil || len(got) != 2 {
+		t.Errorf("agreeing units: %v %v", got, err)
+	}
+	for name, c := range map[string]struct {
+		units                  map[int][]kicad.Field
+		value, footprint, lcsc string
+	}{
+		"custom field missing on unit 2": {units: map[int][]kicad.Field{1: f("Value", "OPA2", "MPN", "X1"), 2: f("Value", "OPA2")}},
+		"custom field only on unit 2":    {units: map[int][]kicad.Field{1: f("Value", "OPA2"), 2: f("Value", "OPA2", "MPN", "X1")}},
+		"values differ between units":    {units: map[int][]kicad.Field{1: f("Value", "OPA2"), 3: f("Value", "OPA2B")}},
+		"given value differs":            {units: agree, value: "TL072"},
+		"given LCSC absent on the units": {units: agree, lcsc: "C1"},
+	} {
+		if _, err := kicadInheritUnitFields(c.units, "U1", c.value, c.footprint, c.lcsc); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+// TestSchKicadNestedProjects: sub/inner.kicad_pro's root sheet is also a
+// sheet of the outer project above it — two projects hold it, so placing
+// and renaming there are refused and the file stays as it was.
+func TestSchKicadNestedProjects(t *testing.T) {
+	outer := t.TempDir()
+	inner := filepath.Join(outer, "sub")
+	_ = os.MkdirAll(inner, 0o755)
+	_ = os.WriteFile(filepath.Join(outer, "outer.kicad_pro"), []byte("{}\n"), 0o644)
+	root := strings.Replace(kicad.NewSchematicText("A4", kicad.NewUUID(), true), "\t(sheet_instances",
+		"\t(sheet (at 25.4 25.4) (size 20 10) (uuid \""+kicad.NewUUID()+"\") (property \"Sheetname\" \"Inner\" (at 25.4 24 0)) (property \"Sheetfile\" \"sub/inner.kicad_sch\" (at 25.4 36 0)))\n\t(sheet_instances", 1)
+	_ = os.WriteFile(filepath.Join(outer, "outer.kicad_sch"), []byte(root), 0o644)
+	_ = os.WriteFile(filepath.Join(inner, "inner.kicad_pro"), []byte("{}\n"), 0o644)
+	e, _ := kicad.OpenSchematic(kicad.NewSchematicText("A4", kicad.NewUUID(), true))
+	e.Project = "inner"
+	lib := filepath.Join(inner, "my.kicad_sym")
+	_ = os.WriteFile(lib, []byte(testDualLib), 0o644)
+	sym, _ := kicad.LibSymbolFromFile(lib, "OPA2")
+	_ = e.AddLibSymbol("my:OPA2", sym)
+	if _, err := e.PlaceSymbol(kicad.SymbolInstance{LibID: "my:OPA2", Ref: "U1", Value: "OPA2", At: kicad.Pt{X: 50.8, Y: 50.8}}); err != nil {
+		t.Fatal(err)
+	}
+	text, _ := e.Render()
+	sheet := filepath.Join(inner, "inner.kicad_sch")
+	_ = os.WriteFile(sheet, []byte(text), 0o644)
+	k := []string{"--backend", "kicad", "--kicad-sch", sheet}
+	for _, args := range [][]string{
+		{"place", "--symbol", "my:OPA2", "--designator", "U1", "--unit", "2", "--x", "101.6", "--y", "50.8"},
+		{"place", "--symbol", "my:OPA2", "--designator", "U2", "--x", "101.6", "--y", "50.8"},
+		{"modify", "--id", "U1", "--designator", "U7"},
+	} {
+		var out, errb bytes.Buffer
+		if code := Run(append(append([]string{"sch"}, args...), k...), &out, &errb); code == 0 || !strings.Contains(out.String()+errb.String(), "several projects") {
+			t.Errorf("%v: exit %d: %s%s", args, code, out.String(), errb.String())
+		}
+		if now, _ := os.ReadFile(sheet); string(now) != text {
+			t.Fatalf("refused %v changed the sheet", args)
+		}
+	}
+}
+
+// TestSchBuildMultiUnitDecouplingLive: decoupling caps of two multi-unit
+// ICs (their supply pins are on the power units) sit beside those pins —
+// EG-06 passes.
+func TestSchBuildMultiUnitDecouplingLive(t *testing.T) {
+	sbNeedKicad(t)
+	t.Setenv(kicad.EnvCacheDir, t.TempDir())
+	for name, nears := range map[string][2]string{"plain": {}, "near": {"U1:8", "U2:14"}} {
+		spec := &sbSpec{Name: "dc",
+			Parts: []sbPart{
+				{Ref: "U1", Symbol: "Amplifier_Operational:LM358"},
+				{Ref: "U2", Symbol: "74xx:74HC00"},
+				{Ref: "C1", Value: "100nF", Symbol: "Device:C", Near: nears[0]},
+				{Ref: "C2", Value: "100nF", Symbol: "Device:C", Near: nears[1]},
+				{Ref: "R1", Value: "10k", Symbol: "Device:R"},
+			},
+			Nets: []sbNet{
+				{Name: "+5V", Kind: "power", Pins: []string{"U1:8", "U2:14", "C1:1", "C2:1", "R1:1"}},
+				{Name: "GND", Kind: "ground", Pins: []string{"U1:4", "U2:7", "C1:2", "C2:2"}},
+				{Name: "IN_A", Pins: []string{"U1:3", "R1:2"}},
+				{Name: "FB_A", Pins: []string{"U1:1", "U1:2", "U2:1", "U2:2"}},
+			}}
+		res, err := runSchBuild(spec, sbOptions{OutDir: filepath.Join(t.TempDir(), name), NoIntent: true, Jobs: 2, PlannerBudget: 20000}, nil)
+		if err != nil || !res.OK || sbGateStatus(res, "engineer-grade") != "pass" {
+			t.Errorf("%s: %v %+v", name, err, res.Gates)
+		}
+	}
+}

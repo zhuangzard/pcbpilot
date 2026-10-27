@@ -272,7 +272,7 @@ func kicadSchPlace(path string, libID, symLib, ref, value, footprint, lcsc strin
 				}
 			}
 			var err error
-			if fields, err = kicadInheritUnitFields(e.SymbolFields(ref), ref, value, footprint, lcsc); err != nil {
+			if fields, err = kicadInheritUnitFields(e.SymbolUnitFields(ref), ref, value, footprint, lcsc); err != nil {
 				return nil, err
 			}
 		} else if lcsc != "" {
@@ -292,15 +292,51 @@ func kicadSchPlace(path string, libID, symLib, ref, value, footprint, lcsc strin
 	})
 }
 
-// kicadInheritUnitFields gives a new unit of a placed symbol the fields of
-// its placed units (KiCad keeps them equal on every unit); a --value,
-// --footprint or --lcsc that disagrees with them — or names a field they do
-// not have — is refused, so the units never diverge (sch modify --id REF
+// kicadInheritUnitFields gives a new unit of a placed symbol the fields its
+// placed units share (KiCad keeps them equal on every unit). Units that
+// already disagree — a value, or a field one of them lacks — are refused, as
+// is a --value, --footprint or --lcsc that differs from them or names a
+// field they do not have, so the units never diverge (sch modify --id REF
 // sets a field on every unit).
-func kicadInheritUnitFields(have []kicad.Field, ref, value, footprint, lcsc string) ([]kicad.Field, error) {
+func kicadInheritUnitFields(byUnit map[int][]kicad.Field, ref, value, footprint, lcsc string) ([]kicad.Field, error) {
+	units := make([]int, 0, len(byUnit))
+	for u := range byUnit {
+		units = append(units, u)
+	}
+	sort.Ints(units)
+	if len(units) == 0 {
+		return nil, nil
+	}
+	// the fields of the first unit, checked against every other unit
+	first := byUnit[units[0]]
+	val := map[string]string{}
+	for _, f := range first {
+		val[f.Name] = f.Value
+	}
+	for _, u := range units[1:] {
+		seen := map[string]bool{}
+		for _, f := range byUnit[u] {
+			seen[f.Name] = true
+			if f.Name == "Reference" {
+				continue
+			}
+			v, ok := val[f.Name]
+			if !ok {
+				return nil, fmt.Errorf("%s: unit %d has a %s field unit %d lacks; make the placed units agree first (sch modify --id %s)", ref, u, f.Name, units[0], ref)
+			}
+			if v != f.Value {
+				return nil, fmt.Errorf("%s: %s is %q on unit %d but %q on unit %d; make the placed units agree first (sch modify --id %s)", ref, f.Name, v, units[0], f.Value, u, ref)
+			}
+		}
+		for name := range val {
+			if name != "Reference" && !seen[name] {
+				return nil, fmt.Errorf("%s: unit %d lacks the %s field unit %d has; make the placed units agree first (sch modify --id %s)", ref, u, name, units[0], ref)
+			}
+		}
+	}
 	given := map[string]string{"Value": value, "Footprint": footprint, "LCSC": lcsc}
 	var out []kicad.Field
-	for _, f := range have {
+	for _, f := range first {
 		if f.Name == "Reference" {
 			continue
 		}
