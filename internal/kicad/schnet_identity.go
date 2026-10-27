@@ -5,10 +5,12 @@ package kicad
 // names unescaped, so "/pic_sockets/VCC_PIC" may be the sub-sheet label
 // "VCC_PIC" (identity "/pic_sockets/VCC_PIC") or a root label
 // "pic_sockets/VCC_PIC" ("/pic_sockets{slash}VCC_PIC"). The reading comes
-// from evidence only — the net-naming texts of each sheet file, then the
-// sheets of the net's pins — and an undecidable name, or two nets with one
-// identity, is ErrNetAmbiguous: every consumer then stops instead of
-// matching a guessed (possibly shorted) net.
+// from label evidence only: exactly one reading whose sheet file has a
+// label, hierarchical label or sheet pin with that text. The sheets of the
+// net's pins prove nothing (a net crosses sheets through hierarchical
+// ports), so they are not used. No evidence, several readings with
+// evidence, or two nets with one identity is ErrNetAmbiguous: every
+// consumer then stops instead of matching a guessed (possibly shorted) net.
 
 import (
 	"errors"
@@ -52,10 +54,6 @@ func sheetNetTexts(path string) map[string]bool {
 // netIdentities rewrites every net name to its identity. files maps sheet
 // paths to their sheet files (label evidence; may be empty).
 func (nl *SchNetlist) netIdentities(files map[string]string) error {
-	compSheet := map[string]string{}
-	for _, c := range nl.Components {
-		compSheet[c.Ref] = c.Sheet
-	}
 	cache := map[string]map[string]bool{}
 	texts := func(sheet string) map[string]bool {
 		f, ok := files[sheet]
@@ -80,7 +78,7 @@ func (nl *SchNetlist) netIdentities(files map[string]string) error {
 			prefix = cands[0]
 		default:
 			var why string
-			if prefix, why = nl.decideSheet(n, cands, texts, compSheet); prefix == "" {
+			if prefix, why = decideSheet(n, cands, texts); prefix == "" {
 				errs = append(errs, why)
 				continue
 			}
@@ -100,47 +98,38 @@ func (nl *SchNetlist) netIdentities(files map[string]string) error {
 }
 
 // decideSheet picks the sheet path of net n among cands (each a reading
-// of its XML name): the readings whose sheet file has a label / sheet pin
-// with the rest of the name (when every candidate's file was read), then
-// the readings whose sheet holds one of the net's pins. "" and why when
-// not exactly one reading is left.
-func (nl *SchNetlist) decideSheet(n *SchNet, cands []string, texts func(string) map[string]bool, compSheet map[string]string) (string, string) {
-	set := cands
-	evidence := true
+// of its XML name): the one reading whose sheet file has a label /
+// hierarchical label / sheet pin with the rest of the name, every
+// candidate's file having been read. "" and why otherwise.
+func decideSheet(n *SchNet, cands []string, texts func(string) map[string]bool) (string, string) {
+	var viable, unread []string
 	for _, c := range cands {
-		evidence = evidence && texts(c) != nil
-	}
-	if evidence {
-		var viable []string
-		for _, c := range cands {
-			if texts(c)[n.Name[len(c):]] {
-				viable = append(viable, c)
-			}
-		}
-		if len(viable) == 1 {
-			return viable[0], ""
-		}
-		if len(viable) > 1 {
-			set = viable
+		t := texts(c)
+		switch {
+		case t == nil:
+			unread = append(unread, c)
+		case t[n.Name[len(c):]]:
+			viable = append(viable, c)
 		}
 	}
-	pinSheets := map[string]bool{}
-	for _, d := range n.Nodes {
-		pinSheets[compSheet[d.Ref]] = true
+	if len(unread) == 0 && len(viable) == 1 {
+		return viable[0], ""
 	}
-	var onPins []string
-	for _, c := range set {
-		if pinSheets[c] {
-			onPins = append(onPins, c)
-		}
-	}
-	if len(onPins) == 1 {
-		return onPins[0], ""
+	set := viable
+	if len(unread) > 0 || len(viable) == 0 {
+		set = cands
 	}
 	var reads []string
 	for _, c := range set {
 		reads = append(reads, fmt.Sprintf("sheet %s label %q", c, n.Name[len(c):]))
 	}
 	sort.Strings(reads)
-	return "", fmt.Sprintf("net %s %q could be %s", n.Code, n.Name, strings.Join(reads, " or "))
+	why := "labels on several sheets fit"
+	switch {
+	case len(unread) > 0:
+		why = "sheet files " + strings.Join(unread, ", ") + " not readable"
+	case len(viable) == 0:
+		why = "no sheet has such a label"
+	}
+	return "", fmt.Sprintf("net %s %q could be %s (%s)", n.Code, n.Name, strings.Join(reads, " or "), why)
 }

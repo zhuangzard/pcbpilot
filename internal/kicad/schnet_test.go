@@ -115,8 +115,9 @@ func TestSchNetlistCanonicalNetIdentity(t *testing.T) {
 // Two different nets that kicad-cli's XML writes with one name: the root
 // label "pic_sockets/VCC_PIC" and the sub-sheet label "VCC_PIC" both read
 // "/pic_sockets/VCC_PIC". They are never collapsed into one identity (that
-// would hide a short): the sheets of their pins tell them apart, else the
-// netlist is ErrNetAmbiguous.
+// would hide a short) and never told apart by where their pins sit (a net
+// crosses the hierarchy through ports, so pins prove nothing): with both
+// labels present the netlist is ErrNetAmbiguous, however the pins lie.
 func TestSchNetlistSameXMLNameTwoNets(t *testing.T) {
 	const tmpl = `<?xml version="1.0" encoding="utf-8"?>
 <export version="E">
@@ -137,29 +138,33 @@ func TestSchNetlistSameXMLNameTwoNets(t *testing.T) {
     <net code="2" name="/pic_sockets/VCC_PIC">NODES2</net>
   </nets>
 </export>`
-	files := map[string]string{
+	both := map[string]string{
 		"root.kicad_sch":    `(label "pic_sockets/VCC_PIC" (at 0 0 0))`,
 		"sockets.kicad_sch": `(label "VCC_PIC" (at 0 0 0))`,
 	}
-	// Pins on one sheet each: decidable.
-	x := strings.NewReplacer("NODES1", `<node ref="R1" pin="1"/><node ref="R1" pin="2"/>`,
-		"NODES2", `<node ref="R2" pin="1"/><node ref="R2" pin="2"/>`).Replace(writeSheets(t, tmpl, files))
+	for name, nodes := range map[string][2]string{
+		// pins of each net on "its" sheet — still not proof of where it was named
+		"pins apart": {`<node ref="R1" pin="1"/><node ref="R1" pin="2"/>`, `<node ref="R2" pin="1"/><node ref="R2" pin="2"/>`},
+		// the root-label net reaches only sub-sheet pins and vice versa (ports)
+		"pins swapped": {`<node ref="R2" pin="1"/><node ref="R2" pin="2"/>`, `<node ref="R1" pin="1"/><node ref="R1" pin="2"/>`},
+		// both nets cross the hierarchy
+		"both cross": {`<node ref="R1" pin="1"/><node ref="R2" pin="1"/>`, `<node ref="R1" pin="2"/><node ref="R2" pin="2"/>`},
+	} {
+		x := strings.NewReplacer("NODES1", nodes[0], "NODES2", nodes[1]).Replace(writeSheets(t, tmpl, both))
+		if _, err := ParseSchNetlist([]byte(x)); !errors.Is(err, ErrNetAmbiguous) || !strings.Contains(err.Error(), "fix:") {
+			t.Errorf("%s: want ErrNetAmbiguous with a fix hint, got %v", name, err)
+		}
+	}
+	// Only the sub-sheet label exists: one net, certain, even if it crosses.
+	one := strings.Replace(tmpl, `<net code="2" name="/pic_sockets/VCC_PIC">NODES2</net>`, "", 1)
+	x := strings.Replace(writeSheets(t, one, map[string]string{"root.kicad_sch": `(label "OTHER" (at 0 0 0))`, "sockets.kicad_sch": `(label "VCC_PIC" (at 0 0 0))`}),
+		"NODES1", `<node ref="R1" pin="1"/><node ref="R2" pin="1"/>`, 1)
 	nl, err := ParseSchNetlist([]byte(x))
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || nl.Nets[0].Name != "/pic_sockets/VCC_PIC" {
+		t.Fatalf("single label: %v %+v", err, nl)
 	}
-	if a, b := nl.Nets[0].Name, nl.Nets[1].Name; a != "/pic_sockets{slash}VCC_PIC" || b != "/pic_sockets/VCC_PIC" {
-		t.Fatalf("identities %q, %q: want the root label and the sub-sheet label apart", a, b)
-	}
-	// Pins of both nets on both sheets: undecidable, never guessed.
-	x = strings.NewReplacer("NODES1", `<node ref="R1" pin="1"/><node ref="R2" pin="1"/>`,
-		"NODES2", `<node ref="R1" pin="2"/><node ref="R2" pin="2"/>`).Replace(writeSheets(t, tmpl, files))
-	if _, err := ParseSchNetlist([]byte(x)); !errors.Is(err, ErrNetAmbiguous) || !strings.Contains(err.Error(), "fix:") {
-		t.Fatalf("want ErrNetAmbiguous with a fix hint, got %v", err)
-	}
-	// No sheet files (no label evidence) and pins on both sheets: an error too.
-	x = strings.NewReplacer("ROOT", "", "NODES1", `<node ref="R1" pin="1"/><node ref="R2" pin="1"/>`,
-		"NODES2", `<node ref="R1" pin="2"/><node ref="R2" pin="2"/>`).Replace(tmpl)
+	// No sheet files (no label evidence): an error.
+	x = strings.NewReplacer("ROOT", "", "NODES1", `<node ref="R1" pin="1"/>`).Replace(one)
 	if _, err := ParseSchNetlist([]byte(x)); !errors.Is(err, ErrNetAmbiguous) {
 		t.Fatalf("no evidence: want ErrNetAmbiguous, got %v", err)
 	}

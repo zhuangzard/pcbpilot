@@ -105,5 +105,19 @@ class HierarchicalNetIdentityTest(unittest.TestCase):
         self.assertEqual(len(rep["netMismatch"]), 2)
 
 
+    def test_hidden_short_legacy_names(self):
+        # Legacy connectivity: distinct schematic nets "VCC" and "/pwr/VCC";
+        # the board shorts them into one net /pwr/VCC. Never merged.
+        sch = {"components": [{"id": "c", "ref": "R1", "pins": [{"number": "1"}, {"number": "2"}]}],
+               "nets": [{"id": "a", "name": "VCC"}, {"id": "b", "name": "/pwr/VCC"}],
+               "connections": [{"componentId": "c", "pinNumber": "1", "netId": "a"},
+                               {"componentId": "c", "pinNumber": "2", "netId": "b"}]}
+        pcb = {"components": [{"designator": "R1", "pads": [{"padNumber": "1", "net": "/pwr/VCC"}, {"padNumber": "2", "net": "/pwr/VCC"}]}]}
+        rep = pnd.diff(pnd.schematic_map(sch), pnd.pcb_map(pcb))
+        self.assertFalse(rep["ok"], rep)
+        self.assertEqual(rep["netCollision"], [{"net": "/pwr/VCC", "schematic": ["/pwr/VCC", "VCC"]}])
+        self.assertEqual([m["pad"] for m in rep["netMismatch"]], ["R1.1"])
+
+
 if __name__ == "__main__":
     unittest.main()

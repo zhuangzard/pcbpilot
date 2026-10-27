@@ -397,21 +397,15 @@ func runSignoff(o signoffOpts, waivers []gateWaiver, stderr io.Writer) (*signoff
 	// names for documents without one), the board's own net names, and the
 	// intent's names resolved against both.
 	boardIDs := netname.NewResolver(boardNetIDs(snap))
+	netIDs, shorts := signoffNetIdentities(docs, boardIDs)
 	schPins := map[string]string{}
 	netParts := map[string]map[string]bool{}
-	for _, d := range docs {
+	for di, d := range docs {
 		ref := map[string]string{}
 		for _, c := range d.Components {
 			ref[c.ID] = c.Ref
 		}
-		name := map[string]string{}
-		for _, n := range d.Nets {
-			if n.FullName != "" {
-				name[n.ID] = n.FullName
-			} else if n.Name != "" {
-				name[n.ID], _ = boardIDs.Resolve(n.Name)
-			}
-		}
+		name := netIDs[di]
 		for _, c := range d.Connections {
 			n := name[c.NetID]
 			if n == "" {
@@ -436,6 +430,10 @@ func runSignoff(o signoffOpts, waivers []gateWaiver, stderr io.Writer) (*signoff
 		}
 		g := padNetDiffGate(schPins, board, strings.Join(o.connectivity, ","), filepath.Join(o.outDir, "net-diff.json"))
 		g.Gate = "signoff-continuity"
+		if len(shorts) > 0 {
+			g.Pass = false
+			g.Items = append(shorts, g.Items...)
+		}
 		add(g)
 	}
 	boardPads := map[string]int{}
@@ -525,6 +523,60 @@ func runSignoff(o signoffOpts, waivers []gateWaiver, stderr io.Writer) (*signoff
 	_ = writeJSONFile(filepath.Join(o.outDir, "signoff.json"), res)
 	_ = os.WriteFile(filepath.Join(o.outDir, "signoff.md"), []byte(signoffMarkdown(res)), 0o644)
 	return res, nil
+}
+
+// signoffNetIdentities gives each schematic net (per document, by net id)
+// its identity: fullName, else its name resolved against the board's nets.
+// Resolution is per schematic net, never per pin: when several distinct
+// schematic nets ("VCC" and "/pwr/VCC") would become one identity they keep
+// their own names — the partition comparison then shows the board short —
+// and each such group is returned as a failure item.
+func signoffNetIdentities(docs []signoffDoc, board *netname.Resolver) ([]map[string]string, []string) {
+	type src struct {
+		doc            int
+		id, key, ident string
+	}
+	var srcs []src
+	keys := map[string]map[string]bool{} // identity → distinct source names
+	for di, d := range docs {
+		for _, n := range d.Nets {
+			key, ident := n.FullName, n.FullName
+			if key == "" {
+				key = n.Name
+				if key == "" {
+					key = n.ID
+				}
+				if id, m := board.Resolve(key); m == netname.Found {
+					ident = id
+				} else {
+					ident = key
+				}
+			}
+			srcs = append(srcs, src{di, n.ID, key, ident})
+			if keys[ident] == nil {
+				keys[ident] = map[string]bool{}
+			}
+			keys[ident][key] = true
+		}
+	}
+	out := make([]map[string]string, len(docs))
+	for i := range out {
+		out[i] = map[string]string{}
+	}
+	var shorts []string
+	for _, s := range srcs {
+		if len(keys[s.ident]) > 1 {
+			out[s.doc][s.id] = s.key
+			continue
+		}
+		out[s.doc][s.id] = s.ident
+	}
+	for _, ident := range sortedKeysOf(keys) {
+		if len(keys[ident]) > 1 {
+			shorts = append(shorts, fmt.Sprintf("schematic nets %s all resolve to board net %s — distinct schematic nets on one board net (a short), not merged", strings.Join(sortedKeysOf(keys[ident]), ", "), ident))
+		}
+	}
+	return out, shorts
 }
 
 func dashIfEmpty(s string) string {

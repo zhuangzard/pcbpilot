@@ -288,60 +288,58 @@ func validIntentName(name string) error {
 	return nil
 }
 
-// sortedNetNames returns intent net names in a stable order.
 // onBoard is the intent with every net name resolved to the board's net
 // identity (pkg/netname): an intent derived from display names ("VCC_PIC",
 // "VPP/MCLR") names the hierarchical KiCad board's "/pic_sockets/VCC_PIC" /
 // "/VPP{slash}MCLR". Names already on the board and unknown names stay.
-// Never merged, never guessed: two intent nets resolving to one board net
-// (or onto an intent net already named so) and a rule net whose name fits
-// several board nets are an error. The receiver is not changed; renamed
-// lists "intent → board".
+// Never merged, never guessed: every net reference (nets, diff pairs, net
+// classes, domains, blocks) is resolved first, and distinct names reaching
+// one board net (aliases, or an alias next to the exact identity) or a
+// name fitting several board nets is an error before anything is
+// rewritten. The receiver is not changed; renamed lists "intent → board".
 func (in *designIntent) onBoard(boardNets []string) (*designIntent, []string, error) {
 	if in == nil {
 		return in, nil, nil
 	}
-	r := netname.NewResolver(boardNets)
-	to := map[string]string{}
-	var problems []string
-	ambiguous := map[string]bool{}
-	check := func(name string) (string, bool) {
-		id, m := r.Resolve(name)
-		if m == netname.Ambiguous && !ambiguous[name] {
-			ambiguous[name] = true
-			problems = append(problems, fmt.Sprintf("%q could be board net %s", name, strings.Join(r.Candidates(name), " or ")))
+	refs := map[string]bool{}
+	for name, n := range in.Nets {
+		refs[name] = true
+		if n != nil && n.DiffPair != "" {
+			refs[n.DiffPair] = true
 		}
-		return id, m == netname.Found && id != name
-	}
-	dest := map[string][]string{}
-	for _, name := range in.sortedNetNames() {
-		if id, ok := check(name); ok {
-			dest[id] = append(dest[id], name)
-		}
-	}
-	for _, id := range sortedKeysOf(dest) {
-		srcs := dest[id]
-		if len(srcs) > 1 || in.Nets[id] != nil {
-			if in.Nets[id] != nil {
-				srcs = append(srcs, id)
-			}
-			problems = append(problems, fmt.Sprintf("intent nets %s all name board net %s", strings.Join(srcs, ", "), id))
-			continue
-		}
-		to[srcs[0]] = id
 	}
 	for _, nc := range in.NetClasses {
 		for _, n := range nc.Nets {
-			if id, ok := check(n); ok && to[n] == "" && in.Nets[n] == nil {
-				to[n] = id
-			}
+			refs[n] = true
 		}
 	}
 	for _, d := range in.Domains {
 		for _, n := range d.Nets {
-			if id, ok := check(n); ok && to[n] == "" && in.Nets[n] == nil {
-				to[n] = id
-			}
+			refs[n] = true
+		}
+	}
+	for _, b := range in.Blocks {
+		for _, n := range b.Nets {
+			refs[n] = true
+		}
+	}
+	r := netname.NewResolver(boardNets)
+	var problems []string
+	dest := map[string][]string{} // board net → distinct intent names reaching it
+	for _, name := range sortedKeysOf(refs) {
+		switch id, m := r.Resolve(name); m {
+		case netname.Ambiguous:
+			problems = append(problems, fmt.Sprintf("%q could be board net %s", name, strings.Join(r.Candidates(name), " or ")))
+		case netname.Found:
+			dest[id] = append(dest[id], name)
+		}
+	}
+	to := map[string]string{}
+	for _, id := range sortedKeysOf(dest) {
+		if srcs := dest[id]; len(srcs) > 1 {
+			problems = append(problems, fmt.Sprintf("intent names %s all name board net %s", strings.Join(srcs, ", "), id))
+		} else if srcs[0] != id {
+			to[srcs[0]] = id
 		}
 	}
 	if len(problems) > 0 {
@@ -401,6 +399,7 @@ func sortedKeysOf[V any](m map[string]V) []string {
 	return out
 }
 
+// sortedNetNames returns intent net names in a stable order.
 func (in *designIntent) sortedNetNames() []string {
 	out := make([]string, 0, len(in.Nets))
 	for n := range in.Nets {

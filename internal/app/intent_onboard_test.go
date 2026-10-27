@@ -66,6 +66,21 @@ func TestIntentOnBoardRejectsCollisionsAndAmbiguity(t *testing.T) {
 			t.Errorf("%s: want an error with a fix hint, got %v", name, err)
 		}
 	}
+	// The same, reached through the other references: the rule net under
+	// its display name, its exact identity in a net class / domain / block
+	// / diff pair, or an ambiguous name in a block.
+	vcc := map[string]*intentNet{"VCC_PIC": {WidthMil: intentWidth{Outer: 20}}}
+	for name, in := range map[string]*designIntent{
+		"netclass identity": {Nets: vcc, NetClasses: []intentNetClass{{Name: "N", Nets: []string{"/pic_sockets/VCC_PIC"}}}},
+		"domain identity":   {Nets: vcc, Domains: []intentDomain{{ID: "D", Nets: []string{"/pic_sockets/VCC_PIC"}}}},
+		"block identity":    {Nets: vcc, Blocks: []intentBlock{{ID: "B", Nets: []string{"/pic_sockets/VCC_PIC"}}}},
+		"diff pair alias":   {Nets: map[string]*intentNet{"/VPP{slash}MCLR": {DiffPair: "VPP/MCLR"}}},
+		"block ambiguous":   {Nets: vcc, Blocks: []intentBlock{{ID: "B", Nets: []string{"SDA"}}}},
+	} {
+		if _, _, err := in.onBoard(hierBoardNets); err == nil {
+			t.Errorf("%s: want an error, nothing rewritten", name)
+		}
+	}
 }
 
 // signoff-trace: the schematic has SDA on two sheets, the board only one of
@@ -118,5 +133,53 @@ func TestSignoffTraceAmbiguousIsNotUnknown(t *testing.T) {
 	}
 	if len(res.Traceability) != 1 || res.Traceability[0].Identity != "" || res.Traceability[0].BoardPads != 0 {
 		t.Fatalf("row %+v: SDA must not be matched to the board's /a/SDA", res.Traceability)
+	}
+}
+
+// Legacy connectivity (no fullName) with two distinct schematic nets "VCC"
+// and "/pwr/VCC" on a board that has them as one net /pwr/VCC: resolving
+// each name on its own would merge them and hide the short. Continuity
+// fails and names it.
+func TestSignoffContinuityHiddenShortLegacyNames(t *testing.T) {
+	dir := t.TempDir()
+	raw, err := os.ReadFile(filepath.Join("..", "kicad", "testdata", "snapshot.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	board := filepath.Join(dir, "board.json")
+	if err := os.WriteFile(board, []byte(strings.ReplaceAll(string(raw), `"VCC"`, `"/pwr/VCC"`)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	intent := filepath.Join(dir, "intent.json")
+	if err := os.WriteFile(intent, []byte(`{"nets":{"GND":{"role":"ground"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	doc := map[string]any{"schemaVersion": "1.4",
+		"components": []any{
+			map[string]any{"id": "r1", "ref": "R1", "device": map[string]any{"deviceUuid": "x"}, "pins": []any{map[string]any{"number": "1"}, map[string]any{"number": "2"}}},
+			map[string]any{"id": "j1", "ref": "J1", "device": map[string]any{"deviceUuid": "y"}, "pins": []any{map[string]any{"number": "1"}, map[string]any{"number": "2"}}},
+		},
+		"nets": []any{map[string]any{"id": "n1", "name": "VCC"}, map[string]any{"id": "n4", "name": "/pwr/VCC"},
+			map[string]any{"id": "n2", "name": "SIG_A"}, map[string]any{"id": "n3", "name": "GND"}},
+		"connections": []any{
+			map[string]any{"componentId": "r1", "pinNumber": "1", "netId": "n1"},
+			map[string]any{"componentId": "r1", "pinNumber": "2", "netId": "n2"},
+			map[string]any{"componentId": "j1", "pinNumber": "1", "netId": "n4"},
+			map[string]any{"componentId": "j1", "pinNumber": "2", "netId": "n3"},
+		}}
+	b, _ := json.Marshal(doc)
+	conn := filepath.Join(dir, "conn.json")
+	if err := os.WriteFile(conn, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	res, err := runSignoff(signoffOpts{board: board, intent: intent, connectivity: []string{conn}, outDir: filepath.Join(dir, "so")}, nil, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, g := range res.Gates {
+		if g.Gate == "signoff-continuity" && (g.Pass || len(g.Items) == 0 || !strings.Contains(g.Items[0], "/pwr/VCC, VCC all resolve to board net /pwr/VCC")) {
+			t.Fatalf("continuity %+v: want the hidden short reported", g)
+		}
 	}
 }

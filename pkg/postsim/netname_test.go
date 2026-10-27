@@ -130,3 +130,35 @@ func TestSimNetAliasCollisionFails(t *testing.T) {
 		}
 	}
 }
+
+// A sim net whose name fits two board nets is reported whatever its role
+// (here a signal net) — never guessed, never silently left out.
+func TestSimNetAmbiguousAnyRoleFails(t *testing.T) {
+	board, err := os.ReadFile("testdata/esp32mini/board.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sim powersim.Output
+	if err := json.Unmarshal(simFrom(t, "../../internal/app/testdata/esp32-v05"), &sim); err != nil {
+		t.Fatal(err)
+	}
+	// Two sheets' local "+3V3" on the board: one pad moved to /b/+3V3.
+	s := strings.Replace(strings.ReplaceAll(string(board), `"+3V3"`, `"/a/+3V3"`), `"/a/+3V3"`, `"/b/+3V3"`, 1)
+	for i := range sim.Results {
+		if n := sim.Results[i].Nets["+3V3"]; n != nil {
+			n.Role = "signal"
+		}
+	}
+	raw, _ := json.Marshal(sim)
+	r, err := Run([]byte(s), raw, DefaultOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, f := range r.Findings {
+		found = found || (f.Kind == "sim-board-mismatch" && f.Severity == "fail" && strings.Contains(f.Message, "sim net +3V3 could be board net /a/+3V3 or /b/+3V3"))
+	}
+	if !found || r.Verdict.Status != "fail" {
+		t.Fatalf("verdict %s, findings %+v: want the ambiguous signal net reported", r.Verdict.Status, r.Findings)
+	}
+}

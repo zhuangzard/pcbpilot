@@ -570,8 +570,8 @@ func Run(boardRaw, simRaw []byte, o Options) (*Result, error) {
 // reports a false sim-board-mismatch and the net's copper is not found.
 // Names already on the board and unknown names stay. Never merged: two sim
 // nets resolving to one board net (or onto a sim net already named so),
-// and a simulated net whose name fits several board nets, stay unrenamed
-// and are sim-board-mismatch failures.
+// and a sim net (any role) whose name fits several board nets, stay
+// unrenamed and are sim-board-mismatch failures.
 func simNetsOnBoard(b *Board, results []powersim.Result) ([]string, []Finding) {
 	var ids []string
 	for _, pt := range b.Parts {
@@ -592,11 +592,11 @@ func simNetsOnBoard(b *Board, results []powersim.Result) ([]string, []Finding) {
 	for i := range results {
 		res := &results[i]
 		dest := map[string][]string{} // board net → sim nets resolving to it
-		for n, nr := range res.Nets {
+		for n := range res.Nets {
 			switch id, m := r.Resolve(n); {
 			case m == netname.Found && id != n:
 				dest[id] = append(dest[id], n)
-			case m == netname.Ambiguous && nr != nil && (nr.Role == "power" || nr.Role == "ground" || nr.Role == "switch"):
+			case m == netname.Ambiguous:
 				ambiguous[n] = r.Candidates(n)
 			}
 		}

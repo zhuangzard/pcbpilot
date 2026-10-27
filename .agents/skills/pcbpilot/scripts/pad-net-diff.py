@@ -111,20 +111,32 @@ def pcb_map(board):
 
 
 def to_identities(sch, pcb):
-    """Schematic pin -> net identity (NC / None kept)."""
+    """Schematic pin -> net identity (NC / None kept), resolved per
+    schematic net, never per pin. Distinct schematic nets that would become
+    one identity ("VCC" and "/pwr/VCC") keep their own names, so their pads
+    mismatch, and are returned as collisions (a short on the board)."""
     resolve = resolver(pcb.values())
+    ident = {}
+    for v in sch.values():
+        if isinstance(v, tuple) and v not in ident:
+            net, full = v
+            ident[v] = net if full else resolve(net)
+    sources = {}
+    for v, i in ident.items():
+        sources.setdefault(i, set()).add(v[0])
+    collisions = [{"net": i, "schematic": sorted(src)} for i, src in sorted(sources.items()) if len(src) > 1]
+    clash = {c["net"] for c in collisions}
     out = {}
     for key, v in sch.items():
         if isinstance(v, tuple):
-            net, full = v
-            out[key] = net if full else resolve(net)
+            out[key] = v[0] if ident[v] in clash else ident[v]
         else:
             out[key] = v
-    return out
+    return out, collisions
 
 
 def diff(sch, pcb, ignore=()):
-    sch = to_identities(sch, pcb)
+    sch, collisions = to_identities(sch, pcb)
     sch_refs = {r for r, _ in sch if r not in ignore}
     pcb_refs = {r for r, _ in pcb if r not in ignore}
     out = {
@@ -135,6 +147,7 @@ def diff(sch, pcb, ignore=()):
         "netMismatch": [],
         "netCaseOnly": [],
         "unconnectedPins": [],
+        "netCollision": collisions,
     }
     for (ref, pin), net in sorted(sch.items()):
         if ref in ignore or ref not in pcb_refs:
@@ -157,7 +170,7 @@ def diff(sch, pcb, ignore=()):
             continue
         if (ref, pin) not in sch:
             out["padWithoutPin"].append(f"{ref}.{pin}")
-    out["ok"] = not any(out[k] for k in ("missingOnPcb", "extraOnPcb", "pinWithoutPad", "padWithoutPin", "netMismatch"))
+    out["ok"] = not any(out[k] for k in ("missingOnPcb", "extraOnPcb", "pinWithoutPad", "padWithoutPin", "netMismatch", "netCollision"))
     out["counts"] = {k: len(v) for k, v in out.items() if isinstance(v, list)}
     return out
 
@@ -189,6 +202,8 @@ def main():
         for k in ("missingOnPcb", "extraOnPcb", "pinWithoutPad", "padWithoutPin"):
             if rep[k]:
                 print(f"  {k}: {', '.join(rep[k][:40])}")
+        for c in rep["netCollision"]:
+            print(f"  short: schematic nets {', '.join(c['schematic'])} all resolve to pcb net {c['net']}")
         for m in rep["netMismatch"][:60]:
             print(f"  net {m['pad']}: schematic={m['schematic'] or '(none)'} pcb={m['pcb'] or '(none)'}")
         for m in rep["netCaseOnly"][:60]:

@@ -86,8 +86,10 @@ pad-net diff 直接读。单独挂在 KiCad `unconnected-(…)` 网上的脚不�
 一律先用 `fullName`；只有 `name` 的旧文档 / intent / sim 用显示名解析到板上**唯一**对应的网，同名多图纸时不猜：
 sim 判 `sim-board-mismatch`、intent 报错、signoff-trace 判"ambiguous"失败（不再退回到板上去找）。两个名字解析到同一块板网
 （如 `VCC_PIC` 与 `/pic_sockets/VCC_PIC` 同时出现）一律拒绝，绝不合并。kicad-cli XML 不转义 `/`，`/pic_sockets/VCC_PIC`
-可能是子图标签 `VCC_PIC`，也可能是根图标签 `pic_sockets/VCC_PIC`：读法只按证据定（各图纸文件里的标签/层次标签/图纸引脚，
-其次网上引脚所在图纸），定不下来或两个网读成同一身份时 `kicad netlist` 直接报 `ErrNetAmbiguous`（附修法：改标签名）。
+可能是子图标签 `VCC_PIC`，也可能是根图标签 `pic_sockets/VCC_PIC`：读法只按标签证据定（各图纸文件里的标签/层次标签/图纸引脚
+恰好只有一种读法存在）；引脚在哪张图不算证据（网经层次端口跨图）。无证据、多种读法都有标签、或两个网读成同一身份时
+`kicad netlist` 直接报 `ErrNetAmbiguous`（附修法：改标签名）。旧连接文档（无 fullName）按每个原理图网解析，
+两个不同原理图网（如 `VCC` 与 `/pwr/VCC`）落到同一块板网时 pad-net-diff 报 `netCollision`、signoff-continuity 失败（板上短路），不合并。
 
 ## 布线（`kicad route`）——与 `pcb auto route` + `pcb gate` 同序同算
 
