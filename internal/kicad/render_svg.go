@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/zhuangzard/pcbpilot/internal/gate"
@@ -58,15 +59,78 @@ func NormalizeSVG(b []byte, from []string, to string) []byte {
 			s = strings.ReplaceAll(s, f, to)
 		}
 	}
-	s = svgNumAttrRE.ReplaceAllStringFunc(s, func(a string) string {
-		m := svgNumAttrRE.FindStringSubmatch(a)
-		v := m[2]
-		for range 2 { // a match eats its right neighbour: twice catches "-0 -0"
-			v = svgNegZeroRE.ReplaceAllString(v, "$1$2$3")
+	return []byte(mapTags(s, func(tag string) string {
+		return svgNumAttrRE.ReplaceAllStringFunc(tag, func(a string) string {
+			m := svgNumAttrRE.FindStringSubmatch(a)
+			v := m[2]
+			for range 2 { // a match eats its right neighbour: twice catches "-0 -0"
+				v = svgNegZeroRE.ReplaceAllString(v, "$1$2$3")
+			}
+			return m[1] + v + m[3]
+		})
+	}))
+}
+
+// mapTags applies f to every element start tag of an XML text ("<name …>",
+// quote-aware) and leaves character data, comments, CDATA, processing
+// instructions, declarations and end tags as they are.
+func mapTags(s string, f func(string) string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		j := strings.IndexByte(s[i:], '<')
+		if j < 0 {
+			b.WriteString(s[i:])
+			break
 		}
-		return m[1] + v + m[3]
-	})
-	return []byte(s)
+		b.WriteString(s[i : i+j])
+		i += j
+		rest := s[i:]
+		skipTo := func(end string) {
+			k := strings.Index(rest, end)
+			if k < 0 {
+				k = len(rest) - len(end)
+			}
+			b.WriteString(rest[:k+len(end)])
+			i += k + len(end)
+		}
+		switch {
+		case strings.HasPrefix(rest, "<!--"):
+			skipTo("-->")
+			continue
+		case strings.HasPrefix(rest, "<![CDATA["):
+			skipTo("]]>")
+			continue
+		case strings.HasPrefix(rest, "<?"):
+			skipTo("?>")
+			continue
+		}
+		// A tag runs to the first '>' outside quotes.
+		end, quote := -1, byte(0)
+		for k := 1; k < len(rest); k++ {
+			c := rest[k]
+			if quote != 0 {
+				if c == quote {
+					quote = 0
+				}
+			} else if c == '"' || c == '\'' {
+				quote = c
+			} else if c == '>' {
+				end = k
+				break
+			}
+		}
+		if end < 0 {
+			b.WriteString(rest)
+			break
+		}
+		tag := rest[:end+1]
+		if len(tag) > 1 && tag[1] != '/' && tag[1] != '!' {
+			tag = f(tag)
+		}
+		b.WriteString(tag)
+		i += end + 1
+	}
+	return b.String()
 }
 
 // pathForms are the spellings of each directory KiCad may print (native,
@@ -95,17 +159,68 @@ var svgDrawn = map[string]bool{"svg": true, "path": true, "circle": true, "rect"
 
 var svgSpaceRE = regexp.MustCompile(`\s+`)
 
+// svgHidden are containers whose children are not drawn where they stand.
+var svgHidden = map[string]bool{"defs": true, "symbol": true, "clipPath": true, "mask": true, "marker": true, "pattern": true}
+
+var svgNumRE = regexp.MustCompile(`[-+]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][-+]?[0-9]+)?`)
+
+// svgGeometry reports whether one element, by its own attributes and text,
+// has something to draw: a path with coordinates, a line of non-zero
+// length, a rect / circle / ellipse with size, a poly with two points, text
+// with content, an image with a source.
+func svgGeometry(name string, attr map[string]string, text string) bool {
+	num := func(k string) float64 {
+		v, err := strconv.ParseFloat(strings.TrimSuffix(strings.TrimSpace(attr[k]), "mm"), 64)
+		if err != nil {
+			return 0
+		}
+		return v
+	}
+	switch name {
+	case "path":
+		return len(svgNumRE.FindAllString(attr["d"], 2)) == 2
+	case "line":
+		return num("x1") != num("x2") || num("y1") != num("y2")
+	case "rect":
+		return num("width") > 0 && num("height") > 0
+	case "circle":
+		return num("r") > 0
+	case "ellipse":
+		return num("rx") > 0 && num("ry") > 0
+	case "polyline", "polygon":
+		return len(svgNumRE.FindAllString(attr["points"], 4)) == 4
+	case "text":
+		return strings.TrimSpace(text) != ""
+	case "image":
+		return strings.TrimSpace(attr["href"]) != ""
+	}
+	return false
+}
+
 // SVGElements is the structural form of an SVG: one canonical string per
 // drawn element (tag, sorted attributes with collapsed whitespace, text, and
 // the attributes of every enclosing <g>, which carry colour and transform),
 // in document order, the <svg> root first. Two SVGs draw the same thing iff
 // the multisets match. It fails unless the document is well-formed, its
-// root is <svg> and it draws at least one element besides the root.
+// root is <svg> and it really draws something: an element with geometry
+// (svgGeometry) outside defs / symbol / clipPath / mask / marker / pattern,
+// or a <use> there whose target holds such an element.
 func SVGElements(b []byte) ([]string, error) {
 	dec := xml.NewDecoder(bytes.NewReader(b))
 	dec.Strict = true
-	var ctx, stack, out []string
-	cur := -1 // index in out of an open text element
+	type frame struct {
+		name, ctx, id string
+		attr          map[string]string
+		text          strings.Builder
+		key           int  // index in out, -1 if not a drawn element
+		hidden        bool // inside a non-rendering container
+		content       bool // this element or a descendant has geometry
+	}
+	var stack []*frame
+	var out []string
+	idContent := map[string]bool{}
+	var uses []string // targets of <use> outside hidden containers
+	visible := 0
 	root := ""
 	for {
 		tok, err := dec.Token()
@@ -122,50 +237,74 @@ func SVGElements(b []byte) ([]string, error) {
 					return nil, fmt.Errorf("root element is <%s>, not <svg>", root)
 				}
 			}
+			f := &frame{name: t.Name.Local, attr: map[string]string{}, key: -1}
 			attrs := make([]string, 0, len(t.Attr))
 			for _, a := range t.Attr {
 				name := a.Name.Local
 				if a.Name.Space != "" {
 					name = a.Name.Space + ":" + name
 				}
+				f.attr[a.Name.Local] = a.Value
 				attrs = append(attrs, name+"="+strings.TrimSpace(svgSpaceRE.ReplaceAllString(a.Value, " ")))
 			}
 			sort.Strings(attrs)
+			f.id = f.attr["id"]
 			parent := ""
-			if len(ctx) > 0 {
-				parent = ctx[len(ctx)-1]
+			if n := len(stack); n > 0 {
+				parent, f.hidden = stack[n-1].ctx, stack[n-1].hidden
 			}
-			here := parent
-			if t.Name.Local == "g" {
-				here = parent + "g{" + strings.Join(attrs, ";") + "}"
+			f.hidden = f.hidden || svgHidden[f.name]
+			f.ctx = parent
+			if f.name == "g" {
+				f.ctx = parent + "g{" + strings.Join(attrs, ";") + "}"
 			}
-			ctx, stack = append(ctx, here), append(stack, t.Name.Local)
-			if svgDrawn[t.Name.Local] {
-				out = append(out, parent+"|"+t.Name.Local+"{"+strings.Join(attrs, ";")+"}")
-				if t.Name.Local == "text" {
-					cur = len(out) - 1
-				}
+			if svgDrawn[f.name] {
+				out = append(out, parent+"|"+f.name+"{"+strings.Join(attrs, ";")+"}")
+				f.key = len(out) - 1
+			}
+			if f.name == "use" && !f.hidden {
+				uses = append(uses, strings.TrimPrefix(f.attr["href"], "#"))
+			}
+			stack = append(stack, f)
+		case xml.CharData:
+			if n := len(stack); n > 0 && stack[n-1].name == "text" {
+				stack[n-1].text.Write(t)
 			}
 		case xml.EndElement:
-			if len(stack) > 0 {
-				if stack[len(stack)-1] == "text" {
-					cur = -1
-				}
-				ctx, stack = ctx[:len(ctx)-1], stack[:len(stack)-1]
+			n := len(stack)
+			if n == 0 {
+				continue
 			}
-		case xml.CharData:
-			if cur >= 0 {
-				if s := strings.TrimSpace(string(t)); s != "" {
-					out[cur] += "=" + s
+			f := stack[n-1]
+			stack = stack[:n-1]
+			txt := strings.TrimSpace(f.text.String())
+			if f.key >= 0 && f.name == "text" && txt != "" {
+				out[f.key] += "=" + txt
+			}
+			if svgGeometry(f.name, f.attr, txt) {
+				f.content = true
+				if !f.hidden {
+					visible++
 				}
+			}
+			if f.content && n > 1 {
+				stack[n-2].content = true
+			}
+			if f.id != "" {
+				idContent[f.id] = f.content
 			}
 		}
 	}
 	if root == "" {
 		return nil, fmt.Errorf("no root element")
 	}
-	if len(out) < 2 {
-		return nil, fmt.Errorf("draws nothing (no element besides <svg>)")
+	for _, u := range uses {
+		if idContent[u] {
+			visible++
+		}
+	}
+	if visible == 0 {
+		return nil, fmt.Errorf("draws nothing (no element with geometry outside defs)")
 	}
 	return out, nil
 }

@@ -154,11 +154,16 @@ func (d *renderDeps) libTable(path, head string, lookup func(string) (FPLibVar, 
 // (page_layout_descr_file, schematic and board).
 func (d *renderDeps) worksheets(pro string, lookup func(string) (FPLibVar, bool)) {
 	b, err := os.ReadFile(pro)
-	if err != nil {
+	if os.IsNotExist(err) {
 		return // no project file: KiCad's default drawing sheet
 	}
+	if err != nil {
+		d.Unresolved = append(d.Unresolved, fmt.Sprintf("%s: %v", filepath.Base(pro), err))
+		return
+	}
 	var doc map[string]any
-	if json.Unmarshal(b, &doc) != nil {
+	if err := json.Unmarshal(b, &doc); err != nil {
+		d.Unresolved = append(d.Unresolved, fmt.Sprintf("%s: not valid JSON (%v)", filepath.Base(pro), err))
 		return
 	}
 	x := &fpVarExpander{lookup: lookup, t: &FPLibTables{Vars: map[string]FPLibVar{}}}

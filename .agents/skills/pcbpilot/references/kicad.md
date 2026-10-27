@@ -120,7 +120,9 @@ pcbpilot kicad render --out build/render --compare old/render              # 只
   `.kicad_pro` 指定的图框（`.kicad_wks`），按相对位置镜像复制（不改写任何文件，`../shared/x.kicad_sch` 照样能找到）；绝对路径或
   KiCad 变量指向的库原地只读（`render.json` 的 `readInPlace`）。绝对路径子图、未定义变量、找不到的文件 →
   `RENDER_DEPENDENCY_UNRESOLVED`（cannot-check，逐项列出），不出半张图。
-- **出图校验**：层次里每一页都必须产出能解析、且画了东西的 SVG（缺页 `RENDER_INCOMPLETE`，空图/坏图 `RENDER_BAD_SVG`）；
+- **出图校验**：层次里每一页都必须产出能解析、且真正画了东西的 SVG（`<defs>`/`<clipPath>` 等之外有几何：带坐标的 path、有尺寸的
+  rect/circle、有字的 text、指向有内容目标的 use；缺页 `RENDER_INCOMPLETE`，空图/坏图 `RENDER_BAD_SVG`）。两页或两层压平后文件名相同
+  （子图 `a/b` 与 `a-b`、层 `F.Cu` 与 `F_Cu`、层名 `top` 与总图）出图前就判 `RENDER_INCOMPLETE`；
   kicad-cli 的输出保留进 `warnings`，其中“找不到 sheet/symbol/footprint/库/文件”类消息即使退出码 0 也判
   `RENDER_KICAD_DIAGNOSTIC`。以上都是 cannot-check（退出 5），**上一版渲染原样保留**：新图先在暂存目录完成，全部通过才替换。
 - **确定性**：kicad-cli 每次出图只有 `<title>` 里的出图时间（以及偶尔回显的临时路径）会变；pcbpilot 只在生成的头部（`<title>` 与
@@ -133,7 +135,8 @@ pcbpilot kicad render --out build/render --compare old/render              # 只
   像素不同），所以 `--compare` 只列出不比较。原理图没有 PNG：kicad-cli 不出原理图位图，pcbpilot 也不带 SVG 光栅化库。
 - `--out` 写 SVG + `render.json`（文件、sha256、绘制元素数）。再次渲染到同一目录只替换 `render.json` 列出的文件；目录里有其他
   文件/子目录/链接（`RENDER_OUT_NOT_EMPTY` / `RENDER_OUT_UNSAFE`），或 `render.json` 列了渲染器不会写的名字（只允许纯文件名
-  `.svg`/`.png`，`RENDER_OUT_BAD_MANIFEST`），一律拒绝、什么都不删。`--compare` 与 `--out` 是同一目录（含链接/联接）也拒绝。
+  `.svg`/`.png`，`RENDER_OUT_BAD_MANIFEST`），一律拒绝、什么都不删。`--compare` 与 `--out` 是同一目录（含链接/联接）也拒绝；
+  `--report` 落在输入的工程目录（含输入文件本身）、`--out` 或 `--compare` 里同样拒绝（退出 1）。
 - `--compare` 逐文件：`identical`（规范化后字节相同）/ `changed`（结构化 SVG 比较：每个绘制元素连同排序后的属性、文字和所在
   `<g>` 的样式作多重集合比较，给 `elementsAdded/elementsRemoved/changedElements` 和几条样例；只换了绘制顺序记 `reordered`）/
   `added` / `removed` / `unreadable`（解析不了、没画东西——两份相同的空图也不算通过——或 `render.json` 列了却不存在）。

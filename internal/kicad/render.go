@@ -433,6 +433,11 @@ func RenderSchSVG(cli, sch, outDir, from, to string) ([]RenderFile, []string, er
 	if err != nil {
 		return nil, nil, renderErr("RENDER_DEPENDENCY_UNRESOLVED", "check every sheet of the hierarchy loads", "%v", err)
 	}
+	base := strings.TrimSuffix(filepath.Base(sch), filepath.Ext(sch))
+	want, err := schPageFiles(base, pages)
+	if err != nil {
+		return nil, nil, err
+	}
 	raw, err := os.MkdirTemp("", "pcbpilot-sch-svg-")
 	if err != nil {
 		return nil, nil, err
@@ -441,15 +446,6 @@ func RenderSchSVG(cli, sch, outDir, from, to string) ([]RenderFile, []string, er
 	warns, err := runRenderCLI(cli, true, "sch", "export", "svg", "--output", raw, sch)
 	if err != nil {
 		return nil, warns, err
-	}
-	base := strings.TrimSuffix(filepath.Base(sch), filepath.Ext(sch))
-	want := map[string]string{}
-	for _, p := range pages {
-		f := base
-		if p.Name != "" {
-			f += "-" + strings.ReplaceAll(p.Name, "/", "-")
-		}
-		want[f+".svg"] = p.Name
 	}
 	ents, err := os.ReadDir(raw)
 	if err != nil {
@@ -495,6 +491,30 @@ func RenderSchSVG(cli, sch, outDir, from, to string) ([]RenderFile, []string, er
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].File < files[j].File })
 	return files, warns, nil
+}
+
+// schPageFiles maps each page of the hierarchy to the file kicad-cli plots
+// it to (<base>.svg, <base>-<sheet path, "/" → "-">.svg). Two pages that
+// flatten to one name ("a/b" and "a-b") would let one file stand for both,
+// so that is refused before plotting.
+func schPageFiles(base string, pages []SchPage) (map[string]string, error) {
+	want := map[string]string{}
+	for _, p := range pages {
+		f := base
+		if p.Name != "" {
+			f += "-" + strings.ReplaceAll(p.Name, "/", "-")
+		}
+		f += ".svg"
+		key := strings.ToLower(f) // one file on a case-insensitive disk
+		for have, page := range want {
+			if strings.ToLower(have) == key && page != p.Name {
+				return nil, renderErr("RENDER_INCOMPLETE", "rename one of the sheets so their names differ after \"/\" → \"-\"",
+					"pages %q and %q would both plot to %s", page, p.Name, f)
+			}
+		}
+		want[f] = p.Name
+	}
+	return want, nil
 }
 
 // normalizedSVG reads and normalises one plotted SVG and checks it draws.
@@ -546,8 +566,19 @@ func renderPCB(cli, pcb string, o RenderOptions, layers []string, stage, from, t
 		f.Layer = layer
 		return f, os.WriteFile(filepath.Join(stage, name), b, 0o644)
 	}
-	var files []RenderFile
 	composite := base + "-pcb-" + o.Side + ".svg"
+	// One file per plot: a layer whose name flattens onto another layer's or
+	// onto the composite ("F.Cu" / "F_Cu", a layer called "top") is refused.
+	names := map[string]string{strings.ToLower(composite): "the " + o.Side + " composite"}
+	for _, l := range layers {
+		key := strings.ToLower(base + "-pcb-" + strings.ReplaceAll(l, ".", "_") + ".svg")
+		if other, dup := names[key]; dup {
+			return nil, nil, renderErr("RENDER_INCOMPLETE", "list each layer once, by its KiCad name (F.Cu, not F_Cu)",
+				"layer %q and %s would both plot to %s", l, other, key)
+		}
+		names[key] = fmt.Sprintf("layer %q", l)
+	}
+	var files []RenderFile
 	f, err := plot(composite, "pcb-composite", "", layers)
 	if err != nil {
 		return nil, warns, err

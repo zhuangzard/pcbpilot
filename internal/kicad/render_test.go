@@ -184,3 +184,83 @@ func TestRenderPixels(t *testing.T) {
 		}
 	}
 }
+
+// Two pages or layers that flatten to one file name are refused before
+// plotting: one file must never stand for two plots.
+func TestRenderNameCollisions(t *testing.T) {
+	if _, err := schPageFiles("top", []SchPage{{Name: ""}, {Name: "a/b"}, {Name: "a-b"}}); renderCode(err) != "RENDER_INCOMPLETE" {
+		t.Errorf("sheet a/b vs a-b: %v", err)
+	}
+	if _, err := schPageFiles("top", []SchPage{{Name: ""}, {Name: "Power"}, {Name: "power"}}); renderCode(err) != "RENDER_INCOMPLETE" {
+		t.Errorf("sheet case variants: %v", err)
+	}
+	if w, err := schPageFiles("top", []SchPage{{Name: ""}, {Name: "a/b"}, {Name: "c"}}); err != nil || len(w) != 3 {
+		t.Errorf("distinct pages: %v %v", w, err)
+	}
+	fakeRenderCLIEnv(t, "exit") // never reached: refused before plotting
+	ws := t.TempDir()
+	pcb := filepath.Join(ws, "b.kicad_pcb")
+	writeFile(t, pcb, "(kicad_pcb)\n")
+	for _, layers := range [][]string{{"F.Cu", "F_Cu"}, {"F.Cu", "F.Cu"}, {"top", "F.Cu"}} {
+		_, err := Render(RenderOptions{PCB: pcb, Layers: layers, OutDir: filepath.Join(ws, "out")})
+		if renderCode(err) != "RENDER_INCOMPLETE" || RenderVerdict(err) != gate.CannotCheck {
+			t.Errorf("layers %v: %v", layers, err)
+		}
+	}
+}
+
+// Numeric normalisation touches attributes of element tags only: the same
+// characters inside <text> (or a comment) stay as written.
+func TestNormalizeSVGLeavesCharacterData(t *testing.T) {
+	in := `<svg xmlns="http://www.w3.org/2000/svg"><text x="-0" y="1">x="-0" d="M-0 -0"</text><!-- d="-0" --><path d="M-0 1 L2 2"/></svg>`
+	got := string(NormalizeSVG([]byte(in), nil, ""))
+	want := `<svg xmlns="http://www.w3.org/2000/svg"><text x="0" y="1">x="-0" d="M-0 -0"</text><!-- d="-0" --><path d="M0 1 L2 2"/></svg>`
+	if got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+}
+
+// A drawing needs real geometry outside non-rendering containers.
+func TestSVGElementsNeedsGeometry(t *testing.T) {
+	for _, bad := range []string{
+		`<svg><path/></svg>`, `<svg><path d=""/></svg>`, `<svg><path d="M"/></svg>`,
+		`<svg><defs><path id="p" d="M1 1 L2 2"/></defs></svg>`,
+		`<svg><clipPath id="c"><rect width="5" height="5"/></clipPath><mask><circle r="2"/></mask></svg>`,
+		`<svg><defs><g id="e"><path d=""/></g></defs><use href="#e"/></svg>`,
+		`<svg><use href="#missing"/></svg>`,
+		`<svg><rect width="0" height="5"/><circle r="0"/><line x1="1" y1="1" x2="1" y2="1"/><text> </text><polyline points="1 1"/></svg>`,
+	} {
+		if _, err := SVGElements([]byte(bad)); err == nil {
+			t.Errorf("%s accepted as a drawing", bad)
+		}
+	}
+	for _, good := range []string{
+		`<svg><defs><path id="p" d="M1 1 L2 2"/></defs><use xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#p"/></svg>`,
+		`<svg><g><text x="1">R1</text></g></svg>`, `<svg><rect width="1" height="2"/></svg>`, `<svg><polygon points="0,0 1,1"/></svg>`,
+	} {
+		if _, err := SVGElements([]byte(good)); err != nil {
+			t.Errorf("%s rejected: %v", good, err)
+		}
+	}
+}
+
+// Only a missing .kicad_pro means "default drawing sheet"; one that cannot
+// be read or parsed leaves the drawing sheet unknown.
+func TestRenderDepsProjectFileErrors(t *testing.T) {
+	for _, c := range []struct{ name, want string }{{"malformed", "not valid JSON"}, {"unreadable", "top.kicad_pro"}} {
+		t.Run(c.name, func(t *testing.T) {
+			ws := t.TempDir()
+			root := schProject(t, ws, "../shared/sub.kicad_sch")
+			pro := filepath.Join(ws, "proj", "top.kicad_pro")
+			if c.name == "malformed" {
+				writeFile(t, pro, `{"schematic": {`)
+			} else if err := os.MkdirAll(pro, 0o755); err != nil { // a directory: ReadFile fails, not "not exist"
+				t.Fatal(err)
+			}
+			d, err := collectRenderDeps(root)
+			if err != nil || len(d.Unresolved) != 1 || !strings.Contains(d.Unresolved[0], c.want) {
+				t.Fatalf("%v %q", err, d.Unresolved)
+			}
+		})
+	}
+}

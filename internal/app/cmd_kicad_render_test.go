@@ -94,3 +94,32 @@ func TestSchBuildRenderIsNormalized(t *testing.T) {
 		t.Fatalf("compare exit %d: %s", code, stdout)
 	}
 }
+
+// --report may not land inside the input's project, --out or --compare
+// (it could overwrite the input or become foreign content of a render).
+func TestKicadRenderReportPathGuard(t *testing.T) {
+	root := t.TempDir()
+	proj := filepath.Join(root, "proj")
+	sch := filepath.Join(proj, "top.kicad_sch")
+	_ = os.MkdirAll(proj, 0o755)
+	const body = "(kicad_sch (version 20231120))\n"
+	if err := os.WriteFile(sch, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	base := filepath.Join(root, "base")
+	_ = os.MkdirAll(base, 0o755)
+	for _, r := range []string{sch, strings.ToUpper(sch), filepath.Join(proj, "r.json"), filepath.Join(root, "out", "r.json"), filepath.Join(base, "r.json")} {
+		stdout, _, code := runCLI(t, "kicad", "render", "--sch", sch, "--out", filepath.Join(root, "out"), "--compare", base, "--report", r)
+		var rep kicadRenderReport
+		_ = json.Unmarshal([]byte(stdout), &rep)
+		if code != 1 || rep.Error == nil || rep.Error.Code != "RENDER_BAD_INPUT" {
+			t.Errorf("--report %s: exit %d %+v", r, code, rep.Error)
+		}
+		if b, _ := os.ReadFile(sch); string(b) != body {
+			t.Fatalf("--report %s overwrote the input", r)
+		}
+		if _, err := os.Stat(filepath.Join(proj, "r.json")); err == nil {
+			t.Fatal("report written into the project")
+		}
+	}
+}

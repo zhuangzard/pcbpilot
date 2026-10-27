@@ -7,6 +7,7 @@ package app
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -102,6 +103,22 @@ connectivity is judged from netlists (kicad netlist / sch-read), not pictures.`,
 			if o.Sch == "" && o.PCB == "" && compare == "" {
 				return fail(&kicad.RenderError{Code: "RENDER_BAD_INPUT", Detail: "nothing to do", Fix: "pass --sch, --pcb or --compare"})
 			}
+			if report != "" {
+				var guard []string // the report never lands in a project, --out or --compare
+				for _, in := range []string{o.Sch, o.PCB} {
+					if in != "" {
+						guard = append(guard, filepath.Dir(in))
+					}
+				}
+				guard = append(guard, o.OutDir)
+				if compare != "" {
+					guard = append(guard, compare)
+				}
+				if err := checkReportPath(report, guard); err != nil {
+					report = ""
+					return fail(err)
+				}
+			}
 			if compare != "" && sameDir(compare, o.OutDir) {
 				return fail(&kicad.RenderError{Code: "RENDER_BAD_INPUT", Detail: "--compare names the --out directory", Fix: "render into a new --out and compare it with the old one"})
 			}
@@ -135,7 +152,7 @@ connectivity is judged from netlists (kicad netlist / sch-read), not pictures.`,
 	f.BoolVar(&o.PNG, "png", false, "PCB only: also a 3D raster preview (kicad-cli pcb render; not compared)")
 	f.IntVar(&o.DPI, "dpi", 0, "PNG pixels per inch over the board area (default 150, with --png)")
 	f.StringVar(&compare, "compare", "", "baseline render directory to diff --out against")
-	f.StringVar(&report, "report", "", "also write the JSON report to this file")
+	f.StringVar(&report, "report", "", "also write the JSON report to this file (outside the project, --out and --compare)")
 	return c
 }
 
@@ -150,6 +167,49 @@ func sameDir(a, b string) bool {
 	p, err1 := filepath.Abs(a)
 	q, err2 := filepath.Abs(b)
 	return err1 == nil && err2 == nil && strings.EqualFold(filepath.Clean(p), filepath.Clean(q))
+}
+
+// checkReportPath refuses a --report path inside any of dirs (the input's
+// project directory, which holds the input itself; --out, where it would be
+// foreign content; --compare): checked through links, junctions and case
+// with os.SameFile on every existing ancestor, and lexically
+// (case-insensitive) for directories that do not exist yet.
+func checkReportPath(report string, dirs []string) error {
+	abs, err := filepath.Abs(report)
+	if err != nil {
+		return err
+	}
+	refuse := func(dir string) error {
+		return &kicad.RenderError{Code: "RENDER_BAD_INPUT", Detail: fmt.Sprintf("--report %s is inside %s", report, dir),
+			Fix: "write the report outside the project, --out and --compare directories"}
+	}
+	if info, err := os.Lstat(abs); err == nil && !info.Mode().IsRegular() {
+		return &kicad.RenderError{Code: "RENDER_BAD_INPUT", Detail: "--report " + report + " is not a regular file", Fix: "name a new file"}
+	}
+	for _, dir := range dirs {
+		d, err := filepath.Abs(dir)
+		if err != nil {
+			continue
+		}
+		if rel, err := filepath.Rel(strings.ToLower(d), strings.ToLower(abs)); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return refuse(dir)
+		}
+		dst, err := os.Stat(d)
+		if err != nil {
+			continue
+		}
+		for p := filepath.Dir(abs); ; {
+			if st, err := os.Stat(p); err == nil && os.SameFile(st, dst) {
+				return refuse(dir)
+			}
+			up := filepath.Dir(p)
+			if up == p {
+				break
+			}
+			p = up
+		}
+	}
+	return nil
 }
 
 func writeRenderReport(stdout io.Writer, path string, rep kicadRenderReport) error {
