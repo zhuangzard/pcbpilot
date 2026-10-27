@@ -51,12 +51,18 @@ type RenderOptions struct {
 	OutDir string
 	PNG    bool // PCB only: also a 3D raster from kicad-cli pcb render
 	DPI    int  // PNG pixels per inch of board size (default 150)
+	// ReportName (a plain *.json file name) is published inside OutDir with
+	// the render, listed in render.json as kind "report". Report builds its
+	// bytes from the finished manifest and the staged directory (holding
+	// the SVGs and render.json) before anything in OutDir changes.
+	ReportName string
+	Report     func(m *RenderManifest, staged string) ([]byte, error)
 }
 
 // RenderFile is one written preview.
 type RenderFile struct {
 	File     string `json:"file"` // plain file name inside the output directory
-	Kind     string `json:"kind"` // sch-page | pcb-composite | pcb-layer | pcb-3d
+	Kind     string `json:"kind"` // sch-page | pcb-composite | pcb-layer | pcb-3d | report
 	Page     string `json:"page,omitempty"`
 	Layer    string `json:"layer,omitempty"`
 	SHA256   string `json:"sha256"`
@@ -114,7 +120,15 @@ var (
 	// renderNameRE is every file name a render writes (and a manifest may list).
 	renderNameRE = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.+()=, -]*\.(svg|png)$`)
 	renderKinds  = map[string]bool{"sch-page": true, "pcb-composite": true, "pcb-layer": true, "pcb-3d": true}
+	// renderReportNameRE is the only form --report takes: a plain .json file
+	// name, written inside --out.
+	renderReportNameRE = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.+()=, -]*\.json$`)
 )
+
+// ValidRenderReportName reports whether name can be a --report file.
+func ValidRenderReportName(name string) bool {
+	return renderReportNameRE.MatchString(name) && !strings.Contains(name, "..") && !strings.EqualFold(name, RenderManifestName)
+}
 
 // Render plots o.Sch or o.PCB into o.OutDir and writes its manifest. The
 // previous render in o.OutDir is replaced only after the new one is
@@ -152,6 +166,9 @@ func Render(o RenderOptions) (*RenderManifest, error) {
 		}
 	}
 	m.Source = filepath.Base(in)
+	if o.ReportName != "" && !ValidRenderReportName(o.ReportName) {
+		return nil, renderErr("RENDER_BAD_INPUT", "--report takes a plain file name such as report.json (written inside --out)", "bad report name %q", o.ReportName)
+	}
 	if st, err := os.Stat(in); err != nil || st.IsDir() {
 		return nil, renderErr("RENDER_INPUT_MISSING", "check the path", "%s is not a file (%v)", in, err)
 	}
@@ -207,7 +224,29 @@ func Render(o RenderOptions) (*RenderManifest, error) {
 	if !o.PNG && o.DPI != 0 {
 		m.Warnings = append(m.Warnings, "dpi: ignored without --png")
 	}
+	if o.ReportName != "" {
+		for _, f := range m.Files {
+			if strings.EqualFold(f.File, o.ReportName) {
+				return nil, renderErr("RENDER_BAD_INPUT", "pick another --report name", "--report %q is also a render file", o.ReportName)
+			}
+		}
+		m.Files = append(m.Files, RenderFile{File: o.ReportName, Kind: "report"})
+	}
 	sort.Slice(m.Files, func(i, j int) bool { return m.Files[i].File < m.Files[j].File })
+	if err := writeManifest(stage, m); err != nil {
+		return nil, err
+	}
+	if o.ReportName != "" {
+		var b []byte
+		if o.Report != nil {
+			if b, err = o.Report(m, stage); err != nil {
+				return nil, err
+			}
+		}
+		if err := os.WriteFile(filepath.Join(stage, o.ReportName), b, 0o644); err != nil {
+			return nil, err
+		}
+	}
 	if err := publishRender(stage, out, m); err != nil {
 		return nil, err
 	}
@@ -290,10 +329,14 @@ func readStrictManifest(dir string) (*RenderManifest, error) {
 	}
 	seen := map[string]bool{}
 	for _, f := range m.Files {
-		if !renderNameRE.MatchString(f.File) || strings.Contains(f.File, "..") || !renderKinds[f.Kind] || seen[f.File] {
+		okName := renderNameRE.MatchString(f.File) && renderKinds[f.Kind]
+		if f.Kind == "report" {
+			okName = ValidRenderReportName(f.File)
+		}
+		if !okName || strings.Contains(f.File, "..") || seen[strings.ToLower(f.File)] {
 			return nil, bad("entry %q (kind %q) is not a file kicad render writes", f.File, f.Kind)
 		}
-		seen[f.File] = true
+		seen[strings.ToLower(f.File)] = true
 	}
 	return m, nil
 }
@@ -338,7 +381,7 @@ func publishRender(stage, out string, m *RenderManifest) error {
 		}
 	}
 	for _, f := range m.Files {
-		if !renderNameRE.MatchString(f.File) {
+		if !renderNameRE.MatchString(f.File) && !(f.Kind == "report" && ValidRenderReportName(f.File)) {
 			return renderErr("RENDER_FAILED", "", "refusing to write %q", f.File)
 		}
 		p := filepath.Join(out, f.File)
@@ -349,8 +392,12 @@ func publishRender(stage, out string, m *RenderManifest) error {
 			return err
 		}
 	}
+	return writeManifest(out, m)
+}
+
+func writeManifest(dir string, m *RenderManifest) error {
 	b, _ := json.MarshalIndent(m, "", "  ")
-	return os.WriteFile(filepath.Join(out, RenderManifestName), append(b, '\n'), 0o644)
+	return os.WriteFile(filepath.Join(dir, RenderManifestName), append(b, '\n'), 0o644)
 }
 
 // renderCopyExt are the files kicad-cli needs to plot a project; 3D models
@@ -399,17 +446,24 @@ func runRenderCLI(cli string, blocking bool, args ...string) ([]string, error) {
 	what := "kicad-cli " + strings.Join(args[:min(3, len(args))], " ")
 	var msgs, missing []string
 	for _, l := range strings.Split(strings.ReplaceAll(buf.String(), "\r", ""), "\n") {
-		if l = strings.TrimSpace(l); l == "" || renderQuietRE.MatchString(l) {
+		if l = strings.TrimSpace(l); l == "" {
 			continue
 		}
-		if len(l) > 300 {
-			l = l[:300] + "…"
+		// Classify the whole original line first; a progress prefix
+		// ("Loading…") never hides a missing object. Fontconfig's own
+		// config noise (seen under go test on Windows) is about system
+		// fonts, not the design: kept as a warning only.
+		miss := renderMissingRE.MatchString(l) && renderObjectRE.MatchString(l) && !strings.HasPrefix(l, "Fontconfig")
+		if !miss && renderQuietRE.MatchString(l) {
+			continue
 		}
-		msgs = append(msgs, what+": "+l)
-		// Fontconfig's own config noise (seen under go test on Windows) is
-		// about system fonts, not the design: kept as a warning only.
-		if renderMissingRE.MatchString(l) && renderObjectRE.MatchString(l) && !strings.HasPrefix(l, "Fontconfig") {
-			missing = append(missing, l)
+		shown := l // only what is displayed is shortened
+		if r := []rune(shown); len(r) > 300 {
+			shown = string(r[:300]) + "…"
+		}
+		msgs = append(msgs, what+": "+shown)
+		if miss {
+			missing = append(missing, shown)
 		}
 	}
 	if err != nil {

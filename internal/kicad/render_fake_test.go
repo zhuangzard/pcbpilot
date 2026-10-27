@@ -29,8 +29,13 @@ func fakeRenderCLI(args []string) int {
 		fmt.Fprintln(os.Stderr, "fake failure")
 		return 3
 	}
-	if mode == "diag" {
+	switch mode {
+	case "diag":
 		fmt.Println("Error: symbol library 'parts' not found")
+	case "diag-long": // the finding sits after 300+ characters of path
+		fmt.Println("Error: symbol library '" + strings.Repeat("very-long-directory-name/", 20) + "parts.kicad_sym' not found")
+	case "diag-loading": // a progress prefix in front of the finding
+		fmt.Println("Loading symbol library 'parts' failed: file not found")
 	}
 	in := args[len(args)-1]
 	// Like KiCad, read the project's drawing sheet: one it names but cannot
@@ -427,5 +432,85 @@ func TestRenderFakeMissingWorksheet(t *testing.T) {
 	writeFile(t, filepath.Join(ws, "proj", "custom.kicad_wks"), "(kicad_wks)\n")
 	if _, err := Render(RenderOptions{Sch: root, OutDir: filepath.Join(ws, "out")}); err != nil {
 		t.Fatalf("worksheet present: %v", err)
+	}
+}
+
+// Diagnostics are classified on the whole line: a finding after a long path
+// or behind a "Loading" progress prefix still blocks; only the displayed
+// text is shortened.
+func TestRenderFakeDiagnosticsClassifiedWhole(t *testing.T) {
+	for _, mode := range []string{"diag-long", "diag-loading"} {
+		t.Run(mode, func(t *testing.T) {
+			fakeRenderCLIEnv(t, mode)
+			ws := t.TempDir()
+			root := schProject(t, ws, "../shared/sub.kicad_sch")
+			_, err := Render(RenderOptions{Sch: root, OutDir: filepath.Join(ws, "out")})
+			if renderCode(err) != "RENDER_KICAD_DIAGNOSTIC" {
+				t.Fatalf("err %v, want RENDER_KICAD_DIAGNOSTIC", err)
+			}
+			if mode == "diag-long" && !strings.Contains(err.Error(), "…") {
+				t.Errorf("long line not shortened for display: %v", err)
+			}
+		})
+	}
+}
+
+// --report travels in the staged publish: listed in render.json as kind
+// "report", built from the staged render, ignored by compare, replaced or
+// dropped by the next render, kept when a re-render fails.
+func TestRenderFakeReportPublished(t *testing.T) {
+	fakeRenderCLIEnv(t, "")
+	ws := t.TempDir()
+	root := schProject(t, ws, "../shared/sub.kicad_sch")
+	out, other := filepath.Join(ws, "out"), filepath.Join(ws, "other")
+	seen := ""
+	m, err := Render(RenderOptions{Sch: root, OutDir: out, ReportName: "report.json",
+		Report: func(m *RenderManifest, staged string) ([]byte, error) {
+			if _, err := os.Stat(filepath.Join(staged, "top.svg")); err != nil {
+				return nil, err
+			}
+			seen = staged
+			return []byte(`{"verdict":"pass"}`), nil
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seen == "" || strings.HasPrefix(seen, out) {
+		t.Errorf("report built from %q, want the staged render", seen)
+	}
+	listed := false
+	for _, f := range m.Files {
+		listed = listed || (f.File == "report.json" && f.Kind == "report")
+	}
+	if b, _ := os.ReadFile(filepath.Join(out, "report.json")); !listed || string(b) != `{"verdict":"pass"}` {
+		t.Fatalf("report not published: listed=%v %s", listed, b)
+	}
+	if _, err := Render(RenderOptions{Sch: root, OutDir: other}); err != nil {
+		t.Fatal(err)
+	}
+	if r := CompareRenders(out, other); r.Verdict != gate.Pass {
+		t.Errorf("compare saw the report: %s %+v", r.Verdict, r.Files)
+	}
+	t.Setenv("PCBPILOT_FAKE_SVG", "exit")
+	if _, err := Render(RenderOptions{Sch: root, OutDir: out, ReportName: "report.json"}); err == nil {
+		t.Fatal("failing render succeeded")
+	}
+	if b, _ := os.ReadFile(filepath.Join(out, "report.json")); string(b) != `{"verdict":"pass"}` {
+		t.Error("a failed re-render changed the published report")
+	}
+	t.Setenv("PCBPILOT_FAKE_SVG", "")
+	if _, err := Render(RenderOptions{Sch: root, OutDir: out}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(out, "report.json")); !os.IsNotExist(err) {
+		t.Error("the old report outlived a render without --report")
+	}
+	for _, bad := range []string{"../r.json", "sub/r.json", `sub\r.json`, "render.json", "RENDER.JSON", "r.txt", ""} {
+		if bad == "" {
+			continue
+		}
+		if _, err := Render(RenderOptions{Sch: root, OutDir: out, ReportName: bad}); renderCode(err) != "RENDER_BAD_INPUT" {
+			t.Errorf("report name %q: %v", bad, err)
+		}
 	}
 }

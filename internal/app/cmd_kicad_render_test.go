@@ -95,168 +95,35 @@ func TestSchBuildRenderIsNormalized(t *testing.T) {
 	}
 }
 
-// --report may not land inside the input's project, --out or --compare
-// (it could overwrite the input or become foreign content of a render).
-func TestKicadRenderReportPathGuard(t *testing.T) {
+
+// --report takes only a plain file name; a bad one is a request error with
+// nothing written, and without a render it stays on stdout.
+func TestKicadRenderReportName(t *testing.T) {
 	root := t.TempDir()
-	proj := filepath.Join(root, "proj")
-	sch := filepath.Join(proj, "top.kicad_sch")
-	_ = os.MkdirAll(proj, 0o755)
-	const body = "(kicad_sch (version 20231120))\n"
-	if err := os.WriteFile(sch, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	base := filepath.Join(root, "base")
-	_ = os.MkdirAll(base, 0o755)
-	for _, r := range []string{sch, strings.ToUpper(sch), filepath.Join(proj, "r.json"), filepath.Join(root, "out", "r.json"), filepath.Join(base, "r.json")} {
-		stdout, _, code := runCLI(t, "kicad", "render", "--sch", sch, "--out", filepath.Join(root, "out"), "--compare", base, "--report", r)
+	cur := filepath.Join(root, "cur")
+	for _, d := range []string{base, cur} {
+		_ = os.MkdirAll(d, 0o755)
+		_ = os.WriteFile(filepath.Join(d, "p.svg"), []byte(`<svg><path d="M1 1 L2 2"/></svg>`), 0o644)
+	}
+	for _, bad := range []string{filepath.Join(root, "r.json"), "../r.json", "sub/r.json", "render.json", "r.txt"} {
+		stdout, _, code := runCLI(t, "kicad", "render", "--out", cur, "--compare", base, "--report", bad)
 		var rep kicadRenderReport
 		_ = json.Unmarshal([]byte(stdout), &rep)
 		if code != 1 || rep.Error == nil || rep.Error.Code != "RENDER_BAD_INPUT" {
-			t.Errorf("--report %s: exit %d %+v", r, code, rep.Error)
-		}
-		if b, _ := os.ReadFile(sch); string(b) != body {
-			t.Fatalf("--report %s overwrote the input", r)
-		}
-		if _, err := os.Stat(filepath.Join(proj, "r.json")); err == nil {
-			t.Fatal("report written into the project")
+			t.Errorf("--report %q: exit %d %+v", bad, code, rep.Error)
 		}
 	}
-}
-
-// The --report guard runs before any write, even for an argument error, and
-// covers external dependencies and hard links; a report is replaced by
-// rename, never truncated in place.
-func TestKicadRenderReportGuardDeep(t *testing.T) {
-	root := t.TempDir()
-	// An existing render in X: --report X/render.json with nothing to do
-	// must not overwrite its manifest.
-	x := filepath.Join(root, "x")
-	_ = os.MkdirAll(x, 0o755)
-	const manifest = `{"schemaVersion":1,"kind":"sch","files":[{"file":"p.svg","kind":"sch-page","sha256":"","bytes":0}]}`
-	_ = os.WriteFile(filepath.Join(x, "render.json"), []byte(manifest), 0o644)
-	_ = os.WriteFile(filepath.Join(x, "p.svg"), []byte(`<svg><path d="M1 1 L2 2"/></svg>`), 0o644)
-	if _, _, code := runCLI(t, "kicad", "render", "--out", x, "--report", filepath.Join(x, "render.json")); code != 1 {
-		t.Errorf("early error: exit %d", code)
+	if _, err := os.Stat(filepath.Join(root, "r.json")); !os.IsNotExist(err) {
+		t.Error("report written outside --out")
 	}
-	if b, _ := os.ReadFile(filepath.Join(x, "render.json")); string(b) != manifest {
-		t.Fatal("an argument error overwrote --out/render.json through --report")
-	}
-
-	// A project whose sub-sheet lives outside it.
-	proj, shared := filepath.Join(root, "proj"), filepath.Join(root, "shared")
-	_ = os.MkdirAll(proj, 0o755)
-	_ = os.MkdirAll(shared, 0o755)
-	sch, sub := filepath.Join(proj, "top.kicad_sch"), filepath.Join(shared, "sub.kicad_sch")
-	const top = `(kicad_sch (version 20231120) (uuid "11111111-1111-1111-1111-111111111111")
-	(sheet (at 1 1) (size 5 5) (uuid "22222222-2222-2222-2222-222222222222")
-		(property "Sheetname" "sub" (at 1 1 0)) (property "Sheetfile" "../shared/sub.kicad_sch" (at 1 6 0))))
-`
-	const subText = "(kicad_sch (version 20231120) (uuid \"33333333-3333-3333-3333-333333333333\"))\n"
-	_ = os.WriteFile(sch, []byte(top), 0o644)
-	_ = os.WriteFile(sub, []byte(subText), 0o644)
-	out := filepath.Join(root, "out")
-	try := func(name, report string) {
-		t.Helper()
-		stdout, _, code := runCLI(t, "kicad", "render", "--sch", sch, "--out", out, "--report", report)
-		var rep kicadRenderReport
-		_ = json.Unmarshal([]byte(stdout), &rep)
-		if code != 1 || rep.Error == nil || rep.Error.Code != "RENDER_BAD_INPUT" {
-			t.Errorf("%s: exit %d %+v", name, code, rep.Error)
-		}
-		if b, _ := os.ReadFile(sub); string(b) != subText {
-			t.Fatalf("%s: external sheet overwritten", name)
-		}
-		if b, _ := os.ReadFile(sch); string(b) != top {
-			t.Fatalf("%s: input overwritten", name)
-		}
-	}
-	try("external sheet", sub)
-	link := filepath.Join(root, "link.json")
-	if err := os.Link(sch, link); err != nil {
-		t.Skipf("no hard links here: %v", err)
-	}
-	try("hard link to the input", link)
-	link2 := filepath.Join(root, "link2.json")
-	if err := os.Link(sub, link2); err == nil {
-		try("hard link to an external sheet", link2)
-	}
-
-	// Replace, not truncate: a hard link to an old report keeps its bytes.
-	old := filepath.Join(root, "old.json")
-	_ = os.WriteFile(old, []byte("old"), 0o644)
-	keep := filepath.Join(root, "keep.json")
-	if err := os.Link(old, keep); err != nil {
-		t.Fatal(err)
-	}
-	base := filepath.Join(root, "base")
-	_ = os.MkdirAll(base, 0o755)
-	_ = os.WriteFile(filepath.Join(base, "p.svg"), []byte(`<svg><path d="M1 1 L2 2"/></svg>`), 0o644)
-	_, _, _ = runCLI(t, "kicad", "render", "--out", x, "--compare", base, "--report", old)
-	if b, _ := os.ReadFile(keep); string(b) != "old" {
-		t.Error("report truncated an existing inode")
-	}
-	if b, _ := os.ReadFile(old); !strings.Contains(string(b), `"verdict"`) {
-		t.Errorf("report not written: %s", b)
-	}
-}
-
-// A missing external sheet stays protected: --report naming it is refused
-// and nothing is created there. With the closure incomplete, a --report
-// anywhere else is not written either (stdout only).
-func TestKicadRenderReportUnresolvedDependency(t *testing.T) {
-	root := t.TempDir()
-	proj := filepath.Join(root, "proj")
-	_ = os.MkdirAll(proj, 0o755)
-	_ = os.MkdirAll(filepath.Join(root, "shared"), 0o755)
-	sch := filepath.Join(proj, "top.kicad_sch")
-	_ = os.WriteFile(sch, []byte(`(kicad_sch (version 20231120) (uuid "11111111-1111-1111-1111-111111111111")
-	(sheet (at 1 1) (size 5 5) (uuid "22222222-2222-2222-2222-222222222222")
-		(property "Sheetname" "sub" (at 1 1 0)) (property "Sheetfile" "../shared/sub.kicad_sch" (at 1 6 0))))
-`), 0o644)
-	missing := filepath.Join(root, "shared", "sub.kicad_sch")
-	stdout, _, code := runCLI(t, "kicad", "render", "--sch", sch, "--out", filepath.Join(root, "out"), "--report", missing)
+	stdout, _, code := runCLI(t, "kicad", "render", "--out", cur, "--compare", base, "--report", "r.json")
 	var rep kicadRenderReport
 	_ = json.Unmarshal([]byte(stdout), &rep)
-	if code != 1 || rep.Error == nil || rep.Error.Code != "RENDER_BAD_INPUT" {
-		t.Errorf("report on the missing sheet: exit %d %+v", code, rep.Error)
+	if code != 0 || !strings.Contains(strings.Join(rep.Warnings, " "), "stdout only") {
+		t.Errorf("compare-only with --report: exit %d %v", code, rep.Warnings)
 	}
-	if _, err := os.Stat(missing); !os.IsNotExist(err) {
-		t.Fatal("report written where the missing sheet belongs")
-	}
-	elsewhere := filepath.Join(root, "r.json")
-	stdout, _, code = runCLI(t, "kicad", "render", "--sch", sch, "--out", filepath.Join(root, "out"), "--report", elsewhere)
-	rep = kicadRenderReport{}
-	_ = json.Unmarshal([]byte(stdout), &rep)
-	if code == 0 || rep.OK {
-		t.Errorf("incomplete closure rendered: exit %d", code)
-	}
-	if _, err := os.Stat(elsewhere); !os.IsNotExist(err) {
-		t.Error("report file written although the closure is incomplete")
-	}
-	if !strings.Contains(strings.Join(rep.Warnings, " "), "stdout only") {
-		t.Errorf("no note that the report stayed on stdout: %v", rep.Warnings)
-	}
-}
-
-// A linked .kicad_pro is protected by its resolved target too.
-func TestKicadRenderReportLinkedProjectTarget(t *testing.T) {
-	root := t.TempDir()
-	proj := filepath.Join(root, "proj")
-	_ = os.MkdirAll(proj, 0o755)
-	sch := filepath.Join(proj, "top.kicad_sch")
-	_ = os.WriteFile(sch, []byte("(kicad_sch (version 20231120) (uuid \"11111111-1111-1111-1111-111111111111\"))\n"), 0o644)
-	target := filepath.Join(root, "elsewhere", "top.kicad_pro")
-	_ = os.MkdirAll(filepath.Dir(target), 0o755)
-	_ = os.WriteFile(target, []byte("{}"), 0o644)
-	if err := os.Symlink(target, filepath.Join(proj, "top.kicad_pro")); err != nil {
-		t.Skipf("cannot create a symlink here: %v", err)
-	}
-	stdout, _, code := runCLI(t, "kicad", "render", "--sch", sch, "--out", filepath.Join(root, "out"), "--report", target)
-	if code != 1 || !strings.Contains(stdout, "RENDER_BAD_INPUT") {
-		t.Errorf("report on the linked .kicad_pro target: exit %d", code)
-	}
-	if b, _ := os.ReadFile(target); string(b) != "{}" {
-		t.Fatal("linked .kicad_pro target overwritten")
+	if _, err := os.Stat(filepath.Join(cur, "r.json")); !os.IsNotExist(err) {
+		t.Error("compare-only run wrote a report into --out")
 	}
 }

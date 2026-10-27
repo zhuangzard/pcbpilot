@@ -287,14 +287,79 @@ func svgPathDraws(d string) bool {
 	return flush() && draws
 }
 
+// svgPaint is the inherited paint state that decides whether geometry is
+// visible: display="none" and opacity 0 hide a whole subtree; visibility
+// and fill-/stroke-opacity inherit and a descendant may override them.
+type svgPaint struct {
+	none, opZero, visHidden bool
+	fillOp, strokeOp        float64
+}
+
+var svgDefaultPaint = svgPaint{fillOp: 1, strokeOp: 1}
+
+// svgProps are an element's presentation properties: attributes, then the
+// style attribute (which wins).
+func svgProps(attr map[string]string) map[string]string {
+	p := map[string]string{}
+	for _, k := range []string{"display", "visibility", "opacity", "fill-opacity", "stroke-opacity"} {
+		if v, ok := attr[k]; ok {
+			p[k] = strings.TrimSpace(v)
+		}
+	}
+	for _, decl := range strings.Split(attr["style"], ";") {
+		if k, v, ok := strings.Cut(decl, ":"); ok {
+			p[strings.ToLower(strings.TrimSpace(k))] = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(v), "!important"))
+		}
+	}
+	return p
+}
+
+func (s svgPaint) child(attr map[string]string) svgPaint {
+	p := svgProps(attr)
+	num := func(v string) (float64, bool) {
+		v = strings.TrimSpace(v)
+		pct := strings.HasSuffix(v, "%")
+		f, err := strconv.ParseFloat(strings.TrimSuffix(v, "%"), 64)
+		if pct {
+			f /= 100
+		}
+		return f, err == nil
+	}
+	if strings.EqualFold(p["display"], "none") {
+		s.none = true
+	}
+	switch strings.ToLower(p["visibility"]) {
+	case "hidden", "collapse":
+		s.visHidden = true
+	case "visible":
+		s.visHidden = false
+	}
+	if f, ok := num(p["opacity"]); ok && f <= 0 {
+		s.opZero = true
+	}
+	if f, ok := num(p["fill-opacity"]); ok {
+		s.fillOp = f
+	}
+	if f, ok := num(p["stroke-opacity"]); ok {
+		s.strokeOp = f
+	}
+	return s
+}
+
+func (s svgPaint) invisible() bool {
+	return s.none || s.opZero || s.visHidden || (s.fillOp <= 0 && s.strokeOp <= 0)
+}
+
 // SVGElements is the structural form of an SVG: one canonical string per
 // drawn element (tag, sorted attributes with collapsed whitespace, text, and
 // the attributes of every enclosing <g>, which carry colour and transform),
 // in document order, the <svg> root first. Two SVGs draw the same thing iff
 // the multisets match. It fails unless the document is well-formed, its
 // root is <svg> and it really draws something: an element with geometry
-// (svgGeometry) outside defs / symbol / clipPath / mask / marker / pattern,
-// or a <use> there whose target holds such an element.
+// (svgGeometry) outside defs / symbol / clipPath / mask / marker / pattern
+// that is not hidden by display="none", visibility="hidden" or zero opacity
+// (attributes or style, inherited), or a visible <use> there whose target
+// holds such an element.
 func SVGElements(b []byte) ([]string, error) {
 	dec := xml.NewDecoder(bytes.NewReader(b))
 	dec.Strict = true
@@ -304,12 +369,17 @@ func SVGElements(b []byte) ([]string, error) {
 		text          strings.Builder
 		key           int  // index in out, -1 if not a drawn element
 		hidden        bool // inside a non-rendering container
-		content       bool // this element or a descendant has geometry
+		content       bool // this element or a descendant has visible geometry
+		paint         svgPaint
+	}
+	type use struct {
+		target string
+		shown  bool
 	}
 	var stack []*frame
 	var out []string
 	idContent := map[string]bool{}
-	var uses []string // targets of <use> outside hidden containers
+	var uses []use // <use> elements outside hidden containers
 	visible := 0
 	root := ""
 	closed := false // the root element has ended
@@ -343,11 +413,15 @@ func SVGElements(b []byte) ([]string, error) {
 			}
 			sort.Strings(attrs)
 			f.id = f.attr["id"]
-			parent := ""
+			parent, paint := "", svgDefaultPaint
 			if n := len(stack); n > 0 {
-				parent, f.hidden = stack[n-1].ctx, stack[n-1].hidden
+				parent, f.hidden, paint = stack[n-1].ctx, stack[n-1].hidden, stack[n-1].paint
+				if svgHidden[stack[n-1].name] {
+					paint = svgDefaultPaint // drawn where it is used, with that paint
+				}
 			}
 			f.hidden = f.hidden || svgHidden[f.name]
+			f.paint = paint.child(f.attr)
 			f.ctx = parent
 			if f.name == "g" {
 				f.ctx = parent + "g{" + strings.Join(attrs, ";") + "}"
@@ -357,7 +431,7 @@ func SVGElements(b []byte) ([]string, error) {
 				f.key = len(out) - 1
 			}
 			if f.name == "use" && !f.hidden {
-				uses = append(uses, strings.TrimPrefix(f.attr["href"], "#"))
+				uses = append(uses, use{strings.TrimPrefix(f.attr["href"], "#"), !f.paint.invisible()})
 			}
 			stack = append(stack, f)
 		case xml.CharData:
@@ -378,7 +452,7 @@ func SVGElements(b []byte) ([]string, error) {
 			if f.key >= 0 && f.name == "text" && txt != "" {
 				out[f.key] += "=" + txt
 			}
-			if svgGeometry(f.name, f.attr, txt) {
+			if svgGeometry(f.name, f.attr, txt) && !f.paint.invisible() {
 				f.content = true
 				if !f.hidden {
 					visible++
@@ -396,7 +470,7 @@ func SVGElements(b []byte) ([]string, error) {
 		return nil, fmt.Errorf("no root element")
 	}
 	for _, u := range uses {
-		if idContent[u] {
+		if u.shown && idContent[u.target] {
 			visible++
 		}
 	}
@@ -483,7 +557,7 @@ func readRenderSide(dir string) (*renderSide, error) {
 		}
 		s.listed = map[string]bool{}
 		for _, f := range m.Files {
-			if strings.HasSuffix(f.File, ".svg") {
+			if strings.EqualFold(filepath.Ext(f.File), ".svg") {
 				s.listed[f.File] = true
 			}
 		}

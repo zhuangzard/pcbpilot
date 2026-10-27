@@ -343,38 +343,53 @@ func TestCompareRendersRefusesLinks(t *testing.T) {
 	}
 }
 
-// A missing external sheet makes the closure incomplete and stays in the
-// protected set; a linked .kicad_pro is protected as link and as target.
-func TestRenderDependenciesProtectUnresolvedAndTargets(t *testing.T) {
-	ws := t.TempDir()
-	root := schProject(t, ws, "../shared/sub.kicad_sch")
-	missing := filepath.Join(ws, "shared", "sub.kicad_sch")
-	if err := os.Remove(missing); err != nil {
-		t.Fatal(err)
+
+// Geometry hidden by display, visibility or zero opacity (attribute or
+// style, inherited, also through <use>) is not drawing.
+func TestSVGElementsHiddenGeometry(t *testing.T) {
+	const p = `<path d="M1 1 L2 2"/>`
+	for _, bad := range []string{
+		`<svg><g display="none">` + p + `</g></svg>`,
+		`<svg><g style="display: none">` + p + `</g></svg>`,
+		`<svg><g visibility="hidden"><g>` + p + `</g></g></svg>`,
+		`<svg><g style="visibility:hidden">` + p + `</g></svg>`,
+		`<svg><g opacity="0"><g opacity="1">` + p + `</g></g></svg>`,
+		`<svg><g style="opacity:0%">` + p + `</g></svg>`,
+		`<svg><g fill-opacity="0" stroke-opacity="0">` + p + `</g></svg>`,
+		`<svg><g style="fill-opacity:0;stroke-opacity:0">` + p + `</g></svg>`,
+		`<svg><g fill-opacity="0"><path stroke-opacity="0" d="M1 1 L2 2"/></g></svg>`,
+		`<svg><text opacity="0" x="1">R1</text></svg>`,
+		`<svg><defs><path id="a" d="M1 1 L2 2"/></defs><use href="#a" display="none"/></svg>`,
+		`<svg><defs><path id="a" d="M1 1 L2 2"/></defs><g opacity="0"><use href="#a"/></g></svg>`,
+		`<svg><defs><path id="a" d="M1 1 L2 2" visibility="hidden"/></defs><use href="#a"/></svg>`,
+	} {
+		if _, err := SVGElements([]byte(bad)); err == nil {
+			t.Errorf("%s accepted as a drawing", bad)
+		}
 	}
-	files, _, complete, err := RenderDependencies(root)
-	if err != nil || complete {
-		t.Fatalf("complete=%v err=%v", complete, err)
+	for _, good := range []string{
+		`<svg><g visibility="hidden"><g visibility="visible">` + p + `</g></g></svg>`,
+		`<svg><g fill-opacity="0">` + p + `</g></svg>`,
+		`<svg><g stroke-opacity="0"><g stroke-opacity="1">` + p + `</g></g></svg>`,
+		`<svg><defs><g id="a" opacity="1">` + p + `</g></defs><use href="#a"/></svg>`,
+	} {
+		if _, err := SVGElements([]byte(good)); err != nil {
+			t.Errorf("%s rejected: %v", good, err)
+		}
 	}
-	found := false
-	for _, f := range files {
-		found = found || strings.EqualFold(f, missing)
+}
+
+// A manifest entry with an upper-case .SVG that is missing on both sides is
+// unreadable, not ignored.
+func TestCompareRendersUpperCaseListed(t *testing.T) {
+	root := t.TempDir()
+	for _, d := range []string{"a", "b"} {
+		writeFile(t, filepath.Join(root, d, "page1.svg"), `<svg><path d="M1 1 L2 2"/></svg>`)
+		writeFile(t, filepath.Join(root, d, RenderManifestName), `{"schemaVersion":1,"kind":"sch","files":[`+
+			`{"file":"page1.svg","kind":"sch-page","sha256":"","bytes":0},{"file":"page2.SVG","kind":"sch-page","sha256":"","bytes":0}]}`)
 	}
-	if !found {
-		t.Errorf("missing sheet %s not protected: %v", missing, files)
-	}
-	writeFile(t, missing, `(kicad_sch (version 20231120) (generator "test") (uuid "33333333-3333-3333-3333-333333333333"))`+"\n")
-	target := filepath.Join(ws, "elsewhere", "top.kicad_pro")
-	writeFile(t, target, "{}")
-	if err := os.Symlink(target, filepath.Join(ws, "proj", "top.kicad_pro")); err != nil {
-		t.Skipf("cannot create a symlink here: %v", err)
-	}
-	files, _, complete, _ = RenderDependencies(root)
-	found = false
-	for _, f := range files {
-		found = found || strings.EqualFold(f, target)
-	}
-	if !complete || !found {
-		t.Errorf("linked .kicad_pro target not protected (complete=%v): %v", complete, files)
+	r := CompareRenders(filepath.Join(root, "a"), filepath.Join(root, "b"))
+	if r.Verdict != gate.CannotCheck || r.Counts["unreadable"] != 1 {
+		t.Fatalf("%s %v", r.Verdict, r.Counts)
 	}
 }

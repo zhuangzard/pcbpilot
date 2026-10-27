@@ -76,6 +76,12 @@ when kicad-cli reports something it could not load, or when any page of the
 hierarchy is missing or not a drawing. kicad-cli's other messages go to
 render.json "warnings".
 
+--report NAME (a plain file name such as report.json, no directory) writes this
+JSON report inside --out as part of the same staged publish, listed in
+render.json as kind "report" and ignored by --compare. It needs --out and a
+render (--sch / --pcb); otherwise, and whenever the render fails, the report goes
+to stdout only.
+
 A changed render shows that the drawing moved, not whether the design is right:
 connectivity is judged from netlists (kicad netlist / sch-read), not pictures.`,
 		Example: `  pcbpilot kicad render --sch board.kicad_sch --out review/render-v1
@@ -84,7 +90,8 @@ connectivity is judged from netlists (kicad netlist / sch-read), not pictures.`,
   pcbpilot kicad render --out build/render --compare old/render   # compare only`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if o.OutDir == "" {
+			outGiven := o.OutDir != ""
+			if !outGiven {
 				o.OutDir = "pcbpilot-render"
 			}
 			rep := kicadRenderReport{Out: o.OutDir, Verdict: gate.Pass}
@@ -94,42 +101,20 @@ connectivity is judged from netlists (kicad netlist / sch-read), not pictures.`,
 					re = &kicad.RenderError{Code: "RENDER_FAILED", Detail: err.Error()}
 				}
 				rep.OK, rep.Error, rep.Verdict = false, re, gate.CannotCheck
-				_ = writeRenderReport(stdout, report, rep)
+				if report != "" {
+					rep.Warnings = append(rep.Warnings, "report: "+report+" not written (no render was published); stdout only")
+				}
+				_ = writeRenderReport(stdout, rep)
 				if kicad.RenderVerdict(re) == gate.CannotCheck {
 					return exitCodeError{gate.CannotCheck.ExitCode()}
 				}
 				return errQuiet
 			}
-			// --report is checked before anything (even an error report) is
-			// written: it must not land on an input, a dependency, or in
-			// --out / --compare.
-			if report != "" {
-				var files, dirs []string
-				complete := true
-				for _, in := range []string{o.Sch, o.PCB} {
-					if in == "" {
-						continue
-					}
-					abs, _ := filepath.Abs(in)
-					files, dirs = append(files, abs), append(dirs, filepath.Dir(abs))
-					f, d, ok, err := kicad.RenderDependencies(in)
-					files, dirs = append(files, f...), append(dirs, d...)
-					complete = complete && ok && err == nil
-				}
-				dirs = append(dirs, o.OutDir)
-				if compare != "" {
-					dirs = append(dirs, compare)
-				}
-				if err := checkReportPath(report, files, dirs); err != nil {
-					report = ""
-					return fail(err)
-				}
-				if !complete {
-					// With an incomplete closure the protected set is
-					// incomplete too: the report goes to stdout only.
-					rep.Warnings = append(rep.Warnings, "report: not written to "+report+" (the project's dependencies could not all be resolved); stdout only")
-					report = ""
-				}
+			if report != "" && !kicad.ValidRenderReportName(report) {
+				bad := report
+				report = ""
+				return fail(&kicad.RenderError{Code: "RENDER_BAD_INPUT", Detail: fmt.Sprintf("--report %q is not a plain file name", bad),
+					Fix: "pass a file name such as report.json; it is written inside --out"})
 			}
 			if o.Sch == "" && o.PCB == "" && compare == "" {
 				return fail(&kicad.RenderError{Code: "RENDER_BAD_INPUT", Detail: "nothing to do", Fix: "pass --sch, --pcb or --compare"})
@@ -137,19 +122,45 @@ connectivity is judged from netlists (kicad netlist / sch-read), not pictures.`,
 			if compare != "" && sameDir(compare, o.OutDir) {
 				return fail(&kicad.RenderError{Code: "RENDER_BAD_INPUT", Detail: "--compare names the --out directory", Fix: "render into a new --out and compare it with the old one"})
 			}
+			if report != "" && (!outGiven || (o.Sch == "" && o.PCB == "")) {
+				rep.Warnings = append(rep.Warnings, "report: "+report+" is written only with --out and a render (--sch / --pcb); stdout only")
+				report = ""
+			}
+			// finish completes the report once the render is in place (staged
+			// or published); compare reads current, shown as --out.
+			finish := func(m *kicad.RenderManifest, current string) {
+				rep.OK = true
+				if m != nil {
+					rep.Render, rep.Warnings = m, append(rep.Warnings, m.Warnings...)
+				}
+				if compare != "" {
+					rep.Compare = kicad.CompareRenders(compare, current)
+					rep.Compare.Current = o.OutDir
+					rep.Verdict = rep.Compare.Verdict
+				}
+			}
 			if o.Sch != "" || o.PCB != "" {
+				if report != "" {
+					// The report travels in the staged publish: built from the
+					// staged render, listed in render.json, never written alone.
+					o.ReportName = report
+					o.Report = func(m *kicad.RenderManifest, staged string) ([]byte, error) {
+						finish(m, staged)
+						return renderReportJSON(rep)
+					}
+				}
 				m, err := kicad.Render(o)
 				if err != nil {
+					rep.Render, rep.Compare, rep.Verdict = nil, nil, gate.CannotCheck
 					return fail(err)
 				}
-				rep.Render, rep.Warnings = m, append(rep.Warnings, m.Warnings...)
+				if report == "" {
+					finish(m, o.OutDir)
+				}
+			} else {
+				finish(nil, o.OutDir)
 			}
-			rep.OK = true
-			if compare != "" {
-				rep.Compare = kicad.CompareRenders(compare, o.OutDir)
-				rep.Verdict = rep.Compare.Verdict
-			}
-			if err := writeRenderReport(stdout, report, rep); err != nil {
+			if err := writeRenderReport(stdout, rep); err != nil {
 				return err
 			}
 			if code := rep.Verdict.ExitCode(); code != 0 {
@@ -167,7 +178,7 @@ connectivity is judged from netlists (kicad netlist / sch-read), not pictures.`,
 	f.BoolVar(&o.PNG, "png", false, "PCB only: also a 3D raster preview (kicad-cli pcb render; not compared)")
 	f.IntVar(&o.DPI, "dpi", 0, "PNG pixels per inch over the board area (default 150, with --png)")
 	f.StringVar(&compare, "compare", "", "baseline render directory to diff --out against")
-	f.StringVar(&report, "report", "", "also write the JSON report to this file (outside the project, --out and --compare)")
+	f.StringVar(&report, "report", "", "also publish the JSON report as this plain file name inside --out (listed in render.json)")
 	return c
 }
 
@@ -184,111 +195,18 @@ func sameDir(a, b string) bool {
 	return err1 == nil && err2 == nil && strings.EqualFold(filepath.Clean(p), filepath.Clean(q))
 }
 
-// checkReportPath refuses a --report path that is, or could overwrite, any
-// of files (inputs and dependencies) or lies inside any of dirs (project
-// and dependency directories, --out, --compare): lexically (case-insensitive)
-// and by identity — os.SameFile on every existing ancestor, and an existing
-// report path against the files and every file in dirs, so links and hard
-// links count.
-func checkReportPath(report string, files, dirs []string) error {
-	abs, err := filepath.Abs(report)
-	if err != nil {
-		return err
-	}
-	refuse := func(what string) error {
-		return &kicad.RenderError{Code: "RENDER_BAD_INPUT", Detail: fmt.Sprintf("--report %s would write over %s", report, what),
-			Fix: "write the report to a new file outside the project, its dependencies, --out and --compare"}
-	}
-	existing, statErr := os.Stat(abs)
-	if info, err := os.Lstat(abs); err == nil && !info.Mode().IsRegular() {
-		return &kicad.RenderError{Code: "RENDER_BAD_INPUT", Detail: "--report " + report + " is not a regular file", Fix: "name a new file"}
-	}
-	same := func(p string) bool {
-		if strings.EqualFold(filepath.Clean(p), abs) {
-			return true
-		}
-		if statErr != nil {
-			return false
-		}
-		st, err := os.Stat(p)
-		return err == nil && os.SameFile(st, existing)
-	}
-	for _, f := range files {
-		if same(f) {
-			return refuse(f)
-		}
-	}
-	for _, dir := range dirs {
-		d, err := filepath.Abs(dir)
-		if err != nil {
-			continue
-		}
-		if rel, err := filepath.Rel(strings.ToLower(d), strings.ToLower(abs)); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return refuse(dir)
-		}
-		dst, err := os.Stat(d)
-		if err != nil {
-			continue
-		}
-		for p := filepath.Dir(abs); ; {
-			if st, err := os.Stat(p); err == nil && os.SameFile(st, dst) {
-				return refuse(dir)
-			}
-			up := filepath.Dir(p)
-			if up == p {
-				break
-			}
-			p = up
-		}
-		if statErr == nil { // a hard link elsewhere to a file in dir
-			hit := ""
-			_ = filepath.WalkDir(d, func(p string, e os.DirEntry, err error) error {
-				if err != nil || hit != "" {
-					return filepath.SkipDir
-				}
-				if e.IsDir() {
-					return nil
-				}
-				// Stat follows links: a linked file is compared by the
-				// identity of the file it points to.
-				if st, err := os.Stat(p); err == nil && st.Mode().IsRegular() && same(p) {
-					hit = p
-				}
-				return nil
-			})
-			if hit != "" {
-				return refuse(hit)
-			}
-		}
-	}
-	return nil
-}
-
-func writeRenderReport(stdout io.Writer, path string, rep kicadRenderReport) error {
+func renderReportJSON(rep kicadRenderReport) ([]byte, error) {
 	b, err := json.MarshalIndent(rep, "", "  ")
 	if err != nil {
-		return err
+		return nil, err
 	}
-	b = append(b, '\n')
-	if path != "" {
-		// temp + rename: an existing report is replaced, never truncated in
-		// place (a hard link to it keeps its old contents).
-		tmp, err := os.CreateTemp(filepath.Dir(path), ".render-report-*.tmp")
-		if err != nil {
-			return err
-		}
-		_, werr := tmp.Write(b)
-		cerr := tmp.Close()
-		if werr == nil && cerr == nil {
-			werr = os.Rename(tmp.Name(), path)
-		}
-		if werr != nil || cerr != nil {
-			_ = os.Remove(tmp.Name())
-			if werr == nil {
-				werr = cerr
-			}
-			return werr
-		}
+	return append(b, '\n'), nil
+}
+
+func writeRenderReport(stdout io.Writer, rep kicadRenderReport) error {
+	b, err := renderReportJSON(rep)
+	if err != nil {
+		return err
 	}
 	_, err = stdout.Write(b)
 	return err
