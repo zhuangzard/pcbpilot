@@ -1,0 +1,4 @@
+interface:
+  display_name: "pcbpilot Library"
+  short_description: "Find parts and build or verify symbols and footprints with a datasheet pin map"
+  default_prompt: "Use $pcbpilot-library to select a part, reuse or create its symbol and footprint in EasyEDA or KiCad, and record a datasheet-driven pin-to-pad acceptance check before it is used."
