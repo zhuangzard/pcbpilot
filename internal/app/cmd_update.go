@@ -171,7 +171,7 @@ refused. The daemon never pulls a checkout unless ` + "`--auto source`" + `.`,
 				localBinary = ""
 			}
 			if localDir != "" && (localBinary != "" || checkOnly) {
-				for _, flag := range []string{"version", "cli-only", "skill-only", "client", "preserve", "force", "create-missing", "adopt"} {
+				for _, flag := range []string{"version", "cli-only", "skill-only", "client", "preserve", "force", "create-missing"} {
 					if cmd.Flags().Changed(flag) {
 						return fmt.Errorf("--local-dir cannot be combined with --%s", flag)
 					}
@@ -179,7 +179,7 @@ refused. The daemon never pulls a checkout unless ` + "`--auto source`" + `.`,
 				if checkOnly && localBinary != "" {
 					return fmt.Errorf("local check verifies the running CLI; --binary is install-only")
 				}
-				return runLocalUpdate(cfg, localDir, localBinary, checkOnly, exitCode, jsonOut, stdout)
+				return runLocalUpdate(cfg, localDir, localBinary, checkOnly, exitCode, jsonOut, adopt, stdout)
 			}
 			if localBinary != "" {
 				return fmt.Errorf("--binary requires --local-dir")

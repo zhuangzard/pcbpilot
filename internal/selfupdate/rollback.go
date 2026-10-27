@@ -128,11 +128,11 @@ func appendJournal(dir string, entries []JournalEntry) error {
 	if err := ReadJSON(journalFile(dir), &all); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	return WriteJSON(journalFile(dir), append(all, entries...))
+	return WriteJSON(journalFile(dir), append(append([]JournalEntry{}, all...), entries...))
 }
 
 // RestoreSnapshot puts the saved binary, skill dirs and MCP link back. When the
-// update journaled its skill sync, exactly the journaled destinations are
+// update journaled its skill sync, only the journaled destinations are
 // undone: created dirs are removed, replaced and removed (retired) dirs get
 // their previous tree back — including Skills the initiating CLI did not know.
 // Without a journal (older snapshots), a public Skill the snapshot did not hold
@@ -156,7 +156,6 @@ func RestoreSnapshot(_ context.Context, s Snapshot) ([]string, error) {
 			restored = append(restored, "cli")
 		}
 	}
-	journaled := map[string]bool{}
 	var journal []JournalEntry
 	jdir := SkillJournalDir(s.Dir)
 	_, statErr := os.Stat(journalFile(jdir))
@@ -168,7 +167,6 @@ func RestoreSnapshot(_ context.Context, s Snapshot) ([]string, error) {
 	}
 	for i := len(journal) - 1; i >= 0; i-- {
 		e := journal[i]
-		journaled[filepath.Clean(e.Dir)] = true
 		label := "skill:" + e.Dir
 		var err error
 		switch {
@@ -191,8 +189,10 @@ func RestoreSnapshot(_ context.Context, s Snapshot) ([]string, error) {
 	saved := map[string]bool{}
 	for _, sk := range s.Skills {
 		saved[filepath.Clean(sk.Dir)] = true
-		if journaled[filepath.Clean(sk.Dir)] {
-			continue // the journal already restored this destination
+		if haveJournal {
+			// The journal is the exact record of what the update changed;
+			// anything it does not list (another client, a later edit) stays.
+			continue
 		}
 		label := SkillLabel(sk.Client, sk.Skill)
 		if err := materializeTree(filepath.Join(s.Dir, sk.Saved), sk.Dir); err != nil {

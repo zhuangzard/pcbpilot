@@ -116,6 +116,13 @@ func SyncSkills(ctx context.Context, opts SyncOptions, logf func(string, ...any)
 	if err := syncOutcomeError(res); err != nil {
 		return res, err
 	}
+	if opts.Journal != "" {
+		// An (empty) journal says "this update's skill step ran": a rollback then
+		// restores exactly what it lists and nothing else.
+		if err := journalWrite(opts.Journal, nil); err != nil {
+			return res, fmt.Errorf("rollback journal: %w", err)
+		}
+	}
 
 	// Decide per-dir what needs doing before paying for a download. The known
 	// set is this CLI's list plus the manifest each router was installed with,
@@ -196,9 +203,14 @@ func applyClientSync(tree skillTree, items []syncItem, opts SyncOptions, target 
 	if err := txn.commit(); err != nil {
 		return fail(err)
 	}
-	if err := txn.finish(opts.Journal); err != nil {
-		log("skill-sync: rollback journal: %v", err)
+	if err := txn.recordJournal(opts.Journal); err != nil {
+		// Without a durable journal this sync could not be rolled back: undo it.
+		if undoErr := txn.undo(len(txn.changes)); undoErr != nil {
+			return fail(fmt.Errorf("rollback journal: %w; restoring the client failed: %v", err, undoErr))
+		}
+		return fail(fmt.Errorf("rollback journal: %w (all Skills of this client restored)", err))
 	}
+	txn.cleanup()
 	for _, it := range items {
 		switch it.action {
 		case syncWrite:
@@ -340,11 +352,13 @@ func syncOutcomeError(res SyncResult) error {
 
 // ── transaction ──────────────────────────────────────────────────────────────
 
-// skillRename is os.Rename and stageCopy is copyTree; tests replace them to
-// inject a failure at a chosen switch or stage.
+// Test seams: tests replace these to inject a failure at a chosen switch,
+// stage, journal copy or journal write.
 var (
-	skillRename = os.Rename
-	stageCopy   = copyTree
+	skillRename  = os.Rename
+	stageCopy    = copyTree
+	journalCopy  = copyTree
+	journalWrite = appendJournal
 )
 
 type skillChange struct {
@@ -479,16 +493,24 @@ func (t *skillTxn) discard() {
 	}
 }
 
-// finish records the committed changes in the journal (when set), keeping the
-// previous trees there, and deletes the backups next to the destinations.
-func (t *skillTxn) finish(journal string) error {
+// recordJournal durably records the committed changes, with copies of the
+// previous trees, before any backup is deleted. On failure it removes the
+// partial copies and leaves journal.json untouched; the caller then undoes the
+// switches, so a sync that cannot be rolled back is never left in place.
+func (t *skillTxn) recordJournal(journal string) error {
+	if journal == "" {
+		return nil
+	}
+	if err := os.MkdirAll(journal, 0o755); err != nil {
+		return err
+	}
 	var entries []JournalEntry
-	var errs []error
-	if journal != "" {
-		if err := os.MkdirAll(journal, 0o755); err != nil {
-			errs = append(errs, err)
-			journal = ""
+	var copies []string
+	fail := func(err error) error {
+		for _, c := range copies {
+			_ = os.RemoveAll(c)
 		}
+		return err
 	}
 	for _, c := range t.changes {
 		e := JournalEntry{Dir: c.dir}
@@ -500,26 +522,32 @@ func (t *skillTxn) finish(journal string) error {
 		default:
 			e.Action = "replaced"
 		}
-		if journal != "" && c.backup != "" {
-			saved, err := os.MkdirTemp(journal, "tree-*")
-			if err == nil {
-				err = copyTree(c.backup, saved, false, false)
-			}
-			if err != nil {
-				errs = append(errs, err)
-			} else {
-				e.Saved = filepath.Base(saved)
-			}
-		}
 		if c.backup != "" {
-			_ = os.RemoveAll(c.backup)
+			saved, err := os.MkdirTemp(journal, "tree-*")
+			if err != nil {
+				return fail(err)
+			}
+			copies = append(copies, saved)
+			if err := journalCopy(c.backup, saved, false, false); err != nil {
+				return fail(fmt.Errorf("save previous %s: %w", c.dir, err))
+			}
+			e.Saved = filepath.Base(saved)
 		}
 		entries = append(entries, e)
 	}
-	if journal != "" {
-		if err := appendJournal(journal, entries); err != nil {
-			errs = append(errs, err)
+	if err := journalWrite(journal, entries); err != nil {
+		return fail(fmt.Errorf("write journal: %w", err))
+	}
+	return nil
+}
+
+// cleanup deletes the backups next to the destinations once the transaction
+// (and its journal) is final.
+func (t *skillTxn) cleanup() {
+	for _, c := range t.changes {
+		if c.backup != "" {
+			_ = os.RemoveAll(c.backup)
+			c.backup = ""
 		}
 	}
-	return errors.Join(errs...)
 }

@@ -401,6 +401,32 @@ else:
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertFalse(retired.exists())
 
+    def test_focused_skill_link_is_left_alone(self):
+        self.multi()
+        checkout = self.root / 'checkout' / DEMO
+        checkout.mkdir(parents=True)
+        (checkout / 'SKILL.md').write_text('checkout copy')
+        link = self.root / f'codex config/skills/{DEMO}'
+        link.parent.mkdir(parents=True)
+        link.symlink_to(checkout, target_is_directory=True)
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('is a link; left alone', result.stdout + result.stderr)
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(sorted(p.name for p in checkout.iterdir()), ['SKILL.md'])
+        self.assertEqual((checkout / 'SKILL.md').read_text(), 'checkout copy')
+
+    def test_file_at_a_skill_path_is_a_conflict(self):
+        self.multi()
+        path = self.root / f'claude config/skills/{DEMO}'
+        path.parent.mkdir(parents=True)
+        path.write_text('a user file')
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('is not a directory', result.stdout + result.stderr)
+        self.assertEqual(path.read_text(), 'a user file')
+        self.assertEqual((self.root / f'codex config/skills/{DEMO}/.version').read_text(), '1.4.2\n')
+
     def test_crlf_skill_md_from_a_windows_package_is_accepted(self):
         self.package(skills=('pcbpilot', DEMO), crlf=True)
         self.sums()

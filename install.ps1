@@ -642,6 +642,16 @@ try {
                     $skillBase = $base
                     if (Test-Path -LiteralPath $dest) {
                         $existing = Get-Item -LiteralPath $dest -Force
+                        if (($existing.Attributes -band [IO.FileAttributes]::ReparsePoint) -and $skill -cne $SkillName) {
+                            # A focused Skill linked into a checkout is updated by that checkout,
+                            # never through the link (the router keeps its shared-link behaviour).
+                            Write-Warn "$client Skill $skill is a link/junction; left alone -> $dest"
+                            continue
+                        }
+                        if (-not $existing.PSIsContainer) {
+                            Write-Warn "$client Skill $skill not installed: $dest exists and is not a directory; move it away"
+                            continue
+                        }
                         if ($existing.Attributes -band [IO.FileAttributes]::ReparsePoint) {
                             $linkTarget = ''
                             try {

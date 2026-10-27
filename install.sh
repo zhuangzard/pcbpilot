@@ -285,6 +285,16 @@ stage_skill() {
   _base=$(client_base_dir "$_client") || fatal "Unknown skill target: $_client"
   case "$_base" in /*) ;; *) fatal "Client config directory must be absolute: $_base" ;; esac
   _dest="${_base}/${_skill}"
+  if [ "$_skill" != "$SKILL_NAME" ] && [ -L "$_dest" ]; then
+    # A focused Skill linked into a checkout is updated by that checkout, never
+    # through the link (the router keeps its historical shared-link behaviour).
+    warn "$_client Skill $_skill is a link; left alone (linked → $(cd "$_dest" 2>/dev/null && pwd -P || printf 'unavailable'))"
+    return 0
+  fi
+  if { [ -e "$_dest" ] || [ -L "$_dest" ]; } && [ ! -d "$_dest" ]; then
+    warn "$_client Skill $_skill not installed: $_dest exists and is not a directory; move it away"
+    return 0
+  fi
   if [ "$_skill" != "$SKILL_NAME" ] && [ -d "$_dest" ] && [ ! -L "$_dest" ] && [ ! -f "$_dest/.version" ] \
     && [ "$SKILL_ADOPT" != 1 ]; then
     # Somebody else's directory under a pcbpilot name: never replace it silently.

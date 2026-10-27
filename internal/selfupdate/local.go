@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -40,6 +41,8 @@ type LocalBundle struct {
 	Skills    map[string]map[string][]byte
 	Manifest  SkillManifest
 	Connector string
+	// Adopt lets Install replace a same-named dir pcbpilot did not install.
+	Adopt bool
 }
 
 // ReadLocalBundle snapshots validated bytes before any installation writes.
@@ -296,73 +299,87 @@ func (b *LocalBundle) Install(binary string, log io.Writer) (retErr error) {
 		return err
 	}
 	fmt.Fprintf(log, "Installed CLI: %s\n", binary)
-	// Every client with the router installed receives every packaged Skill;
-	// retired ones are removed where pcbpilot wrote them.
-	for _, client := range clientOrder {
-		if !ClientInstalled(client) {
-			continue
-		}
-		for _, skill := range b.Manifest.Skills {
-			if e := b.installSkill(skill, SkillDirFor(client, skill), log); e != nil {
-				return e
-			}
-		}
-		for _, name := range retiredSkills(b.Manifest, PublicSkills()) {
-			dir := SkillDirFor(client, name)
-			if dir == "" || !ownedSkillDir(dir) {
-				continue
-			}
-			if e := removeOwnedSkill(dir); e != nil {
-				return fmt.Errorf("remove retired Skill %s: %w", dir, e)
-			}
-			fmt.Fprintf(log, "Removed retired Skill: %s\n", dir)
-		}
-	}
-	return nil
+	return b.installSkills(log)
 }
 
-// installSkill backs up (when present) and replaces one Skill dir.
-func (b *LocalBundle) installSkill(skill, dir string, log io.Writer) error {
-	if p, e := filepath.EvalSymlinks(dir); e == nil {
-		dir = p
+// installSkills gives every client with the router every packaged Skill, with
+// the same rules as SyncSkills: links are left alone, a same-named dir
+// pcbpilot did not install is a conflict unless Adopt, retired Skills go only
+// where pcbpilot wrote them, and each client is staged completely and switched
+// as one transaction. Every dir about to change is first copied to a printed
+// .pcbpilot-local-backup-* directory.
+func (b *LocalBundle) installSkills(log io.Writer) error {
+	root, err := os.MkdirTemp("", "easyeda-local-skills-*")
+	if err != nil {
+		return err
 	}
-	if isDir(dir) {
-		backup, e := os.MkdirTemp(filepath.Dir(dir), ".pcbpilot-local-backup-*")
-		if e != nil {
-			return e
-		}
-		if e = copyTree(dir, backup, false, false); e != nil {
-			return e
-		}
-		fmt.Fprintf(log, "Skill backup: %s\n", backup)
-	}
-	src, e := os.MkdirTemp(filepath.Dir(dir), ".easyeda-local-source-*")
-	if e != nil {
-		return e
-	}
-	e = func() error {
-		defer os.RemoveAll(src)
+	defer os.RemoveAll(root)
+	for _, skill := range b.Manifest.Skills {
 		for name, data := range b.Skills[skill] {
-			p := filepath.Join(src, name)
-			if e := os.MkdirAll(filepath.Dir(p), 0755); e != nil {
-				return e
+			p := filepath.Join(root, skill, filepath.FromSlash(name))
+			if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+				return err
 			}
 			mode := os.FileMode(0644)
 			if bytes.HasPrefix(data, []byte("#!")) {
 				mode = 0755
 			}
-			if e := os.WriteFile(p, data, mode); e != nil {
-				return e
+			if err := os.WriteFile(p, data, mode); err != nil {
+				return err
 			}
 		}
-		return materialize(src, dir, false, b.Version)
-	}()
-	if e != nil {
-		return fmt.Errorf("Skill %s failed: %w", dir, e)
 	}
-	if e := b.CheckSkillNamed(skill, dir); e != nil {
-		return e
+	tree := skillTree{root: root, manifest: b.Manifest, cleanup: func() {}}
+	var clients []string
+	for _, c := range clientOrder {
+		if ClientInstalled(c) {
+			clients = append(clients, c)
+		}
 	}
-	fmt.Fprintf(log, "Installed Skill: %s\n", dir)
-	return nil
+	opts := SyncOptions{Force: true, Adopt: b.Adopt}
+	items := planSkillSync(clients, b.Manifest, retiredSkills(b.Manifest, knownSkills(clients)), opts, b.Version)
+	for _, it := range items {
+		if it.action == syncKeep || !isDir(it.out.Dir) {
+			continue
+		}
+		backup, err := os.MkdirTemp(filepath.Dir(it.out.Dir), ".pcbpilot-local-backup-*")
+		if err != nil {
+			return err
+		}
+		if err := copyTree(it.out.Dir, backup, false, false); err != nil {
+			return err
+		}
+		fmt.Fprintf(log, "Skill backup: %s\n", backup)
+	}
+	changed := 0
+	var failures []error
+	for _, client := range clients {
+		var mine []syncItem
+		for _, it := range items {
+			if it.out.Client == client {
+				mine = append(mine, it)
+			}
+		}
+		for _, o := range applyClientSync(tree, mine, opts, b.Version, &changed, func(string, ...any) {}) {
+			switch o.Status {
+			case "error":
+				failures = append(failures, fmt.Errorf("Skill %s: %s", o.Dir, o.Err))
+			case "created", "updated":
+				if err := b.CheckSkillNamed(o.Skill, o.Dir); err != nil {
+					failures = append(failures, err)
+					continue
+				}
+				fmt.Fprintf(log, "Installed Skill: %s\n", o.Dir)
+			case "removed":
+				fmt.Fprintf(log, "Removed retired Skill: %s\n", o.Dir)
+			case "linked", "conflict", "kept":
+				detail := o.Err
+				if o.Status == "linked" {
+					detail = "linked to " + o.Linked + " (source checkout; left alone)"
+				}
+				fmt.Fprintf(log, "Skipped Skill %s: %s\n", o.Dir, detail)
+			}
+		}
+	}
+	return errors.Join(failures...)
 }

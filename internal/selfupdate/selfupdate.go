@@ -543,62 +543,6 @@ func skillMetadataVersion(body string) (string, error) {
 	return version, nil
 }
 
-// materialize prepares a complete sibling directory, then switches it into
-// place. Failed copies never change the installation; a failed switch restores
-// its backup. A normal sync removes files absent from the release. Preserve mode
-// merges local content and keeps its old marker rather than claiming parity.
-func materialize(src, dst string, preserve bool, version string) error {
-	if resolved, err := filepath.EvalSymlinks(dst); err == nil {
-		dst = resolved
-	}
-	parent := filepath.Dir(dst)
-	if err := os.MkdirAll(parent, 0755); err != nil {
-		return err
-	}
-	stage, err := os.MkdirTemp(parent, ".easyeda-skill-stage-*")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(stage)
-	existed := isDir(dst)
-	if preserve && existed {
-		if err := copyTree(dst, stage, false, false); err != nil {
-			return err
-		}
-	}
-	if err := copyTree(src, stage, preserve, true); err != nil {
-		return err
-	}
-	if !preserve || !existed {
-		if err := os.WriteFile(filepath.Join(stage, versionMarker), []byte(version+"\n"), 0644); err != nil {
-			return err
-		}
-	}
-	if err := os.Chmod(stage, 0755); err != nil {
-		return err
-	}
-	if !existed {
-		return os.Rename(stage, dst)
-	}
-	backup, err := os.MkdirTemp(parent, ".easyeda-skill-backup-*")
-	if err != nil {
-		return err
-	}
-	if err := os.Remove(backup); err != nil {
-		return err
-	}
-	if err := os.Rename(dst, backup); err != nil {
-		return err
-	}
-	if err := os.Rename(stage, dst); err != nil {
-		if restoreErr := os.Rename(backup, dst); restoreErr != nil {
-			return fmt.Errorf("switch skill: %w; restore failed: %v (original preserved at %s)", err, restoreErr, backup)
-		}
-		return err
-	}
-	return os.RemoveAll(backup)
-}
-
 func copyTree(src, dst string, preserve, skipMarker bool) error {
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {

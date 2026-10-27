@@ -71,7 +71,7 @@ func TestLocalUpdateReadyAndUnknownWindow(t *testing.T) {
 		host, port := fakeDaemon(t, `{"service":"pcbpilot","status":"ok","version":"v1.4.9-dev.1","windows":[`+windows+`]}`)
 		cfg := &appConfig{host: host, ports: fmt.Sprintf("%d-%d", port, port)}
 		var out bytes.Buffer
-		e := runLocalUpdate(cfg, dir, "", true, true, true, &out)
+		e := runLocalUpdate(cfg, dir, "", true, true, true, false, &out)
 		if (e != nil) != unknown {
 			t.Fatalf("unknown=%v err=%v report=%s", unknown, e, out.String())
 		}

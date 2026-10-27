@@ -187,6 +187,30 @@ class PowerShellInstallerTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual((user / '.version').read_text(), '1.4.2\n')
 
+    def test_focused_skill_junction_is_left_alone(self):
+        self.old_install()
+        checkout = self.root / 'checkout' / DEMO
+        checkout.mkdir(parents=True)
+        (checkout / 'SKILL.md').write_text('checkout copy')
+        link = self.codex / 'skills' / DEMO
+        shutil.rmtree(link)
+        subprocess.check_call(['cmd', '/c', 'mklink', '/J', str(link), str(checkout)], stdout=subprocess.DEVNULL)
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('left alone', result.stdout + result.stderr)
+        self.assertEqual(sorted(p.name for p in checkout.iterdir()), ['SKILL.md'])
+        self.assertEqual((checkout / 'SKILL.md').read_text(), 'checkout copy')
+
+    def test_file_at_a_skill_path_is_a_conflict(self):
+        path = self.claude / 'skills' / DEMO
+        path.parent.mkdir(parents=True)
+        path.write_text('a user file')
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('is not a directory', result.stdout + result.stderr)
+        self.assertEqual(path.read_text(), 'a user file')
+        self.assertEqual((self.codex / 'skills' / DEMO / '.version').read_text(), '1.4.2\n')
+
     def test_a_failed_switch_at_any_position_restores_every_skill(self):
         self.old_install()
         retired = self.codex / 'skills/pcbpilot-old'
