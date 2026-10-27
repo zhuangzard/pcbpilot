@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -90,9 +91,6 @@ func (t *Txn) Stage(path string, data []byte, base *Snapshot) error {
 	if cerr := f.Close(); werr == nil {
 		werr = cerr
 	}
-	if werr == nil {
-		werr = os.Chmod(f.Name(), perm)
-	}
 	if werr != nil {
 		os.Remove(f.Name())
 		return werr
@@ -138,6 +136,9 @@ func (t *Txn) base(path string, base *Snapshot) (string, Snapshot, error) {
 	if err != nil {
 		return "", Snapshot{}, err
 	}
+	if t.reserved(abs) {
+		return "", Snapshot{}, fmt.Errorf("%s is pcbpilot's own transaction state (writer lock, journal or backups) and cannot be part of a transaction", abs)
+	}
 	var b Snapshot
 	if base != nil {
 		b = *base
@@ -146,6 +147,59 @@ func (t *Txn) base(path string, base *Snapshot) (string, Snapshot, error) {
 	}
 	b.Path = abs
 	return abs, b, nil
+}
+
+// reserved is true for the writer lock and anything inside the txn
+// directory, compared with the platform's case rules and, where the files
+// exist, by identity (os.SameFile), so an alias cannot slip through.
+func (t *Txn) reserved(abs string) bool {
+	lock, tdir := WriterLockPath(t.root), txnDir(t.root)
+	if samePath(abs, lock) || within(abs, tdir) {
+		return true
+	}
+	if sameFile(abs, lock) {
+		return true
+	}
+	for d := abs; ; {
+		if sameFile(d, tdir) {
+			return true
+		}
+		up := filepath.Dir(d)
+		if up == d {
+			return false
+		}
+		d = up
+	}
+}
+
+func sameFile(a, b string) bool {
+	sa, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	sb, err := os.Stat(b)
+	return err == nil && os.SameFile(sa, sb)
+}
+
+// samePath compares cleaned paths, ignoring case where the usual
+// filesystems do (Windows, macOS).
+func samePath(a, b string) bool {
+	a, b = filepath.Clean(a), filepath.Clean(b)
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
+}
+
+func within(p, dir string) bool {
+	if samePath(p, dir) {
+		return true
+	}
+	rel := filepath.Clean(dir) + string(filepath.Separator)
+	if len(p) < len(rel) {
+		return false
+	}
+	return samePath(p[:len(rel)-1], dir) && os.IsPathSeparator(p[len(rel)-1])
 }
 
 func (t *Txn) put(c *Change) {
@@ -285,7 +339,10 @@ func (t *Txn) Apply(wantRev string, o Opts) (Plan, error) {
 					return err
 				}
 			}
-			return e.base().Check()
+			if err := e.base().Check(); err != nil {
+				return err
+			}
+			return stagedOK(e)
 		}
 	}
 	dir := txnDir(t.root)
@@ -306,8 +363,14 @@ func (t *Txn) Apply(wantRev string, o Opts) (Plan, error) {
 
 	// Prepare: nothing outside .pcbpilot/txn is touched until the journal
 	// says "commit", and it says so only after the backups are durable.
-	if err := os.MkdirAll(bdir, 0o755); err != nil {
+	// Backups may hold private files: the txn tree is 0700, files 0600.
+	if err := os.MkdirAll(bdir, 0o700); err != nil {
 		return plan, err
+	}
+	for _, d := range []string{dir, bdir} {
+		if err := os.Chmod(d, 0o700); err != nil {
+			return plan, err
+		}
 	}
 	if err := createJournal(t.root, j); err != nil {
 		return plan, err
@@ -347,6 +410,11 @@ func (t *Txn) Apply(wantRev string, o Opts) (Plan, error) {
 	if err := syncDirs(syncs...); err != nil {
 		return abandon(err)
 	}
+	for _, e := range j.Changes {
+		if err := stagedOK(e); err != nil {
+			return abandon(err)
+		}
+	}
 	j.Phase = "commit"
 	if err := writeJournal(t.root, j); err != nil {
 		return abandon(err)
@@ -360,7 +428,10 @@ func (t *Txn) Apply(wantRev string, o Opts) (Plan, error) {
 		if e.Kind == KindDelete {
 			err = removeRetry(e.Path, check(e))
 		} else {
-			err = renameRetry(e.Staged, e.Path, check(e))
+			// The staged file gets the target's mode only now.
+			if err = os.Chmod(e.Staged, e.Mode); err == nil {
+				err = renameRetry(e.Staged, e.Path, check(e))
+			}
 		}
 		if err == nil {
 			err = syncDir(filepath.Dir(e.Path))
@@ -555,17 +626,24 @@ func keepJournal(root string, err error) error {
 		Fix:    "run `pcbpilot kicad txn recover` again"}
 }
 
-// syncFile flushes a file's data and metadata (Windows needs write access).
-var syncFile = func(path string) error {
-	f, err := os.OpenFile(path, os.O_RDWR, 0)
+// syncFile flushes a file's data and metadata; it works on read-only files.
+var syncFile = platformSyncFile
+
+// stagedOK re-hashes a staged file: it must still hold the bytes that were
+// staged (nothing replaced it while it waited in the target directory).
+func stagedOK(e journalEntry) error {
+	if e.Kind == KindDelete {
+		return nil
+	}
+	b, err := os.ReadFile(e.Staged)
 	if err != nil {
-		return err
+		return wrapf(err, "staged content for %s", e.Path)
 	}
-	err = f.Sync()
-	if cerr := f.Close(); err == nil {
-		err = cerr
+	if h := sha256.Sum256(b); hex.EncodeToString(h[:]) != e.NewSHA {
+		return changedErr(e.Path, fmt.Sprintf("its staged content %s was modified (sha256 %s → %s)",
+			filepath.Base(e.Staged), short(e.NewSHA), short(hex.EncodeToString(h[:]))))
 	}
-	return err
+	return nil
 }
 
 // mkdirTracked is os.MkdirAll that returns the directories it had to
@@ -629,7 +707,7 @@ func createJournal(root string, j journal) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(journalPath(root), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(journalPath(root), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if errors.Is(err, fs.ErrExist) {
 		return Pending(root)
 	}
@@ -854,8 +932,12 @@ func copyFile(dst, src string) (string, error) {
 		return "", err
 	}
 	defer in.Close()
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
+		return "", err
+	}
+	if err := out.Chmod(0o600); err != nil { // a leftover from an earlier run
+		out.Close()
 		return "", err
 	}
 	h := sha256.New()

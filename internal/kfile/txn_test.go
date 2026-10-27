@@ -259,7 +259,7 @@ func interrupt(t *testing.T, tx *Txn) {
 	old := renameFile
 	renameFile = func(from, to string) error {
 		base := filepath.Base(to)
-		if base == "journal.json" || (base == "a.kicad_pcb" || base == "a.del") && !landed[base] {
+		if base == "journal.json" || (base == "a.kicad_pcb" || base == "a.del" || base == "a.aro") && !landed[base] {
 			landed[base] = true
 			return platformRename(from, to)
 		}
@@ -268,7 +268,7 @@ func interrupt(t *testing.T, tx *Txn) {
 	oldRm := removeFile
 	removeFile = func(p string) error {
 		base := filepath.Base(p)
-		if base == "a.del" && !landed[base] {
+		if (base == "a.del" || base == "a.aro") && !landed[base] {
 			landed[base] = true
 			return os.Remove(p)
 		}
@@ -852,6 +852,178 @@ func TestRenamedButNotFlushed(t *testing.T) {
 	}
 	if read(t, filepath.Join(dir, "a.kicad_pcb")) != "A1" || read(t, filepath.Join(dir, "a.kicad_pro")) != "P1" {
 		t.Fatal("not rolled back")
+	}
+	clean(t, dir)
+}
+
+// readOnly makes a 0444 (Windows: read-only attribute) file and makes sure
+// the test directory can still be removed.
+func readOnly(t *testing.T, p, body string) {
+	t.Helper()
+	os.WriteFile(p, []byte(body), 0o644)
+	os.Chmod(p, 0o444)
+	t.Cleanup(func() { os.Chmod(p, 0o644) })
+}
+
+func isReadOnly(t *testing.T, p string) bool {
+	t.Helper()
+	st, err := os.Stat(p)
+	return err == nil && st.Mode().Perm()&0o200 == 0
+}
+
+// A deleted read-only file is restored read-only by rollback and by recover,
+// and recover can flush it (it does not stay pending).
+func TestTxnReadOnlyOriginal(t *testing.T) {
+	// Rollback.
+	dir := project(t, map[string]string{"a.kicad_pcb": "A1", "a.kicad_pro": "P1"})
+	ro := filepath.Join(dir, "a.aro")
+	readOnly(t, ro, "frozen")
+	tx := stagedTxn(t, dir)
+	if err := tx.Delete(ro, nil); err != nil {
+		t.Fatal(err)
+	}
+	injectRename(t, onBase("a.kicad_pro", func(string, string) error { return errors.New("fail") }))
+	if _, err := tx.Apply("", Opts{Env: fakeEnv()}); err == nil || CodeOf(err) == CodeTxnPending {
+		t.Fatalf("rollback: %v", err)
+	}
+	renameFile = platformRename
+	if read(t, ro) != "frozen" || !isReadOnly(t, ro) {
+		t.Fatalf("rollback: %q read-only=%v", read(t, ro), isReadOnly(t, ro))
+	}
+	clean(t, dir)
+
+	// Recover after a crash that left it deleted.
+	dir = project(t, map[string]string{"a.kicad_pcb": "A1", "a.kicad_pro": "P1"})
+	ro = filepath.Join(dir, "a.aro")
+	readOnly(t, ro, "frozen")
+	tx = stagedTxn(t, dir)
+	tx.Delete(ro, nil)
+	interrupt(t, tx)
+	if read(t, ro) != "<missing>" {
+		t.Fatal("setup: a.aro should be deleted")
+	}
+	rec, err := Recover(dir, RecoverOpts{Env: fakeEnv()})
+	if err != nil || rec.Action != "rolled-back" || read(t, ro) != "frozen" || !isReadOnly(t, ro) {
+		t.Fatalf("recover: %+v %v read-only=%v", rec, err, isReadOnly(t, ro))
+	}
+	clean(t, dir)
+}
+
+// Backups and the journal are private to the user.
+func TestTxnPrivatePerms(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permission bits")
+	}
+	checkPerms := func(dir, when string) {
+		t.Helper()
+		filepath.Walk(txnDir(dir), func(p string, fi os.FileInfo, err error) error {
+			if err != nil {
+				return nil
+			}
+			want := os.FileMode(0o600)
+			if fi.IsDir() {
+				want = 0o700
+			}
+			if fi.Mode().Perm() != want {
+				t.Errorf("%s: %s is %v, want %v", when, p, fi.Mode().Perm(), want)
+			}
+			return nil
+		})
+	}
+	dir := project(t, map[string]string{"a.kicad_pcb": "A1", "a.kicad_pro": "P1"})
+	os.Chmod(filepath.Join(dir, "a.kicad_pcb"), 0o600)
+	beforeMutate = func(string) { checkPerms(dir, "apply") }
+	_, err := stagedTxn(t, dir).Apply("", Opts{Env: fakeEnv()})
+	beforeMutate = nil
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := os.Stat(filepath.Join(dir, "a.kicad_pcb")); st.Mode().Perm() != 0o600 {
+		t.Errorf("target mode %v", st.Mode().Perm())
+	}
+
+	dir = project(t, map[string]string{"a.kicad_pcb": "A1", "a.kicad_pro": "P1"})
+	interrupt(t, stagedTxn(t, dir))
+	checkPerms(dir, "interrupted")
+}
+
+// The writer lock and the txn directory cannot be staged or deleted.
+func TestTxnReservedPaths(t *testing.T) {
+	dir := project(t, map[string]string{"a.kicad_pcb": "A1"})
+	w, err := AcquireWriter(dir, fakeEnv())
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Release()
+	os.MkdirAll(txnDir(dir), 0o700)
+	os.WriteFile(journalPath(dir)+".keep", []byte("x"), 0o600)
+	tx := NewTxn(dir)
+	reserved := []string{
+		WriterLockPath(dir),
+		journalPath(dir),
+		filepath.Join(txnDir(dir), "0123456789abcdef", "000-a.kicad_pcb"),
+		txnDir(dir),
+	}
+	// A case variant of the same path, where the platform or the filesystem
+	// treats it as the same file.
+	variant := filepath.Join(dir, ".PCBPILOT", "writer.lock")
+	if samePath(variant, WriterLockPath(dir)) || sameFile(variant, WriterLockPath(dir)) {
+		reserved = append(reserved, variant)
+	}
+	for _, p := range reserved {
+		if err := tx.Stage(p, []byte("evil"), nil); err == nil || !strings.Contains(err.Error(), "transaction state") {
+			t.Errorf("Stage(%s): %v", p, err)
+		}
+	}
+	if err := tx.Delete(WriterLockPath(dir), nil); err == nil {
+		t.Error("Delete(writer.lock) accepted")
+	}
+	for _, d := range []string{filepath.Join(dir, ".pcbpilot"), txnDir(dir)} {
+		noTemps(t, d)
+	}
+	// A sibling under .pcbpilot that is not txn state is allowed.
+	if err := tx.Stage(filepath.Join(dir, ".pcbpilot", "report.json"), []byte("{}"), nil); err != nil {
+		t.Fatal(err)
+	}
+	tx.Abort()
+}
+
+// A staged file modified before or during Apply is refused.
+func TestStagedTampering(t *testing.T) {
+	staged := func(tx *Txn, dir, name string) string {
+		return tx.changes[filepath.Join(dir, name)].staged
+	}
+	// Before Apply: refused in prepare, nothing written.
+	dir := project(t, map[string]string{"a.kicad_pcb": "A1", "a.kicad_pro": "P1"})
+	tx := stagedTxn(t, dir)
+	if runtime.GOOS != "windows" {
+		if st, _ := os.Stat(staged(tx, dir, "a.kicad_pro")); st.Mode().Perm() != 0o600 {
+			t.Errorf("staged mode %v, want 0600 until install", st.Mode().Perm())
+		}
+	}
+	os.WriteFile(staged(tx, dir, "a.kicad_pro"), []byte("tampered"), 0o600)
+	if _, err := tx.Apply("", Opts{Env: fakeEnv()}); CodeOf(err) != CodeChanged {
+		t.Fatalf("before apply: %v", err)
+	}
+	if read(t, filepath.Join(dir, "a.kicad_pcb")) != "A1" || read(t, filepath.Join(dir, "a.kicad_pro")) != "P1" {
+		t.Fatal("before apply: files written")
+	}
+	tx.Abort()
+	clean(t, dir)
+
+	// Just before its rename: the earlier file is rolled back.
+	dir = project(t, map[string]string{"a.kicad_pcb": "A1", "a.kicad_pro": "P1"})
+	tx = stagedTxn(t, dir)
+	pro := staged(tx, dir, "a.kicad_pro")
+	beforeMutate = func(p string) {
+		if filepath.Base(p) == "a.kicad_pro" {
+			os.WriteFile(pro, []byte("tampered"), 0o600)
+		}
+	}
+	_, err := tx.Apply("", Opts{Env: fakeEnv()})
+	beforeMutate = nil
+	if CodeOf(err) != CodeChanged || read(t, filepath.Join(dir, "a.kicad_pcb")) != "A1" || read(t, filepath.Join(dir, "a.kicad_pro")) != "P1" {
+		t.Fatalf("during apply: %v", err)
 	}
 	clean(t, dir)
 }
