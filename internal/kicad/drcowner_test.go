@@ -309,7 +309,7 @@ func TestLoadFabContract(t *testing.T) {
 	}
 	good := `{"vendor":"JLCPCB","layers":2,"finish":"HASL lead-free","assembly":{"sides":"top"},
 	  "limits":{"minTrackMm":0.127,"minSpaceMm":0.127,"minDrillMm":0.3,"minAnnularMm":0.13},
-	  "sources":[{"item":"limits","url":"https://example.com/capabilities","retrieved":"2026-10-27"},
+	  "sources":[{"item":"layers","url":"https://example.com/order","retrieved":"2026-10-27"},{"item":"limits","url":"https://example.com/capabilities","retrieved":"2026-10-27"},
 	             {"item":"finish","url":"https://example.com/finish","retrieved":"2026-10-27"},
 	             {"item":"assembly.sides","url":"https://example.com/quote","retrieved":"2026-10-27"}]}`
 	c, err := LoadFabContract(write(good))
@@ -335,6 +335,7 @@ func TestLoadFabContract(t *testing.T) {
 		"sides without source":  strings.Replace(good, `"item":"assembly.sides"`, `"item":"silk"`, 1),
 		"limit without source":  strings.Replace(perLimit, src("limits.minDrillMm"), "", 1),
 		"unknown source item":   strings.Replace(good, `"item":"finish"`, `"item":"finsh"`, 1),
+		"layers without source": strings.Replace(good, `{"item":"layers","url":"https://example.com/order","retrieved":"2026-10-27"},`, "", 1),
 	} {
 		if _, err := LoadFabContract(write(bad)); err == nil || !strings.Contains(err.Error(), "CONTRACT_INVALID") {
 			t.Errorf("%s: %v", name, err)
@@ -455,5 +456,92 @@ func TestEvalDRCPolicy(t *testing.T) {
 	}
 	if r.HardDetail() == "" || !strings.Contains(r.SilencedDetail(), "courtyards_overlap (excluded), overlapping_pads (downgraded)") {
 		t.Fatalf("details: %q / %q", r.HardDetail(), r.SilencedDetail())
+	}
+}
+
+// Mixed items: the uuids that are there still decide; only the item without
+// one is compared by position.
+func TestDiffDRCMixedUUIDs(t *testing.T) {
+	ix := mustIndex(t)
+	mk := func(track string, padX float64) []OwnedViolation {
+		return ix.Own([]Violation{viol("clearance", "violations", item("Track [VCC]", track, 10, 10), item("Pad 2 of R1", "", padX, 10))})
+	}
+	base := mk("trk-1", 10.8)
+	if d := DiffDRC(base, mk("trk-2", 10.8), 0.5); len(d.New) != 1 || d.Matched != 0 {
+		t.Fatalf("other track, unidentified pad in place: %+v", d)
+	}
+	if d := DiffDRC(base, mk("trk-1", 10.9), 0.5); d.Matched != 1 {
+		t.Fatalf("same track, pad within tolerance: %+v", d)
+	}
+	if d := DiffDRC(base, mk("trk-1", 12), 0.5); len(d.New) != 1 {
+		t.Fatalf("same track, pad moved: %+v", d)
+	}
+	// A uuid on one side only: the other side's object cannot be shown to be
+	// R1's pad (its owner is unresolved), so it is not the same violation.
+	oneSided := ix.Own([]Violation{viol("clearance", "violations", item("Track [VCC]", "trk-1", 10, 10), item("Pad 2 of R1", "pad-r1-2", 10.8, 10))})
+	if d := DiffDRC(base, oneSided, 0.5); len(d.New) != 1 {
+		t.Fatalf("uuid on one side: %+v", d)
+	}
+}
+
+// Rules that gate at warning severity are hard for the policy too: a
+// project that excludes or ignores them fails unless a waiver accepts it.
+func TestFabWarningRulesAreHard(t *testing.T) {
+	for _, rule := range []string{"copper_sliver", "holes_co_located", "footprint_symbol_field_mismatch", "hole_to_hole", "connection_width"} {
+		if DRCRuleClass(rule) != "hard" || !DRCGatesWarning(rule) {
+			t.Errorf("%s: class %s, gates %v", rule, DRCRuleClass(rule), DRCGatesWarning(rule))
+		}
+		for _, pol := range []*DRCPolicy{
+			{Exclusions: []DRCExclusion{{Rule: rule, Key: rule + "|1|2|a|b"}}},
+			{Ignored: []string{rule}},
+		} {
+			if r := EvalDRCPolicy(pol, nil); len(r.Hard) != 1 {
+				t.Errorf("%s %+v: %+v", rule, pol, r)
+			}
+		}
+	}
+	for _, rule := range []string{"silk_overlap", "isolated_copper", "lib_footprint_mismatch"} {
+		if DRCGatesWarning(rule) {
+			t.Errorf("%s gates as a warning", rule)
+		}
+	}
+}
+
+func TestReadEffectiveRulesNetclassesAndFlags(t *testing.T) {
+	board := string(mustReadFile(t, drcBoard))
+	run := func(pro string) *EffectiveRules {
+		t.Helper()
+		dir := t.TempDir()
+		_ = os.WriteFile(filepath.Join(dir, "b.kicad_pcb"), []byte(board), 0o644)
+		_ = os.WriteFile(filepath.Join(dir, "b.kicad_pro"), []byte(pro), 0o644)
+		r, err := ReadEffectiveRules(filepath.Join(dir, "b.kicad_pcb"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	// Fine with clearance 0 next to Default 0.2 and no Board Setup minimum:
+	// Fine's effective clearance is unproven.
+	r := run(`{"board":{"design_settings":{"rules":{"min_clearance":0}}},"net_settings":{"classes":[{"name":"Default","clearance":0.2},{"name":"Fine","clearance":0}]}}`)
+	if len(r.Space.Unknown) != 1 || !strings.Contains(r.Space.Unknown[0], "Fine") {
+		t.Errorf("zero class clearance: %+v", r.Space)
+	}
+	// A class without a clearance inherits Default's.
+	if r := run(`{"net_settings":{"classes":[{"name":"Default","clearance":0.2},{"name":"Fine"}]}}`); len(r.Space.Unknown) != 0 {
+		t.Errorf("inherited clearance: %+v", r.Space)
+	}
+	if r := run(`{"net_settings":{"classes":[{"name":"Default"},{"name":"Fine"}]}}`); len(r.Space.Unknown) != 1 {
+		t.Errorf("nothing to inherit: %+v", r.Space)
+	}
+	// Microvias allowed: their smaller drill minimum counts; a malformed
+	// flag leaves the drill unproven.
+	if r := run(`{"board":{"design_settings":{"rules":{"allow_microvias":true,"min_through_hole_diameter":0.3,"min_microvia_drill":0.1}}}}`); !near(r.Drill.MinMm, 0.1) || len(r.Drill.Unknown) != 0 {
+		t.Errorf("microvias: %+v", r.Drill)
+	}
+	if r := run(`{"board":{"design_settings":{"rules":{"allow_microvias":"yes","min_through_hole_diameter":0.3,"min_microvia_drill":0.1}}}}`); len(r.Drill.Unknown) != 1 {
+		t.Errorf("malformed allow_microvias: %+v", r.Drill)
+	}
+	if r := run(`{"board":{"design_settings":{"rules":{"allow_blind_buried_vias":1}}}}`); len(r.Drill.Unknown) != 1 {
+		t.Errorf("malformed allow_blind_buried_vias: %+v", r.Drill)
 	}
 }

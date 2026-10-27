@@ -192,7 +192,7 @@ func TestKicadDRCCommandCannotCheck(t *testing.T) {
 
 const preflightContract = `{"vendor":"JLCPCB","layers":4,"finish":"ENIG",
   "limits":{"minTrackMm":0.127,"minSpaceMm":0.127,"minDrillMm":0.3,"minAnnularMm":0.13},
-  "sources":[{"item":"limits","url":"https://example.com/capabilities","retrieved":"2026-10-27"},
+  "sources":[{"item":"layers","url":"https://example.com/order","retrieved":"2026-10-27"},{"item":"limits","url":"https://example.com/capabilities","retrieved":"2026-10-27"},
              {"item":"finish","url":"https://example.com/finish","retrieved":"2026-10-27"}]}`
 
 func runPreflight(t *testing.T, args ...string) (*fabPreflightReport, int) {
@@ -323,7 +323,7 @@ func TestPreflightCheckHelpers(t *testing.T) {
 		}
 	}
 	ct.Finish = "ENIG"
-	if c := finishCheck([]byte(`(kicad_pcb)`), ct); c.Status != gate.Warn || !c.Advisory {
+	if c := finishCheck([]byte(`(kicad_pcb)`), ct); c.Status != gate.CannotCheck {
 		t.Errorf("no finish on the board: %+v", c)
 	}
 	// Outline: an open outline item (even excluded) fails; ignoring the rule
@@ -342,5 +342,25 @@ func TestPreflightCheckHelpers(t *testing.T) {
 	}
 	if c := outlineCheck(edge, &kicadDRCReport{}); c.Status != gate.CannotCheck {
 		t.Errorf("DRC did not run: %+v", c)
+	}
+}
+
+// copper_sliver, holes_co_located (warnings) and
+// footprint_symbol_field_mismatch (parity) gate end to end; signed waivers
+// accept them.
+func TestKicadDRCCommandFabWarningRules(t *testing.T) {
+	pcb := copyDRCBoard(t)
+	fakeKicadCLIEnv(t, "drc/warning-fab.json", "0")
+	rep, code := runDRCReport(t, "--pcb", pcb, "--schematic-parity")
+	s := checkStatus(rep.Checks)
+	if code != 6 || s["kicad-drc"] != gate.Fail || len(rep.Checks[0].Items) != 2 || s["schematic-parity"] != gate.Fail {
+		t.Fatalf("exit %d %+v", code, rep.Checks)
+	}
+	w := filepath.Join(t.TempDir(), "w.json")
+	_ = os.WriteFile(w, []byte(`[{"gate":"kicad-drc","match":"copper_sliver (warning","reason":"fab removes slivers","by":"t"},
+		{"gate":"kicad-drc","match":"holes_co_located (warning","reason":"stacked mounting hole","by":"t"},
+		{"gate":"schematic-parity","match":"footprint_symbol_field_mismatch","reason":"value text only","by":"t"}]`), 0o644)
+	if rep, code := runDRCReport(t, "--pcb", pcb, "--schematic-parity", "--waivers", w); code != 0 || rep.Verdict != gate.Pass {
+		t.Fatalf("waived: exit %d %+v", code, rep.Checks)
 	}
 }

@@ -236,7 +236,7 @@ func TestKicadFabPreflightLive(t *testing.T) {
 	contract := filepath.Join(t.TempDir(), "contract.json")
 	_ = os.WriteFile(contract, []byte(`{"vendor":"JLCPCB","layers":2,"assembly":{"sides":"top"},
 	  "limits":{"minTrackMm":0.127,"minSpaceMm":0.127,"minDrillMm":0.3,"minAnnularMm":0.13},
-	  "sources":[{"item":"limits","url":"https://example.com/capabilities","retrieved":"2026-10-27"},
+	  "sources":[{"item":"layers","url":"https://example.com/order","retrieved":"2026-10-27"},{"item":"limits","url":"https://example.com/capabilities","retrieved":"2026-10-27"},
 	             {"item":"assembly","url":"https://example.com/quote","retrieved":"2026-10-27"}]}`), 0o644)
 	before := treeHash(t, dir)
 	r := runFabPreflight(fabPreflightOptions{pcb: filepath.Join(dir, "interf_u.kicad_pcb"), sch: filepath.Join(dir, "interf_u.kicad_sch"), contract: contract, cli: cli})

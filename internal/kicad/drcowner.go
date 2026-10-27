@@ -422,22 +422,36 @@ func matchDistanceMm(a, b OwnedViolation) (float64, bool) {
 	if len(a.Items) != len(b.Items) {
 		return 0, false
 	}
-	withUUIDs := true
+	// Items identified on both sides pair by uuid; only the rest (a uuid on
+	// at most one side) pair by position, in order. An identified object
+	// with no counterpart is a different violation, unless the other side
+	// has unidentified items it could be.
+	inA, inB := map[string]bool{}, map[string]bool{}
+	anonA, anonB := 0, 0
 	for i := range a.Items {
-		withUUIDs = withUUIDs && a.Items[i].UUID != "" && b.Items[i].UUID != ""
+		if u := a.Items[i].UUID; u != "" {
+			inA[u] = true
+		} else {
+			anonA++
+		}
+		if u := b.Items[i].UUID; u != "" {
+			inB[u] = true
+		} else {
+			anonB++
+		}
 	}
 	worst := 0.0
-	if !withUUIDs {
-		for i := range a.Items {
-			worst = math.Max(worst, pos(a.Items[i].X-b.Items[i].X, a.Items[i].Y-b.Items[i].Y))
+	takenA, takenB := make([]bool, len(a.Items)), make([]bool, len(b.Items))
+	for i, ai := range a.Items {
+		if ai.UUID == "" || !inB[ai.UUID] {
+			if ai.UUID != "" && anonB == 0 {
+				return 0, false
+			}
+			continue
 		}
-		return worst, true
-	}
-	taken := make([]bool, len(b.Items))
-	for _, ai := range a.Items {
 		j, dj := -1, math.Inf(1)
 		for k, bk := range b.Items {
-			if taken[k] || bk.UUID != ai.UUID {
+			if takenB[k] || bk.UUID != ai.UUID {
 				continue
 			}
 			if dk := pos(ai.X-bk.X, ai.Y-bk.Y); dk < dj {
@@ -447,8 +461,33 @@ func matchDistanceMm(a, b OwnedViolation) (float64, bool) {
 		if j < 0 {
 			return 0, false
 		}
-		taken[j] = true
+		takenA[i], takenB[j] = true, true
 		worst = math.Max(worst, dj)
+	}
+	for k, bk := range b.Items {
+		if !takenB[k] && bk.UUID != "" && !inA[bk.UUID] && anonA == 0 {
+			return 0, false
+		}
+	}
+	var restA, restB []DRCItem
+	for i, ai := range a.Items {
+		if !takenA[i] {
+			restA = append(restA, ai)
+		}
+	}
+	for k, bk := range b.Items {
+		if !takenB[k] {
+			restB = append(restB, bk)
+		}
+	}
+	if len(restA) != len(restB) {
+		return 0, false
+	}
+	for i := range restA {
+		if restA[i].UUID != "" && restB[i].UUID != "" {
+			return 0, false // two identified, different objects
+		}
+		worst = math.Max(worst, pos(restA[i].X-restB[i].X, restA[i].Y-restB[i].Y))
 	}
 	return worst, true
 }

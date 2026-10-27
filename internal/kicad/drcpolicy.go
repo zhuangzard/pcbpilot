@@ -28,6 +28,9 @@ var drcHardRules = map[string]bool{
 	"starved_thermal":             true, "zones_intersect": true, "solder_mask_bridge": true,
 	"items_not_allowed": true, "through_hole_pad_without_hole": true, "invalid_outline": true,
 	"item_on_disabled_layer": true, "track_on_post_machined_layer": true,
+	// Warnings by KiCad's default, but evidence a fab or the parity check
+	// needs: they gate at warning severity, so silencing them fails too.
+	"copper_sliver": true, "holes_co_located": true, "footprint_symbol_field_mismatch": true,
 }
 
 // drcSoftRules are the other rules KiCad 10 reports as errors by default
@@ -71,12 +74,11 @@ func DRCRuleClass(rule string) string {
 }
 
 // DRCGatesWarning: a warning-severity violation of rule still gates — the
-// electrical / fabrication rules (DRCRuleClass "hard", unknown rules
-// included: fail closed) and copper slivers, which a fab etches as they
-// are.
-func DRCGatesWarning(rule string) bool {
-	return DRCRuleClass(rule) == "hard" || rule == "copper_sliver"
-}
+// electrical / fabrication rules (DRCRuleClass "hard": copper slivers and
+// co-located holes included, unknown rules too — fail closed). The same
+// class decides the policy, so a rule that gates as a warning also fails
+// when the project excludes or ignores it.
+func DRCGatesWarning(rule string) bool { return DRCRuleClass(rule) == "hard" }
 
 // KiCadWarningRule: KiCad 10 does not report rule as an error by default.
 func KiCadWarningRule(rule string) bool { return kicadWarningRules[rule] }

@@ -28,14 +28,15 @@
   "assembly": {"sides": "top", "qty": 5},
   "viaProcess": "tented",
   "limits": {"minTrackMm": 0.127, "minSpaceMm": 0.127, "minDrillMm": 0.3, "minAnnularMm": 0.13},
-  "sources": [{"item": "limits", "url": "<厂商能力页 URL>", "retrieved": "YYYY-MM-DD"},
+  "sources": [{"item": "layers", "url": "<报价单 URL>", "retrieved": "YYYY-MM-DD"},
+               {"item": "limits", "url": "<厂商能力页 URL>", "retrieved": "YYYY-MM-DD"},
                {"item": "finish", "url": "<厂商工艺页或报价单 URL>", "retrieved": "YYYY-MM-DD"},
                {"item": "assembly", "url": "<报价单 URL>", "retrieved": "YYYY-MM-DD"}]
 }
 ```
 
 - 这就是 `kicad fab --preflight --contract` 读的格式：未知键直接拒绝（`CONTRACT_INVALID`，拼错的 `limits` 不会被当成“没有限制”）；
-  必填 `vendor`、`layers`（铜层数）和 `sources`（http(s) `url` + `YYYY-MM-DD` 的 `retrieved`）；每个会被检查的值（每项 `limits`、
+  必填 `vendor`、`layers`（铜层数）和 `sources`（http(s) `url` + `YYYY-MM-DD` 的 `retrieved`）；每个会被检查的值（`layers`、每项 `limits`、
   `finish`、`assembly.sides`）都要有一条 `item` 指向它或父项（`limits`、`assembly`）的来源，`item` 拼错（不是契约字段）直接拒绝；
   `limits` 缺哪项，对应的 `min-*` 检查就是 cannot-check；`finish` 缺省则不比，要写明确工艺（“HASL lead-free”，不是 “HASL”）；
   `assembly.sides` 缺省则 `assembly-sides` 为 cannot-check。
@@ -66,8 +67,8 @@ KiCad DRC JSON 只列**违例**，不列生效的规则；干净的 DRC 只说�
 
 | 来源 | 位置 | 计入 |
 |---|---|---|
-| Board Setup 约束 | `<board>.kicad_pro` → `board.design_settings.rules` | `min_track_width`、`min_clearance`、`min_through_hole_diameter`（`allow_microvias` 时加 `min_microvia_drill`）、`min_via_annular_width`；值为 0 记为“未设” |
-| 网络类 | `.kicad_pro` → `net_settings.classes[].clearance` | 每个类的间距（只有 `Default` 算全局下限）；网络类线宽/过孔尺寸只是默认值，DRC 不按它报错，不计入 |
+| Board Setup 约束 | `<board>.kicad_pro` → `board.design_settings.rules` | `min_track_width`、`min_clearance`、`min_through_hole_diameter`（`allow_microvias` 时加 `min_microvia_drill`）、`min_via_annular_width`；值为 0 记为“未设”；`allow_microvias` 等开关不是布尔值 → 孔径 cannot-check |
+| 网络类 | `.kicad_pro` → `net_settings.classes[].clearance` | 每个类的间距（只有 `Default` 算全局下限；其他类为 0 → cannot-check，缺省则继承 Default）；网络类线宽/过孔尺寸只是默认值，DRC 不按它报错，不计入 |
 | 自定义规则 | 同名 `<board>.kicad_dru`：`(constraint <track_width / clearance / hole_size / annular_width> (min …))` | 带条件/层的规则只拉低最小值，无条件的 error 规则才是全局下限；`(severity ignore)` / `(severity warning)`（不是强制下限）、只有 opt/max、数值读不懂 → 该项 cannot-check |
 | 局部覆盖 | `.kicad_pcb` 封装、焊盘的 `(clearance …)`，铺铜的 `(connect_pads (clearance …))` | 计入间距（不算全局下限）；值读不懂 → cannot-check |
 

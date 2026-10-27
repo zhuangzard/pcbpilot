@@ -216,13 +216,13 @@ pcbpilot kicad drc --pcb board.kicad_pcb --baseline drc/drc-report.json --waiver
   `footprint`（只涉及一个封装自己的对象）> `placement`（两个以上封装）> `graphic` > `unresolved`；位置另给 KiCad 坐标 `xMm/yMm`（mm，y 向下）。
 - **检查（各自 pass / fail / cannot-check，总判定取最差，退出码 0 / 6 / 5）**：
   `kicad-drc`（violations + unconnected 的 error 级条目，以及**电气/制造规则的 warning 级条目**——hard 类规则如 hole_to_hole、
-  connection_width、被降级的 solder_mask_bridge，外加 copper_sliver；其余警告只列出）、`kicad-drc-policy`（同 route 门禁：电气/制造规则被排除、ignore 或从
-  error 降为 warning 即失败，courtyard 等放置类只记 `SILENCED`）、`schematic-parity`（带 `--schematic-parity` 时，任何严重度的一致性条目）。
+  connection_width、copper_sliver、holes_co_located、被降级的 solder_mask_bridge；其余警告只列出）、`kicad-drc-policy`（同 route 门禁：电气/制造规则被排除、ignore 或从
+  error 降为 warning 即失败；会在 warning 级门禁的规则（copper_sliver、holes_co_located、footprint_symbol_field_mismatch 等）被排除或 ignore 同样失败；courtyard 等放置类只记 `SILENCED`）、`schematic-parity`（带 `--schematic-parity` 时，任何严重度的一致性条目）。
   `--waivers` 用 route 同一格式 `{"gate":"kicad-drc","match":…,"reason":…,"by":…}`，逐条接受（`kicad-drc` 的 waiver 也覆盖另两项）。
   kicad-cli 失败、报告不合 schema、基线读不了 → cannot-check，waiver 不能放行。
 - **基线**：`--baseline-pcb` 对旧板副本也跑一次 DRC；`--baseline` 接受本命令（或 `kicad fab --preflight`）的报告，也接受原始 kicad-cli JSON
   （用当前板解析归属，没有工程策略，所以策略项全量判定）。匹配 = 同规则 + 同归属 key + **同一组违例对象**（条目 uuid 的多重集合相同）且每个对象与基线里同 uuid 的对象相距
-  ≤ `--tolerance-mm`（默认 0.5；一致性与环境类不看位置）；条目缺 uuid 时退回更严的“条目数相同、按顺序逐个在容差内”；基线里是 warning、
+  ≤ `--tolerance-mm`（默认 0.5；一致性与环境类不看位置）；有 uuid 的对象照样按 uuid 配对，只有缺 uuid 的对象按顺序比位置（两边都有 uuid 却不同 = 不同违例）；基线里是 warning、
   现在是 error 的算新增（升级）；一对一。所以焊盘不动、换了一条同网的线去碰它也是新增。`baseline.new` 计入门禁，`baseline.resolved` 是消失的旧违例。
   实测（interf_u 副本，pcbnew 把 R1 挪到 C1 上）：新增条目都涉及 R1，只多一条 copper_edge_clearance——KiCad 把同一块铺铜对板框的冲突
   报在了另一段 Edge.Cuts 上（对象不同 = 新增，同时留下一条 resolved 孪生项）。

@@ -152,12 +152,28 @@ func (r *EffectiveRules) addProject(b []byte) error {
 		return err
 	}
 	rules := raw.Board.DesignSettings.Rules
-	flag := func(k string) bool {
+	// A present flag must be a JSON boolean: a malformed allow_microvias
+	// would hide the (smaller) microvia drill minimum.
+	flag := func(k string) (bool, bool) {
+		raw := bytes.TrimSpace(rules[k])
+		if len(raw) == 0 || string(raw) == "null" {
+			return false, true
+		}
 		var v bool
-		_ = json.Unmarshal(rules[k], &v)
-		return v
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return false, false
+		}
+		return v, true
 	}
-	r.MicroVias, r.BlindBuriedVias = flag("allow_microvias"), flag("allow_blind_buried_vias")
+	var okMicro, okBlind bool
+	r.MicroVias, okMicro = flag("allow_microvias")
+	r.BlindBuriedVias, okBlind = flag("allow_blind_buried_vias")
+	if !okMicro {
+		r.Drill.Unknown = append(r.Drill.Unknown, fmt.Sprintf(".kicad_pro allow_microvias is %s, not true / false: whether the microvia drill minimum applies is unknown", string(rules["allow_microvias"])))
+	}
+	if !okBlind {
+		r.Drill.Unknown = append(r.Drill.Unknown, fmt.Sprintf(".kicad_pro allow_blind_buried_vias is %s, not true / false", string(rules["allow_blind_buried_vias"])))
+	}
 	put := func(e *EffectiveMin, key string) {
 		v, present, ok := rawNumber(rules[key])
 		switch {
@@ -177,19 +193,36 @@ func (r *EffectiveRules) addProject(b []byte) error {
 	if r.MicroVias {
 		put(&r.Drill, "min_microvia_drill")
 	}
+	// Every net is at least in Default, so its clearance is global. Another
+	// class without a clearance inherits Default's (KiCad 9+); one whose
+	// clearance is 0 has no proven value of its own: Unknown.
+	var classes []string
+	defClr := 0.0
 	for i, c := range raw.NetSettings.Classes {
 		var name string
 		_ = json.Unmarshal(c["name"], &name)
 		if name == "" {
 			name = strconv.Itoa(i)
 		}
+		classes = append(classes, name)
 		v, present, ok := rawNumber(c["clearance"])
 		switch {
 		case !ok:
 			r.Space.Unknown = append(r.Space.Unknown, fmt.Sprintf("netclass %s clearance is %s, not a length in mm", name, string(c["clearance"])))
 		case present && v > 0:
-			// Every net is at least in Default: its clearance is global.
 			r.Space.add("netclass", "net_settings.classes["+name+"].clearance", v, name == "Default")
+			if name == "Default" {
+				defClr = v
+			}
+		case present && name == "Default":
+			r.Space.Unset = append(r.Space.Unset, "netclass Default clearance = 0 (no constraint)")
+		case present:
+			r.Space.Unknown = append(r.Space.Unknown, fmt.Sprintf("netclass %s clearance = 0: inherited or unset, its effective clearance is unproven (fix: give the class its clearance)", name))
+		}
+	}
+	for i, c := range raw.NetSettings.Classes {
+		if _, present, _ := rawNumber(c["clearance"]); !present && classes[i] != "Default" && defClr == 0 {
+			r.Space.Unknown = append(r.Space.Unknown, fmt.Sprintf("netclass %s has no clearance and Default none to inherit: its effective clearance is unproven", classes[i]))
 		}
 	}
 	return nil
@@ -457,6 +490,9 @@ func LoadFabContract(path string) (*FabContract, error) {
 	}
 	if c.Finish != "" {
 		checked["finish"] = true
+	}
+	if c.Layers > 0 {
+		checked["layers"] = true // the layer-count check
 	}
 	if c.Assembly != nil && c.Assembly.Sides != "" {
 		checked["assembly.sides"] = true

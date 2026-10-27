@@ -285,8 +285,7 @@ func finishCheck(board []byte, ct *kicad.FabContract) drcCheck {
 		return cannotCheck(c.Name, "contract finish "+err.Error()+" (fix: name the exact process in the contract)")
 	}
 	if have == "" {
-		c.Status, c.Advisory, c.Detail = gate.Warn, true, "the board's stackup names no copper finish; the order form decides ("+want+")"
-		return c
+		return cannotCheck(c.Name, "the board's stackup names no copper finish, so it cannot be compared with the contract's "+want+" (fix: set Board Setup > Physical Stackup finish)")
 	}
 	got, err := kicad.FinishProcess(have)
 	if err != nil {
