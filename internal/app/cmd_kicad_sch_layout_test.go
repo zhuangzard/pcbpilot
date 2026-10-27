@@ -237,18 +237,54 @@ func TestKicadSchCheckFixPwrFlag(t *testing.T) {
 
 func TestERCPinSnap(t *testing.T) {
 	sheet := autoFixture(t) // R3 at (88.9, 88.9), pin 1 at (88.9, 85.09)
+	const root = "/6f1c1d40-0000-4000-8000-000000000001"
 	c := ercPinSnap{}
+	pin1 := "3335ca2c-6813-45e6-b4e6-8674a5772037"
 	for _, x := range []struct {
-		ref, pin  string
-		rep, want kicad.Pt
+		name, uuid, path, ref, pin string
+		rep, want                  kicad.Pt
+		code                       string
 	}{
-		{"R3", "1", kicad.Pt{X: 88.9, Y: 85.1}, kicad.Pt{X: 88.9, Y: 85.09}},      // rounded report → the pin
-		{"R3", "1", kicad.Pt{X: 0.889, Y: 0.8509}, kicad.Pt{X: 0.889, Y: 0.8509}}, // far off: the report stands
-		{"R9", "1", kicad.Pt{X: 88.9, Y: 85.1}, kicad.Pt{X: 88.9, Y: 85.1}},       // no such symbol
-		{"R3", "7", kicad.Pt{X: 88.9, Y: 85.1}, kicad.Pt{X: 88.9, Y: 85.1}},       // no such pin
+		{"uuid, rounded report", pin1, root, "R3", "1", kicad.Pt{X: 88.9, Y: 85.1}, kicad.Pt{X: 88.9, Y: 85.09}, ""},
+		{"reference, rounded report", "", root, "R3", "1", kicad.Pt{X: 88.9, Y: 85.1}, kicad.Pt{X: 88.9, Y: 85.09}, ""},
+		{"unscaled report", pin1, root, "R3", "1", kicad.Pt{X: 0.889, Y: 0.8509}, kicad.Pt{X: 0.889, Y: 0.8509}, "ERC_POS_MISMATCH"},
+		{"no such symbol", "", root, "R9", "1", kicad.Pt{X: 88.9, Y: 85.1}, kicad.Pt{X: 88.9, Y: 85.1}, "ERC_PIN_UNRESOLVED"},
+		{"no such pin", "", root, "R3", "7", kicad.Pt{X: 88.9, Y: 85.1}, kicad.Pt{X: 88.9, Y: 85.1}, "ERC_PIN_UNRESOLVED"},
+		{"another sheet instance", "", "/other", "R3", "1", kicad.Pt{X: 88.9, Y: 85.1}, kicad.Pt{X: 88.9, Y: 85.1}, "ERC_PIN_UNRESOLVED"},
 	} {
-		if got := c.at(sheet, x.ref, x.pin, x.rep); got != x.want {
-			t.Errorf("%s.%s at %+v → %+v, want %+v", x.ref, x.pin, x.rep, got, x.want)
+		got, code, err := c.at(sheet, x.path, kicad.ERCItem{UUID: x.uuid, Pos: x.rep}, x.ref, x.pin)
+		if got != x.want || code != x.code || (code == "") != (err == nil) {
+			t.Errorf("%s: %+v %q %v, want %+v %q", x.name, got, code, err, x.want, x.code)
+		}
+	}
+}
+
+// --fix-pwr-flag places nothing it cannot check: a report of unknown units,
+// or a pin it cannot find on the sheet.
+func TestKicadFixPwrFlagsRefusesUnchecked(t *testing.T) {
+	sheet := autoFixture(t)
+	orig, _ := os.ReadFile(sheet)
+	undriven := func(scale float64, desc, uuid string, at kicad.Pt) *kicad.ERCReport {
+		return &kicad.ERCReport{PosScale: scale, PosNote: "units unknown", Violations: []kicad.ERCViolation{{
+			Type: "power_pin_not_driven", File: sheet, UUIDPath: "/6f1c1d40-0000-4000-8000-000000000001",
+			Items: []kicad.ERCItem{{Description: desc, UUID: uuid, Pos: at}}}}}
+	}
+	gnd := "Symbol #PWR0001 Hidden pin 1 [GND, Power input, Line]"
+	for _, c := range []struct {
+		name string
+		erc  *kicad.ERCReport
+		code string
+	}{
+		{"unknown units", undriven(0, gnd, "23686c86-232e-4996-9b7f-315f8db97828", kicad.Pt{X: 0.508, Y: 0.5461}), "ERC_UNITS_UNKNOWN"},
+		{"unknown pin", undriven(100, "Symbol #PWR0099 Hidden pin 1 [GND, Power input, Line]", "", kicad.Pt{X: 50.8, Y: 54.61}), "ERC_PIN_UNRESOLVED"},
+		{"pin elsewhere", undriven(100, gnd, "23686c86-232e-4996-9b7f-315f8db97828", kicad.Pt{X: 0.508, Y: 0.5461}), "ERC_POS_MISMATCH"},
+	} {
+		fx := kicadFixPwrFlags(sheet, c.erc)
+		if len(fx) != 1 || fx[0].Net != "GND" || fx[0].Code != c.code || fx[0].Ref != "" || fx[0].Err == "" || fx[0].Fix == "" {
+			t.Errorf("%s: %+v", c.name, fx)
+		}
+		if b, _ := os.ReadFile(sheet); string(b) != string(orig) {
+			t.Fatalf("%s: the sheet was written", c.name)
 		}
 	}
 }
