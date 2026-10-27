@@ -74,7 +74,7 @@ func tinyKicadSnapshot() []byte {
 }
 
 func TestKicadBoardCourtyardAndMountingHoles(t *testing.T) {
-	b, fixed, err := kicadBoard(tinyKicadSnapshot())
+	b, fixed, _, err := kicadBoard(tinyKicadSnapshot())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,12 +92,12 @@ func TestKicadBoardCourtyardAndMountingHoles(t *testing.T) {
 }
 
 func TestPosesFromBoardFlipsYKeepsAngleAndSide(t *testing.T) {
-	b, _, err := kicadBoard(tinyKicadSnapshot())
+	b, _, kept, err := kicadBoard(tinyKicadSnapshot())
 	if err != nil {
 		t.Fatal(err)
 	}
 	b.Part("R3").MoveTo(pcbauto.Point{X: 700, Y: -900}, 270)
-	p := posesFromBoard(b)
+	p := posesFromBoard(b, kept)
 	if got := p["R3"]; got != (kicad.Pose{XMil: 700, YMil: 900, RotationDeg: 270, Side: "bottom"}) {
 		t.Fatalf("R3 pose %+v", got)
 	}
@@ -235,7 +235,7 @@ func tinyKicadSnapshotShared(t *testing.T) []byte {
 }
 
 func TestKicadBoardKeepsSharedDesignatorsApart(t *testing.T) {
-	b, fixed, err := kicadBoard(tinyKicadSnapshotShared(t))
+	b, fixed, kept, err := kicadBoard(tinyKicadSnapshotShared(t))
 	if err != nil {
 		t.Fatalf("kicadBoard on shared designators: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestKicadBoardKeepsSharedDesignatorsApart(t *testing.T) {
 			t.Fatalf("hole %s owned by %q", h.Name, h.Owner)
 		}
 	}
-	poses := posesFromBoard(b)
+	poses := posesFromBoard(b, kept)
 	for k := range poses {
 		if strings.Contains(k, kicadKeptSep) || k == "H1" || k == "REF**" {
 			t.Fatalf("pose for kept part %s", k)
@@ -266,7 +266,7 @@ func TestKicadBoardKeepsSharedDesignatorsApart(t *testing.T) {
 	if _, ok := poses["U1"]; !ok {
 		t.Fatal("U1 lost its pose")
 	}
-	notes := kicadKeptNotes(fixed)
+	notes := kicadKeptNotes(kept)
 	if len(notes) != 2 || !strings.Contains(notes[0], `"H1" is on 2 footprints`) || !strings.Contains(notes[1], `placeholder designator "REF**"`) {
 		t.Fatalf("notes %q", notes)
 	}
@@ -312,7 +312,7 @@ func TestKicadBoardKeepsEmptyDesignators(t *testing.T) {
 		}
 		snap["components"] = comps
 		raw, _ := json.Marshal(snap)
-		b, fixed, err := kicadBoard(raw)
+		b, fixed, kept, err := kicadBoard(raw)
 		if err != nil {
 			t.Fatalf("%d empty: %v", n, err)
 		}
@@ -322,13 +322,49 @@ func TestKicadBoardKeepsEmptyDesignators(t *testing.T) {
 				t.Fatalf("%d empty: %s not a fixed model part (fixed %v)", n, ref, fixed)
 			}
 		}
-		poses := posesFromBoard(b)
+		poses := posesFromBoard(b, kept)
 		if len(poses) != 8 { // the tiny board's own parts only
 			t.Fatalf("%d empty: poses %v", n, kicadPlaceKeys(poses))
 		}
-		notes := kicadKeptNotes(fixed)
+		notes := kicadKeptNotes(kept)
 		if len(notes) != 1 || !strings.Contains(notes[0], fmt.Sprintf(`placeholder designator "" (%d footprint(s))`, n)) {
 			t.Fatalf("%d empty: notes %q", n, notes)
 		}
+	}
+}
+
+// A real designator that happens to contain "@kiid:" is an ordinary part:
+// only the refs kicadKeepShared generated are skipped.
+func TestPosesFromBoardSkipsOnlyGeneratedRefs(t *testing.T) {
+	var snap map[string]any
+	if err := json.Unmarshal(tinyKicadSnapshotShared(t), &snap); err != nil {
+		t.Fatal(err)
+	}
+	box := map[string]any{"minX": 960, "minY": -1460, "maxX": 1040, "maxY": -1420}
+	snap["components"] = append(snap["components"].([]any), map[string]any{"primitiveId": "id-odd", "designator": "U@kiid:1",
+		"footprint": "Resistor_SMD:R_0603", "layer": 1, "x": 1000, "y": -1440, "bbox": box, "courtyard": box,
+		"pads": []any{map[string]any{"padNumber": "1", "net": "A", "x": 970.0, "y": -1440.0, "width": 30.0, "height": 30.0, "layer": 1}}})
+	raw, _ := json.Marshal(snap)
+	b, fixed, kept, err := kicadBoard(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := b.Part("U@kiid:1"); p == nil || p.Fixed || slices.Contains(fixed, "U@kiid:1") {
+		t.Fatalf("U@kiid:1: %+v, want an ordinary movable part", p)
+	}
+	if len(kept) != 4 {
+		t.Fatalf("kept %v, want the two H1 and two REF** only", kept)
+	}
+	poses := posesFromBoard(b, kept)
+	if _, ok := poses["U@kiid:1"]; !ok {
+		t.Fatalf("U@kiid:1 lost its pose: %v", kicadPlaceKeys(poses))
+	}
+	for k := range kept {
+		if _, ok := poses[k]; ok {
+			t.Fatalf("generated ref %s got a pose", k)
+		}
+	}
+	if notes := kicadKeptNotes(kept); len(notes) != 2 || strings.Contains(strings.Join(notes, " "), "U@kiid:1") {
+		t.Fatalf("notes %q", notes)
 	}
 }

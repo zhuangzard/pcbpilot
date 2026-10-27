@@ -464,25 +464,62 @@ def snapshot(board):
     return snap
 
 
+def silk_layer(l):
+    """pcbpilot silk layer id: 3 = F.Silkscreen, 4 = B.Silkscreen, 0 = other."""
+    if l == pcbnew.F_SilkS:
+        return 3
+    if l == pcbnew.B_SilkS:
+        return 4
+    return 0
+
+
+def text_index(board, entries):
+    """Every text silk_texts() reports, as [id, text, kind, key, entry]
+    (entry = the owning footprint_index() entry, None for board text). Ids:
+    "<component id>#ref" / "#value" for the fields; a graphic text's uuid,
+    or "<component id | board>#text:<uuid>:<n>" when the uuid repeats (a
+    duplicated footprint carries its texts' uuids along). edit addresses
+    texts by these same ids."""
+    items = []
+    for e in entries:
+        fp, k = e["fp"], e["key"]
+        items.append([field_id(k, "ref"), fp.Reference(), "attribute", "Designator", e])
+        items.append([field_id(k, "value"), fp.Value(), "attribute", "Device", e])
+        for item in fp.GraphicalItems():
+            if item.GetClass() in ("PCB_TEXT", "FP_TEXT") and silk_layer(item.GetLayer()):
+                items.append([None, item, "string", "", e])
+    for item in board.GetDrawings():
+        if item.GetClass() == "PCB_TEXT" and silk_layer(item.GetLayer()):
+            items.append([None, item, "string", "", None])
+    n, nth = {}, {}
+    for it in items:
+        if it[0] is None:
+            u = it[1].m_Uuid.AsString()
+            n[u] = n.get(u, 0) + 1
+    for it in items:
+        if it[0] is None:
+            u = it[1].m_Uuid.AsString()
+            if n[u] == 1:
+                it[0] = u
+            else:
+                base = "%s#text:%s" % (it[4]["key"] if it[4] else "board", u)
+                nth[base] = nth.get(base, 0) + 1
+                it[0] = "%s:%d" % (base, nth[base])
+    return items
+
+
 def silk_texts(board, entries):
     """Silkscreen texts in the pcbpilot pcbSilkText shape (Go field names):
-    every footprint reference/value field and footprint/board text. Layer 3 =
-    F.Silkscreen, 4 = B.Silkscreen, 0 = not on silk (then Hidden)."""
+    every footprint reference/value field and footprint/board text
+    (text_index). Layer 3 = F.Silkscreen, 4 = B.Silkscreen, 0 = not on silk
+    (then Hidden)."""
     out = []
-
-    def silk_layer(l):
-        if l == pcbnew.F_SilkS:
-            return 3
-        if l == pcbnew.B_SilkS:
-            return 4
-        return 0
-
-    def rec(t, kind, key, comp=None, tid=None, comp_id=None):
+    for tid, t, kind, key, e in text_index(board, entries):
         bb = box_mil(t.GetBoundingBox())
         layer = silk_layer(t.GetLayer())
         visible = t.IsVisible() if hasattr(t, "IsVisible") else True
         r = {
-            "ID": tid or t.m_Uuid.AsString(), "Kind": kind, "Key": key, "Text": t.GetShownText(False) if hasattr(t, "GetShownText") else t.GetText(),
+            "ID": tid, "Kind": kind, "Key": key, "Text": t.GetShownText(False) if hasattr(t, "GetShownText") else t.GetText(),
             "Layer": layer, "Mirror": bool(t.IsMirrored()), "Reverse": False,
             "Rotation": round(t.GetTextAngleDegrees() % 360.0, 4),
             "FontSize": mil(t.GetTextHeight()), "LineWidth": mil(t.GetTextThickness()),
@@ -490,21 +527,10 @@ def silk_texts(board, entries):
             "BBox": {"MinX": bb["minX"], "MinY": bb["minY"], "MaxX": bb["maxX"], "MaxY": bb["maxY"]},
             "Hidden": (not visible) or layer == 0,
         }
-        if comp is not None:
-            r["CompID"] = comp_id
-            r["CompLayer"] = 2 if comp.IsFlipped() else 1
-        return r
-
-    for e in entries:
-        fp, k = e["fp"], e["key"]
-        out.append(rec(fp.Reference(), "attribute", "Designator", fp, field_id(k, "ref"), k))
-        out.append(rec(fp.Value(), "attribute", "Device", fp, field_id(k, "value"), k))
-        for item in fp.GraphicalItems():
-            if item.GetClass() in ("PCB_TEXT", "FP_TEXT") and silk_layer(item.GetLayer()):
-                out.append(rec(item, "string", "", fp, comp_id=k))
-    for item in board.GetDrawings():
-        if item.GetClass() == "PCB_TEXT" and silk_layer(item.GetLayer()):
-            out.append(rec(item, "string", ""))
+        if e is not None:
+            r["CompID"] = e["key"]
+            r["CompLayer"] = 2 if e["fp"].IsFlipped() else 1
+        out.append(r)
     return out
 
 
@@ -557,17 +583,21 @@ def save_board(board, src, out):
         shutil.copyfile(dru_path(src), dru_path(out))
 
 
-def netclasses(pcb, reqs_path, out):
-    with open(reqs_path) as f:
-        reqs = json.load(f)
-    isolation, edges = [], []
+def validate_netclasses(reqs):
+    """(problems, nets, isolation, edges) of a netclasses request: the v1
+    shape {net: {outerMil, innerMil, minMil, clearanceMil}} or v2
+    {"pcbpilotReqs": 2, "nets", "isolation", "edges"}."""
+    bad, isolation, edges = [], [], []
     if isinstance(reqs, dict) and reqs.get("pcbpilotReqs") == 2:
-        isolation = reqs.get("isolation") or []
-        edges = reqs.get("edges") or []
-        reqs = reqs.get("nets") or {}
-    bad = []
+        lists, bad = op_lists("netclasses", {k: v for k, v in reqs.items() if k not in ("pcbpilotReqs", "nets")},
+                              ("isolation", "edges"))
+        isolation, edges = lists["isolation"], lists["edges"]
+        reqs = reqs.get("nets")
+        if reqs is None:
+            reqs = {}
     if not isinstance(reqs, dict) or any(not isinstance(r, dict) for r in reqs.values()):
         bad.append("nets: must map each net name to an object")
+        reqs = {}
     else:
         bad += check_fields("nets", [reqs[n] for n in sorted(reqs)], opt=("outerMil", "innerMil", "minMil", "clearanceMil"),
                             positive=("outerMil", "innerMil", "minMil", "clearanceMil"))
@@ -575,9 +605,19 @@ def netclasses(pcb, reqs_path, out):
     bad += check_fields("edges", edges, opt=("mil",), positive=("mil",))
     for what, lst, keys in (("isolation", isolation, ("aNets", "bNets")), ("edges", edges, ("nets",))):
         for i, it in enumerate(lst):
+            if not isinstance(it, dict):
+                continue
             for k in keys:
-                if isinstance(it, dict) and not isinstance(it.get(k) or [], list):
+                v = it.get(k)
+                if v is not None and (not isinstance(v, list) or any(not isinstance(n, str) for n in v)):
                     bad.append("%s[%d].%s: not a list of net names" % (what, i, k))
+    return bad, reqs, isolation, edges
+
+
+def netclasses(pcb, reqs_path, out):
+    with open(reqs_path) as f:
+        reqs = json.load(f)
+    bad, reqs, isolation, edges = validate_netclasses(reqs)
     if bad:
         return reject("netclasses", bad)
     board = pcbnew.LoadBoard(pcb)
@@ -853,10 +893,7 @@ def pours(pcb, spec_path, out):
     with open(spec_path) as f:
         spec = json.load(f)
     board = pcbnew.LoadBoard(pcb)
-    zspecs = spec.get("zones", [])
-    bad = check_fields("zones", zspecs, opt=("clearanceMil", "minWidthMil"), positive=("clearanceMil", "minWidthMil"))
-    zspecs = [zs for zs in zspecs if isinstance(zs, dict)]
-    bad += check_nets(board, [zs.get("net") for zs in zspecs]) + check_layers(board, [zs.get("layer") for zs in zspecs])
+    bad = validate_pours(board, spec)
     if bad:
         return reject("pours", bad)
     for z in list(board.Zones()):
@@ -872,7 +909,7 @@ def pours(pcb, spec_path, out):
     best = max(range(ps.OutlineCount()), key=lambda i: abs(ps.Outline(i).Area()))
     chain = ps.Outline(best)
     made = []
-    for zs in zspecs:
+    for zs in spec.get("zones") or []:
         net = board.FindNet(zs["net"])
         z = pcbnew.ZONE(board)
         z.SetLayer(kicad_layer(zs["layer"]))
@@ -898,15 +935,27 @@ def pours(pcb, spec_path, out):
     return {"ok": True, "out": out, "pours": made, "zonesFilled": zones}
 
 
+def validate_pours(board, spec):
+    """Every problem of a pours spec {"zones": [{net, layer, clearanceMil,
+    minWidthMil}]}, before any change."""
+    lists, bad = op_lists("pours", spec, ("zones",))
+    zs = lists["zones"]
+    bad += check_fields("zones", zs, opt=("clearanceMil", "minWidthMil"), positive=("clearanceMil", "minWidthMil"))
+    zs = [z for z in zs if isinstance(z, dict)]
+    return bad + check_nets(board, [z.get("net") for z in zs]) + check_layers(board, [z.get("layer") for z in zs])
+
+
 def check_nets(board, names):
     """Problems with the nets copper is asked to carry: every name must be a
     non-empty net on the board (FindNet of an unknown name is None, and the
     item would silently land on net 0, the unconnected net)."""
     have = {str(n) for n in board.GetNetsByName().keys() if str(n)}
     bad = []
-    for n in dict.fromkeys(names):
-        if not isinstance(n, str) or not n:
-            bad.append("net %r: empty or missing" % (n,))
+    for n in distinct(names):
+        if not isinstance(n, str):
+            bad.append("net %r: not a net name string" % (n,))
+        elif not n:
+            bad.append("net '': empty")
         elif n not in have:
             near = sorted(h for h in have if h.lower() == n.lower())
             bad.append("net %s: not on the board%s" % (n, (" (did you mean %s?)" % ", ".join(near)) if near else ""))
@@ -989,6 +1038,35 @@ def check_fields(what, ops, need=(), opt=(), positive=(), strings=()):
     return bad
 
 
+def op_lists(what, spec, keys):
+    """({key: list}, problems) of a request object whose every key is one of
+    keys and holds a list (absent or null = empty). Anything else is a
+    problem, never coerced: {"setWidth": {}} or "hideTexts": "" must not
+    read as "nothing to do"."""
+    lists = {k: [] for k in keys}
+    if not isinstance(spec, dict):
+        return lists, ["%s: the request is a %s, not an object" % (what, type(spec).__name__)]
+    bad = ["%s: unknown field %r" % (what, k) for k in sorted(spec, key=str) if k not in keys]
+    for k in keys:
+        v = spec.get(k)
+        if isinstance(v, list):
+            lists[k] = v
+        elif v is not None:
+            bad.append("%s.%s: a %s, not a list" % (what, k, type(v).__name__))
+    return lists, bad
+
+
+def check_ids(what, ids, known, label="id"):
+    """Problems with ids that must be strings naming a known object."""
+    bad = []
+    for i, v in enumerate(ids):
+        if not isinstance(v, str) or not v:
+            bad.append("%s[%d]: %s %r is not a non-empty string" % (what, i, label, v))
+        elif v not in known:
+            bad.append("%s[%d]: no such %s %s" % (what, i, "text" if label == "text id" else "object", v))
+    return bad
+
+
 def reject(what, bad):
     """The bridge's answer to an operation with bad input: nothing applied,
     nothing saved, every problem listed."""
@@ -1004,6 +1082,68 @@ def set_via_width(v, w):
         v.SetWidth(w)
 
 
+EDIT_OPS = ("setWidth", "addVias", "addTracks", "setText", "addTexts", "hideTexts", "padZoneNone")
+
+
+def validate_edit(board, ops):
+    """(problems, plan) of an edit request, before any change: every field
+    the apply phase reads is checked here, so it cannot stop half way or
+    coerce a bad value (int(1.9) == 1 would put a track on F.Cu). plan =
+    {lists, tracks, texts, zonePads} for the apply phase."""
+    L, bad = op_lists("edit", ops, EDIT_OPS)
+    tracks = {t.m_Uuid.AsString(): t for t in board.GetTracks()}
+    entries = footprint_index(board)
+    text_index_cache = text_index(board, entries)
+    texts = {it[0]: it[1] for it in text_index_cache}
+    plan = {"lists": L, "tracks": tracks, "texts": texts, "zonePads": []}
+    bad += check_fields("setWidth", L["setWidth"], need=("width",), positive=("width",))
+    bad += check_fields("addVias", L["addVias"], need=("x", "y"), opt=("diameter", "drill"), positive=("diameter", "drill"))
+    bad += check_fields("addTracks", L["addTracks"], need=("startX", "startY", "endX", "endY", "lineWidth"), positive=("lineWidth",))
+    bad += check_fields("setText", L["setText"], need=("x", "y"), opt=("rotation", "fontSize", "lineWidth"), positive=("fontSize", "lineWidth"))
+    bad += check_fields("addTexts", L["addTexts"], need=("x", "y"), opt=("rotation", "fontSize", "lineWidth"),
+                        positive=("fontSize", "lineWidth"), strings=("text",))
+    bad += check_fields("padZoneNone", L["padZoneNone"])
+    obj = {k: [op for op in L[k] if isinstance(op, dict)] for k in EDIT_OPS if k != "hideTexts"}
+    bad += check_text_layers([op.get("layer", 3) for op in obj["addTexts"]])
+    for i, op in enumerate(L["setWidth"]):
+        if not isinstance(op, dict):
+            continue
+        tid = op.get("id")
+        if not isinstance(tid, str) or not tid:
+            bad.append("setWidth[%d]: id %r is not a non-empty string" % (i, tid))
+        elif tid not in tracks:
+            bad.append("setWidth[%d]: no such track %s" % (i, tid))
+        elif tracks[tid].Type() == pcbnew.PCB_VIA_T:
+            bad.append("setWidth[%d]: %s is a via, not a track" % (i, tid))
+    bad += check_nets(board, [op.get("net") for op in obj["addVias"] + obj["addTracks"]])
+    bad += check_layers(board, [op.get("layer") for op in obj["addTracks"]])
+    bad += check_ids("setText", [op.get("id") for op in obj["setText"]], texts, "text id")
+    bad += check_ids("hideTexts", L["hideTexts"], texts, "text id")
+    fields = {it[0] for it in text_index_cache if it[2] == "attribute"}
+    for i, tid in enumerate(L["hideTexts"]):
+        if isinstance(tid, str) and tid in texts and tid not in fields:
+            # KiCad 10 saves no visibility for a graphic text (only fields
+            # carry "hide"): SetVisible(False) would be lost on save.
+            bad.append("hideTexts[%d]: %s is a graphic text; KiCad keeps no hidden state for it" % (i, tid))
+    for i, op in enumerate(obj["padZoneNone"]):
+        want, pad = op.get("id", op.get("ref")), op.get("pad")
+        if not isinstance(want, str) or not want:
+            bad.append("padZoneNone[%d]: id/ref %r is not a non-empty string" % (i, want))
+            continue
+        if not (isinstance(pad, str) or is_int(pad)):
+            bad.append("padZoneNone[%d] %s: pad %r is not a pad number" % (i, want, pad))
+            continue
+        e, why = resolve_footprint(entries, want)
+        if e is None:
+            bad.append("padZoneNone %s.%s: footprint %s" % (want, pad, why))
+            continue
+        hit = [p for p in e["fp"].Pads() if p.GetNumber() == str(pad)]
+        if not hit:
+            bad.append("padZoneNone %s.%s: no such pad" % (want, pad))
+        plan["zonePads"] += hit
+    return bad, plan
+
+
 def edit(pcb, ops_path, out):
     """Apply copper/silk edits (mil, y-up), fill the zones and save:
     {"setWidth":[{"id","width"}], "addVias":[{"net","x","y","diameter","drill"}],
@@ -1017,69 +1157,21 @@ def edit(pcb, ops_path, out):
     with open(ops_path) as f:
         ops = json.load(f)
     board = pcbnew.LoadBoard(pcb)
-    tracks = {t.m_Uuid.AsString(): t for t in board.GetTracks()}
-    entries = footprint_index(board)
-    texts = {}
-    for e in entries:
-        texts[field_id(e["key"], "ref")] = e["fp"].Reference()
-        texts[field_id(e["key"], "value")] = e["fp"].Value()
-
-    # 1. Validate everything before the first change: every field the apply
-    # phase reads is checked here, so it cannot stop half way or coerce a
-    # bad value (int(1.9) == 1 would put a track on F.Cu).
-    bad = []
-    bad += check_fields("setWidth", ops.get("setWidth") or [], need=("width",), positive=("width",))
-    bad += check_fields("addVias", ops.get("addVias") or [], need=("x", "y"), opt=("diameter", "drill"), positive=("diameter", "drill"))
-    bad += check_fields("addTracks", ops.get("addTracks") or [], need=("startX", "startY", "endX", "endY", "lineWidth"), positive=("lineWidth",))
-    bad += check_fields("setText", ops.get("setText") or [], need=("x", "y"), opt=("rotation", "fontSize", "lineWidth"), positive=("fontSize", "lineWidth"))
-    bad += check_fields("addTexts", ops.get("addTexts") or [], need=("x", "y"), opt=("rotation", "fontSize", "lineWidth"),
-                        positive=("fontSize", "lineWidth"), strings=("text",))
-    bad += check_text_layers([op.get("layer", 3) for op in ops.get("addTexts") or [] if isinstance(op, dict)])
-    for k in ("setWidth", "addVias", "addTracks", "setText", "addTexts", "padZoneNone"):
-        if any(not isinstance(op, dict) for op in ops.get(k) or []):
-            return reject("edit", bad or ["%s: every entry must be an object" % k])
-    for op in ops.get("setWidth") or []:
-        t = tracks.get(op.get("id"))
-        if t is None:
-            bad.append("setWidth %s: no such track" % op.get("id"))
-        elif t.Type() == pcbnew.PCB_VIA_T:
-            bad.append("setWidth %s: is a via, not a track" % op.get("id"))
-    adds = (ops.get("addVias") or []) + (ops.get("addTracks") or [])
-    bad += check_nets(board, [op.get("net") for op in adds])
-    bad += check_layers(board, [op.get("layer") for op in ops.get("addTracks") or []])
-    for op in ops.get("setText") or []:
-        if op.get("id") not in texts:
-            bad.append("setText %s: no such text" % op.get("id"))
-    for tid in ops.get("hideTexts") or []:
-        if not isinstance(tid, str) or tid not in texts:
-            bad.append("hideTexts %s: no such text" % tid)
-    zone_pads = []
-    for op in ops.get("padZoneNone") or []:
-        want = str(op.get("id") or op.get("ref") or "")
-        if op.get("pad") is None:
-            bad.append("padZoneNone %s: no pad given" % want)
-            continue
-        e, why = resolve_footprint(entries, want)
-        if e is None:
-            bad.append("padZoneNone %s.%s: footprint %s" % (want, op.get("pad"), why))
-            continue
-        hit = [p for p in e["fp"].Pads() if p.GetNumber() == str(op.get("pad"))]
-        if not hit:
-            bad.append("padZoneNone %s.%s: no such pad" % (want, op.get("pad")))
-        zone_pads += hit
+    bad, plan = validate_edit(board, ops)
     if bad:
         return reject("edit", bad)
+    L, tracks, texts, zone_pads = plan["lists"], plan["tracks"], plan["texts"], plan["zonePads"]
 
     # 2. Apply.
     done = {"setWidth": 0, "addVias": 0, "addTracks": 0, "setText": 0}
-    for op in ops.get("setWidth") or []:
+    for op in L["setWidth"]:
         tracks[op["id"]].SetWidth(nm(op["width"]))
         done["setWidth"] += 1
 
     def pos(x, y):
         return pcbnew.VECTOR2I(nm(x), -nm(y))
 
-    for op in ops.get("addVias") or []:
+    for op in L["addVias"]:
         v = pcbnew.PCB_VIA(board)
         v.SetPosition(pos(op["x"], op["y"]))
         v.SetViaType(pcbnew.VIATYPE_THROUGH)
@@ -1091,7 +1183,7 @@ def edit(pcb, ops_path, out):
         v.SetNet(board.FindNet(op["net"]))
         board.Add(v)
         done["addVias"] += 1
-    for op in ops.get("addTracks") or []:
+    for op in L["addTracks"]:
         t = pcbnew.PCB_TRACK(board)
         t.SetStart(pos(op["startX"], op["startY"]))
         t.SetEnd(pos(op["endX"], op["endY"]))
@@ -1100,7 +1192,7 @@ def edit(pcb, ops_path, out):
         t.SetNet(board.FindNet(op["net"]))
         board.Add(t)
         done["addTracks"] += 1
-    for op in ops.get("setText") or []:
+    for op in L["setText"]:
         t = texts[op["id"]]
         if op.get("rotation") is not None:
             t.SetTextAngleDegrees(float(op["rotation"]))
@@ -1115,7 +1207,7 @@ def edit(pcb, ops_path, out):
         t.SetTextPos(pos(op["x"], op["y"]))
         done["setText"] += 1
     done["addTexts"], done["hideTexts"] = 0, 0
-    for op in ops.get("addTexts") or []:
+    for op in L["addTexts"]:
         t = pcbnew.PCB_TEXT(board)
         t.SetText(op["text"])
         t.SetLayer(pcbnew.B_SilkS if op.get("layer", 3) == 4 else pcbnew.F_SilkS)
@@ -1131,12 +1223,12 @@ def edit(pcb, ops_path, out):
         t.SetTextPos(pos(op["x"], op["y"]))
         board.Add(t)
         done["addTexts"] += 1
-    for tid in ops.get("hideTexts") or []:
+    for tid in L["hideTexts"]:
         texts[tid].SetVisible(False)
         done["hideTexts"] += 1
     for p in zone_pads:
         p.SetLocalZoneConnection(pcbnew.ZONE_CONNECTION_NONE)
-    done["padZoneNone"] = len(ops.get("padZoneNone") or [])
+    done["padZoneNone"] = len(L["padZoneNone"])
     zones = fill_zones(board) if (done["setWidth"] or done["addVias"] or done["addTracks"] or done["padZoneNone"]) else 0
     save_board(board, pcb, out)
     return {"ok": True, "error": "", "out": out, "done": done, "zonesFilled": zones}

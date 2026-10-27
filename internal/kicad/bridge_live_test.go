@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -304,6 +305,10 @@ func TestBridgeRejectsInexactLayersAndBadFieldsLive(t *testing.T) {
 		{"track width string", map[string]any{"addTracks": []any{map[string]any{"net": "GND", "layer": 1, "startX": 0, "startY": 0, "endX": 1, "endY": 1, "lineWidth": "10"}}}, "lineWidth: '10' is not a number"},
 		{"via without x", map[string]any{"addVias": []any{map[string]any{"net": "GND", "y": -200}}}, "addVias[0].x"},
 		{"text without text", map[string]any{"addTexts": []any{map[string]any{"x": 1, "y": 1}}}, "addTexts[0].text"},
+		{"valid track + setWidth object", map[string]any{"addTracks": []any{track(1)}, "setWidth": map[string]any{}}, "setWidth: a dict, not a list"},
+		{"valid track + hideTexts string", map[string]any{"addTracks": []any{track(1)}, "hideTexts": ""}, "hideTexts: a str, not a list"},
+		{"valid track + net list", map[string]any{"addTracks": []any{track(1), map[string]any{"net": []any{"GND"}, "layer": 1, "startX": 0, "startY": 0, "endX": 1, "endY": 1, "lineWidth": 8}}}, "not a net name string"},
+		{"valid track + id object", map[string]any{"addTracks": []any{track(1)}, "setText": []any{map[string]any{"id": map[string]any{"a": 1}, "x": 0, "y": 0}}}, "is not a non-empty string"},
 	}
 	for _, c := range cases {
 		out := filepath.Join(dir, "out.kicad_pcb")
@@ -323,14 +328,17 @@ func TestBridgeRejectsInexactLayersAndBadFieldsLive(t *testing.T) {
 	if _, err := tools.Edit(pcb, map[string]any{"addTexts": []any{text(nil), text(4)}}, filepath.Join(dir, "texts.kicad_pcb")); err != nil {
 		t.Fatalf("valid text layers: %v", err)
 	}
-	for _, layer := range []any{1.9, true} {
+	for _, layer := range []any{1.9, true, "zones-object"} {
 		out := filepath.Join(dir, "poured.kicad_pcb")
-		raw, _ := json.Marshal(map[string]any{"zones": []any{map[string]any{"net": "GND", "layer": layer}}})
+		raw, _ := json.Marshal(map[string]any{"zones": []any{map[string]any{"net": "GND", "layer": 2}, map[string]any{"net": "GND", "layer": layer}}})
+		if layer == "zones-object" { // a container that is not a list
+			raw, _ = json.Marshal(map[string]any{"zones": map[string]any{"net": "GND", "layer": 2}})
+		}
 		spec := filepath.Join(dir, "pours.json")
 		if err := os.WriteFile(spec, raw, 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := tools.RunBridge("pours", pcb, spec, out); err == nil || !strings.Contains(err.Error(), "not an integer") {
+		if _, err := tools.RunBridge("pours", pcb, spec, out); err == nil || !strings.Contains(err.Error(), "not an integer") && !strings.Contains(err.Error(), "zones: a dict, not a list") {
 			t.Fatalf("pour layer %v: %v", layer, err)
 		}
 		if _, serr := os.Stat(out); serr == nil {
@@ -351,4 +359,166 @@ func TestBridgeRejectsInexactLayersAndBadFieldsLive(t *testing.T) {
 		t.Fatalf("netclasses with a string width: %v", err)
 	}
 	unchanged("netclasses")
+}
+
+// twinTiny writes tiny.kicad_pcb with its mounting hole H1 carrying a
+// silk graphic text, an exact twin of that footprint (same uuid, same
+// designator, so ids fall back to fp:<uuid>:<n>) 40 mm to the left, and a
+// board text on F.Silkscreen.
+func twinTiny(t *testing.T, dir string) string {
+	t.Helper()
+	src, err := os.ReadFile("testdata/tiny.kicad_pcb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := strings.ReplaceAll(string(src), "\r\n", "\n")
+	start := strings.Index(s, "\t(footprint \"MountingHole:")
+	end := strings.Index(s[start:], "\n\t)\n") + len("\n\t)\n")
+	block := strings.Replace(s[start:start+end], "\t\t(duplicate_pad_numbers_are_jumpers no)\n",
+		"\t\t(fp_text user \"HOLE\" (at 0 2 0) (layer \"F.SilkS\") (uuid \"00000000-0000-4000-8000-0000000000c1\")\n"+
+			"\t\t\t(effects (font (size 1 1) (thickness 0.15))))\n\t\t(duplicate_pad_numbers_are_jumpers no)\n", 1)
+	twin := strings.Replace(block, "(at 46 36)", "(at 6 36)", 1)
+	s = s[:start] + block + twin + s[start+end:]
+	seg := strings.Index(s, "\t(segment")
+	s = s[:seg] + "\t(gr_text \"BOARD\" (at 25 5 0) (layer \"F.SilkS\") (uuid \"00000000-0000-4000-8000-0000000000d1\")\n" +
+		"\t\t(effects (font (size 1 1) (thickness 0.15))))\n" + s[seg:]
+	pcb := filepath.Join(dir, "twin.kicad_pcb")
+	if err := os.WriteFile(pcb, []byte(s), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return pcb
+}
+
+type twinSnap struct {
+	Components []struct {
+		ID         string  `json:"primitiveId"`
+		Designator string  `json:"designator"`
+		X          float64 `json:"x"`
+	} `json:"components"`
+	Holes []struct {
+		ComponentID string  `json:"componentId"`
+		X           float64 `json:"x"`
+	} `json:"footprintHoles"`
+	Silk []struct {
+		ID     string `json:"ID"`
+		CompID string `json:"CompID"`
+		Text   string `json:"Text"`
+		Hidden bool   `json:"Hidden"`
+		BBox   struct{ MinX, MaxX, MinY, MaxY float64 }
+	} `json:"silk"`
+}
+
+func readTwin(t *testing.T, tools *Tools, pcb string) twinSnap {
+	t.Helper()
+	raw, err := tools.Snapshot(pcb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s twinSnap
+	if err := json.Unmarshal(raw, &s); err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+// Same uuid and same designator: fp:<uuid>:<n> ids, and the silk texts and
+// holes of each twin follow that twin; edit addresses one twin's texts and
+// pads by those ids, and board / footprint graphic texts are editable.
+func TestBridgeTwinFootprintsLive(t *testing.T) {
+	tools := bridgeLiveTools(t)
+	dir := t.TempDir()
+	pcb := twinTiny(t, dir)
+	s := readTwin(t, tools, pcb)
+	x := map[string]float64{}
+	for _, c := range s.Components {
+		if c.Designator == "H1" {
+			x[c.ID] = c.X
+		}
+	}
+	const u = "78ac4046-a4ea-4708-9871-4a29dbc82cb6"
+	first, second := "fp:"+u+":1", "fp:"+u+":2"
+	if len(x) != 2 || x[first] == 0 && x[second] == 0 {
+		t.Fatalf("H1 ids %v, want %s and %s", x, first, second)
+	}
+	for _, h := range s.Holes {
+		if xx, ok := x[h.ComponentID]; ok && math.Abs(h.X-xx) > 0.01 {
+			t.Fatalf("hole of %s at x %v, its footprint at %v", h.ComponentID, h.X, xx)
+		}
+	}
+	var hole []string // the twins' graphic text ids
+	board := ""
+	for _, l := range s.Silk {
+		if xx, ok := x[l.CompID]; ok {
+			if cx := (l.BBox.MinX + l.BBox.MaxX) / 2; math.Abs(cx-xx) > 100 {
+				t.Fatalf("silk %s (%q) at x %.0f, its footprint %s at %.0f", l.ID, l.Text, cx, l.CompID, xx)
+			}
+			if l.Text == "HOLE" {
+				hole = append(hole, l.ID)
+			}
+		}
+		if l.Text == "BOARD" {
+			board = l.ID
+		}
+	}
+	if len(hole) != 2 || hole[0] == hole[1] || board == "" {
+		t.Fatalf("graphic text ids %v, board text %q", hole, board)
+	}
+	out := filepath.Join(dir, "edited.kicad_pcb")
+	// KiCad keeps no hidden state for a graphic text: refused, not lost.
+	if _, err := tools.Edit(pcb, map[string]any{"hideTexts": []any{hole[1]}}, out); err == nil || !strings.Contains(err.Error(), "graphic text") {
+		t.Fatalf("hiding a graphic text: %v", err)
+	}
+	_, err := tools.Edit(pcb, map[string]any{
+		"setText": []any{map[string]any{"id": second + "#ref", "x": 300, "y": -1000}, map[string]any{"id": board, "x": 1000, "y": -300},
+			map[string]any{"id": hole[1], "x": 500, "y": -1200}},
+		"hideTexts":   []any{second + "#ref"},
+		"padZoneNone": []any{map[string]any{"id": second, "pad": ""}},
+	}, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// SaveBoard re-sorts footprints, so fp:<uuid>:<n> is only stable for an
+	// unchanged file: identify the twins in the result by position.
+	e := readTwin(t, tools, out)
+	edited := map[string]bool{} // output id → is the twin we edited
+	for _, c := range e.Components {
+		if c.Designator == "H1" {
+			edited[c.ID] = math.Abs(c.X-x[second]) < 0.01
+		}
+	}
+	moved, hidden := 0, 0
+	for _, l := range e.Silk {
+		cx, cy := (l.BBox.MinX+l.BBox.MaxX)/2, (l.BBox.MinY+l.BBox.MaxY)/2
+		if l.ID == board && (math.Abs(cx-1000) > 1 || math.Abs(cy+300) > 1) {
+			t.Fatalf("board text at (%.1f, %.1f)", cx, cy)
+		}
+		mine, ok := edited[l.CompID]
+		if !ok {
+			continue
+		}
+		var at bool
+		switch {
+		case l.ID == l.CompID+"#ref":
+			at = math.Abs(cx-300) < 1 && math.Abs(cy+1000) < 1
+			if l.Hidden != mine {
+				t.Fatalf("%s hidden=%v: only the edited twin's designator may hide", l.ID, l.Hidden)
+			}
+			if l.Hidden {
+				hidden++
+			}
+		case l.Text == "HOLE":
+			at = math.Abs(cx-500) < 1 && math.Abs(cy+1200) < 1
+		default:
+			continue
+		}
+		if at != mine {
+			t.Fatalf("%s (%q) at (%.1f, %.1f): only the edited twin's texts may move", l.ID, l.Text, cx, cy)
+		}
+		if at {
+			moved++
+		}
+	}
+	if moved != 2 || hidden != 1 {
+		t.Fatalf("moved %d text(s), hid %d; want the edited twin's designator and graphic text moved, its designator hidden", moved, hidden)
+	}
 }

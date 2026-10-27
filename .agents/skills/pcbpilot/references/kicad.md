@@ -39,7 +39,10 @@ pcbpilot ──▶ KiCad 自带 Python + pcbnew（internal/kicad/bridge.py，go:
 - **bridge 写操作全有或全无**：`edit`（加线/过孔、改线宽、丝印、`padZoneNone`）、`pours` 先校验全部网名、
   层号（必须是精确整数，`1.9`/`true` 拒绝；丝印文字层只能 3/4）、数值字段、对象 id 与位号；任一网不在板上（不会再静默落到 0 号无网）、id 不存在或位号对应多个封装，整批拒绝、
   **不保存**，错误列出每一项（大小写不同的网名给出 `did you mean`）。`padZoneNone` 可用 `id`（快照
-  primitiveId）指定封装。`netclasses` 的意图网不在板上仍是忽略并告警（`missingNets`），绝缘/板边域里缺的网
+  primitiveId）指定封装。各操作字段必须是数组（`null`/缺省 = 空；对象、字符串、数字一律拒绝），网名与 id
+  必须是字符串；`setText` / `hideTexts` 可寻址快照 `silk` 里的每条文字（字段、封装图形文字、板上文字），但图形文字
+  KiCad 不保存隐藏状态，`hideTexts` 对它直接拒绝。`fp:<uuid>:<序号>` 只对未改动的文件稳定（保存会重排封装），
+  每次写入后重新取快照再寻址。`netclasses` 的意图网不在板上仍是忽略并告警（`missingNets`），绝缘/板边域里缺的网
   另列 `missingDomainNets` 并告警。
 - **位号重复 / 占位位号**（两个 `H1`、多个 `REF**`/`G***` logo、未标注的 `R?`）：快照里各自独立成条（各有
   primitiveId 与 uuid，标 `duplicateDesignator` / `placeholder`），顶层 `duplicateDesignators` 列出位号与全部 id
