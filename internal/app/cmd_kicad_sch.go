@@ -246,6 +246,9 @@ func kicadSchPlace(path string, libID, symLib, ref, value, footprint, lcsc strin
 		if err := kicad.ValidReference(ref); err != nil {
 			return nil, err
 		}
+		if err := e.HierarchyErr(); err != nil {
+			return nil, fmt.Errorf("placing %s needs the project's sheet hierarchy, which is unknown: %v (open the sheet inside its KiCad project)", ref, err)
+		}
 		if e.RepeatedSheet() {
 			return nil, fmt.Errorf("this sheet is used by several sheet symbols (each use has its own references); placing symbols on it is not supported")
 		}
@@ -291,7 +294,9 @@ func kicadSchPlace(path string, libID, symLib, ref, value, footprint, lcsc strin
 
 // kicadInheritUnitFields gives a new unit of a placed symbol the fields of
 // its placed units (KiCad keeps them equal on every unit); a --value,
-// --footprint or --lcsc that disagrees is refused (sch modify changes all).
+// --footprint or --lcsc that disagrees with them — or names a field they do
+// not have — is refused, so the units never diverge (sch modify --id REF
+// sets a field on every unit).
 func kicadInheritUnitFields(have []kicad.Field, ref, value, footprint, lcsc string) ([]kicad.Field, error) {
 	given := map[string]string{"Value": value, "Footprint": footprint, "LCSC": lcsc}
 	var out []kicad.Field
@@ -305,8 +310,10 @@ func kicadInheritUnitFields(have []kicad.Field, ref, value, footprint, lcsc stri
 		delete(given, f.Name)
 		out = append(out, kicad.Field{Name: f.Name, Value: f.Value, Hide: f.Hide})
 	}
-	if v := given["LCSC"]; v != "" {
-		out = append(out, kicad.Field{Name: "LCSC", Value: v, Hide: true})
+	for _, name := range []string{"Value", "Footprint", "LCSC"} {
+		if g := given[name]; g != "" {
+			return nil, fmt.Errorf("%s: its placed units have no %s field, so a new unit cannot get %q alone (set it on every unit first: sch modify --id %s); omit it here", ref, name, g, ref)
+		}
 	}
 	return out, nil
 }

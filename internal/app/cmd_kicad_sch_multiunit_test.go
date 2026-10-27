@@ -107,7 +107,21 @@ func TestSchKicadBackendMultiUnit(t *testing.T) {
 			t.Fatalf("refused %v changed the sheet", bad)
 		}
 	}
-	run(false, "prim-delete", "--ids", "U2")
+	// a new unit never gets a field its placed units lack or disagree on
+	run(false, "place", "--symbol", "my:OPA2", "--designator", "U4", "--value", "OPA2", "--x", "152.4", "--y", "101.6")
+	src, _ = os.ReadFile(sheet)
+	for _, bad := range [][]string{
+		{"--lcsc", "C1"}, // absent on unit 1
+		{"--footprint", "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm"}, // empty on unit 1
+		{"--value", "TL072"}, // differs
+	} {
+		run(true, append([]string{"place", "--symbol", "my:OPA2", "--designator", "U4", "--unit", "2", "--x", "177.8", "--y", "101.6"}, bad...)...)
+		if now, _ := os.ReadFile(sheet); !bytes.Equal(now, src) {
+			t.Fatalf("refused place %v changed the sheet", bad)
+		}
+	}
+	run(false, "place", "--symbol", "my:OPA2", "--designator", "U4", "--unit", "2", "--value", "OPA2", "--x", "177.8", "--y", "101.6")
+	run(false, "prim-delete", "--ids", "U2,U4:1,U4")
 
 	run(false, "prim-delete", "--ids", "U9:3")
 	e, _ := kicad.OpenSchematicFile(sheet)

@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"sort"
 	"strconv"
@@ -88,6 +89,7 @@ type SchEditor struct {
 	// OpenSchematicFile).
 	elsewhere map[string][]string
 	sheetUses int
+	hierErr   error // the hierarchy could not be determined (scanProject)
 	// queued state: renames and deletions of existing symbols (lookups and
 	// collision checks see them before Render), edit keys (see edit)
 	renamed map[*sexp]string
@@ -215,24 +217,25 @@ func cleanAbs(p string) string {
 	return filepath.Clean(p)
 }
 
-// projectRootSheet is the root sheet of the project holding path: the
-// <name>.kicad_sch beside the nearest <name>.kicad_pro at or above the
-// sheet's directory ("" when there is none).
-func projectRootSheet(path string) string {
-	dir := filepath.Dir(cleanAbs(path))
-	for i := 0; i < 8; i++ {
-		if pros, _ := filepath.Glob(filepath.Join(dir, "*.kicad_pro")); len(pros) == 1 {
-			if root := strings.TrimSuffix(pros[0], ".kicad_pro") + ".kicad_sch"; fileExists(root) {
-				return filepath.Clean(root)
-			}
-		}
-		up := filepath.Dir(dir)
-		if up == dir {
-			break
-		}
-		dir = up
+// pathKey is a sheet path for comparison: cleaned, absolute, and folded on
+// the case-insensitive file systems of Windows and macOS.
+func pathKey(p string) string {
+	p = cleanAbs(p)
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		p = strings.ToLower(p)
 	}
-	return ""
+	return p
+}
+
+// samePath reports whether a and b name the same sheet file (os.SameFile
+// when both exist: short names, links).
+func samePath(a, b string) bool {
+	if pathKey(a) == pathKey(b) {
+		return true
+	}
+	sa, err1 := os.Stat(a)
+	sb, err2 := os.Stat(b)
+	return err1 == nil && err2 == nil && os.SameFile(sa, sb)
 }
 
 func fileExists(p string) bool {
@@ -257,106 +260,169 @@ func resolveSheetFile(parent, root, sf string) string {
 	return a
 }
 
-// scanProject walks the project's sheet hierarchy from its root sheet
-// (sub-sheets in other directories included; paths compared cleaned and
-// absolute) and records the references placed on the other sheets
-// (e.elsewhere, by project-relative path) and how many times this sheet is
-// instantiated (e.sheetUses: a sheet used by two sheet symbols, or nested in
-// a sheet that is itself used twice, counts 2). A sheet outside any project
-// hierarchy compares with the sheets beside it.
-func (e *SchEditor) scanProject(path string) {
-	self := cleanAbs(path)
-	root := projectRootSheet(path)
-	files := map[string]*sexp{}
-	parents := map[string][]string{} // child file → parent file per sheet symbol
-	var walk func(f string, depth int)
-	walk = func(f string, depth int) {
-		if _, ok := files[f]; ok || depth > 32 {
+// sheetTree is the result of walking a hierarchy from its root sheet.
+type sheetTree struct {
+	root    string
+	files   map[string]*sexp    // pathKey → parsed sheet
+	names   map[string]string   // pathKey → path as resolved
+	parents map[string][]string // pathKey(child) → pathKey(parent), one per sheet symbol
+	selfAt  string              // instance path of the first use of self ("" if not reached)
+	reached bool                // self is in the tree
+	broken  []string            // sheets the walk could not read
+}
+
+// walkSheetTree walks every sheet reachable from root, carrying each
+// sheet's instance path (/root-uuid/sheet-uuid/…).
+func walkSheetTree(root, self string) *sheetTree {
+	t := &sheetTree{root: root, files: map[string]*sexp{}, names: map[string]string{}, parents: map[string][]string{}}
+	var walk func(f, instPath string)
+	walk = func(f, instPath string) {
+		k := pathKey(f)
+		if samePath(f, self) {
+			t.reached = true
+			if t.selfAt == "" {
+				t.selfAt = instPath
+			}
+		}
+		if _, ok := t.files[k]; ok {
 			return
 		}
 		b, err := os.ReadFile(f)
 		if err != nil {
+			t.broken = append(t.broken, f)
 			return
 		}
 		r, err := parseSx(string(b))
 		if err != nil {
+			t.broken = append(t.broken, f)
 			return
 		}
-		files[f] = r
-		ru := ""
-		if u := r.child("uuid"); u != nil && len(u.list) > 1 {
-			ru = u.list[1].atom
+		t.files[k], t.names[k] = r, f
+		if instPath == "" { // the root
+			if u := r.child("uuid"); u != nil && len(u.list) > 1 {
+				instPath = "/" + u.list[1].atom
+			}
 		}
 		for _, s := range r.list {
 			if s.head() != "sheet" || propVal(s, "Sheetfile") == "" {
 				continue
 			}
 			child := resolveSheetFile(f, root, propVal(s, "Sheetfile"))
-			parents[child] = append(parents[child], f)
-			// a sheet one level below the root without symbols yet gets its
-			// instance path here
-			if child == self && f == root && e.InstancePath == "" {
-				if u := s.child("uuid"); u != nil && len(u.list) > 1 {
-					e.InstancePath = "/" + ru + "/" + u.list[1].atom
-				}
+			t.parents[pathKey(child)] = append(t.parents[pathKey(child)], k)
+			cp := instPath
+			if u := s.child("uuid"); u != nil && len(u.list) > 1 {
+				cp += "/" + u.list[1].atom
 			}
-			walk(child, depth+1)
+			walk(child, cp)
 		}
 	}
-	base := filepath.Dir(self)
-	if root != "" {
-		walk(root, 0)
-		base = filepath.Dir(root)
-	}
-	if _, ok := files[self]; !ok { // not reached from a project root: the sheets beside it
-		files, parents, root = map[string]*sexp{}, map[string][]string{}, ""
-		others, _ := filepath.Glob(filepath.Join(filepath.Dir(self), "*.kicad_sch"))
-		for _, o := range others {
-			o = cleanAbs(o)
-			b, err := os.ReadFile(o)
-			if err != nil {
+	walk(root, "")
+	return t
+}
+
+// findSheetTree finds the hierarchy holding path: walking up from the
+// sheet's directory, the first project (<name>.kicad_pro beside its root
+// <name>.kicad_sch) whose tree includes the sheet; with several .kicad_pro in
+// one directory, the one whose tree includes it. A root sheet outside any
+// project is its own hierarchy. Otherwise the hierarchy is unknown (error).
+func findSheetTree(path string) (*sheetTree, error) {
+	self := cleanAbs(path)
+	var tried []string
+	for dir := filepath.Dir(self); ; {
+		pros, _ := filepath.Glob(filepath.Join(dir, "*.kicad_pro"))
+		var hits []*sheetTree
+		for _, pro := range pros {
+			root := strings.TrimSuffix(pro, ".kicad_pro") + ".kicad_sch"
+			if !fileExists(root) {
 				continue
 			}
-			r, err := parseSx(string(b))
-			if err != nil {
-				continue
-			}
-			files[o] = r
-			for _, s := range r.list {
-				if s.head() == "sheet" && propVal(s, "Sheetfile") != "" {
-					c := resolveSheetFile(o, "", propVal(s, "Sheetfile"))
-					parents[c] = append(parents[c], o)
-				}
+			tried = append(tried, root)
+			if t := walkSheetTree(root, self); t.reached {
+				hits = append(hits, t)
 			}
 		}
-		base = filepath.Dir(self)
+		if len(hits) > 1 {
+			var roots []string
+			for _, h := range hits {
+				roots = append(roots, h.root)
+			}
+			return nil, fmt.Errorf("%s belongs to several projects (%s)", self, strings.Join(roots, ", "))
+		}
+		if len(hits) == 1 {
+			if len(hits[0].broken) > 0 {
+				return hits[0], fmt.Errorf("sheet(s) of the hierarchy unreadable: %s", strings.Join(hits[0].broken, ", "))
+			}
+			return hits[0], nil
+		}
+		up := filepath.Dir(dir)
+		if up == dir {
+			break
+		}
+		dir = up
+	}
+	if b, err := os.ReadFile(self); err == nil && strings.Contains(string(b), "(sheet_instances") {
+		t := walkSheetTree(self, self)
+		if len(t.broken) > 0 {
+			return t, fmt.Errorf("sheet(s) of the hierarchy unreadable: %s", strings.Join(t.broken, ", "))
+		}
+		return t, nil
+	}
+	if len(tried) > 0 {
+		return nil, fmt.Errorf("%s is not reached from the root sheet of any project above it (%s)", self, strings.Join(tried, ", "))
+	}
+	return nil, fmt.Errorf("%s is a sub-sheet and no .kicad_pro with its root sheet was found above it", self)
+}
+
+// scanProject records the hierarchy around this sheet: the references
+// placed on the project's other sheets (e.elsewhere, by project-relative
+// path), how many times this sheet is instantiated (e.sheetUses: used by two
+// sheet symbols, or nested in a sheet used twice, counts 2) and, for a sheet
+// without symbols, its instance path. When the hierarchy cannot be
+// determined e.hierErr says why and hierarchy-sensitive edits are refused.
+func (e *SchEditor) scanProject(path string) {
+	t, err := findSheetTree(path)
+	if err != nil {
+		e.hierErr = err
+	}
+	if t == nil {
+		return
+	}
+	self := pathKey(path)
+	for k, name := range t.names { // the same file under another spelling
+		if samePath(name, path) {
+			self = k
+		}
+	}
+	if e.InstancePath == "" && t.selfAt != "" && strings.Count(t.selfAt, "/") > 1 {
+		e.InstancePath = t.selfAt
 	}
 	memo := map[string]int{}
-	var uses func(f string, depth int) int
-	uses = func(f string, depth int) int {
-		if n, ok := memo[f]; ok {
+	var uses func(k string, depth int) int
+	uses = func(k string, depth int) int {
+		if n, ok := memo[k]; ok {
 			return n
 		}
-		ps := parents[f]
-		if len(ps) == 0 || depth > 32 {
+		ps := t.parents[k]
+		if len(ps) == 0 || depth > len(t.files)+1 { // the root (or a cycle)
 			return 1
 		}
 		n := 0
 		for _, p := range ps {
 			n += uses(p, depth+1)
 		}
-		memo[f] = n
+		memo[k] = n
 		return n
 	}
-	if len(parents[self]) > 0 {
+	if len(t.parents[self]) > 0 {
 		e.sheetUses = uses(self, 0)
 	}
-	for f, r := range files {
-		if f == self {
+	base := filepath.Dir(t.root)
+	for k, r := range t.files {
+		if k == self {
 			continue
 		}
-		name := f
-		if rel, err := filepath.Rel(base, f); err == nil {
+		name := t.names[k]
+		if rel, err := filepath.Rel(base, name); err == nil {
 			name = filepath.ToSlash(rel)
 		}
 		for _, s := range r.list {
@@ -373,6 +439,18 @@ func (e *SchEditor) scanProject(path string) {
 	for ref := range e.elsewhere {
 		sort.Strings(e.elsewhere[ref])
 	}
+}
+
+// HierarchyErr says why the sheet's project hierarchy is unknown (nil when
+// it is known, or for a sheet opened from text): renames, placing and
+// deleting every unit are refused then.
+func (e *SchEditor) HierarchyErr() error { return e.hierErr }
+
+func (e *SchEditor) errHierarchy(what string) error {
+	if e.hierErr != nil {
+		return fmt.Errorf("%s needs the project's sheet hierarchy, which is unknown: %v (open the sheet inside its KiCad project)", what, e.hierErr)
+	}
+	return nil
 }
 
 // UUID is the sheet file's uuid.
@@ -955,6 +1033,9 @@ func (e *SchEditor) checkRename(from, to string) error {
 	if strings.HasPrefix(to, "#") != strings.HasPrefix(from, "#") {
 		return fmt.Errorf("cannot rename %s to %s: '#' marks power symbols only", from, to)
 	}
+	if err := e.errHierarchy("renaming " + from); err != nil {
+		return err
+	}
 	if e.RepeatedSheet() {
 		return fmt.Errorf("cannot rename %s: this sheet is used by several sheet symbols (each use has its own references); rename it in the KiCad project, not per sheet file", from)
 	}
@@ -1238,6 +1319,11 @@ func (e *SchEditor) DeleteSymbols(keys []string) (map[string][]int, error) {
 			return nil, fmt.Errorf("no symbol %s on this sheet", ref)
 		} else if err := e.errAcrossSheets(ref, "deleting every unit of"); err != nil {
 			return nil, fmt.Errorf("%w (or delete one unit: %s:N)", err, ref)
+		} else if n, _ := e.LibUnitCount(e.SymbolLibID(ref)); n > 1 {
+			// other units may be on sheets an unknown hierarchy hides
+			if err := e.errHierarchy("deleting every unit of " + ref); err != nil {
+				return nil, fmt.Errorf("%w (or delete one unit: %s:N)", err, ref)
+			}
 		}
 		for _, in := range del {
 			if in.item < 0 {

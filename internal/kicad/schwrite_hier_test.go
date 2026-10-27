@@ -3,6 +3,8 @@ package kicad
 import (
 	"os"
 	"path/filepath"
+	"runtime"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -180,11 +182,13 @@ func TestHierarchyRefusals(t *testing.T) {
 		t.Error("rename onto U301 accepted")
 	}
 
-	// one component, unit 1 on a.kicad_sch and unit 2 on b.kicad_sch
+	// one component, unit 1 on a.kicad_sch and unit 2 on b.kicad_sch, both
+	// sub-sheets of split.kicad_sch
 	split := t.TempDir()
+	writeProject(t, split, "split", map[string]string{"A": "a.kicad_sch", "B": "b.kicad_sch"})
 	for i, name := range []string{"a", "b"} {
-		s, _ := OpenSchematic(NewSchematicText("A4", NewUUID(), true))
-		s.Project = "split"
+		s, _ := OpenSchematic(NewSchematicText("A4", NewUUID(), false))
+		s.Project, s.InstancePath = "split", "/x/"+name
 		_ = s.AddLibSymbol("my:DUAL", dualSym)
 		if _, err := s.PlaceSymbol(SymbolInstance{LibID: "my:DUAL", Ref: "U1", Unit: i + 1, Value: "DUAL", At: Pt{50.8, 50.8}}); err != nil {
 			t.Fatal(err)
@@ -192,21 +196,149 @@ func TestHierarchyRefusals(t *testing.T) {
 		out, _ := s.Render()
 		_ = os.WriteFile(filepath.Join(split, name+".kicad_sch"), []byte(out), 0o644)
 	}
-	a, err := OpenSchematicFile(filepath.Join(split, "a.kicad_sch"))
+	open := func() *SchEditor {
+		a, err := OpenSchematicFile(filepath.Join(split, "a.kicad_sch"))
+		if err != nil || a.HierarchyErr() != nil {
+			t.Fatalf("%v / %v", err, a.HierarchyErr())
+		}
+		return a
+	}
+	if err := open().SetField("U1", "Value", "X"); err == nil || !strings.Contains(err.Error(), "b.kicad_sch") {
+		t.Errorf("field edit of a split component: %v", err)
+	}
+	if err := open().SetField("U1", "Reference", "U2"); err == nil {
+		t.Error("rename of a split component accepted")
+	}
+	if _, err := open().DeleteSymbol("U1"); err == nil {
+		t.Error("deleting every unit of a split component accepted")
+	}
+	if _, err := open().DeleteSymbol("U1:1"); err != nil {
+		t.Errorf("deleting one unit: %v", err)
+	}
+}
+
+// writeProject writes <name>.kicad_pro and a root <name>.kicad_sch whose
+// sheet symbols (sheet name → Sheetfile) use the given files.
+func writeProject(t *testing.T, dir, name string, sheets map[string]string) string {
+	t.Helper()
+	var syms []string
+	for sn, file := range sheets {
+		syms = append(syms, sheetSymbol(sn, file))
+	}
+	sort.Strings(syms)
+	root := strings.Replace(NewSchematicText("A4", NewUUID(), true), "\t(sheet_instances", "\t"+strings.Join(syms, "\n\t")+"\n\t(sheet_instances", 1)
+	_ = os.WriteFile(filepath.Join(dir, name+".kicad_pro"), []byte("{}\n"), 0o644)
+	p := filepath.Join(dir, name+".kicad_sch")
+	if err := os.WriteFile(p, []byte(root), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func sheetSymbol(name, file string) string {
+	return `(sheet (at 25.4 25.4) (size 20 10) (uuid "` + NewUUID() + `")
+		(property "Sheetname" "` + name + `" (at 25.4 24 0) (effects (font (size 1.27 1.27))))
+		(property "Sheetfile" "` + file + `" (at 25.4 36 0) (effects (font (size 1.27 1.27)))))`
+}
+
+// An empty sheet two levels below the root gets its full instance path.
+func TestDeepEmptySheetInstancePath(t *testing.T) {
+	p := t.TempDir()
+	rootPath := writeProject(t, p, "deep", map[string]string{"Mid": "mid.kicad_sch"})
+	mid := strings.Replace(NewSchematicText("A4", NewUUID(), false), "\t(embedded_fonts", "\t"+sheetSymbol("Leaf", "leaf/leaf.kicad_sch")+"\n\t(embedded_fonts", 1)
+	_ = os.WriteFile(filepath.Join(p, "mid.kicad_sch"), []byte(mid), 0o644)
+	_ = os.MkdirAll(filepath.Join(p, "leaf"), 0o755)
+	_ = os.WriteFile(filepath.Join(p, "leaf", "leaf.kicad_sch"), []byte(NewSchematicText("A4", NewUUID(), false)), 0o644)
+	r, _ := parseSx(mustRead(t, rootPath))
+	m, _ := parseSx(mid)
+	want := "/" + r.child("uuid").list[1].atom + "/" + r.child("sheet").child("uuid").list[1].atom + "/" + m.child("sheet").child("uuid").list[1].atom
+	leaf, err := OpenSchematicFile(filepath.Join(p, "leaf", "leaf.kicad_sch"))
+	if err != nil || leaf.HierarchyErr() != nil {
+		t.Fatalf("%v / %v", err, leaf.HierarchyErr())
+	}
+	if leaf.InstancePath != want {
+		t.Errorf("instance path %q, want %q", leaf.InstancePath, want)
+	}
+	_ = leaf.AddLibSymbol("my:DUAL", dualSym)
+	if _, err := leaf.PlaceSymbol(SymbolInstance{LibID: "my:DUAL", Ref: "U1", Value: "DUAL", At: Pt{50.8, 50.8}}); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := leaf.Render()
+	if !strings.Contains(out, `(path "`+want+`"`) {
+		t.Error("placed symbol lacks the full instance path")
+	}
+}
+
+func mustRead(t *testing.T, p string) string {
+	t.Helper()
+	b, err := os.ReadFile(p)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := a.SetField("U1", "Value", "X"); err == nil || !strings.Contains(err.Error(), "b.kicad_sch") {
-		t.Errorf("field edit of a split component: %v", err)
+	return string(b)
+}
+
+// Without a known hierarchy (a sub-sheet outside any project, or two
+// projects whose roots do not include it) renames and deleting every unit
+// are refused; a plain field edit proceeds. With several .kicad_pro in one
+// directory the project whose tree holds the sheet is used.
+func TestUnknownHierarchyRefuses(t *testing.T) {
+	lone := t.TempDir()
+	s, _ := OpenSchematic(NewSchematicText("A4", NewUUID(), false))
+	s.Project = "lone"
+	_ = s.AddLibSymbol("my:DUAL", dualSym)
+	for u := 1; u <= 2; u++ {
+		_, _ = s.PlaceSymbol(SymbolInstance{LibID: "my:DUAL", Ref: "U1", Unit: u, Value: "DUAL", At: Pt{50.8, 25.4 * float64(u)}})
 	}
-	if err := a.SetField("U1", "Reference", "U2"); err == nil {
-		t.Error("rename of a split component accepted")
+	text, _ := s.Render()
+	sub := filepath.Join(lone, "sub.kicad_sch")
+	_ = os.WriteFile(sub, []byte(text), 0o644)
+	e, err := OpenSchematicFile(sub)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := a.DeleteSymbol("U1"); err == nil {
-		t.Error("deleting every unit of a split component accepted")
+	if e.HierarchyErr() == nil {
+		t.Fatal("a sub-sheet outside any project has a known hierarchy")
 	}
-	if _, err := a.DeleteSymbol("U1:1"); err != nil {
-		t.Errorf("deleting one unit: %v", err)
+	if err := e.SetField("U1", "Reference", "U2"); err == nil || !strings.Contains(err.Error(), "hierarchy") {
+		t.Errorf("rename: %v", err)
+	}
+	if _, err := e.DeleteSymbol("U1"); err == nil || !strings.Contains(err.Error(), "hierarchy") {
+		t.Errorf("delete every unit: %v", err)
+	}
+	if err := e.SetField("U1", "Value", "LM358"); err != nil {
+		t.Errorf("field edit: %v", err)
+	}
+	// two projects in one directory: only "good" reaches sub.kicad_sch
+	writeProject(t, lone, "other", map[string]string{"X": "x.kicad_sch"})
+	writeProject(t, lone, "good", map[string]string{"S": "sub.kicad_sch"})
+	e, _ = OpenSchematicFile(sub)
+	if e.HierarchyErr() != nil {
+		t.Errorf("project not chosen among two: %v", e.HierarchyErr())
+	}
+	writeProject(t, lone, "twin", map[string]string{"S": "sub.kicad_sch"})
+	e, _ = OpenSchematicFile(sub)
+	if err := e.HierarchyErr(); err == nil || !strings.Contains(err.Error(), "several projects") {
+		t.Errorf("two projects holding the sheet: %v", err)
+	}
+}
+
+// Sheetfile spelled with other letter case still names the sheet on the
+// case-insensitive file systems of Windows and macOS.
+func TestMixedCaseNestedSheet(t *testing.T) {
+	if runtime.GOOS != "windows" && runtime.GOOS != "darwin" {
+		t.Skip("case-sensitive file system")
+	}
+	p := t.TempDir()
+	writeProject(t, p, "mc", map[string]string{"A": "Sub/Child.KiCad_Sch", "B": "sub/child.kicad_sch"})
+	_ = os.MkdirAll(filepath.Join(p, "sub"), 0o755)
+	_ = os.WriteFile(filepath.Join(p, "sub", "child.kicad_sch"), []byte(NewSchematicText("A4", NewUUID(), false)), 0o644)
+	e, err := OpenSchematicFile(filepath.Join(p, "SUB", "CHILD.kicad_sch"))
+	if err != nil || e.HierarchyErr() != nil {
+		t.Fatalf("%v / %v", err, e.HierarchyErr())
+	}
+	if !e.RepeatedSheet() || e.sheetUses != 2 {
+		t.Errorf("mixed-case uses of one sheet: repeated=%v uses=%d", e.RepeatedSheet(), e.sheetUses)
 	}
 }
 
