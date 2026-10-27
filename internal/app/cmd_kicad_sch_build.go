@@ -1136,6 +1136,7 @@ type sbOptions struct {
 	Requirements                   []string
 	Reviewers, Waivers             string
 	NoReview, Render               bool
+	DiscardExternal                bool
 	ReviewTimeout                  time.Duration
 }
 
@@ -1158,6 +1159,7 @@ func sbFlags(c *cobra.Command, o *sbOptions) {
 	f.BoolVar(&o.NoReview, "no-review", false, "skip the design review despite --requirements; needs a signed waiver {\"gate\":\"design-review\",\"match\":\"--no-review\"} in --waivers")
 	f.StringVar(&o.Waivers, "waivers", "", "JSON list of signed waivers [{gate,match,reason,by}]")
 	f.DurationVar(&o.ReviewTimeout, "review-timeout", 20*time.Minute, "per-reviewer time limit")
+	f.BoolVar(&o.DiscardExternal, "discard-external-edits", false, "overwrite edits made in --out outside pcbpilot since its last build (refused by default: EXTERNAL_EDIT); the current files are checkpointed first")
 	f.BoolVar(&o.Render, "render", false, "also export one SVG per sheet to <out>/render (kicad-cli sch export svg)")
 }
 
@@ -1190,7 +1192,9 @@ IR 1.4, pcbpilot sch connectivity) in KiCad: parts by LCSC number (else generate
 the pin list), nets, no-connects, modules → zones.
 
 Every build saves a checkpoint (<out>/.pcbpilot/checkpoints/N); change the design later
-with kicad sch-edit, read it compactly with kicad sch-read.`,
+with kicad sch-edit, read it compactly with kicad sch-read. A rebuild into an existing --out
+whose files were edited outside pcbpilot is refused (EXTERNAL_EDIT) unless
+--discard-external-edits is given.`,
 		Example: `  pcbpilot kicad sch-build --spec design.json --out build/
   pcbpilot kicad sch-build --spec design.json --out build/ --dry-run
   pcbpilot kicad sch-build --from-connectivity p1.json --from-connectivity p2.json --out gas/ --name gas`,
@@ -1258,7 +1262,11 @@ func finishSbRun(res *sbReport, err error, reportPath string, stdout, stderr io.
 				bad = append(bad, g.Name)
 			}
 		}
-		fmt.Fprintf(stderr, "sch-build: gate(s) failed: %s\n", strings.Join(bad, ", "))
+		if len(bad) == 0 && res.Error != nil { // refused before any gate ran
+			fmt.Fprintf(stderr, "sch-build: %s: %s\n", res.Error.Code, res.Error.Message)
+		} else {
+			fmt.Fprintf(stderr, "sch-build: gate(s) failed: %s\n", strings.Join(bad, ", "))
+		}
 		return errActionFailed
 	}
 	return nil

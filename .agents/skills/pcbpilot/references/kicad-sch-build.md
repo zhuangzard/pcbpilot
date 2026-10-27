@@ -42,6 +42,16 @@ pcbpilot kicad sch-checkpoint list --project build/                     # 回退
   `PCBPILOT_KICAD_ISOLATE=0` 关闭。
 - **可复现**：`--planner-timeout` 按墙钟决定哪些区用 planner；同一 spec 要逐字节可复现时用 `--no-planner --fresh`。
 
+### GUI 改动保护（v0.10.2 起）
+
+- sch-edit 和对已有 `--out` 的 sch-build 会从存储的 spec 重画整个工程。上次构建后在 KiCad GUI 里改过的
+  图纸/工程/库文件（改动、新增、删除）会被拒绝：`EXTERNAL_EDIT`，列出文件，什么都不写。比对依据是构建时
+  记录的 sha256 清单（`state.json` 的 `manifest`）；旧工程没有清单时比对 checkpoint，都没有也拒绝。
+- 要保留 GUI 改动：`sch-read --project build/ --out edited.json` 导入成 spec，构建到新的 `--out`。确定要丢弃：
+  加 `--discard-external-edits`（报告列出将覆盖的文件，并先存一个 checkpoint，可 `sch-checkpoint restore N` 找回）。
+- 目录里有 KiCad 的 `~*.lck` 锁文件 = 工程还在 KiCad 里打开：`KICAD_OPEN`，先在 KiCad 保存并关闭（覆盖开关不跳过它）。
+  `.kicad_prl`、`_autosave-*`、`*-bak`、`*-backups/` 等 KiCad 附属文件不算改动。
+
 delta 例子（只写意图，脚名即可）：
 
 ```json

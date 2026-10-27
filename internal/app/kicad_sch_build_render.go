@@ -37,6 +37,10 @@ type sbState struct {
 	SymUUIDs      map[string]string       `json:"symbolUuids"` // "REF/unit"
 	Zones         map[string]*sbZoneState `json:"zones"`
 	Files         []string                `json:"files"` // files this build owns in --out
+	// Manifest is sha256 of the project files in --out at the last commit
+	// (kicad_sch_build_guard.go): the next in-place run refuses when they
+	// were edited outside pcbpilot.
+	Manifest map[string]string `json:"manifest,omitempty"`
 }
 
 type sbZoneState struct {
@@ -131,6 +135,7 @@ type sbReport struct {
 	Outputs    map[string]string `json:"outputs,omitempty"`
 	Checkpoint int               `json:"checkpoint,omitempty"`
 	Edit       any               `json:"edit,omitempty"`
+	External   *sbExternalEdits  `json:"externalEdits,omitempty"`
 	Plan       *sbPlan           `json:"plan,omitempty"`
 	PartBoxes  map[string]sbBox  `json:"partBoxes,omitempty"`
 	Error      *sbFailure        `json:"error,omitempty"`
@@ -293,15 +298,14 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 	if o.DryRun {
 		rep.Mode += "+dry-run"
 	}
-	st, _ := loadSbState(out)
+	loaded, _ := loadSbState(out)
+	st := loaded
 	if st == nil || o.Fresh {
-		old := st
 		st = newSbState()
-		if old != nil {
-			st.Files = old.Files // still owned: replaced or removed on commit
+		if loaded != nil {
+			st.Files = loaded.Files // still owned: replaced or removed on commit
 		}
 	}
-	startSHA := sbProjectSHA(out, st)
 	if !o.DryRun {
 		unlock, err := sbLock(out)
 		if err != nil {
@@ -311,6 +315,12 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 		}
 		defer unlock()
 	}
+	// edits made in the KiCad GUI since the last build would be overwritten
+	if f := sbGuardExternalEdits(out, loaded, o, rep); f != nil {
+		rep.OK, rep.Error = false, f
+		return rep, nil
+	}
+	startSHA := sbProjectSHA(out, st)
 	name := o.Name
 	if name == "" {
 		name = spec.Name
@@ -620,6 +630,7 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 	}
 	_ = os.RemoveAll(filepath.Join(sbMetaDir(out), "failed"))
 	st.Files = files
+	st.Manifest = sbMakeManifest(out, files)
 	rep.Project = filepath.Join(out, name+".kicad_pro")
 	rep.Root = filepath.Join(out, name+".kicad_sch")
 	for _, f := range files {
