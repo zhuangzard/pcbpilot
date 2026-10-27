@@ -329,6 +329,63 @@ func injectStat(t *testing.T, path string, statErr, readErr error) {
 	}
 }
 
+// The selected settings directory itself must be a real directory on
+// every branch (default per OS and KICAD_CONFIG_HOME/10.0).
+func TestKiCadConfigDirMustBeDirectory(t *testing.T) {
+	root := t.TempDir()
+	mk := func(goos string, env map[string]string) fpLibEnv {
+		return fpLibEnv{lookupEnv: func(k string) (string, bool) { v, ok := env[k]; return v, ok }, goos: goos, home: root,
+			stockDir: func() string { return "" }}
+	}
+	branches := []struct {
+		goos string
+		env  map[string]string
+		dir  string
+	}{
+		{"windows", map[string]string{"APPDATA": filepath.Join(root, "appdata")}, filepath.Join(root, "appdata", "kicad", FPLibVersion)},
+		{"darwin", nil, filepath.Join(root, "Library", "Preferences", "kicad", FPLibVersion)},
+		{"linux", nil, filepath.Join(root, ".config", "kicad", FPLibVersion)},
+		{"linux", map[string]string{"KICAD_CONFIG_HOME": filepath.Join(root, "kch")}, filepath.Join(root, "kch", FPLibVersion)},
+	}
+	for _, b := range branches {
+		// Absent: fine.
+		if got, err := kicadConfigDir(mk(b.goos, b.env)); err != nil || got != b.dir {
+			t.Errorf("%s %v absent: %s %v", b.goos, b.env, got, err)
+		}
+		// A regular file at the settings path.
+		if err := os.MkdirAll(filepath.Dir(b.dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(b.dir, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := kicadConfigDir(mk(b.goos, b.env)); err == nil || err.Code != ErrFPLibUnresolved || !strings.Contains(err.Detail, "not a directory") {
+			t.Errorf("%s %v regular file: %v", b.goos, b.env, err)
+		}
+		if err := os.Remove(b.dir); err != nil {
+			t.Fatal(err)
+		}
+		// A dangling link / junction (injected) and an inaccessible path.
+		for name, statErr := range map[string]error{"dangling": fs.ErrNotExist,
+			"permission": &fs.PathError{Op: "stat", Path: b.dir, Err: fs.ErrPermission}} {
+			injectStat(t, b.dir, statErr, nil)
+			if _, err := kicadConfigDir(mk(b.goos, b.env)); err == nil || err.Code != ErrFPLibUnresolved || err.Path != b.dir {
+				t.Errorf("%s %v %s: %v", b.goos, b.env, name, err)
+			}
+			fpStat, fpLstat, fpReadFile = os.Stat, os.Lstat, os.ReadFile
+		}
+	}
+	// And through the loader: a file at the default 10.0 path fails the load.
+	f := newFPFixture(t)
+	if err := os.RemoveAll(filepath.Join(f.cfg, FPLibVersion)); err != nil {
+		t.Fatal(err)
+	}
+	f.write(filepath.Join(f.cfg, FPLibVersion), "not a dir")
+	if _, err := f.tryLoad(); err == nil || !strings.Contains(err.Error(), "not a directory") {
+		t.Errorf("loader with a file at 10.0: %v", err)
+	}
+}
+
 // A broken settings directory, template table or kicad_common.json is an
 // error, never a reason to pick the next fallback.
 func TestFPLibSettingsPathsFailClosed(t *testing.T) {

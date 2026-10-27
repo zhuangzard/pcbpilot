@@ -454,7 +454,8 @@ func (nl *SyncNetlist) Validate() []SyncNetlistIssue {
 		}
 	}
 	codes := map[string]string{}
-	pinNet := map[[2]string]int{} // (ref, pin) -> index of its net
+	type netID struct{ code, name string }
+	pinNet := map[[2]string]netID{} // (ref, pin) -> the net it is on
 	for i, n := range nl.Nets {
 		switch prev, dup := codes[n.Code]; {
 		case n.Code == "":
@@ -475,15 +476,20 @@ func (nl *SyncNetlist) Validate() []SyncNetlistIssue {
 			if refs[d.Ref] == 0 {
 				add(ErrNetlistInvalid, d.Ref, "", "net %q has a node on %s.%s, which is not a component", n.Name, d.Ref, d.Pin)
 			}
-			// Net identity is the net entry (its code), not its name: two
-			// entries sharing a name are still two nets.
+			// Net identity is the net code, not the name: two nets sharing a
+			// name are still two nets; two entries sharing a code are the
+			// duplicate-code issue above, not a pin conflict. A net without
+			// a code (already reported) is identified by its position.
+			id := netID{n.Code, n.Name}
+			if id.code == "" {
+				id.code = fmt.Sprintf("#%d", i+1)
+			}
 			k := [2]string{d.Ref, d.Pin}
-			if prev, seen := pinNet[k]; seen && prev != i {
-				p := nl.Nets[prev]
+			if prev, seen := pinNet[k]; seen && prev.code != id.code {
 				add(ErrNetlistInvalid, d.Ref, "", "pin %s.%s is on both net %q (code %s) and net %q (code %s)",
-					d.Ref, d.Pin, p.Name, p.Code, n.Name, n.Code)
+					d.Ref, d.Pin, prev.name, prev.code, n.Name, id.code)
 			} else if !seen {
-				pinNet[k] = i
+				pinNet[k] = id
 			}
 		}
 	}

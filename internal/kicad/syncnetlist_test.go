@@ -378,6 +378,14 @@ func TestSyncNetlistValidateIdentityAndNets(t *testing.T) {
 			t.Errorf("%s: want %s %q, got %v", c.what, ErrNetlistInvalid, c.detail, got)
 		}
 	}
+	// Two entries with the same code and the same pin: only the
+	// duplicate-code issue, no spurious pin conflict.
+	nl0 := base()
+	nl0.Nets[1].Code = "1"
+	nl0.Nets[1].Nodes[0].Pin = "1"
+	if issues := nl0.Validate(); len(issues) != 1 || !strings.Contains(issues[0].Detail, "net code 1 is used by both") {
+		t.Errorf("same code + same pin: want only the duplicate-code issue, got %+v", issues)
+	}
 	// The same pin listed twice on one net is not a conflict.
 	nl := base()
 	nl.Nets[0].Nodes = append(nl.Nets[0].Nodes, SyncNode{Ref: "R1", Pin: "1"})

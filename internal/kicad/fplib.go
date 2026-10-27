@@ -399,6 +399,33 @@ func KiCadConfigDir() (string, error) {
 }
 
 func kicadConfigDir(env fpLibEnv) (string, *FPLibError) {
+	d, err := kicadConfigPath(env)
+	if err != nil {
+		return "", err
+	}
+	// The chosen directory itself: absent is fine (no user settings yet);
+	// a dangling link/junction, an unreadable path or a non-directory is
+	// an error, never "no global table".
+	ok, err := strictPresent(d, "KiCad settings directory")
+	if err != nil {
+		return "", err
+	}
+	if ok {
+		st, serr := fpStat(d)
+		if serr != nil {
+			return "", &FPLibError{Code: ErrFPLibUnresolved, Path: d,
+				Detail: "cannot check KiCad settings directory: " + serr.Error(), Fix: "check the folder's permissions"}
+		}
+		if !st.IsDir() {
+			return "", &FPLibError{Code: ErrFPLibUnresolved, Path: d,
+				Detail: "KiCad settings directory is not a directory", Fix: "remove or rename the file at this path"}
+		}
+	}
+	return d, nil
+}
+
+// kicadConfigPath picks the settings directory path (see KiCadConfigDir).
+func kicadConfigPath(env fpLibEnv) (string, *FPLibError) {
 	if v := env.env("KICAD_CONFIG_HOME"); v != "" {
 		// KiCad appends the settings version to KICAD_CONFIG_HOME; accept a
 		// flat directory (tables directly inside it) only when there is no
