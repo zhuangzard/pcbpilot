@@ -188,7 +188,7 @@ func ecc83Synced(t *testing.T) (dir, sch, pcb string) {
 	dir = demoCopy(t, "ecc83")
 	sch, pcb = filepath.Join(dir, "ecc83-pp.kicad_sch"), filepath.Join(dir, "ecc83-pp.kicad_pcb")
 	o := syncOpts(sch, pcb)
-	o.inPlace, o.noParity = true, true
+	o.inPlace, o.noParity, o.forceUnverified = true, true, true
 	rep, code := runSync(t, o)
 	if code != 5 || !rep.Committed || rep.Counts.Swap != 6 || rep.Counts.Update != 15 {
 		t.Fatalf("first sync: exit %d committed %v counts %+v errors %+v", code, rep.Committed, rep.Counts, rep.Errors)
@@ -494,7 +494,7 @@ func TestPcbSyncLiveLocksAndRevision(t *testing.T) {
 	before := syncFileSHA(t, pcb)
 	for _, env := range []*kfile.Env{running, idle} {
 		o := syncOpts(sch, pcb)
-		o.inPlace, o.noParity, o.env = true, true, env
+		o.inPlace, o.noParity, o.forceUnverified, o.env = true, true, true, env
 		rep, code := runSync(t, o)
 		if code != 4 || rep.Committed || len(rep.Errors) == 0 || rep.Errors[0].Code != string(kfile.CodeLocked) {
 			t.Fatalf("locked board: exit %d %+v", code, rep.Errors)
@@ -504,7 +504,7 @@ func TestPcbSyncLiveLocksAndRevision(t *testing.T) {
 		}
 	}
 	o := syncOpts(sch, pcb)
-	o.inPlace, o.noParity, o.env = true, true, running
+	o.inPlace, o.noParity, o.forceUnverified, o.env = true, true, true, running
 	o.breakLock = "stale"
 	if _, code := runSync(t, o); code != 4 {
 		t.Fatalf("--break-lock stale must not remove a live lock: exit %d", code)
@@ -533,7 +533,7 @@ func TestPcbSyncLiveLocksAndRevision(t *testing.T) {
 	}
 	rev := rep.Revision
 	a := syncOpts(sch, pcb)
-	a.inPlace, a.noParity, a.applyPlan, a.revision = true, true, planPath, "0000"+rev[4:]
+	a.inPlace, a.noParity, a.forceUnverified, a.applyPlan, a.revision = true, true, true, planPath, "0000"+rev[4:]
 	if _, code = runSync(t, a); code != 4 {
 		t.Fatalf("a wrong --revision must be refused: exit %d", code)
 	}
@@ -677,7 +677,7 @@ pcbnew.SaveBoard(sys.argv[1], b)
 		}
 	})
 	o := syncOpts(sch, pcb)
-	o.inPlace, o.noParity = true, true
+	o.inPlace, o.noParity, o.forceUnverified = true, true, true
 	if rep, code := runSync(t, o); code != 5 || !rep.Committed || rep.Counts.Swap != 1 {
 		t.Fatalf("swap: exit %d %+v %+v", code, rep.Ops, rep.Errors)
 	}
@@ -806,7 +806,7 @@ pcbnew.SaveBoard(sys.argv[1], b)
 		}
 	})
 	o := syncOpts(sch, pcb)
-	o.inPlace, o.noParity = true, true
+	o.inPlace, o.noParity, o.forceUnverified = true, true, true
 	if rep, code := runSync(t, o); code != 5 || !rep.Committed || rep.Counts.Swap != 1 {
 		t.Fatalf("exit %d %+v %+v", code, rep.Ops, rep.Errors)
 	}

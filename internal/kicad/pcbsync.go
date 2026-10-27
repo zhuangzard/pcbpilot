@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -288,9 +289,11 @@ func (p *SyncPlan) ApplyDoc() map[string]any {
 }
 
 // SyncRevision identifies a plan made from given files: sha256 over the
-// board and project base hashes ("" = absent), the options and the ops. The
-// same edit of the same files always gets the same revision.
-func SyncRevision(boardSHA, proSHA string, o SyncOptions, p *SyncPlan) string {
+// board and project base hashes ("" = absent), the options, the ops (which
+// carry each library footprint's hash) and extra — the state of every
+// other file the result depends on (the effective project and rules, …).
+// The same edit of the same files always gets the same revision.
+func SyncRevision(boardSHA, proSHA string, o SyncOptions, p *SyncPlan, extra ...string) string {
 	h := sha256.New()
 	ops, _ := json.Marshal(p.Ops)
 	upd := []string{}
@@ -302,6 +305,9 @@ func SyncRevision(boardSHA, proSHA string, o SyncOptions, p *SyncPlan) string {
 	ign := sortedKeys(o.FieldsIgnore)
 	opt, _ := json.Marshal([]any{o.Match, o.Orphans, upd, ign, o.RenameNets, o.Staging, o.StagingGap})
 	fmt.Fprintf(h, "pcb-sync/1\x00%s\x00%s\x00%s\x00%s", boardSHA, proSHA, opt, ops)
+	for _, e := range extra {
+		fmt.Fprintf(h, "\x00%s", e)
+	}
 	return hex.EncodeToString(h.Sum(nil))
 }
 
@@ -386,6 +392,27 @@ func BuildSyncPlan(in SyncInput) (*SyncPlan, error) {
 			continue
 		}
 		byPath[f.Path] = f
+	}
+	// A symbol is one footprint: two footprints on keys of one symbol
+	// (different units of a multi-unit symbol) are a duplicate, never a
+	// pick of one and an orphan of the other.
+	for _, c := range comps {
+		var hits []*SyncFP
+		for _, k := range c.Keys() {
+			if f := byPath[k]; f != nil && !slices.Contains(hits, f) {
+				hits = append(hits, f)
+			}
+		}
+		if len(hits) > 1 {
+			var refs []string
+			for _, f := range hits {
+				refs = append(refs, f.Ref+" ("+f.Path+")")
+			}
+			sort.Strings(refs)
+			refuse = append(refuse, SyncError{Code: ErrDupPath, Ref: c.Ref,
+				Detail: fmt.Sprintf("%s is on %d footprints, one per unit key: %s", c.Ref, len(hits), strings.Join(refs, ", ")),
+				Fix:    "a multi-unit symbol has one footprint: delete the extra footprint(s) so one remains"})
+		}
 	}
 	if len(refuse) > 0 {
 		return nil, &SyncRefusal{Errors: refuse}

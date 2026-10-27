@@ -1,27 +1,41 @@
 package kicad
 
-// pcbsync_refs.go — what a net rename would leave behind: the board's
-// copper moves with the net, but the project's netclass assignments and
-// patterns and the custom rules (.kicad_dru) name nets by text. v0.11
-// refuses such a rename instead of rewriting those files.
+// pcbsync_refs.go — net renames against the project and rules. The board's
+// copper moves with a renamed net, but the project's netclass assignments
+// and patterns and the custom rules (.kicad_dru) select nets by text. v0.11
+// is conservative: a rename is refused whenever any of them involves
+// either name, or a rule selects nets in a way that cannot be evaluated
+// literally. Nothing is rewritten.
 
 import (
 	"encoding/json"
 	"fmt"
 	"path"
+	"regexp"
 	"sort"
 	"strings"
 )
 
-// ErrRenameReferenced: a planned net rename would orphan a netclass
-// assignment, a netclass pattern or a custom rule naming the old net.
+// ErrRenameReferenced: a planned net rename touches a netclass
+// assignment, a netclass pattern or a custom rule.
 const ErrRenameReferenced = "E_RENAME_REFERENCED"
 
-// RenameReferences lists, per planned renameNet, every reference to the
-// old name in the project (net_settings.netclass_assignments keys,
-// net_settings.netclass_patterns whose pattern matches the old name but not
-// the new one) and in the custom rules (the old name quoted). A project
-// that is not JSON is itself an error: its references cannot be checked.
+// druNetCond is a literal net condition: A.NetName == 'X' / B.NetClass != "X".
+var (
+	druNetCond    = regexp.MustCompile(`\b[AB]\.(NetName|NetClass)\s*(==|!=)\s*(?:'([^']*)'|"([^"]*)")`)
+	druNetMention = regexp.MustCompile(`NetName|NetClass|inDiffPair|isCoupledDiffPair|matches\s*\(|memberOf`)
+)
+
+// RenameReferences lists, per planned renameNet, why it is refused:
+//   - a netclass_assignments entry for either name;
+//   - a netclass_patterns pattern that matches either name, read the ways
+//     KiCad may (wildcard * ?, and as a regular expression);
+//   - a .kicad_dru that names either net, or selects nets / classes other
+//     than by literal comparisons (matches(), wildcards in a literal,
+//     diff-pair and membership functions): its effect on the renamed net
+//     cannot be decided.
+//
+// A project that is not JSON is itself a refusal: it cannot be checked.
 func RenameReferences(pro, dru []byte, p *SyncPlan) []SyncError {
 	var renames [][2]string
 	for _, o := range p.Ops {
@@ -41,44 +55,93 @@ func RenameReferences(pro, dru []byte, p *SyncPlan) []SyncError {
 			} `json:"netclass_patterns"`
 		} `json:"net_settings"`
 	}
-	var out []SyncError
+	fix := "update the netclass assignments / patterns and custom rules for the new name in KiCad (Board Setup > Net Classes / Custom Rules) and sync again, or pass --rename-nets=false to re-net the pads one by one instead"
 	if len(pro) > 0 {
 		if err := json.Unmarshal(pro, &ns); err != nil {
-			return []SyncError{{Code: ErrRenameReferenced, Detail: "the .kicad_pro is not JSON, so its netclass assignments cannot be checked before a net rename: " + err.Error(),
-				Fix: "repair the project file, or pass --rename-nets=false"}}
+			return []SyncError{{Code: ErrRenameReferenced, Detail: "the .kicad_pro is not JSON, so its netclass assignments cannot be checked before a net rename: " + err.Error(), Fix: fix}}
 		}
 	}
-	for _, r := range renames {
-		from, to := r[0], r[1]
-		var where []string
-		if _, ok := ns.NetSettings.Assignments[from]; ok {
-			where = append(where, "netclass assignment of "+from+" in the .kicad_pro")
+	druText := string(dru)
+	// Rule conditions that are not literal comparisons of a plain name.
+	var opaque []string
+	if strings.TrimSpace(druText) != "" {
+		literal := 0
+		for _, m := range druNetCond.FindAllStringSubmatch(druText, -1) {
+			if strings.ContainsAny(m[3]+m[4], "*?") {
+				opaque = append(opaque, strings.TrimSpace(m[0])+" (wildcard)")
+				continue
+			}
+			literal++
 		}
-		for _, pt := range ns.NetSettings.Patterns {
-			if wildMatch(pt.Pattern, from) && !wildMatch(pt.Pattern, to) {
-				where = append(where, fmt.Sprintf("netclass pattern %q (class %s) in the .kicad_pro", pt.Pattern, pt.Netclass))
+		mentions := druNetMention.FindAllString(druText, -1)
+		if len(mentions) > literal {
+			for _, m := range mentions {
+				if m != "NetName" && m != "NetClass" {
+					opaque = append(opaque, m)
+				}
+			}
+			if len(opaque) == 0 {
+				opaque = append(opaque, "a NetName / NetClass condition that is not a literal == / != comparison")
 			}
 		}
-		if t := string(dru); t != "" && (strings.Contains(t, "'"+from+"'") || strings.Contains(t, `"`+from+`"`)) {
-			where = append(where, "a rule naming "+from+" in the .kicad_dru")
+	}
+	var out []SyncError
+	for _, r := range renames {
+		var where []string
+		for _, name := range r {
+			if _, ok := ns.NetSettings.Assignments[name]; ok {
+				where = append(where, fmt.Sprintf("netclass assignment of %s in the .kicad_pro", name))
+			}
+			for _, pt := range ns.NetSettings.Patterns {
+				if patternMatches(pt.Pattern, name) {
+					where = append(where, fmt.Sprintf("netclass pattern %q (class %s) matches %s in the .kicad_pro", pt.Pattern, pt.Netclass, name))
+				}
+			}
+			if druText != "" && strings.Contains(druText, name) {
+				where = append(where, fmt.Sprintf("the .kicad_dru names %s", name))
+			}
+		}
+		for _, o := range opaque {
+			where = append(where, "the .kicad_dru selects nets in a way that cannot be checked literally: "+o)
 		}
 		if len(where) == 0 {
 			continue
 		}
-		sort.Strings(where)
-		out = append(out, SyncError{Code: ErrRenameReferenced, Detail: fmt.Sprintf("renaming net %s to %s would leave %s pointing at the old name",
-			from, to, strings.Join(where, "; ")),
-			Fix: "update those references to " + to + " in KiCad (Board Setup > Net Classes / Custom Rules) and sync again, or pass --rename-nets=false"})
+		out = append(out, SyncError{Code: ErrRenameReferenced,
+			Detail: fmt.Sprintf("net %s → %s is not renamed: %s", r[0], r[1], strings.Join(dedupe(where), "; ")), Fix: fix})
 	}
 	return out
 }
 
-// wildMatch is KiCad's netclass pattern wildcard match (* and ?), case
-// sensitive like net names.
-func wildMatch(pattern, name string) bool {
+func dedupe(ss []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range ss {
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// patternMatches reads a netclass pattern both ways KiCad may: as a
+// wildcard (* ?) and as a regular expression.
+func patternMatches(pattern, name string) bool {
 	if pattern == "" {
 		return false
 	}
+	if wildMatch(pattern, name) {
+		return true
+	}
+	re, err := regexp.Compile(pattern)
+	return err == nil && re.MatchString(name)
+}
+
+// wildMatch is KiCad's wildcard match (* and ?), case sensitive like net
+// names.
+func wildMatch(pattern, name string) bool {
 	// path.Match treats '/' specially; net names contain '/', so escape the
 	// pattern's other metacharacters and match on a '/'-free mapping.
 	const slash = "\x00"

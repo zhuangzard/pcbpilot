@@ -129,14 +129,14 @@ pcbpilot kicad pcb-sync ... --in-place --apply-plan plan.json --revision <rev>
   符号是一个封装，带任一单元的 key 都算（新件用第一个单元的）；同一子图复用多次 = 各自独立的 key。路径匹配不上时，只有
   位号在**整块原始板上**（不只是剩下没匹配的封装里）和原理图里都唯一，才按位号匹配并 `setPath` 重新挂钩（报告 `matchedBy:"ref"`）。
 - **拒绝（退出 1，什么都不写）**：未标注位号 `E_UNANNOTATED`、重复位号 `E_DUP_REF`、重复 key、板上两个封装同一路径
-  `E_DUP_PATH`、上板符号 Footprint 字段为空 `E_FP_MISSING_FIELD`、库解析不了 `E_FP_LIB_UNRESOLVED`（报出变量名/昵称）
+  `E_DUP_PATH`（含一个多单元符号的不同单元 key 落在两个封装上）、上板符号 Footprint 字段为空 `E_FP_MISSING_FIELD`、库解析不了 `E_FP_LIB_UNRESOLVED`（报出变量名/昵称）
   / `E_FP_LIB_TYPE`、库里没有该封装 `E_FP_NOT_FOUND`。修原理图或库表后重跑，不要绕。计划里的发现（如
   `E_PIN_PAD_MISMATCH`：网表引脚在封装上没有焊盘）让 `--check` / `--dry-run` / `--plan-out` 退出 1（`verdict: plan-errors`，
   不写计划），不会报 in-sync；应用时 pad-net 门禁失败。
 - **操作**（固定顺序）：`renameNet`（板网的焊盘**恰好**全部去往一个新名字、该名字板上还没有、没有孤儿/板专用件的焊盘在其上
-  → 改名，走线/过孔/铺铜跟着走；拆分、合并、目标名已占用都不改名，逐焊盘改网；`.kicad_pro` 的 netclass 指派 / 只匹配旧名的
-  pattern、`.kicad_dru` 里引用旧名的规则会让改名**整批拒绝** `E_RENAME_REFERENCED`，列出引用，提示先在 Board Setup 改名或
-  `--rename-nets=false`）→ `addFootprint`（库里加载，按图纸路径
+  → 改名，走线/过孔/铺铜跟着走；拆分、合并、目标名已占用都不改名，逐焊盘改网；保守：`.kicad_pro` 里任何涉及新旧任一名字的 netclass
+  指派或 pattern（按通配和正则两种读法）、`.kicad_dru` 里出现任一名字或任何不能按字面判断的网/网络类条件（`matches`、通配、
+  差分对/成员函数），都让改名**整批拒绝** `E_RENAME_REFERENCED`，列出原因，提示先在 Board Setup 改或 `--rename-nets=false`）→ `addFootprint`（库里加载，按图纸路径
   再按位号排序，从板框右侧 10 mm 起成行暂存，`--staging X,Y` / `--staging-gap`）→ `swapFootprint`（保留 uuid、所在 group、位置/角度/面/锁定/
   字段文字布局/路径、封装级 clearance / 阻焊 / 锡膏 / 铺铜连接覆盖与 allow-missing-courtyard / solder-mask-bridge，
   以及每个焊盘的本地覆盖（带到同编号的新焊盘；同编号多个焊盘覆盖不同时按顺序 + 封装内相对位置一一对应，对不上或带覆盖的焊盘在
@@ -152,7 +152,8 @@ pcbpilot kicad pcb-sync ... --in-place --apply-plan plan.json --revision <rev>
   规划后库文件被改 → 退出 4。源板、`.kicad_pro`、`.kicad_dru` 读入时记下字节与哈希；bridge 加载的是复制进暂存目录的这份字节，应用前和提交前
   都再核对源文件（被改 → `E_FILE_CHANGED` 退出 4，什么都不写）。bridge `sync-apply` 先校验全部操作（封装 id、焊盘、网、库封装能加载），全有或全无，只写进目标旁的
   `.pcbpilot-stage-*/`（`PCBPILOT_STAGE_DIR` 之外一律拒绝）；三道门禁在暂存板上跑完后由 kfile 事务提交（锁文件、读后被改
-  `E_FILE_CHANGED`、计划 revision）。`--in-place` 只有 pad-net 与 idempotent 通过、parity 没失败才提交，否则板子一字节不动；
+  `E_FILE_CHANGED`、计划 revision）。`--in-place` 只有 pad-net、idempotent、schematic-parity **都 pass** 才提交（parity 不能检查 → 不提交；`--no-parity` 是 skip，
+  只有再加 `--force-unverified` 才提交，仍退出 5），否则板子一字节不动；
   `--out` 只要暂存板能读回就保留输出。`--in-place` 不改 `.kicad_pro`（缺失时才写）；`--out` 发布的 `.kicad_pro` 是源工程的原字节（不是
   SaveBoard 重写的，非默认设置都保留；parity 也用它）；源没有 `.kicad_pro` 时目标已有的那份保持不动，只有目标也没有才写
   SaveBoard 生成的默认工程。`.kicad_dru` 同理：源有就发布源的（覆盖目标已有的，基哈希校验），源没有就保留目标的。改名检查、parity
@@ -165,7 +166,10 @@ pcbpilot kicad pcb-sync ... --in-place --apply-plan plan.json --revision <rev>
   `--no-parity` 是用户跳过，结论是 skip、退出 5，永远不是 pass。
 - **退出码**：0 通过（`--check` 无漂移）· 1 错误/拒绝 · 2 用法 · 3 `--check` 有漂移 · 4 锁定/读后被改/revision 不符（未写）·
   5 有门禁没能验证（含 `--no-parity`）· 6 门禁失败（`--out` 输出保留，`--in-place` 未提交）。
-- **报告** `pcbpilot.kicad.pcb-sync/1`，总是打印到 stdout；`--check` / `--dry-run` / `--plan-out` 只有给了 `--report` 才写文件
+- 原理图（根图及其目录下全部 `.kicad_sch`）和 `--netlist` 在开始时记哈希，应用前、提交前与板一起再核对（被改 → 退出 4）。
+  revision 还包含实际发布的工程与规则的哈希/存在状态，以及每个库封装的哈希。
+- **报告** `pcbpilot.kicad.pcb-sync/1`，总是打印到 stdout；`--report` / `--plan-out` 必须以 `.json` 结尾，已存在的文件必须是
+  pcb-sync 自己的报告或计划（`schema` 字段），否则退出 2；`--check` / `--dry-run` / `--plan-out` 只有给了 `--report` 才写文件
   （不会因为 KiCad 开着工程而失败），写入板子的运行默认写 `<目标>.pcb-sync.json`。`--report` / `--plan-out`
   不能是任何输入或输出文件（板/工程/规则/prl、任一 `.kicad_sch`、网表、`--apply-plan`、输出板及其工程；按规范化路径、
   Windows/macOS 不分大小写、硬链接/链接同一文件判断），不能带 `.kicad_*` 扩展名，两者也不能相同 → 用法错误退出 2；写入经

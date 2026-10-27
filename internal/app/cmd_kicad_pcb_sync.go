@@ -33,6 +33,7 @@ import (
 	"regexp"
 	"runtime"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -72,6 +73,7 @@ type pcbSyncOpts struct {
 	report                 string
 	breakLock              string
 	noParity               bool
+	forceUnverified        bool
 
 	env     *kfile.Env     // lock identity (tests); nil = this machine
 	tools   *kicad.Tools   // tests; nil = kicad.Locate()
@@ -123,8 +125,8 @@ The edit is applied to a stage directory beside the target and verified
 there: pad-net (pads vs schematic pins), schematic-parity (kicad-cli pcb drc
 --schematic-parity on a copy) and idempotent (re-planning finds nothing). Then
 a transaction commits it: KiCad lock files are honoured (--break-lock), a board
-changed since it was read is refused. --in-place commits only when no gate
-failed.
+changed since it was read is refused. --in-place commits only when all three
+gates passed (--no-parity needs --force-unverified to commit).
 
 Modes: --dry-run and --check (exit 3 on drift) only read; --plan-out writes the
 plan with its revision, --apply-plan P --revision R applies it only if the
@@ -142,7 +144,7 @@ Report: --report (default <target>.pcb-sync.json), also printed on stdout.`,
 	f.StringVar(&o.sch, "sch", "", "root schematic sheet (.kicad_sch)")
 	f.StringVar(&o.pcb, "pcb", "", "board to sync (.kicad_pcb); with --create it may not exist yet")
 	f.StringVar(&o.out, "out", "", "write the synced board here (the input board is untouched)")
-	f.BoolVar(&o.inPlace, "in-place", false, "write the synced board over --pcb (only when every gate that ran passed)")
+	f.BoolVar(&o.inPlace, "in-place", false, "write the synced board over --pcb (only when pad-net, schematic-parity and idempotent all passed)")
 	f.StringVar(&o.netlist, "netlist", "", "use this kicad-cli netlist export instead of exporting --sch")
 	f.StringVar(&o.netlistFormat, "netlist-format", "", "kicadxml | kicadsexpr (default: kicadxml for the export, detected for --netlist)")
 	f.BoolVar(&o.dryRun, "dry-run", false, "plan and report only; write nothing but the report")
@@ -160,7 +162,8 @@ Report: --report (default <target>.pcb-sync.json), also printed on stdout.`,
 	f.Float64Var(&o.stagingGap, "staging-gap", 2, "gap between staged footprints (mm)")
 	f.StringVar(&o.report, "report", "", "report path (default <target>.pcb-sync.json)")
 	f.StringVar(&o.breakLock, "break-lock", "none", "KiCad lock files that may be removed: none | stale (this user, this host, no KiCad running) | any")
-	f.BoolVar(&o.noParity, "no-parity", false, "skip the schematic-parity gate (the result is then not verified: exit 5)")
+	f.BoolVar(&o.noParity, "no-parity", false, "skip the schematic-parity gate (the result is then not verified: exit 5; --in-place then commits only with --force-unverified)")
+	f.BoolVar(&o.forceUnverified, "force-unverified", false, "with --in-place --no-parity: commit although schematic parity was not checked (exit 5 still)")
 	return c
 }
 
@@ -277,6 +280,8 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 		return usage("--apply-plan needs --revision (printed by --plan-out)")
 	case o.revision != "" && o.applyPlan == "":
 		return usage("--revision goes with --apply-plan")
+	case o.forceUnverified && !(o.noParity && o.inPlace):
+		return usage("--force-unverified only goes with --in-place --no-parity")
 	}
 	readOnly := o.check || o.dryRun || o.planOut != ""
 	if !readOnly && o.out == "" && !o.inPlace {
@@ -486,8 +491,25 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 	if druData, druSnap, err = readOpt(boardSibling(o.pcb, ".kicad_dru")); err != nil {
 		return fileErr(err)
 	}
+	// The schematic (root and every sheet under its directory) and an
+	// explicit netlist are inputs too: re-checked with the board.
+	var inputSnaps []kfile.Snapshot
+	for _, f := range pcbSyncSchematicFiles(o.sch) {
+		sn, err := kfile.Stat(f)
+		if err != nil {
+			return fileErr(err)
+		}
+		inputSnaps = append(inputSnaps, sn)
+	}
+	if o.netlist != "" {
+		sn, err := kfile.Stat(o.netlist)
+		if err != nil {
+			return fileErr(err)
+		}
+		inputSnaps = append(inputSnaps, sn)
+	}
 	sourceUnchanged := func() error {
-		for _, sn := range []kfile.Snapshot{boardSnap, proSnap, druSnap} {
+		for _, sn := range append([]kfile.Snapshot{boardSnap, proSnap, druSnap}, inputSnaps...) {
 			if sn.Path == "" {
 				continue
 			}
@@ -633,7 +655,14 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 		rep.Errors = append(rep.Errors, refs...)
 		return finish("refused", 1)
 	}
-	rep.Revision = kicad.SyncRevision(boardSnap.SHA256, proSnap.SHA256, sopts, plan)
+	state := func(what string, b []byte) string {
+		if b == nil {
+			return what + ":absent"
+		}
+		return what + ":" + kfileSHA(b)
+	}
+	rep.Revision = kicad.SyncRevision(boardSnap.SHA256, proSnap.SHA256, sopts, plan,
+		state("project", effPro), state("rules", effDru))
 
 	// Findings of the plan (a netlist pin without its pad) mean the board
 	// cannot be brought in line: --check, --dry-run and --plan-out fail.
@@ -799,9 +828,16 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 	// be read back.
 	commit := wrote && padNet != gate.CannotCheck
 	if o.inPlace {
-		commit = wrote && padNet == gate.Pass && idem == gate.Pass && overall != gate.Fail
+		parity := gate.CannotCheck
+		for _, g := range gates {
+			if g.Name == "schematic-parity" {
+				parity = g.Status
+			}
+		}
+		commit = wrote && padNet == gate.Pass && idem == gate.Pass &&
+			(parity == gate.Pass || (parity == gate.Skip && o.forceUnverified))
 		if wrote && !commit {
-			rep.Warnings = append(rep.Warnings, "not committed: a gate failed or could not run, so the board is unchanged")
+			rep.Warnings = append(rep.Warnings, "not committed: a gate failed, could not run or was skipped (--force-unverified commits with --no-parity), so the board is unchanged")
 		}
 	}
 	if commit {
@@ -1074,8 +1110,42 @@ func pcbSyncOutputAlias(o pcbSyncOpts, report string) string {
 				return fmt.Sprintf("%s and %s are the same file %s", other.what, out.what, out.path)
 			}
 		}
+		if !strings.EqualFold(filepath.Ext(out.path), ".json") {
+			return fmt.Sprintf("%s %s must end in .json", out.what, out.path)
+		}
+		if b, err := os.ReadFile(out.path); err == nil {
+			var head struct {
+				Schema string `json:"schema"`
+			}
+			if json.Unmarshal(b, &head) != nil || (head.Schema != pcbSyncSchema && head.Schema != pcbSyncPlanSchema) {
+				return fmt.Sprintf("%s %s exists and is not a pcb-sync report or plan: pcb-sync only replaces its own files", out.what, out.path)
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Sprintf("%s %s: %v", out.what, out.path, err)
+		}
 	}
 	return ""
+}
+
+// pcbSyncSchematicFiles: the root sheet and every .kicad_sch under its
+// directory (sub-sheets may live in sub-directories), sorted.
+func pcbSyncSchematicFiles(root string) []string {
+	out := []string{root}
+	dir := filepath.Dir(root)
+	_ = filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() && p != dir && (strings.HasPrefix(d.Name(), ".") || strings.HasSuffix(d.Name(), ".pretty")) {
+			return filepath.SkipDir
+		}
+		if !d.IsDir() && strings.EqualFold(filepath.Ext(p), ".kicad_sch") && !sameFilePath(p, root) {
+			out = append(out, p)
+		}
+		return nil
+	})
+	sort.Strings(out[1:])
+	return out
 }
 
 // pathAlias: a and b are one file — the same cleaned absolute path (case

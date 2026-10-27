@@ -617,6 +617,17 @@ func TestBuildSyncPlanRefusals(t *testing.T) {
 			c := compByRef(nl, "C1")
 			c.Footprint = "NoSuchLib:C_0603"
 		}},
+		{"multi-unit-two-footprints", ErrDupPath, func(_ *SyncNetlist, inv *SyncInventory, _ *SyncOptions) {
+			// U1's unit A on one footprint, unit B on a second one.
+			second := *fpByRef(inv, "U1")
+			second.ID, second.UUID, second.Ref, second.Path = "fp-U1b", "fp-U1b", "U1", "/"+uU1b
+			inv.Footprints = append(inv.Footprints, second)
+		}},
+		{"multi-unit-two-footprints-reversed", ErrDupPath, func(_ *SyncNetlist, inv *SyncInventory, _ *SyncOptions) {
+			second := *fpByRef(inv, "U1")
+			second.ID, second.UUID, second.Ref, second.Path = "fp-U1b", "fp-U1b", "U1", "/"+uU1b
+			inv.Footprints = append([]SyncFP{second}, inv.Footprints...)
+		}},
 		{"fp-not-found", ErrFPNotFound, func(nl *SyncNetlist, _ *SyncInventory, _ *SyncOptions) {
 			nl.Components = append(nl.Components, syncComp("R3", "1k", "Resistor_SMD:R_1206", uR3))
 		}},

@@ -49,6 +49,7 @@ type fakeSync struct {
 	after   *kicad.SyncInventory
 	// parityDru: the rules beside the board the parity check was given.
 	parityDru []byte
+	parity    gate.Status // the parity verdict to report ("" = pass)
 }
 
 func (f *fakeSync) inventory(value string) *kicad.SyncInventory {
@@ -113,7 +114,11 @@ func (f *fakeSync) SyncApply(pcb string, plan *kicad.SyncPlan, stage, base strin
 
 func (f *fakeSync) RunParity(pcb, pro, sch string, expected func(kicad.Violation) bool) kicad.ParityResult {
 	f.parityDru, _ = os.ReadFile(boardSibling(pcb, ".kicad_dru"))
-	return kicad.ParityResult{Status: gate.Pass, Detail: "fake parity"}
+	st := gate.Pass
+	if f.parity != "" {
+		st = f.parity
+	}
+	return kicad.ParityResult{Status: st, Detail: "fake parity"}
 }
 
 const fakePro = `{"meta":{"filename":"a.kicad_pro"},"text_variables":{"STAGE":"neutral"},"net_settings":{"classes":[{"name":"Default","clearance":0.31}]}}` + "\n"
@@ -547,5 +552,143 @@ func TestPcbSyncOutPublishesSourceRules(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(tdru); string(b) != "(version 1)\n(rule mine)\n" || string(fake.parityDru) != string(b) {
 		t.Fatalf("kept rules %q, parity rules %q", b, fake.parityDru)
+	}
+}
+
+// TestPcbSyncOutputsAreOwnJSON: --report / --plan-out end in .json, and an
+// existing file there must be a pcb-sync report or plan (never a library
+// table, a config or someone else's JSON).
+func TestPcbSyncOutputsAreOwnJSON(t *testing.T) {
+	dir, o, _ := fakeProject(t, fakeNetlist())
+	foreign := filepath.Join(dir, "settings.json")
+	if err := os.WriteFile(foreign, []byte(`{"schema":"other/1"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]func(o *pcbSyncOpts){
+		"report = fp-lib-table":    func(o *pcbSyncOpts) { o.dryRun, o.report = true, filepath.Join(dir, "fp-lib-table") },
+		"report not .json":         func(o *pcbSyncOpts) { o.dryRun, o.report = true, filepath.Join(dir, "new.txt") },
+		"report = foreign json":    func(o *pcbSyncOpts) { o.dryRun, o.report = true, foreign },
+		"plan-out = sym-lib-table": func(o *pcbSyncOpts) { o.planOut = filepath.Join(dir, "sym-lib-table") },
+		"plan-out = foreign json":  func(o *pcbSyncOpts) { o.planOut = foreign },
+	}
+	for name, edit := range cases {
+		m := o
+		edit(&m)
+		if _, code, stderr := runSyncCode(t, m); code != 2 || stderr == "" {
+			t.Errorf("%s: exit %d", name, code)
+		}
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "fp-lib-table")); !strings.Contains(string(b), "fp_lib_table") {
+		t.Fatal("fp-lib-table changed")
+	}
+	// Its own report is replaced, run after run.
+	m := o
+	m.dryRun, m.report = true, filepath.Join(dir, "r.json")
+	for i := 0; i < 2; i++ {
+		if _, code, _ := runSyncCode(t, m); code != 0 {
+			t.Fatalf("run %d over its own report: exit %d", i, code)
+		}
+	}
+}
+
+// TestPcbSyncRevisionCoversProjectAndRules: the source rules, or a kept
+// target project, edited between --plan-out and --apply-plan change the
+// revision: refused (exit 4).
+func TestPcbSyncRevisionCoversProjectAndRules(t *testing.T) {
+	t.Run("source rules", func(t *testing.T) {
+		dir, o, _ := fakeProject(t, fakeNetlist())
+		plan := filepath.Join(t.TempDir(), "p.json")
+		p := o
+		p.planOut = plan
+		rep, code, _ := runSyncCode(t, p)
+		if code != 0 {
+			t.Fatalf("plan: %d %+v", code, rep.Errors)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "a.kicad_dru"), []byte("(version 1)\n(rule changed)\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		a := o
+		a.inPlace, a.applyPlan, a.revision = true, plan, rep.Revision
+		if rep, code, _ = runSyncCode(t, a); code != 4 || rep.Errors[len(rep.Errors)-1].Code != string(kfile.CodeRevision) {
+			t.Fatalf("exit %d %+v", code, rep.Errors)
+		}
+	})
+	t.Run("kept target project", func(t *testing.T) {
+		dir, o, _ := fakeProject(t, fakeNetlist())
+		if err := os.Remove(filepath.Join(dir, "a.kicad_pro")); err != nil {
+			t.Fatal(err)
+		}
+		o.out = filepath.Join(dir, "out", "o.kicad_pcb")
+		tpro := boardSibling(o.out, ".kicad_pro")
+		if err := os.MkdirAll(filepath.Dir(tpro), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(tpro, []byte(`{"meta":{}}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		plan := filepath.Join(t.TempDir(), "p.json")
+		p := o
+		p.planOut = plan
+		rep, code, _ := runSyncCode(t, p)
+		if code != 0 {
+			t.Fatalf("plan: %d %+v", code, rep.Errors)
+		}
+		if err := os.WriteFile(tpro, []byte(`{"meta":{},"text_variables":{"X":"y"}}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		a := o
+		a.applyPlan, a.revision = plan, rep.Revision
+		if rep, code, _ = runSyncCode(t, a); code != 4 || rep.Errors[len(rep.Errors)-1].Code != string(kfile.CodeRevision) || fileExists(o.out) {
+			t.Fatalf("exit %d %+v", code, rep.Errors)
+		}
+	})
+}
+
+// TestPcbSyncInPlaceNeedsParity: --in-place commits only after schematic
+// parity passed; a parity check that could not run never commits, and a
+// skipped one (--no-parity) commits only with --force-unverified.
+func TestPcbSyncInPlaceNeedsParity(t *testing.T) {
+	dir, o, fake := fakeProject(t, fakeNetlist())
+	pcb := filepath.Join(dir, "a.kicad_pcb")
+	before := syncFileSHA(t, pcb)
+	o.inPlace = true
+	fake.parity = gate.CannotCheck
+	if rep, code, _ := runSyncCode(t, o); code != 5 || rep.Committed || syncFileSHA(t, pcb) != before {
+		t.Fatalf("parity cannot-check: exit %d committed %v", code, rep.Committed)
+	}
+	fake.parity = ""
+	o.noParity = true
+	if rep, code, _ := runSyncCode(t, o); code != 5 || rep.Committed || syncFileSHA(t, pcb) != before {
+		t.Fatalf("--no-parity alone: exit %d committed %v", code, rep.Committed)
+	}
+	o.forceUnverified = true
+	if rep, code, _ := runSyncCode(t, o); code != 5 || !rep.Committed || syncFileSHA(t, pcb) == before {
+		t.Fatalf("--no-parity --force-unverified: exit %d committed %v", code, rep.Committed)
+	}
+	o.noParity = false
+	if _, code, _ := runSyncCode(t, o); code != 2 {
+		t.Fatalf("--force-unverified without --no-parity: exit %d", code)
+	}
+}
+
+// TestPcbSyncInputsRecheckedBeforeCommit: a schematic sheet or the
+// --netlist file edited while the sync runs refuses the commit (exit 4).
+func TestPcbSyncInputsRecheckedBeforeCommit(t *testing.T) {
+	for _, f := range []string{filepath.Join("sub", "b.kicad_sch"), "a.kicad_sch", "net.xml"} {
+		t.Run(f, func(t *testing.T) {
+			dir, o, fake := fakeProject(t, fakeNetlist())
+			o.out = filepath.Join(dir, "out", "o.kicad_pcb")
+			fake.onApply = func(string) {
+				p := filepath.Join(dir, f)
+				b, _ := os.ReadFile(p)
+				if err := os.WriteFile(p, append(b, ' '), 0o644); err != nil {
+					t.Error(err)
+				}
+			}
+			rep, code, _ := runSyncCode(t, o)
+			if code != 4 || rep.Errors[len(rep.Errors)-1].Code != string(kfile.CodeChanged) || fileExists(o.out) {
+				t.Fatalf("exit %d %+v", code, rep.Errors)
+			}
+		})
 	}
 }
