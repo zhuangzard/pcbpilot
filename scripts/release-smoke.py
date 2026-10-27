@@ -86,16 +86,16 @@ def check_connector(path, version):
 def extract_skills(archive_path, destination):
     """Extract only regular package files, retaining modes even on Windows.
 
-    The archive root holds public-skills.json plus one directory per listed
-    Skill; anything else (an unlisted directory, a stray root file) fails."""
+    The archive root holds one directory per listed Skill, the manifest
+    inside the router (pcbpilot/.public-skills.json); anything else (an
+    unlisted directory, a root-level file) fails."""
     modes = {}
     with tarfile.open(archive_path, "r:gz") as archive:
         for member in archive:
             path = PurePosixPath(member.name)
-            root_file = member.name == skill_manifest.MANIFEST_NAME
             require(not path.is_absolute() and path.parts
-                    and (root_file or (skill_manifest.NAME.fullmatch(path.parts[0]) is not None
-                                       and (len(path.parts) > 1 or member.isdir())))
+                    and skill_manifest.NAME.fullmatch(path.parts[0]) is not None
+                    and (len(path.parts) > 1 or member.isdir())
                     and ".." not in path.parts and "\\" not in member.name and ":" not in member.name
                     and path.as_posix() == member.name.rstrip("/"),
                     f"unsafe skill archive path: {member.name}")
@@ -110,9 +110,9 @@ def extract_skills(archive_path, destination):
                 with archive.extractfile(member) as source, target.open("wb") as output:
                     shutil.copyfileobj(source, output)
                 target.chmod(member.mode & 0o777)
-    require(skill_manifest.MANIFEST_NAME in modes, f"skills.tar.gz has no {skill_manifest.MANIFEST_NAME}")
-    manifest = skill_manifest.loads((destination / skill_manifest.MANIFEST_NAME).read_bytes())
-    tops = {PurePosixPath(name).parts[0] for name in modes if name != skill_manifest.MANIFEST_NAME}
+    require(skill_manifest.ARCHIVE_ENTRY in modes, f"skills.tar.gz has no {skill_manifest.ARCHIVE_ENTRY}")
+    manifest = skill_manifest.loads((destination / skill_manifest.ARCHIVE_ENTRY).read_bytes())
+    tops = {PurePosixPath(name).parts[0] for name in modes}
     require(tops == set(manifest.skills), f"skills.tar.gz directories {sorted(tops)} differ from the manifest {list(manifest.skills)}")
     return manifest, {name: destination / name for name in manifest.skills}, modes
 
@@ -132,7 +132,7 @@ def check_skill(root, version, archive_modes=None, router=None):
     router = router.resolve() if router is not None else None
     frontmatter = (root / "SKILL.md").read_text(encoding="utf-8").split("---", 2)
     require(len(frontmatter) == 3 and not frontmatter[0].strip(), "SKILL.md frontmatter missing")
-    match = re.search(r'^  version:\s*"([^"]+)"$', frontmatter[1], re.MULTILINE)
+    match = re.search(r'^  version:\s*"([^"]+)"\r?$', frontmatter[1], re.MULTILINE)
     require(match and match.group(1) == version, "Skill metadata.version mismatch")
     count = links = 0
     for path in root.rglob("*"):

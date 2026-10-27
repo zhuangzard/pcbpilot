@@ -69,7 +69,7 @@ func twoSkillArchive(t *testing.T, version string) []byte {
 	t.Helper()
 	manifest := `{"retired": [], "router": "pcbpilot", "schemaVersion": 1, "skills": ["pcbpilot", "` + demoSkill + `"]}` + "\n"
 	return tarGzFiles(t, map[string]string{
-		"public-skills.json":                manifest,
+		"pcbpilot/.public-skills.json":      manifest,
 		"pcbpilot/SKILL.md":                 skillDoc(version),
 		demoSkill + "/SKILL.md":             skillDoc(version),
 		demoSkill + "/references/review.md": "[shared](../../pcbpilot/SKILL.md)",

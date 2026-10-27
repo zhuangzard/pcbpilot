@@ -29,7 +29,7 @@ func withPublicSkills(t *testing.T, skills []string, retired ...string) {
 }
 
 // multiTarball builds skills.tar.gz with one root per Skill. manifest nil
-// writes no public-skills.json (a pre-0.11 archive). SKILL.md bodies are
+// writes no pcbpilot/.public-skills.json (a pre-0.11 archive). SKILL.md bodies are
 // wrapped with frontmatter declaring version.
 func multiTarball(t *testing.T, version string, skills map[string]map[string]string, manifest *SkillManifest) []byte {
 	t.Helper()
@@ -49,7 +49,7 @@ func multiTarball(t *testing.T, version string, skills map[string]map[string]str
 		if err != nil {
 			t.Fatal(err)
 		}
-		write(SkillManifestName, append(raw, '\n'))
+		write(SkillManifestEntry, append(raw, '\n'))
 	}
 	names := make([]string, 0, len(skills))
 	for name := range skills {
@@ -373,7 +373,7 @@ func TestSyncRejectsIncompleteOrMisversionedArchiveBeforeWriting(t *testing.T) {
 			tw.Write([]byte(body))
 		}
 		raw, _ := json.Marshal(twoSkillManifest())
-		add(SkillManifestName, string(raw))
+		add(SkillManifestEntry, string(raw))
 		add("pcbpilot/SKILL.md", "---\nmetadata:\n  version: \"1.0.0\"\n---\n")
 		add(demoSkill+"/SKILL.md", "---\nmetadata:\n  version: \"0.9.9\"\n---\n")
 		tw.Close()

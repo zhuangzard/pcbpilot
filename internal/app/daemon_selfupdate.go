@@ -401,11 +401,15 @@ func (u *selfUpdater) startupVerify(ctx context.Context) bool {
 	if u.own() != st.To {
 		problems = append(problems, fmt.Sprintf("daemon runs v%s, expected v%s", u.own(), st.To))
 	}
-	for _, t := range selfupdate.Targets(true) {
-		if t.Linked == "" && t.Installed != st.To {
-			problems = append(problems, fmt.Sprintf("skill %s is %q", selfupdate.SkillLabel(t.Client, t.Skill), t.Installed))
-		}
+	// Every expected Skill of every client with the router, missing dirs
+	// included. An updater older than focused Skills installed the router only;
+	// complete the set from the target release before judging it.
+	if missing := selfupdate.VerifyInstalledSkills(st.To); len(missing) > 0 && selfupdate.IsCleanRelease(st.To) {
+		res, err := selfupdate.SyncSkills(ctx, selfupdate.SyncOptions{TargetVersion: st.To, Preserve: selfupdate.PreserveFromEnv()},
+			func(f string, a ...any) { selfupdate.AppendLog(f, a...) })
+		selfupdate.AppendLog("post-restart: completed skills for v%s (%d changed) %v", st.To, res.Changed, errOrNil(err))
 	}
+	problems = append(problems, selfupdate.VerifyInstalledSkills(st.To)...)
 	if hasString(st.Components, compMCP) {
 		if v := selfupdate.MCPInstalledVersion(); v != st.To {
 			problems = append(problems, "mcp is "+orDash(v))

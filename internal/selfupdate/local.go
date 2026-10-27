@@ -125,7 +125,6 @@ func ReadLocalBundle(dir string) (*LocalBundle, error) {
 	defer gz.Close()
 	tr := tar.NewReader(gz)
 	var total int64
-	var manifestRaw []byte
 	for {
 		h, e := tr.Next()
 		if e == io.EOF {
@@ -140,15 +139,6 @@ func ReadLocalBundle(dir string) (*LocalBundle, error) {
 		total += h.Size
 		if h.Size < 0 || h.Size > 64<<20 || total > 256<<20 {
 			return nil, fmt.Errorf("skill package too large")
-		}
-		if h.Name == SkillManifestName {
-			if manifestRaw != nil {
-				return nil, fmt.Errorf("duplicate skill entry: %s", h.Name)
-			}
-			if manifestRaw, e = io.ReadAll(tr); e != nil {
-				return nil, e
-			}
-			continue
 		}
 		// Slash paths are the archive format on every OS: path.Clean, not
 		// filepath.Clean (which rewrites separators on Windows).
@@ -170,8 +160,8 @@ func ReadLocalBundle(dir string) (*LocalBundle, error) {
 		}
 	}
 	b.Manifest = legacySkillManifest()
-	if manifestRaw != nil {
-		if b.Manifest, err = parseSkillManifest(manifestRaw); err != nil {
+	if raw, ok := b.Skills[SkillName][installedManifestName]; ok {
+		if b.Manifest, err = parseSkillManifest(raw); err != nil {
 			return nil, err
 		}
 	}

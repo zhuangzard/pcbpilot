@@ -321,6 +321,8 @@ try {
 
     $TempRoot = Join-Path ([IO.Path]::GetTempPath()) ('easyeda-install-' + [Guid]::NewGuid().ToString('N'))
     [void](New-Item -ItemType Directory -Path $TempRoot -Force)
+    # Staged Skill trees (client x Skill), switched in together after the CLI.
+    $SkillPlan = New-Object System.Collections.ArrayList
     try {
         # -- checksums first; nothing installed is touched until every asset
         # -- downloaded here has been verified.
@@ -462,6 +464,106 @@ try {
         $SkillRoot = Join-Path $TempRoot 'skills'
         $Skills = @()
         $Retired = @()
+
+        # Read skills.tar.gz in memory and refuse anything but regular files and
+        # directories with safe relative paths, before a single file is written.
+        # Handles ustar names/prefixes and pax 'path' records (Python's default).
+        function Get-TarText {
+            param([byte[]]$Bytes, [int]$Offset, [int]$Length)
+            $end = $Offset
+            while ($end -lt $Offset + $Length -and $Bytes[$end] -ne 0) { $end++ }
+            return [Text.Encoding]::UTF8.GetString($Bytes, $Offset, $end - $Offset)
+        }
+        function Get-TarNumber {
+            param([byte[]]$Bytes, [int]$Offset, [int]$Length)
+            $text = (Get-TarText $Bytes $Offset $Length).Trim([char]0, ' ')
+            if (-not $text) { return [long]0 }
+            if ($text -notmatch '^[0-7]+$') { Stop-Install 'Unsafe or invalid Skill archive (bad tar number); nothing installed' }
+            return [Convert]::ToInt64($text, 8)
+        }
+        function Read-SkillArchive {
+            param([string]$Path)
+            $file = [IO.File]::OpenRead($Path)
+            try {
+                $gz = New-Object IO.Compression.GZipStream($file, [IO.Compression.CompressionMode]::Decompress)
+                $buffer = New-Object IO.MemoryStream
+                $gz.CopyTo($buffer)
+                $bytes = $buffer.ToArray()
+            } catch {
+                Stop-Install 'Invalid Skill archive (not gzip); nothing installed'
+            } finally {
+                $file.Dispose()
+            }
+            if ($bytes.Length -gt 256MB) { Stop-Install 'Skill archive exceeds the size limit; nothing installed' }
+            $entries = New-Object System.Collections.ArrayList
+            $seen = @{}
+            $pos = 0
+            $paxPath = $null
+            while ($pos + 512 -le $bytes.Length) {
+                $zero = $true
+                for ($i = 0; $i -lt 512; $i++) { if ($bytes[$pos + $i] -ne 0) { $zero = $false; break } }
+                if ($zero) { break }
+                $name = Get-TarText $bytes $pos 100
+                $size = Get-TarNumber $bytes ($pos + 124) 12
+                $type = [char]$bytes[$pos + 156]
+                if ((Get-TarText $bytes ($pos + 257) 6) -like 'ustar*') {
+                    $prefix = Get-TarText $bytes ($pos + 345) 155
+                    if ($prefix) { $name = "$prefix/$name" }
+                }
+                $dataStart = $pos + 512
+                if ($size -lt 0 -or $dataStart + $size -gt $bytes.Length) { Stop-Install 'Invalid Skill archive (truncated); nothing installed' }
+                $pos = $dataStart + [int]([math]::Ceiling($size / 512.0) * 512)
+                if ($type -eq 'x') {
+                    # pax records: "<len> <key>=<value>\n"
+                    $off = $dataStart
+                    while ($off -lt $dataStart + $size) {
+                        $sp = $off
+                        while ($sp -lt $dataStart + $size -and $bytes[$sp] -ne 32) { $sp++ }
+                        $lenText = [Text.Encoding]::ASCII.GetString($bytes, $off, $sp - $off)
+                        if ($lenText -notmatch '^[0-9]+$' -or [int]$lenText -le ($sp - $off + 1)) {
+                            Stop-Install 'Unsafe or invalid Skill archive (bad pax header); nothing installed'
+                        }
+                        $record = [Text.Encoding]::UTF8.GetString($bytes, $sp + 1, [int]$lenText - ($sp - $off) - 2)
+                        $eq = $record.IndexOf('=')
+                        if ($eq -gt 0 -and $record.Substring(0, $eq) -eq 'path') { $paxPath = $record.Substring($eq + 1) }
+                        $off += [int]$lenText
+                    }
+                    continue
+                }
+                if ($null -ne $paxPath) { $name = $paxPath; $paxPath = $null }
+                if ($type -eq '5') {
+                    $kind = 'dir'
+                } elseif ($type -eq '0' -or $type -eq [char]0) {
+                    $kind = 'file'
+                } else {
+                    Stop-Install "Unsafe or invalid Skill archive (link or special entry $name); nothing installed"
+                }
+                $clean = $name.TrimEnd('/')
+                $parts = $clean -split '/'
+                if (-not $clean -or $clean.StartsWith('/') -or $clean.Contains('\') -or $clean.Contains(':') -or
+                    ($parts | Where-Object { $_ -eq '' -or $_ -eq '.' -or $_ -eq '..' })) {
+                    Stop-Install "Unsafe or invalid Skill archive (unsafe path $name); nothing installed"
+                }
+                # NTFS is case-insensitive: names differing only in case collide.
+                $key = $clean.ToLowerInvariant()
+                if ($seen.ContainsKey($key)) { Stop-Install "Unsafe or invalid Skill archive (duplicate entry $name); nothing installed" }
+                $seen[$key] = $true
+                $data = $null
+                if ($kind -eq 'file') {
+                    $data = New-Object byte[] $size
+                    [Array]::Copy($bytes, $dataStart, $data, 0, $size)
+                }
+                [void]$entries.Add([pscustomobject]@{ Name = $clean; Kind = $kind; Data = $data; Top = $parts[0] })
+            }
+            return $entries
+        }
+
+        # Only router-prefixed names become directories, and only they may be removed.
+        function Test-SkillName {
+            param($Name)
+            return ($Name -is [string]) -and ($Name -cmatch '^pcbpilot(-[a-z0-9]+)*$') -and -not ($Name -clike 'pcbpilot-repo-*')
+        }
+
         if ($Targets.Count -eq 0) {
             Write-Step 'Skill install skipped (PCBPILOT_INSTALL_SKILLS=none)'
         } else {
@@ -469,47 +571,56 @@ try {
             $archive = Join-Path $TempRoot 'skills.tar.gz'
             Get-ReleaseAsset -Name 'skills.tar.gz' -Destination $archive
             Test-AssetChecksum -Name 'skills.tar.gz' -Path $archive
-            # bsdtar ships in %SystemRoot%\System32 on Windows 10 1803+. Prefer it
-            # explicitly so a Git-Bash/MSYS tar earlier on PATH cannot change the
-            # extraction semantics.
-            $tarExe = Join-Path (Join-Path (Get-EnvValue 'SystemRoot') 'System32') 'tar.exe'
-            if (-not (Test-Path -LiteralPath $tarExe)) {
-                $candidate = Get-Command -Name 'tar.exe' -CommandType Application -ErrorAction SilentlyContinue
-                if ($null -eq $candidate) {
-                    Stop-Install 'tar.exe not found (ships with Windows 10 1803+). Update Windows, or extract skills.tar.gz manually and run "pcbpilot update --skill-only --create-missing".'
-                }
-                $tarExe = (@($candidate)[0]).Source
-            }
-            [void](New-Item -ItemType Directory -Path $SkillRoot -Force)
-            $extract = Invoke-Native -FilePath $tarExe -Arguments @('-xzf', $archive, '-C', $SkillRoot)
-            if ($extract.ExitCode -ne 0) { Stop-Install 'Invalid Skill archive; nothing installed' }
-            $manifestPath = Join-Path $SkillRoot 'public-skills.json'
-            if (Test-Path -LiteralPath $manifestPath) {
+            $entries = @(Read-SkillArchive -Path $archive)
+            $manifestEntry = @($entries | Where-Object { $_.Name -ceq "$SkillName/.public-skills.json" })
+            if ($manifestEntry.Count -gt 0) {
+                if ($manifestEntry[0].Kind -ne 'file') { Stop-Install 'Skill archive manifest is not a file; nothing installed' }
                 try {
-                    $manifest = [IO.File]::ReadAllText($manifestPath) | ConvertFrom-Json
+                    $manifest = [Text.Encoding]::UTF8.GetString($manifestEntry[0].Data) | ConvertFrom-Json
                 } catch {
-                    Stop-Install 'Skill archive has an unreadable public-skills.json; nothing installed'
+                    Stop-Install 'Skill archive has a malformed public-skills.json; nothing installed'
                 }
                 $fields = @($manifest.PSObject.Properties | ForEach-Object { $_.Name })
-                if (($fields -notcontains 'schemaVersion') -or $manifest.schemaVersion -ne 1 -or
-                    ($fields -notcontains 'router') -or $manifest.router -ne $SkillName -or ($fields -notcontains 'skills')) {
+                $extra = @($fields | Where-Object { @('schemaVersion', 'router', 'skills', 'retired') -cnotcontains $_ })
+                if ($extra.Count -gt 0 -or ($fields -cnotcontains 'schemaVersion') -or -not ($manifest.schemaVersion -is [int] -or $manifest.schemaVersion -is [long]) -or
+                    $manifest.schemaVersion -ne 1 -or ($fields -cnotcontains 'router') -or $manifest.router -cne $SkillName -or
+                    ($fields -cnotcontains 'skills') -or -not ($manifest.skills -is [array])) {
                     Stop-Install 'Skill archive public-skills.json is not schemaVersion 1 with router pcbpilot; nothing installed'
                 }
                 $Skills = @($manifest.skills)
-                if ($fields -contains 'retired') { $Retired = @($manifest.retired) }
+                if ($fields -ccontains 'retired') {
+                    if (-not ($manifest.retired -is [array])) { Stop-Install 'Skill archive public-skills.json retired is not a list; nothing installed' }
+                    $Retired = @($manifest.retired)
+                }
+                foreach ($top in @($entries | ForEach-Object { $_.Top } | Select-Object -Unique)) {
+                    if ($Skills -cnotcontains $top) { Stop-Install "Unsafe or invalid Skill archive (entry outside the listed Skills: $top); nothing installed" }
+                }
             } else {
-                $Skills = @($SkillName)
+                $Skills = @($SkillName)  # release before v0.11: the router only
+                $entries = @($entries | Where-Object { $_.Top -ceq $SkillName })
             }
-            # Every name becomes a directory under each client's skills\ and only
-            # router-prefixed names may ever be removed.
-            foreach ($name in @($Skills + $Retired)) {
-                if (-not ($name -is [string]) -or $name -cnotmatch '^pcbpilot(-[a-z0-9]+)*$' -or $name -clike 'pcbpilot-repo-*') {
-                    Stop-Install "Skill archive lists an invalid Skill name: $name; nothing installed"
+            $allNames = @($Skills + $Retired)
+            foreach ($name in $allNames) {
+                if (-not (Test-SkillName $name)) { Stop-Install "Skill archive lists an invalid Skill name: $name; nothing installed" }
+            }
+            if (@($allNames | Select-Object -Unique).Count -ne $allNames.Count) { Stop-Install 'Skill archive lists a Skill name twice; nothing installed' }
+            if ($Skills -cnotcontains $SkillName) { Stop-Install "Skill archive does not list $SkillName; nothing installed" }
+            # Write the validated entries; every path stays under $SkillRoot.
+            [void](New-Item -ItemType Directory -Path $SkillRoot -Force)
+            $rootFull = [IO.Path]::GetFullPath($SkillRoot).TrimEnd('\') + '\'
+            foreach ($entry in $entries) {
+                $full = [IO.Path]::GetFullPath((Join-Path $SkillRoot ($entry.Name -replace '/', '\')))
+                if (-not $full.StartsWith($rootFull, [StringComparison]::OrdinalIgnoreCase)) {
+                    Stop-Install "Unsafe or invalid Skill archive (path escapes: $($entry.Name)); nothing installed"
+                }
+                if ($entry.Kind -eq 'dir') {
+                    [void](New-Item -ItemType Directory -Path $full -Force)
+                } else {
+                    [void](New-Item -ItemType Directory -Path (Split-Path -Parent $full) -Force)
+                    [IO.File]::WriteAllBytes($full, [byte[]]$entry.Data)
                 }
             }
-            if ($Skills -cnotcontains $SkillName) { Stop-Install "Skill archive does not list $SkillName; nothing installed" }
             foreach ($name in $Skills) {
-                if ($Retired -ccontains $name) { Stop-Install "Skill archive lists $name as both shipped and retired; nothing installed" }
                 $skillMd = Join-Path (Join-Path $SkillRoot $name) 'SKILL.md'
                 if (-not (Test-Path -LiteralPath $skillMd) -or (Get-Item -LiteralPath $skillMd).Length -eq 0) {
                     Stop-Install "Skill archive has no $name/SKILL.md; nothing installed"
@@ -520,6 +631,75 @@ try {
                 }
             }
             Write-Ok "skill archive metadata.version = $BareVersion ($($Skills -join ', '))"
+
+            # Stage every client x Skill completely before the CLI or any Skill
+            # changes; the switches happen together after the CLI is installed.
+            $SkillAdopt = (Get-EnvValue 'PCBPILOT_SKILL_ADOPT') -eq '1'
+            foreach ($client in $Targets) {
+                $base = Get-ClientBaseDir $client
+                foreach ($skill in $Skills) {
+                    $dest = Join-Path $base $skill
+                    $skillBase = $base
+                    if (Test-Path -LiteralPath $dest) {
+                        $existing = Get-Item -LiteralPath $dest -Force
+                        if ($existing.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                            $linkTarget = ''
+                            try {
+                                $value = $existing.Target
+                                if ($value) { $linkTarget = [string](@($value)[0]) }
+                            } catch {
+                                $linkTarget = ''
+                            }
+                            if (-not $linkTarget -or -not (Test-AbsolutePath $linkTarget)) {
+                                Stop-Install "$dest is a symlink/junction whose target cannot be resolved; remove it or set a different client config dir"
+                            }
+                            $dest = $linkTarget.TrimEnd('\', '/')
+                            $skillBase = Split-Path -Parent $dest
+                        } elseif ($skill -cne $SkillName -and -not (Test-Path -LiteralPath (Join-Path $dest '.version') -PathType Leaf) -and -not $SkillAdopt) {
+                            Write-Warn "$client Skill $skill not installed: $dest exists but pcbpilot did not install it (no .version marker); move it away or set PCBPILOT_SKILL_ADOPT=1"
+                            continue
+                        }
+                    }
+                    if (-not (Test-Path -LiteralPath $skillBase)) { [void](New-Item -ItemType Directory -Path $skillBase -Force) }
+                    $stage = Join-Path $skillBase ('.easyeda-stage.' + [IO.Path]::GetRandomFileName())
+                    [void]$SkillPlan.Add([pscustomobject]@{ Dest = $dest; Stage = $stage; Backup = ''; Done = $false
+                            Note = "$client Skill $skill installed -> $dest"; Warn = $false })
+                    [void](New-Item -ItemType Directory -Path $stage -Force)
+                    try {
+                        Copy-Item -Path (Join-Path (Join-Path $SkillRoot $skill) '*') -Destination $stage -Recurse -Force
+                        if ($SkillPreserve -and (Test-Path -LiteralPath $dest)) {
+                            Copy-Item -Path (Join-Path $dest '*') -Destination $stage -Recurse -Force
+                            $SkillPlan[$SkillPlan.Count - 1].Note = "$client Skill $skill preserved (mixed local/release content; previous version marker kept) -> $dest"
+                            $SkillPlan[$SkillPlan.Count - 1].Warn = $true
+                        } else {
+                            # LF-terminated, byte-identical to what install.sh and `pcbpilot update` write.
+                            [IO.File]::WriteAllText((Join-Path $stage '.version'), "$BareVersion`n")
+                        }
+                    } catch {
+                        Stop-Install "Could not stage $client Skill $skill; nothing installed"
+                    }
+                }
+                # A retired Skill is removed only where pcbpilot installed it: a real
+                # directory holding a .version marker. Links and user directories that
+                # merely share the name stay; preserve mode keeps everything.
+                foreach ($name in $Retired) {
+                    $dir = Join-Path $base $name
+                    if (-not (Test-Path -LiteralPath $dir)) { continue }
+                    $item = Get-Item -LiteralPath $dir -Force
+                    $marker = Join-Path $dir '.version'
+                    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                        Write-Warn "$client retired Skill $name is a link; left in place -> $dir"
+                    } elseif (-not $item.PSIsContainer -or -not (Test-Path -LiteralPath $marker -PathType Leaf) -or
+                        ((Get-Item -LiteralPath $marker -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                        Write-Warn "$client retired Skill $name has no .version marker (not installed by pcbpilot); left in place -> $dir"
+                    } elseif ($SkillPreserve) {
+                        Write-Warn "$client retired Skill $name kept (PCBPILOT_SKILL_PRESERVE=1) -> $dir"
+                    } else {
+                        [void]$SkillPlan.Add([pscustomobject]@{ Dest = $dir; Stage = ''; Backup = ''; Done = $false
+                                Note = "$client retired Skill $name removed"; Warn = $false })
+                    }
+                }
+            }
         }
 
         # -- install the CLI (handle a running/locked pcbpilot.exe) -------------
@@ -624,119 +804,56 @@ try {
             Where-Object { $_.FullName -ne $orphan } |
             ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
 
-        # -- install the Skill (stage -> swap, restore the backup on failure) ---
-        function Install-SkillTo {
-            param([string]$Client, [string]$Skill, [string]$Source)
-            $base = Get-ClientBaseDir $Client
-            if (-not $base) { Stop-Install "Unknown skill target: $Client" }
-            if (-not (Test-Path -LiteralPath $base)) { [void](New-Item -ItemType Directory -Path $base -Force) }
-            $dest = Join-Path $base $Skill
-            if (Test-Path -LiteralPath $dest) {
-                $existing = Get-Item -LiteralPath $dest -Force
-                if ($existing.Attributes -band [IO.FileAttributes]::ReparsePoint) {
-                    $linkTarget = ''
-                    try {
-                        $value = $existing.Target
-                        if ($value) { $linkTarget = [string](@($value)[0]) }
-                    } catch {
-                        $linkTarget = ''
-                    }
-                    if (-not $linkTarget -or -not (Test-AbsolutePath $linkTarget)) {
-                        Stop-Install "$dest is a symlink/junction whose target cannot be resolved; remove it or set a different client config dir"
-                    }
-                    $dest = $linkTarget.TrimEnd('\', '/')
-                    $base = Split-Path -Parent $dest
-                }
-            }
-            $stage = Join-Path $base ('.easyeda-stage.' + [IO.Path]::GetRandomFileName())
-            $backup = "$stage.previous"
-            [void](New-Item -ItemType Directory -Path $stage -Force)
-            try {
-                Copy-Item -Path (Join-Path $Source '*') -Destination $stage -Recurse -Force
-            } catch {
-                Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
-                Stop-Install "Could not stage $Client Skill $Skill; existing files kept"
-            }
-            $preserved = $false
-            if ($SkillPreserve -and (Test-Path -LiteralPath $dest)) {
+        # -- switch every staged Skill in; one failure restores all of them ------
+        # _PCBPILOT_TEST_FAIL_SWAP=N (test only) makes the Nth switch fail.
+        $failAt = 0
+        [void][int]::TryParse((Get-EnvValue '_PCBPILOT_TEST_FAIL_SWAP'), [ref]$failAt)
+        $swaps = 0
+        function Undo-SkillSwitches {
+            $ok = $true
+            for ($i = $SkillPlan.Count - 1; $i -ge 0; $i--) {
+                $step = $SkillPlan[$i]
+                if (-not $step.Done) { continue }
                 try {
-                    Copy-Item -Path (Join-Path $dest '*') -Destination $stage -Recurse -Force
+                    if ($step.Stage -and (Test-Path -LiteralPath $step.Dest)) { Move-Item -LiteralPath $step.Dest -Destination $step.Stage -Force }
+                    if ($step.Backup) { Move-Item -LiteralPath $step.Backup -Destination $step.Dest -Force; $step.Backup = '' }
+                    $step.Done = $false
                 } catch {
-                    Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
-                    Stop-Install "Could not preserve $Client Skill $Skill; existing files kept"
-                }
-                $preserved = $true
-            } else {
-                # LF-terminated, byte-identical to what install.sh and `pcbpilot update` write.
-                [IO.File]::WriteAllText((Join-Path $stage '.version'), "$BareVersion`n")
-            }
-            if (Test-Path -LiteralPath $dest) {
-                try {
-                    Move-Item -LiteralPath $dest -Destination $backup -Force
-                } catch {
-                    Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
-                    Stop-Install "Could not back up $Client Skill $Skill; existing files kept"
+                    Write-Warn "Could not restore $($step.Dest) (previous files kept at $($step.Backup))"
+                    $ok = $false
                 }
             }
+            return $ok
+        }
+        foreach ($step in $SkillPlan) {
+            $failed = $false
             try {
-                Move-Item -LiteralPath $stage -Destination $dest -Force
-            } catch {
-                if (Test-Path -LiteralPath $backup) {
-                    try { Move-Item -LiteralPath $backup -Destination $dest -Force } catch { Stop-Install "Restore $backup to $dest" }
+                if (Test-Path -LiteralPath $step.Dest) {
+                    $swaps++
+                    if ($swaps -eq $failAt) { throw 'injected failure' }
+                    $backup = Join-Path (Split-Path -Parent $step.Dest) ('.easyeda-backup.' + [IO.Path]::GetRandomFileName())
+                    Move-Item -LiteralPath $step.Dest -Destination $backup -Force
+                    $step.Backup = $backup
                 }
-                Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
-                Stop-Install "Could not install $Client Skill $Skill"
+                $step.Done = $true
+                if ($step.Stage) {
+                    $swaps++
+                    if ($swaps -eq $failAt) { throw 'injected failure' }
+                    Move-Item -LiteralPath $step.Stage -Destination $step.Dest -Force
+                }
+            } catch {
+                $failed = $true
             }
-            if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction SilentlyContinue }
-            if ($preserved) {
-                Write-Warn "$Client Skill $Skill preserved (mixed local/release content; previous version marker kept) -> $dest"
-            } else {
-                Write-Ok "$Client Skill $Skill installed -> $dest"
+            if ($failed) {
+                if (-not (Undo-SkillSwitches)) {
+                    Stop-Install "Could not switch $($step.Dest) and could not restore every earlier Skill; see the warnings above"
+                }
+                Stop-Install "Could not switch $($step.Dest); every Skill was restored"
             }
         }
-
-        # A retired Skill is removed only where pcbpilot installed it: a real
-        # directory holding a .version marker. Links and user directories that
-        # merely share the name stay; preserve mode keeps everything.
-        function Remove-RetiredSkill {
-            param([string]$Client, [string]$Name)
-            $base = Get-ClientBaseDir $Client
-            if (-not $base) { return }
-            $dir = Join-Path $base $Name
-            if (-not (Test-Path -LiteralPath $dir)) { return }
-            $item = Get-Item -LiteralPath $dir -Force
-            if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
-                Write-Warn "$Client retired Skill $Name is a link; left in place -> $dir"
-                return
-            }
-            $marker = Join-Path $dir '.version'
-            if (-not $item.PSIsContainer -or -not (Test-Path -LiteralPath $marker -PathType Leaf) -or
-                ((Get-Item -LiteralPath $marker -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-                Write-Warn "$Client retired Skill $Name has no .version marker (not installed by pcbpilot); left in place -> $dir"
-                return
-            }
-            if ($SkillPreserve) {
-                Write-Warn "$Client retired Skill $Name kept (PCBPILOT_SKILL_PRESERVE=1) -> $dir"
-                return
-            }
-            $trash = Join-Path $base ('.easyeda-retired.' + [IO.Path]::GetRandomFileName())
-            try {
-                Move-Item -LiteralPath $dir -Destination $trash -Force
-            } catch {
-                Write-Warn "Could not remove retired $Client Skill $Name -> $dir"
-                return
-            }
-            Remove-Item -LiteralPath $trash -Recurse -Force -ErrorAction SilentlyContinue
-            Write-Ok "$Client retired Skill $Name removed"
-        }
-
-        foreach ($client in $Targets) {
-            foreach ($skill in $Skills) {
-                Install-SkillTo -Client $client -Skill $skill -Source (Join-Path $SkillRoot $skill)
-            }
-            foreach ($name in $Retired) {
-                Remove-RetiredSkill -Client $client -Name $name
-            }
+        foreach ($step in $SkillPlan) {
+            if ($step.Backup) { Remove-Item -LiteralPath $step.Backup -Recurse -Force -ErrorAction SilentlyContinue }
+            if ($step.Warn) { Write-Warn $step.Note } else { Write-Ok $step.Note }
         }
 
         # -- PATH --------------------------------------------------------------
@@ -826,6 +943,11 @@ try {
         Write-Host ''
         Write-Host "Full docs: https://github.com/$Repo"
     } finally {
+        foreach ($step in $SkillPlan) {
+            if ($step.Stage -and (Test-Path -LiteralPath $step.Stage)) {
+                Remove-Item -LiteralPath $step.Stage -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
         if (Test-Path -LiteralPath $TempRoot) {
             Remove-Item -LiteralPath $TempRoot -Recurse -Force -ErrorAction SilentlyContinue
         }

@@ -3,8 +3,11 @@
 `.agents/skills/public-skills.json` names every Skill that ships in
 skills.tar.gz (`skills`), the router among them (`router`, always `pcbpilot`),
 and Skills an earlier release shipped that installers and the self-updater
-remove again (`retired`). The archive carries a canonical copy at its root;
-an archive without one is a pre-0.11 single-Skill package (`LEGACY`).
+remove again (`retired`). The archive carries a canonical copy inside the
+router as `pcbpilot/.public-skills.json` (ARCHIVE_ENTRY): every installed router
+then records its release's Skill set, and v0.10.x readers, which accept only
+`pcbpilot/` entries, still read the archive. An archive without it is a
+pre-0.11 single-Skill package (`LEGACY`).
 
 The canonical serialization (sorted keys, two-space indent, one list item per
 line) is a contract: install.sh parses it with awk, without a JSON parser.
@@ -18,6 +21,8 @@ import re
 MANIFEST_NAME = "public-skills.json"
 SKILLS_ROOT = PurePosixPath(".agents/skills")
 ROUTER = "pcbpilot"
+INSTALLED_NAME = ".public-skills.json"
+ARCHIVE_ENTRY = f"{ROUTER}/{INSTALLED_NAME}"
 NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 
 
@@ -78,9 +83,9 @@ def load(repo: Path) -> Manifest:
 def from_archive(archive) -> Manifest:
     """The manifest of an opened skills.tar.gz; LEGACY when the archive predates it."""
     try:
-        member = archive.getmember(MANIFEST_NAME)
+        member = archive.getmember(ARCHIVE_ENTRY)
     except KeyError:
         return LEGACY
     if not member.isfile():
-        raise ValueError(f"skills.tar.gz: {MANIFEST_NAME} is not a regular file")
+        raise ValueError(f"skills.tar.gz: {ARCHIVE_ENTRY} is not a regular file")
     return loads(archive.extractfile(member).read())

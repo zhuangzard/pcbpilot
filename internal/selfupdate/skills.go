@@ -21,8 +21,17 @@ import (
 	"strings"
 )
 
-// SkillManifestName is the manifest file at the root of skills.tar.gz.
+// SkillManifestName is the source manifest, .agents/skills/public-skills.json.
 const SkillManifestName = "public-skills.json"
+
+// installedManifestName is the copy the router carries: pack-skill writes it
+// into the archive as SkillManifestEntry, so every installed router records
+// the Skill set it was released with. Keeping it inside pcbpilot/ also means
+// v0.10.x readers, which accept only pcbpilot/ entries, still read the archive.
+const installedManifestName = ".public-skills.json"
+
+// SkillManifestEntry is the manifest's path inside skills.tar.gz.
+const SkillManifestEntry = SkillName + "/" + installedManifestName
 
 // SkillManifest lists the public Skills of one release.
 type SkillManifest struct {
@@ -153,6 +162,80 @@ func skillsBase(client string) string {
 	return filepath.Join(base, "skills")
 }
 
+// installedRouterManifest reads the manifest a copied (non-linked) router of
+// client was installed with.
+func installedRouterManifest(client string) (SkillManifest, bool) {
+	dir := skillDir(client)
+	if dir == "" || SkillLinkTarget(dir) != "" {
+		return SkillManifest{}, false
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, installedManifestName))
+	if err != nil {
+		return SkillManifest{}, false
+	}
+	m, err := parseSkillManifest(raw)
+	return m, err == nil
+}
+
+// knownSkills is this CLI's list plus every Skill (and retired name) named by
+// the manifests the given clients' routers were installed with.
+func knownSkills(clients []string) SkillManifest {
+	known := PublicSkills()
+	for _, c := range clients {
+		m, ok := installedRouterManifest(c)
+		if !ok {
+			continue
+		}
+		for _, name := range m.Skills {
+			if !slices.Contains(known.Skills, name) {
+				known.Skills = append(known.Skills, name)
+			}
+		}
+		for _, name := range m.Retired {
+			if !slices.Contains(known.Retired, name) && !slices.Contains(known.Skills, name) {
+				known.Retired = append(known.Retired, name)
+			}
+		}
+	}
+	return known
+}
+
+// ExpectedSkills is the Skill set a client with the router should have: the
+// manifest the router was installed with, else this CLI's own list.
+func ExpectedSkills(client string) []string {
+	if m, ok := installedRouterManifest(client); ok {
+		return m.Skills
+	}
+	return PublicSkills().Skills
+}
+
+// VerifyInstalledSkills lists every way the installed Skills differ from
+// version: for each client whose copied router is installed, every expected
+// Skill must exist with that marker. Checkout links are skipped, and so is a
+// same-named directory pcbpilot never installed (a reported conflict).
+func VerifyInstalledSkills(version string) []string {
+	var problems []string
+	for _, c := range clientOrder {
+		router := skillDir(c)
+		if router == "" || !isDir(router) || SkillLinkTarget(router) != "" {
+			continue
+		}
+		for _, skill := range ExpectedSkills(c) {
+			dir := SkillDirFor(c, skill)
+			label := SkillLabel(c, skill)
+			switch {
+			case SkillLinkTarget(dir) != "":
+			case !isDir(dir):
+				problems = append(problems, fmt.Sprintf("skill %s is missing", label))
+			case skill != SkillName && !ownedSkillDir(dir):
+			case readMarker(dir) != version:
+				problems = append(problems, fmt.Sprintf("skill %s is %q", label, readMarker(dir)))
+			}
+		}
+	}
+	return problems
+}
+
 // SkillDirFor returns the directory of one public Skill for a client, or "".
 func SkillDirFor(client, skill string) string {
 	base := skillsBase(client)
@@ -183,6 +266,9 @@ func ownedSkillDir(dir string) bool {
 	marker, err := os.Lstat(filepath.Join(dir, versionMarker))
 	return err == nil && marker.Mode().IsRegular()
 }
+
+// OwnedSkillDir reports whether dir is a Skill directory pcbpilot installed.
+func OwnedSkillDir(dir string) bool { return ownedSkillDir(dir) }
 
 // removeOwnedSkill moves an owned Skill directory aside and deletes it. A
 // directory without the marker, or a link, is refused and left untouched.

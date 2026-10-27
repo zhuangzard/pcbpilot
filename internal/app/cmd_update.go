@@ -98,6 +98,7 @@ func newUpdateCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 		skillOnly     bool
 		clients       []string
 		preserve      bool
+		adopt         bool
 		force         bool
 		createMissing bool
 		jsonOut       bool
@@ -170,7 +171,7 @@ refused. The daemon never pulls a checkout unless ` + "`--auto source`" + `.`,
 				localBinary = ""
 			}
 			if localDir != "" && (localBinary != "" || checkOnly) {
-				for _, flag := range []string{"version", "cli-only", "skill-only", "client", "preserve", "force", "create-missing"} {
+				for _, flag := range []string{"version", "cli-only", "skill-only", "client", "preserve", "force", "create-missing", "adopt"} {
 					if cmd.Flags().Changed(flag) {
 						return fmt.Errorf("--local-dir cannot be combined with --%s", flag)
 					}
@@ -276,7 +277,7 @@ refused. The daemon never pulls a checkout unless ` + "`--auto source`" + `.`,
 			}
 			plan := updatePlan{
 				src: src, target: rep.Target, components: comps, clients: clients,
-				force: force, preserve: preserve, createMissing: createMissing,
+				force: force, preserve: preserve, adopt: adopt, createMissing: createMissing,
 				openFolder: openFolder, noRollback: noRollback,
 			}
 			if waitConnector {
@@ -321,6 +322,7 @@ refused. The daemon never pulls a checkout unless ` + "`--auto source`" + `.`,
 	f.StringSliceVar(&skip, "skip", nil, "components to leave alone: cli,skill,mcp,tools,daemon,connector")
 	f.StringSliceVar(&clients, "client", nil, "limit skill sync to clients: claude,codex,agents,zcode (default: all present)")
 	f.BoolVar(&preserve, "preserve", false, "skill sync: keep local edits (never overwrite existing files)")
+	f.BoolVar(&adopt, "adopt", false, "skill sync: let a focused Skill replace a same-named dir pcbpilot did not install")
 	f.BoolVar(&force, "force", false, "overwrite a dev build / re-install even when already at the target")
 	f.BoolVar(&createMissing, "create-missing", false, "install the skill into a client dir that doesn't exist yet")
 	f.BoolVar(&jsonOut, "json", false, "emit JSON")
@@ -565,6 +567,8 @@ func checkSkills(target string, clients []string) []updateSkillRow {
 			row.Status = "behind"
 		case !t.Present:
 			row.Status = "not-installed"
+		case t.Linked == "" && t.Skill != selfupdate.SkillName && !selfupdate.OwnedSkillDir(t.Dir):
+			row.Status, row.Err = "conflict", "a same-named directory pcbpilot did not install; move it away or `pcbpilot update --adopt`"
 		case t.Linked != "":
 			row.Status = "linked"
 		case selfupdate.SemverCore(t.Installed) == "":
@@ -675,7 +679,7 @@ func countBehind(rep updateReport) int {
 		}
 	}
 	for _, s := range rep.Skills {
-		if s.Status == "behind" || s.Status == "error" || (s.Status == "preserved" && s.Installed != rep.Target) {
+		if s.Status == "behind" || s.Status == "error" || s.Status == "conflict" || (s.Status == "preserved" && s.Installed != rep.Target) {
 			n++
 		}
 	}
@@ -764,6 +768,9 @@ func updateNotes(rep updateReport) []string {
 			notes = append(notes, fmt.Sprintf("skill %s skipped (%s) — `pcbpilot update --create-missing` to install it", label, s.Err))
 		} else if s.Status == "skipped" && s.Err != "" && s.Err != "not installed" {
 			notes = append(notes, fmt.Sprintf("skill %s skipped: %s", label, s.Err))
+		}
+		if s.Status == "conflict" {
+			notes = append(notes, fmt.Sprintf("skill %s not installed: %s", label, s.Err))
 		}
 		if s.Status == "kept" {
 			notes = append(notes, fmt.Sprintf("retired skill %s left in place: %s", label, s.Err))
