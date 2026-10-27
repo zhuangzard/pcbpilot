@@ -73,13 +73,16 @@ KiCad 板级工作（`.kicad_pcb`）：从已同步的板子到布好、过门�
    顺序和每个门禁的判据见 [kicad.md 布线一节](../pcbpilot/references/kicad.md#布线kicad-route与-pcb-auto-route--pcb-gate-同序同算)。
 5. **签核**：`pcbpilot signoff --run-dir work/route --intent work/intent.json --sim work/sim.json --connectivity work/conn.json`
    （`kicad route` 最后也会自动跑一次）。
-6. **交付**：签核用的是 `routed.kicad_pcb` **加上同目录的** `routed.kicad_pro` / `routed.kicad_dru`（意图网络类、绝缘域规则都在
-   里面）；只拷板子回去，目标工程会用旧的网络类与规则，签核结论就不成立。所以三件一起交付，并列出依赖的工程库
-   （`fp-lib-table` / `sym-lib-table` 里 `${KIPRJMOD}` 下的库，3D 模型路径）。合并由用户做：先备份或 git commit 原工程；
-   板子改名为工程的 `<board>.kicad_pcb`；规则用 PCB 编辑器 Board Setup → Import Settings 从 `routed.kicad_pcb` 导入网络类、
-   约束与自定义规则（不整份覆盖 `.kicad_pro`，以免丢原理图/工程设置），或在原工程尚无规则时连 `.kicad_pro` / `.kicad_dru`
-   一起改名替换。合并后关闭 KiCad，在**目标工程**重跑 `kicad-cli pcb drc --format json --severity-all --schematic-parity`，
-   结果与 `summary.drc` 一致（error 0）才算验收；不一致或没重跑 → `INCOMPLETE`。
+6. **交付与目标工程签核**：签核读的是 `routed.kicad_pcb` 和同目录的 `routed.kicad_pro` / `routed.kicad_dru`（意图网络类、
+   绝缘域规则在里面），三件连同依赖库清单（`${KIPRJMOD}` 下的库、3D 路径）一起交付。合并由用户做，先备份或 git commit：
+   `.kicad_pro` 的 `board.design_settings` 与 `net_settings` 两节、整份 `.kicad_dru` 都要并入，板子改名为工程的板文件名。
+   合并后关闭 KiCad，核对目标的有效规则与签核运行一致（不一致逐项给用户确认，否则停）：
+   ```bash
+   python -c "import json,sys;L=lambda p:(lambda d:(d['board']['design_settings'],d['net_settings']))(json.load(open(p,encoding='utf-8')));print('pro same:',L(sys.argv[1])==L(sys.argv[2]),'| dru same:',open(sys.argv[3],'rb').read()==open(sys.argv[4],'rb').read())" <目标>.kicad_pro work/route/routed.kicad_pro <目标>.kicad_dru work/route/routed.kicad_dru
+   ```
+   然后在**目标工程**重跑完整签核，不只 DRC：`kicad-cli pcb drc --format json --severity-all --schematic-parity`（含排除项与
+   `ignore` 规则检查，[§6.4](../pcbpilot/references/evidence-and-verdicts.md#64-drc-排除项与被关掉的规则)）→ `kicad snapshot <目标>.kicad_pcb` → `signoff --board … --intent …
+   --sim … --connectivity …`，按 [§6.5](../pcbpilot/references/evidence-and-verdicts.md#65-运行证据绑定到确切输入) 记哈希绑定。任一步没跑或不一致 → `INCOMPLETE`。
 
 ## 布局策略与有界布局循环
 
@@ -108,9 +111,8 @@ KiCad 板级工作（`.kicad_pcb`）：从已同步的板子到布好、过门�
 
 - **后端** `--router fastroute|tracemaker|both`：fastroute（默认，外部进程，需自行安装到 `~/.pcbpilot/fastroute/current`
   或 `$FASTROUTE_BIN`）；TraceMaker 需 `--tracemaker-bin` / `$TRACEMAKER_BIN`；`both` 并行取先过全部门禁者。两个都没有 →
-  布线步骤 `BLOCKED`，只交付布局。**先确认路径指向可执行文件本身**：`current` 若链接到解压目录（Windows 包里
-  可执行文件在 `fastroute-<版本>-windows-x64/fastroute.exe`），要显式 `--fastroute-bin <exe>`——否则要等输入板 DRC
-  （大板或负载高时可达数分钟）跑完才报 “executable file not found”。
+  布线步骤 `BLOCKED`，只交付布局。`current` 若链接到解压目录（Windows 包里是 `fastroute-<版本>-windows-x64/fastroute.exe`），
+  显式 `--fastroute-bin <exe>`，否则要等输入板 DRC 跑完（可达数分钟）才报 “executable file not found”。
 - **重布还是续布**：已有部分走线且要保留 → 不加 `--rip-up`；推倒重来 → `--rip-up`（锁定的走线保留）。
 - **网络类来源**（报告里要写清每个类从哪来）：用户在 `.kicad_pro` 定义的类（比意图更宽时保留，记在
   `netclasses.kept`）、意图生成的 `PP<n>_W<线宽>`、绝缘域 `PPD_<域>`（`.kicad_dru` 写 clearance + creepage）。快照的
@@ -123,6 +125,7 @@ KiCad 板级工作（`.kicad_pcb`）：从已同步的板子到布好、过门�
 
 - 每个门禁逐条报：`gate`、PASS/FAIL、`detail`、`info`；退出码非零 = 至少一个门禁失败。`kicad-drc` 只计 error 级，
   警告在 `summary.drc.warnings`，评审仍要列出；`info` 标出**输入板原本就有**的违规（布局/封装问题，不是布线造成的）。
+  它看不到 KiCad 的排除项和设成 `ignore` 的规则：按 [§6.4](../pcbpilot/references/evidence-and-verdicts.md#64-drc-排除项与被关掉的规则) 另查，触及短路/间距/未连接即 FAIL。
 - `kicad-drc` 的 detail 以 `cannot check:` 开头（kicad-cli 没写报告、报告截断或格式不对），或 `summary.inputDrc.error`
   非空 → `INCOMPLETE`，waiver 也不能放行；修好环境（KiCad 安装、库表、文件权限）后重跑。
 - 违规归属与修法按 [drc-triage.md](../pcbpilot/references/drc-triage.md) 分组：先上游（原理图/封装/布局）后下游；
@@ -144,5 +147,4 @@ KiCad 板级工作（`.kicad_pcb`）：从已同步的板子到布好、过门�
 | `lib_footprint_issues` | 当前配置找不到封装库（环境类） | 修库表后重跑；不算设计缺陷，也不算 PASS |
 | 写入失败或结果被覆盖 | 文件仍在 KiCad 中打开 | 请用户关闭后重跑；记 `BLOCKED` |
 | 布线后 `drill_out_of_range` / `via_diameter`（过孔小于 Board Setup 的最小孔/最小过孔） | 已有 `.kicad_pro` 时过孔尺寸没跟板约束对齐（KiCad 演示板实测） | 对照板约束与快照 `rules.viaDrillMil` / `viaDiameterMil`，显式给 `--via-dia-mil` / `--via-drill-mil` 重跑；不降低板约束 |
-| `fastroute round 0: exec: … executable file not found` | 路由器路径是目录或不存在 | `--fastroute-bin` 指向可执行文件后重跑 |
 | `netclasses.kept` 里很多 “width kept at …” | 用户类（含 Default）比意图更宽，保留用户值 | 预期；报告写明这些网的线宽来自用户类而非意图 |

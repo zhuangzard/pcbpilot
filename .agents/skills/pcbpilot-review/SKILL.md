@@ -64,6 +64,8 @@ metadata:
   KICAD_CONFIG_HOME=~/.pcbpilot/cache/kicad-config/v1 \
     kicad-cli pcb drc --format json --severity-all --schematic-parity -o out/drc.json <board>.kicad_pcb
   ```
+  `drc.json` 干净不够：带 `"excluded": true` 的条目与 `.kicad_pro` 里设成 `ignore` 的规则按
+  [§6.4](../pcbpilot/references/evidence-and-verdicts.md#64-drc-排除项与被关掉的规则) 列出，触及短路/间距/未连接即 FAIL。
 - EasyEDA（窗口在前台，串行）：`pcbpilot sch gate --only layout-lint,check,bridge-check --json`、`pcbpilot sch nets`、
   `pcbpilot sch connectivity --all-pages`（存 `conn.json`）、`pcbpilot pcb drc --json`、`pcbpilot pcb layout-lint --json`。
   `sch check --page <名>` 会切页再切回；`sch bridge-check` 没有 `--page`，只对当前页准确——非当前页只能记 `--all-pages`
@@ -88,9 +90,9 @@ python <pcbpilot Skill 根>/scripts/pad-net-diff.py --sch out/conn.json --pcb ou
 ### 4. pre-fab
 
 - 逐条走 [prefab-checklist.md](../pcbpilot/references/prefab-checklist.md)，第 0 节订单契约先于一切。
-- `pcbpilot signoff`：有 `kicad route` / `pcb gate` / `pcb auto route` 的 run 目录就 `--run-dir <run>`；没有时用显式输入
-  `--board out/board.json --intent out/intent.json --sim out/sim.json --connectivity out/conn.json --out-dir out/signoff`，
-  缺的项（review、manual、report）会如实 FAIL——报告里写成“缺输入”，不要说成设计缺陷。
+- `pcbpilot signoff`：有 `kicad route` / `pcb gate` / `pcb auto route` 的 run 目录就 `--run-dir <run>`，并先按
+  [§6.5](../pcbpilot/references/evidence-and-verdicts.md#65-运行证据绑定到确切输入) 核对它读的就是当前文件；没有时用显式输入
+  `--board out/board.json …`，新鲜度与“缺输入”的写法见 [review-workflow.md pre-fab](../pcbpilot/references/review-workflow.md#pre-fab能否投板)。
 - KiCad：`pcbpilot kicad lcsc --pcb <board> --sch <root> --check`；`pcbpilot kicad fab --pcb <board> --sch <root> --out <新目录>`
   （缺 C 号时什么都不写并非零退出）。EasyEDA 没有 pcbpilot 制造输出路径 → Gerber/CPL 记 UNSUPPORTED，只能 `bom export`。
 

@@ -52,7 +52,8 @@ pcbpilot kicad lcsc --pcb <board>.kicad_pcb --sch <root>.kicad_sch --check     #
 ```
 
 DRC 大板要几分钟，等它完成。DRC 有错误 → `FAIL`，交回 router 修板（归属与修法见
-[drc-triage.md](../pcbpilot/references/drc-triage.md)）。干净的 `drc.json` 只说明板子满足**它自己的**规则，不证明契约极限：
+[drc-triage.md](../pcbpilot/references/drc-triage.md)）；排除项（`"excluded": true`）与设成 `ignore` 的规则按
+[§6.4](../pcbpilot/references/evidence-and-verdicts.md#64-drc-排除项与被关掉的规则) 列出，触及短路/间距/未连接且无签名 waiver → `FAIL`。干净的 `drc.json` 只说明板子满足**它自己的**规则，不证明契约极限：
 另读有效规则集（Board Setup 约束、网络类、`.kicad_dru` 自定义规则与局部覆盖）逐项对照契约，松于契约 → `FAIL`，
 有一项读不全或无法对上 → `INCOMPLETE`（[§2.1](references/fab-acceptance.md#21-有效规则集-vs-契约)）。每项覆盖见 [§2](references/fab-acceptance.md#2-预检的范围)。
 
@@ -101,8 +102,9 @@ v0.10.2 起的行为（细节见 [kicad-file-safety.md §6](../pcbpilot/referenc
 | 同目录再出一版 | 可以复用清单管理的目录；目录里有不是 pcbpilot 写的同名文件 → 换新目录 |
 | 板上有盲埋孔、微孔、盘中孔、半孔 | 契约必须写明工艺；否则 `FAIL`，交回 router 或请用户选服务 |
 | 阻抗控制网 | 叠层取自契约的厂商叠层编号，线宽/间距核对属 router 的布线任务；未核对 → `INCOMPLETE` |
-| 底面贴片 | 契约写明双面；CPL `Layer` 列核对 `Bottom`；底面件方向在预览里逐个看 |
-| 有 `kicad route` 运行目录 | 加跑 `pcbpilot signoff --run-dir <dir> --intent … --sim … --connectivity …`；没有就把签核项记 `INCOMPLETE` |
+| 贴片面 | 契约 `assembly.sides` 只写 `top` / `bottom` / `both`；与 CPL `Layer` 列实际出现的面集合（`Top`、`Bottom`）比对，必须相等。只有两面都有贴装件时才写 `both`；不一致 → `FAIL`。底面件方向在预览里逐个看 |
+| 有 `kicad route` 运行目录 | 先按 [§6.5](../pcbpilot/references/evidence-and-verdicts.md#65-运行证据绑定到确切输入) 比对哈希：板、原理图、有效规则、intent、sim 与这次出图的输入一致，才 `signoff --run-dir <dir> …`；不一致的门禁作废重跑，绑定表写进验收记录 |
+| 没有运行目录（手工布线） | 显式输入签核：`kicad snapshot` 出图用的板 → `signoff --board … --intent … --sim … --connectivity …`，新鲜度与缺输入写法见 [review-workflow.md pre-fab](../pcbpilot/references/review-workflow.md#pre-fab能否投板)；不跑就是 `INCOMPLETE` |
 
 ## 报告
 

@@ -143,3 +143,33 @@
   关闭的文件（复制到工程外再跑）。
 - 结论必须基于已保存状态（`live-verified`、持久化、下单前的最终证据）时，停下交回 `pcbpilot` 路由：经用户明确授权后
   save → 有界 reload，再取新快照继续。
+
+### 6.4 DRC 排除项与被关掉的规则
+
+KiCad DRC“干净”不等于每条规则都查过：被**排除**（exclusion）的违例和被设成 `ignore` 的规则不算进错误数，短路、间距、
+未连接也可能这样消失。KiCad 板的 DRC 结论必须同时看三样（2026-10-26 在 KiCad 10.0.6 的 `cm5_minima` demo 副本上实测）：
+
+1. 用 `kicad-cli pcb drc --format json --severity-all [--schematic-parity]` 跑：`--severity-all` 会把被排除的违例也写出来，
+   条目带 `"excluded": true`（只给 `--severity-error` / `--severity-warning` 时它们不出现；`--severity-exclusions` 只出排除项）。
+   `kicad route` 的 `kicad-drc` 门禁只按 error 级跑，看不到排除项，所以这一步要单独跑。
+2. 列出工程里的排除项：`.kicad_pro` → `board.design_settings.drc_exclusions`（每条 `["<规则>|x|y|uuid|uuid", "注释"]`）。
+3. 列出被关掉的规则：`.kicad_pro` → `board.design_settings.rule_severities` 中值为 `ignore` 的键——这些规则根本不运行，
+   报告里不会有任何条目。
+
+```bash
+python -c "import json,sys;ds=json.load(open(sys.argv[1],encoding='utf-8'))['board']['design_settings'];print('exclusions:',ds.get('drc_exclusions',[]));print('ignored:',sorted(k for k,v in ds.get('rule_severities',{}).items() if v=='ignore'))" <board>.kicad_pro
+python -c "import json,sys;[print(v['type'],v['severity'],v['description']) for v in json.load(open(sys.argv[1],encoding='utf-8'))['violations'] if v.get('excluded')]" drc.json
+```
+
+判定：排除项或 `ignore` 规则落在短路/间距/未连接/一致性类（`shorting_items`、`tracks_crossing`、`clearance`、`hole_clearance`、
+`copper_edge_clearance`、`creepage`、`solder_mask_bridge`、`unconnected_items`、`net_conflict`、`missing_footprint`、
+`extra_footprint`、`duplicate_footprints`）→ `FAIL`，除非有用户签名的 waiver 逐条覆盖（KiCad 里的排除注释不是 waiver）。
+其他类的排除/忽略逐条列进报告并写理由；说不清理由的记 `INCOMPLETE`。
+
+### 6.5 运行证据绑定到确切输入
+
+一份运行目录（`kicad route` / `pcb gate` 的 `--out-dir`、`signoff --out-dir`、设计报告）只对它当时读的文件成立。拿它给
+别的文件下结论前，逐项比对 sha256：板文件、根原理图（及子图）、有效规则（`.kicad_pro` 的 `board.design_settings` 与
+`net_settings`、整份 `.kicad_dru`）、`intent.json`、`sim.json`、connectivity。任一不同，依赖它的门禁作废要重跑
+（板或规则变了 → DRC 与全部板级门禁；原理图变了 → 连通、trace、parts；intent/sim 变了 → copper、safety、ir）。
+运行目录本身不记录输入哈希，绑定表（文件、哈希、对应的运行与门禁）要写进验收或评审报告。

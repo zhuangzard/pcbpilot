@@ -25,6 +25,15 @@
    改网都由用户在 KiCad 原理图编辑器里做，Agent 给出逐项修改清单，能力记 `UNSUPPORTED`，改完重新 `kicad sch-read` 回读。
    这类工程上 pcbpilot 只做三种原地修改：`kicad sch-fit`、`kicad sch-check --fix-pwr-flag`、`kicad lcsc --set`（只写 LCSC 字段）；
    都无检查点，先 git commit 或整目录备份。
+   spec 只证明工程**出自** sch-build，不证明它**仍是** pcbpilot 最后写的样子。每次 `sch-edit` 或在同一目录重跑 `sch-build`
+   之前，把当前文件与最新检查点逐个比 sha256（检查点记录了它拥有的文件）：
+   ```bash
+   python -c "import json,sys,hashlib,os;d=sys.argv[1];c=os.path.join(d,'.pcbpilot','checkpoints');n=str(max(int(x) for x in os.listdir(c) if x.isdigit()));m=json.load(open(os.path.join(c,n,'checkpoint.json'),encoding='utf-8'));h=lambda p:hashlib.sha256(open(p,'rb').read()).hexdigest() if os.path.exists(p) else None;bad=[f for f in m['files'] if h(os.path.join(d,f))!=h(os.path.join(c,n,f))];print('checkpoint',n,'changed:',bad or 'none')" <工程目录>
+   ```
+   有任何文件不同（图纸、`.kicad_sym`、库表、`.kicad_pro`）→ 停止，记 `BLOCKED`：用户在 GUI 里的改动必须先并入新的基线
+   （`kicad sch-read` 读出现状，与 spec 对照，用户确认后把差异写进 spec 再 `sch-build` 出新工程），绝不在其上重新生成。
+   实测（v0.10.x，2026-10-26）：`sch-edit` 与 `sch-build` 都**不**检查这种漂移——外部改过的图纸会被静默覆盖，
+   它们只拒绝运行**期间**发生的并发修改（`CONCURRENT_CHANGE`）。
 
 ## 2. 命令写入表
 

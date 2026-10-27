@@ -35,6 +35,7 @@
 - 数值只来自用户、厂商当期页面或报价单；每条 `sources` 写 URL 和获取日期。没有日期的旧数字（包括 Skill 参考里的）
   只当线索，下单当天要重新取。
 - 用户没定的项（例如是否阻抗控制、贴片面）就问，不替用户选；缺项时契约相关的结论记 `INCOMPLETE`。
+- `assembly.sides` 只取 `top` / `bottom` / `both`，出图后与 CPL `Layer` 列的面集合比对（第 4 节）；`both` 只在两面都有贴装件时成立。
 - 盲埋孔、微孔、盘中孔、半孔、拼板：板上有就必须在契约里写明工艺，否则 `FAIL`（厂商默认服务通常不做）。
 
 ## 2. 预检的范围
@@ -47,7 +48,7 @@
 | DRC + 原理图一致性 | `kicad-cli pcb drc --format json --severity-all --schematic-parity -o drc.json <board>.kicad_pcb` | 板上规则（板子自带的 Board Setup 约束）、未连接、原理图↔板差异 | 契约极限——除非已把契约数值写进板规则 |
 | 规则 vs 契约 | 读有效规则集（[2.1](#21-有效规则集-vs-契约)）逐项对照第 1 节 `limits` | 板上允许的最小值是否不小于契约 | 板上实际几何（那是 DRC 按这些规则查的） |
 | 贴片件 C 号 | `pcbpilot kicad lcsc --pcb … --sch … --check` | 每个贴装件有合法 C 号 | 这个号是否就是对的料（MPN、封装、参数） |
-| 发布签核 | `pcbpilot signoff --run-dir <kicad route 输出目录> …` | 8 个 `signoff-*` 子门禁 | 没有 `kicad route` 运行目录时整项 `INCOMPLETE` |
+| 发布签核 | 有运行目录：`signoff --run-dir <dir> …`（先做输入哈希绑定）；手工布线：显式输入 `signoff --board … --intent … --sim … --connectivity …` | 8 个 `signoff-*` 子门禁 | 运行目录读的不是这次出图的文件（哈希不符）→ 受影响门禁作废重跑；两种都没跑 → `INCOMPLETE` |
 
 DRC 在大板上要几分钟（实测 8 层小板 6.5 min），让它跑完，不要中途杀掉再当“没错误”。DRC 违例归属与修法见
 [drc-triage.md](../../pcbpilot/references/drc-triage.md)。
@@ -104,7 +105,9 @@ python -c "import json,sys;d=json.load(open(sys.argv[1],encoding='utf-8'));print
   需求量 → 该行 `FAIL`（换料要用户确认）；没算损耗或拼板 → `INCOMPLETE`。
 - `fab` 输出的 `cpl: left out N part(s) not assembled (…)` 与 `fab-report.json` 的 `cplOmitted` 列出不贴的件；逐个确认
   它们本来就不该贴（DNP、安装孔、测试点、Logo），而不是漏了属性。
-- CPL 件数 = BOM 位号总数（工具已强制，位号不一致直接失败）；双面贴装时看 `Layer` 列确实有 `Bottom`，且契约写了双面。
+- CPL 件数 = BOM 位号总数（工具已强制，位号不一致直接失败）。CPL `Layer` 列出现的面集合（只有 `Top` → top；只有 `Bottom` →
+  bottom；两者都有 → both）必须等于契约 `assembly.sides`，否则 `FAIL`（改契约或改板，不改 CPL）：
+  `python -c "import csv,sys;print(sorted({r['Layer'] for r in csv.DictReader(open(sys.argv[1],encoding='utf-8-sig'))}))" <板>-cpl.csv`
 
 ## 5. 贴片方向修正与预览
 
@@ -132,6 +135,7 @@ kicad-cli pcb export svg --layers F.Fab,F.Courtyard,Edge.Cuts --mode-single --pa
 # 制造输出验收：<板名> rev<X>（<日期>）
 - 输入：<board>.kicad_pcb sha256=<…>，<root>.kicad_sch sha256=<…>；文件已在 KiCad 中关闭（无 .lck）
 - 订单契约：fab/order-contract.json（来源获取日期 <…>）
+- 证据绑定：板 / 原理图 / 有效规则 / intent / sim / connectivity 的 sha256，与签核运行（目录、时间）读到的一致：是 / 否（重跑了哪些门禁）
 - 命令：pcbpilot kicad fab --pcb … --sch … --out <目录> [--cpl-overrides …]；pcbpilot 版本 <…>，KiCad <…>
 | 项 | 结论 | 验证状态 | 证据 |
 | ERC (`kicad sch-check`) | PASS/WARN/FAIL | live-verified | 报告路径、条数 |

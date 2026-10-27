@@ -29,8 +29,9 @@ spec 字段、门禁细节与 delta 语法以 [kicad-sch-build.md](../pcbpilot/r
 3. **写前确认文件已在 KiCad 中关闭**（同目录无 `~*.lck`）；有锁 → `BLOCKED`，请用户关闭，不删锁文件。
 4. **不绕门禁**：不用 `--no-planner` 绕 `SHEET_NOT_LOADED`；`--no-review` 只能配用户签名的 waiver，Agent 不自写 waiver；
    门禁失败时 `--out` 不变，失败工程在 `<out>/.pcbpilot/sch-build/failed/` 供查看。
-5. **先认工程来源**：`sch-edit` 只用于 sch-build 生成的工程（有 `.pcbpilot/sch-build/spec.json`）；手画或导入的工程默认只读 +
-   `sch-check`，修改由用户在 KiCad GUI 里做。判据与仅有的原地修复见 [kicad-file-safety.md §1 第 4 条](../pcbpilot/references/kicad-file-safety.md#1-四条规则)。
+5. **先认工程来源和基线**：`sch-edit` 只用于 sch-build 生成的工程（有 `.pcbpilot/sch-build/spec.json`），且每次写前确认文件
+   与最新检查点一致；不一致（用户在 GUI 改过）→ 停，先并入新基线。手画或导入的工程默认只读 + `sch-check`，修改由用户在
+   KiCad GUI 里做。判据、哈希比对命令与仅有的原地修复见 [kicad-file-safety.md §1 第 4 条](../pcbpilot/references/kicad-file-safety.md#1-四条规则)。
 
 ## 工作流
 
@@ -120,7 +121,7 @@ pcbpilot kicad netlist --sch build/<name>.kicad_sch --out conn.json
 | ERC `pin_to_pin`（Unspecified 引脚） | EasyEDA 转来的符号引脚类型不可信 | 记 WARN 并列出；不为消警告改引脚类型 |
 | ERC `power_pin_not_driven`（非 sch-build 工程） | 电源来自连接器/被动脚器件 | 备份后 `kicad sch-check --sch … --fix-pwr-flag`；先确认确有电源来源 |
 | ERC `lib_symbol_issues` / `footprint_link_issues` 只指向 `Device`、`Resistor_SMD` 等自带库 | ERC 用隔离的空全局库表 | 环境类，WARN 并注明；`PCBPILOT_KICAD_ISOLATE=0` 可用用户配置复核 |
-| `sch-edit` 后 `fp-lib-table` 消失、`lcsc.pretty/` 为空，ERC 出现大量 `footprint_link_issues … 'lcsc'` | v0.10.1 缺陷：编辑时 LCSC 件的封装文件不再复制 | 判 FAIL；把修改并回原始 spec，`kicad sch-build --spec <原始+修改> --out <同一目录>` 重建（区位置复用），再查这两项 |
+| `sch-edit` 后 `fp-lib-table` 消失、`lcsc.pretty/` 为空，ERC 出现大量 `footprint_link_issues … 'lcsc'` | v0.10.1 缺陷：编辑时 LCSC 件的封装文件不再复制 | 判 FAIL；把修改并回原始 spec，先做第 5 条的基线比对，再 `kicad sch-build --spec <原始+修改> --out <同一目录>` 重建（区位置复用），再查这两项 |
 | `extends another symbol` | v0.10.1 不支持派生符号 | 父符号 / C 号 / `pins`；v0.10.2 起自动展平 |
 | `sch-fit` 报 “too big — split the sheet” | 单页放不下 A0 | 拆页；`sch-fit` 先 `--dry-run` |
 | kicad-cli 退出码 137 或长时间卡住 | KiCad 安装/升级中被杀；全局库表过大 | 等安装完；保持默认隔离配置 |

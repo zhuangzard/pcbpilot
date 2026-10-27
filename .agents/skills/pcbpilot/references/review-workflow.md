@@ -73,8 +73,18 @@ full 档全部 + 下列项，并逐条走 [prefab-checklist.md](prefab-checklist
 | 制造文件 | EasyEDA 没有 pcbpilot 制造输出路径：只有 `pcbpilot bom export --type csv`；Gerber/坐标由用户在 EasyEDA 里导出 → 记 `UNSUPPORTED`，人工核对 | `pcbpilot kicad fab --pcb <board>.kicad_pcb --sch <root>.kicad_sch --out <新目录>`；查看 `fab-report.json`，Gerber 查看器人工核对 |
 | LCSC | `signoff-parts` | `pcbpilot kicad lcsc --pcb … --sch … --check` |
 
-没有 `signoff` 所需的 run 目录（例如手工布线、从未跑过 `pcb gate`）时，`signoff` 记 `INCOMPLETE`，
-在报告里写“需要用户同意运行 `pcb gate`（会保存并重载板子）”。
+**没有 run 目录时（手工布线、从未跑过 `pcb gate` / `kicad route`）用显式输入签核**，它只写 `--out-dir`，评审里可以跑：
+
+```bash
+pcbpilot signoff --board board.json --intent intent.json --sim sim.json --connectivity conn.json     [--values values.json] [--review review.json] [--report report.json] [--manual manual.html] --out-dir out/signoff
+```
+
+- 新鲜度先于结论：`board.json` 取自当前板（KiCad `kicad snapshot` 已保存并关闭的 `.kicad_pcb`；EasyEDA `pcb dump --include-copper`
+  只读快照），`conn.json` / `sim.json` / `intent.json` 来自同一版原理图，且都晚于最后一次写入；逐个记 sha256，绑定规则见
+  [evidence-and-verdicts.md §6.5](evidence-and-verdicts.md#65-运行证据绑定到确切输入)。对不上 → 重新导出再跑。
+- 没给的 review / report / manual 会让 `signoff-review` / `signoff-artifacts` 如实失败：报告写“缺输入”，不说成设计缺陷，
+  该项记 `INCOMPLETE`。
+- 只有用户明确要求、同意保存并重载板子时才改跑 `pcb gate`；评审本身不跑它。
 
 ## 3. 层次与多页覆盖
 
