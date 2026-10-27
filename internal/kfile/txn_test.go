@@ -1383,3 +1383,102 @@ func TestReadOnlyBeforeInstall(t *testing.T) {
 	}
 	clean(t, dir)
 }
+
+// A staged file swapped for a link (even to identical bytes) or for another
+// file is refused before its chmod and before every rename attempt.
+func TestStagedLinkRefused(t *testing.T) {
+	asLink := func(target string) func() {
+		old := lstatFile
+		lstatFile = func(p string) (os.FileInfo, error) {
+			fi, err := old(p)
+			if err == nil && p == target {
+				return linkInfo{fi}, nil
+			}
+			return fi, err
+		}
+		return func() { lstatFile = old }
+	}
+	var chmods []string
+	oc := chmodHandle
+	chmodHandle = func(f *os.File, m os.FileMode) error { chmods = append(chmods, f.Name()); return oc(f, m) }
+	t.Cleanup(func() { chmodHandle = oc })
+
+	// Before Apply.
+	dir := project(t, map[string]string{"a.kicad_pcb": "A1", "a.kicad_pro": "P1"})
+	tx := stagedTxn(t, dir)
+	staged := tx.changes[filepath.Join(dir, "a.kicad_pcb")].staged
+	undo := asLink(staged)
+	_, err := tx.Apply("", Opts{Env: fakeEnv()})
+	undo()
+	if CodeOf(err) != CodeUnsupported || read(t, filepath.Join(dir, "a.kicad_pcb")) != "A1" {
+		t.Fatalf("linked staged file: %v", err)
+	}
+	for _, c := range chmods {
+		if c == staged {
+			t.Fatal("chmod went through a linked staged file")
+		}
+	}
+	tx.Abort()
+	clean(t, dir)
+
+	// Just before its install: the earlier file is rolled back.
+	tx = stagedTxn(t, dir)
+	pro := filepath.Join(dir, "a.kicad_pro")
+	stagedPro := tx.changes[pro].staged
+	beforeMutate = func(p string) {
+		if p == pro {
+			undo = asLink(stagedPro)
+		}
+	}
+	_, err = tx.Apply("", Opts{Env: fakeEnv()})
+	beforeMutate = nil
+	undo()
+	if CodeOf(err) != CodeUnsupported || read(t, filepath.Join(dir, "a.kicad_pcb")) != "A1" || read(t, pro) != "P1" {
+		t.Fatalf("mid-apply: %v", err)
+	}
+	clean(t, dir)
+
+	// Replaced by another regular file with identical bytes.
+	tx = stagedTxn(t, dir)
+	stagedPro = tx.changes[pro].staged
+	os.Remove(stagedPro)
+	os.WriteFile(stagedPro, []byte("P2"), 0o600)
+	if _, err := tx.Apply("", Opts{Env: fakeEnv()}); CodeOf(err) != CodeChanged || read(t, pro) != "P1" {
+		t.Fatalf("swapped staged file: %v", err)
+	}
+	tx.Abort()
+	clean(t, dir)
+
+	// A real symlink to identical bytes, where possible.
+	tx = stagedTxn(t, dir)
+	stagedPro = tx.changes[pro].staged
+	twin := filepath.Join(dir, "twin")
+	os.WriteFile(twin, []byte("P2"), 0o644)
+	os.Remove(stagedPro)
+	if os.Symlink(twin, stagedPro) != nil {
+		tx.Abort()
+		return
+	}
+	if _, err := tx.Apply("", Opts{Env: fakeEnv()}); CodeOf(err) != CodeUnsupported || read(t, pro) != "P1" {
+		t.Fatalf("real link: %v", err)
+	}
+	if st, _ := os.Stat(twin); st.Mode().Perm() != 0o644 {
+		t.Fatalf("referent mode changed to %v", st.Mode().Perm())
+	}
+	tx.Abort()
+}
+
+// AcquireWriter does not follow a linked writer.lock or truncate its target.
+func TestWriterLockLinkRefused(t *testing.T) {
+	dir := t.TempDir()
+	referent := filepath.Join(dir, "precious.kicad_pcb")
+	os.WriteFile(referent, []byte("keep me"), 0o644)
+	os.MkdirAll(filepath.Dir(WriterLockPath(dir)), 0o755)
+	symlinkOrSkip(t, referent, WriterLockPath(dir))
+	if _, err := AcquireWriter(dir, fakeEnv()); CodeOf(err) != CodeUnsupported {
+		t.Fatalf("linked lock: %v", err)
+	}
+	if read(t, referent) != "keep me" {
+		t.Fatalf("referent changed: %q", read(t, referent))
+	}
+}

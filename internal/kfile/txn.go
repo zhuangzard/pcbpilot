@@ -27,13 +27,14 @@ const (
 
 // Change is one file of a transaction.
 type Change struct {
-	Path    string      `json:"path"`
-	Kind    Kind        `json:"kind"`
-	Base    Snapshot    `json:"base"`
-	NewSHA  string      `json:"newSha,omitempty"`
-	staged  string      // temp file beside Path ("" for a delete)
-	mode    os.FileMode // the file's mode before the transaction
-	hasMode bool
+	Path     string      `json:"path"`
+	Kind     Kind        `json:"kind"`
+	Base     Snapshot    `json:"base"`
+	NewSHA   string      `json:"newSha,omitempty"`
+	staged   string      // temp file beside Path ("" for a delete)
+	stagedID os.FileInfo // identity of the staged file, from its own handle
+	mode     os.FileMode // the file's mode before the transaction
+	hasMode  bool
 }
 
 // Plan is what Apply would do, identified by Revision.
@@ -89,6 +90,10 @@ func (t *Txn) Stage(path string, data []byte, base *Snapshot) error {
 	if serr := f.Sync(); werr == nil {
 		werr = serr
 	}
+	id, serr := f.Stat()
+	if werr == nil {
+		werr = serr
+	}
 	if cerr := f.Close(); werr == nil {
 		werr = cerr
 	}
@@ -101,7 +106,7 @@ func (t *Txn) Stage(path string, data []byte, base *Snapshot) error {
 		kind = KindReplace
 	}
 	h := sha256.Sum256(data)
-	t.put(&Change{Path: abs, Kind: kind, Base: b, NewSHA: hex.EncodeToString(h[:]), staged: f.Name(), mode: perm, hasMode: true})
+	t.put(&Change{Path: abs, Kind: kind, Base: b, NewSHA: hex.EncodeToString(h[:]), staged: f.Name(), stagedID: id, mode: perm, hasMode: true})
 	return nil
 }
 
@@ -271,15 +276,16 @@ type journal struct {
 }
 
 type journalEntry struct {
-	Path    string      `json:"path"`
-	Kind    Kind        `json:"kind"`
-	Existed bool        `json:"existed"`
-	Mode    os.FileMode `json:"mode"`
-	HasMode bool        `json:"hasMode,omitempty"` // Mode is known (0 is a real mode then)
-	BaseSHA string      `json:"baseSha,omitempty"`
-	NewSHA  string      `json:"newSha,omitempty"`
-	Backup  string      `json:"backup,omitempty"` // relative to the txn dir
-	Staged  string      `json:"staged,omitempty"`
+	Path     string      `json:"path"`
+	Kind     Kind        `json:"kind"`
+	Existed  bool        `json:"existed"`
+	Mode     os.FileMode `json:"mode"`
+	HasMode  bool        `json:"hasMode,omitempty"` // Mode is known (0 is a real mode then)
+	BaseSHA  string      `json:"baseSha,omitempty"`
+	NewSHA   string      `json:"newSha,omitempty"`
+	Backup   string      `json:"backup,omitempty"` // relative to the txn dir
+	Staged   string      `json:"staged,omitempty"`
+	stagedID os.FileInfo // in-process only: the staged file's identity
 }
 
 func (e journalEntry) base() Snapshot {
@@ -364,7 +370,7 @@ func (t *Txn) Apply(wantRev string, o Opts) (Plan, error) {
 		Host: envOr(o.Env).Host, Created: time.Now().UTC()}
 	for i, c := range cs {
 		e := journalEntry{Path: c.Path, Kind: c.Kind, Existed: c.Base.Exists, Mode: c.mode, HasMode: c.hasMode,
-			BaseSHA: c.Base.SHA256, NewSHA: c.NewSHA, Staged: c.staged}
+			BaseSHA: c.Base.SHA256, NewSHA: c.NewSHA, Staged: c.staged, stagedID: c.stagedID}
 		if c.Base.Exists {
 			e.Backup = filepath.ToSlash(filepath.Join(plan.Revision[:16], fmt.Sprintf("%03d-%s", i, filepath.Base(c.Path))))
 		}
@@ -443,8 +449,10 @@ func (t *Txn) Apply(wantRev string, o Opts) (Plan, error) {
 		} else {
 			// The staged file gets the target's mode only now; then
 			// chmod, flush, rename, flush the directory.
-			if err = chmodSync(e.Staged, e.Mode, true); err == nil {
-				err = renameRetry(e.Staged, e.Path, check(e))
+			if err = stagedOK(e); err == nil {
+				if err = chmodSync(e.Staged, e.Mode, true); err == nil {
+					err = renameRetry(e.Staged, e.Path, check(e))
+				}
 			}
 		}
 		if err == nil {
@@ -691,9 +699,25 @@ var (
 
 // stagedOK re-hashes a staged file: it must still hold the bytes that were
 // staged (nothing replaced it while it waited in the target directory).
+//
+// It must also still be the very file Stage wrote (same identity as its
+// handle reported) and a regular file: a link to identical bytes would
+// make the chmod change the referent and the rename install the link.
 func stagedOK(e journalEntry) error {
 	if e.Kind == KindDelete {
 		return nil
+	}
+	fi, err := lstatFile(e.Staged)
+	if err != nil {
+		return wrapf(err, "staged content for %s", e.Path)
+	}
+	if !fi.Mode().IsRegular() {
+		return &Error{Code: CodeUnsupported, Path: e.Staged,
+			Detail: fmt.Sprintf("the staged file for %s was replaced by a %v", e.Path, fi.Mode().Type()),
+			Fix:    "something is tampering with the project directory; stage again"}
+	}
+	if e.stagedID != nil && !os.SameFile(fi, e.stagedID) {
+		return changedErr(e.Path, "its staged file "+filepath.Base(e.Staged)+" was replaced by another file")
 	}
 	b, err := os.ReadFile(e.Staged)
 	if err != nil {

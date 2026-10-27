@@ -178,3 +178,24 @@ func TestWindowsCloudPlaceholderAllowed(t *testing.T) {
 		}
 	}
 }
+
+// A junction at writer.lock (creatable without privileges) is refused and
+// its target left alone.
+func TestWindowsWriterLockJunctionRefused(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	os.Mkdir(target, 0o755)
+	os.WriteFile(filepath.Join(target, "keep"), []byte("keep me"), 0o644)
+	os.MkdirAll(filepath.Dir(WriterLockPath(dir)), 0o755)
+	if out, err := exec.Command("cmd", "/c", "mklink", "/J", WriterLockPath(dir), target).CombinedOutput(); err != nil {
+		t.Skipf("mklink /J: %v %s", err, out)
+	}
+	if w, err := AcquireWriter(dir, fakeEnv()); err == nil {
+		w.Release()
+		t.Fatal("acquired a junction as the writer lock")
+	}
+	ents, _ := os.ReadDir(target)
+	if b, _ := os.ReadFile(filepath.Join(target, "keep")); len(ents) != 1 || string(b) != "keep me" {
+		t.Fatal("junction target changed")
+	}
+}

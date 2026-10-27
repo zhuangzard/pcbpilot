@@ -35,6 +35,11 @@ var errBusy = errors.New("held by another writer")
 
 var absPath = filepath.Abs
 
+func notRegularLock(path, what string) error {
+	return &Error{Code: CodeUnsupported, Path: path, Detail: "the writer lock is " + what + ", not a regular file; it is not opened",
+		Fix: "remove " + path + " (pcbpilot recreates it)"}
+}
+
 // WriterLockPath is the pcbpilot writer lock of a project directory.
 func WriterLockPath(root string) string { return filepath.Join(root, ".pcbpilot", "writer.lock") }
 
