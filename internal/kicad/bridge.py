@@ -798,7 +798,7 @@ def check_effective(ds, ns, names, classes):
 
 
 def netclasses(pcb, reqs_path, out):
-    with open(reqs_path) as f:
+    with open(reqs_path, encoding="utf-8") as f:
         reqs = json.load(f)
     bad, reqs, isolation, edges = validate_netclasses(reqs)
     if bad:
@@ -900,7 +900,7 @@ def netclasses(pcb, reqs_path, out):
     src_dru = dru_path(pcb)
     text = ""
     if os.path.exists(src_dru):
-        with open(src_dru) as f:
+        with open(src_dru, encoding="utf-8") as f:
             text = f.read()
     text = re.sub(re.escape(DRU_BEGIN) + r".*?" + re.escape(DRU_END) + r"\n?", "", text, flags=re.S)
     rules = []
@@ -937,7 +937,7 @@ def netclasses(pcb, reqs_path, out):
         text = text.rstrip("\n") + "\n" + DRU_BEGIN + "\n" + "\n".join(rules) + "\n" + DRU_END + "\n"
     out_dru = dru_path(out)
     if text.strip():
-        with open(out_dru, "w") as f:
+        with open(out_dru, "w", encoding="utf-8") as f:
             f.write(text)
     elif os.path.exists(out_dru) and os.path.abspath(out_dru) != os.path.abspath(src_dru):
         os.remove(out_dru)
@@ -951,7 +951,7 @@ def list_patterns(pcb):
     binding exposes NET_SETTINGS' pattern list only as an opaque object."""
     pro = os.path.splitext(pcb)[0] + ".kicad_pro"
     try:
-        with open(pro) as f:
+        with open(pro, encoding="utf-8") as f:
             ns = json.load(f).get("net_settings") or {}
     except (OSError, ValueError):
         return []
@@ -1023,7 +1023,7 @@ def nm(v_mil):
 def rules(pcb, rules_path, out):
     """Board design rules + Default netclass (mil). The caller makes sure a
     .kicad_pro sits next to PCB (rules live in the project file)."""
-    with open(rules_path) as f:
+    with open(rules_path, encoding="utf-8") as f:
         r = json.load(f)
     board = pcbnew.LoadBoard(pcb)
     ds = board.GetDesignSettings()
@@ -1064,7 +1064,7 @@ POUR_PREFIX = "pcbpilot pour"
 def pours(pcb, spec_path, out):
     """Board-outline copper zones [{net, layer (pcbpilot id), clearanceMil}],
     replacing earlier pcbpilot pours, then fill and save."""
-    with open(spec_path) as f:
+    with open(spec_path, encoding="utf-8") as f:
         spec = json.load(f)
     board = pcbnew.LoadBoard(pcb)
     bad = validate_pours(board, spec)
@@ -1342,7 +1342,7 @@ def edit(pcb, ops_path, out):
     All or nothing: every id, net, layer and footprint is checked first; one
     unknown net, missing id or ambiguous designator rejects the whole edit
     and nothing is saved (the result lists every problem)."""
-    with open(ops_path) as f:
+    with open(ops_path, encoding="utf-8") as f:
         ops = json.load(f)
     board = pcbnew.LoadBoard(pcb)
     bad, plan = validate_edit(board, ops)
@@ -1560,7 +1560,7 @@ def fp_info(spec_path):
     """[{"id", "libDir", "name"}] → {id: {pads, box, boxSource}}. A footprint
     that does not load is listed in problems (E_FP_NOT_FOUND on the Go side).
     Nothing is saved: the scratch board only parents the footprints."""
-    with open(spec_path) as f:
+    with open(spec_path, encoding="utf-8") as f:
         spec = json.load(f)
     if not isinstance(spec, list):
         return {"ok": False, "error": "fp-info: the request is a %s, not a list" % type(spec).__name__}
@@ -1670,6 +1670,12 @@ def validate_sync(board, plan):
                 if op["fp"] in swapped:
                     bad.append("ops[%d] swapFootprint: %s is swapped twice" % (i, op["fp"]))
                 swapped.add(op["fp"])
+                new_nums = {p.GetNumber() for p in fp.Pads()}
+                for p in e["fp"].Pads():
+                    ov = pad_overrides(p)
+                    if ov and p.GetNumber() not in new_nums:
+                        bad.append("ops[%d] swapFootprint %s: pad %r has local overrides (%s) and the new footprint has no such pad"
+                                   % (i, e["ref"], p.GetNumber(), ", ".join(sorted(ov))))
                 continue
             if not is_str(op.get("ref")) or not is_str(op.get("value"), empty=True):
                 bad.append("ops[%d] addFootprint: ref and value are required" % i)
@@ -1777,6 +1783,47 @@ def detach(container, item):
     DETACHED.append(item)
 
 
+# Footprint-level overrides a swap carries over (getter/setter suffix; None
+# or ZONE_CONNECTION_INHERITED = not overridden), and the pad-level ones it
+# carries to the new pad with the same number. A pad with overrides the new
+# footprint has no pad for refuses the swap.
+FP_OVERRIDES = ("LocalClearance", "LocalSolderMaskMargin", "LocalSolderPasteMargin", "LocalSolderPasteMarginRatio",
+                "LocalZoneConnection")
+FP_ALLOW = ("AllowMissingCourtyard", "AllowSolderMaskBridges")
+PAD_OVERRIDES = ("LocalClearance", "LocalSolderMaskMargin", "LocalSolderPasteMargin", "LocalSolderPasteMarginRatio",
+                 "LocalZoneConnection", "LocalThermalGapOverride", "LocalThermalSpokeWidthOverride")
+
+
+# Setters SWIG cannot take a plain int for (std::optional<int> overload).
+PAD_SETTERS = {"LocalThermalGapOverride": "SetThermalGap"}
+
+
+def overridden(v):
+    return v is not None and v != pcbnew.ZONE_CONNECTION_INHERITED
+
+
+def pad_overrides(pad):
+    """{name: value} of the pad's local overrides."""
+    return {n: getattr(pad, "Get" + n)() for n in PAD_OVERRIDES if overridden(getattr(pad, "Get" + n)())}
+
+
+def carry_overrides(nf, fp):
+    """Footprint overrides and allow-flags of fp onto nf; each pad's
+    overrides onto nf's pads with the same number."""
+    for n in FP_OVERRIDES:
+        v = getattr(fp, "Get" + n)()
+        if overridden(v):
+            getattr(nf, "Set" + n)(v)
+    for n in FP_ALLOW:
+        getattr(nf, "Set" + n)(getattr(fp, n)())
+    for p in fp.Pads():
+        ov = pad_overrides(p)
+        for q in nf.Pads():
+            if q.GetNumber() == p.GetNumber():
+                for n, v in ov.items():
+                    getattr(q, PAD_SETTERS.get(n, "Set" + n))(v)
+
+
 def drop_extra_fields(fp, keep):
     """Remove the user fields a library footprint brings (e.g. a generator
     note) that the footprint is not meant to carry: the symbol's fields for
@@ -1807,7 +1854,7 @@ def place_fp(fp, x_nm, y_nm, rot, back):
 
 def sync_apply(pcb, plan_path, out):
     out = stage_out(out)
-    with open(plan_path) as f:
+    with open(plan_path, encoding="utf-8") as f:  # Go writes UTF-8, whatever the locale
         plan = json.load(f)
     # NewBoard writes OUT (+ .kicad_pro / .kicad_prl) at once: OUT is staged.
     board = pcbnew.NewBoard(out) if pcb == "-" else pcbnew.LoadBoard(pcb)
@@ -1867,6 +1914,7 @@ def sync_apply(pcb, plan_path, out):
             keep = pcbnew.FP_DNP | pcbnew.FP_EXCLUDE_FROM_BOM | pcbnew.FP_EXCLUDE_FROM_POS_FILES
             nf.SetAttributes((nf.GetAttributes() & ~keep) | (fp.GetAttributes() & keep))
             nf.SetLocked(fp.IsLocked())
+            carry_overrides(nf, fp)
             set_pad_nets(board, nf, op.get("padNets", {}), made)
             detach(board, fp)
             cur[op["fp"]] = nf

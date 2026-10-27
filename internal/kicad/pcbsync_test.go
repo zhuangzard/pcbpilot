@@ -136,6 +136,7 @@ func syncCase(edit func(nl *SyncNetlist, inv *SyncInventory, o *SyncOptions)) Sy
 		"Package_SO:SOIC-8":    {Pads: smdPads("1", "2", "3", "4", "5", "6", "7", "8"), Box: &SyncBox{-3.7, -2.7, 3.7, 2.7}, BoxSource: "courtyard"},
 		"Connector:CONN_3":     {Pads: smdPads("1", "2", "3"), Box: &SyncBox{-1, -3.5, 1, 3.5}, BoxSource: "pads"},
 		"Connector:CONN_2":     {Pads: smdPads("1", "2"), Box: &SyncBox{-1, -2.5, 1, 2.5}, BoxSource: "pads"},
+		"Connector:CONN_3B":    {Pads: smdPads("1", "2", "3"), Box: &SyncBox{-1.2, -3.5, 1.2, 3.5}, BoxSource: "pads"},
 	}
 	for id := range infos {
 		libs[id] = libRef(id)
@@ -159,6 +160,15 @@ func compByRef(nl *SyncNetlist, ref string) *SyncComp {
 	for i := range nl.Components {
 		if nl.Components[i].Ref == ref {
 			return &nl.Components[i]
+		}
+	}
+	panic("no " + ref)
+}
+
+func indexByRef(inv *SyncInventory, ref string) int {
+	for i := range inv.Footprints {
+		if inv.Footprints[i].Ref == ref {
+			return i
 		}
 	}
 	panic("no " + ref)
@@ -427,6 +437,43 @@ func TestBuildSyncPlan(t *testing.T) {
 		}, func(t *testing.T, p *SyncPlan) {
 			if p.Match.ByRef != 0 || p.Counts.Add != 1 || p.Counts.OrphanFlag != 2 {
 				t.Fatalf("%+v", p.Ops)
+			}
+		}},
+		{"ref-fallback-globally-ambiguous", func(_ *SyncNetlist, inv *SyncInventory, _ *SyncOptions) {
+			// R1 lost its link; R2's footprint (still linked to R2 by path)
+			// is labelled "R1" too. "R1" is on two footprints, so it is no
+			// key even though only one of them is left after path matching.
+			fpByRef(inv, "R1").Path = "/00000000-0000-0000-0000-0000000000ff"
+			inv.Footprints[indexByRef(inv, "R2")].Ref = "R1"
+		}, func(t *testing.T, p *SyncPlan) {
+			if p.Match.ByRef != 0 || p.Counts.Add != 1 || p.Counts.OrphanFlag != 1 || len(opsOf(p, "setRef")) != 1 {
+				t.Fatalf("a globally ambiguous reference must not be matched: %+v %+v", p.Match, p.Ops)
+			}
+		}},
+		{"swap-and-renet", func(nl *SyncNetlist, _ *SyncInventory, _ *SyncOptions) {
+			c := compByRef(nl, "J1")
+			c.Footprint, c.Fields["Footprint"] = "Connector:CONN_3B", "Connector:CONN_3B"
+			v := netByName(nl, "VCC")
+			v.Nodes = v.Nodes[:3]                                                                                // J1.1 leaves VCC (3 tracks) …
+			nl.Nets = append(nl.Nets, SyncNet{Code: "8", Name: "/IN", Nodes: []SyncNode{{Ref: "J1", Pin: "1"}}}) // … for /IN
+		}, func(t *testing.T, p *SyncPlan) {
+			sw := opsOf(p, "swapFootprint")
+			if len(sw) != 1 || sw[0].PadNets["1"] != "/IN" {
+				t.Fatalf("%+v", p.Ops)
+			}
+			if len(p.DanglingCopper) != 1 || p.DanglingCopper[0].Ref != "J1" || p.DanglingCopper[0].Pad != "1" ||
+				p.DanglingCopper[0].Net != "VCC" || p.DanglingCopper[0].To != "/IN" || p.DanglingCopper[0].Tracks != 3 {
+				t.Fatalf("a swapped pad leaving a net with copper must be reported: %+v", p.DanglingCopper)
+			}
+		}},
+		{"add-fields-ignore", func(nl *SyncNetlist, _ *SyncInventory, o *SyncOptions) {
+			nl.Components = append(nl.Components, syncComp("R3", "4k7", "Resistor_SMD:R_0805", uR3))
+			nl.Components[len(nl.Components)-1].Fields["MPN"] = "RC0805"
+			o.FieldsIgnore = map[string]bool{"MPN": true}
+		}, func(t *testing.T, p *SyncPlan) {
+			a := opsOf(p, "addFootprint")
+			if len(a) != 1 || a[0].Fields["MPN"] != "" || len(a[0].Fields) != 2 {
+				t.Fatalf("--fields-ignore must hold for new footprints: %+v", a)
 			}
 		}},
 		{"fields", func(nl *SyncNetlist, inv *SyncInventory, o *SyncOptions) {

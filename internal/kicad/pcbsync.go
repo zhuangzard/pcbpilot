@@ -404,6 +404,14 @@ func BuildSyncPlan(in SyncInput) (*SyncPlan, error) {
 		}
 	}
 	if opts.Match != SyncMatchPath {
+		// A reference is a key only when it is unique on the whole board
+		// (board-only footprints aside), not just among the footprints
+		// left over after path matching: a duplicated "R1" stays ambiguous
+		// even when one copy is linked by path.
+		refCount := map[string]int{}
+		for _, f := range fps {
+			refCount[f.Ref]++
+		}
 		free := map[string][]*SyncFP{}
 		for _, f := range fps {
 			if !used[f] {
@@ -411,7 +419,7 @@ func BuildSyncPlan(in SyncInput) (*SyncPlan, error) {
 			}
 		}
 		for _, c := range comps {
-			if matched[c] || len(free[c.Ref]) != 1 {
+			if matched[c] || len(free[c.Ref]) != 1 || refCount[c.Ref] != 1 {
 				continue
 			}
 			f := free[c.Ref][0]
@@ -666,9 +674,20 @@ func BuildSyncPlan(in SyncInput) (*SyncPlan, error) {
 			plan.Ops = append(plan.Ops, with(SyncOp{Op: "swapFootprint", From: f.FPID, To: c.Footprint, FPID: c.Footprint,
 				LibDir: r.LibDir, Name: r.Name, PadNets: pn, Reason: "the symbol's Footprint field names another footprint"}))
 			for _, pd := range f.Pads {
-				if pd.copper() && !newNums[pd.Number] && pd.Net != "" && boardNet[pd.Net].copper() {
+				if !pd.copper() || pd.Net == "" || !boardNet[pd.Net].copper() {
+					continue
+				}
+				if !newNums[pd.Number] {
 					plan.OrphanCopper = append(plan.OrphanCopper, SyncCopper{Ref: c.Ref, Pad: pd.Number, Net: pd.Net,
 						Reason: "the new footprint has no pad " + pd.Number + "; copper on its net stays"})
+					continue
+				}
+				// The pad stays (same number) but its net changes: the copper
+				// on the old net no longer reaches it.
+				if to := pn[pd.Number]; afterRename(pd.Net) != to {
+					bn := boardNet[pd.Net]
+					plan.DanglingCopper = append(plan.DanglingCopper, SyncCopper{Ref: c.Ref, Pad: pd.Number, Net: pd.Net, To: to,
+						Tracks: bn.Tracks, Vias: bn.Vias, Zones: bn.Zones, Reason: "the swapped pad leaves a net that has copper; that copper stays on " + pd.Net})
 				}
 			}
 		}
@@ -760,7 +779,7 @@ func BuildSyncPlan(in SyncInput) (*SyncPlan, error) {
 			}
 		}
 		plan.Ops = append(plan.Ops, SyncOp{Op: "addFootprint", Ref: c.Ref, Key: c.Keys()[0], FPID: c.Footprint, LibDir: r.LibDir, Name: r.Name,
-			Value: strp(c.Value), Fields: syncWantFields(c, nil), Sheetname: strp(c.SheetNames), Sheetfile: strp(c.Sheetfile()),
+			Value: strp(c.Value), Fields: syncWantFields(c, opts.FieldsIgnore), Sheetname: strp(c.SheetNames), Sheetfile: strp(c.Sheetfile()),
 			DNP: boolp(c.DNP), ExcludeFromBOM: boolp(c.ExcludeFromBOM), X: floatp(at[i][0]), Y: floatp(at[i][1]), Rot: floatp(0), Side: "F",
 			PadNets: pn, Reason: "new symbol"})
 		plan.Staged = append(plan.Staged, SyncStaged{Ref: c.Ref, X: at[i][0], Y: at[i][1]})

@@ -1,0 +1,50 @@
+{
+  "ops": [
+    {
+      "op": "swapFootprint",
+      "fp": "fp-J1",
+      "ref": "J1",
+      "key": "/00000000-0000-0000-0000-0000000000d1",
+      "from": "Connector:CONN_3",
+      "to": "Connector:CONN_3B",
+      "fpid": "Connector:CONN_3B",
+      "libDir": "/libs/Connector.pretty",
+      "name": "CONN_3B",
+      "padNets": {
+        "1": "/IN",
+        "2": "/OUT",
+        "3": "GND"
+      },
+      "matchedBy": "path",
+      "reason": "the symbol's Footprint field names another footprint"
+    }
+  ],
+  "match": {
+    "byPath": 5,
+    "byRef": 0,
+    "unmatchedSymbols": [],
+    "unmatchedFootprints": []
+  },
+  "counts": {
+    "add": 0,
+    "swap": 1,
+    "update": 0,
+    "padNet": 0,
+    "renameNet": 0,
+    "orphanFlag": 0,
+    "orphanRemove": 0
+  },
+  "staged": [],
+  "orphanCopper": [],
+  "danglingCopper": [
+    {
+      "ref": "J1",
+      "pad": "1",
+      "net": "VCC",
+      "to": "/IN",
+      "tracks": 3,
+      "reason": "the swapped pad leaves a net that has copper; that copper stays on VCC"
+    }
+  ],
+  "errors": []
+}
