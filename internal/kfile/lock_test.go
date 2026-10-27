@@ -2,9 +2,11 @@ package kfile
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -75,7 +77,10 @@ func TestLockStates(t *testing.T) {
 		{"same user, kicad running (path)", lockBody, fakeEnv("/Applications/KiCad/KiCad.app/Contents/MacOS/kicad"), LockLive},
 		{"same user, eeschema running", lockBody, fakeEnv("eeschema"), LockLive},
 		{"same user, no process list", lockBody, &Env{Host: "box", User: "alice", Procs: func() ([]Proc, error) { return nil, errors.New("denied") }}, LockLive},
-		{"domain user and fqdn host", `{"hostname":"box.lab.lan","username":"CORP\\Alice"}`, fakeEnv(), LockStaleCandidate},
+		{"short host recorded, fqdn here", lockBody, &Env{Host: "box.lab.lan", User: "alice", Procs: fakeEnv().Procs}, LockStaleCandidate},
+		{"fqdn recorded, short here", `{"hostname":"box.lab.lan","username":"alice"}`, fakeEnv(), LockForeign},
+		{"same short name, other domain", `{"hostname":"box.a.example","username":"alice"}`, &Env{Host: "box.b.example", User: "alice", Procs: fakeEnv().Procs}, LockForeign},
+		{"domain user vs bare user", `{"hostname":"box","username":"CORP\\alice"}`, fakeEnv(), LockLive},
 		{"other user here", `{"hostname":"box","username":"bob"}`, fakeEnv(), LockLive},
 		{"other host", `{"hostname":"far","username":"alice"}`, fakeEnv(), LockForeign},
 		{"unreadable", "garbage", fakeEnv(), LockUnreadable},
@@ -241,5 +246,90 @@ func TestLockCheckFailsClosed(t *testing.T) {
 	// A directory that does not exist yet is not an error.
 	if _, err := CheckLocks([]string{filepath.Join(dir, "new", "sub", "x.kicad_sch")}, fakeEnv()); err != nil {
 		t.Errorf("missing dir: %v", err)
+	}
+}
+
+func TestHostUserIdentity(t *testing.T) {
+	hosts := []struct {
+		rec, local string
+		same       bool
+	}{
+		{"BOX", "box", true},
+		{"box", "box.lab.lan", true},
+		{"box.lab.lan", "BOX.LAB.LAN", true},
+		{"box.lab.lan", "box", false},
+		{"box.a.example", "box.b.example", false},
+		{"other", "box.lab.lan", false},
+		{"", "box", false},
+	}
+	for _, c := range hosts {
+		if got := sameHost(c.rec, c.local); got != c.same {
+			t.Errorf("sameHost(%q, %q) = %v", c.rec, c.local, got)
+		}
+	}
+	caseless := runtime.GOOS == "windows"
+	users := []struct {
+		rec, local string
+		same       bool
+	}{
+		{"alice", "alice", true},
+		{"Alice", "alice", caseless},
+		{`CORP\alice`, "alice", false},
+		{`CORP\alice`, `corp\ALICE`, caseless},
+		{"", "", false},
+	}
+	for _, c := range users {
+		if got := sameUser(c.rec, c.local); got != c.same {
+			t.Errorf("sameUser(%q, %q) = %v", c.rec, c.local, got)
+		}
+	}
+}
+
+// The project lock is found however deep the target sits below the project.
+func TestDeepProjectLock(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "demo.kicad_pro"), []byte("x"), 0o644)
+	writeLock(t, filepath.Join(dir, "demo.kicad_pro"), lockBody)
+	deep := dir
+	for i := 0; i < 12; i++ {
+		deep = filepath.Join(deep, fmt.Sprintf("s%d", i))
+	}
+	os.MkdirAll(deep, 0o755)
+	ls := mustLocks(t, []string{filepath.Join(deep, "x.kicad_sch")}, fakeEnv())
+	if len(ls) != 1 || ls[0].Kind != "project" || ls[0].Target != filepath.Join(dir, "demo.kicad_pro") {
+		t.Fatalf("deep target locks: %+v", ls)
+	}
+}
+
+// A stale lock rewritten (KiCad restarted) between the check and the delete
+// is not removed.
+func TestStaleLockRewrittenBeforeRemove(t *testing.T) {
+	for _, how := range []string{"rewritten", "kicad started"} {
+		dir := t.TempDir()
+		target := filepath.Join(dir, "x.kicad_pcb")
+		lck := writeLock(t, target, lockBody)
+		procs := []string{}
+		env := &Env{Host: "box", User: "alice", Procs: func() ([]Proc, error) {
+			var out []Proc
+			for i, n := range procs {
+				out = append(out, Proc{PID: 10 + i, Name: n})
+			}
+			return out, nil
+		}}
+		beforeLockRemove = func(p string) {
+			if how == "rewritten" {
+				os.WriteFile(p, []byte(`{"hostname":"box","username":"alice","pid":"new session"}`), 0o644)
+			} else {
+				procs = append(procs, "kicad.exe")
+			}
+		}
+		_, err := Guard([]string{target}, BreakStale, env)
+		beforeLockRemove = nil
+		if CodeOf(err) != CodeLocked {
+			t.Errorf("%s: %v", how, err)
+		}
+		if _, serr := os.Stat(lck); serr != nil {
+			t.Errorf("%s: lock removed", how)
+		}
 	}
 }

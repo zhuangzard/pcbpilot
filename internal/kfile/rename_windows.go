@@ -82,7 +82,7 @@ func posixRename(from, to string) error {
 	if err != nil {
 		return err
 	}
-	h, err := syscall.CreateFile(src, deleteAccess|syscall.SYNCHRONIZE,
+	h, err := syscall.CreateFile(src, deleteAccess|syscall.SYNCHRONIZE|syscall.GENERIC_WRITE,
 		syscall.FILE_SHARE_READ|syscall.FILE_SHARE_WRITE|syscall.FILE_SHARE_DELETE, nil,
 		syscall.OPEN_EXISTING, syscall.FILE_ATTRIBUTE_NORMAL, 0)
 	if err != nil {
@@ -105,7 +105,9 @@ func posixRename(from, to string) error {
 	if r == 0 {
 		return e
 	}
-	return nil
+	// This path has no WRITE_THROUGH; flush the renamed file (its data and
+	// the metadata NTFS associates with it) before reporting success.
+	return syscall.FlushFileBuffers(h)
 }
 
 // verbatim is the \\?\ form of an absolute path.
@@ -130,8 +132,8 @@ func isRetryable(err error) bool {
 	return errno == errSharingViolation || errno == errLockViolation || errno == errAccessDenied
 }
 
-// syncDir is a no-op: Windows cannot flush a directory handle. Durability of
+// platformSyncDir is a no-op: Windows cannot flush a directory handle. Durability of
 // directory entries rests on NTFS metadata journaling, MoveFileExW
 // WRITE_THROUGH for renames, and the journal ordering in Txn (see the
 // package doc).
-func syncDir(string) error { return nil }
+func platformSyncDir(string) error { return nil }

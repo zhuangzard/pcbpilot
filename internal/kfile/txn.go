@@ -50,6 +50,7 @@ type Plan struct {
 type Txn struct {
 	root    string
 	changes map[string]*Change
+	created []string // directories Stage created
 }
 
 // NewTxn starts a transaction for the project directory root.
@@ -69,9 +70,11 @@ func (t *Txn) Stage(path string, data []byte, base *Snapshot) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+	created, err := mkdirTracked(filepath.Dir(abs))
+	if err != nil {
 		return err
 	}
+	t.created = append(t.created, created...)
 	perm, err := targetPerm(abs, 0)
 	if err != nil {
 		return err
@@ -229,8 +232,10 @@ const journalSchema = "pcbpilot.kfile.txn/1"
 func txnDir(root string) string      { return filepath.Join(root, ".pcbpilot", "txn") }
 func journalPath(root string) string { return filepath.Join(txnDir(root), "journal.json") }
 
-// beforeMutate, when set by a test, runs just before each target is touched.
-var beforeMutate func(path string)
+// Test hooks: beforeMutate runs just before each target is touched,
+// beforeBackup before each backup copy, beforeRestore before a rollback or
+// recover step changes a file.
+var beforeMutate, beforeBackup, beforeRestore func(path string)
 
 // Apply commits the staged changes.
 //
@@ -317,13 +322,27 @@ func (t *Txn) Apply(wantRev string, o Opts) (Plan, error) {
 		if e.Backup == "" {
 			continue
 		}
-		if err := copyFile(filepath.Join(dir, filepath.FromSlash(e.Backup)), e.Path); err != nil {
+		if beforeBackup != nil {
+			beforeBackup(e.Path)
+		}
+		sha, err := copyFile(filepath.Join(dir, filepath.FromSlash(e.Backup)), e.Path)
+		if err != nil {
 			return abandon(wrapf(err, "back up %s", e.Path))
+		}
+		if sha != e.BaseSHA {
+			return abandon(changedErr(e.Path, fmt.Sprintf("changed while it was being backed up (sha256 %s → %s)", short(e.BaseSHA), short(sha))))
 		}
 	}
 	syncs := []string{bdir, dir, filepath.Dir(dir), t.root}
 	for _, e := range j.Changes {
 		syncs = append(syncs, filepath.Dir(e.Path)) // staged temp entries
+	}
+	// Directories Stage created: each one's entry lives in its parent,
+	// flushed bottom-up to the first directory that already existed.
+	created := append([]string(nil), t.created...)
+	sort.SliceStable(created, func(a, b int) bool { return len(created[a]) > len(created[b]) })
+	for _, d := range created {
+		syncs = append(syncs, filepath.Dir(d))
 	}
 	if err := syncDirs(syncs...); err != nil {
 		return abandon(err)
@@ -349,8 +368,8 @@ func (t *Txn) Apply(wantRev string, o Opts) (Plan, error) {
 		if err == nil {
 			continue
 		}
-		if _, rerr := undoAll(t.root, j.Changes[:i+1], true); rerr != nil {
-			return plan, &Error{Code: CodeTxnPending, Path: e.Path, Err: err,
+		if _, rerr := undoAll(t.root, j.Changes[:i+1], true, guardOpts{o.Locks, o.NoLockCheck, o.Env}); rerr != nil {
+			return plan, &Error{Code: CodeTxnPending, Path: e.Path, Err: errors.Join(err, rerr),
 				Detail: fmt.Sprintf("apply failed (%v) and rollback failed (%v); the journal is kept", err, rerr),
 				Fix:    "close KiCad and other programs using the project, then run `pcbpilot kicad txn recover` (or `discard` to keep the files as they are)"}
 		}
@@ -387,12 +406,28 @@ func entryStateOf(e journalEntry) (entryState, Snapshot, error) {
 	return stateOther, cur, nil
 }
 
+// guardOpts are the KiCad lock rules for rollback and recover writes.
+type guardOpts struct {
+	locks  BreakPolicy
+	noLock bool
+	env    *Env
+}
+
+func (g guardOpts) check(path string) error {
+	if g.noLock {
+		return nil
+	}
+	_, err := Guard([]string{path}, g.locks, g.env)
+	return err
+}
+
 // undo returns e.Path to its pre-transaction content and mode, but only when
 // it still holds what the transaction wrote; a file already at its base is
 // left alone and anything else is a conflict — unless failed is set: the
 // entry whose own step just failed may hold someone else's edit that made
 // it fail (the step was refused before touching it), which is left alone.
-func undo(root string, e journalEntry, failed bool) (bool, error) {
+// KiCad locks are checked before every attempt to change the file.
+func undo(root string, e journalEntry, failed bool, g guardOpts) (bool, error) {
 	st, cur, err := entryStateOf(e)
 	if err != nil {
 		return false, err
@@ -406,8 +441,14 @@ func undo(root string, e journalEntry, failed bool) (bool, error) {
 		}
 		return false, changedErr(e.Path, fmt.Sprintf("holds content (sha256 %s) that is neither the transaction's nor the original; left as is", short(cur.SHA256)))
 	}
+	if beforeRestore != nil {
+		beforeRestore(e.Path)
+	}
 	if !e.Existed {
 		ours := func() error {
+			if err := g.check(e.Path); err != nil {
+				return err
+			}
 			if s, _, err := entryStateOf(e); err != nil || s != stateOurs {
 				return changedErr(e.Path, "changed during rollback")
 			}
@@ -425,28 +466,76 @@ func undo(root string, e journalEntry, failed bool) (bool, error) {
 	if h := sha256.Sum256(b); hex.EncodeToString(h[:]) != e.BaseSHA {
 		return false, fmt.Errorf("restore %s: backup %s does not match the recorded hash", e.Path, e.Backup)
 	}
-	if _, err := WriteFile(e.Path, b, Opts{NoLockCheck: true, Base: &cur, Perm: e.Mode}); err != nil {
+	// WriteFile checks the locks before creating its temp file and before
+	// every rename attempt.
+	if _, err := WriteFile(e.Path, b, Opts{NoLockCheck: g.noLock, Locks: g.locks, Env: g.env, Base: &cur, Perm: e.Mode}); err != nil {
 		return false, err
 	}
-	return true, os.Chmod(e.Path, e.Mode)
+	if st, err := os.Stat(e.Path); err == nil && st.Mode().Perm() != e.Mode.Perm() {
+		if err := os.Chmod(e.Path, e.Mode); err != nil {
+			return true, err
+		}
+		return true, syncFile(e.Path)
+	}
+	return true, nil
 }
 
 // undoAll undoes entries in reverse order and returns the paths restored.
-// lastFailed marks the last entry as the one whose step failed.
-func undoAll(root string, entries []journalEntry, lastFailed bool) ([]string, error) {
+// lastFailed marks the last entry as the one whose step failed. A KiCad
+// lock stops it at once: nothing more is changed and the journal stays.
+func undoAll(root string, entries []journalEntry, lastFailed bool, g guardOpts) ([]string, error) {
 	var restored []string
 	var errs []error
 	for i := len(entries) - 1; i >= 0; i-- {
-		did, err := undo(root, entries[i], lastFailed && i == len(entries)-1)
-		if err != nil {
-			errs = append(errs, err)
-		}
+		did, err := undo(root, entries[i], lastFailed && i == len(entries)-1, g)
 		if did {
 			restored = append(restored, entries[i].Path)
+		}
+		if err != nil {
+			errs = append(errs, err)
+			if CodeOf(err) == CodeLocked {
+				break
+			}
 		}
 	}
 	sort.Strings(restored)
 	return restored, errors.Join(errs...)
+}
+
+// syncFile flushes a file's data and metadata (Windows needs write access).
+func syncFile(path string) error {
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		return err
+	}
+	err = f.Sync()
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return err
+}
+
+// mkdirTracked is os.MkdirAll that returns the directories it had to
+// create, deepest first.
+func mkdirTracked(dir string) ([]string, error) {
+	var missing []string
+	for d := dir; ; {
+		if _, err := os.Stat(d); err == nil {
+			break
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return nil, err
+		}
+		missing = append(missing, d)
+		up := filepath.Dir(d)
+		if up == d {
+			break
+		}
+		d = up
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
+	}
+	return missing, nil
 }
 
 // finish ends a transaction on disk: staged leftovers, then the journal (so
@@ -466,8 +555,10 @@ func finish(root string, j *journal) error {
 			Detail: "the transaction finished but its journal could not be removed: " + err.Error(),
 			Fix:    "run `pcbpilot kicad txn recover`; it recognises a finished transaction and only cleans up"}
 	}
+	// The journal's removal must be durable before its backups go; if that
+	// cannot be confirmed the backups stay (orphaned backups are harmless).
 	if err := syncDir(txnDir(root)); err != nil {
-		errs = append(errs, err)
+		return wrapf(errors.Join(append(errs, err)...), "transaction cleanup (backups kept)")
 	}
 	if len(j.Revision) >= 16 {
 		if err := os.RemoveAll(filepath.Join(txnDir(root), j.Revision[:16])); err != nil {
@@ -609,12 +700,12 @@ func Recover(root string, o RecoverOpts) (Recovery, error) {
 		rec.Action = "completed"
 		return rec, finish(root, j)
 	}
-	if !o.NoLockCheck {
+	if !o.NoLockCheck { // preflight; undo checks again before each file
 		if _, err := Guard(paths, o.Locks, o.Env); err != nil {
 			return rec, err
 		}
 	}
-	restored, err := undoAll(root, j.Changes, false)
+	restored, err := undoAll(root, j.Changes, false, guardOpts{o.Locks, o.NoLockCheck, o.Env})
 	rec.Restored = restored
 	if err != nil {
 		return rec, &Error{Code: CodeTxnPending, Path: journalPath(root), Err: err,
@@ -696,22 +787,25 @@ func syncDirs(dirs ...string) error {
 	return nil
 }
 
-func copyFile(dst, src string) error {
+// copyFile copies src to dst, flushes dst and returns the sha256 of the
+// bytes copied.
+func copyFile(dst, src string) (string, error) {
 	in, err := os.Open(src)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer in.Close()
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
-		return err
+		return "", err
 	}
-	_, err = io.Copy(out, in)
+	h := sha256.New()
+	_, err = io.Copy(io.MultiWriter(out, h), in)
 	if serr := out.Sync(); err == nil {
 		err = serr
 	}
 	if cerr := out.Close(); err == nil {
 		err = cerr
 	}
-	return err
+	return hex.EncodeToString(h.Sum(nil)), err
 }

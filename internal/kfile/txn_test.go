@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // project makes a synthetic project directory with the given files.
@@ -225,16 +226,25 @@ func TestTxnMidApplyEditOrLock(t *testing.T) {
 		}
 		_, err := stagedTxn(t, dir).Apply("", Opts{Env: fakeEnv("kicad.exe")})
 		beforeMutate = nil
-		want, proWant := CodeChanged, "saved by KiCad"
-		if mode == "lock" {
-			want, proWant = CodeLocked, "P1"
-			os.Remove(LockPath(pro))
+		if mode == "edit" {
+			if CodeOf(err) != CodeChanged || read(t, filepath.Join(dir, "a.kicad_pcb")) != "A1" || read(t, pro) != "saved by KiCad" {
+				t.Errorf("edit: %v, pcb %q pro %q", err, read(t, filepath.Join(dir, "a.kicad_pcb")), read(t, pro))
+			}
+			clean(t, dir)
+			continue
 		}
-		if CodeOf(err) != want {
-			t.Errorf("%s: err %v", mode, err)
+		// The project lock also blocks restoring a.kicad_pcb: nothing more is
+		// changed, the journal stays, and recover finishes once KiCad closes.
+		var le *Error
+		if CodeOf(err) != CodeTxnPending || !errors.As(errors.Unwrap(err), &le) || read(t, filepath.Join(dir, "a.kicad_pcb")) != "A2" {
+			t.Fatalf("lock: %v, pcb %q", err, read(t, filepath.Join(dir, "a.kicad_pcb")))
 		}
-		if read(t, filepath.Join(dir, "a.kicad_pcb")) != "A1" || read(t, pro) != proWant {
-			t.Errorf("%s: pcb %q pro %q", mode, read(t, filepath.Join(dir, "a.kicad_pcb")), read(t, pro))
+		os.Remove(LockPath(pro))
+		if rec, err := Recover(dir, RecoverOpts{Env: fakeEnv()}); err != nil || rec.Action != "rolled-back" {
+			t.Fatalf("recover after unlock: %+v %v", rec, err)
+		}
+		if read(t, filepath.Join(dir, "a.kicad_pcb")) != "A1" || read(t, pro) != "P1" {
+			t.Fatal("lock: not recovered")
 		}
 		clean(t, dir)
 	}
@@ -523,4 +533,185 @@ func TestAcquireWriter(t *testing.T) {
 		t.Fatalf("%d winners, %d busy", len(won), busy)
 	}
 	won[0].Release()
+}
+
+// A lock that appears after Recover's preflight stops the restore.
+func TestRestoreBlockedByLateLock(t *testing.T) {
+	dir := project(t, map[string]string{"a.kicad_pcb": "A1", "a.kicad_pro": "P1"})
+	interrupt(t, stagedTxn(t, dir))
+	pcb := filepath.Join(dir, "a.kicad_pcb")
+	beforeRestore = func(p string) { writeLock(t, p, lockBody) }
+	_, err := Recover(dir, RecoverOpts{Env: fakeEnv("eeschema")})
+	beforeRestore = nil
+	if CodeOf(err) != CodeTxnPending || !strings.Contains(err.Error(), "E_KICAD_LOCKED") {
+		t.Fatalf("late lock: %v", err)
+	}
+	if read(t, pcb) != "A2" || Pending(dir) == nil {
+		t.Fatal("restored through a lock, or journal dropped")
+	}
+	os.Remove(LockPath(pcb))
+	if _, err := Recover(dir, RecoverOpts{Env: fakeEnv()}); err != nil || read(t, pcb) != "A1" {
+		t.Fatalf("recover after unlock: %v", err)
+	}
+	clean(t, dir)
+}
+
+// If the journal's removal cannot be flushed, the backups are kept.
+func TestFinishKeepsBackupsWhenFlushFails(t *testing.T) {
+	dir := project(t, map[string]string{"a.kicad_pcb": "A1", "a.kicad_pro": "P1"})
+	tx := stagedTxn(t, dir)
+	rev := mustPlan(t, tx).Revision
+	removed := false
+	old := removeFile
+	removeFile = func(p string) error {
+		if filepath.Base(p) == "journal.json" {
+			removed = true
+		}
+		return os.Remove(p)
+	}
+	oldSync := syncDir
+	syncDir = func(d string) error {
+		if removed && d == txnDir(dir) {
+			return errors.New("flush failed")
+		}
+		return oldSync(d)
+	}
+	plan, err := tx.Apply("", Opts{Env: fakeEnv()})
+	removeFile, syncDir = old, oldSync
+	if err == nil || !plan.Applied || !strings.Contains(err.Error(), "backups kept") {
+		t.Fatalf("err %v applied %v", err, plan.Applied)
+	}
+	if _, err := os.Stat(filepath.Join(txnDir(dir), rev[:16])); err != nil {
+		t.Fatal("backups removed although the journal removal was not flushed")
+	}
+}
+
+// New directories made by Stage are flushed in their parents, bottom-up,
+// before the commit; a failed flush aborts with nothing written.
+func TestCreatedDirsFlushed(t *testing.T) {
+	dir := project(t, map[string]string{"a.kicad_pro": "P1"})
+	target := filepath.Join(dir, "new", "sub", "x.kicad_sch")
+	var synced []string
+	oldSync := syncDir
+	syncDir = func(d string) error { synced = append(synced, d); return oldSync(d) }
+	tx := NewTxn(dir)
+	if err := tx.Stage(target, []byte("S"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Apply("", Opts{Env: fakeEnv()}); err != nil {
+		t.Fatal(err)
+	}
+	syncDir = oldSync
+	idx := func(d string) int {
+		for i, s := range synced {
+			if s == d {
+				return i
+			}
+		}
+		return -1
+	}
+	sub, newd := idx(filepath.Join(dir, "new")), idx(dir)
+	if sub < 0 || newd < 0 {
+		t.Fatalf("parents of created dirs not flushed: %v", synced)
+	}
+
+	// Injected failure on the flush of "new" (parent of "sub").
+	dir2 := project(t, map[string]string{"a.kicad_pro": "P1"})
+	target2 := filepath.Join(dir2, "new", "sub", "x.kicad_sch")
+	syncDir = func(d string) error {
+		if d == filepath.Join(dir2, "new") {
+			return errors.New("flush failed")
+		}
+		return oldSync(d)
+	}
+	tx2 := NewTxn(dir2)
+	tx2.Stage(target2, []byte("S"), nil)
+	_, err := tx2.Apply("", Opts{Env: fakeEnv()})
+	syncDir = oldSync
+	if err == nil || read(t, target2) != "<missing>" {
+		t.Fatalf("flush failure: %v, target %q", err, read(t, target2))
+	}
+	tx2.Abort()
+	clean(t, dir2)
+}
+
+// A file modified while its backup is being copied aborts in prepare.
+func TestBackupChangedDuringCopy(t *testing.T) {
+	dir := project(t, map[string]string{"a.kicad_pcb": "A1", "a.kicad_pro": "P1"})
+	pro := filepath.Join(dir, "a.kicad_pro")
+	beforeBackup = func(p string) {
+		if p == pro {
+			os.WriteFile(pro, []byte("saved meanwhile"), 0o644)
+		}
+	}
+	tx := stagedTxn(t, dir)
+	_, err := tx.Apply("", Opts{Env: fakeEnv()})
+	beforeBackup = nil
+	if CodeOf(err) != CodeChanged {
+		t.Fatalf("err %v", err)
+	}
+	if read(t, filepath.Join(dir, "a.kicad_pcb")) != "A1" || read(t, pro) != "saved meanwhile" {
+		t.Fatal("a target was touched")
+	}
+	tx.Abort()
+	clean(t, dir)
+}
+
+// Operations sharing one Writer run one after the other, and Release waits
+// for the running one.
+func TestWriterLeaseSerializes(t *testing.T) {
+	dir := project(t, map[string]string{"a.kicad_pcb": "A1", "b.kicad_pcb": "B1"})
+	w, err := AcquireWriter(dir, fakeEnv())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var inside, maxInside int32
+	var mu sync.Mutex
+	entered := make(chan struct{}, 4)
+	beforeMutate = func(string) {
+		entered <- struct{}{}
+		mu.Lock()
+		inside++
+		if inside > maxInside {
+			maxInside = inside
+		}
+		mu.Unlock()
+		time.Sleep(50 * time.Millisecond)
+		mu.Lock()
+		inside--
+		mu.Unlock()
+	}
+	defer func() { beforeMutate = nil }()
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	var txs []*Txn
+	for i, n := range []string{"a.kicad_pcb", "b.kicad_pcb"} {
+		tx := NewTxn(dir)
+		txs = append(txs, tx)
+		tx.Stage(filepath.Join(dir, n), []byte("new"), nil)
+		wg.Add(1)
+		go func(i int, tx *Txn) {
+			defer wg.Done()
+			_, errs[i] = tx.Apply("", Opts{Env: fakeEnv(), Writer: w})
+		}(i, tx)
+	}
+	<-entered             // one operation is running
+	relErr := w.Release() // must wait for it
+	wg.Wait()
+	if errs[0] != nil && errs[1] != nil {
+		t.Fatalf("Release did not wait for the running operation: %v / %v", errs[0], errs[1])
+	}
+	for i, e := range errs {
+		// The one that got the lease after Release finds the writer gone.
+		if e != nil && !strings.Contains(e.Error(), "released") {
+			t.Errorf("apply %d: %v", i, e)
+		}
+	}
+	for _, tx := range txs {
+		tx.Abort() // the refused one keeps its staging until the caller aborts
+	}
+	if maxInside != 1 || relErr != nil {
+		t.Fatalf("overlapping operations: %d, release %v", maxInside, relErr)
+	}
+	clean(t, dir)
 }

@@ -15,9 +15,9 @@ func platformRename(from, to string) error { return os.Rename(from, to) }
 // or a file busy on a network filesystem) is the only transient case.
 func isRetryable(err error) bool { return errors.Is(err, syscall.EBUSY) }
 
-// syncDir fsyncs a directory so the entries created, renamed or removed in
+// platformSyncDir fsyncs a directory so the entries created, renamed or removed in
 // it survive a power loss.
-func syncDir(dir string) error {
+func platformSyncDir(dir string) error {
 	f, err := os.Open(dir)
 	if err != nil {
 		return err

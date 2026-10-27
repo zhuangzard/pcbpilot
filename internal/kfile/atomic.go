@@ -42,6 +42,7 @@ type Result struct {
 var (
 	renameFile  = platformRename
 	removeFile  = os.Remove
+	syncDir     = platformSyncDir
 	retryBudget = 3 * time.Second
 )
 
@@ -204,7 +205,8 @@ func (w *File) Abort() error {
 }
 
 // renameRetry renames, retrying sharing violations with backoff (10 ms
-// doubling, 500 ms cap) for retryBudget in total. check, when not nil, runs
+// doubling, 500 ms cap) for retryBudget in total, but at least 3 attempts
+// (the per-attempt checks can be slow on a loaded machine). check, when not nil, runs
 // before every attempt and its error ends the loop.
 func renameRetry(from, to string, check func() error) error {
 	deadline := time.Now().Add(retryBudget)
@@ -221,7 +223,7 @@ func renameRetry(from, to string, check func() error) error {
 		if err == nil || !isRetryable(err) {
 			return err
 		}
-		if time.Now().Add(delay).After(deadline) {
+		if tries >= 3 && time.Now().Add(delay).After(deadline) {
 			return &Error{Code: CodeSharing, Path: to, Err: err,
 				Detail: fmt.Sprintf("another program holds the file open (%d attempts over %s): %v", tries, retryBudget, err),
 				Fix:    "close the program holding the file (KiCad, a viewer, antivirus or a sync client) and retry"}

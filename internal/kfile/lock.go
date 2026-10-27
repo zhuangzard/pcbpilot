@@ -56,6 +56,8 @@ type LockInfo struct {
 	Mod    time.Time `json:"mod"`
 	State  LockState `json:"state"`
 	Broke  bool      `json:"broke,omitempty"` // removed under the BreakPolicy
+	raw    []byte    // content when classified, to detect a lock rewritten before removal
+	size   int64
 }
 
 // BreakPolicy says which locks a writer may remove. The zero value is
@@ -208,11 +210,12 @@ func uncheckable(target, detail string, err error) *Error {
 		Fix: "fix the permissions or remove the entry named in the detail, then retry"}
 }
 
-// projectDir is the nearest directory at or above dir (8 levels at most)
-// holding a *.kicad_pro, with its entries; "" when there is none. A directory
-// that does not exist is skipped; any other listing error is returned.
+// projectDir is the nearest directory at or above dir, up to the filesystem
+// root, holding a *.kicad_pro, with its entries; "" when there is none. A
+// directory that does not exist is skipped; any other listing error is
+// returned.
 func projectDir(dir string) (string, []fs.DirEntry, error) {
-	for i := 0; i < 8; i++ {
+	for {
 		ents, err := readDirFn(dir)
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return "", nil, fmt.Errorf("cannot list %s: %w", dir, err)
@@ -232,11 +235,12 @@ func projectDir(dir string) (string, []fs.DirEntry, error) {
 }
 
 func classify(lck, target, kind string, mod time.Time, env *Env) LockInfo {
-	li := LockInfo{Path: lck, Target: target, Kind: kind, Mod: mod, State: LockUnreadable}
+	li := LockInfo{Path: lck, Target: target, Kind: kind, Mod: mod, State: LockUnreadable, size: -1}
 	b, err := os.ReadFile(lck)
 	if err != nil {
 		return li
 	}
+	li.raw, li.size = b, int64(len(b))
 	host, usr, ok := parseLock(b)
 	if !ok {
 		return li
@@ -276,25 +280,34 @@ func parseLock(b []byte) (host, usr string, ok bool) {
 	return host, usr, host != "" && usr != ""
 }
 
-func sameHost(a, b string) bool {
-	a, b = strings.ToLower(a), strings.ToLower(b)
-	if a == b {
-		return a != ""
+// sameHost compares a recorded host name with local, this machine's name.
+// Host names are case-insensitive. Different full names are different
+// machines (box.a.example is not box.b.example); the one exception is a
+// recorded short name that is local's own first label (KiCad may record
+// "box" where os.Hostname gives "box.lab.lan"). Anything else is foreign.
+func sameHost(recorded, local string) bool {
+	r, l := strings.ToLower(strings.TrimSpace(recorded)), strings.ToLower(strings.TrimSpace(local))
+	if r == "" || l == "" {
+		return false
 	}
-	// "box" and "box.example.lan" name the same machine.
-	a, _, _ = strings.Cut(a, ".")
-	b, _, _ = strings.Cut(b, ".")
-	return a != "" && a == b
+	if r == l {
+		return true
+	}
+	short, _, _ := strings.Cut(l, ".")
+	return !strings.Contains(r, ".") && r == short
 }
 
-func sameUser(a, b string) bool {
-	norm := func(s string) string {
-		if i := strings.LastIndex(s, `\`); i >= 0 {
-			s = s[i+1:] // DOMAIN\user
-		}
-		return strings.ToLower(s)
+// sameUser compares full user names (DOMAIN\user included), ignoring case
+// only on Windows, where account names are case-insensitive.
+func sameUser(recorded, local string) bool {
+	r, l := strings.TrimSpace(recorded), strings.TrimSpace(local)
+	if r == "" || l == "" {
+		return false
 	}
-	return norm(a) != "" && norm(a) == norm(b)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(r, l)
+	}
+	return r == l
 }
 
 // kicadRunning is true when the GUI may hold the lock, or when the process
@@ -323,9 +336,47 @@ func isKiCadGUI(name string) bool {
 	return n == "kicad" || n == "pcbnew" || n == "eeschema"
 }
 
+// beforeLockRemove, when set by a test, runs just before a lock is re-read
+// for removal.
+var beforeLockRemove func(path string)
+
+// removeLock deletes a lock the policy allows to break, but only if it is
+// still the lock that was classified: same size, mtime and content, and (for
+// a stale candidate) still no KiCad process. A KiCad that starts and
+// rewrites the lock between this re-check and the delete — microseconds —
+// is the window that remains.
+func removeLock(l LockInfo, env *Env) error {
+	if beforeLockRemove != nil {
+		beforeLockRemove(l.Path)
+	}
+	changed := func(why string) error {
+		return &Error{Code: CodeLocked, Path: l.Target, Detail: "lock " + l.Path + " " + why + " while it was being removed",
+			Fix: "KiCad may have just opened the file; close it and retry"}
+	}
+	st, err := statFn(l.Path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return uncheckable(l.Target, "cannot re-stat lock "+l.Path+": "+err.Error(), err)
+	}
+	b, rerr := os.ReadFile(l.Path)
+	if rerr != nil || !st.ModTime().Equal(l.Mod) || st.Size() != l.size || !bytes.Equal(b, l.raw) {
+		return changed("changed")
+	}
+	if l.State == LockStaleCandidate && kicadRunning(envOr(env).Procs) {
+		return changed("became live (KiCad started)")
+	}
+	if err := os.Remove(l.Path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return uncheckable(l.Target, "cannot remove lock "+l.Path+": "+err.Error(), err)
+	}
+	return nil
+}
+
 // Guard checks the locks of targets and removes those the policy allows.
 // It returns every lock found (Broke set on the removed ones) and an
-// E_KICAD_LOCKED *Error if any lock still blocks or the check itself failed.
+// E_KICAD_LOCKED *Error if any lock still blocks, a lock changed while being
+// removed, or the check itself failed.
 func Guard(targets []string, p BreakPolicy, env *Env) ([]LockInfo, error) {
 	locks, err := CheckLocks(targets, env)
 	if err != nil {
@@ -336,10 +387,11 @@ func Guard(targets []string, p BreakPolicy, env *Env) ([]LockInfo, error) {
 	for i := range locks {
 		l := &locks[i]
 		if p.allows(l.State) {
-			if err := os.Remove(l.Path); err == nil || errors.Is(err, fs.ErrNotExist) {
-				l.Broke = true
-				continue
+			if err := removeLock(*l, env); err != nil {
+				return locks, err
 			}
+			l.Broke = true
+			continue
 		}
 		if first == "" {
 			first = l.Target

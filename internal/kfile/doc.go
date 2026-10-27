@@ -43,20 +43,31 @@
 //     <root>/.pcbpilot/writer.lock (Windows share mode, Unix flock), released
 //     by the kernel when the holder dies; Apply, Recover and Discard take it.
 //
-// Durability: file contents are fsynced before they are renamed into place.
-// On Unix every directory whose entries change (target directories, the txn
-// and backup directories and their new ancestors) is fsynced, and a failed
-// fsync is an error. Windows cannot flush a directory handle: renames use
-// MoveFileExW WRITE_THROUGH, which returns after the rename is on disk, and
-// for created files (backups, the journal) durability rests on NTFS metadata
-// journaling plus the ordering above — the journal says "commit" only after
-// the backup contents are flushed, and is itself replaced with a
-// write-through rename. The POSIX-rename fallback is not write-through.
+// Durability on Unix: file contents are fsynced before they are renamed
+// into place; every directory whose entries change (target directories, the
+// txn and backup directories, and the parents of directories Stage created,
+// bottom-up to the first one that already existed) is fsynced, and a failed
+// fsync is an error. Each backup is hashed after copying and must equal the
+// base hash before the journal says "commit".
+//
+// Durability on Windows is best effort. Windows cannot flush a directory
+// handle, so whether a newly created directory entry (a backup, the
+// journal, a created directory or file) survives a power loss depends on
+// NTFS metadata journaling. What pcbpilot does: every file it creates is
+// flushed (FlushFileBuffers) before it is used; targets and the journal are
+// replaced with MoveFileExW WRITE_THROUGH; the POSIX-rename fallback flushes
+// the renamed file. Remaining windows: after a power cut, a just-created
+// backup or journal entry may be missing even though its data was flushed
+// (so a journal may be lost, leaving targets half-applied with no automatic
+// recover), and on non-NTFS volumes (FAT/exFAT, some network shares) none
+// of the metadata ordering is guaranteed.
 //
 // TOCTOU window: the lock check and the base re-hash happen immediately
 // before each rename, not atomically with it. A writer that replaces the file
 // (or KiCad that starts and saves) between that check and the rename —
 // typically well under a millisecond — is overwritten without detection. No
 // operating-system lock closes this window because KiCad itself neither holds
-// nor checks one when it saves.
+// nor checks one when it saves. Likewise a stale lock is re-read (size,
+// mtime, content) and the KiCad process list re-checked right before it is
+// deleted; a KiCad that rewrites it within those microseconds loses its lock.
 package kfile

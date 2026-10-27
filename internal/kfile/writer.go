@@ -19,10 +19,14 @@ type writerInfo struct {
 	Time time.Time `json:"time"`
 }
 
-// Writer is a held project writer lock.
+// Writer is a held project writer lock. Operations that are given a Writer
+// (Apply, Recover, Discard) hold its operation lease for their whole run, so
+// two of them sharing one Writer run one after the other, and Release waits
+// for the running one to finish.
 type Writer struct {
 	root string
-	mu   sync.Mutex
+	op   sync.Mutex // operation lease
+	mu   sync.Mutex // guards f
 	f    *os.File
 }
 
@@ -76,11 +80,14 @@ func AcquireWriter(root string, env *Env) (*Writer, error) {
 // Root is the project directory the lock covers.
 func (w *Writer) Root() string { return w.root }
 
-// Release gives up the lock. Calling it again is a no-op.
+// Release gives up the lock once no operation is using it. Calling it again
+// is a no-op.
 func (w *Writer) Release() error {
 	if w == nil {
 		return nil
 	}
+	w.op.Lock()
+	defer w.op.Unlock()
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.f == nil {
@@ -97,14 +104,17 @@ func (w *Writer) covers(root string) bool {
 	return w.f != nil && sameDir(w.root, root)
 }
 
-// writerFor returns a release func for w when w covers root (a no-op: the
-// caller keeps owning w), or acquires the lock for root.
+// writerFor takes the operation lease of w when w covers root (release
+// returns the lease; the caller keeps owning w), or acquires the lock for
+// root (release gives it up).
 func writerFor(w *Writer, root string, env *Env) (release func(), err error) {
 	if w != nil {
+		w.op.Lock()
 		if !w.covers(root) {
+			w.op.Unlock()
 			return nil, fmt.Errorf("the writer lock passed in is for %s (or released), not %s", w.root, root)
 		}
-		return func() {}, nil
+		return w.op.Unlock, nil
 	}
 	nw, err := AcquireWriter(root, env)
 	if err != nil {
