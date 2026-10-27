@@ -149,7 +149,8 @@ class ReadbackTest(unittest.TestCase):
             self.assertTrue(board.compare("x", want, got), "missing %s not caught" % k)
 
     def test_hole(self):
-        self.check_every_field(board.expect_hole(HOLE, "H1"))
+        self.check_every_field(board.expect_hole(HOLE, "H1", [0, 1, 2, 3, 4]))
+        self.assertEqual(board.expect_hole(dict(HOLE, type="npth"), "H1", [0])["number"], "")
 
     def test_zone(self):
         self.check_every_field(board.expect_zone(ZONE, ["B.Cu", "F.Cu"], [[0, 0], [10, 0], [10, 10]]))
@@ -179,6 +180,20 @@ class ReadbackTest(unittest.TestCase):
             self.assertTrue(board.check_stackup_rows(want, bad, "ENIG", finish), "altered %s.%s not caught" % (i, k))
         self.assertTrue(board.check_stackup_rows(want, rows, "OSP", finish))
         self.assertTrue(board.check_stackup_rows(want, rows[:2], "ENIG", finish))
+
+    def test_stackup_colors(self):
+        want = [{"name": "F.SilkS", "type": "Top Silk Screen", "thickness": 0, "color": "White"},
+                {"name": "F.Mask", "type": "Top Solder Mask", "thickness": 0.01, "color": "Green"}]
+        block = ('(stackup\n\t(layer "F.SilkS"\n\t\t(type "Top Silk Screen")\n\t\t(color "White")\n\t)\n'
+                 '\t(layer "F.Mask" (type "Top Solder Mask") (color "Green") (thickness 0.01))\n\t(copper_finish "None")\n)')
+        rows, finish = board.read_stackup(block)
+        self.assertEqual(board.check_stackup_rows(want, rows, "None", finish), [])
+        for i in range(2):
+            bad = [dict(r) for r in rows]
+            bad[i]["color"] = "Black"
+            self.assertTrue(board.check_stackup_rows(want, bad, "None", finish), "altered colour %d not caught" % i)
+            del bad[i]["color"]
+            self.assertTrue(board.check_stackup_rows(want, bad, "None", finish), "missing colour %d not caught" % i)
 
     def test_bool_is_not_a_number(self):
         self.assertTrue(board.compare("", {"locked": True}, {"locked": 1}))

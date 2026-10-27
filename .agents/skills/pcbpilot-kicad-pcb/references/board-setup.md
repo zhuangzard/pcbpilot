@@ -30,15 +30,15 @@
 | `new --out X.kicad_pcb [--layers 2\|4\|6]` | 空板 + 工程文件 | 空板没有网：铺铜/带网孔要等原理图同步（或已有网的板） |
 | `outline --rect W,H [--origin X,Y] [--corner-radius R]` / `--polygon "x,y …"` / `--circle X,Y,D` | Edge.Cuts 板框（线段 + 真圆弧） | 已有板框 → `E_BOARD_OUTLINE_EXISTS`，只有 `--replace` 才删掉板级 Edge.Cuts 重画；自交/重复点/零面积 → `E_BOARD_GEOMETRY` |
 | `outline … --slot X1,Y1,X2,Y2,W` / `--cutout-circle` / `--cutout-rect` / `--cutout-polygon` | 槽孔、挖空 | 必须整个在板内且互不重叠；不给外形时加到现有板框上（没有闭合板框 → `E_BOARD_NO_OUTLINE`）；板边缺口画进外形多边形 |
-| `stackup --layers 2\|4\|6 [--thickness 1.6] [--outer-copper 0.035] [--inner-copper 0.0175] [--dielectric t1,t2,…] [--finish ENIG]` | 层数 + 物理层叠 | 介质 core/prepreg 交替、默认 FR4 εr 4.5；板厚 = 全部层之和（含阻焊）；减层时被删的内层上还有走线/铺铜/焊盘/图形 → `E_BOARD_LAYER_IN_USE` |
-| `holes --at X,Y … --drill D [--type pth --pad P --net GND] [--ref H5]` | 安装孔 | 每孔一个锁定、board-only 的 `pcbpilot:MountingHole_*` 封装；必须先有闭合板框（否则 `E_BOARD_NO_OUTLINE`）；NPTH 不能带网/焊环；PTH 必须给 `--pad`；出板、碰到或包住挖空、压焊盘或过孔铜、离已有钻孔（焊盘孔、过孔、本批其他孔）小于板子的孔间距 → 拒绝 |
+| `stackup --layers 2\|4\|6 [--thickness 1.6] [--outer-copper 0.035] [--inner-copper 0.0175] [--dielectric t1,t2,…] [--finish ENIG]` | 层数 + 物理层叠 | 介质 core/prepreg 交替、默认 FR4 εr 4.5；板厚 = 全部层之和（含阻焊）；减层时被删的内层上还有走线/铺铜/图形，或有焊盘显式用到它（SMD、连接器焊盘、只在部分层上的孔；贯穿全部铜层的通孔焊盘不算）→ `E_BOARD_LAYER_IN_USE` |
+| `holes --at X,Y … --drill D [--type pth --pad P --net GND] [--ref H5]` | 安装孔 | 每孔一个锁定、board-only 的 `pcbpilot:MountingHole_*` 封装；必须先有闭合板框（否则 `E_BOARD_NO_OUTLINE`）；NPTH 不能带网/焊环；PTH 必须给 `--pad`；出板、碰到或包住挖空、压焊盘或过孔铜、离已有钻孔（焊盘孔、过孔、本批其他孔）小于板子的孔间距；NPTH 离任何走线/圆弧铜小于孔间隙、PTH 焊环离别的网走线小于铜间距 → 拒绝 |
 | `keepout --rect X,Y,W,H\|--polygon\|--circle [--layers F.Cu,B.Cu] [--forbid tracks,vias,pads,pours,footprints] [--name]` | 规则区 | 默认全部铜层、五项全禁 |
-| `zone --rect …\|--polygon\|--circle\|--board-outline --net GND --layers In1.Cu [--clearance --min-width --thermal-gap --spoke-width --connection thermal\|solid\|none\|tht-thermal --priority N] [--no-fill]` | 铺铜 + 灌铜 | 灌铜按 KiCad「全部重灌」做（报告写明重灌了几个区）；`summary.filledAreaMm2` 为 0 有警告 |
+| `zone --rect …\|--polygon\|--circle\|--board-outline --net GND --layers In1.Cu [--clearance --min-width --thermal-gap --spoke-width --connection thermal\|solid\|none\|tht-thermal --priority N] [--no-fill]` | 铺铜 + 灌铜 | 灌铜按 KiCad「全部重灌」做（报告写明重灌了几个区）；灌出来面积为 0（在板外、或整个落在禁铺区里）→ `E_BOARD_VERIFY`，不提交 |
 | `text --text "rev A" --at X,Y [--layer F.Silkscreen\|B.Silkscreen\|F.Fab\|B.Fab] [--size 1 --thickness 0.15 --rotation --justify]` | 板上文字 | 背面层自动镜像；低于板子最小丝印字高/线宽给警告 |
 
 几何判定是精确的（线段/圆弧/圆的真实距离与包含，两个边界相距 ≤ 0.001 mm 算相碰）；与板上已有 Edge.Cuts 比较时，
-板框里的圆弧用 KiCad 自己的折线近似。写后重新加载逐项核对请求的每个属性（孔的位置/钻径/焊盘、铺铜的层/多边形/最小宽度/
-热焊盘间隙与辐条/连接方式/优先级、层叠每层厚度与材料、文字的位置/字号/角度等），任何一项不符 → `E_BOARD_VERIFY`，不提交。
+板框里的圆弧用 KiCad 自己的折线近似。写后重新加载逐项核对请求的每个属性（孔的位置/钻径/焊盘形状、编号、铜层与阻焊层、board-only/不进 BOM/不进坐标文件属性、铺铜的层/多边形/最小宽度/
+热焊盘间隙与辐条/连接方式/优先级、层叠每层厚度、材料与阻焊/丝印颜色、文字的位置/字号/角度等），任何一项不符 → `E_BOARD_VERIFY`，不提交。
 灌铜先清空再由 pcbnew 重新生成，灌铜失败或有区未灌上同样 `E_BOARD_VERIFY`。
 
 `outline`、`holes`、`keepout` 改变铺铜能覆盖的范围：板上已有灌好的铜时会自动全部重灌（警告里写明）。

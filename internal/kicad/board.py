@@ -558,9 +558,16 @@ def layers_in_use(board, drop):
     for d in board.GetDrawings():
         if d.GetLayer() in drop:
             hit("drawings")
+    enabled = set(board.GetEnabledLayers().CuStack())
     for fp in board.GetFootprints():
         for p in fp.Pads():
-            if p.GetAttribute() == pcbnew.PAD_ATTRIB_SMD and p.GetLayer() in drop:
+            cu = set(p.GetLayerSet().CuStack())
+            # A plated or unplated hole through every copper layer ("*.Cu")
+            # simply loses the dropped layers; any other pad that names a
+            # dropped layer (SMD, connector, a hole on chosen layers) uses it.
+            if p.GetAttribute() in (pcbnew.PAD_ATTRIB_PTH, pcbnew.PAD_ATTRIB_NPTH) and cu >= enabled:
+                continue
+            if cu & set(drop):
                 hit("pads")
         for g in fp.GraphicalItems():
             if g.GetLayer() in drop:
@@ -619,7 +626,8 @@ def stackup_text(text):
     return text[st[0]:st[1]] if st else ""
 
 
-STACKUP_FIELDS = {"type": "type", "thickness": "thickness", "material": "material", "epsilon_r": "epsilonR", "loss_tangent": "lossTangent"}
+STACKUP_FIELDS = {"type": "type", "thickness": "thickness", "material": "material", "epsilon_r": "epsilonR", "loss_tangent": "lossTangent",
+                  "color": "color"}
 
 
 def read_stackup(block):
@@ -720,9 +728,13 @@ def hole_conflicts(board, h):
     h2h, hclr = mm(ds.m_HoleToHoleMin), mm(ds.m_HoleClearance)
     x, y, rd, rp = h["x"], h["y"], h["drill"] / 2, h["pad"] / 2
     pth = h["type"] == "pth"
+    clr = max(mm(ds.m_MinClearance), mm(ds.m_NetSettings.GetDefaultNetclass().GetClearance()))
     out = []
     for t in board.GetTracks():
         if t.Type() != pcbnew.PCB_VIA_T:
+            why = track_conflict(t, x, y, rd, rp, pth, h.get("net") or "", clr, hclr)
+            if why:
+                out.append(why)
             continue
         vx, vy = mm(t.GetPosition().x), mm(t.GetPosition().y)
         d = math.hypot(vx - x, vy - y)
@@ -748,6 +760,40 @@ def hole_conflicts(board, h):
                     out.append("the drill is %.3f mm from the drill of %s pad %s; the board's hole-to-hole minimum is %g mm" % (gap, fp.GetReference(), p.GetNumber(), h2h))
                     break
     return out
+
+
+def track_dist(t, p):
+    """Distance (mm) from p to the centre line of a track segment or arc."""
+    a, b = xy_mm(t.GetStart()), xy_mm(t.GetEnd())
+    if t.Type() == pcbnew.PCB_ARC_T:
+        c, m = xy_mm(t.GetCenter()), xy_mm(t.GetMid())
+        ang = lambda q: math.atan2(q[1] - c[1], q[0] - c[0])
+        a0, a1, am = ang(a), ang(b), ang(m)
+        sw = math.fmod(a1 - a0, 2 * math.pi)
+        if sw < 0:
+            sw += 2 * math.pi
+        arc = [c[0], c[1], dist(a, c), a0, sw]
+        if not in_span(arc, am):
+            arc[4] = sw - 2 * math.pi  # the arc runs the other way round
+        return pt_arc(p, arc)
+    return pt_seg(p, a, b)
+
+
+def track_conflict(t, x, y, rd, rp, pth, net, clr, hclr):
+    """Why a new hole at (x, y) (drill radius rd, pad radius rp) cannot sit
+    by track t: an NPTH drill within the hole clearance of the track copper
+    (any net), a PTH ring within the copper clearance of a track of another
+    net, or a PTH drill within the hole clearance of any track."""
+    d = track_dist(t, (x, y)) - mm(t.GetWidth()) / 2
+    at = "the %s on %s at (%s, %s)-(%s, %s)" % ("arc" if t.Type() == pcbnew.PCB_ARC_T else "track", pcbnew.LayerName(t.GetLayer()),
+                                                  fmt_num(mm(t.GetStart().x)), fmt_num(mm(t.GetStart().y)), fmt_num(mm(t.GetEnd().x)), fmt_num(mm(t.GetEnd().y)))
+    if pth and t.GetNetname() != net and d - rp < clr:
+        return "the pad is %.3f mm from %s (net %s); the copper clearance is %g mm" % (d - rp, at, t.GetNetname() or "none", clr)
+    if not pth and d - rd < hclr:
+        return "the hole is %.3f mm from %s; the board's hole clearance is %g mm" % (d - rd, at, hclr)
+    if pth and t.GetNetname() == net and net and d - rd < hclr:
+        return "the drill is %.3f mm from %s; the board's hole clearance is %g mm" % (d - rd, at, hclr)
+    return ""
 
 
 def next_refs(board, count, taken):
@@ -816,7 +862,9 @@ def op_holes(board, spec, P):
             pad.SetNumber("1")
         else:
             pad.SetAttribute(pcbnew.PAD_ATTRIB_NPTH)
-            pad.SetLayerSet(pcbnew.PAD.UnplatedHoleMask())
+            # "*.Cu *.Mask" like KiCad's own MountingHole NPTHs (pcbnew
+            # writes UnplatedHoleMask() back as that anyway).
+            pad.SetLayerSet(pcbnew.PAD.PTHMask())
             pad.SetNumber("")
         pad.SetPosition(at)
         if net is not None:
@@ -842,20 +890,41 @@ def op_holes(board, spec, P):
     return refill_filled(board, {"created": created, "removed": []})
 
 
-def expect_hole(h, ref):
+def hole_layers(pth):
+    """Layer ids a mounting hole pad is on (sorted)."""
+    return sorted(pcbnew.PAD.PTHMask().Seq())
+
+
+def expect_hole(h, ref, layers):
+    pth = h["type"] == "pth"
     return {"ref": ref, "x": h["x"], "y": h["y"], "padPos": [h["x"], h["y"]], "drill": [h["drill"], h["drill"]],
-            "pad": [h["pad"], h["pad"]], "type": h["type"], "net": h.get("net") or "", "locked": True, "pads": 1}
+            "pad": [h["pad"], h["pad"]], "type": h["type"], "net": h.get("net") or "", "locked": True, "pads": 1,
+            "boardOnly": True, "excludeFromBOM": True, "excludeFromPos": True, "shape": "circle",
+            "number": "1" if pth else "", "layers": layers}
+
+
+def pad_shape(p):
+    try:
+        k = p.GetShape()
+    except TypeError:  # KiCad 10 padstacks: the front layer's shape
+        k = p.GetFrontShape()
+    return {pcbnew.PAD_SHAPE_CIRCLE: "circle", pcbnew.PAD_SHAPE_RECTANGLE: "rect", pcbnew.PAD_SHAPE_OVAL: "oval",
+            pcbnew.PAD_SHAPE_ROUNDRECT: "roundrect"}.get(k, "shape %d" % k)
 
 
 def read_hole(fp):
     pads = list(fp.Pads())
-    got = {"ref": fp.GetReference(), "x": mm(fp.GetPosition().x), "y": mm(fp.GetPosition().y), "locked": bool(fp.IsLocked()), "pads": len(pads)}
+    a = fp.GetAttributes()
+    got = {"ref": fp.GetReference(), "x": mm(fp.GetPosition().x), "y": mm(fp.GetPosition().y), "locked": bool(fp.IsLocked()), "pads": len(pads),
+           "boardOnly": bool(a & pcbnew.FP_BOARD_ONLY), "excludeFromBOM": bool(a & pcbnew.FP_EXCLUDE_FROM_BOM),
+           "excludeFromPos": bool(a & pcbnew.FP_EXCLUDE_FROM_POS_FILES)}
     if pads:
         p = pads[0]
         attr = p.GetAttribute()
         got.update({"padPos": xy_mm(p.GetPosition()), "drill": [mm(p.GetDrillSizeX()), mm(p.GetDrillSizeY())],
                     "pad": [mm(p.GetSizeX()), mm(p.GetSizeY())], "net": p.GetNetname(),
-                    "type": "pth" if attr == pcbnew.PAD_ATTRIB_PTH else "npth" if attr == pcbnew.PAD_ATTRIB_NPTH else "attr %d" % attr})
+                    "type": "pth" if attr == pcbnew.PAD_ATTRIB_PTH else "npth" if attr == pcbnew.PAD_ATTRIB_NPTH else "attr %d" % attr,
+                    "shape": pad_shape(p), "number": p.GetNumber(), "layers": sorted(p.GetLayerSet().Seq())})
     return got
 
 
@@ -866,7 +935,7 @@ def verify_holes(board, spec, res, V):
         if fp is None:
             V.append("hole %s missing after the write" % c["name"])
             continue
-        V += compare("hole " + c["name"], expect_hole(h, c["name"]), read_hole(fp))
+        V += compare("hole " + c["name"], expect_hole(h, c["name"], hole_layers(h["type"] == "pth")), read_hole(fp))
 
 
 # ── keepout and zone ────────────────────────────────────────────────────────
@@ -1007,7 +1076,7 @@ def verify_zone(board, spec, res, V):
         area = sum(abs(z.GetFilledPolysList(l).Area()) for l in z.GetLayerSet().CuStack() if z.HasFilledPolysForLayer(l))
         res["summary"]["filledAreaMm2"] = round(area / 1e12, 3)
         if area <= 0:
-            res.setdefault("warnings", []).append("the zone filled to nothing: check its net, clearance and that it overlaps the board")
+            V.append("the zone filled to nothing (outside the board, or covered by a keepout that forbids pours): give it a shape on the board")
 
 
 # ── text ────────────────────────────────────────────────────────────────────

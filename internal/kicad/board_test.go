@@ -438,3 +438,15 @@ func TestBoardExactContainment(t *testing.T) {
 		t.Error("outline validation missed the enclosed cutout")
 	}
 }
+
+func TestStackupRowsCarryColors(t *testing.T) {
+	rows := StackupSpec{Layers: 2, MaskColor: "Black", SilkColor: "Yellow"}.payload()["rows"].([]map[string]any)
+	want := map[string]string{"F.SilkS": "Yellow", "F.Mask": "Black", "B.Mask": "Black", "B.SilkS": "Yellow"}
+	for _, r := range rows {
+		if c, ok := want[r["name"].(string)]; ok && r["color"] != c {
+			t.Errorf("%s colour %v, want %s", r["name"], r["color"], c)
+		} else if !ok && r["color"] != nil {
+			t.Errorf("%s has colour %v", r["name"], r["color"])
+		}
+	}
+}

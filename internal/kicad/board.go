@@ -893,6 +893,9 @@ func (s StackupSpec) payload() map[string]any {
 	var rows []map[string]any
 	for _, l := range s.layers() {
 		r := map[string]any{"name": l.Name, "type": l.Type, "thickness": bdRound6(l.Thickness)}
+		if l.Color != "" {
+			r["color"] = l.Color
+		}
 		if l.Dielectric {
 			r["material"], r["epsilonR"], r["lossTangent"] = l.Material, l.EpsilonR, l.LossTan
 		}

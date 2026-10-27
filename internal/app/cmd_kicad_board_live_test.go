@@ -260,6 +260,22 @@ func boardLiveRefused(t *testing.T, tools *kicad.Tools, op string, o kicadBoardO
 	return rep
 }
 
+// seedPy runs body against pcb with KiCad's python (b0 = the board, P(x, y)
+// = a point in mm) and saves it: fixtures a schematic sync or the PCB
+// editor would make.
+func seedPy(t *testing.T, tools *kicad.Tools, pcb, body string) {
+	t.Helper()
+	script := filepath.Join(t.TempDir(), "seed.py")
+	src := "import sys, pcbnew\nb0 = pcbnew.LoadBoard(sys.argv[1])\n" +
+		"P = lambda x, y: pcbnew.VECTOR2I(pcbnew.FromMM(x), pcbnew.FromMM(y))\n" + body + "\npcbnew.SaveBoard(sys.argv[1], b0)\n"
+	if err := os.WriteFile(script, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(tools.Python, script, pcb).CombinedOutput(); err != nil {
+		t.Fatalf("seed: %v\n%s", err, out)
+	}
+}
+
 // seedVia adds a through via on net at (x, y) mm.
 func seedVia(t *testing.T, tools *kicad.Tools, pcb, net string, x, y float64) {
 	t.Helper()
@@ -302,6 +318,44 @@ func TestKicadBoardLiveRefusals(t *testing.T) {
 	boardLiveRefused(t, tools, "holes", in, &kicad.HolesSpec{Holes: []kicad.HoleSpec{{X: 61, Y: 25, Drill: 2.2, Pad: 3.5, Type: "pth", Net: "GND"}}}, 2, kicad.ErrBoardOverlap)
 	boardLiveRefused(t, tools, "holes", in, &kicad.HolesSpec{Holes: []kicad.HoleSpec{{X: 61.5, Y: 25, Drill: 2}}}, 2, kicad.ErrBoardOverlap)
 	boardLiveOp(t, tools, "holes", pcb, &kicad.HolesSpec{Holes: []kicad.HoleSpec{{X: 70, Y: 25, Drill: 2}}})
+
+	// Tracks: an NPTH through a trace (segment or arc), a PTH ring on a
+	// trace of another net.
+	seedPy(t, tools, pcb, `
+def track(net, layer, a, b, mid=None):
+    t = pcbnew.PCB_ARC(b0) if mid else pcbnew.PCB_TRACK(b0)
+    t.SetStart(P(*a)); t.SetEnd(P(*b))
+    if mid: t.SetMid(P(*mid))
+    t.SetWidth(pcbnew.FromMM(0.25)); t.SetLayer(layer); t.SetNet(net); b0.Add(t)
+sig = pcbnew.NETINFO_ITEM(b0, "SIG"); b0.Add(sig)
+track(b0.FindNet("GND"), pcbnew.F_Cu, (40, 45), (55, 45))
+track(sig, pcbnew.B_Cu, (40, 10), (55, 10))
+track(b0.FindNet("GND"), pcbnew.F_Cu, (10, 40), (20, 40), mid=(15, 35))
+`)
+	boardLiveRefused(t, tools, "holes", in, &kicad.HolesSpec{Holes: []kicad.HoleSpec{{X: 47, Y: 45, Drill: 2}}}, 2, kicad.ErrBoardOverlap)
+	boardLiveRefused(t, tools, "holes", in, &kicad.HolesSpec{Holes: []kicad.HoleSpec{{X: 15, Y: 35, Drill: 1}}}, 2, kicad.ErrBoardOverlap)
+	boardLiveRefused(t, tools, "holes", in, &kicad.HolesSpec{Holes: []kicad.HoleSpec{{X: 47, Y: 11.5, Drill: 2.2, Pad: 3.5, Type: "pth", Net: "GND"}}}, 2, kicad.ErrBoardOverlap)
+	boardLiveOp(t, tools, "holes", pcb, &kicad.HolesSpec{Holes: []kicad.HoleSpec{{X: 15, Y: 39, Drill: 1}}}) // inside the arc's bow, clear of it
+
+	// Zones that fill to nothing: outside the board, inside a no-pour keepout.
+	boardLiveRefused(t, tools, "zone", in, &kicad.ZoneSpec{Shape: kicad.BoardShape{Rect: &kicad.BoardRect{X: 100, Y: 100, Width: 10, Height: 10}},
+		Net: "GND", Layers: []string{"F.Cu"}}, 6, kicad.ErrBoardVerify)
+	boardLiveOp(t, tools, "keepout", pcb, &kicad.KeepoutSpec{Shape: kicad.BoardShape{Rect: &kicad.BoardRect{X: 60, Y: 35, Width: 15, Height: 10}}})
+	boardLiveRefused(t, tools, "zone", in, &kicad.ZoneSpec{Shape: kicad.BoardShape{Rect: &kicad.BoardRect{X: 63, Y: 38, Width: 4, Height: 4}},
+		Net: "GND", Layers: []string{"F.Cu"}}, 6, kicad.ErrBoardVerify)
+
+	// Fewer copper layers: a through-hole pad on every layer is fine, a
+	// connector pad on In1.Cu blocks the removal.
+	boardLiveOp(t, tools, "stackup", pcb, &kicad.StackupSpec{Layers: 4})
+	boardLiveOp(t, tools, "stackup", pcb, &kicad.StackupSpec{Layers: 2})
+	boardLiveOp(t, tools, "stackup", pcb, &kicad.StackupSpec{Layers: 4})
+	seedPy(t, tools, pcb, `
+fp = pcbnew.FOOTPRINT(b0); fp.SetReference("J9"); fp.SetPosition(P(70, 10))
+p = pcbnew.PAD(fp); p.SetAttribute(pcbnew.PAD_ATTRIB_CONN); p.SetShape(pcbnew.PAD_SHAPE_RECTANGLE)
+p.SetSize(pcbnew.VECTOR2I(pcbnew.FromMM(1), pcbnew.FromMM(2))); ls = pcbnew.LSET(); ls.AddLayer(pcbnew.In1_Cu); p.SetLayerSet(ls)
+p.SetNumber("1"); p.SetPosition(P(70, 10)); fp.Add(p); fp.SetAttributes(pcbnew.FP_BOARD_ONLY); b0.Add(fp)
+`)
+	boardLiveRefused(t, tools, "stackup", in, &kicad.StackupSpec{Layers: 2}, 2, kicad.ErrBoardLayerInUse)
 
 	// A rule only the result breaks: no board text on B.Silkscreen.
 	dru := []byte("(version 1)\n(rule \"pcbpilot test: no back text\"\n  (constraint disallow text)\n  (condition \"A.Layer == 'B.Silkscreen'\"))\n")
