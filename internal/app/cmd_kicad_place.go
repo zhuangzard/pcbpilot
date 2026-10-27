@@ -72,7 +72,7 @@ of --place-seeds seeds) and writes the poses back with pcbnew:
 --mech constrains the model only (fixed / edge parts, keep-outs, zones,
 holes); the board outline and holes in the written file stay KiCad's.
 Locked footprints and mounting holes stay put, and so do footprints whose
-designator is shared (two H1) or a placeholder (REF**, G***, R?): they are
+designator is shared (two H1) or a placeholder (empty, REF**, G***, R?): they are
 fixed obstacles, listed in the report notes. Moving parts invalidates the
 copper: tracks and vias are removed and zones unfilled in the output.`,
 		Example: `  pcbpilot kicad place --pcb board.kicad_pcb --out placed/board.kicad_pcb
@@ -342,7 +342,7 @@ var reMountRef = regexp.MustCompile(`^M?H\d+$`)
 // fixed designators.
 //
 // A designator on more than one footprint (two H1, several REF** logos)
-// or a placeholder designator (REF**, G***, R?) cannot be posed by name:
+// or a placeholder designator (empty, REF**, G***, R?) cannot be posed by name:
 // such parts enter the model as "<designator>@kiid:<primitiveId>", fixed,
 // so they stay where they are, keep their room, and get no pose.
 func kicadBoard(raw []byte) (*pcbauto.Board, []string, error) {
@@ -387,6 +387,10 @@ const kicadKeptSep = "@kiid:"
 // footprint (REF**, R?) or a logo (G***).
 var reKicadPlaceholder = regexp.MustCompile(`^[A-Za-z_]*[*?]+$`)
 
+// kicadPlaceholderRef is bridge.py's is_placeholder: an empty designator
+// counts too (it names no footprint, so it cannot be posed either).
+func kicadPlaceholderRef(ref string) bool { return ref == "" || reKicadPlaceholder.MatchString(ref) }
+
 // kicadKeepShared rewrites the snapshot for the placer: every component
 // whose designator is shared or a placeholder gets the unique designator
 // "<designator>@kiid:<primitiveId>" and is locked; footprint holes follow
@@ -411,7 +415,7 @@ func kicadKeepShared(raw []byte) ([]byte, error) {
 	for _, c := range comps {
 		ref, _ := c["designator"].(string)
 		id, _ := c["primitiveId"].(string)
-		if ref == "" || (count[ref] < 2 && !reKicadPlaceholder.MatchString(ref)) {
+		if count[ref] < 2 && !kicadPlaceholderRef(ref) {
 			continue
 		}
 		if id == "" {
@@ -462,7 +466,7 @@ func kicadKeptNotes(fixed []string) []string {
 	var notes []string
 	for _, ref := range order {
 		why := fmt.Sprintf("designator %q is on %d footprints", ref, len(ids[ref]))
-		if reKicadPlaceholder.MatchString(ref) {
+		if kicadPlaceholderRef(ref) {
 			why = fmt.Sprintf("placeholder designator %q (%d footprint(s))", ref, len(ids[ref]))
 		}
 		notes = append(notes, fmt.Sprintf("%s: kept in place, not placed (ids %s); annotate unique designators to place them", why, strings.Join(ids[ref], ", ")))

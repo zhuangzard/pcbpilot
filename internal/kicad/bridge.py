@@ -565,6 +565,21 @@ def netclasses(pcb, reqs_path, out):
         isolation = reqs.get("isolation") or []
         edges = reqs.get("edges") or []
         reqs = reqs.get("nets") or {}
+    bad = []
+    if not isinstance(reqs, dict) or any(not isinstance(r, dict) for r in reqs.values()):
+        bad.append("nets: must map each net name to an object")
+    else:
+        bad += check_fields("nets", [reqs[n] for n in sorted(reqs)], opt=("outerMil", "innerMil", "minMil", "clearanceMil"),
+                            positive=("outerMil", "innerMil", "minMil", "clearanceMil"))
+    bad += check_fields("isolation", isolation, opt=("clearanceMm", "creepageMm"), positive=("clearanceMm", "creepageMm"))
+    bad += check_fields("edges", edges, opt=("mil",), positive=("mil",))
+    for what, lst, keys in (("isolation", isolation, ("aNets", "bNets")), ("edges", edges, ("nets",))):
+        for i, it in enumerate(lst):
+            for k in keys:
+                if isinstance(it, dict) and not isinstance(it.get(k) or [], list):
+                    bad.append("%s[%d].%s: not a list of net names" % (what, i, k))
+    if bad:
+        return reject("netclasses", bad)
     board = pcbnew.LoadBoard(pcb)
     ns = board.GetDesignSettings().m_NetSettings
 
@@ -839,7 +854,9 @@ def pours(pcb, spec_path, out):
         spec = json.load(f)
     board = pcbnew.LoadBoard(pcb)
     zspecs = spec.get("zones", [])
-    bad = check_nets(board, [zs.get("net") for zs in zspecs]) + check_layers(board, [zs.get("layer") for zs in zspecs])
+    bad = check_fields("zones", zspecs, opt=("clearanceMil", "minWidthMil"), positive=("clearanceMil", "minWidthMil"))
+    zspecs = [zs for zs in zspecs if isinstance(zs, dict)]
+    bad += check_nets(board, [zs.get("net") for zs in zspecs]) + check_layers(board, [zs.get("layer") for zs in zspecs])
     if bad:
         return reject("pours", bad)
     for z in list(board.Zones()):
@@ -858,9 +875,9 @@ def pours(pcb, spec_path, out):
     for zs in zspecs:
         net = board.FindNet(zs["net"])
         z = pcbnew.ZONE(board)
-        z.SetLayer(kicad_layer(int(zs["layer"])))
+        z.SetLayer(kicad_layer(zs["layer"]))
         z.SetNetCode(net.GetNetCode())
-        name = "%s %s L%d" % (POUR_PREFIX, zs["net"], int(zs["layer"]))
+        name = "%s %s L%d" % (POUR_PREFIX, zs["net"], zs["layer"])
         z.SetZoneName(name)
         outline = z.Outline()
         outline.NewOutline()
@@ -901,14 +918,74 @@ def check_layers(board, lids):
     copper layer of the board."""
     enabled = set(board.GetEnabledLayers().CuStack())
     bad = []
-    for lid in dict.fromkeys(lids):
+    for lid in distinct(lids):
+        if not is_int(lid):
+            bad.append("layer %r: not an integer layer id" % (lid,))
+            continue
         try:
-            l = kicad_layer(int(lid))
-        except (TypeError, ValueError):
+            l = kicad_layer(lid)
+        except ValueError:
             bad.append("layer %r: no copper layer with that id" % (lid,))
             continue
         if l not in enabled:
             bad.append("layer %r: not enabled on this %d-layer board" % (lid, board.GetCopperLayerCount()))
+    return bad
+
+
+def is_int(v):
+    """An exact JSON integer: not a bool (True == 1), not 1.9 or "1"."""
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def is_num(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
+def distinct(vals):
+    """vals without repeats, by type and value (1, 1.0 and True stay apart)."""
+    seen, out = set(), []
+    for v in vals:
+        k = (type(v).__name__, repr(v))
+        if k not in seen:
+            seen.add(k)
+            out.append(v)
+    return out
+
+
+# Silk text layers (pcbpilot ids): 3 = F.Silkscreen, 4 = B.Silkscreen.
+TEXT_LAYERS = (3, 4)
+
+
+def check_text_layers(lids):
+    """Problems with silk text layer ids (absent = 3, F.Silkscreen)."""
+    return ["text layer %r: not 3 (F.Silkscreen) or 4 (B.Silkscreen)" % (lid,)
+            for lid in distinct(lids) if not (is_int(lid) and lid in TEXT_LAYERS)]
+
+
+def check_fields(what, ops, need=(), opt=(), positive=(), strings=()):
+    """Problems with the numeric / text fields an op list carries: need =
+    required finite numbers, opt = optional (null/absent ok) finite numbers,
+    positive = of those, the ones that must not be negative (required ones
+    not 0 either; an optional 0 means "default"), strings = required
+    non-empty strings."""
+    bad = []
+    for i, op in enumerate(ops):
+        if not isinstance(op, dict):
+            bad.append("%s[%d]: not an object" % (what, i))
+            continue
+        for k in need:
+            if not is_num(op.get(k)):
+                bad.append("%s[%d].%s: %r is not a number" % (what, i, k, op.get(k)))
+        for k in opt:
+            if op.get(k) is not None and not is_num(op.get(k)):
+                bad.append("%s[%d].%s: %r is not a number" % (what, i, k, op.get(k)))
+        for k in positive:
+            v = op.get(k)
+            if is_num(v) and (v < 0 or (v == 0 and k in need)):
+                bad.append("%s[%d].%s: %r is negative or a required zero" % (what, i, k, op.get(k)))
+        for k in strings:
+            if not isinstance(op.get(k), str) or not op.get(k):
+                bad.append("%s[%d].%s: %r is not a non-empty string" % (what, i, k, op.get(k)))
     return bad
 
 
@@ -947,8 +1024,20 @@ def edit(pcb, ops_path, out):
         texts[field_id(e["key"], "ref")] = e["fp"].Reference()
         texts[field_id(e["key"], "value")] = e["fp"].Value()
 
-    # 1. Validate everything before the first change.
+    # 1. Validate everything before the first change: every field the apply
+    # phase reads is checked here, so it cannot stop half way or coerce a
+    # bad value (int(1.9) == 1 would put a track on F.Cu).
     bad = []
+    bad += check_fields("setWidth", ops.get("setWidth") or [], need=("width",), positive=("width",))
+    bad += check_fields("addVias", ops.get("addVias") or [], need=("x", "y"), opt=("diameter", "drill"), positive=("diameter", "drill"))
+    bad += check_fields("addTracks", ops.get("addTracks") or [], need=("startX", "startY", "endX", "endY", "lineWidth"), positive=("lineWidth",))
+    bad += check_fields("setText", ops.get("setText") or [], need=("x", "y"), opt=("rotation", "fontSize", "lineWidth"), positive=("fontSize", "lineWidth"))
+    bad += check_fields("addTexts", ops.get("addTexts") or [], need=("x", "y"), opt=("rotation", "fontSize", "lineWidth"),
+                        positive=("fontSize", "lineWidth"), strings=("text",))
+    bad += check_text_layers([op.get("layer", 3) for op in ops.get("addTexts") or [] if isinstance(op, dict)])
+    for k in ("setWidth", "addVias", "addTracks", "setText", "addTexts", "padZoneNone"):
+        if any(not isinstance(op, dict) for op in ops.get(k) or []):
+            return reject("edit", bad or ["%s: every entry must be an object" % k])
     for op in ops.get("setWidth") or []:
         t = tracks.get(op.get("id"))
         if t is None:
@@ -962,11 +1051,14 @@ def edit(pcb, ops_path, out):
         if op.get("id") not in texts:
             bad.append("setText %s: no such text" % op.get("id"))
     for tid in ops.get("hideTexts") or []:
-        if tid not in texts:
+        if not isinstance(tid, str) or tid not in texts:
             bad.append("hideTexts %s: no such text" % tid)
     zone_pads = []
     for op in ops.get("padZoneNone") or []:
         want = str(op.get("id") or op.get("ref") or "")
+        if op.get("pad") is None:
+            bad.append("padZoneNone %s: no pad given" % want)
+            continue
         e, why = resolve_footprint(entries, want)
         if e is None:
             bad.append("padZoneNone %s.%s: footprint %s" % (want, op.get("pad"), why))
@@ -1004,7 +1096,7 @@ def edit(pcb, ops_path, out):
         t.SetStart(pos(op["startX"], op["startY"]))
         t.SetEnd(pos(op["endX"], op["endY"]))
         t.SetWidth(nm(op["lineWidth"]))
-        t.SetLayer(kicad_layer(int(op["layer"])))
+        t.SetLayer(kicad_layer(op["layer"]))
         t.SetNet(board.FindNet(op["net"]))
         board.Add(t)
         done["addTracks"] += 1
@@ -1026,12 +1118,12 @@ def edit(pcb, ops_path, out):
     for op in ops.get("addTexts") or []:
         t = pcbnew.PCB_TEXT(board)
         t.SetText(op["text"])
-        t.SetLayer(pcbnew.B_SilkS if int(op.get("layer", 3)) == 4 else pcbnew.F_SilkS)
+        t.SetLayer(pcbnew.B_SilkS if op.get("layer", 3) == 4 else pcbnew.F_SilkS)
         h = nm(op.get("fontSize") or 40)
         t.SetTextSize(pcbnew.VECTOR2I(h, h))
         if op.get("lineWidth"):
             t.SetTextThickness(nm(op["lineWidth"]))
-        if int(op.get("layer", 3)) == 4:
+        if op.get("layer", 3) == 4:
             t.SetMirrored(True)
         t.SetHorizJustify(pcbnew.GR_TEXT_H_ALIGN_CENTER)
         t.SetVertJustify(pcbnew.GR_TEXT_V_ALIGN_CENTER)

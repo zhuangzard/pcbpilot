@@ -37,7 +37,7 @@ pcbpilot ──▶ KiCad 自带 Python + pcbnew（internal/kicad/bridge.py，go:
   swig 不暴露 netclass pattern 列表，用户 pattern 从 `.kicad_pro` 读回保留。
 
 - **bridge 写操作全有或全无**：`edit`（加线/过孔、改线宽、丝印、`padZoneNone`）、`pours` 先校验全部网名、
-  层号、对象 id 与位号；任一网不在板上（不会再静默落到 0 号无网）、id 不存在或位号对应多个封装，整批拒绝、
+  层号（必须是精确整数，`1.9`/`true` 拒绝；丝印文字层只能 3/4）、数值字段、对象 id 与位号；任一网不在板上（不会再静默落到 0 号无网）、id 不存在或位号对应多个封装，整批拒绝、
   **不保存**，错误列出每一项（大小写不同的网名给出 `did you mean`）。`padZoneNone` 可用 `id`（快照
   primitiveId）指定封装。`netclasses` 的意图网不在板上仍是忽略并告警（`missingNets`），绝缘/板边域里缺的网
   另列 `missingDomainNets` 并告警。

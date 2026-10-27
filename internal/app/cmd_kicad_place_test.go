@@ -294,3 +294,41 @@ func TestRunKicadPlaceSkipsSharedDesignators(t *testing.T) {
 		t.Fatalf("report notes %q lack the shared H1", rep.Notes)
 	}
 }
+
+// Empty designators are placeholders too: one or several, each becomes a
+// unique fixed model part and gets no pose.
+func TestKicadBoardKeepsEmptyDesignators(t *testing.T) {
+	for _, n := range []int{1, 3} {
+		var snap map[string]any
+		if err := json.Unmarshal(tinyKicadSnapshot(), &snap); err != nil {
+			t.Fatal(err)
+		}
+		comps := snap["components"].([]any)
+		for i := 0; i < n; i++ {
+			x := 300 + 200*float64(i)
+			box := map[string]any{"minX": x - 40, "minY": -1500, "maxX": x + 40, "maxY": -1420}
+			comps = append(comps, map[string]any{"primitiveId": fmt.Sprintf("id-empty-%d", i), "designator": "",
+				"footprint": "Symbol:Logo", "layer": 1, "x": x, "y": -1460, "bbox": box, "courtyard": box})
+		}
+		snap["components"] = comps
+		raw, _ := json.Marshal(snap)
+		b, fixed, err := kicadBoard(raw)
+		if err != nil {
+			t.Fatalf("%d empty: %v", n, err)
+		}
+		for i := 0; i < n; i++ {
+			ref := kicadKeptSep + fmt.Sprintf("id-empty-%d", i)
+			if p := b.Part(ref); p == nil || !p.Fixed || !slices.Contains(fixed, ref) {
+				t.Fatalf("%d empty: %s not a fixed model part (fixed %v)", n, ref, fixed)
+			}
+		}
+		poses := posesFromBoard(b)
+		if len(poses) != 8 { // the tiny board's own parts only
+			t.Fatalf("%d empty: poses %v", n, kicadPlaceKeys(poses))
+		}
+		notes := kicadKeptNotes(fixed)
+		if len(notes) != 1 || !strings.Contains(notes[0], fmt.Sprintf(`placeholder designator "" (%d footprint(s))`, n)) {
+			t.Fatalf("%d empty: notes %q", n, notes)
+		}
+	}
+}

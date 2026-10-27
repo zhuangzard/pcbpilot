@@ -264,3 +264,91 @@ func TestPlaceSharedDesignatorLive(t *testing.T) {
 		}
 	}
 }
+
+// Layer ids must be exact integers (int(1.9) would be F.Cu, True == 1), a
+// silk text layer must be 3 or 4, and numeric fields must be numbers: a bad
+// one anywhere rejects the whole batch with the board unchanged, in place
+// too.
+func TestBridgeRejectsInexactLayersAndBadFieldsLive(t *testing.T) {
+	tools := bridgeLiveTools(t)
+	dir := t.TempDir()
+	pcb := sharedTiny(t, dir)
+	before, _ := os.ReadFile(pcb)
+	unchanged := func(what string) {
+		t.Helper()
+		if after, _ := os.ReadFile(pcb); !bytes.Equal(before, after) {
+			t.Fatalf("%s: rejected in-place write changed the board", what)
+		}
+	}
+	track := func(layer any) map[string]any {
+		return map[string]any{"net": "GND", "layer": layer, "startX": 100, "startY": -100, "endX": 300, "endY": -100, "lineWidth": 10}
+	}
+	text := func(layer any) map[string]any {
+		m := map[string]any{"text": "X", "x": 500, "y": -500}
+		if layer != nil {
+			m["layer"] = layer
+		}
+		return m
+	}
+	cases := []struct {
+		name string
+		ops  map[string]any
+		want string
+	}{
+		{"track layer 1.9", map[string]any{"addTracks": []any{track(1.9)}}, "layer 1.9: not an integer"},
+		{"track layer true", map[string]any{"addTracks": []any{track(true)}}, "layer True: not an integer"},
+		{"track layer \"1\"", map[string]any{"addTracks": []any{track("1")}}, "layer '1': not an integer"},
+		{"valid track + text layer 1", map[string]any{"addTracks": []any{track(1)}, "addTexts": []any{text(1)}}, "text layer 1: not 3"},
+		{"text layer 3.5", map[string]any{"addTexts": []any{text(3.5)}}, "text layer 3.5: not 3"},
+		{"text layer true", map[string]any{"addTexts": []any{text(true)}}, "text layer True: not 3"},
+		{"track width string", map[string]any{"addTracks": []any{map[string]any{"net": "GND", "layer": 1, "startX": 0, "startY": 0, "endX": 1, "endY": 1, "lineWidth": "10"}}}, "lineWidth: '10' is not a number"},
+		{"via without x", map[string]any{"addVias": []any{map[string]any{"net": "GND", "y": -200}}}, "addVias[0].x"},
+		{"text without text", map[string]any{"addTexts": []any{map[string]any{"x": 1, "y": 1}}}, "addTexts[0].text"},
+	}
+	for _, c := range cases {
+		out := filepath.Join(dir, "out.kicad_pcb")
+		_, err := tools.Edit(pcb, c.ops, out)
+		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), "board not saved") {
+			t.Fatalf("%s: %v, want %q", c.name, err, c.want)
+		}
+		if _, serr := os.Stat(out); serr == nil {
+			t.Fatalf("%s: rejected edit wrote the output board", c.name)
+		}
+		if _, err := tools.Edit(pcb, c.ops, pcb); err == nil {
+			t.Fatalf("%s: in-place edit accepted", c.name)
+		}
+		unchanged(c.name)
+	}
+	// Absent text layer = F.Silkscreen, 4 = B.Silkscreen: accepted.
+	if _, err := tools.Edit(pcb, map[string]any{"addTexts": []any{text(nil), text(4)}}, filepath.Join(dir, "texts.kicad_pcb")); err != nil {
+		t.Fatalf("valid text layers: %v", err)
+	}
+	for _, layer := range []any{1.9, true} {
+		out := filepath.Join(dir, "poured.kicad_pcb")
+		raw, _ := json.Marshal(map[string]any{"zones": []any{map[string]any{"net": "GND", "layer": layer}}})
+		spec := filepath.Join(dir, "pours.json")
+		if err := os.WriteFile(spec, raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tools.RunBridge("pours", pcb, spec, out); err == nil || !strings.Contains(err.Error(), "not an integer") {
+			t.Fatalf("pour layer %v: %v", layer, err)
+		}
+		if _, serr := os.Stat(out); serr == nil {
+			t.Fatalf("pour layer %v: rejected pours wrote the output board", layer)
+		}
+		if _, err := tools.RunBridge("pours", pcb, spec, pcb); err == nil {
+			t.Fatalf("pour layer %v: in-place accepted", layer)
+		}
+		unchanged("pours")
+	}
+	// netclasses: a non-numeric intent width is refused before any change.
+	reqs := filepath.Join(dir, "reqs.json")
+	raw, _ := json.Marshal(map[string]any{"pcbpilotReqs": 2, "nets": map[string]any{"GND": map[string]any{"outerMil": "wide"}}})
+	if err := os.WriteFile(reqs, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tools.RunBridge("netclasses", pcb, reqs, pcb); err == nil || !strings.Contains(err.Error(), "outerMil") {
+		t.Fatalf("netclasses with a string width: %v", err)
+	}
+	unchanged("netclasses")
+}
