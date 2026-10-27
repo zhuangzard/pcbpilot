@@ -3,6 +3,8 @@ package app
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -806,7 +808,7 @@ func sbBackupFiles(t *testing.T, out, sub string) map[string]string {
 		_ = filepath.Walk(d, func(p string, info os.FileInfo, err error) error {
 			if err == nil && !info.IsDir() {
 				b, _ := os.ReadFile(p)
-				got[filepath.Base(p)] = string(b)
+				got[p] = string(b)
 			}
 			return nil
 		})
@@ -872,7 +874,7 @@ func TestSchEditRaceAfterEarlierInstall(t *testing.T) {
 		t.Fatal("the edited sheet was not put back")
 	}
 	found := false
-	for _, v := range sbBackupFiles(t, out, "racing-save") {
+	for _, v := range sbBackupFiles(t, out, "") {
 		found = found || v == racing
 	}
 	if !found {
@@ -958,5 +960,145 @@ func TestSchBuildCaseOnlyRename(t *testing.T) {
 	}
 	if rep, err := runSchBuild(sbGuardSpec(), sbOptions{OutDir: out, Name: "p", NoIntent: true, PlannerBudget: 20000}, nil); err != nil || !rep.OK {
 		t.Fatalf("third build: %v %+v", err, rep.Error)
+	}
+}
+
+// Without hard links the install fails closed (no check-then-rename).
+func TestSbLinkNoReplaceFailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	src, dst := filepath.Join(dir, "a.tmp"), filepath.Join(dir, "a.kicad_sch")
+	_ = os.WriteFile(src, []byte("new"), 0o644)
+	defer func() { sbLink = os.Link }()
+	sbLink = func(string, string) error {
+		return &os.LinkError{Op: "link", Err: errors.New("operation not supported")}
+	}
+	err := sbLinkNoReplace(src, dst)
+	if !errors.Is(err, errSbNoHardLinks) || !strings.Contains(err.Error(), dir) {
+		t.Fatalf("want a no-hard-links error naming the folder, got %v", err)
+	}
+	if fileExists(dst) || !fileExists(src) {
+		t.Fatal("a failed install moved the file anyway")
+	}
+	sbLink = os.Link
+	_ = os.WriteFile(dst, []byte("racing save"), 0o644)
+	if err := sbLinkNoReplace(src, dst); !errors.Is(err, fs.ErrExist) {
+		t.Fatalf("existing dst: %v", err)
+	}
+	if b, _ := os.ReadFile(dst); string(b) != "racing save" {
+		t.Fatal("link install replaced an existing file")
+	}
+}
+
+// End to end: an --out without hard links aborts with NO_ATOMIC_REPLACE and
+// puts every original back.
+func TestSchEditNoHardLinksAborts(t *testing.T) {
+	out := sbGuardBuild(t)
+	before := map[string][]byte{}
+	for _, f := range []string{"p.kicad_pro", "p.kicad_sch", "sym-lib-table"} {
+		before[f], _ = os.ReadFile(filepath.Join(out, f))
+	}
+	defer func() { sbLink, sbInstall = os.Link, func(s, d string) error { return sbRenameNoReplace(s, d) } }()
+	sbLink = func(string, string) error {
+		return &os.LinkError{Op: "link", Err: errors.New("operation not supported")}
+	}
+	sbInstall = sbLinkNoReplace
+	rep, err := runSchEdit(sbOptions{OutDir: out, NoIntent: true, PlannerBudget: 20000}, sbGuardOps)
+	if err != nil || rep.Error == nil || rep.Error.Code != "NO_ATOMIC_REPLACE" || !strings.Contains(rep.Error.Fix, "hard links") {
+		t.Fatalf("no hard links: %v %+v", err, rep.Error)
+	}
+	for f, want := range before {
+		if b, _ := os.ReadFile(filepath.Join(out, f)); !bytes.Equal(b, want) {
+			t.Errorf("%s not put back", f)
+		}
+	}
+}
+
+// Rollback moves pcbpilot's installed file away before it looks at it: a save
+// just before that move is kept, and a save just after it is left in place
+// (the original then stays in the backup).
+func TestSchEditRollbackKeepsRacingSaves(t *testing.T) {
+	for _, when := range []string{"before", "after"} {
+		t.Run(when, func(t *testing.T) {
+			out := sbGuardBuild(t)
+			pro, sheet := filepath.Join(out, "p.kicad_pro"), filepath.Join(out, "p.kicad_sch")
+			origPro, _ := os.ReadFile(pro)
+			defer func() { sbTestAfterInstall, sbTestRollbackMove = nil, nil }()
+			sbTestAfterInstall = func(rel string) {
+				if rel == "p.kicad_pro" {
+					sbTestAfterInstall = nil
+					sbGuardAppend(t, sheet) // the next target fails: rollback
+				}
+			}
+			const racing = `{"saved":"by KiCad during rollback"}`
+			sbTestRollbackMove = func(rel, w string) {
+				if rel == "p.kicad_pro" && w == when {
+					sbTestRollbackMove = nil
+					_ = os.WriteFile(pro, []byte(racing), 0o644)
+				}
+			}
+			rep, err := runSchEdit(sbOptions{OutDir: out, NoIntent: true, PlannerBudget: 20000}, sbGuardOps)
+			if err != nil || rep.Error == nil || rep.Error.Code != "CONCURRENT_CHANGE" {
+				t.Fatalf("rollback: %v %+v", err, rep.Error)
+			}
+			found := false
+			_ = filepath.Walk(sbMetaDir(out), func(p string, info os.FileInfo, err error) error {
+				if err == nil && !info.IsDir() {
+					if b, _ := os.ReadFile(p); string(b) == racing {
+						found = true
+					}
+				}
+				return nil
+			})
+			if b, _ := os.ReadFile(pro); string(b) == racing {
+				found = true
+			}
+			if !found {
+				t.Fatal("a save made during rollback was deleted")
+			}
+			if when == "before" {
+				if b, _ := os.ReadFile(pro); !bytes.Equal(b, origPro) {
+					t.Fatal("original .kicad_pro not put back")
+				}
+			} else {
+				if b, _ := os.ReadFile(pro); string(b) != racing {
+					t.Fatal("the save after the move must stay in place")
+				}
+				if !strings.Contains(rep.Error.Message, "could not put back") {
+					t.Fatalf("the original left in the backup must be named: %s", rep.Error.Message)
+				}
+			}
+		})
+	}
+}
+
+// render/ holds reports only as top-level SVGs; a design file there is design data.
+func TestSbRenderDesignFileIsNotAReport(t *testing.T) {
+	for f, want := range map[string]bool{"render/p.svg": true, "render/x.kicad_sch": false, "render/a/b.svg": false,
+		"render/notes.txt": false, "erc.json": true, "render/X.KICAD_SCH": false, "lib.kicad_sym": false} {
+		if got := sbIsReport(f); got != want {
+			t.Errorf("sbIsReport(%q) = %v, want %v", f, got, want)
+		}
+	}
+	out := sbGuardBuild(t)
+	sbWriteRel(t, out, "render/x.kicad_sch", "(kicad_sch)")
+	rep, err := runSchEdit(sbOptions{OutDir: out, NoIntent: true, PlannerBudget: 20000}, sbGuardOps)
+	if err != nil || rep.Error == nil || rep.Error.Code != "EXTERNAL_EDIT" || !sbContains(rep.External.Added, "render/x.kicad_sch") {
+		t.Fatalf("added render/x.kicad_sch: %v %+v %+v", err, rep.Error, rep.External)
+	}
+	// recorded, then edited: changed, refused (not a report refresh)
+	st := mustSbState(t, out)
+	snap, _ := sbTakeSnapshot(out)
+	st.Manifest["render/x.kicad_sch"] = snap.Files["render/x.kicad_sch"]
+	st.Files = append(st.Files, "render/x.kicad_sch")
+	if err := writeJSONFile(filepath.Join(sbMetaDir(out), "state.json"), st); err != nil {
+		t.Fatal(err)
+	}
+	sbWriteRel(t, out, "render/x.kicad_sch", "(kicad_sch edited)")
+	rep, _ = runSchEdit(sbOptions{OutDir: out, NoIntent: true, PlannerBudget: 20000}, sbGuardOps)
+	if rep.Error == nil || rep.Error.Code != "EXTERNAL_EDIT" || !sbContains(rep.External.Changed, "render/x.kicad_sch") {
+		t.Fatalf("edited render/x.kicad_sch: %+v %+v", rep.Error, rep.External)
+	}
+	if b, _ := os.ReadFile(filepath.Join(out, "render", "x.kicad_sch")); string(b) != "(kicad_sch edited)" {
+		t.Fatal("edited design file under render/ was replaced")
 	}
 }

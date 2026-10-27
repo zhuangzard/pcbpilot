@@ -41,12 +41,13 @@ import (
 var (
 	sbReadFile           = os.ReadFile
 	sbReadDir            = os.ReadDir
-	sbTestBeforeCommit   func(out string) // after generation and gates, before phase 2
-	sbTestAfterPublish   func(out string) // after the files are copied into --out
-	sbTestScanFile       func(rel string) // after each file a snapshot read
-	sbTestAfterMoveAside func(rel string) // publish: the original was moved into the backup
-	sbTestAfterInstall   func(rel string) // publish: the new file is in place
-	sbTestDuringPrepare  func(out string) // after the discard checkpoint and staged hashing, before the live re-check
+	sbTestBeforeCommit   func(out string)       // after generation and gates, before phase 2
+	sbTestAfterPublish   func(out string)       // after the files are copied into --out
+	sbTestScanFile       func(rel string)       // after each file a snapshot read
+	sbTestAfterMoveAside func(rel string)       // publish: the original was moved into the backup
+	sbTestAfterInstall   func(rel string)       // publish: the new file is in place
+	sbTestRollbackMove   func(rel, when string) // rollback: before / after moving pcbpilot's file away
+	sbTestDuringPrepare  func(out string)       // after the discard checkpoint and staged hashing, before the live re-check
 )
 
 // sbExternalEdits is what changed in --out since pcbpilot last wrote it.
@@ -286,7 +287,14 @@ var sbReportNames = []string{"erc.json", "connectivity.json", "values.json", "in
 
 func sbIsReport(f string) bool {
 	f = sbFoldName(f)
-	return sbContains(sbReportNames, f) || strings.HasPrefix(f, "render/")
+	base := f[strings.LastIndex(f, "/")+1:]
+	if sbProjectFile(base) || strings.HasSuffix(base, ".kicad_mod") {
+		return false // design files are never reports, wherever they are
+	}
+	if strings.HasPrefix(f, "render/") {
+		return strings.Count(f, "/") == 1 && strings.HasSuffix(f, ".svg")
+	}
+	return sbContains(sbReportNames, f)
 }
 
 // sbKicadLock: KiCad's lock files are ~<file>.lck; another *.lck is not one.
@@ -746,16 +754,29 @@ func (g *sbGuard) publish(stage string, targets, deletes []string) *sbFailure {
 			stuck = append(stuck, dst)
 		}
 	}
+	code := "CONCURRENT_CHANGE"
 	rollback := func(why string) *sbFailure {
 		for i := len(log) - 1; i >= 0; i-- {
 			d := log[i]
 			dst, _ := sbSafeJoin(g.out, d.f)
 			if d.wrote != "" {
-				if b, err := os.ReadFile(dst); err == nil {
-					if sbContentHash(d.f, b) == d.wrote {
-						_ = os.Remove(dst) // exactly the bytes pcbpilot installed
+				// move whatever is at dst now to a fresh path first (one atomic
+				// rename), then inspect the moved file: a save made in the
+				// meantime is never read-then-deleted
+				if sbTestRollbackMove != nil {
+					sbTestRollbackMove(d.f, "before")
+				}
+				rec := filepath.Join(backup, "rollback", filepath.FromSlash(d.f)+"."+strconv.FormatInt(time.Now().UnixNano(), 36))
+				if os.MkdirAll(filepath.Dir(rec), 0o755) != nil || os.Rename(dst, rec) != nil {
+					stuck = append(stuck, dst)
+				} else {
+					if sbTestRollbackMove != nil {
+						sbTestRollbackMove(d.f, "after")
+					}
+					if b, err := os.ReadFile(rec); err == nil && sbContentHash(d.f, b) == d.wrote {
+						_ = os.Remove(rec) // exactly the bytes pcbpilot installed, now in pcbpilot's own folder
 					} else {
-						keep(d.f, dst)
+						kept = append(kept, rec)
 					}
 				}
 			}
@@ -767,6 +788,9 @@ func (g *sbGuard) publish(stage string, targets, deletes []string) *sbFailure {
 			}
 		}
 		msg := g.out + " changed while sch-build published it: " + why
+		if code != "CONCURRENT_CHANGE" {
+			msg = "cannot publish into " + g.out + ": " + why
+		}
 		if len(kept) > 0 {
 			msg += "; the file(s) saved meanwhile were moved to " + strings.Join(kept, ", ")
 		}
@@ -775,8 +799,11 @@ func (g *sbGuard) publish(stage string, targets, deletes []string) *sbFailure {
 		} else {
 			msg += "; the originals were put back"
 		}
-		return &sbFailure{Code: "CONCURRENT_CHANGE", Message: msg,
-			Fix: "nothing of this build was kept; the backup is " + backup + ". If KiCad has the project open, save and close it there, then re-run"}
+		fix := "nothing of this build was kept; the backup is " + backup + ". If KiCad has the project open, save and close it there, then re-run"
+		if code == "NO_ATOMIC_REPLACE" {
+			fix = "nothing of this build was kept. pcbpilot replaces files with hard links so that a concurrent KiCad save is never overwritten; build into a folder on a file system that supports hard links (choose --out elsewhere)"
+		}
+		return &sbFailure{Code: code, Message: msg, Fix: fix}
 	}
 	step := func(f string, write bool) *sbFailure {
 		dst, err := sbSafeJoin(g.out, f)
@@ -823,11 +850,14 @@ func (g *sbGuard) publish(stage string, targets, deletes []string) *sbFailure {
 		if err := os.WriteFile(tmp, b, 0o644); err != nil {
 			return rollback(err.Error())
 		}
-		if err := sbRenameNoReplace(tmp, dst); err != nil {
+		if err := sbInstall(tmp, dst); err != nil {
 			_ = os.Remove(tmp) // pcbpilot's own temporary copy
 			if errors.Is(err, fs.ErrExist) {
 				keep(f, dst)
 				return rollback(f + " was saved again while it was being replaced")
+			}
+			if errors.Is(err, errSbNoHardLinks) {
+				code = "NO_ATOMIC_REPLACE"
 			}
 			return rollback(err.Error())
 		}
