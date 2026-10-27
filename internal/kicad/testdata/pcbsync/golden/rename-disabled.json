@@ -1,0 +1,87 @@
+{
+  "ops": [
+    {
+      "op": "setPadNet",
+      "fp": "fp-R1",
+      "ref": "R1",
+      "from": "/SIG",
+      "pad": "2",
+      "net": "/SENSE"
+    },
+    {
+      "op": "setPadNet",
+      "fp": "fp-R2",
+      "ref": "R2",
+      "from": "/SIG",
+      "pad": "1",
+      "net": "/SENSE"
+    },
+    {
+      "op": "setPadNet",
+      "fp": "fp-U1",
+      "ref": "U1",
+      "from": "/SIG",
+      "pad": "2",
+      "net": "/SENSE"
+    },
+    {
+      "op": "removeNet",
+      "net": "/SIG",
+      "reason": "no pad is left on the net (tracks 4, vias 1, zones 0 stay)",
+      "info": true
+    }
+  ],
+  "match": {
+    "byPath": 5,
+    "byRef": 0,
+    "unmatchedSymbols": [],
+    "unmatchedFootprints": []
+  },
+  "counts": {
+    "add": 0,
+    "swap": 0,
+    "update": 0,
+    "padNet": 3,
+    "renameNet": 0,
+    "orphanFlag": 0,
+    "orphanRemove": 0
+  },
+  "staged": [],
+  "orphanCopper": [],
+  "danglingCopper": [
+    {
+      "ref": "R1",
+      "pad": "2",
+      "net": "/SIG",
+      "to": "/SENSE",
+      "tracks": 4,
+      "vias": 1,
+      "reason": "the pad leaves a net that has copper; that copper stays on /SIG"
+    },
+    {
+      "ref": "R2",
+      "pad": "1",
+      "net": "/SIG",
+      "to": "/SENSE",
+      "tracks": 4,
+      "vias": 1,
+      "reason": "the pad leaves a net that has copper; that copper stays on /SIG"
+    },
+    {
+      "ref": "U1",
+      "pad": "2",
+      "net": "/SIG",
+      "to": "/SENSE",
+      "tracks": 4,
+      "vias": 1,
+      "reason": "the pad leaves a net that has copper; that copper stays on /SIG"
+    },
+    {
+      "net": "/SIG",
+      "tracks": 4,
+      "vias": 1,
+      "reason": "no pad is left on the net; its copper stays"
+    }
+  ],
+  "errors": []
+}
