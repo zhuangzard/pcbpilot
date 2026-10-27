@@ -522,3 +522,62 @@ func TestBridgeTwinFootprintsLive(t *testing.T) {
 		t.Fatalf("moved %d text(s), hid %d; want the edited twin's designator and graphic text moved, its designator hidden", moved, hidden)
 	}
 }
+
+// Two tracks with one uuid: the snapshot names the shared id, and setWidth
+// on it is refused with nothing saved (a dict by uuid used to widen one of
+// them and save).
+func TestBridgeDuplicateTrackUUIDLive(t *testing.T) {
+	tools := bridgeLiveTools(t)
+	dir := t.TempDir()
+	src, err := os.ReadFile("testdata/tiny.kicad_pcb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := strings.ReplaceAll(string(src), "\r\n", "\n")
+	start := strings.Index(s, "\t(segment")
+	end := strings.Index(s[start:], "\n\t)\n") + len("\n\t)\n")
+	seg := s[start : start+end]
+	twin := strings.Replace(strings.Replace(seg, "(start 10.8 8)", "(start 10.8 12)", 1), "(end 22.5 18.1)", "(end 22.5 22.1)", 1)
+	s = s[:start+end] + twin + s[start+end:]
+	pcb := filepath.Join(dir, "duptrack.kicad_pcb")
+	if err := os.WriteFile(pcb, []byte(s), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := tools.Snapshot(pcb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snap struct {
+		Copper struct {
+			Lines []struct {
+				ID string `json:"primitiveId"`
+			} `json:"lines"`
+			Dup []string `json:"duplicateIds"`
+		} `json:"copper"`
+	}
+	if err := json.Unmarshal(raw, &snap); err != nil {
+		t.Fatal(err)
+	}
+	const id = "b93f23a7-11a1-4363-9345-fd2db67dc1ac"
+	if len(snap.Copper.Lines) != 2 || snap.Copper.Lines[0].ID != snap.Copper.Lines[1].ID {
+		t.Skipf("KiCad did not keep the repeated track uuid on load: %+v", snap.Copper.Lines)
+	}
+	if len(snap.Copper.Dup) != 1 || snap.Copper.Dup[0] != id {
+		t.Fatalf("copper.duplicateIds %v", snap.Copper.Dup)
+	}
+	before, _ := os.ReadFile(pcb)
+	out := filepath.Join(dir, "wide.kicad_pcb")
+	ops := map[string]any{"setWidth": []any{map[string]any{"id": id, "width": 20}}}
+	if _, err := tools.Edit(pcb, ops, out); err == nil || !strings.Contains(err.Error(), "ambiguous: 2 tracks/vias share that uuid") {
+		t.Fatalf("setWidth on a shared uuid: %v", err)
+	}
+	if _, serr := os.Stat(out); serr == nil {
+		t.Fatal("rejected edit wrote the output board")
+	}
+	if _, err := tools.Edit(pcb, ops, pcb); err == nil {
+		t.Fatal("in-place setWidth on a shared uuid accepted")
+	}
+	if after, _ := os.ReadFile(pcb); !bytes.Equal(before, after) {
+		t.Fatal("rejected in-place edit changed the board")
+	}
+}

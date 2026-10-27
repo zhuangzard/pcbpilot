@@ -1508,6 +1508,37 @@ func (s *syncWriter) Write(p []byte) (int, error) {
 	return s.w.Write(p)
 }
 
+// kicadPlannerKeys is one unique planner part key per component (same
+// order): the designator when it is unique, else "<designator>@kiid:<id>"
+// ("#<index>" without an id), allocated against every designator on the
+// board and every key already handed out (a real footprint may be named
+// "H1@kiid:abc"), so pads and courtyards of different footprints never
+// merge.
+func kicadPlannerKeys(comps []boardComp) []string {
+	count, taken := map[string]int{}, map[string]bool{}
+	for _, c := range comps {
+		count[c.Designator]++
+		taken[c.Designator] = true
+	}
+	keys := make([]string, len(comps))
+	for i, c := range comps {
+		if count[c.Designator] == 1 {
+			keys[i] = c.Designator
+			continue
+		}
+		base := c.Designator + kicadKeptSep + c.ID
+		if c.ID == "" {
+			base = fmt.Sprintf("%s%s#%d", c.Designator, kicadKeptSep, i)
+		}
+		k := base
+		for n := 2; taken[k]; n++ {
+			k = fmt.Sprintf("%s~%d", base, n)
+		}
+		taken[k], keys[i] = true, k
+	}
+	return keys
+}
+
 // kicadEscapeEnv is the escape planner's view of a KiCad snapshot: pads,
 // courtyards, per-net clearances (board netclasses and the intent), and the
 // copper already on the board.
@@ -1519,22 +1550,10 @@ func kicadEscapeEnv(s *boardSnapshot, raw []byte, reqs map[string]specctra.NetRe
 		up := func(mil float64) float64 { return math.Ceil(mil*25.4-1e-6) / 25.4 }
 		env.viaDia, env.viaDrill = up(s.Rules.ViaDiameterMil), up(s.Rules.ViaDrillMil)
 	}
-	// A designator on several footprints (two H1) groups the planner's
-	// parts by "<designator>@kiid:<primitiveId>": one part's pads and
-	// courtyard never merge with another's.
-	shared := map[string]int{}
-	for _, c := range s.Components {
-		shared[c.Designator]++
-	}
-	partKey := func(ref, id string) string {
-		if shared[ref] > 1 && id != "" {
-			return ref + kicadKeptSep + id
-		}
-		return ref
-	}
-	for _, c := range s.Components {
+	keys := kicadPlannerKeys(s.Components)
+	for i, c := range s.Components {
 		for _, p := range c.Pads {
-			env.pads = append(env.pads, pcbPadP{ID: p.ID, Designator: partKey(c.Designator, c.ID), Number: p.Number, Net: p.Net, Layer: p.Layer, X: p.X, Y: p.Y, W: p.W, H: p.H})
+			env.pads = append(env.pads, pcbPadP{ID: p.ID, Designator: keys[i], Number: p.Number, Net: p.Net, Layer: p.Layer, X: p.X, Y: p.Y, W: p.W, H: p.H})
 		}
 	}
 	var extra struct {
@@ -1550,9 +1569,9 @@ func kicadEscapeEnv(s *boardSnapshot, raw []byte, reqs map[string]specctra.NetRe
 		NetClassOf map[string]string `json:"netClassOf"`
 	}
 	_ = json.Unmarshal(raw, &extra)
-	for _, c := range extra.Components {
-		if c.Courtyard != nil {
-			env.court[partKey(c.Designator, c.ID)] = *c.Courtyard
+	for i, c := range extra.Components { // the same array as s.Components
+		if c.Courtyard != nil && i < len(keys) {
+			env.court[keys[i]] = *c.Courtyard
 		}
 	}
 	clrOf := map[string]float64{}

@@ -454,6 +454,11 @@ def snapshot(board):
         "pours": pours, "poured": poured, "regions": regions, "fills": fills,
     }
     snap["routedLines"] = len(lines) + len(arcs)
+    rep_ids = sorted(u for u, ts in copper_by_uuid(board).items() if len(ts) > 1)
+    if rep_ids:
+        snap["copper"]["duplicateIds"] = rep_ids
+        notes.append("%d copper id(s) shared by several tracks/vias (%s): edits by those ids are refused"
+                     % (len(rep_ids), ", ".join(rep_ids[:5]) + (", ..." if len(rep_ids) > 5 else "")))
     try:
         snap["silk"] = silk_texts(board, entries)
     except Exception as e:  # silk is optional for the copper consumers
@@ -1082,6 +1087,14 @@ def set_via_width(v, w):
         v.SetWidth(w)
 
 
+def copper_by_uuid(board):
+    """{uuid: [tracks, arcs and vias with it]} in board order."""
+    out = {}
+    for t in board.GetTracks():
+        out.setdefault(t.m_Uuid.AsString(), []).append(t)
+    return out
+
+
 EDIT_OPS = ("setWidth", "addVias", "addTracks", "setText", "addTexts", "hideTexts", "padZoneNone")
 
 
@@ -1091,7 +1104,10 @@ def validate_edit(board, ops):
     coerce a bad value (int(1.9) == 1 would put a track on F.Cu). plan =
     {lists, tracks, texts, zonePads} for the apply phase."""
     L, bad = op_lists("edit", ops, EDIT_OPS)
-    tracks = {t.m_Uuid.AsString(): t for t in board.GetTracks()}
+    # uuid → every track/arc/via carrying it: a converted or hand-merged
+    # board can repeat one, and a dict would keep only the last item.
+    copper = copper_by_uuid(board)
+    tracks = {u: ts[0] for u, ts in copper.items() if len(ts) == 1}
     entries = footprint_index(board)
     text_index_cache = text_index(board, entries)
     texts = {it[0]: it[1] for it in text_index_cache}
@@ -1111,6 +1127,8 @@ def validate_edit(board, ops):
         tid = op.get("id")
         if not isinstance(tid, str) or not tid:
             bad.append("setWidth[%d]: id %r is not a non-empty string" % (i, tid))
+        elif len(copper.get(tid, [])) > 1:
+            bad.append("setWidth[%d]: id %s is ambiguous: %d tracks/vias share that uuid" % (i, tid, len(copper[tid])))
         elif tid not in tracks:
             bad.append("setWidth[%d]: no such track %s" % (i, tid))
         elif tracks[tid].Type() == pcbnew.PCB_VIA_T:

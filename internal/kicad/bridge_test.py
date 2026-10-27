@@ -237,6 +237,16 @@ class ValidateEdit(unittest.TestCase):
         self.assertEqual(problems({"addVias": None, "addTracks": None}), [])
 
 
+class DuplicateCopperIds(unittest.TestCase):
+    def test_shared_track_uuid_is_refused(self):
+        b = board()
+        b.tracks += [Track("t-dup"), Track("t-dup"), Track("t-dup", fake.PCB_VIA_T)]
+        bad, plan = bridge.validate_edit(b, {"setWidth": [{"id": "t-1", "width": 9}, {"id": "t-dup", "width": 9}]})
+        self.assertTrue(has(bad, "id t-dup is ambiguous: 3 tracks/vias share that uuid"), bad)
+        self.assertNotIn("t-dup", plan["tracks"])
+        self.assertEqual(len(bridge.copper_by_uuid(b)["t-dup"]), 3)
+
+
 class ValidatePoursAndNetclasses(unittest.TestCase):
     def test_pours(self):
         b = board()

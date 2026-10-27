@@ -368,3 +368,34 @@ func TestPosesFromBoardSkipsOnlyGeneratedRefs(t *testing.T) {
 		t.Fatalf("notes %q", notes)
 	}
 }
+
+// The escape planner's part keys never collide: two "H1" plus a real
+// footprint named "H1@kiid:abc" (the key the first H1 would get) stay
+// three parts, each with its own pads and courtyard.
+func TestKicadEscapeEnvKeysDoNotCollide(t *testing.T) {
+	comp := func(id, ref string, x float64) map[string]any {
+		box := map[string]any{"minX": x - 50, "minY": -50, "maxX": x + 50, "maxY": 50}
+		return map[string]any{"primitiveId": id, "designator": ref, "layer": 1, "x": x, "y": 0, "courtyard": box,
+			"pads": []any{map[string]any{"primitiveId": id + "-p1", "padNumber": "1", "net": "GND", "layer": 1, "x": x, "y": 0, "width": 30, "height": 30}}}
+	}
+	raw, _ := json.Marshal(map[string]any{"components": []any{comp("abc", "H1", 0), comp("def", "H1", 500), comp("real", "H1@kiid:abc", 1000), comp("u", "U1", 1500)}})
+	var s boardSnapshot
+	if err := json.Unmarshal(raw, &s); err != nil {
+		t.Fatal(err)
+	}
+	keys := kicadPlannerKeys(s.Components)
+	if keys[2] != "H1@kiid:abc" || keys[3] != "U1" || keys[1] != "H1@kiid:def" || keys[0] == keys[2] || keys[0] == "" {
+		t.Fatalf("keys %q", keys)
+	}
+	env := kicadEscapeEnv(&s, raw, nil)
+	byKey := map[string]int{}
+	for _, p := range env.pads {
+		byKey[p.Designator]++
+	}
+	if len(byKey) != 4 || len(env.court) != 4 {
+		t.Fatalf("pads by key %v, courtyards %d: parts merged", byKey, len(env.court))
+	}
+	if c := env.court["H1@kiid:abc"]; c.MinX != 950 {
+		t.Fatalf("the real H1@kiid:abc courtyard was overwritten: %+v", c)
+	}
+}
