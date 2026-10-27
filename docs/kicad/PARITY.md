@@ -39,7 +39,8 @@ KiCad 对等 = **为同一动作协议实现 KiCad 后端**（`--backend kicad`�
 | 原理图检查（sch check/gate/ERC） | 连接器 + 自检 | `pcbpilot kicad sch-check --sch root.kicad_sch [--fix-pwr-flag] [--ignore KIND]`：kicad-cli ERC（JSON）+ pcbpilot 质量检查（符号重叠、导线穿本体、斜线/离栅格/重叠导线、线端或引脚落在导线中段（KiCad 不连）、标签/字段文字压物、标签压线、引脚压标签、图签/出页），JSON 报告，ERC 错误或任一发现即非零；`--fix-pwr-flag` 每个未驱动电源网接一个 PWR_FLAG（逐页门禁 + 网表校验） | 完成（Gas A 导入：10 条 power_pin_not_driven → 0 ERC 错误；剩 199 条封装库未登记警告、92 条美观发现是导入页现状） |
 | 意图推导（intent derive，含安全表） | 离线 | 离线（输入改为 KiCad connectivity） | 进行中 |
 | 仿真 power/analog/post-layout | 离线 | 离线（board-final.json 来自 KiCad） | 进行中 |
-| 布局（pcb auto run / place） | 连接器剧本 | `kicad place`（pcbnew） | 已实现，紧凑度/居中待调 |
+| 板级设置（板框/挖空、层叠、安装孔、禁布区、铺铜、板上文字） | pcb.outline / mount-holes / pour 动作 | `kicad board new\|outline\|stackup\|holes\|keepout\|zone\|text`（mm；Go 校验几何 + board.py/pcbnew 写入并重载核对，kfile 事务提交；stackup 写入 `(setup (stackup …))` 后由 pcbnew 重读规范化；`kicad-cli pcb export stats` 回读尺寸/板厚/孔数，`--drc` 判无新增 DRC 错误） | 完成（v011/board；KiCad 10.0.6：空板全流程 + ecc83-pp / pic_programmer 副本，每步 DRC 无新增错误、SVG 导出） |
+| 布局（pcb auto run / place） | 连接器剧本 | `kicad place`（pcbnew；板框取 Edge.Cuts 最大闭合多边形，板内挖空按精确多边形挡件，`kicad board holes` 的孔固定） | 已实现，紧凑度/居中待调 |
 | 布线（fastroute + 意图规则 + 宽度/过孔阵/IR 闭环） | 连接器 + dsn-fix/ses-repair | `kicad route`（原生 DSN/SES） | 进行中（kicad/core；kicad/pcb-fixes 修了实板缺陷，见下） |
 | 铺铜/电源平面 | pcb.pour.* | pcbnew ZONE + ZONE_FILLER | 进行中 |
 | 全部硬门禁（DRC、意图、安全/隔离、仿真、丝印、说明书、报告、设计评审） | runQualityGates | 同一门禁代码跑在 KiCad 快照上 | 进行中 |
