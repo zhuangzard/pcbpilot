@@ -20,13 +20,16 @@ import (
 //
 // What was verified (KiCad 10.0 on Windows): the lock of a document is
 // "~<file name>.lck" in the document's directory (e.g. ~board.kicad_pcb.lck),
-// the project has its own "~<project>.kicad_pro.lck", kicad-cli takes no lock,
-// KiCad logs "Detected stale lock file, removing it", and the GUI does not
-// keep the document open while editing. The lock content has not been
-// observed from a real session: it is believed to be a JSON object with
-// "hostname" and "username" and no pid. parseLock therefore accepts exactly
-// that (plus the short keys "host"/"user") and classifies anything else as
-// LockUnreadable, which blocks like a live lock.
+// the project has its own "~<project>.kicad_pro.lck", KiCad logs "Detected
+// stale lock file, removing it", and the GUI does not keep the document open
+// while editing. kicad-cli is not lock-free: `kicad-cli pcb drc` (10.0.6)
+// holds "~<project>.kicad_pro.lck" while it runs and removes it when done,
+// so a write next to a board being checked is refused like one next to an
+// open GUI. The content observed from that lock is a compact JSON object
+// {"hostname":…,"username":…} with no pid (testdata/locks/kicad10-real.lck,
+// names neutralised). parseLock accepts exactly that (plus the short keys
+// "host"/"user") and classifies anything else as LockUnreadable, which
+// blocks like a live lock.
 
 // LockState classifies a lock file found next to a target.
 type LockState string
@@ -36,8 +39,8 @@ const (
 	// another user here. Blocks.
 	LockLive LockState = "live"
 	// LockStaleCandidate: this user on this machine, and no kicad / pcbnew /
-	// eeschema process is running. Probably left by a crash. Blocks unless the
-	// policy is BreakStale or BreakAny.
+	// eeschema / kicad-cli process is running. Probably left by a crash.
+	// Blocks unless the policy is BreakStale or BreakAny.
 	LockStaleCandidate LockState = "stale-candidate"
 	// LockForeign: written by another host (shared or synced folder). Its
 	// liveness cannot be checked, so it blocks like a live lock.
@@ -328,12 +331,13 @@ func kicadRunning(list ProcLister) bool {
 	return false
 }
 
-// isKiCadGUI: kicad, pcbnew, eeschema (any case, optional .exe, any path).
-// kicad-cli takes no locks and does not count.
+// isKiCadGUI: a KiCad process that may hold a lock — kicad, pcbnew,
+// eeschema, and kicad-cli, which holds the project lock while `pcb drc`
+// runs (10.0.6) — any case, optional .exe, any path.
 func isKiCadGUI(name string) bool {
 	n := strings.ToLower(filepath.Base(strings.ReplaceAll(name, `\`, "/")))
 	n = strings.TrimSuffix(n, ".exe")
-	return n == "kicad" || n == "pcbnew" || n == "eeschema"
+	return n == "kicad" || n == "pcbnew" || n == "eeschema" || n == "kicad-cli"
 }
 
 // beforeLockRemove, when set by a test, runs just before a lock is re-read
