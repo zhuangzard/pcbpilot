@@ -471,7 +471,13 @@ func (t *Txn) Apply(wantRev string, o Opts) (Plan, error) {
 		// was either restored from its backup (mode included) or never
 		// touched, and a mode someone else gave it (e.g. read-only, the
 		// reason it failed) is theirs. Everything is flushed.
-		if ferr := settle(j.Changes[:i], guardOpts{o.Locks, o.NoLockCheck, o.Env}, j.Changes[i:i+1]...); ferr != nil {
+		// A failed entry that is now a link or directory (what refused it) was
+		// not written through and is not ours to flush.
+		failed := j.Changes[i : i+1]
+		if checkRegular(e.Path) != nil {
+			failed = nil
+		}
+		if ferr := settle(j.Changes[:i], guardOpts{o.Locks, o.NoLockCheck, o.Env}, failed...); ferr != nil {
 			return plan, keepJournal(t.root, errors.Join(err, ferr))
 		}
 		return abandon(wrapf(err, "apply %s (all files restored)", e.Path))
