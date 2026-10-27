@@ -97,6 +97,12 @@ func TestSchEditKeepsLCSCFootprints(t *testing.T) {
 	_ = os.Remove(filepath.Join(kicad.LCSCCacheDir("C99901"), mod))
 	_ = os.Remove(filepath.Join(out, mod))
 	before, _ := os.ReadFile(filepath.Join(out, "lc.kicad_sch"))
+	// removing the project's footprint is itself an edit outside pcbpilot:
+	// refused before any build, unless the user chooses to discard it
+	if er, err := runSchEdit(opt, []sbOp{{Op: "set_value", Ref: "R1", Value: "3k3"}}); er == nil || er.OK || er.Error == nil || er.Error.Code != "EXTERNAL_EDIT" {
+		t.Errorf("removed project footprint not refused as an external edit: err=%v report=%+v", err, er)
+	}
+	opt.DiscardExternal = true
 	er, err = runSchEdit(opt, []sbOp{{Op: "set_value", Ref: "R1", Value: "3k3"}})
 	if er == nil || er.OK || sbGateStatus(er, "erc") != "fail" {
 		t.Errorf("unresolvable own footprint library accepted: err=%v report=%+v", err, er)
