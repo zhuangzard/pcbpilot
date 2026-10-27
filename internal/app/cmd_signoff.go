@@ -450,9 +450,16 @@ func runSignoff(o signoffOpts, waivers []gateWaiver, stderr io.Writer) (*signoff
 	trace := gateResult{Gate: "signoff-trace"}
 	for _, name := range in.sortedNetNames() {
 		n := in.Nets[name]
-		id, ok := schIDs.Resolve(name)
-		if !ok {
-			id, _ = boardIDs.Resolve(name)
+		// Only an unknown name falls back to the board: an ambiguous one
+		// (two sheets with this label) is never looked up elsewhere.
+		ambiguous := ""
+		id, m := schIDs.Resolve(name)
+		if m == netname.Ambiguous {
+			ambiguous = "ambiguous in the schematic: " + strings.Join(schIDs.Candidates(name), " or ")
+		} else if m == netname.Unknown {
+			if id, m = boardIDs.Resolve(name); m == netname.Ambiguous {
+				ambiguous = "ambiguous on the board: " + strings.Join(boardIDs.Candidates(name), " or ")
+			}
 		}
 		row := traceRow{Net: name, Role: n.Role, CurrentA: n.CurrentA, OuterMil: n.WidthMil.Outer, InnerMil: n.WidthMil.Inner,
 			MinMil: n.WidthMil.Min, ClearanceMil: n.ClearanceMil, ViasPerTrans: n.ViasPerTransition, Domain: n.Domain,
@@ -470,12 +477,14 @@ func runSignoff(o signoffOpts, waivers []gateWaiver, stderr io.Writer) (*signoff
 			}
 		}
 		switch {
+		case ambiguous != "":
+			row.Status = ambiguous
 		case len(docs) > 0 && row.SchematicPins == 0:
 			row.Status = "not in the schematic"
 		case row.BoardPads == 0:
 			row.Status = "not on the board"
 		}
-		if row.Status != "ok" && n.WidthMil.Outer > 0 {
+		if row.Status != "ok" && (n.WidthMil.Outer > 0 || ambiguous != "") {
 			trace.Items = append(trace.Items, name+": "+row.Status)
 		}
 		res.Traceability = append(res.Traceability, row)

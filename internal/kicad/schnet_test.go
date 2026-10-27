@@ -2,6 +2,9 @@ package kicad
 
 import (
 	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -13,10 +16,11 @@ import (
 const hierNetXML = `<?xml version="1.0" encoding="utf-8"?>
 <export version="E">
   <design>
-    <sheet number="1" name="/" tstamps="/"/>
-    <sheet number="2" name="/pic_sockets/" tstamps="/a/"/>
-    <sheet number="3" name="/i2c_a/" tstamps="/b/"/>
-    <sheet number="4" name="/i2c_b/" tstamps="/c/"/>
+    <source>ROOT</source>
+    <sheet number="1" name="/" tstamps="/"><title_block><source>root.kicad_sch</source></title_block></sheet>
+    <sheet number="2" name="/pic_sockets/" tstamps="/a/"><title_block><source>sockets.kicad_sch</source></title_block></sheet>
+    <sheet number="3" name="/i2c_a/" tstamps="/b/"><title_block><source>i2c.kicad_sch</source></title_block></sheet>
+    <sheet number="4" name="/i2c_b/" tstamps="/c/"><title_block><source>i2c.kicad_sch</source></title_block></sheet>
   </design>
   <components>
     <comp ref="R1"><value>1k</value><libsource lib="Device" part="R"/><sheetpath names="/" tstamps="/"/></comp>
@@ -38,8 +42,26 @@ const hierNetXML = `<?xml version="1.0" encoding="utf-8"?>
   </nets>
 </export>`
 
+// writeSheets writes sheet files holding the given s-expression lines and
+// returns the XML with its root <source> pointing at them.
+func writeSheets(t *testing.T, xml string, files map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("(kicad_sch\n"+body+"\n)\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return strings.Replace(xml, "ROOT", filepath.Join(dir, "root.kicad_sch"), 1)
+}
+
 func TestSchNetlistCanonicalNetIdentity(t *testing.T) {
-	nl, err := ParseSchNetlist([]byte(hierNetXML))
+	x := writeSheets(t, hierNetXML, map[string]string{
+		"root.kicad_sch":    `(label "VPP{slash}MCLR" (at 0 0 0))`,
+		"sockets.kicad_sch": `(hierarchical_label "VCC_PIC" (shape input))`,
+		"i2c.kicad_sch":     `(label "SDA" (at 0 0 0))`,
+	})
+	nl, err := ParseSchNetlist([]byte(x))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,5 +109,58 @@ func TestSchNetlistCanonicalNetIdentity(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// Two different nets that kicad-cli's XML writes with one name: the root
+// label "pic_sockets/VCC_PIC" and the sub-sheet label "VCC_PIC" both read
+// "/pic_sockets/VCC_PIC". They are never collapsed into one identity (that
+// would hide a short): the sheets of their pins tell them apart, else the
+// netlist is ErrNetAmbiguous.
+func TestSchNetlistSameXMLNameTwoNets(t *testing.T) {
+	const tmpl = `<?xml version="1.0" encoding="utf-8"?>
+<export version="E">
+  <design>
+    <source>ROOT</source>
+    <sheet number="1" name="/" tstamps="/"><title_block><source>root.kicad_sch</source></title_block></sheet>
+    <sheet number="2" name="/pic_sockets/" tstamps="/a/"><title_block><source>sockets.kicad_sch</source></title_block></sheet>
+  </design>
+  <components>
+    <comp ref="R1"><value>1k</value><libsource lib="Device" part="R"/><sheetpath names="/" tstamps="/"/></comp>
+    <comp ref="R2"><value>1k</value><libsource lib="Device" part="R"/><sheetpath names="/pic_sockets/" tstamps="/a/"/></comp>
+  </components>
+  <libparts>
+    <libpart lib="Device" part="R"><pins><pin num="1" name="~" type="passive"/><pin num="2" name="~" type="passive"/></pins></libpart>
+  </libparts>
+  <nets>
+    <net code="1" name="/pic_sockets/VCC_PIC">NODES1</net>
+    <net code="2" name="/pic_sockets/VCC_PIC">NODES2</net>
+  </nets>
+</export>`
+	files := map[string]string{
+		"root.kicad_sch":    `(label "pic_sockets/VCC_PIC" (at 0 0 0))`,
+		"sockets.kicad_sch": `(label "VCC_PIC" (at 0 0 0))`,
+	}
+	// Pins on one sheet each: decidable.
+	x := strings.NewReplacer("NODES1", `<node ref="R1" pin="1"/><node ref="R1" pin="2"/>`,
+		"NODES2", `<node ref="R2" pin="1"/><node ref="R2" pin="2"/>`).Replace(writeSheets(t, tmpl, files))
+	nl, err := ParseSchNetlist([]byte(x))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a, b := nl.Nets[0].Name, nl.Nets[1].Name; a != "/pic_sockets{slash}VCC_PIC" || b != "/pic_sockets/VCC_PIC" {
+		t.Fatalf("identities %q, %q: want the root label and the sub-sheet label apart", a, b)
+	}
+	// Pins of both nets on both sheets: undecidable, never guessed.
+	x = strings.NewReplacer("NODES1", `<node ref="R1" pin="1"/><node ref="R2" pin="1"/>`,
+		"NODES2", `<node ref="R1" pin="2"/><node ref="R2" pin="2"/>`).Replace(writeSheets(t, tmpl, files))
+	if _, err := ParseSchNetlist([]byte(x)); !errors.Is(err, ErrNetAmbiguous) || !strings.Contains(err.Error(), "fix:") {
+		t.Fatalf("want ErrNetAmbiguous with a fix hint, got %v", err)
+	}
+	// No sheet files (no label evidence) and pins on both sheets: an error too.
+	x = strings.NewReplacer("ROOT", "", "NODES1", `<node ref="R1" pin="1"/><node ref="R2" pin="1"/>`,
+		"NODES2", `<node ref="R1" pin="2"/><node ref="R2" pin="2"/>`).Replace(tmpl)
+	if _, err := ParseSchNetlist([]byte(x)); !errors.Is(err, ErrNetAmbiguous) {
+		t.Fatalf("no evidence: want ErrNetAmbiguous, got %v", err)
 	}
 }

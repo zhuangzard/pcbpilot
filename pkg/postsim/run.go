@@ -216,9 +216,11 @@ func Run(boardRaw, simRaw []byte, o Options) (*Result, error) {
 	} else {
 		res.Assumptions = append(res.Assumptions, "thermal: the sim file carries no time-averaged thermal power (written before v0.6.1) — every scenario's operating-point power is treated as continuous (peak bursts overstate the temperature); re-run pcbpilot sim power")
 	}
-	if renamed := simNetsOnBoard(b, sim.Results); len(renamed) > 0 {
+	renamed, nameFindings := simNetsOnBoard(b, sim.Results)
+	if len(renamed) > 0 {
 		res.Assumptions = append(res.Assumptions, "sim nets named by their schematic display name matched to the board's net names (pkg/netname: KiCad's full hierarchical name): "+strings.Join(renamed, ", "))
 	}
+	res.Findings = append(res.Findings, nameFindings...)
 	res.Findings = append(res.Findings, crossCheck(b, scen)...)
 
 	// Roles and ground nets.
@@ -566,8 +568,11 @@ func Run(boardRaw, simRaw []byte, o Options) (*Result, error) {
 // KiCad schematic's display names ("VCC_PIC", "VPP/MCLR") names the board's
 // "/pic_sockets/VCC_PIC" / "/VPP{slash}MCLR". Without it the pin↔pad check
 // reports a false sim-board-mismatch and the net's copper is not found.
-// Names already on the board, unknown and ambiguous names stay.
-func simNetsOnBoard(b *Board, results []powersim.Result) []string {
+// Names already on the board and unknown names stay. Never merged: two sim
+// nets resolving to one board net (or onto a sim net already named so),
+// and a simulated net whose name fits several board nets, stay unrenamed
+// and are sim-board-mismatch failures.
+func simNetsOnBoard(b *Board, results []powersim.Result) ([]string, []Finding) {
 	var ids []string
 	for _, pt := range b.Parts {
 		for _, pd := range pt.Pads {
@@ -583,18 +588,32 @@ func simNetsOnBoard(b *Board, results []powersim.Result) []string {
 	r := netname.NewResolver(ids)
 	done := map[string]bool{}
 	var renamed []string
+	collide, ambiguous := map[string][]string{}, map[string][]string{}
 	for i := range results {
 		res := &results[i]
-		to := map[string]string{}
-		for n := range res.Nets {
-			if id, ok := r.Resolve(n); ok && id != n && res.Nets[id] == nil {
-				to[n] = id
+		dest := map[string][]string{} // board net → sim nets resolving to it
+		for n, nr := range res.Nets {
+			switch id, m := r.Resolve(n); {
+			case m == netname.Found && id != n:
+				dest[id] = append(dest[id], n)
+			case m == netname.Ambiguous && nr != nil && (nr.Role == "power" || nr.Role == "ground" || nr.Role == "switch"):
+				ambiguous[n] = r.Candidates(n)
 			}
 		}
-		for n, id := range to {
+		for id, srcs := range dest {
+			sort.Strings(srcs)
+			_, rippleTaken := res.Ripple[id]
+			if len(srcs) > 1 || res.Nets[id] != nil || rippleTaken {
+				if res.Nets[id] != nil || rippleTaken {
+					srcs = append(srcs, id)
+				}
+				collide[id] = srcs
+				continue
+			}
+			n := srcs[0]
 			res.Nets[id] = res.Nets[n]
 			delete(res.Nets, n)
-			if e, ok := res.Ripple[n]; ok && res.Ripple[id] == nil {
+			if e, ok := res.Ripple[n]; ok {
 				res.Ripple[id] = e
 				delete(res.Ripple, n)
 			}
@@ -605,7 +624,16 @@ func simNetsOnBoard(b *Board, results []powersim.Result) []string {
 		}
 	}
 	sort.Strings(renamed)
-	return renamed
+	var out []Finding
+	for _, id := range sortedStrings(collide) {
+		out = append(out, Finding{Severity: "fail", Kind: "sim-board-mismatch", Nets: collide[id],
+			Message: fmt.Sprintf("sim nets %s all name board net %s — not merged (their currents would be added or lost): give them distinct names in the schematic and re-run sim power", strings.Join(collide[id], ", "), id)})
+	}
+	for _, n := range sortedStrings(ambiguous) {
+		out = append(out, Finding{Severity: "fail", Kind: "sim-board-mismatch", Nets: append([]string{n}, ambiguous[n]...),
+			Message: fmt.Sprintf("sim net %s could be board net %s — not guessed: re-run sim power on a kicad netlist (its fullName) or rename the labels", n, strings.Join(ambiguous[n], " or "))})
+	}
+	return renamed, out
 }
 
 // crossCheck verifies that the sim file and the board are the same design

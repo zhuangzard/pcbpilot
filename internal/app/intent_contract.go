@@ -292,26 +292,67 @@ func validIntentName(name string) error {
 // onBoard is the intent with every net name resolved to the board's net
 // identity (pkg/netname): an intent derived from display names ("VCC_PIC",
 // "VPP/MCLR") names the hierarchical KiCad board's "/pic_sockets/VCC_PIC" /
-// "/VPP{slash}MCLR". Names already on the board, unknown names and
-// ambiguous ones stay as they are. The receiver is not changed; renamed
+// "/VPP{slash}MCLR". Names already on the board and unknown names stay.
+// Never merged, never guessed: two intent nets resolving to one board net
+// (or onto an intent net already named so) and a rule net whose name fits
+// several board nets are an error. The receiver is not changed; renamed
 // lists "intent → board".
-func (in *designIntent) onBoard(boardNets []string) (*designIntent, []string) {
+func (in *designIntent) onBoard(boardNets []string) (*designIntent, []string, error) {
 	if in == nil {
-		return in, nil
+		return in, nil, nil
 	}
 	r := netname.NewResolver(boardNets)
 	to := map[string]string{}
-	var renamed []string
+	var problems []string
+	ambiguous := map[string]bool{}
+	check := func(name string) (string, bool) {
+		id, m := r.Resolve(name)
+		if m == netname.Ambiguous && !ambiguous[name] {
+			ambiguous[name] = true
+			problems = append(problems, fmt.Sprintf("%q could be board net %s", name, strings.Join(r.Candidates(name), " or ")))
+		}
+		return id, m == netname.Found && id != name
+	}
+	dest := map[string][]string{}
 	for _, name := range in.sortedNetNames() {
-		id, ok := r.Resolve(name)
-		if !ok || id == name || in.Nets[id] != nil {
+		if id, ok := check(name); ok {
+			dest[id] = append(dest[id], name)
+		}
+	}
+	for _, id := range sortedKeysOf(dest) {
+		srcs := dest[id]
+		if len(srcs) > 1 || in.Nets[id] != nil {
+			if in.Nets[id] != nil {
+				srcs = append(srcs, id)
+			}
+			problems = append(problems, fmt.Sprintf("intent nets %s all name board net %s", strings.Join(srcs, ", "), id))
 			continue
 		}
-		to[name] = id
-		renamed = append(renamed, name+" → "+id)
+		to[srcs[0]] = id
+	}
+	for _, nc := range in.NetClasses {
+		for _, n := range nc.Nets {
+			if id, ok := check(n); ok && to[n] == "" && in.Nets[n] == nil {
+				to[n] = id
+			}
+		}
+	}
+	for _, d := range in.Domains {
+		for _, n := range d.Nets {
+			if id, ok := check(n); ok && to[n] == "" && in.Nets[n] == nil {
+				to[n] = id
+			}
+		}
+	}
+	if len(problems) > 0 {
+		return nil, nil, fmt.Errorf("intent nets do not resolve to one board net each (pkg/netname; never merged or guessed): %s (fix: name each intent net by the board's full net name, e.g. re-derive the intent from kicad netlist output)", strings.Join(problems, "; "))
+	}
+	var renamed []string
+	for _, n := range sortedKeysOf(to) {
+		renamed = append(renamed, n+" → "+to[n])
 	}
 	if len(to) == 0 {
-		return in, nil
+		return in, nil, nil
 	}
 	conv := func(n string) string {
 		if id, ok := to[n]; ok {
@@ -348,7 +389,16 @@ func (in *designIntent) onBoard(boardNets []string) (*designIntent, []string) {
 	for i := range cp.Domains {
 		cp.Domains[i].Nets = list(cp.Domains[i].Nets)
 	}
-	return &cp, renamed
+	return &cp, renamed, nil
+}
+
+func sortedKeysOf[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (in *designIntent) sortedNetNames() []string {

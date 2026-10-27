@@ -66,8 +66,10 @@ type SchNet struct {
 type SchNetNode struct{ Ref, Pin, Function, Type string }
 
 type schNetXML struct {
+	Source string `xml:"design>source"` // the root sheet file
 	Sheets []struct {
-		Name string `xml:"name,attr"`
+		Name   string `xml:"name,attr"`
+		Source string `xml:"title_block>source"` // relative to the root's directory
 	} `xml:"design>sheet"`
 	Comps []struct {
 		Ref       string `xml:"ref,attr"`
@@ -106,8 +108,14 @@ type schNetXML struct {
 	} `xml:"nets>net"`
 }
 
-// ParseSchNetlist reads kicadxml.
-func ParseSchNetlist(data []byte) (*SchNetlist, error) {
+// ParseSchNetlist reads kicadxml. Net names become identities
+// (schNetIdentity), with the sheet files found next to the root sheet the
+// XML names as label evidence when they exist.
+func ParseSchNetlist(data []byte) (*SchNetlist, error) { return parseSchNetlist(data, "") }
+
+// parseSchNetlist: rootDir is where the sheet files are ("" = the directory
+// of the root sheet the XML names).
+func parseSchNetlist(data []byte, rootDir string) (*SchNetlist, error) {
 	var x schNetXML
 	if err := xml.Unmarshal(data, &x); err != nil {
 		return nil, fmt.Errorf("parse KiCad netlist: %w", err)
@@ -126,8 +134,15 @@ func ParseSchNetlist(data []byte) (*SchNetlist, error) {
 			nl.Sheets = append(nl.Sheets, s)
 		}
 	}
+	if rootDir == "" && x.Source != "" {
+		rootDir = filepath.Dir(x.Source)
+	}
+	files := map[string]string{}
 	for _, s := range x.Sheets {
 		addSheet(s.Name)
+		if s.Source != "" && rootDir != "" {
+			files[s.Name] = filepath.Join(rootDir, s.Source)
+		}
 	}
 	for _, c := range x.Comps {
 		addSheet(c.Sheet.Names)
@@ -141,11 +156,14 @@ func ParseSchNetlist(data []byte) (*SchNetlist, error) {
 		nl.Components = append(nl.Components, sc)
 	}
 	for _, n := range x.Nets {
-		sn := SchNet{Code: n.Code, Name: netname.Canonical(n.Name, nl.Sheets)}
+		sn := SchNet{Code: n.Code, Name: n.Name}
 		for _, d := range n.Nodes {
 			sn.Nodes = append(sn.Nodes, SchNetNode{d.Ref, d.Pin, d.Func, d.Type})
 		}
 		nl.Nets = append(nl.Nets, sn)
+	}
+	if err := nl.netIdentities(files); err != nil {
+		return nil, err
 	}
 	return nl, nil
 }
@@ -173,7 +191,7 @@ func ExportSchNetlist(sch string) (*SchNetlist, error) {
 	if err != nil {
 		return nil, fmt.Errorf("kicad-cli wrote no netlist: %s", strings.TrimSpace(buf.String()))
 	}
-	return ParseSchNetlist(data)
+	return parseSchNetlist(data, filepath.Dir(sch))
 }
 
 // netNames maps each net identity to its display name (netname.Display):

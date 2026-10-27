@@ -83,7 +83,11 @@ pad-net diff 直接读。单独挂在 KiCad `unconnected-(…)` 网上的脚不�
 `{slash}` 还原为 `/`，在全设计唯一时才用短名，否则等于 fullName）。**绝不在标签内部的 `/` 处截断**（旧版把
 `/VPP/MCLR` 截成 `MCLR`）。`unconnected-(…)` 是"无网"，两侧比较都按无网处理。匹配方（pad-net-diff、
 `signoff` 的 continuity/trace、`sim post-layout` 的脚↔焊盘检查与铜网查找、`kicad route` 的网络类、intent-widths）
-一律先用 `fullName`；只有 `name` 的旧文档 / intent / sim 用显示名解析到板上**唯一**对应的网，同名多图纸时不猜、照常报差异。
+一律先用 `fullName`；只有 `name` 的旧文档 / intent / sim 用显示名解析到板上**唯一**对应的网，同名多图纸时不猜：
+sim 判 `sim-board-mismatch`、intent 报错、signoff-trace 判"ambiguous"失败（不再退回到板上去找）。两个名字解析到同一块板网
+（如 `VCC_PIC` 与 `/pic_sockets/VCC_PIC` 同时出现）一律拒绝，绝不合并。kicad-cli XML 不转义 `/`，`/pic_sockets/VCC_PIC`
+可能是子图标签 `VCC_PIC`，也可能是根图标签 `pic_sockets/VCC_PIC`：读法只按证据定（各图纸文件里的标签/层次标签/图纸引脚，
+其次网上引脚所在图纸），定不下来或两个网读成同一身份时 `kicad netlist` 直接报 `ErrNetAmbiguous`（附修法：改标签名）。
 
 ## 布线（`kicad route`）——与 `pcb auto route` + `pcb gate` 同序同算
 

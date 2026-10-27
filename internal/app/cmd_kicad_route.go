@@ -435,8 +435,12 @@ func (r *kicadRun) run() error {
 	// Intent nets named by their display name ("VCC_PIC") are the board's
 	// hierarchical nets ("/pic_sockets/VCC_PIC"): one identity for every
 	// rule below (netclasses, isolation, widths, gates).
-	if in, renamed := r.in.onBoard(boardNetIDs(inSnap)); len(renamed) > 0 {
-		r.in = in
+	in, renamed, err := r.in.onBoard(boardNetIDs(inSnap))
+	if err != nil {
+		return fmt.Errorf("pre-route gate: %w", err)
+	}
+	r.in = in
+	if len(renamed) > 0 {
 		r.summary["intentNetsOnBoard"] = renamed
 		fmt.Fprintf(r.stderr, "intent nets resolved to the board's net names: %s\n", strings.Join(renamed, ", "))
 	}

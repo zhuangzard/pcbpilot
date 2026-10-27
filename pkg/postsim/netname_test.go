@@ -83,3 +83,50 @@ func TestNothingSimulatedIsUnverified(t *testing.T) {
 		t.Errorf("no not-verified finding: %+v", r.Findings)
 	}
 }
+
+// Two sim nets that resolve to one board net — the display name "+3V3" and
+// the identity "/power/+3V3", with different currents — are never merged
+// in map order: both stay as they are and the run fails on it.
+func TestSimNetAliasCollisionFails(t *testing.T) {
+	board, err := os.ReadFile("testdata/esp32mini/board.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	board = []byte(strings.ReplaceAll(string(board), `"+3V3"`, `"/power/+3V3"`))
+	var sim powersim.Output
+	if err := json.Unmarshal(simFrom(t, "../../internal/app/testdata/esp32-v05"), &sim); err != nil {
+		t.Fatal(err)
+	}
+	for i := range sim.Results {
+		n := sim.Results[i].Nets["+3V3"]
+		if n == nil {
+			t.Fatal("fixture has no +3V3")
+		}
+		cp := *n
+		cp.CurrentA = 2 * n.CurrentA
+		sim.Results[i].Nets["/power/+3V3"] = &cp
+	}
+	raw, _ := json.Marshal(sim)
+	r, err := Run(board, raw, DefaultOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Verdict.Status != "fail" {
+		t.Fatalf("verdict %s, want fail", r.Verdict.Status)
+	}
+	found := false
+	for _, f := range r.Findings {
+		if f.Kind == "sim-board-mismatch" && strings.Contains(f.Message, "not merged") &&
+			strings.Contains(f.Message, "+3V3, /power/+3V3") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no collision finding: %+v", r.Findings)
+	}
+	for _, a := range r.Assumptions {
+		if strings.Contains(a, "+3V3 → ") {
+			t.Errorf("a colliding net was renamed: %s", a)
+		}
+	}
+}

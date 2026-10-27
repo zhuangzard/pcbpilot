@@ -461,7 +461,11 @@ func snapshotIntentGates(snap *boardSnapshot, in *designIntent, intentPath, simV
 	for _, c := range snap.Components {
 		pads = append(pads, c.Pads...)
 	}
-	in, _ = in.onBoard(boardNetIDs(snap))
+	in, _, err := in.onBoard(boardNetIDs(snap))
+	if err != nil {
+		add(gateResult{Gate: "intent-widths", Detail: err.Error()})
+		return false
+	}
 	vs := checkIntentWidths(tracks, pads, intentRequirements(in), pouredLookup(snap.Copper.Poured), segNeed)
 	basis := "WIDTH BASIS net: every track carries the net's intent current"
 	var info []string

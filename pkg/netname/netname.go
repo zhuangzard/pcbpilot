@@ -13,13 +13,17 @@
 // "{slash}" (KiCad label "VPP/MCLR" on the root sheet = "/VPP{slash}MCLR").
 // So in the escaped form the last literal '/' always ends the sheet path,
 // and a name is never cut anywhere else. kicad-cli's XML netlist writes
-// names unescaped; Canonical restores the escaped form from the sheet
-// paths of the design.
+// names unescaped, so "/pic_sockets/VCC_PIC" may be the sub-sheet label
+// "VCC_PIC" or the root label "pic_sockets/VCC_PIC": Candidates lists the
+// readings and the caller picks one from evidence (internal/kicad: the
+// labels of each sheet file, the sheets of the net's pins) — never by
+// guessing; an undecidable name is an error.
 //
 // The short (display) name — Local — is the name without its sheet path,
 // unescaped ("VPP/MCLR"); it is only a display field. A display name, or a
 // name from an older document, resolves to an identity through Resolver:
-// the exact identity, else the one identity whose display name it is.
+// the exact identity, else the one identity whose display name it is;
+// several such identities are Ambiguous, never a pick.
 //
 // "unconnected-(…)" is KiCad's name for a single-pin net with no name: it
 // is no net at all (IsUnconnected) on either side of a comparison.
@@ -48,24 +52,29 @@ func Escape(s string) string {
 // Unescape is the inverse of Escape.
 func Unescape(s string) string { return strings.ReplaceAll(s, "{slash}", "/") }
 
-// Canonical is the identity of a net name as kicad-cli's XML netlist writes
-// it (unescaped), given the design's sheet paths ("/", "/Sub/", …; each
-// ends with '/'). A name starting with '/' keeps the longest sheet path it
-// starts with and escapes the rest; any other name is escaped whole. With
-// no sheet path known the root "/" is assumed. Already canonical names
-// come back unchanged.
-func Canonical(name string, sheets []string) string {
+// Candidates lists the sheet paths a net name as kicad-cli's XML writes it
+// (unescaped) can start with, given the design's sheet paths ("/",
+// "/Sub/", …; each ends with '/'), shortest first: the root "/" for every
+// name starting with '/', plus each longer sheet path it starts with. A
+// name not starting with '/' (global, power, "Net-(…)") has none. One
+// candidate = the reading is certain; several = evidence must decide.
+func Candidates(name string, sheets []string) []string {
 	if !strings.HasPrefix(name, "/") {
-		return Escape(name)
+		return nil
 	}
-	prefix := "/"
+	out := []string{"/"}
 	for _, s := range sheets {
-		if strings.HasSuffix(s, "/") && len(s) > len(prefix) && strings.HasPrefix(name, s) && len(name) > len(s) {
-			prefix = s
+		if s != "/" && strings.HasSuffix(s, "/") && strings.HasPrefix(name, s) && len(name) > len(s) {
+			out = append(out, s)
 		}
 	}
-	return prefix + Escape(name[len(prefix):])
+	sort.Slice(out, func(i, j int) bool { return len(out[i]) < len(out[j]) })
+	return out
 }
+
+// Join is the identity of an XML (unescaped) net name read with sheet path
+// prefix ("" for a name without one): the prefix, then the rest escaped.
+func Join(prefix, name string) string { return prefix + Escape(name[len(prefix):]) }
 
 // SheetPath is the sheet path of an identity ("" for a global name).
 func SheetPath(id string) string {
@@ -129,18 +138,34 @@ func NewResolver(ids []string) *Resolver {
 	return r
 }
 
-// Resolve returns the identity of name and true, or name and false when it
-// is not a known identity and no single identity carries it as an alias
-// (two sheets with the same local label stay ambiguous: never guessed).
-func (r *Resolver) Resolve(name string) (string, bool) {
+// Match is how a name resolved.
+type Match int
+
+const (
+	Unknown   Match = iota // no identity carries the name
+	Found                  // the identity itself, or the one carrying the alias
+	Ambiguous              // several identities carry it (Candidates lists them)
+)
+
+// Resolve returns the identity of name and Found; name and Unknown when no
+// identity carries it; name and Ambiguous when several do (two sheets with
+// the same local label): never guessed, and never to be looked up
+// elsewhere as if unknown.
+func (r *Resolver) Resolve(name string) (string, Match) {
 	if r.ids[name] {
-		return name, true
+		return name, Found
 	}
-	if v := r.alias[name]; len(v) == 1 {
-		return v[0], true
+	switch v := r.alias[name]; len(v) {
+	case 0:
+		return name, Unknown
+	case 1:
+		return v[0], Found
 	}
-	return name, false
+	return name, Ambiguous
 }
+
+// Candidates lists the identities an ambiguous name could be.
+func (r *Resolver) Candidates(name string) []string { return append([]string(nil), r.alias[name]...) }
 
 // Has reports whether id is one of the identities.
 func (r *Resolver) Has(id string) bool { return r.ids[id] }
