@@ -37,7 +37,7 @@ type SkillManifest struct {
 var publicSkills = SkillManifest{
 	SchemaVersion: 1,
 	Router:        SkillName,
-	Skills:        []string{SkillName},
+	Skills:        []string{SkillName, "pcbpilot-review"},
 	Retired:       []string{},
 }
 
