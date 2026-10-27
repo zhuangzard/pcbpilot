@@ -3,6 +3,24 @@
 仅在首次使用、升级或连接异常时读取。本地 IR 检查和离线规划不需要打开 EasyEDA；
 实际读写、DRC 和原生导图需要已连接的编辑器。
 
+## 目录
+
+- [支持的宿主线：V3 3.2.x 与 V4](#支持的宿主线v3-32x-与-v4)
+- [安装与升级](#安装与升级)
+  - [源码 checkout 中的 Skill](#源码-checkout-中的-skill)
+  - [本地开发版（用户明确选择时）](#本地开发版用户明确选择时)
+  - [正式版](#正式版)
+  - [仿真工具（ngspice / Elmer FEM）](#仿真工具ngspice--elmer-fem)
+- [确认连接和目标文档](#确认连接和目标文档)
+  - [官方客户端 CLI 探测（health.officialCli，只读）](#官方客户端-cli-探测healthofficialcli只读)
+  - [扩展已启用、权限已开，但始终没有连接尝试](#扩展已启用权限已开但始终没有连接尝试)
+  - [连接正常，但 block-apply 的第一个 place 就 “connector did not respond”](#连接正常但-block-apply-的第一个-place-就-connector-did-not-respond)
+- [上下文与缓存](#上下文与缓存)
+  - [Web 整页重载（typed，显式请求）](#web-整页重载typed显式请求)
+- [单连接恢复](#单连接恢复)
+  - [PCB 文档枚举暂时缺失（#190）](#pcb-文档枚举暂时缺失190)
+  - [读取预算与未知写入状态](#读取预算与未知写入状态)
+
 ## 支持的宿主线：V3 3.2.x 与 V4
 
 pcbpilot 支持 EasyEDA Pro V3（3.2.x，桌面 3.2.149 与 pro.easyeda.com 已验证）和 V4（Web 4.1.60

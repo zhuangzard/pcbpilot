@@ -1,6 +1,34 @@
 # 外部工程导入与迁移
 
-本页描述 Altium Designer 工程迁移的当前能力边界。它不是 `pcbpilot` 的导入命令。
+本页覆盖工程级操作：KiCad ↔ EasyEDA 的一次性迁移（`project import`、`kicad sch-import`）、Altium Designer
+工程迁移的能力边界（`unsupported`）、MCP 新建工程容器、跨工程打开与原生 `.epro2` 导出。
+
+## KiCad 设计导入 EasyEDA（`project import`）
+
+设计在 KiCad 后端完成后，用官方导入器一次性带入 EasyEDA，生成当前团队里的**新工程**（关联封装与 3D 模型），
+从不修改已有工程：
+
+```bash
+pcbpilot project import --file kicad/Demo.kicad_pro --name Demo_kicad          # 也可给 KiCad 工程目录
+pcbpilot project import --file design.zip --type KiCad --name Demo --team <teamUuid>
+```
+
+`--file` 为 KiCad 工程目录或 `.kicad_pro` 时，`.kicad_pro`、`.kicad_sch`、`.kicad_pcb`、`.kicad_dru` 与库表会被打包；
+其他格式按 `--type` 交给导入器（KiCad、EasyEDA Pro、EasyEDA、JLCEDA Pro、JLCEDA、Allegro、OrCAD、EAGLE、PADS、
+LTspice；默认 KiCad）。命令返回不等于迁移成功：导入后按下文 Altium 一节“目标工程已经由用户独立提供”的 1–4 步逐页回读连接、
+Board 绑定、板框、层叠与 DRC，数量与关键网不一致时不报告成功。Altium 工程本身仍是 `unsupported`（见下文）。
+
+## EasyEDA 工程转 KiCad 原理图（`kicad sch-import`）
+
+```bash
+pcbpilot kicad sch-import --epro Project.epro --board <板名> --out kicad/ --pcb kicad/<板名>.kicad_pcb
+```
+
+把 `.epro` 导出中一块板的原理图转成 `<out>/<name>.kicad_sch`（根页，每个 EasyEDA 页一张子页）、`<name>.kicad_pro`、
+`easyeda.kicad_sym` 与 `sym-lib-table`。符号来自导出的 `.esym`；器件保留位号、值、LCSC 号、MPN 与厂商；有 `--pcb` 时
+Footprint 字段取该板同位号的封装。电源标记转 KiCad 电源符号，网络端口转全局标签。默认用 kicad-cli 导出结果网表，
+与 EasyEDA 数据（及 `--pcb` 焊盘网络）逐网逐脚比较，分区不一致即失败；`--no-check` 跳过比较时结果只能算 `source-only`。
+工程含多块板时必须给 `--board`。转换后的修改走 `kicad sch-edit` / `sch-build`，不手改文本。
 
 ## Altium Designer 工程：当前 `unsupported`
 
@@ -43,6 +71,22 @@ EasyEDA Pro。Agent 不得用交互界面、CUA、`debug.exec_js`、分块 base6
 
 来源与完整探测矩阵见 [GitHub issue #203](https://github.com/zhoushoujianwork/easyeda-agent/issues/203)。
 
+
+## MCP 新建工程（`project.create`）
+
+从首页调用 MCP `project.create` 时，先通过 `pcbpilot_health` 选择真实窗口，把新名称放在
+`payload.friendlyName`，可用 `payload.open` 请求打开。此动作只创建工程容器，必须提供
+`window`，不要传 `project` 或 `doc`；拟建名称不是已有工程，首页标签不是原理图页面。
+创建后检查 `created` / `opened` / `partial` 并读回工程身份，再处理文档创建。部分成功时
+先用 `pcbpilot project find --window <id> --name <完整友好名称> --team <teamUuid>`
+按友好名称和团队精确查找，不盲目重复创建。它只调用官方项目 UUID 枚举与逐项详情读取；
+查找默认等待 90 秒，可显式加 `--timeout 120s`（5 秒到 10 分钟）。超时仍是未知，不能据此创建同名工程；
+`found` 可用于核对已有工程，`unknown`（例如 UUID 清单为空、详情缺失或枚举报错）不能当作
+不存在；只有 `enumeration.complete:true` 且 `presence:"absent"` 才能说明指定团队**根文件夹**内
+没有匹配（SDK 不保证递归子文件夹）。本例未传 `folderUuid`，故先查目标团队根文件夹。
+结果仍需核对 UUID 和团队，不因同名自动打开或重试创建。无 `--team` 的查找仅
+用于发现匹配，不证明全局不存在。返回 `UNKNOWN_ACTION` 时检查连接器是否实现此动作；健康检查的
+版本兼容不能证明 handler 存在。其他 MCP 写操作仍要求真实 `project` 和 `doc`；不得推广此例外。
 
 ## 工程级打开与原生导出
 

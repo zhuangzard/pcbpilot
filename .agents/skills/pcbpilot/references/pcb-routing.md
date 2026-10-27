@@ -5,6 +5,23 @@
 
 ---
 
+## 目录
+
+- [关键网与叠层](#关键网与叠层)
+- [Routing (copper tracks + vias)](#routing-copper-tracks--vias)
+- [离线单层寻路与独立复验](#离线单层寻路与独立复验)
+- [联合逃线与模块联动（offline-verified）](#联合逃线与模块联动offline-verified)
+- [External router: fastroute](#external-router-fastroute)
+- [Length constraints — differential pairs / equal-length groups (#176)](#length-constraints--differential-pairs--equal-length-groups-176)
+- [Copper pour (铺铜)](#copper-pour-铺铜)
+- [带铜模块的离线组装、定位与验收](#带铜模块的离线组装定位与验收)
+- [Keep-out / rule regions (禁止区域)](#keep-out--rule-regions-禁止区域)
+- [Net-bound filled region (填充区域 / 异形大块铜)](#net-bound-filled-region-填充区域--异形大块铜)
+- [晶振障碍感知保护搜索（开发中）](#晶振障碍感知保护搜索开发中)
+- [旧模块保护对象替换（offline-verified）](#旧模块保护对象替换offline-verified)
+- [过孔载流：换层阵列与 via-current（offline-verified）](#过孔载流换层阵列与-via-currentoffline-verified)
+- [2026-09-25 ESP32 E2E 布线/铜/丝印实测要点（桌面 V3 3.2.149，connector 0.2.6）](#2026-09-25-esp32-e2e-布线铜丝印实测要点桌面-v3-32149connector-026)
+
 ### 关键网与叠层
 
 `pcb route-critical --spec <S0.json> --dry-run` 先检查真实铜层数与关键网方案。
@@ -334,7 +351,12 @@ Steps (stdout is one summary JSON, progress on stderr):
 4. pour rebuild → save → reload → pour rebuild → native DRC → `pad-net-diff.py` (needs `--sch-connectivity`,
    one `sch connectivity` file per page of this board; otherwise reported as skipped).
 
-`pcb dsn-fix` and `pcb ses-repair` also run alone, for a manual round-trip or another router.
+`pcb dsn-fix` and `pcb ses-repair` also run alone, for a manual round-trip or another router. For that manual round-trip the
+import step is `pcbpilot pcb import-autoroute <file>` (Specctra `.ses`, or an autoroute `.json` with `--format json`;
+the format is otherwise inferred from the extension). It only imports into the active PCB; afterwards run
+`pcb ses-repair` (it compares the imported tracks with the session file and fixes the importer defects) and read
+back the post-steps (pour rebuild → save → reload → pour rebuild → `pcb drc` → `scripts/pad-net-diff.py`) —
+`pcb autoroute` is the path that chains all of them.
 `pcb widen --net SV1_DRV,SV2_DRV --max-mil 40` widens high-current nets afterwards wherever the clearance to
 other-net tracks, vias and pads allows (only gains > 2 mil; then rebuild / save / reload / DRC).
 
@@ -452,6 +474,22 @@ and re-pours; passing raw points to the bare `eda.*` create fails ("无法创建
   Dry-run first, then read back the GND vias and run `pcb pour-rebuild` + official DRC.
 
 ### 带铜模块的离线组装、定位与验收
+
+模块布局闭环（入口 SKILL.md 只保留一句硬规则，完整条件在此）：
+
+- 顺序固定：`pcb dump --include-copper --out board.json` → `pcb layout-plan --from layout.json --board board.json
+  --module <id> --candidates 3 --out <dir>` → AI 写明选择理由 → 执行该候选的 `.apply.json` → save → 有界 reload →
+  新 dump → pour rebuild → `pcb module-check` 对账。执行前核对语义哈希；禁止现场试摆坐标。
+- 输入写明成员、固定轴、允许角度及 `member pad → owner pad`；同网去耦不得按最近焊盘重新分配。
+- 候选报告位置、板边、距离和最近的内部/外部/keepout 对象对，不给总分；都不合适就改关系或搜索参数重算。
+- 带铜模块用 schemaVersion 2（及以上），声明器件、内部铜、外部端口、旧铜替换清单和验收要求；模块内部对象可刚体
+  变换，连接固定 owner 的外部引线必须在候选位置重新求解。`pcb module-check` 只在新鲜铜快照、journal 与候选一致时验收。
+- `affectedBaselinePours` 把可被重建的既有材料化铺铜绑定到 boundary/materialized ID 与参数化 `impactEnvelope`：
+  只允许声明对象在包络内变化，包络外及未声明铜严格保持（细则见下文）。
+- 晶振模块逐个证明每个 fence/anchor via 在 TOP/BOTTOM 实际 GND 铜中与 anchor 同岛，并核对 OSC ordered path、
+  fresh pad geometry、实际长度/转折、capture PID 与 polygon/holes/ARC（细则见下文）。
+- `pcb poured-list` 读取重建后的实际铺铜：只有完整 inventory 返回真实 `[]` 才是 known-empty；fill/boundary/net/layer/
+  polygon 任一缺测都是 unknown/error。
 
 `pcb layout-plan` 的 schemaVersion 2 把器件身份、局部铜、外部端口、regions、pours 和 vias
 放入同一模块契约。局部坐标先生成完整模块，再对候选做旋转/平移；器件位号和 footprint
@@ -605,7 +643,7 @@ subset; `--dry-run` prints the per-corner plan. Save after placing; delete via
 > and retry once, reporting `stale:true` if it still cannot refresh. **Reliable recording
 > workflow** for user-facing videos/tutorials where the visual artifact is required:
 > 1. `pcbpilot view region --left … --right … --top … --bottom …`（或 `pcbpilot view fit`）框住目标视口。
-> 2. `pcbpilot pcb snapshot --fit=false --previous-sha256 <上一次的 sha256>`。
+> 2. `pcbpilot pcb snapshot --fit-mode none --previous-sha256 <上一次的 sha256>`（保留第 1 步框好的视口）。
 > 3. 若结果 `stale:true`，说明画布未刷新 — 告警/失败，不要用该帧。
 > 4. 用 `pcb list` / `pcb drc` / `pcb check` / `pcb layout-lint` 做**权威**正确性校验（截图只作视觉终检）。
 >

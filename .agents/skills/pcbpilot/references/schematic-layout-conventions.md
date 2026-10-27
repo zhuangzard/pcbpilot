@@ -11,6 +11,27 @@ When an AI agent (via `pcbpilot`) generates or modifies a schematic, it must fol
 > 4 命名约定 · 5 Designator 前缀 · 6 去耦电容规则 · 7 真实参考 motobox2026 · 8 真实参考 ESP32S3R8N8 ·
 > 9 自动化布局执行步骤 · 10 边界/开放问题 · 11 图纸边界/标题栏 keep-out。
 
+## 目录
+
+- [0. 坐标系与单位](#0-坐标系与单位)
+- [1. 分区 (Zone Map)](#1-分区-zone-map)
+- [1.5 功能框与标题](#15-功能框与标题)
+- [2. 模块间距](#2-模块间距)
+- [3. Wire 长度与走线约定](#3-wire-长度与走线约定)
+  - [3.1 短桩 (pin lead-out)](#31-短桩-pin-lead-out)
+  - [3.2 直角约定 (right-angle routing)](#32-直角约定-right-angle-routing)
+  - [3.3 电源/接地特殊约定](#33-电源接地特殊约定)
+  - [3.4 线宽](#34-线宽)
+  - [3.5 朝向约定 (orientation — 顺着导线方向)](#35-朝向约定-orientation--顺着导线方向)
+- [4. 命名约定](#4-命名约定)
+- [5. Designator 前缀](#5-designator-前缀)
+- [6. 去耦电容 (decoupling) 规则](#6-去耦电容-decoupling-规则)
+- [7. 真实参考 A：motobox2026 (motorcycle tracker)](#7-真实参考-amotobox2026-motorcycle-tracker)
+- [8. 真实参考 B：ESP32S3R8N8 开发板](#8-真实参考-besp32s3r8n8-开发板)
+- [9. 自动化布局的执行步骤](#9-自动化布局的执行步骤)
+- [10. 边界与开放问题](#10-边界与开放问题)
+- [11. 图纸边界与标题栏 keep-out (sheet / title-block keep-out)](#11-图纸边界与标题栏-keep-out-sheet--title-block-keep-out)
+
 ## 0. 坐标系与单位
 
 - EasyEDA Pro 原理图原生坐标单位（raw/canvas unit）= `0.01 inch` = `0.254 mm`；
@@ -120,7 +141,7 @@ buffer:
 
 每个**需要接入 wire/netflag/netport/netlabel 的 pin** 都必须经非零长度 wire 引出
 （EasyEDA DRC 不认标识与 pin 坐标重叠为连接，见
-[`schematic.md` 的 EasyEDA Electrical Rules](./schematic.md#easyeda-electrical-rules-load-bearing)）。
+[`schematic.md` 的必须保留的电气规则](./schematic.md#必须保留的电气规则)）。
 故意未使用的 pin 应显式 `sch no-connect`，不应为了满足短桩规则制造假连接。
 
 > **重要**：自动生成时严禁产出**零长度 wire 占位记录**（如 `{line:[620,60,620,60]}`）——实测 ESP32 reference 中 204 个 wire 里 149 个是这种零长占位，DRC 会逐个报错。Agent 在 emit wire 前必须 assert `(x1,y1) != (x2,y2)`。

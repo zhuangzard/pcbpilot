@@ -46,9 +46,16 @@ class ReleaseSmokeTests(unittest.TestCase):
             path.chmod(0o755)
         return root
 
-    def archive(self, entries):
+    def archive(self, entries, skills=("pcbpilot",)):
+        """entries: (name, kind) pairs; a canonical manifest listing skills is
+        added first unless skills is None (a pre-0.11 single-Skill archive)."""
         path = self.root / "skills.tar.gz"
         with tarfile.open(path, "w:gz") as archive:
+            if skills is not None:
+                data = smoke.skill_manifest.Manifest("pcbpilot", tuple(skills), ()).canonical_bytes()
+                member = tarfile.TarInfo("public-skills.json")
+                member.size, member.mode = len(data), 0o644
+                archive.addfile(member, io.BytesIO(data))
             for name, kind in entries:
                 member = tarfile.TarInfo(name)
                 member.mode = 0o755
@@ -121,13 +128,50 @@ class ReleaseSmokeTests(unittest.TestCase):
         for entries in bad:
             with self.subTest(entries=entries):
                 with self.assertRaises(ValueError):
-                    smoke.extract_skill(self.archive(entries), self.root / "unpack")
+                    smoke.extract_skills(self.archive(entries), self.root / "unpack")
         self.assertFalse((self.root / "outside").exists())
 
     def test_extract_preserves_archive_modes(self):
-        root, modes = smoke.extract_skill(self.archive([("pcbpilot/SKILL.md", "file")]), self.root / "unpack")
-        self.assertEqual((root / "SKILL.md").read_bytes(), b"x")
+        manifest, roots, modes = smoke.extract_skills(self.archive([("pcbpilot/SKILL.md", "file")]), self.root / "unpack")
+        self.assertEqual(manifest.skills, ("pcbpilot",))
+        self.assertEqual((roots["pcbpilot"] / "SKILL.md").read_bytes(), b"x")
         self.assertEqual(modes["pcbpilot/SKILL.md"], 0o755)
+
+    def test_extract_requires_manifest_and_exactly_the_listed_roots(self):
+        cases = [
+            ([("pcbpilot/SKILL.md", "file")], None, "has no public-skills.json"),
+            ([("pcbpilot/SKILL.md", "file"), ("pcbpilot-demo/SKILL.md", "file")], ("pcbpilot",), "differ from the manifest"),
+            ([("pcbpilot/SKILL.md", "file")], ("pcbpilot", "pcbpilot-demo"), "differ from the manifest"),
+            ([("pcbpilot/SKILL.md", "file"), ("stray.txt", "file")], ("pcbpilot",), "unsafe skill archive path"),
+        ]
+        for index, (entries, skills, expected) in enumerate(cases):
+            with self.subTest(expected=expected, skills=skills):
+                with self.assertRaisesRegex(ValueError, expected):
+                    smoke.extract_skills(self.archive(entries, skills), self.root / f"unpack{index}")
+        manifest, roots, _ = smoke.extract_skills(
+            self.archive([("pcbpilot/SKILL.md", "file"), ("pcbpilot-demo/SKILL.md", "file")], ("pcbpilot", "pcbpilot-demo")),
+            self.root / "unpack-ok")
+        self.assertEqual(sorted(roots), ["pcbpilot", "pcbpilot-demo"])
+
+    def test_focused_skill_links_only_into_router(self):
+        router = self.skill()
+        demo = self.root / "pcbpilot-demo"
+        demo.mkdir()
+        (demo / "SKILL.md").write_text('---\nmetadata:\n  version: "1.4.2"\n---\n[shared](../pcbpilot/references/guide.md)\n', encoding="utf-8")
+        (self.root / "public-skills.json").write_bytes(
+            smoke.skill_manifest.Manifest("pcbpilot", ("pcbpilot", "pcbpilot-demo"), ()).canonical_bytes())
+        manifest, roots = smoke.skill_roots(self.root)
+        report = smoke.check_skills(manifest, roots, "1.4.2")
+        self.assertEqual(report["pcbpilot-demo"]["localLinks"], 1)
+        (router / "references/guide.md").write_text("[demo](../../pcbpilot-demo/SKILL.md)\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "escapes package"):
+            smoke.check_skills(manifest, roots, "1.4.2")
+        (router / "references/guide.md").write_text("ok", encoding="utf-8")
+        (demo / "SKILL.md").write_text('---\nmetadata:\n  version: "1.4.1"\n---\n', encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "version mismatch"):
+            smoke.check_skills(manifest, roots, "1.4.2")
+        # A plain router directory is still accepted as --skill-dir.
+        self.assertEqual(smoke.skill_roots(router), (smoke.skill_manifest.LEGACY, {"pcbpilot": router}))
 
     def test_native_platform_selection_is_explicit(self):
         self.assertEqual(smoke.native_asset("Windows", "AMD64"), "pcbpilot_windows_amd64.exe")

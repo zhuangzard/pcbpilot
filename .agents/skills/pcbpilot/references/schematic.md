@@ -91,6 +91,18 @@ rebind 使用候选优先事务：先回读 Device association，候选创建且
 存在性和 `rollback.verified`。命令超时表示写入
 仍可能晚到，禁止盲重试和 `pcb import-changes`，先做新鲜原理图回读并核对关联键。
 
+**从库刷新已放置器件**（与原理图→PCB 同步无关；只换当前实例引用的库符号/封装）：
+
+```bash
+pcbpilot sch rebind-footprint --id <primitiveId> --footprint <封装名>          # 按名称在 --scope（默认 project）库中查找
+pcbpilot sch rebind-footprint --id <primitiveId> --footprint-uuid <u> --footprint-lib <l>
+pcbpilot sch rebind-symbol    --id <primitiveId> --symbol <符号名>             # 或 --symbol-uuid/--symbol-lib
+```
+
+`modify()` 改不了已放置实例的符号/封装引用，所以两条命令都走上面的候选优先事务；导入器件
+`libraryUuid` 为空时先在工程库反查。重放会生成**新的 primitiveId**，旧引脚上的导线可能要重画：
+完成后重新取 ID，跑 `sch check` / `sch drc` 与 connectivity 对账，确认无误再 `pcb import-changes`。
+
 `sch modify` 的 `otherProperty` 与兼容别名 `customAttributes` 二选一。连接器合并保留
 现有属性，并回读检查；`partial`/非空 `notApplied` 是失败，`verified:false` 是未经确认。
 回放 `propertiesBefore` 只能恢复覆盖值，不能靠 merge 删除本次新增的键。不要把库记录的

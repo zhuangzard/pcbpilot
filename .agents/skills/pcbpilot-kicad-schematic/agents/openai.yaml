@@ -1,0 +1,4 @@
+interface:
+  display_name: "pcbpilot KiCad Schematic"
+  short_description: "Build, edit and check KiCad schematics from a design spec"
+  default_prompt: "Use $pcbpilot-kicad-schematic to build or change a KiCad schematic from a design spec with kicad sch-build / sch-edit, then read it back and report every gate."

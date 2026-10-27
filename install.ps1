@@ -31,6 +31,8 @@ try {
     $ProgressPreference = 'SilentlyContinue'
 
     $Repo = 'zhuangzard/pcbpilot'
+    # Router Skill. A release ships it plus focused Skills, listed in the
+    # archive's public-skills.json (absent before v0.11: the router only).
     $SkillName = 'pcbpilot'
     $BinaryAsset = 'pcbpilot_windows_amd64.exe'
 
@@ -457,7 +459,9 @@ try {
             if (-not (Test-AbsolutePath $base)) { Stop-Install "Client config directory must be absolute: $base" }
         }
 
-        $SourceSkill = ''
+        $SkillRoot = Join-Path $TempRoot 'skills'
+        $Skills = @()
+        $Retired = @()
         if ($Targets.Count -eq 0) {
             Write-Step 'Skill install skipped (PCBPILOT_INSTALL_SKILLS=none)'
         } else {
@@ -476,18 +480,46 @@ try {
                 }
                 $tarExe = (@($candidate)[0]).Source
             }
-            $extract = Invoke-Native -FilePath $tarExe -Arguments @('-xzf', $archive, '-C', $TempRoot)
+            [void](New-Item -ItemType Directory -Path $SkillRoot -Force)
+            $extract = Invoke-Native -FilePath $tarExe -Arguments @('-xzf', $archive, '-C', $SkillRoot)
             if ($extract.ExitCode -ne 0) { Stop-Install 'Invalid Skill archive; nothing installed' }
-            $SourceSkill = Join-Path $TempRoot $SkillName
-            $skillMd = Join-Path $SourceSkill 'SKILL.md'
-            if (-not (Test-Path -LiteralPath $skillMd) -or (Get-Item -LiteralPath $skillMd).Length -eq 0) {
-                Stop-Install 'Skill archive has no SKILL.md; nothing installed'
+            $manifestPath = Join-Path $SkillRoot 'public-skills.json'
+            if (Test-Path -LiteralPath $manifestPath) {
+                try {
+                    $manifest = [IO.File]::ReadAllText($manifestPath) | ConvertFrom-Json
+                } catch {
+                    Stop-Install 'Skill archive has an unreadable public-skills.json; nothing installed'
+                }
+                $fields = @($manifest.PSObject.Properties | ForEach-Object { $_.Name })
+                if (($fields -notcontains 'schemaVersion') -or $manifest.schemaVersion -ne 1 -or
+                    ($fields -notcontains 'router') -or $manifest.router -ne $SkillName -or ($fields -notcontains 'skills')) {
+                    Stop-Install 'Skill archive public-skills.json is not schemaVersion 1 with router pcbpilot; nothing installed'
+                }
+                $Skills = @($manifest.skills)
+                if ($fields -contains 'retired') { $Retired = @($manifest.retired) }
+            } else {
+                $Skills = @($SkillName)
             }
-            $metaMatch = [regex]::Match([IO.File]::ReadAllText($skillMd), '(?m)^  version:\s*"([^"]*)"\s*$')
-            if (-not $metaMatch.Success -or $metaMatch.Groups[1].Value -ne $BareVersion) {
-                Stop-Install "Skill metadata version differs from $Version; nothing installed"
+            # Every name becomes a directory under each client's skills\ and only
+            # router-prefixed names may ever be removed.
+            foreach ($name in @($Skills + $Retired)) {
+                if (-not ($name -is [string]) -or $name -cnotmatch '^pcbpilot(-[a-z0-9]+)*$' -or $name -clike 'pcbpilot-repo-*') {
+                    Stop-Install "Skill archive lists an invalid Skill name: $name; nothing installed"
+                }
             }
-            Write-Ok "skill archive metadata.version = $BareVersion"
+            if ($Skills -cnotcontains $SkillName) { Stop-Install "Skill archive does not list $SkillName; nothing installed" }
+            foreach ($name in $Skills) {
+                if ($Retired -ccontains $name) { Stop-Install "Skill archive lists $name as both shipped and retired; nothing installed" }
+                $skillMd = Join-Path (Join-Path $SkillRoot $name) 'SKILL.md'
+                if (-not (Test-Path -LiteralPath $skillMd) -or (Get-Item -LiteralPath $skillMd).Length -eq 0) {
+                    Stop-Install "Skill archive has no $name/SKILL.md; nothing installed"
+                }
+                $metaMatch = [regex]::Match([IO.File]::ReadAllText($skillMd), '(?m)^  version:\s*"([^"]*)"\s*$')
+                if (-not $metaMatch.Success -or $metaMatch.Groups[1].Value -ne $BareVersion) {
+                    Stop-Install "Skill $name metadata version differs from $Version; nothing installed"
+                }
+            }
+            Write-Ok "skill archive metadata.version = $BareVersion ($($Skills -join ', '))"
         }
 
         # -- install the CLI (handle a running/locked pcbpilot.exe) -------------
@@ -594,11 +626,11 @@ try {
 
         # -- install the Skill (stage -> swap, restore the backup on failure) ---
         function Install-SkillTo {
-            param([string]$Client, [string]$Source)
+            param([string]$Client, [string]$Skill, [string]$Source)
             $base = Get-ClientBaseDir $Client
             if (-not $base) { Stop-Install "Unknown skill target: $Client" }
             if (-not (Test-Path -LiteralPath $base)) { [void](New-Item -ItemType Directory -Path $base -Force) }
-            $dest = Join-Path $base $SkillName
+            $dest = Join-Path $base $Skill
             if (Test-Path -LiteralPath $dest) {
                 $existing = Get-Item -LiteralPath $dest -Force
                 if ($existing.Attributes -band [IO.FileAttributes]::ReparsePoint) {
@@ -623,7 +655,7 @@ try {
                 Copy-Item -Path (Join-Path $Source '*') -Destination $stage -Recurse -Force
             } catch {
                 Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
-                Stop-Install "Could not stage $Client Skill; existing files kept"
+                Stop-Install "Could not stage $Client Skill $Skill; existing files kept"
             }
             $preserved = $false
             if ($SkillPreserve -and (Test-Path -LiteralPath $dest)) {
@@ -631,7 +663,7 @@ try {
                     Copy-Item -Path (Join-Path $dest '*') -Destination $stage -Recurse -Force
                 } catch {
                     Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
-                    Stop-Install "Could not preserve $Client Skill; existing files kept"
+                    Stop-Install "Could not preserve $Client Skill $Skill; existing files kept"
                 }
                 $preserved = $true
             } else {
@@ -643,7 +675,7 @@ try {
                     Move-Item -LiteralPath $dest -Destination $backup -Force
                 } catch {
                     Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
-                    Stop-Install "Could not back up $Client Skill; existing files kept"
+                    Stop-Install "Could not back up $Client Skill $Skill; existing files kept"
                 }
             }
             try {
@@ -653,18 +685,58 @@ try {
                     try { Move-Item -LiteralPath $backup -Destination $dest -Force } catch { Stop-Install "Restore $backup to $dest" }
                 }
                 Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
-                Stop-Install "Could not install $Client Skill"
+                Stop-Install "Could not install $Client Skill $Skill"
             }
             if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction SilentlyContinue }
             if ($preserved) {
-                Write-Warn "$Client Skill preserved (mixed local/release content; previous version marker kept) -> $dest"
+                Write-Warn "$Client Skill $Skill preserved (mixed local/release content; previous version marker kept) -> $dest"
             } else {
-                Write-Ok "$Client Skill installed -> $dest"
+                Write-Ok "$Client Skill $Skill installed -> $dest"
             }
         }
 
+        # A retired Skill is removed only where pcbpilot installed it: a real
+        # directory holding a .version marker. Links and user directories that
+        # merely share the name stay; preserve mode keeps everything.
+        function Remove-RetiredSkill {
+            param([string]$Client, [string]$Name)
+            $base = Get-ClientBaseDir $Client
+            if (-not $base) { return }
+            $dir = Join-Path $base $Name
+            if (-not (Test-Path -LiteralPath $dir)) { return }
+            $item = Get-Item -LiteralPath $dir -Force
+            if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                Write-Warn "$Client retired Skill $Name is a link; left in place -> $dir"
+                return
+            }
+            $marker = Join-Path $dir '.version'
+            if (-not $item.PSIsContainer -or -not (Test-Path -LiteralPath $marker -PathType Leaf) -or
+                ((Get-Item -LiteralPath $marker -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                Write-Warn "$Client retired Skill $Name has no .version marker (not installed by pcbpilot); left in place -> $dir"
+                return
+            }
+            if ($SkillPreserve) {
+                Write-Warn "$Client retired Skill $Name kept (PCBPILOT_SKILL_PRESERVE=1) -> $dir"
+                return
+            }
+            $trash = Join-Path $base ('.easyeda-retired.' + [IO.Path]::GetRandomFileName())
+            try {
+                Move-Item -LiteralPath $dir -Destination $trash -Force
+            } catch {
+                Write-Warn "Could not remove retired $Client Skill $Name -> $dir"
+                return
+            }
+            Remove-Item -LiteralPath $trash -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Ok "$Client retired Skill $Name removed"
+        }
+
         foreach ($client in $Targets) {
-            Install-SkillTo -Client $client -Source $SourceSkill
+            foreach ($skill in $Skills) {
+                Install-SkillTo -Client $client -Skill $skill -Source (Join-Path $SkillRoot $skill)
+            }
+            foreach ($name in $Retired) {
+                Remove-RetiredSkill -Client $client -Name $name
+            }
         }
 
         # -- PATH --------------------------------------------------------------

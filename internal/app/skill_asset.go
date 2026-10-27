@@ -88,6 +88,9 @@ func (a skillAsset) resolve(explicit string) (string, error) {
 	// 3. Installed skill dirs (each Target.Dir is …/skills/pcbpilot).
 	// rels are skills-root-relative, so strip the leading skill-name segment.
 	for _, t := range selfupdate.Targets(false) {
+		if t.Skill != selfupdate.SkillName {
+			continue // shared data assets live in the router Skill
+		}
 		for _, rel := range a.rels {
 			sub := rel
 			if i := strings.IndexByte(sub, '/'); i >= 0 {

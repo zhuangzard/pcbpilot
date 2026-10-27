@@ -99,7 +99,7 @@ OSC_IN 本批 9 个实际图元，OSC_OUT 保留。第二版令 C21.1 先到 X1.
 保存重载仍保持。正式事实见 [crystal-route-live.json](crystal-route-live.json)。
 
 本轮还修正了数据入口认知：集成 `pcb dump` 面向板级规划，可能不保留 pad 的原始形状字段；
-正式几何与 `pcb net-path` 应读取 `pcb components-list --include-pads` 返回的真实 pad 数据，
+正式几何与 `pcb net-path` 应读取 `pcb list --include-pads`（action `pcb.components.list`） 返回的真实 pad 数据，
 不能因 dump 中字段缺失就降级到 bbox。
 
 ## 用户复核后的晶振护环完成口径

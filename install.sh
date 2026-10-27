@@ -4,10 +4,13 @@
 set -euo pipefail
 
 REPO="zhuangzard/pcbpilot"
+# Router Skill. A release ships it plus focused Skills; skills.tar.gz lists them
+# in public-skills.json (absent in releases before v0.11: router only).
 SKILL_NAME="pcbpilot"
 # PCBPILOT_INSTALL_SKILLS: ""|auto (detect), "none" (skip), or CSV of codex,claude,agents,zcode
 INSTALL_SKILLS="${PCBPILOT_INSTALL_SKILLS:-}"
-# PCBPILOT_SKILL_PRESERVE=1 keeps existing files instead of clean-replacing
+# PCBPILOT_SKILL_PRESERVE=1 keeps existing files instead of clean-replacing (every Skill;
+# retired Skills are then kept too)
 SKILL_PRESERVE="${PCBPILOT_SKILL_PRESERVE:-0}"
 # PCBPILOT_INSTALL_DIR selects an absolute binary destination.
 # CODEX_HOME / CLAUDE_CONFIG_DIR select client config roots.
@@ -209,11 +212,11 @@ ACTUAL_VERSION=$("$TMP/binary" --version) || fatal "Downloaded binary cannot run
   || fatal "Downloaded binary version differs: $ACTUAL_VERSION; expected $VERSION"
 
 # ── install skills (Codex + Claude Code + shared Agent root) ──────────────────
-# Repository source: .agents/skills/pcbpilot. The release packager keeps
-# the archive root as pcbpilot/, independent of the checkout layout.
-# Resolve which clients to install for.
-# codex → ~/.codex/skills/pcbpilot, claude → ~/.claude/skills/pcbpilot,
-# agents → ~/.agents/skills/pcbpilot (Codex Desktop shared skill root)
+# Repository source: .agents/skills/<skill>. The archive holds one root per
+# public Skill (pcbpilot/, pcbpilot-<focus>/) plus public-skills.json.
+# Resolve which clients to install for; every client gets every Skill:
+# codex → ~/.codex/skills/<skill>, claude → ~/.claude/skills/<skill>,
+# agents → ~/.agents/skills/<skill> (Codex Desktop shared skill root)
 detect_targets() {
   # Explicit "none" → skip entirely.
   case "$INSTALL_SKILLS" in
@@ -267,11 +270,11 @@ client_base_dir() {
 # failed switch, restore the previous directory. Preserve mode reports mixed
 # content and keeps the old marker instead of claiming a complete upgrade.
 install_skill_to() {
-  _client="$1"; _src="$2"
+  _client="$1"; _skill="$2"; _src="$3"
   _base=$(client_base_dir "$_client") || fatal "Unknown skill target: $_client"
   case "$_base" in /*) ;; *) fatal "Client config directory must be absolute: $_base" ;; esac
   mkdir -p "$_base"
-  _dest="${_base}/${SKILL_NAME}"
+  _dest="${_base}/${_skill}"
   if [ -L "$_dest" ]; then
     _dest=$(cd "$_dest" && pwd -P) || fatal "Skill symlink target is unavailable"
     _base=$(dirname "$_dest")
@@ -301,10 +304,58 @@ install_skill_to() {
   fi
   rm -rf "$_backup"
   if [ "$_preserved" = 1 ]; then
-    warn "$_client Skill preserved (mixed local/release content; previous version marker kept) → $_dest"
+    warn "$_client Skill $_skill preserved (mixed local/release content; previous version marker kept) → $_dest"
   else
-    ok "$_client Skill installed → $_dest"
+    ok "$_client Skill $_skill installed → $_dest"
   fi
+}
+
+# A retired Skill is removed only where pcbpilot installed it: a real directory
+# with a .version marker. Links (source checkouts) and user directories that
+# merely share the name stay; preserve mode keeps everything.
+remove_retired_skill() {
+  _client="$1"; _name="$2"
+  _base=$(client_base_dir "$_client") || return 0
+  _dir="${_base}/${_name}"
+  [ -e "$_dir" ] || [ -L "$_dir" ] || return 0
+  if [ -L "$_dir" ]; then
+    warn "$_client retired Skill $_name is a link; left in place → $_dir"; return 0
+  fi
+  if [ ! -d "$_dir" ] || [ -L "$_dir/.version" ] || [ ! -f "$_dir/.version" ]; then
+    warn "$_client retired Skill $_name has no .version marker (not installed by pcbpilot); left in place → $_dir"; return 0
+  fi
+  if [ "$SKILL_PRESERVE" = 1 ]; then
+    warn "$_client retired Skill $_name kept (PCBPILOT_SKILL_PRESERVE=1) → $_dir"; return 0
+  fi
+  _trash=$(mktemp -d "${_base}/.easyeda-retired.XXXXXX") && rmdir "$_trash" && mv "$_dir" "$_trash" \
+    || { warn "Could not remove retired $_client Skill $_name → $_dir"; return 0; }
+  rm -rf "$_trash"
+  ok "$_client retired Skill $_name removed"
+}
+
+# manifest_list KEY FILE prints the names of one list in public-skills.json.
+# pack-skill.py writes the canonical form (one item per line, sorted keys),
+# so a line scan is enough and no JSON tool is required.
+manifest_list() {
+  awk -v key="\"$1\":" '
+    index($0, key) { inlist = ($0 !~ /]/); next }
+    inlist && /]/ { inlist = 0; next }
+    inlist { gsub(/[ \t",\r]/, ""); if ($0 != "") print }
+  ' "$2"
+}
+
+# Every name must be the router or router-prefixed: it becomes a directory name
+# under each client's skills/, and only such names may ever be removed.
+check_skill_names() {
+  for _name in "$@"; do
+    case "$_name" in
+      "$SKILL_NAME"|"$SKILL_NAME"-*) ;;
+      *) fatal "Skill archive lists an invalid Skill name: $_name; nothing installed" ;;
+    esac
+    case "$_name" in
+      *[!a-z0-9-]*|*--*|*-|"$SKILL_NAME"-repo-*) fatal "Skill archive lists an invalid Skill name: $_name; nothing installed" ;;
+    esac
+  done
 }
 
 TARGETS=$(detect_targets)
@@ -322,11 +373,32 @@ else
   info "Downloading skills.tar.gz..."
   download_release_asset "skills.tar.gz" "$TMP/skills.tar.gz"
   verify_asset "skills.tar.gz" "$TMP/skills.tar.gz"
-  tar -xzf "$TMP/skills.tar.gz" -C "$TMP" || fatal "Invalid Skill archive; nothing installed"
-  SRC_SKILL="$TMP/$SKILL_NAME"
-  [ -s "$SRC_SKILL/SKILL.md" ] || fatal "Skill archive has no SKILL.md; nothing installed"
-  SKILL_VERSION=$(sed -n 's/^  version: *"\([^"]*\)" *$/\1/p' "$SRC_SKILL/SKILL.md")
-  [ "$SKILL_VERSION" = "${VERSION#v}" ] || fatal "Skill metadata version differs from $VERSION; nothing installed"
+  SKILL_ROOT="$TMP/skills"
+  mkdir -p "$SKILL_ROOT"
+  tar -xzf "$TMP/skills.tar.gz" -C "$SKILL_ROOT" || fatal "Invalid Skill archive; nothing installed"
+  if [ -f "$SKILL_ROOT/public-skills.json" ]; then
+    SKILLS=$(manifest_list skills "$SKILL_ROOT/public-skills.json")
+    RETIRED=$(manifest_list retired "$SKILL_ROOT/public-skills.json")
+  else
+    SKILLS="$SKILL_NAME"; RETIRED=""  # release before v0.11: the router only
+  fi
+  # shellcheck disable=SC2086 # names are validated single words
+  check_skill_names $SKILLS $RETIRED
+  case " $(printf '%s ' $SKILLS)" in *" $SKILL_NAME "*) ;; *) fatal "Skill archive does not list $SKILL_NAME; nothing installed" ;; esac
+  for skill in $SKILLS; do
+    for retired in $RETIRED; do
+      [ "$skill" != "$retired" ] || fatal "Skill archive lists $skill as both shipped and retired; nothing installed"
+    done
+    [ -s "$SKILL_ROOT/$skill/SKILL.md" ] || fatal "Skill archive has no $skill/SKILL.md; nothing installed"
+    SKILL_VERSION=$(sed -n 's/^  version: *"\([^"]*\)" *$/\1/p' "$SKILL_ROOT/$skill/SKILL.md")
+    [ "$SKILL_VERSION" = "${VERSION#v}" ] || fatal "Skill $skill metadata version differs from $VERSION; nothing installed"
+    for client in $TARGETS; do
+      CLIENT_BASE=$(client_base_dir "$client")
+      if [ -L "$CLIENT_BASE/$skill" ] && [ ! -d "$CLIENT_BASE/$skill" ]; then
+        fatal "Skill symlink target is unavailable: $CLIENT_BASE/$skill"
+      fi
+    done
+  done
 fi
 BIN_TMP=$(mktemp "${INSTALL_DIR}/.easyeda-download.XXXXXX")
 cp "$TMP/binary" "$BIN_TMP"
@@ -335,7 +407,12 @@ mv "$BIN_TMP" "${INSTALL_DIR}/pcbpilot"
 BIN_TMP=""
 ok "CLI installed → ${INSTALL_DIR}/pcbpilot"
 for client in $TARGETS; do
-  install_skill_to "$client" "$SRC_SKILL"
+  for skill in $SKILLS; do
+    install_skill_to "$client" "$skill" "$SKILL_ROOT/$skill"
+  done
+  for retired in $RETIRED; do
+    remove_retired_skill "$client" "$retired"
+  done
 done
 
 # ── daemon login service (required) ──────────────────────────────────────────

@@ -12,6 +12,15 @@ import tempfile
 import unittest
 
 REPO = Path(__file__).resolve().parents[2]
+# Test-only placeholder for a focused public Skill shipped next to the router.
+DEMO = 'pcbpilot-demo'
+
+
+def canonical_manifest(skills, retired=()):
+    """The exact bytes pack-skill.py writes (sorted keys, indent 2)."""
+    import json
+    data = {'retired': list(retired), 'router': 'pcbpilot', 'schemaVersion': 1, 'skills': list(skills)}
+    return (json.dumps(data, indent=2, sort_keys=True) + '\n').encode()
 
 
 @unittest.skipIf(os.name == 'nt', 'Bash installer is for macOS/Linux; Windows uses the native CLI')
@@ -57,15 +66,22 @@ else:
         self.cli = self.root / 'bin/pcbpilot'
         self.skill = self.root / 'codex config/skills/pcbpilot'
 
-    def package(self, version='1.4.2'):
+    def package(self, version='1.4.2', skills=None, retired=(), demo_version=None):
+        """skills=None: a pre-0.11 archive (router only, no manifest)."""
         with tarfile.open(self.assets / 'skills.tar.gz', 'w:gz') as archive:
-            for name, content in {'SKILL.md': f'---\nname: pcbpilot\nmetadata:\n  version: "{version}"\n---\n[Guide](references/guide.md)\n',
-                                  'references/guide.md': 'New guide\n'}.items():
-                data = content.encode()
-                item = tarfile.TarInfo('pcbpilot/' + name)
+            def add(name, data):
+                item = tarfile.TarInfo(name)
                 item.size = len(data)
                 item.mode = 0o644
                 archive.addfile(item, io.BytesIO(data))
+            if skills is not None:
+                add('public-skills.json', canonical_manifest(skills, retired))
+            for name, content in {'SKILL.md': f'---\nname: pcbpilot\nmetadata:\n  version: "{version}"\n---\n[Guide](references/guide.md)\n',
+                                  'references/guide.md': 'New guide\n'}.items():
+                add('pcbpilot/' + name, content.encode())
+            for skill in (skills or ())[1:]:
+                add(f'{skill}/SKILL.md', f'---\nname: {skill}\nmetadata:\n  version: "{demo_version or version}"\n---\n'
+                    '[Shared](../pcbpilot/references/guide.md)\n'.encode())
 
     def sums(self):
         names = [self.binary_name, 'skills.tar.gz']
@@ -244,6 +260,69 @@ else:
         self.assertTrue(self.skill.is_symlink())
         self.assertEqual((shared / '.version').read_text(), '1.4.2\n')
         self.assertFalse((shared / 'retired.md').exists())
+
+    def multi(self, retired=(), **kwargs):
+        self.package(skills=('pcbpilot', DEMO), retired=retired, **kwargs)
+        self.sums()
+
+    def test_every_listed_skill_is_installed_for_every_client(self):
+        self.multi()
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for client in ('codex', 'claude'):
+            for skill in ('pcbpilot', DEMO):
+                path = self.root / f'{client} config/skills/{skill}'
+                self.assertEqual((path / '.version').read_text(), '1.4.2\n', (client, skill))
+            self.assertFalse((self.root / f'{client} config/skills/public-skills.json').exists())
+        self.assertIn(f'Skill {DEMO} installed', result.stdout)
+
+    def test_focused_skill_version_mismatch_rejected_before_changes(self):
+        self.old_install()
+        self.multi(demo_version='1.4.1')
+        self.assert_failed_unchanged(self.run_install())
+        self.assertFalse((self.root / f'codex config/skills/{DEMO}').exists())
+
+    def test_invalid_manifest_names_rejected_before_changes(self):
+        self.old_install()
+        for skills, retired in [(('pcbpilot', 'user-notes'), ()), (('pcbpilot', DEMO), ('../escape',)),
+                                (('pcbpilot', DEMO), (DEMO,)), ((DEMO,), ())]:
+            with self.subTest(skills=skills, retired=retired):
+                self.package(skills=skills, retired=retired)
+                self.sums()
+                self.assert_failed_unchanged(self.run_install())
+
+    def test_retired_skill_removed_only_where_pcbpilot_installed_it(self):
+        self.old_install()
+        owned = self.root / 'codex config/skills/pcbpilot-old'
+        owned.mkdir(parents=True)
+        (owned / 'SKILL.md').write_text('old focused')
+        (owned / '.version').write_text('1.4.1\n')
+        user = self.root / 'claude config/skills/pcbpilot-old'
+        user.mkdir(parents=True)
+        (user / 'SKILL.md').write_text('user content under the same name')
+        linked_target = self.root / 'checkout/pcbpilot-old'
+        linked_target.mkdir(parents=True)
+        (linked_target / '.version').write_text('1.4.1\n')
+        self.multi(retired=('pcbpilot-old',))
+        result = self.run_install(PCBPILOT_SKILL_PRESERVE='1')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(owned.exists(), 'preserve mode keeps retired Skills')
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(owned.exists())
+        self.assertEqual((user / 'SKILL.md').read_text(), 'user content under the same name')
+        self.assertIn('not installed by pcbpilot', result.stdout + result.stderr)
+        shutil.rmtree(user)
+        user.symlink_to(linked_target, target_is_directory=True)
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(user.is_symlink() and (linked_target / '.version').exists())
+
+    def test_legacy_single_skill_archive_installs_router_only(self):
+        result = self.run_install()  # setUp packaged a pre-0.11 archive
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue((self.skill / 'SKILL.md').exists())
+        self.assertEqual(sorted(p.name for p in self.skill.parent.iterdir()), ['pcbpilot'])
 
     def test_dangling_skill_symlink_refused_before_binary_change(self):
         self.old_install()

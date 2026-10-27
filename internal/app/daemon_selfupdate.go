@@ -403,7 +403,7 @@ func (u *selfUpdater) startupVerify(ctx context.Context) bool {
 	}
 	for _, t := range selfupdate.Targets(true) {
 		if t.Linked == "" && t.Installed != st.To {
-			problems = append(problems, fmt.Sprintf("skill %s is %q", t.Client, t.Installed))
+			problems = append(problems, fmt.Sprintf("skill %s is %q", selfupdate.SkillLabel(t.Client, t.Skill), t.Installed))
 		}
 	}
 	if hasString(st.Components, compMCP) {
