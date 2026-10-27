@@ -51,6 +51,7 @@
 | `kicad lcsc --check` / `--search` | 板、原理图 / 网络 | 无 | 否 |
 | `kicad place --pcb B --out Y` | 板 | `Y`（+ `.kicad_pro`）、`Y.seed-N.kicad_pcb`、`Y.report.json`；输出板的走线/过孔被清除、铺铜未灌 | 否 |
 | `kicad route --pcb B --out-dir R` | 板、同名 `.kicad_pro` / `.kicad_dru` | `R/work/` 逐步工作板、`R/routed.kicad_pcb`、`board-final.json`、`summary.json`、`report/`、`manual/`、`review-*/` | 否（复制进 `R/work/`） |
+| `kicad render --out D` | 原理图层次或板（在临时副本上出图） | `D/*.svg`、`D/render.json`、`--png` 时 `D/*-3d-*.png`；`--compare` 只读 | 否；`D` 非空且不是上次 render 的输出时拒绝 |
 | `kicad fab --out O` | 板、原理图 | `O/gerber/`、`O/<板>-gerber.zip`、BOM、CPL、`fab-report.json` | 否；缺 C 号时什么都不写 |
 | `kicad drc --pcb B [--out O]` | 板、同名 `.kicad_pro` / `.kicad_dru`、库表（`--schematic-parity` 加原理图层次）、基线 | 临时副本（用完删除）；stdout 报告；`--out` 时 `O/drc-report.json`、`O/drc.json`、`O/baseline-drc.json` | 否（kicad-cli 只在副本上跑，工程目录不新增 `.kicad_prl`） |
 | `kicad fab --preflight` | 同 `kicad drc` + 原理图 BOM 字段、契约 | 只有 stdout 报告；`--out` 不碰 | 否 |

@@ -54,6 +54,7 @@ goes to --out-dir.`,
 		newKicadSnapshotCmd(stdout),
 		newKicadRouteCmd(stdout, stderr),
 		newKicadSchCheckCmd(stdout, stderr),
+		newKicadRenderCmd(stdout),
 	)
 	return c
 }

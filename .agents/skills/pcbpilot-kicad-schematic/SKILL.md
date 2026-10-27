@@ -96,9 +96,10 @@ pcbpilot kicad netlist --sch build/<name>.kicad_sch --out conn.json
 | 晶振 | 无通用块。晶体 + 两颗负载电容到 GND，网 `XTAL_IN` / `XTAL_OUT`，电容 `near` 振荡器脚；负载电容值按数据手册 CL 算 |
 | USB-C 设备（sink） | `block.usbc_dual_orientation_data`（CC 5.1k 下拉、双取向 D+/D-、ESD）；只取电源用 `block.usbc_ufp_power_or` |
 
-**渲染与基线对比**：`--render` 的 SVG 每次构建/编辑原地覆盖 `<out>/render/`；要对比，先把上一版 `render/` 和
-`sch-read` 输出复制到工作区外。连接是否变化以两份 `sch-read` JSON 的差异（parts/nets/noConnect）为证据，SVG 只用来
-发现排版回退（标签压线、区位置跳动），不单独给 PASS。
+**渲染与基线对比**：`--render` 的 SVG（已规范化，同一 spec 两次构建逐字节相同）每次原地覆盖 `<out>/render/`；先把上一版
+`render/` 和 `sch-read` 输出复制到工作区外，改完后 `pcbpilot kicad render --out <out>/render --compare <旧 render>` 逐页给
+identical / changed（变化元素数）/ added / removed（[kicad.md](../pcbpilot/references/kicad.md) 的 `kicad render` 节）。连接是否变化以两份
+`sch-read` JSON 的差异（parts/nets/noConnect）为证据，SVG 只用来发现排版回退（标签压线、区位置跳动），不单独给 PASS。
 
 ## 报告
 

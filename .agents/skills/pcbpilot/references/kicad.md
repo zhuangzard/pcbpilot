@@ -131,6 +131,58 @@ sim 判 `sim-board-mismatch`、intent 报错、signoff-trace 判"ambiguous"失�
 signoff-continuity 失败（板上短路），不合并。显示名 `name` 只在能唯一解析回本网时才缩短，绝不等于别的网的身份或显示名。
 pad-net-diff 的大小写宽容只用于 EasyEDA 名（无 fullName）；KiCad 网名区分大小写。
 
+## 预览与视觉回归（`kicad render`）
+
+```bash
+pcbpilot kicad render --sch root.kicad_sch --out review/r1                 # 每页一张 SVG（<base>.svg、<base>-<子图路径>.svg）
+pcbpilot kicad render --pcb board.kicad_pcb [--side bottom] [--layers F.Cu,F.Silkscreen] [--png --dpi 150] --out review/b1
+pcbpilot kicad render --sch root.kicad_sch --out review/r2 --compare review/r1   # 出图后与基线比
+pcbpilot kicad render --out build/render --compare old/render              # 只比（例如两次 sch-build --render 的输出）
+```
+
+- 在工程**临时副本**上跑 kicad-cli（原目录不出现 `.kicad_prl`/锁文件），用隔离的空库表配置（默认配色，不受用户主题影响）。
+  副本 = 工程目录的 KiCad 文件 + 依赖闭包：沿层次找到的每张子图、`sym-lib-table`/`fp-lib-table` 里相对或 `${KIPRJMOD}` 路径的库、
+  `.kicad_pro` 指定的图框（`.kicad_wks`），按相对位置镜像复制（不改写任何文件，`../shared/x.kicad_sch` 照样能找到）；绝对路径或
+  KiCad 变量指向的库原地只读（`render.json` 的 `readInPlace`）。绝对路径子图、未定义变量、找不到的文件 →
+  `RENDER_DEPENDENCY_UNRESOLVED`（cannot-check，逐项列出），不出半张图。
+- **出图校验**：层次里每一页都必须产出能解析、且真正画了东西的 SVG（`<defs>`/`<clipPath>` 等之外有几何：带坐标的 path、有尺寸的
+  rect/circle、有字的 text、指向有内容目标的 use；缺页 `RENDER_INCOMPLETE`，空图/坏图 `RENDER_BAD_SVG`）。两页或两层压平后文件名相同
+  （子图 `a/b` 与 `a-b`、层 `F.Cu` 与 `F_Cu`、层名 `top` 与总图）出图前就判 `RENDER_INCOMPLETE`；
+  kicad-cli 的输出保留进 `warnings`，任何带失败字样的行（failed / error / cannot / unable / permission denied / not found /
+  missing…，在进度行过滤之前判）即使退出码 0 也判 `RENDER_KICAD_DIAGNOSTIC`；只有明确列出的无害行（Fontconfig、
+  `Plotted to '…'`、`Done.`）放过。以上都是 cannot-check（退出 5），**上一版渲染原样保留**：新图先在暂存目录完成；发布时旧文件
+  （含 `render.json`）先移进 `--out/.render-backup/`，新文件拷完、最后写 `render.json` 才删备份，中途失败就把旧渲染搬回。
+  备份目录还在（发布中断且没能恢复）时新渲染判 `RENDER_OUT_PARTIAL`、`--compare` 判 cannot-check。工程目录本身是链接/联接时
+  按其目标列目录、按逻辑路径复制。
+- **确定性**：kicad-cli 每次出图只有 `<title>` 里的出图时间（以及偶尔回显的临时路径）会变；pcbpilot 只在生成的头部（`<title>` 与
+  其后的 `<desc>`）去掉时间与临时路径，图中文字里出现的临时副本路径换回用户自己的目录，`-0` 只在数值属性/路径数据里改写，
+  `<text>` 文字不动。同一输入两次出图逐字节相同（`TestRenderLive*` 在 pic_programmer 原理图+板、complex_hierarchy 上实测）。
+  绘制顺序保留不排序。
+- PCB：`<base>-pcb-<side>.svg`（全部 `--layers` 叠在板框范围内）+ 每层一张 `<base>-pcb-<层>.svg`（带 Edge.Cuts 定位）；
+  默认层 `F.Cu,F.Mask,F.Silkscreen,Edge.Cuts`，`--side bottom` 用 B.* 并镜像。
+- PNG：只有板有（`kicad-cli pcb render` 3D 光追，按板框尺寸 × `--dpi` 定像素）。光追**不可逐字节复现**（10.0.6 实测同一板两次
+  像素不同），所以 `--compare` 只列出不比较。原理图没有 PNG：kicad-cli 不出原理图位图，pcbpilot 也不带 SVG 光栅化库。
+  这一步的诊断同样阻断，只放过“3D 模型加载不了”这一类消息（可选模型，只影响预览）；PNG 必须能解码，尺寸略小于请求值
+  （KiCad 10 实测 640x400 → 616x368，每边允许小 48 像素以内），`render.json` 记实际尺寸。
+- `--out` 写 SVG + `render.json`（文件、sha256、绘制元素数）。再次渲染到同一目录只替换 `render.json` 列出的文件；目录里有其他
+  文件/子目录/链接（`RENDER_OUT_NOT_EMPTY` / `RENDER_OUT_UNSAFE`），或 `render.json` 列了渲染器不会写的名字（只允许纯文件名
+  `.svg`/`.png`，`RENDER_OUT_BAD_MANIFEST`），一律拒绝、什么都不删。`--compare` 与 `--out` 是同一目录（含链接/联接）也拒绝；
+  `--report` 只收纯文件名（如 `report.json`，不带目录，不能叫 `render.json`）：随渲染一起在暂存目录生成、一起发布到
+  `--out`，`render.json` 里记为 `kind: report`，`--compare` 忽略它；没给 `--out`、只做比较或渲染失败时报告只打到 stdout。
+  链接形式的 `.kicad_pro`/库表按解析后的内容复制，解析不到判 cannot-check。kicad-cli 消息按整行判定（"Loading…" 开头或超长路径
+  也不会漏判），只截短显示。路径数据只有 move 没有画线段的 path、被 `display="none"`/`visibility="hidden"`/不透明度 0 隐藏，或
+  没有可见颜料（fill 与 stroke 都是 none，或只有宽度 0 的 stroke；属性或 style，含继承与 `<use>`）的图形都不算画了东西；fill 只在
+  能围出面积的图形上算数（曲线/圆弧、三个不共线点、有尺寸的 rect/circle/ellipse），直线 path、两点 polygon 必须有可见 stroke。
+  SVG 必须恰好一个 `<svg>` 根元素。**这个“画了东西”的检查只是防空白输出的启发式判断，不是完整的 SVG 渲染器**（不算裁剪、
+  遮挡、变换到画布外等），通过它不等于画面正确。`--compare` 不跟随链接：链接目录或非普通文件的 `.svg` 记 unreadable（cannot-check）。
+- `--compare` 逐文件：`identical`（规范化后字节相同）/ `changed`（结构化 SVG 比较：每个绘制元素连同排序后的属性、文字和所在
+  `<g>` 的样式作多重集合比较，给 `elementsAdded/elementsRemoved/changedElements` 和几条样例；只换了绘制顺序记 `reordered`）/
+  `added` / `removed` / `unreadable`（解析不了、没画东西——两份相同的空图也不算通过——或 `render.json` 列了却不存在）。
+  `verdict` 三态：全部 identical → `pass`（退出 0），有差异 → `fail`（6），一侧没有 SVG 或有 unreadable → `cannot-check`（5）；
+  出图失败同样 cannot-check（5）并给 `error.code/fix`，参数/`--out` 用法错误退出 1。两边渲染选项不同写进 `notes`。
+- SVG 变化只说明“画面动了”，不说明设计对错：连接是否变化以网表（`kicad netlist` / `sch-read`）为证据。
+- `kicad sch-build --render` / `sch-edit --render` 用同一个出图函数，`<out>/render/` 也是规范化的 SVG，可直接作 `--compare` 的两侧。
+
 ## 布线（`kicad route`）——与 `pcb auto route` + `pcb gate` 同序同算
 
 ```bash

@@ -1839,22 +1839,29 @@ func sbStageReports(stage, out, name string, nl *kicad.SchNetlist, d *sbDesign, 
 	}
 	have("erc.json", "erc")
 	if o.Render { // one SVG per sheet for a human / visual review
+		// kicad.RenderSchSVG is `kicad render --sch`'s plotter: its SVGs are
+		// normalised (no plot date; stage paths read as --out), so two builds of one spec
+		// give identical files and `kicad render --out <out>/render --compare
+		// <saved render>` diffs them structurally.
 		if cli, err := kicad.KicadCLI(); err == nil {
 			dir := filepath.Join(stage, "render")
 			_ = os.MkdirAll(dir, 0o755)
-			cmd, cancel := kicad.SchCLICommand(cli, "sch", "export", "svg", "--output", dir, filepath.Join(stage, name+".kicad_sch"))
-			if b, err := cmd.CombinedOutput(); err != nil {
-				rep.Warnings = append(rep.Warnings, "render: "+sbClip(string(b), 200))
-			} else if ents, err := os.ReadDir(dir); err == nil {
-				for _, e := range ents {
-					if !e.IsDir() && sbSafeName(e.Name()) {
-						sbRelocate(filepath.Join(dir, e.Name()), stage, out)
-						reports = append(reports, "render/"+e.Name())
+			// Published like every report: through the reports list below
+			// (staged → <out>/render on commit, hashed into the manifest).
+			files, msgs, err := kicad.RenderSchSVG(cli, filepath.Join(stage, name+".kicad_sch"), dir, stage, out)
+			for _, m := range msgs {
+				rep.Warnings = append(rep.Warnings, "render: "+sbClip(m, 200))
+			}
+			if err != nil {
+				rep.Warnings = append(rep.Warnings, "render: "+sbClip(err.Error(), 200))
+			} else {
+				for _, f := range files {
+					if sbSafeName(f.File) {
+						reports = append(reports, "render/"+f.File)
 					}
 				}
 				rep.Outputs["render"] = filepath.Join(out, "render")
 			}
-			cancel()
 		}
 	}
 	conn, err := nl.ToConnectivityDoc(name)

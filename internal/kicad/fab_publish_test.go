@@ -94,6 +94,8 @@ func fakeKiCadCLI(args []string) int {
 			return 1
 		}
 		return code
+	case "sch export svg", "pcb export svg", "pcb render --side":
+		return fakeRenderCLI(args) // render_fake_test.go
 	default:
 		fmt.Fprintln(os.Stderr, "fake kicad-cli: unsupported", args)
 		return 2
