@@ -637,6 +637,14 @@ func resolveFastroute(explicit string) (string, error) {
 	return resolveRouterBinary("fastroute", explicit, "FASTROUTE_BIN", "--fastroute-bin", fastrouteLookPath, fastrouteInstallHint)
 }
 
+// routerReadDir / routerStat / routerLstat are the router lookup's file
+// system calls; tests replace them to inject errors.
+var (
+	routerReadDir = os.ReadDir
+	routerStat    = os.Stat
+	routerLstat   = os.Lstat
+)
+
 // resolveRouterBinary is the lookup shared by fastroute and tracemaker:
 // explicit path, $env, ~/.pcbpilot/<name>/current, PATH (look).
 func resolveRouterBinary(name, explicit, env, flag string, look func(string) (string, error), hint string) (string, error) {
@@ -651,12 +659,15 @@ func resolveRouterBinary(name, explicit, env, flag string, look func(string) (st
 	}
 	if home, err := os.UserHomeDir(); err == nil {
 		cur := filepath.Join(home, ".pcbpilot", name, "current")
-		if _, err := os.Lstat(cur); err == nil {
+		if _, err := routerLstat(cur); err == nil {
 			p, err := filepath.EvalSymlinks(cur)
 			if err != nil {
 				return "", fmt.Errorf("%s: %s is a broken link (%v); reinstall %s or pass %s", name, cur, err, name, flag)
 			}
 			return installedBinary(name, p, flag)
+		} else if !os.IsNotExist(err) {
+			// It exists but cannot be read: never fall through to PATH.
+			return "", fmt.Errorf("%s: cannot read %s: %v; fix its permissions or pass %s", name, cur, err, flag)
 		}
 	}
 	if p, err := look(name); err == nil {
@@ -677,7 +688,7 @@ func installedBinary(name, p, flag string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("%s binary %s: %w", name, p, err)
 	}
-	st, err := os.Stat(abs)
+	st, err := routerStat(abs)
 	if err != nil {
 		return "", fmt.Errorf("%s binary %s: %w", name, p, err)
 	}
@@ -697,20 +708,33 @@ func installedBinary(name, p, flag string) (string, error) {
 	// Every supported location (p, p/bin, each subdirectory) and every
 	// executable name: exactly one distinct file may match, so a stale copy
 	// at the root never silently wins over the release subdirectory.
+	// A location that cannot be read is an error, never skipped: it could
+	// hold the real executable while a stale one elsewhere would win. Only
+	// the optional bin/ may be absent.
+	root, err := routerReadDir(abs)
+	if err != nil {
+		return "", fmt.Errorf("%s: cannot read %s: %v; fix its permissions or pass %s", name, abs, err, flag)
+	}
+	listing := map[string][]os.DirEntry{abs: root}
 	dirs := []string{abs, filepath.Join(abs, "bin")}
-	if ents, err := os.ReadDir(abs); err == nil {
-		for _, e := range ents {
-			if e.IsDir() && !strings.EqualFold(e.Name(), "bin") {
-				dirs = append(dirs, filepath.Join(abs, e.Name()))
-			}
+	for _, e := range root {
+		if e.IsDir() && !strings.EqualFold(e.Name(), "bin") {
+			dirs = append(dirs, filepath.Join(abs, e.Name()))
 		}
 	}
 	var found []string
 	var seen []os.FileInfo
-	for _, d := range dirs {
-		ents, err := os.ReadDir(d)
-		if err != nil {
-			continue
+	for i, d := range dirs {
+		ents, ok := listing[d]
+		if !ok {
+			var err error
+			ents, err = routerReadDir(d)
+			if err != nil {
+				if i == 1 && os.IsNotExist(err) {
+					continue // no bin/
+				}
+				return "", fmt.Errorf("%s: cannot read %s: %v; fix its permissions or pass %s", name, d, err, flag)
+			}
 		}
 		for _, ent := range ents {
 			match := false
@@ -722,8 +746,11 @@ func installedBinary(name, p, flag string) (string, error) {
 				continue
 			}
 			m := filepath.Join(d, ent.Name())
-			st, err := os.Stat(m)
-			if err != nil || st.IsDir() || !isExecutable(m, st) {
+			st, err := routerStat(m)
+			if err != nil {
+				return "", fmt.Errorf("%s: cannot stat %s: %v; fix it or pass %s", name, m, err, flag)
+			}
+			if st.IsDir() || !isExecutable(m, st) {
 				continue
 			}
 			dup := false

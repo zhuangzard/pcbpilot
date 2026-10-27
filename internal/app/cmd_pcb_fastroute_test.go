@@ -638,3 +638,82 @@ func TestResolveFastroutePathWrapperRefused(t *testing.T) {
 		}
 	}
 }
+
+// File-system errors in the lookup fail it (naming the path) instead of
+// being skipped: an unreadable release subdirectory must not let a stale
+// root executable win, and an unreadable `current` must not fall through
+// to PATH. Only a missing bin/ is skipped.
+func TestResolveFastrouteFileSystemErrors(t *testing.T) {
+	exe := "fastroute"
+	if runtime.GOOS == "windows" {
+		exe = "fastroute.exe"
+	}
+	dir := t.TempDir()
+	writeExe(t, filepath.Join(dir, exe)) // root copy
+	sub := filepath.Join(dir, "fastroute-0.1.14-windows-x64")
+	writeExe(t, filepath.Join(sub, exe))
+	if err := os.Remove(filepath.Join(sub, exe)); err != nil { // the subdir stays, the lookup must read it
+		t.Fatal(err)
+	}
+	denied := &os.PathError{Op: "open", Path: sub, Err: os.ErrPermission}
+	savedRD, savedSt, savedL := routerReadDir, routerStat, routerLstat
+	defer func() { routerReadDir, routerStat, routerLstat = savedRD, savedSt, savedL }()
+
+	// No bin/: fine, the root copy resolves.
+	if got, err := resolveFastroute(dir); err != nil || filepath.Base(got) != exe {
+		t.Fatalf("root only: %q %v", got, err)
+	}
+	// Unreadable release subdirectory: fails, not the root copy.
+	routerReadDir = func(p string) ([]os.DirEntry, error) {
+		if p == sub {
+			return nil, denied
+		}
+		return os.ReadDir(p)
+	}
+	if _, err := resolveFastroute(dir); err == nil || !strings.Contains(err.Error(), "cannot read") || !strings.Contains(err.Error(), sub) {
+		t.Fatalf("unreadable subdir: %v", err)
+	}
+	// bin/ that exists but cannot be read: fails too.
+	bin := filepath.Join(dir, "bin")
+	routerReadDir = func(p string) ([]os.DirEntry, error) {
+		if p == bin {
+			return nil, &os.PathError{Op: "open", Path: bin, Err: os.ErrPermission}
+		}
+		return os.ReadDir(p)
+	}
+	if _, err := resolveFastroute(dir); err == nil || !strings.Contains(err.Error(), "cannot read") {
+		t.Fatalf("unreadable bin/: %v", err)
+	}
+	// A candidate that cannot be stat'ed: fails.
+	routerReadDir = os.ReadDir
+	routerStat = func(p string) (os.FileInfo, error) {
+		if strings.EqualFold(filepath.Base(p), exe) {
+			return nil, &os.PathError{Op: "stat", Path: p, Err: os.ErrPermission}
+		}
+		return os.Stat(p)
+	}
+	if _, err := resolveFastroute(dir); err == nil || !strings.Contains(err.Error(), "cannot stat") {
+		t.Fatalf("unstatable candidate: %v", err)
+	}
+	routerStat = os.Stat
+
+	// An unreadable ~/.pcbpilot/fastroute/current fails; PATH is not used.
+	fakeHome(t)
+	t.Setenv("FASTROUTE_BIN", "")
+	savedLook := fastrouteLookPath
+	defer func() { fastrouteLookPath = savedLook }()
+	onPath := filepath.Join(t.TempDir(), exe)
+	writeExe(t, onPath)
+	fastrouteLookPath = func(string) (string, error) { return onPath, nil }
+	routerLstat = func(p string) (os.FileInfo, error) {
+		return nil, &os.PathError{Op: "lstat", Path: p, Err: os.ErrPermission}
+	}
+	if got, err := resolveFastroute(""); err == nil || !strings.Contains(err.Error(), "cannot read") {
+		t.Fatalf("unreadable current fell through to PATH: %q %v", got, err)
+	}
+	// A missing current does fall through to PATH.
+	routerLstat = os.Lstat
+	if got, err := resolveFastroute(""); err != nil || !sameFile(t, got, onPath) {
+		t.Fatalf("missing current, PATH: %q %v", got, err)
+	}
+}

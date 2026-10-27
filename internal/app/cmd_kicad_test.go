@@ -383,3 +383,25 @@ func TestKicadDRCGateSoftPolicyPasses(t *testing.T) {
 		}
 	}
 }
+
+// The fabrication checks a fab builds from need a waiver however they are
+// silenced: excluded, ignored, or downgraded to warning.
+func TestKicadDRCGateFabricationRulesAreHard(t *testing.T) {
+	for _, rule := range []string{"items_not_allowed", "through_hole_pad_without_hole", "invalid_outline",
+		"item_on_disabled_layer", "track_on_post_machined_layer"} {
+		for _, pol := range []*kicad.DRCPolicy{
+			{Exclusions: []kicad.DRCExclusion{{Rule: rule, Key: rule + "|1|2|a|b"}}},
+			{Ignored: []string{rule}},
+			{Downgraded: []string{rule}},
+		} {
+			g := gateResult{Gate: "kicad-drc", Pass: true}
+			if s := applyDRCPolicy(&g, pol, nil); g.Pass || len(g.Items) != 1 || len(s) != 0 {
+				t.Fatalf("%s %+v: passed or not hard: %+v", rule, pol, g)
+			}
+			applyWaivers(&g, []gateWaiver{{Gate: "kicad-drc", Match: rule, Reason: "reviewed", By: "test"}})
+			if !g.Pass {
+				t.Fatalf("%s %+v: a matching waiver did not pass it: %+v", rule, pol, g)
+			}
+		}
+	}
+}

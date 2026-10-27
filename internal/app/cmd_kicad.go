@@ -381,7 +381,9 @@ func kicadDRCGate(rep *kicad.DRCReport, path string) gateResult {
 // not silence on a routed board (exclusion, "ignore", or a downgrade of an
 // error to "warning"): shorts, the clearance family, unconnected items,
 // schematic parity, copper / drill size rules, thermals, zones, solder mask
-// bridges. Silencing one fails kicad-drc unless a signed waiver matches.
+// bridges, custom disallow rules and the outline / layer / hole checks a
+// fab builds from. Silencing one fails kicad-drc unless a signed waiver
+// matches.
 var drcHardRules = map[string]bool{
 	"shorting_items": true, "tracks_crossing": true,
 	"clearance": true, "hole_clearance": true, "copper_edge_clearance": true, "creepage": true, "hole_to_hole": true, "edge_clearance": true,
@@ -391,19 +393,19 @@ var drcHardRules = map[string]bool{
 	"track_width": true, "via_diameter": true, "drill_out_of_range": true, "annular_width": true, "connection_width": true,
 	"microvia_drill_out_of_range": true,
 	"starved_thermal":             true, "zones_intersect": true, "solder_mask_bridge": true,
+	"items_not_allowed": true, "through_hole_pad_without_hole": true, "invalid_outline": true,
+	"item_on_disabled_layer": true, "track_on_post_machined_layer": true,
 }
 
 // drcSoftRules are the other rules KiCad 10 reports as errors by default
-// (placement, courtyard, outline, length / skew tuning, library): silencing
-// one is listed as "silenced" in the gate detail and summary.drcPolicy but
-// does not fail the gate.
+// (placement, courtyard, length / skew tuning, library): silencing one is
+// listed as "silenced" in the gate detail and summary.drcPolicy but does not
+// fail the gate.
 var drcSoftRules = map[string]bool{
 	"courtyards_overlap": true, "diff_pair_gap_out_of_range": true, "diff_pair_uncoupled_length_too_long": true,
-	"footprint": true, "invalid_outline": true, "item_on_disabled_layer": true, "items_not_allowed": true,
-	"length_out_of_range": true, "malformed_courtyard": true, "npth_inside_courtyard": true, "pth_inside_courtyard": true,
-	"overlapping_pads": true, "skew_out_of_range": true, "text_on_edge_cuts": true, "through_hole_pad_without_hole": true,
-	"too_many_vias": true, "track_angle": true, "track_on_post_machined_layer": true, "track_segment_length": true,
-	"unresolved_variable": true,
+	"footprint": true, "length_out_of_range": true, "malformed_courtyard": true, "npth_inside_courtyard": true,
+	"pth_inside_courtyard": true, "overlapping_pads": true, "skew_out_of_range": true, "text_on_edge_cuts": true,
+	"too_many_vias": true, "track_angle": true, "track_segment_length": true, "unresolved_variable": true,
 }
 
 // kicadWarningRules are the rules KiCad 10 does not report as errors by
