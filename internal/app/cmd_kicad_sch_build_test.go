@@ -609,6 +609,148 @@ func TestSbGridZoneMultiPinSameNet(t *testing.T) {
 	t.Fatalf("no grid variant could lay out a zone with a multi-pin same-net IC side:\n%s", strings.Join(errs, "\n"))
 }
 
+// A zone of nothing but decoupling caps on several rails (no IC): the caps
+// stack in columns, and the ground symbol of one cap and the supply symbol of
+// the cap below used to meet on one vertical line, so every grid variant
+// failed with "N stub(s) would touch a foreign wire or pin" (field board
+// 2026-10-27: 33 caps on four rails, all stubs at one y).
+func TestSbGridZoneDecapColumns(t *testing.T) {
+	sbNeedKicad(t)
+	spec := &sbSpec{Name: "decaps", Zones: []sbZone{{ID: "dec", Title: "FPGA decoupling"}}}
+	rails := []string{"+1V2", "+2V5", "+3V3"}
+	gnd := sbNet{Name: "GND", Kind: "ground"}
+	nets := map[string]*sbNet{}
+	// runs of one rail, then the next, then a bulk cap per rail
+	var railOf []string
+	for _, run := range []struct {
+		rail string
+		n    int
+	}{{"+1V2", 8}, {"+3V3", 16}, {"+2V5", 5}, {"+1V2", 1}, {"+3V3", 2}, {"+2V5", 1}} {
+		for i := 0; i < run.n; i++ {
+			railOf = append(railOf, run.rail)
+		}
+	}
+	for i, r := range railOf {
+		ref := fmt.Sprintf("C%d", i+1)
+		spec.Parts = append(spec.Parts, sbPart{Ref: ref, Value: "100n", Symbol: "Device:C", Zone: "dec"})
+		if nets[r] == nil {
+			nets[r] = &sbNet{Name: r, Kind: "power"}
+		}
+		nets[r].Pins = append(nets[r].Pins, ref+":1")
+		gnd.Pins = append(gnd.Pins, ref+":2")
+	}
+	for _, r := range rails {
+		spec.Nets = append(spec.Nets, *nets[r])
+	}
+	spec.Nets = append(spec.Nets, gnd)
+	d, _, err := buildDesign(spec, sbResolveOpts{Offline: true})
+	if err != nil {
+		t.Fatalf("design: %v", err)
+	}
+	zi := d.zoneInputs()[0]
+	for i, v := range sbGridVariants {
+		zl, err := gridZone(d, zi, &sbMeasure{cache: map[string]kicad.SceneSymbol{}}, v)
+		if err != nil {
+			t.Errorf("grid variant %d: %v", i, err)
+			continue
+		}
+		if f := sbZoneFindings(d, zi, zl); sbHasShort(f) {
+			t.Errorf("grid variant %d shorts nets: %v", i, f)
+		}
+	}
+}
+
+// An IC whose side carries runs of same-net pins (three OUT, three VS) with a
+// decoupling cap on the first of them: each pin used to get its own stub and
+// label, and the cap's attach wire, bending past the next pins, crossed their
+// stubs (EG-08) on every grid variant (field board 2026-10-27, a high-side
+// switch zone that v0.10.0 drew clean). The runs are now tied along the pin
+// ends and carry one connection.
+// A pin of a same-net run (tied, no marker of its own) must never be the
+// fallback tie target of its run's first pin: that pin dropped its marker for
+// it and the whole run lost its net name (field board 2026-10-27, a KiCad
+// netlist mismatch on an isolator's GND2 pins). Every stub of S is blocked;
+// its only same-net sibling T is tied to S already.
+func TestSbFixStubsNeverTiesToATiedPin(t *testing.T) {
+	s, tp := kicad.Pt{X: 0, Y: 0}, kicad.Pt{X: 0, Y: 2.54}
+	zl := &sbZoneLayout{
+		Wires: [][]kicad.Pt{
+			{s, tp},                                 // the run tie
+			{s, {X: 5.08, Y: 0}},                    // S's stub
+			{{X: 2.54, Y: -20}, {X: 2.54, Y: 20}},   // foreign wires all around
+			{{X: -2.54, Y: -20}, {X: -2.54, Y: 20}}, //
+			{{X: -20, Y: -2.54}, {X: 20, Y: -2.54}}, //
+		},
+		Markers: []sbMarker{{Kind: "label", Net: "GND2", At: kicad.Pt{X: 5.08, Y: 0}, Dir: "right"}},
+	}
+	pinNet := map[kicad.Pt]string{
+		s: "GND2#U1.17", tp: "GND2#U1.18",
+		{X: 2.54, Y: -20}: "A#R1.1", {X: 2.54, Y: 20}: "A#R2.1", {X: -2.54, Y: -20}: "B#R3.1", {X: -2.54, Y: 20}: "B#R4.1",
+		{X: -20, Y: -2.54}: "C#R5.1", {X: 20, Y: -2.54}: "C#R6.1",
+	}
+	bad := sbFixStubs(zl, pinNet, nil, map[kicad.Pt]kicad.Pt{tp: s})
+	if len(zl.Markers) != 1 {
+		t.Fatalf("S dropped its marker for a pin of its own run: markers %v", zl.Markers)
+	}
+	if len(bad) == 0 {
+		t.Fatal("a stub with no clear way out must be reported, not hidden")
+	}
+}
+
+func TestSbGridZoneSameNetPinRuns(t *testing.T) {
+	two := []sbPin{{Number: "1", Name: "1", Type: "passive"}, {Number: "2", Name: "2", Type: "passive"}}
+	pin := func(n, name, typ string) sbPin { return sbPin{Number: n, Name: name, Type: typ} }
+	spec := &sbSpec{
+		Name:  "hss",
+		Zones: []sbZone{{ID: "sw", Title: "High-side switch"}},
+		Parts: []sbPart{
+			{Ref: "U1", Value: "HSS", Zone: "sw", Pins: []sbPin{
+				pin("1", "NC", "no_connect"), pin("2", "GND", "power_in"), pin("3", "IN", "input"), pin("4", "NC", "no_connect"),
+				pin("5", "OUT", "output"), pin("6", "OUT", "output"), pin("7", "OUT", "output"), pin("8", "VS", "power_in"),
+				pin("9", "VS", "power_in"), pin("10", "VS", "power_in"), pin("11", "NC", "no_connect"), pin("12", "DIAG_EN", "input"),
+				pin("13", "CL", "passive"), pin("14", "CS", "output"), pin("15", "EP", "power_in")}},
+			{Ref: "R1", Value: "10k", Zone: "sw", Pins: two},
+			{Ref: "C1", Value: "100n", Zone: "sw", Pins: two, Near: "U1:8"},
+			{Ref: "C2", Value: "10n", Zone: "sw", Pins: two},
+		},
+		Nets: []sbNet{
+			{Name: "GND", Kind: "ground", Pins: []string{"U1:2", "U1:15", "C1:2", "C2:2"}},
+			{Name: "+24V", Kind: "power", Pins: []string{"U1:8", "U1:9", "U1:10", "C1:1"}},
+			{Name: "LOAD_PWR", Pins: []string{"U1:5", "U1:6", "U1:7", "C2:1"}},
+			{Name: "LOAD_CS", Pins: []string{"U1:14"}},
+			{Name: "LOAD_EN", Pins: []string{"R1:1"}},
+			{Name: "LOAD_IN", Pins: []string{"R1:2", "U1:3"}},
+			{Name: "LOAD_CL", Pins: []string{"U1:13"}},
+			{Name: "LOAD_DIAG", Pins: []string{"U1:12"}},
+		},
+	}
+	d, _, err := buildDesign(spec, sbResolveOpts{Offline: true})
+	if err != nil {
+		t.Fatalf("design: %v", err)
+	}
+	zi := d.zoneInputs()[0]
+	clean := 0
+	var bad []string
+	for i, v := range sbGridVariants {
+		zl, err := gridZone(d, zi, &sbMeasure{cache: map[string]kicad.SceneSymbol{}}, v)
+		if err != nil {
+			continue // a variant may fail; layoutZones takes the clean one
+		}
+		f := sbZoneFindings(d, zi, zl)
+		if len(f) == 0 {
+			clean++
+		}
+		for _, s := range f {
+			if strings.HasPrefix(s, "EG-08") || strings.HasPrefix(s, "short: ") {
+				bad = append(bad, fmt.Sprintf("variant %d: %s", i, s))
+			}
+		}
+	}
+	if len(bad) > 0 || clean == 0 {
+		t.Fatalf("%d clean variant(s); crossings / shorts:\n%s", clean, strings.Join(bad, "\n"))
+	}
+}
+
 func TestFinishSbRunFailureIsNotOK(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "r.json")
 	err := finishSbRun(&sbReport{OK: true}, fmt.Errorf("zone z could not be laid out"), path, io.Discard, io.Discard)
