@@ -9,19 +9,38 @@ import (
 // LM2904): properties only, the units live in the parent.
 var derivedLib = map[string]string{
 	"BASE": `(symbol "BASE"
-		(exclude_from_sim no) (in_bom yes) (on_board yes)
+		(pin_names (offset 1.016))
+		(exclude_from_sim no) (in_bom yes) (on_board yes) (in_pos_files yes)
 		(property "Reference" "U" (at 0 5.08 0) (effects (font (size 1.27 1.27))))
 		(property "Value" "BASE" (at 0 -5.08 0) (effects (font (size 1.27 1.27))))
+		(property "Footprint" "Package:BASE_FP" (at 0 0 0) (hide yes) (effects (font (size 1.27 1.27))))
 		(property "Datasheet" "base.pdf" (at 0 0 0) (hide yes) (effects (font (size 1.27 1.27))))
+		(property "Description" "base description" (at 0 0 0) (hide yes) (effects (font (size 1.27 1.27))))
+		(property "ki_fp_filters" "BASE*" (at 0 0 0) (hide yes) (effects (font (size 1.27 1.27))))
+		(property "Sim.Device" "SUBCKT" (at 0 0 0) (hide yes) (effects (font (size 1.27 1.27))))
 		(symbol "BASE_1_1" (pin input line (at -5.08 0 0) (length 2.54) (name "A" (effects (font (size 1.27 1.27)))) (number "1" (effects (font (size 1.27 1.27))))))
 		(symbol "BASE_2_1" (pin input line (at -5.08 0 0) (length 2.54) (name "A" (effects (font (size 1.27 1.27)))) (number "2" (effects (font (size 1.27 1.27))))))
 	)`,
+	// MID leaves Footprint/Description empty (inherited), overrides in_bom
+	// and pin_names
 	"MID": `(symbol "MID" (extends "BASE")
+		(pin_names (hide yes))
+		(in_bom no)
 		(property "Value" "MID" (at 0 -6 0) (effects (font (size 1.27 1.27))))
+		(property "Footprint" "" (at 0 0 0) (hide yes) (effects (font (size 1.27 1.27))))
+		(property "Description" "" (at 0 0 0) (hide yes) (effects (font (size 1.27 1.27))))
 		(property "ki_keywords" "mid" (at 0 0 0) (hide yes) (effects (font (size 1.27 1.27)))))`,
+	// TOP: empty keywords/filters/datasheet inherit; on_board, exclude_from_sim,
+	// in_pos_files override; pin_numbers is new (BASE has none)
 	"TOP": `(symbol "TOP" (extends "MID")
+		(pin_numbers (hide yes))
+		(exclude_from_sim yes) (on_board no) (in_pos_files no)
 		(property "Reference" "IC" (at 0 7 0) (effects (font (size 1.27 1.27))))
-		(property "Value" "TOP" (at 0 -7 0) (effects (font (size 1.27 1.27)))))`,
+		(property "Value" "TOP" (at 0 -7 0) (effects (font (size 1.27 1.27))))
+		(property "Datasheet" "" (at 0 0 0) (hide yes) (effects (font (size 1.27 1.27))))
+		(property "ki_keywords" "" (at 0 0 0) (hide yes) (effects (font (size 1.27 1.27))))
+		(property "ki_fp_filters" "" (at 0 0 0) (hide yes) (effects (font (size 1.27 1.27))))
+		(property "MPN" "TOP-1" (at 0 0 0) (hide yes) (effects (font (size 1.27 1.27)))))`,
 	"LOOP": `(symbol "LOOP" (extends "LOOP"))`,
 }
 
@@ -37,12 +56,30 @@ func TestFlattenLibSymbol(t *testing.T) {
 	if n.list[1].atom != "TOP" || n.child("extends") != nil {
 		t.Fatalf("not flattened: %s", text)
 	}
-	for k, want := range map[string]string{"Reference": "IC", "Value": "TOP", "Datasheet": "base.pdf", "ki_keywords": "mid"} {
+	for k, want := range map[string]string{"Reference": "IC", "Value": "TOP", "Footprint": "Package:BASE_FP",
+		"Datasheet": "base.pdf", "Description": "base description", "ki_keywords": "mid", "ki_fp_filters": "BASE*",
+		"Sim.Device": "SUBCKT", "MPN": "TOP-1"} {
 		if got := propVal(n, k); got != want {
 			t.Errorf("%s = %q, want %q", k, got, want)
 		}
 	}
-	if !strings.Contains(text, `(symbol "TOP_1_1"`) || !strings.Contains(text, `(symbol "TOP_2_1"`) || strings.Contains(text, "BASE_") {
+	// every attribute once, with the nearest override
+	for h, want := range map[string]string{"pin_names": "(pin_names (hide yes))", "pin_numbers": "(pin_numbers (hide yes))",
+		"exclude_from_sim": "(exclude_from_sim yes)", "in_bom": "(in_bom no)", "on_board": "(on_board no)", "in_pos_files": "(in_pos_files no)"} {
+		var got []string
+		for _, c := range n.list {
+			if c.head() == h {
+				got = append(got, text[c.beg:c.end])
+			}
+		}
+		if len(got) != 1 || got[0] != want {
+			t.Errorf("%s: %q, want [%s]", h, got, want)
+		}
+	}
+	if c := strings.Count(text, `(property "Footprint"`); c != 1 {
+		t.Errorf("Footprint property ×%d", c)
+	}
+	if !strings.Contains(text, `(symbol "TOP_1_1"`) || !strings.Contains(text, `(symbol "TOP_2_1"`) || strings.Contains(text, `(symbol "BASE_`) {
 		t.Errorf("unit sub-symbols not renamed: %s", text)
 	}
 	pins, err := LibSymbolPins(text)

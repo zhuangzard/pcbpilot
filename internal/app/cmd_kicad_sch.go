@@ -243,6 +243,15 @@ func kicadSchPlace(path string, libID, symLib, ref, value, footprint, lcsc strin
 		if unit < 1 {
 			unit = 1
 		}
+		if err := kicad.ValidReference(ref); err != nil {
+			return nil, err
+		}
+		if e.RepeatedSheet() {
+			return nil, fmt.Errorf("this sheet is used by several sheet symbols (each use has its own references); placing symbols on it is not supported")
+		}
+		if others := e.RefElsewhere(ref); len(others) > 0 {
+			return nil, fmt.Errorf("%s is already placed on %s; place every unit of a component on one sheet", ref, strings.Join(others, ", "))
+		}
 		if n, err := e.LibUnitCount(libID); err != nil {
 			return nil, err
 		} else if unit > n {
@@ -421,7 +430,7 @@ func kicadSchNoConnect(path, ref string, pins []string, stdout io.Writer) error 
 // name/supplierId/manufacturerId shortcuts) set fields — a rename and the
 // fields always apply to every unit of the reference.
 func kicadSchModify(path, id string, patch map[string]any, stdout io.Writer) error {
-	ref, _, err := kicad.SplitUnitKey(id)
+	ref, unit, err := kicad.SplitUnitKey(id)
 	if err != nil {
 		return err
 	}
@@ -464,6 +473,20 @@ func kicadSchModify(path, id string, patch map[string]any, stdout io.Writer) err
 		if len(units) == 0 {
 			return nil, fmt.Errorf("no symbol %s on this sheet", ref)
 		}
+		if unit > 0 { // an explicit unit must be placed, field-only edits included
+			if _, _, _, err := e.SymbolAt(id); err != nil {
+				return nil, err
+			}
+		}
+		// a Reference field in the patch is a rename like --designator
+		rename, hasRename := patch["designator"].(string)
+		if r, ok := set["Reference"]; ok {
+			if hasRename && r != rename {
+				return nil, fmt.Errorf("designator %q and Reference field %q disagree", rename, r)
+			}
+			rename, hasRename = r, true
+			delete(set, "Reference")
+		}
 		keys := make([]string, 0, len(set))
 		for k := range set {
 			keys = append(keys, k)
@@ -474,11 +497,8 @@ func kicadSchModify(path, id string, patch map[string]any, stdout io.Writer) err
 				return nil, err
 			}
 		}
-		if d, ok := patch["designator"].(string); ok && d != ref {
-			if len(e.SymbolUnits(d)) > 0 {
-				return nil, fmt.Errorf("cannot rename %s to %s: %s is already on this sheet", ref, d, d)
-			}
-			if err := e.SetField(ref, "Reference", d); err != nil {
+		if hasRename && rename != ref {
+			if err := e.SetField(ref, "Reference", rename); err != nil { // validates and checks collisions
 				return nil, err
 			}
 		}

@@ -90,6 +90,24 @@ func TestSchKicadBackendMultiUnit(t *testing.T) {
 	if !regexp.MustCompile(`\(at 127 76\.2 0\)\s*\(unit 3\)`).MatchString(s) {
 		t.Error("U9:3 not moved")
 	}
+	// refused edits leave the file untouched: an unplaced unit, a rename by
+	// Reference field onto a placed part or to an invalid designator
+	run(false, "place", "--symbol", "my:OPA2X", "--designator", "U2", "--x", "152.4", "--y", "50.8")
+	src, _ = os.ReadFile(sheet)
+	for _, bad := range [][]string{
+		{"modify", "--id", "U9:99", "--patch", `{"name":"X"}`},
+		{"modify", "--id", "U9", "--patch", `{"customAttributes":{"Reference":"U2"}}`},
+		{"modify", "--id", "U9", "--patch", `{"otherProperty":{"Reference":"U9:1"}}`},
+		{"modify", "--id", "U9", "--designator", "U 10"},
+		{"modify", "--id", "U9", "--designator", "U10", "--patch", `{"customAttributes":{"Reference":"U11"}}`},
+		{"place", "--symbol", "my:OPA2X", "--designator", "U3:2", "--x", "0", "--y", "0"},
+	} {
+		run(true, bad...)
+		if now, _ := os.ReadFile(sheet); !bytes.Equal(now, src) {
+			t.Fatalf("refused %v changed the sheet", bad)
+		}
+	}
+	run(false, "prim-delete", "--ids", "U2")
 
 	run(false, "prim-delete", "--ids", "U9:3")
 	e, _ := kicad.OpenSchematicFile(sheet)
@@ -165,7 +183,7 @@ func TestSchBuildMultiUnitLive(t *testing.T) {
 	for _, p := range rd.Parts {
 		units[p.Ref] = len(p.Units)
 	}
-	if units["U1"] != 3 || units["U2"] != 5 || units["R1"] != 0 {
+	if units["U1"] != 0 || units["U2"] != 0 || units["R1"] != 0 { // fully placed: no units list
 		t.Errorf("sch-read units %v", units)
 	}
 	er, err := runSchEdit(sbOptions{OutDir: out, NoIntent: true, Jobs: 4, PlannerBudget: 20000},
@@ -179,4 +197,102 @@ func TestSchBuildMultiUnitLive(t *testing.T) {
 			t.Errorf("%s on %d units, want %d", frag, c, n)
 		}
 	}
+}
+
+// A triple gate whose supply pins (7, 14) are common to every unit (unit 0).
+// They are passive: KiCad's ERC reports common power_in pins of an unplaced
+// unit as missing_power_pin (an error), so the ERC gate refuses a partly
+// placed part of that kind — correctly.
+const testTripleLib = `(kicad_symbol_lib (version 20251024) (generator "test")
+	(symbol "TRI"
+		(exclude_from_sim no) (in_bom yes) (on_board yes)
+		(property "Reference" "U" (at 0 7.62 0) (effects (font (size 1.27 1.27))))
+		(property "Value" "TRI" (at 0 -7.62 0) (effects (font (size 1.27 1.27))))
+		(symbol "TRI_0_1"
+			(pin passive line (at 0 7.62 270) (length 2.54) (name "VCC" (effects (font (size 1.27 1.27)))) (number "14" (effects (font (size 1.27 1.27)))))
+			(pin passive line (at 0 -7.62 90) (length 2.54) (name "GND" (effects (font (size 1.27 1.27)))) (number "7" (effects (font (size 1.27 1.27))))))
+		(symbol "TRI_1_1" (rectangle (start -2.54 2.54) (end 2.54 -2.54) (stroke (width 0.254) (type default)) (fill (type none)))
+			(pin input line (at -5.08 0 0) (length 2.54) (name "A" (effects (font (size 1.27 1.27)))) (number "1" (effects (font (size 1.27 1.27)))))
+			(pin output line (at 5.08 0 180) (length 2.54) (name "Y" (effects (font (size 1.27 1.27)))) (number "2" (effects (font (size 1.27 1.27))))))
+		(symbol "TRI_2_1" (rectangle (start -2.54 2.54) (end 2.54 -2.54) (stroke (width 0.254) (type default)) (fill (type none)))
+			(pin input line (at -5.08 0 0) (length 2.54) (name "A" (effects (font (size 1.27 1.27)))) (number "3" (effects (font (size 1.27 1.27)))))
+			(pin output line (at 5.08 0 180) (length 2.54) (name "Y" (effects (font (size 1.27 1.27)))) (number "4" (effects (font (size 1.27 1.27))))))
+		(symbol "TRI_3_1" (rectangle (start -2.54 2.54) (end 2.54 -2.54) (stroke (width 0.254) (type default)) (fill (type none)))
+			(pin input line (at -5.08 0 0) (length 2.54) (name "A" (effects (font (size 1.27 1.27)))) (number "5" (effects (font (size 1.27 1.27)))))
+			(pin output line (at 5.08 0 180) (length 2.54) (name "Y" (effects (font (size 1.27 1.27)))) (number "6" (effects (font (size 1.27 1.27))))))
+	)
+)`
+
+// TestSchBuildPartialUnitsLive: a spec units list places only those units;
+// sch-read of the partly placed part writes the list back and a rebuild from
+// it places the same units, common (unit 0) supply pins still connected.
+func TestSchBuildPartialUnitsLive(t *testing.T) {
+	sbNeedKicad(t)
+	t.Setenv(kicad.EnvCacheDir, t.TempDir())
+	libDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(libDir, "my.kicad_sym"), []byte(testTripleLib), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	spec := func(units []int, extra ...string) *sbSpec {
+		return &sbSpec{Name: "pu", LibDirs: []string{libDir},
+			Parts: []sbPart{{Ref: "U1", Symbol: "my:TRI", Units: units}, {Ref: "R1", Value: "1k", Symbol: "Device:R"}},
+			Nets: []sbNet{
+				{Name: "VCC", Kind: "power", Pins: []string{"U1:14", "R1:1"}},
+				{Name: "GND", Kind: "ground", Pins: []string{"U1:7"}},
+				{Name: "SIG", Pins: append([]string{"U1:2", "U1:5", "R1:2"}, extra...)},
+			}}
+	}
+	if _, err := runSchBuild(spec([]int{1, 4}), sbOptions{OutDir: filepath.Join(t.TempDir(), "bad"), NoIntent: true, Jobs: 2}, nil); err == nil || !strings.Contains(err.Error(), "UNIT_NOT_ON_SYMBOL") {
+		t.Errorf("unit 4 of a 3-unit symbol: %v", err)
+	}
+	if _, err := runSchBuild(spec([]int{1, 3}, "U1:3"), sbOptions{OutDir: filepath.Join(t.TempDir(), "bad2"), NoIntent: true, Jobs: 2}, nil); err == nil {
+		t.Error("a pin of an unplaced unit accepted")
+	}
+	out := filepath.Join(t.TempDir(), "pu")
+	check := func(dir, what string, res *sbReport, err error) {
+		t.Helper()
+		if err != nil || sbGateStatus(res, "netlist") != "pass" {
+			t.Fatalf("%s: %v %+v", what, err, res)
+		}
+		sch, rerr := os.ReadFile(filepath.Join(dir, "pu.kicad_sch"))
+		if rerr != nil {
+			t.Fatalf("%s: %v (ok=%v %+v)", what, rerr, res.OK, res.Error)
+		}
+		if n := strings.Count(string(sch), `(lib_id "my:TRI")`); n != 2 {
+			t.Errorf("%s: %d units of U1 placed, want 2", what, n)
+		}
+		e, _ := kicad.OpenSchematicFile(filepath.Join(dir, "pu.kicad_sch"))
+		if u := e.SymbolUnits("U1"); len(u) != 2 || u[0] != 1 || u[1] != 3 {
+			t.Errorf("%s: units %v", what, u)
+		}
+	}
+	res, err := runSchBuild(spec([]int{1, 3}), sbOptions{OutDir: out, NoIntent: true, Jobs: 2, PlannerBudget: 20000}, nil)
+	check(out, "build", res, err)
+	rd, err := readSbSpec(out, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range rd.Parts {
+		if p.Ref == "U1" && (len(p.Units) != 2 || p.Units[0] != 1 || p.Units[1] != 3) {
+			t.Errorf("sch-read units %v, want [1 3]", p.Units)
+		}
+	}
+	pinNet := map[string]string{}
+	for _, n := range rd.Nets {
+		for _, p := range n.Pins {
+			pinNet[p] = n.Name
+		}
+	}
+	if pinNet["U1:14"] != "VCC" || pinNet["U1:7"] != "GND" || pinNet["U1:5"] != "SIG" {
+		t.Errorf("sch-read nets %v", pinNet)
+	}
+	for _, p := range append(rd.NoConnect, "") {
+		if p == "U1:3" || p == "U1:4" {
+			t.Errorf("pin %s of the unplaced unit 2 read back", p)
+		}
+	}
+	copyDir := filepath.Join(t.TempDir(), "copy")
+	rd.Name = "pu"
+	res2, err := runSchBuild(rd, sbOptions{OutDir: copyDir, NoIntent: true, Jobs: 2, PlannerBudget: 20000}, nil)
+	check(copyDir, "rebuild from sch-read", res2, err)
 }

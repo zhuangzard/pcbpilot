@@ -212,7 +212,7 @@ func (e *SchEditor) sceneSymbol(n *sexp, libs map[string]Box) (SceneSymbol, erro
 		s.Fields = append(s.Fields, SceneField{Name: p.list[1].atom, Value: p.list[2].atom,
 			Box: fieldBox(Pt{pa.num(1), pa.num(2)}, vertical, len([]rune(p.list[2].atom)), size, just)})
 	}
-	pins, err := e.LibPins(s.LibID)
+	pins, err := e.LibPinsStyle(s.LibID, instStyle(n))
 	if err != nil {
 		return s, nil // unknown library symbol: no pins
 	}

@@ -14,7 +14,9 @@
 4. **多单元器件**（双运放、四与非门、带独立电源单元的器件）：spec 里只写一个件，`REF:脚号` 可指任何单元的脚
    （`U1:5` 是 B 单元，`U1:8`/`U1:4` 是电源单元）；sch-build 画出**全部**单元（含电源单元，ERC 不报缺单元）。
    KiCad 派生符号（`Amplifier_Operational:LM358`、`74xx:74HC00` 这类 `extends` 的）自动展平后使用。
-   sch-read 的 `units` 列出已放的单元；`set_value` / `set_field` / `remove_part` 作用于该位号的全部单元。
+   只放部分单元时在件上写 `"units": [1, 3]`（未列出的单元不画，其脚不能进网）；sch-read 只对**部分放置**的件
+   输出 `units`，回读再构建不会多出单元。`set_value` / `set_field` / `remove_part` 作用于该位号的全部单元。
+   公共（unit 0）电源脚的件不能只放部分单元：KiCad ERC 报 `missing_power_pin`（错误）。
 5. 一次构建失败时读 `error.code` / `error.fix`；spec 问题是一次全部列出的（例如 `PIN_NOT_ON_SYMBOL` 会给出
    符号真实的脚号脚名），一轮改完再跑。门禁失败时 `--out` 不会被改动。
 

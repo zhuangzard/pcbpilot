@@ -109,8 +109,8 @@ type sbPart struct {
 	// BBox is informational (sch-read output: minX,minY,maxX,maxY mm on
 	// its sheet); the build ignores it.
 	BBox []float64 `json:"bboxMm,omitempty"`
-	// Units is informational too (sch-read: the units of a multi-unit
-	// symbol placed on the sheets); the build places every unit.
+	// Units places only these units of a multi-unit symbol (sch-read
+	// writes it for a partly placed component); empty = every unit.
 	Units []int `json:"units,omitempty"`
 }
 
@@ -753,7 +753,24 @@ func resolveSymbols(parts []*sbRPart, opts sbResolveOpts, libDirs []string) (st 
 			}
 		}
 		p.Multi = len(units) > 1
+		// an explicit units list places only those units (a partly placed
+		// component read back by sch-read); default: every unit
+		want := map[int]bool{}
+		badUnit := false
+		for _, u := range p.Units {
+			if !units[u] && !(u == 1 && len(units) <= 1) {
+				diags = append(diags, sbDiag{Code: "UNIT_NOT_ON_SYMBOL", Message: fmt.Sprintf("%s: unit %d is not a unit of %s (units with pins: %v)", p.Ref, u, p.LibID, sbSortedUnits(units)), Fix: "fix the part's units list or drop it (every unit)"})
+				badUnit = true
+			}
+			want[u] = true
+		}
+		if badUnit {
+			continue
+		}
 		for _, q := range pins {
+			if len(want) > 0 && q.Unit > 0 && !want[q.Unit] {
+				continue
+			}
 			if q.Unit == 0 || q.Unit == 1 || p.Multi {
 				p.LPins = append(p.LPins, q)
 			}
@@ -1060,7 +1077,9 @@ func buildDesign(s *sbSpec, opts sbResolveOpts) (*sbDesign, sbResolveStats, erro
 		return nil, st, fmt.Errorf("unusedPins %q: want nc or open", s.UnusedPins)
 	}
 	for _, p := range d.Parts {
-		if p.Multi {
+		if p.Multi && len(p.Units) > 0 {
+			d.Warnings = append(d.Warnings, fmt.Sprintf("%s: multi-unit symbol — units %v placed as the spec lists (grid layout)", p.Ref, sbUnits(p)))
+		} else if p.Multi {
 			d.Warnings = append(d.Warnings, fmt.Sprintf("%s: multi-unit symbol — every unit is placed (grid layout)", p.Ref))
 		}
 	}
@@ -1399,3 +1418,12 @@ func (t *sbTimer) mark(stage string) {
 }
 
 func (t *sbTimer) total() float64 { return float64(time.Since(t.start).Microseconds()) / 1000 }
+
+func sbSortedUnits(units map[int]bool) []int {
+	out := make([]int, 0, len(units))
+	for u := range units {
+		out = append(out, u)
+	}
+	sort.Ints(out)
+	return out
+}

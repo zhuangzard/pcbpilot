@@ -140,9 +140,10 @@ type sbReport struct {
 
 // sbBox is a part's drawn extent on its sheet (mm).
 type sbBox struct {
-	Sheet string    `json:"sheet"`
-	Box   []float64 `json:"bboxMm"`
-	Units []int     `json:"units,omitempty"` // placed units, ascending
+	Sheet    string    `json:"sheet"`
+	Box      []float64 `json:"bboxMm"`
+	Units    []int     `json:"units,omitempty"`    // placed units, ascending
+	LibUnits int       `json:"libUnits,omitempty"` // units of the library symbol
 }
 
 // sbPartBoxes reads every sheet back: ref → body box (all units) and the
@@ -176,7 +177,8 @@ func sbPartBoxes(dir string, files []string) map[string]sbBox {
 				units = append(old.Units, s.Unit)
 				sort.Ints(units)
 			}
-			out[s.Ref] = sbBox{Sheet: f, Box: []float64{sbRound2(b.MinX), sbRound2(b.MinY), sbRound2(b.MaxX), sbRound2(b.MaxY)}, Units: units}
+			total, _ := e.LibUnitCount(s.LibID)
+			out[s.Ref] = sbBox{Sheet: f, Box: []float64{sbRound2(b.MinX), sbRound2(b.MinY), sbRound2(b.MaxX), sbRound2(b.MaxY)}, Units: units, LibUnits: total}
 		}
 	}
 	return out

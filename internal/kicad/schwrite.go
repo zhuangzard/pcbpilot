@@ -18,9 +18,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // SchFileVersion is the format version written into new sheets (KiCad 10).
@@ -81,6 +83,11 @@ type SchEditor struct {
 	pwrNext               int
 	bodies                map[string]Box // lib_id → graphics-only box (set by Scene)
 	flgFloor              int
+	// elsewhere: reference → the project's other sheets that place it, and
+	// sheetUses: how many sheet symbols use this file (both set by
+	// OpenSchematicFile).
+	elsewhere map[string][]string
+	sheetUses int
 }
 
 type textEdit struct {
@@ -143,6 +150,7 @@ func OpenSchematicFile(path string) (*SchEditor, error) {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	dir := filepath.Dir(path)
+	e.elsewhere = map[string][]string{}
 	if e.Project == "" {
 		pros, _ := filepath.Glob(filepath.Join(dir, "*.kicad_pro"))
 		if len(pros) == 1 {
@@ -171,6 +179,14 @@ func OpenSchematicFile(path string) (*SchEditor, error) {
 						e.pwrNext = n + 1
 					}
 				}
+				for _, ref := range instRefs(s, e.Project) { // references placed on other sheets
+					if !strings.HasPrefix(ref, "#") && !slices.Contains(e.elsewhere[ref], filepath.Base(o)) {
+						e.elsewhere[ref] = append(e.elsewhere[ref], filepath.Base(o))
+					}
+				}
+			}
+			if s.head() == "sheet" && propVal(s, "Sheetfile") == filepath.Base(path) {
+				e.sheetUses++
 			}
 		}
 		if e.InstancePath != "" || r.child("sheet_instances") == nil {
@@ -316,6 +332,11 @@ func FlattenLibSymbol(syms map[string]string, name string) (string, error) {
 	return flattenLibSymbol(syms, name, 0)
 }
 
+// flattenInherits are the properties a derived symbol inherits when it
+// leaves them empty (KiCad's mandatory fields, keywords, footprint filters).
+var flattenInherits = map[string]bool{"Reference": true, "Value": true, "Footprint": true, "Datasheet": true,
+	"Description": true, "ki_keywords": true, "ki_fp_filters": true}
+
 func flattenLibSymbol(syms map[string]string, name string, depth int) (string, error) {
 	text, ok := syms[name]
 	if !ok {
@@ -346,19 +367,56 @@ func flattenLibSymbol(syms map[string]string, name string, depth int) (string, e
 		return "", fmt.Errorf("flattened %s: %w", name, err)
 	}
 	src := strings.TrimSpace(text)
+	// child properties: a mandatory field, keywords or footprint filters
+	// left empty in the derived symbol inherit the parent's value; any other
+	// property replaces (or joins) the parent's.
 	childProps := map[string]string{}
 	var order []string
+	parentHas := map[string]bool{}
+	for _, c := range parent.list {
+		if c.head() == "property" && len(c.list) > 2 && c.list[2].atom != "" {
+			parentHas[c.list[1].atom] = true
+		}
+	}
+	// child attributes (pin_names, pin_numbers, exclude_from_sim, in_bom,
+	// on_board, in_pos_files, …): every top-level item of the derived symbol
+	// other than its name, extends, properties and unit sub-symbols overrides
+	// the parent's item of the same head.
+	childAttr := map[string]string{}
+	var attrOrder []string
 	for _, c := range child.list {
-		if c.head() == "property" && len(c.list) > 2 {
+		switch h := c.head(); h {
+		case "property":
+			if len(c.list) < 3 {
+				continue
+			}
+			if c.list[2].atom == "" && flattenInherits[c.list[1].atom] && parentHas[c.list[1].atom] {
+				continue
+			}
 			childProps[c.list[1].atom] = src[c.beg:c.end]
 			order = append(order, c.list[1].atom)
+		case "", "extends", "symbol":
+		default:
+			if _, dup := childAttr[h]; !dup {
+				attrOrder = append(attrOrder, h)
+			}
+			childAttr[h] = src[c.beg:c.end]
 		}
 	}
 	var edits []textEdit
-	last := -1
+	last, firstProp := -1, -1
 	for _, c := range parent.list {
-		if c.head() != "property" || len(c.list) < 3 {
+		h := c.head()
+		if t, ok := childAttr[h]; ok && h != "property" {
+			edits = append(edits, textEdit{c.beg, c.end, t})
+			delete(childAttr, h)
 			continue
+		}
+		if h != "property" || len(c.list) < 3 {
+			continue
+		}
+		if firstProp < 0 {
+			firstProp = c.beg
 		}
 		last = c.end
 		if t, ok := childProps[c.list[1].atom]; ok {
@@ -366,11 +424,23 @@ func flattenLibSymbol(syms map[string]string, name string, depth int) (string, e
 			delete(childProps, c.list[1].atom)
 		}
 	}
-	var extra []string
+	var extra, attrs []string
 	for _, n := range order {
 		if t, ok := childProps[n]; ok {
 			extra = append(extra, t)
 		}
+	}
+	for _, h := range attrOrder {
+		if t, ok := childAttr[h]; ok {
+			attrs = append(attrs, t)
+		}
+	}
+	if len(attrs) > 0 { // attributes the parent lacks: before its properties
+		at := firstProp
+		if at < 0 {
+			at = parent.end - 1
+		}
+		edits = append(edits, textEdit{at, at, strings.Join(attrs, "\n\t\t") + "\n\t\t"})
 	}
 	if len(extra) > 0 {
 		if last < 0 { // no properties: before the closing paren
@@ -388,19 +458,32 @@ func flattenLibSymbol(syms map[string]string, name string, depth int) (string, e
 	return pt, nil
 }
 
-// LibPin is a library pin of one unit (unit 0 = common to all units).
+// LibPin is a library pin of one unit (unit 0 = common to all units) and
+// body style (0 = common to all styles; 2 = the De Morgan alternate).
 type LibPin struct {
 	Number, Name, Type string
 	Unit               int
+	Style              int
 	At                 Pt // y up
 	Angle, Length      float64
 }
 
-// LibPins lists the pins of an embedded library symbol.
+// LibPins lists the pins of an embedded library symbol in body style 1 —
+// the style pcbpilot places (common-style pins included).
 func (e *SchEditor) LibPins(id string) ([]LibPin, error) {
+	return e.LibPinsStyle(id, 1)
+}
+
+// LibPinsStyle lists the pins of an embedded library symbol in body style
+// (common-style pins included). Style 2 of a 74xx gate is the De Morgan
+// alternate: the same pin numbers drawn elsewhere.
+func (e *SchEditor) LibPinsStyle(id string, style int) ([]LibPin, error) {
 	s, ok := e.libs[id]
 	if !ok {
 		return nil, fmt.Errorf("library symbol %s is not in the sheet", id)
+	}
+	if style < 1 {
+		style = 1
 	}
 	var out []LibPin
 	for _, u := range s.list {
@@ -408,20 +491,19 @@ func (e *SchEditor) LibPins(id string) ([]LibPin, error) {
 			continue
 		}
 		parts := strings.Split(u.list[1].atom, "_")
-		unit := 0
+		unit, st := 0, 0
 		if len(parts) >= 3 {
 			unit, _ = strconv.Atoi(parts[len(parts)-2])
-			// body style 2 is the De Morgan alternate (74xx gates): the same
-			// pins drawn elsewhere. pcbpilot places style 1 only.
-			if style, _ := strconv.Atoi(parts[len(parts)-1]); style > 1 {
-				continue
-			}
+			st, _ = strconv.Atoi(parts[len(parts)-1])
+		}
+		if st != 0 && st != style {
+			continue
 		}
 		for _, p := range u.list {
 			if p.head() != "pin" {
 				continue
 			}
-			lp := LibPin{Unit: unit}
+			lp := LibPin{Unit: unit, Style: st}
 			if len(p.list) > 1 {
 				lp.Type = p.list[1].atom
 			}
@@ -610,6 +692,135 @@ func SplitUnitKey(key string) (ref string, unit int, err error) {
 	return r, n, nil
 }
 
+// instRefs lists the references a placed symbol has under project (every
+// instance path: a sheet used twice gives each use its own reference); the
+// Reference field when it has no instances.
+func instRefs(s *sexp, project string) []string {
+	var out []string
+	if in := s.child("instances"); in != nil {
+		for _, pr := range in.list {
+			if pr.head() != "project" || len(pr.list) < 2 || (project != "" && pr.list[1].atom != project) {
+				continue
+			}
+			for _, pa := range pr.list {
+				if r := pa.child("reference"); pa.head() == "path" && r != nil && len(r.list) > 1 && !slices.Contains(out, r.list[1].atom) {
+					out = append(out, r.list[1].atom)
+				}
+			}
+		}
+	}
+	if len(out) == 0 {
+		if r := propVal(s, "Reference"); r != "" {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// instPaths counts the instance paths of a placed symbol (all projects).
+func instPaths(s *sexp) int {
+	n := 0
+	if in := s.child("instances"); in != nil {
+		for _, pr := range in.list {
+			for _, pa := range pr.list {
+				if pa.head() == "path" {
+					n++
+				}
+			}
+		}
+	}
+	return n
+}
+
+// RefElsewhere lists the project's other sheets that place reference ref
+// (only known for a sheet opened with OpenSchematicFile).
+func (e *SchEditor) RefElsewhere(ref string) []string { return e.elsewhere[ref] }
+
+// RepeatedSheet reports whether this sheet file is used by more than one
+// sheet symbol (or its symbols carry several instance paths): each use has
+// its own references, so pcbpilot does not place or rename symbols here.
+func (e *SchEditor) RepeatedSheet() bool {
+	if e.sheetUses > 1 {
+		return true
+	}
+	for _, s := range e.root.list {
+		if s.head() == "symbol" && instPaths(s) > 1 {
+			return true
+		}
+	}
+	return false
+}
+
+// errAcrossSheets refuses an edit of ref that would leave the units placed
+// on the project's other sheets inconsistent.
+func (e *SchEditor) errAcrossSheets(ref, what string) error {
+	if others := e.elsewhere[ref]; len(others) > 0 {
+		return fmt.Errorf("%s also has units on %s; %s a component placed on several sheets is not supported "+
+			"(it would leave the other sheets inconsistent) — put all its units on one sheet first", ref, strings.Join(others, ", "), what)
+	}
+	return nil
+}
+
+// ValidReference checks a designator KiCad and pcbpilot accept: not empty,
+// no ':' (the unit separator of REF:UNIT), no '.' (REF.PIN), no whitespace,
+// quotes, control characters or KiCad's variable syntax "${".
+func ValidReference(ref string) error {
+	if ref == "" {
+		return fmt.Errorf("empty designator")
+	}
+	for _, r := range ref {
+		if r == ':' || r == '.' || r == '"' || r == '\\' || unicode.IsSpace(r) || unicode.IsControl(r) || !unicode.IsPrint(r) {
+			return fmt.Errorf("designator %q: no ':', '.', quotes, backslashes, whitespace or control characters", ref)
+		}
+	}
+	if strings.Contains(ref, "${") {
+		return fmt.Errorf("designator %q: no text variables", ref)
+	}
+	return nil
+}
+
+// checkRename validates renaming every unit of from to to.
+func (e *SchEditor) checkRename(from, to string) error {
+	if err := ValidReference(to); err != nil {
+		return fmt.Errorf("cannot rename %s: %w", from, err)
+	}
+	if to == from {
+		return nil
+	}
+	if strings.HasPrefix(to, "#") != strings.HasPrefix(from, "#") {
+		return fmt.Errorf("cannot rename %s to %s: '#' marks power symbols only", from, to)
+	}
+	if e.RepeatedSheet() {
+		return fmt.Errorf("cannot rename %s: this sheet is used by several sheet symbols (each use has its own references); rename it in the KiCad project, not per sheet file", from)
+	}
+	if err := e.errAcrossSheets(from, "renaming"); err != nil {
+		return err
+	}
+	if len(e.instancesOf(to)) > 0 {
+		return fmt.Errorf("cannot rename %s to %s: %s is already on this sheet", from, to, to)
+	}
+	for _, s := range e.root.list {
+		if s.head() == "symbol" && slices.Contains(instRefs(s, ""), to) {
+			return fmt.Errorf("cannot rename %s to %s: %s is already used on this sheet", from, to, to)
+		}
+	}
+	if others := e.elsewhere[to]; len(others) > 0 {
+		return fmt.Errorf("cannot rename %s to %s: %s is already used on %s", from, to, to, strings.Join(others, ", "))
+	}
+	return nil
+}
+
+// instStyle is the body style of a placed symbol (KiCad 9+ writes
+// body_style, older files convert; default 1).
+func instStyle(s *sexp) int {
+	for _, h := range []string{"body_style", "convert"} {
+		if c := s.child(h); c != nil && c.num(1) >= 1 {
+			return int(c.num(1))
+		}
+	}
+	return 1
+}
+
 func instUnit(s *sexp) int {
 	if u := s.child("unit"); u != nil && u.num(1) >= 1 {
 		return int(u.num(1))
@@ -759,7 +970,7 @@ func (e *SchEditor) SymbolPinPositions(key string) (map[string]Pt, error) {
 		if lid == nil || at == nil {
 			return nil, fmt.Errorf("symbol %s has no lib_id/at", ref)
 		}
-		pins, err := e.LibPins(lid.list[1].atom)
+		pins, err := e.LibPinsStyle(lid.list[1].atom, instStyle(inst))
 		if err != nil {
 			return nil, err
 		}
@@ -807,6 +1018,8 @@ func (e *SchEditor) DeleteSymbol(key string) ([]int, error) {
 		del = []symInst{in}
 	} else if del = e.instancesOf(ref); len(del) == 0 {
 		return nil, fmt.Errorf("no symbol %s on this sheet", ref)
+	} else if err := e.errAcrossSheets(ref, "deleting every unit of"); err != nil {
+		return nil, fmt.Errorf("%w (or delete one unit: %s:N)", err, ref)
 	}
 	var units, items []int
 	for _, in := range del {
@@ -969,6 +1182,13 @@ func (e *SchEditor) SetField(ref, name, value string) error {
 	insts := e.instancesOf(ref)
 	if len(insts) == 0 {
 		return fmt.Errorf("no symbol %s on this sheet", ref)
+	}
+	if name == "Reference" {
+		if err := e.checkRename(ref, value); err != nil {
+			return err
+		}
+	} else if err := e.errAcrossSheets(ref, "editing fields of"); err != nil {
+		return err
 	}
 	for _, in := range insts {
 		if in.item < 0 {
