@@ -30,7 +30,7 @@ var drcHardRules = map[string]bool{
 	"item_on_disabled_layer": true, "track_on_post_machined_layer": true,
 	// Warnings by KiCad's default, but evidence a fab or the parity check
 	// needs: they gate at warning severity, so silencing them fails too.
-	"copper_sliver": true, "holes_co_located": true, "footprint_symbol_field_mismatch": true,
+	"copper_sliver": true, "holes_co_located": true, "footprint_symbol_field_mismatch": true, "padstack": true,
 }
 
 // drcSoftRules are the other rules KiCad 10 reports as errors by default

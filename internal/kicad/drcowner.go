@@ -209,6 +209,8 @@ var drcEnvironmentRules = map[string]bool{"lib_footprint_issues": true, "lib_foo
 
 var reItemRef = regexp.MustCompile(`^(?:Footprint|Symbol) (\S+)`)
 
+var reNumber = regexp.MustCompile(`[-+]?[0-9]+(?:\.[0-9]+)?`)
+
 // Attribute names the owners of v from the board index (nil: none resolve).
 func (ix *BoardIndex) Attribute(v Violation) DRCOwner {
 	o := DRCOwner{}
@@ -286,6 +288,13 @@ func (ix *BoardIndex) Attribute(v Violation) DRCOwner {
 	sort.Strings(o.Nets)
 	sort.Strings(ids)
 	o.Key = o.Class + "|" + strings.Join(dedupeSorted(ids), ",")
+	// A parity rule can report several problems on one footprint (a field
+	// mismatch per field): KiCad's summary, numbers normalised, tells them
+	// apart.
+	if o.Class == "schematic-parity" {
+		summary, _, _ := strings.Cut(v.Message, "; ")
+		o.Key += "|" + reNumber.ReplaceAllString(strings.TrimSpace(summary), "#")
+	}
 	return o
 }
 

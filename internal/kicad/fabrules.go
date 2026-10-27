@@ -37,6 +37,9 @@ type RuleSource struct {
 	// netclass, an unconditional custom rule), so it bounds the item
 	// everywhere. Local overrides and conditional rules only lower it.
 	Global bool `json:"global,omitempty"`
+	// Holes (drill only): the hole class the value bounds — "through" or
+	// "micro"; empty for all holes (a custom hole_size rule).
+	Holes string `json:"holes,omitempty"`
 }
 
 // EffectiveMin is the smallest value the rules allow for one item.
@@ -50,6 +53,9 @@ type EffectiveMin struct {
 	Unknown []string `json:"unknown,omitempty"`
 	// Unset: sources present but 0 (KiCad: no constraint).
 	Unset []string `json:"unset,omitempty"`
+	// HoleClasses (drill only): the hole classes the board allows; each
+	// needs its own global bound.
+	HoleClasses []string `json:"holeClasses,omitempty"`
 }
 
 func (e *EffectiveMin) add(src, where string, mm float64, global bool) {
@@ -60,14 +66,23 @@ func (e *EffectiveMin) add(src, where string, mm float64, global bool) {
 	}
 }
 
-// Covered: a global source bounds the item.
+// Covered: a global source bounds the item — for drills, every hole class
+// the board allows (a through-hole minimum says nothing about microvias).
 func (e *EffectiveMin) Covered() bool {
-	for _, s := range e.Sources {
-		if s.Global {
-			return true
+	classes := e.HoleClasses
+	if len(classes) == 0 {
+		classes = []string{""}
+	}
+	for _, cl := range classes {
+		ok := false
+		for _, s := range e.Sources {
+			ok = ok || (s.Global && (cl == "" || s.Holes == "" || s.Holes == cl))
+		}
+		if !ok {
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 // Measured is the smallest copper geometry actually on the board (mm).
@@ -188,10 +203,20 @@ func (r *EffectiveRules) addProject(b []byte) error {
 	}
 	put(&r.Track, "min_track_width")
 	put(&r.Space, "min_clearance")
-	put(&r.Drill, "min_through_hole_diameter")
 	put(&r.Annular, "min_via_annular_width")
+	r.Drill.HoleClasses = []string{"through"}
+	put(&r.Drill, "min_through_hole_diameter")
 	if r.MicroVias {
+		r.Drill.HoleClasses = append(r.Drill.HoleClasses, "micro")
 		put(&r.Drill, "min_microvia_drill")
+	}
+	for i := range r.Drill.Sources {
+		switch r.Drill.Sources[i].Where {
+		case "board.design_settings.rules.min_through_hole_diameter":
+			r.Drill.Sources[i].Holes = "through"
+		case "board.design_settings.rules.min_microvia_drill":
+			r.Drill.Sources[i].Holes = "micro"
+		}
 	}
 	// Every net is at least in Default, so its clearance is global. Another
 	// class without a clearance inherits Default's (KiCad 9+); one whose

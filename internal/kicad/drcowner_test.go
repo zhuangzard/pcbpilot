@@ -77,7 +77,7 @@ func TestAttributeClasses(t *testing.T) {
 		{viol("silk_over_copper", "violations", item("Segment of R1", "silk-r1", 1, 1), item("Pad 1 of R1", "pad-r1-1", 1, 1)), "footprint", "footprint|fp:R1", []string{"R1"}},
 		{viol("copper_edge_clearance", "violations", item("Segment on Edge.Cuts", "edge-1", 0, 0), item("Zone [GND]", "zone-1", 3, 3)), "board-outline", "board-outline|outline,zone:GND", nil},
 		{viol("lib_footprint_issues", "violations", item("Footprint R1", "fp-r1", 1, 1)), "environment", "environment|fp:R1", []string{"R1"}},
-		{viol("missing_footprint", "schematic_parity", item("Symbol R7 [10k]", "sym-uuid", 0, 0)), "schematic-parity", "schematic-parity|?:Symbol R7", []string{"R7"}},
+		{viol("missing_footprint", "schematic_parity", item("Symbol R7 [10k]", "sym-uuid", 0, 0)), "schematic-parity", "schematic-parity|?:Symbol R7|missing_footprint", []string{"R7"}},
 		{viol("text_height", "violations", item("Text on F.Silkscreen", "txt-1", 0, 0)), "graphic", "graphic|text:F.SilkS", nil},
 		// Two REF** logos: the designator does not identify one, the uuid does.
 		{viol("courtyards_overlap", "violations", item("Footprint REF**", "fp-logo-a", 1, 1), item("Footprint REF**", "fp-logo-b", 1, 1)), "placement", "placement|fp:fp-logo-a,fp:fp-logo-b", []string{"REF**"}},
@@ -487,7 +487,7 @@ func TestDiffDRCMixedUUIDs(t *testing.T) {
 // Rules that gate at warning severity are hard for the policy too: a
 // project that excludes or ignores them fails unless a waiver accepts it.
 func TestFabWarningRulesAreHard(t *testing.T) {
-	for _, rule := range []string{"copper_sliver", "holes_co_located", "footprint_symbol_field_mismatch", "hole_to_hole", "connection_width"} {
+	for _, rule := range []string{"copper_sliver", "holes_co_located", "footprint_symbol_field_mismatch", "padstack", "hole_to_hole", "connection_width"} {
 		if DRCRuleClass(rule) != "hard" || !DRCGatesWarning(rule) {
 			t.Errorf("%s: class %s, gates %v", rule, DRCRuleClass(rule), DRCGatesWarning(rule))
 		}
@@ -543,5 +543,58 @@ func TestReadEffectiveRulesNetclassesAndFlags(t *testing.T) {
 	}
 	if r := run(`{"board":{"design_settings":{"rules":{"allow_blind_buried_vias":1}}}}`); len(r.Drill.Unknown) != 1 {
 		t.Errorf("malformed allow_blind_buried_vias: %+v", r.Drill)
+	}
+}
+
+// One parity rule, several problems on one footprint: which field
+// mismatched is part of the identity (numbers normalised).
+func TestDiffDRCParityDiscriminator(t *testing.T) {
+	ix := mustIndex(t)
+	field := func(msg string) []OwnedViolation {
+		v := viol("footprint_symbol_field_mismatch", "schematic_parity", item("Footprint R1", "fp-r1", 10, 10))
+		v.Message = msg + "; Footprint R1"
+		return ix.Own([]Violation{v})
+	}
+	base := field("Value field '10k' doesn't match symbol '4k7'")
+	if d := DiffDRC(base, field("Datasheet field 'a.pdf' doesn't match symbol 'b.pdf'"), 0.5); len(d.New) != 1 || len(d.Resolved) != 1 {
+		t.Fatalf("another field on the same footprint: %+v", d)
+	}
+	if d := DiffDRC(base, field("Value field '22k' doesn't match symbol '4k7'"), 0.5); d.Matched != 1 {
+		t.Fatalf("same field, other numbers: %+v", d)
+	}
+}
+
+// With microvias allowed, the drill minimum needs a bound for them too.
+func TestReadEffectiveRulesMicroviaCoverage(t *testing.T) {
+	board := string(mustReadFile(t, drcBoard))
+	run := func(pro, dru string) *EffectiveRules {
+		t.Helper()
+		dir := t.TempDir()
+		_ = os.WriteFile(filepath.Join(dir, "b.kicad_pcb"), []byte(board), 0o644)
+		_ = os.WriteFile(filepath.Join(dir, "b.kicad_pro"), []byte(pro), 0o644)
+		if dru != "" {
+			_ = os.WriteFile(filepath.Join(dir, "b.kicad_dru"), []byte(dru), 0o644)
+		}
+		r, err := ReadEffectiveRules(filepath.Join(dir, "b.kicad_pcb"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	zero := `{"board":{"design_settings":{"rules":{"allow_microvias":true,"min_through_hole_diameter":0.3,"min_microvia_drill":0}}}}`
+	absent := `{"board":{"design_settings":{"rules":{"allow_microvias":true,"min_through_hole_diameter":0.3}}}}`
+	for name, pro := range map[string]string{"zero": zero, "absent": absent} {
+		if r := run(pro, ""); r.Drill.Covered() {
+			t.Errorf("microvia minimum %s: drill covered by the through-hole minimum alone: %+v", name, r.Drill)
+		}
+	}
+	if r := run(absent, "(version 1)\n(rule holes (constraint hole_size (min 0.15mm)))\n"); !r.Drill.Covered() || !near(r.Drill.MinMm, 0.15) {
+		t.Errorf("a global hole_size rule bounds microvias too: %+v", r.Drill)
+	}
+	if r := run(`{"board":{"design_settings":{"rules":{"allow_microvias":true,"min_through_hole_diameter":0.3,"min_microvia_drill":0.1}}}}`, ""); !r.Drill.Covered() {
+		t.Errorf("both minimums: %+v", r.Drill)
+	}
+	if r := run(`{"board":{"design_settings":{"rules":{"min_through_hole_diameter":0.3}}}}`, ""); !r.Drill.Covered() {
+		t.Errorf("no microvias: %+v", r.Drill)
 	}
 }
