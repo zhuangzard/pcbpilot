@@ -1,0 +1,12 @@
+{
+  "board": {
+    "design_settings": {
+      "drc_exclusions": [
+        ["courtyards_overlap|100221000|45955000|11659109-eea0-488c-af3a-a134aa53be7b|86b7aa3e-5fae-4956-9584-486046f4c3e7", "Intentional Overlap"],
+        ["clearance|10000000|20000000|00000000-0000-4000-8000-0000000000c1|00000000-0000-4000-8000-0000000000c2", "too close on purpose"],
+        "via_dangling|130959409|65559501|438e11bc-6c89-48ba-9c13-e6b8852c4413|00000000-0000-0000-0000-000000000000"
+      ],
+      "rule_severities": {"clearance": "error", "unconnected_items": "ignore", "missing_courtyard": "ignore", "silk_overlap": "warning"}
+    }
+  }
+}

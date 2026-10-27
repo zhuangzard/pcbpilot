@@ -377,6 +377,69 @@ func kicadDRCGate(rep *kicad.DRCReport, path string) gateResult {
 	return g
 }
 
+// drcCriticalRules are the KiCad DRC rules a project may not silence for a
+// routed board: shorts, clearances, unconnected items and the schematic
+// parity checks. An exclusion of one, or the rule set to "ignore", fails the
+// kicad-drc gate unless a signed waiver matches it.
+var drcCriticalRules = map[string]bool{
+	"shorting_items": true, "tracks_crossing": true,
+	"clearance": true, "hole_clearance": true, "copper_edge_clearance": true, "creepage": true,
+	"unconnected_items": true,
+	"schematic_parity": true, "missing_footprint": true, "extra_footprint": true, "duplicate_footprints": true,
+	"net_conflict": true, "footprint_symbol_mismatch": true,
+}
+
+// applyDRCPolicy adds the project's DRC policy (its .kicad_pro
+// drc_exclusions and rule_severities "ignore") to the kicad-drc gate:
+// critical rules become failing items ("EXCLUDED <rule> ..." / "IGNORED
+// <rule> ..."), which a {"gate":"kicad-drc","match":...} waiver can accept;
+// every other exclusion or ignored rule is listed in Info. excluded are the
+// report's excluded items (kicad-cli --severity-all), for their positions.
+func applyDRCPolicy(g *gateResult, pol *kicad.DRCPolicy, excluded []kicad.Violation) {
+	if pol == nil {
+		return
+	}
+	where := map[string]string{} // rule|first uuid -> description
+	for _, v := range excluded {
+		if len(v.Objs) > 0 {
+			where[v.Rule+"|"+v.Objs[0]] = v.Message
+		}
+	}
+	critical := 0
+	for _, e := range pol.Exclusions {
+		desc := ""
+		if parts := strings.Split(e.Key, "|"); len(parts) >= 4 {
+			desc = where[e.Rule+"|"+parts[3]]
+		}
+		it := "EXCLUDED " + e.Key
+		if e.Comment != "" {
+			it += fmt.Sprintf(" (comment: %q)", e.Comment)
+		}
+		if desc != "" {
+			it += ": " + desc
+		}
+		if drcCriticalRules[e.Rule] {
+			g.Items = append(g.Items, it+" (.kicad_pro drc_exclusions)")
+			critical++
+		} else {
+			g.Info = append(g.Info, it)
+		}
+	}
+	for _, rule := range pol.Ignored {
+		it := fmt.Sprintf("IGNORED %s (.kicad_pro rule_severities: ignore; KiCad's DRC does not report it at all)", rule)
+		if drcCriticalRules[rule] {
+			g.Items = append(g.Items, it)
+			critical++
+		} else {
+			g.Info = append(g.Info, it)
+		}
+	}
+	if critical > 0 {
+		g.Pass = false
+		g.Detail += fmt.Sprintf("; %d short / clearance / unconnected / parity check(s) excluded or ignored by the project (sign a kicad-drc waiver to accept one)", critical)
+	}
+}
+
 func kicadFlat(v kicad.Violation) drcFlatViolation {
 	return drcFlatViolation{Rule: v.Rule, ObjType: v.ObjType, Net: v.Net, X: v.X, Y: v.Y, Layer: v.Layer, Objs: v.Objs, Message: v.Message}
 }

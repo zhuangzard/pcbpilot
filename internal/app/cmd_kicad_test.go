@@ -263,3 +263,67 @@ func TestKicadRequirementsCarryIntentVia(t *testing.T) {
 		t.Fatalf("no intent via must stay out of the bridge request: %s", b)
 	}
 }
+
+// A project's excluded clearance and its unconnected_items set to "ignore"
+// fail the kicad-drc gate (listed as items) unless signed waivers match
+// every one; excluded courtyards, ignored courtyard checks and the like are
+// info only.
+func TestKicadDRCGateProjectPolicy(t *testing.T) {
+	rep, err := kicad.ParseDRC(mustRead(t, filepath.Join("..", "kicad", "testdata", "drc", "exclusions-all.json")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pol, err := kicad.ReadDRCPolicy(filepath.Join("..", "kicad", "testdata", "drc", "exclusions.kicad_pro"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	errs, _, _ := rep.SplitErrors()
+	errs.Violations, errs.Total, errs.Counts = nil, 0, map[string]int{} // only the policy under test
+	g := kicadDRCGate(errs, "drc.json")
+	if !g.Pass {
+		t.Fatalf("clean report: %+v", g)
+	}
+	applyDRCPolicy(&g, pol, rep.Excluded())
+	if g.Pass || len(g.Items) != 2 {
+		t.Fatalf("critical exclusion / ignore passed: %+v", g)
+	}
+	joined := strings.Join(g.Items, "\n")
+	for _, want := range []string{"EXCLUDED clearance", "too close on purpose", "Track [GND]", "IGNORED unconnected_items"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("items lack %q:\n%s", want, joined)
+		}
+	}
+	info := strings.Join(g.Info, "\n")
+	for _, want := range []string{"EXCLUDED courtyards_overlap", "EXCLUDED via_dangling", "IGNORED missing_courtyard"} {
+		if !strings.Contains(info, want) {
+			t.Errorf("info lacks %q:\n%s", want, info)
+		}
+	}
+	// One waiver is not enough; both are.
+	one := g
+	applyWaivers(&one, []gateWaiver{{Gate: "kicad-drc", Match: "EXCLUDED clearance|10000000", Reason: "reviewed", By: "test"}})
+	if one.Pass {
+		t.Fatal("half-waived policy passed")
+	}
+	both := g
+	applyWaivers(&both, []gateWaiver{{Gate: "kicad-drc", Match: "EXCLUDED clearance|10000000", Reason: "reviewed", By: "test"},
+		{Gate: "kicad-drc", Match: "IGNORED unconnected_items", Reason: "pours connect it", By: "test"}})
+	if !both.Pass || len(both.Waived) != 2 {
+		t.Fatalf("fully waived policy: %+v", both)
+	}
+	// No policy file: nothing added.
+	g2 := kicadDRCGate(errs, "drc.json")
+	applyDRCPolicy(&g2, &kicad.DRCPolicy{}, nil)
+	if !g2.Pass || len(g2.Items)+len(g2.Info) != 0 {
+		t.Fatalf("empty policy: %+v", g2)
+	}
+}
+
+func mustRead(t *testing.T, p string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}

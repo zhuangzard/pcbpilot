@@ -1408,6 +1408,17 @@ func (r *kicadRun) routedDRCGate(routed string) (all, errs *kicad.DRCReport) {
 	rep, warn, nWarn := all.SplitErrors()
 	_ = writeJSONFile(drcPath, rep)
 	g := kicadDRCGate(rep, drcPath)
+	// What the project tells DRC not to report is part of the gate: an
+	// excluded or ignored short / clearance / unconnected / parity check
+	// fails it unless a signed waiver matches.
+	pro := strings.TrimSuffix(routed, ".kicad_pcb") + ".kicad_pro"
+	if pol, err := kicad.ReadDRCPolicy(pro); err == nil {
+		applyDRCPolicy(&g, pol, all.Excluded())
+		r.summary["drcPolicy"] = pol
+	} else if !os.IsNotExist(err) {
+		g.Pass = false
+		g.Detail += "; cannot read the project's DRC exclusions / severities: " + err.Error()
+	}
 	pre := map[string]int{}
 	for _, v := range rep.Violations {
 		if r.inputDRC[v.Rule+"|"+v.Message] {
