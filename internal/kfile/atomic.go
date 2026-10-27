@@ -204,6 +204,18 @@ func (w *File) Abort() error {
 	return os.Remove(w.f.Name())
 }
 
+// renamedError: the rename took effect but flushing it failed. It is a
+// post-mutation error: never retried (the source is gone), and a
+// transaction rolls the target back.
+type renamedError struct {
+	path string
+	err  error
+}
+
+func (e *renamedError) Error() string {
+	return "renamed into " + e.path + " but could not flush it: " + e.err.Error()
+}
+
 // renameRetry renames, retrying sharing violations with backoff (10 ms
 // doubling, 500 ms cap) for retryBudget in total, but at least 3 attempts
 // (the per-attempt checks can be slow on a loaded machine). check, when not nil, runs

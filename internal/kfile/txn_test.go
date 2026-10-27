@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -712,6 +713,145 @@ func TestWriterLeaseSerializes(t *testing.T) {
 	}
 	if maxInside != 1 || relErr != nil {
 		t.Fatalf("overlapping operations: %d, release %v", maxInside, relErr)
+	}
+	clean(t, dir)
+}
+
+// crashAfterLastMutation applies tx and "dies" (panics) in the directory
+// fsync that follows the last mutation.
+func crashAfterLastMutation(t *testing.T, tx *Txn, dir, last string) {
+	t.Helper()
+	lastDone := false
+	beforeMutate = func(p string) { lastDone = filepath.Base(p) == last }
+	oldSync := syncDir
+	syncDir = func(d string) error {
+		if lastDone && d == dir {
+			panic("power cut")
+		}
+		return oldSync(d)
+	}
+	defer func() {
+		beforeMutate, syncDir = nil, oldSync
+		if r := recover(); r != "power cut" {
+			t.Fatalf("no crash: %v", r)
+		}
+	}()
+	tx.Apply("", Opts{Env: fakeEnv()})
+}
+
+// Recover makes the targets durable before it drops the journal.
+func TestRecoverFlushesBeforeCleanup(t *testing.T) {
+	dir := project(t, map[string]string{"a.kicad_pcb": "A1", "a.kicad_pro": "P1"})
+	tx := stagedTxn(t, dir)
+	rev := mustPlan(t, tx).Revision
+	crashAfterLastMutation(t, tx, dir, "new.kicad_dru")
+	if Pending(dir) == nil || read(t, filepath.Join(dir, "new.kicad_dru")) != "D1" {
+		t.Fatal("setup: expected every change landed and the journal left")
+	}
+	backups := filepath.Join(txnDir(dir), rev[:16])
+
+	oldSync := syncDir
+	syncDir = func(d string) error {
+		if d == dir {
+			return errors.New("flush failed")
+		}
+		return oldSync(d)
+	}
+	_, err := Recover(dir, RecoverOpts{Env: fakeEnv()})
+	syncDir = oldSync
+	if CodeOf(err) != CodeTxnPending || Pending(dir) == nil {
+		t.Fatalf("flush failure: %v", err)
+	}
+	if _, serr := os.Stat(backups); serr != nil {
+		t.Fatal("backups dropped although the targets are not durable")
+	}
+
+	var order []string
+	syncDir = func(d string) error { order = append(order, "sync "+d); return oldSync(d) }
+	old := removeFile
+	removeFile = func(p string) error { order = append(order, "rm "+filepath.Base(p)); return os.Remove(p) }
+	rec, err := Recover(dir, RecoverOpts{Env: fakeEnv()})
+	syncDir, removeFile = oldSync, old
+	if err != nil || rec.Action != "completed" {
+		t.Fatalf("%+v %v", rec, err)
+	}
+	si, ri := -1, -1
+	for i, o := range order {
+		if o == "sync "+dir && si < 0 {
+			si = i
+		}
+		if o == "rm journal.json" {
+			ri = i
+		}
+	}
+	if si < 0 || ri < 0 || si > ri {
+		t.Fatalf("target dir not flushed before the journal was removed: %v", order)
+	}
+	clean(t, dir)
+}
+
+// A restore whose flush fails keeps the journal; the next recover finishes.
+func TestRecoverRestoreFlushFailure(t *testing.T) {
+	dir := project(t, map[string]string{"a.kicad_pcb": "A1", "a.kicad_pro": "P1"})
+	interrupt(t, stagedTxn(t, dir))
+	old := syncFile
+	syncFile = func(string) error { return errors.New("flush failed") }
+	_, err := Recover(dir, RecoverOpts{Env: fakeEnv()})
+	syncFile = old
+	if CodeOf(err) != CodeTxnPending || Pending(dir) == nil {
+		t.Fatalf("flush failure: %v", err)
+	}
+	rec, err := Recover(dir, RecoverOpts{Env: fakeEnv()})
+	if err != nil || rec.Action != "rolled-back" || read(t, filepath.Join(dir, "a.kicad_pcb")) != "A1" {
+		t.Fatalf("%+v %v", rec, err)
+	}
+	clean(t, dir)
+}
+
+// A crash between restoring a file's bytes and its chmod is repaired.
+func TestRecoverRepairsMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no 0600/0644 distinction")
+	}
+	dir := project(t, map[string]string{"a.kicad_pcb": "A1", "a.kicad_pro": "P1"})
+	del := filepath.Join(dir, "a.del")
+	os.WriteFile(del, []byte("secret"), 0o600)
+	tx := stagedTxn(t, dir)
+	tx.Delete(del, nil)
+	interrupt(t, tx)
+	os.WriteFile(del, []byte("secret"), 0o644) // bytes back, mode not
+	os.Chmod(del, 0o644)
+	if _, err := Recover(dir, RecoverOpts{Env: fakeEnv()}); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := os.Stat(del); st.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %v", st.Mode().Perm())
+	}
+	clean(t, dir)
+}
+
+// A rename that happened but whose flush failed is not retried and is
+// rolled back with the rest.
+func TestRenamedButNotFlushed(t *testing.T) {
+	dir := project(t, map[string]string{"a.kicad_pcb": "A1", "a.kicad_pro": "P1"})
+	calls := 0
+	injectRename(t, onBase("a.kicad_pro", func(from, to string) error {
+		calls++
+		if err := platformRename(from, to); err != nil || calls > 1 {
+			return err
+		}
+		return &renamedError{path: to, err: errors.New("flush failed")}
+	}))
+	_, err := stagedTxn(t, dir).Apply("", Opts{Env: fakeEnv()})
+	var re *renamedError
+	if !errors.As(err, &re) || CodeOf(err) == CodeChanged {
+		t.Fatalf("err %v", err)
+	}
+	if calls != 2 { // the failed one, then the rollback's restore
+		t.Fatalf("%d renames of a.kicad_pro: retried?", calls)
+	}
+	if read(t, filepath.Join(dir, "a.kicad_pcb")) != "A1" || read(t, filepath.Join(dir, "a.kicad_pro")) != "P1" {
+		t.Fatal("not rolled back")
 	}
 	clean(t, dir)
 }

@@ -38,7 +38,10 @@
 //     backups. A journal left by a crash blocks later transactions with
 //     E_TXN_PENDING until Recover (restore what the transaction wrote; finish
 //     a transaction that had fully landed; refuse, changing nothing, if a file
-//     was edited since) or Discard (keep the files as they are).
+//     was edited since; a file whose bytes are back but whose mode is not
+//     gets its mode) or Discard (keep the files as they are). Recover and a
+//     rollback flush every journalled file and directory before the journal
+//     goes; if a flush fails the journal and backups stay.
 //   - One writer per project. AcquireWriter is an operating-system lock on
 //     <root>/.pcbpilot/writer.lock (Windows share mode, Unix flock), released
 //     by the kernel when the holder dies; Apply, Recover and Discard take it.

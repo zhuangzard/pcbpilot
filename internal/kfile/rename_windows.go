@@ -40,11 +40,22 @@ var (
 // retries.
 func platformRename(from, to string) error {
 	err := moveFileEx(from, to)
-	if err != nil && isRetryable(err) && posixRename(from, to) == nil {
-		return nil
+	if err == nil || !isRetryable(err) {
+		return err
 	}
-	return err
+	perr := posixRename(from, to)
+	var renamed *renamedError
+	switch {
+	case perr == nil:
+		return nil
+	case errors.As(perr, &renamed):
+		return perr // the rename happened; only its flush failed
+	}
+	return err // the fallback did not rename either: report the first error
 }
+
+// flushHandle is FlushFileBuffers, replaceable in tests.
+var flushHandle = syscall.FlushFileBuffers
 
 func moveFileEx(from, to string) error {
 	f, err := syscall.UTF16PtrFromString(from)
@@ -107,7 +118,10 @@ func posixRename(from, to string) error {
 	}
 	// This path has no WRITE_THROUGH; flush the renamed file (its data and
 	// the metadata NTFS associates with it) before reporting success.
-	return syscall.FlushFileBuffers(h)
+	if err := flushHandle(h); err != nil {
+		return &renamedError{path: to, err: err}
+	}
+	return nil
 }
 
 // verbatim is the \\?\ form of an absolute path.

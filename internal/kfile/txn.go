@@ -374,6 +374,9 @@ func (t *Txn) Apply(wantRev string, o Opts) (Plan, error) {
 				Fix:    "close KiCad and other programs using the project, then run `pcbpilot kicad txn recover` (or `discard` to keep the files as they are)"}
 		}
 		t.Abort()
+		if ferr := flushTargets(j.Changes[:i+1]); ferr != nil {
+			return plan, keepJournal(t.root, errors.Join(err, ferr))
+		}
 		return abandon(wrapf(err, "apply %s (all files restored)", e.Path))
 	}
 	plan.Applied = true
@@ -434,7 +437,7 @@ func undo(root string, e journalEntry, failed bool, g guardOpts) (bool, error) {
 	}
 	switch st {
 	case stateBase:
-		return false, nil
+		return fixMode(e, cur, g)
 	case stateOther:
 		if failed {
 			return false, nil
@@ -502,8 +505,58 @@ func undoAll(root string, entries []journalEntry, lastFailed bool, g guardOpts) 
 	return restored, errors.Join(errs...)
 }
 
+// fixMode restores the recorded mode of a file whose bytes are already at
+// their base (a crash between restoring the bytes and the chmod), under the
+// lock and base re-check.
+func fixMode(e journalEntry, cur Snapshot, g guardOpts) (bool, error) {
+	if !e.Existed || !cur.Exists || e.Mode == 0 {
+		return false, nil
+	}
+	st, err := os.Stat(e.Path)
+	if err != nil || st.Mode().Perm() == e.Mode.Perm() {
+		return false, err
+	}
+	if err := g.check(e.Path); err != nil {
+		return false, err
+	}
+	if err := e.base().Check(); err != nil {
+		return false, err
+	}
+	if err := os.Chmod(e.Path, e.Mode); err != nil {
+		return false, err
+	}
+	return true, syncFile(e.Path)
+}
+
+// flushTargets makes every journalled path durable as it is now (file
+// data and metadata, then its directory) before a journal is dropped.
+func flushTargets(entries []journalEntry) error {
+	var dirs []string
+	for _, e := range entries {
+		_, err := os.Stat(e.Path)
+		switch {
+		case err == nil:
+			if err := syncFile(e.Path); err != nil {
+				return wrapf(err, "flush %s", e.Path)
+			}
+		case !errors.Is(err, fs.ErrNotExist):
+			return err
+		}
+		dirs = append(dirs, filepath.Dir(e.Path))
+	}
+	return syncDirs(dirs...)
+}
+
+// keepJournal is the error for a transaction whose files could not be made
+// durable: the journal and backups stay for the next recover.
+func keepJournal(root string, err error) error {
+	return &Error{Code: CodeTxnPending, Path: journalPath(root), Err: err,
+		Detail: "the files could not be flushed, so the journal and backups are kept: " + err.Error(),
+		Fix:    "run `pcbpilot kicad txn recover` again"}
+}
+
 // syncFile flushes a file's data and metadata (Windows needs write access).
-func syncFile(path string) error {
+var syncFile = func(path string) error {
 	f, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
 		return err
@@ -698,6 +751,9 @@ func Recover(root string, o RecoverOpts) (Recovery, error) {
 	}
 	if all {
 		rec.Action = "completed"
+		if err := flushTargets(j.Changes); err != nil {
+			return rec, keepJournal(root, err)
+		}
 		return rec, finish(root, j)
 	}
 	if !o.NoLockCheck { // preflight; undo checks again before each file
@@ -711,6 +767,9 @@ func Recover(root string, o RecoverOpts) (Recovery, error) {
 		return rec, &Error{Code: CodeTxnPending, Path: journalPath(root), Err: err,
 			Detail: "recover incomplete, the journal is kept: " + err.Error(),
 			Fix:    "close the programs holding the files and run recover again"}
+	}
+	if err := flushTargets(j.Changes); err != nil {
+		return rec, keepJournal(root, err)
 	}
 	rec.Action = "rolled-back"
 	return rec, finish(root, j)

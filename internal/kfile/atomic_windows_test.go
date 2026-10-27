@@ -3,6 +3,7 @@
 package kfile
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -76,6 +77,30 @@ func TestWindowsRealHandleShareDelete(t *testing.T) {
 	defer syscall.CloseHandle(h)
 	if _, err := WriteFile(p, []byte("new"), Opts{Env: fakeEnv()}); err != nil {
 		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(p); string(b) != "new" {
+		t.Fatalf("content %q", b)
+	}
+	noTemps(t, dir)
+}
+
+// The POSIX fallback renamed the file but could not flush it: that is
+// reported as such at once, not retried into a misleading error.
+func TestWindowsFallbackFlushFailure(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "x.kicad_pcb")
+	os.WriteFile(p, []byte("orig"), 0o644)
+	h := openShared(t, p, syscall.FILE_SHARE_READ|syscall.FILE_SHARE_WRITE|syscall.FILE_SHARE_DELETE)
+	defer syscall.CloseHandle(h)
+	old := flushHandle
+	flushHandle = func(syscall.Handle) error { return errors.New("flush failed") }
+	defer func() { flushHandle = old }()
+	calls := 0
+	injectRename(t, func(from, to string) error { calls++; return platformRename(from, to) })
+	_, err := WriteFile(p, []byte("new"), Opts{Env: fakeEnv()})
+	var re *renamedError
+	if !errors.As(err, &re) || calls != 1 {
+		t.Fatalf("err %v after %d renames", err, calls)
 	}
 	if b, _ := os.ReadFile(p); string(b) != "new" {
 		t.Fatalf("content %q", b)
