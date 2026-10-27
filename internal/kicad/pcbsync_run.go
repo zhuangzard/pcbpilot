@@ -197,8 +197,9 @@ type ParityResult struct {
 }
 
 // RunParity copies the sheets (root first; their layout kept, ../ sheets
-// included) to a temp directory, puts pcb (+ pro and the rules beside pcb,
-// when present) next to the root copy under the root sheet's basename
+// included) to a temp directory, puts pcb (+ pro when given — a pro that is
+// missing or unreadable is CannotCheck — and the rules beside pcb, when
+// present) next to the root copy under the root sheet's basename
 // (kicad-cli finds the schematic by that name), and runs the parity DRC
 // there with the isolated config (parity needs no library). Every
 // schematic_parity item fails the gate unless expected(v) says it is one
@@ -241,11 +242,14 @@ func (t *Tools) RunParity(pcb, pro string, sheets []string, expected func(Violat
 	if err := copyPlain(pcb, filepath.Join(bdir, base+".kicad_pcb")); err != nil {
 		return cc("copy board: %v", err)
 	}
+	// A project that was named must be there: parity without its netclass
+	// and rule context is not the check that was asked for.
 	if pro != "" {
-		if _, err := os.Stat(pro); err == nil {
-			if err := copyPlain(pro, filepath.Join(bdir, base+".kicad_pro")); err != nil {
-				return cc("copy project: %v", err)
-			}
+		if _, err := os.Stat(pro); err != nil {
+			return cc("project %s: %v", pro, err)
+		}
+		if err := copyPlain(pro, filepath.Join(bdir, base+".kicad_pro")); err != nil {
+			return cc("copy project %s: %v", pro, err)
 		}
 	}
 	// The rules beside the board (the effective ones the sync publishes).

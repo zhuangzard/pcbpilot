@@ -170,7 +170,8 @@ pcbpilot kicad pcb-sync ... --in-place --apply-plan plan.json --revision <rev>
 - 原理图按真实依赖图收集：根图 + 图纸符号的 Sheetfile 递归（含 `../` 外部子图；绝对路径的图纸 → `E_SHEET_PATH` 拒绝），
   连同根图旁的 `.kicad_pro` 读一次、记哈希、按原目录结构复制到临时目录；网表导出与 parity 都用这份副本。这些文件和
   `--netlist` 在应用前、提交前（不提交时在返回成功前；`--check` / `--dry-run` / `--plan-out` 在给出结论或写计划前，库封装文件
-  也一并核对）与板一起再核对（被改 → 退出 4）。`--in-place` 无事可做时也验证读入字节的
+  也一并核对）与板一起再核对（被改 → 退出 4）。封装库配置（工程 / 全局 / 嵌套 fp-lib-table、kicad_common.json，含当时不存在的）
+  同样记快照、计入 revision、一并核对。parity 拿到的工程缺失或读不出 → cannot-check，不算通过。`--in-place` 无事可做时也验证读入字节的
   暂存副本，不读活文件。revision 还包含实际发布的工程与规则、将被覆盖的目标板 / 工程 / 规则的哈希或不存在状态，以及每个库封装的
   哈希。
 - **报告** `pcbpilot.kicad.pcb-sync/1`，总是打印到 stdout；`--report` / `--plan-out` 必须以 `.json` 结尾，已存在的文件必须是

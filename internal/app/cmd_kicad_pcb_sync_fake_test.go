@@ -892,3 +892,61 @@ func TestPcbSyncReadOnlyRechecksInputs(t *testing.T) {
 		t.Fatalf("unchanged: exit %d %s", code, rep.Verdict)
 	}
 }
+
+// TestPcbSyncLibraryConfigRechecked: the project and global fp-lib-table
+// (and kicad_common.json) are inputs: edited during planning, a read-only
+// answer or plan is refused (exit 4), and edited between --plan-out and
+// --apply-plan they change the revision.
+func TestPcbSyncLibraryConfigRechecked(t *testing.T) {
+	for _, which := range []string{"project", "global", "kicad_common"} {
+		for _, mode := range []string{"dry-run", "plan-out"} {
+			t.Run(which+"/"+mode, func(t *testing.T) {
+				dir, o, fake := fakeProject(t, fakeNetlistR2())
+				fake.value = "1k"
+				file := filepath.Join(dir, "fp-lib-table")
+				switch which {
+				case "global":
+					file = filepath.Join(os.Getenv("KICAD_CONFIG_HOME"), "10.0", "fp-lib-table")
+				case "kicad_common":
+					file = filepath.Join(os.Getenv("KICAD_CONFIG_HOME"), "10.0", "kicad_common.json")
+				}
+				if mode == "dry-run" {
+					o.dryRun = true
+				} else {
+					o.planOut = filepath.Join(dir, "plan.json")
+				}
+				fake.onFPInfo = func() {
+					b, _ := os.ReadFile(file)
+					if err := os.WriteFile(file, append(b, ' '), 0o644); err != nil {
+						t.Error(err)
+					}
+				}
+				rep, code, _ := runSyncCode(t, o)
+				if code != 4 || rep.Errors[len(rep.Errors)-1].Code != string(kfile.CodeChanged) || fileExists(filepath.Join(dir, "plan.json")) {
+					t.Fatalf("exit %d %+v", code, rep.Errors)
+				}
+			})
+		}
+	}
+	t.Run("revision", func(t *testing.T) {
+		dir, o, fake := fakeProject(t, fakeNetlistR2())
+		fake.value = "1k"
+		plan := filepath.Join(t.TempDir(), "p.json")
+		p := o
+		p.planOut = plan
+		rep, code, _ := runSyncCode(t, p)
+		if code != 0 {
+			t.Fatalf("plan: %d %+v", code, rep.Errors)
+		}
+		tbl := filepath.Join(dir, "fp-lib-table")
+		b, _ := os.ReadFile(tbl)
+		if err := os.WriteFile(tbl, append(b, ' '), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		a := o
+		a.inPlace, a.applyPlan, a.revision = true, plan, rep.Revision
+		if rep, code, _ = runSyncCode(t, a); code != 4 || rep.Errors[len(rep.Errors)-1].Code != string(kfile.CodeRevision) {
+			t.Fatalf("exit %d %+v", code, rep.Errors)
+		}
+	})
+}

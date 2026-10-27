@@ -29,6 +29,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -98,6 +99,10 @@ type FPLibTables struct {
 	Problems     []FPLibError        `json:"problems,omitempty"` // nested tables that failed, table cycles
 	Warnings     []FPLibError        `json:"warnings,omitempty"` // e.g. legacy variable fallbacks
 	Libs         []FPLib             `json:"-"`                  // all rows, lookup order
+	// Files are every configuration file the load consulted, present or
+	// not (kicad_common.json, the project and global tables, nested
+	// tables): what a caller snapshots to know the resolution still holds.
+	Files []string `json:"files,omitempty"`
 
 }
 
@@ -153,6 +158,7 @@ func loadFPLibTables(projDir string, env fpLibEnv) (*FPLibTables, error) {
 	if ferr != nil {
 		return nil, ferr
 	}
+	t.Files = append(t.Files, filepath.Join(cfg, "kicad_common.json"))
 	user, ferr := readKiCadCommonVars(filepath.Join(cfg, "kicad_common.json"))
 	if ferr != nil {
 		return nil, ferr
@@ -160,6 +166,7 @@ func loadFPLibTables(projDir string, env fpLibEnv) (*FPLibTables, error) {
 	lookup := func(name string) (FPLibVar, bool) { return resolveFPVar(name, abs, user, env) }
 
 	p := filepath.Join(abs, "fp-lib-table")
+	t.Files = append(t.Files, p)
 	present, ferr := tablePresent(p)
 	if ferr != nil {
 		return nil, ferr
@@ -171,6 +178,7 @@ func loadFPLibTables(projDir string, env fpLibEnv) (*FPLibTables, error) {
 		}
 	}
 	global := filepath.Join(cfg, "fp-lib-table")
+	t.Files = append(t.Files, global)
 	if present, ferr = tablePresent(global); ferr != nil {
 		return nil, ferr
 	}
@@ -222,6 +230,9 @@ func readTable(path string) (*sx, *FPLibError) {
 // same file (os.SameFile: case variants, symlinks, "dir/../dir" spellings)
 // as one of them is a cycle.
 func (t *FPLibTables) loadTable(path, scope string, lookup func(string) (FPLibVar, bool), stack []os.FileInfo) *FPLibError {
+	if !slices.Contains(t.Files, path) {
+		t.Files = append(t.Files, path)
+	}
 	st, err := fpStat(path)
 	if err != nil {
 		return &FPLibError{Code: ErrFPLibUnresolved, Path: path,

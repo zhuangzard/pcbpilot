@@ -649,6 +649,19 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 		return fail(kicad.ErrFPLibUnresolved, "", err.Error(), "", 1)
 	}
 	rep.Libs.Project, rep.Libs.Global, rep.Libs.Vars = libs.ProjectTable, libs.GlobalTable, libs.Vars
+	// The library configuration (project / global / nested tables,
+	// kicad_common.json) decides which footprint files are installed: it is
+	// snapshotted with the other inputs, re-checked with them and in the
+	// revision.
+	var libSnaps []kfile.Snapshot
+	for _, f := range libs.Files {
+		sn, err := kfile.Stat(f)
+		if err != nil {
+			return fileErr(err)
+		}
+		libSnaps = append(libSnaps, sn)
+	}
+	inputSnaps = append(inputSnaps, libSnaps...)
 	info := func(refs []kicad.FPRef) (map[string]kicad.SyncFPInfo, []kicad.SyncError) {
 		// Each library footprint is hashed before and after the bridge
 		// loads it: the plan describes exactly those bytes.
@@ -706,9 +719,10 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 		}
 		return what + ":" + sn.SHA256
 	}
-	rep.Revision = kicad.SyncRevision(boardSnap.SHA256, proSnap.SHA256, sopts, plan,
-		state("project", effPro), state("rules", effDru),
-		snapState("target-board", targetSnap), snapState("target-project", targetProSnap), snapState("target-rules", targetDruSnap))
+	extra := append([]string{state("project", effPro), state("rules", effDru),
+		snapState("target-board", targetSnap), snapState("target-project", targetProSnap), snapState("target-rules", targetDruSnap)},
+		libConfigStates(libSnaps)...)
+	rep.Revision = kicad.SyncRevision(boardSnap.SHA256, proSnap.SHA256, sopts, plan, extra...)
 
 	// A read-only answer speaks only for the inputs it was computed from:
 	// every snapshot (board, project, rules, sheets, netlist, target files)
@@ -883,6 +897,11 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 	}
 
 	// Verify the staged board.
+	// The staged board has a project whenever one is published (the
+	// effective one) or the bridge saved one; parity must then get it.
+	if effPro == nil && noop {
+		stagedPro = ""
+	}
 	gates, padNet, idem := pcbSyncVerify(t, o, sopts, nl, libs, info, plan, staged, stagedPro, sheetCopies)
 	rep.Gates = gates
 	overall := gate.Aggregate(gateResults(gates)...)
@@ -1258,4 +1277,18 @@ func fileSHAOrEmpty(p string) string {
 		return ""
 	}
 	return kfileSHA(b)
+}
+
+// libConfigStates names each footprint-library config file and its
+// content state for the revision.
+func libConfigStates(sns []kfile.Snapshot) []string {
+	out := make([]string, 0, len(sns))
+	for _, sn := range sns {
+		st := "absent"
+		if sn.Exists {
+			st = sn.SHA256
+		}
+		out = append(out, "libconfig:"+filepath.ToSlash(sn.Path)+":"+st)
+	}
+	return out
 }
