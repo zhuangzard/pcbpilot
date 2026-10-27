@@ -1,0 +1,4 @@
+interface:
+  display_name: "pcbpilot Review"
+  short_description: "Read-only EasyEDA/KiCad design review and ready-to-order verdict"
+  default_prompt: "Use $pcbpilot-review to review an EasyEDA or KiCad design read-only (quick, full or pre-fab tier) and report evidence-ranked verdicts without editing anything."
