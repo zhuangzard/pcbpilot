@@ -122,9 +122,57 @@ func identityEdits(t *testing.T, e *SchEditor) int {
 	t.Helper()
 	n := 0
 	seen := map[string]bool{}
+	// a reference two symbols share with the same unit (unannotated "#PWR?",
+	// duplicates) addresses no single symbol: SchEditor refuses it, and the
+	// refusal must leave the file as it is
+	units := map[string]map[string]int{}
+	for _, s := range e.root.list {
+		if ref := symRef(s); s.head() == "symbol" && ref != "" {
+			u := "1"
+			if c := s.child("unit"); c != nil && len(c.list) > 1 {
+				u = c.list[1].atom
+			}
+			if units[ref] == nil {
+				units[ref] = map[string]int{}
+			}
+			units[ref][u]++
+		}
+	}
+	dup := func(ref string) bool {
+		for _, c := range units[ref] {
+			if c > 1 {
+				return true
+			}
+		}
+		return false
+	}
 	for _, s := range e.root.list {
 		ref := symRef(s)
-		if s.head() != "symbol" || ref == "" || seen[ref] {
+		if s.head() != "symbol" || ref == "" {
+			continue
+		}
+		if dup(ref) {
+			if at := s.child("at"); at != nil && e.MoveSymbol(ref, Pt{at.num(1), at.num(2)}, at.num(3)) == nil {
+				t.Errorf("MoveSymbol %s: a duplicate reference accepted", ref)
+			}
+			if e.SetField(ref, "Value", propVal(s, "Value")) == nil {
+				t.Errorf("SetField %s: a duplicate reference accepted", ref)
+			}
+			continue
+		}
+		if at := s.child("at"); at != nil {
+			// Every unit moves to where it is; a multi-unit symbol is
+			// addressed per unit (REF:UNIT), as MoveSymbol requires.
+			key := ref
+			if u := s.child("unit"); u != nil && len(u.list) > 1 && len(e.SymbolUnits(ref)) > 1 {
+				key = ref + ":" + u.list[1].atom
+			}
+			if err := e.MoveSymbol(key, Pt{at.num(1), at.num(2)}, at.num(3)); err != nil {
+				t.Errorf("MoveSymbol %s: %v", key, err)
+			}
+			n++
+		}
+		if seen[ref] {
 			continue
 		}
 		seen[ref] = true
@@ -143,12 +191,6 @@ func identityEdits(t *testing.T, e *SchEditor) int {
 				}
 				n++
 			}
-		}
-		if at := s.child("at"); at != nil {
-			if err := e.MoveSymbol(ref, Pt{at.num(1), at.num(2)}, at.num(3)); err != nil {
-				t.Errorf("MoveSymbol %s: %v", ref, err)
-			}
-			n++
 		}
 	}
 	return n

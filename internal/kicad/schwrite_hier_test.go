@@ -548,3 +548,31 @@ func TestReusedSheetFieldEditChecksEveryReference(t *testing.T) {
 		t.Error("delete on a reused sheet accepted")
 	}
 }
+
+// Two symbols sharing a reference and unit (unannotated "R?") are not units
+// of one component: moving, editing or deleting by that reference is
+// refused instead of reaching the wrong symbol (or both).
+func TestDuplicateReferenceRefused(t *testing.T) {
+	e, _ := OpenSchematic(NewSchematicText("A4", NewUUID(), true))
+	e.Project = "t"
+	_ = e.AddLibSymbol("test:R", testRes)
+	for i, v := range []string{"1k", "2k"} {
+		if _, err := e.PlaceSymbol(SymbolInstance{LibID: "test:R", Ref: "R?", Value: v, At: Pt{X: 50.8 + 25.4*float64(i), Y: 50.8}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	text, _ := e.Render()
+	e2, _ := OpenSchematic(text)
+	if err := e2.MoveSymbol("R?:1", Pt{X: 76.2, Y: 50.8}, 0); err == nil || !strings.Contains(err.Error(), "annotate") {
+		t.Errorf("move: %v", err)
+	}
+	if err := e2.SetField("R?", "Value", "1k"); err == nil {
+		t.Error("field edit of a duplicate reference accepted")
+	}
+	if _, err := e2.DeleteSymbol("R?"); err == nil {
+		t.Error("delete of a duplicate reference accepted")
+	}
+	if out, _ := e2.Render(); out != text {
+		t.Error("refused edits changed the sheet")
+	}
+}

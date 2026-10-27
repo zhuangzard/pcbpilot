@@ -1192,6 +1192,21 @@ func (e *SchEditor) edit(key string, ed textEdit) {
 	e.repl = append(e.repl, ed)
 }
 
+// errDuplicateRef refuses to address ref when two of its symbols carry the
+// same unit: not units of one component but separate symbols sharing a
+// reference (unannotated "U?", or a duplicate), which no key names apart.
+func (e *SchEditor) errDuplicateRef(ref string, all []symInst) error {
+	seen := map[int]bool{}
+	for _, in := range all {
+		u := instUnit(in.n)
+		if seen[u] {
+			return fmt.Errorf("%s: several symbols on this sheet carry reference %s unit %d (unannotated or duplicate); annotate the schematic first", ref, ref, u)
+		}
+		seen[u] = true
+	}
+	return nil
+}
+
 func unitKeys(ref string, insts []symInst) string {
 	var ks []string
 	for _, in := range insts {
@@ -1209,6 +1224,9 @@ func (e *SchEditor) instance(key string) (symInst, error) {
 	all := e.instancesOf(ref)
 	if len(all) == 0 {
 		return symInst{}, fmt.Errorf("no symbol %s on this sheet", ref)
+	}
+	if err := e.errDuplicateRef(ref, all); err != nil {
+		return symInst{}, err
 	}
 	if unit == 0 {
 		if len(all) > 1 {
@@ -1396,6 +1414,8 @@ func (e *SchEditor) DeleteSymbols(keys []string) (map[string][]int, error) {
 			del = []symInst{in}
 		} else if del = e.instancesOf(ref); len(del) == 0 {
 			return nil, fmt.Errorf("no symbol %s on this sheet", ref)
+		} else if err := e.errDuplicateRef(ref, del); err != nil {
+			return nil, err
 		} else if err := e.errAcrossSheets(ref, "deleting every unit of"); err != nil {
 			return nil, fmt.Errorf("%w (or delete one unit: %s:N)", err, ref)
 		} else if n, _ := e.LibUnitCount(e.SymbolLibID(ref)); n > 1 {
@@ -1588,6 +1608,9 @@ func (e *SchEditor) SetField(ref, name, value string) error {
 	insts := e.instancesOf(ref)
 	if len(insts) == 0 {
 		return fmt.Errorf("no symbol %s on this sheet", ref)
+	}
+	if err := e.errDuplicateRef(ref, insts); err != nil { // "every unit" would reach other symbols
+		return err
 	}
 	if name == "Reference" {
 		if err := e.checkRename(ref, value); err != nil {
