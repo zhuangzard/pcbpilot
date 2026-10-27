@@ -37,6 +37,11 @@ type SyncOptions struct {
 	// that pcbpilot did not install (no .version marker). Without it such a
 	// directory is reported as "conflict" and left untouched.
 	Adopt bool
+	// verify, when set, checks a complete Skill tree (skill name, dir): every
+	// staged tree before the switch, and every switched dir before the
+	// transaction is final. A failure restores the client. Local bundles use it
+	// to compare bytes with the package.
+	verify func(skill, dir string) error
 	// Assets, when set, supplies skills.tar.gz (a local asset dir or a pinned
 	// release) instead of the default GitHub download; its Version() is written
 	// verbatim as the marker, so X.Y.Z-dev.N local packages keep their suffix.
@@ -193,6 +198,9 @@ func applyClientSync(tree skillTree, items []syncItem, opts SyncOptions, target 
 		case syncRemove:
 			err = txn.stageRemove(it.out.Dir)
 		}
+		if err == nil && it.action == syncWrite && opts.verify != nil {
+			err = opts.verify(it.out.Skill, txn.changes[len(txn.changes)-1].stage)
+		}
 		if err != nil {
 			return fail(fmt.Errorf("stage %s: %w", it.out.Dir, err))
 		}
@@ -202,6 +210,19 @@ func applyClientSync(tree skillTree, items []syncItem, opts SyncOptions, target 
 	}
 	if err := txn.commit(); err != nil {
 		return fail(err)
+	}
+	if opts.verify != nil {
+		for _, c := range txn.changes {
+			if c.stage == "" {
+				continue
+			}
+			if err := opts.verify(c.skill, c.dir); err != nil {
+				if undoErr := txn.undo(len(txn.changes)); undoErr != nil {
+					return fail(fmt.Errorf("verify %s: %w; restoring the client failed: %v", c.dir, err, undoErr))
+				}
+				return fail(fmt.Errorf("verify %s: %w (all Skills of this client restored)", c.dir, err))
+			}
+		}
 	}
 	if err := txn.recordJournal(opts.Journal); err != nil {
 		// Without a durable journal this sync could not be rolled back: undo it.
@@ -367,6 +388,8 @@ type skillChange struct {
 	backup  string // where the previous tree sits once committed
 	existed bool
 	applied bool
+	skill   string
+	version string // marker written into stage
 }
 
 type skillTxn struct{ changes []*skillChange }
@@ -385,7 +408,7 @@ func (t *skillTxn) stageWrite(src, dst string, preserve bool, version string) er
 	if err != nil {
 		return err
 	}
-	c := &skillChange{dir: dst, stage: stage, existed: isDir(dst)}
+	c := &skillChange{dir: dst, stage: stage, existed: isDir(dst), skill: filepath.Base(src), version: version}
 	t.changes = append(t.changes, c)
 	if preserve && c.existed {
 		if err := copyTree(dst, stage, false, false); err != nil {
@@ -516,7 +539,7 @@ func (t *skillTxn) recordJournal(journal string) error {
 		e := JournalEntry{Dir: c.dir}
 		switch {
 		case !c.existed:
-			e.Action = "created"
+			e.Action, e.Version = "created", c.version
 		case c.stage == "":
 			e.Action = "removed"
 		default:

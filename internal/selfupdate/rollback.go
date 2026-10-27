@@ -113,6 +113,9 @@ type JournalEntry struct {
 	Dir    string `json:"dir"`
 	Action string `json:"action"`
 	Saved  string `json:"saved,omitempty"`
+	// Version is the marker a created dir was written with; rollback removes
+	// the dir only while it is still that pcbpilot-owned install.
+	Version string `json:"version,omitempty"`
 }
 
 // SkillJournalDir is where an update's skill sync journals its changes.
@@ -171,10 +174,17 @@ func RestoreSnapshot(_ context.Context, s Snapshot) ([]string, error) {
 		var err error
 		switch {
 		case e.Action == "created":
-			if fi, statErr := os.Lstat(e.Dir); statErr == nil && fi.Mode()&os.ModeSymlink == 0 {
-				err = os.RemoveAll(e.Dir)
-				label += " removed"
+			if _, statErr := os.Lstat(e.Dir); statErr != nil {
+				break // already gone
 			}
+			if !ownedSkillDir(e.Dir) || e.Version == "" || readMarker(e.Dir) != e.Version {
+				// Something else lives there now (a user dir, a file, another
+				// install): never delete it.
+				err = fmt.Errorf("conflict: no longer the %q install this update created; left in place", e.Version)
+				break
+			}
+			err = os.RemoveAll(e.Dir)
+			label += " removed"
 		case e.Saved != "":
 			err = materializeTree(filepath.Join(jdir, e.Saved), e.Dir)
 		default:

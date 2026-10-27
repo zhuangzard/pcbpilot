@@ -211,6 +211,22 @@ class PowerShellInstallerTests(unittest.TestCase):
         self.assertEqual(path.read_text(), 'a user file')
         self.assertEqual((self.codex / 'skills' / DEMO / '.version').read_text(), '1.4.2\n')
 
+    def test_linked_version_marker_does_not_make_a_dir_owned(self):
+        user = self.claude / 'skills' / DEMO
+        user.mkdir(parents=True)
+        (user / 'notes.md').write_text('mine')
+        marker = self.root / 'elsewhere.version'
+        marker.write_text('1.4.1\n')
+        try:
+            (user / '.version').symlink_to(marker)
+        except OSError as error:
+            self.skipTest(f'file symlinks unavailable: {error}')
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('pcbpilot did not install it', result.stdout + result.stderr)
+        self.assertEqual((user / 'notes.md').read_text(), 'mine')
+        self.assertEqual(marker.read_text(), '1.4.1\n')
+
     def test_a_failed_switch_at_any_position_restores_every_skill(self):
         self.old_install()
         retired = self.codex / 'skills/pcbpilot-old'

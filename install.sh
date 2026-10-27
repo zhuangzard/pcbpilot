@@ -295,7 +295,9 @@ stage_skill() {
     warn "$_client Skill $_skill not installed: $_dest exists and is not a directory; move it away"
     return 0
   fi
-  if [ "$_skill" != "$SKILL_NAME" ] && [ -d "$_dest" ] && [ ! -L "$_dest" ] && [ ! -f "$_dest/.version" ] \
+  # Owned = a regular, non-linked .version marker (as for retired Skills and in Go).
+  if [ "$_skill" != "$SKILL_NAME" ] && [ -d "$_dest" ] && [ ! -L "$_dest" ] \
+    && { [ -L "$_dest/.version" ] || [ ! -f "$_dest/.version" ]; } \
     && [ "$SKILL_ADOPT" != 1 ]; then
     # Somebody else's directory under a pcbpilot name: never replace it silently.
     warn "$_client Skill $_skill not installed: $_dest exists but pcbpilot did not install it (no .version marker); move it away or set PCBPILOT_SKILL_ADOPT=1"

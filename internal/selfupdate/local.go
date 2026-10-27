@@ -128,6 +128,7 @@ func ReadLocalBundle(dir string) (*LocalBundle, error) {
 	defer gz.Close()
 	tr := tar.NewReader(gz)
 	var total int64
+	seenFolded := map[string]bool{}
 	for {
 		h, e := tr.Next()
 		if e == io.EOF {
@@ -150,6 +151,13 @@ func ReadLocalBundle(dir string) (*LocalBundle, error) {
 			strings.Contains(name, ":") || filepath.IsAbs(name) || path.Clean(name) != name || name == ".." || strings.HasPrefix(name, "../") {
 			return nil, fmt.Errorf("unsafe skill entry: %s", h.Name)
 		}
+		folded := strings.ToLower(h.Name)
+		if seenFolded[folded] {
+			// Two names that differ only in case land on one file on Windows
+			// and macOS; refuse them everywhere so packages stay portable.
+			return nil, fmt.Errorf("duplicate skill entry (case-insensitive): %s", h.Name)
+		}
+		seenFolded[folded] = true
 		files := b.Skills[skill]
 		if files == nil {
 			files = map[string][]byte{}
@@ -336,7 +344,9 @@ func (b *LocalBundle) installSkills(log io.Writer) error {
 			clients = append(clients, c)
 		}
 	}
-	opts := SyncOptions{Force: true, Adopt: b.Adopt}
+	// Every staged tree and every switched dir must equal the package byte for
+	// byte; any mismatch restores the client before the switch is final.
+	opts := SyncOptions{Force: true, Adopt: b.Adopt, verify: b.CheckSkillNamed}
 	items := planSkillSync(clients, b.Manifest, retiredSkills(b.Manifest, knownSkills(clients)), opts, b.Version)
 	for _, it := range items {
 		if it.action == syncKeep || !isDir(it.out.Dir) {
@@ -365,10 +375,6 @@ func (b *LocalBundle) installSkills(log io.Writer) error {
 			case "error":
 				failures = append(failures, fmt.Errorf("Skill %s: %s", o.Dir, o.Err))
 			case "created", "updated":
-				if err := b.CheckSkillNamed(o.Skill, o.Dir); err != nil {
-					failures = append(failures, err)
-					continue
-				}
 				fmt.Fprintf(log, "Installed Skill: %s\n", o.Dir)
 			case "removed":
 				fmt.Fprintf(log, "Removed retired Skill: %s\n", o.Dir)

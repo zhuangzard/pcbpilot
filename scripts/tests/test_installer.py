@@ -427,6 +427,21 @@ else:
         self.assertEqual(path.read_text(), 'a user file')
         self.assertEqual((self.root / f'codex config/skills/{DEMO}/.version').read_text(), '1.4.2\n')
 
+    def test_linked_version_marker_does_not_make_a_dir_owned(self):
+        self.multi()
+        user = self.root / f'claude config/skills/{DEMO}'
+        user.mkdir(parents=True)
+        (user / 'notes.md').write_text('mine')
+        marker = self.root / 'elsewhere.version'
+        marker.write_text('1.4.1\n')
+        (user / '.version').symlink_to(marker)
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('pcbpilot did not install it', result.stdout + result.stderr)
+        self.assertEqual((user / 'notes.md').read_text(), 'mine')
+        self.assertTrue((user / '.version').is_symlink())
+        self.assertEqual(marker.read_text(), '1.4.1\n')
+
     def test_crlf_skill_md_from_a_windows_package_is_accepted(self):
         self.package(skills=('pcbpilot', DEMO), crlf=True)
         self.sums()

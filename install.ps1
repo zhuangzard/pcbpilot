@@ -665,7 +665,10 @@ try {
                             }
                             $dest = $linkTarget.TrimEnd('\', '/')
                             $skillBase = Split-Path -Parent $dest
-                        } elseif ($skill -cne $SkillName -and -not (Test-Path -LiteralPath (Join-Path $dest '.version') -PathType Leaf) -and -not $SkillAdopt) {
+                        } elseif ($skill -cne $SkillName -and -not $SkillAdopt -and (
+                                -not (Test-Path -LiteralPath (Join-Path $dest '.version') -PathType Leaf) -or
+                                ((Get-Item -LiteralPath (Join-Path $dest '.version') -Force).Attributes -band [IO.FileAttributes]::ReparsePoint))) {
+                            # Owned = a regular, non-linked .version marker (as for retired Skills and in Go).
                             Write-Warn "$client Skill $skill not installed: $dest exists but pcbpilot did not install it (no .version marker); move it away or set PCBPILOT_SKILL_ADOPT=1"
                             continue
                         }

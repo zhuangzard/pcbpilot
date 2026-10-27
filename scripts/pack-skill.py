@@ -33,12 +33,20 @@ DUPLICATE_MIN_CHARS = 200
 
 def tracked_files(repo: Path) -> list[Path]:
     raw = subprocess.check_output(["git", "-C", str(repo), "ls-files", "-z", "--", SKILLS.as_posix()])
-    return sorted({Path(os.fsdecode(item)) for item in raw.split(b"\0") if item})
+    # Dedupe on the git spelling: Windows pathlib compares paths case-insensitively,
+    # which would hide two index entries that differ only in case.
+    return [Path(name) for name in sorted({os.fsdecode(item) for item in raw.split(b"\0") if item})]
 
 
 def tracked_skill_files(repo: Path, manifest: skill_manifest.Manifest) -> dict[str, list[Path]]:
     files = tracked_files(repo)
     by_skill = defaultdict(list)
+    folded = {}
+    for file in files:
+        key = file.as_posix().lower()
+        if key in folded:
+            raise ValueError(f"{file.as_posix()} and {folded[key]} differ only in case; they collide on Windows/macOS")
+        folded[key] = file.as_posix()
     for file in files:
         parts = file.relative_to(SKILLS).parts
         if len(parts) > 1 and parts[0] in manifest.skills:

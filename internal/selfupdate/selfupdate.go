@@ -402,6 +402,7 @@ func extractSkillTree(archive []byte, version string, legacyNoChecksum bool) (sk
 	var extractedBytes int64
 	var unsafe []string
 	tops := map[string]bool{}
+	folded2name := map[string]string{}
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -428,6 +429,13 @@ func extractSkillTree(archive []byte, version string, legacyNoChecksum bool) (sk
 		}
 		top, _, _ := strings.Cut(filepath.ToSlash(clean), "/")
 		tops[top] = true
+		// Names that differ only in case collide on Windows and macOS.
+		if folded := strings.ToLower(filepath.ToSlash(clean)); folded != "" {
+			if prev, dup := folded2name[folded]; dup && (prev != filepath.ToSlash(clean) || hdr.Typeflag != tar.TypeDir) {
+				return fail(fmt.Errorf("skills.tar.gz: %q and %q collide on a case-insensitive filesystem", prev, hdr.Name))
+			}
+			folded2name[folded] = filepath.ToSlash(clean)
+		}
 		switch hdr.Typeflag {
 		case tar.TypeDir:
 			if err := os.MkdirAll(dst, 0755); err != nil {
