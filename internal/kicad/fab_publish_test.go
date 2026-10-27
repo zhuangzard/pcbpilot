@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -66,6 +69,17 @@ func fakeKiCadCLI(args []string) int {
 		if err := os.WriteFile(out, b, 0o644); err != nil {
 			return 1
 		}
+	case "pcb drc --format":
+		b, err := os.ReadFile(os.Getenv("PCBPILOT_FAKE_DRC"))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		if err := os.WriteFile(flag("-o"), b, 0o644); err != nil {
+			return 1
+		}
+		code, _ := strconv.Atoi(os.Getenv("PCBPILOT_FAKE_EXIT"))
+		return code
 	default:
 		fmt.Fprintln(os.Stderr, "fake kicad-cli: unsupported", args)
 		return 2
@@ -219,12 +233,192 @@ func TestPublishFabIgnoresUnsafeManifest(t *testing.T) {
 	os.WriteFile(filepath.Join(out, fabManifestName), []byte(`{"files":["../victim.txt","..","`+strings.ReplaceAll(victim, `\`, `\\`)+`"],"gerbers":["../../victim.txt"]}`), 0o644)
 	stage := filepath.Join(out, ".stage")
 	os.MkdirAll(filepath.Join(stage, "gerber"), 0o755)
-	if err := publishFab(out, stage, nil, nil); err != nil {
+	prev, err := readFabManifest(out)
+	if err != nil || len(prev.Files)+len(prev.Gerbers) != 0 {
+		t.Fatalf("unsafe entries kept: %+v %v", prev, err)
+	}
+	if _, err := publishFab(out, stage, prev, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(victim); err != nil {
-		t.Fatalf("manifest entry outside OUT removed a file: %v", err)
+		t.Fatalf("manifest entry outside OUT moved a file: %v", err)
 	}
+}
+
+func TestRunFabCreatesMissingOut(t *testing.T) {
+	tools := fakeCLI(t)
+	out := filepath.Join(t.TempDir(), "new", "fab")
+	rep, err := RunFab(FabOptions{PCB: writeBoard(t, t.TempDir(), "board.kicad_pcb", true), OutDir: out, NoAssembly: true, Tools: tools})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(rep.Zip); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// snapshotDir maps every file under dir (relative path) to its content.
+func snapshotDir(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	m := map[string]string{}
+	filepath.Walk(dir, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !info.IsDir() {
+			b, _ := os.ReadFile(p)
+			rel, _ := filepath.Rel(dir, p)
+			m[filepath.ToSlash(rel)] = string(b)
+		}
+		return nil
+	})
+	return m
+}
+
+func sameSnapshot(t *testing.T, what string, got, want map[string]string) {
+	t.Helper()
+	for k, v := range want {
+		if g, ok := got[k]; !ok || g != v {
+			t.Errorf("%s: %s changed or missing", what, k)
+		}
+	}
+	for k := range got {
+		if _, ok := want[k]; !ok {
+			t.Errorf("%s: unexpected %s", what, k)
+		}
+	}
+}
+
+// The first run into an OUT holding same-named files pcbpilot did not write
+// fails before touching anything.
+func TestRunFabRefusesForeignCollisions(t *testing.T) {
+	tools := fakeCLI(t)
+	out := t.TempDir()
+	os.MkdirAll(filepath.Join(out, "gerber"), 0o755)
+	os.WriteFile(filepath.Join(out, "board-gerber.zip"), []byte("user zip"), 0o644)
+	os.WriteFile(filepath.Join(out, "gerber", "board-F_Cu.gtl"), []byte("user gerber"), 0o644)
+	before := snapshotDir(t, out)
+	_, err := RunFab(FabOptions{PCB: writeBoard(t, t.TempDir(), "board.kicad_pcb", true), OutDir: out, NoAssembly: true, Tools: tools})
+	if !errors.Is(err, ErrFabCollision) || !strings.Contains(err.Error(), "board-gerber.zip") || !strings.Contains(err.Error(), "board-F_Cu.gtl") {
+		t.Fatalf("want a collision naming both files, got %v", err)
+	}
+	sameSnapshot(t, "after collision", snapshotDir(t, out), before)
+
+	// fab-report.json alone collides too.
+	out2 := t.TempDir()
+	os.WriteFile(filepath.Join(out2, fabReportName), []byte("{}"), 0o644)
+	if _, err := RunFab(FabOptions{PCB: writeBoard(t, t.TempDir(), "board.kicad_pcb", true), OutDir: out2, NoAssembly: true, Tools: tools}); !errors.Is(err, ErrFabCollision) {
+		t.Fatalf("fab-report.json: %v", err)
+	}
+}
+
+var reStageDir = regexp.MustCompile(`/\.pcbpilot-fab-[0-9]+/`)
+
+// failInstall makes the k-th move of a staged file into OUT fail (k from 1;
+// k == 0: the manifest, which is moved last), and every rollback move fail
+// too when breakRollback is set.
+func failInstall(t *testing.T, k int, breakRollback bool) {
+	t.Helper()
+	n, failed := 0, false
+	fabRename = func(from, to string) error {
+		f := filepath.ToSlash(from)
+		staged := reStageDir.MatchString(f) && !strings.Contains(f, "/backup/")
+		if staged && !failed {
+			n++
+			if n == k || (k == 0 && filepath.Base(from) == fabManifestName) {
+				failed = true
+				return errors.New("injected: file is locked")
+			}
+		}
+		if failed && breakRollback && !staged {
+			return errors.New("injected: rollback blocked")
+		}
+		return os.Rename(from, to)
+	}
+	t.Cleanup(func() { fabRename = os.Rename })
+}
+
+// A publish that fails part-way leaves OUT exactly as the previous good run
+// left it (files, contents and manifest).
+func TestPublishFabRollsBack(t *testing.T) {
+	tools := fakeCLI(t)
+	src := t.TempDir()
+	for _, tc := range []struct {
+		name string
+		k    int
+	}{
+		{"after the old set is moved aside", 1},
+		{"after the first new file is installed", 2},
+		{"at the manifest (last move)", 0},
+	} {
+		out := t.TempDir()
+		if _, err := RunFab(FabOptions{PCB: writeBoard(t, src, "board.kicad_pcb", false), OutDir: out, NoAssembly: true, Tools: tools}); err != nil {
+			t.Fatal(err)
+		}
+		good := snapshotDir(t, out)
+		failInstall(t, tc.k, false)
+		_, err := RunFab(FabOptions{PCB: writeBoard(t, src, "board.kicad_pcb", true), OutDir: out, NoAssembly: true, Tools: tools})
+		fabRename = os.Rename
+		if err == nil || !strings.Contains(err.Error(), "injected") || !strings.Contains(err.Error(), "restored") {
+			t.Fatalf("%s: want an injected, restored failure, got %v", tc.name, err)
+		}
+		sameSnapshot(t, tc.name, snapshotDir(t, out), good)
+	}
+}
+
+// When the rollback itself fails, the previous files are kept in the stage
+// and the error says where.
+func TestPublishFabRollbackFailureKeepsBackup(t *testing.T) {
+	tools := fakeCLI(t)
+	src, out := t.TempDir(), t.TempDir()
+	if _, err := RunFab(FabOptions{PCB: writeBoard(t, src, "board.kicad_pcb", false), OutDir: out, NoAssembly: true, Tools: tools}); err != nil {
+		t.Fatal(err)
+	}
+	failInstall(t, 2, true)
+	_, err := RunFab(FabOptions{PCB: writeBoard(t, src, "board.kicad_pcb", true), OutDir: out, NoAssembly: true, Tools: tools})
+	fabRename = os.Rename
+	if err == nil || !strings.Contains(err.Error(), "restoring the previous files failed") {
+		t.Fatalf("got %v", err)
+	}
+	var backups []string
+	filepath.Walk(out, func(p string, info os.FileInfo, err error) error {
+		if err == nil && !info.IsDir() && strings.Contains(filepath.ToSlash(p), "/backup/") {
+			backups = append(backups, p)
+		}
+		return nil
+	})
+	if len(backups) == 0 {
+		t.Fatal("previous files were deleted with the stage")
+	}
+}
+
+// A linked OUT/gerber is refused: removing owned files through it would
+// delete files outside OUT.
+func TestRunFabRefusesLinkedGerberDir(t *testing.T) {
+	tools := fakeCLI(t)
+	root := t.TempDir()
+	out, outside := filepath.Join(root, "out"), filepath.Join(root, "elsewhere")
+	os.MkdirAll(out, 0o755)
+	os.MkdirAll(outside, 0o755)
+	victim := filepath.Join(outside, "board-In1_Cu.g1")
+	os.WriteFile(victim, []byte("not pcbpilot's"), 0o644)
+	os.WriteFile(filepath.Join(out, fabManifestName), []byte(`{"files":[],"gerbers":["board-In1_Cu.g1"]}`), 0o644)
+	link := filepath.Join(out, "gerber")
+	how := "symlink"
+	if err := os.Symlink(outside, link); err != nil {
+		how = "junction"
+		if runtime.GOOS != "windows" || exec.Command("cmd", "/c", "mklink", "/J", link, outside).Run() != nil {
+			t.Skipf("cannot create a symlink or junction here: %v", err)
+		}
+	}
+	_, err := RunFab(FabOptions{PCB: writeBoard(t, t.TempDir(), "board.kicad_pcb", true), OutDir: out, NoAssembly: true, Tools: tools})
+	if err == nil || !strings.Contains(err.Error(), "symlink/junction") {
+		t.Fatalf("linked (%s) gerber dir accepted: %v", how, err)
+	}
+	if b, _ := os.ReadFile(victim); string(b) != "not pcbpilot's" {
+		t.Fatal("file outside OUT touched")
+	}
+	t.Logf("refused a %s", how)
 }
 
 // ── BOM / CPL consistency ──────────────────────────────────────────────────

@@ -105,9 +105,9 @@ func ParseDRCWith(data []byte, o DRCParseOptions) (*DRCReport, error) {
 		if len(raw) == 0 || raw[0] != '[' {
 			return nil, bad("%q is %s, not an array", key, jsonKind(raw))
 		}
-		var vs []drcJSONViolation
-		if err := json.Unmarshal(raw, &vs); err != nil {
-			return nil, bad("%q entries: %v", key, err)
+		vs, err := decodeDRCEntries(raw)
+		if err != nil {
+			return nil, bad("%q %v", key, err)
 		}
 		sections[key] = vs
 	}
@@ -181,6 +181,50 @@ func (r *DRCReport) SortedCounts() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// decodeDRCEntries decodes one section, entry by entry: each must be an
+// object with string type, description and severity and an items array of
+// objects (kicad-cli's drc.v1 schema). A null or partial entry would decode
+// as a blank violation and could be miscounted, so it is rejected instead.
+func decodeDRCEntries(raw []byte) ([]drcJSONViolation, error) {
+	var entries []json.RawMessage
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return nil, fmt.Errorf("entries: %v", err)
+	}
+	out := make([]drcJSONViolation, 0, len(entries))
+	for i, e := range entries {
+		e = bytes.TrimSpace(e)
+		if len(e) == 0 || e[0] != '{' {
+			return nil, fmt.Errorf("entry %d is %s, not an object", i, jsonKind(e))
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(e, &fields); err != nil {
+			return nil, fmt.Errorf("entry %d: %v", i, err)
+		}
+		for _, k := range []string{"type", "description", "severity"} {
+			if v := bytes.TrimSpace(fields[k]); len(v) == 0 || v[0] != '"' {
+				return nil, fmt.Errorf("entry %d: %q is %s, not a string", i, k, jsonKind(v))
+			}
+		}
+		var items []json.RawMessage
+		if v := bytes.TrimSpace(fields["items"]); len(v) == 0 || v[0] != '[' {
+			return nil, fmt.Errorf("entry %d: %q is %s, not an array", i, "items", jsonKind(v))
+		} else if err := json.Unmarshal(v, &items); err != nil {
+			return nil, fmt.Errorf("entry %d items: %v", i, err)
+		}
+		for j, it := range items {
+			if it = bytes.TrimSpace(it); len(it) == 0 || it[0] != '{' {
+				return nil, fmt.Errorf("entry %d item %d is %s, not an object", i, j, jsonKind(it))
+			}
+		}
+		var v drcJSONViolation
+		if err := json.Unmarshal(e, &v); err != nil {
+			return nil, fmt.Errorf("entry %d: %v", i, err)
+		}
+		out = append(out, v)
+	}
+	return out, nil
 }
 
 // jsonKind names a raw JSON value's type for an error message.

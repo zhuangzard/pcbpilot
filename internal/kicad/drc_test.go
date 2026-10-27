@@ -46,7 +46,12 @@ func TestParseDRCRejectsUncheckable(t *testing.T) {
 		{"drc/missing-unconnected.json", `no "unconnected_items" section`},
 		{"drc/wrong-type.json", `"violations" is an object, not an array`},
 		{"drc/null-section.json", `"unconnected_items" is null, not an array`},
-		{"drc/bad-entry.json", `"violations" entries`},
+		{"drc/bad-entry.json", `"violations" entry 0 is a string, not an object`},
+		{"drc/null-entry.json", `"violations" entry 0 is null, not an object`},
+		{"drc/missing-type.json", `"unconnected_items" entry 0: "type" is empty, not a string`},
+		{"drc/items-object.json", `"violations" entry 0: "items" is an object, not an array`},
+		{"drc/null-item.json", `"violations" entry 0 item 0 is null, not an object`},
+		{"drc/parity-bad-severity.json", `"schematic_parity" entry 0: "severity" is a number, not a string`},
 	} {
 		rep, err := ParseDRC(readDRCFixture(t, tc.file))
 		if !errors.Is(err, ErrDRCReport) || rep != nil || !strings.Contains(err.Error(), tc.want) {
@@ -90,5 +95,36 @@ func TestDRCSeverityCLIFailure(t *testing.T) {
 	}
 	if _, serr := os.Stat(out); !os.IsNotExist(serr) {
 		t.Fatalf("a stale report from an earlier run must be removed first: %v", serr)
+	}
+}
+
+// fakeDRC points DRCSeverity at the test binary (fakeKiCadCLI), which
+// writes the fixture as the report and exits with code.
+func fakeDRC(t *testing.T, fixture string, code string) *Tools {
+	t.Helper()
+	tools := fakeCLI(t)
+	abs, _ := filepath.Abs(filepath.Join("testdata", fixture))
+	t.Setenv("PCBPILOT_FAKE_DRC", abs)
+	t.Setenv("PCBPILOT_FAKE_EXIT", code)
+	return &Tools{CLI: tools.CLI}
+}
+
+func TestDRCSeverityFakeCLI(t *testing.T) {
+	dir := t.TempDir()
+	run := func(fixture, code string) (*DRCReport, error) {
+		return fakeDRC(t, fixture, code).DRCSeverity(filepath.Join(dir, "x.kicad_pcb"), filepath.Join(dir, "drc.json"), "all")
+	}
+	if rep, err := run("drc/clean.json", "0"); err != nil || rep.Total != 0 {
+		t.Fatalf("clean run: %+v %v", rep, err)
+	}
+	if rep, err := run("drc.json", "0"); err != nil || rep.Total != 3 {
+		t.Fatalf("run with violations: %+v %v", rep, err)
+	}
+	// A clean-looking report from a kicad-cli that failed is not a result.
+	if rep, err := run("drc/clean.json", "3"); !errors.Is(err, ErrDRCReport) || rep != nil {
+		t.Fatalf("non-zero exit read as %+v %v", rep, err)
+	}
+	if rep, err := run("drc/null-entry.json", "0"); !errors.Is(err, ErrDRCReport) || rep != nil {
+		t.Fatalf("malformed report read as %+v %v", rep, err)
 	}
 }

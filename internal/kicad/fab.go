@@ -805,11 +805,26 @@ func RunFab(o FabOptions) (*FabReport, error) {
 	// holds exactly this run's kicad-cli output (never a Gerber left in OUT by
 	// an earlier run with more layers or another board name) and a failed
 	// check publishes nothing. publishFab then moves the files into OUT.
+	if err := checkFabOutDirs(o.OutDir); err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(o.OutDir, 0o755); err != nil {
+		return nil, err
+	}
+	prev, err := readFabManifest(o.OutDir)
+	if err != nil {
+		return nil, err
+	}
 	stage, err := os.MkdirTemp(o.OutDir, ".pcbpilot-fab-")
 	if err != nil {
 		return nil, err
 	}
-	defer os.RemoveAll(stage)
+	keepStage := false
+	defer func() {
+		if !keepStage {
+			os.RemoveAll(stage)
+		}
+	}()
 	sgdir := filepath.Join(stage, "gerber")
 	if err := os.MkdirAll(sgdir, 0o755); err != nil {
 		return nil, err
@@ -882,7 +897,12 @@ func RunFab(o FabOptions) (*FabReport, error) {
 		rep.CPL, rep.BOM = filepath.Join(o.OutDir, cplName), filepath.Join(o.OutDir, bomName)
 	}
 	rep.Zip = filepath.Join(o.OutDir, files[0])
-	stale, err := foreignFabFiles(o.OutDir, gerbers)
+	// Checked before anything in OUT is touched.
+	if c := fabCollisions(o.OutDir, prev, append(append([]string{}, files...), fabReportName), gerbers); len(c) > 0 {
+		return rep, fmt.Errorf("%w: %s (fix: move or delete them — outputs of a pcbpilot without %s count as foreign — or choose another --out)",
+			ErrFabCollision, strings.Join(c, ", "), fabManifestName)
+	}
+	stale, err := foreignFabFiles(o.OutDir, prev, gerbers)
 	if err != nil {
 		return nil, err
 	}
@@ -894,7 +914,11 @@ func RunFab(o FabOptions) (*FabReport, error) {
 		return nil, err
 	}
 	files = append(files, fabReportName)
-	return rep, publishFab(o.OutDir, stage, files, gerbers)
+	keepStage, err = publishFab(o.OutDir, stage, prev, files, gerbers)
+	if err != nil {
+		return nil, err
+	}
+	return rep, nil
 }
 
 // ── BOM / CPL consistency ──────────────────────────────────────────────────
@@ -1014,121 +1038,6 @@ func CheckBOMCPL(parts []Part, cpl [][]string) []FabProblem {
 		}
 	}
 	return probs
-}
-
-// ── publishing ─────────────────────────────────────────────────────────────
-
-const (
-	fabReportName   = "fab-report.json"
-	fabManifestName = ".pcbpilot-fab-manifest.json"
-)
-
-// fabManifest lists what the last successful run wrote into OUT (Files,
-// relative to OUT) and OUT/gerber (Gerbers, base names). Only these paths
-// are ever replaced or removed by a later run; anything else in OUT is the
-// user's and is left alone.
-type fabManifest struct {
-	Files   []string `json:"files"`
-	Gerbers []string `json:"gerbers"`
-}
-
-// safeBase accepts a manifest entry only when it is a plain file name, so a
-// hand-edited manifest cannot point a removal outside OUT.
-func safeBase(name string) bool {
-	return name != "" && name != "." && name != ".." && filepath.Base(name) == name && !strings.ContainsAny(name, `/\:`)
-}
-
-func readFabManifest(outDir string) fabManifest {
-	var m fabManifest
-	if b, err := os.ReadFile(filepath.Join(outDir, fabManifestName)); err == nil {
-		_ = json.Unmarshal(b, &m)
-	}
-	return m
-}
-
-// removeOwned deletes dir/name when it is a regular file a manifest listed.
-func removeOwned(dir, name string) error {
-	if !safeBase(name) {
-		return nil
-	}
-	p := filepath.Join(dir, name)
-	if st, err := os.Lstat(p); err != nil || !st.Mode().IsRegular() {
-		return nil
-	}
-	return os.Remove(p)
-}
-
-// foreignFabFiles lists Gerber/drill-looking files in OUT/gerber that this
-// run will not write and no earlier pcbpilot run recorded: user files, or
-// leftovers of a pcbpilot version without a manifest. They stay, unzipped.
-func foreignFabFiles(outDir string, gerbers []string) ([]string, error) {
-	ents, err := os.ReadDir(filepath.Join(outDir, "gerber"))
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	known := map[string]bool{}
-	for _, n := range append(append([]string{}, gerbers...), readFabManifest(outDir).Gerbers...) {
-		known[n] = true
-	}
-	var out []string
-	for _, e := range ents {
-		if !e.IsDir() && !known[e.Name()] && isFabFile(e.Name()) {
-			out = append(out, e.Name())
-		}
-	}
-	return out, nil
-}
-
-// publishFab moves the staged run into outDir: the previous run's files that
-// this run did not produce again are removed (manifest entries only), the
-// new files replace same-named ones, and the new manifest is written last.
-// The zip itself never depends on this step: it was built from the stage.
-func publishFab(outDir, stage string, files, gerbers []string) error {
-	gdir := filepath.Join(outDir, "gerber")
-	if err := os.MkdirAll(gdir, 0o755); err != nil {
-		return err
-	}
-	set := func(list []string) map[string]bool {
-		m := map[string]bool{}
-		for _, n := range list {
-			m[n] = true
-		}
-		return m
-	}
-	prev := readFabManifest(outDir)
-	newFiles, newGerbers := set(files), set(gerbers)
-	for _, n := range prev.Gerbers {
-		if !newGerbers[n] {
-			if err := removeOwned(gdir, n); err != nil {
-				return err
-			}
-		}
-	}
-	for _, n := range prev.Files {
-		if !newFiles[n] && n != fabManifestName {
-			if err := removeOwned(outDir, n); err != nil {
-				return err
-			}
-		}
-	}
-	for _, n := range gerbers {
-		if err := os.Rename(filepath.Join(stage, "gerber", n), filepath.Join(gdir, n)); err != nil {
-			return err
-		}
-	}
-	for _, n := range files {
-		if err := os.Rename(filepath.Join(stage, n), filepath.Join(outDir, n)); err != nil {
-			return err
-		}
-	}
-	b, err := json.MarshalIndent(fabManifest{Files: files, Gerbers: gerbers}, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(outDir, fabManifestName), append(b, '\n'), 0o644)
 }
 
 // WriteReport writes rep as indented JSON.

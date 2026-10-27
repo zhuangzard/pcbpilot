@@ -37,7 +37,11 @@ Every file is generated into a fresh staging directory and the zip holds only
 that run's output. A rerun replaces the files the previous run recorded in
 OUT/.pcbpilot-fab-manifest.json (so Gerbers of layers the board no longer has
 are removed) and leaves every other file in OUT alone; Gerber-looking files
-it does not own are reported, never zipped.
+it does not own are reported, never zipped. A file this run would write that
+exists but is not in the manifest (a user's file, or an output of a pcbpilot
+without manifests) stops the run before anything is touched; a symlinked or
+junctioned OUT or OUT/gerber is refused. If installing fails part-way, the
+previous run's files are put back.
 
 The BOM and CPL must list the same designators, each exactly once: a part in
 one but not the other, a duplicate or an empty designator fails the run

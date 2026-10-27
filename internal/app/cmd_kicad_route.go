@@ -1056,7 +1056,7 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 	all, err := r.kt.DRCSeverity(routed, allPath, "all")
 	var drcRep *kicad.DRCReport
 	if err != nil {
-		r.add(gateResult{Gate: "kicad-drc", Detail: err.Error()})
+		r.add(kicadDRCCannotCheck(err))
 	} else {
 		rep, warn, nWarn := all.SplitErrors()
 		drcRep = rep
