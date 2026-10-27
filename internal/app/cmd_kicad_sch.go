@@ -42,7 +42,7 @@ Unless --no-check, kicad-cli exports the netlist of the result and it is
 compared net by net and pin by pin with the connectivity derived from the
 EasyEDA data (and with the --pcb pads' nets); the command fails when the
 partitions differ.`,
-		Example: `  pcbpilot kicad sch-import --epro Project.epro --board GasV5_A --out kicad/ --pcb kicad/GasV5_A.kicad_pcb`,
+		Example: `  pcbpilot kicad sch-import --epro Project.epro --board board-b-v5a --out kicad/ --pcb kicad/board-b-v5a.kicad_pcb`,
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			res, err := kicad.ConvertEasyedaSchematic(epro, kicad.EasyedaSchOptions{Board: board, OutDir: out, Name: name, PCB: pcb})

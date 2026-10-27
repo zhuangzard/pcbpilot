@@ -500,7 +500,7 @@ func PlaceOnEdge(b *Board, p *Part, e MechEdge) error {
 	movePartCentre(p, c, best)
 	// The body is flush with the edge, but the pads must keep the board's
 	// copper-to-edge rule: an unshrouded header's body is barely larger
-	// than its pads (Gas Module V5 B: C124387 2x5 headers J2/J8 had their
+	// than its pads (Board-B V5 B: C124387 2x5 headers J2/J8 had their
 	// top-row TH pads 10.8 mil from the outline, native DRC wants 30).
 	if clr := b.Rules.EdgeClearance; clr > 0 && len(p.Pads) > 0 {
 		pb := p.Pads[0].Box.Bounds()

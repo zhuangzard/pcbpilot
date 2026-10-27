@@ -21,7 +21,7 @@ final gate) bolted around it. It is **correct-by-gate** (it drops copper rather 
 grid is fine (≈3.2 mil) so each search is expensive, and almost every remaining failure on dense boards is
 "negotiation did not converge in the time budget" followed by the gate deleting routing.
 
-Field result (Gas Module V5 compact, 100×80 mm, 4 layers, 199 parts): built-in **97.2 % (171/176) with 62 native
+Field result (Board-B V5 compact, 100×80 mm, 4 layers, 199 parts): built-in **97.2 % (171/176) with 62 native
 DRC connection errors**, versus fastroute **100 % / DRC 0 in 432 s** on the same placement. On BGA boards the
 built-in router stays at **55–64 %** offline. The missing capabilities, in order of expected payoff:
 
@@ -196,7 +196,7 @@ Legend: **exists** / **missing** / **weak**.
 |---|---|
 | Exists | PathFinder negotiation with history and present cost; stall detection; strict legalisation; partial (connection-level) repair; pair units re-routed together; fan-out yielding; root swap for island bridging. |
 | Missing | **Push-and-shove**: displacing neighbouring traces/vias by the minimum needed and springing them back, which is what interactive and Specctra-family routers use to finish the last few percent (described as a feature in the Freerouting user documentation [Freerouting docs] and in fastroute's README as "pull-tight/shove/optimizer" stages [fastroute README]). **Multi-start with order perturbation** (fastroute: re-run with shuffled connection orders while unrouted remain [fastroute README]). **Checkpoint / resume** of a partially routed session (fastroute `--initial-session`; pcbpilot already depends on it in `pcb auto route`). **Targeted rip-up** limited to the items actually blocking (fastroute docs: "smart rip-up" [fastroute IMPROVEMENTS]). **Topological / rubber-band** reasoning to keep detours short after shoving [Dai et al. 1991]. |
-| Weak | Rip-up granularity is the net. Late in negotiation each round re-routes ~176 nets on RK3568 and does not converge (176→177→176→174, docs/pcbauto.md). Legalisation runs after the deadline with little time, then the final gate **deletes** nets — this is exactly how the Gas V5 result lost connections (97.2 %) and why native DRC saw connection errors on copper the internal checker had passed or partly removed. Routing order is fixed (priority, span) — no learning across rounds. |
+| Weak | Rip-up granularity is the net. Late in negotiation each round re-routes ~176 nets on RK3568 and does not converge (176→177→176→174, docs/pcbauto.md). Legalisation runs after the deadline with little time, then the final gate **deletes** nets — this is exactly how the Board-B V5 result lost connections (97.2 %) and why native DRC saw connection errors on copper the internal checker had passed or partly removed. Routing order is fixed (priority, span) — no learning across rounds. |
 
 ### (c) Post-route optimization
 
@@ -211,7 +211,7 @@ Legend: **exists** / **missing** / **weak**.
 | | Assessment |
 |---|---|
 | Exists | Plane fan-out with ray sites and yield; BGA detection, void computation, min-cost-flow void assignment, ganging, dog-bone via class selection, pre-routed escapes; neck-down; IPC-2221/2152 width sizing; per-net clearance; HV isolation fields and footprint relief; board-edge bands; keep-outs; footprint holes; via current arrays; intent requirements (width/length/skew); pour connectivity simulation. |
-| Missing | **Ordered escape routing** that guarantees escape order compatible with the outside (network-flow / SAT formulations [Yan & Wong 2009; Ozdal & Wong 2005; Luo et al. 2010]). **Multi-layer escape planning** (assign balls to layers before escaping). **Escape integrated with negotiation** (escapes are frozen, released only on repair failure). **Fine-pitch non-BGA escape** (QFN/QFP with ground pins between signals; the fastroute flow needs hand-made `--escapes` for Gas V5 U8, all 14 GND pins). **Rule areas** (region-scoped clearances, e.g. 3.5/3.5 mil inside a BGA). **Length-matched routing during search** [Ozdal & Wong 2004] rather than meanders afterwards. |
+| Missing | **Ordered escape routing** that guarantees escape order compatible with the outside (network-flow / SAT formulations [Yan & Wong 2009; Ozdal & Wong 2005; Luo et al. 2010]). **Multi-layer escape planning** (assign balls to layers before escaping). **Escape integrated with negotiation** (escapes are frozen, released only on repair failure). **Fine-pitch non-BGA escape** (QFN/QFP with ground pins between signals; the fastroute flow needs hand-made `--escapes` for Board-B V5 U8, all 14 GND pins). **Rule areas** (region-scoped clearances, e.g. 3.5/3.5 mil inside a BGA). **Length-matched routing during search** [Ozdal & Wong 2004] rather than meanders afterwards. |
 | Weak | BGA path default-off (did not beat generic fan-out). Escape order mismatch blocked later routes (71.2 % → 62.1 % on the synthetic board). Rules are a mix of board rule + per-net plan; there is no single rule object queried by both search and DRC. |
 
 ---
@@ -240,15 +240,15 @@ Root causes the repo itself names: remaining failures "are mostly timeouts — n
 minutes" (docs/pcbauto.md "局部修复"); 95 % of K230 search work went into failed searches (before the
 unreachability proof); escape order frozen too early.
 
-### 3.2 Field results (Gas Module, 2026-10-06)
+### 3.2 Field results (Board-B, 2026-10-06)
 
 Recorded in `.agents/skills/pcbpilot/references/pcb-auto.md` (lines ≈365–372) and `pcb-routing.md` (lines ≈326–345):
 
 | Board | Router | Completion | DRC | Time |
 |---|---|---|---|---|
-| Gas Module V5 compact, 100×80 mm, 4L, 199 parts, 462–463 connections, U8 fixed centre | fastroute 0.1.7 | **100 %** | native DRC **0**; `pcb check` 0 ERROR; pad-net diff 0 | **432 s** |
+| Board-B V5 compact, 100×80 mm, 4L, 199 parts, 462–463 connections, U8 fixed centre | fastroute 0.1.7 | **100 %** | native DRC **0**; `pcb check` 0 ERROR; pad-net diff 0 | **432 s** |
 | same placement | pcbpilot internal | **97.2 % (171/176 routed connections as counted by the internal router)** | **62 native "connection" errors** | 594–1840 s per variant (recorded for the 150×110 mm predecessor with the same 199 parts) |
-| Gas Module v9 | fastroute single-thread | completes | — | **102 s** (8-thread run crashed after 244 s) |
+| Board-B v9 | fastroute single-thread | completes | — | **102 s** (8-thread run crashed after 244 s) |
 | Gas 150×110 mm, 4L, 199 parts, 463 connections | fastroute first route / multi-start 8 | — | — | ≈131 s / 510–566 s |
 
 Notes for interpretation:
@@ -279,7 +279,7 @@ Goal: a reproducible, single-referee comparison. fastroute is executed as an ext
 | T1 small | `lckfb-mipi-3in1-adapter`, `bbclaw-ai-voice-terminal`, `reference-4stage-compact`, `degraded-4stage-compact` | `internal/app/testdata/boards/*.json` | yes (open source / synthetic) |
 | T2 medium | `lckfb-szpi-esp32s3` (4L, 628 pads) | same | yes |
 | T3 BGA | `lckfb-rk3568-4layer` (4L), `lckfb-k230-canmv` (6L), 6L synthetic BGA board | same / bga_test.go | yes |
-| T4 field | Gas Module V5 compact (and v9, 150×110 variant) | `Gas_Control/GasControl_PCB/.pcbpilot/artifacts/*-fixed*.dsn` (local) | **no** — commercial; pass via `PCBPILOT_BENCH_DSN=<path>` like `EASYEDA_BENCH_BOARD` |
+| T4 field | Board-B V5 compact (and v9, 150×110 variant) | `Gas_Control/GasControl_PCB/.pcbpilot/artifacts/*-fixed*.dsn` (local) | **no** — commercial; pass via `PCBPILOT_BENCH_DSN=<path>` like `EASYEDA_BENCH_BOARD` |
 
 ### 4.2 Same input for both routers
 
@@ -359,7 +359,7 @@ All of the following, on the median of 3 runs:
 
 Interim milestones (to steer the rewrite, not to claim victory):
 - M1: T1+T2 = 100 %, DRC 0, ≤ 2× fastroute time.
-- M2: T4 Gas V5 compact = 100 %, native DRC 0, ≤ 600 s.
+- M2: T4 Board-B V5 compact = 100 %, native DRC 0, ≤ 600 s.
 - M3: T3 within 5 points of fastroute; then full acceptance.
 
 ### 4.7 Harness location

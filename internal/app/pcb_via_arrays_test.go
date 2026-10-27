@@ -77,7 +77,7 @@ func TestIntentViaNeeds(t *testing.T) {
 }
 
 // Every array via lies within the via-current check's grouping link of the
-// transition (else the check rates it alone — Gas Module v14).
+// transition (else the check rates it alone — Board-B v14).
 func TestPlanViaArraysStayLinked(t *testing.T) {
 	tracks, vias := plus12Transition()
 	// Block the near rings with other-net copper on the left and right so

@@ -122,7 +122,7 @@ func TestDocGuardLiveUUIDRequiresMatchingIdentity(t *testing.T) {
 	}
 }
 
-// Gas Module V5 B v23: the save after 2.5 h of repair failed once with the
+// Board-B V5 B v23: the save after 2.5 h of repair failed once with the
 // connector gone; saveRetrying waits for it to answer and saves again.
 func TestSaveRetryingAfterDisconnect(t *testing.T) {
 	var calls []string
@@ -161,7 +161,7 @@ func TestSaveRetryingAfterDisconnect(t *testing.T) {
 	}
 }
 
-// Gas Module V5 B: the live daemon, starved at load 115, missed one health
+// Board-B V5 B: the live daemon, starved at load 115, missed one health
 // scan and a 6865 s route died. With daemonWaitBudget set, a request keeps
 // scanning until the daemon answers.
 func TestDaemonWaitBudget(t *testing.T) {

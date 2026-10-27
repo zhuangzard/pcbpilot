@@ -54,7 +54,7 @@ func TestPlanInwardEscapes(t *testing.T) {
 	}
 }
 
-// Trimmed from the Gas Module V5 B round-5 report (fastroute 0.1.7).
+// Trimmed from the Board-B V5 B round-5 report (fastroute 0.1.7).
 func TestReadFastrouteBlocked(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "r.json")
 	report := `{"stats":{"unrouted":2},"unrouted":[

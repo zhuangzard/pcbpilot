@@ -323,7 +323,7 @@ func DropReplaced(b *Board, rp MechReplace) (holes, keeps int) {
 // with their old ids, at old positions or exactly where the new holes go;
 // either way the playbook creates (and journals) the new set, so every old
 // hole-sized fill goes — one that coincides with a new hole would otherwise be
-// stacked under it (Gas Module V5 B 2026-10-06: two or three fills per corner,
+// stacked under it (Board-B V5 B 2026-10-06: two or three fills per corner,
 // fastroute pin-pin violations on all layers). Footprint holes (Owner set or
 // "ref:id" names), exact slot polygons and fills whose size is not within 25 %
 // of a new hole's drill are kept. With no new holes nothing is stale.
@@ -352,7 +352,7 @@ func StaleMechFills(b *Board, holesBefore int) []string {
 // not fully inside the new outline's bounds was drawn for another board
 // (`board copy` brings the source board's screw-head rings and inner-plane
 // edge bands along), and any region whose bounds match a keep-out the mech
-// spec adds (±1 mil) would be stacked under the new one. Gas Module V5 B,
+// spec adds (±1 mil) would be stacked under the new one. Board-B V5 B,
 // 2026-10-06: eight such regions from the 150×110 source survived on the
 // 100×80 copy; EasyEDA exports MULTI regions as pins, so fastroute saw
 // overlapping pins at the corners. Regions fully inside the board that the

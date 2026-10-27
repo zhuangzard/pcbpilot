@@ -8,7 +8,7 @@ import (
 	"github.com/zhuangzard/pcbpilot/internal/pcb/specctra"
 )
 
-// qfnRow is the top row of a 0.4 mm QFN (PicoRick RP2040 U303 pads: 7.874 ×
+// qfnRow is the top row of a 0.4 mm QFN (Board-A RP2040 U303 pads: 7.874 ×
 // 34.45 mil, 15.75 mil pitch) plus one pad of the opposite row, so the
 // part's pad centroid lies below the row; nets[i] is pad i+1's net.
 func escQFNRow(nets ...string) []pcbPadP {

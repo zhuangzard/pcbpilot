@@ -170,11 +170,11 @@ the agent shell works.
   outward exit (capped at the net's width), the escape the planner would pick, and a class (full / neck / IMPOSSIBLE) against
   `widthMil.min`. It changes no routing decision.
 
-**Findings (evidence, not yet automated).** On PicoRick (RP2040 QFN-56, 0.4 mm pitch, 0.875 x 0.2 mm pads) power/GND pads on
+**Findings (evidence, not yet automated).** On Board-A (RP2040 QFN-56, 0.4 mm pitch, 0.875 x 0.2 mm pads) power/GND pads on
 fine-pitch ICs fail as full-width tracks: the widest legal straight exit is 0.2952 mm, below the 15.75 mil class width. A manual
 experiment (In2 GND -> +3V3 plane, 10 mil stubs + 0.6/0.3 vias at every U303 power pin) took the direct-fastroute pipeline
 from 13 unrouted / 13 DRC items to 1 unrouted / 1 DRC item (two runs each). Caveats: baseline is direct fastroute, not the full
-pcbpilot flow (5 unrouted); GND return quality and the 0.127 mm mask check were not evaluated; on a second board (GasV5_A,
+pcbpilot flow (5 unrouted); GND return quality and the 0.127 mm mask check were not evaluated; on a second board (board-b-v5a,
 TQFP-144 0.5 mm) the failures are congestion, not exit geometry. This release does NOT automate stub + via + plane; replacing
 a plane net remains an explicit user decision.
 
@@ -185,7 +185,7 @@ import the new `pcbpilot-connector.eext` (uninstall the old "PCB Pilot Connector
 refuses design actions until the versions match.**
 
 TraceMaker as a second router (`kicad route`, no connector change):
-- `--router fastroute|tracemaker|both` (default fastroute, unchanged behaviour: PicoRick 5 unrouted / KiCad DRC 9 on the
+- `--router fastroute|tracemaker|both` (default fastroute, unchanged behaviour: Board-A 5 unrouted / KiCad DRC 9 on the
   same input before and after). `both` runs the two at once with the cores split; the first result that is complete with no
   new DRC error goes through the full gates first, a result that fails any gate hands over to the other; when no router
   passes, the outputs describe the best judged result (fewest unrouted). `--tracemaker-bin`, `--tracemaker-time`.
@@ -208,7 +208,7 @@ Gates:
 - Schematic cross-probe lens in the board manual (schematic ↔ PCB, draggable / zoomable / rotatable, per-part width,
   drop, safety and LCSC data) — single offline HTML, `board-manual` gate unchanged.
 
-Known limits (PicoRick, RP2040 QFN-56 0.4 mm): neither router completes it under the full intent constraints yet
+Known limits (Board-A, RP2040 QFN-56 0.4 mm): neither router completes it under the full intent constraints yet
 (fastroute 5 unrouted + 4 Analog clearance errors at IC101; tracemaker 2–3 unrouted + 8–9 narrow segments near U303);
 no gate was relaxed to hide them. Layered, locked routing is planned for 0.9.2.
 
@@ -267,7 +267,7 @@ Route / gates / sign-off (EasyEDA and KiCad, no connector change):
 - Silkscreen planner: eight positions × horizontal/rotated, then inside the own footprint, tented vias as a second
   tier, fab-minimum font fallback (`--silk-min-font`, JLC 0.8 mm / 0.15 mm stroke; the gate fails below
   min(project size, min font)), group labels at the minimum too, up to 3 labels evicted, grid index + per-label slot
-  cache: PicoRick 23 → 8 unresolved (67 s → 0.9 s), Gas V5 A 58 → 23 (88 s → 1.7 s).
+  cache: Board-A 23 → 8 unresolved (67 s → 0.9 s), Board-B V5 A 58 → 23 (88 s → 1.7 s).
 - DSN board-edge keep-out bands leave a full-depth window over the near-edge pads of edge-mounted connectors
   (`summary.edgeExemptPads`; KiCad and EasyEDA DSNs); the copper-to-edge gate is unchanged.
 - Every intent net class above the neck-down floor goes to fastroute `--no-neckdown-classes` (its micro neck-down
@@ -275,17 +275,17 @@ Route / gates / sign-off (EasyEDA and KiCad, no connector change):
 - Intent pad escapes (`kicad route`, `pcb auto route` / autoroute with `--intent`): an SMD pad of an intent net whose
   full width cannot leave it gets a fixed escape before routing — outward to where a full-width trace end fits, a
   bridge to a same-net row neighbour, or inward to a via — as wide as clearance allows, never below `widthMil.min`
-  (`summary.intentEscapes`; KiCad adds them to the board after the SES import). PicoRick: 11 → 5 unrouted, KiCad
+  (`summary.intentEscapes`; KiCad adds them to the board after the SES import). Board-A: 11 → 5 unrouted, KiCad
   DRC 22 → 15, intent-widths 0, fastroute 696 → 91 s.
 - `intent-widths`: a narrower segment passes only as a pad escape — wholly within max(3 × width, 30 mil) of a
   same-net pad, an end within 50 mil of it, and ≥ `widthMil.min`.
 - `route-complete` / `routeResult.placementHints`: each blocked connection names the part to move, the direction
   and a minimum distance.
-- `kicad route`: `--threads` defaults to min(cores−1, 8) (multi-threaded fastroute is deterministic: 3 PicoRick runs
+- `kicad route`: `--threads` defaults to min(cores−1, 8) (multi-threaded fastroute is deterministic: 3 Board-A runs
   gave byte-identical sessions; `--threads 1` for reproducibility across builds); every gate reads the router-agnostic
   `routeResult` (`summary.routeResult`), fastroute being its only backend for now.
 - `kicad route`: `--multi-start` (default 4) is a pcbpilot setting, fastroute's optimizer is off by default
-  (`--optimizer`, `--optimizer-threshold`; PicoRick 299 → 134 s at the same 4 unrouted); `--diagnose` blocked
+  (`--optimizer`, `--optimizer-threshold`; Board-A 299 → 134 s at the same 4 unrouted); `--diagnose` blocked
   connections stop continuation runs and are named in `route-complete` (`summary.blockedConnections`).
 - `pcb auto route` ends like `kicad route`: design review before routing (`--requirements`, `--reviewers`,
   `--no-review` with a signed waiver), design report, layout review, `pcbpilot signoff`, and the `gate-set` check of

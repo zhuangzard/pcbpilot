@@ -990,7 +990,7 @@ const widthBasisHelp = "intent-widths requirement: segment (default; a track car
 // segmentViaOK applies the per-segment basis to via current: a via group
 // whose simulated current (sum over its vias, worst scenario) is below half
 // the net's current passes when its summed ampacity covers that current with
-// the intent's via margin (default 20 %). Gas Module v16 B: a single GND via
+// the intent's via margin (default 20 %). Board-B v16 B: a single GND via
 // near U8 carrying milliamps was rated against the 1.51 A net current.
 func segmentViaOK(in *designIntent, res *postsim.Result) func([]string, string) (bool, string) {
 	return segmentViaOKKeyed(strings.ToUpper, in, res)

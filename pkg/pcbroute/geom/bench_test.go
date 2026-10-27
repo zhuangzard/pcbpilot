@@ -10,7 +10,7 @@ import (
 
 // PLAN.md M1 micro-bench: load all copper of a board, build the static index
 // (≤ 50 ms) and run 10⁶ Collides queries on one core (≤ 1 s). The board is a
-// JSON dump given by PCBPILOT_GEOM_BENCH_JSON (Gas V5 is commercial and not in
+// JSON dump given by PCBPILOT_GEOM_BENCH_JSON (Board-B V5 is commercial and not in
 // the repository; the M3 DSN reader replaces the dump):
 //
 //	{"layers": 4, "bounds": [x0, y0, x1, y1],

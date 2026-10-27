@@ -25,13 +25,13 @@
    - **惰性、带缓存的精确障碍判定**：不预先栅格化障碍。
    - **持续累积 history 的“先提交者胜、受害者重排”式协商。**
 
-   GPU 只用来算 cost-to-go 启发式场。PicoRick 上整趟只占约 3 s，而且加了 `.kicad_dru` 自定义规则后会被整个关掉（实测 `fields 0 GPU`），结果仍然是 60 s 全通。
+   GPU 只用来算 cost-to-go 启发式场。Board-A 上整趟只占约 3 s，而且加了 `.kicad_dru` 自定义规则后会被整个关掉（实测 `fields 0 GPU`），结果仍然是 60 s 全通。
 2. **fastroute 慢，而且容易留下长尾。**
    - 它是 Freerouting 的忠实移植：无网格的“房间/门”搜索，每一步都要算多边形，每个连接都重建搜索库。
    - 它没有 present/history 拥塞代价；作者试过 PathFinder，效果变差。rip-up 代价反而逐趟**变贵**。
    - 多起点（multi-start）在第一次跑完之后才开始，而且每个变体重做扇出、串行跑各趟。
 
-   PicoRick 日志里，141 s 的构成是：首跑 50 s（剩 6 个未通）+ 多起点约 90 s（3 个变体，最好剩 5 个）+ 优化器 0.9 s。5 个未通全在 U303 的 +1V1/+3V3/VREF 焊盘附近，最后 10 多趟每趟“routed 0”，是在空转。
+   Board-A 日志里，141 s 的构成是：首跑 50 s（剩 6 个未通）+ 多起点约 90 s（3 个变体，最好剩 5 个）+ 优化器 0.9 s。5 个未通全在 U303 的 +1V1/+3V3/VREF 焊盘附近，最后 10 多趟每趟“routed 0”，是在空转。
 3. **两家的 neck-down 都不符合 pcbpilot 的意图门禁。**
    - TraceMaker 的 neck-down 作用于**整条连接**，宽度降到板最小线宽或 0.15 mm（`src/route/router.cpp:179-183,3242-3265`）。没有按网络类的开关；`.kicad_dru` 里的 `track_width min` 在布线时根本不读。
    - fastroute 有 `--no-neckdown-classes`。但默认开着的“fanout micro neck-down”在任何插入失败处都会把线缩到类线宽的 3/4、3/5、1/2（`crates/fr-engine/src/autoroute/inserter.rs:181-246`）。`min_trace_width_um` 只是下限，不是禁令。
@@ -75,7 +75,7 @@ pcbpilot 只有 `kicad route` 跑全链门禁。现在：
 
 ---
 
-## 1. 基准解读（PicoRick，4 层，359 个连接）
+## 1. 基准解读（Board-A，4 层，359 个连接）
 
 数据来自 `bench/tracemaker-vs-fastroute-2026-10-09-data/logs/`。
 
@@ -87,7 +87,7 @@ pcbpilot 只有 `kicad route` 跑全链门禁。现在：
 | TM 加 dru 后 GPU 场被关掉，时间几乎不变 | `tm-soft-120-diffpairs-dru.log`：`fields 0 GPU + 0 CPU`；60 s 对 57 s | 任何非 `disallow` 的自定义规则都会置 `needs_exact_`，同时关掉类缓存和场（`src/drc/rule_engine.cpp:343`、`router.cpp:226,1009`）。GPU 场本来就只占约 3 s |
 | fastroute F2 用 141 s，剩 5 个 | `fr-minw150-300.log`：扇出 3.8 s → 自动布线 26 趟、46 s 剩 6 个（第 16–26 趟都是 routed 0）→ 多起点 3 个变体 64–83 s（最好剩 5）→ 优化器 0.9 s | 多起点在首跑之后串行开始；停滞判据要等 10 趟没有进步才停；尾部全是“blocked”项 |
 | fastroute 未通全在 U303 电源脚 | `fr-minw150-300.json`：+1V1 ×3、+3V3 ×1、RX_IC1_VREF ×1，长度 1.5–3.2 mm | 密脚 QFN 出线，加上 0.4 mm 的 Power 类线宽，在 150 µm 下限时挤不出去。日志说这些项 `cannot be routed even on the board as loaded`：**这是布局问题，路由器怎么跑都没用** |
-| pcbpilot 自己的 `kicad route` 路径 | `internal/app/cmd_kicad_route.go:638-641` 注释：PicoRick 主跑 112 s + multi-start 143 s，并行后取 max | `--threads` 默认 1（`:139`）是为了可复现，主跑因此是单线程；比基准里 fastroute 默认多线程还慢 |
+| pcbpilot 自己的 `kicad route` 路径 | `internal/app/cmd_kicad_route.go:638-641` 注释：Board-A 主跑 112 s + multi-start 143 s，并行后取 max | `--threads` 默认 1（`:139`）是为了可复现，主跑因此是单线程；比基准里 fastroute 默认多线程还慢 |
 
 ---
 
@@ -553,13 +553,13 @@ pcbpilot 的 pcbroute v2 规划（`docs/router-cleanroom/PLAN.md`）选了 tile/
 | S6 | **移动后拉直**：在 `DragSymbolsOpt` 的“刚性平移 / 拆掉重连”之间加一档：拖动线端、标签、不连标记，再把被拖斜的线拉直（KiCAD-MCP-Server 的三步法），不行再拆掉重连。门禁用 golden netlist diff | 少量移动后的图更整齐，导线保留原样，重连更少 | `internal/kicad/schroute.go:378,925` | S–M |
 | S7 | **把版式规则做成门禁，不靠提示词**：去耦电容离 IC ≤ 25.4 mm、件间距 ≥ 10.16 / 12.7 mm、标题栏禁区、页面按算式选择、网名规范（大写，低有效 `_N`） | 美观问题在 build 时直接失败，不用等人眼看 | `internal/kicad/schquality.go`（`CheckSchematic`）；WT `sbQualityCheck` | S |
 | S8 | **spec 的诊断一次报全**（schem 思路）：未声明网、未用网、引脚名在符号里不存在（schem 没有、pcbpilot 能做）、单引脚网、重复位号，全部收集后返回，并附修复建议码（mcp-server-kicad 的 `[names]` / `[touch]` 风格） | 模型一轮改完，减少 build 往返 | WT `cmd_kicad_sch_build.go`（spec 校验） | S |
-| **R1** | **抽出路由器接口，加 TraceMaker 后端**。`kicad route --router fastroute\|tracemaker\|auto`；TraceMaker 直接读写 `.kicad_pcb`（不走 DSN/SES）；把 `.kicad_pro` 和精简后的 `.kicad_dru` 同名复制到输出旁；之后必须重铺。默认参数：`--soft-zones`；平面层 `--no-tracks-on`；用 `--work N` 保证可复现；`--json`。`route-complete` 改读统一的 RouterResult | PicoRick 实测：141 s / 5 未通变成 57 s / 0 未通（单板，开差分对时；不开是 1 个未通）。同时省掉 DSN 后处理和 SES 导入 | `internal/app/cmd_kicad_route.go`（`doRoute`，`:568`；`r.route`；`kicadRouteCompleteGate`，`:1123`）；新增 `internal/app/kicad_route_tracemaker.go`；`internal/app/pcb_route_gates.go:892` | M |
+| **R1** | **抽出路由器接口，加 TraceMaker 后端**。`kicad route --router fastroute\|tracemaker\|auto`；TraceMaker 直接读写 `.kicad_pcb`（不走 DSN/SES）；把 `.kicad_pro` 和精简后的 `.kicad_dru` 同名复制到输出旁；之后必须重铺。默认参数：`--soft-zones`；平面层 `--no-tracks-on`；用 `--work N` 保证可复现；`--json`。`route-complete` 改读统一的 RouterResult | Board-A 实测：141 s / 5 未通变成 57 s / 0 未通（单板，开差分对时；不开是 1 个未通）。同时省掉 DSN 后处理和 SES 导入 | `internal/app/cmd_kicad_route.go`（`doRoute`，`:568`；`r.route`；`kicadRouteCompleteGate`，`:1123`）；新增 `internal/app/kicad_route_tracemaker.go`；`internal/app/pcb_route_gates.go:892` | M |
 | **R2** | **给 TraceMaker 打补丁**：`--no-neckdown-classes`；neck 下限取 `.kicad_dru` 的 `track_width min`；`--pairs FILE`（喂给已有的 `RouterOptions::pair_nets`）。用本地构建脚本 + SHA 记录维护补丁，同时向上游提 PR | 消除 T4/T5 那类 `intent-widths` 失败（92 条 track_width 错误 / 163 mm 窄线）。差分对只耦合意图中的那几对 | TraceMaker：`src/route/router.cpp:179-183,3242-3265`、`src/route/escape.cpp:133-139`、`src/route/router.hpp`、`src/app/main.cpp`、`route_job.cpp`。pcbpilot：安装脚本或说明（仿照 fastroute 的 `~/.pcbpilot/<tool>/current`）、`docs/kicad/` | S（补丁）+ S（构建） |
-| **R3** | **跨路由器组合赛跑 + 早停**：`--router auto` 同时启动 fastroute（主跑）和 TraceMaker（打过补丁的），也可以加 pcbauto。各自的结果先过一组**便宜门禁**（route-complete + intent-widths + kicad-drc 未连接数），先通过者胜，其余取消；都没通过就按门禁结果择优。fastroute 侧：去掉“主跑完再看”的串行等待；`--diagnose` 判为 blocked 的项不再续跑，直接报给布局 | 墙钟 ≈ min(各路由器)，不再是 max 或累加。PicoRick 从约 143 s（pcbpilot 现路径）降到约 60 s。blocked 项早止损，省掉 10 趟以上空转 | `internal/app/cmd_kicad_route.go:567-690`；`cmd_pcb_fastroute.go:776`（续跑条件加 blocked 判断） | M |
-| R4 | **把 blocked 项反馈给布局**：fastroute 的 blocked 分类，或 TraceMaker 的 `boxed in`，映射到元件和焊盘（PicoRick：U303 周围的 C314 等去耦件），生成 `place` 建议（移动或旋转去耦电容、放出线过孔），并加 `pcbpilot kicad route` 的 `--place-retry 1` | 处理长尾的根本办法：这些项任何路由器参数都解决不了 | `internal/app/cmd_kicad_route.go`；`pkg/pcbauto` 的摆放与评分 | M |
+| **R3** | **跨路由器组合赛跑 + 早停**：`--router auto` 同时启动 fastroute（主跑）和 TraceMaker（打过补丁的），也可以加 pcbauto。各自的结果先过一组**便宜门禁**（route-complete + intent-widths + kicad-drc 未连接数），先通过者胜，其余取消；都没通过就按门禁结果择优。fastroute 侧：去掉“主跑完再看”的串行等待；`--diagnose` 判为 blocked 的项不再续跑，直接报给布局 | 墙钟 ≈ min(各路由器)，不再是 max 或累加。Board-A 从约 143 s（pcbpilot 现路径）降到约 60 s。blocked 项早止损，省掉 10 趟以上空转 | `internal/app/cmd_kicad_route.go:567-690`；`cmd_pcb_fastroute.go:776`（续跑条件加 blocked 判断） | M |
+| R4 | **把 blocked 项反馈给布局**：fastroute 的 blocked 分类，或 TraceMaker 的 `boxed in`，映射到元件和焊盘（Board-A：U303 周围的 C314 等去耦件），生成 `place` 建议（移动或旋转去耦电容、放出线过孔），并加 `pcbpilot kicad route` 的 `--place-retry 1` | 处理长尾的根本办法：这些项任何路由器参数都解决不了 | `internal/app/cmd_kicad_route.go`；`pkg/pcbauto` 的摆放与评分 | M |
 | R5 | **neck 策略按网络类三选一**：none / pad-local（长度 ≤ max(3w, 0.75 mm)，与 pcbauto `inNeck` 一致）/ anywhere。`intent-widths` 段宽判据同步认 pad-local 缩线。TraceMaker 要实现 pad-local，需要在 commit 时把 neck 宽度只用在离焊盘近的线段上，补丁变大（M） | 电源类可以安全地从密脚出线，又不会全程变细 | `internal/kicad/dsn.go`、`specctra/requirements.go`、`pcb_route_gates.go:96,370`；TraceMaker `router.cpp:1196`（commit） | M |
 | R6 | **pcbroute v2 / pcbauto 采用 TraceMaker 的三件事**：(a) 惰性精确判定 + 按（类，线宽）共享缓存，取代占圆盘格；(b) N 个变体 goroutine 组合赛跑（pitch × {0.5,1,2}、顺序 × 3、过孔代价 × 2），首个全通即停，按扩展次数计预算，结果可复现；(c) 网络类每网只解析一次。v2 先做网格版，tile 只用于平面和大空白区 | 内置路由器从 0 并行变成多核满载；多类混合板的间距更精确；首个全通即停 | `pkg/pcbauto/router.go`（`setupNets`，`:440`；`search`，`:1356`；`negotiate`，`:1960`）；`pkg/pcbroute/search`、`negotiate`（实现）；`docs/router-cleanroom/PLAN.md` | L |
-| R7 | **铺铜和规则文件卫生**：送给 TraceMaker 的 `.kicad_dru` 只保留 clearance、creepage、edge、disallow，去掉 `track_width`（布线时不生效，还会让它进入精确模式）；完整的 dru 留给 DRC 门禁。路由后一定重铺（`--refill-zones`），再跑 kicad-drc | 避免假失败；保住缓存和 GPU 场。PicoRick 上只差约 3 s，大板差得更多 | `internal/app/kicad_route_tracemaker.go`（R1 新文件）；`internal/kicad`（dru 生成） | S |
+| R7 | **铺铜和规则文件卫生**：送给 TraceMaker 的 `.kicad_dru` 只保留 clearance、creepage、edge、disallow，去掉 `track_width`（布线时不生效，还会让它进入精确模式）；完整的 dru 留给 DRC 门禁。路由后一定重铺（`--refill-zones`），再跑 kicad-drc | 避免假失败；保住缓存和 GPU 场。Board-A 上只差约 3 s，大板差得更多 | `internal/app/kicad_route_tracemaker.go`（R1 新文件）；`internal/kicad`（dru 生成） | S |
 | R8 | **fastroute 可复现与线程**：`kicad route` 默认 `--threads 1` 是为了可复现，代价是单线程。可以改为 `--threads N` + 固定 multi-start，并在报告里记录（fastroute 并行趟的提交顺序是确定的，`parallel_pass.rs`）。需要先测 3 次结果是否一致 | 主跑可能快 2–3 倍（基准默认多线程首跑 50 s，pcbpilot 单线程 112 s） | `internal/app/cmd_kicad_route.go:139` | S（先测） |
 
 ### 11.1 原理图前三（速度 + 美观）
@@ -579,7 +579,7 @@ pcbpilot 的 pcbroute v2 规划（`docs/router-cleanroom/PLAN.md`）选了 tile/
    - 补丁约 40–80 行，位置明确（§2.2）。上游合并前，按 fastroute 的方式让用户从带 tag 的源码 + 补丁本地构建，记录 SHA。TraceMaker 是 GPL，只作为外部进程调用，与 fastroute 情况相同。
    - 上游合并后撤掉本地补丁。
 2. **R3：跨路由器组合赛跑 + blocked 早止损。** 把“fastroute 跑完 → 多起点 → 续跑”的串联，改成多个路由器并行、先过便宜门禁者胜。
-3. **R4：长尾回到布局。** PicoRick 剩下的 5 个是布局造成的 blocked 项。只调路由器不能根治；需要在路由报告 → 摆放之间建立闭环。
+3. **R4：长尾回到布局。** Board-A 剩下的 5 个是布局造成的 blocked 项。只调路由器不能根治；需要在路由报告 → 摆放之间建立闭环。
 
   （R6 是长期最重要的，但工作量 L，不进前三。）
 
@@ -613,7 +613,7 @@ pcbpilot 的 pcbroute v2 规划（`docs/router-cleanroom/PLAN.md`）选了 tile/
 
 ## 13. 未验证 / 待测
 
-- R2 补丁之后的布通率：禁止 neck 会让 PicoRick 的 Power 类更难布。需要和 R4（布局反馈）一起，在至少 5 块真实板上测，包括 Gas V5 A。
+- R2 补丁之后的布通率：禁止 neck 会让 Board-A 的 Power 类更难布。需要和 R4（布局反馈）一起，在至少 5 块真实板上测，包括 Board-B V5 A。
 - R8：fastroute 多线程下结果是否可复现，没有测。
 - TraceMaker 0.9.0 在布线时执行 dru 的 `edge_clearance`，这一点是读代码得出的（RuleEngine 共用），没有实测。
 - kicad-copilot 云端布局的具体算法，只能从 schema 推断为 ELK layered。

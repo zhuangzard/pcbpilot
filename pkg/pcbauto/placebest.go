@@ -20,12 +20,12 @@ type SeedTrial struct {
 // board / zone, keep-out and height hits), then weighted wirelength plus
 // every tether excess (critical relations included), both in inches — a
 // compact placement around its cores. Weighting the critical relations ten
-// times more picked a scattered placement on Gas Module V5 (seed 3: 136.5 in,
+// times more picked a scattered placement on Board-B V5 (seed 3: 136.5 in,
 // empty corners) over the compact one the user asked for (seed 2: 121.9 in);
 // the annealer already holds the critical relations by their tethers.
 //
 // A part with no room for its designator costs 1.5 in: the text may not be
-// shrunk, so a blocked label is a silk-gate failure later (Gas Module V5).
+// shrunk, so a blocked label is a silk-gate failure later (Board-B V5).
 func placeScore(m PlaceMetrics) (illegal int, score float64) {
 	illegal = m.Overlaps + m.OutOfBoard + m.OutOfZone + m.KeepoutHits + m.HeightHits
 	return illegal, m.WirelengthIn + m.TetherExcessMil/1000 + 1.5*float64(m.LabelBlocked)
@@ -41,7 +41,7 @@ func better(a, b SeedTrial) bool {
 
 // PlaceBest runs Place with seeds opt.Seed … opt.Seed+n-1 in parallel, each
 // on its own copy of b, and keeps the best (placeScore). The annealer is a
-// stochastic search: on Gas Module V5 one start state gave 121.9–156.5 in of
+// stochastic search: on Board-B V5 one start state gave 121.9–156.5 in of
 // wirelength across eight seeds, so a single seed made placement quality a
 // lottery (the "first version" was seed 1 on one start; a later run on the
 // same start drew 139.5). b ends up as the winning copy.
