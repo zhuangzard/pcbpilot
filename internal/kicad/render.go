@@ -499,6 +499,7 @@ func RenderSchSVG(cli, sch, outDir, from, to string) ([]RenderFile, []string, er
 // so that is refused before plotting.
 func schPageFiles(base string, pages []SchPage) (map[string]string, error) {
 	want := map[string]string{}
+	used := map[string]string{} // case-folded file name → page that claimed it
 	for _, p := range pages {
 		f := base
 		if p.Name != "" {
@@ -506,13 +507,11 @@ func schPageFiles(base string, pages []SchPage) (map[string]string, error) {
 		}
 		f += ".svg"
 		key := strings.ToLower(f) // one file on a case-insensitive disk
-		for have, page := range want {
-			if strings.ToLower(have) == key && page != p.Name {
-				return nil, renderErr("RENDER_INCOMPLETE", "rename one of the sheets so their names differ after \"/\" → \"-\"",
-					"pages %q and %q would both plot to %s", page, p.Name, f)
-			}
+		if page, dup := used[key]; dup {
+			return nil, renderErr("RENDER_INCOMPLETE", "give every sheet a distinct name (also after \"/\" → \"-\" and ignoring case)",
+				"pages %q and %q would both plot to %s", page, p.Name, f)
 		}
-		want[f] = p.Name
+		used[key], want[f] = p.Name, p.Name
 	}
 	return want, nil
 }

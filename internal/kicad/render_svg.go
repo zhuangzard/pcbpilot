@@ -26,8 +26,10 @@ var (
 	// Numeric attributes and path data: the only place "-0" is rewritten.
 	svgNumAttrRE = regexp.MustCompile(`(\s(?:d|points|x|y|x1|y1|x2|y2|cx|cy|r|rx|ry|width|height|viewBox|transform|textLength|font-size|stroke-width)=")([^"]*)(")`)
 	svgNegZeroRE = regexp.MustCompile(`(^|[^0-9.eE])-(0(?:\.0+)?)([^0-9.]|$)`)
-	// The generated header: <title> and the <desc> that directly follows it.
-	svgHeaderRE = regexp.MustCompile(`(?s)<title>.*?</title>(\s*<desc>[^<]*</desc>)?`)
+	// The generated header: the <title> that opens the root <svg> and the
+	// <desc> that directly follows it.
+	svgRootRE   = regexp.MustCompile(`<svg[\s>]`)
+	svgHeaderRE = regexp.MustCompile(`^\s*<title>[^<]*</title>(\s*<desc>[^<]*</desc>)?`)
 )
 
 // NormalizeSVG makes a kicad-cli SVG byte-identical across runs without
@@ -43,7 +45,7 @@ var (
 func NormalizeSVG(b []byte, from []string, to string) []byte {
 	s := strings.ReplaceAll(string(b), "\r\n", "\n")
 	forms := pathForms(from)
-	s = svgHeaderRE.ReplaceAllStringFunc(s, func(h string) string {
+	s = mapHeader(s, func(h string) string {
 		h = svgTitleDateRE.ReplaceAllString(h, "$1$3")
 		h = svgTitleWSRE.ReplaceAllString(h, "</title>")
 		for _, f := range forms {
@@ -133,6 +135,26 @@ func mapTags(s string, f func(string) string) string {
 	return b.String()
 }
 
+// mapHeader applies f to the generated header only: a <title> (and the
+// <desc> after it) standing first inside the root <svg>. Titles anywhere
+// else are drawing content and are left alone.
+func mapHeader(s string, f func(string) string) string {
+	loc := svgRootRE.FindStringIndex(s)
+	if loc == nil {
+		return s
+	}
+	end := strings.IndexByte(s[loc[0]:], '>')
+	if end < 0 {
+		return s
+	}
+	at := loc[0] + end + 1
+	m := svgHeaderRE.FindStringIndex(s[at:])
+	if m == nil {
+		return s
+	}
+	return s[:at] + f(s[at:at+m[1]]) + s[at+m[1]:]
+}
+
 // pathForms are the spellings of each directory KiCad may print (native,
 // forward-slash, JSON-escaped), longest first; bare roots are skipped.
 func pathForms(dirs []string) []string {
@@ -178,7 +200,7 @@ func svgGeometry(name string, attr map[string]string, text string) bool {
 	}
 	switch name {
 	case "path":
-		return len(svgNumRE.FindAllString(attr["d"], 2)) == 2
+		return svgPathDraws(attr["d"])
 	case "line":
 		return num("x1") != num("x2") || num("y1") != num("y2")
 	case "rect":
@@ -195,6 +217,74 @@ func svgGeometry(name string, attr map[string]string, text string) bool {
 		return strings.TrimSpace(attr["href"]) != ""
 	}
 	return false
+}
+
+var (
+	svgPathTokRE = regexp.MustCompile(`[A-Za-z]|[-+]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][-+]?[0-9]+)?`)
+	svgPathSepRE = regexp.MustCompile(`^[\s,]*$`)
+	// Arguments per repetition of each path command.
+	svgPathArgs = map[byte]int{'M': 2, 'L': 2, 'T': 2, 'H': 1, 'V': 1, 'C': 6, 'S': 4, 'Q': 4, 'A': 7, 'Z': 0}
+)
+
+// svgPathDraws parses path data and reports whether it is well-formed
+// (starts with a move, every command has whole argument groups, nothing
+// but numbers, commands and separators) and holds at least one drawing
+// segment: L/H/V/C/S/Q/T/A, or extra coordinate pairs after a move (implicit
+// lines). A move alone, or a move closed with Z, draws nothing.
+func svgPathDraws(d string) bool {
+	locs := svgPathTokRE.FindAllStringIndex(d, -1)
+	last := 0
+	for _, l := range locs {
+		if !svgPathSepRE.MatchString(d[last:l[0]]) {
+			return false // stray characters
+		}
+		last = l[1]
+	}
+	if !svgPathSepRE.MatchString(d[last:]) {
+		return false
+	}
+	draws := false
+	var cmd byte
+	n := 0
+	flush := func() bool {
+		if cmd == 0 {
+			return true
+		}
+		want := svgPathArgs[cmd]
+		if want == 0 {
+			return n == 0
+		}
+		if n == 0 || n%want != 0 {
+			return false
+		}
+		if cmd != 'M' || n > 2 {
+			draws = true
+		}
+		return true
+	}
+	for _, l := range locs {
+		t := d[l[0]:l[1]]
+		c := t[0]
+		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') {
+			if !flush() {
+				return false
+			}
+			up := c &^ 0x20
+			if _, ok := svgPathArgs[up]; !ok {
+				return false
+			}
+			if cmd == 0 && up != 'M' {
+				return false
+			}
+			cmd, n = up, 0
+			continue
+		}
+		if cmd == 0 {
+			return false
+		}
+		n++
+	}
+	return flush() && draws
 }
 
 // SVGElements is the structural form of an SVG: one canonical string per

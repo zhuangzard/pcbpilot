@@ -100,24 +100,32 @@ connectivity is judged from netlists (kicad netlist / sch-read), not pictures.`,
 				}
 				return errQuiet
 			}
-			if o.Sch == "" && o.PCB == "" && compare == "" {
-				return fail(&kicad.RenderError{Code: "RENDER_BAD_INPUT", Detail: "nothing to do", Fix: "pass --sch, --pcb or --compare"})
-			}
+			// --report is checked before anything (even an error report) is
+			// written: it must not land on an input, a dependency, or in
+			// --out / --compare.
 			if report != "" {
-				var guard []string // the report never lands in a project, --out or --compare
+				var files, dirs []string
 				for _, in := range []string{o.Sch, o.PCB} {
-					if in != "" {
-						guard = append(guard, filepath.Dir(in))
+					if in == "" {
+						continue
+					}
+					abs, _ := filepath.Abs(in)
+					files, dirs = append(files, abs), append(dirs, filepath.Dir(abs))
+					if f, d, err := kicad.RenderDependencies(in); err == nil {
+						files, dirs = append(files, f...), append(dirs, d...)
 					}
 				}
-				guard = append(guard, o.OutDir)
+				dirs = append(dirs, o.OutDir)
 				if compare != "" {
-					guard = append(guard, compare)
+					dirs = append(dirs, compare)
 				}
-				if err := checkReportPath(report, guard); err != nil {
+				if err := checkReportPath(report, files, dirs); err != nil {
 					report = ""
 					return fail(err)
 				}
+			}
+			if o.Sch == "" && o.PCB == "" && compare == "" {
+				return fail(&kicad.RenderError{Code: "RENDER_BAD_INPUT", Detail: "nothing to do", Fix: "pass --sch, --pcb or --compare"})
 			}
 			if compare != "" && sameDir(compare, o.OutDir) {
 				return fail(&kicad.RenderError{Code: "RENDER_BAD_INPUT", Detail: "--compare names the --out directory", Fix: "render into a new --out and compare it with the old one"})
@@ -169,22 +177,39 @@ func sameDir(a, b string) bool {
 	return err1 == nil && err2 == nil && strings.EqualFold(filepath.Clean(p), filepath.Clean(q))
 }
 
-// checkReportPath refuses a --report path inside any of dirs (the input's
-// project directory, which holds the input itself; --out, where it would be
-// foreign content; --compare): checked through links, junctions and case
-// with os.SameFile on every existing ancestor, and lexically
-// (case-insensitive) for directories that do not exist yet.
-func checkReportPath(report string, dirs []string) error {
+// checkReportPath refuses a --report path that is, or could overwrite, any
+// of files (inputs and dependencies) or lies inside any of dirs (project
+// and dependency directories, --out, --compare): lexically (case-insensitive)
+// and by identity — os.SameFile on every existing ancestor, and an existing
+// report path against the files and every file in dirs, so links and hard
+// links count.
+func checkReportPath(report string, files, dirs []string) error {
 	abs, err := filepath.Abs(report)
 	if err != nil {
 		return err
 	}
-	refuse := func(dir string) error {
-		return &kicad.RenderError{Code: "RENDER_BAD_INPUT", Detail: fmt.Sprintf("--report %s is inside %s", report, dir),
-			Fix: "write the report outside the project, --out and --compare directories"}
+	refuse := func(what string) error {
+		return &kicad.RenderError{Code: "RENDER_BAD_INPUT", Detail: fmt.Sprintf("--report %s would write over %s", report, what),
+			Fix: "write the report to a new file outside the project, its dependencies, --out and --compare"}
 	}
+	existing, statErr := os.Stat(abs)
 	if info, err := os.Lstat(abs); err == nil && !info.Mode().IsRegular() {
 		return &kicad.RenderError{Code: "RENDER_BAD_INPUT", Detail: "--report " + report + " is not a regular file", Fix: "name a new file"}
+	}
+	same := func(p string) bool {
+		if strings.EqualFold(filepath.Clean(p), abs) {
+			return true
+		}
+		if statErr != nil {
+			return false
+		}
+		st, err := os.Stat(p)
+		return err == nil && os.SameFile(st, existing)
+	}
+	for _, f := range files {
+		if same(f) {
+			return refuse(f)
+		}
 	}
 	for _, dir := range dirs {
 		d, err := filepath.Abs(dir)
@@ -208,6 +233,21 @@ func checkReportPath(report string, dirs []string) error {
 			}
 			p = up
 		}
+		if statErr == nil { // a hard link elsewhere to a file in dir
+			hit := ""
+			_ = filepath.WalkDir(d, func(p string, e os.DirEntry, err error) error {
+				if err != nil || hit != "" {
+					return filepath.SkipDir
+				}
+				if e.Type().IsRegular() && same(p) {
+					hit = p
+				}
+				return nil
+			})
+			if hit != "" {
+				return refuse(hit)
+			}
+		}
 	}
 	return nil
 }
@@ -219,8 +259,23 @@ func writeRenderReport(stdout io.Writer, path string, rep kicadRenderReport) err
 	}
 	b = append(b, '\n')
 	if path != "" {
-		if err := os.WriteFile(path, b, 0o644); err != nil {
+		// temp + rename: an existing report is replaced, never truncated in
+		// place (a hard link to it keeps its old contents).
+		tmp, err := os.CreateTemp(filepath.Dir(path), ".render-report-*.tmp")
+		if err != nil {
 			return err
+		}
+		_, werr := tmp.Write(b)
+		cerr := tmp.Close()
+		if werr == nil && cerr == nil {
+			werr = os.Rename(tmp.Name(), path)
+		}
+		if werr != nil || cerr != nil {
+			_ = os.Remove(tmp.Name())
+			if werr == nil {
+				werr = cerr
+			}
+			return werr
 		}
 	}
 	_, err = stdout.Write(b)

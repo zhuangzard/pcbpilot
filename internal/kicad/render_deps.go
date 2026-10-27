@@ -270,12 +270,19 @@ func copyRenderDeps(d *renderDeps, dst string, models bool) (string, error) {
 				}
 				return nil
 			}
-			if !e.Type().IsRegular() {
-				return nil
-			}
 			ext := strings.ToLower(filepath.Ext(name))
 			if filter && !renderCopyExt[ext] && !(models && renderModelExt[ext]) && name != "sym-lib-table" && name != "fp-lib-table" {
 				return nil
+			}
+			if !e.Type().IsRegular() {
+				// A linked project file (.kicad_pro, a library table, a
+				// sheet…) is copied as its resolved contents; one that does
+				// not resolve to a regular file refuses the render.
+				st, err := os.Stat(p)
+				if err != nil || !st.Mode().IsRegular() {
+					return renderErr("RENDER_DEPENDENCY_UNRESOLVED", "point the link at an existing file or replace it with the file",
+						"%s is a link / special file that does not resolve to a regular file (%v)", p, err)
+				}
 			}
 			return copyOne(p)
 		})
@@ -298,4 +305,26 @@ func copyRenderDeps(d *renderDeps, dst string, models bool) (string, error) {
 		}
 	}
 	return place(d.ProjDir)
+}
+
+// RenderDependencies lists every file and directory a render of in reads:
+// the input, the project directory's KiCad files, every sheet, library and
+// drawing sheet of its closure (mirrored or read in place). `kicad render
+// --report` must not land on any of them.
+func RenderDependencies(in string) (files, dirs []string, err error) {
+	d, err := collectRenderDeps(in)
+	if err != nil {
+		return nil, nil, err
+	}
+	abs, _ := filepath.Abs(in)
+	files = append(files, abs)
+	dirs = append(dirs, d.ProjDir)
+	for _, p := range append(append([]string{}, d.Mirror...), d.InPlace...) {
+		if st, err := os.Stat(p); err == nil && st.IsDir() {
+			dirs = append(dirs, p)
+		} else {
+			files = append(files, p)
+		}
+	}
+	return files, dirs, nil
 }

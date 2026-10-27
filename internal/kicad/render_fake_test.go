@@ -1,6 +1,7 @@
 package kicad
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -32,6 +33,20 @@ func fakeRenderCLI(args []string) int {
 		fmt.Println("Error: symbol library 'parts' not found")
 	}
 	in := args[len(args)-1]
+	// Like KiCad, read the project's drawing sheet: one it names but cannot
+	// find is reported (and must make the render cannot-check).
+	if b, err := os.ReadFile(strings.TrimSuffix(in, filepath.Ext(in)) + ".kicad_pro"); err == nil {
+		var pro struct {
+			Schematic struct {
+				Wks string `json:"page_layout_descr_file"`
+			} `json:"schematic"`
+		}
+		if json.Unmarshal(b, &pro) == nil && pro.Schematic.Wks != "" {
+			if _, err := os.Stat(filepath.Join(filepath.Dir(in), pro.Schematic.Wks)); err != nil {
+				fmt.Println("Error: drawing sheet file " + pro.Schematic.Wks + " not found")
+			}
+		}
+	}
 	page := func(name string) string {
 		if mode == "empty" {
 			return `<svg xmlns="http://www.w3.org/2000/svg"></svg>`
@@ -373,5 +388,44 @@ func TestRenderOutRefusesLinks(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(filepath.Join(outside, "precious.svg")); string(b) != "precious" {
 		t.Fatal("render reached through a link")
+	}
+}
+
+// A .kicad_pro that is a link is copied as its contents, so the drawing
+// sheet it names travels too; a link that resolves to nothing refuses.
+func TestRenderFakeLinkedProjectFile(t *testing.T) {
+	fakeRenderCLIEnv(t, "")
+	ws := t.TempDir()
+	root := schProject(t, ws, "../shared/sub.kicad_sch")
+	writeFile(t, filepath.Join(ws, "proj", "custom.kicad_wks"), "(kicad_wks)\n")
+	real := filepath.Join(ws, "elsewhere", "top.kicad_pro")
+	writeFile(t, real, `{"schematic": {"page_layout_descr_file": "custom.kicad_wks"}}`)
+	if err := os.Symlink(real, filepath.Join(ws, "proj", "top.kicad_pro")); err != nil {
+		t.Skipf("cannot create a symlink here: %v", err)
+	}
+	if _, err := Render(RenderOptions{Sch: root, OutDir: filepath.Join(ws, "out")}); err != nil {
+		t.Fatalf("linked .kicad_pro: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(ws, "gone"), filepath.Join(ws, "proj", "sym-lib-table")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Render(RenderOptions{Sch: root, OutDir: filepath.Join(ws, "out2")}); renderCode(err) != "RENDER_DEPENDENCY_UNRESOLVED" {
+		t.Fatalf("dangling linked lib table: %v", err)
+	}
+}
+
+// The fake's drawing-sheet check itself: a worksheet the project names but
+// the copy lacks is a blocking diagnostic.
+func TestRenderFakeMissingWorksheet(t *testing.T) {
+	fakeRenderCLIEnv(t, "")
+	ws := t.TempDir()
+	root := schProject(t, ws, "../shared/sub.kicad_sch")
+	writeFile(t, filepath.Join(ws, "proj", "top.kicad_pro"), `{"schematic": {"page_layout_descr_file": "custom.kicad_wks"}}`)
+	if _, err := Render(RenderOptions{Sch: root, OutDir: filepath.Join(ws, "out")}); renderCode(err) != "RENDER_DEPENDENCY_UNRESOLVED" {
+		t.Fatalf("missing worksheet: %v", err)
+	}
+	writeFile(t, filepath.Join(ws, "proj", "custom.kicad_wks"), "(kicad_wks)\n")
+	if _, err := Render(RenderOptions{Sch: root, OutDir: filepath.Join(ws, "out")}); err != nil {
+		t.Fatalf("worksheet present: %v", err)
 	}
 }
