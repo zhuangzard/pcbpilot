@@ -351,19 +351,23 @@ func (e *updateEngine) stepSkill(ctx context.Context, plan updatePlan, res *appl
 	sync, err := selfupdate.SyncSkills(ctx, opts, func(f string, a ...any) { e.log(f, a...) })
 	res.Skills = sync.Outcomes
 	for _, o := range sync.Outcomes {
-		row := stepRow{Component: compSkill + ":" + o.Client, From: o.From, To: o.To, Where: o.Dir}
+		row := stepRow{Component: compSkill + ":" + selfupdate.SkillLabel(o.Client, o.Skill), From: o.From, To: o.To, Where: o.Dir}
 		switch o.Status {
 		case "updated", "created", "preserved":
 			row.Status = "updated"
 			if o.Status == "preserved" {
 				row.Detail = "local edits kept (preserve); release parity not claimed"
 			}
+		case "removed":
+			row.Status, row.Detail, row.To = "updated", "retired Skill removed", ""
+		case "kept":
+			row.Status, row.Detail, row.To = "skipped", o.Err, ""
 		case "up-to-date":
 			row.Status = "current"
 		case "linked":
 			row.Status, row.Detail = "linked", "linked to "+o.Linked+" (source install — updated by git pull)"
 		case "skipped":
-			row.Status, row.Detail = "skipped", "not installed"
+			row.Status, row.Detail = "skipped", o.Err
 			row.To = ""
 		default:
 			row.Status, row.Detail = "failed", o.Err
@@ -630,7 +634,7 @@ func (e *updateEngine) verify(ctx context.Context, plan updatePlan, res *applyRe
 			}
 			v := strings.TrimSpace(readText(filepath.Join(o.Dir, ".version")))
 			_, err := os.Stat(filepath.Join(o.Dir, "SKILL.md"))
-			add("skill:"+o.Client, err == nil && v == plan.target, true, v)
+			add("skill:"+selfupdate.SkillLabel(o.Client, o.Skill), err == nil && v == plan.target, true, v)
 		}
 	}
 	if plan.has(compMCP) && res.MCP != nil && res.MCP.Status != "skipped" && res.MCP.Status != "error" {

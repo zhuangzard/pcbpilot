@@ -20,7 +20,8 @@
 
 这里的价值来自职责与证据可组合，不要求启动多个 Agent。参考项目的硬件目录分类和库存
 功能适合实验室，本项目已有 typed CLI、库与样例，不引入第二套板卡目录或个人物料数据库。
-设计工作流仍保持一个公开入口，避免拆分原理图、PCB 和规则后再次发生知识漂移。
+设计工作流仍以 `pcbpilot` 为唯一路由入口；聚焦公开 Skill 只承接单一职责并链接 `pcbpilot/` 的
+共享知识，避免拆分后再次发生知识漂移（边界见 [Skill 设计](skill-design.md)）。
 合并旧规则时保留了布局工作流记忆，并把原 `CLAUDE.md` 中经 Makefile 核实的发布知识迁到
 [release-workflow.md](release-workflow.md)，避免用软链接替换文件时丢失有效经验。
 
@@ -33,14 +34,16 @@ CLAUDE.md -> AGENTS.md             兼容入口
   memory/                         已有共享经验，保持原记录
   skills/
     README.md                     Skill 维护与分发约定
-    pcbpilot/                唯一公开设计包（真实目录）
+    public-skills.json        公开 Skill 清单（router + 聚焦 Skill + retired）
+    pcbpilot/                公开路由 Skill（真实目录）
+    pcbpilot-<slug>/         聚焦公开 Skill（按清单发布）
     pcbpilot-repo-lookup/           查询实现、样例、证据
     pcbpilot-repo-maintain/         修改工具、知识、验证与 Git 贡献
 .claude -> .agents                同一套仓库资源
 docs/README.md                    文档导航与归属
 ```
 
-公开设计包继续由 `install.sh`、`pcbpilot update` 和正式 release 管理；仓库协作 Skill 依赖
+公开 Skill 继续由 `install.sh`、`pcbpilot update` 和正式 release 管理；仓库协作 Skill 依赖
 源码 checkout，只通过下面的开发安装脚本链接。两条分发路径不会相互覆盖。已有 `.claude`
 目录迁移到 `.agents`，包括本地未提交状态；Git 只收录已审查的共享文件，worktree 和本机设置
 保持忽略。

@@ -15,9 +15,11 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 )
@@ -29,9 +31,14 @@ func IsLocalVersion(v string) bool {
 }
 
 type LocalBundle struct {
-	Version   string
-	Binary    []byte
-	Skill     map[string][]byte
+	Version string
+	Binary  []byte
+	// Skill is the router's files (Skills[SkillName]), kept for callers that
+	// predate focused Skills.
+	Skill map[string][]byte
+	// Skills maps every packaged Skill to its files (relative slash paths).
+	Skills    map[string]map[string][]byte
+	Manifest  SkillManifest
 	Connector string
 }
 
@@ -69,7 +76,7 @@ func ReadLocalBundle(dir string) (*LocalBundle, error) {
 		}
 		return b, nil
 	}
-	b := &LocalBundle{Skill: map[string][]byte{}, Connector: filepath.Join(dir, "pcbpilot-connector.eext")}
+	b := &LocalBundle{Skills: map[string]map[string][]byte{}, Connector: filepath.Join(dir, "pcbpilot-connector.eext")}
 	if b.Binary, err = read(asset); err != nil {
 		return nil, err
 	}
@@ -118,6 +125,7 @@ func ReadLocalBundle(dir string) (*LocalBundle, error) {
 	defer gz.Close()
 	tr := tar.NewReader(gz)
 	var total int64
+	var manifestRaw []byte
 	for {
 		h, e := tr.Next()
 		if e == io.EOF {
@@ -126,26 +134,59 @@ func ReadLocalBundle(dir string) (*LocalBundle, error) {
 		if e != nil {
 			return nil, e
 		}
-		name := strings.TrimPrefix(h.Name, SkillName+"/")
-		if name == h.Name || name == "." || name == ".version" || strings.Contains(name, `\`) || filepath.IsAbs(name) || filepath.Clean(name) != name || name == ".." || strings.HasPrefix(name, "../") || h.Typeflag != tar.TypeReg {
+		if h.Typeflag != tar.TypeReg {
 			return nil, fmt.Errorf("unsafe skill entry: %s", h.Name)
-		}
-		if _, exists := b.Skill[name]; exists {
-			return nil, fmt.Errorf("duplicate skill entry: %s", name)
 		}
 		total += h.Size
 		if h.Size < 0 || h.Size > 64<<20 || total > 256<<20 {
 			return nil, fmt.Errorf("skill package too large")
 		}
-		b.Skill[name], e = io.ReadAll(tr)
-		if e != nil {
+		if h.Name == SkillManifestName {
+			if manifestRaw != nil {
+				return nil, fmt.Errorf("duplicate skill entry: %s", h.Name)
+			}
+			if manifestRaw, e = io.ReadAll(tr); e != nil {
+				return nil, e
+			}
+			continue
+		}
+		// Slash paths are the archive format on every OS: path.Clean, not
+		// filepath.Clean (which rewrites separators on Windows).
+		skill, name, ok := strings.Cut(h.Name, "/")
+		if !ok || !isPublicSkillName(skill) || name == "" || name == "." || name == versionMarker || strings.Contains(name, `\`) ||
+			strings.Contains(name, ":") || filepath.IsAbs(name) || path.Clean(name) != name || name == ".." || strings.HasPrefix(name, "../") {
+			return nil, fmt.Errorf("unsafe skill entry: %s", h.Name)
+		}
+		files := b.Skills[skill]
+		if files == nil {
+			files = map[string][]byte{}
+			b.Skills[skill] = files
+		}
+		if _, exists := files[name]; exists {
+			return nil, fmt.Errorf("duplicate skill entry: %s", h.Name)
+		}
+		if files[name], e = io.ReadAll(tr); e != nil {
 			return nil, e
 		}
 	}
-	v, err := skillMetadataVersion(string(b.Skill["SKILL.md"]))
-	if err != nil || v != b.Version {
-		return nil, fmt.Errorf("Skill metadata does not match connector %s", b.Version)
+	b.Manifest = legacySkillManifest()
+	if manifestRaw != nil {
+		if b.Manifest, err = parseSkillManifest(manifestRaw); err != nil {
+			return nil, err
+		}
 	}
+	for skill := range b.Skills {
+		if !slices.Contains(b.Manifest.Skills, skill) {
+			return nil, fmt.Errorf("skills.tar.gz: %s/ is not listed in %s", skill, SkillManifestName)
+		}
+	}
+	for _, skill := range b.Manifest.Skills {
+		v, err := skillMetadataVersion(string(b.Skills[skill]["SKILL.md"]))
+		if err != nil || v != b.Version {
+			return nil, fmt.Errorf("%s Skill metadata does not match connector %s", skill, b.Version)
+		}
+	}
+	b.Skill = b.Skills[SkillName]
 	return b, nil
 }
 
@@ -160,7 +201,15 @@ func (b *LocalBundle) CheckBinary(path string) error {
 	return nil
 }
 
-func (b *LocalBundle) CheckSkill(dir string) error {
+// CheckSkill compares an installed router dir with the bundle.
+func (b *LocalBundle) CheckSkill(dir string) error { return b.CheckSkillNamed(SkillName, dir) }
+
+// CheckSkillNamed compares one installed Skill dir with the bundle byte for byte.
+func (b *LocalBundle) CheckSkillNamed(skill, dir string) error {
+	want, listed := b.Skills[skill]
+	if !listed {
+		return fmt.Errorf("%s is not in the local package", skill)
+	}
 	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
 		dir = resolved
 	}
@@ -188,7 +237,7 @@ func (b *LocalBundle) CheckSkill(dir string) error {
 			if strings.TrimSpace(string(data)) != b.Version {
 				return fmt.Errorf("Skill version marker differs")
 			}
-		} else if want, ok := b.Skill[name]; !ok || !bytes.Equal(data, want) {
+		} else if expected, ok := want[name]; !ok || !bytes.Equal(data, expected) {
 			return fmt.Errorf("Skill content differs: %s", name)
 		}
 		seen[name] = true
@@ -197,7 +246,7 @@ func (b *LocalBundle) CheckSkill(dir string) error {
 	if err != nil {
 		return err
 	}
-	if len(seen) != len(b.Skill)+1 || !seen[".version"] {
+	if len(seen) != len(want)+1 || !seen[".version"] {
 		return fmt.Errorf("Skill files/marker missing")
 	}
 	return nil
@@ -257,14 +306,37 @@ func (b *LocalBundle) Install(binary string, log io.Writer) (retErr error) {
 		return err
 	}
 	fmt.Fprintf(log, "Installed CLI: %s\n", binary)
-	for _, target := range Targets(false) {
-		if !target.Present {
+	// Every client with the router installed receives every packaged Skill;
+	// retired ones are removed where pcbpilot wrote them.
+	for _, client := range clientOrder {
+		if !ClientInstalled(client) {
 			continue
 		}
-		dir := target.Dir
-		if p, e := filepath.EvalSymlinks(dir); e == nil {
-			dir = p
+		for _, skill := range b.Manifest.Skills {
+			if e := b.installSkill(skill, SkillDirFor(client, skill), log); e != nil {
+				return e
+			}
 		}
+		for _, name := range retiredSkills(b.Manifest, PublicSkills()) {
+			dir := SkillDirFor(client, name)
+			if dir == "" || !ownedSkillDir(dir) {
+				continue
+			}
+			if e := removeOwnedSkill(dir); e != nil {
+				return fmt.Errorf("remove retired Skill %s: %w", dir, e)
+			}
+			fmt.Fprintf(log, "Removed retired Skill: %s\n", dir)
+		}
+	}
+	return nil
+}
+
+// installSkill backs up (when present) and replaces one Skill dir.
+func (b *LocalBundle) installSkill(skill, dir string, log io.Writer) error {
+	if p, e := filepath.EvalSymlinks(dir); e == nil {
+		dir = p
+	}
+	if isDir(dir) {
 		backup, e := os.MkdirTemp(filepath.Dir(dir), ".pcbpilot-local-backup-*")
 		if e != nil {
 			return e
@@ -273,34 +345,34 @@ func (b *LocalBundle) Install(binary string, log io.Writer) (retErr error) {
 			return e
 		}
 		fmt.Fprintf(log, "Skill backup: %s\n", backup)
-		src, e := os.MkdirTemp(filepath.Dir(dir), ".easyeda-local-source-*")
-		if e != nil {
-			return e
-		}
-		e = func() error {
-			defer os.RemoveAll(src)
-			for name, data := range b.Skill {
-				p := filepath.Join(src, name)
-				if e := os.MkdirAll(filepath.Dir(p), 0755); e != nil {
-					return e
-				}
-				mode := os.FileMode(0644)
-				if bytes.HasPrefix(data, []byte("#!")) {
-					mode = 0755
-				}
-				if e := os.WriteFile(p, data, mode); e != nil {
-					return e
-				}
-			}
-			return materialize(src, dir, false, b.Version)
-		}()
-		if e != nil {
-			return fmt.Errorf("Skill %s failed: %w", dir, e)
-		}
-		if e := b.CheckSkill(dir); e != nil {
-			return e
-		}
-		fmt.Fprintf(log, "Installed Skill: %s\n", dir)
 	}
+	src, e := os.MkdirTemp(filepath.Dir(dir), ".easyeda-local-source-*")
+	if e != nil {
+		return e
+	}
+	e = func() error {
+		defer os.RemoveAll(src)
+		for name, data := range b.Skills[skill] {
+			p := filepath.Join(src, name)
+			if e := os.MkdirAll(filepath.Dir(p), 0755); e != nil {
+				return e
+			}
+			mode := os.FileMode(0644)
+			if bytes.HasPrefix(data, []byte("#!")) {
+				mode = 0755
+			}
+			if e := os.WriteFile(p, data, mode); e != nil {
+				return e
+			}
+		}
+		return materialize(src, dir, false, b.Version)
+	}()
+	if e != nil {
+		return fmt.Errorf("Skill %s failed: %w", dir, e)
+	}
+	if e := b.CheckSkillNamed(skill, dir); e != nil {
+		return e
+	}
+	fmt.Fprintf(log, "Installed Skill: %s\n", dir)
 	return nil
 }
