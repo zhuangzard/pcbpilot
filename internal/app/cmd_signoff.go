@@ -33,6 +33,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/zhuangzard/pcbpilot/pkg/netname"
 	"github.com/zhuangzard/pcbpilot/pkg/powersim"
 )
 
@@ -181,7 +182,10 @@ type traceRow struct {
 	SchematicPins int      `json:"schematicPins"`
 	Parts         []string `json:"parts"`
 	BoardPads     int      `json:"boardPads"`
-	Status        string   `json:"status"`
+	// Identity is the net's identity (pkg/netname) when the intent names it
+	// by its display name: KiCad's full hierarchical name on the board.
+	Identity string `json:"identity,omitempty"`
+	Status   string `json:"status"`
 }
 
 var (
@@ -200,8 +204,9 @@ type signoffDoc struct {
 		} `json:"device"`
 	} `json:"components"`
 	Nets []struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
+		ID       string `json:"id"`
+		Name     string `json:"name"`
+		FullName string `json:"fullName"` // net identity (kicad netlist)
 	} `json:"nets"`
 	Connections []struct {
 		ComponentID string `json:"componentId"`
@@ -387,18 +392,20 @@ func runSignoff(o signoffOpts, waivers []gateWaiver, stderr io.Writer) (*signoff
 		res.Gates[len(res.Gates)-1].Items = append(res.Gates[len(res.Gates)-1].Items, "per-segment basis needs --sim")
 	}
 
-	// 5. Continuity and traceability.
+	// 5. Continuity and traceability, on net identities (pkg/netname): the
+	// schematic's fullName (else its name, resolved against the board's
+	// names for documents without one), the board's own net names, and the
+	// intent's names resolved against both.
+	boardIDs := netname.NewResolver(boardNetIDs(snap))
+	netIDs, shorts := signoffNetIdentities(docs, boardIDs)
 	schPins := map[string]string{}
 	netParts := map[string]map[string]bool{}
-	for _, d := range docs {
+	for di, d := range docs {
 		ref := map[string]string{}
 		for _, c := range d.Components {
 			ref[c.ID] = c.Ref
 		}
-		name := map[string]string{}
-		for _, n := range d.Nets {
-			name[n.ID] = n.Name
-		}
+		name := netIDs[di]
 		for _, c := range d.Connections {
 			n := name[c.NetID]
 			if n == "" {
@@ -417,40 +424,65 @@ func runSignoff(o signoffOpts, waivers []gateWaiver, stderr io.Writer) (*signoff
 		// Unconnected single pins are not nets on the board side either.
 		board := boardPinNets(snap)
 		for k, v := range board {
-			if strings.HasPrefix(v, "unconnected-(") {
+			if netname.IsUnconnected(v) {
 				delete(board, k)
 			}
 		}
 		g := padNetDiffGate(schPins, board, strings.Join(o.connectivity, ","), filepath.Join(o.outDir, "net-diff.json"))
 		g.Gate = "signoff-continuity"
+		if len(shorts) > 0 {
+			g.Pass = false
+			g.Items = append(shorts, g.Items...)
+		}
 		add(g)
 	}
 	boardPads := map[string]int{}
 	for _, n := range boardPinNets(snap) {
 		boardPads[n]++
 	}
+	schNets := make([]string, 0, len(netParts))
+	for n := range netParts {
+		schNets = append(schNets, n)
+	}
+	schIDs := netname.NewResolver(schNets)
 	trace := gateResult{Gate: "signoff-trace"}
 	for _, name := range in.sortedNetNames() {
 		n := in.Nets[name]
+		// Only an unknown name falls back to the board: an ambiguous one
+		// (two sheets with this label) is never looked up elsewhere.
+		ambiguous := ""
+		id, m := schIDs.Resolve(name)
+		if m == netname.Ambiguous {
+			ambiguous = "ambiguous in the schematic: " + strings.Join(schIDs.Candidates(name), " or ")
+		} else if m == netname.Unknown {
+			if id, m = boardIDs.Resolve(name); m == netname.Ambiguous {
+				ambiguous = "ambiguous on the board: " + strings.Join(boardIDs.Candidates(name), " or ")
+			}
+		}
 		row := traceRow{Net: name, Role: n.Role, CurrentA: n.CurrentA, OuterMil: n.WidthMil.Outer, InnerMil: n.WidthMil.Inner,
 			MinMil: n.WidthMil.Min, ClearanceMil: n.ClearanceMil, ViasPerTrans: n.ViasPerTransition, Domain: n.Domain,
-			BoardPads: boardPads[name], Status: "ok"}
-		for p := range netParts[name] {
+			BoardPads: boardPads[id], Status: "ok"}
+		if id != name {
+			row.Identity = id
+		}
+		for p := range netParts[id] {
 			row.Parts = append(row.Parts, p)
 		}
 		sort.Strings(row.Parts)
 		for _, v := range schPins {
-			if v == name {
+			if v == id {
 				row.SchematicPins++
 			}
 		}
 		switch {
+		case ambiguous != "":
+			row.Status = ambiguous
 		case len(docs) > 0 && row.SchematicPins == 0:
 			row.Status = "not in the schematic"
 		case row.BoardPads == 0:
 			row.Status = "not on the board"
 		}
-		if row.Status != "ok" && n.WidthMil.Outer > 0 {
+		if row.Status != "ok" && (n.WidthMil.Outer > 0 || ambiguous != "") {
 			trace.Items = append(trace.Items, name+": "+row.Status)
 		}
 		res.Traceability = append(res.Traceability, row)
@@ -493,6 +525,83 @@ func runSignoff(o signoffOpts, waivers []gateWaiver, stderr io.Writer) (*signoff
 	return res, nil
 }
 
+// signoffNetIdentities gives each schematic net (per document, by net id)
+// its identity: fullName, else its name resolved against the board's nets.
+// Resolution is per schematic net, never per pin or per name. Documents
+// (pages) merge by net name, the rule of sim power / intent derive
+// (powersim.BuildDesign): equal names on different documents are one net —
+// unless one document has that name on several net records, which then
+// all stay distinct. When several distinct schematic nets (two "VCC"
+// records, or "VCC" and "/pwr/VCC") would become one identity they keep
+// distinct names — the partition comparison then shows the board short —
+// and each such group is returned as a failure item.
+func signoffNetIdentities(docs []signoffDoc, board *netname.Resolver) ([]map[string]string, []string) {
+	type src struct {
+		doc         int
+		id, key, to string
+	}
+	var srcs []src
+	idsByName := map[string]map[int]map[string]bool{} // name → document → net ids
+	for di, d := range docs {
+		for _, n := range d.Nets {
+			key, ident := n.FullName, n.FullName
+			if key == "" {
+				if key = n.Name; key == "" {
+					key = n.ID
+				}
+				if id, m := board.Resolve(key); m == netname.Found {
+					ident = id
+				} else {
+					ident = key
+				}
+			}
+			srcs = append(srcs, src{di, n.ID, key, ident})
+			if idsByName[key] == nil {
+				idsByName[key] = map[int]map[string]bool{}
+			}
+			if idsByName[key][di] == nil {
+				idsByName[key][di] = map[string]bool{}
+			}
+			idsByName[key][di][n.ID] = true
+		}
+	}
+	// label names the source net: its name when pages merge it by name,
+	// else name + document + net id.
+	label := func(s src) string {
+		for _, ids := range idsByName[s.key] {
+			if len(ids) > 1 {
+				return fmt.Sprintf("%s (document %d net %s)", s.key, s.doc+1, s.id)
+			}
+		}
+		return s.key
+	}
+	sources := map[string]map[string]bool{} // identity → distinct source nets
+	for _, s := range srcs {
+		if sources[s.to] == nil {
+			sources[s.to] = map[string]bool{}
+		}
+		sources[s.to][label(s)] = true
+	}
+	out := make([]map[string]string, len(docs))
+	for i := range out {
+		out[i] = map[string]string{}
+	}
+	for _, s := range srcs {
+		if len(sources[s.to]) > 1 {
+			out[s.doc][s.id] = label(s)
+			continue
+		}
+		out[s.doc][s.id] = s.to
+	}
+	var shorts []string
+	for _, ident := range sortedKeysOf(sources) {
+		if len(sources[ident]) > 1 {
+			shorts = append(shorts, fmt.Sprintf("schematic nets %s all resolve to board net %s — distinct schematic nets on one board net (a short), not merged", strings.Join(sortedKeysOf(sources[ident]), ", "), ident))
+		}
+	}
+	return out, shorts
+}
+
 func dashIfEmpty(s string) string {
 	if s == "" {
 		return "—"
@@ -512,7 +621,11 @@ func signoffMarkdown(r *signoffResult) string {
 		if len(t.Parts) > 8 {
 			parts = strings.Join(t.Parts[:8], " ") + fmt.Sprintf(" … (+%d)", len(t.Parts)-8)
 		}
-		fmt.Fprintf(&b, "| %s | %s | %.3f | %.2f / %.2f / %.2f | %.2f | %d | %d | %s | %d | %s |\n", t.Net, t.Role, t.CurrentA, t.OuterMil, t.InnerMil, t.MinMil, t.ClearanceMil, t.ViasPerTrans, t.SchematicPins, parts, t.BoardPads, t.Status)
+		net := t.Net
+		if t.Identity != "" {
+			net += " = " + t.Identity
+		}
+		fmt.Fprintf(&b, "| %s | %s | %.3f | %.2f / %.2f / %.2f | %.2f | %d | %d | %s | %d | %s |\n", net, t.Role, t.CurrentA, t.OuterMil, t.InnerMil, t.MinMil, t.ClearanceMil, t.ViasPerTrans, t.SchematicPins, parts, t.BoardPads, t.Status)
 	}
 	for _, g := range r.Gates {
 		if len(g.Items) == 0 {

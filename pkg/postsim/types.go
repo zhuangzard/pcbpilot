@@ -246,7 +246,7 @@ type Finding struct {
 
 // Verdict is the overall status.
 type Verdict struct {
-	Status  string   `json:"status"` // pass | warn | fail
+	Status  string   `json:"status"` // pass | warn | fail | unverified (nothing simulated)
 	Reasons []string `json:"reasons,omitempty"`
 }
 

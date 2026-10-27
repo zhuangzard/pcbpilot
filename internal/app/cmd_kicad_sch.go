@@ -18,6 +18,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
+	"github.com/zhuangzard/pcbpilot/pkg/netname"
 )
 
 func newKicadSchImportCmd(stdout, stderr io.Writer) *cobra.Command {
@@ -102,13 +103,10 @@ partitions differ.`,
 	return c
 }
 
-// stripSheetPath drops KiCad's "/Sheet/" prefix of sheet-local net names.
-func stripSheetPath(n string) string {
-	if strings.HasPrefix(n, "/") {
-		return n[strings.LastIndex(n, "/")+1:]
-	}
-	return n
-}
+// stripSheetPath is the display name of a KiCad net identity
+// (netname.Local): the "/Sheet/" path dropped, a '/' inside the label kept
+// ("/VPP{slash}MCLR" → "VPP/MCLR").
+func stripSheetPath(n string) string { return netname.Local(n) }
 
 func newKicadSchNetlistCmd(stdout, stderr io.Writer) *cobra.Command {
 	var sch, out, projectID string
@@ -118,10 +116,17 @@ func newKicadSchNetlistCmd(stdout, stderr io.Writer) *cobra.Command {
 		Long: `Runs 'kicad-cli sch export netlist --format kicadxml' on the root sheet and
 converts it into pcbpilot's schematic connectivity IR (schemaVersion 1.4 —
 the shape 'sch connectivity' writes; 'intent derive --connectivity' and
-pad-net-diff read it). Power symbols are not components; sheet-local names
-"/Sheet/NAME" become NAME when unique in the design; single-pin
-"unconnected-(…)" nets become connectionState "unconnected" (or noConnected
-on a no-connect flag); the LCSC field becomes device.supplierId.`,
+pad-net-diff read it). Power symbols are not components.
+
+Net identity (pkg/netname, the rule every matcher uses): each net's
+"fullName" is KiCad's full hierarchical name, escaped as on the board and in
+'kicad snapshot' ("/Sheet/NAME", "/VPP{slash}MCLR" for the root-sheet label
+"VPP/MCLR", "GND"). "name" is only the display name: the sheet path dropped
+when the rest is unique in the design, never cut inside a label. Single-pin
+"unconnected-(…)" nets are no net: their pins get connectionState
+"unconnected" (or noConnected on a no-connect flag), matching an
+"unconnected-(…)" pad on the board. Every component has a "pins" list ([]
+for a pinless symbol); the LCSC field becomes device.supplierId.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			nl, err := kicad.ExportSchNetlist(sch)

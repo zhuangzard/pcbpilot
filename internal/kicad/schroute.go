@@ -29,6 +29,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/zhuangzard/pcbpilot/pkg/netname"
 )
 
 // SchGrid is KiCad's default schematic connection grid (50 mil).
@@ -1217,10 +1219,7 @@ func (e *SchEditor) fallbackName(is island, items []connItem, opt DragOptions, r
 		res.Renamed = append(res.Renamed, fmt.Sprintf("%s → %s", n, name))
 		return name, kind, nil
 	}
-	if i := strings.LastIndex(n, "/"); i >= 0 {
-		n = n[i+1:]
-	}
-	return n, kind, nil
+	return netname.Local(n), kind, nil
 }
 
 // placeNetMarker puts a label (kind label/global_label/hierarchical_label)

@@ -75,7 +75,10 @@ intent `copper.tempRiseC`）；`--margin 1.2`；`--j-max`（A/mm²，默认按 I
 `findings[]`、`verdict`。
 
 结论：**fail** = sim 与板不是同一设计版本（`sim-board-mismatch`）、电源网超 IR 预算、负载开路、过孔超载流量、Tj 超 Tj,max、板温 > 130 °C；
-**warn** = 压降 > 80 % 预算、过孔 > 80 %、Tj > 80 % Tj,max、板温 > 105 °C（FR-4 Tg 余量）、Elmer 不一致。
+**warn** = 压降 > 80 % 预算、过孔 > 80 %、Tj > 80 % Tj,max、板温 > 105 °C（FR-4 Tg 余量）、Elmer 不一致；
+**unverified** = 什么都没仿真（IR 表里没有一个网解出压降，且板上没有任何器件/铜损发热；`not-verified` 发现）——
+不是通过：`post-layout-sim` / `signoff-ir` 门禁只放行 pass|warn。先查 sim power 是否用的是这块板的原理图、网名是否对得上。
+sim 的网名按 `pkg/netname` 解析到板上的网（层次 KiCad 板上 sim 的 `VCC_PIC` = 板上 `/pic_sockets/VCC_PIC`，记入 `assumptions`）。
 报告第 6A 章与“验证状态”一行都由它生成，进入封面总体结论。
 
 热图（`--svg-dir`）：每层 `temp-<层>.svg`（°C，统一色标，器件框 + 位号 + 最热点）与

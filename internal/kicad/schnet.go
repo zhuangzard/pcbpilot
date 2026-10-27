@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/zhuangzard/pcbpilot/internal/connectivity"
+	"github.com/zhuangzard/pcbpilot/pkg/netname"
 )
 
 // KicadCLI locates kicad-cli ($KICAD_CLI, PATH, the macOS bundle).
@@ -40,6 +41,7 @@ func KicadCLI() (string, error) {
 type SchNetlist struct {
 	Components []SchNetComp
 	Nets       []SchNet
+	Sheets     []string // sheet paths "/", "/Sub/", … of the design
 }
 
 // SchNetComp is one component (all units merged by KiCad).
@@ -52,7 +54,9 @@ type SchNetComp struct {
 // SchNetPin is a library pin.
 type SchNetPin struct{ Number, Name, Type string }
 
-// SchNet is a net and its nodes.
+// SchNet is a net and its nodes. Name is the net's identity
+// (pkg/netname.Canonical: KiCad's full name, escaped as on the board —
+// kicad-cli's XML writes it unescaped).
 type SchNet struct {
 	Code, Name string
 	Nodes      []SchNetNode
@@ -62,6 +66,11 @@ type SchNet struct {
 type SchNetNode struct{ Ref, Pin, Function, Type string }
 
 type schNetXML struct {
+	Source string `xml:"design>source"` // the root sheet file
+	Sheets []struct {
+		Name   string `xml:"name,attr"`
+		Source string `xml:"title_block>source"` // relative to the root's directory
+	} `xml:"design>sheet"`
 	Comps []struct {
 		Ref       string `xml:"ref,attr"`
 		Value     string `xml:"value"`
@@ -99,8 +108,14 @@ type schNetXML struct {
 	} `xml:"nets>net"`
 }
 
-// ParseSchNetlist reads kicadxml.
-func ParseSchNetlist(data []byte) (*SchNetlist, error) {
+// ParseSchNetlist reads kicadxml. Net names become identities
+// (schNetIdentity), with the sheet files found next to the root sheet the
+// XML names as label evidence when they exist.
+func ParseSchNetlist(data []byte) (*SchNetlist, error) { return parseSchNetlist(data, "") }
+
+// parseSchNetlist: rootDir is where the sheet files are ("" = the directory
+// of the root sheet the XML names).
+func parseSchNetlist(data []byte, rootDir string) (*SchNetlist, error) {
 	var x schNetXML
 	if err := xml.Unmarshal(data, &x); err != nil {
 		return nil, fmt.Errorf("parse KiCad netlist: %w", err)
@@ -112,6 +127,26 @@ func ParseSchNetlist(data []byte) (*SchNetlist, error) {
 		}
 	}
 	nl := &SchNetlist{}
+	seen := map[string]bool{}
+	addSheet := func(s string) {
+		if s != "" && !seen[s] {
+			seen[s] = true
+			nl.Sheets = append(nl.Sheets, s)
+		}
+	}
+	if rootDir == "" && x.Source != "" {
+		rootDir = filepath.Dir(x.Source)
+	}
+	files := map[string]string{}
+	for _, s := range x.Sheets {
+		addSheet(s.Name)
+		if s.Source != "" && rootDir != "" {
+			files[s.Name] = filepath.Join(rootDir, s.Source)
+		}
+	}
+	for _, c := range x.Comps {
+		addSheet(c.Sheet.Names)
+	}
 	for _, c := range x.Comps {
 		sc := SchNetComp{Ref: c.Ref, Value: c.Value, Footprint: c.Footprint, Lib: c.Lib.Lib, Part: c.Lib.Part,
 			Sheet: c.Sheet.Names, Fields: map[string]string{}, Pins: lp[c.Lib.Lib+":"+c.Lib.Part]}
@@ -126,6 +161,9 @@ func ParseSchNetlist(data []byte) (*SchNetlist, error) {
 			sn.Nodes = append(sn.Nodes, SchNetNode{d.Ref, d.Pin, d.Func, d.Type})
 		}
 		nl.Nets = append(nl.Nets, sn)
+	}
+	if err := nl.netIdentities(files); err != nil {
+		return nil, err
 	}
 	return nl, nil
 }
@@ -153,41 +191,28 @@ func ExportSchNetlist(sch string) (*SchNetlist, error) {
 	if err != nil {
 		return nil, fmt.Errorf("kicad-cli wrote no netlist: %s", strings.TrimSpace(buf.String()))
 	}
-	return ParseSchNetlist(data)
+	return parseSchNetlist(data, filepath.Dir(sch))
 }
 
-// netNames maps each KiCad net name to the pcbpilot name: sheet-local
-// names "/Sheet/NAME" lose the path when NAME is unique in the design;
-// KiCad's unnamed nets ("Net-(R1-Pad2)", "unconnected-(U1-NC-Pad5)") are
-// kept as they are.
+// netNames maps each net identity to its display name (netname.Display):
+// the sheet path dropped when the rest is unique in the design, never cut
+// inside a label ("/VPP{slash}MCLR" → "VPP/MCLR"); KiCad's unnamed nets
+// ("Net-(R1-Pad2)") keep their name.
 func (nl *SchNetlist) netNames() map[string]string {
-	base := func(n string) string {
-		if strings.HasPrefix(n, "/") {
-			return n[strings.LastIndex(n, "/")+1:]
-		}
-		return n
-	}
-	count := map[string]int{}
+	ids := make([]string, 0, len(nl.Nets))
 	for _, n := range nl.Nets {
-		count[base(n.Name)]++
+		ids = append(ids, n.Name)
 	}
-	out := map[string]string{}
-	for _, n := range nl.Nets {
-		b := base(n.Name)
-		if count[b] == 1 && b != "" {
-			out[n.Name] = b
-		} else {
-			out[n.Name] = n.Name
-		}
-	}
-	return out
+	return netname.Display(ids)
 }
 
 // lcscKeys are field names that hold the LCSC C-number.
 var lcscKeys = []string{"LCSC", "LCSC Part", "LCSC Part #", "JLCPCB Part #", "Supplier Part"}
 
 // ToConnectivityDoc converts the netlist into the schematic connectivity
-// IR. Power symbols (#PWR, #FLG) are not components. Pins of unconnected
+// IR. Each net carries its display name (name) and its identity (fullName,
+// what the board carries). Components always carry a pins list (empty for
+// a pinless symbol). Power symbols (#PWR, #FLG) are not components. Pins of unconnected
 // nets ("unconnected-(…)") become connectionState "unconnected"; pins on a
 // no-connect flag are reported by KiCad as such single-node nets too.
 func (nl *SchNetlist) ToConnectivityDoc(projectID string) (*connectivity.Document, error) {
@@ -206,7 +231,7 @@ func (nl *SchNetlist) ToConnectivityDoc(projectID string) (*connectivity.Documen
 				break
 			}
 		}
-		comp := connectivity.Component{ID: "cmp-" + c.Ref, Ref: c.Ref, Device: dev, Footprint: c.Footprint, PageName: c.Sheet}
+		comp := connectivity.Component{ID: "cmp-" + c.Ref, Ref: c.Ref, Device: dev, Footprint: c.Footprint, PageName: c.Sheet, Pins: []connectivity.Pin{}}
 		pinIdx[c.Ref] = map[string]int{}
 		for _, p := range c.Pins {
 			if _, dup := pinIdx[c.Ref][p.Number]; dup {
@@ -241,7 +266,7 @@ func (nl *SchNetlist) ToConnectivityDoc(projectID string) (*connectivity.Documen
 		if len(real) == 0 {
 			continue
 		}
-		if strings.HasPrefix(n.Name, "unconnected-(") && len(real) == 1 {
+		if netname.IsUnconnected(n.Name) && len(real) == 1 {
 			p := pin(real[0].Ref, real[0].Pin, real[0].Function)
 			if strings.Contains(real[0].Type, "no_connect") {
 				p.NoConnected = true
@@ -262,7 +287,7 @@ func (nl *SchNetlist) ToConnectivityDoc(projectID string) (*connectivity.Documen
 		if !strings.HasPrefix(n.Name, "/") && !strings.HasPrefix(n.Name, "Net-(") {
 			scope = "global"
 		}
-		doc.Nets = append(doc.Nets, connectivity.Net{ID: id, Name: names[n.Name], Scope: scope, Role: role})
+		doc.Nets = append(doc.Nets, connectivity.Net{ID: id, Name: names[n.Name], FullName: n.Name, Scope: scope, Role: role})
 		for _, d := range real {
 			p := pin(d.Ref, d.Pin, d.Function)
 			if strings.Contains(d.Type, "no_connect") {
@@ -282,7 +307,8 @@ func isPowerName(n string) bool {
 	return strings.HasPrefix(u, "+") || strings.HasPrefix(u, "VCC") || strings.HasPrefix(u, "VDD") || strings.HasPrefix(u, "VBAT") || strings.HasPrefix(u, "VIN")
 }
 
-// PinNets maps "REF.PIN" → net name (KiCad name), components without '#'.
+// PinNets maps "REF.PIN" → net identity (KiCad's escaped full name, as on
+// the board), components without '#'.
 func (nl *SchNetlist) PinNets() map[string]string {
 	out := map[string]string{}
 	for _, n := range nl.Nets {

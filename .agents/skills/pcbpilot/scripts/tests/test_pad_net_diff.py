@@ -54,5 +54,124 @@ class PadNetDiffTest(unittest.TestCase):
         self.assertTrue(rep["ok"])
 
 
+# kicad netlist of a hierarchical design vs kicad snapshot of its board.
+HIER_SCH = {
+    "components": [
+        {"id": "c1", "ref": "U1", "pins": [{"number": "1"}, {"number": "2"}, {"number": "4", "connectionState": "unconnected"}]},
+        {"id": "c2", "ref": "R1", "pins": [{"number": "1"}, {"number": "2"}]},
+        {"id": "c3", "ref": "H1", "pins": None},  # older kicad netlist: pinless mounting hole
+    ],
+    "nets": [
+        {"id": "n1", "name": "VCC_PIC", "fullName": "/pic_sockets/VCC_PIC"},
+        {"id": "n2", "name": "VPP/MCLR", "fullName": "/VPP{slash}MCLR"},
+    ],
+    "connections": [
+        {"componentId": "c1", "pinNumber": "1", "netId": "n2"},
+        {"componentId": "c1", "pinNumber": "2", "netId": "n1"},
+        {"componentId": "c2", "pinNumber": "1", "netId": "n2"},
+        {"componentId": "c2", "pinNumber": "2", "netId": "n1"},
+    ],
+}
+HIER_PCB = {"components": [
+    {"designator": "U1", "pads": [{"padNumber": "1", "net": "/VPP{slash}MCLR"}, {"padNumber": "2", "net": "/pic_sockets/VCC_PIC"},
+                                  {"padNumber": "4", "net": "unconnected-(U1-S{slash}S-Pad4)"}]},
+    {"designator": "R1", "pads": [{"padNumber": "1", "net": "/VPP{slash}MCLR"}, {"padNumber": "2", "net": "/pic_sockets/VCC_PIC"}]},
+    {"designator": "H1", "pads": [{"padNumber": "", "net": ""}]},
+]}
+
+
+class HierarchicalNetIdentityTest(unittest.TestCase):
+    def test_full_names_match_snapshot(self):
+        rep = pnd.diff(pnd.schematic_map(HIER_SCH), pnd.pcb_map(HIER_PCB))
+        self.assertTrue(rep["ok"], rep)
+        self.assertEqual(rep["netMismatch"], [])
+
+    def test_display_names_resolve_without_full_name(self):
+        old = {**HIER_SCH, "nets": [{"id": n["id"], "name": n["name"]} for n in HIER_SCH["nets"]]}
+        rep = pnd.diff(pnd.schematic_map(old), pnd.pcb_map(HIER_PCB))
+        self.assertTrue(rep["ok"], rep)
+
+    def test_never_cut_at_label_slash(self):
+        cut = {**HIER_SCH, "nets": [{"id": "n1", "name": "VCC_PIC"}, {"id": "n2", "name": "MCLR"}]}
+        rep = pnd.diff(pnd.schematic_map(cut), pnd.pcb_map(HIER_PCB))
+        self.assertEqual(sorted(m["pad"] for m in rep["netMismatch"]), ["R1.1", "U1.1"])
+
+    def test_ambiguous_display_name_is_not_guessed(self):
+        pcb = {"components": [{"designator": "R1", "pads": [{"padNumber": "1", "net": "/a/SDA"}, {"padNumber": "2", "net": "/b/SDA"}]}]}
+        sch = {"components": [{"id": "c", "ref": "R1", "pins": [{"number": "1"}, {"number": "2"}]}],
+               "nets": [{"id": "n", "name": "SDA"}],
+               "connections": [{"componentId": "c", "pinNumber": "1", "netId": "n"}, {"componentId": "c", "pinNumber": "2", "netId": "n"}]}
+        rep = pnd.diff(pnd.schematic_map(sch), pnd.pcb_map(pcb))
+        self.assertEqual(len(rep["netMismatch"]), 2)
+
+
+    def test_hidden_short_legacy_names(self):
+        # Legacy connectivity: distinct schematic nets "VCC" and "/pwr/VCC";
+        # the board shorts them into one net /pwr/VCC. Never merged.
+        sch = {"components": [{"id": "c", "ref": "R1", "pins": [{"number": "1"}, {"number": "2"}]}],
+               "nets": [{"id": "a", "name": "VCC"}, {"id": "b", "name": "/pwr/VCC"}],
+               "connections": [{"componentId": "c", "pinNumber": "1", "netId": "a"},
+                               {"componentId": "c", "pinNumber": "2", "netId": "b"}]}
+        pcb = {"components": [{"designator": "R1", "pads": [{"padNumber": "1", "net": "/pwr/VCC"}, {"padNumber": "2", "net": "/pwr/VCC"}]}]}
+        rep = pnd.diff(pnd.schematic_map(sch), pnd.pcb_map(pcb))
+        self.assertFalse(rep["ok"], rep)
+        self.assertEqual(rep["netCollision"], [{"net": "/pwr/VCC", "schematic": ["/pwr/VCC", "VCC"]}])
+        self.assertEqual([m["pad"] for m in rep["netMismatch"]], ["R1.1"])
+
+
+    def test_hidden_short_same_name_two_nets_one_page(self):
+        sch = {"components": [{"id": "c", "ref": "R1", "pins": [{"number": "1"}, {"number": "2"}]}],
+               "nets": [{"id": "a", "name": "VCC"}, {"id": "b", "name": "VCC"}],
+               "connections": [{"componentId": "c", "pinNumber": "1", "netId": "a"},
+                               {"componentId": "c", "pinNumber": "2", "netId": "b"}]}
+        pcb = {"components": [{"designator": "R1", "pads": [{"padNumber": "1", "net": "VCC"}, {"padNumber": "2", "net": "VCC"}]}]}
+        rep = pnd.diff(pnd.schematic_map(sch), pnd.pcb_map(pcb))
+        self.assertFalse(rep["ok"], rep)
+        self.assertEqual(rep["netCollision"], [{"net": "VCC", "schematic": ["VCC (page 1 net a)", "VCC (page 1 net b)"]}])
+
+    def test_same_name_across_pages_is_one_net(self):
+        def page(ref, nid):
+            return {"components": [{"id": "c" + ref, "ref": ref, "pins": [{"number": "1"}]}],
+                    "nets": [{"id": nid, "name": "VCC"}],
+                    "connections": [{"componentId": "c" + ref, "pinNumber": "1", "netId": nid}]}
+        sch = {**pnd.schematic_map(page("R1", "p1n"), 0), **pnd.schematic_map(page("R2", "p2n"), 1)}
+        pcb = {"components": [{"designator": "R1", "pads": [{"padNumber": "1", "net": "VCC"}]},
+                              {"designator": "R2", "pads": [{"padNumber": "1", "net": "VCC"}]}]}
+        rep = pnd.diff(sch, pnd.pcb_map(pcb))
+        self.assertTrue(rep["ok"], rep)
+        self.assertEqual(rep["netCollision"], [])
+
+    def test_kicad_names_are_case_sensitive(self):
+        sch = {"components": [{"id": "c", "ref": "R1", "pins": [{"number": "1"}]}],
+               "nets": [{"id": "a", "name": "sda", "fullName": "/io/sda"}],
+               "connections": [{"componentId": "c", "pinNumber": "1", "netId": "a"}]}
+        pcb = {"components": [{"designator": "R1", "pads": [{"padNumber": "1", "net": "/io/SDA"}]}]}
+        rep = pnd.diff(pnd.schematic_map(sch), pnd.pcb_map(pcb))
+        self.assertFalse(rep["ok"], rep)
+        self.assertEqual(rep["netCaseOnly"], [])
+        self.assertEqual(rep["netMismatch"][0]["pad"], "R1.1")
+
+
+    def test_legacy_kicad_doc_and_board_are_case_sensitive(self):
+        # kicad netlist output from before fullName: documentId kicad-sch.
+        legacy = {"documentId": "kicad-sch",
+                  "components": [{"id": "c", "ref": "R1", "pins": [{"number": "1"}]}],
+                  "nets": [{"id": "a", "name": "sda"}],
+                  "connections": [{"componentId": "c", "pinNumber": "1", "netId": "a"}]}
+        pcb = {"components": [{"designator": "R1", "pads": [{"padNumber": "1", "net": "SDA"}]}]}
+        rep = pnd.diff(pnd.schematic_map(legacy), pnd.pcb_map(pcb))
+        self.assertFalse(rep["ok"], rep)
+        self.assertEqual(rep["netCaseOnly"], [])
+        # An EasyEDA doc (no documentId kicad-sch) still folds case ...
+        easy = {**legacy, "documentId": "page1"}
+        self.assertTrue(pnd.diff(pnd.schematic_map(easy), pnd.pcb_map(pcb))["ok"])
+        # ... unless the board is a kicad snapshot or --strict-case is set.
+        kboard = {**pcb, "source": "kicad"}
+        self.assertTrue(pnd.board_is_kicad(kboard))
+        rep = pnd.diff(pnd.schematic_map(easy), pnd.pcb_map(kboard), strict_case=pnd.board_is_kicad(kboard))
+        self.assertFalse(rep["ok"], rep)
+        self.assertEqual(rep["netMismatch"][0]["pad"], "R1.1")
+
+
 if __name__ == "__main__":
     unittest.main()

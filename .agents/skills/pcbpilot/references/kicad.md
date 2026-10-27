@@ -87,7 +87,24 @@ pcbpilot ──▶ KiCad 自带 Python + pcbnew（internal/kicad/bridge.py，go:
 与 `sch connectivity` 同形：components+pins、nets、connections），`intent derive --connectivity` / `sim power` /
 pad-net diff 直接读。单独挂在 KiCad `unconnected-(…)` 网上的脚不产生连接：带 no-connect 标记的记 `noConnected`，
 否则 `connectionState: "unconnected"`。`--values` 写 `{"parts":{ref:{value,mpn,lcsc}}}` 给 `intent derive --values`。
-从 KiCad 起步的设计由此得到与 EasyEDA 相同的意图 / 安全推导。
+从 KiCad 起步的设计由此得到与 EasyEDA 相同的意图 / 安全推导。每个器件都有 `pins` 列表（无引脚的安装孔为 `[]`）。
+
+**网络身份（唯一规则，`pkg/netname`）**：网的身份是 KiCad 自己的完整层次名，按 KiCad 转义写法——与 `.kicad_pcb`、
+`kicad snapshot` 完全相同：子图局部网 `/pic_sockets/VCC_PIC`，根图局部标签 `VPP/MCLR` 为 `/VPP{slash}MCLR`，
+全局/电源网 `GND`。`kicad netlist` 每个网写 `fullName`（身份，新增字段）和 `name`（仅显示名：去掉图纸路径、
+`{slash}` 还原为 `/`，在全设计唯一时才用短名，否则等于 fullName）。**绝不在标签内部的 `/` 处截断**（旧版把
+`/VPP/MCLR` 截成 `MCLR`）。`unconnected-(…)` 是"无网"，两侧比较都按无网处理。匹配方（pad-net-diff、
+`signoff` 的 continuity/trace、`sim post-layout` 的脚↔焊盘检查与铜网查找、`kicad route` 的网络类、intent-widths）
+一律先用 `fullName`；只有 `name` 的旧文档 / intent / sim 用显示名解析到板上**唯一**对应的网，同名多图纸时不猜：
+sim 判 `sim-board-mismatch`、intent 报错、signoff-trace 判"ambiguous"失败（不再退回到板上去找）。两个名字解析到同一块板网
+（如 `VCC_PIC` 与 `/pic_sockets/VCC_PIC` 同时出现）一律拒绝，绝不合并。kicad-cli XML 不转义 `/`，`/pic_sockets/VCC_PIC`
+可能是子图标签 `VCC_PIC`，也可能是根图标签 `pic_sockets/VCC_PIC`：读法只按标签证据定（各图纸文件里的标签/层次标签/图纸引脚
+恰好只有一种读法存在）；引脚在哪张图不算证据（网经层次端口跨图）。无证据、多种读法都有标签、或两个网读成同一身份时
+`kicad netlist` 直接报 `ErrNetAmbiguous`（附修法：改标签名）。旧连接文档（无 fullName）按每个原理图网（文档 + 网 id）解析；
+多页文档按网名合并（与 sim power / intent derive 同规则：不同页同名 = 同一网，但同一页上同名的多个网记录各自独立）。
+两个不同原理图网（同页两条 `VCC` 记录，或 `VCC` 与 `/pwr/VCC`）落到同一块板网时 pad-net-diff 报 `netCollision`、
+signoff-continuity 失败（板上短路），不合并。显示名 `name` 只在能唯一解析回本网时才缩短，绝不等于别的网的身份或显示名。
+pad-net-diff 的大小写宽容只用于 EasyEDA 名（无 fullName）；KiCad 网名区分大小写。
 
 ## 布线（`kicad route`）——与 `pcb auto route` + `pcb gate` 同序同算
 

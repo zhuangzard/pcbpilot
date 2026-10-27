@@ -150,3 +150,24 @@ func TestSegmentViaOK(t *testing.T) {
 		t.Fatal("a via the sim does not know must not pass")
 	}
 }
+
+// KiCad net names are case-sensitive: /io/SDA (with a rule) and /io/sda
+// (without) are two nets, so only /io/SDA's thin track violates. EasyEDA
+// folds case (it may upper-case PCB net names): both match the rule.
+func TestCheckIntentWidthsCaseByBackend(t *testing.T) {
+	reqs := map[string]specctra.NetRequirement{"/io/SDA": {OuterMil: 10, InnerMil: 10, MinMil: 8}}
+	tracks := []specctra.Track{
+		{ID: "upper", Net: "/io/SDA", Layer: 1, X1: 0, X2: 1000, Width: 6},
+		{ID: "lower", Net: "/io/sda", Layer: 1, X1: 0, Y1: 500, X2: 1000, Y2: 500, Width: 6},
+	}
+	kicad := &boardSnapshot{Source: "kicad"}
+	if !kicad.kicadNames() || (&boardSnapshot{}).kicadNames() {
+		t.Fatal("kicadNames: a kicad snapshot (source kicad) only")
+	}
+	if vs := checkIntentWidthsKeyed(netCaseKey(kicad.kicadNames()), tracks, nil, reqs, nil); len(vs) != 1 || vs[0].ID != "upper" {
+		t.Errorf("KiCad: %+v, want only /io/SDA", vs)
+	}
+	if vs := checkIntentWidthsKeyed(netCaseKey(false), tracks, nil, reqs, nil); len(vs) != 2 {
+		t.Errorf("EasyEDA: %+v, want both (case folded)", vs)
+	}
+}
