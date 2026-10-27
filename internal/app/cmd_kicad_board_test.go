@@ -550,3 +550,21 @@ func TestKicadBoardReportIsNotTheSpec(t *testing.T) {
 		t.Errorf("spec overwritten or KiCad ran (%d)", f.calls)
 	}
 }
+
+func TestKicadBoardSameNetHolesRefusedUnverified(t *testing.T) {
+	_, pcb := boardFixture(t)
+	orig, _ := os.ReadFile(pcb)
+	spec := &kicad.HolesSpec{Holes: []kicad.HoleSpec{{X: 10, Y: 10, Drill: 1, Pad: 4, Type: "pth", Net: "GND"},
+		{X: 11.5, Y: 10, Drill: 1, Pad: 4, Type: "pth", Net: "GND"}}}
+	for _, o := range []kicadBoardOpts{{pcb: pcb, inPlace: true}, {pcb: pcb, inPlace: true, noDRC: true, forceUnverified: true}} {
+		f := &fakeBoardTools{}
+		rep := &kicadBoardReport{}
+		runKicadBoard(rep, "holes", spec, o, f)
+		if rep.exit != 2 || f.calls != 0 || len(rep.Written) != 0 || len(rep.Issues) == 0 || rep.Issues[0].Code != kicad.ErrBoardOverlap {
+			t.Errorf("%+v: exit %d calls %d %v", o, rep.exit, f.calls, issueCodes(rep))
+		}
+	}
+	if b, _ := os.ReadFile(pcb); !bytes.Equal(b, orig) {
+		t.Error("board written")
+	}
+}

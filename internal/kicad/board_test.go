@@ -450,3 +450,15 @@ func TestStackupRowsCarryColors(t *testing.T) {
 		}
 	}
 }
+
+func TestHolesSameNetDrillVsRing(t *testing.T) {
+	gnd := func(x float64) HoleSpec { return HoleSpec{X: x, Drill: 1, Pad: 4, Type: "pth", Net: "GND"} }
+	// 1.5 mm apart: each drill cuts the other's 4 mm ring.
+	if bad := (HolesSpec{Holes: []HoleSpec{gnd(0), gnd(1.5)}}).Validate(); !boardHasCode(bad, ErrBoardOverlap, "holes[1]") {
+		t.Errorf("same-net drill in the other ring accepted: %v", boardCodes(bad))
+	}
+	// 3 mm apart: rings overlap, drills clear of the other's copper.
+	if bad := (HolesSpec{Holes: []HoleSpec{gnd(0), gnd(3)}}).Validate(); len(bad) > 0 {
+		t.Errorf("same-net ring contact refused: %v", boardCodes(bad))
+	}
+}

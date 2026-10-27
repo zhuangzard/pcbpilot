@@ -971,10 +971,11 @@ func (h HolesSpec) Validate() []BoardIssue {
 	for i, a := range h.Holes {
 		for j := 0; j < i; j++ {
 			b := h.Holes[j]
-			// Two PTHs on one net may share copper; only their drills clash.
+			// Two PTHs on one net may touch ring to ring, but neither drill
+			// may cut the other's copper.
 			reach := (a.outer() + b.outer()) / 2
 			if a.Type == "pth" && b.Type == "pth" && a.Net != "" && a.Net == b.Net {
-				reach = (a.Drill + b.Drill) / 2
+				reach = math.Max(a.Drill/2+b.outer()/2, b.Drill/2+a.outer()/2)
 			}
 			if math.Hypot(a.X-b.X, a.Y-b.Y) < reach {
 				bad = append(bad, bdIssue(ErrBoardOverlap, fmt.Sprintf("holes[%d]", i), "move the holes apart",
