@@ -486,6 +486,8 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 		if boardData, boardSnap, err = kfile.Read(o.pcb); err != nil {
 			return fileErr(err)
 		}
+	} else if boardSnap, err = kfile.Stat(o.pcb); err != nil { // --create: absent, and must stay so
+		return fileErr(err)
 	}
 	readOpt := func(p string) ([]byte, kfile.Snapshot, error) {
 		st, err := kfile.Stat(p)
@@ -580,7 +582,7 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 		}
 	}
 	targetUnchanged := func() error {
-		for _, sn := range []kfile.Snapshot{targetProSnap, targetDruSnap} {
+		for _, sn := range []kfile.Snapshot{targetSnap, targetProSnap, targetDruSnap} {
 			if sn.Path != "" {
 				if err := sn.Check(); err != nil {
 					return err

@@ -963,3 +963,85 @@ print("RESULT" + json.dumps({"refs": refs, "groups": groups}))
 		t.Fatalf("the saved board does not reload: %v", err)
 	}
 }
+
+// TestPcbSyncLiveSwapKeepsSpokeAngle: a pad's customised thermal spoke
+// angle is an override: a swap carries it to the same pad, and a
+// replacement without that pad refuses the swap.
+func TestPcbSyncLiveSwapKeepsSpokeAngle(t *testing.T) {
+	kt := pcbSyncLive(t)
+	_, sch, pcb := ecc83Synced(t)
+	pcbnewScript(t, kt, pcb, `fp = [f for f in b.GetFootprints() if f.GetReference() == "C2"][0]
+[p for p in fp.Pads() if p.GetNumber() == "2"][0].SetThermalSpokeAngleDegrees(30.0)
+pcbnew.SaveBoard(sys.argv[1], b)
+`)
+	readAngle := `fp = [f for f in b.GetFootprints() if f.GetReference() == "C2"][0]
+print("RESULT" + json.dumps({p.GetNumber(): p.GetThermalSpokeAngleDegrees() for p in fp.Pads()}))
+`
+	if got := scriptResult(t, pcbnewScript(t, kt, pcb, readAngle)); got["2"] != 30.0 {
+		t.Fatalf("fixture: %v", got)
+	}
+	editSch(t, sch, func(e *kicad.SchEditor) {
+		if err := e.SetField("C2", "Footprint", "Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P5.00mm"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	o := syncOpts(sch, pcb)
+	o.inPlace, o.noParity, o.forceUnverified = true, true, true
+	if rep, code := runSync(t, o); code != 5 || !rep.Committed || rep.Counts.Swap != 1 {
+		t.Fatalf("exit %d %+v %+v", code, rep.Ops, rep.Errors)
+	}
+	if got := scriptResult(t, pcbnewScript(t, kt, pcb, readAngle)); got["2"] != 30.0 || got["1"] != 45.0 {
+		t.Fatalf("spoke angles after the swap: %v", got)
+	}
+	editSch(t, sch, func(e *kicad.SchEditor) {
+		if err := e.SetField("C2", "Footprint", "TestPoint:TestPoint_THTPad_D1.5mm_Drill0.7mm"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	before := syncFileSHA(t, pcb)
+	rep, code := runSync(t, o)
+	if code != 1 || !strings.Contains(fmt.Sprint(rep.Errors), "ThermalSpokeAngleDegrees") || syncFileSHA(t, pcb) != before {
+		t.Fatalf("a swap dropping the angle must be refused: exit %d %+v", code, rep.Errors)
+	}
+}
+
+// TestPcbSyncLiveRenameMovesCopperShapes: a renamed net takes its copper
+// drawings (board shapes carrying the net) along, like tracks and zones.
+func TestPcbSyncLiveRenameMovesCopperShapes(t *testing.T) {
+	kt := pcbSyncLive(t)
+	_, sch, pcb := ecc83Synced(t)
+	pcbnewScript(t, kt, pcb, `n = b.FindNet("Net-(U1A-K)")
+s = pcbnew.PCB_SHAPE(b)
+s.SetShape(pcbnew.SHAPE_T_SEGMENT)
+s.SetStart(pcbnew.VECTOR2I(150000000, 120000000))
+s.SetEnd(pcbnew.VECTOR2I(155000000, 120000000))
+s.SetWidth(500000)
+s.SetLayer(pcbnew.B_Cu)
+s.SetNet(n)
+b.Add(s)
+pcbnew.SaveBoard(sys.argv[1], b)
+`)
+	readShapes := `print("RESULT" + json.dumps({"nets": sorted(d.GetNetname() for d in b.GetDrawings() if d.GetLayer() == pcbnew.B_Cu)}))
+`
+	if got := scriptResult(t, pcbnewScript(t, kt, pcb, readShapes)); fmt.Sprint(got["nets"]) != "[Net-(U1A-K)]" {
+		t.Fatalf("fixture: %v", got)
+	}
+	editSch(t, sch, func(e *kicad.SchEditor) {
+		pins, err := e.SymbolPinPositions("C2")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := e.AddLabel(kicad.LabelLocal, "CATHODE", pins["2"], 0, ""); err != nil {
+			t.Fatal(err)
+		}
+	})
+	o := syncOpts(sch, pcb)
+	o.inPlace = true
+	rep, code := runSync(t, o)
+	if code != 0 || rep.Counts.RenameNet != 1 {
+		t.Fatalf("exit %d %+v %+v %+v", code, rep.Counts, rep.Gates, rep.Errors)
+	}
+	if got := scriptResult(t, pcbnewScript(t, kt, pcb, readShapes)); fmt.Sprint(got["nets"]) != "[/CATHODE]" {
+		t.Fatalf("the copper shape stayed on the old net: %v", got)
+	}
+}

@@ -1526,7 +1526,7 @@ def sync_read(board):
     nets = {}
 
     def net(name):
-        return nets.setdefault(name, {"name": name, "pads": 0, "tracks": 0, "vias": 0, "zones": 0})
+        return nets.setdefault(name, {"name": name, "pads": 0, "tracks": 0, "vias": 0, "zones": 0, "shapes": 0})
 
     for name in board.GetNetsByName().keys():
         if str(name):
@@ -1540,6 +1540,8 @@ def sync_read(board):
     for z in board.Zones():
         if z.GetNetname() and not z.GetIsRuleArea():
             net(z.GetNetname())["zones"] += 1
+    for d in net_shapes(board):
+        net(d.GetNetname())["shapes"] += 1
     return {"ok": True, "error": "", "kicadVersion": pcbnew.Version(), "units": "mm",
             "footprints": fps, "nets": [nets[k] for k in sorted(nets)], "outline": outline_box(board)}
 
@@ -1806,9 +1808,32 @@ def overridden(v):
     return v is not None and v != pcbnew.ZONE_CONNECTION_INHERITED
 
 
+def default_spoke_angle(pad):
+    """KiCad's thermal spoke angle for a fresh pad of this shape: 45° for
+    round and oval pads, 90° for the rest (10.0.6 libraries)."""
+    return 45.0 if pad.GetShape(pcbnew.F_Cu) in (pcbnew.PAD_SHAPE_CIRCLE, pcbnew.PAD_SHAPE_OVAL) else 90.0
+
+
 def pad_overrides(pad):
-    """{name: value} of the pad's local overrides."""
-    return {n: getattr(pad, "Get" + n)() for n in PAD_OVERRIDES if overridden(getattr(pad, "Get" + n)())}
+    """{name: value} of the pad's local overrides, a customised thermal
+    spoke angle included."""
+    out = {n: getattr(pad, "Get" + n)() for n in PAD_OVERRIDES if overridden(getattr(pad, "Get" + n)())}
+    a = round(pad.GetThermalSpokeAngleDegrees(), 6)
+    if abs(a - default_spoke_angle(pad)) > 1e-6:
+        out["ThermalSpokeAngleDegrees"] = a
+    return out
+
+
+def net_shapes(board):
+    """Board drawings that carry a net (copper shapes)."""
+    out = []
+    for d in board.GetDrawings():
+        try:
+            if d.GetNetCode() > 0:
+                out.append(d)
+        except AttributeError:
+            pass
+    return out
 
 
 def check_fp_sha(lib_dir, name, want):
@@ -1920,7 +1945,7 @@ def sync_apply(pcb, plan_path, out):
             new = pcbnew.NETINFO_ITEM(board, op["to"])
             board.Add(new)
             code = old.GetNetCode()
-            for it in list(board.GetPads()) + list(board.GetTracks()) + list(board.Zones()):
+            for it in list(board.GetPads()) + list(board.GetTracks()) + list(board.Zones()) + net_shapes(board):
                 if it.GetNetCode() == code:
                     it.SetNet(new)
             detach(board, old)

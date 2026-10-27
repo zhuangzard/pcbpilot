@@ -950,3 +950,54 @@ func TestPcbSyncLibraryConfigRechecked(t *testing.T) {
 		}
 	})
 }
+
+// TestPcbSyncReadOnlyRechecksDestination: with --out, a read-only run also
+// answers for the destination board — an existing one edited, or an absent
+// one created, during planning is exit 4 with no plan written; under
+// --create the board that was absent must still be absent.
+func TestPcbSyncReadOnlyRechecksDestination(t *testing.T) {
+	type tc struct {
+		mode, setup string // setup: existing | absent | create
+	}
+	for _, c := range []tc{{"check", "existing"}, {"dry-run", "absent"}, {"plan-out", "existing"}, {"plan-out", "absent"}, {"dry-run", "create"}, {"plan-out", "create"}} {
+		t.Run(c.mode+"/"+c.setup, func(t *testing.T) {
+			dir, o, fake := fakeProject(t, fakeNetlistR2())
+			fake.value = "1k"
+			dest := filepath.Join(dir, "out", "o.kicad_pcb")
+			switch c.setup {
+			case "existing":
+				if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(dest, []byte("(kicad_pcb (old))\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				o.out = dest
+			case "absent":
+				o.out = dest
+			case "create":
+				dest = filepath.Join(dir, "fresh.kicad_pcb")
+				o.pcb, o.create = dest, true
+			}
+			switch c.mode {
+			case "check":
+				o.check = true
+			case "dry-run":
+				o.dryRun = true
+			default:
+				o.planOut = filepath.Join(dir, "plan.json")
+			}
+			fake.onFPInfo = func() {
+				_ = os.MkdirAll(filepath.Dir(dest), 0o755)
+				b, _ := os.ReadFile(dest)
+				if err := os.WriteFile(dest, append(b, []byte("(kicad_pcb (touched))\n")...), 0o644); err != nil {
+					t.Error(err)
+				}
+			}
+			rep, code, _ := runSyncCode(t, o)
+			if code != 4 || rep.OK || rep.Errors[len(rep.Errors)-1].Code != string(kfile.CodeChanged) || fileExists(filepath.Join(dir, "plan.json")) {
+				t.Fatalf("exit %d %+v", code, rep.Errors)
+			}
+		})
+	}
+}

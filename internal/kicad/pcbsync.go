@@ -97,9 +97,10 @@ type SyncBoardNet struct {
 	Tracks int    `json:"tracks"`
 	Vias   int    `json:"vias"`
 	Zones  int    `json:"zones"`
+	Shapes int    `json:"shapes,omitempty"` // board drawings on copper with the net
 }
 
-func (n SyncBoardNet) copper() bool { return n.Tracks+n.Vias+n.Zones > 0 }
+func (n SyncBoardNet) copper() bool { return n.Tracks+n.Vias+n.Zones+n.Shapes > 0 }
 
 // SyncBox is a rectangle in mm.
 type SyncBox struct {
