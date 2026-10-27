@@ -38,7 +38,7 @@
 - 这就是 `kicad fab --preflight --contract` 读的格式：未知键直接拒绝（`CONTRACT_INVALID`，拼错的 `limits` 不会被当成“没有限制”）；
   必填 `vendor`、`layers`（铜层数）和 `sources`（http(s) `url` + `YYYY-MM-DD` 的 `retrieved`）；每个会被检查的值（`layers`、每项 `limits`、
   `finish`、`assembly.sides`）都要有一条 `item` 指向它或父项（`limits`、`assembly`）的来源，`item` 拼错（不是契约字段）直接拒绝；
-  `limits` 缺哪项，对应的 `min-*` 检查就是 cannot-check；`finish` 缺省则不比，要写明确工艺（“HASL lead-free”，不是 “HASL”）；
+  `limits` 缺哪项，对应的 `min-*` 检查就是 cannot-check；`finish` 缺省则 `finish` 为 cannot-check（未验证，退出码 5），要写明确工艺（“HASL lead-free”，不是 “HASL”）；
   `assembly.sides` 缺省则 `assembly-sides` 为 cannot-check。
 - 数值只来自用户、厂商当期页面或报价单；每条 `sources` 写 URL 和获取日期。没有日期的旧数字（包括 Skill 参考里的）
   只当线索，下单当天要重新取。
@@ -70,7 +70,7 @@ KiCad DRC JSON 只列**违例**，不列生效的规则；干净的 DRC 只说�
 | Board Setup 约束 | `<board>.kicad_pro` → `board.design_settings.rules` | `min_track_width`、`min_clearance`、`min_through_hole_diameter`（`allow_microvias` 时加 `min_microvia_drill`）、`min_via_annular_width`；值为 0 记为“未设”；`allow_microvias` 等开关不是布尔值 → 孔径 cannot-check |
 | 网络类 | `.kicad_pro` → `net_settings.classes[].clearance` | 每个类的间距（只有 `Default` 算全局下限；其他类为 0 → cannot-check，缺省则继承 Default）；网络类线宽/过孔尺寸只是默认值，DRC 不按它报错，不计入 |
 | 自定义规则 | 同名 `<board>.kicad_dru`：`(constraint <track_width / clearance / hole_size / annular_width> (min …))` | 带条件/层的规则只拉低最小值，无条件的 error 规则才是全局下限；`(severity ignore)` / `(severity warning)`（不是强制下限）、只有 opt/max、数值读不懂 → 该项 cannot-check |
-| 局部覆盖 | `.kicad_pcb` 封装、焊盘的 `(clearance …)`，铺铜的 `(connect_pads (clearance …))` | 计入间距（不算全局下限）；值读不懂 → cannot-check |
+| 局部覆盖 | `.kicad_pcb` 封装、焊盘的 `(clearance …)`，铺铜的 `(connect_pads (clearance …))` | 计入间距（不算全局下限）；值读不懂 → cannot-check。KiCad 10 只在设了覆盖时写封装/焊盘的 `(clearance …)`（pcbnew 10.0.6 实测 `SetLocalClearance(0)` 写出 `(clearance 0)`），所以 0 就是 0 mm 覆盖 → 低于契约即 FAIL；铺铜总会写这一项，0 的含义证明不了 → cannot-check |
 
 判定：任一来源更小 → `FAIL`，`items` 列出出处（改板子规则后重跑 DRC，不改契约凑数）；有读不懂/证明不了的规则，或没有全局下限（只有“未设”、
 局部覆盖或带条件的规则）→ cannot-check（请用户在 Board Setup 填契约值）；否则最小值 ≥ 契约 → PASS。`info` 另列板上实测最细线宽、最小过孔/焊盘孔，方便和规则对照。契约四项以外的极限（孔到孔、铜到板边、

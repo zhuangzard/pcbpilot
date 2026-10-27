@@ -232,6 +232,19 @@ func TestKicadFabPreflightFake(t *testing.T) {
 	if _, err := os.Stat(outDir); !os.IsNotExist(err) {
 		t.Fatalf("--preflight created --out: %v", err)
 	}
+	// A contract that omits the finish: finish is cannot-check (exit 5 on
+	// its own), not an advisory skip.
+	noFinish := filepath.Join(t.TempDir(), "nofinish.json")
+	_ = os.WriteFile(noFinish, []byte(strings.Replace(strings.Replace(preflightContract, `"finish":"ENIG",`, "", 1),
+		`,
+             {"item":"finish","url":"https://example.com/finish","retrieved":"2026-10-27"}`, "", 1)), 0o644)
+	rep, _ = runPreflight(t, "--pcb", pcb, "--contract", noFinish, "--no-assembly")
+	if s := checkStatus(rep.Checks); s["contract"] != gate.Pass || s["finish"] != gate.CannotCheck {
+		t.Fatalf("contract without finish: %v", s)
+	}
+	if gate.Aggregate(gate.Result{Name: "finish", Status: gate.CannotCheck}).ExitCode() != 5 {
+		t.Fatal("cannot-check finish must exit 5")
+	}
 	// No contract: every contract check is cannot-check, so never a pass.
 	rep, _ = runPreflight(t, "--pcb", pcb, "--no-assembly")
 	if s := checkStatus(rep.Checks); s["contract"] != gate.CannotCheck || s["min-space"] != gate.CannotCheck || s["layer-count"] != gate.CannotCheck {
@@ -321,6 +334,10 @@ func TestPreflightCheckHelpers(t *testing.T) {
 		if c := finishCheck(board(tc.board), ct); c.Status != tc.want {
 			t.Errorf("board %q contract %q: %+v", tc.board, tc.contract, c)
 		}
+	}
+	ct.Finish = ""
+	if c := finishCheck(board("ENIG"), ct); c.Status != gate.CannotCheck || c.Advisory {
+		t.Errorf("contract without a finish: %+v", c)
 	}
 	ct.Finish = "ENIG"
 	if c := finishCheck([]byte(`(kicad_pcb)`), ct); c.Status != gate.CannotCheck {

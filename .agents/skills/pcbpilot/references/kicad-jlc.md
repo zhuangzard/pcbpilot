@@ -185,7 +185,7 @@ pcbpilot kicad fab --preflight --pcb b.kicad_pcb --sch b.kicad_sch --contract fa
 | `contract` | 契约文件合法（字段、日期、来源 URL）；没给 → cannot-check |
 | `layer-count` | 板的铜层数 = 契约 `layers` |
 | `min-track` / `min-space` / `min-drill` / `min-annular` | 有效规则允许的最小值 ≥ 契约 `limits`：Board Setup 约束（`.kicad_pro`）、网络类间距、`.kicad_dru` 自定义规则的 `(min …)`（mm/mil/in/um）、封装/焊盘/铺铜（`connect_pads (clearance …)`）的局部覆盖，取最小。任一来源低于契约 → fail；值类型不对（含 `allow_microvias` 不是 true/false）、非 Default 网络类间距为 0（继承/未设，有效值证明不了）、规则读不懂、`(severity ignore/warning)`、只有 opt/max 没有 min → cannot-check；只有局部覆盖或带条件/层的规则、没有全局下限（Board Setup、Default 网络类、无条件 error 规则）→ cannot-check。`info` 另列板上实测最细线宽、最小孔 |
-| `finish` | 板叠层 `copper_finish` 与契约 `finish` 归一成同一工艺才 pass（HASL 有铅 / 无铅、ENIG、ENEPIG、OSP、沉银、沉锡、硬金）；工艺不同 → fail；只写 “HASL”（有铅还是无铅？）、认不出的名字、或板叠层没写表面处理 → cannot-check |
+| `finish` | 板叠层 `copper_finish` 与契约 `finish` 归一成同一工艺才 pass（HASL 有铅 / 无铅、ENIG、ENEPIG、OSP、沉银、沉锡、硬金）；工艺不同 → fail；只写 “HASL”（有铅还是无铅？）、认不出的名字、板叠层没写表面处理、或契约没写 `finish` → cannot-check |
 | `assembly-sides` | CPL 实际出现的面（top/bottom/both）= 契约 `assembly.sides` |
 | `lcsc` | 每个贴装件有合法 C 号（与出图同一套 `MergeParts` / `CheckLCSC`），给出覆盖率 |
 | `bom-cpl` | 与出图相同的位号一致性（`CPL_NOT_IN_BOM` 等，临时目录里跑 kicad-cli pos） |

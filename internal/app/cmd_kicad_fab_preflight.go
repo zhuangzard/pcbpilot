@@ -277,8 +277,7 @@ func finishCheck(board []byte, ct *kicad.FabContract) drcCheck {
 	case ct == nil:
 		return cannotCheck(c.Name, "no valid contract to compare with")
 	case ct.Finish == "":
-		c.Status, c.Advisory, c.Detail = gate.Skip, true, "the contract names no finish"
-		return c
+		return cannotCheck(c.Name, "the contract names no finish (fix: add the ordered finish and its source to the contract)")
 	}
 	want, err := kicad.FinishProcess(ct.Finish)
 	if err != nil {

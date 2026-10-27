@@ -209,7 +209,23 @@ var drcEnvironmentRules = map[string]bool{"lib_footprint_issues": true, "lib_foo
 
 var reItemRef = regexp.MustCompile(`^(?:Footprint|Symbol) (\S+)`)
 
-var reNumber = regexp.MustCompile(`[-+]?[0-9]+(?:\.[0-9]+)?`)
+// reToken splits a parity summary into words; reMeasure is a word that
+// is a measurement or plain number (0.1000, 2, 12.5mm, 90deg), the only
+// thing normalised: identifiers with digits (MPN1, R12, 10k) stay.
+var (
+	reToken   = regexp.MustCompile(`[A-Za-z0-9_.+-]+`)
+	reMeasure = regexp.MustCompile(`^[-+]?[0-9]+(?:\.[0-9]+)?(?:mm|mil|mils|in|um|deg|%)?$`)
+)
+
+// normaliseMeasures replaces the measurement words of s with "#".
+func normaliseMeasures(s string) string {
+	return reToken.ReplaceAllStringFunc(s, func(w string) string {
+		if reMeasure.MatchString(w) {
+			return "#"
+		}
+		return w
+	})
+}
 
 // Attribute names the owners of v from the board index (nil: none resolve).
 func (ix *BoardIndex) Attribute(v Violation) DRCOwner {
@@ -293,7 +309,7 @@ func (ix *BoardIndex) Attribute(v Violation) DRCOwner {
 	// apart.
 	if o.Class == "schematic-parity" {
 		summary, _, _ := strings.Cut(v.Message, "; ")
-		o.Key += "|" + reNumber.ReplaceAllString(strings.TrimSpace(summary), "#")
+		o.Key += "|" + normaliseMeasures(strings.TrimSpace(summary))
 	}
 	return o
 }

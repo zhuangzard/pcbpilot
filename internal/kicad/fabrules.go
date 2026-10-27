@@ -363,7 +363,13 @@ func (r *EffectiveRules) addBoard(b []byte) error {
 		v, err := strconv.ParseFloat(n.arg(0), 64)
 		return v, err == nil
 	}
-	local := func(n *sx, where string) {
+	// KiCad 10 writes a footprint's or pad's (clearance …) only when the
+	// override is set (verified with pcbnew 10.0.6: SetLocalClearance(0)
+	// saves "(clearance 0)", an unset override writes nothing), so an
+	// explicit 0 is a 0 mm override. A zone always writes its
+	// connect_pads clearance; whether 0 there lowers anything below the
+	// netclass is not something pcbpilot can prove: Unknown.
+	local := func(n *sx, where string, zone bool) {
 		c := n.child("clearance")
 		if c == nil {
 			return
@@ -372,7 +378,9 @@ func (r *EffectiveRules) addBoard(b []byte) error {
 		switch {
 		case !ok || v < 0:
 			r.Space.Unknown = append(r.Space.Unknown, fmt.Sprintf("%s clearance override %q is not a length in mm", where, c.arg(0)))
-		case v > 0:
+		case v == 0 && zone:
+			r.Space.Unknown = append(r.Space.Unknown, where+" clearance 0: whether the zone then follows its netclass or allows 0 mm is unproven (fix: give the zone its clearance)")
+		default:
 			r.Space.add("local", where+" clearance override", v, false)
 		}
 	}
@@ -392,7 +400,7 @@ func (r *EffectiveRules) addBoard(b []byte) error {
 				if n := k.child("net_name"); n != nil {
 					net = n.arg(0)
 				}
-				local(cp, "zone ["+net+"]")
+				local(cp, "zone ["+net+"]", true)
 			}
 		case "footprint", "module":
 			ref := ""
@@ -401,13 +409,13 @@ func (r *EffectiveRules) addBoard(b []byte) error {
 					ref = p.arg(1)
 				}
 			}
-			local(k, "footprint "+ref)
+			local(k, "footprint "+ref, false)
 			for _, p := range k.children("pad") {
 				pad := p.arg(0)
 				if pad == "" {
 					pad = "(unnamed)"
 				}
-				local(p, fmt.Sprintf("pad %s of %s", pad, ref))
+				local(p, fmt.Sprintf("pad %s of %s", pad, ref), false)
 				if p.arg(1) == "thru_hole" || p.arg(1) == "np_thru_hole" {
 					if d := p.child("drill"); d != nil {
 						// (drill D) or (drill oval W H): the smallest dimension.

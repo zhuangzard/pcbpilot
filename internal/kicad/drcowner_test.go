@@ -273,6 +273,15 @@ func TestReadEffectiveRulesUnproven(t *testing.T) {
 			}},
 		{"invalid local override", okPro, "", strings.Replace(board, "(clearance 0.2)", "(clearance wide)", 1),
 			func(r *EffectiveRules) bool { return len(r.Space.Unknown) == 1 }},
+		// KiCad 10 writes (clearance 0) only for a set override: 0 mm.
+		{"zero footprint override", okPro, "", strings.Replace(board, "(clearance 0.2)", "(clearance 0)", 1),
+			func(r *EffectiveRules) bool { return near(r.Space.MinMm, 0) && len(r.Space.Unknown) == 0 }},
+		{"zero pad override", okPro, "", strings.Replace(board, "(clearance 0.1)", "(clearance 0)", 1),
+			func(r *EffectiveRules) bool { return near(r.Space.MinMm, 0) }},
+		{"zero zone clearance", okPro, "", strings.Replace(board, "(connect_pads (clearance 0.5))", "(connect_pads (clearance 0))", 1),
+			func(r *EffectiveRules) bool {
+				return len(r.Space.Unknown) == 1 && strings.Contains(r.Space.Unknown[0], "zone")
+			}},
 		{"error severity unconditional rule covers", `{}`, "(version 1)\n(rule e (severity error) (constraint track_width (min 0.15mm)))\n", "",
 			func(r *EffectiveRules) bool { return r.Track.Covered() && len(r.Track.Unknown) == 0 }},
 	}
@@ -559,8 +568,19 @@ func TestDiffDRCParityDiscriminator(t *testing.T) {
 	if d := DiffDRC(base, field("Datasheet field 'a.pdf' doesn't match symbol 'b.pdf'"), 0.5); len(d.New) != 1 || len(d.Resolved) != 1 {
 		t.Fatalf("another field on the same footprint: %+v", d)
 	}
-	if d := DiffDRC(base, field("Value field '22k' doesn't match symbol '4k7'"), 0.5); d.Matched != 1 {
-		t.Fatalf("same field, other numbers: %+v", d)
+	// Values are identifiers, kept verbatim: 22k is not 10k.
+	if d := DiffDRC(base, field("Value field '22k' doesn't match symbol '4k7'"), 0.5); len(d.New) != 1 {
+		t.Fatalf("other value: %+v", d)
+	}
+	// Field names with digits stay apart: MPN1 resolved, MPN2 new.
+	mpn := func(f string) []OwnedViolation { return field(f + " field 'X' doesn't match symbol 'Y'") }
+	if d := DiffDRC(mpn("MPN1"), mpn("MPN2"), 0.5); len(d.New) != 1 || len(d.Resolved) != 1 {
+		t.Fatalf("MPN1 -> MPN2: %+v", d)
+	}
+	// Measurements are normalised.
+	meas := func(v string) []OwnedViolation { return field("Pad count mismatch (actual " + v + " mm)") }
+	if d := DiffDRC(meas("0.1000"), meas("0.2500"), 0.5); d.Matched != 1 {
+		t.Fatalf("same problem, other measurement: %+v", d)
 	}
 }
 
