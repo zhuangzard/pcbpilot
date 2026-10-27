@@ -289,21 +289,29 @@ func TestKicadDRCGateProjectPolicy(t *testing.T) {
 		t.Fatalf("clean report: %+v", g)
 	}
 	applyDRCPolicy(&g, pol, rep.Excluded())
-	if g.Pass || len(g.Items) != 4 {
+	critical := []string{"EXCLUDED clearance|10000000", "IGNORED unconnected_items", "EXCLUDED unconnected_items|30000000",
+		"EXCLUDED extra_footprint|5000000",
+		// Board size rules and every other error-level rule too (fail closed).
+		"EXCLUDED courtyards_overlap|", "EXCLUDED via_diameter|", "EXCLUDED track_width|",
+		"IGNORED track_width", "IGNORED annular_width", "DOWNGRADED drill_out_of_range"}
+	if g.Pass || len(g.Items) != len(critical) {
 		t.Fatalf("critical exclusion / ignore passed: %+v", g)
 	}
 	joined := strings.Join(g.Items, "\n")
-	for _, want := range []string{"EXCLUDED clearance", "too close on purpose", "Track [GND]", "IGNORED unconnected_items",
-		"EXCLUDED unconnected_items|30000000", "joined by the pour", "EXCLUDED extra_footprint|5000000", "Footprint FID1"} {
+	for _, want := range append([]string{"too close on purpose", "Track [GND]", "joined by the pour", "Footprint FID1"}, critical...) {
 		if !strings.Contains(joined, want) {
 			t.Errorf("items lack %q:\n%s", want, joined)
 		}
 	}
 	info := strings.Join(g.Info, "\n")
-	for _, want := range []string{"EXCLUDED courtyards_overlap", "EXCLUDED via_dangling", "IGNORED missing_courtyard"} {
+	for _, want := range []string{"EXCLUDED via_dangling", "IGNORED missing_courtyard"} {
 		if !strings.Contains(info, want) {
 			t.Errorf("info lacks %q:\n%s", want, info)
 		}
+	}
+	// silk_overlap and missing_footprint at warning are KiCad defaults, not downgrades.
+	if strings.Contains(joined+info, "silk_overlap") || strings.Contains(joined+info, "DOWNGRADED missing_footprint") {
+		t.Errorf("warning-level rule reported:\n%s\n%s", joined, info)
 	}
 	// Some waivers are not enough; one per item is.
 	one := g
@@ -312,11 +320,12 @@ func TestKicadDRCGateProjectPolicy(t *testing.T) {
 		t.Fatal("half-waived policy passed")
 	}
 	both := g
-	applyWaivers(&both, []gateWaiver{{Gate: "kicad-drc", Match: "EXCLUDED clearance|10000000", Reason: "reviewed", By: "test"},
-		{Gate: "kicad-drc", Match: "IGNORED unconnected_items", Reason: "pours connect it", By: "test"},
-		{Gate: "kicad-drc", Match: "EXCLUDED unconnected_items|30000000", Reason: "pour", By: "test"},
-		{Gate: "kicad-drc", Match: "EXCLUDED extra_footprint|5000000", Reason: "fiducial", By: "test"}})
-	if !both.Pass || len(both.Waived) != 4 {
+	var all []gateWaiver
+	for _, m := range critical {
+		all = append(all, gateWaiver{Gate: "kicad-drc", Match: m, Reason: "reviewed", By: "test"})
+	}
+	applyWaivers(&both, all)
+	if !both.Pass || len(both.Waived) != len(critical) {
 		t.Fatalf("fully waived policy: %+v", both)
 	}
 	// No policy file: nothing added.

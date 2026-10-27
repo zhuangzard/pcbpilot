@@ -150,7 +150,7 @@ pcbpilot kicad route --pcb GasV5_A.kicad_pcb --intent intent.json --sim sim.json
 | gate | 判据 |
 |---|---|
 | `design-review` | 见第 0 步（design / layout 两条） |
-| `kicad-drc` | `kicad-cli pcb drc --severity-all`（含被排除项 `excluded: true`）：未排除的 error 级 violations + unconnected + parity 合计 0；逐条列出；`info` 标出输入板原本就有的错误（摆放/封装问题，非布线所致）。警告（丝印重叠等）只记在 `summary.drc.warnings`，不进门禁。**工程自己的静默**也进门禁：`.kicad_pro` 的 `drc_exclusions` 或 `rule_severities: ignore` 覆盖短路 / 间距（clearance、hole_clearance、copper_edge_clearance、creepage、shorting_items、tracks_crossing）/ unconnected_items / 原理图一致性（missing/extra/duplicate_footprints、net_conflict、footprint_symbol_mismatch）时列为 `EXCLUDED <key>` / `IGNORED <rule>` 并判失败，只有签名 waiver（`{"gate":"kicad-drc","match":"EXCLUDED clearance\|…"}`）能逐条放行；其余排除/忽略只进 `info`（`summary.drcPolicy`） |
+| `kicad-drc` | `kicad-cli pcb drc --severity-all`（含被排除项 `excluded: true`）：未排除的 error 级 violations + unconnected + parity 合计 0；逐条列出；`info` 标出输入板原本就有的错误（摆放/封装问题，非布线所致）。警告（丝印重叠等）只记在 `summary.drc.warnings`，不进门禁。**工程自己的静默**也进门禁：`.kicad_pro` 的 `drc_exclusions` 排除、`rule_severities` 设为 `ignore`、或把 KiCad 默认为 error 的规则降为 `warning`，只要涉及 error 级规则（KiCad 10 默认严重度；未知规则按 error；原理图一致性规则 missing/extra/duplicate_footprints、net_conflict、footprint_symbol_mismatch 也算）即列为 `EXCLUDED <key>` / `IGNORED <rule>` / `DOWNGRADED <rule>` 并判失败（含 via_diameter、drill_out_of_range、annular_width、track_width、courtyards_overlap 等尺寸/布局规则），只有逐条签名 waiver 能放行；丝印、文字、库等 warning 级规则的排除/忽略只进 `info`（`summary.drcPolicy`） |
 | `pad-net-diff` | 有 `--sch` 时：板上每个焊盘的网 vs 原理图网表 |
 | `intent-rules` | 每个意图网在布好的板上仍解析到它的 PP 网络类，类宽/间距不低于意图 |
 | `intent-widths` | `checkIntentWidths`；有 `--sim` 时按每段仿真电流（segment，`segmentWidthNeed`），否则按网 |

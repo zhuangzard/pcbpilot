@@ -577,3 +577,64 @@ func TestIntentClassesForbidNeckdown(t *testing.T) {
 		t.Fatalf("args %s", got)
 	}
 }
+
+// One executable across every location: a stale copy at the root and the
+// release subdirectory's, or name.exe beside name.com, is ambiguous; a hard
+// link seen twice is one file.
+func TestResolveFastrouteAmbiguousLocations(t *testing.T) {
+	exe := "fastroute"
+	if runtime.GOOS == "windows" {
+		exe = "fastroute.exe"
+	}
+	dir := t.TempDir()
+	child := filepath.Join(dir, "fastroute-0.1.14-windows-x64", exe)
+	writeExe(t, child)
+	if got, err := resolveFastroute(dir); err != nil || !sameFile(t, got, child) {
+		t.Fatalf("release subdir only: %q %v", got, err)
+	}
+	// The same file again under bin/ (hard link): still one candidate.
+	if err := os.MkdirAll(filepath.Join(dir, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(child, filepath.Join(dir, "bin", exe)); err == nil {
+		if got, err := resolveFastroute(dir); err != nil || !sameFile(t, got, child) {
+			t.Fatalf("hard link counted twice: %q %v", got, err)
+		}
+	}
+	writeExe(t, filepath.Join(dir, exe)) // a stale root copy
+	if _, err := resolveFastroute(dir); err == nil || !strings.Contains(err.Error(), "executables") {
+		t.Fatalf("root vs release subdir not ambiguous: %v", err)
+	}
+	if runtime.GOOS == "windows" {
+		d2 := t.TempDir()
+		writeExe(t, filepath.Join(d2, "fastroute.exe"))
+		writeExe(t, filepath.Join(d2, "fastroute.com"))
+		if _, err := resolveFastroute(d2); err == nil || !strings.Contains(err.Error(), "2 executables") {
+			t.Fatalf(".exe vs .com not ambiguous: %v", err)
+		}
+	}
+}
+
+// PATH (PATHEXT) finding only fastroute.bat / .cmd is refused like an
+// explicit wrapper, not handed to exec.
+func TestResolveFastroutePathWrapperRefused(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("PATHEXT wrappers are Windows-only")
+	}
+	fakeHome(t)
+	t.Setenv("FASTROUTE_BIN", "")
+	saved := fastrouteLookPath
+	fastrouteLookPath = exec.LookPath
+	defer func() { fastrouteLookPath = saved }()
+	for _, ext := range []string{".bat", ".cmd"} {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "fastroute"+ext), []byte("@echo off\r\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", dir)
+		t.Setenv("PATHEXT", ".COM;.EXE;.BAT;.CMD")
+		if _, err := resolveFastroute(""); err == nil || !strings.Contains(err.Error(), "not an executable") {
+			t.Fatalf("PATH %s accepted: %v", ext, err)
+		}
+	}
+}

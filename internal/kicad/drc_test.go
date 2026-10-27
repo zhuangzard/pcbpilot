@@ -184,12 +184,13 @@ func TestReadDRCPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(p.Exclusions) != 5 || p.Exclusions[1].Rule != "clearance" || p.Exclusions[1].Comment != "too close on purpose" ||
+	if len(p.Exclusions) != 7 || p.Exclusions[1].Rule != "clearance" || p.Exclusions[1].Comment != "too close on purpose" ||
 		p.Exclusions[2].Rule != "via_dangling" || p.Exclusions[2].Comment != "" {
 		t.Fatalf("exclusions: %+v", p.Exclusions)
 	}
-	if strings.Join(p.Ignored, ",") != "missing_courtyard,unconnected_items" {
-		t.Fatalf("ignored: %v", p.Ignored)
+	if strings.Join(p.Ignored, ",") != "annular_width,missing_courtyard,track_width,unconnected_items" ||
+		strings.Join(p.Downgraded, ",") != "drill_out_of_range,missing_footprint,silk_overlap" {
+		t.Fatalf("ignored %v downgraded %v", p.Ignored, p.Downgraded)
 	}
 	bad := filepath.Join(t.TempDir(), "bad.kicad_pro")
 	_ = os.WriteFile(bad, []byte(`{"board":{"design_settings":{"drc_exclusions":[7]}}}`), 0o644)

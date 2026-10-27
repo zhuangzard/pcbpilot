@@ -660,7 +660,9 @@ func resolveRouterBinary(name, explicit, env, flag string, look func(string) (st
 		}
 	}
 	if p, err := look(name); err == nil {
-		return filepath.Abs(p)
+		// PATH (and PATHEXT on Windows) can find a .bat / .cmd or a file
+		// without the execute bit: the same policy as an explicit path.
+		return installedBinary(name, p, flag)
 	}
 	return "", errors.New(hint)
 }
@@ -692,7 +694,9 @@ func installedBinary(name, p, flag string) (string, error) {
 			exe = append(exe, name+ext)
 		}
 	}
-	// Directories searched in order: p, p/bin, then each subdirectory.
+	// Every supported location (p, p/bin, each subdirectory) and every
+	// executable name: exactly one distinct file may match, so a stale copy
+	// at the root never silently wins over the release subdirectory.
 	dirs := []string{abs, filepath.Join(abs, "bin")}
 	if ents, err := os.ReadDir(abs); err == nil {
 		for _, e := range ents {
@@ -701,40 +705,41 @@ func installedBinary(name, p, flag string) (string, error) {
 			}
 		}
 	}
-	level := func(ds []string) []string {
-		var found []string
-		for _, e := range exe { // name.exe wins over name.com in the same place
-			for _, d := range ds {
-				ents, err := os.ReadDir(d)
-				if err != nil {
-					continue
-				}
-				for _, ent := range ents {
-					// Windows file names are case-insensitive (FASTROUTE.EXE).
-					same := ent.Name() == e || (runtime.GOOS == "windows" && strings.EqualFold(ent.Name(), e))
-					if !same || ent.IsDir() {
-						continue
-					}
-					m := filepath.Join(d, ent.Name())
-					if st, err := os.Stat(m); err == nil && !st.IsDir() && isExecutable(m, st) {
-						found = append(found, m)
-					}
-				}
+	var found []string
+	var seen []os.FileInfo
+	for _, d := range dirs {
+		ents, err := os.ReadDir(d)
+		if err != nil {
+			continue
+		}
+		for _, ent := range ents {
+			match := false
+			for _, e := range exe {
+				// Windows file names are case-insensitive (FASTROUTE.EXE).
+				match = match || ent.Name() == e || (runtime.GOOS == "windows" && strings.EqualFold(ent.Name(), e))
 			}
-			if len(found) > 0 {
-				break
+			if !match || ent.IsDir() {
+				continue
+			}
+			m := filepath.Join(d, ent.Name())
+			st, err := os.Stat(m)
+			if err != nil || st.IsDir() || !isExecutable(m, st) {
+				continue
+			}
+			dup := false
+			for _, o := range seen {
+				dup = dup || os.SameFile(o, st)
+			}
+			if !dup {
+				seen, found = append(seen, st), append(found, m)
 			}
 		}
-		return found
 	}
-	for _, ds := range [][]string{dirs[:1], dirs[1:2], dirs[2:]} {
-		found := level(ds)
-		if len(found) == 1 {
-			return found[0], nil
-		}
-		if len(found) > 1 {
-			return "", fmt.Errorf("%s: %s holds %d executables (%s); pass %s with the one to use", name, p, len(found), strings.Join(found, ", "), flag)
-		}
+	if len(found) == 1 {
+		return found[0], nil
+	}
+	if len(found) > 1 {
+		return "", fmt.Errorf("%s: %s holds %d executables (%s); remove the stale ones or pass %s with the one to use", name, p, len(found), strings.Join(found, ", "), flag)
 	}
 	return "", fmt.Errorf("%s: %s is a directory without a %s executable (looked in it, bin/ and its subdirectories); unpack the release there or pass %s with the executable", name, p, strings.Join(exe, " / "), flag)
 }

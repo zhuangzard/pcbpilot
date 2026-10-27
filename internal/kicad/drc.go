@@ -346,6 +346,8 @@ type DRCExclusion struct {
 type DRCPolicy struct {
 	Exclusions []DRCExclusion `json:"exclusions,omitempty"`
 	Ignored    []string       `json:"ignored,omitempty"`
+	// Downgraded: rules the project sets to "warning".
+	Downgraded []string `json:"downgraded,omitempty"`
 }
 
 // ReadDRCPolicy reads the DRC policy of a .kicad_pro. drc_exclusions is a
@@ -383,10 +385,14 @@ func ReadDRCPolicy(pro string) (*DRCPolicy, error) {
 		p.Exclusions = append(p.Exclusions, DRCExclusion{Rule: rule, Key: key, Comment: comment})
 	}
 	for rule, sev := range raw.Board.DesignSettings.Severities {
-		if strings.EqualFold(sev, "ignore") {
+		switch strings.ToLower(sev) {
+		case "ignore":
 			p.Ignored = append(p.Ignored, rule)
+		case "warning":
+			p.Downgraded = append(p.Downgraded, rule)
 		}
 	}
 	sort.Strings(p.Ignored)
+	sort.Strings(p.Downgraded)
 	return p, nil
 }
