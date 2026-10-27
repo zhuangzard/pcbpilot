@@ -660,38 +660,50 @@ func resolveRouterBinary(name, explicit, env, flag string, look func(string) (st
 		}
 	}
 	if p, err := look(name); err == nil {
-		return p, nil
+		return filepath.Abs(p)
 	}
 	return "", errors.New(hint)
 }
 
-// installedBinary is p itself when p is a file, else the one executable
-// named name (name.exe on Windows) in p, p/bin, or one directory level down
-// (p/<name>-<ver>-<os>-<arch>/, the unpacked release archive).
+// installedBinary is p itself when p is an executable file, else the one
+// executable named name in p, p/bin, or one directory level down
+// (p/<name>-<ver>-<os>-<arch>/, the unpacked release archive). The result
+// is always absolute: exec refuses a relative path found through the
+// current directory (exec.ErrDot) or looks a bare name up on PATH.
 func installedBinary(name, p, flag string) (string, error) {
-	st, err := os.Stat(p)
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", fmt.Errorf("%s binary %s: %w", name, p, err)
+	}
+	st, err := os.Stat(abs)
 	if err != nil {
 		return "", fmt.Errorf("%s binary %s: %w", name, p, err)
 	}
 	if !st.IsDir() {
-		return p, nil
+		if !isExecutable(abs, st) {
+			return "", fmt.Errorf("%s binary %s is not an executable (%s); pass %s with the %s executable", name, p, executableRule(), flag, name)
+		}
+		return abs, nil
 	}
 	exe := []string{name}
 	if runtime.GOOS == "windows" {
-		exe = []string{name + ".exe", name}
+		exe = nil
+		for _, ext := range winExecExts {
+			exe = append(exe, name+ext)
+		}
 	}
 	var found []string
 	for _, pat := range []string{"", "bin", "*"} {
 		for _, e := range exe {
-			ms, _ := filepath.Glob(filepath.Join(p, pat, e))
+			ms, _ := filepath.Glob(filepath.Join(abs, pat, e))
 			sort.Strings(ms)
 			for _, m := range ms {
-				if st, err := os.Stat(m); err == nil && !st.IsDir() && (runtime.GOOS == "windows" || st.Mode()&0o111 != 0) {
+				if st, err := os.Stat(m); err == nil && !st.IsDir() && isExecutable(m, st) {
 					found = append(found, m)
 				}
 			}
 			if len(found) > 0 {
-				break // name.exe wins over a same-directory name
+				break // name.exe wins over name.bat in the same place
 			}
 		}
 		if len(found) == 1 {
@@ -702,6 +714,30 @@ func installedBinary(name, p, flag string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("%s: %s is a directory without a %s executable (looked in it, bin/ and its subdirectories); unpack the release there or pass %s with the executable", name, p, strings.Join(exe, " / "), flag)
+}
+
+// winExecExts are the extensions Windows runs directly.
+var winExecExts = []string{".exe", ".com", ".bat", ".cmd"}
+
+// isExecutable: an x bit on Unix, an executable extension on Windows.
+func isExecutable(p string, st os.FileInfo) bool {
+	if runtime.GOOS != "windows" {
+		return st.Mode()&0o111 != 0
+	}
+	ext := strings.ToLower(filepath.Ext(p))
+	for _, e := range winExecExts {
+		if ext == e {
+			return true
+		}
+	}
+	return false
+}
+
+func executableRule() string {
+	if runtime.GOOS == "windows" {
+		return "Windows runs " + strings.Join(winExecExts, " / ") + " files"
+	}
+	return "no execute permission"
 }
 
 type fastrouteOpts struct {

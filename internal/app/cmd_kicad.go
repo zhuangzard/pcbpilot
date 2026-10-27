@@ -163,16 +163,26 @@ func mergeRules(def, explicit kicad.Rules) kicad.Rules {
 		ViaDrillMil: pick(def.ViaDrillMil, explicit.ViaDrillMil), EdgeMil: pick(def.EdgeMil, explicit.EdgeMil)}
 }
 
-// kicadRuleFloors are a project's own design-rule minimums (mil; 0 = none),
-// board.design_settings.rules of its .kicad_pro (where KiCad 6+ keeps them).
+// kicadRuleFloors are a project's own design-rule minimums and its Default
+// netclass via, in integer nm (0 = none), from the .kicad_pro
+// (board.design_settings.rules and net_settings.classes, where KiCad 6+
+// keeps them).
 type kicadRuleFloors struct {
-	ViaDiaMil     float64 `json:"minViaDiameterMil"`
-	ViaDrillMil   float64 `json:"minThroughHoleMil"`
-	ViaAnnularMil float64 `json:"minViaAnnularMil"`
-	TrackMil      float64 `json:"minTrackMil"`
+	ViaDia     int64 `json:"minViaDiameterNm"`
+	ViaDrill   int64 `json:"minThroughHoleNm"`
+	ViaAnnular int64 `json:"minViaAnnularNm"`
+	Track      int64 `json:"minTrackNm"`
+	// DefaultViaDia / DefaultViaDrill: the Default netclass via, the
+	// partner of a single --via-dia-mil or --via-drill-mil.
+	DefaultViaDia   int64 `json:"defaultViaDiameterNm"`
+	DefaultViaDrill int64 `json:"defaultViaDrillNm"`
 }
 
-// readKicadRuleFloors reads the minimums from a .kicad_pro.
+func nmOfMm(mm float64) int64   { return int64(math.Round(mm * 1e6)) }
+func nmOfMil(mil float64) int64 { return int64(math.Round(mil * 25400)) }
+func mmOfNm(v int64) string     { return strconv.FormatFloat(float64(v)/1e6, 'f', -1, 64) + " mm" }
+
+// readKicadRuleFloors reads the minimums and the Default via from a .kicad_pro.
 func readKicadRuleFloors(pro string) (kicadRuleFloors, error) {
 	data, err := os.ReadFile(pro)
 	if err != nil {
@@ -189,41 +199,62 @@ func readKicadRuleFloors(pro string) (kicadRuleFloors, error) {
 				} `json:"rules"`
 			} `json:"design_settings"`
 		} `json:"board"`
+		NetSettings struct {
+			Classes []struct {
+				Name        string  `json:"name"`
+				ViaDiameter float64 `json:"via_diameter"`
+				ViaDrill    float64 `json:"via_drill"`
+			} `json:"classes"`
+		} `json:"net_settings"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return kicadRuleFloors{}, fmt.Errorf("%s: %w", pro, err)
 	}
 	r := raw.Board.DesignSettings.Rules
-	mil := func(mm float64) float64 { return mm / 0.0254 }
-	return kicadRuleFloors{ViaDiaMil: mil(r.MinViaDiameter), ViaDrillMil: mil(r.MinThroughHoleDiameter),
-		ViaAnnularMil: mil(r.MinViaAnnularWidth), TrackMil: mil(r.MinTrackWidth)}, nil
+	f := kicadRuleFloors{ViaDia: nmOfMm(r.MinViaDiameter), ViaDrill: nmOfMm(r.MinThroughHoleDiameter),
+		ViaAnnular: nmOfMm(r.MinViaAnnularWidth), Track: nmOfMm(r.MinTrackWidth)}
+	for _, c := range raw.NetSettings.Classes {
+		if c.Name == "Default" {
+			f.DefaultViaDia, f.DefaultViaDrill = nmOfMm(c.ViaDiameter), nmOfMm(c.ViaDrill)
+		}
+	}
+	return f, nil
 }
 
 // checkRuleFloors refuses explicit Default-netclass values below the
 // board's own minimums: KiCad's DRC would reject every via / track the
 // router makes with them (interf_u: 0.3 mm drill vs min hole 0.5 mm gave
-// 16 drill_out_of_range + 16 via_diameter errors). --min-track-mil
-// replaces the board's minimum track width, so --track-mil is checked
-// against it when given.
+// 16 drill_out_of_range + 16 via_diameter errors). Each via flag is checked
+// with its partner as it will be written: the other flag, else the Default
+// netclass value, so a single flag cannot make a pair whose annular ring is
+// below the minimum. --min-track-mil replaces the board's minimum track
+// width, so --track-mil is checked against it when given. Integer nm.
 func checkRuleFloors(r kicad.Rules, f kicadRuleFloors) error {
-	const eps = 1e-3
-	mm := func(mil float64) string { return strconv.FormatFloat(math.Round(mil*25.4)/1000, 'f', -1, 64) + " mm" }
 	var bad []string
-	if r.ViaDiaMil > 0 && r.ViaDiaMil+eps < f.ViaDiaMil {
-		bad = append(bad, fmt.Sprintf("--via-dia-mil %g (%s) is below the board's min via diameter %.2f mil (%s)", r.ViaDiaMil, mm(r.ViaDiaMil), f.ViaDiaMil, mm(f.ViaDiaMil)))
+	dia, drill := f.DefaultViaDia, f.DefaultViaDrill
+	if r.ViaDiaMil > 0 {
+		dia = nmOfMil(r.ViaDiaMil)
+		if dia < f.ViaDia {
+			bad = append(bad, fmt.Sprintf("--via-dia-mil %g (%s) is below the board's min via diameter %s", r.ViaDiaMil, mmOfNm(dia), mmOfNm(f.ViaDia)))
+		}
 	}
-	if r.ViaDrillMil > 0 && r.ViaDrillMil+eps < f.ViaDrillMil {
-		bad = append(bad, fmt.Sprintf("--via-drill-mil %g (%s) is below the board's min through-hole %.2f mil (%s)", r.ViaDrillMil, mm(r.ViaDrillMil), f.ViaDrillMil, mm(f.ViaDrillMil)))
+	if r.ViaDrillMil > 0 {
+		drill = nmOfMil(r.ViaDrillMil)
+		if drill < f.ViaDrill {
+			bad = append(bad, fmt.Sprintf("--via-drill-mil %g (%s) is below the board's min through-hole %s", r.ViaDrillMil, mmOfNm(drill), mmOfNm(f.ViaDrill)))
+		}
 	}
-	if r.ViaDiaMil > 0 && r.ViaDrillMil > 0 && r.ViaDiaMil+eps < r.ViaDrillMil+2*f.ViaAnnularMil {
-		bad = append(bad, fmt.Sprintf("--via-dia-mil %g leaves an annular ring below the board's min %.2f mil around --via-drill-mil %g", r.ViaDiaMil, f.ViaAnnularMil, r.ViaDrillMil))
+	if (r.ViaDiaMil > 0 || r.ViaDrillMil > 0) && dia > 0 && drill > 0 && dia < drill+2*f.ViaAnnular {
+		src := map[bool]string{true: "flag", false: "Default netclass"}
+		bad = append(bad, fmt.Sprintf("via %s (%s) / drill %s (%s) leaves an annular ring of %s, below the board's min %s",
+			mmOfNm(dia), src[r.ViaDiaMil > 0], mmOfNm(drill), src[r.ViaDrillMil > 0], mmOfNm((dia-drill)/2), mmOfNm(f.ViaAnnular)))
 	}
-	floor := f.TrackMil
+	floor := f.Track
 	if r.MinTrackMil > 0 {
-		floor = r.MinTrackMil
+		floor = nmOfMil(r.MinTrackMil)
 	}
-	if r.TrackMil > 0 && r.TrackMil+eps < floor {
-		bad = append(bad, fmt.Sprintf("--track-mil %g is below the board's min track width %.2f mil", r.TrackMil, floor))
+	if r.TrackMil > 0 && nmOfMil(r.TrackMil) < floor {
+		bad = append(bad, fmt.Sprintf("--track-mil %g (%s) is below the board's min track width %s", r.TrackMil, mmOfNm(nmOfMil(r.TrackMil)), mmOfNm(floor)))
 	}
 	if len(bad) == 0 {
 		return nil

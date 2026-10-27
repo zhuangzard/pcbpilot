@@ -2,7 +2,6 @@ package app
 
 import (
 	"encoding/json"
-	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -184,7 +183,8 @@ func interfUPro() string {
 // the real demo file is read too when it is installed.
 func TestKicadRuleFloorsRefuseBelowBoardMinimum(t *testing.T) {
 	syn := filepath.Join(t.TempDir(), "b.kicad_pro")
-	if err := os.WriteFile(syn, []byte(`{"board":{"design_settings":{"rules":{"min_through_hole_diameter":0.5,"min_via_diameter":0.9,"min_via_annular_width":0.05,"min_track_width":0.2}}}}`), 0o644); err != nil {
+	if err := os.WriteFile(syn, []byte(`{"board":{"design_settings":{"rules":{"min_through_hole_diameter":0.5,"min_via_diameter":0.9,"min_via_annular_width":0.05,"min_track_width":0.2}}},
+	"net_settings":{"classes":[{"name":"Default","via_diameter":1.4,"via_drill":0.6},{"name":"Power","via_diameter":1.6,"via_drill":0.6}]}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	pros := []string{syn}
@@ -193,33 +193,45 @@ func TestKicadRuleFloorsRefuseBelowBoardMinimum(t *testing.T) {
 	} else {
 		t.Log("interf_u demo not installed: synthetic rules only")
 	}
+	refused := func(t *testing.T, r kicad.Rules, f kicadRuleFloors, subs ...string) {
+		t.Helper()
+		err := checkRuleFloors(r, f)
+		if err == nil {
+			t.Fatalf("%+v accepted", r)
+		}
+		for _, s := range append(subs, "RULE_BELOW_BOARD_MINIMUM", "fix:") {
+			if !strings.Contains(err.Error(), s) {
+				t.Fatalf("%+v: error lacks %q: %v", r, s, err)
+			}
+		}
+	}
 	for _, pro := range pros {
 		f, err := readKicadRuleFloors(pro)
 		if err != nil {
 			t.Fatal(err)
 		}
-		near := func(a, b float64) bool { return math.Abs(a-b) < 1e-3 }
-		if !near(f.ViaDiaMil, 0.9/0.0254) || !near(f.ViaDrillMil, 0.5/0.0254) || !near(f.ViaAnnularMil, 0.05/0.0254) || !near(f.TrackMil, 0.2/0.0254) {
-			t.Fatalf("%s: floors %+v", pro, f)
+		want := kicadRuleFloors{ViaDia: 900000, ViaDrill: 500000, ViaAnnular: 50000, Track: 200000, DefaultViaDia: 1400000, DefaultViaDrill: 600000}
+		if f != want {
+			t.Fatalf("%s: floors %+v, want %+v", pro, f, want)
 		}
-		// What `kicad route --via-drill-mil 11.81 --via-dia-mil 23.62` (0.3 / 0.6
-		// mm) used to write onto this board.
-		err = checkRuleFloors(kicad.Rules{ViaDiaMil: 23.62, ViaDrillMil: 11.81}, f)
-		if err == nil || !strings.Contains(err.Error(), "RULE_BELOW_BOARD_MINIMUM") || !strings.Contains(err.Error(), "--via-drill-mil") ||
-			!strings.Contains(err.Error(), "--via-dia-mil") || !strings.Contains(err.Error(), "0.5 mm") || !strings.Contains(err.Error(), "fix:") {
-			t.Fatalf("%s: 0.6/0.3 mm via accepted or unclear: %v", pro, err)
-		}
-		if err := checkRuleFloors(kicad.Rules{TrackMil: 6}, f); err == nil || !strings.Contains(err.Error(), "--track-mil") {
-			t.Fatalf("%s: 6 mil track below 0.2 mm accepted: %v", pro, err)
-		}
-		// Thick enough drill, diameter leaves < 0.05 mm ring.
-		if err := checkRuleFloors(kicad.Rules{ViaDiaMil: 35.5, ViaDrillMil: 35}, f); err == nil || !strings.Contains(err.Error(), "annular") {
-			t.Fatalf("%s: thin annulus accepted: %v", pro, err)
-		}
+		// What `kicad route --via-drill-mil 11.81 --via-dia-mil 23.62` (0.3 /
+		// 0.6 mm) used to write onto this board.
+		refused(t, kicad.Rules{ViaDiaMil: 23.62, ViaDrillMil: 11.81}, f, "--via-drill-mil", "--via-dia-mil", "0.5 mm")
+		// Each flag alone, partnered with the Default netclass value.
+		refused(t, kicad.Rules{ViaDrillMil: 11.81}, f, "--via-drill-mil")
+		refused(t, kicad.Rules{ViaDiaMil: 23.62}, f, "--via-dia-mil", "annular") // 0.6 mm round a 0.6 mm drill
+		refused(t, kicad.Rules{ViaDrillMil: 1.35 / 0.0254}, f, "annular")        // 1.35 mm drill in the Default 1.4 mm via
+		refused(t, kicad.Rules{ViaDiaMil: 35.5, ViaDrillMil: 35}, f, "annular")
+		refused(t, kicad.Rules{TrackMil: 6}, f, "--track-mil")
+		// 0.2 mm is 7.874 mil: 7.87 is below it in nm, not within a tolerance.
+		refused(t, kicad.Rules{TrackMil: 7.87}, f, "--track-mil")
 		for _, ok := range []kicad.Rules{
 			{},
-			{ViaDiaMil: 0.9 / 0.0254, ViaDrillMil: 0.5 / 0.0254}, // exactly the minimums (mm → mil rounding)
+			{ViaDiaMil: 0.9 / 0.0254, ViaDrillMil: 0.5 / 0.0254}, // exactly the minimums
+			{ViaDrillMil: 0.5 / 0.0254},                          // in the Default 1.4 mm via
+			{ViaDiaMil: 0.9 / 0.0254},                            // round the Default 0.6 mm drill: 0.15 mm ring
 			{ViaDiaMil: 55.12, ViaDrillMil: 23.62, TrackMil: 15.75},
+			{TrackMil: 0.2 / 0.0254},
 			{TrackMil: 6, MinTrackMil: 6}, // --min-track-mil replaces the board minimum
 		} {
 			if err := checkRuleFloors(ok, f); err != nil {

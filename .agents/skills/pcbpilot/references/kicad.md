@@ -93,13 +93,13 @@ pcbpilot kicad route --pcb GasV5_A.kicad_pcb --intent intent.json --sim sim.json
    铜到板边取 `pcbauto.EdgeFromIntent` 的 max(外层, 内层)（意图无 edge 时用默认 20/30 mil）；
    `--clearance-mil` 等显式参数优先。已有项目时，意图的板边距离仍是下限（只升不降）。随后跑一次**输入板 DRC** 作基线。
    已有项目时，显式 `--via-dia-mil` / `--via-drill-mil` / `--track-mil` 低于该项目自己的最小过孔直径 / 最小孔径 / 最小环宽 /
-   最小线宽即**在启动阶段拒绝**（`RULE_BELOW_BOARD_MINIMUM`，评审与输入 DRC 之前）；不给这些参数时用板自己的网络类尺寸。
+   最小线宽即**在启动阶段拒绝**（只给一个过孔参数时与 Default 网络类的另一半配对检查环宽）（`RULE_BELOW_BOARD_MINIMUM`，评审与输入 DRC 之前）；不给这些参数时用板自己的网络类尺寸。
 2. **布线前门禁：意图 → KiCad 网络类 + 自定义规则**（必须在导出 DSN 之前）：
    - 每网 `{outer, inner, min, clearance}` 按取值分组为 `PP<n>_W<线宽>` 网络类（精确网名 pattern，优先级最高；
      用户类更宽的值保留，记 `netclasses.kept`）。
      **过孔**取 max(意图 `netClasses` 的过孔、该网原网络类过孔、板最小孔径 / 最小过孔直径 / 孔径 + 2×最小环宽)，线宽、间距也不低于
      板最小值；KiCad 新建网络类自带 0.6/0.3 mm 过孔，旧版因此在 interf_u（最小孔 0.5、最小过孔 0.9 mm）上布出 16 个
-     drill_out_of_range + 16 个 via_diameter。已有网络类（含 Default）过孔低于板最小值时在工作副本上抬高，记 `netclasses.viaFloored`。
+     drill_out_of_range + 16 个 via_diameter。Default 过孔低于板最小值时在工作副本上抬高；其他网按**有效**过孔对（多类合成、部分类由 Default 补齐）判，低于最小值的加只带过孔的 `PPV_<径>_<孔>` 类；都记 `netclasses.viaFloored`。全程整数 nm 比较（0.2 mm 不会被 7.87 mil 的舍入削掉），内层线宽同样不低于板最小线宽。KiCad 9 以下没有无值网络类，`netclasses` 直接拒绝。
      `PPD_<域>` 类只有名字（不带尺寸），不覆盖网自身的线宽/间距/过孔。
    - **内层线宽**：KiCad 网络类只有一个线宽。取最接近的官方机制：DSN 里加 `(layer_rule In1.Cu … (rule (width W)))`
      让 fastroute 内层按内层宽走；`.kicad_dru` 写 `(layer inner)` 的 `track_width (min <widthMil.min>) (opt <inner>)`；

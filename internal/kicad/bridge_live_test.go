@@ -730,3 +730,65 @@ func TestBridgeNetclassViasMeetBoardMinimumsLive(t *testing.T) {
 		t.Errorf("snapshot rules via %.2f/%.2f below the board minimums", s.Rules.ViaDiameterMil, s.Rules.ViaDrillMil)
 	}
 }
+
+// A project whose Default via (0.6 / 0.3 mm) is itself below its minimums,
+// plus a class with a diameter only: every net outside the intent gets a
+// floored effective via (PPV_ class), so no DSN padstack stays below them.
+func TestBridgeNetclassFloorsLowDefaultLive(t *testing.T) {
+	tools := bridgeLiveTools(t)
+	dir := t.TempDir()
+	pcb := interfCopy(t, dir)
+	pro := strings.TrimSuffix(pcb, ".kicad_pcb") + ".kicad_pro"
+	raw, err := os.ReadFile(pro)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	ns := doc["net_settings"].(map[string]any)
+	classes := ns["classes"].([]any)
+	for _, c := range classes {
+		if m := c.(map[string]any); m["name"] == "Default" {
+			m["via_diameter"], m["via_drill"] = 0.6, 0.3
+		}
+	}
+	ns["classes"] = append(classes, map[string]any{"name": "DiaOnly", "via_diameter": 1.0, "priority": 1})
+	ns["netclass_patterns"] = append(anyList(ns["netclass_patterns"]), map[string]any{"netclass": "DiaOnly", "pattern": "/BIT5"})
+	b, _ := json.MarshalIndent(doc, "", "  ")
+	if err := os.WriteFile(pro, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "classed.kicad_pcb")
+	res, err := tools.NetclassesIso(pcb, map[string]NetRequirement{"/ACK": {OuterMil: 10, InnerMil: 10, ClearanceMil: 8}}, nil, nil, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.ViaFloored) == 0 {
+		t.Fatalf("no via floor reported: %+v", res)
+	}
+	dsn := filepath.Join(dir, "classed.dsn")
+	if _, err := tools.ExportDSN(out, dsn); err != nil {
+		t.Fatal(err)
+	}
+	text, _ := os.ReadFile(dsn)
+	ps := regexp.MustCompile(`Via\[\d+-\d+\]_(\d+):(\d+)_um`).FindAllStringSubmatch(string(text), -1)
+	seen := map[string]bool{}
+	for _, m := range ps {
+		d, _ := strconv.Atoi(m[1])
+		h, _ := strconv.Atoi(m[2])
+		seen[m[1]+":"+m[2]] = true
+		if d < 900 || h < 500 || d < h+100 {
+			t.Errorf("DSN via padstack %s below min via 900 um / hole 500 um / ring 50 um", m[0])
+		}
+	}
+	if !seen["1000:500"] {
+		t.Errorf("the diameter-only class should give 1000:500, padstacks %v (floored %v)", seen, res.ViaFloored)
+	}
+}
+
+func anyList(v any) []any {
+	l, _ := v.([]any)
+	return l
+}

@@ -645,14 +645,104 @@ def via_floor(ds, dia, drill):
     return dia, drill
 
 
+class UnsupportedKiCad(Exception):
+    pass
+
+
 def empty_netclass(name):
     """A NETCLASS with no values of its own: every field it does not set comes
     from the next matching class / Default in the composite, never from
-    KiCad's built-in defaults (KiCad < 9 has no such constructor)."""
+    KiCad's built-in defaults. KiCad < 9 has neither the constructor nor
+    optional netclass fields: a class there always carries every value, so
+    it would override the nets' own sizes. Refused, not approximated."""
     try:
         return pcbnew.NETCLASS(name, False)
     except TypeError:
-        return pcbnew.NETCLASS(name)
+        raise UnsupportedKiCad("this KiCad has no value-less netclasses (pcbnew.NETCLASS(name, False)); "
+                               "pcbpilot netclasses need KiCad 9 or newer")
+
+
+def effective_via(ns, net):
+    """(effective class, via diameter, via drill) in nm of net: the composite
+    of every class matching it, Default filling what none of them sets."""
+    eff = ns.GetEffectiveNetClass(net)
+    dn = ns.GetDefaultNetclass()
+    dia = eff.GetViaDiameter() if eff.HasViaDiameter() else dn.GetViaDiameter()
+    drill = eff.GetViaDrill() if eff.HasViaDrill() else dn.GetViaDrill()
+    return eff, int(dia), int(drill)
+
+
+def mm_of_nm(v):
+    return ("%.6f" % (v / 1e6)).rstrip("0").rstrip(".")
+
+
+def class_plan(ds, ns, names, reqs, missing, raised):
+    """The pcbpilot classes of a board, in integer nm: ({(track, inner, min,
+    clearance, intent outer, via diameter, via drill): [nets]}, via-floor
+    notes). Intent nets get max(intent, effective class, board minimums) on
+    every value. Every other net keeps its effective via unless that is
+    below the board minimums (a partial class, a low Default, several
+    matching classes): such nets get a via-only PPV_ class added to ns."""
+    tmin, cmin = int(ds.m_TrackMinWidth), int(ds.m_MinClearance)
+    floored = []
+    # Default always carries a via; the DSN declares its padstack (KiCad's
+    # kicad_default class) even with no net left in it, so it is floored in
+    # place rather than overridden.
+    dn = ns.GetDefaultNetclass()
+    dia, drill = int(dn.GetViaDiameter()), int(dn.GetViaDrill())
+    pair = via_floor(ds, dia, drill)
+    if pair != (dia, drill):
+        dn.SetViaDiameter(pair[0])
+        dn.SetViaDrill(pair[1])
+        ns.ClearAllCaches()
+        floored.append("Default: via %s/%s mil raised to %s/%s mil (board minimums)" % (mil(dia), mil(drill), mil(pair[0]), mil(pair[1])))
+    groups = {}
+    for net in sorted(reqs):
+        r = reqs[net]
+        if net not in names:
+            missing.append(net)
+            continue
+        eff, edia, edrill = effective_via(ns, net)
+        have_w = int(eff.GetTrackWidth()) if eff.HasTrackWidth() else 0
+        have_c = int(eff.GetClearance()) if eff.HasClearance() else 0
+        outer = nm(r.get("outerMil") or 0)
+        inner = nm(r.get("innerMil") or 0) or outer
+        mn = nm(r.get("minMil") or 0)
+        clr = nm(r.get("clearanceMil") or 0)
+        w = max(outer, have_w, tmin)
+        inner = max(inner, tmin)
+        if mn:
+            mn = max(mn, tmin)
+        c = max(clr, have_c, cmin)
+        vdia, vdrill = via_floor(ds, max(nm(r.get("viaDiaMil") or 0), edia), max(nm(r.get("viaDrillMil") or 0), edrill))
+        if have_w > outer:
+            raised.append("%s: width kept at %s mil (class %s; intent %s)" % (net, mil(have_w), eff.GetName(), mil(outer)))
+        if have_c > clr:
+            raised.append("%s: clearance kept at %s mil (class %s; intent %s)" % (net, mil(have_c), eff.GetName(), mil(clr)))
+        groups.setdefault((w, inner, mn, c, outer, vdia, vdrill), []).append(net)
+    low = {}
+    for net in sorted(set(names) - set(reqs)):
+        if not net:
+            continue
+        _, dia, drill = effective_via(ns, net)
+        pair = via_floor(ds, dia, drill)
+        if pair != (dia, drill):
+            low.setdefault(pair, {}).setdefault((dia, drill), []).append(net)
+    for i, (pair, src) in enumerate(sorted(low.items())):
+        name = "%sV_%d_%d" % (CLASS_PREFIX, pair[0] // 1000, pair[1] // 1000)
+        nc = empty_netclass(name)
+        nc.SetViaDiameter(pair[0])
+        nc.SetViaDrill(pair[1])
+        nc.SetPriority(-750000 + i)
+        nc.SetDescription("pcbpilot via floor (board minimums)")
+        ns.SetNetclass(name, nc)
+        for (dia, drill), nets in sorted(src.items()):
+            for net in nets:
+                ns.SetNetclassPatternAssignment(net, name)
+            floored.append("%d net(s) (%s): via %s/%s mil raised to %s/%s mil (board minimums), class %s" % (
+                len(nets), ", ".join(nets[:5]) + (", ..." if len(nets) > 5 else ""), mil(dia), mil(drill), mil(pair[0]), mil(pair[1]), name))
+    ns.ClearAllCaches()
+    return groups, floored
 
 
 def netclasses(pcb, reqs_path, out):
@@ -661,12 +751,16 @@ def netclasses(pcb, reqs_path, out):
     bad, reqs, isolation, edges = validate_netclasses(reqs)
     if bad:
         return reject("netclasses", bad)
+    try:
+        empty_netclass("pcbpilot-probe")
+    except UnsupportedKiCad as e:
+        return reject("netclasses", [str(e)])
     board = pcbnew.LoadBoard(pcb)
     ds = board.GetDesignSettings()
     ns = ds.m_NetSettings
 
     # Idempotent: drop classes and patterns of an earlier run.
-    old = [str(n) for n in ns.GetNetclasses().keys() if re.match(r"^%s(\d+_|D_)" % CLASS_PREFIX, str(n))]
+    old = [str(n) for n in ns.GetNetclasses().keys() if re.match(r"^%s(\d+_|D_|V_)" % CLASS_PREFIX, str(n))]
     if old:
         keep = {}
         for n, nc in ns.GetNetclasses().items():
@@ -684,68 +778,34 @@ def netclasses(pcb, reqs_path, out):
             ns.SetNetclassPatternAssignment(p, c)
         ns.ClearAllCaches()
 
-    # A class whose own via is below the board minimums would make the router
-    # place vias KiCad's DRC rejects: raise it on the work copy and say so.
-    floored = []
-    for cname, nc in list(ns.GetNetclasses().items()) + [("Default", ns.GetDefaultNetclass())]:
-        if not (nc.HasViaDiameter() and nc.HasViaDrill()):
-            continue
-        dia, drill = via_floor(ds, nc.GetViaDiameter(), nc.GetViaDrill())
-        if dia != nc.GetViaDiameter() or drill != nc.GetViaDrill():
-            floored.append("%s: via %s/%s mil raised to %s/%s mil (board minimums)" % (
-                cname, mil(nc.GetViaDiameter()), mil(nc.GetViaDrill()), mil(dia), mil(drill)))
-            nc.SetViaDiameter(dia)
-            nc.SetViaDrill(drill)
-    ns.ClearAllCaches()
-
     names = {str(n) for n in board.GetNetsByName().keys()}
     missing, groups, raised = [], {}, []
-    eps = 0.005
-    for net in sorted(reqs):
-        r = reqs[net]
-        if net not in names:
-            missing.append(net)
-            continue
-        eff = ns.GetEffectiveNetClass(net)
-        have_w = mil(eff.GetTrackWidth()) if eff.HasTrackWidth() else 0.0
-        have_c = mil(eff.GetClearance()) if eff.HasClearance() else 0.0
-        outer = float(r.get("outerMil") or 0)
-        inner = float(r.get("innerMil") or 0) or outer
-        mn = float(r.get("minMil") or 0)
-        clr = float(r.get("clearanceMil") or 0)
-        w = max(outer, have_w, mil(ds.m_TrackMinWidth))
-        c = max(clr, have_c, mil(ds.m_MinClearance))
-        # Via: the larger of the intent's and the net's current class, then
-        # the board minimums.
-        vdia, vdrill = via_floor(ds, max(nm(r.get("viaDiaMil") or 0), eff.GetViaDiameter() if eff.HasViaDiameter() else 0),
-                                 max(nm(r.get("viaDrillMil") or 0), eff.GetViaDrill() if eff.HasViaDrill() else 0))
-        if have_w > outer + eps:
-            raised.append("%s: width kept at %s mil (class %s; intent %s)" % (net, have_w, eff.GetName(), outer))
-        if have_c > clr + eps:
-            raised.append("%s: clearance kept at %s mil (class %s; intent %s)" % (net, have_c, eff.GetName(), clr))
-        key = (round(w, 2), round(inner, 2), round(mn, 2), round(c, 2), round(outer, 2), vdia, vdrill)
-        groups.setdefault(key, []).append(net)
+    # Integer nm from here on: the board floors apply after the mil -> nm
+    # conversion, so no rounding can undo them (0.2 mm is 7.874 mil; rounded
+    # to 7.87 mil it would be 199898 nm).
+    groups, floored = class_plan(ds, ns, names, reqs, missing, raised)
 
     classes = []
     for i, key in enumerate(sorted(groups)):
         w, inner, mn, c, outer, vdia, vdrill = key
-        name = "%s%d_W%s" % (CLASS_PREFIX, i + 1, fmt_mil(w))
+        name = "%s%d_W%s" % (CLASS_PREFIX, i + 1, fmt_mil(mil(w)))
         nc = empty_netclass(name)
-        nc.SetTrackWidth(int(round(w * NM_PER_MIL)))
+        nc.SetTrackWidth(w)
         if c > 0:
-            nc.SetClearance(int(round(c * NM_PER_MIL)))
+            nc.SetClearance(c)
         nc.SetViaDiameter(vdia)
         nc.SetViaDrill(vdrill)
         # Highest priority: our values win over any user class that also
         # matches the net (KiCad then builds a composite "PPn_...,User").
         nc.SetPriority(-1000000 + i)
-        nc.SetDescription("pcbpilot intent: outer %s / inner %s / min %s / clearance %s mil" % (outer, inner, mn, c))
+        nc.SetDescription("pcbpilot intent: outer %s / inner %s / min %s / clearance %s mil" % (mil(outer), mil(inner), mil(mn), mil(c)))
         ns.SetNetclass(name, nc)
         for net in groups[key]:
             ns.SetNetclassPatternAssignment(net, name)
-        classes.append({"name": name, "nets": groups[key], "trackWidthMil": w, "innerWidthMil": inner,
-                        "minMil": mn, "clearanceMil": c, "intentOuterMil": outer,
-                        "viaDiameterMil": mil(vdia), "viaDrillMil": mil(vdrill)})
+        classes.append({"name": name, "nets": groups[key], "trackWidthMil": mil(w), "innerWidthMil": mil(inner),
+                        "minMil": mil(mn), "clearanceMil": mil(c), "intentOuterMil": mil(outer),
+                        "viaDiameterMil": mil(vdia), "viaDrillMil": mil(vdrill),
+                        "nm": {"track": w, "inner": inner, "min": mn, "clearance": c, "viaDiameter": vdia, "viaDrill": vdrill}})
     # Insulation domains (intent pairs): one class per domain, below the
     # width classes in priority, so the composite keeps the PP widths.
     # Domain nets not on the board cannot carry the rule: reported in
@@ -780,7 +840,7 @@ def netclasses(pcb, reqs_path, out):
         for net in cl["nets"]:
             eff = ns.GetEffectiveNetClass(net)
             first = eff.GetName().split(",")[0]
-            if first != cl["name"] or abs(mil(eff.GetTrackWidth()) - cl["trackWidthMil"]) > eps:
+            if first != cl["name"] or int(eff.GetTrackWidth()) != cl["nm"]["track"]:
                 mismatched.append("%s: effective class %s width %s mil" % (net, eff.GetName(), mil(eff.GetTrackWidth())))
             cl.setdefault("effective", {})[net] = eff.GetName()
 
@@ -796,14 +856,14 @@ def netclasses(pcb, reqs_path, out):
     text = re.sub(re.escape(DRU_BEGIN) + r".*?" + re.escape(DRU_END) + r"\n?", "", text, flags=re.S)
     rules = []
     for cl in classes:
-        mm = lambda v: ("%.4f" % (v * 0.0254)).rstrip("0").rstrip(".")
-        if cl["minMil"] > 0:
+        q = cl.pop("nm")
+        if q["min"] > 0:
             rules.append('(rule "pcbpilot %s min"\n  (condition "A.hasNetclass(\'%s\')")\n  (constraint track_width (min %smm)))'
-                         % (cl["name"], cl["name"], mm(cl["minMil"])))
-        if cl["innerWidthMil"] > cl["trackWidthMil"] + eps:
-            lo = cl["minMil"] if cl["minMil"] > 0 else mil(board.GetDesignSettings().m_TrackMinWidth)
+                         % (cl["name"], cl["name"], mm_of_nm(q["min"])))
+        if q["inner"] > q["track"]:
+            lo = q["min"] if q["min"] > 0 else int(ds.m_TrackMinWidth)
             rules.append('(rule "pcbpilot %s inner"\n  (layer inner)\n  (condition "A.hasNetclass(\'%s\')")\n  (constraint track_width (min %smm) (opt %smm)))'
-                         % (cl["name"], cl["name"], mm(lo), mm(cl["innerWidthMil"])))
+                         % (cl["name"], cl["name"], mm_of_nm(lo), mm_of_nm(q["inner"])))
     for pr in isolation:
         da = "%sD_%s" % (CLASS_PREFIX, re.sub(r"[^A-Za-z0-9_]", "_", str(pr.get("aName") or pr.get("a"))))
         db = "%sD_%s" % (CLASS_PREFIX, re.sub(r"[^A-Za-z0-9_]", "_", str(pr.get("bName") or pr.get("b"))))

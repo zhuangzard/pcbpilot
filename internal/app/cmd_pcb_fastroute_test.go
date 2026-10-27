@@ -193,10 +193,69 @@ func TestResolveFastrouteEmptyInstallDir(t *testing.T) {
 		t.Fatalf("empty install dir: err %v", err)
 	}
 	// Two unpacked releases in one directory: ambiguous, never a guess.
-	writeExe(t, filepath.Join(ver, "a", "fastroute"))
-	writeExe(t, filepath.Join(ver, "b", "fastroute"))
+	exe := "fastroute"
+	if runtime.GOOS == "windows" {
+		exe = "fastroute.exe"
+	}
+	writeExe(t, filepath.Join(ver, "a", exe))
+	writeExe(t, filepath.Join(ver, "b", exe))
 	if _, err := resolveFastroute(""); err == nil || !strings.Contains(err.Error(), "2 executables") {
 		t.Fatalf("ambiguous install dir: err %v", err)
+	}
+}
+
+// A direct file must be executable: no x bit on Unix, no .exe/.com/.bat/.cmd
+// on Windows (a LICENSE or a .zip handed to --fastroute-bin) is refused.
+func TestResolveFastrouteRefusesNonExecutableFile(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "fastroute.zip")
+	if err := os.WriteFile(p, []byte("PK"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolveFastroute(p); err == nil || !strings.Contains(err.Error(), "not an executable") {
+		t.Fatalf("non-executable file: err %v", err)
+	}
+}
+
+// A relative --fastroute-bin resolves to an absolute path, so exec runs
+// that file: neither exec.ErrDot nor a same-named binary earlier on PATH.
+func TestResolveFastrouteRelativeExplicitIsAbsolute(t *testing.T) {
+	work, other := t.TempDir(), t.TempDir()
+	name, args := "fastroute", []string{}
+	if runtime.GOOS == "windows" {
+		// A real program to launch: a copy of cmd.exe named fastroute.exe.
+		sh := os.Getenv("ComSpec")
+		if sh == "" {
+			sh = filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe")
+		}
+		b, err := os.ReadFile(sh)
+		if err != nil {
+			t.Skipf("no cmd.exe to copy: %v", err)
+		}
+		name, args = "fastroute.exe", []string{"/c", "echo %CD%"}
+		for _, d := range []string{work, other} {
+			if err := os.WriteFile(filepath.Join(d, name), b, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+	} else {
+		for _, d := range []string{work, other} {
+			if err := os.WriteFile(filepath.Join(d, name), []byte("#!/bin/sh\necho "+d+"\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	t.Chdir(work)
+	t.Setenv("PATH", other) // a conflicting fastroute first on PATH
+	got, err := resolveFastroute(name)
+	want := filepath.Join(work, name)
+	if err != nil || !filepath.IsAbs(got) || !sameFile(t, got, want) {
+		t.Fatalf("relative explicit: got %q %v, want %q", got, err, want)
+	}
+	cmd := exec.Command(got, args...)
+	cmd.Dir = t.TempDir() // launching must not depend on the current directory
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("launch %s: %v\n%s", got, err, out)
 	}
 }
 
