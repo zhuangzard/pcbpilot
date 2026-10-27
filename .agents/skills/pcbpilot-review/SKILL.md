@@ -26,6 +26,8 @@ metadata:
    [review-workflow.md §1](../pcbpilot/references/review-workflow.md#1-开工前后端范围只读边界)；KiCad 每条命令写什么见
    [kicad-file-safety.md §2](../pcbpilot/references/kicad-file-safety.md#2-命令写入表)。最容易误跑的：`pcb gate`（会 save + reload）、
    `kicad sch-check --fix-pwr-flag`、`kicad sch-fit`、`kicad lcsc --set`、`kicad route` / `kicad place`、任何 `sch`/`pcb` 修改子命令。
+   EasyEDA 只取当前编辑器状态的只读快照，不 save / reload；它的限制与“需要已保存状态时怎么办”见
+   [evidence-and-verdicts.md §6.3](../pcbpilot/references/evidence-and-verdicts.md#63-只读任务的快照)。
 2. **KiCad 在副本上评审。** 实测 `kicad-cli` 跑 ERC 时会在工程目录新建 `<工程>.kicad_prl`，被中断的 `kicad-cli` 会留下
    `~<工程>.kicad_pro.lck`。把工程复制到工程外的临时目录再跑；所有输出（JSON、报告）写到另一个评审目录。
 3. **结论词汇与证据排序只用** [evidence-and-verdicts.md](../pcbpilot/references/evidence-and-verdicts.md)：缺证据、证据矛盾、
@@ -111,10 +113,10 @@ python <pcbpilot Skill 根>/scripts/pad-net-diff.py --sch out/conn.json --pcb ou
 
 | 现象 | 原因 | 怎么记、怎么补 |
 |---|---|---|
-| `sim post-layout` PASS，但 IR 表为空、热源 0.000 W | 电源来自连接器或器件无功耗模型（`intent.md` 里 `unknown-model`、`floating-domain`） | 空跑 → INCOMPLETE；补电源模型或 `intent derive --spec`（声明 rails）后重跑 |
+| `sim post-layout` PASS，但 IR 表为空、热源 0.000 W 或负载是默认 50 mA | 电源来自连接器或器件无功耗模型（`intent.md` 里 `unknown-model`、`floating-domain`） | 受影响的轨 INCOMPLETE（[§6.2](../pcbpilot/references/evidence-and-verdicts.md#62-仿真覆盖与模型假设)）；补电源模型或 `intent derive --spec`（声明 rails）后重跑 |
 | `pcb check --board` `passed:true`，`trackCount`/`padCount` 为 0 | 离线只跑 copper-to-edge、isolation、via-current，其余计数未运行 | 只对这三项记 PASS（看 `limitations[]`）；其余 DFM 项 EasyEDA 现场才有，KiCad 记 UNSUPPORTED |
 | `pad-net-diff.py` 抛 `TypeError: 'NoneType' object is not iterable` | `kicad netlist` 对无网连接的单脚件（安装孔 CONN_1）写 `"pins": null` | 连通性该项 INCOMPLETE；以 kicad-cli DRC 的 `schematic_parity` / `signoff-continuity` 为证据 |
-| `pad-net-diff` 上百条 netMismatch，`signoff-trace` 报 “not on the board” | 层次工程：网表 IR 去掉了 `/Sheet/` 前缀并把 `unconnected-(…)` 记为 NC，板快照保留 KiCad 原名 | 只差前缀/NC 写法的不算缺陷；去掉它们后剩下的才逐条报。`signoff-continuity` 按分区比较不受影响 |
+| `pad-net-diff` 上百条 netMismatch，`signoff-trace` 报 “not on the board” | 层次工程：网表 IR 去掉了 `/Sheet/` 前缀并把 `unconnected-(…)` 记为 NC，板快照保留 KiCad 原名 | 不靠去前缀消差异（`/A/BIAS` ≠ `/B/BIAS`）：按 [§6.1](../pcbpilot/references/evidence-and-verdicts.md#61-网络身份与对账差异) 逐网证明一一对应才记 INCOMPLETE，否则 FAIL；v0.10.2 前以 DRC `schematic_parity` 为证据 |
 | `kicad-cli` 长时间无输出 | 全局库表加载慢 | 中断后清副本里的残锁，设 `KICAD_CONFIG_HOME` 重跑一次，不循环重试 |
 | `pcb drc` 超时 | EasyEDA 窗口在后台 | BLOCKED；请用户把窗口切到前台后跑一次 |
 | `sch drc` 0 条但 `sch check` 有发现 | `sch drc` 可能只返回汇总 | 以 `sch check` 逐条为准，`sch drc` 不单独给 PASS |

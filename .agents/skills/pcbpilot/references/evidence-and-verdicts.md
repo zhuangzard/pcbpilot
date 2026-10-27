@@ -10,6 +10,7 @@
 3. [证据强弱排序与冲突规则](#3-证据强弱排序与冲突规则)
 4. [pcbpilot 输出 → 结论](#4-pcbpilot-输出--结论)
 5. [汇总与措辞](#5-汇总与措辞)
+6. [跨任务共用的判定规则](#6-跨任务共用的判定规则)
 
 ## 1. 两个维度：结论 vs 验证状态
 
@@ -92,7 +93,7 @@
 | `kicad sch-build` / `sch-edit` | `ok:false` + `error.code` | FAIL（未写任何文件）；`SHEET_NOT_LOADED` 是加载问题，修 spec 字符，不绕过 |
 | `kicad route` | `summary.json` 的 `gates[]` | 同 `pcb gate`；`summary.simKicadMismatch` 里的网 → INCOMPLETE（门禁本身仍失败）。v0.10.2 起读不了的 kicad-cli DRC 报告记为 “cannot check”，`kicad-drc` 门禁失败而不是当作干净 |
 | `kicad fab` | 缺 C 号即非零退出且不写文件 | FAIL；`--no-assembly` 时 BOM/CPL 项为 UNSUPPORTED（未出），不是 PASS |
-| `sim post-layout` | `verdict.status`: pass / warn / fail | 直接对应 |
+| `sim post-layout` | `verdict.status`: pass / warn / fail | 直接对应，但 PASS 还要满足第 6.2 节的覆盖条件；`sim-board-mismatch` 按第 6.1 节判 |
 | `review-panel` | 门禁 pass/fail；每条需求 met / not_met / cannot_judge | not_met 或 blocking → FAIL；评审者缺失/超时 → FAIL（工具即如此）；**门禁通过时 cannot_judge 的需求仍逐条记 INCOMPLETE** |
 | `signoff` | 8 个 `signoff-*` 子门禁 | 逐项对应；任一失败整体非零 |
 | `sch save` / `pcb save` / `doc reload` | `saved`、回读 | `saved:false` 或 reload 后读不到 → 涉及持久化的结论全部 INCOMPLETE |
@@ -107,3 +108,38 @@
   制造可行性 INCOMPLETE（未出 Gerber）”。禁止的说法：“基本通过”“应该没问题”“检查都过了”（不列范围）。
 - 评审流程见 [review-workflow.md](review-workflow.md)，DRC/ERC 分类与修法见 [drc-triage.md](drc-triage.md)，
   投板前逐项清单见 [prefab-checklist.md](prefab-checklist.md)。
+
+## 6. 跨任务共用的判定规则
+
+评审、仿真报告、制造验收、布线签核都按这里判；其他页面只引用本节，不另写一套。
+
+### 6.1 网络身份与对账差异
+
+- 网的身份是**实例限定**的完整名（层次路径 + 网名）：`/A/BIAS` 与 `/B/BIAS` 是两个网，`BIAS` 不能代表其中任何一个。
+  不得用去掉 `/Sheet/` 前缀、合并 `unconnected-(…)` 写法、大小写归一等办法把差异“消掉”。
+- 只有逐网证明**一一对应**（一边的每个网恰好对应另一边的一个网，且两边的 `REF:PAD` 集合完全相同）时，差异才算命名差异；
+  证明过程（映射表）写进报告。证明不了的差异不能当命名问题处理。
+- 判定优先级（`sim-board-mismatch`、`pad-net-diff` netMismatch、`signoff-trace` “not on the board” 同样适用）：
+  已证明只是工具路径归一造成的差异 → `INCOMPLETE`（写明是工具缺口，不是 PASS）；真实的或未查清的连接差异 → `FAIL`。
+- 现状：`kicad netlist` 去掉子页路径而 `kicad snapshot` 保留 KiCad 原名；工具统一网络身份的修复 v0.10.2 起提供。
+  在此之前，KiCad 原理图↔板一致性以 `kicad-cli pcb drc --schematic-parity` 输出的 `schematic_parity` 条目为证据。
+- `SIM/KICAD MISMATCH`（仿真判开路、KiCad DRC 判连通）是两份证据矛盾，按第 3 节记 `INCOMPLETE`，不属于本条。
+
+### 6.2 仿真覆盖与模型假设
+
+- `sim post-layout` / `signoff-ir` 的 PASS 只对**已建模**的部分成立：每个预期的电源轨、源和负载都在模型里，负载电流有数据手册
+  或用户给的证据。用默认每脚 50 mA（`assumed`）的负载、IR 表为空或缺某条轨 → 受影响的轨记 `INCOMPLETE`。
+- 板温 PASS 不等于器件热安全。没有逐器件功耗、热阻（θJA/θJB/θJC）与 Tj,max 时，器件热结论记 `INCOMPLETE`；
+  Tj 裕量与板温分开报告。
+- 假设沿链传递：基于 `assumed` / `approx` 模型的结论，在下游（intent 线宽、`signoff-ir`、设计报告、评审、下单结论）都要
+  点名该假设；下游门禁通过不会把假设变成证据。
+
+### 6.3 只读任务的快照
+
+- 评审、仿真、报告这类只读任务不 `sch save` / `pcb save`、不 `doc reload`、不跑 `pcb gate`（写入表见
+  [review-workflow.md §1](review-workflow.md#1-开工前后端范围只读边界)）。
+- EasyEDA 用当前编辑器状态的只读快照（`pcb dump --include-copper`、`sch connectivity`）。它可能含未保存的修改，也不证明
+  已持久化，所以结论最高 `offline-verified`，报告写明“基于未经 save/reload 的编辑器状态”。KiCad 用已保存且已在 KiCad 中
+  关闭的文件（复制到工程外再跑）。
+- 结论必须基于已保存状态（`live-verified`、持久化、下单前的最终证据）时，停下交回 `pcbpilot` 路由：经用户明确授权后
+  save → 有界 reload，再取新快照继续。

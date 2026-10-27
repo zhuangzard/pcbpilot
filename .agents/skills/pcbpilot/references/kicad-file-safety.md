@@ -5,14 +5,14 @@
 
 ## 目录
 
-1. [三条规则](#1-三条规则)
+1. [四条规则](#1-四条规则)
 2. [命令写入表](#2-命令写入表)
 3. [写前：关闭文件与锁文件](#3-写前关闭文件与锁文件)
 4. [pcbpilot 自己做的文本修改](#4-pcbpilot-自己做的文本修改)
 5. [检查点与回退](#5-检查点与回退)
 6. [制造输出目录与清单](#6-制造输出目录与清单)
 
-## 1. 三条规则
+## 1. 四条规则
 
 1. **不手工文本编辑 `.kicad_sch` / `.kicad_pcb` / `.kicad_pro` / `.kicad_sym` / `.kicad_mod`。** 读用
    `kicad sch-read`、`kicad netlist`、`kicad snapshot`；改原理图用 `kicad sch-build`（新建）/ `kicad sch-edit`（增量）；
@@ -20,6 +20,11 @@
    `UNSUPPORTED`，不用 sed、正则或手写 S-expression 代替。
 2. **写之前文件在 KiCad 中已关闭。** KiCad 不会察觉外部修改；打开状态下外部写入会在用户下次保存时被覆盖，或两份互相覆盖。
 3. **输入不动，输出进新目录。** 能写到 `--out` / `--out-dir` 的命令就写到工程之外的新目录；原地写入的命令先有回退手段（第 5 节）。
+4. **原理图写入看工程来源。** `kicad sch-edit`（含 `replace_part`、加件、改网）只用于 `kicad sch-build` 生成的工程——判据是
+   `<工程>/.pcbpilot/sch-build/spec.json` 存在。用户手画的、`kicad sch-import` 或其他工具导入的工程没有这份 spec：换件、加件、
+   改网都由用户在 KiCad 原理图编辑器里做，Agent 给出逐项修改清单，能力记 `UNSUPPORTED`，改完重新 `kicad sch-read` 回读。
+   这类工程上 pcbpilot 只做三种原地修改：`kicad sch-fit`、`kicad sch-check --fix-pwr-flag`、`kicad lcsc --set`（只写 LCSC 字段）；
+   都无检查点，先 git commit 或整目录备份。
 
 ## 2. 命令写入表
 

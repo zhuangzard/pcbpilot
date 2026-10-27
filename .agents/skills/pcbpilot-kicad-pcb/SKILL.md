@@ -73,8 +73,13 @@ KiCad 板级工作（`.kicad_pcb`）：从已同步的板子到布好、过门�
    顺序和每个门禁的判据见 [kicad.md 布线一节](../pcbpilot/references/kicad.md#布线kicad-route与-pcb-auto-route--pcb-gate-同序同算)。
 5. **签核**：`pcbpilot signoff --run-dir work/route --intent work/intent.json --sim work/sim.json --connectivity work/conn.json`
    （`kicad route` 最后也会自动跑一次）。
-6. **交付**：报告 `work/route/routed.kicad_pcb`、`summary.json` 的 `gates[]`；用户确认后关闭 KiCad，把板子复制回工程，
-   在 KiCad 里打开看一眼再保存。
+6. **交付**：签核用的是 `routed.kicad_pcb` **加上同目录的** `routed.kicad_pro` / `routed.kicad_dru`（意图网络类、绝缘域规则都在
+   里面）；只拷板子回去，目标工程会用旧的网络类与规则，签核结论就不成立。所以三件一起交付，并列出依赖的工程库
+   （`fp-lib-table` / `sym-lib-table` 里 `${KIPRJMOD}` 下的库，3D 模型路径）。合并由用户做：先备份或 git commit 原工程；
+   板子改名为工程的 `<board>.kicad_pcb`；规则用 PCB 编辑器 Board Setup → Import Settings 从 `routed.kicad_pcb` 导入网络类、
+   约束与自定义规则（不整份覆盖 `.kicad_pro`，以免丢原理图/工程设置），或在原工程尚无规则时连 `.kicad_pro` / `.kicad_dru`
+   一起改名替换。合并后关闭 KiCad，在**目标工程**重跑 `kicad-cli pcb drc --format json --severity-all --schematic-parity`，
+   结果与 `summary.drc` 一致（error 0）才算验收；不一致或没重跑 → `INCOMPLETE`。
 
 ## 布局策略与有界布局循环
 
@@ -134,7 +139,7 @@ KiCad 板级工作（`.kicad_pcb`）：从已同步的板子到布好、过门�
 | 布局比原来更差 | 约束不足（缺 `--groups` / `--intent` / `mech.json`） | 补约束再跑，或保留原布局 |
 | `route-complete` 失败，`summary.blockedConnections` 非空 | 器件挡道，重布无用 | 回到布局：按提示挪件或锁定后重跑 `kicad place` |
 | `intent-widths` 失败 | 网太细或颈缩 | 检查意图线宽；`--pad-neck-floor-mil` 只允许在焊盘处颈缩 |
-| `post-layout-sim` 失败，标 `SIM/KICAD MISMATCH` | 仿真栅格与 KiCad 连通判断不一致 | 记 `INCOMPLETE`，逐网核对，不当通过 |
+| `post-layout-sim` 失败，标 `SIM/KICAD MISMATCH` | 仿真栅格与 KiCad 连通判断不一致 | 记 `INCOMPLETE`，逐网核对，不当通过；网名/层次路径对不上按 [§6.1](../pcbpilot/references/evidence-and-verdicts.md#61-网络身份与对账差异) |
 | `pad-net-diff` / `signoff-continuity` 失败 | 板与原理图没同步 | 用户在 KiCad 做 Update PCB from Schematic，重新从第 1 步走 |
 | `lib_footprint_issues` | 当前配置找不到封装库（环境类） | 修库表后重跑；不算设计缺陷，也不算 PASS |
 | 写入失败或结果被覆盖 | 文件仍在 KiCad 中打开 | 请用户关闭后重跑；记 `BLOCKED` |

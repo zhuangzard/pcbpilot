@@ -67,8 +67,10 @@ pcbpilot sim power --connectivity conn.json --out sim.json --report sim.md
 | `intent derive --models … --sim sim.json` | 20 块、34 网、2 域；0 error / 8 warn；`sim analog` 4 块 WARN |
 | `sim post-layout` | **FAIL**：`sim-board-mismatch` —— 板快照里子页网名是 `/pic_sockets/VCC_PIC`，`kicad netlist` 输出 `VCC_PIC`；另有板温 107.6 °C（U3 7805 下方，1.09 W，来自假设的 IC 负载 × 9 V 压差） |
 
-读法：①模型缺失时先补模型，不读数字；②层次图子页网名目前在 post-layout 对账中不归一，结论记 INCOMPLETE 并报告为
-工具缺口；③板温高的原因是 `assumed` 负载，报告里要写“取决于假设”，换成数据手册电流后再判断是否是真实散热问题。
+读法：①模型缺失时先补模型，不读数字；②层次图子页网名目前在 post-layout 对账中不归一：工具给 FAIL，只有逐网证明
+`/pic_sockets/VCC_PIC` ↔ `VCC_PIC` 这类差异一一对应（焊盘集合相同）后才降为 INCOMPLETE 并报告为工具缺口，未证明的仍是
+FAIL（[判定规则 §6.1](../../pcbpilot/references/evidence-and-verdicts.md#61-网络身份与对账差异)）；③板温高的原因是 `assumed`
+负载，涉及的轨与器件热结论都是 INCOMPLETE（§6.2），换成数据手册电流后再判断是否是真实散热问题。
 
 ## 从这两次运行学到的判读要点
 

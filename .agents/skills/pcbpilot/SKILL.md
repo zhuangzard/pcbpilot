@@ -54,6 +54,10 @@ kicad-cli/pcbnew）。找到相近样例，理解其电气或机械理由，替�
 
 ## 先做决定
 
+- **聚焦 Skill**：已安装时按职责转交，它们只承接一项任务、共享本 Skill 的参考——只读评审与能否下单 → `pcbpilot-review`；
+  KiCad 原理图 → `pcbpilot-kicad-schematic`；KiCad 布局/布线/签核 → `pcbpilot-kicad-pcb`；Gerber/BOM/CPL 与下单验收 →
+  `pcbpilot-fab`；选型、建库、引脚映射 → `pcbpilot-library`；仿真、设计意图、设计报告与说明书 → `pcbpilot-sim-report`。
+  未安装或任务跨多个职责时，按本页工作循环继续。
 - **只评审 / “能不能下单”**：只读，不移动、不布线、不改规则（[协作边界](references/collaboration-workflow.md)）。按快速检查 → ERC/DRC
   → 专项审计 → 预制造清单取证；证据缺失或矛盾时结论为 `incomplete`，不写“通过”。流程、证据强弱与判词见 `references/review-workflow.md`、
   `references/evidence-and-verdicts.md`、`references/prefab-checklist.md`；DRC 归属与修法见 `references/drc-triage.md`。
@@ -75,17 +79,17 @@ kicad-cli/pcbnew）。找到相近样例，理解其电气或机械理由，替�
 | 从需求到整板；260919 AT32F415 Demo、历史考题迁移 | `spec validate <s0.json>` | [design-flow.md](references/design-flow.md)、[design-decisions.md](references/design-decisions.md)、[recipes/](references/recipes/index.md)、[260919 索引](references/examples/260919-at32f415/index.md)、[考题差异表](references/examples/exam-differences.md) |
 | EasyEDA 原理图源数据、参数化布局、Apply | `sch connectivity --page <页>` | [schematic-data.md](references/schematic-data.md)、[auto-layout-sop.md](references/auto-layout-sop.md) |
 | EasyEDA 已有原理图检查或小修；美观度（只报告）、标签 vs 导线、总线 | `sch gate`、[`scripts/lint.sh`](scripts/lint.sh)；`sch aesthetics` / `sch bus list` | [schematic.md](references/schematic.md)、[schematic-wiring.md](references/schematic-wiring.md#标签-vs-导线总线与原理图美观度软层度量--opt-in-生成) |
-| **KiCad 原理图（首选）**：写 spec 一次画完；修改/查看 | `kicad sch-build --spec` / `kicad sch-edit` / `kicad sch-read` | [kicad-sch-build.md](references/kicad-sch-build.md) |
-| KiCad 板：快照、网表、布局、布线、签核 | `kicad snapshot` / `kicad netlist` / `kicad place` / `kicad route` | [kicad.md](references/kicad.md) |
-| KiCad 选件、C 号建库、JLC 制造文件 | `kicad lcsc --check` / `kicad fab` | [kicad-jlc.md](references/kicad-jlc.md) |
+| **KiCad 原理图（首选）**：写 spec 一次画完；修改/查看 | `kicad sch-build --spec` / `kicad sch-edit` / `kicad sch-read` | [kicad-sch-build.md](references/kicad-sch-build.md)；聚焦 Skill `pcbpilot-kicad-schematic` |
+| KiCad 板：快照、网表、布局、布线、签核 | `kicad snapshot` / `kicad netlist` / `kicad place` / `kicad route` | [kicad.md](references/kicad.md)；聚焦 Skill `pcbpilot-kicad-pcb` |
+| KiCad 选件、C 号建库、JLC 制造文件 | `kicad lcsc --check` / `kicad fab` | [kicad-jlc.md](references/kicad-jlc.md)；聚焦 Skill `pcbpilot-fab`（制造）、`pcbpilot-library`（建库） |
 | EasyEDA PCB 布局、板框；原理图 → PCB 交接与逐焊盘对账 | `pcb list --include-bbox` / `pcb layout-lint`；`pcb import-changes` → [`scripts/pad-net-diff.py`](scripts/pad-net-diff.py) | [pcb.md](references/pcb.md)、[pcb-layout.md](references/pcb-layout.md)、[recipes/schematic-to-pcb.md](references/recipes/schematic-to-pcb.md) |
 | PCB 布线、铺铜、禁布区、带铜模块 | `pcb route-critical --dry-run` | [pcb-routing.md](references/pcb-routing.md) |
 | 整板电气感知自动设计；布线难点回推原理图（`feedback.json` → `sch pin-swap`，须用户确认） | `pcb auto analyze` / `pcb auto run` | [pcb-auto.md](references/pcb-auto.md)、[回推闭环](references/pcb-auto.md#闭环布线难点回推原理图)、[recipes/pcb-auto-run.md](references/recipes/pcb-auto-run.md)、[pin-capabilities.json](references/pin-capabilities.json) |
-| 设计评审 / 是否可发布（只读） | `pcb check` / `pcb drc` / `kicad sch-check` → `pcb gate` / `signoff` / `review-panel` | [collaboration-workflow.md](references/collaboration-workflow.md)、[pcb-design-rules.md](references/pcb-design-rules.md#13-drc-检查清单) |
+| 设计评审 / 是否可发布（只读） | `pcb check` / `pcb drc` / `kicad sch-check` → `pcb gate` / `signoff` / `review-panel` | [collaboration-workflow.md](references/collaboration-workflow.md)、[pcb-design-rules.md](references/pcb-design-rules.md#13-drc-检查清单)；聚焦 Skill `pcbpilot-review` |
 | EDA 配置、考试设计规则、PWR 网络类；电源预算 → 线宽/过孔、机械 → 板框/孔、高压隔离、高速的数据契约 | `pcb rules check` | [pcb-config.md](references/pcb-config.md)、[power-spec](references/recipes/power-spec.md)、[mech-spec](references/recipes/mech-spec.md)、[hv-isolation](references/recipes/hv-isolation.md)、[high-speed](references/recipes/high-speed.md) |
-| 电源仿真；模拟 SPICE 仿真与改值（改原理图须用户确认） | `sim power`；`sim tools check` → `sim analog` | [power-sim.md](references/power-sim.md)、[power-models.json](references/power-models.json)、[analog-sim.md](references/analog-sim.md)、[spice-models/](references/spice-models/README.md)、[仿真工具](references/environment-setup.md#仿真工具ngspice--elmer-fem) |
-| 设计意图；布线后真实铜皮仿真；设计报告 / 板卡说明书 | `intent derive`；`pcb dump --include-copper` → `sim post-layout`；`report design` / `report manual` | [design-intent.md](references/design-intent.md)、[post-layout-sim.md](references/post-layout-sim.md)、[design-report.md](references/design-report.md)、[board-manual.md](references/board-manual.md) |
-| 选型、标准电路、库器件与建库；`block-apply` 首个 place 就 “connector did not respond” | `blocks search`、[`parts-select.py`](scripts/parts-select.py)、[`bom-enrich.py`](scripts/bom-enrich.py)、[`blocks-pin-audit.py`](scripts/blocks-pin-audit.py)；[`parts-relocalize.py`](scripts/parts-relocalize.py) 重解析 `deviceUuid` | [part-selection.md](references/part-selection.md#站点差异deviceuuid-必须按当前版本重解析)、[library-authoring.md](references/library-authoring.md)、[standard-parts.json](references/standard-parts.json) |
+| 电源仿真；模拟 SPICE 仿真与改值（改原理图须用户确认） | `sim power`；`sim tools check` → `sim analog` | [power-sim.md](references/power-sim.md)、[power-models.json](references/power-models.json)、[analog-sim.md](references/analog-sim.md)、[spice-models/](references/spice-models/README.md)、[仿真工具](references/environment-setup.md#仿真工具ngspice--elmer-fem)；聚焦 Skill `pcbpilot-sim-report` |
+| 设计意图；布线后真实铜皮仿真；设计报告 / 板卡说明书 | `intent derive`；`pcb dump --include-copper` → `sim post-layout`；`report design` / `report manual` | [design-intent.md](references/design-intent.md)、[post-layout-sim.md](references/post-layout-sim.md)、[design-report.md](references/design-report.md)、[board-manual.md](references/board-manual.md)；聚焦 Skill `pcbpilot-sim-report` |
+| 选型、标准电路、库器件与建库；`block-apply` 首个 place 就 “connector did not respond” | `blocks search`、[`parts-select.py`](scripts/parts-select.py)、[`bom-enrich.py`](scripts/bom-enrich.py)、[`blocks-pin-audit.py`](scripts/blocks-pin-audit.py)；[`parts-relocalize.py`](scripts/parts-relocalize.py) 重解析 `deviceUuid` | [part-selection.md](references/part-selection.md#站点差异deviceuuid-必须按当前版本重解析)、[library-authoring.md](references/library-authoring.md)、[standard-parts.json](references/standard-parts.json)；聚焦 Skill `pcbpilot-library` |
 | action 或队列字段、未知官方接口；离线读 `.eprj3`、上游 API 变化；工程打开/导出/导入、MCP `project.create` | `actions` / `api search`；`project inspect-eprj3` / `api upstream-diff`；`project find` / `project import` | [actions.md](references/actions.md)、[offline-format-api-watch.md](references/offline-format-api-watch.md)、[project-import.md](references/project-import.md) |
 
 ## 不可省略的事实

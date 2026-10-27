@@ -43,8 +43,8 @@ ls "$W/proj"/~*.lck 2>/dev/null                              # 无输出 = 无�
 | `intent derive --connectivity out/conn.json --out out/intent.json --report out/intent.md --sim-out out/sim.json` | `20 blocks, 34 nets, 2 domains, 0 pairs; classes GND(1) POWER(2) SIGNAL(31); findings 0 error / 9 warn`；模拟子步骤 `analog-lc-peaking`（L1 谐振峰 33.4 dB）；`floating-domain`（P101–P106 无地参考，实为安装孔）；7 条 `unknown-model`（U1–U6、JP1） | WARN；`unknown-model` 意味着后面的电流是假设值 |
 | `pcb check --board out/board.json --intent out/intent.json --json` | `passed:true`，`errors 0`；`limitations[]` 写明 copper-to-edge 外层最小 151.18 mil（要求 20 mil）；`trackCount 0`、`padCount 0` | 仅 copper-to-edge / isolation / via-current 三项 PASS；其余 DFM 项 UNSUPPORTED（离线） |
 | `sim post-layout --board … --sim … --intent … --out out/post.json --report out/post.md` | `post-layout PASS — board max 25.0 °C`；IR 表为空，热源 0.000 W | **INCOMPLETE**（空跑：没有任何电源网带电流） |
-| `pad-net-diff.py --sch out/conn.json --pcb out/board.json` | `TypeError: 'NoneType' object is not iterable`（P101–P106 的 `"pins": null`） | INCOMPLETE（工具故障）；把 null 换成 `[]` 的临时副本跑出 117 条 netMismatch，全部是 `/pic_sockets/VCC_PIC` vs `VCC_PIC`、`unconnected-(…)` vs NC 这类写法差异 |
-| `signoff --board … --intent … --sim … --connectivity out/conn.json --out-dir out/signoff` | `signoff failed: signoff-review, signoff-parts, signoff-trace, signoff-artifacts`；safety / copper / ir / continuity PASS（`34 net(s) identical`） | review、artifacts = 缺输入；parts = 63 个元件无 LCSC 号；trace = 层次网名误报；ir 的 PASS 继承上面的空跑 → INCOMPLETE |
+| `pad-net-diff.py --sch out/conn.json --pcb out/board.json` | `TypeError: 'NoneType' object is not iterable`（P101–P106 的 `"pins": null`） | INCOMPLETE（工具故障）；把 null 换成 `[]` 的临时副本跑出 117 条 netMismatch，看起来都是 `/pic_sockets/VCC_PIC` vs `VCC_PIC`、`unconnected-(…)` vs NC 这类写法差异——但只有逐网证明一一对应（`REF:PAD` 集合相同）后才能记 INCOMPLETE，未证明的仍是 FAIL（[判定规则 §6.1](../../pcbpilot/references/evidence-and-verdicts.md#61-网络身份与对账差异)）；原理图↔板一致性另以 DRC `schematic_parity` 为证据 |
+| `signoff --board … --intent … --sim … --connectivity out/conn.json --out-dir out/signoff` | `signoff failed: signoff-review, signoff-parts, signoff-trace, signoff-artifacts`；safety / copper / ir / continuity PASS（`34 net(s) identical`） | review、artifacts = 缺输入；parts = 63 个元件无 LCSC 号；trace = 层次网名差异（同上，证明一一对应前不能称误报）；ir 的 PASS 继承上面的空跑 → INCOMPLETE |
 
 ## 4. 报告摘录
 
@@ -55,7 +55,7 @@ ls "$W/proj"/~*.lck 2>/dev/null                              # 无输出 = 无�
 
 ## 发现
 | # | 级别 | 对象 | 问题 | 证据 | 建议修法 |
-| 1 | S2 | L1 / VCC 滤波 | LC 谐振峰 33.4 dB | intent.md findings `analog-lc-peaking` | 输出电容串 0.5–2 Ω 或换带 ESR 的电解（用户确认后 kicad sch-edit） |
+| 1 | S2 | L1 / VCC 滤波 | LC 谐振峰 33.4 dB | intent.md findings `analog-lc-peaking` | 输出电容串 0.5–2 Ω 或换带 ESR 的电解（手画的 demo 工程不能用 `kicad sch-edit`：用户在 KiCad 里改） |
 | 2 | S3 | C2 C3 L1 P1 R15 U3 R11 | Footprint 字段文字压在电源符号/位号上 | sch-check quality `text-over-symbol` ×6、`text-overlap` ×1 | 在 KiCad 里隐藏或挪开 Footprint 字段 |
 
 ## 未检查 / 不支持

@@ -6,6 +6,12 @@
 | Skill | 任务 | 分发方式 |
 |---|---|---|
 | [pcbpilot](pcbpilot/SKILL.md) | 参数化电路设计、typed 执行与回读；公开 Skill 的路由入口 | 公开（router）；Release、ClawHub、SkillHub |
+| [pcbpilot-review](pcbpilot-review/SKILL.md) | 只读设计评审（quick / full / pre-fab）与“能否投板”结论 | 公开（聚焦）；随 router 发布 |
+| [pcbpilot-kicad-schematic](pcbpilot-kicad-schematic/SKILL.md) | KiCad 原理图 `sch-build` / `sch-edit` / `sch-read` / `sch-check` | 公开（聚焦）；随 router 发布 |
+| [pcbpilot-kicad-pcb](pcbpilot-kicad-pcb/SKILL.md) | KiCad 布局、布线、铺铜、DRC 与签核 | 公开（聚焦）；随 router 发布 |
+| [pcbpilot-fab](pcbpilot-fab/SKILL.md) | KiCad 制造输出（Gerber/钻孔/BOM/CPL）、订单契约与下单验收 | 公开（聚焦）；随 router 发布 |
+| [pcbpilot-library](pcbpilot-library/SKILL.md) | 选型、符号/封装/器件建库、引脚映射验收 | 公开（聚焦）；随 router 发布 |
+| [pcbpilot-sim-report](pcbpilot-sim-report/SKILL.md) | 电源/模拟/布线后仿真、设计意图、设计报告与板卡说明书 | 公开（聚焦）；随 router 发布 |
 | [pcbpilot-repo-lookup](pcbpilot-repo-lookup/SKILL.md) | 跨项目只读查询实现、样例、证据 | 链接源码 checkout |
 | [pcbpilot-repo-maintain](pcbpilot-repo-maintain/SKILL.md) | 修改工具、知识、验证与 Git 贡献 | 链接源码 checkout |
 

@@ -29,8 +29,8 @@ spec 字段、门禁细节与 delta 语法以 [kicad-sch-build.md](../pcbpilot/r
 3. **写前确认文件已在 KiCad 中关闭**（同目录无 `~*.lck`）；有锁 → `BLOCKED`，请用户关闭，不删锁文件。
 4. **不绕门禁**：不用 `--no-planner` 绕 `SHEET_NOT_LOADED`；`--no-review` 只能配用户签名的 waiver，Agent 不自写 waiver；
    门禁失败时 `--out` 不变，失败工程在 `<out>/.pcbpilot/sch-build/failed/` 供查看。
-5. **非 sch-build 的工程**（用户手画、导入）：默认只读 + `sch-check`。原地写的只有 `sch-fit`、`sch-check --fix-pwr-flag`
-   （无检查点，先 git commit 或整目录备份）；其余修改交用户在 KiCad 里做，能力记 `UNSUPPORTED`。
+5. **先认工程来源**：`sch-edit` 只用于 sch-build 生成的工程（有 `.pcbpilot/sch-build/spec.json`）；手画或导入的工程默认只读 +
+   `sch-check`，修改由用户在 KiCad GUI 里做。判据与仅有的原地修复见 [kicad-file-safety.md §1 第 4 条](../pcbpilot/references/kicad-file-safety.md#1-四条规则)。
 
 ## 工作流
 

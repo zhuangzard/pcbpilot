@@ -52,17 +52,20 @@ pcbpilot kicad lcsc --pcb <board>.kicad_pcb --sch <root>.kicad_sch --check     #
 ```
 
 DRC 大板要几分钟，等它完成。DRC 有错误 → `FAIL`，交回 router 修板（归属与修法见
-[drc-triage.md](../pcbpilot/references/drc-triage.md)）；板规则松于契约极限 → `FAIL`。每项覆盖与不覆盖见 [§2](references/fab-acceptance.md#2-预检的范围)。
+[drc-triage.md](../pcbpilot/references/drc-triage.md)）。干净的 `drc.json` 只说明板子满足**它自己的**规则，不证明契约极限：
+另读有效规则集（Board Setup 约束、网络类、`.kicad_dru` 自定义规则与局部覆盖）逐项对照契约，松于契约 → `FAIL`，
+有一项读不全或无法对上 → `INCOMPLETE`（[§2.1](references/fab-acceptance.md#21-有效规则集-vs-契约)）。每项覆盖见 [§2](references/fab-acceptance.md#2-预检的范围)。
 
 **3. 补 LCSC C 号（PCBA）。** 对每个缺号件：
 
 ```bash
-pcbpilot kicad lcsc --search "<MPN 或 值+封装>" --qty <数量>        # --offline 只查内置常用料
+pcbpilot kicad lcsc --search "<MPN 或 值+封装>" --qty <需求量>      # --offline 只查内置常用料
 pcbpilot kicad lcsc --pcb <board>.kicad_pcb --sch <root>.kicad_sch --set R1=C25744 --set C1=C1525,C2=C1525
 pcbpilot kicad lcsc --pcb <board>.kicad_pcb --sch <root>.kicad_sch --check     # 直到 0 missing / 0 invalid
 ```
 
-候选的 MPN 与原理图完全一致才能直接写；只是兼容/替代型号时先给用户确认。安装孔、Mark、测试点、Logo、PCB 保险丝这类
+`--qty` 是**这个 C 号**的需求量 = 板数 × 每板贴装位数（BOM 里该 C 号的位号数）+ 厂商损耗/备料，拼板时板数按拼板数取整后的
+实际贴装板数（算法见 [§4](references/fab-acceptance.md#4-bom-与-cpl-审核)）。候选的 MPN 与原理图完全一致才能直接写；只是兼容/替代型号时先给用户确认。安装孔、Mark、测试点、Logo、PCB 保险丝这类
 不贴的封装，请用户在 KiCad 里勾排除属性。符号/封装要从 C 号建库属于库任务，交回 router。
 
 **4. 出图。**

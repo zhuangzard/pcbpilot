@@ -53,7 +53,7 @@
 
 | 命令 | 说明 | 文档 |
 |---|---|---|
-| `api` | Discover the official eda.* API surface (search / list, offline) | [actions.md](actions.md), [offline-format-api-watch.md](offline-format-api-watch.md), [schematic.md](schematic.md), [SKILL.md](../SKILL.md) |
+| `api` | Discover the official eda.* API surface (search / list, offline) | [actions.md](actions.md), [offline-format-api-watch.md](offline-format-api-watch.md), [schematic.md](schematic.md) |
 | `api ls` | List eda.* namespaces (optionally filtered by substring) | — |
 | `api probe` | Report typeof for eda.* members on the connected host (read-only, nothing is called) | [actions.md](actions.md), [offline-format-api-watch.md](offline-format-api-watch.md), [schematic-wiring.md](schematic-wiring.md) |
 | `api search` | Rank eda.* methods matching all query terms (name/namespace/summary) | [actions.md](actions.md), [schematic.md](schematic.md), [SKILL.md](../SKILL.md) |
@@ -70,7 +70,7 @@
 
 | 命令 | 说明 | 文档 |
 |---|---|---|
-| `ask` | Ask the user a decision question (console card, terminal fallback) and print the choice | [design-flow.md](design-flow.md), [SKILL.md](../SKILL.md) |
+| `ask` | Ask the user a decision question (console card, terminal fallback) and print the choice | [design-flow.md](design-flow.md) |
 
 ## audit
 
@@ -87,7 +87,7 @@
 |---|---|---|
 | `blocks` | Query the embedded circuit-block library (电路块库) — offline, no daemon | [environment-setup.md](environment-setup.md), [kicad-sch-build.md](kicad-sch-build.md), [part-selection.md](part-selection.md), [pcb.md](pcb.md) +3 |
 | `blocks ls` | List blocks (optionally filter by --category / --ready / --draft) | [environment-setup.md](environment-setup.md), [standard-blocks-contributing.md](standard-blocks-contributing.md) |
-| `blocks search` | Find blocks by id/desc/category/port/part (case-insensitive) | [kicad-sch-build.md](kicad-sch-build.md), [part-selection.md](part-selection.md), [reusable-module-library.md](reusable-module-library.md), [standard-blocks-contributing.md](standard-blocks-contributing.md) |
+| `blocks search` | Find blocks by id/desc/category/port/part (case-insensitive) | [kicad-sch-build.md](kicad-sch-build.md), [part-selection.md](part-selection.md), [reusable-module-library.md](reusable-module-library.md), [standard-blocks-contributing.md](standard-blocks-contributing.md) +1 |
 | `blocks show` | Print a block's full JSON (parts, internal_nets, ports, notes) | [pcb.md](pcb.md), [schematic.md](schematic.md), [standard-blocks-contributing.md](standard-blocks-contributing.md) |
 
 ## board
@@ -109,7 +109,7 @@
 |---|---|---|
 | `bom` | BOM export and enrichment | [review-workflow.md](review-workflow.md) |
 | `bom enrich` | Enrich a BOM TSV with LCSC C-numbers via bom-enrich.py | — |
-| `bom export` | Export schematic BOM as csv or xlsx artifact | [actions.md](actions.md), [prefab-checklist.md](prefab-checklist.md), [review-workflow.md](review-workflow.md), [schematic.md](schematic.md) |
+| `bom export` | Export schematic BOM as csv or xlsx artifact | [actions.md](actions.md), [design-pre-analysis.md](design-pre-analysis.md), [prefab-checklist.md](prefab-checklist.md), [review-workflow.md](review-workflow.md) +2 |
 
 ## call
 
@@ -178,31 +178,31 @@
 | 命令 | 说明 | 文档 |
 |---|---|---|
 | `kb` | Per-project resource library: add papers/datasheets/standards/requirements/mech files, search (BM25), cite | [design-flow.md](design-flow.md) |
-| `kb add` | Copy files into resources/<kind>/ and index them (dedupe by sha256) | — |
-| `kb list` | List documents (id, kind, status, pages, summary state) | — |
+| `kb add` | Copy files into resources/<kind>/ and index them (dedupe by sha256) | [design-flow.md](design-flow.md) |
+| `kb list` | List documents (id, kind, status, pages, summary state) | [design-flow.md](design-flow.md) |
 | `kb reindex` | Re-extract and re-index every document (after upgrading pcbpilot or installing pdftotext) | — |
 | `kb search` | BM25 search over page-bounded chunks; --docs screens documents first | [design-flow.md](design-flow.md), [SKILL.md](../SKILL.md) |
 | `kb set-summary` | Fill a document's summary slot (after deep-reading it) | [design-flow.md](design-flow.md) |
-| `kb show` | Show a document's metadata and summary; --pages / --chunk prints only that text (deep-read) | [design-flow.md](design-flow.md), [SKILL.md](../SKILL.md) |
+| `kb show` | Show a document's metadata and summary; --pages / --chunk prints only that text (deep-read) | [design-flow.md](design-flow.md) |
 | `kb summarize-status` | Which documents still need a summary (the agent's reading queue) | [design-flow.md](design-flow.md) |
-| `kb tag` | Add or remove tags | — |
+| `kb tag` | Add or remove tags | [design-flow.md](design-flow.md) |
 
 ## kicad
 
 | 命令 | 说明 | 文档 |
 |---|---|---|
-| `kicad` | Design in KiCad: placement, schematic sheets / import / netlist, snapshot, route + gates (fastroute), JLC fab output, LCSC parts | [design-flow.md](design-flow.md), [drc-triage.md](drc-triage.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad-jlc.md](kicad-jlc.md) +3 |
+| `kicad` | Design in KiCad: placement, schematic sheets / import / netlist, snapshot, route + gates (fastroute), JLC fab output, LCSC parts | [design-flow.md](design-flow.md), [drc-triage.md](drc-triage.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad-jlc.md](kicad-jlc.md) +4 |
 | `kicad fab` | Export JLCPCB manufacturing files (Gerber+drill zip, BOM, CPL) with kicad-cli | [evidence-and-verdicts.md](evidence-and-verdicts.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad-jlc.md](kicad-jlc.md), [prefab-checklist.md](prefab-checklist.md) +2 |
 | `kicad lcsc` | Check, write or search LCSC (JLC) part numbers on a KiCad design | [kicad-file-safety.md](kicad-file-safety.md), [kicad-jlc.md](kicad-jlc.md), [kicad-sch-build.md](kicad-sch-build.md), [prefab-checklist.md](prefab-checklist.md) +2 |
 | `kicad netlist` | Schematic connectivity JSON (the IR intent derive and pad-net-diff read) from a .kicad_sch | [evidence-and-verdicts.md](evidence-and-verdicts.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad.md](kicad.md), [prefab-checklist.md](prefab-checklist.md) +2 |
-| `kicad place` | Place a KiCad board's footprints with the pcbauto placer (best of several seeds) | [drc-triage.md](drc-triage.md), [kicad-file-safety.md](kicad-file-safety.md), [review-workflow.md](review-workflow.md) |
+| `kicad place` | Place a KiCad board's footprints with the pcbauto placer (best of several seeds) | [drc-triage.md](drc-triage.md), [kicad-file-safety.md](kicad-file-safety.md), [pcb-auto.md](pcb-auto.md), [review-workflow.md](review-workflow.md) +1 |
 | `kicad route` | Route and gate a .kicad_pcb like pcb auto route: review → intent netclasses → fastroute → via arrays / widen / pours / silk → every gate → IR closure → report → release review | [board-manual.md](board-manual.md), [drc-triage.md](drc-triage.md), [evidence-and-verdicts.md](evidence-and-verdicts.md), [kicad-file-safety.md](kicad-file-safety.md) +6 |
 | `kicad sch-build` | Build a complete, gate-checked KiCad schematic project from one design spec (one call, seconds) | [design-flow.md](design-flow.md), [evidence-and-verdicts.md](evidence-and-verdicts.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad-sch-build.md](kicad-sch-build.md) +2 |
-| `kicad sch-check` | Schematic hard gate on KiCad: kicad-cli ERC + pcbpilot quality checks (JSON, non-zero on fail) | [drc-triage.md](drc-triage.md), [evidence-and-verdicts.md](evidence-and-verdicts.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad-sch-build.md](kicad-sch-build.md) +2 |
+| `kicad sch-check` | Schematic hard gate on KiCad: kicad-cli ERC + pcbpilot quality checks (JSON, non-zero on fail) | [drc-triage.md](drc-triage.md), [evidence-and-verdicts.md](evidence-and-verdicts.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad-sch-build.md](kicad-sch-build.md) +3 |
 | `kicad sch-checkpoint` | List or restore the checkpoints kicad sch-build / sch-edit saved | [kicad-file-safety.md](kicad-file-safety.md), [kicad-sch-build.md](kicad-sch-build.md) |
-| `kicad sch-edit` | Change a sch-build project in one call (add/remove/replace parts or blocks, connect by pin name, rename nets, move zones) | [design-flow.md](design-flow.md), [drc-triage.md](drc-triage.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad-sch-build.md](kicad-sch-build.md) +2 |
+| `kicad sch-edit` | Change a sch-build project in one call (add/remove/replace parts or blocks, connect by pin name, rename nets, move zones) | [design-flow.md](design-flow.md), [drc-triage.md](drc-triage.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad-sch-build.md](kicad-sch-build.md) +3 |
 | `kicad sch-fit` | Size every schematic sheet to its content (smallest A4…A0 that holds it clear of the title block) | [drc-triage.md](drc-triage.md), [kicad-file-safety.md](kicad-file-safety.md), [review-workflow.md](review-workflow.md) |
-| `kicad sch-import` | Convert an EasyEDA Pro schematic (.epro export) into a hierarchical KiCad schematic and check its netlist | [kicad-file-safety.md](kicad-file-safety.md) |
+| `kicad sch-import` | Convert an EasyEDA Pro schematic (.epro export) into a hierarchical KiCad schematic and check its netlist | [kicad-file-safety.md](kicad-file-safety.md), [project-import.md](project-import.md) |
 | `kicad sch-read` | Compact parts/nets JSON of a KiCad schematic (a valid sch-build spec; read this, not the S-expression) | [kicad-file-safety.md](kicad-file-safety.md), [kicad-sch-build.md](kicad-sch-build.md), [review-workflow.md](review-workflow.md), [SKILL.md](../SKILL.md) |
 | `kicad snapshot` | Board snapshot JSON (mil, y-up; the pcb dump --include-copper shape) of a .kicad_pcb | [board-manual.md](board-manual.md), [evidence-and-verdicts.md](evidence-and-verdicts.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad.md](kicad.md) +3 |
 
@@ -267,13 +267,13 @@
 | `pcb antenna-keepout` | Auto-generate the all-layer no-copper keep-out over each RF/antenna part's antenna end | [prefab-checklist.md](prefab-checklist.md) |
 | `pcb arrange` | Coarse auto-layout SEED: cluster by shared nets, or pack a grid | — |
 | `pcb auto` | Electrical-aware auto design: analyse, decide layers, place, route, check (offline engine → apply playbook) | [actions.md](actions.md), [board-manual.md](board-manual.md), [collaboration-workflow.md](collaboration-workflow.md), [design-flow.md](design-flow.md) +20 |
-| `pcb auto analyze` | Understand the circuit and decide widths, clearances, domains and layer count (no placement/routing) | [pcb-auto.md](pcb-auto.md), [recipes/index.md](recipes/index.md), [recipes/power-spec.md](recipes/power-spec.md) |
+| `pcb auto analyze` | Understand the circuit and decide widths, clearances, domains and layer count (no placement/routing) | [pcb-auto.md](pcb-auto.md), [recipes/index.md](recipes/index.md), [recipes/power-spec.md](recipes/power-spec.md), [SKILL.md](../SKILL.md) |
 | `pcb auto bench` | Benchmark engine placement against the human placement on real boards (layout-score, wirelength, routability) | [pcb-auto.md](pcb-auto.md) |
 | `pcb auto feedback` | Recompute schematic feedback (pin swaps, decap ownership, IR drop, package) from an existing plan.json (offline) | — |
 | `pcb auto route` | Finish a placed board with an external router: apply placement → fastroute → repair → pours → DRC → pad-net diff → post-layout sim | [board-manual.md](board-manual.md), [design-flow.md](design-flow.md), [evidence-and-verdicts.md](evidence-and-verdicts.md), [kicad.md](kicad.md) +4 |
-| `pcb auto run` | Full pipeline: analyse → stackup → (place) → route → DRC/SI → plan.json + playbook.json + preview.svg + report.md | [actions.md](actions.md), [design-flow.md](design-flow.md), [design-intent.md](design-intent.md), [design-report.md](design-report.md) +12 |
+| `pcb auto run` | Full pipeline: analyse → stackup → (place) → route → DRC/SI → plan.json + playbook.json + preview.svg + report.md | [actions.md](actions.md), [design-flow.md](design-flow.md), [design-intent.md](design-intent.md), [design-report.md](design-report.md) +13 |
 | `pcb auto-place` | Module-aware auto placement: pull each satellite (cap/R/LED) to the chip pin it connects to | [pcb-layout.md](pcb-layout.md) |
-| `pcb autoroute` | Auto-route the active PCB via an external router (DSN→fix→route→SES→import→repair→DRC) | [drc-triage.md](drc-triage.md), [pcb-layout.md](pcb-layout.md), [pcb-routing.md](pcb-routing.md) |
+| `pcb autoroute` | Auto-route the active PCB via an external router (DSN→fix→route→SES→import→repair→DRC) | [drc-triage.md](drc-triage.md), [pcb-layout.md](pcb-layout.md), [pcb-routing.md](pcb-routing.md), [SKILL.md](../SKILL.md) |
 | `pcb beautify` | Round sharp track corners into arcs (走线美化) on the active PCB | [design-flow.md](design-flow.md), [pcb-design-rules.md](pcb-design-rules.md), [pcb-layout.md](pcb-layout.md) |
 | `pcb board-info` | Read the current Board (schematic↔PCB linkage) + PCB info | [examples/260919-at32f415/fixed-mechanics.md](examples/260919-at32f415/fixed-mechanics.md) |
 | `pcb check` | DFM audit: acute angles / dangling copper / bad vias / neck-down / 3W coupling (read-only) | [actions.md](actions.md), [beginner-troubleshooting.md](beginner-troubleshooting.md), [design-decisions.md](design-decisions.md), [design-intent.md](design-intent.md) +23 |
@@ -294,7 +294,7 @@
 | `pcb diff-pair rename` | Rename a differential pair | [pcb-routing.md](pcb-routing.md) |
 | `pcb distribute` | Evenly space component centers along an axis (x\|y) | — |
 | `pcb docs` | List PCB documents in the current project (uuid + name) | — |
-| `pcb drc` | Run PCB DRC and return normalized violations | [design-report.md](design-report.md), [drc-triage.md](drc-triage.md), [evidence-and-verdicts.md](evidence-and-verdicts.md), [examples/260919-at32f415/critical-routing.md](examples/260919-at32f415/critical-routing.md) +12 |
+| `pcb drc` | Run PCB DRC and return normalized violations | [design-report.md](design-report.md), [drc-triage.md](drc-triage.md), [evidence-and-verdicts.md](evidence-and-verdicts.md), [examples/260919-at32f415/critical-routing.md](examples/260919-at32f415/critical-routing.md) +13 |
 | `pcb drc-rules` | Read the active PCB's DRC rule configuration without running a check | [pcb.md](pcb.md) |
 | `pcb drc-rules-set` | Set full PCB rules from JSON, or raise only the pour clearance | [actions.md](actions.md), [design-flow.md](design-flow.md), [pcb-config.md](pcb-config.md), [pcb.md](pcb.md) |
 | `pcb dsn-fix` | Repair an EasyEDA Specctra DSN export for an external router (offline) | [pcb-routing.md](pcb-routing.md) |
@@ -305,7 +305,7 @@
 | `pcb eq-group delete` | Delete an equal-length group by name | [pcb-routing.md](pcb-routing.md) |
 | `pcb eq-group list` | List equal-length groups on the active PCB | [prefab-checklist.md](prefab-checklist.md) |
 | `pcb escape-plan` | Jointly reserve measured pad escape paths offline (no editor writes) | [pcb-routing.md](pcb-routing.md) |
-| `pcb export-dsn` | Export the active PCB as a Specctra DSN (autorouter input) | [pcb-layout.md](pcb-layout.md), [pcb-routing.md](pcb-routing.md) |
+| `pcb export-dsn` | Export the active PCB as a Specctra DSN (autorouter input) | [pcb-layout.md](pcb-layout.md), [pcb-routing.md](pcb-routing.md), [SKILL.md](../SKILL.md) |
 | `pcb feedback` | Recompute schematic feedback (pin swaps, decap ownership, IR drop, package) from an existing plan.json (offline) | [pcb-auto.md](pcb-auto.md) |
 | `pcb fill` | Net-bound filled region (填充区域 / 异形大块铜): create / list / delete | [beginner-troubleshooting.md](beginner-troubleshooting.md), [pcb-layout.md](pcb-layout.md), [pcb-routing.md](pcb-routing.md) |
 | `pcb fill create` | Create a net-bound filled region (area via --points \| --rect \| --at/--size \| --ref) | [pcb-layout.md](pcb-layout.md), [pcb-routing.md](pcb-routing.md) |
@@ -314,15 +314,15 @@
 | `pcb floorplan` | Plan ordered functional bands from the S0 signal flow (read-only) | [pcb-layout.md](pcb-layout.md) |
 | `pcb gate` | Hard quality gate for a finished board: every schematic/simulation constraint of the intent, from code | [board-manual.md](board-manual.md), [evidence-and-verdicts.md](evidence-and-verdicts.md), [kicad.md](kicad.md), [pcb-auto.md](pcb-auto.md) +4 |
 | `pcb grid-snap` | Snap component anchors to a grid (PCB data units, mil-scale) | [pcb-layout-conventions.md](pcb-layout-conventions.md) |
-| `pcb import-autoroute` | Import a routed result (Specctra .ses / autoroute .json) into the active PCB | — |
-| `pcb import-changes` | Sync the schematic netlist/components into the active PCB | [actions.md](actions.md), [design-flow.md](design-flow.md), [drc-triage.md](drc-triage.md), [pcb-auto.md](pcb-auto.md) +2 |
+| `pcb import-autoroute` | Import a routed result (Specctra .ses / autoroute .json) into the active PCB | [pcb-routing.md](pcb-routing.md) |
+| `pcb import-changes` | Sync the schematic netlist/components into the active PCB | [actions.md](actions.md), [design-flow.md](design-flow.md), [drc-triage.md](drc-triage.md), [pcb-auto.md](pcb-auto.md) +3 |
 | `pcb layer-set` | Switch the active/edit PCB layer (id\|name\|top\|bottom\|inner1) | [actions.md](actions.md), [pcb-routing.md](pcb-routing.md) |
 | `pcb layer-visibility` | Show/hide/focus PCB layers (preset or explicit show/hide) | [actions.md](actions.md), [pcb-layout.md](pcb-layout.md), [pcb-routing.md](pcb-routing.md) |
 | `pcb layers` | List layers of the active PCB (+ current layer, copper count) | [actions.md](actions.md), [examples/260919-at32f415/fixed-mechanics.md](examples/260919-at32f415/fixed-mechanics.md), [examples/260919-at32f415/index.md](examples/260919-at32f415/index.md), [pcb-config.md](pcb-config.md) +3 |
-| `pcb layout-lint` | Score PCB placement quality + predict routability (ratsnest crossings) | [drc-triage.md](drc-triage.md), [evidence-and-verdicts.md](evidence-and-verdicts.md), [examples/260919-at32f415/fixed-mechanics.md](examples/260919-at32f415/fixed-mechanics.md), [examples/260919-at32f415/ldo-placement.md](examples/260919-at32f415/ldo-placement.md) +5 |
+| `pcb layout-lint` | Score PCB placement quality + predict routability (ratsnest crossings) | [drc-triage.md](drc-triage.md), [evidence-and-verdicts.md](evidence-and-verdicts.md), [examples/260919-at32f415/fixed-mechanics.md](examples/260919-at32f415/fixed-mechanics.md), [examples/260919-at32f415/ldo-placement.md](examples/260919-at32f415/ldo-placement.md) +6 |
 | `pcb layout-plan` | Generate measured module placement candidates offline (no editor writes) | [actions.md](actions.md), [examples/260919-at32f415/index.md](examples/260919-at32f415/index.md), [examples/260919-at32f415/layout-candidates.md](examples/260919-at32f415/layout-candidates.md), [pcb-layout.md](pcb-layout.md) +3 |
 | `pcb layout-score` | Score placement quality across 9 dimensions, with per-component attribution | [pcb-design-rules.md](pcb-design-rules.md), [pcb-layout-conventions.md](pcb-layout-conventions.md), [pcb-layout.md](pcb-layout.md) |
-| `pcb list` | List placed components/footprints on the active PCB | [beginner-troubleshooting.md](beginner-troubleshooting.md), [examples/260919-at32f415/critical-routing.md](examples/260919-at32f415/critical-routing.md), [examples/260919-at32f415/fixed-mechanics.md](examples/260919-at32f415/fixed-mechanics.md), [examples/260919-at32f415/index.md](examples/260919-at32f415/index.md) +5 |
+| `pcb list` | List placed components/footprints on the active PCB | [beginner-troubleshooting.md](beginner-troubleshooting.md), [examples/260919-at32f415/critical-routing.md](examples/260919-at32f415/critical-routing.md), [examples/260919-at32f415/fixed-mechanics.md](examples/260919-at32f415/fixed-mechanics.md), [examples/260919-at32f415/index.md](examples/260919-at32f415/index.md) +6 |
 | `pcb lock` | Lock/unlock PCB components (batch, readback-verified) | [examples/260919-at32f415/fixed-mechanics.md](examples/260919-at32f415/fixed-mechanics.md) |
 | `pcb modify` | Lay out a PCB component: move/rotate/flip layer/lock/designator | [drc-triage.md](drc-triage.md), [examples/260919-at32f415/critical-routing.md](examples/260919-at32f415/critical-routing.md), [examples/260919-at32f415/fixed-mechanics.md](examples/260919-at32f415/fixed-mechanics.md), [examples/260919-at32f415/ldo-placement.md](examples/260919-at32f415/ldo-placement.md) +4 |
 | `pcb module-check` | Verify a routed module against fresh before/after copper snapshots and apply journal | [actions.md](actions.md), [evidence-and-verdicts.md](evidence-and-verdicts.md), [examples/260919-at32f415/crystal-guard-plan.md](examples/260919-at32f415/crystal-guard-plan.md), [pcb-routing.md](pcb-routing.md) +1 |
@@ -338,13 +338,13 @@
 | `pcb new-board` | Create a NEW board (板) with a fresh empty PCB page, bound to an UNBOUND schematic | [pcb.md](pcb.md) |
 | `pcb origin` | Read or set the PCB canvas/display origin (does not move geometry) | [design-flow.md](design-flow.md), [examples/260919-at32f415/fixed-mechanics.md](examples/260919-at32f415/fixed-mechanics.md), [pcb-config.md](pcb-config.md), [pcb.md](pcb.md) |
 | `pcb origin get` | Read the canvas-origin X/Y offsets in mil | [design-flow.md](design-flow.md), [examples/260919-at32f415/fixed-mechanics.md](examples/260919-at32f415/fixed-mechanics.md), [pcb-config.md](pcb-config.md), [pcb.md](pcb.md) |
-| `pcb origin set` | Set and read back canvas-origin X/Y offsets in mil | [examples/260919-at32f415/fixed-mechanics.md](examples/260919-at32f415/fixed-mechanics.md) |
-| `pcb outline-clear` | Remove the current board outline (BOARD_OUTLINE layer) | — |
+| `pcb origin set` | Set and read back canvas-origin X/Y offsets in mil | [examples/260919-at32f415/fixed-mechanics.md](examples/260919-at32f415/fixed-mechanics.md), [pcb.md](pcb.md) |
+| `pcb outline-clear` | Remove the current board outline (BOARD_OUTLINE layer) | [pcb-layout.md](pcb-layout.md) |
 | `pcb outline-fit` | Resize the board outline to hug the placed parts + a margin (fix low utilization) | [pcb-layout.md](pcb-layout.md), [pcb-routing.md](pcb-routing.md) |
 | `pcb outline-get` | Read the board outline, including true center-line dimensions and rendered bbox | [design-flow.md](design-flow.md), [examples/260919-at32f415/fixed-mechanics.md](examples/260919-at32f415/fixed-mechanics.md), [pcb-layout-conventions.md](pcb-layout-conventions.md), [pcb-layout.md](pcb-layout.md) +2 |
 | `pcb outline-round` | Set a rounded-rectangle board outline (圆角板框) | [design-flow.md](design-flow.md), [examples/260919-at32f415/fixed-mechanics.md](examples/260919-at32f415/fixed-mechanics.md), [pcb-layout-conventions.md](pcb-layout-conventions.md), [pcb-layout.md](pcb-layout.md) |
-| `pcb outline-set` | Set the board outline from a closed polygon of points (mil, y-up) | — |
-| `pcb place-constrained` | Tiered placement: edge-must parts (connectors/module/IPEX) → board edge + locked, then legalize the rest | [pcb-layout.md](pcb-layout.md), [pcb-routing.md](pcb-routing.md) |
+| `pcb outline-set` | Set the board outline from a closed polygon of points (mil, y-up) | [pcb-layout.md](pcb-layout.md) |
+| `pcb place-constrained` | Tiered placement: edge-must parts (connectors/module/IPEX) → board edge + locked, then legalize the rest | [pcb-design-rules.md](pcb-design-rules.md), [pcb-layout.md](pcb-layout.md), [pcb-routing.md](pcb-routing.md) |
 | `pcb pour` | Create a copper pour (铺铜) from a closed polygon, bound to a net (usually GND) | [pcb-layout.md](pcb-layout.md), [pcb-routing.md](pcb-routing.md), [pcb.md](pcb.md) |
 | `pcb pour-clean` | Remove netless copper pours (net:"" dead copper — see `pcb check` netless-pour) | [drc-triage.md](drc-triage.md), [pcb-routing.md](pcb-routing.md), [pcb.md](pcb.md) |
 | `pcb pour-delete` | Delete copper pour regions by primitiveId | [pcb-routing.md](pcb-routing.md) |
@@ -364,11 +364,11 @@
 | `pcb route` | Offline single-layer path solving and independent checking | [pcb-routing.md](pcb-routing.md) |
 | `pcb route check` | Recheck a candidate against independent inputs without solving | [pcb-routing.md](pcb-routing.md) |
 | `pcb route solve` | Find a bounded straight/45-degree path between measured pads | [pcb-routing.md](pcb-routing.md) |
-| `pcb route-critical` | P7.0 critical nets first: power copper → diff pairs routed+measured → locked (issue #127) | [drc-triage.md](drc-triage.md), [pcb-layout.md](pcb-layout.md), [pcb-routing.md](pcb-routing.md) |
+| `pcb route-critical` | P7.0 critical nets first: power copper → diff pairs routed+measured → locked (issue #127) | [drc-triage.md](drc-triage.md), [pcb-layout.md](pcb-layout.md), [pcb-routing.md](pcb-routing.md), [SKILL.md](../SKILL.md) |
 | `pcb route-short` | Self-route the short, clear hops: per-net MST, L-shaped tracks on the pads' layer | [pcb-auto.md](pcb-auto.md), [pcb-layout.md](pcb-layout.md) |
 | `pcb rules` | Apply / check schematic electrical intent as native PCB rules (net classes, widths, clearances, vias, diff pairs) | [actions.md](actions.md), [design-flow.md](design-flow.md), [design-intent.md](design-intent.md), [design-report.md](design-report.md) +8 |
 | `pcb rules apply` | Write the differences between intent and live rules (--dry-run: plan only) | [actions.md](actions.md), [design-flow.md](design-flow.md), [design-intent.md](design-intent.md), [drc-triage.md](drc-triage.md) +6 |
-| `pcb rules check` | Read-only: diff intent vs live rules; non-zero when anything would be written | [design-flow.md](design-flow.md), [design-report.md](design-report.md), [drc-triage.md](drc-triage.md), [pcb-auto.md](pcb-auto.md) +2 |
+| `pcb rules check` | Read-only: diff intent vs live rules; non-zero when anything would be written | [design-flow.md](design-flow.md), [design-report.md](design-report.md), [drc-triage.md](drc-triage.md), [pcb-auto.md](pcb-auto.md) +3 |
 | `pcb save` | Save the active PCB document to disk | [actions.md](actions.md), [collaboration-workflow.md](collaboration-workflow.md), [design-flow.md](design-flow.md), [evidence-and-verdicts.md](evidence-and-verdicts.md) +16 |
 | `pcb ses-repair` | Repair the active PCB after 'pcb import-autoroute' of a Specctra session | [pcb-routing.md](pcb-routing.md) |
 | `pcb silk-add` | Add a free silkscreen string (board marking / credit / note) with config | [pcb-config.md](pcb-config.md), [pcb-layout.md](pcb-layout.md) |
@@ -377,7 +377,7 @@
 | `pcb silk-label-pads` | Label component pads with pin numbers / net names | — |
 | `pcb silk-netnames` | Auto-generate network-name silkscreen labels in a zone | — |
 | `pcb silk-set` | Batch-adjust existing silk: position / rotation / size / text, or align to a reference | [pcb-layout.md](pcb-layout.md), [pcb.md](pcb.md) |
-| `pcb silk-zone-outline` | Auto-draw grouped orthogonal functional-zone outlines on silkscreen | — |
+| `pcb silk-zone-outline` | Auto-draw grouped orthogonal functional-zone outlines on silkscreen | [pcb-layout.md](pcb-layout.md) |
 | `pcb slot` | Board cutout / slot (挖槽) — a MULTI-layer fill that mills a hole | [examples/exam-differences.md](examples/exam-differences.md), [pcb-routing.md](pcb-routing.md), [recipes/hv-isolation.md](recipes/hv-isolation.md) |
 | `pcb snapshot` | Capture the active PCB canvas as a PNG artifact | [actions.md](actions.md), [pcb-layout-conventions.md](pcb-layout-conventions.md), [pcb-routing.md](pcb-routing.md), [pcb.md](pcb.md) |
 | `pcb stackup` | Board stackup: copper layer count + inner-layer types (signal/plane) | [design-decisions.md](design-decisions.md), [pcb-config.md](pcb-config.md), [pcb-layout-conventions.md](pcb-layout-conventions.md), [pcb-layout.md](pcb-layout.md) |
@@ -409,20 +409,20 @@
 | `pcb widen` | Widen the tracks of chosen nets up to --max-mil where clearance allows | [drc-triage.md](drc-triage.md), [pcb-auto.md](pcb-auto.md), [pcb-routing.md](pcb-routing.md) |
 | `pcb zones` | Functional zone claims (S0 modules[].zone → PCB, issue #126): set / status / clear | [pcb-layout.md](pcb-layout.md), [pcb.md](pcb.md) |
 | `pcb zones clear` | Remove all zone claims | — |
-| `pcb zones set` | Set zone claims from an S0 spec file (--spec) or manually (--module) | [pcb.md](pcb.md) |
+| `pcb zones set` | Set zone claims from an S0 spec file (--spec) or manually (--module) | [pcb-layout.md](pcb-layout.md), [pcb.md](pcb.md) |
 | `pcb zones status` | Show the persisted zone claims (and live violations when a window is connected) | — |
 
 ## project
 
 | 命令 | 说明 | 文档 |
 |---|---|---|
-| `project` | Read EasyEDA project and document context | [offline-format-api-watch.md](offline-format-api-watch.md), [project-import.md](project-import.md), [SKILL.md](../SKILL.md) |
+| `project` | Read EasyEDA project and document context | [offline-format-api-watch.md](offline-format-api-watch.md), [project-import.md](project-import.md) |
 | `project create` | Create an EasyEDA project container through the official API | [design-flow.md](design-flow.md), [examples/260919-at32f415/index.md](examples/260919-at32f415/index.md) |
 | `project doc` | Read active editor document and schematic page context | — |
-| `project export` | Export the active project as a native epro2 archive (no overwrite) | [actions.md](actions.md), [pcb-auto.md](pcb-auto.md), [project-import.md](project-import.md) |
+| `project export` | Export the active project as a native epro2 archive (no overwrite) | [actions.md](actions.md), [pcb-auto.md](pcb-auto.md), [project-import.md](project-import.md), [SKILL.md](../SKILL.md) |
 | `project export-source` | Export the current project's original .epro2 file through the official read-only API | [actions.md](actions.md), [auto-layout-sop.md](auto-layout-sop.md) |
-| `project find` | Find projects by exact friendly name without opening them | [SKILL.md](../SKILL.md) |
-| `project import` | Import a KiCad (or other) project into EasyEDA as a NEW project | — |
+| `project find` | Find projects by exact friendly name without opening them | [project-import.md](project-import.md), [SKILL.md](../SKILL.md) |
+| `project import` | Import a KiCad (or other) project into EasyEDA as a NEW project | [project-import.md](project-import.md), [SKILL.md](../SKILL.md) |
 | `project info` | Read current EasyEDA project information | — |
 | `project inspect-eprj3` | Read an EasyEDA Pro V4 local .eprj3 project offline (inventory, counts, units, version markers, schema findings) | [actions.md](actions.md), [offline-format-api-watch.md](offline-format-api-watch.md), [SKILL.md](../SKILL.md) |
 | `project open` | Open a project by --project-uuid, or a legacy document by --uuid | [actions.md](actions.md), [design-flow.md](design-flow.md), [project-import.md](project-import.md) |
@@ -433,9 +433,9 @@
 |---|---|---|
 | `project-config` | Per-project process template: which steps/sims/report sections run, plus constraints (pcbpilot.project.json) | [design-flow.md](design-flow.md) |
 | `project-config init` | Create pcbpilot.project.json from a template and register the dir with the console | [design-flow.md](design-flow.md) |
-| `project-config set` | Change toggles and constraints (validated before writing) | — |
+| `project-config set` | Change toggles and constraints (validated before writing) | [design-flow.md](design-flow.md) |
 | `project-config show` | Print the config (JSON) with validation issues, skipped steps and sections | [design-flow.md](design-flow.md), [SKILL.md](../SKILL.md) |
-| `project-config validate` | Validate the config; exit 1 on any error-level issue | — |
+| `project-config validate` | Validate the config; exit 1 on any error-level issue | [design-flow.md](design-flow.md) |
 
 ## report
 
@@ -455,7 +455,7 @@
 
 | 命令 | 说明 | 文档 |
 |---|---|---|
-| `sch` | Schematic operations | [actions.md](actions.md), [analog-sim.md](analog-sim.md), [auto-layout-sop.md](auto-layout-sop.md), [design-intent.md](design-intent.md) +17 |
+| `sch` | Schematic operations | [actions.md](actions.md), [analog-sim.md](analog-sim.md), [auto-layout-sop.md](auto-layout-sop.md), [design-intent.md](design-intent.md) +18 |
 | `sch aesthetics` | Measure schematic aesthetics: wiring, layout, labels, bus lanes (report-only, weight 0) | [actions.md](actions.md), [auto-layout-sop.md](auto-layout-sop.md), [schematic-wiring.md](schematic-wiring.md), [schematic.md](schematic.md) +1 |
 | `sch align` | Align parts' rendered bboxes (left\|right\|top\|bottom\|centerx\|centery) to a reference part | [schematic-placement.md](schematic-placement.md) |
 | `sch apply` | Replay a declarative step file (playbook) against EasyEDA | [actions.md](actions.md), [auto-layout-sop.md](auto-layout-sop.md), [collaboration-workflow.md](collaboration-workflow.md), [design-flow.md](design-flow.md) +5 |
@@ -471,13 +471,13 @@
 | `sch bus check` | Check every native bus: members exist on pins and carry their own label/port (non-zero exit on errors) | [actions.md](actions.md), [schematic-wiring.md](schematic-wiring.md) |
 | `sch bus create` | Create one native bus from orthogonal polylines (verified by readback; --dry-run validates offline) | [actions.md](actions.md), [schematic-wiring.md](schematic-wiring.md) |
 | `sch bus delete` | Delete native buses by primitive id (verified by readback) | — |
-| `sch bus list` | List native buses on the active page (read-only) | [actions.md](actions.md) |
+| `sch bus list` | List native buses on the active page (read-only) | [actions.md](actions.md), [SKILL.md](../SKILL.md) |
 | `sch check` | Reconstructed per-item design check the SDK DRC can't itemize | [actions.md](actions.md), [auto-layout-sop.md](auto-layout-sop.md), [beginner-troubleshooting.md](beginner-troubleshooting.md), [collaboration-workflow.md](collaboration-workflow.md) +14 |
 | `sch clear` | Clear the active schematic page (delete all page primitives: components, flags, wires, buses, graphics) | [actions.md](actions.md), [auto-layout-sop.md](auto-layout-sop.md), [pcb-auto.md](pcb-auto.md), [pcb-routing.md](pcb-routing.md) +3 |
 | `sch clusters` | 列出 L1 虚拟组(器件 + 它自己的 marker/桩线)并判组间重叠 / 出图纸 | — |
 | `sch compose` | Compose authored Lib circuits onto one sheet and compile a guarded SCH Apply | [library/modules/README.md](../library/modules/README.md), [actions.md](actions.md), [auto-layout-sop.md](auto-layout-sop.md), [collaboration-workflow.md](collaboration-workflow.md) +6 |
 | `sch connect` | Stub a wire out of a pin and place a netflag/netport at its far end | [actions.md](actions.md), [drc-triage.md](drc-triage.md), [schematic-wiring.md](schematic-wiring.md), [schematic.md](schematic.md) |
-| `sch connectivity` | Export layout-independent schematic connectivity IR | [actions.md](actions.md), [auto-layout-sop.md](auto-layout-sop.md), [design-flow.md](design-flow.md), [design-intent.md](design-intent.md) +12 |
+| `sch connectivity` | Export layout-independent schematic connectivity IR | [actions.md](actions.md), [auto-layout-sop.md](auto-layout-sop.md), [design-flow.md](design-flow.md), [design-intent.md](design-intent.md) +13 |
 | `sch connectivity-diff` | Compare two connectivity snapshots offline | [actions.md](actions.md), [schematic-data.md](schematic-data.md) |
 | `sch design-diff` | Compare local schematic identity, connectivity, geometry and complete compose plans | [actions.md](actions.md), [design-flow.md](design-flow.md), [schematic-data.md](schematic-data.md) |
 | `sch designator-geometry` | Export measured current-page Designator text bboxes (read-only) | [auto-layout-sop.md](auto-layout-sop.md), [schematic-data.md](schematic-data.md) |
@@ -488,13 +488,13 @@
 | `sch destagger` | 批量消 marker-overlap:换方向/桩长并带桩线一起挪(默认 dry-run;--apply 执行) | [schematic-placement.md](schematic-placement.md) |
 | `sch disconnect` | Remove a pin's stub wire and its netflag/netport together (inverse of connect) | [actions.md](actions.md), [schematic.md](schematic.md) |
 | `sch distribute` | Equalize edge-to-edge gaps between parts along one axis (x\|y) | — |
-| `sch drc` | Run the official schematic DRC SDK gate (may be boolean/aggregate only) | [collaboration-workflow.md](collaboration-workflow.md), [evidence-and-verdicts.md](evidence-and-verdicts.md), [examples/260919-at32f415/index.md](examples/260919-at32f415/index.md), [examples/260919-at32f415/ldo-placement.md](examples/260919-at32f415/ldo-placement.md) +3 |
+| `sch drc` | Run the official schematic DRC SDK gate (may be boolean/aggregate only) | [collaboration-workflow.md](collaboration-workflow.md), [evidence-and-verdicts.md](evidence-and-verdicts.md), [examples/260919-at32f415/index.md](examples/260919-at32f415/index.md), [examples/260919-at32f415/ldo-placement.md](examples/260919-at32f415/ldo-placement.md) +4 |
 | `sch export-image` | Render the page — or only the given primitives — to SVG/PNG/PDF | [actions.md](actions.md), [auto-layout-sop.md](auto-layout-sop.md), [collaboration-workflow.md](collaboration-workflow.md), [design-report.md](design-report.md) +5 |
-| `sch extract-layout` | Reverse-derive a block's schematic_layout template from a placed instance (issue #140) | — |
+| `sch extract-layout` | Reverse-derive a block's schematic_layout template from a placed instance (issue #140) | [standard-blocks-contributing.md](standard-blocks-contributing.md) |
 | `sch frame` | Apply or verify computed module frames and titles from JSON | [actions.md](actions.md), [auto-layout-sop.md](auto-layout-sop.md), [pcb-auto.md](pcb-auto.md), [schematic-data.md](schematic-data.md) +1 |
 | `sch frame apply` | Apply owned dashed frames and titles; matching data performs zero graphics writes | [actions.md](actions.md), [auto-layout-sop.md](auto-layout-sop.md), [pcb-auto.md](pcb-auto.md), [schematic-data.md](schematic-data.md) +1 |
 | `sch frame check` | Read back owned frame geometry and styling; never modify the schematic | [auto-layout-sop.md](auto-layout-sop.md), [schematic-placement.md](schematic-placement.md) |
-| `sch gate` | S5 校验门:按固定顺序跑 layout-lint → check → bridge-check → drc,出一张报告 | [actions.md](actions.md), [auto-layout-sop.md](auto-layout-sop.md), [collaboration-workflow.md](collaboration-workflow.md), [design-flow.md](design-flow.md) +8 |
+| `sch gate` | S5 校验门:按固定顺序跑 layout-lint → check → bridge-check → drc,出一张报告 | [actions.md](actions.md), [auto-layout-sop.md](auto-layout-sop.md), [collaboration-workflow.md](collaboration-workflow.md), [design-flow.md](design-flow.md) +9 |
 | `sch group` | Persistent virtual groups (create/list/add/remove/ungroup) — the platform has NO grouping API | [actions.md](actions.md), [schematic-placement.md](schematic-placement.md) |
 | `sch group add` | Add members to an existing group | — |
 | `sch group create` | Create a group from member designators (CSV); id is auto-assigned (g1, g2, …) | — |
@@ -527,13 +527,13 @@
 | `sch page-rename` | Rename a schematic page | — |
 | `sch pages` | List schematic documents and pages in the current project | [design-pre-analysis.md](design-pre-analysis.md), [recipes/schematic-to-pcb.md](recipes/schematic-to-pcb.md), [review-workflow.md](review-workflow.md) |
 | `sch pin-swap` | Compile a pin-swap item of feedback.json into a guarded sch apply playbook (offline; live-unverified) | [design-flow.md](design-flow.md), [pcb-auto.md](pcb-auto.md), [SKILL.md](../SKILL.md) |
-| `sch place` | Place a component from the device library at coordinates | [actions.md](actions.md), [examples/260919-at32f415/layout-candidates.md](examples/260919-at32f415/layout-candidates.md), [kicad-sch-build.md](kicad-sch-build.md), [kicad.md](kicad.md) +1 |
+| `sch place` | Place a component from the device library at coordinates | [actions.md](actions.md), [examples/260919-at32f415/layout-candidates.md](examples/260919-at32f415/layout-candidates.md), [kicad-sch-build.md](kicad-sch-build.md), [kicad.md](kicad.md) |
 | `sch plan` | Generate a guarded sch apply playbook for explicit marker additions, including NC-to-connected pins (offline) | [actions.md](actions.md), [schematic-data.md](schematic-data.md) |
 | `sch power-layout` | Plan a four-part fixed AMS1117 power circuit offline from measured geometry | [schematic-placement.md](schematic-placement.md) |
 | `sch prim-delete` | Delete schematic primitives of ANY type by id (or the current selection if --ids omitted) | [actions.md](actions.md), [drc-triage.md](drc-triage.md), [schematic-layout-conventions.md](schematic-layout-conventions.md) |
 | `sch read` | One-call semantic snapshot of the circuit (components + nets + check) | [actions.md](actions.md), [examples/260919-at32f415/index.md](examples/260919-at32f415/index.md), [examples/260919-at32f415/ldo-placement.md](examples/260919-at32f415/ldo-placement.md), [pcb-layout.md](pcb-layout.md) +3 |
-| `sch rebind-footprint` | Swap a footprint transactionally (candidate create/readback before original delete) | — |
-| `sch rebind-symbol` | Swap a symbol transactionally (candidate create/readback before original delete) | — |
+| `sch rebind-footprint` | Swap a footprint transactionally (candidate create/readback before original delete) | [schematic.md](schematic.md) |
+| `sch rebind-symbol` | Swap a symbol transactionally (candidate create/readback before original delete) | [schematic.md](schematic.md) |
 | `sch reconcile` | 把「接对了没有」变成机械判据:从块库重推应有连接,与活体网表逐条对账 | [drc-triage.md](drc-triage.md), [evidence-and-verdicts.md](evidence-and-verdicts.md), [review-workflow.md](review-workflow.md) |
 | `sch rename` | Rename a schematic document (the whole sheet, not a single page) | [actions.md](actions.md) |
 | `sch replace` | Replace a placed component with a different library device (换型号 / 器件标准化) | [actions.md](actions.md), [part-selection.md](part-selection.md) |
@@ -566,7 +566,7 @@
 
 | 命令 | 说明 | 文档 |
 |---|---|---|
-| `signoff` | Release sign-off (EasyEDA and KiCad alike): review, LCSC parts, safety, per-segment copper, IR, schematic↔PCB continuity and traceability, manual + report — non-zero unless all pass | [kicad.md](kicad.md), [pcb-auto.md](pcb-auto.md), [prefab-checklist.md](prefab-checklist.md), [review-workflow.md](review-workflow.md) +1 |
+| `signoff` | Release sign-off (EasyEDA and KiCad alike): review, LCSC parts, safety, per-segment copper, IR, schematic↔PCB continuity and traceability, manual + report — non-zero unless all pass | [kicad.md](kicad.md), [pcb-auto.md](pcb-auto.md), [prefab-checklist.md](prefab-checklist.md), [review-workflow.md](review-workflow.md) |
 
 ## sim
 
@@ -578,7 +578,7 @@
 | `sim post-layout` | Post-layout (设计后) verification on the real copper: IR drop, via currents, current density, thermal maps, part temperatures | [board-manual.md](board-manual.md), [design-flow.md](design-flow.md), [design-report.md](design-report.md), [environment-setup.md](environment-setup.md) +9 |
 | `sim power` | DC power simulation: per-net voltage and per-pin current for every scenario | [actions.md](actions.md), [analog-sim.md](analog-sim.md), [design-intent.md](design-intent.md), [design-report.md](design-report.md) +9 |
 | `sim tools` | Check / install the external cross-check simulators (ngspice, Elmer FEM) | [analog-sim.md](analog-sim.md), [design-flow.md](design-flow.md), [design-intent.md](design-intent.md), [environment-setup.md](environment-setup.md) +3 |
-| `sim tools check` | Report path, version, minimum and status (ok/missing/outdated) of each simulator | [environment-setup.md](environment-setup.md), [post-layout-sim.md](post-layout-sim.md), [power-sim.md](power-sim.md), [SKILL.md](../SKILL.md) |
+| `sim tools check` | Report path, version, minimum and status (ok/missing/outdated) of each simulator | [analog-sim.md](analog-sim.md), [environment-setup.md](environment-setup.md), [post-layout-sim.md](post-layout-sim.md), [power-sim.md](power-sim.md) +1 |
 | `sim tools install` | Install missing/outdated simulators with this platform's package manager | [analog-sim.md](analog-sim.md), [design-flow.md](design-flow.md), [design-intent.md](design-intent.md), [environment-setup.md](environment-setup.md) +1 |
 
 ## skill
@@ -594,9 +594,9 @@
 | 命令 | 说明 | 文档 |
 |---|---|---|
 | `spec` | Validate and inspect the S0 design proposal (S0 spec) | [pcb-layout.md](pcb-layout.md) |
-| `spec backfill` | 把 block-apply 落地后的真实位号回填进 spec 的 modules[].parts(离线) | — |
+| `spec backfill` | 把 block-apply 落地后的真实位号回填进 spec 的 modules[].parts(离线) | [pcb-layout.md](pcb-layout.md) |
 | `spec show` | Print the normalized S0 spec (both legacy spellings folded into one shape) | [pcb-layout.md](pcb-layout.md) |
-| `spec validate` | Check an S0 spec for unknown enum values, contradictions and gaps | [pcb-layout.md](pcb-layout.md) |
+| `spec validate` | Check an S0 spec for unknown enum values, contradictions and gaps | [pcb-layout.md](pcb-layout.md), [SKILL.md](../SKILL.md) |
 
 ## update
 
@@ -639,4 +639,4 @@
 | `workflow reset` | Clear deprecated checklist entries (or --all) | — |
 | `workflow status` | Show deprecated checklist state; --reconcile compares it with the live document | [pcb-layout.md](pcb-layout.md) |
 
-共 421 条命令，其中 102 条尚无参考提到。
+共 421 条命令，其中 88 条尚无参考提到。

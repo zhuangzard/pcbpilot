@@ -96,6 +96,7 @@ pcbpilot kicad lcsc --import C6186 --import C25744 --lib-dir ./lib   # 联网；
 ### 4. 把已放置的件刷新到库
 
 这是“实例 ↔ 库”的刷新，和原理图 → PCB 同步是两件事；刷新后再交回 router 做 `pcb import-changes` / PCB 更新。
+KiCad 能否用 `sch-edit` 取决于工程来源，规则见 [kicad-file-safety.md §1 第 4 条](../pcbpilot/references/kicad-file-safety.md#1-四条规则)。
 
 | 场景 | 命令 | 写后必须 |
 |---|---|---|
@@ -103,7 +104,8 @@ pcbpilot kicad lcsc --import C6186 --import C25744 --lib-dir ./lib   # 联网；
 | EasyEDA：同一器件换封装 | `sch rebind-footprint --id <primitiveId> --footprint <名>`（或 `--footprint-uuid` + `--footprint-lib`） | 同上；超时先新鲜读取对账，不重试、不 import-changes |
 | EasyEDA：换成另一个器件 | `sch replace --id <primitiveId> --lcsc <C号>`（或 `--device-uuid` + `--device-lib`） | 读 `pinDiff`，非空就重接线后 `sch check` |
 | EasyEDA：补真实 C 号 | `sch resolve-lcsc`（dry-run）→ `sch resolve-lcsc --apply`，多页逐页 | unresolved 逐个人工判定 |
-| KiCad 原理图：换件 | `kicad sch-edit --project D --spec delta.json`，op `replace_part` | 门禁自动重跑；`kicad sch-read` 回读 |
+| KiCad 原理图：换件（仅 sch-build 生成的工程） | `kicad sch-edit --project D --spec delta.json`，op `replace_part` | 门禁自动重跑；`kicad sch-read` 回读 |
+| KiCad 原理图：手画或导入的工程 | pcbpilot 不改（`UNSUPPORTED`）；交用户在 KiCad 里换符号/封装 | 用户改完后 `kicad sch-read` 回读，对照验收记录 |
 | KiCad PCB：封装从库更新 | pcbpilot **不支持**（`UNSUPPORTED`） | 用户在 PCB 编辑器“从库更新封装”/“从原理图更新 PCB”后，重新 `kicad snapshot` |
 
 ## 决策点
