@@ -21,6 +21,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -138,6 +139,13 @@ func boardCommonFlags(c *cobra.Command, o *kicadBoardOpts, specHelp string) {
 // printing the report and returning the exit code as an error.
 func boardRun(cmd *cobra.Command, stdout io.Writer, op string, o kicadBoardOpts, spec kicad.BoardOpSpec, opFlags []string, fromFlags func() error) error {
 	rep := &kicadBoardReport{Op: op, PCB: o.pcb, Out: o.out, InPlace: o.inPlace}
+	// A report that would land on a board, project, rules or lock file is
+	// refused before anything runs, and then never written.
+	if bad := boardReportAlias(o); bad != "" {
+		boardFail(rep, &kicad.BoardError{Op: op, Issues: []kicad.BoardIssue{{Code: kicad.ErrBoardArg, Field: "report",
+			Detail: "--report " + o.report + " is " + bad, Fix: "write the report to its own .json file"}}})
+		return boardEmit(stdout, rep, "")
+	}
 	err := func() error {
 		if o.spec != "" {
 			for _, f := range opFlags {
@@ -155,8 +163,8 @@ func boardRun(cmd *cobra.Command, stdout io.Writer, op string, o kicadBoardOpts,
 		return fromFlags()
 	}()
 	if err == nil {
-		var tools *kicad.Tools
-		if tools, err = kicad.Locate(); err == nil {
+		var tools kicadBoardTools
+		if tools, err = boardLocate(); err == nil {
 			runKicadBoard(rep, op, spec, o, tools)
 		}
 	}
@@ -164,6 +172,61 @@ func boardRun(cmd *cobra.Command, stdout io.Writer, op string, o kicadBoardOpts,
 		boardFail(rep, err)
 	}
 	return boardEmit(stdout, rep, o.report)
+}
+
+// boardLocate finds KiCad (stubbed in tests).
+var boardLocate = func() (kicadBoardTools, error) {
+	t, err := kicad.Locate()
+	if err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
+// boardSidecars are the files that travel with a board.
+var boardSidecars = []string{".kicad_pro", ".kicad_dru"}
+
+// boardReportAlias says why --report names a file the run reads or writes
+// (a board, its project, rules, local settings or a KiCad lock), or "".
+func boardReportAlias(o kicadBoardOpts) string {
+	if o.report == "" {
+		return ""
+	}
+	low := strings.ToLower(o.report)
+	for _, ext := range []string{".kicad_pcb", ".kicad_pro", ".kicad_dru", ".kicad_prl", ".kicad_sch", ".lck"} {
+		if strings.HasSuffix(low, ext) {
+			return "a KiCad file (" + ext + ")"
+		}
+	}
+	var guarded []string
+	for _, b := range []string{o.pcb, o.out} {
+		if b == "" {
+			continue
+		}
+		base := strings.TrimSuffix(b, filepath.Ext(b))
+		for _, ext := range append([]string{".kicad_pcb", ".kicad_prl"}, boardSidecars...) {
+			guarded = append(guarded, base+ext, kfile.LockPath(base+ext))
+		}
+		guarded = append(guarded, b, kfile.LockPath(b))
+	}
+	for _, g := range guarded {
+		if boardSamePath(o.report, g) {
+			return "the same file as " + g
+		}
+	}
+	return ""
+}
+
+// boardSamePath: a and b name one file — the same cleaned absolute path
+// (ignoring case on Windows and macOS) or, where both exist, the same file.
+func boardSamePath(a, b string) bool {
+	a, b = filepath.Clean(mustAbs(a)), filepath.Clean(mustAbs(b))
+	if a == b || ((runtime.GOOS == "windows" || runtime.GOOS == "darwin") && strings.EqualFold(a, b)) {
+		return true
+	}
+	sa, ea := os.Stat(a)
+	sb, eb := os.Stat(b)
+	return ea == nil && eb == nil && os.SameFile(sa, sb)
 }
 
 // boardEmit prints (and with path writes) the report; the exit code rides
@@ -240,12 +303,13 @@ func runKicadBoard(rep *kicadBoardReport, op string, spec kicad.BoardOpSpec, o k
 	}
 	defer os.RemoveAll(stage)
 	stagedIn, stagedOut := "", filepath.Join(stage, "out", filepath.Base(target))
-	var base kfile.Snapshot
+	var in *boardStaged
 	if op != "new" {
-		if stagedIn, base, err = boardStageInput(o.pcb, filepath.Join(stage, "in")); err != nil {
+		if in, err = boardStageInput(o.pcb, filepath.Join(stage, "in")); err != nil {
 			boardFail(rep, err)
 			return
 		}
+		stagedIn = in.pcb
 	}
 	if err := os.MkdirAll(filepath.Dir(stagedOut), 0o755); err != nil {
 		boardFail(rep, err)
@@ -264,6 +328,10 @@ func runKicadBoard(rep *kicadBoardReport, op string, spec kicad.BoardOpSpec, o k
 		return
 	}
 	rep.Checks = append(rep.Checks, gate.Result{Name: "pcbnew-reload", Status: gate.Parse(res.Verify.Status), Detail: strings.Join(res.Verify.Detail, "; ")})
+	if err := boardStageSidecars(stagedIn, stagedOut); err != nil {
+		boardFail(rep, err)
+		return
+	}
 	if st, ok := spec.(*kicad.StackupSpec); ok {
 		rep.Stackup = st.Rows()
 	}
@@ -279,7 +347,7 @@ func runKicadBoard(rep *kicadBoardReport, op string, spec kicad.BoardOpSpec, o k
 			Fix: "fix the cause named in the failing check and run the op again"})
 		return
 	}
-	plan, err := boardCommit(o, op, target, stagedOut, base)
+	plan, err := boardCommit(o, target, stagedOut, in)
 	if err != nil {
 		rep.Verdict = gate.Fail
 		boardFail(rep, err)
@@ -327,70 +395,126 @@ func boardCheckPaths(op string, o kicadBoardOpts) error {
 	if o.pcb != "" && mustAbs(o.pcb) == mustAbs(o.out) {
 		return bad("out", "--out is --pcb", "use --in-place to replace the input, or another --out")
 	}
-	if _, err := os.Lstat(o.out); err == nil {
-		return &kicad.BoardError{Op: op, Issues: []kicad.BoardIssue{{Code: kicad.ErrBoardOutExists, Field: "out",
-			Detail: o.out + " already exists", Fix: "choose a new --out, or change that board with --pcb " + o.out + " --in-place"}}}
+	base := strings.TrimSuffix(o.out, ".kicad_pcb")
+	for _, p := range []string{o.out, base + ".kicad_pro", base + ".kicad_dru"} {
+		if _, err := os.Lstat(p); err == nil {
+			return &kicad.BoardError{Op: op, Issues: []kicad.BoardIssue{{Code: kicad.ErrBoardOutExists, Field: "out",
+				Detail: p + " already exists (the result's board, project and rules are all new files)",
+				Fix:    "choose a new --out, or change that board with --pcb " + o.out + " --in-place"}}}
+		}
 	}
 	return nil
 }
 
-// boardStageInput copies pcb and its project files into dir and returns
-// the staged board and the snapshot of the bytes copied.
-func boardStageInput(pcb, dir string) (string, kfile.Snapshot, error) {
+// boardStaged is the staged input: the board copy and the snapshot of
+// every source file the run read (a missing sidecar as an absent
+// snapshot), which the commit compares against the files once more.
+type boardStaged struct {
+	pcb   string
+	board kfile.Snapshot
+	side  []kfile.Snapshot
+}
+
+// boardStageInput copies pcb and its sidecars (exactly the bytes it read)
+// into dir.
+func boardStageInput(pcb, dir string) (*boardStaged, error) {
 	data, snap, err := kfile.Read(pcb)
 	if err != nil {
-		return "", snap, err
+		return nil, err
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", snap, err
+		return nil, err
 	}
-	staged := filepath.Join(dir, filepath.Base(pcb))
-	if err := os.WriteFile(staged, data, 0o644); err != nil {
-		return "", snap, err
+	st := &boardStaged{pcb: filepath.Join(dir, filepath.Base(pcb)), board: snap}
+	if err := os.WriteFile(st.pcb, data, 0o644); err != nil {
+		return nil, err
 	}
-	for _, ext := range []string{".kicad_pro", ".kicad_dru"} {
+	for _, ext := range boardSidecars {
 		src := strings.TrimSuffix(pcb, ".kicad_pcb") + ext
-		b, err := os.ReadFile(src)
+		b, ss, err := kfile.Read(src)
+		if os.IsNotExist(err) {
+			st.side = append(st.side, kfile.Snapshot{Path: src})
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		st.side = append(st.side, ss)
+		if err := os.WriteFile(strings.TrimSuffix(st.pcb, ".kicad_pcb")+ext, b, 0o644); err != nil {
+			return nil, err
+		}
+	}
+	return st, nil
+}
+
+// boardStageSidecars puts the project files of the result next to the
+// staged output BEFORE it is verified, so DRC sees the input's rules and
+// the commit writes exactly the verified bytes: the staged input's
+// .kicad_pro / .kicad_dru (whatever pcbnew wrote is replaced); for a new
+// board pcbnew's project, or a minimal one.
+func boardStageSidecars(stagedIn, stagedOut string) error {
+	ob := strings.TrimSuffix(stagedOut, ".kicad_pcb")
+	if stagedIn == "" {
+		if _, err := os.Stat(ob + ".kicad_pro"); os.IsNotExist(err) {
+			return os.WriteFile(ob+".kicad_pro", kicad.MinimalProject(stagedOut), 0o644)
+		}
+		return nil
+	}
+	ib := strings.TrimSuffix(stagedIn, ".kicad_pcb")
+	if err := os.Remove(ob + ".kicad_prl"); err != nil && !os.IsNotExist(err) {
+		return err // local view settings: not part of the result
+	}
+	for _, ext := range boardSidecars {
+		if err := os.Remove(ob + ext); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		b, err := os.ReadFile(ib + ext)
 		if os.IsNotExist(err) {
 			continue
 		}
 		if err != nil {
-			return "", snap, err
+			return err
 		}
-		if err := os.WriteFile(strings.TrimSuffix(staged, ".kicad_pcb")+ext, b, 0o644); err != nil {
-			return "", snap, err
+		if err := os.WriteFile(ob+ext, b, 0o644); err != nil {
+			return err
 		}
 	}
-	return staged, snap, nil
+	return nil
 }
 
-// boardCommit writes the staged result with one kfile transaction.
-func boardCommit(o kicadBoardOpts, op, target, stagedOut string, base kfile.Snapshot) (kfile.Plan, error) {
+// boardCommit writes the staged result with one kfile transaction:
+// --in-place the board only (compare-and-swap against the staged bytes),
+// --out the board and the staged sidecars (all new files). Every source
+// file the run read must still hold the bytes it was staged from.
+func boardCommit(o kicadBoardOpts, target, stagedOut string, in *boardStaged) (kfile.Plan, error) {
 	t := kfile.NewTxn(filepath.Dir(mustAbs(target)))
 	defer t.Abort()
 	if o.inPlace {
-		if err := t.StageFile(target, stagedOut, &base); err != nil {
+		if err := t.StageFile(target, stagedOut, &in.board); err != nil {
 			return kfile.Plan{}, err
 		}
 	} else {
 		if err := t.StageFile(target, stagedOut, nil); err != nil {
 			return kfile.Plan{}, err
 		}
-		// The project: pcbnew wrote one next to the staged board; an
-		// existing project file at the destination is kept.
-		for _, ext := range []string{".kicad_pro", ".kicad_dru"} {
+		for _, ext := range boardSidecars {
 			src := strings.TrimSuffix(stagedOut, ".kicad_pcb") + ext
-			if ext == ".kicad_dru" && o.pcb != "" {
-				src = strings.TrimSuffix(o.pcb, ".kicad_pcb") + ext
-			}
-			dst := strings.TrimSuffix(target, ".kicad_pcb") + ext
 			if _, err := os.Stat(src); err != nil {
 				continue
 			}
-			if _, err := os.Lstat(dst); err == nil {
-				continue
+			if err := t.StageFile(strings.TrimSuffix(target, ".kicad_pcb")+ext, src, nil); err != nil {
+				return kfile.Plan{}, err
 			}
-			if err := t.StageFile(dst, src, nil); err != nil {
+		}
+	}
+	if in != nil {
+		for _, s := range in.side {
+			if err := s.Check(); err != nil {
+				return kfile.Plan{}, err
+			}
+		}
+		if !o.inPlace {
+			if err := in.board.Check(); err != nil {
 				return kfile.Plan{}, err
 			}
 		}

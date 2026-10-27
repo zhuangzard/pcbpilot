@@ -9,17 +9,18 @@
 #   python board.py new - SPEC.json OUT.kicad_pcb
 #
 # OP: new | outline | stackup | holes | keepout | zone | text. SPEC is what
-# board.go sends: every length in mm in KiCad's frame (y down), every shape
-# already turned into primitives ("prims": segment / arc / circle) and a
-# sampled polygon ("samples") for the containment checks. Go has checked the
-# numbers and the geometry; this script checks what needs the board (enabled
-# layers, nets, the existing outline, items on layers a stackup removes,
-# overlaps with pads) BEFORE changing anything, then applies the op, saves
-# OUT, loads OUT again and verifies it.
+# board.go sends: every length in mm in KiCad's frame (y down); every shape
+# as primitives to draw ("prims"), its exact boundary ("edges": segments and
+# arcs) and parameters ("shape") for the containment checks, and a polygon
+# ("samples") for zones and rule areas. Go has checked the numbers and the
+# geometry; this script checks what needs the board (enabled layers, nets,
+# the outline, items on layers a stackup removes, pads, vias and holes)
+# BEFORE changing anything, then applies the op, saves OUT, loads OUT again
+# and compares every requested property with what was read back.
 #
 # One result line on stdout: PCBPILOT_JSON:{...}. A refusal is
 # {"ok": false, "problems": [{"code", "field", "detail", "fix"}]} with exit
-# status 1 and OUT not written; a verification failure is code
+# status 1 and OUT not written; a failed fill or read-back is code
 # E_BOARD_VERIFY (OUT may exist then: the Go side never commits it).
 #
 # Only KiCad's public Python API (pcbnew) is used, except for the stackup:
@@ -37,6 +38,13 @@ import pcbnew
 
 PREFIX = "PCBPILOT_JSON:"
 
+# Two boundaries closer than this (mm) touch: board_geom.go BoardTol.
+TOL = 0.001
+# Read-back tolerance (mm): values are stored in nm.
+EXACT = 1.5e-6
+# Arc mid points are re-derived by KiCad on load.
+ARC_TOL = 0.002
+
 # KiCad 6-9 short layer names that 10 still writes in the file but no
 # longer resolves by name.
 LEGACY_LAYERS = {
@@ -48,6 +56,7 @@ LEGACY_LAYERS = {
 TEXT_LAYERS = ("F.Silkscreen", "B.Silkscreen", "F.Fab", "B.Fab")
 
 FIX_LAYER = "use a layer the board has enabled (listed in the detail); add copper layers with `pcbpilot kicad board stackup --layers N`"
+FIX_VERIFY = "nothing was committed; report this with the JSON report (do not edit the file by hand)"
 
 
 def emit(obj, code=0):
@@ -59,6 +68,10 @@ def emit(obj, code=0):
 class Problems(list):
     def add(self, code, field, detail, fix=""):
         self.append({"code": code, "field": field, "detail": detail, "fix": fix})
+
+
+class VerifyError(Exception):
+    """A fill or read-back that failed: reported as E_BOARD_VERIFY."""
 
 
 def nm(v):
@@ -73,8 +86,175 @@ def vec(p):
     return pcbnew.VECTOR2I(nm(p[0]), nm(p[1]))
 
 
+def xy_mm(v):
+    return [mm(v.x), mm(v.y)]
+
+
 def uuid_of(item):
     return item.m_Uuid.AsString()
+
+
+def fmt_num(v):
+    return ("%.3f" % v).rstrip("0").rstrip(".")
+
+
+# ── exact geometry (the formulas of board_geom.go) ──────────────────────────
+
+def dist(a, b):
+    return math.hypot(a[0] - b[0], a[1] - b[1])
+
+
+def pt_seg(p, a, b):
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    l2 = dx * dx + dy * dy
+    if l2 == 0:
+        return dist(p, a)
+    t = max(0.0, min(1.0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2))
+    return dist(p, (a[0] + t * dx, a[1] + t * dy))
+
+
+def _cross(o, a, b):
+    return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+
+def _on_seg(a, b, p):
+    return (min(a[0], b[0]) - 1e-9 <= p[0] <= max(a[0], b[0]) + 1e-9 and
+            min(a[1], b[1]) - 1e-9 <= p[1] <= max(a[1], b[1]) + 1e-9)
+
+
+def segs_touch(a, b, c, d):
+    d1, d2, d3, d4 = _cross(c, d, a), _cross(c, d, b), _cross(a, b, c), _cross(a, b, d)
+    if ((d1 > 0 > d2) or (d1 < 0 < d2)) and ((d3 > 0 > d4) or (d3 < 0 < d4)):
+        return True
+    e = 1e-12
+    return ((abs(d1) < e and _on_seg(c, d, a)) or (abs(d2) < e and _on_seg(c, d, b)) or
+            (abs(d3) < e and _on_seg(a, b, c)) or (abs(d4) < e and _on_seg(a, b, d)))
+
+
+def seg_seg(a, b, c, d):
+    if segs_touch(a, b, c, d):
+        return 0.0
+    return min(pt_seg(a, c, d), pt_seg(b, c, d), pt_seg(c, a, b), pt_seg(d, a, b))
+
+
+def _full(arc):
+    return abs(arc[4]) >= 2 * math.pi - 1e-12
+
+
+def in_span(arc, t):
+    if _full(arc):
+        return True
+    d = t - arc[3]
+    if arc[4] < 0:
+        d = -d
+    d = math.fmod(d, 2 * math.pi)
+    if d < 0:
+        d += 2 * math.pi
+    return d <= abs(arc[4]) + 1e-12 or d >= 2 * math.pi - 1e-12
+
+
+def arc_ends(arc):
+    if _full(arc):
+        return []
+    cx, cy, r, a0, sw = arc
+    return [(cx + r * math.cos(a0), cy + r * math.sin(a0)), (cx + r * math.cos(a0 + sw), cy + r * math.sin(a0 + sw))]
+
+
+def pt_arc(p, arc):
+    c = (arc[0], arc[1])
+    d = dist(p, c)
+    if d < 1e-12:
+        return arc[2]
+    if in_span(arc, math.atan2(p[1] - c[1], p[0] - c[0])):
+        return abs(d - arc[2])
+    return min([dist(p, q) for q in arc_ends(arc)] or [math.inf])
+
+
+def seg_arc(a, b, arc):
+    cx, cy, r = arc[0], arc[1], arc[2]
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    fx, fy = a[0] - cx, a[1] - cy
+    A, B, C = dx * dx + dy * dy, 2 * (fx * dx + fy * dy), fx * fx + fy * fy - r * r
+    if A > 0:
+        disc = B * B - 4 * A * C
+        if disc >= 0:
+            sq = math.sqrt(disc)
+            for t in ((-B - sq) / (2 * A), (-B + sq) / (2 * A)):
+                if -1e-12 <= t <= 1 + 1e-12:
+                    x, y = a[0] + t * dx, a[1] + t * dy
+                    if in_span(arc, math.atan2(y - cy, x - cx)):
+                        return 0.0
+    best = min(pt_arc(a, arc), pt_arc(b, arc))
+    for q in arc_ends(arc):
+        best = min(best, pt_seg(q, a, b))
+    t = max(0.0, min(1.0, -(fx * dx + fy * dy) / A)) if A > 0 else 0.0
+    q = (a[0] + t * dx, a[1] + t * dy)
+    d = dist(q, (cx, cy))
+    if d > 1e-12 and in_span(arc, math.atan2(q[1] - cy, q[0] - cx)):
+        best = min(best, abs(d - r))
+    return best
+
+
+def seg_edge(a, b, e):
+    """Distance from segment a→b to an edge {"seg": [...]} or {"arc": [...]}."""
+    if "seg" in e:
+        s = e["seg"]
+        return seg_seg(a, b, (s[0], s[1]), (s[2], s[3]))
+    return seg_arc(a, b, e["arc"])
+
+
+def edge_start(e):
+    if "seg" in e:
+        return (e["seg"][0], e["seg"][1])
+    cx, cy, r, a0, _ = e["arc"]
+    return (cx + r * math.cos(a0), cy + r * math.sin(a0))
+
+
+def point_in_poly(pts, p):
+    inside, j = False, len(pts) - 1
+    for i in range(len(pts)):
+        a, b = pts[i], pts[j]
+        if (a[1] > p[1]) != (b[1] > p[1]) and p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0]:
+            inside = not inside
+        j = i
+    return inside
+
+
+def sdf(shape, p):
+    """Exact signed distance from p to a shape {"rect"|"circle"|"slot"|"polygon": ...} (< 0 inside)."""
+    if shape.get("circle"):
+        c = shape["circle"]
+        return dist(p, (c["x"], c["y"])) - c["diameter"] / 2
+    if shape.get("slot"):
+        s = shape["slot"]
+        return pt_seg(p, (s["x1"], s["y1"]), (s["x2"], s["y2"])) - s["width"] / 2
+    if shape.get("rect"):
+        r = shape["rect"]
+        rad = r.get("cornerRadius", 0) or 0
+        qx = abs(p[0] - (r["x"] + r["width"] / 2)) - (r["width"] / 2 - rad)
+        qy = abs(p[1] - (r["y"] + r["height"] / 2)) - (r["height"] / 2 - rad)
+        return math.hypot(max(qx, 0), max(qy, 0)) + min(max(qx, qy), 0) - rad
+    pts = shape["polygon"]
+    d = min(pt_seg(p, pts[i], pts[(i + 1) % len(pts)]) for i in range(len(pts)))
+    return -d if point_in_poly(pts, p) else d
+
+
+def fits(contours, contains, item):
+    """None when the shape item ({"edges", "shape"}) lies on the board — its
+    boundary more than TOL from every contour (outline and cutouts), a point
+    of it on the board, no contour inside it — else why not. contains(p) is
+    the board's own point test."""
+    for e in item["edges"]:
+        for c in contours:
+            for i in range(len(c)):
+                if seg_edge(c[i], c[(i + 1) % len(c)], e) <= TOL:
+                    return "its edge crosses or touches the board outline or a cutout (keep more than %g mm away)" % TOL
+    if not contains(edge_start(item["edges"][0])):
+        return "it lies outside the board outline or inside a cutout"
+    for c in contours:
+        if c and sdf(item["shape"], c[0]) < 0:
+            return "it encloses an existing cutout or the whole outline"
+    return None
 
 
 # ── layers and nets ─────────────────────────────────────────────────────────
@@ -136,7 +316,35 @@ def find_net(board, name, field, P):
     return None
 
 
-# ── outline ─────────────────────────────────────────────────────────────────
+# ── read-back comparison ────────────────────────────────────────────────────
+
+def same(want, got, tol):
+    if isinstance(want, bool) or isinstance(got, bool):
+        return type(want) is type(got) and want == got
+    if isinstance(want, (int, float)) and isinstance(got, (int, float)):
+        return abs(want - got) <= tol
+    if isinstance(want, (list, tuple)) and isinstance(got, (list, tuple)):
+        return len(want) == len(got) and all(same(a, b, tol) for a, b in zip(want, got))
+    if isinstance(want, dict) and isinstance(got, dict):
+        return not compare("", want, got, tol)
+    return want == got
+
+
+def compare(label, want, got, tol=EXACT):
+    """Every key of want that got does not match (numbers within tol)."""
+    out = []
+    for k, w in want.items():
+        g = got.get(k, "<missing>")
+        if not same(w, g, tol):
+            out.append("%s%s: read back %s, expected %s" % (label + " " if label else "", k, json.dumps(g), json.dumps(w)))
+    return out
+
+
+def rnd(p):
+    return [round(p[0], 6), round(p[1], 6)]
+
+
+# ── board outline ───────────────────────────────────────────────────────────
 
 def edge_drawings(board):
     """Board-level drawings on Edge.Cuts (footprint edge cuts are the footprint's own)."""
@@ -158,9 +366,23 @@ def largest(ps):
     return max(range(ps.OutlineCount()), key=lambda i: abs(ps.Outline(i).Area()))
 
 
-def inside_board(ps, samples):
-    """Every sample point is on the board (inside an outline, outside its cutouts)."""
-    return all(ps.Contains(vec(p)) for p in samples)
+def chain_mm(ch):
+    return [(mm(ch.CPoint(i).x), mm(ch.CPoint(i).y)) for i in range(ch.PointCount())]
+
+
+def board_contours(ps):
+    """Every outline and cutout of the board as a point list (mm). Arcs in
+    Edge.Cuts arrive as KiCad's own polyline (its max-error approximation)."""
+    out = []
+    for i in range(ps.OutlineCount()):
+        out.append(chain_mm(ps.Outline(i)))
+        for j in range(ps.HoleCount(i)):
+            out.append(chain_mm(ps.Hole(i, j)))
+    return out
+
+
+def fits_board(ps, item):
+    return fits(board_contours(ps), lambda p: ps.Contains(vec(p)), item)
 
 
 def add_prims(board, prims, layer, width):
@@ -189,16 +411,61 @@ def add_prims(board, prims, layer, width):
     return made
 
 
+def read_edge(d):
+    k = d.GetShape()
+    if k == pcbnew.SHAPE_T_SEGMENT:
+        return {"kind": "segment", "start": xy_mm(d.GetStart()), "end": xy_mm(d.GetEnd())}
+    if k == pcbnew.SHAPE_T_ARC:
+        return {"kind": "arc", "start": xy_mm(d.GetStart()), "mid": xy_mm(d.GetArcMid()), "end": xy_mm(d.GetEnd())}
+    if k == pcbnew.SHAPE_T_CIRCLE:
+        return {"kind": "circle", "center": xy_mm(d.GetCenter()), "radius": mm(d.GetRadius())}
+    return {"kind": "shape %d" % k}
+
+
+def canon_edge(e):
+    """e with its end points in a fixed order: KiCad stores arcs counter-
+    clockwise (it swaps start and end of a clockwise one) and the direction
+    of an outline piece does not matter."""
+    e = dict(e)
+    if "start" in e and "end" in e and list(e["end"]) < list(e["start"]):
+        e["start"], e["end"] = e["end"], e["start"]
+    return e
+
+
+def expect_edge(p):
+    return canon_edge({k: v for k, v in p.items() if k in ("kind", "start", "mid", "end", "center", "radius")})
+
+
+def fill_zones(board):
+    """Regenerate every copper zone fill: unfill first (so a fill that is
+    only still present cannot pass), fill with pcbnew's filler, and fail
+    unless it reports success and every zone is filled again."""
+    zones = board.Zones()
+    copper = [z for z in zones if not z.GetIsRuleArea()]
+    for z in copper:
+        z.UnFill()
+    try:
+        ok = pcbnew.ZONE_FILLER(board).Fill(zones)
+    except Exception as e:
+        raise VerifyError("the zone filler failed: %s: %s" % (type(e).__name__, e))
+    if not ok:
+        raise VerifyError("the zone filler reported failure")
+    stale = [z.GetZoneName() or uuid_of(z) for z in copper if not z.IsFilled()]
+    if stale:
+        raise VerifyError("zones not filled after the fill: %s" % ", ".join(stale))
+    return len(copper)
+
+
 def refill_filled(board, res):
     """Refill the board's zones when any is filled: a new edge, hole or
     keepout changes what the fills may cover, and a stale fill is a DRC
     error (zone in a keepout, unconnected new PTH pad)."""
-    zones = board.Zones()
-    if not any(z.IsFilled() for z in zones if not z.GetIsRuleArea()):
+    if not any(z.IsFilled() for z in board.Zones() if not z.GetIsRuleArea()):
         return res
-    pcbnew.ZONE_FILLER(board).Fill(zones)
-    res.setdefault("warnings", []).append("refilled the board's %d zone(s): the change affects their fills" % len(zones))
-    res.setdefault("summary", {})["zonesRefilled"] = len(zones)
+    n = fill_zones(board)
+    res.setdefault("warnings", []).append("refilled the board's %d zone(s): the change affects their fills" % n)
+    res.setdefault("summary", {})["zonesRefilled"] = n
+    res["filled"] = True
     return res
 
 
@@ -219,8 +486,9 @@ def op_outline(board, spec, P):
         else:
             holes_before = ps.HoleCount(largest(ps))
             for i, c in enumerate(cutouts):
-                if not inside_board(ps, c["samples"]):
-                    P.add("E_BOARD_GEOMETRY", "cutouts[%d]" % i, "the %s cutout is not wholly inside the board (or overlaps an existing cutout)" % c["kind"],
+                why = fits_board(ps, c)
+                if why:
+                    P.add("E_BOARD_GEOMETRY", "cutouts[%d]" % i, "the %s cutout does not fit: %s" % (c["kind"], why),
                           "move it inside the outline, away from the edge and other cutouts")
     if P:
         return None
@@ -229,19 +497,20 @@ def op_outline(board, spec, P):
         for d in existing:
             removed.append({"kind": "edge", "uuid": uuid_of(d)})
             board.Remove(d)
-    created = []
+    created, want = [], {}
     w = spec.get("lineWidth") or 0.05
+    for shp in ([outer] if outer else []) + cutouts:
+        made = add_prims(board, shp["prims"], pcbnew.Edge_Cuts, w)
+        for m, p in zip(made, shp["prims"]):
+            want[m["uuid"]] = expect_edge(p)
+        created += made
+    expect = {"holes": holes_before + len(cutouts), "edges": want, "lineWidth": w}
     if outer:
-        created += add_prims(board, outer["prims"], pcbnew.Edge_Cuts, w)
-    for c in cutouts:
-        created += add_prims(board, c["prims"], pcbnew.Edge_Cuts, w)
-    want = {"holes": holes_before + len(cutouts)}
-    if outer:
-        want["bbox"] = outer["bbox"]
-    return refill_filled(board, {"created": created, "removed": removed, "expect": want})
+        expect["bbox"] = outer["bbox"]
+    return refill_filled(board, {"created": created, "removed": removed, "expect": expect})
 
 
-def verify_outline(board, res, V):
+def verify_outline(board, spec, res, V):
     ps = board_polys(board)
     if ps is None:
         V.append("no closed board outline after the write")
@@ -253,8 +522,19 @@ def verify_outline(board, res, V):
     if "bbox" in exp:
         bb = ps.Outline(i).BBox()
         got = [mm(bb.GetX()), mm(bb.GetY()), mm(bb.GetX() + bb.GetWidth()), mm(bb.GetY() + bb.GetHeight())]
-        if any(abs(a - b) > 0.01 for a, b in zip(got, exp["bbox"])):
+        if not same(exp["bbox"], got, 0.01):
             V.append("outline bbox %s, expected %s (mm)" % (got, exp["bbox"]))
+    drawings = {uuid_of(d): d for d in board.GetDrawings()}
+    for u, want in exp["edges"].items():
+        d = drawings.get(u)
+        if d is None or d.GetLayer() != pcbnew.Edge_Cuts:
+            V.append("Edge.Cuts drawing %s missing after the write" % u)
+            continue
+        V += compare("edge " + u, want, canon_edge(read_edge(d)), ARC_TOL if want["kind"] == "arc" else EXACT)
+        V += compare("edge " + u, {"width": exp["lineWidth"]}, {"width": mm(d.GetWidth())})
+    for r in res.get("removed", []):
+        if r["uuid"] in drawings:
+            V.append("replaced Edge.Cuts drawing %s is still on the board" % r["uuid"])
     res.setdefault("summary", {}).update({"outlines": ps.OutlineCount(), "cutouts": ps.HoleCount(i)})
 
 
@@ -339,7 +619,49 @@ def stackup_text(text):
     return text[st[0]:st[1]] if st else ""
 
 
-def op_stackup(board, spec, P, out):
+STACKUP_FIELDS = {"type": "type", "thickness": "thickness", "material": "material", "epsilon_r": "epsilonR", "loss_tangent": "lossTangent"}
+
+
+def read_stackup(block):
+    """(rows, finish) of a (stackup ...) block: each layer's name, type,
+    thickness (0 when absent) and, where written, material / epsilonR /
+    lossTangent."""
+    rows = []
+    for s, e, head in sexpr_children(block, 0):
+        if head != "layer":
+            continue
+        chunk = block[s:e]
+        m = re.match(r'\(layer\s+"([^"]*)"', chunk)
+        row = {"name": m.group(1) if m else "", "thickness": 0}
+        for fs, fe, fh in sexpr_children(chunk, 0):
+            if fh in STACKUP_FIELDS:
+                v = chunk[fs + 1 + len(fh):fe - 1].strip()
+                if v.startswith('"'):
+                    v = v[1:-1]
+                else:
+                    try:
+                        v = float(v)
+                    except ValueError:
+                        pass
+                row[STACKUP_FIELDS[fh]] = v
+        rows.append(row)
+    f = re.search(r'\(copper_finish\s+"([^"]*)"\)', block)
+    return rows, f.group(1) if f else None
+
+
+def check_stackup_rows(want_rows, got_rows, want_finish, got_finish):
+    V = []
+    if [r["name"] for r in got_rows] != [r["name"] for r in want_rows]:
+        V.append("stackup layers %s, expected %s" % ([r["name"] for r in got_rows], [r["name"] for r in want_rows]))
+        return V
+    for w, g in zip(want_rows, got_rows):
+        V += compare("stackup " + w["name"], w, g)
+    if got_finish != want_finish:
+        V.append("stackup copper_finish %r, expected %r" % (got_finish, want_finish))
+    return V
+
+
+def op_stackup(board, spec, P):
     n = spec["layers"]
     cur = board.GetCopperLayerCount()
     if n < cur:
@@ -352,10 +674,8 @@ def op_stackup(board, spec, P, out):
     if P:
         return None
     board.SetCopperLayerCount(n)
-    ds = board.GetDesignSettings()
-    ds.SetBoardThickness(nm(spec["thickness"]))
-    return {"created": [], "removed": [], "summary": {"copperLayersBefore": cur, "copperLayers": n, "thickness": spec["thickness"], "finish": spec["finish"]},
-            "post": "stackup"}
+    board.GetDesignSettings().SetBoardThickness(nm(spec["thickness"]))
+    return {"created": [], "removed": [], "summary": {"copperLayersBefore": cur, "copperLayers": n, "thickness": spec["thickness"], "finish": spec["finish"]}}
 
 
 def write_stackup(out, block):
@@ -375,35 +695,59 @@ def verify_stackup(board, spec, out, res, V):
     ds = board.GetDesignSettings()
     if not ds.m_HasStackup:
         V.append("the saved board has no stackup")
-    if abs(mm(ds.GetBoardThickness()) - spec["thickness"]) > 0.001:
-        V.append("board thickness %.4f mm, expected %.4f mm" % (mm(ds.GetBoardThickness()), spec["thickness"]))
+    if abs(mm(ds.GetBoardThickness()) - spec["thickness"]) > EXACT:
+        V.append("board thickness %.6f mm, expected %.6f mm" % (mm(ds.GetBoardThickness()), spec["thickness"]))
     with open(out, encoding="utf-8") as f:
-        block = stackup_text(f.read())
-    if '(copper_finish "%s")' % spec["finish"] not in block:
-        V.append("copper finish %s not in the saved stackup" % spec["finish"])
-    copper = re.findall(r'\(layer\s+"([^"]+)"\s*\(type\s+"copper"\)', block)
-    want = ["F.Cu"] + ["In%d.Cu" % k for k in range(1, spec["layers"] - 1)] + ["B.Cu"]
-    if copper != want:
-        V.append("stackup copper layers %s, expected %s" % (copper, want))
-    res["summary"]["stackupLayers"] = len(re.findall(r'\(layer\s+"', block))
+        rows, finish = read_stackup(stackup_text(f.read()))
+    V += check_stackup_rows(spec["rows"], rows, spec["finish"], finish)
+    res["summary"]["stackupLayers"] = len(rows)
 
 
 # ── holes ───────────────────────────────────────────────────────────────────
 
-def pad_hits(board, x, y, r):
-    """Designators of footprints with a pad whose bbox comes within r of (x, y)."""
-    hits = []
+def via_width(v):
+    try:
+        return v.GetWidth(pcbnew.F_Cu)
+    except TypeError:
+        return v.GetWidth()
+
+
+def hole_conflicts(board, h):
+    """Why the new hole h cannot go where it is: an existing pad's copper,
+    a via's copper, or a drill closer than the board's hole-to-hole minimum
+    (an NPTH also keeps the hole clearance from via copper)."""
+    ds = board.GetDesignSettings()
+    h2h, hclr = mm(ds.m_HoleToHoleMin), mm(ds.m_HoleClearance)
+    x, y, rd, rp = h["x"], h["y"], h["drill"] / 2, h["pad"] / 2
+    pth = h["type"] == "pth"
+    out = []
+    for t in board.GetTracks():
+        if t.Type() != pcbnew.PCB_VIA_T:
+            continue
+        vx, vy = mm(t.GetPosition().x), mm(t.GetPosition().y)
+        d = math.hypot(vx - x, vy - y)
+        vcu, vdr = mm(via_width(t)) / 2, mm(t.GetDrillValue()) / 2
+        if pth and d < rp + vcu:
+            out.append("the pad overlaps the copper of the via at (%s, %s)" % (fmt_num(vx), fmt_num(vy)))
+        elif d - rd - vdr < h2h:
+            out.append("the drill is %.3f mm from the via drill at (%s, %s); the board's hole-to-hole minimum is %g mm" % (d - rd - vdr, fmt_num(vx), fmt_num(vy), h2h))
+        elif not pth and d - rd - vcu < hclr:
+            out.append("the hole is %.3f mm from the copper of the via at (%s, %s); the board's hole clearance is %g mm" % (d - rd - vcu, fmt_num(vx), fmt_num(vy), hclr))
     for fp in board.GetFootprints():
         for p in fp.Pads():
             bb = p.GetBoundingBox()
             x0, y0 = mm(bb.GetX()), mm(bb.GetY())
             x1, y1 = x0 + mm(bb.GetWidth()), y0 + mm(bb.GetHeight())
-            dx = max(x0 - x, 0, x - x1)
-            dy = max(y0 - y, 0, y - y1)
-            if math.hypot(dx, dy) < r:
-                hits.append(fp.GetReference())
+            if math.hypot(max(x0 - x, 0, x - x1), max(y0 - y, 0, y - y1)) < rp:
+                out.append("it lands on a pad of %s" % fp.GetReference())
                 break
-    return hits
+            if p.GetDrillSizeX() > 0:
+                px, py = mm(p.GetPosition().x), mm(p.GetPosition().y)
+                gap = math.hypot(px - x, py - y) - rd - mm(max(p.GetDrillSizeX(), p.GetDrillSizeY())) / 2
+                if gap < h2h:
+                    out.append("the drill is %.3f mm from the drill of %s pad %s; the board's hole-to-hole minimum is %g mm" % (gap, fp.GetReference(), p.GetNumber(), h2h))
+                    break
+    return out
 
 
 def next_refs(board, count, taken):
@@ -418,35 +762,38 @@ def next_refs(board, count, taken):
     return out
 
 
-def fmt_num(v):
-    return ("%.3f" % v).rstrip("0").rstrip(".")
-
-
 def op_holes(board, spec, P):
     holes = spec["holes"]
     ps = board_polys(board)
+    if ps is None:
+        what = "Edge.Cuts is not one closed outline" if edge_drawings(board) else "the board has no outline"
+        P.add("E_BOARD_NO_OUTLINE", "holes", "%s: hole positions cannot be checked" % what,
+              "draw a closed outline first (`kicad board outline`)")
+        return None
+    h2h = mm(board.GetDesignSettings().m_HoleToHoleMin)
     used = {fp.GetReference() for fp in board.GetFootprints()}
     nets = []
     for i, h in enumerate(holes):
         f = "holes[%d]" % i
+        at = "the hole at (%s, %s)" % (fmt_num(h["x"]), fmt_num(h["y"]))
         net = None
         if h.get("net"):
             net = find_net(board, h["net"], f + ".net", P)
         nets.append(net)
         if h.get("ref") and h["ref"] in used:
             P.add("E_BOARD_REF_EXISTS", f + ".ref", "%s is already on the board" % h["ref"], "give another designator or omit it (the next free H<n> is used)")
-        if ps is not None and not inside_board(ps, h["samples"]):
-            P.add("E_BOARD_GEOMETRY", f, "the hole at (%s, %s) is not wholly inside the board outline" % (fmt_num(h["x"]), fmt_num(h["y"])),
-                  "move it inside the outline (away from the edge and cutouts)")
-        hit = pad_hits(board, h["x"], h["y"], h["pad"] / 2)
-        if hit:
-            P.add("E_BOARD_OVERLAP", f, "the hole at (%s, %s) lands on pads of %s" % (fmt_num(h["x"]), fmt_num(h["y"]), ", ".join(sorted(set(hit)))),
-                  "move the hole clear of existing pads")
+        why = fits_board(ps, h)
+        if why:
+            P.add("E_BOARD_GEOMETRY", f, "%s does not fit on the board: %s" % (at, why), "move it inside the outline, away from the edge and cutouts")
+        for why in hole_conflicts(board, h):
+            P.add("E_BOARD_OVERLAP", f, "%s: %s" % (at, why), "move the hole clear of existing pads, vias and holes")
+        for j in range(i):
+            o = holes[j]
+            gap = math.hypot(o["x"] - h["x"], o["y"] - h["y"]) - (o["drill"] + h["drill"]) / 2
+            if gap < h2h:
+                P.add("E_BOARD_OVERLAP", f, "%s is %.3f mm from holes[%d]; the board's hole-to-hole minimum is %g mm" % (at, gap, j, h2h), "move the holes apart")
     if P:
         return None
-    warnings = []
-    if ps is None:
-        warnings.append("the board has no closed outline: hole positions were not checked against it")
     auto = next_refs(board, sum(1 for h in holes if not h.get("ref")), [h["ref"] for h in holes if h.get("ref")])
     created = []
     for h, net in zip(holes, nets):
@@ -492,7 +839,24 @@ def op_holes(board, spec, P):
         fp.SetLocked(True)
         board.Add(fp)
         created.append({"kind": "mounting-hole", "uuid": uuid_of(fp), "name": ref})
-    return refill_filled(board, {"created": created, "removed": [], "warnings": warnings})
+    return refill_filled(board, {"created": created, "removed": []})
+
+
+def expect_hole(h, ref):
+    return {"ref": ref, "x": h["x"], "y": h["y"], "padPos": [h["x"], h["y"]], "drill": [h["drill"], h["drill"]],
+            "pad": [h["pad"], h["pad"]], "type": h["type"], "net": h.get("net") or "", "locked": True, "pads": 1}
+
+
+def read_hole(fp):
+    pads = list(fp.Pads())
+    got = {"ref": fp.GetReference(), "x": mm(fp.GetPosition().x), "y": mm(fp.GetPosition().y), "locked": bool(fp.IsLocked()), "pads": len(pads)}
+    if pads:
+        p = pads[0]
+        attr = p.GetAttribute()
+        got.update({"padPos": xy_mm(p.GetPosition()), "drill": [mm(p.GetDrillSizeX()), mm(p.GetDrillSizeY())],
+                    "pad": [mm(p.GetSizeX()), mm(p.GetSizeY())], "net": p.GetNetname(),
+                    "type": "pth" if attr == pcbnew.PAD_ATTRIB_PTH else "npth" if attr == pcbnew.PAD_ATTRIB_NPTH else "attr %d" % attr})
+    return got
 
 
 def verify_holes(board, spec, res, V):
@@ -502,18 +866,7 @@ def verify_holes(board, spec, res, V):
         if fp is None:
             V.append("hole %s missing after the write" % c["name"])
             continue
-        pads = list(fp.Pads())
-        if len(pads) != 1:
-            V.append("hole %s has %d pads" % (c["name"], len(pads)))
-            continue
-        p = pads[0]
-        want = pcbnew.PAD_ATTRIB_PTH if h["type"] == "pth" else pcbnew.PAD_ATTRIB_NPTH
-        if p.GetAttribute() != want or abs(mm(p.GetDrillSizeX()) - h["drill"]) > 1e-4:
-            V.append("hole %s reads back as attribute %d drill %.4f mm" % (c["name"], p.GetAttribute(), mm(p.GetDrillSizeX())))
-        if (h.get("net") or "") != p.GetNetname():
-            V.append("hole %s is on net %r, expected %r" % (c["name"], p.GetNetname(), h.get("net") or ""))
-        if not fp.IsLocked():
-            V.append("hole %s is not locked" % c["name"])
+        V += compare("hole " + c["name"], expect_hole(h, c["name"]), read_hole(fp))
 
 
 # ── keepout and zone ────────────────────────────────────────────────────────
@@ -522,6 +875,8 @@ RULES = {"tracks": "SetDoNotAllowTracks", "vias": "SetDoNotAllowVias", "pads": "
          "pours": "SetDoNotAllowZoneFills", "footprints": "SetDoNotAllowFootprints"}
 GETTERS = {"tracks": "GetDoNotAllowTracks", "vias": "GetDoNotAllowVias", "pads": "GetDoNotAllowPads",
            "pours": "GetDoNotAllowZoneFills", "footprints": "GetDoNotAllowFootprints"}
+CONNECTIONS = {"thermal": "ZONE_CONNECTION_THERMAL", "solid": "ZONE_CONNECTION_FULL", "none": "ZONE_CONNECTION_NONE",
+               "tht-thermal": "ZONE_CONNECTION_THT_THERMAL"}
 
 
 def layer_set(ids):
@@ -538,6 +893,15 @@ def set_outline(z, pts):
         o.Append(nm(p[0]), nm(p[1]))
 
 
+def zone_polygon(z):
+    o = z.Outline()
+    if o.OutlineCount() != 1:
+        return "%d outlines" % o.OutlineCount()
+    if o.HoleCount(0):
+        return "%d holes" % o.HoleCount(0)
+    return [rnd(p) for p in chain_mm(o.Outline(0))]
+
+
 def op_keepout(board, spec, P):
     ids = resolve_copper(board, spec["layers"], "layers", P)
     if P:
@@ -548,27 +912,34 @@ def op_keepout(board, spec, P):
     for r, setter in RULES.items():
         getattr(z, setter)(r in spec["forbid"])
     set_outline(z, spec["shape"]["samples"])
-    if spec.get("name"):
-        z.SetZoneName(spec["name"])
+    z.SetZoneName(spec.get("name") or "")
     board.Add(z)
+    names = sorted(board.GetLayerName(l) for l in ids)
     return refill_filled(board, {"created": [{"kind": "rule-area", "uuid": uuid_of(z), "name": spec.get("name", "")}], "removed": [],
-                                 "summary": {"layers": [board.GetLayerName(l) for l in ids], "forbid": spec["forbid"]}})
+                                 "summary": {"layers": names, "forbid": spec["forbid"]}})
+
+
+def expect_keepout(spec, layers):
+    w = {"ruleArea": True, "layers": layers, "polygon": [rnd(p) for p in spec["shape"]["samples"]], "name": spec.get("name") or ""}
+    for r in RULES:
+        w["no " + r] = r in spec["forbid"]
+    return w
+
+
+def read_keepout(board, z):
+    g = {"ruleArea": bool(z.GetIsRuleArea()), "layers": sorted(board.GetLayerName(l) for l in z.GetLayerSet().CuStack()),
+         "polygon": zone_polygon(z), "name": z.GetZoneName()}
+    for r, getter in GETTERS.items():
+        g["no " + r] = bool(getattr(z, getter)())
+    return g
 
 
 def verify_keepout(board, spec, res, V):
     z = next((z for z in board.Zones() if uuid_of(z) == res["created"][0]["uuid"]), None)
-    if z is None or not z.GetIsRuleArea():
+    if z is None:
         V.append("rule area missing after the write")
         return
-    for r, g in GETTERS.items():
-        if getattr(z, g)() != (r in spec["forbid"]):
-            V.append("rule area: %s %s" % (r, "allowed" if getattr(z, g)() is False else "forbidden"))
-    if sorted(board.GetLayerName(l) for l in z.GetLayerSet().CuStack()) != sorted(res["summary"]["layers"]):
-        V.append("rule area layers differ after the write")
-
-
-CONNECTIONS = {"thermal": "ZONE_CONNECTION_THERMAL", "solid": "ZONE_CONNECTION_FULL", "none": "ZONE_CONNECTION_NONE",
-               "tht-thermal": "ZONE_CONNECTION_THT_THERMAL"}
+    V += compare("rule area", expect_keepout(spec, res["summary"]["layers"]), read_keepout(board, z))
 
 
 def op_zone(board, spec, P):
@@ -581,8 +952,7 @@ def op_zone(board, spec, P):
             P.add("E_BOARD_NO_OUTLINE", "boardOutline", "the board has no closed outline to pour into",
                   "draw it first (`kicad board outline`) or give the zone a shape")
         else:
-            ch = ps.Outline(largest(ps))
-            pts = [(mm(ch.CPoint(i).x), mm(ch.CPoint(i).y)) for i in range(ch.PointCount())]
+            pts = chain_mm(ps.Outline(largest(ps)))
     else:
         pts = spec["shape"]["samples"]
     if P:
@@ -599,35 +969,42 @@ def op_zone(board, spec, P):
     z.SetAssignedPriority(int(spec["priority"]))
     z.SetZoneName(spec.get("name") or "")
     board.Add(z)
-    filled = 0
+    filled, warnings = 0, []
     if spec["fill"]:
-        zones = board.Zones()
-        pcbnew.ZONE_FILLER(board).Fill(zones)
-        filled = len(zones)
-    warnings = []
-    if spec["fill"] and filled > 1:
-        warnings.append("all %d zones of the board were refilled (KiCad fills by priority across zones)" % filled)
+        filled = fill_zones(board)
+        if filled > 1:
+            warnings.append("all %d zones of the board were refilled (KiCad fills by priority across zones)" % filled)
     return {"created": [{"kind": "zone", "uuid": uuid_of(z), "name": spec.get("name", "")}], "removed": [], "warnings": warnings,
-            "summary": {"net": spec["net"], "layers": [board.GetLayerName(l) for l in ids], "zonesFilled": filled}}
+            "filled": bool(spec["fill"]), "expectPolygon": [rnd(p) for p in pts],
+            "summary": {"net": spec["net"], "layers": sorted(board.GetLayerName(l) for l in ids), "zonesFilled": filled}}
+
+
+def expect_zone(spec, layers, polygon):
+    return {"ruleArea": False, "net": spec["net"], "layers": layers, "polygon": polygon, "clearance": spec["clearance"],
+            "minWidth": spec["minWidth"], "thermalGap": spec["thermalGap"], "spokeWidth": spec["spokeWidth"],
+            "connection": spec["connection"], "priority": int(spec["priority"]), "name": spec.get("name") or "",
+            "filled": bool(spec["fill"])}
+
+
+def read_zone(board, z):
+    conn = {getattr(pcbnew, v): k for k, v in CONNECTIONS.items()}
+    clr = z.GetLocalClearance()  # std::optional<int> in 10.0: an int or None
+    return {"ruleArea": bool(z.GetIsRuleArea()), "net": z.GetNetname(),
+            "layers": sorted(board.GetLayerName(l) for l in z.GetLayerSet().CuStack()), "polygon": zone_polygon(z),
+            "clearance": None if clr is None else mm(int(clr)), "minWidth": mm(z.GetMinThickness()),
+            "thermalGap": mm(z.GetThermalReliefGap()), "spokeWidth": mm(z.GetThermalReliefSpokeWidth()),
+            "connection": conn.get(z.GetPadConnection(), "connection %d" % z.GetPadConnection()),
+            "priority": z.GetAssignedPriority(), "name": z.GetZoneName(), "filled": bool(z.IsFilled())}
 
 
 def verify_zone(board, spec, res, V):
     z = next((z for z in board.Zones() if uuid_of(z) == res["created"][0]["uuid"]), None)
-    if z is None or z.GetIsRuleArea():
+    if z is None:
         V.append("zone missing after the write")
         return
-    if z.GetNetname() != spec["net"]:
-        V.append("zone on net %r, expected %r" % (z.GetNetname(), spec["net"]))
-    if z.GetAssignedPriority() != int(spec["priority"]):
-        V.append("zone priority %d, expected %d" % (z.GetAssignedPriority(), spec["priority"]))
-    clr = z.GetLocalClearance()  # std::optional<int> in 10.0: an int or None
-    if clr is None or abs(mm(int(clr)) - spec["clearance"]) > 1e-4:
-        V.append("zone clearance %r, expected %.4f mm" % (clr, spec["clearance"]))
+    V += compare("zone", expect_zone(spec, res["summary"]["layers"], res["expectPolygon"]), read_zone(board, z))
     if spec["fill"]:
-        area = 0.0
-        for l in z.GetLayerSet().CuStack():
-            if z.HasFilledPolysForLayer(l):
-                area += abs(z.GetFilledPolysList(l).Area())
+        area = sum(abs(z.GetFilledPolysList(l).Area()) for l in z.GetLayerSet().CuStack() if z.HasFilledPolysForLayer(l))
         res["summary"]["filledAreaMm2"] = round(area / 1e12, 3)
         if area <= 0:
             res.setdefault("warnings", []).append("the zone filled to nothing: check its net, clearance and that it overlaps the board")
@@ -667,18 +1044,36 @@ def op_text(board, spec, P):
             "summary": {"layer": board.GetLayerName(lid), "mirrored": bool(mirror)}}
 
 
+def expect_text(spec, layer, mirrored):
+    return {"text": spec["text"], "layer": layer, "x": spec["x"], "y": spec["y"], "size": [spec["size"], spec["size"]],
+            "thickness": spec["thickness"], "rotation": round(float(spec["rotation"]) % 360, 6), "justify": spec["justify"],
+            "mirrored": mirrored}
+
+
+def read_text(board, t):
+    just = {getattr(pcbnew, v): k for k, v in JUSTIFY.items()}
+    return {"text": t.GetText(), "layer": board.GetLayerName(t.GetLayer()), "x": mm(t.GetPosition().x), "y": mm(t.GetPosition().y),
+            "size": [mm(t.GetTextSize().x), mm(t.GetTextSize().y)], "thickness": mm(t.GetTextThickness()),
+            "rotation": round(t.GetTextAngleDegrees() % 360, 6), "justify": just.get(t.GetHorizJustify(), "?"),
+            "mirrored": bool(t.IsMirrored())}
+
+
 def verify_text(board, spec, res, V):
     t = next((d for d in board.GetDrawings() if uuid_of(d) == res["created"][0]["uuid"]), None)
     if t is None or t.GetClass() != "PCB_TEXT":
         V.append("text missing after the write")
         return
-    if t.GetText() != spec["text"]:
-        V.append("text reads back as %r" % t.GetText())
+    V += compare("text", expect_text(spec, res["summary"]["layer"], res["summary"]["mirrored"]), read_text(board, t))
 
 
 # ── main ────────────────────────────────────────────────────────────────────
 
-OPS = {"outline": op_outline, "holes": op_holes, "keepout": op_keepout, "zone": op_zone, "text": op_text}
+OPS = {"outline": op_outline, "stackup": op_stackup, "holes": op_holes, "keepout": op_keepout, "zone": op_zone, "text": op_text}
+VERIFY = {"outline": verify_outline, "holes": verify_holes, "keepout": verify_keepout, "zone": verify_zone, "text": verify_text}
+
+
+def verify_problems(details):
+    return [{"code": "E_BOARD_VERIFY", "field": "", "detail": d, "fix": FIX_VERIFY} for d in details]
 
 
 def run(op, src, spec_path, out):
@@ -694,10 +1089,10 @@ def run(op, src, spec_path, out):
         res = {"created": [], "removed": [], "summary": {"copperLayers": spec["layers"]}}
     else:
         board = pcbnew.LoadBoard(src)
-        if op == "stackup":
-            res = op_stackup(board, spec, P, out)
-        else:
+        try:
             res = OPS[op](board, spec, P)
+        except VerifyError as e:
+            return {"ok": False, "op": op, "problems": verify_problems([str(e)]), "verify": {"status": "fail", "detail": [str(e)]}}
         if P:
             return {"ok": False, "op": op, "problems": P}
     pcbnew.SaveBoard(out, board)
@@ -709,36 +1104,25 @@ def run(op, src, spec_path, out):
     if op == "new":
         if back.GetCopperLayerCount() != spec["layers"]:
             V.append("%d copper layers after the write" % back.GetCopperLayerCount())
-    elif op == "outline":
-        verify_outline(back, res, V)
     elif op == "stackup":
         verify_stackup(back, spec, out, res, V)
-    elif op == "holes":
-        verify_holes(back, spec, res, V)
-    elif op == "keepout":
-        verify_keepout(back, spec, res, V)
-    elif op == "zone":
-        verify_zone(back, spec, res, V)
-    elif op == "text":
-        verify_text(back, spec, res, V)
-    uuids = {c["uuid"] for c in res["created"]}
-    if op in ("outline",):
-        have = {uuid_of(d) for d in back.GetDrawings()}
-        missing = uuids - have
-        if missing:
-            V.append("%d created drawing(s) missing after the write" % len(missing))
+    else:
+        VERIFY[op](back, spec, res, V)
+    if res.get("filled"):
+        stale = [z.GetZoneName() or uuid_of(z) for z in back.Zones() if not z.GetIsRuleArea() and not z.IsFilled()]
+        if stale:
+            V.append("zones saved unfilled: %s" % ", ".join(stale))
     result = {"ok": not V, "op": op, "created": res["created"], "removed": res["removed"], "warnings": res.get("warnings", []),
               "summary": res.get("summary", {}), "verify": {"status": "fail" if V else "pass", "detail": V},
               "kicadVersion": pcbnew.Version()}
     if V:
-        result["problems"] = [{"code": "E_BOARD_VERIFY", "field": "", "detail": d,
-                               "fix": "report this: the board did not read back as written (nothing was committed)"} for d in V]
+        result["problems"] = verify_problems(V)
     return result
 
 
 def main(argv):
     usage = "usage: board.py new|outline|stackup|holes|keepout|zone|text IN.kicad_pcb|- SPEC.json OUT.kicad_pcb"
-    if len(argv) != 5 or argv[1] not in ("new", "stackup") + tuple(OPS):
+    if len(argv) != 5 or argv[1] not in ("new",) + tuple(OPS):
         emit({"ok": False, "error": usage}, 2)
     try:
         res = run(*argv[1:])

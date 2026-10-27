@@ -369,3 +369,72 @@ func TestBoardPyUnit(t *testing.T) {
 		t.Fatalf("board_test.py: %v\n%s", err, out)
 	}
 }
+
+func TestBoardExactContainment(t *testing.T) {
+	outer := BoardShape{Rect: &BoardRect{Width: 80, Height: 50, CornerRadius: 3}}
+	// A cutout enclosing another: overlap, though no boundaries cross.
+	big := BoardShape{Rect: &BoardRect{X: 10, Y: 10, Width: 20, Height: 20}}
+	small := BoardShape{Circle: &BoardCircle{X: 20, Y: 20, Diameter: 2}}
+	if !BoardShapesOverlap(big, small) || !BoardShapesOverlap(small, big) {
+		t.Error("enclosed cutout not seen as overlapping")
+	}
+	// Concave outline (a U): every corner of the cutout is on the board, its
+	// edges cross the notch.
+	u := BoardShape{Polygon: []XY{{0, 0}, {60, 0}, {60, 40}, {35, 40}, {35, 10}, {25, 10}, {25, 40}, {0, 40}}}
+	across := BoardShape{Rect: &BoardRect{X: 20, Y: 30, Width: 20, Height: 4}}
+	if BoardShapeInside(across, u) {
+		t.Error("cutout across a concave notch counted as inside")
+	}
+	if !BoardShapeInside(BoardShape{Rect: &BoardRect{X: 5, Y: 30, Width: 15, Height: 4}}, u) {
+		t.Error("cutout in one arm of the U not inside")
+	}
+	// Tangency between the 72 sample points of a round board (2.5° = half
+	// a sample step): a 0.0005 mm gap touches, a 0.01 mm gap fits although
+	// the sampled chord there lies 0.019 mm inside the circle.
+	round := BoardShape{Circle: &BoardCircle{Diameter: 40}}
+	at := func(rc float64) BoardShape {
+		a := 2.5 * math.Pi / 180
+		return BoardShape{Circle: &BoardCircle{X: rc * math.Cos(a), Y: rc * math.Sin(a), Diameter: 2}}
+	}
+	if BoardShapeInside(at(18.9995), round) {
+		t.Error("cutout 0.0005 mm from a round outline counted as inside")
+	}
+	if !BoardShapeInside(at(18.99), round) {
+		t.Error("cutout 0.01 mm inside a round outline refused (sampled check)")
+	}
+	if g := BoardShapeGap(at(18.99), round); math.Abs(g-0.01) > 1e-9 {
+		t.Errorf("gap %v, want 0.01", g)
+	}
+	// Arc against segment: a circle near a rounded corner, inside the
+	// corner's square but outside its arc.
+	corner := BoardShape{Circle: &BoardCircle{X: 0.9, Y: 0.9, Diameter: 0.4}}
+	if BoardShapeInside(corner, outer) {
+		t.Error("cutout in the rounded-off corner counted as inside")
+	}
+	// Slot end arc tangent to a circle: 0.0005 mm apart touches.
+	sl := BoardShape{Slot: &BoardSlot{X1: 10, Y1: 10, X2: 20, Y2: 10, Width: 2}}
+	if !BoardShapesOverlap(sl, BoardShape{Circle: &BoardCircle{X: 23.0005, Y: 10, Diameter: 4}}) {
+		t.Error("slot end touching a circle not seen")
+	}
+	if BoardShapesOverlap(sl, BoardShape{Circle: &BoardCircle{X: 23.01, Y: 10, Diameter: 4}}) {
+		t.Error("slot 0.01 mm from a circle seen as overlapping")
+	}
+	// Arc–arc whose closest points are mid-arc (the line of centres).
+	a1 := bdArcEdge(XY{0, 0}, 5, -math.Pi/4, math.Pi/2)
+	a2 := bdArcEdge(XY{12, 0}, 5, 3*math.Pi/4, math.Pi/2)
+	if d := bdEdgeDist(a1, a2); math.Abs(d-2) > 1e-9 {
+		t.Errorf("arc-arc distance %v, want 2", d)
+	}
+	// Segment passing a full circle at 0.0005 mm.
+	if d := bdEdgeDist(bdSegEdge(XY{-5, 1.0005}, XY{5, 1.0005}), bdArcEdge(XY{0, 0}, 1, 0, 2*math.Pi)); math.Abs(d-0.0005) > 1e-9 {
+		t.Errorf("seg-circle distance %v", d)
+	}
+	o := OutlineSpec{Outer: u, Cutouts: []BoardShape{across}}
+	if !boardHasCode(o.Validate(), ErrBoardGeometry, "cutouts[0]") {
+		t.Error("outline validation missed the concave crossing")
+	}
+	o = OutlineSpec{Outer: outer, Cutouts: []BoardShape{big, small}}
+	if !boardHasCode(o.Validate(), ErrBoardGeometry, "cutouts[1]") {
+		t.Error("outline validation missed the enclosed cutout")
+	}
+}

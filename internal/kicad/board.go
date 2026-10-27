@@ -325,35 +325,6 @@ func bdPointInPoly(pts []XY, p XY) bool {
 	return in
 }
 
-// polysTouch: any two edges touch, or one polygon contains the other.
-func bdPolysTouch(a, b []XY) bool {
-	for i := range a {
-		for j := range b {
-			if bdSegsTouch(a[i], a[(i+1)%len(a)], b[j], b[(j+1)%len(b)]) {
-				return true
-			}
-		}
-	}
-	return bdPointInPoly(a, b[0]) || bdPointInPoly(b, a[0])
-}
-
-// polyInside: every vertex of in is strictly inside out and no edges touch.
-func bdPolyInside(in, out []XY) bool {
-	for _, p := range in {
-		if !bdPointInPoly(out, p) {
-			return false
-		}
-	}
-	for i := range in {
-		for j := range out {
-			if bdSegsTouch(in[i], in[(i+1)%len(in)], out[j], out[(j+1)%len(out)]) {
-				return false
-			}
-		}
-	}
-	return true
-}
-
 // arcPoints samples the arc around c of radius r from angle a0 sweeping
 // sweep radians (KiCad frame), end points included.
 func bdArcPoints(c XY, r, a0, sweep float64) []XY {
@@ -572,21 +543,15 @@ func (o OutlineSpec) Validate() []BoardIssue {
 	if len(bad) > 0 {
 		return bad
 	}
-	var outer []XY
-	if hasOuter {
-		outer = o.Outer.Samples()
-	}
-	samples := make([][]XY, len(o.Cutouts))
 	for i, c := range o.Cutouts {
-		samples[i] = c.Samples()
-		if outer != nil && !bdPolyInside(samples[i], outer) {
+		if hasOuter && !BoardShapeInside(c, o.Outer) {
 			bad = append(bad, bdIssue(ErrBoardGeometry, fmt.Sprintf("cutouts[%d]", i), "move or shrink the cutout so it lies wholly inside the outline (a notch in the edge is part of the outline polygon)",
-				"the %s cutout is not strictly inside the outline", c.kind()))
+				"the %s cutout is not strictly inside the outline (its edge must stay more than %g mm inside)", c.kind(), BoardTol))
 		}
 		for j := 0; j < i; j++ {
-			if bdPolysTouch(samples[i], samples[j]) {
+			if BoardShapesOverlap(c, o.Cutouts[j]) {
 				bad = append(bad, bdIssue(ErrBoardGeometry, fmt.Sprintf("cutouts[%d]", i), "merge overlapping cutouts into one polygon or move them apart",
-					"overlaps cutouts[%d]", j))
+					"overlaps or touches cutouts[%d]", j))
 			}
 		}
 	}
@@ -594,16 +559,21 @@ func (o OutlineSpec) Validate() []BoardIssue {
 }
 
 // boardPayload is one shape as board.py receives it.
+// Prims are what pcbnew draws, Edges and Shape the exact boundary and
+// shape for board.py's containment checks, Samples a polygon for zones and
+// rule areas (which KiCad stores as polygons).
 type boardPayload struct {
-	Kind    string      `json:"kind"`
-	Prims   []BoardPrim `json:"prims"`
-	Samples []XY        `json:"samples"`
-	BBox    [4]float64  `json:"bbox"`
+	Kind    string                 `json:"kind"`
+	Shape   BoardShape             `json:"shape"`
+	Prims   []BoardPrim            `json:"prims"`
+	Edges   []map[string][]float64 `json:"edges"`
+	Samples []XY                   `json:"samples"`
+	BBox    [4]float64             `json:"bbox"`
 }
 
 func bdPayloadOf(s BoardShape) boardPayload {
 	pts := s.Samples()
-	return boardPayload{Kind: s.kind(), Prims: s.Prims(), Samples: pts, BBox: bdBboxOf(pts)}
+	return boardPayload{Kind: s.kind(), Shape: s, Prims: s.Prims(), Edges: s.edgeJSON(), Samples: pts, BBox: bdBboxOf(pts)}
 }
 
 func (o OutlineSpec) payload() map[string]any {
@@ -920,7 +890,15 @@ func (s StackupSpec) Rows() []StackupRow {
 
 func (s StackupSpec) payload() map[string]any {
 	d := s.withDefaults()
-	return map[string]any{"layers": d.Layers, "thickness": s.TotalThickness(), "block": s.StackupBlock(), "finish": d.Finish}
+	var rows []map[string]any
+	for _, l := range s.layers() {
+		r := map[string]any{"name": l.Name, "type": l.Type, "thickness": bdRound6(l.Thickness)}
+		if l.Dielectric {
+			r["material"], r["epsilonR"], r["lossTangent"] = l.Material, l.EpsilonR, l.LossTan
+		}
+		rows = append(rows, r)
+	}
+	return map[string]any{"layers": d.Layers, "thickness": s.TotalThickness(), "block": s.StackupBlock(), "finish": d.Finish, "rows": rows}
 }
 
 // ── holes ───────────────────────────────────────────────────────────────────
@@ -1013,8 +991,9 @@ func (h HolesSpec) payload() map[string]any {
 		if t == "npth" {
 			pad = x.Drill
 		}
-		pts := BoardShape{Circle: &BoardCircle{X: x.X, Y: x.Y, Diameter: pad}}.Samples()
-		hs = append(hs, map[string]any{"x": x.X, "y": x.Y, "drill": x.Drill, "pad": pad, "type": t, "net": x.Net, "ref": x.Ref, "samples": pts})
+		c := BoardShape{Circle: &BoardCircle{X: x.X, Y: x.Y, Diameter: pad}}
+		hs = append(hs, map[string]any{"x": x.X, "y": x.Y, "drill": x.Drill, "pad": pad, "type": t, "net": x.Net, "ref": x.Ref,
+			"shape": c, "edges": c.edgeJSON()})
 	}
 	return map[string]any{"holes": hs}
 }

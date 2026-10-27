@@ -238,3 +238,94 @@ func TestKicadBoardLiveDemos(t *testing.T) {
 		})
 	}
 }
+
+// boardLiveRefused runs one op that must be refused (or fail a check):
+// nothing written, the board unchanged, the issue code as expected.
+func boardLiveRefused(t *testing.T, tools *kicad.Tools, op string, o kicadBoardOpts, spec kicad.BoardOpSpec, exit int, code string) *kicadBoardReport {
+	t.Helper()
+	before, _ := os.ReadFile(o.pcb)
+	rep := &kicadBoardReport{Op: op}
+	runKicadBoard(rep, op, spec, o, tools)
+	found := false
+	for _, is := range rep.Issues {
+		found = found || is.Code == code
+	}
+	if rep.OK || rep.exit != exit || !found || len(rep.Written) != 0 {
+		blob, _ := json.MarshalIndent(rep, "", "  ")
+		t.Fatalf("%s: want exit %d with %s, nothing written:\n%s", op, exit, code, blob)
+	}
+	if after, _ := os.ReadFile(o.pcb); string(after) != string(before) {
+		t.Fatalf("%s: the refused op changed %s", op, o.pcb)
+	}
+	return rep
+}
+
+// seedVia adds a through via on net at (x, y) mm.
+func seedVia(t *testing.T, tools *kicad.Tools, pcb, net string, x, y float64) {
+	t.Helper()
+	script := filepath.Join(t.TempDir(), "via.py")
+	src := `import sys, pcbnew
+b = pcbnew.LoadBoard(sys.argv[1])
+v = pcbnew.PCB_VIA(b); v.SetPosition(pcbnew.VECTOR2I(pcbnew.FromMM(float(sys.argv[3])), pcbnew.FromMM(float(sys.argv[4]))))
+v.SetWidth(pcbnew.FromMM(0.8)); v.SetDrill(pcbnew.FromMM(0.4)); v.SetNet(b.FindNet(sys.argv[2])); b.Add(v)
+pcbnew.SaveBoard(sys.argv[1], b)
+`
+	if err := os.WriteFile(script, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(tools.Python, script, pcb, net, ftoa(x), ftoa(y)).CombinedOutput(); err != nil {
+		t.Fatalf("seed via: %v\n%s", err, out)
+	}
+}
+
+// TestKicadBoardLiveRefusals: holes without an outline, holes on a via or
+// too close to its drill, and a custom rule of the input's .kicad_dru that
+// only the result violates (the post-write DRC must see the rules).
+func TestKicadBoardLiveRefusals(t *testing.T) {
+	tools := boardLiveTools(t)
+	dir := t.TempDir()
+	pcb := filepath.Join(dir, "r.kicad_pcb")
+	boardLiveOp(t, tools, "new", pcb, &kicad.NewBoardSpec{Layers: 2})
+	seedNet(t, tools, pcb, "GND", 40, 15)
+	in := kicadBoardOpts{pcb: pcb, inPlace: true}
+	hole := &kicad.HolesSpec{Holes: []kicad.HoleSpec{{X: 10, Y: 10, Drill: 3.2}}}
+	boardLiveRefused(t, tools, "holes", in, hole, 2, kicad.ErrBoardNoOutline)
+
+	boardLiveOp(t, tools, "outline", pcb, &kicad.OutlineSpec{Outer: kicad.BoardShape{Rect: &kicad.BoardRect{Width: 80, Height: 50}},
+		Cutouts: []kicad.BoardShape{{Rect: &kicad.BoardRect{X: 30, Y: 30, Width: 2, Height: 2}}}})
+	// A hole enclosing the cutout: no boundary of it is crossed.
+	boardLiveRefused(t, tools, "holes", in, &kicad.HolesSpec{Holes: []kicad.HoleSpec{{X: 31, Y: 31, Drill: 8}}}, 2, kicad.ErrBoardGeometry)
+	// A cutout that only touches the edge (0.0005 mm) is refused, one 0.05 mm in fits.
+	boardLiveRefused(t, tools, "outline", in, &kicad.OutlineSpec{Cutouts: []kicad.BoardShape{{Circle: &kicad.BoardCircle{X: 10, Y: 1.0005, Diameter: 2}}}}, 2, kicad.ErrBoardGeometry)
+
+	seedVia(t, tools, pcb, "GND", 60, 25)
+	boardLiveRefused(t, tools, "holes", in, &kicad.HolesSpec{Holes: []kicad.HoleSpec{{X: 61, Y: 25, Drill: 2.2, Pad: 3.5, Type: "pth", Net: "GND"}}}, 2, kicad.ErrBoardOverlap)
+	boardLiveRefused(t, tools, "holes", in, &kicad.HolesSpec{Holes: []kicad.HoleSpec{{X: 61.5, Y: 25, Drill: 2}}}, 2, kicad.ErrBoardOverlap)
+	boardLiveOp(t, tools, "holes", pcb, &kicad.HolesSpec{Holes: []kicad.HoleSpec{{X: 70, Y: 25, Drill: 2}}})
+
+	// A rule only the result breaks: no board text on B.Silkscreen.
+	dru := []byte("(version 1)\n(rule \"pcbpilot test: no back text\"\n  (constraint disallow text)\n  (condition \"A.Layer == 'B.Silkscreen'\"))\n")
+	if err := os.WriteFile(filepath.Join(dir, "r.kicad_dru"), dru, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	back := &kicad.TextSpec{Text: "back", X: 40, Y: 40, Layer: "B.Silkscreen"}
+	rep := boardLiveRefused(t, tools, "text", kicadBoardOpts{pcb: pcb, inPlace: true, drc: true}, back, 6, kicad.ErrBoardVerify)
+	if rep.DRC == nil || len(rep.DRC.New) == 0 || !rep.DRC.New[0].Ours {
+		t.Fatalf("custom rule violation not reported as ours: %+v", rep.DRC)
+	}
+	out := filepath.Join(dir, "o", "r2.kicad_pcb")
+	rep = boardLiveRefused(t, tools, "text", kicadBoardOpts{pcb: pcb, out: out, drc: true}, back, 6, kicad.ErrBoardVerify)
+	// Front text is allowed; the --out result carries the verified project and rules.
+	w := &kicadBoardReport{}
+	runKicadBoard(w, "text", &kicad.TextSpec{Text: "front", X: 40, Y: 40}, kicadBoardOpts{pcb: pcb, out: out, drc: true}, tools)
+	if !w.OK {
+		t.Fatalf("front text: %+v", w)
+	}
+	for _, ext := range []string{".kicad_dru", ".kicad_pro"} {
+		src, _ := os.ReadFile(strings.TrimSuffix(pcb, ".kicad_pcb") + ext)
+		got, err := os.ReadFile(strings.TrimSuffix(out, ".kicad_pcb") + ext)
+		if err != nil || string(got) != string(src) {
+			t.Errorf("--out %s differs from the source (%v)", ext, err)
+		}
+	}
+}

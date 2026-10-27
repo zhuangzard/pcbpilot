@@ -24,6 +24,7 @@ type fakeBoardTools struct {
 	drc     []*kicad.DRCReport
 	opErr   error
 	calls   int
+	druSeen []string // the .kicad_dru next to each board DRC ran on
 }
 
 func (f *fakeBoardTools) BoardOp(op string, spec kicad.BoardOpSpec, pcb, out string) (*kicad.BoardResult, error) {
@@ -55,7 +56,12 @@ func (f *fakeBoardTools) Stats(string) (*kicad.BoardStats, error) {
 	return &s, f.statErr
 }
 
-func (f *fakeBoardTools) BoardDRC(string, string) (*kicad.DRCReport, error) {
+func (f *fakeBoardTools) BoardDRC(pcb, _ string) (*kicad.DRCReport, error) {
+	if b, err := os.ReadFile(strings.TrimSuffix(pcb, ".kicad_pcb") + ".kicad_dru"); err == nil {
+		f.druSeen = append(f.druSeen, string(b))
+	} else {
+		f.druSeen = append(f.druSeen, "")
+	}
 	if len(f.drc) == 0 {
 		return &kicad.DRCReport{}, nil
 	}
@@ -312,5 +318,141 @@ func TestKicadPlaceKeepsCutoutPolygon(t *testing.T) {
 	}
 	if bb := b.Holes[0].Bounds(); bb.W() < 787 || bb.H() < 78 {
 		t.Errorf("cutout covers %.0f x %.0f mil, want the whole 787 x 79 mil slot", bb.W(), bb.H())
+	}
+}
+
+func boardFixtureDru(t *testing.T) (dir, pcb string) {
+	dir, pcb = boardFixture(t)
+	if err := os.WriteFile(filepath.Join(dir, "b.kicad_dru"), []byte("(version 1)\n(rule \"x\" (constraint disallow text))\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir, pcb
+}
+
+func TestKicadBoardSidecarsVerifiedAndCommitted(t *testing.T) {
+	dir, pcb := boardFixtureDru(t)
+	dru, _ := os.ReadFile(filepath.Join(dir, "b.kicad_dru"))
+	out := filepath.Join(dir, "o", "n.kicad_pcb")
+	f := &fakeBoardTools{} // writes its own "{}" project next to the result, as pcbnew might
+	rep := &kicadBoardReport{}
+	runKicadBoard(rep, "text", textSpec(), kicadBoardOpts{pcb: pcb, out: out, drc: true}, f)
+	if !rep.OK {
+		t.Fatalf("%+v", rep)
+	}
+	if len(f.druSeen) != 2 || f.druSeen[0] != string(dru) || f.druSeen[1] != string(dru) {
+		t.Errorf("DRC before/after ran with rules %q, want the input's on both", f.druSeen)
+	}
+	for ext, want := range map[string]string{".kicad_pro": `{"meta":{}}`, ".kicad_dru": string(dru)} {
+		if b, err := os.ReadFile(filepath.Join(dir, "o", "n"+ext)); err != nil || string(b) != want {
+			t.Errorf("--out %s: %q %v, want the verified source bytes", ext, b, err)
+		}
+	}
+	if len(rep.Written) != 3 {
+		t.Errorf("written %v", rep.Written)
+	}
+	// --out refuses a destination whose project or rules already exist.
+	err := boardCheckPaths("text", kicadBoardOpts{pcb: pcb, out: filepath.Join(dir, "o", "n2.kicad_pcb")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "o", "n2.kicad_dru"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var be *kicad.BoardError
+	if err := boardCheckPaths("text", kicadBoardOpts{pcb: pcb, out: filepath.Join(dir, "o", "n2.kicad_pcb")}); !errors.As(err, &be) || be.Issues[0].Code != kicad.ErrBoardOutExists {
+		t.Errorf("existing destination rules: %v", err)
+	}
+}
+
+func TestKicadBoardSidecarChangedMeanwhile(t *testing.T) {
+	for _, inPlace := range []bool{false, true} {
+		dir, pcb := boardFixtureDru(t)
+		orig, _ := os.ReadFile(pcb)
+		o := kicadBoardOpts{pcb: pcb, inPlace: inPlace}
+		if !inPlace {
+			o.out = filepath.Join(dir, "n.kicad_pcb")
+		}
+		f := &fakeBoardTools{during: func() { _ = os.WriteFile(filepath.Join(dir, "b.kicad_dru"), []byte("(version 1)\n"), 0o644) }}
+		rep := &kicadBoardReport{}
+		runKicadBoard(rep, "text", textSpec(), o, f)
+		if rep.OK || rep.exit != 4 || rep.Issues[0].Code != "E_FILE_CHANGED" {
+			t.Fatalf("in-place %v: want E_FILE_CHANGED, got exit %d %v", inPlace, rep.exit, issueCodes(rep))
+		}
+		if b, _ := os.ReadFile(pcb); !bytes.Equal(b, orig) {
+			t.Errorf("in-place %v: board written", inPlace)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "n.kicad_pcb")); err == nil {
+			t.Errorf("in-place %v: --out written", inPlace)
+		}
+	}
+}
+
+func TestKicadBoardReportAlias(t *testing.T) {
+	dir, pcb := boardFixture(t)
+	orig, _ := os.ReadFile(pcb)
+	pro, _ := os.ReadFile(filepath.Join(dir, "b.kicad_pro"))
+	link := filepath.Join(dir, "report.json")
+	if err := os.Link(pcb, link); err != nil {
+		t.Skip("hard links unsupported:", err)
+	}
+	out := filepath.Join(dir, "n.kicad_pcb")
+	f := &fakeBoardTools{}
+	old := boardLocate
+	boardLocate = func() (kicadBoardTools, error) { return f, nil }
+	defer func() { boardLocate = old }()
+	run := func(args ...string) (int, kicadBoardReport) {
+		var buf bytes.Buffer
+		c := newKicadBoardCmd(&buf)
+		c.SetArgs(args)
+		c.SetOut(io.Discard)
+		c.SetErr(io.Discard)
+		code := 0
+		var ec exitCodeError
+		if err := c.Execute(); errors.As(err, &ec) {
+			code = ec.code
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		var rep kicadBoardReport
+		_ = json.Unmarshal(buf.Bytes(), &rep)
+		return code, rep
+	}
+	upper := filepath.Join(dir, "B.KICAD_PCB")
+	for _, rp := range []string{pcb, filepath.Join(dir, "b.kicad_pro"), filepath.Join(dir, "b.kicad_dru"), filepath.Join(dir, "~b.kicad_pcb.lck"),
+		out, filepath.Join(dir, "n.kicad_pro"), link, upper, filepath.Join(dir, "sub", "..", "b.kicad_pcb")} {
+		for _, good := range []bool{true, false} {
+			text := "rev A"
+			if !good {
+				text = ""
+			}
+			code, rep := run("text", "--pcb", pcb, "--out", out, "--text", text, "--at", "1,2", "--report", rp)
+			if code != 2 || len(rep.Issues) != 1 || rep.Issues[0].Field != "report" {
+				t.Errorf("--report %s (valid op %v): exit %d %v", rp, good, code, rep.Issues)
+			}
+		}
+	}
+	if b, _ := os.ReadFile(pcb); !bytes.Equal(b, orig) {
+		t.Error("a refused report overwrote the board")
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "b.kicad_pro")); !bytes.Equal(b, pro) {
+		t.Error("a refused report overwrote the project")
+	}
+	if f.calls != 0 {
+		t.Errorf("KiCad ran %d times for refused reports", f.calls)
+	}
+	// A report of its own: written, for a successful and a refused op.
+	rp := filepath.Join(dir, "r.json")
+	if code, _ := run("text", "--pcb", pcb, "--out", out, "--text", "rev A", "--at", "1,2", "--report", rp); code != 0 {
+		t.Fatalf("good run: exit %d", code)
+	}
+	var rep kicadBoardReport
+	if b, err := os.ReadFile(rp); err != nil || json.Unmarshal(b, &rep) != nil || !rep.OK {
+		t.Errorf("report file: %v %+v", err, rep)
+	}
+	if code, _ := run("text", "--pcb", pcb, "--in-place", "--text", "", "--at", "1,2", "--report", rp); code != 2 {
+		t.Errorf("refused op: exit %d", code)
+	}
+	if b, _ := os.ReadFile(rp); json.Unmarshal(b, &rep) != nil || rep.OK {
+		t.Errorf("report of the refused run: %s", b)
 	}
 }
