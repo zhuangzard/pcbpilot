@@ -22,8 +22,8 @@ KiCad 板级工作（`.kicad_pcb`）：从已同步的板子到布好、过门�
 
 ## 硬规则
 
-1. 不文本编辑 `.kicad_*`，不做 GUI 自动化。读用 `kicad snapshot`，写只经 `kicad place` / `kicad route`（都写到新文件，
-   输入板不动）。没有 typed 命令的修改交给用户在 KiCad 里做，记 `UNSUPPORTED`。细则见
+1. 不文本编辑 `.kicad_*`，不做 GUI 自动化。读用 `kicad snapshot`，写只经 `kicad pcb-sync` / `kicad place` / `kicad route`
+   （place/route 写新文件、输入板不动；pcb-sync `--in-place` 走事务，门禁不过不写）。没有 typed 命令的修改交给用户在 KiCad 里做，记 `UNSUPPORTED`。细则见
    [kicad-file-safety.md](../pcbpilot/references/kicad-file-safety.md)。
 2. 写之前请用户在 KiCad 中**关闭**该板；目录里有 `~<文件>.lck` 锁文件 → `BLOCKED`，不自己删锁。用户在 KiCad 里改过 →
    旧快照作废，重新 `kicad snapshot`。
@@ -36,17 +36,16 @@ KiCad 板级工作（`.kicad_pcb`）：从已同步的板子到布好、过门�
 
 | 步骤 | 现状 | 用户在 KiCad 里做 |
 |---|---|---|
-| 原理图 → PCB 同步 | 无头 “Update PCB from Schematic” 计划在 v0.11 以 `kicad pcb-sync` 提供（`planned`） | PCB 编辑器 Tools → Update PCB from Schematic（F8），保存后关闭 |
 | 封装从库刷新 | 无 typed 命令（`UNSUPPORTED`） | Tools → Update Footprints from Library；先确认库表能找到库 |
 | 板框 / 层叠 / 层数 | `kicad board` 计划中（`planned`）；`kicad place` 不改板框和孔 | Edge.Cuts 画闭合板框；Board Setup → Physical Stackup 定层数、铜厚、介质 |
 | 锁定器件 | `kicad place` 尊重 KiCad 的 locked 标记 | 选中器件 → Lock；或在 `mech.json` 的 `fixed[]` 写死坐标 |
 
 ## 工作顺序
 
-板框 → 原理图同步 → 封装刷新 → 布局 → 布线 → 铺铜 → DRC/门禁 → 保存（复制回工程）。前三步由用户在 KiCad 完成；
+板框 → 原理图同步（`kicad pcb-sync`，不点 GUI 的 Update PCB）→ 封装刷新 → 布局 → 布线 → 铺铜 → DRC/门禁 → 保存。板框与封装刷新由用户做；
 任何一步回退（例如布局时发现缺件），从那一步重新往后走，旧的布线结果作废。
 
-1. **读板、定起点**（只读）：
+1. **同步、读板、定起点**：先 `pcbpilot kicad pcb-sync --sch board.kicad_sch --pcb board.kicad_pcb --out work/sync/board.kicad_pcb`（`--check` 只查，退出 3 = 不同步；拒绝/退出码/门禁见 [kicad.md](../pcbpilot/references/kicad.md#原理图--pcb-同步kicad-pcb-sync)），pad-net / schematic-parity / idempotent 全 pass 才算同步，新件暂存在板框右侧交给第 3 步；之后的步骤都用同步后的板：
    ```bash
    pcbpilot kicad snapshot board.kicad_pcb --out work/snap.json
    ```
@@ -143,7 +142,7 @@ KiCad 板级工作（`.kicad_pcb`）：从已同步的板子到布好、过门�
 | `route-complete` 失败，`summary.blockedConnections` 非空 | 器件挡道，重布无用 | 回到布局：按提示挪件或锁定后重跑 `kicad place` |
 | `intent-widths` 失败 | 网太细或颈缩 | 检查意图线宽；`--pad-neck-floor-mil` 只允许在焊盘处颈缩 |
 | `post-layout-sim` 失败，标 `SIM/KICAD MISMATCH` | 仿真栅格与 KiCad 连通判断不一致 | 记 `INCOMPLETE`，逐网核对，不当通过；网名/层次路径对不上按 [§6.1](../pcbpilot/references/evidence-and-verdicts.md#61-网络身份与对账差异) |
-| `pad-net-diff` / `signoff-continuity` 失败 | 板与原理图没同步 | 用户在 KiCad 做 Update PCB from Schematic，重新从第 1 步走 |
+| `pad-net-diff` / `signoff-continuity` 失败 | 板与原理图没同步 | `kicad pcb-sync --check` 确认，`kicad pcb-sync` 同步后从第 1 步重走 |
 | `lib_footprint_issues` | 当前配置找不到封装库（环境类） | 修库表后重跑；不算设计缺陷，也不算 PASS |
 | 写入失败或结果被覆盖 | 文件仍在 KiCad 中打开 | 请用户关闭后重跑；记 `BLOCKED` |
 | 布线后 `drill_out_of_range` / `via_diameter`（过孔小于 Board Setup 的最小孔/最小过孔） | 已有 `.kicad_pro` 时过孔尺寸没跟板约束对齐（KiCad 演示板实测） | 对照板约束与快照 `rules.viaDrillMil` / `viaDiameterMil`，显式给 `--via-dia-mil` / `--via-drill-mil` 重跑；不降低板约束 |

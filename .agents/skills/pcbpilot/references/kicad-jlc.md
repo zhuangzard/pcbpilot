@@ -92,7 +92,7 @@ pcbpilot kicad lcsc --import C6186 --import C25744 --lib-dir lib [--lib-name lcs
 `JLCPCB Part #`。值必须是 `C` + 数字。
 
 - 板上封装（`.kicad_pcb` 的 footprint property）与原理图符号都会读；给了 `--sch`
-  时原理图优先（板子由原理图更新），两边不一致会告警并提示 “Update PCB from Schematic”。
+  时原理图优先（板子由原理图更新），两边不一致会告警并提示用 `kicad pcb-sync` 同步（无头 Update PCB from Schematic，见 [kicad.md](kicad.md#原理图--pcb-同步kicad-pcb-sync)）。
 - 原理图经 `kicad-cli sch export bom` 读取，层次图由 KiCad 解析；**kicad-cli 会跳过
   没有 `lib_symbols` 定义的符号**（测试夹具因此带了最小符号定义）。
 - 板上有、原理图 BOM 里没有的封装（板上独有件，或只在原理图里勾了“排除 BOM”）
@@ -134,7 +134,7 @@ PTH/NPTH）。安装孔这类封装若没勾“排除 BOM/坐标文件”也会�
 BOM/CPL 一致性门禁：两者必须列出同一组位号、每个恰好一次。CPL 里未贴装件（排除 BOM 或只在
 原理图标 DNP，kicad-cli pos 仍会输出）自动剔除并在 `cplOmitted` 里列出；其余不一致是硬失败、
 **不写任何文件**，错误码 `BOM_NOT_IN_CPL` / `CPL_NOT_IN_BOM` / `CPL_DUPLICATE_REF` /
-`BOM_DUPLICATE_REF` / `CPL_EMPTY_REF`，每条带 `fix`（多为重新标注后 Update PCB from Schematic）。
+`BOM_DUPLICATE_REF` / `CPL_EMPTY_REF`，每条带 `fix`（多为重新标注后 `kicad pcb-sync`）。
 
 重复出图：所有文件先生成到 OUT 内的临时目录，zip 只装本次 kicad-cli 产物；发布时只替换/删除
 上次运行记在 `OUT/.pcbpilot-fab-manifest.json` 里的文件（板子从 4 层改 2 层后，旧内层 Gerber

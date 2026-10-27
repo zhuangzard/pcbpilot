@@ -192,10 +192,11 @@
 | 命令 | 说明 | 文档 |
 |---|---|---|
 | `kicad` | Design in KiCad: placement, schematic sheets / import / netlist, snapshot, route + gates (fastroute), JLC fab output, LCSC parts | [design-flow.md](design-flow.md), [drc-triage.md](drc-triage.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad-jlc.md](kicad-jlc.md) +4 |
-| `kicad fab` | Export JLCPCB manufacturing files (Gerber+drill zip, BOM, CPL) with kicad-cli | [evidence-and-verdicts.md](evidence-and-verdicts.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad-jlc.md](kicad-jlc.md), [prefab-checklist.md](prefab-checklist.md) +2 |
+| `kicad fab` | Export JLCPCB manufacturing files (Gerber+drill zip, BOM, CPL) with kicad-cli | [evidence-and-verdicts.md](evidence-and-verdicts.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad-jlc.md](kicad-jlc.md), [kicad.md](kicad.md) +3 |
 | `kicad lcsc` | Check, write or search LCSC (JLC) part numbers on a KiCad design | [kicad-file-safety.md](kicad-file-safety.md), [kicad-jlc.md](kicad-jlc.md), [kicad-sch-build.md](kicad-sch-build.md), [prefab-checklist.md](prefab-checklist.md) +2 |
 | `kicad netlist` | Schematic connectivity JSON (the IR intent derive and pad-net-diff read) from a .kicad_sch | [evidence-and-verdicts.md](evidence-and-verdicts.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad.md](kicad.md), [prefab-checklist.md](prefab-checklist.md) +2 |
-| `kicad place` | Place a KiCad board's footprints with the pcbauto placer (best of several seeds) | [drc-triage.md](drc-triage.md), [kicad-file-safety.md](kicad-file-safety.md), [pcb-auto.md](pcb-auto.md), [review-workflow.md](review-workflow.md) +1 |
+| `kicad pcb-sync` | Update PCB from Schematic, headless: add / swap / update / re-net footprints from the schematic, verified | [kicad-jlc.md](kicad-jlc.md), [kicad.md](kicad.md) |
+| `kicad place` | Place a KiCad board's footprints with the pcbauto placer (best of several seeds) | [drc-triage.md](drc-triage.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad.md](kicad.md), [pcb-auto.md](pcb-auto.md) +2 |
 | `kicad route` | Route and gate a .kicad_pcb like pcb auto route: review → intent netclasses → fastroute → via arrays / widen / pours / silk → every gate → IR closure → report → release review | [board-manual.md](board-manual.md), [drc-triage.md](drc-triage.md), [evidence-and-verdicts.md](evidence-and-verdicts.md), [kicad-file-safety.md](kicad-file-safety.md) +6 |
 | `kicad sch-build` | Build a complete, gate-checked KiCad schematic project from one design spec (one call, seconds) | [design-flow.md](design-flow.md), [evidence-and-verdicts.md](evidence-and-verdicts.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad-sch-build.md](kicad-sch-build.md) +2 |
 | `kicad sch-check` | Schematic hard gate on KiCad: kicad-cli ERC + pcbpilot quality checks (JSON, non-zero on fail) | [drc-triage.md](drc-triage.md), [evidence-and-verdicts.md](evidence-and-verdicts.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad-sch-build.md](kicad-sch-build.md) +3 |
@@ -516,7 +517,7 @@
 | `sch lib-layout` | Calculate Lib placement and wiring offline from canonical nets and measured pins | [library/modules/README.md](../library/modules/README.md), [actions.md](actions.md), [auto-layout-sop.md](auto-layout-sop.md), [collaboration-workflow.md](collaboration-workflow.md) +4 |
 | `sch list` | List components on the active (or all) schematic page(s) | [actions.md](actions.md), [analog-sim.md](analog-sim.md), [auto-layout-sop.md](auto-layout-sop.md), [beginner-troubleshooting.md](beginner-troubleshooting.md) +8 |
 | `sch materialize` | 将 1.4 原理图数据转换为器件放置 Apply 队列 | [actions.md](actions.md), [schematic-data.md](schematic-data.md) |
-| `sch modify` | Modify component position, designator, BOM flags, or custom properties | [actions.md](actions.md), [examples/260919-at32f415/layout-candidates.md](examples/260919-at32f415/layout-candidates.md), [examples/260919-at32f415/ldo-placement.md](examples/260919-at32f415/ldo-placement.md), [part-selection.md](part-selection.md) +1 |
+| `sch modify` | Modify component position, designator, BOM flags, or custom properties | [actions.md](actions.md), [examples/260919-at32f415/layout-candidates.md](examples/260919-at32f415/layout-candidates.md), [examples/260919-at32f415/ldo-placement.md](examples/260919-at32f415/ldo-placement.md), [kicad.md](kicad.md) +2 |
 | `sch netflag` | Create a power/ground/net flag or port | — |
 | `sch netlist` | Export schematic netlist as an artifact | [schematic.md](schematic.md) |
 | `sch nets` | 跨页网名审计:同一条轨被写成多个名字 / 单引脚网(逐页命令看不见的那半) | [drc-triage.md](drc-triage.md), [evidence-and-verdicts.md](evidence-and-verdicts.md), [prefab-checklist.md](prefab-checklist.md), [review-workflow.md](review-workflow.md) |
@@ -530,7 +531,7 @@
 | `sch place` | Place a component from the device library at coordinates | [actions.md](actions.md), [examples/260919-at32f415/layout-candidates.md](examples/260919-at32f415/layout-candidates.md), [kicad-sch-build.md](kicad-sch-build.md), [kicad.md](kicad.md) |
 | `sch plan` | Generate a guarded sch apply playbook for explicit marker additions, including NC-to-connected pins (offline) | [actions.md](actions.md), [schematic-data.md](schematic-data.md) |
 | `sch power-layout` | Plan a four-part fixed AMS1117 power circuit offline from measured geometry | [schematic-placement.md](schematic-placement.md) |
-| `sch prim-delete` | Delete schematic primitives of ANY type by id (or the current selection if --ids omitted) | [actions.md](actions.md), [drc-triage.md](drc-triage.md), [schematic-layout-conventions.md](schematic-layout-conventions.md) |
+| `sch prim-delete` | Delete schematic primitives of ANY type by id (or the current selection if --ids omitted) | [actions.md](actions.md), [drc-triage.md](drc-triage.md), [kicad.md](kicad.md), [schematic-layout-conventions.md](schematic-layout-conventions.md) |
 | `sch read` | One-call semantic snapshot of the circuit (components + nets + check) | [actions.md](actions.md), [examples/260919-at32f415/index.md](examples/260919-at32f415/index.md), [examples/260919-at32f415/ldo-placement.md](examples/260919-at32f415/ldo-placement.md), [pcb-layout.md](pcb-layout.md) +3 |
 | `sch rebind-footprint` | Swap a footprint transactionally (candidate create/readback before original delete) | [schematic.md](schematic.md) |
 | `sch rebind-symbol` | Swap a symbol transactionally (candidate create/readback before original delete) | [schematic.md](schematic.md) |
@@ -639,4 +640,4 @@
 | `workflow reset` | Clear deprecated checklist entries (or --all) | — |
 | `workflow status` | Show deprecated checklist state; --reconcile compares it with the live document | [pcb-layout.md](pcb-layout.md) |
 
-共 421 条命令，其中 88 条尚无参考提到。
+共 422 条命令，其中 88 条尚无参考提到。

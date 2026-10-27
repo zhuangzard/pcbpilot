@@ -39,6 +39,7 @@ KiCad 对等 = **为同一动作协议实现 KiCad 后端**（`--backend kicad`�
 | 原理图检查（sch check/gate/ERC） | 连接器 + 自检 | `pcbpilot kicad sch-check --sch root.kicad_sch [--fix-pwr-flag] [--ignore KIND]`：kicad-cli ERC（JSON）+ pcbpilot 质量检查（符号重叠、导线穿本体、斜线/离栅格/重叠导线、线端或引脚落在导线中段（KiCad 不连）、标签/字段文字压物、标签压线、引脚压标签、图签/出页），JSON 报告，ERC 错误或任一发现即非零；`--fix-pwr-flag` 每个未驱动电源网接一个 PWR_FLAG（逐页门禁 + 网表校验） | 完成（Gas A 导入：10 条 power_pin_not_driven → 0 ERC 错误；剩 199 条封装库未登记警告、92 条美观发现是导入页现状） |
 | 意图推导（intent derive，含安全表） | 离线 | 离线（输入改为 KiCad connectivity） | 进行中 |
 | 仿真 power/analog/post-layout | 离线 | 离线（board-final.json 来自 KiCad） | 进行中 |
+| 原理图 → PCB 同步（KiCad “Update PCB from Schematic”） | 连接器原理图转 PCB | `kicad pcb-sync --sch R.kicad_sch --pcb B.kicad_pcb (--out N \| --in-place)`：kicad-cli 网表 + bridge sync-read → 按符号路径（任一单元 key）、再按两侧唯一的位号匹配；新增（板框右侧成行暂存）、换封装（保位姿/锁/字段布局）、位号/值/字段/图纸/DNP、焊盘网、整网改名（铜跟着走）、孤儿 flag/remove（锁定的不删）；拒绝未标注/重复位号/重复路径/缺封装/库解析失败；bridge 只写暂存目录，pad-net + schematic-parity（kicad-cli）+ idempotent 三门禁（`internal/gate`，没验证不算过）后 kfile 事务提交；`--check` / `--dry-run` / `--plan-out` + `--apply-plan --revision` / `--create` / `--break-lock` | 完成（分支 v011/pcbsync；KiCad 10.0.6 演示副本实测：complex_hierarchy 68 swap 后三门禁过、二次无漂移，ecc83 改值/加件/删件/改网名、换封装、DNP/exclude、--create、multichannel 幂等、锁/revision 拒绝、篡改计划门禁失败） |
 | 布局（pcb auto run / place） | 连接器剧本 | `kicad place`（pcbnew） | 已实现，紧凑度/居中待调 |
 | 布线（fastroute + 意图规则 + 宽度/过孔阵/IR 闭环） | 连接器 + dsn-fix/ses-repair | `kicad route`（原生 DSN/SES） | 进行中（kicad/core；kicad/pcb-fixes 修了实板缺陷，见下） |
 | 铺铜/电源平面 | pcb.pour.* | pcbnew ZONE + ZONE_FILLER | 进行中 |

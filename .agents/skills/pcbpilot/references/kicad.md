@@ -29,6 +29,7 @@
 ```
 pcbpilot ──▶ KiCad 自带 Python + pcbnew（internal/kicad/bridge.py，go:embed）
          │     snapshot / netclasses / rules / ripup / dsn / ses / pours / edit / fill
+         │     sync-read / fp-info / sync-apply（kicad pcb-sync；只写进暂存目录）
          ├─▶ kicad-cli pcb drc / sch export netlist
          ├─▶ fastroute（外部进程）
          └─▶ 共用的 EDA 中立计算：intentRequirements、planViaArrays、planWidenToIntent、
@@ -105,6 +106,66 @@ sim 判 `sim-board-mismatch`、intent 报错、signoff-trace 判"ambiguous"失�
 两个不同原理图网（同页两条 `VCC` 记录，或 `VCC` 与 `/pwr/VCC`）落到同一块板网时 pad-net-diff 报 `netCollision`、
 signoff-continuity 失败（板上短路），不合并。显示名 `name` 只在能唯一解析回本网时才缩短，绝不等于别的网的身份或显示名。
 pad-net-diff 的大小写宽容只用于 EasyEDA 名（无 fullName）；KiCad 网名区分大小写。
+
+## 原理图 → PCB 同步（`kicad pcb-sync`）
+
+KiCad 的 Update PCB from Schematic（F8）不再由用户在 GUI 里点：原理图改完（`kicad sch-build` / `sch-edit` / 用户在
+KiCad 里改并保存）后一律用它把板子拉齐，然后 `kicad place`（移动暂存的新件）→ `kicad route --sch` → `kicad fab`。
+
+```bash
+pcbpilot kicad pcb-sync --sch board.kicad_sch --pcb board.kicad_pcb --check            # 只读：退出 3 = 不同步
+pcbpilot kicad pcb-sync --sch board.kicad_sch --pcb board.kicad_pcb --dry-run          # 只读：看计划
+pcbpilot kicad pcb-sync --sch board.kicad_sch --pcb board.kicad_pcb --out work/sync/board.kicad_pcb
+pcbpilot kicad pcb-sync --sch board.kicad_sch --pcb board.kicad_pcb --in-place [--break-lock stale]
+pcbpilot kicad pcb-sync ... --plan-out plan.json      # 给用户审，记下 revision
+pcbpilot kicad pcb-sync ... --in-place --apply-plan plan.json --revision <rev>
+```
+
+- **输入**：默认现导 `kicad-cli sch export netlist --format kicadxml`（隔离配置，同 sch 命令）；`--netlist F
+  [--netlist-format kicadxml|kicadsexpr]` 用现成导出。网名一律按 `pkg/netname` 身份（XML 的未转义名按标签证据解析）。
+  封装库 = 工程 `fp-lib-table` 覆盖用户全局表（同昵称工程优先；禁用行跳过；`${KIPRJMOD}`、`${KICAD10_FOOTPRINT_DIR}`、
+  `kicad_common.json` 变量展开；只支持 `.pretty`）。用的是用户**真实**库表，不是隔离配置。
+- **匹配**（`--match path-then-ref` 默认 / `path` / `ref`）：封装 `(path …)` = 符号的图纸路径 tstamps + 单元 UUID；多单元
+  符号是一个封装，带任一单元的 key 都算（新件用第一个单元的）；同一子图复用多次 = 各自独立的 key。路径匹配不上时，只有
+  位号**两侧都唯一**才按位号匹配并 `setPath` 重新挂钩（报告 `matchedBy:"ref"`）。
+- **拒绝（退出 1，什么都不写）**：未标注位号 `E_UNANNOTATED`、重复位号 `E_DUP_REF`、重复 key、板上两个封装同一路径
+  `E_DUP_PATH`、上板符号 Footprint 字段为空 `E_FP_MISSING_FIELD`、库解析不了 `E_FP_LIB_UNRESOLVED`（报出变量名/昵称）
+  / `E_FP_LIB_TYPE`、库里没有该封装 `E_FP_NOT_FOUND`。修原理图或库表后重跑，不要绕。
+- **操作**（固定顺序）：`renameNet`（板网的焊盘**恰好**全部去往一个新名字、该名字板上还没有、没有孤儿/板专用件的焊盘在其上
+  → 改名，走线/过孔/铺铜跟着走；拆分、合并、目标名已占用都不改名，逐焊盘改网）→ `addFootprint`（库里加载，按图纸路径
+  再按位号排序，从板框右侧 10 mm 起成行暂存，`--staging X,Y` / `--staging-gap`）→ `swapFootprint`（保留位置/角度/面/锁定/
+  字段文字布局/路径；新封装缺的焊盘 → `orphanCopper`）→ `setPath` / `setRef` / `setValue` / `setField` / `removeField`
+  （库封装自带的多余用户字段也去掉）/ `setSheet`（sheetname = 原理图图纸路径名，如 `/`、`/CH1/`）/ `setFlags`
+  （dnp、exclude_from_bom）→ `setPadNet` → `orphan`。`--update values,footprints,fields,refs,dnp` 选类别（焊盘网总是同步），
+  `--fields-ignore` 排除字段，`--rename-nets=false` 关改名。
+- **孤儿**：没有符号认领的封装（含 exclude_from_board 符号的封装）默认 `--orphans flag` 只报告；`remove` 删除，**锁定的
+  永不删**（降级为 flag）；板专用（board-only）封装永远不算孤儿、不被改动。走线和铺铜永远不移动、不删除：焊盘离开了有铜的网
+  → `danglingCopper`，网上一个焊盘都不剩 → `removeNet`（仅报告）。
+- **写入**：bridge `sync-apply` 先校验全部操作（封装 id、焊盘、网、库封装能加载），全有或全无，只写进目标旁的
+  `.pcbpilot-stage-*/`（`PCBPILOT_STAGE_DIR` 之外一律拒绝）；三道门禁在暂存板上跑完后由 kfile 事务提交（锁文件、读后被改
+  `E_FILE_CHANGED`、计划 revision）。`--in-place` 只有 pad-net 与 idempotent 通过、parity 没失败才提交，否则板子一字节不动；
+  `--out` 只要暂存板能读回就保留输出。`--in-place` 不改 `.kicad_pro`（缺失时才写）；`--out` 写新板旁的 `.kicad_pro`（并带
+  `.kicad_dru`）。`--create`：`--pcb` 不存在时从空板起（全部新件暂存在原点起的行里）。
+- **门禁**（`internal/gate`，没验证就不是 pass）：`pad-net`（暂存板上与符号挂钩的封装焊盘网 vs 网表引脚网，
+  `ComparePinNets` / `padNetDiffGate`；NPTH 与无编号焊盘不算）、`schematic-parity`（暂存板 + 工程 + 全部 `.kicad_sch`
+  复制到临时目录、板改名为根图名，`kicad-cli pcb drc --schematic-parity --severity-all`；任一 parity 项失败，只有被 flag 的
+  孤儿的 `extra_footprint` 记为 info；kicad-cli 缺失/崩溃/报告读不出 = cannot-check）、`idempotent`（暂存板重新规划 0 个操作）。
+  `--no-parity` 是用户跳过，结论是 skip、退出 5，永远不是 pass。
+- **退出码**：0 通过（`--check` 无漂移）· 1 错误/拒绝 · 2 用法 · 3 `--check` 有漂移 · 4 锁定/读后被改/revision 不符（未写）·
+  5 有门禁没能验证（含 `--no-parity`）· 6 门禁失败（`--out` 输出保留，`--in-place` 未提交）。
+- **报告** `pcbpilot.kicad.pcb-sync/1`（`--report`，默认 `<目标>.pcb-sync.json`，同时打印到 stdout）：`verdict`、`mode`、
+  `revision`、`kicadVersion`、`netlist`、`libs`、`match`、`ops[]`、`counts`、`staged[]`（`ref,xMm,yMm`，交给 `kicad place`）、
+  `orphanCopper[]`、`danglingCopper[]`、`locks[]`（`broke` 标出被 `--break-lock` 删掉的）、`files[]`（base/new sha256）、
+  `gates[]`、`errors[]`、`warnings[]`（`sourceOpenInKiCad`：`--out` 时源板在 KiCad 里开着，未保存的编辑不在文件里）。
+- **锁**：KiCad 打开工程会写 `~<文件>.lck` / `~<工程>.kicad_pro.lck`（内容 `{"hostname","username"}`，无 pid；
+  **kicad-cli pcb drc 运行期间也会建工程锁**，10.0.6 实测）。默认遇锁退出 4；`--break-lock stale` 只删本机本用户且没有
+  KiCad 进程在跑的锁，`any` 全删（用户明确决定）。Agent 不自己选 `any`。
+- 实测（KiCad 10.0.6 演示副本）：complex_hierarchy 基线 = 68 个 `swapFootprint`（板上用工程库昵称、符号写官方库昵称，
+  KiCad parity 正好报这 68 条 `footprint_symbol_mismatch`），同步后三门禁全过、`--check` 无漂移；ecc83 基线 = 6 swap +
+  15 `setSheet`（老板的 sheetname 是 “Racine”）；multichannel 的符号写的是普通安装里没有的库（“Capacitors THD” 等，
+  板上用工程库），默认同步按 `E_FP_LIB_UNRESOLVED` 拒绝、不写，`--update values,fields,refs,dnp` 时只有 1 个 `setValue`，
+  之后幂等。parity 一次约 30–50 s，是同步的主要耗时。`--apply-plan` 重新计算计划，revision 必须与计划文件和 `--revision`
+  三者一致（板或工程文件、选项、或由原理图算出的操作变了都会变）。固定回归：`PCBPILOT_KICAD_LIVE=1 go test ./internal/app -run TestPcbSyncLive`。
 
 ## 布线（`kicad route`）——与 `pcb auto route` + `pcb gate` 同序同算
 
