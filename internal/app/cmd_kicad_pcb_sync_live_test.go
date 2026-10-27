@@ -10,7 +10,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -596,5 +598,173 @@ func TestPcbSyncLiveGateNonVacuous(t *testing.T) {
 	rep, code = runSync(t, o)
 	if code != 5 || gateOf(rep, "schematic-parity").Status != gate.CannotCheck || gateOf(rep, "pad-net").Status != gate.Pass {
 		t.Fatalf("missing kicad-cli: exit %d gates %+v", code, rep.Gates)
+	}
+}
+
+// pcbnewScript runs a short pcbnew script on board (KiCad's Python) and
+// returns its stdout.
+func pcbnewScript(t *testing.T, kt *kicad.Tools, board, script string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "s.py")
+	if err := os.WriteFile(p, []byte("import pcbnew, sys, json\nb = pcbnew.LoadBoard(sys.argv[1])\n"+script), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command(kt.Python, p, board).CombinedOutput()
+	if err != nil {
+		t.Fatalf("pcbnew script: %v\n%s", err, out)
+	}
+	return string(out)
+}
+
+const readC2Overrides = `fp = [f for f in b.GetFootprints() if f.GetReference() == "C2"][0]
+p1 = [p for p in fp.Pads() if p.GetNumber() == "1"][0]
+print("RESULT" + json.dumps({"fpid": str(fp.GetFPID().GetUniStringLibId()), "clearance": fp.GetLocalClearance(),
+    "zone": fp.GetLocalZoneConnection(), "courtyard": fp.AllowMissingCourtyard(),
+    "mask": p1.GetLocalSolderMaskMargin(), "gap": p1.GetLocalThermalGapOverride()}))
+`
+
+func scriptResult(t *testing.T, out string) map[string]any {
+	t.Helper()
+	i := strings.LastIndex(out, "RESULT")
+	if i < 0 {
+		t.Fatalf("no result: %s", out)
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out[i+6:])), &m); err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
+// TestPcbSyncLiveSwapKeepsOverrides: a swap carries the footprint's local
+// clearance, zone connection and allow-missing-courtyard flag and each
+// pad's local overrides onto the pad with the same number; a pad with
+// overrides the new footprint has no pad for refuses the swap and the
+// board is unchanged.
+func TestPcbSyncLiveSwapKeepsOverrides(t *testing.T) {
+	kt := pcbSyncLive(t)
+	_, sch, pcb := ecc83Synced(t)
+	pcbnewScript(t, kt, pcb, `fp = [f for f in b.GetFootprints() if f.GetReference() == "C2"][0]
+fp.SetLocalClearance(250000)
+fp.SetLocalZoneConnection(pcbnew.ZONE_CONNECTION_NONE)
+fp.SetAllowMissingCourtyard(True)
+for p in fp.Pads():
+    if p.GetNumber() == "1":
+        p.SetLocalSolderMaskMargin(50000)
+        p.SetThermalGap(300000)
+pcbnew.SaveBoard(sys.argv[1], b)
+`)
+	editSch(t, sch, func(e *kicad.SchEditor) {
+		if err := e.SetField("C2", "Footprint", "Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P5.00mm"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	o := syncOpts(sch, pcb)
+	o.inPlace, o.noParity = true, true
+	if rep, code := runSync(t, o); code != 5 || !rep.Committed || rep.Counts.Swap != 1 {
+		t.Fatalf("swap: exit %d %+v %+v", code, rep.Ops, rep.Errors)
+	}
+	got := scriptResult(t, pcbnewScript(t, kt, pcb, readC2Overrides))
+	want := map[string]any{"fpid": "Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P5.00mm", "clearance": 250000.0, "courtyard": true,
+		"mask": 50000.0, "gap": 300000.0}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s after the swap: %v, want %v", k, got[k], v)
+		}
+	}
+	if got["zone"] == -1.0 {
+		t.Errorf("zone connection override lost: %v", got)
+	}
+
+	// Pad 2 gets an override; the new footprint has pad 1 only.
+	pcbnewScript(t, kt, pcb, `fp = [f for f in b.GetFootprints() if f.GetReference() == "C2"][0]
+[p for p in fp.Pads() if p.GetNumber() == "2"][0].SetLocalClearance(200000)
+pcbnew.SaveBoard(sys.argv[1], b)
+`)
+	editSch(t, sch, func(e *kicad.SchEditor) {
+		if err := e.SetField("C2", "Footprint", "TestPoint:TestPoint_THTPad_D1.5mm_Drill0.7mm"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	before := syncFileSHA(t, pcb)
+	rep, code := runSync(t, o)
+	if code != 1 || rep.Committed || !strings.Contains(fmt.Sprint(rep.Errors), "has local overrides") || syncFileSHA(t, pcb) != before {
+		t.Fatalf("a swap that would drop pad overrides must be refused: exit %d %+v", code, rep.Errors)
+	}
+}
+
+// TestPcbSyncLiveNonASCII: a field value and a footprint library path with
+// non-ASCII characters (the bridge reads its JSON as UTF-8, whatever the
+// Windows code page) — the footprint is added with both intact.
+func TestPcbSyncLiveNonASCII(t *testing.T) {
+	kt := pcbSyncLive(t)
+	dir, sch, pcb := ecc83Synced(t)
+	stock := kicad.StockFootprintDir()
+	if stock == "" {
+		t.Skip("stock footprints not installed")
+	}
+	const name = "R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"
+	lib := filepath.Join(dir, "库 Ω.pretty")
+	b, err := os.ReadFile(filepath.Join(stock, "Resistor_THT.pretty", name+".kicad_mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(lib, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(lib, name+".kicad_mod"), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tbl := filepath.Join(dir, "fp-lib-table")
+	tb, _ := os.ReadFile(tbl)
+	text := strings.TrimRight(string(tb), " \r\n")
+	text = strings.TrimSuffix(text, ")") + "  (lib (name \"LibU\")(type \"KiCad\")(uri \"${KIPRJMOD}/库 Ω.pretty\")(options \"\")(descr \"\"))\n)\n"
+	if err := os.WriteFile(tbl, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const note = "电阻 Ω µ — 1%"
+	editSch(t, sch, func(e *kicad.SchEditor) {
+		if _, err := e.PlaceSymbol(kicad.SymbolInstance{LibID: "ecc83-pp:R", Ref: "R5", Value: "10k", Footprint: "LibU:" + name,
+			At: kicad.Pt{X: 25.4, Y: 190.5}, Fields: []kicad.Field{{Name: "Note", Value: note}}}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	o := syncOpts(sch, pcb)
+	o.inPlace = true
+	rep, code := runSync(t, o)
+	if code != 0 || rep.Counts.Add != 1 {
+		t.Fatalf("exit %d %+v %+v %+v", code, rep.Ops, rep.Gates, rep.Errors)
+	}
+	fps, _ := footprintsByRef(t, kt, pcb)
+	if r5 := fps["R5"]; r5.FPID != "LibU:"+name || r5.Fields["Note"] != note {
+		t.Fatalf("R5 %q fields %q", r5.FPID, r5.Fields)
+	}
+}
+
+// TestPcbSyncLivePublishesProject: with the real bridge, --out publishes
+// the source project byte for byte (a non-default text variable kept).
+func TestPcbSyncLivePublishesProject(t *testing.T) {
+	pcbSyncLive(t)
+	dir := demoCopy(t, "ecc83")
+	sch, pcb := filepath.Join(dir, "ecc83-pp.kicad_sch"), filepath.Join(dir, "ecc83-pp.kicad_pcb")
+	pro := filepath.Join(dir, "ecc83-pp.kicad_pro")
+	var m map[string]any
+	pb, _ := os.ReadFile(pro)
+	if err := json.Unmarshal(pb, &m); err != nil {
+		t.Fatal(err)
+	}
+	m["text_variables"] = map[string]any{"STAGE": "neutral"}
+	pb, _ = json.MarshalIndent(m, "", "  ")
+	if err := os.WriteFile(pro, pb, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	o := syncOpts(sch, pcb)
+	o.out = filepath.Join(dir, "out", "e.kicad_pcb")
+	rep, code := runSync(t, o)
+	if code != 0 || !rep.Committed {
+		t.Fatalf("exit %d %+v %+v", code, rep.Gates, rep.Errors)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "out", "e.kicad_pro")); !bytes.Equal(got, pb) {
+		t.Fatalf("project not published as is:\n%s", got)
 	}
 }

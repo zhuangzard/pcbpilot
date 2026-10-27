@@ -70,9 +70,22 @@ type pcbSyncOpts struct {
 	breakLock              string
 	noParity               bool
 
-	env   *kfile.Env   // lock identity (tests); nil = this machine
-	tools *kicad.Tools // tests; nil = kicad.Locate()
+	env     *kfile.Env     // lock identity (tests); nil = this machine
+	tools   *kicad.Tools   // tests; nil = kicad.Locate()
+	backend pcbSyncBackend // tests: replaces the KiCad bridge and kicad-cli (needs --netlist)
 }
+
+// pcbSyncBackend is what pcb-sync needs from KiCad (*kicad.Tools).
+type pcbSyncBackend interface {
+	SyncRead(pcb string) (*kicad.SyncInventory, error)
+	FPInfo(refs []kicad.FPRef) (map[string]kicad.SyncFPInfo, []kicad.SyncError, error)
+	SyncApply(pcb string, plan *kicad.SyncPlan, stage, base string) (*kicad.SyncApplyResult, error)
+	RunParity(pcb, pro, schRoot string, expected func(kicad.Violation) bool) kicad.ParityResult
+}
+
+// pcbSyncBeforeApply, when set (tests only), runs after the plan is made
+// and before the source files are re-checked for the apply.
+var pcbSyncBeforeApply func()
 
 func newKicadPcbSyncCmd(stdout, stderr io.Writer) *cobra.Command {
 	o := pcbSyncOpts{}
@@ -266,6 +279,17 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 	if !readOnly && o.out == "" && !o.inPlace {
 		return usage("give --out NEW.kicad_pcb or --in-place (or --dry-run / --check / --plan-out)")
 	}
+	reportPath := o.report
+	if reportPath == "" {
+		t := o.pcb
+		if o.out != "" {
+			t = o.out
+		}
+		reportPath = boardSibling(t, ".pcb-sync.json")
+	}
+	if why := pcbSyncOutputAlias(o, reportPath); why != "" {
+		return usage("%s", why)
+	}
 	policy, err := kfile.ParseBreakPolicy(o.breakLock)
 	if err != nil {
 		return usage("%v", err)
@@ -340,21 +364,26 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 	default:
 		rep.Mode = "apply"
 	}
-	reportPath := o.report
-	if reportPath == "" {
-		reportPath = boardSibling(target, ".pcb-sync.json")
-	}
+	env := o.env
 	finish := func(verdict string, code int) error {
 		rep.Verdict = verdict
 		rep.OK = code == 0
 		b, _ := json.MarshalIndent(rep, "", "  ")
 		b = append(b, '\n')
+		// The report goes through kfile with the KiCad lock check (and it
+		// can name no input or output: pcbSyncOutputAlias). ok is true on
+		// stdout only when the report was written too.
 		_ = os.MkdirAll(filepath.Dir(reportPath), 0o755)
-		if _, err := kfile.WriteFile(reportPath, b, kfile.Opts{NoLockCheck: true}); err != nil {
+		if _, err := kfile.WriteFile(reportPath, b, kfile.Opts{Env: env}); err != nil {
 			fmt.Fprintf(stderr, "pcb-sync: cannot write the report %s: %v\n", reportPath, err)
 			if code == 0 {
-				code = 1
+				if code = kfile.ExitCode(err); code == 0 {
+					code = 1
+				}
 			}
+			rep.OK = false
+			b, _ = json.MarshalIndent(rep, "", "  ")
+			b = append(b, '\n')
 		}
 		_, _ = stdout.Write(b)
 		if code == 0 {
@@ -383,12 +412,17 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 	}
 
 	// Tools.
-	t := o.tools
+	var t pcbSyncBackend = o.backend
+	cli := ""
 	if t == nil {
-		t, _ = kicad.Locate()
-	}
-	if t == nil || !fileExists(t.Python) {
-		return fail(errSyncBridge, "", "KiCad's Python (pcbnew) was not found", "install KiCad 10 or set "+kicad.EnvPython, 1)
+		kt := o.tools
+		if kt == nil {
+			kt, _ = kicad.Locate()
+		}
+		if kt == nil || !fileExists(kt.Python) {
+			return fail(errSyncBridge, "", "KiCad's Python (pcbnew) was not found", "install KiCad 10 or set "+kicad.EnvPython, 1)
+		}
+		t, cli = kt, kt.CLI
 	}
 
 	if o.out != "" && !readOnly {
@@ -399,7 +433,6 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 
 	// Locks. A write target that is open in KiCad refuses the run before
 	// anything is computed (and Apply checks again before each rename).
-	env := o.env
 	if readOnly {
 		if locks, err := kfile.CheckLocks([]string{o.pcb}, env); err == nil && len(locks) > 0 {
 			rep.addLocks(locks)
@@ -420,14 +453,40 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 	}
 
 	// The board as read now: every write is checked against these hashes.
-	var boardSnap, proSnap kfile.Snapshot
+	// The source files' bytes are kept: the bridge loads exactly these
+	// bytes (copied into the stage), --out publishes exactly these project
+	// settings, and the files are re-checked against them right before the
+	// apply and before the commit.
+	var boardSnap, proSnap, druSnap kfile.Snapshot
+	var boardData, proData, druData []byte
 	if boardExists {
-		if _, boardSnap, err = kfile.Read(o.pcb); err != nil {
+		if boardData, boardSnap, err = kfile.Read(o.pcb); err != nil {
 			return fileErr(err)
 		}
 	}
-	if proSnap, err = kfile.Stat(boardSibling(o.pcb, ".kicad_pro")); err != nil {
+	readOpt := func(p string) ([]byte, kfile.Snapshot, error) {
+		st, err := kfile.Stat(p)
+		if err != nil || !st.Exists {
+			return nil, st, err
+		}
+		return kfile.Read(p)
+	}
+	if proData, proSnap, err = readOpt(boardSibling(o.pcb, ".kicad_pro")); err != nil {
 		return fileErr(err)
+	}
+	if druData, druSnap, err = readOpt(boardSibling(o.pcb, ".kicad_dru")); err != nil {
+		return fileErr(err)
+	}
+	sourceUnchanged := func() error {
+		for _, sn := range []kfile.Snapshot{boardSnap, proSnap, druSnap} {
+			if sn.Path == "" {
+				continue
+			}
+			if err := sn.Check(); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 	targetSnap := boardSnap
 	targetProSnap := proSnap
@@ -452,10 +511,10 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 		if format == "" {
 			format = kicad.NetlistKicadXML
 		}
-		if !fileExists(t.CLI) {
-			return fail(kicad.ErrNetlistExport, o.sch, "kicad-cli not found ("+t.CLI+")", "install KiCad 10, set "+kicad.EnvCLI+", or pass --netlist", 1)
+		if cli == "" || !fileExists(cli) {
+			return fail(kicad.ErrNetlistExport, o.sch, "kicad-cli not found ("+cli+")", "install KiCad 10, set "+kicad.EnvCLI+", or pass --netlist", 1)
 		}
-		if data, err = kicad.ExportSyncNetlist(t.CLI, o.sch, format); err != nil {
+		if data, err = kicad.ExportSyncNetlist(cli, o.sch, format); err != nil {
 			return fail(kicad.ErrNetlistExport, o.sch, err.Error(), "open the schematic in KiCad once to check it loads, or pass --netlist", 1)
 		}
 		rep.Netlist.Source = "kicad-cli sch export netlist " + o.sch
@@ -517,6 +576,11 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 	rep.fill(plan)
 	rep.Revision = kicad.SyncRevision(boardSnap.SHA256, proSnap.SHA256, sopts, plan)
 
+	// Findings of the plan (a netlist pin without its pad) mean the board
+	// cannot be brought in line: --check, --dry-run and --plan-out fail.
+	if readOnly && len(plan.Errors) > 0 {
+		return finish("plan-errors", 1)
+	}
 	switch {
 	case o.check:
 		if plan.Drift() {
@@ -528,7 +592,8 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 	case o.planOut != "":
 		pf := pcbSyncPlanFile{Schema: pcbSyncPlanSchema, Revision: rep.Revision, Sch: o.sch, PCB: o.pcb, Ops: plan.Ops}
 		b, _ := json.MarshalIndent(pf, "", "  ")
-		if _, err := kfile.WriteFile(o.planOut, append(b, '\n'), kfile.Opts{NoLockCheck: true}); err != nil {
+		_ = os.MkdirAll(filepath.Dir(o.planOut), 0o755)
+		if _, err := kfile.WriteFile(o.planOut, append(b, '\n'), kfile.Opts{Env: env}); err != nil {
 			return fileErr(err)
 		}
 		return finish("planned", 0)
@@ -569,6 +634,28 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 		if pcbSyncTamper != nil {
 			applied = pcbSyncTamper(plan)
 		}
+		if src != "" {
+			// The bridge loads the bytes that were read and planned on:
+			// copies of the board, project and rules in the stage.
+			src = filepath.Join(stage, "src-"+base+".kicad_pcb")
+			for _, f := range []struct {
+				ext  string
+				data []byte
+			}{{".kicad_pcb", boardData}, {".kicad_pro", proData}, {".kicad_dru", druData}} {
+				if f.data == nil {
+					continue
+				}
+				if err := os.WriteFile(boardSibling(src, f.ext), f.data, 0o600); err != nil {
+					return fileErr(err)
+				}
+			}
+		}
+		if pcbSyncBeforeApply != nil {
+			pcbSyncBeforeApply()
+		}
+		if err := sourceUnchanged(); err != nil {
+			return fileErr(err)
+		}
 		res, err := t.SyncApply(src, applied, stage, base)
 		if err != nil {
 			rep.Errors = append(rep.Errors, kicad.SyncError{Code: errSyncBridge, Path: target, Detail: err.Error(),
@@ -578,7 +665,18 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 		if rep.KiCadVersion == "" {
 			rep.KiCadVersion = res.KiCadVersion
 		}
+		if !strings.HasPrefix(res.KiCadVersion, "10.") {
+			return fail(errSyncCannotCheck, target, "pcbnew "+res.KiCadVersion+" applied the plan: pcb-sync is verified against KiCad 10 only",
+				"use KiCad 10 ("+kicad.EnvPython+")", 5)
+		}
 		staged, stagedPro = filepath.Join(stage, base+".kicad_pcb"), filepath.Join(stage, base+".kicad_pro")
+		// SaveBoard writes its own .kicad_pro; the project published (and
+		// used by the parity check) is the source's, byte for byte.
+		if proData != nil {
+			if err := os.WriteFile(stagedPro, proData, 0o600); err != nil {
+				return fileErr(err)
+			}
+		}
 		wrote = true
 	}
 
@@ -610,6 +708,9 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 		}
 	}
 	if commit {
+		if err := sourceUnchanged(); err != nil {
+			return fileErr(err)
+		}
 		txn := kfile.NewTxn(filepath.Dir(target))
 		if err := txn.StageFile(target, staged, &targetSnap); err != nil {
 			txn.Abort()
@@ -622,8 +723,8 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 				return fileErr(err)
 			}
 		}
-		if dru := boardSibling(o.pcb, ".kicad_dru"); o.out != "" && fileExists(dru) && !fileExists(boardSibling(target, ".kicad_dru")) {
-			if err := txn.StageFile(boardSibling(target, ".kicad_dru"), dru, nil); err != nil {
+		if tdru := boardSibling(target, ".kicad_dru"); o.out != "" && druData != nil && !fileExists(tdru) {
+			if err := txn.Stage(tdru, druData, nil); err != nil {
 				txn.Abort()
 				return fileErr(err)
 			}
@@ -679,7 +780,7 @@ func gateResults(gs []pcbSyncGate) []gate.Result {
 }
 
 // pcbSyncVerify runs the three gates on the staged board.
-func pcbSyncVerify(t *kicad.Tools, o pcbSyncOpts, sopts kicad.SyncOptions, nl *kicad.SyncNetlist, libs kicad.FPResolver,
+func pcbSyncVerify(t pcbSyncBackend, o pcbSyncOpts, sopts kicad.SyncOptions, nl *kicad.SyncNetlist, libs kicad.FPResolver,
 	info func([]kicad.FPRef) (map[string]kicad.SyncFPInfo, []kicad.SyncError), plan *kicad.SyncPlan, staged, stagedPro string) ([]pcbSyncGate, gate.Status, gate.Status) {
 	var gates []pcbSyncGate
 	inv, err := t.SyncRead(staged)
@@ -801,4 +902,78 @@ func pcbSyncPadNetGate(nl *kicad.SyncNetlist, inv *kicad.SyncInventory) pcbSyncG
 	g := padNetDiffGate(sch, board, "staged board vs schematic netlist", "")
 	st := gate.FromBool(g.Pass && len(conflicts) == 0)
 	return pcbSyncGate{Name: "pad-net", Status: st, Detail: g.Detail, Items: append(g.Items, conflicts...), Info: g.Info}
+}
+
+// pcbSyncOutputAlias explains why a file pcb-sync writes besides the board
+// (the report, --plan-out) is unsafe: it names — by path (case-insensitive
+// where the filesystem is), link or hard link — the input board or its
+// project / rules / local settings, a schematic sheet, the netlist, the
+// plan being applied, the output board or its project, or the other
+// output; or it has a KiCad extension. "" = safe.
+func pcbSyncOutputAlias(o pcbSyncOpts, report string) string {
+	type named struct{ what, path string }
+	var in []named
+	for _, b := range []struct{ what, pcb string }{{"--pcb", o.pcb}, {"--out", o.out}} {
+		if b.pcb == "" {
+			continue
+		}
+		for _, ext := range []string{".kicad_pcb", ".kicad_pro", ".kicad_dru", ".kicad_prl"} {
+			in = append(in, named{b.what + " " + ext, boardSibling(b.pcb, ext)})
+		}
+	}
+	in = append(in, named{"--sch", o.sch})
+	if root := filepath.Dir(o.sch); o.sch != "" {
+		_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() && p != root && (strings.HasPrefix(d.Name(), ".") || strings.HasSuffix(d.Name(), ".pretty")) {
+				return filepath.SkipDir
+			}
+			if !d.IsDir() && strings.EqualFold(filepath.Ext(p), ".kicad_sch") {
+				in = append(in, named{"schematic sheet", p})
+			}
+			return nil
+		})
+	}
+	for _, f := range []named{{"--netlist", o.netlist}, {"--apply-plan", o.applyPlan}} {
+		if f.path != "" {
+			in = append(in, f)
+		}
+	}
+	outs := []named{{"--report", report}}
+	if o.planOut != "" {
+		outs = append(outs, named{"--plan-out", o.planOut})
+	}
+	for i, out := range outs {
+		if strings.HasPrefix(strings.ToLower(filepath.Ext(out.path)), ".kicad_") {
+			return fmt.Sprintf("%s %s has a KiCad file extension; write it elsewhere", out.what, out.path)
+		}
+		for _, f := range in {
+			if pathAlias(out.path, f.path) {
+				return fmt.Sprintf("%s %s is the %s (%s): pcb-sync never writes over an input or output file", out.what, out.path, f.what, f.path)
+			}
+		}
+		for _, other := range outs[:i] {
+			if pathAlias(out.path, other.path) {
+				return fmt.Sprintf("%s and %s are the same file %s", other.what, out.what, out.path)
+			}
+		}
+	}
+	return ""
+}
+
+// pathAlias: a and b are one file — the same cleaned absolute path (case
+// folded on Windows and macOS) or, when both exist, the same file
+// (os.SameFile: links, hard links, 8.3 names).
+func pathAlias(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	if sameFilePath(a, b) {
+		return true
+	}
+	sa, err1 := os.Stat(a)
+	sb, err2 := os.Stat(b)
+	return err1 == nil && err2 == nil && os.SameFile(sa, sb)
 }
