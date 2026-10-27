@@ -9,6 +9,25 @@ typed action，符合“禁止手工操作 EDA 工程”准则。
 `pcbpilot apply --dry-run` 预检）。**尚未在用户的 EasyEDA 现场执行剧本并回读**，首次使用
 按下文“执行”一节逐步验证，结果回填本页。
 
+## 目录
+
+- [什么时候用](#什么时候用)
+- [输入](#输入)
+- [输出（--out-dir DIR）](#输出--out-dir-dir)
+- [闭环：布线难点回推原理图](#闭环布线难点回推原理图)
+- [引擎怎么决策（读报告时对照）](#引擎怎么决策读报告时对照)
+- [原理图模块框 → PCB 归属（--groups）](#原理图模块框--pcb-归属--groups)
+  - [两阶段宏布局（--macro，实验，默认关闭）](#两阶段宏布局--macro实验默认关闭)
+  - [局部调整（--refine --only）](#局部调整--refine---only)
+- [布线交给 fastroute（默认，2026-10-06 用户决定）](#布线交给-fastroute默认2026-10-06-用户决定)
+- [执行（内置布线，--router internal）](#执行内置布线--router-internal)
+- [护栏](#护栏)
+- [美观度度量（pcb aesthetics，只报告）](#美观度度量pcb-aesthetics只报告)
+  - [电气子项容差（美观阶段可“交换”多少，2026-10-02 用户决定，option B）](#电气子项容差美观阶段可交换多少2026-10-02-用户决定option-b)
+- [布局美观生成（pcb auto run --place 的最后一步，Phase B）](#布局美观生成pcb-auto-run---place-的最后一步phase-b)
+- [布线观感（Phase B，pcb auto run 自动执行）](#布线观感phase-bpcb-auto-run-自动执行)
+- [实测记录](#实测记录)
+
 ## 什么时候用
 
 | 场景 | 命令 |
@@ -20,6 +39,13 @@ typed action，符合“禁止手工操作 EDA 工程”准则。
 | 要求固定层数（如需求写明 4 层） | 加 `--layers 4` |
 | 确认版布局只改个别器件（如把 RC 电容挪近引脚、ESD 转向） | `pcb auto run --place --refine --only C7,D3 --no-route` |
 | 原理图画了模块框，要 PCB 按框归属 | `sch groups --pages <页> --out groups.json` → `--groups groups.json` |
+| KiCad 板用同一引擎只做布局（相当于 `--place --no-route`） | `kicad place --pcb board.kicad_pcb --out placed/board.kicad_pcb [--mech mech.json] [--intent intent.json] [--groups groups.json]` |
+
+`kicad place` 用 KiCad 自带 Python 读板（板框、孔、keep-out rule area、courtyard、位号尺寸），并行跑
+`--place-seeds`（默认 6）个种子取最优，用 pcbnew 写回：`--out` 为最优解，其余 `--candidates`（默认共 3）写成
+`<out>.seed-N.kicad_pcb`，指标在 `<out>.report.json`。输入 `--pcb` 不被修改；`--mech` 只约束模型，输出文件的板框和孔
+仍是 KiCad 原值；锁定封装与安装孔不动。移动器件会使铜失效：输出里走线与过孔被删除、铺铜未填充，之后用 `kicad route`
+布线。KiCad 侧的整体流程见 [kicad.md](kicad.md)。
 
 `pcb route-short`、`route-critical`、`layout-plan` 等既有命令仍适用于逐模块、逐网的精细控制；
 `pcb auto` 负责整板级决策。二者可组合：先 `pcb auto analyze` 取线宽/层数/域，再用既有命令
@@ -175,7 +201,7 @@ IO39–42、IO47/48 可换但带 `caution`（32k 晶振 / JTAG / 1.8 V），置�
 
 **护栏**：
 - 换脚改的是原理图 → 与 Layout 变更同一确认规则：先把 diff 与重布前后数值给用户，得到明确同意再 `sch apply`。
-- 执行后：`sch gate` / `sch connectivity` 回读 → 原理图更新到 PCB（`pcb import-changes`）→ `pcb pad-net-diff`
+- 执行后：`sch gate` / `sch connectivity` 回读 → 原理图更新到 PCB（`pcb import-changes`）→ `scripts/pad-net-diff.py`
   对账 → 重新 `pcb auto run`；这一串完成前不得称“已改善”。固件引脚定义同步修改。
 - `status` 一律 `live-unverified`：目前只有离线证据（2026-09-27）。
 - 加件/封装/拆轨是设计取舍，给数值不自动执行；回到 S2（目标连接数据）改源数据再走 S3–S6。

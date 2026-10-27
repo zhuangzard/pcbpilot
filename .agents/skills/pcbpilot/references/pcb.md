@@ -33,7 +33,7 @@ list. 工程写入只允许参数化数据经 Cobra 子命令、typed action 或
 
 - **Data unit = `1 mil`** (schematics are `10 mil` / 0.01in — different). **y-UP**: +y renders upward.
 - **Component `x`/`y` = the ANCHOR (footprint origin), usually NOT the bbox center** — and the anchor-to-center offset rotates with the part, so the mismatch is worst on rotated parts (#105). **Plan in bbox centers, write with center semantics**: `pcb list --include-bbox` returns each part's `center` `{x,y}` (bbox geometric center, CLI-computed) alongside `bbox`; `pcb modify --id <pid> --center --x <cx> --y <cy>` takes the DESIRED center and converts to anchor via the live bbox. `--center` refuses a same-call rotation change (rotating alters the offset the conversion reads) — rotate first, then `--center` in a second call. Raw `--patch '{"x":…,"y":…}'` stays anchor semantics.
-- **显示原点不移动几何**：`pcbpilot pcb origin get/set --x <mil> --y <mil>` 读写画布显示 offset。
+- **显示原点不移动几何**：`pcbpilot pcb origin get` / `pcbpilot pcb origin set --x <mil> --y <mil>` 读写画布显示 offset。
   设置前后用 `outline-get` 和一个器件坐标核对几何完全不变；迁移已有板时根据实际 offset 语义计算，
   不通过平移整板伪造左下原点。
 - Every component is bound to a **layer** (`TOP` / `BOTTOM`). **No left/right mirror — only flip** (change layer via `pcb.component.modify`).
@@ -91,7 +91,7 @@ Act on the focused canvas; the editor view shortcuts. CLI: `pcbpilot view …`.
 
 ### PCB 文本参数
 
-`silk-add` / `silk-set` 支持 `--font-family`（例如 Arial），`silk-list` 回传实际字体；
+`silk-add` / `silk-set` 支持 `--font-family`（例如 Arial），typed `pcb.silk.list` 回传实际字体；
 省略时 `silk-add`、`silk-netnames`、`silk-label-pads` 使用内置 `default` 字体和
 `LEFT_TOP`（1）对齐，坐标为文字左上锚点。官方文本 API 会拒绝空字体名；
 对齐值合法范围为 1–9，不能传 0。宿主常把这些参数错误统一包装成

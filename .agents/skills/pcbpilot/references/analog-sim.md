@@ -11,7 +11,7 @@
 ## 1. 运行
 
 ```bash
-pcbpilot sim tools status                 # ngspice 是否可用；缺失：pcbpilot sim tools install [--run]
+pcbpilot sim tools check                  # ngspice 是否可用；缺失：pcbpilot sim tools install --dry-run，确认后 --yes
 pcbpilot sim analog --connectivity sch-p1.json --values list-p1.json --spec analog-spec.json \
     --out analog.json --report analog.md --plots-dir plots --apply-plan plan.json
 pcbpilot --project <工程> sim analog --pages P1,P2 --out analog.json --report analog.md   # 现场只读

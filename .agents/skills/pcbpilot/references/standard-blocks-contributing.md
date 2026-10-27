@@ -59,6 +59,18 @@ Block；只有当它需要参数化生成拓扑时才提升为新 Block，不能
 - 兼容的 legacy `roles:{ROLE:{dx,dy,rotation}}` 使用相对块原点偏移，y 向上；
   dx/dy 落 5 raw 网格、rotation 为 0/90/180/270，并覆盖全部角色。不能与关系形式混用。
 
+从一份摆好的实例反推 legacy 偏移模板（只读、只打印，不写块数据）：
+
+```bash
+pcbpilot sch extract-layout <block-id> --from LED1,R1,U1 --project <工程>      # 按唯一位号前缀自动配角色
+pcbpilot sch extract-layout <block-id> --role usb=U2 --role tvs=D1 --from R3,R4,C5
+```
+
+`--role ROLE=位号` 显式映射优先；`--from` 只接受与块角色前缀唯一对应的位号，歧义或未匹配直接报错，
+每个角色都必须映射。原点取第一个前缀为 `U` 的角色（否则第一个角色），重复导出结果稳定。把打印出的
+`schematic_layout` 审阅后粘贴进 `internal/blocks/data/<id>.json`，再由 `go test ./internal/blocks/...`
+验证角色覆盖、网格和旋转。
+
 `block-apply` 已有关系求解：先放锚件，读取引脚与边界，再计算其余位置；放件后用真实
 bbox 扩展避让，并在接线前检查几何。关系被跳过或约束未执行时，manifest 会列入
 `NOT applied`，同时检查 warnings；不能把成功退出解释为所有原理图与 PCB 约束均已落实。
