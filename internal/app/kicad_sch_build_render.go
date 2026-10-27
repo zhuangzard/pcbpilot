@@ -15,6 +15,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -140,11 +141,14 @@ type sbReport struct {
 
 // sbBox is a part's drawn extent on its sheet (mm).
 type sbBox struct {
-	Sheet string    `json:"sheet"`
-	Box   []float64 `json:"bboxMm"`
+	Sheet    string    `json:"sheet"`
+	Box      []float64 `json:"bboxMm"`
+	Units    []int     `json:"units,omitempty"`    // placed units, ascending
+	LibUnits int       `json:"libUnits,omitempty"` // units of the library symbol
 }
 
-// sbPartBoxes reads every sheet back: ref → body box (all units).
+// sbPartBoxes reads every sheet back: ref → body box (all units) and the
+// units placed.
 func sbPartBoxes(dir string, files []string) map[string]sbBox {
 	out := map[string]sbBox{}
 	for _, f := range files {
@@ -167,11 +171,25 @@ func sbPartBoxes(dir string, files []string) map[string]sbBox {
 			if s.Power || !s.HasBox || strings.HasPrefix(s.Ref, "#") {
 				continue
 			}
-			b := s.Box
-			if old, ok := out[s.Ref]; ok {
-				b = sbBoxUnion(b, kicad.Box{MinX: old.Box[0], MinY: old.Box[1], MaxX: old.Box[2], MaxY: old.Box[3]})
+			total, _ := e.LibUnitCount(s.LibID)
+			refs := s.Refs // a sheet used twice: every use's reference gets the unit
+			if len(refs) == 0 {
+				refs = []string{s.Ref}
 			}
-			out[s.Ref] = sbBox{Sheet: f, Box: []float64{sbRound2(b.MinX), sbRound2(b.MinY), sbRound2(b.MaxX), sbRound2(b.MaxY)}}
+			for _, ref := range refs {
+				b := s.Box
+				units := []int{s.Unit}
+				if old, ok := out[ref]; ok {
+					b = sbBoxUnion(b, kicad.Box{MinX: old.Box[0], MinY: old.Box[1], MaxX: old.Box[2], MaxY: old.Box[3]})
+					if !slices.Contains(old.Units, s.Unit) {
+						units = append(append([]int(nil), old.Units...), s.Unit)
+					} else {
+						units = old.Units
+					}
+					sort.Ints(units)
+				}
+				out[ref] = sbBox{Sheet: f, Box: []float64{sbRound2(b.MinX), sbRound2(b.MinY), sbRound2(b.MaxX), sbRound2(b.MaxY)}, Units: units, LibUnits: total}
+			}
 		}
 	}
 	return out
@@ -551,14 +569,37 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 		}
 		var top []kicad.ERCViolation
 		byType := map[string]int{}
+		own := sbOwnLibs(d, files)
+		ownBad := map[string]int{}
 		for _, v := range erc.Violations {
 			byType[v.Type]++
 			if v.Severity == "error" && len(top) < 20 {
 				top = append(top, v)
 			}
+			// a library the project ships itself must resolve: the isolated
+			// ERC config only lacks KiCad's stock libraries
+			if v.Type == "footprint_link_issues" || v.Type == "lib_symbol_issues" {
+				for _, lib := range own {
+					if strings.Contains(v.Description, "'"+lib+"'") {
+						ownBad[lib]++
+						if len(top) < 20 {
+							top = append(top, v)
+						}
+					}
+				}
+			}
 		}
-		rep.gate("erc", status, fmt.Sprintf("kicad-cli ERC: %d error(s), %d warning(s)", erc.Errors, erc.Warnings),
-			map[string]any{"byType": byType, "errors": top})
+		detail := fmt.Sprintf("kicad-cli ERC: %d error(s), %d warning(s)", erc.Errors, erc.Warnings)
+		if len(ownBad) > 0 {
+			status = "fail"
+			var libs []string
+			for l, n := range ownBad {
+				libs = append(libs, fmt.Sprintf("%s (%d)", l, n))
+			}
+			sort.Strings(libs)
+			detail += "; the project's own libraries do not resolve: " + strings.Join(libs, ", ")
+		}
+		rep.gate("erc", status, detail, map[string]any{"byType": byType, "errors": top})
 	}
 	if len(fitBad) > 0 {
 		rep.gate("page-fit", "fail", "content does not fit A0 on "+strings.Join(fitBad, ", ")+" — split into more pages", nil)
@@ -1789,5 +1830,35 @@ func sbDroppedPages(d *sbDesign, nl *kicad.SchNetlist) []string {
 			out = append(out, pg.ID)
 		}
 	}
+	return out
+}
+
+// sbOwnLibs are the libraries a built project carries itself: every
+// <lib>.kicad_sym / <lib>.pretty it writes, and the footprint library of
+// every part whose symbol is not KiCad's stock one (an LCSC or project
+// part's footprint must ship with it, e.g. lcsc).
+func sbOwnLibs(d *sbDesign, files []string) []string {
+	set := map[string]bool{}
+	for _, f := range files {
+		if lib, ok := strings.CutSuffix(f, ".kicad_sym"); ok && !strings.Contains(lib, "/") {
+			set[lib] = true
+		}
+		if lib, _, ok := strings.Cut(f, ".pretty/"); ok {
+			set[lib] = true
+		}
+	}
+	for _, p := range d.Parts {
+		if p.LibName == "" { // stock symbol: its footprint may be a stock one
+			continue
+		}
+		if lib, _, ok := strings.Cut(p.Footprint, ":"); ok && (p.FPFile != "" || lib == p.LibName || lib == "lcsc") {
+			set[lib] = true
+		}
+	}
+	out := make([]string, 0, len(set))
+	for l := range set {
+		out = append(out, l)
+	}
+	sort.Strings(out)
 	return out
 }

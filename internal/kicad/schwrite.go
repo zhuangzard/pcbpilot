@@ -18,9 +18,12 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // SchFileVersion is the format version written into new sheets (KiCad 10).
@@ -82,6 +85,17 @@ type SchEditor struct {
 	pwrNext               int
 	bodies                map[string]Box // lib_id → graphics-only box (set by Scene)
 	flgFloor              int
+	// elsewhere: reference → the project's other sheets that place it, and
+	// sheetUses: how many sheet symbols use this file (both set by
+	// OpenSchematicFile).
+	elsewhere map[string][]string
+	sheetUses int
+	hierErr   error // the hierarchy could not be determined (scanProject)
+	// queued state: renames and deletions of existing symbols (lookups and
+	// collision checks see them before Render), edit keys (see edit)
+	renamed map[*sexp]string
+	deleted map[*sexp]bool
+	replKey map[string]int
 }
 
 type textEdit struct {
@@ -144,6 +158,7 @@ func OpenSchematicFile(path string) (*SchEditor, error) {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	dir := filepath.Dir(path)
+	e.elsewhere = map[string][]string{}
 	if e.Project == "" {
 		pros, _ := filepath.Glob(filepath.Join(dir, "*.kicad_pro"))
 		if len(pros) == 1 {
@@ -189,10 +204,284 @@ func OpenSchematicFile(path string) (*SchEditor, error) {
 			}
 		}
 	}
+	e.scanProject(path)
 	if e.InstancePath == "" {
 		e.InstancePath = "/" + e.UUID()
 	}
 	return e, nil
+}
+
+func cleanAbs(p string) string {
+	if a, err := filepath.Abs(p); err == nil {
+		p = a
+	}
+	return filepath.Clean(p)
+}
+
+// pathKey is a sheet path for comparison: cleaned, absolute, and folded on
+// the case-insensitive file systems of Windows and macOS.
+func pathKey(p string) string {
+	p = cleanAbs(p)
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		p = strings.ToLower(p)
+	}
+	return p
+}
+
+// samePath reports whether a and b name the same sheet file (os.SameFile
+// when both exist: short names, links).
+func samePath(a, b string) bool {
+	if pathKey(a) == pathKey(b) {
+		return true
+	}
+	sa, err1 := os.Stat(a)
+	sb, err2 := os.Stat(b)
+	return err1 == nil && err2 == nil && os.SameFile(sa, sb)
+}
+
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
+
+// resolveSheetFile resolves a sheet symbol's Sheetfile: relative to the
+// sheet holding it, else to the project (root sheet) directory.
+func resolveSheetFile(parent, root, sf string) string {
+	if filepath.IsAbs(sf) {
+		return filepath.Clean(sf)
+	}
+	sf = filepath.FromSlash(sf)
+	a := filepath.Clean(filepath.Join(filepath.Dir(parent), sf))
+	if fileExists(a) || root == "" {
+		return a
+	}
+	if b := filepath.Clean(filepath.Join(filepath.Dir(root), sf)); fileExists(b) {
+		return b
+	}
+	return a
+}
+
+// sheetTree is the result of walking a hierarchy from its root sheet.
+type sheetTree struct {
+	root    string
+	files   map[string]*sexp    // pathKey → parsed sheet
+	names   map[string]string   // pathKey → path as resolved
+	parents map[string][]string // pathKey(child) → pathKey(parent), one per sheet symbol
+	selfAt  string              // instance path of the first use of self ("" if not reached)
+	reached bool                // self is in the tree
+	broken  []string            // sheets the walk could not read
+	alias   map[string]string   // pathKey → node key (see key)
+	ids     []sheetID
+}
+
+// key is the node key of a sheet file: one per file identity, so a
+// symlink or hard link to a sheet and the sheet itself are one node and
+// every use accumulates on it.
+func (t *sheetTree) key(p string) string {
+	pk := pathKey(p)
+	if k, ok := t.alias[pk]; ok {
+		return k
+	}
+	if t.alias == nil {
+		t.alias = map[string]string{}
+	}
+	k := pk
+	if fi, err := os.Stat(p); err == nil {
+		for _, id := range t.ids {
+			if os.SameFile(id.fi, fi) {
+				k = id.key
+				break
+			}
+		}
+		if k == pk {
+			t.ids = append(t.ids, sheetID{pk, fi})
+		}
+	}
+	t.alias[pk] = k
+	return k
+}
+
+type sheetID struct {
+	key string
+	fi  os.FileInfo
+}
+
+// walkSheetTree walks every sheet reachable from root, carrying each
+// sheet's instance path (/root-uuid/sheet-uuid/…).
+func walkSheetTree(root, self string) *sheetTree {
+	t := &sheetTree{root: root, files: map[string]*sexp{}, names: map[string]string{}, parents: map[string][]string{}}
+	var walk func(f, instPath string)
+	walk = func(f, instPath string) {
+		k := t.key(f)
+		if samePath(f, self) {
+			t.reached = true
+			if t.selfAt == "" {
+				t.selfAt = instPath
+			}
+		}
+		if _, ok := t.files[k]; ok {
+			return
+		}
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.broken = append(t.broken, f)
+			return
+		}
+		r, err := parseSx(string(b))
+		if err != nil {
+			t.broken = append(t.broken, f)
+			return
+		}
+		t.files[k], t.names[k] = r, f
+		if instPath == "" { // the root
+			if u := r.child("uuid"); u != nil && len(u.list) > 1 {
+				instPath = "/" + u.list[1].atom
+			}
+		}
+		for _, s := range r.list {
+			if s.head() != "sheet" || propVal(s, "Sheetfile") == "" {
+				continue
+			}
+			child := resolveSheetFile(f, root, propVal(s, "Sheetfile"))
+			ck := t.key(child)
+			t.parents[ck] = append(t.parents[ck], k)
+			cp := instPath
+			if u := s.child("uuid"); u != nil && len(u.list) > 1 {
+				cp += "/" + u.list[1].atom
+			}
+			walk(child, cp)
+		}
+	}
+	walk(root, "")
+	return t
+}
+
+// findSheetTree finds the hierarchy holding path: walking up from the
+// sheet's directory, the first project (<name>.kicad_pro beside its root
+// <name>.kicad_sch) whose tree includes the sheet; with several .kicad_pro in
+// one directory, the one whose tree includes it. A root sheet outside any
+// project is its own hierarchy. Otherwise the hierarchy is unknown (error).
+func findSheetTree(path string) (*sheetTree, error) {
+	self := cleanAbs(path)
+	var tried []string
+	var hits []*sheetTree // every project, in any ancestor directory, whose tree holds the sheet
+	for dir := filepath.Dir(self); ; {
+		pros, _ := filepath.Glob(filepath.Join(dir, "*.kicad_pro"))
+		for _, pro := range pros {
+			root := strings.TrimSuffix(pro, ".kicad_pro") + ".kicad_sch"
+			if !fileExists(root) {
+				continue
+			}
+			tried = append(tried, root)
+			if t := walkSheetTree(root, self); t.reached {
+				hits = append(hits, t)
+			}
+		}
+		up := filepath.Dir(dir)
+		if up == dir {
+			break
+		}
+		dir = up
+	}
+	if len(hits) > 1 { // a nested project used as a sheet of an outer one, …
+		var roots []string
+		for _, h := range hits {
+			roots = append(roots, h.root)
+		}
+		return nil, fmt.Errorf("%s belongs to several projects (%s)", self, strings.Join(roots, ", "))
+	}
+	if len(hits) == 1 {
+		if len(hits[0].broken) > 0 {
+			return hits[0], fmt.Errorf("sheet(s) of the hierarchy unreadable: %s", strings.Join(hits[0].broken, ", "))
+		}
+		return hits[0], nil
+	}
+	if b, err := os.ReadFile(self); err == nil && strings.Contains(string(b), "(sheet_instances") {
+		t := walkSheetTree(self, self)
+		if len(t.broken) > 0 {
+			return t, fmt.Errorf("sheet(s) of the hierarchy unreadable: %s", strings.Join(t.broken, ", "))
+		}
+		return t, nil
+	}
+	if len(tried) > 0 {
+		return nil, fmt.Errorf("%s is not reached from the root sheet of any project above it (%s)", self, strings.Join(tried, ", "))
+	}
+	return nil, fmt.Errorf("%s is a sub-sheet and no .kicad_pro with its root sheet was found above it", self)
+}
+
+// scanProject records the hierarchy around this sheet: the references
+// placed on the project's other sheets (e.elsewhere, by project-relative
+// path), how many times this sheet is instantiated (e.sheetUses: used by two
+// sheet symbols, or nested in a sheet used twice, counts 2) and, for a sheet
+// without symbols, its instance path. When the hierarchy cannot be
+// determined e.hierErr says why and hierarchy-sensitive edits are refused.
+func (e *SchEditor) scanProject(path string) {
+	t, err := findSheetTree(path)
+	if err != nil {
+		e.hierErr = err
+	}
+	if t == nil {
+		return
+	}
+	self := t.key(path) // the same file under another spelling or link is one node
+	if e.InstancePath == "" && t.selfAt != "" && strings.Count(t.selfAt, "/") > 1 {
+		e.InstancePath = t.selfAt
+	}
+	memo := map[string]int{}
+	var uses func(k string, depth int) int
+	uses = func(k string, depth int) int {
+		if n, ok := memo[k]; ok {
+			return n
+		}
+		ps := t.parents[k]
+		if len(ps) == 0 || depth > len(t.files)+1 { // the root (or a cycle)
+			return 1
+		}
+		n := 0
+		for _, p := range ps {
+			n += uses(p, depth+1)
+		}
+		memo[k] = n
+		return n
+	}
+	if len(t.parents[self]) > 0 {
+		e.sheetUses = uses(self, 0)
+	}
+	base := filepath.Dir(t.root)
+	for k, r := range t.files {
+		if k == self {
+			continue
+		}
+		name := t.names[k]
+		if rel, err := filepath.Rel(base, name); err == nil {
+			name = filepath.ToSlash(rel)
+		}
+		for _, s := range r.list {
+			if s.head() != "symbol" {
+				continue
+			}
+			for _, ref := range instRefs(s, e.Project) {
+				if !strings.HasPrefix(ref, "#") && !slices.Contains(e.elsewhere[ref], name) {
+					e.elsewhere[ref] = append(e.elsewhere[ref], name)
+				}
+			}
+		}
+	}
+	for ref := range e.elsewhere {
+		sort.Strings(e.elsewhere[ref])
+	}
+}
+
+// HierarchyErr says why the sheet's project hierarchy is unknown (nil when
+// it is known, or for a sheet opened from text): renames, placing and
+// deleting every unit are refused then.
+func (e *SchEditor) HierarchyErr() error { return e.hierErr }
+
+func (e *SchEditor) errHierarchy(what string) error {
+	if e.hierErr != nil {
+		return fmt.Errorf("%s needs the project's sheet hierarchy, which is unknown: %v (open the sheet inside its KiCad project)", what, e.hierErr)
+	}
+	return nil
 }
 
 // UUID is the sheet file's uuid.
@@ -280,7 +569,7 @@ func RenameLibSymbol(sym, id string) (string, error) {
 }
 
 // LibSymbolFromFile returns the `(symbol "name" …)` text of name in a
-// .kicad_sym library (symbols that `extends` another are not supported).
+// .kicad_sym library; a derived symbol (`extends`) comes back flattened.
 func LibSymbolFromFile(path, name string) (string, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -291,30 +580,184 @@ func LibSymbolFromFile(path, name string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", path, err)
 	}
+	syms := map[string]string{}
 	for _, s := range r.list {
-		if s.head() == "symbol" && len(s.list) > 1 && s.list[1].atom == name {
-			if s.child("extends") != nil {
-				return "", fmt.Errorf("%s:%s extends another symbol (not supported; flatten it in the symbol editor)", path, name)
-			}
-			return src[s.beg:s.end], nil
+		if s.head() == "symbol" && len(s.list) > 1 {
+			syms[s.list[1].atom] = src[s.beg:s.end]
 		}
 	}
-	return "", fmt.Errorf("symbol %q not in %s", name, path)
+	if _, ok := syms[name]; !ok {
+		return "", fmt.Errorf("symbol %q not in %s", name, path)
+	}
+	t, err := FlattenLibSymbol(syms, name)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", path, err)
+	}
+	return t, nil
 }
 
-// LibPin is a library pin of one unit (unit 0 = common to all units).
+// FlattenLibSymbol returns symbol name of a library (bare name → `(symbol
+// …)` text) with its `extends` chain resolved the way KiCad embeds a derived
+// symbol in a sheet: the root parent's units, pins and graphics, renamed to
+// name, with the derived symbol's properties (Reference, Value, Footprint,
+// Datasheet, Description, keywords …) replacing or joining the parent's.
+// A symbol that extends nothing is returned as is.
+func FlattenLibSymbol(syms map[string]string, name string) (string, error) {
+	return flattenLibSymbol(syms, name, 0)
+}
+
+// flattenInherits are the properties a derived symbol inherits when it
+// leaves them empty (KiCad's mandatory fields, keywords, footprint filters).
+var flattenInherits = map[string]bool{"Reference": true, "Value": true, "Footprint": true, "Datasheet": true,
+	"Description": true, "ki_keywords": true, "ki_fp_filters": true}
+
+func flattenLibSymbol(syms map[string]string, name string, depth int) (string, error) {
+	text, ok := syms[name]
+	if !ok {
+		return "", fmt.Errorf("symbol %q not in the library", name)
+	}
+	child, err := parseSx(strings.TrimSpace(text))
+	if err != nil {
+		return "", fmt.Errorf("symbol %s: %w", name, err)
+	}
+	x := child.child("extends")
+	if x == nil || len(x.list) < 2 {
+		return text, nil
+	}
+	if depth > 8 {
+		return "", fmt.Errorf("symbol %s: extends chain too deep (a loop?)", name)
+	}
+	parentName := x.list[1].atom
+	pt, err := flattenLibSymbol(syms, parentName, depth+1)
+	if err != nil {
+		return "", fmt.Errorf("symbol %s extends %s: %w", name, parentName, err)
+	}
+	pt, err = RenameLibSymbol(pt, name)
+	if err != nil {
+		return "", err
+	}
+	parent, err := parseSx(pt)
+	if err != nil {
+		return "", fmt.Errorf("flattened %s: %w", name, err)
+	}
+	src := strings.TrimSpace(text)
+	// child properties: a mandatory field, keywords or footprint filters
+	// left empty in the derived symbol inherit the parent's value; any other
+	// property replaces (or joins) the parent's.
+	childProps := map[string]string{}
+	var order []string
+	parentHas := map[string]bool{}
+	for _, c := range parent.list {
+		if c.head() == "property" && len(c.list) > 2 && c.list[2].atom != "" {
+			parentHas[c.list[1].atom] = true
+		}
+	}
+	// child attributes (pin_names, pin_numbers, exclude_from_sim, in_bom,
+	// on_board, in_pos_files, …): every top-level item of the derived symbol
+	// other than its name, extends, properties and unit sub-symbols overrides
+	// the parent's item of the same head.
+	childAttr := map[string]string{}
+	var attrOrder []string
+	for _, c := range child.list {
+		switch h := c.head(); h {
+		case "property":
+			if len(c.list) < 3 {
+				continue
+			}
+			if c.list[2].atom == "" && flattenInherits[c.list[1].atom] && parentHas[c.list[1].atom] {
+				continue
+			}
+			childProps[c.list[1].atom] = src[c.beg:c.end]
+			order = append(order, c.list[1].atom)
+		case "", "extends", "symbol":
+		default:
+			if _, dup := childAttr[h]; !dup {
+				attrOrder = append(attrOrder, h)
+			}
+			childAttr[h] = src[c.beg:c.end]
+		}
+	}
+	var edits []textEdit
+	last, firstProp := -1, -1
+	for _, c := range parent.list {
+		h := c.head()
+		if t, ok := childAttr[h]; ok && h != "property" {
+			edits = append(edits, textEdit{c.beg, c.end, t})
+			delete(childAttr, h)
+			continue
+		}
+		if h != "property" || len(c.list) < 3 {
+			continue
+		}
+		if firstProp < 0 {
+			firstProp = c.beg
+		}
+		last = c.end
+		if t, ok := childProps[c.list[1].atom]; ok {
+			edits = append(edits, textEdit{c.beg, c.end, t})
+			delete(childProps, c.list[1].atom)
+		}
+	}
+	var extra, attrs []string
+	for _, n := range order {
+		if t, ok := childProps[n]; ok {
+			extra = append(extra, t)
+		}
+	}
+	for _, h := range attrOrder {
+		if t, ok := childAttr[h]; ok {
+			attrs = append(attrs, t)
+		}
+	}
+	if len(attrs) > 0 { // attributes the parent lacks: before its properties
+		at := firstProp
+		if at < 0 {
+			at = parent.end - 1
+		}
+		edits = append(edits, textEdit{at, at, strings.Join(attrs, "\n\t\t") + "\n\t\t"})
+	}
+	if len(extra) > 0 {
+		if last < 0 { // no properties: before the closing paren
+			last = parent.end - 1
+		}
+		edits = append(edits, textEdit{last, last, "\n\t\t" + strings.Join(extra, "\n\t\t")})
+	}
+	sort.SliceStable(edits, func(i, j int) bool { return edits[i].beg > edits[j].beg })
+	for _, ed := range edits {
+		pt = pt[:ed.beg] + ed.text + pt[ed.end:]
+	}
+	if _, err := parseSx(pt); err != nil {
+		return "", fmt.Errorf("flattened %s does not re-parse: %w", name, err)
+	}
+	return pt, nil
+}
+
+// LibPin is a library pin of one unit (unit 0 = common to all units) and
+// body style (0 = common to all styles; 2 = the De Morgan alternate).
 type LibPin struct {
 	Number, Name, Type string
 	Unit               int
+	Style              int
 	At                 Pt // y up
 	Angle, Length      float64
 }
 
-// LibPins lists the pins of an embedded library symbol.
+// LibPins lists the pins of an embedded library symbol in body style 1 —
+// the style pcbpilot places (common-style pins included).
 func (e *SchEditor) LibPins(id string) ([]LibPin, error) {
+	return e.LibPinsStyle(id, 1)
+}
+
+// LibPinsStyle lists the pins of an embedded library symbol in body style
+// (common-style pins included). Style 2 of a 74xx gate is the De Morgan
+// alternate: the same pin numbers drawn elsewhere.
+func (e *SchEditor) LibPinsStyle(id string, style int) ([]LibPin, error) {
 	s, ok := e.libs[id]
 	if !ok {
 		return nil, fmt.Errorf("library symbol %s is not in the sheet", id)
+	}
+	if style < 1 {
+		style = 1
 	}
 	var out []LibPin
 	for _, u := range s.list {
@@ -322,15 +765,19 @@ func (e *SchEditor) LibPins(id string) ([]LibPin, error) {
 			continue
 		}
 		parts := strings.Split(u.list[1].atom, "_")
-		unit := 0
+		unit, st := 0, 0
 		if len(parts) >= 3 {
 			unit, _ = strconv.Atoi(parts[len(parts)-2])
+			st, _ = strconv.Atoi(parts[len(parts)-1])
+		}
+		if st != 0 && st != style {
+			continue
 		}
 		for _, p := range u.list {
 			if p.head() != "pin" {
 				continue
 			}
-			lp := LibPin{Unit: unit}
+			lp := LibPin{Unit: unit, Style: st}
 			if len(p.list) > 1 {
 				lp.Type = p.list[1].atom
 			}
@@ -496,73 +943,504 @@ func propertyText(name, value string, at Pt, angle float64, hide bool) string {
 		Q(name), Q(value), F(at.X), F(at.Y), F(angle), h)
 }
 
-// SymbolPinPositions returns pin number → sheet point for a placed
-// instance (by reference) — both existing and newly placed symbols.
-func (e *SchEditor) SymbolPinPositions(ref string) (map[string]Pt, error) {
-	var inst *sexp
-	for _, s := range e.symbols() {
-		if symRef(s) == ref {
-			inst = s
-			break
+// ── multi-unit symbols ──────────────────────────────────────────────────────
+//
+// A multi-unit symbol (dual op-amp, quad gate, a separate power unit) is one
+// `(symbol …)` instance per placed unit, all with the same reference. Calls
+// that address one instance take a key: "REF", or "REF:UNIT" for one unit;
+// a bare REF that has several units on the sheet is refused as ambiguous
+// (move, position). Fields (Value, Footprint, LCSC …, a rename) are shared:
+// SetField writes every unit. Pins of every placed unit answer to REF.
+
+// SplitUnitKey splits "REF:UNIT" into the reference and the unit; a bare
+// "REF" has unit 0 (every unit).
+func SplitUnitKey(key string) (ref string, unit int, err error) {
+	r, u, ok := strings.Cut(key, ":")
+	if !ok {
+		return key, 0, nil
+	}
+	n, err := strconv.Atoi(u)
+	if err != nil || n < 1 || r == "" {
+		return "", 0, fmt.Errorf("%q: want REF or REF:UNIT (unit 1, 2, …)", key)
+	}
+	return r, n, nil
+}
+
+// instRefs lists the references a placed symbol has under project (every
+// instance path: a sheet used twice gives each use its own reference); the
+// Reference field when it has no instances.
+func instRefs(s *sexp, project string) []string {
+	var out []string
+	if in := s.child("instances"); in != nil {
+		for _, pr := range in.list {
+			if pr.head() != "project" || len(pr.list) < 2 || (project != "" && pr.list[1].atom != project) {
+				continue
+			}
+			for _, pa := range pr.list {
+				if r := pa.child("reference"); pa.head() == "path" && r != nil && len(r.list) > 1 && !slices.Contains(out, r.list[1].atom) {
+					out = append(out, r.list[1].atom)
+				}
+			}
 		}
 	}
-	if inst == nil {
-		return nil, fmt.Errorf("no symbol %s on this sheet", ref)
+	if len(out) == 0 {
+		if r := propVal(s, "Reference"); r != "" {
+			out = append(out, r)
+		}
 	}
-	lid := find(inst, "lib_id")
-	at := inst.child("at")
-	if lid == nil || at == nil {
-		return nil, fmt.Errorf("symbol %s has no lib_id/at", ref)
+	return out
+}
+
+// instPaths counts the instance paths of a placed symbol (all projects).
+func instPaths(s *sexp) int {
+	n := 0
+	if in := s.child("instances"); in != nil {
+		for _, pr := range in.list {
+			for _, pa := range pr.list {
+				if pa.head() == "path" {
+					n++
+				}
+			}
+		}
 	}
-	pins, err := e.LibPins(lid.list[1].atom)
+	return n
+}
+
+// RefElsewhere lists the project's other sheets that place reference ref
+// (only known for a sheet opened with OpenSchematicFile).
+func (e *SchEditor) RefElsewhere(ref string) []string { return e.elsewhere[ref] }
+
+// RepeatedSheet reports whether this sheet file is used by more than one
+// sheet symbol (or its symbols carry several instance paths): each use has
+// its own references, so pcbpilot does not place or rename symbols here.
+func (e *SchEditor) RepeatedSheet() bool {
+	if e.sheetUses > 1 {
+		return true
+	}
+	for _, s := range e.root.list {
+		if s.head() == "symbol" && instPaths(s) > 1 {
+			return true
+		}
+	}
+	return false
+}
+
+// otherUseRefs lists the instance references of the symbols keys name
+// other than the keys' own (the other uses of a reused sheet).
+func (e *SchEditor) otherUseRefs(keys []string) string {
+	asked := map[string]bool{}
+	for _, k := range keys {
+		r, _, _ := SplitUnitKey(k)
+		asked[r] = true
+	}
+	var out []string
+	for _, k := range keys {
+		r, _, _ := SplitUnitKey(k)
+		for _, in := range e.instancesOf(r) {
+			for _, o := range instRefs(in.n, "") {
+				if !asked[o] && !slices.Contains(out, o) {
+					out = append(out, o)
+				}
+			}
+		}
+	}
+	if len(out) == 0 {
+		return "none named"
+	}
+	sort.Strings(out)
+	return strings.Join(out, ", ")
+}
+
+// errAcrossSheets refuses an edit of ref that would leave the units placed
+// on the project's other sheets inconsistent.
+func (e *SchEditor) errAcrossSheets(ref, what string) error {
+	if others := e.elsewhere[ref]; len(others) > 0 {
+		return fmt.Errorf("%s also has units on %s; %s a component placed on several sheets is not supported "+
+			"(it would leave the other sheets inconsistent) — put all its units on one sheet first", ref, strings.Join(others, ", "), what)
+	}
+	return nil
+}
+
+// ValidReference checks a designator KiCad and pcbpilot accept: not empty,
+// no ':' (the unit separator of REF:UNIT), no '.' (REF.PIN), no whitespace,
+// quotes, control characters or KiCad's variable syntax "${".
+func ValidReference(ref string) error {
+	if ref == "" {
+		return fmt.Errorf("empty designator")
+	}
+	for _, r := range ref {
+		if r == ':' || r == '.' || r == '"' || r == '\\' || unicode.IsSpace(r) || unicode.IsControl(r) || !unicode.IsPrint(r) {
+			return fmt.Errorf("designator %q: no ':', '.', quotes, backslashes, whitespace or control characters", ref)
+		}
+	}
+	if strings.Contains(ref, "${") {
+		return fmt.Errorf("designator %q: no text variables", ref)
+	}
+	return nil
+}
+
+// checkRename validates renaming every unit of from to to.
+func (e *SchEditor) checkRename(from, to string) error {
+	if err := ValidReference(to); err != nil {
+		return fmt.Errorf("cannot rename %s: %w", from, err)
+	}
+	if to == from {
+		return nil
+	}
+	if strings.HasPrefix(to, "#") != strings.HasPrefix(from, "#") {
+		return fmt.Errorf("cannot rename %s to %s: '#' marks power symbols only", from, to)
+	}
+	if err := e.errHierarchy("renaming " + from); err != nil {
+		return err
+	}
+	if e.RepeatedSheet() {
+		return fmt.Errorf("cannot rename %s: this sheet is used by several sheet symbols (each use has its own references); rename it in the KiCad project, not per sheet file", from)
+	}
+	if err := e.errAcrossSheets(from, "renaming"); err != nil {
+		return err
+	}
+	if len(e.instancesOf(to)) > 0 {
+		return fmt.Errorf("cannot rename %s to %s: %s is already on this sheet", from, to, to)
+	}
+	for _, s := range e.root.list { // every instance-path reference, queued renames applied
+		if s.head() != "symbol" || e.deleted[s] {
+			continue
+		}
+		refs := instRefs(s, "")
+		if r, ok := e.renamed[s]; ok {
+			refs = []string{r}
+		}
+		if slices.Contains(refs, to) {
+			return fmt.Errorf("cannot rename %s to %s: %s is already used on this sheet", from, to, to)
+		}
+	}
+	if others := e.elsewhere[to]; len(others) > 0 {
+		return fmt.Errorf("cannot rename %s to %s: %s is already used on %s", from, to, to, strings.Join(others, ", "))
+	}
+	return nil
+}
+
+// instStyle is the body style of a placed symbol (KiCad 9+ writes
+// body_style, older files convert; default 1).
+func instStyle(s *sexp) int {
+	for _, h := range []string{"body_style", "convert"} {
+		if c := s.child(h); c != nil && c.num(1) >= 1 {
+			return int(c.num(1))
+		}
+	}
+	return 1
+}
+
+func instUnit(s *sexp) int {
+	if u := s.child("unit"); u != nil && u.num(1) >= 1 {
+		return int(u.num(1))
+	}
+	return 1
+}
+
+// symInst is one placed unit: an existing node (item < 0) or a pending
+// item of this editor (node parsed from e.items[item]).
+type symInst struct {
+	n    *sexp
+	item int
+}
+
+// instancesOf lists every placed unit of ref, existing ones first.
+func (e *SchEditor) instancesOf(ref string) []symInst {
+	var out []symInst
+	for _, s := range e.root.list {
+		if s.head() == "symbol" && !e.deleted[s] && e.effRef(s) == ref {
+			out = append(out, symInst{s, -1})
+		}
+	}
+	for i, it := range e.items {
+		if strings.HasPrefix(it, "(symbol") {
+			if n, err := parseSx(it); err == nil && symRef(n) == ref {
+				out = append(out, symInst{n, i})
+			}
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return instUnit(out[i].n) < instUnit(out[j].n) })
+	return out
+}
+
+// effRef is the reference of an existing symbol with this editor's queued
+// renames applied.
+func (e *SchEditor) effRef(s *sexp) string {
+	if r, ok := e.renamed[s]; ok {
+		return r
+	}
+	return symRef(s)
+}
+
+// edit queues a text edit; a later edit with the same key (a span, or an
+// insertion point + property name) replaces the earlier one, so a second
+// SetField / MoveSymbol of the same item before Render wins instead of
+// queuing overlapping edits.
+func (e *SchEditor) edit(key string, ed textEdit) {
+	if e.replKey == nil {
+		e.replKey = map[string]int{}
+	}
+	if key == "" {
+		key = fmt.Sprintf("%d:%d", ed.beg, ed.end)
+	}
+	if i, ok := e.replKey[key]; ok {
+		e.repl[i] = ed
+		return
+	}
+	e.replKey[key] = len(e.repl)
+	e.repl = append(e.repl, ed)
+}
+
+func unitKeys(ref string, insts []symInst) string {
+	var ks []string
+	for _, in := range insts {
+		ks = append(ks, fmt.Sprintf("%s:%d", ref, instUnit(in.n)))
+	}
+	return strings.Join(ks, ", ")
+}
+
+// instance resolves key to exactly one placed unit.
+func (e *SchEditor) instance(key string) (symInst, error) {
+	ref, unit, err := SplitUnitKey(key)
+	if err != nil {
+		return symInst{}, err
+	}
+	all := e.instancesOf(ref)
+	if len(all) == 0 {
+		return symInst{}, fmt.Errorf("no symbol %s on this sheet", ref)
+	}
+	if unit == 0 {
+		if len(all) > 1 {
+			return symInst{}, fmt.Errorf("%s has %d units on this sheet; name the unit (%s)", ref, len(all), unitKeys(ref, all))
+		}
+		return all[0], nil
+	}
+	for _, in := range all {
+		if instUnit(in.n) == unit {
+			return in, nil
+		}
+	}
+	return symInst{}, fmt.Errorf("%s has no unit %d on this sheet (placed: %s)", ref, unit, unitKeys(ref, all))
+}
+
+// SymbolUnits lists the units of ref placed on this sheet (ascending).
+func (e *SchEditor) SymbolUnits(ref string) []int {
+	var out []int
+	for _, in := range e.instancesOf(ref) {
+		out = append(out, instUnit(in.n))
+	}
+	return out
+}
+
+// SymbolLibID returns the lib_id of ref's instances ("" if not placed).
+func (e *SchEditor) SymbolLibID(ref string) string {
+	for _, in := range e.instancesOf(ref) {
+		if lid := in.n.child("lib_id"); lid != nil && len(lid.list) > 1 {
+			return lid.list[1].atom
+		}
+	}
+	return ""
+}
+
+// SymbolFields returns the properties of ref's first placed unit, in file
+// order (Reference included).
+func (e *SchEditor) SymbolFields(ref string) []Field {
+	insts := e.instancesOf(ref)
+	if len(insts) == 0 {
+		return nil
+	}
+	var out []Field
+	for _, c := range insts[0].n.list {
+		if c.head() == "property" && len(c.list) > 2 {
+			out = append(out, Field{Name: c.list[1].atom, Value: c.list[2].atom, Hide: propertyHidden(c)})
+		}
+	}
+	return out
+}
+
+// SymbolUnitFields returns the properties of every placed unit of ref
+// (unit → fields in file order, Reference included), queued field edits not
+// applied.
+func (e *SchEditor) SymbolUnitFields(ref string) map[int][]Field {
+	out := map[int][]Field{}
+	for _, in := range e.instancesOf(ref) {
+		var fs []Field
+		for _, c := range in.n.list {
+			if c.head() == "property" && len(c.list) > 2 {
+				fs = append(fs, Field{Name: c.list[1].atom, Value: c.list[2].atom, Hide: propertyHidden(c)})
+			}
+		}
+		out[instUnit(in.n)] = fs
+	}
+	return out
+}
+
+// LibUnitCount is the number of units of an embedded library symbol (1 for
+// a single-unit symbol).
+func (e *SchEditor) LibUnitCount(id string) (int, error) {
+	s, ok := e.libs[id]
+	if !ok {
+		return 0, fmt.Errorf("library symbol %s is not in the sheet", id)
+	}
+	n := 1
+	for _, u := range s.list {
+		if u.head() != "symbol" || len(u.list) < 2 {
+			continue
+		}
+		parts := strings.Split(u.list[1].atom, "_")
+		if len(parts) >= 3 {
+			if k, err := strconv.Atoi(parts[len(parts)-2]); err == nil && k > n {
+				n = k
+			}
+		}
+	}
+	return n, nil
+}
+
+// SymbolPinPositions returns pin number → sheet point for a placed symbol —
+// both existing and newly placed ones. key "REF" gives the pins of every
+// placed unit (a pin common to all units: its first unit's position);
+// "REF:UNIT" gives that unit's.
+func (e *SchEditor) SymbolPinPositions(key string) (map[string]Pt, error) {
+	ref, unit, err := SplitUnitKey(key)
 	if err != nil {
 		return nil, err
 	}
-	unit := 1
-	if u := inst.child("unit"); u != nil {
-		unit = int(u.num(1))
-	}
-	mir := ""
-	if m := inst.child("mirror"); m != nil && len(m.list) > 1 {
-		mir = m.list[1].atom
+	var insts []symInst
+	if unit > 0 {
+		in, err := e.instance(key)
+		if err != nil {
+			return nil, err
+		}
+		insts = []symInst{in}
+	} else if insts = e.instancesOf(ref); len(insts) == 0 {
+		return nil, fmt.Errorf("no symbol %s on this sheet", ref)
 	}
 	out := map[string]Pt{}
-	for _, p := range pins {
-		if p.Unit == 0 || p.Unit == unit {
-			out[p.Number] = SymbolXform(p.At, Pt{at.num(1), at.num(2)}, at.num(3), mir)
+	for _, in := range insts {
+		inst := in.n
+		lid := find(inst, "lib_id")
+		at := inst.child("at")
+		if lid == nil || at == nil {
+			return nil, fmt.Errorf("symbol %s has no lib_id/at", ref)
+		}
+		pins, err := e.LibPinsStyle(lid.list[1].atom, instStyle(inst))
+		if err != nil {
+			return nil, err
+		}
+		u := instUnit(inst)
+		mir := ""
+		if m := inst.child("mirror"); m != nil && len(m.list) > 1 {
+			mir = m.list[1].atom
+		}
+		for _, p := range pins {
+			if _, seen := out[p.Number]; !seen && (p.Unit == 0 || p.Unit == u) {
+				out[p.Number] = SymbolXform(p.At, Pt{at.num(1), at.num(2)}, at.num(3), mir)
+			}
 		}
 	}
 	return out, nil
 }
 
-// SymbolAt returns the position and rotation of the symbol ref.
-func (e *SchEditor) SymbolAt(ref string) (x, y, rot float64, err error) {
-	for _, s := range e.symbols() {
-		if symRef(s) == ref {
-			if at := s.child("at"); at != nil {
-				return at.num(1), at.num(2), at.num(3), nil
-			}
-		}
+// SymbolAt returns the position and rotation of the symbol key ("REF", or
+// "REF:UNIT" when REF has several units on the sheet).
+func (e *SchEditor) SymbolAt(key string) (x, y, rot float64, err error) {
+	in, err := e.instance(key)
+	if err != nil {
+		return 0, 0, 0, err
 	}
-	return 0, 0, 0, fmt.Errorf("no symbol %s on this sheet", ref)
+	if at := in.n.child("at"); at != nil {
+		return at.num(1), at.num(2), at.num(3), nil
+	}
+	return 0, 0, 0, fmt.Errorf("symbol %s has no position", key)
 }
 
-// symbols returns the parsed symbol instances, pending ones included.
-func (e *SchEditor) symbols() []*sexp {
-	var out []*sexp
-	for _, s := range e.root.list {
-		if s.head() == "symbol" {
-			out = append(out, s)
-		}
+// DeleteSymbol removes the symbol key: "REF" removes every placed unit,
+// "REF:UNIT" that unit only. Wires, labels and no-connect flags on its pins
+// stay. Returns the units removed.
+func (e *SchEditor) DeleteSymbol(key string) ([]int, error) {
+	ref, _, _ := SplitUnitKey(key)
+	m, err := e.DeleteSymbols([]string{key})
+	return m[ref], err
+}
+
+// DeleteSymbols removes a batch of symbol keys (DeleteSymbol's) as one
+// set: every key is resolved before anything is queued, so overlapping or
+// repeated keys ("U1:1,U1", "U1,U1") delete each unit once. Returns
+// reference → units removed. All or nothing.
+func (e *SchEditor) DeleteSymbols(keys []string) (map[string][]int, error) {
+	type pick struct {
+		in  symInst
+		ref string
 	}
-	for _, it := range e.items {
-		if strings.HasPrefix(it, "(symbol") {
-			if n, err := parseSx(it); err == nil {
-				out = append(out, n)
+	if len(keys) > 0 && e.RepeatedSheet() {
+		// one symbol here is every use's symbol (U201 and U301): deleting it
+		// for one reference deletes it for all
+		return nil, fmt.Errorf("cannot delete %s: this sheet is used by several sheet symbols, so a symbol on it belongs to every use (other references: %s); delete it in the KiCad project, not per sheet file", strings.Join(keys, ", "), e.otherUseRefs(keys))
+	}
+	var picks []pick
+	seen := map[*sexp]bool{}
+	seenItem := map[int]bool{}
+	for _, key := range keys {
+		ref, unit, err := SplitUnitKey(key)
+		if err != nil {
+			return nil, err
+		}
+		var del []symInst
+		if unit > 0 {
+			in, err := e.instance(key)
+			if err != nil {
+				return nil, err
+			}
+			del = []symInst{in}
+		} else if del = e.instancesOf(ref); len(del) == 0 {
+			return nil, fmt.Errorf("no symbol %s on this sheet", ref)
+		} else if err := e.errAcrossSheets(ref, "deleting every unit of"); err != nil {
+			return nil, fmt.Errorf("%w (or delete one unit: %s:N)", err, ref)
+		} else if n, _ := e.LibUnitCount(e.SymbolLibID(ref)); n > 1 {
+			// other units may be on sheets an unknown hierarchy hides
+			if err := e.errHierarchy("deleting every unit of " + ref); err != nil {
+				return nil, fmt.Errorf("%w (or delete one unit: %s:N)", err, ref)
 			}
 		}
+		for _, in := range del {
+			if in.item < 0 {
+				if seen[in.n] {
+					continue
+				}
+				seen[in.n] = true
+			} else {
+				if seenItem[in.item] {
+					continue
+				}
+				seenItem[in.item] = true
+			}
+			picks = append(picks, pick{in, ref})
+		}
 	}
-	return out
+	out := map[string][]int{}
+	var items []int
+	for _, p := range picks {
+		out[p.ref] = append(out[p.ref], instUnit(p.in.n))
+		if p.in.item < 0 {
+			e.deleteNode(p.in.n)
+			if e.deleted == nil {
+				e.deleted = map[*sexp]bool{}
+			}
+			e.deleted[p.in.n] = true
+		} else {
+			items = append(items, p.in.item)
+		}
+	}
+	for r := range out {
+		sort.Ints(out[r])
+	}
+	sort.Sort(sort.Reverse(sort.IntSlice(items)))
+	for _, i := range items {
+		e.items = append(e.items[:i], e.items[i+1:]...)
+	}
+	return out, nil
 }
 
 // AddWire adds one wire per consecutive point pair.
@@ -698,36 +1576,56 @@ func (e *SchEditor) AddPower(net string, p Pt, rot float64, ground bool) (string
 	return ref, err
 }
 
-// SetField sets (or adds) field name on the symbol with reference ref.
-// Setting "Reference" renames the symbol (its instance reference too).
+// SetField sets (or adds) field name on the symbol with reference ref —
+// on every placed unit, since units share their fields. Setting
+// "Reference" renames the symbol (every unit and its instance reference).
 func (e *SchEditor) SetField(ref, name, value string) error {
-	var inst *sexp
-	for _, s := range e.root.list {
-		if s.head() == "symbol" && symRef(s) == ref {
-			inst = s
-			break
-		}
+	if r, u, err := SplitUnitKey(ref); err != nil {
+		return err
+	} else if u > 0 {
+		return fmt.Errorf("%s: fields are shared by every unit of a symbol; give the reference %s", ref, r)
 	}
-	if inst == nil {
-		for i, it := range e.items { // pending symbol: edit its text
-			if strings.HasPrefix(it, "(symbol") {
-				if n, err := parseSx(it); err == nil && symRef(n) == ref {
-					sub := &SchEditor{src: it, root: &sexp{list: []*sexp{n}}}
-					if err := sub.setFieldOn(n, name, value); err != nil {
-						return err
+	insts := e.instancesOf(ref)
+	if len(insts) == 0 {
+		return fmt.Errorf("no symbol %s on this sheet", ref)
+	}
+	if name == "Reference" {
+		if err := e.checkRename(ref, value); err != nil {
+			return err
+		}
+	} else {
+		// a symbol on a reused sheet is every use's: each of its instance
+		// references must be safe to edit, not only the one asked for
+		for _, in := range insts {
+			for _, r := range append(instRefs(in.n, e.Project), ref) {
+				if err := e.errAcrossSheets(r, "editing fields of"); err != nil {
+					if r != ref {
+						return fmt.Errorf("%s is the same symbol as %s on this reused sheet: %w", ref, r, err)
 					}
-					out, err := sub.apply()
-					if err != nil {
-						return err
-					}
-					e.items[i] = out
-					return nil
+					return err
 				}
 			}
 		}
-		return fmt.Errorf("no symbol %s on this sheet", ref)
 	}
-	return e.setFieldOn(inst, name, value)
+	for _, in := range insts {
+		if in.item < 0 {
+			if err := e.setFieldOn(in.n, name, value); err != nil {
+				return err
+			}
+			continue
+		}
+		it := e.items[in.item] // pending symbol: edit its text
+		sub := &SchEditor{src: it, root: &sexp{list: []*sexp{in.n}}}
+		if err := sub.setFieldOn(in.n, name, value); err != nil {
+			return err
+		}
+		out, err := sub.apply()
+		if err != nil {
+			return err
+		}
+		e.items[in.item] = out
+	}
+	return nil
 }
 
 // propHeadRe matches the `(property "Name" "Value"` head of a property.
@@ -744,11 +1642,15 @@ func (e *SchEditor) setFieldOn(inst *sexp, name, value string) error {
 				return fmt.Errorf("cannot rewrite property %s", name)
 			}
 			_ = v
-			e.repl = append(e.repl, textEdit{c.beg, c.beg + loc[1], "(property " + Q(name) + " " + Q(value)})
+			e.edit("", textEdit{c.beg, c.beg + loc[1], "(property " + Q(name) + " " + Q(value)})
 			if name == "Reference" {
 				if r := find(inst, "instances", "project", "path", "reference"); r != nil {
-					e.repl = append(e.repl, textEdit{r.beg, r.end, "(reference " + Q(value) + ")"})
+					e.edit("", textEdit{r.beg, r.end, "(reference " + Q(value) + ")"})
 				}
+				if e.renamed == nil {
+					e.renamed = map[*sexp]string{}
+				}
+				e.renamed[inst] = value
 			}
 			return nil
 		}
@@ -768,33 +1670,36 @@ func (e *SchEditor) setFieldOn(inst *sexp, name, value string) error {
 	if pos < 0 {
 		return fmt.Errorf("symbol has no properties")
 	}
-	e.repl = append(e.repl, textEdit{pos, pos, "\n\t\t" + propertyText(name, value, p, 0, true)})
+	e.edit(fmt.Sprintf("ins:%d:%s", pos, name), textEdit{pos, pos, "\n\t\t" + propertyText(name, value, p, 0, true)})
 	return nil
 }
 
-// MoveSymbol moves the symbol ref to at with rotation rot; its fields move
-// by the same offset.
-func (e *SchEditor) MoveSymbol(ref string, to Pt, rot float64) error {
-	for _, s := range e.root.list {
-		if s.head() != "symbol" || symRef(s) != ref {
-			continue
-		}
-		at := s.child("at")
-		if at == nil {
-			return fmt.Errorf("symbol %s has no position", ref)
-		}
-		dx, dy := to.X-at.num(1), to.Y-at.num(2)
-		e.repl = append(e.repl, textEdit{at.beg, at.end, fmt.Sprintf("(at %s %s %s)", F(to.X), F(to.Y), F(rot))})
-		for _, c := range s.list {
-			if c.head() == "property" {
-				if pa := c.child("at"); pa != nil {
-					e.repl = append(e.repl, textEdit{pa.beg, pa.end, fmt.Sprintf("(at %s %s %s)", F(pa.num(1)+dx), F(pa.num(2)+dy), F(pa.num(3)))})
-				}
+// MoveSymbol moves the symbol key ("REF", or "REF:UNIT" when REF has
+// several units on the sheet) to at with rotation rot; its fields move by
+// the same offset.
+func (e *SchEditor) MoveSymbol(key string, to Pt, rot float64) error {
+	in, err := e.instance(key)
+	if err != nil {
+		return err
+	}
+	if in.item >= 0 {
+		return fmt.Errorf("symbol %s is pending in this edit (pending symbols cannot be moved)", key)
+	}
+	s := in.n
+	at := s.child("at")
+	if at == nil {
+		return fmt.Errorf("symbol %s has no position", key)
+	}
+	dx, dy := to.X-at.num(1), to.Y-at.num(2)
+	e.edit("", textEdit{at.beg, at.end, fmt.Sprintf("(at %s %s %s)", F(to.X), F(to.Y), F(rot))})
+	for _, c := range s.list {
+		if c.head() == "property" {
+			if pa := c.child("at"); pa != nil {
+				e.edit("", textEdit{pa.beg, pa.end, fmt.Sprintf("(at %s %s %s)", F(pa.num(1)+dx), F(pa.num(2)+dy), F(pa.num(3)))})
 			}
 		}
-		return nil
 	}
-	return fmt.Errorf("no symbol %s on this sheet (pending symbols cannot be moved)", ref)
+	return nil
 }
 
 func (e *SchEditor) apply() (string, error) { return applyEdits(e.src, e.repl) }

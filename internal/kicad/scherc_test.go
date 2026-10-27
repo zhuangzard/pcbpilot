@@ -318,7 +318,7 @@ func pinUUIDs(t *testing.T, e *SchEditor, path string) map[string]string {
 		if n.head() != "symbol" {
 			continue
 		}
-		ref := instRefs(n)[path]
+		ref := instRefByPath(n)[path]
 		for _, c := range n.list {
 			if u := c.child("uuid"); c.head() == "pin" && u != nil && len(c.list) > 1 {
 				out[ref+"."+c.list[1].atom] = u.list[1].atom

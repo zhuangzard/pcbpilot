@@ -124,7 +124,7 @@ func newSchCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 		Short: "Schematic operations",
 	}
 	sch.PersistentFlags().StringVar(&window, "window", "", "EasyEDA window ID")
-	sch.PersistentFlags().String("backend", "easyeda", "editor backend for place/wire/netflag/no-connect/modify/connect/autoconnect/layout-plan/group-move/destagger/titleblock: easyeda (connector) or kicad (edits --kicad-sch; coordinates in KiCad mm, y down)")
+	sch.PersistentFlags().String("backend", "easyeda", "editor backend for place/wire/netflag/no-connect/modify/prim-delete/connect/autoconnect/layout-plan/group-move/destagger/titleblock: easyeda (connector) or kicad (edits --kicad-sch; coordinates in KiCad mm, y down)")
 	sch.PersistentFlags().String("kicad-sch", "", "with --backend kicad: the .kicad_sch sheet to edit")
 	sch.AddCommand(newSchConnectivityCmd(cfg, &window, stdout, stderr))
 	sch.AddCommand(newSchIntentAnnotateCmd(cfg, &window, stdout, stderr))
@@ -683,10 +683,16 @@ Pass --designator to atomically assign the final designator on the connector
 side right after create, so you skip the place→` + "`sch list`" + `→` + "`sch modify`" + ` round-trip
 and the coordinate-based primitiveId re-matching that batch placement otherwise
 needs. The response's ` + "`primitiveId`" + ` and ` + "`component.designator`" + ` reflect the
-final placed state.`,
+final placed state.
+
+--backend kicad places a library symbol (--symbol Lib:Name; derived symbols such as
+Amplifier_Operational:LM358 are flattened). A multi-unit symbol is one placement per unit:
+repeat the call with the same --designator and --unit 2, 3, … (the power unit too); a new
+unit inherits the placed units' fields, a conflicting --value/--footprint/--lcsc is refused.`,
 			Example: `  pcbpilot sch place --lib <libraryUuid> --uuid <deviceUuid> --x 100 --y 200
   pcbpilot sch place --lib <l> --uuid <u> --x 100 --y 200 --rotation 90 --mirror
-  pcbpilot sch place --lib <l> --uuid <u> --x 100 --y 200 --designator R12`,
+  pcbpilot sch place --lib <l> --uuid <u> --x 100 --y 200 --designator R12
+  pcbpilot sch place --backend kicad --kicad-sch amp.kicad_sch --symbol Amplifier_Operational:LM358 --designator U1 --unit 2 --x 101.6 --y 50.8`,
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if path, ok, err := kicadSchTarget(cmd); err != nil || ok {
 					if err != nil {
@@ -731,7 +737,7 @@ final placed state.`,
 		c.Flags().StringVar(&kValue, "value", "", "--backend kicad: Value field")
 		c.Flags().StringVar(&kFootprint, "footprint", "", "--backend kicad: Footprint field (Lib:Footprint)")
 		c.Flags().StringVar(&kLCSC, "lcsc", "", "--backend kicad: LCSC field (C-number)")
-		c.Flags().IntVar(&kUnit, "unit", 1, "--backend kicad: symbol unit")
+		c.Flags().IntVar(&kUnit, "unit", 1, "--backend kicad: symbol unit to place (1 = A, 2 = B, …; place each unit of a multi-unit symbol with the same --designator)")
 		sch.AddCommand(c)
 	}
 
@@ -774,7 +780,11 @@ rewrites otherProperty WHOLESALE, so a patch like {"supplierId":...} used to
 silently wipe all custom properties. The connector now reads the existing
 custom properties and re-writes them in the same modify call; preserved keys
 come back in result.propertiesPreserved (+propertiesBefore), and any key the
-platform still dropped is reported in result.notApplied (non-zero exit).`,
+platform still dropped is reported in result.notApplied (non-zero exit).
+
+--backend kicad: --id is the designator, or REF:UNIT for one unit of a multi-unit
+symbol. Fields and --designator apply to every placed unit; --x/--y/--rotation move
+one unit (a bare designator with several units placed is refused).`,
 			Example: `  pcbpilot sch modify --id <primitiveId> --x 150 --y 200
   pcbpilot sch modify --id <id> --rotation 90 --designator R12
   pcbpilot sch modify --id <id> --patch-file patch.json    # PowerShell-safe UTF-8 JSON
@@ -1037,9 +1047,25 @@ NOT line up — re-wire the affected pins, then run ` + "`pcbpilot sch drc`" + `
 			Use:   "prim-delete",
 			Short: "Delete schematic primitives of ANY type by id (or the current selection if --ids omitted)",
 			Args:  cobra.NoArgs,
+			Long: `Delete schematic primitives of ANY type by id (or the current selection if --ids omitted).
+
+--backend kicad --kicad-sch X.kicad_sch --ids U1,R3 deletes symbols by designator: a bare
+designator removes every placed unit of a multi-unit symbol, REF:UNIT only that unit. Wires,
+labels and no-connect flags on the removed pins stay (all or nothing).`,
 			Example: `  pcbpilot sch prim-delete --ids id1,id2   # delete these (any primitive type)
-  pcbpilot sch prim-delete                 # delete the current selection`,
+  pcbpilot sch prim-delete                 # delete the current selection
+  pcbpilot sch prim-delete --backend kicad --kicad-sch amp.kicad_sch --ids U1:2   # one unit of U1`,
 			RunE: func(cmd *cobra.Command, args []string) error {
+				if path, ok, err := kicadSchTarget(cmd); err != nil || ok {
+					if err != nil {
+						return err
+					}
+					ids, err := parseIDList(idsRaw)
+					if err != nil {
+						return fmt.Errorf("--backend kicad: pass --ids U1,U2:1 (designators; REF:UNIT for one unit): %w", err)
+					}
+					return kicadSchDelete(path, ids, stdout)
+				}
 				payload := map[string]any{}
 				var cascadePlan map[string]string // primitiveId → group-member designator
 				if idsRaw != "" {

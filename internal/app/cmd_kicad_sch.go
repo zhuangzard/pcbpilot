@@ -213,6 +213,9 @@ func kicadSymbolText(sheet, libID, symLib string) (string, error) {
 	if d := os.Getenv("KICAD10_SYMBOL_DIR"); d != "" {
 		cands = append(cands, filepath.Join(d, lib+".kicad_sym"))
 	}
+	if d := kicad.StockSymbolDir(); d != "" { // PCBPILOT_KICAD_SYMBOLS or the installed KiCad's
+		cands = append(cands, filepath.Join(d, lib+".kicad_sym"))
+	}
 	cands = append(cands, "/Applications/KiCad/KiCad.app/Contents/SharedSupport/symbols/"+lib+".kicad_sym",
 		"/usr/share/kicad/symbols/"+lib+".kicad_sym")
 	for _, p := range cands {
@@ -237,25 +240,130 @@ func kicadSchPlace(path string, libID, symLib, ref, value, footprint, lcsc strin
 				return nil, err
 			}
 		}
-		if _, err := e.SymbolPinPositions(ref); err == nil {
-			return nil, fmt.Errorf("%s is already on this sheet", ref)
+		if unit < 1 {
+			unit = 1
+		}
+		if err := kicad.ValidReference(ref); err != nil {
+			return nil, err
+		}
+		if err := e.HierarchyErr(); err != nil {
+			return nil, fmt.Errorf("placing %s needs the project's sheet hierarchy, which is unknown: %v (open the sheet inside its KiCad project)", ref, err)
+		}
+		if e.RepeatedSheet() {
+			return nil, fmt.Errorf("this sheet is used by several sheet symbols (each use has its own references); placing symbols on it is not supported")
+		}
+		if others := e.RefElsewhere(ref); len(others) > 0 {
+			return nil, fmt.Errorf("%s is already placed on %s; place every unit of a component on one sheet", ref, strings.Join(others, ", "))
+		}
+		if n, err := e.LibUnitCount(libID); err != nil {
+			return nil, err
+		} else if unit > n {
+			return nil, fmt.Errorf("%s has %d unit(s); --unit %d does not exist", libID, n, unit)
+		}
+		var fields []kicad.Field
+		if placed := e.SymbolUnits(ref); len(placed) > 0 {
+			// another unit of a placed symbol: same library symbol, shared fields
+			if lid := e.SymbolLibID(ref); lid != libID {
+				return nil, fmt.Errorf("%s is already on this sheet as %s; another unit must use the same --symbol", ref, lid)
+			}
+			for _, u := range placed {
+				if u == unit {
+					return nil, fmt.Errorf("%s unit %d is already on this sheet (placed units: %v; pass --unit N for another)", ref, unit, placed)
+				}
+			}
+			inherited, err := kicadInheritUnitFields(e.SymbolUnitFields(ref), ref, value, footprint, lcsc)
+			if err != nil {
+				return nil, err
+			}
+			// the standard fields come through Value/Footprint (one each, with
+			// the library's position); the rest are passed as extra fields
+			for _, f := range inherited {
+				switch f.Name {
+				case "Value":
+					value = f.Value
+				case "Footprint":
+					footprint = f.Value
+				default:
+					fields = append(fields, f)
+				}
+			}
+		} else if lcsc != "" {
+			fields = append(fields, kicad.Field{Name: "LCSC", Value: lcsc, Hide: true})
 		}
 		m := ""
 		if mirror {
 			m = "y"
-		}
-		var fields []kicad.Field
-		if lcsc != "" {
-			fields = append(fields, kicad.Field{Name: "LCSC", Value: lcsc, Hide: true})
 		}
 		id, err := e.PlaceSymbol(kicad.SymbolInstance{LibID: libID, Ref: ref, Unit: unit, At: kicad.Pt{X: x, Y: y}, Rot: rot, Mirror: m,
 			Value: value, Footprint: footprint, Fields: fields})
 		if err != nil {
 			return nil, err
 		}
-		pins, _ := e.SymbolPinPositions(ref)
-		return map[string]any{"uuid": id, "designator": ref, "pins": pins}, nil
+		pins, _ := e.SymbolPinPositions(fmt.Sprintf("%s:%d", ref, unit))
+		return map[string]any{"uuid": id, "designator": ref, "unit": unit, "units": e.SymbolUnits(ref), "pins": pins}, nil
 	})
+}
+
+// kicadInheritUnitFields gives a new unit of a placed symbol the fields its
+// placed units share (KiCad keeps them equal on every unit). Units that
+// already disagree — a value, or a field one of them lacks — are refused, as
+// is a --value, --footprint or --lcsc that differs from them or names a
+// field they do not have, so the units never diverge (sch modify --id REF
+// sets a field on every unit).
+func kicadInheritUnitFields(byUnit map[int][]kicad.Field, ref, value, footprint, lcsc string) ([]kicad.Field, error) {
+	units := make([]int, 0, len(byUnit))
+	for u := range byUnit {
+		units = append(units, u)
+	}
+	sort.Ints(units)
+	if len(units) == 0 {
+		return nil, nil
+	}
+	// the fields of the first unit, checked against every other unit
+	first := byUnit[units[0]]
+	val := map[string]string{}
+	for _, f := range first {
+		val[f.Name] = f.Value
+	}
+	for _, u := range units[1:] {
+		seen := map[string]bool{}
+		for _, f := range byUnit[u] {
+			seen[f.Name] = true
+			if f.Name == "Reference" {
+				continue
+			}
+			v, ok := val[f.Name]
+			if !ok {
+				return nil, fmt.Errorf("%s: unit %d has a %s field unit %d lacks; make the placed units agree first (sch modify --id %s)", ref, u, f.Name, units[0], ref)
+			}
+			if v != f.Value {
+				return nil, fmt.Errorf("%s: %s is %q on unit %d but %q on unit %d; make the placed units agree first (sch modify --id %s)", ref, f.Name, v, units[0], f.Value, u, ref)
+			}
+		}
+		for name := range val {
+			if name != "Reference" && !seen[name] {
+				return nil, fmt.Errorf("%s: unit %d lacks the %s field unit %d has; make the placed units agree first (sch modify --id %s)", ref, u, name, units[0], ref)
+			}
+		}
+	}
+	given := map[string]string{"Value": value, "Footprint": footprint, "LCSC": lcsc}
+	var out []kicad.Field
+	for _, f := range first {
+		if f.Name == "Reference" {
+			continue
+		}
+		if g := given[f.Name]; g != "" && g != f.Value {
+			return nil, fmt.Errorf("%s: %s is %q on its placed units, not %q (units share fields; change them with sch modify --id %s)", ref, f.Name, f.Value, g, ref)
+		}
+		delete(given, f.Name)
+		out = append(out, kicad.Field{Name: f.Name, Value: f.Value, Hide: f.Hide})
+	}
+	for _, name := range []string{"Value", "Footprint", "LCSC"} {
+		if g := given[name]; g != "" {
+			return nil, fmt.Errorf("%s: its placed units have no %s field, so a new unit cannot get %q alone (set it on every unit first: sch modify --id %s); omit it here", ref, name, g, ref)
+		}
+	}
+	return out, nil
 }
 
 // kicadPinOrPoint parses "x,y" (mm) or "REF.PIN" (that pin's position).
@@ -370,11 +478,17 @@ func kicadSchNoConnect(path, ref string, pins []string, stdout io.Writer) error 
 	})
 }
 
-// kicadSchModify: --id is the reference; x/y/rotation move the symbol
-// (wires are not dragged), designator renames, the patch's
-// customAttributes/otherProperty (and name/supplierId/manufacturerId
-// shortcuts) set fields.
-func kicadSchModify(path, ref string, patch map[string]any, stdout io.Writer) error {
+// kicadSchModify: --id is the reference, or REF:UNIT for one unit of a
+// multi-unit symbol; x/y/rotation move that symbol unit (wires are not
+// dragged; a bare REF with several units placed is refused), designator
+// renames, the patch's customAttributes/otherProperty (and
+// name/supplierId/manufacturerId shortcuts) set fields — a rename and the
+// fields always apply to every unit of the reference.
+func kicadSchModify(path, id string, patch map[string]any, stdout io.Writer) error {
+	ref, unit, err := kicad.SplitUnitKey(id)
+	if err != nil {
+		return err
+	}
 	return kicadSchEdit(path, stdout, func(e *kicad.SchEditor) (map[string]any, error) {
 		set := map[string]string{}
 		for _, k := range []string{"customAttributes", "otherProperty"} {
@@ -393,7 +507,7 @@ func kicadSchModify(path, ref string, patch map[string]any, stdout io.Writer) er
 		_, hasY := patch["y"]
 		_, hasR := patch["rotation"]
 		if hasX || hasY || hasR {
-			x, y, r, err := e.SymbolAt(ref)
+			x, y, r, err := e.SymbolAt(id)
 			if err != nil {
 				return nil, err
 			}
@@ -406,9 +520,27 @@ func kicadSchModify(path, ref string, patch map[string]any, stdout io.Writer) er
 			if v, ok := patch["rotation"].(float64); ok {
 				r = v
 			}
-			if err := e.MoveSymbol(ref, kicad.Pt{X: x, Y: y}, r); err != nil {
+			if err := e.MoveSymbol(id, kicad.Pt{X: x, Y: y}, r); err != nil {
 				return nil, err
 			}
+		}
+		units := e.SymbolUnits(ref)
+		if len(units) == 0 {
+			return nil, fmt.Errorf("no symbol %s on this sheet", ref)
+		}
+		if unit > 0 { // an explicit unit must be placed, field-only edits included
+			if _, _, _, err := e.SymbolAt(id); err != nil {
+				return nil, err
+			}
+		}
+		// a Reference field in the patch is a rename like --designator
+		rename, hasRename := patch["designator"].(string)
+		if r, ok := set["Reference"]; ok {
+			if hasRename && r != rename {
+				return nil, fmt.Errorf("designator %q and Reference field %q disagree", rename, r)
+			}
+			rename, hasRename = r, true
+			delete(set, "Reference")
 		}
 		keys := make([]string, 0, len(set))
 		for k := range set {
@@ -420,11 +552,25 @@ func kicadSchModify(path, ref string, patch map[string]any, stdout io.Writer) er
 				return nil, err
 			}
 		}
-		if d, ok := patch["designator"].(string); ok && d != ref {
-			if err := e.SetField(ref, "Reference", d); err != nil {
+		if hasRename && rename != ref {
+			if err := e.SetField(ref, "Reference", rename); err != nil { // validates and checks collisions
 				return nil, err
 			}
 		}
-		return map[string]any{"designator": ref, "fields": set}, nil
+		return map[string]any{"designator": ref, "units": units, "fields": set}, nil
+	})
+}
+
+// kicadSchDelete is `sch prim-delete --backend kicad`: each id is a
+// designator (every placed unit) or REF:UNIT (that unit only). Wires and
+// flags on the removed pins stay; overlapping ids (U1:1,U1) delete each unit
+// once; all or nothing.
+func kicadSchDelete(path string, ids []string, stdout io.Writer) error {
+	return kicadSchEdit(path, stdout, func(e *kicad.SchEditor) (map[string]any, error) {
+		removed, err := e.DeleteSymbols(ids)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"deleted": removed}, nil
 	})
 }

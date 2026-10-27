@@ -78,10 +78,10 @@ func (e *SchEditor) instPins(inst *sexp) ([]LibPin, error) {
 	return out, nil
 }
 
-// instRefs maps each sheet instance path of a placed symbol to its
+// instRefByPath maps each sheet instance path of a placed symbol to its
 // reference (the instances block; a repeated sheet gives each instance its
 // own).
-func instRefs(inst *sexp) map[string]string {
+func instRefByPath(inst *sexp) map[string]string {
 	out := map[string]string{}
 	in := inst.child("instances")
 	if in == nil {
@@ -144,7 +144,7 @@ func (e *SchEditor) ERCPinPoint(uuid, sheetPath, ref, pin string, near *Pt) (ERC
 		if n.head() != "symbol" {
 			continue
 		}
-		refs := instRefs(n)
+		refs := instRefByPath(n)
 		r, ok := refs[sheetPath]
 		if !ok && len(refs) == 0 {
 			r, ok = propVal(n, "Reference"), true

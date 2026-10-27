@@ -27,16 +27,19 @@ type ScenePin struct {
 type SceneSymbol struct {
 	Ref, LibID string
 	Key        string // instance key: Ref, or "Ref:Unit" when the reference has several units here
-	Unit       int
-	At         Pt
-	Rot        float64
-	Mirror     string
-	Power      bool // power symbol (#PWR…)
-	Box        Box  // body + pins; zero when the library symbol is unknown
-	HasBox     bool
-	Body       Box // graphics only (no pins); valid when HasBox
-	Pins       []ScenePin
-	Fields     []SceneField // visible, non-empty fields
+	// Refs is every instance-path reference (a sheet used by two sheet
+	// symbols: U201 and U301 for one symbol); Ref is the first.
+	Refs   []string
+	Unit   int
+	At     Pt
+	Rot    float64
+	Mirror string
+	Power  bool // power symbol (#PWR…)
+	Box    Box  // body + pins; zero when the library symbol is unknown
+	HasBox bool
+	Body   Box // graphics only (no pins); valid when HasBox
+	Pins   []ScenePin
+	Fields []SceneField // visible, non-empty fields
 }
 
 // SceneField is a visible symbol field with an estimated text box.
@@ -166,7 +169,7 @@ func wirePts(n *sexp) []Pt {
 }
 
 func (e *SchEditor) sceneSymbol(n *sexp, libs map[string]Box) (SceneSymbol, error) {
-	s := SceneSymbol{Ref: symRef(n), Unit: 1}
+	s := SceneSymbol{Ref: symRef(n), Refs: instRefs(n, ""), Unit: 1}
 	if id := n.child("lib_id"); id != nil && len(id.list) > 1 {
 		s.LibID = id.list[1].atom
 	}
@@ -212,7 +215,7 @@ func (e *SchEditor) sceneSymbol(n *sexp, libs map[string]Box) (SceneSymbol, erro
 		s.Fields = append(s.Fields, SceneField{Name: p.list[1].atom, Value: p.list[2].atom,
 			Box: fieldBox(Pt{pa.num(1), pa.num(2)}, vertical, len([]rune(p.list[2].atom)), size, just)})
 	}
-	pins, err := e.LibPins(s.LibID)
+	pins, err := e.LibPinsStyle(s.LibID, instStyle(n))
 	if err != nil {
 		return s, nil // unknown library symbol: no pins
 	}
