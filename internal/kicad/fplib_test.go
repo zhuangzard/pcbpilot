@@ -1,6 +1,8 @@
 package kicad
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io/fs"
 	"os"
@@ -807,5 +809,44 @@ func TestFPLibKiCadDemos(t *testing.T) {
 		if len(vt.Warnings) == 0 {
 			t.Errorf("%s: video demo's ${KICAD6_FOOTPRINT_DIR} must be reported", mode)
 		}
+	}
+}
+
+// TestFPLibFilesHashParsedBytes: Files records the hash of exactly the
+// bytes each table was parsed from — a table rewritten right after it was
+// parsed keeps its old hash (so a later re-check catches the change) — and
+// lists the absent files consulted (the global table, kicad_common.json).
+func TestFPLibFilesHashParsedBytes(t *testing.T) {
+	f := newFPFixture(t)
+	f.lib(filepath.Join(f.pj, "a.pretty"), "R")
+	orig := table(row("A", "KiCad", "${KIPRJMOD}/a.pretty"))
+	pt := filepath.Join(f.pj, "fp-lib-table")
+	f.write(pt, orig)
+	fpLibAfterParse = func(path string) {
+		if path == pt {
+			f.write(pt, table(row("B", "KiCad", "${KIPRJMOD}/a.pretty")))
+		}
+	}
+	defer func() { fpLibAfterParse = nil }()
+	tabs := f.load()
+	h := sha256.Sum256([]byte(orig))
+	var got *FPLibFile
+	absent := 0
+	for i := range tabs.Files {
+		if tabs.Files[i].Path == pt {
+			got = &tabs.Files[i]
+		}
+		if !tabs.Files[i].Exists {
+			absent++
+		}
+	}
+	if got == nil || !got.Exists || got.SHA256 != hex.EncodeToString(h[:]) {
+		t.Fatalf("project table recorded as %+v, want the parsed bytes' hash", got)
+	}
+	if _, err := tabs.Resolve("A:R"); err != nil {
+		t.Fatalf("the parse used the original table: %v", err)
+	}
+	if absent < 2 {
+		t.Fatalf("absent files not listed: %+v", tabs.Files)
 	}
 }

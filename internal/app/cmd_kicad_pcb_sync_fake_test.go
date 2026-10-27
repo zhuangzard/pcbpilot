@@ -1001,3 +1001,41 @@ func TestPcbSyncReadOnlyRechecksDestination(t *testing.T) {
 		})
 	}
 }
+
+// TestPcbSyncSchematicProjectRechecked: the schematic's own project (here
+// absent, the board named differently) is an input: one created while the
+// sync plans is exit 4.
+func TestPcbSyncSchematicProjectRechecked(t *testing.T) {
+	dir, o, fake := fakeProject(t, fakeNetlistR2())
+	fake.value = "1k"
+	for _, ext := range []string{".kicad_pcb", ".kicad_pro", ".kicad_dru"} {
+		if err := os.Rename(filepath.Join(dir, "a"+ext), filepath.Join(dir, "board"+ext)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	o.pcb = filepath.Join(dir, "board.kicad_pcb")
+	schPro := filepath.Join(dir, "a.kicad_pro")
+	for _, mode := range []string{"check", "dry-run", "plan-out"} {
+		t.Run(mode, func(t *testing.T) {
+			_ = os.Remove(schPro)
+			m := o
+			switch mode {
+			case "check":
+				m.check = true
+			case "dry-run":
+				m.dryRun = true
+			default:
+				m.planOut = filepath.Join(dir, "plan.json")
+			}
+			fake.onFPInfo = func() {
+				if err := os.WriteFile(schPro, []byte(`{"meta":{}}`), 0o644); err != nil {
+					t.Error(err)
+				}
+			}
+			rep, code, _ := runSyncCode(t, m)
+			if code != 4 || rep.Errors[len(rep.Errors)-1].Code != string(kfile.CodeChanged) || fileExists(filepath.Join(dir, "plan.json")) {
+				t.Fatalf("exit %d %+v", code, rep.Errors)
+			}
+		})
+	}
+}

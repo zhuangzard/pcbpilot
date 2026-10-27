@@ -527,13 +527,17 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 	if err != nil {
 		return fileErr(err)
 	}
-	if schPro := boardSibling(strings.TrimSuffix(sheets[0].Path, filepath.Ext(sheets[0].Path))+".kicad_pcb", ".kicad_pro"); fileExists(schPro) {
-		b, sn, err := kfile.Read(schPro)
-		if err != nil {
-			return fileErr(err)
-		}
-		inputSnaps = append(inputSnaps, sn)
-		if err := os.WriteFile(strings.TrimSuffix(sheetCopies[0], filepath.Ext(sheetCopies[0]))+".kicad_pro", b, 0o644); err != nil {
+	// The schematic's project (next to the root sheet; its name may differ
+	// from the board's): present or absent, it is an input — a stat or read
+	// failure is an error, and one created later is a change.
+	schPro := strings.TrimSuffix(sheets[0].Path, filepath.Ext(sheets[0].Path)) + ".kicad_pro"
+	schProData, schProSnap, err := readOpt(schPro)
+	if err != nil {
+		return fileErr(err)
+	}
+	inputSnaps = append(inputSnaps, schProSnap)
+	if schProData != nil {
+		if err := os.WriteFile(strings.TrimSuffix(sheetCopies[0], filepath.Ext(sheetCopies[0]))+".kicad_pro", schProData, 0o644); err != nil {
 			return fileErr(err)
 		}
 	}
@@ -655,13 +659,10 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 	// kicad_common.json) decides which footprint files are installed: it is
 	// snapshotted with the other inputs, re-checked with them and in the
 	// revision.
+	// Snapshots of exactly the bytes the loader parsed (not a later re-read).
 	var libSnaps []kfile.Snapshot
 	for _, f := range libs.Files {
-		sn, err := kfile.Stat(f)
-		if err != nil {
-			return fileErr(err)
-		}
-		libSnaps = append(libSnaps, sn)
+		libSnaps = append(libSnaps, kfile.Snapshot{Path: f.Path, Exists: f.Exists, Size: f.Size, SHA256: f.SHA256})
 	}
 	inputSnaps = append(inputSnaps, libSnaps...)
 	info := func(refs []kicad.FPRef) (map[string]kicad.SyncFPInfo, []kicad.SyncError) {
