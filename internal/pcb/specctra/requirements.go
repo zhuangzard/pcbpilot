@@ -393,10 +393,12 @@ func childSpans(text, name string) [][2]int {
 }
 
 // writeSexpr serialises a node on one line; quoted atoms keep their quotes.
+// DSN strings have no escapes, so the text goes between the quotes as read
+// (Go quoting would turn a backslash into two).
 func writeSexpr(n *node) string {
 	if !n.isList {
 		if n.Quoted {
-			return strconv.Quote(n.Atom)
+			return `"` + n.Atom + `"`
 		}
 		return n.Atom
 	}
