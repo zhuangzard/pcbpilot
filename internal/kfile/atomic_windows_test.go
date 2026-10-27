@@ -127,3 +127,54 @@ func TestWindowsReparsePointRefused(t *testing.T) {
 	}
 	noTemps(t, dir)
 }
+
+// fakeInfo is an Lstat result for a reparse point with the given mode.
+type fakeInfo struct {
+	mode os.FileMode
+	attr uint32
+}
+
+func (f fakeInfo) Name() string       { return "f" }
+func (f fakeInfo) Size() int64        { return 1 }
+func (f fakeInfo) Mode() os.FileMode  { return f.mode }
+func (f fakeInfo) ModTime() time.Time { return time.Time{} }
+func (f fakeInfo) IsDir() bool        { return f.mode.IsDir() }
+func (f fakeInfo) Sys() any           { return &syscall.Win32FileAttributeData{FileAttributes: f.attr} }
+
+// Cloud-sync placeholders (OneDrive) are written like regular files; every
+// other reparse tag is refused. The tag is injected: a real placeholder
+// needs a sync provider.
+func TestWindowsCloudPlaceholderAllowed(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "x.kicad_pcb")
+	oldL, oldT := lstatFile, reparseTag
+	t.Cleanup(func() { lstatFile, reparseTag = oldL, oldT })
+	cases := []struct {
+		name string
+		mode os.FileMode
+		attr uint32
+		tag  uint32
+		err  error
+		ok   bool
+	}{
+		{"cloud", os.ModeIrregular, syscall.FILE_ATTRIBUTE_REPARSE_POINT, 0x9000001A, nil, true},
+		{"cloud_1", os.ModeIrregular, syscall.FILE_ATTRIBUTE_REPARSE_POINT, 0x9000101A, nil, true},
+		{"cloud_f", os.ModeIrregular, syscall.FILE_ATTRIBUTE_REPARSE_POINT, 0x9000F01A, nil, true},
+		{"onedrive legacy", os.ModeIrregular, syscall.FILE_ATTRIBUTE_REPARSE_POINT, 0x80000021, nil, true},
+		{"symlink tag", os.ModeIrregular, syscall.FILE_ATTRIBUTE_REPARSE_POINT, 0xA000000C, nil, false},
+		{"mount point tag", os.ModeIrregular, syscall.FILE_ATTRIBUTE_REPARSE_POINT, 0xA0000003, nil, false},
+		{"app exec link", os.ModeIrregular, syscall.FILE_ATTRIBUTE_REPARSE_POINT, 0x8000001B, nil, false},
+		{"dedup", os.ModeIrregular, syscall.FILE_ATTRIBUTE_REPARSE_POINT, 0x80000013, nil, false},
+		{"unreadable tag", os.ModeIrregular, syscall.FILE_ATTRIBUTE_REPARSE_POINT, 0, errors.New("denied"), false},
+		{"cloud tag on a symlink", os.ModeSymlink, syscall.FILE_ATTRIBUTE_REPARSE_POINT, 0x9000001A, nil, false},
+		{"cloud tag on a directory", os.ModeDir | os.ModeIrregular, syscall.FILE_ATTRIBUTE_REPARSE_POINT, 0x9000001A, nil, false},
+		{"irregular, no reparse attribute", os.ModeIrregular, 0, 0x9000001A, nil, false},
+	}
+	for _, c := range cases {
+		lstatFile = func(string) (os.FileInfo, error) { return fakeInfo{c.mode, c.attr}, nil }
+		reparseTag = func(string) (uint32, error) { return c.tag, c.err }
+		err := checkRegular(p)
+		if c.ok && err != nil || !c.ok && CodeOf(err) != CodeUnsupported {
+			t.Errorf("%s: %v", c.name, err)
+		}
+	}
+}

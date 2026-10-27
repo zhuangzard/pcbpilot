@@ -46,6 +46,7 @@ var (
 	renameFile  = platformRename
 	removeFile  = os.Remove
 	chmodFile   = os.Chmod
+	lstatFile   = os.Lstat
 	syncDir     = platformSyncDir
 	retryBudget = 3 * time.Second
 )
@@ -128,16 +129,17 @@ func targetPerm(path string, perm os.FileMode, exact bool) (os.FileMode, error) 
 // checkRegular refuses a target that exists and is not a regular file
 // (symlink, Windows reparse point, directory, device, …): replacing a link
 // would replace the link, not its referent, and backups would copy the
-// referent. A missing target is fine.
+// referent. A cloud-sync placeholder (OneDrive) counts as regular. A missing
+// target is fine.
 func checkRegular(path string) error {
-	st, err := os.Lstat(path)
+	st, err := lstatFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	if !st.Mode().IsRegular() {
+	if !st.Mode().IsRegular() && !allowReparse(path, st) {
 		return &Error{Code: CodeUnsupported, Path: path,
 			Detail: fmt.Sprintf("not a regular file (%v); symlinks, reparse points and directories are not written through", st.Mode().Type()),
 			Fix:    "point pcbpilot at the real file instead of the link"}

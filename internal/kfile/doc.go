@@ -44,8 +44,9 @@
 //     goes; if a flush fails the journal and backups stay. Staged files stay
 //     0600 and are re-hashed before the commit and before each rename; the
 //     txn tree is 0700 with 0600 backups; the writer lock and the txn tree
-//     cannot themselves be staged or deleted. Symlinks, reparse points and
-//     other non-regular targets are refused (E_UNSUPPORTED_TARGET), at
+//     cannot themselves be staged or deleted. Symlinks, reparse points (except
+//     cloud-sync placeholders such as OneDrive files, which are the real
+//     file) and other non-regular targets are refused (E_UNSUPPORTED_TARGET), at
 //     staging and again before each change. Every install is chmod, flush,
 //     rename, flush the directory; before any journal is dropped (recover,
 //     rollback, discard) the recorded final modes are verified and every
