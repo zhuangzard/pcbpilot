@@ -378,7 +378,10 @@ REF:PIN with a pin number or a pin NAME (all pins of that name; NAME* = prefix).
 
 Same gates as sch-build; KiCad netlist == edited spec is transactional (nothing written on a
 mismatch). Each successful edit saves a checkpoint (kicad sch-checkpoint list|restore N).
---dry-run prints the plan (zones re-planned/reused, coordinates, connections) and writes nothing.`,
+--dry-run prints the plan (zones re-planned/reused, coordinates, connections) and writes nothing.
+The edit redraws the project from the stored spec: when its files were changed in the KiCad
+GUI since the last build it is refused (EXTERNAL_EDIT; KICAD_OPEN while KiCad has it open) —
+import the edits with sch-read, or overwrite them with --discard-external-edits.`,
 		Example: `  pcbpilot kicad sch-edit --project build/ --spec delta.json
   pcbpilot kicad sch-edit --project build/ --spec delta.json --dry-run`,
 		RunE: func(cmd *cobra.Command, args []string) error {

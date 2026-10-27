@@ -50,6 +50,22 @@ pcbpilot kicad sch-checkpoint list --project build/                     # 回退
   `lcsc.pretty`，已修复）。
 - **可复现**：`--planner-timeout` 按墙钟决定哪些区用 planner；同一 spec 要逐字节可复现时用 `--no-planner --fresh`。
 
+### GUI 改动保护（v0.10.2 起）
+
+- sch-edit 和对已有 `--out` 的 sch-build 会从存储的 spec 重画整个工程。上次构建后在 KiCad GUI 里改过的
+  图纸/工程/库文件（改动、新增、删除；含子目录，以及会覆盖一个不是 pcbpilot 写的文件）会被拒绝：`EXTERNAL_EDIT`，
+  列出文件，什么都不写。比对依据是构建时按暂存内容记录的 sha256 清单（`state.json` 的 `manifest`）；旧工程没有
+  清单时比对 checkpoint，都没有也拒绝。构建期间工程被保存 = `CONCURRENT_CHANGE`；读不了文件 = `PROJECT_UNREADABLE`。
+- 要保留 GUI 改动：`sch-read --project build/ --out edited.json` 导入成 spec，构建到新的 `--out`。确定要丢弃：
+  加 `--discard-external-edits`（报告列出将覆盖的文件，并先把全部工程文件存一个 checkpoint，可 `sch-checkpoint restore N` 找回）。
+- 任一 `~*.lck` 锁文件 = 工程还在 KiCad 里打开：`KICAD_OPEN`，先在 KiCad 保存并关闭（覆盖开关不跳过它）。
+  `.kicad_prl`、`_autosave-*`、`*-bak`、`*-backups/`、`.history/` 等 KiCad 附属文件不算改动；kicad-cli 不改 `.kicad_pro`。
+- 只有 `.kicad_pro` 变了：KiCad 保存工程（如保存 PCB）时会把全部默认设置写进去。没在 KiCad 改工程设置（网络类、
+  文本变量、板设置）时 `--discard-external-edits` 是安全的。
+- 报告文件（`erc.json`、`connectivity.json`、`values.json`、`intent-spec.json`、`intent.json/md`、`render/*.svg`）
+  不是设计数据：被改过或旧工程没记录过时不拒绝，先存进 checkpoint，报告 `warnings` 里 `WARNING: report(s) …`
+  点名并给出 checkpoint 目录，再重新生成。要找回就从那个目录手工拷回（不要整体 restore 那个 checkpoint）。
+
 delta 例子（只写意图，脚名即可）：
 
 ```json
