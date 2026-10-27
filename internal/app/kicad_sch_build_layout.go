@@ -694,6 +694,21 @@ func zoneBox(zl *sbZoneLayout, zi *sbZoneIn, syms map[string]kicad.SceneSymbol, 
 	if math.IsInf(b.MinX, 1) {
 		return kicad.Box{}
 	}
+	// the zone title is drawn from the frame's left edge (writeSbProject) and
+	// may be longer than a narrow zone is wide (a column of pull-downs under a
+	// 28-character title): the packer and pagination only see this box, so
+	// the title ran past the right edge of A0 and the page-fit gate failed on
+	// a page pagination had accepted (field board 2026-10-27)
+	return sbFitTitle(b, zi.Zone.Title)
+}
+
+// sbFitTitle widens a zone box so its frame holds the zone title: the
+// 1.27 mm inset plus the text at 1.778 mm, estimated no narrower than
+// kicad sch-fit / sch-check measure it (1 mm per character + 1 mm).
+func sbFitTitle(b kicad.Box, title string) kicad.Box {
+	if title != "" {
+		b.MaxX = math.Max(b.MaxX, b.MinX-2*sbZoneMargin+1.27+2+1.2*float64(len([]rune(title))))
+	}
 	return b
 }
 
@@ -2126,8 +2141,10 @@ const (
 
 // sbPackFresh packs a fresh page with the zones apply's packer
 // (kicadPackZones: rows in reading order inside the drawing area of the
-// smallest paper that holds them, clear of the title block).
-func sbPackFresh(ids []string, layouts map[string]*sbZoneLayout) map[string]kicad.Pt {
+// smallest paper that holds them, clear of the title block). flagW > 0 is
+// the width of the PWR_FLAG row renderSbPage draws under the zones
+// (sbFlagRowW): it must fit on the paper too.
+func sbPackFresh(ids []string, layouts map[string]*sbZoneLayout, flagW float64) map[string]kicad.Pt {
 	var zs []SchematicZoneResult
 	for _, id := range ids {
 		fp := sbFootprint(layouts[id].Box, kicad.Pt{})
@@ -2140,6 +2157,15 @@ func sbPackFresh(ids []string, layouts map[string]*sbZoneLayout) map[string]kica
 		if !ok {
 			continue
 		}
+		if flagW > 0 {
+			var rects []kicad.Box
+			for _, f := range frames {
+				rects = append(rects, f.Rect)
+			}
+			if !sbFlagRowFits(rects, flagW, p.W, p.H) {
+				continue
+			}
+		}
 		out := map[string]kicad.Pt{}
 		for _, f := range frames {
 			// the frame's zone origin, snapped to the 2.54 mm grid
@@ -2148,6 +2174,51 @@ func sbPackFresh(ids []string, layouts map[string]*sbZoneLayout) map[string]kica
 		return out
 	}
 	return nil
+}
+
+// sbFlagRowW is the width of a page's PWR_FLAG row (renderSbPage): its
+// caption, then one supply / ground symbol with its flag per net. 0: none.
+func sbFlagRowW(nets []string) float64 {
+	if len(nets) == 0 {
+		return 0
+	}
+	w := 5.08
+	for _, n := range nets {
+		w += math.Max(15.24, sbTextW(n)+7.62)
+	}
+	return math.Max(w, 1+float64(len([]rune(sbFlagCaption)))+1) // the caption, as sch-fit measures text
+}
+
+const sbFlagCaption = "PWR_FLAG (ERC: power source of each rail)"
+
+// sbFlagRowBox is the extent of the PWR_FLAG row drawn under zone frames
+// whose lowest edge is bottom: caption 7.62 mm above the symbols, supply
+// symbols above / ground symbols below with their flags.
+func sbFlagRowBox(bottom, w float64) kicad.Box {
+	y := sbSnap(bottom + 12.7)
+	return kicad.Box{MinX: sbPageOrigin - 1, MinY: y - 7.62 - 1.5, MaxX: sbPageOrigin + w, MaxY: y + 8.89}
+}
+
+// sbFlagRowFits reports whether the PWR_FLAG row of width w under frames
+// stays inside the drawing area of a pw × ph paper and out of its title block, by the
+// rules kicad sch-fit judges the page with. The row used to be left out of
+// the page-fit decision: pagination kept a page whose zones filled A0 to
+// the bottom, and the flags under them overflowed it (field board
+// 2026-10-27, page-fit failed on a page pagination had accepted).
+func sbFlagRowFits(frames []kicad.Box, w, pw, ph float64) bool {
+	if w <= 0 {
+		return true
+	}
+	bottom := sbPageOrigin
+	for _, f := range frames {
+		bottom = math.Max(bottom, f.MaxY)
+	}
+	r := sbFlagRowBox(bottom+1.27, w) // + the frames' grid snap at render
+	const border, gap = 10.0, 5.0
+	if r.MaxX > pw-border-gap || r.MaxY > ph-border-gap {
+		return false
+	}
+	return !(r.MaxX > pw-border-112-gap && r.MaxY > ph-border-34-gap)
 }
 
 // sbFootprint is the zone's frame (content box + margin + title band) at
@@ -2159,9 +2230,9 @@ func sbFootprint(box kicad.Box, t kicad.Pt) kicad.Box {
 
 // packZones assigns each zone of one page a translation: kept ones (keep)
 // stay; the rest are packed in rows (fresh build) or put in free space.
-func packZones(ids []string, layouts map[string]*sbZoneLayout, keep map[string]kicad.Pt) map[string]kicad.Pt {
+func packZones(ids []string, layouts map[string]*sbZoneLayout, keep map[string]kicad.Pt, flagW float64) map[string]kicad.Pt {
 	if len(keep) == 0 {
-		if out := sbPackFresh(ids, layouts); out != nil {
+		if out := sbPackFresh(ids, layouts, flagW); out != nil {
 			return out
 		}
 	}
@@ -2235,10 +2306,10 @@ func packZones(ids []string, layouts map[string]*sbZoneLayout, keep map[string]k
 		x += w + sbZoneGap
 		rowH = math.Max(rowH, h)
 	}
-	if !fresh && !sbFitsLargestPaper(placed) {
+	if !fresh && (!sbFitsLargestPaper(placed) || !sbFlagRowFits(placed, flagW, kicad.Papers[len(kicad.Papers)-1].W, kicad.Papers[len(kicad.Papers)-1].H)) {
 		// incremental placement overflowed the largest sheet: repack the
 		// page from scratch rather than ship content that cannot fit
-		if f := sbPackFresh(ids, layouts); f != nil {
+		if f := sbPackFresh(ids, layouts, flagW); f != nil {
 			return f
 		}
 	}

@@ -20,6 +20,48 @@ import (
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
 )
 
+// sbUndrivenSupplies is the set of supply / ground nets with no power
+// output pin: each gets one PWR_FLAG (ERC).
+func (d *sbDesign) sbUndrivenSupplies() map[string]bool {
+	driven := map[string]bool{}
+	for _, p := range d.Parts {
+		for _, num := range p.PowerPins {
+			if n, ok := d.PinNet[sbPinKey(p.Ref, num)]; ok {
+				driven[n] = true
+			}
+		}
+	}
+	out := map[string]bool{}
+	for _, n := range d.Nets {
+		if k := d.NetKind[n.Name]; (k == "power" || k == "ground") && !driven[n.Name] {
+			out[n.Name] = true
+		}
+	}
+	return out
+}
+
+// sbFlagPages maps each page to the nets whose PWR_FLAG it draws: the first
+// page (in d.Pages order) that carries the net.
+func (d *sbDesign) sbFlagPages() map[string][]string {
+	out := map[string][]string{}
+	undriven := d.sbUndrivenSupplies()
+	for _, n := range d.Nets {
+		if !undriven[n.Name] {
+			continue
+		}
+		for _, pg := range d.Pages {
+			if d.NetPages[n.Name][pg.ID] {
+				out[pg.ID] = append(out[pg.ID], n.Name)
+				break
+			}
+		}
+	}
+	for _, ns := range out {
+		sort.Strings(ns)
+	}
+	return out
+}
+
 // recomputeNetPages rebuilds net → pages from the parts' page ids.
 func (d *sbDesign) recomputeNetPages() {
 	d.NetPages = map[string]map[string]bool{}
@@ -66,6 +108,9 @@ type sbPageBases struct {
 	pageBase  map[string]string // any page id → base page id
 	baseTitle map[string]string
 	files     map[string]bool // sheet file names of the base pages and the root (fixed)
+	// frag: zone id → index of the fragment of its base page it is on (0 =
+	// the base page itself). It only ever grows: see sbPaginate.
+	frag map[string]int
 }
 
 // newSbPageBases freezes the spec pages, the zones' base pages and their
@@ -73,7 +118,7 @@ type sbPageBases struct {
 // the order again after a split could reorder groups and oscillate — Codex /
 // Kimi review 2026-10-26), and records them on d for the saved spec.
 func newSbPageBases(d *sbDesign, zis []*sbZoneIn, rootFile string) *sbPageBases {
-	b := &sbPageBases{zoneBase: map[string]string{}, pageBase: map[string]string{}, baseTitle: map[string]string{}, files: map[string]bool{rootFile: true}}
+	b := &sbPageBases{zoneBase: map[string]string{}, pageBase: map[string]string{}, baseTitle: map[string]string{}, files: map[string]bool{rootFile: true}, frag: map[string]int{}}
 	for _, zi := range zis {
 		b.zoneOrder = append(b.zoneOrder, zi.Zone.ID)
 	}
@@ -119,6 +164,17 @@ func (b *sbPageBases) pageID(base string, k int, ids, files map[string]bool) str
 // the others get "<id>-2", "<id>-3"… (never an id of another base page) and
 // follow it. It rewrites d.Pages, zone pages, part page ids and NetPages and
 // reports whether the assignment changed.
+//
+// The grouping is monotone: a zone never goes back to an earlier fragment
+// than the one an earlier round put it on (b.frag). A zone re-laid out for
+// its new cross-page labels can come back smaller (another shape); a plain
+// next-fit then merged the page again, the labels went back to local ones,
+// the zones grew back, the page split again — a two-round cycle until the
+// round guard gave up ("pagination did not settle", field board 2026-10-27).
+// With fragments that only grow, every round that changes the assignment
+// moves a zone to a later fragment, so the loop ends. A page whose zones fit
+// A0 is one group in round 1, none of its nets changes its cross-page status,
+// and it is never split or re-laid out.
 func sbPaginate(d *sbDesign, layouts map[string]*sbZoneLayout, b *sbPageBases) (bool, []string) {
 	taken, files := map[string]bool{}, map[string]bool{} // handed out this round
 	for _, pg := range b.order {
@@ -134,6 +190,38 @@ func sbPaginate(d *sbDesign, layouts map[string]*sbZoneLayout, b *sbPageBases) (
 	newPage := map[string]string{}
 	var pages []sbPage
 	var notes []string
+	// PWR_FLAGs: each undriven supply / ground net gets one, on the first
+	// page carrying it (writeSbProject), in a row under that page's zones
+	undriven := d.sbUndrivenSupplies()
+	zoneFlags := map[string][]string{}
+	for _, p := range d.Parts {
+		for _, q := range p.LPins {
+			if n, ok := d.PinNet[sbPinKey(p.Ref, q.Number)]; ok && undriven[n] {
+				zoneFlags[p.ZoneID] = append(zoneFlags[p.ZoneID], n)
+			}
+		}
+	}
+	seen := map[string]bool{} // flag nets of the pages before the current group
+	flagW := func(g []string) float64 {
+		own := map[string]bool{}
+		var nets []string
+		for _, zid := range g {
+			for _, n := range zoneFlags[zid] {
+				if !seen[n] && !own[n] {
+					own[n] = true
+					nets = append(nets, n)
+				}
+			}
+		}
+		return sbFlagRowW(nets)
+	}
+	closeGroup := func(g []string) {
+		for _, zid := range g {
+			for _, n := range zoneFlags[zid] {
+				seen[n] = true
+			}
+		}
+	}
 	for _, base := range b.order {
 		var ids []string
 		for _, zid := range b.zoneOrder {
@@ -144,15 +232,23 @@ func sbPaginate(d *sbDesign, layouts map[string]*sbZoneLayout, b *sbPageBases) (
 		var groups [][]string
 		var cur []string
 		for _, id := range ids {
-			if len(cur) == 0 || sbPackFresh(append(append([]string(nil), cur...), id), layouts) != nil {
-				cur = append(cur, id)
+			// cur is group len(groups). A zone an earlier round put on a later
+			// fragment opens the next group: fragments of consecutive zones
+			// differ by at most one, so one new group always reaches it.
+			cand := append(append([]string(nil), cur...), id)
+			if len(cur) == 0 || (b.frag[id] <= len(groups) && sbPackFresh(cand, layouts, flagW(cand)) != nil) {
+				cur = cand
+				b.frag[id] = len(groups)
 				continue
 			}
 			groups = append(groups, cur)
+			closeGroup(cur)
 			cur = []string{id}
+			b.frag[id] = len(groups)
 		}
 		if len(cur) > 0 || len(groups) == 0 {
 			groups = append(groups, cur)
+			closeGroup(cur)
 		}
 		for gi, g := range groups {
 			np := base
@@ -169,7 +265,7 @@ func sbPaginate(d *sbDesign, layouts map[string]*sbZoneLayout, b *sbPageBases) (
 			for _, zid := range g {
 				newPage[zid] = np.ID
 			}
-			if len(g) == 1 && sbPackFresh(g, layouts) == nil {
+			if len(g) == 1 && sbPackFresh(g, layouts, 0) == nil {
 				notes = append(notes, fmt.Sprintf("page %s: zone %s alone does not fit A0 — split the zone in the spec (or try --auto-split)", np.ID, g[0]))
 			}
 		}
@@ -205,21 +301,45 @@ func sbPaginate(d *sbDesign, layouts map[string]*sbZoneLayout, b *sbPageBases) (
 	return changed, notes
 }
 
-// sbPaginateMaxRounds guards the paginate ↔ re-layout loop (a guard, not a
-// convergence proof: regrouping can move boundaries and a re-laid zone can
-// change size either way). Running out is an error, never a reason to ship a
-// layout drawn for the wrong labels.
-const sbPaginateMaxRounds = 8
+// sbPaginateRoundLimit bounds the paginate ↔ re-layout loop. Fragments only
+// grow (sbPaginate), a zone's fragment is below the zone count of its base
+// page, and every round but the last moves at least one zone to a later
+// fragment or loses a zone whose re-layout failed (once per zone), so
+// 2 + Σ(zones per page − 1) + zones rounds always suffice. Running out is a
+// bug and an error, never a reason to ship a layout drawn for the wrong
+// labels.
+func sbPaginateRoundLimit(b *sbPageBases) int {
+	n := 2 + len(b.zoneOrder)
+	per := map[string]int{}
+	for _, zid := range b.zoneOrder {
+		per[b.zoneBase[zid]]++
+	}
+	for _, c := range per {
+		n += c - 1
+	}
+	return n
+}
 
 // sbPaginateAndRelayout paginates until the page assignment is stable,
 // re-laying out every zone whose cross-page signal nets changed after each
 // round. It returns the zone inputs for the final pages and the notes.
 func sbPaginateAndRelayout(d *sbDesign, zis []*sbZoneIn, layouts, reuse map[string]*sbZoneLayout, lo sbLayoutOpts, rootFile string) ([]*sbZoneIn, []string, error) {
+	return sbPaginateLoop(d, zis, layouts, rootFile, func(redo []*sbZoneIn) (map[string]*sbZoneLayout, []string) {
+		// the saved drawing of the previous build carries the final
+		// cross-page flags in its hash: reuse it instead of re-planning
+		return layoutZones(d, redo, reuse, lo)
+	})
+}
+
+// sbPaginateLoop is sbPaginateAndRelayout with the re-layout step passed in
+// (tests swap in a stand-in that resizes zones by their cross-page nets).
+func sbPaginateLoop(d *sbDesign, zis []*sbZoneIn, layouts map[string]*sbZoneLayout, rootFile string, relayout func([]*sbZoneIn) (map[string]*sbZoneLayout, []string)) ([]*sbZoneIn, []string, error) {
 	b := newSbPageBases(d, zis, rootFile)
+	limit := sbPaginateRoundLimit(b)
 	var notes, last []string
 	for round := 1; ; round++ {
-		if round > sbPaginateMaxRounds {
-			return zis, notes, fmt.Errorf("pagination did not settle in %d rounds (zones keep growing with their cross-page labels)", sbPaginateMaxRounds)
+		if round > limit {
+			return zis, notes, fmt.Errorf("pagination did not settle in %d rounds (zones keep growing with their cross-page labels)", limit)
 		}
 		before := map[string]string{}
 		for _, zi := range zis {
@@ -235,9 +355,7 @@ func sbPaginateAndRelayout(d *sbDesign, zis []*sbZoneIn, layouts, reuse map[stri
 			}
 		}
 		if len(redo) > 0 {
-			// the saved drawing of the previous build carries the final
-			// cross-page flags in its hash: reuse it instead of re-planning
-			fresh, ln := layoutZones(d, redo, reuse, lo)
+			fresh, ln := relayout(redo)
 			for _, zi := range redo {
 				if l := fresh[zi.Zone.ID]; l != nil {
 					layouts[zi.Zone.ID] = l

@@ -491,11 +491,11 @@ func TestPackZonesKeepsItsOwnFreshPositions(t *testing.T) {
 			layouts[id] = &sbZoneLayout{Box: kicad.Box{MinX: -w / 3, MinY: -h / 2, MaxX: 2 * w / 3, MaxY: h / 2}}
 			ids = append(ids, id)
 		}
-		t0 := packZones(ids, layouts, nil)
+		t0 := packZones(ids, layouts, nil, 0)
 		if len(t0) != n {
 			t.Fatalf("seed %d: fresh pack placed %d of %d zones", seed, len(t0), n)
 		}
-		t1 := packZones(ids, layouts, t0)
+		t1 := packZones(ids, layouts, t0, 0)
 		for _, id := range ids {
 			if t1[id] != t0[id] {
 				t.Fatalf("seed %d: zone %s moved on an unchanged rebuild: %v → %v", seed, id, t0[id], t1[id])
@@ -512,7 +512,7 @@ func TestPackZonesRepacksWhenKeptLayoutOverflows(t *testing.T) {
 		"b": {Box: kicad.Box{MaxX: 100, MaxY: 80}},
 	}
 	keep := map[string]kicad.Pt{"a": {X: 20, Y: 30}, "b": {X: 1500, Y: 30}} // b far past A0
-	out := packZones([]string{"a", "b"}, layouts, keep)
+	out := packZones([]string{"a", "b"}, layouts, keep, 0)
 	var frames []kicad.Box
 	for id, tr := range out {
 		frames = append(frames, sbFootprint(layouts[id].Box, tr))
@@ -858,6 +858,143 @@ func TestSbPaginate(t *testing.T) {
 	for _, z := range ns.Zones {
 		if (z.ID == "z2" || z.ID == "z3") && z.Page != "P" {
 			t.Errorf("saved spec moved zone %s to generated page %s", z.ID, z.Page)
+		}
+	}
+}
+
+// A zone re-laid out for its cross-page labels can come back SMALLER (another
+// shape). Plain next-fit then merged the split page again, the net went back
+// to local, the zone grew back, the page split again: a two-round cycle until
+// "pagination did not settle" (field board 2026-10-27). Fragments now only
+// grow: the loop must settle, keep the split, and never touch a page that fit.
+func TestSbPaginateSettlesWhenRelayoutShrinks(t *testing.T) {
+	d := &sbDesign{
+		Pages:   []sbPage{{ID: "P", Title: "Main"}, {ID: "Q", Title: "Small"}},
+		Zones:   []sbZone{{ID: "z1", Page: "P"}, {ID: "z2", Page: "P"}, {ID: "z3", Page: "P"}, {ID: "q", Page: "Q"}},
+		ByRef:   map[string]*sbRPart{},
+		PinNet:  map[string]string{},
+		NetKind: map[string]string{},
+	}
+	for i, z := range d.Zones {
+		p := &sbRPart{ZoneID: z.ID, PageID: z.Page, LPins: []kicad.LibPin{{Number: "1"}, {Number: "2"}}}
+		p.Ref = fmt.Sprintf("R%d", i+1)
+		d.Parts = append(d.Parts, p)
+		d.ByRef[p.Ref] = p
+	}
+	// S joins z1 and z3 (the zone the split moves); T stays inside page Q
+	d.Nets = []sbNet{{Name: "S", Pins: []string{"R1.1", "R3.1"}}, {Name: "T", Pins: []string{"R4.1", "R4.2"}}}
+	for _, n := range d.Nets {
+		for _, k := range n.Pins {
+			d.PinNet[k] = n.Name
+		}
+	}
+	d.recomputeNetPages()
+	box := func(w, h float64) *sbZoneLayout { return &sbZoneLayout{Box: kicad.Box{MaxX: w, MaxY: h}} }
+	// S local: z1 is big and P overflows A0; S cross-page: z1 is small and
+	// all three zones would fit again
+	size := func(id string) *sbZoneLayout {
+		switch {
+		case id == "z1" && len(d.NetPages["S"]) > 1:
+			return box(400, 200)
+		case id == "z1":
+			return box(700, 500)
+		case id == "q":
+			return box(100, 100)
+		}
+		return box(300, 300)
+	}
+	layouts := map[string]*sbZoneLayout{}
+	for _, z := range d.Zones {
+		layouts[z.ID] = size(z.ID)
+	}
+	if sbPackFresh([]string{"z1", "z2", "z3"}, layouts, 0) != nil {
+		t.Fatal("fixture: page P must overflow A0 with S local")
+	}
+	var zis []*sbZoneIn
+	for _, z := range d.Zones {
+		zis = append(zis, &sbZoneIn{Zone: z})
+	}
+	calls := 0
+	relaid := map[string]int{}
+	_, _, err := sbPaginateLoop(d, zis, layouts, "root.kicad_sch", func(redo []*sbZoneIn) (map[string]*sbZoneLayout, []string) {
+		calls++
+		out := map[string]*sbZoneLayout{}
+		for _, zi := range redo {
+			relaid[zi.Zone.ID]++
+			out[zi.Zone.ID] = size(zi.Zone.ID)
+		}
+		return out, nil
+	})
+	if err != nil {
+		t.Fatalf("pagination did not settle: %v (re-layout rounds %d, zones %v)", err, calls, relaid)
+	}
+	zp := map[string]string{}
+	for _, z := range d.Zones {
+		zp[z.ID] = z.Page
+	}
+	if zp["z1"] != "P" || zp["z2"] != "P" || zp["z3"] == "P" || zp["q"] != "Q" {
+		t.Errorf("zone pages %v: want z1, z2 on P, z3 on a new page, q on Q", zp)
+	}
+	if relaid["q"] != 0 || relaid["z2"] != 0 {
+		t.Errorf("zones whose cross-page nets never changed were re-laid out: %v", relaid)
+	}
+	if calls != 1 {
+		t.Errorf("%d re-layout rounds, want 1 (the split, then a fixed point)", calls)
+	}
+}
+
+// A narrow zone with a long title: the frame the packer sees must hold the
+// title text, or it runs past the right edge of A0 on a page pagination
+// accepted (field board 2026-10-27: page-fit failed on a split page).
+func TestSbFitTitleWidensNarrowZone(t *testing.T) {
+	title := "pull-down column / readback"
+	b := sbFitTitle(kicad.Box{MinX: 0, MaxX: 9.5, MaxY: 50}, title)
+	fp := sbFootprint(b, kicad.Pt{})
+	if need := fp.MinX + 1.27 + 1 + float64(len(title)); fp.MaxX < need {
+		t.Fatalf("frame right edge %.2f < title end %.2f (sch-fit's estimate)", fp.MaxX, need)
+	}
+	if wide := (kicad.Box{MaxX: 300, MaxY: 50}); sbFitTitle(wide, title) != wide {
+		t.Fatal("a zone wider than its title must keep its box")
+	}
+}
+
+// Two zones that fill A0 to the bottom: with an undriven supply on the page,
+// its PWR_FLAG row goes under them and overflows, so pagination must split
+// the page; without one the page fits and stays whole (field board
+// 2026-10-27: page-fit failed on a page pagination had kept).
+func TestSbPaginateCountsPwrFlagRow(t *testing.T) {
+	for _, flags := range []bool{false, true} {
+		d := &sbDesign{
+			Pages:   []sbPage{{ID: "P", Title: "Main"}},
+			Zones:   []sbZone{{ID: "a", Page: "P"}, {ID: "b", Page: "P"}},
+			ByRef:   map[string]*sbRPart{},
+			PinNet:  map[string]string{},
+			NetKind: map[string]string{},
+		}
+		for i, z := range d.Zones {
+			p := &sbRPart{ZoneID: z.ID, PageID: z.Page, LPins: []kicad.LibPin{{Number: "1"}}}
+			p.Ref = fmt.Sprintf("C%d", i+1)
+			d.Parts = append(d.Parts, p)
+			d.ByRef[p.Ref] = p
+		}
+		d.Nets = []sbNet{{Name: "VBUS", Pins: []string{"C1.1", "C2.1"}}}
+		d.PinNet["C1.1"], d.PinNet["C2.1"] = "VBUS", "VBUS"
+		if flags {
+			d.NetKind["VBUS"] = "power" // no power_out pin: one PWR_FLAG
+		}
+		d.recomputeNetPages()
+		layouts := map[string]*sbZoneLayout{"a": {Box: kicad.Box{MaxX: 1000, MaxY: 380}}, "b": {Box: kicad.Box{MaxX: 1000, MaxY: 380}}}
+		if sbPackFresh([]string{"a", "b"}, layouts, 0) == nil {
+			t.Fatal("fixture: the two zones alone must fit A0")
+		}
+		var zis []*sbZoneIn
+		for _, z := range d.Zones {
+			zis = append(zis, &sbZoneIn{Zone: z})
+		}
+		b := newSbPageBases(d, zis, "root.kicad_sch")
+		sbPaginate(d, layouts, b)
+		if want := map[bool]int{false: 1, true: 2}[flags]; len(d.Pages) != want {
+			t.Errorf("flags=%v: %d page(s), want %d", flags, len(d.Pages), want)
 		}
 	}
 }
