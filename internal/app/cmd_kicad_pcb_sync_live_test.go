@@ -768,3 +768,111 @@ func TestPcbSyncLivePublishesProject(t *testing.T) {
 		t.Fatalf("project not published as is:\n%s", got)
 	}
 }
+
+// TestPcbSyncLiveSwapKeepsUUIDAndGroup: the replacement footprint keeps the
+// board footprint's uuid and its place in a group.
+func TestPcbSyncLiveSwapKeepsUUIDAndGroup(t *testing.T) {
+	kt := pcbSyncLive(t)
+	_, sch, pcb := ecc83Synced(t)
+	pcbnewScript(t, kt, pcb, `g = pcbnew.PCB_GROUP(b)
+g.SetName("amp")
+b.Add(g)
+for f in b.GetFootprints():
+    if f.GetReference() in ("C2", "R1"):
+        g.AddItem(f)
+pcbnew.SaveBoard(sys.argv[1], b)
+`)
+	before, _ := footprintsByRef(t, kt, pcb)
+	editSch(t, sch, func(e *kicad.SchEditor) {
+		if err := e.SetField("C2", "Footprint", "Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P5.00mm"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	o := syncOpts(sch, pcb)
+	o.inPlace, o.noParity = true, true
+	if rep, code := runSync(t, o); code != 5 || !rep.Committed || rep.Counts.Swap != 1 {
+		t.Fatalf("exit %d %+v %+v", code, rep.Ops, rep.Errors)
+	}
+	after, _ := footprintsByRef(t, kt, pcb)
+	if after["C2"].UUID != before["C2"].UUID || after["C2"].FPID != "Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P5.00mm" {
+		t.Fatalf("uuid %s → %s (%s)", before["C2"].UUID, after["C2"].UUID, after["C2"].FPID)
+	}
+	got := scriptResult(t, pcbnewScript(t, kt, pcb, `out = {}
+for f in b.GetFootprints():
+    if f.GetReference() in ("C2", "R1"):
+        g = f.GetParentGroup()
+        out[f.GetReference()] = g.GetName() if g else ""
+out["groups"] = [[g.GetName(), len(list(g.GetItems()))] for g in b.Groups()]
+print("RESULT" + json.dumps(out))
+`))
+	if got["C2"] != "amp" || got["R1"] != "amp" || fmt.Sprint(got["groups"]) != "[[amp 2]]" {
+		t.Fatalf("group after the swap: %v", got)
+	}
+}
+
+// TestPcbSyncLiveDuplicatePadNumbers: two pads share a number and carry
+// different overrides. A swap to a footprint with the same pads at the same
+// positions keeps each pad's own settings; one whose pads moved cannot be
+// matched and is refused.
+func TestPcbSyncLiveDuplicatePadNumbers(t *testing.T) {
+	kt := pcbSyncLive(t)
+	dir, sch, pcb := ecc83Synced(t)
+	stock := kicad.StockFootprintDir()
+	src, err := os.ReadFile(filepath.Join(stock, "Resistor_THT.pretty", "R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal.kicad_mod"))
+	if err != nil {
+		t.Skip("stock footprint not installed")
+	}
+	dup := strings.Replace(string(src), `(pad "2"`, `(pad "1"`, 1)
+	moved := strings.Replace(dup, "(at 7.62 0)", "(at 5.08 0)", 1)
+	lib := filepath.Join(dir, "dup.pretty")
+	if err := os.MkdirAll(lib, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, text := range map[string]string{"DupB": dup, "DupC": moved} {
+		if err := os.WriteFile(filepath.Join(lib, name+".kicad_mod"), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tbl := filepath.Join(dir, "fp-lib-table")
+	tb, _ := os.ReadFile(tbl)
+	text := strings.TrimSuffix(strings.TrimRight(string(tb), " \r\n"), ")") + "  (lib (name \"Dup\")(type \"KiCad\")(uri \"${KIPRJMOD}/dup.pretty\")(options \"\")(descr \"\"))\n)\n"
+	if err := os.WriteFile(tbl, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// R1 on the board: both pads numbered "1", different clearances.
+	pcbnewScript(t, kt, pcb, `fp = [f for f in b.GetFootprints() if f.GetReference() == "R1"][0]
+for p in fp.Pads():
+    p.SetNumber("1")
+    p.SetLocalClearance(200000 if p.GetFPRelativePosition().x == 0 else 300000)
+pcbnew.SaveBoard(sys.argv[1], b)
+`)
+	editSch(t, sch, func(e *kicad.SchEditor) {
+		if err := e.SetField("R1", "Footprint", "Dup:DupB"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	o := syncOpts(sch, pcb)
+	o.out, o.noParity = filepath.Join(dir, "out", "d.kicad_pcb"), true
+	// Pin 2 of R1 has no pad on either footprint: pad-net fails (exit 6),
+	// --out keeps the output, which is what this test reads.
+	rep, code := runSync(t, o)
+	if code != 6 || !rep.Committed || rep.Counts.Swap != 1 {
+		t.Fatalf("exit %d %+v %+v", code, rep.Ops, rep.Errors)
+	}
+	got := scriptResult(t, pcbnewScript(t, kt, o.out, `fp = [f for f in b.GetFootprints() if f.GetReference() == "R1"][0]
+print("RESULT" + json.dumps({str(p.GetFPRelativePosition().x): p.GetLocalClearance() for p in fp.Pads()}))
+`))
+	if got["0"] != 200000.0 || got["7620000"] != 300000.0 {
+		t.Fatalf("each same-number pad must keep its own clearance: %v", got)
+	}
+	editSch(t, sch, func(e *kicad.SchEditor) {
+		if err := e.SetField("R1", "Footprint", "Dup:DupC"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	o.out = filepath.Join(dir, "out2", "d.kicad_pcb")
+	rep, code = runSync(t, o)
+	if code != 1 || fileExists(o.out) || !strings.Contains(fmt.Sprint(rep.Errors), "cannot be matched one to one") {
+		t.Fatalf("ambiguous same-number pads: exit %d %+v", code, rep.Errors)
+	}
+}

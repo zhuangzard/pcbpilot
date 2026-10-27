@@ -21,6 +21,8 @@ package app
 // failed (--out keeps the output; --in-place leaves the board unchanged).
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -279,8 +281,10 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 	if !readOnly && o.out == "" && !o.inPlace {
 		return usage("give --out NEW.kicad_pcb or --in-place (or --dry-run / --check / --plan-out)")
 	}
+	// Read-only runs print the report and write it only to an explicit
+	// --report: --check must not fail because KiCad has the project open.
 	reportPath := o.report
-	if reportPath == "" {
+	if reportPath == "" && !readOnly {
 		t := o.pcb
 		if o.out != "" {
 			t = o.out
@@ -373,8 +377,12 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 		// The report goes through kfile with the KiCad lock check (and it
 		// can name no input or output: pcbSyncOutputAlias). ok is true on
 		// stdout only when the report was written too.
-		_ = os.MkdirAll(filepath.Dir(reportPath), 0o755)
-		if _, err := kfile.WriteFile(reportPath, b, kfile.Opts{Env: env}); err != nil {
+		if reportPath != "" {
+			_ = os.MkdirAll(filepath.Dir(reportPath), 0o755)
+		}
+		if reportPath == "" {
+			// stdout only
+		} else if _, err := kfile.WriteFile(reportPath, b, kfile.Opts{Env: env}); err != nil {
 			fmt.Fprintf(stderr, "pcb-sync: cannot write the report %s: %v\n", reportPath, err)
 			if code == 0 {
 				if code = kfile.ExitCode(err); code == 0 {
@@ -489,12 +497,12 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 		return nil
 	}
 	targetSnap := boardSnap
-	targetProSnap := proSnap
+	targetProSnap, targetProData := proSnap, proData
 	if o.out != "" {
 		if targetSnap, err = kfile.Stat(o.out); err != nil {
 			return fileErr(err)
 		}
-		if targetProSnap, err = kfile.Stat(boardSibling(o.out, ".kicad_pro")); err != nil {
+		if targetProData, targetProSnap, err = readOpt(boardSibling(o.out, ".kicad_pro")); err != nil {
 			return fileErr(err)
 		}
 	}
@@ -559,9 +567,29 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 	}
 	rep.Libs.Project, rep.Libs.Global, rep.Libs.Vars = libs.ProjectTable, libs.GlobalTable, libs.Vars
 	info := func(refs []kicad.FPRef) (map[string]kicad.SyncFPInfo, []kicad.SyncError) {
+		// Each library footprint is hashed before and after the bridge
+		// loads it: the plan describes exactly those bytes.
+		before := map[string]string{}
+		for _, r := range refs {
+			before[r.Lib+":"+r.Name] = fileSHAOrEmpty(r.Path)
+		}
 		m, bad, err := t.FPInfo(refs)
 		if err != nil {
 			bad = append(bad, kicad.SyncError{Code: errSyncBridge, Detail: err.Error()})
+		}
+		for _, r := range refs {
+			id := r.Lib + ":" + r.Name
+			fi, ok := m[id]
+			if !ok {
+				continue
+			}
+			if sha := fileSHAOrEmpty(r.Path); sha == "" || sha != before[id] {
+				bad = append(bad, kicad.SyncError{Code: string(kfile.CodeChanged), Path: r.Path,
+					Detail: "library footprint " + id + " changed while it was being read", Fix: "run pcb-sync again"})
+				continue
+			}
+			fi.SHA256 = before[id]
+			m[id] = fi
 		}
 		return m, bad
 	}
@@ -574,6 +602,10 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 		return fail(errSyncBridge, "", err.Error(), "", 1)
 	}
 	rep.fill(plan)
+	if refs := kicad.RenameReferences(proData, druData, plan); len(refs) > 0 {
+		rep.Errors = append(rep.Errors, refs...)
+		return finish("refused", 1)
+	}
 	rep.Revision = kicad.SyncRevision(boardSnap.SHA256, proSnap.SHA256, sopts, plan)
 
 	// Findings of the plan (a netlist pin without its pad) mean the board
@@ -634,6 +666,36 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 		if pcbSyncTamper != nil {
 			applied = pcbSyncTamper(plan)
 		}
+		if pcbSyncBeforeApply != nil {
+			pcbSyncBeforeApply()
+		}
+		// Library footprints: the bytes planned with (fpSha) are copied into
+		// the stage and loaded from there; a library changed since → refused.
+		libStaged := *applied
+		libStaged.Ops = append([]kicad.SyncOp(nil), applied.Ops...)
+		for i, op := range libStaged.Ops {
+			if (op.Op != "addFootprint" && op.Op != "swapFootprint") || op.Info {
+				continue
+			}
+			src := filepath.Join(op.LibDir, op.Name+".kicad_mod")
+			b, err := os.ReadFile(src)
+			if err != nil {
+				return fileErr(err)
+			}
+			if op.FPSha == "" || kfileSHA(b) != op.FPSha {
+				return fail(string(kfile.CodeChanged), src, fmt.Sprintf("library footprint %s changed since it was planned (sha256 %s, planned %s)", op.FPID, short12(kfileSHA(b)), short12(op.FPSha)),
+					"make a new plan and review it", 4)
+			}
+			lib := filepath.Join(stage, fmt.Sprintf("lib-%03d.pretty", i))
+			if err := os.MkdirAll(lib, 0o700); err != nil {
+				return fileErr(err)
+			}
+			if err := os.WriteFile(filepath.Join(lib, op.Name+".kicad_mod"), b, 0o600); err != nil {
+				return fileErr(err)
+			}
+			libStaged.Ops[i].LibDir = lib
+		}
+		applied = &libStaged
 		if src != "" {
 			// The bridge loads the bytes that were read and planned on:
 			// copies of the board, project and rules in the stage.
@@ -649,9 +711,6 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 					return fileErr(err)
 				}
 			}
-		}
-		if pcbSyncBeforeApply != nil {
-			pcbSyncBeforeApply()
 		}
 		if err := sourceUnchanged(); err != nil {
 			return fileErr(err)
@@ -672,8 +731,14 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 		staged, stagedPro = filepath.Join(stage, base+".kicad_pcb"), filepath.Join(stage, base+".kicad_pro")
 		// SaveBoard writes its own .kicad_pro; the project published (and
 		// used by the parity check) is the source's, byte for byte.
-		if proData != nil {
-			if err := os.WriteFile(stagedPro, proData, 0o600); err != nil {
+		// Without a source project, an existing target project is kept
+		// (and checked with), never replaced by SaveBoard's default one.
+		pub := proData
+		if pub == nil && o.out != "" && targetProSnap.Exists {
+			pub = targetProData
+		}
+		if pub != nil {
+			if err := os.WriteFile(stagedPro, pub, 0o600); err != nil {
 				return fileErr(err)
 			}
 		}
@@ -717,7 +782,7 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 			return fileErr(err)
 		}
 		tpro := boardSibling(target, ".kicad_pro")
-		if fileExists(stagedPro) && (!o.inPlace || !targetProSnap.Exists) {
+		if fileExists(stagedPro) && (!targetProSnap.Exists || (!o.inPlace && proData != nil)) {
 			if err := txn.StageFile(tpro, stagedPro, &targetProSnap); err != nil {
 				txn.Abort()
 				return fileErr(err)
@@ -941,7 +1006,10 @@ func pcbSyncOutputAlias(o pcbSyncOpts, report string) string {
 			in = append(in, f)
 		}
 	}
-	outs := []named{{"--report", report}}
+	var outs []named
+	if report != "" {
+		outs = append(outs, named{"--report", report})
+	}
 	if o.planOut != "" {
 		outs = append(outs, named{"--plan-out", o.planOut})
 	}
@@ -976,4 +1044,18 @@ func pathAlias(a, b string) bool {
 	sa, err1 := os.Stat(a)
 	sb, err2 := os.Stat(b)
 	return err1 == nil && err2 == nil && os.SameFile(sa, sb)
+}
+
+func kfileSHA(b []byte) string {
+	h := sha256.Sum256(b)
+	return hex.EncodeToString(h[:])
+}
+
+// fileSHAOrEmpty is the sha256 of a file, "" when it cannot be read.
+func fileSHAOrEmpty(p string) string {
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return ""
+	}
+	return kfileSHA(b)
 }

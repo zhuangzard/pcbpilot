@@ -114,6 +114,10 @@ type SyncFPInfo struct {
 	Pads      []SyncPad `json:"pads"`
 	Box       *SyncBox  `json:"box"`
 	BoxSource string    `json:"boxSource"`
+	// SHA256 of the .kicad_mod the info was loaded from (set by the
+	// caller): it rides in the add / swap op (fpSha) and so in the
+	// revision; the apply installs exactly those bytes.
+	SHA256 string `json:"sha256,omitempty"`
 }
 
 // FPResolver resolves "Lib:Name" (FPLibTables).
@@ -185,6 +189,7 @@ type SyncOp struct {
 	FPID           string            `json:"fpid,omitempty"`
 	LibDir         string            `json:"libDir,omitempty"`
 	Name           string            `json:"name,omitempty"`
+	FPSha          string            `json:"fpSha,omitempty"` // sha256 of the library footprint planned with
 	Value          *string           `json:"value,omitempty"`
 	Field          string            `json:"field,omitempty"`
 	Fields         map[string]string `json:"fields,omitempty"`
@@ -672,7 +677,7 @@ func BuildSyncPlan(in SyncInput) (*SyncPlan, error) {
 				}
 			}
 			plan.Ops = append(plan.Ops, with(SyncOp{Op: "swapFootprint", From: f.FPID, To: c.Footprint, FPID: c.Footprint,
-				LibDir: r.LibDir, Name: r.Name, PadNets: pn, Reason: "the symbol's Footprint field names another footprint"}))
+				LibDir: r.LibDir, Name: r.Name, FPSha: info.SHA256, PadNets: pn, Reason: "the symbol's Footprint field names another footprint"}))
 			for _, pd := range f.Pads {
 				if !pd.copper() || pd.Net == "" || !boardNet[pd.Net].copper() {
 					continue
@@ -778,7 +783,7 @@ func BuildSyncPlan(in SyncInput) (*SyncPlan, error) {
 				future = append(future, futurePad{ref: c.Ref, num: pd.Number, net: desired(c.Ref, pd.Number)})
 			}
 		}
-		plan.Ops = append(plan.Ops, SyncOp{Op: "addFootprint", Ref: c.Ref, Key: c.Keys()[0], FPID: c.Footprint, LibDir: r.LibDir, Name: r.Name,
+		plan.Ops = append(plan.Ops, SyncOp{Op: "addFootprint", Ref: c.Ref, Key: c.Keys()[0], FPID: c.Footprint, LibDir: r.LibDir, Name: r.Name, FPSha: info.SHA256,
 			Value: strp(c.Value), Fields: syncWantFields(c, opts.FieldsIgnore), Sheetname: strp(c.SheetNames), Sheetfile: strp(c.Sheetfile()),
 			DNP: boolp(c.DNP), ExcludeFromBOM: boolp(c.ExcludeFromBOM), X: floatp(at[i][0]), Y: floatp(at[i][1]), Rot: floatp(0), Side: "F",
 			PadNets: pn, Reason: "new symbol"})

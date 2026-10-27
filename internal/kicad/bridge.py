@@ -38,6 +38,7 @@
 # and nothing is saved. Footprints are keyed by footprint_index(), never by
 # designator alone (several REF** logos, two H1 holes).
 
+import hashlib
 import json
 import math
 import os
@@ -1616,7 +1617,7 @@ def validate_sync(board, plan):
         return ["plan.ops: not a list"], None
     by_id = {e["key"]: e for e in footprint_index(board)}
     nets = {str(k) for k in board.GetNetsByName().keys() if str(k)}
-    renamed_to, renamed_from, removed, swapped, loaded = set(), set(), set(), set(), {}
+    renamed_to, renamed_from, removed, swapped, loaded, padmap = set(), set(), set(), set(), {}, {}
 
     def check_pad_nets(i, what, pn, pads):
         if not isinstance(pn, dict):
@@ -1660,6 +1661,11 @@ def validate_sync(board, plan):
             if not (is_str(op.get("libDir")) and is_str(op.get("name")) and is_str(op.get("fpid")) and ":" in op["fpid"]):
                 bad.append("ops[%d] %s: libDir, name and fpid (Lib:Name) are required" % (i, kind))
                 continue
+            if op.get("fpSha") is not None:
+                why = check_fp_sha(op["libDir"], op["name"], op["fpSha"])
+                if why:
+                    bad.append("ops[%d] %s %s: %s" % (i, kind, op.get("ref"), why))
+                    continue
             fp, why = load_library_fp(op["libDir"], op["name"])
             if fp is None:
                 bad.append("ops[%d] %s %s: %s" % (i, kind, op.get("ref"), why))
@@ -1670,12 +1676,10 @@ def validate_sync(board, plan):
                 if op["fp"] in swapped:
                     bad.append("ops[%d] swapFootprint: %s is swapped twice" % (i, op["fp"]))
                 swapped.add(op["fp"])
-                new_nums = {p.GetNumber() for p in fp.Pads()}
-                for p in e["fp"].Pads():
-                    ov = pad_overrides(p)
-                    if ov and p.GetNumber() not in new_nums:
-                        bad.append("ops[%d] swapFootprint %s: pad %r has local overrides (%s) and the new footprint has no such pad"
-                                   % (i, e["ref"], p.GetNumber(), ", ".join(sorted(ov))))
+                pm, why = pad_override_map(e["fp"], fp)
+                if why:
+                    bad.append("ops[%d] swapFootprint %s: %s" % (i, e["ref"], why))
+                padmap[i] = pm
                 continue
             if not is_str(op.get("ref")) or not is_str(op.get("value"), empty=True):
                 bad.append("ops[%d] addFootprint: ref and value are required" % i)
@@ -1738,7 +1742,7 @@ def validate_sync(board, plan):
                 bad.append("ops[%d] orphan %s: the footprint is locked; pcb-sync never removes a locked footprint" % (i, e["ref"]))
             else:
                 removed.add(op["fp"])
-    return bad, {"ops": ops, "byId": by_id, "loaded": loaded}
+    return bad, {"ops": ops, "byId": by_id, "loaded": loaded, "padmap": padmap}
 
 
 def net_of(board, name, made):
@@ -1807,21 +1811,65 @@ def pad_overrides(pad):
     return {n: getattr(pad, "Get" + n)() for n in PAD_OVERRIDES if overridden(getattr(pad, "Get" + n)())}
 
 
-def carry_overrides(nf, fp):
-    """Footprint overrides and allow-flags of fp onto nf; each pad's
-    overrides onto nf's pads with the same number."""
+def check_fp_sha(lib_dir, name, want):
+    """Problem text when the library footprint file is not the one the plan
+    was made from ("" when it is)."""
+    try:
+        with open(os.path.join(lib_dir, name + ".kicad_mod"), "rb") as f:
+            got = hashlib.sha256(f.read()).hexdigest()
+    except OSError as e:
+        return "cannot read the library footprint: %s" % e
+    if got != want:
+        return "library footprint %s changed since the plan (sha256 %s, planned %s)" % (name, got[:12], str(want)[:12])
+    return ""
+
+
+def pad_override_map(old, new):
+    """([(old pad, new pad)], problem): where each overridden pad of old
+    footprint goes on the new one. Pads are matched by number; several
+    pads sharing a number are matched only when that is unambiguous — all
+    carry the same overrides, or there are as many on both sides at the same
+    footprint-relative positions, in order. Otherwise the swap is refused."""
+    def by_num(fp, rel):
+        out = {}
+        for p in fp.Pads():
+            out.setdefault(p.GetNumber(), []).append((p, rel(p)))
+        return out
+    olds = by_num(old, lambda p: p.GetFPRelativePosition())
+    news = by_num(new, lambda p: p.GetPosition())  # a library footprint sits at the origin, rotation 0
+    out = []
+    for num, ops in olds.items():
+        ov = [pad_overrides(p) for p, _ in ops]
+        if not any(ov):
+            continue
+        nps = news.get(num, [])
+        names = ", ".join(sorted({k for o in ov for k in o}))
+        if not nps:
+            return out, "pad %r has local overrides (%s) and the new footprint has no such pad" % (num, names)
+        if all(o == ov[0] for o in ov):
+            src = next(p for (p, _), o in zip(ops, ov) if o)
+            out += [(src, q) for q, _ in nps]
+        elif len(ops) == len(nps) and all(abs(a.x - b.x) <= 1000 and abs(a.y - b.y) <= 1000
+                                          for (_, a), (_, b) in zip(ops, nps)):
+            out += [(p, q) for (p, _), (q, _) in zip(ops, nps)]
+        else:
+            return out, ("pads numbered %r carry different local overrides (%s) and cannot be matched one to one on the new "
+                         "footprint (count or positions differ)" % (num, names))
+    return out, ""
+
+
+def carry_overrides(nf, fp, padmap):
+    """Footprint overrides and allow-flags of fp onto nf; each overridden
+    pad's settings onto the pad pad_override_map paired it with."""
     for n in FP_OVERRIDES:
         v = getattr(fp, "Get" + n)()
         if overridden(v):
             getattr(nf, "Set" + n)(v)
     for n in FP_ALLOW:
         getattr(nf, "Set" + n)(getattr(fp, n)())
-    for p in fp.Pads():
-        ov = pad_overrides(p)
-        for q in nf.Pads():
-            if q.GetNumber() == p.GetNumber():
-                for n, v in ov.items():
-                    getattr(q, PAD_SETTERS.get(n, "Set" + n))(v)
+    for p, q in padmap:
+        for n, v in pad_overrides(p).items():
+            getattr(q, PAD_SETTERS.get(n, "Set" + n))(v)
 
 
 def drop_extra_fields(fp, keep):
@@ -1897,9 +1945,19 @@ def sync_apply(pcb, plan_path, out):
         elif kind == "swapFootprint":
             # The library footprint takes the old one's place, side,
             # orientation, fields (text, layout), link, flags and lock.
+            # The replacement keeps the footprint's uuid (references to it
+            # stay valid) and its group: the old one leaves the board first
+            # so no two items share the uuid.
             nf = ctx["loaded"][i]
             nf.SetFPID(pcbnew.LIB_ID(*op["fpid"].split(":", 1)))
+            grp = fp.GetParentGroup()
+            if grp is not None:
+                grp.RemoveItem(fp)
+            detach(board, fp)
+            nf.SetUuidDirect(pcbnew.KIID(fp.m_Uuid.AsString()))
             board.Add(nf)
+            if grp is not None:
+                grp.AddItem(nf)
             pos = fp.GetPosition()
             place_fp(nf, pos.x, pos.y, fp.GetOrientationDegrees(), fp.IsFlipped())
             for of in fp.GetFields():
@@ -1914,9 +1972,8 @@ def sync_apply(pcb, plan_path, out):
             keep = pcbnew.FP_DNP | pcbnew.FP_EXCLUDE_FROM_BOM | pcbnew.FP_EXCLUDE_FROM_POS_FILES
             nf.SetAttributes((nf.GetAttributes() & ~keep) | (fp.GetAttributes() & keep))
             nf.SetLocked(fp.IsLocked())
-            carry_overrides(nf, fp)
+            carry_overrides(nf, fp, ctx["padmap"].get(i, []))
             set_pad_nets(board, nf, op.get("padNets", {}), made)
-            detach(board, fp)
             cur[op["fp"]] = nf
         elif kind == "setRef":
             fp.SetReference(op["ref"])

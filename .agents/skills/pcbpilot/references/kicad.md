@@ -134,10 +134,13 @@ pcbpilot kicad pcb-sync ... --in-place --apply-plan plan.json --revision <rev>
   `E_PIN_PAD_MISMATCH`：网表引脚在封装上没有焊盘）让 `--check` / `--dry-run` / `--plan-out` 退出 1（`verdict: plan-errors`，
   不写计划），不会报 in-sync；应用时 pad-net 门禁失败。
 - **操作**（固定顺序）：`renameNet`（板网的焊盘**恰好**全部去往一个新名字、该名字板上还没有、没有孤儿/板专用件的焊盘在其上
-  → 改名，走线/过孔/铺铜跟着走；拆分、合并、目标名已占用都不改名，逐焊盘改网）→ `addFootprint`（库里加载，按图纸路径
-  再按位号排序，从板框右侧 10 mm 起成行暂存，`--staging X,Y` / `--staging-gap`）→ `swapFootprint`（保留位置/角度/面/锁定/
+  → 改名，走线/过孔/铺铜跟着走；拆分、合并、目标名已占用都不改名，逐焊盘改网；`.kicad_pro` 的 netclass 指派 / 只匹配旧名的
+  pattern、`.kicad_dru` 里引用旧名的规则会让改名**整批拒绝** `E_RENAME_REFERENCED`，列出引用，提示先在 Board Setup 改名或
+  `--rename-nets=false`）→ `addFootprint`（库里加载，按图纸路径
+  再按位号排序，从板框右侧 10 mm 起成行暂存，`--staging X,Y` / `--staging-gap`）→ `swapFootprint`（保留 uuid、所在 group、位置/角度/面/锁定/
   字段文字布局/路径、封装级 clearance / 阻焊 / 锡膏 / 铺铜连接覆盖与 allow-missing-courtyard / solder-mask-bridge，
-  以及每个焊盘的本地覆盖（带到同编号的新焊盘；带覆盖的焊盘在新封装里没有 → 整批拒绝并列出）；新封装缺的焊盘 → `orphanCopper`，
+  以及每个焊盘的本地覆盖（带到同编号的新焊盘；同编号多个焊盘覆盖不同时按顺序 + 封装内相对位置一一对应，对不上或带覆盖的焊盘在
+  新封装里没有 → 整批拒绝并列出）；新封装缺的焊盘 → `orphanCopper`，
   同编号焊盘换了网且旧网有铜 → `danglingCopper`）→ `setPath` / `setRef` / `setValue` / `setField` / `removeField`
   （库封装自带的多余用户字段也去掉）/ `setSheet`（sheetname = 原理图图纸路径名，如 `/`、`/CH1/`）/ `setFlags`
   （dnp、exclude_from_bom）→ `setPadNet` → `orphan`。`--update values,footprints,fields,refs,dnp` 选类别（焊盘网总是同步），
@@ -145,12 +148,14 @@ pcbpilot kicad pcb-sync ... --in-place --apply-plan plan.json --revision <rev>
 - **孤儿**：没有符号认领的封装（含 exclude_from_board 符号的封装）默认 `--orphans flag` 只报告；`remove` 删除，**锁定的
   永不删**（降级为 flag）；板专用（board-only）封装永远不算孤儿、不被改动。走线和铺铜永远不移动、不删除：焊盘离开了有铜的网
   → `danglingCopper`，网上一个焊盘都不剩 → `removeNet`（仅报告）。
-- **写入**：源板、`.kicad_pro`、`.kicad_dru` 读入时记下字节与哈希；bridge 加载的是复制进暂存目录的这份字节，应用前和提交前
+- **写入**：新增/换入的库封装文件在规划时记 sha256（`fpSha`，计入 revision），应用时只装这份字节（复制进暂存目录再加载），
+  规划后库文件被改 → 退出 4。源板、`.kicad_pro`、`.kicad_dru` 读入时记下字节与哈希；bridge 加载的是复制进暂存目录的这份字节，应用前和提交前
   都再核对源文件（被改 → `E_FILE_CHANGED` 退出 4，什么都不写）。bridge `sync-apply` 先校验全部操作（封装 id、焊盘、网、库封装能加载），全有或全无，只写进目标旁的
   `.pcbpilot-stage-*/`（`PCBPILOT_STAGE_DIR` 之外一律拒绝）；三道门禁在暂存板上跑完后由 kfile 事务提交（锁文件、读后被改
   `E_FILE_CHANGED`、计划 revision）。`--in-place` 只有 pad-net 与 idempotent 通过、parity 没失败才提交，否则板子一字节不动；
   `--out` 只要暂存板能读回就保留输出。`--in-place` 不改 `.kicad_pro`（缺失时才写）；`--out` 发布的 `.kicad_pro` 是源工程的原字节（不是
-  SaveBoard 重写的，非默认设置都保留；parity 也用它），并带 `.kicad_dru`。`--create`：`--pcb` 不存在时从空板起（全部新件暂存在
+  SaveBoard 重写的，非默认设置都保留；parity 也用它），并带 `.kicad_dru`；源没有 `.kicad_pro` 时目标已有的那份保持不动，只有目标
+  也没有才写 SaveBoard 生成的默认工程。`--create`：`--pcb` 不存在时从空板起（全部新件暂存在
   原点起的行里）；没有源板可查版本，就核对 bridge 应用时的 pcbnew 版本，不是 10.x → cannot-check 退出 5。
 - **门禁**（`internal/gate`，没验证就不是 pass）：`pad-net`（暂存板上与符号挂钩的封装焊盘网 vs 网表引脚网，
   `ComparePinNets` / `padNetDiffGate`；NPTH 与无编号焊盘不算）、`schematic-parity`（暂存板 + 工程 + 全部 `.kicad_sch`
@@ -159,7 +164,8 @@ pcbpilot kicad pcb-sync ... --in-place --apply-plan plan.json --revision <rev>
   `--no-parity` 是用户跳过，结论是 skip、退出 5，永远不是 pass。
 - **退出码**：0 通过（`--check` 无漂移）· 1 错误/拒绝 · 2 用法 · 3 `--check` 有漂移 · 4 锁定/读后被改/revision 不符（未写）·
   5 有门禁没能验证（含 `--no-parity`）· 6 门禁失败（`--out` 输出保留，`--in-place` 未提交）。
-- **报告** `pcbpilot.kicad.pcb-sync/1`（`--report`，默认 `<目标>.pcb-sync.json`，同时打印到 stdout）。`--report` / `--plan-out`
+- **报告** `pcbpilot.kicad.pcb-sync/1`，总是打印到 stdout；`--check` / `--dry-run` / `--plan-out` 只有给了 `--report` 才写文件
+  （不会因为 KiCad 开着工程而失败），写入板子的运行默认写 `<目标>.pcb-sync.json`。`--report` / `--plan-out`
   不能是任何输入或输出文件（板/工程/规则/prl、任一 `.kicad_sch`、网表、`--apply-plan`、输出板及其工程；按规范化路径、
   Windows/macOS 不分大小写、硬链接/链接同一文件判断），不能带 `.kicad_*` 扩展名，两者也不能相同 → 用法错误退出 2；写入经
   kfile **带 KiCad 锁检查**，所在目录工程被 KiCad（或正在跑的 kicad-cli）打开时写不进去：退出 4、stdout 的 `ok:false`，

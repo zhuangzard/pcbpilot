@@ -82,6 +82,14 @@ func (f *fakeSync) SyncApply(pcb string, plan *kicad.SyncPlan, stage, base strin
 		if op.Op == "setValue" {
 			inv.Footprints[0].Value = *op.Value
 		}
+		if op.Op == "addFootprint" {
+			f := kicad.SyncFP{ID: op.Key, UUID: op.Key, Ref: op.Ref, Path: op.Key, Sheetname: *op.Sheetname, Sheetfile: *op.Sheetfile,
+				FPID: op.FPID, Value: *op.Value, Fields: op.Fields, Side: "F", Box: &kicad.SyncBox{MinX: 30, MinY: 0, MaxX: 32, MaxY: 2}}
+			for _, n := range []string{"1", "2"} {
+				f.Pads = append(f.Pads, kicad.SyncPad{Number: n, Net: op.PadNets[n], Type: "smd"})
+			}
+			inv.Footprints = append(inv.Footprints, f)
+		}
 	}
 	f.after = inv
 	// What SaveBoard leaves: the board and a project of its own.
@@ -202,13 +210,12 @@ func TestPcbSyncOutputAliasesRefused(t *testing.T) {
 		"report = applied plan": func(o *pcbSyncOpts) {
 			o.inPlace, o.applyPlan, o.revision, o.report = true, in("plan.json"), "r", in("plan.json")
 		},
-		"report = hard link":        func(o *pcbSyncOpts) { o.dryRun, o.report = true, link },
-		"report via ..":             func(o *pcbSyncOpts) { o.dryRun, o.report = true, in(filepath.Join("sub", "..", "net.xml")) },
-		"plan-out = board":          func(o *pcbSyncOpts) { o.planOut = in("a.kicad_pcb") },
-		"plan-out = netlist":        func(o *pcbSyncOpts) { o.planOut = in("net.xml") },
-		"plan-out = report":         func(o *pcbSyncOpts) { o.planOut, o.report = in("x.json"), in("x.json") },
-		"plan-out = default report": func(o *pcbSyncOpts) { o.planOut = in("a.pcb-sync.json") },
-		"report KiCad extension":    func(o *pcbSyncOpts) { o.dryRun, o.report = true, in("new.kicad_sym") },
+		"report = hard link":     func(o *pcbSyncOpts) { o.dryRun, o.report = true, link },
+		"report via ..":          func(o *pcbSyncOpts) { o.dryRun, o.report = true, in(filepath.Join("sub", "..", "net.xml")) },
+		"plan-out = board":       func(o *pcbSyncOpts) { o.planOut = in("a.kicad_pcb") },
+		"plan-out = netlist":     func(o *pcbSyncOpts) { o.planOut = in("net.xml") },
+		"plan-out = report":      func(o *pcbSyncOpts) { o.planOut, o.report = in("x.json"), in("x.json") },
+		"report KiCad extension": func(o *pcbSyncOpts) { o.dryRun, o.report = true, in("new.kicad_sym") },
 	}
 	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
 		cases["report = board, other case"] = func(o *pcbSyncOpts) { o.dryRun, o.report = true, in("A.KICAD_PCB") }
@@ -324,9 +331,10 @@ func TestPcbSyncCreateNeedsKiCad10(t *testing.T) {
 	}
 }
 
-// TestPcbSyncReportHonoursLocks: the report is written with the KiCad lock
-// check; a report that cannot be written makes the run fail and stdout
-// says ok:false.
+// TestPcbSyncReportHonoursLocks: read-only runs write no report unless
+// --report names one (so --check works while KiCad has the project open);
+// an explicit report is written with the KiCad lock check, and one that
+// cannot be written fails the run with ok:false on stdout.
 func TestPcbSyncReportHonoursLocks(t *testing.T) {
 	dir, o, fake := fakeProject(t, fakeNetlist())
 	fake.value = "1k"
@@ -335,12 +343,134 @@ func TestPcbSyncReportHonoursLocks(t *testing.T) {
 	}
 	o.env.Procs = func() ([]kfile.Proc, error) { return []kfile.Proc{{PID: 7, Name: "kicad.exe"}}, nil }
 	o.check = true
+	rep, code, _ := runSyncCode(t, o)
+	if code != 0 || !rep.OK || rep.Verdict != "in-sync" || fileExists(filepath.Join(dir, "a.pcb-sync.json")) {
+		t.Fatalf("--check without --report: exit %d %s", code, rep.Verdict)
+	}
+	o.report = filepath.Join(dir, "r.json")
 	rep, code, stderr := runSyncCode(t, o)
-	if code != 4 || rep.OK || !strings.Contains(stderr, "cannot write the report") || fileExists(filepath.Join(dir, "a.pcb-sync.json")) {
-		t.Fatalf("exit %d ok %v %s", code, rep.OK, stderr)
+	if code != 4 || rep.OK || !strings.Contains(stderr, "cannot write the report") || fileExists(o.report) {
+		t.Fatalf("report beside an open project: exit %d ok %v %s", code, rep.OK, stderr)
 	}
 	o.report = filepath.Join(t.TempDir(), "r.json")
-	if rep, code, _ = runSyncCode(t, o); code != 0 || !rep.OK || rep.Verdict != "in-sync" {
+	if rep, code, _ = runSyncCode(t, o); code != 0 || !rep.OK || !fileExists(o.report) {
 		t.Fatalf("report elsewhere: exit %d %s", code, rep.Verdict)
+	}
+}
+
+// fakeNetlistR2 adds R2 (L:R, not on the board) to fakeNetlist.
+func fakeNetlistR2() string {
+	s := fakeNetlist()
+	s = strings.Replace(s, `</components>`, `<comp ref="R2"><value>1k</value><footprint>L:R</footprint>
+<fields><field name="Footprint">L:R</field></fields><libsource lib="d" part="R" description=""/>
+<property name="Sheetname" value="Root"/><property name="Sheetfile" value="a.kicad_sch"/>
+<sheetpath names="/" tstamps="/"/><tstamps>00000000-0000-0000-0000-000000000002</tstamps></comp></components>`, 1)
+	return strings.Replace(s, `<net code="1" name="GND"><node ref="R1" pin="1"/>`, `<net code="1" name="GND"><node ref="R1" pin="1"/><node ref="R2" pin="1"/>`, 1)
+}
+
+type libCheckSync struct {
+	*fakeSync
+	libDirs []string
+}
+
+func (f *libCheckSync) SyncApply(pcb string, plan *kicad.SyncPlan, stage, base string) (*kicad.SyncApplyResult, error) {
+	for _, op := range plan.Mutating() {
+		if op.Op == "addFootprint" {
+			f.libDirs = append(f.libDirs, op.LibDir)
+		}
+	}
+	return f.fakeSync.SyncApply(pcb, plan, stage, base)
+}
+
+// TestPcbSyncLibraryChangedAfterPlan: the footprint bytes planned with are
+// in the revision and are the bytes installed (copied into the stage); a
+// library footprint edited between --plan-out and --apply-plan, or between
+// the plan and the apply of one run, is refused (exit 4).
+func TestPcbSyncLibraryChangedAfterPlan(t *testing.T) {
+	dir, o, fake := fakeProject(t, fakeNetlistR2())
+	fake.value = "1k"
+	be := &libCheckSync{fakeSync: fake}
+	o.backend = be
+	mod := filepath.Join(dir, "L.pretty", "R.kicad_mod")
+	planPath := filepath.Join(t.TempDir(), "plan.json")
+	p := o
+	p.planOut = planPath
+	rep, code, _ := runSyncCode(t, p)
+	if code != 0 || rep.Counts.Add != 1 || rep.Ops[0].FPSha == "" {
+		t.Fatalf("plan: exit %d %+v", code, rep.Ops)
+	}
+	if err := os.WriteFile(mod, []byte(`(footprint "R" (moved))`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := o
+	a.inPlace, a.applyPlan, a.revision = true, planPath, rep.Revision
+	if rep, code, _ = runSyncCode(t, a); code != 4 || rep.Errors[len(rep.Errors)-1].Code != string(kfile.CodeRevision) {
+		t.Fatalf("library edited after --plan-out: exit %d %+v", code, rep.Errors)
+	}
+
+	// In one run: the plan is made, then the library changes.
+	o.out = filepath.Join(dir, "out", "o.kicad_pcb")
+	pcbSyncBeforeApply = func() {
+		if err := os.WriteFile(mod, []byte(`(footprint "R" (moved again))`), 0o644); err != nil {
+			t.Error(err)
+		}
+	}
+	rep, code, _ = runSyncCode(t, o)
+	pcbSyncBeforeApply = nil
+	if code != 4 || rep.Errors[len(rep.Errors)-1].Code != string(kfile.CodeChanged) || fileExists(o.out) || len(be.libDirs) != 0 {
+		t.Fatalf("library edited before the apply: exit %d %+v", code, rep.Errors)
+	}
+	// Unchanged: the bridge loads the staged copy.
+	if rep, code, _ = runSyncCode(t, o); code != 0 || len(be.libDirs) != 1 || !strings.Contains(be.libDirs[0], ".pcbpilot-stage-") {
+		t.Fatalf("exit %d lib dirs %v %+v", code, be.libDirs, rep.Errors)
+	}
+}
+
+// TestPcbSyncRenameReferencedRefused: renaming a net that a netclass
+// assignment names is refused (v0.11 does not rewrite the project).
+func TestPcbSyncRenameReferencedRefused(t *testing.T) {
+	dir, o, fake := fakeProject(t, strings.Replace(fakeNetlist(), `name="VCC"`, `name="/V5"`, 1))
+	fake.value = "1k"
+	pro := `{"meta":{"filename":"a.kicad_pro"},"net_settings":{"netclass_assignments":{"VCC":"Power"}}}`
+	if err := os.WriteFile(filepath.Join(dir, "a.kicad_pro"), []byte(pro), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	o.dryRun = true
+	rep, code, _ := runSyncCode(t, o)
+	if code != 1 || rep.Verdict != "refused" || rep.Errors[len(rep.Errors)-1].Code != kicad.ErrRenameReferenced {
+		t.Fatalf("exit %d %s %+v", code, rep.Verdict, rep.Errors)
+	}
+	o.renameNets = false
+	if rep, code, _ = runSyncCode(t, o); code != 0 || rep.Counts.PadNet != 1 {
+		t.Fatalf("--rename-nets=false: exit %d %+v", code, rep.Ops)
+	}
+}
+
+// TestPcbSyncOutKeepsTargetProject: with no source project, an existing
+// target project stays as it is (SaveBoard's default one is not published).
+func TestPcbSyncOutKeepsTargetProject(t *testing.T) {
+	dir, o, _ := fakeProject(t, fakeNetlist())
+	if err := os.Remove(filepath.Join(dir, "a.kicad_pro")); err != nil {
+		t.Fatal(err)
+	}
+	o.out = filepath.Join(dir, "out", "o.kicad_pcb")
+	tpro := filepath.Join(dir, "out", "o.kicad_pro")
+	if err := os.MkdirAll(filepath.Dir(tpro), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tpro, []byte(`{"target":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep, code, _ := runSyncCode(t, o)
+	if code != 0 || !rep.Committed {
+		t.Fatalf("exit %d %+v", code, rep.Errors)
+	}
+	if b, _ := os.ReadFile(tpro); string(b) != `{"target":true}` {
+		t.Fatalf("target project replaced: %s", b)
+	}
+	for _, f := range rep.Files {
+		if strings.HasSuffix(f.Path, ".kicad_pro") {
+			t.Fatalf("project in the transaction: %+v", rep.Files)
+		}
 	}
 }
