@@ -27,7 +27,9 @@ const ErrNetlistExport = "E_NETLIST_EXPORT"
 // kicadxml writes names unescaped, so they are resolved the way
 // ParseSchNetlist does (sheet paths, then the label texts of the sheet
 // files under rootDir as evidence; an undecidable name is an error), and
-// mapped back by net code. kicadsexpr names are used as written.
+// mapped back by net code. kicadsexpr names are used as written: they are
+// already escaped (KiCad 10.0.6: root label "A/B" is "/A{slash}B" in both
+// formats once resolved).
 func ReadSyncNetlist(data []byte, format, rootDir string) (*SyncNetlist, error) {
 	nl, err := ParseSyncNetlist(data, format)
 	if err != nil {

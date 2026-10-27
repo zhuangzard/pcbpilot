@@ -692,9 +692,16 @@ func pcbSyncVerify(t *kicad.Tools, o pcbSyncOpts, sopts kicad.SyncOptions, nl *k
 		p2, err := kicad.BuildSyncPlan(kicad.SyncInput{Netlist: nl, Inventory: inv, Libs: libs, Info: info, Opts: sopts})
 		switch {
 		case err != nil:
+			// A refusal of the synced board fails; a bridge that could not
+			// load a footprint for the re-plan means it could not be checked.
 			st := gate.CannotCheck
-			if _, ok := kicad.IsSyncRefusal(err); ok {
+			if r, ok := kicad.IsSyncRefusal(err); ok {
 				st = gate.Fail
+				for _, e := range r.Errors {
+					if e.Code == errSyncBridge {
+						st = gate.CannotCheck
+					}
+				}
 			}
 			gates = append(gates, pcbSyncGate{Name: "idempotent", Status: st, Detail: "re-planning the synced board: " + err.Error()})
 		case len(p2.Mutating()) > 0:
