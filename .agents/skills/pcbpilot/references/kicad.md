@@ -216,8 +216,10 @@ pcbpilot kicad drc --pcb board.kicad_pcb --baseline drc/drc-report.json --waiver
   `footprint`（只涉及一个封装自己的对象）> `placement`（两个以上封装）> `graphic` > `unresolved`；位置另给 KiCad 坐标 `xMm/yMm`（mm，y 向下）。
 - **检查（各自 pass / fail / cannot-check，总判定取最差，退出码 0 / 6 / 5）**：
   `kicad-drc`（violations + unconnected 的 error 级条目，以及**电气/制造规则的 warning 级条目**——hard 类规则如 hole_to_hole、
-  connection_width、copper_sliver、holes_co_located、被降级的 solder_mask_bridge；其余警告只列出）、`kicad-drc-policy`（同 route 门禁：电气/制造规则被排除、ignore 或从
-  error 降为 warning 即失败；会在 warning 级门禁的规则（copper_sliver、holes_co_located、footprint_symbol_field_mismatch 等）被排除或 ignore 同样失败；courtyard 等放置类只记 `SILENCED`）、`schematic-parity`（带 `--schematic-parity` 时，任何严重度的一致性条目）。
+  connection_width、copper_sliver、holes_co_located、isolated_copper、padstack、被降级的 solder_mask_bridge；其余警告只列出）、`kicad-drc-policy`（同 route 门禁：电气/制造规则被排除、ignore 或从
+  error 降为 warning 即失败；会在 warning 级门禁的规则（copper_sliver、holes_co_located、isolated_copper、padstack、footprint_symbol_field_mismatch 等）被排除或 ignore 同样失败；
+  `.kicad_dru` 里 `(severity ignore)` 的自定义规则按其 constraint 对应的 DRC 规则归类（disallow → items_not_allowed、edge_clearance、hole_to_hole …），
+  电气/制造类或认不出的 → `IGNORED custom rule …` 硬项；courtyard 等放置类只记 `SILENCED`）、`schematic-parity`（带 `--schematic-parity` 时，任何严重度的一致性条目）。
   `--waivers` 用 route 同一格式 `{"gate":"kicad-drc","match":…,"reason":…,"by":…}`，逐条接受（`kicad-drc` 的 waiver 也覆盖另两项）。
   kicad-cli 失败、报告不合 schema、基线读不了 → cannot-check，waiver 不能放行。
 - **基线**：`--baseline-pcb` 对旧板副本也跑一次 DRC；`--baseline` 接受本命令（或 `kicad fab --preflight`）的报告，也接受原始 kicad-cli JSON

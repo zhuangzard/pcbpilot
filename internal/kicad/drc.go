@@ -364,6 +364,39 @@ type DRCPolicy struct {
 	Ignored    []string       `json:"ignored,omitempty"`
 	// Downgraded: rules the project sets to "warning".
 	Downgraded []string `json:"downgraded,omitempty"`
+	// IgnoredCustom: .kicad_dru rules set to (severity ignore), with the
+	// constraints they turn off where their condition holds.
+	IgnoredCustom []DRUIgnored `json:"ignoredCustom,omitempty"`
+}
+
+// DRUIgnored is one (severity ignore) custom rule.
+type DRUIgnored struct {
+	Name        string   `json:"name"`
+	Constraints []string `json:"constraints"`
+}
+
+// ReadDRUIgnored lists the (severity ignore) rules of a .kicad_dru.
+func ReadDRUIgnored(dru string) ([]DRUIgnored, error) {
+	b, err := os.ReadFile(dru)
+	if err != nil {
+		return nil, err
+	}
+	root, err := parseSexpr(append(append([]byte("(pcbpilot_dru\n"), b...), []byte("\n)")...))
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", dru, err)
+	}
+	var out []DRUIgnored
+	for _, rule := range root.children("rule") {
+		if s := rule.child("severity"); s == nil || s.arg(0) != "ignore" {
+			continue
+		}
+		ig := DRUIgnored{Name: rule.arg(0)}
+		for _, c := range rule.children("constraint") {
+			ig.Constraints = append(ig.Constraints, c.arg(0))
+		}
+		out = append(out, ig)
+	}
+	return out, nil
 }
 
 // ReadDRCPolicy reads the DRC policy of a .kicad_pro. drc_exclusions is a

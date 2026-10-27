@@ -381,3 +381,29 @@ func TestKicadDRCCommandFabWarningRules(t *testing.T) {
 		t.Fatalf("waived: exit %d %+v", code, rep.Checks)
 	}
 }
+
+// An ignored custom keepout (disallow) rule fails the preflight's policy
+// check unless a signed waiver accepts it.
+func TestKicadFabPreflightIgnoredCustomRule(t *testing.T) {
+	pcb := copyDRCBoard(t)
+	fakeKicadCLIEnv(t, "drc/clean-parity.json", "0")
+	dru := strings.TrimSuffix(pcb, ".kicad_pcb") + ".kicad_dru"
+	b, _ := os.ReadFile(dru)
+	_ = os.WriteFile(dru, append(b, []byte("(rule \"no keepout\" (severity ignore) (constraint disallow track via) (condition \"A.insideArea('KO')\"))\n")...), 0o644)
+	rep, code := runPreflight(t, "--pcb", pcb, "--no-assembly")
+	var pol drcCheck
+	for _, c := range rep.Checks {
+		if c.Name == "kicad-drc-policy" {
+			pol = c
+		}
+	}
+	if code != 6 || pol.Status != gate.Fail || len(pol.Items) != 1 || !strings.Contains(pol.Items[0], `IGNORED custom rule "no keepout" constraint disallow`) {
+		t.Fatalf("exit %d policy %+v", code, pol)
+	}
+	w := filepath.Join(t.TempDir(), "w.json")
+	_ = os.WriteFile(w, []byte(`[{"gate":"kicad-drc","match":"custom rule \"no keepout\"","reason":"keepout reviewed","by":"t"}]`), 0o644)
+	rep, _ = runPreflight(t, "--pcb", pcb, "--no-assembly", "--waivers", w)
+	if s := checkStatus(rep.Checks); s["kicad-drc-policy"] != gate.Pass {
+		t.Fatalf("waived: %v", s)
+	}
+}

@@ -496,7 +496,7 @@ func TestDiffDRCMixedUUIDs(t *testing.T) {
 // Rules that gate at warning severity are hard for the policy too: a
 // project that excludes or ignores them fails unless a waiver accepts it.
 func TestFabWarningRulesAreHard(t *testing.T) {
-	for _, rule := range []string{"copper_sliver", "holes_co_located", "footprint_symbol_field_mismatch", "padstack", "hole_to_hole", "connection_width"} {
+	for _, rule := range []string{"copper_sliver", "holes_co_located", "footprint_symbol_field_mismatch", "padstack", "isolated_copper", "hole_to_hole", "connection_width"} {
 		if DRCRuleClass(rule) != "hard" || !DRCGatesWarning(rule) {
 			t.Errorf("%s: class %s, gates %v", rule, DRCRuleClass(rule), DRCGatesWarning(rule))
 		}
@@ -509,7 +509,7 @@ func TestFabWarningRulesAreHard(t *testing.T) {
 			}
 		}
 	}
-	for _, rule := range []string{"silk_overlap", "isolated_copper", "lib_footprint_mismatch"} {
+	for _, rule := range []string{"silk_overlap", "silk_over_copper", "lib_footprint_mismatch"} {
 		if DRCGatesWarning(rule) {
 			t.Errorf("%s gates as a warning", rule)
 		}
@@ -577,10 +577,19 @@ func TestDiffDRCParityDiscriminator(t *testing.T) {
 	if d := DiffDRC(mpn("MPN1"), mpn("MPN2"), 0.5); len(d.New) != 1 || len(d.Resolved) != 1 {
 		t.Fatalf("MPN1 -> MPN2: %+v", d)
 	}
-	// Measurements are normalised.
-	meas := func(v string) []OwnedViolation { return field("Pad count mismatch (actual " + v + " mm)") }
-	if d := DiffDRC(meas("0.1000"), meas("0.2500"), 0.5); d.Matched != 1 {
-		t.Fatalf("same problem, other measurement: %+v", d)
+	// The summary is verbatim: numeric field names, numeric values and pin
+	// numbers all tell problems apart.
+	for _, pair := range [][2]string{
+		{"Footprint field '1' doesn't match symbol", "Footprint field '2' doesn't match symbol"},
+		{"Value field '100' doesn't match symbol '47'", "Value field '200' doesn't match symbol '47'"},
+		{"No pad found for pin 3 (GND) in schematic", "No pad found for pin 4 (GND) in schematic"},
+	} {
+		if d := DiffDRC(field(pair[0]), field(pair[1]), 0.5); len(d.New) != 1 || len(d.Resolved) != 1 {
+			t.Errorf("%q -> %q: %+v", pair[0], pair[1], d)
+		}
+	}
+	if d := DiffDRC(field("No pad found for pin 3 (GND) in schematic"), field("  No pad found for pin 3 (GND) in schematic "), 0.5); d.Matched != 1 {
+		t.Errorf("same summary, whitespace only: %+v", d)
 	}
 }
 
@@ -616,5 +625,30 @@ func TestReadEffectiveRulesMicroviaCoverage(t *testing.T) {
 	}
 	if r := run(`{"board":{"design_settings":{"rules":{"min_through_hole_diameter":0.3}}}}`, ""); !r.Drill.Covered() {
 		t.Errorf("no microvias: %+v", r.Drill)
+	}
+}
+
+// Custom rules set to "ignore" are judged like the project's ignored rules:
+// by the DRC rule their constraint checks; one pcbpilot cannot classify is
+// hard.
+func TestEvalDRCPolicyIgnoredCustomRules(t *testing.T) {
+	dir := t.TempDir()
+	dru := filepath.Join(dir, "b.kicad_dru")
+	_ = os.WriteFile(dru, []byte(`(version 1)
+(rule "keepout" (severity ignore) (constraint disallow track) (condition "A.insideArea('KO')"))
+(rule "fpga edge" (severity ignore) (constraint edge_clearance (min 0.1mm)))
+(rule "courtyards" (severity ignore) (constraint courtyard_clearance (min 0mm)))
+(rule "silk" (severity ignore) (constraint silk_clearance (min 0mm)))
+(rule "made up" (severity ignore) (constraint made_up_thing (min 1mm)))
+(rule "kept" (constraint clearance (min 0.2mm)))
+`), 0o644)
+	ig, err := ReadDRUIgnored(dru)
+	if err != nil || len(ig) != 5 {
+		t.Fatalf("ignored: %+v %v", ig, err)
+	}
+	r := EvalDRCPolicy(&DRCPolicy{IgnoredCustom: ig}, nil)
+	if len(r.Hard) != 3 || !strings.Contains(r.Hard[0], `"keepout" constraint disallow`) || !strings.Contains(r.Hard[2], "made_up_thing") ||
+		len(r.Silenced) != 1 || r.Silenced[0].Rule != "courtyards_overlap" {
+		t.Fatalf("hard %v silenced %+v info %v", r.Hard, r.Silenced, r.Info)
 	}
 }

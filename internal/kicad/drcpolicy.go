@@ -31,6 +31,7 @@ var drcHardRules = map[string]bool{
 	// Warnings by KiCad's default, but evidence a fab or the parity check
 	// needs: they gate at warning severity, so silencing them fails too.
 	"copper_sliver": true, "holes_co_located": true, "footprint_symbol_field_mismatch": true, "padstack": true,
+	"isolated_copper": true,
 }
 
 // drcSoftRules are the other rules KiCad 10 reports as errors by default
@@ -147,6 +148,16 @@ func EvalDRCPolicy(pol *DRCPolicy, excluded []Violation) *DRCPolicyResult {
 		}
 		put(e.Rule, "excluded", at, it+" (.kicad_pro drc_exclusions)")
 	}
+	for _, ig := range pol.IgnoredCustom {
+		cs := ig.Constraints
+		if len(cs) == 0 {
+			cs = []string{""} // nothing to classify: fail closed
+		}
+		for _, c := range cs {
+			put(druConstraintRule(c), "ignored", ".kicad_dru rule "+ig.Name,
+				fmt.Sprintf("IGNORED custom rule %q constraint %s (.kicad_dru severity ignore: DRC does not report it where its condition holds)", ig.Name, c))
+		}
+	}
 	for _, rule := range pol.Ignored {
 		put(rule, "ignored", ".kicad_pro rule_severities", fmt.Sprintf("IGNORED %s (.kicad_pro rule_severities: ignore; KiCad's DRC does not report it at all)", rule))
 	}
@@ -158,6 +169,28 @@ func EvalDRCPolicy(pol *DRCPolicy, excluded []Violation) *DRCPolicyResult {
 		}
 	}
 	return res
+}
+
+// druConstraints maps a custom-rule constraint to the DRC rule whose class
+// an ignored one gets; one not listed is "" (unclassified: hard).
+var druConstraints = map[string]string{
+	"disallow": "items_not_allowed", "clearance": "clearance", "physical_clearance": "clearance",
+	"hole_clearance": "hole_clearance", "physical_hole_clearance": "hole_clearance", "edge_clearance": "copper_edge_clearance",
+	"hole_to_hole": "hole_to_hole", "creepage": "creepage", "track_width": "track_width", "hole_size": "drill_out_of_range",
+	"annular_width": "annular_width", "via_diameter": "via_diameter", "connection_width": "connection_width",
+	"thermal_spoke_width": "starved_thermal", "thermal_relief_gap": "starved_thermal", "min_resolved_spokes": "starved_thermal",
+	"zone_connection": "starved_thermal", "bridged_mask": "solder_mask_bridge", "solder_mask_expansion": "solder_mask_bridge",
+	"courtyard_clearance": "courtyards_overlap", "length": "length_out_of_range", "skew": "skew_out_of_range",
+	"diff_pair_gap": "diff_pair_gap_out_of_range", "diff_pair_uncoupled": "diff_pair_uncoupled_length_too_long",
+	"via_count": "too_many_vias", "track_angle": "track_angle", "track_segment_length": "track_segment_length",
+	"silk_clearance": "silk_overlap", "text_height": "text_height", "text_thickness": "text_thickness",
+}
+
+func druConstraintRule(c string) string {
+	if r, ok := druConstraints[c]; ok {
+		return r
+	}
+	return "custom:" + c // not in any table: DRCRuleClass makes it hard
 }
 
 // HardDetail is the gate-detail sentence for the Hard items ("" if none).

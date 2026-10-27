@@ -92,6 +92,18 @@ func RunDRC(o DRCRunOptions) (*DRCRun, error) {
 	} else {
 		run.Notes = append(run.Notes, "no "+base+".kicad_pro next to the board: KiCad's default rules and severities apply")
 	}
+	// Custom rules set to "ignore" silence checks like the project's own
+	// rule_severities do.
+	if dru := filepath.Join(dir, base+".kicad_dru"); run.PolicyErr == nil {
+		if ig, err := ReadDRUIgnored(dru); err == nil && len(ig) > 0 {
+			if run.Policy == nil {
+				run.Policy = &DRCPolicy{}
+			}
+			run.Policy.IgnoredCustom = ig
+		} else if err != nil && !os.IsNotExist(err) {
+			run.PolicyErr = err
+		}
+	}
 	tmp, err := os.MkdirTemp("", "pcbpilot-drc-")
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrDRCStage, err)
