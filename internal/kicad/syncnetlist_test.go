@@ -360,6 +360,10 @@ func TestSyncNetlistValidateIdentityAndNets(t *testing.T) {
 		{"empty net name", func(n *SyncNetlist) { n.Nets[1].Name = "" }, "has no name"},
 		{"node without pin", func(n *SyncNetlist) { n.Nets[1].Nodes[0].Pin = "" }, "without a pin"},
 		{"pin on two nets", func(n *SyncNetlist) { n.Nets[1].Nodes[0].Pin = "1" }, "is on both net"},
+		{"pin on two nets of the same name", func(n *SyncNetlist) {
+			n.Nets[1].Name = "A" // codes 1 and 2 both named "A"
+			n.Nets[1].Nodes[0].Pin = "1"
+		}, `is on both net "A" (code 1) and net "A" (code 2)`},
 	}
 	for _, c := range cases {
 		nl := base()

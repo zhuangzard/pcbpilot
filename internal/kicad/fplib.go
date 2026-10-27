@@ -149,8 +149,14 @@ func loadFPLibTables(projDir string, env fpLibEnv) (*FPLibTables, error) {
 		return nil, fmt.Errorf("fp-lib-table: %w", err)
 	}
 	t := &FPLibTables{ProjectDir: abs, Vars: map[string]FPLibVar{}}
-	cfg := kicadConfigDir(env)
-	user := readKiCadCommonVars(filepath.Join(cfg, "kicad_common.json"))
+	cfg, ferr := kicadConfigDir(env)
+	if ferr != nil {
+		return nil, ferr
+	}
+	user, ferr := readKiCadCommonVars(filepath.Join(cfg, "kicad_common.json"))
+	if ferr != nil {
+		return nil, ferr
+	}
 	lookup := func(name string) (FPLibVar, bool) { return resolveFPVar(name, abs, user, env) }
 
 	p := filepath.Join(abs, "fp-lib-table")
@@ -171,7 +177,12 @@ func loadFPLibTables(projDir string, env fpLibEnv) (*FPLibTables, error) {
 	if !present {
 		global = ""
 		if sd := env.stockDir(); sd != "" {
-			if p := filepath.Join(filepath.Dir(sd), "template", "fp-lib-table"); fileExists(p) {
+			p := filepath.Join(filepath.Dir(sd), "template", "fp-lib-table")
+			ok, ferr := strictPresent(p, "KiCad's template fp-lib-table")
+			if ferr != nil {
+				return nil, ferr
+			}
+			if ok {
 				global, t.GlobalSeeded = p, true
 			}
 		}
@@ -378,16 +389,34 @@ func (t *FPLibTables) Nicknames(scope string) []string {
 // $KICAD_CONFIG_HOME[/10.0], else %APPDATA%\kicad\10.0 (Windows),
 // ~/Library/Preferences/kicad/10.0 (macOS), $XDG_CONFIG_HOME or
 // ~/.config + /kicad/10.0 (Linux).
-func KiCadConfigDir() string { return kicadConfigDir(defaultFPLibEnv()) }
+// A settings path that exists but cannot be checked is an *FPLibError.
+func KiCadConfigDir() (string, error) {
+	d, err := kicadConfigDir(defaultFPLibEnv())
+	if err != nil {
+		return "", err
+	}
+	return d, nil
+}
 
-func kicadConfigDir(env fpLibEnv) string {
+func kicadConfigDir(env fpLibEnv) (string, *FPLibError) {
 	if v := env.env("KICAD_CONFIG_HOME"); v != "" {
 		// KiCad appends the settings version to KICAD_CONFIG_HOME; accept a
-		// flat directory too (tables directly inside it).
-		if d := filepath.Join(v, FPLibVersion); dirExists(d) || !fileExists(filepath.Join(v, "fp-lib-table")) {
-			return d
+		// flat directory (tables directly inside it) only when there is no
+		// version directory at all — a broken one is an error, not a
+		// reason to fall back.
+		d := filepath.Join(v, FPLibVersion)
+		ok, err := strictPresent(d, "KiCad settings directory")
+		if err != nil || ok {
+			return d, err
 		}
-		return v
+		flat, err := tablePresent(filepath.Join(v, "fp-lib-table"))
+		if err != nil {
+			return "", err
+		}
+		if flat {
+			return v, nil
+		}
+		return d, nil
 	}
 	switch env.goos {
 	case "windows":
@@ -395,34 +424,42 @@ func kicadConfigDir(env fpLibEnv) string {
 		if base == "" {
 			base = filepath.Join(env.home, "AppData", "Roaming")
 		}
-		return filepath.Join(base, "kicad", FPLibVersion)
+		return filepath.Join(base, "kicad", FPLibVersion), nil
 	case "darwin":
-		return filepath.Join(env.home, "Library", "Preferences", "kicad", FPLibVersion)
+		return filepath.Join(env.home, "Library", "Preferences", "kicad", FPLibVersion), nil
 	default:
 		base := env.env("XDG_CONFIG_HOME")
 		if base == "" {
 			base = filepath.Join(env.home, ".config")
 		}
-		return filepath.Join(base, "kicad", FPLibVersion)
+		return filepath.Join(base, "kicad", FPLibVersion), nil
 	}
 }
 
 // readKiCadCommonVars reads environment.vars from kicad_common.json (the
-// Configure Paths dialog); absent or unreadable means none.
-func readKiCadCommonVars(path string) map[string]string {
-	b, err := os.ReadFile(path)
+// Configure Paths dialog). Only an absent file means "no user variables";
+// an unreadable or invalid file is an error (its variables may decide
+// where libraries are).
+func readKiCadCommonVars(path string) (map[string]string, *FPLibError) {
+	ok, ferr := strictPresent(path, "kicad_common.json")
+	if ferr != nil || !ok {
+		return nil, ferr
+	}
+	b, err := fpReadFile(path)
 	if err != nil {
-		return nil
+		return nil, &FPLibError{Code: ErrFPLibUnresolved, Path: path,
+			Detail: "cannot read kicad_common.json: " + err.Error(), Fix: "check the file's permissions"}
 	}
 	var doc struct {
 		Environment struct {
 			Vars map[string]string `json:"vars"`
 		} `json:"environment"`
 	}
-	if json.Unmarshal(b, &doc) != nil {
-		return nil
+	if err := json.Unmarshal(b, &doc); err != nil {
+		return nil, &FPLibError{Code: ErrFPLibUnresolved, Path: path,
+			Detail: "cannot parse kicad_common.json: " + err.Error(), Fix: "repair the file or re-save Preferences > Configure Paths in KiCad"}
 	}
-	return doc.Environment.Vars
+	return doc.Environment.Vars, nil
 }
 
 var legacyFPDirVar = regexp.MustCompile(`^KICAD\d+_FOOTPRINT_DIR$`)
@@ -571,17 +608,22 @@ func fileExists(p string) bool {
 	return err == nil && !st.IsDir()
 }
 
-// fpStat / fpLstat are os.Stat / os.Lstat; tests inject failures.
+// fpStat / fpLstat / fpReadFile are the os functions; tests inject failures.
 var (
-	fpStat  = os.Stat
-	fpLstat = os.Lstat
+	fpStat     = os.Stat
+	fpLstat    = os.Lstat
+	fpReadFile = os.ReadFile
 )
 
 // tablePresent reports whether a top-level fp-lib-table exists. Only a
 // path that does not exist at all counts as absent; a dangling symlink, a
 // permission or I/O error is an error, so a table KiCad would read is never
 // silently replaced by the next fallback.
-func tablePresent(p string) (bool, *FPLibError) {
+func tablePresent(p string) (bool, *FPLibError) { return strictPresent(p, "fp-lib-table") }
+
+// strictPresent is tablePresent for any settings path (what names it in
+// the error).
+func strictPresent(p, what string) (bool, *FPLibError) {
 	_, err := fpStat(p)
 	if err == nil {
 		return true, nil
@@ -589,15 +631,15 @@ func tablePresent(p string) (bool, *FPLibError) {
 	if errors.Is(err, fs.ErrNotExist) {
 		if _, lerr := fpLstat(p); lerr == nil {
 			return false, &FPLibError{Code: ErrFPLibUnresolved, Path: p,
-				Detail: "fp-lib-table is a symlink to a missing file", Fix: "repair or remove the symlink"}
+				Detail: what + " is a symlink to a missing file", Fix: "repair or remove the symlink"}
 		} else if !errors.Is(lerr, fs.ErrNotExist) {
 			return false, &FPLibError{Code: ErrFPLibUnresolved, Path: p,
-				Detail: "cannot check fp-lib-table: " + lerr.Error(), Fix: "check the file's permissions"}
+				Detail: "cannot check " + what + ": " + lerr.Error(), Fix: "check the file's permissions"}
 		}
 		return false, nil
 	}
 	return false, &FPLibError{Code: ErrFPLibUnresolved, Path: p,
-		Detail: "cannot check fp-lib-table: " + err.Error(), Fix: "check the file's permissions"}
+		Detail: "cannot check " + what + ": " + err.Error(), Fix: "check the file's permissions"}
 }
 
 func dirExists(p string) bool {

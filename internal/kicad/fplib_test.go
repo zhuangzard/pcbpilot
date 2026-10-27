@@ -297,9 +297,119 @@ func TestKiCadConfigDir(t *testing.T) {
 		{"windows", map[string]string{"KICAD_CONFIG_HOME": flat}, flat}, // tables directly inside
 	}
 	for _, c := range cases {
-		if got := kicadConfigDir(mk(c.goos, c.env)); got != c.want {
-			t.Errorf("%s %v: %s, want %s", c.goos, c.env, got, c.want)
+		if got, err := kicadConfigDir(mk(c.goos, c.env)); err != nil || got != c.want {
+			t.Errorf("%s %v: %s %v, want %s", c.goos, c.env, got, err, c.want)
 		}
+	}
+}
+
+// injectStat makes fpStat / fpLstat / fpReadFile fail for one path (lstat
+// then reports the path itself as present, i.e. a dangling symlink when
+// statErr is ErrNotExist); restored at test end.
+func injectStat(t *testing.T, path string, statErr, readErr error) {
+	t.Helper()
+	t.Cleanup(func() { fpStat, fpLstat, fpReadFile = os.Stat, os.Lstat, os.ReadFile })
+	fpStat = func(p string) (os.FileInfo, error) {
+		if p == path && statErr != nil {
+			return nil, statErr
+		}
+		return os.Stat(p)
+	}
+	fpLstat = func(p string) (os.FileInfo, error) {
+		if p == path && statErr != nil {
+			return os.Stat(".") // "the link itself exists"
+		}
+		return os.Lstat(p)
+	}
+	fpReadFile = func(p string) ([]byte, error) {
+		if p == path && readErr != nil {
+			return nil, readErr
+		}
+		return os.ReadFile(p)
+	}
+}
+
+// A broken settings directory, template table or kicad_common.json is an
+// error, never a reason to pick the next fallback.
+func TestFPLibSettingsPathsFailClosed(t *testing.T) {
+	errPerm := &fs.PathError{Op: "stat", Path: "x", Err: fs.ErrPermission}
+	errIO := &fs.PathError{Op: "read", Path: "x", Err: errors.New("I/O error")}
+
+	// Valid flat table present + broken 10.0 directory: error, not the flat table.
+	for name, statErr := range map[string]error{"permission": errPerm, "dangling": fs.ErrNotExist} {
+		f := newFPFixture(t)
+		if err := os.RemoveAll(filepath.Join(f.cfg, FPLibVersion)); err != nil {
+			t.Fatal(err)
+		}
+		f.write(filepath.Join(f.cfg, "fp-lib-table"), table())
+		injectStat(t, filepath.Join(f.cfg, FPLibVersion), statErr, nil)
+		if _, err := f.tryLoad(); err == nil || !strings.Contains(err.Error(), "settings directory") {
+			t.Errorf("%s 10.0 dir: err %v, want a settings directory error", name, err)
+		}
+		fpStat, fpLstat, fpReadFile = os.Stat, os.Lstat, os.ReadFile
+	}
+	// Without the 10.0 directory the flat table is used.
+	f := newFPFixture(t)
+	if err := os.RemoveAll(filepath.Join(f.cfg, FPLibVersion)); err != nil {
+		t.Fatal(err)
+	}
+	f.write(filepath.Join(f.cfg, "fp-lib-table"), table())
+	if tabs := f.load(); tabs.GlobalTable != filepath.Join(f.cfg, "fp-lib-table") {
+		t.Errorf("flat table: GlobalTable = %s", tabs.GlobalTable)
+	}
+	// Broken flat table check (no 10.0 dir): error.
+	f = newFPFixture(t)
+	if err := os.RemoveAll(filepath.Join(f.cfg, FPLibVersion)); err != nil {
+		t.Fatal(err)
+	}
+	injectStat(t, filepath.Join(f.cfg, "fp-lib-table"), errPerm, nil)
+	if _, err := f.tryLoad(); err == nil {
+		t.Error("inaccessible flat table: want an error")
+	}
+	fpStat, fpLstat, fpReadFile = os.Stat, os.Lstat, os.ReadFile
+
+	// No global table and an inaccessible stock template: error, not "no global table".
+	for name, statErr := range map[string]error{"permission": errPerm, "dangling": fs.ErrNotExist} {
+		f := newFPFixture(t)
+		tpl := filepath.Join(filepath.Dir(f.stock), "template", "fp-lib-table")
+		injectStat(t, tpl, statErr, nil)
+		if _, err := f.tryLoad(); err == nil || fpErrCode(t, err).Path != tpl {
+			t.Errorf("%s template: err %v, want an error on %s", name, err, tpl)
+		}
+		fpStat, fpLstat, fpReadFile = os.Stat, os.Lstat, os.ReadFile
+	}
+
+	// kicad_common.json: absent = no variables; unreadable, inaccessible or invalid = error.
+	common := func(f *fpFixture) string { return filepath.Join(f.cfg, FPLibVersion, "kicad_common.json") }
+	if _, err := newFPFixture(t).tryLoad(); err != nil {
+		t.Errorf("absent kicad_common.json: %v", err)
+	}
+	for _, c := range []struct {
+		name, text       string
+		statErr, readErr error
+		want             string
+	}{
+		{"invalid JSON", "{not json", nil, nil, "cannot parse kicad_common.json"},
+		{"vars of the wrong type", `{"environment":{"vars":["a"]}}`, nil, nil, "cannot parse kicad_common.json"},
+		{"read error", "{}", nil, errIO, "cannot read kicad_common.json"},
+		{"stat permission", "{}", errPerm, nil, "cannot check kicad_common.json"},
+		{"dangling", "{}", fs.ErrNotExist, nil, "symlink to a missing file"},
+	} {
+		f := newFPFixture(t)
+		f.write(common(f), c.text)
+		if c.statErr != nil || c.readErr != nil {
+			injectStat(t, common(f), c.statErr, c.readErr)
+		}
+		_, err := f.tryLoad()
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("kicad_common.json %s: err %v, want %q", c.name, err, c.want)
+		}
+		fpStat, fpLstat, fpReadFile = os.Stat, os.Lstat, os.ReadFile
+	}
+	g := newFPFixture(t)
+	g.write(common(g), `{"environment":{"vars":null}}`) // what KiCad writes with no user paths
+	if _, err := g.tryLoad(); err != nil {
+		t.Errorf("vars null: %v", err)
 	}
 }
 

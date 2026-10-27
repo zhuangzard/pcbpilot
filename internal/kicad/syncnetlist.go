@@ -454,7 +454,7 @@ func (nl *SyncNetlist) Validate() []SyncNetlistIssue {
 		}
 	}
 	codes := map[string]string{}
-	pinNet := map[[2]string]string{}
+	pinNet := map[[2]string]int{} // (ref, pin) -> index of its net
 	for i, n := range nl.Nets {
 		switch prev, dup := codes[n.Code]; {
 		case n.Code == "":
@@ -475,11 +475,15 @@ func (nl *SyncNetlist) Validate() []SyncNetlistIssue {
 			if refs[d.Ref] == 0 {
 				add(ErrNetlistInvalid, d.Ref, "", "net %q has a node on %s.%s, which is not a component", n.Name, d.Ref, d.Pin)
 			}
+			// Net identity is the net entry (its code), not its name: two
+			// entries sharing a name are still two nets.
 			k := [2]string{d.Ref, d.Pin}
-			if prev, seen := pinNet[k]; seen && prev != n.Name {
-				add(ErrNetlistInvalid, d.Ref, "", "pin %s.%s is on both net %q and net %q", d.Ref, d.Pin, prev, n.Name)
+			if prev, seen := pinNet[k]; seen && prev != i {
+				p := nl.Nets[prev]
+				add(ErrNetlistInvalid, d.Ref, "", "pin %s.%s is on both net %q (code %s) and net %q (code %s)",
+					d.Ref, d.Pin, p.Name, p.Code, n.Name, n.Code)
 			} else if !seen {
-				pinNet[k] = n.Name
+				pinNet[k] = i
 			}
 		}
 	}
