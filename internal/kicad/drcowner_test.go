@@ -96,42 +96,65 @@ func TestAttributeClasses(t *testing.T) {
 	}
 }
 
-// A board that moved one footprint: only what involves it is new; KiCad
-// reporting a still-present violation at another of its objects' points
-// (a refill) still matches; a parity item matches wherever the part is.
+// / sev returns v with a severity.
+func sev(v Violation, s string) Violation { v.Severity = s; return v }
+
+// Matching is by the offending objects (item uuids) and their positions,
+// never by "some object of the same owner": a stationary pad does not make
+// a clearance to another track of the same net old.
 func TestDiffDRC(t *testing.T) {
 	ix := mustIndex(t)
 	base := ix.Own([]Violation{
+		viol("clearance", "violations", item("Track [VCC]", "trk-1", 10, 10), item("Pad 2 of R1", "pad-r1-2", 10.8, 10)),
 		viol("copper_edge_clearance", "violations", item("Segment on Edge.Cuts", "edge-1", 172, 133), item("Zone [GND]", "zone-1", 193, 133)),
-		viol("clearance", "violations", item("Track [VCC]", "trk-1", 10, 10), item("Pad 2 of R1", "pad-r1-2", 10, 10)),
-		viol("clearance", "violations", item("Track [VCC]", "trk-1", 30, 30), item("Pad 2 of R1", "pad-r1-2", 30, 30)),
+		viol("clearance", "violations", item("Track [VCC]", "trk-1", 30, 30), item("Pad 1 of R1", "pad-r1-1", 30, 30)),
 		viol("footprint_symbol_mismatch", "schematic_parity", item("Footprint R1", "fp-r1", 10, 10)),
+		sev(viol("hole_to_hole", "violations", item("Via [VCC]", "via-1", 15, 10), item("Pad 1 of C1", "pad-c1-1", 15, 10)), "warning"),
+		sev(viol("solder_mask_bridge", "violations", item("Pad 1 of C1", "pad-c1-1", 20, 10), item("Track [VCC]", "trk-1", 20, 10)), "error"),
 	})
+	// Refound: R1's pad against the other VCC track (same owner key, same
+	// pad position), the board edge at another segment, the 30/30 pair
+	// 0.2 mm away, the parity item with R1 moved, the hole_to_hole
+	// escalated to error, the mask bridge now only a warning.
 	cur := ix.Own([]Violation{
-		viol("copper_edge_clearance", "violations", item("Segment on Edge.Cuts", "edge-1", 90, 133), item("Zone [GND]", "zone-1", 193, 133)),
-		viol("clearance", "violations", item("Track [VCC]", "trk-1", 10.3, 10)), // same owners? no: pad gone → other key
-		viol("clearance", "violations", item("Track [VCC]", "trk-1", 30.2, 30), item("Pad 2 of R1", "pad-r1-2", 30.2, 30)),
-		viol("courtyards_overlap", "violations", item("Footprint R1", "fp-r1", 50, 50), item("Footprint C1", "fp-c1", 50, 50)),
+		viol("clearance", "violations", item("Track [VCC]", "trk-2", 10, 10), item("Pad 2 of R1", "pad-r1-2", 10.8, 10)),
+		viol("copper_edge_clearance", "violations", item("Segment on Edge.Cuts", "edge-other", 90, 133), item("Zone [GND]", "zone-1", 193, 133)),
+		viol("clearance", "violations", item("Track [VCC]", "trk-1", 30.2, 30), item("Pad 1 of R1", "pad-r1-1", 30.2, 30)),
 		viol("footprint_symbol_mismatch", "schematic_parity", item("Footprint R1", "fp-r1", 50, 50)),
+		viol("hole_to_hole", "violations", item("Via [VCC]", "via-1", 15, 10), item("Pad 1 of C1", "pad-c1-1", 15, 10)),
+		sev(viol("solder_mask_bridge", "violations", item("Pad 1 of C1", "pad-c1-1", 20, 10), item("Track [VCC]", "trk-1", 20, 10)), "warning"),
 	})
-	d := DiffDRC(base, cur, 0.5)
-	var newRules []string
-	for _, v := range d.New {
-		newRules = append(newRules, v.Rule+"|"+v.Owner.Key)
+	if cur[0].Owner.Key != base[0].Owner.Key {
+		t.Fatalf("test premise: same owner key %q vs %q", cur[0].Owner.Key, base[0].Owner.Key)
 	}
-	want := []string{"clearance|routing|track:VCC", "courtyards_overlap|placement|fp:C1,fp:R1"}
-	if !reflect.DeepEqual(newRules, want) || d.Matched != 3 || len(d.Resolved) != 1 || d.Resolved[0].Owner.Key != "routing|fp:R1,track:VCC" {
-		t.Fatalf("new %v matched %d resolved %+v", newRules, d.Matched, d.Resolved)
+	d := DiffDRC(base, cur, 0.5)
+	var news []string
+	for _, v := range d.New {
+		news = append(news, v.Rule+"/"+v.Items[0].UUID)
+	}
+	want := []string{"clearance/trk-2", "copper_edge_clearance/edge-other", "hole_to_hole/via-1"}
+	if !reflect.DeepEqual(news, want) || d.Matched != 3 || len(d.Resolved) != 3 {
+		t.Fatalf("new %v matched %d resolved %d", news, d.Matched, len(d.Resolved))
 	}
 	// One-to-one: a second identical violation is new.
-	dup := append(append([]OwnedViolation{}, base[1]), base[1])
-	if d := DiffDRC(base[1:2], dup, 0.5); len(d.New) != 1 || d.Matched != 1 {
+	dup := []OwnedViolation{base[0], base[0]}
+	if d := DiffDRC(base[:1], dup, 0.5); len(d.New) != 1 || d.Matched != 1 {
 		t.Fatalf("duplicate: %+v", d)
 	}
-	// Beyond the tolerance it is new and the old one resolved.
-	far := ix.Own([]Violation{viol("clearance", "violations", item("Track [VCC]", "trk-1", 12, 10), item("Pad 2 of R1", "pad-r1-2", 12, 10))})
-	if d := DiffDRC(base[1:2], far, 0.5); len(d.New) != 1 || len(d.Resolved) != 1 {
+	// The same objects beyond the tolerance: new, the old one resolved.
+	far := ix.Own([]Violation{viol("clearance", "violations", item("Track [VCC]", "trk-1", 12, 10), item("Pad 2 of R1", "pad-r1-2", 12.8, 10))})
+	if d := DiffDRC(base[:1], far, 0.5); len(d.New) != 1 || len(d.Resolved) != 1 {
 		t.Fatalf("far: %+v", d)
+	}
+	// Without uuids: same owners and every item in order within tolerance.
+	noID := func(x float64) []OwnedViolation {
+		return ix.Own([]Violation{viol("clearance", "violations", item("Track [VCC]", "", x, 10), item("Pad 2 of R1", "", 10.8, 10))})
+	}
+	if d := DiffDRC(noID(10), noID(10.3), 0.5); d.Matched != 1 {
+		t.Fatalf("uuid-less near: %+v", d)
+	}
+	if d := DiffDRC(noID(10), noID(11), 0.5); len(d.New) != 1 {
+		t.Fatalf("uuid-less: a moved first item with a stationary second is new: %+v", d)
 	}
 }
 
@@ -159,19 +182,31 @@ func mustReadFile(t *testing.T, p string) []byte {
 	return b
 }
 
+func near(p *float64, want float64) bool { return p != nil && *p > want-1e-9 && *p < want+1e-9 }
+
 // The smallest allowed value of each contract item over Board Setup,
-// netclasses, custom rules and local overrides.
+// netclasses, custom rules and local overrides (pads, footprints, zones).
 func TestReadEffectiveRules(t *testing.T) {
 	r, err := ReadEffectiveRules(drcBoard)
 	if err != nil {
 		t.Fatal(err)
 	}
-	near := func(p *float64, want float64) bool { return p != nil && *p > want-1e-9 && *p < want+1e-9 }
-	if !near(r.Track.MinMm, 0.1524) || len(r.Track.Sources) != 2 { // 6 mil custom rule < 0.2 Board Setup
+	if !near(r.Track.MinMm, 0.1524) || len(r.Track.Sources) != 2 || !r.Track.Covered() { // unconditional 6 mil rule < 0.2 Board Setup
 		t.Errorf("track: %+v", r.Track)
 	}
-	if !near(r.Space.MinMm, 0.1) || len(r.Space.Unset) != 1 { // pad R1.1 local 0.1 < dru 0.12 < Fine 0.15
+	// pad R1.1 local 0.1 < conditional dru 0.12 < Fine 0.15 < Default 0.2 = C1 local < zone 0.5
+	if !near(r.Space.MinMm, 0.1) || len(r.Space.Unset) != 1 || len(r.Space.Sources) != 6 || !r.Space.Covered() {
 		t.Errorf("space: %+v", r.Space)
+	}
+	zone := false
+	for _, s := range r.Space.Sources {
+		zone = zone || (s.Source == "local" && strings.HasPrefix(s.Where, "zone [GND]") && s.Mm == 0.5)
+		if s.Where == `rule "fine pitch" constraint clearance` && s.Global {
+			t.Error("a conditional rule counted as global")
+		}
+	}
+	if !zone {
+		t.Errorf("zone connect_pads clearance not read: %+v", r.Space.Sources)
 	}
 	if !near(r.Drill.MinMm, 0.25) { // dru hole_size; min_microvia_drill ignored (no microvias)
 		t.Errorf("drill: %+v", r.Drill)
@@ -186,29 +221,79 @@ func TestReadEffectiveRules(t *testing.T) {
 	if f := BoardFinish(b); f != "ENIG" || !HasEdgeCuts(b) {
 		t.Errorf("finish %q, edge cuts %v", f, HasEdgeCuts(b))
 	}
-
-	// A rule pcbpilot cannot read, or one that turns a contract item's check
-	// off, leaves that item unproven.
-	dir := t.TempDir()
-	for _, ext := range []string{".kicad_pcb", ".kicad_pro"} {
-		if err := os.WriteFile(filepath.Join(dir, "b"+ext), mustReadFile(t, "testdata/drcboard/board"+ext), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	dru := "(version 1)\n(rule a (constraint annular_width (min 2*0.1mm)))\n(rule b (severity ignore) (constraint hole_size (min 0.1mm)))\n"
-	if err := os.WriteFile(filepath.Join(dir, "b.kicad_dru"), []byte(dru), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	r, err = ReadEffectiveRules(filepath.Join(dir, "b.kicad_pcb"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(r.Annular.Unknown) != 1 || len(r.Drill.Unknown) != 1 || len(r.Track.Unknown) != 0 {
-		t.Fatalf("unknown: annular %v drill %v track %v", r.Annular.Unknown, r.Drill.Unknown, r.Track.Unknown)
-	}
 	for in, want := range map[string]float64{"0.2mm": 0.2, "8mil": 0.2032, "0.01in": 0.254, "150um": 0.15, "0.3": 0.3} {
 		if got, err := parseDRULength(in); err != nil || got < want-1e-9 || got > want+1e-9 {
 			t.Errorf("parseDRULength(%q) = %v %v", in, got, err)
+		}
+	}
+}
+
+// What pcbpilot cannot prove is Unknown, and only global rules cover an
+// item.
+func TestReadEffectiveRulesUnproven(t *testing.T) {
+	board := string(mustReadFile(t, drcBoard))
+	run := func(pro, dru, pcb string) *EffectiveRules {
+		t.Helper()
+		dir := t.TempDir()
+		if pcb == "" {
+			pcb = board
+		}
+		_ = os.WriteFile(filepath.Join(dir, "b.kicad_pcb"), []byte(pcb), 0o644)
+		_ = os.WriteFile(filepath.Join(dir, "b.kicad_pro"), []byte(pro), 0o644)
+		if dru != "" {
+			_ = os.WriteFile(filepath.Join(dir, "b.kicad_dru"), []byte(dru), 0o644)
+		}
+		r, err := ReadEffectiveRules(filepath.Join(dir, "b.kicad_pcb"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	okPro := `{"board":{"design_settings":{"rules":{"min_track_width":0.2,"min_clearance":0.2,"min_through_hole_diameter":0.3,"min_via_annular_width":0.13}}}}`
+	cases := []struct {
+		name, pro, dru, pcb string
+		check               func(r *EffectiveRules) bool
+	}{
+		{"wrong-type Board Setup value", `{"board":{"design_settings":{"rules":{"min_track_width":"0.2"}}}}`, "", "",
+			func(r *EffectiveRules) bool { return len(r.Track.Unknown) == 1 }},
+		{"wrong-type netclass clearance", `{"net_settings":{"classes":[{"name":"Default","clearance":"wide"}]}}`, "", "",
+			func(r *EffectiveRules) bool { return len(r.Space.Unknown) == 1 }},
+		{"unreadable custom min", okPro, "(version 1)\n(rule a (constraint annular_width (min 2*0.1mm)))\n", "",
+			func(r *EffectiveRules) bool { return len(r.Annular.Unknown) == 1 }},
+		{"ignored custom constraint", okPro, "(version 1)\n(rule b (severity ignore) (constraint hole_size (min 0.1mm)))\n", "",
+			func(r *EffectiveRules) bool { return len(r.Drill.Unknown) == 1 }},
+		{"warning custom constraint", okPro, "(version 1)\n(rule w (severity warning) (constraint track_width (min 0.3mm)))\n", "",
+			func(r *EffectiveRules) bool { return len(r.Track.Unknown) == 1 && len(r.Track.Sources) == 1 }},
+		{"max / opt only", okPro, "(version 1)\n(rule m (condition \"A.NetClass == 'HV'\") (constraint clearance (opt 1mm) (max 2mm)))\n", "",
+			func(r *EffectiveRules) bool { return len(r.Space.Unknown) == 1 }},
+		{"only conditional / local", `{"board":{"design_settings":{"rules":{"min_clearance":0}}}}`,
+			"(version 1)\n(rule c (layer outer) (constraint clearance (min 0.2mm)))\n", "",
+			func(r *EffectiveRules) bool {
+				return r.Space.MinMm != nil && !r.Space.Covered() && len(r.Space.Unknown) == 0
+			}},
+		{"invalid local override", okPro, "", strings.Replace(board, "(clearance 0.2)", "(clearance wide)", 1),
+			func(r *EffectiveRules) bool { return len(r.Space.Unknown) == 1 }},
+		{"error severity unconditional rule covers", `{}`, "(version 1)\n(rule e (severity error) (constraint track_width (min 0.15mm)))\n", "",
+			func(r *EffectiveRules) bool { return r.Track.Covered() && len(r.Track.Unknown) == 0 }},
+	}
+	for _, c := range cases {
+		if r := run(c.pro, c.dru, c.pcb); !c.check(r) {
+			t.Errorf("%s: track %+v space %+v drill %+v annular %+v", c.name, r.Track, r.Space, r.Drill, r.Annular)
+		}
+	}
+}
+
+func TestFinishProcess(t *testing.T) {
+	for label, want := range map[string]string{"HAL lead-free": FinishHASLLeadFree, "LF-HASL": FinishHASLLeadFree, "HASL lead free": FinishHASLLeadFree,
+		"HAL SnPb": FinishHASLLeaded, "HASL with lead": FinishHASLLeaded, "ENIG": FinishENIG, "enepig": FinishENEPIG, "OSP": FinishOSP,
+		"HT_OSP": FinishOSP, "Immersion silver": FinishImmSilver, "Immersion tin": FinishImmTin, "Hard gold": FinishHardGold} {
+		if got, err := FinishProcess(label); err != nil || got != want {
+			t.Errorf("%q: %q %v, want %q", label, got, err, want)
+		}
+	}
+	for _, label := range []string{"HASL", "HAL", "gold", "Immersion gold", "User defined", ""} {
+		if got, err := FinishProcess(label); err == nil {
+			t.Errorf("%q: %q, want ambiguous / unknown", label, got)
 		}
 	}
 }
@@ -222,20 +307,34 @@ func TestLoadFabContract(t *testing.T) {
 		}
 		return p
 	}
-	good := `{"vendor":"JLCPCB","layers":2,"finish":"HASL","assembly":{"sides":"top"},
+	good := `{"vendor":"JLCPCB","layers":2,"finish":"HASL lead-free","assembly":{"sides":"top"},
 	  "limits":{"minTrackMm":0.127,"minSpaceMm":0.127,"minDrillMm":0.3,"minAnnularMm":0.13},
-	  "sources":[{"item":"limits","url":"https://example.com/capabilities","retrieved":"2026-10-27"}]}`
+	  "sources":[{"item":"limits","url":"https://example.com/capabilities","retrieved":"2026-10-27"},
+	             {"item":"finish","url":"https://example.com/finish","retrieved":"2026-10-27"},
+	             {"item":"assembly.sides","url":"https://example.com/quote","retrieved":"2026-10-27"}]}`
 	c, err := LoadFabContract(write(good))
 	if err != nil || c.Limit("drill") != 0.3 || c.Assembly.Sides != "top" {
 		t.Fatalf("good contract: %+v %v", c, err)
 	}
+	// Per-limit sources cover too.
+	src := func(item string) string {
+		return `{"item":"` + item + `","url":"https://example.com/a","retrieved":"2026-10-27"},`
+	}
+	perLimit := strings.Replace(good, `{"item":"limits",`, src("limits.minTrackMm")+src("limits.minSpaceMm")+src("limits.minDrillMm")+`{"item":"limits.minAnnularMm",`, 1)
+	if _, err := LoadFabContract(write(perLimit)); err != nil {
+		t.Fatalf("per-limit sources: %v", err)
+	}
 	for name, bad := range map[string]string{
-		"misspelt limit": strings.Replace(good, "minTrackMm", "minTrakMm", 1),
-		"no sources":     strings.Replace(good, `"sources":[{"item":"limits","url":"https://example.com/capabilities","retrieved":"2026-10-27"}]`, `"sources":[]`, 1),
-		"undated":        strings.Replace(good, "2026-10-27", "Oct 2026", 1),
-		"not a url":      strings.Replace(good, "https://example.com/capabilities", "jlc website", 1),
-		"sides":          strings.Replace(good, `"top"`, `"front"`, 1),
-		"no layers":      strings.Replace(good, `"layers":2`, `"layers":0`, 1),
+		"misspelt limit":        strings.Replace(good, "minTrackMm", "minTrakMm", 1),
+		"no sources":            `{"vendor":"JLCPCB","layers":2,"sources":[]}`,
+		"undated":               strings.Replace(good, "2026-10-27", "Oct 2026", 1),
+		"not a url":             strings.Replace(good, "https://example.com/capabilities", "jlc website", 1),
+		"sides":                 strings.Replace(good, `"top"`, `"front"`, 1),
+		"no layers":             strings.Replace(good, `"layers":2`, `"layers":0`, 1),
+		"finish without source": strings.Replace(good, `"item":"finish"`, `"item":"mask"`, 1),
+		"sides without source":  strings.Replace(good, `"item":"assembly.sides"`, `"item":"silk"`, 1),
+		"limit without source":  strings.Replace(perLimit, src("limits.minDrillMm"), "", 1),
+		"unknown source item":   strings.Replace(good, `"item":"finish"`, `"item":"finsh"`, 1),
 	} {
 		if _, err := LoadFabContract(write(bad)); err == nil || !strings.Contains(err.Error(), "CONTRACT_INVALID") {
 			t.Errorf("%s: %v", name, err)

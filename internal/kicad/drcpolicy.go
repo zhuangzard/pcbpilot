@@ -70,6 +70,14 @@ func DRCRuleClass(rule string) string {
 	return "hard"
 }
 
+// DRCGatesWarning: a warning-severity violation of rule still gates — the
+// electrical / fabrication rules (DRCRuleClass "hard", unknown rules
+// included: fail closed) and copper slivers, which a fab etches as they
+// are.
+func DRCGatesWarning(rule string) bool {
+	return DRCRuleClass(rule) == "hard" || rule == "copper_sliver"
+}
+
 // KiCadWarningRule: KiCad 10 does not report rule as an error by default.
 func KiCadWarningRule(rule string) bool { return kicadWarningRules[rule] }
 

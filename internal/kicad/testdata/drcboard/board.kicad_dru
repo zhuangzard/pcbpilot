@@ -6,5 +6,4 @@
 (rule "power width"
 	(constraint track_width (min 6mil) (opt 20mil)))
 (rule "small holes" (constraint hole_size (min 0.25)))
-(rule "max only" (constraint track_width (max 2mm)))
 (rule "no courtyards" (severity ignore) (constraint courtyard_clearance (min 0mm)))

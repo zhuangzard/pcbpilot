@@ -179,12 +179,13 @@ pcbpilot kicad fab --preflight --pcb b.kicad_pcb --sch b.kicad_sch --contract fa
 
 | 检查 | 内容 |
 |---|---|
-| `kicad-drc` / `kicad-drc-policy` / `schematic-parity` | 与 [`kicad drc`](kicad.md#drc-门禁kicad-drc) 相同（副本上跑；有 `--sch` 且板旁有同名根原理图时做一致性） |
+| `kicad-drc` / `kicad-drc-policy` / `schematic-parity` | 与 [`kicad drc`](kicad.md#drc-门禁kicad-drc) 相同（副本上跑）。一致性总是做：根原理图取 `.kicad_pro` 同名的 `<工程>.kicad_sch`（不给 `--sch` 时 BOM 字段也从它读）；没有 `.kicad_pro` 或根图 → cannot-check |
+| `schematic-root` | 给了 `--sch` 时，它必须是工程层次里的一张图（子图也行，此时 BOM 按整个层次读），否则 fail——一致性与 BOM 不能来自两份原理图 |
 | `board-outline` | Edge.Cuts 有图形，且 KiCad DRC 内置的轮廓测试没有 `invalid_outline`（被排除也算失败；该规则设成 ignore → cannot-check） |
 | `contract` | 契约文件合法（字段、日期、来源 URL）；没给 → cannot-check |
 | `layer-count` | 板的铜层数 = 契约 `layers` |
-| `min-track` / `min-space` / `min-drill` / `min-annular` | 有效规则允许的最小值 ≥ 契约 `limits`：Board Setup 约束（`.kicad_pro`）、网络类间距、`.kicad_dru` 自定义规则的 `(min …)`（mm/mil/in/um）、封装/焊盘的局部间距覆盖，取最小；某项只有 0（未设）→ cannot-check；规则读不懂或 `(severity ignore)` 关掉该项 → cannot-check。`info` 另列板上实测最细线宽、最小孔 |
-| `finish` | 板叠层 `copper_finish` 与契约 `finish` 一致（板未写 → 提示性 warn） |
+| `min-track` / `min-space` / `min-drill` / `min-annular` | 有效规则允许的最小值 ≥ 契约 `limits`：Board Setup 约束（`.kicad_pro`）、网络类间距、`.kicad_dru` 自定义规则的 `(min …)`（mm/mil/in/um）、封装/焊盘/铺铜（`connect_pads (clearance …)`）的局部覆盖，取最小。任一来源低于契约 → fail；值类型不对、规则读不懂、`(severity ignore/warning)`、只有 opt/max 没有 min → cannot-check；只有局部覆盖或带条件/层的规则、没有全局下限（Board Setup、Default 网络类、无条件 error 规则）→ cannot-check。`info` 另列板上实测最细线宽、最小孔 |
+| `finish` | 板叠层 `copper_finish` 与契约 `finish` 归一成同一工艺才 pass（HASL 有铅 / 无铅、ENIG、ENEPIG、OSP、沉银、沉锡、硬金）；工艺不同 → fail；只写 “HASL”（有铅还是无铅？）或认不出的名字 → cannot-check；板未写 → 提示性 warn |
 | `assembly-sides` | CPL 实际出现的面（top/bottom/both）= 契约 `assembly.sides` |
 | `lcsc` | 每个贴装件有合法 C 号（与出图同一套 `MergeParts` / `CheckLCSC`），给出覆盖率 |
 | `bom-cpl` | 与出图相同的位号一致性（`CPL_NOT_IN_BOM` 等，临时目录里跑 kicad-cli pos） |
@@ -196,10 +197,14 @@ pcbpilot kicad fab --preflight --pcb b.kicad_pcb --sch b.kicad_sch --contract fa
 {"vendor": "JLCPCB", "service": "PCB + PCBA", "layers": 4, "thicknessMm": 1.6, "finish": "ENIG",
  "assembly": {"sides": "top", "qty": 5},
  "limits": {"minTrackMm": 0.127, "minSpaceMm": 0.127, "minDrillMm": 0.3, "minAnnularMm": 0.13},
- "sources": [{"item": "limits", "url": "<厂商能力页 URL>", "retrieved": "YYYY-MM-DD"}]}
+ "sources": [{"item": "limits", "url": "<厂商能力页 URL>", "retrieved": "YYYY-MM-DD"},
+             {"item": "finish", "url": "<厂商工艺页或报价单 URL>", "retrieved": "YYYY-MM-DD"},
+             {"item": "assembly", "url": "<报价单 URL>", "retrieved": "YYYY-MM-DD"}]}
 ```
 
-必填 `vendor`、`layers`、至少一条 `sources`（http(s) URL + `YYYY-MM-DD`）；`assembly.sides` 只取 top / bottom / both；
+必填 `vendor`、`layers`、`sources`（http(s) URL + `YYYY-MM-DD`）；每个会被检查的值（每项 `limits`、`finish`、`assembly.sides`）都要有一条
+`sources` 的 `item` 指向它或它的父项（`limits` 覆盖四项，`assembly` 覆盖 `assembly.sides`），`item` 不是契约字段名的直接拒绝；
+`assembly.sides` 只取 top / bottom / both；
 其余字段（铜厚、阻焊/丝印色、阻抗、过孔工艺）见 pcbpilot-fab Skill 的 fab-acceptance.md §1。上面的数字只是格式示例，
 下单当天从厂商页面重新取值。实测（KiCad 10.0.6，interf_u 副本）：DRC/一致性/环形宽度（板约束 0.05 mm < 0.13）/LCSC（24 件缺号）失败，
 轮廓、层数、线宽、孔径、贴片面通过，`--out` 为空。

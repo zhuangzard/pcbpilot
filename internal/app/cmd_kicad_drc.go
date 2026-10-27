@@ -148,18 +148,22 @@ zone), footprint (one footprint's own objects), placement (two or more footprint
 graphic, unresolved.
 
 Checks (each pass / fail / cannot-check):
-  kicad-drc          error-severity items of violations + unconnected_items
+  kicad-drc          error-severity items of violations + unconnected_items, and
+                     warnings of the electrical / fabrication rules (hole_to_hole,
+                     connection_width, copper_sliver, a downgraded clearance …)
   kicad-drc-policy   .kicad_pro exclusions / ignore / error→warning of an electrical or
                      fabrication rule (shorts, clearances, unconnected, parity, sizes,
                      outline …) fail; placement-class rules are listed as silenced
   schematic-parity   (--schematic-parity) every parity item, any severity
-Warnings are listed, not gated. A signed waiver ({"gate":"kicad-drc","match":…,
+Other warnings are listed, not gated. A signed waiver ({"gate":"kicad-drc","match":…,
 "reason":…,"by":…}, --waivers) accepts each item whose line contains match.
 
 With --baseline (a previous report of this command, or a raw kicad-cli DRC JSON) or
 --baseline-pcb (DRC is run on that board's copy too), only NEW items count: a
-violation matches a baseline one by rule, owners and position within --tolerance-mm;
-"resolved" lists the baseline ones that disappeared. A raw kicad-cli baseline is
+violation matches a baseline one by rule, owners and the same offending objects (item
+uuids), each within --tolerance-mm of its baseline position (without uuids: every item
+in order within it); a warning that became an error is new. "resolved" lists the
+baseline ones that disappeared. A raw kicad-cli baseline is
 attributed with the current board (deleted objects stay unresolved) and carries no
 project policy, so the policy check is judged in full.
 
@@ -239,13 +243,16 @@ func runKicadDRC(o kicadDRCOptions) *kicadDRCReport {
 	rep := &kicadDRCReport{Kind: kicadDRCReportKind, Version: 1, PCB: o.pcb, SchematicParity: o.parity,
 		Counts: map[string]int{}, WarningCounts: map[string]int{}, OwnerClasses: map[string]int{},
 		Violations: []kicad.OwnedViolation{}, Excluded: []kicad.OwnedViolation{}, Files: map[string]string{}}
-	raw := func(name string) string {
-		if o.outDir == "" {
-			return ""
+	// The raw report paths are fixed before the runs start: the two
+	// goroutines below only read them.
+	curRaw, oldRaw := "", ""
+	if o.outDir != "" {
+		curRaw = filepath.Join(o.outDir, "drc.json")
+		rep.Files["drc"] = curRaw
+		if o.baselinePCB != "" {
+			oldRaw = filepath.Join(o.outDir, "baseline-drc.json")
+			rep.Files["baseline-drc"] = oldRaw
 		}
-		p := filepath.Join(o.outDir, name)
-		rep.Files[strings.TrimSuffix(name, ".json")] = p
-		return p
 	}
 	var cur, old *kicad.DRCRun
 	var curErr, oldErr error
@@ -253,13 +260,13 @@ func runKicadDRC(o kicadDRCOptions) *kicadDRCReport {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		cur, curErr = kicad.RunDRC(kicad.DRCRunOptions{PCB: o.pcb, SchematicParity: o.parity, CLI: o.cli, SaveRaw: raw("drc.json")})
+		cur, curErr = kicad.RunDRC(kicad.DRCRunOptions{PCB: o.pcb, SchematicParity: o.parity, CLI: o.cli, SaveRaw: curRaw})
 	}()
 	if o.baselinePCB != "" {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			old, oldErr = kicad.RunDRC(kicad.DRCRunOptions{PCB: o.baselinePCB, SchematicParity: o.parity, CLI: o.cli, SaveRaw: raw("baseline-drc.json")})
+			old, oldErr = kicad.RunDRC(kicad.DRCRunOptions{PCB: o.baselinePCB, SchematicParity: o.parity, CLI: o.cli, SaveRaw: oldRaw})
 		}()
 	}
 	wg.Wait()
@@ -334,13 +341,21 @@ func judgeKicadDRC(rep *kicadDRCReport, o kicadDRCOptions, cur *kicad.DRCRun, cu
 		rep.Baseline = b
 	}
 
+	// Errors gate; so do warnings of the electrical / fabrication rules
+	// (kicad.DRCGatesWarning: hole_to_hole, connection_width, a downgraded
+	// solder_mask_bridge …): a fab builds what the board says, whatever
+	// severity the project gave the check.
 	var errItems, parityItems []string
-	nWarn := 0
+	nErr, nFabWarn, nWarn := 0, 0, 0
 	for _, v := range judged {
 		switch {
 		case v.Section == "schematic_parity":
 			parityItems = append(parityItems, v.Item())
 		case v.Severity == "" || v.Severity == "error":
+			nErr++
+			errItems = append(errItems, v.Item())
+		case kicad.DRCGatesWarning(v.Rule):
+			nFabWarn++
 			errItems = append(errItems, v.Item())
 		default:
 			nWarn++
@@ -350,7 +365,7 @@ func judgeKicadDRC(rep *kicadDRCReport, o kicadDRCOptions, cur *kicad.DRCRun, cu
 	if rep.Baseline != nil {
 		scope = fmt.Sprintf("new vs the baseline (%d matched, %d resolved)", rep.Baseline.Matched, len(rep.Baseline.Resolved))
 	}
-	g := drcCheck{Result: gate.Result{Name: "kicad-drc", Detail: fmt.Sprintf("%d error(s) %s, from kicad-cli pcb drc (KiCad %s); %d warning(s) listed, not gated", len(errItems), scope, rep.KiCadVersion, nWarn)}}
+	g := drcCheck{Result: gate.Result{Name: "kicad-drc", Detail: fmt.Sprintf("%d error(s) and %d electrical / fabrication warning(s) %s, from kicad-cli pcb drc (KiCad %s); %d other warning(s) listed, not gated", nErr, nFabWarn, scope, rep.KiCadVersion, nWarn)}}
 	g.judged(errItems, o.waivers)
 	if counts := sortedCounts(rep.Counts); len(counts) > 0 {
 		g.Info = append(g.Info, "errors in the board: "+strings.Join(counts, ", "))

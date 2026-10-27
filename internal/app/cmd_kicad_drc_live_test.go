@@ -194,10 +194,23 @@ b.Save(sys.argv[1])
 	if r.Baseline == nil || len(r.Baseline.New) == 0 || r.Baseline.Matched == 0 {
 		t.Fatalf("baseline %+v checks %+v", r.Baseline, r.Checks)
 	}
+	// Matching is by the offending objects, so a conflict KiCad now reports
+	// at another object of the same owners (a zone against another Edge.Cuts
+	// segment) is new too; it must then have left a resolved twin.
+	twin := map[string]int{}
+	for _, v := range r.Baseline.Resolved {
+		twin[v.Rule+"|"+v.Owner.Key]++
+	}
 	for _, v := range r.Baseline.New {
-		if !contains(v.Owner.Refs, "R1") {
-			t.Errorf("new violation not involving the moved R1: %s", v.Item())
+		if contains(v.Owner.Refs, "R1") {
+			continue
 		}
+		if k := v.Rule + "|" + v.Owner.Key; twin[k] > 0 {
+			twin[k]--
+			t.Logf("re-reported at another object: %s", v.Item())
+			continue
+		}
+		t.Errorf("new violation not involving the moved R1: %s", v.Item())
 	}
 	if checkStatus(r.Checks)["kicad-drc"] != gate.Fail {
 		t.Errorf("checks %+v", r.Checks)
@@ -223,7 +236,8 @@ func TestKicadFabPreflightLive(t *testing.T) {
 	contract := filepath.Join(t.TempDir(), "contract.json")
 	_ = os.WriteFile(contract, []byte(`{"vendor":"JLCPCB","layers":2,"assembly":{"sides":"top"},
 	  "limits":{"minTrackMm":0.127,"minSpaceMm":0.127,"minDrillMm":0.3,"minAnnularMm":0.13},
-	  "sources":[{"item":"limits","url":"https://example.com/capabilities","retrieved":"2026-10-27"}]}`), 0o644)
+	  "sources":[{"item":"limits","url":"https://example.com/capabilities","retrieved":"2026-10-27"},
+	             {"item":"assembly","url":"https://example.com/quote","retrieved":"2026-10-27"}]}`), 0o644)
 	before := treeHash(t, dir)
 	r := runFabPreflight(fabPreflightOptions{pcb: filepath.Join(dir, "interf_u.kicad_pcb"), sch: filepath.Join(dir, "interf_u.kicad_sch"), contract: contract, cli: cli})
 	if !sameTree(before, treeHash(t, dir)) {

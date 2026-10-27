@@ -50,6 +50,7 @@
 	(gr_line (start 0 0) (end 30 0) (stroke (width 0.1) (type solid)) (layer "Edge.Cuts") (uuid "edge-1"))
 	(gr_text "rev A" (at 5 5) (layer "F.SilkS") (uuid "txt-1"))
 	(segment (start 10 10) (end 20 10) (width 0.15) (layer "F.Cu") (net 2) (uuid "trk-1"))
+	(segment (start 10 12) (end 20 12) (width 0.15) (layer "F.Cu") (net 2) (uuid "trk-2"))
 	(arc (start 20 10) (mid 21 11) (end 22 10) (width 0.25) (layer "B.Cu") (net 1) (uuid "arc-1"))
 	(via (at 15 10) (size 0.6) (drill 0.3) (layers "F.Cu" "B.Cu") (net 2) (uuid "via-1"))
 	(zone (net 1) (net_name "GND") (layer "B.Cu") (uuid "zone-1") (connect_pads (clearance 0.5)))

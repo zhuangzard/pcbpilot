@@ -353,26 +353,26 @@ type DRCDiff struct {
 	TolMm    float64          `json:"toleranceMm"`
 }
 
-// DiffDRC matches cur against base: same rule, same owner Key, and an
-// object of the same owner within tolMm in both (KiCad may report a
-// violation at another of the objects' points after a refill; parity and
-// environment items name a footprint wherever it is, so position does not
-// count for them). The nearest unused baseline violation wins. Severity is
-// not compared (a project may have changed it).
+// DiffDRC matches cur against base, one to one: same rule, same owner Key,
+// not escalated (a warning in the baseline that is an error now is new),
+// and the same offending objects — the multiset of item uuids, each object
+// within tolMm of its baseline position (parity and environment items name
+// a footprint wherever it is: position does not count for them). When an
+// item has no uuid on either side the fallback is stricter by position: the
+// same number of items, in order, each within tolMm. The nearest unused
+// baseline violation wins.
 func DiffDRC(base, cur []OwnedViolation, tolMm float64) DRCDiff {
 	d := DRCDiff{New: []OwnedViolation{}, Resolved: []OwnedViolation{}, TolMm: tolMm}
 	used := make([]bool, len(base))
 	for _, c := range cur {
 		best, bestD := -1, math.Inf(1)
 		for i, b := range base {
-			if used[i] || b.Rule != c.Rule || b.Owner.Key != c.Owner.Key {
+			if used[i] || b.Rule != c.Rule || b.Owner.Key != c.Owner.Key || escalated(b, c) {
 				continue
 			}
-			dist := 0.0
-			if c.Owner.Class != "schematic-parity" && c.Owner.Class != "environment" {
-				if dist = violationDistanceMm(b, c); dist > tolMm {
-					continue
-				}
+			dist, ok := matchDistanceMm(b, c)
+			if !ok || dist > tolMm {
+				continue
 			}
 			if dist < bestD {
 				best, bestD = i, dist
@@ -393,29 +393,62 @@ func DiffDRC(base, cur []OwnedViolation, tolMm float64) DRCDiff {
 	return d
 }
 
-// violationDistanceMm is the smallest distance between an object of a and
-// one of b with the same owner identity (positions of v.Items), else between
-// the violations' positions; +Inf when only one side has a position, 0 when
-// neither has.
-func violationDistanceMm(a, b OwnedViolation) float64 {
-	best := math.Inf(1)
-	if len(a.Items) == len(a.Owner.Items) && len(b.Items) == len(b.Owner.Items) {
-		for i, ai := range a.Items {
-			for j, bj := range b.Items {
-				if a.Owner.Items[i].ID == b.Owner.Items[j].ID {
-					best = math.Min(best, math.Hypot(ai.X-bj.X, ai.Y-bj.Y)*0.0254)
-				}
+func isError(v OwnedViolation) bool { return v.Severity == "" || v.Severity == "error" }
+
+// escalated: the baseline item was not an error, the current one is.
+func escalated(b, c OwnedViolation) bool { return isError(c) && !isError(b) }
+
+// matchDistanceMm is how far apart a and b are as the same pair of objects:
+// the largest distance between items with the same uuid (ok false when the
+// uuid multisets differ), or with the fallback the largest in-order item
+// distance. Parity / environment items are at distance 0 once matched.
+func matchDistanceMm(a, b OwnedViolation) (float64, bool) {
+	ignorePos := a.Owner.Class == "schematic-parity" || a.Owner.Class == "environment"
+	pos := func(dx, dy float64) float64 {
+		if ignorePos {
+			return 0
+		}
+		return math.Hypot(dx, dy) * 0.0254
+	}
+	if len(a.Items) == 0 && len(b.Items) == 0 {
+		switch {
+		case ignorePos || a.XMm == nil && b.XMm == nil:
+			return 0, true
+		case a.XMm == nil || b.XMm == nil:
+			return 0, false
+		}
+		return math.Hypot(*a.XMm-*b.XMm, *a.YMm-*b.YMm), true
+	}
+	if len(a.Items) != len(b.Items) {
+		return 0, false
+	}
+	withUUIDs := true
+	for i := range a.Items {
+		withUUIDs = withUUIDs && a.Items[i].UUID != "" && b.Items[i].UUID != ""
+	}
+	worst := 0.0
+	if !withUUIDs {
+		for i := range a.Items {
+			worst = math.Max(worst, pos(a.Items[i].X-b.Items[i].X, a.Items[i].Y-b.Items[i].Y))
+		}
+		return worst, true
+	}
+	taken := make([]bool, len(b.Items))
+	for _, ai := range a.Items {
+		j, dj := -1, math.Inf(1)
+		for k, bk := range b.Items {
+			if taken[k] || bk.UUID != ai.UUID {
+				continue
+			}
+			if dk := pos(ai.X-bk.X, ai.Y-bk.Y); dk < dj {
+				j, dj = k, dk
 			}
 		}
+		if j < 0 {
+			return 0, false
+		}
+		taken[j] = true
+		worst = math.Max(worst, dj)
 	}
-	if !math.IsInf(best, 1) {
-		return best
-	}
-	switch {
-	case a.XMm == nil && b.XMm == nil:
-		return 0
-	case a.XMm == nil || b.XMm == nil:
-		return math.Inf(1)
-	}
-	return math.Hypot(*a.XMm-*b.XMm, *a.YMm-*b.YMm)
+	return worst, true
 }

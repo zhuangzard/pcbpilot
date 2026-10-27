@@ -58,8 +58,9 @@ command lists them and exits non-zero without writing anything. Fill them with
 
 CPL rotation caveat: ` + kicad.RotationNote + `
 --preflight checks instead of exporting and writes nothing (not to --out, not to the
-project): DRC on a copy (kicad drc: kicad-drc, kicad-drc-policy, schematic-parity with
---sch), board-outline (Edge.Cuts closed, from KiCad's outline test), contract (--contract
+project): DRC on a copy (kicad drc: kicad-drc, kicad-drc-policy, schematic-parity
+against the project root <project>.kicad_sch; a --sch must be a sheet of that
+hierarchy: schematic-root), board-outline (Edge.Cuts closed, from KiCad's outline test), contract (--contract
 order file, see the pcbpilot-fab skill), layer-count, min-track / min-space / min-drill /
 min-annular (the smallest value the effective rules allow — .kicad_pro constraints and
 netclass clearances, .kicad_dru custom rules, local clearance overrides — vs the

@@ -132,10 +132,35 @@ func TestKicadDRCCommandVerdicts(t *testing.T) {
 		checkStatus(rep.Checks)["schematic-parity"] != gate.Pass {
 		t.Fatalf("raw baseline: exit %d %+v %+v", code, rep.Baseline, rep.Checks)
 	}
-	// --baseline-pcb runs DRC on that board too (same fake report: nothing new).
-	rep, code = runDRCReport(t, "--pcb", pcb, "--baseline-pcb", copyDRCBoard(t))
-	if code != 0 || rep.Baseline.Kind != "pcb" || len(rep.Baseline.New) != 0 {
-		t.Fatalf("baseline-pcb: exit %d %+v", code, rep.Baseline)
+	// --baseline-pcb with --out: DRC on that board too (same fake report:
+	// nothing new) and both raw reports kept.
+	bout := t.TempDir()
+	rep, code = runDRCReport(t, "--pcb", pcb, "--baseline-pcb", copyDRCBoard(t), "--out", bout)
+	if code != 0 || rep.Baseline.Kind != "pcb" || len(rep.Baseline.New) != 0 || len(rep.Files) != 3 {
+		t.Fatalf("baseline-pcb: exit %d %+v files %v", code, rep.Baseline, rep.Files)
+	}
+	for _, f := range []string{"drc.json", "baseline-drc.json", "drc-report.json"} {
+		if _, err := os.Stat(filepath.Join(bout, f)); err != nil {
+			t.Fatalf("--baseline-pcb --out %s: %v", f, err)
+		}
+	}
+}
+
+// Warnings of electrical / fabrication rules gate (waivable); cosmetic
+// warnings do not.
+func TestKicadDRCCommandFabWarningsGate(t *testing.T) {
+	pcb := copyDRCBoard(t)
+	fakeKicadCLIEnv(t, "drc/warning-only.json", "0")
+	rep, code := runDRCReport(t, "--pcb", pcb)
+	g := rep.Checks[0]
+	if code != 6 || rep.Errors != 0 || g.Status != gate.Fail || len(g.Items) != 1 || !strings.HasPrefix(g.Items[0], "hole_to_hole (warning, routing: C1 [VCC])") ||
+		!strings.Contains(g.Detail, "0 error(s) and 1 electrical / fabrication warning(s)") {
+		t.Fatalf("exit %d errors %d check %+v", code, rep.Errors, g)
+	}
+	w := filepath.Join(t.TempDir(), "w.json")
+	_ = os.WriteFile(w, []byte(`[{"gate":"kicad-drc","match":"hole_to_hole (warning","reason":"fab confirmed 0.1 mm","by":"t"}]`), 0o644)
+	if rep, code := runDRCReport(t, "--pcb", pcb, "--waivers", w); code != 0 || len(rep.Checks[0].Waived) != 1 {
+		t.Fatalf("waived: exit %d %+v", code, rep.Checks[0])
 	}
 }
 
@@ -165,42 +190,73 @@ func TestKicadDRCCommandCannotCheck(t *testing.T) {
 	}
 }
 
+const preflightContract = `{"vendor":"JLCPCB","layers":4,"finish":"ENIG",
+  "limits":{"minTrackMm":0.127,"minSpaceMm":0.127,"minDrillMm":0.3,"minAnnularMm":0.13},
+  "sources":[{"item":"limits","url":"https://example.com/capabilities","retrieved":"2026-10-27"},
+             {"item":"finish","url":"https://example.com/finish","retrieved":"2026-10-27"}]}`
+
+func runPreflight(t *testing.T, args ...string) (*fabPreflightReport, int) {
+	t.Helper()
+	stdout, _, err := runKiCadCmd(t, append([]string{"fab", "--preflight"}, args...)...)
+	code := 0
+	var ec exitCodeError
+	if errors.As(err, &ec) {
+		code = ec.code
+	} else if err != nil {
+		t.Fatalf("preflight %v: %v", args, err)
+	}
+	var rep fabPreflightReport
+	if err := json.Unmarshal([]byte(stdout), &rep); err != nil {
+		t.Fatalf("%v\n%s", err, stdout)
+	}
+	return &rep, code
+}
+
 // The preflight's contract checks on the fixture board (bare board: the
 // fake kicad-cli does no position export).
 func TestKicadFabPreflightFake(t *testing.T) {
 	pcb := copyDRCBoard(t)
 	fakeKicadCLIEnv(t, "drc/drcboard-all.json", "0")
 	contract := filepath.Join(t.TempDir(), "contract.json")
-	_ = os.WriteFile(contract, []byte(`{"vendor":"JLCPCB","layers":4,"finish":"ENIG",
-	  "limits":{"minTrackMm":0.127,"minSpaceMm":0.127,"minDrillMm":0.3,"minAnnularMm":0.13},
-	  "sources":[{"item":"limits","url":"https://example.com/capabilities","retrieved":"2026-10-27"}]}`), 0o644)
+	_ = os.WriteFile(contract, []byte(preflightContract), 0o644)
 	outDir := filepath.Join(t.TempDir(), "fab")
-	stdout, _, err := runKiCadCmd(t, "fab", "--preflight", "--pcb", pcb, "--contract", contract, "--no-assembly", "--out", outDir)
-	var ec exitCodeError
-	if !errors.As(err, &ec) || ec.code != 6 {
-		t.Fatalf("want exit 6, got %v", err)
-	}
-	var rep fabPreflightReport
-	if err := json.Unmarshal([]byte(stdout), &rep); err != nil {
-		t.Fatal(err)
-	}
-	want := map[string]gate.Status{"kicad-drc": gate.Fail, "kicad-drc-policy": gate.Pass, "board-outline": gate.Pass,
+	// No --sch: the project's root schematic is found from the .kicad_pro,
+	// so parity runs anyway.
+	rep, code := runPreflight(t, "--pcb", pcb, "--contract", contract, "--no-assembly", "--out", outDir)
+	want := map[string]gate.Status{"kicad-drc": gate.Fail, "kicad-drc-policy": gate.Pass, "schematic-parity": gate.Fail, "board-outline": gate.Pass,
 		"contract": gate.Pass, "layer-count": gate.Pass, "min-track": gate.Pass, "min-space": gate.Fail, "min-drill": gate.Fail,
 		"min-annular": gate.Pass, "finish": gate.Pass, "assembly-sides": gate.Skip, "lcsc": gate.Skip, "bom-cpl": gate.Skip}
-	if got := checkStatus(rep.Checks); !reflect.DeepEqual(got, want) || rep.Verdict != gate.Fail {
-		t.Fatalf("checks %v verdict %s", got, rep.Verdict)
+	if got := checkStatus(rep.Checks); code != 6 || !reflect.DeepEqual(got, want) || rep.Verdict != gate.Fail || !strings.HasSuffix(rep.Sch, "board.kicad_sch") {
+		t.Fatalf("exit %d checks %v verdict %s sch %q", code, got, rep.Verdict, rep.Sch)
 	}
 	if _, err := os.Stat(outDir); !os.IsNotExist(err) {
 		t.Fatalf("--preflight created --out: %v", err)
 	}
 	// No contract: every contract check is cannot-check, so never a pass.
-	stdout, _, _ = runKiCadCmd(t, "fab", "--preflight", "--pcb", pcb, "--no-assembly")
-	_ = json.Unmarshal([]byte(stdout), &rep)
+	rep, _ = runPreflight(t, "--pcb", pcb, "--no-assembly")
 	if s := checkStatus(rep.Checks); s["contract"] != gate.CannotCheck || s["min-space"] != gate.CannotCheck || s["layer-count"] != gate.CannotCheck {
 		t.Fatalf("no contract: %v", s)
 	}
 	if _, _, err := runKiCadCmd(t, "fab", "--pcb", pcb, "--out", outDir, "--contract", contract); err == nil || !strings.Contains(err.Error(), "--preflight flags") {
 		t.Fatalf("--contract without --preflight: %v", err)
+	}
+	// --sch of another hierarchy: parity and BOM would disagree.
+	other := filepath.Join(t.TempDir(), "other.kicad_sch")
+	_ = os.WriteFile(other, []byte(`(kicad_sch (version 20250114) (generator "t") (uuid "o") (sheet_instances (path "/" (page "1"))))`), 0o644)
+	rep, _ = runPreflight(t, "--pcb", pcb, "--sch", other, "--no-assembly")
+	if checkStatus(rep.Checks)["schematic-root"] != gate.Fail {
+		t.Fatalf("foreign --sch: %+v", rep.Checks)
+	}
+	// The project's own sub-sheet is fine.
+	rep, _ = runPreflight(t, "--pcb", pcb, "--sch", filepath.Join(filepath.Dir(pcb), "sub", "sub.kicad_sch"), "--no-assembly")
+	if checkStatus(rep.Checks)["schematic-root"] != gate.Pass {
+		t.Fatalf("own sub-sheet: %+v", rep.Checks)
+	}
+	// No project root schematic: parity is cannot-check, not omitted.
+	_ = os.Remove(strings.TrimSuffix(pcb, ".kicad_pcb") + ".kicad_sch")
+	rep, _ = runPreflight(t, "--pcb", pcb, "--no-assembly")
+	if checkStatus(rep.Checks)["schematic-parity"] != gate.CannotCheck {
+		t.Fatalf("no root schematic: %+v", rep.Checks)
 	}
 }
 
@@ -210,8 +266,11 @@ func TestPreflightCheckHelpers(t *testing.T) {
 	}
 	ct := &kicad.FabContract{Layers: 2}
 	ct.Limits.MinSpaceMm = 0.127
-	if c := ruleLimitCheck(min(0.127, kicad.RuleSource{Source: "netclass", Mm: 0.127}), ct, kicad.Measured{}); c.Status != gate.Pass {
+	if c := ruleLimitCheck(min(0.127, kicad.RuleSource{Source: "netclass", Mm: 0.127, Global: true}), ct, kicad.Measured{}); c.Status != gate.Pass {
 		t.Errorf("equal to the limit: %+v", c)
+	}
+	if c := ruleLimitCheck(min(0.2, kicad.RuleSource{Source: "local", Where: "pad 1 of U1", Mm: 0.2}), ct, kicad.Measured{}); c.Status != gate.CannotCheck {
+		t.Errorf("only a local override: %+v", c)
 	}
 	if c := ruleLimitCheck(min(0.1, kicad.RuleSource{Source: "local", Where: "pad 1 of U1", Mm: 0.1}), ct, kicad.Measured{}); c.Status != gate.Fail || len(c.Items) != 1 {
 		t.Errorf("below: %+v", c)
@@ -219,7 +278,9 @@ func TestPreflightCheckHelpers(t *testing.T) {
 	if c := ruleLimitCheck(&kicad.EffectiveMin{Item: "space", Unset: []string{"min_clearance = 0"}}, ct, kicad.Measured{}); c.Status != gate.CannotCheck {
 		t.Errorf("unbounded: %+v", c)
 	}
-	if c := ruleLimitCheck(&kicad.EffectiveMin{Item: "space", MinMm: new(float64), Unknown: []string{"x"}}, ct, kicad.Measured{}); c.Status != gate.CannotCheck {
+	unk := min(0.2, kicad.RuleSource{Source: ".kicad_pro", Mm: 0.2, Global: true})
+	unk.Unknown = []string{"x"}
+	if c := ruleLimitCheck(unk, ct, kicad.Measured{}); c.Status != gate.CannotCheck {
 		t.Errorf("unknown rule: %+v", c)
 	}
 	if c := ruleLimitCheck(&kicad.EffectiveMin{Item: "track"}, ct, kicad.Measured{}); c.Status != gate.CannotCheck || !strings.Contains(c.Detail, "minTrackMm") {
@@ -239,32 +300,47 @@ func TestPreflightCheckHelpers(t *testing.T) {
 	if c := sidesCheck(&fabAssemblyReport{CPLSides: []string{"top"}}, ct); c.Status != gate.Pass {
 		t.Errorf("top vs top: %+v", c)
 	}
-	board := []byte(`(kicad_pcb (setup (stackup (copper_finish "HAL lead-free"))) (gr_line (layer "Edge.Cuts")))`)
+	// Finish: the same process passes, another fails, ambiguous or
+	// unknown labels are cannot-check.
+	board := func(f string) []byte {
+		return []byte(`(kicad_pcb (setup (stackup (copper_finish "` + f + `"))) (gr_line (layer "Edge.Cuts")))`)
+	}
+	for _, tc := range []struct {
+		board, contract string
+		want            gate.Status
+	}{
+		{"HAL lead-free", "HASL lead-free", gate.Pass},
+		{"HAL lead-free", "LF-HASL", gate.Pass},
+		{"HAL SnPb", "HASL lead-free", gate.Fail},
+		{"ENIG", "ENEPIG", gate.Fail},
+		{"HAL lead-free", "ENIG", gate.Fail},
+		{"HAL lead-free", "HASL", gate.CannotCheck},
+		{"User defined", "ENIG", gate.CannotCheck},
+	} {
+		ct.Finish = tc.contract
+		if c := finishCheck(board(tc.board), ct); c.Status != tc.want {
+			t.Errorf("board %q contract %q: %+v", tc.board, tc.contract, c)
+		}
+	}
 	ct.Finish = "ENIG"
-	if c := finishCheck(board, ct); c.Status != gate.Fail || c.Advisory {
-		t.Errorf("finish mismatch: %+v", c)
-	}
-	ct.Finish = "HAL"
-	if c := finishCheck(board, ct); c.Status != gate.Pass {
-		t.Errorf("finish match: %+v", c)
-	}
 	if c := finishCheck([]byte(`(kicad_pcb)`), ct); c.Status != gate.Warn || !c.Advisory {
 		t.Errorf("no finish on the board: %+v", c)
 	}
 	// Outline: an open outline item (even excluded) fails; ignoring the rule
 	// leaves it unchecked; no Edge.Cuts fails.
+	edge := board("ENIG")
 	drc := &kicadDRCReport{Run: &kicad.DRCRun{}, Excluded: []kicad.OwnedViolation{{Violation: kicad.Violation{Rule: "invalid_outline", Excluded: true, Message: "not closed"}}}}
-	if c := outlineCheck(board, drc); c.Status != gate.Fail || !strings.HasPrefix(c.Items[0], "EXCLUDED ") {
+	if c := outlineCheck(edge, drc); c.Status != gate.Fail || !strings.HasPrefix(c.Items[0], "EXCLUDED ") {
 		t.Errorf("open outline: %+v", c)
 	}
 	drc = &kicadDRCReport{Run: &kicad.DRCRun{Policy: &kicad.DRCPolicy{Ignored: []string{"invalid_outline"}}}}
-	if c := outlineCheck(board, drc); c.Status != gate.CannotCheck {
+	if c := outlineCheck(edge, drc); c.Status != gate.CannotCheck {
 		t.Errorf("ignored outline test: %+v", c)
 	}
 	if c := outlineCheck([]byte(`(kicad_pcb)`), &kicadDRCReport{Run: &kicad.DRCRun{}}); c.Status != gate.Fail {
 		t.Errorf("no Edge.Cuts: %+v", c)
 	}
-	if c := outlineCheck(board, &kicadDRCReport{}); c.Status != gate.CannotCheck {
+	if c := outlineCheck(edge, &kicadDRCReport{}); c.Status != gate.CannotCheck {
 		t.Errorf("DRC did not run: %+v", c)
 	}
 }

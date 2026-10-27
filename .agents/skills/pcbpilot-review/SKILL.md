@@ -63,7 +63,7 @@ metadata:
   pcbpilot kicad netlist   --sch <root>.kicad_sch --out out/conn.json      # 后续 intent / signoff 的输入
   pcbpilot kicad drc --pcb <board>.kicad_pcb --schematic-parity --out out/drc/ > out/drc.json   # 0 PASS / 6 FAIL / 5 未验证
   ```
-  看 `checks`：`kicad-drc`（错误级违例）、`kicad-drc-policy`（排除项、`ignore`、error 降为 warning；触及短路/间距/未连接/一致性/尺寸/板框
+  看 `checks`：`kicad-drc`（错误级违例 + 电气/制造规则的警告）、`kicad-drc-policy`（排除项、`ignore`、error 降为 warning；触及短路/间距/未连接/一致性/尺寸/板框
   即 fail，courtyard 类只记 `SILENCED`，口径同 [§6.4](../pcbpilot/references/evidence-and-verdicts.md#64-drc-排除项与被关掉的规则)）、
   `schematic-parity`；`cannot-check` → INCOMPLETE，不当干净。每条违例带 `owner.class`（environment / schematic-parity / board-outline /
   routing / footprint / placement）与位号、网名，第 5 步分诊直接用；用户给了上一版板或报告时加 `--baseline-pcb` / `--baseline`，

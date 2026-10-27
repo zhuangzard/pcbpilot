@@ -7,8 +7,11 @@ package kicad
 // report proves the board meets its own rules, not the fab's limits. The
 // smallest value the rules allow anywhere is read from every source DRC
 // uses — Board Setup constraints (.kicad_pro), netclass clearances, custom
-// rules (.kicad_dru) and local clearance overrides on footprints and pads —
-// and the smallest of them must not be below the contract's limit.
+// rules (.kicad_dru) and local clearance overrides on footprints, pads and
+// zones — and the smallest of them must not be below the contract's limit.
+// Only a global source (Board Setup, the Default netclass, an unconditional
+// error-severity custom rule) proves the item is bounded everywhere; what
+// pcbpilot cannot read is Unknown, never skipped.
 
 import (
 	"bytes"
@@ -30,6 +33,10 @@ type RuleSource struct {
 	Source string  `json:"source"` // .kicad_pro | netclass | .kicad_dru | local
 	Where  string  `json:"where"`
 	Mm     float64 `json:"mm"`
+	// Global: the value applies to every object (Board Setup, the Default
+	// netclass, an unconditional custom rule), so it bounds the item
+	// everywhere. Local overrides and conditional rules only lower it.
+	Global bool `json:"global,omitempty"`
 }
 
 // EffectiveMin is the smallest value the rules allow for one item.
@@ -37,20 +44,30 @@ type EffectiveMin struct {
 	Item    string       `json:"item"` // track | space | drill | annular
 	MinMm   *float64     `json:"minMm,omitempty"`
 	Sources []RuleSource `json:"sources,omitempty"`
-	// Unknown: rules that bound the item in a way pcbpilot cannot read
-	// (an ignored constraint, an unparsable value); the minimum is then
-	// unproven.
+	// Unknown: rules that bound the item in a way pcbpilot cannot prove
+	// (an invalid value, an ignored or warning-only constraint, a rule
+	// without a min); the minimum is then unproven.
 	Unknown []string `json:"unknown,omitempty"`
 	// Unset: sources present but 0 (KiCad: no constraint).
 	Unset []string `json:"unset,omitempty"`
 }
 
-func (e *EffectiveMin) add(src, where string, mm float64) {
-	e.Sources = append(e.Sources, RuleSource{Source: src, Where: where, Mm: mm})
+func (e *EffectiveMin) add(src, where string, mm float64, global bool) {
+	e.Sources = append(e.Sources, RuleSource{Source: src, Where: where, Mm: mm, Global: global})
 	if e.MinMm == nil || mm < *e.MinMm {
 		v := mm
 		e.MinMm = &v
 	}
+}
+
+// Covered: a global source bounds the item.
+func (e *EffectiveMin) Covered() bool {
+	for _, s := range e.Sources {
+		if s.Global {
+			return true
+		}
+	}
+	return false
 }
 
 // Measured is the smallest copper geometry actually on the board (mm).
@@ -109,6 +126,17 @@ func ReadEffectiveRules(pcb string) (*EffectiveRules, error) {
 	return r, nil
 }
 
+// rawNumber reads a JSON number; ok false for a present value of another type.
+func rawNumber(raw json.RawMessage) (v float64, present, ok bool) {
+	if raw == nil || string(bytes.TrimSpace(raw)) == "null" {
+		return 0, false, true
+	}
+	if err := json.Unmarshal(raw, &v); err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
+		return 0, true, false
+	}
+	return v, true, true
+}
+
 func (r *EffectiveRules) addProject(b []byte) error {
 	var raw struct {
 		Board struct {
@@ -117,23 +145,13 @@ func (r *EffectiveRules) addProject(b []byte) error {
 			} `json:"design_settings"`
 		} `json:"board"`
 		NetSettings struct {
-			Classes []struct {
-				Name      string   `json:"name"`
-				Clearance *float64 `json:"clearance"`
-			} `json:"classes"`
+			Classes []map[string]json.RawMessage `json:"classes"`
 		} `json:"net_settings"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return err
 	}
 	rules := raw.Board.DesignSettings.Rules
-	num := func(k string) (float64, bool) {
-		var v float64
-		if rules[k] == nil || json.Unmarshal(rules[k], &v) != nil {
-			return 0, false
-		}
-		return v, true
-	}
 	flag := func(k string) bool {
 		var v bool
 		_ = json.Unmarshal(rules[k], &v)
@@ -141,11 +159,13 @@ func (r *EffectiveRules) addProject(b []byte) error {
 	}
 	r.MicroVias, r.BlindBuriedVias = flag("allow_microvias"), flag("allow_blind_buried_vias")
 	put := func(e *EffectiveMin, key string) {
-		v, ok := num(key)
+		v, present, ok := rawNumber(rules[key])
 		switch {
 		case !ok:
+			e.Unknown = append(e.Unknown, fmt.Sprintf(".kicad_pro %s is %s, not a length in mm", key, string(rules[key])))
+		case !present:
 		case v > 0:
-			e.add(".kicad_pro", "board.design_settings.rules."+key, v)
+			e.add(".kicad_pro", "board.design_settings.rules."+key, v, true)
 		default:
 			e.Unset = append(e.Unset, ".kicad_pro "+key+" = 0 (no constraint)")
 		}
@@ -157,9 +177,19 @@ func (r *EffectiveRules) addProject(b []byte) error {
 	if r.MicroVias {
 		put(&r.Drill, "min_microvia_drill")
 	}
-	for _, c := range raw.NetSettings.Classes {
-		if c.Clearance != nil && *c.Clearance > 0 {
-			r.Space.add("netclass", "net_settings.classes["+c.Name+"].clearance", *c.Clearance)
+	for i, c := range raw.NetSettings.Classes {
+		var name string
+		_ = json.Unmarshal(c["name"], &name)
+		if name == "" {
+			name = strconv.Itoa(i)
+		}
+		v, present, ok := rawNumber(c["clearance"])
+		switch {
+		case !ok:
+			r.Space.Unknown = append(r.Space.Unknown, fmt.Sprintf("netclass %s clearance is %s, not a length in mm", name, string(c["clearance"])))
+		case present && v > 0:
+			// Every net is at least in Default: its clearance is global.
+			r.Space.add("netclass", "net_settings.classes["+name+"].clearance", v, name == "Default")
 		}
 	}
 	return nil
@@ -181,8 +211,11 @@ func (r *EffectiveRules) item(name string) *EffectiveMin {
 }
 
 // addDRU reads the (rule …) entries of a .kicad_dru. A constraint of a
-// contract item whose min cannot be read, or a rule that sets it to
-// "ignore", makes that item Unknown.
+// contract item is Unknown when its rule is "ignore" or "warning" severity
+// (not an enforced minimum where its condition holds), when it has no min
+// (only opt / max: no lower bound there) or when its min cannot be read.
+// A rule with a condition or a layer only lowers the minimum; an
+// unconditional one also bounds the item everywhere.
 func (r *EffectiveRules) addDRU(b []byte) {
 	root, err := parseSexpr(append(append([]byte("(pcbpilot_dru\n"), b...), []byte("\n)")...))
 	if err != nil {
@@ -193,10 +226,11 @@ func (r *EffectiveRules) addDRU(b []byte) {
 	}
 	for _, rule := range root.children("rule") {
 		name := rule.arg(0)
-		ignored := false
-		if s := rule.child("severity"); s != nil && s.arg(0) == "ignore" {
-			ignored = true
+		sev := ""
+		if s := rule.child("severity"); s != nil {
+			sev = s.arg(0)
 		}
+		global := rule.child("condition") == nil && rule.child("layer") == nil
 		for _, c := range rule.children("constraint") {
 			item, ok := druConstraintItem[c.arg(0)]
 			if !ok {
@@ -204,20 +238,21 @@ func (r *EffectiveRules) addDRU(b []byte) {
 			}
 			e := r.item(item)
 			where := fmt.Sprintf("rule %q constraint %s", name, c.arg(0))
-			if ignored {
-				e.Unknown = append(e.Unknown, where+": (severity ignore) turns the check off where its condition holds")
+			if sev != "" && sev != "error" {
+				e.Unknown = append(e.Unknown, fmt.Sprintf("%s: (severity %s) is not an enforced minimum where its condition holds", where, sev))
 				continue
 			}
 			m := c.child("min")
 			if m == nil {
-				continue // only opt / max: no lower bound from this rule
+				e.Unknown = append(e.Unknown, where+": no min (only opt / max), so no lower bound where its condition holds")
+				continue
 			}
 			mm, err := parseDRULength(m.arg(0))
 			if err != nil {
 				e.Unknown = append(e.Unknown, fmt.Sprintf("%s: min %q: %v", where, m.arg(0), err))
 				continue
 			}
-			e.add(".kicad_dru", where, mm)
+			e.add(".kicad_dru", where, mm, global)
 		}
 	}
 }
@@ -246,9 +281,9 @@ func parseDRULength(s string) (float64, error) {
 	return v, nil
 }
 
-// addBoard reads local clearance overrides of footprints and pads (they
-// replace the netclass clearance for that object, so may be smaller) and the
-// smallest track width and drills on the board.
+// addBoard reads local clearance overrides of footprints, pads and zones
+// (they replace the netclass clearance for that object, so may be smaller)
+// and the smallest track width and drills on the board.
 func (r *EffectiveRules) addBoard(b []byte) error {
 	root, err := parseSexpr(b)
 	if err != nil {
@@ -270,6 +305,19 @@ func (r *EffectiveRules) addBoard(b []byte) error {
 		v, err := strconv.ParseFloat(n.arg(0), 64)
 		return v, err == nil
 	}
+	local := func(n *sx, where string) {
+		c := n.child("clearance")
+		if c == nil {
+			return
+		}
+		v, ok := num(c)
+		switch {
+		case !ok || v < 0:
+			r.Space.Unknown = append(r.Space.Unknown, fmt.Sprintf("%s clearance override %q is not a length in mm", where, c.arg(0)))
+		case v > 0:
+			r.Space.add("local", where+" clearance override", v, false)
+		}
+	}
 	for _, k := range root.Kids[1:] {
 		switch k.head() {
 		case "segment", "arc":
@@ -280,6 +328,14 @@ func (r *EffectiveRules) addBoard(b []byte) error {
 			if d, ok := num(k.child("drill")); ok {
 				setMin(&r.Measured.MinViaDrillMm, d)
 			}
+		case "zone":
+			if cp := k.child("connect_pads"); cp != nil {
+				net := ""
+				if n := k.child("net_name"); n != nil {
+					net = n.arg(0)
+				}
+				local(cp, "zone ["+net+"]")
+			}
 		case "footprint", "module":
 			ref := ""
 			for _, p := range k.children("property") {
@@ -287,17 +343,13 @@ func (r *EffectiveRules) addBoard(b []byte) error {
 					ref = p.arg(1)
 				}
 			}
-			if v, ok := num(k.child("clearance")); ok && v > 0 {
-				r.Space.add("local", "footprint "+ref+" clearance override", v)
-			}
+			local(k, "footprint "+ref)
 			for _, p := range k.children("pad") {
-				if v, ok := num(p.child("clearance")); ok && v > 0 {
-					pad := p.arg(0)
-					if pad == "" {
-						pad = "(unnamed)"
-					}
-					r.Space.add("local", fmt.Sprintf("pad %s of %s clearance override", pad, ref), v)
+				pad := p.arg(0)
+				if pad == "" {
+					pad = "(unnamed)"
 				}
+				local(p, fmt.Sprintf("pad %s of %s", pad, ref))
 				if p.arg(1) == "thru_hole" || p.arg(1) == "np_thru_hole" {
 					if d := p.child("drill"); d != nil {
 						// (drill D) or (drill oval W H): the smallest dimension.
@@ -358,10 +410,21 @@ func (c *FabContract) Limit(item string) float64 {
 	return c.Limits.MinAnnularMm
 }
 
+// contractSourceItems are the values a sources[].item may name; a parent
+// ("limits", "assembly") covers its fields.
+var contractSourceItems = map[string]bool{
+	"vendor": true, "service": true, "layers": true, "thicknessMm": true, "copperOz": true, "finish": true,
+	"mask": true, "silk": true, "impedance": true, "viaProcess": true,
+	"assembly": true, "assembly.sides": true, "assembly.qty": true,
+	"limits": true, "limits.minTrackMm": true, "limits.minSpaceMm": true, "limits.minDrillMm": true, "limits.minAnnularMm": true,
+}
+
 // LoadFabContract reads and validates a contract file: unknown fields are
-// refused (a misspelt limit must not read as "no limit"), vendor, layers
-// and at least one source with an http(s) url and a YYYY-MM-DD retrieval
-// date are required, assembly.sides is top | bottom | both.
+// refused (a misspelt limit must not read as "no limit"); vendor and layers
+// are required; every source has a known item, an http(s) url and a
+// YYYY-MM-DD retrieval date; every value preflight checks (each limit, the
+// finish, assembly.sides) is covered by a source naming it or its parent;
+// assembly.sides is top | bottom | both.
 func LoadFabContract(path string) (*FabContract, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -383,15 +446,30 @@ func LoadFabContract(path string) (*FabContract, error) {
 	if c.Assembly != nil && c.Assembly.Sides != "top" && c.Assembly.Sides != "bottom" && c.Assembly.Sides != "both" {
 		bad = append(bad, fmt.Sprintf("assembly.sides %q is not top, bottom or both", c.Assembly.Sides))
 	}
+	checked := map[string]bool{}
 	for k, v := range map[string]float64{"minTrackMm": c.Limits.MinTrackMm, "minSpaceMm": c.Limits.MinSpaceMm, "minDrillMm": c.Limits.MinDrillMm, "minAnnularMm": c.Limits.MinAnnularMm} {
 		if v < 0 || math.IsNaN(v) {
 			bad = append(bad, "limits."+k+" is negative")
 		}
+		if v > 0 {
+			checked["limits."+k] = true
+		}
+	}
+	if c.Finish != "" {
+		checked["finish"] = true
+	}
+	if c.Assembly != nil && c.Assembly.Sides != "" {
+		checked["assembly.sides"] = true
 	}
 	if len(c.Sources) == 0 {
 		bad = append(bad, "no sources: every value needs the vendor page (url) and the date it was read (retrieved)")
 	}
+	covered := map[string]bool{}
 	for i, s := range c.Sources {
+		if !contractSourceItems[s.Item] {
+			bad = append(bad, fmt.Sprintf("sources[%d].item %q is not a contract field (vendor, layers, finish, assembly[.sides], limits[.minTrackMm …], …)", i, s.Item))
+		}
+		covered[s.Item] = true
 		if u, err := url.Parse(s.URL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			bad = append(bad, fmt.Sprintf("sources[%d].url %q is not an http(s) URL", i, s.URL))
 		}
@@ -399,11 +477,59 @@ func LoadFabContract(path string) (*FabContract, error) {
 			bad = append(bad, fmt.Sprintf("sources[%d].retrieved %q is not a YYYY-MM-DD date", i, s.Retrieved))
 		}
 	}
+	for k := range checked {
+		parent, _, _ := strings.Cut(k, ".")
+		if !covered[k] && !covered[parent] {
+			bad = append(bad, fmt.Sprintf("no source for %s (add a sources entry with item %q or %q)", k, k, parent))
+		}
+	}
 	if len(bad) > 0 {
 		sort.Strings(bad)
 		return &c, fmt.Errorf("CONTRACT_INVALID: %s: %s (fix: complete the contract with the user; values come from the vendor's current page)", path, strings.Join(bad, "; "))
 	}
 	return &c, nil
+}
+
+// Surface-finish processes pcbpilot tells apart. A fab quote names one of
+// these; anything else (or a bare "HASL", leaded or lead-free?) is
+// ambiguous.
+const (
+	FinishHASLLeaded   = "hasl-leaded"
+	FinishHASLLeadFree = "hasl-lead-free"
+	FinishENIG         = "enig"
+	FinishENEPIG       = "enepig"
+	FinishOSP          = "osp"
+	FinishImmSilver    = "immersion-silver"
+	FinishImmTin       = "immersion-tin"
+	FinishHardGold     = "hard-gold"
+)
+
+var finishAliases = map[string]string{
+	"hal snpb": FinishHASLLeaded, "hasl snpb": FinishHASLLeaded, "hasl leaded": FinishHASLLeaded, "hasl with lead": FinishHASLLeaded,
+	"leaded hasl": FinishHASLLeaded, "hal leaded": FinishHASLLeaded, "hasl lead": FinishHASLLeaded,
+	"hal lead free": FinishHASLLeadFree, "hasl lead free": FinishHASLLeadFree, "lead free hasl": FinishHASLLeadFree,
+	"lf hasl": FinishHASLLeadFree, "hasl lf": FinishHASLLeadFree, "leadfree hasl": FinishHASLLeadFree, "hasl leadfree": FinishHASLLeadFree,
+	"enig": FinishENIG, "electroless nickel immersion gold": FinishENIG,
+	"enepig": FinishENEPIG,
+	"osp":    FinishOSP, "ht osp": FinishOSP, "organic solderability preservative": FinishOSP,
+	"immersion silver": FinishImmSilver, "imag": FinishImmSilver,
+	"immersion tin": FinishImmTin, "imsn": FinishImmTin,
+	"hard gold": FinishHardGold, "electrolytic hard gold": FinishHardGold,
+}
+
+var reFinishSep = regexp.MustCompile(`[^a-z0-9]+`)
+
+// FinishProcess names the process of a finish label (KiCad's stackup
+// names, common fab names); unknown or ambiguous labels are an error.
+func FinishProcess(label string) (string, error) {
+	k := strings.TrimSpace(reFinishSep.ReplaceAllString(strings.ToLower(label), " "))
+	if p, ok := finishAliases[k]; ok {
+		return p, nil
+	}
+	if k == "hasl" || k == "hal" {
+		return "", fmt.Errorf("%q is ambiguous: say leaded or lead-free (e.g. \"HASL lead-free\")", label)
+	}
+	return "", fmt.Errorf("%q is not a finish pcbpilot can name (HASL leaded / lead-free, ENIG, ENEPIG, OSP, immersion silver / tin, hard gold)", label)
 }
 
 // BoardFinish is the copper finish of the board's stackup ("" when the

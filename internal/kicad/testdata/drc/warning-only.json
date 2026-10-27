@@ -1,0 +1,17 @@
+{
+  "$schema": "https://schemas.kicad.org/drc.v1.json",
+  "coordinate_units": "mm",
+  "date": "2026-10-27T12:00:00",
+  "ignored_checks": [],
+  "included_severities": ["error", "warning", "exclusion"],
+  "kicad_version": "10.0.6",
+  "source": "board.kicad_pcb",
+  "violations": [
+    {"description": "Drilled holes too close together (board setup constraints hole to hole 0.2500 mm; actual 0.1000 mm)", "severity": "warning", "type": "hole_to_hole",
+     "items": [{"description": "Via [VCC] on F.Cu - B.Cu", "pos": {"x": 15.0, "y": 10.0}, "uuid": "via-1"},
+               {"description": "PTH pad 1 [VCC] of C1", "pos": {"x": 15.2, "y": 10.0}, "uuid": "pad-c1-1"}]},
+    {"description": "Silkscreen clearance", "severity": "warning", "type": "silk_overlap",
+     "items": [{"description": "Segment of R1 on F.Silkscreen", "pos": {"x": 10.0, "y": 10.0}, "uuid": "silk-r1"}]}
+  ],
+  "unconnected_items": []
+}

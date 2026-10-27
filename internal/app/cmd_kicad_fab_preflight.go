@@ -69,18 +69,26 @@ func runFabPreflight(o fabPreflightOptions) *fabPreflightReport {
 		return rep
 	}
 
-	// 1. DRC (+ parity when the project's root schematic is there).
-	root := strings.TrimSuffix(o.pcb, ".kicad_pcb") + ".kicad_sch"
-	parity := false
-	if o.sch != "" {
-		if _, err := os.Stat(root); err == nil {
-			parity = true
-		}
+	// 1. DRC + parity. KiCad compares a board with its project's root
+	// schematic (<project>.kicad_sch next to the .kicad_pro); without --sch
+	// that root is also what the BOM fields are read from, and a --sch of
+	// another hierarchy is an inconsistent input, not a second schematic.
+	root, rootErr := projectRootSchematic(o.pcb)
+	parity := rootErr == nil
+	if o.sch == "" && parity {
+		o.sch, rep.Sch = root, root
+		rep.Notes = append(rep.Notes, "no --sch: using the project's root schematic "+root)
 	}
 	rep.DRC = runKicadDRC(kicadDRCOptions{pcb: o.pcb, cli: o.cli, parity: parity, waivers: o.waivers, tolMm: 0.5})
 	rep.Checks = append(rep.Checks, rep.DRC.Checks...)
-	if o.sch != "" && !parity {
-		add(cannotCheck("schematic-parity", fmt.Sprintf("KiCad compares a board with its project's root schematic %s, which is not next to the board (fix: keep the board and %s in one KiCad project)", filepath.Base(root), filepath.Base(root))))
+	if !parity {
+		add(cannotCheck("schematic-parity", rootErr.Error()))
+	} else if o.sch != root {
+		c := schematicRootCheck(o.sch, root)
+		add(c)
+		if c.Status == gate.Pass {
+			o.sch = root // a sub-sheet: the BOM is read from the whole hierarchy, like parity
+		}
 	}
 
 	// 2. Board outline: KiCad's own outline test runs inside DRC.
@@ -128,6 +136,39 @@ func runFabPreflight(o fabPreflightOptions) *fabPreflightReport {
 	add(sidesCheck(asm, ct))
 	rep.Checks = append(rep.Checks, cs...)
 	return rep
+}
+
+// projectRootSchematic is the root sheet KiCad's parity check uses for
+// pcb: <project>.kicad_sch of the .kicad_pro next to the board.
+func projectRootSchematic(pcb string) (string, error) {
+	base := strings.TrimSuffix(pcb, ".kicad_pcb")
+	if _, err := os.Stat(base + ".kicad_pro"); err != nil {
+		return "", fmt.Errorf("no %s next to the board, so no project root schematic to compare with (fix: keep the board in its KiCad project)", filepath.Base(base)+".kicad_pro")
+	}
+	root := base + ".kicad_sch"
+	if _, err := os.Stat(root); err != nil {
+		return "", fmt.Errorf("the project's root schematic %s is missing, so KiCad cannot compare the board with it (fix: keep the schematic in the project)", filepath.Base(root))
+	}
+	return root, nil
+}
+
+// schematicRootCheck: --sch must belong to the project's hierarchy, so
+// parity and the BOM fields come from the same schematic.
+func schematicRootCheck(sch, root string) drcCheck {
+	c := drcCheck{Result: gate.Result{Name: "schematic-root"}}
+	files, err := kicad.SheetFiles(root)
+	if err != nil {
+		return cannotCheck(c.Name, "cannot read the project's schematic hierarchy: "+err.Error())
+	}
+	sa, _ := filepath.Abs(sch)
+	for _, f := range files {
+		if fa, _ := filepath.Abs(f); strings.EqualFold(filepath.Clean(fa), filepath.Clean(sa)) {
+			c.Status, c.Detail = gate.Pass, "--sch is a sheet of the project's hierarchy (root "+root+")"
+			return c
+		}
+	}
+	c.Status, c.Detail = gate.Fail, fmt.Sprintf("--sch %s is not a sheet of the board's project hierarchy (root %s): parity and the BOM fields would come from different schematics (fix: pass the project's own schematic, or omit --sch)", sch, root)
+	return c
 }
 
 func outlineCheck(board []byte, drc *kicadDRCReport) drcCheck {
@@ -196,26 +237,25 @@ func ruleLimitCheck(e *kicad.EffectiveMin, ct *kicad.FabContract, m kicad.Measur
 		return c
 	}
 	limit := ct.Limit(e.Item)
+	var below []string
+	for _, s := range e.Sources {
+		if s.Mm < limit-1e-6 {
+			below = append(below, fmt.Sprintf("%s %s = %g mm", s.Source, s.Where, s.Mm))
+		}
+	}
 	switch {
 	case limit <= 0:
 		c.Status, c.Detail = gate.CannotCheck, "the contract gives no "+ruleContractKey[e.Item]
+	case len(below) > 0:
+		c.Items, c.Status = below, gate.Fail
+		c.Detail = fmt.Sprintf("smallest allowed %s %g mm vs contract %g mm: %d rule value(s) below the contract (fix: raise them in Board Setup / .kicad_dru / the local override and rerun DRC; never lower the contract)", e.Item, *e.MinMm, limit, len(below))
 	case len(e.Unknown) > 0:
-		c.Status, c.Detail = gate.CannotCheck, "rules pcbpilot cannot read bound it: "+strings.Join(e.Unknown, "; ")+" (fix: check them by hand against the contract)"
-	case e.MinMm == nil:
-		c.Status, c.Detail = gate.CannotCheck, fmt.Sprintf("no rule bounds the %s (fix: set the Board Setup constraint to the contract's %g mm)", e.Item, limit)
+		c.Status, c.Detail = gate.CannotCheck, "rules pcbpilot cannot prove bound it: "+strings.Join(e.Unknown, "; ")+" (fix: make them error-severity minimums, or check them by hand against the contract)"
+	case e.MinMm == nil || !e.Covered():
+		c.Status, c.Detail = gate.CannotCheck, fmt.Sprintf("no global rule bounds the %s (only local overrides or conditional rules, or none) (fix: set the Board Setup constraint to the contract's %g mm)", e.Item, limit)
 	default:
-		var below []string
-		for _, s := range e.Sources {
-			if s.Mm < limit-1e-6 {
-				below = append(below, fmt.Sprintf("%s %s = %g mm", s.Source, s.Where, s.Mm))
-			}
-		}
-		c.Items = below
-		c.Status = gate.FromBool(len(below) == 0)
+		c.Status = gate.Pass
 		c.Detail = fmt.Sprintf("smallest allowed %s %g mm vs contract %g mm", e.Item, *e.MinMm, limit)
-		if len(below) > 0 {
-			c.Detail += fmt.Sprintf(": %d rule value(s) below the contract (fix: raise them in Board Setup / .kicad_dru and rerun DRC; never lower the contract)", len(below))
-		}
 	}
 	return c
 }
@@ -227,21 +267,35 @@ func mmOrNone(v *float64) string {
 	return fmt.Sprintf("%g mm", *v)
 }
 
+// finishCheck compares the processes the contract and the board's stackup
+// name (kicad.FinishProcess): equal → pass, different → fail; a label that
+// is unknown or ambiguous ("HASL": leaded or lead-free?) → cannot-check.
 func finishCheck(board []byte, ct *kicad.FabContract) drcCheck {
-	c := drcCheck{Result: gate.Result{Name: "finish", Advisory: true}}
+	c := drcCheck{Result: gate.Result{Name: "finish"}}
 	have := kicad.BoardFinish(board)
 	switch {
 	case ct == nil:
 		return cannotCheck(c.Name, "no valid contract to compare with")
 	case ct.Finish == "":
-		c.Status, c.Detail = gate.Skip, "the contract names no finish"
-	case have == "":
-		c.Status, c.Detail = gate.Warn, "the board's stackup names no copper finish; the order form decides ("+ct.Finish+")"
-	case strings.Contains(strings.ToLower(have), strings.ToLower(ct.Finish)) || strings.Contains(strings.ToLower(ct.Finish), strings.ToLower(have)):
-		c.Status, c.Detail = gate.Pass, fmt.Sprintf("board stackup %q, contract %q", have, ct.Finish)
-	default:
-		c.Advisory = false
-		c.Status, c.Detail = gate.Fail, fmt.Sprintf("board stackup %q, contract %q (fix: set Board Setup > Physical Stackup finish or the contract, with the user)", have, ct.Finish)
+		c.Status, c.Advisory, c.Detail = gate.Skip, true, "the contract names no finish"
+		return c
+	}
+	want, err := kicad.FinishProcess(ct.Finish)
+	if err != nil {
+		return cannotCheck(c.Name, "contract finish "+err.Error()+" (fix: name the exact process in the contract)")
+	}
+	if have == "" {
+		c.Status, c.Advisory, c.Detail = gate.Warn, true, "the board's stackup names no copper finish; the order form decides ("+want+")"
+		return c
+	}
+	got, err := kicad.FinishProcess(have)
+	if err != nil {
+		return cannotCheck(c.Name, "board stackup finish "+err.Error())
+	}
+	c.Status = gate.FromBool(got == want)
+	c.Detail = fmt.Sprintf("board stackup %q (%s), contract %q (%s)", have, got, ct.Finish, want)
+	if got != want {
+		c.Detail += " (fix: set Board Setup > Physical Stackup finish or the contract, with the user)"
 	}
 	return c
 }

@@ -51,8 +51,8 @@ pcbpilot kicad fab --preflight --pcb <board>.kicad_pcb --sch <root>.kicad_sch   
 ```
 
 `--preflight` 不写任何文件（板和原理图在临时副本上查），每项 `pass` / `fail` / `cannot-check`，总判定取最差，退出码 0 / 6 / 5：
-`kicad-drc`（错误级违例，带归属：封装/布局/布线/板框/原理图一致性/环境）、`kicad-drc-policy`（排除项与被关掉的规则，触及电气/制造规则
-且无签名 waiver → fail）、`schematic-parity`、`board-outline`、`contract`、`layer-count`、`min-track`/`min-space`/`min-drill`/`min-annular`
+`kicad-drc`（错误级违例与电气/制造规则的警告，带归属：封装/布局/布线/板框/原理图一致性/环境）、`kicad-drc-policy`（排除项与被关掉的规则，触及电气/制造规则
+且无签名 waiver → fail）、`schematic-parity`（根图取 `.kicad_pro` 同名原理图，`--sch` 必须属于它的层次 = `schematic-root`）、`board-outline`、`contract`、`layer-count`、`min-track`/`min-space`/`min-drill`/`min-annular`
 （有效规则集含网络类、`.kicad_dru`、局部覆盖 vs 契约）、`finish`、`assembly-sides`、`lcsc`（覆盖率）、`bom-cpl`。映射：fail → `FAIL`，交回
 router 修板（归属与修法见 [drc-triage.md](../pcbpilot/references/drc-triage.md)，改契约凑数不算修）；cannot-check → `INCOMPLETE`，按 detail 的
 `fix` 补（缺契约、规则 0/读不懂、DRC 没跑成）。大板 DRC 要几分钟，等它完成。命令不覆盖的项（钻孔表、gbrjob、查看器、方向）见
