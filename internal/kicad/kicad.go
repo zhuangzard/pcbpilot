@@ -257,6 +257,10 @@ type NetRequirement struct {
 	InnerMil     float64 `json:"innerMil"`
 	MinMil       float64 `json:"minMil"`
 	ClearanceMil float64 `json:"clearanceMil"`
+	// ViaDiaMil / ViaDrillMil: the intent's via for the net (0 = none). The
+	// bridge writes max(this, the net's current class via, board minimums).
+	ViaDiaMil   float64 `json:"viaDiaMil,omitempty"`
+	ViaDrillMil float64 `json:"viaDrillMil,omitempty"`
 }
 
 // NetClass is one netclass the bridge wrote.
@@ -268,6 +272,8 @@ type NetClass struct {
 	MinMil         float64           `json:"minMil"`
 	ClearanceMil   float64           `json:"clearanceMil"`
 	IntentOuterMil float64           `json:"intentOuterMil"`
+	ViaDiameterMil float64           `json:"viaDiameterMil"`
+	ViaDrillMil    float64           `json:"viaDrillMil"`
 	Effective      map[string]string `json:"effective,omitempty"`
 }
 
@@ -278,12 +284,15 @@ type NetclassResult struct {
 	MissingNets []string   `json:"missingNets"`
 	// MissingDomainNets are insulation / edge domain nets not on the board
 	// ("<domain>: <net>"): their rules cannot cover them.
-	MissingDomainNets []string            `json:"missingDomainNets,omitempty"`
-	Kept              []string            `json:"kept"`
-	Mismatched        []string            `json:"mismatched"`
-	Domains           map[string][]string `json:"domains,omitempty"`
-	DRU               string              `json:"dru"`
-	DRURules          int                 `json:"druRules"`
+	MissingDomainNets []string `json:"missingDomainNets,omitempty"`
+	Kept              []string `json:"kept"`
+	// ViaFloored: existing classes whose via was below the board minimums
+	// and was raised on the work copy.
+	ViaFloored []string            `json:"viaFloored,omitempty"`
+	Mismatched []string            `json:"mismatched"`
+	Domains    map[string][]string `json:"domains,omitempty"`
+	DRU        string              `json:"dru"`
+	DRURules   int                 `json:"druRules"`
 }
 
 // Netclasses writes reqs as netclasses (one per distinct requirement) into

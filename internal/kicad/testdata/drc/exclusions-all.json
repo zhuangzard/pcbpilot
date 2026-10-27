@@ -1,0 +1,133 @@
+{
+  "$schema": "https://schemas.kicad.org/drc.v1.json",
+  "coordinate_units": "mm",
+  "kicad_version": "10.0.6",
+  "violations": [
+    {
+      "comment": "Intentional Overlap",
+      "description": "Courtyards overlap",
+      "excluded": true,
+      "items": [
+        {
+          "description": "Footprint J1",
+          "pos": {
+            "x": 88.9,
+            "y": 36.15
+          },
+          "uuid": "11659109-eea0-488c-af3a-a134aa53be7b"
+        },
+        {
+          "description": "Footprint J601",
+          "pos": {
+            "x": 99.65,
+            "y": 49.85
+          },
+          "uuid": "86b7aa3e-5fae-4956-9584-486046f4c3e7"
+        }
+      ],
+      "severity": "error",
+      "type": "courtyards_overlap"
+    },
+    {
+      "comment": "too close on purpose",
+      "description": "Clearance violation (netclass 'Default' clearance 0.2000 mm; actual 0.1000 mm)",
+      "excluded": true,
+      "items": [
+        {
+          "description": "Track [GND] on F.Cu, length 1.0000 mm",
+          "pos": {
+            "x": 10.0,
+            "y": 20.0
+          },
+          "uuid": "00000000-0000-4000-8000-0000000000c1"
+        },
+        {
+          "description": "Pad 1 [VCC] of R1 on F.Cu",
+          "pos": {
+            "x": 10.1,
+            "y": 20.0
+          },
+          "uuid": "00000000-0000-4000-8000-0000000000c2"
+        }
+      ],
+      "severity": "error",
+      "type": "clearance"
+    },
+    {
+      "description": "Via is not connected or connected on only one layer",
+      "items": [
+        {
+          "description": "Via [+BATT] on F.Cu - B.Cu",
+          "pos": {
+            "x": 81.45,
+            "y": 72.5
+          },
+          "uuid": "e2e5b0e8-52ad-4f61-a2a4-78efb39d4983"
+        }
+      ],
+      "severity": "warning",
+      "type": "via_dangling"
+    },
+    {
+      "description": "Board has malformed outline",
+      "items": [
+        {
+          "description": "Line on Edge.Cuts",
+          "pos": {
+            "x": 0,
+            "y": 0
+          },
+          "uuid": "00000000-0000-4000-8000-0000000000c3"
+        }
+      ],
+      "severity": "error",
+      "type": "invalid_outline"
+    }
+  ],
+  "unconnected_items": [
+    {
+      "comment": "joined by the pour",
+      "description": "Missing connection between items",
+      "excluded": true,
+      "items": [
+        {
+          "description": "Pad 2 [GND] of C1 on F.Cu",
+          "pos": {
+            "x": 30.0,
+            "y": 40.0
+          },
+          "uuid": "00000000-0000-4000-8000-0000000000d1"
+        },
+        {
+          "description": "Pad 1 [GND] of C2 on F.Cu",
+          "pos": {
+            "x": 31.0,
+            "y": 40.0
+          },
+          "uuid": "00000000-0000-4000-8000-0000000000d2"
+        }
+      ],
+      "severity": "error",
+      "type": "unconnected_items"
+    }
+  ],
+  "schematic_parity": [
+    {
+      "comment": "fiducial",
+      "description": "Footprint not found in schematic",
+      "excluded": true,
+      "items": [
+        {
+          "description": "Footprint FID1",
+          "pos": {
+            "x": 5.0,
+            "y": 5.0
+          },
+          "uuid": "00000000-0000-4000-8000-0000000000e1"
+        }
+      ],
+      "severity": "warning",
+      "type": "extra_footprint"
+    }
+  ]
+}

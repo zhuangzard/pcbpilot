@@ -169,10 +169,10 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 	f.Float64Var(&o.fo.minTraceUm, "min-trace-um", 0, "fastroute --router.min_trace_width_um (default: max(board minimum track width, min(narrowest widthMil.min, narrowest class width)))")
 	f.Float64Var(&o.padNeckFloor, "pad-neck-floor-mil", 0, "let intent nets neck down at pads (off by default: every intent class is --no-neckdown-classes). Nets with widthMil.min <= max(this, narrowest min) leave that list and fastroute's neck floor becomes that value, so no neck goes below the net's own minimum; full width outside the pad zone is restored by widen-to-intent and enforced by the intent-widths gate (a failing run is not shipped). Also lets escape vias sit next to own-net SMD pads (fastroute allows it). PicoRick: 10")
 	f.Float64Var(&o.rules.ClearanceMil, "clearance-mil", 0, "board minimum clearance + Default netclass clearance (default for a board without .kicad_pro: intent copper.clearanceMil)")
-	f.Float64Var(&o.rules.TrackMil, "track-mil", 0, "Default netclass track width")
+	f.Float64Var(&o.rules.TrackMil, "track-mil", 0, "Default netclass track width; refused below the board minimum (--min-track-mil, else the project's)")
 	f.Float64Var(&o.rules.MinTrackMil, "min-track-mil", 0, "board minimum track width (default for a board without .kicad_pro: intent copper.minTrackMil)")
-	f.Float64Var(&o.rules.ViaDiaMil, "via-dia-mil", 0, "Default netclass via diameter (default without .kicad_pro: intent copper.viaDiaMil)")
-	f.Float64Var(&o.rules.ViaDrillMil, "via-drill-mil", 0, "Default netclass via drill (default without .kicad_pro: intent copper.viaDrillMil)")
+	f.Float64Var(&o.rules.ViaDiaMil, "via-dia-mil", 0, "Default netclass via diameter (default without .kicad_pro: intent copper.viaDiaMil); refused below the project's min via diameter / annular ring")
+	f.Float64Var(&o.rules.ViaDrillMil, "via-drill-mil", 0, "Default netclass via drill (default without .kicad_pro: intent copper.viaDrillMil); refused below the project's min through-hole")
 	f.Float64Var(&o.rules.EdgeMil, "edge-mil", 0, "copper-to-board-edge clearance (default without .kicad_pro: max(intent edge.outerMil, edge.innerMil))")
 	f.StringVar(&o.pours, "pours", "auto", "pours after the SES import: auto (only when the input has no copper zones) | on | off")
 	f.StringVar(&o.gndNet, "gnd-net", "GND", "ground pour net")
@@ -354,6 +354,18 @@ func (r *kicadRun) run() error {
 		}
 		r.o.tm.bin = bin
 		r.summary["tracemakerBin"] = bin
+	}
+
+	// Explicit rule flags must not undercut the board's own minimums
+	// (checked here, before the design review and the input DRC).
+	if pro := strings.TrimSuffix(o.pcb, ".kicad_pcb") + ".kicad_pro"; o.ruleFlags {
+		if floors, err := readKicadRuleFloors(pro); err == nil {
+			if err := checkRuleFloors(o.rules, floors); err != nil {
+				return err
+			}
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("board rules: %w", err)
+		}
 	}
 
 	// Schematic netlist (pad-net diff, review evidence).
@@ -1408,6 +1420,17 @@ func (r *kicadRun) routedDRCGate(routed string) (all, errs *kicad.DRCReport) {
 	rep, warn, nWarn := all.SplitErrors()
 	_ = writeJSONFile(drcPath, rep)
 	g := kicadDRCGate(rep, drcPath)
+	// What the project tells DRC not to report is part of the gate: an
+	// excluded or ignored short / clearance / unconnected / parity check
+	// fails it unless a signed waiver matches.
+	pro := strings.TrimSuffix(routed, ".kicad_pcb") + ".kicad_pro"
+	if pol, err := kicad.ReadDRCPolicy(pro); err == nil {
+		silenced := applyDRCPolicy(&g, pol, all.Excluded())
+		r.summary["drcPolicy"] = map[string]any{"exclusions": pol.Exclusions, "ignored": pol.Ignored, "downgraded": pol.Downgraded, "silenced": silenced}
+	} else if !os.IsNotExist(err) {
+		g.Pass = false
+		g.Detail += "; cannot read the project's DRC exclusions / severities: " + err.Error()
+	}
 	pre := map[string]int{}
 	for _, v := range rep.Violations {
 		if r.inputDRC[v.Rule+"|"+v.Message] {

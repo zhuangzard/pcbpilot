@@ -290,6 +290,228 @@ class ValidatePoursAndNetclasses(unittest.TestCase):
             self.assertTrue(has(bridge.validate_netclasses(req)[0], sub), (req, sub))
 
 
+# ── netclass sizes: integer nm, board floors, partial classes ─────────────
+
+FIELDS = ("TrackWidth", "Clearance", "ViaDiameter", "ViaDrill")
+
+
+class NC:
+    """A KiCad 9+ NETCLASS: optional fields, priority (lower wins)."""
+
+    def __init__(self, name, init=True, **vals):
+        self.name, self.prio, self.v = name, 0, dict(vals)
+        if init:  # KiCad's built-in defaults
+            for k, d in zip(FIELDS, (200000, 200000, 600000, 300000)):
+                self.v.setdefault(k, d)
+
+    def GetName(self):
+        return self.name
+
+    def SetPriority(self, p):
+        self.prio = p
+
+    def GetPriority(self):
+        return self.prio
+
+    def SetDescription(self, d):
+        pass
+
+    def __getattr__(self, attr):
+        for pre in ("Has", "Get", "Set"):
+            if attr.startswith(pre) and attr[len(pre):] in FIELDS:
+                f = attr[len(pre):]
+                if pre == "Has":
+                    return lambda: f in self.v
+                if pre == "Get":
+                    return lambda: self.v.get(f, 0)
+                return lambda x: self.v.__setitem__(f, x)
+        raise AttributeError(attr)
+
+
+class NS:
+    """NET_SETTINGS: exact-name patterns; the effective class is the
+    composite of every matching class by priority, Default filling the rest."""
+
+    def __init__(self, default, classes=(), assign=None):
+        self.default, self.classes, self.assign = default, {c.name: c for c in classes}, dict(assign or {})
+
+    def GetDefaultNetclass(self):
+        return self.default
+
+    def GetNetclasses(self):
+        return dict(self.classes)
+
+    def SetNetclass(self, name, nc):
+        self.classes[name] = nc
+
+    def SetNetclassPatternAssignment(self, net, name):
+        self.assign.setdefault(net, []).append(name)
+
+    def ClearAllCaches(self):
+        pass
+
+    def GetEffectiveNetClass(self, net):
+        cls = sorted((self.classes[n] for n in self.assign.get(net, [])), key=lambda c: c.prio)
+        out = NC(",".join(c.name for c in cls) or "Default", False)
+        for c in cls + [self.default]:
+            for f in FIELDS:
+                if f in c.v and f not in out.v:
+                    out.v[f] = c.v[f]
+        return out
+
+
+class DS:
+    def __init__(self, track=0, clr=0, hole=0, via=0, ring=0):
+        self.m_TrackMinWidth, self.m_MinClearance = track, clr
+        self.m_MinThroughDrill, self.m_ViasMinSize, self.m_ViasMinAnnularWidth = hole, via, ring
+
+
+class NetclassPlan(unittest.TestCase):
+    def setUp(self):
+        self.saved = getattr(fake, "NETCLASS", None)
+        fake.NETCLASS = NC
+
+    def tearDown(self):
+        fake.NETCLASS = self.saved
+
+    def plan(self, ds, ns, names, reqs):
+        missing, raised = [], []
+        groups, floored = bridge.class_plan(ds, ns, set(names), reqs, missing, raised)
+        return groups, floored, missing
+
+    def test_floors_survive_mil_rounding(self):
+        # 0.2 mm track / 0.127 mm clearance / 0.5 mm hole are not whole
+        # hundredths of a mil: 7.87 mil would be 199898 nm < 200000.
+        ds = DS(track=200000, clr=127000, hole=500000, via=900000, ring=50000)
+        ns = NS(NC("Default", True, TrackWidth=150000, Clearance=100000, ViaDiameter=800000, ViaDrill=400000))
+        groups, _, _ = self.plan(ds, ns, ["A"], {"A": {"outerMil": 7.87, "innerMil": 7.87, "minMil": 7.0, "clearanceMil": 4.99,
+                                                      "viaDiaMil": 35.43, "viaDrillMil": 19.68}})
+        (key, nets), = groups.items()
+        w, inner, mn, c, outer, vdia, vdrill = key
+        self.assertEqual(nets, ["A"])
+        self.assertEqual((w, inner, mn, c), (200000, 200000, 200000, 127000))
+        self.assertEqual((vdia, vdrill), (900000, 500000))
+        self.assertTrue(all(isinstance(v, int) for v in key), key)
+        self.assertEqual(bridge.mm_of_nm(w), "0.2")
+
+    def test_inner_width_floored(self):
+        ds = DS(track=200000)
+        ns = NS(NC("Default", True, TrackWidth=100000))
+        groups, _, _ = self.plan(ds, ns, ["A"], {"A": {"outerMil": 10, "innerMil": 5}})
+        (key,) = groups
+        self.assertEqual(key[1], 200000)  # inner 5 mil = 127000 nm < 0.2 mm
+
+    def test_partial_and_multiple_classes(self):
+        ds = DS(hole=500000, via=900000, ring=50000)
+        dn = NC("Default", True, ViaDiameter=600000, ViaDrill=300000)
+        dia_only = NC("DiaOnly", False, ViaDiameter=1000000)
+        drill_only = NC("DrillOnly", False, ViaDrill=600000)
+        thin = NC("Thin", False, ViaDiameter=950000, ViaDrill=900000)
+        dia_only.prio, drill_only.prio = 1, 2
+        ns = NS(dn, [dia_only, drill_only, thin],
+                {"A": ["DiaOnly"], "B": ["DrillOnly"], "C": ["DiaOnly", "DrillOnly"], "D": ["Thin"]})
+        names = ["", "A", "B", "C", "D", "E", "I"]
+        _, floored, _ = self.plan(ds, ns, names, {"I": {"outerMil": 10}})
+        eff = {n: bridge.effective_sizes(ns, n)[3:] for n in names if n}
+        # A: 1.0 / Default 0.3 -> hole floor. B: Default 0.6 / 0.6 -> min via
+        # 0.9 (ring 0.6 + 0.1 = 0.7 is lower). C: both classes, 1.0 / 0.6, is
+        # fine. D: ring 0.025 -> 1.0. E: plain Default -> 0.9 / 0.5.
+        self.assertEqual(eff["A"], (1000000, 500000))
+        self.assertEqual(eff["B"], (900000, 600000))
+        self.assertEqual(eff["C"], (1000000, 600000))
+        self.assertEqual(eff["D"], (1000000, 900000))
+        self.assertEqual(eff["E"], (900000, 500000))
+        self.assertFalse(any(n.startswith("PPF_") for n in ns.assign.get("C", [])))
+        # Default is floored in place (the DSN declares its padstack whatever
+        # uses it); only D needs a via-only override class.
+        self.assertEqual((dn.GetViaDiameter(), dn.GetViaDrill()), (900000, 500000))
+        self.assertTrue(floored[0].startswith("Default: track/clearance/via"), floored)
+        self.assertEqual([n for n in ns.assign if any(c.startswith("PPF_") for c in ns.assign[n])], ["D"])
+        # The intent net is left to its PP class (class_plan's groups).
+        self.assertFalse(any(n.startswith("PPF_") for n in ns.assign.get("I", [])))
+
+    def test_non_intent_and_domain_nets_get_track_and_clearance_floors(self):
+        # Default 0.1 / 0.1 mm and a user class "Thin" with a 0.12 mm track on
+        # a domain-only net: neither is an intent net, both must still meet
+        # the board's 0.2 mm track / 0.15 mm clearance.
+        ds = DS(track=200000, clr=150000)
+        dn = NC("Default", True, TrackWidth=100000, Clearance=100000)
+        thin = NC("Thin", False, TrackWidth=120000)
+        ns = NS(dn, [thin, NC("PPD_hv", False)], {"HV1": ["Thin", "PPD_hv"], "WIDE": ["Wide"]})
+        ns.classes["Wide"] = NC("Wide", False, TrackWidth=300000, Clearance=250000)
+        names = ["GND", "HV1", "WIDE"]
+        self.plan(ds, ns, names, {})
+        for n in names:
+            _, w, c, _, _ = bridge.effective_sizes(ns, n)
+            self.assertGreaterEqual(w, 200000, n)
+            self.assertGreaterEqual(c, 150000, n)
+        self.assertEqual(bridge.effective_sizes(ns, "WIDE")[1:3], (300000, 250000))  # never lowered
+        self.assertEqual(bridge.check_effective(ds, ns, names, []), [])
+
+    def test_floor_class_names_are_exact(self):
+        # 1.0 mm / 0.5001 mm and 1.0009 mm / 0.5 mm are distinct pairs; µm
+        # names would give both ..._1000_500.
+        ds = DS(hole=500000, via=1000000, ring=50000)
+        dn = NC("Default", True, ViaDiameter=1000000, ViaDrill=500000)
+        a = NC("A", False, ViaDiameter=599000, ViaDrill=500100)  # -> 1.0 mm / 0.5001 mm
+        b = NC("B", False, ViaDiameter=1000900, ViaDrill=300000)  # -> 1.0009 mm / 0.5 mm
+        ns = NS(dn, [a, b], {"N1": ["A"], "N2": ["B"]})
+        self.plan(ds, ns, ["N1", "N2"], {})
+        e1, e2 = bridge.effective_sizes(ns, "N1"), bridge.effective_sizes(ns, "N2")
+        self.assertEqual(e1[3:], (1000000, 500100))
+        self.assertEqual(e2[3:], (1000900, 500000))
+        ppf = sorted(n for n in ns.classes if n.startswith("PPF_"))
+        self.assertEqual(len(ppf), 2, ppf)
+        self.assertTrue(any(n.endswith("_1000000_500100") for n in ppf) and any(n.endswith("_1000900_500000") for n in ppf), ppf)
+
+    def test_generated_classes_outrank_every_project_class(self):
+        # A project class at priority -2000000 with a small via and clearance
+        # must not override PP / PPF; check_effective catches one that would.
+        ds = DS(track=200000, clr=150000, hole=500000, via=900000, ring=50000)
+        dn = NC("Default", True, TrackWidth=250000, Clearance=200000, ViaDiameter=1000000, ViaDrill=500000)
+        boss = NC("Boss", True, TrackWidth=100000, Clearance=100000, ViaDiameter=600000, ViaDrill=300000)
+        boss.prio = -2000000
+        ns = NS(dn, [boss], {"I": ["Boss"], "O": ["Boss"]})
+        prio = bridge.class_priorities(ns)
+        self.assertLess(max(prio.values()), -2000000)
+        missing, raised = [], []
+        groups, _ = bridge.class_plan(ds, ns, {"I", "O"}, {"I": {"outerMil": 10, "clearanceMil": 8}}, missing, raised, prio)
+        (key, nets), = groups.items()
+        pp = NC("PP1_W10", False, TrackWidth=key[0], Clearance=key[3], ViaDiameter=key[5], ViaDrill=key[6])
+        pp.prio = prio["PP"]
+        ns.SetNetclass(pp.name, pp)
+        ns.SetNetclassPatternAssignment("I", pp.name)
+        q = {"track": key[0], "clearance": key[3], "viaDiameter": key[5], "viaDrill": key[6]}
+        classes = [{"name": pp.name, "nets": ["I"], "nm": q}]
+        self.assertEqual(bridge.check_effective(ds, ns, {"I", "O"}, classes), [])
+        self.assertEqual(bridge.effective_sizes(ns, "O")[1:], (200000, 150000, 900000, 500000))
+        # The same PP class below the project class: caught, not shipped.
+        pp.prio = -1000000
+        bad = bridge.check_effective(ds, ns, {"I", "O"}, classes)
+        self.assertTrue(bad and bad[0].startswith("I: effective class Boss"), bad)
+
+    def test_no_valueless_netclass_is_refused(self):
+        def old_netclass(name, *init):
+            if init:
+                raise TypeError("NETCLASS() takes 1 argument")
+            return NC(name)
+        fake.NETCLASS = old_netclass
+        with self.assertRaises(bridge.UnsupportedKiCad):
+            bridge.empty_netclass("PPD_x")
+        import tempfile
+        d = tempfile.mkdtemp()
+        reqs = os.path.join(d, "reqs.json")
+        with open(reqs, "w") as f:
+            f.write('{"GND": {"outerMil": 10}}')
+        loaded = []
+        fake.LoadBoard = lambda p: loaded.append(p)
+        res = bridge.netclasses(os.path.join(d, "b.kicad_pcb"), reqs, os.path.join(d, "out.kicad_pcb"))
+        self.assertFalse(res["ok"])
+        self.assertIn("KiCad 9", res["error"])
+        self.assertEqual(loaded, [])  # refused before the board is loaded or anything written
+        self.assertFalse(os.path.exists(os.path.join(d, "out.kicad_pcb")))
+
+
 import place  # noqa: E402  (same fake pcbnew)
 
 

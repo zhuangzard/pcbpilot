@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -23,6 +24,11 @@ type Violation struct {
 	Objs     []string `json:"objs,omitempty"` // item uuids
 	Message  string   `json:"message,omitempty"`
 	Section  string   `json:"section"` // violations | unconnected_items | schematic_parity
+	// Excluded: the board's drc_exclusions cover the item (kicad-cli
+	// reports it only with --severity-all / --severity-exclusions);
+	// Comment is the exclusion's note.
+	Excluded bool   `json:"excluded,omitempty"`
+	Comment  string `json:"comment,omitempty"`
 }
 
 // DRCReport is a parsed `kicad-cli pcb drc --format json` report.
@@ -32,6 +38,10 @@ type DRCReport struct {
 	Total        int            `json:"total"`
 	Counts       map[string]int `json:"counts"`
 	Violations   []Violation    `json:"violations"`
+	// ExcludedItems are the items of any section the project's
+	// drc_exclusions cover: never in Violations, Total or Counts; callers
+	// judge them by the project's DRCPolicy.
+	ExcludedItems []Violation `json:"excludedItems,omitempty"`
 }
 
 type drcJSONItem struct {
@@ -48,6 +58,8 @@ type drcJSONViolation struct {
 	Severity    string        `json:"severity"`
 	Type        string        `json:"type"`
 	Items       []drcJSONItem `json:"items"`
+	Excluded    bool          `json:"excluded"`
+	Comment     string        `json:"comment"`
 }
 
 var (
@@ -131,7 +143,8 @@ func ParseDRCWith(data []byte, o DRCParseOptions) (*DRCReport, error) {
 	rep := &DRCReport{KiCadVersion: r.Version, Units: r.Units, Counts: map[string]int{}}
 	add := func(section string, vs []drcJSONViolation) {
 		for _, v := range vs {
-			fv := Violation{Rule: v.Type, Severity: v.Severity, Message: v.Description, Section: section}
+			fv := Violation{Rule: v.Type, Severity: v.Severity, Message: v.Description, Section: section,
+				Excluded: v.Excluded || v.Severity == "exclusion", Comment: v.Comment}
 			if fv.Rule == "" {
 				fv.Rule = section
 			}
@@ -161,6 +174,10 @@ func ParseDRCWith(data []byte, o DRCParseOptions) (*DRCReport, error) {
 			// The item descriptions carry what the summary line does not.
 			for _, it := range v.Items {
 				fv.Message += "; " + it.Description
+			}
+			if fv.Excluded {
+				rep.ExcludedItems = append(rep.ExcludedItems, fv)
+				continue
 			}
 			rep.Violations = append(rep.Violations, fv)
 			rep.Counts[fv.Rule]++
@@ -311,4 +328,71 @@ func (r *DRCReport) SplitErrors() (*DRCReport, map[string]int, int) {
 	}
 	errs.Total = len(errs.Violations)
 	return errs, warn, n
+}
+
+// Excluded lists the report's excluded items, from every section.
+func (r *DRCReport) Excluded() []Violation { return r.ExcludedItems }
+
+// DRCExclusion is one board.design_settings.drc_exclusions entry of a
+// .kicad_pro: "<rule>|<x>|<y>|<uuid>|<uuid>" and its comment.
+type DRCExclusion struct {
+	Rule    string `json:"rule"`
+	Key     string `json:"key"`
+	Comment string `json:"comment,omitempty"`
+}
+
+// DRCPolicy is what a project tells KiCad's DRC not to report: its
+// exclusions and the rules whose severity is "ignore".
+type DRCPolicy struct {
+	Exclusions []DRCExclusion `json:"exclusions,omitempty"`
+	Ignored    []string       `json:"ignored,omitempty"`
+	// Downgraded: rules the project sets to "warning".
+	Downgraded []string `json:"downgraded,omitempty"`
+}
+
+// ReadDRCPolicy reads the DRC policy of a .kicad_pro. drc_exclusions is a
+// list of keys (KiCad 6–8) or of [key, comment] pairs (KiCad 9+).
+func ReadDRCPolicy(pro string) (*DRCPolicy, error) {
+	data, err := os.ReadFile(pro)
+	if err != nil {
+		return nil, err
+	}
+	var raw struct {
+		Board struct {
+			DesignSettings struct {
+				Exclusions []json.RawMessage `json:"drc_exclusions"`
+				Severities map[string]string `json:"rule_severities"`
+			} `json:"design_settings"`
+		} `json:"board"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("%s: %w", pro, err)
+	}
+	p := &DRCPolicy{}
+	for i, e := range raw.Board.DesignSettings.Exclusions {
+		var key, comment string
+		var pair []string
+		if err := json.Unmarshal(e, &key); err != nil {
+			if err := json.Unmarshal(e, &pair); err != nil || len(pair) == 0 {
+				return nil, fmt.Errorf("%s: drc_exclusions[%d] is neither a key nor a [key, comment] pair", pro, i)
+			}
+			key = pair[0]
+			if len(pair) > 1 {
+				comment = pair[1]
+			}
+		}
+		rule, _, _ := strings.Cut(key, "|")
+		p.Exclusions = append(p.Exclusions, DRCExclusion{Rule: rule, Key: key, Comment: comment})
+	}
+	for rule, sev := range raw.Board.DesignSettings.Severities {
+		switch strings.ToLower(sev) {
+		case "ignore":
+			p.Ignored = append(p.Ignored, rule)
+		case "warning":
+			p.Downgraded = append(p.Downgraded, rule)
+		}
+	}
+	sort.Strings(p.Ignored)
+	sort.Strings(p.Downgraded)
+	return p, nil
 }

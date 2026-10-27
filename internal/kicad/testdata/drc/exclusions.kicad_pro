@@ -1,0 +1,45 @@
+{
+  "board": {
+    "design_settings": {
+      "drc_exclusions": [
+        [
+          "courtyards_overlap|100221000|45955000|11659109-eea0-488c-af3a-a134aa53be7b|86b7aa3e-5fae-4956-9584-486046f4c3e7",
+          "Intentional Overlap"
+        ],
+        [
+          "clearance|10000000|20000000|00000000-0000-4000-8000-0000000000c1|00000000-0000-4000-8000-0000000000c2",
+          "too close on purpose"
+        ],
+        "via_dangling|130959409|65559501|438e11bc-6c89-48ba-9c13-e6b8852c4413|00000000-0000-0000-0000-000000000000",
+        [
+          "unconnected_items|30000000|40000000|00000000-0000-4000-8000-0000000000d1|00000000-0000-4000-8000-0000000000d2",
+          "joined by the pour"
+        ],
+        [
+          "extra_footprint|5000000|5000000|00000000-0000-4000-8000-0000000000e1|00000000-0000-0000-0000-000000000000",
+          "fiducial"
+        ],
+        [
+          "via_diameter|40000000|50000000|00000000-0000-4000-8000-0000000000f1|00000000-0000-0000-0000-000000000000",
+          "small via"
+        ],
+        [
+          "track_width|41000000|50000000|00000000-0000-4000-8000-0000000000f2|00000000-0000-0000-0000-000000000000",
+          "thin track"
+        ]
+      ],
+      "rule_severities": {
+        "clearance": "error",
+        "unconnected_items": "ignore",
+        "missing_courtyard": "ignore",
+        "silk_overlap": "warning",
+        "track_width": "ignore",
+        "annular_width": "ignore",
+        "drill_out_of_range": "warning",
+        "missing_footprint": "warning",
+        "pth_inside_courtyard": "warning",
+        "made_up_rule": "ignore"
+      }
+    }
+  }
+}

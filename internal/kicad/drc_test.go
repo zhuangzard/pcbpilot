@@ -155,3 +155,54 @@ func TestDRCSeverityFakeCLI(t *testing.T) {
 		t.Fatalf("unremovable old report: %+v %v", rep, err)
 	}
 }
+
+// kicad-cli --severity-all reports excluded items with "excluded": true and
+// their original severity (KiCad's cm5_minima demo): they are not errors of
+// the report, they are judged by the project's DRC policy.
+func TestParseDRCExcludedItems(t *testing.T) {
+	rep, err := ParseDRC(readDRCFixture(t, "drc/exclusions-all.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ex := rep.Excluded()
+	if len(ex) != 4 || ex[0].Rule != "courtyards_overlap" || ex[0].Comment != "Intentional Overlap" || ex[1].Rule != "clearance" ||
+		ex[2].Rule != "unconnected_items" || ex[2].Section != "unconnected_items" || ex[3].Rule != "extra_footprint" || ex[3].Section != "schematic_parity" {
+		t.Fatalf("excluded: %+v", ex)
+	}
+	// Excluded items of every section stay out of the report's totals.
+	if rep.Total != 2 || rep.Counts["unconnected_items"] != 0 || rep.Counts["extra_footprint"] != 0 || rep.Counts["clearance"] != 0 {
+		t.Fatalf("report counts excluded items: %d %v", rep.Total, rep.Counts)
+	}
+	errs, warn, n := rep.SplitErrors()
+	if errs.Total != 1 || errs.Counts["invalid_outline"] != 1 || n != 1 || warn["via_dangling"] != 1 {
+		t.Fatalf("split: %+v %v %d", errs, warn, n)
+	}
+}
+
+func TestReadDRCPolicy(t *testing.T) {
+	p, err := ReadDRCPolicy(filepath.Join("testdata", "drc", "exclusions.kicad_pro"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Exclusions) != 7 || p.Exclusions[1].Rule != "clearance" || p.Exclusions[1].Comment != "too close on purpose" ||
+		p.Exclusions[2].Rule != "via_dangling" || p.Exclusions[2].Comment != "" {
+		t.Fatalf("exclusions: %+v", p.Exclusions)
+	}
+	if strings.Join(p.Ignored, ",") != "annular_width,made_up_rule,missing_courtyard,track_width,unconnected_items" ||
+		strings.Join(p.Downgraded, ",") != "drill_out_of_range,missing_footprint,pth_inside_courtyard,silk_overlap" {
+		t.Fatalf("ignored %v downgraded %v", p.Ignored, p.Downgraded)
+	}
+	bad := filepath.Join(t.TempDir(), "bad.kicad_pro")
+	_ = os.WriteFile(bad, []byte(`{"board":{"design_settings":{"drc_exclusions":[7]}}}`), 0o644)
+	if _, err := ReadDRCPolicy(bad); err == nil {
+		t.Fatal("a malformed drc_exclusions entry was accepted")
+	}
+	// KiCad's cm5_minima demo: 5 exclusions (courtyards, test-point vias).
+	if demos := kicadDemosDir(); demos != "" {
+		if p, err := ReadDRCPolicy(filepath.Join(demos, "cm5_minima", "CM5_MINIMA_3.kicad_pro")); err == nil {
+			if len(p.Exclusions) != 5 || p.Exclusions[0].Rule != "courtyards_overlap" || p.Exclusions[0].Comment != "Intentional Overlap" {
+				t.Fatalf("cm5_minima: %+v", p.Exclusions)
+			}
+		}
+	}
+}
