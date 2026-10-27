@@ -70,9 +70,14 @@ func installedComponents(daemonVersion, userHome string) []Component {
 	// Same client list and version source as the self-updater and
 	// `pcbpilot update --check` (selfupdate.Targets): a copied install reads its
 	// .version marker, a symlinked source checkout its SKILL.md metadata.version.
+	// One row per public Skill, so the table is aligned only when all are current.
 	targets := selfupdate.Targets(true)
 	for _, t := range targets {
-		c := Component{Name: "Skill (" + skillClientLabel(t.Client) + ")", Version: t.Installed, Where: t.Dir, Align: alignOf(t.Installed, daemonVersion)}
+		name := "Skill (" + skillClientLabel(t.Client) + ")"
+		if t.Skill != selfupdate.SkillName {
+			name = "Skill " + t.Skill + " (" + skillClientLabel(t.Client) + ")"
+		}
+		c := Component{Name: name, Version: t.Installed, Where: t.Dir, Align: alignOf(t.Installed, daemonVersion)}
 		if t.Linked != "" {
 			c.Align, c.Detail = "linked", "linked (source) → "+t.Linked+" — updated by git pull"
 		}

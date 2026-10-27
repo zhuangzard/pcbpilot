@@ -2,6 +2,7 @@
 """Link checkout Skills, preserving release installs and unrelated checkouts."""
 
 import argparse
+import json
 import os
 from pathlib import Path
 
@@ -9,12 +10,24 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 
 
+def public_skills(repo: Path) -> set[str]:
+    """Names listed in .agents/skills/public-skills.json (the router plus focused Skills)."""
+    manifest = repo / ".agents/skills/public-skills.json"
+    if not manifest.is_file():
+        return {"pcbpilot"}
+    skills = json.loads(manifest.read_text(encoding="utf-8")).get("skills")
+    if not isinstance(skills, list) or not all(isinstance(name, str) for name in skills):
+        raise ValueError(f"{manifest}: skills must be a list of names")
+    return set(skills)
+
+
 def skill_sources(repo: Path, scope: str = "repo") -> list[Path]:
+    design = public_skills(repo) if scope == "design" else set()
     sources = [
         path.resolve()
         for path in sorted((repo / ".agents/skills").glob("*"))
         if not path.is_symlink() and path.is_dir() and (path / "SKILL.md").is_file()
-        and (scope == "all" or (scope == "design" and path.name == "pcbpilot")
+        and (scope == "all" or (scope == "design" and path.name in design)
              or (scope == "repo" and path.name.startswith("pcbpilot-repo-")))
     ]
     if not sources:
@@ -113,7 +126,7 @@ def main() -> int:
     destination.add_argument("--skills-dir", type=Path, help="custom user-level Skill discovery directory")
     parser.add_argument("--dry-run", action="store_true", help="validate and print destinations without writing")
     parser.add_argument("--scope", choices=("repo", "design", "all"), default="repo",
-                        help="repo collaboration Skills (default), public design Skill, or all checkout Skills")
+                        help="repo collaboration Skills (default), public design Skills (public-skills.json), or all checkout Skills")
     args = parser.parse_args()
     try:
         sources = skill_sources(REPO, args.scope)

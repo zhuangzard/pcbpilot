@@ -55,6 +55,7 @@ type updateReport struct {
 // "installed" side is filled in.
 type updateSkillRow struct {
 	Client    string `json:"client"`
+	Skill     string `json:"skill"`
 	Dir       string `json:"dir"`
 	From      string `json:"from,omitempty"`      // version before this run (apply mode)
 	Installed string `json:"installed,omitempty"` // version on disk after this run
@@ -395,10 +396,13 @@ func selectComponents(cliOnly, skillOnly bool, only, skip []string) (map[string]
 func fillApplyReport(rep *updateReport, res applyResult) {
 	rep.CLI = res.CLI
 	for _, o := range res.Skills {
-		row := updateSkillRow{Client: o.Client, Dir: o.Dir, From: o.From, Present: o.Status != "skipped", Status: o.Status, Err: o.Err, Linked: o.Linked}
+		row := updateSkillRow{Client: o.Client, Skill: o.Skill, Dir: o.Dir, From: o.From, Present: o.Status != "skipped" && o.Status != "removed",
+			Status: o.Status, Err: o.Err, Linked: o.Linked}
 		switch o.Status {
 		case "updated", "created", "up-to-date":
 			row.Installed = o.To
+		case "removed":
+			row.Installed = ""
 		default:
 			row.Installed = o.From
 		}
@@ -553,8 +557,12 @@ func checkSkills(target string, clients []string) []updateSkillRow {
 		if len(want) > 0 && !want[t.Client] {
 			continue
 		}
-		row := updateSkillRow{Client: t.Client, Dir: t.Dir, Installed: t.Installed, Present: t.Present, Linked: t.Linked}
+		row := updateSkillRow{Client: t.Client, Skill: t.Skill, Dir: t.Dir, Installed: t.Installed, Present: t.Present, Linked: t.Linked}
 		switch {
+		case !t.Present && t.Skill != selfupdate.SkillName && selfupdate.ClientInstalled(t.Client):
+			// A focused Skill missing next to an installed router: the update adds
+			// it, and until then the client is not aligned.
+			row.Status = "behind"
 		case !t.Present:
 			row.Status = "not-installed"
 		case t.Linked != "":
@@ -744,14 +752,21 @@ func updateNotes(rep updateReport) []string {
 		}
 	}
 	for _, s := range rep.Skills {
+		label := selfupdate.SkillLabel(s.Client, s.Skill)
 		if s.Status == "preserved" {
-			notes = append(notes, fmt.Sprintf("skill %s kept local content and its previous version marker; release parity is not claimed", s.Client))
+			notes = append(notes, fmt.Sprintf("skill %s kept local content and its previous version marker; release parity is not claimed", label))
 		}
-		if s.Status == "not-installed" {
+		// One note per client: focused Skills follow the router.
+		if s.Status == "not-installed" && (s.Skill == "" || s.Skill == selfupdate.SkillName) {
 			notes = append(notes, fmt.Sprintf("skill not installed for %s — `pcbpilot update --create-missing` to add %s", s.Client, s.Dir))
 		}
-		if s.Status == "skipped" && s.Err != "" {
-			notes = append(notes, fmt.Sprintf("skill %s skipped (%s) — `pcbpilot update --create-missing` to install it", s.Client, s.Err))
+		if s.Status == "skipped" && s.Err == "not installed" && (s.Skill == "" || s.Skill == selfupdate.SkillName) {
+			notes = append(notes, fmt.Sprintf("skill %s skipped (%s) — `pcbpilot update --create-missing` to install it", label, s.Err))
+		} else if s.Status == "skipped" && s.Err != "" && s.Err != "not installed" {
+			notes = append(notes, fmt.Sprintf("skill %s skipped: %s", label, s.Err))
+		}
+		if s.Status == "kept" {
+			notes = append(notes, fmt.Sprintf("retired skill %s left in place: %s", label, s.Err))
 		}
 	}
 	return notes
@@ -788,7 +803,7 @@ func printCheckReport(w io.Writer, rep updateReport) {
 		if s.Linked != "" {
 			where += "  (linked to " + s.Linked + ")"
 		}
-		tableRow(w, "skill:"+s.Client, s.Status, ver, where)
+		tableRow(w, "skill:"+selfupdate.SkillLabel(s.Client, s.Skill), s.Status, ver, where)
 	}
 	if m := rep.MCP; m != nil {
 		ver := orDash(m.Installed)

@@ -1,10 +1,21 @@
 # Skill 设计
 
-`.agents/skills/pcbpilot/` 是唯一公开设计入口，CLI、daemon 和 Connector 为它服务。入口保持短小，
-负责选择样例、说明参数入口、调用 typed 工具和安排独立验证；具体知识放在按需读取的参考与样例中。
+公开 Skill 由一个路由 Skill `.agents/skills/pcbpilot/` 加若干聚焦公开 Skill 组成，清单是
+`.agents/skills/public-skills.json`。`pcbpilot` 是设计入口，CLI、daemon 和 Connector 为它服务。入口
+保持短小，负责选择样例、说明参数入口、调用 typed 工具、安排独立验证，并把评审、制造输出、库、
+KiCad 原理图/PCB、仿真报告等专项任务路由到对应的聚焦 Skill；具体知识放在按需读取的参考与样例中。
+
+## 公开 Skill 的边界
+
+- 一个 router + 多个聚焦 Skill；聚焦 Skill 名称为 `pcbpilot-<slug>`，各自拥有自己的 references。
+- 共享知识只有一个家，通常是 `pcbpilot/` 内的 reference、数据或脚本；聚焦 Skill 链接到它而不是
+  复制。允许的跨 Skill 链接只有“聚焦 Skill → `pcbpilot/`”，且两端都在清单中一起打包。
+- 全部公开 Skill 共用一个发布版本，与 CLI、MCP、connector 同版。
+- `pack-skill.py --check` 检查跨 Skill 链接和重复长段落；重复说明知识需要收回到一个位置。
+- 下线一个公开 Skill 时把名字移到清单的 `retired`，安装器只移除 pcbpilot 写入的同名目录。
 
 源码仓库另有 `.agents/skills/pcbpilot-repo-lookup` 与 `pcbpilot-repo-maintain`，分别提供跨项目
-查询与仓库维护，不拆分设计工作流、不随公开 Skill 发布。安装、文档归属与兼容入口见
+查询与仓库维护，不随公开 Skill 发布。安装、文档归属与兼容入口见
 [Agent 协作设计](agent-collaboration.md) 和 [文档索引](README.md)。
 
 ## 运行方式
@@ -73,5 +84,6 @@ Agent 按下列循环工作：
 改变底层命令、采集或算法时，同步相应样例、工具说明和覆盖边界。缺失 typed 能力时先查
 CLI help、action 和官方 API；可重复操作沉淀为 typed action 与 Cobra 子命令。
 
-修改 Skill 后运行 frontmatter/link 检查和 `python3 scripts/pack-skill.py --check`。这些检查只证明
+修改 Skill 后运行 frontmatter/link 检查和 `python3 scripts/pack-skill.py --check`（覆盖清单中的每个
+公开 Skill、跨 Skill 链接和重复段落）。这些检查只证明
 包结构和依赖完整；算法回归、现场复现和历史题迁移分别保留自己的证据。

@@ -14,7 +14,8 @@ skill ──▶ Go CLI/daemon ──WebSocket──▶ connector .eext ──▶
 - `AGENTS.md` 是仓库协作规则的规范源，`CLAUDE.md` 是它的相对软链接。
   已有布局验证交付经验按需读 [.agents/memory/workflow.md](.agents/memory/workflow.md)。
 - `.agents/` 保存仓库协作 Skill 与共享 Agent 资料；`.claude` 仅软链接到它，不维护副本。
-- 所有 Skill 的规范源统一放在 `.agents/skills/`；`pcbpilot/` 是其中唯一公开设计包。
+- 所有 Skill 的规范源统一放在 `.agents/skills/`；公开 Skill 由 `public-skills.json` 列出：`pcbpilot/` 是路由入口，
+  聚焦公开 Skill（`pcbpilot-<slug>/`）只链接 `pcbpilot/` 的共享文件、不复制内容。
   仓库查询和维护入口为 `.agents/skills/pcbpilot-repo-*/`，不进入公开 Skill 发布包。
 - 先从 [docs/README.md](docs/README.md) 按任务定位唯一维护位置；兼容设计和跨项目安装见
   [docs/agent-collaboration.md](docs/agent-collaboration.md)。改协作入口后运行 `make agent-check`。

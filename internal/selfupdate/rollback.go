@@ -1,7 +1,8 @@
 package selfupdate
 
 // Rollback snapshots: before any apply, the current binary, every present
-// (non-linked) skill dir and the MCP current link are copied to
+// (non-linked) skill dir — each public Skill of each client — and the MCP
+// current link are copied to
 // ~/.pcbpilot/rollback/<version>/. `pcbpilot update --rollback` and the
 // daemon's failed post-restart verify restore from it. The two newest
 // snapshots are kept.
@@ -11,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -18,6 +20,7 @@ import (
 
 type SnapshotSkill struct {
 	Client string `json:"client"`
+	Skill  string `json:"skill,omitempty"` // "" in snapshots from before focused Skills: the router
 	Dir    string `json:"dir"`
 	Saved  string `json:"saved"` // relative to the snapshot dir
 }
@@ -57,11 +60,11 @@ func TakeSnapshot(version, bin string) (Snapshot, error) {
 		if t.Linked != "" {
 			continue
 		}
-		rel := filepath.Join("skills", t.Client)
+		rel := filepath.Join("skills", t.Client, t.Skill)
 		if err := copyTree(t.Dir, filepath.Join(dir, rel), false, false); err != nil {
-			return s, fmt.Errorf("snapshot skill %s: %w", t.Client, err)
+			return s, fmt.Errorf("snapshot skill %s: %w", SkillLabel(t.Client, t.Skill), err)
 		}
-		s.Skills = append(s.Skills, SnapshotSkill{Client: t.Client, Dir: t.Dir, Saved: rel})
+		s.Skills = append(s.Skills, SnapshotSkill{Client: t.Client, Skill: t.Skill, Dir: t.Dir, Saved: rel})
 	}
 	if err := WriteJSON(filepath.Join(dir, "manifest.json"), s); err != nil {
 		return s, err
@@ -103,7 +106,9 @@ func LatestSnapshot(version string) (Snapshot, error) {
 	return best, nil
 }
 
-// RestoreSnapshot puts the saved binary, skill dirs and MCP link back.
+// RestoreSnapshot puts the saved binary, skill dirs and MCP link back. A public
+// Skill the snapshot did not hold for a client it covered was added by the
+// update being undone; it is removed when pcbpilot installed it (marker, no link).
 func RestoreSnapshot(_ context.Context, s Snapshot) ([]string, error) {
 	var restored, errs []string
 	if s.Bin != "" && s.SavedBin != "" {
@@ -123,11 +128,33 @@ func RestoreSnapshot(_ context.Context, s Snapshot) ([]string, error) {
 			restored = append(restored, "cli")
 		}
 	}
+	saved := map[string]bool{}
 	for _, sk := range s.Skills {
+		saved[filepath.Clean(sk.Dir)] = true
+		label := SkillLabel(sk.Client, sk.Skill)
 		if err := materializeTree(filepath.Join(s.Dir, sk.Saved), sk.Dir); err != nil {
-			errs = append(errs, "skill "+sk.Client+": "+err.Error())
+			errs = append(errs, "skill "+label+": "+err.Error())
 		} else {
-			restored = append(restored, "skill:"+sk.Client)
+			restored = append(restored, "skill:"+label)
+		}
+	}
+	for _, sk := range s.Skills {
+		if sk.Skill != "" && sk.Skill != SkillName {
+			continue // one sweep per client, anchored at its router dir
+		}
+		base := filepath.Dir(sk.Dir)
+		known := PublicSkills()
+		for _, name := range slices.Concat(known.Skills, known.Retired) {
+			dir := filepath.Join(base, name)
+			if name == SkillName || saved[filepath.Clean(dir)] || !ownedSkillDir(dir) {
+				continue
+			}
+			label := SkillLabel(sk.Client, name)
+			if err := removeOwnedSkill(dir); err != nil {
+				errs = append(errs, "skill "+label+": "+err.Error())
+			} else {
+				restored = append(restored, "skill:"+label+" removed")
+			}
 		}
 	}
 	if s.MCPCurrent != "" && s.MCPCurrent != MCPCurrentTarget() {

@@ -40,7 +40,7 @@ Changelog。`release-build` 生成五平台 CLI、准确版本/UUID 的连接器
 | 资产 | 内容 | 谁用 |
 |---|---|---|
 | `pcbpilot_<os>_<arch>[.exe]` | CLI/daemon | `update` a 步、daemon 自更新 |
-| `skills.tar.gz` | 公共 Skill（`pcbpilot/` 根） | b 步 |
+| `skills.tar.gz` | 公开 Skill：根目录每个 Skill 一个目录（`pcbpilot/`、`pcbpilot-<slug>/`）加 `public-skills.json`；v0.10.x 更新器只装其中的 `pcbpilot/` | b 步 |
 | `mcp.tar.gz` | `mcp/`：src、package(-lock).json、`VERSION`（= 发布版本）、**生产 node_modules**（`npm ci --omit=dev`，纯 JS 无原生模块、去掉 `.bin` 链接、字节可复现；约 3 MB 压缩 / 24 MB 解压） | c 步：安装到 `~/.pcbpilot/mcp/<v>` + `current` 链接，只需 Node.js ≥ 20.17，不需要 npm 与联网安装依赖 |
 | `pcbpilot-connector.eext` | 连接器 | f 步下载到 `~/.pcbpilot/connector/`，人工导入 |
 | `install.sh` / `install.ps1` | 首装脚本（也安装 MCP、写 `~/.pcbpilot/install.json`） | 新机器 |
