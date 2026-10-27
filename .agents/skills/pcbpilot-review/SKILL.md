@@ -84,6 +84,8 @@ python <pcbpilot Skill 根>/scripts/pad-net-diff.py --sch out/conn.json --pcb ou
 - KiCad 的 `kicad netlist` 已把元件值放进 `device.name`，`intent derive` 不必再给 `--values`；`kicad sch-read` 的输出**不是**
   `--values` 格式（实测报 `cannot unmarshal array`）。
 - 人工审计（去耦、电源轨、接口电平、复位/启动脚、连接器脚序）引用 `intent.md` 的 findings 与 `sim.json`；逐条写出处。
+- KiCad 要看图或与上次评审比画面：`pcbpilot kicad render --sch <root> | --pcb <board> --out out/render [--compare <上次 render>]`
+  （副本上出图，只写 `--out`；`changed` 只说明画面动了，连接以网表为证据，见 [kicad.md](../pcbpilot/references/kicad.md) `kicad render` 节）。
 - `review-panel --stage design --requirements <需求.md> --evidence …` 只在用户给了需求文档、且同意把设计数据发给外部评审
   CLI（默认 codex、kimi、claude）时跑；否则记 “未运行（无需求文档/未授权）” = INCOMPLETE。
 

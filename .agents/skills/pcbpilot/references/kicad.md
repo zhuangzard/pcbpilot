@@ -106,6 +106,31 @@ sim 判 `sim-board-mismatch`、intent 报错、signoff-trace 判"ambiguous"失�
 signoff-continuity 失败（板上短路），不合并。显示名 `name` 只在能唯一解析回本网时才缩短，绝不等于别的网的身份或显示名。
 pad-net-diff 的大小写宽容只用于 EasyEDA 名（无 fullName）；KiCad 网名区分大小写。
 
+## 预览与视觉回归（`kicad render`）
+
+```bash
+pcbpilot kicad render --sch root.kicad_sch --out review/r1                 # 每页一张 SVG（<base>.svg、<base>-<子图路径>.svg）
+pcbpilot kicad render --pcb board.kicad_pcb [--side bottom] [--layers F.Cu,F.Silkscreen] [--png --dpi 150] --out review/b1
+pcbpilot kicad render --sch root.kicad_sch --out review/r2 --compare review/r1   # 出图后与基线比
+pcbpilot kicad render --out build/render --compare old/render              # 只比（例如两次 sch-build --render 的输出）
+```
+
+- 在工程**临时副本**上跑 kicad-cli（原目录不出现 `.kicad_prl`/锁文件），用隔离的空库表配置（默认配色，不受用户主题影响）。
+- **确定性**：kicad-cli 每次出图只有 `<title>` 里的出图时间（以及偶尔回显的临时路径）会变；pcbpilot 把它们去掉、统一 LF 与 `-0`，
+  同一输入两次出图逐字节相同（`TestRenderLive*` 在 pic_programmer 原理图+板、complex_hierarchy 上实测）。绘制顺序保留不排序。
+- PCB：`<base>-pcb-<side>.svg`（全部 `--layers` 叠在板框范围内）+ 每层一张 `<base>-pcb-<层>.svg`（带 Edge.Cuts 定位）；
+  默认层 `F.Cu,F.Mask,F.Silkscreen,Edge.Cuts`，`--side bottom` 用 B.* 并镜像。
+- PNG：只有板有（`kicad-cli pcb render` 3D 光追，按板框尺寸 × `--dpi` 定像素）。光追**不可逐字节复现**（10.0.6 实测同一板两次
+  像素不同），所以 `--compare` 只列出不比较。原理图没有 PNG：kicad-cli 不出原理图位图，pcbpilot 也不带 SVG 光栅化库。
+- `--out` 写 SVG + `render.json`（文件、sha256、绘制元素数）；再次渲染到同一目录只删 `render.json` 列出的文件，其他非空目录拒绝
+  （`RENDER_OUT_NOT_EMPTY`）。
+- `--compare` 逐文件：`identical`（规范化后字节相同）/ `changed`（结构化 SVG 比较：每个绘制元素连同排序后的属性、文字和所在
+  `<g>` 的样式作多重集合比较，给 `elementsAdded/elementsRemoved/changedElements` 和几条样例；只换了绘制顺序记 `reordered`）/
+  `added` / `removed` / `unreadable`。`verdict` 三态：全部 identical → `pass`（退出 0），有差异 → `fail`（6），一侧没有 SVG 或
+  文件解析不了 → `cannot-check`（5）；出图本身失败退出 1 并给 `error.code/fix`。两边渲染选项不同写进 `notes`。
+- SVG 变化只说明“画面动了”，不说明设计对错：连接是否变化以网表（`kicad netlist` / `sch-read`）为证据。
+- `kicad sch-build --render` / `sch-edit --render` 用同一个出图函数，`<out>/render/` 也是规范化的 SVG，可直接作 `--compare` 的两侧。
+
 ## 布线（`kicad route`）——与 `pcb auto route` + `pcb gate` 同序同算
 
 ```bash
