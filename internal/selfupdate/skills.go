@@ -59,7 +59,7 @@ func OverridePublicSkillsForTest(skills []string, retired ...string) (restore fu
 
 // legacySkillManifest describes an archive that predates public-skills.json.
 func legacySkillManifest() SkillManifest {
-	return SkillManifest{SchemaVersion: 1, Router: SkillName, Skills:        []string{SkillName, "pcbpilot-fab", "pcbpilot-kicad-pcb", "pcbpilot-kicad-schematic", "pcbpilot-library", "pcbpilot-review", "pcbpilot-sim-report"}, Retired: []string{}}
+	return SkillManifest{SchemaVersion: 1, Router: SkillName, Skills: []string{SkillName}, Retired: []string{}}
 }
 
 func (m SkillManifest) clone() SkillManifest {
