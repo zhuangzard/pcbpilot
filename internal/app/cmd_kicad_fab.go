@@ -33,6 +33,17 @@ KiCad 9 Gerber/drill and KiCad 10 BOM/CPL help articles):
   OUT/<board>-cpl.csv    Designator, Mid X, Mid Y, Layer, Rotation (mm)
   OUT/fab-report.json    what was written, warnings, applied overrides
 
+Every file is generated into a fresh staging directory and the zip holds only
+that run's output. A rerun replaces the files the previous run recorded in
+OUT/.pcbpilot-fab-manifest.json (so Gerbers of layers the board no longer has
+are removed) and leaves every other file in OUT alone; Gerber-looking files
+it does not own are reported, never zipped.
+
+The BOM and CPL must list the same designators, each exactly once: a part in
+one but not the other, a duplicate or an empty designator fails the run
+(codes CPL_NOT_IN_BOM, BOM_NOT_IN_CPL, CPL_DUPLICATE_REF, BOM_DUPLICATE_REF,
+CPL_EMPTY_REF, each with a fix) and nothing is written.
+
 LCSC numbers are read from the fields "LCSC Part #", "LCSC", "LCSC Part",
 "JLCPCB Part #" on the board footprints and, with --sch, the schematic symbols
 (schematic wins). Every placed part that is not DNP, not excluded from BOM and
@@ -76,6 +87,10 @@ Override file (JSON), designator entries win over footprint entries:
 				fmt.Fprintln(stderr, "     or mark the part DNP / exclude from BOM / exclude from position files; --no-assembly for bare boards")
 				return err
 			}
+			if errors.Is(err, kicad.ErrBOMCPLMismatch) {
+				printFabProblems(stderr, rep.Problems)
+				return err
+			}
 			if err != nil {
 				return err
 			}
@@ -83,6 +98,9 @@ Override file (JSON), designator entries win over footprint entries:
 			fmt.Fprintf(stdout, "gerber zip: %s (%d files)\n", rep.Zip, len(rep.ZipFiles))
 			if rep.BOM != "" {
 				fmt.Fprintf(stdout, "bom: %s (%d lines)\ncpl: %s (%d parts)\n", rep.BOM, rep.BOMLines, rep.CPL, rep.CPLParts)
+				if len(rep.CPLOmitted) > 0 {
+					fmt.Fprintf(stdout, "cpl: left out %d part(s) not assembled (DNP / excluded from BOM): %s\n", len(rep.CPLOmitted), strings.Join(rep.CPLOmitted, ", "))
+				}
 				for _, a := range rep.Overrides {
 					fmt.Fprintln(stdout, "cpl override:", a)
 				}
@@ -99,6 +117,13 @@ Override file (JSON), designator entries win over footprint entries:
 	f.BoolVar(&noAssembly, "no-assembly", false, "bare board: Gerber/drill zip only, no BOM/CPL and no LCSC check")
 	f.BoolVar(&verbose, "verbose", false, "show kicad-cli output")
 	return c
+}
+
+func printFabProblems(w io.Writer, probs []kicad.FabProblem) {
+	fmt.Fprintf(w, "%d BOM/CPL consistency problem(s):\n", len(probs))
+	for _, p := range probs {
+		fmt.Fprintf(w, "  %-18s %s\n  %-18s fix: %s\n", p.Code, p.Message, "", p.Fix)
+	}
 }
 
 func printLCSCProblems(w io.Writer, missing, invalid []kicad.MissingLCSC) {
