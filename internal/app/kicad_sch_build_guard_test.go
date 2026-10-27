@@ -630,3 +630,71 @@ func TestSchEditSaveDuringCommitPreparation(t *testing.T) {
 		t.Fatal("commit replaced a sheet saved during the discard checkpoint")
 	}
 }
+
+// Windows/macOS: a user's MYLIB.KICAD_SYM (upper-case extension) is the
+// generated mylib.kicad_sym; it must be in the snapshot, refused, and come
+// back from the override's checkpoint.
+func TestSchBuildUpperCaseExtensionOverwrite(t *testing.T) {
+	if !sbFoldCase {
+		t.Skip("case-sensitive file system")
+	}
+	sbNeedKicad(t)
+	out := filepath.Join(t.TempDir(), "p")
+	const name = "MYLIB.KICAD_SYM"
+	sbWriteRel(t, out, name, testSymLib)
+	if rep, err := runSchBuild(sbGuardSpec(), sbOptions{OutDir: out, NoIntent: true, PlannerBudget: 20000}, nil); err != nil || !rep.OK {
+		t.Fatalf("build: %v %+v", err, rep.Error)
+	}
+	if st := mustSbState(t, out); st.Manifest[name] == "" {
+		t.Fatalf("upper-case library not in the manifest: %v", st.Manifest)
+	}
+	spec := sbGuardSpec()
+	spec.Parts[0].Symbol = "mylib:R"
+	rep, err := runSchBuild(spec, sbOptions{OutDir: out, NoIntent: true, PlannerBudget: 20000}, nil)
+	if err != nil || rep.Error == nil || rep.Error.Code != "EXTERNAL_EDIT" || strings.Join(rep.External.Overwrites, ",") != name {
+		t.Fatalf("overwrite of %s: %v %+v %+v", name, err, rep.Error, rep.External)
+	}
+	if b, _ := os.ReadFile(filepath.Join(out, name)); string(b) != testSymLib {
+		t.Fatal("refused build changed the user library")
+	}
+	rep, err = runSchBuild(spec, sbOptions{OutDir: out, NoIntent: true, PlannerBudget: 20000, DiscardExternal: true}, nil)
+	if err != nil || !rep.OK || rep.External == nil || rep.External.Checkpoint == 0 {
+		t.Fatalf("override: %v %+v %+v", err, rep.Error, rep.External)
+	}
+	if b, _ := os.ReadFile(filepath.Join(out, "mylib.kicad_sym")); string(b) == testSymLib {
+		t.Fatal("override did not regenerate the library")
+	}
+	if _, err := restoreSbCheckpoint(out, rep.External.Checkpoint); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(out, name)); string(b) != testSymLib {
+		t.Fatal("restoring the pre-discard checkpoint did not bring the user library back")
+	}
+}
+
+// A write target the project-file filter does not classify is still
+// checked on its own and checkpointed by the override.
+func TestSbGuardChecksUnclassifiedTargets(t *testing.T) {
+	out := t.TempDir()
+	sbWriteRel(t, out, "p.kicad_sch", "v1")
+	sbWriteRel(t, out, "notes.dat", "user data")
+	st := sbFakeCommit(t, out, []string{"p.kicad_sch"})
+	stage := t.TempDir()
+	sbWriteRel(t, stage, "p.kicad_sch", "v2")
+	sbWriteRel(t, stage, "notes.dat", "generated")
+	g, f := sbGuardStart(out, st, sbOptions{}, &sbReport{})
+	if f != nil {
+		t.Fatal(f)
+	}
+	if _, f := g.beforeCommit(stage, []string{"notes.dat", "p.kicad_sch"}, nil, &sbReport{}); f == nil || f.Code != "EXTERNAL_EDIT" || !strings.Contains(f.Message, "notes.dat") {
+		t.Fatalf("unclassified target: %+v", f)
+	}
+	g, _ = sbGuardStart(out, st, sbOptions{DiscardExternal: true}, &sbReport{})
+	rep := &sbReport{}
+	if _, f := g.beforeCommit(stage, []string{"notes.dat", "p.kicad_sch"}, nil, rep); f != nil || rep.External == nil || rep.External.Checkpoint == 0 {
+		t.Fatalf("override: %+v %+v", f, rep.External)
+	}
+	if b, _ := os.ReadFile(filepath.Join(sbCheckpointDir(out), strconv.Itoa(rep.External.Checkpoint), "notes.dat")); string(b) != "user data" {
+		t.Fatal("checkpoint lacks the unclassified target")
+	}
+}

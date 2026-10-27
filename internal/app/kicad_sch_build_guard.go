@@ -84,6 +84,7 @@ func (x *sbExternalEdits) onlyProjectFile() bool {
 // could live in. KiCad's side files are not: .kicad_prl (view state, also
 // written by kicad-cli), ~*.lck (open-file locks), _autosave-*, *-bak.
 func sbProjectFile(name string) bool {
+	name = sbFoldName(name)
 	if strings.HasPrefix(name, "~") || strings.HasPrefix(name, "_autosave-") || strings.HasPrefix(name, "#") {
 		return false
 	}
@@ -110,7 +111,7 @@ var sbProjectVolatile = map[string][]string{"pcbnew": {"last_paths"}, "board": {
 // sbContentHash hashes a project file; .kicad_pro as canonical JSON (key
 // order and whitespace do not count) without the volatile fields.
 func sbContentHash(rel string, b []byte) string {
-	if strings.HasSuffix(rel, ".kicad_pro") {
+	if strings.HasSuffix(sbFoldName(rel), ".kicad_pro") {
 		var v map[string]any
 		if json.Unmarshal(b, &v) == nil {
 			for sec, keys := range sbProjectVolatile {
@@ -159,12 +160,13 @@ func sbTakeSnapshot(out string) (*sbSnapshot, error) {
 		}
 		for _, e := range ents {
 			n := e.Name()
+			ln, lrel := sbFoldName(n), sbFoldName(rel) // classification ignores case where the FS does
 			r := n
 			if rel != "" {
 				r = rel + "/" + n
 			}
 			if e.IsDir() {
-				if strings.HasPrefix(n, ".") || strings.HasSuffix(n, "-backups") {
+				if strings.HasPrefix(ln, ".") || strings.HasSuffix(ln, "-backups") {
 					continue
 				}
 				if err := walk(r); err != nil {
@@ -172,11 +174,11 @@ func sbTakeSnapshot(out string) (*sbSnapshot, error) {
 				}
 				continue
 			}
-			if strings.HasSuffix(n, ".lck") {
+			if strings.HasSuffix(ln, ".lck") {
 				s.Locks = append(s.Locks, r)
 				continue
 			}
-			mod := strings.HasSuffix(n, ".kicad_mod") && strings.HasSuffix(rel, ".pretty")
+			mod := strings.HasSuffix(ln, ".kicad_mod") && strings.HasSuffix(lrel, ".pretty")
 			if !sbProjectFile(n) && !mod {
 				continue
 			}
@@ -185,7 +187,7 @@ func sbTakeSnapshot(out string) (*sbSnapshot, error) {
 				return fmt.Errorf("read %s: %w", filepath.Join(dir, n), err)
 			}
 			s.Files[r] = sbContentHash(r, b)
-			if strings.HasSuffix(n, ".kicad_sch") {
+			if strings.HasSuffix(ln, ".kicad_sch") {
 				for _, m := range sbSheetFileRe.FindAllSubmatch(b, -1) {
 					refs = append(refs, filepath.Join(dir, filepath.FromSlash(string(m[1]))))
 				}
@@ -221,6 +223,14 @@ func (s *sbSnapshot) paths() []string {
 // sbFoldCase: the file system ignores case (Windows, macOS default), so
 // MYLIB.kicad_sym and a generated mylib.kicad_sym are the same file.
 var sbFoldCase = runtime.GOOS == "windows" || runtime.GOOS == "darwin"
+
+// sbFoldName lower-cases a name for classification where the FS ignores case.
+func sbFoldName(n string) string {
+	if sbFoldCase {
+		return strings.ToLower(n)
+	}
+	return n
+}
 
 // sbPathKey is a path's identity on this file system; reports keep the
 // original spelling.
@@ -497,14 +507,27 @@ func (g *sbGuard) beforeCommit(stage string, files, deletes []string, rep *sbRep
 		sbTestBeforeCommit(g.out)
 	}
 	touch := append(append([]string(nil), files...), deletes...)
-	x := sbDiff(g.baseline, g.basis, touch)
+	// every write/delete target on its own, whatever the project-file
+	// filter thinks of its name: an existing one joins the baseline
+	extra, err := sbReadTargets(g.out, g.baseline, touch)
+	if err != nil {
+		return nil, sbUnreadable(g.out, err)
+	}
+	base := &sbSnapshot{Files: map[string]string{}, Locks: g.baseline.Locks}
+	for f, h := range g.baseline.Files {
+		base.Files[f] = h
+	}
+	for f, h := range extra {
+		base.Files[f] = h
+	}
+	x := sbDiff(base, g.basis, touch)
 	x.Locks = nil
 	if x.any() {
 		rep.External = x
 		if !g.o.DiscardExternal {
 			return nil, g.refuse(x)
 		}
-		n, err := saveSbCheckpoint(g.out, g.baseline.paths(), "before-discard-external-edits")
+		n, err := saveSbCheckpoint(g.out, base.paths(), "before-discard-external-edits")
 		if err != nil {
 			return nil, &sbFailure{Code: "CHECKPOINT_FAILED", Message: "checkpoint before discarding external edits: " + err.Error(),
 				Fix: "nothing was written; free disk space or fix permissions on " + sbCheckpointDir(g.out) + " and re-run"}
@@ -531,7 +554,7 @@ func (g *sbGuard) beforeCommit(stage string, files, deletes []string, rep *sbRep
 	for _, f := range touch {
 		written[sbPathKey(f)] = true
 	}
-	for f, h := range g.baseline.Files {
+	for f, h := range base.Files {
 		if !written[sbPathKey(f)] {
 			man[f] = h
 		}
@@ -547,7 +570,14 @@ func (g *sbGuard) beforeCommit(stage string, files, deletes []string, rep *sbRep
 	if len(now.Locks) > 0 {
 		return nil, sbLockedByKicad(g.out, now.Locks)
 	}
-	if moved := sbMoved(g.baseline, now); len(moved) > 0 {
+	again, err := sbReadTargets(g.out, now, touch)
+	if err != nil {
+		return nil, sbUnreadable(g.out, err)
+	}
+	for f, h := range again {
+		now.Files[f] = h
+	}
+	if moved := sbMoved(base, now); len(moved) > 0 {
 		msg := g.out + " changed while sch-build ran: " + strings.Join(moved, ", ")
 		if x.Checkpoint > 0 {
 			msg += fmt.Sprintf(" (checkpoint %d was taken first and is kept)", x.Checkpoint)
@@ -556,4 +586,30 @@ func (g *sbGuard) beforeCommit(stage string, files, deletes []string, rep *sbRep
 			Fix: "nothing was written; if KiCad has the project open, save and close it there, then re-run"}
 	}
 	return man, nil
+}
+
+// sbReadTargets hashes the write/delete targets that exist in --out but are
+// not in snap (a name the project-file filter does not know). An entry that
+// cannot be read (a directory, no permission) fails closed.
+func sbReadTargets(out string, snap *sbSnapshot, targets []string) (map[string]string, error) {
+	known, _ := sbKeyed(snap.Files)
+	extra := map[string]string{}
+	for _, f := range targets {
+		if _, ok := known[sbPathKey(f)]; ok {
+			continue
+		}
+		p, err := sbSafeJoin(out, f)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := os.Lstat(p); os.IsNotExist(err) {
+			continue
+		}
+		b, err := sbReadFile(p)
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", p, err)
+		}
+		extra[f] = sbContentHash(f, b)
+	}
+	return extra, nil
 }
