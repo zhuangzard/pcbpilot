@@ -373,13 +373,13 @@ func TestKicadDRCGateSoftPolicyPasses(t *testing.T) {
 	}
 	for _, r := range []string{"via_diameter", "drill_out_of_range", "track_width", "annular_width", "hole_to_hole", "connection_width",
 		"solder_mask_bridge", "starved_thermal", "zones_intersect", "microvia_drill_out_of_range", "edge_clearance", "no_such_rule"} {
-		if drcRuleClass(r) != "hard" {
-			t.Errorf("%s is %s, want hard", r, drcRuleClass(r))
+		if kicad.DRCRuleClass(r) != "hard" {
+			t.Errorf("%s is %s, want hard", r, kicad.DRCRuleClass(r))
 		}
 	}
 	for _, r := range []string{"courtyards_overlap", "pth_inside_courtyard", "npth_inside_courtyard", "overlapping_pads", "footprint"} {
-		if drcRuleClass(r) != "soft" {
-			t.Errorf("%s is %s, want soft", r, drcRuleClass(r))
+		if kicad.DRCRuleClass(r) != "soft" {
+			t.Errorf("%s is %s, want soft", r, kicad.DRCRuleClass(r))
 		}
 	}
 }

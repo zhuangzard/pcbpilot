@@ -1,0 +1,23 @@
+{
+  "board": {
+    "design_settings": {
+      "drc_exclusions": [["courtyards_overlap|10000000|10000000|fp-r1|fp-c1", "intentional"]],
+      "rule_severities": {"silk_overlap": "ignore", "clearance": "error"},
+      "rules": {
+        "allow_microvias": false,
+        "min_clearance": 0.0,
+        "min_track_width": 0.2,
+        "min_through_hole_diameter": 0.3,
+        "min_microvia_drill": 0.1,
+        "min_via_annular_width": 0.13
+      }
+    }
+  },
+  "meta": {"filename": "board.kicad_pro", "version": 3},
+  "net_settings": {
+    "classes": [
+      {"name": "Default", "clearance": 0.2, "track_width": 0.25, "via_diameter": 0.6, "via_drill": 0.3},
+      {"name": "Fine", "clearance": 0.15, "track_width": 0.1}
+    ]
+  }
+}

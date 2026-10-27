@@ -29,6 +29,17 @@ type Violation struct {
 	// Comment is the exclusion's note.
 	Excluded bool   `json:"excluded,omitempty"`
 	Comment  string `json:"comment,omitempty"`
+	// Items are the report's items in order (Objs keeps only their uuids).
+	Items []DRCItem `json:"items,omitempty"`
+}
+
+// DRCItem is one object of a violation: KiCad's description ("Footprint
+// C2", "PTH pad 1 [VCC] of C1"), its uuid and its position (mil, y-up).
+type DRCItem struct {
+	Description string  `json:"description"`
+	UUID        string  `json:"uuid,omitempty"`
+	X           float64 `json:"x"`
+	Y           float64 `json:"y"`
 }
 
 // DRCReport is a parsed `kicad-cli pcb drc --format json` report.
@@ -153,6 +164,11 @@ func ParseDRCWith(data []byte, o DRCParseOptions) (*DRCReport, error) {
 				if it.UUID != "" {
 					fv.Objs = append(fv.Objs, it.UUID)
 				}
+				di := DRCItem{Description: it.Description, UUID: it.UUID}
+				if it.Pos != nil {
+					di.X, di.Y = it.Pos.X*scale, -it.Pos.Y*scale
+				}
+				fv.Items = append(fv.Items, di)
 				if fv.X == nil && it.Pos != nil {
 					x, y := it.Pos.X*scale, -it.Pos.Y*scale
 					fv.X, fv.Y = &x, &y

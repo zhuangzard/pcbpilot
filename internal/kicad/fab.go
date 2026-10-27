@@ -826,23 +826,11 @@ func RunFab(o FabOptions) (*FabReport, error) {
 
 	if !o.NoAssembly {
 		posName := base + "-kicad-pos.csv"
-		if err := runCLI(o.Tools.CLI, PosArgs(o.PCB, filepath.Join(stage, posName)), o.Log); err != nil {
-			return nil, err
-		}
-		pf, err := os.Open(filepath.Join(stage, posName))
+		rows, applied, omitted, err := BuildCPL(o.Tools.CLI, o.PCB, filepath.Join(stage, posName), bd, ov, parts, o.Log)
 		if err != nil {
 			return nil, err
 		}
-		fpLib := map[string]string{}
-		for _, f := range bd.Footprints {
-			fpLib[f.Ref] = f.LibID
-		}
-		rows, applied, err := ConvertPosToCPL(pf, ov, fpLib)
-		pf.Close()
-		if err != nil {
-			return nil, err
-		}
-		rows, rep.CPLOmitted = AssembledCPL(rows, parts)
+		rep.CPLOmitted = omitted
 		// JLC matches BOM and CPL by designator: a mismatch is a rejected
 		// order or a part placed without being supplied, so it stops the run.
 		if rep.Problems = CheckBOMCPL(parts, rows); len(rep.Problems) > 0 {
@@ -885,6 +873,29 @@ func RunFab(o FabOptions) (*FabReport, error) {
 		return nil, err
 	}
 	return rep, nil
+}
+
+// BuildCPL runs kicad-cli pos on pcb into posPath and returns the JLC CPL
+// rows of the assembled parts (header first), the overrides applied and the
+// designators left out as not assembled (AssembledCPL).
+func BuildCPL(cli, pcb, posPath string, bd *Board, ov *CPLOverrides, parts []Part, log io.Writer) (rows [][]string, applied, omitted []string, err error) {
+	if err := runCLI(cli, PosArgs(pcb, posPath), log); err != nil {
+		return nil, nil, nil, err
+	}
+	pf, err := os.Open(posPath)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	defer pf.Close()
+	fpLib := map[string]string{}
+	for _, f := range bd.Footprints {
+		fpLib[f.Ref] = f.LibID
+	}
+	if rows, applied, err = ConvertPosToCPL(pf, ov, fpLib); err != nil {
+		return nil, nil, nil, err
+	}
+	rows, omitted = AssembledCPL(rows, parts)
+	return rows, applied, omitted, nil
 }
 
 // ── BOM / CPL consistency ──────────────────────────────────────────────────

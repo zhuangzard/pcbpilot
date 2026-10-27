@@ -14,8 +14,8 @@ import (
 )
 
 func newKiCadFabCmd(stdout, stderr io.Writer) *cobra.Command {
-	var pcb, sch, out, overrides string
-	var noAssembly, verbose bool
+	var pcb, sch, out, overrides, contract, waiverPath string
+	var noAssembly, verbose, preflight bool
 	c := &cobra.Command{
 		Use:   "fab",
 		Short: "Export JLCPCB manufacturing files (Gerber+drill zip, BOM, CPL) with kicad-cli",
@@ -57,13 +57,54 @@ command lists them and exits non-zero without writing anything. Fill them with
 'pcbpilot kicad lcsc --set', or use --no-assembly for a bare-board order.
 
 CPL rotation caveat: ` + kicad.RotationNote + `
+--preflight checks instead of exporting and writes nothing (not to --out, not to the
+project): DRC on a copy (kicad drc: kicad-drc, kicad-drc-policy, schematic-parity with
+--sch), board-outline (Edge.Cuts closed, from KiCad's outline test), contract (--contract
+order file, see the pcbpilot-fab skill), layer-count, min-track / min-space / min-drill /
+min-annular (the smallest value the effective rules allow — .kicad_pro constraints and
+netclass clearances, .kicad_dru custom rules, local clearance overrides — vs the
+contract limits), finish, assembly-sides (CPL sides vs contract), lcsc (coverage) and
+bom-cpl (the same designator checks as an export). Every check is pass / fail /
+cannot-check; one verdict and the JSON report on stdout; exit 0 pass, 6 fail, 5 not
+verified (a missing contract is cannot-check: no contract, no "ready to order").
+
 Override file (JSON), designator entries win over footprint entries:
   {"refs": {"U3": {"rotate": 180}},
    "footprints": {"Package_TO_SOT_SMD:SOT-23": {"rotate": 180}, "SOT-223-3_TabPin2": {"rotate": -90, "dx": 0, "dy": 0}}}`,
 		Example: `  pcbpilot kicad fab --pcb board.kicad_pcb --sch board.kicad_sch --out fab/
   pcbpilot kicad fab --pcb board.kicad_pcb --out fab/ --cpl-overrides jlc-rot.json
-  pcbpilot kicad fab --pcb board.kicad_pcb --out fab/ --no-assembly`,
+  pcbpilot kicad fab --pcb board.kicad_pcb --out fab/ --no-assembly
+  pcbpilot kicad fab --preflight --pcb board.kicad_pcb --sch board.kicad_sch --contract fab/order-contract.json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if preflight {
+				if pcb == "" {
+					return fmt.Errorf("--pcb is required")
+				}
+				ws, err := loadWaivers(waiverPath)
+				if err != nil {
+					return err
+				}
+				cli, err := kicad.ResolveFabCLI()
+				if err != nil {
+					return err
+				}
+				rep := runFabPreflight(fabPreflightOptions{pcb: pcb, sch: sch, contract: contract, overrides: overrides,
+					cli: cli, noAssembly: noAssembly, waivers: ws})
+				if out != "" {
+					rep.Notes = append(rep.Notes, "--preflight wrote nothing to "+out)
+				}
+				if err := writeJSON(stdout, rep); err != nil {
+					return err
+				}
+				printDRCSummary(stderr, "kicad fab --preflight", rep.Verdict, rep.Checks, nil)
+				if code := rep.Verdict.ExitCode(); code != 0 {
+					return exitCodeError{code}
+				}
+				return nil
+			}
+			if contract != "" || waiverPath != "" {
+				return fmt.Errorf("--contract and --waivers are --preflight flags")
+			}
 			if pcb == "" || out == "" {
 				return fmt.Errorf("--pcb and --out are required")
 			}
@@ -121,6 +162,9 @@ Override file (JSON), designator entries win over footprint entries:
 	f.StringVar(&overrides, "cpl-overrides", "", "JSON file of CPL rotation/offset corrections (see help)")
 	f.BoolVar(&noAssembly, "no-assembly", false, "bare board: Gerber/drill zip only, no BOM/CPL and no LCSC check")
 	f.BoolVar(&verbose, "verbose", false, "show kicad-cli output")
+	f.BoolVar(&preflight, "preflight", false, "read-only: DRC + fab checks against --contract, one verdict, no outputs written")
+	f.StringVar(&contract, "contract", "", "--preflight: order contract JSON (vendor, layers, finish, assembly.sides, limits, sources)")
+	f.StringVar(&waiverPath, "waivers", "", "--preflight: signed waiver file for the DRC checks (JSON list of {gate, match, reason, by})")
 	return c
 }
 

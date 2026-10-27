@@ -14,6 +14,7 @@
 建库   pcbpilot kicad lcsc --import C25744 --lib-dir lib # 嘉立创 EasyEDA 库记录 → KiCad 自带导入器
 写号   pcbpilot kicad lcsc --pcb b.kicad_pcb --sch b.kicad_sch --set R1=C25744
 检查   pcbpilot kicad lcsc --pcb b.kicad_pcb --sch b.kicad_sch --check
+预检   pcbpilot kicad fab  --preflight --pcb b.kicad_pcb --sch b.kicad_sch --contract order-contract.json
 出图   pcbpilot kicad fab  --pcb b.kicad_pcb --sch b.kicad_sch --out fab/
 ```
 
@@ -167,6 +168,41 @@ pcbpilot kicad fab --pcb b.kicad_pcb --out fab/ --cpl-overrides jlc-rot.json
 `rotate` 加到 KiCad 角度上（结果归一到 0–360），`dx/dy` 以 mm 加到 Mid X/Y；拼写错误的
 键会被拒绝。实际用到的覆盖写进 `fab-report.json` 并打印。覆盖值必须来自本板在 JLC
 预览里的观察，记录在工程里，不能从别的板照抄。
+
+### 预检：`kicad fab --preflight`（只读）
+
+出图前一次性回答“现在能不能下单”，**不写任何文件**（`--out` 给了也不碰，工程目录也不变）：
+
+```bash
+pcbpilot kicad fab --preflight --pcb b.kicad_pcb --sch b.kicad_sch --contract fab/order-contract.json [--waivers w.json] [--no-assembly]
+```
+
+| 检查 | 内容 |
+|---|---|
+| `kicad-drc` / `kicad-drc-policy` / `schematic-parity` | 与 [`kicad drc`](kicad.md#drc-门禁kicad-drc) 相同（副本上跑；有 `--sch` 且板旁有同名根原理图时做一致性） |
+| `board-outline` | Edge.Cuts 有图形，且 KiCad DRC 内置的轮廓测试没有 `invalid_outline`（被排除也算失败；该规则设成 ignore → cannot-check） |
+| `contract` | 契约文件合法（字段、日期、来源 URL）；没给 → cannot-check |
+| `layer-count` | 板的铜层数 = 契约 `layers` |
+| `min-track` / `min-space` / `min-drill` / `min-annular` | 有效规则允许的最小值 ≥ 契约 `limits`：Board Setup 约束（`.kicad_pro`）、网络类间距、`.kicad_dru` 自定义规则的 `(min …)`（mm/mil/in/um）、封装/焊盘的局部间距覆盖，取最小；某项只有 0（未设）→ cannot-check；规则读不懂或 `(severity ignore)` 关掉该项 → cannot-check。`info` 另列板上实测最细线宽、最小孔 |
+| `finish` | 板叠层 `copper_finish` 与契约 `finish` 一致（板未写 → 提示性 warn） |
+| `assembly-sides` | CPL 实际出现的面（top/bottom/both）= 契约 `assembly.sides` |
+| `lcsc` | 每个贴装件有合法 C 号（与出图同一套 `MergeParts` / `CheckLCSC`），给出覆盖率 |
+| `bom-cpl` | 与出图相同的位号一致性（`CPL_NOT_IN_BOM` 等，临时目录里跑 kicad-cli pos） |
+
+总判定取最差；退出码 0 PASS / 6 FAIL / 5 未验证（cannot-check、缺契约）。`--no-assembly` 时最后三项记为提示性 skip。
+契约格式（JSON，`DisallowUnknownFields`：拼错的键直接拒绝）：
+
+```json
+{"vendor": "JLCPCB", "service": "PCB + PCBA", "layers": 4, "thicknessMm": 1.6, "finish": "ENIG",
+ "assembly": {"sides": "top", "qty": 5},
+ "limits": {"minTrackMm": 0.127, "minSpaceMm": 0.127, "minDrillMm": 0.3, "minAnnularMm": 0.13},
+ "sources": [{"item": "limits", "url": "<厂商能力页 URL>", "retrieved": "YYYY-MM-DD"}]}
+```
+
+必填 `vendor`、`layers`、至少一条 `sources`（http(s) URL + `YYYY-MM-DD`）；`assembly.sides` 只取 top / bottom / both；
+其余字段（铜厚、阻焊/丝印色、阻抗、过孔工艺）见 pcbpilot-fab Skill 的 fab-acceptance.md §1。上面的数字只是格式示例，
+下单当天从厂商页面重新取值。实测（KiCad 10.0.6，interf_u 副本）：DRC/一致性/环形宽度（板约束 0.05 mm < 0.13）/LCSC（24 件缺号）失败，
+轮廓、层数、线宽、孔径、贴片面通过，`--out` 为空。
 
 ## 5. 输出与核对
 
