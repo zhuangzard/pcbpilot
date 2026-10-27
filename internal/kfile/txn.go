@@ -535,6 +535,12 @@ func (g guardOpts) check(path string) error {
 func undo(root string, e journalEntry, failed bool, g guardOpts) (bool, error) {
 	st, cur, err := entryStateOf(e)
 	if err != nil {
+		if failed && CodeOf(err) == CodeUnsupported {
+			// the failed entry became a link or directory under us: that is
+			// what refused it, nothing was written through it, and it is
+			// not ours to restore
+			return false, nil
+		}
 		return false, err
 	}
 	switch st {

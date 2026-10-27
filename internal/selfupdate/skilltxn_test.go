@@ -167,6 +167,26 @@ func TestRouterManifestCompletesSkillsTheCLIDoesNotKnow(t *testing.T) {
 	}
 }
 
+// A router installed from a legacy (router-only) archive has no manifest:
+// verification must hold it to what that archive shipped, not to the focused
+// Skills this CLI knows, or a good update is rolled back (CI on Linux).
+func TestVerifyLegacyRouterNeedsOnlyTheRouter(t *testing.T) {
+	isolatedSkillHome(t)
+	restore, err := OverridePublicSkillsForTest([]string{SkillName, demoSkill})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(restore)
+	seedOwned(t, "claude", SkillName, "1.0.0")
+	if p := VerifyInstalledSkills("1.0.0"); len(p) != 0 {
+		t.Fatalf("legacy router: %v", p)
+	}
+	seedOwned(t, "claude", SkillName, "0.9.0")
+	if p := VerifyInstalledSkills("1.0.0"); len(p) != 1 || !strings.Contains(p[0], `"0.9.0"`) {
+		t.Fatalf("a stale legacy router must still be reported: %v", p)
+	}
+}
+
 func TestJournaledRollbackUndoesExactlyWhatTheSyncChanged(t *testing.T) {
 	isolatedSkillHome(t)
 	router := seedOwned(t, "claude", SkillName, "0.9.0")

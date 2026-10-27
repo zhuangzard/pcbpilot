@@ -200,18 +200,10 @@ func knownSkills(clients []string) SkillManifest {
 	return known
 }
 
-// ExpectedSkills is the Skill set a client with the router should have: the
-// manifest the router was installed with, else this CLI's own list.
-func ExpectedSkills(client string) []string {
-	if m, ok := installedRouterManifest(client); ok {
-		return m.Skills
-	}
-	return PublicSkills().Skills
-}
-
 // VerifyInstalledSkills lists every way the installed Skills differ from
-// version: for each client whose copied router is installed, every expected
-// Skill must exist with that marker. Checkout links are skipped, and so is a
+// version: for each client whose copied router is installed, every Skill its
+// installed manifest lists (just the router for a legacy archive) must exist
+// with that marker. Checkout links are skipped, and so is a
 // same-named directory pcbpilot never installed (a reported conflict).
 func VerifyInstalledSkills(version string) []string {
 	var problems []string
@@ -220,7 +212,14 @@ func VerifyInstalledSkills(version string) []string {
 		if router == "" || !isDir(router) || SkillLinkTarget(router) != "" {
 			continue
 		}
-		for _, skill := range ExpectedSkills(c) {
+		// What was installed is what the archive shipped: a router without
+		// a manifest came from a legacy (router-only) archive, so the focused
+		// Skills this CLI knows were never part of that install.
+		want := legacySkillManifest().Skills
+		if m, ok := installedRouterManifest(c); ok {
+			want = m.Skills
+		}
+		for _, skill := range want {
 			dir := SkillDirFor(c, skill)
 			label := SkillLabel(c, skill)
 			switch {
