@@ -33,6 +33,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/zhuangzard/pcbpilot/pkg/netname"
 	"github.com/zhuangzard/pcbpilot/pkg/powersim"
 )
 
@@ -181,7 +182,10 @@ type traceRow struct {
 	SchematicPins int      `json:"schematicPins"`
 	Parts         []string `json:"parts"`
 	BoardPads     int      `json:"boardPads"`
-	Status        string   `json:"status"`
+	// Identity is the net's identity (pkg/netname) when the intent names it
+	// by its display name: KiCad's full hierarchical name on the board.
+	Identity string `json:"identity,omitempty"`
+	Status   string `json:"status"`
 }
 
 var (
@@ -200,8 +204,9 @@ type signoffDoc struct {
 		} `json:"device"`
 	} `json:"components"`
 	Nets []struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
+		ID       string `json:"id"`
+		Name     string `json:"name"`
+		FullName string `json:"fullName"` // net identity (kicad netlist)
 	} `json:"nets"`
 	Connections []struct {
 		ComponentID string `json:"componentId"`
@@ -387,7 +392,11 @@ func runSignoff(o signoffOpts, waivers []gateWaiver, stderr io.Writer) (*signoff
 		res.Gates[len(res.Gates)-1].Items = append(res.Gates[len(res.Gates)-1].Items, "per-segment basis needs --sim")
 	}
 
-	// 5. Continuity and traceability.
+	// 5. Continuity and traceability, on net identities (pkg/netname): the
+	// schematic's fullName (else its name, resolved against the board's
+	// names for documents without one), the board's own net names, and the
+	// intent's names resolved against both.
+	boardIDs := netname.NewResolver(boardNetIDs(snap))
 	schPins := map[string]string{}
 	netParts := map[string]map[string]bool{}
 	for _, d := range docs {
@@ -397,7 +406,11 @@ func runSignoff(o signoffOpts, waivers []gateWaiver, stderr io.Writer) (*signoff
 		}
 		name := map[string]string{}
 		for _, n := range d.Nets {
-			name[n.ID] = n.Name
+			if n.FullName != "" {
+				name[n.ID] = n.FullName
+			} else if n.Name != "" {
+				name[n.ID], _ = boardIDs.Resolve(n.Name)
+			}
 		}
 		for _, c := range d.Connections {
 			n := name[c.NetID]
@@ -417,7 +430,7 @@ func runSignoff(o signoffOpts, waivers []gateWaiver, stderr io.Writer) (*signoff
 		// Unconnected single pins are not nets on the board side either.
 		board := boardPinNets(snap)
 		for k, v := range board {
-			if strings.HasPrefix(v, "unconnected-(") {
+			if netname.IsUnconnected(v) {
 				delete(board, k)
 			}
 		}
@@ -429,18 +442,30 @@ func runSignoff(o signoffOpts, waivers []gateWaiver, stderr io.Writer) (*signoff
 	for _, n := range boardPinNets(snap) {
 		boardPads[n]++
 	}
+	schNets := make([]string, 0, len(netParts))
+	for n := range netParts {
+		schNets = append(schNets, n)
+	}
+	schIDs := netname.NewResolver(schNets)
 	trace := gateResult{Gate: "signoff-trace"}
 	for _, name := range in.sortedNetNames() {
 		n := in.Nets[name]
+		id, ok := schIDs.Resolve(name)
+		if !ok {
+			id, _ = boardIDs.Resolve(name)
+		}
 		row := traceRow{Net: name, Role: n.Role, CurrentA: n.CurrentA, OuterMil: n.WidthMil.Outer, InnerMil: n.WidthMil.Inner,
 			MinMil: n.WidthMil.Min, ClearanceMil: n.ClearanceMil, ViasPerTrans: n.ViasPerTransition, Domain: n.Domain,
-			BoardPads: boardPads[name], Status: "ok"}
-		for p := range netParts[name] {
+			BoardPads: boardPads[id], Status: "ok"}
+		if id != name {
+			row.Identity = id
+		}
+		for p := range netParts[id] {
 			row.Parts = append(row.Parts, p)
 		}
 		sort.Strings(row.Parts)
 		for _, v := range schPins {
-			if v == name {
+			if v == id {
 				row.SchematicPins++
 			}
 		}
@@ -512,7 +537,11 @@ func signoffMarkdown(r *signoffResult) string {
 		if len(t.Parts) > 8 {
 			parts = strings.Join(t.Parts[:8], " ") + fmt.Sprintf(" … (+%d)", len(t.Parts)-8)
 		}
-		fmt.Fprintf(&b, "| %s | %s | %.3f | %.2f / %.2f / %.2f | %.2f | %d | %d | %s | %d | %s |\n", t.Net, t.Role, t.CurrentA, t.OuterMil, t.InnerMil, t.MinMil, t.ClearanceMil, t.ViasPerTrans, t.SchematicPins, parts, t.BoardPads, t.Status)
+		net := t.Net
+		if t.Identity != "" {
+			net += " = " + t.Identity
+		}
+		fmt.Fprintf(&b, "| %s | %s | %.3f | %.2f / %.2f / %.2f | %.2f | %d | %d | %s | %d | %s |\n", net, t.Role, t.CurrentA, t.OuterMil, t.InnerMil, t.MinMil, t.ClearanceMil, t.ViasPerTrans, t.SchematicPins, parts, t.BoardPads, t.Status)
 	}
 	for _, g := range r.Gates {
 		if len(g.Items) == 0 {

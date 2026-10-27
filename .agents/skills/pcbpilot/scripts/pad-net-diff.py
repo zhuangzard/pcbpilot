@@ -9,6 +9,17 @@ Inputs:
          `pcbpilot sch pages`); `--all-pages` mixes every schematic.
   --pcb  output of `pcbpilot pcb dump --out board.json`
 
+  --pcb  may also be `pcbpilot kicad snapshot board.kicad_pcb` (KiCad); --sch
+         then `pcbpilot kicad netlist`.
+
+Nets are compared by identity (pkg/netname, the rule every pcbpilot matcher
+uses): a schematic net's "fullName" (KiCad's full hierarchical name, escaped
+as on the board: "/pic_sockets/VCC_PIC", "/VPP{slash}MCLR") when present,
+else its "name"; a name without fullName (older documents) that is not a
+board net resolves to the one board net whose display name it is (the sheet
+path dropped, "{slash}" read as '/'). Never cut at '/' inside a label. A KiCad
+"unconnected-(…)" pad net is no net.
+
 Reports parts missing on the PCB, extra PCB parts, pins without a pad, pads
 without a pin, and net mismatches. A schematic no-connect matches an empty
 PCB net. Nets that differ only in letter case (EasyEDA may upper-case net
@@ -23,6 +34,31 @@ import json
 import sys
 
 NC = "<NC>"
+UNCONNECTED = "unconnected-("
+
+
+def local_name(net):
+    """Display name of a net identity: the sheet path dropped, {slash} → '/'."""
+    if net.startswith("/"):
+        net = net[net.rfind("/") + 1:]
+    return net.replace("{slash}", "/")
+
+
+def resolver(board_nets):
+    """name -> board identity: exact, else the single board net whose display
+    name (or unescaped full name) it is; ambiguous names are not guessed."""
+    ids = {n for n in board_nets if n and not n.startswith(UNCONNECTED)}
+    alias = {}
+    for i in ids:
+        for a in {local_name(i), i.replace("{slash}", "/")} - {i}:
+            alias.setdefault(a, set()).add(i)
+
+    def resolve(name):
+        if name in ids:
+            return name
+        hit = alias.get(name, set())
+        return next(iter(hit)) if len(hit) == 1 else name
+    return resolve
 
 
 def unwrap(doc):
@@ -35,32 +71,60 @@ def unwrap(doc):
 
 def schematic_map(doc):
     doc = unwrap(doc)
-    net_name = {n["id"]: (n.get("name") or n["id"]) for n in doc.get("nets", [])}
-    comp_ref = {c["id"]: c.get("ref", "") for c in doc.get("components", [])}
+    # (identity, has fullName): fullName is the identity; a bare name may
+    # still need resolving against the board.
+    net_name = {n["id"]: ((n.get("fullName") or n.get("name") or n["id"]), bool(n.get("fullName")))
+                for n in doc.get("nets") or []}
+    comp_ref = {c["id"]: c.get("ref", "") for c in doc.get("components") or []}
     pins = {}
-    for c in doc.get("components", []):
+    for c in doc.get("components") or []:
         ref = c.get("ref", "")
-        for p in c.get("pins", []):
+        for p in c.get("pins") or []:
             key = (ref, str(p.get("number", "")))
             pins[key] = NC if p.get("noConnected") else None
-    for conn in doc.get("connections", []):
+    for conn in doc.get("connections") or []:
         ref = comp_ref.get(conn.get("componentId"), "")
         key = (ref, str(conn.get("pinNumber", "")))
-        pins[key] = net_name.get(conn.get("netId"), conn.get("netId"))
+        pins[key] = net_name.get(conn.get("netId"), (conn.get("netId"), False))
     return pins
+
+
+def unwrap_board(doc):
+    if isinstance(doc, dict) and "components" not in doc:
+        for key in ("result", "board", "snapshot"):
+            if isinstance(doc.get(key), dict):
+                return unwrap_board(doc[key])
+    return doc
 
 
 def pcb_map(board):
     pads = {}
-    for c in board.get("components", []):
+    for c in board.get("components") or []:
         ref = c.get("designator", "")
         for p in c.get("pads") or []:
-            key = (ref, str(p.get("padNumber", "")))
-            pads[key] = p.get("net") or ""
+            key = (ref, str(p.get("padNumber", p.get("number", ""))))
+            net = p.get("net") or ""
+            if key[1] == "" and not net:
+                continue  # unnumbered, netless pad: a mechanical hole (KiCad NPTH)
+            pads[key] = "" if net.startswith(UNCONNECTED) else net
     return pads
 
 
+def to_identities(sch, pcb):
+    """Schematic pin -> net identity (NC / None kept)."""
+    resolve = resolver(pcb.values())
+    out = {}
+    for key, v in sch.items():
+        if isinstance(v, tuple):
+            net, full = v
+            out[key] = net if full else resolve(net)
+        else:
+            out[key] = v
+    return out
+
+
 def diff(sch, pcb, ignore=()):
+    sch = to_identities(sch, pcb)
     sch_refs = {r for r, _ in sch if r not in ignore}
     pcb_refs = {r for r, _ in pcb if r not in ignore}
     out = {
@@ -113,7 +177,7 @@ def main():
                 if sch.get(key) is None:
                     sch[key] = net
     with open(a.pcb, encoding="utf-8") as f:
-        pcb = pcb_map(json.load(f))
+        pcb = pcb_map(unwrap_board(json.load(f)))
     ignore = {r.strip() for r in a.ignore_refs.split(",") if r.strip()}
     rep = diff(sch, pcb, ignore)
     if a.json:

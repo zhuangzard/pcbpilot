@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/zhuangzard/pcbpilot/pkg/netname"
 	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
 	"github.com/zhuangzard/pcbpilot/pkg/safety"
 )
@@ -288,6 +289,68 @@ func validIntentName(name string) error {
 }
 
 // sortedNetNames returns intent net names in a stable order.
+// onBoard is the intent with every net name resolved to the board's net
+// identity (pkg/netname): an intent derived from display names ("VCC_PIC",
+// "VPP/MCLR") names the hierarchical KiCad board's "/pic_sockets/VCC_PIC" /
+// "/VPP{slash}MCLR". Names already on the board, unknown names and
+// ambiguous ones stay as they are. The receiver is not changed; renamed
+// lists "intent → board".
+func (in *designIntent) onBoard(boardNets []string) (*designIntent, []string) {
+	if in == nil {
+		return in, nil
+	}
+	r := netname.NewResolver(boardNets)
+	to := map[string]string{}
+	var renamed []string
+	for _, name := range in.sortedNetNames() {
+		id, ok := r.Resolve(name)
+		if !ok || id == name || in.Nets[id] != nil {
+			continue
+		}
+		to[name] = id
+		renamed = append(renamed, name+" → "+id)
+	}
+	if len(to) == 0 {
+		return in, nil
+	}
+	conv := func(n string) string {
+		if id, ok := to[n]; ok {
+			return id
+		}
+		return n
+	}
+	list := func(ns []string) []string {
+		out := make([]string, len(ns))
+		for i, n := range ns {
+			out[i] = conv(n)
+		}
+		return out
+	}
+	cp := *in
+	cp.Nets = make(map[string]*intentNet, len(in.Nets))
+	for name, n := range in.Nets {
+		if n != nil && n.DiffPair != "" {
+			x := *n
+			x.DiffPair = conv(n.DiffPair)
+			n = &x
+		}
+		cp.Nets[conv(name)] = n
+	}
+	cp.NetClasses = append([]intentNetClass(nil), in.NetClasses...)
+	for i := range cp.NetClasses {
+		cp.NetClasses[i].Nets = list(cp.NetClasses[i].Nets)
+	}
+	cp.Blocks = append([]intentBlock(nil), in.Blocks...)
+	for i := range cp.Blocks {
+		cp.Blocks[i].Nets = list(cp.Blocks[i].Nets)
+	}
+	cp.Domains = append([]intentDomain(nil), in.Domains...)
+	for i := range cp.Domains {
+		cp.Domains[i].Nets = list(cp.Domains[i].Nets)
+	}
+	return &cp, renamed
+}
+
 func (in *designIntent) sortedNetNames() []string {
 	out := make([]string, 0, len(in.Nets))
 	for n := range in.Nets {

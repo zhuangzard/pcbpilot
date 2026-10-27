@@ -461,12 +461,13 @@ func snapshotIntentGates(snap *boardSnapshot, in *designIntent, intentPath, simV
 	for _, c := range snap.Components {
 		pads = append(pads, c.Pads...)
 	}
+	in, _ = in.onBoard(boardNetIDs(snap))
 	vs := checkIntentWidths(tracks, pads, intentRequirements(in), pouredLookup(snap.Copper.Poured), segNeed)
 	basis := "WIDTH BASIS net: every track carries the net's intent current"
 	var info []string
 	if segNeed != nil {
 		basis = "WIDTH BASIS segment: a track carrying under half the net current is judged by its own simulated current, else the net current"
-		info = []string{"width basis is segment: the intent's outer width is not a hard floor on every track (a lightly loaded segment may be narrower, never below widthMil.min); pass --width-basis net for the strict per-net reading"}
+		info = []string{"width basis is segment: the intent's outer width is not a hard floor on every track (a lightly loaded segment may be narrower, never below widthMil.min); for the strict per-net reading re-run pcb gate, pcb auto route or kicad route with --width-basis net (signoff always judges per segment)"}
 	}
 	add(gateResult{Gate: "intent-widths", Pass: len(vs) == 0,
 		Detail: fmt.Sprintf("%d track(s) below the intent width (%s) outside pad escapes and own-net pours, or below the minimum", len(vs), basis),

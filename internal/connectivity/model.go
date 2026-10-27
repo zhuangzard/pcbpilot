@@ -181,11 +181,25 @@ type Pin struct {
 	Y               float64 `json:"y,omitempty"`
 }
 type Net struct {
-	ID    string `json:"id"`
-	Name  string `json:"name,omitempty"`
-	Scope string `json:"scope,omitempty"`
-	Role  string `json:"role,omitempty"`
+	ID   string `json:"id"`
+	Name string `json:"name,omitempty"`
+	// FullName is the net's identity: KiCad's full hierarchical name in
+	// KiCad's escaped form (pkg/netname), the name the board carries; Name
+	// is then only the display name. Additive field written by kicad
+	// netlist; matchers use FullName when set, else Name.
+	FullName string `json:"fullName,omitempty"`
+	Scope    string `json:"scope,omitempty"`
+	Role     string `json:"role,omitempty"`
 }
+
+// Identity is the net's name for matching with a board (pkg/netname).
+func (n Net) Identity() string {
+	if n.FullName != "" {
+		return n.FullName
+	}
+	return n.Name
+}
+
 type Connection struct {
 	ComponentID string `json:"componentId"`
 	PinNumber   string `json:"pinNumber"`

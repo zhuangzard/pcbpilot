@@ -432,6 +432,14 @@ func (r *kicadRun) run() error {
 	if inSnap, r.inRaw, err = r.snapshot(board); err != nil {
 		return err
 	}
+	// Intent nets named by their display name ("VCC_PIC") are the board's
+	// hierarchical nets ("/pic_sockets/VCC_PIC"): one identity for every
+	// rule below (netclasses, isolation, widths, gates).
+	if in, renamed := r.in.onBoard(boardNetIDs(inSnap)); len(renamed) > 0 {
+		r.in = in
+		r.summary["intentNetsOnBoard"] = renamed
+		fmt.Fprintf(r.stderr, "intent nets resolved to the board's net names: %s\n", strings.Join(renamed, ", "))
+	}
 	if rep, err := kt.DRC(board, filepath.Join(r.work, "input-drc.json")); err == nil {
 		r.inputDRC = map[string]bool{}
 		for _, v := range rep.Violations {
@@ -1450,6 +1458,20 @@ func (r *kicadRun) closureGates() []gateResult {
 }
 
 // boardPinNets maps "REF.PIN" → net of every board pad that has a net.
+// boardNetIDs lists the board's net names (its net identities, pkg/netname).
+func boardNetIDs(snap *boardSnapshot) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, n := range boardPinNets(snap) {
+		if !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 func boardPinNets(snap *boardSnapshot) map[string]string {
 	out := map[string]string{}
 	for _, c := range snap.Components {

@@ -75,7 +75,15 @@ pcbpilot ──▶ KiCad 自带 Python + pcbnew（internal/kicad/bridge.py，go:
 与 `sch connectivity` 同形：components+pins、nets、connections），`intent derive --connectivity` / `sim power` /
 pad-net diff 直接读。单独挂在 KiCad `unconnected-(…)` 网上的脚不产生连接：带 no-connect 标记的记 `noConnected`，
 否则 `connectionState: "unconnected"`。`--values` 写 `{"parts":{ref:{value,mpn,lcsc}}}` 给 `intent derive --values`。
-从 KiCad 起步的设计由此得到与 EasyEDA 相同的意图 / 安全推导。
+从 KiCad 起步的设计由此得到与 EasyEDA 相同的意图 / 安全推导。每个器件都有 `pins` 列表（无引脚的安装孔为 `[]`）。
+
+**网络身份（唯一规则，`pkg/netname`）**：网的身份是 KiCad 自己的完整层次名，按 KiCad 转义写法——与 `.kicad_pcb`、
+`kicad snapshot` 完全相同：子图局部网 `/pic_sockets/VCC_PIC`，根图局部标签 `VPP/MCLR` 为 `/VPP{slash}MCLR`，
+全局/电源网 `GND`。`kicad netlist` 每个网写 `fullName`（身份，新增字段）和 `name`（仅显示名：去掉图纸路径、
+`{slash}` 还原为 `/`，在全设计唯一时才用短名，否则等于 fullName）。**绝不在标签内部的 `/` 处截断**（旧版把
+`/VPP/MCLR` 截成 `MCLR`）。`unconnected-(…)` 是"无网"，两侧比较都按无网处理。匹配方（pad-net-diff、
+`signoff` 的 continuity/trace、`sim post-layout` 的脚↔焊盘检查与铜网查找、`kicad route` 的网络类、intent-widths）
+一律先用 `fullName`；只有 `name` 的旧文档 / intent / sim 用显示名解析到板上**唯一**对应的网，同名多图纸时不猜、照常报差异。
 
 ## 布线（`kicad route`）——与 `pcb auto route` + `pcb gate` 同序同算
 

@@ -25,6 +25,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/zhuangzard/pcbpilot/pkg/netname"
 	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
 	"github.com/zhuangzard/pcbpilot/pkg/powersim"
 )
@@ -214,6 +215,9 @@ func Run(boardRaw, simRaw []byte, o Options) (*Result, error) {
 		res.Assumptions = append(res.Assumptions, "thermal: time-averaged heat — parts at the sim file's thermalW (loads at their average current; I²R parts √(P_avg·P_peak)), copper Joule heat scaled to the RMS bound √(I_avg·I_peak); IR drop, via current and copper self-heating stay at the operating-point (peak) currents")
 	} else {
 		res.Assumptions = append(res.Assumptions, "thermal: the sim file carries no time-averaged thermal power (written before v0.6.1) — every scenario's operating-point power is treated as continuous (peak bursts overstate the temperature); re-run pcbpilot sim power")
+	}
+	if renamed := simNetsOnBoard(b, sim.Results); len(renamed) > 0 {
+		res.Assumptions = append(res.Assumptions, "sim nets named by their schematic display name matched to the board's net names (pkg/netname: KiCad's full hierarchical name): "+strings.Join(renamed, ", "))
 	}
 	res.Findings = append(res.Findings, crossCheck(b, scen)...)
 
@@ -555,6 +559,53 @@ func Run(boardRaw, simRaw []byte, o Options) (*Result, error) {
 	res.Model = modelNotes(o, st)
 	res.findings(o)
 	return res, nil
+}
+
+// simNetsOnBoard renames the sim nets (and their ripple entries) to the
+// board's net identities (pkg/netname): a sim derived from a hierarchical
+// KiCad schematic's display names ("VCC_PIC", "VPP/MCLR") names the board's
+// "/pic_sockets/VCC_PIC" / "/VPP{slash}MCLR". Without it the pin↔pad check
+// reports a false sim-board-mismatch and the net's copper is not found.
+// Names already on the board, unknown and ambiguous names stay.
+func simNetsOnBoard(b *Board, results []powersim.Result) []string {
+	var ids []string
+	for _, pt := range b.Parts {
+		for _, pd := range pt.Pads {
+			ids = append(ids, pd.Net)
+		}
+	}
+	for _, t := range b.Tracks {
+		ids = append(ids, t.Net)
+	}
+	for _, a := range b.Areas {
+		ids = append(ids, a.Net)
+	}
+	r := netname.NewResolver(ids)
+	done := map[string]bool{}
+	var renamed []string
+	for i := range results {
+		res := &results[i]
+		to := map[string]string{}
+		for n := range res.Nets {
+			if id, ok := r.Resolve(n); ok && id != n && res.Nets[id] == nil {
+				to[n] = id
+			}
+		}
+		for n, id := range to {
+			res.Nets[id] = res.Nets[n]
+			delete(res.Nets, n)
+			if e, ok := res.Ripple[n]; ok && res.Ripple[id] == nil {
+				res.Ripple[id] = e
+				delete(res.Ripple, n)
+			}
+			if !done[n] {
+				done[n] = true
+				renamed = append(renamed, n+" → "+id)
+			}
+		}
+	}
+	sort.Strings(renamed)
+	return renamed
 }
 
 // crossCheck verifies that the sim file and the board are the same design
@@ -1304,6 +1355,12 @@ func (res *Result) findings(o Options) {
 			}
 		}
 	}
+	// Nothing simulated (no net with a solved IR drop, no heat on the
+	// board) verifies nothing: "unverified", never a pass.
+	nothing := res.nothingSimulated()
+	if nothing != "" {
+		add("warn", "not-verified", nothing, nil, nil)
+	}
 	v := Verdict{Status: "pass"}
 	for _, f := range res.Findings {
 		switch f.Severity {
@@ -1317,7 +1374,37 @@ func (res *Result) findings(o Options) {
 			v.Reasons = append(v.Reasons, f.Message)
 		}
 	}
+	if nothing != "" && v.Status != "fail" {
+		v.Status = "unverified"
+	}
 	res.Verdict = v
+}
+
+// nothingSimulated explains why the run verified nothing — the IR table
+// has no solved net and no scenario puts heat on the board — or is "".
+func (res *Result) nothingSimulated() string {
+	for _, n := range res.Nets {
+		switch n.Status {
+		case "ok", "over-budget", "open", "info":
+			return ""
+		}
+	}
+	if t := res.Thermal; t != nil {
+		for _, s := range t.PerScenario {
+			if s.PartsW+s.JouleW > 0 {
+				return ""
+			}
+		}
+	}
+	why := "no power/ground net of the sim carries current"
+	if len(res.Nets) > 0 {
+		var ns []string
+		for _, n := range res.Nets {
+			ns = append(ns, n.Net+" "+n.Status)
+		}
+		why = "no net's IR drop could be solved (" + strings.Join(ns, ", ") + ")"
+	}
+	return "nothing simulated: " + why + " and no part or copper dissipates heat on the board — the post-layout check verified nothing (status unverified: check that sim power ran on this board's schematic and that its net names match the board)"
 }
 
 func modelNotes(o Options, st *Stackup) []string {
