@@ -54,7 +54,9 @@ def is_num(v):
 
 def records(doc):
     """([(selector, pose)], problems): selector = {"ref": r} or {"uuid": u}."""
-    if isinstance(doc, dict) and "pcbpilotPoses" in doc:
+    # The envelope carries a version number; a legacy map may well have a
+    # footprint named "pcbpilotPoses" (its value is then a pose object).
+    if isinstance(doc, dict) and is_num(doc.get("pcbpilotPoses")):
         if doc.get("pcbpilotPoses") != 2 or not isinstance(doc.get("poses"), list) or set(doc) - {"pcbpilotPoses", "poses"}:
             return [], ['poses file: want {"pcbpilotPoses": 2, "poses": [records]}']
         out, bad = [], []

@@ -107,6 +107,9 @@ func PlaceTargets(pcbPath string, targets []PoseTarget, outPath string) (*PlaceR
 		return nil, err
 	}
 	defer os.RemoveAll(dir)
+	if targets == nil {
+		targets = []PoseTarget{} // "poses": [] — null is not a record list
+	}
 	blob, err := json.Marshal(map[string]any{"pcbpilotPoses": 2, "poses": targets})
 	if err != nil {
 		return nil, err

@@ -290,5 +290,28 @@ class ValidatePoursAndNetclasses(unittest.TestCase):
             self.assertTrue(has(bridge.validate_netclasses(req)[0], sub), (req, sub))
 
 
+import place  # noqa: E402  (same fake pcbnew)
+
+
+class PlaceRecords(unittest.TestCase):
+    pose = {"xMil": 1, "yMil": 2, "rotationDeg": 0}
+
+    def test_envelope(self):
+        recs, bad = place.records({"pcbpilotPoses": 2, "poses": [dict(self.pose, ref="U1"), dict(self.pose, uuid="u-9")]})
+        self.assertEqual(bad, [])
+        self.assertEqual([r[0] for r in recs], [{"ref": "U1"}, {"uuid": "u-9"}])
+        for doc in ({"pcbpilotPoses": 3, "poses": []}, {"pcbpilotPoses": 2, "poses": None}, {"pcbpilotPoses": 2, "poses": [], "x": 1}):
+            self.assertTrue(place.records(doc)[1], doc)
+
+    def test_legacy_designator_named_like_the_envelope(self):
+        # A footprint literally called "pcbpilotPoses": its value is a pose
+        # object, so this is a legacy map, keys as designators.
+        recs, bad = place.records({"pcbpilotPoses": dict(self.pose), "uuid:abc": dict(self.pose)})
+        self.assertEqual(bad, [])
+        self.assertEqual(sorted(r[0]["ref"] for r in recs), ["pcbpilotPoses", "uuid:abc"])
+        recs, bad = place.records({"pcbpilotPoses": True})  # not a version number either
+        self.assertEqual((bad, [r[0] for r in recs]), ([], [{"ref": "pcbpilotPoses"}]))
+
+
 if __name__ == "__main__":
     unittest.main()

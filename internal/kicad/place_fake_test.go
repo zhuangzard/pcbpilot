@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -15,6 +16,10 @@ const fakePlaceEnv = "PCBPILOT_FAKE_PLACE_STDOUT"
 
 func TestMain(m *testing.M) {
 	if out, ok := os.LookupEnv(fakePlaceEnv); ok {
+		if dst := os.Getenv("PCBPILOT_FAKE_PLACE_COPY"); dst != "" && len(os.Args) > 4 {
+			b, _ := os.ReadFile(os.Args[4]) // place.py SCRIPT place PCB POSES OUT
+			_ = os.WriteFile(dst, b, 0o644)
+		}
 		fmt.Print(out)
 		if os.Getenv("PCBPILOT_FAKE_PLACE_EXIT") == "1" {
 			os.Exit(1)
@@ -53,5 +58,23 @@ func TestPlaceParsesSuccessAndCrash(t *testing.T) {
 	var pe *PlaceError
 	if err == nil || errors.As(err, &pe) {
 		t.Fatalf("crash: %v", err)
+	}
+}
+
+// nil and empty targets both write an empty record list, never null.
+func TestPlaceTargetsNilIsEmpty(t *testing.T) {
+	for _, targets := range [][]PoseTarget{nil, {}} {
+		copyTo := filepath.Join(t.TempDir(), "poses.json")
+		t.Setenv(EnvPython, os.Args[0])
+		t.Setenv(fakePlaceEnv, "PCBPILOT_RESULT {\"ok\": true, \"moved\": 0}\n")
+		t.Setenv("PCBPILOT_FAKE_PLACE_EXIT", "0")
+		t.Setenv("PCBPILOT_FAKE_PLACE_COPY", copyTo)
+		if _, err := PlaceTargets("in.kicad_pcb", targets, "out.kicad_pcb"); err != nil {
+			t.Fatal(err)
+		}
+		b, err := os.ReadFile(copyTo)
+		if err != nil || string(b) != `{"pcbpilotPoses":2,"poses":[]}` {
+			t.Fatalf("targets %#v wrote %s (%v)", targets, b, err)
+		}
 	}
 }
