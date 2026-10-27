@@ -989,27 +989,63 @@ func TestSbLinkNoReplaceFailsClosed(t *testing.T) {
 	}
 }
 
-// End to end: an --out without hard links aborts with NO_ATOMIC_REPLACE and
-// puts every original back.
-func TestSchEditNoHardLinksAborts(t *testing.T) {
-	out := sbGuardBuild(t)
-	before := map[string][]byte{}
-	for _, f := range []string{"p.kicad_pro", "p.kicad_sch", "sym-lib-table"} {
-		before[f], _ = os.ReadFile(filepath.Join(out, f))
-	}
-	defer func() { sbLink, sbInstall = os.Link, func(s, d string) error { return sbRenameNoReplace(s, d) } }()
-	sbLink = func(string, string) error {
-		return &os.LinkError{Op: "link", Err: errors.New("operation not supported")}
-	}
-	sbInstall = sbLinkNoReplace
-	rep, err := runSchEdit(sbOptions{OutDir: out, NoIntent: true, PlannerBudget: 20000}, sbGuardOps)
-	if err != nil || rep.Error == nil || rep.Error.Code != "NO_ATOMIC_REPLACE" || !strings.Contains(rep.Error.Fix, "hard links") {
-		t.Fatalf("no hard links: %v %+v", err, rep.Error)
-	}
-	for f, want := range before {
-		if b, _ := os.ReadFile(filepath.Join(out, f)); !bytes.Equal(b, want) {
-			t.Errorf("%s not put back", f)
+// sbTreeBytes reads every file below dir except .pcbpilot.
+func sbTreeBytes(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	m := map[string]string{}
+	_ = filepath.Walk(dir, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
 		}
+		if info.IsDir() && info.Name() == ".pcbpilot" {
+			return filepath.SkipDir
+		}
+		if !info.IsDir() {
+			b, _ := os.ReadFile(p)
+			r, _ := filepath.Rel(dir, p)
+			m[r] = string(b)
+		}
+		return nil
+	})
+	return m
+}
+
+// End to end: an --out without hard links aborts with NO_ATOMIC_REPLACE and
+// the project directory is byte-identical afterwards — refused by the probe
+// before anything moves, and (probe bypassed) through rollback's
+// rename fallback.
+func TestSchEditNoHardLinksAborts(t *testing.T) {
+	defer func() {
+		sbLink, sbInstall = os.Link, func(s, d string) error { return sbRenameNoReplace(s, d) }
+		sbProbe = sbProbeDefault
+	}()
+	for _, probe := range []bool{true, false} {
+		t.Run(map[bool]string{true: "probe", false: "rollback"}[probe], func(t *testing.T) {
+			out := sbGuardBuild(t)
+			before := sbTreeBytes(t, out)
+			sbLink = func(string, string) error {
+				return &os.LinkError{Op: "link", Err: errors.New("operation not supported")}
+			}
+			sbInstall = sbLinkNoReplace
+			sbProbe = sbLinkProbe
+			if !probe {
+				sbProbe = func(string) error { return nil }
+			}
+			rep, err := runSchEdit(sbOptions{OutDir: out, NoIntent: true, PlannerBudget: 20000}, sbGuardOps)
+			sbLink, sbInstall, sbProbe = os.Link, func(s, d string) error { return sbRenameNoReplace(s, d) }, sbProbeDefault
+			if err != nil || rep.Error == nil || rep.Error.Code != "NO_ATOMIC_REPLACE" || !strings.Contains(rep.Error.Fix, "hard links") {
+				t.Fatalf("no hard links: %v %+v", err, rep.Error)
+			}
+			after := sbTreeBytes(t, out)
+			if len(after) != len(before) {
+				t.Fatalf("files changed: before %d, after %d", len(before), len(after))
+			}
+			for f, b := range before {
+				if after[f] != b {
+					t.Errorf("%s differs after the aborted run", f)
+				}
+			}
+		})
 	}
 }
 
@@ -1102,3 +1138,5 @@ func TestSbRenderDesignFileIsNotAReport(t *testing.T) {
 		t.Fatal("edited design file under render/ was replaced")
 	}
 }
+
+var sbProbeDefault = sbProbe

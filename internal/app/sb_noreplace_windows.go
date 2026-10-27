@@ -18,3 +18,6 @@ func sbRenameNoReplace(src, dst string) error {
 	}
 	return syscall.MoveFile(from, to)
 }
+
+// sbProbe: MoveFileW needs no hard links; nothing to probe.
+var sbProbe = func(string) error { return nil }

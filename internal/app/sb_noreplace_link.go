@@ -33,3 +33,23 @@ func sbLinkNoReplace(src, dst string) error {
 
 // sbInstall puts a staged file in place (test seam over sbRenameNoReplace).
 var sbInstall = func(src, dst string) error { return sbRenameNoReplace(src, dst) }
+
+// sbLinkProbe checks once that dir's file system can hard-link (the no-replace
+// install on Unix needs it): a temporary file is linked and both removed.
+func sbLinkProbe(dir string) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(dir, ".pcbpilot-linkprobe-*")
+	if err != nil {
+		return err
+	}
+	name := f.Name()
+	f.Close()
+	defer os.Remove(name)
+	l := name + ".l"
+	if err := sbLink(name, l); err != nil {
+		return fmt.Errorf("the file system holding %s cannot hard-link (%v): %w", dir, err, errSbNoHardLinks)
+	}
+	return os.Remove(l)
+}

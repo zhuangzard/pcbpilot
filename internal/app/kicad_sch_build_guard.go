@@ -737,6 +737,12 @@ func sbReadTargets(out string, snap *sbSnapshot, targets []string) (map[string]s
 // save) is moved into the backup as racing-save, never deleted, and the
 // originals are put back. The backup is removed only after success.
 func (g *sbGuard) publish(stage string, targets, deletes []string) *sbFailure {
+	// probe once, before any original is moved: without hard links nothing
+	// could be installed (or put back) without risking a concurrent save
+	if err := sbProbe(g.out); err != nil {
+		return &sbFailure{Code: "NO_ATOMIC_REPLACE", Message: "cannot publish into " + g.out + ": " + err.Error(),
+			Fix: "nothing was written. pcbpilot replaces files with hard links so that a concurrent KiCad save is never overwritten; build into a folder on a file system that supports hard links (choose --out elsewhere)"}
+	}
 	backup := filepath.Join(sbMetaDir(g.out), "publish-backup-"+strconv.FormatInt(time.Now().UnixNano(), 36))
 	base, _ := sbKeyed(g.base.Files)
 	type done struct {
@@ -782,7 +788,12 @@ func (g *sbGuard) publish(stage string, targets, deletes []string) *sbFailure {
 			}
 			if d.had {
 				bk, _ := sbSafeJoin(backup, d.f)
-				if err := sbRenameNoReplace(bk, dst); err != nil {
+				if err := sbInstall(bk, dst); err != nil {
+					// no hard links after all: a plain rename is safe while
+					// dst is still absent; otherwise keep both and say where
+					if _, serr := os.Lstat(dst); errors.Is(err, errSbNoHardLinks) && os.IsNotExist(serr) && os.Rename(bk, dst) == nil {
+						continue
+					}
 					stuck = append(stuck, bk)
 				}
 			}
