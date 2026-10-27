@@ -164,7 +164,7 @@ func boardRun(cmd *cobra.Command, stdout io.Writer, op string, o kicadBoardOpts,
 	if bad := boardReportAlias(o); bad != "" {
 		boardFail(rep, &kicad.BoardError{Op: op, Issues: []kicad.BoardIssue{{Code: kicad.ErrBoardArg, Field: "report",
 			Detail: "--report " + o.report + " is " + bad, Fix: "write the report to its own .json file"}}})
-		return boardEmit(stdout, rep, "")
+		return boardEmit(stdout, rep, kicadBoardOpts{})
 	}
 	err := func() error {
 		if o.spec != "" {
@@ -191,7 +191,7 @@ func boardRun(cmd *cobra.Command, stdout io.Writer, op string, o kicadBoardOpts,
 	if err != nil {
 		boardFail(rep, err)
 	}
-	return boardEmit(stdout, rep, o.report)
+	return boardEmit(stdout, rep, o)
 }
 
 // boardLocate finds KiCad (stubbed in tests).
@@ -212,7 +212,7 @@ func boardReportAlias(o kicadBoardOpts) string {
 	if o.report == "" {
 		return ""
 	}
-	low := strings.ToLower(o.report)
+	low := strings.ToLower(boardNormPath(o.report))
 	for _, ext := range []string{".kicad_pcb", ".kicad_pro", ".kicad_dru", ".kicad_prl", ".kicad_sch", ".lck"} {
 		if strings.HasSuffix(low, ext) {
 			return "a KiCad file (" + ext + ")"
@@ -229,6 +229,9 @@ func boardReportAlias(o kicadBoardOpts) string {
 		}
 		guarded = append(guarded, b, kfile.LockPath(b))
 	}
+	if o.spec != "" {
+		guarded = append(guarded, o.spec)
+	}
 	for _, g := range guarded {
 		if boardSamePath(o.report, g) {
 			return "the same file as " + g
@@ -237,10 +240,38 @@ func boardReportAlias(o kicadBoardOpts) string {
 	return ""
 }
 
-// boardSamePath: a and b name one file — the same cleaned absolute path
+// boardNormPath is p as the file system resolves it: absolute and clean;
+// on Windows also without a \\?\ (or \\?\UNC\) prefix and with the
+// trailing dots and spaces Win32 drops from every component, so
+// "n.kicad_pcb." and "n.kicad_pcb " are n.kicad_pcb.
+func boardNormPath(p string) string {
+	return boardNormPathOS(p, runtime.GOOS)
+}
+
+func boardNormPathOS(p, goos string) string {
+	if goos != "windows" {
+		return filepath.Clean(mustAbs(p))
+	}
+	q := strings.ReplaceAll(p, "/", `\`)
+	switch {
+	case strings.HasPrefix(q, `\\?\UNC\`):
+		q = `\\` + q[len(`\\?\UNC\`):]
+	case strings.HasPrefix(q, `\\?\`), strings.HasPrefix(q, `\\.\`):
+		q = q[len(`\\?\`):]
+	}
+	parts := strings.Split(q, `\`)
+	for i, c := range parts {
+		if c != "." && c != ".." {
+			parts[i] = strings.TrimRight(c, ". ")
+		}
+	}
+	return filepath.Clean(mustAbs(strings.Join(parts, `\`)))
+}
+
+// boardSamePath: a and b name one file — the same normalized absolute path
 // (ignoring case on Windows and macOS) or, where both exist, the same file.
 func boardSamePath(a, b string) bool {
-	a, b = filepath.Clean(mustAbs(a)), filepath.Clean(mustAbs(b))
+	a, b = boardNormPath(a), boardNormPath(b)
 	if a == b || ((runtime.GOOS == "windows" || runtime.GOOS == "darwin") && strings.EqualFold(a, b)) {
 		return true
 	}
@@ -251,7 +282,8 @@ func boardSamePath(a, b string) bool {
 
 // boardEmit prints (and with path writes) the report; the exit code rides
 // on exitCodeError.
-func boardEmit(stdout io.Writer, rep *kicadBoardReport, path string) error {
+func boardEmit(stdout io.Writer, rep *kicadBoardReport, o kicadBoardOpts) error {
+	path := o.report
 	if rep.Verdict == "" {
 		rep.Verdict = gate.CannotCheck
 	}
@@ -261,6 +293,18 @@ func boardEmit(stdout io.Writer, rep *kicadBoardReport, path string) error {
 		return err
 	}
 	if path != "" {
+		// Identity again, now that the run may have created files: the
+		// report never lands on anything the run read or wrote.
+		bad := boardReportAlias(o)
+		for _, w := range rep.Written {
+			if bad == "" && boardSamePath(path, w) {
+				bad = "the same file as " + w
+			}
+		}
+		if bad != "" {
+			return fmt.Errorf("--report %s is %s: not written (the report is on stdout)", path, bad)
+		}
+		// kfile: a temp file beside the report, renamed over it.
 		if _, err := kfile.WriteFile(path, blob, kfile.Opts{}); err != nil {
 			return fmt.Errorf("--report %s: %w", path, err)
 		}

@@ -14,7 +14,8 @@
   仍是读入时的字节，变了同样 `E_FILE_CHANGED`。两者都经 kfile 原子写入；工程目录会出现 `.pcbpilot/`（写锁、事务日志）。
 - 写之前请用户在 KiCad 里关闭该板；有 `~<文件>.lck` → `E_KICAD_LOCKED`（退出码 4），**不要自己删锁**。
 - `--report` 只能是单独的 JSON 文件：指向板、工程、规则、`.kicad_prl`、锁文件（大小写/相对路径/硬链接都算同一文件）
-  一律 `E_BOARD_ARG` 拒绝，什么都不跑、不写。
+  或 `--spec` 文件一律 `E_BOARD_ARG` 拒绝，什么都不跑、不写；Windows 上 `\\?\` 前缀、各级末尾的点和空格（`n.kicad_pcb.`、
+  `n.kicad_pcb `）按系统规则先归一再比。写报告前再核对一次，经临时文件 + 改名写入。
 - `--spec FILE.json` 与形状参数互斥；JSON 的字段写法见各子命令 `--help`，多余字段直接拒绝。
 - **DRC 默认开且说了算**：`outline` / `stackup` / `holes` / `keepout` / `zone` 总在输入和结果上各跑一次
   `kicad-cli pcb drc`（error 级，带输入的 `.kicad_pro` / `.kicad_dru`：网络类、自定义规则都算；隔离的空全局库表，库检查不参与），
@@ -31,10 +32,10 @@
 | 命令 | 作用 | 要点 |
 |---|---|---|
 | `new --out X.kicad_pcb [--layers 2\|4\|6]` | 空板 + 工程文件 | 空板没有网：铺铜/带网孔要等原理图同步（或已有网的板） |
-| `outline --rect W,H [--origin X,Y] [--corner-radius R]` / `--polygon "x,y …"` / `--circle X,Y,D` | Edge.Cuts 板框（线段 + 真圆弧） | 已有板框 → `E_BOARD_OUTLINE_EXISTS`，只有 `--replace` 才删掉板级 Edge.Cuts 重画；自交/重复点/零面积 → `E_BOARD_GEOMETRY` |
+| `outline --rect W,H [--origin X,Y] [--corner-radius R]` / `--polygon "x,y …"` / `--circle X,Y,D` | Edge.Cuts 板框（线段 + 真圆弧） | 已有板框 → `E_BOARD_OUTLINE_EXISTS`，只有 `--replace` 才删掉板级 Edge.Cuts 重画；板框由封装的 Edge.Cuts 画出时不支持替换（`--replace` 也拒绝，写明封装位号）；写后外轮廓数必须正好是 1；自交/重复点/零面积 → `E_BOARD_GEOMETRY` |
 | `outline … --slot X1,Y1,X2,Y2,W` / `--cutout-circle` / `--cutout-rect` / `--cutout-polygon` | 槽孔、挖空 | 必须整个在板内且互不重叠；不给外形时加到现有板框上（没有闭合板框 → `E_BOARD_NO_OUTLINE`）；板边缺口画进外形多边形 |
 | `stackup --layers 2\|4\|6 [--thickness 1.6] [--outer-copper 0.035] [--inner-copper 0.0175] [--dielectric t1,t2,…] [--finish ENIG]` | 层数 + 物理层叠 | 介质 core/prepreg 交替、默认 FR4 εr 4.5；板厚 = 全部层之和（含阻焊）；减层时被删的内层上还有走线/铺铜/图形，或有焊盘显式用到它（SMD、连接器焊盘、只在部分层上的孔；贯穿全部铜层的通孔焊盘不算）→ `E_BOARD_LAYER_IN_USE` |
-| `holes --at X,Y … --drill D [--type pth --pad P --net GND] [--ref H5]` | 安装孔 | 每孔一个锁定、board-only 的 `pcbpilot:MountingHole_*` 封装；必须先有闭合板框（否则 `E_BOARD_NO_OUTLINE`）；NPTH 不能带网/焊环；PTH 必须给 `--pad`；出板、碰到或包住挖空、钻孔与已有钻孔重叠、钻孔穿过任何铜（焊盘真实形状、过孔、走线/圆弧）、PTH 焊环压到别的网（或无网）的铜 → `E_BOARD_OVERLAP`；孔间距、孔间隙、铜间距（含网络类与自定义规则）由 DRC 判 |
+| `holes --at X,Y … --drill D [--type pth --pad P --net GND] [--ref H5]` | 安装孔 | 每孔一个锁定、board-only 的 `pcbpilot:MountingHole_*` 封装；必须先有闭合板框（否则 `E_BOARD_NO_OUTLINE`）；NPTH 不能带网/焊环；PTH 必须给 `--pad`；出板、碰到或包住挖空、钻孔与已有钻孔重叠、钻孔穿过任何铜（不论网：焊盘真实形状、过孔、走线/圆弧）、PTH 焊环压到别的网（或无网）的铜（同网只允许焊环相接） → `E_BOARD_OVERLAP`；孔间距、孔间隙、铜间距（含网络类与自定义规则）由 DRC 判 |
 | `keepout --rect X,Y,W,H\|--polygon\|--circle [--layers F.Cu,B.Cu] [--forbid tracks,vias,pads,pours,footprints] [--name]` | 规则区 | 默认全部铜层、五项全禁 |
 | `zone --rect …\|--polygon\|--circle\|--board-outline --net GND --layers In1.Cu [--clearance --min-width --thermal-gap --spoke-width --connection thermal\|solid\|none\|tht-thermal --priority N] [--no-fill]` | 铺铜 + 灌铜 | 灌铜按 KiCad「全部重灌」做（报告写明重灌了几个区）；任一请求层灌出来面积为 0（在板外、或在该层整个落在禁铺区里）→ `E_BOARD_VERIFY` 并写明哪一层，不提交 |
 | `text --text "rev A" --at X,Y [--layer F.Silkscreen\|B.Silkscreen\|F.Fab\|B.Fab] [--size 1 --thickness 0.15 --rotation --justify]` | 板上文字 | 背面层自动镜像；低于板子最小丝印字高/线宽给警告 |

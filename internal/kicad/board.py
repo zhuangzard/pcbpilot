@@ -469,11 +469,26 @@ def refill_filled(board, res):
     return res
 
 
+def footprint_edges(board):
+    """Designators of footprints that draw on Edge.Cuts."""
+    return sorted({fp.GetReference() for fp in board.GetFootprints()
+                   for g in fp.GraphicalItems() if g.GetLayer() == pcbnew.Edge_Cuts})
+
+
 def op_outline(board, spec, P):
     existing = edge_drawings(board)
     outer = spec.get("outer")
     cutouts = spec.get("cutouts") or []
     holes_before = 0
+    ps0 = board_polys(board)
+    outlines_before = ps0.OutlineCount() if ps0 is not None else 0
+    fps = footprint_edges(board)
+    if outer and fps:
+        P.add("E_BOARD_OUTLINE_EXISTS", "outline", "unsupported replacement: footprint(s) %s draw Edge.Cuts, which kicad board cannot remove or replace" % ", ".join(fps),
+              "remove or edit those footprints' Edge.Cuts in KiCad first, or add cutouts only")
+    elif outer and outlines_before and not existing:
+        P.add("E_BOARD_OUTLINE_EXISTS", "outline", "the board already has %d closed outline(s) that are not board-level Edge.Cuts drawings" % outlines_before,
+              "unsupported replacement: remove the existing outline in KiCad first")
     if outer:
         if existing and not spec.get("replace"):
             P.add("E_BOARD_OUTLINE_EXISTS", "outline", "Edge.Cuts already has %d drawing(s) on this board" % len(existing),
@@ -504,7 +519,7 @@ def op_outline(board, spec, P):
         for m, p in zip(made, shp["prims"]):
             want[m["uuid"]] = expect_edge(p)
         created += made
-    expect = {"holes": holes_before + len(cutouts), "edges": want, "lineWidth": w}
+    expect = {"holes": holes_before + len(cutouts), "edges": want, "lineWidth": w, "outlines": 1 if outer else outlines_before}
     if outer:
         expect["bbox"] = outer["bbox"]
     return refill_filled(board, {"created": created, "removed": removed, "expect": expect})
@@ -517,6 +532,8 @@ def verify_outline(board, spec, res, V):
         return
     i = largest(ps)
     exp = res["expect"]
+    if ps.OutlineCount() != exp["outlines"]:
+        V.append("the board has %d outer outline(s) after the write, expected %d" % (ps.OutlineCount(), exp["outlines"]))
     if ps.HoleCount(i) != exp["holes"]:
         V.append("the outline has %d cutout(s), expected %d" % (ps.HoleCount(i), exp["holes"]))
     if "bbox" in exp:
@@ -759,12 +776,14 @@ def hole_conflicts(board, h):
             if pd > 0 and math.hypot(px - x, py - y) < rd + pd:
                 out.append("the drill overlaps the drill of %s pad %s" % (fp.GetReference(), p.GetNumber()))
                 break
-            r = rp if ring(p.GetNetname()) else rd
-            if pth and not ring(p.GetNetname()):
-                continue  # same net: copper may touch; DRC judges the drill
-            if any(pad_copper_hits(p, l, x, y, r) for l in p.GetLayerSet().CuStack() if l in enabled):
-                what = "pad" if pth else "drill"
-                out.append("the %s overlaps the copper of %s pad %s (net %s)" % (what, fp.GetReference(), p.GetNumber(), p.GetNetname() or "none"))
+            layers = [l for l in p.GetLayerSet().CuStack() if l in enabled]
+            # The drill may cut no pad's copper, whatever its net; only the
+            # ring of a same-net PTH may touch it.
+            if any(pad_copper_hits(p, l, x, y, rd) for l in layers):
+                out.append("the drill cuts the copper of %s pad %s (net %s)" % (fp.GetReference(), p.GetNumber(), p.GetNetname() or "none"))
+                break
+            if ring(p.GetNetname()) and any(pad_copper_hits(p, l, x, y, rp) for l in layers):
+                out.append("the pad overlaps the copper of %s pad %s (net %s)" % (fp.GetReference(), p.GetNumber(), p.GetNetname() or "none"))
                 break
     return out
 

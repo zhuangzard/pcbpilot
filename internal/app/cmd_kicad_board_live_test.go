@@ -395,6 +395,22 @@ p.AddPrimitivePoly(pcbnew.F_Cu, ring, 0, True)
 fp.Add(p); fp.SetAttributes(pcbnew.FP_BOARD_ONLY); b0.Add(fp)
 `)
 	boardLiveOp(t, tools, "holes", pcb, &kicad.HolesSpec{Holes: []kicad.HoleSpec{{X: 50, Y: 30, Drill: 2}}})
+
+	// Same-net pads: a GND PTH ring may touch GND copper, its drill may not
+	// cut it (a small SMD pad, a large pad around the whole hole).
+	seedPy(t, tools, pcb, `
+gnd = b0.FindNet("GND")
+for ref, at, size in (("SMD1", (25, 46), 2), ("BIG1", (10, 8), 10)):
+    fp = pcbnew.FOOTPRINT(b0); fp.SetReference(ref); fp.SetPosition(P(*at))
+    p = pcbnew.PAD(fp); p.SetAttribute(pcbnew.PAD_ATTRIB_SMD); p.SetShape(pcbnew.F_Cu, pcbnew.PAD_SHAPE_RECTANGLE)
+    p.SetSize(pcbnew.VECTOR2I(pcbnew.FromMM(size), pcbnew.FromMM(size))); ls = pcbnew.LSET(); ls.AddLayer(pcbnew.F_Cu); p.SetLayerSet(ls)
+    p.SetNumber("1"); p.SetPosition(P(*at)); p.SetNet(gnd); fp.Add(p); fp.SetAttributes(pcbnew.FP_BOARD_ONLY); b0.Add(fp)
+`)
+	gndPTH := func(x, y float64) *kicad.HolesSpec {
+		return &kicad.HolesSpec{Holes: []kicad.HoleSpec{{X: x, Y: y, Drill: 1, Pad: 3, Type: "pth", Net: "GND"}}}
+	}
+	boardLiveRefused(t, tools, "holes", in, gndPTH(25, 46), 2, kicad.ErrBoardOverlap)
+	boardLiveRefused(t, tools, "holes", in, gndPTH(10, 8), 2, kicad.ErrBoardOverlap)
 	boardLiveRefused(t, tools, "holes", in, &kicad.HolesSpec{Holes: []kicad.HoleSpec{{X: 53.5, Y: 30, Drill: 1}}}, 2, kicad.ErrBoardOverlap) // on the ring
 
 	// A two-layer pour with a no-pour keepout on one layer: the failing layer is named.
@@ -455,4 +471,29 @@ p.SetNumber("1"); p.SetPosition(P(70, 10)); fp.Add(p); fp.SetAttributes(pcbnew.F
 			t.Errorf("--out %s differs from the source (%v)", ext, err)
 		}
 	}
+}
+
+// TestKicadBoardLiveFootprintOutline: an outline drawn by a footprint's
+// Edge.Cuts is not replaced silently, with or without --replace.
+func TestKicadBoardLiveFootprintOutline(t *testing.T) {
+	tools := boardLiveTools(t)
+	pcb := filepath.Join(t.TempDir(), "f.kicad_pcb")
+	boardLiveOp(t, tools, "new", pcb, &kicad.NewBoardSpec{Layers: 2})
+	seedPy(t, tools, pcb, `
+fp = pcbnew.FOOTPRINT(b0); fp.SetReference("FRAME1"); fp.SetPosition(P(0, 0))
+pts = [(0, 0), (20, 0), (20, 20), (0, 20)]
+for i in range(4):
+    s = pcbnew.PCB_SHAPE(fp); s.SetShape(pcbnew.SHAPE_T_SEGMENT); s.SetLayer(pcbnew.Edge_Cuts)
+    s.SetStart(P(*pts[i])); s.SetEnd(P(*pts[(i + 1) % 4])); s.SetWidth(pcbnew.FromMM(0.05)); fp.Add(s)
+b0.Add(fp)
+`)
+	rect := kicad.BoardShape{Rect: &kicad.BoardRect{X: 50, Y: 0, Width: 20, Height: 20}}
+	for _, replace := range []bool{false, true} {
+		rep := boardLiveRefused(t, tools, "outline", kicadBoardOpts{pcb: pcb, inPlace: true}, &kicad.OutlineSpec{Outer: rect, Replace: replace}, 2, kicad.ErrBoardOutlineExists)
+		if !strings.Contains(rep.Issues[0].Detail, "unsupported replacement") || !strings.Contains(rep.Issues[0].Detail, "FRAME1") {
+			t.Errorf("replace %v: %+v", replace, rep.Issues)
+		}
+	}
+	// Cutouts inside the footprint's outline are still fine.
+	boardLiveOp(t, tools, "outline", pcb, &kicad.OutlineSpec{Cutouts: []kicad.BoardShape{{Circle: &kicad.BoardCircle{X: 10, Y: 10, Diameter: 3}}}})
 }

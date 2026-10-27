@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -418,8 +419,13 @@ func TestKicadBoardReportAlias(t *testing.T) {
 		return code, rep
 	}
 	upper := filepath.Join(dir, "B.KICAD_PCB")
-	for _, rp := range []string{pcb, filepath.Join(dir, "b.kicad_pro"), filepath.Join(dir, "b.kicad_dru"), filepath.Join(dir, "~b.kicad_pcb.lck"),
-		out, filepath.Join(dir, "n.kicad_pro"), link, upper, filepath.Join(dir, "sub", "..", "b.kicad_pcb")} {
+	aliases := []string{pcb, filepath.Join(dir, "b.kicad_pro"), filepath.Join(dir, "b.kicad_dru"), filepath.Join(dir, "~b.kicad_pcb.lck"),
+		out, filepath.Join(dir, "n.kicad_pro"), link, upper, filepath.Join(dir, "sub", "..", "b.kicad_pcb")}
+	if runtime.GOOS == "windows" {
+		// Names Win32 resolves to the (not yet existing) output or the project.
+		aliases = append(aliases, out+" ", out+".", out+". .", `\\?\`+out, filepath.Join(dir, "n.kicad_pro "), filepath.Join(dir+".", "n.kicad_pcb"))
+	}
+	for _, rp := range aliases {
 		for _, good := range []bool{true, false} {
 			text := "rev A"
 			if !good {
@@ -495,5 +501,52 @@ func TestKicadBoardDRCByDefault(t *testing.T) {
 	runKicadBoard(rep, "text", textSpec(), kicadBoardOpts{pcb: pcb, inPlace: true}, f)
 	if !rep.OK || len(f.druSeen) != 0 {
 		t.Errorf("text without --drc ran DRC %d times", len(f.druSeen))
+	}
+}
+
+func TestKicadBoardNormPathWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Win32 path rules")
+	}
+	for in, want := range map[string]string{
+		`C:\a\n.kicad_pcb.`:       `C:\a\n.kicad_pcb`,
+		`C:\a\n.kicad_pcb `:       `C:\a\n.kicad_pcb`,
+		`\\?\C:\a\n.kicad_pcb`:    `C:\a\n.kicad_pcb`,
+		`C:\a. \b\..\n.kicad_pcb`: `C:\a\n.kicad_pcb`,
+		`\\?\UNC\srv\sh\x.json`:   `\\srv\sh\x.json`,
+	} {
+		if got := boardNormPathOS(in, "windows"); !strings.EqualFold(got, want) {
+			t.Errorf("%q → %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestKicadBoardReportIsNotTheSpec(t *testing.T) {
+	dir, pcb := boardFixture(t)
+	spec := filepath.Join(dir, "setup.json")
+	body := []byte(`{"text":"rev A","x":1,"y":2}`)
+	if err := os.WriteFile(spec, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeBoardTools{}
+	old := boardLocate
+	boardLocate = func() (kicadBoardTools, error) { return f, nil }
+	defer func() { boardLocate = old }()
+	for _, rp := range []string{spec, filepath.Join(dir, "SETUP.JSON"), filepath.Join(dir, ".", "setup.json")} {
+		if runtime.GOOS != "windows" && runtime.GOOS != "darwin" && rp != spec && strings.Contains(rp, "SETUP") {
+			continue
+		}
+		var buf bytes.Buffer
+		c := newKicadBoardCmd(&buf)
+		c.SetArgs([]string{"text", "--pcb", pcb, "--in-place", "--spec", spec, "--report", rp})
+		c.SetOut(io.Discard)
+		c.SetErr(io.Discard)
+		var ec exitCodeError
+		if err := c.Execute(); !errors.As(err, &ec) || ec.code != 2 {
+			t.Errorf("--report %s = --spec: %v", rp, err)
+		}
+	}
+	if b, _ := os.ReadFile(spec); !bytes.Equal(b, body) || f.calls != 0 {
+		t.Errorf("spec overwritten or KiCad ran (%d)", f.calls)
 	}
 }
