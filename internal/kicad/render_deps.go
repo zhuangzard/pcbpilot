@@ -258,21 +258,31 @@ func copyRenderDeps(d *renderDeps, dst string, models bool) (string, error) {
 		}
 		return copyFile(src, to)
 	}
-	walk := func(dir string, filter bool) error {
-		return filepath.WalkDir(dir, func(p string, e os.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			name := e.Name()
+	// walk copies below dir; a dir that is itself a link or junction is
+	// walked at its resolved location but copied under its logical path.
+	var walk func(dir string, filter bool, depth int) error
+	// walk copies below dir by its logical path. The directory given is
+	// listed through any link or junction it is (os.ReadDir follows it);
+	// links met below it are not followed into.
+	walk = func(dir string, filter bool, depth int) error {
+		ents, err := os.ReadDir(dir)
+		if err != nil {
+			return err
+		}
+		for _, e := range ents {
+			p, name := filepath.Join(dir, e.Name()), e.Name()
 			if e.IsDir() {
-				if p != dir && (strings.HasPrefix(name, ".") || strings.HasSuffix(name, "-backups")) {
-					return filepath.SkipDir
+				if strings.HasPrefix(name, ".") || strings.HasSuffix(name, "-backups") || depth > 32 {
+					continue
 				}
-				return nil
+				if err := walk(p, filter, depth+1); err != nil {
+					return err
+				}
+				continue
 			}
 			ext := strings.ToLower(filepath.Ext(name))
 			if filter && !renderCopyExt[ext] && !(models && renderModelExt[ext]) && name != "sym-lib-table" && name != "fp-lib-table" {
-				return nil
+				continue
 			}
 			if !e.Type().IsRegular() {
 				// A linked project file (.kicad_pro, a library table, a
@@ -280,14 +290,20 @@ func copyRenderDeps(d *renderDeps, dst string, models bool) (string, error) {
 				// not resolve to a regular file refuses the render.
 				st, err := os.Stat(p)
 				if err != nil || !st.Mode().IsRegular() {
+					if err == nil && st.IsDir() {
+						continue // a linked directory is not followed
+					}
 					return renderErr("RENDER_DEPENDENCY_UNRESOLVED", "point the link at an existing file or replace it with the file",
 						"%s is a link / special file that does not resolve to a regular file (%v)", p, err)
 				}
 			}
-			return copyOne(p)
-		})
+			if err := copyOne(p); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
-	if err := walk(d.ProjDir, true); err != nil {
+	if err := walk(d.ProjDir, true, 0); err != nil {
 		return "", err
 	}
 	for _, m := range d.Mirror {
@@ -296,7 +312,7 @@ func copyRenderDeps(d *renderDeps, dst string, models bool) (string, error) {
 			return "", err
 		}
 		if st.IsDir() { // a .pretty library
-			err = walk(m, false)
+			err = walk(m, false, 0)
 		} else {
 			err = copyOne(m)
 		}

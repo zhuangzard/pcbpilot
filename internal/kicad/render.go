@@ -97,7 +97,7 @@ func (e *RenderError) Error() string { return e.Code + ": " + e.Detail }
 // --out), as opposed to a render that could not be checked.
 func (e *RenderError) Usage() bool {
 	switch e.Code {
-	case "RENDER_BAD_INPUT", "RENDER_INPUT_MISSING", "RENDER_OUT_NOT_EMPTY", "RENDER_OUT_UNSAFE", "RENDER_OUT_BAD_MANIFEST":
+	case "RENDER_BAD_INPUT", "RENDER_INPUT_MISSING", "RENDER_OUT_NOT_EMPTY", "RENDER_OUT_UNSAFE", "RENDER_OUT_BAD_MANIFEST", "RENDER_OUT_PARTIAL":
 		return true
 	}
 	return false
@@ -283,6 +283,10 @@ func checkRenderOut(dir string) (string, error) {
 	if len(ents) == 0 {
 		return abs, nil
 	}
+	if _, err := os.Lstat(filepath.Join(abs, RenderBackupName)); err == nil {
+		return "", renderErr("RENDER_OUT_PARTIAL", "a previous publish was interrupted: restore "+RenderBackupName+" by hand or use a new --out",
+			"%s holds %s", dir, RenderBackupName)
+	}
 	m, err := readStrictManifest(abs)
 	if err != nil {
 		return "", err
@@ -292,6 +296,10 @@ func checkRenderOut(dir string) (string, error) {
 		listed[f.File] = true
 	}
 	for _, e := range ents {
+		if e.Name() == RenderBackupName {
+			return "", renderErr("RENDER_OUT_PARTIAL", "a previous publish was interrupted: restore "+RenderBackupName+" by hand or use a new --out",
+				"%s holds %s", dir, RenderBackupName)
+		}
 		if !listed[e.Name()] {
 			return "", renderErr("RENDER_OUT_NOT_EMPTY", "use an empty or new --out directory (or one written by kicad render, without other files)",
 				"%s holds %q, which no render wrote", dir, e.Name())
@@ -360,39 +368,96 @@ func ReadRenderManifest(dir string) (*RenderManifest, error) {
 // checked again, the old listed files are removed (regular files only; a
 // name is a plain file name, so nothing outside out is reachable), the new
 // files are copied in and the manifest is written last.
-func publishRender(stage, out string, m *RenderManifest) error {
+func publishRender(stage, out string, m *RenderManifest) (err error) {
 	if _, err := checkRenderOut(out); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(out, 0o755); err != nil {
 		return err
 	}
-	if old, err := readStrictManifest(out); err == nil {
-		for _, f := range old.Files {
-			p := filepath.Join(out, f.File)
-			if info, err := os.Lstat(p); err == nil && info.Mode().IsRegular() {
-				if err := os.Remove(p); err != nil {
-					return err
-				}
-			}
-		}
-		if err := os.Remove(filepath.Join(out, RenderManifestName)); err != nil {
-			return err
-		}
-	}
 	for _, f := range m.Files {
 		if !renderNameRE.MatchString(f.File) && !(f.Kind == "report" && ValidRenderReportName(f.File)) {
 			return renderErr("RENDER_FAILED", "", "refusing to write %q", f.File)
+		}
+	}
+	// 1. Park the old render (its listed files and render.json) in the
+	// backup directory; its presence marks a publish in progress.
+	backup := filepath.Join(out, RenderBackupName)
+	if err := os.Mkdir(backup, 0o755); err != nil {
+		return renderErr("RENDER_OUT_PARTIAL", "a previous publish was interrupted: restore "+RenderBackupName+" by hand or use a new --out", "%v", err)
+	}
+	var parked []string
+	if old, err := readStrictManifest(out); err == nil {
+		for _, f := range append(old.Files, RenderFile{File: RenderManifestName}) {
+			p := filepath.Join(out, f.File)
+			if info, err := os.Lstat(p); err != nil || !info.Mode().IsRegular() {
+				continue
+			}
+			if err := os.Rename(p, filepath.Join(backup, f.File)); err != nil {
+				restoreRender(out, backup, parked, nil)
+				return err
+			}
+			parked = append(parked, f.File)
+		}
+	}
+	// 2. Copy the new files, render.json last; on any failure remove what
+	// was written and move the old render back.
+	var written []string
+	defer func() {
+		if err != nil {
+			if rerr := restoreRender(out, backup, parked, written); rerr != nil {
+				err = renderErr("RENDER_OUT_PARTIAL", "restore "+filepath.Join(out, RenderBackupName)+" by hand or use a new --out",
+					"publish failed (%v) and the previous render could not be restored: %v", err, rerr)
+			}
+		}
+	}()
+	for _, f := range m.Files {
+		if err := renderPublishHook("copy", f.File); err != nil {
+			return err
 		}
 		p := filepath.Join(out, f.File)
 		if info, err := os.Lstat(p); err == nil && !info.Mode().IsRegular() {
 			return renderErr("RENDER_OUT_UNSAFE", "remove it from --out", "%s is not a regular file", p)
 		}
+		written = append(written, f.File)
 		if err := copyFile(filepath.Join(stage, f.File), p); err != nil {
 			return err
 		}
 	}
-	return writeManifest(out, m)
+	written = append(written, RenderManifestName)
+	if err := writeManifest(out, m); err != nil {
+		return err
+	}
+	// 3. Done: drop the parked old render.
+	return os.RemoveAll(backup)
+}
+
+// RenderBackupName is the directory inside --out that holds the previous
+// render while a new one is published; compare refuses a directory that
+// has one (an interrupted publish).
+const RenderBackupName = ".render-backup"
+
+// renderPublishHook lets tests fail a publish step ("copy", "restore").
+var renderPublishHook = func(step, name string) error { return nil }
+
+// restoreRender undoes a failed publish: removes the new files, moves the
+// parked old ones back and removes the backup directory. On error the
+// backup directory stays, so the output is recognisably incomplete.
+func restoreRender(out, backup string, parked, written []string) error {
+	for _, f := range written {
+		if err := os.Remove(filepath.Join(out, f)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	for _, f := range parked {
+		if err := renderPublishHook("restore", f); err != nil {
+			return err
+		}
+		if err := os.Rename(filepath.Join(backup, f), filepath.Join(out, f)); err != nil {
+			return err
+		}
+	}
+	return os.Remove(backup)
 }
 
 func writeManifest(dir string, m *RenderManifest) error {
@@ -429,8 +494,13 @@ var (
 	// kicad-cli progress lines that carry no finding.
 	renderQuietRE = regexp.MustCompile(`^(Plotted to |Done\.|Loading|Build |Create |Simplif|Calculating|Load Raytracing|Loading 3D|Reload time|Rendering|Successfully created)`)
 	// A message about something the plot could not load.
-	renderMissingRE = regexp.MustCompile(`(?i)(not found|missing|could not (load|find|open|read)|cannot (load|find|open|read)|unable to (load|find|open|read)|failed to (load|open|read)|does not exist)`)
-	renderObjectRE  = regexp.MustCompile(`(?i)(sheet|symbol|footprint|librar|\.kicad_|drawing sheet|worksheet|file)`)
+	// Any failure wording blocks (checked before the progress filter).
+	renderFailRE = regexp.MustCompile(`(?i)(fail|error|cannot|can't|unable|permission denied|not found|missing|could not|does not exist)`)
+	// Known-harmless lines that may carry failure wording: Fontconfig's
+	// config noise about system fonts (seen under go test on Windows).
+	// Plain progress lines name only the file kicad-cli wrote (whose name
+	// may itself contain such a word).
+	renderHarmlessRE = regexp.MustCompile(`^(Fontconfig (error|warning):|Plotted to '[^']*'\.?$|Done\.$)`)
 )
 
 // runRenderCLI runs kicad-cli with the isolated config and timeout and
@@ -453,7 +523,7 @@ func runRenderCLI(cli string, blocking bool, args ...string) ([]string, error) {
 		// ("Loading…") never hides a missing object. Fontconfig's own
 		// config noise (seen under go test on Windows) is about system
 		// fonts, not the design: kept as a warning only.
-		miss := renderMissingRE.MatchString(l) && renderObjectRE.MatchString(l) && !strings.HasPrefix(l, "Fontconfig")
+		miss := renderFailRE.MatchString(l) && !renderHarmlessRE.MatchString(l)
 		if !miss && renderQuietRE.MatchString(l) {
 			continue
 		}

@@ -36,6 +36,10 @@ func fakeRenderCLI(args []string) int {
 		fmt.Println("Error: symbol library '" + strings.Repeat("very-long-directory-name/", 20) + "parts.kicad_sym' not found")
 	case "diag-loading": // a progress prefix in front of the finding
 		fmt.Println("Loading symbol library 'parts' failed: file not found")
+	case "diag-perm": // generic failure wording, no "missing object" phrase
+		fmt.Println("Loading footprint 'F' failed: permission denied")
+	case "plotted-error-name": // harmless progress naming a file called error…
+		fmt.Println("Plotted to '/tmp/error_amp-failed-sub.svg'.")
 	}
 	in := args[len(args)-1]
 	// Like KiCad, read the project's drawing sheet: one it names but cannot
@@ -512,5 +516,133 @@ func TestRenderFakeReportPublished(t *testing.T) {
 		if _, err := Render(RenderOptions{Sch: root, OutDir: out, ReportName: bad}); renderCode(err) != "RENDER_BAD_INPUT" {
 			t.Errorf("report name %q: %v", bad, err)
 		}
+	}
+}
+
+// Generic failure wording blocks even behind a progress prefix; only the
+// explicit harmless lines (Fontconfig, "Plotted to '…'", "Done.") pass,
+// whatever the plotted file is called.
+func TestRenderFakeGenericFailureWording(t *testing.T) {
+	for _, c := range []struct {
+		mode string
+		ok   bool
+	}{{"diag-perm", false}, {"plotted-error-name", true}} {
+		t.Run(c.mode, func(t *testing.T) {
+			fakeRenderCLIEnv(t, c.mode)
+			ws := t.TempDir()
+			root := schProject(t, ws, "../shared/sub.kicad_sch")
+			_, err := Render(RenderOptions{Sch: root, OutDir: filepath.Join(ws, "out")})
+			if c.ok && err != nil {
+				t.Fatalf("harmless line blocked: %v", err)
+			}
+			if !c.ok && renderCode(err) != "RENDER_KICAD_DIAGNOSTIC" {
+				t.Fatalf("err %v, want RENDER_KICAD_DIAGNOSTIC", err)
+			}
+		})
+	}
+}
+
+// A project directory reached through a junction / link is walked at its
+// target but copied under its logical path: .kicad_pro and the library
+// tables travel.
+func TestRenderCopyThroughLinkedProjectDir(t *testing.T) {
+	ws := t.TempDir()
+	real := filepath.Join(ws, "real")
+	writeFile(t, filepath.Join(real, "top.kicad_sch"), "(kicad_sch (version 20231120) (uuid \"11111111-1111-1111-1111-111111111111\"))\n")
+	writeFile(t, filepath.Join(real, "top.kicad_pro"), "{}")
+	writeFile(t, filepath.Join(real, "sym-lib-table"), "(sym_lib_table (version 7))\n")
+	writeFile(t, filepath.Join(real, "fp-lib-table"), "(fp_lib_table (version 7))\n")
+	link := filepath.Join(ws, "link")
+	makeLink(t, real, link)
+	d, err := collectRenderDeps(filepath.Join(link, "top.kicad_sch"))
+	if err != nil || len(d.Unresolved) > 0 {
+		t.Fatalf("%v %v", err, d.Unresolved)
+	}
+	dst := filepath.Join(ws, "copy")
+	proj, err := copyRenderDeps(d, dst, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"top.kicad_sch", "top.kicad_pro", "sym-lib-table", "fp-lib-table"} {
+		if _, err := os.Stat(filepath.Join(proj, f)); err != nil {
+			t.Errorf("%s not copied through the linked project dir: %v", f, err)
+		}
+	}
+}
+
+// A publish that fails mid-copy restores the previous render, manifest
+// included; one whose restore also fails leaves the backup directory, and
+// both a new render and a compare refuse that directory.
+func TestRenderPublishTransactional(t *testing.T) {
+	fakeRenderCLIEnv(t, "")
+	ws := t.TempDir()
+	root := schProject(t, ws, "../shared/sub.kicad_sch")
+	out, base := filepath.Join(ws, "out"), filepath.Join(ws, "base")
+	for _, d := range []string{out, base} {
+		if _, err := Render(RenderOptions{Sch: root, OutDir: d}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	snapshot := func() map[string]string {
+		m := map[string]string{}
+		ents, _ := os.ReadDir(out)
+		for _, e := range ents {
+			b, _ := os.ReadFile(filepath.Join(out, e.Name()))
+			m[e.Name()] = string(b)
+		}
+		return m
+	}
+	before := snapshot()
+	defer func(h func(string, string) error) { renderPublishHook = h }(renderPublishHook)
+	copies := 0
+	renderPublishHook = func(step, name string) error {
+		if step == "copy" {
+			if copies++; copies == 2 {
+				return fmt.Errorf("injected failure copying %s", name)
+			}
+		}
+		return nil
+	}
+	if _, err := Render(RenderOptions{Sch: root, OutDir: out}); err == nil || !strings.Contains(err.Error(), "injected") {
+		t.Fatalf("mid-copy failure not reported: %v", err)
+	}
+	after := snapshot()
+	if len(after) != len(before) {
+		t.Fatalf("restored --out has %d entries, was %d: %v", len(after), len(before), after)
+	}
+	for k, v := range before {
+		if after[k] != v {
+			t.Fatalf("%s not restored", k)
+		}
+	}
+	if r := CompareRenders(base, out); r.Verdict != gate.Pass {
+		t.Fatalf("restored render does not compare: %s %+v", r.Verdict, r.Files)
+	}
+
+	// Restore fails too: the backup stays and the directory is refused.
+	copies = 0
+	renderPublishHook = func(step, name string) error {
+		if step == "copy" {
+			if copies++; copies == 2 {
+				return fmt.Errorf("injected failure copying %s", name)
+			}
+		}
+		if step == "restore" {
+			return fmt.Errorf("injected failure restoring %s", name)
+		}
+		return nil
+	}
+	if _, err := Render(RenderOptions{Sch: root, OutDir: out}); renderCode(err) != "RENDER_OUT_PARTIAL" {
+		t.Fatalf("unrestorable publish: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(out, RenderBackupName)); err != nil {
+		t.Fatal("backup directory removed although the restore failed")
+	}
+	if r := CompareRenders(base, out); r.Verdict == gate.Pass || r.Verdict != gate.CannotCheck {
+		t.Fatalf("compare of an interrupted publish: %s", r.Verdict)
+	}
+	renderPublishHook = func(string, string) error { return nil }
+	if _, err := Render(RenderOptions{Sch: root, OutDir: out}); renderCode(err) != "RENDER_OUT_PARTIAL" {
+		t.Fatalf("render into an interrupted publish: %v", err)
 	}
 }

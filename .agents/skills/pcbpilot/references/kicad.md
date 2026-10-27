@@ -123,8 +123,12 @@ pcbpilot kicad render --out build/render --compare old/render              # 只
 - **出图校验**：层次里每一页都必须产出能解析、且真正画了东西的 SVG（`<defs>`/`<clipPath>` 等之外有几何：带坐标的 path、有尺寸的
   rect/circle、有字的 text、指向有内容目标的 use；缺页 `RENDER_INCOMPLETE`，空图/坏图 `RENDER_BAD_SVG`）。两页或两层压平后文件名相同
   （子图 `a/b` 与 `a-b`、层 `F.Cu` 与 `F_Cu`、层名 `top` 与总图）出图前就判 `RENDER_INCOMPLETE`；
-  kicad-cli 的输出保留进 `warnings`，其中“找不到 sheet/symbol/footprint/库/文件”类消息即使退出码 0 也判
-  `RENDER_KICAD_DIAGNOSTIC`。以上都是 cannot-check（退出 5），**上一版渲染原样保留**：新图先在暂存目录完成，全部通过才替换。
+  kicad-cli 的输出保留进 `warnings`，任何带失败字样的行（failed / error / cannot / unable / permission denied / not found /
+  missing…，在进度行过滤之前判）即使退出码 0 也判 `RENDER_KICAD_DIAGNOSTIC`；只有明确列出的无害行（Fontconfig、
+  `Plotted to '…'`、`Done.`）放过。以上都是 cannot-check（退出 5），**上一版渲染原样保留**：新图先在暂存目录完成；发布时旧文件
+  （含 `render.json`）先移进 `--out/.render-backup/`，新文件拷完、最后写 `render.json` 才删备份，中途失败就把旧渲染搬回。
+  备份目录还在（发布中断且没能恢复）时新渲染判 `RENDER_OUT_PARTIAL`、`--compare` 判 cannot-check。工程目录本身是链接/联接时
+  按其目标列目录、按逻辑路径复制。
 - **确定性**：kicad-cli 每次出图只有 `<title>` 里的出图时间（以及偶尔回显的临时路径）会变；pcbpilot 只在生成的头部（`<title>` 与
   其后的 `<desc>`）去掉时间与临时路径，图中文字里出现的临时副本路径换回用户自己的目录，`-0` 只在数值属性/路径数据里改写，
   `<text>` 文字不动。同一输入两次出图逐字节相同（`TestRenderLive*` 在 pic_programmer 原理图+板、complex_hierarchy 上实测）。
@@ -139,8 +143,8 @@ pcbpilot kicad render --out build/render --compare old/render              # 只
   `--report` 只收纯文件名（如 `report.json`，不带目录，不能叫 `render.json`）：随渲染一起在暂存目录生成、一起发布到
   `--out`，`render.json` 里记为 `kind: report`，`--compare` 忽略它；没给 `--out`、只做比较或渲染失败时报告只打到 stdout。
   链接形式的 `.kicad_pro`/库表按解析后的内容复制，解析不到判 cannot-check。kicad-cli 消息按整行判定（"Loading…" 开头或超长路径
-  也不会漏判），只截短显示。路径数据只有 move 没有画线段的 path、被 `display="none"`/`visibility="hidden"`/不透明度 0（属性或
-  style，含继承与 `<use>`）隐藏的图形都不算画了东西；SVG 必须恰好一个 `<svg>` 根元素。`--compare` 不跟随链接：链接目录或
+  也不会漏判），只截短显示。路径数据只有 move 没有画线段的 path、被 `display="none"`/`visibility="hidden"`/不透明度 0 隐藏，或
+  没有可见颜料（fill 与 stroke 都是 none，或只有宽度 0 的 stroke；属性或 style，含继承与 `<use>`）的图形都不算画了东西；SVG 必须恰好一个 `<svg>` 根元素。`--compare` 不跟随链接：链接目录或
   非普通文件的 `.svg` 记 unreadable（cannot-check）。
 - `--compare` 逐文件：`identical`（规范化后字节相同）/ `changed`（结构化 SVG 比较：每个绘制元素连同排序后的属性、文字和所在
   `<g>` 的样式作多重集合比较，给 `elementsAdded/elementsRemoved/changedElements` 和几条样例；只换了绘制顺序记 `reordered`）/

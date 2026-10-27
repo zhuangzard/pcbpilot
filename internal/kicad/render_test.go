@@ -369,7 +369,7 @@ func TestSVGElementsHiddenGeometry(t *testing.T) {
 	}
 	for _, good := range []string{
 		`<svg><g visibility="hidden"><g visibility="visible">` + p + `</g></g></svg>`,
-		`<svg><g fill-opacity="0">` + p + `</g></svg>`,
+		`<svg><g fill-opacity="0" stroke="#000">` + p + `</g></svg>`,
 		`<svg><g stroke-opacity="0"><g stroke-opacity="1">` + p + `</g></g></svg>`,
 		`<svg><defs><g id="a" opacity="1">` + p + `</g></defs><use href="#a"/></svg>`,
 	} {
@@ -391,5 +391,45 @@ func TestCompareRendersUpperCaseListed(t *testing.T) {
 	r := CompareRenders(filepath.Join(root, "a"), filepath.Join(root, "b"))
 	if r.Verdict != gate.CannotCheck || r.Counts["unreadable"] != 1 {
 		t.Fatalf("%s %v", r.Verdict, r.Counts)
+	}
+}
+
+// Geometry without visible paint — fill and stroke none (attributes or
+// style, inherited, or through <use>), or a stroke of width 0 with no fill —
+// is not drawing; such files never compare as a pass.
+func TestSVGElementsUnpainted(t *testing.T) {
+	const p = `<path d="M1 1 L2 2"/>`
+	bad := []string{
+		`<svg><path fill="none" d="M1 1 L2 2"/></svg>`,
+		`<svg><rect fill="none" stroke="none" width="2" height="2"/></svg>`,
+		`<svg><text fill="none" stroke="none" x="1">R1</text></svg>`,
+		`<svg><g style="fill:none; stroke:none"><g>` + p + `<circle r="2"/></g></g></svg>`,
+		`<svg><g style="fill:none; stroke:#000; stroke-width:0">` + p + `</g></svg>`,
+		`<svg><line x1="0" y1="0" x2="1" y2="1"/></svg>`,
+		`<svg><defs><path id="a" d="M1 1 L2 2"/></defs><use href="#a" style="fill:none"/></svg>`,
+		`<svg><defs><g id="a" fill="none">` + p + `</g></defs><g stroke="none"><use href="#a"/></g></svg>`,
+	}
+	for _, b := range bad {
+		if _, err := SVGElements([]byte(b)); err == nil {
+			t.Errorf("%s accepted as a drawing", b)
+		}
+		root := t.TempDir()
+		for _, d := range []string{"a", "b"} {
+			writeFile(t, filepath.Join(root, d, "p.svg"), b)
+		}
+		if r := CompareRenders(filepath.Join(root, "a"), filepath.Join(root, "b")); r.Verdict != gate.CannotCheck {
+			t.Errorf("identical unpainted %s: %s", b, r.Verdict)
+		}
+	}
+	for _, good := range []string{
+		`<svg><g style="fill:none; stroke:#840000; stroke-width:0.1524">` + p + `</g></svg>`,
+		`<svg><g style="fill:none">` + `<path stroke="red" d="M1 1 L2 2"/></g></svg>`,
+		`<svg><line stroke="#000" x1="0" y1="0" x2="1" y2="1"/></svg>`,
+		`<svg><defs><path id="a" d="M1 1 L2 2"/></defs><use href="#a" fill="none" stroke="red"/></svg>`,
+		`<svg><text x="1">R1</text></svg>`,
+	} {
+		if _, err := SVGElements([]byte(good)); err != nil {
+			t.Errorf("%s rejected: %v", good, err)
+		}
 	}
 }
