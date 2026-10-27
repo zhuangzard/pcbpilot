@@ -717,3 +717,47 @@ func TestResolveFastrouteFileSystemErrors(t *testing.T) {
 		t.Fatalf("missing current, PATH: %q %v", got, err)
 	}
 }
+
+// A release directory reached through a symlink (or a Windows junction) is
+// searched like a real one: a stale root executable plus a linked release
+// subdirectory is ambiguous, never the root one; a dangling link fails.
+// Same lookup for tracemaker.
+func TestResolveRouterSymlinkedReleaseDir(t *testing.T) {
+	for _, tool := range []string{"fastroute", "tracemaker"} {
+		exe := tool
+		if runtime.GOOS == "windows" {
+			exe = tool + ".exe"
+		}
+		dir, real := t.TempDir(), t.TempDir()
+		writeExe(t, filepath.Join(real, exe))
+		link := filepath.Join(dir, tool+"-1.0-x64")
+		err := os.Symlink(real, link)
+		if err != nil && runtime.GOOS == "windows" {
+			sh := os.Getenv("ComSpec")
+			if sh == "" {
+				sh = filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe")
+			}
+			err = exec.Command(sh, "/c", "mklink", "/J", link, real).Run()
+		}
+		if err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		resolve := map[string]func(string) (string, error){"fastroute": resolveFastroute, "tracemaker": resolveTracemaker}[tool]
+		if got, err := resolve(dir); err != nil || !sameFile(t, got, filepath.Join(real, exe)) {
+			t.Fatalf("%s via linked dir: %q %v", tool, got, err)
+		}
+		writeExe(t, filepath.Join(dir, exe)) // stale root copy
+		if got, err := resolve(dir); err == nil || !strings.Contains(err.Error(), "executables") {
+			t.Fatalf("%s: stale root won over the linked release dir: %q %v", tool, got, err)
+		}
+		if err := os.Remove(filepath.Join(dir, exe)); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.RemoveAll(real); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := resolve(dir); err == nil || !strings.Contains(err.Error(), "cannot stat") {
+			t.Fatalf("%s: dangling link: %v", tool, err)
+		}
+	}
+}

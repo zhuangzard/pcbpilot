@@ -718,7 +718,20 @@ func installedBinary(name, p, flag string) (string, error) {
 	listing := map[string][]os.DirEntry{abs: root}
 	dirs := []string{abs, filepath.Join(abs, "bin")}
 	for _, e := range root {
-		if e.IsDir() && !strings.EqualFold(e.Name(), "bin") {
+		if strings.EqualFold(e.Name(), "bin") {
+			continue
+		}
+		isDir := e.IsDir()
+		if e.Type()&(os.ModeSymlink|os.ModeIrregular) != 0 {
+			// A symlinked (or, on Windows, junctioned) release directory:
+			// DirEntry does not follow it, so stat the target.
+			st, err := routerStat(filepath.Join(abs, e.Name()))
+			if err != nil {
+				return "", fmt.Errorf("%s: cannot stat %s: %v; fix the link or pass %s", name, filepath.Join(abs, e.Name()), err, flag)
+			}
+			isDir = st.IsDir()
+		}
+		if isDir {
 			dirs = append(dirs, filepath.Join(abs, e.Name()))
 		}
 	}
