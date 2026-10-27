@@ -777,3 +777,176 @@ func TestSchEditSaveDuringFinalSnapshot(t *testing.T) {
 		t.Errorf("the backup of an aborted publication must be kept: %v", ents)
 	}
 }
+
+func sbBackupFiles(t *testing.T, out, sub string) map[string]string {
+	t.Helper()
+	got := map[string]string{}
+	dirs, _ := filepath.Glob(filepath.Join(sbMetaDir(out), "publish-backup-*", sub))
+	for _, d := range dirs {
+		_ = filepath.Walk(d, func(p string, info os.FileInfo, err error) error {
+			if err == nil && !info.IsDir() {
+				b, _ := os.ReadFile(p)
+				got[filepath.Base(p)] = string(b)
+			}
+			return nil
+		})
+	}
+	return got
+}
+
+// KiCad recreates a target right after publication moved the original aside:
+// the no-replace install refuses, the racing save is kept (never deleted)
+// and the original is put back.
+func TestSchEditRaceAfterMoveAside(t *testing.T) {
+	out := sbGuardBuild(t)
+	sheet := filepath.Join(out, "p.kicad_sch")
+	orig, _ := os.ReadFile(sheet)
+	defer func() { sbTestAfterMoveAside = nil }()
+	const racing = "(kicad_sch saved by KiCad meanwhile)"
+	sbTestAfterMoveAside = func(rel string) {
+		if rel == "p.kicad_sch" {
+			sbTestAfterMoveAside = nil
+			_ = os.WriteFile(sheet, []byte(racing), 0o644)
+		}
+	}
+	rep, err := runSchEdit(sbOptions{OutDir: out, NoIntent: true, PlannerBudget: 20000}, sbGuardOps)
+	if err != nil || rep.Error == nil || rep.Error.Code != "CONCURRENT_CHANGE" || !strings.Contains(rep.Error.Message, "racing-save") {
+		t.Fatalf("recreated target: %v %+v", err, rep.Error)
+	}
+	if b, _ := os.ReadFile(sheet); !bytes.Equal(b, orig) {
+		t.Fatal("the original sheet was not put back")
+	}
+	found := false
+	for _, v := range sbBackupFiles(t, out, "racing-save") {
+		found = found || v == racing
+	}
+	if !found {
+		t.Fatal("the racing save was not kept in the backup")
+	}
+}
+
+// A save over a file pcbpilot already installed, then a later target fails:
+// rollback keeps that save (it is not pcbpilot's bytes) instead of removing it.
+func TestSchEditRaceAfterEarlierInstall(t *testing.T) {
+	out := sbGuardBuild(t)
+	pro, sheet := filepath.Join(out, "p.kicad_pro"), filepath.Join(out, "p.kicad_sch")
+	origPro, _ := os.ReadFile(pro)
+	defer func() { sbTestAfterInstall = nil }()
+	const racing = `{"saved":"by KiCad over the new file"}`
+	var edited []byte
+	sbTestAfterInstall = func(rel string) {
+		if rel == "p.kicad_pro" {
+			sbTestAfterInstall = nil
+			_ = os.WriteFile(pro, []byte(racing), 0o644)
+			edited = sbGuardAppend(t, sheet) // the next target no longer matches
+		}
+	}
+	rep, err := runSchEdit(sbOptions{OutDir: out, NoIntent: true, PlannerBudget: 20000}, sbGuardOps)
+	if err != nil || rep.Error == nil || rep.Error.Code != "CONCURRENT_CHANGE" {
+		t.Fatalf("race after an earlier install: %v %+v", err, rep.Error)
+	}
+	if b, _ := os.ReadFile(pro); !bytes.Equal(b, origPro) {
+		t.Fatal("the original .kicad_pro was not put back")
+	}
+	if b, _ := os.ReadFile(sheet); !bytes.Equal(b, edited) {
+		t.Fatal("the edited sheet was not put back")
+	}
+	found := false
+	for _, v := range sbBackupFiles(t, out, "racing-save") {
+		found = found || v == racing
+	}
+	if !found {
+		t.Fatal("the save over pcbpilot's file was deleted instead of kept")
+	}
+}
+
+// A report kept by a build that does not write it keeps its hash: build
+// --render, rebuild without, annotate the SVG, build --render → refused.
+func TestSchBuildRetainedReportKeepsHash(t *testing.T) {
+	sbNeedKicad(t)
+	out := filepath.Join(t.TempDir(), "p")
+	o := sbOptions{OutDir: out, NoIntent: true, PlannerBudget: 20000}
+	ro := o
+	ro.Render = true
+	for i, opt := range []sbOptions{ro, o} {
+		if rep, err := runSchBuild(sbGuardSpec(), opt, nil); err != nil || !rep.OK {
+			t.Fatalf("build %d: %v %+v", i, err, rep.Error)
+		}
+	}
+	svg := filepath.Join(out, "render", "p.svg")
+	if st := mustSbState(t, out); st.Manifest["render/p.svg"] == "" {
+		t.Fatalf("retained SVG lost its hash: %v", st.Manifest)
+	}
+	if err := os.WriteFile(svg, []byte("<svg><!-- my notes --></svg>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := runSchBuild(sbGuardSpec(), ro, nil)
+	if err != nil || rep.Error == nil || rep.Error.Code != "EXTERNAL_EDIT" || strings.Join(rep.External.Changed, ",") != "render/p.svg" {
+		t.Fatalf("annotated SVG: %v %+v %+v", err, rep.Error, rep.External)
+	}
+	if b, _ := os.ReadFile(svg); string(b) != "<svg><!-- my notes --></svg>" {
+		t.Fatal("annotated SVG overwritten")
+	}
+}
+
+// A report of a build that recorded no hashes for reports: replacing it is
+// refused (an edit cannot be ruled out); the override checkpoints it.
+func TestSchBuildLegacyReportRefused(t *testing.T) {
+	out := sbGuardBuild(t)
+	statePath := filepath.Join(sbMetaDir(out), "state.json")
+	var raw map[string]any
+	b, _ := os.ReadFile(statePath)
+	if err := json.Unmarshal(b, &raw); err != nil {
+		t.Fatal(err)
+	}
+	man := raw["manifest"].(map[string]any)
+	delete(man, "erc.json")
+	delete(raw, "reports")
+	if err := writeJSONFile(statePath, raw); err != nil {
+		t.Fatal(err)
+	}
+	erc := filepath.Join(out, "erc.json")
+	_ = os.WriteFile(erc, []byte(`{"annotated":true}`), 0o644)
+	rep, err := runSchEdit(sbOptions{OutDir: out, NoIntent: true, PlannerBudget: 20000}, sbGuardOps)
+	if err != nil || rep.Error == nil || rep.Error.Code != "EXTERNAL_EDIT" || strings.Join(rep.External.Unrecorded, ",") != "erc.json" {
+		t.Fatalf("legacy report: %v %+v %+v", err, rep.Error, rep.External)
+	}
+	if b, _ := os.ReadFile(erc); string(b) != `{"annotated":true}` {
+		t.Fatal("legacy report overwritten")
+	}
+	rep, err = runSchEdit(sbOptions{OutDir: out, NoIntent: true, PlannerBudget: 20000, DiscardExternal: true}, sbGuardOps)
+	if err != nil || !rep.OK || rep.External == nil {
+		t.Fatalf("override: %v %+v", err, rep.Error)
+	}
+	if b, _ := os.ReadFile(filepath.Join(sbCheckpointDir(out), strconv.Itoa(rep.External.Checkpoint), "erc.json")); string(b) != `{"annotated":true}` {
+		t.Fatal("checkpoint lacks the legacy report")
+	}
+}
+
+// Windows/macOS: renaming the project P → p rewrites the same files; it is
+// not a delete plus a missing file.
+func TestSchBuildCaseOnlyRename(t *testing.T) {
+	if !sbFoldCase {
+		t.Skip("case-sensitive file system")
+	}
+	sbNeedKicad(t)
+	out := filepath.Join(t.TempDir(), "proj")
+	if rep, err := runSchBuild(sbGuardSpec(), sbOptions{OutDir: out, Name: "P", NoIntent: true, PlannerBudget: 20000}, nil); err != nil || !rep.OK {
+		t.Fatalf("build P: %v %+v", err, rep.Error)
+	}
+	rep, err := runSchBuild(sbGuardSpec(), sbOptions{OutDir: out, Name: "p", NoIntent: true, PlannerBudget: 20000}, nil)
+	if err != nil || !rep.OK {
+		t.Fatalf("rebuild as p: %v %+v %+v", err, rep.Error, rep.External)
+	}
+	ents, _ := os.ReadDir(out)
+	var names []string
+	for _, e := range ents {
+		names = append(names, e.Name())
+	}
+	if !sbContains(names, "p.kicad_sch") || !sbContains(names, "p.kicad_pro") {
+		t.Fatalf("files after the rename: %v", names)
+	}
+	if rep, err := runSchBuild(sbGuardSpec(), sbOptions{OutDir: out, Name: "p", NoIntent: true, PlannerBudget: 20000}, nil); err != nil || !rep.OK {
+		t.Fatalf("third build: %v %+v", err, rep.Error)
+	}
+}

@@ -596,9 +596,15 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 
 	// compare-and-swap: nothing in --out changed while we built (KiCad does
 	// not honour sbLock), and nothing this commit replaces was edited
+	// deletes by identity: a case-only rename (P.kicad_sch → p.kicad_sch on
+	// Windows/macOS) is a write of the same file, not a delete
+	writes := map[string]bool{}
+	for _, f := range append(append([]string(nil), files...), reports...) {
+		writes[sbPathKey(f)] = true
+	}
 	var deletes []string
 	for _, f := range st.Files {
-		if !sbContains(files, f) {
+		if !writes[sbPathKey(f)] {
 			deletes = append(deletes, f)
 		}
 	}
@@ -668,7 +674,7 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 	if err := writeJSONFile(filepath.Join(sbMetaDir(out), "state.json"), st); err != nil {
 		return rep, err
 	}
-	n, err := saveSbCheckpoint(out, files, rep.Mode)
+	n, err := saveSbCheckpoint(out, append(append([]string(nil), files...), reports...), rep.Mode)
 	if err != nil {
 		rep.Warnings = append(rep.Warnings, "checkpoint: "+err.Error())
 	}

@@ -24,7 +24,9 @@ package app
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -37,12 +39,14 @@ import (
 
 // test seams: I/O errors (fail closed) and saves at the racy points
 var (
-	sbReadFile          = os.ReadFile
-	sbReadDir           = os.ReadDir
-	sbTestBeforeCommit  func(out string) // after generation and gates, before phase 2
-	sbTestAfterPublish  func(out string) // after the files are copied into --out
-	sbTestScanFile      func(rel string) // after each file a snapshot read
-	sbTestDuringPrepare func(out string) // after the discard checkpoint and staged hashing, before the live re-check
+	sbReadFile           = os.ReadFile
+	sbReadDir            = os.ReadDir
+	sbTestBeforeCommit   func(out string) // after generation and gates, before phase 2
+	sbTestAfterPublish   func(out string) // after the files are copied into --out
+	sbTestScanFile       func(rel string) // after each file a snapshot read
+	sbTestAfterMoveAside func(rel string) // publish: the original was moved into the backup
+	sbTestAfterInstall   func(rel string) // publish: the new file is in place
+	sbTestDuringPrepare  func(out string) // after the discard checkpoint and staged hashing, before the live re-check
 )
 
 // sbExternalEdits is what changed in --out since pcbpilot last wrote it.
@@ -54,6 +58,10 @@ type sbExternalEdits struct {
 	// Overwrites: existing files pcbpilot did not write that this build
 	// would replace or delete (e.g. a user library that becomes an output).
 	Overwrites []string `json:"overwrites,omitempty"`
+	// Unrecorded: files pcbpilot owns that this build replaces but whose
+	// content was never recorded (reports of older builds): an edit cannot
+	// be ruled out.
+	Unrecorded []string `json:"unrecorded,omitempty"`
 	Locks      []string `json:"kicadLocks,omitempty"`
 	// Checkpoint holds every project file as it was before
 	// --discard-external-edits overwrote them.
@@ -61,7 +69,7 @@ type sbExternalEdits struct {
 }
 
 func (x *sbExternalEdits) any() bool {
-	return len(x.Changed)+len(x.Added)+len(x.Removed)+len(x.Overwrites) > 0
+	return len(x.Changed)+len(x.Added)+len(x.Removed)+len(x.Overwrites)+len(x.Unrecorded) > 0
 }
 
 func (x *sbExternalEdits) summary() string {
@@ -69,7 +77,7 @@ func (x *sbExternalEdits) summary() string {
 	for _, g := range []struct {
 		k string
 		v []string
-	}{{"changed", x.Changed}, {"added", x.Added}, {"removed", x.Removed}, {"not written by pcbpilot, would be overwritten", x.Overwrites}} {
+	}{{"changed", x.Changed}, {"added", x.Added}, {"removed", x.Removed}, {"not written by pcbpilot, would be overwritten", x.Overwrites}, {"never recorded, an edit cannot be ruled out", x.Unrecorded}} {
 		if len(g.v) > 0 {
 			parts = append(parts, g.k+" "+strings.Join(g.v, ", "))
 		}
@@ -79,7 +87,7 @@ func (x *sbExternalEdits) summary() string {
 
 // onlyProjectFile: the one conflict is a .kicad_pro edit.
 func (x *sbExternalEdits) onlyProjectFile() bool {
-	return len(x.Added)+len(x.Removed)+len(x.Overwrites) == 0 && len(x.Changed) == 1 && strings.HasSuffix(x.Changed[0], ".kicad_pro")
+	return len(x.Added)+len(x.Removed)+len(x.Overwrites)+len(x.Unrecorded) == 0 && len(x.Changed) == 1 && strings.HasSuffix(x.Changed[0], ".kicad_pro")
 }
 
 // sbProjectFile reports whether a file name is a KiCad project file an edit
@@ -386,6 +394,10 @@ func sbDiff(snap *sbSnapshot, b *sbBasis, touch []string) *sbExternalEdits {
 		}
 		return f
 	}
+	touched := map[string]bool{}
+	for _, f := range touch {
+		touched[sbPathKey(f)] = true
+	}
 	seen := map[string]bool{}
 	check := func(f string) {
 		k := sbPathKey(f)
@@ -403,6 +415,8 @@ func sbDiff(snap *sbSnapshot, b *sbBasis, touch []string) *sbExternalEdits {
 			x.Overwrites = append(x.Overwrites, spell(k, f))
 		case has && inRec && c != r:
 			x.Changed = append(x.Changed, spell(k, f))
+		case has && !inRec && touched[k] && b.Name != "none":
+			x.Unrecorded = append(x.Unrecorded, spell(k, f))
 		case !has && inRec && owned[k] && !sbIsReport(f): // a deleted report is no edit
 			x.Removed = append(x.Removed, f)
 		}
@@ -411,11 +425,14 @@ func sbDiff(snap *sbSnapshot, b *sbBasis, touch []string) *sbExternalEdits {
 		check(f)
 	}
 	for _, f := range b.Owned {
+		if sbIsReport(f) && !touched[sbPathKey(f)] {
+			continue // a report this build does not write is kept as it is
+		}
 		check(f) // rewritten, or deleted when no longer generated
 	}
 	if !b.NoRecord {
 		for k, n := range names {
-			if _, ok := rec[k]; !ok && !seen[k] {
+			if _, ok := rec[k]; !ok && !seen[k] && !sbIsReport(n) {
 				x.Added = append(x.Added, n)
 			}
 		}
@@ -429,7 +446,7 @@ func sbDiff(snap *sbSnapshot, b *sbBasis, touch []string) *sbExternalEdits {
 			}
 		}
 	}
-	for _, l := range []*[]string{&x.Changed, &x.Added, &x.Removed, &x.Overwrites} {
+	for _, l := range []*[]string{&x.Changed, &x.Added, &x.Removed, &x.Overwrites, &x.Unrecorded} {
 		sort.Strings(*l)
 	}
 	return x
@@ -461,6 +478,9 @@ type sbGuard struct {
 	basis    *sbBasis
 	baseline *sbSnapshot
 	base     *sbSnapshot // baseline + existing write/delete targets (beforeCommit)
+	// reports: owned report files (not in the project-file snapshot) as they
+	// were at the baseline; a retained one keeps its hash in the manifest
+	reports map[string]string
 }
 
 func sbUnreadable(out string, err error) *sbFailure {
@@ -501,7 +521,20 @@ func sbGuardStart(out string, st *sbState, o sbOptions, rep *sbReport) (*sbGuard
 	if err != nil {
 		return nil, sbUnreadable(out, err)
 	}
-	g := &sbGuard{out: out, o: o, baseline: snap, basis: basis}
+	var owned []string
+	for _, f := range basis.Owned {
+		if sbIsReport(f) {
+			owned = append(owned, f)
+		}
+	}
+	if basis.LegacyReports {
+		owned = append(owned, sbReportNames...)
+	}
+	reports, err := sbReadTargets(out, snap, owned)
+	if err != nil {
+		return nil, sbUnreadable(out, err)
+	}
+	g := &sbGuard{out: out, o: o, baseline: snap, basis: basis, reports: reports}
 	x := sbDiff(snap, g.basis, nil)
 	if len(x.Locks) > 0 {
 		if o.DryRun {
@@ -536,13 +569,16 @@ func (g *sbGuard) beforeCommit(stage string, files, deletes []string, rep *sbRep
 	touch := append(append([]string(nil), files...), deletes...)
 	// every write/delete target on its own, whatever the project-file
 	// filter thinks of its name: an existing one joins the baseline
-	extra, err := sbReadTargets(g.out, g.baseline, touch)
-	if err != nil {
-		return nil, sbUnreadable(g.out, err)
-	}
 	base := &sbSnapshot{Files: map[string]string{}, Locks: g.baseline.Locks}
 	for f, h := range g.baseline.Files {
 		base.Files[f] = h
+	}
+	for f, h := range g.reports {
+		base.Files[f] = h
+	}
+	extra, err := sbReadTargets(g.out, base, touch)
+	if err != nil {
+		return nil, sbUnreadable(g.out, err)
 	}
 	for f, h := range extra {
 		base.Files[f] = h
@@ -598,7 +634,11 @@ func (g *sbGuard) beforeCommit(stage string, files, deletes []string, rep *sbRep
 	if len(now.Locks) > 0 {
 		return nil, sbLockedByKicad(g.out, now.Locks)
 	}
-	again, err := sbReadTargets(g.out, now, touch)
+	recheck := append([]string(nil), touch...)
+	for f := range g.reports {
+		recheck = append(recheck, f)
+	}
+	again, err := sbReadTargets(g.out, now, recheck)
 	if err != nil {
 		return nil, sbUnreadable(g.out, err)
 	}
@@ -645,38 +685,67 @@ func sbReadTargets(out string, snap *sbSnapshot, targets []string) (map[string]s
 // publish replaces the targets with the staged files and removes deletes,
 // recoverably: each existing target is first moved into a per-run backup
 // under .pcbpilot and its hash compared with the checked baseline (a save
-// after the final snapshot read that file). On a mismatch or an error
-// everything already replaced is put back, the backup is kept and the
-// commit aborts; after success the backup is removed.
+// after the final snapshot read that file); the new file is installed with
+// a no-replace move, so a file KiCad recreated meanwhile is never replaced.
+// On any mismatch or error the run aborts: a destination is removed only
+// while it still holds the bytes pcbpilot wrote, anything else (a racing
+// save) is moved into the backup as racing-save, never deleted, and the
+// originals are put back. The backup is removed only after success.
 func (g *sbGuard) publish(stage string, targets, deletes []string) *sbFailure {
 	backup := filepath.Join(sbMetaDir(g.out), "publish-backup-"+strconv.FormatInt(time.Now().UnixNano(), 36))
 	base, _ := sbKeyed(g.base.Files)
 	type done struct {
-		f        string
-		had, put bool
+		f     string
+		had   bool   // the original is in the backup
+		wrote string // hash of the bytes installed at dst
 	}
 	var log []done
+	var kept, stuck []string
+	keep := func(f, dst string) { // a file pcbpilot did not write: move it aside, never delete it
+		p := filepath.Join(backup, "racing-save", filepath.FromSlash(f)+"."+strconv.FormatInt(time.Now().UnixNano(), 36))
+		if os.MkdirAll(filepath.Dir(p), 0o755) == nil && os.Rename(dst, p) == nil {
+			kept = append(kept, p)
+		} else {
+			stuck = append(stuck, dst)
+		}
+	}
 	rollback := func(why string) *sbFailure {
 		for i := len(log) - 1; i >= 0; i-- {
 			d := log[i]
 			dst, _ := sbSafeJoin(g.out, d.f)
-			if d.put {
-				_ = os.Remove(dst)
+			if d.wrote != "" {
+				if b, err := os.ReadFile(dst); err == nil {
+					if sbContentHash(d.f, b) == d.wrote {
+						_ = os.Remove(dst) // exactly the bytes pcbpilot installed
+					} else {
+						keep(d.f, dst)
+					}
+				}
 			}
 			if d.had {
-				src, _ := sbSafeJoin(backup, d.f)
-				_ = os.Rename(src, dst)
+				bk, _ := sbSafeJoin(backup, d.f)
+				if err := sbRenameNoReplace(bk, dst); err != nil {
+					stuck = append(stuck, bk)
+				}
 			}
 		}
-		return &sbFailure{Code: "CONCURRENT_CHANGE", Message: g.out + " changed while sch-build published it: " + why + "; every file was put back",
-			Fix: "nothing was written (a file that could not be put back stays in " + backup + "); if KiCad has the project open, save and close it there, then re-run"}
+		msg := g.out + " changed while sch-build published it: " + why
+		if len(kept) > 0 {
+			msg += "; the file(s) saved meanwhile were moved to " + strings.Join(kept, ", ")
+		}
+		if len(stuck) > 0 {
+			msg += "; could not put back " + strings.Join(stuck, ", ")
+		} else {
+			msg += "; the originals were put back"
+		}
+		return &sbFailure{Code: "CONCURRENT_CHANGE", Message: msg,
+			Fix: "nothing of this build was kept; the backup is " + backup + ". If KiCad has the project open, save and close it there, then re-run"}
 	}
 	step := func(f string, write bool) *sbFailure {
 		dst, err := sbSafeJoin(g.out, f)
 		if err != nil {
 			return rollback(err.Error())
 		}
-		d := done{f: f}
 		want, inBase := base[sbPathKey(f)]
 		if _, err := os.Lstat(dst); err == nil {
 			bk, _ := sbSafeJoin(backup, f)
@@ -686,8 +755,10 @@ func (g *sbGuard) publish(stage string, targets, deletes []string) *sbFailure {
 			if err := os.Rename(dst, bk); err != nil {
 				return rollback(f + ": " + err.Error())
 			}
-			d.had = true
-			log = append(log, d)
+			log = append(log, done{f: f, had: true})
+			if sbTestAfterMoveAside != nil {
+				sbTestAfterMoveAside(f)
+			}
 			b, err := sbReadFile(bk)
 			if err != nil {
 				return rollback(f + ": " + err.Error())
@@ -698,7 +769,7 @@ func (g *sbGuard) publish(stage string, targets, deletes []string) *sbFailure {
 		} else if inBase {
 			return rollback(f + " was removed after the final check")
 		} else {
-			log = append(log, d)
+			log = append(log, done{f: f})
 		}
 		if !write {
 			return nil
@@ -715,10 +786,17 @@ func (g *sbGuard) publish(stage string, targets, deletes []string) *sbFailure {
 		if err := os.WriteFile(tmp, b, 0o644); err != nil {
 			return rollback(err.Error())
 		}
-		log[len(log)-1].put = true
-		if err := os.Rename(tmp, dst); err != nil {
-			_ = os.Remove(tmp)
+		if err := sbRenameNoReplace(tmp, dst); err != nil {
+			_ = os.Remove(tmp) // pcbpilot's own temporary copy
+			if errors.Is(err, fs.ErrExist) {
+				keep(f, dst)
+				return rollback(f + " was saved again while it was being replaced")
+			}
 			return rollback(err.Error())
+		}
+		log[len(log)-1].wrote = sbContentHash(f, b)
+		if sbTestAfterInstall != nil {
+			sbTestAfterInstall(f)
 		}
 		return nil
 	}
