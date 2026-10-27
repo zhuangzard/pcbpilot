@@ -4,7 +4,7 @@ description: "用 pcbpilot 为 KiCad 工程出制造与贴片文件并验收：�
 license: MIT
 metadata:
   author: "zhuangzard (pcbpilot); original easyeda-agent by zhoushoujianwork"
-  version: "0.10.2"
+  version: "0.11.0"
   homepage: "https://github.com/zhuangzard/pcbpilot"
 ---
 

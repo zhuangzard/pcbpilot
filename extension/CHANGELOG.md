@@ -1,5 +1,57 @@
 # Changelog
 
+## [0.11.0] — 2026-10-27
+
+**CLI, daemon, Skills and MCP move to 0.11.0. The connector runtime is UNCHANGED (only its version number moves); import the
+0.11.0 `pcbpilot-connector.eext` so the versions match — the daemon pauses design actions until they do.**
+
+Summary: the KiCad path gains a full headless board toolchain. With four new commands (`kicad board`, `kicad pcb-sync`,
+`kicad drc`, `kicad render`) plus `kicad fab --preflight`, schematic → board → DRC → fab no longer needs the KiCad GUI. They all
+share one write-safety layer and one tri-state gate. The Skill grows from one router into seven focused public skills. Every
+tool was reviewed by Codex and Kimi K3.1 Pro, round after round, until neither reported a blocker. Includes everything in 0.10.3.
+
+**New KiCad commands**
+- **`kicad board`** (`new`, `outline`, `stackup`, `holes`, `keepout`, `zone`, `text`; mm): sets up a board without the GUI.
+  - Covers the outline and cutouts, layer stackup, mounting holes, keepouts, copper zones and board text.
+  - Geometry is checked in Go, written through pcbnew, then re-read and compared.
+  - A copper or hole operation runs DRC by default and fails on any new error (`--no-drc` / `--force-unverified` to opt out).
+  - Writes go to a new file unless `--in-place`, which checks the KiCad lock and the file hash first.
+- **`kicad pcb-sync`**: KiCad's "Update PCB from Schematic", headless.
+  - Matches symbols to footprints by symbol path, then by a reference that is unique on both sides.
+  - Plans additions (staged beside the outline), footprint swaps (pose, lock, field layout and pad overrides kept), reference /
+    value / field / DNP updates, pad nets, whole-net renames (the copper moves with the net), and orphans (flag or remove).
+  - Applies in a staging directory. Three gates (pad-net, schematic-parity DRC, idempotent re-plan) must pass before a
+    transactional commit.
+  - `--check` / `--dry-run` / `--plan-out`, then `--apply-plan --revision`. Every input is re-checked before answering:
+    sheets, netlist, project, rules, fp-lib-tables, library footprints and the target. A change during the run fails with
+    `E_FILE_CHANGED` (exit 4).
+- **`kicad drc`**: KiCad DRC as a tri-state gate (exit 0 pass / 6 fail / 5 cannot-check).
+  - Attributes an owner to each violation.
+  - Applies the project's exclusion policy: excluded or ignored electrical / fabrication rules fail without a signed waiver.
+  - Reports only what is new against `--baseline` or `--baseline-pcb`, with optional `--schematic-parity`.
+- **`kicad fab --preflight`**: read-only.
+  - Checks DRC plus fab rules against an order contract (vendor, layers, finish, assembly sides, limits).
+  - Gives one verdict and writes nothing.
+- **`kicad render`**: deterministic SVG previews of every schematic sheet and board layer, plus a 3D PNG of the board.
+  - Same input, byte-identical SVG.
+  - `--compare` gives a structural diff against a baseline render.
+  - A missing, empty or broken page is cannot-check, and the previous render is kept.
+
+**Shared foundations**
+- **`kfile`**: atomic KiCad file writes and multi-file transactions.
+  - Honours KiCad's `~*.lck` locks and keeps crash-safe journals.
+  - Refuses linked targets and verifies backups.
+- **`gate`**: one pass / fail / cannot-check verdict model. Nothing counts as "pass" unless it was actually checked.
+- **Footprint libraries**: project and global `fp-lib-table` resolution (variables, nesting, disabled rows) and netlist
+  parsers (`kicadxml` / `kicadsexpr`), shared by pcb-sync and the library tools.
+
+**Skills**
+- Six focused public skills next to the `pcbpilot` router: `pcbpilot-kicad-schematic`, `pcbpilot-kicad-pcb`, `pcbpilot-fab`,
+  `pcbpilot-library`, `pcbpilot-review` and `pcbpilot-sim-report`.
+  - They come with shared review / verdict / DRC / pre-fab / file-safety references and a generated command index.
+- Installers and the self-updater install every public skill from one manifest, transactionally with rollback.
+  - The legacy single-skill manifest stays router-only.
+
 ## [0.10.3] — 2026-10-27
 
 **CLI, daemon, Skill and MCP move to 0.10.3. The connector runtime is UNCHANGED (only its version number moves); import the
