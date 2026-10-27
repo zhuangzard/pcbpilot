@@ -46,6 +46,8 @@ var (
 	renameFile  = platformRename
 	removeFile  = os.Remove
 	chmodFile   = os.Chmod
+	chmodHandle = func(f *os.File, m os.FileMode) error { return f.Chmod(m) }
+	syncHandle  = func(f *os.File) error { return f.Sync() }
 	lstatFile   = os.Lstat
 	syncDir     = platformSyncDir
 	retryBudget = 3 * time.Second
@@ -147,6 +149,23 @@ func checkRegular(path string) error {
 	return nil
 }
 
+// checkWritable refuses an existing target that became read-only (mode
+// bits on Unix, the read-only attribute on Windows) after it was staged.
+func checkWritable(path string) error {
+	st, err := lstatFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if st.Mode().Perm()&0o200 == 0 {
+		return &Error{Code: CodeReadOnly, Path: path, Detail: "the file became read-only after pcbpilot staged it",
+			Fix: "clear the read-only attribute (or check it out of version control) and retry"}
+	}
+	return nil
+}
+
 // modeEq compares file modes as the platform stores them: on Windows only
 // the read-only attribute (owner write bit) exists.
 func modeEq(a, b os.FileMode) bool {
@@ -191,14 +210,17 @@ func (w *File) Commit() (Result, error) {
 		os.Remove(tmp)
 		return Result{Locks: w.locks}, err
 	}
-	// Order: chmod, flush (data and the new mode), rename, flush the dir.
+	// Order: fchmod and fsync on the still-open temp file (so even a 0000
+	// mode cannot lock us out), close, rename, flush the directory.
+	if err := chmodHandle(w.f, w.perm); err != nil {
+		w.f.Close()
+		return fail(err)
+	}
+	if err := syncHandle(w.f); err != nil {
+		w.f.Close()
+		return fail(err)
+	}
 	if err := w.f.Close(); err != nil {
-		return fail(err)
-	}
-	if err := chmodFile(tmp, w.perm); err != nil {
-		return fail(err)
-	}
-	if err := syncFile(tmp); err != nil {
 		return fail(err)
 	}
 	// Locks and base are re-checked before every rename attempt, so a retry
@@ -212,6 +234,9 @@ func (w *File) Commit() (Result, error) {
 			}
 		}
 		if err := checkRegular(w.path); err != nil {
+			return err
+		}
+		if err := checkWritable(w.path); err != nil {
 			return err
 		}
 		if w.o.Base != nil {

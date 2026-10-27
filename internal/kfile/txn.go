@@ -347,6 +347,11 @@ func (t *Txn) Apply(wantRev string, o Opts) (Plan, error) {
 			if err := checkRegular(e.Path); err != nil {
 				return err
 			}
+			if e.Kind != KindDelete {
+				if err := checkWritable(e.Path); err != nil {
+					return err
+				}
+			}
 			if err := e.base().Check(); err != nil {
 				return err
 			}
@@ -438,10 +443,8 @@ func (t *Txn) Apply(wantRev string, o Opts) (Plan, error) {
 		} else {
 			// The staged file gets the target's mode only now; then
 			// chmod, flush, rename, flush the directory.
-			if err = chmodFile(e.Staged, e.Mode); err == nil {
-				if err = syncFile(e.Staged); err == nil {
-					err = renameRetry(e.Staged, e.Path, check(e))
-				}
+			if err = chmodSync(e.Staged, e.Mode, true); err == nil {
+				err = renameRetry(e.Staged, e.Path, check(e))
 			}
 		}
 		if err == nil {
@@ -456,7 +459,11 @@ func (t *Txn) Apply(wantRev string, o Opts) (Plan, error) {
 				Fix:    "close KiCad and other programs using the project, then run `pcbpilot kicad txn recover` (or `discard` to keep the files as they are)"}
 		}
 		t.Abort()
-		if ferr := settle(j.Changes[:i+1], guardOpts{o.Locks, o.NoLockCheck, o.Env}); ferr != nil {
+		// Modes are settled for the entries this run changed; the failed one
+		// was either restored from its backup (mode included) or never
+		// touched, and a mode someone else gave it (e.g. read-only, the
+		// reason it failed) is theirs. Everything is flushed.
+		if ferr := settle(j.Changes[:i], guardOpts{o.Locks, o.NoLockCheck, o.Env}, j.Changes[i:i+1]...); ferr != nil {
 			return plan, keepJournal(t.root, errors.Join(err, ferr))
 		}
 		return abandon(wrapf(err, "apply %s (all files restored)", e.Path))
@@ -476,6 +483,11 @@ const (
 )
 
 func entryStateOf(e journalEntry) (entryState, Snapshot, error) {
+	// A link whose referent happens to hold the expected bytes is still not
+	// the file the transaction wrote.
+	if err := checkRegular(e.Path); err != nil {
+		return stateOther, Snapshot{Path: e.Path}, err
+	}
 	cur, err := Stat(e.Path)
 	if err != nil {
 		return stateOther, cur, err
@@ -519,6 +531,9 @@ func undo(root string, e journalEntry, failed bool, g guardOpts) (bool, error) {
 	}
 	switch st {
 	case stateBase:
+		if failed {
+			return false, nil // never touched by this run; its mode is not ours to change
+		}
 		return fixMode(e, g)
 	case stateOther:
 		if failed {
@@ -592,6 +607,9 @@ func undoAll(root string, entries []journalEntry, lastFailed bool, g guardOpts) 
 // and the file's state first, flushes after the chmod and verifies the
 // result. An entry without a recorded mode is left alone.
 func fixMode(e journalEntry, g guardOpts) (bool, error) {
+	if err := checkRegular(e.Path); err != nil {
+		return false, err
+	}
 	if !e.HasMode {
 		return false, nil
 	}
@@ -612,10 +630,7 @@ func fixMode(e journalEntry, g guardOpts) (bool, error) {
 	if st1, _, err := entryStateOf(e); err != nil || st1 != st0 {
 		return false, changedErr(e.Path, "changed while its mode was being restored")
 	}
-	if err := chmodFile(e.Path, e.Mode); err != nil {
-		return false, err
-	}
-	if err := syncFile(e.Path); err != nil {
+	if err := chmodSync(e.Path, e.Mode, true); err != nil {
 		return true, err
 	}
 	if fi, err := os.Lstat(e.Path); err != nil || !modeEq(fi.Mode(), e.Mode) {
@@ -626,13 +641,14 @@ func fixMode(e journalEntry, g guardOpts) (bool, error) {
 
 // settle verifies and repairs the recorded final mode of every entry, then
 // makes every entry durable: the last step before a journal may go.
-func settle(entries []journalEntry, g guardOpts) error {
+// flushOnly entries are flushed without a mode check.
+func settle(entries []journalEntry, g guardOpts, flushOnly ...journalEntry) error {
 	for _, e := range entries {
 		if _, err := fixMode(e, g); err != nil {
 			return err
 		}
 	}
-	return flushTargets(entries)
+	return flushTargets(append(append([]journalEntry(nil), entries...), flushOnly...))
 }
 
 // flushTargets makes every journalled path durable as it is now (file
@@ -640,6 +656,9 @@ func settle(entries []journalEntry, g guardOpts) error {
 func flushTargets(entries []journalEntry) error {
 	var dirs []string
 	for _, e := range entries {
+		if err := checkRegular(e.Path); err != nil {
+			return err
+		}
 		_, err := os.Stat(e.Path)
 		switch {
 		case err == nil:
@@ -662,8 +681,13 @@ func keepJournal(root string, err error) error {
 		Fix:    "run `pcbpilot kicad txn recover` again"}
 }
 
-// syncFile flushes a file's data and metadata; it works on read-only files.
-var syncFile = platformSyncFile
+// chmodSync sets a mode (when setMode) and flushes, through one handle
+// opened before the chmod; syncFile only flushes. Both work on read-only
+// and 0000 files. Replaceable in tests.
+var (
+	chmodSync = platformChmodSync
+	syncFile  = func(path string) error { return chmodSync(path, 0, false) }
+)
 
 // stagedOK re-hashes a staged file: it must still hold the bytes that were
 // staged (nothing replaced it while it waited in the target directory).

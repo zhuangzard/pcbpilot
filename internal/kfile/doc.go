@@ -47,8 +47,10 @@
 //     cannot themselves be staged or deleted. Symlinks, reparse points (except
 //     cloud-sync placeholders such as OneDrive files, which are the real
 //     file) and other non-regular targets are refused (E_UNSUPPORTED_TARGET), at
-//     staging and again before each change. Every install is chmod, flush,
-//     rename, flush the directory; before any journal is dropped (recover,
+//     staging and again before each change. Every install is chmod and flush
+//     through one open descriptor (so even mode 0000 can be flushed), a
+//     re-check that the target is still a writable regular file, rename,
+//     flush the directory; before any journal is dropped (recover,
 //     rollback, discard) the recorded final modes are verified and every
 //     file is flushed.
 //   - One writer per project. AcquireWriter is an operating-system lock on

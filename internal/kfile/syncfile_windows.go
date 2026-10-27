@@ -4,12 +4,14 @@ package kfile
 
 import "os"
 
-// platformSyncFile flushes path. FlushFileBuffers needs a handle with write
-// access, which a read-only file refuses, so the read-only attribute is
-// cleared for the flush and set again afterwards. Callers hold the project
-// writer lock and have checked the KiCad locks.
-func platformSyncFile(path string) error {
-	st, err := os.Stat(path)
+// platformChmodSync flushes path and, with setMode, gives it mode, through
+// one handle. FlushFileBuffers needs write access, which a read-only file
+// refuses to open with, so the read-only attribute is cleared before the
+// open and the final attribute (the old one, or mode) is set through the
+// open handle before the flush. Callers hold the project writer lock and
+// have checked the KiCad locks.
+func platformChmodSync(path string, mode os.FileMode, setMode bool) error {
+	st, err := os.Lstat(path)
 	if err != nil {
 		return err
 	}
@@ -20,16 +22,24 @@ func platformSyncFile(path string) error {
 		}
 	}
 	f, err := os.OpenFile(path, os.O_RDWR, 0)
-	if err == nil {
-		err = f.Sync()
-		if cerr := f.Close(); err == nil {
-			err = cerr
+	if err != nil {
+		if ro {
+			chmodFile(path, 0o444)
+		}
+		return err
+	}
+	if !setMode && ro {
+		mode, setMode = 0o444, true
+	}
+	if setMode {
+		if err := chmodHandle(f, mode); err != nil {
+			f.Close()
+			return err
 		}
 	}
-	if ro {
-		if cerr := chmodFile(path, 0o444); err == nil {
-			err = cerr
-		}
+	err = syncHandle(f)
+	if cerr := f.Close(); err == nil {
+		err = cerr
 	}
 	return err
 }

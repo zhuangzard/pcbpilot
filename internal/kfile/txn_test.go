@@ -2,6 +2,7 @@ package kfile
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -1120,9 +1121,12 @@ func TestSymlinkTargetsRefused(t *testing.T) {
 func opLog(t *testing.T, failRenameTo string) *[]string {
 	t.Helper()
 	var log []string
-	oc, of, or, od := chmodFile, syncFile, renameFile, syncDir
-	chmodFile = func(p string, m os.FileMode) error { log = append(log, "chmod "+filepath.Base(p)); return oc(p, m) }
-	syncFile = func(p string) error { log = append(log, "fsync "+filepath.Base(p)); return of(p) }
+	oc, of, or, od := chmodHandle, syncHandle, renameFile, syncDir
+	chmodHandle = func(f *os.File, m os.FileMode) error {
+		log = append(log, "chmod "+filepath.Base(f.Name()))
+		return oc(f, m)
+	}
+	syncHandle = func(f *os.File) error { log = append(log, "fsync "+filepath.Base(f.Name())); return of(f) }
 	renameFile = func(from, to string) error {
 		if filepath.Base(to) == failRenameTo {
 			return errors.New("fail")
@@ -1131,7 +1135,7 @@ func opLog(t *testing.T, failRenameTo string) *[]string {
 		return or(from, to)
 	}
 	syncDir = func(d string) error { log = append(log, "dirsync "+d); return od(d) }
-	t.Cleanup(func() { chmodFile, syncFile, renameFile, syncDir = oc, of, or, od })
+	t.Cleanup(func() { chmodHandle, syncHandle, renameFile, syncDir = oc, of, or, od })
 	return &log
 }
 
@@ -1231,4 +1235,151 @@ func TestExactZeroMode(t *testing.T) {
 	if st, _ := os.Stat(p); !modeEq(st.Mode(), 0) {
 		t.Errorf("mode %v, want 0000", st.Mode().Perm())
 	}
+}
+
+// A 0000 file is chmodded and flushed through a descriptor opened first, so
+// an unprivileged user is not locked out of its own fsync.
+func TestZeroModeKeepsDescriptor(t *testing.T) {
+	dir := t.TempDir()
+	unprivileged := runtime.GOOS != "windows" && os.Geteuid() != 0
+	nf := filepath.Join(dir, "zero.kicad_pcb")
+	t.Cleanup(func() { os.Chmod(nf, 0o644) })
+	if _, err := WriteFile(nf, []byte("z"), Opts{NoLockCheck: true, Perm: 0, PermExact: true}); err != nil {
+		t.Fatalf("WriteFile 0000: %v", err)
+	}
+	if unprivileged {
+		if _, err := os.Open(nf); !errors.Is(err, fs.ErrPermission) {
+			t.Fatalf("precondition: a 0000 file should not open for this user: %v", err)
+		}
+	}
+	if err := syncFile(nf); err != nil {
+		t.Fatalf("syncFile on 0000: %v", err)
+	}
+	if err := flushTargets([]journalEntry{{Path: nf}}); err != nil {
+		t.Fatalf("flushTargets on 0000: %v", err)
+	}
+	if st, _ := os.Stat(nf); !modeEq(st.Mode(), 0) {
+		t.Fatalf("mode after flush %v, want 0000", st.Mode().Perm())
+	}
+
+	// chmod to 0000 then flush, through one descriptor.
+	p := filepath.Join(dir, "f.kicad_pcb")
+	os.WriteFile(p, []byte("x"), 0o644)
+	t.Cleanup(func() { os.Chmod(p, 0o644) })
+	if err := chmodSync(p, 0, true); err != nil {
+		t.Fatalf("chmodSync to 0000: %v", err)
+	}
+	if st, _ := os.Stat(p); !modeEq(st.Mode(), 0) {
+		t.Fatalf("mode %v", st.Mode().Perm())
+	}
+	if err := syncFile(p); err != nil {
+		t.Fatalf("flush after: %v", err)
+	}
+}
+
+// linkInfo makes a real file look like a symlink to checkRegular, with the
+// permission bits the journal recorded.
+type linkInfo struct{ os.FileInfo }
+
+func (l linkInfo) Mode() os.FileMode { return os.ModeSymlink | l.FileInfo.Mode().Perm() }
+
+// Recovery refuses a link even when its referent holds the expected bytes
+// and its bits match the journal.
+func TestRecoverRefusesLinkedEntry(t *testing.T) {
+	asLink := func(t *testing.T, target string) {
+		old := lstatFile
+		lstatFile = func(p string) (os.FileInfo, error) {
+			fi, err := old(p)
+			if err == nil && p == target {
+				return linkInfo{fi}, nil
+			}
+			return fi, err
+		}
+		t.Cleanup(func() { lstatFile = old })
+	}
+	// Rolled-back path: a.kicad_pcb holds the transaction's bytes (A2).
+	dir := project(t, map[string]string{"a.kicad_pcb": "A1", "a.kicad_pro": "P1"})
+	interrupt(t, stagedTxn(t, dir))
+	pcb := filepath.Join(dir, "a.kicad_pcb")
+	t.Run("rolled-back", func(t *testing.T) {
+		asLink(t, pcb)
+		if _, err := Recover(dir, RecoverOpts{Env: fakeEnv()}); CodeOf(err) != CodeUnsupported || Pending(dir) == nil {
+			t.Fatalf("recover through a link: %v", err)
+		}
+		if _, err := Discard(dir, RecoverOpts{Env: fakeEnv()}); err == nil || Pending(dir) == nil {
+			t.Fatalf("discard through a link: %v", err)
+		}
+	})
+	if _, err := Recover(dir, RecoverOpts{Env: fakeEnv()}); err != nil {
+		t.Fatal(err)
+	}
+	clean(t, dir)
+
+	// Completed path: every change landed; the created file is a "link".
+	dir = project(t, map[string]string{"a.kicad_pcb": "A1", "a.kicad_pro": "P1"})
+	crashAfterLastMutation(t, stagedTxn(t, dir), dir, "new.kicad_dru")
+	t.Run("completed", func(t *testing.T) {
+		asLink(t, filepath.Join(dir, "new.kicad_dru"))
+		if _, err := Recover(dir, RecoverOpts{Env: fakeEnv()}); CodeOf(err) != CodeUnsupported || Pending(dir) == nil {
+			t.Fatalf("completed through a link: %v", err)
+		}
+	})
+	if rec, err := Recover(dir, RecoverOpts{Env: fakeEnv()}); err != nil || rec.Action != "completed" {
+		t.Fatalf("%+v %v", rec, err)
+	}
+	clean(t, dir)
+
+	// A real symlink whose referent holds the new bytes, where possible.
+	dir = project(t, map[string]string{"a.kicad_pcb": "A1", "a.kicad_pro": "P1", "other": "A2"})
+	interrupt(t, stagedTxn(t, dir))
+	pcb = filepath.Join(dir, "a.kicad_pcb")
+	os.Remove(pcb)
+	if err := os.Symlink(filepath.Join(dir, "other"), pcb); err != nil {
+		return // no symlink privilege; the injected cases above cover it
+	}
+	if _, err := Recover(dir, RecoverOpts{Env: fakeEnv()}); CodeOf(err) != CodeUnsupported || Pending(dir) == nil {
+		t.Fatalf("real link: %v", err)
+	}
+}
+
+// A target made read-only between staging and install is refused.
+func TestReadOnlyBeforeInstall(t *testing.T) {
+	dir := project(t, map[string]string{"a.kicad_pcb": "A1", "a.kicad_pro": "P1"})
+	pcb, pro := filepath.Join(dir, "a.kicad_pcb"), filepath.Join(dir, "a.kicad_pro")
+	t.Cleanup(func() { os.Chmod(pcb, 0o644); os.Chmod(pro, 0o644) })
+
+	f, err := Create(pcb, Opts{Env: fakeEnv()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Write([]byte("new"))
+	os.Chmod(pcb, 0o444)
+	if _, err := f.Commit(); CodeOf(err) != CodeReadOnly || read(t, pcb) != "A1" {
+		t.Fatalf("Commit over a read-only target: %v %q", err, read(t, pcb))
+	}
+	noTemps(t, dir)
+	os.Chmod(pcb, 0o644)
+
+	tx := stagedTxn(t, dir)
+	os.Chmod(pro, 0o444)
+	if _, err := tx.Apply("", Opts{Env: fakeEnv()}); CodeOf(err) != CodeReadOnly || read(t, pcb) != "A1" || read(t, pro) != "P1" {
+		t.Fatalf("Apply after chmod: %v", err)
+	}
+	tx.Abort()
+	clean(t, dir)
+	os.Chmod(pro, 0o644)
+
+	// Made read-only just before its own install: earlier file rolled back,
+	// the user's read-only mode kept.
+	beforeMutate = func(p string) {
+		if p == pro {
+			os.Chmod(pro, 0o444)
+		}
+	}
+	_, err = stagedTxn(t, dir).Apply("", Opts{Env: fakeEnv()})
+	beforeMutate = nil
+	if CodeOf(err) != CodeReadOnly || read(t, pcb) != "A1" || read(t, pro) != "P1" || !isReadOnly(t, pro) {
+		t.Fatalf("mid-apply: %v pcb %q read-only=%v", err, read(t, pcb), isReadOnly(t, pro))
+	}
+	clean(t, dir)
 }
