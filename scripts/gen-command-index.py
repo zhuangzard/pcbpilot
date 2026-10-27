@@ -93,7 +93,9 @@ def doc_pattern(path: tuple[str, ...]) -> re.Pattern:
 
 def doc_texts() -> dict[str, str]:
     texts = {}
-    for md in sorted(SKILL.rglob("*.md")):
+    # Sort by the POSIX string: Windows paths compare case-insensitively, so
+    # sorted(Path) orders SKILL.md differently there than on Linux/macOS.
+    for md in sorted(SKILL.rglob("*.md"), key=lambda p: p.as_posix()):
         if md == INDEX:
             continue
         rel = md.relative_to(INDEX.parent) if INDEX.parent in md.parents else Path("..") / md.relative_to(SKILL)
