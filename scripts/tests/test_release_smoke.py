@@ -53,7 +53,7 @@ class ReleaseSmokeTests(unittest.TestCase):
         with tarfile.open(path, "w:gz") as archive:
             if skills is not None:
                 data = smoke.skill_manifest.Manifest("pcbpilot", tuple(skills), ()).canonical_bytes()
-                member = tarfile.TarInfo("public-skills.json")
+                member = tarfile.TarInfo("pcbpilot/.public-skills.json")
                 member.size, member.mode = len(data), 0o644
                 archive.addfile(member, io.BytesIO(data))
             for name, kind in entries:
@@ -139,7 +139,7 @@ class ReleaseSmokeTests(unittest.TestCase):
 
     def test_extract_requires_manifest_and_exactly_the_listed_roots(self):
         cases = [
-            ([("pcbpilot/SKILL.md", "file")], None, "has no public-skills.json"),
+            ([("pcbpilot/SKILL.md", "file")], None, "has no pcbpilot/.public-skills.json"),
             ([("pcbpilot/SKILL.md", "file"), ("pcbpilot-demo/SKILL.md", "file")], ("pcbpilot",), "differ from the manifest"),
             ([("pcbpilot/SKILL.md", "file")], ("pcbpilot", "pcbpilot-demo"), "differ from the manifest"),
             ([("pcbpilot/SKILL.md", "file"), ("stray.txt", "file")], ("pcbpilot",), "unsafe skill archive path"),

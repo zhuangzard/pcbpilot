@@ -66,22 +66,36 @@ else:
         self.cli = self.root / 'bin/pcbpilot'
         self.skill = self.root / 'codex config/skills/pcbpilot'
 
-    def package(self, version='1.4.2', skills=None, retired=(), demo_version=None):
-        """skills=None: a pre-0.11 archive (router only, no manifest)."""
+    def package(self, version='1.4.2', skills=None, retired=(), demo_version=None, manifest=None, extra=(), crlf=False):
+        """skills=None: a pre-0.11 archive (router only, no manifest). manifest
+        overrides the manifest bytes; extra appends (name, kind) members."""
         with tarfile.open(self.assets / 'skills.tar.gz', 'w:gz') as archive:
-            def add(name, data):
+            def add(name, data=b'', kind='file'):
                 item = tarfile.TarInfo(name)
-                item.size = len(data)
                 item.mode = 0o644
-                archive.addfile(item, io.BytesIO(data))
-            if skills is not None:
-                add('public-skills.json', canonical_manifest(skills, retired))
-            for name, content in {'SKILL.md': f'---\nname: pcbpilot\nmetadata:\n  version: "{version}"\n---\n[Guide](references/guide.md)\n',
-                                  'references/guide.md': 'New guide\n'}.items():
-                add('pcbpilot/' + name, content.encode())
+                if kind == 'symlink':
+                    item.type, item.linkname = tarfile.SYMTYPE, '../../outside'
+                    archive.addfile(item)
+                elif kind == 'hardlink':
+                    item.type, item.linkname = tarfile.LNKTYPE, 'pcbpilot/SKILL.md'
+                    archive.addfile(item)
+                else:
+                    item.size = len(data)
+                    archive.addfile(item, io.BytesIO(data))
+            if manifest is not None:
+                add('pcbpilot/.public-skills.json', manifest)
+            elif skills is not None:
+                add('pcbpilot/.public-skills.json', canonical_manifest(skills, retired))
+            skill_md = f'---\nname: pcbpilot\nmetadata:\n  version: "{version}"\n---\n[Guide](references/guide.md)\n'
+            if crlf:
+                skill_md = skill_md.replace('\n', '\r\n')
+            add('pcbpilot/SKILL.md', skill_md.encode())
+            add('pcbpilot/references/guide.md', b'New guide\n')
             for skill in (skills or ())[1:]:
                 add(f'{skill}/SKILL.md', f'---\nname: {skill}\nmetadata:\n  version: "{demo_version or version}"\n---\n'
                     '[Shared](../pcbpilot/references/guide.md)\n'.encode())
+            for name, kind in extra:
+                add(name, b'x', kind)
 
     def sums(self):
         names = [self.binary_name, 'skills.tar.gz']
@@ -317,6 +331,123 @@ else:
         result = self.run_install()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue(user.is_symlink() and (linked_target / '.version').exists())
+
+    def skill_files(self):
+        return {str(p.relative_to(self.root)): p.read_bytes()
+                for base in ('codex config', 'claude config') for p in (self.root / base).rglob('*') if p.is_file()}
+
+    def test_adversarial_archives_rejected_before_any_write(self):
+        self.old_install()
+        before = self.skill_files()
+        cases = {
+            'parent path': dict(extra=[('pcbpilot/../../evil.txt', 'file')]),
+            'absolute path': dict(extra=[('/tmp/evil.txt', 'file')]),
+            'symlink': dict(extra=[('pcbpilot/link', 'symlink')]),
+            'hardlink': dict(extra=[('pcbpilot/hard', 'hardlink')]),
+            'duplicate': dict(extra=[('pcbpilot/SKILL.md', 'file')]),
+            'unlisted root': dict(extra=[('pcbpilot-other/SKILL.md', 'file')]),
+            'root file': dict(extra=[('stray.json', 'file')]),
+            'malformed manifest': dict(manifest=b'{"schemaVersion": 1, "router": "pcbpilot", "skills": ['),
+            'wrong schema': dict(manifest=canonical_manifest(('pcbpilot', DEMO)).replace(b'"schemaVersion": 1', b'"schemaVersion": 2')),
+            'wrong router': dict(manifest=canonical_manifest(('pcbpilot', DEMO)).replace(b'"router": "pcbpilot"', b'"router": "other"')),
+            'extra key': dict(manifest=canonical_manifest(('pcbpilot', DEMO)).replace(b'{\n', b'{\n  "extra": 1,\n')),
+            'duplicate names': dict(manifest=canonical_manifest(('pcbpilot', DEMO, DEMO))),
+        }
+        for name, kwargs in cases.items():
+            with self.subTest(case=name):
+                self.package(skills=('pcbpilot', DEMO), **kwargs)
+                self.sums()
+                self.assert_failed_unchanged(self.run_install())
+                self.assertEqual(self.skill_files(), before)
+                self.assertFalse((self.root / 'evil.txt').exists() or Path('/tmp/evil.txt').exists())
+                self.assertEqual(list(self.root.rglob('.easyeda-*')), [])
+
+    def test_unowned_same_named_dir_is_not_replaced_without_adopt(self):
+        self.multi()
+        user = self.root / f'claude config/skills/{DEMO}'
+        user.mkdir(parents=True)
+        (user / 'notes.md').write_text('mine')
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('pcbpilot did not install it', result.stdout + result.stderr)
+        self.assertEqual(sorted(p.name for p in user.iterdir()), ['notes.md'])
+        self.assertEqual((self.root / f'codex config/skills/{DEMO}/.version').read_text(), '1.4.2\n')
+        result = self.run_install(PCBPILOT_SKILL_ADOPT='1')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((user / '.version').read_text(), '1.4.2\n')
+
+    def test_a_failed_switch_at_any_position_restores_every_skill(self):
+        self.old_install()
+        for client in ('codex', 'claude'):
+            demo = self.root / f'{client} config/skills/{DEMO}'
+            demo.mkdir(parents=True)
+            (demo / 'SKILL.md').write_text('old demo')
+            (demo / '.version').write_text('1.4.1\n')
+        retired = self.root / 'codex config/skills/pcbpilot-old'
+        retired.mkdir(parents=True)
+        (retired / '.version').write_text('1.4.1\n')
+        self.multi(retired=('pcbpilot-old',))
+        before = self.skill_files()
+        # codex: 2 Skills x (backup + switch) + 1 retired backup; claude: 1 switch for
+        # its new router + 2 for its demo = 8 switches.
+        for position in range(1, 9):
+            with self.subTest(position=position):
+                result = self.run_install(_PCBPILOT_TEST_FAIL_SWAP=str(position))
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertIn('every Skill was restored', result.stdout + result.stderr)
+                self.assertEqual(self.skill_files(), before)
+                self.assertEqual(list(self.root.rglob('.easyeda-*')), [])
+        result = self.run_install(_PCBPILOT_TEST_FAIL_SWAP='9')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(retired.exists())
+
+    def test_focused_skill_link_is_left_alone(self):
+        self.multi()
+        checkout = self.root / 'checkout' / DEMO
+        checkout.mkdir(parents=True)
+        (checkout / 'SKILL.md').write_text('checkout copy')
+        link = self.root / f'codex config/skills/{DEMO}'
+        link.parent.mkdir(parents=True)
+        link.symlink_to(checkout, target_is_directory=True)
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('is a link; left alone', result.stdout + result.stderr)
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(sorted(p.name for p in checkout.iterdir()), ['SKILL.md'])
+        self.assertEqual((checkout / 'SKILL.md').read_text(), 'checkout copy')
+
+    def test_file_at_a_skill_path_is_a_conflict(self):
+        self.multi()
+        path = self.root / f'claude config/skills/{DEMO}'
+        path.parent.mkdir(parents=True)
+        path.write_text('a user file')
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('is not a directory', result.stdout + result.stderr)
+        self.assertEqual(path.read_text(), 'a user file')
+        self.assertEqual((self.root / f'codex config/skills/{DEMO}/.version').read_text(), '1.4.2\n')
+
+    def test_linked_version_marker_does_not_make_a_dir_owned(self):
+        self.multi()
+        user = self.root / f'claude config/skills/{DEMO}'
+        user.mkdir(parents=True)
+        (user / 'notes.md').write_text('mine')
+        marker = self.root / 'elsewhere.version'
+        marker.write_text('1.4.1\n')
+        (user / '.version').symlink_to(marker)
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('pcbpilot did not install it', result.stdout + result.stderr)
+        self.assertEqual((user / 'notes.md').read_text(), 'mine')
+        self.assertTrue((user / '.version').is_symlink())
+        self.assertEqual(marker.read_text(), '1.4.1\n')
+
+    def test_crlf_skill_md_from_a_windows_package_is_accepted(self):
+        self.package(skills=('pcbpilot', DEMO), crlf=True)
+        self.sums()
+        result = self.run_install()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.skill / '.version').read_text(), '1.4.2\n')
 
     def test_legacy_single_skill_archive_installs_router_only(self):
         result = self.run_install()  # setUp packaged a pre-0.11 archive

@@ -127,6 +127,8 @@ func newSkillStatusCmd(stdout, stderr io.Writer) *cobra.Command {
 					state = "missing" // the next sync adds it next to the router
 				case !t.Present:
 					state = "not installed"
+				case t.Linked == "" && t.Skill != selfupdate.SkillName && !selfupdate.OwnedSkillDir(t.Dir):
+					state = "conflict" // same-named dir pcbpilot did not install; sync leaves it
 				case state == "":
 					state = "unknown"
 				}
@@ -154,6 +156,7 @@ func newSkillSyncCmd(stdout, stderr io.Writer) *cobra.Command {
 		preserve      bool
 		force         bool
 		createMissing bool
+		adopt         bool
 		jsonOut       bool
 	)
 	c := &cobra.Command{
@@ -200,6 +203,7 @@ func newSkillSyncCmd(stdout, stderr io.Writer) *cobra.Command {
 				Preserve:      preserve,
 				Force:         force,
 				CreateMissing: createMissing,
+				Adopt:         adopt,
 			}, logf)
 
 			if jsonOut {
@@ -224,6 +228,7 @@ func newSkillSyncCmd(stdout, stderr io.Writer) *cobra.Command {
 	c.Flags().BoolVar(&preserve, "preserve", false, "keep local edits (never overwrite existing files)")
 	c.Flags().BoolVar(&force, "force", false, "sync even if the dir is already at the target version")
 	c.Flags().BoolVar(&createMissing, "create-missing", false, "install into a client dir that doesn't exist yet")
+	c.Flags().BoolVar(&adopt, "adopt", false, "let a focused Skill replace a same-named dir pcbpilot did not install")
 	c.Flags().BoolVar(&jsonOut, "json", false, "emit JSON")
 	return c
 }

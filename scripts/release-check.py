@@ -116,14 +116,14 @@ def check_skills_archive(repo: Path, path: Path, version: str) -> None:
     """skills.tar.gz = the source manifest plus one versioned directory per listed Skill."""
     want = skill_manifest.load(repo)
     with tarfile.open(path, "r:gz") as archive:
-        if skill_manifest.MANIFEST_NAME not in archive.getnames():
-            raise ValueError(f"skills.tar.gz has no {skill_manifest.MANIFEST_NAME}")
+        if skill_manifest.ARCHIVE_ENTRY not in archive.getnames():
+            raise ValueError(f"skills.tar.gz has no {skill_manifest.ARCHIVE_ENTRY}")
         manifest = skill_manifest.from_archive(archive)
-        if manifest != want or archive.extractfile(skill_manifest.MANIFEST_NAME).read() != want.canonical_bytes():
-            raise ValueError(f"skills.tar.gz: {skill_manifest.MANIFEST_NAME} differs from the source manifest")
+        if manifest != want or archive.extractfile(skill_manifest.ARCHIVE_ENTRY).read() != want.canonical_bytes():
+            raise ValueError(f"skills.tar.gz: {skill_manifest.ARCHIVE_ENTRY} differs from the source manifest")
         for member in archive.getmembers():
             top = member.name.split("/", 1)[0]
-            if member.name != skill_manifest.MANIFEST_NAME and top not in manifest.skills:
+            if top not in manifest.skills or not (member.isfile() or member.isdir()):
                 raise ValueError(f"skills.tar.gz: entry outside the listed skills: {member.name}")
         for name in manifest.skills:
             try:

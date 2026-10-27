@@ -12,6 +12,9 @@ INSTALL_SKILLS="${PCBPILOT_INSTALL_SKILLS:-}"
 # PCBPILOT_SKILL_PRESERVE=1 keeps existing files instead of clean-replacing (every Skill;
 # retired Skills are then kept too)
 SKILL_PRESERVE="${PCBPILOT_SKILL_PRESERVE:-0}"
+# PCBPILOT_SKILL_ADOPT=1 lets a focused Skill replace a same-named directory that
+# pcbpilot did not install (no .version marker); by default it is left alone
+SKILL_ADOPT="${PCBPILOT_SKILL_ADOPT:-0}"
 # PCBPILOT_INSTALL_DIR selects an absolute binary destination.
 # CODEX_HOME / CLAUDE_CONFIG_DIR select client config roots.
 # PCBPILOT_VERSION=v0.18.2 pins the release and skips the GitHub API lookup entirely
@@ -146,7 +149,7 @@ fi
 mkdir -p "$INSTALL_DIR"
 TMP=$(mktemp -d)
 BIN_TMP=""
-trap 'rm -rf "$TMP"; [ -z "$BIN_TMP" ] || rm -f "$BIN_TMP"' EXIT
+trap '{ cleanup_skill_stages 2>/dev/null || true; }; rm -rf "$TMP"; [ -z "$BIN_TMP" ] || rm -f "$BIN_TMP"' EXIT
 
 # Download and validate all selected assets BEFORE changing an installed file.
 # Only HTTP 404 means an old release without checksums; network/server failures
@@ -266,54 +269,62 @@ client_base_dir() {
   esac
 }
 
-# Stage on the destination filesystem and swap only a complete directory. On a
-# failed switch, restore the previous directory. Preserve mode reports mixed
-# content and keeps the old marker instead of claiming a complete upgrade.
-install_skill_to() {
+# Skill installation is one transaction over every client × Skill: each new
+# tree is staged completely on its destination's filesystem first, then all
+# switches run; a failed switch puts every earlier one back. Records are
+# "dest<TAB>stage" ("-" stage = remove a retired Skill) in $SKILL_PLAN, and
+# "dest<TAB>stage<TAB>backup" in $SKILL_DONE once switched.
+SKILL_PLAN="$TMP/skill-plan"
+SKILL_DONE="$TMP/skill-done"
+SKILL_NOTES="$TMP/skill-notes"
+TAB=$(printf '\t')
+
+# stage_skill CLIENT SKILL SRC adds one staged tree to the plan.
+stage_skill() {
   _client="$1"; _skill="$2"; _src="$3"
   _base=$(client_base_dir "$_client") || fatal "Unknown skill target: $_client"
   case "$_base" in /*) ;; *) fatal "Client config directory must be absolute: $_base" ;; esac
-  mkdir -p "$_base"
   _dest="${_base}/${_skill}"
+  if [ "$_skill" != "$SKILL_NAME" ] && [ -L "$_dest" ]; then
+    # A focused Skill linked into a checkout is updated by that checkout, never
+    # through the link (the router keeps its historical shared-link behaviour).
+    warn "$_client Skill $_skill is a link; left alone (linked → $(cd "$_dest" 2>/dev/null && pwd -P || printf 'unavailable'))"
+    return 0
+  fi
+  if { [ -e "$_dest" ] || [ -L "$_dest" ]; } && [ ! -d "$_dest" ]; then
+    warn "$_client Skill $_skill not installed: $_dest exists and is not a directory; move it away"
+    return 0
+  fi
+  # Owned = a regular, non-linked .version marker (as for retired Skills and in Go).
+  if [ "$_skill" != "$SKILL_NAME" ] && [ -d "$_dest" ] && [ ! -L "$_dest" ] \
+    && { [ -L "$_dest/.version" ] || [ ! -f "$_dest/.version" ]; } \
+    && [ "$SKILL_ADOPT" != 1 ]; then
+    # Somebody else's directory under a pcbpilot name: never replace it silently.
+    warn "$_client Skill $_skill not installed: $_dest exists but pcbpilot did not install it (no .version marker); move it away or set PCBPILOT_SKILL_ADOPT=1"
+    return 0
+  fi
+  mkdir -p "$_base" || fatal "Could not create $_base; nothing installed"
   if [ -L "$_dest" ]; then
     _dest=$(cd "$_dest" && pwd -P) || fatal "Skill symlink target is unavailable"
     _base=$(dirname "$_dest")
   fi
-  _stage=$(mktemp -d "${_base}/.easyeda-stage.XXXXXX")
-  if ! cp -R "$_src"/. "$_stage"/; then
-    rm -rf "$_stage"; fatal "Could not stage $_client Skill; existing files kept"
-  fi
-  _preserved=0
+  _stage=$(mktemp -d "${_base}/.easyeda-stage.XXXXXX") || fatal "Could not stage $_client Skill $_skill; nothing installed"
+  printf '%s\t%s\n' "$_dest" "$_stage" >> "$SKILL_PLAN"
+  cp -R "$_src"/. "$_stage"/ || fatal "Could not stage $_client Skill $_skill; nothing installed"
   if [ "$SKILL_PRESERVE" = 1 ] && [ -d "$_dest" ]; then
-    if ! cp -R "$_dest"/. "$_stage"/; then
-      rm -rf "$_stage"; fatal "Could not preserve $_client Skill; existing files kept"
-    fi
-    _preserved=1
+    cp -R "$_dest"/. "$_stage"/ || fatal "Could not preserve $_client Skill $_skill; nothing installed"
+    printf 'warn\t%s Skill %s preserved (mixed local/release content; previous version marker kept) → %s\n' "$_client" "$_skill" "$_dest" >> "$SKILL_NOTES"
   else
-    printf '%s\n' "${VERSION#v}" > "$_stage/.version"
+    printf '%s\n' "${VERSION#v}" > "$_stage/.version" || fatal "Could not stage $_client Skill $_skill; nothing installed"
+    printf 'ok\t%s Skill %s installed → %s\n' "$_client" "$_skill" "$_dest" >> "$SKILL_NOTES"
   fi
-  _backup="$_stage.previous"
-  if [ -e "$_dest" ]; then
-    if ! mv "$_dest" "$_backup"; then
-      rm -rf "$_stage"; fatal "Could not back up $_client Skill; existing files kept"
-    fi
-  fi
-  if ! mv "$_stage" "$_dest"; then
-    if [ -e "$_backup" ]; then mv "$_backup" "$_dest" || fatal "Restore $_backup to $_dest"; fi
-    rm -rf "$_stage"; fatal "Could not install $_client Skill"
-  fi
-  rm -rf "$_backup"
-  if [ "$_preserved" = 1 ]; then
-    warn "$_client Skill $_skill preserved (mixed local/release content; previous version marker kept) → $_dest"
-  else
-    ok "$_client Skill $_skill installed → $_dest"
-  fi
+  [ -s "$_stage/SKILL.md" ] || fatal "Staged $_client Skill $_skill has no SKILL.md; nothing installed"
 }
 
 # A retired Skill is removed only where pcbpilot installed it: a real directory
 # with a .version marker. Links (source checkouts) and user directories that
 # merely share the name stay; preserve mode keeps everything.
-remove_retired_skill() {
+plan_retired_skill() {
   _client="$1"; _name="$2"
   _base=$(client_base_dir "$_client") || return 0
   _dir="${_base}/${_name}"
@@ -327,21 +338,134 @@ remove_retired_skill() {
   if [ "$SKILL_PRESERVE" = 1 ]; then
     warn "$_client retired Skill $_name kept (PCBPILOT_SKILL_PRESERVE=1) → $_dir"; return 0
   fi
-  _trash=$(mktemp -d "${_base}/.easyeda-retired.XXXXXX") && rmdir "$_trash" && mv "$_dir" "$_trash" \
-    || { warn "Could not remove retired $_client Skill $_name → $_dir"; return 0; }
-  rm -rf "$_trash"
-  ok "$_client retired Skill $_name removed"
+  printf '%s\t-\n' "$_dir" >> "$SKILL_PLAN"
+  printf 'ok\t%s retired Skill %s removed\n' "$_client" "$_name" >> "$SKILL_NOTES"
 }
 
-# manifest_list KEY FILE prints the names of one list in public-skills.json.
-# pack-skill.py writes the canonical form (one item per line, sorted keys),
-# so a line scan is enough and no JSON tool is required.
+# skill_mv SRC DST is mv with a test-only failure point: _PCBPILOT_TEST_FAIL_SWAP=N
+# makes the Nth switch fail, to exercise the restore path.
+SKILL_SWAPS=0
+skill_mv() {
+  SKILL_SWAPS=$((SKILL_SWAPS + 1))
+  [ "${_PCBPILOT_TEST_FAIL_SWAP:-0}" != "$SKILL_SWAPS" ] || return 1
+  mv "$1" "$2"
+}
+
+# undo_skill_switches reverses every recorded switch, newest first.
+undo_skill_switches() {
+  [ -f "$SKILL_DONE" ] || return 0
+  _undo_ok=0
+  sed -n '1!G;h;$p' "$SKILL_DONE" > "$SKILL_DONE.rev"
+  while IFS="$TAB" read -r _dest _stage _backup; do
+    if [ "$_stage" != "-" ] && [ -e "$_dest" ]; then
+      mv "$_dest" "$_stage" || { warn "Could not undo $_dest"; _undo_ok=1; continue; }
+    fi
+    if [ -n "$_backup" ] && [ "$_backup" != "-" ]; then
+      mv "$_backup" "$_dest" || { warn "Could not restore $_dest (previous files kept at $_backup)"; _undo_ok=1; }
+    fi
+  done < "$SKILL_DONE.rev"
+  rm -f "$SKILL_DONE"
+  return "$_undo_ok"
+}
+
+commit_skill_plan() {
+  [ -f "$SKILL_PLAN" ] || return 0
+  : > "$SKILL_DONE"
+  while IFS="$TAB" read -r _dest _stage; do
+    _backup="-"
+    if [ -e "$_dest" ]; then
+      _backup="$(dirname "$_dest")/.easyeda-backup.$$.$SKILL_SWAPS"
+      if ! skill_mv "$_dest" "$_backup"; then
+        undo_skill_switches || fatal "Could not switch $_dest and could not restore every earlier Skill; see the warnings above"
+        fatal "Could not switch $_dest; every Skill was restored"
+      fi
+    fi
+    printf '%s\t%s\t%s\n' "$_dest" "$_stage" "$_backup" >> "$SKILL_DONE"
+    if [ "$_stage" != "-" ] && ! skill_mv "$_stage" "$_dest"; then
+      undo_skill_switches || fatal "Could not install $_dest and could not restore every earlier Skill; see the warnings above"
+      fatal "Could not install $_dest; every Skill was restored"
+    fi
+  done < "$SKILL_PLAN"
+  while IFS="$TAB" read -r _dest _stage _backup; do
+    [ "$_backup" = "-" ] || rm -rf "$_backup"
+  done < "$SKILL_DONE"
+  rm -f "$SKILL_DONE"
+  while IFS="$TAB" read -r _kind _text; do
+    if [ "$_kind" = ok ]; then ok "$_text"; else warn "$_text"; fi
+  done < "$SKILL_NOTES"
+}
+
+# Stages that never got switched in (a fatal error, or undone switches) go
+# away with the temp dir; switched ones have already moved.
+cleanup_skill_stages() {
+  [ -f "$SKILL_PLAN" ] || return 0
+  while IFS="$TAB" read -r _dest _stage; do
+    case "$_stage" in */.easyeda-stage.*) [ ! -d "$_stage" ] || rm -rf "$_stage" ;; esac
+  done < "$SKILL_PLAN"
+}
+
+skill_archive_fail() { fatal "Unsafe or invalid Skill archive ($1); nothing installed"; }
+
+# list_skill_archive ARCHIVE lists member names without extracting anything and
+# rejects absolute or parent paths, links and special files, and duplicates.
+list_skill_archive() {
+  tar -tzf "$1" > "$TMP/skill-names" 2>/dev/null || skill_archive_fail "cannot list members"
+  tar -tvzf "$1" > "$TMP/skill-long" 2>/dev/null || skill_archive_fail "cannot list members"
+  [ "$(wc -l < "$TMP/skill-names")" = "$(wc -l < "$TMP/skill-long")" ] || skill_archive_fail "member listing differs"
+  # Verbose listings start with the entry type: only regular files and dirs.
+  if awk '{ t = substr($0, 1, 1); if (t != "-" && t != "d") bad = 1 } END { exit !bad }' "$TMP/skill-long"; then
+    skill_archive_fail "links or special files"
+  fi
+  [ -z "$(sed 's:/*$::' "$TMP/skill-names" | sort | uniq -d)" ] || skill_archive_fail "duplicate entries"
+  while IFS= read -r _n; do
+    case "$_n" in
+      ''|/*|*\\*|*:*|..|../*|*/..|*/../*|*/../|.|./*|*/./*|*//*) skill_archive_fail "unsafe path: $_n" ;;
+    esac
+  done < "$TMP/skill-names"
+}
+
+# check_listed_roots: every entry lies under a listed Skill.
+check_listed_roots() {
+  while IFS= read -r _n; do
+    _top=${_n%%/*}
+    case " $(printf '%s ' $SKILLS) " in *" $_top "*) ;; *) skill_archive_fail "entry outside the listed Skills: $_n" ;; esac
+  done < "$TMP/skill-names"
+}
+
+# manifest_list KEY FILE prints the names of one list in the manifest.
 manifest_list() {
   awk -v key="\"$1\":" '
     index($0, key) { inlist = ($0 !~ /]/); next }
     inlist && /]/ { inlist = 0; next }
-    inlist { gsub(/[ \t",\r]/, ""); if ($0 != "") print }
+    inlist { gsub(/[ \t",]/, ""); if ($0 != "") print }
   ' "$2"
+}
+
+# json_list KEY END NAME... prints one list exactly as json.dumps(indent=2).
+json_list() {
+  _key="$1"; _end="$2"; shift 2
+  if [ $# -eq 0 ]; then printf '  "%s": []%s\n' "$_key" "$_end"; return 0; fi
+  printf '  "%s": [\n' "$_key"
+  _i=0
+  for _x in "$@"; do
+    _i=$((_i + 1))
+    if [ "$_i" -lt $# ]; then printf '    "%s",\n' "$_x"; else printf '    "%s"\n' "$_x"; fi
+  done
+  printf '  ]%s\n' "$_end"
+}
+
+# check_manifest FILE: pack-skill.py writes the canonical form (sorted keys,
+# indent 2, one name per line). The manifest is accepted only when rebuilding
+# that form from the parsed names (schemaVersion 1, router pcbpilot) gives the
+# same bytes, so malformed JSON, other keys or values, and odd layouts all fail.
+check_manifest() {
+  # shellcheck disable=SC2086 # names are validated single words
+  check_skill_names $SKILLS $RETIRED
+  [ -z "$(printf '%s\n' $SKILLS $RETIRED | sort | uniq -d)" ] || skill_archive_fail "duplicate Skill names in the manifest"
+  # shellcheck disable=SC2086
+  { printf '{\n'; json_list retired , $RETIRED; printf '  "router": "%s",\n  "schemaVersion": 1,\n' "$SKILL_NAME"
+    json_list skills '' $SKILLS; printf '}\n'; } > "$TMP/manifest.canonical"
+  cmp -s "$TMP/manifest.canonical" "$1" || skill_archive_fail "public-skills.json is not schemaVersion 1 with router $SKILL_NAME in canonical form"
 }
 
 # Every name must be the router or router-prefixed: it becomes a directory name
@@ -367,36 +491,52 @@ for client in $TARGETS; do
     [ -d "$CLIENT_BASE/$SKILL_NAME" ] || fatal "Skill symlink target is unavailable: $CLIENT_BASE/$SKILL_NAME"
   fi
 done
+SKILLS=""; RETIRED=""
 if [ -z "$TARGETS" ]; then
   info "Skill install skipped (PCBPILOT_INSTALL_SKILLS=none)"
 else
   info "Downloading skills.tar.gz..."
   download_release_asset "skills.tar.gz" "$TMP/skills.tar.gz"
   verify_asset "skills.tar.gz" "$TMP/skills.tar.gz"
-  SKILL_ROOT="$TMP/skills"
-  mkdir -p "$SKILL_ROOT"
-  tar -xzf "$TMP/skills.tar.gz" -C "$SKILL_ROOT" || fatal "Invalid Skill archive; nothing installed"
-  if [ -f "$SKILL_ROOT/public-skills.json" ]; then
-    SKILLS=$(manifest_list skills "$SKILL_ROOT/public-skills.json")
-    RETIRED=$(manifest_list retired "$SKILL_ROOT/public-skills.json")
+  # Validate every member before anything is extracted.
+  list_skill_archive "$TMP/skills.tar.gz"
+  MANIFEST_ENTRY="$SKILL_NAME/.public-skills.json"
+  if grep -qx "$MANIFEST_ENTRY" "$TMP/skill-names"; then
+    tar -xzOf "$TMP/skills.tar.gz" "$MANIFEST_ENTRY" > "$TMP/manifest.json" 2>/dev/null || skill_archive_fail "unreadable manifest"
+    SKILLS=$(manifest_list skills "$TMP/manifest.json")
+    RETIRED=$(manifest_list retired "$TMP/manifest.json")
+    check_manifest "$TMP/manifest.json"
   else
     SKILLS="$SKILL_NAME"; RETIRED=""  # release before v0.11: the router only
   fi
-  # shellcheck disable=SC2086 # names are validated single words
-  check_skill_names $SKILLS $RETIRED
   case " $(printf '%s ' $SKILLS)" in *" $SKILL_NAME "*) ;; *) fatal "Skill archive does not list $SKILL_NAME; nothing installed" ;; esac
+  if [ -f "$TMP/manifest.json" ]; then check_listed_roots; fi
+  SKILL_ROOT="$TMP/skills"
+  mkdir -p "$SKILL_ROOT"
+  tar -xzf "$TMP/skills.tar.gz" -C "$SKILL_ROOT" || fatal "Invalid Skill archive; nothing installed"
   for skill in $SKILLS; do
     for retired in $RETIRED; do
       [ "$skill" != "$retired" ] || fatal "Skill archive lists $skill as both shipped and retired; nothing installed"
     done
-    [ -s "$SKILL_ROOT/$skill/SKILL.md" ] || fatal "Skill archive has no $skill/SKILL.md; nothing installed"
-    SKILL_VERSION=$(sed -n 's/^  version: *"\([^"]*\)" *$/\1/p' "$SKILL_ROOT/$skill/SKILL.md")
+    [ -d "$SKILL_ROOT/$skill" ] && [ ! -L "$SKILL_ROOT/$skill" ] && [ -s "$SKILL_ROOT/$skill/SKILL.md" ] \
+      || fatal "Skill archive has no $skill/SKILL.md; nothing installed"
+    # tr: tolerate a CRLF SKILL.md from an older Windows-cut package.
+    SKILL_VERSION=$(tr -d '\r' < "$SKILL_ROOT/$skill/SKILL.md" | sed -n 's/^  version: *"\([^"]*\)" *$/\1/p')
     [ "$SKILL_VERSION" = "${VERSION#v}" ] || fatal "Skill $skill metadata version differs from $VERSION; nothing installed"
     for client in $TARGETS; do
       CLIENT_BASE=$(client_base_dir "$client")
       if [ -L "$CLIENT_BASE/$skill" ] && [ ! -d "$CLIENT_BASE/$skill" ]; then
         fatal "Skill symlink target is unavailable: $CLIENT_BASE/$skill"
       fi
+    done
+  done
+  # Stage every destination before the CLI or any Skill changes.
+  for client in $TARGETS; do
+    for skill in $SKILLS; do
+      stage_skill "$client" "$skill" "$SKILL_ROOT/$skill"
+    done
+    for retired in $RETIRED; do
+      plan_retired_skill "$client" "$retired"
     done
   done
 fi
@@ -406,14 +546,7 @@ chmod 0755 "$BIN_TMP"
 mv "$BIN_TMP" "${INSTALL_DIR}/pcbpilot"
 BIN_TMP=""
 ok "CLI installed → ${INSTALL_DIR}/pcbpilot"
-for client in $TARGETS; do
-  for skill in $SKILLS; do
-    install_skill_to "$client" "$skill" "$SKILL_ROOT/$skill"
-  done
-  for retired in $RETIRED; do
-    remove_retired_skill "$client" "$retired"
-  done
-done
+commit_skill_plan
 
 # ── daemon login service (required) ──────────────────────────────────────────
 # The connector only talks to a daemon on 61832; without a login service every

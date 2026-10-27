@@ -32,18 +32,24 @@
 - 内容不重复：`pack-skill.py --check` 会拒绝在两个 Skill 中出现的长段落（≥200 字符，空白归一后比较）。
 - 下线的 Skill 只从 pcbpilot 写入的目录移除（真实目录且带 `.version` 标记）；软链接和用户自建的
   同名目录保持不动，`PCBPILOT_SKILL_PRESERVE=1` 时全部保留。
+- 新聚焦 Skill 遇到用户自建的同名目录（无 `.version`）时不覆盖，报告 `conflict`；确需替换用
+  `--adopt`（`pcbpilot update` / `skill sync`）或 `PCBPILOT_SKILL_ADOPT=1`（安装脚本）。
 
 ## 安装与打包
 
 发布版仍通过根目录 `install.sh` / `install.ps1` 或 `pcbpilot update` 安装 CLI 与清单中的全部公开
-Skill：每个客户端 × 每个 Skill 各自先暂存再整体替换。已装 router 的客户端会自动补齐新增的聚焦
-Skill；`PCBPILOT_INSTALL_SKILLS` 选择客户端，`PCBPILOT_SKILL_PRESERVE` 对每个 Skill 生效。
+Skill：先把每个客户端 × 每个 Skill 完整暂存，再一起切换；任一切换失败就把已切换的全部还原
+（`pcbpilot update` 按客户端成组，安装脚本整体成组）。安装脚本在解压前逐项检查归档成员（拒绝绝对
+路径、`..`、链接、重复项和清单外的根目录），清单必须是规范格式。已装 router 的客户端会自动补齐
+新增的聚焦 Skill；`PCBPILOT_INSTALL_SKILLS` 选择客户端，`PCBPILOT_SKILL_PRESERVE` 对每个 Skill 生效。
+`pcbpilot update` 把本次创建、替换、移除的目录及原内容记入回滚快照，回滚只撤销这些目录。
 源码链接使用 `python3 scripts/install-agent-skills.py`，默认只安装仓库协作入口；
 `--scope design` 选择清单中的公开 Skill，`--scope all` 选择全部，`--dry-run` 预览。
 目标选择、旧链接迁移和冲突保护见 [Agent 协作设计](../../docs/agent-collaboration.md)。
 
 `pack-skill.py` 只打包清单中各 Skill 内已跟踪或已暂存的文件：`skills.tar.gz` 根目录是每个
-Skill 一个目录加一份规范格式的 `public-skills.json`。本 README、协作 Skill、memory 和本机状态不进入
+Skill 一个目录，规范格式的清单副本放在 `pcbpilot/.public-skills.json`（随 router 安装，记录该版本的
+Skill 集合；v0.10.x 读取器只接受 `pcbpilot/` 条目）。文本文件一律按 LF 打包，与 git 索引一致。本 README、协作 Skill、memory 和本机状态不进入
 公开包；公开包中的相对链接必须在解包后成立。已跟踪却不在清单（也不是 `pcbpilot-repo-*`）的 Skill、
 以及仍被跟踪的已下线 Skill 都会让检查失败。发布授权与版本准备见 [发布流程](../../docs/release-workflow.md)。
 

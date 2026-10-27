@@ -149,6 +149,7 @@ type updatePlan struct {
 	clients       []string
 	force         bool
 	preserve      bool
+	adopt         bool // skill sync may replace same-named dirs pcbpilot did not install
 	createMissing bool
 	daemonMode    bool // the daemon applies itself: tools = ngspice only, no restart step, no prompts
 	openFolder    bool
@@ -342,11 +343,16 @@ func (e *updateEngine) stepSkill(ctx context.Context, plan updatePlan, res *appl
 		TargetVersion: plan.target,
 		Clients:       plan.clients,
 		Preserve:      plan.preserve,
+		Adopt:         plan.adopt,
 		Force:         plan.force,
 		CreateMissing: plan.createMissing,
 	}
 	if plan.src.Local() {
 		opts.Assets = plan.src
+	}
+	if res.Snapshot != "" {
+		// Journal exactly what the sync changes, so a rollback undoes that set.
+		opts.Journal = selfupdate.SkillJournalDir(res.Snapshot)
 	}
 	sync, err := selfupdate.SyncSkills(ctx, opts, func(f string, a ...any) { e.log(f, a...) })
 	res.Skills = sync.Outcomes
@@ -360,7 +366,7 @@ func (e *updateEngine) stepSkill(ctx context.Context, plan updatePlan, res *appl
 			}
 		case "removed":
 			row.Status, row.Detail, row.To = "updated", "retired Skill removed", ""
-		case "kept":
+		case "kept", "conflict":
 			row.Status, row.Detail, row.To = "skipped", o.Err, ""
 		case "up-to-date":
 			row.Status = "current"

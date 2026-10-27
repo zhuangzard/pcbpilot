@@ -106,9 +106,40 @@ func LatestSnapshot(version string) (Snapshot, error) {
 	return best, nil
 }
 
-// RestoreSnapshot puts the saved binary, skill dirs and MCP link back. A public
-// Skill the snapshot did not hold for a client it covered was added by the
-// update being undone; it is removed when pcbpilot installed it (marker, no link).
+// JournalEntry is one Skill destination a sync changed: created (did not
+// exist), replaced, or removed (a retired Skill). Saved names the previous
+// tree inside the journal dir.
+type JournalEntry struct {
+	Dir    string `json:"dir"`
+	Action string `json:"action"`
+	Saved  string `json:"saved,omitempty"`
+	// Version is the marker a created dir was written with; rollback removes
+	// the dir only while it is still that pcbpilot-owned install.
+	Version string `json:"version,omitempty"`
+}
+
+// SkillJournalDir is where an update's skill sync journals its changes.
+func SkillJournalDir(snapshotDir string) string { return filepath.Join(snapshotDir, "skill-journal") }
+
+func journalFile(dir string) string { return filepath.Join(dir, "journal.json") }
+
+func appendJournal(dir string, entries []JournalEntry) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	var all []JournalEntry
+	if err := ReadJSON(journalFile(dir), &all); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return WriteJSON(journalFile(dir), append(append([]JournalEntry{}, all...), entries...))
+}
+
+// RestoreSnapshot puts the saved binary, skill dirs and MCP link back. When the
+// update journaled its skill sync, only the journaled destinations are
+// undone: created dirs are removed, replaced and removed (retired) dirs get
+// their previous tree back — including Skills the initiating CLI did not know.
+// Without a journal (older snapshots), a public Skill the snapshot did not hold
+// for a client it covered is removed when pcbpilot installed it.
 func RestoreSnapshot(_ context.Context, s Snapshot) ([]string, error) {
 	var restored, errs []string
 	if s.Bin != "" && s.SavedBin != "" {
@@ -128,9 +159,51 @@ func RestoreSnapshot(_ context.Context, s Snapshot) ([]string, error) {
 			restored = append(restored, "cli")
 		}
 	}
+	var journal []JournalEntry
+	jdir := SkillJournalDir(s.Dir)
+	_, statErr := os.Stat(journalFile(jdir))
+	haveJournal := statErr == nil
+	if haveJournal {
+		if err := ReadJSON(journalFile(jdir), &journal); err != nil {
+			errs = append(errs, "skill journal: "+err.Error())
+		}
+	}
+	for i := len(journal) - 1; i >= 0; i-- {
+		e := journal[i]
+		label := "skill:" + e.Dir
+		var err error
+		switch {
+		case e.Action == "created":
+			if _, statErr := os.Lstat(e.Dir); statErr != nil {
+				break // already gone
+			}
+			if !ownedSkillDir(e.Dir) || e.Version == "" || readMarker(e.Dir) != e.Version {
+				// Something else lives there now (a user dir, a file, another
+				// install): never delete it.
+				err = fmt.Errorf("conflict: no longer the %q install this update created; left in place", e.Version)
+				break
+			}
+			err = os.RemoveAll(e.Dir)
+			label += " removed"
+		case e.Saved != "":
+			err = materializeTree(filepath.Join(jdir, e.Saved), e.Dir)
+		default:
+			err = fmt.Errorf("previous tree was not journaled")
+		}
+		if err != nil {
+			errs = append(errs, label+": "+err.Error())
+		} else {
+			restored = append(restored, label)
+		}
+	}
 	saved := map[string]bool{}
 	for _, sk := range s.Skills {
 		saved[filepath.Clean(sk.Dir)] = true
+		if haveJournal {
+			// The journal is the exact record of what the update changed;
+			// anything it does not list (another client, a later edit) stays.
+			continue
+		}
 		label := SkillLabel(sk.Client, sk.Skill)
 		if err := materializeTree(filepath.Join(s.Dir, sk.Saved), sk.Dir); err != nil {
 			errs = append(errs, "skill "+label+": "+err.Error())
@@ -139,6 +212,9 @@ func RestoreSnapshot(_ context.Context, s Snapshot) ([]string, error) {
 		}
 	}
 	for _, sk := range s.Skills {
+		if haveJournal {
+			break
+		}
 		if sk.Skill != "" && sk.Skill != SkillName {
 			continue // one sweep per client, anchored at its router dir
 		}
