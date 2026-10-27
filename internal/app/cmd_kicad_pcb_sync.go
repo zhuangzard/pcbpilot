@@ -1,0 +1,797 @@
+package app
+
+// cmd_kicad_pcb_sync.go — `pcbpilot kicad pcb-sync`: KiCad's "Update PCB
+// from Schematic" without the GUI. The schematic netlist (a fresh kicad-cli
+// export, or --netlist) is matched against the board (bridge sync-read),
+// internal/kicad.BuildSyncPlan computes the edits, the bridge applies them
+// into a stage directory beside the target (sync-apply), three gates verify
+// the staged board, and a kfile transaction commits it.
+//
+// Gates (internal/gate; never a pass when not verified):
+//   - pad-net: every linked footprint's pad nets equal the schematic's pin
+//     nets (ComparePinNets / padNetDiffGate over the staged board).
+//   - schematic-parity: kicad-cli pcb drc --schematic-parity on a copy of
+//     the staged board beside a copy of the sheets; any parity item fails,
+//     except an extra footprint the plan flagged as an orphan.
+//   - idempotent: a new plan from the staged board has no op.
+//
+// Exit codes: 0 pass (or no drift for --check), 1 other error / refusal,
+// 2 usage, 3 --check found drift, 4 locked / changed / revision mismatch
+// (nothing written), 5 a gate could not run (or --no-parity), 6 a gate
+// failed (--out keeps the output; --in-place leaves the board unchanged).
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"regexp"
+	"runtime"
+	"slices"
+	"strconv"
+	"strings"
+
+	"github.com/spf13/cobra"
+	"github.com/zhuangzard/pcbpilot/internal/gate"
+	"github.com/zhuangzard/pcbpilot/internal/kfile"
+	"github.com/zhuangzard/pcbpilot/internal/kicad"
+)
+
+const (
+	pcbSyncSchema     = "pcbpilot.kicad.pcb-sync/1"
+	pcbSyncPlanSchema = "pcbpilot.kicad.pcb-sync.plan/1"
+
+	errSyncBridge       = "E_BRIDGE"
+	errSyncVerifyPadNet = "E_VERIFY_PADNET"
+	errSyncVerifyParity = "E_VERIFY_PARITY"
+	errSyncCannotCheck  = "E_CANNOT_CHECK"
+)
+
+// pcbSyncTamper, when set (tests only), replaces the plan the bridge
+// applies — the verify gates still judge against the schematic, so a
+// tampered plan must make them fail.
+var pcbSyncTamper func(*kicad.SyncPlan) *kicad.SyncPlan
+
+type pcbSyncOpts struct {
+	sch, pcb, out          string
+	inPlace                bool
+	netlist, netlistFormat string
+	dryRun, check          bool
+	planOut, applyPlan     string
+	revision               string
+	match, orphans         string
+	update, fieldsIgnore   []string
+	renameNets, create     bool
+	staging                string
+	stagingGap             float64
+	report                 string
+	breakLock              string
+	noParity               bool
+
+	env   *kfile.Env   // lock identity (tests); nil = this machine
+	tools *kicad.Tools // tests; nil = kicad.Locate()
+}
+
+func newKicadPcbSyncCmd(stdout, stderr io.Writer) *cobra.Command {
+	o := pcbSyncOpts{}
+	c := &cobra.Command{
+		Use:   "pcb-sync --sch ROOT.kicad_sch --pcb BOARD.kicad_pcb (--out NEW.kicad_pcb | --in-place)",
+		Short: "Update PCB from Schematic, headless: add / swap / update / re-net footprints from the schematic, verified",
+		Long: `Bring a KiCad board in line with its schematic — what KiCad's "Update PCB from
+Schematic" does, without the GUI:
+
+  - footprints of new symbols are added (staged in rows right of the board
+    outline, for kicad place to move), changed footprints swapped (position,
+    rotation, side, lock, field layout and link kept), references, values,
+    fields, sheet names and dnp / exclude-from-BOM flags updated;
+  - every pad gets its schematic net; a board net whose pads all move to one
+    new schematic name is renamed with its tracks, vias and zones;
+  - footprints no symbol claims are flagged (--orphans remove deletes them;
+    locked and board-only ones never). Tracks and zones are never moved or
+    deleted: copper left without its pad is reported (orphanCopper,
+    danglingCopper).
+
+Footprints are matched by symbol path (sheet path + unit UUID), then by a
+reference unique on both sides (--match). Footprint libraries come from the
+project fp-lib-table over the user's global one. The netlist is a fresh
+kicad-cli export of --sch unless --netlist is given.
+
+Nothing is guessed: unannotated or duplicate references, two footprints on one
+symbol path, an empty Footprint field, a library that does not resolve or a
+footprint that does not load refuse the whole sync (exit 1), and nothing is
+written.
+
+The edit is applied to a stage directory beside the target and verified
+there: pad-net (pads vs schematic pins), schematic-parity (kicad-cli pcb drc
+--schematic-parity on a copy) and idempotent (re-planning finds nothing). Then
+a transaction commits it: KiCad lock files are honoured (--break-lock), a board
+changed since it was read is refused. --in-place commits only when no gate
+failed.
+
+Modes: --dry-run and --check (exit 3 on drift) only read; --plan-out writes the
+plan with its revision, --apply-plan P --revision R applies it only if the
+files still give that revision.
+
+Exit: 0 pass, 1 error/refused, 2 usage, 3 drift (--check), 4 locked / changed /
+revision mismatch, 5 not verified (cannot-check, --no-parity), 6 verify failed.
+Report: --report (default <target>.pcb-sync.json), also printed on stdout.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runPcbSync(o, stdout, stderr)
+		},
+	}
+	f := c.Flags()
+	f.StringVar(&o.sch, "sch", "", "root schematic sheet (.kicad_sch)")
+	f.StringVar(&o.pcb, "pcb", "", "board to sync (.kicad_pcb); with --create it may not exist yet")
+	f.StringVar(&o.out, "out", "", "write the synced board here (the input board is untouched)")
+	f.BoolVar(&o.inPlace, "in-place", false, "write the synced board over --pcb (only when every gate that ran passed)")
+	f.StringVar(&o.netlist, "netlist", "", "use this kicad-cli netlist export instead of exporting --sch")
+	f.StringVar(&o.netlistFormat, "netlist-format", "", "kicadxml | kicadsexpr (default: kicadxml for the export, detected for --netlist)")
+	f.BoolVar(&o.dryRun, "dry-run", false, "plan and report only; write nothing but the report")
+	f.BoolVar(&o.check, "check", false, "exit 3 when the board is not in line with the schematic (read only)")
+	f.StringVar(&o.planOut, "plan-out", "", "write the plan (with its revision) here and stop")
+	f.StringVar(&o.applyPlan, "apply-plan", "", "apply a plan written by --plan-out (needs --revision)")
+	f.StringVar(&o.revision, "revision", "", "the revision of --apply-plan; refused when the files no longer give it")
+	f.StringVar(&o.match, "match", kicad.SyncMatchPathOrRef, "footprint matching: path-then-ref | path | ref")
+	f.StringVar(&o.orphans, "orphans", "flag", "footprints no symbol claims: flag | remove (locked ones are never removed)")
+	f.StringSliceVar(&o.update, "update", nil, "what to update: values,footprints,fields,refs,dnp (default all; pad nets always)")
+	f.StringSliceVar(&o.fieldsIgnore, "fields-ignore", nil, "footprint fields never set or removed")
+	f.BoolVar(&o.renameNets, "rename-nets", true, "rename a board net (with its copper) when all its pads move to one new name")
+	f.BoolVar(&o.create, "create", false, "start a new board when --pcb does not exist")
+	f.StringVar(&o.staging, "staging", "auto", "where new footprints go: auto (10 mm right of the outline) or X,Y in mm")
+	f.Float64Var(&o.stagingGap, "staging-gap", 2, "gap between staged footprints (mm)")
+	f.StringVar(&o.report, "report", "", "report path (default <target>.pcb-sync.json)")
+	f.StringVar(&o.breakLock, "break-lock", "none", "KiCad lock files that may be removed: none | stale (this user, this host, no KiCad running) | any")
+	f.BoolVar(&o.noParity, "no-parity", false, "skip the schematic-parity gate (the result is then not verified: exit 5)")
+	return c
+}
+
+type pcbSyncGate struct {
+	Name   string      `json:"name"`
+	Status gate.Status `json:"status"`
+	Detail string      `json:"detail"`
+	Items  []string    `json:"items,omitempty"`
+	Info   []string    `json:"info,omitempty"`
+}
+
+type pcbSyncLock struct {
+	Path  string          `json:"path"`
+	State kfile.LockState `json:"state"`
+	Kind  string          `json:"kind"`
+	User  string          `json:"user,omitempty"`
+	Host  string          `json:"host,omitempty"`
+	Broke bool            `json:"broke"`
+}
+
+type pcbSyncFile struct {
+	Path    string `json:"path"`
+	Kind    string `json:"kind"`
+	BaseSHA string `json:"baseSha,omitempty"`
+	NewSHA  string `json:"newSha,omitempty"`
+}
+
+type pcbSyncReport struct {
+	Schema       string `json:"schema"`
+	OK           bool   `json:"ok"`
+	Verdict      string `json:"verdict"`
+	Mode         string `json:"mode"`
+	Sch          string `json:"sch"`
+	PCB          string `json:"pcb"`
+	Out          string `json:"out,omitempty"`
+	InPlace      bool   `json:"inPlace"`
+	Created      bool   `json:"created,omitempty"`
+	Committed    bool   `json:"committed"`
+	Revision     string `json:"revision,omitempty"`
+	KiCadVersion string `json:"kicadVersion,omitempty"`
+	Netlist      struct {
+		Source     string `json:"source"`
+		Format     string `json:"format"`
+		Components int    `json:"components"`
+		Nets       int    `json:"nets"`
+	} `json:"netlist"`
+	Libs struct {
+		Project string                    `json:"project,omitempty"`
+		Global  string                    `json:"global,omitempty"`
+		Vars    map[string]kicad.FPLibVar `json:"vars,omitempty"`
+	} `json:"libs"`
+	Match          kicad.SyncMatch    `json:"match"`
+	Ops            []kicad.SyncOp     `json:"ops"`
+	Counts         kicad.SyncCounts   `json:"counts"`
+	Staged         []kicad.SyncStaged `json:"staged"`
+	OrphanCopper   []kicad.SyncCopper `json:"orphanCopper"`
+	DanglingCopper []kicad.SyncCopper `json:"danglingCopper"`
+	Locks          []pcbSyncLock      `json:"locks"`
+	Files          []pcbSyncFile      `json:"files"`
+	Gates          []pcbSyncGate      `json:"gates"`
+	Errors         []kicad.SyncError  `json:"errors"`
+	Warnings       []string           `json:"warnings,omitempty"`
+}
+
+// pcbSyncPlanFile is what --plan-out writes and --apply-plan reads.
+type pcbSyncPlanFile struct {
+	Schema   string         `json:"schema"`
+	Revision string         `json:"revision"`
+	Sch      string         `json:"sch"`
+	PCB      string         `json:"pcb"`
+	Ops      []kicad.SyncOp `json:"ops"`
+}
+
+func sameFilePath(a, b string) bool {
+	aa, err1 := filepath.Abs(a)
+	bb, err2 := filepath.Abs(b)
+	if err1 != nil || err2 != nil {
+		return a == b
+	}
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		return strings.EqualFold(aa, bb)
+	}
+	return aa == bb
+}
+
+func boardSibling(pcb, ext string) string { return strings.TrimSuffix(pcb, ".kicad_pcb") + ext }
+
+func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
+	usage := func(f string, a ...any) error {
+		fmt.Fprintf(stderr, "pcb-sync: "+f+"\n", a...)
+		return exitCodeError{2}
+	}
+	// Flags.
+	switch {
+	case o.sch == "":
+		return usage("--sch is required")
+	case o.pcb == "":
+		return usage("--pcb is required")
+	case !strings.HasSuffix(o.pcb, ".kicad_pcb"):
+		return usage("--pcb %s is not a .kicad_pcb", o.pcb)
+	case o.out != "" && !strings.HasSuffix(o.out, ".kicad_pcb"):
+		return usage("--out %s is not a .kicad_pcb", o.out)
+	case o.out != "" && o.inPlace:
+		return usage("give --out or --in-place, not both")
+	case o.out != "" && sameFilePath(o.out, o.pcb):
+		return usage("--out is the input board; use --in-place")
+	case o.check && (o.dryRun || o.planOut != "" || o.applyPlan != ""):
+		return usage("--check only reads; it does not combine with --dry-run, --plan-out or --apply-plan")
+	case o.planOut != "" && o.applyPlan != "":
+		return usage("--plan-out and --apply-plan are two separate runs")
+	case o.dryRun && o.applyPlan != "":
+		return usage("--dry-run does not combine with --apply-plan")
+	case o.applyPlan != "" && o.revision == "":
+		return usage("--apply-plan needs --revision (printed by --plan-out)")
+	case o.revision != "" && o.applyPlan == "":
+		return usage("--revision goes with --apply-plan")
+	}
+	readOnly := o.check || o.dryRun || o.planOut != ""
+	if !readOnly && o.out == "" && !o.inPlace {
+		return usage("give --out NEW.kicad_pcb or --in-place (or --dry-run / --check / --plan-out)")
+	}
+	policy, err := kfile.ParseBreakPolicy(o.breakLock)
+	if err != nil {
+		return usage("%v", err)
+	}
+	switch o.match {
+	case kicad.SyncMatchPathOrRef, kicad.SyncMatchPath, kicad.SyncMatchRef:
+	default:
+		return usage("--match %q: want path-then-ref, path or ref", o.match)
+	}
+	if o.orphans != "flag" && o.orphans != "remove" {
+		return usage("--orphans %q: want flag or remove", o.orphans)
+	}
+	switch o.netlistFormat {
+	case "", kicad.NetlistKicadXML, kicad.NetlistKicadSexpr:
+	default:
+		return usage("--netlist-format %q: want kicadxml or kicadsexpr", o.netlistFormat)
+	}
+	sopts := kicad.SyncOptions{Match: o.match, Orphans: o.orphans, RenameNets: o.renameNets, StagingGap: o.stagingGap}
+	if len(o.update) > 0 {
+		sopts.Update = map[string]bool{}
+		for _, u := range o.update {
+			u = strings.TrimSpace(u)
+			if !slices.Contains(kicad.SyncUpdateAll, u) {
+				return usage("--update %q: want values, footprints, fields, refs or dnp", u)
+			}
+			sopts.Update[u] = true
+		}
+	}
+	if len(o.fieldsIgnore) > 0 {
+		sopts.FieldsIgnore = map[string]bool{}
+		for _, f := range o.fieldsIgnore {
+			sopts.FieldsIgnore[strings.TrimSpace(f)] = true
+		}
+	}
+	if o.staging != "" && o.staging != "auto" {
+		xs, ys, ok := strings.Cut(o.staging, ",")
+		x, err1 := strconv.ParseFloat(strings.TrimSpace(xs), 64)
+		y, err2 := strconv.ParseFloat(strings.TrimSpace(ys), 64)
+		if !ok || err1 != nil || err2 != nil {
+			return usage("--staging %q: want auto or X,Y (mm)", o.staging)
+		}
+		sopts.Staging = &[2]float64{x, y}
+	}
+	if o.stagingGap < 0 {
+		return usage("--staging-gap must not be negative")
+	}
+	boardExists := fileExists(o.pcb)
+	if !boardExists && !o.create {
+		return usage("board %s not found (pass --create to start a new board)", o.pcb)
+	}
+	if !fileExists(o.sch) {
+		return usage("schematic %s not found", o.sch)
+	}
+
+	target := o.pcb
+	if o.out != "" {
+		target = o.out
+	}
+	rep := &pcbSyncReport{Schema: pcbSyncSchema, Sch: o.sch, PCB: o.pcb, Out: o.out, InPlace: o.inPlace, Created: !boardExists,
+		Ops: []kicad.SyncOp{}, Staged: []kicad.SyncStaged{}, OrphanCopper: []kicad.SyncCopper{}, DanglingCopper: []kicad.SyncCopper{},
+		Locks: []pcbSyncLock{}, Files: []pcbSyncFile{}, Gates: []pcbSyncGate{}, Errors: []kicad.SyncError{},
+		Match: kicad.SyncMatch{UnmatchedSymbols: []string{}, UnmatchedFootprints: []string{}}}
+	switch {
+	case o.check:
+		rep.Mode = "check"
+	case o.dryRun:
+		rep.Mode = "dry-run"
+	case o.planOut != "":
+		rep.Mode = "plan"
+	case o.applyPlan != "":
+		rep.Mode = "apply-plan"
+	default:
+		rep.Mode = "apply"
+	}
+	reportPath := o.report
+	if reportPath == "" {
+		reportPath = boardSibling(target, ".pcb-sync.json")
+	}
+	finish := func(verdict string, code int) error {
+		rep.Verdict = verdict
+		rep.OK = code == 0
+		b, _ := json.MarshalIndent(rep, "", "  ")
+		b = append(b, '\n')
+		_ = os.MkdirAll(filepath.Dir(reportPath), 0o755)
+		if _, err := kfile.WriteFile(reportPath, b, kfile.Opts{NoLockCheck: true}); err != nil {
+			fmt.Fprintf(stderr, "pcb-sync: cannot write the report %s: %v\n", reportPath, err)
+			if code == 0 {
+				code = 1
+			}
+		}
+		_, _ = stdout.Write(b)
+		if code == 0 {
+			return nil
+		}
+		return exitCodeError{code}
+	}
+	fail := func(code, path, detail, fix string, exit int) error {
+		rep.Errors = append(rep.Errors, kicad.SyncError{Code: code, Path: path, Detail: detail, Fix: fix})
+		v := "error"
+		switch exit {
+		case 4:
+			v = "refused"
+		case 5:
+			v = string(gate.CannotCheck)
+		}
+		return finish(v, exit)
+	}
+	fileErr := func(err error) error {
+		var ke *kfile.Error
+		if errors.As(err, &ke) {
+			rep.addLocks(ke.Locks)
+			return fail(string(ke.Code), ke.Path, ke.Detail, ke.Fix, kfile.ExitCode(err))
+		}
+		return fail("E_IO", "", err.Error(), "", 1)
+	}
+
+	// Tools.
+	t := o.tools
+	if t == nil {
+		t, _ = kicad.Locate()
+	}
+	if t == nil || !fileExists(t.Python) {
+		return fail(errSyncBridge, "", "KiCad's Python (pcbnew) was not found", "install KiCad 10 or set "+kicad.EnvPython, 1)
+	}
+
+	if o.out != "" && !readOnly {
+		if err := os.MkdirAll(filepath.Dir(o.out), 0o755); err != nil {
+			return fail("E_IO", o.out, err.Error(), "", 1)
+		}
+	}
+
+	// Locks. A write target that is open in KiCad refuses the run before
+	// anything is computed (and Apply checks again before each rename).
+	env := o.env
+	if readOnly {
+		if locks, err := kfile.CheckLocks([]string{o.pcb}, env); err == nil && len(locks) > 0 {
+			rep.addLocks(locks)
+			rep.Warnings = append(rep.Warnings, "sourceOpenInKiCad: the board is open in KiCad; edits not saved there are not in the file")
+		}
+	} else {
+		locks, err := kfile.Guard([]string{target}, policy, env)
+		rep.addLocks(locks)
+		if err != nil {
+			return fileErr(err)
+		}
+		if o.out != "" && boardExists {
+			if src, err := kfile.CheckLocks([]string{o.pcb}, env); err == nil && len(src) > 0 {
+				rep.addLocks(src)
+				rep.Warnings = append(rep.Warnings, "sourceOpenInKiCad: the input board is open in KiCad; edits not saved there are not in the file")
+			}
+		}
+	}
+
+	// The board as read now: every write is checked against these hashes.
+	var boardSnap, proSnap kfile.Snapshot
+	if boardExists {
+		if _, boardSnap, err = kfile.Read(o.pcb); err != nil {
+			return fileErr(err)
+		}
+	}
+	if proSnap, err = kfile.Stat(boardSibling(o.pcb, ".kicad_pro")); err != nil {
+		return fileErr(err)
+	}
+	targetSnap := boardSnap
+	targetProSnap := proSnap
+	if o.out != "" {
+		if targetSnap, err = kfile.Stat(o.out); err != nil {
+			return fileErr(err)
+		}
+		if targetProSnap, err = kfile.Stat(boardSibling(o.out, ".kicad_pro")); err != nil {
+			return fileErr(err)
+		}
+	}
+
+	// Netlist.
+	format := o.netlistFormat
+	var data []byte
+	if o.netlist != "" {
+		if data, err = os.ReadFile(o.netlist); err != nil {
+			return fail(kicad.ErrNetlistExport, o.netlist, err.Error(), "", 1)
+		}
+		rep.Netlist.Source = o.netlist
+	} else {
+		if format == "" {
+			format = kicad.NetlistKicadXML
+		}
+		if !fileExists(t.CLI) {
+			return fail(kicad.ErrNetlistExport, o.sch, "kicad-cli not found ("+t.CLI+")", "install KiCad 10, set "+kicad.EnvCLI+", or pass --netlist", 1)
+		}
+		if data, err = kicad.ExportSyncNetlist(t.CLI, o.sch, format); err != nil {
+			return fail(kicad.ErrNetlistExport, o.sch, err.Error(), "open the schematic in KiCad once to check it loads, or pass --netlist", 1)
+		}
+		rep.Netlist.Source = "kicad-cli sch export netlist " + o.sch
+	}
+	nl, err := kicad.ReadSyncNetlist(data, format, filepath.Dir(o.sch))
+	if err != nil {
+		return fail(kicad.ErrNetlistExport, o.netlist, err.Error(), "re-export the netlist with kicad-cli sch export netlist", 1)
+	}
+	if format == "" {
+		format = kicad.NetlistKicadXML
+		if strings.HasPrefix(strings.TrimSpace(string(data)), "(") {
+			format = kicad.NetlistKicadSexpr
+		}
+	}
+	rep.Netlist.Format, rep.Netlist.Components, rep.Netlist.Nets = format, len(nl.Components), len(nl.Nets)
+
+	// Board inventory.
+	inv := &kicad.SyncInventory{}
+	if boardExists {
+		if inv, err = t.SyncRead(o.pcb); err != nil {
+			return fail(errSyncBridge, o.pcb, err.Error(), "check the board opens in KiCad 10", 1)
+		}
+		if err := boardSnap.Check(); err != nil {
+			return fileErr(err)
+		}
+		rep.KiCadVersion = inv.KiCadVersion
+		if !strings.HasPrefix(inv.KiCadVersion, "10.") {
+			return fail(errSyncCannotCheck, o.pcb, "pcbnew "+inv.KiCadVersion+": pcb-sync is verified against KiCad 10 only",
+				"use KiCad 10 ("+kicad.EnvPython+")", 5)
+		}
+	}
+
+	// Footprint libraries (the user's real tables).
+	libs, err := kicad.LoadFPLibTables(filepath.Dir(o.pcb))
+	if err != nil {
+		var le *kicad.FPLibError
+		if errors.As(err, &le) {
+			rep.Errors = append(rep.Errors, kicad.SyncError{Code: le.Code, Path: le.Path, Var: le.Var, Detail: le.Detail, Fix: le.Fix})
+			return finish("refused", 1)
+		}
+		return fail(kicad.ErrFPLibUnresolved, "", err.Error(), "", 1)
+	}
+	rep.Libs.Project, rep.Libs.Global, rep.Libs.Vars = libs.ProjectTable, libs.GlobalTable, libs.Vars
+	info := func(refs []kicad.FPRef) (map[string]kicad.SyncFPInfo, []kicad.SyncError) {
+		m, bad, err := t.FPInfo(refs)
+		if err != nil {
+			bad = append(bad, kicad.SyncError{Code: errSyncBridge, Detail: err.Error()})
+		}
+		return m, bad
+	}
+	plan, err := kicad.BuildSyncPlan(kicad.SyncInput{Netlist: nl, Inventory: inv, Libs: libs, Info: info, Opts: sopts})
+	if err != nil {
+		if r, ok := kicad.IsSyncRefusal(err); ok {
+			rep.Errors = append(rep.Errors, r.Errors...)
+			return finish("refused", 1)
+		}
+		return fail(errSyncBridge, "", err.Error(), "", 1)
+	}
+	rep.fill(plan)
+	rep.Revision = kicad.SyncRevision(boardSnap.SHA256, proSnap.SHA256, sopts, plan)
+
+	switch {
+	case o.check:
+		if plan.Drift() {
+			return finish("drift", 3)
+		}
+		return finish("in-sync", 0)
+	case o.dryRun:
+		return finish("planned", 0)
+	case o.planOut != "":
+		pf := pcbSyncPlanFile{Schema: pcbSyncPlanSchema, Revision: rep.Revision, Sch: o.sch, PCB: o.pcb, Ops: plan.Ops}
+		b, _ := json.MarshalIndent(pf, "", "  ")
+		if _, err := kfile.WriteFile(o.planOut, append(b, '\n'), kfile.Opts{NoLockCheck: true}); err != nil {
+			return fileErr(err)
+		}
+		return finish("planned", 0)
+	case o.applyPlan != "":
+		b, err := os.ReadFile(o.applyPlan)
+		var pf pcbSyncPlanFile
+		if err == nil {
+			err = json.Unmarshal(b, &pf)
+		}
+		if err != nil || pf.Schema != pcbSyncPlanSchema {
+			return usage("--apply-plan %s is not a %s file (%v)", o.applyPlan, pcbSyncPlanSchema, err)
+		}
+		if pf.Revision != o.revision {
+			return fail(string(kfile.CodeRevision), o.applyPlan, fmt.Sprintf("--revision %s is not the plan's revision %s", short12(o.revision), short12(pf.Revision)),
+				"pass the revision printed with the plan", 4)
+		}
+		if rep.Revision != o.revision {
+			return fail(string(kfile.CodeRevision), o.pcb, fmt.Sprintf("the plan has revision %s, but the board, schematic and options now give %s", short12(o.revision), short12(rep.Revision)),
+				"the files changed after the plan was made; make a new plan and review it", 4)
+		}
+	}
+
+	// Apply into a stage directory beside the target.
+	staged, stagedPro := o.pcb, boardSibling(o.pcb, ".kicad_pro")
+	wrote := false
+	if !(o.inPlace && len(plan.Mutating()) == 0) {
+		stage, err := kicad.NewStageDir(target)
+		if err != nil {
+			return fileErr(err)
+		}
+		defer os.RemoveAll(stage)
+		base := strings.TrimSuffix(filepath.Base(target), ".kicad_pcb")
+		src := ""
+		if boardExists {
+			src = o.pcb
+		}
+		applied := plan
+		if pcbSyncTamper != nil {
+			applied = pcbSyncTamper(plan)
+		}
+		res, err := t.SyncApply(src, applied, stage, base)
+		if err != nil {
+			rep.Errors = append(rep.Errors, kicad.SyncError{Code: errSyncBridge, Path: target, Detail: err.Error(),
+				Fix: "nothing was written; see the problems listed"})
+			return finish("error", 1)
+		}
+		if rep.KiCadVersion == "" {
+			rep.KiCadVersion = res.KiCadVersion
+		}
+		staged, stagedPro = filepath.Join(stage, base+".kicad_pcb"), filepath.Join(stage, base+".kicad_pro")
+		wrote = true
+	}
+
+	// Verify the staged board.
+	gates, padNet, idem := pcbSyncVerify(t, o, sopts, nl, libs, info, plan, staged, stagedPro)
+	rep.Gates = gates
+	overall := gate.Aggregate(gateResults(gates)...)
+	for _, g := range gates {
+		switch {
+		case g.Status == gate.Fail && g.Name == "pad-net":
+			rep.Errors = append(rep.Errors, kicad.SyncError{Code: errSyncVerifyPadNet, Path: target, Detail: g.Detail})
+		case g.Status == gate.Fail && g.Name == "schematic-parity":
+			rep.Errors = append(rep.Errors, kicad.SyncError{Code: errSyncVerifyParity, Path: target, Detail: g.Detail})
+		case g.Status == gate.Fail:
+			rep.Errors = append(rep.Errors, kicad.SyncError{Code: "E_VERIFY_IDEMPOTENT", Path: target, Detail: g.Detail})
+		case g.Status == gate.CannotCheck:
+			rep.Errors = append(rep.Errors, kicad.SyncError{Code: errSyncCannotCheck, Path: target, Detail: g.Name + ": " + g.Detail})
+		}
+	}
+
+	// Commit. --in-place only when pad-net and idempotent passed and parity
+	// did not fail; --out keeps its output whenever the staged board could
+	// be read back.
+	commit := wrote && padNet != gate.CannotCheck
+	if o.inPlace {
+		commit = wrote && padNet == gate.Pass && idem == gate.Pass && overall != gate.Fail
+		if wrote && !commit {
+			rep.Warnings = append(rep.Warnings, "not committed: a gate failed or could not run, so the board is unchanged")
+		}
+	}
+	if commit {
+		txn := kfile.NewTxn(filepath.Dir(target))
+		if err := txn.StageFile(target, staged, &targetSnap); err != nil {
+			txn.Abort()
+			return fileErr(err)
+		}
+		tpro := boardSibling(target, ".kicad_pro")
+		if fileExists(stagedPro) && (!o.inPlace || !targetProSnap.Exists) {
+			if err := txn.StageFile(tpro, stagedPro, &targetProSnap); err != nil {
+				txn.Abort()
+				return fileErr(err)
+			}
+		}
+		if dru := boardSibling(o.pcb, ".kicad_dru"); o.out != "" && fileExists(dru) && !fileExists(boardSibling(target, ".kicad_dru")) {
+			if err := txn.StageFile(boardSibling(target, ".kicad_dru"), dru, nil); err != nil {
+				txn.Abort()
+				return fileErr(err)
+			}
+		}
+		p, err := txn.Apply("", kfile.Opts{Locks: policy, Env: env})
+		rep.addLocks(p.Locks)
+		for _, c := range p.Changes {
+			rep.Files = append(rep.Files, pcbSyncFile{Path: c.Path, Kind: string(c.Kind), BaseSHA: c.Base.SHA256, NewSHA: c.NewSHA})
+		}
+		if err != nil {
+			txn.Abort()
+			return fileErr(err)
+		}
+		rep.Committed = p.Applied
+	}
+	return finish(string(overall), overall.ExitCode())
+}
+
+func short12(s string) string {
+	if len(s) > 12 {
+		return s[:12]
+	}
+	return s
+}
+
+func (r *pcbSyncReport) addLocks(ls []kfile.LockInfo) {
+	for _, l := range ls {
+		dup := false
+		for i := range r.Locks {
+			if r.Locks[i].Path == l.Path {
+				r.Locks[i].Broke = r.Locks[i].Broke || l.Broke
+				dup = true
+			}
+		}
+		if !dup {
+			r.Locks = append(r.Locks, pcbSyncLock{Path: l.Path, State: l.State, Kind: l.Kind, User: l.User, Host: l.Host, Broke: l.Broke})
+		}
+	}
+}
+
+func (r *pcbSyncReport) fill(p *kicad.SyncPlan) {
+	r.Ops, r.Match, r.Counts, r.Staged = p.Ops, p.Match, p.Counts, p.Staged
+	r.OrphanCopper, r.DanglingCopper = p.OrphanCopper, p.DanglingCopper
+	r.Errors = append(r.Errors, p.Errors...)
+}
+
+func gateResults(gs []pcbSyncGate) []gate.Result {
+	out := make([]gate.Result, len(gs))
+	for i, g := range gs {
+		out[i] = gate.Result{Name: g.Name, Status: g.Status, Detail: g.Detail}
+	}
+	return out
+}
+
+// pcbSyncVerify runs the three gates on the staged board.
+func pcbSyncVerify(t *kicad.Tools, o pcbSyncOpts, sopts kicad.SyncOptions, nl *kicad.SyncNetlist, libs kicad.FPResolver,
+	info func([]kicad.FPRef) (map[string]kicad.SyncFPInfo, []kicad.SyncError), plan *kicad.SyncPlan, staged, stagedPro string) ([]pcbSyncGate, gate.Status, gate.Status) {
+	var gates []pcbSyncGate
+	inv, err := t.SyncRead(staged)
+	if err != nil {
+		cc := "the staged board could not be read back: " + err.Error()
+		gates = append(gates, pcbSyncGate{Name: "pad-net", Status: gate.CannotCheck, Detail: cc},
+			pcbSyncGate{Name: "idempotent", Status: gate.CannotCheck, Detail: cc})
+	} else {
+		gates = append(gates, pcbSyncPadNetGate(nl, inv))
+		p2, err := kicad.BuildSyncPlan(kicad.SyncInput{Netlist: nl, Inventory: inv, Libs: libs, Info: info, Opts: sopts})
+		switch {
+		case err != nil:
+			st := gate.CannotCheck
+			if _, ok := kicad.IsSyncRefusal(err); ok {
+				st = gate.Fail
+			}
+			gates = append(gates, pcbSyncGate{Name: "idempotent", Status: st, Detail: "re-planning the synced board: " + err.Error()})
+		case len(p2.Mutating()) > 0:
+			g := pcbSyncGate{Name: "idempotent", Status: gate.Fail,
+				Detail: fmt.Sprintf("re-planning the synced board still finds %d op(s)", len(p2.Mutating()))}
+			for _, op := range p2.Mutating() {
+				g.Items = append(g.Items, fmt.Sprintf("%s %s %s%s", op.Op, op.Ref, op.Field, op.Pad))
+			}
+			gates = append(gates, g)
+		default:
+			gates = append(gates, pcbSyncGate{Name: "idempotent", Status: gate.Pass, Detail: "re-planning the synced board finds no op"})
+		}
+	}
+	if o.noParity {
+		gates = append(gates, pcbSyncGate{Name: "schematic-parity", Status: gate.Skip, Detail: "--no-parity: not checked"})
+	} else {
+		flagged := map[string]bool{}
+		for _, op := range plan.Ops {
+			if op.Op == "orphan" && op.Action == "flag" {
+				flagged[op.Ref] = true
+			}
+		}
+		pr := t.RunParity(staged, stagedPro, o.sch, func(v kicad.Violation) bool {
+			if v.Rule != "extra_footprint" {
+				return false
+			}
+			for ref := range flagged {
+				if regexp.MustCompile(`Footprint ` + regexp.QuoteMeta(ref) + `\b`).MatchString(v.Message) {
+					return true
+				}
+			}
+			return false
+		})
+		gates = append(gates, pcbSyncGate{Name: "schematic-parity", Status: pr.Status, Detail: pr.Detail, Items: pr.Items, Info: pr.Info})
+	}
+	// Order: pad-net, schematic-parity, idempotent.
+	order := map[string]int{"pad-net": 0, "schematic-parity": 1, "idempotent": 2}
+	for i := 1; i < len(gates); i++ {
+		for j := i; j > 0 && order[gates[j].Name] < order[gates[j-1].Name]; j-- {
+			gates[j], gates[j-1] = gates[j-1], gates[j]
+		}
+	}
+	var pad, idem gate.Status = gate.CannotCheck, gate.CannotCheck
+	for _, g := range gates {
+		switch g.Name {
+		case "pad-net":
+			pad = g.Status
+		case "idempotent":
+			idem = g.Status
+		}
+	}
+	return gates, pad, idem
+}
+
+// pcbSyncPadNetGate compares the schematic's pin nets (symbols on the
+// board, power symbols excluded) with the pads of the footprints linked to
+// them (by symbol path) on the staged board. Pads without a net and
+// non-plated holes are not pins.
+func pcbSyncPadNetGate(nl *kicad.SyncNetlist, inv *kicad.SyncInventory) pcbSyncGate {
+	on := nl.OnBoard()
+	sch := map[string]string{}
+	keys := map[string]bool{}
+	for i := range on.Components {
+		c := &on.Components[i]
+		if strings.HasPrefix(c.Ref, "#") {
+			continue
+		}
+		for _, k := range c.Keys() {
+			keys[k] = true
+		}
+	}
+	for _, n := range on.Nets {
+		for _, d := range n.Nodes {
+			if !strings.HasPrefix(d.Ref, "#") {
+				sch[d.Ref+"."+d.Pin] = n.Name
+			}
+		}
+	}
+	board := map[string]string{}
+	var conflicts []string
+	for _, f := range inv.Footprints {
+		if f.BoardOnly || !keys[f.Path] {
+			continue
+		}
+		for _, p := range f.Pads {
+			if p.Number == "" || p.Type == "npth" || p.Net == "" {
+				continue
+			}
+			k := f.Ref + "." + p.Number
+			if prev, ok := board[k]; ok && prev != p.Net {
+				conflicts = append(conflicts, fmt.Sprintf("%s: pads numbered %s are on %s and %s", f.Ref, p.Number, prev, p.Net))
+				continue
+			}
+			board[k] = p.Net
+		}
+	}
+	g := padNetDiffGate(sch, board, "staged board vs schematic netlist", "")
+	st := gate.FromBool(g.Pass && len(conflicts) == 0)
+	return pcbSyncGate{Name: "pad-net", Status: st, Detail: g.Detail, Items: append(g.Items, conflicts...), Info: g.Info}
+}
