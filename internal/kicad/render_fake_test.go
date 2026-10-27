@@ -1,6 +1,7 @@
 package kicad
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -680,12 +681,15 @@ func fakePCBRender(args []string, mode string) int {
 	case "png-diag":
 		fmt.Println("Error: footprint library 'Resistor_THT' not found")
 	}
-	f, err := os.Create(flag("-o"))
-	if err != nil {
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, image.NewGray(image.Rect(0, 0, w, h))); err != nil {
 		return 1
 	}
-	defer f.Close()
-	if err := png.Encode(f, image.NewGray(image.Rect(0, 0, w, h))); err != nil {
+	b := buf.Bytes()
+	if mode == "png-truncated" { // a valid header over cut-off image data
+		b = b[:len(b)*2/3]
+	}
+	if err := os.WriteFile(flag("-o"), b, 0o644); err != nil {
 		return 1
 	}
 	return 0
@@ -694,7 +698,7 @@ func fakePCBRender(args []string, mode string) int {
 // The 3D raster keeps diagnostic blocking except for optional 3D models,
 // and its PNG must decode at the requested size.
 func TestRenderFakePNG(t *testing.T) {
-	for _, c := range []struct{ mode, want string }{{"", ""}, {"png-wrong", "RENDER_BAD_PNG"}, {"png-small", "RENDER_BAD_PNG"}, {"png-diag", "RENDER_KICAD_DIAGNOSTIC"}} {
+	for _, c := range []struct{ mode, want string }{{"", ""}, {"png-wrong", "RENDER_BAD_PNG"}, {"png-small", "RENDER_BAD_PNG"}, {"png-truncated", "RENDER_BAD_PNG"}, {"png-diag", "RENDER_KICAD_DIAGNOSTIC"}} {
 		t.Run("mode="+c.mode, func(t *testing.T) {
 			fakeRenderCLIEnv(t, c.mode)
 			ws := t.TempDir()

@@ -759,15 +759,20 @@ func renderPCB(cli, pcb string, o RenderOptions, layers []string, stage, from, t
 	}
 	// kicad-cli 10 trims a few pixels off the requested size (measured:
 	// 640x400 -> 616x368, 1600x900 -> 1568x872), so the PNG must decode,
-	// be non-empty and fall within a small margin below the request.
-	cfg, err := png.DecodeConfig(bytes.NewReader(b))
+	// be non-empty and fall within a small margin below the request. The
+	// whole image is decoded: a valid header over truncated data is no PNG.
+	var pw, ph int
+	img, err := png.Decode(bytes.NewReader(b))
+	if err == nil {
+		pw, ph = img.Bounds().Dx(), img.Bounds().Dy()
+	}
 	near := func(got, want int) bool { return got > 0 && got <= want && want-got <= 48 }
-	if err != nil || !near(cfg.Width, w) || !near(cfg.Height, h) {
+	if err != nil || !near(pw, w) || !near(ph, h) {
 		return nil, warns, renderErr("RENDER_BAD_PNG", "check kicad-cli pcb render on this board",
-			"%s: want a PNG of about %dx%d, got %dx%d (%v)", name, w, h, cfg.Width, cfg.Height, err)
+			"%s: want a PNG of about %dx%d, got %dx%d (%v)", name, w, h, pw, ph, err)
 	}
 	sum := sha256.Sum256(b)
-	files = append(files, RenderFile{File: name, Kind: "pcb-3d", SHA256: hex.EncodeToString(sum[:]), Bytes: len(b), Width: cfg.Width, Height: cfg.Height})
+	files = append(files, RenderFile{File: name, Kind: "pcb-3d", SHA256: hex.EncodeToString(sum[:]), Bytes: len(b), Width: pw, Height: ph})
 	warns = append(warns, "png: 3D raytrace preview, not bit-reproducible; --compare ignores it")
 	return files, warns, nil
 }
