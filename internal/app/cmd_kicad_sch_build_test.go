@@ -1141,6 +1141,51 @@ func TestSbPaginateCountsPwrFlagRow(t *testing.T) {
 	}
 }
 
+// A wide (CJK) title is drawn about twice as wide per glyph as ASCII, so it
+// must widen the box twice as much (Kimi review).
+func TestSbFitTitleCountsWideGlyphs(t *testing.T) {
+	narrow := kicad.Box{MaxY: 50}
+	ascii, cjk := sbFitTitle(narrow, "abcdefghijkl"), sbFitTitle(narrow, "电源去耦电容电源去耦电容")
+	if got, want := cjk.MaxX, ascii.MaxX+1.2*12; ascii.MaxX <= 0 || got < want-1e-9 {
+		t.Fatalf("CJK title box %.2f mm wide, want at least %.2f", got, want)
+	}
+}
+
+// A single zone that fits A0 alone but not with the PWR_FLAG row of its
+// undriven rail cannot be fixed by splitting pages: pagination must say so
+// instead of accepting the page silently (Kimi review).
+func TestSbPaginateNotesSingleZoneFlagOverflow(t *testing.T) {
+	d := &sbDesign{
+		Pages:   []sbPage{{ID: "P", Title: "Main"}},
+		Zones:   []sbZone{{ID: "a", Page: "P"}},
+		ByRef:   map[string]*sbRPart{},
+		PinNet:  map[string]string{"C1.1": "VBUS"},
+		NetKind: map[string]string{"VBUS": "power"},
+	}
+	p := &sbRPart{ZoneID: "a", PageID: "P", LPins: []kicad.LibPin{{Number: "1"}}}
+	p.Ref = "C1"
+	d.Parts = append(d.Parts, p)
+	d.ByRef[p.Ref] = p
+	d.Nets = []sbNet{{Name: "VBUS", Pins: []string{"C1.1"}}}
+	d.recomputeNetPages()
+	var layouts map[string]*sbZoneLayout
+	for h := 700.0; h < 841; h += 2 {
+		l := map[string]*sbZoneLayout{"a": {Box: kicad.Box{MaxX: 1000, MaxY: h}}}
+		if sbPackFresh([]string{"a"}, l, 0) != nil && sbPackFresh([]string{"a"}, l, sbFlagRowW([]string{"VBUS"})) == nil {
+			layouts = l
+			break
+		}
+	}
+	if layouts == nil {
+		t.Fatal("fixture: no zone height fits A0 alone but not with the flag row")
+	}
+	b := newSbPageBases(d, []*sbZoneIn{{Zone: d.Zones[0]}}, "root.kicad_sch")
+	_, notes := sbPaginate(d, layouts, b)
+	if !strings.Contains(strings.Join(notes, "\n"), "PWR_FLAG row") {
+		t.Fatalf("notes %q do not report the zone-plus-flags overflow", notes)
+	}
+}
+
 // Three pages sharing one signal net: every root occurrence (labelled stub
 // or direct wire between same-row neighbours) must join one net — KiCad's
 // netlist is the judge (Codex review: an unlabelled direct wire was an

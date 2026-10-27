@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
 )
@@ -704,10 +705,18 @@ func zoneBox(zl *sbZoneLayout, zi *sbZoneIn, syms map[string]kicad.SceneSymbol, 
 
 // sbFitTitle widens a zone box so its frame holds the zone title: the
 // 1.27 mm inset plus the text at 1.778 mm, estimated no narrower than
-// kicad sch-fit / sch-check measure it (1 mm per character + 1 mm).
+// kicad sch-fit / sch-check measure it (1 mm per character + 1 mm). A
+// wide (CJK) glyph is drawn about twice as wide, so it counts double.
 func sbFitTitle(b kicad.Box, title string) kicad.Box {
 	if title != "" {
-		b.MaxX = math.Max(b.MaxX, b.MinX-2*sbZoneMargin+1.27+2+1.2*float64(len([]rune(title))))
+		n := 0
+		for _, r := range title {
+			n++
+			if r >= 0x1100 && unicode.In(r, unicode.Han, unicode.Hangul, unicode.Hiragana, unicode.Katakana) || r >= 0xFF00 && r <= 0xFFEF {
+				n++
+			}
+		}
+		b.MaxX = math.Max(b.MaxX, b.MinX-2*sbZoneMargin+1.27+2+1.2*float64(n))
 	}
 	return b
 }

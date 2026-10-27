@@ -230,6 +230,7 @@ func sbPaginate(d *sbDesign, layouts map[string]*sbZoneLayout, b *sbPageBases) (
 			}
 		}
 		var groups [][]string
+		var groupFlagW []float64 // each group's PWR_FLAG row, taken before it closes
 		var cur []string
 		for _, id := range ids {
 			// cur is group len(groups). A zone an earlier round put on a later
@@ -242,12 +243,14 @@ func sbPaginate(d *sbDesign, layouts map[string]*sbZoneLayout, b *sbPageBases) (
 				continue
 			}
 			groups = append(groups, cur)
+			groupFlagW = append(groupFlagW, flagW(cur))
 			closeGroup(cur)
 			cur = []string{id}
 			b.frag[id] = len(groups)
 		}
 		if len(cur) > 0 || len(groups) == 0 {
 			groups = append(groups, cur)
+			groupFlagW = append(groupFlagW, flagW(cur))
 			closeGroup(cur)
 		}
 		for gi, g := range groups {
@@ -267,6 +270,10 @@ func sbPaginate(d *sbDesign, layouts map[string]*sbZoneLayout, b *sbPageBases) (
 			}
 			if len(g) == 1 && sbPackFresh(g, layouts, 0) == nil {
 				notes = append(notes, fmt.Sprintf("page %s: zone %s alone does not fit A0 — split the zone in the spec (or try --auto-split)", np.ID, g[0]))
+			} else if len(g) == 1 && groupFlagW[gi] > 0 && sbPackFresh(g, layouts, groupFlagW[gi]) == nil {
+				// the zone fits, but not with the PWR_FLAG row its undriven
+				// rails need under it: no page split can fix that
+				notes = append(notes, fmt.Sprintf("page %s: zone %s does not fit A0 together with its PWR_FLAG row — split the zone in the spec (or drive those rails)", np.ID, g[0]))
 			}
 		}
 		if len(groups) > 1 {
