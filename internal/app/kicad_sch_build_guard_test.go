@@ -699,32 +699,52 @@ func TestSbGuardChecksUnclassifiedTargets(t *testing.T) {
 	}
 }
 
-// erc.json (and the other reports) go through the same guard as the sheets.
-func TestSchEditRefusesEditedReport(t *testing.T) {
+// sbCheckRefreshed: a report replaced anyway was checkpointed and named in a warning.
+func sbCheckRefreshed(t *testing.T, rep *sbReport, out, rel, was string) {
+	t.Helper()
+	if rep.Error != nil || !rep.OK || rep.External == nil || !sbContains(rep.External.Refreshed, rel) || rep.External.Checkpoint == 0 {
+		t.Fatalf("%s must be checkpointed and replaced: %+v %+v", rel, rep.Error, rep.External)
+	}
+	if !strings.Contains(strings.Join(rep.Warnings, "\n"), "WARNING: report(s) "+rel) {
+		t.Fatalf("no warning naming %s: %v", rel, rep.Warnings)
+	}
+	cp := filepath.Join(sbCheckpointDir(out), strconv.Itoa(rep.External.Checkpoint), filepath.FromSlash(rel))
+	if b, _ := os.ReadFile(cp); string(b) != was {
+		t.Fatalf("checkpoint %d lacks the previous %s", rep.External.Checkpoint, rel)
+	}
+	if b, _ := os.ReadFile(filepath.Join(out, filepath.FromSlash(rel))); string(b) == was {
+		t.Fatalf("%s was not regenerated", rel)
+	}
+}
+
+// An edited erc.json (a report, not design data) is checkpointed, named in a
+// warning and regenerated — not refused.
+func TestSchEditRefreshesEditedReport(t *testing.T) {
 	out := sbGuardBuild(t)
 	if st := mustSbState(t, out); !sbContains(st.Reports, "erc.json") || st.Manifest["erc.json"] == "" {
 		t.Fatalf("erc.json not recorded: %+v", st.Reports)
 	}
-	erc := filepath.Join(out, "erc.json")
-	if err := os.WriteFile(erc, []byte(`{"note":"my annotated ERC"}`), 0o644); err != nil {
+	const note = `{"note":"my annotated ERC"}`
+	if err := os.WriteFile(filepath.Join(out, "erc.json"), []byte(note), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	rep, err := runSchEdit(sbOptions{OutDir: out, NoIntent: true, PlannerBudget: 20000}, sbGuardOps)
-	if err != nil || rep.Error == nil || rep.Error.Code != "EXTERNAL_EDIT" || strings.Join(rep.External.Changed, ",") != "erc.json" {
-		t.Fatalf("edited erc.json: %v %+v %+v", err, rep.Error, rep.External)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if b, _ := os.ReadFile(erc); string(b) != `{"note":"my annotated ERC"}` {
-		t.Fatal("refused edit replaced erc.json")
-	}
-	rep, err = runSchEdit(sbOptions{OutDir: out, NoIntent: true, PlannerBudget: 20000, DiscardExternal: true}, sbGuardOps)
-	if err != nil || !rep.OK || rep.External == nil {
-		t.Fatalf("override: %v %+v", err, rep.Error)
-	}
-	if b, _ := os.ReadFile(filepath.Join(sbCheckpointDir(out), strconv.Itoa(rep.External.Checkpoint), "erc.json")); string(b) != `{"note":"my annotated ERC"}` {
-		t.Fatal("pre-discard checkpoint lacks the edited erc.json")
-	}
+	sbCheckRefreshed(t, rep, out, "erc.json", note)
 	if ents, _ := filepath.Glob(filepath.Join(sbMetaDir(out), "publish-backup-*")); len(ents) != 0 {
 		t.Fatalf("backup left after a successful commit: %v", ents)
+	}
+	// a design file edited together with a report is still refused
+	sbGuardAppend(t, filepath.Join(out, "p.kicad_sch"))
+	_ = os.WriteFile(filepath.Join(out, "erc.json"), []byte(note), 0o644)
+	rep, _ = runSchEdit(sbOptions{OutDir: out, NoIntent: true, PlannerBudget: 20000}, sbGuardOps)
+	if rep.Error == nil || rep.Error.Code != "EXTERNAL_EDIT" || strings.Join(rep.External.Changed, ",") != "p.kicad_sch" {
+		t.Fatalf("edited sheet + report: %+v %+v", rep.Error, rep.External)
+	}
+	if b, _ := os.ReadFile(filepath.Join(out, "erc.json")); string(b) != note {
+		t.Fatal("a refused run replaced the report")
 	}
 }
 
@@ -861,7 +881,8 @@ func TestSchEditRaceAfterEarlierInstall(t *testing.T) {
 }
 
 // A report kept by a build that does not write it keeps its hash: build
-// --render, rebuild without, annotate the SVG, build --render → refused.
+// --render, rebuild without, annotate the SVG, build --render → the SVG is
+// checkpointed, named in a warning and regenerated.
 func TestSchBuildRetainedReportKeepsHash(t *testing.T) {
 	sbNeedKicad(t)
 	out := filepath.Join(t.TempDir(), "p")
@@ -873,25 +894,23 @@ func TestSchBuildRetainedReportKeepsHash(t *testing.T) {
 			t.Fatalf("build %d: %v %+v", i, err, rep.Error)
 		}
 	}
-	svg := filepath.Join(out, "render", "p.svg")
 	if st := mustSbState(t, out); st.Manifest["render/p.svg"] == "" {
 		t.Fatalf("retained SVG lost its hash: %v", st.Manifest)
 	}
-	if err := os.WriteFile(svg, []byte("<svg><!-- my notes --></svg>"), 0o644); err != nil {
+	const notes = "<svg><!-- my notes --></svg>"
+	if err := os.WriteFile(filepath.Join(out, "render", "p.svg"), []byte(notes), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	rep, err := runSchBuild(sbGuardSpec(), ro, nil)
-	if err != nil || rep.Error == nil || rep.Error.Code != "EXTERNAL_EDIT" || strings.Join(rep.External.Changed, ",") != "render/p.svg" {
-		t.Fatalf("annotated SVG: %v %+v %+v", err, rep.Error, rep.External)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if b, _ := os.ReadFile(svg); string(b) != "<svg><!-- my notes --></svg>" {
-		t.Fatal("annotated SVG overwritten")
-	}
+	sbCheckRefreshed(t, rep, out, "render/p.svg", notes)
 }
 
-// A report of a build that recorded no hashes for reports: replacing it is
-// refused (an edit cannot be ruled out); the override checkpoints it.
-func TestSchBuildLegacyReportRefused(t *testing.T) {
+// A report of a build that recorded no hashes for reports (pre-v0.10.2):
+// checkpointed, named in a warning and regenerated, not refused.
+func TestSchBuildLegacyReportRefreshed(t *testing.T) {
 	out := sbGuardBuild(t)
 	statePath := filepath.Join(sbMetaDir(out), "state.json")
 	var raw map[string]any
@@ -905,22 +924,13 @@ func TestSchBuildLegacyReportRefused(t *testing.T) {
 	if err := writeJSONFile(statePath, raw); err != nil {
 		t.Fatal(err)
 	}
-	erc := filepath.Join(out, "erc.json")
-	_ = os.WriteFile(erc, []byte(`{"annotated":true}`), 0o644)
+	const note = `{"annotated":true}`
+	_ = os.WriteFile(filepath.Join(out, "erc.json"), []byte(note), 0o644)
 	rep, err := runSchEdit(sbOptions{OutDir: out, NoIntent: true, PlannerBudget: 20000}, sbGuardOps)
-	if err != nil || rep.Error == nil || rep.Error.Code != "EXTERNAL_EDIT" || strings.Join(rep.External.Unrecorded, ",") != "erc.json" {
-		t.Fatalf("legacy report: %v %+v %+v", err, rep.Error, rep.External)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if b, _ := os.ReadFile(erc); string(b) != `{"annotated":true}` {
-		t.Fatal("legacy report overwritten")
-	}
-	rep, err = runSchEdit(sbOptions{OutDir: out, NoIntent: true, PlannerBudget: 20000, DiscardExternal: true}, sbGuardOps)
-	if err != nil || !rep.OK || rep.External == nil {
-		t.Fatalf("override: %v %+v", err, rep.Error)
-	}
-	if b, _ := os.ReadFile(filepath.Join(sbCheckpointDir(out), strconv.Itoa(rep.External.Checkpoint), "erc.json")); string(b) != `{"annotated":true}` {
-		t.Fatal("checkpoint lacks the legacy report")
-	}
+	sbCheckRefreshed(t, rep, out, "erc.json", note)
 }
 
 // Windows/macOS: renaming the project P → p rewrites the same files; it is

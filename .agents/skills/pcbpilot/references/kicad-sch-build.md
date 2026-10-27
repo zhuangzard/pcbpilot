@@ -54,6 +54,9 @@ pcbpilot kicad sch-checkpoint list --project build/                     # 回退
   `.kicad_prl`、`_autosave-*`、`*-bak`、`*-backups/`、`.history/` 等 KiCad 附属文件不算改动；kicad-cli 不改 `.kicad_pro`。
 - 只有 `.kicad_pro` 变了：KiCad 保存工程（如保存 PCB）时会把全部默认设置写进去。没在 KiCad 改工程设置（网络类、
   文本变量、板设置）时 `--discard-external-edits` 是安全的。
+- 报告文件（`erc.json`、`connectivity.json`、`values.json`、`intent-spec.json`、`intent.json/md`、`render/*.svg`）
+  不是设计数据：被改过或旧工程没记录过时不拒绝，先存进 checkpoint，报告 `warnings` 里 `WARNING: report(s) …`
+  点名并给出 checkpoint 目录，再重新生成。要找回就从那个目录手工拷回（不要整体 restore 那个 checkpoint）。
 
 delta 例子（只写意图，脚名即可）：
 

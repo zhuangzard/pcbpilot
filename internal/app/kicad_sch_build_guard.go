@@ -62,7 +62,10 @@ type sbExternalEdits struct {
 	// content was never recorded (reports of older builds): an edit cannot
 	// be ruled out.
 	Unrecorded []string `json:"unrecorded,omitempty"`
-	Locks      []string `json:"kicadLocks,omitempty"`
+	// Refreshed: reports that were edited or never recorded and are
+	// replaced anyway (checkpointed first, with a warning)
+	Refreshed []string `json:"refreshedReports,omitempty"`
+	Locks     []string `json:"kicadLocks,omitempty"`
 	// Checkpoint holds every project file as it was before
 	// --discard-external-edits overwrote them.
 	Checkpoint int `json:"checkpoint,omitempty"`
@@ -586,6 +589,23 @@ func (g *sbGuard) beforeCommit(stage string, files, deletes []string, rep *sbRep
 	g.base = base
 	x := sbDiff(base, g.basis, touch)
 	x.Locks = nil
+	// reports (erc.json, connectivity/intent, render/*.svg) are pcbpilot's
+	// outputs, not design data: an edited or never-recorded one is
+	// checkpointed and replaced with a warning, not refused
+	var refresh []string
+	split := func(l []string) []string {
+		var keep []string
+		for _, f := range l {
+			if sbIsReport(f) {
+				refresh = append(refresh, f)
+			} else {
+				keep = append(keep, f)
+			}
+		}
+		return keep
+	}
+	x.Changed, x.Unrecorded = split(x.Changed), split(x.Unrecorded)
+	sort.Strings(refresh)
 	if x.any() {
 		rep.External = x
 		if !g.o.DiscardExternal {
@@ -599,6 +619,23 @@ func (g *sbGuard) beforeCommit(stage string, files, deletes []string, rep *sbRep
 		x.Checkpoint = n
 		rep.Warnings = append(rep.Warnings, fmt.Sprintf("--discard-external-edits: overwriting edits made outside pcbpilot (%s); changed, removed and overwritten files are rewritten from the spec, added files stay unless the build writes the same name. Every project file before this run is checkpoint %d: pcbpilot kicad sch-checkpoint restore %d --project %s",
 			x.summary(), n, n, g.out))
+	}
+	if len(refresh) > 0 {
+		x.Refreshed = refresh
+		rep.External = x
+		n := x.Checkpoint // the discard checkpoint already holds them
+		if n == 0 {
+			var err error
+			if n, err = saveSbCheckpoint(g.out, refresh, "before-report-refresh"); err != nil {
+				return nil, &sbFailure{Code: "CHECKPOINT_FAILED", Message: "checkpoint before replacing reports: " + err.Error(),
+					Fix: "nothing was written; free disk space or fix permissions on " + sbCheckpointDir(g.out) + " and re-run"}
+			}
+			x.Checkpoint = n
+		}
+		// copy them back by hand: restoring this checkpoint would also roll
+		// the project back to the state before this build
+		rep.Warnings = append(rep.Warnings, fmt.Sprintf("WARNING: report(s) %s were edited or never recorded; they are regenerated and the previous copies are kept in checkpoint %d (%s)",
+			strings.Join(refresh, ", "), n, filepath.Join(sbCheckpointDir(g.out), strconv.Itoa(n))))
 	}
 	// the manifest comes from the staged bytes: a save after publication is
 	// an edit the next run sees
