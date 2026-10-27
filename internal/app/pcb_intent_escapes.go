@@ -4,7 +4,7 @@ package app
 //
 // Every intent net class is in fastroute's --no-neckdown-classes, so a
 // current-carrying net is routed at its full class width everywhere. A
-// full-width trace cannot leave a fine-pitch pad (PicoRick: RP2040 QFN-56,
+// full-width trace cannot leave a fine-pitch pad (Board-A: RP2040 QFN-56,
 // 0.4 mm pitch, +3V3 / +1V1 at 15.75 mil: 11 connections blocked). Instead
 // of reopening neck-down, each such pad gets a short fixed escape at the
 // widest width the pitch allows (never below widthMil.min); the router

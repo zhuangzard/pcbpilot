@@ -2,7 +2,7 @@ package app
 
 // pcb_widen.go — `pcb widen`: widen the tracks of chosen nets (e.g. valve
 // drain nets) up to a maximum width wherever the clearance to other-net copper
-// allows. Ported from the Gas Module V5 widen_drv.py, which was used after a
+// allows. Ported from the Board-B V5 widen_drv.py, which was used after a
 // fastroute route; the router keeps every net at its class width, and
 // high-current nets want more copper where there is room.
 
@@ -50,7 +50,7 @@ func planWiden(tracks []specctra.Track, vias []widenVia, pads []boardPad, nets m
 
 // planWidenToIntent grows every track below its net's intent width (outer /
 // inner by layer) towards it, as far as the clearance allows — a fastroute
-// neck-down left mid-run (Gas Module v11 A: GND at 10.82 mil, 84 mil from
+// neck-down left mid-run (Board-B v11 A: GND at 10.82 mil, 84 mil from
 // any pad). Tracks it cannot bring to full width stay listed by the gate.
 func planWidenToIntent(tracks []specctra.Track, vias []widenVia, pads []boardPad, reqs map[string]specctra.NetRequirement, clearanceMil float64) []widenOp {
 	return planWidenTo(tracks, vias, pads, func(t specctra.Track) float64 {
@@ -187,7 +187,7 @@ func widenToIntent(cfg *appConfig, window string, in *designIntent, stderr io.Wr
 // widenLive reads the board (after save + reload), plans with plan using the
 // board clearance plus specctra.ClearanceMarginMil (EasyEDA's DRC rounds a
 // few hundredths tighter: a widened drain track measured 5.93 < 6.0 mil on
-// Gas Module v11), and replaces the tracks.
+// Board-B v11), and replaces the tracks.
 func widenLive(cfg *appConfig, window string, plan func([]specctra.Track, []widenVia, []boardPad, float64) []widenOp, what string, clearanceMil float64, dryRun bool, stderr io.Writer) ([]widenOp, error) {
 	if !dryRun {
 		// The ids below are deleted: read them from a reloaded board.
@@ -222,7 +222,7 @@ func widenLive(cfg *appConfig, window string, plan func([]specctra.Track, []wide
 		pads = append(pads, c.Pads...)
 	}
 	// Never widen copper on a layer the board does not have (importer
-	// leftovers on 21/22, Gas Module v9): it is reconciled, not kept.
+	// leftovers on 21/22, Board-B v9): it is reconciled, not kept.
 	valid := map[int]bool{}
 	for _, l := range specctra.CopperLayerIDs(max(snap.CopperLayers, 2)) {
 		valid[l] = true
@@ -250,7 +250,7 @@ func widenLive(cfg *appConfig, window string, plan func([]specctra.Track, []wide
 		return ops, fmt.Errorf("widen: %d track(s) could not be recreated: %v", len(failures), failures)
 	}
 	// DRC guard: the planner's pad model (axis-aligned W×H) is coarser than
-	// EasyEDA's (rotated, polygon, rounded corners) — Gas Module v12 A: two
+	// EasyEDA's (rotated, polygon, rounded corners) — Board-B v12 A: two
 	// widened GND tracks measured 5.84 < 6.0 mil to an SMD pad. Any widened
 	// track in a clearance violation steps back half way, then to its old
 	// width, with native DRC after each step.
@@ -260,7 +260,7 @@ func widenLive(cfg *appConfig, window string, plan func([]specctra.Track, []wide
 		}
 		// Pours must flow around the wider tracks before DRC judges them:
 		// unrebuilt pours made 43 of 46 widened drain tracks look like
-		// clearance violations and step back (Gas Module v13 A).
+		// clearance violations and step back (Board-B v13 A).
 		if _, err := requestActionTimed(cfg, "pcb.pour.rebuild", window, map[string]any{}, 20*time.Minute); err != nil {
 			return ops, fmt.Errorf("pour rebuild before the widen DRC check: %w", err)
 		}
@@ -390,7 +390,7 @@ const simOpenHostConnected = "SIM/KICAD MISMATCH"
 // irOverBudget returns net → drop/budget for the post-layout sim's IR-drop
 // failures when the other failing gates are at most intent-widths (nil
 // otherwise: widening cannot fix a DRC or connectivity failure, and it helps
-// a width shortfall too — Gas Module V5 B v20 skipped the closure because a
+// a width shortfall too — Board-B V5 B v20 skipped the closure because a
 // +12V width failure sat next to the drop failures).
 func irOverBudget(summary map[string]any) map[string]float64 {
 	gates, _ := summary["gates"].([]gateResult)

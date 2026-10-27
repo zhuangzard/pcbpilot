@@ -387,9 +387,16 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 	// zone layouts (reuse unchanged ones)
 	zis := d.zoneInputs()
 	reuse := map[string]*sbZoneLayout{}
+	zoneTitle := map[string]string{}
+	for _, z := range d.Zones {
+		zoneTitle[z.ID] = z.Title
+	}
 	for id, zs := range st.Zones {
 		if zs.Layout != nil {
 			l := *zs.Layout
+			// a drawing saved before zone boxes held their title
+			// (sbFitTitle; the title is not part of the layout hash)
+			l.Box = sbFitTitle(l.Box, zoneTitle[id])
 			if len(ec.renameMap()) > 0 {
 				l.Markers = append([]sbMarker(nil), l.Markers...)
 				for i := range l.Markers {
@@ -442,6 +449,7 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 	// positions per page
 	trans := map[string]kicad.Pt{}
 	moved := map[string]bool{}
+	flagPages := d.sbFlagPages()
 	for _, pg := range d.Pages {
 		var ids []string
 		keep := map[string]kicad.Pt{}
@@ -458,7 +466,7 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 				keep[zi.Zone.ID] = kicad.Pt{X: sbSnap(at.X + sbZoneMargin - b.MinX), Y: sbSnap(at.Y + sbZoneMargin + sbZoneTitle - b.MinY)}
 			}
 		}
-		for id, t := range packZones(ids, layouts, keep) {
+		for id, t := range packZones(ids, layouts, keep, sbFlagRowW(flagPages[pg.ID])) {
 			trans[id] = t
 			if k, ok := keep[id]; ok && k != t {
 				moved[id] = true
@@ -899,26 +907,7 @@ func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layou
 		return os.WriteFile(p, data, 0o644)
 	}
 	// power nets needing a PWR_FLAG: no power_out pin on the net
-	driven := map[string]bool{}
-	for _, p := range d.Parts {
-		for _, num := range p.PowerPins {
-			if n, ok := d.PinNet[sbPinKey(p.Ref, num)]; ok {
-				driven[n] = true
-			}
-		}
-	}
-	flagPage := map[string]string{}
-	for _, n := range d.Nets {
-		k := d.NetKind[n.Name]
-		if (k == "power" || k == "ground") && !driven[n.Name] {
-			for _, pg := range d.Pages {
-				if d.NetPages[n.Name][pg.ID] {
-					flagPage[n.Name] = pg.ID
-					break
-				}
-			}
-		}
-	}
+	flagPages := d.sbFlagPages()
 	pwr, flg := 1, 1
 	powerSyms := map[string]string{}
 	pageNo := 2
@@ -958,13 +947,7 @@ func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layou
 		e.Project, e.InstancePath = name, inst
 		e.SetPowerRefNext(pwr)
 		e.SetFlagFloor(flg)
-		var flagNets []string
-		for n, p := range flagPage {
-			if p == pg.ID {
-				flagNets = append(flagNets, n)
-			}
-		}
-		sort.Strings(flagNets)
+		flagNets := flagPages[pg.ID]
 		if err := renderSbPage(e, d, st, pg, zis, layouts, trans, flagNets); err != nil {
 			return nil, nil, fmt.Errorf("page %s: %w", pg.ID, err)
 		}
@@ -1390,7 +1373,7 @@ func renderSbPage(e *kicad.SchEditor, d *sbDesign, st *sbState, pg sbPage, zis [
 	x, y := sbPageOrigin+5.08, sbSnap(bottom+12.7)
 	for i, n := range flagNets {
 		if i == 0 {
-			e.AddText("PWR_FLAG (ERC: power source of each rail)", kicad.Pt{X: sbPageOrigin, Y: y - 7.62}, 0, 1.27)
+			e.AddText(sbFlagCaption, kicad.Pt{X: sbPageOrigin, Y: y - 7.62}, 0, 1.27)
 		}
 		p := kicad.Pt{X: sbSnap(x), Y: y}
 		ground := d.NetKind[n] == "ground"

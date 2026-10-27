@@ -3,7 +3,7 @@ package app
 // pcb_fastroute_escapes.go — automatic inward escapes for ground pins that
 // fastroute reports as blocked. A GND pin between fine-pitch signal pins
 // (TQFP 0.5 mm) often has no way out: the neighbours' escapes fence it in.
-// The manual fix on Gas Module V5 was a fixed stub from the pad centre into
+// The manual fix on Board-B V5 was a fixed stub from the pad centre into
 // the part body, ending in a via down to the ground layers; the router then
 // treats the via as the pin. This plans those stubs from the router report.
 

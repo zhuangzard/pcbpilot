@@ -275,7 +275,7 @@ pcbpilot kicad pcb-sync ... --in-place --apply-plan plan.json --revision <rev>
 ## 布线（`kicad route`）——与 `pcb auto route` + `pcb gate` 同序同算
 
 ```bash
-pcbpilot kicad route --pcb GasV5_A.kicad_pcb --intent intent.json --sim sim.json \
+pcbpilot kicad route --pcb board-b-v5a.kicad_pcb --intent intent.json --sim sim.json \
     --requirements 03_Requirement/REQUIREMENTS.md --requirements 00_Project_Scope/SCOPE.md \
     [--sch board.kicad_sch] [--rip-up] [--clearance-mil 5.98 --track-mil 10 --via-dia-mil 24 --via-drill-mil 12 --edge-mil 30] \
     [--project-config pcbpilot.project.json] --out-dir route/
@@ -305,8 +305,8 @@ pcbpilot kicad route --pcb GasV5_A.kicad_pcb --intent intent.json --sim sim.json
      绝缘对两侧每个网的 DSN 间距抬到该对的电气间隙（fastroute 每类只有一个间距）。危险域的板边距离
      （`EdgeFromIntent.ByDomain`）写成 `(constraint edge_clearance (min …))`。
    - DSN：原生 `ExportSpecctraDSN`（um），再：复合类名的逗号改 `+`（`--no-neckdown-classes` 用逗号分隔）、加内层 layer_rule、
-     所有间距 +0.2 mil（KiCad DRC 在 PicoRick 上量出 0.1484 < 0.1501 mm）、**板边禁布带**（边框内侧与每个 Edge.Cuts 挖空外侧，
-     外层/内层各自距离，且不低于板规则；安装孔禁布圆按外层距离放大）——KiCad 导出器不带铜到板边规则（Gas V5 A 曾有内层线
+     所有间距 +0.2 mil（KiCad DRC 在 Board-A 上量出 0.1484 < 0.1501 mm）、**板边禁布带**（边框内侧与每个 Edge.Cuts 挖空外侧，
+     外层/内层各自距离，且不低于板规则；安装孔禁布圆按外层距离放大）——KiCad 导出器不带铜到板边规则（Board-B V5 A 曾有内层线
      离边 13 mil）。**板边连接器开窗**：板边安装件（封装框角点在板框外或距板框 < 1 mil，与 `copper-to-edge` 门禁同一判据）
      的近边焊盘外扩（间距 + 2 mil）后，在禁布带上开全深度窗口（焊盘 + 向内直出的逃线），否则 USB/端子焊盘布不通；
      `summary.edgeExemptPads` 列出，其余铜照常禁布，门禁照常判（这些焊盘不低于工厂下限时为 WARN）。逐网复查类线宽/内层线宽/间距，不足即停。**不做** EasyEDA 的 dsn-fix / ses-repair / reconcile。
@@ -314,7 +314,7 @@ pcbpilot kicad route --pcb GasV5_A.kicad_pcb --intent intent.json --sim sim.json
    或显式路径是目录时（Windows 解压布局 `0.1.14/fastroute-0.1.14-windows-x64/fastroute.exe`）解析到其中、`bin/` 或下一层
    子目录里唯一的可执行文件；找不到或有多个即在启动阶段报错。
 3a. **`--router fastroute|tracemaker|both`**（默认 fastroute）：TraceMaker 是第二个后端（`~/.pcbpilot/tracemaker/current`、
-   `$TRACEMAKER_BIN` 或 `--tracemaker-bin`；`--tracemaker-time` 默认 300 s——它同时决定格点间距，PicoRick 上 ≥300 s 为 0.05 mm
+   `$TRACEMAKER_BIN` 或 `--tracemaker-bin`；`--tracemaker-time` 默认 300 s——它同时决定格点间距，Board-A 上 ≥300 s 为 0.05 mm
    全通 359/359，90–180 s 为 0.1 mm、2 条未布通）。直接读 classed 板（含 `.kicad_pro/.kicad_dru`）写出布好的板，不走 DSN/SES；
    约束由意图生成：有 `widthMil.min` 且小于类宽的网只允许在焊盘处缩到该最小（`min_width_mm`），其余宽于 DSN 下限的网禁止缩细
    （`no_neckdown`），显式差分对带间距/偏斜。`both`：两个后端同时跑，**先「完整 + 无新增 DRC 错误」的胜出并取消另一个**，胜出者仍要过
@@ -322,11 +322,11 @@ pcbpilot kicad route --pcb GasV5_A.kicad_pcb --intent intent.json --sim sim.json
    `summary.routerCandidates` 记录每个后端的未布通数、用时、快检结果、是否过全量门禁。任何门禁、签核都不因后端而减少。
 3. **fastroute**：一条 `runFastroute`（续跑、崩溃单线程重试）。`--multi-start`（默认 4）是 pcbpilot 设置：fastroute 自己
    并行重跑 N−1 个不同种子的第 1 轮网序、按（未布通、冲突、−分数）取最好，pcbpilot 不再叠第二层并行。同一 DSN + 同一参数
-   结果逐字节相同（PicoRick：3 次 `--multi-start=1`、2 次 `--multi-start=4` 的 SES 完全一致）。优化器默认关（`--optimizer`
-   打开，`--optimizer-threshold`）：它的预算等于整个布线阶段（含 multi-start，至少 60 s）——PicoRick `--multi-start=4`
+   结果逐字节相同（Board-A：3 次 `--multi-start=1`、2 次 `--multi-start=4` 的 SES 完全一致）。优化器默认关（`--optimizer`
+   打开，`--optimizer-threshold`）：它的预算等于整个布线阶段（含 multi-start，至少 60 s）——Board-A `--multi-start=4`
    开 299 s / 关 134 s，同为 4 未布通 30 冲突，线长只差 0.1 %、过孔差 1；`--multi-start=1` 为 60 / 55 s、8 未布通。
    `--diagnose` 把未布通分 blocked / congestion：全部 blocked 时不续跑（重布无用），`route-complete` 逐条写
-   「移动器件或加逃线」，`summary.blockedConnections` 列出。`--threads` 缺省 min(核数−1, 8)（PicoRick 8 线程连跑 3 次
+   「移动器件或加逃线」，`summary.blockedConnections` 列出。`--threads` 缺省 min(核数−1, 8)（Board-A 8 线程连跑 3 次
    SES 逐字节相同：14 未布通 / 3469 mm / 156 孔；单线程 13 / 3646 mm / 164 孔；机器高负载时墙钟 204–330 s 对 184 s，
    空闲时首轮约 50 对 112 s）；`--threads 1` 用于跨 fastroute 版本可复现。多线程崩溃自动单线程重跑。
    门禁与签核只读路由器无关的 `routeResult`（router、version、patchSha、args、session|board、unrouted/blocked 连接、
@@ -427,13 +427,13 @@ pcbpilot signoff --run-dir route/ --intent intent.json --sim sim.json --connecti
 ## 计时与提速（`summary.timings`）
 
 `kicad route` 记录每段墙钟：设计评审、规则、输入 DRC、网络类、DSN 导出/准备、fastroute、SES 导入、过孔阵列、加宽、铺铜、丝印、
-每个门禁（DRC、快照、仿真、意图/安全、尾部门禁）、IR 收敛、报告、发布评审、签核。PicoRick（145 件，4 层，rip-up）实测
+每个门禁（DRC、快照、仿真、意图/安全、尾部门禁）、IR 收敛、报告、发布评审、签核。Board-A（145 件，4 层，rip-up）实测
 303 s → 213 s：multi-start=4 改为与主布线**并行的推测运行**（≥2 核，`--parallel-multi-start`，255.7 → 164.7 s）；
 每轮门禁只跑一次 `kicad-cli` DRC（错误进门禁、警告只统计）；丝印轮次与上一轮相同即停止。丝印规划（共用 planSilkTight）
-改为网格索引 + 每标签静态合法位缓存：PicoRick 规划 67 s → 0.9 s、Gas V5 A 88 s → 1.7 s（同一快照离线测，机器负载高），
+改为网格索引 + 每标签静态合法位缓存：Board-A 规划 67 s → 0.9 s、Board-B V5 A 88 s → 1.7 s（同一快照离线测，机器负载高），
 未解决位号 23 → 8、58 → 23。剩余大头是 fastroute 本身。
 
-kicad/pcb-fixes 前后（PicoRick 草稿副本，`--rip-up --no-review`，同一命令；机器负载 15–80，墙钟只作参考）：
+kicad/pcb-fixes 前后（Board-A 草稿副本，`--rip-up --no-review`，同一命令；机器负载 15–80，墙钟只作参考）：
 
 | | 前（de11806d） | 后 |
 |---|---|---|
@@ -460,7 +460,7 @@ fastroute 696 → 91 s。`kicad route` 没有 `--candidates` 候选摆放试布�
 
 ## 验证记录（2026-10-09，KiCad 10.0.7，fastroute 0.1.13）
 
-- **Gas Module V5 A**（转换来的 KiCad 板，203 封装/199 有 LCSC，4 层，无 .kicad_pro，草稿副本）：设计评审**未通过**
+- **Board-B V5 A**（转换来的 KiCad 板，203 封装/199 有 LCSC，4 层，无 .kicad_pro，草稿副本）：设计评审**未通过**
   （三家一致：J2/J8 与 CONNECTOR_PINOUT.md 不符；Codex 另有 R-12 BAT54S 钳位、ADC VD>VA 等），按规则停止布线；
   为验证布线管线另用标注为测试用途的 waiver 跑通：0 → 2 条 fastroute 未布通（1 条由 GND 铺铜接上，1 条 +5V_SENS 真开路，
   KiCad unconnected 1）；KiCad DRC 14 = 13 条输入板原有的 courtyards_overlap（摆放问题）+ 1 unconnected；copper-to-edge、
@@ -469,7 +469,7 @@ fastroute 696 → 91 s。`kicad route` 没有 `--candidates` 候选摆放试布�
   说明书、设计报告生成。单次约 18 min（评审复用时）。`pcbpilot signoff`（以 EasyEDA 原理图连接 pre-connectivity.json 对照）：
   review / parts（199/199 LCSC）/ safety / copper / trace / artifacts 通过，ir 与 continuity 失败
   （Q1–Q5 第 1 脚在板上有网、原理图连接里没有：栅极网络脚号与 JLC 封装不一致，需原理图侧核对）。
-- **PicoRick One revA**（草稿副本，145 件 4 层，rip-up，无 sim/评审）：2 条未布通，见上文计时。
+- **Board-A One revA**（草稿副本，145 件 4 层，rip-up，无 sim/评审）：2 条未布通，见上文计时。
 
 固定回归：固定回归：`PCBPILOT_KICAD_LIVE=1 PCBPILOT_FASTROUTE_LIVE=<fastroute> go test ./internal/app -run TestKicadLive`
 （自带 MIT 小板 `internal/kicad/testdata/tiny.kicad_pcb`，由同目录 `gen_tiny.py` 生成）。

@@ -45,7 +45,7 @@ func TestReadFastrouteReport(t *testing.T) {
 	if err != nil || r.Unrouted != 3 || r.Violations != 2 || r.Fixable != 1 || r.FixableList[0] != "TopLayer at (1833.4, 1143.7) mil: trace GND / pin " {
 		t.Fatalf("got %+v %v", r, err)
 	}
-	// A KiCad DSN is in um: the same report numbers are mm (Gas V5 A:
+	// A KiCad DSN is in um: the same report numbers are mm (Board-B V5 A:
 	// C78.2 at (20.32, -33.336) = board (800, 1312.44) mil).
 	r, err = readFastrouteReport(p, specctra.ReportMilPerUnit("(pcb x (parser) (resolution um 10) (unit um)"))
 	if err != nil || r.FixableList[0] != "TopLayer at (72.2, 45.0) mil: trace GND / pin " {
@@ -343,7 +343,7 @@ func TestDsnFixFlagsEscapes(t *testing.T) {
 	if len(opt.Escapes) != 1 || !opt.Escapes[0].Via || opt.Escapes[0].Path[1][0] != 4710.65 {
 		t.Fatalf("escapes = %+v", opt.Escapes)
 	}
-	// Short form recorded on the Gas Module v6A3 run.
+	// Short form recorded on the Board-B v6A3 run.
 	if err := os.WriteFile(p, []byte(`[[[2399.6, 1427.2], [2334.15, 1427.2]], [[1537.4, 1801.2], [1602.85, 1801.2]]]`), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -428,7 +428,7 @@ func TestPrepareDSNGate(t *testing.T) {
 }
 
 // fastroute 0.1.7 can panic in its parallel autorouter after writing a
-// checkpoint session but no report (Gas Module v9). The run must be recorded
+// checkpoint session but no report (Board-B v9). The run must be recorded
 // as crashed with unknown counts and repeated once single-threaded.
 func TestRunFastrouteCrashRetry(t *testing.T) {
 	skipOnWindows(t)

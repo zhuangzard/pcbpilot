@@ -13,7 +13,7 @@ import (
 	"github.com/zhuangzard/pcbpilot/pkg/pcbroute/rules"
 )
 
-// PLAN.md M6 micro-bench on the Gas Module V5 design (commercial, never
+// PLAN.md M6 micro-bench on the Board-B V5 design (commercial, never
 // committed): PCBPILOT_BENCH_DSN=<file.dsn>. Builds the track planes of every
 // layer and every inflation key (≤ 300 ms total), then inserts single routed
 // tracks into a built plane (≤ 50 µs median).

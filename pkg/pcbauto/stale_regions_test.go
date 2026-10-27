@@ -2,7 +2,7 @@ package pcbauto
 
 import "testing"
 
-// Regions recorded on Gas Module V5 B before the v8 run (board copied from a
+// Regions recorded on Board-B V5 B before the v8 run (board copied from a
 // 150×110 board, new outline 100×80 = 3937×3150 mil).
 func TestStaleBoardRegions(t *testing.T) {
 	raw := []byte(`{"copper":{"regions":[

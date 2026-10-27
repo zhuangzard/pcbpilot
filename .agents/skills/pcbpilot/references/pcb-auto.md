@@ -371,7 +371,7 @@ pcbpilot pcb auto route --playbook out/playbook.json --out-dir out/live --projec
   pad-net-diff、intent-rules、intent-widths、intent-lengths、copper-to-edge、isolation、via-current、post-layout-sim、
   route-complete、silkscreen、board-manual、design-report、signoff）缺任何一个即失败。安全检查与 KiCad 一样拆成
   copper-to-edge / isolation / via-current 三个门（原 `pcb-check-intent`）。任何门不过，命令非零。
-  线宽门只按电流，压降还取决于长度：Gas Module V5 B v17 的 SV1_DRV 0.34 A 走内层 1551 mil × 10 mil，压降 57 mV（预算 30）。
+  线宽门只按电流，压降还取决于长度：Board-B V5 B v17 的 SV1_DRV 0.34 A 走内层 1551 mil × 10 mil，压降 57 mV（预算 30）。
 - 会话对账：一段在同层同网铜（走线圆头胶囊、过孔圆盘）覆盖其 90 % 宽度全长时视为在（v17：导入丢了夹在 2.2 mil 缝里的
   1.1 mil GND 短段；v18：EasyEDA 把 12.5 mil 宽 40 mil 的 SV1_DRV 短段并进了旁边的过孔和 40 mil 走线）。
 - `route-complete`（fastroute 布线时）：导入的会话必须 0 未布通、0 个可修复违规；v18 B 带 1 条未布通导入而没有门拦住。
@@ -399,7 +399,7 @@ pcbpilot pcb auto route --playbook out/playbook.json --out-dir out/live --projec
 - 摆放给位号留位（`pcb auto run`）：从板上丝印取项目字高和平均字宽，每个器件在四边（横/竖、居中/齐两端共 24 个
   候选）至少要有一个位号空位，空位离本体 5+8 mil（8 mil 是 EasyEDA 器件框含丝印外框比摆放本体大出的量），离别的
   器件本体 8 mil；没有空位的器件按 2×标签面积计罚，美观阶段不得占掉位号空位，多 seed 评分每个无位位号加 1.5 in，
-  `labelBlocked` 写进 placement 指标。Gas Module V5 B 离线：丝印门问题 24 → 4（无位 17 → 2），加权线长 160 → 166 in。
+  `labelBlocked` 写进 placement 指标。Board-B V5 B 离线：丝印门问题 24 → 4（无位 17 → 2），加权线长 160 → 166 in。
 - 豁免：`--waivers waivers.json`，每条 `{gate, match, reason, by}` 由人签字；只有一道门的全部失败项都被豁免覆盖
   时才放行，豁免内容写进 summary。没有失败项明细的门（如 DRC 数量）不能豁免。
 
@@ -427,16 +427,16 @@ fastroute 报告的 `--diagnose` 把未布通分为 blocked（几何堵死：单
 `route-complete` 逐条写「移动器件或加逃线」。
 
 **多 seed 取最优（`--place-seeds 6`，默认）。** 不做引擎布线时（fastroute 模式、`--no-route`），退火摆放的结果全凭 seed：
-2026-10-06 Gas Module V5 同一起点 8 个 seed 的加权线长从 121.9 到 156.5 in。现在并行跑 6 个 seed（约 37 s），先比合法性
+2026-10-06 Board-B V5 同一起点 8 个 seed 的加权线长从 121.9 到 156.5 in。现在并行跑 6 个 seed（约 37 s），先比合法性
 （重叠、出板、出区、禁布、限高），再比“线长 + 全部关联超距”（英寸，越小越紧凑），取最好的一个；每个 seed 的结果打印在
 stderr。关键关系超距权重曾设高十倍，结果选中了四角空、器件散的 seed 3，已改回同一量纲。
 
 **电流加权（摆放）。** 电流已知（仿真或声明，不含启发式默认值）且 ≥ 0.2 A 的非地网，摆放权重取
-max(原权重, min(1 + 4·I, 6))：压降门是 I·R，所以按电流线性加权。Gas Module V5 B 的阀驱动漏极（0.45 A）原来与
+max(原权重, min(1 + 4·I, 6))：压降门是 I·R，所以按电流线性加权。Board-B V5 B 的阀驱动漏极（0.45 A）原来与
 5 mA 的电源轨同权（0.15），漏极回路被拉散，压降 33–100 mV 超 30 mV 门；加权后离线摆放 Σ I·HPWL 从 12279 降到
 8140 mil·A（SV1_DRV 2016→671、SV3_DRV 4091→566 mil），不加权总线长 149.5→148.8 in，核心件仍居中。
 
-**按可布通性挑布局（`--candidates`）。** 几何评分最好的布局不一定最好布：Gas Module V5 B 换 seed 7 后仍有 3–4 条
+**按可布通性挑布局（`--candidates`）。** 几何评分最好的布局不一定最好布：Board-B V5 B 换 seed 7 后仍有 3–4 条
 布不通。`pcb auto run` 默认把前 3 名写成 `<out-dir>/candidates/seed-N/playbook.json`（与最优方案只差摆放步骤）；
 `pcb auto route --playbook <out-dir>/playbook.json --candidates <out-dir>/candidates --trial-time 2m` 依次摆放每个候选、
 按真实流程准备 DSN（修正、意图要求、预留逃线）并用 fastroute 试布一轮，留下未布通最少（其次可修违规最少）的那个，
@@ -447,11 +447,11 @@ max(原权重, min(1 + 4·I, 6))：压降门是 I·R，所以按电流线性加�
 - 板级 MULTI 规则区域只要不完全在新板框内，或与新规格要建的禁布区（含新孔的螺丝头环）重合，就删除。
 
 完全在板内、不与新规格重合的区域（如用户画的禁布区）和封装内的孔保留；`--keep-board-fills` 全部保留。
-2026-10-06 Gas Module V5 B：`--replace` 只删了日志里的 4 个区域，从 150×110 源板复制来的 8 个旧螺丝头环和
+2026-10-06 Board-B V5 B：`--replace` 只删了日志里的 4 个区域，从 150×110 源板复制来的 8 个旧螺丝头环和
 板边带留在 100×80 新板上。EasyEDA 导出 DSN 时把 MULTI 区域当成引脚，fastroute 因此报四角 pin–pin 重叠；
 用同一快照离线回放后，12 个旧区域全部进入删除列表。
 
-同一摆放的对比（Gas Module V5 compact，100×80 mm，4 层，199 件，U8 固定居中）：
+同一摆放的对比（Board-B V5 compact，100×80 mm，4 层，199 件，U8 固定居中）：
 
 | 布线 | 布通 | 原生 DRC |
 |---|---|---|

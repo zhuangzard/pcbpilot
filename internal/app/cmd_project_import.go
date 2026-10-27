@@ -90,7 +90,7 @@ existing project is never modified.
 .kicad_pcb, .kicad_dru and library tables are zipped), or any file the
 importer accepts for --type.`,
 		Args: cobra.NoArgs,
-		Example: `  pcbpilot project import --file kicad/GasV5_A.kicad_pro --name GasV5_A_kicad
+		Example: `  pcbpilot project import --file kicad/board-b-v5a.kicad_pro --name board-b-v5a_kicad
   pcbpilot project import --file design.zip --type KiCad --name Demo`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if file == "" || name == "" {

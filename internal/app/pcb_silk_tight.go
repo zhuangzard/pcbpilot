@@ -3,7 +3,7 @@ package app
 // pcb_silk_tight.go — designators next to their own footprint, never
 // shrunk, judged on the readback (pcb.silk.list), and the "silkscreen" gate.
 //
-// Why: on Gas Module V5 the connector's slot search (15 mil × 1.5 drift)
+// Why: on Board-B V5 the connector's slot search (15 mil × 1.5 drift)
 // left designators far from their parts and on top of each other. The plan
 // is computed here from the board dump so it can be tested offline; the
 // verdict always comes from the real rendered boxes read back afterwards.
@@ -1593,7 +1593,7 @@ func labelSpecFromBoard(raw []byte) *pcbauto.LabelSpec {
 	}
 	// The silk step measures from EasyEDA's footprint box, which includes
 	// the silk outline: about silkOutlineMil beyond the placer's body on
-	// Gas Module V5 (0603: 119×66 vs 103×51). The placer's room must
+	// Board-B V5 (0603: 119×66 vs 103×51). The placer's room must
 	// hold that margin or its "free" slot is blocked at silk time.
 	opt := defaultSilkTightOpts()
 	return &pcbauto.LabelSpec{Height: height / float64(n), CharW: length / float64(chars),

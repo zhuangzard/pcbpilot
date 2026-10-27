@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// Requirements as written by `intent derive` for the Gas Module V5 board
+// Requirements as written by `intent derive` for the Board-B V5 board
 // (pre-intent.json): +12V forbids neck-down, GND may neck to 10 mil.
 func gasReqs() map[string]NetRequirement {
 	return map[string]NetRequirement{

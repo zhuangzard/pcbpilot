@@ -533,7 +533,7 @@ func reloadDocumentByUUID(cfg *appConfig, win, target string) (string, error) {
 }
 
 // saveRetryBudget bounds how long a save waits for the connector to come
-// back (Gas Module V5 B v23: after 2.5 h of repair under load 151 the save
+// back (Board-B V5 B v23: after 2.5 h of repair under load 151 the save
 // failed with "connector disconnected before responding" and the run died).
 var saveRetryBudget = 2 * time.Minute
 

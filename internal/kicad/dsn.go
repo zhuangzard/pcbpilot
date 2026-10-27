@@ -44,7 +44,7 @@ type DSNPrep struct {
 	Nets  int      `json:"nets"`
 	// EdgeKeepouts counts the board-edge / cut-out keep-out bands added
 	// and the mounting-hole keep-outs grown (KiCad's exporter carries no
-	// copper-to-edge rule: Gas V5 A routed inner tracks 13 mil from the edge).
+	// copper-to-edge rule: Board-B V5 A routed inner tracks 13 mil from the edge).
 	EdgeKeepouts int `json:"edgeKeepouts"`
 	// EdgeWindows: band windows left open for edge-mounted connector pads.
 	EdgeWindows int `json:"edgeWindows,omitempty"`
@@ -163,7 +163,7 @@ const reqEps = 0.005
 
 // ClearanceMarginMil is added to every clearance in the DSN handed to
 // fastroute: KiCad's DRC measured 0.1484 mm against a 0.1501 mm netclass
-// clearance on a track fastroute had placed at the rule (PicoRick, KiCad
+// clearance on a track fastroute had placed at the rule (Board-A, KiCad
 // 10.0.7), so routing at the bare rule fails DRC by rounding. Same value as
 // the EasyEDA flow's specctra.ClearanceMarginMil.
 var ClearanceMarginMil = 0.2

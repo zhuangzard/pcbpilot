@@ -2,7 +2,7 @@
 
 用户决定（2026-10-09）：设计全部在 KiCad 完成，EasyEDA 只作为提交工具；**pcbpilot 的所有功能都必须能在 KiCad 上运行**，
 硬门禁（意图、仿真、ISO/医疗安全、丝印、说明书、报告、多代理设计评审）一个不少。本文件是对等矩阵与实施顺序，
-一项功能只有在 KiCad 上实跑通过（Gas Module V5 或 PicoRick 实板）才标“完成”。
+一项功能只有在 KiCad 上实跑通过（Board-B V5 或 Board-A 实板）才标“完成”。
 
 ## 架构
 
@@ -104,7 +104,7 @@ KiCad 对等 = **为同一动作协议实现 KiCad 后端**（`--backend kicad`�
 
 ## `kicad route` 实板缺陷修复（分支 kicad/pcb-fixes，2026-10-09）
 
-在 Gas V5 A / PicoRick 草稿副本上跑 `kicad route` 发现的共用代码缺陷，均已修复并有单测：
+在 Board-B V5 A / Board-A 草稿副本上跑 `kicad route` 发现的共用代码缺陷，均已修复并有单测：
 
 | # | 缺陷 | 修复 | 位置 |
 |---|---|---|---|
@@ -114,7 +114,7 @@ KiCad 对等 = **为同一动作协议实现 KiCad 后端**（`--backend kicad`�
 | 4 | 密板丝印规划失败、每轮约 12 s | 八方位 × 横/竖 + 封装内居中；盖阻焊过孔作为第二档；无位时降到 JLC 最小 0.8 mm / 0.15 mm（`--silk-min-font`）；组标签也可降号；一次最多挪开 3 个挡位标签；网格索引 + 每标签静态合法位缓存。门禁仍硬：字号低于 min(项目字号, 最小字号) 失败 | `pcb_silk_tight.go`（共用） |
 | 5 | EasyEDA `pcb auto route` 末尾没有签核 | 末尾发布设计报告并运行同一 `pcbpilot signoff`（`--review` 或 `<out-dir>/review-design/review.json`） | `pcb auto route` |
 | 6 | DSN 板边禁布带挡住板边连接器焊盘 | 板边安装件（铜到板边门禁的同一判据：封装框到达板框）的近边焊盘在禁布带上开全深度窗口（焊盘 + 向内直出逃线，外扩间距 + 2 mil）；其余铜照常禁布，门禁不变 | `specctra.EdgeBandsExcept`（KiCad 与 EasyEDA 共用） |
-| 7 | fastroute 多次运行结果不同 / 太慢 | 同 DSN + 同参数结果逐字节相同；fastroute 自己并行跑 multi-start 变体，不再叠第二层并行：`--multi-start`（默认 4）成为 pcbpilot 设置；优化器默认关（`--optimizer`），PicoRick 299 → 134 s、同为 4 未布通；`--diagnose` 全部 blocked 时不续跑，route-complete 写明需改摆放/逃线 | `kicad route`、`runFastroute` |
+| 7 | fastroute 多次运行结果不同 / 太慢 | 同 DSN + 同参数结果逐字节相同；fastroute 自己并行跑 multi-start 变体，不再叠第二层并行：`--multi-start`（默认 4）成为 pcbpilot 设置；优化器默认关（`--optimizer`），Board-A 299 → 134 s、同为 4 未布通；`--diagnose` 全部 blocked 时不续跑，route-complete 写明需改摆放/逃线 | `kicad route`、`runFastroute` |
 | 7a | 主运行单线程过慢 | `--threads` 缺省 min(核数−1, 8)（8 线程 3 次结果逐字节相同）；`--threads 1` 可复现 | `kicad route` |
 | 7d | 门禁读 fastroute 专有字段 | 路由器无关 `routeResult`（`route_result.go`），route-complete（含铺铜放宽）只读它；fastroute 为唯一实现，留给第二后端 | 共用 |
 | 7e | 只有 fastroute 一个后端 | `kicad route --router fastroute\|tracemaker\|both`：TraceMaker 直接写 `.kicad_pcb`（`routeResult.Board`），约束来自意图（`tracemakerConstraints`）；`both` 并行跑、先过快检（完整且无新增 DRC 错误）者先进全量门禁，失败换下一个，门禁不变。TraceMaker 缓存「已布铜只擦到 margin 判阻塞」的误判（U303.22 被封）已在 fork 修复 | `kicad_route_backends.go`、`kicad_route_tracemaker.go`、`kicad_route_candidates.go` |
@@ -124,7 +124,7 @@ KiCad 对等 = **为同一动作协议实现 KiCad 后端**（`--backend kicad`�
 
 ## 意图网焊盘逃线（分支 kicad/escape-stubs，2026-10-09）
 
-所有意图网类进 `--no-neckdown-classes` 后，满宽走线出不了细间距焊盘（PicoRick RP2040 U303 QFN-56 0.4 mm，
+所有意图网类进 `--no-neckdown-classes` 后，满宽走线出不了细间距焊盘（Board-A RP2040 U303 QFN-56 0.4 mm，
 +3V3 / +1V1 15.75 mil：11 条连接 blocked）。不重开颈缩，改为**布线前预布固定逃线**（`planIntentEscapes`，
 `kicad route` 与 EasyEDA `pcb auto route` / autoroute 共用；EasyEDA 原有 GND 预逃线照旧，已有逃线的焊盘跳过）：
 
@@ -146,7 +146,7 @@ KiCad 对等 = **为同一动作协议实现 KiCad 后端**（`--backend kicad`�
 - 布不通反馈：`routeResult.placementHints` 与 `route-complete` 条目给出每条 blocked 连接该挪哪个件、往哪挪、至少多远
   （逃线走廊里挡着的件；走廊空则把另一端件拉向逃线出口；同件同网脚、远端连接不编造挪件）。
 
-PicoRick 草稿副本，`kicad route --rip-up --no-review --threads 1`，同一命令、同一意图（墙钟受机器负载影响，只作参考）：
+Board-A 草稿副本，`kicad route --rip-up --no-review --threads 1`，同一命令、同一意图（墙钟受机器负载影响，只作参考）：
 
 | | 前（dev 897c4041） | 后（r4，最终代码） | r3（无 via-at-SMD 规则） |
 |---|---|---|---|

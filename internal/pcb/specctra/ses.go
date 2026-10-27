@@ -185,7 +185,7 @@ func addPath(w *Wiring, net string, path *node, scale toMil) error {
 	}
 	a := path.atoms()
 	if len(a) == 4 {
-		// A one-point path (fastroute 0.1.7, Gas Module V5 B v22: +12V
+		// A one-point path (fastroute 0.1.7, Board-B V5 B v22: +12V
 		// "(path Inner1 21650 3052804 2435932)") has no length: a dot inside
 		// copper the session already carries. Skip it, keep a note.
 		x, err1 := strconv.ParseFloat(a[2], 64)

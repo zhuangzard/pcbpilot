@@ -3,7 +3,7 @@ package app
 // pcb_via_arrays.go — post-route via arrays. The intent sizes each power
 // net's layer transitions as k vias of drill/dia in parallel (intent
 // nets[].via.countPerTransition); fastroute places one via per transition.
-// Gas Module v9: seven single 12/24 mil vias carried 0.74 A where +12V, GND
+// Board-B v9: seven single 12/24 mil vias carried 0.74 A where +12V, GND
 // and VIN_F need 1.46–1.51 A. This adds the k−1 missing vias around each
 // transition via, the way the internal router's via arrays do: each extra
 // via either sits on the net's track of a layer it joins or is tied to the
@@ -182,7 +182,7 @@ func planViaArrays(tracks []specctra.Track, vias []widenVia, pads []boardPad, ne
 			}
 			// Stay within the via-current check's grouping link of a via of
 			// this transition, or the check rates the new via on its own
-			// (Gas Module v14: a via 60.4 mil from its neighbour failed as a
+			// (Board-B v14: a via 60.4 mil from its neighbour failed as a
 			// single via).
 			linked := false
 			for _, o := range group {

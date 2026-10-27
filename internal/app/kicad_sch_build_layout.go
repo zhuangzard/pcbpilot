@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
 )
@@ -694,6 +695,29 @@ func zoneBox(zl *sbZoneLayout, zi *sbZoneIn, syms map[string]kicad.SceneSymbol, 
 	if math.IsInf(b.MinX, 1) {
 		return kicad.Box{}
 	}
+	// the zone title is drawn from the frame's left edge (writeSbProject) and
+	// may be longer than a narrow zone is wide (a column of pull-downs under a
+	// 28-character title): the packer and pagination only see this box, so
+	// the title ran past the right edge of A0 and the page-fit gate failed on
+	// a page pagination had accepted (field board 2026-10-27)
+	return sbFitTitle(b, zi.Zone.Title)
+}
+
+// sbFitTitle widens a zone box so its frame holds the zone title: the
+// 1.27 mm inset plus the text at 1.778 mm, estimated no narrower than
+// kicad sch-fit / sch-check measure it (1 mm per character + 1 mm). A
+// wide (CJK) glyph is drawn about twice as wide, so it counts double.
+func sbFitTitle(b kicad.Box, title string) kicad.Box {
+	if title != "" {
+		n := 0
+		for _, r := range title {
+			n++
+			if r >= 0x1100 && unicode.In(r, unicode.Han, unicode.Hangul, unicode.Hiragana, unicode.Katakana) || r >= 0x3000 && r <= 0x303F || r >= 0xFF00 && r <= 0xFFEF {
+				n++
+			}
+		}
+		b.MaxX = math.Max(b.MaxX, b.MinX-2*sbZoneMargin+1.27+2+1.2*float64(n))
+	}
 	return b
 }
 
@@ -713,16 +737,25 @@ func sbMarkerBox(mk sbMarker) kicad.Box {
 		}
 		return kicad.Box{MinX: p.X - half, MinY: p.Y, MaxX: p.X + half, MaxY: p.Y + reach}
 	}
+	// A local label's text sits on the reading side of its wire (above a
+	// horizontal one, left of a vertical one, up to 1.5 mm); a global or
+	// hierarchical label's shape is centred on it (±1.1 mm, kicad sch-check).
+	// The box covers both, and no more: a symmetric ±1.6 mm made the labels
+	// of neighbouring pins 2.54 mm apart "overlap", sbDeconflict staggered
+	// their stubs up to 40 mm long, and a ground symbol's value text ended up
+	// under a hierarchical label (field board 2026-10-27, a 96-pin connector
+	// whose nets pagination moved across pages).
+	const read, other = 1.6, 1.25
 	w := sbTextW(mk.Net) + 2
 	switch mk.Dir {
 	case "left":
-		return kicad.Box{MinX: p.X - w, MinY: p.Y - 1.6, MaxX: p.X, MaxY: p.Y + 1.6}
+		return kicad.Box{MinX: p.X - w, MinY: p.Y - read, MaxX: p.X, MaxY: p.Y + other}
 	case "up":
-		return kicad.Box{MinX: p.X - 1.6, MinY: p.Y - w, MaxX: p.X + 1.6, MaxY: p.Y}
+		return kicad.Box{MinX: p.X - read, MinY: p.Y - w, MaxX: p.X + other, MaxY: p.Y}
 	case "down":
-		return kicad.Box{MinX: p.X - 1.6, MinY: p.Y, MaxX: p.X + 1.6, MaxY: p.Y + w}
+		return kicad.Box{MinX: p.X - read, MinY: p.Y, MaxX: p.X + other, MaxY: p.Y + w}
 	}
-	return kicad.Box{MinX: p.X, MinY: p.Y - 1.6, MaxX: p.X + w, MaxY: p.Y + 1.6}
+	return kicad.Box{MinX: p.X, MinY: p.Y - read, MaxX: p.X + w, MaxY: p.Y + other}
 }
 
 // ── fallback: grid + autoconnect ────────────────────────────────────────────
@@ -830,6 +863,13 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 	}
 	opp := map[string]string{"up": "down", "down": "up", "left": "right", "right": "left"}
 	vec := map[string]kicad.Pt{"up": {Y: -1}, "down": {Y: 1}, "left": {X: -1}, "right": {X: 1}}
+	// tied: pins of a same-net run that carry no connection of their own →
+	// the run's first pin, which does
+	tied := map[kicad.Pt]kicad.Pt{}
+	zl.Wires = append(zl.Wires, sbTieSameNetRuns(d, items[0].p.Ref, items[0].s, direct, func(p, first kicad.Pt) {
+		wiredAt[ptKey(p)] = true
+		tied[sbRoundPt(p)] = sbRoundPt(first)
+	})...)
 	segClear := func(a, b kicad.Pt, skip map[string]bool, net string) bool {
 		for k, pa := range pins { // never through a foreign pin end (a short)
 			if d.PinNet[k] != net && (pa.at == a || pa.at == b || sbOnInterior(pa.at, [2]kicad.Pt{a, b})) {
@@ -1047,6 +1087,43 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 								tee = []kicad.Pt{tm, end}
 								mk = sbMarker{Kind: d.NetKind[n], Net: n, At: end, Dir: dir}
 							default:
+								if len(d.NetPages[n]) > 1 {
+									// A cross-page net is drawn as a hierarchical label, whose
+									// shape is centred on its anchor: on the wire it always
+									// covers the wire (label-on-wire). It goes on a short tee,
+									// clear of the wire, like a supply symbol (field board
+									// 2026-10-27: a comparator threshold net that pagination
+									// moved across pages).
+									dirs := []string{"up", "down"}
+									if math.Abs(a.X-b.X) < 1e-6 {
+										dirs = []string{"right", "left"}
+									}
+									for _, dir := range dirs {
+										end := kicad.Pt{X: tm.X + vec[dir].X*2.54, Y: tm.Y + vec[dir].Y*2.54}
+										if sbTouchesWires(tm, end, zl.Wires, kicad.Pt{X: math.NaN()}) || sbTouchesWires(tm, end, rays, kicad.Pt{X: math.NaN()}) {
+											continue
+										}
+										m := sbMarker{Kind: "label", Net: n, At: end, Dir: dir}
+										mb := sbMarkerBox(m)
+										hit := sbOverlap(mb, sbXformBox(it.s.Box, pose))
+										for _, pb := range placed {
+											hit = hit || sbOverlap(mb, sbGrow(pb, -1.5))
+										}
+										for _, w := range append(append([][]kicad.Pt(nil), zl.Wires...), wire) {
+											for i := 0; i+1 < len(w) && !hit; i++ {
+												hit = sbOverlap(mb, sbGrow(kicad.Box{MinX: math.Min(w[i].X, w[i+1].X), MinY: math.Min(w[i].Y, w[i+1].Y), MaxX: math.Max(w[i].X, w[i+1].X), MaxY: math.Max(w[i].Y, w[i+1].Y)}, 0.2))
+											}
+										}
+										if !hit {
+											tee, mk = []kicad.Pt{tm, end}, m
+											break
+										}
+									}
+									if tee == nil {
+										continue
+									}
+									break
+								}
 								// the label rides on the first segment: it must be long
 								// enough for the text, or the next bend runs through it
 								// (label-on-wire; a field board's dense supply zone a signal label on 6.35 mm)
@@ -1110,6 +1187,33 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 			}
 		}
 		return nil
+	}
+	// an upright two-pin part takes its supply / ground symbol straight on
+	// the pin (no autoconnect search)
+	uprightMarkers := func(it unitRef, pose sbPose) {
+		if len(it.s.Pins) != 2 {
+			return
+		}
+		for _, q := range it.s.Pins {
+			k := sbPinKey(it.p.Ref, q.Number)
+			kind := d.NetKind[d.PinNet[k]]
+			dir := sbOutwardDir(math.Mod(q.Outward+pose.Rot+360, 360))
+			if !((kind == "power" && dir == "up") || (kind == "ground" && dir == "down")) {
+				continue
+			}
+			a := sbXform(q.At, pose)
+			b := kicad.Pt{X: a.X, Y: a.Y + vec[dir].Y*2.54}
+			zl.Wires = append(zl.Wires, []kicad.Pt{a, b})
+			zl.Markers = append(zl.Markers, sbMarker{Kind: kind, Net: d.PinNet[k], At: b, Dir: dir})
+			direct[k] = true
+			wiredAt[ptKey(a)] = true
+		}
+	}
+	// a decoupling cap as the core (a zone of decoupling caps) draws its
+	// symbols the same way: sidePlace puts the next cap 5.08 mm under it,
+	// which leaves no room for a planner stub and its symbol between them
+	if isDecap(items[0].p) && !items[0].p.Multi {
+		uprightMarkers(items[0], sbPose{Unit: items[0].unit})
 	}
 	sidePlace := func(it unitRef) bool {
 		rot := sbTwoPinRot(d, it.p, it.s)
@@ -1217,24 +1321,7 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 				placed, owner = append(placed, f), append(owner, it.p.Ref)
 				addPins(it, pose)
 				found = true
-				// an upright two-pin part takes its supply / ground symbol
-				// straight on the pin (no autoconnect search)
-				if len(it.s.Pins) == 2 {
-					for _, q := range it.s.Pins {
-						k := sbPinKey(it.p.Ref, q.Number)
-						kind := d.NetKind[d.PinNet[k]]
-						dir := sbOutwardDir(math.Mod(q.Outward+rot+360, 360))
-						if !((kind == "power" && dir == "up") || (kind == "ground" && dir == "down")) {
-							continue
-						}
-						a := sbXform(q.At, pose)
-						b := kicad.Pt{X: a.X, Y: a.Y + vec[dir].Y*2.54}
-						zl.Wires = append(zl.Wires, []kicad.Pt{a, b})
-						zl.Markers = append(zl.Markers, sbMarker{Kind: kind, Net: d.PinNet[k], At: b, Dir: dir})
-						direct[k] = true
-						wiredAt[ptKey(a)] = true
-					}
-				}
+				uprightMarkers(it, pose)
 			}
 		}
 		return found
@@ -1345,11 +1432,26 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 	for _, it := range far {
 		rot := sbTwoPinRot(d, it.p, it.s)
 		f := foot(sbRotScene(it.s, rot), it.p.Ref)
+		// the reference / value texts beside the body take column room too:
+		// without them the next column's caps sat under this one's texts
+		// (text-over-symbol on every cap of a decoupling-only zone)
+		fl := sbFields(it.s, sbPose{Rot: rot}, it.p.Ref, it.p.Value)
+		f = sbBoxUnion(f, sbBoxUnion(fl.RefBox, fl.VBox))
 		if y > core.MinY && y+f.H() > core.MinY+colH {
 			x, y, colW = x+colW+2.54, core.MinY, 0
 		}
 		at := kicad.Pt{X: sbSnap(x - f.MinX), Y: sbSnap(y - f.MinY)}
-		zl.Parts[it.p.Ref] = append(zl.Parts[it.p.Ref], sbPose{At: at, Rot: rot, Unit: it.unit})
+		pose := sbPose{At: at, Rot: rot, Unit: it.unit}
+		zl.Parts[it.p.Ref] = append(zl.Parts[it.p.Ref], pose)
+		// Column neighbours sit one foot apart: room for a symbol on a short
+		// stub each. The planner's 5.08 mm stubs (and the deconflict that
+		// lengthens them) made the ground symbol of one cap and the supply
+		// symbol of the cap below meet on one vertical line — every stub of
+		// a column of decoupling caps "touched a foreign wire" (field board
+		// 2026-10-27: a zone of 33 caps on four rails, all stubs at one y).
+		if isDecap(it.p) && !it.p.Multi {
+			uprightMarkers(it, pose)
+		}
 		y += f.H()
 		colW = math.Max(colW, f.W())
 	}
@@ -1543,7 +1645,7 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 			}
 		}
 	}
-	if bad := sbFixStubs(zl, pinNet, bodies); len(bad) > 0 {
+	if bad := sbFixStubs(zl, pinNet, bodies, tied); len(bad) > 0 {
 		var refs, desc []string
 		for _, b := range bad {
 			desc = append(desc, b.Desc)
@@ -1566,14 +1668,102 @@ func gridZoneOnce(d *sbDesign, zi *sbZoneIn, m *sbMeasure, v sbGridVariant, excl
 	return zl, nil, nil
 }
 
-// sbFixStubs moves every marker stub that touches another wire, another
-// pin or another marker to the first clear direction / length.
+// sbTieSameNetRuns joins runs of neighbouring pins of the core (at the zone
+// origin, unrotated) that sit on one side and carry one net — an IC's three
+// OUT pins, its VS pins — with short wires along the pin ends, as a human
+// draws them: the first pin of a run keeps the connection, the others are
+// marked direct (no stub, no marker, no attach target) and reported to wired.
+// Neighbours are consecutive along the side with no other pin between and
+// at most 7.62 mm apart.
+//
+// Each pin used to get its own stub and label. With a decoupling cap's attach
+// wire leaving the first pin and bending past the next ones, the bend crossed
+// their (lengthened) stubs — EG-08 on every grid variant of a load-switch
+// zone that v0.10.0 drew clean (field board 2026-10-27).
+func sbTieSameNetRuns(d *sbDesign, ref string, s kicad.SceneSymbol, direct map[string]bool, wired func(pin, first kicad.Pt)) [][]kicad.Pt {
+	type pin struct {
+		at  kicad.Pt
+		key string
+		net string
+	}
+	sides := map[string][]pin{} // side + the pin ends' common coordinate
+	for _, q := range s.Pins {
+		k := sbPinKey(ref, q.Number)
+		n, ok := d.PinNet[k]
+		if !ok || d.NC[k] {
+			n = "" // a pin without a net breaks a run
+		}
+		dir := sbOutwardDir(q.Outward)
+		at := sbRoundPt(q.At)
+		line := at.X
+		if dir == "up" || dir == "down" {
+			line = at.Y
+		}
+		key := fmt.Sprintf("%s|%.4f", dir, line)
+		sides[key] = append(sides[key], pin{at, k, n})
+	}
+	keys := make([]string, 0, len(sides))
+	for k := range sides {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var wires [][]kicad.Pt
+	for _, sk := range keys {
+		ps := sides[sk]
+		sort.Slice(ps, func(i, j int) bool {
+			if ps[i].at.Y != ps[j].at.Y {
+				return ps[i].at.Y < ps[j].at.Y
+			}
+			if ps[i].at.X != ps[j].at.X {
+				return ps[i].at.X < ps[j].at.X
+			}
+			return ps[i].key < ps[j].key
+		})
+		first := ps[0].at
+		for i := 1; i < len(ps); i++ {
+			a, b := ps[i-1], ps[i]
+			dist := math.Abs(a.at.X-b.at.X) + math.Abs(a.at.Y-b.at.Y)
+			if a.net == "" || a.net != b.net || dist < 1e-6 || dist > 7.62+1e-6 {
+				first = b.at
+				continue
+			}
+			wires = append(wires, []kicad.Pt{a.at, b.at})
+			direct[b.key] = true // the run's first pin carries the run
+			wired(b.at, first)
+		}
+	}
+	return wires
+}
+
+// sbSameRun reports whether p is a tied pin of the run whose first pin is
+// start (or of start's own run).
+func sbSameRun(tied map[kicad.Pt]kicad.Pt, p, start kicad.Pt) bool {
+	r, ok := tied[p]
+	if !ok {
+		return false
+	}
+	if rs, ok := tied[start]; ok {
+		start = rs
+	}
+	return r == start
+}
+
+// sbBadStub is a marker stub sbFixStubs could not clear.
 type sbBadStub struct {
 	Desc string
 	A, B kicad.Pt
 }
 
-func sbFixStubs(zl *sbZoneLayout, pinNet map[kicad.Pt]string, bodies []kicad.Box) (unresolved []sbBadStub) {
+// sbFixStubs moves every marker stub that touches another wire, another
+// pin or another marker to the first clear direction / length.
+//
+// tied maps the pins sbTieSameNetRuns joined to a run (no marker of their
+// own) to the run's first pin. A run's first pin is never tied to a pin of
+// its own run as a fallback: it dropped its marker for it and the whole run
+// lost its net name (a KiCad netlist mismatch on an isolator's GND2 pins,
+// field board 2026-10-27). A pin of another run is fine: that run's first
+// pin keeps its marker.
+func sbFixStubs(zl *sbZoneLayout, pinNet map[kicad.Pt]string, bodies []kicad.Box, tied map[kicad.Pt]kicad.Pt) (unresolved []sbBadStub) {
 	vec := map[string]kicad.Pt{"up": {Y: -1}, "down": {Y: 1}, "left": {X: -1}, "right": {X: 1}}
 	// same-net sibling ties: a pin whose marker was dropped (dropped) must not
 	// become another pin's tie target, and a target keeps its own marker
@@ -1735,7 +1925,7 @@ func sbFixStubs(zl *sbZoneLayout, pinNet map[kicad.Pt]string, bodies []kicad.Box
 			for p, n := range pinNet {
 				_, rp, _ := strings.Cut(n, "#")
 				rp, _, _ = strings.Cut(rp, ".")
-				if p != start && rp == ownRef && sbPinNetName(n) == ownNet && !dropped[p] && (p.X == start.X || p.Y == start.Y) {
+				if p != start && rp == ownRef && sbPinNetName(n) == ownNet && !dropped[p] && !sbSameRun(tied, p, start) && (p.X == start.X || p.Y == start.Y) {
 					sib = append(sib, p)
 				}
 			}
@@ -2126,8 +2316,10 @@ const (
 
 // sbPackFresh packs a fresh page with the zones apply's packer
 // (kicadPackZones: rows in reading order inside the drawing area of the
-// smallest paper that holds them, clear of the title block).
-func sbPackFresh(ids []string, layouts map[string]*sbZoneLayout) map[string]kicad.Pt {
+// smallest paper that holds them, clear of the title block). flagW > 0 is
+// the width of the PWR_FLAG row renderSbPage draws under the zones
+// (sbFlagRowW): it must fit on the paper too.
+func sbPackFresh(ids []string, layouts map[string]*sbZoneLayout, flagW float64) map[string]kicad.Pt {
 	var zs []SchematicZoneResult
 	for _, id := range ids {
 		fp := sbFootprint(layouts[id].Box, kicad.Pt{})
@@ -2140,6 +2332,15 @@ func sbPackFresh(ids []string, layouts map[string]*sbZoneLayout) map[string]kica
 		if !ok {
 			continue
 		}
+		if flagW > 0 {
+			var rects []kicad.Box
+			for _, f := range frames {
+				rects = append(rects, f.Rect)
+			}
+			if !sbFlagRowFits(rects, flagW, p.W, p.H) {
+				continue
+			}
+		}
 		out := map[string]kicad.Pt{}
 		for _, f := range frames {
 			// the frame's zone origin, snapped to the 2.54 mm grid
@@ -2148,6 +2349,51 @@ func sbPackFresh(ids []string, layouts map[string]*sbZoneLayout) map[string]kica
 		return out
 	}
 	return nil
+}
+
+// sbFlagRowW is the width of a page's PWR_FLAG row (renderSbPage): its
+// caption, then one supply / ground symbol with its flag per net. 0: none.
+func sbFlagRowW(nets []string) float64 {
+	if len(nets) == 0 {
+		return 0
+	}
+	w := 5.08
+	for _, n := range nets {
+		w += math.Max(15.24, sbTextW(n)+7.62)
+	}
+	return math.Max(w, 1+float64(len([]rune(sbFlagCaption)))+1) // the caption, as sch-fit measures text
+}
+
+const sbFlagCaption = "PWR_FLAG (ERC: power source of each rail)"
+
+// sbFlagRowBox is the extent of the PWR_FLAG row drawn under zone frames
+// whose lowest edge is bottom: caption 7.62 mm above the symbols, supply
+// symbols above / ground symbols below with their flags.
+func sbFlagRowBox(bottom, w float64) kicad.Box {
+	y := sbSnap(bottom + 12.7)
+	return kicad.Box{MinX: sbPageOrigin - 1, MinY: y - 7.62 - 1.5, MaxX: sbPageOrigin + w, MaxY: y + 8.89}
+}
+
+// sbFlagRowFits reports whether the PWR_FLAG row of width w under frames
+// stays inside the drawing area of a pw × ph paper and out of its title block, by the
+// rules kicad sch-fit judges the page with. The row used to be left out of
+// the page-fit decision: pagination kept a page whose zones filled A0 to
+// the bottom, and the flags under them overflowed it (field board
+// 2026-10-27, page-fit failed on a page pagination had accepted).
+func sbFlagRowFits(frames []kicad.Box, w, pw, ph float64) bool {
+	if w <= 0 {
+		return true
+	}
+	bottom := sbPageOrigin
+	for _, f := range frames {
+		bottom = math.Max(bottom, f.MaxY)
+	}
+	r := sbFlagRowBox(bottom+1.27, w) // + the frames' grid snap at render
+	const border, gap = 10.0, 5.0
+	if r.MaxX > pw-border-gap || r.MaxY > ph-border-gap {
+		return false
+	}
+	return !(r.MaxX > pw-border-112-gap && r.MaxY > ph-border-34-gap)
 }
 
 // sbFootprint is the zone's frame (content box + margin + title band) at
@@ -2159,9 +2405,9 @@ func sbFootprint(box kicad.Box, t kicad.Pt) kicad.Box {
 
 // packZones assigns each zone of one page a translation: kept ones (keep)
 // stay; the rest are packed in rows (fresh build) or put in free space.
-func packZones(ids []string, layouts map[string]*sbZoneLayout, keep map[string]kicad.Pt) map[string]kicad.Pt {
+func packZones(ids []string, layouts map[string]*sbZoneLayout, keep map[string]kicad.Pt, flagW float64) map[string]kicad.Pt {
 	if len(keep) == 0 {
-		if out := sbPackFresh(ids, layouts); out != nil {
+		if out := sbPackFresh(ids, layouts, flagW); out != nil {
 			return out
 		}
 	}
@@ -2235,10 +2481,10 @@ func packZones(ids []string, layouts map[string]*sbZoneLayout, keep map[string]k
 		x += w + sbZoneGap
 		rowH = math.Max(rowH, h)
 	}
-	if !fresh && !sbFitsLargestPaper(placed) {
+	if !fresh && (!sbFitsLargestPaper(placed) || !sbFlagRowFits(placed, flagW, kicad.Papers[len(kicad.Papers)-1].W, kicad.Papers[len(kicad.Papers)-1].H)) {
 		// incremental placement overflowed the largest sheet: repack the
 		// page from scratch rather than ship content that cannot fit
-		if f := sbPackFresh(ids, layouts); f != nil {
+		if f := sbPackFresh(ids, layouts, flagW); f != nil {
 			return f
 		}
 	}

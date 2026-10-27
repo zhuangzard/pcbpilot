@@ -366,7 +366,7 @@ func (pl *placer) setup(res *PlaceResult) {
 		}
 		// A net whose current is known (simulated or declared) is IR drop
 		// per mil: weight it by that current (the drop gate is I·R, so
-		// linear). Gas Module V5 B weighed its 0.45 A valve drains like a
+		// linear). Board-B V5 B weighed its 0.45 A valve drains like a
 		// 5 mA rail, the drain loops spread and failed the 30 mV drop
 		// gate. Heuristic rail currents stay out: they are guesses.
 		if np.Role != RoleGround && (np.Source == "simulated" || np.Source == "declared") && np.CurrentA >= 0.2 {

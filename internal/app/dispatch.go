@@ -1119,7 +1119,7 @@ func serviceName(body []byte) string {
 // daemonWaitBudget is how long a request keeps looking for a daemon that
 // does not answer its health check. 0 (the default) fails at once — an
 // interactive command with no daemon should say so. Long flows (pcb auto
-// run / route) set it: Gas Module V5 B's route died after 6865 s when the
+// run / route) set it: Board-B V5 B's route died after 6865 s when the
 // live daemon, starved at load 115, missed one health scan.
 var daemonWaitBudget time.Duration
 

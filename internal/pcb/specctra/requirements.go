@@ -30,7 +30,7 @@ type RequirementReport struct {
 	// global floor would otherwise allow (widthMil.min = outer > the
 	// narrowest min of any net); pass them to fastroute --no-neckdown-classes.
 	// Nets already at the floor (6 mil signals) are left out: the flag cannot
-	// change their width and only constrains the router (Gas Module v9: 128
+	// change their width and only constrains the router (Board-B v9: 128
 	// of 129 classes listed, routing got harder).
 	NoNeckdown []string `json:"noNeckdownClasses,omitempty"`
 	// MinTraceMil is the narrowest neck-down any net allows (0 = none given).
@@ -433,7 +433,7 @@ func writeSexpr(n *node) (string, error) {
 
 // ClearanceMarginMil is added to every clearance handed to the router:
 // EasyEDA measures clearance a few hundredths of a mil tighter than
-// fastroute (Gas Module v10: 5.93 < 6.0 mil on a track fastroute placed at
+// fastroute (Board-B v10: 5.93 < 6.0 mil on a track fastroute placed at
 // exactly 6.0), so routing at the bare rule fails native DRC by rounding.
 const ClearanceMarginMil = 0.2
 

@@ -102,7 +102,7 @@ func TestCheckIntentLengths(t *testing.T) {
 }
 
 // Per-segment basis: a GND track carrying 0.2 A of a 1.46 A net needs only
-// its own IPC width (Gas Module v15 A: 14.75 mil tracks vs a 21.65 mil net
+// its own IPC width (Board-B v15 A: 14.75 mil tracks vs a 21.65 mil net
 // requirement); a trunk carrying most of the net current keeps the net's.
 func TestSegmentWidthNeed(t *testing.T) {
 	in, err := parseDesignIntent([]byte(`{"schemaVersion":1,"copper":{"outerOz":1,"innerOz":0.5,"tempRiseC":10},"nets":{

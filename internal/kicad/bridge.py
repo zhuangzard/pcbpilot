@@ -1101,7 +1101,7 @@ def pours(pcb, spec_path, out):
         if zs.get("minWidthMil"):
             z.SetMinThickness(nm(zs["minWidthMil"]))
         # SMD pads solid, through-hole pads thermal: a one-spoke SMD thermal
-        # is a KiCad starved_thermal error (Gas V5 A: U8.115, C50.2).
+        # is a KiCad starved_thermal error (Board-B V5 A: U8.115, C50.2).
         z.SetPadConnection(pcbnew.ZONE_CONNECTION_THT_THERMAL)
         board.Add(z)
         made.append(name)

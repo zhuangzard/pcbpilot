@@ -8,7 +8,7 @@ import (
 )
 
 func TestPlaceScoreOrder(t *testing.T) {
-	// Gas Module V5 seeds (A start): compact seed 2 must beat seed 3.
+	// Board-B V5 seeds (A start): compact seed 2 must beat seed 3.
 	s2 := PlaceMetrics{WirelengthIn: 121.9, TetherExcessMil: 11000, CriticalExcessMil: 9876}
 	s3 := PlaceMetrics{WirelengthIn: 136.5, TetherExcessMil: 7500, CriticalExcessMil: 6314}
 	i2, sc2 := placeScore(s2)

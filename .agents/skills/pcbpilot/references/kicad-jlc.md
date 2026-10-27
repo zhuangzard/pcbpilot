@@ -126,7 +126,7 @@ Files From KiCad 10》（2026-09-09，KiCad 10.0.3 验证）。
 
 门禁：每个**贴装件**（非 DNP、未排除 BOM、未排除坐标文件）都必须有合法 C 号，否则
 列出全部缺号/非法件、非零退出，且**不写任何文件**（失败的运行不会看起来像完成）。
-只做光板时用 `--no-assembly`（只出 Gerber/钻孔 zip，不检查 C 号）。真实板 PicoRick
+只做光板时用 `--no-assembly`（只出 Gerber/钻孔 zip，不检查 C 号）。真实板 Board-A
 revA 的板文件没有任何 LCSC 字段，`kicad fab` 正确地列出 145 个缺号件；
 `--no-assembly` 产出 4 层 13 个文件的 zip（GTL/G1/G2/GBL/GTS/GBS/GTO/GBO/GTP/GBP/GM1 +
 PTH/NPTH）。安装孔这类封装若没勾“排除 BOM/坐标文件”也会被要求 C 号——去 KiCad 里勾上，
