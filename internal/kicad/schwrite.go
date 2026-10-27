@@ -716,7 +716,11 @@ func (e *SchEditor) SetField(ref, name, value string) error {
 					if err := sub.setFieldOn(n, name, value); err != nil {
 						return err
 					}
-					e.items[i] = sub.apply()
+					out, err := sub.apply()
+					if err != nil {
+						return err
+					}
+					e.items[i] = out
 					return nil
 				}
 			}
@@ -793,46 +797,53 @@ func (e *SchEditor) MoveSymbol(ref string, to Pt, rot float64) error {
 	return fmt.Errorf("no symbol %s on this sheet (pending symbols cannot be moved)", ref)
 }
 
-func (e *SchEditor) apply() string { return applyEdits(e.src, e.repl) }
+func (e *SchEditor) apply() (string, error) { return applyEdits(e.src, e.repl) }
 
-// applyEdits splices edits into src as if applied from the last offset to
-// the first (edits at one offset: the later one ends up first). Disjoint
-// edits are copied in one pass; overlapping ones (never produced on
-// purpose) keep the old one-splice-at-a-time result.
-func applyEdits(src string, edits []textEdit) string {
-	idx := make([]int, len(edits))
-	for i := range idx {
-		idx[i] = i
+// applyEdits splices edits (byte spans of the original src) in one pass.
+// A replacement repeated on the same span keeps only the last one (setting
+// a field twice ends with the second value). Insertions at one offset come
+// before a replacement starting there, the later insertion first. Any other
+// overlap is an error: the spans would no longer refer to the same text.
+func applyEdits(src string, edits []textEdit) (string, error) {
+	last := map[[2]int]int{}
+	for i, ed := range edits {
+		if ed.beg < 0 || ed.end < ed.beg || ed.end > len(src) {
+			return "", fmt.Errorf("sheet edit span %d–%d outside the %d-byte sheet", ed.beg, ed.end, len(src))
+		}
+		if ed.end > ed.beg {
+			last[[2]int{ed.beg, ed.end}] = i
+		}
+	}
+	var idx []int
+	for i, ed := range edits {
+		if ed.end == ed.beg || last[[2]int{ed.beg, ed.end}] == i {
+			idx = append(idx, i)
+		}
 	}
 	sort.SliceStable(idx, func(a, b int) bool {
 		ea, eb := edits[idx[a]], edits[idx[b]]
 		if ea.beg != eb.beg {
 			return ea.beg < eb.beg
 		}
+		if za, zb := ea.end == ea.beg, eb.end == eb.beg; za != zb {
+			return za
+		}
 		return idx[a] > idx[b]
 	})
 	var b strings.Builder
-	cur := 0
+	cur, prev := 0, -1
 	for _, i := range idx {
 		ed := edits[i]
-		if ed.beg < cur || ed.end < ed.beg {
-			return applyEditsSlow(src, edits)
+		if ed.beg < cur {
+			p := edits[prev]
+			return "", fmt.Errorf("overlapping sheet edits at bytes %d–%d and %d–%d", p.beg, p.end, ed.beg, ed.end)
 		}
 		b.WriteString(src[cur:ed.beg])
 		b.WriteString(ed.text)
-		cur = ed.end
+		cur, prev = ed.end, i
 	}
 	b.WriteString(src[cur:])
-	return b.String()
-}
-
-func applyEditsSlow(src string, edits []textEdit) string {
-	edits = append([]textEdit(nil), edits...)
-	sort.SliceStable(edits, func(i, j int) bool { return edits[i].beg > edits[j].beg })
-	for _, ed := range edits {
-		src = src[:ed.beg] + ed.text + src[ed.end:]
-	}
-	return src
+	return b.String(), nil
 }
 
 // Render returns the edited text; it re-parses before returning.
@@ -855,7 +866,10 @@ func (e *SchEditor) Render() (string, error) {
 		}
 		edits = append(edits, textEdit{pos, pos, strings.Join(e.items, "\n\t") + "\n\t"})
 	}
-	s := applyEdits(e.src, edits)
+	s, err := applyEdits(e.src, edits)
+	if err != nil {
+		return "", err
+	}
 	r, err := parseSx(s)
 	if err != nil {
 		return "", fmt.Errorf("edited sheet does not re-parse: %w", err)

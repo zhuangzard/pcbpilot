@@ -198,19 +198,65 @@ func TestRenameLibSymbolEscapedName(t *testing.T) {
 	}
 }
 
-// applyEdits copies disjoint edits in one pass with the same result as
-// splicing them one at a time from the end.
-func TestApplyEditsMatchesSplicing(t *testing.T) {
+func TestApplyEdits(t *testing.T) {
 	src := "0123456789"
-	cases := [][]textEdit{
-		{{2, 4, "ab"}, {6, 6, "X"}, {0, 1, ""}},
-		{{5, 5, "A"}, {5, 5, "B"}, {5, 7, "C"}},
-		{{3, 6, "x"}, {4, 5, "overlap"}},
-		{{10, 10, "end"}, {0, 0, "start"}},
+	ok := []struct {
+		edits []textEdit
+		want  string
+	}{
+		{[]textEdit{{2, 4, "ab"}, {6, 6, "X"}, {0, 1, ""}}, "1ab45X6789"},
+		// repeated replacement of one span: the last wins, shrinking or growing
+		{[]textEdit{{2, 8, ""}, {2, 8, ""}}, "0189"},
+		{[]textEdit{{2, 8, "LONGER TEXT"}, {2, 8, "x"}}, "01x89"},
+		{[]textEdit{{2, 4, "x"}, {2, 4, "a much longer value"}, {6, 7, "Z"}}, "01a much longer value45Z789"},
+		// insertions at one offset: later first, before a replacement there
+		{[]textEdit{{5, 5, "A"}, {5, 7, "C"}, {5, 5, "B"}}, "01234BAC789"},
+		{[]textEdit{{3, 5, "r"}, {5, 5, "i"}}, "012ri56789"},
+		{[]textEdit{{10, 10, "end"}, {0, 0, "start"}}, "start0123456789end"},
 	}
-	for _, edits := range cases {
-		if got, want := applyEdits(src, edits), applyEditsSlow(src, edits); got != want {
-			t.Errorf("%v: got %q, want %q", edits, got, want)
+	for _, tc := range ok {
+		got, err := applyEdits(src, tc.edits)
+		if err != nil || got != tc.want {
+			t.Errorf("%v: got %q, %v; want %q", tc.edits, got, err, tc.want)
 		}
+	}
+	bad := [][]textEdit{
+		{{3, 6, "x"}, {4, 5, "nested"}},
+		{{2, 6, "x"}, {4, 8, "partial"}},
+		{{2, 6, "x"}, {2, 8, "same start"}},
+		{{2, 6, "x"}, {4, 4, "insert inside"}},
+		{{8, 12, "past end"}},
+	}
+	for _, edits := range bad {
+		if got, err := applyEdits(src, edits); err == nil {
+			t.Errorf("%v: want an error, got %q", edits, got)
+		}
+	}
+}
+
+// Setting one field twice keeps the second value; Render reports an
+// overlapping edit instead of writing a corrupt sheet.
+func TestRenderRepeatedAndOverlappingEdits(t *testing.T) {
+	sheet, _ := buildTestSheet(t)
+	e, err := OpenSchematic(sheet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.SetField("R1", "Value", "a much longer value than before"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.SetField("R1", "Value", "4k7"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := e.Render()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, `(property "Value" "4k7"`) || strings.Contains(out, "longer value") || strings.Contains(out, `"10k"`) {
+		t.Errorf("second SetField did not win")
+	}
+	e.repl = append(e.repl, textEdit{e.root.beg + 1, e.root.end - 1, ""}, textEdit{e.root.beg + 2, e.root.beg + 3, "x"})
+	if _, err := e.Render(); err == nil || !strings.Contains(err.Error(), "overlapping sheet edits") {
+		t.Errorf("overlap: err = %v", err)
 	}
 }

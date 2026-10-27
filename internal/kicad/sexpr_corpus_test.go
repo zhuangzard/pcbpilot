@@ -107,61 +107,94 @@ func identityEdits(t *testing.T, e *SchEditor) int {
 	return n
 }
 
-// TestKiCadDemoCorpusRoundTrip reads every .kicad_sch / .kicad_pcb /
-// .kicad_sym KiCad ships as a demo and checks: both readers parse it and
-// agree; write → parse yields the identical tree (strings re-quoted with
-// Q); a schematic opened with SchEditor and rendered with no edits, and with
-// identity edits (every field re-set to its value, every symbol moved to
-// its own position), is byte-identical to the file; ParseBoard reads every
-// top-level footprint of a board.
+// checkCorpusFile is the round-trip check for one KiCad file: both readers
+// parse it and agree; write → parse yields the identical tree (strings
+// re-quoted with Q); a schematic opened with SchEditor and rendered with no
+// edits, and with identity edits (every field re-set to its value, every
+// symbol moved to its own position), is byte-identical to the file;
+// ParseBoard reads every top-level footprint of a board. It returns the
+// number of identity edits.
+func checkCorpusFile(t *testing.T, p string) int {
+	t.Helper()
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(b)
+	root := checkSexprInput(t, src)
+	if root == nil {
+		t.Fatal("does not parse")
+	}
+	edits := 0
+	switch filepath.Ext(p) {
+	case ".kicad_sch":
+		e, err := OpenSchematic(src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out, err := e.Render(); err != nil || out != src {
+			t.Fatalf("no-op render changed the file (%v)", err)
+		}
+		edits = identityEdits(t, e)
+		out, err := e.Render()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out != src {
+			t.Fatalf("identity edits changed the file at byte %d", firstDiff(out, src))
+		}
+	case ".kicad_pcb":
+		bd, err := ParseBoard(b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := 0
+		for _, c := range root.list {
+			if c.head() == "footprint" {
+				want++
+			}
+		}
+		if len(bd.Footprints) != want {
+			t.Errorf("ParseBoard read %d footprints, file has %d", len(bd.Footprints), want)
+		}
+	}
+	return edits
+}
+
+// TestKiCadFixtureCorpusRoundTrip runs the round-trip check on the
+// committed KiCad-written fixtures (testdata/sexpr: an LF root sheet with a
+// multi-unit op-amp and a hierarchical sheet, a CRLF sub-sheet and a CRLF
+// board with quotes, backslashes, newlines and UTF-8 in their fields), so it
+// runs without KiCad installed. The files are byte-exact (.gitattributes).
+func TestKiCadFixtureCorpusRoundTrip(t *testing.T) {
+	files, _ := filepath.Glob("testdata/sexpr/*.kicad_*")
+	more, _ := filepath.Glob("testdata/*.kicad_pcb")
+	files = append(files, more...)
+	var n, edits int
+	for _, p := range files {
+		if ext := filepath.Ext(p); ext != ".kicad_sch" && ext != ".kicad_pcb" {
+			continue
+		}
+		n++
+		t.Run(filepath.Base(p), func(t *testing.T) { edits += checkCorpusFile(t, p) })
+	}
+	if n < 4 || edits == 0 {
+		t.Fatalf("fixture corpus incomplete: %d files, %d identity edits", n, edits)
+	}
+	b, _ := os.ReadFile("testdata/sexpr/sub.kicad_sch")
+	if !strings.Contains(string(b), "\r\n") || !strings.Contains(string(b), `C:\\lib`) {
+		t.Fatal("testdata/sexpr/sub.kicad_sch lost its CRLF line ends or escapes")
+	}
+}
+
+// TestKiCadDemoCorpusRoundTrip runs the same check on every .kicad_sch /
+// .kicad_pcb / .kicad_sym KiCad ships as a demo.
 func TestKiCadDemoCorpusRoundTrip(t *testing.T) {
 	dir, files := demoFiles(t, ".kicad_sch", ".kicad_pcb", ".kicad_sym")
 	edits := 0
 	for _, p := range files {
 		rel, _ := filepath.Rel(dir, p)
-		t.Run(filepath.ToSlash(rel), func(t *testing.T) {
-			b, err := os.ReadFile(p)
-			if err != nil {
-				t.Fatal(err)
-			}
-			src := string(b)
-			root := checkSexprInput(t, src)
-			if root == nil {
-				t.Fatal("does not parse")
-			}
-			switch filepath.Ext(p) {
-			case ".kicad_sch":
-				e, err := OpenSchematic(src)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if out, err := e.Render(); err != nil || out != src {
-					t.Fatalf("no-op render changed the file (%v)", err)
-				}
-				edits += identityEdits(t, e)
-				out, err := e.Render()
-				if err != nil {
-					t.Fatal(err)
-				}
-				if out != src {
-					t.Fatalf("identity edits changed the file at byte %d", firstDiff(out, src))
-				}
-			case ".kicad_pcb":
-				bd, err := ParseBoard(b)
-				if err != nil {
-					t.Fatal(err)
-				}
-				want := 0
-				for _, c := range root.list {
-					if c.head() == "footprint" {
-						want++
-					}
-				}
-				if len(bd.Footprints) != want {
-					t.Errorf("ParseBoard read %d footprints, file has %d", len(bd.Footprints), want)
-				}
-			}
-		})
+		t.Run(filepath.ToSlash(rel), func(t *testing.T) { edits += checkCorpusFile(t, p) })
 	}
 	t.Logf("%d files, %d identity edits", len(files), edits)
 }
@@ -183,25 +216,32 @@ func TestKiCadDemoNetlistUnchanged(t *testing.T) {
 	if os.Getenv("PCBPILOT_KICAD_LIVE") != "1" {
 		t.Skip("runs kicad-cli twice per demo project (~15 min); set PCBPILOT_KICAD_LIVE=1")
 	}
+	// Opted in: a missing KiCad, demo set or kicad-cli failure on an
+	// unedited demo is an environment fault and fails the test.
+	if kicadDemosDir() == "" {
+		t.Fatalf("PCBPILOT_KICAD_LIVE=1 but KiCad demos not found (set %s)", EnvKiCadDemos)
+	}
 	dir, pros := demoFiles(t, ".kicad_pro")
 	cli, err := KicadCLI()
 	if err != nil {
-		t.Skip(err)
+		t.Fatal(err)
 	}
 	checked := 0
+	var unsupported []string
 	for _, pro := range pros {
+		rel, _ := filepath.Rel(dir, pro)
 		root := strings.TrimSuffix(pro, ".kicad_pro") + ".kicad_sch"
 		if _, err := os.Stat(root); err != nil {
+			unsupported = append(unsupported, filepath.ToSlash(rel)+" (no root sheet)")
 			continue
 		}
-		rel, _ := filepath.Rel(dir, pro)
 		t.Run(filepath.ToSlash(rel), func(t *testing.T) {
 			tmp := t.TempDir()
 			sheets := copySchProject(t, filepath.Dir(pro), tmp)
 			troot := filepath.Join(tmp, filepath.Base(root))
 			before, err := exportNetlistText(cli, troot, filepath.Join(tmp, "before.net"))
 			if err != nil {
-				t.Skipf("kicad-cli cannot export the original: %v", err)
+				t.Fatalf("environment: kicad-cli cannot export the unedited demo: %v", err)
 			}
 			for _, sp := range sheets {
 				b, err := os.ReadFile(sp)
@@ -247,7 +287,10 @@ func TestKiCadDemoNetlistUnchanged(t *testing.T) {
 			checked++
 		})
 	}
-	t.Logf("%d projects: netlist unchanged", checked)
+	t.Logf("%d projects: netlist unchanged; not applicable: %v", checked, unsupported)
+	if checked == 0 && !t.Failed() {
+		t.Fatal("no demo project was checked")
+	}
 }
 
 // copySchProject copies a project's schematic-side files (sheets, project,
