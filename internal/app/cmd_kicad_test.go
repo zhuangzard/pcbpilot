@@ -373,13 +373,13 @@ func TestKicadDRCGateSoftPolicyPasses(t *testing.T) {
 	}
 	for _, r := range []string{"via_diameter", "drill_out_of_range", "track_width", "annular_width", "hole_to_hole", "connection_width",
 		"solder_mask_bridge", "starved_thermal", "zones_intersect", "microvia_drill_out_of_range", "edge_clearance", "no_such_rule"} {
-		if drcRuleClass(r) != "hard" {
-			t.Errorf("%s is %s, want hard", r, drcRuleClass(r))
+		if kicad.DRCRuleClass(r) != "hard" {
+			t.Errorf("%s is %s, want hard", r, kicad.DRCRuleClass(r))
 		}
 	}
 	for _, r := range []string{"courtyards_overlap", "pth_inside_courtyard", "npth_inside_courtyard", "overlapping_pads", "footprint"} {
-		if drcRuleClass(r) != "soft" {
-			t.Errorf("%s is %s, want soft", r, drcRuleClass(r))
+		if kicad.DRCRuleClass(r) != "soft" {
+			t.Errorf("%s is %s, want soft", r, kicad.DRCRuleClass(r))
 		}
 	}
 }
@@ -388,12 +388,17 @@ func TestKicadDRCGateSoftPolicyPasses(t *testing.T) {
 // silenced: excluded, ignored, or downgraded to warning.
 func TestKicadDRCGateFabricationRulesAreHard(t *testing.T) {
 	for _, rule := range []string{"items_not_allowed", "through_hole_pad_without_hole", "invalid_outline",
-		"item_on_disabled_layer", "track_on_post_machined_layer"} {
-		for _, pol := range []*kicad.DRCPolicy{
+		"item_on_disabled_layer", "track_on_post_machined_layer", "copper_sliver", "holes_co_located", "footprint_symbol_field_mismatch", "padstack", "isolated_copper"} {
+		pols := []*kicad.DRCPolicy{
 			{Exclusions: []kicad.DRCExclusion{{Rule: rule, Key: rule + "|1|2|a|b"}}},
 			{Ignored: []string{rule}},
-			{Downgraded: []string{rule}},
-		} {
+		}
+		// "warning" is KiCad's own default for the warning-level ones (they
+		// gate at warning severity instead).
+		if !kicad.KiCadWarningRule(rule) {
+			pols = append(pols, &kicad.DRCPolicy{Downgraded: []string{rule}})
+		}
+		for _, pol := range pols {
 			g := gateResult{Gate: "kicad-drc", Pass: true}
 			if s := applyDRCPolicy(&g, pol, nil); g.Pass || len(g.Items) != 1 || len(s) != 0 {
 				t.Fatalf("%s %+v: passed or not hard: %+v", rule, pol, g)

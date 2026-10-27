@@ -28,7 +28,7 @@ metadata:
 1. 不手工编辑 `.kicad_*`；`kicad lcsc --set` 是唯一由本 Skill 运行的原地写入，运行前确认文件已在 KiCad 中关闭、
    工程已提交 git 或已复制备份（[kicad-file-safety.md](../pcbpilot/references/kicad-file-safety.md)）。
 2. 订单契约先于出图；契约里的每个数值带来源 URL 与获取日期。没有契约就不写“可以下单”。
-3. `kicad fab` 不跑 DRC/ERC。DRC 与 ERC 单独跑、单独报，范围写明。
+3. `kicad fab` 出图不跑 DRC/ERC；出图前用只读的 `kicad fab --preflight`（DRC + 制造检查）与 `kicad sch-check`（ERC），各报各的范围。
 4. 每次出图用新目录或只由 pcbpilot 清单管理的目录；不把旧文件、别的工具的输出混进上传包。
 5. 不为通过门禁乱填 C 号；不该贴的件在 KiCad 里标 DNP / 排除 BOM / 排除坐标文件（用户操作），不是填号。
 6. CPL 方向覆盖只来自本板在厂商预览里的观察；pcbpilot 不带、也不要编一张按封装的角度表。
@@ -43,19 +43,20 @@ metadata:
 过孔工艺、工艺极限，写成 `fab/order-contract.json`（模板见 [fab-acceptance.md §1](references/fab-acceptance.md#1-订单契约)）。
 用户未定的项直接问；参考资料里的厂商数字没有日期就当过期。
 
-**2. 预检（各报各的范围）。**
+**2. 预检（只读，一条命令一个结论）。**
 
 ```bash
-pcbpilot kicad sch-check --sch <root>.kicad_sch
-kicad-cli pcb drc --format json --severity-all --schematic-parity -o <tmp>/drc.json <board>.kicad_pcb
-pcbpilot kicad lcsc --pcb <board>.kicad_pcb --sch <root>.kicad_sch --check     # 只在 PCBA 订单时
+pcbpilot kicad sch-check --sch <root>.kicad_sch                                  # ERC，预检不含
+pcbpilot kicad fab --preflight --pcb <board>.kicad_pcb --sch <root>.kicad_sch   --contract fab/order-contract.json [--waivers <签名 waiver>] [--no-assembly] > <评审目录>/preflight.json
 ```
 
-DRC 大板要几分钟，等它完成。DRC 有错误 → `FAIL`，交回 router 修板（归属与修法见
-[drc-triage.md](../pcbpilot/references/drc-triage.md)）；排除项（`"excluded": true`）与设成 `ignore` 的规则按
-[§6.4](../pcbpilot/references/evidence-and-verdicts.md#64-drc-排除项与被关掉的规则) 列出，触及短路/间距/未连接且无签名 waiver → `FAIL`。干净的 `drc.json` 只说明板子满足**它自己的**规则，不证明契约极限：
-另读有效规则集（Board Setup 约束、网络类、`.kicad_dru` 自定义规则与局部覆盖）逐项对照契约，松于契约 → `FAIL`，
-有一项读不全或无法对上 → `INCOMPLETE`（[§2.1](references/fab-acceptance.md#21-有效规则集-vs-契约)）。每项覆盖见 [§2](references/fab-acceptance.md#2-预检的范围)。
+`--preflight` 不写任何文件（板和原理图在临时副本上查），每项 `pass` / `fail` / `cannot-check`，总判定取最差，退出码 0 / 6 / 5：
+`kicad-drc`（错误级违例与电气/制造规则的警告，带归属：封装/布局/布线/板框/原理图一致性/环境）、`kicad-drc-policy`（排除项与被关掉的规则，触及电气/制造规则
+且无签名 waiver → fail）、`schematic-parity`（根图取 `.kicad_pro` 同名原理图，`--sch` 必须属于它的层次 = `schematic-root`）、`board-outline`、`contract`、`layer-count`、`min-track`/`min-space`/`min-drill`/`min-annular`
+（有效规则集含网络类、`.kicad_dru`、局部覆盖 vs 契约）、`finish`、`assembly-sides`、`lcsc`（覆盖率）、`bom-cpl`。映射：fail → `FAIL`，交回
+router 修板（归属与修法见 [drc-triage.md](../pcbpilot/references/drc-triage.md)，改契约凑数不算修）；cannot-check → `INCOMPLETE`，按 detail 的
+`fix` 补（缺契约、规则 0/读不懂、DRC 没跑成）。大板 DRC 要几分钟，等它完成。命令不覆盖的项（钻孔表、gbrjob、查看器、方向）见
+[§2](references/fab-acceptance.md#2-预检的范围)。修了板以后可以 `pcbpilot kicad drc --pcb <新板> --baseline <评审目录>/preflight.json` 只看新增。
 
 **3. 补 LCSC C 号（PCBA）。** 对每个缺号件：
 
@@ -126,6 +127,9 @@ BLOCKED 或 manual 项无证据，列出缺什么）。上传清单只列 `<板>
 | `unknown field "…"`（覆盖文件） | 覆盖 JSON 键名拼错 | 只允许 `refs` / `footprints` 与 `rotate` / `dx` / `dy` |
 | 覆盖写了却不在 `cplOverridesApplied` | 位号或封装名不匹配（静默跳过） | 用 CPL 的位号、BOM 的 `Footprint` 名或 `Lib:Name` 重写 |
 | `--search` 首条 MPN 带后缀或换了前缀 | 目录里没有原型号，排名给了替代件 | 不直接写；换查询或请用户确认替代 |
+| `--preflight` 的 `min-track` 等为 cannot-check：`… = 0 (no constraint)` | Board Setup 没设该最小值，也没有别的规则约束它 | 请用户在 Board Setup 填契约值（或 `.kicad_dru`），重跑；不当作 PASS |
+| `kicad-drc-policy` fail：`IGNORED connection_width` / `DOWNGRADED solder_mask_bridge` | 工程把电气/制造检查关掉或降级 | 用户恢复成 error 后重跑，或逐条签名 waiver（`{"gate":"kicad-drc",…}`） |
+| `contract` fail：`CONTRACT_INVALID` | 键名拼错、缺来源 URL/日期、`assembly.sides` 不是 top/bottom/both | 按 [§1](references/fab-acceptance.md#1-订单契约) 补齐；数值重新从厂商页面取 |
 | DRC 报 `drill_out_of_range`，钻孔刀具表有 `C0.000` | 板上过孔/孔径定义错误 | `FAIL`，交回 router 修板；`kicad fab` 照样能出图，不能当证据 |
 | 锡膏层文件只有文件头 | 该面没有 SMD 焊盘 | 正常；铜层或板框只有头才是错误 |
 | `kicad-cli` 退出码 137 或长时间无输出 | KiCad 正在安装/升级，或板很大 | 等安装完成；大板 DRC 等几分钟，不当作成功 |

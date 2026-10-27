@@ -29,7 +29,7 @@
 ```
 pcbpilot ──▶ KiCad 自带 Python + pcbnew（internal/kicad/bridge.py，go:embed）
          │     snapshot / netclasses / rules / ripup / dsn / ses / pours / edit / fill
-         ├─▶ kicad-cli pcb drc / sch export netlist
+         ├─▶ kicad-cli pcb drc / sch export netlist（`kicad drc` / `fab --preflight` 在副本上跑 DRC）
          ├─▶ fastroute（外部进程）
          └─▶ 共用的 EDA 中立计算：intentRequirements、planViaArrays、planWidenToIntent、
              planSilkTight、sim post-layout、snapshotIntentGates、tailGates、planWidenIR、
@@ -196,6 +196,44 @@ pcbpilot kicad route --pcb GasV5_A.kicad_pcb --intent intent.json --sim sim.json
    （`summary.simKicadMismatch`；门禁仍失败，因为这些焊盘的压降没有被证明），不再挡住收敛；同网的超预算压降照常列出并加宽。
 7. **设计报告**（门禁 `design-report`）后，8. **发布评审**（review-panel `layout` 阶段，证据加上报告 JSON、`summary.json`、
    `board-final.json`）。任何门禁失败退出码非零。
+
+## DRC 门禁（`kicad drc`）
+
+任何 KiCad 板（不必经过 `kicad route`）的独立 DRC 判定，与 route 的 `kicad-drc` 门禁共用同一套严格解析与工程静默策略：
+
+```bash
+pcbpilot kicad drc --pcb board.kicad_pcb [--schematic-parity] [--out drc/]
+pcbpilot kicad drc --pcb board.kicad_pcb --baseline-pcb ../revA/board.kicad_pcb     # 只报新增
+pcbpilot kicad drc --pcb board.kicad_pcb --baseline drc/drc-report.json --waivers w.json
+```
+
+- **只读、在副本上跑**：板及同名 `.kicad_pro` / `.kicad_dru`（`--schematic-parity` 再加同名根原理图 `<板>.kicad_sch` 与整个层次）复制到临时目录，
+  用 pcbpilot 的隔离 KiCad 配置（空的全局库表，kicadenv.go）运行 `kicad-cli pcb drc --format json --severity-all`；工程自己的
+  `fp-lib-table` / `sym-lib-table` 随副本带上，`${KIPRJMOD}` 指回原目录，所以工程库照常解析，只在全局库里的封装出 `lib_footprint_*`
+  环境类警告。工程目录不新增 `.kicad_prl`、锁文件或任何改动（演示板副本前后哈希一致）。子图在工程目录外 → cannot-check。
+- **归属**：每个违例按条目 uuid 在 `.kicad_pcb` S 表达式里找到所属顶层对象（焊盘、丝印、courtyard 都归它的封装；线/弧/过孔/铺铜带网名），
+  给出 `owner.class`：`environment`（库表类规则）> `schematic-parity` > `board-outline`（涉及 Edge.Cuts）> `routing`（涉及线、过孔、铺铜）>
+  `footprint`（只涉及一个封装自己的对象）> `placement`（两个以上封装）> `graphic` > `unresolved`；位置另给 KiCad 坐标 `xMm/yMm`（mm，y 向下）。
+- **检查（各自 pass / fail / cannot-check，总判定取最差，退出码 0 / 6 / 5）**：
+  `kicad-drc`（violations + unconnected 的 error 级条目，以及**电气/制造规则的 warning 级条目**——hard 类规则如 hole_to_hole、
+  connection_width、copper_sliver、holes_co_located、isolated_copper、padstack、被降级的 solder_mask_bridge；其余警告只列出）、`kicad-drc-policy`（同 route 门禁：电气/制造规则被排除、ignore 或从
+  error 降为 warning 即失败；会在 warning 级门禁的规则（copper_sliver、holes_co_located、isolated_copper、padstack、footprint_symbol_field_mismatch 等）被排除或 ignore 同样失败；
+  `.kicad_dru` 里 `(severity ignore)` 的自定义规则按其 constraint 对应的 DRC 规则归类（disallow → items_not_allowed、edge_clearance、hole_to_hole …），
+  电气/制造类或认不出的 → `IGNORED custom rule …` 硬项；courtyard 等放置类只记 `SILENCED`）、`schematic-parity`（带 `--schematic-parity` 时，任何严重度的一致性条目）。
+  `--waivers` 用 route 同一格式 `{"gate":"kicad-drc","match":…,"reason":…,"by":…}`，逐条接受（`kicad-drc` 的 waiver 也覆盖另两项）。
+  kicad-cli 失败、报告不合 schema、基线读不了 → cannot-check，waiver 不能放行。
+- **基线**：`--baseline-pcb` 对旧板副本也跑一次 DRC；`--baseline` 接受本命令（或 `kicad fab --preflight`）的报告，也接受原始 kicad-cli JSON
+  （用当前板解析归属，没有工程策略，所以策略项全量判定）。匹配 = 同规则 + 同归属 key + **同一组违例对象**（条目 uuid 的多重集合相同）且每个对象与基线里同 uuid 的对象相距
+  ≤ `--tolerance-mm`（默认 0.5；一致性与环境类不看位置）；有 uuid 的对象照样按 uuid 配对，只有缺 uuid 的对象按顺序比位置（两边都有 uuid 却不同 = 不同违例）；基线里是 warning、
+  现在是 error 的算新增（升级）；一对一。所以焊盘不动、换了一条同网的线去碰它也是新增。`baseline.new` 计入门禁，`baseline.resolved` 是消失的旧违例。
+  实测（interf_u 副本，pcbnew 把 R1 挪到 C1 上）：新增条目都涉及 R1，只多一条 copper_edge_clearance——KiCad 把同一块铺铜对板框的冲突
+  报在了另一段 Edge.Cuts 上（对象不同 = 新增，同时留下一条 resolved 孪生项）。
+- `--out DIR` 另存 `drc-report.json`、`drc.json`（原始报告）、`baseline-drc.json`。
+
+实测（2026-10-27，Windows 11，KiCad 10.0.6，演示板副本，`--schematic-parity`）：pic_programmer PASS（只有 41 条环境类警告），
+interf_u FAIL（copper_edge_clearance=board-outline、2 条 starved_thermal=routing、`connection_width` 被 ignore、22 条 footprint_symbol_mismatch），
+cm5_minima FAIL（5 条排除项：courtyards_overlap 记 SILENCED，solder_mask_bridge 降级为 hard 项）、video FAIL（0 错误，161 条一致性警告）；
+单板 8–40 s。
 
 ## 发布签核（`pcbpilot signoff`，EasyEDA 与 KiCad 同一条）
 

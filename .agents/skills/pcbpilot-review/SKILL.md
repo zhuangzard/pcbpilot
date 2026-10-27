@@ -50,9 +50,9 @@ metadata:
   多板工程先 `pcbpilot board list`、`pcbpilot sch pages` 确定与该 PCB 绑定的页。
 - KiCad：查 `~*.lck`。锁文件内容是 `{"hostname","username"}`；确认 KiCad 真开着该工程才判 BLOCKED（请用户关闭），
   否则是中断运行留下的残锁——在**副本**里删掉它即可，不碰用户原目录。
-- 直接调用 `kicad-cli`（例如 PCB DRC）时设 `KICAD_CONFIG_HOME=~/.pcbpilot/cache/kicad-config/v1`（任一 pcbpilot KiCad
-  原理图命令如 `kicad sch-check` 会建好这份空库表配置）。实测 Windows + KiCad 10 上不设它，`kicad-cli pcb drc --schematic-parity`
-  10 分钟无输出；设了 26 秒完成。代价是库类违规必然出现（见第 5 步“环境类”）。
+- PCB DRC 用 `pcbpilot kicad drc`：它自己把板复制到临时目录、用隔离的空库表配置跑 kicad-cli（不隔离时实测 Windows + KiCad 10 上
+  `kicad-cli pcb drc --schematic-parity` 10 分钟无输出；隔离后 8–40 s），工程目录不变。仍要直接调 `kicad-cli` 时设
+  `KICAD_CONFIG_HOME=~/.pcbpilot/cache/kicad-config/v1`。代价是只在全局库里的封装必然出库类警告（见第 5 步“环境类”）。
 
 ### 2. quick
 
@@ -61,11 +61,13 @@ metadata:
   pcbpilot kicad sch-check --sch <root>.kicad_sch > out/sch-check.json      # ERC + 质量检查，非零=有 ERC error 或质量发现
   pcbpilot kicad sch-read  --sch <root>.kicad_sch --out out/spec.json      # 位号/网表概览
   pcbpilot kicad netlist   --sch <root>.kicad_sch --out out/conn.json      # 后续 intent / signoff 的输入
-  KICAD_CONFIG_HOME=~/.pcbpilot/cache/kicad-config/v1 \
-    kicad-cli pcb drc --format json --severity-all --schematic-parity -o out/drc.json <board>.kicad_pcb
+  pcbpilot kicad drc --pcb <board>.kicad_pcb --schematic-parity --out out/drc/ > out/drc.json   # 0 PASS / 6 FAIL / 5 未验证
   ```
-  `drc.json` 干净不够：带 `"excluded": true` 的条目与 `.kicad_pro` 里设成 `ignore` 的规则按
-  [§6.4](../pcbpilot/references/evidence-and-verdicts.md#64-drc-排除项与被关掉的规则) 列出，触及短路/间距/未连接即 FAIL。
+  看 `checks`：`kicad-drc`（错误级违例 + 电气/制造规则的警告）、`kicad-drc-policy`（排除项、`ignore`、error 降为 warning；触及短路/间距/未连接/一致性/尺寸/板框
+  即 fail，courtyard 类只记 `SILENCED`，口径同 [§6.4](../pcbpilot/references/evidence-and-verdicts.md#64-drc-排除项与被关掉的规则)）、
+  `schematic-parity`；`cannot-check` → INCOMPLETE，不当干净。每条违例带 `owner.class`（environment / schematic-parity / board-outline /
+  routing / footprint / placement）与位号、网名，第 5 步分诊直接用；用户给了上一版板或报告时加 `--baseline-pcb` / `--baseline`，
+  报告里分开写“新增”与“原有”。
 - EasyEDA（窗口在前台，串行）：`pcbpilot sch gate --only layout-lint,check,bridge-check --json`、`pcbpilot sch nets`、
   `pcbpilot sch connectivity --all-pages`（存 `conn.json`）、`pcbpilot pcb drc --json`、`pcbpilot pcb layout-lint --json`。
   `sch check --page <名>` 会切页再切回；`sch bridge-check` 没有 `--page`，只对当前页准确——非当前页只能记 `--all-pages`
@@ -93,8 +95,9 @@ python <pcbpilot Skill 根>/scripts/pad-net-diff.py --sch out/conn.json --pcb ou
 - `pcbpilot signoff`：有 `kicad route` / `pcb gate` / `pcb auto route` 的 run 目录就 `--run-dir <run>`，并先按
   [§6.5](../pcbpilot/references/evidence-and-verdicts.md#65-运行证据绑定到确切输入) 核对它读的就是当前文件；没有时用显式输入
   `--board out/board.json …`，新鲜度与“缺输入”的写法见 [review-workflow.md pre-fab](../pcbpilot/references/review-workflow.md#pre-fab能否投板)。
-- KiCad：`pcbpilot kicad lcsc --pcb <board> --sch <root> --check`；`pcbpilot kicad fab --pcb <board> --sch <root> --out <新目录>`
-  （缺 C 号时什么都不写并非零退出）。EasyEDA 没有 pcbpilot 制造输出路径 → Gerber/CPL 记 UNSUPPORTED，只能 `bom export`。
+- KiCad：`pcbpilot kicad fab --preflight --pcb <board> --sch <root> --contract <订单契约>`（只读：DRC + 板框 + 层数 + 规则对契约 +
+  表面处理 + 贴片面 + C 号覆盖 + BOM/CPL 位号，一个判定；没有契约 → 契约各项 cannot-check = INCOMPLETE）；需要看文件时再
+  `pcbpilot kicad fab --pcb <board> --sch <root> --out <工程外新目录>`（缺 C 号时什么都不写并非零退出）。EasyEDA 没有 pcbpilot 制造输出路径 → Gerber/CPL 记 UNSUPPORTED，只能 `bom export`。
 
 ### 5. 分诊、分级、汇总
 

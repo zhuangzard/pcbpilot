@@ -28,10 +28,18 @@
   "assembly": {"sides": "top", "qty": 5},
   "viaProcess": "tented",
   "limits": {"minTrackMm": 0.127, "minSpaceMm": 0.127, "minDrillMm": 0.3, "minAnnularMm": 0.13},
-  "sources": [{"item": "limits", "url": "<厂商能力页 URL>", "retrieved": "YYYY-MM-DD"}]
+  "sources": [{"item": "layers", "url": "<报价单 URL>", "retrieved": "YYYY-MM-DD"},
+               {"item": "limits", "url": "<厂商能力页 URL>", "retrieved": "YYYY-MM-DD"},
+               {"item": "finish", "url": "<厂商工艺页或报价单 URL>", "retrieved": "YYYY-MM-DD"},
+               {"item": "assembly", "url": "<报价单 URL>", "retrieved": "YYYY-MM-DD"}]
 }
 ```
 
+- 这就是 `kicad fab --preflight --contract` 读的格式：未知键直接拒绝（`CONTRACT_INVALID`，拼错的 `limits` 不会被当成“没有限制”）；
+  必填 `vendor`、`layers`（铜层数）和 `sources`（http(s) `url` + `YYYY-MM-DD` 的 `retrieved`）；每个会被检查的值（`layers`、每项 `limits`、
+  `finish`、`assembly.sides`）都要有一条 `item` 指向它或父项（`limits`、`assembly`）的来源，`item` 拼错（不是契约字段）直接拒绝；
+  `limits` 缺哪项，对应的 `min-*` 检查就是 cannot-check；`finish` 缺省则 `finish` 为 cannot-check（未验证，退出码 5），要写明确工艺（“HASL lead-free”，不是 “HASL”）；
+  `assembly.sides` 缺省则 `assembly-sides` 为 cannot-check。
 - 数值只来自用户、厂商当期页面或报价单；每条 `sources` 写 URL 和获取日期。没有日期的旧数字（包括 Skill 参考里的）
   只当线索，下单当天要重新取。
 - 用户没定的项（例如是否阻抗控制、贴片面）就问，不替用户选；缺项时契约相关的结论记 `INCOMPLETE`。
@@ -40,39 +48,33 @@
 
 ## 2. 预检的范围
 
-每条预检写清它覆盖什么、不覆盖什么。`kicad fab` 自己**不跑 DRC/ERC**，它只检查 C 号和 BOM/CPL 位号一致性。
+每条预检写清它覆盖什么、不覆盖什么。`kicad fab` 出图本身**不跑 DRC/ERC**；`kicad fab --preflight` 只读地把能自动判定的项一次跑完：
 
 | 检查 | 命令 | 覆盖 | 不覆盖 |
 |---|---|---|---|
 | ERC + 原理图质量 | `pcbpilot kicad sch-check --sch <root>.kicad_sch` | 整个层次的 ERC、重叠/离网格/标签压件 | 板子 |
-| DRC + 原理图一致性 | `kicad-cli pcb drc --format json --severity-all --schematic-parity -o drc.json <board>.kicad_pcb` | 板上规则（板子自带的 Board Setup 约束）、未连接、原理图↔板差异 | 契约极限——除非已把契约数值写进板规则 |
-| 规则 vs 契约 | 读有效规则集（[2.1](#21-有效规则集-vs-契约)）逐项对照第 1 节 `limits` | 板上允许的最小值是否不小于契约 | 板上实际几何（那是 DRC 按这些规则查的） |
-| 贴片件 C 号 | `pcbpilot kicad lcsc --pcb … --sch … --check` | 每个贴装件有合法 C 号 | 这个号是否就是对的料（MPN、封装、参数） |
+| DRC、排除项策略、原理图一致性、板框闭合、层数、最小线宽/间距/孔径/环宽、表面处理、贴片面、C 号覆盖、BOM/CPL 位号 | `pcbpilot kicad fab --preflight --pcb … --sch … --contract fab/order-contract.json` | 每项 pass/fail/cannot-check，见 [kicad-jlc.md 预检](../../pcbpilot/references/kicad-jlc.md#预检kicad-fab---preflight只读)；板上规则由 KiCad DRC 查，规则本身对照契约（[2.1](#21-有效规则集-vs-契约)） | 契约四项以外的工艺极限（孔到孔、板边距离、微孔、阻抗）；C 号是否就是对的料；Gerber 文件本身（第 3 节） |
+| 只看修改引入的 DRC | `pcbpilot kicad drc --pcb <新板> --baseline <上次 preflight.json 或 drc-report.json>`（或 `--baseline-pcb <旧板>`） | 新增违例（规则 + 归属 + 位置）与消失的违例 | 基线本身的问题（基线里已有的照样要修或签 waiver） |
 | 发布签核 | 有运行目录：`signoff --run-dir <dir> …`（先做输入哈希绑定）；手工布线：显式输入 `signoff --board … --intent … --sim … --connectivity …` | 8 个 `signoff-*` 子门禁 | 运行目录读的不是这次出图的文件（哈希不符）→ 受影响门禁作废重跑；两种都没跑 → `INCOMPLETE` |
 
-DRC 在大板上要几分钟（实测 8 层小板 6.5 min），让它跑完，不要中途杀掉再当“没错误”。DRC 违例归属与修法见
-[drc-triage.md](../../pcbpilot/references/drc-triage.md)。
+DRC 在大板上要几分钟（实测 8 层小板 6.5 min），让它跑完。preflight 的 `cannot-check`（DRC 没跑成、缺契约、规则读不懂）记 `INCOMPLETE`，
+`fail` 记 `FAIL`；DRC 违例归属与修法见 [drc-triage.md](../../pcbpilot/references/drc-triage.md)，报告里每条带 `owner.class` 与位号/网名。
 
 ### 2.1 有效规则集 vs 契约
 
-KiCad DRC JSON 只列**违例**，不列生效的规则；`drc.json` 干净只说明板子没违反它自己的规则。要证明契约极限，读出有效规则集
-（只读文件，不改），对每个契约项求“板上任何地方允许的最小值”：
+KiCad DRC JSON 只列**违例**，不列生效的规则；干净的 DRC 只说明板子没违反它自己的规则。`--preflight` 的 `min-track` / `min-space` /
+`min-drill` / `min-annular` 读出有效规则集（只读），对每项取“板上任何地方允许的最小值”，与契约 `limits` 比：
 
-| 来源 | 位置 | 读什么 |
+| 来源 | 位置 | 计入 |
 |---|---|---|
-| Board Setup 约束 | `<board>.kicad_pro` → `board.design_settings.rules` | `min_clearance`、`min_track_width`、`min_via_diameter`、`min_via_annular_width`、`min_through_hole_diameter`、`min_hole_to_hole`、`min_hole_clearance`、`min_copper_edge_clearance`、`min_microvia_*`、`allow_blind_buried_vias` / `allow_microvias` |
-| 网络类 | `.kicad_pro` → `net_settings.classes[]`（`clearance`、`track_width`、`via_diameter`、`via_drill`、`diff_pair_*`）；归属看 `netclass_patterns` / `netclass_assignments` | 每个类的值；`Default` 也算 |
-| 自定义规则 | 与板同名的 `<board>.kicad_dru`：每条 `(rule … [(layer …)] (constraint <类型> (min …)) (condition …))` | 会**覆盖**网络类（可以更小）；逐条看条件覆盖哪些对象 |
-| 局部覆盖 | `.kicad_pcb` 里封装/焊盘/铺铜自带的 `(clearance …)`、`(solder_mask_margin …)` 等 | 只作用于该对象，也会让最小值变小 |
+| Board Setup 约束 | `<board>.kicad_pro` → `board.design_settings.rules` | `min_track_width`、`min_clearance`、`min_through_hole_diameter`（`allow_microvias` 时加 `min_microvia_drill`）、`min_via_annular_width`；值为 0 记为“未设”；`allow_microvias` 等开关不是布尔值 → 孔径 cannot-check |
+| 网络类 | `.kicad_pro` → `net_settings.classes[].clearance` | 每个类的间距（只有 `Default` 算全局下限；其他类为 0 → cannot-check，缺省则继承 Default）；网络类线宽/过孔尺寸只是默认值，DRC 不按它报错，不计入 |
+| 自定义规则 | 同名 `<board>.kicad_dru`：`(constraint <track_width / clearance / hole_size / annular_width> (min …))` | 带条件/层的规则只拉低最小值，无条件的 error 规则才是全局下限；`(severity ignore)` / `(severity warning)`（不是强制下限）、只有 opt/max、数值读不懂 → 该项 cannot-check |
+| 局部覆盖 | `.kicad_pcb` 封装、焊盘的 `(clearance …)`，铺铜的 `(connect_pads (clearance …))` | 计入间距（不算全局下限）；值读不懂 → cannot-check。KiCad 10 只在设了覆盖时写封装/焊盘的 `(clearance …)`（pcbnew 10.0.6 实测 `SetLocalClearance(0)` 写出 `(clearance 0)`），所以 0 就是 0 mm 覆盖 → 低于契约即 FAIL；铺铜总会写这一项，0 的含义证明不了 → cannot-check |
 
-```bash
-python -c "import json,sys;d=json.load(open(sys.argv[1],encoding='utf-8'));print(json.dumps(d['board']['design_settings']['rules'],indent=1));[print(c['name'],c.get('clearance'),c.get('track_width'),c.get('via_diameter'),c.get('via_drill')) for c in d['net_settings']['classes']]" <board>.kicad_pro
-grep -n "(rule\|(layer\|(constraint\|(condition" <board>.kicad_dru
-```
-
-判定：每个契约项（最小线宽、间距、孔径、环宽、板边距离……）的有效最小值 ≥ 契约 `limits` → 该项 PASS；任一来源给出更小的
-允许值 → `FAIL`（改板子规则后重跑 DRC，不改契约凑数）。Board Setup 里是 0（未设）且没有别的来源约束该项、`.kicad_dru` 的条件
-看不懂、或局部覆盖没逐个核对 → 该项 `INCOMPLETE`。对照表（契约值、各来源的值、出处行）写进验收记录。
+判定：任一来源更小 → `FAIL`，`items` 列出出处（改板子规则后重跑 DRC，不改契约凑数）；有读不懂/证明不了的规则，或没有全局下限（只有“未设”、
+局部覆盖或带条件的规则）→ cannot-check（请用户在 Board Setup 填契约值）；否则最小值 ≥ 契约 → PASS。`info` 另列板上实测最细线宽、最小过孔/焊盘孔，方便和规则对照。契约四项以外的极限（孔到孔、铜到板边、
+微孔、盲埋孔、阻抗线宽）仍按上表来源人工对照，结论写进验收记录；看不全 → `INCOMPLETE`。
 
 ## 3. 逐文件验收
 
@@ -139,8 +141,9 @@ kicad-cli pcb export svg --layers F.Fab,F.Courtyard,Edge.Cuts --mode-single --pa
 - 命令：pcbpilot kicad fab --pcb … --sch … --out <目录> [--cpl-overrides …]；pcbpilot 版本 <…>，KiCad <…>
 | 项 | 结论 | 验证状态 | 证据 |
 | ERC (`kicad sch-check`) | PASS/WARN/FAIL | live-verified | 报告路径、条数 |
-| DRC + parity | … | … | drc.json：错误 N、警告 N |
-| 规则 vs 契约 | … | manual | 有效规则集对照表（.kicad_pro / .kicad_dru / 局部覆盖出处） |
+| 预检（`kicad fab --preflight`） | 总判定 | live-verified | preflight.json：每项 status；fail/cannot-check 项逐条列出 |
+| DRC + parity + 排除项 | … | … | preflight 的 `kicad-drc` / `kicad-drc-policy` / `schematic-parity`：错误 N（按 owner.class）、警告 N、waiver |
+| 规则 vs 契约 | … | live-verified | preflight 的 `min-*` 项（含 `info` 出处）；契约四项以外的人工对照表 |
 | LCSC / BOM | … | … | `lcsc --check` 输出、MPN 核对、逐 C 号需求量（板数 × 位数 + 损耗）与库存、查询日期 |
 | Gerber/钻孔集合与叠层 | … | … | fab-report 层清单、gbrjob GeneralSpecs |
 | Gerber 查看器 | … | manual | 用户观察记录 |
@@ -167,4 +170,6 @@ kicad-cli pcb export svg --layers F.Fab,F.Courtyard,Edge.Cuts --mode-single --pa
 | `royalblue54L_feather`（8 层，C 号齐全） | `kicad-cli pcb drc` | 6.5 min；283 条违例，其中 183 条 `drill_out_of_range`（盲孔孔径 0.00001 mm） |
 | 同上 | `fab --sch … --out` | 19 s；17 个文件的 zip、BOM 29 行、CPL 48 件；`.gbrjob` 报 8 层 / 1.6 mm / ENIG；`PTH.drl` 刀具表出现 `T1C0.000`，即上面的盲孔——DRC 失败的板照样能出图，所以 DRC 必须单独跑 |
 | 同上 | `--cpl-overrides`（位号 + 封装条目） | 每条生效的覆盖逐行打印并写入 `cplOverridesApplied`；不存在的位号/封装名不报错 |
+| `interf_u`（2 层） | `fab --preflight --sch … --contract …`（契约 2 层、0.127/0.127/0.3/0.13 mm） | 12 s；FAIL：DRC 3 错（板框 1、布线 2）、`connection_width` 被 ignore、22 条一致性警告、环宽 0.05 < 0.13、24 件缺号；轮廓/层数/线宽/间距/孔径/贴片面 PASS；`--out` 与工程目录不变（2026-10-27，pcbpilot v0.11 开发构建） |
+| `cm5_minima`（6 层，带排除项） | 同上（契约 4 层） | FAIL：层数 6≠4、`min_track_width` = 0 → min-track cannot-check、U702 局部间距 0.125 < 0.127、ENIG≠HASL、两面贴装≠top；5 条排除项中 courtyards_overlap 记 SILENCED |
 | `vme-wren`（自带 `.kicad_dru`） | 只读 `.kicad_pro` 与 `.kicad_dru`（§2.1 的两条命令） | 网络类 `DDR4_CMD` 等线宽 0.08 mm、间距 0.1 mm；自定义规则 `clearance_under_fpga` 在 FPGA/DDR 下方区域另设孔径 0.2 mm、过孔 0.4 mm——只看 Board Setup 会漏掉这些更小的允许值 |
