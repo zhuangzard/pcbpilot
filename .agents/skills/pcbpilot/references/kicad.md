@@ -29,6 +29,8 @@
 ```
 pcbpilot ──▶ KiCad 自带 Python + pcbnew（internal/kicad/bridge.py，go:embed）
          │     snapshot / netclasses / rules / ripup / dsn / ses / pours / edit / fill
+         ├─▶ KiCad 自带 Python + pcbnew（internal/kicad/board.py）：kicad board 的 new / outline / stackup /
+         │     holes / keepout / zone / text
          ├─▶ kicad-cli pcb drc / sch export netlist（`kicad drc` / `fab --preflight` 在副本上跑 DRC）
          ├─▶ fastroute（外部进程）
          └─▶ 共用的 EDA 中立计算：intentRequirements、planViaArrays、planWidenToIntent、
@@ -64,6 +66,29 @@ pcbpilot ──▶ KiCad 自带 Python + pcbnew（internal/kicad/bridge.py，go:
   旧的 `{位号: 位姿}` 仍可读，但键一律按位号解释（位号可以就叫 `uuid:…`）。要让它们参与
   布局，先在原理图/PCB 里重新标注唯一位号。
 
+## 板级设置（`kicad board new|outline|stackup|holes|keepout|zone|text`）
+
+无头建板：mm、KiCad 坐标（y 向下）。参数和推荐顺序见聚焦 Skill pcbpilot-kicad-pcb 的 `references/board-setup.md`；这里只记实现事实。
+
+- 分工：Go（`internal/kicad/board.go`）校验数值/单位/几何（多边形自交、圆角半径、挖空在板内且互不重叠、孔互叠、
+  层叠厚度合计）并把形状转成 KiCad 图元（线段、三点圆弧、圆）；board.py 校验要看板子的部分（已启用层、网、现有板框、
+  减层时内层上的对象、孔压焊盘），改板、保存、**重新加载核对**。错误码 `E_BOARD_*`，带 `fix`。
+- 提交：输入连同 `.kicad_pro`/`.kicad_dru` 先复制到暂存目录再改，结果旁边放回同一份工程/规则后才做 stats/DRC 校验；
+  全部检查通过才经 kfile 事务提交（`--out` 新建板 + 校验过的工程/规则字节、`--in-place` 锁检查 + 基准哈希 CAS），源工程/规则
+  提交前再比一次哈希。`--report` 不得与任何板/工程/规则/锁文件同名（含大小写、硬链接）。`outline` / `stackup` / `holes` 另用 `kicad-cli pcb export stats` 回读板尺寸、
+  板厚、NPTH/PTH 数；加/改铜或孔的 op（outline/stackup/holes/keepout/zone）默认对比改前改后的 error 级 DRC 并以它为准
+  （`--no-drc` = 未验证，退出码 5，只有 `--force-unverified` 才写），`text` / `new` 用 `--drc` 开。
+- 层叠：KiCad 10.0.6 的 Python 没有导出 stackup（`GetStackupDescriptor` 是不透明对象），所以 `SetCopperLayerCount`
+  + `SetBoardThickness` 后把 `(stackup …)` 块写进保存后文件的 `(setup …)`，再由 pcbnew 加载、保存一遍规范化并核对
+  `m_HasStackup`、板厚与铜层列表。板厚按 KiCad 的算法含阻焊层。
+- 几何是精确判定（`board_geom.go`：线段/圆弧距离、有符号距离包含，容差 0.001 mm），board.py 用同一套公式对板上
+  Edge.Cuts（KiCad 的折线近似）判孔/挖空；孔的预检只拦确定的物理重叠（钻孔与钻孔、钻孔穿铜、焊环压别的网的铜；焊盘用 `GetEffectivePolygon` 的真实形状），间距全归 DRC。写后回读逐项比对
+  每个请求属性；灌铜先 UnFill 再 `ZONE_FILLER.Fill`，返回失败/异常/仍未灌 → `E_BOARD_VERIFY`。
+- 10.0 的 `GetLayerID` 不再认 `F.SilkS` 这类旧短名（返回 -1），board.py 自带旧名映射。安装孔是锁定、board-only、
+  不进 BOM/坐标文件的单焊盘封装。`outline` / `holes` / `keepout` 遇到已灌铜的板会全部重灌。
+- kicad-cli 的 DRC/stats 用隔离的空全局库表（`SchCLIEnv`）：Windows 上带完整全局 fp-lib-table 时一次 DRC 要
+  2 分钟以上（小板也会卡住），隔离后约 2 秒。
+
 ## 快照（`kicad snapshot board.kicad_pcb [--out board.json]`）
 
 形状与 `pcb dump --include-copper` 一致（Go：`kicad.Snapshot(pcbPath) ([]byte, error)`），`boardSnapshot`、
@@ -76,7 +101,7 @@ pcbpilot ──▶ KiCad 自带 Python + pcbnew（internal/kicad/bridge.py，go:
 | 器件 | primitiveId（封装 uuid；**板上 uuid 重复时改用 `ref:<位号>`**，位号也重复时 `fp:<uuid>:<序号>`——转换来的板曾见 203 个封装只有 39 个不同 uuid）/ uuid / designator / value / footprint / `lcsc`（字段 LCSC、LCSC Part、LCSC Part #、JLCPCB Part #）/ layer / x,y,rotation / bbox / pads |
 | 焊盘 | padNumber / net / layer / x,y / width,height（轴对齐外包）/ rotation / shape `[RECT\|ELLIPSE\|OVAL\|POLYGON, w, h]` / 通孔 holeDiameter |
 | NPTH | 进 `footprintHoles`（圆孔 dia；槽孔为包络多边形） |
-| 板框 | Edge.Cuts 合成多边形取面积最大者；内部挖空写成 layer 12 的 `copper.fills` |
+| 板框 | Edge.Cuts 合成多边形取面积最大者；内部挖空写成 layer 12 的 `copper.fills`（`edgecut-N`；`kicad place` 按其精确多边形挡件） |
 | 铜 | `copper.lines`、`arcs`（arcAngle 逆时针为正）、`vias`、`pours`、`poured`（每个外轮廓一组 `[外轮廓, 孔...]`）、`regions`（禁放=2、禁走线/过孔=5、禁铺=7） |
 | 丝印 | `silk`：每个封装的位号/值字段与丝印层文字，pcbSilkText 形状（BBox、FontSize、Rotation、Hidden、CompID）；字段 id 为 `<器件id>#ref` / `#value` |
 | 规则 | clearance / track / 最小线宽 / 过孔 / 铜到板边 / 孔到孔（mil），source=`kicad`；另有 `netclasses[]`、`netClassOf{net: 有效网络类}`、`kicadLayers` |

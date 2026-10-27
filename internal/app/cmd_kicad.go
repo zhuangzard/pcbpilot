@@ -30,7 +30,7 @@ import (
 func newKicadCmd(cfg *appConfig, stdout, stderr io.Writer) *cobra.Command {
 	c := &cobra.Command{
 		Use:   "kicad",
-		Short: "Design in KiCad: placement, schematic sheets / import / netlist, snapshot, route + gates (fastroute), DRC gate, JLC fab output + preflight, LCSC parts",
+		Short: "Design in KiCad: board setup (outline/stackup/holes/zones), placement, schematic sheets / import / netlist, snapshot, route + gates (fastroute), DRC gate, JLC fab output + preflight, LCSC parts",
 		Long: `Work on KiCad 10 boards (.kicad_pcb + .kicad_pro) and schematics without the EasyEDA
 connector (user decision 2026-10-09; EasyEDA only receives the finished project
 via project import). KiCad is found at $PCBPILOT_KICAD_APP (default
@@ -40,6 +40,7 @@ goes to --out-dir.`,
 	}
 	c.AddCommand(
 		newKicadPlaceCmd(stdout, stderr),
+		newKicadBoardCmd(stdout),
 		newKicadSchFitCmd(stdout, stderr),
 		newKiCadFabCmd(stdout, stderr),
 		newKicadDRCCmd(stdout, stderr),

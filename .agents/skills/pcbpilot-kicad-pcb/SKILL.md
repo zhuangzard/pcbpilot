@@ -1,6 +1,6 @@
 ---
 name: pcbpilot-kicad-pcb
-description: "用 pcbpilot 离线完成 KiCad 板子的布局、布线与签核：kicad snapshot 读板，kicad place 多种子自动布局（锁定件、共用/占位位号保持不动），kicad route 按设计意图生成网络类、绝缘域与铺铜后用 fastroute/TraceMaker 布线并跑 DRC 等全部门禁，最后 signoff。适用于“KiCad 布局”“摆件”“KiCad 自动布线”“铺铜/重灌”“网络类/线宽规则”“DRC 报错怎么修”“布完能不能签核”。KiCad board layout and routing with pcbpilot, offline on .kicad_pcb files: snapshot the board, auto-place footprints (best of several seeds; locked, shared and placeholder designators stay fixed), route with intent-derived netclasses, insulation domains and pours through fastroute or TraceMaker, gate on KiCad DRC and every intent/safety/sim check, then sign off. Use for \"place my KiCad board\", \"autoroute this .kicad_pcb\", \"pour / refill ground\", \"netclasses from intent\", \"fix KiCad DRC errors\", \"is the routed board ready for sign-off\"."
+description: "用 pcbpilot 离线完成 KiCad 板子的板级设置、布局、布线与签核：kicad board 建板框/挖空/层叠/安装孔/禁布区/铺铜/文字（mm），kicad snapshot 读板，kicad place 多种子自动布局（锁定件、共用/占位位号保持不动），kicad route 按设计意图生成网络类、绝缘域与铺铜后用 fastroute/TraceMaker 布线并跑 DRC 等全部门禁，最后 signoff。适用于“画板框/定层叠/加安装孔”“KiCad 布局”“摆件”“KiCad 自动布线”“铺铜/重灌”“网络类/线宽规则”“DRC 报错怎么修”“布完能不能签核”。KiCad board setup, layout and routing with pcbpilot, offline on .kicad_pcb files: board outline/cutouts/stackup/mounting holes/keepouts/zones/text (kicad board), snapshot the board, auto-place footprints (best of several seeds; locked, shared and placeholder designators stay fixed), route with intent-derived netclasses, insulation domains and pours through fastroute or TraceMaker, gate on KiCad DRC and every intent/safety/sim check, then sign off. Use for \"draw the board outline / set a 4-layer stackup\", \"place my KiCad board\", \"autoroute this .kicad_pcb\", \"pour / refill ground\", \"netclasses from intent\", \"fix KiCad DRC errors\", \"is the routed board ready for sign-off\"."
 license: MIT
 metadata:
   author: "zhuangzard (pcbpilot); original easyeda-agent by zhoushoujianwork"
@@ -22,8 +22,8 @@ KiCad 板级工作（`.kicad_pcb`）：从已同步的板子到布好、过门�
 
 ## 硬规则
 
-1. 不文本编辑 `.kicad_*`，不做 GUI 自动化。读用 `kicad snapshot`，写只经 `kicad place` / `kicad route`（都写到新文件，
-   输入板不动）。没有 typed 命令的修改交给用户在 KiCad 里做，记 `UNSUPPORTED`。细则见
+1. 不文本编辑 `.kicad_*`，不做 GUI 自动化。读用 `kicad snapshot`，写只经 `kicad board` / `kicad place` / `kicad route`
+   （默认写到新文件，输入板不动；`kicad board --in-place` 走锁检查 + 哈希比对）。没有 typed 命令的修改交给用户在 KiCad 里做，记 `UNSUPPORTED`。细则见
    [kicad-file-safety.md](../pcbpilot/references/kicad-file-safety.md)。
 2. 写之前请用户在 KiCad 中**关闭**该板；目录里有 `~<文件>.lck` 锁文件 → `BLOCKED`，不自己删锁。用户在 KiCad 里改过 →
    旧快照作废，重新 `kicad snapshot`。
@@ -38,12 +38,12 @@ KiCad 板级工作（`.kicad_pcb`）：从已同步的板子到布好、过门�
 |---|---|---|
 | 原理图 → PCB 同步 | 无头 “Update PCB from Schematic” 计划在 v0.11 以 `kicad pcb-sync` 提供（`planned`） | PCB 编辑器 Tools → Update PCB from Schematic（F8），保存后关闭 |
 | 封装从库刷新 | 无 typed 命令（`UNSUPPORTED`） | Tools → Update Footprints from Library；先确认库表能找到库 |
-| 板框 / 层叠 / 层数 | `kicad board` 计划中（`planned`）；`kicad place` 不改板框和孔 | Edge.Cuts 画闭合板框；Board Setup → Physical Stackup 定层数、铜厚、介质 |
 | 锁定器件 | `kicad place` 尊重 KiCad 的 locked 标记 | 选中器件 → Lock；或在 `mech.json` 的 `fixed[]` 写死坐标 |
 
 ## 工作顺序
 
-板框 → 原理图同步 → 封装刷新 → 布局 → 布线 → 铺铜 → DRC/门禁 → 保存（复制回工程）。前三步由用户在 KiCad 完成；
+板框 → 原理图同步 → 封装刷新 → 布局 → 布线 → 铺铜 → DRC/门禁 → 保存（复制回工程）。板框、层叠、安装孔、禁布区、
+铺铜、板上文字用 `kicad board`（[board-setup.md](references/board-setup.md)，单位 mm）；同步与封装刷新由用户在 KiCad 完成；
 任何一步回退（例如布局时发现缺件），从那一步重新往后走，旧的布线结果作废。
 
 1. **读板、定起点**（只读）：
@@ -118,7 +118,7 @@ KiCad 板级工作（`.kicad_pcb`）：从已同步的板子到布好、过门�
   `netclasses.kept`）、意图生成的 `PP<n>_W<线宽>`、绝缘域 `PPD_<域>`（`.kicad_dru` 写 clearance + creepage）。快照的
   `netClassOf` 是布线后每个网的有效类，`intent-rules` 门禁核对它。
 - **铺铜** `--pours auto|on|off`：`auto` 只给**没有任何铺铜区**的板加 GND/电源铺铜；已有铺铜区的板只重灌、不新建。
-  地/电源层用 `--gnd-net`、`--gnd-layers`、`--power-net`、`--power-layer` 改；层叠本身在 KiCad 里定。
+  地/电源层用 `--gnd-net`、`--gnd-layers`、`--power-net`、`--power-layer` 改；层叠用 `kicad board stackup` 先定好。
 - **设计评审**：`--requirements` 必需；评审不通过就停止，不布线。`--no-review` / `--no-manual` 需要用户签名的 waiver。
 
 ## 读结果与报告
