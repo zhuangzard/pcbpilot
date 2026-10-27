@@ -200,3 +200,63 @@ func TestKicadRenderReportGuardDeep(t *testing.T) {
 		t.Errorf("report not written: %s", b)
 	}
 }
+
+// A missing external sheet stays protected: --report naming it is refused
+// and nothing is created there. With the closure incomplete, a --report
+// anywhere else is not written either (stdout only).
+func TestKicadRenderReportUnresolvedDependency(t *testing.T) {
+	root := t.TempDir()
+	proj := filepath.Join(root, "proj")
+	_ = os.MkdirAll(proj, 0o755)
+	_ = os.MkdirAll(filepath.Join(root, "shared"), 0o755)
+	sch := filepath.Join(proj, "top.kicad_sch")
+	_ = os.WriteFile(sch, []byte(`(kicad_sch (version 20231120) (uuid "11111111-1111-1111-1111-111111111111")
+	(sheet (at 1 1) (size 5 5) (uuid "22222222-2222-2222-2222-222222222222")
+		(property "Sheetname" "sub" (at 1 1 0)) (property "Sheetfile" "../shared/sub.kicad_sch" (at 1 6 0))))
+`), 0o644)
+	missing := filepath.Join(root, "shared", "sub.kicad_sch")
+	stdout, _, code := runCLI(t, "kicad", "render", "--sch", sch, "--out", filepath.Join(root, "out"), "--report", missing)
+	var rep kicadRenderReport
+	_ = json.Unmarshal([]byte(stdout), &rep)
+	if code != 1 || rep.Error == nil || rep.Error.Code != "RENDER_BAD_INPUT" {
+		t.Errorf("report on the missing sheet: exit %d %+v", code, rep.Error)
+	}
+	if _, err := os.Stat(missing); !os.IsNotExist(err) {
+		t.Fatal("report written where the missing sheet belongs")
+	}
+	elsewhere := filepath.Join(root, "r.json")
+	stdout, _, code = runCLI(t, "kicad", "render", "--sch", sch, "--out", filepath.Join(root, "out"), "--report", elsewhere)
+	rep = kicadRenderReport{}
+	_ = json.Unmarshal([]byte(stdout), &rep)
+	if code == 0 || rep.OK {
+		t.Errorf("incomplete closure rendered: exit %d", code)
+	}
+	if _, err := os.Stat(elsewhere); !os.IsNotExist(err) {
+		t.Error("report file written although the closure is incomplete")
+	}
+	if !strings.Contains(strings.Join(rep.Warnings, " "), "stdout only") {
+		t.Errorf("no note that the report stayed on stdout: %v", rep.Warnings)
+	}
+}
+
+// A linked .kicad_pro is protected by its resolved target too.
+func TestKicadRenderReportLinkedProjectTarget(t *testing.T) {
+	root := t.TempDir()
+	proj := filepath.Join(root, "proj")
+	_ = os.MkdirAll(proj, 0o755)
+	sch := filepath.Join(proj, "top.kicad_sch")
+	_ = os.WriteFile(sch, []byte("(kicad_sch (version 20231120) (uuid \"11111111-1111-1111-1111-111111111111\"))\n"), 0o644)
+	target := filepath.Join(root, "elsewhere", "top.kicad_pro")
+	_ = os.MkdirAll(filepath.Dir(target), 0o755)
+	_ = os.WriteFile(target, []byte("{}"), 0o644)
+	if err := os.Symlink(target, filepath.Join(proj, "top.kicad_pro")); err != nil {
+		t.Skipf("cannot create a symlink here: %v", err)
+	}
+	stdout, _, code := runCLI(t, "kicad", "render", "--sch", sch, "--out", filepath.Join(root, "out"), "--report", target)
+	if code != 1 || !strings.Contains(stdout, "RENDER_BAD_INPUT") {
+		t.Errorf("report on the linked .kicad_pro target: exit %d", code)
+	}
+	if b, _ := os.ReadFile(target); string(b) != "{}" {
+		t.Fatal("linked .kicad_pro target overwritten")
+	}
+}

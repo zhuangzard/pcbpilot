@@ -288,3 +288,93 @@ func TestNormalizeSVGHeaderOnly(t *testing.T) {
 		t.Errorf("header not normalised:\n%s", got)
 	}
 }
+
+// Exactly one root <svg>, nothing but whitespace (and prolog) around it;
+// two identical such files are not a passing compare.
+func TestSVGElementsSingleRoot(t *testing.T) {
+	const ok = `<svg><path d="M1 1 L2 2"/></svg>`
+	for _, bad := range []string{ok + ok, ok + "<path d=\"M1 1 L2 2\"/>", ok + "junk", "junk" + ok, ok + "<x/>"} {
+		if _, err := SVGElements([]byte(bad)); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+		root := t.TempDir()
+		for _, d := range []string{"a", "b"} {
+			writeFile(t, filepath.Join(root, d, "p.svg"), bad)
+		}
+		if r := CompareRenders(filepath.Join(root, "a"), filepath.Join(root, "b")); r.Verdict != gate.CannotCheck || r.Counts["unreadable"] != 1 {
+			t.Errorf("identical %q: %s %v", bad, r.Verdict, r.Counts)
+		}
+	}
+	for _, good := range []string{ok, "<?xml version=\"1.0\"?>\n<!-- c -->\n" + ok + "\n<!-- tail -->\n"} {
+		if _, err := SVGElements([]byte(good)); err != nil {
+			t.Errorf("%q rejected: %v", good, err)
+		}
+	}
+}
+
+// A compare never follows links: a linked directory or a linked .svg on
+// either side is unreadable (cannot-check), even without render.json.
+func TestCompareRendersRefusesLinks(t *testing.T) {
+	const svg = `<svg><path d="M1 1 L2 2"/></svg>`
+	root := t.TempDir()
+	base, cur, elsewhere := filepath.Join(root, "base"), filepath.Join(root, "cur"), filepath.Join(root, "elsewhere")
+	for _, d := range []string{base, cur} {
+		writeFile(t, filepath.Join(d, "p.svg"), svg)
+	}
+	writeFile(t, filepath.Join(elsewhere, "q.svg"), svg)
+	makeLink(t, elsewhere, filepath.Join(cur, "sub"))
+	makeLink(t, elsewhere, filepath.Join(base, "sub"))
+	r := CompareRenders(base, cur)
+	if r.Verdict != gate.CannotCheck || r.Counts["unreadable"] != 1 || r.Counts["identical"] != 1 {
+		t.Fatalf("linked dir: %s %v %+v", r.Verdict, r.Counts, r.Files)
+	}
+	f := filepath.Join(root, "f")
+	writeFile(t, filepath.Join(f, "base", "p.svg"), svg)
+	writeFile(t, filepath.Join(f, "target.svg"), svg)
+	if err := os.Symlink(filepath.Join(f, "target.svg"), filepath.Join(f, "cur", "p.svg")); err != nil {
+		if err := os.MkdirAll(filepath.Join(f, "cur"), 0o755); err == nil {
+			if err := os.Symlink(filepath.Join(f, "target.svg"), filepath.Join(f, "cur", "p.svg")); err != nil {
+				t.Skipf("cannot create a file symlink here: %v", err)
+			}
+		}
+	}
+	if r := CompareRenders(filepath.Join(f, "base"), filepath.Join(f, "cur")); r.Verdict != gate.CannotCheck || r.Counts["unreadable"] != 1 {
+		t.Fatalf("linked svg: %s %v", r.Verdict, r.Counts)
+	}
+}
+
+// A missing external sheet makes the closure incomplete and stays in the
+// protected set; a linked .kicad_pro is protected as link and as target.
+func TestRenderDependenciesProtectUnresolvedAndTargets(t *testing.T) {
+	ws := t.TempDir()
+	root := schProject(t, ws, "../shared/sub.kicad_sch")
+	missing := filepath.Join(ws, "shared", "sub.kicad_sch")
+	if err := os.Remove(missing); err != nil {
+		t.Fatal(err)
+	}
+	files, _, complete, err := RenderDependencies(root)
+	if err != nil || complete {
+		t.Fatalf("complete=%v err=%v", complete, err)
+	}
+	found := false
+	for _, f := range files {
+		found = found || strings.EqualFold(f, missing)
+	}
+	if !found {
+		t.Errorf("missing sheet %s not protected: %v", missing, files)
+	}
+	writeFile(t, missing, `(kicad_sch (version 20231120) (generator "test") (uuid "33333333-3333-3333-3333-333333333333"))`+"\n")
+	target := filepath.Join(ws, "elsewhere", "top.kicad_pro")
+	writeFile(t, target, "{}")
+	if err := os.Symlink(target, filepath.Join(ws, "proj", "top.kicad_pro")); err != nil {
+		t.Skipf("cannot create a symlink here: %v", err)
+	}
+	files, _, complete, _ = RenderDependencies(root)
+	found = false
+	for _, f := range files {
+		found = found || strings.EqualFold(f, target)
+	}
+	if !complete || !found {
+		t.Errorf("linked .kicad_pro target not protected (complete=%v): %v", complete, files)
+	}
+}

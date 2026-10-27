@@ -138,7 +138,9 @@ pcbpilot kicad render --out build/render --compare old/render              # 只
   `.svg`/`.png`，`RENDER_OUT_BAD_MANIFEST`），一律拒绝、什么都不删。`--compare` 与 `--out` 是同一目录（含链接/联接）也拒绝；
   `--report` 在任何写入之前检查：落在输入的工程目录（含输入文件本身）、依赖闭包里的子图/库/图框、`--out` 或 `--compare` 里，
   或与其中任一文件是同一文件（含硬链接）一律拒绝（退出 1）；报告用临时文件 + 改名写入，不截断已有文件。链接形式的
-  `.kicad_pro`/库表按解析后的内容复制，解析不到判 cannot-check。路径数据只有 move 没有画线段的 path 不算画了东西。
+  `.kicad_pro`/库表按解析后的内容复制，解析不到判 cannot-check；链接本身和它指向的文件都受 `--report` 保护，找不到的依赖路径
+  也受保护。依赖闭包不完整时报告只打到 stdout、不写 `--report` 文件。路径数据只有 move 没有画线段的 path 不算画了东西；SVG 必须
+  恰好一个 `<svg>` 根元素。`--compare` 不跟随链接：链接目录或非普通文件的 `.svg` 记 unreadable（cannot-check）。
 - `--compare` 逐文件：`identical`（规范化后字节相同）/ `changed`（结构化 SVG 比较：每个绘制元素连同排序后的属性、文字和所在
   `<g>` 的样式作多重集合比较，给 `elementsAdded/elementsRemoved/changedElements` 和几条样例；只换了绘制顺序记 `reordered`）/
   `added` / `removed` / `unreadable`（解析不了、没画东西——两份相同的空图也不算通过——或 `render.json` 列了却不存在）。

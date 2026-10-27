@@ -312,6 +312,7 @@ func SVGElements(b []byte) ([]string, error) {
 	var uses []string // targets of <use> outside hidden containers
 	visible := 0
 	root := ""
+	closed := false // the root element has ended
 	for {
 		tok, err := dec.Token()
 		if err == io.EOF {
@@ -322,7 +323,10 @@ func SVGElements(b []byte) ([]string, error) {
 		}
 		switch t := tok.(type) {
 		case xml.StartElement:
-			if root == "" {
+			if len(stack) == 0 {
+				if closed {
+					return nil, fmt.Errorf("element <%s> after the root <svg>", t.Name.Local)
+				}
 				if root = t.Name.Local; root != "svg" {
 					return nil, fmt.Errorf("root element is <%s>, not <svg>", root)
 				}
@@ -359,6 +363,8 @@ func SVGElements(b []byte) ([]string, error) {
 		case xml.CharData:
 			if n := len(stack); n > 0 && stack[n-1].name == "text" {
 				stack[n-1].text.Write(t)
+			} else if n == 0 && strings.TrimSpace(string(t)) != "" {
+				return nil, fmt.Errorf("text outside the root <svg>")
 			}
 		case xml.EndElement:
 			n := len(stack)
@@ -367,6 +373,7 @@ func SVGElements(b []byte) ([]string, error) {
 			}
 			f := stack[n-1]
 			stack = stack[:n-1]
+			closed = closed || n == 1
 			txt := strings.TrimSpace(f.text.String())
 			if f.key >= 0 && f.name == "text" && txt != "" {
 				out[f.key] += "=" + txt
@@ -433,19 +440,31 @@ type renderSide struct {
 	svgs   map[string]string
 	pngs   []string
 	listed map[string]bool
+	bad    map[string]string // non-regular .svg entries and linked dirs → why
 }
 
 func readRenderSide(dir string) (*renderSide, error) {
-	s := &renderSide{svgs: map[string]string{}}
+	s := &renderSide{svgs: map[string]string{}, bad: map[string]string{}}
 	err := filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if !d.Type().IsRegular() {
-			return nil // directories are walked; links are never followed
-		}
 		rel, _ := filepath.Rel(dir, p)
 		rel = filepath.ToSlash(rel)
+		if d.IsDir() {
+			return nil // real directories are walked
+		}
+		if !d.Type().IsRegular() {
+			// Links are never followed: a linked directory or a non-regular
+			// .svg is a file this side cannot vouch for.
+			isSVG := strings.EqualFold(filepath.Ext(p), ".svg")
+			if st, err := os.Stat(p); err == nil && st.IsDir() {
+				s.bad[rel+"/"] = "linked directory (not followed)"
+			} else if isSVG {
+				s.bad[rel] = "not a regular file (link or special file)"
+			}
+			return nil
+		}
 		switch strings.ToLower(filepath.Ext(p)) {
 		case ".svg":
 			s.svgs[rel] = p
@@ -484,11 +503,11 @@ func CompareRenders(baseline, current string) *RenderCompare {
 	base, berr := readRenderSide(baseline)
 	cur, cerr := readRenderSide(current)
 	switch {
-	case berr != nil || len(base.svgs)+len(base.listed) == 0:
+	case berr != nil || len(base.svgs)+len(base.listed)+len(base.bad) == 0:
 		r.Verdict, r.Fix = gate.CannotCheck, "point --compare at the --out directory of an earlier kicad render"
 		r.Notes = append(r.Notes, fmt.Sprintf("baseline %s has no usable render (%v)", baseline, berr))
 		return r
-	case cerr != nil || len(cur.svgs)+len(cur.listed) == 0:
+	case cerr != nil || len(cur.svgs)+len(cur.listed)+len(cur.bad) == 0:
 		r.Verdict, r.Fix = gate.CannotCheck, "render first (--sch or --pcb) or point --out at a rendered directory"
 		r.Notes = append(r.Notes, fmt.Sprintf("current %s has no usable render (%v)", current, cerr))
 		return r
@@ -512,6 +531,11 @@ func CompareRenders(baseline, current string) *RenderCompare {
 			names[n] = true
 		}
 	}
+	for _, m := range []map[string]string{base.bad, cur.bad} {
+		for n := range m {
+			names[n] = true
+		}
+	}
 	order := make([]string, 0, len(names))
 	for n := range names {
 		order = append(order, n)
@@ -522,6 +546,10 @@ func CompareRenders(baseline, current string) *RenderCompare {
 		var d RenderFileDiff
 		bp, cp := base.svgs[n], cur.svgs[n]
 		switch {
+		case base.bad[n] != "":
+			d = RenderFileDiff{File: n, Status: "unreadable", Detail: "baseline: " + base.bad[n]}
+		case cur.bad[n] != "":
+			d = RenderFileDiff{File: n, Status: "unreadable", Detail: "current: " + cur.bad[n]}
 		case bp == "" && base.listed[n], cp == "" && cur.listed[n]:
 			d = RenderFileDiff{File: n, Status: "unreadable", Detail: "listed in render.json but missing"}
 		default:

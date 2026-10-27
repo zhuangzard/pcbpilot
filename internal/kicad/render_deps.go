@@ -31,6 +31,9 @@ type renderDeps struct {
 	Mirror     []string // absolute files / directories copied below Root
 	InPlace    []string // libraries read where they are (absolute or KiCad variable)
 	Unresolved []string
+	// UnresolvedPaths are the files behind Unresolved that have a path
+	// (missing sheets, unreadable tables…): still protected from --report.
+	UnresolvedPaths []string
 }
 
 var kicadBuiltinVarRE = regexp.MustCompile(`^KICAD\d*_[A-Z0-9_]+$`)
@@ -90,11 +93,13 @@ func (d *renderDeps) walkSheets(file string, seen map[string]bool, depth int) {
 	src, err := os.ReadFile(file)
 	if err != nil {
 		d.Unresolved = append(d.Unresolved, fmt.Sprintf("sheet %s: %v", file, err))
+		d.UnresolvedPaths = append(d.UnresolvedPaths, file)
 		return
 	}
 	n, err := parseSx(string(src))
 	if err != nil {
 		d.Unresolved = append(d.Unresolved, fmt.Sprintf("sheet %s: %v", file, err))
+		d.UnresolvedPaths = append(d.UnresolvedPaths, file)
 		return
 	}
 	for _, c := range n.list {
@@ -110,11 +115,13 @@ func (d *renderDeps) walkSheets(file string, seen map[string]bool, depth int) {
 			continue
 		case filepath.IsAbs(sub) || filepath.IsAbs(filepath.FromSlash(sub)) || strings.HasPrefix(sub, `\`) || strings.HasPrefix(sub, "/"):
 			d.Unresolved = append(d.Unresolved, fmt.Sprintf("sheet %q in %s: absolute sheet path (make it relative to the project)", sub, filepath.Base(file)))
+			d.UnresolvedPaths = append(d.UnresolvedPaths, filepath.Clean(filepath.FromSlash(sub)))
 			continue
 		}
 		p := filepath.Join(filepath.Dir(file), filepath.FromSlash(sub))
 		if _, err := os.Stat(p); err != nil {
 			d.Unresolved = append(d.Unresolved, fmt.Sprintf("sheet %q in %s: not found next to it", sub, filepath.Base(file)))
+			d.UnresolvedPaths = append(d.UnresolvedPaths, p)
 			continue
 		}
 		d.walkSheets(p, seen, depth+1)
@@ -129,6 +136,7 @@ func (d *renderDeps) libTable(path, head string, lookup func(string) (FPLibVar, 
 	}
 	if err != nil {
 		d.Unresolved = append(d.Unresolved, fmt.Sprintf("%s: %v", filepath.Base(path), err))
+		d.UnresolvedPaths = append(d.UnresolvedPaths, path)
 		return
 	}
 	root, err := parseSexpr(b)
@@ -137,6 +145,7 @@ func (d *renderDeps) libTable(path, head string, lookup func(string) (FPLibVar, 
 	}
 	if err != nil {
 		d.Unresolved = append(d.Unresolved, fmt.Sprintf("%s: %v", filepath.Base(path), err))
+		d.UnresolvedPaths = append(d.UnresolvedPaths, path)
 		return
 	}
 	x := &fpVarExpander{lookup: lookup, t: &FPLibTables{Vars: map[string]FPLibVar{}}}
@@ -159,11 +168,13 @@ func (d *renderDeps) worksheets(pro string, lookup func(string) (FPLibVar, bool)
 	}
 	if err != nil {
 		d.Unresolved = append(d.Unresolved, fmt.Sprintf("%s: %v", filepath.Base(pro), err))
+		d.UnresolvedPaths = append(d.UnresolvedPaths, pro)
 		return
 	}
 	var doc map[string]any
 	if err := json.Unmarshal(b, &doc); err != nil {
 		d.Unresolved = append(d.Unresolved, fmt.Sprintf("%s: not valid JSON (%v)", filepath.Base(pro), err))
+		d.UnresolvedPaths = append(d.UnresolvedPaths, pro)
 		return
 	}
 	x := &fpVarExpander{lookup: lookup, t: &FPLibTables{Vars: map[string]FPLibVar{}}}
@@ -196,6 +207,7 @@ func (d *renderDeps) dependency(where, ref string, x *fpVarExpander, base string
 	}
 	if _, err := os.Stat(p); err != nil {
 		d.Unresolved = append(d.Unresolved, fmt.Sprintf("%s: %s not found", where, p))
+		d.UnresolvedPaths = append(d.UnresolvedPaths, p)
 		return
 	}
 	switch {
@@ -203,6 +215,7 @@ func (d *renderDeps) dependency(where, ref string, x *fpVarExpander, base string
 		d.mirror(p)
 	case mustMirror:
 		d.Unresolved = append(d.Unresolved, fmt.Sprintf("%s: absolute path (make it relative to the project)", where))
+		d.UnresolvedPaths = append(d.UnresolvedPaths, p)
 	default:
 		d.InPlace = append(d.InPlace, p)
 	}
@@ -307,24 +320,54 @@ func copyRenderDeps(d *renderDeps, dst string, models bool) (string, error) {
 	return place(d.ProjDir)
 }
 
-// RenderDependencies lists every file and directory a render of in reads:
-// the input, the project directory's KiCad files, every sheet, library and
-// drawing sheet of its closure (mirrored or read in place). `kicad render
-// --report` must not land on any of them.
-func RenderDependencies(in string) (files, dirs []string, err error) {
+// RenderDependencies lists every file and directory a render of in reads
+// or refers to: the input, the project directory, its KiCad files (a linked
+// one both as the link and as its resolved target), every sheet, library and
+// drawing sheet of the closure, and every reference that could not be
+// resolved. complete is false when the closure has unresolved references.
+// `kicad render --report` must not land on any of them.
+func RenderDependencies(in string) (files, dirs []string, complete bool, err error) {
 	d, err := collectRenderDeps(in)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 	abs, _ := filepath.Abs(in)
 	files = append(files, abs)
 	dirs = append(dirs, d.ProjDir)
-	for _, p := range append(append([]string{}, d.Mirror...), d.InPlace...) {
+	add := func(p string) {
 		if st, err := os.Stat(p); err == nil && st.IsDir() {
 			dirs = append(dirs, p)
 		} else {
 			files = append(files, p)
 		}
+		if r, err := filepath.EvalSymlinks(p); err == nil && r != p {
+			if st, err := os.Stat(r); err == nil && st.IsDir() {
+				dirs = append(dirs, r)
+			} else {
+				files = append(files, r)
+			}
+		}
 	}
-	return files, dirs, nil
+	add(abs)
+	for _, p := range append(append(append([]string{}, d.Mirror...), d.InPlace...), d.UnresolvedPaths...) {
+		add(p)
+	}
+	// Project files, linked ones included (the copy reads through links).
+	_ = filepath.WalkDir(d.ProjDir, func(p string, e os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if e.IsDir() {
+			if p != d.ProjDir && (strings.HasPrefix(e.Name(), ".") || strings.HasSuffix(e.Name(), "-backups")) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(e.Name()))
+		if renderCopyExt[ext] || e.Name() == "sym-lib-table" || e.Name() == "fp-lib-table" {
+			add(p)
+		}
+		return nil
+	})
+	return files, dirs, len(d.Unresolved) == 0, nil
 }

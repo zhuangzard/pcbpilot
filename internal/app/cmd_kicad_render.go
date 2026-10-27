@@ -105,15 +105,16 @@ connectivity is judged from netlists (kicad netlist / sch-read), not pictures.`,
 			// --out / --compare.
 			if report != "" {
 				var files, dirs []string
+				complete := true
 				for _, in := range []string{o.Sch, o.PCB} {
 					if in == "" {
 						continue
 					}
 					abs, _ := filepath.Abs(in)
 					files, dirs = append(files, abs), append(dirs, filepath.Dir(abs))
-					if f, d, err := kicad.RenderDependencies(in); err == nil {
-						files, dirs = append(files, f...), append(dirs, d...)
-					}
+					f, d, ok, err := kicad.RenderDependencies(in)
+					files, dirs = append(files, f...), append(dirs, d...)
+					complete = complete && ok && err == nil
 				}
 				dirs = append(dirs, o.OutDir)
 				if compare != "" {
@@ -122,6 +123,12 @@ connectivity is judged from netlists (kicad netlist / sch-read), not pictures.`,
 				if err := checkReportPath(report, files, dirs); err != nil {
 					report = ""
 					return fail(err)
+				}
+				if !complete {
+					// With an incomplete closure the protected set is
+					// incomplete too: the report goes to stdout only.
+					rep.Warnings = append(rep.Warnings, "report: not written to "+report+" (the project's dependencies could not all be resolved); stdout only")
+					report = ""
 				}
 			}
 			if o.Sch == "" && o.PCB == "" && compare == "" {
@@ -135,7 +142,7 @@ connectivity is judged from netlists (kicad netlist / sch-read), not pictures.`,
 				if err != nil {
 					return fail(err)
 				}
-				rep.Render, rep.Warnings = m, m.Warnings
+				rep.Render, rep.Warnings = m, append(rep.Warnings, m.Warnings...)
 			}
 			rep.OK = true
 			if compare != "" {
@@ -239,7 +246,12 @@ func checkReportPath(report string, files, dirs []string) error {
 				if err != nil || hit != "" {
 					return filepath.SkipDir
 				}
-				if e.Type().IsRegular() && same(p) {
+				if e.IsDir() {
+					return nil
+				}
+				// Stat follows links: a linked file is compared by the
+				// identity of the file it points to.
+				if st, err := os.Stat(p); err == nil && st.Mode().IsRegular() && same(p) {
 					hit = p
 				}
 				return nil
