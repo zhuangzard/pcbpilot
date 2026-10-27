@@ -240,18 +240,6 @@ func LibSymbolProperty(sym, name string) string {
 	return propVal(n, name)
 }
 
-// SymbolExtends reports the parent name of a derived library symbol.
-func SymbolExtends(sym string) string {
-	n, err := parseSx(strings.TrimSpace(sym))
-	if err != nil {
-		return ""
-	}
-	if x := n.child("extends"); x != nil && len(x.list) > 1 {
-		return x.list[1].atom
-	}
-	return ""
-}
-
 // LibSymbolNames lists the top-level symbol names of a .kicad_sym file.
 func LibSymbolNames(path string) ([]string, error) {
 	b, err := os.ReadFile(path)
@@ -352,12 +340,12 @@ func LibSymbolCached(path, name string) (string, error) {
 		libFileCache.m[key] = syms
 		libFileCache.Unlock()
 	}
-	t, ok := syms[name]
-	if !ok {
+	if _, ok := syms[name]; !ok {
 		return "", fmt.Errorf("symbol %q not in %s", name, path)
 	}
-	if n, err := parseSx(t); err == nil && n.child("extends") != nil {
-		return "", fmt.Errorf("%s:%s extends another symbol (not supported; flatten it in the symbol editor)", path, name)
+	t, err := FlattenLibSymbol(syms, name) // a derived symbol comes back flattened
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", path, err)
 	}
 	return t, nil
 }

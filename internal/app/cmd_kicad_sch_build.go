@@ -109,6 +109,9 @@ type sbPart struct {
 	// BBox is informational (sch-read output: minX,minY,maxX,maxY mm on
 	// its sheet); the build ignores it.
 	BBox []float64 `json:"bboxMm,omitempty"`
+	// Units is informational too (sch-read: the units of a multi-unit
+	// symbol placed on the sheets); the build places every unit.
+	Units []int `json:"units,omitempty"`
 }
 
 type sbPin struct {
@@ -671,10 +674,8 @@ func resolveSymbols(parts []*sbRPart, opts sbResolveOpts, libDirs []string) (st 
 				diags = append(diags, sbDiag{Code: "SYMBOL_NOT_FOUND", Message: fmt.Sprintf("%s: %v", p.Ref, err), Fix: "check Lib:Name, add libDirs, or give lcsc/pins"})
 				continue
 			}
-			if parent := kicad.SymbolExtends(t); parent != "" {
-				diags = append(diags, sbDiag{Code: "SYMBOL_DERIVED", Message: fmt.Sprintf("%s: symbol %s extends %s (derived symbols are not supported; use the parent, an LCSC number or a pin list)", p.Ref, p.Symbol, parent), Fix: "use the parent symbol, an LCSC number or a pin list"})
-				continue
-			}
+			// t is flattened: a derived symbol (LM358 extends LM2904) carries
+			// its parent's units and pins under its own name.
 			lib, name, _ := strings.Cut(p.Symbol, ":")
 			if strings.HasSuffix(lib, ".kicad_sym") {
 				lib = strings.TrimSuffix(filepath.Base(lib), ".kicad_sym")

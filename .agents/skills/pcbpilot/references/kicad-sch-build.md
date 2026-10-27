@@ -11,7 +11,11 @@
 2. 器件优先给 LCSC C 号（`kicad lcsc --search` 选件）；没有 C 号或离线时给 `pins`（生成方框符号），
    或 `symbol: "Device:R"` 这类 KiCad 自带符号。标准电路用块（`pcbpilot blocks search …`）。
 3. 网的引脚写 `REF:脚名` 或 `REF:脚号`；电源网写 `rails`（电压、电流 → intent derive 的线宽/IR/安全）。
-4. 一次构建失败时读 `error.code` / `error.fix`；spec 问题是一次全部列出的（例如 `PIN_NOT_ON_SYMBOL` 会给出
+4. **多单元器件**（双运放、四与非门、带独立电源单元的器件）：spec 里只写一个件，`REF:脚号` 可指任何单元的脚
+   （`U1:5` 是 B 单元，`U1:8`/`U1:4` 是电源单元）；sch-build 画出**全部**单元（含电源单元，ERC 不报缺单元）。
+   KiCad 派生符号（`Amplifier_Operational:LM358`、`74xx:74HC00` 这类 `extends` 的）自动展平后使用。
+   sch-read 的 `units` 列出已放的单元；`set_value` / `set_field` / `remove_part` 作用于该位号的全部单元。
+5. 一次构建失败时读 `error.code` / `error.fix`；spec 问题是一次全部列出的（例如 `PIN_NOT_ON_SYMBOL` 会给出
    符号真实的脚号脚名），一轮改完再跑。门禁失败时 `--out` 不会被改动。
 
 ## 流程

@@ -142,9 +142,11 @@ type sbReport struct {
 type sbBox struct {
 	Sheet string    `json:"sheet"`
 	Box   []float64 `json:"bboxMm"`
+	Units []int     `json:"units,omitempty"` // placed units, ascending
 }
 
-// sbPartBoxes reads every sheet back: ref → body box (all units).
+// sbPartBoxes reads every sheet back: ref → body box (all units) and the
+// units placed.
 func sbPartBoxes(dir string, files []string) map[string]sbBox {
 	out := map[string]sbBox{}
 	for _, f := range files {
@@ -168,10 +170,13 @@ func sbPartBoxes(dir string, files []string) map[string]sbBox {
 				continue
 			}
 			b := s.Box
+			units := []int{s.Unit}
 			if old, ok := out[s.Ref]; ok {
 				b = sbBoxUnion(b, kicad.Box{MinX: old.Box[0], MinY: old.Box[1], MaxX: old.Box[2], MaxY: old.Box[3]})
+				units = append(old.Units, s.Unit)
+				sort.Ints(units)
 			}
-			out[s.Ref] = sbBox{Sheet: f, Box: []float64{sbRound2(b.MinX), sbRound2(b.MinY), sbRound2(b.MaxX), sbRound2(b.MaxY)}}
+			out[s.Ref] = sbBox{Sheet: f, Box: []float64{sbRound2(b.MinX), sbRound2(b.MinY), sbRound2(b.MaxX), sbRound2(b.MaxY)}, Units: units}
 		}
 	}
 	return out

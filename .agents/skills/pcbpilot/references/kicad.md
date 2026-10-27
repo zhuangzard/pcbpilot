@@ -9,6 +9,10 @@
 
 > 原理图：用 `kicad sch-build`（spec → 完整工程，一次调用，见 [kicad-sch-build.md](kicad-sch-build.md)），
 > 不再逐步调用 `sch place / autoconnect --backend kicad`。
+> 仍需逐件改单张图时（`--backend kicad --kicad-sch X`），多单元器件每个单元是一个实例：`sch place` 同一
+> `--designator` 加 `--unit 2/3…` 逐个放（新单元继承已放单元的字段，冲突的 `--value/--footprint/--lcsc` 拒绝）；
+> `sch modify --id U1` 的字段与改位号作用于全部单元，移动要写 `--id U1:2`（只写 `U1` 且有多个单元时拒绝）；
+> `sch prim-delete --ids U1` 删全部单元，`U1:2` 只删该单元；`REF.PIN` 可指任何已放单元的脚。
 
 ## 工作方式
 
