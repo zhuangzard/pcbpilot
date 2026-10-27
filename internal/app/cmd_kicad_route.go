@@ -1051,31 +1051,7 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 	// KiCad DRC (errors gate; warnings reported).
 	// One kicad-cli run (all severities): the errors gate and the reported
 	// warnings come from the same report.
-	drcPath := filepath.Join(o.outDir, "drc.json")
-	allPath := filepath.Join(o.outDir, "drc-all.json")
-	all, err := r.kt.DRCSeverity(routed, allPath, "all")
-	var drcRep *kicad.DRCReport
-	if err != nil {
-		r.add(kicadDRCCannotCheck(err))
-	} else {
-		rep, warn, nWarn := all.SplitErrors()
-		drcRep = rep
-		_ = writeJSONFile(drcPath, rep)
-		g := kicadDRCGate(rep, drcPath)
-		pre := map[string]int{}
-		for _, v := range rep.Violations {
-			if r.inputDRC[v.Rule+"|"+v.Message] {
-				pre[v.Rule]++
-			}
-		}
-		for k, n := range pre {
-			g.Info = append(g.Info, fmt.Sprintf("%s: %d of these already in the input board (placement / footprints, not routing)", k, n))
-		}
-		sort.Strings(g.Info)
-		r.add(g)
-		_ = writeJSONFile(filepath.Join(o.outDir, "drc-flat.json"), kicadDRCFlat(rep))
-		r.summary["drc"] = map[string]any{"file": drcPath, "allFile": allPath, "total": rep.Total, "counts": rep.Counts, "warnings": nWarn, "warningCounts": warn}
-	}
+	all, drcRep := r.routedDRCGate(routed)
 	snap, raw, err := r.snapshot(routed)
 	if err != nil {
 		return false, err
@@ -1399,6 +1375,40 @@ func (r *kicadRun) starvedThermals(board string) (string, error) {
 	return out, nil
 }
 
+// routedDRCGate runs kicad-cli DRC (all severities) on the routed board and
+// adds the kicad-drc gate: errors gate, warnings reported. It returns the
+// full report and its error part; a report that cannot be read adds a
+// failing "cannot check" gate and returns nils.
+func (r *kicadRun) routedDRCGate(routed string) (all, errs *kicad.DRCReport) {
+	drcPath := filepath.Join(r.o.outDir, "drc.json")
+	allPath := filepath.Join(r.o.outDir, "drc-all.json")
+	all, err := r.kt.DRCSeverity(routed, allPath, "all")
+	if err != nil {
+		// No counts: closureGates must not read a stale or absent report
+		// as "placement-only".
+		r.summary["drc"] = map[string]any{"file": allPath, "error": err.Error()}
+		r.add(kicadDRCCannotCheck(err))
+		return nil, nil
+	}
+	rep, warn, nWarn := all.SplitErrors()
+	_ = writeJSONFile(drcPath, rep)
+	g := kicadDRCGate(rep, drcPath)
+	pre := map[string]int{}
+	for _, v := range rep.Violations {
+		if r.inputDRC[v.Rule+"|"+v.Message] {
+			pre[v.Rule]++
+		}
+	}
+	for k, n := range pre {
+		g.Info = append(g.Info, fmt.Sprintf("%s: %d of these already in the input board (placement / footprints, not routing)", k, n))
+	}
+	sort.Strings(g.Info)
+	r.add(g)
+	_ = writeJSONFile(filepath.Join(r.o.outDir, "drc-flat.json"), kicadDRCFlat(rep))
+	r.summary["drc"] = map[string]any{"file": drcPath, "allFile": allPath, "total": rep.Total, "counts": rep.Counts, "warnings": nWarn, "warningCounts": warn}
+	return all, rep
+}
+
 // placementDRC are KiCad DRC rules that copper widening cannot cause or fix
 // (footprint placement and library data).
 var placementDRC = map[string]bool{"courtyards_overlap": true, "malformed_courtyard": true, "missing_courtyard": true,
@@ -1416,9 +1426,12 @@ func (r *kicadRun) closureGates() []gateResult {
 			continue
 		}
 		if g.Gate == "kicad-drc" && !g.Pass {
-			onlyPlacement := true
+			// Only a report that was read and names its rules can be
+			// placement-only; a DRC that could not be checked never is.
+			onlyPlacement := false
 			if c, ok := r.summary["drc"].(map[string]any); ok {
-				if counts, ok := c["counts"].(map[string]int); ok {
+				if counts, ok := c["counts"].(map[string]int); ok && len(counts) > 0 {
+					onlyPlacement = true
 					for rule := range counts {
 						onlyPlacement = onlyPlacement && placementDRC[rule]
 					}

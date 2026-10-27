@@ -41,7 +41,8 @@ it does not own are reported, never zipped. A file this run would write that
 exists but is not in the manifest (a user's file, or an output of a pcbpilot
 without manifests) stops the run before anything is touched; a symlinked or
 junctioned OUT or OUT/gerber is refused. If installing fails part-way, the
-previous run's files are put back.
+previous run's files are put back. Runs into one OUT are serialized by
+OUT/.pcbpilot-fab.lock: a second concurrent run is refused.
 
 The BOM and CPL must list the same designators, each exactly once: a part in
 one but not the other, a duplicate or an empty designator fails the run

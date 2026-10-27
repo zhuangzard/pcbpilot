@@ -70,6 +70,10 @@ func fakeKiCadCLI(args []string) int {
 			return 1
 		}
 	case "pcb drc --format":
+		code, _ := strconv.Atoi(os.Getenv("PCBPILOT_FAKE_EXIT"))
+		if strings.HasSuffix(os.Getenv("PCBPILOT_FAKE_DRC"), "NO-REPORT") {
+			return code // "succeeds" without writing a report
+		}
 		b, err := os.ReadFile(os.Getenv("PCBPILOT_FAKE_DRC"))
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -78,7 +82,6 @@ func fakeKiCadCLI(args []string) int {
 		if err := os.WriteFile(flag("-o"), b, 0o644); err != nil {
 			return 1
 		}
-		code, _ := strconv.Atoi(os.Getenv("PCBPILOT_FAKE_EXIT"))
 		return code
 	default:
 		fmt.Fprintln(os.Stderr, "fake kicad-cli: unsupported", args)
@@ -265,7 +268,7 @@ func snapshotDir(t *testing.T, dir string) map[string]string {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !info.IsDir() {
+		if !info.IsDir() && info.Name() != fabLockName { // the Unix lock file stays
 			b, _ := os.ReadFile(p)
 			rel, _ := filepath.Rel(dir, p)
 			m[filepath.ToSlash(rel)] = string(b)
@@ -404,16 +407,19 @@ func TestRunFabRefusesLinkedGerberDir(t *testing.T) {
 	os.WriteFile(victim, []byte("not pcbpilot's"), 0o644)
 	os.WriteFile(filepath.Join(out, fabManifestName), []byte(`{"files":[],"gerbers":["board-In1_Cu.g1"]}`), 0o644)
 	link := filepath.Join(out, "gerber")
-	how := "symlink"
-	if err := os.Symlink(outside, link); err != nil {
-		how = "junction"
-		if runtime.GOOS != "windows" || exec.Command("cmd", "/c", "mklink", "/J", link, outside).Run() != nil {
-			t.Skipf("cannot create a symlink or junction here: %v", err)
+	how := linkDir(t, outside, link)
+	// Also spelled with trailing separators, which would make Lstat follow it.
+	for _, o := range []string{out, out + string(filepath.Separator), out + "/", out + string(filepath.Separator) + "."} {
+		_, err := RunFab(FabOptions{PCB: writeBoard(t, t.TempDir(), "board.kicad_pcb", true), OutDir: o, NoAssembly: true, Tools: tools})
+		if err == nil || !strings.Contains(err.Error(), "symlink/junction") {
+			t.Fatalf("linked (%s) gerber dir accepted via %q: %v", how, o, err)
 		}
 	}
-	_, err := RunFab(FabOptions{PCB: writeBoard(t, t.TempDir(), "board.kicad_pcb", true), OutDir: out, NoAssembly: true, Tools: tools})
-	if err == nil || !strings.Contains(err.Error(), "symlink/junction") {
-		t.Fatalf("linked (%s) gerber dir accepted: %v", how, err)
+	// OUT itself linked, given as "link/".
+	outLink := filepath.Join(root, "outlink")
+	linkDir(t, outside, outLink)
+	if _, err := RunFab(FabOptions{PCB: writeBoard(t, t.TempDir(), "board.kicad_pcb", true), OutDir: outLink + string(filepath.Separator), NoAssembly: true, Tools: tools}); err == nil || !strings.Contains(err.Error(), "symlink/junction") {
+		t.Fatalf("linked OUT accepted with a trailing separator: %v", err)
 	}
 	if b, _ := os.ReadFile(victim); string(b) != "not pcbpilot's" {
 		t.Fatal("file outside OUT touched")
@@ -678,5 +684,107 @@ func TestLiveBOMCPLOnDemo(t *testing.T) {
 	os.WriteFile(pcb, bytes.Replace(b, []byte(`(property "Reference" "R2"`), []byte(`(property "Reference" "R1"`), 1), 0o644)
 	if p, _ := check(); strings.Join(codes(p), " ") != "CPL_DUPLICATE_REF:R1" {
 		t.Fatalf("duplicate R1: %v", codes(p))
+	}
+}
+
+// linkDir makes link point at target: a symlink, or on Windows without the
+// symlink privilege a junction (mklink /J needs no privilege).
+func linkDir(t *testing.T, target, link string) string {
+	t.Helper()
+	err := os.Symlink(target, link)
+	if err == nil {
+		return "symlink"
+	}
+	if runtime.GOOS == "windows" && exec.Command("cmd", "/c", "mklink", "/J", link, target).Run() == nil {
+		return "junction"
+	}
+	t.Skipf("cannot create a symlink or junction here: %v", err)
+	return ""
+}
+
+// Overlapping runs into one OUT: the second is refused while the first
+// holds the lock, and runs normally once it is released.
+func TestRunFabLocksOut(t *testing.T) {
+	tools := fakeCLI(t)
+	out := t.TempDir()
+	unlock, err := lockFabOut(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lockFabOut(out); !errors.Is(err, ErrFabBusy) {
+		t.Fatalf("second lock: %v", err)
+	}
+	pcb := writeBoard(t, t.TempDir(), "board.kicad_pcb", true)
+	if _, err := RunFab(FabOptions{PCB: pcb, OutDir: out, NoAssembly: true, Tools: tools}); !errors.Is(err, ErrFabBusy) {
+		t.Fatalf("run during another run: %v", err)
+	}
+	if n := snapshotDir(t, out); len(n) != 0 {
+		t.Fatalf("a refused run wrote %v", n)
+	}
+	unlock()
+	if _, err := RunFab(FabOptions{PCB: pcb, OutDir: out, NoAssembly: true, Tools: tools}); err != nil {
+		t.Fatal(err)
+	}
+	// Two real runs at once: exactly the successful ones publish, and OUT
+	// ends up a complete single set.
+	errs := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			_, err := RunFab(FabOptions{PCB: pcb, OutDir: out, NoAssembly: true, Tools: tools})
+			errs <- err
+		}()
+	}
+	for i := 0; i < 2; i++ {
+		if err := <-errs; err != nil && !errors.Is(err, ErrFabBusy) {
+			t.Fatalf("concurrent run: %v", err)
+		}
+	}
+	if z := zipNames(t, filepath.Join(out, "board-gerber.zip")); len(z) != 11 {
+		t.Fatalf("zip after concurrent runs: %v", z)
+	}
+}
+
+// A manifest-owned path that turned into a directory is refused before
+// anything moves; one that turned into a symlink is moved as the link,
+// never followed.
+func TestPublishFabOwnedPathChangedKind(t *testing.T) {
+	tools := fakeCLI(t)
+	src := t.TempDir()
+	run := func(out string, twoLayer bool) error {
+		_, err := RunFab(FabOptions{PCB: writeBoard(t, src, "board.kicad_pcb", twoLayer), OutDir: out, NoAssembly: true, Tools: tools})
+		return err
+	}
+	out := t.TempDir()
+	if err := run(out, false); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(out, "gerber", "board-In1_Cu.g1") // owned, not produced by a 2-layer run
+	os.Remove(stale)
+	os.MkdirAll(filepath.Join(stale, "keep"), 0o755)
+	before := snapshotDir(t, out)
+	if err := run(out, true); !errors.Is(err, ErrFabCollision) || !strings.Contains(err.Error(), "board-In1_Cu.g1") {
+		t.Fatalf("owned path now a directory: %v", err)
+	}
+	sameSnapshot(t, "owned dir refused", snapshotDir(t, out), before)
+
+	out = t.TempDir()
+	if err := run(out, false); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "target.txt")
+	os.WriteFile(target, []byte("outside"), 0o644)
+	stale = filepath.Join(out, "gerber", "board-In1_Cu.g1")
+	os.Remove(stale)
+	if err := os.Symlink(target, stale); err != nil {
+		t.Skipf("cannot create a file symlink here: %v", err)
+	}
+	if err := run(out, true); err != nil {
+		t.Fatal(err)
+	}
+	if exists(stale) {
+		t.Error("owned stale symlink kept")
+	}
+	if b, err := os.ReadFile(target); err != nil || string(b) != "outside" {
+		t.Errorf("symlink target touched: %q %v", b, err)
 	}
 }

@@ -16,7 +16,13 @@ import (
 const (
 	fabReportName   = "fab-report.json"
 	fabManifestName = ".pcbpilot-fab-manifest.json"
+	fabLockName     = ".pcbpilot-fab.lock"
 )
+
+// ErrFabBusy is returned (wrapped) when another `kicad fab` run holds OUT.
+var ErrFabBusy = errors.New("another kicad fab run is writing this output directory (fix: wait for it, or use another --out)")
+
+func fabLockPath(outDir string) string { return filepath.Join(outDir, fabLockName) }
 
 // ErrFabCollision is returned (wrapped) when a file this run would write
 // already exists in OUT and the previous run's manifest does not list it.
@@ -100,9 +106,17 @@ func checkFabOutDirs(outDir string) error {
 	return nil
 }
 
-func isRegular(p string) bool {
+// movable reports a path publishFab may move aside: a regular file or a
+// symlink (renamed as the link itself, never followed). A directory, a
+// junction or anything else at a manifest path is refused instead.
+func movable(p string) bool {
 	st, err := os.Lstat(p)
-	return err == nil && st.Mode().IsRegular()
+	return err == nil && (st.Mode().IsRegular() || st.Mode()&os.ModeSymlink != 0)
+}
+
+func exists(p string) bool {
+	_, err := os.Lstat(p)
+	return err == nil
 }
 
 func nameSet(list []string) map[string]bool {
@@ -113,26 +127,47 @@ func nameSet(list []string) map[string]bool {
 	return m
 }
 
-// fabCollisions lists the destinations this run would write that exist and
-// are not a regular file the previous manifest owns.
+// fabCollisions lists what stops a publish before anything is touched: a
+// destination this run would write that exists and is not a movable entry
+// the previous manifest owns, and a manifest-owned path that has become a
+// directory (or junction).
 func fabCollisions(outDir string, prev fabManifest, files, gerbers []string) []string {
 	var out []string
+	seen := map[string]bool{}
+	add := func(p string) {
+		if !seen[p] {
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	gdir := filepath.Join(outDir, "gerber")
 	check := func(dir string, owned map[string]bool, names []string) {
 		for _, n := range names {
-			p := filepath.Join(dir, n)
-			if _, err := os.Lstat(p); err == nil && !(owned[n] && isRegular(p)) {
-				out = append(out, p)
+			if p := filepath.Join(dir, n); exists(p) && !(owned[n] && movable(p)) {
+				add(p)
 			}
 		}
 	}
 	check(outDir, nameSet(prev.Files), files)
-	check(filepath.Join(outDir, "gerber"), nameSet(prev.Gerbers), gerbers)
-	if p := filepath.Join(outDir, fabManifestName); !isRegular(p) {
-		if _, err := os.Lstat(p); err == nil {
-			out = append(out, p)
+	check(gdir, nameSet(prev.Gerbers), gerbers)
+	for _, p := range manifestPaths(outDir, prev) {
+		if exists(p) && !movable(p) {
+			add(p)
 		}
 	}
 	return out
+}
+
+// manifestPaths are the previous run's paths in OUT, manifest included.
+func manifestPaths(outDir string, prev fabManifest) []string {
+	var ps []string
+	for _, n := range prev.Gerbers {
+		ps = append(ps, filepath.Join(outDir, "gerber", n))
+	}
+	for _, n := range prev.Files {
+		ps = append(ps, filepath.Join(outDir, n))
+	}
+	return append(ps, filepath.Join(outDir, fabManifestName))
 }
 
 // foreignFabFiles lists Gerber/drill-looking files in OUT/gerber that no
@@ -167,7 +202,8 @@ func foreignFabFiles(outDir string, prev fabManifest, gerbers []string) ([]strin
 // back to OUT, so OUT holds the previous set again. The caller deletes the
 // stage (and with it the backups) unless keep is true: a rollback that
 // itself failed leaves the previous files there, named in the error.
-// fabCollisions must have returned nothing for the same arguments.
+// fabCollisions must have returned nothing for the same arguments, and the
+// caller must hold the OUT lock (lockFabOut).
 func publishFab(outDir, stage string, prev fabManifest, files, gerbers []string) (keep bool, err error) {
 	gdir := filepath.Join(outDir, "gerber")
 	bak := filepath.Join(stage, "backup")
@@ -207,18 +243,16 @@ func publishFab(outDir, stage string, prev fabManifest, files, gerbers []string)
 		*list = append(*list, move{from, to})
 		return nil
 	}
-	for _, n := range prev.Gerbers {
-		if p := filepath.Join(gdir, n); isRegular(p) {
-			if err := mv(&backedUp, p, filepath.Join(bak, "gerber", n)); err != nil {
-				return false, err
-			}
+	for _, p := range manifestPaths(outDir, prev) {
+		if !movable(p) {
+			continue // absent (fabCollisions refused anything else)
 		}
-	}
-	for _, n := range append(append([]string{}, prev.Files...), fabManifestName) {
-		if p := filepath.Join(outDir, n); isRegular(p) {
-			if err := mv(&backedUp, p, filepath.Join(bak, n)); err != nil {
-				return false, err
-			}
+		to := filepath.Join(bak, filepath.Base(p))
+		if filepath.Dir(p) == gdir {
+			to = filepath.Join(bak, "gerber", filepath.Base(p))
+		}
+		if err := mv(&backedUp, p, to); err != nil {
+			return false, err
 		}
 	}
 	for _, n := range gerbers {

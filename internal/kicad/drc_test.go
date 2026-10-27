@@ -29,6 +29,14 @@ func TestParseDRCValid(t *testing.T) {
 	if rep.Total != 3 || rep.Counts["clearance"] != 1 || rep.Counts["unconnected_items"] != 1 || rep.Counts["track_width"] != 1 {
 		t.Fatalf("report with violations: %+v", rep)
 	}
+	// A real kicad-cli 10.0.6 report (KiCad's microwave demo, --severity-all).
+	rep, err = ParseDRC(readDRCFixture(t, "drc/kicad10-microwave-all.json"))
+	if err != nil || rep.Total != 24 {
+		t.Fatalf("kicad-cli 10 report: %+v %v", rep, err)
+	}
+	if errs, _, nWarn := rep.SplitErrors(); errs.Total != 8 || nWarn != 16 {
+		t.Fatalf("kicad-cli 10 report split: %d errors, %d warnings", errs.Total, nWarn)
+	}
 	// drc.json carries schematic_parity: [] so it also passes the parity variant.
 	if _, err := ParseDRCWith(readDRCFixture(t, "drc.json"), DRCParseOptions{SchematicParity: true}); err != nil {
 		t.Fatal(err)
@@ -51,6 +59,11 @@ func TestParseDRCRejectsUncheckable(t *testing.T) {
 		{"drc/missing-type.json", `"unconnected_items" entry 0: "type" is empty, not a string`},
 		{"drc/items-object.json", `"violations" entry 0: "items" is an object, not an array`},
 		{"drc/null-item.json", `"violations" entry 0 item 0 is null, not an object`},
+		{"drc/bad-severity.json", `"violations" entry 0: unknown severity "fatal"`},
+		{"drc/item-empty.json", `"violations" entry 0 item 0 "description" is empty, not a string`},
+		{"drc/item-null-description.json", `"violations" entry 0 item 0 "description" is null, not a string`},
+		{"drc/item-no-pos.json", `"violations" entry 0 item 0 "pos" is empty, not an object`},
+		{"drc/item-pos-string.json", `"violations" entry 0 item 0 pos "x" is a string, not a number`},
 		{"drc/parity-bad-severity.json", `"schematic_parity" entry 0: "severity" is a number, not a string`},
 	} {
 		rep, err := ParseDRC(readDRCFixture(t, tc.file))
@@ -126,5 +139,19 @@ func TestDRCSeverityFakeCLI(t *testing.T) {
 	}
 	if rep, err := run("drc/null-entry.json", "0"); !errors.Is(err, ErrDRCReport) || rep != nil {
 		t.Fatalf("malformed report read as %+v %v", rep, err)
+	}
+	// kicad-cli exits 0 without writing: the previous (clean) report at the
+	// same path must not be read back.
+	if _, err := run("drc/clean.json", "0"); err != nil {
+		t.Fatal(err)
+	}
+	if rep, err := run("NO-REPORT", "0"); !errors.Is(err, ErrDRCReport) || rep != nil {
+		t.Fatalf("stale report read as %+v %v", rep, err)
+	}
+	// An old report that cannot be removed is an error, not a skipped step.
+	stuck := filepath.Join(dir, "stuck.json")
+	os.MkdirAll(filepath.Join(stuck, "x"), 0o755)
+	if rep, err := fakeDRC(t, "drc/clean.json", "0").DRCSeverity(filepath.Join(dir, "x.kicad_pcb"), stuck, "all"); !errors.Is(err, ErrDRCReport) || rep != nil {
+		t.Fatalf("unremovable old report: %+v %v", rep, err)
 	}
 }

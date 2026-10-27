@@ -332,7 +332,10 @@ func (t *Tools) DRC(pcb, out string) (*DRCReport, error) { return t.DRCSeverity(
 func (t *Tools) DRCSeverity(pcb, out, severity string) (*DRCReport, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), BridgeTimeout)
 	defer cancel()
-	_ = os.Remove(out)
+	// A report left by an earlier run must never be read as this run's.
+	if err := os.Remove(out); err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("%w: cannot remove the previous report: %v", ErrDRCReport, err)
+	}
 	cmd := exec.CommandContext(ctx, t.CLI, "pcb", "drc", "--format", "json", "--severity-"+severity, "-o", out, pcb)
 	var buf bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &buf, &buf

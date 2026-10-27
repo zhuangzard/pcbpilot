@@ -805,10 +805,22 @@ func RunFab(o FabOptions) (*FabReport, error) {
 	// holds exactly this run's kicad-cli output (never a Gerber left in OUT by
 	// an earlier run with more layers or another board name) and a failed
 	// check publishes nothing. publishFab then moves the files into OUT.
+	// One normalized OUT everywhere: "link/" (trailing separator) would make
+	// Lstat follow the link the check is meant to catch.
+	o.OutDir = filepath.Clean(o.OutDir)
 	if err := checkFabOutDirs(o.OutDir); err != nil {
 		return nil, err
 	}
 	if err := os.MkdirAll(o.OutDir, 0o755); err != nil {
+		return nil, err
+	}
+	// Held from reading the manifest until publish (or its rollback) is done.
+	unlock, err := lockFabOut(o.OutDir)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	if err := checkFabOutDirs(o.OutDir); err != nil {
 		return nil, err
 	}
 	prev, err := readFabManifest(o.OutDir)

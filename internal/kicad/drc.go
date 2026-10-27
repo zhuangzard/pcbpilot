@@ -214,17 +214,55 @@ func decodeDRCEntries(raw []byte) ([]drcJSONViolation, error) {
 			return nil, fmt.Errorf("entry %d items: %v", i, err)
 		}
 		for j, it := range items {
-			if it = bytes.TrimSpace(it); len(it) == 0 || it[0] != '{' {
-				return nil, fmt.Errorf("entry %d item %d is %s, not an object", i, j, jsonKind(it))
+			if err := checkDRCItem(it); err != nil {
+				return nil, fmt.Errorf("entry %d item %d %v", i, j, err)
 			}
 		}
 		var v drcJSONViolation
 		if err := json.Unmarshal(e, &v); err != nil {
 			return nil, fmt.Errorf("entry %d: %v", i, err)
 		}
+		if !drcSeverities[v.Severity] {
+			return nil, fmt.Errorf("entry %d: unknown severity %q", i, v.Severity)
+		}
 		out = append(out, v)
 	}
 	return out, nil
+}
+
+// drcSeverities are the severities kicad-cli 10 writes into a DRC report
+// (the values of its --severity-error/-warning/-exclusion flags, and of the
+// report's included_severities).
+var drcSeverities = map[string]bool{"error": true, "warning": true, "exclusion": true}
+
+// checkDRCItem: an item is an object with a string description and uuid and
+// a pos object with numeric x and y, as kicad-cli 10 writes every item.
+func checkDRCItem(raw json.RawMessage) error {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || raw[0] != '{' {
+		return fmt.Errorf("is %s, not an object", jsonKind(raw))
+	}
+	var it map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &it); err != nil {
+		return err
+	}
+	for _, k := range []string{"description", "uuid"} {
+		if v := bytes.TrimSpace(it[k]); len(v) == 0 || v[0] != '"' {
+			return fmt.Errorf("%q is %s, not a string", k, jsonKind(v))
+		}
+	}
+	var pos map[string]json.RawMessage
+	if v := bytes.TrimSpace(it["pos"]); len(v) == 0 || v[0] != '{' {
+		return fmt.Errorf("%q is %s, not an object", "pos", jsonKind(v))
+	} else if err := json.Unmarshal(v, &pos); err != nil {
+		return err
+	}
+	for _, k := range []string{"x", "y"} {
+		if v := bytes.TrimSpace(pos[k]); jsonKind(v) != "a number" {
+			return fmt.Errorf("pos %q is %s, not a number", k, jsonKind(v))
+		}
+	}
+	return nil
 }
 
 // jsonKind names a raw JSON value's type for an error message.
@@ -241,6 +279,8 @@ func jsonKind(raw []byte) string {
 		return "a boolean"
 	case 'n':
 		return "null"
+	case '[':
+		return "an array"
 	}
 	return "a number"
 }

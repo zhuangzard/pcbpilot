@@ -1,0 +1,1 @@
+{"coordinate_units":"mm","unconnected_items":[],"violations":[{"type":"clearance","description":"x","severity":"fatal","items":[{"description":"Pad 1 of R1","pos":{"x":1,"y":2},"uuid":"u1"}]}]}
