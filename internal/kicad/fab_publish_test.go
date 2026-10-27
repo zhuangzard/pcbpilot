@@ -554,7 +554,13 @@ func TestRunFabBOMCPLMismatchWritesNothing(t *testing.T) {
 	if got := codes(rep.Problems); strings.Join(got, " ") != "BOM_NOT_IN_CPL:R3" {
 		t.Fatalf("problems %v", got)
 	}
-	if n := dirNames(t, out); len(n) != 0 {
+	var n []string
+	for _, name := range dirNames(t, out) {
+		if name != fabLockName { // the Unix lock file stays
+			n = append(n, name)
+		}
+	}
+	if len(n) != 0 {
 		t.Fatalf("a failed check must publish nothing, got %v", n)
 	}
 
