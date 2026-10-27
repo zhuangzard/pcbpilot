@@ -130,4 +130,8 @@ func isRetryable(err error) bool {
 	return errno == errSharingViolation || errno == errLockViolation || errno == errAccessDenied
 }
 
-func syncDir(string) {}
+// syncDir is a no-op: Windows cannot flush a directory handle. Durability of
+// directory entries rests on NTFS metadata journaling, MoveFileExW
+// WRITE_THROUGH for renames, and the journal ordering in Txn (see the
+// package doc).
+func syncDir(string) error { return nil }

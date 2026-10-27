@@ -26,11 +26,12 @@ const (
 
 // Change is one file of a transaction.
 type Change struct {
-	Path   string   `json:"path"`
-	Kind   Kind     `json:"kind"`
-	Base   Snapshot `json:"base"`
-	NewSHA string   `json:"newSha,omitempty"`
-	staged string   // temp file beside Path ("" for a delete)
+	Path   string      `json:"path"`
+	Kind   Kind        `json:"kind"`
+	Base   Snapshot    `json:"base"`
+	NewSHA string      `json:"newSha,omitempty"`
+	staged string      // temp file beside Path ("" for a delete)
+	mode   os.FileMode // the file's mode before the transaction
 }
 
 // Plan is what Apply would do, identified by Revision.
@@ -38,10 +39,14 @@ type Plan struct {
 	Revision string     `json:"revision"`
 	Changes  []Change   `json:"changes"`
 	Locks    []LockInfo `json:"locks,omitempty"`
+	// Applied is set by Apply once every change has taken effect, even when
+	// the cleanup afterwards reports an error.
+	Applied bool `json:"applied,omitempty"`
 }
 
 // Txn is a set of file changes applied all-or-nothing. Root is the project
-// directory: the backups and the journal live under Root/.pcbpilot/txn/.
+// directory: the writer lock, the backups and the journal live under
+// Root/.pcbpilot/.
 type Txn struct {
 	root    string
 	changes map[string]*Change
@@ -94,7 +99,7 @@ func (t *Txn) Stage(path string, data []byte, base *Snapshot) error {
 		kind = KindReplace
 	}
 	h := sha256.Sum256(data)
-	t.put(&Change{Path: abs, Kind: kind, Base: b, NewSHA: hex.EncodeToString(h[:]), staged: f.Name()})
+	t.put(&Change{Path: abs, Kind: kind, Base: b, NewSHA: hex.EncodeToString(h[:]), staged: f.Name(), mode: perm})
 	return nil
 }
 
@@ -117,7 +122,11 @@ func (t *Txn) Delete(path string, base *Snapshot) error {
 	if !b.Exists {
 		return fmt.Errorf("delete %s: file does not exist", abs)
 	}
-	t.put(&Change{Path: abs, Kind: KindDelete, Base: b})
+	st, err := os.Stat(abs)
+	if err != nil {
+		return err
+	}
+	t.put(&Change{Path: abs, Kind: KindDelete, Base: b, mode: st.Mode().Perm()})
 	return nil
 }
 
@@ -154,8 +163,9 @@ func (t *Txn) sorted() []*Change {
 
 // Plan lists the changes in path order with the locks currently on them. The
 // Revision is the sha256 of each (path relative to root, base sha, new sha),
-// so the same edit of the same files always has the same revision.
-func (t *Txn) Plan(env *Env) Plan {
+// so the same edit of the same files always has the same revision. The error
+// is a lock check that could not be completed.
+func (t *Txn) Plan(env *Env) (Plan, error) {
 	cs := t.sorted()
 	p := Plan{Changes: make([]Change, len(cs))}
 	h := sha256.New()
@@ -166,8 +176,9 @@ func (t *Txn) Plan(env *Env) Plan {
 		fmt.Fprintf(h, "%s\x00%s\x00%s\x00", t.rel(c.Path), c.Base.SHA256, c.NewSHA)
 	}
 	p.Revision = hex.EncodeToString(h.Sum(nil))
-	p.Locks = CheckLocks(paths, env)
-	return p
+	locks, err := CheckLocks(paths, env)
+	p.Locks = locks
+	return p, err
 }
 
 func (t *Txn) rel(p string) string {
@@ -191,7 +202,7 @@ func (t *Txn) Abort() {
 type journal struct {
 	Schema   string         `json:"schema"`
 	Revision string         `json:"revision"`
-	Phase    string         `json:"phase"` // backup: nothing renamed yet | commit
+	Phase    string         `json:"phase"` // prepare: no target touched yet | commit
 	PID      int            `json:"pid"`
 	Host     string         `json:"host"`
 	Created  time.Time      `json:"created"`
@@ -199,13 +210,18 @@ type journal struct {
 }
 
 type journalEntry struct {
-	Path    string `json:"path"`
-	Kind    Kind   `json:"kind"`
-	Existed bool   `json:"existed"`
-	BaseSHA string `json:"baseSha,omitempty"`
-	NewSHA  string `json:"newSha,omitempty"`
-	Backup  string `json:"backup,omitempty"` // relative to the txn dir
-	Staged  string `json:"staged,omitempty"`
+	Path    string      `json:"path"`
+	Kind    Kind        `json:"kind"`
+	Existed bool        `json:"existed"`
+	Mode    os.FileMode `json:"mode"`
+	BaseSHA string      `json:"baseSha,omitempty"`
+	NewSHA  string      `json:"newSha,omitempty"`
+	Backup  string      `json:"backup,omitempty"` // relative to the txn dir
+	Staged  string      `json:"staged,omitempty"`
+}
+
+func (e journalEntry) base() Snapshot {
+	return Snapshot{Path: e.Path, Exists: e.Existed, SHA256: e.BaseSHA}
 }
 
 const journalSchema = "pcbpilot.kfile.txn/1"
@@ -213,142 +229,255 @@ const journalSchema = "pcbpilot.kfile.txn/1"
 func txnDir(root string) string      { return filepath.Join(root, ".pcbpilot", "txn") }
 func journalPath(root string) string { return filepath.Join(txnDir(root), "journal.json") }
 
-// Apply commits the staged changes. wantRev, when not empty, must equal the
-// current Plan().Revision (E_REVISION_MISMATCH otherwise). It refuses with
-// E_TXN_PENDING while a journal exists, with E_KICAD_LOCKED while a lock
-// blocks (o.Locks, o.NoLockCheck, o.Env apply; o.Base and o.Perm are unused)
-// and with E_FILE_CHANGED when a file no longer matches its base. If a rename
-// fails, the files already replaced are restored from the backups. On
-// success the staged files are consumed and the backups removed.
+// beforeMutate, when set by a test, runs just before each target is touched.
+var beforeMutate func(path string)
+
+// Apply commits the staged changes.
+//
+// It holds the project writer lock while it runs (o.Writer when the caller
+// already holds it; otherwise it acquires one). wantRev, when not empty,
+// must equal the current Plan().Revision (E_REVISION_MISMATCH otherwise). It
+// refuses with E_TXN_PENDING while a journal exists. Immediately before each
+// file is touched — and before every retry — the KiCad locks (o.Locks,
+// o.NoLockCheck, o.Env) and the file's base hash are checked again
+// (E_KICAD_LOCKED, E_FILE_CHANGED). o.Base and o.Perm are unused.
+//
+// Order on disk: journal (prepare) → backups → fsync of backups and their
+// directories → journal (commit) → each target in path order, each followed
+// by a directory fsync → journal removed → backups removed. When a step
+// fails, every target already touched, including the one that failed, is
+// restored from its backup if it still holds what this transaction wrote.
+// When even that fails the journal is kept and the error is E_TXN_PENDING.
 func (t *Txn) Apply(wantRev string, o Opts) (Plan, error) {
-	plan := t.Plan(o.Env)
+	plan, err := t.Plan(o.Env)
+	if err != nil {
+		return plan, err
+	}
 	if wantRev != "" && wantRev != plan.Revision {
 		return plan, &Error{Code: CodeRevision, Path: t.root,
 			Detail: fmt.Sprintf("plan revision %s, but the files now give %s", short(wantRev), short(plan.Revision)),
 			Fix:    "the files changed after the plan was made; make a new plan and review it"}
 	}
-	if err := Pending(t.root); err != nil {
-		return plan, err
-	}
 	cs := t.sorted()
 	if len(cs) == 0 {
 		return plan, nil
 	}
-	if !o.NoLockCheck {
-		paths := make([]string, len(cs))
-		for i, c := range cs {
-			paths[i] = c.Path
-		}
-		locks, err := Guard(paths, o.Locks, o.Env)
-		plan.Locks = locks
-		if err != nil {
-			return plan, err
-		}
-	}
-	for _, c := range cs {
-		if err := c.Base.Check(); err != nil {
-			return plan, err
-		}
-	}
-
-	// The journal is created exclusively: two writers of one project cannot
-	// both get here.
-	dir := txnDir(t.root)
-	bdir := filepath.Join(dir, plan.Revision[:16])
-	if err := os.MkdirAll(bdir, 0o755); err != nil {
+	release, err := writerFor(o.Writer, t.root, o.Env)
+	if err != nil {
 		return plan, err
 	}
-	j := journal{Schema: journalSchema, Revision: plan.Revision, Phase: "backup", PID: os.Getpid(),
+	defer release()
+	if err := Pending(t.root); err != nil {
+		return plan, err
+	}
+
+	check := func(e journalEntry) func() error {
+		return func() error {
+			if !o.NoLockCheck {
+				locks, err := Guard([]string{e.Path}, o.Locks, o.Env)
+				plan.Locks = mergeLocks(plan.Locks, locks)
+				if err != nil {
+					return err
+				}
+			}
+			return e.base().Check()
+		}
+	}
+	dir := txnDir(t.root)
+	bdir := filepath.Join(dir, plan.Revision[:16])
+	j := journal{Schema: journalSchema, Revision: plan.Revision, Phase: "prepare", PID: os.Getpid(),
 		Host: envOr(o.Env).Host, Created: time.Now().UTC()}
 	for i, c := range cs {
-		e := journalEntry{Path: c.Path, Kind: c.Kind, Existed: c.Base.Exists, BaseSHA: c.Base.SHA256,
-			NewSHA: c.NewSHA, Staged: c.staged}
+		e := journalEntry{Path: c.Path, Kind: c.Kind, Existed: c.Base.Exists, Mode: c.mode,
+			BaseSHA: c.Base.SHA256, NewSHA: c.NewSHA, Staged: c.staged}
 		if c.Base.Exists {
 			e.Backup = filepath.ToSlash(filepath.Join(plan.Revision[:16], fmt.Sprintf("%03d-%s", i, filepath.Base(c.Path))))
 		}
+		if err := check(e)(); err != nil {
+			return plan, err
+		}
 		j.Changes = append(j.Changes, e)
+	}
+
+	// Prepare: nothing outside .pcbpilot/txn is touched until the journal
+	// says "commit", and it says so only after the backups are durable.
+	if err := os.MkdirAll(bdir, 0o755); err != nil {
+		return plan, err
 	}
 	if err := createJournal(t.root, j); err != nil {
 		return plan, err
 	}
-	cleanup := func() {
-		os.RemoveAll(bdir)
-		os.Remove(journalPath(t.root))
-		os.Remove(dir) // only when empty
+	abandon := func(err error) (Plan, error) {
+		if cerr := finish(t.root, &j); cerr != nil {
+			err = errors.Join(err, cerr)
+		}
+		return plan, err
 	}
 	for _, e := range j.Changes {
 		if e.Backup == "" {
 			continue
 		}
 		if err := copyFile(filepath.Join(dir, filepath.FromSlash(e.Backup)), e.Path); err != nil {
-			cleanup()
-			return plan, wrapf(err, "back up %s", e.Path)
+			return abandon(wrapf(err, "back up %s", e.Path))
 		}
+	}
+	syncs := []string{bdir, dir, filepath.Dir(dir), t.root}
+	for _, e := range j.Changes {
+		syncs = append(syncs, filepath.Dir(e.Path)) // staged temp entries
+	}
+	if err := syncDirs(syncs...); err != nil {
+		return abandon(err)
 	}
 	j.Phase = "commit"
 	if err := writeJournal(t.root, j); err != nil {
-		cleanup()
-		return plan, err
+		return abandon(err)
 	}
 
 	for i, e := range j.Changes {
+		if beforeMutate != nil {
+			beforeMutate(e.Path)
+		}
 		var err error
 		if e.Kind == KindDelete {
-			err = removeRetry(e.Path)
+			err = removeRetry(e.Path, check(e))
 		} else {
-			err = renameRetry(e.Staged, e.Path)
+			err = renameRetry(e.Staged, e.Path, check(e))
+		}
+		if err == nil {
+			err = syncDir(filepath.Dir(e.Path))
 		}
 		if err == nil {
 			continue
 		}
-		if rerr := rollback(t.root, j.Changes[:i]); rerr != nil {
+		if _, rerr := undoAll(t.root, j.Changes[:i+1], true); rerr != nil {
 			return plan, &Error{Code: CodeTxnPending, Path: e.Path, Err: err,
 				Detail: fmt.Sprintf("apply failed (%v) and rollback failed (%v); the journal is kept", err, rerr),
 				Fix:    "close KiCad and other programs using the project, then run `pcbpilot kicad txn recover` (or `discard` to keep the files as they are)"}
 		}
 		t.Abort()
-		cleanup()
-		return plan, wrapf(err, "apply %s (all files restored)", e.Path)
+		return abandon(wrapf(err, "apply %s (all files restored)", e.Path))
 	}
-	for _, e := range j.Changes {
-		syncDir(filepath.Dir(e.Path))
-	}
+	plan.Applied = true
 	t.changes = map[string]*Change{}
-	cleanup()
-	return plan, nil
+	return plan, finish(t.root, &j)
 }
 
-// rollback restores done (in reverse) to their state before the transaction.
-func rollback(root string, done []journalEntry) error {
-	var errs []error
-	for i := len(done) - 1; i >= 0; i-- {
-		if err := restore(root, done[i]); err != nil {
-			errs = append(errs, err)
-		}
+// entryState is how a journalled path compares with the transaction.
+type entryState int
+
+const (
+	stateOurs  entryState = iota // holds what the transaction wrote (or removed)
+	stateBase                    // still as before the transaction
+	stateOther                   // changed by someone else
+)
+
+func entryStateOf(e journalEntry) (entryState, Snapshot, error) {
+	cur, err := Stat(e.Path)
+	if err != nil {
+		return stateOther, cur, err
 	}
-	return errors.Join(errs...)
+	switch {
+	case e.Kind == KindDelete && !cur.Exists:
+		return stateOurs, cur, nil
+	case e.Kind != KindDelete && cur.Exists && cur.SHA256 == e.NewSHA:
+		return stateOurs, cur, nil
+	case cur.Exists == e.Existed && (!cur.Exists || cur.SHA256 == e.BaseSHA):
+		return stateBase, cur, nil
+	}
+	return stateOther, cur, nil
 }
 
-// restore puts e.Path back to its pre-transaction content: the backup when it
-// existed; otherwise it is removed if it still holds what the transaction
-// wrote.
-func restore(root string, e journalEntry) error {
+// undo returns e.Path to its pre-transaction content and mode, but only when
+// it still holds what the transaction wrote; a file already at its base is
+// left alone and anything else is a conflict — unless failed is set: the
+// entry whose own step just failed may hold someone else's edit that made
+// it fail (the step was refused before touching it), which is left alone.
+func undo(root string, e journalEntry, failed bool) (bool, error) {
+	st, cur, err := entryStateOf(e)
+	if err != nil {
+		return false, err
+	}
+	switch st {
+	case stateBase:
+		return false, nil
+	case stateOther:
+		if failed {
+			return false, nil
+		}
+		return false, changedErr(e.Path, fmt.Sprintf("holds content (sha256 %s) that is neither the transaction's nor the original; left as is", short(cur.SHA256)))
+	}
 	if !e.Existed {
-		now, err := Stat(e.Path)
-		if err != nil || !now.Exists || now.SHA256 != e.NewSHA {
-			return err
+		ours := func() error {
+			if s, _, err := entryStateOf(e); err != nil || s != stateOurs {
+				return changedErr(e.Path, "changed during rollback")
+			}
+			return nil
 		}
-		return removeRetry(e.Path)
-	}
-	if now, err := Stat(e.Path); err == nil && now.Exists && now.SHA256 == e.BaseSHA {
-		return nil
+		if err := removeRetry(e.Path, ours); err != nil {
+			return false, err
+		}
+		return true, syncDir(filepath.Dir(e.Path))
 	}
 	b, err := os.ReadFile(filepath.Join(txnDir(root), filepath.FromSlash(e.Backup)))
 	if err != nil {
-		return wrapf(err, "restore %s", e.Path)
+		return false, wrapf(err, "restore %s", e.Path)
 	}
-	_, err = WriteFile(e.Path, b, Opts{NoLockCheck: true})
-	return err
+	if h := sha256.Sum256(b); hex.EncodeToString(h[:]) != e.BaseSHA {
+		return false, fmt.Errorf("restore %s: backup %s does not match the recorded hash", e.Path, e.Backup)
+	}
+	if _, err := WriteFile(e.Path, b, Opts{NoLockCheck: true, Base: &cur, Perm: e.Mode}); err != nil {
+		return false, err
+	}
+	return true, os.Chmod(e.Path, e.Mode)
+}
+
+// undoAll undoes entries in reverse order and returns the paths restored.
+// lastFailed marks the last entry as the one whose step failed.
+func undoAll(root string, entries []journalEntry, lastFailed bool) ([]string, error) {
+	var restored []string
+	var errs []error
+	for i := len(entries) - 1; i >= 0; i-- {
+		did, err := undo(root, entries[i], lastFailed && i == len(entries)-1)
+		if err != nil {
+			errs = append(errs, err)
+		}
+		if did {
+			restored = append(restored, entries[i].Path)
+		}
+	}
+	sort.Strings(restored)
+	return restored, errors.Join(errs...)
+}
+
+// finish ends a transaction on disk: staged leftovers, then the journal (so
+// a crash from here on leaves no journal pointing at missing backups), then
+// the backups. A journal that cannot be removed is E_TXN_PENDING.
+func finish(root string, j *journal) error {
+	var errs []error
+	for _, e := range j.Changes {
+		if e.Staged != "" {
+			if err := os.Remove(e.Staged); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				errs = append(errs, err)
+			}
+		}
+	}
+	if err := removeRetry(journalPath(root), nil); err != nil {
+		return &Error{Code: CodeTxnPending, Path: journalPath(root), Err: err,
+			Detail: "the transaction finished but its journal could not be removed: " + err.Error(),
+			Fix:    "run `pcbpilot kicad txn recover`; it recognises a finished transaction and only cleans up"}
+	}
+	if err := syncDir(txnDir(root)); err != nil {
+		errs = append(errs, err)
+	}
+	if len(j.Revision) >= 16 {
+		if err := os.RemoveAll(filepath.Join(txnDir(root), j.Revision[:16])); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if err := errors.Join(errs...); err != nil {
+		return wrapf(err, "transaction cleanup")
+	}
+	return nil
 }
 
 func createJournal(root string, j journal) error {
@@ -391,15 +520,18 @@ func readJournal(root string) (*journal, error) {
 		return nil, err
 	}
 	var j journal
-	if err := json.Unmarshal(b, &j); err != nil {
+	if err := json.Unmarshal(b, &j); err != nil || j.Schema != journalSchema {
+		if err == nil {
+			err = fmt.Errorf("schema %q", j.Schema)
+		}
 		return nil, &Error{Code: CodeTxnPending, Path: journalPath(root), Err: err,
 			Detail: "the transaction journal is unreadable: " + err.Error(),
-			Fix:    "inspect the files listed under .pcbpilot/txn, then run `pcbpilot kicad txn discard`"}
+			Fix:    "inspect the project files and .pcbpilot/txn, then run `pcbpilot kicad txn discard --force`"}
 	}
 	return &j, nil
 }
 
-// Pending returns E_TXN_PENDING when root has a transaction journal: another
+// Pending returns E_TXN_PENDING when root has a transaction journal: a
 // pcbpilot process is applying, or one was interrupted.
 func Pending(root string) error {
 	p := journalPath(root)
@@ -414,98 +546,154 @@ func Pending(root string) error {
 		Fix:    "run `pcbpilot kicad txn recover` to restore the files from before it, or `pcbpilot kicad txn discard` to keep them as they are"}
 }
 
-// Recover undoes an interrupted transaction of root: every file it touched
-// gets its content from before the transaction. It returns the paths
-// restored. It refuses while the process that wrote the journal still runs
-// on this machine. A root with no journal is a no-op.
-func Recover(root string, env *Env) ([]string, error) {
-	j, err := pendingJournal(root, env)
+// RecoverOpts controls Recover and Discard.
+type RecoverOpts struct {
+	// Writer is the project writer lock when the caller holds it; otherwise
+	// it is acquired (so a transaction still running blocks recovery).
+	Writer *Writer
+	Env    *Env
+	// Locks and NoLockCheck apply to the KiCad locks of the files restored.
+	Locks       BreakPolicy
+	NoLockCheck bool
+	// Force accepts a journal written on another host, and lets Discard drop
+	// an unreadable journal. The user's explicit decision.
+	Force bool
+}
+
+// Recovery reports what Recover or Discard did.
+type Recovery struct {
+	Revision string `json:"revision,omitempty"`
+	Phase    string `json:"phase,omitempty"`
+	// Action: none (no journal) | cleaned (interrupted before any file was
+	// touched) | completed (every change had landed) | rolled-back | discarded.
+	Action    string   `json:"action"`
+	Restored  []string `json:"restored,omitempty"`
+	Conflicts []string `json:"conflicts,omitempty"`
+}
+
+// Recover resolves an interrupted transaction of root. If no file was
+// touched, or every change had already landed, it only cleans up. Otherwise
+// it restores each file that still holds what the transaction wrote; files
+// still at their original content are left alone. If any file holds other
+// content (edited after the interruption), nothing is changed, the journal
+// is kept and the error is E_FILE_CHANGED listing the conflicts.
+func Recover(root string, o RecoverOpts) (Recovery, error) {
+	root, j, release, rec, err := openJournal(root, o, false)
 	if j == nil || err != nil {
-		return nil, err
+		return rec, err
 	}
-	var restored []string
-	if j.Phase == "commit" {
-		var errs []error
-		for i := len(j.Changes) - 1; i >= 0; i-- {
-			e := j.Changes[i]
-			before, _ := Stat(e.Path)
-			if err := restore(root, e); err != nil {
-				errs = append(errs, err)
-				continue
-			}
-			if after, _ := Stat(e.Path); after != before {
-				restored = append(restored, e.Path)
-			}
+	defer release()
+	if j.Phase != "commit" {
+		rec.Action = "cleaned"
+		return rec, finish(root, j)
+	}
+	all := true
+	var paths []string
+	for _, e := range j.Changes {
+		st, _, err := entryStateOf(e)
+		if err != nil {
+			return rec, err
 		}
-		if err := errors.Join(errs...); err != nil {
-			return restored, &Error{Code: CodeTxnPending, Path: journalPath(root), Err: err,
-				Detail: "recover incomplete: " + err.Error(), Fix: "close the programs holding the files and run recover again"}
+		if st == stateOther {
+			rec.Conflicts = append(rec.Conflicts, e.Path)
+		}
+		all = all && st == stateOurs
+		paths = append(paths, e.Path)
+	}
+	if len(rec.Conflicts) > 0 {
+		return rec, &Error{Code: CodeChanged, Path: rec.Conflicts[0],
+			Detail: "changed after the interrupted transaction, so recover would destroy that work: " + strings.Join(rec.Conflicts, ", "),
+			Fix:    "inspect those files; `pcbpilot kicad txn discard` keeps every file as it is now"}
+	}
+	if all {
+		rec.Action = "completed"
+		return rec, finish(root, j)
+	}
+	if !o.NoLockCheck {
+		if _, err := Guard(paths, o.Locks, o.Env); err != nil {
+			return rec, err
 		}
 	}
-	sort.Strings(restored)
-	clearJournal(root, j)
-	return restored, nil
+	restored, err := undoAll(root, j.Changes, false)
+	rec.Restored = restored
+	if err != nil {
+		return rec, &Error{Code: CodeTxnPending, Path: journalPath(root), Err: err,
+			Detail: "recover incomplete, the journal is kept: " + err.Error(),
+			Fix:    "close the programs holding the files and run recover again"}
+	}
+	rec.Action = "rolled-back"
+	return rec, finish(root, j)
 }
 
 // Discard drops an interrupted transaction's journal and backups and keeps
-// the files as they are now.
-func Discard(root string, env *Env) error {
-	j, err := pendingJournal(root, env)
-	if j == nil || err != nil {
-		return err
+// every file as it is now.
+func Discard(root string, o RecoverOpts) (Recovery, error) {
+	root, j, release, rec, err := openJournal(root, o, true)
+	if err != nil {
+		return rec, err
 	}
-	clearJournal(root, j)
-	return nil
+	if release != nil {
+		defer release()
+	}
+	if j == nil {
+		if rec.Action == "discarded" { // unreadable journal, Force
+			err = os.RemoveAll(txnDir(root))
+		}
+		return rec, err
+	}
+	rec.Action = "discarded"
+	return rec, finish(root, j)
 }
 
-func pendingJournal(root string, env *Env) (*journal, error) {
-	if abs, err := filepath.Abs(root); err == nil {
-		root = abs
+// openJournal takes the writer lock and reads the journal, refusing a
+// foreign-host journal without Force. j is nil when there is nothing to do;
+// for discard an unreadable journal with Force yields j == nil and
+// Action "discarded".
+func openJournal(root string, o RecoverOpts, discard bool) (string, *journal, func(), Recovery, error) {
+	rec := Recovery{Action: "none"}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return root, nil, nil, rec, err
 	}
-	j, err := readJournal(root)
+	release, err := writerFor(o.Writer, abs, o.Env)
+	if err != nil {
+		return abs, nil, nil, rec, err
+	}
+	j, err := readJournal(abs)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
+		release()
+		return abs, nil, nil, rec, nil
 	}
 	if err != nil {
-		return nil, err
+		if discard && o.Force {
+			rec.Action = "discarded"
+			return abs, nil, release, rec, nil
+		}
+		release()
+		return abs, nil, nil, rec, err
 	}
-	env = envOr(env)
-	if j.PID != os.Getpid() && sameHost(j.Host, env.Host) && pidAlive(env.Procs, j.PID) {
-		return nil, &Error{Code: CodeTxnPending, Path: journalPath(root),
-			Detail: fmt.Sprintf("pid %d is still applying this transaction", j.PID),
-			Fix:    "wait for that pcbpilot process to finish"}
+	rec.Revision, rec.Phase = j.Revision, j.Phase
+	if !sameHost(j.Host, envOr(o.Env).Host) && !o.Force {
+		release()
+		return abs, nil, nil, rec, &Error{Code: CodeTxnPending, Path: journalPath(abs),
+			Detail: fmt.Sprintf("the transaction was written on host %q; its process may still be running there", j.Host),
+			Fix:    "run recover on that host, or pass --force once you are sure it is not running"}
 	}
-	return j, nil
+	return abs, j, release, rec, nil
 }
 
-func clearJournal(root string, j *journal) {
-	for _, e := range j.Changes {
-		if e.Staged != "" {
-			os.Remove(e.Staged)
+func syncDirs(dirs ...string) error {
+	seen := map[string]bool{}
+	for _, d := range dirs {
+		if seen[d] {
+			continue
+		}
+		seen[d] = true
+		if err := syncDir(d); err != nil {
+			return err
 		}
 	}
-	if len(j.Revision) >= 16 {
-		os.RemoveAll(filepath.Join(txnDir(root), j.Revision[:16]))
-	}
-	os.Remove(journalPath(root))
-	os.Remove(txnDir(root))
-}
-
-// pidAlive is true unless the process list proves pid is gone.
-func pidAlive(list ProcLister, pid int) bool {
-	if list == nil {
-		return true
-	}
-	ps, err := list()
-	if err != nil {
-		return true
-	}
-	for _, p := range ps {
-		if p.PID == pid {
-			return true
-		}
-	}
-	return false
+	return nil
 }
 
 func copyFile(dst, src string) error {

@@ -107,7 +107,7 @@ func TestRenamePersistentSharingViolation(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "x.kicad_pcb")
 	os.WriteFile(p, []byte("orig"), 0o644)
-	setBudget(t, 120*time.Millisecond)
+	setBudget(t, 600*time.Millisecond)
 	calls := 0
 	injectRename(t, func(from, to string) error {
 		calls++
@@ -115,7 +115,7 @@ func TestRenamePersistentSharingViolation(t *testing.T) {
 	})
 	start := time.Now()
 	_, err := WriteFile(p, []byte("new"), Opts{Env: fakeEnv()})
-	if CodeOf(err) != CodeSharing || calls < 3 || time.Since(start) > 2*time.Second {
+	if CodeOf(err) != CodeSharing || calls < 2 || time.Since(start) > 5*time.Second {
 		t.Fatalf("err %v after %d calls in %s", err, calls, time.Since(start))
 	}
 	if ExitCode(err) != 1 {

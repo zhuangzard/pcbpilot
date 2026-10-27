@@ -4,67 +4,111 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
-// writerLock is Root/.pcbpilot/writer.lock.
-type writerLock struct {
+// writerInfo is what Root/.pcbpilot/writer.lock says about its holder. It is
+// information for the "busy" message only; ownership is the OS lock.
+type writerInfo struct {
 	PID  int       `json:"pid"`
 	Host string    `json:"host"`
 	User string    `json:"user,omitempty"`
 	Time time.Time `json:"time"`
 }
 
+// Writer is a held project writer lock.
+type Writer struct {
+	root string
+	mu   sync.Mutex
+	f    *os.File
+}
+
+// errBusy is returned by lockExclusive when another handle holds the lock.
+var errBusy = errors.New("held by another writer")
+
+var absPath = filepath.Abs
+
 // WriterLockPath is the pcbpilot writer lock of a project directory.
 func WriterLockPath(root string) string { return filepath.Join(root, ".pcbpilot", "writer.lock") }
 
-// AcquireWriter makes this process the only pcbpilot writer of the project
-// directory root until release is called. A held lock is taken over only
-// when it names this host and its pid is not running (pid reuse can make a
-// dead holder look alive; that errs on the side of refusing). An empty or
-// unreadable lock file is treated as held.
-func AcquireWriter(root string, env *Env) (release func(), err error) {
+// AcquireWriter makes the caller the only pcbpilot writer of the project
+// directory root until Release. The lock is an operating-system lock on
+// Root/.pcbpilot/writer.lock (Windows: a handle opened without write
+// sharing; Unix: flock), so it is released when the holder exits or crashes
+// and there is no stale-lock takeover to race on. It is exclusive between
+// processes and between callers within one process. The file is never
+// deleted (deleting it would let two writers lock different files); its JSON
+// content only names the current holder.
+func AcquireWriter(root string, env *Env) (*Writer, error) {
 	env = envOr(env)
-	p := WriterLockPath(root)
+	abs, err := absPath(root)
+	if err != nil {
+		return nil, err
+	}
+	p := WriterLockPath(abs)
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return nil, err
 	}
-	me := writerLock{PID: os.Getpid(), Host: env.Host, User: env.User, Time: time.Now().UTC()}
-	body, _ := json.Marshal(me)
-	for attempt := 0; attempt < 2; attempt++ {
-		f, err := os.OpenFile(p, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-		if err == nil {
-			_, werr := f.Write(body)
-			if cerr := f.Close(); werr == nil {
-				werr = cerr
-			}
-			if werr != nil {
-				os.Remove(p)
-				return nil, werr
-			}
-			return func() { os.Remove(p) }, nil
-		}
-		if !errors.Is(err, fs.ErrExist) {
-			return nil, err
-		}
-		b, _ := os.ReadFile(p)
-		var held writerLock
-		parsed := json.Unmarshal(b, &held) == nil && held.PID > 0
-		if parsed && sameHost(held.Host, env.Host) && held.PID != me.PID && !pidAlive(env.Procs, held.PID) {
-			os.Remove(p) // the holder died; take over
-			continue
-		}
-		detail := "unreadable lock file"
-		if parsed {
+	f, err := lockExclusive(p)
+	if errors.Is(err, errBusy) {
+		detail := "unknown holder"
+		var held writerInfo
+		if b, rerr := os.ReadFile(p); rerr == nil && json.Unmarshal(b, &held) == nil && held.PID > 0 {
 			detail = fmt.Sprintf("pid %d on %s since %s", held.PID, held.Host, held.Time.Format(time.RFC3339))
 		}
 		return nil, &Error{Code: CodeWriterBusy, Path: p,
 			Detail: "another pcbpilot command is writing this project: " + detail,
-			Fix:    "wait for it to finish; if no pcbpilot command is running, delete " + p}
+			Fix:    "wait for it to finish (the lock is released automatically when that process exits)"}
 	}
-	return nil, &Error{Code: CodeWriterBusy, Path: p, Detail: "the writer lock keeps reappearing",
-		Fix: "wait for the other pcbpilot command to finish"}
+	if err != nil {
+		return nil, wrapf(err, "lock %s", p)
+	}
+	body, _ := json.Marshal(writerInfo{PID: os.Getpid(), Host: env.Host, User: env.User, Time: time.Now().UTC()})
+	if err := f.Truncate(0); err == nil {
+		_, _ = f.WriteAt(body, 0) // informational; a failure does not weaken the lock
+	}
+	return &Writer{root: abs, f: f}, nil
+}
+
+// Root is the project directory the lock covers.
+func (w *Writer) Root() string { return w.root }
+
+// Release gives up the lock. Calling it again is a no-op.
+func (w *Writer) Release() error {
+	if w == nil {
+		return nil
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.f == nil {
+		return nil
+	}
+	err := w.f.Close() // closing the handle releases the OS lock
+	w.f = nil
+	return err
+}
+
+func (w *Writer) covers(root string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.f != nil && sameDir(w.root, root)
+}
+
+// writerFor returns a release func for w when w covers root (a no-op: the
+// caller keeps owning w), or acquires the lock for root.
+func writerFor(w *Writer, root string, env *Env) (release func(), err error) {
+	if w != nil {
+		if !w.covers(root) {
+			return nil, fmt.Errorf("the writer lock passed in is for %s (or released), not %s", w.root, root)
+		}
+		return func() {}, nil
+	}
+	nw, err := AcquireWriter(root, env)
+	if err != nil {
+		return nil, err
+	}
+	return func() { nw.Release() }, nil
 }

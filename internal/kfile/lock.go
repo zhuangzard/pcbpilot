@@ -136,59 +136,90 @@ func LockPath(path string) string {
 	return filepath.Join(filepath.Dir(path), "~"+filepath.Base(path)+".lck")
 }
 
+// Filesystem probes, replaceable in tests to inject I/O errors.
+var (
+	statFn    = os.Stat
+	readDirFn = os.ReadDir
+)
+
 // CheckLocks returns the lock files that guard targets: each target's own
 // lock, every project lock (~*.kicad_pro.lck) in the nearest directory at or
 // above the target that holds a .kicad_pro, and for a .kicad_sch target the
 // root sheet lock (~<project>.kicad_sch.lck) of each project there. Sorted by
 // lock path, deduplicated.
-func CheckLocks(targets []string, env *Env) []LockInfo {
+//
+// It fails closed: when the absence of a lock cannot be established (a stat
+// or directory listing fails for a reason other than "does not exist", or a
+// directory sits at a lock path) it returns an E_KICAD_LOCKED *Error.
+func CheckLocks(targets []string, env *Env) ([]LockInfo, error) {
 	env = envOr(env)
 	seen := map[string]bool{}
 	var out []LockInfo
-	add := func(lck, target, kind string) {
+	add := func(lck, target, kind string) error {
 		if seen[lck] {
-			return
+			return nil
 		}
-		st, err := os.Stat(lck)
-		if err != nil || st.IsDir() {
-			return
+		st, err := statFn(lck)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return uncheckable(target, "cannot stat lock "+lck+": "+err.Error(), err)
+		}
+		if st.IsDir() {
+			return uncheckable(target, "a directory sits at the lock path "+lck, nil)
 		}
 		seen[lck] = true
 		out = append(out, classify(lck, target, kind, st.ModTime(), env))
+		return nil
 	}
 	for _, t := range targets {
 		if abs, err := filepath.Abs(t); err == nil {
 			t = abs
 		}
-		add(LockPath(t), t, "file")
-		proj := projectDir(filepath.Dir(t))
-		if proj == "" {
-			continue
+		if err := add(LockPath(t), t, "file"); err != nil {
+			return out, err
 		}
-		ents, _ := os.ReadDir(proj)
+		proj, ents, err := projectDir(filepath.Dir(t))
+		if err != nil {
+			return out, uncheckable(t, err.Error(), err)
+		}
 		for _, e := range ents {
 			n := e.Name()
 			if strings.HasPrefix(n, "~") && strings.HasSuffix(n, ".kicad_pro.lck") {
-				add(filepath.Join(proj, n), filepath.Join(proj, strings.TrimSuffix(n[1:], ".lck")), "project")
+				if err := add(filepath.Join(proj, n), filepath.Join(proj, strings.TrimSuffix(n[1:], ".lck")), "project"); err != nil {
+					return out, err
+				}
 			}
 			if strings.HasSuffix(t, ".kicad_sch") && strings.HasSuffix(n, ".kicad_pro") && !e.IsDir() {
 				root := filepath.Join(proj, strings.TrimSuffix(n, ".kicad_pro")+".kicad_sch")
-				add(LockPath(root), root, "root-sheet")
+				if err := add(LockPath(root), root, "root-sheet"); err != nil {
+					return out, err
+				}
 			}
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
-	return out
+	return out, nil
+}
+
+func uncheckable(target, detail string, err error) *Error {
+	return &Error{Code: CodeLocked, Path: target, Detail: "cannot establish that the file is not open in KiCad: " + detail, Err: err,
+		Fix: "fix the permissions or remove the entry named in the detail, then retry"}
 }
 
 // projectDir is the nearest directory at or above dir (8 levels at most)
-// holding a *.kicad_pro, or "".
-func projectDir(dir string) string {
+// holding a *.kicad_pro, with its entries; "" when there is none. A directory
+// that does not exist is skipped; any other listing error is returned.
+func projectDir(dir string) (string, []fs.DirEntry, error) {
 	for i := 0; i < 8; i++ {
-		ents, _ := os.ReadDir(dir)
+		ents, err := readDirFn(dir)
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return "", nil, fmt.Errorf("cannot list %s: %w", dir, err)
+		}
 		for _, e := range ents {
 			if !e.IsDir() && strings.HasSuffix(e.Name(), ".kicad_pro") {
-				return dir
+				return dir, ents, nil
 			}
 		}
 		up := filepath.Dir(dir)
@@ -197,7 +228,7 @@ func projectDir(dir string) string {
 		}
 		dir = up
 	}
-	return ""
+	return "", nil, nil
 }
 
 func classify(lck, target, kind string, mod time.Time, env *Env) LockInfo {
@@ -294,9 +325,12 @@ func isKiCadGUI(name string) bool {
 
 // Guard checks the locks of targets and removes those the policy allows.
 // It returns every lock found (Broke set on the removed ones) and an
-// E_KICAD_LOCKED *Error if any lock still blocks.
+// E_KICAD_LOCKED *Error if any lock still blocks or the check itself failed.
 func Guard(targets []string, p BreakPolicy, env *Env) ([]LockInfo, error) {
-	locks := CheckLocks(targets, env)
+	locks, err := CheckLocks(targets, env)
+	if err != nil {
+		return locks, err
+	}
 	var block []string
 	var first string
 	for i := range locks {

@@ -4,6 +4,7 @@ package kfile
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"syscall"
 )
@@ -14,11 +15,19 @@ func platformRename(from, to string) error { return os.Rename(from, to) }
 // or a file busy on a network filesystem) is the only transient case.
 func isRetryable(err error) bool { return errors.Is(err, syscall.EBUSY) }
 
-// syncDir makes a rename durable. Best effort: a filesystem that cannot fsync
-// a directory still has the rename, only without the durability promise.
-func syncDir(dir string) {
-	if f, err := os.Open(dir); err == nil {
-		_ = f.Sync()
-		_ = f.Close()
+// syncDir fsyncs a directory so the entries created, renamed or removed in
+// it survive a power loss.
+func syncDir(dir string) error {
+	f, err := os.Open(dir)
+	if err != nil {
+		return err
 	}
+	err = f.Sync()
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return fmt.Errorf("fsync directory %s: %w", dir, err)
+	}
+	return nil
 }

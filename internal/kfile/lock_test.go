@@ -2,6 +2,7 @@ package kfile
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -81,7 +82,7 @@ func TestLockStates(t *testing.T) {
 	}
 	for _, c := range cases {
 		writeLock(t, target, c.body)
-		ls := CheckLocks([]string{target}, c.env)
+		ls := mustLocks(t, []string{target}, c.env)
 		if len(ls) != 1 || ls[0].State != c.want || ls[0].Kind != "file" || ls[0].Target != target {
 			t.Errorf("%s: got %+v, want one %s file lock", c.name, ls, c.want)
 		}
@@ -147,7 +148,7 @@ func TestProjectAndRootSheetLocks(t *testing.T) {
 	writeLock(t, filepath.Join(dir, "demo.kicad_pro"), lockBody)
 	writeLock(t, filepath.Join(dir, "demo.kicad_sch"), lockBody)
 
-	ls := CheckLocks([]string{child}, fakeEnv("eeschema.exe"))
+	ls := mustLocks(t, []string{child}, fakeEnv("eeschema.exe"))
 	kinds := map[string]string{}
 	for _, l := range ls {
 		kinds[filepath.Base(l.Path)] = l.Kind
@@ -159,12 +160,12 @@ func TestProjectAndRootSheetLocks(t *testing.T) {
 		t.Fatalf("child sheet locks = %+v", ls)
 	}
 	// A board gets the project lock but not the root sheet lock.
-	ls = CheckLocks([]string{filepath.Join(dir, "demo.kicad_pcb")}, fakeEnv())
+	ls = mustLocks(t, []string{filepath.Join(dir, "demo.kicad_pcb")}, fakeEnv())
 	if len(ls) != 1 || ls[0].Kind != "project" {
 		t.Fatalf("board locks = %+v", ls)
 	}
 	// The root sheet's own lock is reported once.
-	ls = CheckLocks([]string{filepath.Join(dir, "demo.kicad_sch"), child}, fakeEnv())
+	ls = mustLocks(t, []string{filepath.Join(dir, "demo.kicad_sch"), child}, fakeEnv())
 	if len(ls) != 2 {
 		t.Fatalf("dedupe: %+v", ls)
 	}
@@ -192,4 +193,53 @@ func TestSystemProcsSeesSelf(t *testing.T) {
 		}
 	}
 	t.Fatalf("own pid %d not in %d processes", os.Getpid(), len(ps))
+}
+
+func mustLocks(t *testing.T, targets []string, env *Env) []LockInfo {
+	t.Helper()
+	ls, err := CheckLocks(targets, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ls
+}
+
+// A lock check that cannot complete must block, not report "no lock".
+func TestLockCheckFailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "demo.kicad_pro"), []byte("x"), 0o644)
+	target := filepath.Join(dir, "demo.kicad_pcb")
+	os.WriteFile(target, []byte("x"), 0o644)
+	denied := &fs.PathError{Op: "stat", Path: "x", Err: fs.ErrPermission}
+
+	cases := map[string]func(){
+		"stat error": func() {
+			statFn = func(string) (fs.FileInfo, error) { return nil, denied }
+		},
+		"readdir error": func() {
+			readDirFn = func(string) ([]fs.DirEntry, error) { return nil, denied }
+		},
+		"directory at lock path": func() {
+			os.Mkdir(LockPath(target), 0o755)
+		},
+	}
+	for name, inject := range cases {
+		oldStat, oldRead := statFn, readDirFn
+		inject()
+		_, err := CheckLocks([]string{target}, fakeEnv())
+		_, gerr := Guard([]string{target}, BreakAny, fakeEnv())
+		_, werr := WriteFile(target, []byte("new"), Opts{Env: fakeEnv(), Locks: BreakAny})
+		statFn, readDirFn = oldStat, oldRead
+		os.Remove(LockPath(target))
+		if CodeOf(err) != CodeLocked || CodeOf(gerr) != CodeLocked || CodeOf(werr) != CodeLocked {
+			t.Errorf("%s: CheckLocks %v, Guard %v, WriteFile %v", name, err, gerr, werr)
+		}
+		if b, _ := os.ReadFile(target); string(b) != "x" {
+			t.Errorf("%s: wrote through an unverifiable lock", name)
+		}
+	}
+	// A directory that does not exist yet is not an error.
+	if _, err := CheckLocks([]string{filepath.Join(dir, "new", "sub", "x.kicad_sch")}, fakeEnv()); err != nil {
+		t.Errorf("missing dir: %v", err)
+	}
 }

@@ -29,7 +29,7 @@ func TestWindowsRealHandleNoShareDelete(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "x.kicad_pcb")
 	os.WriteFile(p, []byte("orig"), 0o644)
-	setBudget(t, 300*time.Millisecond)
+	setBudget(t, 600*time.Millisecond)
 	calls := 0
 	injectRename(t, func(from, to string) error { calls++; return platformRename(from, to) })
 

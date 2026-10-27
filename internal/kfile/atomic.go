@@ -27,6 +27,9 @@ type Opts struct {
 	Perm os.FileMode
 	// Env is the identity locks are compared against (default SystemEnv()).
 	Env *Env
+	// Writer is the project writer lock when the caller already holds it
+	// (Txn.Apply only; without it Apply acquires the lock itself).
+	Writer *Writer
 }
 
 // Result describes a committed write.
@@ -38,6 +41,7 @@ type Result struct {
 // Fault injection points for tests.
 var (
 	renameFile  = platformRename
+	removeFile  = os.Remove
 	retryBudget = 3 * time.Second
 )
 
@@ -159,28 +163,34 @@ func (w *File) Commit() (Result, error) {
 	if err := os.Chmod(tmp, w.perm); err != nil {
 		return fail(err)
 	}
-	if !w.o.NoLockCheck {
-		locks, err := Guard([]string{w.path}, w.o.Locks, w.o.Env)
-		w.locks = mergeLocks(w.locks, locks)
-		if err != nil {
-			return fail(err)
+	// Locks and base are re-checked before every rename attempt, so a retry
+	// loop never lands on a file KiCad opened or changed meanwhile.
+	check := func() error {
+		if !w.o.NoLockCheck {
+			locks, err := Guard([]string{w.path}, w.o.Locks, w.o.Env)
+			w.locks = mergeLocks(w.locks, locks)
+			if err != nil {
+				return err
+			}
 		}
-	}
-	if w.o.Base != nil {
-		b := *w.o.Base
-		b.Path = w.path
-		if err := b.Check(); err != nil {
-			return fail(err)
+		if w.o.Base != nil {
+			b := *w.o.Base
+			b.Path = w.path
+			return b.Check()
 		}
+		return nil
 	}
-	if err := renameRetry(tmp, w.path); err != nil {
+	if err := renameRetry(tmp, w.path, check); err != nil {
 		return fail(err)
 	}
-	syncDir(filepath.Dir(w.path))
-	return Result{
+	res := Result{
 		New:   Snapshot{Path: w.path, Exists: true, Size: w.size, SHA256: hex.EncodeToString(w.h.Sum(nil))},
 		Locks: w.locks,
-	}, nil
+	}
+	if err := syncDir(filepath.Dir(w.path)); err != nil {
+		return res, wrapf(err, "%s was replaced, but its directory could not be flushed", w.path)
+	}
+	return res, nil
 }
 
 // Abort discards the pending content. Safe after Commit (no-op).
@@ -194,12 +204,18 @@ func (w *File) Abort() error {
 }
 
 // renameRetry renames, retrying sharing violations with backoff (10 ms
-// doubling, 500 ms cap) for retryBudget in total.
-func renameRetry(from, to string) error {
+// doubling, 500 ms cap) for retryBudget in total. check, when not nil, runs
+// before every attempt and its error ends the loop.
+func renameRetry(from, to string, check func() error) error {
 	deadline := time.Now().Add(retryBudget)
 	delay := 10 * time.Millisecond
 	tries := 0
 	for {
+		if check != nil {
+			if err := check(); err != nil {
+				return err
+			}
+		}
 		err := renameFile(from, to)
 		tries++
 		if err == nil || !isRetryable(err) {
@@ -217,12 +233,18 @@ func renameRetry(from, to string) error {
 	}
 }
 
-// removeRetry deletes path with the same retry rule; a missing file is fine.
-func removeRetry(path string) error {
+// removeRetry deletes path with the same retry and check rule; a missing
+// file is fine.
+func removeRetry(path string, check func() error) error {
 	deadline := time.Now().Add(retryBudget)
 	delay := 10 * time.Millisecond
 	for {
-		err := os.Remove(path)
+		if check != nil {
+			if err := check(); err != nil {
+				return err
+			}
+		}
+		err := removeFile(path)
 		if err == nil || errors.Is(err, fs.ErrNotExist) {
 			return nil
 		}
