@@ -17,6 +17,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -372,6 +373,27 @@ const (
 
 var errNetlistSections = errors.New("missing <components> or <nets> section (not a complete kicad-cli netlist export)")
 
+// kiidRe is a KiCad UUID as KiCad writes it (lowercase 8-4-4-4-12 hex;
+// legacy timestamps are stored as "00000000-0000-0000-0000-<8 hex>", the
+// same shape).
+var kiidRe = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// validSheetTstamps accepts "/" (root) or "/<uuid>/.../<uuid>/".
+func validSheetTstamps(s string) bool {
+	if s == "/" {
+		return true
+	}
+	if len(s) < 2 || s[0] != '/' || s[len(s)-1] != '/' {
+		return false
+	}
+	for _, seg := range strings.Split(s[1:len(s)-1], "/") {
+		if !kiidRe.MatchString(seg) {
+			return false
+		}
+	}
+	return true
+}
+
 // SyncNetlistIssue is one reason a netlist cannot drive a board sync.
 type SyncNetlistIssue struct {
 	Code   string `json:"code"`
@@ -381,9 +403,10 @@ type SyncNetlistIssue struct {
 }
 
 // Validate reports what makes the netlist unusable for matching
-// footprints: components without a reference, symbol UUID or sheet path,
-// unannotated or duplicate references, duplicate footprint path keys, and
-// net nodes naming no component (kicadsexpr drops exclude_from_board
+// footprints: components without a reference, a malformed sheet path or
+// symbol UUID, unannotated or duplicate references, duplicate footprint
+// path keys; nets with an empty or duplicate code or an empty name, nodes
+// without a pin or naming no component, and a pin on two different nets (kicadsexpr drops exclude_from_board
 // symbols together with their nodes, so that never fires on a real export).
 // Empty component and net lists are valid. Issues are in netlist order.
 func (nl *SyncNetlist) Validate() []SyncNetlistIssue {
@@ -404,12 +427,22 @@ func (nl *SyncNetlist) Validate() []SyncNetlistIssue {
 		if strings.HasSuffix(c.Ref, "?") {
 			add(ErrUnannotated, c.Ref, "", "%s is not annotated", c.Ref)
 		}
-		if !strings.HasPrefix(c.SheetTstamps, "/") {
-			add(ErrNetlistInvalid, c.Ref, "", "%s has no sheet path tstamps", c.Ref)
+		if !validSheetTstamps(c.SheetTstamps) {
+			add(ErrNetlistInvalid, c.Ref, "", "%s has sheet path tstamps %q, want \"/\" or \"/<uuid>/.../\"", c.Ref, c.SheetTstamps)
 			continue
 		}
 		if len(c.Tstamps) == 0 {
 			add(ErrNetlistInvalid, c.Ref, "", "%s has no symbol UUID (tstamps)", c.Ref)
+			continue
+		}
+		badUUID := false
+		for _, u := range c.Tstamps {
+			if !kiidRe.MatchString(u) {
+				add(ErrNetlistInvalid, c.Ref, "", "%s has symbol UUID %q, not a KiCad UUID", c.Ref, u)
+				badUUID = true
+			}
+		}
+		if badUUID {
 			continue
 		}
 		for _, k := range c.Keys() {
@@ -420,10 +453,33 @@ func (nl *SyncNetlist) Validate() []SyncNetlistIssue {
 			keys[k] = c.Ref
 		}
 	}
-	for _, n := range nl.Nets {
+	codes := map[string]string{}
+	pinNet := map[[2]string]string{}
+	for i, n := range nl.Nets {
+		switch prev, dup := codes[n.Code]; {
+		case n.Code == "":
+			add(ErrNetlistInvalid, "", "", "net #%d (%q) has no code", i+1, n.Name)
+		case dup:
+			add(ErrNetlistInvalid, "", "", "net code %s is used by both %q and %q", n.Code, prev, n.Name)
+		default:
+			codes[n.Code] = n.Name
+		}
+		if n.Name == "" {
+			add(ErrNetlistInvalid, "", "", "net code %s has no name", n.Code)
+		}
 		for _, d := range n.Nodes {
+			if d.Pin == "" {
+				add(ErrNetlistInvalid, d.Ref, "", "net %q has a node on %s without a pin", n.Name, d.Ref)
+				continue
+			}
 			if refs[d.Ref] == 0 {
 				add(ErrNetlistInvalid, d.Ref, "", "net %q has a node on %s.%s, which is not a component", n.Name, d.Ref, d.Pin)
+			}
+			k := [2]string{d.Ref, d.Pin}
+			if prev, seen := pinNet[k]; seen && prev != n.Name {
+				add(ErrNetlistInvalid, d.Ref, "", "pin %s.%s is on both net %q and net %q", d.Ref, d.Pin, prev, n.Name)
+			} else if !seen {
+				pinNet[k] = n.Name
 			}
 		}
 	}

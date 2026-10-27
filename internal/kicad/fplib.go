@@ -14,7 +14,8 @@ package kicad
 // lookup falls through to the next table; a row of type "Table" splices
 // the rows of the referenced table in at its own position.
 //
-// Fail closed: an unreadable top-level table is a load error, and a nested
+// Fail closed: an unreadable top-level table (or one whose existence
+// cannot be checked) is a load error, and a nested
 // table that cannot be read blocks every nickname not found before it (it
 // might have defined the nickname), so a broken table never silently lets
 // a lookup fall through to a different library of the same name.
@@ -23,6 +24,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -97,7 +99,6 @@ type FPLibTables struct {
 	Warnings     []FPLibError        `json:"warnings,omitempty"` // e.g. legacy variable fallbacks
 	Libs         []FPLib             `json:"-"`                  // all rows, lookup order
 
-	foldCase bool // compare table paths case-insensitively (Windows, macOS)
 }
 
 // FPRef is a resolved footprint.
@@ -147,19 +148,27 @@ func loadFPLibTables(projDir string, env fpLibEnv) (*FPLibTables, error) {
 	if err != nil {
 		return nil, fmt.Errorf("fp-lib-table: %w", err)
 	}
-	t := &FPLibTables{ProjectDir: abs, Vars: map[string]FPLibVar{}, foldCase: env.goos == "windows" || env.goos == "darwin"}
+	t := &FPLibTables{ProjectDir: abs, Vars: map[string]FPLibVar{}}
 	cfg := kicadConfigDir(env)
 	user := readKiCadCommonVars(filepath.Join(cfg, "kicad_common.json"))
 	lookup := func(name string) (FPLibVar, bool) { return resolveFPVar(name, abs, user, env) }
 
-	if p := filepath.Join(abs, "fp-lib-table"); pathExists(p) {
+	p := filepath.Join(abs, "fp-lib-table")
+	present, ferr := tablePresent(p)
+	if ferr != nil {
+		return nil, ferr
+	}
+	if present {
 		t.ProjectTable = p
-		if err := t.loadTable(p, "project", lookup, map[string]bool{}); err != nil {
+		if err := t.loadTable(p, "project", lookup, nil); err != nil {
 			return nil, err
 		}
 	}
 	global := filepath.Join(cfg, "fp-lib-table")
-	if !pathExists(global) {
+	if present, ferr = tablePresent(global); ferr != nil {
+		return nil, ferr
+	}
+	if !present {
 		global = ""
 		if sd := env.stockDir(); sd != "" {
 			if p := filepath.Join(filepath.Dir(sd), "template", "fp-lib-table"); fileExists(p) {
@@ -169,7 +178,7 @@ func loadFPLibTables(projDir string, env fpLibEnv) (*FPLibTables, error) {
 	}
 	if global != "" {
 		t.GlobalTable = global
-		if err := t.loadTable(global, "global", lookup, map[string]bool{}); err != nil {
+		if err := t.loadTable(global, "global", lookup, nil); err != nil {
 			return nil, err
 		}
 	}
@@ -197,19 +206,25 @@ func readTable(path string) (*sx, *FPLibError) {
 // loadTable appends the rows of one table file (recursing into nested
 // "Table" rows) in lookup order. It fails only when the file itself cannot
 // be read or parsed; a failing nested table becomes a Blocked row.
-func (t *FPLibTables) loadTable(path, scope string, lookup func(string) (FPLibVar, bool), seen map[string]bool) *FPLibError {
-	key := filepath.Clean(path)
-	if t.foldCase {
-		key = strings.ToLower(key)
+//
+// stack holds the tables being loaded above this one; a table that is the
+// same file (os.SameFile: case variants, symlinks, "dir/../dir" spellings)
+// as one of them is a cycle.
+func (t *FPLibTables) loadTable(path, scope string, lookup func(string) (FPLibVar, bool), stack []os.FileInfo) *FPLibError {
+	st, err := fpStat(path)
+	if err != nil {
+		return &FPLibError{Code: ErrFPLibUnresolved, Path: path,
+			Detail: "cannot read fp-lib-table: " + err.Error(), Fix: "check the table path in KiCad's Footprint Libraries dialog"}
 	}
-	if seen[key] {
-		// The cycle's rows are already loaded above it: nothing is unknown.
-		t.Problems = append(t.Problems, FPLibError{Code: ErrFPLibUnresolved, Path: path,
-			Detail: "fp-lib-table nests itself", Fix: "remove the recursive Table row"})
-		return nil
+	for _, up := range stack {
+		if os.SameFile(up, st) {
+			// The cycle's rows are already loaded above it: nothing is unknown.
+			t.Problems = append(t.Problems, FPLibError{Code: ErrFPLibUnresolved, Path: path,
+				Detail: "fp-lib-table nests itself", Fix: "remove the recursive Table row"})
+			return nil
+		}
 	}
-	seen[key] = true
-	defer delete(seen, key)
+	stack = append(stack[:len(stack):len(stack)], st)
 	root, ferr := readTable(path)
 	if ferr != nil {
 		return ferr
@@ -239,7 +254,7 @@ func (t *FPLibTables) loadTable(path, scope string, lookup func(string) (FPLibVa
 				continue
 			}
 			if lib.Err == nil {
-				lib.Err = t.loadTable(lib.Dir, scope, lookup, seen)
+				lib.Err = t.loadTable(lib.Dir, scope, lookup, stack)
 			}
 			if lib.Err != nil {
 				e := *lib.Err
@@ -556,9 +571,33 @@ func fileExists(p string) bool {
 	return err == nil && !st.IsDir()
 }
 
-func pathExists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
+// fpStat / fpLstat are os.Stat / os.Lstat; tests inject failures.
+var (
+	fpStat  = os.Stat
+	fpLstat = os.Lstat
+)
+
+// tablePresent reports whether a top-level fp-lib-table exists. Only a
+// path that does not exist at all counts as absent; a dangling symlink, a
+// permission or I/O error is an error, so a table KiCad would read is never
+// silently replaced by the next fallback.
+func tablePresent(p string) (bool, *FPLibError) {
+	_, err := fpStat(p)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		if _, lerr := fpLstat(p); lerr == nil {
+			return false, &FPLibError{Code: ErrFPLibUnresolved, Path: p,
+				Detail: "fp-lib-table is a symlink to a missing file", Fix: "repair or remove the symlink"}
+		} else if !errors.Is(lerr, fs.ErrNotExist) {
+			return false, &FPLibError{Code: ErrFPLibUnresolved, Path: p,
+				Detail: "cannot check fp-lib-table: " + lerr.Error(), Fix: "check the file's permissions"}
+		}
+		return false, nil
+	}
+	return false, &FPLibError{Code: ErrFPLibUnresolved, Path: p,
+		Detail: "cannot check fp-lib-table: " + err.Error(), Fix: "check the file's permissions"}
 }
 
 func dirExists(p string) bool {

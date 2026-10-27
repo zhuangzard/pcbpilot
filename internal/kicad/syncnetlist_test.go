@@ -322,3 +322,94 @@ func TestSyncNetlistValidate(t *testing.T) {
 		}
 	}
 }
+
+// TestSyncNetlistValidateIdentityAndNets pins the UUID, sheet-path and net
+// rules on a small hand-built netlist.
+func TestSyncNetlistValidateIdentityAndNets(t *testing.T) {
+	const u1, u2, sh = "00000000-0000-0000-0000-00004549f4be", "4d7b2a6e-31c2-4f0a-9d1e-5b7c8a9e0f12", "00000000-0000-0000-0000-00004b3a1333"
+	base := func() *SyncNetlist {
+		return &SyncNetlist{
+			Components: []SyncComp{
+				{Ref: "R1", SheetTstamps: "/", Tstamps: []string{u1}},
+				{Ref: "R2", SheetTstamps: "/" + sh + "/", Tstamps: []string{u2}},
+			},
+			Nets: []SyncNet{
+				{Code: "1", Name: "A", Nodes: []SyncNode{{Ref: "R1", Pin: "1"}, {Ref: "R2", Pin: "1"}}},
+				{Code: "2", Name: "B", Nodes: []SyncNode{{Ref: "R1", Pin: "2"}, {Ref: "R2", Pin: "2"}}},
+			},
+		}
+	}
+	if issues := base().Validate(); len(issues) != 0 {
+		t.Fatalf("base must validate: %+v", issues)
+	}
+	cases := []struct {
+		what   string
+		edit   func(*SyncNetlist)
+		detail string
+	}{
+		{"garbage sheet path", func(n *SyncNetlist) { n.Components[1].SheetTstamps = "/garbage/" }, "sheet path tstamps"},
+		{"sheet path without trailing slash", func(n *SyncNetlist) { n.Components[1].SheetTstamps = "/" + sh }, "sheet path tstamps"},
+		{"empty sheet segment", func(n *SyncNetlist) { n.Components[1].SheetTstamps = "/" + sh + "//" }, "sheet path tstamps"},
+		{"not a UUID", func(n *SyncNetlist) { n.Components[0].Tstamps = []string{"not-a-uuid"} }, "not a KiCad UUID"},
+		{"empty UUID", func(n *SyncNetlist) { n.Components[0].Tstamps = []string{""} }, "not a KiCad UUID"},
+		{"upper-case UUID", func(n *SyncNetlist) { n.Components[0].Tstamps = []string{strings.ToUpper(u1)} }, "not a KiCad UUID"},
+		{"bare 8-hex timestamp", func(n *SyncNetlist) { n.Components[0].Tstamps = []string{"4549F4BE"} }, "not a KiCad UUID"},
+		{"second unit bad", func(n *SyncNetlist) { n.Components[0].Tstamps = []string{u1, "x"} }, "not a KiCad UUID"},
+		{"empty net code", func(n *SyncNetlist) { n.Nets[1].Code = "" }, "has no code"},
+		{"duplicate net code", func(n *SyncNetlist) { n.Nets[1].Code = "1" }, "net code 1 is used by both"},
+		{"empty net name", func(n *SyncNetlist) { n.Nets[1].Name = "" }, "has no name"},
+		{"node without pin", func(n *SyncNetlist) { n.Nets[1].Nodes[0].Pin = "" }, "without a pin"},
+		{"pin on two nets", func(n *SyncNetlist) { n.Nets[1].Nodes[0].Pin = "1" }, "is on both net"},
+	}
+	for _, c := range cases {
+		nl := base()
+		c.edit(nl)
+		var got []string
+		ok := false
+		for _, is := range nl.Validate() {
+			got = append(got, is.Detail)
+			ok = ok || (is.Code == ErrNetlistInvalid && strings.Contains(is.Detail, c.detail))
+		}
+		if !ok {
+			t.Errorf("%s: want %s %q, got %v", c.what, ErrNetlistInvalid, c.detail, got)
+		}
+	}
+	// The same pin listed twice on one net is not a conflict.
+	nl := base()
+	nl.Nets[0].Nodes = append(nl.Nets[0].Nodes, SyncNode{Ref: "R1", Pin: "1"})
+	if issues := nl.Validate(); len(issues) != 0 {
+		t.Errorf("repeated node on one net: %+v", issues)
+	}
+}
+
+// The identity and net rules fire on real exports of both formats.
+func TestSyncNetlistValidateFormats(t *testing.T) {
+	for _, name := range []string{"ecc83-pp-flags.kicadxml.net", "ecc83-pp-flags.kicadsexpr.net"} {
+		base := string(readNetFixture(t, name))
+		xmlForm := strings.HasSuffix(name, "kicadxml.net")
+		pick := func(x, s string) string {
+			if xmlForm {
+				return x
+			}
+			return s
+		}
+		for _, c := range []struct{ what, re, repl, detail string }{
+			{"bad UUID", "00000000-0000-0000-0000-00004549f3be", "not-a-uuid", "not a KiCad UUID"},
+			{"bad sheet path", pick(`tstamps="/"/>`, `\(names "/"\)\s*\(tstamps "/"\)`), pick(`tstamps="/garbage/"/>`, `(names "/") (tstamps "/garbage/")`), "sheet path tstamps"},
+			{"duplicate net code", pick(`code="2"`, `\(code "2"\)`), pick(`code="1"`, `(code "1")`), "net code 1 is used by both"},
+			{"empty pin", pick(`pin="2"`, `\(pin "2"\)`), pick(`pin=""`, `(pin "")`), "without a pin"},
+		} {
+			nl, err := ParseSyncNetlist([]byte(replaceFirst(t, base, c.re, c.repl)), "")
+			if err != nil {
+				t.Fatalf("%s %s: %v", name, c.what, err)
+			}
+			ok := false
+			for _, is := range nl.Validate() {
+				ok = ok || strings.Contains(is.Detail, c.detail)
+			}
+			if !ok {
+				t.Errorf("%s %s: want %q, got %+v", name, c.what, c.detail, nl.Validate())
+			}
+		}
+	}
+}

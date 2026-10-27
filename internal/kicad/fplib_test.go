@@ -2,6 +2,7 @@ package kicad
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -399,24 +400,118 @@ func TestFPLibBrokenTablesFailClosed(t *testing.T) {
 	}
 }
 
-func TestFPLibTableCycleCaseFolding(t *testing.T) {
-	for goos, fold := range map[string]bool{"windows": true, "darwin": true, "linux": false} {
-		f := newFPFixture(t)
-		f.goos = goos
-		if got := f.load().foldCase; got != fold {
-			t.Errorf("%s: foldCase %v, want %v", goos, got, fold)
-		}
-	}
-	if runtime.GOOS != "windows" {
-		return // only Windows guarantees a case-insensitive file system here
-	}
+// Table cycles are found by file identity, not by spelling.
+func TestFPLibTableCycleByIdentity(t *testing.T) {
+	// The same file spelled through "sub/.." is the same table.
 	f := newFPFixture(t)
 	inner := filepath.Join(f.root, "inner-table")
-	f.write(inner, table(row("Back", "Table", filepath.ToSlash(strings.ToUpper(inner)))))
+	if err := os.MkdirAll(filepath.Join(f.root, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(f.root, "sub") + string(filepath.Separator) + ".." + string(filepath.Separator) + "inner-table"
+	f.write(inner, table(row("Back", "Table", filepath.ToSlash(alias))))
 	f.write(filepath.Join(f.cfg, FPLibVersion, "fp-lib-table"), table(row("In", "Table", filepath.ToSlash(inner))))
-	tabs := f.load()
-	if len(tabs.Problems) != 1 || !strings.Contains(tabs.Problems[0].Detail, "nests itself") {
-		t.Errorf("case-variant path must be the same table: %+v", tabs.Problems)
+	if tabs := f.load(); len(tabs.Problems) != 1 || !strings.Contains(tabs.Problems[0].Detail, "nests itself") {
+		t.Errorf("alias spelling must be the same table: %+v", tabs.Problems)
+	}
+
+	// Case variants: one file on a case-insensitive file system, two
+	// distinct tables (no cycle) on a case-sensitive one.
+	g := newFPFixture(t)
+	lower := filepath.Join(g.root, "case-table")
+	upper := filepath.Join(g.root, "CASE-TABLE")
+	g.write(lower, table(row("ToUpper", "Table", filepath.ToSlash(upper))))
+	sl, _ := os.Stat(lower)
+	su, err := os.Stat(upper)
+	insensitive := err == nil && os.SameFile(sl, su)
+	if !insensitive {
+		g.lib(filepath.Join(g.root, "u.pretty"), "U")
+		g.write(upper, table(row("U", "KiCad", filepath.ToSlash(filepath.Join(g.root, "u.pretty")))))
+	}
+	g.write(filepath.Join(g.cfg, FPLibVersion, "fp-lib-table"), table(row("Start", "Table", filepath.ToSlash(lower))))
+	tabs := g.load()
+	if insensitive {
+		if len(tabs.Problems) != 1 || !strings.Contains(tabs.Problems[0].Detail, "nests itself") {
+			t.Errorf("case-insensitive FS: case variant must be the same table: %+v", tabs.Problems)
+		}
+	} else {
+		if len(tabs.Problems) != 0 {
+			t.Errorf("case-sensitive FS: distinct tables are not a cycle: %+v", tabs.Problems)
+		}
+		if _, err := tabs.Resolve("U:U"); err != nil {
+			t.Errorf("case-sensitive FS: U:U from the upper-case table: %v", err)
+		}
+	}
+
+	// A symlinked table pointing back at its parent (where symlinks work).
+	h := newFPFixture(t)
+	parent := filepath.Join(h.root, "parent-table")
+	link := filepath.Join(h.root, "link-table")
+	h.write(parent, table(row("Back", "Table", filepath.ToSlash(link))))
+	if err := os.Symlink(parent, link); err != nil {
+		t.Logf("symlink case skipped: %v", err)
+		return
+	}
+	h.write(filepath.Join(h.cfg, FPLibVersion, "fp-lib-table"), table(row("P", "Table", filepath.ToSlash(parent))))
+	if tabs := h.load(); len(tabs.Problems) != 1 || !strings.Contains(tabs.Problems[0].Detail, "nests itself") {
+		t.Errorf("symlink back to the parent must be a cycle: %+v", tabs.Problems)
+	}
+}
+
+// Only a path that does not exist is "no table"; anything else stops the
+// load instead of falling back to the next table.
+func TestFPLibTablePresenceErrors(t *testing.T) {
+	defer func() { fpStat, fpLstat = os.Stat, os.Lstat }()
+	errPerm := &fs.PathError{Op: "stat", Path: "x", Err: fs.ErrPermission}
+	for _, c := range []struct {
+		name        string
+		stat, lstat error // injected for the table path
+		wantErr     string
+	}{
+		{"permission", errPerm, nil, "cannot check"},
+		{"io", &fs.PathError{Op: "stat", Path: "x", Err: errors.New("I/O error")}, nil, "cannot check"},
+		{"dangling symlink", fs.ErrNotExist, nil, "symlink to a missing file"},
+		{"lstat permission", fs.ErrNotExist, errPerm, "cannot check"},
+	} {
+		for _, which := range []string{"project", "global"} {
+			f := newFPFixture(t)
+			f.lib(filepath.Join(f.stock, "R.pretty"), "R1")
+			f.write(filepath.Join(filepath.Dir(f.stock), "template", "fp-lib-table"),
+				table(row("R", "KiCad", "${KICAD10_FOOTPRINT_DIR}/R.pretty")))
+			target := filepath.Join(f.pj, "fp-lib-table")
+			if which == "global" {
+				target = filepath.Join(f.cfg, FPLibVersion, "fp-lib-table")
+			}
+			fpStat = func(p string) (os.FileInfo, error) {
+				if p == target {
+					return nil, c.stat
+				}
+				return os.Stat(p)
+			}
+			fpLstat = func(p string) (os.FileInfo, error) {
+				if p == target {
+					if c.lstat != nil {
+						return nil, c.lstat
+					}
+					return os.Stat(f.pj) // "exists": the link itself
+				}
+				return os.Lstat(p)
+			}
+			_, err := f.tryLoad()
+			if err == nil || !strings.Contains(err.Error(), c.wantErr) || fpErrCode(t, err).Path != target {
+				t.Errorf("%s %s: err %v, want %q on %s", c.name, which, err, c.wantErr, target)
+			}
+		}
+	}
+	fpStat, fpLstat = os.Stat, os.Lstat
+	// A real dangling symlink, where the OS lets us make one.
+	f := newFPFixture(t)
+	if err := os.Symlink(filepath.Join(f.root, "gone"), filepath.Join(f.pj, "fp-lib-table")); err != nil {
+		t.Logf("real dangling symlink skipped: %v", err)
+		return
+	}
+	if _, err := f.tryLoad(); err == nil {
+		t.Error("dangling project fp-lib-table symlink must fail the load")
 	}
 }
 
