@@ -15,7 +15,7 @@ func platformSyncFile(path string) error {
 	}
 	ro := st.Mode().Perm()&0o200 == 0
 	if ro {
-		if err := os.Chmod(path, 0o666); err != nil {
+		if err := chmodFile(path, 0o666); err != nil {
 			return err
 		}
 	}
@@ -27,7 +27,7 @@ func platformSyncFile(path string) error {
 		}
 	}
 	if ro {
-		if cerr := os.Chmod(path, 0o444); err == nil {
+		if cerr := chmodFile(path, 0o444); err == nil {
 			err = cerr
 		}
 	}

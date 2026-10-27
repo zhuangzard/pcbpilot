@@ -1027,3 +1027,208 @@ func TestStagedTampering(t *testing.T) {
 	}
 	clean(t, dir)
 }
+
+// Recover verifies and repairs every entry's final mode before it drops the
+// journal: after a failed attribute restore, and on the completed path.
+func TestRecoverSettlesModes(t *testing.T) {
+	// The read-only attribute of a restored file is lost during its flush.
+	dir := project(t, map[string]string{"a.kicad_pcb": "A1", "a.kicad_pro": "P1"})
+	ro := filepath.Join(dir, "a.aro")
+	readOnly(t, ro, "frozen")
+	tx := stagedTxn(t, dir)
+	tx.Delete(ro, nil)
+	interrupt(t, tx)
+	old := syncFile
+	syncFile = func(p string) error {
+		err := old(p)
+		if filepath.Base(p) == "a.aro" {
+			os.Chmod(p, 0o666)
+			return errors.New("attribute restore failed")
+		}
+		return err
+	}
+	_, err := Recover(dir, RecoverOpts{Env: fakeEnv()})
+	syncFile = old
+	if CodeOf(err) != CodeTxnPending || isReadOnly(t, ro) {
+		t.Fatalf("setup: %v read-only=%v", err, isReadOnly(t, ro))
+	}
+	if _, err := Recover(dir, RecoverOpts{Env: fakeEnv()}); err != nil || !isReadOnly(t, ro) {
+		t.Fatalf("retry: %v read-only=%v", err, isReadOnly(t, ro))
+	}
+	clean(t, dir)
+
+	// Completed path: every change landed, one created file lost its mode.
+	dir = project(t, map[string]string{"a.kicad_pcb": "A1", "a.kicad_pro": "P1"})
+	crashAfterLastMutation(t, stagedTxn(t, dir), dir, "new.kicad_dru")
+	dru := filepath.Join(dir, "new.kicad_dru")
+	os.Chmod(dru, 0o444)
+	t.Cleanup(func() { os.Chmod(dru, 0o644) })
+	rec, err := Recover(dir, RecoverOpts{Env: fakeEnv()})
+	if err != nil || rec.Action != "completed" || isReadOnly(t, dru) {
+		t.Fatalf("completed: %+v %v read-only=%v", rec, err, isReadOnly(t, dru))
+	}
+	clean(t, dir)
+}
+
+func symlinkOrSkip(t *testing.T, target, link string) {
+	t.Helper()
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+}
+
+func TestSymlinkTargetsRefused(t *testing.T) {
+	dir := project(t, map[string]string{"real.kicad_pcb": "R1", "a.kicad_pcb": "A1", "a.kicad_pro": "P1"})
+	link := filepath.Join(dir, "link.kicad_pcb")
+	symlinkOrSkip(t, filepath.Join(dir, "real.kicad_pcb"), link)
+	tx := NewTxn(dir)
+	if err := tx.Stage(link, []byte("x"), nil); CodeOf(err) != CodeUnsupported {
+		t.Errorf("Stage: %v", err)
+	}
+	if err := tx.Delete(link, nil); CodeOf(err) != CodeUnsupported {
+		t.Errorf("Delete: %v", err)
+	}
+	if _, err := WriteFile(link, []byte("x"), Opts{Env: fakeEnv()}); CodeOf(err) != CodeUnsupported || ExitCode(err) != 1 {
+		t.Errorf("WriteFile: %v", err)
+	}
+	if read(t, filepath.Join(dir, "real.kicad_pcb")) != "R1" {
+		t.Fatal("referent written")
+	}
+	noTemps(t, dir)
+
+	// Replaced by a link just before its rename: refused, earlier file rolled back.
+	tx = stagedTxn(t, dir)
+	pro := filepath.Join(dir, "a.kicad_pro")
+	beforeMutate = func(p string) {
+		if p == pro {
+			os.Remove(pro)
+			os.Symlink(filepath.Join(dir, "real.kicad_pcb"), pro)
+		}
+	}
+	_, err := tx.Apply("", Opts{Env: fakeEnv()})
+	beforeMutate = nil
+	if CodeOf(err) != CodeUnsupported || read(t, filepath.Join(dir, "a.kicad_pcb")) != "A1" {
+		t.Fatalf("mid-apply link: %v", err)
+	}
+	if fi, _ := os.Lstat(pro); fi.Mode()&os.ModeSymlink == 0 || read(t, filepath.Join(dir, "real.kicad_pcb")) != "R1" {
+		t.Fatal("link or referent touched")
+	}
+	clean(t, dir)
+}
+
+// opLog records chmod, file flush, rename and directory flush in order.
+func opLog(t *testing.T, failRenameTo string) *[]string {
+	t.Helper()
+	var log []string
+	oc, of, or, od := chmodFile, syncFile, renameFile, syncDir
+	chmodFile = func(p string, m os.FileMode) error { log = append(log, "chmod "+filepath.Base(p)); return oc(p, m) }
+	syncFile = func(p string) error { log = append(log, "fsync "+filepath.Base(p)); return of(p) }
+	renameFile = func(from, to string) error {
+		if filepath.Base(to) == failRenameTo {
+			return errors.New("fail")
+		}
+		log = append(log, "rename "+filepath.Base(from)+">"+filepath.Base(to))
+		return or(from, to)
+	}
+	syncDir = func(d string) error { log = append(log, "dirsync "+d); return od(d) }
+	t.Cleanup(func() { chmodFile, syncFile, renameFile, syncDir = oc, of, or, od })
+	return &log
+}
+
+// assertInstallOrder checks chmod → fsync → rename → dir fsync for the temp
+// file tmp installed as target in dir.
+func assertInstallOrder(t *testing.T, log []string, tmp, target, dir string) {
+	t.Helper()
+	at := func(op string, from int) int {
+		for i := from; i < len(log); i++ {
+			if log[i] == op {
+				return i
+			}
+		}
+		return -1
+	}
+	c := at("chmod "+tmp, 0)
+	f := at("fsync "+tmp, c+1)
+	r := at("rename "+tmp+">"+target, f+1)
+	d := at("dirsync "+dir, r+1)
+	if c < 0 || f < 0 || r < 0 || d < 0 {
+		t.Fatalf("order for %s: chmod %d fsync %d rename %d dirsync %d in %v", tmp, c, f, r, d, log)
+	}
+}
+
+func TestInstallOrder(t *testing.T) {
+	dir := project(t, map[string]string{"a.kicad_pcb": "A1", "a.kicad_pro": "P1"})
+	tx := stagedTxn(t, dir)
+	staged := filepath.Base(tx.changes[filepath.Join(dir, "a.kicad_pcb")].staged)
+	log := opLog(t, "a.kicad_pro")
+	if _, err := tx.Apply("", Opts{Env: fakeEnv()}); err == nil {
+		t.Fatal("no error")
+	}
+	assertInstallOrder(t, *log, staged, "a.kicad_pcb", dir)
+	// The rollback restore of a.kicad_pcb uses a fresh temp file.
+	var restoreTmp string
+	for _, op := range *log {
+		if strings.HasPrefix(op, "rename .a.kicad_pcb.pcbpilot-") && strings.HasSuffix(op, ">a.kicad_pcb") && !strings.Contains(op, staged) {
+			restoreTmp = strings.TrimSuffix(strings.TrimPrefix(op, "rename "), ">a.kicad_pcb")
+		}
+	}
+	if restoreTmp == "" {
+		t.Fatalf("no restore rename in %v", *log)
+	}
+	assertInstallOrder(t, *log, restoreTmp, "a.kicad_pcb", dir)
+	if read(t, filepath.Join(dir, "a.kicad_pcb")) != "A1" {
+		t.Fatal("not rolled back")
+	}
+}
+
+// Discard flushes the files it keeps before the journal goes.
+func TestDiscardFlushes(t *testing.T) {
+	dir := project(t, map[string]string{"a.kicad_pcb": "A1", "a.kicad_pro": "P1"})
+	interrupt(t, stagedTxn(t, dir))
+	old := syncFile
+	syncFile = func(string) error { return errors.New("flush failed") }
+	_, err := Discard(dir, RecoverOpts{Env: fakeEnv()})
+	syncFile = old
+	if CodeOf(err) != CodeTxnPending || Pending(dir) == nil {
+		t.Fatalf("flush failure: %v", err)
+	}
+	if rec, err := Discard(dir, RecoverOpts{Env: fakeEnv()}); err != nil || rec.Action != "discarded" {
+		t.Fatalf("%+v %v", rec, err)
+	}
+	clean(t, dir)
+}
+
+// Mode 0 is a real mode once it is known.
+func TestExactZeroMode(t *testing.T) {
+	dir := t.TempDir()
+	if p, _ := targetPerm(filepath.Join(dir, "n1"), 0, false); p != 0o644 {
+		t.Errorf("default perm %v", p)
+	}
+	if p, _ := targetPerm(filepath.Join(dir, "n2"), 0, true); p != 0 {
+		t.Errorf("exact zero perm %v", p)
+	}
+	nf := filepath.Join(dir, "zero.kicad_pcb")
+	if _, err := WriteFile(nf, []byte("z"), Opts{NoLockCheck: true, Perm: 0, PermExact: true}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(nf, 0o644) })
+	if st, _ := os.Stat(nf); !modeEq(st.Mode(), 0) {
+		t.Errorf("new file mode %v, want 0000", st.Mode().Perm())
+	}
+
+	p := filepath.Join(dir, "f.kicad_pcb")
+	os.WriteFile(p, []byte("x"), 0o644)
+	t.Cleanup(func() { os.Chmod(p, 0o644) })
+	snap, _ := Stat(p)
+	e := journalEntry{Path: p, Kind: KindReplace, Existed: true, BaseSHA: snap.SHA256, NewSHA: "other", Mode: 0}
+	if did, err := fixMode(e, guardOpts{noLock: true}); did || err != nil {
+		t.Fatalf("unknown mode touched: %v %v", did, err)
+	}
+	e.HasMode = true
+	if did, err := fixMode(e, guardOpts{noLock: true}); !did || err != nil {
+		t.Fatalf("exact 0: %v %v", did, err)
+	}
+	if st, _ := os.Stat(p); !modeEq(st.Mode(), 0) {
+		t.Errorf("mode %v, want 0000", st.Mode().Perm())
+	}
+}

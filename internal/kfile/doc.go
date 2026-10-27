@@ -44,7 +44,12 @@
 //     goes; if a flush fails the journal and backups stay. Staged files stay
 //     0600 and are re-hashed before the commit and before each rename; the
 //     txn tree is 0700 with 0600 backups; the writer lock and the txn tree
-//     cannot themselves be staged or deleted.
+//     cannot themselves be staged or deleted. Symlinks, reparse points and
+//     other non-regular targets are refused (E_UNSUPPORTED_TARGET), at
+//     staging and again before each change. Every install is chmod, flush,
+//     rename, flush the directory; before any journal is dropped (recover,
+//     rollback, discard) the recorded final modes are verified and every
+//     file is flushed.
 //   - One writer per project. AcquireWriter is an operating-system lock on
 //     <root>/.pcbpilot/writer.lock (Windows share mode, Unix flock), released
 //     by the kernel when the holder dies; Apply, Recover and Discard take it.

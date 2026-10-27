@@ -27,12 +27,13 @@ const (
 
 // Change is one file of a transaction.
 type Change struct {
-	Path   string      `json:"path"`
-	Kind   Kind        `json:"kind"`
-	Base   Snapshot    `json:"base"`
-	NewSHA string      `json:"newSha,omitempty"`
-	staged string      // temp file beside Path ("" for a delete)
-	mode   os.FileMode // the file's mode before the transaction
+	Path    string      `json:"path"`
+	Kind    Kind        `json:"kind"`
+	Base    Snapshot    `json:"base"`
+	NewSHA  string      `json:"newSha,omitempty"`
+	staged  string      // temp file beside Path ("" for a delete)
+	mode    os.FileMode // the file's mode before the transaction
+	hasMode bool
 }
 
 // Plan is what Apply would do, identified by Revision.
@@ -76,7 +77,7 @@ func (t *Txn) Stage(path string, data []byte, base *Snapshot) error {
 		return err
 	}
 	t.created = append(t.created, created...)
-	perm, err := targetPerm(abs, 0)
+	perm, err := targetPerm(abs, 0, false)
 	if err != nil {
 		return err
 	}
@@ -100,7 +101,7 @@ func (t *Txn) Stage(path string, data []byte, base *Snapshot) error {
 		kind = KindReplace
 	}
 	h := sha256.Sum256(data)
-	t.put(&Change{Path: abs, Kind: kind, Base: b, NewSHA: hex.EncodeToString(h[:]), staged: f.Name(), mode: perm})
+	t.put(&Change{Path: abs, Kind: kind, Base: b, NewSHA: hex.EncodeToString(h[:]), staged: f.Name(), mode: perm, hasMode: true})
 	return nil
 }
 
@@ -127,7 +128,7 @@ func (t *Txn) Delete(path string, base *Snapshot) error {
 	if err != nil {
 		return err
 	}
-	t.put(&Change{Path: abs, Kind: KindDelete, Base: b, mode: st.Mode().Perm()})
+	t.put(&Change{Path: abs, Kind: KindDelete, Base: b, mode: st.Mode().Perm(), hasMode: true})
 	return nil
 }
 
@@ -138,6 +139,9 @@ func (t *Txn) base(path string, base *Snapshot) (string, Snapshot, error) {
 	}
 	if t.reserved(abs) {
 		return "", Snapshot{}, fmt.Errorf("%s is pcbpilot's own transaction state (writer lock, journal or backups) and cannot be part of a transaction", abs)
+	}
+	if err := checkRegular(abs); err != nil {
+		return "", Snapshot{}, err
 	}
 	var b Snapshot
 	if base != nil {
@@ -271,6 +275,7 @@ type journalEntry struct {
 	Kind    Kind        `json:"kind"`
 	Existed bool        `json:"existed"`
 	Mode    os.FileMode `json:"mode"`
+	HasMode bool        `json:"hasMode,omitempty"` // Mode is known (0 is a real mode then)
 	BaseSHA string      `json:"baseSha,omitempty"`
 	NewSHA  string      `json:"newSha,omitempty"`
 	Backup  string      `json:"backup,omitempty"` // relative to the txn dir
@@ -339,6 +344,9 @@ func (t *Txn) Apply(wantRev string, o Opts) (Plan, error) {
 					return err
 				}
 			}
+			if err := checkRegular(e.Path); err != nil {
+				return err
+			}
 			if err := e.base().Check(); err != nil {
 				return err
 			}
@@ -350,7 +358,7 @@ func (t *Txn) Apply(wantRev string, o Opts) (Plan, error) {
 	j := journal{Schema: journalSchema, Revision: plan.Revision, Phase: "prepare", PID: os.Getpid(),
 		Host: envOr(o.Env).Host, Created: time.Now().UTC()}
 	for i, c := range cs {
-		e := journalEntry{Path: c.Path, Kind: c.Kind, Existed: c.Base.Exists, Mode: c.mode,
+		e := journalEntry{Path: c.Path, Kind: c.Kind, Existed: c.Base.Exists, Mode: c.mode, HasMode: c.hasMode,
 			BaseSHA: c.Base.SHA256, NewSHA: c.NewSHA, Staged: c.staged}
 		if c.Base.Exists {
 			e.Backup = filepath.ToSlash(filepath.Join(plan.Revision[:16], fmt.Sprintf("%03d-%s", i, filepath.Base(c.Path))))
@@ -428,9 +436,12 @@ func (t *Txn) Apply(wantRev string, o Opts) (Plan, error) {
 		if e.Kind == KindDelete {
 			err = removeRetry(e.Path, check(e))
 		} else {
-			// The staged file gets the target's mode only now.
-			if err = os.Chmod(e.Staged, e.Mode); err == nil {
-				err = renameRetry(e.Staged, e.Path, check(e))
+			// The staged file gets the target's mode only now; then
+			// chmod, flush, rename, flush the directory.
+			if err = chmodFile(e.Staged, e.Mode); err == nil {
+				if err = syncFile(e.Staged); err == nil {
+					err = renameRetry(e.Staged, e.Path, check(e))
+				}
 			}
 		}
 		if err == nil {
@@ -445,7 +456,7 @@ func (t *Txn) Apply(wantRev string, o Opts) (Plan, error) {
 				Fix:    "close KiCad and other programs using the project, then run `pcbpilot kicad txn recover` (or `discard` to keep the files as they are)"}
 		}
 		t.Abort()
-		if ferr := flushTargets(j.Changes[:i+1]); ferr != nil {
+		if ferr := settle(j.Changes[:i+1], guardOpts{o.Locks, o.NoLockCheck, o.Env}); ferr != nil {
 			return plan, keepJournal(t.root, errors.Join(err, ferr))
 		}
 		return abandon(wrapf(err, "apply %s (all files restored)", e.Path))
@@ -508,7 +519,7 @@ func undo(root string, e journalEntry, failed bool, g guardOpts) (bool, error) {
 	}
 	switch st {
 	case stateBase:
-		return fixMode(e, cur, g)
+		return fixMode(e, g)
 	case stateOther:
 		if failed {
 			return false, nil
@@ -517,6 +528,9 @@ func undo(root string, e journalEntry, failed bool, g guardOpts) (bool, error) {
 	}
 	if beforeRestore != nil {
 		beforeRestore(e.Path)
+	}
+	if err := checkRegular(e.Path); err != nil {
+		return false, err
 	}
 	if !e.Existed {
 		ours := func() error {
@@ -542,16 +556,11 @@ func undo(root string, e journalEntry, failed bool, g guardOpts) (bool, error) {
 	}
 	// WriteFile checks the locks before creating its temp file and before
 	// every rename attempt.
-	if _, err := WriteFile(e.Path, b, Opts{NoLockCheck: g.noLock, Locks: g.locks, Env: g.env, Base: &cur, Perm: e.Mode}); err != nil {
+	if _, err := WriteFile(e.Path, b, Opts{NoLockCheck: g.noLock, Locks: g.locks, Env: g.env, Base: &cur, Perm: e.Mode, PermExact: e.HasMode}); err != nil {
 		return false, err
 	}
-	if st, err := os.Stat(e.Path); err == nil && st.Mode().Perm() != e.Mode.Perm() {
-		if err := os.Chmod(e.Path, e.Mode); err != nil {
-			return true, err
-		}
-		return true, syncFile(e.Path)
-	}
-	return true, nil
+	_, err = fixMode(e, g)
+	return true, err
 }
 
 // undoAll undoes entries in reverse order and returns the paths restored.
@@ -576,27 +585,54 @@ func undoAll(root string, entries []journalEntry, lastFailed bool, g guardOpts) 
 	return restored, errors.Join(errs...)
 }
 
-// fixMode restores the recorded mode of a file whose bytes are already at
-// their base (a crash between restoring the bytes and the chmod), under the
-// lock and base re-check.
-func fixMode(e journalEntry, cur Snapshot, g guardOpts) (bool, error) {
-	if !e.Existed || !cur.Exists || e.Mode == 0 {
+// fixMode gives an existing entry its recorded mode when the file is in
+// the transaction's state or its original state (in both the recorded mode
+// is the right final mode) — e.g. after a crash between restoring the bytes
+// and the chmod, or a lost read-only attribute. It re-checks the KiCad lock
+// and the file's state first, flushes after the chmod and verifies the
+// result. An entry without a recorded mode is left alone.
+func fixMode(e journalEntry, g guardOpts) (bool, error) {
+	if !e.HasMode {
 		return false, nil
 	}
-	st, err := os.Stat(e.Path)
-	if err != nil || st.Mode().Perm() == e.Mode.Perm() {
+	st0, cur, err := entryStateOf(e)
+	if err != nil || st0 == stateOther || !cur.Exists {
+		return false, err
+	}
+	fi, err := os.Lstat(e.Path)
+	if err != nil || modeEq(fi.Mode(), e.Mode) {
 		return false, err
 	}
 	if err := g.check(e.Path); err != nil {
 		return false, err
 	}
-	if err := e.base().Check(); err != nil {
+	if err := checkRegular(e.Path); err != nil {
 		return false, err
 	}
-	if err := os.Chmod(e.Path, e.Mode); err != nil {
+	if st1, _, err := entryStateOf(e); err != nil || st1 != st0 {
+		return false, changedErr(e.Path, "changed while its mode was being restored")
+	}
+	if err := chmodFile(e.Path, e.Mode); err != nil {
 		return false, err
 	}
-	return true, syncFile(e.Path)
+	if err := syncFile(e.Path); err != nil {
+		return true, err
+	}
+	if fi, err := os.Lstat(e.Path); err != nil || !modeEq(fi.Mode(), e.Mode) {
+		return true, fmt.Errorf("%s: mode is still not %v", e.Path, e.Mode)
+	}
+	return true, nil
+}
+
+// settle verifies and repairs the recorded final mode of every entry, then
+// makes every entry durable: the last step before a journal may go.
+func settle(entries []journalEntry, g guardOpts) error {
+	for _, e := range entries {
+		if _, err := fixMode(e, g); err != nil {
+			return err
+		}
+	}
+	return flushTargets(entries)
 }
 
 // flushTargets makes every journalled path durable as it is now (file
@@ -827,9 +863,10 @@ func Recover(root string, o RecoverOpts) (Recovery, error) {
 			Detail: "changed after the interrupted transaction, so recover would destroy that work: " + strings.Join(rec.Conflicts, ", "),
 			Fix:    "inspect those files; `pcbpilot kicad txn discard` keeps every file as it is now"}
 	}
+	g := guardOpts{o.Locks, o.NoLockCheck, o.Env}
 	if all {
 		rec.Action = "completed"
-		if err := flushTargets(j.Changes); err != nil {
+		if err := settle(j.Changes, g); err != nil {
 			return rec, keepJournal(root, err)
 		}
 		return rec, finish(root, j)
@@ -839,14 +876,14 @@ func Recover(root string, o RecoverOpts) (Recovery, error) {
 			return rec, err
 		}
 	}
-	restored, err := undoAll(root, j.Changes, false, guardOpts{o.Locks, o.NoLockCheck, o.Env})
+	restored, err := undoAll(root, j.Changes, false, g)
 	rec.Restored = restored
 	if err != nil {
 		return rec, &Error{Code: CodeTxnPending, Path: journalPath(root), Err: err,
 			Detail: "recover incomplete, the journal is kept: " + err.Error(),
 			Fix:    "close the programs holding the files and run recover again"}
 	}
-	if err := flushTargets(j.Changes); err != nil {
+	if err := settle(j.Changes, g); err != nil {
 		return rec, keepJournal(root, err)
 	}
 	rec.Action = "rolled-back"
@@ -868,6 +905,11 @@ func Discard(root string, o RecoverOpts) (Recovery, error) {
 			err = os.RemoveAll(txnDir(root))
 		}
 		return rec, err
+	}
+	// The files are kept as they are; make them durable before the journal
+	// that could still explain them goes.
+	if err := flushTargets(j.Changes); err != nil {
+		return rec, keepJournal(root, err)
 	}
 	rec.Action = "discarded"
 	return rec, finish(root, j)

@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 )
 
@@ -22,9 +23,11 @@ type Opts struct {
 	// NoLockCheck skips the KiCad lock check: for files KiCad never opens
 	// (pcbpilot's own reports and state).
 	NoLockCheck bool
-	// Perm is the mode of a new file (default 0o644); an existing file keeps
-	// its mode.
+	// Perm is the mode of a new file; an existing file keeps its mode. A zero
+	// Perm means 0o644 unless PermExact is set.
 	Perm os.FileMode
+	// PermExact makes Perm exact, 0 included.
+	PermExact bool
 	// Env is the identity locks are compared against (default SystemEnv()).
 	Env *Env
 	// Writer is the project writer lock when the caller already holds it
@@ -42,6 +45,7 @@ type Result struct {
 var (
 	renameFile  = platformRename
 	removeFile  = os.Remove
+	chmodFile   = os.Chmod
 	syncDir     = platformSyncDir
 	retryBudget = 3 * time.Second
 )
@@ -79,7 +83,7 @@ func Create(path string, o Opts) (*File, error) {
 	if err != nil {
 		return nil, err
 	}
-	perm, err := targetPerm(abs, o.Perm)
+	perm, err := targetPerm(abs, o.Perm, o.PermExact)
 	if err != nil {
 		return nil, err
 	}
@@ -99,24 +103,55 @@ func Create(path string, o Opts) (*File, error) {
 	return w, nil
 }
 
-// targetPerm is the mode for the new content; a read-only target is refused.
-func targetPerm(path string, perm os.FileMode) (os.FileMode, error) {
-	st, err := os.Stat(path)
+// targetPerm is the mode for the new content; a read-only or non-regular
+// target is refused.
+func targetPerm(path string, perm os.FileMode, exact bool) (os.FileMode, error) {
+	if err := checkRegular(path); err != nil {
+		return 0, err
+	}
+	st, err := os.Lstat(path)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		if perm == 0 {
+		if perm == 0 && !exact {
 			perm = 0o644
 		}
 		return perm, nil
 	case err != nil:
 		return 0, err
-	case st.IsDir():
-		return 0, fmt.Errorf("%s is a directory", path)
 	case st.Mode().Perm()&0o200 == 0:
 		return 0, &Error{Code: CodeReadOnly, Path: path, Detail: "the file is read-only",
 			Fix: "clear the read-only attribute (or check it out of version control) and retry"}
 	}
 	return st.Mode().Perm(), nil
+}
+
+// checkRegular refuses a target that exists and is not a regular file
+// (symlink, Windows reparse point, directory, device, …): replacing a link
+// would replace the link, not its referent, and backups would copy the
+// referent. A missing target is fine.
+func checkRegular(path string) error {
+	st, err := os.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !st.Mode().IsRegular() {
+		return &Error{Code: CodeUnsupported, Path: path,
+			Detail: fmt.Sprintf("not a regular file (%v); symlinks, reparse points and directories are not written through", st.Mode().Type()),
+			Fix:    "point pcbpilot at the real file instead of the link"}
+	}
+	return nil
+}
+
+// modeEq compares file modes as the platform stores them: on Windows only
+// the read-only attribute (owner write bit) exists.
+func modeEq(a, b os.FileMode) bool {
+	if runtime.GOOS == "windows" {
+		return a&0o200 == b&0o200
+	}
+	return a.Perm() == b.Perm()
 }
 
 func createTemp(target string) (*os.File, error) {
@@ -154,14 +189,14 @@ func (w *File) Commit() (Result, error) {
 		os.Remove(tmp)
 		return Result{Locks: w.locks}, err
 	}
-	if err := w.f.Sync(); err != nil {
-		w.f.Close()
-		return fail(err)
-	}
+	// Order: chmod, flush (data and the new mode), rename, flush the dir.
 	if err := w.f.Close(); err != nil {
 		return fail(err)
 	}
-	if err := os.Chmod(tmp, w.perm); err != nil {
+	if err := chmodFile(tmp, w.perm); err != nil {
+		return fail(err)
+	}
+	if err := syncFile(tmp); err != nil {
 		return fail(err)
 	}
 	// Locks and base are re-checked before every rename attempt, so a retry
@@ -173,6 +208,9 @@ func (w *File) Commit() (Result, error) {
 			if err != nil {
 				return err
 			}
+		}
+		if err := checkRegular(w.path); err != nil {
+			return err
 		}
 		if w.o.Base != nil {
 			b := *w.o.Base

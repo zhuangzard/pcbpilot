@@ -17,6 +17,9 @@ const (
 	CodeReadOnly   Code = "E_READONLY"
 	// CodeWriterBusy: another pcbpilot process holds the project writer lock.
 	CodeWriterBusy Code = "E_WRITER_BUSY"
+	// CodeUnsupported: the target is a symlink, reparse point, directory or
+	// other non-regular file.
+	CodeUnsupported Code = "E_UNSUPPORTED_TARGET"
 )
 
 // Error is every refusal of this package: a code, the file it concerns, what

@@ -5,6 +5,7 @@ package kfile
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"syscall"
 	"testing"
@@ -104,6 +105,25 @@ func TestWindowsFallbackFlushFailure(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(p); string(b) != "new" {
 		t.Fatalf("content %q", b)
+	}
+	noTemps(t, dir)
+}
+
+// A directory junction (a reparse point any user can create) is refused.
+func TestWindowsReparsePointRefused(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "realdir")
+	os.Mkdir(real, 0o755)
+	j := filepath.Join(dir, "j.kicad_pcb")
+	if out, err := exec.Command("cmd", "/c", "mklink", "/J", j, real).CombinedOutput(); err != nil {
+		t.Skipf("mklink /J: %v %s", err, out)
+	}
+	tx := NewTxn(dir)
+	if err := tx.Stage(j, []byte("x"), nil); CodeOf(err) != CodeUnsupported {
+		t.Errorf("Stage: %v", err)
+	}
+	if _, err := WriteFile(j, []byte("x"), Opts{Env: fakeEnv()}); CodeOf(err) != CodeUnsupported {
+		t.Errorf("WriteFile: %v", err)
 	}
 	noTemps(t, dir)
 }
