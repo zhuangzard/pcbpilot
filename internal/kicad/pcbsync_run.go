@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -197,15 +196,16 @@ type ParityResult struct {
 	Info   []string    `json:"info,omitempty"`
 }
 
-// RunParity copies pcb (+ pro when present) and every .kicad_sch under the
-// root sheet's directory to a temp directory, the board renamed to the root
-// sheet's basename (kicad-cli finds the schematic by that name), and runs
-// the parity DRC there with the isolated config (parity needs no library).
-// Every schematic_parity item fails the gate unless expected(v) says it is
-// one the plan chose to keep (a flagged orphan). Anything that keeps the
-// check from running — no kicad-cli, a crash, a report that does not parse
-// or lacks the schematic_parity section — is CannotCheck.
-func (t *Tools) RunParity(pcb, pro, schRoot string, expected func(Violation) bool) ParityResult {
+// RunParity copies the sheets (root first; their layout kept, ../ sheets
+// included) to a temp directory, puts pcb (+ pro and the rules beside pcb,
+// when present) next to the root copy under the root sheet's basename
+// (kicad-cli finds the schematic by that name), and runs the parity DRC
+// there with the isolated config (parity needs no library). Every
+// schematic_parity item fails the gate unless expected(v) says it is one
+// the plan chose to keep (a flagged orphan). Anything that keeps the check
+// from running — no kicad-cli, a crash, a report that does not parse or
+// lacks the schematic_parity section — is CannotCheck.
+func (t *Tools) RunParity(pcb, pro string, sheets []string, expected func(Violation) bool) ParityResult {
 	cc := func(f string, a ...any) ParityResult {
 		return ParityResult{Status: gate.CannotCheck, Detail: fmt.Sprintf(f, a...)}
 	}
@@ -215,54 +215,48 @@ func (t *Tools) RunParity(pcb, pro, schRoot string, expected func(Violation) boo
 	if _, err := os.Stat(t.CLI); err != nil {
 		return cc("kicad-cli not found at %s", t.CLI)
 	}
+	if len(sheets) == 0 {
+		return cc("no schematic sheets")
+	}
 	dir, err := os.MkdirTemp("", "pcbpilot-parity-")
 	if err != nil {
 		return cc("temp dir: %v", err)
 	}
 	defer os.RemoveAll(dir)
-	base := strings.TrimSuffix(filepath.Base(schRoot), filepath.Ext(schRoot))
-	if err := copyPlain(pcb, filepath.Join(dir, base+".kicad_pcb")); err != nil {
+	var files []SchSheetFile
+	for _, p := range sheets {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return cc("read sheet: %v", err)
+		}
+		abs, _ := filepath.Abs(p)
+		files = append(files, SchSheetFile{Path: abs, Data: b})
+	}
+	copies, err := CopySheetTree(files, dir)
+	if err != nil {
+		return cc("copy sheets: %v", err)
+	}
+	bdir := filepath.Dir(copies[0])
+	base := strings.TrimSuffix(filepath.Base(copies[0]), filepath.Ext(copies[0]))
+	if err := copyPlain(pcb, filepath.Join(bdir, base+".kicad_pcb")); err != nil {
 		return cc("copy board: %v", err)
 	}
 	if pro != "" {
 		if _, err := os.Stat(pro); err == nil {
-			if err := copyPlain(pro, filepath.Join(dir, base+".kicad_pro")); err != nil {
+			if err := copyPlain(pro, filepath.Join(bdir, base+".kicad_pro")); err != nil {
 				return cc("copy project: %v", err)
 			}
 		}
 	}
 	// The rules beside the board (the effective ones the sync publishes).
 	if dru := strings.TrimSuffix(pcb, filepath.Ext(pcb)) + ".kicad_dru"; fileExists(dru) {
-		if err := copyPlain(dru, filepath.Join(dir, base+".kicad_dru")); err != nil {
+		if err := copyPlain(dru, filepath.Join(bdir, base+".kicad_dru")); err != nil {
 			return cc("copy rules: %v", err)
 		}
 	}
-	root := filepath.Dir(schRoot)
-	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			if p != root && (strings.HasPrefix(d.Name(), ".") || strings.HasSuffix(d.Name(), ".pretty")) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.EqualFold(filepath.Ext(p), ".kicad_sch") {
-			return nil
-		}
-		rel, err := filepath.Rel(root, p)
-		if err != nil {
-			return err
-		}
-		return copyPlain(p, filepath.Join(dir, rel))
-	})
-	if err != nil {
-		return cc("copy sheets: %v", err)
-	}
 	out := filepath.Join(dir, "parity.json")
 	var buf bytes.Buffer
-	cmd, cancel := SchCLICommand(t.CLI, "pcb", "drc", "--schematic-parity", "--format", "json", "--severity-all", "-o", out, filepath.Join(dir, base+".kicad_pcb"))
+	cmd, cancel := SchCLICommand(t.CLI, "pcb", "drc", "--schematic-parity", "--format", "json", "--severity-all", "-o", out, filepath.Join(bdir, base+".kicad_pcb"))
 	defer cancel()
 	cmd.Stdout, cmd.Stderr = &buf, &buf
 	runErr := cmd.Run()

@@ -594,12 +594,15 @@ func BuildSyncPlan(in SyncInput) (*SyncPlan, error) {
 	if opts.RenameNets {
 		curPads := map[string]map[[2]string]bool{} // board net → (ref,num) of pads on it
 		strays := map[string]bool{}                // nets with a pad outside the matched footprints
+		// A stray is a connected pad no schematic pin speaks for: any pad
+		// of an unmatched or board-only footprint, and an unnumbered pad
+		// or a hole on a matched one. A rename would move it to the new
+		// net unauthorised, so its net is not renamed.
 		for i := range inv.Footprints {
-			if f := &inv.Footprints[i]; !used[f] {
-				for _, pd := range f.Pads {
-					if pd.Net != "" {
-						strays[pd.Net] = true
-					}
+			f := &inv.Footprints[i]
+			for _, pd := range f.Pads {
+				if pd.Net != "" && (!used[f] || !pd.copper()) {
+					strays[pd.Net] = true
 				}
 			}
 		}

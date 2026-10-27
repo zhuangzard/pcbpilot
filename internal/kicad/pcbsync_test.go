@@ -374,6 +374,17 @@ func TestBuildSyncPlan(t *testing.T) {
 				}
 			}
 		}},
+		{"rename-blocked-by-unnumbered-pad", func(nl *SyncNetlist, inv *SyncInventory, _ *SyncOptions) {
+			// /SIG would be renamed, but U1 also has an unnumbered pad on it
+			// (no pin authorises moving it).
+			netByName(nl, "/SIG").Name = "/SENSE"
+			f := fpByRef(inv, "U1")
+			f.Pads = append(f.Pads, SyncPad{Number: "", Net: "/SIG", Type: "smd"})
+		}, func(t *testing.T, p *SyncPlan) {
+			if len(opsOf(p, "renameNet")) != 0 || len(opsOf(p, "setPadNet")) != 3 {
+				t.Fatalf("an unnumbered connected pad must block the rename: %+v", p.Ops)
+			}
+		}},
 		{"rename-disabled", func(nl *SyncNetlist, _ *SyncInventory, o *SyncOptions) {
 			netByName(nl, "/SIG").Name = "/SENSE"
 			o.RenameNets = false

@@ -33,7 +33,6 @@ import (
 	"regexp"
 	"runtime"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -85,7 +84,7 @@ type pcbSyncBackend interface {
 	SyncRead(pcb string) (*kicad.SyncInventory, error)
 	FPInfo(refs []kicad.FPRef) (map[string]kicad.SyncFPInfo, []kicad.SyncError, error)
 	SyncApply(pcb string, plan *kicad.SyncPlan, stage, base string) (*kicad.SyncApplyResult, error)
-	RunParity(pcb, pro, schRoot string, expected func(kicad.Violation) bool) kicad.ParityResult
+	RunParity(pcb, pro string, sheets []string, expected func(kicad.Violation) bool) kicad.ParityResult
 }
 
 // pcbSyncBeforeApply, when set (tests only), runs after the plan is made
@@ -300,6 +299,16 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 	if why := pcbSyncOutputAlias(o, reportPath); why != "" {
 		return usage("%s", why)
 	}
+	// The report and plan files as they are now (absent, or pcb-sync's own):
+	// written later only over exactly this state (kfile Base).
+	reportSnap, why := pcbSyncOwnOutput("--report", reportPath)
+	if why != "" {
+		return usage("%s", why)
+	}
+	planSnap, why := pcbSyncOwnOutput("--plan-out", o.planOut)
+	if why != "" {
+		return usage("%s", why)
+	}
 	policy, err := kfile.ParseBreakPolicy(o.breakLock)
 	if err != nil {
 		return usage("%v", err)
@@ -388,7 +397,7 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 		}
 		if reportPath == "" {
 			// stdout only
-		} else if _, err := kfile.WriteFile(reportPath, b, kfile.Opts{Env: env}); err != nil {
+		} else if _, err := kfile.WriteFile(reportPath, b, kfile.Opts{Env: env, Base: &reportSnap}); err != nil {
 			fmt.Fprintf(stderr, "pcb-sync: cannot write the report %s: %v\n", reportPath, err)
 			if code == 0 {
 				if code = kfile.ExitCode(err); code == 0 {
@@ -491,15 +500,40 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 	if druData, druSnap, err = readOpt(boardSibling(o.pcb, ".kicad_dru")); err != nil {
 		return fileErr(err)
 	}
-	// The schematic (root and every sheet under its directory) and an
-	// explicit netlist are inputs too: re-checked with the board.
+	// The schematic: the root sheet and every sheet it references
+	// (recursively, ../ included), plus the project next to the root, read
+	// once, hashed, and copied with their layout; the netlist export and
+	// the parity check use the copy. Re-checked with the board.
+	sheets, err := kicad.SchematicSheets(o.sch)
+	if err != nil {
+		if r, ok := kicad.IsSyncRefusal(err); ok {
+			rep.Errors = append(rep.Errors, r.Errors...)
+			return finish("refused", 1)
+		}
+		return fail(kicad.ErrSheetPath, o.sch, err.Error(), "", 1)
+	}
 	var inputSnaps []kfile.Snapshot
-	for _, f := range pcbSyncSchematicFiles(o.sch) {
-		sn, err := kfile.Stat(f)
+	for _, sh := range sheets {
+		inputSnaps = append(inputSnaps, kfile.Snapshot{Path: sh.Path, Exists: true, Size: int64(len(sh.Data)), SHA256: kfileSHA(sh.Data)})
+	}
+	schCopyDir, err := os.MkdirTemp("", "pcbpilot-sync-sch-")
+	if err != nil {
+		return fileErr(err)
+	}
+	defer os.RemoveAll(schCopyDir)
+	sheetCopies, err := kicad.CopySheetTree(sheets, schCopyDir)
+	if err != nil {
+		return fileErr(err)
+	}
+	if schPro := boardSibling(strings.TrimSuffix(sheets[0].Path, filepath.Ext(sheets[0].Path))+".kicad_pcb", ".kicad_pro"); fileExists(schPro) {
+		b, sn, err := kfile.Read(schPro)
 		if err != nil {
 			return fileErr(err)
 		}
 		inputSnaps = append(inputSnaps, sn)
+		if err := os.WriteFile(strings.TrimSuffix(sheetCopies[0], filepath.Ext(sheetCopies[0]))+".kicad_pro", b, 0o644); err != nil {
+			return fileErr(err)
+		}
 	}
 	if o.netlist != "" {
 		sn, err := kfile.Stat(o.netlist)
@@ -571,12 +605,12 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 		if cli == "" || !fileExists(cli) {
 			return fail(kicad.ErrNetlistExport, o.sch, "kicad-cli not found ("+cli+")", "install KiCad 10, set "+kicad.EnvCLI+", or pass --netlist", 1)
 		}
-		if data, err = kicad.ExportSyncNetlist(cli, o.sch, format); err != nil {
+		if data, err = kicad.ExportSyncNetlist(cli, sheetCopies[0], format); err != nil {
 			return fail(kicad.ErrNetlistExport, o.sch, err.Error(), "open the schematic in KiCad once to check it loads, or pass --netlist", 1)
 		}
 		rep.Netlist.Source = "kicad-cli sch export netlist " + o.sch
 	}
-	nl, err := kicad.ReadSyncNetlist(data, format, filepath.Dir(o.sch))
+	nl, err := kicad.ReadSyncNetlist(data, format, filepath.Dir(sheetCopies[0]))
 	if err != nil {
 		return fail(kicad.ErrNetlistExport, o.netlist, err.Error(), "re-export the netlist with kicad-cli sch export netlist", 1)
 	}
@@ -661,8 +695,15 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 		}
 		return what + ":" + kfileSHA(b)
 	}
+	snapState := func(what string, sn kfile.Snapshot) string {
+		if !sn.Exists {
+			return what + ":absent"
+		}
+		return what + ":" + sn.SHA256
+	}
 	rep.Revision = kicad.SyncRevision(boardSnap.SHA256, proSnap.SHA256, sopts, plan,
-		state("project", effPro), state("rules", effDru))
+		state("project", effPro), state("rules", effDru),
+		snapState("target-board", targetSnap), snapState("target-project", targetProSnap), snapState("target-rules", targetDruSnap))
 
 	// Findings of the plan (a netlist pin without its pad) mean the board
 	// cannot be brought in line: --check, --dry-run and --plan-out fail.
@@ -681,7 +722,7 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 		pf := pcbSyncPlanFile{Schema: pcbSyncPlanSchema, Revision: rep.Revision, Sch: o.sch, PCB: o.pcb, Ops: plan.Ops}
 		b, _ := json.MarshalIndent(pf, "", "  ")
 		_ = os.MkdirAll(filepath.Dir(o.planOut), 0o755)
-		if _, err := kfile.WriteFile(o.planOut, append(b, '\n'), kfile.Opts{Env: env}); err != nil {
+		if _, err := kfile.WriteFile(o.planOut, append(b, '\n'), kfile.Opts{Env: env, Base: &planSnap}); err != nil {
 			return fileErr(err)
 		}
 		return finish("planned", 0)
@@ -707,7 +748,10 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 	// Apply into a stage directory beside the target.
 	staged, stagedPro := o.pcb, boardSibling(o.pcb, ".kicad_pro")
 	wrote := false
-	if !(o.inPlace && len(plan.Mutating()) == 0) {
+	// An in-place run with nothing to change verifies a staged copy of the
+	// bytes read (not the live board) and writes nothing.
+	noop := o.inPlace && len(plan.Mutating()) == 0
+	{
 		stage, err := kicad.NewStageDir(target)
 		if err != nil {
 			return fileErr(err)
@@ -771,8 +815,13 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 		if err := sourceUnchanged(); err != nil {
 			return fileErr(err)
 		}
-		res, err := t.SyncApply(src, applied, stage, base)
-		if err != nil {
+		var res *kicad.SyncApplyResult
+		if noop {
+			if err := os.WriteFile(filepath.Join(stage, base+".kicad_pcb"), boardData, 0o600); err != nil {
+				return fileErr(err)
+			}
+			res = &kicad.SyncApplyResult{KiCadVersion: rep.KiCadVersion}
+		} else if res, err = t.SyncApply(src, applied, stage, base); err != nil {
 			rep.Errors = append(rep.Errors, kicad.SyncError{Code: errSyncBridge, Path: target, Detail: err.Error(),
 				Fix: "nothing was written; see the problems listed"})
 			return finish("error", 1)
@@ -803,11 +852,11 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 				return fileErr(err)
 			}
 		}
-		wrote = true
+		wrote = !noop
 	}
 
 	// Verify the staged board.
-	gates, padNet, idem := pcbSyncVerify(t, o, sopts, nl, libs, info, plan, staged, stagedPro)
+	gates, padNet, idem := pcbSyncVerify(t, o, sopts, nl, libs, info, plan, staged, stagedPro, sheetCopies)
 	rep.Gates = gates
 	overall := gate.Aggregate(gateResults(gates)...)
 	for _, g := range gates {
@@ -878,6 +927,16 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 		}
 		rep.Committed = p.Applied
 	}
+	// Nothing committed (a no-op, or verification only): the result still
+	// speaks for the inputs only if none changed while it ran.
+	if !rep.Committed {
+		if err := sourceUnchanged(); err != nil {
+			return fileErr(err)
+		}
+		if err := targetUnchanged(); err != nil {
+			return fileErr(err)
+		}
+	}
 	return finish(string(overall), overall.ExitCode())
 }
 
@@ -919,7 +978,7 @@ func gateResults(gs []pcbSyncGate) []gate.Result {
 
 // pcbSyncVerify runs the three gates on the staged board.
 func pcbSyncVerify(t pcbSyncBackend, o pcbSyncOpts, sopts kicad.SyncOptions, nl *kicad.SyncNetlist, libs kicad.FPResolver,
-	info func([]kicad.FPRef) (map[string]kicad.SyncFPInfo, []kicad.SyncError), plan *kicad.SyncPlan, staged, stagedPro string) ([]pcbSyncGate, gate.Status, gate.Status) {
+	info func([]kicad.FPRef) (map[string]kicad.SyncFPInfo, []kicad.SyncError), plan *kicad.SyncPlan, staged, stagedPro string, sheets []string) ([]pcbSyncGate, gate.Status, gate.Status) {
 	var gates []pcbSyncGate
 	inv, err := t.SyncRead(staged)
 	if err != nil {
@@ -963,7 +1022,7 @@ func pcbSyncVerify(t pcbSyncBackend, o pcbSyncOpts, sopts kicad.SyncOptions, nl 
 				flagged[op.Ref] = true
 			}
 		}
-		pr := t.RunParity(staged, stagedPro, o.sch, func(v kicad.Violation) bool {
+		pr := t.RunParity(staged, stagedPro, sheets, func(v kicad.Violation) bool {
 			if v.Rule != "extra_footprint" {
 				return false
 			}
@@ -1070,6 +1129,11 @@ func pcbSyncOutputAlias(o pcbSyncOpts, report string) string {
 		}
 	}
 	in = append(in, named{"--sch", o.sch})
+	if sheets, err := kicad.SchematicSheets(o.sch); err == nil {
+		for _, sh := range sheets {
+			in = append(in, named{"schematic sheet", sh.Path})
+		}
+	}
 	if root := filepath.Dir(o.sch); o.sch != "" {
 		_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
 			if err != nil {
@@ -1113,39 +1177,31 @@ func pcbSyncOutputAlias(o pcbSyncOpts, report string) string {
 		if !strings.EqualFold(filepath.Ext(out.path), ".json") {
 			return fmt.Sprintf("%s %s must end in .json", out.what, out.path)
 		}
-		if b, err := os.ReadFile(out.path); err == nil {
-			var head struct {
-				Schema string `json:"schema"`
-			}
-			if json.Unmarshal(b, &head) != nil || (head.Schema != pcbSyncSchema && head.Schema != pcbSyncPlanSchema) {
-				return fmt.Sprintf("%s %s exists and is not a pcb-sync report or plan: pcb-sync only replaces its own files", out.what, out.path)
-			}
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return fmt.Sprintf("%s %s: %v", out.what, out.path, err)
-		}
 	}
 	return ""
 }
 
-// pcbSyncSchematicFiles: the root sheet and every .kicad_sch under its
-// directory (sub-sheets may live in sub-directories), sorted.
-func pcbSyncSchematicFiles(root string) []string {
-	out := []string{root}
-	dir := filepath.Dir(root)
-	_ = filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() && p != dir && (strings.HasPrefix(d.Name(), ".") || strings.HasSuffix(d.Name(), ".pretty")) {
-			return filepath.SkipDir
-		}
-		if !d.IsDir() && strings.EqualFold(filepath.Ext(p), ".kicad_sch") && !sameFilePath(p, root) {
-			out = append(out, p)
-		}
-		return nil
-	})
-	sort.Strings(out[1:])
-	return out
+// pcbSyncOwnOutput reads a report / plan path once: absent, or a pcb-sync
+// report or plan (schema field); its snapshot is the Base the file is later
+// written over. "" path = nothing to check.
+func pcbSyncOwnOutput(what, path string) (kfile.Snapshot, string) {
+	if path == "" {
+		return kfile.Snapshot{}, ""
+	}
+	b, sn, err := kfile.Read(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return kfile.Snapshot{Path: path}, ""
+	}
+	if err != nil {
+		return sn, fmt.Sprintf("%s %s: %v", what, path, err)
+	}
+	var head struct {
+		Schema string `json:"schema"`
+	}
+	if json.Unmarshal(b, &head) != nil || (head.Schema != pcbSyncSchema && head.Schema != pcbSyncPlanSchema) {
+		return sn, fmt.Sprintf("%s %s exists and is not a pcb-sync report or plan: pcb-sync only replaces its own files", what, path)
+	}
+	return sn, ""
 }
 
 // pathAlias: a and b are one file — the same cleaned absolute path (case

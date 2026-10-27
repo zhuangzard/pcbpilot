@@ -893,3 +893,36 @@ print("RESULT" + json.dumps({str(p.GetFPRelativePosition().x): p.GetLocalClearan
 		t.Fatalf("ambiguous same-number pads: exit %d %+v", code, rep.Errors)
 	}
 }
+
+// TestPcbSyncLiveUnnumberedPadBlocksRename: a connected pad with no number
+// (no schematic pin speaks for it) on a footprint of a net that would be
+// renamed keeps the net from being renamed: the pads are re-netted one by
+// one instead, and the unnumbered pad is left where it is.
+func TestPcbSyncLiveUnnumberedPadBlocksRename(t *testing.T) {
+	kt := pcbSyncLive(t)
+	_, sch, pcb := ecc83Synced(t)
+	pcbnewScript(t, kt, pcb, `fp = [f for f in b.GetFootprints() if f.GetReference() == "C2"][0]
+src = [p for p in fp.Pads() if p.GetNumber() == "2"][0]
+extra = pcbnew.PAD(src)
+extra.SetNumber("")
+extra.SetPosition(pcbnew.VECTOR2I(src.GetPosition().x, src.GetPosition().y + 3000000))
+fp.Add(extra)
+extra.SetNet(src.GetNet())
+pcbnew.SaveBoard(sys.argv[1], b)
+`)
+	editSch(t, sch, func(e *kicad.SchEditor) {
+		pins, err := e.SymbolPinPositions("C2")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := e.AddLabel(kicad.LabelLocal, "CATHODE", pins["2"], 0, ""); err != nil {
+			t.Fatal(err)
+		}
+	})
+	o := syncOpts(sch, pcb)
+	o.dryRun = true
+	rep, code := runSync(t, o)
+	if code != 0 || rep.Counts.RenameNet != 0 || rep.Counts.PadNet != 3 {
+		t.Fatalf("exit %d counts %+v ops %+v", code, rep.Counts, rep.Ops)
+	}
+}

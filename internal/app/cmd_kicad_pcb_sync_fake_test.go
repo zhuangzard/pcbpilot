@@ -50,6 +50,13 @@ type fakeSync struct {
 	// parityDru: the rules beside the board the parity check was given.
 	parityDru []byte
 	parity    gate.Status // the parity verdict to report ("" = pass)
+	// onParity runs inside the parity check; paritySheets are the sheet
+	// copies it was given; onRead runs inside every sync-read; reads lists
+	// the boards read.
+	onParity     func()
+	paritySheets []string
+	onRead       func()
+	reads        []string
 }
 
 func (f *fakeSync) inventory(value string) *kicad.SyncInventory {
@@ -61,7 +68,11 @@ func (f *fakeSync) inventory(value string) *kicad.SyncInventory {
 }
 
 func (f *fakeSync) SyncRead(pcb string) (*kicad.SyncInventory, error) {
-	if strings.Contains(pcb, ".pcbpilot-stage-") {
+	f.reads = append(f.reads, pcb)
+	if f.onRead != nil {
+		f.onRead()
+	}
+	if strings.Contains(pcb, ".pcbpilot-stage-") && f.after != nil {
 		return f.after, nil
 	}
 	return f.inventory(f.value), nil
@@ -112,7 +123,11 @@ func (f *fakeSync) SyncApply(pcb string, plan *kicad.SyncPlan, stage, base strin
 	return &kicad.SyncApplyResult{KiCadVersion: v}, nil
 }
 
-func (f *fakeSync) RunParity(pcb, pro, sch string, expected func(kicad.Violation) bool) kicad.ParityResult {
+func (f *fakeSync) RunParity(pcb, pro string, sheets []string, expected func(kicad.Violation) bool) kicad.ParityResult {
+	f.paritySheets = sheets
+	if f.onParity != nil {
+		f.onParity()
+	}
 	f.parityDru, _ = os.ReadFile(boardSibling(pcb, ".kicad_dru"))
 	st := gate.Pass
 	if f.parity != "" {
@@ -138,7 +153,12 @@ func fakeProject(t *testing.T, netlist string) (dir string, o pcbSyncOpts, fake 
 		}
 	}
 	t.Setenv("KICAD_CONFIG_HOME", cfg)
-	files := map[string]string{"a.kicad_sch": "(kicad_sch)\n", "sub/b.kicad_sch": "(kicad_sch)\n", "a.kicad_pcb": "(kicad_pcb)\n",
+	// a.kicad_sch references sub/b.kicad_sch and a sheet outside the
+	// project directory (../ext-<dir>/c.kicad_sch).
+	ext := "ext-" + filepath.Base(dir)
+	files := map[string]string{
+		"a.kicad_sch":     "(kicad_sch\n  (sheet (property \"Sheetfile\" \"sub/b.kicad_sch\"))\n  (sheet (property \"Sheetfile\" \"../" + ext + "/c.kicad_sch\"))\n)\n",
+		"sub/b.kicad_sch": "(kicad_sch)\n", "../" + ext + "/c.kicad_sch": "(kicad_sch)\n", "a.kicad_pcb": "(kicad_pcb)\n",
 		"a.kicad_pro": fakePro, "a.kicad_dru": "(version 1)\n", "net.xml": netlist,
 		"fp-lib-table":         "(fp_lib_table\n  (version 7)\n  (lib (name \"L\")(type \"KiCad\")(uri \"${KIPRJMOD}/L.pretty\")(options \"\")(descr \"\"))\n)\n",
 		"L.pretty/R.kicad_mod": "(footprint \"R\")\n"}
@@ -690,5 +710,113 @@ func TestPcbSyncInputsRecheckedBeforeCommit(t *testing.T) {
 				t.Fatalf("exit %d %+v", code, rep.Errors)
 			}
 		})
+	}
+}
+
+// TestPcbSyncExternalSheetRechecked: a sheet outside the project directory
+// (../) is part of the inputs — copied for the export and parity, and an
+// edit to it before the commit is refused.
+func TestPcbSyncExternalSheetRechecked(t *testing.T) {
+	dir, o, fake := fakeProject(t, fakeNetlist())
+	ext := filepath.Join(filepath.Dir(dir), "ext-"+filepath.Base(dir), "c.kicad_sch")
+	o.out = filepath.Join(dir, "out", "o.kicad_pcb")
+	rep, code, _ := runSyncCode(t, o)
+	if code != 0 || len(fake.paritySheets) != 3 {
+		t.Fatalf("exit %d, parity sheets %v %+v", code, fake.paritySheets, rep.Errors)
+	}
+	for _, p := range fake.paritySheets {
+		if pathAlias(p, ext) || pathAlias(p, filepath.Join(dir, "a.kicad_sch")) {
+			t.Fatalf("parity must run on copies, got %s", p)
+		}
+	}
+	if err := os.Remove(o.out); err != nil {
+		t.Fatal(err)
+	}
+	fake.onApply = func(string) {
+		if err := os.WriteFile(ext, []byte("(kicad_sch (edited))\n"), 0o644); err != nil {
+			t.Error(err)
+		}
+	}
+	rep, code, _ = runSyncCode(t, o)
+	if code != 4 || rep.Errors[len(rep.Errors)-1].Code != string(kfile.CodeChanged) || fileExists(o.out) {
+		t.Fatalf("external sheet edited: exit %d %+v", code, rep.Errors)
+	}
+}
+
+// TestPcbSyncNoopVerifiesStagedCopy: an in-place run with nothing to do
+// verifies a staged copy of the bytes read, not the live board, and an edit
+// of the board while it is checked turns the success into exit 4.
+func TestPcbSyncNoopVerifiesStagedCopy(t *testing.T) {
+	dir, o, fake := fakeProject(t, fakeNetlist())
+	fake.value = "1k"
+	pcb := filepath.Join(dir, "a.kicad_pcb")
+	o.inPlace = true
+	rep, code, _ := runSyncCode(t, o)
+	if code != 0 || len(rep.Ops) != 0 || rep.Committed || len(fake.reads) != 2 || !strings.Contains(fake.reads[1], ".pcbpilot-stage-") {
+		t.Fatalf("no-op: exit %d reads %v", code, fake.reads)
+	}
+	fake.onParity = func() {
+		if err := os.WriteFile(pcb, []byte("(kicad_pcb (edited))\n"), 0o644); err != nil {
+			t.Error(err)
+		}
+	}
+	rep, code, _ = runSyncCode(t, o)
+	if code != 4 || rep.OK || rep.Errors[len(rep.Errors)-1].Code != string(kfile.CodeChanged) {
+		t.Fatalf("board edited during parity: exit %d %+v", code, rep.Errors)
+	}
+}
+
+// TestPcbSyncOutputsWrittenOverTheirSnapshot: a report or plan file that
+// appears (or changes) after the start is not overwritten.
+func TestPcbSyncOutputsWrittenOverTheirSnapshot(t *testing.T) {
+	dir, o, fake := fakeProject(t, fakeNetlist())
+	foreign := []byte(`{"schema":"someone/else"}`)
+	o.out = filepath.Join(dir, "out", "o.kicad_pcb")
+	o.report = filepath.Join(dir, "r.json")
+	fake.onApply = func(string) {
+		if err := os.WriteFile(o.report, foreign, 0o644); err != nil {
+			t.Error(err)
+		}
+	}
+	rep, code, _ := runSyncCode(t, o)
+	if b, _ := os.ReadFile(o.report); code != 4 || rep.OK || !bytes.Equal(b, foreign) {
+		t.Fatalf("report appeared: exit %d ok %v file %s", code, rep.OK, b)
+	}
+	p := o
+	p.out, p.report, p.planOut = "", "", filepath.Join(dir, "plan.json")
+	fake.onApply = nil
+	fake.onRead = func() {
+		if err := os.WriteFile(p.planOut, foreign, 0o644); err != nil {
+			t.Error(err)
+		}
+	}
+	rep, code, _ = runSyncCode(t, p)
+	if b, _ := os.ReadFile(p.planOut); code != 4 || !bytes.Equal(b, foreign) {
+		t.Fatalf("plan appeared: exit %d file %s %+v", code, b, rep.Errors)
+	}
+}
+
+// TestPcbSyncRevisionCoversTarget: an existing --out board edited between
+// --plan-out and --apply-plan is refused (exit 4).
+func TestPcbSyncRevisionCoversTarget(t *testing.T) {
+	dir, o, _ := fakeProject(t, fakeNetlist())
+	o.out = filepath.Join(dir, "out", "o.kicad_pcb")
+	if _, code, _ := runSyncCode(t, o); code != 0 {
+		t.Fatalf("first sync: %d", code)
+	}
+	plan := filepath.Join(t.TempDir(), "p.json")
+	p := o
+	p.planOut = plan
+	rep, code, _ := runSyncCode(t, p)
+	if code != 0 {
+		t.Fatalf("plan: %d %+v", code, rep.Errors)
+	}
+	if err := os.WriteFile(o.out, []byte("(kicad_pcb (edited))\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := o
+	a.applyPlan, a.revision = plan, rep.Revision
+	if rep, code, _ = runSyncCode(t, a); code != 4 || rep.Errors[len(rep.Errors)-1].Code != string(kfile.CodeRevision) {
+		t.Fatalf("target edited after the plan: exit %d %+v", code, rep.Errors)
 	}
 }

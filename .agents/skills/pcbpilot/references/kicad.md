@@ -134,7 +134,8 @@ pcbpilot kicad pcb-sync ... --in-place --apply-plan plan.json --revision <rev>
   `E_PIN_PAD_MISMATCH`：网表引脚在封装上没有焊盘）让 `--check` / `--dry-run` / `--plan-out` 退出 1（`verdict: plan-errors`，
   不写计划），不会报 in-sync；应用时 pad-net 门禁失败。
 - **操作**（固定顺序）：`renameNet`（板网的焊盘**恰好**全部去往一个新名字、该名字板上还没有、没有孤儿/板专用件的焊盘在其上
-  → 改名，走线/过孔/铺铜跟着走；拆分、合并、目标名已占用都不改名，逐焊盘改网；保守：`.kicad_pro` 里任何涉及新旧任一名字的 netclass
+  → 改名，走线/过孔/铺铜跟着走；拆分、合并、目标名已占用，或网上有没有原理图引脚对应的焊盘（孤儿/板专用件的焊盘、无编号
+  焊盘、孔）都不改名，逐焊盘改网；保守：`.kicad_pro` 里任何涉及新旧任一名字的 netclass
   指派或 pattern（按通配和正则两种读法）、`.kicad_dru` 里出现任一名字或任何不能按字面判断的网/网络类条件（`matches`、通配、
   差分对/成员函数），都让改名**整批拒绝** `E_RENAME_REFERENCED`，列出原因，提示先在 Board Setup 改或 `--rename-nets=false`）→ `addFootprint`（库里加载，按图纸路径
   再按位号排序，从板框右侧 10 mm 起成行暂存，`--staging X,Y` / `--staging-gap`）→ `swapFootprint`（保留 uuid、所在 group、位置/角度/面/锁定/
@@ -166,10 +167,13 @@ pcbpilot kicad pcb-sync ... --in-place --apply-plan plan.json --revision <rev>
   `--no-parity` 是用户跳过，结论是 skip、退出 5，永远不是 pass。
 - **退出码**：0 通过（`--check` 无漂移）· 1 错误/拒绝 · 2 用法 · 3 `--check` 有漂移 · 4 锁定/读后被改/revision 不符（未写）·
   5 有门禁没能验证（含 `--no-parity`）· 6 门禁失败（`--out` 输出保留，`--in-place` 未提交）。
-- 原理图（根图及其目录下全部 `.kicad_sch`）和 `--netlist` 在开始时记哈希，应用前、提交前与板一起再核对（被改 → 退出 4）。
-  revision 还包含实际发布的工程与规则的哈希/存在状态，以及每个库封装的哈希。
+- 原理图按真实依赖图收集：根图 + 图纸符号的 Sheetfile 递归（含 `../` 外部子图；绝对路径的图纸 → `E_SHEET_PATH` 拒绝），
+  连同根图旁的 `.kicad_pro` 读一次、记哈希、按原目录结构复制到临时目录；网表导出与 parity 都用这份副本。这些文件和
+  `--netlist` 在应用前、提交前（不提交时在返回成功前）与板一起再核对（被改 → 退出 4）。`--in-place` 无事可做时也验证读入字节的
+  暂存副本，不读活文件。revision 还包含实际发布的工程与规则、将被覆盖的目标板 / 工程 / 规则的哈希或不存在状态，以及每个库封装的
+  哈希。
 - **报告** `pcbpilot.kicad.pcb-sync/1`，总是打印到 stdout；`--report` / `--plan-out` 必须以 `.json` 结尾，已存在的文件必须是
-  pcb-sync 自己的报告或计划（`schema` 字段），否则退出 2；`--check` / `--dry-run` / `--plan-out` 只有给了 `--report` 才写文件
+  pcb-sync 自己的报告或计划（`schema` 字段），否则退出 2；开始时的状态作为写入基准，运行中被创建或改动 → 不覆盖，退出 4；`--check` / `--dry-run` / `--plan-out` 只有给了 `--report` 才写文件
   （不会因为 KiCad 开着工程而失败），写入板子的运行默认写 `<目标>.pcb-sync.json`。`--report` / `--plan-out`
   不能是任何输入或输出文件（板/工程/规则/prl、任一 `.kicad_sch`、网表、`--apply-plan`、输出板及其工程；按规范化路径、
   Windows/macOS 不分大小写、硬链接/链接同一文件判断），不能带 `.kicad_*` 扩展名，两者也不能相同 → 用法错误退出 2；写入经
