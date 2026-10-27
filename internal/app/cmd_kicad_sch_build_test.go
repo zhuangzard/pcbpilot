@@ -491,11 +491,11 @@ func TestPackZonesKeepsItsOwnFreshPositions(t *testing.T) {
 			layouts[id] = &sbZoneLayout{Box: kicad.Box{MinX: -w / 3, MinY: -h / 2, MaxX: 2 * w / 3, MaxY: h / 2}}
 			ids = append(ids, id)
 		}
-		t0 := packZones(ids, layouts, nil)
+		t0 := packZones(ids, layouts, nil, 0)
 		if len(t0) != n {
 			t.Fatalf("seed %d: fresh pack placed %d of %d zones", seed, len(t0), n)
 		}
-		t1 := packZones(ids, layouts, t0)
+		t1 := packZones(ids, layouts, t0, 0)
 		for _, id := range ids {
 			if t1[id] != t0[id] {
 				t.Fatalf("seed %d: zone %s moved on an unchanged rebuild: %v → %v", seed, id, t0[id], t1[id])
@@ -512,7 +512,7 @@ func TestPackZonesRepacksWhenKeptLayoutOverflows(t *testing.T) {
 		"b": {Box: kicad.Box{MaxX: 100, MaxY: 80}},
 	}
 	keep := map[string]kicad.Pt{"a": {X: 20, Y: 30}, "b": {X: 1500, Y: 30}} // b far past A0
-	out := packZones([]string{"a", "b"}, layouts, keep)
+	out := packZones([]string{"a", "b"}, layouts, keep, 0)
 	var frames []kicad.Box
 	for id, tr := range out {
 		frames = append(frames, sbFootprint(layouts[id].Box, tr))
@@ -607,6 +607,148 @@ func TestSbGridZoneMultiPinSameNet(t *testing.T) {
 		}
 	}
 	t.Fatalf("no grid variant could lay out a zone with a multi-pin same-net IC side:\n%s", strings.Join(errs, "\n"))
+}
+
+// A zone of nothing but decoupling caps on several rails (no IC): the caps
+// stack in columns, and the ground symbol of one cap and the supply symbol of
+// the cap below used to meet on one vertical line, so every grid variant
+// failed with "N stub(s) would touch a foreign wire or pin" (field board
+// 2026-10-27: 33 caps on four rails, all stubs at one y).
+func TestSbGridZoneDecapColumns(t *testing.T) {
+	sbNeedKicad(t)
+	spec := &sbSpec{Name: "decaps", Zones: []sbZone{{ID: "dec", Title: "FPGA decoupling"}}}
+	rails := []string{"+1V2", "+2V5", "+3V3"}
+	gnd := sbNet{Name: "GND", Kind: "ground"}
+	nets := map[string]*sbNet{}
+	// runs of one rail, then the next, then a bulk cap per rail
+	var railOf []string
+	for _, run := range []struct {
+		rail string
+		n    int
+	}{{"+1V2", 8}, {"+3V3", 16}, {"+2V5", 5}, {"+1V2", 1}, {"+3V3", 2}, {"+2V5", 1}} {
+		for i := 0; i < run.n; i++ {
+			railOf = append(railOf, run.rail)
+		}
+	}
+	for i, r := range railOf {
+		ref := fmt.Sprintf("C%d", i+1)
+		spec.Parts = append(spec.Parts, sbPart{Ref: ref, Value: "100n", Symbol: "Device:C", Zone: "dec"})
+		if nets[r] == nil {
+			nets[r] = &sbNet{Name: r, Kind: "power"}
+		}
+		nets[r].Pins = append(nets[r].Pins, ref+":1")
+		gnd.Pins = append(gnd.Pins, ref+":2")
+	}
+	for _, r := range rails {
+		spec.Nets = append(spec.Nets, *nets[r])
+	}
+	spec.Nets = append(spec.Nets, gnd)
+	d, _, err := buildDesign(spec, sbResolveOpts{Offline: true})
+	if err != nil {
+		t.Fatalf("design: %v", err)
+	}
+	zi := d.zoneInputs()[0]
+	for i, v := range sbGridVariants {
+		zl, err := gridZone(d, zi, &sbMeasure{cache: map[string]kicad.SceneSymbol{}}, v)
+		if err != nil {
+			t.Errorf("grid variant %d: %v", i, err)
+			continue
+		}
+		if f := sbZoneFindings(d, zi, zl); sbHasShort(f) {
+			t.Errorf("grid variant %d shorts nets: %v", i, f)
+		}
+	}
+}
+
+// An IC whose side carries runs of same-net pins (three OUT, three VS) with a
+// decoupling cap on the first of them: each pin used to get its own stub and
+// label, and the cap's attach wire, bending past the next pins, crossed their
+// stubs (EG-08) on every grid variant (field board 2026-10-27, a high-side
+// switch zone that v0.10.0 drew clean). The runs are now tied along the pin
+// ends and carry one connection.
+// A pin of a same-net run (tied, no marker of its own) must never be the
+// fallback tie target of its run's first pin: that pin dropped its marker for
+// it and the whole run lost its net name (field board 2026-10-27, a KiCad
+// netlist mismatch on an isolator's GND2 pins). Every stub of S is blocked;
+// its only same-net sibling T is tied to S already.
+func TestSbFixStubsNeverTiesToATiedPin(t *testing.T) {
+	s, tp := kicad.Pt{X: 0, Y: 0}, kicad.Pt{X: 0, Y: 2.54}
+	zl := &sbZoneLayout{
+		Wires: [][]kicad.Pt{
+			{s, tp},                                 // the run tie
+			{s, {X: 5.08, Y: 0}},                    // S's stub
+			{{X: 2.54, Y: -20}, {X: 2.54, Y: 20}},   // foreign wires all around
+			{{X: -2.54, Y: -20}, {X: -2.54, Y: 20}}, //
+			{{X: -20, Y: -2.54}, {X: 20, Y: -2.54}}, //
+		},
+		Markers: []sbMarker{{Kind: "label", Net: "GND2", At: kicad.Pt{X: 5.08, Y: 0}, Dir: "right"}},
+	}
+	pinNet := map[kicad.Pt]string{
+		s: "GND2#U1.17", tp: "GND2#U1.18",
+		{X: 2.54, Y: -20}: "A#R1.1", {X: 2.54, Y: 20}: "A#R2.1", {X: -2.54, Y: -20}: "B#R3.1", {X: -2.54, Y: 20}: "B#R4.1",
+		{X: -20, Y: -2.54}: "C#R5.1", {X: 20, Y: -2.54}: "C#R6.1",
+	}
+	bad := sbFixStubs(zl, pinNet, nil, map[kicad.Pt]kicad.Pt{tp: s})
+	if len(zl.Markers) != 1 {
+		t.Fatalf("S dropped its marker for a pin of its own run: markers %v", zl.Markers)
+	}
+	if len(bad) == 0 {
+		t.Fatal("a stub with no clear way out must be reported, not hidden")
+	}
+}
+
+func TestSbGridZoneSameNetPinRuns(t *testing.T) {
+	two := []sbPin{{Number: "1", Name: "1", Type: "passive"}, {Number: "2", Name: "2", Type: "passive"}}
+	pin := func(n, name, typ string) sbPin { return sbPin{Number: n, Name: name, Type: typ} }
+	spec := &sbSpec{
+		Name:  "hss",
+		Zones: []sbZone{{ID: "sw", Title: "High-side switch"}},
+		Parts: []sbPart{
+			{Ref: "U1", Value: "HSS", Zone: "sw", Pins: []sbPin{
+				pin("1", "NC", "no_connect"), pin("2", "GND", "power_in"), pin("3", "IN", "input"), pin("4", "NC", "no_connect"),
+				pin("5", "OUT", "output"), pin("6", "OUT", "output"), pin("7", "OUT", "output"), pin("8", "VS", "power_in"),
+				pin("9", "VS", "power_in"), pin("10", "VS", "power_in"), pin("11", "NC", "no_connect"), pin("12", "DIAG_EN", "input"),
+				pin("13", "CL", "passive"), pin("14", "CS", "output"), pin("15", "EP", "power_in")}},
+			{Ref: "R1", Value: "10k", Zone: "sw", Pins: two},
+			{Ref: "C1", Value: "100n", Zone: "sw", Pins: two, Near: "U1:8"},
+			{Ref: "C2", Value: "10n", Zone: "sw", Pins: two},
+		},
+		Nets: []sbNet{
+			{Name: "GND", Kind: "ground", Pins: []string{"U1:2", "U1:15", "C1:2", "C2:2"}},
+			{Name: "+24V", Kind: "power", Pins: []string{"U1:8", "U1:9", "U1:10", "C1:1"}},
+			{Name: "LOAD_PWR", Pins: []string{"U1:5", "U1:6", "U1:7", "C2:1"}},
+			{Name: "LOAD_CS", Pins: []string{"U1:14"}},
+			{Name: "LOAD_EN", Pins: []string{"R1:1"}},
+			{Name: "LOAD_IN", Pins: []string{"R1:2", "U1:3"}},
+			{Name: "LOAD_CL", Pins: []string{"U1:13"}},
+			{Name: "LOAD_DIAG", Pins: []string{"U1:12"}},
+		},
+	}
+	d, _, err := buildDesign(spec, sbResolveOpts{Offline: true})
+	if err != nil {
+		t.Fatalf("design: %v", err)
+	}
+	zi := d.zoneInputs()[0]
+	clean := 0
+	var bad []string
+	for i, v := range sbGridVariants {
+		zl, err := gridZone(d, zi, &sbMeasure{cache: map[string]kicad.SceneSymbol{}}, v)
+		if err != nil {
+			continue // a variant may fail; layoutZones takes the clean one
+		}
+		f := sbZoneFindings(d, zi, zl)
+		if len(f) == 0 {
+			clean++
+		}
+		for _, s := range f {
+			if strings.HasPrefix(s, "EG-08") || strings.HasPrefix(s, "short: ") {
+				bad = append(bad, fmt.Sprintf("variant %d: %s", i, s))
+			}
+		}
+	}
+	if len(bad) > 0 || clean == 0 {
+		t.Fatalf("%d clean variant(s); crossings / shorts:\n%s", clean, strings.Join(bad, "\n"))
+	}
 }
 
 func TestFinishSbRunFailureIsNotOK(t *testing.T) {
@@ -859,6 +1001,188 @@ func TestSbPaginate(t *testing.T) {
 		if (z.ID == "z2" || z.ID == "z3") && z.Page != "P" {
 			t.Errorf("saved spec moved zone %s to generated page %s", z.ID, z.Page)
 		}
+	}
+}
+
+// A zone re-laid out for its cross-page labels can come back SMALLER (another
+// shape). Plain next-fit then merged the split page again, the net went back
+// to local, the zone grew back, the page split again: a two-round cycle until
+// "pagination did not settle" (field board 2026-10-27). Fragments now only
+// grow: the loop must settle, keep the split, and never touch a page that fit.
+func TestSbPaginateSettlesWhenRelayoutShrinks(t *testing.T) {
+	d := &sbDesign{
+		Pages:   []sbPage{{ID: "P", Title: "Main"}, {ID: "Q", Title: "Small"}},
+		Zones:   []sbZone{{ID: "z1", Page: "P"}, {ID: "z2", Page: "P"}, {ID: "z3", Page: "P"}, {ID: "q", Page: "Q"}},
+		ByRef:   map[string]*sbRPart{},
+		PinNet:  map[string]string{},
+		NetKind: map[string]string{},
+	}
+	for i, z := range d.Zones {
+		p := &sbRPart{ZoneID: z.ID, PageID: z.Page, LPins: []kicad.LibPin{{Number: "1"}, {Number: "2"}}}
+		p.Ref = fmt.Sprintf("R%d", i+1)
+		d.Parts = append(d.Parts, p)
+		d.ByRef[p.Ref] = p
+	}
+	// S joins z1 and z3 (the zone the split moves); T stays inside page Q
+	d.Nets = []sbNet{{Name: "S", Pins: []string{"R1.1", "R3.1"}}, {Name: "T", Pins: []string{"R4.1", "R4.2"}}}
+	for _, n := range d.Nets {
+		for _, k := range n.Pins {
+			d.PinNet[k] = n.Name
+		}
+	}
+	d.recomputeNetPages()
+	box := func(w, h float64) *sbZoneLayout { return &sbZoneLayout{Box: kicad.Box{MaxX: w, MaxY: h}} }
+	// S local: z1 is big and P overflows A0; S cross-page: z1 is small and
+	// all three zones would fit again
+	size := func(id string) *sbZoneLayout {
+		switch {
+		case id == "z1" && len(d.NetPages["S"]) > 1:
+			return box(400, 200)
+		case id == "z1":
+			return box(700, 500)
+		case id == "q":
+			return box(100, 100)
+		}
+		return box(300, 300)
+	}
+	layouts := map[string]*sbZoneLayout{}
+	for _, z := range d.Zones {
+		layouts[z.ID] = size(z.ID)
+	}
+	if sbPackFresh([]string{"z1", "z2", "z3"}, layouts, 0) != nil {
+		t.Fatal("fixture: page P must overflow A0 with S local")
+	}
+	var zis []*sbZoneIn
+	for _, z := range d.Zones {
+		zis = append(zis, &sbZoneIn{Zone: z})
+	}
+	calls := 0
+	relaid := map[string]int{}
+	_, _, err := sbPaginateLoop(d, zis, layouts, "root.kicad_sch", func(redo []*sbZoneIn) (map[string]*sbZoneLayout, []string) {
+		calls++
+		out := map[string]*sbZoneLayout{}
+		for _, zi := range redo {
+			relaid[zi.Zone.ID]++
+			out[zi.Zone.ID] = size(zi.Zone.ID)
+		}
+		return out, nil
+	})
+	if err != nil {
+		t.Fatalf("pagination did not settle: %v (re-layout rounds %d, zones %v)", err, calls, relaid)
+	}
+	zp := map[string]string{}
+	for _, z := range d.Zones {
+		zp[z.ID] = z.Page
+	}
+	if zp["z1"] != "P" || zp["z2"] != "P" || zp["z3"] == "P" || zp["q"] != "Q" {
+		t.Errorf("zone pages %v: want z1, z2 on P, z3 on a new page, q on Q", zp)
+	}
+	if relaid["q"] != 0 || relaid["z2"] != 0 {
+		t.Errorf("zones whose cross-page nets never changed were re-laid out: %v", relaid)
+	}
+	if calls != 1 {
+		t.Errorf("%d re-layout rounds, want 1 (the split, then a fixed point)", calls)
+	}
+}
+
+// A narrow zone with a long title: the frame the packer sees must hold the
+// title text, or it runs past the right edge of A0 on a page pagination
+// accepted (field board 2026-10-27: page-fit failed on a split page).
+func TestSbFitTitleWidensNarrowZone(t *testing.T) {
+	title := "pull-down column / readback"
+	b := sbFitTitle(kicad.Box{MinX: 0, MaxX: 9.5, MaxY: 50}, title)
+	fp := sbFootprint(b, kicad.Pt{})
+	if need := fp.MinX + 1.27 + 1 + float64(len(title)); fp.MaxX < need {
+		t.Fatalf("frame right edge %.2f < title end %.2f (sch-fit's estimate)", fp.MaxX, need)
+	}
+	if wide := (kicad.Box{MaxX: 300, MaxY: 50}); sbFitTitle(wide, title) != wide {
+		t.Fatal("a zone wider than its title must keep its box")
+	}
+}
+
+// Two zones that fill A0 to the bottom: with an undriven supply on the page,
+// its PWR_FLAG row goes under them and overflows, so pagination must split
+// the page; without one the page fits and stays whole (field board
+// 2026-10-27: page-fit failed on a page pagination had kept).
+func TestSbPaginateCountsPwrFlagRow(t *testing.T) {
+	for _, flags := range []bool{false, true} {
+		d := &sbDesign{
+			Pages:   []sbPage{{ID: "P", Title: "Main"}},
+			Zones:   []sbZone{{ID: "a", Page: "P"}, {ID: "b", Page: "P"}},
+			ByRef:   map[string]*sbRPart{},
+			PinNet:  map[string]string{},
+			NetKind: map[string]string{},
+		}
+		for i, z := range d.Zones {
+			p := &sbRPart{ZoneID: z.ID, PageID: z.Page, LPins: []kicad.LibPin{{Number: "1"}}}
+			p.Ref = fmt.Sprintf("C%d", i+1)
+			d.Parts = append(d.Parts, p)
+			d.ByRef[p.Ref] = p
+		}
+		d.Nets = []sbNet{{Name: "VBUS", Pins: []string{"C1.1", "C2.1"}}}
+		d.PinNet["C1.1"], d.PinNet["C2.1"] = "VBUS", "VBUS"
+		if flags {
+			d.NetKind["VBUS"] = "power" // no power_out pin: one PWR_FLAG
+		}
+		d.recomputeNetPages()
+		layouts := map[string]*sbZoneLayout{"a": {Box: kicad.Box{MaxX: 1000, MaxY: 380}}, "b": {Box: kicad.Box{MaxX: 1000, MaxY: 380}}}
+		if sbPackFresh([]string{"a", "b"}, layouts, 0) == nil {
+			t.Fatal("fixture: the two zones alone must fit A0")
+		}
+		var zis []*sbZoneIn
+		for _, z := range d.Zones {
+			zis = append(zis, &sbZoneIn{Zone: z})
+		}
+		b := newSbPageBases(d, zis, "root.kicad_sch")
+		sbPaginate(d, layouts, b)
+		if want := map[bool]int{false: 1, true: 2}[flags]; len(d.Pages) != want {
+			t.Errorf("flags=%v: %d page(s), want %d", flags, len(d.Pages), want)
+		}
+	}
+}
+
+// A wide (CJK) title is drawn about twice as wide per glyph as ASCII, so it
+// must widen the box twice as much (Kimi review).
+func TestSbFitTitleCountsWideGlyphs(t *testing.T) {
+	narrow := kicad.Box{MaxY: 50}
+	ascii, cjk := sbFitTitle(narrow, "abcdefghijkl"), sbFitTitle(narrow, "电源、去耦。滤波「电容」电源")
+	if got, want := cjk.MaxX, ascii.MaxX+1.2*(2*14-12); ascii.MaxX <= 0 || got < want-1e-9 {
+		t.Fatalf("CJK title box %.2f mm wide, want at least %.2f", got, want)
+	}
+}
+
+// A single zone that fits A0 alone but not with the PWR_FLAG row of its
+// undriven rail cannot be fixed by splitting pages: pagination must say so
+// instead of accepting the page silently (Kimi review).
+func TestSbPaginateNotesSingleZoneFlagOverflow(t *testing.T) {
+	d := &sbDesign{
+		Pages:   []sbPage{{ID: "P", Title: "Main"}},
+		Zones:   []sbZone{{ID: "a", Page: "P"}},
+		ByRef:   map[string]*sbRPart{},
+		PinNet:  map[string]string{"C1.1": "VBUS"},
+		NetKind: map[string]string{"VBUS": "power"},
+	}
+	p := &sbRPart{ZoneID: "a", PageID: "P", LPins: []kicad.LibPin{{Number: "1"}}}
+	p.Ref = "C1"
+	d.Parts = append(d.Parts, p)
+	d.ByRef[p.Ref] = p
+	d.Nets = []sbNet{{Name: "VBUS", Pins: []string{"C1.1"}}}
+	d.recomputeNetPages()
+	var layouts map[string]*sbZoneLayout
+	for h := 700.0; h < 841; h += 2 {
+		l := map[string]*sbZoneLayout{"a": {Box: kicad.Box{MaxX: 1000, MaxY: h}}}
+		if sbPackFresh([]string{"a"}, l, 0) != nil && sbPackFresh([]string{"a"}, l, sbFlagRowW([]string{"VBUS"})) == nil {
+			layouts = l
+			break
+		}
+	}
+	if layouts == nil {
+		t.Fatal("fixture: no zone height fits A0 alone but not with the flag row")
+	}
+	b := newSbPageBases(d, []*sbZoneIn{{Zone: d.Zones[0]}}, "root.kicad_sch")
+	_, notes := sbPaginate(d, layouts, b)
+	if !strings.Contains(strings.Join(notes, "\n"), "PWR_FLAG row") {
+		t.Fatalf("notes %q do not report the zone-plus-flags overflow", notes)
 	}
 }
 
