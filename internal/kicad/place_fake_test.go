@@ -34,9 +34,11 @@ func fakePlace(t *testing.T, stdout string, fail bool) (*PlaceResult, error) {
 
 func TestPlaceParsesRejection(t *testing.T) {
 	_, err := fakePlace(t, "swig noise\nPCBPILOT_RESULT {\"ok\": false, \"error\": \"place rejected, board not written: H1 is on 2 footprints\", "+
-		"\"missing\": [\"Q9\"], \"ambiguous\": {\"H1\": [\"u-a\", \"u-b\"]}}\n", true)
+		"\"missing\": [{\"ref\": \"Q9\"}], \"ambiguous\": [{\"uuid\": \"u-a\", \"candidates\": [\"u-a\", \"u-a\"]}, {\"ref\": \"H1\", \"candidates\": [\"u-a\", \"u-b\"]}], "+
+		"\"posedTwice\": [{\"uuid\": \"u-c\", \"selectors\": [{\"ref\": \"J1\"}, {\"uuid\": \"u-c\"}]}], \"invalid\": [\"poses[0]: bad\"]}\n", true)
 	var pe *PlaceError
-	if !errors.As(err, &pe) || pe.Missing[0] != "Q9" || len(pe.Ambiguous["H1"]) != 2 || !strings.Contains(err.Error(), "H1 is on 2 footprints") {
+	if !errors.As(err, &pe) || pe.Missing[0].Ref != "Q9" || pe.Ambiguous[0].UUID != "u-a" || pe.Ambiguous[1].Ref != "H1" || len(pe.Ambiguous[1].Candidates) != 2 ||
+		pe.PosedTwice[0].Selectors[1].UUID != "u-c" || len(pe.Invalid) != 1 || !strings.Contains(err.Error(), "H1 is on 2 footprints") {
 		t.Fatalf("rejection: %#v", err)
 	}
 }

@@ -238,19 +238,26 @@ func TestPlaceSharedDesignatorLive(t *testing.T) {
 	out := filepath.Join(dir, "placed.kicad_pcb")
 	_, err := Place(pcb, map[string]Pose{"H1": {XMil: 1000, YMil: 1000}, "NOPE1": {}}, out)
 	var pe *PlaceError
-	if !errors.As(err, &pe) || len(pe.Ambiguous["H1"]) != 2 || len(pe.Missing) != 1 || pe.Missing[0] != "NOPE1" {
+	if !errors.As(err, &pe) || len(pe.Ambiguous) != 1 || pe.Ambiguous[0].Ref != "H1" || len(pe.Ambiguous[0].Candidates) != 2 ||
+		len(pe.Missing) != 1 || pe.Missing[0].Ref != "NOPE1" {
 		t.Fatalf("place by the shared H1: %v", err)
 	}
 	if _, serr := os.Stat(out); serr == nil {
 		t.Fatal("rejected placement wrote the output board")
 	}
 	const second = "00000000-0000-4000-8000-0000000000a1"
-	// Two keys for one footprint: refused too.
-	_, err = Place(pcb, map[string]Pose{"J1": {}, UUIDPoseKey("a17e7d90-6115-4f2e-bcd2-745186e45464"): {}}, out)
-	if !errors.As(err, &pe) || !strings.Contains(err.Error(), "address the same footprint") {
+	// Two records for one footprint: refused too.
+	_, err = PlaceTargets(pcb, []PoseTarget{{PoseFootprint: PoseFootprint{Ref: "J1"}}, {PoseFootprint: PoseFootprint{UUID: "a17e7d90-6115-4f2e-bcd2-745186e45464"}}}, out)
+	if !errors.As(err, &pe) || len(pe.PosedTwice) != 1 || !strings.Contains(err.Error(), "address the same footprint") {
 		t.Fatalf("J1 by designator and uuid: %v", err)
 	}
-	res, err := Place(pcb, map[string]Pose{UUIDPoseKey(second): {XMil: 1000, YMil: 1000, Side: "top"}, "R1": {XMil: 600, YMil: 700, Side: "top"}}, out)
+	// A record must name its footprint one way only.
+	_, err = PlaceTargets(pcb, []PoseTarget{{PoseFootprint: PoseFootprint{Ref: "R1", UUID: second}}}, out)
+	if !errors.As(err, &pe) || len(pe.Invalid) != 1 {
+		t.Fatalf("ref and uuid in one record: %v", err)
+	}
+	res, err := PlaceTargets(pcb, []PoseTarget{{PoseFootprint: PoseFootprint{UUID: second}, Pose: Pose{XMil: 1000, YMil: 1000, Side: "top"}},
+		{PoseFootprint: PoseFootprint{Ref: "R1"}, Pose: Pose{XMil: 600, YMil: 700, Side: "top"}}}, out)
 	if err != nil || res.Moved != 2 {
 		t.Fatalf("place by uuid: %+v %v", res, err)
 	}
@@ -264,6 +271,36 @@ func TestPlaceSharedDesignatorLive(t *testing.T) {
 			t.Fatalf("H1 %s at (%v, %v): only uuid %s may move", c.UUID, c.X, c.Y, second)
 		}
 	}
+
+	// A real designator spelled "uuid:<the second H1's uuid>": a ref selector
+	// (and the legacy designator-keyed map) moves that footprint, a uuid
+	// selector the H1 — the namespaces never mix.
+	src, _ := os.ReadFile(pcb)
+	odd := "uuid:" + second
+	renamed := strings.Replace(string(src), `(property "Reference" "R2"`, `(property "Reference" "`+odd+`"`, 1)
+	oddPcb := filepath.Join(dir, "odd.kicad_pcb")
+	if renamed == string(src) || os.WriteFile(oddPcb, []byte(renamed), 0o644) != nil {
+		t.Fatal("could not rename R2")
+	}
+	check := func(what string, res *PlaceResult, err error, refMoves bool) {
+		t.Helper()
+		if err != nil || res.Moved != 1 {
+			t.Fatalf("%s: %+v %v", what, res, err)
+		}
+		for _, c := range readLiveSnap(t, tools, out).Components {
+			at := c.X == 1500 && c.Y == -500
+			if c.Designator == odd && at != refMoves || c.UUID == second && at == refMoves {
+				t.Fatalf("%s: %s (uuid %s) at (%v, %v)", what, c.Designator, c.UUID, c.X, c.Y)
+			}
+		}
+	}
+	p := Pose{XMil: 1500, YMil: 500, Side: "top"}
+	res, err = PlaceTargets(oddPcb, []PoseTarget{{PoseFootprint: PoseFootprint{Ref: odd}, Pose: p}}, out)
+	check("ref "+odd, res, err, true)
+	res, err = Place(oddPcb, map[string]Pose{odd: p}, out)
+	check("legacy key "+odd, res, err, true)
+	res, err = PlaceTargets(oddPcb, []PoseTarget{{PoseFootprint: PoseFootprint{UUID: second}, Pose: p}}, out)
+	check("uuid "+second, res, err, false)
 }
 
 // Layer ids must be exact integers (int(1.9) would be F.Cu, True == 1), a

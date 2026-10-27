@@ -38,8 +38,8 @@ pcbpilot ──▶ KiCad 自带 Python + pcbnew（internal/kicad/bridge.py，go:
 
 - **bridge 写操作全有或全无**：`edit`（加线/过孔、改线宽、丝印、`padZoneNone`）、`pours` 先校验全部网名、
   层号（必须是精确整数，`1.9`/`true` 拒绝；丝印文字层只能 3/4）、数值字段、对象 id 与位号；任一网不在板上（不会再静默落到 0 号无网）、id 不存在或位号对应多个封装，整批拒绝、
-  **不保存**，错误列出每一项（大小写不同的网名给出 `did you mean`）。`padZoneNone` 可用 `id`（快照
-  primitiveId）指定封装。各操作字段必须是数组（`null`/缺省 = 空；对象、字符串、数字一律拒绝），网名与 id
+  **不保存**，错误列出每一项（大小写不同的网名给出 `did you mean`）。`padZoneNone` 用且只用一个选择器指定封装：
+  `ref`（只匹配位号）/ `id`（只匹配快照 primitiveId）/ `uuid`（只匹配封装 uuid），命名空间互不混用。各操作字段必须是数组（`null`/缺省 = 空；对象、字符串、数字一律拒绝），网名与 id
   必须是字符串；`setText` / `hideTexts` 可寻址快照 `silk` 里的每条文字（字段、封装图形文字、板上文字），但图形文字
   KiCad 不保存隐藏状态，`hideTexts` 对它直接拒绝。`fp:<uuid>:<序号>` 只对未改动的文件稳定（保存会重排封装），
   每次写入后重新取快照再寻址。`netclasses` 的意图网不在板上仍是忽略并告警（`missingNets`），绝缘/板边域里缺的网
@@ -47,7 +47,9 @@ pcbpilot ──▶ KiCad 自带 Python + pcbnew（internal/kicad/bridge.py，go:
 - **位号重复 / 占位位号**（两个 `H1`、多个 `REF**`/`G***` logo、未标注的 `R?`）：快照里各自独立成条（各有
   primitiveId 与 uuid，标 `duplicateDesignator` / `placeholder`），顶层 `duplicateDesignators` 列出位号与全部 id
   并在 `partial` 里说明（按位号索引的读者会混淆它们），占位位号另列 `placeholderDesignators`（不算降级），不再互相覆盖。`kicad place` 把这些封装作为固定障碍原地保留、不出位姿，报告 `notes` 逐个
-  列出；place.py 收到重复位号或不存在的键时整批拒绝、不写板，单个封装用 `uuid:<uuid>` 键指定。要让它们参与
+  列出；place.py 收到重复位号或不存在的键时整批拒绝、不写板，位姿文件是带类型的记录
+  `{"pcbpilotPoses":2,"poses":[{"ref":…}|{"uuid":…}, …]}`（Go：`kicad.PlaceTargets`），单个封装用 `uuid` 记录指定；
+  旧的 `{位号: 位姿}` 仍可读，但键一律按位号解释（位号可以就叫 `uuid:…`）。要让它们参与
   布局，先在原理图/PCB 里重新标注唯一位号。
 
 ## 快照（`kicad snapshot board.kicad_pcb [--out board.json]`）

@@ -210,22 +210,33 @@ def duplicate_refs(entries):
     return {r: es for r, es in groups.items() if len(es) > 1}
 
 
-def resolve_footprint(entries, want):
-    """The one entry `want` names: a component id (snapshot primitiveId),
-    "uuid:<kiid>", or a designator. Returns (entry, None) or (None, why);
-    why is "missing" or "ambiguous: <candidate ids>"."""
-    for e in entries:
-        if e["key"] == want:
-            return e, None
-    if want.startswith("uuid:"):
-        hits = [e for e in entries if e["uuid"] == want[5:]]
-    else:
-        hits = [e for e in entries if e["ref"] == want]
+FOOTPRINT_SELECTORS = ("ref", "id", "uuid")
+
+
+def resolve_footprint(entries, kind, want):
+    """The one entry a typed selector names: kind "ref" matches designators
+    only, "id" the snapshot primitiveId only, "uuid" the footprint uuid only
+    (namespaces never mix: a designator may read "ref:C1" or "uuid:..."). Returns
+    (entry, None) or (None, why); why is "missing" or "ambiguous: <ids>"."""
+    field = {"ref": "ref", "id": "key", "uuid": "uuid"}[kind]
+    hits = [e for e in entries if e[field] == want]
     if not hits:
         return None, "missing"
     if len(hits) > 1:
         return None, "ambiguous: %d footprints (%s); address one by its id" % (len(hits), ", ".join(e["key"] for e in hits))
     return hits[0], None
+
+
+def footprint_selector(op):
+    """(kind, value, problem) of an op naming one footprint by exactly one
+    of "ref" (designator), "id" (primitiveId) or "uuid"."""
+    given = [k for k in FOOTPRINT_SELECTORS if op.get(k) is not None]
+    if len(given) != 1:
+        return None, None, "give exactly one of ref / id / uuid (got %s)" % (", ".join(given) or "none")
+    k = given[0]
+    if not isinstance(op[k], str) or not op[k]:
+        return None, None, "%s %r is not a non-empty string" % (k, op[k])
+    return k, op[k], None
 
 
 def field_id(key, which):
@@ -1144,14 +1155,15 @@ def validate_edit(board, ops):
             # carry "hide"): SetVisible(False) would be lost on save.
             bad.append("hideTexts[%d]: %s is a graphic text; KiCad keeps no hidden state for it" % (i, tid))
     for i, op in enumerate(obj["padZoneNone"]):
-        want, pad = op.get("id", op.get("ref")), op.get("pad")
-        if not isinstance(want, str) or not want:
-            bad.append("padZoneNone[%d]: id/ref %r is not a non-empty string" % (i, want))
+        kind, want, why = footprint_selector(op)
+        pad = op.get("pad")
+        if why:
+            bad.append("padZoneNone[%d]: %s" % (i, why))
             continue
         if not (isinstance(pad, str) or is_int(pad)):
             bad.append("padZoneNone[%d] %s: pad %r is not a pad number" % (i, want, pad))
             continue
-        e, why = resolve_footprint(entries, want)
+        e, why = resolve_footprint(entries, kind, want)
         if e is None:
             bad.append("padZoneNone %s.%s: footprint %s" % (want, pad, why))
             continue
@@ -1168,7 +1180,7 @@ def edit(pcb, ops_path, out):
      "addTracks":[{"net","layer","startX","startY","endX","endY","lineWidth"}],
      "setText":[{"id","x","y","rotation","fontSize","lineWidth"}],  (x, y = text centre)
      "addTexts":[{"text","x","y","layer","rotation","fontSize","lineWidth"}],
-     "hideTexts":["id"], "padZoneNone":[{"ref" | "id", "pad"}]}
+     "hideTexts":["id"], "padZoneNone":[{"ref" | "id" | "uuid", "pad"}]}
     All or nothing: every id, net, layer and footprint is checked first; one
     unknown net, missing id or ambiguous designator rejects the whole edit
     and nothing is saved (the result lists every problem)."""

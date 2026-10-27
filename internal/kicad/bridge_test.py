@@ -128,14 +128,33 @@ class FootprintIndex(unittest.TestCase):
 
     def test_resolve(self):
         es = bridge.footprint_index(board())
-        self.assertEqual(bridge.resolve_footprint(es, "U1")[0]["key"], "u-1")
-        self.assertEqual(bridge.resolve_footprint(es, "uuid:h-2")[0]["key"], "h-2")
-        self.assertEqual(bridge.resolve_footprint(es, "fp:r-5:2")[0]["fp"], es[4]["fp"])
-        self.assertIn("ambiguous: 2 footprints (h-1, h-2)", bridge.resolve_footprint(es, "H1")[1])
-        self.assertIn("ambiguous", bridge.resolve_footprint(es, "uuid:r-5")[1])
-        self.assertEqual(bridge.resolve_footprint(es, "Q9"), (None, "missing"))
+        self.assertEqual(bridge.resolve_footprint(es, "ref", "U1")[0]["key"], "u-1")
+        self.assertEqual(bridge.resolve_footprint(es, "uuid", "h-2")[0]["key"], "h-2")
+        self.assertEqual(bridge.resolve_footprint(es, "id", "fp:r-5:2")[0]["fp"], es[4]["fp"])
+        self.assertIn("ambiguous: 2 footprints (h-1, h-2)", bridge.resolve_footprint(es, "ref", "H1")[1])
+        self.assertIn("ambiguous", bridge.resolve_footprint(es, "uuid", "r-5")[1])
+        self.assertEqual(bridge.resolve_footprint(es, "ref", "Q9"), (None, "missing"))
+        # Namespaces never mix: a primitiveId is not a designator and back.
+        self.assertEqual(bridge.resolve_footprint(es, "ref", "u-1"), (None, "missing"))
+        self.assertEqual(bridge.resolve_footprint(es, "id", "U1"), (None, "missing"))
+        self.assertEqual(bridge.resolve_footprint(es, "ref", "uuid:h-2"), (None, "missing"))
         dup = bridge.duplicate_refs(es)
         self.assertEqual(sorted(dup), ["H1", "R5"])
+
+    def test_ref_spelled_like_an_id(self):
+        # Two footprints share uuid "d": ids ref:C1 / ref:C2; a third
+        # footprint's real designator is "ref:C1".
+        b = Board(fps=[FP("d", "C1"), FP("d", "C2"), FP("z", "ref:C1", pads=("7",))])
+        es = bridge.footprint_index(b)
+        self.assertEqual([e["key"] for e in es], ["ref:C1", "ref:C2", "z"])
+        self.assertIs(bridge.resolve_footprint(es, "ref", "ref:C1")[0]["fp"], b.fps[2])
+        self.assertIs(bridge.resolve_footprint(es, "id", "ref:C1")[0]["fp"], b.fps[0])
+        bad, plan = bridge.validate_edit(b, {"padZoneNone": [{"ref": "ref:C1", "pad": "7"}]})
+        self.assertEqual(bad, [])
+        self.assertIs(plan["zonePads"][0], b.fps[2].pads[0])
+        bad = bridge.validate_edit(b, {"padZoneNone": [{"ref": "ref:C1", "id": "z", "pad": "7"}, {"pad": "7"}]})[0]
+        self.assertTrue(has(bad, "exactly one of ref / id / uuid (got ref, id)"), bad)
+        self.assertTrue(has(bad, "(got none)"), bad)
 
     def test_placeholders(self):
         for r in ("", "REF**", "G***", "R?", "LOGO**"):
@@ -224,7 +243,7 @@ class ValidateEdit(unittest.TestCase):
                     "addVias[1].y", "setWidth[0]: v-1 is a via", "setWidth[1]: id ['t-1']", "no such track t-9", "setWidth[3].width",
                     "setText[0]: no such text fab-text", "setText[1]: text id {'x': 1}", "hideTexts[0]", "hideTexts[1]", "no such text nope",
                     "text layer 1", "addTexts[1].text", "padZoneNone H1.1: footprint ambiguous", "padZoneNone U1.9: no such pad",
-                    "padZoneNone[2]: id/ref 3", "pad None", "padZoneNone[4]: not an object"):
+                    "padZoneNone[2]: id 3 is not a non-empty string", "pad None", "padZoneNone[4]: not an object"):
             self.assertTrue(has(bad, sub), "%r not in %s" % (sub, bad))
 
     def test_containers_and_types(self):
