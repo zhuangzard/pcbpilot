@@ -4,6 +4,25 @@
 本文件只保留调用边界；不复制全部命令和历史修复。原理图主流程见
 [schematic-data.md](schematic-data.md) 与 [auto-layout-sop.md](auto-layout-sop.md)。
 
+## 目录
+
+- [1.4 原理图入口](#14-原理图入口)
+- [仿真（离线计算，无 typed action）](#仿真离线计算无-typed-action)
+- [SCH Apply](#sch-apply)
+- [常用原理图适配器边界](#常用原理图适配器边界)
+- [图纸与明细表](#图纸与明细表)
+- [器件库与自建资产](#器件库与自建资产)
+- [外部工程导入边界](#外部工程导入边界)
+- [PCB 基础上下文（非穷举）](#pcb-基础上下文非穷举)
+  - [长度约束：差分对 / 等长网络组（#176）](#长度约束差分对--等长网络组176)
+- [Board（板子/组合 — 原理图↔PCB 绑定）](#board板子组合--原理图pcb-绑定)
+- [PCB 属性同步（现有契约）](#pcb-属性同步现有契约)
+  - [schematic.pin.repair_marker](#schematicpinrepair_marker)
+- [离线读取与 API 监测（无 typed action）](#离线读取与-api-监测无-typed-action)
+- [工程打开与原生导出](#工程打开与原生导出)
+- [读取开销与页面加载探测](#读取开销与页面加载探测)
+- [原生原理图 DRC 的判定与覆盖](#原生原理图-drc-的判定与覆盖)
+
 ## 1.4 原理图入口
 
 | 目的 | CLI |
@@ -219,7 +238,7 @@ EasyEDA 交互界面兜底。能力边界与未来 typed 验收见 [project-impo
 - `schematic.bus.list` / `schematic.bus.create` / `schematic.bus.delete` — 官方 `sch_PrimitiveBus`（@beta）
   原生总线：只读列表（非数组即报错，不当空页）；建一条正交且互相连通的总线并回读名字与路径
   （不符 `partial:true`）；按 ID 删除并回读残留。总线不证明成员连通，API 无 bus entry。
-  CLI `sch bus list|create|delete [--dry-run]`。V3 3.2.149 桌面版 live-verified（2026-10-01），V4 未验证。
+  CLI `sch bus list|create|delete`（`create`/`delete` 支持 `--dry-run`）。V3 3.2.149 桌面版 live-verified（2026-10-01），V4 未验证。
   布局计划的总线由 `sch bus apply` 组合这三个 action 落地（日志、替换、回滚、终态回读），见
   [schematic-wiring.md](schematic-wiring.md#标签-vs-导线总线与原理图美观度软层度量--opt-in-生成)；apply 本身 live-unverified。
 
