@@ -192,7 +192,7 @@ func repeatedSheetFixture(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := string(b)
+	s := strings.ReplaceAll(string(b), "\r\n", "\n") // a Windows checkout may have CRLF
 	i := strings.Index(s, `(property "Reference" "R3"`)
 	at := strings.LastIndex(s[:i], "(at 88.9 88.9 0)")
 	inst := "(path \"" + autoRootPath + "\"\n\t\t\t\t\t(reference \"R3\")"

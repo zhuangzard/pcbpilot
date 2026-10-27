@@ -18,10 +18,14 @@ import (
 )
 
 // The test binary doubles as a fake kicad-cli (PCBPILOT_FAKE_KICAD_CLI=1),
-// so RunFab's staging and publishing run without KiCad installed.
+// so RunFab's staging and publishing run without KiCad installed, and as a
+// fake KiCad python for Place (place_fake_test.go).
 func TestMain(m *testing.M) {
 	if os.Getenv("PCBPILOT_FAKE_KICAD_CLI") == "1" {
 		os.Exit(fakeKiCadCLI(os.Args[1:]))
+	}
+	if code, ok := fakePlacePython(); ok {
+		os.Exit(code)
 	}
 	os.Exit(m.Run())
 }

@@ -14,19 +14,22 @@ import (
 // value as place.py's stdout and exits with PCBPILOT_FAKE_PLACE_EXIT.
 const fakePlaceEnv = "PCBPILOT_FAKE_PLACE_STDOUT"
 
-func TestMain(m *testing.M) {
-	if out, ok := os.LookupEnv(fakePlaceEnv); ok {
-		if dst := os.Getenv("PCBPILOT_FAKE_PLACE_COPY"); dst != "" && len(os.Args) > 4 {
-			b, _ := os.ReadFile(os.Args[4]) // place.py SCRIPT place PCB POSES OUT
-			_ = os.WriteFile(dst, b, 0o644)
-		}
-		fmt.Print(out)
-		if os.Getenv("PCBPILOT_FAKE_PLACE_EXIT") == "1" {
-			os.Exit(1)
-		}
-		os.Exit(0)
+// fakePlacePython is called from TestMain (fab_publish_test.go) when the
+// test binary runs as the fake python; ok is false otherwise.
+func fakePlacePython() (code int, ok bool) {
+	out, ok := os.LookupEnv(fakePlaceEnv)
+	if !ok {
+		return 0, false
 	}
-	os.Exit(m.Run())
+	if dst := os.Getenv("PCBPILOT_FAKE_PLACE_COPY"); dst != "" && len(os.Args) > 4 {
+		b, _ := os.ReadFile(os.Args[4]) // place.py SCRIPT place PCB POSES OUT
+		_ = os.WriteFile(dst, b, 0o644)
+	}
+	fmt.Print(out)
+	if os.Getenv("PCBPILOT_FAKE_PLACE_EXIT") == "1" {
+		return 1, true
+	}
+	return 0, true
 }
 
 func fakePlace(t *testing.T, stdout string, fail bool) (*PlaceResult, error) {
