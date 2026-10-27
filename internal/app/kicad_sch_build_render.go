@@ -8,7 +8,6 @@ package app
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -192,26 +191,6 @@ type sbFailure struct {
 	Fix     string `json:"fix"`
 }
 
-// sbProjectSHA hashes the files a build owns (compare-and-swap).
-func sbProjectSHA(out string, st *sbState) string {
-	h := sha256.New()
-	for _, f := range st.Files {
-		if p, err := sbSafeJoin(out, f); err == nil {
-			b, _ := os.ReadFile(p)
-			fmt.Fprintf(h, "%s\x00%d\x00", f, len(b))
-			h.Write(b)
-		}
-	}
-	return fmt.Sprintf("%x", h.Sum(nil))
-}
-
-func sbCheckUnchanged(out string, st *sbState, start string) error {
-	if now := sbProjectSHA(out, st); now != start {
-		return fmt.Errorf("%s changed while sch-build ran (sha256 %s → %s)", out, start[:12], now[:12])
-	}
-	return nil
-}
-
 // sbLock serializes writers of one project (O_EXCL lock file; a lock older
 // than 10 minutes is stale).
 func sbLock(out string) (func(), error) {
@@ -316,11 +295,11 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 		defer unlock()
 	}
 	// edits made in the KiCad GUI since the last build would be overwritten
-	if f := sbGuardExternalEdits(out, loaded, o, rep); f != nil {
-		rep.OK, rep.Error = false, f
+	guard, gf := sbGuardStart(out, loaded, o, rep)
+	if gf != nil {
+		rep.OK, rep.Error = false, gf
 		return rep, nil
 	}
-	startSHA := sbProjectSHA(out, st)
 	name := o.Name
 	if name == "" {
 		name = spec.Name
@@ -607,10 +586,18 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 			Fix: "nothing was written; fix the spec (or zone/page split) and rebuild — the failed project is in " + failed}
 		return rep, nil
 	}
-	// compare-and-swap: the project must not have changed while we built
-	if err := sbCheckUnchanged(out, st, startSHA); err != nil {
-		rep.OK = false
-		rep.Error = &sbFailure{Code: "CONCURRENT_CHANGE", Message: err.Error(), Fix: "re-run: another writer changed the project during this build"}
+	// compare-and-swap: nothing in --out changed while we built (KiCad does
+	// not honour sbLock), and nothing this commit replaces was edited
+	var deletes []string
+	for _, f := range st.Files {
+		if !sbContains(files, f) {
+			deletes = append(deletes, f)
+		}
+	}
+	manifest, gf := guard.beforeCommit(stage, files, deletes, rep)
+	if gf != nil {
+		rep.OK, rep.Error = false, gf
+		rep.Timings, rep.TotalMs = tm.Steps, tm.total()
 		return rep, nil
 	}
 
@@ -618,19 +605,20 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 	if err := os.MkdirAll(out, 0o755); err != nil {
 		return rep, err
 	}
-	for _, f := range st.Files { // files a previous build wrote that this one does not
-		if !sbContains(files, f) {
-			if p, err := sbSafeJoin(out, f); err == nil {
-				_ = os.Remove(p)
-			}
+	for _, f := range deletes { // files a previous build wrote that this one does not
+		if p, err := sbSafeJoin(out, f); err == nil {
+			_ = os.Remove(p)
 		}
 	}
 	if err := copySbFiles(stage, out, append(files, "erc.json")); err != nil {
 		return rep, err
 	}
+	if sbTestAfterPublish != nil {
+		sbTestAfterPublish(out)
+	}
 	_ = os.RemoveAll(filepath.Join(sbMetaDir(out), "failed"))
 	st.Files = files
-	st.Manifest = sbMakeManifest(out, files)
+	st.Manifest = manifest
 	rep.Project = filepath.Join(out, name+".kicad_pro")
 	rep.Root = filepath.Join(out, name+".kicad_sch")
 	for _, f := range files {
