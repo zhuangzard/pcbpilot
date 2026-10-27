@@ -1,0 +1,76 @@
+{
+  "ops": [
+    {
+      "op": "addFootprint",
+      "ref": "R1",
+      "key": "/00000000-0000-0000-0000-0000000000a1",
+      "fpid": "Resistor_SMD:R_0603",
+      "libDir": "/libs/Resistor_SMD.pretty",
+      "name": "R_0603",
+      "value": "10k",
+      "fields": {
+        "Datasheet": "",
+        "Description": ""
+      },
+      "sheetname": "/",
+      "sheetfile": "t.kicad_sch",
+      "dnp": false,
+      "excludeFromBom": false,
+      "x": 61.5,
+      "y": 0.8,
+      "rot": 0,
+      "side": "F",
+      "padNets": {
+        "1": "VCC",
+        "2": "/SIG"
+      },
+      "reason": "new symbol"
+    },
+    {
+      "op": "orphan",
+      "fp": "fp-R1",
+      "ref": "R1",
+      "action": "flag",
+      "reason": "no symbol on the board has this footprint",
+      "info": true
+    },
+    {
+      "op": "orphan",
+      "fp": "fp-R1b",
+      "ref": "R1",
+      "action": "flag",
+      "reason": "no symbol on the board has this footprint",
+      "info": true
+    }
+  ],
+  "match": {
+    "byPath": 4,
+    "byRef": 0,
+    "unmatchedSymbols": [
+      "R1"
+    ],
+    "unmatchedFootprints": [
+      "R1",
+      "R1"
+    ]
+  },
+  "counts": {
+    "add": 1,
+    "swap": 0,
+    "update": 0,
+    "padNet": 0,
+    "renameNet": 0,
+    "orphanFlag": 2,
+    "orphanRemove": 0
+  },
+  "staged": [
+    {
+      "ref": "R1",
+      "xMm": 61.5,
+      "yMm": 0.8
+    }
+  ],
+  "orphanCopper": [],
+  "danglingCopper": [],
+  "errors": []
+}

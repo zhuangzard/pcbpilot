@@ -204,7 +204,9 @@
 | `kicad fab` | Export JLCPCB manufacturing files (Gerber+drill zip, BOM, CPL) with kicad-cli | [evidence-and-verdicts.md](evidence-and-verdicts.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad-jlc.md](kicad-jlc.md), [kicad.md](kicad.md) +3 |
 | `kicad lcsc` | Check, write or search LCSC (JLC) part numbers on a KiCad design | [kicad-file-safety.md](kicad-file-safety.md), [kicad-jlc.md](kicad-jlc.md), [kicad-sch-build.md](kicad-sch-build.md), [prefab-checklist.md](prefab-checklist.md) +2 |
 | `kicad netlist` | Schematic connectivity JSON (the IR intent derive and pad-net-diff read) from a .kicad_sch | [evidence-and-verdicts.md](evidence-and-verdicts.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad.md](kicad.md), [prefab-checklist.md](prefab-checklist.md) +2 |
+| `kicad pcb-sync` | Update PCB from Schematic, headless: add / swap / update / re-net footprints from the schematic, verified | [kicad-jlc.md](kicad-jlc.md), [kicad.md](kicad.md) |
 | `kicad place` | Place a KiCad board's footprints with the pcbauto placer (best of several seeds) | [drc-triage.md](drc-triage.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad.md](kicad.md), [pcb-auto.md](pcb-auto.md) +2 |
+| `kicad render` | Deterministic SVG previews of a KiCad schematic / board, and a structural compare against a baseline render | [kicad-file-safety.md](kicad-file-safety.md), [kicad.md](kicad.md) |
 | `kicad route` | Route and gate a .kicad_pcb like pcb auto route: review → intent netclasses → fastroute → via arrays / widen / pours / silk → every gate → IR closure → report → release review | [board-manual.md](board-manual.md), [drc-triage.md](drc-triage.md), [evidence-and-verdicts.md](evidence-and-verdicts.md), [kicad-file-safety.md](kicad-file-safety.md) +6 |
 | `kicad sch-build` | Build a complete, gate-checked KiCad schematic project from one design spec (one call, seconds) | [design-flow.md](design-flow.md), [evidence-and-verdicts.md](evidence-and-verdicts.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad-sch-build.md](kicad-sch-build.md) +2 |
 | `kicad sch-check` | Schematic hard gate on KiCad: kicad-cli ERC + pcbpilot quality checks (JSON, non-zero on fail) | [drc-triage.md](drc-triage.md), [evidence-and-verdicts.md](evidence-and-verdicts.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad-sch-build.md](kicad-sch-build.md) +3 |
@@ -648,4 +650,4 @@
 | `workflow reset` | Clear deprecated checklist entries (or --all) | — |
 | `workflow status` | Show deprecated checklist state; --reconcile compares it with the live document | [pcb-layout.md](pcb-layout.md) |
 
-共 430 条命令，其中 94 条尚无参考提到。
+共 432 条命令，其中 94 条尚无参考提到。

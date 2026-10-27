@@ -1,0 +1,54 @@
+{
+  "ops": [
+    {
+      "op": "swapFootprint",
+      "fp": "fp-J1",
+      "ref": "J1",
+      "key": "/00000000-0000-0000-0000-0000000000d1",
+      "from": "Connector:CONN_3",
+      "to": "Connector:CONN_2",
+      "fpid": "Connector:CONN_2",
+      "libDir": "/libs/Connector.pretty",
+      "name": "CONN_2",
+      "padNets": {
+        "1": "VCC",
+        "2": "/OUT"
+      },
+      "matchedBy": "path",
+      "reason": "the symbol's Footprint field names another footprint"
+    }
+  ],
+  "match": {
+    "byPath": 5,
+    "byRef": 0,
+    "unmatchedSymbols": [],
+    "unmatchedFootprints": []
+  },
+  "counts": {
+    "add": 0,
+    "swap": 1,
+    "update": 0,
+    "padNet": 0,
+    "renameNet": 0,
+    "orphanFlag": 0,
+    "orphanRemove": 0
+  },
+  "staged": [],
+  "orphanCopper": [
+    {
+      "ref": "J1",
+      "pad": "3",
+      "net": "GND",
+      "reason": "the new footprint has no pad 3; copper on its net stays"
+    }
+  ],
+  "danglingCopper": [],
+  "errors": [
+    {
+      "code": "E_PIN_PAD_MISMATCH",
+      "ref": "J1",
+      "detail": "J1 pin(s) 3 have no pad on the new footprint Connector:CONN_2",
+      "fix": "pick a footprint whose pad numbers match the symbol's pin numbers"
+    }
+  ]
+}

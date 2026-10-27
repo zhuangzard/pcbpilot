@@ -1,0 +1,33 @@
+{
+  "ops": [
+    {
+      "op": "orphan",
+      "fp": "fp-C1",
+      "ref": "C1",
+      "action": "flag",
+      "reason": "its symbol is excluded from the board",
+      "info": true
+    }
+  ],
+  "match": {
+    "byPath": 4,
+    "byRef": 0,
+    "unmatchedSymbols": [],
+    "unmatchedFootprints": [
+      "C1"
+    ]
+  },
+  "counts": {
+    "add": 0,
+    "swap": 0,
+    "update": 0,
+    "padNet": 0,
+    "renameNet": 0,
+    "orphanFlag": 1,
+    "orphanRemove": 0
+  },
+  "staged": [],
+  "orphanCopper": [],
+  "danglingCopper": [],
+  "errors": []
+}

@@ -72,7 +72,9 @@ func TestLockStates(t *testing.T) {
 		env        *Env
 		want       LockState
 	}{
-		{"same user, no kicad", lockBody, fakeEnv("explorer.exe", "kicad-cli.exe", "python.exe"), LockStaleCandidate},
+		{"same user, no kicad", lockBody, fakeEnv("explorer.exe", "python.exe"), LockStaleCandidate},
+		// kicad-cli pcb drc holds the project lock while it runs (10.0.6).
+		{"same user, kicad-cli running", lockBody, fakeEnv("explorer.exe", "kicad-cli.exe", "python.exe"), LockLive},
 		{"same user, pcbnew running", lockBody, fakeEnv("PCBNEW.EXE"), LockLive},
 		{"same user, kicad running (path)", lockBody, fakeEnv("/Applications/KiCad/KiCad.app/Contents/MacOS/kicad"), LockLive},
 		{"same user, eeschema running", lockBody, fakeEnv("eeschema"), LockLive},
@@ -331,5 +333,35 @@ func TestStaleLockRewrittenBeforeRemove(t *testing.T) {
 		if _, serr := os.Stat(lck); serr != nil {
 			t.Errorf("%s: lock removed", how)
 		}
+	}
+}
+
+// TestParseRealKiCad10Lock: the lock kicad-cli pcb drc (10.0.6) held on a
+// project while it ran, with the host and user names neutralised. It
+// parses, and with KiCad running on the same host and user it is live.
+func TestParseRealKiCad10Lock(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("testdata", "locks", "kicad10-real.lck"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, u, ok := parseLock(b)
+	if !ok || h != "HOST" || u != "user" {
+		t.Fatalf("parse: %q %q %v", h, u, ok)
+	}
+	dir := t.TempDir()
+	pro := filepath.Join(dir, "board.kicad_pro")
+	if err := os.WriteFile(pro, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(LockPath(pro), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env := &Env{Host: "HOST", User: "user", Procs: func() ([]Proc, error) { return []Proc{{PID: 3, Name: "kicad-cli.exe"}}, nil }}
+	locks, err := CheckLocks([]string{filepath.Join(dir, "board.kicad_pcb")}, env)
+	if err != nil || len(locks) != 1 || locks[0].Kind != "project" {
+		t.Fatalf("%+v %v", locks, err)
+	}
+	if locks[0].State != LockLive {
+		t.Fatalf("a lock held while kicad-cli runs must be live, never stale: %+v", locks[0])
 	}
 }

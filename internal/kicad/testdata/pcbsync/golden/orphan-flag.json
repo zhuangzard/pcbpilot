@@ -1,0 +1,33 @@
+{
+  "ops": [
+    {
+      "op": "orphan",
+      "fp": "fp-R2",
+      "ref": "R2",
+      "action": "flag",
+      "reason": "no symbol on the board has this footprint",
+      "info": true
+    }
+  ],
+  "match": {
+    "byPath": 4,
+    "byRef": 0,
+    "unmatchedSymbols": [],
+    "unmatchedFootprints": [
+      "R2"
+    ]
+  },
+  "counts": {
+    "add": 0,
+    "swap": 0,
+    "update": 0,
+    "padNet": 0,
+    "renameNet": 0,
+    "orphanFlag": 1,
+    "orphanRemove": 0
+  },
+  "staged": [],
+  "orphanCopper": [],
+  "danglingCopper": [],
+  "errors": []
+}

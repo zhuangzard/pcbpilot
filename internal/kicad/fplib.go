@@ -21,6 +21,8 @@ package kicad
 // a lookup fall through to a different library of the same name.
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -98,7 +100,38 @@ type FPLibTables struct {
 	Problems     []FPLibError        `json:"problems,omitempty"` // nested tables that failed, table cycles
 	Warnings     []FPLibError        `json:"warnings,omitempty"` // e.g. legacy variable fallbacks
 	Libs         []FPLib             `json:"-"`                  // all rows, lookup order
+	// Files are every configuration file the load consulted, present or
+	// not (kicad_common.json, the project and global tables, nested
+	// tables), each with the hash of exactly the bytes that were parsed:
+	// what a caller re-checks to know the resolution still holds.
+	Files []FPLibFile `json:"files,omitempty"`
+}
 
+// FPLibFile is one configuration file as the load saw it.
+type FPLibFile struct {
+	Path   string `json:"path"`
+	Exists bool   `json:"exists"`
+	Size   int64  `json:"size,omitempty"`
+	SHA256 string `json:"sha256,omitempty"`
+}
+
+// fpLibAfterParse, when set (tests only), runs right after a file's bytes
+// were parsed and before anything else.
+var fpLibAfterParse func(path string)
+
+// note records path once: absent (data nil) or the bytes parsed.
+func (t *FPLibTables) note(path string, data []byte, exists bool) {
+	for _, f := range t.Files {
+		if f.Path == path {
+			return
+		}
+	}
+	f := FPLibFile{Path: path, Exists: exists}
+	if exists {
+		h := sha256.Sum256(data)
+		f.Size, f.SHA256 = int64(len(data)), hex.EncodeToString(h[:])
+	}
+	t.Files = append(t.Files, f)
 }
 
 // FPRef is a resolved footprint.
@@ -153,7 +186,7 @@ func loadFPLibTables(projDir string, env fpLibEnv) (*FPLibTables, error) {
 	if ferr != nil {
 		return nil, ferr
 	}
-	user, ferr := readKiCadCommonVars(filepath.Join(cfg, "kicad_common.json"))
+	user, ferr := readKiCadCommonVars(filepath.Join(cfg, "kicad_common.json"), t.note)
 	if ferr != nil {
 		return nil, ferr
 	}
@@ -163,6 +196,9 @@ func loadFPLibTables(projDir string, env fpLibEnv) (*FPLibTables, error) {
 	present, ferr := tablePresent(p)
 	if ferr != nil {
 		return nil, ferr
+	}
+	if !present {
+		t.note(p, nil, false)
 	}
 	if present {
 		t.ProjectTable = p
@@ -175,6 +211,7 @@ func loadFPLibTables(projDir string, env fpLibEnv) (*FPLibTables, error) {
 		return nil, ferr
 	}
 	if !present {
+		t.note(global, nil, false)
 		global = ""
 		if sd := env.stockDir(); sd != "" {
 			p := filepath.Join(filepath.Dir(sd), "template", "fp-lib-table")
@@ -196,9 +233,15 @@ func loadFPLibTables(projDir string, env fpLibEnv) (*FPLibTables, error) {
 	return t, nil
 }
 
-// readTable reads and parses one fp-lib-table file.
-func readTable(path string) (*sx, *FPLibError) {
+// readTable reads and parses one fp-lib-table file; note gets the very
+// bytes parsed.
+func readTable(path string, note func(string, []byte, bool)) (*sx, *FPLibError) {
 	b, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		note(path, nil, false)
+	} else if err == nil {
+		note(path, b, true)
+	}
 	if err != nil {
 		return nil, &FPLibError{Code: ErrFPLibUnresolved, Path: path,
 			Detail: "cannot read fp-lib-table: " + err.Error(), Fix: "check the table path in KiCad's Footprint Libraries dialog"}
@@ -210,6 +253,9 @@ func readTable(path string) (*sx, *FPLibError) {
 	if err != nil {
 		return nil, &FPLibError{Code: ErrFPLibUnresolved, Path: path,
 			Detail: "cannot parse fp-lib-table: " + err.Error(), Fix: "repair or re-save the table from KiCad"}
+	}
+	if fpLibAfterParse != nil {
+		fpLibAfterParse(path)
 	}
 	return root, nil
 }
@@ -224,6 +270,9 @@ func readTable(path string) (*sx, *FPLibError) {
 func (t *FPLibTables) loadTable(path, scope string, lookup func(string) (FPLibVar, bool), stack []os.FileInfo) *FPLibError {
 	st, err := fpStat(path)
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			t.note(path, nil, false)
+		}
 		return &FPLibError{Code: ErrFPLibUnresolved, Path: path,
 			Detail: "cannot read fp-lib-table: " + err.Error(), Fix: "check the table path in KiCad's Footprint Libraries dialog"}
 	}
@@ -236,7 +285,7 @@ func (t *FPLibTables) loadTable(path, scope string, lookup func(string) (FPLibVa
 		}
 	}
 	stack = append(stack[:len(stack):len(stack)], st)
-	root, ferr := readTable(path)
+	root, ferr := readTable(path, t.note)
 	if ferr != nil {
 		return ferr
 	}
@@ -483,16 +532,26 @@ func kicadConfigPath(env fpLibEnv) (string, *FPLibError) {
 // Configure Paths dialog). Only an absent file means "no user variables";
 // an unreadable or invalid file is an error (its variables may decide
 // where libraries are).
-func readKiCadCommonVars(path string) (map[string]string, *FPLibError) {
+func readKiCadCommonVars(path string, note func(string, []byte, bool)) (map[string]string, *FPLibError) {
 	ok, ferr := strictPresent(path, "kicad_common.json")
-	if ferr != nil || !ok {
+	if ferr != nil {
 		return nil, ferr
+	}
+	if !ok {
+		note(path, nil, false)
+		return nil, nil
 	}
 	b, err := fpReadFile(path)
 	if err != nil {
 		return nil, &FPLibError{Code: ErrFPLibUnresolved, Path: path,
 			Detail: "cannot read kicad_common.json: " + err.Error(), Fix: "check the file's permissions"}
 	}
+	note(path, b, true)
+	defer func() {
+		if fpLibAfterParse != nil {
+			fpLibAfterParse(path)
+		}
+	}()
 	var doc struct {
 		Environment struct {
 			Vars map[string]string `json:"vars"`

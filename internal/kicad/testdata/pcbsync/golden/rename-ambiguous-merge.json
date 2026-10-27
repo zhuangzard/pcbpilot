@@ -1,0 +1,130 @@
+{
+  "ops": [
+    {
+      "op": "setPadNet",
+      "fp": "fp-J1",
+      "ref": "J1",
+      "from": "/OUT",
+      "pad": "2",
+      "net": "/NODE"
+    },
+    {
+      "op": "setPadNet",
+      "fp": "fp-R1",
+      "ref": "R1",
+      "from": "/SIG",
+      "pad": "2",
+      "net": "/NODE"
+    },
+    {
+      "op": "setPadNet",
+      "fp": "fp-R2",
+      "ref": "R2",
+      "from": "/SIG",
+      "pad": "1",
+      "net": "/NODE"
+    },
+    {
+      "op": "setPadNet",
+      "fp": "fp-U1",
+      "ref": "U1",
+      "from": "/OUT",
+      "pad": "1",
+      "net": "/NODE"
+    },
+    {
+      "op": "setPadNet",
+      "fp": "fp-U1",
+      "ref": "U1",
+      "from": "/SIG",
+      "pad": "2",
+      "net": "/NODE"
+    },
+    {
+      "op": "removeNet",
+      "net": "/OUT",
+      "reason": "no pad is left on the net (tracks 2, vias 0, zones 0 stay)",
+      "info": true
+    },
+    {
+      "op": "removeNet",
+      "net": "/SIG",
+      "reason": "no pad is left on the net (tracks 4, vias 1, zones 0 stay)",
+      "info": true
+    }
+  ],
+  "match": {
+    "byPath": 5,
+    "byRef": 0,
+    "unmatchedSymbols": [],
+    "unmatchedFootprints": []
+  },
+  "counts": {
+    "add": 0,
+    "swap": 0,
+    "update": 0,
+    "padNet": 5,
+    "renameNet": 0,
+    "orphanFlag": 0,
+    "orphanRemove": 0
+  },
+  "staged": [],
+  "orphanCopper": [],
+  "danglingCopper": [
+    {
+      "ref": "J1",
+      "pad": "2",
+      "net": "/OUT",
+      "to": "/NODE",
+      "tracks": 2,
+      "reason": "the pad leaves a net that has copper; that copper stays on /OUT"
+    },
+    {
+      "ref": "R1",
+      "pad": "2",
+      "net": "/SIG",
+      "to": "/NODE",
+      "tracks": 4,
+      "vias": 1,
+      "reason": "the pad leaves a net that has copper; that copper stays on /SIG"
+    },
+    {
+      "ref": "R2",
+      "pad": "1",
+      "net": "/SIG",
+      "to": "/NODE",
+      "tracks": 4,
+      "vias": 1,
+      "reason": "the pad leaves a net that has copper; that copper stays on /SIG"
+    },
+    {
+      "ref": "U1",
+      "pad": "1",
+      "net": "/OUT",
+      "to": "/NODE",
+      "tracks": 2,
+      "reason": "the pad leaves a net that has copper; that copper stays on /OUT"
+    },
+    {
+      "ref": "U1",
+      "pad": "2",
+      "net": "/SIG",
+      "to": "/NODE",
+      "tracks": 4,
+      "vias": 1,
+      "reason": "the pad leaves a net that has copper; that copper stays on /SIG"
+    },
+    {
+      "net": "/OUT",
+      "tracks": 2,
+      "reason": "no pad is left on the net; its copper stays"
+    },
+    {
+      "net": "/SIG",
+      "tracks": 4,
+      "vias": 1,
+      "reason": "no pad is left on the net; its copper stays"
+    }
+  ],
+  "errors": []
+}

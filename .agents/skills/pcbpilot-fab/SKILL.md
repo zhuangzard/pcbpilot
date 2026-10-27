@@ -118,10 +118,10 @@ BLOCKED 或 manual 项无证据，列出缺什么）。上传清单只列 `<板>
 | 现象 | 原因 | 修法 |
 |---|---|---|
 | `N placed part(s) without an LCSC part number`，`--out` 为空 | 贴装件缺号 | 第 3 步补号，或排除不贴件，或 `--no-assembly` |
-| `CPL_EMPTY_REF` | 没有位号的封装（Logo、焊盘图形）仍在坐标文件里 | 用户在 KiCad 给它勾“排除坐标文件”，或标注位号后从原理图更新 PCB |
+| `CPL_EMPTY_REF` | 没有位号的封装（Logo、焊盘图形）仍在坐标文件里 | 用户在 KiCad 给它勾“排除坐标文件”，或标注位号后 `kicad pcb-sync` |
 | `CPL_NOT_IN_BOM`：excluded from the BOM but not from position files | 只排除了 BOM | 同时勾排除坐标文件，或取消排除 BOM |
-| `CPL_NOT_IN_BOM`：DNP in the schematic but not on the board | 原理图与板不同步 | 用户在 KiCad 里 Update PCB from Schematic，再出图 |
-| `*_DUPLICATE_REF` | 位号重复 | 原理图重新标注 → 更新 PCB |
+| `CPL_NOT_IN_BOM`：DNP in the schematic but not on the board | 原理图与板不同步 | `pcbpilot kicad pcb-sync`（无头 Update PCB from Schematic）同步后再出图 |
+| `*_DUPLICATE_REF` | 位号重复 | 原理图重新标注 → `kicad pcb-sync` |
 | `would overwrite files pcbpilot does not own` | 目标目录有别的来源的同名文件 | 换新 `--out`，或由用户移走那些文件 |
 | 告警 `holds Gerber/drill file(s) this run did not produce` | 旧版本或别的工具的残留 | 不进 zip，但让用户删掉或换目录，免得误传 |
 | `unknown field "…"`（覆盖文件） | 覆盖 JSON 键名拼错 | 只允许 `refs` / `footprints` 与 `rotate` / `dx` / `dy` |
