@@ -3,7 +3,9 @@ package app
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -36,8 +38,19 @@ func TestKicadRenderCompareExitCodes(t *testing.T) {
 			t.Errorf("%s: exit %d verdict %s, want %d %s", c.out, code, rep.Verdict, c.code, c.verdict)
 		}
 	}
-	// Comparing a directory with itself, or giving nothing to do, is refused.
-	for _, args := range [][]string{{"kicad", "render", "--out", base, "--compare", base}, {"kicad", "render"}} {
+	// Comparing a directory with itself (also through a link or junction),
+	// or giving nothing to do, is refused.
+	alias := filepath.Join(root, "alias")
+	if err := os.Symlink(base, alias); err != nil && runtime.GOOS == "windows" {
+		_ = exec.Command("cmd", "/c", "mklink", "/J", alias, base).Run()
+	}
+	refused := [][]string{{"kicad", "render", "--out", base, "--compare", base}, {"kicad", "render"}}
+	if _, err := os.Stat(alias); err == nil {
+		refused = append(refused, []string{"kicad", "render", "--out", alias, "--compare", base})
+	} else {
+		t.Log("no link / junction here; alias case skipped")
+	}
+	for _, args := range refused {
 		stdout, _, code := runCLI(t, args...)
 		var rep kicadRenderReport
 		_ = json.Unmarshal([]byte(stdout), &rep)
@@ -59,6 +72,9 @@ func TestSchBuildRenderIsNormalized(t *testing.T) {
 		rep, err := runSchBuild(sbGuardSpec(), sbOptions{OutDir: out, NoIntent: true, Render: true, PlannerBudget: 20000}, nil)
 		if err != nil || !rep.OK {
 			t.Fatalf("build %s: %v %+v", n, err, rep.Error)
+		}
+		if rep.Outputs["render"] == "" {
+			t.Fatalf("build %s rendered nothing: %v", n, rep.Warnings)
 		}
 		dirs = append(dirs, filepath.Join(out, "render"))
 	}

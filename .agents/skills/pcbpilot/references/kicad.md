@@ -116,18 +116,29 @@ pcbpilot kicad render --out build/render --compare old/render              # 只
 ```
 
 - 在工程**临时副本**上跑 kicad-cli（原目录不出现 `.kicad_prl`/锁文件），用隔离的空库表配置（默认配色，不受用户主题影响）。
-- **确定性**：kicad-cli 每次出图只有 `<title>` 里的出图时间（以及偶尔回显的临时路径）会变；pcbpilot 把它们去掉、统一 LF 与 `-0`，
-  同一输入两次出图逐字节相同（`TestRenderLive*` 在 pic_programmer 原理图+板、complex_hierarchy 上实测）。绘制顺序保留不排序。
+  副本 = 工程目录的 KiCad 文件 + 依赖闭包：沿层次找到的每张子图、`sym-lib-table`/`fp-lib-table` 里相对或 `${KIPRJMOD}` 路径的库、
+  `.kicad_pro` 指定的图框（`.kicad_wks`），按相对位置镜像复制（不改写任何文件，`../shared/x.kicad_sch` 照样能找到）；绝对路径或
+  KiCad 变量指向的库原地只读（`render.json` 的 `readInPlace`）。绝对路径子图、未定义变量、找不到的文件 →
+  `RENDER_DEPENDENCY_UNRESOLVED`（cannot-check，逐项列出），不出半张图。
+- **出图校验**：层次里每一页都必须产出能解析、且画了东西的 SVG（缺页 `RENDER_INCOMPLETE`，空图/坏图 `RENDER_BAD_SVG`）；
+  kicad-cli 的输出保留进 `warnings`，其中“找不到 sheet/symbol/footprint/库/文件”类消息即使退出码 0 也判
+  `RENDER_KICAD_DIAGNOSTIC`。以上都是 cannot-check（退出 5），**上一版渲染原样保留**：新图先在暂存目录完成，全部通过才替换。
+- **确定性**：kicad-cli 每次出图只有 `<title>` 里的出图时间（以及偶尔回显的临时路径）会变；pcbpilot 只在生成的头部（`<title>` 与
+  其后的 `<desc>`）去掉时间与临时路径，图中文字里出现的临时副本路径换回用户自己的目录，`-0` 只在数值属性/路径数据里改写，
+  `<text>` 文字不动。同一输入两次出图逐字节相同（`TestRenderLive*` 在 pic_programmer 原理图+板、complex_hierarchy 上实测）。
+  绘制顺序保留不排序。
 - PCB：`<base>-pcb-<side>.svg`（全部 `--layers` 叠在板框范围内）+ 每层一张 `<base>-pcb-<层>.svg`（带 Edge.Cuts 定位）；
   默认层 `F.Cu,F.Mask,F.Silkscreen,Edge.Cuts`，`--side bottom` 用 B.* 并镜像。
 - PNG：只有板有（`kicad-cli pcb render` 3D 光追，按板框尺寸 × `--dpi` 定像素）。光追**不可逐字节复现**（10.0.6 实测同一板两次
   像素不同），所以 `--compare` 只列出不比较。原理图没有 PNG：kicad-cli 不出原理图位图，pcbpilot 也不带 SVG 光栅化库。
-- `--out` 写 SVG + `render.json`（文件、sha256、绘制元素数）；再次渲染到同一目录只删 `render.json` 列出的文件，其他非空目录拒绝
-  （`RENDER_OUT_NOT_EMPTY`）。
+- `--out` 写 SVG + `render.json`（文件、sha256、绘制元素数）。再次渲染到同一目录只替换 `render.json` 列出的文件；目录里有其他
+  文件/子目录/链接（`RENDER_OUT_NOT_EMPTY` / `RENDER_OUT_UNSAFE`），或 `render.json` 列了渲染器不会写的名字（只允许纯文件名
+  `.svg`/`.png`，`RENDER_OUT_BAD_MANIFEST`），一律拒绝、什么都不删。`--compare` 与 `--out` 是同一目录（含链接/联接）也拒绝。
 - `--compare` 逐文件：`identical`（规范化后字节相同）/ `changed`（结构化 SVG 比较：每个绘制元素连同排序后的属性、文字和所在
   `<g>` 的样式作多重集合比较，给 `elementsAdded/elementsRemoved/changedElements` 和几条样例；只换了绘制顺序记 `reordered`）/
-  `added` / `removed` / `unreadable`。`verdict` 三态：全部 identical → `pass`（退出 0），有差异 → `fail`（6），一侧没有 SVG 或
-  文件解析不了 → `cannot-check`（5）；出图本身失败退出 1 并给 `error.code/fix`。两边渲染选项不同写进 `notes`。
+  `added` / `removed` / `unreadable`（解析不了、没画东西——两份相同的空图也不算通过——或 `render.json` 列了却不存在）。
+  `verdict` 三态：全部 identical → `pass`（退出 0），有差异 → `fail`（6），一侧没有 SVG 或有 unreadable → `cannot-check`（5）；
+  出图失败同样 cannot-check（5）并给 `error.code/fix`，参数/`--out` 用法错误退出 1。两边渲染选项不同写进 `notes`。
 - SVG 变化只说明“画面动了”，不说明设计对错：连接是否变化以网表（`kicad netlist` / `sch-read`）为证据。
 - `kicad sch-build --render` / `sch-edit --render` 用同一个出图函数，`<out>/render/` 也是规范化的 SVG，可直接作 `--compare` 的两侧。
 

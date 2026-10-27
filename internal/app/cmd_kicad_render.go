@@ -49,8 +49,14 @@ temp paths KiCad embeds are removed; paint order is kept.
                          them and pcbpilot ships no SVG rasterizer.
 
 --out DIR (default ./pcbpilot-render) gets the files plus render.json (file list,
-sha256, element counts). A re-render into a directory with render.json replaces
-exactly the files it lists; any other non-empty directory is refused.
+sha256, element counts). The new render is assembled aside and replaces the files
+the old render.json lists only once complete. A directory holding anything else
+(other files, subdirectories, links, a render.json naming other paths) is refused.
+
+The temp copy holds the project directory's KiCad files plus every sheet,
+library and drawing sheet reached by a relative or ${KIPRJMOD} path (at the
+same relative place, so nothing is rewritten); libraries named by an absolute
+path or a KiCad variable are read in place (listed as readInPlace).
 
 --compare BASELINE_DIR diffs the SVGs of --out against an earlier render (after
 rendering, when --sch/--pcb is given; else the existing --out). Per file:
@@ -59,7 +65,15 @@ changedElements from a structural SVG diff: each drawn element with its sorted
 attributes, text and enclosing group style, compared as a multiset; a pure
 reorder is "reordered"), added, removed, unreadable. verdict: pass = all
 identical, fail = anything differs, cannot-check = a side has no SVG or a file
-does not parse. Exit 0 pass, 6 fail, 5 cannot-check; 1 when rendering fails.
+does not parse, draws nothing, or is listed in render.json but missing.
+Exit 0 pass, 6 fail, 5 cannot-check; 1 for a bad request (flags, unusable --out).
+
+A render is cannot-check (exit 5, the previous render in --out left untouched)
+when a sheet / library / drawing sheet the project references cannot be
+resolved (absolute sheet paths, undefined path variables, missing files),
+when kicad-cli reports something it could not load, or when any page of the
+hierarchy is missing or not a drawing. kicad-cli's other messages go to
+render.json "warnings".
 
 A changed render shows that the drawing moved, not whether the design is right:
 connectivity is judged from netlists (kicad netlist / sch-read), not pictures.`,
@@ -80,6 +94,9 @@ connectivity is judged from netlists (kicad netlist / sch-read), not pictures.`,
 				}
 				rep.OK, rep.Error, rep.Verdict = false, re, gate.CannotCheck
 				_ = writeRenderReport(stdout, report, rep)
+				if kicad.RenderVerdict(re) == gate.CannotCheck {
+					return exitCodeError{gate.CannotCheck.ExitCode()}
+				}
 				return errQuiet
 			}
 			if o.Sch == "" && o.PCB == "" && compare == "" {
@@ -122,10 +139,17 @@ connectivity is judged from netlists (kicad netlist / sch-read), not pictures.`,
 	return c
 }
 
+// sameDir: a and b are one directory, also through links / junctions or
+// case-insensitive spellings.
 func sameDir(a, b string) bool {
-	x, err1 := filepath.Abs(a)
-	y, err2 := filepath.Abs(b)
-	return err1 == nil && err2 == nil && strings.EqualFold(filepath.Clean(x), filepath.Clean(y))
+	x, err1 := os.Stat(a)
+	y, err2 := os.Stat(b)
+	if err1 == nil && err2 == nil {
+		return os.SameFile(x, y)
+	}
+	p, err1 := filepath.Abs(a)
+	q, err2 := filepath.Abs(b)
+	return err1 == nil && err2 == nil && strings.EqualFold(filepath.Clean(p), filepath.Clean(q))
 }
 
 func writeRenderReport(stdout io.Writer, path string, rep kicadRenderReport) error {

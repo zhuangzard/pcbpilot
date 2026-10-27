@@ -24,9 +24,7 @@ func renderDemoCopy(t *testing.T, demo string) string {
 		t.Skipf("KiCad demos not found (set %s)", EnvKiCadDemos)
 	}
 	dst := filepath.Join(t.TempDir(), demo)
-	if _, err := copyRenderProject(filepath.Join(demos, demo, demo+".kicad_pro"), dst, false); err != nil {
-		t.Fatal(err)
-	}
+	copyTree(t, filepath.Join(demos, demo), dst)
 	return dst
 }
 
