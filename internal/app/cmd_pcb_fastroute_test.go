@@ -1,11 +1,13 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -78,6 +80,146 @@ func TestResolveFastroute(t *testing.T) {
 	_, err := resolveFastroute("")
 	if err == nil || !strings.Contains(err.Error(), "install-fastroute.sh") || !strings.Contains(err.Error(), "never downloads") {
 		t.Fatalf("not-installed error = %v", err)
+	}
+}
+
+// fakeHome points os.UserHomeDir at a temp directory on every OS.
+func fakeHome(t *testing.T) string {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	return home
+}
+
+func writeExe(t *testing.T, p string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// linkCurrent makes <home>/.pcbpilot/<tool>/current point at target (a
+// symlink, as the installers do; skipped where symlinks need privileges).
+func linkCurrent(t *testing.T, home, tool, target string) {
+	t.Helper()
+	cur := filepath.Join(home, ".pcbpilot", tool, "current")
+	if err := os.MkdirAll(filepath.Dir(cur), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err := os.Symlink(target, cur)
+	if err != nil && runtime.GOOS == "windows" {
+		// Unprivileged Windows: a directory junction is what a user gets
+		// from `mklink /J`, and EvalSymlinks follows it the same way.
+		if st, serr := os.Stat(target); serr == nil && st.IsDir() {
+			sh := os.Getenv("ComSpec")
+			if sh == "" {
+				sh = filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe")
+			}
+			err = exec.Command(sh, "/c", "mklink", "/J", cur, target).Run()
+		}
+	}
+	if err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+}
+
+// sameFile: a and b name one file (through links or junctions).
+func sameFile(t *testing.T, a, b string) bool {
+	t.Helper()
+	sa, err1 := os.Stat(a)
+	sb, err2 := os.Stat(b)
+	return err1 == nil && err2 == nil && os.SameFile(sa, sb)
+}
+
+// The Windows install: current -> 0.1.14, the release zip unpacked beside
+// it. resolveFastroute must return the executable inside, not the directory.
+func TestResolveFastrouteInstallTree(t *testing.T) {
+	home := fakeHome(t)
+	t.Setenv("FASTROUTE_BIN", "")
+	saved := fastrouteLookPath
+	fastrouteLookPath = func(string) (string, error) { return "", errors.New("no PATH lookup in this test") }
+	defer func() { fastrouteLookPath = saved }()
+	exe := "fastroute"
+	if runtime.GOOS == "windows" {
+		exe = "fastroute.exe"
+	}
+	ver := filepath.Join(home, ".pcbpilot", "fastroute", "0.1.14")
+	bin := filepath.Join(ver, "fastroute-0.1.14-windows-x64", exe)
+	writeExe(t, bin)
+	for _, f := range []string{"LICENSE", "NOTICE", "SHA256SUMS.txt", "fastroute-0.1.14-windows-x64.zip"} {
+		_ = os.WriteFile(filepath.Join(ver, f), []byte("x"), 0o644)
+	}
+	_ = os.WriteFile(filepath.Join(filepath.Dir(bin), "LICENSE"), []byte("x"), 0o644)
+	linkCurrent(t, home, "fastroute", ver)
+	if got, err := resolveFastroute(""); err != nil || !sameFile(t, got, bin) {
+		t.Fatalf("current -> version dir: got %q %v, want %q", got, err, bin)
+	}
+	// An explicit directory resolves the same way.
+	if got, err := resolveFastroute(ver); err != nil || filepath.Base(got) != exe {
+		t.Fatalf("explicit dir: got %q %v", got, err)
+	}
+	// current -> the binary itself (scripts/fastroute-upgrade-check.sh).
+	if err := os.Remove(filepath.Join(home, ".pcbpilot", "fastroute", "current")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(bin, filepath.Join(home, ".pcbpilot", "fastroute", "current")); err != nil {
+		t.Logf("current -> binary not checked: %v", err) // file links need privileges on Windows
+		return
+	}
+	if got, err := resolveFastroute(""); err != nil || filepath.Base(got) != exe {
+		t.Fatalf("current -> binary: got %q %v", got, err)
+	}
+}
+
+// A current directory with no executable fails at resolve time (kicad route
+// setup), naming the directory, instead of handing a directory to exec.
+func TestResolveFastrouteEmptyInstallDir(t *testing.T) {
+	home := fakeHome(t)
+	t.Setenv("FASTROUTE_BIN", "")
+	saved := fastrouteLookPath
+	fastrouteLookPath = func(string) (string, error) { return "", errors.New("no PATH lookup in this test") }
+	defer func() { fastrouteLookPath = saved }()
+	ver := filepath.Join(home, ".pcbpilot", "fastroute", "0.1.14")
+	if err := os.MkdirAll(filepath.Join(ver, "fastroute-0.1.14-windows-x64"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(ver, "fastroute-0.1.14-windows-x64.zip"), []byte("x"), 0o644)
+	linkCurrent(t, home, "fastroute", ver)
+	_, err := resolveFastroute("")
+	if err == nil || !strings.Contains(err.Error(), "without a fastroute") || !strings.Contains(err.Error(), "--fastroute-bin") {
+		t.Fatalf("empty install dir: err %v", err)
+	}
+	// Two unpacked releases in one directory: ambiguous, never a guess.
+	writeExe(t, filepath.Join(ver, "a", "fastroute"))
+	writeExe(t, filepath.Join(ver, "b", "fastroute"))
+	if _, err := resolveFastroute(""); err == nil || !strings.Contains(err.Error(), "2 executables") {
+		t.Fatalf("ambiguous install dir: err %v", err)
+	}
+}
+
+func TestResolveTracemakerInstallTree(t *testing.T) {
+	home := fakeHome(t)
+	t.Setenv("TRACEMAKER_BIN", "")
+	t.Setenv("PATH", t.TempDir())
+	exe := "tracemaker"
+	if runtime.GOOS == "windows" {
+		exe = "tracemaker.exe"
+	}
+	ver := filepath.Join(home, ".pcbpilot", "tracemaker", "pcbpilot-abc")
+	bin := filepath.Join(ver, "tracemaker-windows-x64", exe)
+	writeExe(t, bin)
+	linkCurrent(t, home, "tracemaker", ver)
+	if got, err := resolveTracemaker(""); err != nil || !sameFile(t, got, bin) {
+		t.Fatalf("got %q %v, want %q", got, err, bin)
+	}
+	if err := os.Remove(bin); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolveTracemaker(""); err == nil || !strings.Contains(err.Error(), "without a tracemaker") {
+		t.Fatalf("empty install dir: err %v", err)
 	}
 }
 

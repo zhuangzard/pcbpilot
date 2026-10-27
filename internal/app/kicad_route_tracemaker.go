@@ -16,7 +16,6 @@ import (
 	"math"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,33 +28,9 @@ const tracemakerInstallHint = "tracemaker not found: set --tracemaker-bin or $TR
 
 // resolveTracemaker finds the tracemaker executable: explicit flag, then
 // $TRACEMAKER_BIN, ~/.pcbpilot/tracemaker/current (a binary or a directory
-// holding one) and PATH.
+// holding one, see installedBinary) and PATH.
 func resolveTracemaker(explicit string) (string, error) {
-	for _, p := range []string{explicit, os.Getenv("TRACEMAKER_BIN")} {
-		if p == "" {
-			continue
-		}
-		if _, err := os.Stat(p); err != nil {
-			return "", fmt.Errorf("tracemaker binary %s: %w", p, err)
-		}
-		return p, nil
-	}
-	if home, err := os.UserHomeDir(); err == nil {
-		if p, err := filepath.EvalSymlinks(filepath.Join(home, ".pcbpilot", "tracemaker", "current")); err == nil {
-			if st, err := os.Stat(p); err == nil {
-				if st.IsDir() {
-					p = filepath.Join(p, "tracemaker")
-				}
-				if _, err := os.Stat(p); err == nil {
-					return p, nil
-				}
-			}
-		}
-	}
-	if p, err := exec.LookPath("tracemaker"); err == nil {
-		return p, nil
-	}
-	return "", errors.New(tracemakerInstallHint)
+	return resolveRouterBinary("tracemaker", explicit, "TRACEMAKER_BIN", "--tracemaker-bin", exec.LookPath, tracemakerInstallHint)
 }
 
 // tracemakerOpts are the pcbpilot-side settings of one tracemaker run.

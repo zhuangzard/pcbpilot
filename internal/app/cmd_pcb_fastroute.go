@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -627,27 +628,80 @@ const fastrouteInstallHint = "fastroute is not installed (GPLv3, run as a separa
 var fastrouteLookPath = exec.LookPath
 
 // resolveFastroute finds the binary: explicit flag, $FASTROUTE_BIN, the
-// adopted version (~/.pcbpilot/fastroute/current), PATH.
+// adopted version (~/.pcbpilot/fastroute/current), PATH. A directory (the
+// unpacked release, e.g. current -> 0.1.14 holding
+// fastroute-0.1.14-windows-x64/fastroute.exe) resolves to the executable in
+// it; a directory without one is an error here, at setup, not when the
+// first run starts.
 func resolveFastroute(explicit string) (string, error) {
-	for _, p := range []string{explicit, os.Getenv("FASTROUTE_BIN")} {
+	return resolveRouterBinary("fastroute", explicit, "FASTROUTE_BIN", "--fastroute-bin", fastrouteLookPath, fastrouteInstallHint)
+}
+
+// resolveRouterBinary is the lookup shared by fastroute and tracemaker:
+// explicit path, $env, ~/.pcbpilot/<name>/current, PATH (look).
+func resolveRouterBinary(name, explicit, env, flag string, look func(string) (string, error), hint string) (string, error) {
+	for _, p := range []string{explicit, os.Getenv(env)} {
 		if p == "" {
 			continue
 		}
 		if _, err := os.Stat(p); err != nil {
-			return "", fmt.Errorf("fastroute binary %s: %w", p, err)
+			return "", fmt.Errorf("%s binary %s: %w", name, p, err)
 		}
-		return p, nil
+		return installedBinary(name, p, flag)
 	}
-	// The version adopted by scripts/fastroute-upgrade-check.sh.
 	if home, err := os.UserHomeDir(); err == nil {
-		if p, err := filepath.EvalSymlinks(filepath.Join(home, ".pcbpilot", "fastroute", "current")); err == nil {
-			return p, nil
+		cur := filepath.Join(home, ".pcbpilot", name, "current")
+		if _, err := os.Lstat(cur); err == nil {
+			p, err := filepath.EvalSymlinks(cur)
+			if err != nil {
+				return "", fmt.Errorf("%s: %s is a broken link (%v); reinstall %s or pass %s", name, cur, err, name, flag)
+			}
+			return installedBinary(name, p, flag)
 		}
 	}
-	if p, err := fastrouteLookPath("fastroute"); err == nil {
+	if p, err := look(name); err == nil {
 		return p, nil
 	}
-	return "", errors.New(fastrouteInstallHint)
+	return "", errors.New(hint)
+}
+
+// installedBinary is p itself when p is a file, else the one executable
+// named name (name.exe on Windows) in p, p/bin, or one directory level down
+// (p/<name>-<ver>-<os>-<arch>/, the unpacked release archive).
+func installedBinary(name, p, flag string) (string, error) {
+	st, err := os.Stat(p)
+	if err != nil {
+		return "", fmt.Errorf("%s binary %s: %w", name, p, err)
+	}
+	if !st.IsDir() {
+		return p, nil
+	}
+	exe := []string{name}
+	if runtime.GOOS == "windows" {
+		exe = []string{name + ".exe", name}
+	}
+	var found []string
+	for _, pat := range []string{"", "bin", "*"} {
+		for _, e := range exe {
+			ms, _ := filepath.Glob(filepath.Join(p, pat, e))
+			sort.Strings(ms)
+			for _, m := range ms {
+				if st, err := os.Stat(m); err == nil && !st.IsDir() && (runtime.GOOS == "windows" || st.Mode()&0o111 != 0) {
+					found = append(found, m)
+				}
+			}
+			if len(found) > 0 {
+				break // name.exe wins over a same-directory name
+			}
+		}
+		if len(found) == 1 {
+			return found[0], nil
+		}
+		if len(found) > 1 {
+			return "", fmt.Errorf("%s: %s holds %d executables (%s); pass %s with the one to use", name, p, len(found), strings.Join(found, ", "), flag)
+		}
+	}
+	return "", fmt.Errorf("%s: %s is a directory without a %s executable (looked in it, bin/ and its subdirectories); unpack the release there or pass %s with the executable", name, p, strings.Join(exe, " / "), flag)
 }
 
 type fastrouteOpts struct {
