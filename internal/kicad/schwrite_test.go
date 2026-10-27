@@ -130,7 +130,8 @@ func TestSchEditorRoundTrip(t *testing.T) {
 	if err := e2.SetField("R2", "Reference", "R9"); err != nil {
 		t.Fatal(err)
 	}
-	if err := e2.MoveSymbol("R2", Pt{160.02, 76.2}, 270); err != nil {
+	// a queued rename counts for later lookups: R2 is R9 now
+	if err := e2.MoveSymbol("R9", Pt{160.02, 76.2}, 270); err != nil {
 		t.Fatal(err)
 	}
 	out2, err := e2.Render()

@@ -508,17 +508,13 @@ func kicadSchModify(path, id string, patch map[string]any, stdout io.Writer) err
 
 // kicadSchDelete is `sch prim-delete --backend kicad`: each id is a
 // designator (every placed unit) or REF:UNIT (that unit only). Wires and
-// flags on the removed pins stay; all or nothing.
+// flags on the removed pins stay; overlapping ids (U1:1,U1) delete each unit
+// once; all or nothing.
 func kicadSchDelete(path string, ids []string, stdout io.Writer) error {
 	return kicadSchEdit(path, stdout, func(e *kicad.SchEditor) (map[string]any, error) {
-		removed := map[string][]int{}
-		for _, id := range ids {
-			units, err := e.DeleteSymbol(id)
-			if err != nil {
-				return nil, err
-			}
-			ref, _, _ := kicad.SplitUnitKey(id)
-			removed[ref] = append(removed[ref], units...)
+		removed, err := e.DeleteSymbols(ids)
+		if err != nil {
+			return nil, err
 		}
 		return map[string]any{"deleted": removed}, nil
 	})

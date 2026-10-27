@@ -209,3 +209,139 @@ func TestHierarchyRefusals(t *testing.T) {
 		t.Errorf("deleting one unit: %v", err)
 	}
 }
+
+// Queued renames count before Render: two renames onto one name are refused,
+// a renamed symbol answers to its new name, a freed name can be reused, and
+// repeated edits of one item replace each other instead of overlapping.
+func TestQueuedRenames(t *testing.T) {
+	e := multiUnitSheet(t)
+	_ = e.AddLibSymbol("test:R", testRes)
+	for i, r := range []string{"R1", "R2"} {
+		if _, err := e.PlaceSymbol(SymbolInstance{LibID: "test:R", Ref: r, Value: "1k", At: Pt{101.6 + 25.4*float64(i), 50.8}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	text, _ := e.Render()
+	e, _ = OpenSchematic(text)
+	if err := e.SetField("R1", "Reference", "R9"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.SetField("R2", "Reference", "R9"); err == nil {
+		t.Fatal("second rename onto R9 accepted")
+	}
+	if err := e.SetField("R9", "Value", "2k"); err != nil { // the renamed R1
+		t.Fatal(err)
+	}
+	if err := e.SetField("R9", "Reference", "R10"); err != nil { // renamed twice: last wins
+		t.Fatal(err)
+	}
+	if err := e.SetField("R2", "Reference", "R1"); err != nil { // R1 is free now
+		t.Fatal(err)
+	}
+	if err := e.SetField("U1", "Reference", "R10"); err == nil {
+		t.Fatal("rename onto a queued name accepted")
+	}
+	for _, at := range []Pt{{127, 101.6}, {152.4, 101.6}} {
+		if err := e.MoveSymbol("U1:2", at, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, err := e.Render()
+	if err != nil {
+		t.Fatal(err)
+	}
+	e2, _ := OpenSchematic(out)
+	if u := e2.SymbolUnits("R10"); len(u) != 1 || len(e2.SymbolUnits("R9")) != 0 || len(e2.SymbolUnits("R1")) != 1 || len(e2.SymbolUnits("R2")) != 0 {
+		t.Errorf("after the renames: R10 %v R9 %v R1 %v R2 %v", u, e2.SymbolUnits("R9"), e2.SymbolUnits("R1"), e2.SymbolUnits("R2"))
+	}
+	if f := e2.SymbolFields("R10"); len(f) < 2 || f[1].Value != "2k" {
+		t.Errorf("R10 fields %+v", f)
+	}
+	if x, _, _, _ := e2.SymbolAt("U1:2"); x != 152.4 {
+		t.Errorf("U1:2 at x=%v, want the last move", x)
+	}
+}
+
+// A deletion batch is resolved as one set: overlapping and repeated keys,
+// in either order, delete each unit once.
+func TestDeleteSymbolsBatch(t *testing.T) {
+	for _, keys := range [][]string{{"U1:1", "U1"}, {"U1", "U1:1"}, {"U1", "U1"}, {"U1:2", "U1:2", "U1:1"}} {
+		e := multiUnitSheet(t)
+		got, err := e.DeleteSymbols(keys)
+		if err != nil {
+			t.Fatalf("%v: %v", keys, err)
+		}
+		if u := got["U1"]; len(u) != 2 || u[0] != 1 || u[1] != 2 {
+			t.Errorf("%v: removed %v", keys, u)
+		}
+		out, err := e.Render()
+		if err != nil {
+			t.Fatalf("%v: %v", keys, err)
+		}
+		if strings.Contains(out, `(lib_id "my:DUAL")`) {
+			t.Errorf("%v: a unit survived", keys)
+		}
+		if _, err := e.DeleteSymbol("U1"); err == nil {
+			t.Errorf("%v: deleting a queued-deleted symbol again succeeded", keys)
+		}
+	}
+	e := multiUnitSheet(t)
+	if _, err := e.DeleteSymbols([]string{"U1:2", "U1:3"}); err == nil {
+		t.Error("batch with a missing unit accepted")
+	}
+	if out, _ := e.Render(); !strings.Contains(out, "(unit 2)") {
+		t.Error("a refused batch deleted something")
+	}
+}
+
+// TestNestedReusedSheet: sub-sheets in a subdirectory are found by walking
+// the hierarchy from the project's root sheet.
+func TestNestedReusedSheet(t *testing.T) {
+	dir := kicadDemo(t, "complex_hierarchy")
+	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(dir, "ampli_ht.kicad_sch"), filepath.Join(dir, "sub", "ampli_ht.kicad_sch")); err != nil {
+		t.Fatal(err)
+	}
+	rootPath := filepath.Join(dir, "complex_hierarchy.kicad_sch")
+	b, _ := os.ReadFile(rootPath)
+	_ = os.WriteFile(rootPath, []byte(strings.ReplaceAll(string(b), `(property "Sheetfile" "ampli_ht.kicad_sch"`, `(property "Sheetfile" "sub/ampli_ht.kicad_sch"`)), 0o644)
+	root, err := OpenSchematicFile(rootPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := root.RefElsewhere("U201"); len(got) != 1 || got[0] != "sub/ampli_ht.kicad_sch" {
+		t.Errorf("RefElsewhere(U201) from the root = %v", got)
+	}
+	sub, err := OpenSchematicFile(filepath.Join(dir, "sub", "ampli_ht.kicad_sch"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sub.RefElsewhere("U101"); len(got) != 1 || got[0] != "complex_hierarchy.kicad_sch" {
+		t.Errorf("RefElsewhere(U101) from the nested sheet = %v", got)
+	}
+	if !sub.RepeatedSheet() || sub.sheetUses != 2 {
+		t.Errorf("nested reused sheet: repeated=%v uses=%d", sub.RepeatedSheet(), sub.sheetUses)
+	}
+
+	// a symbol-less nested sheet used twice: only the hierarchy walk sees it
+	p := t.TempDir()
+	_ = os.WriteFile(filepath.Join(p, "top.kicad_pro"), []byte("{}\n"), 0o644)
+	sheet := func(name string) string {
+		return `(sheet (at 25.4 25.4) (size 20 10) (uuid "` + NewUUID() + `")
+		(property "Sheetname" "` + name + `" (at 25.4 24 0) (effects (font (size 1.27 1.27))))
+		(property "Sheetfile" "sub/child.kicad_sch" (at 25.4 36 0) (effects (font (size 1.27 1.27)))))`
+	}
+	top := strings.Replace(NewSchematicText("A4", NewUUID(), true), "\t(sheet_instances", "\t"+sheet("A")+"\n\t"+sheet("B")+"\n\t(sheet_instances", 1)
+	_ = os.WriteFile(filepath.Join(p, "top.kicad_sch"), []byte(top), 0o644)
+	_ = os.MkdirAll(filepath.Join(p, "sub"), 0o755)
+	_ = os.WriteFile(filepath.Join(p, "sub", "child.kicad_sch"), []byte(NewSchematicText("A4", NewUUID(), false)), 0o644)
+	child, err := OpenSchematicFile(filepath.Join(p, "sub", "child.kicad_sch"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !child.RepeatedSheet() {
+		t.Error("sub/child.kicad_sch used by two sheet symbols not seen as repeated")
+	}
+}

@@ -296,3 +296,60 @@ func TestSchBuildPartialUnitsLive(t *testing.T) {
 	res2, err := runSchBuild(rd, sbOptions{OutDir: copyDir, NoIntent: true, Jobs: 2, PlannerBudget: 20000}, nil)
 	check(copyDir, "rebuild from sch-read", res2, err)
 }
+
+// TestSchReadReusedSheetPartialUnits: on KiCad's complex_hierarchy demo the
+// sheet ampli_ht.kicad_sch is used twice (U201 and U301 are one LM358N
+// symbol). With its unit 2 deleted, sch-read gives both references the units
+// list [1], and a build from that spec places unit 1 only, for both.
+func TestSchReadReusedSheetPartialUnits(t *testing.T) {
+	if _, err := kicad.KicadCLI(); err != nil {
+		t.Skip("kicad-cli not installed")
+	}
+	sd := kicad.StockSymbolDir()
+	src := filepath.Join(sd, "..", "demos", "complex_hierarchy")
+	if sd == "" || !fileExists(filepath.Join(src, "complex_hierarchy.kicad_pro")) {
+		t.Skip("KiCad complex_hierarchy demo not installed")
+	}
+	dir := t.TempDir()
+	files, _ := filepath.Glob(filepath.Join(src, "*"))
+	for _, f := range files {
+		if b, err := os.ReadFile(f); err == nil {
+			_ = os.WriteFile(filepath.Join(dir, filepath.Base(f)), b, 0o644)
+		}
+	}
+	ampli := filepath.Join(dir, "ampli_ht.kicad_sch")
+	e, err := kicad.OpenSchematicFile(ampli)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.DeleteSymbol("U201:2"); err != nil {
+		t.Fatal(err)
+	}
+	text, err := e.Render()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(ampli, []byte(text), 0o644)
+	rd, err := readSbSpec(dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string][]int{}
+	for _, p := range rd.Parts {
+		got[p.Ref] = p.Units
+	}
+	for _, ref := range []string{"U201", "U301"} {
+		if u := got[ref]; len(u) != 1 || u[0] != 1 {
+			t.Errorf("sch-read %s units %v, want [1]", ref, u)
+		}
+	}
+	d, _, err := buildDesign(rd, sbResolveOpts{OutDir: t.TempDir(), Offline: true, Jobs: 2})
+	if err != nil {
+		t.Fatalf("design from sch-read: %v", err)
+	}
+	for _, ref := range []string{"U201", "U301"} {
+		if p := d.ByRef[ref]; p == nil || len(sbUnits(p)) != 1 || sbUnits(p)[0] != 1 {
+			t.Errorf("rebuild would place %s units %v, want [1]", ref, sbUnits(p))
+		}
+	}
+}

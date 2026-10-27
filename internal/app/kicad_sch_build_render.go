@@ -15,6 +15,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -170,15 +171,25 @@ func sbPartBoxes(dir string, files []string) map[string]sbBox {
 			if s.Power || !s.HasBox || strings.HasPrefix(s.Ref, "#") {
 				continue
 			}
-			b := s.Box
-			units := []int{s.Unit}
-			if old, ok := out[s.Ref]; ok {
-				b = sbBoxUnion(b, kicad.Box{MinX: old.Box[0], MinY: old.Box[1], MaxX: old.Box[2], MaxY: old.Box[3]})
-				units = append(old.Units, s.Unit)
-				sort.Ints(units)
-			}
 			total, _ := e.LibUnitCount(s.LibID)
-			out[s.Ref] = sbBox{Sheet: f, Box: []float64{sbRound2(b.MinX), sbRound2(b.MinY), sbRound2(b.MaxX), sbRound2(b.MaxY)}, Units: units, LibUnits: total}
+			refs := s.Refs // a sheet used twice: every use's reference gets the unit
+			if len(refs) == 0 {
+				refs = []string{s.Ref}
+			}
+			for _, ref := range refs {
+				b := s.Box
+				units := []int{s.Unit}
+				if old, ok := out[ref]; ok {
+					b = sbBoxUnion(b, kicad.Box{MinX: old.Box[0], MinY: old.Box[1], MaxX: old.Box[2], MaxY: old.Box[3]})
+					if !slices.Contains(old.Units, s.Unit) {
+						units = append(append([]int(nil), old.Units...), s.Unit)
+					} else {
+						units = old.Units
+					}
+					sort.Ints(units)
+				}
+				out[ref] = sbBox{Sheet: f, Box: []float64{sbRound2(b.MinX), sbRound2(b.MinY), sbRound2(b.MaxX), sbRound2(b.MaxY)}, Units: units, LibUnits: total}
+			}
 		}
 	}
 	return out

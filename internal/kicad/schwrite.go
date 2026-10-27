@@ -88,6 +88,11 @@ type SchEditor struct {
 	// OpenSchematicFile).
 	elsewhere map[string][]string
 	sheetUses int
+	// queued state: renames and deletions of existing symbols (lookups and
+	// collision checks see them before Render), edit keys (see edit)
+	renamed map[*sexp]string
+	deleted map[*sexp]bool
+	replKey map[string]int
 }
 
 type textEdit struct {
@@ -179,14 +184,6 @@ func OpenSchematicFile(path string) (*SchEditor, error) {
 						e.pwrNext = n + 1
 					}
 				}
-				for _, ref := range instRefs(s, e.Project) { // references placed on other sheets
-					if !strings.HasPrefix(ref, "#") && !slices.Contains(e.elsewhere[ref], filepath.Base(o)) {
-						e.elsewhere[ref] = append(e.elsewhere[ref], filepath.Base(o))
-					}
-				}
-			}
-			if s.head() == "sheet" && propVal(s, "Sheetfile") == filepath.Base(path) {
-				e.sheetUses++
 			}
 		}
 		if e.InstancePath != "" || r.child("sheet_instances") == nil {
@@ -204,10 +201,178 @@ func OpenSchematicFile(path string) (*SchEditor, error) {
 			}
 		}
 	}
+	e.scanProject(path)
 	if e.InstancePath == "" {
 		e.InstancePath = "/" + e.UUID()
 	}
 	return e, nil
+}
+
+func cleanAbs(p string) string {
+	if a, err := filepath.Abs(p); err == nil {
+		p = a
+	}
+	return filepath.Clean(p)
+}
+
+// projectRootSheet is the root sheet of the project holding path: the
+// <name>.kicad_sch beside the nearest <name>.kicad_pro at or above the
+// sheet's directory ("" when there is none).
+func projectRootSheet(path string) string {
+	dir := filepath.Dir(cleanAbs(path))
+	for i := 0; i < 8; i++ {
+		if pros, _ := filepath.Glob(filepath.Join(dir, "*.kicad_pro")); len(pros) == 1 {
+			if root := strings.TrimSuffix(pros[0], ".kicad_pro") + ".kicad_sch"; fileExists(root) {
+				return filepath.Clean(root)
+			}
+		}
+		up := filepath.Dir(dir)
+		if up == dir {
+			break
+		}
+		dir = up
+	}
+	return ""
+}
+
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
+
+// resolveSheetFile resolves a sheet symbol's Sheetfile: relative to the
+// sheet holding it, else to the project (root sheet) directory.
+func resolveSheetFile(parent, root, sf string) string {
+	if filepath.IsAbs(sf) {
+		return filepath.Clean(sf)
+	}
+	sf = filepath.FromSlash(sf)
+	a := filepath.Clean(filepath.Join(filepath.Dir(parent), sf))
+	if fileExists(a) || root == "" {
+		return a
+	}
+	if b := filepath.Clean(filepath.Join(filepath.Dir(root), sf)); fileExists(b) {
+		return b
+	}
+	return a
+}
+
+// scanProject walks the project's sheet hierarchy from its root sheet
+// (sub-sheets in other directories included; paths compared cleaned and
+// absolute) and records the references placed on the other sheets
+// (e.elsewhere, by project-relative path) and how many times this sheet is
+// instantiated (e.sheetUses: a sheet used by two sheet symbols, or nested in
+// a sheet that is itself used twice, counts 2). A sheet outside any project
+// hierarchy compares with the sheets beside it.
+func (e *SchEditor) scanProject(path string) {
+	self := cleanAbs(path)
+	root := projectRootSheet(path)
+	files := map[string]*sexp{}
+	parents := map[string][]string{} // child file → parent file per sheet symbol
+	var walk func(f string, depth int)
+	walk = func(f string, depth int) {
+		if _, ok := files[f]; ok || depth > 32 {
+			return
+		}
+		b, err := os.ReadFile(f)
+		if err != nil {
+			return
+		}
+		r, err := parseSx(string(b))
+		if err != nil {
+			return
+		}
+		files[f] = r
+		ru := ""
+		if u := r.child("uuid"); u != nil && len(u.list) > 1 {
+			ru = u.list[1].atom
+		}
+		for _, s := range r.list {
+			if s.head() != "sheet" || propVal(s, "Sheetfile") == "" {
+				continue
+			}
+			child := resolveSheetFile(f, root, propVal(s, "Sheetfile"))
+			parents[child] = append(parents[child], f)
+			// a sheet one level below the root without symbols yet gets its
+			// instance path here
+			if child == self && f == root && e.InstancePath == "" {
+				if u := s.child("uuid"); u != nil && len(u.list) > 1 {
+					e.InstancePath = "/" + ru + "/" + u.list[1].atom
+				}
+			}
+			walk(child, depth+1)
+		}
+	}
+	base := filepath.Dir(self)
+	if root != "" {
+		walk(root, 0)
+		base = filepath.Dir(root)
+	}
+	if _, ok := files[self]; !ok { // not reached from a project root: the sheets beside it
+		files, parents, root = map[string]*sexp{}, map[string][]string{}, ""
+		others, _ := filepath.Glob(filepath.Join(filepath.Dir(self), "*.kicad_sch"))
+		for _, o := range others {
+			o = cleanAbs(o)
+			b, err := os.ReadFile(o)
+			if err != nil {
+				continue
+			}
+			r, err := parseSx(string(b))
+			if err != nil {
+				continue
+			}
+			files[o] = r
+			for _, s := range r.list {
+				if s.head() == "sheet" && propVal(s, "Sheetfile") != "" {
+					c := resolveSheetFile(o, "", propVal(s, "Sheetfile"))
+					parents[c] = append(parents[c], o)
+				}
+			}
+		}
+		base = filepath.Dir(self)
+	}
+	memo := map[string]int{}
+	var uses func(f string, depth int) int
+	uses = func(f string, depth int) int {
+		if n, ok := memo[f]; ok {
+			return n
+		}
+		ps := parents[f]
+		if len(ps) == 0 || depth > 32 {
+			return 1
+		}
+		n := 0
+		for _, p := range ps {
+			n += uses(p, depth+1)
+		}
+		memo[f] = n
+		return n
+	}
+	if len(parents[self]) > 0 {
+		e.sheetUses = uses(self, 0)
+	}
+	for f, r := range files {
+		if f == self {
+			continue
+		}
+		name := f
+		if rel, err := filepath.Rel(base, f); err == nil {
+			name = filepath.ToSlash(rel)
+		}
+		for _, s := range r.list {
+			if s.head() != "symbol" {
+				continue
+			}
+			for _, ref := range instRefs(s, e.Project) {
+				if !strings.HasPrefix(ref, "#") && !slices.Contains(e.elsewhere[ref], name) {
+					e.elsewhere[ref] = append(e.elsewhere[ref], name)
+				}
+			}
+		}
+	}
+	for ref := range e.elsewhere {
+		sort.Strings(e.elsewhere[ref])
+	}
 }
 
 // UUID is the sheet file's uuid.
@@ -799,8 +964,15 @@ func (e *SchEditor) checkRename(from, to string) error {
 	if len(e.instancesOf(to)) > 0 {
 		return fmt.Errorf("cannot rename %s to %s: %s is already on this sheet", from, to, to)
 	}
-	for _, s := range e.root.list {
-		if s.head() == "symbol" && slices.Contains(instRefs(s, ""), to) {
+	for _, s := range e.root.list { // every instance-path reference, queued renames applied
+		if s.head() != "symbol" || e.deleted[s] {
+			continue
+		}
+		refs := instRefs(s, "")
+		if r, ok := e.renamed[s]; ok {
+			refs = []string{r}
+		}
+		if slices.Contains(refs, to) {
 			return fmt.Errorf("cannot rename %s to %s: %s is already used on this sheet", from, to, to)
 		}
 	}
@@ -839,7 +1011,7 @@ type symInst struct {
 func (e *SchEditor) instancesOf(ref string) []symInst {
 	var out []symInst
 	for _, s := range e.root.list {
-		if s.head() == "symbol" && symRef(s) == ref {
+		if s.head() == "symbol" && !e.deleted[s] && e.effRef(s) == ref {
 			out = append(out, symInst{s, -1})
 		}
 	}
@@ -852,6 +1024,34 @@ func (e *SchEditor) instancesOf(ref string) []symInst {
 	}
 	sort.SliceStable(out, func(i, j int) bool { return instUnit(out[i].n) < instUnit(out[j].n) })
 	return out
+}
+
+// effRef is the reference of an existing symbol with this editor's queued
+// renames applied.
+func (e *SchEditor) effRef(s *sexp) string {
+	if r, ok := e.renamed[s]; ok {
+		return r
+	}
+	return symRef(s)
+}
+
+// edit queues a text edit; a later edit with the same key (a span, or an
+// insertion point + property name) replaces the earlier one, so a second
+// SetField / MoveSymbol of the same item before Render wins instead of
+// queuing overlapping edits.
+func (e *SchEditor) edit(key string, ed textEdit) {
+	if e.replKey == nil {
+		e.replKey = map[string]int{}
+	}
+	if key == "" {
+		key = fmt.Sprintf("%d:%d", ed.beg, ed.end)
+	}
+	if i, ok := e.replKey[key]; ok {
+		e.repl[i] = ed
+		return
+	}
+	e.replKey[key] = len(e.repl)
+	e.repl = append(e.repl, ed)
 }
 
 func unitKeys(ref string, insts []symInst) string {
@@ -1005,36 +1205,77 @@ func (e *SchEditor) SymbolAt(key string) (x, y, rot float64, err error) {
 // "REF:UNIT" that unit only. Wires, labels and no-connect flags on its pins
 // stay. Returns the units removed.
 func (e *SchEditor) DeleteSymbol(key string) ([]int, error) {
-	ref, unit, err := SplitUnitKey(key)
-	if err != nil {
-		return nil, err
+	ref, _, _ := SplitUnitKey(key)
+	m, err := e.DeleteSymbols([]string{key})
+	return m[ref], err
+}
+
+// DeleteSymbols removes a batch of symbol keys (DeleteSymbol's) as one
+// set: every key is resolved before anything is queued, so overlapping or
+// repeated keys ("U1:1,U1", "U1,U1") delete each unit once. Returns
+// reference → units removed. All or nothing.
+func (e *SchEditor) DeleteSymbols(keys []string) (map[string][]int, error) {
+	type pick struct {
+		in  symInst
+		ref string
 	}
-	var del []symInst
-	if unit > 0 {
-		in, err := e.instance(key)
+	var picks []pick
+	seen := map[*sexp]bool{}
+	seenItem := map[int]bool{}
+	for _, key := range keys {
+		ref, unit, err := SplitUnitKey(key)
 		if err != nil {
 			return nil, err
 		}
-		del = []symInst{in}
-	} else if del = e.instancesOf(ref); len(del) == 0 {
-		return nil, fmt.Errorf("no symbol %s on this sheet", ref)
-	} else if err := e.errAcrossSheets(ref, "deleting every unit of"); err != nil {
-		return nil, fmt.Errorf("%w (or delete one unit: %s:N)", err, ref)
-	}
-	var units, items []int
-	for _, in := range del {
-		units = append(units, instUnit(in.n))
-		if in.item < 0 {
-			e.deleteNode(in.n)
-		} else {
-			items = append(items, in.item)
+		var del []symInst
+		if unit > 0 {
+			in, err := e.instance(key)
+			if err != nil {
+				return nil, err
+			}
+			del = []symInst{in}
+		} else if del = e.instancesOf(ref); len(del) == 0 {
+			return nil, fmt.Errorf("no symbol %s on this sheet", ref)
+		} else if err := e.errAcrossSheets(ref, "deleting every unit of"); err != nil {
+			return nil, fmt.Errorf("%w (or delete one unit: %s:N)", err, ref)
 		}
+		for _, in := range del {
+			if in.item < 0 {
+				if seen[in.n] {
+					continue
+				}
+				seen[in.n] = true
+			} else {
+				if seenItem[in.item] {
+					continue
+				}
+				seenItem[in.item] = true
+			}
+			picks = append(picks, pick{in, ref})
+		}
+	}
+	out := map[string][]int{}
+	var items []int
+	for _, p := range picks {
+		out[p.ref] = append(out[p.ref], instUnit(p.in.n))
+		if p.in.item < 0 {
+			e.deleteNode(p.in.n)
+			if e.deleted == nil {
+				e.deleted = map[*sexp]bool{}
+			}
+			e.deleted[p.in.n] = true
+		} else {
+			items = append(items, p.in.item)
+		}
+	}
+	for r := range out {
+		sort.Ints(out[r])
 	}
 	sort.Sort(sort.Reverse(sort.IntSlice(items)))
 	for _, i := range items {
 		e.items = append(e.items[:i], e.items[i+1:]...)
 	}
-	return units, nil
+	return out, nil
 }
 
 // AddWire adds one wire per consecutive point pair.
@@ -1219,11 +1460,15 @@ func (e *SchEditor) setFieldOn(inst *sexp, name, value string) error {
 				return fmt.Errorf("cannot rewrite property %s", name)
 			}
 			_ = v
-			e.repl = append(e.repl, textEdit{c.beg, c.beg + loc[1], "(property " + Q(name) + " " + Q(value)})
+			e.edit("", textEdit{c.beg, c.beg + loc[1], "(property " + Q(name) + " " + Q(value)})
 			if name == "Reference" {
 				if r := find(inst, "instances", "project", "path", "reference"); r != nil {
-					e.repl = append(e.repl, textEdit{r.beg, r.end, "(reference " + Q(value) + ")"})
+					e.edit("", textEdit{r.beg, r.end, "(reference " + Q(value) + ")"})
 				}
+				if e.renamed == nil {
+					e.renamed = map[*sexp]string{}
+				}
+				e.renamed[inst] = value
 			}
 			return nil
 		}
@@ -1243,7 +1488,7 @@ func (e *SchEditor) setFieldOn(inst *sexp, name, value string) error {
 	if pos < 0 {
 		return fmt.Errorf("symbol has no properties")
 	}
-	e.repl = append(e.repl, textEdit{pos, pos, "\n\t\t" + propertyText(name, value, p, 0, true)})
+	e.edit(fmt.Sprintf("ins:%d:%s", pos, name), textEdit{pos, pos, "\n\t\t" + propertyText(name, value, p, 0, true)})
 	return nil
 }
 
@@ -1264,11 +1509,11 @@ func (e *SchEditor) MoveSymbol(key string, to Pt, rot float64) error {
 		return fmt.Errorf("symbol %s has no position", key)
 	}
 	dx, dy := to.X-at.num(1), to.Y-at.num(2)
-	e.repl = append(e.repl, textEdit{at.beg, at.end, fmt.Sprintf("(at %s %s %s)", F(to.X), F(to.Y), F(rot))})
+	e.edit("", textEdit{at.beg, at.end, fmt.Sprintf("(at %s %s %s)", F(to.X), F(to.Y), F(rot))})
 	for _, c := range s.list {
 		if c.head() == "property" {
 			if pa := c.child("at"); pa != nil {
-				e.repl = append(e.repl, textEdit{pa.beg, pa.end, fmt.Sprintf("(at %s %s %s)", F(pa.num(1)+dx), F(pa.num(2)+dy), F(pa.num(3)))})
+				e.edit("", textEdit{pa.beg, pa.end, fmt.Sprintf("(at %s %s %s)", F(pa.num(1)+dx), F(pa.num(2)+dy), F(pa.num(3)))})
 			}
 		}
 	}
