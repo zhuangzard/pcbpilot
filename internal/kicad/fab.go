@@ -163,73 +163,27 @@ func (n *sx) children(name string) []*sx {
 	return out
 }
 
+// parseSexpr reads one top-level expression with the shared KiCad
+// tokenizer (sexpr.go), the same rules as parseSx.
 func parseSexpr(b []byte) (*sx, error) {
-	pos := 0
-	var parse func() (*sx, error)
-	skip := func() {
-		for pos < len(b) && (b[pos] == ' ' || b[pos] == '\t' || b[pos] == '\n' || b[pos] == '\r') {
-			pos++
+	var stack []*sx
+	var root *sx
+	add := func(n *sx) {
+		if len(stack) == 0 {
+			root = n
+			return
 		}
+		top := stack[len(stack)-1]
+		top.Kids = append(top.Kids, n)
 	}
-	parse = func() (*sx, error) {
-		skip()
-		if pos >= len(b) {
-			return nil, io.ErrUnexpectedEOF
-		}
-		switch b[pos] {
-		case '(':
-			pos++
+	err := sexprEvents(string(b),
+		func(int) {
 			n := &sx{isList: true}
-			for {
-				skip()
-				if pos >= len(b) {
-					return nil, io.ErrUnexpectedEOF
-				}
-				if b[pos] == ')' {
-					pos++
-					return n, nil
-				}
-				k, err := parse()
-				if err != nil {
-					return nil, err
-				}
-				n.Kids = append(n.Kids, k)
-			}
-		case ')':
-			return nil, fmt.Errorf("unexpected ')' at byte %d", pos)
-		case '"':
-			pos++
-			var sb strings.Builder
-			for pos < len(b) && b[pos] != '"' {
-				if b[pos] == '\\' && pos+1 < len(b) {
-					pos++
-					switch b[pos] {
-					case 'n':
-						sb.WriteByte('\n')
-					case 't':
-						sb.WriteByte('\t')
-					default:
-						sb.WriteByte(b[pos])
-					}
-				} else {
-					sb.WriteByte(b[pos])
-				}
-				pos++
-			}
-			if pos >= len(b) {
-				return nil, io.ErrUnexpectedEOF
-			}
-			pos++
-			return &sx{Atom: sb.String(), Quoted: true}, nil
-		default:
-			start := pos
-			for pos < len(b) && !strings.ContainsRune(" \t\r\n()\"", rune(b[pos])) {
-				pos++
-			}
-			return &sx{Atom: string(b[start:pos])}, nil
-		}
-	}
-	root, err := parse()
+			add(n)
+			stack = append(stack, n)
+		},
+		func(int) { stack = stack[:len(stack)-1] },
+		func(val string, quoted bool, _ int) { add(&sx{Atom: val, Quoted: quoted}) })
 	if err != nil {
 		return nil, fmt.Errorf("s-expression: %w", err)
 	}

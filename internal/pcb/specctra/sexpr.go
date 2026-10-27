@@ -72,9 +72,14 @@ func parseSexpr(src string) (*node, error) {
 }
 
 type sexprParser struct {
-	src string
-	pos int
+	src   string
+	pos   int
+	depth int
 }
+
+// maxSexprDepth caps list nesting (real DSN/SES files stay far below it), so
+// hostile input fails instead of growing the stack without bound.
+const maxSexprDepth = 1000
 
 func (p *sexprParser) skipSpace() {
 	for p.pos < len(p.src) && strings.ContainsRune(" \t\r\n", rune(p.src[p.pos])) {
@@ -88,6 +93,11 @@ func (p *sexprParser) parse() (*node, error) {
 	}
 	switch p.src[p.pos] {
 	case '(':
+		if p.depth == maxSexprDepth {
+			return nil, fmt.Errorf("lists nested deeper than %d at offset %d", maxSexprDepth, p.pos)
+		}
+		p.depth++
+		defer func() { p.depth-- }()
 		p.pos++
 		n := &node{isList: true}
 		for {

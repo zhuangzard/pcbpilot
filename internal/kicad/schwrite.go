@@ -38,9 +38,10 @@ func NewUUID() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
-// Q quotes s as a KiCad string.
+// Q quotes s as a KiCad string, escaping what KiCad's own formatter escapes
+// (backslash, quote, LF, CR); tab and UTF-8 stay raw.
 func Q(s string) string {
-	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`)
+	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\r", `\r`)
 	return `"` + r.Replace(s) + `"`
 }
 
@@ -266,7 +267,7 @@ func RenameLibSymbol(sym, id string) (string, error) {
 	if m == nil {
 		return "", fmt.Errorf("library symbol text must start with (symbol \"Name\"")
 	}
-	oldName, _ := strconv.Unquote(`"` + m[1] + `"`)
+	oldName := unescapeKiCad(m[1])
 	bare := id
 	if i := strings.LastIndex(id, ":"); i >= 0 {
 		bare = id[i+1:]
@@ -715,7 +716,11 @@ func (e *SchEditor) SetField(ref, name, value string) error {
 					if err := sub.setFieldOn(n, name, value); err != nil {
 						return err
 					}
-					e.items[i] = sub.apply()
+					out, err := sub.apply()
+					if err != nil {
+						return err
+					}
+					e.items[i] = out
 					return nil
 				}
 			}
@@ -725,14 +730,16 @@ func (e *SchEditor) SetField(ref, name, value string) error {
 	return e.setFieldOn(inst, name, value)
 }
 
+// propHeadRe matches the `(property "Name" "Value"` head of a property.
+var propHeadRe = regexp.MustCompile(`^\(property\s+"(?:[^"\\]|\\.)*"\s+"(?:[^"\\]|\\.)*"`)
+
 func (e *SchEditor) setFieldOn(inst *sexp, name, value string) error {
 	for _, c := range inst.list {
 		if c.head() == "property" && len(c.list) > 2 && c.list[1].atom == name {
 			v := c.list[2]
 			// the value atom has no offsets: re-emit the property head.
 			head := e.src[c.beg:c.end]
-			re := regexp.MustCompile(`^\(property\s+"(?:[^"\\]|\\.)*"\s+"(?:[^"\\]|\\.)*"`)
-			loc := re.FindStringIndex(head)
+			loc := propHeadRe.FindStringIndex(head)
 			if loc == nil {
 				return fmt.Errorf("cannot rewrite property %s", name)
 			}
@@ -790,14 +797,53 @@ func (e *SchEditor) MoveSymbol(ref string, to Pt, rot float64) error {
 	return fmt.Errorf("no symbol %s on this sheet (pending symbols cannot be moved)", ref)
 }
 
-func (e *SchEditor) apply() string {
-	edits := append([]textEdit(nil), e.repl...)
-	sort.SliceStable(edits, func(i, j int) bool { return edits[i].beg > edits[j].beg })
-	s := e.src
-	for _, ed := range edits {
-		s = s[:ed.beg] + ed.text + s[ed.end:]
+func (e *SchEditor) apply() (string, error) { return applyEdits(e.src, e.repl) }
+
+// applyEdits splices edits (byte spans of the original src) in one pass.
+// A replacement repeated on the same span keeps only the last one (setting
+// a field twice ends with the second value). Insertions at one offset come
+// before a replacement starting there, the later insertion first. Any other
+// overlap is an error: the spans would no longer refer to the same text.
+func applyEdits(src string, edits []textEdit) (string, error) {
+	last := map[[2]int]int{}
+	for i, ed := range edits {
+		if ed.beg < 0 || ed.end < ed.beg || ed.end > len(src) {
+			return "", fmt.Errorf("sheet edit span %d–%d outside the %d-byte sheet", ed.beg, ed.end, len(src))
+		}
+		if ed.end > ed.beg {
+			last[[2]int{ed.beg, ed.end}] = i
+		}
 	}
-	return s
+	var idx []int
+	for i, ed := range edits {
+		if ed.end == ed.beg || last[[2]int{ed.beg, ed.end}] == i {
+			idx = append(idx, i)
+		}
+	}
+	sort.SliceStable(idx, func(a, b int) bool {
+		ea, eb := edits[idx[a]], edits[idx[b]]
+		if ea.beg != eb.beg {
+			return ea.beg < eb.beg
+		}
+		if za, zb := ea.end == ea.beg, eb.end == eb.beg; za != zb {
+			return za
+		}
+		return idx[a] > idx[b]
+	})
+	var b strings.Builder
+	cur, prev := 0, -1
+	for _, i := range idx {
+		ed := edits[i]
+		if ed.beg < cur {
+			p := edits[prev]
+			return "", fmt.Errorf("overlapping sheet edits at bytes %d–%d and %d–%d", p.beg, p.end, ed.beg, ed.end)
+		}
+		b.WriteString(src[cur:ed.beg])
+		b.WriteString(ed.text)
+		cur, prev = ed.end, i
+	}
+	b.WriteString(src[cur:])
+	return b.String(), nil
 }
 
 // Render returns the edited text; it re-parses before returning.
@@ -820,13 +866,18 @@ func (e *SchEditor) Render() (string, error) {
 		}
 		edits = append(edits, textEdit{pos, pos, strings.Join(e.items, "\n\t") + "\n\t"})
 	}
-	sort.SliceStable(edits, func(i, j int) bool { return edits[i].beg > edits[j].beg })
-	s := e.src
-	for _, ed := range edits {
-		s = s[:ed.beg] + ed.text + s[ed.end:]
+	s, err := applyEdits(e.src, edits)
+	if err != nil {
+		return "", err
 	}
-	if _, err := parseSx(s); err != nil {
+	r, err := parseSx(s)
+	if err != nil {
 		return "", fmt.Errorf("edited sheet does not re-parse: %w", err)
+	}
+	// Edits sit inside the root list, so whatever followed it is unchanged;
+	// a root that now ends elsewhere means an edit was unbalanced.
+	if want := len(s) - (len(e.src) - e.root.end); r.end != want {
+		return "", fmt.Errorf("edited sheet does not re-parse: the top-level list ends at byte %d instead of %d (unbalanced edit)", r.end, want)
 	}
 	return s, nil
 }
