@@ -119,5 +119,38 @@ class HierarchicalNetIdentityTest(unittest.TestCase):
         self.assertEqual([m["pad"] for m in rep["netMismatch"]], ["R1.1"])
 
 
+    def test_hidden_short_same_name_two_nets_one_page(self):
+        sch = {"components": [{"id": "c", "ref": "R1", "pins": [{"number": "1"}, {"number": "2"}]}],
+               "nets": [{"id": "a", "name": "VCC"}, {"id": "b", "name": "VCC"}],
+               "connections": [{"componentId": "c", "pinNumber": "1", "netId": "a"},
+                               {"componentId": "c", "pinNumber": "2", "netId": "b"}]}
+        pcb = {"components": [{"designator": "R1", "pads": [{"padNumber": "1", "net": "VCC"}, {"padNumber": "2", "net": "VCC"}]}]}
+        rep = pnd.diff(pnd.schematic_map(sch), pnd.pcb_map(pcb))
+        self.assertFalse(rep["ok"], rep)
+        self.assertEqual(rep["netCollision"], [{"net": "VCC", "schematic": ["VCC (page 1 net a)", "VCC (page 1 net b)"]}])
+
+    def test_same_name_across_pages_is_one_net(self):
+        def page(ref, nid):
+            return {"components": [{"id": "c" + ref, "ref": ref, "pins": [{"number": "1"}]}],
+                    "nets": [{"id": nid, "name": "VCC"}],
+                    "connections": [{"componentId": "c" + ref, "pinNumber": "1", "netId": nid}]}
+        sch = {**pnd.schematic_map(page("R1", "p1n"), 0), **pnd.schematic_map(page("R2", "p2n"), 1)}
+        pcb = {"components": [{"designator": "R1", "pads": [{"padNumber": "1", "net": "VCC"}]},
+                              {"designator": "R2", "pads": [{"padNumber": "1", "net": "VCC"}]}]}
+        rep = pnd.diff(sch, pnd.pcb_map(pcb))
+        self.assertTrue(rep["ok"], rep)
+        self.assertEqual(rep["netCollision"], [])
+
+    def test_kicad_names_are_case_sensitive(self):
+        sch = {"components": [{"id": "c", "ref": "R1", "pins": [{"number": "1"}]}],
+               "nets": [{"id": "a", "name": "sda", "fullName": "/io/sda"}],
+               "connections": [{"componentId": "c", "pinNumber": "1", "netId": "a"}]}
+        pcb = {"components": [{"designator": "R1", "pads": [{"padNumber": "1", "net": "/io/SDA"}]}]}
+        rep = pnd.diff(pnd.schematic_map(sch), pnd.pcb_map(pcb))
+        self.assertFalse(rep["ok"], rep)
+        self.assertEqual(rep["netCaseOnly"], [])
+        self.assertEqual(rep["netMismatch"][0]["pad"], "R1.1")
+
+
 if __name__ == "__main__":
     unittest.main()

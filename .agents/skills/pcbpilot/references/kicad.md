@@ -88,8 +88,11 @@ sim 判 `sim-board-mismatch`、intent 报错、signoff-trace 判"ambiguous"失�
 （如 `VCC_PIC` 与 `/pic_sockets/VCC_PIC` 同时出现）一律拒绝，绝不合并。kicad-cli XML 不转义 `/`，`/pic_sockets/VCC_PIC`
 可能是子图标签 `VCC_PIC`，也可能是根图标签 `pic_sockets/VCC_PIC`：读法只按标签证据定（各图纸文件里的标签/层次标签/图纸引脚
 恰好只有一种读法存在）；引脚在哪张图不算证据（网经层次端口跨图）。无证据、多种读法都有标签、或两个网读成同一身份时
-`kicad netlist` 直接报 `ErrNetAmbiguous`（附修法：改标签名）。旧连接文档（无 fullName）按每个原理图网解析，
-两个不同原理图网（如 `VCC` 与 `/pwr/VCC`）落到同一块板网时 pad-net-diff 报 `netCollision`、signoff-continuity 失败（板上短路），不合并。
+`kicad netlist` 直接报 `ErrNetAmbiguous`（附修法：改标签名）。旧连接文档（无 fullName）按每个原理图网（文档 + 网 id）解析；
+多页文档按网名合并（与 sim power / intent derive 同规则：不同页同名 = 同一网，但同一页上同名的多个网记录各自独立）。
+两个不同原理图网（同页两条 `VCC` 记录，或 `VCC` 与 `/pwr/VCC`）落到同一块板网时 pad-net-diff 报 `netCollision`、
+signoff-continuity 失败（板上短路），不合并。显示名 `name` 只在能唯一解析回本网时才缩短，绝不等于别的网的身份或显示名。
+pad-net-diff 的大小写宽容只用于 EasyEDA 名（无 fullName）；KiCad 网名区分大小写。
 
 ## 布线（`kicad route`）——与 `pcb auto route` + `pcb gate` 同序同算
 

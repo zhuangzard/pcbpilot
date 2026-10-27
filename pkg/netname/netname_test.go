@@ -75,3 +75,28 @@ func TestResolver(t *testing.T) {
 		t.Errorf("Candidates(SDA) = %v", c)
 	}
 }
+
+// /a/X, /b/X and the root label "/a/X" (identity "/{slash}a{slash}X",
+// Local "/a/X" = another net's identity): no display name may equal
+// another net's identity or display name, and each display name resolves
+// back to its own net.
+func TestDisplayNeverShadowsAnotherNet(t *testing.T) {
+	ids := []string{"/a/X", "/b/X", "/{slash}a{slash}X", "/c/Y",
+		"/p/q{slash}r", "/{slash}p{slash}q{slash}r"} // Local of the second = unescaped full name of the first
+	d := Display(ids)
+	if d["/{slash}a{slash}X"] != "/{slash}a{slash}X" || d["/a/X"] != "/a/X" || d["/b/X"] != "/b/X" || d["/c/Y"] != "Y" ||
+		d["/{slash}p{slash}q{slash}r"] != "/{slash}p{slash}q{slash}r" {
+		t.Fatalf("Display = %v", d)
+	}
+	seen := map[string]string{}
+	r := NewResolver(ids)
+	for _, id := range ids {
+		if prev, dup := seen[d[id]]; dup {
+			t.Errorf("display %q for both %s and %s", d[id], prev, id)
+		}
+		seen[d[id]] = id
+		if got, m := r.Resolve(d[id]); m != Found || got != id {
+			t.Errorf("display %q of %s resolves to %q (%v)", d[id], id, got, m)
+		}
+	}
+}

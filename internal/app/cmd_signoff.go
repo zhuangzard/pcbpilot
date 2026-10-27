@@ -527,23 +527,26 @@ func runSignoff(o signoffOpts, waivers []gateWaiver, stderr io.Writer) (*signoff
 
 // signoffNetIdentities gives each schematic net (per document, by net id)
 // its identity: fullName, else its name resolved against the board's nets.
-// Resolution is per schematic net, never per pin: when several distinct
-// schematic nets ("VCC" and "/pwr/VCC") would become one identity they keep
-// their own names — the partition comparison then shows the board short —
+// Resolution is per schematic net, never per pin or per name. Documents
+// (pages) merge by net name, the rule of sim power / intent derive
+// (powersim.BuildDesign): equal names on different documents are one net —
+// unless one document has that name on several net records, which then
+// all stay distinct. When several distinct schematic nets (two "VCC"
+// records, or "VCC" and "/pwr/VCC") would become one identity they keep
+// distinct names — the partition comparison then shows the board short —
 // and each such group is returned as a failure item.
 func signoffNetIdentities(docs []signoffDoc, board *netname.Resolver) ([]map[string]string, []string) {
 	type src struct {
-		doc            int
-		id, key, ident string
+		doc         int
+		id, key, to string
 	}
 	var srcs []src
-	keys := map[string]map[string]bool{} // identity → distinct source names
+	idsByName := map[string]map[int]map[string]bool{} // name → document → net ids
 	for di, d := range docs {
 		for _, n := range d.Nets {
 			key, ident := n.FullName, n.FullName
 			if key == "" {
-				key = n.Name
-				if key == "" {
+				if key = n.Name; key == "" {
 					key = n.ID
 				}
 				if id, m := board.Resolve(key); m == netname.Found {
@@ -553,27 +556,47 @@ func signoffNetIdentities(docs []signoffDoc, board *netname.Resolver) ([]map[str
 				}
 			}
 			srcs = append(srcs, src{di, n.ID, key, ident})
-			if keys[ident] == nil {
-				keys[ident] = map[string]bool{}
+			if idsByName[key] == nil {
+				idsByName[key] = map[int]map[string]bool{}
 			}
-			keys[ident][key] = true
+			if idsByName[key][di] == nil {
+				idsByName[key][di] = map[string]bool{}
+			}
+			idsByName[key][di][n.ID] = true
 		}
+	}
+	// label names the source net: its name when pages merge it by name,
+	// else name + document + net id.
+	label := func(s src) string {
+		for _, ids := range idsByName[s.key] {
+			if len(ids) > 1 {
+				return fmt.Sprintf("%s (document %d net %s)", s.key, s.doc+1, s.id)
+			}
+		}
+		return s.key
+	}
+	sources := map[string]map[string]bool{} // identity → distinct source nets
+	for _, s := range srcs {
+		if sources[s.to] == nil {
+			sources[s.to] = map[string]bool{}
+		}
+		sources[s.to][label(s)] = true
 	}
 	out := make([]map[string]string, len(docs))
 	for i := range out {
 		out[i] = map[string]string{}
 	}
-	var shorts []string
 	for _, s := range srcs {
-		if len(keys[s.ident]) > 1 {
-			out[s.doc][s.id] = s.key
+		if len(sources[s.to]) > 1 {
+			out[s.doc][s.id] = label(s)
 			continue
 		}
-		out[s.doc][s.id] = s.ident
+		out[s.doc][s.id] = s.to
 	}
-	for _, ident := range sortedKeysOf(keys) {
-		if len(keys[ident]) > 1 {
-			shorts = append(shorts, fmt.Sprintf("schematic nets %s all resolve to board net %s — distinct schematic nets on one board net (a short), not merged", strings.Join(sortedKeysOf(keys[ident]), ", "), ident))
+	var shorts []string
+	for _, ident := range sortedKeysOf(sources) {
+		if len(sources[ident]) > 1 {
+			shorts = append(shorts, fmt.Sprintf("schematic nets %s all resolve to board net %s — distinct schematic nets on one board net (a short), not merged", strings.Join(sortedKeysOf(sources[ident]), ", "), ident))
 		}
 	}
 	return out, shorts

@@ -183,3 +183,63 @@ func TestSignoffContinuityHiddenShortLegacyNames(t *testing.T) {
 		}
 	}
 }
+
+// Same-name schematic nets: two "VCC" records on one document are two nets
+// (shorted on the board → continuity fails); one "VCC" on each of two
+// documents is one net merged by name (sim power's page rule) → passes.
+func TestSignoffContinuitySameNameNets(t *testing.T) {
+	dir := t.TempDir()
+	board := filepath.Join("..", "kicad", "testdata", "snapshot.json")
+	intent := filepath.Join(dir, "intent.json")
+	if err := os.WriteFile(intent, []byte(`{"nets":{"GND":{"role":"ground"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	comp := func(id, ref string) map[string]any {
+		return map[string]any{"id": id, "ref": ref, "device": map[string]any{"deviceUuid": "x"}, "pins": []any{map[string]any{"number": "1"}, map[string]any{"number": "2"}}}
+	}
+	conn := func(c, pin, net string) map[string]any {
+		return map[string]any{"componentId": c, "pinNumber": pin, "netId": net}
+	}
+	net := func(id, name string) map[string]any { return map[string]any{"id": id, "name": name} }
+	write := func(name string, doc map[string]any) string {
+		doc["schemaVersion"] = "1.4"
+		b, _ := json.Marshal(doc)
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	continuity := func(conns []string) gateResult {
+		var stderr bytes.Buffer
+		res, err := runSignoff(signoffOpts{board: board, intent: intent, connectivity: conns, outDir: filepath.Join(dir, "so")}, nil, &stderr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, g := range res.Gates {
+			if g.Gate == "signoff-continuity" {
+				return g
+			}
+		}
+		t.Fatal("no continuity gate")
+		return gateResult{}
+	}
+	one := write("one.json", map[string]any{
+		"components":  []any{comp("r1", "R1"), comp("j1", "J1")},
+		"nets":        []any{net("n1", "VCC"), net("n4", "VCC"), net("n2", "SIG_A"), net("n3", "GND")},
+		"connections": []any{conn("r1", "1", "n1"), conn("r1", "2", "n2"), conn("j1", "1", "n4"), conn("j1", "2", "n3")}})
+	if g := continuity([]string{one}); g.Pass || len(g.Items) == 0 || !strings.Contains(g.Items[0], "VCC (document 1 net n1), VCC (document 1 net n4)") {
+		t.Errorf("two VCC records on one document, shorted on the board: %+v", g)
+	}
+	p1 := write("p1.json", map[string]any{
+		"components":  []any{comp("r1", "R1")},
+		"nets":        []any{net("a", "VCC"), net("n2", "SIG_A")},
+		"connections": []any{conn("r1", "1", "a"), conn("r1", "2", "n2")}})
+	p2 := write("p2.json", map[string]any{
+		"components":  []any{comp("j1", "J1")},
+		"nets":        []any{net("b", "VCC"), net("n3", "GND")},
+		"connections": []any{conn("j1", "1", "b"), conn("j1", "2", "n3")}})
+	if g := continuity([]string{p1, p2}); !g.Pass {
+		t.Errorf("VCC on two documents is one net: %+v", g)
+	}
+}

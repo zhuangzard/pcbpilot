@@ -88,19 +88,21 @@ func SheetPath(id string) string {
 // "{slash}" read back as '/'.
 func Local(id string) string { return Unescape(id[len(SheetPath(id)):]) }
 
-// Display maps each identity of a design to its short name: Local when no
-// other identity has the same Local, else the identity itself.
+// Display maps each identity of a design to its short name: Local when
+// that name resolves (Resolver over the same identities) to this identity
+// alone — not another net's identity ("/{slash}a{slash}X" has Local "/a/X",
+// the identity of another net), not an alias shared with another net —
+// else the identity itself. So no display name equals another net's
+// identity or display name, and each resolves back to its own net.
 func Display(ids []string) map[string]string {
-	count := map[string]int{}
-	for _, id := range ids {
-		count[Local(id)]++
-	}
+	r := NewResolver(ids)
 	out := map[string]string{}
 	for _, id := range ids {
-		if l := Local(id); count[l] == 1 && l != "" {
-			out[id] = l
-		} else {
-			out[id] = id
+		out[id] = id
+		if l := Local(id); l != "" && l != id {
+			if got, m := r.Resolve(l); m == Found && got == id {
+				out[id] = l
+			}
 		}
 	}
 	return out

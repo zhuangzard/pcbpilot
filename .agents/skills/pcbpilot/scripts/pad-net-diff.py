@@ -23,7 +23,10 @@ path dropped, "{slash}" read as '/'). Never cut at '/' inside a label. A KiCad
 Reports parts missing on the PCB, extra PCB parts, pins without a pad, pads
 without a pin, and net mismatches. A schematic no-connect matches an empty
 PCB net. Nets that differ only in letter case (EasyEDA may upper-case net
-names on the PCB side) are listed as warnings, not errors.
+names on the PCB side) are listed as warnings, not errors - for nets
+without fullName only; KiCad names are case-sensitive. Distinct schematic
+nets (by page + net id; equal names on different pages are one net) that
+reach one PCB net are a short: netCollision.
 Exit 0 = identical, 2 = only case warnings (report them, not "passed"),
 1 = real differences.
 
@@ -69,11 +72,12 @@ def unwrap(doc):
     return doc
 
 
-def schematic_map(doc):
+def schematic_map(doc, page=0):
+    """pin -> (name, has fullName, (page, net id)) | NC | None. fullName is
+    the identity; a bare name may still need resolving against the board.
+    The (page, net id) source keeps distinct schematic nets apart."""
     doc = unwrap(doc)
-    # (identity, has fullName): fullName is the identity; a bare name may
-    # still need resolving against the board.
-    net_name = {n["id"]: ((n.get("fullName") or n.get("name") or n["id"]), bool(n.get("fullName")))
+    net_name = {n["id"]: ((n.get("fullName") or n.get("name") or n["id"]), bool(n.get("fullName")), (page, n["id"]))
                 for n in doc.get("nets") or []}
     comp_ref = {c["id"]: c.get("ref", "") for c in doc.get("components") or []}
     pins = {}
@@ -85,7 +89,8 @@ def schematic_map(doc):
     for conn in doc.get("connections") or []:
         ref = comp_ref.get(conn.get("componentId"), "")
         key = (ref, str(conn.get("pinNumber", "")))
-        pins[key] = net_name.get(conn.get("netId"), (conn.get("netId"), False))
+        nid = conn.get("netId")
+        pins[key] = net_name.get(nid, (nid, False, (page, nid)))
     return pins
 
 
@@ -112,31 +117,49 @@ def pcb_map(board):
 
 def to_identities(sch, pcb):
     """Schematic pin -> net identity (NC / None kept), resolved per
-    schematic net, never per pin. Distinct schematic nets that would become
-    one identity ("VCC" and "/pwr/VCC") keep their own names, so their pads
-    mismatch, and are returned as collisions (a short on the board)."""
+    schematic net (page + net id), never per pin or per name.
+
+    Pages are merged by net name (the rule of sim power / intent derive):
+    equal names on different pages are one net - unless one page has that
+    name on several nets, which then all stay distinct. Distinct schematic
+    nets that would become one identity (two "VCC" records, or "VCC" and
+    "/pwr/VCC") keep distinct labels, so their pads mismatch, and are
+    returned as collisions (a short on the board). Also returns the pins
+    whose net came with a fullName (KiCad: names are case-sensitive)."""
     resolve = resolver(pcb.values())
-    ident = {}
-    for v in sch.values():
-        if isinstance(v, tuple) and v not in ident:
-            net, full = v
-            ident[v] = net if full else resolve(net)
+    nets = {v for v in sch.values() if isinstance(v, tuple)}
+    ids_by_name = {}
+    for name, _, (page, nid) in nets:
+        ids_by_name.setdefault(name, {}).setdefault(page, set()).add(nid)
+
+    def source(v):
+        name, _, (page, nid) = v
+        if all(len(ids) == 1 for ids in ids_by_name[name].values()):
+            return ("name", name)
+        return ("net", page, nid, name)
+
+    def label(src):
+        return src[1] if src[0] == "name" else f"{src[3]} (page {src[1] + 1} net {src[2]})"
+
+    ident = {v: (v[0] if v[1] else resolve(v[0])) for v in nets}
     sources = {}
     for v, i in ident.items():
-        sources.setdefault(i, set()).add(v[0])
-    collisions = [{"net": i, "schematic": sorted(src)} for i, src in sorted(sources.items()) if len(src) > 1]
+        sources.setdefault(i, set()).add(source(v))
+    collisions = [{"net": i, "schematic": sorted(label(x) for x in src)} for i, src in sorted(sources.items()) if len(src) > 1]
     clash = {c["net"] for c in collisions}
-    out = {}
+    out, strict = {}, set()
     for key, v in sch.items():
         if isinstance(v, tuple):
-            out[key] = v[0] if ident[v] in clash else ident[v]
+            out[key] = label(source(v)) if ident[v] in clash else ident[v]
+            if v[1]:
+                strict.add(key)
         else:
             out[key] = v
-    return out, collisions
+    return out, collisions, strict
 
 
 def diff(sch, pcb, ignore=()):
-    sch, collisions = to_identities(sch, pcb)
+    sch, collisions, strict = to_identities(sch, pcb)
     sch_refs = {r for r, _ in sch if r not in ignore}
     pcb_refs = {r for r, _ in pcb if r not in ignore}
     out = {
@@ -161,7 +184,9 @@ def diff(sch, pcb, ignore=()):
             want = ""
         else:
             want = "" if net == NC else net
-        if pad_net != want and pad_net.lower() == want.lower():
+        # Case folding only for EasyEDA names: KiCad names (fullName) are
+        # case-sensitive, a case-only difference is a different net.
+        if pad_net != want and (ref, pin) not in strict and pad_net.lower() == want.lower():
             out["netCaseOnly"].append({"pad": f"{ref}.{pin}", "schematic": want, "pcb": pad_net})
         elif pad_net != want:
             out["netMismatch"].append({"pad": f"{ref}.{pin}", "schematic": net or "", "pcb": pad_net})
@@ -183,9 +208,9 @@ def main():
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
     sch = {}
-    for path in a.sch:
+    for page, path in enumerate(a.sch):
         with open(path, encoding="utf-8") as f:
-            for key, net in schematic_map(json.load(f)).items():
+            for key, net in schematic_map(json.load(f), page).items():
                 # A pin seen with a net on one page wins over "unconnected".
                 if sch.get(key) is None:
                     sch[key] = net
