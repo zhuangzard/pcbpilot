@@ -220,6 +220,22 @@ func TestSimBoardComparesLikeWithLike(t *testing.T) {
 			board:  func(m map[string]any, ref string) { m["device"], m["value"] = vals(ref), vals(ref) },
 			sim:    func(p *powersim.PartResult, ref string) { p.Value = vals(ref) },
 			change: func(p *powersim.PartResult) { p.Value = "330" }, want: "R7: sim 330, board VAL-R7"},
+		// Case folding suits MPNs, not values: 1m (milliohm) is not 1M.
+		{name: "kicad-value-case", root: map[string]any{"source": "kicad"},
+			board: func(m map[string]any, ref string) {
+				v := vals(ref)
+				if ref == "R7" {
+					v = "1M"
+				}
+				m["device"], m["value"] = v, v
+			},
+			sim: func(p *powersim.PartResult, ref string) {
+				p.Value = vals(ref)
+				if ref == "R7" {
+					p.Value = "1000k" // the same megohm, written differently
+				}
+			},
+			change: func(p *powersim.PartResult) { p.Value = "1m" }, want: "R7: sim 1m, board 1M"},
 		{name: "kicad-old-snapshot", root: map[string]any{"source": "kicad"},
 			board:  func(m map[string]any, ref string) { m["device"] = vals(ref) }, // no "value" field
 			sim:    func(p *powersim.PartResult, ref string) { p.Value = vals(ref) },

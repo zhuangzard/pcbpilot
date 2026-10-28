@@ -710,7 +710,7 @@ func crossCheck(b *Board, scen []*powersim.Result) []Finding {
 				}
 				continue
 			}
-			if simID, boardID := simBoardIdentity(b.KiCad, pr, bp); simID != "" && boardID != "" && !sameDevice(simID, boardID) {
+			if simID, boardID := simBoardIdentity(b.KiCad, pr, bp); simID != "" && boardID != "" && !sameIdentity(b.KiCad, simID, boardID) {
 				msg := fmt.Sprintf("%s: sim %s, board %s", ref, simID, boardID)
 				if fits(ref) {
 					unsync[ref] = msg
