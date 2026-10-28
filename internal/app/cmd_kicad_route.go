@@ -492,6 +492,13 @@ func (r *kicadRun) run() error {
 	// kicad rules' block must stay behind the route block bridge just
 	// re-appended (the last matching rule wins; see kicad_rules_block.go).
 	if kr, _ := r.summary["kicadRules"].(map[string]any); kr != nil {
+		// The block must be exactly what kicad rules writes for the classes
+		// just derived (after the board floors): a board minimum or a user /
+		// Default class widened since, or a hand-edited block, is stale.
+		if err := verifyRulesBlock(classed, full.ClassesNM, inSnap.CopperLayers); err != nil {
+			kr["stale"] = true
+			return fmt.Errorf("pre-route gate: %w", err)
+		}
 		if err := moveRulesBlockLast(classed); err != nil {
 			return fmt.Errorf("pre-route gate: kicad rules block: %w", err)
 		}

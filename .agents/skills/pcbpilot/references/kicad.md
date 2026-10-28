@@ -310,7 +310,9 @@ pcbpilot kicad rules … --check [--stage placed|routed] [--report r.json]  # �
   意图没写 `min` 时只带板最小线宽，排在后面会把下限削弱到板最小值；route 重跑把自己的块追加到末尾后，`kicad route`
   会把本块移回最后。每个 PP 类 `(layer outer)` / `(layer inner)`（有内层时）`track_width (min <下限>) (opt <线宽>)`；
   下限只由类的取值决定（`expectedFloor`，不从生成的文本反推）= 意图 `widthMil.min`（允许颈缩的极限），没有则为该层全线宽；
-  校验时按 KiCad 的“最后匹配”解析实际规则（含条件可能重叠的用户规则），解析值低于下限即失败。块头记 `request-sha256`
+  校验时对**每个启用的铜层**（F.Cu、In1.Cu…、B.Cu）分别按 KiCad 的“最后匹配”解析实际规则：不带 `(layer …)` 的、
+  `outer` / `inner` 组规则、以及只写某一层名（如 `B.Cu`、`In2.Cu`）的规则都算，含条件可能重叠的用户规则；任一层解析值
+  低于该层下限即失败（单层的削弱规则不靠探针，直接判失败）。块头记 `request-sha256`
   （推导指纹）与 `sizes-owned`。
 - **预设尺寸**：把各类的外/内层线宽与过孔写进 Board Setup → Pre-defined Sizes（GUI 便利，**从不算作规则**）；只增删
   自己上次加的（`sizes-owned`），用户原有的保留。
@@ -337,11 +339,13 @@ clearance 会替换类间距，也会被对规则替换）；有绝缘对时 cre
 - `staged-readback`：在暂存副本上 bridge `rules-read`（pcbnew 自己算出的**有效**网络类与 nm 尺寸）逐网等于计划，绝缘域网
   解析到 `PPD_<域>`，预设尺寸都在，每类外/内层解析出的最小线宽不低于下限；再用 **kicad-cli DRC 探针**：每类在外层（及内层）
   放一根比下限窄 2 µm 的探针线、每个绝缘对放两根间距比对间隙小 5 µm 的线（都在板外）。KiCad 读不懂 `.kicad_dru` 时
-  **静默忽略全部规则、DRC 报 0**（10.0.6 实测）。探针跑两次：带规则一次，再跑一次**阴性对照**（同样探针，`.kicad_dru`
-  去掉 pcbpilot 的两个块、保留用户部分，`.kicad_pro` 去掉 PP / PPD / PPF 类及其 pattern）。每个计划类还有一组**间距探针**：
-  该类的网与板上间距最低的未计划网相距“类间距 − 5 µm”。带规则时没报 = fail；两次都报 = 被板最小值或类间距挡住，**不能归因**到规则，只
-  记 info；只有带规则报、对照不报才算证明规则生效。一个可归因的探针都没有（如所有下限都等于板最小线宽、绝缘对靠类间距）
-  → `cannot-check`（不能证明 KiCad 加载了规则），绝不 pass。
+  **静默忽略全部规则、DRC 报 0**（10.0.6 实测）。每个计划类还有一组**间距探针**：该类的网与板上间距最低的未计划网相距
+  “类间距 − 5 µm”。探针跑三次：带规则一次，再跑两个**阴性对照**，各管一种归因——**`.kicad_dru` 对照**保留工程的网络类、
+  只去掉 `.kicad_dru` 里 pcbpilot 的两个块（线宽探针、绝缘对探针用它归因）；**网络类对照**保留 `.kicad_dru`、只去掉
+  `.kicad_pro` 里的 PP / PPD / PPF 类及其 pattern（间距探针用它归因）。带规则时没报 = fail；在自己的对照里也报 = 被板最小值
+  或别的规则挡住，**不能归因**，只记 info；带规则报、对照不报才算证明。`.kicad_dru` 只能由 `.kicad_dru` 可归因的探针证明已被
+  KiCad 加载：一个都没有（如所有下限都等于板最小线宽、绝缘对靠类间距，哪怕间距探针能归因到网络类）→ `cannot-check`，
+  `--apply` 拒绝；绝缘 clearance / creepage、域边距这些 `.kicad_dru` 规则也只在此前提下算已验证。
 - `readback`（`--apply`）：写入后在真实文件上再 `rules-read` + 探针，与已验证的暂存一致、`.kicad_pro` / `.kicad_dru` 字节
   等于暂存文件；不一致即**回滚**（以本次写入内容为 base，绝不覆盖期间的外部编辑；回滚本身失败 = `E_ROLLBACK` 退出 1）。
 - `--check` 额外：`effective-rules`（板上现状 ≥ 计划：类线宽/间距/过孔、逐层解析出的最小线宽规则、域类，绝缘对规则必须
@@ -374,8 +378,10 @@ clearance 会替换类间距，也会被对规则替换）；有绝缘对时 cre
 
 **与 `kicad route` 的关系**：route 不变，仍走同一推导；输入板的 `.kicad_dru` 有 `pcbpilot-rules` 块时，route 用同样的
 线宽依据（自己的 `--intent` / `--sim` / `--requirements` 与板层叠）重新推导，指纹与块头 `request-sha256` 不同即
-`RULES_STALE` 停止（“rerun kicad rules”），相同则沿用（`summary.kicadRules`），并在写完自己的块后把 `pcbpilot-rules`
-块移回最后。没有该块时与以前逐字节一致。
+`RULES_STALE` 停止（“rerun kicad rules”），相同则沿用（`summary.kicadRules`）。route 跑完网络类（含板最小值等下限）后，
+还要求 `pcbpilot-rules` 块与 `rulesBlockRules(本次的类)` 生成的块**逐字节相同**（含合法的 `request-sha256` 头）：用户 /
+Default 类或板最小值在 `kicad rules --apply` 之后变宽、块被手改、头坏了，一律 `RULES_STALE` 停止，不会把旧的、偏低的
+下限移到最后继续用；通过后才把块移回最后。没有该块时与以前逐字节一致。
 
 **测试隔离**：`internal/app` 的 TestMain 把 USERPROFILE 换成临时目录；这样启动的 kicad-cli / pcbnew 会把设置写到工作目录的
 相对 `KiCad/10.0`（10.0.6 实测；只设 `KICAD_CONFIG_HOME` 时缓存目录仍落在那里）。TestMain 因此给所有 KiCad 子进程设临时的

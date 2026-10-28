@@ -814,14 +814,13 @@ func (r *rulesRun) compareToPlan(rb *kicad.RulesReadback) []string {
 				kicad.MmOfNm(eff.Track), kicad.MmOfNm(eff.Clearance), kicad.MmOfNm(eff.ViaDiameter), kicad.MmOfNm(eff.ViaDrill),
 				c.Name, kicad.MmOfNm(c.NM.Track), kicad.MmOfNm(c.NM.Clearance), kicad.MmOfNm(c.NM.ViaDiameter), kicad.MmOfNm(c.NM.ViaDrill)))
 		}
-		for _, l := range []string{"outer", "inner"} {
-			if l == "inner" && rb.CopperLayers <= 2 {
-				continue
-			}
-			want := r.planFloor(e, l)
+		// Every enabled copper layer on its own: group rules and rules
+		// naming one layer, last match wins.
+		for _, l := range copperLayerNames(rb.CopperLayers) {
+			want := r.planFloor(e, layerGroup(l))
 			have, by := r.resolvedFloor(r.druRule, c.Name, l)
 			if have < want {
-				bad = append(bad, fmt.Sprintf("%s: the staged rules resolve track_width min %s on %s layers (rule %q), plan %s", e.Net, kicad.MmOfNm(have), l, by, kicad.MmOfNm(want)))
+				bad = append(bad, fmt.Sprintf("%s: the staged rules resolve track_width min %s on %s (rule %q), plan %s", e.Net, kicad.MmOfNm(have), l, by, kicad.MmOfNm(want)))
 			}
 		}
 	}
@@ -912,6 +911,7 @@ type rulesProbeExp struct {
 	ids   []int  // probe indexes
 	why   string
 	alias string
+	src   string // dru (width, insulation pair) | class (class clearance)
 }
 
 // probeCheck proves with kicad-cli DRC that the rules resolve on board (a
@@ -1003,7 +1003,7 @@ func (r *rulesRun) probeCheck(board, what string) rulesCheck {
 			kicad.ProbeTrack{Net: e.Net, Layer: 1, StartX: x0, StartY: y, EndX: x0 + 100, EndY: y, WidthNm: minW},
 			kicad.ProbeTrack{Net: partner, Layer: 1, StartX: x0, StartY: y + dy, EndX: x0 + 100, EndY: y + dy, WidthNm: minW})
 		exps = append(exps, rulesProbeExp{what: fmt.Sprintf("class %s clearance: %s and %s %s apart", c.Name, e.Net, partner, kicad.MmOfNm(gap)),
-			kind: "clearance", ids: []int{len(tracks) - 2, len(tracks) - 1}, why: "class clearance " + kicad.MmOfNm(c.NM.Clearance)})
+			kind: "clearance", ids: []int{len(tracks) - 2, len(tracks) - 1}, why: "class clearance " + kicad.MmOfNm(c.NM.Clearance), src: "class"})
 	}
 	domNets := map[string][]string{}
 	for dom, nets := range r.full.Domains {
@@ -1034,12 +1034,17 @@ func (r *rulesRun) probeCheck(board, what string) rulesCheck {
 	}
 	r.probeRuns++
 	dir := filepath.Join(r.stage, fmt.Sprintf("probe-%d", r.probeRuns))
-	// Two DRC runs on the same probes: with the rules under test, and a
-	// negative control without pcbpilot's rules — its .kicad_dru blocks
-	// removed (the user part kept) and its netclasses / patterns removed
-	// from the project. A probe proves a pcbpilot rule only when the
-	// verdicts differ; one flagged in both runs is enforced by something
-	// else (the board minimum, a user class) and proves nothing.
+	// Three DRC runs on the same probes: with the rules under test, and two
+	// negative controls, one per source of a pcbpilot rule. The DRU control
+	// keeps the project (classes) and removes pcbpilot's .kicad_dru blocks
+	// (the user part kept): it attributes width and insulation-pair probes
+	// to the .kicad_dru. The class control keeps the .kicad_dru and removes
+	// pcbpilot's netclasses / patterns from the project: it attributes the
+	// class-clearance probes to the netclasses. A probe proves its rule only
+	// when it is flagged with the rules and not in its control; one flagged
+	// in both is enforced by something else (the board minimum, a class)
+	// and proves nothing. The .kicad_dru counts as loaded only through a
+	// DRU-attributable probe.
 	user := ""
 	if b, err := os.ReadFile(boardSibling(board, ".kicad_dru")); err == nil {
 		u, _, _, err := kicad.SplitDRU(strings.ReplaceAll(string(b), "\r\n", "\n"))
@@ -1049,14 +1054,17 @@ func (r *rulesRun) probeCheck(board, what string) rulesCheck {
 		}
 		user = u
 	}
+	pro, _ := os.ReadFile(boardSibling(board, ".kicad_pro"))
 	var ctlPro []byte
-	if b, err := os.ReadFile(boardSibling(board, ".kicad_pro")); err == nil {
-		if ctlPro, err = stripOwnedProject(b); err != nil {
+	if pro != nil {
+		var err error
+		if ctlPro, err = stripOwnedProject(pro); err != nil {
 			chk.Status, chk.Detail = gate.CannotCheck, "probe control project: "+err.Error()
 			return chk
 		}
 	}
-	run := func(sub string, dru *string) (*kicad.DRCReport, []string, error) {
+	druText, _ := os.ReadFile(boardSibling(board, ".kicad_dru"))
+	run := func(sub string, pro, dru []byte) (*kicad.DRCReport, []string, error) {
 		d := filepath.Join(dir, sub)
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return nil, nil, err
@@ -1070,35 +1078,31 @@ func (r *rulesRun) probeCheck(board, what string) rulesCheck {
 		if err != nil {
 			return nil, nil, err
 		}
-		// The probe board carries exactly the project and rules under test
-		// (the control: the stripped project).
+		// The probe board carries exactly the project and rules of this run.
 		_ = os.Remove(boardSibling(out, ".kicad_pro"))
-		if dru != nil {
-			if ctlPro != nil {
-				_ = os.WriteFile(boardSibling(out, ".kicad_pro"), ctlPro, 0o644)
-			}
-		} else if b, err := os.ReadFile(boardSibling(board, ".kicad_pro")); err == nil {
-			_ = os.WriteFile(boardSibling(out, ".kicad_pro"), b, 0o644)
-		}
 		_ = os.Remove(boardSibling(out, ".kicad_dru"))
-		if dru != nil && strings.TrimSpace(*dru) != "" {
-			_ = os.WriteFile(boardSibling(out, ".kicad_dru"), []byte(*dru), 0o644)
-		} else if dru == nil {
-			if b, err := os.ReadFile(boardSibling(board, ".kicad_dru")); err == nil {
-				_ = os.WriteFile(boardSibling(out, ".kicad_dru"), b, 0o644)
-			}
+		if pro != nil {
+			_ = os.WriteFile(boardSibling(out, ".kicad_pro"), pro, 0o644)
+		}
+		if strings.TrimSpace(string(dru)) != "" {
+			_ = os.WriteFile(boardSibling(out, ".kicad_dru"), dru, 0o644)
 		}
 		rep, err := r.t.DRC(out, filepath.Join(d, "probe-drc.json"))
 		return rep, ids, err
 	}
-	drc, ids, err := run("rules", nil)
+	drc, ids, err := run("rules", pro, druText)
 	if err != nil {
 		chk.Status, chk.Detail = gate.CannotCheck, "kicad-cli DRC on the probes: "+err.Error()
 		return chk
 	}
-	ctl, cids, err := run("control", &user)
+	ctlDRU, dids, err := run("control-dru", pro, []byte(user))
 	if err != nil {
-		chk.Status, chk.Detail = gate.CannotCheck, "kicad-cli DRC on the control probes: "+err.Error()
+		chk.Status, chk.Detail = gate.CannotCheck, "kicad-cli DRC on the .kicad_dru control probes: "+err.Error()
+		return chk
+	}
+	ctlCls, cids, err := run("control-classes", ctlPro, druText)
+	if err != nil {
+		chk.Status, chk.Detail = gate.CannotCheck, "kicad-cli DRC on the netclass control probes: "+err.Error()
 		return chk
 	}
 	flagged := func(rep *kicad.DRCReport, ids []string, e rulesProbeExp) bool {
@@ -1121,27 +1125,38 @@ func (r *rulesRun) probeCheck(board, what string) rulesCheck {
 		}
 		return false
 	}
-	attributed, failed := 0, 0
+	druAttr, clsAttr, druProbes, failed := 0, 0, 0, 0
 	for _, e := range exps {
-		withRules, without := flagged(drc, ids, e), flagged(ctl, cids, e)
+		withRules := flagged(drc, ids, e)
+		var without bool
+		if e.src == "class" {
+			without = flagged(ctlCls, cids, e)
+		} else {
+			druProbes++
+			without = flagged(ctlDRU, dids, e)
+		}
 		switch {
 		case !withRules:
 			failed++
 			chk.Items = append(chk.Items, fmt.Sprintf("DRC probe on %s: %s raised no %s violation (%s does not resolve; is the .kicad_dru readable by KiCad?)", what, e.what, e.kind, e.why))
 		case without:
-			chk.Info = append(chk.Info, fmt.Sprintf("probe %s: also flagged without pcbpilot's rules (the board minimum or a class enforces it): not attributable to the .kicad_dru", e.what))
+			chk.Info = append(chk.Info, fmt.Sprintf("probe %s: also flagged in the %s control (the board minimum or another rule enforces it): not attributable to pcbpilot's %s", e.what,
+				map[bool]string{true: "netclass", false: ".kicad_dru"}[e.src == "class"], map[bool]string{true: "netclasses", false: ".kicad_dru"}[e.src == "class"]))
+		case e.src == "class":
+			clsAttr++
 		default:
-			attributed++
+			druAttr++
 		}
 	}
 	switch {
 	case len(chk.Items) > 0:
 		chk.Status = gate.Fail
-	case attributed == 0:
+	case druProbes > 0 && druAttr == 0:
 		chk.Status = gate.CannotCheck
-		chk.Items = append(chk.Items, "no DRC probe is attributable to pcbpilot's .kicad_dru rules (every probe is also flagged without them): that KiCad loads and applies the rules is not proven")
+		chk.Items = append(chk.Items, "no DRC probe is attributable to pcbpilot's .kicad_dru rules (every width / pair probe is also flagged with the .kicad_dru blocks removed): that KiCad loads and applies the .kicad_dru is not proven, so no .kicad_dru rule (minimum widths, insulation clearance / creepage, edge) counts as verified")
 	}
-	chk.Detail = fmt.Sprintf("kicad-cli DRC on %s: %d of %d probe(s) attributable to pcbpilot's rules (flagged with them, not in the control without them), %d failed", what, attributed, len(exps), failed)
+	chk.Detail = fmt.Sprintf("kicad-cli DRC on %s: %d of %d .kicad_dru probe(s) attributable to the .kicad_dru, %d of %d class-clearance probe(s) attributable to the netclasses (flagged with the rules, not in their control), %d failed",
+		what, druAttr, druProbes, clsAttr, len(exps)-druProbes, failed)
 	return chk
 }
 
@@ -1192,18 +1207,17 @@ func (r *rulesRun) effectiveRules() {
 		lowv("clearance", eff.Clearance, c.NM.Clearance)
 		lowv("via diameter", eff.ViaDiameter, c.NM.ViaDiameter)
 		lowv("via drill", eff.ViaDrill, c.NM.ViaDrill)
-		for _, l := range []string{"outer", "inner"} {
-			if l == "inner" && rb.CopperLayers <= 2 {
-				continue
-			}
-			want := r.planFloor(e, l)
-			have, _ := r.resolvedFloor(rules, firstClass(eff.Class), l)
+		// Every enabled copper layer on its own (a user rule limited to
+		// B.Cu or In2.Cu can weaken just that layer).
+		for _, l := range copperLayerNames(rb.CopperLayers) {
+			want := r.planFloor(e, layerGroup(l))
+			have, by := r.resolvedFloor(rules, firstClass(eff.Class), l)
 			if have < want {
 				what := "no track_width minimum rule"
-				if have > 0 {
-					what = "track_width minimum " + kicad.MmOfNm(have)
+				if have > 0 || by != "" {
+					what = fmt.Sprintf("track_width minimum %s (rule %q)", kicad.MmOfNm(have), by)
 				}
-				chk.Items = append(chk.Items, fmt.Sprintf("%s: %s on %s layers for class %s, plan %s (a netclass width is a routing default, not a minimum: run kicad rules --apply)", e.Net, what, l, firstClass(eff.Class), kicad.MmOfNm(want)))
+				chk.Items = append(chk.Items, fmt.Sprintf("%s: %s on %s for class %s, plan %s (a netclass width is a routing default, not a minimum: run kicad rules --apply)", e.Net, what, l, firstClass(eff.Class), kicad.MmOfNm(want)))
 			}
 		}
 	}

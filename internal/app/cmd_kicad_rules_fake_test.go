@@ -390,9 +390,12 @@ func (f *rulesFakeKiCad) DRC(pcb, out string) (*kicad.DRCReport, error) {
 	ts, ids := f.probes[pcb], f.ids[pcb]
 	for i, t := range ts {
 		eff := p.effective(t.Net)
-		layer := "outer"
-		if t.Layer >= 15 {
-			layer = "inner"
+		layer := "F.Cu"
+		switch {
+		case t.Layer == 2:
+			layer = "B.Cu"
+		case t.Layer >= 15:
+			layer = fmt.Sprintf("In%d.Cu", t.Layer-14)
 		}
 		floor := p.Minimums.Track
 		for _, c := range strings.Split(eff.Class, ",") {
@@ -413,6 +416,11 @@ func (f *rulesFakeKiCad) DRC(pcb, out string) (*kicad.DRCReport, error) {
 		need := max(p.effective(a.Net).Clearance, p.effective(b.Net).Clearance)
 		for _, r := range rules {
 			if strings.HasPrefix(r.Name, "pcbpilot isolation ") {
+				x, y, _ := strings.Cut(strings.TrimPrefix(r.Name, "pcbpilot isolation "), "|")
+				ea, eb := p.effective(a.Net).Class, p.effective(b.Net).Class
+				if !(hasClass(ea, x) && hasClass(eb, y) || hasClass(ea, y) && hasClass(eb, x)) {
+					continue
+				}
 				for _, c := range r.Constraints {
 					if c.Type == "clearance" && c.Min != nil && *c.Min > need {
 						need = *c.Min

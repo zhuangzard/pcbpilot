@@ -165,7 +165,10 @@ func placeRulesBlock(dru, block string) (string, error) {
 }
 
 // rulesTrackFloor resolves the track_width minimum KiCad applies to class
-// cls on a layer kind (outer | inner) from a parsed .kicad_dru: the last
+// cls on one copper layer ("F.Cu", "In2.Cu", "B.Cu"; "outer" / "inner"
+// stand for F.Cu / In1.Cu) from a parsed .kicad_dru: a rule applies when
+// it has no (layer …), names that layer, or names its group (outer =
+// F.Cu / B.Cu, inner = InN.Cu); the last
 // matching rule wins — a pcbpilot-owned rule whose condition is exactly
 // A.hasNetclass('cls'), or any user rule not provably disjoint from names
 // (cls, its nets: druDisjoint); a user rule without a comparable minimum
@@ -178,10 +181,16 @@ func rulesTrackFloor(rules []kicad.DRURule, cls, layer string, names ...map[stri
 			nm[k] = true
 		}
 	}
+	switch layer {
+	case "outer":
+		layer = "F.Cu"
+	case "inner":
+		layer = "In1.Cu"
+	}
 	var mn int64
 	name := ""
 	for _, r := range rules {
-		if r.Layer != "" && r.Layer != layer {
+		if !ruleOnLayer(r.Layer, layer) {
 			continue
 		}
 		if r.Block != "" && r.Condition != cond {
@@ -203,6 +212,65 @@ func rulesTrackFloor(rules []kicad.DRURule, cls, layer string, names ...map[stri
 		}
 	}
 	return mn, name
+}
+
+// ruleOnLayer: a rule's (layer …) covers the copper layer.
+func ruleOnLayer(ruleLayer, layer string) bool {
+	switch ruleLayer {
+	case "", layer:
+		return true
+	case "outer":
+		return layer == "F.Cu" || layer == "B.Cu"
+	case "inner":
+		return reInnerLayer.MatchString(layer)
+	}
+	return false
+}
+
+// layerGroup is a copper layer's group (outer | inner).
+func layerGroup(layer string) string {
+	if reInnerLayer.MatchString(layer) {
+		return "inner"
+	}
+	return "outer"
+}
+
+// copperLayerNames are a board's enabled copper layers in stack order.
+func copperLayerNames(n int) []string {
+	out := []string{"F.Cu"}
+	for i := 1; i <= n-2; i++ {
+		out = append(out, fmt.Sprintf("In%d.Cu", i))
+	}
+	return append(out, "B.Cu")
+}
+
+// verifyRulesBlock: the rules block of the .kicad_dru next to pcb is
+// byte for byte the block kicad rules writes for classes (the floored
+// classes the netclasses step just produced) with the block's own stamp; a
+// missing or invalid stamp, a body edited by hand, or floors from classes
+// that have changed since (a widened board minimum, a user / Default
+// class) is RULES_STALE.
+func verifyRulesBlock(pcb string, classes []kicad.NetclassClassNM, copperLayers int) error {
+	stale := func(why string) error {
+		return fmt.Errorf("RULES_STALE: the board's kicad rules block %s; rerun `pcbpilot kicad rules --apply` with the same inputs, then route", why)
+	}
+	b, err := os.ReadFile(strings.TrimSuffix(pcb, ".kicad_pcb") + ".kicad_dru")
+	if err != nil {
+		return stale("cannot be read: " + err.Error())
+	}
+	text := strings.ReplaceAll(string(b), "\r\n", "\n")
+	_, blk, _, err := kicad.SplitDRU(text)
+	if err != nil {
+		return stale("is malformed: " + err.Error())
+	}
+	st, ok := parseRulesStamp(text)
+	if blk == "" || !ok || len(st.RequestSHA) != 64 {
+		return stale("has no valid stamp (request-sha256)")
+	}
+	if want := rulesBlockText(rulesBlockRules(classes, copperLayers), st.RequestSHA, st.Owned); blk != want {
+		return stale("no longer matches the classes derived now (a board minimum or a user / Default class changed after kicad rules --apply, or the block was edited)")
+	}
+	return nil
 }
 
 // moveRulesBlockLast re-places the rules block of the .kicad_dru next to

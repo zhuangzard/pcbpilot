@@ -368,8 +368,8 @@ func TestKicadRulesPlan(t *testing.T) {
 	if rulesFileSHA(t, boardSibling(f.o.pcb, ".kicad_pro")) != before || fileExists(boardSibling(f.o.pcb, ".kicad_dru")) {
 		t.Fatal("--plan wrote the project")
 	}
-	// Two DRC runs: the probes with the rules, and the negative control.
-	if c := checkOf(rep, "staged-readback"); c.Status != gate.Pass || f.fake.drcCalls != 2 {
+	// Three DRC runs: the probes with the rules and the two negative controls.
+	if c := checkOf(rep, "staged-readback"); c.Status != gate.Pass || f.fake.drcCalls != 3 {
 		t.Fatalf("staged readback: %+v (DRC runs %d)", c, f.fake.drcCalls)
 	}
 	var pf rulesPlanFile
