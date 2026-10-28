@@ -104,7 +104,7 @@ daemon 是唯一检查和应用升级的地方：启动时、每 6 小时、以�
 时依次：快照回滚点 → CLI → Skill（所有客户端目录；源码 symlink 不动）→ MCP → ngspice →
 下载连接器 `.eext` → 退出让登录服务拉起新二进制 → 新 daemon 自检（版本、Skill、MCP 握手），
 失败自动回滚并永不再自动应用该版本。状态写 `~/.pcbpilot/update-state.json`，日志
-`~/.pcbpilot/update.log`。CLI/MCP 不自己查网，只在会话首条命令时转述 daemon 状态；daemon 不在
+`~/.pcbpilot/update.log`。CLI/MCP 不自己查网，只在会话首条命令时转述 daemon 状态（一次升级/回滚/失败的结果只转述一次，记入 `update-state.json` 的 `noticedAt` 后不再重复）；daemon 不在
 时才做一次 1 小时缓存、3 秒超时的检查并提示修复服务。
 
 - 关闭：`pcbpilot update --auto off`（写 `~/.pcbpilot/config.json`，登录服务也生效）；

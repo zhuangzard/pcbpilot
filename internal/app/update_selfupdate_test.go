@@ -366,7 +366,9 @@ func healthRaw(t *testing.T, version string, notices ...string) json.RawMessage 
 }
 
 func TestSessionNoticeRelaysDaemonStateAndFixesSkew(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // Windows: os.UserHomeDir, else the real ~/.pcbpilot caches leak in
 	restarted := 0
 	probes := 0
 	d := noticeDeps{
@@ -407,7 +409,9 @@ func TestSessionNoticeRelaysDaemonStateAndFixesSkew(t *testing.T) {
 }
 
 func TestSessionNoticeFallbackCheckUsesOneHourCacheAndSurvivesOffline(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // Windows: os.UserHomeDir, else the real ~/.pcbpilot caches leak in
 	calls := 0
 	now := time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)
 	d := noticeDeps{
@@ -499,5 +503,50 @@ func TestSelfUpdaterAlignInstallsMCPAndConnectorForOwnVersion(t *testing.T) {
 	}
 	if !strings.Contains(readText(filepath.Join(oi.home, ".codex", "config.toml")), selfupdate.MCPServerPath()) {
 		t.Fatal("aligned MCP not registered")
+	}
+}
+
+// The outcome of an apply ("0.11.0 → 0.12.0 updated … restart your AI
+// client") is relayed by the first CLI session and then no longer repeated
+// by health; a new apply announces itself again.
+func TestUpdateOutcomeNoticeRelayedOnce(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	now := time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)
+	write := func(to string) {
+		t.Helper()
+		st := selfupdate.UpdateState{Phase: selfupdate.PhaseDone, From: "0.6.0", To: to, At: now.Add(-time.Hour),
+			Summary: "pcbpilot 0.6.0 → " + to + " updated: cli"}
+		if err := os.MkdirAll(filepath.Dir(selfupdate.UpdateStatePath()), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := selfupdate.WriteJSON(selfupdate.UpdateStatePath(), st); err != nil {
+			t.Fatal(err)
+		}
+	}
+	u := &selfUpdater{deps: updateDeps{now: func() time.Time { return now }}, version: "v" + "0.6.1"}
+	health := func() json.RawMessage {
+		h, _ := u.Health(nil)
+		raw, _ := json.Marshal(map[string]any{"version": "v0.6.1", "updates": h})
+		return raw
+	}
+	d := noticeDeps{now: func() time.Time { return now }, version: "v0.6.1",
+		probe: func(context.Context) daemonProbe { return daemonProbe{Running: true, Version: "v0.6.1", Raw: health()} }}
+	session := func() string {
+		var out bytes.Buffer
+		runSessionNotice(context.Background(), d, &out)
+		return out.String()
+	}
+	write("0.6.1")
+	if s := session(); !strings.Contains(s, "0.6.0 → 0.6.1 updated") {
+		t.Fatalf("first session must relay the update: %q", s)
+	}
+	if s := session(); strings.Contains(s, "updated") {
+		t.Fatalf("the update notice repeated in a later session: %q", s)
+	}
+	write("0.6.2")
+	if s := session(); !strings.Contains(s, "0.6.0 → 0.6.2 updated") {
+		t.Fatalf("a new apply must be announced: %q", s)
 	}
 }

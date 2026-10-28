@@ -243,6 +243,10 @@ type UpdateState struct {
 	Error       string    `json:"error,omitempty"`
 	SkipVersion string    `json:"skipVersion,omitempty"` // a release that failed verify: never auto-apply it again
 	Summary     string    `json:"summary,omitempty"`
+	// NoticedAt: a CLI session already relayed this outcome's one-shot
+	// notice ("0.11.0 → 0.12.0 updated … restart your AI client"); health
+	// stops repeating it. A new apply writes a new state without it.
+	NoticedAt time.Time `json:"noticedAt,omitempty"`
 }
 
 func UpdateStatePath() string { return statePath("update-state.json") }
@@ -251,6 +255,23 @@ func ReadUpdateState() UpdateState {
 	var s UpdateState
 	_ = ReadJSON(UpdateStatePath(), &s)
 	return s
+}
+
+// OneShotPhase: the outcome of an apply, announced once (done, rolled back,
+// failed); pending/deferred states are reported while they last.
+func OneShotPhase(phase string) bool {
+	return phase == PhaseDone || phase == PhaseRolledBack || phase == PhaseFailed
+}
+
+// MarkUpdateNoticed records that the last apply's outcome was relayed to a
+// CLI session, so the notice is not repeated on every later session.
+func MarkUpdateNoticed(now time.Time) error {
+	s := ReadUpdateState()
+	if !OneShotPhase(s.Phase) || !s.NoticedAt.IsZero() {
+		return nil
+	}
+	s.NoticedAt = now
+	return WriteJSON(UpdateStatePath(), s)
 }
 
 // ── session.json ──────────────────────────────────────────────────────────

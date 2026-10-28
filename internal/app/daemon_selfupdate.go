@@ -580,7 +580,8 @@ func (u *selfUpdater) Health(windows []daemon.Window) (any, any) {
 	if st := selfupdate.ReadUpdateState(); st.Phase != "" {
 		stc := st
 		h.LastUpdate = &stc
-		recent := u.now().Sub(st.At) < 24*time.Hour
+		// Announced once: a CLI session that relayed it marks it noticed.
+		recent := u.now().Sub(st.At) < 24*time.Hour && st.NoticedAt.IsZero()
 		switch {
 		case st.Phase == selfupdate.PhaseDone && recent:
 			notices = append(notices, st.Summary+" — restart your AI client to load the new Skill/MCP")
