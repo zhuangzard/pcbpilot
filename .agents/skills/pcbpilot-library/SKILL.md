@@ -88,7 +88,10 @@ pcbpilot kicad lcsc --import C6186 --import C25744 --lib-dir ./lib   # 联网；
 - `--import` **不写库表**：已有工程把两条 `${KIPRJMOD}` 条目交给用户添加；用 `kicad sch-build` 新建的工程直接在 spec 里写
   `"lcsc": "C6186"`，sch-build 自己导入（缓存于 `~/.pcbpilot/cache/kicad-lcsc/`）并写好 `sym-lib-table` / `fp-lib-table`。
 - KiCad 自带库的件在 spec 里写 `"symbol": "Device:C", "footprint": "Capacitor_SMD:C_0805_2012Metric"`；
-  工程内自有库写 `"symbol": "path/lib.kicad_sym:Name"` 或在 spec `libDirs` 里列目录。
+  工程内自有库写 `"symbol": "path/lib.kicad_sym:Name"` 或在 spec `libDirs` 里列目录。自有**封装**库同理：
+  `"footprint": "mylib:FOO"` 且 `mylib.pretty` 在某个 `libDirs` 目录下（或直接列该 `.pretty`），sch-build 复制并登记进工程
+  `fp-lib-table`，与符号来源无关；找不到就是 `FOOTPRINT_LIB_NOT_FOUND`。这就是给 sch-build 工程加库的 typed 方式——
+  不要手改 `fp-lib-table`（下次构建会重写）。
 - 没有现成符号时用 `pins[]`（`number` / `name` / `type`，KiCad 类型名）生成方框符号；封装仍须来自现有库。
 - 回读：`kicad-cli sym export svg` / `fp export svg --sp`、KiCad python 读焊盘（验收记录第 6 节），再在临时目录做一次性
   `kicad sch-build` → `kicad sch-read` 核对每个网落到的 `REF:脚号`（第 7 节）。

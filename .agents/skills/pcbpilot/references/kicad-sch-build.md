@@ -61,7 +61,8 @@ pcbpilot kicad sch-checkpoint list --project build/                     # 回退
 
 ### 大板与分页（v0.10.1 起）
 
-- **自动分页**：某页的区放不进 A0 时自动拆成 `<页>-2`、`<页>-3`…（区不拆开，按阅读顺序装页，标题加 `(k/n)`），
+- **自动分页**：某页的区放不进 A0 时自动拆成 `<页>-2`、`<页>-3`…（区不拆开，按阅读顺序装页，标题加 `(k/n)`；页名里的 `/` 在网名里按 KiCad 规则写成 `{slash}`，
+  netlist / pcb-sync / parity 一致，v0.12.1 起不再因此 E_VERIFY_PARITY），
   跨页网自动变层次标签 + 根图图纸引脚；根图符号自动换行进 A0。保存的 spec 仍是你写的原始分页。
   报告 `warnings` 列出 `page … split into N pages`；单个区自己就超过 A0 会点名，要在 spec 里拆这个区。
 - **密集区**：一个区画不干净（质量/EG-06 失败）时可试 `--auto-split`（按 IC 拆子区，只在问题变少时保留；默认关，
@@ -73,6 +74,12 @@ pcbpilot kicad sch-checkpoint list --project build/                     # 回退
   `pcbpilot_*`）报 footprint/符号链接问题时 ERC 门禁失败（v0.10.1 的 sch-edit 会丢 `fp-lib-table` 和
   `lcsc.pretty`，已修复）。
 - **可复现**：`--planner-timeout` 按墙钟决定哪些区用 planner；同一 spec 要逐字节可复现时用 `--no-planner --fresh`。
+- **planner 预算**（v0.12.1）：`--planner-timeout` 是整个布局阶段的一个截止点（含分页重排），只阻止新的 planner 启动；
+  已启动的跑完候选上限，所以大 spec 可能超时，`warnings` 会写明。大 spec（几百个区）质量/EG 门禁失败、`error.fix`
+  提示 `--no-planner` 时，先用 `--no-planner` 重建一次（实测上千件的大板：planner 布局超时三倍且 EG-08 失败，网格几秒内通过）。
+- **项目封装库**（v0.12.1）：`"footprint": "mylib:FOO"` 的 `mylib.pretty` 放在 spec `libDirs` 列的目录下（或直接列
+  `…/mylib.pretty`），不论符号来自 LCSC / 自带库 / pins，都会随工程复制并登记进 `fp-lib-table`（`${KIPRJMOD}`）。
+  找不到 → `FOOTPRINT_LIB_NOT_FOUND`（构建失败，不再静默）。不要手改 `fp-lib-table`：每次 sch-build / sch-edit 都会重写它。
 
 ### GUI 改动保护（v0.10.2 起）
 

@@ -1005,8 +1005,8 @@ func stagePositions(boxes []*SyncBox, inv *SyncInventory, o SyncOptions) [][2]fl
 		}
 	}
 	// A large batch is packed about square: rows at least as wide as the
-	// root of the area it needs, not one 100 mm column (v0.12.0: 1443 new
-	// footprints, no outline → a strip 810 mm tall).
+	// root of the area it needs, not one 100 mm column (v0.12.0: a first
+	// sync of a large board without an outline was a strip ~0.8 m tall).
 	area := 0.0
 	for _, b := range boxes {
 		if b != nil {

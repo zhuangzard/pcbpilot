@@ -85,6 +85,10 @@ pcbpilot kicad netlist --sch build/<name>.kicad_sch --out conn.json
 - 一轮改完所有 spec 问题：失败报告一次列出全部（`PIN_TWO_NETS`、`PIN_NOT_ON_SYMBOL` 带符号真实脚号脚名…），不要逐条试。
 - 首次构建要联网导入 LCSC 符号（实测 31 件 ~28 s 解析 + ~39 s 布局）；缓存命中后可加 `--offline`。
 - 复现同一图：`--no-planner --fresh`（`--planner-timeout` 按墙钟，机器忙时选中的区会变）。
+- 大 spec 的质量/EG 门禁失败且 `error.fix` 提示 `--no-planner`：先 `--no-planner` 重建一次再改 spec；`--planner-timeout`
+  只阻止新的 planner 启动，超时会在 `warnings` 写明。
+- 项目封装库（`"footprint": "mylib:FOO"`）：把 `mylib.pretty` 所在目录写进 spec `libDirs`，构建会复制并登记；
+  缺库报 `FOOTPRINT_LIB_NOT_FOUND`。
 - 已有设计迁入：`kicad sch-import --epro X.epro --board B --out D [--pcb B.kicad_pcb]`（逐网对账，不过则失败），或
   `kicad sch-build --from-connectivity p1.json --from-connectivity p2.json --out D`（EasyEDA 连接 IR，每页一个文件）。
 
