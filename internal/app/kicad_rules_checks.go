@@ -247,9 +247,11 @@ func (r *rulesRun) planFloor(e rulesNetPlan, layer string) int64 {
 	return expectedFloor(c.NM, layer)
 }
 
-// resolvedFloor is what the staged rules resolve for e's class.
-func (r *rulesRun) resolvedFloor(rules []kicad.DRURule, cls string, layer string) (int64, string) {
-	return rulesTrackFloor(rules, cls, layer, r.ownedNames())
+// resolvedFloor is what rules resolve on layer for one net: its class cls
+// and the names of that net only (netNamesIn), so a rule naming another
+// planned net never counts for it.
+func (r *rulesRun) resolvedFloor(rules []kicad.DRURule, cls, layer string, names map[string]bool) (int64, string) {
+	return rulesTrackFloor(rules, cls, layer, names)
 }
 
 // ── conflicts ───────────────────────────────────────────────────────────────
@@ -458,11 +460,35 @@ const (
 )
 
 // netNames are the names a rule must avoid to be disjoint from net e: the
-// net, its planned class and every class of its current composite.
+// net, every class of its current composite and every class this plan
+// assigns it (its PP class and the insulation domain classes it joins,
+// which may not exist on the board yet).
 func (r *rulesRun) netNames(e rulesNetPlan) map[string]bool {
+	return r.netNamesIn(r.rb0, e)
+}
+
+// netNamesIn is netNames with the composite read from rb (the staged or
+// the published readback) in addition to the plan's memberships.
+func (r *rulesRun) netNamesIn(rb *kicad.RulesReadback, e rulesNetPlan) map[string]bool {
 	m := map[string]bool{e.Net: true, e.Class: true}
-	for _, c := range strings.Split(r.rb0.Nets[e.Net].Class, ",") {
-		m[c] = true
+	for _, src := range []*kicad.RulesReadback{r.rb0, rb} {
+		if src == nil {
+			continue
+		}
+		for _, c := range strings.Split(src.Nets[e.Net].Class, ",") {
+			if c != "" {
+				m[c] = true
+			}
+		}
+	}
+	if r.full != nil {
+		for dom, nets := range r.full.Domains {
+			for _, n := range nets {
+				if n == e.Net {
+					m["PPD_"+dom] = true
+				}
+			}
+		}
 	}
 	return m
 }
@@ -818,7 +844,7 @@ func (r *rulesRun) compareToPlan(rb *kicad.RulesReadback) []string {
 		// naming one layer, last match wins.
 		for _, l := range copperLayerNames(rb.CopperLayers) {
 			want := r.planFloor(e, layerGroup(l))
-			have, by := r.resolvedFloor(r.druRule, c.Name, l)
+			have, by := r.resolvedFloor(r.druRule, c.Name, l, r.netNamesIn(rb, e))
 			if have < want {
 				bad = append(bad, fmt.Sprintf("%s: the staged rules resolve track_width min %s on %s (rule %q), plan %s", e.Net, kicad.MmOfNm(have), l, by, kicad.MmOfNm(want)))
 			}
@@ -1028,7 +1054,17 @@ func (r *rulesRun) probeCheck(board, what string) rulesCheck {
 		exps = append(exps, rulesProbeExp{what: fmt.Sprintf("pair %s|%s: %s and %s %s apart", p.A, p.B, an[0], bn[0], kicad.MmOfNm(gap)),
 			kind: "clearance", ids: []int{len(tracks) - 2, len(tracks) - 1}, why: fmt.Sprintf("pair clearance %g mm", p.ClearanceMm)})
 	}
+	// DRU-backed rules always need proof that KiCad loads the .kicad_dru:
+	// with nothing to probe (every floor at or below the probe step, no
+	// pair) it is not proven — never "no probe needed".
+	druRequired := len(r.block) > 0 || len(r.rep.Isolation) > 0 || len(r.ri.Edges) > 0
 	if len(tracks) == 0 {
+		if druRequired {
+			chk.Status = gate.CannotCheck
+			chk.Items = append(chk.Items, "no .kicad_dru rule could be probed (every width floor is at or below the probe step and there is no insulation pair): that KiCad loads and applies the .kicad_dru is not proven")
+			chk.Detail = "no DRC probe possible"
+			return chk
+		}
 		chk.Detail = "no probe needed"
 		return chk
 	}
@@ -1151,7 +1187,7 @@ func (r *rulesRun) probeCheck(board, what string) rulesCheck {
 	switch {
 	case len(chk.Items) > 0:
 		chk.Status = gate.Fail
-	case druProbes > 0 && druAttr == 0:
+	case druRequired && druAttr == 0:
 		chk.Status = gate.CannotCheck
 		chk.Items = append(chk.Items, "no DRC probe is attributable to pcbpilot's .kicad_dru rules (every width / pair probe is also flagged with the .kicad_dru blocks removed): that KiCad loads and applies the .kicad_dru is not proven, so no .kicad_dru rule (minimum widths, insulation clearance / creepage, edge) counts as verified")
 	}
@@ -1211,7 +1247,7 @@ func (r *rulesRun) effectiveRules() {
 		// B.Cu or In2.Cu can weaken just that layer).
 		for _, l := range copperLayerNames(rb.CopperLayers) {
 			want := r.planFloor(e, layerGroup(l))
-			have, by := r.resolvedFloor(rules, firstClass(eff.Class), l)
+			have, by := r.resolvedFloor(rules, firstClass(eff.Class), l, r.netNamesIn(rb, e))
 			if have < want {
 				what := "no track_width minimum rule"
 				if have > 0 || by != "" {

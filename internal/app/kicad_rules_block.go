@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -264,7 +265,7 @@ func verifyRulesBlock(pcb string, classes []kicad.NetclassClassNM, copperLayers 
 		return stale("is malformed: " + err.Error())
 	}
 	st, ok := parseRulesStamp(text)
-	if blk == "" || !ok || len(st.RequestSHA) != 64 {
+	if blk == "" || !ok || !validRequestSHA(st.RequestSHA) {
 		return stale("has no valid stamp (request-sha256)")
 	}
 	if want := rulesBlockText(rulesBlockRules(classes, copperLayers), st.RequestSHA, st.Owned); blk != want {
@@ -272,6 +273,10 @@ func verifyRulesBlock(pcb string, classes []kicad.NetclassClassNM, copperLayers 
 	}
 	return nil
 }
+
+var reSHA256 = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+func validRequestSHA(s string) bool { return reSHA256.MatchString(s) }
 
 // moveRulesBlockLast re-places the rules block of the .kicad_dru next to
 // pcb behind the route block (kicad route after its netclasses step).
@@ -303,9 +308,19 @@ func (r *kicadRun) rulesStamp(ri kicadRulesInputs, inSnap *boardSnapshot) (kicad
 	if err != nil {
 		return ri, nil
 	}
-	st, ok := parseRulesStamp(string(data))
-	if !ok {
+	// A rules block is present or not by its markers; a present block must
+	// carry a valid stamp (and pass verifyRulesBlock after the netclasses).
+	_, blk, _, err := kicad.SplitDRU(strings.ReplaceAll(string(data), "\r\n", "\n"))
+	if err != nil {
+		return ri, fmt.Errorf("RULES_STALE: the board's .kicad_dru is malformed (%v); rerun `pcbpilot kicad rules --apply` with the same inputs, then route", err)
+	}
+	if blk == "" {
 		return ri, nil
+	}
+	st, ok := parseRulesStamp(string(data))
+	if !ok || !validRequestSHA(st.RequestSHA) {
+		r.summary["kicadRules"] = map[string]any{"stale": true, "appliedRequestSha256": st.RequestSHA}
+		return ri, fmt.Errorf("RULES_STALE: the board's kicad rules block has no valid request-sha256 stamp; rerun `pcbpilot kicad rules --pcb %s --intent %s --apply` with the same inputs, then route", r.o.pcb, r.o.intent)
 	}
 	board, err := os.ReadFile(r.o.pcb)
 	if err != nil {
