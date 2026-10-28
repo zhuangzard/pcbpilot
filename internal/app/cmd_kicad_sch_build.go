@@ -827,20 +827,30 @@ func resolveSymbols(parts []*sbRPart, opts sbResolveOpts, libDirs []string) (st 
 			p.Footprint = kicad.LibSymbolProperty(text, "Footprint")
 		}
 	}
+	// Footprint problems fail the build like every other spec problem: the
+	// error is returned here explicitly (the deferred handler above only
+	// fills in an error when none is returned).
 	diags = append(diags, sbResolveFootprintLibs(parts, dirs, &st)...)
+	if len(diags) > 0 {
+		return st, &sbDiagErr{diags}
+	}
 	return st, nil
 }
 
 // sbFPLibCheck answers whether a footprint "Lib:Name" is one KiCad finds
-// without the project: in a stock library or through a usable row of the
-// user's global fp-lib-table (path variables such as
-// ${KICAD10_FOOTPRINT_DIR} expanded, disabled rows skipped), the
-// footprint file itself checked, not only the nickname.
+// without the project, checked down to the footprint file. The user's
+// global fp-lib-table decides what a nickname is (path variables such as
+// ${KICAD10_FOOTPRINT_DIR} expanded): an enabled row is the library, a
+// nickname whose rows are all disabled is one KiCad cannot load. Only a
+// nickname with no global row falls back to the stock install. Stock and
+// global inspection are tracked apart: a library is reported missing only
+// when every source that could hold it was inspected; otherwise the build
+// notes it as unverified.
 type sbFPLibCheck struct {
 	once     bool
-	stock    string
+	stock    string // stock footprint dir ("" = none found)
 	tables   *kicad.FPLibTables
-	inspects bool // the global table (or the stock install) could be inspected
+	globalOK bool // a global table was read completely (no unreadable nested table)
 }
 
 // sbStockFootprintDir / sbLoadFPLibTables are what the check reads; tests
@@ -870,14 +880,39 @@ func (c *sbFPLibCheck) external(lib, name string) (res sbFPExt, where string) {
 		if tmp, err := os.MkdirTemp("", "pcbpilot-fplib-"); err == nil {
 			if t, err := sbLoadFPLibTables(tmp); err == nil {
 				c.tables = t
-				// An existing table, even an empty one, is an inspection:
-				// a library it lacks is unknown. Only "no table at all and
-				// no KiCad template" leaves nothing to inspect.
-				c.inspects = t.GlobalTable != ""
+				// An existing table, even an empty one, is an inspection;
+				// a nested table that could not be read leaves it partial.
+				c.globalOK = t.GlobalTable != ""
+				for _, l := range t.Libs {
+					if l.Scope == "global" && l.Blocked {
+						c.globalOK = false
+					}
+				}
 			}
 			os.RemoveAll(tmp)
 		}
-		c.inspects = c.inspects || c.stock != ""
+	}
+	if c.tables != nil {
+		hasRow := false
+		for _, l := range c.tables.Libs {
+			if l.Scope == "global" && l.Nickname == lib {
+				hasRow = true
+			}
+		}
+		if hasRow { // the table decides, the stock folder of the same name does not
+			ref, err := c.tables.Resolve(lib + ":" + name)
+			var fe *kicad.FPLibError
+			switch {
+			case err == nil && ref.Scope == "global":
+				return sbFPExtOK, ""
+			case errors.As(err, &fe) && fe.Code == kicad.ErrFPNotFound:
+				return sbFPExtNoFP, filepath.Dir(fe.Path)
+			case c.globalOK: // disabled everywhere, bad URI, missing folder
+				return sbFPExtNoLib, ""
+			default: // an unreadable nested table may define it
+				return sbFPExtUnverified, ""
+			}
+		}
 	}
 	if c.stock != "" {
 		if d := filepath.Join(c.stock, lib+".pretty"); sbIsDir(d) {
@@ -887,20 +922,12 @@ func (c *sbFPLibCheck) external(lib, name string) (res sbFPExt, where string) {
 			return sbFPExtNoFP, d
 		}
 	}
-	if c.tables != nil {
-		ref, err := c.tables.Resolve(lib + ":" + name)
-		if err == nil && ref.Scope == "global" {
-			return sbFPExtOK, ""
-		}
-		var fe *kicad.FPLibError
-		if errors.As(err, &fe) && fe.Code == kicad.ErrFPNotFound {
-			return sbFPExtNoFP, filepath.Dir(fe.Path)
-		}
+	// No global row and not in the stock install (or none found): missing
+	// only when the global table was inspected completely.
+	if c.globalOK {
+		return sbFPExtNoLib, ""
 	}
-	if !c.inspects {
-		return sbFPExtUnverified, ""
-	}
-	return sbFPExtNoLib, ""
+	return sbFPExtUnverified, ""
 }
 
 func sbIsDir(p string) bool {
