@@ -1681,8 +1681,9 @@ func (v *rvView) checkPullupVoltage() *rvCheck {
 		done[root] = true
 		var devs []*rvPin
 		for _, p := range v.groupPins(id) {
-			declared := pinIsInput(v, p)
-			if v.comps[p.Ref].kind == pkIC && (declared || p.Type != "passive" && p.Type != "power_in" && p.Type != "power_out") {
+			// a declared receiver counts whatever the part kind; the type
+			// inference is for ICs only
+			if pinIsInput(v, p) || v.comps[p.Ref].kind == pkIC && p.Type != "passive" && p.Type != "power_in" && p.Type != "power_out" {
 				devs = append(devs, p)
 			}
 		}
@@ -1808,16 +1809,14 @@ func (v *rvView) checkLEDs() *rvCheck {
 		has := func(s string) bool { return sbContainsStr(states, s) }
 		ok := false
 		if len(nets) <= 2 {
-			ok = limited > 0 && !has("open")
+			ok = limited > 0
 		} else { // multi-die: every non-rail terminal needs its own limiter
 			ok = limited > 0 && limited == len(nets)-rails
 		}
 		why := strings.Join(whys, "; ")
 		base := ReviewFinding{Refs: []string{ref}, netIDs: nets, Evidence: []string{why}}
 		switch {
-		case ok:
-			c.Coverage.Checked++
-		case has("ambiguous"):
+		case has("ambiguous"): // both sides must be resolved before a limiter counts
 			c.unverified(fmt.Sprintf("%s: %s", ref, why))
 		case has("open"):
 			c.Coverage.Checked++
@@ -1825,6 +1824,8 @@ func (v *rvView) checkLEDs() *rvCheck {
 			f.Severity, f.Message = "error", fmt.Sprintf("LED %s has no complete current path (%s)", ref, why)
 			f.Fix = "complete the LED's path to its supply / driver, or remove the part"
 			c.add(f)
+		case ok:
+			c.Coverage.Checked++
 		case has("drive"):
 			c.Coverage.Checked++
 			f := base
@@ -2256,7 +2257,7 @@ func (v *rvView) checkICPower() *rvCheck {
 		c.Coverage.Candidates++
 		supply, ground, typed := false, false, false
 		rails := map[string]string{}
-		var gndPins []string
+		var gndPins, badGnd []string
 		for _, p := range comp.pins {
 			gndNamed := rvGndPinRe.MatchString(p.Name)
 			designated := gndNamed && p.Type != "output" && p.Type != "power_out" || p.Type == "power_in" && v.groupIsGround(p.Net)
@@ -2264,6 +2265,8 @@ func (v *rvView) checkICPower() *rvCheck {
 				gndPins = append(gndPins, p.Ref+"."+p.Num)
 				if v.groupIsGround(p.Net) {
 					ground = true
+				} else if !p.NC {
+					badGnd = append(badGnd, p.Ref+"."+p.Num)
 				}
 				continue
 			}
@@ -2285,12 +2288,14 @@ func (v *rvView) checkICPower() *rvCheck {
 				Fix: "connect " + r + "'s power pins to its rail", Evidence: []string{"pin types: no power_in pin on a connected non-ground net"}})
 		}
 		switch {
+		case len(badGnd) > 0:
+			// every designated ground pin must reach ground: a connected GND
+			// does not excuse a VSS / EP left on another net
+			c.add(ReviewFinding{Severity: "error", Message: fmt.Sprintf("%s ground pin(s) %s are not on a ground net", r, strings.Join(badGnd, ", ")), Refs: []string{r}, Pins: badGnd,
+				Fix: "connect " + r + "'s ground / exposed pad pins to GND", Evidence: []string{"designated ground pins (GND/VSS/EP-named or power_in on ground): " + strings.Join(gndPins, ", "), "not on ground: " + strings.Join(badGnd, ", ")}})
 		case ground:
 		case comp.fieldRole("no-ground"):
 			c.exempt(r, "no ground pin by design", "component field ReviewRole")
-		case len(gndPins) > 0:
-			c.add(ReviewFinding{Severity: "error", Message: fmt.Sprintf("%s ground pin(s) %s are not on a ground net", r, strings.Join(gndPins, ", ")), Refs: []string{r}, Pins: gndPins,
-				Fix: "connect " + r + "'s ground / exposed pad to GND", Evidence: []string{"designated ground pins (GND/VSS/EP-named or power_in on ground): " + strings.Join(gndPins, ", ")}})
 		case len(rails) >= 2:
 			c.exempt(r, fmt.Sprintf("supply terminals only, between %s (no ground pin by design)", strings.Join(rvRailNames(v, rails), " and ")), "pin types (netlist)")
 		default:
@@ -2421,30 +2426,23 @@ func (v *rvView) railExempt(net, ref string) (string, string, bool) {
 // several parts is a warning (shared coverage) — distance is EG-06's.
 func (v *rvView) checkDecoupling() *rvCheck {
 	c := v.check(RvDecoupling, "netlist", "pin-types", "part kinds")
-	loads := map[string][]string{} // rail group root → parts
+	loads := map[string][]string{} // rail group root → power pins (REF.PIN)
 	for _, r := range v.icParts() {
-		seen := map[string]bool{}
 		for _, p := range v.comps[r].pins {
-			if p.Type != "power_in" || v.groupIsGround(p.Net) || netname.IsUnconnected(p.Net) || seen[v.find(p.Net)] {
-				continue
+			if p.Type == "power_in" && !v.groupIsGround(p.Net) && !netname.IsUnconnected(p.Net) {
+				loads[v.find(p.Net)] = append(loads[v.find(p.Net)], r+"."+p.Num)
 			}
-			seen[v.find(p.Net)] = true
-			loads[v.find(p.Net)] = append(loads[v.find(p.Net)], r)
 		}
 	}
 	for _, r := range v.icParts() {
-		seen := map[string]bool{}
 		for _, p := range v.comps[r].pins {
 			if p.Type != "power_in" || v.groupIsGround(p.Net) || netname.IsUnconnected(p.Net) {
 				continue
 			}
 			root := v.find(p.Net)
-			if seen[root] {
-				continue
-			}
-			seen[root] = true
+			key := r + "." + p.Num
 			c.Coverage.Candidates++
-			subj := r + " " + v.name(p.Net)
+			subj := key + " " + v.name(p.Net)
 			if why, src, ok := v.railExempt(p.Net, r); ok {
 				c.exempt(subj, why, src)
 				if strings.Contains(src, "intent") {
@@ -2454,33 +2452,33 @@ func (v *rvView) checkDecoupling() *rvCheck {
 			}
 			c.Coverage.Checked++
 			caps, other := v.capsTo(p.Net)
-			var pins []string
-			for _, q := range v.comps[r].pins {
-				if q.Type == "power_in" && v.find(q.Net) == root {
-					pins = append(pins, r+"."+q.Num)
-				}
-			}
 			if len(caps) == 0 {
-				ev := []string{fmt.Sprintf("power_in pin(s) %s on %s", strings.Join(pins, ", "), v.name(p.Net)), "no capacitor from " + v.name(p.Net) + " to ground"}
+				ev := []string{fmt.Sprintf("power_in pin %s (%s) on %s", key, p.Name, v.name(p.Net)), "no capacitor from " + v.name(p.Net) + " to ground"}
 				if len(other) > 0 {
 					ev = append(ev, "capacitors to other nets: "+strings.Join(other, ", "))
 				}
-				c.add(ReviewFinding{Severity: "error", Message: fmt.Sprintf("%s supply %s (%s) has no decoupling capacitor to ground", r, v.name(p.Net), strings.Join(pins, ", ")),
-					Refs: []string{r}, Pins: pins, netIDs: []string{p.Net},
-					Fix:      fmt.Sprintf("add a 100 nF ceramic from %s to GND at %s", v.name(p.Net), r),
+				c.add(ReviewFinding{Severity: "error", Message: fmt.Sprintf("%s supply pin %s (%s) on %s has no decoupling capacitor to ground", r, key, p.Name, v.name(p.Net)),
+					Refs: []string{r}, Pins: []string{key}, netIDs: []string{p.Net},
+					Fix:      fmt.Sprintf("add a 100 nF ceramic from %s to GND at %s", v.name(p.Net), key),
 					Evidence: ev})
 				continue
 			}
-			if n := len(loads[root]); n > 1 {
-				var others []string
-				for _, o := range loads[root] {
-					if o != r {
-						others = append(others, o)
-					}
+			// the capacitor set of this pin also serves other power pins —
+			// of other parts, or of this package (VDD1/VDD2 on one cap)
+			var others []string
+			for _, o := range loads[root] {
+				if o != key {
+					others = append(others, o)
 				}
-				c.add(ReviewFinding{Severity: "warning", Certainty: "likely", Message: fmt.Sprintf("%s supply %s shares its decoupling: capacitor(s) %s also serve %s (%d parts on the rail)", r, v.name(p.Net), strings.Join(caps, ", "), strings.Join(others, ", "), n),
-					Refs: []string{r}, Pins: pins, netIDs: []string{p.Net},
-					Fix:      fmt.Sprintf("give %s its own 100 nF on %s (shared coverage is not local decoupling)", r, v.name(p.Net)),
+			}
+			if len(others) > 0 {
+				shown := others
+				if len(shown) > 6 {
+					shown = append(append([]string(nil), shown[:6]...), fmt.Sprintf("… %d more", len(others)-6))
+				}
+				c.add(ReviewFinding{Severity: "warning", Certainty: "likely", Message: fmt.Sprintf("%s supply pin %s on %s shares its decoupling: capacitor(s) %s also serve %s (%d power pins on the rail)", r, key, v.name(p.Net), strings.Join(caps, ", "), strings.Join(shown, ", "), len(loads[root])),
+					Refs: []string{r}, Pins: []string{key}, netIDs: []string{p.Net},
+					Fix:      fmt.Sprintf("give %s its own 100 nF on %s (shared coverage is not local decoupling)", key, v.name(p.Net)),
 					Evidence: []string{"capacitor set on " + v.name(p.Net) + ": " + strings.Join(caps, ", ")}})
 			}
 		}
@@ -2517,6 +2515,16 @@ func (v *rvView) regulators() map[string]rvReg {
 		}
 	}
 	return out
+}
+
+// regFunc is the intent block function of a regulator (buck, boost, ldo;
+// "" unknown).
+func (v *rvView) regFunc(r string) string {
+	w := v.in.Hints.Regulators[r]
+	if i := strings.LastIndex(w, " "); i >= 0 && strings.HasPrefix(w, "intent block") {
+		return w[i+1:]
+	}
+	return ""
 }
 
 // rvReg is why a part is taken for a regulator; Proven: intent says so.
@@ -2561,27 +2569,59 @@ func (v *rvView) regPins(r string) (outs, ins []*rvPin, byType bool) {
 }
 
 // outputNode is where a regulator output pin's capacitor belongs: the pin's
-// own net, or for a switch-node pin (SW/LX/PH) the far side of the one
-// inductor on it (a buck's output). ok false: a switch node without a
-// single inductor (the output cannot be traced).
-func (v *rvView) outputNode(p *rvPin) (string, string, bool) {
+// own net, or for a switch-node pin (SW/LX/PH) the output the topology
+// leads to — a buck: SW → the one inductor → output; a boost: SW → the
+// rectifier diode (anode on SW) → output. The function comes from the
+// intent block (fn); without it, or when the trace does not resolve, or it
+// lands on the regulator's own input, the output is unresolved (ok false)
+// and the input capacitor is never taken for the output one.
+func (v *rvView) outputNode(r string, p *rvPin, fn string, ins []*rvPin) (string, string, bool) {
 	if !rvSwPinRe.MatchString(p.Name) {
 		return p.Net, "", true
 	}
-	var ind []*rvPin
-	for _, q := range v.groupPins(p.Net) {
-		if v.comps[q.Ref].kind == pkInductor {
-			ind = append(ind, q)
+	input := map[string]bool{}
+	for _, q := range ins {
+		input[v.find(q.Net)] = true
+	}
+	var far *rvPin
+	var via string
+	switch fn {
+	case "buck":
+		var ind []*rvPin
+		for _, q := range v.groupPins(p.Net) {
+			if v.comps[q.Ref].kind == pkInductor {
+				ind = append(ind, q)
+			}
 		}
+		if len(ind) != 1 {
+			return "", "buck switch node " + v.name(p.Net) + ": not exactly one inductor", false
+		}
+		far, via = v.farPin(ind[0]), ind[0].Ref
+	case "boost":
+		var d []*rvPin
+		for _, q := range v.groupPins(p.Net) {
+			if k := v.comps[q.Ref].kind; (k == pkDiode || k == pkLED) && v.diodeRole(q) == "A" && !rvClampRe.MatchString(v.comps[q.Ref].c.Part) {
+				d = append(d, q)
+			}
+		}
+		if len(d) != 1 {
+			return "", "boost switch node " + v.name(p.Net) + ": no single rectifier diode (anode on SW; a synchronous FET is not traced)", false
+		}
+		ms, _ := v.dcMates(d[0], "out")
+		if len(ms) == 1 {
+			far = ms[0]
+		}
+		via = d[0].Ref
+	default:
+		return "", "switch pin " + r + "." + p.Num + " of a regulator whose topology is not declared (intent buck/boost block)", false
 	}
-	if len(ind) != 1 {
-		return "", "", false
+	if far == nil || netname.IsUnconnected(far.Net) {
+		return "", fn + " switch node " + v.name(p.Net) + " → " + via + ": no far terminal", false
 	}
-	far := v.farPin(ind[0])
-	if far == nil {
-		return "", "", false
+	if input[v.find(far.Net)] {
+		return "", fn + " switch node " + v.name(p.Net) + " → " + via + " → " + v.name(far.Net) + " is the regulator's input, not its output", false
 	}
-	return far.Net, "switch node " + v.name(p.Net) + " → " + ind[0].Ref + " → " + v.name(far.Net), true
+	return far.Net, "switch node " + v.name(p.Net) + " → " + via + " → " + v.name(far.Net), true
 }
 
 func (v *rvView) capless(r string) (string, bool) {
@@ -2634,11 +2674,8 @@ func (v *rvView) checkReg(id string, output bool) *rvCheck {
 			node, via := p.Net, ""
 			if output {
 				var ok bool
-				if node, via, ok = v.outputNode(p); !ok {
-					c.Coverage.Checked++
-					c.add(ReviewFinding{Severity: "warning", Certainty: "likely", Message: fmt.Sprintf("regulator %s switch pin %s.%s (%s): no single inductor to its output, output capacitor not evaluated", r, r, p.Num, p.Name),
-						Refs: []string{r}, Pins: []string{r + "." + p.Num}, netIDs: []string{p.Net}, Fix: "check the switch node goes through one inductor to the output and its capacitor",
-						Evidence: []string{"regulator: " + reg.Why}, Missing: []string{"output node of " + r}})
+				if node, via, ok = v.outputNode(r, p, v.regFunc(r), ins); !ok {
+					c.unverified(fmt.Sprintf("%s: output of switch pin %s.%s (%s) not resolved: %s", r, r, p.Num, p.Name, via))
 					continue
 				}
 			}

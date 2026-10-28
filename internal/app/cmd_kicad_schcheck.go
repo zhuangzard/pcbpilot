@@ -81,12 +81,16 @@ derive: net roles, rail voltages, regulator blocks, the optional review{}
 roles) and --sim sim.json (pcbpilot sim power: rail voltages) when given.
   connections   i2c-pullup, open-drain-pullup, pullup-voltage, led-limiter,
                 floating-input, output-conflict
-  power         ic-power-ground (designated GND/VSS/EP pins; a part with
-                supply terminals only is exempt), decoupling (exact cap set
-                per power pin; shared coverage = warning),
+  power         ic-power-ground (every designated GND/VSS/EP pin must reach
+                ground; a part with supply terminals only is exempt),
+                decoupling (per power pin: its exact cap set; a set that
+                also serves another power pin, even of the same part, is a
+                shared-coverage warning),
                 regulator-output-cap / regulator-input-cap (proven only for
                 an intent ldo/buck/boost block; a power_out pin alone is
-                likely; a SW/LX pin is traced through its inductor),
+                likely; a SW/LX pin is traced by the declared topology: buck
+                SW → inductor → output, boost SW → rectifier → output;
+                undeclared or landing on the input is cannot-check),
                 bulk-cap (>= 1 uF floor)
   net integrity merged-nets (ERC multiple_net_names), single-pin-net,
                 hier-mismatch (sheet pin <-> hierarchical label)

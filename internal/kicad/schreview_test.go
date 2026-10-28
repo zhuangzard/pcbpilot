@@ -1081,3 +1081,104 @@ func TestReviewLEDDieNumbers(t *testing.T) {
 	b.addNode("GND", "D1.RK")
 	want(t, b.review(t, ReviewHints{}), RvLEDLimiter, "pass")
 }
+
+// TestReviewRound4: every designated ground pin individually, both LED
+// sides resolved, boost output traced through its rectifier, per-pin
+// decoupling, declared receivers of any part kind.
+func TestReviewRound4(t *testing.T) {
+	// GND connected, VSS and EP on other nets → error naming both
+	m := rvFed().cap("C1", "10u", "+3V3", "GND")
+	m.part("U1", "Synth:MCU", "", "1:VDD:power_in", "2:GND:power_in", "3:VSS:power_in", "4:EP:passive")
+	m.addNode("+3V3", "U1.1")
+	m.addNode("GND", "U1.2")
+	m.net("/X1", "U1.3")
+	m.net("/X2", "U1.4")
+	c := want(t, m.review(t, ReviewHints{}), RvICPowerGround, "fail", "error")
+	if len(c.Findings[0].Pins) != 2 || !strings.Contains(c.Findings[0].Message, "U1.3") || !strings.Contains(c.Findings[0].Message, "U1.4") {
+		t.Fatal(c.Findings[0])
+	}
+
+	led := func(b *rvT, ref, a, k string) {
+		b.part(ref, "Device:LED", "LED", "1:K:passive", "2:A:passive")
+		b.addNode(k, ref+".1")
+		b.addNode(a, ref+".2")
+	}
+	// supply → R → LED → transistor: the limiter does not settle the other side
+	b := rvFed().res("R1", "1k", "+3V3", "/LA")
+	b.part("Q1", "Transistor_FET:Q_NMOS_GDS", "", "1:G:input", "2:D:passive", "3:S:passive")
+	b.addNode("/LK", "Q1.2")
+	b.addNode("GND", "Q1.3")
+	b.net("/G", "Q1.1")
+	led(b, "D1", "/LA", "/LK")
+	want(t, b.review(t, ReviewHints{}), RvLEDLimiter, "cannot-check")
+	// … or an unknown-polarity diode on the far side
+	b = rvFed().res("R1", "1k", "+3V3", "/LA")
+	b.part("D9", "Device:D", "D", "1:1:passive", "2:2:passive")
+	b.addNode("/LK", "D9.1")
+	b.addNode("GND", "D9.2")
+	led(b, "D1", "/LA", "/LK")
+	want(t, b.review(t, ReviewHints{}), RvLEDLimiter, "cannot-check")
+
+	// boost: VIN — L1 — SW — D1 — VOUT; input cap present, output cap missing
+	boost := func(outCap bool) *rvT {
+		b := rvFed().cap("C1", "10u", "+3V3", "GND")
+		b.part("U4", "Synth:BOOST", "", "1:VIN:power_in", "2:GND:power_in", "3:SW:power_out")
+		b.addNode("+3V3", "U4.1")
+		b.addNode("GND", "U4.2")
+		b.part("L1", "Device:L", "10u", "1:1:passive", "2:2:passive")
+		b.addNode("+3V3", "L1.1")
+		b.net("/SW", "U4.3", "L1.2")
+		b.part("D1", "Device:D_Schottky", "SS14", "1:K:passive", "2:A:passive")
+		b.addNode("/SW", "D1.2")
+		b.net("+12V", "D1.1")
+		b.ic("U8", "+12V").cap("C8", "100n", "+12V", "GND")
+		if outCap {
+			b.cap("C4", "22u", "+12V", "GND")
+		}
+		return b
+	}
+	bo := ReviewHints{Regulators: map[string]string{"U4": "intent block boost"}}
+	c = want(t, boost(false).review(t, bo), RvRegOutputCap, "pass") // C8 (100 nF) is on +12V: a cap is there
+	_ = c
+	b = boost(false)
+	b.nl.Components = b.nl.Components[:len(b.nl.Components)-2] // drop U8 and C8: +12V has no cap
+	for i := range b.nl.Nets {
+		var keep []SchNetNode
+		for _, n := range b.nl.Nets[i].Nodes {
+			if n.Ref != "U8" && n.Ref != "C8" {
+				keep = append(keep, n)
+			}
+		}
+		b.nl.Nets[i].Nodes = keep
+	}
+	c = want(t, b.review(t, bo), RvRegOutputCap, "fail", "error")
+	if c.Findings[0].Nets[0] != "+12V" {
+		t.Fatal(c.Findings[0])
+	}
+	want(t, boost(true).review(t, bo), RvRegOutputCap, "pass")
+	// the same part declared a buck: the inductor leads to its input → unresolved
+	want(t, b.review(t, ReviewHints{Regulators: map[string]string{"U4": "intent block buck"}}), RvRegOutputCap, "cannot-check")
+	// no declared topology: unresolved, never the input cap
+	want(t, b.review(t, ReviewHints{}), RvRegOutputCap, "cannot-check")
+
+	// VDD1 / VDD2 of one package on one cap: each pin is shared
+	d := rvFed().cap("C1", "100n", "+3V3", "GND")
+	d.part("U1", "Synth:IC", "", "1:VDD1:power_in", "2:VDD2:power_in", "3:GND:power_in")
+	d.addNode("+3V3", "U1.1")
+	d.addNode("+3V3", "U1.2")
+	d.addNode("GND", "U1.3")
+	c = want(t, d.review(t, ReviewHints{}), RvDecoupling, "pass", "warning", "warning")
+	if c.Coverage.Candidates != 2 {
+		t.Fatal(c.Coverage)
+	}
+
+	// a declared receiver on a part of kind "other" (X1) is checked
+	x := rvBase().cap("C1", "10u", "+3V3", "GND")
+	x.net("+5V")
+	x.ic("U9", "+5V").cap("C9", "10u", "+5V", "GND")
+	x.part("X1", "Synth:MODULE", "", "1:CFG:passive")
+	x.net("/CFG", "X1.1").res("R1", "4k7", "/CFG", "+5V")
+	h := ReviewHints{InputPin: map[string]string{"X1.1": "intent review.inputPins"}, PinMaxV: map[string]float64{"X1.1": 1.8},
+		NetVoltage: map[string]float64{"+5V": 5}, VoltageSource: map[string]string{"+5V": "intent"}}
+	want(t, x.review(t, h), RvPullupVoltage, "fail", "error")
+}
