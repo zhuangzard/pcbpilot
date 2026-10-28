@@ -970,7 +970,9 @@ func sortSyncOps(ops []SyncOp) {
 // given order) in rows starting 10 mm right of the board outline (right of
 // any footprint already parked there, too), or at --staging X,Y; the origin
 // when the board has neither outline nor footprints. Rows are as wide as
-// the outline (at least 100 mm). Deterministic: same input, same places.
+// the outline, at least 100 mm, and at least the square root of the batch's
+// area (a large batch is a compact block, not one long column).
+// Deterministic: same input, same places.
 func stagePositions(boxes []*SyncBox, inv *SyncInventory, o SyncOptions) [][2]float64 {
 	gap := o.StagingGap
 	if gap <= 0 {
@@ -1002,6 +1004,18 @@ func stagePositions(boxes []*SyncBox, inv *SyncInventory, o SyncOptions) [][2]fl
 			}
 		}
 	}
+	// A large batch is packed about square: rows at least as wide as the
+	// root of the area it needs, not one 100 mm column (v0.12.0: 1443 new
+	// footprints, no outline → a strip 810 mm tall).
+	area := 0.0
+	for _, b := range boxes {
+		if b != nil {
+			area += (b.MaxX - b.MinX + gap) * (b.MaxY - b.MinY + gap)
+		} else {
+			area += (1 + gap) * (1 + gap)
+		}
+	}
+	width = math.Max(width, math.Ceil(math.Sqrt(area)))
 	out := make([][2]float64, len(boxes))
 	cx, cy, rowH := x0, y0, 0.0
 	for i, b := range boxes {

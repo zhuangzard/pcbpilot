@@ -1073,7 +1073,7 @@ func TestPcbSyncLiveSlashSheetName(t *testing.T) {
 		t.Fatalf("build: %v %+v", err, res)
 	}
 	o := syncOpts(filepath.Join(out, "sl.kicad_sch"), filepath.Join(out, "sl.kicad_pcb"))
-	o.inPlace, o.create = true, true
+	o.create = true // a new board: --create alone writes it (no --in-place)
 	rep, code := runSync(t, o)
 	if code != 0 || !rep.Committed {
 		t.Fatalf("exit %d gates %+v errors %+v", code, rep.Gates, rep.Errors)

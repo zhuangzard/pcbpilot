@@ -129,7 +129,10 @@ gates passed (--no-parity needs --force-unverified to commit).
 
 Modes: --dry-run and --check (exit 3 on drift) only read; --plan-out writes the
 plan with its revision, --apply-plan P --revision R applies it only if the
-files still give that revision.
+files still give that revision. --create starts a new board when --pcb does
+not exist and writes it there (as --in-place) unless --out names another
+target; without an outline the new footprints are staged in a compact block
+from the origin.
 
 Exit: 0 pass, 1 error/refused, 2 usage, 3 drift (--check), 4 locked / changed /
 revision mismatch, 5 not verified (cannot-check, --no-parity), 6 verify failed.
@@ -156,7 +159,7 @@ Report: --report (default <target>.pcb-sync.json), also printed on stdout.`,
 	f.StringSliceVar(&o.update, "update", nil, "what to update: values,footprints,fields,refs,dnp (default all; pad nets always)")
 	f.StringSliceVar(&o.fieldsIgnore, "fields-ignore", nil, "footprint fields never set or removed")
 	f.BoolVar(&o.renameNets, "rename-nets", true, "rename a board net (with its copper) when all its pads move to one new name")
-	f.BoolVar(&o.create, "create", false, "start a new board when --pcb does not exist")
+	f.BoolVar(&o.create, "create", false, "start a new board when --pcb does not exist (written to --pcb unless --out is given)")
 	f.StringVar(&o.staging, "staging", "auto", "where new footprints go: auto (10 mm right of the outline) or X,Y in mm")
 	f.Float64Var(&o.stagingGap, "staging-gap", 2, "gap between staged footprints (mm)")
 	f.StringVar(&o.report, "report", "", "report path (default <target>.pcb-sync.json)")
@@ -255,6 +258,13 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 		fmt.Fprintf(stderr, "pcb-sync: "+f+"\n", a...)
 		return exitCodeError{2}
 	}
+	// --create on a board that does not exist yet writes that new board:
+	// nothing is there to keep, so it is --in-place unless --out names
+	// another target (v0.12.1; before, a bare --create was a usage error).
+	impliedInPlace := false
+	if o.create && o.out == "" && !o.inPlace && !o.check && !o.dryRun && o.planOut == "" && o.pcb != "" && !fileExists(o.pcb) {
+		o.inPlace, impliedInPlace = true, true
+	}
 	// Flags.
 	switch {
 	case o.sch == "":
@@ -284,6 +294,9 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 	}
 	readOnly := o.check || o.dryRun || o.planOut != ""
 	if !readOnly && o.out == "" && !o.inPlace {
+		if o.create {
+			return usage("--create: %s already exists; give --in-place to sync it, or --out NEW.kicad_pcb", o.pcb)
+		}
 		return usage("give --out NEW.kicad_pcb or --in-place (or --dry-run / --check / --plan-out)")
 	}
 	// Read-only runs print the report and write it only to an explicit
@@ -371,6 +384,9 @@ func runPcbSync(o pcbSyncOpts, stdout, stderr io.Writer) error {
 		Ops: []kicad.SyncOp{}, Staged: []kicad.SyncStaged{}, OrphanCopper: []kicad.SyncCopper{}, DanglingCopper: []kicad.SyncCopper{},
 		Locks: []pcbSyncLock{}, Files: []pcbSyncFile{}, Gates: []pcbSyncGate{}, Errors: []kicad.SyncError{},
 		Match: kicad.SyncMatch{UnmatchedSymbols: []string{}, UnmatchedFootprints: []string{}}}
+	if impliedInPlace {
+		rep.Warnings = append(rep.Warnings, "--create: "+o.pcb+" did not exist; the new board is written there (--in-place)")
+	}
 	switch {
 	case o.check:
 		rep.Mode = "check"

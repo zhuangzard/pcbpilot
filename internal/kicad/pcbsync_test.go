@@ -3,6 +3,7 @@ package kicad
 import (
 	"encoding/json"
 	"flag"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -703,6 +704,22 @@ func TestSyncStagingDeterministic(t *testing.T) {
 	none := stagePositions(boxes[:1], &SyncInventory{}, SyncOptions{})
 	if none[0] != [2]float64{5, 3} {
 		t.Fatalf("no outline, no footprints: from the origin, got %v", none)
+	}
+	// A large batch on a new board (no outline) is a compact block, not
+	// one 100 mm wide column (1500 mm tall): 1500 boxes of 10×6 mm with 2 mm
+	// gaps need about 380 mm × 380 mm.
+	var many []*SyncBox
+	for i := 0; i < 1500; i++ {
+		many = append(many, &SyncBox{-5, -3, 5, 3})
+	}
+	big := stagePositions(many, &SyncInventory{}, SyncOptions{StagingGap: 2})
+	minX, minY, maxX, maxY := big[0][0], big[0][1], big[0][0], big[0][1]
+	for _, p := range big {
+		minX, minY, maxX, maxY = math.Min(minX, p[0]), math.Min(minY, p[1]), math.Max(maxX, p[0]), math.Max(maxY, p[1])
+	}
+	w, h := maxX-minX+10, maxY-minY+6
+	if h > 1.5*w || w > 1.5*h || h > 450 {
+		t.Fatalf("1500 staged footprints span %.0f × %.0f mm: want a compact block", w, h)
 	}
 }
 
