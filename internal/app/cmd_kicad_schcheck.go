@@ -116,8 +116,13 @@ every error and cannot-check item in full, then one line per check /
 missing evidence with a per-part breakdown; checks[] keeps every finding.
 Exemptions need an explicit role (intent review{}, a ReviewRole /
 InternalPullup component field, the part kind) and name their source; a low
-current alone exempts nothing. Connector pins are the off-board boundary
-(info). Not covered: crystal load caps, strap pins, feedback values, ESR,
+current alone exempts nothing. A connector (a KiCad Connector* symbol
+library or Connector_* footprint library, intent review.connectors /
+ReviewRole=connector, or a J/P part without power_in pins) is the
+off-board boundary: info only where the off-board side could provide what
+is missing (a line with one on-board device); two on-board devices on a
+line keep the on-board finding; a connector's power inputs are checked.
+Not covered: crystal load caps, strap pins, feedback values, ESR,
 sequencing, transient protection.
 --waivers takes signed {gate:"sch-review", match:<finding fingerprint>,
 reason, by} entries: a waiver accepts that one finding (reported as waived,

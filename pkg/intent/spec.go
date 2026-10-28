@@ -97,6 +97,11 @@ type ReviewNotes struct {
 	InputPins      []string   `json:"inputPins,omitempty"`
 	CurrentDrivers []string   `json:"currentDrivers,omitempty"`
 	CommonPins     [][]string `json:"commonPins,omitempty"`
+	// Connectors: parts that are connectors (the off-board boundary)
+	// although not from a KiCad connector library; GroundedPowerPins:
+	// power pins the datasheet ties to ground.
+	Connectors        []string `json:"connectors,omitempty"`
+	GroundedPowerPins []string `json:"groundedPowerPins,omitempty"`
 }
 
 // SpecEdge is spec.json "edge".

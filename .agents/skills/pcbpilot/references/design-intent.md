@@ -63,7 +63,8 @@ pcbpilot intent derive --connectivity sch-p1.json --connectivity sch-p2.json \
           "tolerantPins":["U4.SDA"],"pinDomains":{"U1.PA9":"+1V8"},"pinMaxV":{"U4.SDA":3.6},
           "testPoints":["TP3"],"singlePinNets":["/SPARE"],"referenceRails":["/VREF"],
           "modules":["U8"],"caplessRegulators":["U5"],"chargePumps":["U9"],"aliases":[["+3V3","VDD_IO"]],
-          "inputPins":["U7.12"],"currentDrivers":["U3.LED1"],"commonPins":[["U5.2","U5.4"]]}
+          "inputPins":["U7.12"],"currentDrivers":["U3.LED1"],"commonPins":[["U5.2","U5.4"]],
+          "connectors":["BUS1"],"groundedPowerPins":["U1.VBAT"]}
 ```
 
 脚写 `REF.脚号` 或 `REF.脚名`；网写网名（显示名或全名，歧义/不存在的名字记入 `review.notes`，不猜）；件写位号。
@@ -75,6 +76,11 @@ pcbpilot intent derive --connectivity sch-p1.json --connectivity sch-p2.json \
 - `inputPins`：库里标成 passive/unspecified、实为输入的脚（否则不算接收端）；`currentDrivers`：调节 LED 电流的脚
   （只按脚名 LED1/K/CC 识别的只给 warning）；`commonPins`：符号没叠放、但电气上是同一个脚的多个输出脚（否则同名的
   两个输出——双运放的两个 OUT——按冲突报），写 `REF.脚号` 或 `REF.脚名`（脚名不唯一时拒绝并记 note，改用脚号）。
+- `connectors`：不在 KiCad 连接器库（`Connector*` 符号库 / `Connector_*` 封装库）里的连接器，如 PCI 金手指；
+  只有这三种来源（外加 J/P 位号且没有 power_in 脚）才算连接器。连接器的 power_in 脚照样检查，确属不用的写豁免。
+  连接器是板外边界：只有一个板上器件的 I2C/开漏线，上拉可以在板外 → info；两个及以上板上器件共用的线，板上必须
+  自己上拉 → 照样 error/warning。
+- `groundedPowerPins`：数据手册要求接地的电源脚（否则非地名的 power_in 脚接地报 error；V−/VEE 接地视为单电源负端）。
 - `pushPullOutputs` 声明的 GPIO 同时算推挽输出参与多输出冲突检查：两个声明推挽的脚接在一起即报错。
 - MCU GPIO（bidirectional/tri_state）方向未知，不算 push-pull 驱动；配成推挽输出的写 `pushPullOutputs`。
 - 上拉电压域：上拉到信号脚自己的电源组（单电源器件取它唯一的电源轨，多电源器件写 `pinDomains`）直接通过，不需要电压；

@@ -170,12 +170,22 @@ func TestReviewI2C(t *testing.T) {
 	// negative: pull-ups, one through a 0 Ω link
 	b := bus().res("R1", "4k7", "/SDA", "+3V3").res("R9", "0R", "/SCL", "/SCL_B").res("R2", "4k7", "/SCL_B", "+3V3")
 	want(t, b.review(t, ReviewHints{}), RvI2CPullup, "pass")
-	// off-board: leaves through a connector → info
+	// a connector on a bus two on-board devices share does not excuse the
+	// on-board pull-up: still an error
 	b = bus()
 	b.part("J1", "Connector:Conn_01x02", "", "1:Pin_1:passive", "2:Pin_2:passive")
 	b.addNode("/SDA", "J1.1")
 	b.addNode("/SCL", "J1.2")
-	want(t, b.review(t, ReviewHints{}), RvI2CPullup, "pass", "info", "info")
+	c = want(t, b.review(t, ReviewHints{}), RvI2CPullup, "fail", "error", "error")
+	if !strings.Contains(strings.Join(c.Findings[0].Evidence, " "), "on-board devices") {
+		t.Fatal(c.Findings[0])
+	}
+	// one on-board device, the bus completed off-board: the pull-up may be
+	// there → info
+	one := rvBase().ic("U1", "+3V3", "3:SDA:bidirectional", "4:SCL:bidirectional").cap("C1", "10u", "+3V3", "GND")
+	one.part("J1", "Connector:Conn_01x02", "", "1:Pin_1:passive", "2:Pin_2:passive")
+	one.net("/SDA", "U1.3", "J1.1").net("/SCL", "U1.4", "J1.2")
+	want(t, one.review(t, ReviewHints{}), RvI2CPullup, "pass", "info", "info")
 	// heuristic: recognised by the net name only → warning, not error
 	b = rvBase().ic("U1", "+3V3", "3:IO1:bidirectional").ic("U2", "+3V3", "3:IO1:bidirectional").cap("C1", "10u", "+3V3", "GND")
 	b.net("/I2C_SDA", "U1.3", "U2.3")
@@ -1269,8 +1279,9 @@ func TestReviewRound5(t *testing.T) {
 	want(t, bc.review(t, ReviewHints{}), RvLEDLimiter, "pass")
 }
 
-// TestReviewBusConnector: a PCI edge connector (BUS1, footprint BUSPCI)
-// whose ±12 V pins are power_in and unused is a connector, not an IC.
+// TestReviewBusConnector: BUS1 (footprint BUSPCI) with power_in pins is
+// no connector by name: its unconnected power input is an error; declared
+// a connector its power inputs are checked all the same.
 func TestReviewBusConnector(t *testing.T) {
 	b := rvFed().cap("C1", "10u", "+3V3", "GND")
 	b.part("BUS1", "Synth:BUSPCI_5V", "BUSPCI_5V", "1:+12V:power_in", "2:+5V:power_in", "3:GND:power_in")
@@ -1278,5 +1289,120 @@ func TestReviewBusConnector(t *testing.T) {
 	b.net("unconnected-(BUS1-+12V-Pad1)", "BUS1.1")
 	b.addNode("+3V3", "BUS1.2")
 	b.addNode("GND", "BUS1.3")
-	want(t, b.review(t, ReviewHints{}), RvICPowerGround, "not-applicable")
+	// not a KiCad connector library, no intent role: an on-board part whose
+	// unconnected power input is an error
+	c := want(t, b.review(t, ReviewHints{}), RvICPowerGround, "fail", "error")
+	if !strings.Contains(c.Findings[0].Message, "BUS1.1") {
+		t.Fatal(c.Findings[0])
+	}
+	// declared a connector: its power inputs are still checked
+	want(t, b.review(t, ReviewHints{Connector: map[string]string{"BUS1": "intent review.connectors"}}), RvICPowerGround, "fail", "error")
+}
+
+// TestReviewRound6: package-shared resistors, reversed LEDs, per-die
+// findings, positive supply evidence per power pin.
+func TestReviewRound6(t *testing.T) {
+	// common-anode RGB: one resistor from the common anode to +3V3, the
+	// cathodes straight to driver pins → every die unlimited
+	ca := rvFed().res("R1", "330", "+3V3", "/CA").ic("U1", "+3V3", "3:PR:output", "4:PG:output", "5:PB:output").cap("C1", "10u", "+3V3", "GND")
+	ca.part("D1", "Synth:LED_RGB_CA", "LED", "1:A:passive", "2:RK:passive", "3:GK:passive", "4:BK:passive")
+	ca.addNode("/CA", "D1.1")
+	for i, n := range []string{"/R", "/G", "/B"} {
+		ca.net(n, fmt.Sprintf("D1.%d", i+2), fmt.Sprintf("U1.%d", i+3))
+	}
+	c := want(t, ca.review(t, ReviewHints{}), RvLEDLimiter, "fail", "error", "error", "error")
+	if !strings.Contains(c.Findings[0].Message, "die") {
+		t.Fatal(c.Findings[0])
+	}
+	// common-cathode: one resistor from the common cathode to GND
+	cc := rvFed().res("R1", "330", "/CK", "GND").ic("U1", "+3V3", "3:PR:output", "4:PG:output").cap("C1", "10u", "+3V3", "GND")
+	cc.part("D1", "Synth:LED_RG_CC", "LED", "1:K:passive", "2:RA:passive", "3:GA:passive")
+	cc.addNode("/CK", "D1.1")
+	cc.net("/R", "D1.2", "U1.3").net("/G", "D1.3", "U1.4")
+	want(t, cc.review(t, ReviewHints{}), RvLEDLimiter, "fail", "error", "error")
+	// … with a resistor per die it passes
+	ok := rvFed().ic("U1", "+3V3", "3:PR:output", "4:PG:output").cap("C1", "10u", "+3V3", "GND")
+	ok.part("D1", "Synth:LED_RG_CC", "LED", "1:K:passive", "2:RA:passive", "3:GA:passive")
+	ok.addNode("GND", "D1.1")
+	ok.res("R1", "330", "/R", "/RR").res("R2", "330", "/G", "/GG")
+	ok.addNode("/RR", "D1.2")
+	ok.addNode("/GG", "D1.3")
+	ok.addNode("/R", "U1.3")
+	ok.addNode("/G", "U1.4")
+	want(t, ok.review(t, ReviewHints{}), RvLEDLimiter, "pass")
+
+	// reversed: anode on GND, cathode through 1 kΩ to +3V3
+	rv := rvFed().res("R1", "1k", "/K", "+3V3")
+	rv.part("D1", "Device:LED", "LED", "1:K:passive", "2:A:passive")
+	rv.addNode("GND", "D1.2")
+	rv.addNode("/K", "D1.1")
+	c = want(t, rv.review(t, ReviewHints{}), RvLEDLimiter, "fail", "error")
+	if !strings.Contains(c.Findings[0].Message, "reverse") {
+		t.Fatal(c.Findings[0])
+	}
+	// endpoint levels unknown (two unnamed rails without voltages) → cannot-check
+	un := rvFed().res("R1", "1k", "/K", "VX1")
+	un.part("D1", "Device:LED", "LED", "1:K:passive", "2:A:passive")
+	un.net("VX2")
+	un.addNode("VX2", "D1.2")
+	un.addNode("/K", "D1.1")
+	un.ic("U7", "VX1").ic("U8", "VX2").cap("C7", "1u", "VX1", "GND").cap("C8", "1u", "VX2", "GND")
+	want(t, un.review(t, ReviewHints{NetRole: map[string]string{"VX1": "power", "VX2": "power"}}), RvLEDLimiter, "cannot-check")
+
+	// per die: die R unlimited (error), die G through a transistor (cannot-check)
+	pd := rvFed().ic("U1", "+3V3", "3:PR:output").cap("C1", "10u", "+3V3", "GND")
+	pd.part("D1", "Synth:LED_RG", "LED", "1:RA:passive", "2:RK:passive", "3:GA:passive", "4:GK:passive")
+	pd.net("/R", "D1.1", "U1.3")
+	pd.addNode("GND", "D1.2")
+	pd.res("R2", "330", "+3V3", "/GA")
+	pd.addNode("/GA", "D1.3")
+	pd.part("Q1", "Transistor_FET:Q_NMOS_GDS", "", "1:G:input", "2:D:passive", "3:S:passive")
+	pd.net("/GK", "D1.4", "Q1.2")
+	pd.addNode("GND", "Q1.3")
+	pd.net("/QG", "Q1.1")
+	c = want(t, pd.review(t, ReviewHints{}), RvLEDLimiter, "fail", "error")
+	if len(c.Unverified) != 1 || !strings.Contains(c.Findings[0].Message, "die R") {
+		t.Fatalf("%+v", c)
+	}
+
+	// a VDD pin tied to ground → error; declared → exempt
+	g := rvFed().cap("C1", "10u", "+3V3", "GND")
+	g.part("U1", "Synth:IC", "", "1:VDD:power_in", "2:VBAT:power_in", "3:GND:power_in")
+	g.addNode("+3V3", "U1.1")
+	g.addNode("GND", "U1.2")
+	g.addNode("GND", "U1.3")
+	want(t, g.review(t, ReviewHints{}), RvICPowerGround, "fail", "error")
+	want(t, g.review(t, ReviewHints{GroundedPin: map[string]string{"U1.2": "intent review.groundedPowerPins"}}), RvICPowerGround, "pass")
+	// a V− pin on ground: single-supply op-amp, fine
+	op := rvFed().cap("C1", "10u", "+3V3", "GND")
+	op.part("U2", "Synth:OPA", "", "1:V+:power_in", "2:V-:power_in", "3:OUT:output", "4:IN:input")
+	op.addNode("+3V3", "U2.1")
+	op.addNode("GND", "U2.2")
+	op.net("/O", "U2.3", "U2.4")
+	want(t, op.review(t, ReviewHints{}), RvICPowerGround, "pass")
+	// a VDD on a populated local net with no supply source: likely warning
+	ns := rvFed().cap("C1", "10u", "+3V3", "GND")
+	ns.part("U3", "Synth:IC", "", "1:VDD:power_in", "2:GND:power_in")
+	ns.net("/VLOC", "U3.1")
+	ns.addNode("GND", "U3.2")
+	ns.cap("C3", "100n", "/VLOC", "GND")
+	c = want(t, ns.review(t, ReviewHints{}), RvICPowerGround, "pass", "warning")
+	if len(c.Findings[0].Missing) == 0 {
+		t.Fatal(c.Findings[0])
+	}
+	// … fed through a ferrite from +3V3: evidence behind the inductor
+	ns.part("FB1", "Device:FerriteBead", "", "1:1:passive", "2:2:passive")
+	ns.addNode("+3V3", "FB1.1")
+	ns.addNode("/VLOC", "FB1.2")
+	want(t, ns.review(t, ReviewHints{}), RvICPowerGround, "pass")
+}
+
+// TestReviewI2CBitBanged: an I2C line driven by a tri-state buffer through
+// a series resistor (a programmer bit-banging the bus): the pull-up need
+// is not proven → likely warning, not error.
+func TestReviewI2CBitBanged(t *testing.T) {
+	b := rvBase().ic("U1", "+3V3", "3:SDA:bidirectional").ic("U2", "+3V3", "3:SDA:bidirectional").ic("U3", "+3V3", "3:1Y:tri_state").cap("C1", "10u", "+3V3", "GND")
+	b.net("/SDA", "U1.3", "U2.3").res("R1", "100", "/SDA", "/DRV")
+	b.addNode("/DRV", "U3.3")
+	want(t, b.review(t, ReviewHints{}), RvI2CPullup, "pass", "warning")
 }

@@ -207,6 +207,9 @@ type ReviewHints struct {
 	// drivers; CommonPins: groups of REF.PIN that are one electrical pin.
 	InputPin, CurrentDriver map[string]string
 	CommonPins              [][]string
+	// Connector: parts declared connectors; GroundedPin: power pins that
+	// sit on ground by design.
+	Connector, GroundedPin map[string]string
 }
 
 // ReviewInput is what Review checks.
@@ -254,6 +257,7 @@ type rvView struct {
 	sheetOf           map[string]string // ref → sheet path
 	hasIntent, hasSim bool
 	notes             []string // input problems found while reviewing
+	ledEnd            string   // the endpoint the last LED trace reached (rail id | pin | conn)
 }
 
 // part kinds
@@ -308,10 +312,11 @@ func rvKind(c *SchNetComp, npins int) string {
 		return pkCap
 	case (pre == "D" || pre == "LED") && (rvLEDWord.MatchString(c.Part) || rvLEDWord.MatchString(val)):
 		return pkLED
-	case has("connector") || pre == "J" || pre == "P" || pre == "CN" || pre == "CON" || pre == "USB" || pre == "BUS" ||
-		strings.Contains(fp, "connector") || strings.Contains(fp, "buspci") || strings.Contains(fp, "edge_conn"):
-		// an edge / bus connector (PCI, PCIe) is a connector even when its
-		// symbol types the bus supply pins power_in
+	case strings.HasPrefix(strings.ToLower(c.Lib), "connector") || strings.HasPrefix(fp, "connector_"):
+		// KiCad's connector libraries (Connector, Connector_Generic …;
+		// footprints Connector_*); an explicit role is applied in newRvView
+		return pkConnector
+	case (pre == "J" || pre == "P") && !rvHasPowerIn(c):
 		return pkConnector
 	case has(":sw_") || pre == "SW" || pre == "S" || pre == "K":
 		return pkSwitch
@@ -328,6 +333,15 @@ func rvKind(c *SchNetComp, npins int) string {
 		}
 	}
 	return pkOther
+}
+
+func rvHasPowerIn(c *SchNetComp) bool {
+	for _, p := range c.Pins {
+		if rvBaseType(p.Type) == "power_in" {
+			return true
+		}
+	}
+	return false
 }
 
 func rvBaseType(t string) string {
@@ -384,6 +398,9 @@ func newRvView(in *ReviewInput) *rvView {
 	for _, r := range v.refs {
 		c := v.comps[r]
 		c.kind = rvKind(c.c, len(c.pins))
+		if _, ok := in.Hints.Connector[r]; ok || c.fieldRole("connector") {
+			c.kind = pkConnector // explicit role (intent review.connectors / ReviewRole)
+		}
 		sort.Slice(c.pins, func(i, j int) bool { return rvPinLess(c.pins[i].Num, c.pins[j].Num) })
 	}
 	v.hasIntent, v.hasSim = in.Hints.Intent != "", in.Hints.Sim != ""
@@ -1343,6 +1360,46 @@ func rvArrayMate(c *rvComp, p *rvPin) map[string]bool {
 	return out
 }
 
+// logicDrivers are the output / tri-state pins that drive net n's group
+// directly or through one series resistor, other than I2C (SDA/SCL) pins:
+// a bus bit-banged by ordinary logic.
+func (v *rvView) logicDrivers(n string) []string {
+	var out []string
+	look := func(pins []*rvPin, via string) {
+		for _, p := range pins {
+			if (p.Type == "output" || p.Type == "tri_state") && !rvI2CRe.MatchString(p.Name) && v.comps[p.Ref].kind != pkConnector {
+				out = append(out, p.Ref+"."+p.Num+" ("+p.Type+via+")")
+			}
+		}
+	}
+	look(v.groupPins(n), "")
+	for _, p := range v.groupPins(n) {
+		if c := v.comps[p.Ref]; c.kind == pkResistor && !v.isJoin(p.Ref) {
+			if f := v.farPin(p); f != nil && !v.isSupply(f.Net) && !v.groupIsGround(f.Net) {
+				look(v.groupPins(f.Net), " through "+p.Ref)
+			}
+		}
+	}
+	sort.Strings(out)
+	return rvUniq(out)
+}
+
+// onBoardDevices are the ICs / other active parts with a non-passive pin
+// on n's group (connectors and passives excluded).
+func (v *rvView) onBoardDevices(n string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, p := range v.groupPins(n) {
+		k := v.comps[p.Ref].kind
+		if (k == pkIC || k == pkOther) && p.Type != "passive" && !seen[p.Ref] {
+			seen[p.Ref] = true
+			out = append(out, p.Ref)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 func (v *rvView) offBoard(n string) []string {
 	var out []string
 	for _, p := range v.groupPins(n) {
@@ -1431,9 +1488,24 @@ func (v *rvView) checkI2C() *rvCheck {
 		c.Coverage.Checked++
 		ev := []string{"I2C recognised by " + how, "no resistor from " + v.name(id) + " (or a net joined to it by 0 Ω / net tie) to a supply"}
 		if off := v.offBoard(id); len(off) > 0 {
-			c.add(ReviewFinding{Severity: "info", Certainty: cert, Message: fmt.Sprintf("I2C line %s has no pull-up on this board; it leaves through %s", v.name(id), strings.Join(off, ", ")),
-				Refs: refs, netIDs: grp, Fix: "confirm the pull-up is on the other side of the connector, or add 2.2–10 kΩ to the bus supply",
-				Evidence: append(ev, "connector pins are the off-board boundary")})
+			if on := v.onBoardDevices(id); len(on) < 2 {
+				// one on-board device: the bus is completed off-board, where
+				// the pull-up may legitimately be
+				c.add(ReviewFinding{Severity: "info", Certainty: cert, Message: fmt.Sprintf("I2C line %s has no pull-up on this board; it leaves through %s", v.name(id), strings.Join(off, ", ")),
+					Refs: refs, netIDs: grp, Fix: "confirm the pull-up is on the other side of the connector, or add 2.2–10 kΩ to the bus supply",
+					Evidence: append(ev, "connector pins are the off-board boundary", "one on-board device on the line")})
+				continue
+			}
+			// two or more on-board devices talk over it without the
+			// connector: the on-board bus needs its own pull-up
+			ev = append(ev, fmt.Sprintf("%d on-board devices (%s) share the line; the connector (%s) cannot be relied on to pull it up", len(v.onBoardDevices(id)), strings.Join(v.onBoardDevices(id), ", "), strings.Join(off, ", ")))
+		}
+		if drv := v.logicDrivers(id); len(drv) > 0 {
+			// driven by non-I2C push-pull / tri-state logic (a bit-banged
+			// bus): a missing pull-up is not proven
+			c.add(ReviewFinding{Severity: "warning", Certainty: "likely", Message: fmt.Sprintf("I2C line %s has no pull-up; it is driven by %s, so the need is not proven", v.name(id), strings.Join(drv, ", ")),
+				Refs: refs, netIDs: grp, Fix: "if any device releases the line (open-drain SDA / clock stretching), add a pull-up to the bus supply",
+				Evidence: append(ev, "non-I2C driver(s): "+strings.Join(drv, ", ")), Missing: []string{"whether the bus is open-drain on every device (intent review.pulledUpNets / a pull-up)"}})
 			continue
 		}
 		c.add(ReviewFinding{Severity: "error", Certainty: cert, Message: fmt.Sprintf("I2C line %s has no pull-up resistor to a supply", v.name(id)),
@@ -1552,11 +1624,12 @@ func (v *rvView) checkOpenDrain() *rvCheck {
 				c.unverified(fmt.Sprintf("%s: the pull-%s path runs through jumper(s) %s whose state is unknown", name, mode.dir, strings.Join(rvUniq(amb), ", ")))
 				continue
 			}
-			if off := v.offBoard(id); len(off) > 0 {
+			if off := v.offBoard(id); len(off) > 0 && len(v.onBoardDevices(id)) < 2 {
+				// the line's other end is off-board: its pull may be there
 				c.Coverage.Checked++
 				c.add(ReviewFinding{Severity: "info", Message: fmt.Sprintf("%s line %s (%s) has no pull-%s on this board; it leaves through %s", mode.what, name, strings.Join(drv, ", "), mode.dir, strings.Join(off, ", ")),
 					Refs: rvRefs(mode.pins), Pins: rvPinKeys(mode.pins), netIDs: v.group(id), Fix: "confirm the pull-" + mode.dir + " is off-board, or add one",
-					Evidence: []string{"pin types: " + strings.Join(drv, ", "), "connector pins are the off-board boundary"}})
+					Evidence: []string{"pin types: " + strings.Join(drv, ", "), "connector pins are the off-board boundary", "one on-board device on the line"}})
 				continue
 			}
 			var unknown, absent []string
@@ -1781,96 +1854,189 @@ func (v *rvView) pinMaxV(p *rvPin) (float64, bool) {
 var rvLEDDriverPin = regexp.MustCompile(`(?i)^(LED\w*|ISINK\w*|SINK\w*|K\d*|LEDK\w*|CC\d*|ILED\w*|OUT_?LED\w*|D\d+K)$`)
 
 // checkLEDs traces each LED die's own current path — anode side and
-// cathode side, polarity resolved throughout. A side ends at a rail, at a
-// driving pin, or at a common node shared only by LED terminals (common
-// anode / cathode) that itself reaches a rail or one driver: the sibling
-// LEDs are independent branches there, not ambiguity. A die is limited when
-// one side has its own exclusive series resistor (not 0 Ω) whose far side
-// completes the path, or a declared current driver (review.currentDrivers);
-// a resistor shared before the branches is no individual limiter; a pin
-// only named like a current driver (LED1, K, CC) is a likely warning. A
-// branch inside a resistor path, a transistor, switch, open jumper or
-// unknown polarity on either side is unverified (cannot-check); a path
-// that ends nowhere is an error; a connector is the off-board boundary
-// (info). The aggregate current of a driver feeding several LEDs is not
-// checked.
+// cathode side, polarity resolved throughout — and reports every die on
+// its own (one die's cannot-check never hides another die's error). A side
+// ends at a rail, at a driving pin, or at a common node shared only by LED
+// terminals (common anode / cathode) that itself reaches a rail or one
+// driver: the sibling LEDs are independent branches there. A die is
+// limited when one side has its own exclusive series resistor (not 0 Ω)
+// whose far side completes the path, or a declared current driver
+// (review.currentDrivers). A resistor that also carries a sibling die's
+// current — on the package's common terminal, or with a sibling die
+// terminal of the same polarity on its node — or one shared by several
+// LEDs before the branches is no individual limiter; antiparallel dies
+// (opposite polarity on the node) conduct one at a time and keep it. The
+// endpoints must forward-bias the die (anode end above cathode end, by
+// rail voltage or rail polarity); a reversed die is an error, endpoints
+// whose levels are unknown are cannot-check. A pin only named like a
+// current driver (LED1, K, CC) is a likely warning. A branch inside a
+// resistor path, a transistor, switch, open jumper or unknown polarity is
+// unverified (cannot-check); a path that ends nowhere is an error; a
+// connector is the off-board boundary (info). The aggregate current of a
+// driver feeding several LEDs is not checked.
 func (v *rvView) checkLEDs() *rvCheck {
 	c := v.check(RvLEDLimiter, "netlist", "part kinds")
-	rank := map[string]int{"ambiguous": 6, "open": 5, "none": 4, "drive": 3, "named": 2, "offboard": 1, "ok": 0}
 	for _, ref := range v.refs {
 		led := v.comps[ref]
 		if led.kind != pkLED {
 			continue
 		}
-		c.Coverage.Candidates++
 		dies, why := v.ledDies(ref)
-		worst, whys := "ok", []string{}
 		if len(dies) == 0 {
-			worst, whys = "ambiguous", []string{why}
+			c.Coverage.Candidates++
+			c.unverified(fmt.Sprintf("%s: %s", ref, why))
+			continue
+		}
+		users := map[*rvPin]int{} // how many dies use each terminal pin
+		for _, d := range dies {
+			users[d.A]++
+			users[d.K]++
 		}
 		for _, d := range dies {
+			c.Coverage.Candidates++
+			v.ledEnd = ""
 			sa, wa := v.ledSide(ref, d.A.Net, "in", map[string]bool{ref: true})
+			endA := v.ledEnd
+			v.ledEnd = ""
 			sk, wk := v.ledSide(ref, d.K.Net, "out", map[string]bool{ref: true})
+			endK := v.ledEnd
+			if sa == "limit" {
+				if s := v.dieShares(ref, d.A, users); s != "" {
+					sa, wa = "shared", wa+" (also carries "+s+": no individual limiter)"
+				}
+			}
+			if sk == "limit" {
+				if s := v.dieShares(ref, d.K, users); s != "" {
+					sk, wk = "shared", wk+" (also carries "+s+": no individual limiter)"
+				}
+			}
 			st := ledDieState(sa, sk)
-			label := d.Name
-			if len(dies) == 1 {
-				label = ""
-			} else {
-				label = "die " + label + ": "
+			label, name := "", "LED "+ref
+			if len(dies) > 1 {
+				label, name = "die "+d.Name+": ", "LED "+ref+" die "+d.Name
 			}
-			whys = append(whys, fmt.Sprintf("%sanode %s: %s; cathode %s: %s", label, v.name(d.A.Net), wa, v.name(d.K.Net), wk))
-			if rank[st] > rank[worst] {
-				worst = st
+			dwhy := fmt.Sprintf("%sanode %s: %s; cathode %s: %s", label, v.name(d.A.Net), wa, v.name(d.K.Net), wk)
+			if st != "ambiguous" && st != "open" {
+				switch dir := v.ledBias(endA, endK); dir {
+				case "reversed":
+					st = "reversed"
+				case "unknown":
+					st, dwhy = "ambiguous", dwhy+"; the endpoint levels do not establish the current direction"
+				}
 			}
-		}
-		why = strings.Join(whys, " | ")
-		base := ReviewFinding{Refs: []string{ref}, netIDs: led.netSet(), Evidence: []string{why}}
-		switch worst {
-		case "ambiguous":
-			c.unverified(fmt.Sprintf("%s: %s", ref, why))
-		case "ok":
-			c.Coverage.Checked++
-		case "open":
-			c.Coverage.Checked++
-			f := base
-			f.Severity, f.Message = "error", fmt.Sprintf("LED %s has no complete current path (%s)", ref, why)
-			f.Fix = "complete the LED's path to its supply / driver, or remove the part"
-			c.add(f)
-		case "drive":
-			c.Coverage.Checked++
-			f := base
-			f.Severity, f.Certainty = "warning", "likely"
-			f.Message = fmt.Sprintf("LED %s has a series resistor but its driver is not verified (%s)", ref, why)
-			f.Fix = "check the pin drives the LED; declare it in intent review.pushPullOutputs"
-			f.Missing = []string{"direction of the driving pin (intent review.pushPullOutputs)"}
-			c.add(f)
-		case "named":
-			c.Coverage.Checked++
-			f := base
-			f.Severity, f.Certainty = "warning", "likely"
-			f.Message = fmt.Sprintf("LED %s is driven by a pin named like a current driver, not verified (%s)", ref, why)
-			f.Fix = "check the driver regulates the LED current, then declare the pin in intent review.currentDrivers; otherwise add a series resistor"
-			f.Missing = []string{"current-driver role of the pin (intent review.currentDrivers)"}
-			c.add(f)
-		case "offboard":
-			c.Coverage.Checked++
-			f := base
-			f.Severity, f.Message = "info", fmt.Sprintf("LED %s has no series limiter on this board; its path leaves through a connector (%s)", ref, why)
-			f.Fix = "confirm the current is limited off-board, or add a series resistor"
-			f.Evidence = append(f.Evidence, "connector pins are the off-board boundary")
-			c.add(f)
-		default:
-			c.Coverage.Checked++
-			f := base
-			f.Severity, f.Message = "error", fmt.Sprintf("LED %s has no individual series resistor or current limiter in its own path (%s)", ref, why)
-			f.Fix = fmt.Sprintf("add a series resistor to %s: R = (Vsupply − Vf) / If (a resistor shared by several LEDs does not limit each)", ref)
-			c.add(f)
+			base := ReviewFinding{Refs: []string{ref}, Pins: []string{ref + "." + d.A.Num, ref + "." + d.K.Num}, netIDs: []string{d.A.Net, d.K.Net}, Evidence: []string{dwhy}}
+			switch st {
+			case "ambiguous":
+				c.unverified(fmt.Sprintf("%s: %s", name, dwhy))
+			case "ok":
+				c.Coverage.Checked++
+			case "open":
+				c.Coverage.Checked++
+				f := base
+				f.Severity, f.Message = "error", fmt.Sprintf("%s has no complete current path (%s)", name, dwhy)
+				f.Fix = "complete the LED's path to its supply / driver, or remove the part"
+				c.add(f)
+			case "reversed":
+				c.Coverage.Checked++
+				f := base
+				f.Severity, f.Message = "error", fmt.Sprintf("%s is reverse-biased: its anode end is not above its cathode end (%s)", name, dwhy)
+				f.Fix = "turn the LED around (anode toward the supply / driver, cathode toward ground / sink)"
+				c.add(f)
+			case "drive":
+				c.Coverage.Checked++
+				f := base
+				f.Severity, f.Certainty = "warning", "likely"
+				f.Message = fmt.Sprintf("%s has a series resistor but its driver is not verified (%s)", name, dwhy)
+				f.Fix = "check the pin drives the LED; declare it in intent review.pushPullOutputs"
+				f.Missing = []string{"direction of the driving pin (intent review.pushPullOutputs)"}
+				c.add(f)
+			case "named":
+				c.Coverage.Checked++
+				f := base
+				f.Severity, f.Certainty = "warning", "likely"
+				f.Message = fmt.Sprintf("%s is driven by a pin named like a current driver, not verified (%s)", name, dwhy)
+				f.Fix = "check the driver regulates the LED current, then declare the pin in intent review.currentDrivers; otherwise add a series resistor"
+				f.Missing = []string{"current-driver role of the pin (intent review.currentDrivers)"}
+				c.add(f)
+			case "offboard":
+				c.Coverage.Checked++
+				f := base
+				f.Severity, f.Message = "info", fmt.Sprintf("%s has no series limiter on this board; its path leaves through a connector (%s)", name, dwhy)
+				f.Fix = "confirm the current is limited off-board, or add a series resistor"
+				f.Evidence = append(f.Evidence, "connector pins are the off-board boundary")
+				c.add(f)
+			default:
+				c.Coverage.Checked++
+				f := base
+				f.Severity, f.Message = "error", fmt.Sprintf("%s has no individual series resistor or current limiter in its own path (%s)", name, dwhy)
+				f.Fix = fmt.Sprintf("add a series resistor to %s: R = (Vsupply − Vf) / If (a resistor shared by several LEDs or dies does not limit each)", ref)
+				c.add(f)
+			}
 		}
 	}
 	return c
 }
 
-// ledDieState combines the two sides of one die.
+// dieShares names what else a die's limiter on terminal pin p carries:
+// the package's common terminal (p used by several dies), or a sibling
+// die terminal of the same polarity on p's node. "" = exclusive.
+func (v *rvView) dieShares(ref string, p *rvPin, users map[*rvPin]int) string {
+	if users[p] > 1 {
+		return fmt.Sprintf("the common terminal %s.%s of %d dies", ref, p.Num, users[p])
+	}
+	role := v.diodeRole(p)
+	for _, q := range v.groupPins(p.Net) {
+		if q.Ref == ref && q != p && v.diodeRole(q) == role {
+			return "sibling die terminal " + ref + "." + q.Num
+		}
+	}
+	return ""
+}
+
+// railLevel is a rail's level for the bias check: ground 0, a known
+// voltage, else the sign its name gives ("+…", VCC/VDD… positive; "-…"
+// negative).
+func (v *rvView) railLevel(n string) (float64, bool) {
+	if v.groupIsGround(n) {
+		return 0, true
+	}
+	if x, ok := v.voltage(n); ok {
+		return x, true
+	}
+	for _, g := range v.group(n) { // a 0 Ω-joined rail names the group too
+		nm := v.name(g)
+		switch {
+		case strings.HasPrefix(nm, "-"):
+			return -1, true
+		case isPowerName(nm):
+			return 1, true
+		}
+	}
+	return 0, false
+}
+
+// ledBias checks the die's endpoints forward-bias it: ok | reversed |
+// unknown. An end is a rail identity, "pin" (a driver), "conn" or "".
+func (v *rvView) ledBias(a, k string) string {
+	rail := func(e string) bool { return e != "" && e != "pin" && e != "conn" }
+	switch {
+	case rail(a) && rail(k):
+		va, oka := v.railLevel(a)
+		vk, okk := v.railLevel(k)
+		if !oka || !okk {
+			return "unknown"
+		}
+		if va <= vk {
+			return "reversed"
+		}
+	case rail(a) && v.groupIsGround(a):
+		return "reversed" // the anode on ground: nothing drives below it
+	}
+	return "ok"
+}
+
+// ledDieState combines the two sides of one die ("shared": resolved, not
+// an individual limiter).
 func ledDieState(a, k string) string {
 	for _, s := range []string{"ambiguous", "open"} {
 		if a == s || k == s {
@@ -1980,6 +2146,7 @@ func sbContainsStr(xs []string, s string) bool {
 // and why.
 func (v *rvView) ledSide(ref, n, dir string, seen map[string]bool) (string, string) {
 	if v.isSupply(n) || v.groupIsGround(n) {
+		v.ledEnd = n
 		return "rail", "on rail " + v.name(n)
 	}
 	p, st, why := v.ledNext(ref, n)
@@ -2028,8 +2195,10 @@ func (v *rvView) ledElement(ref string, p *rvPin, dir string, seen map[string]bo
 		st, why := v.ledSide(p.Ref, ms[0].Net, dir, seen)
 		return st, "in series with " + p.Ref + ", " + why
 	case pkConnector:
+		v.ledEnd = "conn"
 		return "offboard", "leaves through " + p.Ref + "." + p.Num
 	case pkIC:
+		v.ledEnd = "pin"
 		if src, ok := pinRole(v.in.Hints.CurrentDriver, p); ok {
 			return "limit", p.Ref + "." + p.Num + " (" + p.Name + ", current driver: " + src + ")"
 		}
@@ -2145,6 +2314,7 @@ func (v *rvView) farPin(p *rvPin) *rvPin {
 // unknown direction (unknown).
 func (v *rvView) pathOn(from, n, dir string, depth int) (string, string) {
 	if v.isSupply(n) || v.groupIsGround(n) {
+		v.ledEnd = n
 		return "ok", "rail " + v.name(n)
 	}
 	if depth > 6 {
@@ -2169,8 +2339,10 @@ func (v *rvView) pathOn(from, n, dir string, depth int) (string, string) {
 		s, w := v.pathOn(p.Ref, ms[0].Net, dir, depth+1)
 		return s, p.Ref + " → " + w
 	case pkConnector:
+		v.ledEnd = "conn"
 		return "ok", "connector " + p.Ref + "." + p.Num
 	case pkIC:
+		v.ledEnd = "pin"
 		switch p.Type {
 		case "output", "power_out", "bidirectional", "tri_state", "open_collector", "open_emitter":
 			return "ok", "driver pin " + p.Ref + "." + p.Num + " (" + p.Name + ")"
@@ -2380,67 +2552,160 @@ func (v *rvView) icParts() []string {
 	return out
 }
 
+// supplyEvidence tells why net n is a supply a power pin may rely on: a
+// power_out pin of a real part (a regulator output), a global power-named
+// rail (a power symbol), an intent power rail or voltage, or a connector
+// (an off-board supply) — on n or behind series inductors / ferrites.
+// "" = none: never accepted on net population alone.
+func (v *rvView) supplyEvidence(n string) string {
+	seen := map[string]bool{}
+	q := []string{n}
+	for depth := 0; len(q) > 0 && depth < 4; depth++ {
+		var next []string
+		for _, net := range q {
+			r := v.find(net)
+			if seen[r] || netname.IsUnconnected(net) || v.groupIsGround(net) {
+				continue
+			}
+			seen[r] = true
+			for _, g := range v.group(net) {
+				if v.in.Hints.NetRole[g] == "power" {
+					return "intent power rail " + v.name(g)
+				}
+				if _, ok := v.in.Hints.NetVoltage[g]; ok {
+					return "rail " + v.name(g) + " with a known voltage"
+				}
+				if nm := v.name(g); !strings.HasPrefix(g, "/") && !strings.HasPrefix(g, "Net-(") && (isPowerName(nm) || strings.HasPrefix(nm, "-")) {
+					return "power rail " + v.name(g) + " (power symbol)"
+				}
+			}
+			for _, p := range v.groupPins(net) {
+				switch k := v.comps[p.Ref].kind; {
+				case p.Type == "power_out" && k != pkConnector:
+					return "power output " + p.Ref + "." + p.Num + " (" + p.Name + ")"
+				case k == pkConnector:
+					return "connector " + p.Ref + "." + p.Num + " (off-board supply)"
+				case k == pkInductor:
+					if f := v.farPin(p); f != nil {
+						next = append(next, f.Net)
+					}
+				}
+			}
+		}
+		q = next
+	}
+	return ""
+}
+
 var rvGndPinRe = regexp.MustCompile(`(?i)^(\w*GND\w*|VSS\w*|EP|EPAD|PAD|THERMAL\w*|0V)$`)
 
-// checkICPower: a part with typed power inputs needs one connected to a
-// supply. A part with designated ground pins (power_in on ground, or a pin
-// named GND/VSS/EP… whatever its type) needs one of them on ground — a
-// signal pin tied to ground does not count. A part with supply terminals
-// only (an op-amp between two rails, positive, negative or floating) has
-// no ground pin to check: exempt with ≥ 2 rails, a likely warning with one.
+// rvNegSupRe: a negative-supply terminal (V−, VEE, −VS): on ground in a
+// single-supply design, on a negative rail in a split one.
+var rvNegSupRe = regexp.MustCompile(`(?i)^(V-|VEE\w*|-VS\w*|VS-|V_?NEG\w*)$`)
+
+// checkICPower checks every power pin of a part on its own. Each
+// designated ground pin (GND/VSS/EP-named, whatever its type) must be on
+// ground, a no-connect flag included. Each other power input must sit on
+// a supply with positive evidence (supplyEvidence: a regulator / power_out
+// source, a power-symbol rail, an intent rail, a connector) — never on net
+// population alone: unconnected, no-connect or alone on its net is an
+// error, no identified source a likely warning, and a non-ground power pin
+// on ground an error unless intent review.groundedPowerPins declares it (a
+// V−/VEE pin on ground is a single-supply negative terminal). A part with
+// supply terminals only (an op-amp across two rails) has no ground pin to
+// check. A connector with power_in pins gets its power inputs checked.
 func (v *rvView) checkICPower() *rvCheck {
 	c := v.check(RvICPowerGround, "netlist", "pin-types")
-	for _, r := range v.icParts() {
+	parts := append([]string(nil), v.icParts()...)
+	for _, r := range v.refs {
+		if v.comps[r].kind == pkConnector && rvHasPowerIn(v.comps[r].c) {
+			parts = append(parts, r)
+		}
+	}
+	for _, r := range parts {
 		comp := v.comps[r]
+		conn := comp.kind == pkConnector
 		c.Coverage.Candidates++
-		supply, ground, typed := false, false, false
+		c.Coverage.Checked++
+		ground := false
 		rails := map[string]string{}
-		var gndPins, badGnd, badSup []string
+		var gndPins, badGnd, badSup, onGnd, noSrc []string
 		for _, p := range comp.pins {
-			gndNamed := rvGndPinRe.MatchString(p.Name)
-			designated := gndNamed && p.Type != "output" && p.Type != "power_out" || p.Type == "power_in" && v.groupIsGround(p.Net)
-			if designated {
-				gndPins = append(gndPins, p.Ref+"."+p.Num)
+			key := p.Ref + "." + p.Num
+			if rvGndPinRe.MatchString(p.Name) && p.Type != "output" && p.Type != "power_out" {
+				if conn {
+					continue // a connector's ground pins are its own business
+				}
+				gndPins = append(gndPins, key)
 				if v.groupIsGround(p.Net) {
 					ground = true
 				} else { // a no-connect flag does not excuse a ground pin
-					badGnd = append(badGnd, p.Ref+"."+p.Num)
+					badGnd = append(badGnd, key)
 				}
 				continue
 			}
 			if p.Type != "power_in" {
 				continue
 			}
-			typed = true
-			if !p.NC && !netname.IsUnconnected(p.Net) && (len(v.groupPins(p.Net)) > 1 || v.isSupply(p.Net) && isPowerName(v.name(p.Net))) {
-				supply = true
+			label := key + " (" + p.Name + ")"
+			switch {
+			case p.NC || netname.IsUnconnected(p.Net):
+				badSup = append(badSup, label)
+			case v.groupIsGround(p.Net):
+				if rvNegSupRe.MatchString(p.Name) {
+					ground = true // single-supply negative terminal
+					continue
+				}
+				if _, ok := pinRole(v.in.Hints.GroundedPin, p); ok {
+					c.exempt(key, "power pin on ground by design", "intent review.groundedPowerPins")
+					continue
+				}
+				onGnd = append(onGnd, label)
+			default:
+				ev := v.supplyEvidence(p.Net)
+				if ev == "" {
+					if len(v.groupPins(p.Net)) < 2 {
+						badSup = append(badSup, label)
+					} else {
+						noSrc = append(noSrc, label+" on "+v.name(p.Net))
+					}
+					continue
+				}
 				rails[v.find(p.Net)] = p.Net
-			} else {
-				badSup = append(badSup, p.Ref+"."+p.Num+" ("+p.Name+")")
 			}
 		}
-		c.Coverage.Checked++
-		// every power input on its own: VDD1 connected does not excuse VDD2
-		if typed && len(badSup) > 0 {
-			msg := fmt.Sprintf("%s power input(s) %s not connected to a supply", r, strings.Join(badSup, ", "))
-			if !supply {
-				msg = fmt.Sprintf("%s has no power input connected to a supply (%s)", r, strings.Join(badSup, ", "))
+		pinsOf := func(xs []string) []string {
+			var out []string
+			for _, x := range xs {
+				k, _, _ := strings.Cut(x, " ")
+				out = append(out, k)
 			}
-			var pins []string
-			for _, b := range badSup {
-				k, _, _ := strings.Cut(b, " ")
-				pins = append(pins, k)
-			}
-			c.add(ReviewFinding{Severity: "error", Message: msg, Refs: []string{r}, Pins: pins,
+			return out
+		}
+		if len(badSup) > 0 {
+			c.add(ReviewFinding{Severity: "error", Message: fmt.Sprintf("%s power input(s) %s not connected to a supply", r, strings.Join(badSup, ", ")), Refs: []string{r}, Pins: pinsOf(badSup),
 				Fix:      "connect every power pin of " + r + " to its rail (a no-connect flag on a power input is a fault unless the datasheet says so — then waive it)",
-				Evidence: []string{"pin types: power_in pins unconnected, no-connect or alone on their net: " + strings.Join(badSup, ", ")}})
+				Evidence: []string{"power_in pins unconnected, no-connect or alone on their net: " + strings.Join(badSup, ", ")}})
+		}
+		if len(onGnd) > 0 {
+			c.add(ReviewFinding{Severity: "error", Message: fmt.Sprintf("%s power input(s) %s sit on ground", r, strings.Join(onGnd, ", ")), Refs: []string{r}, Pins: pinsOf(onGnd),
+				Fix:      "connect the pin to its supply rail, or declare it in intent review.groundedPowerPins when the datasheet ties it to ground",
+				Evidence: []string{"non-ground power_in pins on a ground net: " + strings.Join(onGnd, ", ")}})
+		}
+		for _, x := range noSrc {
+			k, _, _ := strings.Cut(x, " ")
+			c.add(ReviewFinding{Severity: "warning", Certainty: "likely", Message: fmt.Sprintf("%s power input %s: no supply source identified", r, x), Refs: []string{r}, Pins: []string{k},
+				Fix:      "feed the net from a regulator / power symbol / connector, or declare the rail in intent",
+				Evidence: []string{"no power_out source, power-symbol rail, intent rail or connector on the net (net population alone is no supply)"},
+				Missing:  []string{"supply source of the net (intent rails / a power symbol)"}})
+		}
+		if conn {
+			continue
 		}
 		switch {
 		case len(badGnd) > 0:
-			// every designated ground pin must reach ground: a connected GND
-			// does not excuse a VSS / EP left on another net
 			c.add(ReviewFinding{Severity: "error", Message: fmt.Sprintf("%s ground pin(s) %s are not on a ground net", r, strings.Join(badGnd, ", ")), Refs: []string{r}, Pins: badGnd,
-				Fix: "connect " + r + "'s ground / exposed pad pins to GND", Evidence: []string{"designated ground pins (GND/VSS/EP-named or power_in on ground): " + strings.Join(gndPins, ", "), "not on ground: " + strings.Join(badGnd, ", ")}})
+				Fix: "connect " + r + "'s ground / exposed pad pins to GND", Evidence: []string{"designated ground pins (GND/VSS/EP-named): " + strings.Join(gndPins, ", "), "not on ground: " + strings.Join(badGnd, ", ")}})
 		case ground:
 		case comp.fieldRole("no-ground"):
 			c.exempt(r, "no ground pin by design", "component field ReviewRole")
@@ -2449,7 +2714,7 @@ func (v *rvView) checkICPower() *rvCheck {
 		default:
 			c.add(ReviewFinding{Severity: "warning", Certainty: "likely", Message: fmt.Sprintf("%s has no recognised ground pin", r), Refs: []string{r},
 				Fix:      "connect its ground pin, or name it GND / type it power_in (ReviewRole=no-ground on a part that has none)",
-				Evidence: []string{"no GND/VSS/EP-named or ground power_in pin, one supply rail"}, Missing: []string{"ground pin of " + r}})
+				Evidence: []string{"no GND/VSS/EP-named pin on ground, one supply rail"}, Missing: []string{"ground pin of " + r}})
 		}
 	}
 	return c

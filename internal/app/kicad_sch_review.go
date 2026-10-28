@@ -166,7 +166,8 @@ func loadReviewHints(intentPath, simPath string, ids []string, nl *kicad.SchNetl
 		PullUpNet: map[string]string{}, ReferenceRail: map[string]string{}, SinglePinNet: map[string]string{},
 		TestPoint: map[string]string{}, Module: map[string]string{}, Capless: map[string]string{},
 		PullNone: map[string]string{}, PushPull: map[string]string{}, PinDomain: map[string]string{}, PinMaxV: map[string]float64{},
-		ChargePump: map[string]string{}, InputPin: map[string]string{}, CurrentDriver: map[string]string{}}
+		ChargePump: map[string]string{}, InputPin: map[string]string{}, CurrentDriver: map[string]string{},
+		Connector: map[string]string{}, GroundedPin: map[string]string{}}
 	var notes []string
 	res := netname.NewResolver(ids)
 	net := func(name, what string) (string, bool) {
@@ -247,6 +248,7 @@ func loadReviewHints(intentPath, simPath string, ids []string, nl *kicad.SchNetl
 			pins(r.PushPullOutputs, h.PushPull, "pushPullOutputs")
 			pins(r.InputPins, h.InputPin, "inputPins")
 			pins(r.CurrentDrivers, h.CurrentDriver, "currentDrivers")
+			pins(r.GroundedPowerPins, h.GroundedPin, "groundedPowerPins")
 			for _, g := range r.CommonPins { // REF.PIN or REF.NAME: resolved by the review
 				var grp []string
 				for _, x := range g {
@@ -295,6 +297,7 @@ func loadReviewHints(intentPath, simPath string, ids []string, nl *kicad.SchNetl
 			parts(r.Modules, h.Module, "modules")
 			parts(r.CaplessRegulators, h.Capless, "caplessRegulators")
 			parts(r.ChargePumps, h.ChargePump, "chargePumps")
+			parts(r.Connectors, h.Connector, "connectors")
 			h.Aliases = r.Aliases
 		}
 	}
