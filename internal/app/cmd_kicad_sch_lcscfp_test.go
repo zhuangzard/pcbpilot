@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -189,5 +190,89 @@ func TestSchBuildShipsSpecFootprintLibs(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "FOOTPRINT_LIB_NOT_FOUND") || !strings.Contains(err.Error(), `"nolib_xyz"`) ||
 		!strings.Contains(err.Error(), "FOOTPRINT_NOT_FOUND") {
 		t.Errorf("unknown footprint library / missing footprint not reported: %v", err)
+	}
+}
+
+// sbFakeExternalFP points the footprint check at a fake stock install
+// (stock = "" for none) and a KiCad settings home holding table (""
+// for no global fp-lib-table at all).
+func sbFakeExternalFP(t *testing.T, stock, table string) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("KICAD_CONFIG_HOME", home)
+	if table != "" {
+		d := filepath.Join(home, kicad.FPLibVersion)
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d, "fp-lib-table"), []byte(table), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	oldStock, oldLoad := sbStockFootprintDir, sbLoadFPLibTables
+	sbStockFootprintDir = func() string { return stock }
+	t.Cleanup(func() { sbStockFootprintDir, sbLoadFPLibTables = oldStock, oldLoad })
+}
+
+func sbFPDiagCodes(parts []*sbRPart, notes *sbResolveStats) map[string]string {
+	got := map[string]string{}
+	for _, d := range sbResolveFootprintLibs(parts, nil, notes) {
+		got[d.Code] += d.Message + "\n"
+	}
+	return got
+}
+
+// TestSbFootprintLibsExternal: a footprint outside libDirs is checked to
+// its file, in a stock library and through the global fp-lib-table (path
+// variables expanded) alike — a known nickname with an unknown footprint is
+// FOOTPRINT_NOT_FOUND, never accepted. An existing global table, even an
+// empty one, is an inspection: a library it lacks is FOOTPRINT_LIB_NOT_FOUND
+// also without a stock install. Only when nothing could be inspected is it a
+// note.
+func TestSbFootprintLibsExternal(t *testing.T) {
+	stock := t.TempDir()
+	sbFakeFootprintLib(t, stock, "Stock_SMD", "R_0603")
+	glib := t.TempDir()
+	sbFakeFootprintLib(t, glib, "glib", "G1")
+	sbFakeFootprintLib(t, glib, "offlib", "O1")
+	t.Setenv("PCBPILOT_TEST_GLIB", glib)
+	table := `(fp_lib_table (version 7)
+  (lib (name "glib") (type "KiCad") (uri "${PCBPILOT_TEST_GLIB}/glib.pretty") (options "") (descr ""))
+  (lib (name "offlib") (type "KiCad") (uri "${PCBPILOT_TEST_GLIB}/offlib.pretty") (options "") (descr "") (disabled))
+)`
+	parts := func(fps ...string) []*sbRPart {
+		var out []*sbRPart
+		for i, f := range fps {
+			out = append(out, &sbRPart{sbPart: sbPart{Ref: fmt.Sprintf("R%d", i+1), Footprint: f}})
+		}
+		return out
+	}
+
+	sbFakeExternalFP(t, stock, table)
+	var st sbResolveStats
+	if got := sbFPDiagCodes(parts("Stock_SMD:R_0603", "glib:G1"), &st); len(got) != 0 {
+		t.Errorf("stock and global footprints that exist: %v", got)
+	}
+	got := sbFPDiagCodes(parts("Stock_SMD:NO_SUCH", "glib:NO_SUCH", "offlib:O1", "nolib:X"), &st)
+	if nf := got["FOOTPRINT_NOT_FOUND"]; !strings.Contains(nf, "Stock_SMD:NO_SUCH") || !strings.Contains(nf, "glib:NO_SUCH") {
+		t.Errorf("missing footprint in a stock / global library not reported: %v", got)
+	}
+	if nl := got["FOOTPRINT_LIB_NOT_FOUND"]; !strings.Contains(nl, `"offlib"`) || !strings.Contains(nl, `"nolib"`) {
+		t.Errorf("a disabled or unknown library must be FOOTPRINT_LIB_NOT_FOUND: %v", got)
+	}
+
+	// no stock install, an empty global table: still an inspection
+	sbFakeExternalFP(t, "", "(fp_lib_table (version 7))")
+	st = sbResolveStats{}
+	if got := sbFPDiagCodes(parts("nolib:X"), &st); !strings.Contains(got["FOOTPRINT_LIB_NOT_FOUND"], `"nolib"`) || len(st.Notes) != 0 {
+		t.Errorf("empty global table, no stock: want FOOTPRINT_LIB_NOT_FOUND, got %v notes %v", got, st.Notes)
+	}
+
+	// nothing to inspect (the tables cannot be loaded, no stock): a note
+	sbFakeExternalFP(t, "", "")
+	sbLoadFPLibTables = func(string) (*kicad.FPLibTables, error) { return nil, fmt.Errorf("unreadable") }
+	st = sbResolveStats{}
+	if got := sbFPDiagCodes(parts("nolib:X"), &st); len(got) != 0 || len(st.Notes) != 1 {
+		t.Errorf("uninspectable: want one note, got %v notes %v", got, st.Notes)
 	}
 }
