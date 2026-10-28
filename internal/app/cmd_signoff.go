@@ -660,11 +660,14 @@ func signoffMarkdown(r *signoffResult) string {
 }
 
 // boardCopperMissing names the nets signoff-copper cannot judge: every net
-// that joins pads of two or more parts but has no track, arc, via or filled
-// copper of its own. Copper on other nets (a GND pour, one stray track) is
-// no evidence for an unrouted VCC or signal net. "" when every such net has
-// copper. A net whose pads all sit on one part (tied pads, a shield pair) is
-// not judged.
+// with two or more physically distinct pads but no track, arc, via or
+// filled copper of its own. Copper on other nets (a GND pour, one stray
+// track) is no evidence for an unrouted VCC or signal net, and the pads of
+// one part count too (an IC's several supply or ground pins). Pads that
+// share a number within one footprint are one pad: KiCad connects them
+// internally. Footprint jumper pad groups are not in the snapshot (pcbnew's
+// SWIG returns JumperPadGroups as an opaque object), so they are judged.
+// "" when every judged net has copper.
 func boardCopperMissing(snap *boardSnapshot) (string, []string) {
 	c := snap.Copper
 	if a := c.Availability["routing"]; a != "" && a != "available" && len(c.Lines)+len(c.Arcs) == 0 {
@@ -683,7 +686,7 @@ func boardCopperMissing(snap *boardSnapshot) (string, []string) {
 	}
 	type netPads struct {
 		name  string
-		pads  int
+		pads  map[string]bool // designator + "|" + pad number: one per internally connected group
 		parts map[string]bool
 	}
 	nets := map[string]*netPads{}
@@ -695,27 +698,27 @@ func boardCopperMissing(snap *boardSnapshot) (string, []string) {
 			k := nk(p.Net)
 			np := nets[k]
 			if np == nil {
-				np = &netPads{name: p.Net, parts: map[string]bool{}}
+				np = &netPads{name: p.Net, pads: map[string]bool{}, parts: map[string]bool{}}
 				nets[k] = np
 			}
-			np.pads++
+			np.pads[comp.Designator+"|"+p.Number] = true
 			np.parts[comp.Designator] = true
 		}
 	}
 	var missing []string
 	judged := 0
 	for k, np := range nets {
-		if np.pads < 2 || len(np.parts) < 2 {
+		if len(np.pads) < 2 {
 			continue
 		}
 		judged++
 		if !copper[k] {
-			missing = append(missing, fmt.Sprintf("%s: %d pads on %d parts, no track, via or filled copper", np.name, np.pads, len(np.parts)))
+			missing = append(missing, fmt.Sprintf("%s: %d pads on %d part(s), no track, via or filled copper", np.name, len(np.pads), len(np.parts)))
 		}
 	}
 	if len(missing) == 0 {
 		return "", nil
 	}
 	sort.Strings(missing)
-	return fmt.Sprintf("%d of %d multi-part net(s) have no copper on the board: route them before sign-off", len(missing), judged), missing
+	return fmt.Sprintf("%d of %d multi-pad net(s) have no copper on the board: route them before sign-off", len(missing), judged), missing
 }

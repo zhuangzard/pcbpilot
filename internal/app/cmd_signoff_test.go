@@ -209,6 +209,22 @@ func TestSignoffCopperUnroutedCannotCheck(t *testing.T) {
 		}
 		return nets
 	}
+	// addPart appends a footprint (a copy of the first one) with the pads
+	// given as (number, net).
+	addPart := func(snap map[string]any, ref string, pads [][2]string) {
+		comps := snap["components"].([]any)
+		u := map[string]any{}
+		for k, v := range comps[0].(map[string]any) {
+			u[k] = v
+		}
+		u["designator"], u["primitiveId"] = ref, "fp-"+ref
+		var ps []any
+		for i, p := range pads {
+			ps = append(ps, map[string]any{"padNumber": p[0], "net": p[1], "layer": 1, "x": 900.0 + 50*float64(i), "y": -600.0, "width": 40.0, "height": 40.0})
+		}
+		u["pads"] = ps
+		snap["components"] = append(comps, u)
+	}
 	cases := []struct {
 		name string
 		f    func(snap, cu map[string]any)
@@ -239,8 +255,24 @@ func TestSignoffCopperUnroutedCannotCheck(t *testing.T) {
 			snap["components"] = append(comps, u)
 			cu["poured"], cu["pours"] = []any{}, []any{}
 		}, "GND"},
+		// One part, two supply pads with different numbers, no copper on
+		// that net: judged (an IC's VCC pins still need copper).
+		{"one-part-two-pads", func(snap, cu map[string]any) {
+			addPart(snap, "U8", [][2]string{{"1", "VDD_IC"}, {"4", "VDD_IC"}})
+		}, "VDD_IC"},
+		// Same pad number twice in one footprint: KiCad connects them
+		// internally, one pad, nothing to route.
+		{"one-part-same-number", func(snap, cu map[string]any) {
+			addPart(snap, "U8", [][2]string{{"5", "VDD_IC"}, {"5", "VDD_IC"}})
+		}, ""},
 	}
 	for _, c := range cases {
+		if c.want == "" {
+			if g := copperGate(edit(c.name, c.f)); strings.Contains(g.Detail, "cannot check") {
+				t.Errorf("%s: judged: %+v", c.name, g)
+			}
+			continue
+		}
 		g := copperGate(edit(c.name, c.f))
 		if got := strings.Join(unrouted(g), " "); g.Pass || got != c.want || !strings.HasPrefix(g.Detail, "cannot check") {
 			t.Errorf("%s: unrouted %q, want %q: %+v", c.name, got, c.want, g)
