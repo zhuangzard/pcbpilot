@@ -33,7 +33,24 @@ pcbpilot kicad sch-checkpoint list --project build/                     # 回退
 门禁（全部硬性）：KiCad 网表 == spec、ERC 无错误、`kicad sch-check` 质量检查、工程级规则（电源朝上/地朝下、
 去耦 ≤ 25.4 mm、无交叉、无四通结点、无悬空标签、无自动网名、层次一致、标题栏齐全）、连接 IR、intent derive；
 给了 `--requirements` 还有 review-panel 设计评审（跳过要签名豁免）。产物：工程文件、`connectivity.json`、
-`intent.json`、`erc.json`、报告里每阶段计时。
+`intent.json`、`erc.json`、`sch-review.json`、报告里每阶段计时。
+
+### 设计评审门禁 `sch-review`（v0.12 起）
+
+每次 sch-build / sch-edit 在**暂存的最终文件**上跑一遍 `kicad sch-check --review` 的同一套审查（用本次的网表、ERC
+和刚推导的 `intent.json`），报告 `sch-review.json` 与工程一起原子提交，`gates[]` 里是 `sch-review`：
+
+- `--sch-review advisory`（默认）：只报告，不阻断——未豁免的 error 或 cannot-check 记为 `warn`，增量修复照常可写；
+- `--sch-review strict`：error 或 cannot-check 让构建失败（`SCH_REVIEW_FAILED`，`--out` 不动，失败工程与
+  `sch-review.json` 在 `.pcbpilot/sch-build/failed/`）；签核、`pcbpilot-review` 用 strict；
+- `--sch-review off`：跳过（gate 为 `skip`）。
+
+审查项、证据、豁免与退出码见 `pcbpilot kicad sch-check --help`；要点：只有 proven 的
+发现是 error；internal pull-up、测试点、参考轨等**角色**写在 spec 的 `intent.review`（经 `intent derive --spec`
+进 `intent.json`，字段见 [design-intent.md](design-intent.md#review)），或在符号字段 `ReviewRole` /
+`InternalPullup` 上声明——低电流本身从不豁免。接受一条复核过的发现：`--waivers` 里
+`{"gate":"sch-review","match":"<finding.fingerprint>","reason":…,"by":…}`（按 fingerprint 精确匹配，不按文字；
+豁免不会把 cannot-check 变成 pass，报告 `verdict` 区分 `pass` 与 `pass-with-waivers`）。
 
 ### 大板与分页（v0.10.1 起）
 

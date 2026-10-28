@@ -54,6 +54,18 @@ pcbpilot intent derive --connectivity sch-p1.json --connectivity sch-p2.json \
  "rules":{"clearanceMil":6,"trackMil":6,"viaDrillMil":12,"viaDiaMil":24}}
 ```
 
+<a id="review"></a>`spec.review`（可选，原样进 `intent.json` 的 `review`，旧的 intent.json 没有它也照常可用）：给
+`kicad sch-check --review` / sch-build `sch-review` 门禁声明原理图看不出的**角色**，每条豁免在报告里注明来源字段。
+
+```json
+"review":{"internalPullups":["U1.NRST","U3.7"],"internalPulldowns":["U2.BOOT0"],"pulledUpNets":["/I2C_EXT_SDA"],
+          "tolerantPins":["U4.SDA"],"testPoints":["TP3"],"singlePinNets":["/SPARE"],"referenceRails":["/VREF"],
+          "modules":["U8"],"caplessRegulators":["U5"],"aliases":[["+3V3","VDD_IO"]]}
+```
+
+脚写 `REF.脚号` 或 `REF.脚名`；网写网名（显示名或全名，歧义/不存在的名字记入 `review.notes`，不猜）；件写位号。
+低电流不是豁免理由：参考/采样轨要显式写进 `referenceRails`。
+
 声明的轨电流**优先于仿真**（`currentSource: declared`）；声明低于仿真值会出 finding。只声明
 `voltage`/`rippleMvpp`/`peakV`（不写 `currentA`）的轨保留仿真/启发电流。`domains[].transient`
 （`mains`/`secondary`/`none`）+ `ratedVrms` 声明该域的瞬态来源与 IEC 60664-1 Table F.1 取值电压

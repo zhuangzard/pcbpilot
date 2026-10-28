@@ -90,6 +90,8 @@
 | `pcb module-check` | `status`: pass / fail / incomplete | 直接对应 |
 | `pcb poured-list` | 完整 inventory | 完整读取的 `[]` → known-empty；任一字段缺测 → INCOMPLETE |
 | `kicad sch-check` | `ok`、ERC、质量发现 | `ok:false` → FAIL；ERC 只有警告 → WARN |
+| `kicad sch-check --review` | `status` / `review.verdict`、每项 `checks[].status`、发现的 `certainty` | 退出 6 / `fail` → FAIL（proven error）；5 / `cannot-check` → 该项 INCOMPLETE；`pass-with-waivers` → PASS 并列出豁免；只有 warning → WARN |
+| `kicad sch-build` / `sch-edit` 的 `sch-review` 门禁 | `gates[].status`、`sch-review.json` | advisory 下 `warn` = 有 error 或 cannot-check（不阻断，按上一行判）；strict 下失败即 `SCH_REVIEW_FAILED`（未写文件） |
 | `kicad sch-build` / `sch-edit` | `ok:false` + `error.code` | FAIL（未写任何文件）；`SHEET_NOT_LOADED` 是加载问题，修 spec 字符，不绕过 |
 | `kicad route` | `summary.json` 的 `gates[]` | 同 `pcb gate`；`summary.simKicadMismatch` 里的网 → INCOMPLETE（门禁本身仍失败）。v0.10.2 起读不了的 kicad-cli DRC 报告记为 “cannot check”，`kicad-drc` 门禁失败而不是当作干净 |
 | `kicad fab` | 缺 C 号即非零退出且不写文件 | FAIL；`--no-assembly` 时 BOM/CPL 项为 UNSUPPORTED（未出），不是 PASS |
