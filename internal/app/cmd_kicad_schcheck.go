@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/zhuangzard/pcbpilot/internal/gate"
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
 )
 
@@ -41,15 +42,20 @@ type kicadSchCheckReport struct {
 	Quality  []kicadSheetFindings `json:"quality"`
 	Findings int                  `json:"qualityFindings"`
 	Fixed    []kicadPwrFlagFix    `json:"pwrFlags,omitempty"`
+	// Review is the design review (--review); Status is then the overall
+	// verdict of ERC + quality + review.
+	Review *kicad.SchReview `json:"review,omitempty"`
+	Status gate.Status      `json:"status,omitempty"`
 }
 
 func newKicadSchCheckCmd(stdout, stderr io.Writer) *cobra.Command {
 	var sch string
-	var fixPwr bool
+	var fixPwr, review bool
 	var ignore []string
+	var intentPath, simPath, waiverPath string
 	c := &cobra.Command{
 		Use:   "sch-check",
-		Short: "Schematic hard gate on KiCad: kicad-cli ERC + pcbpilot quality checks (JSON, non-zero on fail)",
+		Short: "Schematic hard gate on KiCad: kicad-cli ERC + pcbpilot quality checks, --review design audit (JSON, non-zero on fail)",
 		Long: `Runs kicad-cli's ERC (JSON, all severities) on the hierarchy of --sch and
 pcbpilot's own quality checks on every sheet: overlapping symbols, wires through
 symbol bodies, diagonal / off-grid / overlapping wires, a wire end or pin on the
@@ -66,13 +72,52 @@ write is netlist-verified (unchanged connectivity) or left untouched. ERC runs
 again afterwards.
 
 --ignore KIND (repeatable) drops a quality finding kind (e.g. off-grid on an
-imported sheet whose parts sit off the 1.27 mm grid).`,
+imported sheet whose parts sit off the 1.27 mm grid).
+
+--review adds the design review (read-only; JSON under "review"): schematic
+design mistakes proven from the KiCad netlist, the library pin electrical
+types, ERC and the sheet files, plus --intent intent.json (pcbpilot intent
+derive: net roles, rail voltages, regulator blocks, the optional review{}
+roles) and --sim sim.json (pcbpilot sim power: rail voltages) when given.
+  connections   i2c-pullup, open-drain-pullup, pullup-voltage, led-limiter,
+                floating-input, output-conflict
+  power         ic-power-ground, decoupling (exact cap set per power pin;
+                shared coverage = warning), regulator-output-cap,
+                regulator-input-cap, bulk-cap (>= 1 uF floor)
+  net integrity merged-nets (ERC multiple_net_names), single-pin-net,
+                hier-mismatch (sheet pin <-> hierarchical label)
+Each check is pass | fail | cannot-check | not-applicable and names the
+evidence it needed and used; each finding has severity error|warning|info,
+certainty proven|likely|heuristic (only proven findings are errors), refs,
+pins, nets, sheet, a fix and its evidence. What the evidence cannot decide
+(e.g. an internal pull-up without intent) is unverified: cannot-check, never
+a pass. Exemptions need an explicit role (intent review{}, a ReviewRole /
+InternalPullup component field, the part kind) and name their source; a low
+current alone exempts nothing. Connector pins are the off-board boundary
+(info). Not covered: crystal load caps, strap pins, feedback values, ESR,
+sequencing, transient protection.
+--waivers takes signed {gate:"sch-review", match:<finding fingerprint>,
+reason, by} entries: a waiver accepts that one finding (reported as waived,
+verdict pass-with-waivers), never a cannot-check.
+Exit with --review: 0 pass, 6 an unwaived error (or ERC error / quality
+finding), 5 cannot-check.`,
 		Args: cobra.NoArgs,
 		Example: `  pcbpilot kicad sch-check --sch board.kicad_sch
-  pcbpilot kicad sch-check --sch board.kicad_sch --fix-pwr-flag`,
+  pcbpilot kicad sch-check --sch board.kicad_sch --fix-pwr-flag
+  pcbpilot kicad sch-check --sch board.kicad_sch --review --intent intent.json --waivers waivers.json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if sch == "" {
 				return fmt.Errorf("--sch is required")
+			}
+			if review && fixPwr {
+				return fmt.Errorf("--review is read-only: run --fix-pwr-flag in its own sch-check first")
+			}
+			if !review && (intentPath != "" || simPath != "" || waiverPath != "") {
+				return fmt.Errorf("--intent, --sim and --waivers are --review flags")
+			}
+			waivers, err := loadWaivers(waiverPath)
+			if err != nil {
+				return err
 			}
 			root, err := kicad.RootSheetFor(sch)
 			if err != nil {
@@ -107,6 +152,23 @@ imported sheet whose parts sit off the 1.27 mm grid).`,
 				rep.Findings += len(fs)
 			}
 			rep.OK = erc.Errors == 0 && rep.Findings == 0
+			if review {
+				rv, err := runSchReview(schReviewOpts{root: root, erc: erc, intentPath: intentPath, simPath: simPath, waivers: waivers})
+				if err != nil {
+					return err
+				}
+				rep.Review = rv
+				rep.Status = gate.Aggregate(gate.Result{Name: "erc+quality", Status: gate.FromBool(rep.OK)}, gate.Result{Name: schReviewGate, Status: rv.Status})
+				rep.OK = rep.Status == gate.Pass
+				if err := writeJSON(stdout, rep); err != nil {
+					return err
+				}
+				fmt.Fprintf(stderr, "sch-check: %d ERC error(s), %d warning(s), %d quality finding(s); %s\n", erc.Errors, erc.Warnings, rep.Findings, rv.Summary())
+				if code := rep.Status.ExitCode(); code != 0 {
+					return exitCodeError{code}
+				}
+				return nil
+			}
 			if err := writeJSON(stdout, rep); err != nil {
 				return err
 			}
@@ -119,6 +181,10 @@ imported sheet whose parts sit off the 1.27 mm grid).`,
 	c.Flags().StringVar(&sch, "sch", "", "a .kicad_sch of the design (its root sheet is found next to it)")
 	c.Flags().BoolVar(&fixPwr, "fix-pwr-flag", false, "wire a PWR_FLAG to every power net ERC reports as not driven")
 	c.Flags().StringArrayVar(&ignore, "ignore", nil, "quality finding kind to skip (repeatable)")
+	c.Flags().BoolVar(&review, "review", false, "also run the design review (read-only; exit 6 on an unwaived error, 5 on cannot-check)")
+	c.Flags().StringVar(&intentPath, "intent", "", "--review: intent.json from `pcbpilot intent derive` (net roles, rail voltages, review roles)")
+	c.Flags().StringVar(&simPath, "sim", "", "--review: `pcbpilot sim power` document (rail voltages)")
+	c.Flags().StringVar(&waiverPath, "waivers", "", "--review: signed waiver file (JSON list of {gate:\"sch-review\", match:<fingerprint>, reason, by})")
 	return c
 }
 

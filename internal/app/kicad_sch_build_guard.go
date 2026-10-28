@@ -283,7 +283,7 @@ type sbBasis struct {
 
 // sbReportNames are the reports sch-build writes into --out besides the
 // project (render/*.svg too).
-var sbReportNames = []string{"erc.json", "connectivity.json", "values.json", "intent-spec.json", "intent.json", "intent.md"}
+var sbReportNames = []string{"erc.json", "connectivity.json", "values.json", "intent-spec.json", "intent.json", "intent.md", "sch-review.json"}
 
 func sbIsReport(f string) bool {
 	f = sbFoldName(f)
