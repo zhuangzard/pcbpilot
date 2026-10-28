@@ -1,5 +1,83 @@
 # Changelog
 
+## [0.12.0] — 2026-10-28
+
+**CLI, daemon, Skills and MCP move to 0.12.0. The connector runtime is UNCHANGED (only its version number moves); import the
+0.12.0 `pcbpilot-connector.eext` so the versions match — the daemon pauses design actions until they do.**
+
+Summary: two design-quality gates for the KiCad full cycle. `kicad sch-check --review` reviews a schematic electrically, using
+pin types, the netlist, ERC, intent and simulation. `kicad rules` turns intent and simulation into KiCad design rules that are
+enforced and proven to load. Both were designed by a three-expert panel (Codex, Kimi K3.1 Pro and Claude), which also reviewed
+the code round after round until no blocker remained: 9 rounds for the review, 7 for the rules.
+
+**`kicad sch-check --review` and the `sch-review` gate**
+- **13 checks.**
+  - Connections: I2C pull-ups, open-drain/interrupt bias, pull-up voltage against the pin's domain, LED current limiting,
+    floating inputs, output conflicts.
+  - Power: IC power and ground, decoupling per power pin, regulator input/output caps, bulk capacitance.
+  - Nets: merged nets (from KiCad's own `multiple_net_names`), single-pin nets, hierarchical label vs sheet pin mismatches.
+- **How each check reports.**
+  - Every check reports pass, fail, cannot-check or not-applicable, with the evidence it needed and the evidence it used.
+  - Every finding carries a certainty (proven, likely or heuristic); only proven findings are errors.
+  - Missing optional declarations give a likely warning that names the missing evidence. Cannot-check is reserved for evidence
+    that cannot be obtained: unreadable sheets, an ERC rule set to ignore, jumpers, branches, unknown diode polarity.
+- **Topology-aware tracing.**
+  - Tracing follows 0 Ω resistors, resistor arrays and net ties. Diodes conduct only anode → cathode; TVS/zener/ESD clamps never
+    conduct.
+  - LEDs are judged per die: each needs its own series resistor, common anode/cathode nodes are handled, and reverse bias is
+    detected from rail voltages, including voltages parsed from rail names such as +3V3 or 5V0.
+  - Buck and boost outputs are traced through the inductor or the rectifier.
+  - Bidirectional pins have no assumed direction unless intent declares them push-pull.
+- **Reporting.**
+  - Verdicts: pass, pass-with-warnings, pass-with-waivers, fail and cannot-check.
+  - Waivers match by a stable fingerprint and never turn cannot-check into pass.
+  - Findings are grouped by check and missing evidence, with counts. On a large demo, 224 findings become 8 lines; every
+    finding stays in the JSON.
+- **In `sch-build` / `sch-edit`.**
+  - `--sch-review off|advisory|strict`, default advisory. The review runs on the staged files and its report commits with the
+    project.
+  - Strict blocks proven errors and cannot-check results. A review tool or input error blocks publication in every mode.
+- **intent.json gains an optional `review` section** for declared roles: internal pulls, push-pull outputs, input pins, pin
+  domains and maximum voltages, connectors, current drivers, common pins, charge pumps, capless regulators, reference rails,
+  modules, test points and aliases. Old intent files work unchanged.
+- **Not covered yet** (documented): crystal load capacitors, strap/boot pins, feedback-divider values, capacitance/ESR adequacy,
+  power sequencing, transient protection, driver aggregate current.
+
+**`kicad rules` — design rules from intent and simulation**
+- **Modes** (exactly one): `--plan [--plan-out]`, `--apply`, `--apply-plan P --revision R`, `--check [--stage placed|routed]`.
+  JSON on stdout. Exit codes: 0 pass, 6 fail, 5 cannot-check, 4 file changed or locked, 1 usage.
+- **How widths are derived.**
+  - Current: the per-net worst case across all simulation results (ripple RMS for switch nodes), compared with any
+    declared peak/RMS current; the larger wins. Only real JSON numbers count as evidence (`null` does not).
+  - Width: IPC-2221/2152 at that current, or the intent width if larger. Inner layers use IPC-2221's internal-conductor
+    constant, so they come out wider than outer layers at the same copper and current; this can raise inner widths above
+    what `intent derive` recorded. Copper thickness is read per layer from the stackup; any defaulted value is recorded.
+  - Never below the board's own minimums.
+  - A power, ground or switch net without current evidence is cannot-check; only an explicit 0 counts as zero current.
+  - Impedance or differential-pair conflicts fail rather than being silently widened.
+- **What is written.**
+  - Netclasses, plus an owned `.kicad_dru` block with outer- and inner-layer track_width minimums. A netclass width is only a
+    default, so this block is what DRC enforces, including on manual GUI routing.
+  - Isolation clearance, creepage and board-edge rules, and the KiCad pre-defined track/via sizes.
+  - User rules are kept: a user maximum is carried over, and a conflicting or weakened user rule (including an explicitly set
+    Default class) is refused unless named with `--replace`.
+- **Verification.**
+  - Writes go through one transaction; pcbnew reads every net's effective class back.
+  - DRC probes run with two negative controls, one without the owned rules file block and one without the owned classes, to
+    prove the rules really load. KiCad silently ignores a rules file it cannot parse.
+  - If nothing can be attributed to the rules file, the result is cannot-check and apply refuses.
+- **`--check`** verifies, layer by layer and with KiCad's last-match semantics:
+  - effective widths, maximums, clearances, isolation and edge rules;
+  - routed copper widths, including arcs and intent-declared neckdowns. Zone-only nets are cannot-check.
+  - via size and via current, using the same resolved per-net currents as the width derivation;
+  - an advisory courtyard proxy for isolation placement.
+- **`kicad route`** shares the same derivation. When a rules block exists, route verifies it byte for byte and stops with
+  `RULES_STALE` if it is out of date. Without one, route's output is byte-identical to 0.11.0.
+
+**Other**
+- Live KiCad tests isolate KiCad's config, cache and documents directories; a guard fails the run if KiCad writes into the
+  package directory.
+
 ## [0.11.0] — 2026-10-27
 
 **CLI, daemon, Skills and MCP move to 0.11.0. The connector runtime is UNCHANGED (only its version number moves); import the

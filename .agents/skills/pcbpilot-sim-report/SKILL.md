@@ -4,7 +4,7 @@ description: "pcbpilot 仿真与设计文档专项：电源直流仿真（每网
 license: MIT
 metadata:
   author: "zhuangzard (pcbpilot); original easyeda-agent by zhoushoujianwork"
-  version: "0.11.0"
+  version: "0.12.0"
   homepage: "https://github.com/zhuangzard/pcbpilot"
 ---
 
