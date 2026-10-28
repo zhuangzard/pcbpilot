@@ -20,6 +20,12 @@ func addViaCurrentFindings(rep *pcbCheckReport, dump []byte, intentPath string) 
 	if err != nil {
 		return err
 	}
+	return addViaCurrentFindingsIntent(rep, dump, in)
+}
+
+// addViaCurrentFindingsIntent is addViaCurrentFindings on a parsed intent
+// (kicad rules passes one carrying its resolved currents).
+func addViaCurrentFindingsIntent(rep *pcbCheckReport, dump []byte, in *pcbauto.Intent) error {
 	chk, err := pcbauto.CheckViaCurrentSnapshot(dump, in)
 	if err != nil {
 		return err

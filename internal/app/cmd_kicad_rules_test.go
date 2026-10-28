@@ -70,12 +70,12 @@ func TestPlanRulesWidths(t *testing.T) {
 	widths, bs = planRulesWidths(in, sim, declaredCurrents{"MOTOR": {PeakA: 3}}, cu)
 	g := basisOf(bs, "GND")
 	wantOuter := metricCeilMil(pcbauto.TraceWidthForCurrent(2, 10, 1, false))
-	wantInner := metricCeilMil(pcbauto.TraceWidthForCurrent(2, 10, 0.5, false))
+	wantInner := metricCeilMil(pcbauto.TraceWidthForCurrent(2, 10, 0.5, true)) // IPC-2221 internal constant
 	if g.Status != "pass" || g.Width.OuterMil != wantOuter || g.Width.InnerMil != wantInner || wantInner <= wantOuter || widths["GND"].OuterMil != wantOuter {
 		t.Fatalf("GND 2 A: %+v (want %g / %g)", g, wantOuter, wantInner)
 	}
-	if b := basisOf(bs, "VBUS"); b.Width.OuterMil != 10 || widths["VBUS"] != (rulesWidth{}) {
-		t.Fatalf("VBUS: the intent governs: %+v", b)
+	if b := basisOf(bs, "VBUS"); b.Width.OuterMil != 10 || widths["VBUS"].OuterMil != 0 && widths["VBUS"].OuterMil != 10 || b.Width.InnerMil <= 10 {
+		t.Fatalf("VBUS: the intent governs outer, the internal-layer current width inner: %+v", b)
 	}
 	// A declared peak resolves the pulsed net.
 	if b := basisOf(bs, "MOTOR"); b.Status != "pass" || b.Current.Source != "declared" || b.Current.A != 3 {
@@ -790,8 +790,13 @@ func TestPlanRulesWidthsRepoIntents(t *testing.T) {
 			t.Errorf("%s: %s %s", b.Net, b.Status, b.Detail)
 		}
 	}
+	// The intent was derived from this sim (IPC-2152: inner ≈ outer per
+	// copper weight): no OUTER width rises. kicad rules sizes inner layers
+	// with IPC-2221's internal-conductor constant, so inner widths may.
 	for n, w := range widths {
-		t.Errorf("%s raised to %+v: the intent was derived from this sim", n, w)
+		if w.OuterMil > in.Nets[n].WidthMil.Outer+reqEpsMil {
+			t.Errorf("%s outer raised to %g: the intent was derived from this sim", n, w.OuterMil)
+		}
 	}
 	if b := basisOf(bs, "+3V3"); b.Current == nil || b.Current.Source != "sim" || b.CurrentWidth == nil {
 		t.Fatalf("+3V3: %+v", b)

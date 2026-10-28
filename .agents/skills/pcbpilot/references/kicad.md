@@ -286,10 +286,12 @@ pcbpilot kicad rules … --check [--stage placed|routed] [--report r.json]  # �
 （`deriveKicadRules`：`kicadRequirements` / `kicadIsolation` / `kicadEdges` + 一次 bridge `netclasses`），
 `kicad rules` 只在其上叠加电流线宽、逐层最小线宽规则与预设尺寸：
 
-- **线宽依据**（每网写进 `nets[].basis`）：电流 = max(`--sim` 的 DC 电流（开关节点取纹波 RMS）、声明的峰值/RMS
+- **线宽依据**（每网写进 `nets[].basis`）：电流 = max(`--sim` 的 DC 电流——取 sim 文件**所有结果（含 worst）里该网的最大值**，
+  只认真正的 JSON 数字（`currentA`，否则焊盘数值电流的 Σsource / Σsink），`null`、空条目都不算；开关节点取纹波 RMS——、声明的峰值/RMS
   （意图 `peakA` / `rmsA`，或 `--requirements` 的 JSON `{"nets":{NET:{"peakA","rmsA"}}}`）)；都没有时用意图自己的
-  `currentA`（仅当 `currentSource` 是 simulated / declared）。线宽 = max(意图 `widthMil`, IPC-2221/2152 在该电流下的线宽，
-  0.05 mm 网格向上取)；铜厚**逐层**取板层叠：写了厚度的层保留原值，只有没写的层回退到意图 `copper`（外层/内层重量），再没有用
+  `currentA`（仅当 `currentSource` 是 simulated / declared）。线宽 = max(意图 `widthMil`, IPC-2221 在该电流下的线宽，
+  0.05 mm 网格向上取；外层用外部导体常数，**内层用内部导体常数**——同铜厚同电流内层更宽。注意 `intent derive` 按 IPC-2152
+  把内外层视作同等，所以由同一 sim 推出的意图，kicad rules 可能只抬高内层线宽）；铜厚**逐层**取板层叠：写了厚度的层保留原值，只有没写的层回退到意图 `copper`（外层/内层重量），再没有用
   KiCad 默认 0.035 mm（每个回退层都写入 `assumptions`，`copper.source` 为 `stackup` / `stackup+intent` /
   `stackup+kicad-default` / `intent` / `kicad-default`），然后外层取两外层较薄者、内层取最薄内层——已知的 0.5 oz 内层
   不会因别的层缺值被当成 1 oz。温升取意图 `copper.tempRiseC`（缺省 10 °C，同样记假设）。
@@ -372,7 +374,8 @@ clearance 会替换类间距，也会被对规则替换）；有绝缘对时 cre
   `{refs, maxLengthMil, minWidthMil}` 覆盖的段可以；在本网铺铜内的细段 = cannot-check（铺铜颈缩由 post-layout sim 判）；
   没有走线、只有铺铜的网（含铺铜孤岛）= `zone-only`（cannot-check：铺铜宽度与是否连上焊盘这里不判）；≥2 焊盘却无铜的网 =
   `not-routed`（cannot-check，绝不当通过））、`via-size`（每个过孔不小于计划过孔）、`via-current`
-  （route 的过孔电流门禁原样复用）、`isolation-placement`（**advisory**：同面封装 courtyard 边到边距离 < 对的电气间隙
+  （route 的过孔电流门禁，但喂给它的是本次推导解析出的每网电流——sim 最坏值、声明的峰值 / RMS 比意图大时用大的，
+  焊盘电流按比例放大——和计划所用的温升，不是意图文件里的原值）、`isolation-placement`（**advisory**：同面封装 courtyard 边到边距离 < 对的电气间隙
   → warn；跨两域且未在意图 `pairs[].bridges` 声明的器件 → warn。这是**布局代理检查，不是铜间距**，铜由带绝缘规则的
   DRC 判）。`--stage placed`：未布线阶段不做铜检查（标 not applicable）。
 

@@ -121,7 +121,7 @@ func TestPlanRulesWidthsMissingIsNotZero(t *testing.T) {
 	if has["C"] || !has["D"] {
 		t.Fatalf("evidence %v", has)
 	}
-	_, bs := planRulesWidths(in, sp, nil, cu, has)
+	_, bs := planRulesWidths(in, sp, nil, cu, simCurrents(raw))
 	for net, want := range map[string]string{"A": "cannot-check", "B": "pass", "C": "cannot-check", "D": "pass"} {
 		if b := basisOf(bs, net); b.Status != want {
 			t.Errorf("%s: %s, want %s (%+v)", net, b.Status, want, b)

@@ -326,7 +326,9 @@ type rulesRun struct {
 	rbStaged *kicad.RulesReadback
 	// maxes / maxConflicts: carried user track_width maximums
 	// (trackMaxCarry).
-	maxes        trackMaxes
+	maxes trackMaxes
+	// intentName: board net name → the intent's own name (onBoard renames).
+	intentName   map[string]string
 	maxConflicts []maxConflict
 	// intentCopy: the captured intent bytes in the stage (for readers that
 	// take a path).
@@ -670,6 +672,12 @@ func (r *rulesRun) derive() int {
 	}
 	sort.Strings(names)
 	ob, renamed, err := in.onBoard(names)
+	r.intentName = map[string]string{}
+	for _, rn := range renamed {
+		if a, b, ok := strings.Cut(rn, " → "); ok {
+			r.intentName[b] = a
+		}
+	}
 	if err != nil {
 		return r.fail(errRulesInput, o.intent, err.Error(), "", 1)
 	}
@@ -680,7 +688,11 @@ func (r *rulesRun) derive() int {
 	cu := copperBasis(stack, ob)
 	rep.Copper = &cu
 	rep.Assumptions = append(rep.Assumptions, cu.Assumptions...)
-	widths, bases := planRulesWidths(ob, sp, decl, cu, simEvidence(r.data[o.sim]))
+	var sc map[string]simNetCurrent
+	if o.sim != "" {
+		sc = simCurrents(r.data[o.sim])
+	}
+	widths, bases := planRulesWidths(ob, sp, decl, cu, sc)
 	r.bases = bases
 	r.ri = deriveKicadRules(ob, r.intentCopy, widths)
 	rep.RequestSHA = r.ri.sha()

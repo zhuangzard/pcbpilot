@@ -664,7 +664,7 @@ func (r *kicadRun) rulesStamp(ri kicadRulesInputs, inSnap *boardSnapshot) (kicad
 	}
 	stack, _ := kicad.ReadStackupCopper(board)
 	var sp *pcbauto.SimPower
-	var simHas map[string]bool
+	var simCur map[string]simNetCurrent
 	if r.o.sim != "" {
 		raw, err := os.ReadFile(r.o.sim)
 		if err != nil {
@@ -673,13 +673,13 @@ func (r *kicadRun) rulesStamp(ri kicadRulesInputs, inSnap *boardSnapshot) (kicad
 		if sp, err = pcbauto.ParseSim(raw); err != nil {
 			return ri, err
 		}
-		simHas = simEvidence(raw)
+		simCur = simCurrents(raw)
 	}
 	decl, _, err := loadDeclaredCurrents(r.o.requirements)
 	if err != nil {
 		return ri, err
 	}
-	widths, _ := planRulesWidths(r.in, sp, decl, copperBasis(stack, r.in), simHas)
+	widths, _ := planRulesWidths(r.in, sp, decl, copperBasis(stack, r.in), simCur)
 	ri2 := deriveKicadRules(r.in, r.o.intent, widths)
 	sum := map[string]any{"requestSha256": ri2.sha(), "appliedRequestSha256": st.RequestSHA}
 	r.summary["kicadRules"] = sum

@@ -199,8 +199,10 @@ func parseDesignIntent(raw []byte) (*designIntent, error) {
 	}
 	if json.Unmarshal(raw, &present) == nil {
 		for name, fields := range present.Nets {
-			var v float64
-			if n := in.Nets[name]; n != nil && json.Unmarshal(fields["currentA"], &v) == nil {
+			// An actual JSON number only: null decodes into a float64
+			// without error and is not evidence.
+			var v *float64
+			if n := in.Nets[name]; n != nil && json.Unmarshal(fields["currentA"], &v) == nil && v != nil {
 				n.currentAGiven = true
 			}
 		}
