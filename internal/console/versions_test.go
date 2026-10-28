@@ -33,21 +33,29 @@ func byName(cs []Component) map[string]Component {
 func TestComponentsFollowSelfUpdateTargetsAndMCPStamp(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir on Windows
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("CODEX_HOME", "")
 
 	// Source checkout with a linked Skill for ZCode and Claude Code; a copied
-	// release Skill for Codex.
+	// release Skill for Codex. Unprivileged Windows cannot create the skill
+	// symlinks: the linked rows are then not checked, everything else is.
 	repo := filepath.Join(t.TempDir(), "pcbpilot")
 	writeFile(t, filepath.Join(repo, ".agents", "skills", "pcbpilot", "SKILL.md"),
 		"---\nname: pcbpilot\nmetadata:\n  version: \"0.6.1\"\n---\n# pcbpilot\n")
 	writeFile(t, filepath.Join(repo, ".agents", "skills", "pcbpilot", ".version"), "0.5.0\n") // stale marker from an old copy
+	linkedSkills := true
 	for _, client := range []string{".zcode", ".claude"} {
 		if err := os.MkdirAll(filepath.Join(home, client, "skills"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.Symlink(filepath.Join(repo, ".agents", "skills", "pcbpilot"), filepath.Join(home, client, "skills", "pcbpilot")); err != nil {
-			t.Fatal(err)
+			if !symlinkUnprivileged(err) {
+				t.Fatal(err)
+			}
+			t.Logf("linked skill rows not checked: %v", err)
+			linkedSkills = false
+			os.RemoveAll(filepath.Join(home, client))
 		}
 	}
 	writeFile(t, filepath.Join(home, ".codex", "skills", "pcbpilot", "SKILL.md"), "---\nname: pcbpilot\n---\n")
@@ -58,9 +66,7 @@ func TestComponentsFollowSelfUpdateTargetsAndMCPStamp(t *testing.T) {
 	writeFile(t, filepath.Join(cur, "VERSION"), "0.6.1\n")
 	writeFile(t, filepath.Join(cur, "package.json"), `{"version":"0.18.3"}`)
 	writeFile(t, filepath.Join(cur, "src", "server.mjs"), "")
-	if err := os.Symlink(cur, filepath.Join(home, ".pcbpilot", "mcp", "current")); err != nil {
-		t.Fatal(err)
-	}
+	linkDirForTest(t, cur, filepath.Join(home, ".pcbpilot", "mcp", "current")) // a junction on Windows, like selfupdate.linkDir
 	server := filepath.Join(home, ".pcbpilot", "mcp", "current", "src", "server.mjs")
 	claudeJSON := func(server string) {
 		b, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{"pcbpilot": map[string]any{"command": "node", "args": []string{server}}}})
@@ -69,11 +75,13 @@ func TestComponentsFollowSelfUpdateTargetsAndMCPStamp(t *testing.T) {
 	claudeJSON(server)
 
 	m := byName(components("v0.6.1", home, nil))
-	if z, ok := m["Skill (ZCode)"]; !ok || z.Version != "0.6.1" || z.Align != "linked" || !strings.Contains(z.Detail, "linked (source)") {
-		t.Fatalf("ZCode skill row: %+v (all: %+v)", z, m)
-	}
-	if c := m["Skill (Claude Code)"]; c.Version != "0.6.1" || c.Align != "linked" {
-		t.Fatalf("linked skill must read SKILL.md metadata.version, not the stale marker: %+v", c)
+	if linkedSkills {
+		if z, ok := m["Skill (ZCode)"]; !ok || z.Version != "0.6.1" || z.Align != "linked" || !strings.Contains(z.Detail, "linked (source)") {
+			t.Fatalf("ZCode skill row: %+v (all: %+v)", z, m)
+		}
+		if c := m["Skill (Claude Code)"]; c.Version != "0.6.1" || c.Align != "linked" {
+			t.Fatalf("linked skill must read SKILL.md metadata.version, not the stale marker: %+v", c)
+		}
 	}
 	if c := m["Skill (Codex)"]; c.Version != "0.6.1" || c.Align != "aligned" {
 		t.Fatalf("copied skill: %+v", c)
@@ -86,7 +94,8 @@ func TestComponentsFollowSelfUpdateTargetsAndMCPStamp(t *testing.T) {
 	}
 
 	// Source install: every client runs the checkout's server.
-	writeFile(t, filepath.Join(home, ".pcbpilot", "install.json"), `{"kind":"source","repo":"`+repo+`"}`)
+	info, _ := json.Marshal(map[string]string{"kind": "source", "repo": repo}) // escapes Windows backslashes
+	writeFile(t, filepath.Join(home, ".pcbpilot", "install.json"), string(info))
 	claudeJSON(filepath.Join(repo, "mcp", "src", "server.mjs"))
 	if c := byName(components("v0.6.1-13-gabc", home, nil))["MCP"]; c.Version != "linked (source)" || c.Align != "linked" {
 		t.Fatalf("source MCP row: %+v", c)

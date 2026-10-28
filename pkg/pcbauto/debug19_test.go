@@ -7,7 +7,6 @@ import (
 	"os"
 	"sort"
 	"strconv"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -28,8 +27,7 @@ func TestDebugRouteSpeed(t *testing.T) {
 	noUnreachableProof = os.Getenv("PCBAUTO_NOPROOF") != ""
 	defer func() { noOwnerCache, noUnreachableProof = false, false }()
 	b := loadFixture(t, f)
-	var ru0, ru1 syscall.Rusage
-	_ = syscall.Getrusage(syscall.RUSAGE_SELF, &ru0)
+	cpu0 := processCPUTime()
 	start := time.Now()
 	res, err := Run(context.Background(), b, Options{Stack: StackOptions{Force: b.CopperLayers}, NoEscalate: true,
 		Route: RouteOptions{Timeout: 2 * time.Hour, MaxIters: iters}})
@@ -37,8 +35,7 @@ func TestDebugRouteSpeed(t *testing.T) {
 		t.Fatal(err)
 	}
 	el := time.Since(start)
-	_ = syscall.Getrusage(syscall.RUSAGE_SELF, &ru1)
-	cpu := time.Duration(ru1.Utime.Nano()-ru0.Utime.Nano()) + time.Duration(ru1.Stime.Nano()-ru0.Stime.Nano())
+	cpu := processCPUTime() - cpu0
 	var lines []string
 	for _, tr := range res.Route.Tracks {
 		lines = append(lines, fmt.Sprintf("T %s %d %.4f %.4f %.4f %.4f %.4f", tr.Net, tr.Layer, tr.A.X, tr.A.Y, tr.B.X, tr.B.Y, tr.Width))

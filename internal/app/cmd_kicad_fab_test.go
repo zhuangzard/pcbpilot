@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -55,7 +56,14 @@ func TestKiCadLcscModesExclusive(t *testing.T) {
 }
 
 func TestKiCadFabGateMessage(t *testing.T) {
-	t.Setenv("PCBPILOT_KICAD_CLI", "/bin/sh") // never reached: the gate fails first
+	// kicad-cli must resolve to an existing file (checked before the gate) but
+	// is never run: the gate fails first. The test binary exists on every OS
+	// (/bin/sh does not on Windows).
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PCBPILOT_KICAD_CLI", exe)
 	_, errOut, err := runKiCadCmd(t, "fab", "--pcb", kicadFixBoard, "--out", t.TempDir())
 	if err == nil {
 		t.Fatal("want failure")

@@ -25,6 +25,16 @@ import (
 	"github.com/zhuangzard/pcbpilot/internal/selfupdate"
 )
 
+// skillAssetExecutable locates the running binary for the walk-up rung (a
+// test seam: a test binary under the user profile, e.g. %TEMP% on Windows,
+// would otherwise walk up into the real ~/.agents).
+var skillAssetExecutable = os.Executable
+
+// skillAssetWalkStop, when set, ends a walk-up at the first directory it
+// accepts, without probing it (a test seam: on Windows the temp dir is inside
+// the user profile, so walking up from a test dir reached the real ~/.agents).
+var skillAssetWalkStop func(dir string) bool
+
 // skillAsset describes one locatable skill file.
 type skillAsset struct {
 	// name is the bare filename, used in probe messages and the $PATH lookup.
@@ -105,6 +115,9 @@ func (a skillAsset) resolve(explicit string) (string, error) {
 	// 4/5. Repository skills walked up from the binary, then from cwd.
 	walkUp := func(dir string) (string, bool) {
 		for i := 0; i < 8; i++ {
+			if skillAssetWalkStop != nil && skillAssetWalkStop(dir) {
+				break
+			}
 			for _, rel := range a.rels {
 				if c := filepath.Join(dir, ".agents", "skills", filepath.FromSlash(rel)); hit(c) {
 					return c, true
@@ -118,7 +131,7 @@ func (a skillAsset) resolve(explicit string) (string, error) {
 		}
 		return "", false
 	}
-	if exe, err := os.Executable(); err == nil {
+	if exe, err := skillAssetExecutable(); err == nil {
 		// Resolve symlinks: a /usr/local/bin/pcbpilot symlinked into the repo's
 		// bin/ should walk up the REPO, not /usr/local.
 		if real, rerr := filepath.EvalSymlinks(exe); rerr == nil {

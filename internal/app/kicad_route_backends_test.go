@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -80,27 +81,22 @@ func TestTracemakerResult(t *testing.T) {
 	}
 }
 
-// A stand-in tracemaker: writes the board and a report, checks its arguments.
-func fakeTracemaker(t *testing.T, body string) string {
+// A stand-in tracemaker (this test binary, fake_router_test.go): answers
+// `version` with 9.9.9 and otherwise behaves as named — ok (checks
+// --constraints, writes the board and a report), incomplete (exit 3 with
+// unrouted connections), crash (exit 1), norep (a board but no report) or
+// sleep (30 s). The behaviour holds until the next call or the test's end.
+func fakeTracemaker(t *testing.T, behaviour string) string {
 	t.Helper()
-	p := filepath.Join(t.TempDir(), "tracemaker")
-	script := "#!/bin/sh\nif [ \"$1\" = version ]; then echo 'tracemaker 9.9.9'; exit 0; fi\n" + body
-	if err := os.WriteFile(p, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return p
+	bin := fakeRouterBin(t, "tracemaker")
+	t.Setenv(envFakeTMBehaves, behaviour)
+	return bin
 }
 
 func TestRunTracemaker(t *testing.T) {
 	dir := t.TempDir()
 	in, out, rep := filepath.Join(dir, "in.kicad_pcb"), filepath.Join(dir, "out.kicad_pcb"), filepath.Join(dir, "r.json")
-	bin := fakeTracemaker(t, `
-out=""; json=""; cons=""
-while [ $# -gt 0 ]; do case "$1" in -o) out=$2; shift;; --json) json=$2; shift;; --constraints) cons=$2; shift;; esac; shift; done
-[ -f "$cons" ] || exit 3
-echo routed > "$out"
-echo '{"connections":5,"routed":4,"seconds":1.5,"unrouted":[{"net":"N","from":"U1.1","to":"U2.2","blocked":false,"reason":"x"}]}' > "$json"
-`)
+	bin := fakeTracemaker(t, "ok")
 	cons := filepath.Join(dir, "c.json")
 	if err := os.WriteFile(cons, []byte(`{"version":1}`), 0o644); err != nil {
 		t.Fatal(err)
@@ -119,23 +115,17 @@ echo '{"connections":5,"routed":4,"seconds":1.5,"unrouted":[{"net":"N","from":"U
 		}
 	}
 	// exit 3 = finished with unrouted connections: an incomplete result, not an error
-	inc := fakeTracemaker(t, `
-out=""; json=""
-while [ $# -gt 0 ]; do case "$1" in -o) out=$2; shift;; --json) json=$2; shift;; esac; shift; done
-echo routed > "$out"
-echo '{"connections":5,"routed":3,"seconds":2,"unrouted":[{"net":"N","from":"U1.1","to":"U2.2","blocked":false},{"net":"M","from":"U1.2","to":"U2.3","blocked":false}]}' > "$json"
-exit 3
-`)
+	inc := fakeTracemaker(t, "incomplete")
 	if r3, err := runTracemaker(context.Background(), tracemakerOpts{bin: inc, timeout: 10 * time.Second}, in, out, cons, rep, io.Discard); err != nil || r3.UnroutedCount != 2 {
 		t.Fatalf("exit 3 must give the incomplete result: %v %+v", err, r3)
 	}
 	// a crash is an error, never an empty success
-	bad := fakeTracemaker(t, "exit 1\n")
+	bad := fakeTracemaker(t, "crash")
 	if _, err := runTracemaker(context.Background(), tracemakerOpts{bin: bad}, in, out, cons, rep, io.Discard); err == nil {
 		t.Fatal("crashed tracemaker must fail")
 	}
 	// no report = no result
-	noRep := fakeTracemaker(t, "out=''; while [ $# -gt 0 ]; do case \"$1\" in -o) out=$2; shift;; esac; shift; done; echo x > \"$out\"\n")
+	noRep := fakeTracemaker(t, "norep")
 	if _, err := runTracemaker(context.Background(), tracemakerOpts{bin: noRep}, in, out, cons, rep, io.Discard); err == nil {
 		t.Fatal("a run without a report must fail")
 	}
@@ -143,7 +133,7 @@ exit 3
 
 func TestRunTracemakerCancel(t *testing.T) {
 	dir := t.TempDir()
-	bin := fakeTracemaker(t, "sleep 30\n")
+	bin := fakeTracemaker(t, "sleep")
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() { time.Sleep(200 * time.Millisecond); cancel() }()
 	start := time.Now()
@@ -154,8 +144,7 @@ func TestRunTracemakerCancel(t *testing.T) {
 }
 
 func TestResolveTracemaker(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	home := fakeHome(t) // HOME and USERPROFILE (os.UserHomeDir on Windows)
 	t.Setenv("TRACEMAKER_BIN", "")
 	t.Setenv("PATH", t.TempDir())
 	if _, err := resolveTracemaker(""); err == nil || !strings.Contains(err.Error(), "tracemaker not found") {
@@ -165,13 +154,17 @@ func TestResolveTracemaker(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	bin := filepath.Join(dir, "tracemaker")
+	exe := "tracemaker"
+	if runtime.GOOS == "windows" {
+		exe = "tracemaker.exe"
+	}
+	bin := filepath.Join(dir, exe)
 	_ = os.WriteFile(bin, []byte("x"), 0o755)
-	_ = os.Symlink(dir, filepath.Join(home, ".pcbpilot", "tracemaker", "current"))
+	linkCurrent(t, home, "tracemaker", dir) // a junction on unprivileged Windows
 	got, err := resolveTracemaker("")
-	want, _ := filepath.EvalSymlinks(bin)
-	if g, _ := filepath.EvalSymlinks(got); err != nil || g != want {
-		t.Fatalf("got %q err %v want %q", got, err, want)
+	// sameFile, not EvalSymlinks: that does not resolve a Windows junction.
+	if err != nil || !sameFile(t, got, bin) {
+		t.Fatalf("got %q err %v want %q", got, err, bin)
 	}
 	if _, err := resolveTracemaker(filepath.Join(home, "nope")); err == nil {
 		t.Fatal("explicit missing path must fail")

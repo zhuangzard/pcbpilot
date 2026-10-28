@@ -128,9 +128,7 @@ func TestSchDesignatorsOutputAliasesRejected(t *testing.T) {
 			case "relative":
 				alias = dir + "/./source.json"
 			case "symlink":
-				if err := os.Symlink(input, alias); err != nil {
-					t.Fatal(err)
-				}
+				symlinkOrSkip(t, input, alias) // file symlinks need the privilege on Windows
 			case "hardlink":
 				if err := os.Link(input, alias); err != nil {
 					t.Fatal(err)
@@ -153,6 +151,16 @@ func TestSchDesignatorsOutputAliasesRejected(t *testing.T) {
 	}
 	if err := schDesignatorsDistinctFiles(filepath.Join(dir, "prefix.json"), filepath.Join(dir, "prefix.json")); err == nil {
 		t.Fatal("future output collision accepted")
+	}
+	// A not-yet-created file reached through a linked directory (a junction
+	// on unprivileged Windows, which EvalSymlinks does not resolve).
+	linked := filepath.Join(t.TempDir(), "linked")
+	dirLinkForTest(t, dir, linked)
+	if err := schDesignatorsDistinctFiles(filepath.Join(dir, "future.json"), filepath.Join(linked, "future.json")); err == nil {
+		t.Fatal("future output collision through a linked directory accepted")
+	}
+	if err := schDesignatorsDistinctFiles(filepath.Join(dir, "a.json"), filepath.Join(linked, "b.json")); err != nil {
+		t.Fatalf("distinct files in one linked directory refused: %v", err)
 	}
 }
 

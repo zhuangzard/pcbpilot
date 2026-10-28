@@ -53,8 +53,13 @@ func TestReplaceBinarySignsOnInstall(t *testing.T) {
 	if err := os.WriteFile(tmp, []byte("x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// dst does not exist yet (first install): Windows used to fail here
+	// moving the missing old binary aside.
 	if err := replaceBinary(tmp, dst); err != nil {
 		t.Fatal(err)
+	}
+	if b, err := os.ReadFile(dst); err != nil || string(b) != "x" {
+		t.Fatalf("installed binary = %q %v", b, err)
 	}
 	if runtime.GOOS != "windows" && (len(got) != 1 || got[0] != tmp) {
 		t.Fatalf("ensureLocalSignature calls = %v, want exactly the staged file", got)

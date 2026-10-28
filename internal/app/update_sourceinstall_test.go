@@ -13,8 +13,7 @@ import (
 // tarball, linked skills report their SKILL.md version (not a stale .version
 // marker), and an MCP registered at the checkout reads as "linked".
 func TestSourceInstallAtReleaseTag(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	home := fakeHome(t) // HOME and USERPROFILE (os.UserHomeDir on Windows)
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	repo := filepath.Join(home, "src", "pcbpilot")
 	skill := filepath.Join(repo, ".agents", "skills", "pcbpilot")
@@ -30,18 +29,18 @@ func TestSourceInstallAtReleaseTag(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(skill, ".version"), []byte("0.2.0\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(skill, filepath.Join(home, ".claude", "skills", "pcbpilot")); err != nil {
-		t.Fatal(err)
-	}
 	if err := selfupdate.WriteJSON(selfupdate.InstallInfoPath(), selfupdate.InstallInfo{Kind: "source", Repo: repo, Version: "v0.6.1"}); err != nil {
 		t.Fatal(err)
 	}
 
-	for _, tg := range selfupdate.Targets(true) {
-		if tg.Client == "claude" && (tg.Linked == "" || tg.Installed != "0.6.1") {
-			t.Fatalf("linked claude skill: %+v, want Installed 0.6.1", tg)
+	t.Run("linked skill", func(t *testing.T) {
+		symlinkOrSkip(t, skill, filepath.Join(home, ".claude", "skills", "pcbpilot"))
+		for _, tg := range selfupdate.Targets(true) {
+			if tg.Client == "claude" && (tg.Linked == "" || tg.Installed != "0.6.1") {
+				t.Fatalf("linked claude skill: %+v, want Installed 0.6.1", tg)
+			}
 		}
-	}
+	})
 	u := &selfUpdater{version: "v0.6.1"}
 	if u.release() {
 		t.Fatal("source install at a release tag treated as a release install")

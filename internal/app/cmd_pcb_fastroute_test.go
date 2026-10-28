@@ -61,7 +61,11 @@ func TestReadFastrouteReport(t *testing.T) {
 
 func TestResolveFastroute(t *testing.T) {
 	dir := t.TempDir()
-	bin := filepath.Join(dir, "fastroute")
+	exe := "fastroute"
+	if runtime.GOOS == "windows" {
+		exe = "fastroute.exe" // PATH lookup goes by PATHEXT; it is not run here
+	}
+	bin := filepath.Join(dir, exe)
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -501,11 +505,12 @@ func TestIntentPairsAndTune(t *testing.T) {
 
 // fakeFastroute writes a session and a report with unrouted connections,
 // the first blocked of them classed "blocked" by --diagnose; it logs one
-// line per call to calls.
+// line per call to calls. The fake is this test binary (fake_router_test.go);
+// its behaviour holds until the next fakeFastroute call or the test's end.
 func fakeFastroute(t *testing.T, unrouted, blocked int) (bin, calls string) {
 	t.Helper()
 	dir := t.TempDir()
-	bin, calls = filepath.Join(dir, "fastroute"), filepath.Join(dir, "calls")
+	bin, calls = fakeRouterBin(t, "fastroute"), filepath.Join(dir, "calls")
 	var items []string
 	for i := 0; i < unrouted; i++ {
 		cls := "congestion"
@@ -515,11 +520,8 @@ func fakeFastroute(t *testing.T, unrouted, blocked int) (bin, calls string) {
 		items = append(items, fmt.Sprintf(`{"net":"N%d","from":{"component":"U1","pin":"%d"},"to":{"component":"R1","pin":"1"},"diagnosis":{"class":"%s"}}`, i, i+1, cls))
 	}
 	rep := fmt.Sprintf(`{"stats":{"unrouted":%d,"violations":0},"unrouted":[%s]}`, unrouted, strings.Join(items, ","))
-	script := "#!/bin/sh\necho call >> " + calls + "\nses=; rep=\nwhile [ $# -gt 0 ]; do case \"$1\" in -do) ses=$2; shift;; --report=*) rep=${1#--report=};; esac; shift; done\n" +
-		"echo '(session x)' > \"$ses\"\ncat > \"$rep\" <<'J'\n" + rep + "\nJ\n"
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	t.Setenv(envFakeCalls, calls)
+	t.Setenv(envFakeReport, rep)
 	return bin, calls
 }
 
