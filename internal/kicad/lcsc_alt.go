@@ -70,7 +70,8 @@ type AltLine struct {
 	LCSC       string         `json:"lcsc"`
 	Need       *int64         `json:"need,omitempty"`
 	Reasons    []string       `json:"reasons"`
-	Blocking   bool           `json:"blocking"` // cannot be ordered as is (extended-library alone is not blocking)
+	Unknown    bool           `json:"unverifiable,omitempty"` // catalog record lacks stock / buyable: cannot tell
+	Blocking   bool           `json:"blocking"`               // cannot be ordered as is (extended-library alone is not blocking)
 	Candidates []AltCandidate `json:"candidates,omitempty"`
 	Proposal   *AltProposal   `json:"proposal"`
 	Error      string         `json:"error,omitempty"`
@@ -199,6 +200,12 @@ func lineReasons(r CatalogLookup, need int64) (reasons []string, blocking bool) 
 		return []string{"not-in-catalog"}, true
 	}
 	p := r.Part
+	if p.Buyable == nil {
+		reasons = append(reasons, "buyable-unknown")
+	}
+	if p.Stock == nil {
+		reasons = append(reasons, "stock-unknown")
+	}
 	if p.Buyable != nil && (!*p.Buyable || p.NoBuyReason != "" || p.MergedCode != "") {
 		reasons, blocking = append(reasons, "not-buyable"), true
 	}
@@ -294,15 +301,21 @@ func Alternatives(in AltInput) *AltReport {
 		r := look(g.LCSC)
 		reasons, blocking := lineReasons(r, need[g.LCSC])
 		g.Reasons, g.Blocking, g.Current, g.Error = append(g.Reasons, reasons...), blocking, r.Part, r.Err
+		for _, x := range reasons {
+			if strings.HasSuffix(x, "-unknown") {
+				g.Unknown = true
+			}
+		}
 		n := need[g.LCSC]
 		g.Need = &n
 		if len(reasons) > 0 {
 			flagged[g.LCSC] = true
 		}
 	}
-	for _, code := range codes {
-		if !flagged[code] {
-			reserved[code] += need[code]
+	for _, k := range order {
+		// Lines that keep their number, including extended-only ones that may find no basic replacement.
+		if g := groups[k]; !g.Blocking && !g.Unknown {
+			reserved[g.LCSC] += need[g.LCSC]
 		}
 	}
 
@@ -325,7 +338,20 @@ func Alternatives(in AltInput) *AltReport {
 			}
 			verdicts = append(verdicts, gate.Result{Name: refList(g.Refs), Status: st})
 		}
+		if g.Unknown {
+			verdicts = append(verdicts, gate.Result{Name: refList(g.Refs), Status: gate.CannotCheck})
+		}
 		rep.Lines = append(rep.Lines, *g)
+	}
+	skipped := 0
+	for _, p := range in.Parts {
+		if p.Assembled() && !ValidLCSC(p.LCSC) {
+			skipped++
+		}
+	}
+	if skipped > 0 {
+		rep.Warnings = append(rep.Warnings, fmt.Sprintf("%d assembled part(s) have no valid LCSC number and are not covered (see lcsc --check); the verdict cannot be a pass", skipped))
+		verdicts = append(verdicts, gate.Result{Name: "unnumbered-parts", Status: gate.CannotCheck})
 	}
 	if len(codes) == 0 {
 		verdicts = append(verdicts, gate.Result{Name: "bom", Status: gate.CannotCheck, Detail: "no assembled part with a valid LCSC number"})
@@ -415,6 +441,9 @@ func proposeFor(in AltInput, g *AltLine, reserved map[string]int64, rep *AltRepo
 		}
 		c.SameMPN = NormMPN(h.MPN) != "" && NormMPN(h.MPN) == NormMPN(mpn)
 		c.Eligible = true
+		if c.SameMPN && NormMPN(cur.Brand) != "" && NormMPN(h.Brand) != NormMPN(cur.Brand) {
+			c.SameMPN = false // same type number from another manufacturer is not the same part
+		}
 		bad := func(why string) {
 			c.Eligible = false
 			c.Unverified = append(c.Unverified, why)

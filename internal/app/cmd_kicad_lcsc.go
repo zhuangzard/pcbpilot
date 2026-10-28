@@ -257,6 +257,9 @@ func runLcscSearch(stdout io.Writer, scriptPath, query string, offline bool, qty
 	if limit > 0 && len(hits) > limit {
 		hits = hits[:limit]
 	}
+	for i := range hits {
+		hits[i].Record = nil // internal (--health / --alternatives); --search output is unchanged
+	}
 	if asJSON {
 		b, _ := json.MarshalIndent(hits, "", "  ")
 		fmt.Fprintln(stdout, string(b))

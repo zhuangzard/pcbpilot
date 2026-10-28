@@ -197,3 +197,37 @@ func TestAlternativesNothingToDo(t *testing.T) {
 		}
 	}
 }
+
+func TestAlternativesUnknownFieldsAndUnnumberedPartsAreNotPass(t *testing.T) {
+	p := resistor("C1", "X", "0402", "1kΩ", "±1%", "62.5mW", true, 0)
+	p.Stock, p.Buyable = nil, nil
+	rep := Alternatives(AltInput{Parts: partsOf([4]string{"R1", "1k", r0402, "C1"}), Boards: 1, Catalog: &fakeCatalog{byCode: map[string]*CatalogPart{"C1": p}}})
+	if rep.Verdict != gate.CannotCheck {
+		t.Errorf("record without stock/buyable: %s", rep.Verdict)
+	}
+	good := resistor("C25744", "X", "0402", "10kΩ", "±1%", "62.5mW", true, 1000000)
+	rep = Alternatives(AltInput{Parts: partsOf([4]string{"R1", "10k", r0402, "C25744"}, [4]string{"R2", "10k", r0402, ""}), Boards: 1,
+		Catalog: &fakeCatalog{byCode: map[string]*CatalogPart{"C25744": good}}})
+	if rep.Verdict != gate.CannotCheck || len(rep.Warnings) != 1 {
+		t.Errorf("unnumbered part: %s %v", rep.Verdict, rep.Warnings)
+	}
+}
+
+func TestNormMPNKeepsDecimalPoint(t *testing.T) {
+	if NormMPN("AMS1117-3.3") == NormMPN("AMS1117-33") {
+		t.Error("3.3 V and 33 must differ")
+	}
+	if NormMPN("rc0402fr-07 1kl") != NormMPN("RC0402FR_071KL") {
+		t.Error("case, space, - and _ are ignored")
+	}
+}
+
+func TestAlternativesSameMPNOtherBrandIsNotSame(t *testing.T) {
+	ic := &CatalogPart{LCSC: "C500", MPN: "LM358", Brand: "TI", Package: "SOP-8", Category: "Op Amps", Base: bp(false), Stock: i64(0), Buyable: bp(true)}
+	other := &CatalogPart{LCSC: "C501", MPN: "LM358", Brand: "Other Corp", Package: "SOP-8", Category: "Op Amps", Base: bp(false), Stock: i64(99999), Buyable: bp(true)}
+	cat := &fakeCatalog{byCode: map[string]*CatalogPart{"C500": ic}, search: map[string][]CatalogPart{"LM358": {*other}}}
+	rep := Alternatives(AltInput{Parts: partsOf([4]string{"U1", "op", "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm", "C500"}), Boards: 1, Catalog: cat})
+	if altLine(t, rep, "U1").Proposal != nil {
+		t.Error("another manufacturer's part must not be proposed as same-MPN")
+	}
+}
