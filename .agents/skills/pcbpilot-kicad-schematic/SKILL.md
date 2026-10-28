@@ -67,9 +67,12 @@ pcbpilot kicad netlist --sch build/<name>.kicad_sch --out conn.json
   上下拉”证据时才判 error，否则 likely warning；passive/unspecified 脚不算接收端（除非写进 `inputPins`）；二极管/LED
   按阳极→阴极方向导通。上拉到器件自己的电源即通过，不同/未知电源域又无电压 → likely warning。稳压器电容只有 intent 的 ldo/buck/boost 块才判 proven error（只有
   power_out 脚的负载开关、电源切换只给 likely），SW 脚按 intent 声明的拓扑追输出（buck：SW→电感→输出；boost：SW→整流管→输出；
-  没声明或追到输入端 → cannot-check，不拿输入电容充当输出电容）；每个指定地脚（GND/VSS/EP）都必须接地；只有供电端
+  没声明或追到输入端 → cannot-check，不拿输入电容充当输出电容）；每个指定地脚（GND/VSS/EP）都必须接地（打了 no-connect 也不例外，确属设计时写豁免）；每个
+  power_in 脚都要单独接到电源（VDD1 接了不能替 VDD2 免检）；只有供电端
   没有地脚的器件（双轨运放）不报缺地；去耦按每个电源脚判，同一器件的 VDD1/VDD2 共用一颗电容也报共用 warning；
-  LED 两侧都必须拓扑可判，一侧有电阻、另一侧经晶体管或极性不明 → cannot-check。报告 `summary`：error 与 cannot-check 全列，warning 按检查项/缺失证据分组并按器件计数。
+  LED 按每颗管芯（双色 GA/GK/RA/RK 等）两侧都必须拓扑可判，一侧有电阻、另一侧经晶体管或极性不明 → cannot-check；
+  只接 LED 公共端的节点（共阳/共阴）直达电源轨或一个驱动脚时算已判端点，兄弟 LED 是独立支路；每颗管芯要有自己独占
+  的串联电阻，分支前共用的电阻不算各自限流；驱动脚的总电流不检查。报告 `summary`：error 与 cannot-check 全列，warning 按检查项/缺失证据分组并按器件计数。
   LED 限流按每颗 LED 自己的电流路径追踪（轨上别处的电阻、并联支路的电阻都不算），节点分叉 → cannot-check。修法：在 spec 里补件（上拉、去耦、
   限流电阻）再 sch-edit；确属设计意图的写进 `intent.review` 角色；人工复核接受的写签名豁免（按 fingerprint）。
   不覆盖：晶振负载电容、启动/strap 脚、反馈分压值、ESR/容量充分性、上电时序/倒灌、瞬态保护。

@@ -418,11 +418,12 @@ func TestReviewLED(t *testing.T) {
 	if c.Findings[0].Refs[0] != "D2" {
 		t.Fatal(c.Findings[0])
 	}
-	// two LEDs sharing one resistor: the shared node branches → ambiguous
+	// two LEDs sharing one resistor before the branches: no individual
+	// limiter for either
 	b = rvFed().res("R1", "330", "+3V3", "/LA")
 	led(b, "D1", "/LA", "GND")
 	led(b, "D2", "/LA", "GND")
-	want(t, b.review(t, ReviewHints{}), RvLEDLimiter, "cannot-check")
+	want(t, b.review(t, ReviewHints{}), RvLEDLimiter, "fail", "error", "error")
 	// an LED driven straight from a GPIO pin → error
 	b = rvFed().ic("U1", "+3V3", "3:PA5:bidirectional").cap("C1", "10u", "+3V3", "GND")
 	b.net("/LED", "U1.3")
@@ -1181,4 +1182,101 @@ func TestReviewRound4(t *testing.T) {
 	h := ReviewHints{InputPin: map[string]string{"X1.1": "intent review.inputPins"}, PinMaxV: map[string]float64{"X1.1": 1.8},
 		NetVoltage: map[string]float64{"+5V": 5}, VoltageSource: map[string]string{"+5V": "intent"}}
 	want(t, x.review(t, h), RvPullupVoltage, "fail", "error")
+}
+
+// TestReviewRound5: NC ground and power pins, pinMaxV before the
+// own-supply match, LED polarity on either side, common-node LEDs.
+func TestReviewRound5(t *testing.T) {
+	// GND grounded, VSS / EP flagged no-connect → error
+	m := rvFed().cap("C1", "10u", "+3V3", "GND")
+	m.part("U1", "Synth:MCU", "", "1:VDD:power_in", "2:GND:power_in", "3:VSS:power_in", "4:EP:passive")
+	m.addNode("+3V3", "U1.1")
+	m.addNode("GND", "U1.2")
+	m.typ["U1.3"], m.typ["U1.4"] = "power_in+no_connect", "passive+no_connect"
+	m.net("unconnected-(U1-VSS-Pad3)", "U1.3")
+	m.net("unconnected-(U1-EP-Pad4)", "U1.4")
+	c := want(t, m.review(t, ReviewHints{}), RvICPowerGround, "fail", "error")
+	if len(c.Findings[0].Pins) != 2 {
+		t.Fatal(c.Findings[0])
+	}
+	// dual VDD, VDD2 no-connect (or unconnected) → error naming VDD2
+	for _, nc := range []bool{true, false} {
+		d := rvFed().cap("C1", "10u", "+3V3", "GND")
+		d.part("U2", "Synth:IC", "", "1:VDD1:power_in", "2:VDD2:power_in", "3:GND:power_in")
+		d.addNode("+3V3", "U2.1")
+		d.addNode("GND", "U2.3")
+		if nc {
+			d.typ["U2.2"] = "power_in+no_connect"
+		}
+		d.net("unconnected-(U2-VDD2-Pad2)", "U2.2")
+		c = want(t, d.review(t, ReviewHints{}), RvICPowerGround, "fail", "error")
+		if !strings.Contains(c.Findings[0].Message, "U2.2") {
+			t.Fatal(c.Findings[0])
+		}
+	}
+	// a 3.3 V IC input with pinMaxV 1.8 pulled up to its own 3.3 V supply
+	p := rvBase().ic("U1", "+3V3", "3:CFG:input").cap("C1", "10u", "+3V3", "GND")
+	p.net("/CFG", "U1.3").res("R1", "10k", "/CFG", "+3V3")
+	h := ReviewHints{PinMaxV: map[string]float64{"U1.3": 1.8}, NetVoltage: map[string]float64{"+3V3": 3.3}, VoltageSource: map[string]string{"+3V3": "intent"}}
+	want(t, p.review(t, h), RvPullupVoltage, "fail", "error")
+	want(t, p.review(t, ReviewHints{}), RvPullupVoltage, "pass") // no maximum: own supply matches
+
+	// unknown polarity on the anode side, then on the cathode side, each
+	// with the other side on a rail
+	for _, names := range [][2]string{{"1:K:passive", "2:X:passive"}, {"1:X:passive", "2:A:passive"}} {
+		b := rvFed().res("R1", "1k", "+3V3", "/LA")
+		b.part("D1", "Device:LED", "LED", names[0], names[1])
+		b.addNode("GND", "D1.1")
+		b.addNode("/LA", "D1.2")
+		want(t, b.review(t, ReviewHints{}), RvLEDLimiter, "cannot-check")
+	}
+
+	led := func(b *rvT, ref, a, k string) {
+		b.part(ref, "Device:LED", "LED", "1:K:passive", "2:A:passive")
+		b.addNode(k, ref+".1")
+		b.addNode(a, ref+".2")
+	}
+	// common anode node driven by one pin, each cathode with its own resistor
+	ca := rvFed().ic("U1", "+3V3", "3:PA0:output").cap("C1", "10u", "+3V3", "GND")
+	ca.net("/CA", "U1.3")
+	for i := 1; i <= 3; i++ {
+		d, k := fmt.Sprintf("D%d", i), fmt.Sprintf("/K%d", i)
+		led(ca, d, "/CA", k)
+		ca.res(fmt.Sprintf("R%d", i), "1k", k, "GND")
+	}
+	want(t, ca.review(t, ReviewHints{}), RvLEDLimiter, "pass")
+	// a branch inside an individual resistor path stays cannot-check
+	ca.res("R9", "1k", "/K1", "+3V3")
+	c = want(t, ca.review(t, ReviewHints{}), RvLEDLimiter, "cannot-check")
+	if !strings.Contains(strings.Join(c.Unverified, " "), "D1") {
+		t.Fatal(c.Unverified)
+	}
+
+	// an antiparallel bicolour LED family on a common driven node (GA/GK/RA/RK)
+	bc := rvFed().ic("U1", "+3V3", "3:LEDC:output").cap("C1", "10u", "+3V3", "GND")
+	bc.net("/LC", "U1.3")
+	for i := 1; i <= 2; i++ {
+		d, n := fmt.Sprintf("D%d", i), fmt.Sprintf("/N%d", i)
+		bc.part(d, "Synth:LED_DUAL", "LED", "GA:1:passive", "GK:2:passive", "RA:3:passive", "RK:4:passive")
+		bc.addNode(n, d+".GA")
+		bc.addNode("/LC", d+".GK")
+		bc.addNode("/LC", d+".RA")
+		bc.addNode(n, d+".RK")
+		bc.res(fmt.Sprintf("R%d", i), "470", n, fmt.Sprintf("/IO%d", i))
+		bc.ic(fmt.Sprintf("U%d", 10+i), "+3V3", "3:IO:output")
+		bc.addNode(fmt.Sprintf("/IO%d", i), fmt.Sprintf("U%d.3", 10+i))
+	}
+	want(t, bc.review(t, ReviewHints{}), RvLEDLimiter, "pass")
+}
+
+// TestReviewBusConnector: a PCI edge connector (BUS1, footprint BUSPCI)
+// whose ±12 V pins are power_in and unused is a connector, not an IC.
+func TestReviewBusConnector(t *testing.T) {
+	b := rvFed().cap("C1", "10u", "+3V3", "GND")
+	b.part("BUS1", "Synth:BUSPCI_5V", "BUSPCI_5V", "1:+12V:power_in", "2:+5V:power_in", "3:GND:power_in")
+	b.nl.Components[len(b.nl.Components)-1].Footprint = "footprints:BUSPCI"
+	b.net("unconnected-(BUS1-+12V-Pad1)", "BUS1.1")
+	b.addNode("+3V3", "BUS1.2")
+	b.addNode("GND", "BUS1.3")
+	want(t, b.review(t, ReviewHints{}), RvICPowerGround, "not-applicable")
 }

@@ -79,10 +79,16 @@ design mistakes proven from the KiCad netlist, the library pin electrical
 types, ERC and the sheet files, plus --intent intent.json (pcbpilot intent
 derive: net roles, rail voltages, regulator blocks, the optional review{}
 roles) and --sim sim.json (pcbpilot sim power: rail voltages) when given.
-  connections   i2c-pullup, open-drain-pullup, pullup-voltage, led-limiter,
+  connections   i2c-pullup, open-drain-pullup, pullup-voltage (a declared
+                review.pinMaxV is judged before the own-supply match),
+                led-limiter (per die: its own series resistor; a common
+                anode/cathode node to a rail or one driver is an endpoint;
+                a resistor shared before the branches does not limit each;
+                driver aggregate current not checked),
                 floating-input, output-conflict
   power         ic-power-ground (every designated GND/VSS/EP pin must reach
-                ground; a part with supply terminals only is exempt),
+                ground, no-connect flags included; every power_in pin must
+                reach a supply; a part with supply terminals only is exempt),
                 decoupling (per power pin: its exact cap set; a set that
                 also serves another power pin, even of the same part, is a
                 shared-coverage warning),
