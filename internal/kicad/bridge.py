@@ -148,6 +148,22 @@ def lcsc_of(fp):
 PAD_KIND = {}
 
 
+def local_clearance(item):
+    """A pad's or footprint's clearance override (mil), None when unset:
+    KiCad 9+ returns an optional (None), older versions 0 for "none"."""
+    try:
+        v = item.GetLocalClearance()
+    except Exception:
+        return None
+    if v is None:
+        return None
+    try:
+        v = int(v)
+    except (TypeError, ValueError):
+        return None
+    return mil(v) if v > 0 else None
+
+
 def pad_kind(shape):
     if not PAD_KIND:
         PAD_KIND.update({
@@ -291,6 +307,9 @@ def snapshot(board):
         }
         if ref in dup:
             comp["duplicateDesignator"] = True
+        lc = local_clearance(fp)
+        if lc is not None:
+            comp["localClearance"] = lc
         if is_placeholder(ref):
             comp["placeholder"] = True
         lcsc = lcsc_of(fp)
@@ -348,6 +367,9 @@ def snapshot(board):
             }
             if lid == 12:
                 pad["holeDiameter"] = mil(min(drill.x, drill.y))
+            lc = local_clearance(p)
+            if lc is not None:
+                pad["localClearance"] = lc
             comp["pads"].append(pad)
         snap["components"].append(comp)
     if holes:
@@ -1059,7 +1081,14 @@ def rules_probe(pcb, spec_path, out):
     """Probe tracks for kicad rules (on a scratch copy only): {"tracks": [{net,
     layer (pcbpilot id), startX, startY, endX, endY (mil, y-up), widthNm}]}.
     Exact nm widths, no zone fill; OUT is saved and the new tracks' uuids are
-    returned in order."""
+    returned in order.
+
+    The probe board keeps only what the probes' rules resolve from: the
+    project (classes, patterns, minimums, .kicad_dru travel with the board),
+    the outline and rule areas. Footprints, tracks, vias and copper zones are
+    removed: only the probes' own violations are read, and kicad-cli DRC of a
+    large placed board costs minutes per run (a probe net stays on the board
+    through its probe track)."""
     with open(spec_path, encoding="utf-8") as f:
         spec = json.load(f)
     L, bad = op_lists("rules-probe", spec, ("tracks",))
@@ -1070,6 +1099,7 @@ def rules_probe(pcb, spec_path, out):
     bad += check_layers(board, [op.get("layer") for op in obj])
     if bad:
         return reject("rules-probe", bad)
+    strip_for_probes(board)
     ids = []
     for op in obj:
         t = pcbnew.PCB_TRACK(board)
@@ -1082,6 +1112,19 @@ def rules_probe(pcb, spec_path, out):
         ids.append(t.m_Uuid.AsString())
     save_board(board, pcb, out)
     return {"ok": True, "out": out, "ids": ids}
+
+
+def strip_for_probes(board):
+    """Remove footprints, tracks, vias and copper zones (rule areas stay:
+    custom-rule conditions may name them)."""
+    # Collect everything first (the containers change while items leave),
+    # then Delete: Remove hands the C++ objects to Python proxies SWIG
+    # cannot destroy, which breaks SWIG's type mapping for the rest of the
+    # run (a new track's m_Uuid comes back as a bare SwigPyObject).
+    items = list(board.GetFootprints()) + list(board.GetTracks()) + [z for z in board.Zones() if not z.GetIsRuleArea()]
+    for item in items:
+        board.Delete(item)
+    del items
 
 
 def list_patterns(pcb):

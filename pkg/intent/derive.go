@@ -57,6 +57,7 @@ type ctx struct {
 	laneGroups   map[string]string     // net → auto length group of a multi-lane port
 	ddrPairs     [][2]string           // DDR strobe/clock pairs recognised from names
 	ddrGroup     map[string]string     // net → DDR byte-lane / address group
+	isoUsed      map[int]bool          // spec.isolation entries that matched a pair
 }
 
 type pinRef struct {
@@ -111,6 +112,7 @@ func Derive(in Input) (*Intent, error) {
 	c.buildNets()
 	c.assignDomainsToBlocks()
 	c.buildPairs()
+	c.findDeclaredIsolation()
 	c.buildEdge()
 	c.buildNetClasses()
 	c.buildFindings()

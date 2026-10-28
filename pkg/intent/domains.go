@@ -315,6 +315,7 @@ func (c *ctx) pairFor(a, b *Domain, bridges []string, note string) *Pair {
 	cl, cr, slot, slotW, ref, why := SafetyDistances(*p, st)
 	p.ClearanceMm, p.CreepageMm, p.SlotRequired, p.SlotWidthMm, p.StandardRef = cl, cr, slot, slotW, ref
 	p.Why = append(p.Why, why...)
+	c.applyDeclared(p, a, b)
 	by := "no part (implicit pair)"
 	if len(p.Bridges) > 0 {
 		by = strings.Join(p.Bridges, ", ")
@@ -400,4 +401,92 @@ func (c *ctx) spanning(a, b string) []string {
 		}
 	}
 	return out
+}
+
+// declaredFor is the largest clearance / creepage the spec declares for
+// the pair a|b (spec.domains[] of either side, spec.isolation[] naming
+// both), with the declarations that gave them.
+func (c *ctx) declaredFor(a, b *Domain) (clr, creep float64, from []string) {
+	in := func(d *Domain, ref string) bool {
+		ref = strings.TrimSpace(ref)
+		if id, ok := strings.CutPrefix(ref, "domain:"); ok {
+			return strings.TrimSpace(id) == d.ID
+		}
+		return has(d.Nets, ref)
+	}
+	for i, sd := range c.spec.Domains {
+		if sd.ClearanceMm <= 0 && sd.CreepageMm <= 0 {
+			continue
+		}
+		for _, n := range sd.Nets {
+			if has(a.Nets, n) || has(b.Nets, n) {
+				clr, creep = math.Max(clr, sd.ClearanceMm), math.Max(creep, sd.CreepageMm)
+				from = append(from, fmt.Sprintf("spec.domains[%d] (%s)", i, n))
+				break
+			}
+		}
+	}
+	for i, si := range c.spec.Isolation {
+		if in(a, si.A) && in(b, si.B) || in(a, si.B) && in(b, si.A) {
+			clr, creep = math.Max(clr, si.ClearanceMm), math.Max(creep, si.CreepageMm)
+			w := fmt.Sprintf("spec.isolation[%d] (%s|%s)", i, si.A, si.B)
+			if si.Why != "" {
+				w += ": " + si.Why
+			}
+			from = append(from, w)
+			if c.isoUsed == nil {
+				c.isoUsed = map[int]bool{}
+			}
+			c.isoUsed[i] = true
+		}
+	}
+	return clr, creep, from
+}
+
+// applyDeclared raises the pair to the declared distances: clearance and
+// creepage are max(derived, declared) (creepage never below the
+// clearance), each with its source. Without a declaration the pair is
+// unchanged (no new fields).
+func (c *ctx) applyDeclared(p *Pair, a, b *Domain) {
+	dc, dr, from := c.declaredFor(a, b)
+	if dc <= 0 && dr <= 0 {
+		return
+	}
+	p.DeclaredClearanceMm, p.DeclaredCreepageMm = dc, dr
+	p.DerivedClearanceMm, p.DerivedCreepageMm = p.ClearanceMm, p.CreepageMm
+	p.ClearanceSource, p.CreepageSource = "derived", "derived"
+	if dc > p.ClearanceMm {
+		p.ClearanceMm, p.ClearanceSource = dc, "declared"
+	}
+	if want := math.Max(dr, p.ClearanceMm); want > p.CreepageMm {
+		p.CreepageMm, p.CreepageSource = want, "declared"
+	}
+	p.Why = append(p.Why, fmt.Sprintf("declared distance %s: clearance %s mm (derived %s mm, declared %s mm → %s), creepage %s mm (derived %s mm, declared %s mm → %s; never below the clearance)",
+		strings.Join(from, ", "), trimFloat(p.ClearanceMm, 3), trimFloat(p.DerivedClearanceMm, 3), trimFloat(dc, 3), p.ClearanceSource,
+		trimFloat(p.CreepageMm, 3), trimFloat(p.DerivedCreepageMm, 3), trimFloat(dr, 3), p.CreepageSource))
+}
+
+// findDeclaredIsolation: a spec.isolation entry that matches no insulation
+// pair raises nothing — it is a warning, never a silent no-op.
+func (c *ctx) findDeclaredIsolation() {
+	for i, si := range c.spec.Isolation {
+		if c.isoUsed[i] {
+			continue
+		}
+		c.add("warn", "declared-isolation-unmatched", fmt.Sprintf("spec.isolation[%d] (%s|%s) matches no insulation pair: its declared distance is not applied", i, si.A, si.B), nil, []string{si.A, si.B},
+			"name a net of each of two domains that an isolation part bridges (or domain:<id> from intent.json domains[]); the pairs are in intent.json pairs[]")
+	}
+	for i, sd := range c.spec.Domains {
+		if sd.ClearanceMm <= 0 && sd.CreepageMm <= 0 {
+			continue
+		}
+		hit := false
+		for _, p := range c.out.Pairs {
+			hit = hit || p.DeclaredClearanceMm > 0 && p.DeclaredClearanceMm >= sd.ClearanceMm || p.DeclaredCreepageMm > 0 && p.DeclaredCreepageMm >= sd.CreepageMm
+		}
+		if !hit {
+			c.add("warn", "declared-isolation-unmatched", fmt.Sprintf("spec.domains[%d] declares clearance %s / creepage %s mm but its domain is in no insulation pair: not applied", i, trimFloat(sd.ClearanceMm, 3), trimFloat(sd.CreepageMm, 3)), nil, sd.Nets,
+				"check that the domain's nets are on the barrier an isolation part bridges")
+		}
+	}
 }
