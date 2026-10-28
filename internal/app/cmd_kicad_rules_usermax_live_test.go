@@ -104,7 +104,7 @@ func TestKicadRulesLiveUserMax(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := verifyRulesBlock(classed, full.ClassesNM, inSnap.CopperLayers, r.routeTrackMaxes(classed, full, inSnap.CopperLayers)); err != nil {
+	if err := r.checkRulesBlock(classed, full, inSnap.CopperLayers); err != nil {
 		t.Fatalf("route stage 2: %v", err)
 	}
 	if err := moveRulesBlockLast(classed); err != nil || !rulesBlockLast(t, classed) {

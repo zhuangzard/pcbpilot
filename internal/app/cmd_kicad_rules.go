@@ -723,9 +723,17 @@ func (r *rulesRun) derive() int {
 	}
 	r.maxes, r.maxConflicts = trackMaxCarry(userRules, full.ClassesNM, r.rb0.CopperLayers, func(n string) map[string]bool { return r.identity(n, nil) }, replaced)
 	// R8: a maximum below an impedance-controlled or paired net's width is
-	// an incompatible requirement of the net itself (not resolved by
-	// --replace, which only removes the rule).
-	for _, mc := range r.maxConflicts {
+	// an incompatible requirement of the net itself. --replace cannot
+	// resolve it: it is judged on the captured user rules as read, before
+	// any rule is removed.
+	var origRules []kicad.DRURule
+	if t := string(r.data[r.dru]); t != "" {
+		if origRules, err = kicad.ParseDRU(t); err != nil {
+			return r.fail(errRulesInput, r.dru, err.Error(), "", 1)
+		}
+	}
+	_, origConflicts := trackMaxCarry(origRules, full.ClassesNM, r.rb0.CopperLayers, func(n string) map[string]bool { return r.identity(n, nil) }, nil)
+	for _, mc := range origConflicts {
 		for _, n := range mc.Nets {
 			nn := r.in.Nets[n]
 			if nn == nil || !(nn.ImpedanceOhm > 0 || nn.DiffPair != "" || nn.Role == "diff" || nn.Role == "rf" || nn.Role == "hs") {

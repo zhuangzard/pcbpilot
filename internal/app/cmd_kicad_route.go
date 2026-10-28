@@ -495,7 +495,7 @@ func (r *kicadRun) run() error {
 		// The block must be exactly what kicad rules writes for the classes
 		// just derived (after the board floors): a board minimum or a user /
 		// Default class widened since, or a hand-edited block, is stale.
-		if err := verifyRulesBlock(classed, full.ClassesNM, inSnap.CopperLayers, r.routeTrackMaxes(classed, full, inSnap.CopperLayers)); err != nil {
+		if err := r.checkRulesBlock(classed, full, inSnap.CopperLayers); err != nil {
 			kr["stale"] = true
 			return fmt.Errorf("pre-route gate: %w", err)
 		}

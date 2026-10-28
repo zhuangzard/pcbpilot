@@ -558,14 +558,14 @@ func validRequestSHA(s string) bool { return reSHA256.MatchString(s) }
 // block check: the user rules of the classed board's .kicad_dru and each
 // net's identity from the input board (its classes after the apply: user,
 // PP and PPD) plus the classes just derived.
-func (r *kicadRun) routeTrackMaxes(classed string, full *kicad.NetclassFull, copperLayers int) trackMaxes {
+func (r *kicadRun) routeTrackMaxes(classed string, full *kicad.NetclassFull, copperLayers int) (trackMaxes, []maxConflict, error) {
 	b, err := os.ReadFile(strings.TrimSuffix(classed, ".kicad_pcb") + ".kicad_dru")
 	if err != nil {
-		return nil
+		return nil, nil, err
 	}
 	rules, err := kicad.ParseDRU(strings.ReplaceAll(string(b), "\r\n", "\n"))
 	if err != nil {
-		return nil
+		return nil, nil, err
 	}
 	var snap struct {
 		NetClassOf map[string]string `json:"netClassOf"`
@@ -590,8 +590,28 @@ func (r *kicadRun) routeTrackMaxes(classed string, full *kicad.NetclassFull, cop
 		}
 		return m
 	}
-	mx, _ := trackMaxCarry(rules, full.ClassesNM, copperLayers, identity, nil)
-	return mx
+	mx, bad := trackMaxCarry(rules, full.ClassesNM, copperLayers, identity, nil)
+	return mx, bad, nil
+}
+
+// checkRulesBlock is route's check of the kicad rules block on the classed
+// board: a user track_width maximum below the plan (added after the apply:
+// the owned rule, placed last, would override it) is RULES_STALE naming
+// the rule; otherwise the block must be exactly the one kicad rules writes
+// with the recomputed maxima (verifyRulesBlock).
+func (r *kicadRun) checkRulesBlock(classed string, full *kicad.NetclassFull, copperLayers int) error {
+	mx, bad, err := r.routeTrackMaxes(classed, full, copperLayers)
+	if err != nil {
+		return fmt.Errorf("RULES_STALE: the .kicad_dru cannot be read for the kicad rules check (%v); rerun `pcbpilot kicad rules --apply`", err)
+	}
+	if len(bad) > 0 {
+		var names []string
+		for _, b := range bad {
+			names = append(names, fmt.Sprintf("%q (%s)", b.Rule, b.Detail))
+		}
+		return fmt.Errorf("RULES_STALE: user track_width maximum(s) below the plan: %s; pcbpilot's owned rule would override them — rerun `pcbpilot kicad rules --apply` (it refuses until the rule is changed or replaced with --replace <name>)", strings.Join(names, "; "))
+	}
+	return verifyRulesBlock(classed, full.ClassesNM, copperLayers, mx)
 }
 
 // moveRulesBlockLast re-places the rules block of the .kicad_dru next to

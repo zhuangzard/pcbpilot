@@ -128,3 +128,36 @@ func TestVerifyRulesBlockWithMax(t *testing.T) {
 		t.Fatalf("%+v %+v", got, bad)
 	}
 }
+
+// Round 7: --replace cannot resolve R8 — the impedance net under a smaller
+// user max fails although the rule is replaced, and nothing is written.
+func TestKicadRulesImpedanceMaxNotReplaceable(t *testing.T) {
+	in := strings.Replace(rulesTestIntent, `"SIG":{"role":"signal"`, `"SIG":{"role":"signal","impedanceOhm":50`, 1)
+	f, rep, code := applyWithDRU(t, in, "(rule \"z0\"\n  (condition \"A.NetName == 'SIG'\")\n  (constraint track_width (max 0.1mm)))\n", "z0")
+	if code != 6 || rep.Committed || checkOf(rep, "plan-coverage").Status != gate.Fail || netOf(rep, "SIG").Status != "fail" {
+		t.Fatalf("exit %d %+v %+v", code, checkOf(rep, "plan-coverage"), netOf(rep, "SIG"))
+	}
+	if b, _ := os.ReadFile(boardSibling(f.o.pcb, ".kicad_dru")); !strings.Contains(string(b), "\"z0\"") || strings.Contains(string(b), kicad.DRURulesBegin) {
+		t.Fatalf("something was written:\n%s", b)
+	}
+}
+
+// Round 7: a user max below the plan added after the apply stops route
+// with RULES_STALE naming the rule.
+func TestRouteCheckRulesBlockUserMaxBelowPlan(t *testing.T) {
+	classes := []kicad.NetclassClassNM{{NetClass: kicad.NetClass{Name: "PP1_W7p87", Nets: []string{"SIG"}}, NM: kicad.ClassNM{Track: 200000, Inner: 200000, Min: 152400}}}
+	sha := strings.Repeat("ef", 32)
+	pcb := filepath.Join(t.TempDir(), "b.kicad_pcb")
+	text, _ := placeRulesBlock("(version 1)\n", rulesBlockText(rulesBlockRules(classes, 2), sha, kicad.SizeSet{}))
+	full := &kicad.NetclassFull{ClassesNM: classes}
+	r := &kicadRun{inRaw: []byte(`{"netClassOf":{"SIG":"PP1_W7p87"}}`)}
+	_ = os.WriteFile(boardSibling(pcb, ".kicad_dru"), []byte(text), 0o644)
+	if err := r.checkRulesBlock(pcb, full, 2); err != nil {
+		t.Fatalf("unchanged: %v", err)
+	}
+	late := "(rule \"late narrow\"\n  (condition \"A.NetName == 'SIG'\")\n  (constraint track_width (max 0.1mm)))\n"
+	_ = os.WriteFile(boardSibling(pcb, ".kicad_dru"), []byte(strings.Replace(text, "(version 1)\n", "(version 1)\n"+late, 1)), 0o644)
+	if err := r.checkRulesBlock(pcb, full, 2); err == nil || !strings.Contains(err.Error(), "RULES_STALE") || !strings.Contains(err.Error(), "late narrow") {
+		t.Fatalf("below-plan max: %v", err)
+	}
+}
