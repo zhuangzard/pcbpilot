@@ -79,3 +79,18 @@ func TestKiCadLcscSearchOffline(t *testing.T) {
 		t.Fatalf("%s", out)
 	}
 }
+
+func TestKiCadFabStepFlagsNeedStep(t *testing.T) {
+	for _, flag := range []string{"--step-board-only", "--step-no-dnp", "--step-subst-models"} {
+		_, _, err := runKiCadCmd(t, "fab", "--pcb", kicadFixBoard, "--out", t.TempDir(), "--no-assembly", flag)
+		if err == nil || !strings.Contains(err.Error(), "need --step") {
+			t.Errorf("%s without --step: %v", flag, err)
+		}
+	}
+	if _, _, err := runKiCadCmd(t, "fab", "--pcb", kicadFixBoard, "--out", t.TempDir(), "--step", "--step-board-only", "--step-no-dnp"); err == nil {
+		t.Error("--step-no-dnp with --step-board-only must be rejected")
+	}
+	if _, _, err := runKiCadCmd(t, "fab", "--preflight", "--pcb", kicadFixBoard, "--ipc356"); err == nil {
+		t.Error("--preflight must refuse output flags")
+	}
+}

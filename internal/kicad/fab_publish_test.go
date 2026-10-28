@@ -74,6 +74,27 @@ func fakeKiCadCLI(args []string) int {
 		if err := os.WriteFile(out, b, 0o644); err != nil {
 			return 1
 		}
+	case "pcb export step":
+		// PCBPILOT_FAKE_STEP: "" valid | empty | none | truncated
+		switch os.Getenv("PCBPILOT_FAKE_STEP") {
+		case "none":
+		case "empty":
+			_ = os.WriteFile(out, nil, 0o644)
+		case "truncated":
+			_ = os.WriteFile(out, []byte("ISO-10303-21;\nHEADER;\n"), 0o644)
+		default:
+			_ = os.WriteFile(out, []byte("ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n"), 0o644)
+			fmt.Println("Warning: could not load model foo.wrl")
+		}
+		if os.Getenv("PCBPILOT_FAKE_ARGS") != "" {
+			_ = os.WriteFile(os.Getenv("PCBPILOT_FAKE_ARGS"), []byte(strings.Join(args, "\n")), 0o644)
+		}
+	case "pcb export ipcd356":
+		body := "P  VER   IPC-D-356A\n327N/C   R1  -1\n"
+		if os.Getenv("PCBPILOT_FAKE_D356") == "norec" {
+			body = "P  VER   IPC-D-356A\n"
+		}
+		_ = os.WriteFile(out, []byte(body), 0o644)
 	case "pcb drc --format":
 		if log := os.Getenv("PCBPILOT_FAKE_DRC_LOG"); log != "" {
 			// What RunDRC handed kicad-cli: arguments, directory, config.

@@ -16,6 +16,7 @@ import (
 func newKiCadFabCmd(stdout, stderr io.Writer) *cobra.Command {
 	var pcb, sch, out, overrides, contract, waiverPath string
 	var noAssembly, verbose, preflight bool
+	var step, stepBoardOnly, stepNoDNP, stepSubst, ipc356 bool
 	c := &cobra.Command{
 		Use:   "fab",
 		Short: "Export JLCPCB manufacturing files (Gerber+drill zip, BOM, CPL) with kicad-cli",
@@ -32,6 +33,19 @@ KiCad 9 Gerber/drill and KiCad 10 BOM/CPL help articles):
   OUT/<board>-bom.csv    Comment, Designator, Footprint, LCSC Part #
   OUT/<board>-cpl.csv    Designator, Mid X, Mid Y, Layer, Rotation (mm)
   OUT/fab-report.json    what was written, warnings, applied overrides
+  OUT/<board>.step       --step: STEP 3D model of the board (not in the zip)
+  OUT/<board>.d356       --ipc356: IPC-D-356A netlist for flying-probe test (not in the zip)
+
+--step and --ipc356 add outputs to the same run (same staging, manifest and
+rollback); without them the output is unchanged. A STEP that kicad-cli wrote
+empty or truncated, or an IPC-D-356 without test records, fails the run and
+nothing is published. fab-report.json gets "step" (sha256, args, footprints
+without a 3D model: no (model …) entry or only hidden ones) and "ipc356"
+(sha256, test-record count). --step-board-only exports the bare board body
+(the footprint model check is then reported as skipped); --step-no-dnp leaves
+out DNP parts; --step-subst-models lets KiCad swap same-name STEP models for
+VRML ones (off by default: it can hide a missing model). For STEP without the
+LCSC gate use --no-assembly.
 
 Every file is generated into a fresh staging directory and the zip holds only
 that run's output. A rerun replaces the files the previous run recorded in
@@ -75,9 +89,13 @@ Override file (JSON), designator entries win over footprint entries:
 		Example: `  pcbpilot kicad fab --pcb board.kicad_pcb --sch board.kicad_sch --out fab/
   pcbpilot kicad fab --pcb board.kicad_pcb --out fab/ --cpl-overrides jlc-rot.json
   pcbpilot kicad fab --pcb board.kicad_pcb --out fab/ --no-assembly
+  pcbpilot kicad fab --pcb board.kicad_pcb --out fab/ --no-assembly --step --ipc356
   pcbpilot kicad fab --preflight --pcb board.kicad_pcb --sch board.kicad_sch --contract fab/order-contract.json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if preflight {
+				if step || ipc356 || stepBoardOnly || stepNoDNP || stepSubst {
+					return fmt.Errorf("--step and --ipc356 write files; --preflight writes nothing")
+				}
 				if pcb == "" {
 					return fmt.Errorf("--pcb is required")
 				}
@@ -106,6 +124,12 @@ Override file (JSON), designator entries win over footprint entries:
 			if contract != "" || waiverPath != "" {
 				return fmt.Errorf("--contract and --waivers are --preflight flags")
 			}
+			if !step && (stepBoardOnly || stepNoDNP || stepSubst) {
+				return fmt.Errorf("--step-board-only, --step-no-dnp and --step-subst-models need --step")
+			}
+			if stepBoardOnly && stepNoDNP {
+				return fmt.Errorf("--step-no-dnp has no effect with --step-board-only (no component models are exported)")
+			}
 			if pcb == "" || out == "" {
 				return fmt.Errorf("--pcb and --out are required")
 			}
@@ -122,6 +146,7 @@ Override file (JSON), designator entries win over footprint entries:
 			}
 			rep, err := kicad.RunFab(kicad.FabOptions{PCB: pcb, Sch: sch, OutDir: out,
 				CPLOverrides: overrides, NoAssembly: noAssembly,
+				Step: step, StepBoardOnly: stepBoardOnly, StepNoDNP: stepNoDNP, StepSubst: stepSubst, IPC356: ipc356,
 				Tools: kicad.FabTools{CLI: cli}, Log: log})
 			if rep != nil {
 				for _, w := range rep.Warnings {
@@ -143,6 +168,21 @@ Override file (JSON), designator entries win over footprint entries:
 			}
 			fmt.Fprintf(stdout, "layers: %s\n", strings.Join(rep.Layers, ", "))
 			fmt.Fprintf(stdout, "gerber zip: %s (%d files)\n", rep.Zip, len(rep.ZipFiles))
+			if rep.Step != nil {
+				fmt.Fprintf(stdout, "step: %s (%d bytes, sha256 %s)\n", rep.Step.File, rep.Step.Bytes, rep.Step.SHA256)
+				if n := len(rep.Step.FootprintsNoModel); n > 0 {
+					fmt.Fprintf(stdout, "step: %d footprint(s) without a 3D model:", n)
+					for _, m := range rep.Step.FootprintsNoModel {
+						fmt.Fprintf(stdout, " %s", m.Ref)
+					}
+					fmt.Fprintln(stdout)
+				} else if rep.Step.BoardOnly {
+					fmt.Fprintln(stdout, "step: board only; footprint model check skipped")
+				}
+			}
+			if rep.IPC356 != nil {
+				fmt.Fprintf(stdout, "ipc-d-356: %s (%d test records, sha256 %s)\n", rep.IPC356.File, rep.IPC356.Records, rep.IPC356.SHA256)
+			}
 			if rep.BOM != "" {
 				fmt.Fprintf(stdout, "bom: %s (%d lines)\ncpl: %s (%d parts)\n", rep.BOM, rep.BOMLines, rep.CPL, rep.CPLParts)
 				if len(rep.CPLOmitted) > 0 {
@@ -162,6 +202,11 @@ Override file (JSON), designator entries win over footprint entries:
 	f.StringVar(&out, "out", "", "output directory (required)")
 	f.StringVar(&overrides, "cpl-overrides", "", "JSON file of CPL rotation/offset corrections (see help)")
 	f.BoolVar(&noAssembly, "no-assembly", false, "bare board: Gerber/drill zip only, no BOM/CPL and no LCSC check")
+	f.BoolVar(&step, "step", false, "also export a STEP 3D model of the board")
+	f.BoolVar(&stepBoardOnly, "step-board-only", false, "--step: bare board body, no component models")
+	f.BoolVar(&stepNoDNP, "step-no-dnp", false, "--step: leave out the models of DNP parts")
+	f.BoolVar(&stepSubst, "step-subst-models", false, "--step: use same-name STEP models in place of VRML ones")
+	f.BoolVar(&ipc356, "ipc356", false, "also export an IPC-D-356A netlist (flying-probe test)")
 	f.BoolVar(&verbose, "verbose", false, "show kicad-cli output")
 	f.BoolVar(&preflight, "preflight", false, "read-only: DRC + fab checks against --contract, one verdict, no outputs written")
 	f.StringVar(&contract, "contract", "", "--preflight: order contract JSON (vendor, layers, finish, assembly.sides, limits, sources)")

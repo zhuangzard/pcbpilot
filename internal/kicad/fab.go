@@ -213,6 +213,13 @@ type Footprint struct {
 	DNP        bool              `json:"dnp,omitempty"`
 	ExcludeBOM bool              `json:"excludeFromBom,omitempty"`
 	ExcludePos bool              `json:"excludeFromPos,omitempty"`
+	Models     []FootprintModel  `json:"-"` // (model …) entries, shown or hidden
+}
+
+// FootprintModel is one (model "path" …) entry of a footprint.
+type FootprintModel struct {
+	Path   string
+	Hidden bool // (hide yes): KiCad keeps the entry but does not use it
 }
 
 // Board is the parsed subset of a .kicad_pcb.
@@ -307,6 +314,13 @@ func ParseBoard(b []byte) (*Board, error) {
 			}
 		}
 		f.Ref, f.Value = f.Fields["Reference"], f.Fields["Value"]
+		for _, m := range fp.children("model") {
+			fm := FootprintModel{Path: m.arg(0)}
+			if h := m.child("hide"); h != nil && h.arg(0) != "no" {
+				fm.Hidden = true
+			}
+			f.Models = append(f.Models, fm)
+		}
 		if a := fp.child("attr"); a != nil {
 			for _, k := range a.Kids[1:] {
 				switch k.Atom {
@@ -667,6 +681,11 @@ type FabOptions struct {
 	PCB, Sch, OutDir string
 	CPLOverrides     string
 	NoAssembly       bool // bare board: skip BOM/CPL and the LCSC gate
+	Step             bool // also export a STEP 3D model (fab_extras.go)
+	StepBoardOnly    bool // --step: board body only, no component models
+	StepNoDNP        bool // --step: leave out DNP parts' models
+	StepSubst        bool // --step: substitute same-name STEP models for VRML ones
+	IPC356           bool // also export an IPC-D-356 flying-probe netlist
 	Tools            FabTools
 	Log              io.Writer
 }
@@ -690,6 +709,8 @@ type FabReport struct {
 	Problems     []FabProblem  `json:"problems,omitempty"`
 	Warnings     []string      `json:"warnings,omitempty"`
 	RotationNote string        `json:"rotationNote,omitempty"`
+	Step         *StepReport   `json:"step,omitempty"`
+	IPC356       *IPC356Report `json:"ipc356,omitempty"`
 }
 
 // ErrMissingLCSC is returned (wrapped) when assembled parts lack LCSC numbers.
@@ -822,6 +843,27 @@ func RunFab(o FabOptions) (*FabReport, error) {
 	files := []string{base + "-gerber.zip"} // published names, relative to OutDir
 	if err := ZipFiles(filepath.Join(stage, files[0]), zipList); err != nil {
 		return nil, err
+	}
+
+	if o.Step {
+		name := base + ".step"
+		sr, err := exportStep(o, bd, filepath.Join(stage, name), o.Log)
+		if err != nil {
+			return nil, err
+		}
+		sr.File = filepath.Join(o.OutDir, name)
+		rep.Step = sr
+		files = append(files, name)
+	}
+	if o.IPC356 {
+		name := base + ".d356"
+		ir, err := exportIPC356(o, filepath.Join(stage, name), o.Log)
+		if err != nil {
+			return nil, err
+		}
+		ir.File = filepath.Join(o.OutDir, name)
+		rep.IPC356 = ir
+		files = append(files, name)
 	}
 
 	if !o.NoAssembly {
@@ -1024,4 +1066,47 @@ func WriteReport(path string, rep *FabReport) error {
 		return err
 	}
 	return os.WriteFile(path, append(b, '\n'), 0o644)
+}
+
+// exportStep writes the STEP into the staging path and fills its report.
+func exportStep(o FabOptions, bd *Board, staged string, log io.Writer) (*StepReport, error) {
+	opts := StepOptions{BoardOnly: o.StepBoardOnly, NoDNP: o.StepNoDNP, SubstModels: o.StepSubst}
+	args := StepArgs(o.PCB, staged, opts)
+	out, err := runCLICapture(o.Tools.CLI, args, log)
+	if err != nil {
+		return nil, err
+	}
+	if err := CheckSTEPFile(staged); err != nil {
+		return nil, err
+	}
+	sum, size, err := FileSHA256(staged)
+	if err != nil {
+		return nil, err
+	}
+	sr := &StepReport{SHA256: sum, Bytes: size, BoardOnly: opts.BoardOnly, NoDNP: opts.NoDNP, Subst: opts.SubstModels,
+		Args: args[:len(args)-1], ModelCheck: "done", KiCadWarnings: kicadModelWarnings(out),
+		FootprintsNoModel: []NoModelFootprint{}}
+	if opts.BoardOnly {
+		sr.ModelCheck = "skipped: --step-board-only exports no component models"
+	} else {
+		sr.FootprintsNoModel = FootprintsWithoutModel(bd)
+	}
+	return sr, nil
+}
+
+// exportIPC356 writes the IPC-D-356 netlist into the staging path.
+func exportIPC356(o FabOptions, staged string, log io.Writer) (*IPC356Report, error) {
+	args := IPCD356Args(o.PCB, staged)
+	if _, err := runCLICapture(o.Tools.CLI, args, log); err != nil {
+		return nil, err
+	}
+	n, err := CountIPCD356Records(staged)
+	if err != nil {
+		return nil, err
+	}
+	sum, size, err := FileSHA256(staged)
+	if err != nil {
+		return nil, err
+	}
+	return &IPC356Report{SHA256: sum, Bytes: size, Records: n, Args: args[:len(args)-1]}, nil
 }
