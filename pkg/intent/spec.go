@@ -41,6 +41,39 @@ type Spec struct {
 	// overrides the board-edge safety distances (default: routed edge,
 	// 20 mil outer / 30 mil inner).
 	Edge *SpecEdge `json:"edge,omitempty"`
+	// Review declares the roles the schematic cannot show to the design
+	// review (`kicad sch-check --review`); copied into intent.json.
+	Review *ReviewNotes `json:"review,omitempty"`
+}
+
+// ReviewNotes are explicit roles for the schematic design review. Pins are
+// "REF.PIN" (pin number) or "REF.NAME" (pin name, case-insensitive); nets
+// are net names (display or full name); parts are references. Every field
+// is optional; an exemption the review applies names the field it came
+// from.
+type ReviewNotes struct {
+	// InternalPullups / InternalPulldowns: pins with an internal pull the
+	// design relies on (an open-drain line or an input then needs no
+	// external resistor).
+	InternalPullups   []string `json:"internalPullups,omitempty"`
+	InternalPulldowns []string `json:"internalPulldowns,omitempty"`
+	// PulledUpNets: nets pulled up outside what the schematic shows.
+	PulledUpNets []string `json:"pulledUpNets,omitempty"`
+	// TolerantPins accept a pull-up rail above their own supply.
+	TolerantPins []string `json:"tolerantPins,omitempty"`
+	// TestPoints: parts that are test points; SinglePinNets: nets that
+	// reach one pin on purpose.
+	TestPoints    []string `json:"testPoints,omitempty"`
+	SinglePinNets []string `json:"singlePinNets,omitempty"`
+	// ReferenceRails need no decoupling / bulk capacitor (a reference or
+	// sense node named like a rail).
+	ReferenceRails []string `json:"referenceRails,omitempty"`
+	// Modules have integrated decoupling; CaplessRegulators are stable
+	// without an output capacitor.
+	Modules           []string `json:"modules,omitempty"`
+	CaplessRegulators []string `json:"caplessRegulators,omitempty"`
+	// Aliases: groups of names intentionally on one net.
+	Aliases [][]string `json:"aliases,omitempty"`
 }
 
 // SpecEdge is spec.json "edge".
