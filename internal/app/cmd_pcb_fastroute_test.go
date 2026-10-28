@@ -435,25 +435,9 @@ func TestPrepareDSNGate(t *testing.T) {
 // checkpoint session but no report (Board-B v9). The run must be recorded
 // as crashed with unknown counts and repeated once single-threaded.
 func TestRunFastrouteCrashRetry(t *testing.T) {
-	skipOnWindows(t)
 	dir := t.TempDir()
-	bin := filepath.Join(dir, "fastroute")
-	script := `#!/bin/sh
-for a in "$@"; do
-  case "$a" in
-    -do) next=ses ;;
-    --report=*) report="${a#--report=}" ;;
-    --multi-start=1) single=1 ;;
-    *) if [ "$next" = ses ]; then ses="$a"; next=; fi ;;
-  esac
-done
-echo "(session x)" > "$ses"
-if [ -z "$single" ]; then echo "thread panicked: free list corrupted" >&2; exit 101; fi
-echo '{"stats":{"unrouted":0,"violations":0}}' > "$report"
-`
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	bin := fakeRouterBin(t, "fastroute") // fake_router_test.go
+	t.Setenv(envFakeFRMode, "crash-parallel")
 	var log strings.Builder
 	ses, runs, err := runFastroute(fastrouteOpts{bin: bin, multiStart: 8, timeout: time.Minute}, "b.dsn", filepath.Join(dir, "b"), &log)
 	if err != nil {
@@ -470,9 +454,7 @@ echo '{"stats":{"unrouted":0,"violations":0}}' > "$report"
 	}
 
 	// A binary that always crashes: round 0 has no good result -> error.
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 101\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	t.Setenv(envFakeFRMode, "crash")
 	if _, runs, err := runFastroute(fastrouteOpts{bin: bin, timeout: time.Minute}, "b.dsn", filepath.Join(dir, "c"), io.Discard); err == nil || runs[len(runs)-1].Unrouted != -1 {
 		t.Fatalf("always-crashing router accepted: %+v %v", runs, err)
 	}

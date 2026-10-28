@@ -8,6 +8,7 @@ package app
 import (
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ const (
 	envFakeRouter    = "PCBPILOT_FAKE_ROUTER" // fastroute | tracemaker
 	envFakeCalls     = "PCBPILOT_FAKE_CALLS"  // fastroute: file that gets one "call" line per run
 	envFakeReport    = "PCBPILOT_FAKE_REPORT" // fastroute: report JSON to write
+	envFakeFRMode    = "PCBPILOT_FAKE_FR"     // fastroute: "" | wait-stop | crash-parallel | crash
 	envFakeTMBehaves = "PCBPILOT_FAKE_TM"     // tracemaker: ok | incomplete | crash | norep | sleep
 )
 
@@ -53,14 +55,37 @@ func fakeRouterMain(router string, args []string) int {
 			fmt.Fprintln(f, "call")
 			f.Close()
 		}
-		rep := ""
+		rep, single := "", false
 		for _, a := range args {
 			if r, ok := strings.CutPrefix(a, "--report="); ok {
 				rep = r
 			}
+			single = single || a == "--multi-start=1"
+		}
+		report := os.Getenv(envFakeReport)
+		if report == "" {
+			report = `{"stats":{"unrouted":0,"violations":0}}`
+		}
+		switch os.Getenv(envFakeFRMode) {
+		case "crash": // dies before writing anything
+			return 101
+		case "crash-parallel": // fastroute 0.1.7: a checkpoint session, then a panic unless single-threaded
+			os.WriteFile(argAfter(args, "-do"), []byte("(session x)\n"), 0o644)
+			if !single {
+				fmt.Fprintln(os.Stderr, "thread panicked: free list corrupted")
+				return 101
+			}
+		case "wait-stop": // routes until asked to stop (SIGINT / Ctrl+Break), then writes its best board
+			sig := make(chan os.Signal, 1)
+			signal.Notify(sig, os.Interrupt)
+			select {
+			case <-sig:
+			case <-time.After(20 * time.Second):
+				return 9 // never asked to stop gracefully
+			}
 		}
 		if os.WriteFile(argAfter(args, "-do"), []byte("(session x)\n"), 0o644) != nil ||
-			os.WriteFile(rep, []byte(os.Getenv(envFakeReport)+"\n"), 0o644) != nil {
+			os.WriteFile(rep, []byte(report+"\n"), 0o644) != nil {
 			return 2
 		}
 		return 0
