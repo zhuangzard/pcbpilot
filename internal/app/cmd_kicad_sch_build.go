@@ -1312,7 +1312,7 @@ func sbFlags(c *cobra.Command, o *sbOptions) {
 	f.StringVar(&o.PartsPath, "parts", "", "standard-parts.json for blocks (default: the installed skill's)")
 	f.IntVar(&o.Jobs, "jobs", 8, "parallel LCSC imports / zone plans")
 	f.IntVar(&o.PlannerBudget, "planner-budget", 20000, "layout planner candidate budget per zone (bounds one planner run)")
-	f.DurationVar(&o.PlannerTimeout, "planner-timeout", 20*time.Second, "wall-time budget of the layout stage: zones not started by then use the grid")
+	f.DurationVar(&o.PlannerTimeout, "planner-timeout", 20*time.Second, "planner cutoff for the whole layout stage: no planner run starts after it (those zones use the grid); a run already started finishes, bounded by --planner-budget, so the stage can take longer (reported in warnings)")
 	f.StringArrayVar(&o.Requirements, "requirements", nil, "project requirement document(s): the schematic design review (review-panel, stage schematic) runs on them")
 	f.StringVar(&o.Reviewers, "review", "codex,kimi,claude", "design-review reviewer CLIs (all must pass); runs when --requirements is given")
 	f.BoolVar(&o.NoReview, "no-review", false, "skip the design review despite --requirements; needs a signed waiver {\"gate\":\"design-review\",\"match\":\"--no-review\"} in --waivers")

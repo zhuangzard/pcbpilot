@@ -2190,6 +2190,56 @@ type sbLayoutOpts struct {
 	Budget    int
 	Jobs      int
 	Timeout   time.Duration
+	// Deadline is the whole layout stage's planner cutoff (first layout,
+	// page split relayouts, auto-split): set once per build so a relayout
+	// does not start a fresh --planner-timeout. Zero = Timeout from each
+	// layoutZones call (tests, callers without a build).
+	Deadline time.Time
+	Stats    *sbLayoutStats // nil = not collected
+}
+
+// sbLayoutStats is what the planner did in one build's layout stage: what
+// an honest report of --planner-timeout needs (a planner run started
+// before the cutoff runs to its candidate budget; it cannot be cut short).
+type sbLayoutStats struct {
+	mu          sync.Mutex
+	Started     int           // zones whose planner run started
+	Skipped     int           // zones that went to the grid: cutoff passed
+	Longest     time.Duration // longest single planner run
+	LongestZone string
+}
+
+func (s *sbLayoutStats) ran(zone string, d time.Duration) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Started++
+	if d > s.Longest {
+		s.Longest, s.LongestZone = d, zone
+	}
+}
+
+func (s *sbLayoutStats) skipped() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.Skipped++
+	s.mu.Unlock()
+}
+
+// budgetNote is the warning for a layout stage that ran over its
+// --planner-timeout ("" when it did not).
+func (s *sbLayoutStats) budgetNote(elapsed, timeout time.Duration) string {
+	if s == nil || timeout <= 0 || elapsed <= timeout {
+		return ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return fmt.Sprintf("layout took %.1f s, over --planner-timeout %.0f s: the timeout only stops new planner runs — %d zone(s) started the planner before it and each ran to its --planner-budget (longest %.1f s, zone %s), %d zone(s) went straight to the grid; --no-planner draws every zone with the grid (no planner time at all)",
+		elapsed.Seconds(), timeout.Seconds(), s.Started, s.Longest.Seconds(), s.LongestZone, s.Skipped)
 }
 
 // layoutZones draws every zone whose hash changed (reuse = the previous
@@ -2205,8 +2255,8 @@ func layoutZones(d *sbDesign, zis []*sbZoneIn, reuse map[string]*sbZoneLayout, o
 		jobs = 4
 	}
 	sem := make(chan struct{}, jobs)
-	var deadline time.Time
-	if o.Timeout > 0 {
+	deadline := o.Deadline
+	if deadline.IsZero() && o.Timeout > 0 {
 		deadline = time.Now().Add(o.Timeout)
 	}
 	for _, zi := range zis {
@@ -2225,7 +2275,14 @@ func layoutZones(d *sbDesign, zis []*sbZoneIn, reuse map[string]*sbZoneLayout, o
 			var perr error
 			if !o.NoPlanner {
 				var zp *sbZoneLayout
-				if zp, perr = planZoneBounded(d, zi, m, o.Budget, deadline); zp != nil {
+				var started bool
+				zp, started, perr = planZoneBounded(d, zi, m, o.Budget, deadline)
+				if started {
+					o.Stats.ran(zi.Zone.ID, time.Since(t0))
+				} else {
+					o.Stats.skipped()
+				}
+				if zp != nil {
 					zp.Hash = hp
 					cands = append(cands, zp)
 				}
@@ -2286,16 +2343,21 @@ func layoutZones(d *sbDesign, zis []*sbZoneIn, reuse map[string]*sbZoneLayout, o
 // single run is bounded by its candidate budget, so nothing is abandoned
 // mid-run (the engine has no cancellation point): no goroutine outlives the
 // build.
-func planZoneBounded(d *sbDesign, zi *sbZoneIn, m *sbMeasure, budget int, deadline time.Time) (zl *sbZoneLayout, err error) {
-	if !deadline.IsZero() && time.Now().After(deadline) {
-		return nil, fmt.Errorf("layout time budget spent before this zone (--planner-timeout)")
+// sbPlannerNow is the clock of the planner cutoff (tests move it: the
+// Windows clock is too coarse for a nanosecond timeout to have passed).
+var sbPlannerNow = time.Now
+
+func planZoneBounded(d *sbDesign, zi *sbZoneIn, m *sbMeasure, budget int, deadline time.Time) (zl *sbZoneLayout, started bool, err error) {
+	if !deadline.IsZero() && sbPlannerNow().After(deadline) {
+		return nil, false, fmt.Errorf("layout time budget spent before this zone (--planner-timeout)")
 	}
 	defer func() {
 		if r := recover(); r != nil {
 			zl, err = nil, fmt.Errorf("planner panic: %v", r)
 		}
 	}()
-	return planZone(d, zi, m, budget)
+	zl, err = planZone(d, zi, m, budget)
+	return zl, true, err
 }
 
 func sbClip(s string, n int) string {
