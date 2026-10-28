@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -318,7 +319,10 @@ func officialCLIVersion(env officialCLIEnv, p string) (string, string) {
 	bundle := ""
 	if i := strings.Index(resolved, ".app"); i >= 0 && (len(resolved) == i+4 || resolved[i+4] == '/') {
 		bundle = resolved[:i+4]
-		pkgs = append(pkgs, filepath.Join(bundle, "Contents", "Resources", "app", "package.json"))
+		// A .app bundle is a macOS layout: join with "/" like the paths it came
+		// from, whatever host runs the logic (the else branch below does the
+		// same for the target OS).
+		pkgs = append(pkgs, path.Join(bundle, "Contents", "Resources", "app", "package.json"))
 	} else {
 		// Join with the TARGET OS separator (env.goos), so the Windows layout
 		// is computed correctly regardless of where the logic is exercised.
@@ -343,7 +347,7 @@ func officialCLIVersion(env officialCLIEnv, p string) (string, string) {
 		}
 	}
 	if bundle != "" {
-		plist := filepath.Join(bundle, "Contents", "Info.plist")
+		plist := path.Join(bundle, "Contents", "Info.plist")
 		if b, err := env.readFile(plist); err == nil {
 			if m := plistVersionRE.FindSubmatch(b); m != nil {
 				return strings.TrimSpace(string(m[1])), plist

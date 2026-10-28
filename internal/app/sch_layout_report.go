@@ -48,7 +48,7 @@ func schLayoutReportPaths(from, out, report string) error {
 				return err
 			}
 			fj, _ := os.Stat(b.path)
-			if x == y || (fi != nil && fj != nil && os.SameFile(fi, fj)) {
+			if x == y || (fi != nil && fj != nil && os.SameFile(fi, fj)) || sameFileSlot(a.path, b.path) {
 				return fmt.Errorf("--%s must not overwrite --%s; input, geometry and diagnostic report must be distinct", a.name, b.name)
 			}
 		}

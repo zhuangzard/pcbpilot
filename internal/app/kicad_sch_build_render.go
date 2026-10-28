@@ -14,6 +14,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -565,18 +566,26 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 	if ercErr != nil {
 		rep.gate("erc", "fail", ercErr.Error(), nil)
 	} else {
-		status := "pass"
-		if erc.Errors > 0 {
-			status = "fail"
-		} else if erc.Warnings > 0 {
-			status = "warn"
-		}
 		var top []kicad.ERCViolation
 		byType := map[string]int{}
 		own := sbOwnLibs(d, files)
 		ownBad := map[string]int{}
+		stock := sbStockSymbolLibs(d)
+		stockLookups := 0
 		for _, v := range erc.Violations {
 			byType[v.Type]++
+			// Schematic kicad-cli runs use empty global library tables
+			// (kicadenv.go), so KiCad 10 warns that the configuration lacks
+			// every stock library a part came from ("Device"). The symbol is
+			// embedded in the sheet and the library is KiCad's own: an
+			// artefact of the isolated run, not a finding — it must not turn
+			// the gate to warn on every build that uses a stock part.
+			if v.Type == "lib_symbol_issues" && v.Severity == "warning" {
+				if m := sbMissingSymLibRE.FindStringSubmatch(v.Description); m != nil && stock[m[1]] {
+					stockLookups++
+					continue
+				}
+			}
 			if v.Severity == "error" && len(top) < 20 {
 				top = append(top, v)
 			}
@@ -593,7 +602,16 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 				}
 			}
 		}
-		detail := fmt.Sprintf("kicad-cli ERC: %d error(s), %d warning(s)", erc.Errors, erc.Warnings)
+		status := "pass"
+		if erc.Errors > 0 {
+			status = "fail"
+		} else if erc.Warnings-stockLookups > 0 {
+			status = "warn"
+		}
+		detail := fmt.Sprintf("kicad-cli ERC: %d error(s), %d warning(s)", erc.Errors, erc.Warnings-stockLookups)
+		if stockLookups > 0 {
+			detail += fmt.Sprintf(" (%d stock-library lookup warning(s) from the isolated library config not counted)", stockLookups)
+		}
 		if len(ownBad) > 0 {
 			status = "fail"
 			var libs []string
@@ -603,7 +621,7 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 			sort.Strings(libs)
 			detail += "; the project's own libraries do not resolve: " + strings.Join(libs, ", ")
 		}
-		rep.gate("erc", status, detail, map[string]any{"byType": byType, "errors": top})
+		rep.gate("erc", status, detail, map[string]any{"byType": byType, "errors": top, "stockLibLookups": stockLookups})
 	}
 	if len(fitBad) > 0 {
 		rep.gate("page-fit", "fail", "content does not fit A0 on "+strings.Join(fitBad, ", ")+" — split into more pages", nil)
@@ -1795,6 +1813,25 @@ func sbDroppedPages(d *sbDesign, nl *kicad.SchNetlist) []string {
 		}
 	}
 	return out
+}
+
+// sbMissingSymLibRE matches KiCad's "The current configuration does not include the
+// symbol library 'X'" (KiCad 9 ends it with a period, 10 does not).
+var sbMissingSymLibRE = regexp.MustCompile(`does not include the symbol library '([^']+)'`)
+
+// sbStockSymbolLibs are the KiCad stock symbol libraries the design's parts
+// were resolved from (LibName "" = stock; LibID "Device:R" → "Device").
+func sbStockSymbolLibs(d *sbDesign) map[string]bool {
+	set := map[string]bool{}
+	for _, p := range d.Parts {
+		if p.LibName != "" {
+			continue
+		}
+		if lib, _, ok := strings.Cut(p.LibID, ":"); ok && lib != "" {
+			set[lib] = true
+		}
+	}
+	return set
 }
 
 // sbOwnLibs are the libraries a built project carries itself: every

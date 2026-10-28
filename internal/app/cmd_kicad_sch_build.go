@@ -555,10 +555,22 @@ type sbResolveStats struct {
 	Notes        []string `json:"notes,omitempty"`
 }
 
+// sbSplitSymbolID splits a spec symbol into library and name: "Lib:Name", or
+// "path/to/lib.kicad_sym:Name" where the path may itself hold a colon (a
+// Windows drive, C:\libs\my.kicad_sym:R) — the split is then after the
+// ".kicad_sym", never at the drive letter.
+func sbSplitSymbolID(id string) (lib, name string, ok bool) {
+	if i := strings.LastIndex(id, ".kicad_sym:"); i >= 0 {
+		j := i + len(".kicad_sym")
+		return id[:j], id[j+1:], true
+	}
+	return strings.Cut(id, ":")
+}
+
 // sbFindSymbol looks up "Lib:Name" in the project dir, the spec's libDirs and
 // KiCad's stock library (stock = KiCad resolves it from its global table).
 func sbFindSymbol(id string, dirs []string) (text, file string, stock bool, err error) {
-	lib, name, ok := strings.Cut(id, ":")
+	lib, name, ok := sbSplitSymbolID(id)
 	if !ok || lib == "" || name == "" {
 		if strings.HasSuffix(strings.ToLower(lib), ".kicad_sym") {
 			return "", "", false, fmt.Errorf("symbol %q: want Lib:Name or path/to/lib.kicad_sym:Name", id)
@@ -676,7 +688,7 @@ func resolveSymbols(parts []*sbRPart, opts sbResolveOpts, libDirs []string) (st 
 			}
 			// t is flattened: a derived symbol (LM358 extends LM2904) carries
 			// its parent's units and pins under its own name.
-			lib, name, _ := strings.Cut(p.Symbol, ":")
+			lib, name, _ := sbSplitSymbolID(p.Symbol)
 			if strings.HasSuffix(lib, ".kicad_sym") {
 				lib = strings.TrimSuffix(filepath.Base(lib), ".kicad_sym")
 			}
