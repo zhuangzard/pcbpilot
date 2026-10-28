@@ -3,6 +3,7 @@ package intent
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
@@ -32,6 +33,12 @@ type Spec struct {
 	Mains *SpecMains `json:"mains,omitempty"`
 	// Domains override the kind of a domain (e.g. patient) by any of its nets.
 	Domains []SpecDomain `json:"domains,omitempty"`
+	// Isolation declares required insulation distances between two domains
+	// (each named by any of its nets, or "domain:<id>"): a design or
+	// customer requirement above what the standard gives. The pair's
+	// clearance / creepage become max(derived, declared), with the source
+	// recorded in pairs[].
+	Isolation []SpecIsolation `json:"isolation,omitempty"`
 	// USBBudgetA is the current a USB source may deliver (default 0.5 A,
 	// USB 2.0 default power; 1.5/3.0 for USB-C current advertisement).
 	USBBudgetA float64 `json:"usbBudgetA,omitempty"`
@@ -188,6 +195,22 @@ type SpecDomain struct {
 	// §40.6.1.1): the pair becomes basic insulation dimensioned for that
 	// withstand voltage even between two SELV domains.
 	IsolationVrms float64 `json:"isolationVrms,omitempty"`
+	// ClearanceMm / CreepageMm declare the required insulation distance of
+	// this domain's barrier to every domain it pairs with (e.g. 8.0 mm from
+	// a design specification): the pair keeps max(derived, declared).
+	ClearanceMm float64 `json:"clearanceMm,omitempty"`
+	CreepageMm  float64 `json:"creepageMm,omitempty"`
+}
+
+// SpecIsolation is a declared distance between two domains. A and B name
+// a net of each domain (or "domain:<id>"); Why is the requirement's source
+// (a design-specification clause), copied into the pair's why.
+type SpecIsolation struct {
+	A           string  `json:"a"`
+	B           string  `json:"b"`
+	ClearanceMm float64 `json:"clearanceMm,omitempty"`
+	CreepageMm  float64 `json:"creepageMm,omitempty"`
+	Why         string  `json:"why,omitempty"`
 }
 
 // SpecRules override fabrication minimums (mil).
@@ -229,6 +252,17 @@ func ParseSpec(b []byte) (*Spec, error) {
 		}
 		if d.RatedVrms < 0 || d.WorkingVrms < 0 {
 			return nil, fmt.Errorf("spec.domains[%d]: negative voltage", i)
+		}
+		if !finiteNonNeg(d.ClearanceMm) || !finiteNonNeg(d.CreepageMm) {
+			return nil, fmt.Errorf("spec.domains[%d]: clearanceMm / creepageMm must be non-negative mm", i)
+		}
+	}
+	for i, d := range s.Isolation {
+		if strings.TrimSpace(d.A) == "" || strings.TrimSpace(d.B) == "" {
+			return nil, fmt.Errorf("spec.isolation[%d]: a and b must name a net (or domain:<id>) of each domain", i)
+		}
+		if !finiteNonNeg(d.ClearanceMm) || !finiteNonNeg(d.CreepageMm) || d.ClearanceMm == 0 && d.CreepageMm == 0 {
+			return nil, fmt.Errorf("spec.isolation[%d]: give clearanceMm and/or creepageMm (non-negative mm)", i)
 		}
 	}
 	for i, r := range s.Rails {
@@ -356,3 +390,5 @@ func resolveStandard(in *Standard, hazardous bool) Standard {
 	}
 	return st
 }
+
+func finiteNonNeg(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) && v >= 0 }

@@ -49,7 +49,8 @@ pcbpilot intent derive --connectivity sch-p1.json --connectivity sch-p2.json \
  "mains":{"vrms":230,"nets":["L","N"]},
  "domains":[{"kind":"patient","nets":["ECG_IN"],"workingVrms":0},
             {"kind":"hazardous","nets":["HV_GND"],"transient":"mains","ratedVrms":400},
-            {"kind":"isolated-secondary","nets":["CHASSIS_GND"],"isolationVrms":1500}],
+            {"kind":"isolated-secondary","nets":["CHASSIS_GND"],"isolationVrms":1500,"clearanceMm":2.0}],
+ "isolation":[{"a":"HV_GND","b":"GND","clearanceMm":8.0,"creepageMm":8.0,"why":"设计规格 §x：含余量"}],
  "usbBudgetA":0.5,
  "rules":{"clearanceMil":6,"trackMil":6,"viaDrillMil":12,"viaDiaMil":24}}
 ```
@@ -142,7 +143,15 @@ HDMI/MIPI/LVDS 同一端口的多对按网名自动成等长组（`<前缀>_LANE
 对检查串联交流耦合电容（`ac-coupling` / `-missing` / `-value` / `-mismatch`）。名字像电源轨、但仿真中只经
 电阻供电且 <1 mA 的网（VBUS_DET 分压）按信号处理，不进电源平面。`spec.domains[].isolationVrms`
 （如 IEEE 802.3 MDI 1500 Vrms）把该绝缘对定为 basic 并以 √2·Vrms 作要求耐压（`requiredWithstandV`）；
-`pairs[].bridges` 同时列出跨在两域上的电容/电阻（机壳 Y 电容）。电路理解调用 `pcbauto.Understand`（核心/外围、转换器、域与隔离桥）。
+`pairs[].bridges` 同时列出跨在两域上的电容/电阻（机壳 Y 电容）。
+
+**声明的绝缘距离**（可选）：设计/客户规格要求比标准更大的距离时，`spec.isolation[]` 按对声明
+（`a` / `b` 各写该域的任一网名或 `domain:<id>`，`clearanceMm` / `creepageMm` 至少一个，`why` 写规格条款），
+`spec.domains[].clearanceMm` / `creepageMm` 声明“该域对任何域”的距离。该对的 `clearanceMm` / `creepageMm` 取
+max(标准推导, 声明)，爬电不低于间隙；只在有声明时多出 `derivedClearanceMm/derivedCreepageMm`、
+`declaredClearanceMm/declaredCreepageMm`、`clearanceSource/creepageSource`（`derived` / `declared`）并在 `why` 里写明——
+没有声明的 intent 与以前逐字节相同。声明对不上任何绝缘对 → `declared-isolation-unmatched` warn（不静默失效）。
+`kicad rules` / `kicad route` / `signoff-safety` 都用这个取大后的值。电路理解调用 `pcbauto.Understand`（核心/外围、转换器、域与隔离桥）。
 
 ## 3. 正例：ESP32 mini（`pkg/powersim/testdata/esp32mini`，offline-verified）
 

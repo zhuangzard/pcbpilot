@@ -218,6 +218,17 @@ type Pair struct {
 	// peak), e.g. IEEE 802.3 MDI isolation 1500 Vrms → 2121 V: the
 	// clearance is dimensioned for it (IEC 60664-1 procedure 2).
 	RequiredWithstandV float64 `json:"requiredWithstandV,omitempty"`
+	// Declared distances (spec.domains[].clearanceMm / creepageMm,
+	// spec.isolation[]): only when the spec declares one for the pair.
+	// ClearanceMm / CreepageMm are then max(derived, declared); Derived*
+	// keep the standard's numbers and *Source says which one won
+	// ("derived" | "declared").
+	DeclaredClearanceMm float64 `json:"declaredClearanceMm,omitempty"`
+	DeclaredCreepageMm  float64 `json:"declaredCreepageMm,omitempty"`
+	DerivedClearanceMm  float64 `json:"derivedClearanceMm,omitempty"`
+	DerivedCreepageMm   float64 `json:"derivedCreepageMm,omitempty"`
+	ClearanceSource     string  `json:"clearanceSource,omitempty"`
+	CreepageSource      string  `json:"creepageSource,omitempty"`
 }
 
 // NetClass is an EasyEDA-pushable rule class.
