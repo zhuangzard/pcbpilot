@@ -19,7 +19,7 @@ func newKiCadFabCmd(stdout, stderr io.Writer) *cobra.Command {
 	var step, stepBoardOnly, stepNoDNP, stepSubst, ipc356 bool
 	c := &cobra.Command{
 		Use:   "fab",
-		Short: "Export JLCPCB manufacturing files (Gerber+drill zip, BOM, CPL) with kicad-cli",
+		Short: "Export JLCPCB manufacturing files (Gerber+drill zip, BOM, CPL; optional STEP, IPC-D-356) with kicad-cli",
 		Args:  cobra.NoArgs,
 		Long: `Export the file set JLCPCB asks for from a KiCad board (settings from JLC's
 KiCad 9 Gerber/drill and KiCad 10 BOM/CPL help articles):

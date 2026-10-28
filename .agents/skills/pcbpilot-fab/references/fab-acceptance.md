@@ -86,6 +86,8 @@ KiCad DRC JSON 只列**违例**，不列生效的规则；干净的 DRC 只说�
 | 叠层与工艺 | 读 `gerber/<板>-job.gbrjob`（Gerber X2 作业文件，不进 zip）的 `GeneralSpecs`：`LayerNumber`、`BoardThickness`、`Finish`；`FilesAttributes` 每个铜层的 `Copper,Ln,Top/Inr/Bot` 顺序 | 与契约不一致：改板子 Board Setup 的叠层或改契约，不在 zip 里改文件 |
 | 钻孔 | `grep '^T' gerber/<板>-PTH.drl` 看刀具表；PTH 与 NPTH 分开 | 出现 `C0.000` 之类不可能的孔径；板上有盲埋孔/微孔却只有一个贯通钻孔文件 |
 | 残留文件 | 终端与 `warnings` 里 “holds Gerber/drill file(s) this run did not produce” | 有残留：确认后由用户删除，或改用新目录 |
+| STEP（`--step`） | `fab-report.json` 的 `step`：sha256 与磁盘文件一致；`footprintsWithoutModel` 里 `assembled: true` 的项逐个确认（缺模型的贴装件在外壳干涉检查里是看不见的）；`boardOnly: true` 时模型检查是 `skipped` | 贴装件缺模型而用户要做结构核对；sha256 不一致 |
+| IPC-D-356（`--ipc356`） | `ipc356.testRecords` 与板上焊盘量级相符（通孔 317 / 贴片 327）；sha256 一致；文件交给飞针厂时附板本版本 | 记录数明显少于焊盘数 |
 | Gerber 查看器 | 用户在 KiCad GerbView 或厂商上传后的在线预览逐层看：板框闭合、孔与焊盘对齐、内层顺序、丝印/阻焊开窗、过孔盖油 | kicad-cli 没有查看器命令，这一项是 **manual**；没有用户的观察记录就是 `INCOMPLETE` |
 
 读作业文件（任意 Python 3）：
@@ -94,7 +96,7 @@ KiCad DRC JSON 只列**违例**，不列生效的规则；干净的 DRC 只说�
 python -c "import json,sys;d=json.load(open(sys.argv[1],encoding='utf-8'));print(d['GeneralSpecs']);[print(f['Path'],f['FileFunction']) for f in d['FilesAttributes']]" fab/gerber/<板>-job.gbrjob
 ```
 
-只上传 `<板>-gerber.zip`、`<板>-bom.csv`、`<板>-cpl.csv`。`<板>-kicad-pos.csv` 是 kicad-cli 的原始坐标文件（角度未归一、
+只上传 `<板>-gerber.zip`、`<板>-bom.csv`、`<板>-cpl.csv`（`.step` / `.d356` 是另外的交付物，不进 JLC 上传包）。`<板>-kicad-pos.csv` 是 kicad-cli 的原始坐标文件（角度未归一、
 列名不同），留作对照，不上传；`gerber/` 里的钻孔图 `*-drl_map.gbr` 与 `.gbrjob` 也不进 zip。
 
 ## 4. BOM 与 CPL 审核

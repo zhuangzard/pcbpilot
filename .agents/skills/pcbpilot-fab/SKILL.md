@@ -70,12 +70,29 @@ pcbpilot kicad lcsc --pcb <board>.kicad_pcb --sch <root>.kicad_sch --check     #
 实际贴装板数（算法见 [§4](references/fab-acceptance.md#4-bom-与-cpl-审核)）。候选的 MPN 与原理图完全一致才能直接写；只是兼容/替代型号时先给用户确认。安装孔、Mark、测试点、Logo、PCB 保险丝这类
 不贴的封装，请用户在 KiCad 里勾排除属性。符号/封装要从 C 号建库属于库任务，交回 router。
 
+**3b. 下单前体检（PCBA，联网）。** 补完号以后、出图以前：
+
+```bash
+pcbpilot kicad lcsc --pcb <board>.kicad_pcb --sch <root>.kicad_sch --health --qty <板数> > <评审目录>/lcsc-health.json   # 退出码 0 / 6 / 5
+pcbpilot kicad lcsc --pcb <board>.kicad_pcb --sch <root>.kicad_sch --alternatives --qty <板数> > <评审目录>/lcsc-plan.json
+```
+
+`--health` 逐项 pass / fail / cannot-check（缺号、非法号、目录没有、停产/不推荐、库存 < 需求、extended 数量、封装不一致、同 MPN 多个 C 号），
+`--qty` 在这里是**板数**；离线是 `cannot-check`（`INCOMPLETE`），不是通过。fail → `FAIL`；extended / 重复 MPN 是 advisory（`WARN`，把 extended 数量写进记录：每种有换料费）。
+`--alternatives` **只出计划不改设计**：把计划里的每条提案（`requiresReview`）连同值、精度、耐压/功率余量、厂牌给用户确认，确认后才
+`kicad lcsc … --set @<评审目录>/lcsc-plan.json`（设计与计划的 `expect` 不一致会整体拒绝）；再重跑 `--health`。不替用户批准替代件。
+
 **4. 出图。**
 
 ```bash
 pcbpilot kicad fab --pcb <board>.kicad_pcb --sch <root>.kicad_sch --out <新目录>                # PCBA
 pcbpilot kicad fab --pcb <board>.kicad_pcb --out <新目录> --no-assembly                         # 光板
+pcbpilot kicad fab --pcb <board>.kicad_pcb --sch <root>.kicad_sch --out <新目录> --step --ipc356  # 另出 STEP 与飞针网表（可选）
 ```
+
+`--step`（`<板>.step`，`--step-board-only` / `--step-no-dnp` 可选）和 `--ipc356`（`<板>.d356`，IPC-D-356A）与上面的文件**同一次运行**、同一清单、
+**不进 Gerber zip**；STEP 空/截断或 D356 没有测试记录会让整个运行失败。`fab-report.json` 的 `step.footprintsWithoutModel` 列出没有 3D 模型的封装（`assembled`
+标明是否贴装）——结构检查要看贴装件的缺失项，安装孔/Mark 缺模型通常正常；`step.kicadWarnings` 只是附注。
 
 v0.10.2 起的行为（细节见 [kicad-file-safety.md §6](../pcbpilot/references/kicad-file-safety.md#6-制造输出目录与清单)）：
 先在暂存目录生成全部文件，成功后事务式发布并写 `.pcbpilot-fab-manifest.json`；目标文件名已存在而不在清单里 → 拒绝、什么都不改；
@@ -111,7 +128,7 @@ v0.10.2 起的行为（细节见 [kicad-file-safety.md §6](../pcbpilot/referenc
 
 每项一行：检查、命令（完整参数）、输入文件与时间/哈希、结论、验证状态、发现数与对象。整体只用三种说法：
 **可以下单**（每个必需项 PASS，含签名 waiver）/ **不可下单**（任一 FAIL）/ **未完成检查，不能确认可下单**（有 INCOMPLETE、
-BLOCKED 或 manual 项无证据，列出缺什么）。上传清单只列 `<板>-gerber.zip`、`<板>-bom.csv`、`<板>-cpl.csv`。
+BLOCKED 或 manual 项无证据，列出缺什么）。上传清单只列 `<板>-gerber.zip`、`<板>-bom.csv`、`<板>-cpl.csv`；`.step` 给结构/外壳核对，`.d356` 给飞针测试厂，都不是 JLC 上传包的一部分。
 
 ## 常见失败 → 修法
 
@@ -126,6 +143,10 @@ BLOCKED 或 manual 项无证据，列出缺什么）。上传清单只列 `<板>
 | 告警 `holds Gerber/drill file(s) this run did not produce` | 旧版本或别的工具的残留 | 不进 zip，但让用户删掉或换目录，免得误传 |
 | `unknown field "…"`（覆盖文件） | 覆盖 JSON 键名拼错 | 只允许 `refs` / `footprints` 与 `rotate` / `dx` / `dy` |
 | 覆盖写了却不在 `cplOverridesApplied` | 位号或封装名不匹配（静默跳过） | 用 CPL 的位号、BOM 的 `Footprint` 名或 `Lib:Name` 重写 |
+| `--health` 总判定 `cannot-check` | 离线 / 目录接口失败 / 已安装的 `parts-select.py` 太旧（不认 `--lookup`，报“older installed skill”） | 联网重跑；`pcbpilot update` 或 `--parts-select <本版脚本>`；不当作通过 |
+| `--health` 的 `footprint-package` 为 cannot-check：`… is not recognised` | 连接器、模块等认不出的封装，或目录封装写法特殊 | 人工对照数据手册逐个核对并记录，不当作通过；认得出的才会判 fail |
+| `--set @plan.json` 报 “no longer matches plan” | 计划之后设计里的 C 号变了 | 重跑 `--alternatives`，不要手改计划里的 `expect` |
+| `step` / `d356` 报 “truncated” / “holds no test records” | kicad-cli 没写完，或板上没有焊盘 | 重跑；确认板文件能在 KiCad 里打开且有焊盘；不要拿残缺文件当结果 |
 | `--search` 首条 MPN 带后缀或换了前缀 | 目录里没有原型号，排名给了替代件 | 不直接写；换查询或请用户确认替代 |
 | `--preflight` 的 `min-track` 等为 cannot-check：`… = 0 (no constraint)` | Board Setup 没设该最小值，也没有别的规则约束它 | 请用户在 Board Setup 填契约值（或 `.kicad_dru`），重跑；不当作 PASS |
 | `kicad-drc-policy` fail：`IGNORED connection_width` / `DOWNGRADED solder_mask_bridge` | 工程把电气/制造检查关掉或降级 | 用户恢复成 error 后重跑，或逐条签名 waiver（`{"gate":"kicad-drc",…}`） |

@@ -49,7 +49,8 @@ pcbpilot kicad lcsc --search "100nF 0402" --offline         # 只查 standard-pa
 pcbpilot kicad lcsc --search "AMS1117-3.3" --qty 500 --json  # JLC SMT 目录（联网）：C 号 / basic / 库存 / 封装 / MPN
 ```
 
-排名只给候选（规格匹配 → 库存 → basic → preferred → 单价）。选定后读该 C 号的手册确认参数、封装与引脚，
+排名只给候选（规格匹配 → 库存 → basic → preferred → 单价）。已选的 C 号缺货、停产或是 extended 时：`kicad lcsc --alternatives`
+（只出计划不改设计，见 [kicad-jlc.md §1b](../pcbpilot/references/kicad-jlc.md#1b-下单前体检与替代方案--health----alternatives)）；封装不同的“替代”不算替代。选定后读该 C 号的手册确认参数、封装与引脚，
 写进验收记录的“器件”行。EasyEDA 侧也可用 Skill 根目录的 `python scripts/parts-select.py "<query>" --online`（同一份目录客户端）。
 
 ### 2. EasyEDA：复用或自建 Device

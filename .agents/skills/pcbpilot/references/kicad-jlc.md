@@ -14,8 +14,11 @@
 建库   pcbpilot kicad lcsc --import C25744 --lib-dir lib # 嘉立创 EasyEDA 库记录 → KiCad 自带导入器
 写号   pcbpilot kicad lcsc --pcb b.kicad_pcb --sch b.kicad_sch --set R1=C25744
 检查   pcbpilot kicad lcsc --pcb b.kicad_pcb --sch b.kicad_sch --check
+体检   pcbpilot kicad lcsc --pcb b.kicad_pcb --sch b.kicad_sch --health --qty 10        # 下单前 BOM 风险，联网，退出码 0/6/5
+替代   pcbpilot kicad lcsc --pcb b.kicad_pcb --sch b.kicad_sch --alternatives --qty 10 > plan.json   # 只出计划，不改设计
 预检   pcbpilot kicad fab  --preflight --pcb b.kicad_pcb --sch b.kicad_sch --contract order-contract.json
 出图   pcbpilot kicad fab  --pcb b.kicad_pcb --sch b.kicad_sch --out fab/
+3D/飞针 pcbpilot kicad fab --pcb b.kicad_pcb --out fab/ --no-assembly --step --ipc356   # 可选：STEP + IPC-D-356A
 ```
 
 推荐的符号/封装来源是 **嘉立创自己的 EasyEDA 器件库**（与 C 号一一对应，和 JLC
@@ -42,6 +45,45 @@ pcbpilot kicad lcsc --search "10k 0402" --json --qty 500
 CLI 优先用已安装 Skill 里的脚本；Skill 未同步时“封装”列为空（旧脚本无该字段），
 `pcbpilot skill sync` 后恢复。参数核验规则（单位、阻值门禁、手册优先）与
 part-selection.md 相同，搜索排名不等于电气核验。
+
+### 1b. 下单前体检与替代方案：`--health` / `--alternatives`
+
+两者联网（同一份 `parts-select.py`，新增 `--lookup` 精确按 C 号查；`--search` 的 `--online` 行多带完整记录），
+**只读**，JSON 写 stdout，一行摘要写 stderr。`--qty` 在这两个模式里是**板数**（默认 1），每个 C 号的需求量
+= 贴装位数 × 板数 + 目录的 `lossNumber`（按 JLC 贴片损耗理解，下单时核对）。目录库存是查询时刻（`queriedAt`）的目录数字，
+不是预留。目录里按 C 号“搜索”不存在的号会返回别的件，所以查询要求 `componentCode` 完全相等，否则记“目录里没有”。
+
+`--health` 的检查（每项 pass / fail / cannot-check + 证据；总判定取最差，退出码 0 / 6 / 5，与 `fab --preflight` 一致）：
+
+| 检查 | fail | cannot-check |
+|---|---|---|
+| `lcsc-present` | 贴装件没有 C 号 | 没有任何贴装件 |
+| `lcsc-valid` | 不是 `C`+数字（含 “C1, C2” 这类多值） | 没有任何贴装件 |
+| `catalog-found` | 目录里没有这个号 | 查不到（离线/接口错，逐号记录） |
+| `availability` | 不可购买 / 停产 / 不推荐新设计 / 已合并到别的号（给出目录建议的替代号） | 目录没说是否可买 |
+| `stock` | 目录库存 < 需求量 | 目录没给库存数字（不当作 0） |
+| `extended-library` | （advisory）有 extended 件 → `warn`，列出各件（每种扩展库器件有换料费） | 目录没说库类型 |
+| `footprint-package` | 板上封装与目录封装**明确不一致**：贴片尺寸按英制码比较（`C_0201_0603Metric` → 0201），SOT/SOIC/QFN 等按系列 + 引脚数比较（SOIC≈SOP，SOT-25=SOT-23-5） | 任一边认不出，或只有一边写了引脚数：不猜，不算通过 |
+| `duplicate-mpn` | （advisory）同一 MPN（板上 `MPN` 类字段，否则目录 MPN，规范化后比较）出现在多个 C 号下 → `warn` | 没有任何 MPN |
+
+封装检查只比较尺寸码/系列/引脚数，**不比较本体宽度、间距、焊盘**；它是门禁线索，不是封装核对。
+离线时目录相关检查全部 cannot-check，总判定 `cannot-check`（退出 5），**不会**通过；已知的 fail（缺号、非法号）照样 fail。
+
+`--alternatives`：对“当前无法按原号下单”的行（目录没有、不可购买、缺货、库存不足）和 extended 行找替代，只在**全部硬条件可验证**时给出提案：
+
+- 可购买；目录库存 ≥ 需求量（同一候选被多行竞争时按总量累计扣减，也扣掉保持原号的行已占的量）；
+- 封装与**板上封装**明确匹配（同上矩阵，认不出的不提案）；
+- 关键参数两边都有值才比较，缺值 = 未核实 = 不提案。已知族：贴片电阻（阻值 =，功率 ≥，精度 ≤，类型 =）、MLCC（容值 =，耐压 ≥，精度 ≤，介质 =；NP0≡C0G）；
+  数值按 SI 解析（`mΩ` 与 `MΩ` 不同）。电感、二极管、IC 等其它族没有已核实的关键参数——只有 **MPN 规范化后完全相同**的另一个 C 号才可提案；
+- extended 行只接受 basic 候选。
+
+排序：同 MPN → basic → JLC preferred → 精度更紧 → 单价更低 → C 号。每行列前 `--limit`（默认 3）个候选，含不合格的原因（`unverified`）。
+计划里 `assignments`（位号 → 新 C 号）、`expect`（位号 → 制定计划时设计里的 C 号）、每条提案 `requiresReview: true`。
+退出码：每个**阻断行**（缺货/不可购买/目录没有）都有提案 → 0；有阻断行找不到安全替代 → 6；目录/搜索失败 → 5。extended 行是 advisory，不影响退出码。
+
+应用计划：`pcbpilot kicad lcsc --pcb b.kicad_pcb --sch b.kicad_sch --set @plan.json`。写入前把 `expect` 与设计现状逐位号比对，
+任何一个不同（有人改过、位号没了）整体拒绝、什么都不写，需要重新 `--alternatives`。提案换的是器件而不是参数，
+应用前由人核对值、精度、耐压/功率余量、厂牌与数据手册。
 
 ## 2. 为 C 号拿到 KiCad 符号/封装：可选途径对比
 
@@ -143,6 +185,22 @@ BOM/CPL 一致性门禁：两者必须列出同一组位号、每个恰好一次
 本次要写的文件若已存在却不在清单里（用户文件，或旧版 pcbpilot 无清单时的产物）→ 动手前就报冲突退出，
 删掉/挪走或换 `--out`；`OUT` 或 `OUT/gerber` 是符号链接/目录联接时拒绝。安装中途失败会把上次的文件放回。同一 OUT 同时只允许一个 fab 运行（`OUT/.pcbpilot-fab.lock`，第二个直接报忙）。
 
+### 可选输出：`--step` 与 `--ipc356`
+
+两个可选标志在**同一次** `kicad fab` 运行里多出文件，走同一套暂存 → 事务发布 → 清单，不带标志时输出和以前逐字节相同
+（`fab-report.json` 也不多字段）。它们不进 Gerber zip，不属于 JLC 上传包。想要 STEP 又不想被 LCSC 门禁挡住，用 `--no-assembly`。
+
+| 标志 | kicad-cli | 输出 | 校验（失败 = 整个运行失败、不发布任何文件） |
+|---|---|---|---|
+| `--step` | `pcb export step --force`；`--step-board-only` → `--board-only`，`--step-no-dnp` → `--no-dnp`，`--step-subst-models` → `--subst-models`（默认关：会掩盖缺模型） | `OUT/<板>.step` | 非空、以 `ISO-10303-21;` 开头、以 `END-ISO-10303-21;` 结尾（截断文件被拒绝） |
+| `--ipc356` | `pcb export ipcd356`（IPC-D-356A；kicad-cli 另有 `ipc2581`，是别的格式，不用） | `OUT/<板>.d356` | 有 `P  VER … IPC-D-356` 头，且至少一条 317/327/367 测试记录 |
+
+`fab-report.json` 增加 `step`（路径、sha256、字节数、参数、`footprintsWithoutModel`、kicad-cli 里关于模型的告警行）
+与 `ipc356`（路径、sha256、字节数、`testRecords`）。`footprintsWithoutModel` 来自解析板文件：封装没有 `(model …)`，或只有 `(hide yes)` 的模型；
+每项带 `assembled`（是否会被贴装）。模型文件**是否存在**不在这里判（路径带 KiCad 变量），看同一段里的 kicad-cli 告警；
+告警是文本，随版本/语言变化，只作附注，不参与判定。`--step-board-only` 时不含元件，这项检查如实标 `skipped`。
+`--step-board-only` 等选项没有 `--step` 时报错；`--preflight` 拒绝这两个标志（它什么都不写）。
+
 ### CPL 旋转角：不发明偏移表
 
 CPL 的坐标与角度就是 KiCad 的封装位置/角度（底层件的角度也原样输出，例如板上 270°、
@@ -212,7 +270,7 @@ pcbpilot kicad fab --preflight --pcb b.kicad_pcb --sch b.kicad_sch --contract fa
 
 ## 5. 输出与核对
 
-- `OUT/fab-report.json`：层清单、zip 内文件、BOM 行数、CPL 件数、剔除的未贴装件、告警、已用覆盖。
+- `OUT/fab-report.json`：层清单、zip 内文件、BOM 行数、CPL 件数、剔除的未贴装件、告警、已用覆盖；带 `--step` / `--ipc356` 时还有 `step` / `ipc356` 两节（sha256、无 3D 模型的封装、测试记录数）。
 - 上传前用 Gerber 查看器（或 JLC 上传后的在线预览）核对：板框闭合、内层顺序、孔与层
   对齐、过孔盖油与设计一致、丝印正常（JLC KiCad 8/9 文章的检查清单）。
 - 上传 BOM/CPL 后在 JLC 的贴片预览逐个看方向，再决定是否写覆盖文件。

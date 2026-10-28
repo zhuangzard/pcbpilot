@@ -201,8 +201,8 @@
 | `kicad board text` | Add board text on a silkscreen or fab layer | — |
 | `kicad board zone` | Add a copper pour (net, layers, clearance, thermals, priority) and fill it with pcbnew | — |
 | `kicad drc` | KiCad DRC as a tri-state gate: owners per violation, project exclusions policy, new-vs-baseline (JSON, exit 0/6/5) | [kicad-file-safety.md](kicad-file-safety.md), [kicad-jlc.md](kicad-jlc.md), [kicad.md](kicad.md) |
-| `kicad fab` | Export JLCPCB manufacturing files (Gerber+drill zip, BOM, CPL) with kicad-cli | [SKILL.md](../SKILL.md), [evidence-and-verdicts.md](evidence-and-verdicts.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad-jlc.md](kicad-jlc.md) +3 |
-| `kicad lcsc` | Check, write or search LCSC (JLC) part numbers on a KiCad design | [SKILL.md](../SKILL.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad-jlc.md](kicad-jlc.md), [kicad-sch-build.md](kicad-sch-build.md) +2 |
+| `kicad fab` | Export JLCPCB manufacturing files (Gerber+drill zip, BOM, CPL; optional STEP, IPC-D-356) with kicad-cli | [SKILL.md](../SKILL.md), [evidence-and-verdicts.md](evidence-and-verdicts.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad-jlc.md](kicad-jlc.md) +3 |
+| `kicad lcsc` | Check, write, search or health-check LCSC (JLC) part numbers on a KiCad design | [SKILL.md](../SKILL.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad-jlc.md](kicad-jlc.md), [kicad-sch-build.md](kicad-sch-build.md) +2 |
 | `kicad netlist` | Schematic connectivity JSON (the IR intent derive and pad-net-diff read) from a .kicad_sch | [SKILL.md](../SKILL.md), [evidence-and-verdicts.md](evidence-and-verdicts.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad.md](kicad.md) +2 |
 | `kicad pcb-sync` | Update PCB from Schematic, headless: add / swap / update / re-net footprints from the schematic, verified | [kicad-jlc.md](kicad-jlc.md), [kicad.md](kicad.md) |
 | `kicad place` | Place a KiCad board's footprints with the pcbauto placer (best of several seeds) | [SKILL.md](../SKILL.md), [drc-triage.md](drc-triage.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad.md](kicad.md) +2 |

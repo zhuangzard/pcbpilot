@@ -46,7 +46,7 @@ func newKiCadLcscCmd(stdout, stderr io.Writer) *cobra.Command {
 	var qty, limit int
 	c := &cobra.Command{
 		Use:   "lcsc",
-		Short: "Check, write or search LCSC (JLC) part numbers on a KiCad design",
+		Short: "Check, write, search or health-check LCSC (JLC) part numbers on a KiCad design",
 		Args:  cobra.NoArgs,
 		Long: `Exactly one mode:
 
