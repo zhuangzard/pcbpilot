@@ -1276,7 +1276,12 @@ func TestReviewRound5(t *testing.T) {
 		bc.ic(fmt.Sprintf("U%d", 10+i), "+3V3", "3:IO:output")
 		bc.addNode(fmt.Sprintf("/IO%d", i), fmt.Sprintf("U%d.3", 10+i))
 	}
-	want(t, bc.review(t, ReviewHints{}), RvLEDLimiter, "pass")
+	// limited per die; both ends are driver pins, so the bias depends on
+	// the drivers (likely warning per die), never an error
+	c = want(t, bc.review(t, ReviewHints{}), RvLEDLimiter, "pass", "warning", "warning", "warning", "warning")
+	if !strings.Contains(c.Findings[0].Message, "bias") {
+		t.Fatal(c.Findings[0])
+	}
 }
 
 // TestReviewBusConnector: BUS1 (footprint BUSPCI) with power_in pins is
@@ -1347,7 +1352,7 @@ func TestReviewRound6(t *testing.T) {
 	un.addNode("VX2", "D1.2")
 	un.addNode("/K", "D1.1")
 	un.ic("U7", "VX1").ic("U8", "VX2").cap("C7", "1u", "VX1", "GND").cap("C8", "1u", "VX2", "GND")
-	want(t, un.review(t, ReviewHints{NetRole: map[string]string{"VX1": "power", "VX2": "power"}}), RvLEDLimiter, "cannot-check")
+	want(t, un.review(t, ReviewHints{NetRole: map[string]string{"VX1": "power", "VX2": "power"}}), RvLEDLimiter, "pass", "warning")
 
 	// per die: die R unlimited (error), die G through a transistor (cannot-check)
 	pd := rvFed().ic("U1", "+3V3", "3:PR:output").cap("C1", "10u", "+3V3", "GND")
@@ -1405,4 +1410,100 @@ func TestReviewI2CBitBanged(t *testing.T) {
 	b.net("/SDA", "U1.3", "U2.3").res("R1", "100", "/SDA", "/DRV")
 	b.addNode("/DRV", "U3.3")
 	want(t, b.review(t, ReviewHints{}), RvI2CPullup, "pass", "warning")
+}
+
+// TestReviewRound7: LED bias by numeric / name-spelled levels and driver
+// pins, antiparallel LEDs on one resistor, V- on ground needs a positive
+// supply, rails are no single-pin nets.
+func TestReviewRound7(t *testing.T) {
+	led := func(b *rvT, ref, a, k string) {
+		b.part(ref, "Device:LED", "LED", "1:K:passive", "2:A:passive")
+		b.addNode(k, ref+".1")
+		b.addNode(a, ref+".2")
+	}
+	// +12V → R → LED → +5V: name-spelled voltages order the rails
+	b := rvFed().res("R1", "1k", "+12V", "/LA").cap("C1", "10u", "+3V3", "GND")
+	b.net("+5V")
+	b.ic("U1", "+12V").ic("U2", "+5V").cap("C2", "10u", "+12V", "GND").cap("C3", "10u", "+5V", "GND")
+	led(b, "D1", "/LA", "+5V")
+	want(t, b.review(t, ReviewHints{}), RvLEDLimiter, "pass")
+	// the other way round: reversed
+	b = rvFed().res("R1", "1k", "+5V", "/LA").cap("C1", "10u", "+3V3", "GND")
+	b.net("+12V")
+	b.ic("U1", "+12V").ic("U2", "+5V").cap("C2", "10u", "+12V", "GND").cap("C3", "10u", "+5V", "GND")
+	led(b, "D1", "/LA", "+12V")
+	want(t, b.review(t, ReviewHints{}), RvLEDLimiter, "fail", "error")
+	// two positive rails without a spelled voltage: likely warning
+	b = rvFed().res("R1", "1k", "VCC", "/LA").cap("C1", "10u", "+3V3", "GND")
+	b.net("VDD_AUX")
+	b.ic("U1", "VCC").ic("U2", "VDD_AUX").cap("C2", "10u", "VCC", "GND").cap("C3", "10u", "VDD_AUX", "GND")
+	led(b, "D1", "/LA", "VDD_AUX")
+	want(t, b.review(t, ReviewHints{}), RvLEDLimiter, "pass", "warning")
+
+	// GPIO → anode, cathode → R → +3V3: reversed unless the driver's domain
+	// exceeds the rail; domain 3V3 known → error, unknown → warning
+	g := rvFed().cap("C1", "10u", "+3V3", "GND")
+	g.part("U1", "Synth:MCU", "", "1:VDD:power_in", "2:GND:power_in", "3:PA0:output")
+	g.addNode("+3V3", "U1.1")
+	g.addNode("GND", "U1.2")
+	g.net("/IO", "U1.3")
+	led(g, "D1", "/IO", "/K")
+	g.res("R1", "1k", "/K", "+3V3")
+	want(t, g.review(t, ReviewHints{NetVoltage: map[string]float64{"+3V3": 3.3}, VoltageSource: map[string]string{"+3V3": "intent"}}), RvLEDLimiter, "fail", "error")
+	g2 := rvFed().cap("C1", "10u", "+3V3", "GND")
+	g2.part("U1", "Synth:MCU", "", "1:VDD:power_in", "2:VIO:power_in", "3:GND:power_in", "4:PA0:output")
+	g2.addNode("+3V3", "U1.1")
+	g2.net("VX9")
+	g2.addNode("VX9", "U1.2")
+	g2.addNode("GND", "U1.3")
+	g2.net("/IO", "U1.4")
+	led(g2, "D1", "/IO", "/K")
+	g2.res("R1", "1k", "/K", "+3V3")
+	want(t, g2.review(t, ReviewHints{NetRole: map[string]string{"VX9": "power"}}), RvLEDLimiter, "pass", "warning")
+	// GPIO → R → anode, cathode → GND: ok
+	ok := rvFed().ic("U1", "+3V3", "3:PA0:output").cap("C1", "10u", "+3V3", "GND")
+	ok.net("/IO", "U1.3").res("R1", "1k", "/IO", "/LA")
+	led(ok, "D1", "/LA", "GND")
+	want(t, ok.review(t, ReviewHints{}), RvLEDLimiter, "pass")
+	// two GPIOs drive the LED (R in series): bias depends on the drivers
+	two := rvFed().ic("U1", "+3V3", "3:PA0:output", "4:PA1:output").cap("C1", "10u", "+3V3", "GND")
+	two.net("/IO", "U1.3").res("R1", "1k", "/IO", "/LA")
+	two.net("/IO2", "U1.4")
+	led(two, "D1", "/LA", "/IO2")
+	want(t, two.review(t, ReviewHints{}), RvLEDLimiter, "pass", "warning")
+
+	// an antiparallel pair of LEDs on one resistor: the resistor is
+	// exclusive to whichever conducts — no "individual limiter" error
+	ap := rvFed().ic("U1", "+3V3", "3:PA0:output", "4:PA1:output").cap("C1", "10u", "+3V3", "GND")
+	ap.net("/IO", "U1.3").res("R1", "330", "/IO", "/N")
+	ap.net("/M", "U1.4")
+	led(ap, "D1", "/N", "/M")
+	led(ap, "D2", "/M", "/N")
+	c := want(t, ap.review(t, ReviewHints{}), RvLEDLimiter, "pass", "warning", "warning")
+	for _, f := range c.Findings {
+		if strings.Contains(f.Message, "individual") {
+			t.Fatal(f)
+		}
+	}
+
+	// V+ on −5V and V− on GND: no positive supply → V− on ground is an error
+	op := rvFed().cap("C1", "10u", "+3V3", "GND")
+	op.net("-5V")
+	op.ic("U9", "-5V")
+	op.cap("C9", "10u", "-5V", "GND")
+	op.part("U2", "Synth:OPA", "", "1:V+:power_in", "2:V-:power_in", "3:OUT:output", "4:IN:input")
+	op.addNode("-5V", "U2.1")
+	op.addNode("GND", "U2.2")
+	op.net("/O", "U2.3", "U2.4")
+	c = want(t, op.review(t, ReviewHints{}), RvICPowerGround, "fail", "error")
+	if !strings.Contains(c.Findings[0].Message, "U2.2") {
+		t.Fatal(c.Findings[0])
+	}
+
+	// a module with integrated decoupling, only power symbols on VCC/GND:
+	// VCC and GND are rails, not single-pin nets
+	m := newRvT()
+	m.part("U1", "Synth:MODULE", "", "1:VCC:power_in", "2:GND:power_in")
+	m.net("VCC", "U1.1").net("GND", "U1.2")
+	want(t, m.review(t, ReviewHints{}), RvSinglePinNet, "not-applicable")
 }

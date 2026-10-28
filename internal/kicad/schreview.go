@@ -258,6 +258,7 @@ type rvView struct {
 	hasIntent, hasSim bool
 	notes             []string // input problems found while reviewing
 	ledEnd            string   // the endpoint the last LED trace reached (rail id | pin | conn)
+	ledEndPin         *rvPin   // the driver pin when ledEnd is "pin"
 }
 
 // part kinds
@@ -1384,6 +1385,28 @@ func (v *rvView) logicDrivers(n string) []string {
 	return rvUniq(out)
 }
 
+// railDefined: the net is a rail defined by a power symbol (a global
+// power-named / ground net), a power_out source or an intent rail.
+func (v *rvView) railDefined(n string) bool {
+	if v.groupIsGround(n) {
+		return true
+	}
+	for _, g := range v.group(n) {
+		if r := v.in.Hints.NetRole[g]; r == "power" || r == "ground" {
+			return true
+		}
+		if nm := v.name(g); !strings.HasPrefix(g, "/") && !strings.HasPrefix(g, "Net-(") && (isPowerName(nm) || strings.HasPrefix(nm, "-")) {
+			return true
+		}
+		for _, p := range v.nets[g] {
+			if p.Type == "power_out" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // onBoardDevices are the ICs / other active parts with a non-passive pin
 // on n's group (connectors and passives excluded).
 func (v *rvView) onBoardDevices(n string) []string {
@@ -1894,12 +1917,12 @@ func (v *rvView) checkLEDs() *rvCheck {
 		}
 		for _, d := range dies {
 			c.Coverage.Candidates++
-			v.ledEnd = ""
+			v.ledEnd, v.ledEndPin = "", nil
 			sa, wa := v.ledSide(ref, d.A.Net, "in", map[string]bool{ref: true})
-			endA := v.ledEnd
-			v.ledEnd = ""
+			endA, pinA := v.ledEnd, v.ledEndPin
+			v.ledEnd, v.ledEndPin = "", nil
 			sk, wk := v.ledSide(ref, d.K.Net, "out", map[string]bool{ref: true})
-			endK := v.ledEnd
+			endK, pinK := v.ledEnd, v.ledEndPin
 			if sa == "limit" {
 				if s := v.dieShares(ref, d.A, users); s != "" {
 					sa, wa = "shared", wa+" (also carries "+s+": no individual limiter)"
@@ -1916,13 +1939,20 @@ func (v *rvView) checkLEDs() *rvCheck {
 				label, name = "die "+d.Name+": ", "LED "+ref+" die "+d.Name
 			}
 			dwhy := fmt.Sprintf("%sanode %s: %s; cathode %s: %s", label, v.name(d.A.Net), wa, v.name(d.K.Net), wk)
+			biasWhy := ""
 			if st != "ambiguous" && st != "open" {
-				switch dir := v.ledBias(endA, endK); dir {
+				switch b, w := v.ledBias(endA, endK, pinA, pinK); b {
 				case "reversed":
-					st = "reversed"
-				case "unknown":
-					st, dwhy = "ambiguous", dwhy+"; the endpoint levels do not establish the current direction"
+					st, biasWhy = "reversed", w
+				case "likely":
+					if st == "ok" || st == "none" {
+						st = "bias?"
+					}
+					biasWhy = w
 				}
+			}
+			if biasWhy != "" {
+				dwhy += "; bias: " + biasWhy
 			}
 			base := ReviewFinding{Refs: []string{ref}, Pins: []string{ref + "." + d.A.Num, ref + "." + d.K.Num}, netIDs: []string{d.A.Net, d.K.Net}, Evidence: []string{dwhy}}
 			switch st {
@@ -1941,6 +1971,14 @@ func (v *rvView) checkLEDs() *rvCheck {
 				f := base
 				f.Severity, f.Message = "error", fmt.Sprintf("%s is reverse-biased: its anode end is not above its cathode end (%s)", name, dwhy)
 				f.Fix = "turn the LED around (anode toward the supply / driver, cathode toward ground / sink)"
+				c.add(f)
+			case "bias?":
+				c.Coverage.Checked++
+				f := base
+				f.Severity, f.Certainty = "warning", "likely"
+				f.Message = fmt.Sprintf("%s: forward bias not established (%s)", name, biasWhy)
+				f.Fix = "check the LED is forward-biased in operation; give rail voltages / driver domains (intent) to decide it"
+				f.Missing = []string{"endpoint levels (rail voltages, intent review.pinDomains)"}
 				c.add(f)
 			case "drive":
 				c.Coverage.Checked++
@@ -1993,46 +2031,125 @@ func (v *rvView) dieShares(ref string, p *rvPin, users map[*rvPin]int) string {
 	return ""
 }
 
-// railLevel is a rail's level for the bias check: ground 0, a known
-// voltage, else the sign its name gives ("+…", VCC/VDD… positive; "-…"
-// negative).
-func (v *rvView) railLevel(n string) (float64, bool) {
+var rvNameVolt = regexp.MustCompile(`(?i)(?:^|[^0-9A-Z])[+-]?(\d+)(?:[.,](\d+))?V(\d*)(?:$|[^0-9A-Z])`)
+
+// railLevel is a rail's level for the bias check. known: ground (0), a
+// declared / simulated voltage, or a voltage the rail name spells (+12V,
+// 5V0, 3V3, +3.3V, -5V); otherwise only the sign the name gives ("+…",
+// VCC/VDD… positive, "-…" negative: known false, sign ±1); sign 0: nothing
+// is known.
+func (v *rvView) railLevel(n string) (x float64, known bool, sign int) {
 	if v.groupIsGround(n) {
-		return 0, true
+		return 0, true, 0
 	}
 	if x, ok := v.voltage(n); ok {
-		return x, true
+		return x, true, rvSign(x)
 	}
 	for _, g := range v.group(n) { // a 0 Ω-joined rail names the group too
 		nm := v.name(g)
+		if m := rvNameVolt.FindStringSubmatch(nm); m != nil {
+			s := m[1]
+			if m[2] != "" {
+				s += "." + m[2]
+			} else if m[3] != "" {
+				s += "." + m[3]
+			}
+			var f float64
+			if _, err := fmt.Sscanf(s, "%g", &f); err == nil {
+				if strings.HasPrefix(nm, "-") || strings.Contains(nm, "-"+m[1]) {
+					f = -f
+				}
+				return f, true, rvSign(f)
+			}
+		}
+	}
+	for _, g := range v.group(n) {
+		nm := v.name(g)
 		switch {
 		case strings.HasPrefix(nm, "-"):
-			return -1, true
+			return 0, false, -1
 		case isPowerName(nm):
-			return 1, true
+			return 0, false, 1
 		}
 	}
-	return 0, false
+	return 0, false, 0
 }
 
-// ledBias checks the die's endpoints forward-bias it: ok | reversed |
-// unknown. An end is a rail identity, "pin" (a driver), "conn" or "".
-func (v *rvView) ledBias(a, k string) string {
+func rvSign(x float64) int {
+	switch {
+	case x > 0:
+		return 1
+	case x < 0:
+		return -1
+	}
+	return 0
+}
+
+// ledBias checks a die's endpoints forward-bias it. Ends are a rail
+// identity, "pin" (a driver: endPin), "conn" or "". Result: ok | reversed
+// (proven: error) | likely (direction not established: warning) with why.
+//   - two rails: numeric levels (ground, voltages, name-spelled) must put
+//     the anode end above the cathode end; signs alone order only rails of
+//     different sign; otherwise likely.
+//   - pin and ground: the pin must be on the anode side (source).
+//   - pin and a positive rail: the pin on the cathode side sinks (ok); on
+//     the anode side it is reversed unless the driver's domain exceeds the
+//     rail — domain known and not higher: reversed; unknown: likely.
+//   - pin and pin: the bias depends on the drivers (likely).
+func (v *rvView) ledBias(a, k string, pa, pk *rvPin) (string, string) {
 	rail := func(e string) bool { return e != "" && e != "pin" && e != "conn" }
 	switch {
+	case a == "conn" || k == "conn" || a == "" || k == "":
+		return "ok", ""
 	case rail(a) && rail(k):
-		va, oka := v.railLevel(a)
-		vk, okk := v.railLevel(k)
-		if !oka || !okk {
-			return "unknown"
+		va, ka, sa := v.railLevel(a)
+		vk, kk, sk := v.railLevel(k)
+		switch {
+		case ka && kk:
+			if va <= vk {
+				return "reversed", fmt.Sprintf("anode end %s (%.3g V) is not above cathode end %s (%.3g V)", v.name(a), va, v.name(k), vk)
+			}
+			return "ok", ""
+		case (ka || sa != 0) && (kk || sk != 0) && rvSignOf(va, ka, sa) != rvSignOf(vk, kk, sk):
+			if rvSignOf(va, ka, sa) < rvSignOf(vk, kk, sk) {
+				return "reversed", fmt.Sprintf("anode end %s is below cathode end %s", v.name(a), v.name(k))
+			}
+			return "ok", ""
 		}
-		if va <= vk {
-			return "reversed"
+		return "likely", fmt.Sprintf("the levels of %s and %s cannot be ordered (give rail voltages)", v.name(a), v.name(k))
+	case a == "pin" && k == "pin":
+		return "likely", "both ends are driver pins: the bias depends on the drivers"
+	case a == "pin": // cathode on a rail
+		vk, kk, sk := v.railLevel(k)
+		if kk && vk == 0 || !kk && sk < 0 {
+			return "ok", "" // the pin sources into ground / a negative rail
 		}
-	case rail(a) && v.groupIsGround(a):
-		return "reversed" // the anode on ground: nothing drives below it
+		if pa != nil {
+			if dom, _ := v.pinDomain(pa); dom != "" {
+				if dv, ok := v.voltage(dom); ok && kk {
+					if dv > vk {
+						return "ok", ""
+					}
+					return "reversed", fmt.Sprintf("driver %s.%s (domain %s, %.3g V) cannot exceed cathode rail %s (%.3g V)", pa.Ref, pa.Num, v.name(dom), dv, v.name(k), vk)
+				}
+			}
+		}
+		return "likely", fmt.Sprintf("anode driven by a pin, cathode on %s: reversed unless the driver domain exceeds the rail", v.name(k))
+	case k == "pin": // anode on a rail
+		va, ka, sa := v.railLevel(a)
+		if ka && va == 0 || !ka && sa < 0 {
+			return "reversed", fmt.Sprintf("anode on %s, cathode on a driver pin: nothing drives the cathode below it", v.name(a))
+		}
+		return "ok", "" // the pin sinks
 	}
-	return "ok"
+	return "ok", ""
+}
+
+func rvSignOf(x float64, known bool, sign int) int {
+	if known {
+		return rvSign(x)
+	}
+	return sign
 }
 
 // ledDieState combines the two sides of one die ("shared": resolved, not
@@ -2198,7 +2315,7 @@ func (v *rvView) ledElement(ref string, p *rvPin, dir string, seen map[string]bo
 		v.ledEnd = "conn"
 		return "offboard", "leaves through " + p.Ref + "." + p.Num
 	case pkIC:
-		v.ledEnd = "pin"
+		v.ledEnd, v.ledEndPin = "pin", p
 		if src, ok := pinRole(v.in.Hints.CurrentDriver, p); ok {
 			return "limit", p.Ref + "." + p.Num + " (" + p.Name + ", current driver: " + src + ")"
 		}
@@ -2238,8 +2355,22 @@ func (v *rvView) ledCommon(ref, n, dir string) (string, string) {
 	if len(leds) == 0 || len(rest) != 1 {
 		return "ambiguous", branch
 	}
+	// only a sibling that conducts in the same direction from this node
+	// (same terminal role) shares the element at the same time; an
+	// antiparallel sibling conducts when this die does not
+	want := map[string]string{"in": "A", "out": "K"}[dir]
+	same := 0
+	for _, q := range leds {
+		if v.diodeRole(q) == want {
+			same++
+		}
+	}
 	p := rest[0]
-	common := fmt.Sprintf("common node %s (%d sibling LED terminal(s)) ", v.name(n), len(leds))
+	common := fmt.Sprintf("common node %s (%d sibling LED terminal(s), %d conducting with this die) ", v.name(n), len(leds), same)
+	if same == 0 {
+		st, why := v.ledElement(ref, p, dir, map[string]bool{ref: true})
+		return st, common + why
+	}
 	switch v.comps[p.Ref].kind {
 	case pkResistor, pkResArray:
 		st, why := v.ledElement(ref, p, dir, map[string]bool{ref: true})
@@ -2342,7 +2473,7 @@ func (v *rvView) pathOn(from, n, dir string, depth int) (string, string) {
 		v.ledEnd = "conn"
 		return "ok", "connector " + p.Ref + "." + p.Num
 	case pkIC:
-		v.ledEnd = "pin"
+		v.ledEnd, v.ledEndPin = "pin", p
 		switch p.Type {
 		case "output", "power_out", "bidirectional", "tri_state", "open_collector", "open_emitter":
 			return "ok", "driver pin " + p.Ref + "." + p.Num + " (" + p.Name + ")"
@@ -2629,7 +2760,7 @@ func (v *rvView) checkICPower() *rvCheck {
 		c.Coverage.Checked++
 		ground := false
 		rails := map[string]string{}
-		var gndPins, badGnd, badSup, onGnd, noSrc []string
+		var gndPins, badGnd, badSup, onGnd, noSrc, negOnGnd []string
 		for _, p := range comp.pins {
 			key := p.Ref + "." + p.Num
 			if rvGndPinRe.MatchString(p.Name) && p.Type != "output" && p.Type != "power_out" {
@@ -2653,7 +2784,7 @@ func (v *rvView) checkICPower() *rvCheck {
 				badSup = append(badSup, label)
 			case v.groupIsGround(p.Net):
 				if rvNegSupRe.MatchString(p.Name) {
-					ground = true // single-supply negative terminal
+					negOnGnd = append(negOnGnd, label) // decided below
 					continue
 				}
 				if _, ok := pinRole(v.in.Hints.GroundedPin, p); ok {
@@ -2672,6 +2803,20 @@ func (v *rvView) checkICPower() *rvCheck {
 					continue
 				}
 				rails[v.find(p.Net)] = p.Net
+			}
+		}
+		// V-/VEE on ground is a single-supply negative terminal only when
+		// another power pin of the part reaches a positive rail
+		if len(negOnGnd) > 0 {
+			pos := false
+			for _, n := range rails {
+				x, known, sign := v.railLevel(n)
+				pos = pos || known && x > 0 || !known && sign > 0
+			}
+			if pos {
+				ground = true
+			} else {
+				onGnd = append(onGnd, negOnGnd...)
 			}
 		}
 		pinsOf := func(xs []string) []string {
@@ -2707,6 +2852,7 @@ func (v *rvView) checkICPower() *rvCheck {
 			c.add(ReviewFinding{Severity: "error", Message: fmt.Sprintf("%s ground pin(s) %s are not on a ground net", r, strings.Join(badGnd, ", ")), Refs: []string{r}, Pins: badGnd,
 				Fix: "connect " + r + "'s ground / exposed pad pins to GND", Evidence: []string{"designated ground pins (GND/VSS/EP-named): " + strings.Join(gndPins, ", "), "not on ground: " + strings.Join(badGnd, ", ")}})
 		case ground:
+		case len(negOnGnd) > 0: // V−/VEE on ground already reported above
 		case comp.fieldRole("no-ground"):
 			c.exempt(r, "no ground pin by design", "component field ReviewRole")
 		case len(rails) >= 2:
@@ -3314,8 +3460,8 @@ func (v *rvView) checkSinglePin() *rvCheck {
 			continue
 		}
 		p := pins[0]
-		if p.NC {
-			continue
+		if p.NC || v.railDefined(id) {
+			continue // a rail (power symbol, power_out, intent) is the power checks' job
 		}
 		c.Coverage.Candidates++
 		comp := v.comps[p.Ref]
