@@ -239,6 +239,12 @@ func (r *rulesRun) padClearance() {
 		need int64
 	}
 	groups := map[gkey]*group{}
+	type thermalHit struct {
+		ep, net string
+		vias    int
+		refs    []string
+	}
+	thermal := map[[2]string]*thermalHit{}
 	pairs := 0
 	for _, c := range r.snap.Components {
 		for i := 0; i < len(c.Pads); i++ {
@@ -252,7 +258,29 @@ func (r *rulesRun) padClearance() {
 				}
 				gapMil := padGapMil(a.X, a.Y, a.W, a.H, b.X, b.Y, b.W, b.H)
 				if gapMil <= 0 {
-					continue // touching / overlapping pads: a net tie, or a footprint DRC reports
+					// Overlapping pads of two nets: a net tie (skipped) —
+					// unless one has no net: an unnamed thermal via inside
+					// an exposed pad is a different "net" to KiCad and
+					// flagged on every instance.
+					if (a.Net == "") == (b.Net == "") {
+						continue
+					}
+					pairs++
+					ep := a
+					if a.Net == "" {
+						ep = b
+					}
+					id := [2]string{c.Footprint, ep.Number}
+					g := thermal[id]
+					if g == nil {
+						g = &thermalHit{ep: ep.Number, net: ep.Net}
+						thermal[id] = g
+					}
+					g.vias++
+					if !rulesHasStr(g.refs, c.Designator) {
+						g.refs = append(g.refs, c.Designator)
+					}
+					continue
 				}
 				pairs++
 				ca, clsA := r.padNeed(rb, c.LocalClearance, a.LocalClearance, a.Net)
@@ -308,6 +336,25 @@ func (r *rulesRun) padClearance() {
 		}
 		chk.Items = append(chk.Items, fmt.Sprintf("%s: pad gap %s (%s) < clearance %s (%s) on %s%s — fix: a footprint-local clearance override ≤ %s on these footprints, or a lower clearance for that class (or a .kicad_dru rule for the footprint); pcbpilot does not lower it",
 			emptyAs(k.fp, "(no library id)"), kicad.MmOfNm(g.gap), g.pads, kicad.MmOfNm(k.need), strings.Join(g.classes, "; "), strings.Join(refs, ", "), more, kicad.MmOfNm(g.gap)))
+	}
+	tids := make([][2]string, 0, len(thermal))
+	for id := range thermal {
+		tids = append(tids, id)
+	}
+	sort.Slice(tids, func(i, j int) bool { return tids[i][0]+"|"+tids[i][1] < tids[j][0]+"|"+tids[j][1] })
+	for _, id := range tids {
+		g := thermal[id]
+		sort.Strings(g.refs)
+		for _, ref := range g.refs {
+			parts[ref] = true
+		}
+		refs, more := g.refs, ""
+		if len(refs) > 8 {
+			more = fmt.Sprintf(" (+%d more)", len(refs)-8)
+			refs = refs[:8]
+		}
+		chk.Items = append(chk.Items, fmt.Sprintf("%s: pad(s) without a net overlap pad %s (%s) — unnamed thermal vias in the exposed pad; KiCad reports them as clearance errors to the pad, on %s%s — fix: give the thermal-via pads the exposed pad's number (same net) in the footprint; pcbpilot does not change footprints",
+			emptyAs(id[0], "(no library id)"), emptyAs(g.ep, "(unnamed)"), g.net, strings.Join(refs, ", "), more))
 	}
 	if len(chk.Items) > 0 {
 		chk.Status = gate.Warn

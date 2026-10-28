@@ -126,9 +126,15 @@ func TestKicadRulesFootprintPadClearance(t *testing.T) {
 	f := newRulesFixture(t)
 	snap := strings.Replace(rulesTestSnap, `{"designator":"R2"`, `{"designator":"U5","footprint":"Lib:VSSOP-8_P0.5mm","side":"top","courtyard":{"minX":1200,"minY":100,"maxX":1300,"maxY":300},"pads":[{"padNumber":"1","net":"SIG","x":1250,"y":200,"width":13.78,"height":40},{"padNumber":"2","net":"AUX","x":1269.685,"y":200,"width":13.78,"height":40}]},
   {"designator":"R2"`, 1)
+	// U6: an exposed pad (GND) with an unnamed thermal-via PTH inside it.
+	snap = strings.Replace(snap, `{"designator":"R2"`, `{"designator":"U6","footprint":"Lib:SOIC-8-EP","side":"top","courtyard":{"minX":1400,"minY":100,"maxX":1500,"maxY":300},"pads":[{"padNumber":"9","net":"GND","layer":1,"x":1450,"y":200,"width":80,"height":80},{"padNumber":"","net":"","layer":12,"x":1440,"y":190,"width":24,"height":24}]},
+  {"designator":"R2"`, 1)
 	f.fake.snap = []byte(snap)
 	f.o.plan = true
 	rep, code, _ := runRules(t, f.o)
+	if c := checkOf(rep, "footprint-pad-clearance"); !strings.Contains(strings.Join(c.Items, "\n"), "Lib:SOIC-8-EP: pad(s) without a net overlap pad 9 (GND)") {
+		t.Fatalf("thermal via: %+v", c.Items)
+	}
 	c := checkOf(rep, "footprint-pad-clearance")
 	items := strings.Join(c.Items, "\n")
 	if code != 0 || c.Status != gate.Warn || !c.Advisory || !strings.Contains(items, "Lib:VSSOP-8_P0.5mm: pad gap 0.15mm (pads 1/2) < clearance 0.2mm") || !strings.Contains(items, "on U5") || !strings.Contains(items, "footprint-local clearance override") {

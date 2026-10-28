@@ -401,7 +401,7 @@ func TestRunDRCStagedCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{"board.kicad_pcb", "board.kicad_pro", "board.kicad_dru", "fp-lib-table", "board.kicad_sch", "sub/sub.kicad_sch"}
-	if !reflect.DeepEqual(run.Staged, want) || run.Report.Total != 0 || run.Policy == nil || len(run.Policy.Exclusions) != 1 || !run.Isolated {
+	if !reflect.DeepEqual(run.Staged, want) || run.Report.Total != 0 || run.Policy == nil || len(run.Policy.Exclusions) != 1 || run.Isolated != (BoardCLIEnv(mustReadFile(t, filepath.Join(proj, "board.kicad_pcb"))) != nil) {
 		t.Fatalf("run: %+v policy %+v", run, run.Policy)
 	}
 	if !reflect.DeepEqual(dirListing(t, proj), before) {

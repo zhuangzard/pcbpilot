@@ -123,7 +123,9 @@ func RunDRC(o DRCRunOptions) (*DRCRun, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, o.CLI, args...)
 	cmd.Dir = tmp
-	cmd.Env = SchCLIEnv()
+	// The board's own footprint libraries only (boardenv.go): the library
+	// checks stay exactly the user's, without loading the whole stock table.
+	cmd.Env = BoardCLIEnv(data)
 	run.Isolated = cmd.Env != nil
 	var buf bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &buf, &buf

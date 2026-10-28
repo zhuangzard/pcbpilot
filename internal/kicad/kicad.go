@@ -378,6 +378,9 @@ func (t *Tools) DRCEnv(pcb, out, severity string, env []string) (*DRCReport, err
 	cmd := exec.CommandContext(ctx, t.CLI, "pcb", "drc", "--format", "json", "--severity-"+severity, "-o", out, pcb)
 	if len(env) > 0 {
 		cmd.Env = append(os.Environ(), env...)
+	} else if b, err := os.ReadFile(pcb); err == nil {
+		// The board's own footprint libraries only (boardenv.go).
+		cmd.Env = BoardCLIEnv(b)
 	}
 	var buf bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &buf, &buf
