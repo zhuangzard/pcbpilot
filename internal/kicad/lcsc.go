@@ -116,7 +116,7 @@ func ParseSchBOM(b []byte) ([]SchPart, error) {
 		// Grouped rows ("R1,R2") are split defensively even though --group-by ""
 		// already yields one row per reference.
 		for _, ref := range strings.Split(fields["Reference"], ",") {
-			if ref = strings.TrimSpace(ref); ref != "" {
+			if ref = schBOMRef(strings.TrimSpace(ref)); ref != "" {
 				c := sp
 				c.Ref = ref
 				out = append(out, c)
@@ -124,6 +124,18 @@ func ParseSchBOM(b []byte) ([]SchPart, error) {
 		}
 	}
 	return out, nil
+}
+
+// schBOMRef undoes kicad-cli's rendering of a reference that does not end
+// in a digit: KiCad reads "J18A" as unannotated and writes "J18A?" in the
+// BOM, while the board footprint (and the schematic itself) say "J18A". A
+// truly unannotated reference ("R?", no number) is kept as written.
+func schBOMRef(ref string) string {
+	base, ok := strings.CutSuffix(ref, "?")
+	if !ok || !strings.ContainsAny(base, "0123456789") || strings.HasSuffix(base, "?") {
+		return ref
+	}
+	return base
 }
 
 // ReadSchematicParts runs kicad-cli on the (root) schematic — hierarchy is
