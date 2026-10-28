@@ -465,15 +465,17 @@ func TestRunFastrouteCrashRetry(t *testing.T) {
 // it writes its best board and the round is a usable best-so-far result,
 // well before the 30 s WaitDelay kill.
 func TestRunFastrouteTimeoutStopsGracefully(t *testing.T) {
+	// Skipped only when Windows positively has no console to send Ctrl+Break
+	// through (GetConsoleProcessList); any other failure to stop is a failure.
+	if ok, why := ctrlBreakDeliverable(); !ok {
+		t.Skipf("Ctrl+Break cannot be delivered: %s", why)
+	}
 	dir := t.TempDir()
 	bin := fakeRouterBin(t, "fastroute")
 	t.Setenv(envFakeFRMode, "wait-stop")
 	var log strings.Builder
 	start := time.Now()
 	ses, runs, err := runFastroute(fastrouteOpts{bin: bin, timeout: 2 * time.Second}, "b.dsn", filepath.Join(dir, "b"), &log)
-	if strings.Contains(log.String(), "cannot send Ctrl+Break") {
-		t.Skipf("no console to deliver Ctrl+Break in (detached test run): %s", log.String())
-	}
 	if err != nil || len(runs) == 0 || runs[0].Status != "ok" || runs[0].Unrouted != 0 || ses != runs[0].Session {
 		t.Fatalf("timed-out run did not stop gracefully: %+v err %v\n%s", runs, err, log.String())
 	}

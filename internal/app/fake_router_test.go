@@ -18,7 +18,8 @@ const (
 	envFakeRouter    = "PCBPILOT_FAKE_ROUTER" // fastroute | tracemaker
 	envFakeCalls     = "PCBPILOT_FAKE_CALLS"  // fastroute: file that gets one "call" line per run
 	envFakeReport    = "PCBPILOT_FAKE_REPORT" // fastroute: report JSON to write
-	envFakeFRMode    = "PCBPILOT_FAKE_FR"     // fastroute: "" | wait-stop | crash-parallel | crash
+	envFakeFRMode    = "PCBPILOT_FAKE_FR"     // fastroute: "" | wait-stop | ignore-stop | crash-parallel | crash
+	envFakeFRReady   = "PCBPILOT_FAKE_READY"  // fastroute wait-stop / ignore-stop: file written once the stop handler is in place
 	envFakeTMBehaves = "PCBPILOT_FAKE_TM"     // tracemaker: ok | incomplete | crash | norep | sleep
 )
 
@@ -78,11 +79,17 @@ func fakeRouterMain(router string, args []string) int {
 		case "wait-stop": // routes until asked to stop (SIGINT / Ctrl+Break), then writes its best board
 			sig := make(chan os.Signal, 1)
 			signal.Notify(sig, os.Interrupt)
+			fakeReady()
 			select {
 			case <-sig:
 			case <-time.After(20 * time.Second):
 				return 9 // never asked to stop gracefully
 			}
+		case "ignore-stop": // catches the stop request and keeps routing: must be killed
+			signal.Notify(make(chan os.Signal, 1), os.Interrupt)
+			fakeReady()
+			time.Sleep(60 * time.Second)
+			return 9
 		}
 		if os.WriteFile(argAfter(args, "-do"), []byte("(session x)\n"), 0o644) != nil ||
 			os.WriteFile(rep, []byte(report+"\n"), 0o644) != nil {
@@ -119,4 +126,11 @@ func fakeRouterMain(router string, args []string) int {
 	}
 	fmt.Fprintf(os.Stderr, "fake router: unknown %s / %s\n", router, os.Getenv(envFakeTMBehaves))
 	return 2
+}
+
+// fakeReady tells the test (envFakeFRReady) that the stop handler is in place.
+func fakeReady() {
+	if p := os.Getenv(envFakeFRReady); p != "" {
+		_ = os.WriteFile(p, []byte("ready\n"), 0o644)
+	}
 }
