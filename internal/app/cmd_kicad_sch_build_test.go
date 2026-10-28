@@ -1246,6 +1246,10 @@ func TestSbSplitSymbolID(t *testing.T) {
 		"libs/my.kicad_sym:R":                 {"libs/my.kicad_sym", "R"},
 		`C:\Users\me\libs\x y.kicad_sym:R`:    {`C:\Users\me\libs\x y.kicad_sym`, "R"},
 		`D:\a.kicad_sym.d\my.kicad_sym:LM358`: {`D:\a.kicad_sym.d\my.kicad_sym`, "LM358"},
+		// the extension in any case: never a split at the drive colon
+		`C:\libs\custom.KICAD_SYM:R`: {`C:\libs\custom.KICAD_SYM`, "R"},
+		`c:\Libs\Mixed.Kicad_Sym:U1`: {`c:\Libs\Mixed.Kicad_Sym`, "U1"},
+		"libs/UP.KICAD_SYM:R":        {"libs/UP.KICAD_SYM", "R"},
 	} {
 		lib, name, ok := sbSplitSymbolID(id)
 		if !ok || lib != want[0] || name != want[1] {
@@ -1254,6 +1258,15 @@ func TestSbSplitSymbolID(t *testing.T) {
 	}
 	if _, _, ok := sbSplitSymbolID("NoColon"); ok {
 		t.Error("an id without a colon must not split")
+	}
+	// the file path rung and the nickname agree with the split, in any case
+	for lib, nick := range map[string]string{"libs/my.kicad_sym": "my", "libs/UP.KICAD_SYM": "UP", filepath.Join("x", "Mixed.Kicad_Sym"): "Mixed"} {
+		if !sbIsSymLibPath(lib) || sbSymLibNickname(lib) != nick {
+			t.Errorf("%s: path %v nickname %q, want %q", lib, sbIsSymLibPath(lib), sbSymLibNickname(lib), nick)
+		}
+	}
+	if sbIsSymLibPath("Device") {
+		t.Error("a nickname is not a library path")
 	}
 }
 
