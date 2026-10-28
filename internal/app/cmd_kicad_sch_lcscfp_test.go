@@ -111,3 +111,83 @@ func TestSchEditKeepsLCSCFootprints(t *testing.T) {
 		t.Error("a failed edit changed the project")
 	}
 }
+
+// sbFakeFootprintLib writes <dir>/<lib>.pretty/<fp>.kicad_mod (two pads).
+func sbFakeFootprintLib(t *testing.T, dir, lib, fp string) {
+	t.Helper()
+	d := filepath.Join(dir, lib+".pretty")
+	if err := os.MkdirAll(d, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	text := `(footprint "` + fp + `" (version 20240108) (generator "test") (layer "F.Cu")
+	(pad "1" smd rect (at -0.8 0) (size 0.8 0.9) (layers "F.Cu" "F.Paste" "F.Mask"))
+	(pad "2" smd rect (at 0.8 0) (size 0.8 0.9) (layers "F.Cu" "F.Paste" "F.Mask")))
+`
+	if err := os.WriteFile(filepath.Join(d, fp+".kicad_mod"), []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestSchBuildShipsSpecFootprintLibs: a footprint from a project library
+// under libDirs travels with the project whatever the symbol came from —
+// an LCSC part, a stock symbol, a generated one. v0.12.0 copied it only
+// next to a local .kicad_sym symbol; otherwise the library was neither
+// copied nor in fp-lib-table, silently, and pcb-sync then failed with
+// E_FP_LIB_UNRESOLVED. A libDirs entry may also be the .pretty itself. A
+// sch-edit rebuild keeps them; a library found nowhere is a spec error.
+func TestSchBuildShipsSpecFootprintLibs(t *testing.T) {
+	sbNeedKicad(t)
+	t.Setenv(kicad.EnvCacheDir, t.TempDir())
+	sbFakeLCSCPart(t, "C99902", "TCAP2", "TFP_0402")
+	libs := t.TempDir()
+	sbFakeFootprintLib(t, libs, "plib", "FP_A")
+	sbFakeFootprintLib(t, libs, "plib2", "FP_B")
+	out := filepath.Join(t.TempDir(), "fl")
+	spec := &sbSpec{Name: "fl", LibDirs: []string{libs, filepath.Join(libs, "plib2.pretty")},
+		Parts: []sbPart{
+			{Ref: "C1", LCSC: "C99902", Value: "100nF", Footprint: "plib:FP_A"},
+			{Ref: "R1", Value: "1k", Symbol: "Device:R", Footprint: "plib:FP_A"},
+			{Ref: "U1", Value: "X", Footprint: "plib2:FP_B", Pins: []sbPin{{Number: "1", Name: "A", Type: "passive"}, {Number: "2", Name: "B", Type: "passive"}}},
+		},
+		Nets: []sbNet{
+			{Name: "+3V3", Kind: "power", Pins: []string{"C1:1", "R1:1", "U1:1"}},
+			{Name: "GND", Kind: "ground", Pins: []string{"C1:2", "R1:2", "U1:2"}},
+		}}
+	opt := sbOptions{OutDir: out, NoIntent: true, Jobs: 2, PlannerBudget: 20000}
+	res, err := runSchBuild(spec, opt, nil)
+	if err != nil || !res.OK {
+		t.Fatalf("build: %v %+v", err, res)
+	}
+	check := func(what string) {
+		t.Helper()
+		tbl, _ := os.ReadFile(filepath.Join(out, "fp-lib-table"))
+		for _, want := range []string{`(name "plib")`, `"${KIPRJMOD}/plib.pretty"`, `(name "plib2")`, `"${KIPRJMOD}/plib2.pretty"`} {
+			if !strings.Contains(string(tbl), want) {
+				t.Errorf("%s: fp-lib-table lacks %s:\n%s", what, want, tbl)
+			}
+		}
+		for _, f := range []string{"plib.pretty/FP_A.kicad_mod", "plib2.pretty/FP_B.kicad_mod"} {
+			if !fileExists(filepath.Join(out, filepath.FromSlash(f))) {
+				t.Errorf("%s: %s not shipped", what, f)
+			}
+		}
+	}
+	check("build")
+	if er, err := runSchEdit(opt, []sbOp{{Op: "set_value", Ref: "R1", Value: "2k2"}}); err != nil || !er.OK {
+		t.Fatalf("set_value: %v %+v", err, er)
+	}
+	check("after sch-edit")
+
+	if kicad.StockFootprintDir() == "" {
+		t.Skip("stock footprints not installed: an unknown library cannot be told from a stock one")
+	}
+	bad := *spec
+	bad.Parts = append([]sbPart{}, spec.Parts...)
+	bad.Parts[1].Footprint = "nolib_xyz:FP_A"
+	bad.Parts[2].Footprint = "plib2:FP_MISSING"
+	_, err = runSchBuild(&bad, sbOptions{OutDir: filepath.Join(t.TempDir(), "bad"), NoIntent: true, Jobs: 2}, nil)
+	if err == nil || !strings.Contains(err.Error(), "FOOTPRINT_LIB_NOT_FOUND") || !strings.Contains(err.Error(), `"nolib_xyz"`) ||
+		!strings.Contains(err.Error(), "FOOTPRINT_NOT_FOUND") {
+		t.Errorf("unknown footprint library / missing footprint not reported: %v", err)
+	}
+}

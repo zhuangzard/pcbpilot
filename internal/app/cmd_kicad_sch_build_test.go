@@ -1309,3 +1309,74 @@ func TestSbStockSymbolLibLookups(t *testing.T) {
 		}
 	}
 }
+
+// TestSbLayoutBudgetNote: --planner-timeout only stops new planner runs;
+// a stage that ran over it says so, with what the planner did.
+func TestSbLayoutBudgetNote(t *testing.T) {
+	var nilStats *sbLayoutStats
+	nilStats.ran("z", time.Second) // nil-safe
+	nilStats.skipped()
+	s := &sbLayoutStats{}
+	s.ran("a", 2*time.Second)
+	s.ran("b", 9*time.Second)
+	s.skipped()
+	if n := s.budgetNote(5*time.Second, 20*time.Second); n != "" {
+		t.Errorf("under budget: %q", n)
+	}
+	n := s.budgetNote(65*time.Second, 20*time.Second)
+	for _, want := range []string{"65.0 s", "--planner-timeout 20 s", "2 zone(s) started", "longest 9.0 s, zone b", "1 zone(s) went straight to the grid", "--no-planner"} {
+		if !strings.Contains(n, want) {
+			t.Errorf("note lacks %q: %s", want, n)
+		}
+	}
+}
+
+// TestSchBuildPlannerBudgetHonest: the layout stage shares one planner
+// cutoff and reports running over it; a drawing gate that fails after the
+// planner drew zones suggests --no-planner, and only then.
+func TestSchBuildPlannerBudgetHonest(t *testing.T) {
+	sbNeedKicad(t)
+	t.Setenv(kicad.EnvCacheDir, t.TempDir())
+	spec := func() *sbSpec { // stock two-pin parts: zones the planner draws
+		return &sbSpec{Name: "pb",
+			Parts: []sbPart{
+				{Ref: "R1", Value: "10k", Symbol: "Device:R"},
+				{Ref: "R2", Value: "10k", Symbol: "Device:R"},
+				{Ref: "R3", Value: "1k", Symbol: "Device:R"},
+			},
+			Nets: []sbNet{
+				{Name: "+3V3", Pins: []string{"R1:1", "R2:1"}},
+				{Name: "GND", Pins: []string{"R1:2", "R3:2"}},
+				{Name: "MID", Pins: []string{"R2:2", "R3:1"}},
+			}}
+	}
+	sbPlannerNow = func() time.Time { return time.Now().Add(time.Hour) } // the cutoff has passed
+	rep, err := runSchBuild(spec(), sbOptions{OutDir: filepath.Join(t.TempDir(), "a"), NoIntent: true, Jobs: 2, PlannerBudget: 20000, PlannerTimeout: time.Nanosecond}, nil)
+	sbPlannerNow = time.Now
+	if err != nil || !rep.OK {
+		t.Fatalf("build: %v %+v", err, rep.Error)
+	}
+	if sbPlannerZones(rep) != 0 {
+		t.Errorf("a spent cutoff still started the planner: %+v", rep.Zones)
+	}
+	if !strings.Contains(strings.Join(rep.Warnings, "\n"), "over --planner-timeout") {
+		t.Errorf("no over-budget warning: %v", rep.Warnings)
+	}
+
+	sbTestGateHook = func(rep *sbReport) { rep.gate("engineer-grade", "fail", "injected EG-08", nil) }
+	defer func() { sbTestGateHook = nil }()
+	rep, err = runSchBuild(spec(), sbOptions{OutDir: filepath.Join(t.TempDir(), "b"), NoIntent: true, Jobs: 2, PlannerBudget: 20000, PlannerTimeout: time.Minute}, nil)
+	if err != nil || rep.Error == nil || rep.Error.Code != "GATE_FAILED" {
+		t.Fatalf("injected gate: %v %+v", err, rep.Error)
+	}
+	if sbPlannerZones(rep) == 0 {
+		t.Fatalf("the planner drew no zone: %+v", rep.Zones)
+	}
+	if !strings.Contains(rep.Error.Fix, "--no-planner") {
+		t.Errorf("planner-drawn failure does not suggest --no-planner: %s", rep.Error.Fix)
+	}
+	rep, err = runSchBuild(spec(), sbOptions{OutDir: filepath.Join(t.TempDir(), "c"), NoIntent: true, Jobs: 2, NoPlanner: true}, nil)
+	if err != nil || rep.Error == nil || strings.Contains(rep.Error.Fix, "--no-planner") {
+		t.Errorf("--no-planner build must not suggest --no-planner: %v %+v", err, rep.Error)
+	}
+}

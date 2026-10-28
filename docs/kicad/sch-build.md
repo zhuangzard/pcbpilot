@@ -20,8 +20,9 @@ pcbpilot kicad sch-checkpoint list|restore N --project build/
 ```
 
 常用开关：`--no-intent`（不跑 intent derive）、`--analog`（intent derive 内含模拟仿真）、`--no-planner`（全部区用
-网格 + autoconnect，最快）、`--planner-budget`（每区布局器候选上限，默认 20000）、`--planner-timeout`（布局阶段
-总墙钟，超时后未开始的区直接走网格）、`--jobs`（并行 LCSC 导入 / 区布局）、`--fresh`（忽略已有的布局/uuid 状态）、
+网格 + autoconnect，最快）、`--planner-budget`（每区布局器候选上限，默认 20000）、`--planner-timeout`（整个布局阶段
+一个截止点，含自动分页/拆区的重排；过点后不再启动 planner、直接走网格；已启动的 planner 跑完自己的候选上限，
+不能中途截断，所以阶段可能超时——超时会在 `warnings` 里写明实际耗时、启动 planner 的区数、最长一次和走网格的区数）、`--jobs`（并行 LCSC 导入 / 区布局）、`--fresh`（忽略已有的布局/uuid 状态）、
 `--parts`（块用的 standard-parts.json）。
 
 输出为一个 JSON 报告（stdout，另存 `--report`）：`ok`、`gates[]`、`timingsMs[]`（每阶段毫秒）、`totalMs`、
@@ -79,6 +80,7 @@ AI 只写这一份数据。**没有坐标**：位置全部由确定性布局算�
 | 字段 | 含义 |
 |---|---|
 | `parts[]` | `ref`、`value`、`lcsc`（C 号）、`mpn`、`symbol`（可选 `Lib:Name` 或 `path/lib.kicad_sym:Name`）、`footprint`、`zone`、`page`、`fields{}`（隐藏字段）、`pins[]`（无符号/离线时按此生成方框符号）、`near`（关系提示 `REF:PIN`：放在该脚旁，同网时用短导线连上）。 |
+| 封装库 | `footprint` 写 `Lib:Name` 时，工程目录或任一 `libDirs` 目录下的 `<Lib>.pretty`（`libDirs` 也可直接列 `<Lib>.pretty` 目录）随工程复制并登记进工程 `fp-lib-table`（`${KIPRJMOD}/<Lib>.pretty`），**不论符号来自哪里**（LCSC、KiCad 自带、`pins` 生成、本地库；v0.12.0 只在符号来自同目录 `.kicad_sym` 时才带上，其余静默丢掉，pcb-sync 再报 `E_FP_LIB_UNRESOLVED`）。都找不到、也不是 KiCad 自带库、也不在用户全局 `fp-lib-table` 里 → `FOOTPRINT_LIB_NOT_FOUND`；库找到了但没有该封装 → `FOOTPRINT_NOT_FOUND`。相对 `libDirs` 按当前目录解析。 |
 | 符号来源顺序 | 显式 `symbol`（工程目录 → `libDirs` → KiCad 自带库）→ LCSC（`kicad lcsc --import` 同一转换，缓存于 `~/.pcbpilot/cache/kicad-lcsc/<C号>`，重复构建离线且瞬时，多件并行导入）→ `pins` 生成。KiCad `extends` 派生符号不支持（用父符号、C 号或 pins）。EasyEDA 转来的电阻/电容/电感/二极管/开关/连接器等被动类引脚统一改为 passive（EasyEDA 的引脚类型不可信，电阻常被标成 input）。 |
 | `blocks[]` | 电路块库（`pcbpilot blocks ls`），用 block-apply 的同一规划器展开为器件 + 网（standard-parts.json 的器件、位号、internal_nets、端口绑定）。`refs`：role → 位号；`lcsc` / `values` / `symbols`：按 role 覆盖。块内部网自动取可读名（`USB_DP`、`BUCK_SW`、`BUCK_FB`、`Q1_BASE`、`LED1_A`），不会出现 `_N3`。块里的焊盘别名（`EP*`、`EPAD`、`EH`、`SHELL` …）映射到符号真实脚号；对不上就是硬错误。 |
 | `nets[]` | `name`、`pins`（`REF:PIN`，PIN 为脚号或脚名；同名多脚全取；`NAME*` 前缀匹配）、`kind`（`power` / `ground` / `signal`，缺省按名字）、`voltage`、`currentA`（进入 intent derive 的 rails）。 |
@@ -90,7 +92,8 @@ AI 只写这一份数据。**没有坐标**：位置全部由确定性布局算�
 | `intent` | 原样并入 `intent derive --spec`（standard、layers、rules、domains …），rails 与网的电压/电流合并进去。 |
 
 所有 spec 问题一次收集（`error.code = SPEC_INVALID`，每条带 `code` 与 `fix`：`PIN_NOT_ON_SYMBOL` 会列出符号真实
-脚号脚名、`PIN_TWO_NETS`、`PIN_UNKNOWN_PART`、`NET_NO_PINS`、`RAIL_UNKNOWN_NET`、`LCSC_UNAVAILABLE` …），AI 一轮改完。
+脚号脚名、`PIN_TWO_NETS`、`PIN_UNKNOWN_PART`、`NET_NO_PINS`、`RAIL_UNKNOWN_NET`、`LCSC_UNAVAILABLE`、
+`FOOTPRINT_LIB_NOT_FOUND`、`FOOTPRINT_NOT_FOUND` …），AI 一轮改完。
 
 `--from-connectivity`：EasyEDA 连接 IR 1.4（`pcbpilot sch connectivity`，每页一个文件）→ spec：器件（C 号 →
 LCSC 符号，否则按 IR 的引脚表生成）、网、不连接、模块 → 区，每个文件一页。

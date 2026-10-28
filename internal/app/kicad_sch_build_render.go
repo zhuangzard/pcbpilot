@@ -413,7 +413,11 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 			reuse[id] = &l
 		}
 	}
-	lo := sbLayoutOpts{NoPlanner: o.NoPlanner, Budget: o.PlannerBudget, Jobs: o.Jobs, Timeout: o.PlannerTimeout}
+	lo := sbLayoutOpts{NoPlanner: o.NoPlanner, Budget: o.PlannerBudget, Jobs: o.Jobs, Timeout: o.PlannerTimeout, Stats: &sbLayoutStats{}}
+	layoutStart := time.Now()
+	if o.PlannerTimeout > 0 { // one cutoff for the whole layout stage, relayouts included
+		lo.Deadline = layoutStart.Add(o.PlannerTimeout)
+	}
 	layouts, notes := layoutZones(d, zis, reuse, lo)
 	rep.Warnings = append(rep.Warnings, notes...)
 	if o.AutoSplit {
@@ -448,6 +452,11 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 	rep.Pages = rep.Pages[:0]
 	for _, pg := range d.Pages {
 		rep.Pages = append(rep.Pages, pg.ID)
+	}
+	if !o.NoPlanner {
+		if n := lo.Stats.budgetNote(time.Since(layoutStart), o.PlannerTimeout); n != "" {
+			rep.Warnings = append(rep.Warnings, n)
+		}
 	}
 	tm.mark("layout")
 
@@ -656,8 +665,16 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 			rep.Outputs["failedBuild"] = failed
 		}
 		rep.Timings, rep.TotalMs = tm.Steps, tm.total()
+		fix := "nothing was written; fix the spec (or zone/page split) and rebuild"
+		if planned := sbPlannerZones(rep); planned > 0 && sbDrawingGateFailed(rep) {
+			// the planner drew some zones: the grid (same gates) is the
+			// other drawing to try before changing the spec (v0.12.0
+			// field run: EG-08 crossings with the planner, clean with
+			// --no-planner)
+			fix += fmt.Sprintf(", or retry with --no-planner (the planner drew %d zone(s); --no-planner draws every zone with the grid, checked by the same gates)", planned)
+		}
 		rep.Error = &sbFailure{Code: "GATE_FAILED", Message: strings.Join(bad, "; "),
-			Fix: "nothing was written; fix the spec (or zone/page split) and rebuild — the failed project is in " + failed}
+			Fix: fix + " — the failed project is in " + failed}
 		return rep, nil
 	}
 	// reports (connectivity.json + intent, render/*.svg) are written into the
@@ -1832,6 +1849,28 @@ func sbStockSymbolLibs(d *sbDesign) map[string]bool {
 		}
 	}
 	return set
+}
+
+// sbPlannerZones counts the zones the layout planner drew.
+func sbPlannerZones(rep *sbReport) int {
+	n := 0
+	for _, z := range rep.Zones {
+		if z.Method == "planner" {
+			n++
+		}
+	}
+	return n
+}
+
+// sbDrawingGateFailed: a gate about the drawing itself failed (quality,
+// engineer-grade) — one another layout may pass, unlike ERC or page fit.
+func sbDrawingGateFailed(rep *sbReport) bool {
+	for _, g := range rep.Gates {
+		if g.Status == "fail" && (g.Name == "quality" || g.Name == "engineer-grade") {
+			return true
+		}
+	}
+	return false
 }
 
 // sbOwnLibs are the libraries a built project carries itself: every
