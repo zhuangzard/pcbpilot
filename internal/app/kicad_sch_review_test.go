@@ -185,7 +185,7 @@ func TestSchReviewGateLive(t *testing.T) {
 	}
 	var rv kicad.SchReview
 	b, _ := os.ReadFile(filepath.Join(out, "sch-review.json"))
-	if err := json.Unmarshal(b, &rv); err != nil || rvCheck(t, &rv, kicad.RvRegOutputCap).Status != "fail" || rvCheck(t, &rv, kicad.RvRegInputCap).Status != "fail" {
+	if err := json.Unmarshal(b, &rv); err != nil || rvCheck(t, &rv, kicad.RvDecoupling).Status != "fail" || len(rvCheck(t, &rv, kicad.RvRegOutputCap).Findings) == 0 || rv.Summary == nil {
 		t.Fatalf("%v %+v", err, rv.Checks)
 	}
 	strictOut := filepath.Join(t.TempDir(), "strict")

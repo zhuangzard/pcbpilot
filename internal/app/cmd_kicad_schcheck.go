@@ -81,9 +81,13 @@ derive: net roles, rail voltages, regulator blocks, the optional review{}
 roles) and --sim sim.json (pcbpilot sim power: rail voltages) when given.
   connections   i2c-pullup, open-drain-pullup, pullup-voltage, led-limiter,
                 floating-input, output-conflict
-  power         ic-power-ground, decoupling (exact cap set per power pin;
-                shared coverage = warning), regulator-output-cap,
-                regulator-input-cap, bulk-cap (>= 1 uF floor)
+  power         ic-power-ground (designated GND/VSS/EP pins; a part with
+                supply terminals only is exempt), decoupling (exact cap set
+                per power pin; shared coverage = warning),
+                regulator-output-cap / regulator-input-cap (proven only for
+                an intent ldo/buck/boost block; a power_out pin alone is
+                likely; a SW/LX pin is traced through its inductor),
+                bulk-cap (>= 1 uF floor)
   net integrity merged-nets (ERC multiple_net_names), single-pin-net,
                 hier-mismatch (sheet pin <-> hierarchical label)
 Each check is pass | fail | cannot-check | not-applicable and names the
@@ -97,7 +101,10 @@ unresolved topology (no netlist / sheet files / ERC or its rule ignored, an
 open jumper, a switch, a branching LED node, a diode of unknown polarity,
 unparseable ERC items) and is never a pass. Verdict: pass, pass-with-
 warnings (coverage incomplete — never "verified"), pass-with-waivers,
-fail, cannot-check. Exemptions need an explicit role (intent review{}, a ReviewRole /
+fail, cannot-check. stderr and report.review.summary group the findings:
+every error and cannot-check item in full, then one line per check /
+missing evidence with a per-part breakdown; checks[] keeps every finding.
+Exemptions need an explicit role (intent review{}, a ReviewRole /
 InternalPullup component field, the part kind) and name their source; a low
 current alone exempts nothing. Connector pins are the off-board boundary
 (info). Not covered: crystal load caps, strap pins, feedback values, ESR,
@@ -170,7 +177,10 @@ error (unreadable intent, no kicad-cli) is an error exit of its own.`,
 				if err := writeJSON(stdout, rep); err != nil {
 					return err
 				}
-				fmt.Fprintf(stderr, "sch-check: %d ERC error(s), %d warning(s), %d quality finding(s); %s\n", erc.Errors, erc.Warnings, rep.Findings, rv.Summary())
+				for _, l := range rv.Lines() { // grouped; every finding is in the JSON
+					fmt.Fprintln(stderr, "  "+l)
+				}
+				fmt.Fprintf(stderr, "sch-check: %d ERC error(s), %d warning(s), %d quality finding(s); %s\n", erc.Errors, erc.Warnings, rep.Findings, rv.SummaryLine())
 				if code := rep.Status.ExitCode(); code != 0 {
 					return exitCodeError{code}
 				}

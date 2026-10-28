@@ -521,7 +521,8 @@ func TestReviewICPowerGround(t *testing.T) {
 	b.addNode("+3V3", "U1.1")
 	b.net("/A", "U1.2")
 	b.net("/B", "U1.3")
-	c := want(t, b.review(t, ReviewHints{}), RvICPowerGround, "fail", "error")
+	// one supply terminal, no recognisable ground pin: likely, not proven
+	c := want(t, b.review(t, ReviewHints{}), RvICPowerGround, "pass", "warning")
 	if !strings.Contains(c.Findings[0].Message, "ground") {
 		t.Fatal(c.Findings)
 	}
@@ -593,25 +594,31 @@ func regDesign(outCap, inCap bool) *rvT {
 }
 
 func TestReviewRegulatorCaps(t *testing.T) {
+	// a power_out pin alone does not prove a regulator: likely warning
 	r := regDesign(false, true).review(t, ReviewHints{})
+	c := want(t, r, RvRegOutputCap, "pass", "warning")
+	if c.Findings[0].Certainty != "likely" || len(c.Findings[0].Missing) == 0 {
+		t.Fatal(c.Findings[0])
+	}
+	// with an intent ldo block it is a proven error
+	ldo := ReviewHints{Regulators: map[string]string{"U5": "intent block ldo"}}
+	r = regDesign(false, true).review(t, ldo)
 	want(t, r, RvRegOutputCap, "fail", "error")
 	want(t, r, RvRegInputCap, "pass")
-	r = regDesign(true, false).review(t, ReviewHints{})
+	r = regDesign(true, false).review(t, ldo)
 	want(t, r, RvRegOutputCap, "pass")
 	want(t, r, RvRegInputCap, "fail", "error")
 	// capless-stable declared → exempt
 	h := ReviewHints{Capless: map[string]string{"U5": "intent review.caplessRegulators"}}
 	want(t, regDesign(false, true).review(t, h), RvRegOutputCap, "pass")
-	// a regulator known only from intent with passive pins: VOUT by name → likely (warning)
+	// a regulator intent names, with passive pins: VOUT found by name; the
+	// intent block is the regulator evidence → proven
 	b := rvBase().cap("C2", "10u", "/VIN", "GND")
 	b.part("U7", "Synth:LDO", "", "1:GND:passive", "2:VOUT:passive", "3:VIN:passive")
 	b.addNode("GND", "U7.1")
 	b.addNode("+3V3", "U7.2")
 	b.addNode("/VIN", "U7.3")
-	c := want(t, b.review(t, ReviewHints{Regulators: map[string]string{"U7": "intent block ldo"}}), RvRegOutputCap, "pass", "warning")
-	if c.Findings[0].Certainty != "likely" {
-		t.Fatal(c.Findings[0])
-	}
+	want(t, b.review(t, ReviewHints{Regulators: map[string]string{"U7": "intent block ldo"}}), RvRegOutputCap, "fail", "error")
 }
 
 func TestReviewBulk(t *testing.T) {
@@ -790,7 +797,7 @@ func TestReviewCleanDesign(t *testing.T) {
 		}
 	}
 	if r.Status != gate.Pass {
-		t.Fatalf("%s", r.Summary())
+		t.Fatalf("%s", r.SummaryLine())
 	}
 }
 
@@ -822,10 +829,10 @@ func TestReviewLargeGenerated(t *testing.T) {
 	h.NetVoltage, h.VoltageSource = map[string]float64{"+3V3": 3.3}, map[string]string{"+3V3": "intent"}
 	r := b.review(t, h)
 	el := time.Since(t0)
-	t.Logf("400 ICs, %d nets: %s in %v", len(b.nl.Nets), r.Summary(), el)
+	t.Logf("400 ICs, %d nets: %s in %v", len(b.nl.Nets), r.SummaryLine(), el)
 	// one rail for 400 ICs: every IC's decoupling set is shared (warning)
 	if r.Errors != 0 || r.Status != gate.Pass || rvCheckOf(t, r, RvDecoupling).Coverage.Findings != r.Warnings || r.Warnings != 400 {
-		t.Fatalf("%s: %v", r.Summary(), r.Items()[:3])
+		t.Fatalf("%s: %v", r.SummaryLine(), r.Items()[:3])
 	}
 	if !testing.Short() && el > 5*time.Second {
 		t.Fatalf("too slow: %v", el)
@@ -868,15 +875,14 @@ func TestReviewDualSupplyAndAltI2C(t *testing.T) {
 	b.addNode("-5V", "U1.2")
 	b.cap("C1", "10u", "+3V3", "GND").cap("C2", "10u", "-5V", "GND")
 	b.net("/O", "U1.3", "U1.4")
-	want(t, b.review(t, ReviewHints{}), RvICPowerGround, "pass", "warning") // bipolar assumed, not verified
-	hv := ReviewHints{NetVoltage: map[string]float64{"+3V3": 3.3, "-5V": -5}, VoltageSource: map[string]string{"+3V3": "sim s", "-5V": "sim s"}}
-	c := want(t, b.review(t, hv), RvICPowerGround, "pass")
+	// supply terminals only, between two rails: no ground pin to check,
+	// whatever the rail voltages (bipolar, two positive, floating)
+	c := want(t, b.review(t, ReviewHints{}), RvICPowerGround, "pass")
 	if len(c.Exempt) != 1 {
 		t.Fatal(c.Exempt)
 	}
-	// two positive rails are no bipolar supply
-	hv.NetVoltage["-5V"] = 5
-	want(t, b.review(t, hv), RvICPowerGround, "fail", "error")
+	hv := ReviewHints{NetVoltage: map[string]float64{"+3V3": 5, "-5V": 2.5}, VoltageSource: map[string]string{"+3V3": "sim s", "-5V": "sim s"}}
+	want(t, b.review(t, hv), RvICPowerGround, "pass")
 	// an MCU with VDD and VIO whose GND pin is left on its own net, a
 	// signal pin tied to ground: no ground
 	m := rvFed().cap("C1", "10u", "+3V3", "GND")
@@ -919,7 +925,7 @@ func TestReviewDualSupplyAndAltI2C(t *testing.T) {
 	l.addNode("+1V8", "U5.2")
 	l.addNode("+3V3", "U5.3")
 	l.cap("C9", "1u", "+1V8", "+3V3")
-	want(t, l.review(t, ReviewHints{}), RvRegOutputCap, "fail", "error")
+	want(t, l.review(t, ReviewHints{Regulators: map[string]string{"U5": "intent block ldo"}}), RvRegOutputCap, "fail", "error")
 	// a resistor between two rails is not a pull-up
 	b = rvFed().ic("U1", "+3V3").cap("C1", "10u", "+3V3", "GND")
 	b.net("+3V3_OUT")
@@ -940,4 +946,138 @@ func TestReviewLEDUnknownDriver(t *testing.T) {
 	if len(c.Findings[0].Missing) == 0 {
 		t.Fatal(c.Findings[0])
 	}
+}
+
+// TestReviewRound3: push-pull GPIOs contend, buck switch node traced
+// through its inductor, a load switch is no proven regulator, a declared
+// passive receiver is pulled up beyond its maximum, LED path polarity and
+// clamps, commonPins by number and by name, the grouped summary.
+func TestReviewRound3(t *testing.T) {
+	// two GPIOs intent declares push-pull, shorted together
+	g := rvBase().ic("U1", "+3V3", "3:PA1:bidirectional").ic("U2", "+3V3", "3:PB1:bidirectional").cap("C1", "10u", "+3V3", "GND")
+	g.net("/SIG", "U1.3", "U2.3")
+	want(t, g.review(t, ReviewHints{}), RvOutputConflict, "not-applicable")
+	pp := ReviewHints{PushPull: map[string]string{"U1.3": "intent review.pushPullOutputs", "U2.3": "intent review.pushPullOutputs"}}
+	want(t, g.review(t, pp), RvOutputConflict, "fail", "error")
+
+	// a conventional buck: SW → L1 → +3V3 with its output cap there
+	buck := func(outCap bool) *rvT {
+		b := rvFed().cap("C2", "10u", "+3V3", "GND")
+		b.net("+12V")
+		b.part("U4", "Synth:BUCK", "", "1:VIN:power_in", "2:GND:power_in", "3:SW:power_out", "4:FB:input")
+		b.addNode("+12V", "U4.1")
+		b.addNode("GND", "U4.2")
+		b.cap("C3", "10u", "+12V", "GND")
+		b.part("L1", "Device:L", "4.7u", "1:1:passive", "2:2:passive")
+		b.net("/SW", "U4.3", "L1.1")
+		b.addNode("/VBUCK", "L1.2")
+		b.res("R1", "100k", "/VBUCK", "/FB").res("R2", "22k", "/FB", "GND")
+		b.addNode("/FB", "U4.4")
+		if outCap {
+			b.cap("C4", "22u", "/VBUCK", "GND")
+		}
+		return b
+	}
+	bk := ReviewHints{Regulators: map[string]string{"U4": "intent block buck"}}
+	want(t, buck(true).review(t, bk), RvRegOutputCap, "pass")
+	c := want(t, buck(false).review(t, bk), RvRegOutputCap, "fail", "error")
+	if c.Findings[0].Nets[0] != "VBUCK" || !strings.Contains(c.Findings[0].Fix, "VBUCK") || strings.Contains(c.Findings[0].Fix, "SW") {
+		t.Fatalf("cap asked on the switch node: %+v", c.Findings[0])
+	}
+
+	// a load switch (power_out, no regulator evidence) without an output cap
+	ls := rvFed().cap("C1", "10u", "+3V3", "GND")
+	ls.part("U6", "Synth:LOADSW", "", "1:VIN:power_in", "2:GND:power_in", "3:VOUT:power_out", "4:EN:input")
+	ls.addNode("+3V3", "U6.1")
+	ls.addNode("GND", "U6.2")
+	ls.net("/VSW", "U6.3")
+	ls.ic("U7", "/VSW").cap("C7", "100n", "/VSW", "GND")
+	ls.res("R9", "10k", "/EN", "+3V3")
+	ls.addNode("/EN", "U6.4")
+	r := ls.review(t, ReviewHints{})
+	if c := rvCheckOf(t, r, RvRegOutputCap); c.Status == "fail" {
+		t.Fatalf("load switch proven as regulator: %+v", c)
+	}
+
+	// a passive FPGA pin intent declares an input, max 1.8 V, pulled to 5 V
+	fp := rvBase().cap("C1", "10u", "+3V3", "GND")
+	fp.net("+5V")
+	fp.ic("U9", "+5V").cap("C9", "10u", "+5V", "GND")
+	fp.ic("U1", "+3V3", "3:IO7:passive")
+	fp.net("/CFG", "U1.3").res("R1", "4k7", "/CFG", "+5V")
+	h := ReviewHints{InputPin: map[string]string{"U1.3": "intent review.inputPins"}, PinMaxV: map[string]float64{"U1.3": 1.8},
+		NetVoltage: map[string]float64{"+5V": 5, "+3V3": 3.3}, VoltageSource: map[string]string{"+5V": "intent"}}
+	want(t, fp.review(t, h), RvPullupVoltage, "fail", "error")
+
+	// LED path: a series diode reversed to the current, and a TVS, do not
+	// complete it; a diode of unknown polarity is unresolved
+	led := func(b *rvT, ref, a, k string) {
+		b.part(ref, "Device:LED", "LED", "1:K:passive", "2:A:passive")
+		b.addNode(k, ref+".1")
+		b.addNode(a, ref+".2")
+	}
+	rv := rvFed().res("R1", "1k", "/LA", "/M")
+	rv.part("D5", "Device:D", "D", "1:K:passive", "2:A:passive")
+	rv.addNode("/M", "D5.2")
+	rv.addNode("+3V3", "D5.1")
+	led(rv, "D1", "/LA", "GND")
+	want(t, rv.review(t, ReviewHints{}), RvLEDLimiter, "fail", "error")
+	fw := rvFed().res("R1", "1k", "/LA", "/M")
+	fw.part("D5", "Device:D", "D", "1:K:passive", "2:A:passive")
+	fw.addNode("/M", "D5.1")
+	fw.addNode("+3V3", "D5.2")
+	led(fw, "D1", "/LA", "GND")
+	want(t, fw.review(t, ReviewHints{}), RvLEDLimiter, "pass")
+	tv := rvFed().res("R1", "1k", "/LA", "/M")
+	tv.part("D5", "Synth:D_TVS", "TVS", "1:K:passive", "2:A:passive")
+	tv.addNode("/M", "D5.1")
+	tv.addNode("+3V3", "D5.2")
+	led(tv, "D1", "/LA", "GND")
+	want(t, tv.review(t, ReviewHints{}), RvLEDLimiter, "fail", "error")
+	uk := rvFed().res("R1", "1k", "/LA", "/M")
+	uk.part("D5", "Device:D", "D", "1:1:passive", "2:2:passive")
+	uk.addNode("/M", "D5.1")
+	uk.addNode("+3V3", "D5.2")
+	led(uk, "D1", "/LA", "GND")
+	want(t, uk.review(t, ReviewHints{}), RvLEDLimiter, "cannot-check")
+
+	// commonPins by pin number and by pin name; an ambiguous name is a note
+	op := rvBase().ic("U1", "+3V3", "3:VOUT:output", "4:VOUT2:output", "5:OUT:output", "6:OUT:output").cap("C1", "10u", "+3V3", "GND")
+	op.net("/X", "U1.3", "U1.4")
+	want(t, op.review(t, ReviewHints{}), RvOutputConflict, "fail", "error")
+	want(t, op.review(t, ReviewHints{CommonPins: [][]string{{"U1.3", "U1.4"}}}), RvOutputConflict, "pass")
+	want(t, op.review(t, ReviewHints{CommonPins: [][]string{{"U1.VOUT", "U1.VOUT2"}}}), RvOutputConflict, "pass")
+	r = op.review(t, ReviewHints{CommonPins: [][]string{{"U1.OUT", "U1.3"}}})
+	if !strings.Contains(strings.Join(r.Notes, " "), "ambiguous") {
+		t.Fatalf("notes %v", r.Notes)
+	}
+
+	// grouped summary: errors in full, warnings grouped, every finding kept
+	b := rvBase().cap("C1", "10u", "+3V3", "GND")
+	for i := 1; i <= 6; i++ {
+		u := fmt.Sprintf("U%d", i)
+		b.ic(u, "+3V3", "3:EN:input")
+		b.ic(fmt.Sprintf("U%d", 10+i), "+3V3", "3:IO:bidirectional")
+		b.net(fmt.Sprintf("/E%d", i), u+".3", fmt.Sprintf("U%d.3", 10+i))
+	}
+	r = b.review(t, ReviewHints{})
+	sm := r.Summary
+	if sm == nil || sm.Findings != r.Errors+r.Warnings+r.Infos+r.Waived || len(sm.Groups) >= r.Warnings {
+		t.Fatalf("summary %+v (warnings %d)", sm, r.Warnings)
+	}
+	if lines := r.Lines(); len(lines) != len(sm.Errors)+len(sm.CannotCheck)+len(sm.Groups) {
+		t.Fatal(lines)
+	}
+}
+
+// TestReviewLEDDieNumbers: a bicolour LED numbered GA/GK/RA/RK (names
+// 1–4) has known polarity per die.
+func TestReviewLEDDieNumbers(t *testing.T) {
+	b := rvFed().res("R1", "1k", "+3V3", "/G").res("R2", "1k", "+3V3", "/R")
+	b.part("D1", "Synth:LED_DUAL", "LED", "GA:1:passive", "GK:2:passive", "RA:3:passive", "RK:4:passive")
+	b.addNode("/G", "D1.GA")
+	b.addNode("GND", "D1.GK")
+	b.addNode("/R", "D1.RA")
+	b.addNode("GND", "D1.RK")
+	want(t, b.review(t, ReviewHints{}), RvLEDLimiter, "pass")
 }

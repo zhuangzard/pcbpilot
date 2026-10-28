@@ -65,7 +65,10 @@ pcbpilot kicad netlist --sch build/<name>.kicad_sch --out conn.json
   连接器（板外边界，只给 info）、PWR_FLAG（虚拟，不算源也不算负载）不会误报；MCU GPIO 方向未知（不算驱动，写
   `pushPullOutputs` 才算）；开漏线/浮空输入只有在 `intent.review.internalPullsComplete` 或 `noInternalPulls` 给出“无内部
   上下拉”证据时才判 error，否则 likely warning；passive/unspecified 脚不算接收端（除非写进 `inputPins`）；二极管/LED
-  按阳极→阴极方向导通。上拉到器件自己的电源即通过，不同/未知电源域又无电压 → likely warning。LED 限流按每颗 LED 自己的电流路径追踪（轨上别处的电阻、并联支路的电阻都不算），节点分叉 → cannot-check。修法：在 spec 里补件（上拉、去耦、
+  按阳极→阴极方向导通。上拉到器件自己的电源即通过，不同/未知电源域又无电压 → likely warning。稳压器电容只有 intent 的 ldo/buck/boost 块才判 proven error（只有
+  power_out 脚的负载开关、电源切换只给 likely），buck 的 SW 脚沿电感追到输出节点检查电容；只有供电端没有地脚的器件
+  （双轨运放）不报缺地。报告 `summary`：error 与 cannot-check 全列，warning 按检查项/缺失证据分组并按器件计数。
+  LED 限流按每颗 LED 自己的电流路径追踪（轨上别处的电阻、并联支路的电阻都不算），节点分叉 → cannot-check。修法：在 spec 里补件（上拉、去耦、
   限流电阻）再 sch-edit；确属设计意图的写进 `intent.review` 角色；人工复核接受的写签名豁免（按 fingerprint）。
   不覆盖：晶振负载电容、启动/strap 脚、反馈分压值、ESR/容量充分性、上电时序/倒灌、瞬态保护。
 - 一轮改完所有 spec 问题：失败报告一次列出全部（`PIN_TWO_NETS`、`PIN_NOT_ON_SYMBOL` 带符号真实脚号脚名…），不要逐条试。

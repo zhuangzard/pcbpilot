@@ -114,7 +114,7 @@ func runSchReview(o schReviewOpts) (*kicad.SchReview, error) {
 	if err != nil {
 		return nil, err
 	}
-	rep.Inputs, rep.Notes = inputs, notes
+	rep.Inputs, rep.Notes = inputs, append(notes, rep.Notes...)
 	rep.Judge(reviewWaiver(o.waivers))
 	rep.RuntimeMs = float64(time.Since(t0).Microseconds()) / 1000
 	return rep, nil
@@ -247,12 +247,10 @@ func loadReviewHints(intentPath, simPath string, ids []string, nl *kicad.SchNetl
 			pins(r.PushPullOutputs, h.PushPull, "pushPullOutputs")
 			pins(r.InputPins, h.InputPin, "inputPins")
 			pins(r.CurrentDrivers, h.CurrentDriver, "currentDrivers")
-			for _, g := range r.CommonPins {
+			for _, g := range r.CommonPins { // REF.PIN or REF.NAME: resolved by the review
 				var grp []string
 				for _, x := range g {
-					if ks := pinKeys(x, "commonPins"); len(ks) > 0 {
-						grp = append(grp, ks[0])
-					}
+					grp = append(grp, strings.Replace(x, ":", ".", 1))
 				}
 				if len(grp) > 1 {
 					h.CommonPins = append(h.CommonPins, grp)

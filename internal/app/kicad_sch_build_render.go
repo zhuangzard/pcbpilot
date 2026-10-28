@@ -1983,11 +1983,10 @@ func sbSchReviewGate(stage, out, name string, nl *kicad.SchNetlist, erc *kicad.E
 	case rv.Status != gate.Pass || rv.Verdict == "pass-with-warnings":
 		status = "warn"
 	}
-	items := rv.Items()
-	if len(items) > 20 {
-		items = append(items[:20], fmt.Sprintf("… %d more in sch-review.json", len(items)-20))
-	}
-	rep.gate(schReviewGate, status, mode+": "+rv.Summary(), map[string]any{"verdict": rv.Verdict, "items": items, "cannotCheck": rv.Undecided})
+	// grouped: every error and cannot-check item, then one line per group
+	// of warnings / info (every finding stays in sch-review.json)
+	rep.gate(schReviewGate, status, mode+": "+rv.SummaryLine(), map[string]any{"verdict": rv.Verdict, "summary": rv.Lines(), "cannotCheck": rv.Undecided,
+		"findings": rv.Summary.Findings})
 	return rel, status == "fail"
 }
 

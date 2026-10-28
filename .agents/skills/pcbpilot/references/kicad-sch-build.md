@@ -56,6 +56,8 @@ pcbpilot kicad sch-checkpoint list --project build/                     # 回退
 `{"gate":"sch-review","match":"<finding.fingerprint>","reason":…,"by":…}`（按 fingerprint 精确匹配，不按文字；
 豁免不会把 cannot-check 变成 pass）。报告 `verdict`：`pass` / `pass-with-warnings`（有未豁免的 warning，覆盖不全，
 不写“已验证”）/ `pass-with-waivers` / `fail` / `cannot-check`；每条降级的发现都单独列出 `missingEvidence`。
+`sch-review.json` 的 `summary`：`errors`、`cannotCheck` 全列，`groups` 把 warning/info 按检查项 + 缺失证据分组（每组计数、
+按器件分布、几个示例脚和 fingerprint）；`checks[].findings` 仍保留每一条，门禁消息与 sch-check 的 stderr 用分组形式。
 
 ### 大板与分页（v0.10.1 起）
 
