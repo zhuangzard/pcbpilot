@@ -1084,7 +1084,7 @@ func exportStep(o FabOptions, bd *Board, staged string, log io.Writer) (*StepRep
 		return nil, err
 	}
 	sr := &StepReport{SHA256: sum, Bytes: size, BoardOnly: opts.BoardOnly, NoDNP: opts.NoDNP, Subst: opts.SubstModels,
-		Args: args[:len(args)-1], ModelCheck: "done", KiCadWarnings: kicadModelWarnings(out),
+		Args: reportArgs(args), ModelCheck: "done", KiCadWarnings: kicadModelWarnings(out),
 		FootprintsNoModel: []NoModelFootprint{}}
 	if opts.BoardOnly {
 		sr.ModelCheck = "skipped: --step-board-only exports no component models"
@@ -1108,5 +1108,19 @@ func exportIPC356(o FabOptions, staged string, log io.Writer) (*IPC356Report, er
 	if err != nil {
 		return nil, err
 	}
-	return &IPC356Report{SHA256: sum, Bytes: size, Records: n, Args: args[:len(args)-1]}, nil
+	return &IPC356Report{SHA256: sum, Bytes: size, Records: n, Args: reportArgs(args)}, nil
+}
+
+// reportArgs is a kicad-cli argument list without the staging paths (the
+// board and the temporary output file), which mean nothing after the run.
+func reportArgs(args []string) []string {
+	var out []string
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == "--output" {
+			i++
+			continue
+		}
+		out = append(out, args[i])
+	}
+	return out
 }
