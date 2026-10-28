@@ -28,7 +28,61 @@ type SpiceCheck struct {
 	Nodes    int                `json:"nodes"`
 	Pass     bool               `json:"pass"`
 	TolV     float64            `json:"tolV"`
-	Diffs    map[string]float64 `json:"diffs,omitempty"` // nets above tolerance
+	Diffs    map[string]float64 `json:"diffs,omitempty"` // nets above tolerance (fail)
+	// HighZ lists nets above tolerance whose driving-point resistance at
+	// the operating point is at least HighZOhm: a node held only by
+	// leakage and the solvers' gmin shunts (an off switch, a reverse-biased
+	// diode, a connector to an off-board load), where two solvers differ by
+	// a negligible current. They are warnings, not a failure.
+	HighZ    map[string]SpiceHighZ `json:"highZ,omitempty"`
+	HighZOhm float64               `json:"highZOhm,omitempty"`
+}
+
+// SpiceHighZ is one high-impedance net's mismatch.
+type SpiceHighZ struct {
+	DiffV float64 `json:"diffV"`
+	ZOhm  float64 `json:"zOhm"` // driving-point resistance to ground
+	// DiffA is the mismatch as a current into the node (ΔV / Z).
+	DiffA float64 `json:"diffA"`
+}
+
+// spiceHighZOhm: at and above this driving-point resistance a node's
+// voltage is set by leakage, not by the circuit (1 mV there is 1 nA).
+const spiceHighZOhm = 1e6
+
+// drivingPointOhm is each node's small-signal resistance to ground at the
+// solved operating point x: the diagonal of the inverse of the converged
+// MNA matrix (gmin shunts included, as in the solve). The matrix keeps the
+// solve's layout: nodes looked up after the solve (result reporting) were
+// appended to the names but have no row in x, and finalize would move every
+// branch past them.
+func (c *Circuit) drivingPointOhm(x []float64, nodes []int) map[int]float64 {
+	n := len(x)
+	solved := n - c.nb
+	if solved <= 0 || solved > len(c.names) {
+		return nil
+	}
+	s := newSystem(n)
+	for i := 0; i < solved; i++ {
+		s.add(i, i, gminNode)
+	}
+	for _, e := range c.elems {
+		e.stamp(s, x)
+	}
+	out := map[int]float64{}
+	for _, i := range nodes {
+		if i < 0 || i >= solved {
+			continue
+		}
+		b := make([]float64, n)
+		b[i] = 1
+		z, err := solveDense(s.a, b)
+		if err != nil {
+			continue
+		}
+		out[i] = math.Abs(z[i])
+	}
+	return out
 }
 
 var reSpiceName = regexp.MustCompile(`[^A-Za-z0-9_]`)
@@ -127,7 +181,7 @@ var reSpiceOut = regexp.MustCompile(`^\s*(n_[a-z0-9_]+)\s*=\s*([-+0-9.eE]+)\s*$`
 // CheckSPICE runs ngspice (when on PATH) on the netlist of scenarioName and
 // compares node voltages.
 func (e *Engine) CheckSPICE(scenarioName string, tolV float64) *SpiceCheck {
-	ck := &SpiceCheck{Scenario: scenarioName, TolV: tolV}
+	ck := &SpiceCheck{Scenario: scenarioName, TolV: tolV, HighZOhm: spiceHighZOhm}
 	bin, err := simtools.Find("ngspice") // PATH, then Windows install dirs
 	if err != nil {
 		ck.Skipped = "ngspice not on PATH"
@@ -171,11 +225,19 @@ func (e *Engine) CheckSPICE(scenarioName string, tolV float64) *SpiceCheck {
 		return ck
 	}
 	ck.Ran = true
+	ck.compare(r.c, r.sol.X, sn, got, tolV)
+	return ck
+}
+
+// compare fills the node comparison: ngspice's voltages got (by spice node
+// name) against ours x.
+func (ck *SpiceCheck) compare(c *Circuit, x []float64, sn spiceNames, got map[string]float64, tolV float64) {
 	names := make([]string, 0, len(sn.net))
 	for s := range sn.net {
 		names = append(names, s)
 	}
 	sort.Strings(names)
+	over := map[string]float64{}
 	for _, s := range names {
 		net := sn.net[s]
 		if strings.Contains(net, "#") {
@@ -185,13 +247,30 @@ func (e *Engine) CheckSPICE(scenarioName string, tolV float64) *SpiceCheck {
 		if !ok {
 			continue
 		}
-		ours := r.sol.X[r.c.index[net]]
+		ours := x[c.index[net]]
 		d := math.Abs(v - ours)
 		ck.Nodes++
 		if d > ck.MaxDiffV {
 			ck.MaxDiffV, ck.WorstNet = d, net
 		}
 		if d > tolV {
+			over[net] = d
+		}
+	}
+	if len(over) > 0 {
+		idx := make([]int, 0, len(over))
+		for net := range over {
+			idx = append(idx, c.index[net])
+		}
+		z := c.drivingPointOhm(x, idx)
+		for net, d := range over {
+			if zi, ok := z[c.index[net]]; ok && zi >= spiceHighZOhm {
+				if ck.HighZ == nil {
+					ck.HighZ = map[string]SpiceHighZ{}
+				}
+				ck.HighZ[net] = SpiceHighZ{DiffV: round(d, 6), ZOhm: roundSig(zi, 3), DiffA: roundSig(d/zi, 3)}
+				continue
+			}
 			if ck.Diffs == nil {
 				ck.Diffs = map[string]float64{}
 			}
@@ -200,5 +279,13 @@ func (e *Engine) CheckSPICE(scenarioName string, tolV float64) *SpiceCheck {
 	}
 	ck.MaxDiffV = round(ck.MaxDiffV, 9)
 	ck.Pass = ck.Nodes > 0 && len(ck.Diffs) == 0
-	return ck
+}
+
+// roundSig rounds v to n significant digits.
+func roundSig(v float64, n int) float64 {
+	if v == 0 || math.IsInf(v, 0) || math.IsNaN(v) {
+		return v
+	}
+	p := math.Pow(10, float64(n-1)-math.Floor(math.Log10(math.Abs(v))))
+	return math.Round(v*p) / p
 }

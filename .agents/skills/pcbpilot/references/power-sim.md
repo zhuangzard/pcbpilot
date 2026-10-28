@@ -27,7 +27,7 @@ pcbpilot --project <工程> sim power --pages P1,P2 --out sim.json --report sim.
 
 常用参数：`--scenario peak,worst` 只算部分场景；`--switch SW3=closed` 强制开关状态；
 `--models my-models.json` 追加/覆盖器件模型；`--spice sim.cir --spice-check` 导出线性化网表并在
-`ngspice` 存在时比对节点电压（默认容差 1 mV，不存在则 `spiceCheck.skipped`；安装与状态见 `pcbpilot sim tools check`，[environment-setup](environment-setup.md#仿真工具ngspice--elmer-fem)）。完整说明见
+`ngspice` 存在时比对节点电压（默认容差 1 mV；超差节点的工作点驱动点电阻 ≥ 1 MΩ（只靠漏电/gmin 定压的高阻节点：关断的开关管集电极、反偏二极管、出板的线圈端）时记入 `spiceCheck.highZ` 作警告、不判失败，其余超差记入 `diffs` 并退出码 1；不存在则 `spiceCheck.skipped`；安装与状态见 `pcbpilot sim tools check`，[environment-setup](environment-setup.md#仿真工具ngspice--elmer-fem)）。完整说明见
 `pcbpilot sim power --help`。
 
 `--values` 接受 `sch list` 原样响应，或 `{"parts":{"R1":{"value":"10k","mpn":"…","lcsc":"C…"}}}`。
