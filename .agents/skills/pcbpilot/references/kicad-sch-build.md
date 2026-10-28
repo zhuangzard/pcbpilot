@@ -40,17 +40,22 @@ pcbpilot kicad sch-checkpoint list --project build/                     # 回退
 每次 sch-build / sch-edit 在**暂存的最终文件**上跑一遍 `kicad sch-check --review` 的同一套审查（用本次的网表、ERC
 和刚推导的 `intent.json`），报告 `sch-review.json` 与工程一起原子提交，`gates[]` 里是 `sch-review`：
 
-- `--sch-review advisory`（默认）：只报告，不阻断——未豁免的 error 或 cannot-check 记为 `warn`，增量修复照常可写；
-- `--sch-review strict`：error 或 cannot-check 让构建失败（`SCH_REVIEW_FAILED`，`--out` 不动，失败工程与
-  `sch-review.json` 在 `.pcbpilot/sch-build/failed/`）；签核、`pcbpilot-review` 用 strict；
-- `--sch-review off`：跳过（gate 为 `skip`）。
+- `--sch-review advisory`（默认）：只报告，不阻断——未豁免的 error、cannot-check 或 likely warning 都记为 `warn`，
+  增量修复照常可写；
+- `--sch-review strict`：只有 proven error 和 cannot-check 让构建失败（`SCH_REVIEW_FAILED`，`--out` 不动，失败工程
+  与 `sch-review.json` 在 `.pcbpilot/sch-build/failed/`）；likely warning、not-applicable 只报告（`warn`）；签核、
+  `pcbpilot-review` 用 strict；
+- `--sch-review off`：跳过（gate 为 `skip`），`sch-review.json` 换成一条 skipped 记录，旧报告不会留在新图旁边；
+- 审查本身跑不了（intent 读不出、工具错误）不是发现：任何模式都整笔不写（`SCH_REVIEW_FAILED`，消息含
+  `tool/input error`），`sch-review.json` 写不出同样阻断。
 
 审查项、证据、豁免与退出码见 `pcbpilot kicad sch-check --help`；要点：只有 proven 的
 发现是 error；internal pull-up、测试点、参考轨等**角色**写在 spec 的 `intent.review`（经 `intent derive --spec`
 进 `intent.json`，字段见 [design-intent.md](design-intent.md#review)），或在符号字段 `ReviewRole` /
 `InternalPullup` 上声明——低电流本身从不豁免。接受一条复核过的发现：`--waivers` 里
 `{"gate":"sch-review","match":"<finding.fingerprint>","reason":…,"by":…}`（按 fingerprint 精确匹配，不按文字；
-豁免不会把 cannot-check 变成 pass，报告 `verdict` 区分 `pass` 与 `pass-with-waivers`）。
+豁免不会把 cannot-check 变成 pass）。报告 `verdict`：`pass` / `pass-with-warnings`（有未豁免的 warning，覆盖不全，
+不写“已验证”）/ `pass-with-waivers` / `fail` / `cannot-check`；每条降级的发现都单独列出 `missingEvidence`。
 
 ### 大板与分页（v0.10.1 起）
 

@@ -111,3 +111,44 @@ func SheetHierarchyMismatches(root string) ([]HierMismatch, int, error) {
 	err := walk(root, "/", 0)
 	return out, n, err
 }
+
+// LibStacked lists, per library symbol embedded in the sheet files ("Lib:
+// Part"), the groups of pin numbers drawn at one position of one unit and
+// body style with one name — KiCad's stacked pins, one electrical pin.
+func LibStacked(files []string) map[string][][]string {
+	out := map[string][][]string{}
+	for _, f := range files {
+		e, err := OpenSchematicFile(f)
+		if err != nil {
+			continue
+		}
+		for id := range e.libs {
+			if _, done := out[id]; done {
+				continue
+			}
+			pins, err := e.LibPins(id)
+			if err != nil {
+				continue
+			}
+			at := map[string][]string{}
+			var keys []string
+			for _, p := range pins {
+				k := fmt.Sprintf("%d|%d|%.4f|%.4f|%s", p.Unit, p.Style, p.At.X, p.At.Y, p.Name)
+				if _, ok := at[k]; !ok {
+					keys = append(keys, k)
+				}
+				at[k] = append(at[k], p.Number)
+			}
+			sort.Strings(keys)
+			var groups [][]string
+			for _, k := range keys {
+				if g := at[k]; len(g) > 1 {
+					sort.Strings(g)
+					groups = append(groups, g)
+				}
+			}
+			out[id] = groups
+		}
+	}
+	return out
+}

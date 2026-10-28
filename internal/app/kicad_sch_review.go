@@ -107,6 +107,7 @@ func runSchReview(o schReviewOpts) (*kicad.SchReview, error) {
 		addInput("sim", o.simPath)
 	}
 	in := kicad.ReviewInput{Netlist: nl, ERC: erc, ERCIgnored: kicadERCIgnored(o.root), Hints: hints}
+	in.Stacked = kicad.LibStacked(files)
 	in.Hier, in.HierSheets, in.HierErr = kicad.SheetHierarchyMismatches(o.root)
 	in.HierRan = true
 	rep, err := kicad.Review(in)
@@ -165,7 +166,7 @@ func loadReviewHints(intentPath, simPath string, ids []string, nl *kicad.SchNetl
 		PullUpNet: map[string]string{}, ReferenceRail: map[string]string{}, SinglePinNet: map[string]string{},
 		TestPoint: map[string]string{}, Module: map[string]string{}, Capless: map[string]string{},
 		PullNone: map[string]string{}, PushPull: map[string]string{}, PinDomain: map[string]string{}, PinMaxV: map[string]float64{},
-		ChargePump: map[string]string{}}
+		ChargePump: map[string]string{}, InputPin: map[string]string{}, CurrentDriver: map[string]string{}}
 	var notes []string
 	res := netname.NewResolver(ids)
 	net := func(name, what string) (string, bool) {
@@ -244,6 +245,19 @@ func loadReviewHints(intentPath, simPath string, ids []string, nl *kicad.SchNetl
 			pins(r.TolerantPins, h.Tolerant, "tolerantPins")
 			pins(r.NoInternalPulls, h.PullNone, "noInternalPulls")
 			pins(r.PushPullOutputs, h.PushPull, "pushPullOutputs")
+			pins(r.InputPins, h.InputPin, "inputPins")
+			pins(r.CurrentDrivers, h.CurrentDriver, "currentDrivers")
+			for _, g := range r.CommonPins {
+				var grp []string
+				for _, x := range g {
+					if ks := pinKeys(x, "commonPins"); len(ks) > 0 {
+						grp = append(grp, ks[0])
+					}
+				}
+				if len(grp) > 1 {
+					h.CommonPins = append(h.CommonPins, grp)
+				}
+			}
 			if r.InternalPullsComplete {
 				h.PullsComplete = src("internalPullsComplete")
 			}

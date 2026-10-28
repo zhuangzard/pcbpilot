@@ -62,7 +62,8 @@ pcbpilot intent derive --connectivity sch-p1.json --connectivity sch-p2.json \
           "internalPullsComplete":true,"noInternalPulls":["U6.EN"],"pushPullOutputs":["U1.PB3"],
           "tolerantPins":["U4.SDA"],"pinDomains":{"U1.PA9":"+1V8"},"pinMaxV":{"U4.SDA":3.6},
           "testPoints":["TP3"],"singlePinNets":["/SPARE"],"referenceRails":["/VREF"],
-          "modules":["U8"],"caplessRegulators":["U5"],"chargePumps":["U9"],"aliases":[["+3V3","VDD_IO"]]}
+          "modules":["U8"],"caplessRegulators":["U5"],"chargePumps":["U9"],"aliases":[["+3V3","VDD_IO"]],
+          "inputPins":["U7.12"],"currentDrivers":["U3.LED1"],"commonPins":[["U5.2","U5.4"]]}
 ```
 
 脚写 `REF.脚号` 或 `REF.脚名`；网写网名（显示名或全名，歧义/不存在的名字记入 `review.notes`，不猜）；件写位号。
@@ -70,10 +71,14 @@ pcbpilot intent derive --connectivity sch-p1.json --connectivity sch-p2.json \
 
 - 开漏线没上拉、输入没驱动要判 error，必须有“没有内部上下拉”的**明确证据**：`internalPullsComplete:true`（上面的
   内部上下拉清单已列全，未列的脚就没有）或 `noInternalPulls` 点名该脚；只给 intent.json（旧的、或没有 review 段）
-  不算证据，这两项保持 cannot-check。
+  不算证据，这两项只给 likely warning（列出缺的证据）。`intent derive` 不会替你生成这类“无内部上下拉”证据。
+- `inputPins`：库里标成 passive/unspecified、实为输入的脚（否则不算接收端）；`currentDrivers`：调节 LED 电流的脚
+  （只按脚名 LED1/K/CC 识别的只给 warning）；`commonPins`：符号没叠放、但电气上是同一个脚的多个输出脚（否则同名的
+  两个输出——双运放的两个 OUT——按冲突报）。
 - MCU GPIO（bidirectional/tri_state）方向未知，不算 push-pull 驱动；配成推挽输出的写 `pushPullOutputs`。
-- 上拉电压域：多电源器件的信号脚写 `pinDomains`（脚 → 所属电源网）；单电源器件取它唯一的电源轨。超出域电压 0.3 V
-  只是 likely（warning）；写了 `pinMaxV`（绝对最大值/耐压）才判 proven error；`tolerantPins` 豁免。
+- 上拉电压域：上拉到信号脚自己的电源组（单电源器件取它唯一的电源轨，多电源器件写 `pinDomains`）直接通过，不需要电压；
+  不同或未知电源域又没有电压 → likely warning “overvoltage not evaluated”；超出域电压 0.3 V 是 likely；写了 `pinMaxV`
+  （绝对最大值/耐压）才判 proven error；`tolerantPins` 豁免。
 - `chargePumps`：输出电容回到另一条电源轨的器件（带 C1+/C1− 等飞电容脚的会自动识别）；普通 LDO 的输出电容
   接到输入轨不算输出电容。
 

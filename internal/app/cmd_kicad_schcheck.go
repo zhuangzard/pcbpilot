@@ -89,9 +89,15 @@ roles) and --sim sim.json (pcbpilot sim power: rail voltages) when given.
 Each check is pass | fail | cannot-check | not-applicable and names the
 evidence it needed and used; each finding has severity error|warning|info,
 certainty proven|likely|heuristic (only proven findings are errors), refs,
-pins, nets, sheet, a fix and its evidence. What the evidence cannot decide
-(e.g. an internal pull without explicit intent evidence: review.internalPullsComplete / noInternalPulls) is unverified: cannot-check, never
-a pass. Exemptions need an explicit role (intent review{}, a ReviewRole /
+pins, nets, sheet, a fix and its evidence. A finding that misses optional
+evidence (an internal pull not declared either way, a GPIO's direction, a
+rail voltage) is a likely warning that names the missing evidence
+(missingEvidence); cannot-check is kept for failed required evidence or
+unresolved topology (no netlist / sheet files / ERC or its rule ignored, an
+open jumper, a switch, a branching LED node, a diode of unknown polarity,
+unparseable ERC items) and is never a pass. Verdict: pass, pass-with-
+warnings (coverage incomplete — never "verified"), pass-with-waivers,
+fail, cannot-check. Exemptions need an explicit role (intent review{}, a ReviewRole /
 InternalPullup component field, the part kind) and name their source; a low
 current alone exempts nothing. Connector pins are the off-board boundary
 (info). Not covered: crystal load caps, strap pins, feedback values, ESR,
@@ -99,8 +105,9 @@ sequencing, transient protection.
 --waivers takes signed {gate:"sch-review", match:<finding fingerprint>,
 reason, by} entries: a waiver accepts that one finding (reported as waived,
 verdict pass-with-waivers), never a cannot-check.
-Exit with --review: 0 pass, 6 an unwaived error (or ERC error / quality
-finding), 5 cannot-check.`,
+Exit with --review: 0 pass (also with warnings / waivers), 6 an unwaived
+error (or ERC error / quality finding), 5 cannot-check; a tool or input
+error (unreadable intent, no kicad-cli) is an error exit of its own.`,
 		Args: cobra.NoArgs,
 		Example: `  pcbpilot kicad sch-check --sch board.kicad_sch
   pcbpilot kicad sch-check --sch board.kicad_sch --fix-pwr-flag

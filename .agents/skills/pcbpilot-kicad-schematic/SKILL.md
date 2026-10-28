@@ -50,7 +50,7 @@ pcbpilot kicad sch-read --project build/
 pcbpilot kicad sch-edit --project build/ --spec delta.json --dry-run
 pcbpilot kicad sch-edit --project build/ --spec delta.json --render --report edit-report.json
 pcbpilot kicad sch-checkpoint list --project build/       # 回退：sch-checkpoint restore N
-# 6 构建后独立复查与交接（--review：只读设计评审；0 通过 / 6 有 error / 5 cannot-check）
+# 6 构建后独立复查与交接（--review：只读设计评审；0 通过（含 pass-with-warnings）/ 6 有 error / 5 cannot-check）
 pcbpilot kicad sch-check --sch build/<name>.kicad_sch --review --intent build/intent.json [--waivers waivers.json]
 pcbpilot kicad netlist --sch build/<name>.kicad_sch --out conn.json
 ```
@@ -59,11 +59,13 @@ pcbpilot kicad netlist --sch build/<name>.kicad_sch --out conn.json
   阻断）：连接（I2C 上拉、开漏复位/中断上拉、上拉电压域、LED 限流、浮空输入、多输出冲突）、电源（IC 无电源/地、
   每个电源脚的去耦电容集合（共用 = warning）、稳压器输入/输出电容、≥ 1 µF 总容量）、网络完整性（ERC
   `multiple_net_names` 合并网、单脚网、层次标签↔图纸引脚）。每条发现带 rule、fingerprint、severity、certainty
-  （proven/likely/heuristic，只有 proven 是 error）、位号/脚/网/页、修法和证据；缺证据的部分是 cannot-check，不猜。
+  （proven/likely/heuristic，只有 proven 是 error）、位号/脚/网/页、修法和证据；缺可选声明的发现降为 likely warning
+  并列出 `missingEvidence`，cannot-check 只留给必需证据缺失或拓扑未决（跳线、开关、分叉、二极管极性不明）。
   push-pull 输出驱动的复位、声明了内部上拉的脚（spec `intent.review.internalPullups` 或符号字段 `InternalPullup`）、
-  连接器（板外边界，只给 info）、PWR_FLAG（虚拟，不算源也不算负载）不会误报；MCU GPIO 方向未知，开漏线/浮空输入
-  只有在 `intent.review.internalPullsComplete` 或 `noInternalPulls` 给出“无内部上下拉”证据时才判 error，否则
-  cannot-check。LED 限流按每颗 LED 自己的电流路径追踪（轨上别处的电阻、并联支路的电阻都不算），节点分叉 → cannot-check。修法：在 spec 里补件（上拉、去耦、
+  连接器（板外边界，只给 info）、PWR_FLAG（虚拟，不算源也不算负载）不会误报；MCU GPIO 方向未知（不算驱动，写
+  `pushPullOutputs` 才算）；开漏线/浮空输入只有在 `intent.review.internalPullsComplete` 或 `noInternalPulls` 给出“无内部
+  上下拉”证据时才判 error，否则 likely warning；passive/unspecified 脚不算接收端（除非写进 `inputPins`）；二极管/LED
+  按阳极→阴极方向导通。上拉到器件自己的电源即通过，不同/未知电源域又无电压 → likely warning。LED 限流按每颗 LED 自己的电流路径追踪（轨上别处的电阻、并联支路的电阻都不算），节点分叉 → cannot-check。修法：在 spec 里补件（上拉、去耦、
   限流电阻）再 sch-edit；确属设计意图的写进 `intent.review` 角色；人工复核接受的写签名豁免（按 fingerprint）。
   不覆盖：晶振负载电容、启动/strap 脚、反馈分压值、ESR/容量充分性、上电时序/倒灌、瞬态保护。
 - 一轮改完所有 spec 问题：失败报告一次列出全部（`PIN_TWO_NETS`、`PIN_NOT_ON_SYMBOL` 带符号真实脚号脚名…），不要逐条试。
@@ -119,7 +121,7 @@ identical / changed（变化元素数）/ added / removed（[kicad.md](../pcbpil
 
 - 命令全参数、spec 路径、`--out`、检查点号 N、`totalMs`；报告 `gates[]` 逐项状态（netlist / erc / page-fit / quality /
   engineer-grade / connectivity / intent / sch-review / design-review）和 `warnings`；`sch-review` 为 warn 时列
-  `sch-review.json` 的 error 与 cannot-check 项，不写“通过”。
+  `sch-review.json` 的 error、cannot-check 与 likely warning 项（含 missingEvidence），`pass-with-warnings` 写 WARN，不写“通过”。
 - ERC 只有警告 → `WARN`（列 `byType`），不写“通过”；`design-review` 为 skip（没给 `--requirements`）→ 需求覆盖 `INCOMPLETE`。
 - 构建后状态：`fp-lib-table`、`lcsc.pretty/` 存在且非空、`render/` 文件时间是本次；没看渲染就不说“排版已确认”。
 

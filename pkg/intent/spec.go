@@ -90,6 +90,13 @@ type ReviewNotes struct {
 	PinMaxV    map[string]float64 `json:"pinMaxV,omitempty"`
 	// ChargePumps: parts whose output capacitor returns to another rail.
 	ChargePumps []string `json:"chargePumps,omitempty"`
+	// InputPins: pins that are inputs although their symbol types them
+	// passive / unspecified; CurrentDrivers: pins that regulate an LED's
+	// current (no series resistor needed); CommonPins: groups of pins that
+	// are one electrical pin though the symbol does not stack them.
+	InputPins      []string   `json:"inputPins,omitempty"`
+	CurrentDrivers []string   `json:"currentDrivers,omitempty"`
+	CommonPins     [][]string `json:"commonPins,omitempty"`
 }
 
 // SpecEdge is spec.json "edge".

@@ -60,15 +60,16 @@ metadata:
   ```bash
   pcbpilot kicad sch-check --sch <root>.kicad_sch > out/sch-check.json      # ERC + 质量检查，非零=有 ERC error 或质量发现
   pcbpilot kicad sch-check --sch <root>.kicad_sch --review [--intent out/intent.json] [--sim out/sim.json] > out/sch-review.json
-                                                                           # 只读设计评审：0 PASS / 6 FAIL / 5 cannot-check
+                                                                           # 只读设计评审：0 PASS 或 pass-with-warnings / 6 FAIL / 5 cannot-check
   pcbpilot kicad sch-read  --sch <root>.kicad_sch --out out/spec.json      # 位号/网表概览
   pcbpilot kicad netlist   --sch <root>.kicad_sch --out out/conn.json      # 后续 intent / signoff 的输入
   pcbpilot kicad drc --pcb <board>.kicad_pcb --schematic-parity --out out/drc/ > out/drc.json   # 0 PASS / 6 FAIL / 5 未验证
   ```
-  `review.checks[]` 每项 pass / fail / cannot-check / not-applicable，带所需与所用证据；`review.verdict` 为
-  `pass-with-waivers` 时报告列出被豁免的 fingerprint 与 reason/by；cannot-check（多半是没给 intent：内部上拉未知、
-  无轨电压比不了上拉电压域）→ 对应项 INCOMPLETE，full 档补 `--intent` 再跑。只有 certainty=proven 的 error 判 FAIL，
-  heuristic/likely 的 warning 写进 WARN 并注明识别依据。评审只读，从不补件。
+  `review.checks[]` 每项 pass / fail / cannot-check / not-applicable，带所需与所用证据。`review.verdict`：`pass` → PASS；
+  `pass-with-warnings` → WARN（覆盖不全：逐条列出 likely/heuristic 发现和它的 `missingEvidence`，不写“已验证”）；
+  `pass-with-waivers` → PASS 并列出被豁免的 fingerprint 与 reason/by；`cannot-check` → 对应项 INCOMPLETE（必需证据缺失或
+  拓扑未决：没有 ERC/图纸、规则被 ignore、跳线/开关/分叉、二极管极性不明）；只有 certainty=proven 的 error 判 FAIL。
+  缺 intent 只会让发现降为 likely warning，full 档补 `--intent`（含 `review.internalPullsComplete` 等声明）再跑。评审只读，从不补件。
   看 `checks`：`kicad-drc`（错误级违例 + 电气/制造规则的警告）、`kicad-drc-policy`（排除项、`ignore`、error 降为 warning；触及短路/间距/未连接/一致性/尺寸/板框
   即 fail，courtyard 类只记 `SILENCED`，口径同 [§6.4](../pcbpilot/references/evidence-and-verdicts.md#64-drc-排除项与被关掉的规则)）、
   `schematic-parity`；`cannot-check` → INCOMPLETE，不当干净。每条违例带 `owner.class`（environment / schematic-parity / board-outline /

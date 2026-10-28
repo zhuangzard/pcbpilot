@@ -125,8 +125,9 @@ func TestSchReviewWaiverFile(t *testing.T) {
 	if r.Status.OK() {
 		t.Fatal("a waiver of another gate or a text match applied")
 	}
+	// the shared-decoupling warnings of the fixture stay: pass-with-warnings
 	r.Judge(reviewWaiver([]gateWaiver{{Gate: schReviewGate, Match: fp, Reason: "reviewed: pull-up on the host board", By: "engineer"}}))
-	if !r.Status.OK() || r.Verdict != "pass-with-waivers" || !strings.Contains(rvCheck(t, r, kicad.RvOpenDrain).Findings[0].Waived, "engineer") {
+	if !r.Status.OK() || r.Waived != 1 || r.Verdict != "pass-with-warnings" || !strings.Contains(rvCheck(t, r, kicad.RvOpenDrain).Findings[0].Waived, "engineer") {
 		t.Fatalf("%s %+v", r.Verdict, rvCheck(t, r, kicad.RvOpenDrain))
 	}
 }
@@ -256,5 +257,53 @@ func TestSchReviewReportWriteFailureLive(t *testing.T) {
 	sheet2, _ := os.ReadFile(filepath.Join(out, "rvw.kicad_sch"))
 	if !bytes.Equal(before, after) || !bytes.Equal(sheet, sheet2) {
 		t.Fatal("the previous project or report changed")
+	}
+}
+
+// TestSchReviewToolErrorLive: an existing project with a good report, then
+// a rebuild whose staged intent cannot be parsed: a tool/input error, not
+// a finding — nothing is published in advisory mode either, so the old
+// report never sits beside a new schematic. --sch-review off replaces the
+// old report with a skip record.
+func TestSchReviewToolErrorLive(t *testing.T) {
+	sbNeedKicad(t)
+	if testing.Short() {
+		t.Skip("live KiCad build")
+	}
+	t.Setenv(kicad.EnvCacheDir, t.TempDir())
+	out := filepath.Join(t.TempDir(), "p")
+	spec := &sbSpec{Name: "rvt", Title: sbTitle{Title: "Review tool error", Date: "2026-10-28", Rev: "1", Company: "Synthetic"},
+		Parts: []sbPart{{Ref: "J1", Value: "IN", Symbol: "Connector:Conn_01x02_Pin"}, {Ref: "R1", Value: "1k", Symbol: "Device:R"}},
+		Nets:  []sbNet{{Name: "+5V", Kind: "power", Pins: []string{"J1:1", "R1:1"}}, {Name: "GND", Kind: "ground", Pins: []string{"J1:2", "R1:2"}}}}
+	opts := sbOptions{OutDir: out, NoIntent: true, Offline: true, PlannerBudget: 20000}
+	if res, err := runSchBuild(spec, opts, nil); err != nil || !res.OK {
+		t.Fatalf("first build: %v %+v", err, res.Error)
+	}
+	before, _ := os.ReadFile(filepath.Join(out, "sch-review.json"))
+	sheet, _ := os.ReadFile(filepath.Join(out, "rvt.kicad_sch"))
+	sbTestBeforeReview = func(stage string) { _ = os.WriteFile(filepath.Join(stage, "intent.json"), []byte("{not json"), 0o644) }
+	defer func() { sbTestBeforeReview = nil }()
+	spec.Parts[1].Value = "2k2"
+	res, err := runSchBuild(spec, opts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OK || res.Error == nil || res.Error.Code != "SCH_REVIEW_FAILED" || !strings.Contains(res.Error.Message, "tool/input error") {
+		t.Fatalf("ok=%v err=%+v", res.OK, res.Error)
+	}
+	after, _ := os.ReadFile(filepath.Join(out, "sch-review.json"))
+	sheet2, _ := os.ReadFile(filepath.Join(out, "rvt.kicad_sch"))
+	if !bytes.Equal(before, after) || !bytes.Equal(sheet, sheet2) {
+		t.Fatal("published after a tool error")
+	}
+	sbTestBeforeReview = nil
+	off := opts
+	off.SchReview = "off"
+	if res, err = runSchBuild(spec, off, nil); err != nil || !res.OK {
+		t.Fatalf("off: %v %+v", err, res.Error)
+	}
+	b, _ := os.ReadFile(filepath.Join(out, "sch-review.json"))
+	if !strings.Contains(string(b), `"skipped"`) {
+		t.Fatalf("stale report kept: %s", b)
 	}
 }

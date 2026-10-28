@@ -651,12 +651,12 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 	if rel, blocked := sbSchReviewGate(stage, out, name, nl, erc, o, rep, waivers); blocked {
 		failed := filepath.Join(sbMetaDir(out), "failed")
 		_ = os.RemoveAll(failed)
-		if err := copySbFiles(stage, failed, append(files, "erc.json", "sch-review.json")); err == nil {
+		if err := copySbFiles(stage, failed, append(files, sbExisting(stage, "erc.json", "sch-review.json")...)); err == nil {
 			rep.Outputs["failedBuild"] = failed
 		}
 		rep.OK = false
 		rep.Timings, rep.TotalMs = tm.Steps, tm.total()
-		rep.Error = &sbFailure{Code: "SCH_REVIEW_FAILED", Message: "sch-review (strict): " + sbGateDetail(rep, schReviewGate),
+		rep.Error = &sbFailure{Code: "SCH_REVIEW_FAILED", Message: "sch-review: " + sbGateDetail(rep, schReviewGate),
 			Fix: "nothing was written; fix the findings in the spec (or accept a reviewed finding with a signed waiver {\"gate\":\"sch-review\",\"match\":<fingerprint>,…}) and rebuild — the failed project and sch-review.json are in " + failed}
 		return rep, nil
 	} else if rel != "" {
@@ -1941,9 +1941,18 @@ func sbRelocate(path, stage, out string) {
 // in the stage (rel, published with the build).
 func sbSchReviewGate(stage, out, name string, nl *kicad.SchNetlist, erc *kicad.ERCReport, o sbOptions, rep *sbReport, waivers []gateWaiver) (rel string, blocked bool) {
 	mode, _ := reviewMode(o.SchReview)
+	p := filepath.Join(stage, "sch-review.json")
 	if mode == "off" {
+		// an older report must not stay beside the new schematic
+		if err := sbWriteReviewReport(p, map[string]any{"schema": kicad.SchReviewSchema, "status": "skip", "verdict": "skipped", "detail": "--sch-review off"}); err != nil {
+			rep.gate(schReviewGate, "fail", "sch-review.json not written: "+sbClip(err.Error(), 300), nil)
+			return "", true
+		}
 		rep.gate(schReviewGate, "skip", "--sch-review off", nil)
-		return "", false
+		return "sch-review.json", false
+	}
+	if sbTestBeforeReview != nil {
+		sbTestBeforeReview(stage)
 	}
 	ip := filepath.Join(stage, "intent.json")
 	if !fileExists(ip) {
@@ -1951,16 +1960,13 @@ func sbSchReviewGate(stage, out, name string, nl *kicad.SchNetlist, erc *kicad.E
 	}
 	rv, err := runSchReview(schReviewOpts{root: filepath.Join(stage, name+".kicad_sch"), nl: nl, erc: erc, intentPath: ip, waivers: waivers})
 	if err != nil {
-		status := "warn"
-		if mode == "strict" {
-			status = "fail"
-		}
-		rep.gate(schReviewGate, status, "sch-review could not run: "+sbClip(err.Error(), 300), nil)
-		return "", mode == "strict"
+		// a tool / input error is not a finding: in every mode nothing is
+		// published, so no old report stays beside a new schematic
+		rep.gate(schReviewGate, "fail", "sch-review could not run (tool/input error): "+sbClip(err.Error(), 300), nil)
+		return "", true
 	}
 	// the report is published with the project or not at all: a failed
 	// write blocks the build in every mode
-	p := filepath.Join(stage, "sch-review.json")
 	if err := sbWriteReviewReport(p, rv); err != nil {
 		rep.gate(schReviewGate, "fail", "sch-review.json not written: "+sbClip(err.Error(), 300), nil)
 		return "", true
@@ -1968,12 +1974,14 @@ func sbSchReviewGate(stage, out, name string, nl *kicad.SchNetlist, erc *kicad.E
 	sbRelocate(p, stage, out)
 	rel = "sch-review.json"
 	rep.Outputs["schReview"] = filepath.Join(out, rel)
+	// strict blocks proven errors and cannot-check only; likely warnings
+	// (pass-with-warnings) are reported as warn in every mode
 	status := "pass"
-	if rv.Status != gate.Pass {
+	switch {
+	case rv.Status != gate.Pass && mode == "strict":
+		status = "fail"
+	case rv.Status != gate.Pass || rv.Verdict == "pass-with-warnings":
 		status = "warn"
-		if mode == "strict" {
-			status = "fail"
-		}
 	}
 	items := rv.Items()
 	if len(items) > 20 {
@@ -1982,6 +1990,9 @@ func sbSchReviewGate(stage, out, name string, nl *kicad.SchNetlist, erc *kicad.E
 	rep.gate(schReviewGate, status, mode+": "+rv.Summary(), map[string]any{"verdict": rv.Verdict, "items": items, "cannotCheck": rv.Undecided})
 	return rel, status == "fail"
 }
+
+// sbTestBeforeReview runs on the stage just before the review (a test seam).
+var sbTestBeforeReview func(stage string)
 
 // sbWriteReviewReport writes sch-review.json into the stage (a test seam).
 var sbWriteReviewReport = func(path string, v any) error { return writeJSONFile(path, v) }
@@ -1994,4 +2005,15 @@ func sbGateDetail(rep *sbReport, name string) string {
 		}
 	}
 	return ""
+}
+
+// sbExisting are the names of files that exist in dir.
+func sbExisting(dir string, names ...string) []string {
+	var out []string
+	for _, n := range names {
+		if fileExists(filepath.Join(dir, n)) {
+			out = append(out, n)
+		}
+	}
+	return out
 }

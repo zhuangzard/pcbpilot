@@ -196,18 +196,19 @@ func odDesign() *rvT {
 }
 
 func TestReviewOpenDrain(t *testing.T) {
-	// no intent: internal pull-ups unknown → cannot-check, never a pass
+	// no intent: internal pull-ups unknown → a likely warning that names
+	// the missing evidence; the review passes with warnings, never "pass"
 	r := odDesign().review(t, ReviewHints{})
-	c := want(t, r, RvOpenDrain, "cannot-check")
-	if len(c.Unverified) != 1 || r.Status != gate.CannotCheck || r.Status.ExitCode() != 5 {
-		t.Fatalf("%+v %s", c, r.Status)
+	c := want(t, r, RvOpenDrain, "pass", "warning")
+	if c.Findings[0].Certainty != "likely" || len(c.Findings[0].Missing) == 0 || r.Verdict != "pass-with-warnings" || r.Status.ExitCode() != 0 {
+		t.Fatalf("%+v %s", c, r.Verdict)
 	}
 	// an intent.json is no evidence about internal pulls: legacy (no
-	// review{}) and unrelated review notes stay cannot-check
-	want(t, odDesign().review(t, intentHints()), RvOpenDrain, "cannot-check")
+	// review{}) and unrelated review notes stay a likely warning
+	want(t, odDesign().review(t, intentHints()), RvOpenDrain, "pass", "warning")
 	unrelated := intentHints()
 	unrelated.PullUp = map[string]string{"U9.1": "intent review.internalPullups"}
-	want(t, odDesign().review(t, unrelated), RvOpenDrain, "cannot-check")
+	want(t, odDesign().review(t, unrelated), RvOpenDrain, "pass", "warning")
 	// explicit evidence: the pull list is complete, or the pins have none
 	want(t, odDesign().review(t, completeHints()), RvOpenDrain, "fail", "error")
 	none := intentHints()
@@ -228,11 +229,11 @@ func TestReviewOpenDrain(t *testing.T) {
 	// external pull-up → pass
 	want(t, odDesign().res("R1", "10k", "/SENSOR_INT", "+3V3").review(t, ReviewHints{}), RvOpenDrain, "pass")
 	// an open-drain interrupt into an MCU GPIO: its direction is unknown —
-	// not a push-pull driver; cannot-check, an error with pull evidence,
-	// exempt only when intent declares the GPIO push-pull
+	// not a push-pull driver; a likely warning, an error with pull
+	// evidence, exempt only when intent declares the GPIO push-pull
 	g := rvBase().ic("U1", "+3V3", "3:~{INT}:open_collector").ic("U2", "+3V3", "3:PB3:bidirectional").cap("C1", "10u", "+3V3", "GND")
 	g.net("/ALERT", "U1.3", "U2.3")
-	want(t, g.review(t, intentHints()), RvOpenDrain, "cannot-check")
+	want(t, g.review(t, intentHints()), RvOpenDrain, "pass", "warning")
 	want(t, g.review(t, completeHints()), RvOpenDrain, "fail", "error")
 	pp := completeHints()
 	pp.PushPull = map[string]string{"U2.PB3": "intent review.pushPullOutputs"}
@@ -258,6 +259,21 @@ func TestReviewOpenDrain(t *testing.T) {
 	b.addNode("/SENSOR_INT", "D2.1")
 	b.addNode("GND", "D2.2")
 	want(t, b.review(t, completeHints()), RvOpenDrain, "fail", "error")
+	// an LED path that is reverse-biased toward the supply (cathode at the
+	// resistor) does not pull the line up
+	b = odDesign()
+	b.part("D1", "Device:LED", "LED", "1:K:passive", "2:A:passive")
+	b.addNode("/SENSOR_INT", "D1.2")
+	b.res("R5", "1k", "/LK", "+3V3")
+	b.addNode("/LK", "D1.1")
+	want(t, b.review(t, completeHints()), RvOpenDrain, "fail", "error")
+	// a diode whose terminals cannot be told is unresolved topology
+	b = odDesign()
+	b.part("D3", "Device:D", "D", "1:1:passive", "2:2:passive")
+	b.addNode("/SENSOR_INT", "D3.1")
+	b.res("R6", "1k", "/DK", "+3V3")
+	b.addNode("/DK", "D3.2")
+	want(t, b.review(t, completeHints()), RvOpenDrain, "cannot-check")
 	// unknown jumper on the path → cannot-check
 	b = odDesign()
 	b.part("JP1", "Jumper:Jumper_2_Open", "", "1:A:passive", "2:B:passive")
@@ -308,14 +324,23 @@ func TestReviewPullupVoltage(t *testing.T) {
 	m.addNode("+5V", "U3.2")
 	m.addNode("GND", "U3.3")
 	m.addNode("/SDA", "U3.4")
-	want(t, m.review(t, h), RvPullupVoltage, "cannot-check", "warning")
+	// multi-rail part, domain undeclared: overvoltage not evaluated (likely)
+	c = want(t, m.review(t, h), RvPullupVoltage, "pass", "warning", "warning")
+	// pulled up to its own declared supply: structurally matched, no numbers
 	hd := h
 	hd.PinDomain = map[string]string{"U3.4": "+5V"}
 	want(t, m.review(t, hd), RvPullupVoltage, "pass", "warning")
+	// a pull-up to the pin's own supply needs no voltages at all
+	own := rvBase().ic("U1", "+3V3", "3:SDA:bidirectional").ic("U2", "+3V3", "3:SDA:bidirectional").cap("C1", "10u", "+3V3", "GND")
+	own.net("/SDA", "U1.3", "U2.3").res("R1", "4k7", "/SDA", "+3V3")
+	want(t, own.review(t, ReviewHints{}), RvPullupVoltage, "pass")
 	h.Tolerant = map[string]string{"U1.3": "intent review.tolerantPins"}
 	want(t, mk().review(t, h), RvPullupVoltage, "pass")
-	// no voltages → cannot-check
-	want(t, mk().review(t, ReviewHints{}), RvPullupVoltage, "cannot-check")
+	// different domain, no voltages → likely warning "not evaluated"
+	c = want(t, mk().review(t, ReviewHints{}), RvPullupVoltage, "pass", "warning")
+	if !strings.Contains(c.Findings[0].Message, "not evaluated") || len(c.Findings[0].Missing) == 0 {
+		t.Fatal(c.Findings[0])
+	}
 }
 
 func TestReviewLED(t *testing.T) {
@@ -347,11 +372,24 @@ func TestReviewLED(t *testing.T) {
 	b.addNode("GND", "Q1.3")
 	led(b, "D1", "+3V3", "/LK")
 	want(t, b.review(t, ReviewHints{}), RvLEDLimiter, "cannot-check")
-	// driven by a current-sink pin → pass
+	// a pin only named like a current driver → likely warning; an intent
+	// review.currentDrivers role → pass
 	b = rvBase().ic("U1", "+3V3", "3:LED1:open_collector").cap("C1", "10u", "+3V3", "GND")
 	led(b, "D1", "+3V3", "/LK")
 	b.addNode("/LK", "U1.3")
-	want(t, b.review(t, ReviewHints{}), RvLEDLimiter, "pass")
+	c := want(t, b.review(t, ReviewHints{}), RvLEDLimiter, "pass", "warning")
+	if c.Findings[0].Certainty != "likely" {
+		t.Fatal(c.Findings[0])
+	}
+	want(t, b.review(t, ReviewHints{CurrentDriver: map[string]string{"U1.3": "intent review.currentDrivers"}}), RvLEDLimiter, "pass")
+	// a series resistor whose far end goes nowhere → no complete path
+	b = rvFed().res("R1", "1k", "/LA", "/NOWHERE")
+	led(b, "D1", "/LA", "GND")
+	want(t, b.review(t, ReviewHints{}), RvLEDLimiter, "fail", "error")
+	// a series resistor whose far end branches → ambiguous
+	b = rvFed().res("R1", "1k", "/LA", "/MID").res("R2", "1k", "/MID", "+3V3").res("R3", "1k", "/MID", "GND")
+	led(b, "D1", "/LA", "GND")
+	want(t, b.review(t, ReviewHints{}), RvLEDLimiter, "cannot-check")
 	// off-board: to a connector → info
 	b = rvBase()
 	b.part("J1", "Connector:Conn_01x01", "", "1:Pin_1:passive")
@@ -376,7 +414,7 @@ func TestReviewLED(t *testing.T) {
 	b = rvFed().res("R1", "1k", "+3V3", "/LA")
 	led(b, "D1", "/LA", "GND")
 	led(b, "D2", "+3V3", "GND")
-	c := want(t, b.review(t, ReviewHints{}), RvLEDLimiter, "fail", "error")
+	c = want(t, b.review(t, ReviewHints{}), RvLEDLimiter, "fail", "error")
 	if c.Findings[0].Refs[0] != "D2" {
 		t.Fatal(c.Findings[0])
 	}
@@ -398,9 +436,9 @@ func TestReviewFloatingInput(t *testing.T) {
 		b.net("/EN", "U1.3", "U2.3")
 		return b
 	}
-	// no intent, legacy intent: internal pulls unknown → cannot-check
-	want(t, mk().review(t, ReviewHints{}), RvFloatingInput, "cannot-check")
-	want(t, mk().review(t, intentHints()), RvFloatingInput, "cannot-check")
+	// no intent, legacy intent: internal pulls unknown → likely warning
+	want(t, mk().review(t, ReviewHints{}), RvFloatingInput, "pass", "warning")
+	want(t, mk().review(t, intentHints()), RvFloatingInput, "pass", "warning")
 	want(t, mk().review(t, completeHints()), RvFloatingInput, "fail", "error")
 	h := completeHints()
 	h.PullDown = map[string]string{"U1.EN": "intent review.internalPulldowns"}
@@ -417,16 +455,49 @@ func TestReviewFloatingInput(t *testing.T) {
 	if len(c.Findings[0].Pins) != 2 {
 		t.Fatal(c.Findings[0])
 	}
+	// a GPIO of undeclared direction: drive not verified (likely); declared
+	// push-pull → driven
+	gp := rvBase().ic("U1", "+3V3", "3:EN:input").ic("U2", "+3V3", "3:PB0:bidirectional").cap("C1", "10u", "+3V3", "GND")
+	gp.net("/EN", "U1.3", "U2.3")
+	c = want(t, gp.review(t, completeHints()), RvFloatingInput, "pass", "warning")
+	if !strings.Contains(c.Findings[0].Message, "not verified") {
+		t.Fatal(c.Findings[0])
+	}
+	pp := completeHints()
+	pp.PushPull = map[string]string{"U2.3": "intent review.pushPullOutputs"}
+	want(t, gp.review(t, pp), RvFloatingInput, "pass")
+	// a reverse-biased diode from +3V3 (anode at the input) does not drive it
+	rd := mk()
+	rd.part("D1", "Device:D", "D", "1:K:passive", "2:A:passive")
+	rd.addNode("+3V3", "D1.1")
+	rd.addNode("/EN", "D1.2")
+	want(t, rd.review(t, completeHints()), RvFloatingInput, "fail", "error")
+	// forward-biased from +3V3 (cathode at the input) it does
+	fd := mk()
+	fd.part("D1", "Device:D", "D", "1:K:passive", "2:A:passive")
+	fd.addNode("/EN", "D1.1")
+	fd.addNode("+3V3", "D1.2")
+	want(t, fd.review(t, completeHints()), RvFloatingInput, "pass")
+	// passive pins (an FPGA pin typed passive) are no receivers
+	pv := rvBase().ic("U1", "+3V3", "3:IO:passive").ic("U2", "+3V3", "3:IO:passive").cap("C1", "10u", "+3V3", "GND")
+	pv.net("/X", "U1.3", "U2.3")
+	want(t, pv.review(t, completeHints()), RvFloatingInput, "not-applicable")
+	ip := completeHints()
+	ip.InputPin = map[string]string{"U1.3": "intent review.inputPins"}
+	want(t, pv.review(t, ip), RvFloatingInput, "pass", "warning")
 }
 
 func TestReviewOutputConflict(t *testing.T) {
 	b := rvBase().ic("U1", "+3V3", "3:Y:output").ic("U2", "+3V3", "3:Y:output", "4:Y2:output").cap("C1", "10u", "+3V3", "GND")
 	b.net("/CLK", "U1.3", "U2.3")
 	want(t, b.review(t, ReviewHints{}), RvOutputConflict, "fail", "error")
-	// stacked pins (one electrical pin drawn twice: same name) are one driver
-	b = rvBase().ic("U1", "+3V3", "3:Y:output", "4:Y:output").cap("C1", "10u", "+3V3", "GND")
+	// two outputs that only share a name (a dual op-amp's OUT A and OUT B)
+	// contend; pins the symbol stacks, or intent declares common, do not
+	b = rvBase().ic("U1", "+3V3", "3:OUT:output", "4:OUT:output").cap("C1", "10u", "+3V3", "GND")
 	b.net("/CLK", "U1.3", "U1.4")
-	want(t, b.review(t, ReviewHints{}), RvOutputConflict, "pass")
+	want(t, b.review(t, ReviewHints{}), RvOutputConflict, "fail", "error")
+	want(t, b.review(t, ReviewHints{}, func(in *ReviewInput) { in.Stacked = map[string][][]string{"Synth:IC": {{"3", "4"}}} }), RvOutputConflict, "pass")
+	want(t, b.review(t, ReviewHints{CommonPins: [][]string{{"U1.3", "U1.4"}}}), RvOutputConflict, "pass")
 	// two independent outputs of one package (1Y, 2Y of a buffer) contend
 	b = rvBase().ic("U1", "+3V3", "3:1Y:output", "4:2Y:output").cap("C1", "10u", "+3V3", "GND")
 	b.net("/CLK", "U1.3", "U1.4")
@@ -546,7 +617,9 @@ func TestReviewRegulatorCaps(t *testing.T) {
 func TestReviewBulk(t *testing.T) {
 	want(t, rvBase().ic("U1", "+3V3").cap("C1", "100n", "+3V3", "GND").review(t, ReviewHints{}), RvBulkCap, "pass", "warning")
 	want(t, rvBase().ic("U1", "+3V3").cap("C1", "100n", "+3V3", "GND").cap("C2", "4.7u", "+3V3", "GND").review(t, ReviewHints{}), RvBulkCap, "pass")
-	want(t, rvBase().ic("U1", "+3V3").cap("C1", "100n", "+3V3", "GND").cap("C2", "see note", "+3V3", "GND").review(t, ReviewHints{}), RvBulkCap, "cannot-check")
+	want(t, rvBase().ic("U1", "+3V3").cap("C1", "100n", "+3V3", "GND").cap("C2", "see note", "+3V3", "GND").review(t, ReviewHints{}), RvBulkCap, "pass", "warning")
+	// no capacitor at all is below the floor too
+	want(t, rvFed().ic("U1", "+3V3").review(t, ReviewHints{}), RvBulkCap, "pass", "warning")
 }
 
 func TestReviewMergedNets(t *testing.T) {
@@ -663,12 +736,21 @@ func TestReviewWaivers(t *testing.T) {
 	if fp != ReviewFingerprint(RvDecoupling, []string{"U1"}, []string{"U1.1"}, []string{"+3V3"}) || !strings.HasPrefix(fp, "sr2:decoupling:") {
 		t.Fatalf("fingerprint %q", fp)
 	}
+	bulk := rvCheckOf(t, r, RvBulkCap).Findings[0].Fingerprint
 	r.Judge(func(s string) (string, bool) { return "waived: reviewed (test)", s == fp })
-	if r.Status != gate.Pass || r.Verdict != "pass-with-waivers" || r.Waived != 1 || rvCheckOf(t, r, RvDecoupling).Findings[0].Waived == "" {
+	if r.Status != gate.Pass || r.Verdict != "pass-with-warnings" || r.Waived != 1 || rvCheckOf(t, r, RvDecoupling).Findings[0].Waived == "" {
 		t.Fatalf("%s %s %d", r.Status, r.Verdict, r.Waived)
 	}
+	r.Judge(func(s string) (string, bool) { return "waived: reviewed (test)", s == fp || s == bulk })
+	if r.Verdict != "pass-with-waivers" || r.Waived != 2 {
+		t.Fatalf("%s %d", r.Verdict, r.Waived)
+	}
 	// a waiver never decides a cannot-check
-	r = odDesign().review(t, ReviewHints{})
+	j := odDesign()
+	j.part("JP1", "Jumper:Jumper_2_Open", "", "1:A:passive", "2:B:passive")
+	j.addNode("/SENSOR_INT", "JP1.1")
+	j.addNode("/X", "JP1.2")
+	r = j.review(t, completeHints())
 	r.Judge(func(string) (string, bool) { return "waived: all", true })
 	if r.Status != gate.CannotCheck {
 		t.Fatal(r.Status)
@@ -786,7 +868,7 @@ func TestReviewDualSupplyAndAltI2C(t *testing.T) {
 	b.addNode("-5V", "U1.2")
 	b.cap("C1", "10u", "+3V3", "GND").cap("C2", "10u", "-5V", "GND")
 	b.net("/O", "U1.3", "U1.4")
-	want(t, b.review(t, ReviewHints{}), RvICPowerGround, "cannot-check")
+	want(t, b.review(t, ReviewHints{}), RvICPowerGround, "pass", "warning") // bipolar assumed, not verified
 	hv := ReviewHints{NetVoltage: map[string]float64{"+3V3": 3.3, "-5V": -5}, VoltageSource: map[string]string{"+3V3": "sim s", "-5V": "sim s"}}
 	c := want(t, b.review(t, hv), RvICPowerGround, "pass")
 	if len(c.Exempt) != 1 {
@@ -843,4 +925,19 @@ func TestReviewDualSupplyAndAltI2C(t *testing.T) {
 	b.net("+3V3_OUT")
 	b.ic("U2", "+3V3_OUT").cap("C2", "10u", "+3V3_OUT", "GND").res("R1", "3.3", "+3V3", "+3V3_OUT")
 	want(t, b.review(t, ReviewHints{}), RvPullupVoltage, "not-applicable")
+}
+
+// TestReviewLEDUnknownDriver: a series resistor to an IC pin typed passive
+// is a complete path whose driver is not verified → likely warning.
+func TestReviewLEDUnknownDriver(t *testing.T) {
+	b := rvFed().ic("U1", "+3V3", "3:IO28:passive").cap("C1", "10u", "+3V3", "GND")
+	b.res("R1", "1k", "/LA", "/IO")
+	b.addNode("/IO", "U1.3")
+	b.part("D1", "Device:LED", "LED", "1:K:passive", "2:A:passive")
+	b.addNode("GND", "D1.1")
+	b.addNode("/LA", "D1.2")
+	c := want(t, b.review(t, ReviewHints{}), RvLEDLimiter, "pass", "warning")
+	if len(c.Findings[0].Missing) == 0 {
+		t.Fatal(c.Findings[0])
+	}
 }
