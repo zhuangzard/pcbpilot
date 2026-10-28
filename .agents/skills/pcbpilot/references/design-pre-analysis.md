@@ -9,7 +9,7 @@
 |---|---|---|
 | 有哪些件、pin、bbox | `sch list`(designator/name/pins) | 认锚点(大 IC/连接器/RF/晶振)、估面积 |
 | 现有页 / 纸张 | `sch pages` / `sch titleblock-get` | 幅面基线(默认 A4 1170×825)→ 够不够,不够多页 |
-| 能不能下单 | `sch bom` + `scripts/bom-enrich.py` | 补 LCSC C 号、找孤儿件 |
+| 能不能下单 | `bom export` + `scripts/bom-enrich.py` | 补 LCSC C 号、找孤儿件 |
 | 选型 / 补料 | `lib search` / `parts-select.py` / 查 `standard-parts.json` | 标准件优先;新选型**写回 standard-parts.json** |
 
 ## 摸清这几样(够用就行,别写成大计划)

@@ -1,0 +1,32 @@
+{
+  "ops": [
+    {
+      "op": "setRef",
+      "fp": "fp-R2",
+      "ref": "R7",
+      "key": "/00000000-0000-0000-0000-0000000000a2",
+      "from": "R2",
+      "matchedBy": "path",
+      "reason": "the symbol was re-annotated"
+    }
+  ],
+  "match": {
+    "byPath": 5,
+    "byRef": 0,
+    "unmatchedSymbols": [],
+    "unmatchedFootprints": []
+  },
+  "counts": {
+    "add": 0,
+    "swap": 0,
+    "update": 1,
+    "padNet": 0,
+    "renameNet": 0,
+    "orphanFlag": 0,
+    "orphanRemove": 0
+  },
+  "staged": [],
+  "orphanCopper": [],
+  "danglingCopper": [],
+  "errors": []
+}

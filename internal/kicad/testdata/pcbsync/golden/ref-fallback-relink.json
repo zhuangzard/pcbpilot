@@ -1,0 +1,33 @@
+{
+  "ops": [
+    {
+      "op": "setPath",
+      "fp": "fp-R1",
+      "ref": "R1",
+      "key": "/00000000-0000-0000-0000-0000000000a1",
+      "from": "/00000000-0000-0000-0000-0000000000ff",
+      "path": "/00000000-0000-0000-0000-0000000000a1",
+      "matchedBy": "ref",
+      "reason": "matched by reference; the footprint is relinked to its symbol"
+    }
+  ],
+  "match": {
+    "byPath": 4,
+    "byRef": 1,
+    "unmatchedSymbols": [],
+    "unmatchedFootprints": []
+  },
+  "counts": {
+    "add": 0,
+    "swap": 0,
+    "update": 1,
+    "padNet": 0,
+    "renameNet": 0,
+    "orphanFlag": 0,
+    "orphanRemove": 0
+  },
+  "staged": [],
+  "orphanCopper": [],
+  "danglingCopper": [],
+  "errors": []
+}

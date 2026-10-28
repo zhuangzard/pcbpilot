@@ -1,0 +1,29 @@
+{
+  "ops": [
+    {
+      "op": "renameNet",
+      "from": "/SIG",
+      "to": "/SENSE",
+      "reason": "same 3 pad(s); tracks 4, vias 1, zones 0 move with it"
+    }
+  ],
+  "match": {
+    "byPath": 5,
+    "byRef": 0,
+    "unmatchedSymbols": [],
+    "unmatchedFootprints": []
+  },
+  "counts": {
+    "add": 0,
+    "swap": 0,
+    "update": 0,
+    "padNet": 0,
+    "renameNet": 1,
+    "orphanFlag": 0,
+    "orphanRemove": 0
+  },
+  "staged": [],
+  "orphanCopper": [],
+  "danglingCopper": [],
+  "errors": []
+}

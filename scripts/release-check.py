@@ -8,8 +8,12 @@ import platform
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tarfile
 import zipfile
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import skill_manifest  # noqa: E402
 
 ASSETS = [
     "pcbpilot_darwin_amd64", "pcbpilot_darwin_arm64",
@@ -25,7 +29,8 @@ INSTALLERS = ["install.sh", "install.ps1"]
 
 
 def skill_version(text: str) -> str:
-    match = re.search(r'^  version:\s*"([^"]+)"$', text, re.MULTILINE)
+    # \r?: a Windows checkout (core.autocrlf) packs CRLF files.
+    match = re.search(r'^  version:\s*"([^"]+)"\r?$', text, re.MULTILINE)
     if not match:
         raise ValueError("SKILL.md metadata.version missing")
     return match.group(1)
@@ -45,8 +50,10 @@ def check_sources(repo: Path, tag: str, local_dev: bool = False) -> str:
             raise ValueError(f"{name}: version {data.get('version')!r}, expected {version}")
         if name.endswith("package-lock.json") and data.get("packages", {}).get("", {}).get("version") != version:
             raise ValueError(f"{name}: packages[''].version must also be {version}")
-    if skill_version((repo / ".agents/skills/pcbpilot/SKILL.md").read_text(encoding="utf-8")) != version:
-        raise ValueError(f"SKILL.md version must be {version}; run scripts/sync-skill-version.py {version}")
+    # Every public Skill shares the release version.
+    for name in skill_manifest.load(repo).skills:
+        if skill_version((repo / skill_manifest.SKILLS_ROOT / name / "SKILL.md").read_text(encoding="utf-8")) != version:
+            raise ValueError(f"{name}/SKILL.md version must be {version}; run scripts/sync-skill-version.py {version}")
     changelog = (repo / "extension/CHANGELOG.md").read_text(encoding="utf-8")
     if not re.search(rf"^##\s*\[{re.escape(version)}\]", changelog, re.MULTILINE):
         raise ValueError(f"extension/CHANGELOG.md has no ## [{version}] entry")
@@ -105,6 +112,28 @@ def check_mcp(path: Path, version: str) -> None:
             raise ValueError("mcp.tar.gz VERSION differs from the release")
 
 
+def check_skills_archive(repo: Path, path: Path, version: str) -> None:
+    """skills.tar.gz = the source manifest plus one versioned directory per listed Skill."""
+    want = skill_manifest.load(repo)
+    with tarfile.open(path, "r:gz") as archive:
+        if skill_manifest.ARCHIVE_ENTRY not in archive.getnames():
+            raise ValueError(f"skills.tar.gz has no {skill_manifest.ARCHIVE_ENTRY}")
+        manifest = skill_manifest.from_archive(archive)
+        if manifest != want or archive.extractfile(skill_manifest.ARCHIVE_ENTRY).read() != want.canonical_bytes():
+            raise ValueError(f"skills.tar.gz: {skill_manifest.ARCHIVE_ENTRY} differs from the source manifest")
+        for member in archive.getmembers():
+            top = member.name.split("/", 1)[0]
+            if top not in manifest.skills or not (member.isfile() or member.isdir()):
+                raise ValueError(f"skills.tar.gz: entry outside the listed skills: {member.name}")
+        for name in manifest.skills:
+            try:
+                item = archive.extractfile(f"{name}/SKILL.md")
+            except KeyError:
+                item = None
+            if item is None or skill_version(item.read().decode()) != version:
+                raise ValueError(f"packaged {name}/SKILL.md is missing or has the wrong version")
+
+
 def check_manifest(dist: Path, version: str) -> None:
     manifest = json.loads((dist / "manifest.json").read_text(encoding="utf-8"))
     if manifest.get("version") != version or manifest.get("minConnector") != version:
@@ -144,10 +173,7 @@ def check_artifacts(repo: Path, dist: Path, version: str) -> None:
             raise ValueError(f"checksum mismatch: {name}")
     manifest = json.loads((repo / "extension/extension.json").read_text(encoding="utf-8"))
     check_connector(dist / "pcbpilot-connector.eext", version, manifest["uuid"])
-    with tarfile.open(dist / "skills.tar.gz", "r:gz") as archive:
-        item = archive.extractfile("pcbpilot/SKILL.md")
-        if item is None or skill_version(item.read().decode()) != version:
-            raise ValueError("packaged SKILL.md has the wrong version")
+    check_skills_archive(repo, dist / "skills.tar.gz", version)
     check_mcp(dist / "mcp.tar.gz", version)
     check_manifest(dist, version)
     for name in INSTALLERS:

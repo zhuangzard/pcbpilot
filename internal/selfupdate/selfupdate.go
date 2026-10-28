@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -72,7 +73,8 @@ func Repo() string {
 }
 
 const (
-	// SkillName is the skill slug (dir name under each client's skills/).
+	// SkillName is the router Skill's slug (dir name under each client's
+	// skills/). Focused public Skills ship next to it; see skills.go.
 	SkillName = "pcbpilot"
 	// versionMarker records the installed skill version inside a skill dir.
 	versionMarker = ".version"
@@ -103,9 +105,11 @@ var (
 	}
 )
 
-// SkillTarget is one installed (or installable) skill location.
+// SkillTarget is one installed (or installable) skill location: one public
+// Skill of one client.
 type SkillTarget struct {
 	Client    string `json:"client"`    // "claude" | "codex" | "agents" | "zcode"
+	Skill     string `json:"skill"`     // public Skill name; SkillName is the router
 	Dir       string `json:"dir"`       // absolute skill dir
 	Present   bool   `json:"present"`   // dir exists on disk
 	Installed string `json:"installed"` // version marker, "" if unknown/missing
@@ -128,35 +132,9 @@ func SkillLinkTarget(dir string) string {
 	return t
 }
 
-// skillDir returns the skill dir for a client under $HOME, or "" if unknown.
+// skillDir returns the router skill dir for a client under $HOME, or "" if unknown.
 func skillDir(client string) string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	var base string
-	switch client {
-	case "claude":
-		base = os.Getenv("CLAUDE_CONFIG_DIR")
-		if base == "" {
-			base = filepath.Join(home, ".claude")
-		}
-	case "codex":
-		base = os.Getenv("CODEX_HOME")
-		if base == "" {
-			base = filepath.Join(home, ".codex")
-		}
-	case "agents":
-		base = filepath.Join(home, ".agents")
-	case "zcode":
-		base = filepath.Join(home, ".zcode")
-	default:
-		return ""
-	}
-	if !filepath.IsAbs(base) {
-		return ""
-	}
-	return filepath.Join(base, "skills", SkillName)
+	return SkillDirFor(client, SkillName)
 }
 
 // ValidateClients rejects unsupported client names and relative client homes
@@ -176,39 +154,50 @@ func ValidateClients(clients []string) error {
 	return nil
 }
 
-// Targets returns skill targets in deterministic order. When onlyPresent is true,
-// only dirs that already exist on disk are returned (the daemon's default — never
+// Targets returns one target per (client, public Skill) in deterministic order
+// (clients, then this CLI's Skill order, then Skills only the installed
+// router's manifest names). When onlyPresent is true, only
+// dirs that already exist on disk are returned (the daemon's default — never
 // create a skill dir for a client the user doesn't use).
 func Targets(onlyPresent bool) []SkillTarget {
 	var out []SkillTarget
 	for _, c := range clientOrder {
-		dir := skillDir(c)
-		if dir == "" {
-			continue
-		}
-		present := isDir(dir)
-		if onlyPresent && !present {
-			continue
-		}
-		linked := SkillLinkTarget(dir)
-		installed := readMarker(dir)
-		if linked != "" {
-			// A symlinked source checkout never gets a fresh .version marker
-			// (a stale one from an old copy install may remain); its SKILL.md
-			// frontmatter is the version actually in use.
-			if v := linkedSkillVersion(dir); v != "" {
-				installed = v
+		// This CLI's list plus anything the installed router's release shipped.
+		for _, skill := range knownSkills([]string{c}).Skills {
+			t, ok := skillTarget(c, skill)
+			if !ok || (onlyPresent && !t.Present) {
+				continue
 			}
+			out = append(out, t)
 		}
-		out = append(out, SkillTarget{
-			Client:    c,
-			Dir:       dir,
-			Present:   present,
-			Installed: installed,
-			Linked:    linked,
-		})
 	}
 	return out
+}
+
+func skillTarget(client, skill string) (SkillTarget, bool) {
+	dir := SkillDirFor(client, skill)
+	if dir == "" {
+		return SkillTarget{}, false
+	}
+	linked := SkillLinkTarget(dir)
+	installed := readMarker(dir)
+	if linked != "" {
+		// A symlinked source checkout never gets a fresh .version marker
+		// (a stale one from an old copy install may remain); its SKILL.md
+		// frontmatter is the version actually in use.
+		if v := linkedSkillVersion(dir); v != "" {
+			installed = v
+		}
+	}
+	return SkillTarget{Client: client, Skill: skill, Dir: dir, Present: isDir(dir), Installed: installed, Linked: linked}, true
+}
+
+// ClientInstalled reports whether a client has the router Skill installed —
+// the signal that pcbpilot is in use there, so missing focused Skills belong
+// next to it without --create-missing.
+func ClientInstalled(client string) bool {
+	dir := skillDir(client)
+	return dir != "" && isDir(dir)
 }
 
 func isDir(p string) bool {
@@ -296,159 +285,6 @@ func githubToken() string {
 	return strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
 }
 
-// SyncOptions configures SyncSkills.
-type SyncOptions struct {
-	// TargetVersion is the version to bring skill dirs up to (bare "x.y.z" or
-	// "vx.y.z"). Required.
-	TargetVersion string
-	// Clients filters which clients to touch (nil = all present on disk).
-	Clients []string
-	// Preserve keeps existing files instead of overwriting (local edits win).
-	Preserve bool
-	// Force syncs even when a dir's marker already equals the target.
-	Force bool
-	// CreateMissing installs into a client dir even if it doesn't exist yet
-	// (the manual `skill sync` default; the daemon leaves this false).
-	CreateMissing bool
-	// Assets, when set, supplies skills.tar.gz (a local asset dir or a pinned
-	// release) instead of the default GitHub download; its Version() is written
-	// verbatim as the marker, so X.Y.Z-dev.N local packages keep their suffix.
-	Assets AssetSource
-}
-
-// TargetOutcome is the per-dir result of a sync.
-type TargetOutcome struct {
-	Client string `json:"client"`
-	Dir    string `json:"dir"`
-	From   string `json:"from"`   // installed version before
-	To     string `json:"to"`     // target version
-	Status string `json:"status"` // updated|up-to-date|created|preserved|skipped|linked|error
-	Err    string `json:"err,omitempty"`
-	Linked string `json:"linked,omitempty"` // symlink target of a source-install skill
-}
-
-// SyncResult is the full sync report.
-type SyncResult struct {
-	Target   string          `json:"target"`
-	Outcomes []TargetOutcome `json:"outcomes"`
-	Changed  int             `json:"changed"`
-}
-
-// SyncSkills brings the selected skill dirs up to TargetVersion by downloading
-// that release's skills.tar.gz once and materializing it into each dir. logf may
-// be nil. The download only happens if at least one dir actually needs it.
-func SyncSkills(ctx context.Context, opts SyncOptions, logf func(string, ...any)) (SyncResult, error) {
-	log := func(format string, a ...any) {
-		if logf != nil {
-			logf(format, a...)
-		}
-	}
-	target := SemverCore(opts.TargetVersion)
-	if opts.Assets != nil {
-		target = strings.TrimPrefix(opts.Assets.Version(), "v")
-	}
-	if target == "" {
-		return SyncResult{}, fmt.Errorf("sync: bad target version %q", opts.TargetVersion)
-	}
-	res := SyncResult{Target: target}
-
-	// Which clients?
-	want := opts.Clients
-	if len(want) == 0 {
-		for _, c := range clientOrder {
-			want = append(want, c)
-		}
-	}
-
-	// Decide per-dir what needs doing before paying for a download.
-	type job struct {
-		client, dir, from string
-		create            bool
-	}
-	var jobs []job
-	for _, c := range want {
-		dir := skillDir(c)
-		if dir == "" {
-			clientErr := ValidateClients([]string{c})
-			res.Outcomes = append(res.Outcomes, TargetOutcome{Client: c, Status: "error", Err: clientErr.Error()})
-			continue
-		}
-		present := isDir(dir)
-		from := readMarker(dir)
-		if link := SkillLinkTarget(dir); link != "" {
-			// Source install: the dir is a symlink into a git checkout. Writing
-			// release files through it would dirty the checkout; `git pull`
-			// (pcbpilot update on a source install) is what updates it.
-			res.Outcomes = append(res.Outcomes, TargetOutcome{Client: c, Dir: dir, From: from, To: target, Status: "linked", Linked: link})
-			continue
-		}
-		if !present && !(opts.CreateMissing) {
-			res.Outcomes = append(res.Outcomes, TargetOutcome{Client: c, Dir: dir, From: from, To: target, Status: "skipped", Err: "not installed"})
-			continue
-		}
-		if present && !opts.Force && from == target {
-			res.Outcomes = append(res.Outcomes, TargetOutcome{Client: c, Dir: dir, From: from, To: target, Status: "up-to-date"})
-			continue
-		}
-		jobs = append(jobs, job{client: c, dir: dir, from: from, create: !present})
-	}
-
-	if len(jobs) == 0 || syncOutcomeError(res) != nil {
-		return res, syncOutcomeError(res)
-	}
-
-	// Download + extract the release skill tree once into a temp dir.
-	log("skill-sync: fetching skills.tar.gz for v%s", target)
-	var srcRoot string
-	var cleanup func()
-	var err error
-	if opts.Assets != nil {
-		srcRoot, cleanup, err = assetSkillTree(ctx, opts.Assets)
-	} else {
-		srcRoot, cleanup, err = fetchSkillTree(ctx, target)
-	}
-	if err != nil {
-		// Every pending job fails, but that's best-effort — report and return.
-		for _, j := range jobs {
-			res.Outcomes = append(res.Outcomes, TargetOutcome{Client: j.client, Dir: j.dir, From: j.from, To: target, Status: "error", Err: err.Error()})
-		}
-		return res, fmt.Errorf("fetch skills v%s: %w", target, err)
-	}
-	defer cleanup()
-
-	for _, j := range jobs {
-		status := "updated"
-		if j.create {
-			status = "created"
-		} else if opts.Preserve {
-			status = "preserved"
-		}
-		if err := materialize(srcRoot, j.dir, opts.Preserve, target); err != nil {
-			res.Outcomes = append(res.Outcomes, TargetOutcome{Client: j.client, Dir: j.dir, From: j.from, To: target, Status: "error", Err: err.Error()})
-			log("skill-sync: %s %s FAILED: %v", j.client, j.dir, err)
-			continue
-		}
-		res.Outcomes = append(res.Outcomes, TargetOutcome{Client: j.client, Dir: j.dir, From: j.from, To: target, Status: status})
-		res.Changed++
-		fromLabel := j.from
-		if fromLabel == "" {
-			fromLabel = "?"
-		}
-		log("skill-sync: %s %s → %s (%s)", j.client, fromLabel, target, j.dir)
-	}
-	return res, syncOutcomeError(res)
-}
-
-func syncOutcomeError(res SyncResult) error {
-	var failures []error
-	for _, outcome := range res.Outcomes {
-		if outcome.Status == "error" {
-			failures = append(failures, fmt.Errorf("%s: %s", outcome.Client, outcome.Err))
-		}
-	}
-	return errors.Join(failures...)
-}
-
 func downloadBytesWithFallback(ctx context.Context, primary string, limit int64, expected string, allowMirror bool) ([]byte, error) {
 	download := func(url string) ([]byte, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -498,119 +334,174 @@ func checksumHex(body []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// skillTree is an extracted, verified skills.tar.gz: one directory per Skill
+// of manifest under root.
+type skillTree struct {
+	root     string
+	manifest SkillManifest
+	cleanup  func()
+}
+
+func (t skillTree) dir(skill string) string { return filepath.Join(t.root, skill) }
+
 // fetchSkillTree downloads skills.tar.gz for the version and extracts it to a
-// temp dir, returning the path to the extracted `pcbpilot/` root plus a
-// cleanup func.
-func fetchSkillTree(ctx context.Context, version string) (root string, cleanup func(), err error) {
+// temp dir.
+func fetchSkillTree(ctx context.Context, version string) (skillTree, error) {
 	url := tarballURL(version)
 	want, checksumErr := fetchChecksum(ctx, version, "skills.tar.gz")
 	legacyNoChecksum := errors.Is(checksumErr, errChecksumUnavailable)
 	if checksumErr != nil && !legacyNoChecksum {
-		return "", func() {}, fmt.Errorf("verify skills.tar.gz: %w", checksumErr)
+		return skillTree{}, fmt.Errorf("verify skills.tar.gz: %w", checksumErr)
 	}
 	archive, err := downloadBytesWithFallback(ctx, url, (64<<20)+1, want, !legacyNoChecksum)
 	if err != nil {
-		return "", func() {}, fmt.Errorf("download skills.tar.gz: %w", err)
+		return skillTree{}, fmt.Errorf("download skills.tar.gz: %w", err)
 	}
 	if len(archive) > 64<<20 {
-		return "", func() {}, fmt.Errorf("skills.tar.gz exceeds 64 MiB")
+		return skillTree{}, fmt.Errorf("skills.tar.gz exceeds 64 MiB")
 	}
 	// Verify the entire archive before trusting or installing any extracted file.
 	if !legacyNoChecksum && !strings.EqualFold(want, checksumHex(archive)) {
-		return "", func() {}, fmt.Errorf("checksum mismatch for skills.tar.gz")
+		return skillTree{}, fmt.Errorf("checksum mismatch for skills.tar.gz")
 	}
 	return extractSkillTree(archive, version, legacyNoChecksum)
 }
 
 // assetSkillTree extracts skills.tar.gz from an explicit asset source (whose
 // Fetch has already verified the checksum).
-func assetSkillTree(ctx context.Context, src AssetSource) (string, func(), error) {
+func assetSkillTree(ctx context.Context, src AssetSource) (skillTree, error) {
 	archive, err := src.Fetch(ctx, "skills.tar.gz", 64<<20)
 	if err != nil {
-		return "", func() {}, fmt.Errorf("skills.tar.gz: %w", err)
+		return skillTree{}, fmt.Errorf("skills.tar.gz: %w", err)
 	}
 	return extractSkillTree(archive, strings.TrimPrefix(src.Version(), "v"), false)
 }
 
-// extractSkillTree unpacks a verified skills.tar.gz into a temp dir and checks
-// that its SKILL.md declares version.
-func extractSkillTree(archive []byte, version string, legacyNoChecksum bool) (root string, cleanup func(), err error) {
+// extractSkillTree unpacks a verified skills.tar.gz into a temp dir, reads its
+// pcbpilot/.public-skills.json (absent: a single-Skill archive from before
+// 0.11) and checks that every listed Skill has a SKILL.md declaring version.
+// Nothing is ever written outside the temp dir and links are never created; a
+// manifest archive must in addition hold nothing but regular files and dirs
+// under its listed Skill roots.
+func extractSkillTree(archive []byte, version string, legacyNoChecksum bool) (skillTree, error) {
 	tmp, err := os.MkdirTemp("", "easyeda-skill-*")
 	if err != nil {
-		return "", func() {}, err
+		return skillTree{}, err
 	}
-	cleanup = func() { _ = os.RemoveAll(tmp) }
+	cleanup := func() { _ = os.RemoveAll(tmp) }
+	fail := func(err error) (skillTree, error) {
+		cleanup()
+		return skillTree{}, err
+	}
 	gz, err := gzip.NewReader(bytes.NewReader(archive))
 	if err != nil {
-		cleanup()
-		return "", func() {}, err
+		return fail(err)
 	}
 	defer gz.Close()
 	tr := tar.NewReader(gz)
 	var extractedBytes int64
+	var unsafe []string
+	tops := map[string]bool{}
+	folded2name := map[string]string{}
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			cleanup()
-			return "", func() {}, err
+			return fail(err)
 		}
-		// Guard against path traversal; only accept entries under the skill dir.
+		// Guard against path traversal; only accept entries under the temp dir.
 		clean := filepath.Clean(hdr.Name)
-		if clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) || filepath.IsAbs(clean) {
+		if clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) || filepath.IsAbs(clean) ||
+			strings.Contains(hdr.Name, `\`) || strings.Contains(hdr.Name, ":") || slices.Contains(strings.Split(hdr.Name, "/"), "..") {
+			unsafe = append(unsafe, hdr.Name)
 			continue
 		}
 		dst := filepath.Join(tmp, clean)
 		if !strings.HasPrefix(dst, filepath.Clean(tmp)+string(os.PathSeparator)) {
+			unsafe = append(unsafe, hdr.Name)
 			continue
+		}
+		if hdr.Typeflag != tar.TypeDir && hdr.Typeflag != tar.TypeReg {
+			unsafe = append(unsafe, hdr.Name) // links, devices: never extracted
+			continue
+		}
+		top, _, _ := strings.Cut(filepath.ToSlash(clean), "/")
+		tops[top] = true
+		// Names that differ only in case collide on Windows and macOS.
+		if folded := strings.ToLower(filepath.ToSlash(clean)); folded != "" {
+			if prev, dup := folded2name[folded]; dup && (prev != filepath.ToSlash(clean) || hdr.Typeflag != tar.TypeDir) {
+				return fail(fmt.Errorf("skills.tar.gz: %q and %q collide on a case-insensitive filesystem", prev, hdr.Name))
+			}
+			folded2name[folded] = filepath.ToSlash(clean)
 		}
 		switch hdr.Typeflag {
 		case tar.TypeDir:
 			if err := os.MkdirAll(dst, 0755); err != nil {
-				cleanup()
-				return "", func() {}, err
+				return fail(err)
 			}
 		case tar.TypeReg:
 			extractedBytes += hdr.Size
 			if hdr.Size > 64<<20 || extractedBytes > 256<<20 {
-				cleanup()
-				return "", func() {}, fmt.Errorf("skills.tar.gz extracted content exceeds size limit")
+				return fail(fmt.Errorf("skills.tar.gz extracted content exceeds size limit"))
 			}
 			if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
-				cleanup()
-				return "", func() {}, err
+				return fail(err)
 			}
 			f, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(hdr.Mode)&0777|0600)
 			if err != nil {
-				cleanup()
-				return "", func() {}, err
+				return fail(err)
 			}
 			if _, err := io.Copy(f, io.LimitReader(tr, 64<<20)); err != nil {
 				f.Close()
-				cleanup()
-				return "", func() {}, err
+				return fail(err)
 			}
 			if err := f.Close(); err != nil {
-				cleanup()
-				return "", func() {}, err
+				return fail(err)
 			}
 		}
 	}
 
-	root = filepath.Join(tmp, SkillName)
-	skill, readErr := os.ReadFile(filepath.Join(root, "SKILL.md"))
-	if !isDir(root) || readErr != nil || len(strings.TrimSpace(string(skill))) == 0 {
-		cleanup()
-		return "", func() {}, fmt.Errorf("skills.tar.gz did not contain a nonempty %s/SKILL.md", SkillName)
+	manifest := legacySkillManifest()
+	legacyArchive := true
+	manifestPath := filepath.Join(tmp, filepath.FromSlash(SkillManifestEntry))
+	if fi, err := os.Lstat(manifestPath); err == nil {
+		if !fi.Mode().IsRegular() {
+			return fail(fmt.Errorf("skills.tar.gz: %s is not a regular file", SkillManifestEntry))
+		}
+		raw, err := os.ReadFile(manifestPath)
+		if err != nil {
+			return fail(err)
+		}
+		if manifest, err = parseSkillManifest(raw); err != nil {
+			return fail(fmt.Errorf("skills.tar.gz: %w", err))
+		}
+		legacyArchive = false
+		if len(unsafe) > 0 {
+			return fail(fmt.Errorf("skills.tar.gz: unsafe entries %q", unsafe))
+		}
+		for top := range tops {
+			if !slices.Contains(manifest.Skills, top) {
+				return fail(fmt.Errorf("skills.tar.gz: %s is not a listed Skill root", top))
+			}
+		}
 	}
-	declared, err := skillMetadataVersion(string(skill))
-	if err != nil || (declared == "" && !(legacyNoChecksum && SemverLess(version, "1.4.0"))) || (declared != "" && declared != version) {
-		cleanup()
-		return "", func() {}, fmt.Errorf("SKILL.md metadata.version %q does not match target %s (parse error: %v)", declared, version, err)
+	for _, name := range manifest.Skills {
+		root := filepath.Join(tmp, name)
+		skill, readErr := os.ReadFile(filepath.Join(root, "SKILL.md"))
+		if !isDir(root) || readErr != nil || len(strings.TrimSpace(string(skill))) == 0 {
+			return fail(fmt.Errorf("skills.tar.gz did not contain a nonempty %s/SKILL.md", name))
+		}
+		declared, err := skillMetadataVersion(string(skill))
+		// Releases before 1.4.0 without checksums shipped a router without
+		// metadata.version; that leniency never extends to a manifest archive.
+		legacyBlank := declared == "" && legacyArchive && legacyNoChecksum && SemverLess(version, "1.4.0")
+		if err != nil || (declared == "" && !legacyBlank) || (declared != "" && declared != version) {
+			return fail(fmt.Errorf("%s/SKILL.md metadata.version %q does not match target %s (parse error: %v)", name, declared, version, err))
+		}
 	}
-	return root, cleanup, nil
+	return skillTree{root: tmp, manifest: manifest, cleanup: cleanup}, nil
 }
 
 // skillMetadataVersion reads the published frontmatter contract: metadata is a
@@ -658,62 +549,6 @@ func skillMetadataVersion(body string) (string, error) {
 		return "", fmt.Errorf("unclosed YAML frontmatter")
 	}
 	return version, nil
-}
-
-// materialize prepares a complete sibling directory, then switches it into
-// place. Failed copies never change the installation; a failed switch restores
-// its backup. A normal sync removes files absent from the release. Preserve mode
-// merges local content and keeps its old marker rather than claiming parity.
-func materialize(src, dst string, preserve bool, version string) error {
-	if resolved, err := filepath.EvalSymlinks(dst); err == nil {
-		dst = resolved
-	}
-	parent := filepath.Dir(dst)
-	if err := os.MkdirAll(parent, 0755); err != nil {
-		return err
-	}
-	stage, err := os.MkdirTemp(parent, ".easyeda-skill-stage-*")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(stage)
-	existed := isDir(dst)
-	if preserve && existed {
-		if err := copyTree(dst, stage, false, false); err != nil {
-			return err
-		}
-	}
-	if err := copyTree(src, stage, preserve, true); err != nil {
-		return err
-	}
-	if !preserve || !existed {
-		if err := os.WriteFile(filepath.Join(stage, versionMarker), []byte(version+"\n"), 0644); err != nil {
-			return err
-		}
-	}
-	if err := os.Chmod(stage, 0755); err != nil {
-		return err
-	}
-	if !existed {
-		return os.Rename(stage, dst)
-	}
-	backup, err := os.MkdirTemp(parent, ".easyeda-skill-backup-*")
-	if err != nil {
-		return err
-	}
-	if err := os.Remove(backup); err != nil {
-		return err
-	}
-	if err := os.Rename(dst, backup); err != nil {
-		return err
-	}
-	if err := os.Rename(stage, dst); err != nil {
-		if restoreErr := os.Rename(backup, dst); restoreErr != nil {
-			return fmt.Errorf("switch skill: %w; restore failed: %v (original preserved at %s)", err, restoreErr, backup)
-		}
-		return err
-	}
-	return os.RemoveAll(backup)
 }
 
 func copyTree(src, dst string, preserve, skipMarker bool) error {

@@ -5,20 +5,53 @@
 
 | Skill | 任务 | 分发方式 |
 |---|---|---|
-| [pcbpilot](pcbpilot/SKILL.md) | 参数化电路设计、typed 执行与回读 | 唯一公开设计包；Release、ClawHub、SkillHub |
+| [pcbpilot](pcbpilot/SKILL.md) | 参数化电路设计、typed 执行与回读；公开 Skill 的路由入口 | 公开（router）；Release、ClawHub、SkillHub |
+| [pcbpilot-review](pcbpilot-review/SKILL.md) | 只读设计评审（quick / full / pre-fab）与“能否投板”结论 | 公开（聚焦）；随 router 发布 |
+| [pcbpilot-kicad-schematic](pcbpilot-kicad-schematic/SKILL.md) | KiCad 原理图 `sch-build` / `sch-edit` / `sch-read` / `sch-check` | 公开（聚焦）；随 router 发布 |
+| [pcbpilot-kicad-pcb](pcbpilot-kicad-pcb/SKILL.md) | KiCad 布局、布线、铺铜、DRC 与签核 | 公开（聚焦）；随 router 发布 |
+| [pcbpilot-fab](pcbpilot-fab/SKILL.md) | KiCad 制造输出（Gerber/钻孔/BOM/CPL）、订单契约与下单验收 | 公开（聚焦）；随 router 发布 |
+| [pcbpilot-library](pcbpilot-library/SKILL.md) | 选型、符号/封装/器件建库、引脚映射验收 | 公开（聚焦）；随 router 发布 |
+| [pcbpilot-sim-report](pcbpilot-sim-report/SKILL.md) | 电源/模拟/布线后仿真、设计意图、设计报告与板卡说明书 | 公开（聚焦）；随 router 发布 |
 | [pcbpilot-repo-lookup](pcbpilot-repo-lookup/SKILL.md) | 跨项目只读查询实现、样例、证据 | 链接源码 checkout |
 | [pcbpilot-repo-maintain](pcbpilot-repo-maintain/SKILL.md) | 修改工具、知识、验证与 Git 贡献 | 链接源码 checkout |
 
+## 公开 Skill 清单
+
+[`public-skills.json`](public-skills.json) 是公开 Skill 的唯一清单：`router` 固定为 `pcbpilot`，
+`skills` 列出随发布安装的全部公开 Skill（router 加若干聚焦 Skill，名称一律 `pcbpilot-<slug>`），
+`retired` 列出以前发布过、现在要从安装目录移除的名字。新增、改名或下线公开 Skill 时同时改清单与
+`internal/selfupdate/skills.go` 的 `publicSkills`（测试保证两者一致），并保持清单的规范格式
+（键排序、两空格缩进、每个名字一行；`install.sh` 按行解析）。
+
+- `pcbpilot` 是路由 Skill：保留完整设计工作流入口，按任务把 Agent 引到聚焦 Skill；共享参考、
+  数据资产和脚本放在 `pcbpilot/`。
+- 聚焦 Skill 只维护自己独有的 reference，共享事实链接到 `pcbpilot/` 内的文件，不复制。
+  跨 Skill 的本地链接只允许“聚焦 Skill → `pcbpilot/`”，且两端都在清单中；`pcbpilot/` 不链接
+  聚焦 Skill，聚焦 Skill 之间也不互链。
+- 全部公开 Skill 共用一个版本：`scripts/sync-skill-version.py` 一次写入清单中每个 `SKILL.md`。
+- 内容不重复：`pack-skill.py --check` 会拒绝在两个 Skill 中出现的长段落（≥200 字符，空白归一后比较）。
+- 下线的 Skill 只从 pcbpilot 写入的目录移除（真实目录且带 `.version` 标记）；软链接和用户自建的
+  同名目录保持不动，`PCBPILOT_SKILL_PRESERVE=1` 时全部保留。
+- 新聚焦 Skill 遇到用户自建的同名目录（无 `.version`）时不覆盖，报告 `conflict`；确需替换用
+  `--adopt`（`pcbpilot update` / `skill sync`）或 `PCBPILOT_SKILL_ADOPT=1`（安装脚本）。
+
 ## 安装与打包
 
-发布版仍通过根目录 `install.sh` 或 `pcbpilot update` 安装 CLI 与公开设计 Skill。
+发布版仍通过根目录 `install.sh` / `install.ps1` 或 `pcbpilot update` 安装 CLI 与清单中的全部公开
+Skill：先把每个客户端 × 每个 Skill 完整暂存，再一起切换；任一切换失败就把已切换的全部还原
+（`pcbpilot update` 按客户端成组，安装脚本整体成组）。安装脚本在解压前逐项检查归档成员（拒绝绝对
+路径、`..`、链接、重复项和清单外的根目录），清单必须是规范格式。已装 router 的客户端会自动补齐
+新增的聚焦 Skill；`PCBPILOT_INSTALL_SKILLS` 选择客户端，`PCBPILOT_SKILL_PRESERVE` 对每个 Skill 生效。
+`pcbpilot update` 把本次创建、替换、移除的目录及原内容记入回滚快照，回滚只撤销这些目录。
 源码链接使用 `python3 scripts/install-agent-skills.py`，默认只安装仓库协作入口；
-`--scope design` 选择公开设计 Skill，`--scope all` 选择全部，`--dry-run` 预览。
+`--scope design` 选择清单中的公开 Skill，`--scope all` 选择全部，`--dry-run` 预览。
 目标选择、旧链接迁移和冲突保护见 [Agent 协作设计](../../docs/agent-collaboration.md)。
 
-`pack-skill.py` 只打包本目录 `pcbpilot/` 内已跟踪或已暂存的文件，压缩包根仍是
-`pcbpilot/`。本 README、协作 Skill、memory 和本机状态不进入公开包；公开包中的
-相对链接必须在独立解包后成立。发布授权与版本准备见 [发布流程](../../docs/release-workflow.md)。
+`pack-skill.py` 只打包清单中各 Skill 内已跟踪或已暂存的文件：`skills.tar.gz` 根目录是每个
+Skill 一个目录，规范格式的清单副本放在 `pcbpilot/.public-skills.json`（随 router 安装，记录该版本的
+Skill 集合；v0.10.x 读取器只接受 `pcbpilot/` 条目）。文本文件一律按 LF 打包，与 git 索引一致。本 README、协作 Skill、memory 和本机状态不进入
+公开包；公开包中的相对链接必须在解包后成立。已跟踪却不在清单（也不是 `pcbpilot-repo-*`）的 Skill、
+以及仍被跟踪的已下线 Skill 都会让检查失败。发布授权与版本准备见 [发布流程](../../docs/release-workflow.md)。
 
 ## 编写与维护
 
@@ -27,7 +60,8 @@
 - 保留实测硬知识；精简只做去重、下沉或结构化。确认同一事实仍有明确维护位置后才能移除旧文。
 - 信息只有一个家：入口保留任务路由与关键约束，正文放到按需读取的 reference；不要重复规则表。
 - 改 CLI、daemon、typed action、connector 或块库时，同步公开 Skill 的命令签名、例子和限制。
-- 公共入口保持完整设计工作流，不重新拆成原理图、PCB、规则等多个互相漂移的公开 Skill。
+- `pcbpilot` 入口保持完整设计工作流与任务路由；聚焦 Skill 只承接一个职责（评审、制造输出、
+  库、KiCad 原理图、KiCad PCB、仿真报告等），不另起一套工作流，也不复制 router 已有的规则。
 - `SKILL.md` 保留合法 frontmatter 与已有 `metadata.version`，版本行维持两空格缩进。
   name 使用稳定英文 slug；description 清晰区分触发任务，正文语言保持自洽。
 - references 给出明确加载场景；长文提供目录。安装/开发历史不塞进设计入口。

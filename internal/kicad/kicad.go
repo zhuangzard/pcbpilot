@@ -148,6 +148,11 @@ func bridgeScript() (string, error) {
 
 // RunBridge runs one bridge subcommand and returns its result object.
 func (t *Tools) RunBridge(args ...string) (json.RawMessage, error) {
+	return t.RunBridgeEnv(nil, args...)
+}
+
+// RunBridgeEnv is RunBridge with extra environment variables ("K=V").
+func (t *Tools) RunBridgeEnv(env []string, args ...string) (json.RawMessage, error) {
 	script, err := bridgeScript()
 	if err != nil {
 		return nil, fmt.Errorf("kicad bridge: %w", err)
@@ -155,6 +160,9 @@ func (t *Tools) RunBridge(args ...string) (json.RawMessage, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), BridgeTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, t.Python, append([]string{script}, args...)...)
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	runErr := cmd.Run()

@@ -1,6 +1,7 @@
 """Offline release preparation regression; all writes stay in temporary repos."""
 
 import importlib.util
+import io
 import json
 from pathlib import Path
 import subprocess
@@ -20,6 +21,18 @@ def load_script(name):
 pack = load_script("pack-skill")
 release = load_script("release-check")
 pack_mcp = load_script("pack-mcp")
+sync_version = load_script("sync-skill-version")
+manifest_lib = load_script("skill_manifest")
+
+# Test-only placeholder for a focused public Skill; real focused Skills are
+# written elsewhere and are never created by these fixtures in the checkout.
+DEMO = "pcbpilot-demo"
+
+
+def write_manifest(repo, skills=("pcbpilot",), retired=()):
+    path = Path(repo) / ".agents/skills/public-skills.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(manifest_lib.Manifest("pcbpilot", tuple(skills), tuple(retired)).canonical_bytes())
 
 
 class TrackedSkillPackageTests(unittest.TestCase):
@@ -34,6 +47,7 @@ class TrackedSkillPackageTests(unittest.TestCase):
         self.run_git("config", "user.email", "fixture@example.invalid")
         (self.skill / "SKILL.md").write_text('---\nmetadata:\n  version: "1.4.2"\n---\n[Guide](references/guide.md)\n')
         (self.skill / "references/guide.md").write_text("Release fixture\n")
+        write_manifest(self.repo)
         self.run_git("add", ".agents/skills")
         self.run_git("commit", "-qm", "fixture")
 
@@ -48,7 +62,7 @@ class TrackedSkillPackageTests(unittest.TestCase):
         self.assertEqual(pack.pack_skill(self.repo, output), 3)
         with tarfile.open(output) as archive:
             self.assertEqual(set(archive.getnames()), {
-                "pcbpilot/SKILL.md", "pcbpilot/references/guide.md", "pcbpilot/references/new.md",
+                "pcbpilot/.public-skills.json", "pcbpilot/SKILL.md", "pcbpilot/references/guide.md", "pcbpilot/references/new.md",
             })
             self.assertTrue(all(item.isfile() for item in archive.getmembers()))
         original = output.read_bytes()
@@ -98,6 +112,246 @@ class TrackedSkillPackageTests(unittest.TestCase):
         self.assertEqual(len(pack.check_skill(self.repo)), 2)
 
 
+class MultiSkillPackageTests(unittest.TestCase):
+    """Router pcbpilot/ plus a test-only focused Skill packaged side by side."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.repo = Path(self.temp.name)
+        self.router = self.repo / ".agents/skills/pcbpilot"
+        self.demo = self.repo / ".agents/skills" / DEMO
+        (self.router / "references").mkdir(parents=True)
+        (self.demo / "references").mkdir(parents=True)
+        (self.router / "SKILL.md").write_text('---\nmetadata:\n  version: "1.4.2"\n---\n[Shared](references/shared.md)\n')
+        (self.router / "references/shared.md").write_text("Shared router reference\n")
+        (self.demo / "SKILL.md").write_text('---\nmetadata:\n  version: "1.4.2"\n---\n[Own](references/own.md)\n')
+        (self.demo / "references/own.md").write_text("[Shared](../../pcbpilot/references/shared.md)\n")
+        write_manifest(self.repo, ("pcbpilot", DEMO), ("pcbpilot-old",))
+        self.run_git("init", "-q")
+        self.run_git("config", "user.name", "Release fixture")
+        self.run_git("config", "user.email", "fixture@example.invalid")
+        self.run_git("config", "core.autocrlf", "false")
+        self.stage_and_commit()
+
+    def run_git(self, *args):
+        return subprocess.check_output(["git", "-C", str(self.repo), *args], stderr=subprocess.STDOUT)
+
+    def stage_and_commit(self):
+        self.run_git("add", "-A", ".agents/skills")
+        self.run_git("commit", "-qm", "fixture", "--allow-empty")
+
+    def test_archive_has_one_root_per_skill_and_canonical_manifest(self):
+        output = self.repo / "dist/skills.tar.gz"
+        self.assertEqual(pack.pack_skill(self.repo, output), 4)
+        with tarfile.open(output) as archive:
+            self.assertEqual(sorted(archive.getnames()), sorted([
+                "pcbpilot/.public-skills.json", "pcbpilot/SKILL.md", "pcbpilot/references/shared.md",
+                f"{DEMO}/SKILL.md", f"{DEMO}/references/own.md"]))
+            # Inside the router, so v0.10.x readers (pcbpilot/ entries only) accept it.
+            self.assertEqual(archive.getnames()[0], "pcbpilot/.public-skills.json")
+            manifest = manifest_lib.from_archive(archive)
+            self.assertEqual(manifest.skills, ("pcbpilot", DEMO))
+            self.assertEqual(manifest.retired, ("pcbpilot-old",))
+            self.assertEqual(archive.extractfile("pcbpilot/.public-skills.json").read(), manifest.canonical_bytes())
+        first = output.read_bytes()
+        pack.pack_skill(self.repo, output)
+        self.assertEqual(first, output.read_bytes(), "multi-skill archive must stay reproducible")
+
+    def test_link_rules_across_roots(self):
+        # Router -> focused Skill: the router must stand alone.
+        (self.router / "references/shared.md").write_text(f"[Demo](../../{DEMO}/SKILL.md)\n")
+        with self.assertRaisesRegex(ValueError, "crosses into another skill"):
+            pack.check_skill(self.repo)
+        (self.router / "references/shared.md").write_text("Shared router reference\n")
+        # Focused -> another focused Skill.
+        other = self.repo / ".agents/skills/pcbpilot-other"
+        other.mkdir()
+        (other / "SKILL.md").write_text('---\nmetadata:\n  version: "1.4.2"\n---\nOther\n')
+        write_manifest(self.repo, ("pcbpilot", DEMO, "pcbpilot-other"))
+        self.stage_and_commit()
+        (self.demo / "references/own.md").write_text("[Other](../../pcbpilot-other/SKILL.md)\n")
+        with self.assertRaisesRegex(ValueError, "crosses into another skill"):
+            pack.check_skill(self.repo)
+        # Focused -> repository docs: outside every installed Skill.
+        (self.demo / "references/own.md").write_text("[Docs](../../../../docs/x.md)\n")
+        with self.assertRaisesRegex(ValueError, "escapes the installed skill"):
+            pack.check_skill(self.repo)
+        # Focused -> untracked router file.
+        (self.router / "references/draft.md").write_text("draft\n")
+        (self.demo / "references/own.md").write_text("[Draft](../../pcbpilot/references/draft.md)\n")
+        with self.assertRaisesRegex(ValueError, "not included in the tracked package"):
+            pack.check_skill(self.repo)
+
+    def test_unlisted_and_retired_tracked_skills_fail(self):
+        stray = self.repo / ".agents/skills/pcbpilot-stray"
+        stray.mkdir()
+        (stray / "SKILL.md").write_text('---\nmetadata:\n  version: "1.4.2"\n---\n')
+        self.stage_and_commit()
+        with self.assertRaisesRegex(ValueError, "not listed in public-skills.json"):
+            pack.check_skill(self.repo)
+        self.run_git("mv", ".agents/skills/pcbpilot-stray", ".agents/skills/pcbpilot-old")
+        self.stage_and_commit()
+        with self.assertRaisesRegex(ValueError, "listed as retired but still tracked"):
+            pack.check_skill(self.repo)
+
+    def test_repository_skills_are_neither_listed_nor_packaged(self):
+        repo_skill = self.repo / ".agents/skills/pcbpilot-repo-lookup"
+        repo_skill.mkdir()
+        (repo_skill / "SKILL.md").write_text("---\nname: lookup\n---\n")
+        self.stage_and_commit()
+        output = self.repo / "dist/skills.tar.gz"
+        pack.pack_skill(self.repo, output)
+        with tarfile.open(output) as archive:
+            self.assertFalse(any(name.startswith("pcbpilot-repo-") for name in archive.getnames()))
+
+    def test_large_paragraph_duplicated_across_skills_is_flagged(self):
+        paragraph = ("Keep the decoupling capacitor next to the supply pin and return its ground through a "
+                     "short via; measure the loop after every move and record the readback before routing. ") * 2
+        (self.router / "references/shared.md").write_text("Intro\n\n" + paragraph + "\n")
+        # Re-wrapped lines still count as the same paragraph.
+        rewrapped = paragraph.replace("; ", ";\n")
+        (self.demo / "references/own.md").write_text(rewrapped + "\n\n[Shared](../../pcbpilot/references/shared.md)\n")
+        with self.assertRaisesRegex(ValueError, "duplicated content across skills"):
+            pack.check_skill(self.repo)
+        # Short shared phrases and repeats inside one Skill are fine.
+        (self.demo / "references/own.md").write_text("Intro\n\n[Shared](../../pcbpilot/references/shared.md)\n")
+        (self.router / "SKILL.md").write_text('---\nmetadata:\n  version: "1.4.2"\n---\n' + paragraph + "\n\n[Shared](references/shared.md)\n")
+        self.assertEqual(len(pack.check_skill(self.repo)), 4)
+
+    def test_crlf_checkout_packs_lf_and_passes_release_and_smoke_checks(self):
+        # A Windows checkout with core.autocrlf: tracked text arrives as CRLF.
+        for path in [self.router / "SKILL.md", self.demo / "SKILL.md", self.demo / "references/own.md"]:
+            path.write_bytes(path.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
+        binary = self.router / "references/blob.bin"
+        binary.write_bytes(b"\x00\r\n\x00")
+        (self.router / "references/shared.md").write_text("Shared router reference\n[Blob](blob.bin)\n")
+        self.stage_and_commit()
+        output = self.repo / "dist/skills.tar.gz"
+        pack.pack_skill(self.repo, output)
+        with tarfile.open(output) as archive:
+            for member in archive.getmembers():
+                data = archive.extractfile(member).read()
+                if member.name.endswith(".bin"):
+                    self.assertEqual(data, b"\x00\r\n\x00", "binary content must be packed verbatim")
+                else:
+                    self.assertNotIn(b"\r\n", data, member.name)
+        release.check_skills_archive(self.repo, output, "1.4.2")
+        smoke = load_script("release-smoke")
+        with tempfile.TemporaryDirectory() as unpack:
+            manifest, roots, modes = smoke.extract_skills(output, Path(unpack))
+            # The fixture router lacks the real helper scripts, so smoke the focused Skill.
+            self.assertEqual(smoke.check_skill(roots[DEMO], "1.4.2", modes, roots["pcbpilot"])["localLinks"], 2)
+
+    def test_generated_manifest_copy_must_not_be_tracked(self):
+        (self.router / ".public-skills.json").write_text("{}")
+        self.stage_and_commit()
+        with self.assertRaisesRegex(ValueError, "generated by the packager"):
+            pack.check_skill(self.repo)
+
+    def test_names_differing_only_in_case_are_rejected(self):
+        # Add a second index entry that differs only in case (works on any
+        # filesystem); the two would collide on Windows and macOS.
+        self.run_git("config", "core.ignorecase", "false")
+        blob = self.run_git("hash-object", "-w", str(self.demo / "references/own.md")).decode().strip()
+        self.run_git("update-index", "--add", "--cacheinfo", f"100644,{blob},.agents/skills/{DEMO}/references/OWN.md")
+        with self.assertRaisesRegex(ValueError, "differ only in case"):
+            pack.check_skill(self.repo)
+
+    def test_sync_version_stamps_every_listed_skill(self):
+        self.assertEqual(sync_version.sync(self.repo, "1.5.0", check=True), 1)
+        self.assertEqual(sync_version.sync(self.repo, "1.5.0", check=False), 0)
+        for root in (self.router, self.demo):
+            self.assertIn('  version: "1.5.0"', (root / "SKILL.md").read_text())
+        self.assertEqual(sync_version.sync(self.repo, "1.5.0", check=True), 0)
+
+    def test_sync_version_writes_nothing_when_one_skill_lacks_a_version(self):
+        (self.demo / "SKILL.md").write_text("---\nname: demo\n---\n")
+        before = (self.router / "SKILL.md").read_bytes()
+        self.assertEqual(sync_version.sync(self.repo, "1.5.0", check=False), 1)
+        self.assertEqual((self.router / "SKILL.md").read_bytes(), before)
+
+    def test_sync_version_keeps_crlf_line_endings(self):
+        (self.demo / "SKILL.md").write_bytes(b'---\r\nmetadata:\r\n  version: "1.4.2"\r\n---\r\n')
+        self.assertEqual(sync_version.sync(self.repo, "1.5.0", check=False), 0)
+        self.assertEqual((self.demo / "SKILL.md").read_bytes(), b'---\r\nmetadata:\r\n  version: "1.5.0"\r\n---\r\n')
+
+    def test_release_check_requires_every_skill_version_and_exact_archive(self):
+        (self.repo / "extension").mkdir()
+        for file in ["extension/extension.json", "extension/package.json"]:
+            (self.repo / file).write_text(json.dumps({"version": "1.4.2"}))
+        (self.repo / "extension/package-lock.json").write_text(json.dumps({"version": "1.4.2", "packages": {"": {"version": "1.4.2"}}}))
+        (self.repo / "extension/CHANGELOG.md").write_text("## [1.4.2]\n")
+        self.assertEqual(release.check_sources(self.repo, "v1.4.2"), "1.4.2")
+        output = self.repo / "dist/skills.tar.gz"
+        pack.pack_skill(self.repo, output)
+        release.check_skills_archive(self.repo, output, "1.4.2")
+        with self.assertRaisesRegex(ValueError, "wrong version"):
+            release.check_skills_archive(self.repo, output, "1.4.3")
+        # The archive must carry exactly the source list.
+        write_manifest(self.repo, ("pcbpilot",))
+        with self.assertRaisesRegex(ValueError, "differs from the source manifest"):
+            release.check_skills_archive(self.repo, output, "1.4.2")
+        write_manifest(self.repo, ("pcbpilot", DEMO), ("pcbpilot-old",))
+        (self.demo / "SKILL.md").write_text('---\nmetadata:\n  version: "1.4.1"\n---\n')
+        with self.assertRaisesRegex(ValueError, f"{DEMO}/SKILL.md version must be 1.4.2"):
+            release.check_sources(self.repo, "v1.4.2")
+
+    def test_release_check_rejects_legacy_or_padded_archive(self):
+        legacy = self.repo / "legacy.tar.gz"
+        with tarfile.open(legacy, "w:gz") as archive:
+            data = (self.router / "SKILL.md").read_bytes()
+            item = tarfile.TarInfo("pcbpilot/SKILL.md")
+            item.size = len(data)
+            archive.addfile(item, io.BytesIO(data))
+        with self.assertRaisesRegex(ValueError, "has no pcbpilot/.public-skills.json"):
+            release.check_skills_archive(self.repo, legacy, "1.4.2")
+        output = self.repo / "dist/skills.tar.gz"
+        pack.pack_skill(self.repo, output)
+        padded = self.repo / "padded.tar.gz"
+        with tarfile.open(output) as source, tarfile.open(padded, "w:gz") as archive:
+            for member in source.getmembers():
+                archive.addfile(member, source.extractfile(member))
+            archive.addfile(tarfile.TarInfo("pcbpilot-unlisted/SKILL.md"), io.BytesIO(b""))
+        with self.assertRaisesRegex(ValueError, "outside the listed skills"):
+            release.check_skills_archive(self.repo, padded, "1.4.2")
+        linked = self.repo / "linked.tar.gz"
+        with tarfile.open(output) as source, tarfile.open(linked, "w:gz") as archive:
+            for member in source.getmembers():
+                archive.addfile(member, source.extractfile(member))
+            link = tarfile.TarInfo("pcbpilot/link")
+            link.type, link.linkname = tarfile.SYMTYPE, "../../outside"
+            archive.addfile(link)
+        with self.assertRaisesRegex(ValueError, "outside the listed skills"):
+            release.check_skills_archive(self.repo, padded, "1.4.2")
+
+
+class SkillManifestTests(unittest.TestCase):
+    def test_checkout_manifest_is_valid_canonical_and_lists_the_router(self):
+        repo = Path(__file__).resolve().parents[2]
+        manifest = manifest_lib.load(repo)
+        self.assertEqual(manifest.router, "pcbpilot")
+        self.assertIn("pcbpilot", manifest.skills)
+        raw = (repo / ".agents/skills/public-skills.json").read_bytes().replace(b"\r\n", b"\n")
+        self.assertEqual(raw, manifest.canonical_bytes(), "keep public-skills.json canonical (sorted keys, indent 2)")
+
+    def test_invalid_manifests_are_rejected(self):
+        good = {"schemaVersion": 1, "router": "pcbpilot", "skills": ["pcbpilot", DEMO], "retired": []}
+        self.assertEqual(manifest_lib.parse(good).skills, ("pcbpilot", DEMO))
+        for change in [{"schemaVersion": 2}, {"router": "other"}, {"skills": [DEMO]},
+                       {"skills": ["pcbpilot", "pcbpilot"]}, {"skills": ["pcbpilot", "user-skill"]},
+                       {"skills": ["pcbpilot", "pcbpilot-repo-lookup"]}, {"skills": ["pcbpilot", "pcbpilot-../x"]},
+                       {"retired": ["pcbpilot"]}, {"retired": [DEMO]}, {"retired": ["my-skill"]}, {"extra": True}]:
+            with self.subTest(change=change):
+                with self.assertRaises(ValueError):
+                    manifest_lib.parse({**good, **change})
+
+    def test_canonical_form_is_awk_parsable_one_item_per_line(self):
+        text = manifest_lib.Manifest("pcbpilot", ("pcbpilot", DEMO), ()).canonical_bytes().decode()
+        self.assertIn('  "skills": [\n    "pcbpilot",\n    "pcbpilot-demo"\n  ]', text)
+        self.assertIn('  "retired": [],', text)
+
+
 class ReleaseVersionAndAssetTests(unittest.TestCase):
     def test_local_prerelease_is_not_a_publishable_release(self):
         for file in ["extension/extension.json", "extension/package.json", "extension/package-lock.json", ".agents/skills/pcbpilot/SKILL.md", "extension/CHANGELOG.md"]:
@@ -120,6 +374,7 @@ class ReleaseVersionAndAssetTests(unittest.TestCase):
         self.write_json("extension/package.json", {"version": "1.4.2"})
         self.write_json("extension/package-lock.json", {"version": "1.4.2", "packages": {"": {"version": "1.4.2"}}})
         (self.repo / ".agents/skills/pcbpilot/SKILL.md").write_text('---\nmetadata:\n  version: "1.4.2"\n---\n')
+        write_manifest(self.repo)
         (self.repo / "extension/CHANGELOG.md").write_text("# Changes\n\n## [1.4.2]\n\nNew release\n")
 
     def write_json(self, path, data):

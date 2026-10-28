@@ -1,0 +1,14 @@
+{
+  "retired": [],
+  "router": "pcbpilot",
+  "schemaVersion": 1,
+  "skills": [
+    "pcbpilot",
+    "pcbpilot-fab",
+    "pcbpilot-kicad-pcb",
+    "pcbpilot-kicad-schematic",
+    "pcbpilot-library",
+    "pcbpilot-review",
+    "pcbpilot-sim-report"
+  ]
+}

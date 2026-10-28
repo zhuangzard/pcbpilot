@@ -28,6 +28,9 @@
 #   rules PCB RULES.json OUT        design rules + Default netclass (mil)
 #   pours PCB SPEC.json OUT         board-outline copper pours + fill
 #   edit PCB OPS.json OUT           track widths, vias, stubs, silk texts + fill
+#   sync-read PCB                   pcb-sync inventory (mm, KiCad y-down)
+#   fp-info SPEC.json               library footprints: pads + courtyard box
+#   sync-apply PCB|- PLAN.json OUT  apply a pcb-sync plan; OUT in $PCBPILOT_STAGE_DIR
 #
 # Writes are all or nothing: edit and pours check every net, layer, item id
 # and footprint first; an unknown net, a missing id or a designator on more
@@ -35,6 +38,7 @@
 # and nothing is saved. Footprints are keyed by footprint_index(), never by
 # designator alone (several REF** logos, two H1 holes).
 
+import hashlib
 import json
 import math
 import os
@@ -795,7 +799,7 @@ def check_effective(ds, ns, names, classes):
 
 
 def netclasses(pcb, reqs_path, out):
-    with open(reqs_path) as f:
+    with open(reqs_path, encoding="utf-8") as f:
         reqs = json.load(f)
     bad, reqs, isolation, edges = validate_netclasses(reqs)
     if bad:
@@ -897,7 +901,7 @@ def netclasses(pcb, reqs_path, out):
     src_dru = dru_path(pcb)
     text = ""
     if os.path.exists(src_dru):
-        with open(src_dru) as f:
+        with open(src_dru, encoding="utf-8") as f:
             text = f.read()
     text = re.sub(re.escape(DRU_BEGIN) + r".*?" + re.escape(DRU_END) + r"\n?", "", text, flags=re.S)
     rules = []
@@ -934,7 +938,7 @@ def netclasses(pcb, reqs_path, out):
         text = text.rstrip("\n") + "\n" + DRU_BEGIN + "\n" + "\n".join(rules) + "\n" + DRU_END + "\n"
     out_dru = dru_path(out)
     if text.strip():
-        with open(out_dru, "w") as f:
+        with open(out_dru, "w", encoding="utf-8") as f:
             f.write(text)
     elif os.path.exists(out_dru) and os.path.abspath(out_dru) != os.path.abspath(src_dru):
         os.remove(out_dru)
@@ -948,7 +952,7 @@ def list_patterns(pcb):
     binding exposes NET_SETTINGS' pattern list only as an opaque object."""
     pro = os.path.splitext(pcb)[0] + ".kicad_pro"
     try:
-        with open(pro) as f:
+        with open(pro, encoding="utf-8") as f:
             ns = json.load(f).get("net_settings") or {}
     except (OSError, ValueError):
         return []
@@ -1020,7 +1024,7 @@ def nm(v_mil):
 def rules(pcb, rules_path, out):
     """Board design rules + Default netclass (mil). The caller makes sure a
     .kicad_pro sits next to PCB (rules live in the project file)."""
-    with open(rules_path) as f:
+    with open(rules_path, encoding="utf-8") as f:
         r = json.load(f)
     board = pcbnew.LoadBoard(pcb)
     ds = board.GetDesignSettings()
@@ -1061,7 +1065,7 @@ POUR_PREFIX = "pcbpilot pour"
 def pours(pcb, spec_path, out):
     """Board-outline copper zones [{net, layer (pcbpilot id), clearanceMil}],
     replacing earlier pcbpilot pours, then fill and save."""
-    with open(spec_path) as f:
+    with open(spec_path, encoding="utf-8") as f:
         spec = json.load(f)
     board = pcbnew.LoadBoard(pcb)
     bad = validate_pours(board, spec)
@@ -1380,7 +1384,7 @@ def edit(pcb, ops_path, out):
     All or nothing: every id, net, layer and footprint is checked first; one
     unknown net, missing id or ambiguous designator rejects the whole edit
     and nothing is saved (the result lists every problem)."""
-    with open(ops_path) as f:
+    with open(ops_path, encoding="utf-8") as f:
         ops = json.load(f)
     board = pcbnew.LoadBoard(pcb)
     bad, plan = validate_edit(board, ops)
@@ -1460,12 +1464,632 @@ def edit(pcb, ops_path, out):
     return {"ok": True, "error": "", "out": out, "done": done, "zonesFilled": zones}
 
 
+# ── pcb-sync: headless "Update PCB from Schematic" ──────────────────────────
+#
+# Three subcommands, driven by `pcbpilot kicad pcb-sync` (Go computes the
+# plan; the bridge only reads and applies it):
+#   sync-read PCB              footprints, pads, nets and the outline (mm,
+#                              KiCad coordinates, y down)
+#   fp-info SPEC.json          load library footprints: pads + courtyard box
+#   sync-apply PCB|- PLAN OUT  apply a plan and save OUT, which must be a
+#                              file directly inside $PCBPILOT_STAGE_DIR (Go
+#                              commits it with a kfile transaction); "-"
+#                              starts a new board
+# sync-apply is all or nothing: every op, footprint id, pad, net and library
+# footprint is checked first; one problem rejects the plan and nothing is
+# saved. Footprints are addressed by footprint_index() keys, never by
+# designator.
+
+SYNC_PAD_TYPES = {}
+
+
+def sync_pad_type(pad):
+    if not SYNC_PAD_TYPES:
+        SYNC_PAD_TYPES.update({pcbnew.PAD_ATTRIB_PTH: "pth", pcbnew.PAD_ATTRIB_SMD: "smd",
+                               pcbnew.PAD_ATTRIB_CONN: "conn", pcbnew.PAD_ATTRIB_NPTH: "npth"})
+    return SYNC_PAD_TYPES.get(pad.GetAttribute(), "other")
+
+
+def mm(v):
+    return round(v / 1e6, 6)
+
+
+def box_mm(box):
+    return {"minX": mm(box.GetX()), "minY": mm(box.GetY()), "maxX": mm(box.GetRight()), "maxY": mm(box.GetBottom())}
+
+
+def union_box(boxes):
+    out = None
+    for b in boxes:
+        if out is None:
+            out = dict(b)
+        else:
+            out = {"minX": min(out["minX"], b["minX"]), "minY": min(out["minY"], b["minY"]),
+                   "maxX": max(out["maxX"], b["maxX"]), "maxY": max(out["maxY"], b["maxY"])}
+    return out
+
+
+def fpid_of(fp):
+    return str(fp.GetFPID().GetUniStringLibId())
+
+
+def user_fields(fp):
+    """{name: text} of every field but Reference and Value (Datasheet,
+    Description and user fields)."""
+    return {f.GetName(): f.GetText() for f in fp.GetFields() if not (f.IsReference() or f.IsValue())}
+
+
+def fp_box(fp):
+    """(box, source): the courtyard box of a footprint (front and back), else
+    its pads' box, else its bounding box. The footprint must be on a board
+    (pcbnew crashes building the caches of an orphan footprint)."""
+    try:
+        fp.BuildCourtyardCaches()
+    except Exception:
+        pass
+    boxes = []
+    for layer in (pcbnew.F_CrtYd, pcbnew.B_CrtYd):
+        ps = fp.GetCourtyard(layer)
+        if ps.OutlineCount():
+            boxes.append(box_mm(ps.BBox()))
+    if boxes:
+        return union_box(boxes), "courtyard"
+    pads = [box_mm(p.GetBoundingBox()) for p in fp.Pads()]
+    if pads:
+        return union_box(pads), "pads"
+    return box_mm(fp.GetBoundingBox(False)), "bbox"
+
+
+def outline_box(board):
+    boxes = [box_mm(d.GetBoundingBox()) for d in board.GetDrawings() if d.GetLayer() == pcbnew.Edge_Cuts]
+    for fp in board.GetFootprints():
+        boxes += [box_mm(g.GetBoundingBox()) for g in fp.GraphicalItems() if g.GetLayer() == pcbnew.Edge_Cuts]
+    return union_box(boxes)
+
+
+def sync_read(board):
+    fps = []
+    for e in footprint_index(board):
+        fp = e["fp"]
+        a = fp.GetAttributes()
+        pos = fp.GetPosition()
+        box, _ = fp_box(fp)
+        fps.append({
+            "id": e["key"], "uuid": e["uuid"], "ref": e["ref"], "path": fp.GetPath().AsString(),
+            "sheetname": fp.GetSheetname(), "sheetfile": fp.GetSheetfile(), "fpid": fpid_of(fp),
+            "value": fp.GetValue(), "fields": user_fields(fp),
+            "dnp": bool(a & pcbnew.FP_DNP), "excludeFromBom": bool(a & pcbnew.FP_EXCLUDE_FROM_BOM),
+            "excludeFromPos": bool(a & pcbnew.FP_EXCLUDE_FROM_POS_FILES), "boardOnly": bool(a & pcbnew.FP_BOARD_ONLY),
+            "locked": fp.IsLocked(), "x": mm(pos.x), "y": mm(pos.y), "rot": round(fp.GetOrientationDegrees(), 6),
+            "side": "B" if fp.IsFlipped() else "F", "box": box,
+            "pads": [{"number": p.GetNumber(), "net": p.GetNetname(), "type": sync_pad_type(p)} for p in fp.Pads()],
+        })
+    nets = {}
+
+    def net(name):
+        return nets.setdefault(name, {"name": name, "pads": 0, "tracks": 0, "vias": 0, "zones": 0, "shapes": 0})
+
+    for name in board.GetNetsByName().keys():
+        if str(name):
+            net(str(name))
+    for p in board.GetPads():
+        if p.GetNetname():
+            net(p.GetNetname())["pads"] += 1
+    for t in board.GetTracks():
+        if t.GetNetname():
+            net(t.GetNetname())["vias" if t.Type() == pcbnew.PCB_VIA_T else "tracks"] += 1
+    for z in board.Zones():
+        if z.GetNetname() and not z.GetIsRuleArea():
+            net(z.GetNetname())["zones"] += 1
+    for d in net_shapes(board):
+        net(d.GetNetname())["shapes"] += 1
+    return {"ok": True, "error": "", "kicadVersion": pcbnew.Version(), "units": "mm",
+            "footprints": fps, "nets": [nets[k] for k in sorted(nets)], "outline": outline_box(board)}
+
+
+def load_library_fp(lib_dir, name):
+    """(footprint, problem): FootprintLoad that never raises."""
+    if not os.path.isdir(lib_dir):
+        return None, "library folder %s does not exist" % lib_dir
+    try:
+        fp = pcbnew.FootprintLoad(lib_dir, name)
+    except Exception as e:
+        return None, "cannot read library %s: %s" % (lib_dir, e)
+    if fp is None:
+        return None, "library %s has no footprint %s" % (lib_dir, name)
+    return fp, None
+
+
+def fp_info(spec_path):
+    """[{"id", "libDir", "name"}] → {id: {pads, box, boxSource}}. A footprint
+    that does not load is listed in problems (E_FP_NOT_FOUND on the Go side).
+    Nothing is saved: the scratch board only parents the footprints."""
+    with open(spec_path, encoding="utf-8") as f:
+        spec = json.load(f)
+    if not isinstance(spec, list):
+        return {"ok": False, "error": "fp-info: the request is a %s, not a list" % type(spec).__name__}
+    board = pcbnew.BOARD()
+    out, bad = {}, []
+    for i, s in enumerate(spec):
+        if not isinstance(s, dict) or not all(is_str(s.get(k)) for k in ("id", "libDir", "name")):
+            bad.append({"index": i, "detail": "entry is not {id, libDir, name} strings"})
+            continue
+        fp, why = load_library_fp(s["libDir"], s["name"])
+        if fp is None:
+            bad.append({"index": i, "id": s["id"], "detail": why})
+            continue
+        board.Add(fp)
+        box, src = fp_box(fp)
+        out[s["id"]] = {"pads": [{"number": p.GetNumber(), "type": sync_pad_type(p)} for p in fp.Pads()],
+                        "box": box, "boxSource": src}
+    return {"ok": True, "error": "", "footprints": out, "problems": bad}
+
+
+SYNC_OPS = ("renameNet", "addFootprint", "swapFootprint", "setRef", "setValue", "setField", "removeField",
+            "setPath", "setSheet", "setFlags", "setPadNet", "orphan")
+SYNC_FP_OPS = SYNC_OPS[2:]  # ops on an existing footprint (key "fp")
+MANDATORY_FIELDS = ("Reference", "Value", "Datasheet", "Description", "Footprint")
+KIID_PATH_RE = re.compile(r"^(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})+$")
+
+
+def stage_out(out):
+    """OUT resolved; it must be a file directly inside $PCBPILOT_STAGE_DIR,
+    the directory Go created for this run. The bridge never writes a final
+    path: Go commits the staged files with a kfile transaction."""
+    stage = os.environ.get("PCBPILOT_STAGE_DIR", "")
+    if not stage:
+        raise RuntimeError("PCBPILOT_STAGE_DIR is not set: sync-apply only writes into a pcbpilot stage directory")
+    s, o = os.path.realpath(stage), os.path.realpath(out)
+    if os.path.normcase(os.path.dirname(o)) != os.path.normcase(s):
+        raise RuntimeError("output %s is not directly inside the stage directory %s" % (out, stage))
+    return o
+
+
+def is_str(v, empty=False):
+    return isinstance(v, str) and (empty or v != "")
+
+
+def validate_sync(board, plan):
+    """(problems, ctx) of a sync-apply plan, before any change: every field
+    the apply phase reads is checked and every library footprint loaded."""
+    bad = []
+    if not isinstance(plan, dict) or plan.get("schema") != "pcbpilot.kicad.pcb-sync.apply/1":
+        return ["plan: not a pcbpilot.kicad.pcb-sync.apply/1 object"], None
+    ops = plan.get("ops")
+    if not isinstance(ops, list):
+        return ["plan.ops: not a list"], None
+    by_id = {e["key"]: e for e in footprint_index(board)}
+    nets = {str(k) for k in board.GetNetsByName().keys() if str(k)}
+    renamed_to, renamed_from, removed, swapped, loaded, padmap = set(), set(), set(), set(), {}, {}
+
+    def check_pad_nets(i, what, pn, pads):
+        if not isinstance(pn, dict):
+            bad.append("ops[%d] %s: padNets is not an object" % (i, what))
+            return
+        nums = {p.GetNumber() for p in pads if sync_pad_type(p) != "npth" and p.GetNumber()}
+        for k, v in pn.items():
+            if k not in nums:
+                bad.append("ops[%d] %s: pad %r is not a numbered copper pad of the new footprint" % (i, what, k))
+            if not is_str(v, empty=True):
+                bad.append("ops[%d] %s: net of pad %r is not a string" % (i, what, k))
+
+    for i, op in enumerate(ops):
+        if not isinstance(op, dict) or op.get("op") not in SYNC_OPS:
+            bad.append("ops[%d]: unknown op %r" % (i, op.get("op") if isinstance(op, dict) else op))
+            continue
+        kind = op["op"]
+        e = None
+        if kind in SYNC_FP_OPS:
+            e = by_id.get(op.get("fp"))
+            if e is None:
+                bad.append("ops[%d] %s: no footprint with id %r" % (i, kind, op.get("fp")))
+                continue
+            if op["fp"] in removed:
+                bad.append("ops[%d] %s: footprint %s is removed by an earlier op" % (i, kind, op["fp"]))
+            if e["fp"].IsBoardOnly():
+                bad.append("ops[%d] %s: %s is a board-only footprint; pcb-sync never edits it" % (i, kind, e["ref"]))
+                continue
+        if kind == "renameNet":
+            f, t = op.get("from"), op.get("to")
+            if not is_str(f) or not is_str(t) or f == t:
+                bad.append("ops[%d] renameNet: from/to must be two different net names" % i)
+            elif f not in nets or f in renamed_from:
+                bad.append("ops[%d] renameNet: no board net %r to rename" % (i, f))
+            elif t in nets or t in renamed_to:
+                bad.append("ops[%d] renameNet: net %r already exists" % (i, t))
+            else:
+                renamed_from.add(f)
+                renamed_to.add(t)
+        elif kind in ("addFootprint", "swapFootprint"):
+            if not (is_str(op.get("libDir")) and is_str(op.get("name")) and is_str(op.get("fpid")) and ":" in op["fpid"]):
+                bad.append("ops[%d] %s: libDir, name and fpid (Lib:Name) are required" % (i, kind))
+                continue
+            if op.get("fpSha") is not None:
+                why = check_fp_sha(op["libDir"], op["name"], op["fpSha"])
+                if why:
+                    bad.append("ops[%d] %s %s: %s" % (i, kind, op.get("ref"), why))
+                    continue
+            fp, why = load_library_fp(op["libDir"], op["name"])
+            if fp is None:
+                bad.append("ops[%d] %s %s: %s" % (i, kind, op.get("ref"), why))
+                continue
+            loaded[i] = fp
+            check_pad_nets(i, kind, op.get("padNets", {}), fp.Pads())
+            if kind == "swapFootprint":
+                if op["fp"] in swapped:
+                    bad.append("ops[%d] swapFootprint: %s is swapped twice" % (i, op["fp"]))
+                swapped.add(op["fp"])
+                pm, why = pad_override_map(e["fp"], fp)
+                if why:
+                    bad.append("ops[%d] swapFootprint %s: %s" % (i, e["ref"], why))
+                padmap[i] = pm
+                continue
+            if not is_str(op.get("ref")) or not is_str(op.get("value"), empty=True):
+                bad.append("ops[%d] addFootprint: ref and value are required" % i)
+            if not is_str(op.get("key")) or not KIID_PATH_RE.match(op["key"]):
+                bad.append("ops[%d] addFootprint %s: key %r is not a KiCad path" % (i, op.get("ref"), op.get("key")))
+            for k in ("x", "y", "rot"):
+                if not is_num(op.get(k)):
+                    bad.append("ops[%d] addFootprint %s: %s %r is not a number" % (i, op.get("ref"), k, op.get(k)))
+            if op.get("side", "F") not in ("F", "B"):
+                bad.append("ops[%d] addFootprint %s: side %r is not F or B" % (i, op.get("ref"), op.get("side")))
+            flds = op.get("fields", {})
+            if not isinstance(flds, dict) or not all(is_str(k) and is_str(v, True) for k, v in flds.items()):
+                bad.append("ops[%d] addFootprint %s: fields is not {name: text}" % (i, op.get("ref")))
+            elif any(k in ("Reference", "Value", "Footprint") for k in flds):
+                bad.append("ops[%d] addFootprint %s: fields may not hold Reference, Value or Footprint" % (i, op.get("ref")))
+            for k in ("sheetname", "sheetfile"):
+                if not is_str(op.get(k, ""), empty=True):
+                    bad.append("ops[%d] addFootprint %s: %s is not a string" % (i, op.get("ref"), k))
+            for k in ("dnp", "excludeFromBom"):
+                if not isinstance(op.get(k, False), bool):
+                    bad.append("ops[%d] addFootprint %s: %s is not a boolean" % (i, op.get("ref"), k))
+        elif kind == "setRef":
+            if not is_str(op.get("ref")):
+                bad.append("ops[%d] setRef: ref is required" % i)
+        elif kind == "setValue":
+            if not is_str(op.get("value"), empty=True):
+                bad.append("ops[%d] setValue: value is not a string" % i)
+        elif kind in ("setField", "removeField"):
+            name = op.get("field")
+            if not is_str(name) or name in ("Reference", "Value", "Footprint"):
+                bad.append("ops[%d] %s: field %r cannot be set this way" % (i, kind, name))
+            elif kind == "setField" and not is_str(op.get("value"), empty=True):
+                bad.append("ops[%d] setField: value is not a string" % i)
+            elif kind == "removeField" and (name in MANDATORY_FIELDS or not e["fp"].HasField(name)):
+                bad.append("ops[%d] removeField %s: no removable field %r" % (i, e["ref"], name))
+        elif kind == "setPath":
+            if not is_str(op.get("path")) or not KIID_PATH_RE.match(op["path"]):
+                bad.append("ops[%d] setPath %s: %r is not a KiCad path" % (i, e["ref"], op.get("path")))
+        elif kind == "setSheet":
+            if not is_str(op.get("sheetname"), True) or not is_str(op.get("sheetfile"), True):
+                bad.append("ops[%d] setSheet: sheetname and sheetfile must be strings" % i)
+        elif kind == "setFlags":
+            if not isinstance(op.get("dnp"), bool) or not isinstance(op.get("excludeFromBom"), bool):
+                bad.append("ops[%d] setFlags: dnp and excludeFromBom must be booleans" % i)
+        elif kind == "setPadNet":
+            if op["fp"] in swapped:
+                bad.append("ops[%d] setPadNet: %s is swapped; its pads take the swap's padNets" % (i, e["ref"]))
+            pad = op.get("pad")
+            hits = [p for p in e["fp"].Pads() if is_str(pad) and p.GetNumber() == pad]
+            if not hits:
+                bad.append("ops[%d] setPadNet %s: no pad %r" % (i, e["ref"], pad))
+            elif any(sync_pad_type(p) == "npth" for p in hits):
+                bad.append("ops[%d] setPadNet %s.%s: a non-plated hole carries no net" % (i, e["ref"], pad))
+            if not is_str(op.get("net"), empty=True):
+                bad.append("ops[%d] setPadNet: net is not a string" % i)
+        elif kind == "orphan":
+            if op.get("action") != "remove":
+                bad.append("ops[%d] orphan %s: only action remove changes the board" % (i, e["ref"]))
+            elif e["fp"].IsLocked():
+                bad.append("ops[%d] orphan %s: the footprint is locked; pcb-sync never removes a locked footprint" % (i, e["ref"]))
+            else:
+                removed.add(op["fp"])
+    return bad, {"ops": ops, "byId": by_id, "loaded": loaded, "padmap": padmap}
+
+
+def net_of(board, name, made):
+    """The board net called name ("" = no net), created when missing."""
+    if name == "":
+        return board.GetNetInfo().GetNetItem(0)
+    n = board.FindNet(name)
+    if n is None:
+        n = pcbnew.NETINFO_ITEM(board, name)
+        board.Add(n)
+        made.append(name)
+    return n
+
+
+def set_pad_nets(board, fp, pad_nets, made):
+    """Every numbered copper pad gets its padNets entry or no net."""
+    for p in fp.Pads():
+        if sync_pad_type(p) == "npth" or not p.GetNumber():
+            continue
+        p.SetNet(net_of(board, pad_nets.get(p.GetNumber(), ""), made))
+
+
+def copy_field(dst, src):
+    dst.SetText(src.GetText())
+    dst.SetAttributes(src)
+    dst.SetLayer(src.GetLayer())
+    dst.SetPosition(src.GetPosition())
+    dst.SetVisible(src.IsVisible())
+
+
+# Objects removed from a board or footprint. pcbnew's Remove hands the
+# item's ownership to its Python proxy; when that proxy is collected while
+# the run goes on, the freed item corrupts later calls (seen on 10.0.6: 59
+# field removals in one run, then FOOTPRINT.Pads() returned a bare
+# SwigPyObject). Keeping every removed item referenced until the process
+# exits avoids that; the process is short-lived.
+DETACHED = []
+
+
+def detach(container, item):
+    container.Remove(item)
+    DETACHED.append(item)
+
+
+# Footprint-level overrides a swap carries over (getter/setter suffix; None
+# or ZONE_CONNECTION_INHERITED = not overridden), and the pad-level ones it
+# carries to the new pad with the same number. A pad with overrides the new
+# footprint has no pad for refuses the swap.
+FP_OVERRIDES = ("LocalClearance", "LocalSolderMaskMargin", "LocalSolderPasteMargin", "LocalSolderPasteMarginRatio",
+                "LocalZoneConnection")
+FP_ALLOW = ("AllowMissingCourtyard", "AllowSolderMaskBridges")
+PAD_OVERRIDES = ("LocalClearance", "LocalSolderMaskMargin", "LocalSolderPasteMargin", "LocalSolderPasteMarginRatio",
+                 "LocalZoneConnection", "LocalThermalGapOverride", "LocalThermalSpokeWidthOverride")
+
+
+# Setters SWIG cannot take a plain int for (std::optional<int> overload).
+PAD_SETTERS = {"LocalThermalGapOverride": "SetThermalGap"}
+
+
+def overridden(v):
+    return v is not None and v != pcbnew.ZONE_CONNECTION_INHERITED
+
+
+def default_spoke_angle(pad):
+    """KiCad's thermal spoke angle for a fresh pad of this shape: 45° for
+    round and oval pads, 90° for the rest (10.0.6 libraries)."""
+    return 45.0 if pad.GetShape(pcbnew.F_Cu) in (pcbnew.PAD_SHAPE_CIRCLE, pcbnew.PAD_SHAPE_OVAL) else 90.0
+
+
+def pad_overrides(pad):
+    """{name: value} of the pad's local overrides, a customised thermal
+    spoke angle included."""
+    out = {n: getattr(pad, "Get" + n)() for n in PAD_OVERRIDES if overridden(getattr(pad, "Get" + n)())}
+    a = round(pad.GetThermalSpokeAngleDegrees(), 6)
+    if abs(a - default_spoke_angle(pad)) > 1e-6:
+        out["ThermalSpokeAngleDegrees"] = a
+    return out
+
+
+def net_shapes(board):
+    """Board drawings that carry a net (copper shapes)."""
+    out = []
+    for d in board.GetDrawings():
+        try:
+            if d.GetNetCode() > 0:
+                out.append(d)
+        except AttributeError:
+            pass
+    return out
+
+
+def check_fp_sha(lib_dir, name, want):
+    """Problem text when the library footprint file is not the one the plan
+    was made from ("" when it is)."""
+    try:
+        with open(os.path.join(lib_dir, name + ".kicad_mod"), "rb") as f:
+            got = hashlib.sha256(f.read()).hexdigest()
+    except OSError as e:
+        return "cannot read the library footprint: %s" % e
+    if got != want:
+        return "library footprint %s changed since the plan (sha256 %s, planned %s)" % (name, got[:12], str(want)[:12])
+    return ""
+
+
+def pad_override_map(old, new):
+    """([(old pad, new pad)], problem): where each overridden pad of old
+    footprint goes on the new one. Pads are matched by number; several
+    pads sharing a number are matched only when that is unambiguous — all
+    carry the same overrides, or there are as many on both sides at the same
+    footprint-relative positions, in order. Otherwise the swap is refused."""
+    def by_num(fp, rel):
+        out = {}
+        for p in fp.Pads():
+            out.setdefault(p.GetNumber(), []).append((p, rel(p)))
+        return out
+    olds = by_num(old, lambda p: p.GetFPRelativePosition())
+    news = by_num(new, lambda p: p.GetPosition())  # a library footprint sits at the origin, rotation 0
+    out = []
+    for num, ops in olds.items():
+        ov = [pad_overrides(p) for p, _ in ops]
+        if not any(ov):
+            continue
+        nps = news.get(num, [])
+        names = ", ".join(sorted({k for o in ov for k in o}))
+        if not nps:
+            return out, "pad %r has local overrides (%s) and the new footprint has no such pad" % (num, names)
+        if all(o == ov[0] for o in ov):
+            src = next(p for (p, _), o in zip(ops, ov) if o)
+            out += [(src, q) for q, _ in nps]
+        elif len(ops) == len(nps) and all(abs(a.x - b.x) <= 1000 and abs(a.y - b.y) <= 1000
+                                          for (_, a), (_, b) in zip(ops, nps)):
+            out += [(p, q) for (p, _), (q, _) in zip(ops, nps)]
+        else:
+            return out, ("pads numbered %r carry different local overrides (%s) and cannot be matched one to one on the new "
+                         "footprint (count or positions differ)" % (num, names))
+    return out, ""
+
+
+def carry_overrides(nf, fp, padmap):
+    """Footprint overrides and allow-flags of fp onto nf; each overridden
+    pad's settings onto the pad pad_override_map paired it with."""
+    for n in FP_OVERRIDES:
+        v = getattr(fp, "Get" + n)()
+        if overridden(v):
+            getattr(nf, "Set" + n)(v)
+    for n in FP_ALLOW:
+        getattr(nf, "Set" + n)(getattr(fp, n)())
+    for p, q in padmap:
+        for n, v in pad_overrides(p).items():
+            getattr(q, PAD_SETTERS.get(n, "Set" + n))(v)
+
+
+def drop_extra_fields(fp, keep):
+    """Remove the user fields a library footprint brings (e.g. a generator
+    note) that the footprint is not meant to carry: the symbol's fields for
+    a new footprint, the old footprint's for a swap. Otherwise the next plan
+    would remove them and the sync would not be idempotent."""
+    for f in list(fp.GetFields()):
+        if f.GetName() not in MANDATORY_FIELDS and f.GetName() not in keep:
+            detach(fp, f)
+
+
+def sync_flags(fp, dnp, bom):
+    a = fp.GetAttributes() & ~(pcbnew.FP_DNP | pcbnew.FP_EXCLUDE_FROM_BOM)
+    if dnp:
+        a |= pcbnew.FP_DNP
+    if bom:
+        a |= pcbnew.FP_EXCLUDE_FROM_BOM
+    fp.SetAttributes(a)
+
+
+def place_fp(fp, x_nm, y_nm, rot, back):
+    """Position, side, then the absolute orientation. The footprint must
+    already be on the board (pcbnew crashes flipping an orphan footprint)."""
+    fp.SetPosition(pcbnew.VECTOR2I(int(x_nm), int(y_nm)))
+    if back and not fp.IsFlipped():
+        fp.Flip(fp.GetPosition(), pcbnew.FLIP_DIRECTION_TOP_BOTTOM)
+    fp.SetOrientationDegrees(float(rot))
+
+
+def sync_apply(pcb, plan_path, out):
+    out = stage_out(out)
+    with open(plan_path, encoding="utf-8") as f:  # Go writes UTF-8, whatever the locale
+        plan = json.load(f)
+    # NewBoard writes OUT (+ .kicad_pro / .kicad_prl) at once: OUT is staged.
+    board = pcbnew.NewBoard(out) if pcb == "-" else pcbnew.LoadBoard(pcb)
+    bad, ctx = validate_sync(board, plan)
+    if bad:
+        return reject("sync-apply", bad)
+    cur = {k: e["fp"] for k, e in ctx["byId"].items()}  # id → current footprint (a swap replaces it)
+    made, done = [], {k: 0 for k in SYNC_OPS}
+    for i, op in enumerate(ctx["ops"]):
+        kind = op["op"]
+        fp = cur.get(op.get("fp"))
+        if kind == "renameNet":
+            # Every item (pads, tracks, arcs, vias, zones) moves to the new net.
+            old = board.FindNet(op["from"])
+            new = pcbnew.NETINFO_ITEM(board, op["to"])
+            board.Add(new)
+            code = old.GetNetCode()
+            for it in list(board.GetPads()) + list(board.GetTracks()) + list(board.Zones()) + net_shapes(board):
+                if it.GetNetCode() == code:
+                    it.SetNet(new)
+            detach(board, old)
+        elif kind == "addFootprint":
+            nf = ctx["loaded"][i]
+            nf.SetFPID(pcbnew.LIB_ID(*op["fpid"].split(":", 1)))
+            nf.SetReference(op["ref"])
+            nf.SetValue(op["value"])
+            for name in sorted(op.get("fields", {})):
+                had = nf.HasField(name)
+                nf.SetField(name, op["fields"][name])
+                if not had:
+                    nf.GetField(name).SetVisible(False)
+            drop_extra_fields(nf, op.get("fields", {}))
+            nf.SetPath(pcbnew.KIID_PATH(op["key"]))
+            nf.SetSheetname(op.get("sheetname", ""))
+            nf.SetSheetfile(op.get("sheetfile", ""))
+            sync_flags(nf, op.get("dnp", False), op.get("excludeFromBom", False))
+            board.Add(nf)
+            place_fp(nf, round(op["x"] * 1e6), round(op["y"] * 1e6), op["rot"], op.get("side") == "B")
+            set_pad_nets(board, nf, op.get("padNets", {}), made)
+        elif kind == "swapFootprint":
+            # The library footprint takes the old one's place, side,
+            # orientation, fields (text, layout), link, flags and lock.
+            # The replacement keeps the footprint's uuid (references to it
+            # stay valid) and its group: the old one leaves the board first
+            # so no two items share the uuid.
+            nf = ctx["loaded"][i]
+            nf.SetFPID(pcbnew.LIB_ID(*op["fpid"].split(":", 1)))
+            grp = fp.GetParentGroup()
+            if grp is not None:
+                grp.RemoveItem(fp)
+            detach(board, fp)
+            nf.SetUuidDirect(pcbnew.KIID(fp.m_Uuid.AsString()))
+            board.Add(nf)
+            if grp is not None:
+                grp.AddItem(nf)
+            pos = fp.GetPosition()
+            place_fp(nf, pos.x, pos.y, fp.GetOrientationDegrees(), fp.IsFlipped())
+            for of in fp.GetFields():
+                name = of.GetName()
+                if not nf.HasField(name):
+                    nf.SetField(name, of.GetText())
+                copy_field(nf.GetField(name), of)
+            # A Footprint field keeps its layout but names the new footprint.
+            if nf.HasField("Footprint"):
+                nf.GetField("Footprint").SetText(op["fpid"])
+            drop_extra_fields(nf, {of.GetName() for of in fp.GetFields()})
+            nf.SetPath(fp.GetPath())
+            nf.SetSheetname(fp.GetSheetname())
+            nf.SetSheetfile(fp.GetSheetfile())
+            keep = pcbnew.FP_DNP | pcbnew.FP_EXCLUDE_FROM_BOM | pcbnew.FP_EXCLUDE_FROM_POS_FILES
+            nf.SetAttributes((nf.GetAttributes() & ~keep) | (fp.GetAttributes() & keep))
+            nf.SetLocked(fp.IsLocked())
+            carry_overrides(nf, fp, ctx["padmap"].get(i, []))
+            set_pad_nets(board, nf, op.get("padNets", {}), made)
+            cur[op["fp"]] = nf
+        elif kind == "setRef":
+            fp.SetReference(op["ref"])
+        elif kind == "setValue":
+            fp.SetValue(op["value"])
+        elif kind == "setField":
+            had = fp.HasField(op["field"])
+            fp.SetField(op["field"], op["value"])
+            if not had:
+                fp.GetField(op["field"]).SetVisible(False)
+        elif kind == "removeField":
+            detach(fp, fp.GetField(op["field"]))
+        elif kind == "setPath":
+            fp.SetPath(pcbnew.KIID_PATH(op["path"]))
+        elif kind == "setSheet":
+            fp.SetSheetname(op["sheetname"])
+            fp.SetSheetfile(op["sheetfile"])
+        elif kind == "setFlags":
+            sync_flags(fp, op["dnp"], op["excludeFromBom"])
+        elif kind == "setPadNet":
+            for p in fp.Pads():
+                if p.GetNumber() == op["pad"]:
+                    p.SetNet(net_of(board, op["net"], made))
+        elif kind == "orphan":
+            # Out of its group first (as a swap does): a group must not keep
+            # a member that left the board.
+            grp = fp.GetParentGroup()
+            if grp is not None:
+                grp.RemoveItem(fp)
+            detach(board, fp)
+            cur.pop(op["fp"], None)
+        done[kind] += 1
+    pcbnew.SaveBoard(out, board)
+    stage = os.path.dirname(out)
+    return {"ok": True, "error": "", "out": out, "done": done, "netsCreated": sorted(set(made)),
+            "staged": sorted(n for n in os.listdir(stage) if os.path.isfile(os.path.join(stage, n))),
+            "kicadVersion": pcbnew.Version()}
+
+
 def main(argv):
-    usage = "usage: bridge.py snapshot PCB | netclasses PCB REQS OUT | ripup PCB OUT | dsn PCB OUT | ses PCB SES OUT | fill PCB | rules PCB RULES OUT | pours PCB SPEC OUT | edit PCB OPS OUT"
+    usage = ("usage: bridge.py snapshot PCB | netclasses PCB REQS OUT | ripup PCB OUT | dsn PCB OUT | ses PCB SES OUT | fill PCB"
+             " | rules PCB RULES OUT | pours PCB SPEC OUT | edit PCB OPS OUT | sync-read PCB | fp-info SPEC | sync-apply PCB|- PLAN OUT")
     if len(argv) < 2:
         emit({"ok": False, "error": usage}, 2)
     cmd, args = argv[1], argv[2:]
-    want = {"snapshot": 1, "netclasses": 3, "ripup": 2, "dsn": 2, "ses": 3, "fill": 1, "rules": 3, "pours": 3, "edit": 3}
+    want = {"snapshot": 1, "netclasses": 3, "ripup": 2, "dsn": 2, "ses": 3, "fill": 1, "rules": 3, "pours": 3, "edit": 3,
+            "sync-read": 1, "fp-info": 1, "sync-apply": 3}
     if cmd not in want or len(args) != want[cmd]:
         emit({"ok": False, "error": usage}, 2)
     try:
@@ -1486,6 +2110,12 @@ def main(argv):
             res = pours(*args)
         elif cmd == "edit":
             res = edit(*args)
+        elif cmd == "sync-read":
+            res = sync_read(pcbnew.LoadBoard(args[0]))
+        elif cmd == "fp-info":
+            res = fp_info(*args)
+        elif cmd == "sync-apply":
+            res = sync_apply(*args)
         else:
             res = fill(*args)
     except Exception as e:  # report, never a bare traceback on stdout

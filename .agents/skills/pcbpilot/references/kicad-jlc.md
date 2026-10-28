@@ -14,6 +14,7 @@
 建库   pcbpilot kicad lcsc --import C25744 --lib-dir lib # 嘉立创 EasyEDA 库记录 → KiCad 自带导入器
 写号   pcbpilot kicad lcsc --pcb b.kicad_pcb --sch b.kicad_sch --set R1=C25744
 检查   pcbpilot kicad lcsc --pcb b.kicad_pcb --sch b.kicad_sch --check
+预检   pcbpilot kicad fab  --preflight --pcb b.kicad_pcb --sch b.kicad_sch --contract order-contract.json
 出图   pcbpilot kicad fab  --pcb b.kicad_pcb --sch b.kicad_sch --out fab/
 ```
 
@@ -92,7 +93,7 @@ pcbpilot kicad lcsc --import C6186 --import C25744 --lib-dir lib [--lib-name lcs
 `JLCPCB Part #`。值必须是 `C` + 数字。
 
 - 板上封装（`.kicad_pcb` 的 footprint property）与原理图符号都会读；给了 `--sch`
-  时原理图优先（板子由原理图更新），两边不一致会告警并提示 “Update PCB from Schematic”。
+  时原理图优先（板子由原理图更新），两边不一致会告警并提示用 `kicad pcb-sync` 同步（无头 Update PCB from Schematic，见 [kicad.md](kicad.md#原理图--pcb-同步kicad-pcb-sync)）。
 - 原理图经 `kicad-cli sch export bom` 读取，层次图由 KiCad 解析；**kicad-cli 会跳过
   没有 `lib_symbols` 定义的符号**（测试夹具因此带了最小符号定义）。
 - 板上有、原理图 BOM 里没有的封装（板上独有件，或只在原理图里勾了“排除 BOM”）
@@ -134,7 +135,7 @@ PTH/NPTH）。安装孔这类封装若没勾“排除 BOM/坐标文件”也会�
 BOM/CPL 一致性门禁：两者必须列出同一组位号、每个恰好一次。CPL 里未贴装件（排除 BOM 或只在
 原理图标 DNP，kicad-cli pos 仍会输出）自动剔除并在 `cplOmitted` 里列出；其余不一致是硬失败、
 **不写任何文件**，错误码 `BOM_NOT_IN_CPL` / `CPL_NOT_IN_BOM` / `CPL_DUPLICATE_REF` /
-`BOM_DUPLICATE_REF` / `CPL_EMPTY_REF`，每条带 `fix`（多为重新标注后 Update PCB from Schematic）。
+`BOM_DUPLICATE_REF` / `CPL_EMPTY_REF`，每条带 `fix`（多为重新标注后 `kicad pcb-sync`）。
 
 重复出图：所有文件先生成到 OUT 内的临时目录，zip 只装本次 kicad-cli 产物；发布时只替换/删除
 上次运行记在 `OUT/.pcbpilot-fab-manifest.json` 里的文件（板子从 4 层改 2 层后，旧内层 Gerber
@@ -167,6 +168,47 @@ pcbpilot kicad fab --pcb b.kicad_pcb --out fab/ --cpl-overrides jlc-rot.json
 `rotate` 加到 KiCad 角度上（结果归一到 0–360），`dx/dy` 以 mm 加到 Mid X/Y；拼写错误的
 键会被拒绝。实际用到的覆盖写进 `fab-report.json` 并打印。覆盖值必须来自本板在 JLC
 预览里的观察，记录在工程里，不能从别的板照抄。
+
+### 预检：`kicad fab --preflight`（只读）
+
+出图前一次性回答“现在能不能下单”，**不写任何文件**（`--out` 给了也不碰，工程目录也不变）：
+
+```bash
+pcbpilot kicad fab --preflight --pcb b.kicad_pcb --sch b.kicad_sch --contract fab/order-contract.json [--waivers w.json] [--no-assembly]
+```
+
+| 检查 | 内容 |
+|---|---|
+| `kicad-drc` / `kicad-drc-policy` / `schematic-parity` | 与 [`kicad drc`](kicad.md#drc-门禁kicad-drc) 相同（副本上跑）。一致性总是做：根原理图取 `.kicad_pro` 同名的 `<工程>.kicad_sch`（不给 `--sch` 时 BOM 字段也从它读）；没有 `.kicad_pro` 或根图 → cannot-check |
+| `schematic-root` | 给了 `--sch` 时，它必须是工程层次里的一张图（子图也行，此时 BOM 按整个层次读），否则 fail——一致性与 BOM 不能来自两份原理图 |
+| `board-outline` | Edge.Cuts 有图形，且 KiCad DRC 内置的轮廓测试没有 `invalid_outline`（被排除也算失败；该规则设成 ignore → cannot-check） |
+| `contract` | 契约文件合法（字段、日期、来源 URL）；没给 → cannot-check |
+| `layer-count` | 板的铜层数 = 契约 `layers` |
+| `min-track` / `min-space` / `min-drill` / `min-annular` | 有效规则允许的最小值 ≥ 契约 `limits`：Board Setup 约束（`.kicad_pro`）、网络类间距、`.kicad_dru` 自定义规则的 `(min …)`（mm/mil/in/um）、封装/焊盘/铺铜（`connect_pads (clearance …)`）的局部覆盖，取最小。任一来源低于契约 → fail；值类型不对（含 `allow_microvias` 不是 true/false）、非 Default 网络类间距为 0（继承/未设，有效值证明不了）、规则读不懂、`(severity ignore/warning)`、只有 opt/max 没有 min → cannot-check；只有局部覆盖或带条件/层的规则、没有全局下限（Board Setup、Default 网络类、无条件 error 规则）→ cannot-check。`info` 另列板上实测最细线宽、最小孔 |
+| `finish` | 板叠层 `copper_finish` 与契约 `finish` 归一成同一工艺才 pass（HASL 有铅 / 无铅、ENIG、ENEPIG、OSP、沉银、沉锡、硬金）；工艺不同 → fail；只写 “HASL”（有铅还是无铅？）、认不出的名字、板叠层没写表面处理、或契约没写 `finish` → cannot-check |
+| `assembly-sides` | CPL 实际出现的面（top/bottom/both）= 契约 `assembly.sides` |
+| `lcsc` | 每个贴装件有合法 C 号（与出图同一套 `MergeParts` / `CheckLCSC`），给出覆盖率 |
+| `bom-cpl` | 与出图相同的位号一致性（`CPL_NOT_IN_BOM` 等，临时目录里跑 kicad-cli pos） |
+
+总判定取最差；退出码 0 PASS / 6 FAIL / 5 未验证（cannot-check、缺契约）。`--no-assembly` 时最后三项记为提示性 skip。
+契约格式（JSON，`DisallowUnknownFields`：拼错的键直接拒绝）：
+
+```json
+{"vendor": "JLCPCB", "service": "PCB + PCBA", "layers": 4, "thicknessMm": 1.6, "finish": "ENIG",
+ "assembly": {"sides": "top", "qty": 5},
+ "limits": {"minTrackMm": 0.127, "minSpaceMm": 0.127, "minDrillMm": 0.3, "minAnnularMm": 0.13},
+ "sources": [{"item": "layers", "url": "<报价单 URL>", "retrieved": "YYYY-MM-DD"},
+             {"item": "limits", "url": "<厂商能力页 URL>", "retrieved": "YYYY-MM-DD"},
+             {"item": "finish", "url": "<厂商工艺页或报价单 URL>", "retrieved": "YYYY-MM-DD"},
+             {"item": "assembly", "url": "<报价单 URL>", "retrieved": "YYYY-MM-DD"}]}
+```
+
+必填 `vendor`、`layers`、`sources`（http(s) URL + `YYYY-MM-DD`）；每个会被检查的值（`layers`、每项 `limits`、`finish`、`assembly.sides`）都要有一条
+`sources` 的 `item` 指向它或它的父项（`limits` 覆盖四项，`assembly` 覆盖 `assembly.sides`），`item` 不是契约字段名的直接拒绝；
+`assembly.sides` 只取 top / bottom / both；
+其余字段（铜厚、阻焊/丝印色、阻抗、过孔工艺）见 pcbpilot-fab Skill 的 fab-acceptance.md §1。上面的数字只是格式示例，
+下单当天从厂商页面重新取值。实测（KiCad 10.0.6，interf_u 副本）：DRC/一致性/环形宽度（板约束 0.05 mm < 0.13）/LCSC（24 件缺号）失败，
+轮廓、层数、线宽、孔径、贴片面通过，`--out` 为空。
 
 ## 5. 输出与核对
 

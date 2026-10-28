@@ -1,0 +1,21 @@
+{
+  "$schema": "https://schemas.kicad.org/drc.v1.json",
+  "coordinate_units": "mm",
+  "date": "2026-10-27T12:00:00",
+  "ignored_checks": [],
+  "included_severities": ["error", "warning", "exclusion"],
+  "kicad_version": "10.0.6",
+  "source": "board.kicad_pcb",
+  "violations": [
+    {"description": "Copper sliver", "severity": "warning", "type": "copper_sliver",
+     "items": [{"description": "Zone [GND] on B.Cu, priority 0", "pos": {"x": 25.0, "y": 12.0}, "uuid": "zone-1"}]},
+    {"description": "Drilled holes co-located", "severity": "warning", "type": "holes_co_located",
+     "items": [{"description": "PTH pad 1 [VCC] of C1", "pos": {"x": 20.0, "y": 10.0}, "uuid": "pad-c1-1"},
+               {"description": "NPTH pad of C1", "pos": {"x": 20.0, "y": 10.0}, "uuid": "pad-c1-mh"}]}
+  ],
+  "unconnected_items": [],
+  "schematic_parity": [
+    {"description": "Footprint field 'Value' doesn't match symbol", "severity": "warning", "type": "footprint_symbol_field_mismatch",
+     "items": [{"description": "Footprint R1", "pos": {"x": 10.0, "y": 10.0}, "uuid": "fp-r1"}]}
+  ]
+}

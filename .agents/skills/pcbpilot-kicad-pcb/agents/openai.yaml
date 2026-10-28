@@ -1,0 +1,4 @@
+interface:
+  display_name: "pcbpilot KiCad PCB"
+  short_description: "Place, route, pour and gate KiCad boards offline with pcbpilot"
+  default_prompt: "Use $pcbpilot-kicad-pcb to place and route a KiCad .kicad_pcb with intent-derived netclasses and pours, run every gate including KiCad DRC, and report each gate with honest verdicts."

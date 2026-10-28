@@ -1186,7 +1186,7 @@ func sbFlags(c *cobra.Command, o *sbOptions) {
 	f.StringVar(&o.Waivers, "waivers", "", "JSON list of signed waivers [{gate,match,reason,by}]")
 	f.DurationVar(&o.ReviewTimeout, "review-timeout", 20*time.Minute, "per-reviewer time limit")
 	f.BoolVar(&o.DiscardExternal, "discard-external-edits", false, "overwrite edits made in --out outside pcbpilot since its last build (refused by default: EXTERNAL_EDIT); the current files are checkpointed first")
-	f.BoolVar(&o.Render, "render", false, "also export one SVG per sheet to <out>/render (kicad-cli sch export svg)")
+	f.BoolVar(&o.Render, "render", false, "also export one normalised SVG per sheet to <out>/render (the kicad render plotter; diff two with kicad render --compare)")
 }
 
 func newKicadSchBuildCmd(stdout, stderr io.Writer) *cobra.Command {

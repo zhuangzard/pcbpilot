@@ -29,7 +29,10 @@
 ```
 pcbpilot ──▶ KiCad 自带 Python + pcbnew（internal/kicad/bridge.py，go:embed）
          │     snapshot / netclasses / rules / ripup / dsn / ses / pours / edit / fill
-         ├─▶ kicad-cli pcb drc / sch export netlist
+         │     sync-read / fp-info / sync-apply（kicad pcb-sync；只写进暂存目录）
+         ├─▶ KiCad 自带 Python + pcbnew（internal/kicad/board.py）：kicad board 的 new / outline / stackup /
+         │     holes / keepout / zone / text
+         ├─▶ kicad-cli pcb drc / sch export netlist（`kicad drc` / `fab --preflight` 在副本上跑 DRC）
          ├─▶ fastroute（外部进程）
          └─▶ 共用的 EDA 中立计算：intentRequirements、planViaArrays、planWidenToIntent、
              planSilkTight、sim post-layout、snapshotIntentGates、tailGates、planWidenIR、
@@ -64,6 +67,29 @@ pcbpilot ──▶ KiCad 自带 Python + pcbnew（internal/kicad/bridge.py，go:
   旧的 `{位号: 位姿}` 仍可读，但键一律按位号解释（位号可以就叫 `uuid:…`）。要让它们参与
   布局，先在原理图/PCB 里重新标注唯一位号。
 
+## 板级设置（`kicad board new|outline|stackup|holes|keepout|zone|text`）
+
+无头建板：mm、KiCad 坐标（y 向下）。参数和推荐顺序见聚焦 Skill pcbpilot-kicad-pcb 的 `references/board-setup.md`；这里只记实现事实。
+
+- 分工：Go（`internal/kicad/board.go`）校验数值/单位/几何（多边形自交、圆角半径、挖空在板内且互不重叠、孔互叠、
+  层叠厚度合计）并把形状转成 KiCad 图元（线段、三点圆弧、圆）；board.py 校验要看板子的部分（已启用层、网、现有板框、
+  减层时内层上的对象、孔压焊盘），改板、保存、**重新加载核对**。错误码 `E_BOARD_*`，带 `fix`。
+- 提交：输入连同 `.kicad_pro`/`.kicad_dru` 先复制到暂存目录再改，结果旁边放回同一份工程/规则后才做 stats/DRC 校验；
+  全部检查通过才经 kfile 事务提交（`--out` 新建板 + 校验过的工程/规则字节、`--in-place` 锁检查 + 基准哈希 CAS），源工程/规则
+  提交前再比一次哈希。`--report` 不得与任何板/工程/规则/锁文件同名（含大小写、硬链接）。`outline` / `stackup` / `holes` 另用 `kicad-cli pcb export stats` 回读板尺寸、
+  板厚、NPTH/PTH 数；加/改铜或孔的 op（outline/stackup/holes/keepout/zone）默认对比改前改后的 error 级 DRC 并以它为准
+  （`--no-drc` = 未验证，退出码 5，只有 `--force-unverified` 才写），`text` / `new` 用 `--drc` 开。
+- 层叠：KiCad 10.0.6 的 Python 没有导出 stackup（`GetStackupDescriptor` 是不透明对象），所以 `SetCopperLayerCount`
+  + `SetBoardThickness` 后把 `(stackup …)` 块写进保存后文件的 `(setup …)`，再由 pcbnew 加载、保存一遍规范化并核对
+  `m_HasStackup`、板厚与铜层列表。板厚按 KiCad 的算法含阻焊层。
+- 几何是精确判定（`board_geom.go`：线段/圆弧距离、有符号距离包含，容差 0.001 mm），board.py 用同一套公式对板上
+  Edge.Cuts（KiCad 的折线近似）判孔/挖空；孔的预检只拦确定的物理重叠（钻孔与钻孔、钻孔穿铜、焊环压别的网的铜；焊盘用 `GetEffectivePolygon` 的真实形状），间距全归 DRC。写后回读逐项比对
+  每个请求属性；灌铜先 UnFill 再 `ZONE_FILLER.Fill`，返回失败/异常/仍未灌 → `E_BOARD_VERIFY`。
+- 10.0 的 `GetLayerID` 不再认 `F.SilkS` 这类旧短名（返回 -1），board.py 自带旧名映射。安装孔是锁定、board-only、
+  不进 BOM/坐标文件的单焊盘封装。`outline` / `holes` / `keepout` 遇到已灌铜的板会全部重灌。
+- kicad-cli 的 DRC/stats 用隔离的空全局库表（`SchCLIEnv`）：Windows 上带完整全局 fp-lib-table 时一次 DRC 要
+  2 分钟以上（小板也会卡住），隔离后约 2 秒。
+
 ## 快照（`kicad snapshot board.kicad_pcb [--out board.json]`）
 
 形状与 `pcb dump --include-copper` 一致（Go：`kicad.Snapshot(pcbPath) ([]byte, error)`），`boardSnapshot`、
@@ -76,7 +102,7 @@ pcbpilot ──▶ KiCad 自带 Python + pcbnew（internal/kicad/bridge.py，go:
 | 器件 | primitiveId（封装 uuid；**板上 uuid 重复时改用 `ref:<位号>`**，位号也重复时 `fp:<uuid>:<序号>`——转换来的板曾见 203 个封装只有 39 个不同 uuid）/ uuid / designator / value / footprint / `lcsc`（字段 LCSC、LCSC Part、LCSC Part #、JLCPCB Part #）/ layer / x,y,rotation / bbox / pads |
 | 焊盘 | padNumber / net / layer / x,y / width,height（轴对齐外包）/ rotation / shape `[RECT\|ELLIPSE\|OVAL\|POLYGON, w, h]` / 通孔 holeDiameter |
 | NPTH | 进 `footprintHoles`（圆孔 dia；槽孔为包络多边形） |
-| 板框 | Edge.Cuts 合成多边形取面积最大者；内部挖空写成 layer 12 的 `copper.fills` |
+| 板框 | Edge.Cuts 合成多边形取面积最大者；内部挖空写成 layer 12 的 `copper.fills`（`edgecut-N`；`kicad place` 按其精确多边形挡件） |
 | 铜 | `copper.lines`、`arcs`（arcAngle 逆时针为正）、`vias`、`pours`、`poured`（每个外轮廓一组 `[外轮廓, 孔...]`）、`regions`（禁放=2、禁走线/过孔=5、禁铺=7） |
 | 丝印 | `silk`：每个封装的位号/值字段与丝印层文字，pcbSilkText 形状（BBox、FontSize、Rotation、Hidden、CompID）；字段 id 为 `<器件id>#ref` / `#value` |
 | 规则 | clearance / track / 最小线宽 / 过孔 / 铜到板边 / 孔到孔（mil），source=`kicad`；另有 `netclasses[]`、`netClassOf{net: 有效网络类}`、`kicadLayers` |
@@ -105,6 +131,146 @@ sim 判 `sim-board-mismatch`、intent 报错、signoff-trace 判"ambiguous"失�
 两个不同原理图网（同页两条 `VCC` 记录，或 `VCC` 与 `/pwr/VCC`）落到同一块板网时 pad-net-diff 报 `netCollision`、
 signoff-continuity 失败（板上短路），不合并。显示名 `name` 只在能唯一解析回本网时才缩短，绝不等于别的网的身份或显示名。
 pad-net-diff 的大小写宽容只用于 EasyEDA 名（无 fullName）；KiCad 网名区分大小写。
+
+## 预览与视觉回归（`kicad render`）
+
+```bash
+pcbpilot kicad render --sch root.kicad_sch --out review/r1                 # 每页一张 SVG（<base>.svg、<base>-<子图路径>.svg）
+pcbpilot kicad render --pcb board.kicad_pcb [--side bottom] [--layers F.Cu,F.Silkscreen] [--png --dpi 150] --out review/b1
+pcbpilot kicad render --sch root.kicad_sch --out review/r2 --compare review/r1   # 出图后与基线比
+pcbpilot kicad render --out build/render --compare old/render              # 只比（例如两次 sch-build --render 的输出）
+```
+
+- 在工程**临时副本**上跑 kicad-cli（原目录不出现 `.kicad_prl`/锁文件），用隔离的空库表配置（默认配色，不受用户主题影响）。
+  副本 = 工程目录的 KiCad 文件 + 依赖闭包：沿层次找到的每张子图、`sym-lib-table`/`fp-lib-table` 里相对或 `${KIPRJMOD}` 路径的库、
+  `.kicad_pro` 指定的图框（`.kicad_wks`），按相对位置镜像复制（不改写任何文件，`../shared/x.kicad_sch` 照样能找到）；绝对路径或
+  KiCad 变量指向的库原地只读（`render.json` 的 `readInPlace`）。绝对路径子图、未定义变量、找不到的文件 →
+  `RENDER_DEPENDENCY_UNRESOLVED`（cannot-check，逐项列出），不出半张图。
+- **出图校验**：层次里每一页都必须产出能解析、且真正画了东西的 SVG（`<defs>`/`<clipPath>` 等之外有几何：带坐标的 path、有尺寸的
+  rect/circle、有字的 text、指向有内容目标的 use；缺页 `RENDER_INCOMPLETE`，空图/坏图 `RENDER_BAD_SVG`）。两页或两层压平后文件名相同
+  （子图 `a/b` 与 `a-b`、层 `F.Cu` 与 `F_Cu`、层名 `top` 与总图）出图前就判 `RENDER_INCOMPLETE`；
+  kicad-cli 的输出保留进 `warnings`，任何带失败字样的行（failed / error / cannot / unable / permission denied / not found /
+  missing…，在进度行过滤之前判）即使退出码 0 也判 `RENDER_KICAD_DIAGNOSTIC`；只有明确列出的无害行（Fontconfig、
+  `Plotted to '…'`、`Done.`）放过。以上都是 cannot-check（退出 5），**上一版渲染原样保留**：新图先在暂存目录完成；发布时旧文件
+  （含 `render.json`）先移进 `--out/.render-backup/`，新文件拷完、最后写 `render.json` 才删备份，中途失败就把旧渲染搬回。
+  备份目录还在（发布中断且没能恢复）时新渲染判 `RENDER_OUT_PARTIAL`、`--compare` 判 cannot-check。工程目录本身是链接/联接时
+  按其目标列目录、按逻辑路径复制。
+- **确定性**：kicad-cli 每次出图只有 `<title>` 里的出图时间（以及偶尔回显的临时路径）会变；pcbpilot 只在生成的头部（`<title>` 与
+  其后的 `<desc>`）去掉时间与临时路径，图中文字里出现的临时副本路径换回用户自己的目录，`-0` 只在数值属性/路径数据里改写，
+  `<text>` 文字不动。同一输入两次出图逐字节相同（`TestRenderLive*` 在 pic_programmer 原理图+板、complex_hierarchy 上实测）。
+  绘制顺序保留不排序。
+- PCB：`<base>-pcb-<side>.svg`（全部 `--layers` 叠在板框范围内）+ 每层一张 `<base>-pcb-<层>.svg`（带 Edge.Cuts 定位）；
+  默认层 `F.Cu,F.Mask,F.Silkscreen,Edge.Cuts`，`--side bottom` 用 B.* 并镜像。
+- PNG：只有板有（`kicad-cli pcb render` 3D 光追，按板框尺寸 × `--dpi` 定像素）。光追**不可逐字节复现**（10.0.6 实测同一板两次
+  像素不同），所以 `--compare` 只列出不比较。原理图没有 PNG：kicad-cli 不出原理图位图，pcbpilot 也不带 SVG 光栅化库。
+  这一步的诊断同样阻断，只放过“3D 模型加载不了”这一类消息（可选模型，只影响预览）；PNG 必须能解码，尺寸略小于请求值
+  （KiCad 10 实测 640x400 → 616x368，每边允许小 48 像素以内），`render.json` 记实际尺寸。
+- `--out` 写 SVG + `render.json`（文件、sha256、绘制元素数）。再次渲染到同一目录只替换 `render.json` 列出的文件；目录里有其他
+  文件/子目录/链接（`RENDER_OUT_NOT_EMPTY` / `RENDER_OUT_UNSAFE`），或 `render.json` 列了渲染器不会写的名字（只允许纯文件名
+  `.svg`/`.png`，`RENDER_OUT_BAD_MANIFEST`），一律拒绝、什么都不删。`--compare` 与 `--out` 是同一目录（含链接/联接）也拒绝；
+  `--report` 只收纯文件名（如 `report.json`，不带目录，不能叫 `render.json`）：随渲染一起在暂存目录生成、一起发布到
+  `--out`，`render.json` 里记为 `kind: report`，`--compare` 忽略它；没给 `--out`、只做比较或渲染失败时报告只打到 stdout。
+  链接形式的 `.kicad_pro`/库表按解析后的内容复制，解析不到判 cannot-check。kicad-cli 消息按整行判定（"Loading…" 开头或超长路径
+  也不会漏判），只截短显示。路径数据只有 move 没有画线段的 path、被 `display="none"`/`visibility="hidden"`/不透明度 0 隐藏，或
+  没有可见颜料（fill 与 stroke 都是 none，或只有宽度 0 的 stroke；属性或 style，含继承与 `<use>`）的图形都不算画了东西；fill 只在
+  能围出面积的图形上算数（曲线/圆弧、三个不共线点、有尺寸的 rect/circle/ellipse），直线 path、两点 polygon 必须有可见 stroke。
+  SVG 必须恰好一个 `<svg>` 根元素。**这个“画了东西”的检查只是防空白输出的启发式判断，不是完整的 SVG 渲染器**（不算裁剪、
+  遮挡、变换到画布外等），通过它不等于画面正确。`--compare` 不跟随链接：链接目录或非普通文件的 `.svg` 记 unreadable（cannot-check）。
+- `--compare` 逐文件：`identical`（规范化后字节相同）/ `changed`（结构化 SVG 比较：每个绘制元素连同排序后的属性、文字和所在
+  `<g>` 的样式作多重集合比较，给 `elementsAdded/elementsRemoved/changedElements` 和几条样例；只换了绘制顺序记 `reordered`）/
+  `added` / `removed` / `unreadable`（解析不了、没画东西——两份相同的空图也不算通过——或 `render.json` 列了却不存在）。
+  `verdict` 三态：全部 identical → `pass`（退出 0），有差异 → `fail`（6），一侧没有 SVG 或有 unreadable → `cannot-check`（5）；
+  出图失败同样 cannot-check（5）并给 `error.code/fix`，参数/`--out` 用法错误退出 1。两边渲染选项不同写进 `notes`。
+- SVG 变化只说明“画面动了”，不说明设计对错：连接是否变化以网表（`kicad netlist` / `sch-read`）为证据。
+- `kicad sch-build --render` / `sch-edit --render` 用同一个出图函数，`<out>/render/` 也是规范化的 SVG，可直接作 `--compare` 的两侧。
+
+## 原理图 → PCB 同步（`kicad pcb-sync`）
+
+KiCad 的 Update PCB from Schematic（F8）不再由用户在 GUI 里点：原理图改完（`kicad sch-build` / `sch-edit` / 用户在
+KiCad 里改并保存）后一律用它把板子拉齐，然后 `kicad place`（移动暂存的新件）→ `kicad route --sch` → `kicad fab`。
+
+```bash
+pcbpilot kicad pcb-sync --sch board.kicad_sch --pcb board.kicad_pcb --check            # 只读：退出 3 = 不同步
+pcbpilot kicad pcb-sync --sch board.kicad_sch --pcb board.kicad_pcb --dry-run          # 只读：看计划
+pcbpilot kicad pcb-sync --sch board.kicad_sch --pcb board.kicad_pcb --out work/sync/board.kicad_pcb
+pcbpilot kicad pcb-sync --sch board.kicad_sch --pcb board.kicad_pcb --in-place [--break-lock stale]
+pcbpilot kicad pcb-sync ... --plan-out plan.json      # 给用户审，记下 revision
+pcbpilot kicad pcb-sync ... --in-place --apply-plan plan.json --revision <rev>
+```
+
+- **输入**：默认现导 `kicad-cli sch export netlist --format kicadxml`（隔离配置，同 sch 命令）；`--netlist F
+  [--netlist-format kicadxml|kicadsexpr]` 用现成导出。网名一律按 `pkg/netname` 身份（XML 的未转义名按标签证据解析）。
+  封装库 = 工程 `fp-lib-table` 覆盖用户全局表（同昵称工程优先；禁用行跳过；`${KIPRJMOD}`、`${KICAD10_FOOTPRINT_DIR}`、
+  `kicad_common.json` 变量展开；只支持 `.pretty`）。用的是用户**真实**库表，不是隔离配置。
+- **匹配**（`--match path-then-ref` 默认 / `path` / `ref`）：封装 `(path …)` = 符号的图纸路径 tstamps + 单元 UUID；多单元
+  符号是一个封装，带任一单元的 key 都算（新件用第一个单元的）；同一子图复用多次 = 各自独立的 key。路径匹配不上时，只有
+  位号在**整块原始板上**（不只是剩下没匹配的封装里）和原理图里都唯一，才按位号匹配并 `setPath` 重新挂钩（报告 `matchedBy:"ref"`）。
+- **拒绝（退出 1，什么都不写）**：未标注位号 `E_UNANNOTATED`、重复位号 `E_DUP_REF`、重复 key、板上两个封装同一路径
+  `E_DUP_PATH`（含一个多单元符号的不同单元 key 落在两个封装上）、上板符号 Footprint 字段为空 `E_FP_MISSING_FIELD`、库解析不了 `E_FP_LIB_UNRESOLVED`（报出变量名/昵称）
+  / `E_FP_LIB_TYPE`、库里没有该封装 `E_FP_NOT_FOUND`。修原理图或库表后重跑，不要绕。计划里的发现（如
+  `E_PIN_PAD_MISMATCH`：网表引脚在封装上没有焊盘）让 `--check` / `--dry-run` / `--plan-out` 退出 1（`verdict: plan-errors`，
+  不写计划），不会报 in-sync；应用时 pad-net 门禁失败。
+- **操作**（固定顺序）：`renameNet`（板网的焊盘**恰好**全部去往一个新名字、该名字板上还没有、没有孤儿/板专用件的焊盘在其上
+  → 改名，走线/过孔/铺铜/带网的板上铜图形跟着走；拆分、合并、目标名已占用，或网上有没有原理图引脚对应的焊盘（孤儿/板专用件的焊盘、无编号
+  焊盘、孔）都不改名，逐焊盘改网；保守：`.kicad_pro` 里任何涉及新旧任一名字的 netclass
+  指派或 pattern（按通配和正则两种读法）、`.kicad_dru` 里出现任一名字或任何不能按字面判断的网/网络类条件（`matches`、通配、
+  差分对/成员函数），都让改名**整批拒绝** `E_RENAME_REFERENCED`，列出原因，提示先在 Board Setup 改或 `--rename-nets=false`）→ `addFootprint`（库里加载，按图纸路径
+  再按位号排序，从板框右侧 10 mm 起成行暂存，`--staging X,Y` / `--staging-gap`）→ `swapFootprint`（保留 uuid、所在 group、位置/角度/面/锁定/
+  字段文字布局/路径、封装级 clearance / 阻焊 / 锡膏 / 铺铜连接覆盖与 allow-missing-courtyard / solder-mask-bridge，
+  以及每个焊盘的本地覆盖（含与该形状默认值不同的热焊盘辐条角度；带到同编号的新焊盘；同编号多个焊盘覆盖不同时按顺序 + 封装内相对位置一一对应，对不上或带覆盖的焊盘在
+  新封装里没有 → 整批拒绝并列出）；新封装缺的焊盘 → `orphanCopper`，
+  同编号焊盘换了网且旧网有铜 → `danglingCopper`）→ `setPath` / `setRef` / `setValue` / `setField` / `removeField`
+  （库封装自带的多余用户字段也去掉）/ `setSheet`（sheetname = 原理图图纸路径名，如 `/`、`/CH1/`）/ `setFlags`
+  （dnp、exclude_from_bom）→ `setPadNet` → `orphan`。`--update values,footprints,fields,refs,dnp` 选类别（焊盘网总是同步），
+  `--fields-ignore` 排除字段，`--rename-nets=false` 关改名。
+- **孤儿**：没有符号认领的封装（含 exclude_from_board 符号的封装）默认 `--orphans flag` 只报告；`remove` 删除，**锁定的
+  永不删**（降级为 flag），在 group 里的先移出 group 再删；板专用（board-only）封装永远不算孤儿、不被改动。走线和铺铜永远不移动、不删除：焊盘离开了有铜的网
+  → `danglingCopper`，网上一个焊盘都不剩 → `removeNet`（仅报告）。
+- **写入**：新增/换入的库封装文件在规划时记 sha256（`fpSha`，计入 revision），应用时只装这份字节（复制进暂存目录再加载），
+  规划后库文件被改 → 退出 4。源板、`.kicad_pro`、`.kicad_dru` 读入时记下字节与哈希；bridge 加载的是复制进暂存目录的这份字节，应用前和提交前
+  都再核对源文件（被改 → `E_FILE_CHANGED` 退出 4，什么都不写）。bridge `sync-apply` 先校验全部操作（封装 id、焊盘、网、库封装能加载），全有或全无，只写进目标旁的
+  `.pcbpilot-stage-*/`（`PCBPILOT_STAGE_DIR` 之外一律拒绝）；三道门禁在暂存板上跑完后由 kfile 事务提交（锁文件、读后被改
+  `E_FILE_CHANGED`、计划 revision）。`--in-place` 只有 pad-net、idempotent、schematic-parity **都 pass** 才提交（parity 不能检查 → 不提交；`--no-parity` 是 skip，
+  只有再加 `--force-unverified` 才提交，仍退出 5），否则板子一字节不动；
+  `--out` 只要暂存板能读回就保留输出。`--in-place` 不改 `.kicad_pro`（缺失时才写）；`--out` 发布的 `.kicad_pro` 是源工程的原字节（不是
+  SaveBoard 重写的，非默认设置都保留；parity 也用它）；源没有 `.kicad_pro` 时目标已有的那份保持不动，只有目标也没有才写
+  SaveBoard 生成的默认工程。`.kicad_dru` 同理：源有就发布源的（覆盖目标已有的，基哈希校验），源没有就保留目标的。改名检查、parity
+  与提交都用**实际发布**的这份工程和规则，保留的目标文件提交前也再核对（被改 → 退出 4）。`--create`：`--pcb` 不存在时从空板起（全部新件暂存在
+  原点起的行里）；没有源板可查版本，就核对 bridge 应用时的 pcbnew 版本，不是 10.x → cannot-check 退出 5。
+- **门禁**（`internal/gate`，没验证就不是 pass）：`pad-net`（暂存板上与符号挂钩的封装焊盘网 vs 网表引脚网，
+  `ComparePinNets` / `padNetDiffGate`；NPTH 与无编号焊盘不算；同编号的焊盘必须同网，没有网的也算）、`schematic-parity`（暂存板 + 工程 + 全部 `.kicad_sch`
+  复制到临时目录、板改名为根图名，`kicad-cli pcb drc --schematic-parity --severity-all`；任一 parity 项失败，只有被 flag 的
+  孤儿的 `extra_footprint` 记为 info；kicad-cli 缺失/崩溃/报告读不出 = cannot-check）、`idempotent`（暂存板重新规划 0 个操作）。
+  `--no-parity` 是用户跳过，结论是 skip、退出 5，永远不是 pass。
+- **退出码**：0 通过（`--check` 无漂移）· 1 错误/拒绝 · 2 用法 · 3 `--check` 有漂移 · 4 锁定/读后被改/revision 不符（未写）·
+  5 有门禁没能验证（含 `--no-parity`）· 6 门禁失败（`--out` 输出保留，`--in-place` 未提交）。
+- 原理图按真实依赖图收集：根图 + 图纸符号的 Sheetfile 递归（含 `../` 外部子图；绝对路径的图纸 → `E_SHEET_PATH` 拒绝），
+  连同根图旁的 `.kicad_pro` 读一次、记哈希、按原目录结构复制到临时目录；网表导出与 parity 都用这份副本。这些文件和
+  `--netlist` 在应用前、提交前（不提交时在返回成功前；`--check` / `--dry-run` / `--plan-out` 在给出结论或写计划前，库封装文件
+  也一并核对）与板一起再核对（被改 → 退出 4）。`--out` 的目标板（已有的或原本不存在的）与 `--create` 时原本不存在的板也在核对之列。封装库配置（工程 / 全局 / 嵌套
+  fp-lib-table、kicad_common.json，含当时不存在的）
+  同样记快照、计入 revision、一并核对。parity 拿到的工程缺失或读不出 → cannot-check，不算通过。`--in-place` 无事可做时也验证读入字节的
+  暂存副本，不读活文件。revision 还包含实际发布的工程与规则、将被覆盖的目标板 / 工程 / 规则的哈希或不存在状态，以及每个库封装的
+  哈希。
+- **报告** `pcbpilot.kicad.pcb-sync/1`，总是打印到 stdout；`--report` / `--plan-out` 必须以 `.json` 结尾，已存在的文件必须是
+  pcb-sync 自己的报告或计划（`schema` 字段），否则退出 2；开始时的状态作为写入基准，运行中被创建或改动 → 不覆盖，退出 4；`--check` / `--dry-run` / `--plan-out` 只有给了 `--report` 才写文件
+  （不会因为 KiCad 开着工程而失败），写入板子的运行默认写 `<目标>.pcb-sync.json`。`--report` / `--plan-out`
+  不能是任何输入或输出文件（板/工程/规则/prl、任一 `.kicad_sch`、网表、`--apply-plan`、输出板及其工程；按规范化路径、
+  Windows/macOS 不分大小写、硬链接/链接同一文件判断），不能带 `.kicad_*` 扩展名，两者也不能相同 → 用法错误退出 2；写入经
+  kfile **带 KiCad 锁检查**，所在目录工程被 KiCad（或正在跑的 kicad-cli）打开时写不进去：退出 4、stdout 的 `ok:false`，
+  `--report` 指到别处即可。字段：`verdict`、`mode`、
+  `revision`、`kicadVersion`、`netlist`、`libs`、`match`、`ops[]`、`counts`、`staged[]`（`ref,xMm,yMm`，交给 `kicad place`）、
+  `orphanCopper[]`、`danglingCopper[]`、`locks[]`（`broke` 标出被 `--break-lock` 删掉的）、`files[]`（base/new sha256）、
+  `gates[]`、`errors[]`、`warnings[]`（`sourceOpenInKiCad`：`--out` 时源板在 KiCad 里开着，未保存的编辑不在文件里）。
+- **锁**：KiCad 打开工程会写 `~<文件>.lck` / `~<工程>.kicad_pro.lck`（内容 `{"hostname","username"}`，无 pid；
+  **kicad-cli pcb drc 运行期间也会建工程锁**，10.0.6 实测）。默认遇锁退出 4；`--break-lock stale` 只删本机本用户且没有
+  KiCad 进程（kicad / pcbnew / eeschema / kicad-cli）在跑的锁，`any` 全删（用户明确决定）。Agent 不自己选 `any`。
+- 实测（KiCad 10.0.6 演示副本）：complex_hierarchy 基线 = 68 个 `swapFootprint`（板上用工程库昵称、符号写官方库昵称，
+  KiCad parity 正好报这 68 条 `footprint_symbol_mismatch`），同步后三门禁全过、`--check` 无漂移；ecc83 基线 = 6 swap +
+  15 `setSheet`（老板的 sheetname 是 “Racine”）；multichannel 的符号写的是普通安装里没有的库（“Capacitors THD” 等，
+  板上用工程库），默认同步按 `E_FP_LIB_UNRESOLVED` 拒绝、不写，`--update values,fields,refs,dnp` 时只有 1 个 `setValue`，
+  之后幂等。parity 一次约 30–50 s，是同步的主要耗时。`--apply-plan` 重新计算计划，revision 必须与计划文件和 `--revision`
+  三者一致（板或工程文件、选项、或由原理图算出的操作变了都会变）。固定回归：`PCBPILOT_KICAD_LIVE=1 go test ./internal/app -run TestPcbSyncLive`。
 
 ## 布线（`kicad route`）——与 `pcb auto route` + `pcb gate` 同序同算
 
@@ -196,6 +362,44 @@ pcbpilot kicad route --pcb board-b-v5a.kicad_pcb --intent intent.json --sim sim.
    （`summary.simKicadMismatch`；门禁仍失败，因为这些焊盘的压降没有被证明），不再挡住收敛；同网的超预算压降照常列出并加宽。
 7. **设计报告**（门禁 `design-report`）后，8. **发布评审**（review-panel `layout` 阶段，证据加上报告 JSON、`summary.json`、
    `board-final.json`）。任何门禁失败退出码非零。
+
+## DRC 门禁（`kicad drc`）
+
+任何 KiCad 板（不必经过 `kicad route`）的独立 DRC 判定，与 route 的 `kicad-drc` 门禁共用同一套严格解析与工程静默策略：
+
+```bash
+pcbpilot kicad drc --pcb board.kicad_pcb [--schematic-parity] [--out drc/]
+pcbpilot kicad drc --pcb board.kicad_pcb --baseline-pcb ../revA/board.kicad_pcb     # 只报新增
+pcbpilot kicad drc --pcb board.kicad_pcb --baseline drc/drc-report.json --waivers w.json
+```
+
+- **只读、在副本上跑**：板及同名 `.kicad_pro` / `.kicad_dru`（`--schematic-parity` 再加同名根原理图 `<板>.kicad_sch` 与整个层次）复制到临时目录，
+  用 pcbpilot 的隔离 KiCad 配置（空的全局库表，kicadenv.go）运行 `kicad-cli pcb drc --format json --severity-all`；工程自己的
+  `fp-lib-table` / `sym-lib-table` 随副本带上，`${KIPRJMOD}` 指回原目录，所以工程库照常解析，只在全局库里的封装出 `lib_footprint_*`
+  环境类警告。工程目录不新增 `.kicad_prl`、锁文件或任何改动（演示板副本前后哈希一致）。子图在工程目录外 → cannot-check。
+- **归属**：每个违例按条目 uuid 在 `.kicad_pcb` S 表达式里找到所属顶层对象（焊盘、丝印、courtyard 都归它的封装；线/弧/过孔/铺铜带网名），
+  给出 `owner.class`：`environment`（库表类规则）> `schematic-parity` > `board-outline`（涉及 Edge.Cuts）> `routing`（涉及线、过孔、铺铜）>
+  `footprint`（只涉及一个封装自己的对象）> `placement`（两个以上封装）> `graphic` > `unresolved`；位置另给 KiCad 坐标 `xMm/yMm`（mm，y 向下）。
+- **检查（各自 pass / fail / cannot-check，总判定取最差，退出码 0 / 6 / 5）**：
+  `kicad-drc`（violations + unconnected 的 error 级条目，以及**电气/制造规则的 warning 级条目**——hard 类规则如 hole_to_hole、
+  connection_width、copper_sliver、holes_co_located、isolated_copper、padstack、被降级的 solder_mask_bridge；其余警告只列出）、`kicad-drc-policy`（同 route 门禁：电气/制造规则被排除、ignore 或从
+  error 降为 warning 即失败；会在 warning 级门禁的规则（copper_sliver、holes_co_located、isolated_copper、padstack、footprint_symbol_field_mismatch 等）被排除或 ignore 同样失败；
+  `.kicad_dru` 里 `(severity ignore)` 的自定义规则按其 constraint 对应的 DRC 规则归类（disallow → items_not_allowed、edge_clearance、hole_to_hole …），
+  电气/制造类或认不出的 → `IGNORED custom rule …` 硬项；courtyard 等放置类只记 `SILENCED`）、`schematic-parity`（带 `--schematic-parity` 时，任何严重度的一致性条目）。
+  `--waivers` 用 route 同一格式 `{"gate":"kicad-drc","match":…,"reason":…,"by":…}`，逐条接受（`kicad-drc` 的 waiver 也覆盖另两项）。
+  kicad-cli 失败、报告不合 schema、基线读不了 → cannot-check，waiver 不能放行。
+- **基线**：`--baseline-pcb` 对旧板副本也跑一次 DRC；`--baseline` 接受本命令（或 `kicad fab --preflight`）的报告，也接受原始 kicad-cli JSON
+  （用当前板解析归属，没有工程策略，所以策略项全量判定）。匹配 = 同规则 + 同归属 key + **同一组违例对象**（条目 uuid 的多重集合相同）且每个对象与基线里同 uuid 的对象相距
+  ≤ `--tolerance-mm`（默认 0.5；一致性与环境类不看位置）；有 uuid 的对象照样按 uuid 配对，只有缺 uuid 的对象按顺序比位置（两边都有 uuid 却不同 = 不同违例）；基线里是 warning、
+  现在是 error 的算新增（升级）；一对一。所以焊盘不动、换了一条同网的线去碰它也是新增。`baseline.new` 计入门禁，`baseline.resolved` 是消失的旧违例。
+  实测（interf_u 副本，pcbnew 把 R1 挪到 C1 上）：新增条目都涉及 R1，只多一条 copper_edge_clearance——KiCad 把同一块铺铜对板框的冲突
+  报在了另一段 Edge.Cuts 上（对象不同 = 新增，同时留下一条 resolved 孪生项）。
+- `--out DIR` 另存 `drc-report.json`、`drc.json`（原始报告）、`baseline-drc.json`。
+
+实测（2026-10-27，Windows 11，KiCad 10.0.6，演示板副本，`--schematic-parity`）：pic_programmer PASS（只有 41 条环境类警告），
+interf_u FAIL（copper_edge_clearance=board-outline、2 条 starved_thermal=routing、`connection_width` 被 ignore、22 条 footprint_symbol_mismatch），
+cm5_minima FAIL（5 条排除项：courtyards_overlap 记 SILENCED，solder_mask_bridge 降级为 hard 项）、video FAIL（0 错误，161 条一致性警告）；
+单板 8–40 s。
 
 ## 发布签核（`pcbpilot signoff`，EasyEDA 与 KiCad 同一条）
 

@@ -3,6 +3,7 @@ package kicad
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -74,6 +75,12 @@ func fakeKiCadCLI(args []string) int {
 			return 1
 		}
 	case "pcb drc --format":
+		if log := os.Getenv("PCBPILOT_FAKE_DRC_LOG"); log != "" {
+			// What RunDRC handed kicad-cli: arguments, directory, config.
+			cwd, _ := os.Getwd()
+			b, _ := json.Marshal(map[string]any{"args": args, "cwd": cwd, "configHome": os.Getenv("KICAD_CONFIG_HOME")})
+			_ = os.WriteFile(log, b, 0o644)
+		}
 		code, _ := strconv.Atoi(os.Getenv("PCBPILOT_FAKE_EXIT"))
 		if strings.HasSuffix(os.Getenv("PCBPILOT_FAKE_DRC"), "NO-REPORT") {
 			return code // "succeeds" without writing a report
@@ -87,6 +94,8 @@ func fakeKiCadCLI(args []string) int {
 			return 1
 		}
 		return code
+	case "sch export svg", "pcb export svg", "pcb render --side":
+		return fakeRenderCLI(args) // render_fake_test.go
 	default:
 		fmt.Fprintln(os.Stderr, "fake kicad-cli: unsupported", args)
 		return 2

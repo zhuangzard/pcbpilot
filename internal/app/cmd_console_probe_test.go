@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -38,6 +39,8 @@ func TestDaemonConsoleStatusAnswersWhileServiceProbeAndSelfUpdaterHang(t *testin
 		mustWrite(t, p, []byte("<array><string>/nonexistent/pcbpilot</string></array>\nExecStart=/nonexistent/pcbpilot daemon start\n"), 0o644)
 	}
 	release, returned := make(chan struct{}), make(chan struct{}, 8)
+	var releaseOnce sync.Once
+	unhang := func() { releaseOnce.Do(func() { close(release) }) }
 	hang := func() {
 		select {
 		case <-time.After(30 * time.Second):
@@ -51,7 +54,7 @@ func TestDaemonConsoleStatusAnswersWhileServiceProbeAndSelfUpdaterHang(t *testin
 		return "", nil
 	}
 	t.Cleanup(func() {
-		close(release)
+		unhang()
 		<-returned // the single in-flight probe; then restoring the var is race-free
 		daemonServiceProbeRunner = oldRun
 	})
@@ -63,7 +66,8 @@ func TestDaemonConsoleStatusAnswersWhileServiceProbeAndSelfUpdaterHang(t *testin
 	u.startupSkills = func(ctx context.Context) { hang() }
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	go u.Run(ctx)
+	updaterDone := make(chan struct{})
+	go func() { defer close(updaterDone); u.Run(ctx) }()
 
 	port := freePort(t)
 	srv := daemon.New(daemon.Options{Host: "127.0.0.1", PortStart: port, PortEnd: port, Version: "v0.6.1-13-gabc", Updates: u.Health})
@@ -72,7 +76,22 @@ func TestDaemonConsoleStatusAnswersWhileServiceProbeAndSelfUpdaterHang(t *testin
 		t.Fatal("console not mounted")
 	}
 	t.Cleanup(c.Stop)
-	go func() { _ = srv.Run(ctx, io.Discard) }()
+	srvDone := make(chan struct{})
+	go func() { defer close(srvDone); _ = srv.Run(ctx, io.Discard) }()
+	// Registered last, so it runs first: unwedge the hung work, stop both
+	// goroutines and wait for them, or they keep writing under $HOME/.pcbpilot
+	// while t.TempDir removes it ("directory not empty", Linux CI).
+	t.Cleanup(func() {
+		unhang()
+		cancel()
+		for name, done := range map[string]chan struct{}{"self-updater": updaterDone, "daemon": srvDone} {
+			select {
+			case <-done:
+			case <-time.After(10 * time.Second):
+				t.Errorf("%s did not stop after cancel", name)
+			}
+		}
+	})
 	base := fmt.Sprintf("http://127.0.0.1:%d", port)
 	waitHTTP(t, base+"/health")
 
@@ -152,7 +171,6 @@ func waitHTTP(t *testing.T, url string) {
 	}
 	t.Fatalf("%s never answered", url)
 }
-
 
 // Health (the /health "updates" block) only copies state under u.mu; the
 // release check, align, source git and apply never hold it while they work.

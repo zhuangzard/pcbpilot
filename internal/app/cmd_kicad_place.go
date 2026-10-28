@@ -366,9 +366,32 @@ func kicadBoard(raw []byte) (*pcbauto.Board, []string, kicadKept, error) {
 	}
 	var s struct {
 		Components []kicadSnapComp `json:"components"`
+		Copper     *struct {
+			Fills []struct {
+				ID     string `json:"primitiveId"`
+				Source []any  `json:"source"`
+			} `json:"fills"`
+		} `json:"copper"`
 	}
 	if err := json.Unmarshal(raw, &s); err != nil {
 		return nil, nil, nil, err
+	}
+	// Board cutouts (the bridge's "edgecut-N" fills: holes in the Edge.Cuts
+	// outline, e.g. `kicad board outline --slot`) enter FromSnapshot as a
+	// round hole of the cutout's smaller side, so a 2 x 20 mm slot kept parts
+	// out of 2 mm of it only. Keep the exact polygon instead.
+	if s.Copper != nil {
+		polys := map[string][]pcbauto.Point{}
+		for _, f := range s.Copper.Fills {
+			if strings.HasPrefix(f.ID, "edgecut-") {
+				polys[f.ID] = kicadSourcePoints(f.Source)
+			}
+		}
+		for _, h := range b.Holes {
+			if p := polys[h.Name]; len(p) >= 3 && h.Owner == "" {
+				h.Poly = p
+			}
+		}
 	}
 	var fixed []string
 	for _, c := range s.Components {
@@ -387,6 +410,22 @@ func kicadBoard(raw []byte) (*pcbauto.Board, []string, kicadKept, error) {
 		}
 	}
 	return b, fixed, kept, nil
+}
+
+// kicadSourcePoints reads the bridge's polygon source [x, y, "L", x, y, …]
+// (mil, y-up; the bridge writes straight segments only).
+func kicadSourcePoints(src []any) []pcbauto.Point {
+	var nums []float64
+	for _, v := range src {
+		if f, ok := v.(float64); ok {
+			nums = append(nums, f)
+		}
+	}
+	pts := make([]pcbauto.Point, 0, len(nums)/2)
+	for i := 0; i+1 < len(nums); i += 2 {
+		pts = append(pts, pcbauto.Point{X: nums[i], Y: nums[i+1]})
+	}
+	return pts
 }
 
 // kicadKeptSep joins a shared or placeholder designator and the

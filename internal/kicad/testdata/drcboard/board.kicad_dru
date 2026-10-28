@@ -1,0 +1,9 @@
+(version 1)
+# pcbpilot test rules: each line is read by fabrules.go
+(rule "fine pitch"
+	(constraint clearance (min 0.12mm))
+	(condition "A.Footprint == 'U1'"))
+(rule "power width"
+	(constraint track_width (min 6mil) (opt 20mil)))
+(rule "small holes" (constraint hole_size (min 0.25)))
+(rule "no courtyards" (severity ignore) (constraint courtyard_clearance (min 0mm)))

@@ -9,7 +9,7 @@ import (
 	"github.com/zhuangzard/pcbpilot/internal/version"
 )
 
-func runLocalUpdate(cfg *appConfig, dir, binary string, check, exitCode, jsonOut bool, out io.Writer) error {
+func runLocalUpdate(cfg *appConfig, dir, binary string, check, exitCode, jsonOut, adopt bool, out io.Writer) error {
 	dir, err := filepath.Abs(dir)
 	if err != nil {
 		return err
@@ -25,6 +25,7 @@ func runLocalUpdate(cfg *appConfig, dir, binary string, check, exitCode, jsonOut
 		if binary == "" {
 			return fmt.Errorf("local installation requires --binary /absolute/path/to/pcbpilot")
 		}
+		b.Adopt = adopt
 		if err := b.Install(binary, out); err != nil {
 			return err
 		}
@@ -50,12 +51,16 @@ func runLocalUpdate(cfg *appConfig, dir, binary string, check, exitCode, jsonOut
 	}
 	present := 0
 	for _, t := range selfupdate.Targets(false) {
-		if !t.Present {
+		if t.Skill != selfupdate.SkillName || !t.Present {
 			continue
 		}
 		present++
-		if e := b.CheckSkill(t.Dir); e != nil {
-			problem(fmt.Sprintf("%s: %v", t.Dir, e))
+		// Every packaged Skill must sit next to the router, byte for byte.
+		for _, skill := range b.Manifest.Skills {
+			dir := selfupdate.SkillDirFor(t.Client, skill)
+			if e := b.CheckSkillNamed(skill, dir); e != nil {
+				problem(fmt.Sprintf("%s: %v", dir, e))
+			}
 		}
 	}
 	if present == 0 {

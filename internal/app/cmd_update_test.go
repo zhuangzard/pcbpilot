@@ -59,9 +59,11 @@ func TestCheckSkillsReadsVersionMarkers(t *testing.T) {
 	// codex dir deliberately absent.
 
 	rows := checkSkills("0.26.0", nil)
-	byClient := map[string]updateSkillRow{}
+	byClient := map[string]updateSkillRow{} // the router row of each client
 	for _, r := range rows {
-		byClient[r.Client] = r
+		if r.Skill == "pcbpilot" {
+			byClient[r.Client] = r
+		}
 	}
 	if got := byClient["claude"].Status; got != "behind" {
 		t.Errorf("claude status=%q want behind", got)
@@ -69,9 +71,20 @@ func TestCheckSkillsReadsVersionMarkers(t *testing.T) {
 	if got := byClient["codex"].Status; got != "not-installed" {
 		t.Errorf("codex status=%q want not-installed", got)
 	}
-	// A client filter must narrow the report.
-	if rows := checkSkills("0.26.0", []string{"claude"}); len(rows) != 1 || rows[0].Client != "claude" {
-		t.Errorf("--client claude should report exactly the claude dir, got %+v", rows)
+	// A client filter must narrow the report to that client's Skills; a
+	// focused Skill missing next to an installed router is behind (the next
+	// update installs it).
+	rows = checkSkills("0.26.0", []string{"claude"})
+	if len(rows) == 0 || rows[0].Skill != "pcbpilot" || rows[0].Status != "behind" {
+		t.Fatalf("--client claude must lead with the claude router row, got %+v", rows)
+	}
+	for _, r := range rows {
+		if r.Client != "claude" {
+			t.Errorf("--client claude reported %s/%s", r.Client, r.Skill)
+		}
+		if r.Skill != "pcbpilot" && (r.Present || r.Status != "behind") {
+			t.Errorf("missing focused Skill %s: present=%v status=%q, want absent and behind", r.Skill, r.Present, r.Status)
+		}
 	}
 }
 
@@ -89,7 +102,7 @@ func TestCheckSkillsRequiresExactVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := checkSkills("0.26.0", []string{"codex"})
-	if len(rows) != 1 || rows[0].Status != "ahead" {
+	if len(rows) == 0 || rows[0].Skill != "pcbpilot" || rows[0].Status != "ahead" {
 		t.Fatalf("a non-target Skill must not be reported current: %+v", rows)
 	}
 }

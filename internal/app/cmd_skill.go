@@ -27,7 +27,8 @@ func newSkillCmd(stdout, stderr io.Writer) *cobra.Command {
 	s := &cobra.Command{
 		Use:   "skill",
 		Short: "Inspect and update the locally-installed pcbpilot skill dirs",
-		Long: "Inspect and update the pcbpilot skill installed for your AI clients.\n\n" +
+		Long: "Inspect and update the pcbpilot skills installed for your AI clients: the router\n" +
+			"`pcbpilot` plus every focused public Skill of the release, one dir each.\n\n" +
 			"  pcbpilot skill status                 show installed skill dirs + versions vs latest release\n" +
 			"  pcbpilot skill sync                   update present skill dirs to the latest release\n" +
 			"  pcbpilot skill sync --version 0.9.0   pin a specific version\n\n" +
@@ -49,7 +50,32 @@ type skillStatusReport struct {
 	CLIVersion string                   `json:"cliVersion"`
 	Latest     string                   `json:"latest,omitempty"`
 	LatestErr  string                   `json:"latestError,omitempty"`
+	Skills     []string                 `json:"skills"` // public Skills this CLI ships
 	Targets    []selfupdate.SkillTarget `json:"targets"`
+	// Aligned: every public Skill of every client that has the router is
+	// present and at the CLI's version (linked source Skills count as their
+	// checkout's metadata.version). Only meaningful for a release CLI.
+	Aligned bool `json:"aligned"`
+}
+
+// skillsAligned is the `skill status` verdict: false when any public Skill of
+// a client that uses pcbpilot is missing, unknown or at another version.
+func skillsAligned(targets []selfupdate.SkillTarget, cli string) bool {
+	want := selfupdate.SemverCore(cli)
+	if want == "" || !selfupdate.IsCleanRelease(cli) {
+		return false
+	}
+	found := false
+	for _, t := range targets {
+		if !selfupdate.ClientInstalled(t.Client) {
+			continue
+		}
+		found = true
+		if !t.Present || t.Installed != want {
+			return false
+		}
+	}
+	return found
 }
 
 func newSkillStatusCmd(stdout, stderr io.Writer) *cobra.Command {
@@ -67,8 +93,10 @@ func newSkillStatusCmd(stdout, stderr io.Writer) *cobra.Command {
 
 			rep := skillStatusReport{
 				CLIVersion: version.Version,
+				Skills:     selfupdate.PublicSkills().Skills,
 				Targets:    selfupdate.Targets(false),
 			}
+			rep.Aligned = skillsAligned(rep.Targets, version.Version)
 			if latest, err := selfupdate.LatestReleaseVersion(ctx); err != nil {
 				rep.LatestErr = err.Error()
 			} else {
@@ -95,8 +123,12 @@ func newSkillStatusCmd(stdout, stderr io.Writer) *cobra.Command {
 			for _, t := range rep.Targets {
 				state := t.Installed
 				switch {
+				case !t.Present && t.Skill != selfupdate.SkillName && selfupdate.ClientInstalled(t.Client):
+					state = "missing" // the next sync adds it next to the router
 				case !t.Present:
 					state = "not installed"
+				case t.Linked == "" && t.Skill != selfupdate.SkillName && !selfupdate.OwnedSkillDir(t.Dir):
+					state = "conflict" // same-named dir pcbpilot did not install; sync leaves it
 				case state == "":
 					state = "unknown"
 				}
@@ -104,7 +136,11 @@ func newSkillStatusCmd(stdout, stderr io.Writer) *cobra.Command {
 				if t.Present && rep.Latest != "" && selfupdate.SemverLess(t.Installed, rep.Latest) {
 					marker = "↑ " // behind latest
 				}
-				fmt.Fprintf(stdout, "  %s%-7s %-14s %s\n", marker, t.Client, state, t.Dir)
+				fmt.Fprintf(stdout, "  %s%-7s %-24s %-14s %s\n", marker, t.Client, t.Skill, state, t.Dir)
+			}
+			if !rep.Aligned {
+				fmt.Fprintf(stdout, "Not aligned with CLI %s — run `pcbpilot skill sync --version %s` (or `pcbpilot update`)\n",
+					version.Version, selfupdate.SemverCore(version.Version))
 			}
 			return nil
 		},
@@ -120,6 +156,7 @@ func newSkillSyncCmd(stdout, stderr io.Writer) *cobra.Command {
 		preserve      bool
 		force         bool
 		createMissing bool
+		adopt         bool
 		jsonOut       bool
 	)
 	c := &cobra.Command{
@@ -166,6 +203,7 @@ func newSkillSyncCmd(stdout, stderr io.Writer) *cobra.Command {
 				Preserve:      preserve,
 				Force:         force,
 				CreateMissing: createMissing,
+				Adopt:         adopt,
 			}, logf)
 
 			if jsonOut {
@@ -174,7 +212,7 @@ func newSkillSyncCmd(stdout, stderr io.Writer) *cobra.Command {
 				_ = enc.Encode(res)
 			} else {
 				for _, o := range res.Outcomes {
-					line := fmt.Sprintf("%-7s %-11s %s", o.Client, o.Status, o.Dir)
+					line := fmt.Sprintf("%-7s %-24s %-11s %s", o.Client, o.Skill, o.Status, o.Dir)
 					if o.Err != "" {
 						line += "  (" + o.Err + ")"
 					}
@@ -190,6 +228,7 @@ func newSkillSyncCmd(stdout, stderr io.Writer) *cobra.Command {
 	c.Flags().BoolVar(&preserve, "preserve", false, "keep local edits (never overwrite existing files)")
 	c.Flags().BoolVar(&force, "force", false, "sync even if the dir is already at the target version")
 	c.Flags().BoolVar(&createMissing, "create-missing", false, "install into a client dir that doesn't exist yet")
+	c.Flags().BoolVar(&adopt, "adopt", false, "let a focused Skill replace a same-named dir pcbpilot did not install")
 	c.Flags().BoolVar(&jsonOut, "json", false, "emit JSON")
 	return c
 }

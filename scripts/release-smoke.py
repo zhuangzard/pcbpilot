@@ -16,10 +16,14 @@ import platform
 import re
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 from urllib.parse import unquote, urlsplit
 import zipfile
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import skill_manifest  # noqa: E402
 
 ASSETS = (
     "pcbpilot_darwin_amd64", "pcbpilot_darwin_arm64", "pcbpilot_linux_amd64",
@@ -79,13 +83,19 @@ def check_connector(path, version):
         return {"version": version, "uuid": manifest["uuid"], "runtimeTested": False}
 
 
-def extract_skill(archive_path, destination):
-    """Extract only regular package files, retaining modes even on Windows."""
+def extract_skills(archive_path, destination):
+    """Extract only regular package files, retaining modes even on Windows.
+
+    The archive root holds one directory per listed Skill, the manifest
+    inside the router (pcbpilot/.public-skills.json); anything else (an
+    unlisted directory, a root-level file) fails."""
     modes = {}
     with tarfile.open(archive_path, "r:gz") as archive:
         for member in archive:
             path = PurePosixPath(member.name)
-            require(not path.is_absolute() and path.parts and path.parts[0] == "pcbpilot"
+            require(not path.is_absolute() and path.parts
+                    and skill_manifest.NAME.fullmatch(path.parts[0]) is not None
+                    and (len(path.parts) > 1 or member.isdir())
                     and ".." not in path.parts and "\\" not in member.name and ":" not in member.name
                     and path.as_posix() == member.name.rstrip("/"),
                     f"unsafe skill archive path: {member.name}")
@@ -100,14 +110,29 @@ def extract_skill(archive_path, destination):
                 with archive.extractfile(member) as source, target.open("wb") as output:
                     shutil.copyfileobj(source, output)
                 target.chmod(member.mode & 0o777)
-    return destination / "pcbpilot", modes
+    require(skill_manifest.ARCHIVE_ENTRY in modes, f"skills.tar.gz has no {skill_manifest.ARCHIVE_ENTRY}")
+    manifest = skill_manifest.loads((destination / skill_manifest.ARCHIVE_ENTRY).read_bytes())
+    tops = {PurePosixPath(name).parts[0] for name in modes}
+    require(tops == set(manifest.skills), f"skills.tar.gz directories {sorted(tops)} differ from the manifest {list(manifest.skills)}")
+    return manifest, {name: destination / name for name in manifest.skills}, modes
 
 
-def check_skill(root, version, archive_modes=None):
+def skill_roots(directory):
+    """--skill-dir: a skills root holding public-skills.json, or one legacy router directory."""
+    directory = Path(directory)
+    if (directory / skill_manifest.MANIFEST_NAME).is_file():
+        manifest = skill_manifest.loads((directory / skill_manifest.MANIFEST_NAME).read_bytes())
+        return manifest, {name: directory / name for name in manifest.skills}
+    return skill_manifest.LEGACY, {skill_manifest.ROUTER: directory}
+
+
+def check_skill(root, version, archive_modes=None, router=None):
+    """One installed Skill. A focused Skill (router given) may also link into the router."""
     root = root.resolve()
+    router = router.resolve() if router is not None else None
     frontmatter = (root / "SKILL.md").read_text(encoding="utf-8").split("---", 2)
     require(len(frontmatter) == 3 and not frontmatter[0].strip(), "SKILL.md frontmatter missing")
-    match = re.search(r'^  version:\s*"([^"]+)"$', frontmatter[1], re.MULTILINE)
+    match = re.search(r'^  version:\s*"([^"]+)"\r?$', frontmatter[1], re.MULTILINE)
     require(match and match.group(1) == version, "Skill metadata.version mismatch")
     count = links = 0
     for path in root.rglob("*"):
@@ -123,18 +148,27 @@ def check_skill(root, version, archive_modes=None):
             if parsed.scheme or parsed.netloc or not parsed.path:
                 continue
             target = (path.parent / unquote(parsed.path)).resolve()
-            require(target.is_relative_to(root), f"Skill link escapes package: {link}")
+            require(target.is_relative_to(root) or (router is not None and target.is_relative_to(router)),
+                    f"Skill link escapes package: {link}")
             require(target.exists(), f"broken Skill link in {path.relative_to(root)}: {link}")
             links += 1
-    for relative in EXECUTABLE_HELPERS:
-        path = root / relative
-        require(path.is_file(), f"missing Skill helper: {relative}")
-        require(path.read_bytes().startswith(b"#!"), f"Skill helper has no shebang: {relative}")
-        mode = archive_modes.get(f"pcbpilot/{relative}") if archive_modes is not None else path.stat().st_mode
-        if archive_modes is not None or os.name != "nt":
-            require(mode is not None and mode & 0o111, f"Skill helper is not executable: {relative}")
+    if router is None:
+        for relative in EXECUTABLE_HELPERS:
+            path = root / relative
+            require(path.is_file(), f"missing Skill helper: {relative}")
+            require(path.read_bytes().startswith(b"#!"), f"Skill helper has no shebang: {relative}")
+            mode = archive_modes.get(f"{root.name}/{relative}") if archive_modes is not None else path.stat().st_mode
+            if archive_modes is not None or os.name != "nt":
+                require(mode is not None and mode & 0o111, f"Skill helper is not executable: {relative}")
     return {"version": version, "files": count, "localLinks": links,
             "executableModes": "verified" if archive_modes is not None or os.name != "nt" else "unavailable-on-windows-filesystem"}
+
+
+def check_skills(manifest, roots, version, archive_modes=None):
+    """Every listed Skill at the release version; focused Skills may lean on the router."""
+    router = roots[manifest.router]
+    return {name: check_skill(roots[name], version, archive_modes, None if name == manifest.router else router)
+            for name in manifest.skills}
 
 
 def native_asset(system=None, machine=None):
@@ -241,7 +275,7 @@ def main():
     parser.add_argument("--version", required=True, help="exact expected tag, e.g. v1.4.2")
     parser.add_argument("--assets", type=Path, help="release assets directory with checksums.txt")
     parser.add_argument("--binary", type=Path, help="explicit native CLI (defaults to matching release asset)")
-    parser.add_argument("--skill-dir", type=Path, help="unpacked public Skill (defaults to extracting release archive)")
+    parser.add_argument("--skill-dir", type=Path, help="skills root with public-skills.json (e.g. .agents/skills), or one unpacked router Skill")
     parser.add_argument("--local-dev", action="store_true", help="require vX.Y.Z-dev.N; never publish")
     args = parser.parse_args()
     if not args.assets and not (args.binary and args.skill_dir):
@@ -263,14 +297,15 @@ def main():
                 assets = args.assets.resolve()
                 report["assetsIntegrityVerified"] = check_assets(assets)
                 report["connector"] = check_connector(assets / "pcbpilot-connector.eext", args.version[1:])
-                skill, modes = extract_skill(assets / "skills.tar.gz", work / "archive")
-                report["packagedSkill"] = check_skill(skill, args.version[1:], modes)
+                manifest, roots, modes = extract_skills(assets / "skills.tar.gz", work / "archive")
+                report["packagedSkills"] = check_skills(manifest, roots, args.version[1:], modes)
                 binary = args.binary or assets / native_asset()
             else:
                 binary = args.binary
                 report["assetsIntegrityVerified"] = []
             if args.skill_dir:
-                report["providedSkill"] = check_skill(args.skill_dir, args.version[1:])
+                manifest, roots = skill_roots(args.skill_dir)
+                report["providedSkills"] = check_skills(manifest, roots, args.version[1:])
             run_dir = work / "empty-working-directory"
             run_dir.mkdir()
             report["nativeCLI"] = smoke_cli(binary, args.version, run_dir)

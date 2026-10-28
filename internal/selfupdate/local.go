@@ -11,13 +11,16 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 )
@@ -29,10 +32,17 @@ func IsLocalVersion(v string) bool {
 }
 
 type LocalBundle struct {
-	Version   string
-	Binary    []byte
-	Skill     map[string][]byte
+	Version string
+	Binary  []byte
+	// Skill is the router's files (Skills[SkillName]), kept for callers that
+	// predate focused Skills.
+	Skill map[string][]byte
+	// Skills maps every packaged Skill to its files (relative slash paths).
+	Skills    map[string]map[string][]byte
+	Manifest  SkillManifest
 	Connector string
+	// Adopt lets Install replace a same-named dir pcbpilot did not install.
+	Adopt bool
 }
 
 // ReadLocalBundle snapshots validated bytes before any installation writes.
@@ -69,7 +79,7 @@ func ReadLocalBundle(dir string) (*LocalBundle, error) {
 		}
 		return b, nil
 	}
-	b := &LocalBundle{Skill: map[string][]byte{}, Connector: filepath.Join(dir, "pcbpilot-connector.eext")}
+	b := &LocalBundle{Skills: map[string]map[string][]byte{}, Connector: filepath.Join(dir, "pcbpilot-connector.eext")}
 	if b.Binary, err = read(asset); err != nil {
 		return nil, err
 	}
@@ -118,6 +128,7 @@ func ReadLocalBundle(dir string) (*LocalBundle, error) {
 	defer gz.Close()
 	tr := tar.NewReader(gz)
 	var total int64
+	seenFolded := map[string]bool{}
 	for {
 		h, e := tr.Next()
 		if e == io.EOF {
@@ -126,26 +137,57 @@ func ReadLocalBundle(dir string) (*LocalBundle, error) {
 		if e != nil {
 			return nil, e
 		}
-		name := strings.TrimPrefix(h.Name, SkillName+"/")
-		if name == h.Name || name == "." || name == ".version" || strings.Contains(name, `\`) || filepath.IsAbs(name) || filepath.Clean(name) != name || name == ".." || strings.HasPrefix(name, "../") || h.Typeflag != tar.TypeReg {
+		if h.Typeflag != tar.TypeReg {
 			return nil, fmt.Errorf("unsafe skill entry: %s", h.Name)
-		}
-		if _, exists := b.Skill[name]; exists {
-			return nil, fmt.Errorf("duplicate skill entry: %s", name)
 		}
 		total += h.Size
 		if h.Size < 0 || h.Size > 64<<20 || total > 256<<20 {
 			return nil, fmt.Errorf("skill package too large")
 		}
-		b.Skill[name], e = io.ReadAll(tr)
-		if e != nil {
+		// Slash paths are the archive format on every OS: path.Clean, not
+		// filepath.Clean (which rewrites separators on Windows).
+		skill, name, ok := strings.Cut(h.Name, "/")
+		if !ok || !isPublicSkillName(skill) || name == "" || name == "." || name == versionMarker || strings.Contains(name, `\`) ||
+			strings.Contains(name, ":") || filepath.IsAbs(name) || path.Clean(name) != name || name == ".." || strings.HasPrefix(name, "../") {
+			return nil, fmt.Errorf("unsafe skill entry: %s", h.Name)
+		}
+		folded := strings.ToLower(h.Name)
+		if seenFolded[folded] {
+			// Two names that differ only in case land on one file on Windows
+			// and macOS; refuse them everywhere so packages stay portable.
+			return nil, fmt.Errorf("duplicate skill entry (case-insensitive): %s", h.Name)
+		}
+		seenFolded[folded] = true
+		files := b.Skills[skill]
+		if files == nil {
+			files = map[string][]byte{}
+			b.Skills[skill] = files
+		}
+		if _, exists := files[name]; exists {
+			return nil, fmt.Errorf("duplicate skill entry: %s", h.Name)
+		}
+		if files[name], e = io.ReadAll(tr); e != nil {
 			return nil, e
 		}
 	}
-	v, err := skillMetadataVersion(string(b.Skill["SKILL.md"]))
-	if err != nil || v != b.Version {
-		return nil, fmt.Errorf("Skill metadata does not match connector %s", b.Version)
+	b.Manifest = legacySkillManifest()
+	if raw, ok := b.Skills[SkillName][installedManifestName]; ok {
+		if b.Manifest, err = parseSkillManifest(raw); err != nil {
+			return nil, err
+		}
 	}
+	for skill := range b.Skills {
+		if !slices.Contains(b.Manifest.Skills, skill) {
+			return nil, fmt.Errorf("skills.tar.gz: %s/ is not listed in %s", skill, SkillManifestName)
+		}
+	}
+	for _, skill := range b.Manifest.Skills {
+		v, err := skillMetadataVersion(string(b.Skills[skill]["SKILL.md"]))
+		if err != nil || v != b.Version {
+			return nil, fmt.Errorf("%s Skill metadata does not match connector %s", skill, b.Version)
+		}
+	}
+	b.Skill = b.Skills[SkillName]
 	return b, nil
 }
 
@@ -160,7 +202,15 @@ func (b *LocalBundle) CheckBinary(path string) error {
 	return nil
 }
 
-func (b *LocalBundle) CheckSkill(dir string) error {
+// CheckSkill compares an installed router dir with the bundle.
+func (b *LocalBundle) CheckSkill(dir string) error { return b.CheckSkillNamed(SkillName, dir) }
+
+// CheckSkillNamed compares one installed Skill dir with the bundle byte for byte.
+func (b *LocalBundle) CheckSkillNamed(skill, dir string) error {
+	want, listed := b.Skills[skill]
+	if !listed {
+		return fmt.Errorf("%s is not in the local package", skill)
+	}
 	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
 		dir = resolved
 	}
@@ -188,7 +238,7 @@ func (b *LocalBundle) CheckSkill(dir string) error {
 			if strings.TrimSpace(string(data)) != b.Version {
 				return fmt.Errorf("Skill version marker differs")
 			}
-		} else if want, ok := b.Skill[name]; !ok || !bytes.Equal(data, want) {
+		} else if expected, ok := want[name]; !ok || !bytes.Equal(data, expected) {
 			return fmt.Errorf("Skill content differs: %s", name)
 		}
 		seen[name] = true
@@ -197,7 +247,7 @@ func (b *LocalBundle) CheckSkill(dir string) error {
 	if err != nil {
 		return err
 	}
-	if len(seen) != len(b.Skill)+1 || !seen[".version"] {
+	if len(seen) != len(want)+1 || !seen[".version"] {
 		return fmt.Errorf("Skill files/marker missing")
 	}
 	return nil
@@ -257,50 +307,85 @@ func (b *LocalBundle) Install(binary string, log io.Writer) (retErr error) {
 		return err
 	}
 	fmt.Fprintf(log, "Installed CLI: %s\n", binary)
-	for _, target := range Targets(false) {
-		if !target.Present {
+	return b.installSkills(log)
+}
+
+// installSkills gives every client with the router every packaged Skill, with
+// the same rules as SyncSkills: links are left alone, a same-named dir
+// pcbpilot did not install is a conflict unless Adopt, retired Skills go only
+// where pcbpilot wrote them, and each client is staged completely and switched
+// as one transaction. Every dir about to change is first copied to a printed
+// .pcbpilot-local-backup-* directory.
+func (b *LocalBundle) installSkills(log io.Writer) error {
+	root, err := os.MkdirTemp("", "easyeda-local-skills-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(root)
+	for _, skill := range b.Manifest.Skills {
+		for name, data := range b.Skills[skill] {
+			p := filepath.Join(root, skill, filepath.FromSlash(name))
+			if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+				return err
+			}
+			mode := os.FileMode(0644)
+			if bytes.HasPrefix(data, []byte("#!")) {
+				mode = 0755
+			}
+			if err := os.WriteFile(p, data, mode); err != nil {
+				return err
+			}
+		}
+	}
+	tree := skillTree{root: root, manifest: b.Manifest, cleanup: func() {}}
+	var clients []string
+	for _, c := range clientOrder {
+		if ClientInstalled(c) {
+			clients = append(clients, c)
+		}
+	}
+	// Every staged tree and every switched dir must equal the package byte for
+	// byte; any mismatch restores the client before the switch is final.
+	opts := SyncOptions{Force: true, Adopt: b.Adopt, verify: b.CheckSkillNamed}
+	items := planSkillSync(clients, b.Manifest, retiredSkills(b.Manifest, knownSkills(clients)), opts, b.Version)
+	for _, it := range items {
+		if it.action == syncKeep || !isDir(it.out.Dir) {
 			continue
 		}
-		dir := target.Dir
-		if p, e := filepath.EvalSymlinks(dir); e == nil {
-			dir = p
+		backup, err := os.MkdirTemp(filepath.Dir(it.out.Dir), ".pcbpilot-local-backup-*")
+		if err != nil {
+			return err
 		}
-		backup, e := os.MkdirTemp(filepath.Dir(dir), ".pcbpilot-local-backup-*")
-		if e != nil {
-			return e
-		}
-		if e = copyTree(dir, backup, false, false); e != nil {
-			return e
+		if err := copyTree(it.out.Dir, backup, false, false); err != nil {
+			return err
 		}
 		fmt.Fprintf(log, "Skill backup: %s\n", backup)
-		src, e := os.MkdirTemp(filepath.Dir(dir), ".easyeda-local-source-*")
-		if e != nil {
-			return e
-		}
-		e = func() error {
-			defer os.RemoveAll(src)
-			for name, data := range b.Skill {
-				p := filepath.Join(src, name)
-				if e := os.MkdirAll(filepath.Dir(p), 0755); e != nil {
-					return e
-				}
-				mode := os.FileMode(0644)
-				if bytes.HasPrefix(data, []byte("#!")) {
-					mode = 0755
-				}
-				if e := os.WriteFile(p, data, mode); e != nil {
-					return e
-				}
-			}
-			return materialize(src, dir, false, b.Version)
-		}()
-		if e != nil {
-			return fmt.Errorf("Skill %s failed: %w", dir, e)
-		}
-		if e := b.CheckSkill(dir); e != nil {
-			return e
-		}
-		fmt.Fprintf(log, "Installed Skill: %s\n", dir)
 	}
-	return nil
+	changed := 0
+	var failures []error
+	for _, client := range clients {
+		var mine []syncItem
+		for _, it := range items {
+			if it.out.Client == client {
+				mine = append(mine, it)
+			}
+		}
+		for _, o := range applyClientSync(tree, mine, opts, b.Version, &changed, func(string, ...any) {}) {
+			switch o.Status {
+			case "error":
+				failures = append(failures, fmt.Errorf("Skill %s: %s", o.Dir, o.Err))
+			case "created", "updated":
+				fmt.Fprintf(log, "Installed Skill: %s\n", o.Dir)
+			case "removed":
+				fmt.Fprintf(log, "Removed retired Skill: %s\n", o.Dir)
+			case "linked", "conflict", "kept":
+				detail := o.Err
+				if o.Status == "linked" {
+					detail = "linked to " + o.Linked + " (source checkout; left alone)"
+				}
+				fmt.Fprintf(log, "Skipped Skill %s: %s\n", o.Dir, detail)
+			}
+		}
+	}
+	return errors.Join(failures...)
 }

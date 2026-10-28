@@ -1,0 +1,29 @@
+{
+  "ops": [],
+  "match": {
+    "byPath": 5,
+    "byRef": 0,
+    "unmatchedSymbols": [],
+    "unmatchedFootprints": []
+  },
+  "counts": {
+    "add": 0,
+    "swap": 0,
+    "update": 0,
+    "padNet": 0,
+    "renameNet": 0,
+    "orphanFlag": 0,
+    "orphanRemove": 0
+  },
+  "staged": [],
+  "orphanCopper": [],
+  "danglingCopper": [],
+  "errors": [
+    {
+      "code": "E_PIN_PAD_MISMATCH",
+      "ref": "U1",
+      "detail": "U1 pin(s) 9 have no pad on footprint Package_SO:SOIC-8",
+      "fix": "pick a footprint whose pad numbers match the symbol's pin numbers"
+    }
+  ]
+}

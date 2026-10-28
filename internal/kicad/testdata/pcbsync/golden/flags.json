@@ -1,0 +1,43 @@
+{
+  "ops": [
+    {
+      "op": "setFlags",
+      "fp": "fp-C1",
+      "ref": "C1",
+      "key": "/00000000-0000-0000-0000-0000000000c1",
+      "from": "dnp=false excludeFromBom=false",
+      "dnp": false,
+      "excludeFromBom": true,
+      "matchedBy": "path"
+    },
+    {
+      "op": "setFlags",
+      "fp": "fp-R1",
+      "ref": "R1",
+      "key": "/00000000-0000-0000-0000-0000000000a1",
+      "from": "dnp=false excludeFromBom=false",
+      "dnp": true,
+      "excludeFromBom": false,
+      "matchedBy": "path"
+    }
+  ],
+  "match": {
+    "byPath": 5,
+    "byRef": 0,
+    "unmatchedSymbols": [],
+    "unmatchedFootprints": []
+  },
+  "counts": {
+    "add": 0,
+    "swap": 0,
+    "update": 2,
+    "padNet": 0,
+    "renameNet": 0,
+    "orphanFlag": 0,
+    "orphanRemove": 0
+  },
+  "staged": [],
+  "orphanCopper": [],
+  "danglingCopper": [],
+  "errors": []
+}

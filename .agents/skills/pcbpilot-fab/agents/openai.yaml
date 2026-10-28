@@ -1,0 +1,4 @@
+interface:
+  display_name: "pcbpilot 制造输出 / Fab Output"
+  short_description: "为 KiCad 板出 JLC Gerber/钻孔/BOM/CPL 并验收下单结论"
+  default_prompt: "Use $pcbpilot-fab to export and accept JLCPCB Gerber, drill, BOM and CPL files for a KiCad board, with an order contract and a go / no-go acceptance record."

@@ -127,7 +127,9 @@ func ParseSchBOM(b []byte) ([]SchPart, error) {
 }
 
 // ReadSchematicParts runs kicad-cli on the (root) schematic — hierarchy is
-// resolved by KiCad — and parses the result.
+// resolved by KiCad — and parses the result. Like every schematic kicad-cli
+// run it uses the isolated KiCad configuration (kicadenv.go): the BOM fields
+// come from the sheets themselves, never from the global libraries.
 func ReadSchematicParts(cli, sch string) ([]SchPart, error) {
 	tmp, err := os.MkdirTemp("", "pcbpilot-kicad-bom-")
 	if err != nil {
@@ -135,8 +137,10 @@ func ReadSchematicParts(cli, sch string) ([]SchPart, error) {
 	}
 	defer os.RemoveAll(tmp)
 	out := filepath.Join(tmp, "bom.csv")
-	if err := runCLI(cli, SchBOMArgs(sch, out), nil); err != nil {
-		return nil, err
+	cmd, cancel := SchCLICommand(cli, SchBOMArgs(sch, out)...)
+	defer cancel()
+	if b, err := cmd.CombinedOutput(); err != nil {
+		return nil, fmt.Errorf("kicad-cli sch export bom: %w: %s", err, b)
 	}
 	b, err := os.ReadFile(out)
 	if err != nil {

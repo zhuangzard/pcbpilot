@@ -8,6 +8,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -29,6 +30,20 @@ type Violation struct {
 	// Comment is the exclusion's note.
 	Excluded bool   `json:"excluded,omitempty"`
 	Comment  string `json:"comment,omitempty"`
+	// Items are the report's items in order (Objs keeps only their uuids).
+	Items []DRCItem `json:"items,omitempty"`
+	// Description is KiCad's own description, verbatim (Message also
+	// carries the item descriptions after it).
+	Description string `json:"description,omitempty"`
+}
+
+// DRCItem is one object of a violation: KiCad's description ("Footprint
+// C2", "PTH pad 1 [VCC] of C1"), its uuid and its position (mil, y-up).
+type DRCItem struct {
+	Description string  `json:"description"`
+	UUID        string  `json:"uuid,omitempty"`
+	X           float64 `json:"x"`
+	Y           float64 `json:"y"`
 }
 
 // DRCReport is a parsed `kicad-cli pcb drc --format json` report.
@@ -143,7 +158,7 @@ func ParseDRCWith(data []byte, o DRCParseOptions) (*DRCReport, error) {
 	rep := &DRCReport{KiCadVersion: r.Version, Units: r.Units, Counts: map[string]int{}}
 	add := func(section string, vs []drcJSONViolation) {
 		for _, v := range vs {
-			fv := Violation{Rule: v.Type, Severity: v.Severity, Message: v.Description, Section: section,
+			fv := Violation{Rule: v.Type, Severity: v.Severity, Message: v.Description, Description: v.Description, Section: section,
 				Excluded: v.Excluded || v.Severity == "exclusion", Comment: v.Comment}
 			if fv.Rule == "" {
 				fv.Rule = section
@@ -153,6 +168,11 @@ func ParseDRCWith(data []byte, o DRCParseOptions) (*DRCReport, error) {
 				if it.UUID != "" {
 					fv.Objs = append(fv.Objs, it.UUID)
 				}
+				di := DRCItem{Description: it.Description, UUID: it.UUID}
+				if it.Pos != nil {
+					di.X, di.Y = it.Pos.X*scale, -it.Pos.Y*scale
+				}
+				fv.Items = append(fv.Items, di)
 				if fv.X == nil && it.Pos != nil {
 					x, y := it.Pos.X*scale, -it.Pos.Y*scale
 					fv.X, fv.Y = &x, &y
@@ -348,6 +368,62 @@ type DRCPolicy struct {
 	Ignored    []string       `json:"ignored,omitempty"`
 	// Downgraded: rules the project sets to "warning".
 	Downgraded []string `json:"downgraded,omitempty"`
+	// IgnoredCustom: .kicad_dru rules set to (severity ignore), with the
+	// constraints they turn off where their condition holds.
+	IgnoredCustom []DRUIgnored `json:"ignoredCustom,omitempty"`
+}
+
+// DRUIgnored is one (severity ignore) custom rule.
+type DRUIgnored struct {
+	Name        string   `json:"name"`
+	Constraints []string `json:"constraints"`
+	// Rule is the whole rule in a canonical form (atoms, quoting and
+	// nesting kept, whitespace and comments dropped): name, condition,
+	// layer, severity and every constraint with its values. Its policy
+	// item carries it, so a changed condition is a different item.
+	Rule string `json:"rule"`
+}
+
+// canonicalSexpr renders n with single spaces and quoted atoms re-quoted.
+func canonicalSexpr(n *sx) string {
+	if n == nil {
+		return ""
+	}
+	if !n.isList {
+		if n.Quoted {
+			return strconv.Quote(n.Atom)
+		}
+		return n.Atom
+	}
+	parts := make([]string, len(n.Kids))
+	for i, k := range n.Kids {
+		parts[i] = canonicalSexpr(k)
+	}
+	return "(" + strings.Join(parts, " ") + ")"
+}
+
+// ReadDRUIgnored lists the (severity ignore) rules of a .kicad_dru.
+func ReadDRUIgnored(dru string) ([]DRUIgnored, error) {
+	b, err := os.ReadFile(dru)
+	if err != nil {
+		return nil, err
+	}
+	root, err := parseSexpr(append(append([]byte("(pcbpilot_dru\n"), b...), []byte("\n)")...))
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", dru, err)
+	}
+	var out []DRUIgnored
+	for _, rule := range root.children("rule") {
+		if s := rule.child("severity"); s == nil || s.arg(0) != "ignore" {
+			continue
+		}
+		ig := DRUIgnored{Name: rule.arg(0), Rule: canonicalSexpr(rule)}
+		for _, c := range rule.children("constraint") {
+			ig.Constraints = append(ig.Constraints, c.arg(0))
+		}
+		out = append(out, ig)
+	}
+	return out, nil
 }
 
 // ReadDRCPolicy reads the DRC policy of a .kicad_pro. drc_exclusions is a

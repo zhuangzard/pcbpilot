@@ -1,0 +1,8 @@
+(kicad_sch (version 20250114) (generator "pcbpilot-test")
+	(uuid "root-uuid")
+	(paper "A4")
+	(sheet (at 10 10) (size 20 20) (uuid "sheet-1")
+		(property "Sheetname" "sub" (at 10 9 0))
+		(property "Sheetfile" "sub/sub.kicad_sch" (at 10 31 0)))
+	(sheet_instances (path "/" (page "1")))
+)
