@@ -568,3 +568,30 @@ func TestKicadBoardSameNetHolesRefusedUnverified(t *testing.T) {
 		t.Error("board written")
 	}
 }
+
+// A board without an outline keeps its invalid_outline through a stackup
+// change: the violation names the board itself, whose uuid is new on every
+// load, so it must not count as a new error.
+func TestKicadBoardDRCBoardItemNotNew(t *testing.T) {
+	_, pcb := boardFixture(t)
+	outline := func(uuid string) *kicad.DRCReport {
+		return &kicad.DRCReport{Violations: []kicad.Violation{{Rule: "invalid_outline", Section: "violations",
+			Message: "Board has malformed outline (no edges found on Edge.Cuts layer); PCB", Objs: []string{uuid},
+			Items: []kicad.DRCItem{{Description: "PCB", UUID: uuid}}}}}
+	}
+	tools := &fakeBoardTools{stats: kicad.BoardStats{Thickness: 1.6}, drc: []*kicad.DRCReport{outline("u-before"), outline("u-after")}}
+	rep := &kicadBoardReport{Op: "stackup"}
+	runKicadBoard(rep, "stackup", &kicad.StackupSpec{Layers: 4, Thickness: 1.6, Finish: "ENIG"}, kicadBoardOpts{pcb: pcb, inPlace: true}, tools)
+	if !rep.OK || rep.Verdict != gate.Pass {
+		blob, _ := json.MarshalIndent(rep, "", "  ")
+		t.Fatalf("stackup refused on an outline-less board:\n%s", blob)
+	}
+	// Any other item keeps its uuid identity.
+	a := kicad.Violation{Rule: "clearance", Section: "violations", Objs: []string{"x"}, Items: []kicad.DRCItem{{Description: "Track", UUID: "x"}}}
+	b := a
+	b.Objs = []string{"y"}
+	b.Items = []kicad.DRCItem{{Description: "Track", UUID: "y"}}
+	if drcKey(a) == drcKey(b) {
+		t.Error("different items share a DRC key")
+	}
+}

@@ -497,3 +497,14 @@ b0.Add(fp)
 	// Cutouts inside the footprint's outline are still fine.
 	boardLiveOp(t, tools, "outline", pcb, &kicad.OutlineSpec{Cutouts: []kicad.BoardShape{{Circle: &kicad.BoardCircle{X: 10, Y: 10, Diameter: 3}}}})
 }
+
+// TestKicadBoardLiveStackupNoOutline changes the stackup of a board that has
+// no outline yet: its invalid_outline names the board, whose uuid is new on
+// every load, and must not count as a new DRC error; kicad-cli's null size
+// is no stats failure.
+func TestKicadBoardLiveStackupNoOutline(t *testing.T) {
+	tools := boardLiveTools(t)
+	pcb := filepath.Join(t.TempDir(), "bare.kicad_pcb")
+	boardLiveOp(t, tools, "new", pcb, &kicad.NewBoardSpec{Layers: 2})
+	boardLiveOp(t, tools, "stackup", pcb, &kicad.StackupSpec{Layers: 6, Thickness: 1.6, Finish: "ENIG"})
+}

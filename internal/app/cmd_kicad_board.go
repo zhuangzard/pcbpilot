@@ -725,8 +725,21 @@ func boardDRCCheck(tools kicadBoardTools, op, in, out string, created []kicad.Bo
 // drcKey identifies a violation across the two runs: the rule and the
 // items (uuids survive a save), else the rule and the message.
 func drcKey(v kicad.Violation) string {
-	if len(v.Objs) > 0 {
-		ids := append([]string(nil), v.Objs...)
+	// The board itself ("PCB", e.g. invalid_outline) gets a fresh uuid on
+	// every load: it is no identity across the before/after runs.
+	board := map[string]bool{}
+	for _, it := range v.Items {
+		if it.Description == "PCB" && it.UUID != "" {
+			board[it.UUID] = true
+		}
+	}
+	var ids []string
+	for _, id := range v.Objs {
+		if !board[id] {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) > 0 {
 		sort.Strings(ids)
 		return v.Section + "|" + v.Rule + "|" + strings.Join(ids, ",")
 	}
