@@ -49,6 +49,8 @@ USAGE = (
     '  --qty N        build quantity for stock/price ranking (default 100)\n'
     '  --n M          online page size (default 20)\n'
     '  --json         machine-readable output\n'
+    '  --lookup C1,C2 exact catalog lookup of LCSC numbers (online; JSON list of\n'
+    '                 {code, found, error, record}); used by `pcbpilot kicad lcsc --health`\n'
     '\n'
     'After an --online pick, resolve device identity deterministically with\n'
     '  pcbpilot lib by-lcsc --lcsc <C-number>\n'
@@ -297,6 +299,7 @@ def select(keyword, qty=100, n=20):
             'base': c.get('componentLibraryType') == 'base',
             'preferred': bool(c.get('preferredComponentFlag')),
             'stock': stock, 'in_stock': stock >= qty, 'unit': unit,
+            'record': normalize(c),
             **({'resistance': resistance} if resistance else {}),
         })
     # Spec match FIRST (drop candidates whose value doesn't match — a cheap basic
@@ -309,6 +312,76 @@ def select(keyword, qty=100, n=20):
     ranked.sort(key=lambda r: (r['relevance'], r['in_stock'], r['base'],
                                r['preferred'], -r['unit']), reverse=True)
     return ranked
+
+
+def _int_or_none(v):
+    try:
+        return None if v is None or isinstance(v, bool) else int(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def normalize(c):
+    """One catalog record in the stable shape `pcbpilot kicad lcsc` reads.
+
+    Fields the catalog does not state stay null: the Go side must treat a
+    missing stock / buyable flag as "cannot check", never as zero or true.
+    """
+    attrs = {}
+    raw = c.get('attributes')
+    if isinstance(raw, list):
+        for a in raw:
+            if isinstance(a, dict) and a.get('attribute_name_en') and a.get('attribute_value_name') is not None:
+                attrs[str(a['attribute_name_en']).strip()] = str(a['attribute_value_name']).strip()
+    buy = c.get('isBuyComponent')
+    buyable = None if buy is None else str(buy).strip() == '1'
+    tiers = []
+    for p in c.get('componentPrices') or []:
+        if isinstance(p, dict) and p.get('productPrice') is not None:
+            tiers.append({'from': p.get('startNumber'), 'to': p.get('endNumber'), 'price': p.get('productPrice')})
+    return {
+        'lcsc': c.get('componentCode'),
+        'mpn': c.get('componentModelEn'),
+        'brand': c.get('componentBrandEn'),
+        'package': c.get('componentSpecificationEn'),
+        'category': c.get('componentTypeEn') or c.get('firstSortName'),
+        'group': c.get('secondSortName'),
+        'base': (c.get('componentLibraryType') == 'base') if c.get('componentLibraryType') else None,
+        'preferred': bool(c.get('preferredComponentFlag')),
+        'stock': _int_or_none(c.get('stockCount')),
+        'buyable': buyable,
+        'noBuyReason': c.get('noBuyReason') or None,
+        'mergedCode': c.get('mergedComponentCode') or None,
+        'alternativesCode': c.get('componentAlternativesCode') or None,
+        'loss': _int_or_none(c.get('lossNumber')),
+        'leastPatch': _int_or_none(c.get('leastPatchNumber')),
+        'prices': tiers,
+        'attrs': attrs,
+        'desc': c.get('describe'),
+        'url': c.get('lcscGoodsUrl'),
+    }
+
+
+def lookup(codes):
+    """Exact-code catalog lookup. A keyword search for an unknown C-number
+    returns OTHER parts (fuzzy), so only a record whose componentCode equals the
+    request counts; no such record is "found": false, a request failure is
+    reported per code in "error" and never as "not found"."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one(code):
+        want = code.strip().upper()
+        try:
+            hits = jlc_search(want, 10)
+        except Exception as e:  # network, HTTP, JSON: all "could not ask"
+            return {'code': want, 'found': False, 'error': f'{type(e).__name__}: {e}', 'record': None}
+        exact = [h for h in hits if str(h.get('componentCode') or '').upper() == want]
+        if not exact:
+            return {'code': want, 'found': False, 'error': None, 'record': None}
+        return {'code': want, 'found': True, 'error': None, 'record': normalize(exact[0])}
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        return list(pool.map(one, codes))
 
 
 # ── output ──────────────────────────────────────────────────────────────────
@@ -373,6 +446,14 @@ def main():
     av = sys.argv[1:]
     if '--help' in av or '-h' in av:
         print(USAGE)
+        return 0
+    if '--lookup' in av:
+        i = av.index('--lookup')
+        if i + 1 >= len(av):
+            print(USAGE, file=sys.stderr)
+            return 2
+        codes = [c for c in re.split(r'[,\s]+', av[i + 1]) if c]
+        print(json.dumps(lookup(codes), ensure_ascii=False, indent=1))
         return 0
     args = [a for a in av if not a.startswith('--')]
     if not args:

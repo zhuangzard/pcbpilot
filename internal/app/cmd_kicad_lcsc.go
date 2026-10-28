@@ -35,12 +35,14 @@ type partsSelectHit struct {
 	Stock     int64   `json:"stock"`
 	Unit      float64 `json:"unit"`
 	Key       string  `json:"key"` // offline (standard-parts.json) rows
+	// Record is the full catalog record (online rows only), used by --health / --alternatives.
+	Record *kicad.CatalogPart `json:"record,omitempty"`
 }
 
 func newKiCadLcscCmd(stdout, stderr io.Writer) *cobra.Command {
 	var pcb, sch, search, field, scriptPath, libDir, libName string
 	var sets, imports []string
-	var check, offline, asJSON bool
+	var check, offline, asJSON, health, alternatives bool
 	var qty, limit int
 	c := &cobra.Command{
 		Use:   "lcsc",
@@ -56,6 +58,18 @@ func newKiCadLcscCmd(stdout, stderr io.Writer) *cobra.Command {
                      text edit. Close the files in KiCad first.
   --search "query"   search the JLCPCB SMT catalog (live, via the skill's parts-select.py):
                      LCSC number, basic/extended, stock, package, MPN, description.
+  --health           read-only BOM risk report before ordering, from the live JLC catalog: missing
+                     / malformed / unknown LCSC numbers, discontinued or not-recommended parts,
+                     stock vs the order (--qty boards), extended-library count (setup fee),
+                     footprint vs catalog package, one MPN under several LCSC numbers. Every
+                     check is pass / fail / cannot-check with its evidence; JSON on stdout;
+                     exit 0 pass, 6 fail, 5 not verified (offline: cannot-check, never pass).
+  --alternatives     for BOM lines that are out of stock, short of the order, discontinued,
+                     unknown to the catalog or extended-library, propose replacement LCSC
+                     numbers (same package as the board footprint, key parameters verified,
+                     basic library preferred, stock reserved across lines). Never edits the
+                     design: prints a JSON plan; apply it with  --set @plan.json  (refused if
+                     the design no longer carries the numbers the plan expects). Same exit codes.
   --import Cxxxx     fetch the part's EasyEDA symbol+footprint from JLC's EasyEDA server and
                      convert them with KiCad's own EasyEDA importers into
                      --lib-dir/<--lib-name>.kicad_sym and .pretty (symbol gets the
@@ -66,18 +80,38 @@ func newKiCadLcscCmd(stdout, stderr io.Writer) *cobra.Command {
   pcbpilot kicad lcsc --pcb b.kicad_pcb --sch b.kicad_sch --set R1=C25744 --set C1=C1525,C2=C1525
   pcbpilot kicad lcsc --search "10k 0402"
   pcbpilot kicad lcsc --search "AMS1117-3.3" --json
+  pcbpilot kicad lcsc --pcb b.kicad_pcb --sch b.kicad_sch --health --qty 10 > health.json
+  pcbpilot kicad lcsc --pcb b.kicad_pcb --sch b.kicad_sch --alternatives --qty 10 > plan.json
+  pcbpilot kicad lcsc --pcb b.kicad_pcb --sch b.kicad_sch --set @plan.json
   pcbpilot kicad lcsc --import C6186 --import C25744 --lib-dir ./lib`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			modes := 0
-			for _, on := range []bool{check, len(sets) > 0, search != "", len(imports) > 0} {
+			for _, on := range []bool{check, len(sets) > 0, search != "", len(imports) > 0, health, alternatives} {
 				if on {
 					modes++
 				}
 			}
 			if modes != 1 {
-				return fmt.Errorf("choose exactly one of --check, --set, --search, --import")
+				return fmt.Errorf("choose exactly one of --check, --set, --search, --import, --health, --alternatives")
+			}
+			// --qty is a per-number quantity for --search (default 100) but the
+			// number of boards for --health / --alternatives (default 1).
+			boards := 1
+			if cmd.Flags().Changed("qty") {
+				boards = qty
+			}
+			if (health || alternatives) && boards < 1 {
+				return fmt.Errorf("--qty must be at least 1 board")
 			}
 			switch {
+			case health:
+				return runLcscHealth(stdout, stderr, pcb, sch, scriptPath, boards)
+			case alternatives:
+				lim := 3
+				if cmd.Flags().Changed("limit") {
+					lim = limit
+				}
+				return runLcscAlternatives(stdout, stderr, pcb, sch, scriptPath, boards, lim)
 			case search != "":
 				return runLcscSearch(stdout, scriptPath, search, offline, qty, limit, asJSON)
 			case len(imports) > 0:
@@ -93,15 +127,17 @@ func newKiCadLcscCmd(stdout, stderr io.Writer) *cobra.Command {
 	f.StringVar(&pcb, "pcb", "", "board file (.kicad_pcb)")
 	f.StringVar(&sch, "sch", "", "root schematic (.kicad_sch)")
 	f.BoolVar(&check, "check", false, "list placed parts without an LCSC number")
-	f.StringArrayVar(&sets, "set", nil, "REF=Cxxxx assignment(s)")
+	f.BoolVar(&health, "health", false, "BOM risk report from the live catalog (needs --pcb; JSON; exit 0/6/5)")
+	f.BoolVar(&alternatives, "alternatives", false, "propose in-stock replacements as a --set plan (needs --pcb; JSON; read-only)")
+	f.StringArrayVar(&sets, "set", nil, "REF=Cxxxx assignment(s), or @plan.json from --alternatives")
 	f.StringVar(&field, "field", kicad.DefaultLCSCField, "field name to create when a part has none")
 	f.StringVar(&search, "search", "", "JLCPCB catalog query (value+package, MPN or C-number)")
 	f.StringArrayVar(&imports, "import", nil, "LCSC number(s) to import as KiCad symbol+footprint")
 	f.StringVar(&libDir, "lib-dir", "", "--import: directory for the KiCad libraries (required)")
 	f.StringVar(&libName, "lib-name", "lcsc", "--import: library nickname / file stem")
 	f.BoolVar(&offline, "offline", false, "--search: only the curated standard-parts.json (no network)")
-	f.IntVar(&qty, "qty", 100, "--search: build quantity for stock ranking")
-	f.IntVar(&limit, "limit", 10, "--search: rows to print")
+	f.IntVar(&qty, "qty", 100, "--search: build quantity per part (default 100); --health / --alternatives: number of boards (default 1)")
+	f.IntVar(&limit, "limit", 10, "--search: rows to print (default 10); --alternatives: candidates per line (default 3)")
 	f.BoolVar(&asJSON, "json", false, "machine-readable output (--check, --search)")
 	f.StringVar(&scriptPath, "parts-select", "", "path to parts-select.py (default: the installed skill)")
 	return c
@@ -153,7 +189,7 @@ func runLcscSet(stdout io.Writer, pcb, sch string, sets []string, field string) 
 	if pcb == "" && sch == "" {
 		return fmt.Errorf("--set needs --pcb and/or --sch")
 	}
-	assign, err := kicad.ParseAssignments(sets)
+	assign, err := resolveSetArgs(pcb, sch, sets)
 	if err != nil {
 		return err
 	}

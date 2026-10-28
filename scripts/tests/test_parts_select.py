@@ -213,6 +213,56 @@ class PartsResistanceTests(unittest.TestCase):
             self.assertEqual(selector.main(), 0)
 
 
+class CatalogLookupTests(unittest.TestCase):
+    """--lookup / normalize for `pcbpilot kicad lcsc --health`; the catalog is mocked."""
+
+    def record(self, code, **kw):
+        c = catalog_part(code, "10kΩ")
+        c.update(kw)
+        return c
+
+    def test_normalize_keeps_unknowns_null(self):
+        rec = selector.normalize({"componentCode": "C1"})
+        self.assertIsNone(rec["stock"])
+        self.assertIsNone(rec["buyable"])
+        self.assertIsNone(rec["base"])
+        self.assertEqual(rec["attrs"], {})
+
+    def test_normalize_buyable_stock_and_attrs(self):
+        rec = selector.normalize(self.record("C9", isBuyComponent="0", noBuyReason="eol", stockCount=0,
+                                             mergedComponentCode="C10", lossNumber=10))
+        self.assertIs(rec["buyable"], False)
+        self.assertEqual(rec["stock"], 0)
+        self.assertEqual(rec["noBuyReason"], "eol")
+        self.assertEqual(rec["mergedCode"], "C10")
+        self.assertEqual(rec["loss"], 10)
+        self.assertIs(rec["base"], True)
+        self.assertEqual(rec["attrs"]["Resistance"], "10kΩ")
+        ok = selector.normalize(self.record("C9", isBuyComponent="1"))
+        self.assertIs(ok["buyable"], True)
+
+    def test_lookup_requires_exact_code_and_separates_errors(self):
+        def fake(keyword, n=20, library_type=None):
+            if keyword == "C1":
+                return [self.record("C1")]
+            if keyword == "C2":   # fuzzy: the catalog answers with some other part
+                return [self.record("C777")]
+            raise OSError("boom")
+        with mock.patch.object(selector, "jlc_search", fake):
+            rows = {r["code"]: r for r in selector.lookup(["c1", "C2", "C3"])}
+        self.assertTrue(rows["C1"]["found"])
+        self.assertEqual(rows["C1"]["record"]["lcsc"], "C1")
+        self.assertFalse(rows["C2"]["found"])
+        self.assertIsNone(rows["C2"]["error"])
+        self.assertFalse(rows["C3"]["found"])
+        self.assertIn("boom", rows["C3"]["error"])
+
+    def test_select_rows_carry_the_record(self):
+        with mock.patch.object(selector, "jlc_search", lambda *a, **k: [self.record("C5")]):
+            rows = selector.select("10kΩ 0805", qty=10, n=5)
+        self.assertEqual(rows[0]["record"]["lcsc"], "C5")
+
+
 class ConsoleEncodingTest(unittest.TestCase):
     def test_cp1252_console_does_not_crash(self):
         # field report 2026-10-15: the Chinese report raised UnicodeEncodeError on a
