@@ -356,6 +356,57 @@ func TestSyncRetiredSymlinkIsLeftAlone(t *testing.T) {
 	}
 }
 
+// A Skill dir linked into a checkout the way installers link directories
+// (linkDir: a symlink on Unix, a junction on Windows — Go reports a junction
+// as irregular, not a symlink) is a link: reported Linked, never written.
+func TestSyncLinkedDirIntoCheckoutIsLeftAlone(t *testing.T) {
+	isolatedSkillHome(t)
+	checkout := filepath.Join(t.TempDir(), "checkout", ".agents", "skills")
+	router, focused := filepath.Join(checkout, SkillName), filepath.Join(checkout, demoSkill)
+	for _, d := range []string{router, focused} {
+		writeTestFile(t, filepath.Join(d, "SKILL.md"), "CHECKOUT "+filepath.Base(d))
+		writeTestFile(t, filepath.Join(d, versionMarker), "0.9.0\n")
+	}
+	for skill, target := range map[string]string{SkillName: router, demoSkill: focused} {
+		link := SkillDirFor("claude", skill)
+		if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := linkDir(target, link); err != nil {
+			t.Skipf("cannot link a directory here: %v", err)
+		}
+		if got := SkillLinkTarget(link); got == "" || !sameDirForTest(t, got, target) {
+			t.Fatalf("SkillLinkTarget(%s) = %q, want %s", link, got, target)
+		}
+		if ownedSkillDir(link) {
+			t.Fatalf("a linked dir must never count as an owned Skill: %s", link)
+		}
+	}
+	serveRelease(t, "1.0.0", multiTarball(t, "1.0.0", twoSkills(), twoSkillManifest()))
+	res, err := SyncSkills(context.Background(), SyncOptions{TargetVersion: "1.0.0", Force: true}, nil)
+	if err != nil {
+		t.Fatalf("sync: %v %+v", err, res)
+	}
+	if o := outcome(t, res, "claude", SkillName); o.Status != "linked" || o.Linked == "" {
+		t.Fatalf("linked router not reported as linked: %+v", o)
+	}
+	for _, d := range []string{router, focused} {
+		if got := readTestFile(t, filepath.Join(d, "SKILL.md")); got != "CHECKOUT "+filepath.Base(d) {
+			t.Fatalf("checkout written through the link: %s = %q", d, got)
+		}
+		if got := readMarker(d); got != "0.9.0" {
+			t.Fatalf("checkout marker rewritten through the link: %s = %q", d, got)
+		}
+	}
+}
+
+func sameDirForTest(t *testing.T, a, b string) bool {
+	t.Helper()
+	x, err1 := os.Stat(a)
+	y, err2 := os.Stat(b)
+	return err1 == nil && err2 == nil && os.SameFile(x, y)
+}
+
 func TestSyncRejectsIncompleteOrMisversionedArchiveBeforeWriting(t *testing.T) {
 	isolatedSkillHome(t)
 	router := seedOwned(t, "claude", SkillName, "0.9.0")
