@@ -472,27 +472,43 @@ func (r *kicadRun) run() error {
 
 	r.lap("input DRC")
 	// 2. Pre-route gate: intent + insulation → netclasses (+ .kicad_dru).
-	reqs := kicadRequirements(r.in)
-	iso := kicadIsolation(r.in)
-	edges := kicadEdges(o.intent, r.in)
+	// The one derivation kicad rules shares; rules applied by kicad rules
+	// must still equal it for the current inputs (kicadRouteRulesStamp).
+	ri := deriveKicadRules(r.in, o.intent, nil)
+	if ri, err = r.rulesStamp(ri, inSnap); err != nil {
+		return fmt.Errorf("pre-route gate: %w", err)
+	}
+	reqs, iso, edges := ri.Reqs, ri.Iso, ri.Edges
 	r.summary["isolationRules"], r.summary["edgeRules"] = iso, edges
 	classed := r.next("classed")
-	ncRes, err := kt.NetclassesIso(board, reqs, iso, edges, classed)
+	full, err := applyKicadNetclasses(kt, board, ri, nil, classed)
+	var ncRes *kicad.NetclassResult
+	if full != nil {
+		ncRes = &full.NetclassResult
+	}
 	r.summary["netclasses"] = ncRes
 	if err != nil {
-		return fmt.Errorf("pre-route gate: netclasses: %w", err)
+		return fmt.Errorf("pre-route gate: %w", err)
 	}
-	if len(ncRes.Mismatched) > 0 {
-		return fmt.Errorf("pre-route gate: %d net(s) do not resolve to their pcbpilot netclass: %s", len(ncRes.Mismatched), strings.Join(ncRes.Mismatched, "; "))
+	// kicad rules' block must stay behind the route block bridge just
+	// re-appended (the last matching rule wins; see kicad_rules_block.go).
+	if kr, _ := r.summary["kicadRules"].(map[string]any); kr != nil {
+		// The block must be exactly what kicad rules writes for the classes
+		// just derived (after the board floors): a board minimum or a user /
+		// Default class widened since, or a hand-edited block, is stale.
+		if err := r.checkRulesBlock(classed, full, inSnap.CopperLayers); err != nil {
+			kr["stale"] = true
+			return fmt.Errorf("pre-route gate: %w", err)
+		}
+		if err := moveRulesBlockLast(classed); err != nil {
+			return fmt.Errorf("pre-route gate: kicad rules block: %w", err)
+		}
 	}
 	if len(ncRes.MissingNets) > 0 {
 		fmt.Fprintf(r.stderr, "warning: %d intent net(s) not on the board (ignored): %s\n", len(ncRes.MissingNets), strings.Join(ncRes.MissingNets, ", "))
 	}
 	if len(ncRes.MissingDomainNets) > 0 {
 		fmt.Fprintf(r.stderr, "warning: %d insulation/edge domain net(s) not on the board (no rule covers them): %s\n", len(ncRes.MissingDomainNets), strings.Join(ncRes.MissingDomainNets, ", "))
-	}
-	for _, n := range ncRes.MissingNets {
-		delete(reqs, n)
 	}
 	r.classes = ncRes.Classes
 	fmt.Fprintf(r.stderr, "pre-route gate: %d net(s) in %d netclass(es), %d insulation pair(s), %d custom rule(s)\n", len(reqs), len(ncRes.Classes), len(iso), ncRes.DRURules)

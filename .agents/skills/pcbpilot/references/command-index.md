@@ -208,8 +208,9 @@
 | `kicad place` | Place a KiCad board's footprints with the pcbauto placer (best of several seeds) | [SKILL.md](../SKILL.md), [drc-triage.md](drc-triage.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad.md](kicad.md) +2 |
 | `kicad render` | Deterministic SVG previews of a KiCad schematic / board, and a structural compare against a baseline render | [kicad-file-safety.md](kicad-file-safety.md), [kicad.md](kicad.md) |
 | `kicad route` | Route and gate a .kicad_pcb like pcb auto route: review → intent netclasses → fastroute → via arrays / widen / pours / silk → every gate → IR closure → report → release review | [SKILL.md](../SKILL.md), [board-manual.md](board-manual.md), [drc-triage.md](drc-triage.md), [evidence-and-verdicts.md](evidence-and-verdicts.md) +6 |
+| `kicad rules` | Design intent + simulation → KiCad netclasses, .kicad_dru rules and pre-defined sizes, verified with KiCad (plan / apply / check) | [kicad.md](kicad.md) |
 | `kicad sch-build` | Build a complete, gate-checked KiCad schematic project from one design spec (one call, seconds) | [SKILL.md](../SKILL.md), [design-flow.md](design-flow.md), [evidence-and-verdicts.md](evidence-and-verdicts.md), [kicad-file-safety.md](kicad-file-safety.md) +2 |
-| `kicad sch-check` | Schematic hard gate on KiCad: kicad-cli ERC + pcbpilot quality checks (JSON, non-zero on fail) | [SKILL.md](../SKILL.md), [drc-triage.md](drc-triage.md), [evidence-and-verdicts.md](evidence-and-verdicts.md), [kicad-file-safety.md](kicad-file-safety.md) +3 |
+| `kicad sch-check` | Schematic hard gate on KiCad: kicad-cli ERC + pcbpilot quality checks, --review design audit (JSON, non-zero on fail) | [SKILL.md](../SKILL.md), [design-intent.md](design-intent.md), [drc-triage.md](drc-triage.md), [evidence-and-verdicts.md](evidence-and-verdicts.md) +4 |
 | `kicad sch-checkpoint` | List or restore the checkpoints kicad sch-build / sch-edit saved | [kicad-file-safety.md](kicad-file-safety.md), [kicad-sch-build.md](kicad-sch-build.md) |
 | `kicad sch-edit` | Change a sch-build project in one call (add/remove/replace parts or blocks, connect by pin name, rename nets, move zones) | [SKILL.md](../SKILL.md), [design-flow.md](design-flow.md), [drc-triage.md](drc-triage.md), [kicad-file-safety.md](kicad-file-safety.md) +3 |
 | `kicad sch-fit` | Size every schematic sheet to its content (smallest A4…A0 that holds it clear of the title block) | [drc-triage.md](drc-triage.md), [kicad-file-safety.md](kicad-file-safety.md), [review-workflow.md](review-workflow.md) |
@@ -650,4 +651,4 @@
 | `workflow reset` | Clear deprecated checklist entries (or --all) | — |
 | `workflow status` | Show deprecated checklist state; --reconcile compares it with the live document | [pcb-layout.md](pcb-layout.md) |
 
-共 432 条命令，其中 94 条尚无参考提到。
+共 433 条命令，其中 94 条尚无参考提到。

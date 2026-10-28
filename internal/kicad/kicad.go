@@ -452,21 +452,9 @@ func (t *Tools) Edit(pcb string, ops map[string]any, out string) (json.RawMessag
 // the domain classes (insulated domains' edge distance, IEC 60664-1 /
 // 62368-1 / 60601-1 via pcbauto.EdgeFromIntent).
 func (t *Tools) NetclassesIso(pcb string, reqs map[string]NetRequirement, isolation, edges []map[string]any, out string) (*NetclassResult, error) {
-	path := strings.TrimSuffix(out, filepath.Ext(out)) + "-reqs.json"
-	b, err := json.MarshalIndent(map[string]any{"pcbpilotReqs": 2, "nets": reqs, "isolation": isolation, "edges": edges}, "", "  ")
-	if err != nil {
+	res, err := t.NetclassesReq(pcb, NetclassRequest{Nets: reqs, Isolation: isolation, Edges: edges}, out)
+	if res == nil {
 		return nil, err
 	}
-	if err := os.WriteFile(path, b, 0o644); err != nil {
-		return nil, err
-	}
-	raw, err := t.RunBridge("netclasses", pcb, path, out)
-	if err != nil {
-		return nil, err
-	}
-	var res NetclassResult
-	if err := json.Unmarshal(raw, &res); err != nil {
-		return nil, err
-	}
-	return &res, nil
+	return &res.NetclassResult, err
 }

@@ -41,6 +41,67 @@ type Spec struct {
 	// overrides the board-edge safety distances (default: routed edge,
 	// 20 mil outer / 30 mil inner).
 	Edge *SpecEdge `json:"edge,omitempty"`
+	// Review declares the roles the schematic cannot show to the design
+	// review (`kicad sch-check --review`); copied into intent.json.
+	Review *ReviewNotes `json:"review,omitempty"`
+}
+
+// ReviewNotes are explicit roles for the schematic design review. Pins are
+// "REF.PIN" (pin number) or "REF.NAME" (pin name, case-insensitive); nets
+// are net names (display or full name); parts are references. Every field
+// is optional; an exemption the review applies names the field it came
+// from.
+type ReviewNotes struct {
+	// InternalPullups / InternalPulldowns: pins with an internal pull the
+	// design relies on (an open-drain line or an input then needs no
+	// external resistor).
+	InternalPullups   []string `json:"internalPullups,omitempty"`
+	InternalPulldowns []string `json:"internalPulldowns,omitempty"`
+	// PulledUpNets: nets pulled up outside what the schematic shows.
+	PulledUpNets []string `json:"pulledUpNets,omitempty"`
+	// TolerantPins accept a pull-up rail above their own supply.
+	TolerantPins []string `json:"tolerantPins,omitempty"`
+	// TestPoints: parts that are test points; SinglePinNets: nets that
+	// reach one pin on purpose.
+	TestPoints    []string `json:"testPoints,omitempty"`
+	SinglePinNets []string `json:"singlePinNets,omitempty"`
+	// ReferenceRails need no decoupling / bulk capacitor (a reference or
+	// sense node named like a rail).
+	ReferenceRails []string `json:"referenceRails,omitempty"`
+	// Modules have integrated decoupling; CaplessRegulators are stable
+	// without an output capacitor.
+	Modules           []string `json:"modules,omitempty"`
+	CaplessRegulators []string `json:"caplessRegulators,omitempty"`
+	// Aliases: groups of names intentionally on one net.
+	Aliases [][]string `json:"aliases,omitempty"`
+	// NoInternalPulls: pins known to have no internal pull;
+	// InternalPullsComplete: the internal pull lists above name every
+	// internal pull the design relies on, so an unlisted pin has none. An
+	// open-drain line or undriven input is an error only with one of them
+	// (otherwise the review cannot tell).
+	NoInternalPulls       []string `json:"noInternalPulls,omitempty"`
+	InternalPullsComplete bool     `json:"internalPullsComplete,omitempty"`
+	// PushPullOutputs: bidirectional / tri-state pins configured as
+	// push-pull outputs (they then drive an open-drain line).
+	PushPullOutputs []string `json:"pushPullOutputs,omitempty"`
+	// PinDomains: pin → the supply net of its I/O domain (a part with
+	// several rails); PinMaxV: a pin's maximum voltage (abs-max/tolerance).
+	PinDomains map[string]string  `json:"pinDomains,omitempty"`
+	PinMaxV    map[string]float64 `json:"pinMaxV,omitempty"`
+	// ChargePumps: parts whose output capacitor returns to another rail.
+	ChargePumps []string `json:"chargePumps,omitempty"`
+	// InputPins: pins that are inputs although their symbol types them
+	// passive / unspecified; CurrentDrivers: pins that regulate an LED's
+	// current (no series resistor needed); CommonPins: groups of pins that
+	// are one electrical pin though the symbol does not stack them.
+	InputPins      []string   `json:"inputPins,omitempty"`
+	CurrentDrivers []string   `json:"currentDrivers,omitempty"`
+	CommonPins     [][]string `json:"commonPins,omitempty"`
+	// Connectors: parts that are connectors (the off-board boundary)
+	// although not from a KiCad connector library; GroundedPowerPins:
+	// power pins the datasheet ties to ground.
+	Connectors        []string `json:"connectors,omitempty"`
+	GroundedPowerPins []string `json:"groundedPowerPins,omitempty"`
 }
 
 // SpecEdge is spec.json "edge".

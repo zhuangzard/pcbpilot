@@ -4,7 +4,7 @@ description: "用 pcbpilot 选型找料、建库与维护器件库（EasyEDA Pro
 license: MIT
 metadata:
   author: "zhuangzard (pcbpilot); original easyeda-agent by zhoushoujianwork"
-  version: "0.11.0"
+  version: "0.12.0"
   homepage: "https://github.com/zhuangzard/pcbpilot"
 ---
 

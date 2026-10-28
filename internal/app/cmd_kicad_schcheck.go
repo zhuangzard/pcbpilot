@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/zhuangzard/pcbpilot/internal/gate"
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
 )
 
@@ -44,16 +45,21 @@ type kicadSchCheckReport struct {
 	// EngineerGrade: the engineer-grade gate of kicad sch-build, run on an
 	// existing project with --engineer-grade --spec.
 	EngineerGrade *sbGate `json:"engineerGrade,omitempty"`
+	// Review is the design review (--review); Status is then the overall
+	// verdict of ERC + quality + review.
+	Review *kicad.SchReview `json:"review,omitempty"`
+	Status gate.Status      `json:"status,omitempty"`
 }
 
 func newKicadSchCheckCmd(stdout, stderr io.Writer) *cobra.Command {
 	var sch string
-	var fixPwr, eg bool
+	var fixPwr, eg, review bool
 	var specPath string
 	var ignore []string
+	var intentPath, simPath, waiverPath string
 	c := &cobra.Command{
 		Use:   "sch-check",
-		Short: "Schematic hard gate on KiCad: kicad-cli ERC + pcbpilot quality checks (JSON, non-zero on fail)",
+		Short: "Schematic hard gate on KiCad: kicad-cli ERC + pcbpilot quality checks, --review design audit (JSON, non-zero on fail)",
 		Long: `Runs kicad-cli's ERC (JSON, all severities) on the hierarchy of --sch and
 pcbpilot's own quality checks on every sheet: overlapping symbols, wires through
 symbol bodies, diagonal / off-grid / overlapping wires, a wire end or pin on the
@@ -78,13 +84,81 @@ decoupling <= 25.4 mm from its IC supply pin in the same zone, EG-08 crossings,
 EG-09 four-way junctions, EG-13 dangling labels, EG-20 automatic net names,
 EG-22 title block) on a project drawn by any tool. The spec
 (pcbpilot.kicad.sch-build/1) supplies what a sheet cannot: net kinds, zones,
-pages and the title block; its symbols are resolved offline.`,
+pages and the title block; its symbols are resolved offline.
+
+--review adds the design review (read-only; JSON under "review"): schematic
+design mistakes proven from the KiCad netlist, the library pin electrical
+types, ERC and the sheet files, plus --intent intent.json (pcbpilot intent
+derive: net roles, rail voltages, regulator blocks, the optional review{}
+roles) and --sim sim.json (pcbpilot sim power: rail voltages) when given.
+  connections   i2c-pullup, open-drain-pullup, pullup-voltage (a declared
+                review.pinMaxV is judged before the own-supply match),
+                led-limiter (per die: its own series resistor; a common
+                anode/cathode node to a rail or one driver is an endpoint;
+                a resistor shared before the branches does not limit each;
+                driver aggregate current not checked),
+                floating-input, output-conflict
+  power         ic-power-ground (every designated GND/VSS/EP pin must reach
+                ground, no-connect flags included; every power_in pin must
+                reach a supply; a part with supply terminals only is exempt),
+                decoupling (per power pin: its exact cap set; a set that
+                also serves another power pin, even of the same part, is a
+                shared-coverage warning),
+                regulator-output-cap / regulator-input-cap (proven only for
+                an intent ldo/buck/boost block; a power_out pin alone is
+                likely; a SW/LX pin is traced by the declared topology: buck
+                SW → inductor → output, boost SW → rectifier → output;
+                undeclared or landing on the input is cannot-check),
+                bulk-cap (>= 1 uF floor)
+  net integrity merged-nets (ERC multiple_net_names), single-pin-net,
+                hier-mismatch (sheet pin <-> hierarchical label)
+Each check is pass | fail | cannot-check | not-applicable and names the
+evidence it needed and used; each finding has severity error|warning|info,
+certainty proven|likely|heuristic (only proven findings are errors), refs,
+pins, nets, sheet, a fix and its evidence. A finding that misses optional
+evidence (an internal pull not declared either way, a GPIO's direction, a
+rail voltage) is a likely warning that names the missing evidence
+(missingEvidence); cannot-check is kept for failed required evidence or
+unresolved topology (no netlist / sheet files / ERC or its rule ignored, an
+open jumper, a switch, a branching LED node, a diode of unknown polarity,
+unparseable ERC items) and is never a pass. Verdict: pass, pass-with-
+warnings (coverage incomplete — never "verified"), pass-with-waivers,
+fail, cannot-check. stderr and report.review.summary group the findings:
+every error and cannot-check item in full, then one line per check /
+missing evidence with a per-part breakdown; checks[] keeps every finding.
+Exemptions need an explicit role (intent review{}, a ReviewRole /
+InternalPullup component field, the part kind) and name their source; a low
+current alone exempts nothing. A connector (a KiCad Connector* symbol
+library or Connector_* footprint library, intent review.connectors /
+ReviewRole=connector, or a J/P part without power_in pins) is the
+off-board boundary: info only where the off-board side could provide what
+is missing (a line with one on-board device); two on-board devices on a
+line keep the on-board finding; a connector's power inputs are checked.
+Not covered: crystal load caps, strap pins, feedback values, ESR,
+sequencing, transient protection.
+--waivers takes signed {gate:"sch-review", match:<finding fingerprint>,
+reason, by} entries: a waiver accepts that one finding (reported as waived,
+verdict pass-with-waivers), never a cannot-check.
+Exit with --review: 0 pass (also with warnings / waivers), 6 an unwaived
+error (or ERC error / quality finding), 5 cannot-check; a tool or input
+error (unreadable intent, no kicad-cli) is an error exit of its own.`,
 		Args: cobra.NoArgs,
 		Example: `  pcbpilot kicad sch-check --sch board.kicad_sch
-  pcbpilot kicad sch-check --sch board.kicad_sch --fix-pwr-flag`,
+  pcbpilot kicad sch-check --sch board.kicad_sch --fix-pwr-flag
+  pcbpilot kicad sch-check --sch board.kicad_sch --review --intent intent.json --waivers waivers.json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if sch == "" {
 				return fmt.Errorf("--sch is required")
+			}
+			if review && fixPwr {
+				return fmt.Errorf("--review is read-only: run --fix-pwr-flag in its own sch-check first")
+			}
+			if !review && (intentPath != "" || simPath != "" || waiverPath != "") {
+				return fmt.Errorf("--intent, --sim and --waivers are --review flags")
+			}
+			waivers, err := loadWaivers(waiverPath)
+			if err != nil {
+				return err
 			}
 			root, err := kicad.RootSheetFor(sch)
 			if err != nil {
@@ -127,6 +201,26 @@ pages and the title block; its symbols are resolved offline.`,
 				rep.EngineerGrade = &g
 				rep.OK = rep.OK && g.Status == "pass"
 			}
+			if review {
+				rv, err := runSchReview(schReviewOpts{root: root, erc: erc, intentPath: intentPath, simPath: simPath, waivers: waivers})
+				if err != nil {
+					return err
+				}
+				rep.Review = rv
+				rep.Status = gate.Aggregate(gate.Result{Name: "erc+quality", Status: gate.FromBool(rep.OK)}, gate.Result{Name: schReviewGate, Status: rv.Status})
+				rep.OK = rep.Status == gate.Pass
+				if err := writeJSON(stdout, rep); err != nil {
+					return err
+				}
+				for _, l := range rv.Lines() { // grouped; every finding is in the JSON
+					fmt.Fprintln(stderr, "  "+l)
+				}
+				fmt.Fprintf(stderr, "sch-check: %d ERC error(s), %d warning(s), %d quality finding(s); %s\n", erc.Errors, erc.Warnings, rep.Findings, rv.SummaryLine())
+				if code := rep.Status.ExitCode(); code != 0 {
+					return exitCodeError{code}
+				}
+				return nil
+			}
 			if err := writeJSON(stdout, rep); err != nil {
 				return err
 			}
@@ -145,6 +239,10 @@ pages and the title block; its symbols are resolved offline.`,
 	c.Flags().StringArrayVar(&ignore, "ignore", nil, "quality finding kind to skip (repeatable)")
 	c.Flags().BoolVar(&eg, "engineer-grade", false, "also run the kicad sch-build engineer-grade gate (needs --spec)")
 	c.Flags().StringVar(&specPath, "spec", "", "design spec (pcbpilot.kicad.sch-build/1) for --engineer-grade: net kinds, zones, pages, title")
+	c.Flags().BoolVar(&review, "review", false, "also run the design review (read-only; exit 6 on an unwaived error, 5 on cannot-check)")
+	c.Flags().StringVar(&intentPath, "intent", "", "--review: intent.json from `pcbpilot intent derive` (net roles, rail voltages, review roles)")
+	c.Flags().StringVar(&simPath, "sim", "", "--review: `pcbpilot sim power` document (rail voltages)")
+	c.Flags().StringVar(&waiverPath, "waivers", "", "--review: signed waiver file (JSON list of {gate:\"sch-review\", match:<fingerprint>, reason, by})")
 	return c
 }
 
