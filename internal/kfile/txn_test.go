@@ -1438,11 +1438,17 @@ func TestStagedLinkRefused(t *testing.T) {
 	}
 	clean(t, dir)
 
-	// Replaced by another regular file with identical bytes.
+	// Replaced by another regular file with identical bytes. The new file is
+	// written before the old one goes, so the file system cannot hand the
+	// replacement the freed inode (which made this case flaky on Linux).
 	tx = stagedTxn(t, dir)
 	stagedPro = tx.changes[pro].staged
-	os.Remove(stagedPro)
-	os.WriteFile(stagedPro, []byte("P2"), 0o600)
+	if err := os.WriteFile(stagedPro+".new", []byte("P2"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(stagedPro+".new", stagedPro); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := tx.Apply("", Opts{Env: fakeEnv()}); CodeOf(err) != CodeChanged || read(t, pro) != "P1" {
 		t.Fatalf("swapped staged file: %v", err)
 	}
