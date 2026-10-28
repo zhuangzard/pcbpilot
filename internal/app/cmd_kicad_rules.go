@@ -69,6 +69,7 @@ type kicadRulesOpts struct {
 	backend            rulesBackend // tests: replaces KiCad
 	beforeCommit       func()       // tests: runs after the plan, before the commit
 	beforeReadback     func()       // tests: runs after the commit, before the readback
+	afterRead          func()       // tests: runs right after the inputs are read
 }
 
 // rulesBackend is what kicad rules needs from KiCad (*kicad.Tools).
@@ -322,8 +323,11 @@ type rulesRun struct {
 	block   []rulesBlockRule
 	druRule []kicad.DRURule // staged result's custom rules
 	// rbStaged: pcbnew's readback of the verified stage.
-	rbStaged  *kicad.RulesReadback
-	probeRuns int
+	rbStaged *kicad.RulesReadback
+	// intentCopy: the captured intent bytes in the stage (for readers that
+	// take a path).
+	intentCopy string
+	probeRuns  int
 }
 
 func runKicadRules(o kicadRulesOpts, stdout, stderr io.Writer) error {
@@ -479,6 +483,9 @@ func (r *rulesRun) run(planSnap kfile.Snapshot) int {
 	if code := r.readInputs(); code != 0 {
 		return code
 	}
+	if o.afterRead != nil {
+		o.afterRead()
+	}
 	stage, err := os.MkdirTemp("", "pcbpilot-rules-")
 	if err != nil {
 		return r.fileErr(err)
@@ -566,6 +573,15 @@ func (r *rulesRun) readInputs() int {
 	return 0
 }
 
+// captured returns an input's bytes as read by readInputs.
+func (r *rulesRun) captured(p string) ([]byte, error) {
+	b, ok := r.data[p]
+	if !ok || b == nil {
+		return nil, fmt.Errorf("%s: not read as an input", p)
+	}
+	return b, nil
+}
+
 // inputsUnchanged: the answer speaks for the inputs only if none changed
 // while the run read them (E_FILE_CHANGED, exit 4).
 func (r *rulesRun) inputsUnchanged() int {
@@ -591,7 +607,9 @@ func (r *rulesRun) derive() int {
 			return r.fail(errRulesInput, o.sim, err.Error(), "give a sim power result (schemaVersion 1)", 1)
 		}
 	}
-	decl, notes, err := loadDeclaredCurrents(o.requirements)
+	// Every input is parsed from the bytes read (and hashed) once in
+	// readInputs: never from a fresh read of its path.
+	decl, notes, err := declaredCurrentsFrom(o.requirements, r.captured)
 	if err != nil {
 		return r.fail(errRulesInput, "", err.Error(), "", 1)
 	}
@@ -603,6 +621,12 @@ func (r *rulesRun) derive() int {
 	// Stage copy of exactly the bytes read.
 	inDir := filepath.Join(r.stage, "in")
 	if err := os.MkdirAll(inDir, 0o755); err != nil {
+		return r.fileErr(err)
+	}
+	// The intent's edge policy and route's via-current gate read an intent
+	// file: they get a copy of the captured bytes.
+	r.intentCopy = filepath.Join(r.stage, "intent.json")
+	if err := os.WriteFile(r.intentCopy, r.data[o.intent], 0o600); err != nil {
 		return r.fileErr(err)
 	}
 	r.stIn = filepath.Join(inDir, filepath.Base(o.pcb))
@@ -654,7 +678,7 @@ func (r *rulesRun) derive() int {
 	rep.Assumptions = append(rep.Assumptions, cu.Assumptions...)
 	widths, bases := planRulesWidths(ob, sp, decl, cu)
 	r.bases = bases
-	r.ri = deriveKicadRules(ob, o.intent, widths)
+	r.ri = deriveKicadRules(ob, r.intentCopy, widths)
 	rep.RequestSHA = r.ri.sha()
 	st, _ := parseRulesStamp(string(r.data[r.dru]))
 	out := filepath.Join(r.stage, "out", filepath.Base(o.pcb))

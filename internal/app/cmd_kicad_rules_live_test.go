@@ -72,7 +72,7 @@ func TestKicadRulesLiveDemos(t *testing.T) {
 		if code != 6 || rep.Committed || rep.Errors[len(rep.Errors)-1].Code != errRulesConflict {
 			t.Fatalf("conflict: exit %d %+v\n%s", code, rep.Errors, stderr)
 		}
-		a.replace = []string{"POWER"}
+		a.replace = []string{"POWER", "Default"} // the demo sets its own Default sizes
 		rep, code, stderr = runRules(t, a)
 		if code != 0 || !rep.Committed || checkOf(rep, "readback").Status != gate.Pass || checkOf(rep, "staged-readback").Status != gate.Pass {
 			t.Fatalf("apply: exit %d %+v\n%s", code, rep.Checks, stderr)
@@ -111,6 +111,7 @@ func TestKicadRulesLiveDemos(t *testing.T) {
  "+5VUSB":{"currentA":1.0,"role":"power"},"+3V3":{"currentA":0.8,"role":"power"},"GND":{"currentA":1.0,"role":"ground"}}}]}`)}
 		a := o
 		a.apply = true
+		a.replace = []string{"Default"} // the demo sets its own Default sizes
 		rep, code, stderr := runRules(t, a)
 		if code != 0 || !rep.Committed || checkOf(rep, "readback").Status != gate.Pass {
 			t.Fatalf("apply: exit %d %+v\n%s", code, rep.Checks, stderr)

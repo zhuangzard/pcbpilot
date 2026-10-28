@@ -318,12 +318,16 @@ pcbpilot kicad rules … --check [--stage placed|routed] [--report r.json]  # �
   （同输入两次 `--apply`，第二次 `files: []`，文件哈希不变），过时的自有类/规则/尺寸被移除。
 
 **冲突**（`conflicts[]`、`user-rules` 检查；`--apply` 未解决即退出 6、不写）：用户类会被 PP 类以更低的值覆盖
-（`class-override`，如 pic_programmer 的 POWER 类 0.28 mm 间距 < 绝缘对 0.6 mm）、用户类用了 pcbpilot 前缀但不是
+（`class-override`，如 pic_programmer 的 POWER 类 0.28 mm 间距 < 绝缘对 0.6 mm；**Default** 类同样判，只看工程显式设的值——
+与 KiCad 内置默认 0.2 / 0.2 / 0.6 / 0.3 mm 不同的线宽、间距、过孔、孔，且该网没有别的类设这个值）、用户类用了 pcbpilot 前缀但不是
 pcbpilot 生成的名字（`class-name`，重跑会删掉它）、用户 `.kicad_dru` 规则与 pcbpilot 的约束重叠（`dru-weakened`）、
 用户规则用了 pcbpilot 规则名（`dru-name`）。**条件默认视为重叠**，只有能证明不相交才放过：每个 `||` 分支里都有一个
 `A/B.NetName == '字面量'`、`A/B.NetClass == '字面量'` 或 `A/B.hasNetclass('字面量')` 项，且字面量不含通配符、不是计划内的
-网/类/域类；空条件、属性条件（`A.Type == 'Track'`）、通配（`'V*'`）、函数（`insideArea`）都算重叠。重叠时：track_width
-在用户最小值大于 pcbpilot 下限或无法比较时冲突；clearance 除非用户值不低于所有计划间距且没有绝缘对，否则冲突（自定义
+网/类/域类；空条件、属性条件（`A.Type == 'Track'`）、通配（`'V*'`）、函数（`insideArea`）都算重叠。**两物体约束**
+（clearance、creepage）KiCad 按 (A, B) 两种顺序判，`A.NetName == 'VCC' && B.NetName == 'OTHER'` 或单边的
+`A.NetName == 'OTHER'` 仍管着 VCC–OTHER 这一对：每个分支必须把 A 和 B **都**钉在计划外才算不相交。重叠时：track_width
+按规则能管的每个层组（`(layer …)` 为空 = 外层与内层，`outer` / `F.Cu` / `B.Cu`，`inner` / `InN.Cu`）分别与该层下限比较，
+任一层用户最小值更大或无法比较即冲突；clearance 除非用户值不低于所有计划间距且没有绝缘对，否则冲突（自定义
 clearance 会替换类间距，也会被对规则替换）；有绝缘对时 creepage、有域边距时 edge_clearance 一律冲突。只能按名
 `--replace <名>` 放行：被替换的用户 `.kicad_dru` 规则从文件删除；被替换的用户类保留但被 PP 类压过（前缀冲突的会被删除）。
 不冲突的用户类和规则原样保留。
@@ -334,14 +338,17 @@ clearance 会替换类间距，也会被对规则替换）；有绝缘对时 cre
   解析到 `PPD_<域>`，预设尺寸都在，每类外/内层解析出的最小线宽不低于下限；再用 **kicad-cli DRC 探针**：每类在外层（及内层）
   放一根比下限窄 2 µm 的探针线、每个绝缘对放两根间距比对间隙小 5 µm 的线（都在板外）。KiCad 读不懂 `.kicad_dru` 时
   **静默忽略全部规则、DRC 报 0**（10.0.6 实测）。探针跑两次：带规则一次，再跑一次**阴性对照**（同样探针，`.kicad_dru`
-  去掉 pcbpilot 的两个块、保留用户部分）。带规则时没报 = fail；两次都报 = 被板最小值或类间距挡住，**不能归因**到规则，只
+  去掉 pcbpilot 的两个块、保留用户部分，`.kicad_pro` 去掉 PP / PPD / PPF 类及其 pattern）。每个计划类还有一组**间距探针**：
+  该类的网与板上间距最低的未计划网相距“类间距 − 5 µm”。带规则时没报 = fail；两次都报 = 被板最小值或类间距挡住，**不能归因**到规则，只
   记 info；只有带规则报、对照不报才算证明规则生效。一个可归因的探针都没有（如所有下限都等于板最小线宽、绝缘对靠类间距）
   → `cannot-check`（不能证明 KiCad 加载了规则），绝不 pass。
 - `readback`（`--apply`）：写入后在真实文件上再 `rules-read` + 探针，与已验证的暂存一致、`.kicad_pro` / `.kicad_dru` 字节
   等于暂存文件；不一致即**回滚**（以本次写入内容为 base，绝不覆盖期间的外部编辑；回滚本身失败 = `E_ROLLBACK` 退出 1）。
 - `--check` 额外：`effective-rules`（板上现状 ≥ 计划：类线宽/间距/过孔、逐层解析出的最小线宽规则、域类，绝缘对规则必须
   条件**完全等于**对条件、不限层、clearance 与（对有爬电距离时）creepage 都在且不低于要求、其后没有条件可能重叠的规则再设
-  clearance / creepage；再跑探针）、
+  clearance / creepage；每个计划网的**普通间距**按 KiCad 语义解析（自定义规则替换类间距）：任何可能管到它的规则（两物体
+  判定）把间距压到计划以下即失败，值无法比较即 cannot-check；每个域边距规则 `pcbpilot edge PPD_<域>` 必须在、条件正确、
+  `edge_clearance` 不低于计划，其后可能重叠的规则压低或无法比较同样失败 / cannot-check；再跑探针）、
   `copper-widths`（每段直线与圆弧、按层、容差 0.04 mil，对照要求线宽 `requiredWidthMil`（不低于板最小线宽）：低于计划下限失败；介于下限与线宽之间只有意图 `neckdown`
   `{refs, maxLengthMil, minWidthMil}` 覆盖的段可以；在本网铺铜内的细段 = cannot-check（铺铜颈缩由 post-layout sim 判）；
   没有走线、只有铺铜的网（含铺铜孤岛）= `zone-only`（cannot-check：铺铜宽度与是否连上焊盘这里不判）；≥2 焊盘却无铜的网 =
@@ -349,6 +356,11 @@ clearance 会替换类间距，也会被对规则替换）；有绝缘对时 cre
   （route 的过孔电流门禁原样复用）、`isolation-placement`（**advisory**：同面封装 courtyard 边到边距离 < 对的电气间隙
   → warn；跨两域且未在意图 `pairs[].bridges` 声明的器件 → warn。这是**布局代理检查，不是铜间距**，铜由带绝缘规则的
   DRC 判）。`--stage placed`：未布线阶段不做铜检查（标 not applicable）。
+
+**所有权按位置**：`.kicad_dru` 按块标记切成有序片段分别解析，规则属于哪个块只看它在哪个片段里；块外的规则即使与
+自有规则同名也是用户的（用了 pcbpilot 名字 → `dru-name` 冲突，拒绝）。**输入只读一次**：requirements、意图、sim、
+层叠（`.kicad_pcb`）、`.kicad_pro` / `.kicad_dru` 都只从读入并哈希过的字节解析（需要文件路径的读取器拿暂存副本），推导
+过程中不再按路径重读。
 
 **事务与安全**：写入前 `kfile.Guard`（KiCad 打开工程 → `KICAD_OPEN` 退出 4，什么都不写；只读模式仅警告
 `sourceOpenInKiCad`）；所有输入（板、`.kicad_pro`、`.kicad_dru`、意图、sim、requirements）读一次并哈希，写入前与只读模式

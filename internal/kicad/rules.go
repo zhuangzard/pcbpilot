@@ -324,54 +324,74 @@ func SplitDRU(text string) (user, rules, route string, err error) {
 // ParseDRU reads every rule of a .kicad_dru text, marking the rules inside
 // pcbpilot's blocks.
 func ParseDRU(text string) ([]DRURule, error) {
-	_, rulesBlk, routeBlk, err := SplitDRU(text)
-	if err != nil {
+	if _, _, _, err := SplitDRU(text); err != nil {
 		return nil, err
 	}
-	root, err := parseSexpr([]byte("(dru\n" + text + "\n)"))
-	if err != nil {
-		return nil, fmt.Errorf("custom rules: %w", err)
-	}
-	owned := map[string]string{}
-	for blk, body := range map[string]string{"rules": rulesBlk, "route": routeBlk} {
-		if body == "" {
-			continue
+	// Ownership comes from where a rule physically sits: the text is cut at
+	// the block markers into ordered segments and each segment parsed on
+	// its own. A rule outside the spans is the user's, whatever its name.
+	type seg struct{ text, block string }
+	var segs []seg
+	rest := text
+	for rest != "" {
+		i, begin, end, blk := -1, "", "", ""
+		for _, m := range [][3]string{{DRURulesBegin, DRURulesEnd, "rules"}, {DRURouteBegin, DRURouteEnd, "route"}} {
+			if j := strings.Index(rest, m[0]); j >= 0 && (i < 0 || j < i) {
+				i, begin, end, blk = j, m[0], m[1], m[2]
+			}
 		}
-		r, err := parseSexpr([]byte("(dru\n" + body + "\n)"))
-		if err != nil {
-			return nil, fmt.Errorf("custom rules (%s block): %w", blk, err)
+		if i < 0 {
+			segs = append(segs, seg{rest, ""})
+			break
 		}
-		for _, n := range r.children("rule") {
-			owned[n.arg(0)] = blk
+		segs = append(segs, seg{rest[:i], ""})
+		j := strings.Index(rest[i:], end)
+		if j < 0 {
+			return nil, fmt.Errorf("custom rules: %q has no %q", begin, end)
 		}
+		segs = append(segs, seg{rest[i : i+j], blk})
+		rest = rest[i+j+len(end):]
 	}
 	var out []DRURule
-	for i, n := range root.children("rule") {
-		r := DRURule{Name: n.arg(0), Condition: n.child("condition").arg(0), Layer: n.child("layer").arg(0), Index: i, Block: owned[n.arg(0)]}
-		for _, c := range n.children("constraint") {
-			dc := DRUConstraint{Type: c.arg(0)}
-			for _, k := range []string{"min", "opt", "max"} {
-				v := c.child(k)
-				if v == nil {
-					continue
-				}
-				nmv, ok := DRULength(v.arg(0))
-				if !ok {
-					dc.Unparsed = true
-					continue
-				}
-				switch k {
-				case "min":
-					dc.Min = &nmv
-				case "opt":
-					dc.Opt = &nmv
-				default:
-					dc.Max = &nmv
-				}
-			}
-			r.Constraints = append(r.Constraints, dc)
+	for _, sg := range segs {
+		if strings.TrimSpace(sg.text) == "" {
+			continue
 		}
-		out = append(out, r)
+		root, err := parseSexpr([]byte("(dru\n" + sg.text + "\n)"))
+		if err != nil {
+			where := "custom rules"
+			if sg.block != "" {
+				where += " (" + sg.block + " block)"
+			}
+			return nil, fmt.Errorf("%s: %w", where, err)
+		}
+		for _, n := range root.children("rule") {
+			r := DRURule{Name: n.arg(0), Condition: n.child("condition").arg(0), Layer: n.child("layer").arg(0), Index: len(out), Block: sg.block}
+			for _, c := range n.children("constraint") {
+				dc := DRUConstraint{Type: c.arg(0)}
+				for _, k := range []string{"min", "opt", "max"} {
+					v := c.child(k)
+					if v == nil {
+						continue
+					}
+					nmv, ok := DRULength(v.arg(0))
+					if !ok {
+						dc.Unparsed = true
+						continue
+					}
+					switch k {
+					case "min":
+						dc.Min = &nmv
+					case "opt":
+						dc.Opt = &nmv
+					default:
+						dc.Max = &nmv
+					}
+				}
+				r.Constraints = append(r.Constraints, dc)
+			}
+			out = append(out, r)
+		}
 	}
 	return out, nil
 }

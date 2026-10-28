@@ -292,7 +292,7 @@ func newRulesFixture(t *testing.T) *rulesFixture {
 	if err := rulesFakeWrite(boardSibling(pcb, ".kicad_pro"), rulesFakeDefault()); err != nil {
 		t.Fatal(err)
 	}
-	fake := &rulesFakeKiCad{t: t, snap: []byte(rulesTestSnap), nets: []string{"GND", "HV", "SIG", "VCC"}, layers: 2}
+	fake := &rulesFakeKiCad{t: t, snap: []byte(rulesTestSnap), nets: []string{"AUX", "GND", "HV", "SIG", "VCC"}, layers: 2}
 	o := kicadRulesOpts{pcb: pcb, intent: write("intent.json", rulesTestIntent), sim: write("sim.json", rulesTestSim), backend: fake, stage: "routed",
 		env: &kfile.Env{Host: "HOST", User: "user", Procs: func() ([]kfile.Proc, error) { return nil, nil }}}
 	return &rulesFixture{dir: dir, o: o, fake: fake}

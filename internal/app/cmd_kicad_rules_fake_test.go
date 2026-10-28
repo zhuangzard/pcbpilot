@@ -30,10 +30,53 @@ type rulesFakeClass struct {
 type rulesFakePro struct {
 	Fake     bool             `json:"fakeProject"`
 	Default  kicad.ClassNM    `json:"default"`
-	Classes  []rulesFakeClass `json:"classes"`
-	Patterns [][2]string      `json:"patterns"`
+	Classes  []rulesFakeClass `json:"-"`
+	Patterns [][2]string      `json:"-"`
 	Minimums kicad.Minimums   `json:"minimums"`
 	Sizes    kicad.SizeSet    `json:"sizes"`
+}
+
+// The classes and patterns live where KiCad keeps them (net_settings.classes
+// / net_settings.netclass_patterns), so stripOwnedProject works on the fake.
+type rulesFakeNS struct {
+	Classes  []rulesFakeClass `json:"classes"`
+	Patterns []struct {
+		Pattern  string `json:"pattern"`
+		Netclass string `json:"netclass"`
+	} `json:"netclass_patterns"`
+}
+
+type rulesFakeProAlias rulesFakePro
+
+func (p rulesFakePro) MarshalJSON() ([]byte, error) {
+	ns := rulesFakeNS{Classes: p.Classes}
+	for _, pt := range p.Patterns {
+		ns.Patterns = append(ns.Patterns, struct {
+			Pattern  string `json:"pattern"`
+			Netclass string `json:"netclass"`
+		}{pt[0], pt[1]})
+	}
+	return json.Marshal(struct {
+		rulesFakeProAlias
+		NS rulesFakeNS `json:"net_settings"`
+	}{rulesFakeProAlias(p), ns})
+}
+
+func (p *rulesFakePro) UnmarshalJSON(b []byte) error {
+	var v struct {
+		rulesFakeProAlias
+		NS rulesFakeNS `json:"net_settings"`
+	}
+	v.rulesFakeProAlias = rulesFakeProAlias(*p)
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	*p = rulesFakePro(v.rulesFakeProAlias)
+	p.Classes, p.Patterns = v.NS.Classes, nil
+	for _, pt := range v.NS.Patterns {
+		p.Patterns = append(p.Patterns, [2]string{pt.Pattern, pt.Netclass})
+	}
+	return nil
 }
 
 type rulesFakeKiCad struct {
@@ -237,6 +280,24 @@ func (f *rulesFakeKiCad) NetclassesReq(pcb string, req kicad.NetclassRequest, ou
 			cons = append(cons, fmt.Sprintf("(constraint creepage (min %gmm))", v))
 		}
 		rules = append(rules, fmt.Sprintf("(rule \"pcbpilot isolation %s|%s\"\n  (condition \"(A.hasNetclass('%s') && B.hasNetclass('%s')) || (A.hasNetclass('%s') && B.hasNetclass('%s'))\")\n  %s)", da, db, da, db, db, da, strings.Join(cons, "\n  ")))
+	}
+	for i, ed := range req.Edges {
+		dom := reDomainChars.ReplaceAllString(fmt.Sprint(ed["domain"]), "_")
+		cls := "PPD_" + dom
+		nets, _ := ed["nets"].([]string)
+		if _, ok := res.Domains[dom]; !ok {
+			res.Domains[dom] = nil
+			p.Classes = append(p.Classes, rulesFakeClass{Name: cls, Priority: -900000 + i})
+		}
+		for _, n := range nets {
+			if have[n] && !rulesHasStr(res.Domains[dom], n) {
+				res.Domains[dom] = append(res.Domains[dom], n)
+				p.Patterns = append(p.Patterns, [2]string{n, cls})
+			}
+		}
+		milv, _ := ed["mil"].(float64)
+		mm := strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.4f", milv*0.0254), "0"), ".")
+		rules = append(rules, fmt.Sprintf("(rule \"pcbpilot edge %s\"\n  (condition \"A.hasNetclass('%s')\")\n  (constraint edge_clearance (min %smm)))", cls, cls, mm))
 	}
 	if req.Sizes != nil {
 		old := map[int64]bool{}

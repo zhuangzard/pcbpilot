@@ -210,6 +210,12 @@ type declaredCurrents map[string]struct {
 // loadDeclaredCurrents reads every .json requirements file's "nets"; other
 // files (requirement documents) carry no machine-readable current.
 func loadDeclaredCurrents(paths []string) (declaredCurrents, []string, error) {
+	return declaredCurrentsFrom(paths, os.ReadFile)
+}
+
+// declaredCurrentsFrom is loadDeclaredCurrents over bytes from read (kicad
+// rules passes the bytes it hashed, never a fresh read of the path).
+func declaredCurrentsFrom(paths []string, read func(string) ([]byte, error)) (declaredCurrents, []string, error) {
 	out := declaredCurrents{}
 	var notes []string
 	for _, p := range paths {
@@ -217,7 +223,7 @@ func loadDeclaredCurrents(paths []string) (declaredCurrents, []string, error) {
 			notes = append(notes, p+": not JSON, no machine-readable current (bound to the plan by its hash only)")
 			continue
 		}
-		b, err := os.ReadFile(p)
+		b, err := read(p)
 		if err != nil {
 			return nil, nil, err
 		}
