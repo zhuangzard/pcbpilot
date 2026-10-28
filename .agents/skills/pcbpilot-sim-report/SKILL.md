@@ -127,7 +127,7 @@ metadata:
 | 报告 §7 多项 N/A | 没给 `--drc` / `--check` / `--reload-board` / `--net-diff` | 补证据再出下一版；交付版必须齐 |
 | `signoff-review` 缺 review.json | 未跑设计评审 | `review-panel --stage design`（router 的评审流程），不伪造 |
 | `signoff-copper` intent-widths 失败 | 走线窄于 intent 线宽或 `widthMil.min` | 交还 router 加宽/并联铜；改完重 dump → post-layout → signoff |
-| `signoff-copper` cannot check: the board has no copper | 板子还没布线（0 走线/弧/过孔/已灌铺铜） | 先布线（`kicad route` / `pcb auto route`），再重 dump → post-layout → signoff |
+| `signoff-copper` cannot check: <net>: … no track, via or filled copper | 这些网络还没布线（自身 0 走线/弧/过孔/已灌铺铜；别的网有铜不算） | 先布线（`kicad route` / `pcb auto route`），再重 dump → post-layout → signoff |
 | `board-manual` 门禁失败 | notes 缺接口用途、逐脚说明、LED、电源输入，或 post.json 不是同一板 | 按 board-manual.md 补 `pcbpilot.manual-notes.json`；先跑同板 post-layout |
 
 实测样例与数字见 [references/verified-runs.md](references/verified-runs.md)。
