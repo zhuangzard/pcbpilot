@@ -272,6 +272,89 @@ pcbpilot kicad pcb-sync ... --in-place --apply-plan plan.json --revision <rev>
   之后幂等。parity 一次约 30–50 s，是同步的主要耗时。`--apply-plan` 重新计算计划，revision 必须与计划文件和 `--revision`
   三者一致（板或工程文件、选项、或由原理图算出的操作变了都会变）。固定回归：`PCBPILOT_KICAD_LIVE=1 go test ./internal/app -run TestPcbSyncLive`。
 
+## 设计规则（`kicad rules`）——意图 + 仿真 → KiCad 规则，可验证
+
+```bash
+pcbpilot kicad rules --pcb board.kicad_pcb --intent intent.json --sim sim.json [--requirements currents.json] \
+    --plan [--plan-out rules.plan.json]                                   # 只读：打印将写的规则
+pcbpilot kicad rules … --apply [--replace <用户类或规则名>]                 # 计划 + 写入 + KiCad 回读
+pcbpilot kicad rules … --apply-plan rules.plan.json --revision <rev>      # 只写评审过的计划
+pcbpilot kicad rules … --check [--stage placed|routed] [--report r.json]  # 只读门禁（可布过线）
+```
+
+线宽、间距、绝缘由 pcbpilot 的证据决定，不手填。与 `kicad route` 第 2 步**同一条推导**
+（`deriveKicadRules`：`kicadRequirements` / `kicadIsolation` / `kicadEdges` + 一次 bridge `netclasses`），
+`kicad rules` 只在其上叠加电流线宽、逐层最小线宽规则与预设尺寸：
+
+- **线宽依据**（每网写进 `nets[].basis`）：电流 = max(`--sim` 的 DC 电流（开关节点取纹波 RMS）、声明的峰值/RMS
+  （意图 `peakA` / `rmsA`，或 `--requirements` 的 JSON `{"nets":{NET:{"peakA","rmsA"}}}`）)；都没有时用意图自己的
+  `currentA`（仅当 `currentSource` 是 simulated / declared）。线宽 = max(意图 `widthMil`, IPC-2221/2152 在该电流下的线宽，
+  0.05 mm 网格向上取)；外层/内层铜厚取**板层叠**（外层取两外层较薄者、内层取最薄内层），层叠没写铜厚时用意图 `copper`，再没有用
+  KiCad 默认 0.035 mm，并写入 `assumptions`。温升取意图 `copper.tempRiseC`（缺省 10 °C，同样记假设）。
+  例：VCC 意图 20 mil、`--sim` worst 1.6 A、1 oz、ΔT 10 °C → IPC 23.62 mil，向上取到 0.6 mm（23.622 mil），外层与内层
+  （0.5 oz 时更宽）都以电流线宽为准；`+5VUSB` 1.0 A 需 13.78 mil < 意图 20 mil → 意图线宽为准。
+- **cannot-check**：power / ground / switch 网有电流但没有任何电流数字（无 sim、无声明、意图 `currentSource` 缺失或
+  heuristic），或 `pulsed: true` 而没有 `peakA` / `rmsA` → 该网 `cannot-check`，意图线宽仍作为下限写入；计划不完整，
+  `--apply` 拒绝（退出 5，什么都不写）。
+- **不相容要求**（失败）：阻抗控制 / 差分对 / rf / hs 网的电流线宽大于其阻抗线宽 → `plan-coverage` fail，不静默取大。
+- **下限**：与 v0.10.2 route 相同——线宽、间距、过孔不低于板自身最小值（最小线宽、最小间距、最小孔、最小过孔直径、
+  孔 + 2×最小环宽），也不低于网原有网络类（用户类更宽时保留，`warnings` 列出 “width kept at …”）。
+- **绝缘对**：`PPD_<域>` 类 + `.kicad_dru` 的 clearance / creepage 规则；与 route 一样把对的电气间隙写到两侧每个网的
+  类间距上（**已知过约束**：这些网对对外的所有网也用了这个间距，保留只为与 route 一致）。
+- **最小线宽是 DRC 规则**：网络类线宽只是布线默认值，不是下限。`.kicad_dru` 里加 `# pcbpilot-rules:begin … end`
+  块（放在 route 块 `# pcbpilot:begin` **之前**——KiCad 取最后匹配的规则，route 重跑把自己的块追加到末尾后顺序不变）：
+  每个 PP 类 `(layer outer)` / `(layer inner)`（有内层时）`track_width (min <下限>) (opt <线宽>)`；下限 = 意图
+  `widthMil.min`（允许颈缩的极限），没有则为全线宽。块头记 `request-sha256`（推导指纹）与 `sizes-owned`。
+- **预设尺寸**：把各类的外/内层线宽与过孔写进 Board Setup → Pre-defined Sizes（GUI 便利，**从不算作规则**）；只增删
+  自己上次加的（`sizes-owned`），用户原有的保留。
+- **所有权**：`PPn_W…` / `PPD_…` / `PPF_…` 类、`pcbpilot-rules …` / `pcbpilot …` 规则名与块标记属于 pcbpilot；重跑幂等
+  （同输入两次 `--apply`，第二次 `files: []`，文件哈希不变），过时的自有类/规则/尺寸被移除。
+
+**冲突**（`conflicts[]`、`user-rules` 检查；`--apply` 未解决即退出 6、不写）：用户类会被 PP 类以更低的值覆盖
+（`class-override`，如 pic_programmer 的 POWER 类 0.28 mm 间距 < 绝缘对 0.6 mm）、用户类用了 pcbpilot 前缀但不是
+pcbpilot 生成的名字（`class-name`，重跑会删掉它）、用户 `.kicad_dru` 规则会被 pcbpilot 后写的规则削弱（`dru-weakened`：
+同类约束、条件为空或提到计划内的网/类、用户最小值更大或无法比较）、用户规则用了 pcbpilot 规则名（`dru-name`）。只能按名
+`--replace <名>` 放行：被替换的用户 `.kicad_dru` 规则从文件删除；被替换的用户类保留但被 PP 类压过（前缀冲突的会被删除）。
+不冲突的用户类和规则原样保留。
+
+**验证**（R1：各自三态、分开报告；pass 只证明这些检查，不等于可投板）：
+- `plan-coverage`：每网线宽依据是否完整（上面的 pass / cannot-check / fail）。
+- `staged-readback`：在暂存副本上 bridge `rules-read`（pcbnew 自己算出的**有效**网络类与 nm 尺寸）逐网等于计划，绝缘域网
+  解析到 `PPD_<域>`，预设尺寸都在，每类有外/内层最小线宽规则；再用 **kicad-cli DRC 探针**：每类在外层（及内层）放一根比
+  下限窄 2 µm 的探针线、每个绝缘对放两根间距比对间隙小 5 µm 的线（都在板外），必须分别报 `track_width` / `clearance`。
+  KiCad 读不懂 `.kicad_dru` 时**静默忽略全部规则、DRC 报 0**（10.0.6 实测），探针正是为抓这个。
+- `readback`（`--apply`）：写入后在真实文件上再 `rules-read` + 探针，与已验证的暂存一致、`.kicad_pro` / `.kicad_dru` 字节
+  等于暂存文件；不一致即**回滚**（以本次写入内容为 base，绝不覆盖期间的外部编辑；回滚本身失败 = `E_ROLLBACK` 退出 1）。
+- `--check` 额外：`effective-rules`（板上现状 ≥ 计划：类线宽/间距/过孔、逐层最小线宽规则、绝缘规则与域类，再跑探针）、
+  `copper-widths`（每段直线与圆弧、按层、容差 0.04 mil，对照要求线宽 `requiredWidthMil`（不低于板最小线宽）：低于计划下限失败；介于下限与线宽之间只有意图 `neckdown`
+  `{refs, maxLengthMil, minWidthMil}` 覆盖的段可以；在本网铺铜内的细段 = cannot-check（铺铜颈缩由 post-layout sim 判）；
+  ≥2 焊盘却无铜的网 = `not-routed`（cannot-check，绝不当通过））、`via-size`（每个过孔不小于计划过孔）、`via-current`
+  （route 的过孔电流门禁原样复用）、`isolation-placement`（**advisory**：同面封装 courtyard 边到边距离 < 对的电气间隙
+  → warn；跨两域且未在意图 `pairs[].bridges` 声明的器件 → warn。这是**布局代理检查，不是铜间距**，铜由带绝缘规则的
+  DRC 判）。`--stage placed`：未布线阶段不做铜检查（标 not applicable）。
+
+**事务与安全**：写入前 `kfile.Guard`（KiCad 打开工程 → `KICAD_OPEN` 退出 4，什么都不写；只读模式仅警告
+`sourceOpenInKiCad`）；所有输入（板、`.kicad_pro`、`.kicad_dru`、意图、sim、requirements）读一次并哈希，写入前与只读模式
+返回前都复查（变了 = `E_FILE_CHANGED` 退出 4）；`.kicad_pro` + `.kicad_dru` 一个 kfile 事务提交（不写 `.kicad_pcb`），工程
+写锁从提交一直持有到回读与回滚结束。计划 revision 绑定全部输入哈希、推导、类、规则、`--replace` 与 KiCad 版本；
+`--apply-plan` 重算后 revision 必须与计划文件和 `--revision` 三者一致，否则 `E_REVISION_MISMATCH` 退出 4。`--report` /
+`--plan-out` 只能是 `.json`、不能是任何输入或 KiCad 文件，只覆盖自己的报告/计划，原子写入。
+
+退出码：0 pass、6 fail（含冲突、不相容、回读不符已回滚）、5 cannot-check / 计划不完整、4 `KICAD_OPEN` /
+`E_FILE_CHANGED` / `E_REVISION_MISMATCH` / `E_WRITER_BUSY`、1 用法或工具错误。stdout 只有 JSON 报告，诊断在 stderr。
+
+**与 `kicad route` 的关系**：route 不变，仍走同一推导；输入板的 `.kicad_dru` 有 `pcbpilot-rules` 块时，route 用同样的
+线宽依据（自己的 `--intent` / `--sim` / `--requirements` 与板层叠）重新推导，指纹与块头 `request-sha256` 不同即
+`RULES_STALE` 停止（“rerun kicad rules”），相同则沿用（`summary.kicadRules`）。没有该块时与以前逐字节一致。
+
+实测（KiCad 10.0.6，演示副本，合成意图/仿真）：pic_programmer（2 层，POWER 用户类 + HV|LV 绝缘对）——无 `--replace`
+拒绝（POWER class-override），`--replace POWER` 后写入，暂存与写入后探针 4/4，重跑 `files: []`；`--check` effective-rules
+pass，copper-widths pass（铜按**要求线宽**判：意图/电流线宽且不低于板最小线宽；被保留的更宽类线宽只是布线默认值），
+isolation-placement 报 R16↔R15 courtyard 0.47 mm < 0.6 mm 与一个未声明的跨域器件（warn）。One-Air-Max（4 层）——外/内层规则共 8 条，探针 8/8；`--check` 用比原设计更宽的合成意图时 copper-widths 报 68 段过细、10 段在铺铜内
+（cannot-check），via-size 报 196 个过孔小于计划过孔（原板 0.8/0.4 mm 与 0.5/0.3 mm 过孔的孔径都低于板自身的最小孔 0.508 mm，计划过孔被抬到这个下限），
+via-current 2 条——即只读检查会如实指出已布板与计划的差距。
+一次计划约 30–50 s（主要是 DRC 探针）。固定回归：`PCBPILOT_KICAD_LIVE=1 go test ./internal/app -run TestKicadRulesLiveDemos`。
+
 ## 布线（`kicad route`）——与 `pcb auto route` + `pcb gate` 同序同算
 
 ```bash
@@ -289,7 +372,8 @@ pcbpilot kicad route --pcb board-b-v5a.kicad_pcb --intent intent.json --sim sim.
    `--clearance-mil` 等显式参数优先。已有项目时，意图的板边距离仍是下限（只升不降）。随后跑一次**输入板 DRC** 作基线。
    已有项目时，显式 `--via-dia-mil` / `--via-drill-mil` / `--track-mil` 低于该项目自己的最小过孔直径 / 最小孔径 / 最小环宽 /
    最小线宽即**在启动阶段拒绝**（只给一个过孔参数时与 Default 网络类的另一半配对检查环宽）（`RULE_BELOW_BOARD_MINIMUM`，评审与输入 DRC 之前）；不给这些参数时用板自己的网络类尺寸。
-2. **布线前门禁：意图 → KiCad 网络类 + 自定义规则**（必须在导出 DSN 之前）：
+2. **布线前门禁：意图 → KiCad 网络类 + 自定义规则**（必须在导出 DSN 之前；与 `kicad rules` 同一推导——板上有
+   `kicad rules` 写的 `pcbpilot-rules` 块时先核对它仍等于当前输入的推导，不等即 `RULES_STALE` 停止，见上一节）：
    - 每网 `{outer, inner, min, clearance}` 按取值分组为 `PP<n>_W<线宽>` 网络类（精确网名 pattern，优先级最高；
      用户类更宽的值保留，记 `netclasses.kept`）。
      **过孔**取 max(意图 `netClasses` 的过孔、该网原网络类过孔、板最小孔径 / 最小过孔直径 / 孔径 + 2×最小环宽)，线宽、间距也不低于

@@ -403,4 +403,3 @@ func DRULength(s string) (int64, bool) {
 func MmOfNm(v int64) string {
 	return strconv.FormatFloat(float64(v)/1e6, 'f', -1, 64) + "mm"
 }
-

@@ -98,11 +98,11 @@ func TestMetricCeilMil(t *testing.T) {
 
 func TestCopperBasis(t *testing.T) {
 	in := testIntent(t, `{"nets":{"A":{"widthMil":{"outer":6}}},"copper":{"outerOz":2,"innerOz":1,"tempRiseC":20}}`)
-	c := copperBasis([]kicad.StackupCopper{{"F.Cu", 0.035}, {"In1.Cu", 0.0175}, {"In2.Cu", 0.0175}, {"B.Cu", 0.07}}, in)
+	c := copperBasis([]kicad.StackupCopper{{Layer: "F.Cu", ThicknessMm: 0.035}, {Layer: "In1.Cu", ThicknessMm: 0.0175}, {Layer: "In2.Cu", ThicknessMm: 0.0175}, {Layer: "B.Cu", ThicknessMm: 0.07}}, in)
 	if c.Source != "stackup" || c.OuterOz != 1 || c.InnerOz != 0.5 || c.TempRiseC != 20 || len(c.Assumptions) != 0 {
 		t.Fatalf("stackup: %+v", c)
 	}
-	c = copperBasis([]kicad.StackupCopper{{"F.Cu", 0}, {"B.Cu", 0}}, in)
+	c = copperBasis([]kicad.StackupCopper{{Layer: "F.Cu", ThicknessMm: 0}, {Layer: "B.Cu", ThicknessMm: 0}}, in)
 	if c.Source != "intent" || c.OuterOz != 2 || c.InnerOz != 1 || len(c.Assumptions) != 1 {
 		t.Fatalf("intent fallback: %+v", c)
 	}
@@ -733,5 +733,53 @@ func TestRouteRulesStamp(t *testing.T) {
 	r.o.sim = ""
 	if _, err = r.rulesStamp(own, nil); err == nil || !strings.Contains(err.Error(), "RULES_STALE") || !strings.Contains(err.Error(), "rerun") {
 		t.Fatalf("stale: %v", err)
+	}
+}
+
+// TestPlanRulesWidthsRepoIntents runs the width basis on the repo's intent
+// testdata. The esp32-v05 intent was derived from its own sim.json: with
+// that sim no width rises above the intent (route and rules agree), every
+// net has a verified basis. The hand-written esp32-mini intent records no
+// current source: without a sim its power nets are cannot-check.
+func TestPlanRulesWidthsRepoIntents(t *testing.T) {
+	in, err := loadDesignIntent(filepath.Join("testdata", "esp32-v05", "intent.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join("testdata", "esp32-v05", "sim.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sp, err := pcbauto.ParseSim(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cu := copperBasis([]kicad.StackupCopper{{Layer: "F.Cu", ThicknessMm: 0.035}, {Layer: "In1.Cu", ThicknessMm: 0.0175}, {Layer: "In2.Cu", ThicknessMm: 0.0175}, {Layer: "B.Cu", ThicknessMm: 0.035}}, in)
+	widths, bs := planRulesWidths(in, sp, nil, cu)
+	if len(bs) != len(in.Nets) {
+		t.Fatalf("%d bases for %d nets", len(bs), len(in.Nets))
+	}
+	for _, b := range bs {
+		if b.Status != "pass" {
+			t.Errorf("%s: %s %s", b.Net, b.Status, b.Detail)
+		}
+	}
+	for n, w := range widths {
+		t.Errorf("%s raised to %+v: the intent was derived from this sim", n, w)
+	}
+	if b := basisOf(bs, "+3V3"); b.Current == nil || b.Current.Source != "sim" || b.CurrentWidth == nil {
+		t.Fatalf("+3V3: %+v", b)
+	}
+
+	mini, err := loadDesignIntent(filepath.Join("testdata", "intent", "esp32-mini.intent.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, bs = planRulesWidths(mini, nil, nil, copperBasis(nil, mini))
+	for _, b := range bs {
+		power := b.Role == "power" || b.Role == "ground" || b.Role == "switch"
+		if power != (b.Status == "cannot-check") {
+			t.Errorf("%s (%s): %s", b.Net, b.Role, b.Status)
+		}
 	}
 }
