@@ -61,7 +61,11 @@ func TestReadFastrouteReport(t *testing.T) {
 
 func TestResolveFastroute(t *testing.T) {
 	dir := t.TempDir()
-	bin := filepath.Join(dir, "fastroute")
+	exe := "fastroute"
+	if runtime.GOOS == "windows" {
+		exe = "fastroute.exe" // PATH lookup goes by PATHEXT; it is not run here
+	}
+	bin := filepath.Join(dir, exe)
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -431,25 +435,9 @@ func TestPrepareDSNGate(t *testing.T) {
 // checkpoint session but no report (Board-B v9). The run must be recorded
 // as crashed with unknown counts and repeated once single-threaded.
 func TestRunFastrouteCrashRetry(t *testing.T) {
-	skipOnWindows(t)
 	dir := t.TempDir()
-	bin := filepath.Join(dir, "fastroute")
-	script := `#!/bin/sh
-for a in "$@"; do
-  case "$a" in
-    -do) next=ses ;;
-    --report=*) report="${a#--report=}" ;;
-    --multi-start=1) single=1 ;;
-    *) if [ "$next" = ses ]; then ses="$a"; next=; fi ;;
-  esac
-done
-echo "(session x)" > "$ses"
-if [ -z "$single" ]; then echo "thread panicked: free list corrupted" >&2; exit 101; fi
-echo '{"stats":{"unrouted":0,"violations":0}}' > "$report"
-`
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	bin := fakeRouterBin(t, "fastroute") // fake_router_test.go
+	t.Setenv(envFakeFRMode, "crash-parallel")
 	var log strings.Builder
 	ses, runs, err := runFastroute(fastrouteOpts{bin: bin, multiStart: 8, timeout: time.Minute}, "b.dsn", filepath.Join(dir, "b"), &log)
 	if err != nil {
@@ -466,11 +454,33 @@ echo '{"stats":{"unrouted":0,"violations":0}}' > "$report"
 	}
 
 	// A binary that always crashes: round 0 has no good result -> error.
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 101\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	t.Setenv(envFakeFRMode, "crash")
 	if _, runs, err := runFastroute(fastrouteOpts{bin: bin, timeout: time.Minute}, "b.dsn", filepath.Join(dir, "c"), io.Discard); err == nil || runs[len(runs)-1].Unrouted != -1 {
 		t.Fatalf("always-crashing router accepted: %+v %v", runs, err)
+	}
+}
+
+// A run that reaches its timeout is asked to stop the way fastroute
+// documents (SIGINT on Unix, Ctrl+Break on Windows — never a kill first), so
+// it writes its best board and the round is a usable best-so-far result,
+// well before the 30 s WaitDelay kill.
+func TestRunFastrouteTimeoutStopsGracefully(t *testing.T) {
+	// Skipped only when Windows positively has no console to send Ctrl+Break
+	// through (GetConsoleProcessList); any other failure to stop is a failure.
+	if ok, why := ctrlBreakDeliverable(); !ok {
+		t.Skipf("Ctrl+Break cannot be delivered: %s", why)
+	}
+	dir := t.TempDir()
+	bin := fakeRouterBin(t, "fastroute")
+	t.Setenv(envFakeFRMode, "wait-stop")
+	var log strings.Builder
+	start := time.Now()
+	ses, runs, err := runFastroute(fastrouteOpts{bin: bin, timeout: 2 * time.Second}, "b.dsn", filepath.Join(dir, "b"), &log)
+	if err != nil || len(runs) == 0 || runs[0].Status != "ok" || runs[0].Unrouted != 0 || ses != runs[0].Session {
+		t.Fatalf("timed-out run did not stop gracefully: %+v err %v\n%s", runs, err, log.String())
+	}
+	if d := time.Since(start); d > 15*time.Second {
+		t.Fatalf("graceful stop took %s (killed after WaitDelay?)", d)
 	}
 }
 
@@ -501,11 +511,12 @@ func TestIntentPairsAndTune(t *testing.T) {
 
 // fakeFastroute writes a session and a report with unrouted connections,
 // the first blocked of them classed "blocked" by --diagnose; it logs one
-// line per call to calls.
+// line per call to calls. The fake is this test binary (fake_router_test.go);
+// its behaviour holds until the next fakeFastroute call or the test's end.
 func fakeFastroute(t *testing.T, unrouted, blocked int) (bin, calls string) {
 	t.Helper()
 	dir := t.TempDir()
-	bin, calls = filepath.Join(dir, "fastroute"), filepath.Join(dir, "calls")
+	bin, calls = fakeRouterBin(t, "fastroute"), filepath.Join(dir, "calls")
 	var items []string
 	for i := 0; i < unrouted; i++ {
 		cls := "congestion"
@@ -515,11 +526,8 @@ func fakeFastroute(t *testing.T, unrouted, blocked int) (bin, calls string) {
 		items = append(items, fmt.Sprintf(`{"net":"N%d","from":{"component":"U1","pin":"%d"},"to":{"component":"R1","pin":"1"},"diagnosis":{"class":"%s"}}`, i, i+1, cls))
 	}
 	rep := fmt.Sprintf(`{"stats":{"unrouted":%d,"violations":0},"unrouted":[%s]}`, unrouted, strings.Join(items, ","))
-	script := "#!/bin/sh\necho call >> " + calls + "\nses=; rep=\nwhile [ $# -gt 0 ]; do case \"$1\" in -do) ses=$2; shift;; --report=*) rep=${1#--report=};; esac; shift; done\n" +
-		"echo '(session x)' > \"$ses\"\ncat > \"$rep\" <<'J'\n" + rep + "\nJ\n"
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	t.Setenv(envFakeCalls, calls)
+	t.Setenv(envFakeReport, rep)
 	return bin, calls
 }
 

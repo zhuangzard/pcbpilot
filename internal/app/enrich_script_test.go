@@ -24,9 +24,19 @@ func mkScript(t *testing.T, path string) string {
 // emptied too: a real bom-enrich.py on the developer's PATH must not leak in.
 func isolate(t *testing.T) (home string) {
 	t.Helper()
-	home = t.TempDir()
-	t.Setenv("HOME", home)
+	home = fakeHome(t) // HOME and USERPROFILE (os.UserHomeDir on Windows)
 	t.Setenv("PCBPILOT_SKILLS_DIR", "")
+	// The walk-up rungs (from the binary, from cwd) see only the test's own
+	// dirs: on Windows the temp dir lives inside the user profile, so walking
+	// up from the test binary (built under %TEMP%) or a t.TempDir() cwd reached
+	// the developer's real ~/.agents/skills. The binary rung starts from an
+	// empty temp dir and no walk goes above the temp root.
+	exe := filepath.Join(t.TempDir(), "bin", "pcbpilot")
+	tmpRoot := filepath.Clean(os.TempDir())
+	savedExe, savedStop := skillAssetExecutable, skillAssetWalkStop
+	skillAssetExecutable = func() (string, error) { return exe, nil }
+	skillAssetWalkStop = func(dir string) bool { return strings.EqualFold(filepath.Clean(dir), tmpRoot) }
+	t.Cleanup(func() { skillAssetExecutable, skillAssetWalkStop = savedExe, savedStop })
 	t.Setenv("PATH", "")
 	t.Chdir(t.TempDir())
 	return home

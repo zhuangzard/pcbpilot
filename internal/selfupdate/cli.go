@@ -409,17 +409,28 @@ func fetchChecksum(ctx context.Context, version, asset string) (string, error) {
 
 // replaceBinary moves tmp onto dst. On Unix a rename over a running executable
 // is fine (the running process keeps the old inode). Windows refuses to replace
-// a file that is open for execution, so the old one is moved aside first.
+// a file that is open for execution, so the old one is moved aside first; a
+// missing dst (first install, or a restore after the binary was lost) has
+// nothing to move aside and is simply created, as on Unix.
 func replaceBinary(tmp, dst string) error {
 	if runtime.GOOS == "windows" {
 		old := dst + ".old"
 		_ = os.Remove(old)
+		movedAside := true
 		if err := os.Rename(dst, old); err != nil {
-			return err
+			if !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+			movedAside = false
 		}
 		if err := os.Rename(tmp, dst); err != nil {
-			_ = os.Rename(old, dst) // put it back
+			if movedAside {
+				_ = os.Rename(old, dst) // put it back
+			}
 			return err
+		}
+		if !movedAside {
+			return nil
 		}
 		_ = os.Remove(old) // fails while still running; harmless leftover
 		return nil

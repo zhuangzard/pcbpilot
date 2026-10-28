@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -119,10 +120,24 @@ type SkillTarget struct {
 	Linked string `json:"linked,omitempty"`
 }
 
-// SkillLinkTarget returns where dir points when it is a symlink, else "".
+// SkillLinkTarget returns where dir points when it is a symlink or, on
+// Windows, a directory junction (what `mklink /J` gives an unprivileged
+// user), else "". Go >= 1.23 reports a junction as ModeIrregular, not
+// ModeSymlink, and filepath.EvalSymlinks returns it unresolved: without this
+// a junction into a checkout read as a copied Skill the updater may write.
 func SkillLinkTarget(dir string) string {
 	fi, err := os.Lstat(dir)
-	if err != nil || fi.Mode()&os.ModeSymlink == 0 {
+	if err != nil {
+		return ""
+	}
+	if fi.Mode()&os.ModeSymlink == 0 {
+		if runtime.GOOS == "windows" && fi.Mode()&os.ModeIrregular != 0 {
+			// os.Readlink reads mount-point reparse data; any other
+			// reparse point fails it and is not a link.
+			if t, err := os.Readlink(dir); err == nil && t != "" {
+				return filepath.Clean(t)
+			}
+		}
 		return ""
 	}
 	if r, err := filepath.EvalSymlinks(dir); err == nil {

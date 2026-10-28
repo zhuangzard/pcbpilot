@@ -37,6 +37,10 @@ func TestMain(m *testing.M) {
 	if os.Getenv("PCBPILOT_FAKE_KICAD_DRC") != "" {
 		os.Exit(fakeKiCadDRC(os.Args[1:]))
 	}
+	// …and as a fake fastroute / tracemaker for the router tests.
+	if r := os.Getenv(envFakeRouter); r != "" {
+		os.Exit(fakeRouterMain(r, os.Args[1:]))
+	}
 	// Safety net: no test may drive the real launchd/systemd/registry. Tests
 	// that exercise service commands install their own recorder.
 	daemonServiceRunner = func(name string, args ...string) (string, error) {

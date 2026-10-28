@@ -80,7 +80,7 @@ func schDesignatorsDistinctFiles(paths ...string) error {
 			return err
 		}
 		for _, prev := range files {
-			if prev.abs == abs || (prev.info != nil && info != nil && os.SameFile(prev.info, info)) {
+			if prev.abs == abs || (prev.info != nil && info != nil && os.SameFile(prev.info, info)) || sameFileSlot(prev.path, path) {
 				return fmt.Errorf("input and output files must be distinct: %s and %s refer to the same file", prev.path, path)
 			}
 		}

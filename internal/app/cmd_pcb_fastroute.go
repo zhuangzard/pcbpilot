@@ -1071,11 +1071,12 @@ func fastrouteOnce(o fastrouteOpts, dsn, ses, report, initial string, round int,
 	defer cancel()
 	cmd := exec.CommandContext(ctx, o.bin, args...)
 	cmd.Stdout, cmd.Stderr = stderr, stderr
-	// fastroute writes its best board on SIGINT/SIGTERM; give it time to.
-	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
+	// fastroute writes its best board when asked to stop (SIGINT on Unix,
+	// Ctrl+Break on Windows: fastroute_stop_*.go); give it time to.
+	prepareFastrouteCmd(cmd, stderr)
 	cmd.WaitDelay = 30 * time.Second
 	start := time.Now()
-	err := cmd.Run()
+	err := runFastrouteCmd(cmd, stderr)
 	run := fastrouteRun{Round: round, Session: ses, Report: report, Seconds: time.Since(start).Round(time.Second).Seconds(),
 		Status: "ok", Unrouted: -1, Violations: -1, Fixable: -1}
 	switch {

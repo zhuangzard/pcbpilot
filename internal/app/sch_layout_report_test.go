@@ -233,21 +233,22 @@ func TestLayoutReportRefusesPathAliasesBeforeWriting(t *testing.T) {
 	if err := schLayoutReportPaths(from, filepath.Join(dir, "layout.json"), filepath.Join(dir, "layout.json")); err == nil {
 		t.Fatal("report/output alias accepted")
 	}
-	linkedDir := filepath.Join(dir, "linked-dir")
-	if err := os.Symlink(dir, linkedDir); err != nil {
-		t.Fatal(err)
-	}
 	out := filepath.Join(dir, "not-created.json")
-	if err := schLayoutReportPaths(from, out, filepath.Join(linkedDir, "not-created.json")); err == nil {
-		t.Fatal("not-yet-created output/report directory aliases accepted")
-	}
-	dangling := filepath.Join(dir, "dangling.json")
-	if err := os.Symlink(out, dangling); err != nil {
-		t.Fatal(err)
-	}
-	if err := schLayoutReportPaths(from, out, dangling); err == nil {
-		t.Fatal("dangling output/report alias accepted")
-	}
+	t.Run("linked directory", func(t *testing.T) {
+		// A symlink, or a junction on unprivileged Windows.
+		linkedDir := filepath.Join(dir, "linked-dir")
+		dirLinkForTest(t, dir, linkedDir)
+		if err := schLayoutReportPaths(from, out, filepath.Join(linkedDir, "not-created.json")); err == nil {
+			t.Fatal("not-yet-created output/report directory aliases accepted")
+		}
+	})
+	t.Run("dangling symlink", func(t *testing.T) {
+		dangling := filepath.Join(dir, "dangling.json")
+		symlinkOrSkip(t, out, dangling) // file symlinks need the privilege on Windows
+		if err := schLayoutReportPaths(from, out, dangling); err == nil {
+			t.Fatal("dangling output/report alias accepted")
+		}
+	})
 }
 
 func TestLayoutReportWriteFailureDoesNotSuppressOriginalFailure(t *testing.T) {

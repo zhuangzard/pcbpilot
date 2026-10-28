@@ -428,17 +428,24 @@ func (s *Server) artifactDir(outputDir string) string {
 func stripArtifactNesting(p string) string {
 	clean := filepath.Clean(p)
 	sep := string(filepath.Separator)
-	segs := strings.Split(clean, sep)
+	// The volume (a Windows drive "C:" or UNC share) is kept whole: splitting
+	// "C:\.pcbpilot\artifacts" at separators and re-joining the head gave the
+	// drive-relative "C:" instead of the drive root "C:\".
+	vol := filepath.VolumeName(clean)
+	segs := strings.Split(clean[len(vol):], sep)
 	for i := 0; i+1 < len(segs); i++ {
 		if segs[i] == ".pcbpilot" && segs[i+1] == "artifacts" {
 			trimmed := strings.Join(segs[:i], sep)
 			if trimmed == "" {
-				if filepath.IsAbs(clean) {
-					return sep
+				if i > 0 { // rooted: segs[0] is the empty head before the leading separator
+					return vol + sep
+				}
+				if vol != "" {
+					return vol
 				}
 				return "."
 			}
-			return trimmed
+			return vol + trimmed
 		}
 	}
 	return clean

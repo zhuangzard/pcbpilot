@@ -60,7 +60,7 @@ func pushUpstream(t *testing.T, other, content string) {
 }
 
 func TestSourceUpdateRefusesDirtyAndDivergedPullsWhenClean(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	fakeHome(t) // HOME and USERPROFILE: on Windows the update cache follows USERPROFILE
 	work, other := sourceRepos(t)
 	var setups atomic.Int32
 	old := sourceSetupCommand
@@ -107,8 +107,7 @@ func TestSourceUpdateRefusesDirtyAndDivergedPullsWhenClean(t *testing.T) {
 
 func TestSourceInstallDetectionFromInstallJSON(t *testing.T) {
 	work, _ := sourceRepos(t)
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	home := fakeHome(t) // HOME and USERPROFILE (os.UserHomeDir on Windows)
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("CODEX_HOME", "")
 	if _, ok := sourceInstall(); ok {
@@ -118,12 +117,12 @@ func TestSourceInstallDetectionFromInstallJSON(t *testing.T) {
 	linked := filepath.Join(work, ".agents", "skills", "pcbpilot")
 	mustWrite(t, filepath.Join(linked, "SKILL.md"), []byte("x"), 0o644)
 	os.MkdirAll(filepath.Join(home, ".claude", "skills"), 0o755)
-	if err := os.Symlink(linked, filepath.Join(home, ".claude", "skills", "pcbpilot")); err != nil {
-		t.Fatal(err)
-	}
-	if repo, ok := sourceInstall(); !ok || !samePath(repo, work) {
-		t.Fatalf("linked skill must identify the checkout: %q %v", repo, ok)
-	}
+	t.Run("linked skill", func(t *testing.T) {
+		symlinkOrSkip(t, linked, filepath.Join(home, ".claude", "skills", "pcbpilot"))
+		if repo, ok := sourceInstall(); !ok || !samePath(repo, work) {
+			t.Fatalf("linked skill must identify the checkout: %q %v", repo, ok)
+		}
+	})
 	selfupdate.WriteJSON(selfupdate.InstallInfoPath(), selfupdate.InstallInfo{Kind: "release"})
 	if _, ok := sourceInstall(); ok {
 		t.Fatal("install.json kind=release wins over a stray link")
@@ -366,7 +365,7 @@ func healthRaw(t *testing.T, version string, notices ...string) json.RawMessage 
 }
 
 func TestSessionNoticeRelaysDaemonStateAndFixesSkew(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	fakeHome(t) // HOME and USERPROFILE: on Windows the update cache follows USERPROFILE
 	restarted := 0
 	probes := 0
 	d := noticeDeps{
@@ -407,7 +406,7 @@ func TestSessionNoticeRelaysDaemonStateAndFixesSkew(t *testing.T) {
 }
 
 func TestSessionNoticeFallbackCheckUsesOneHourCacheAndSurvivesOffline(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	fakeHome(t) // HOME and USERPROFILE: on Windows the update cache follows USERPROFILE
 	calls := 0
 	now := time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)
 	d := noticeDeps{
@@ -437,7 +436,7 @@ func TestSessionNoticeFallbackCheckUsesOneHourCacheAndSurvivesOffline(t *testing
 }
 
 func TestSessionHookFirstCommandOnlyAndExemptions(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	fakeHome(t) // HOME and USERPROFILE: on Windows the update cache follows USERPROFILE
 	now := time.Now()
 	fresh, _ := selfupdate.TouchSession(now)
 	again, _ := selfupdate.TouchSession(now.Add(10 * time.Minute))

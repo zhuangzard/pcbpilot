@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -321,12 +322,28 @@ func TestWorkDirTimelineSimsReportsAndFiles(t *testing.T) {
 			t.Fatalf("path %q must be refused", bad)
 		}
 	}
-	outside := filepath.Join(t.TempDir(), "secret.txt")
-	os.WriteFile(outside, []byte("x"), 0o644)
-	os.Symlink(outside, filepath.Join(work, "link.txt"))
-	if resp := req(t, srv, "GET", "/api/workdirs/"+wd.ID+"/file?path=link.txt", c.Token(), nil, nil); resp.StatusCode != 403 {
-		t.Fatalf("symlink escape: %d", resp.StatusCode)
-	}
+	t.Run("symlink escape", func(t *testing.T) {
+		outside := filepath.Join(t.TempDir(), "secret.txt")
+		os.WriteFile(outside, []byte("x"), 0o644)
+		symlinkOrSkip(t, outside, filepath.Join(work, "link.txt"))
+		if resp := req(t, srv, "GET", "/api/workdirs/"+wd.ID+"/file?path=link.txt", c.Token(), nil, nil); resp.StatusCode != 403 {
+			t.Fatalf("symlink escape: %d", resp.StatusCode)
+		}
+	})
+	t.Run("directory link escape", func(t *testing.T) {
+		// A directory link out of the work dir is refused too. A symlink is
+		// resolved and refused (403); on unprivileged Windows it is a
+		// junction, which filepath.EvalSymlinks cannot resolve (Go >= 1.23
+		// no longer treats mount points as symlinks), so the server fails
+		// closed with 404. Either way the outside file is never served.
+		outside := t.TempDir()
+		os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("x"), 0o644)
+		linkDirForTest(t, outside, filepath.Join(work, "linkdir"))
+		resp := req(t, srv, "GET", "/api/workdirs/"+wd.ID+"/file?path=linkdir/secret.txt", c.Token(), nil, nil)
+		if resp.StatusCode != 403 && !(runtime.GOOS == "windows" && resp.StatusCode == 404) {
+			t.Fatalf("directory link escape: %d", resp.StatusCode)
+		}
+	})
 }
 
 func TestConfigPutValidatesAndUploadIndexes(t *testing.T) {
@@ -470,7 +487,9 @@ func TestRunsAndSessions(t *testing.T) {
 }
 
 func TestWorkDirStatus(t *testing.T) {
-	dir := "/w"
+	// Run cwds come from os.Getwd (native separators): "\w\sub" on Windows.
+	p := filepath.FromSlash
+	dir := p("/w")
 	t0 := time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)
 	pass := []ReportPkg{{Version: "v2", Verdict: "PASS with warnings", GeneratedAt: t0.Format(time.RFC3339)}}
 	fail := []ReportPkg{{Version: "v1", Verdict: "FAIL", GeneratedAt: t0.Format(time.RFC3339)}}
@@ -485,10 +504,10 @@ func TestWorkDirStatus(t *testing.T) {
 		{"in-progress", []Artifact{{Kind: "intent"}}, nil, nil, "in-progress"},
 		{"finished", []Artifact{{Kind: "report"}}, pass, nil, "finished"},
 		{"failed report", []Artifact{{Kind: "report"}}, fail, nil, "failed"},
-		{"running", nil, pass, []Run{{ID: "r", Status: "running", Cwd: "/w/sub"}}, "running"},
-		{"failed after report", nil, pass, []Run{{ID: "r", Status: "failed", Cwd: "/w", EndedAt: t0.Add(time.Minute)}}, "failed"},
-		{"old failure", nil, pass, []Run{{ID: "r", Status: "failed", Cwd: "/w", EndedAt: t0.Add(-time.Minute)}}, "finished"},
-		{"other dir", nil, pass, []Run{{ID: "r", Status: "running", Cwd: "/w2"}}, "finished"},
+		{"running", nil, pass, []Run{{ID: "r", Status: "running", Cwd: p("/w/sub")}}, "running"},
+		{"failed after report", nil, pass, []Run{{ID: "r", Status: "failed", Cwd: p("/w"), EndedAt: t0.Add(time.Minute)}}, "failed"},
+		{"old failure", nil, pass, []Run{{ID: "r", Status: "failed", Cwd: p("/w"), EndedAt: t0.Add(-time.Minute)}}, "finished"},
+		{"other dir", nil, pass, []Run{{ID: "r", Status: "running", Cwd: p("/w2")}}, "finished"},
 	}
 	for _, c := range cases {
 		if got, _ := workDirStatus(dir, c.arts, c.reps, c.runs); got != c.want {

@@ -142,12 +142,18 @@ func TestStatusServesStaleHealthAndServiceWhileRefreshing(t *testing.T) {
 func TestProbeRecordsErrorsAndRecovers(t *testing.T) {
 	var fail atomic.Bool
 	fail.Store(true)
+	// A controlled clock: the ttl expiry below must not depend on the host
+	// timer resolution (on Windows consecutive time.Now calls can return the
+	// same instant, so a 1 ns ttl never expired there).
+	var clock atomic.Int64
+	clock.Store(time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC).UnixNano())
+	now := func() time.Time { return time.Unix(0, clock.Load()) }
 	p := newProbe(func(ctx context.Context) (any, error) {
 		if fail.Load() {
 			return nil, errors.New("launchctl: context deadline exceeded")
 		}
 		return "ok", nil
-	}, time.Hour, time.Second, nil)
+	}, time.Hour, time.Second, now)
 	if v, st := p.get(time.Second); v != nil || st.State != "error" || !strings.Contains(st.Error, "deadline") {
 		t.Fatalf("error: %v %+v", v, st)
 	}
@@ -155,12 +161,12 @@ func TestProbeRecordsErrorsAndRecovers(t *testing.T) {
 	if v, st := p.get(time.Second); v != nil || st.State != "error" {
 		t.Fatalf("a failure is not retried within ttl: %v %+v", v, st)
 	}
-	p.ttl = time.Nanosecond
+	clock.Add(int64(time.Hour + time.Nanosecond)) // past the ttl
 	if v, st := p.get(time.Second); v != "ok" || st.State != "ok" {
 		t.Fatalf("recovery: %v %+v", v, st)
 	}
 	fail.Store(true)
-	p.ttl = time.Hour
+	clock.Add(int64(time.Minute)) // still within the ttl of the success
 	if v, st := p.get(0); v != "ok" || st.State != "ok" {
 		t.Fatalf("fresh value is served from cache: %v %+v", v, st)
 	}

@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.12.1] — 2026-10-28
+
+**CLI, daemon, Skills and MCP move to 0.12.1. The connector runtime is UNCHANGED (only its version number moves); import the
+0.12.1 `pcbpilot-connector.eext` so the versions match — the daemon pauses design actions until they do.**
+
+Summary: Windows fixes. The whole Go test suite now passes on Windows 11, and the real Windows bugs those tests exposed are
+fixed in the product code. Reviewed by Codex and Kimi K3.1 Pro over three rounds until no blocker remained.
+
+**Fixed on Windows**
+- `kicad sch-build`: a symbol from a library given by an absolute path (`C:\libs\custom.kicad_sym:R`, any extension case) is
+  found; the id was split at the drive letter.
+- Artifact output directories at a volume root or on a UNC share keep their volume.
+- Self-update and install: replacing the binary works when the destination does not exist yet (first install, or restoring a
+  lost binary).
+- `sch layout-plan --report` and `sch designators`: an output reached through a directory junction, including one whose
+  directories do not exist yet, is recognised as the same file as the input and refused; names that differ only in case are
+  one file on Windows and on case-insensitive macOS volumes.
+- Skills: a Skill directory linked into a checkout by a Windows junction is treated as linked, so an update never writes
+  release files into the checkout.
+- `kicad route` with fastroute: a timeout or Ctrl+C now asks fastroute to stop (Ctrl+Break in its own process group), so it
+  writes its best board; a fastroute that does not stop is killed after a 30 s grace period, and a second Ctrl+C kills it
+  at once.
+- `kicad sch-build` ERC gate: KiCad's "configuration does not include the symbol library" warnings are dropped only for the
+  stock libraries the build itself embedded (they are still listed); a missing project library still fails the gate.
+- `pkg/pcbauto` builds on Windows (process CPU time via GetProcessTimes).
+
+**Tests**
+- Fake routers use the test binary instead of `#!/bin/sh` scripts; symlink sub-cases skip only without the symlink privilege
+  (Developer Mode), and junctions are tested explicitly; home directories are isolated with USERPROFILE as well as HOME.
+- On Windows `internal/app` needs more than Go's default 10-minute test timeout: run `go test -timeout 60m ./...`.
+
 ## [0.12.0] — 2026-10-28
 
 **CLI, daemon, Skills and MCP move to 0.12.0. The connector runtime is UNCHANGED (only its version number moves); import the

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -129,7 +130,9 @@ func TestConsoleURLCarriesTokenInFragment(t *testing.T) {
 		t.Fatalf("url: %q", out)
 	}
 	st, err := os.Stat(filepath.Join(home, console.TokenFile))
-	if err != nil || st.Mode().Perm() != 0o600 {
+	// Windows has no POSIX mode bits (os.Stat reports 0666 or 0444 from the
+	// read-only attribute): 0600 is checked where it can be expressed.
+	if err != nil || (runtime.GOOS != "windows" && st.Mode().Perm() != 0o600) {
 		t.Fatalf("token file: %v %v", st, err)
 	}
 }

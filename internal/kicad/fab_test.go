@@ -273,11 +273,26 @@ func TestRunFabGateFailsBeforeWriting(t *testing.T) {
 
 func python3(t *testing.T) string {
 	t.Helper()
-	p, err := exec.LookPath("python3")
-	if err != nil {
-		t.Skip("python3 not on PATH")
+	// A candidate must really run: on Windows "python3" on PATH is usually
+	// the Microsoft Store App Execution Alias stub, which exits 9009 with
+	// "Python was not found". KiCad's bundled Python (what production uses
+	// via Locate) is the fallback.
+	var cands []string
+	for _, n := range []string{"python3", "python"} {
+		if p, err := exec.LookPath(n); err == nil {
+			cands = append(cands, p)
+		}
 	}
-	return p
+	if kt, err := Locate(); err == nil && kt.Python != "" {
+		cands = append(cands, kt.Python)
+	}
+	for _, p := range cands {
+		if exec.Command(p, "-c", "import sys; sys.exit(0 if sys.version_info[0] == 3 else 1)").Run() == nil {
+			return p
+		}
+	}
+	t.Skip("no working Python 3 (PATH or KiCad's bundled one)")
+	return ""
 }
 
 func copyFixtures(t *testing.T, names ...string) string {

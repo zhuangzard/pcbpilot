@@ -6,12 +6,15 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -356,6 +359,62 @@ func TestSyncRetiredSymlinkIsLeftAlone(t *testing.T) {
 	}
 }
 
+// A Skill dir linked into a checkout the way installers link directories
+// (linkDir: a symlink on Unix, a junction on Windows — Go reports a junction
+// as irregular, not a symlink) is a link: reported Linked, never written.
+func TestSyncLinkedDirIntoCheckoutIsLeftAlone(t *testing.T) {
+	isolatedSkillHome(t)
+	checkout := filepath.Join(t.TempDir(), "checkout", ".agents", "skills")
+	router, focused := filepath.Join(checkout, SkillName), filepath.Join(checkout, demoSkill)
+	for _, d := range []string{router, focused} {
+		writeTestFile(t, filepath.Join(d, "SKILL.md"), "CHECKOUT "+filepath.Base(d))
+		writeTestFile(t, filepath.Join(d, versionMarker), "0.9.0\n")
+	}
+	for skill, target := range map[string]string{SkillName: router, demoSkill: focused} {
+		link := SkillDirFor("claude", skill)
+		if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		// linkDir needs no privilege (a junction on Windows, a symlink
+		// elsewhere): any failure is a test failure.
+		if err := linkDir(target, link); err != nil {
+			t.Fatalf("linkDir: %v", err)
+		}
+		if runtime.GOOS == "windows" {
+			assertJunction(t, link)
+		}
+		if got := SkillLinkTarget(link); got == "" || !sameDirForTest(t, got, target) {
+			t.Fatalf("SkillLinkTarget(%s) = %q, want %s", link, got, target)
+		}
+		if ownedSkillDir(link) {
+			t.Fatalf("a linked dir must never count as an owned Skill: %s", link)
+		}
+	}
+	serveRelease(t, "1.0.0", multiTarball(t, "1.0.0", twoSkills(), twoSkillManifest()))
+	res, err := SyncSkills(context.Background(), SyncOptions{TargetVersion: "1.0.0", Force: true}, nil)
+	if err != nil {
+		t.Fatalf("sync: %v %+v", err, res)
+	}
+	if o := outcome(t, res, "claude", SkillName); o.Status != "linked" || o.Linked == "" {
+		t.Fatalf("linked router not reported as linked: %+v", o)
+	}
+	for _, d := range []string{router, focused} {
+		if got := readTestFile(t, filepath.Join(d, "SKILL.md")); got != "CHECKOUT "+filepath.Base(d) {
+			t.Fatalf("checkout written through the link: %s = %q", d, got)
+		}
+		if got := readMarker(d); got != "0.9.0" {
+			t.Fatalf("checkout marker rewritten through the link: %s = %q", d, got)
+		}
+	}
+}
+
+func sameDirForTest(t *testing.T, a, b string) bool {
+	t.Helper()
+	x, err1 := os.Stat(a)
+	y, err2 := os.Stat(b)
+	return err1 == nil && err2 == nil && os.SameFile(x, y)
+}
+
 func TestSyncRejectsIncompleteOrMisversionedArchiveBeforeWriting(t *testing.T) {
 	isolatedSkillHome(t)
 	router := seedOwned(t, "claude", SkillName, "0.9.0")
@@ -548,5 +607,61 @@ func TestRollbackRemovesFocusedSkillAddedByTheUpdate(t *testing.T) {
 	}
 	if !isDir(user) {
 		t.Fatal("rollback removed a dir it had saved")
+	}
+}
+
+// assertJunction: link is a directory junction as Go >= 1.23 reports it
+// (irregular, not a symlink), so the junction branch of SkillLinkTarget is
+// what a test using it exercises.
+func assertJunction(t *testing.T, link string) {
+	t.Helper()
+	fi, err := os.Lstat(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 || fi.Mode()&os.ModeIrregular == 0 {
+		t.Fatalf("%s is not a junction as Go reports one: mode %v", link, fi.Mode())
+	}
+}
+
+// SkillLinkTarget per kind of entry: a plain directory and a missing path are
+// not links; a junction (Windows, always created as one here) and a symlink
+// (where the OS lets this process create one) resolve to their target.
+func TestSkillLinkTargetKinds(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "checkout", "pcbpilot")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	plain := filepath.Join(root, "plain")
+	if err := os.MkdirAll(plain, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := SkillLinkTarget(plain); got != "" {
+		t.Fatalf("plain directory classified as linked to %q", got)
+	}
+	if got := SkillLinkTarget(filepath.Join(root, "missing")); got != "" {
+		t.Fatalf("missing path classified as linked to %q", got)
+	}
+	if runtime.GOOS == "windows" {
+		junction := filepath.Join(root, "junction")
+		if out, err := exec.Command("cmd", "/c", "mklink", "/J", junction, target).CombinedOutput(); err != nil {
+			t.Fatalf("mklink /J: %v: %s", err, out)
+		}
+		assertJunction(t, junction)
+		if got := SkillLinkTarget(junction); got == "" || !sameDirForTest(t, got, target) {
+			t.Fatalf("junction: SkillLinkTarget = %q, want %s", got, target)
+		}
+	}
+	symlink := filepath.Join(root, "symlink")
+	if err := os.Symlink(target, symlink); err != nil {
+		if runtime.GOOS == "windows" && errors.Is(err, syscall.Errno(1314)) { // ERROR_PRIVILEGE_NOT_HELD
+			t.Logf("symlink case not checked: %v", err)
+			return
+		}
+		t.Fatal(err)
+	}
+	if got := SkillLinkTarget(symlink); got == "" || !sameDirForTest(t, got, target) {
+		t.Fatalf("symlink: SkillLinkTarget = %q, want %s", got, target)
 	}
 }

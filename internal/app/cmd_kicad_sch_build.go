@@ -555,17 +555,48 @@ type sbResolveStats struct {
 	Notes        []string `json:"notes,omitempty"`
 }
 
+// sbSplitSymbolID splits a spec symbol into library and name: "Lib:Name", or
+// "path/to/lib.kicad_sym:Name" where the path may itself hold a colon (a
+// Windows drive, C:\libs\my.kicad_sym:R) — the split is then after the
+// ".kicad_sym", never at the drive letter. The extension is matched without
+// regard to case (C:\libs\custom.KICAD_SYM:R); the original text is kept.
+func sbSplitSymbolID(id string) (lib, name string, ok bool) {
+	const delim = sbSymLibExt + ":"
+	for i := len(id) - len(delim); i >= 0; i-- {
+		if strings.EqualFold(id[i:i+len(delim)], delim) {
+			j := i + len(sbSymLibExt)
+			return id[:j], id[j+1:], true
+		}
+	}
+	return strings.Cut(id, ":")
+}
+
+const sbSymLibExt = ".kicad_sym"
+
+// sbIsSymLibPath: lib names a symbol library file (any case of .kicad_sym),
+// not a library nickname.
+func sbIsSymLibPath(lib string) bool {
+	return len(lib) >= len(sbSymLibExt) && strings.EqualFold(lib[len(lib)-len(sbSymLibExt):], sbSymLibExt)
+}
+
+// sbSymLibNickname is the nickname a library file is registered under: its
+// base name without the extension.
+func sbSymLibNickname(path string) string {
+	base := filepath.Base(path)
+	return base[:len(base)-len(sbSymLibExt)]
+}
+
 // sbFindSymbol looks up "Lib:Name" in the project dir, the spec's libDirs and
 // KiCad's stock library (stock = KiCad resolves it from its global table).
 func sbFindSymbol(id string, dirs []string) (text, file string, stock bool, err error) {
-	lib, name, ok := strings.Cut(id, ":")
+	lib, name, ok := sbSplitSymbolID(id)
 	if !ok || lib == "" || name == "" {
-		if strings.HasSuffix(strings.ToLower(lib), ".kicad_sym") {
+		if sbIsSymLibPath(lib) {
 			return "", "", false, fmt.Errorf("symbol %q: want Lib:Name or path/to/lib.kicad_sym:Name", id)
 		}
 		return "", "", false, fmt.Errorf("symbol %q: want Lib:Name", id)
 	}
-	if strings.HasSuffix(lib, ".kicad_sym") { // explicit file path
+	if sbIsSymLibPath(lib) { // explicit file path
 		t, err := kicad.LibSymbolCached(lib, name)
 		return t, lib, false, err
 	}
@@ -676,9 +707,9 @@ func resolveSymbols(parts []*sbRPart, opts sbResolveOpts, libDirs []string) (st 
 			}
 			// t is flattened: a derived symbol (LM358 extends LM2904) carries
 			// its parent's units and pins under its own name.
-			lib, name, _ := strings.Cut(p.Symbol, ":")
-			if strings.HasSuffix(lib, ".kicad_sym") {
-				lib = strings.TrimSuffix(filepath.Base(lib), ".kicad_sym")
+			lib, name, _ := sbSplitSymbolID(p.Symbol)
+			if sbIsSymLibPath(lib) {
+				lib = sbSymLibNickname(lib)
 			}
 			p.SymName, text = name, t
 			if fl, ff, ok := strings.Cut(p.Footprint, ":"); ok && p.FPFile == "" && !stock {

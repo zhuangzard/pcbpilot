@@ -135,11 +135,16 @@ func TestToolPaths(t *testing.T) {
 	}
 	py, cli := toolPaths("darwin", app)
 	// Lexical order: "3.9" sorts after "3.11"; any existing interpreter is fine.
-	if !strings.HasSuffix(py, "/bin/python3") || !strings.HasSuffix(cli, "Contents/MacOS/kicad-cli") {
+	// toolPaths joins with the host separator (it is only called with
+	// runtime.GOOS), so compare slash-normalized.
+	if !strings.HasSuffix(filepath.ToSlash(py), "/bin/python3") || !strings.HasSuffix(filepath.ToSlash(cli), "Contents/MacOS/kicad-cli") {
 		t.Fatalf("%s %s", py, cli)
 	}
-	if py, cli := toolPaths("linux", "/usr"); py != "/usr/bin/python3" || cli != "/usr/bin/kicad-cli" {
+	if py, cli := toolPaths("linux", "/usr"); filepath.ToSlash(py) != "/usr/bin/python3" || filepath.ToSlash(cli) != "/usr/bin/kicad-cli" {
 		t.Fatalf("linux %s %s", py, cli)
+	}
+	if py, cli := toolPaths("windows", "/kicad"); filepath.ToSlash(py) != "/kicad/bin/python.exe" || filepath.ToSlash(cli) != "/kicad/bin/kicad-cli.exe" {
+		t.Fatalf("windows %s %s", py, cli)
 	}
 	t.Setenv(EnvApp, app)
 	t.Setenv(EnvPython, filepath.Join(app, "nope"))

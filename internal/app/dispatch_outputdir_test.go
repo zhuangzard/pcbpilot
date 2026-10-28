@@ -2,6 +2,7 @@ package app
 
 import (
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -40,6 +41,19 @@ func TestStripArtifactNesting(t *testing.T) {
 	// Degenerate: the pair at the filesystem root must not panic or return "".
 	if got := stripArtifactNesting(filepath.Join(sep+".pcbpilot", "artifacts")); got != sep {
 		t.Errorf("rooted pair: got %q, want %q", got, sep)
+	}
+	if runtime.GOOS == "windows" {
+		// The drive is kept whole: the drive root, not the drive-relative "C:".
+		for in, want := range map[string]string{
+			`C:\.pcbpilot\artifacts`:                          `C:\`,
+			`C:\proj\.pcbpilot\artifacts\.pcbpilot\artifacts`: `C:\proj`,
+			`\\srv\share\proj\.pcbpilot\artifacts\sub`:        `\\srv\share\proj`,
+			`\\srv\share\.pcbpilot\artifacts`:                 `\\srv\share\`,
+		} {
+			if got := stripArtifactNesting(in); got != want {
+				t.Errorf("%s: got %q, want %q", in, got, want)
+			}
+		}
 	}
 }
 
