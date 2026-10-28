@@ -13,6 +13,7 @@ package app
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -830,43 +831,76 @@ func resolveSymbols(parts []*sbRPart, opts sbResolveOpts, libDirs []string) (st 
 	return st, nil
 }
 
-// sbFPLibCheck answers whether a footprint library nickname is one KiCad
-// finds without the project: a stock library or a row of the user's global
-// fp-lib-table. known=false when neither can be checked (no KiCad install
-// found, global table unreadable): the caller then only notes it.
+// sbFPLibCheck answers whether a footprint "Lib:Name" is one KiCad finds
+// without the project: in a stock library or through a usable row of the
+// user's global fp-lib-table (path variables such as
+// ${KICAD10_FOOTPRINT_DIR} expanded, disabled rows skipped), the
+// footprint file itself checked, not only the nickname.
 type sbFPLibCheck struct {
-	once    bool
-	stock   string
-	global  map[string]bool
-	checked bool
+	once     bool
+	stock    string
+	tables   *kicad.FPLibTables
+	inspects bool // the global table (or the stock install) could be inspected
 }
 
-func (c *sbFPLibCheck) external(lib string) (found, known bool) {
+// sbStockFootprintDir / sbLoadFPLibTables are what the check reads; tests
+// replace them.
+var (
+	sbStockFootprintDir = kicad.StockFootprintDir
+	sbLoadFPLibTables   = kicad.LoadFPLibTables
+)
+
+type sbFPExt int
+
+const (
+	sbFPExtOK         sbFPExt = iota // found
+	sbFPExtNoFP                      // the library resolves, the footprint is not in it
+	sbFPExtNoLib                     // the library resolves nowhere
+	sbFPExtUnverified                // nothing could be inspected (no KiCad install, unreadable tables)
+)
+
+// external checks lib:name outside the project; where is the library
+// folder for sbFPExtNoFP.
+func (c *sbFPLibCheck) external(lib, name string) (res sbFPExt, where string) {
 	if !c.once {
 		c.once = true
-		c.stock = kicad.StockFootprintDir()
-		c.global = map[string]bool{}
+		c.stock = sbStockFootprintDir()
 		// The project directory given is a fresh temp one: only global rows
 		// count (an old <out>/fp-lib-table is rewritten by this build).
 		if tmp, err := os.MkdirTemp("", "pcbpilot-fplib-"); err == nil {
-			if t, err := kicad.LoadFPLibTables(tmp); err == nil {
-				c.checked = true
-				for _, l := range t.Libs {
-					if l.Scope == "global" && !l.Disabled && !l.Blocked && l.Err == nil {
-						c.global[l.Nickname] = true
-					}
-				}
+			if t, err := sbLoadFPLibTables(tmp); err == nil {
+				c.tables = t
+				// An existing table, even an empty one, is an inspection:
+				// a library it lacks is unknown. Only "no table at all and
+				// no KiCad template" leaves nothing to inspect.
+				c.inspects = t.GlobalTable != ""
 			}
 			os.RemoveAll(tmp)
 		}
+		c.inspects = c.inspects || c.stock != ""
 	}
-	if c.stock != "" && sbIsDir(filepath.Join(c.stock, lib+".pretty")) {
-		return true, true
+	if c.stock != "" {
+		if d := filepath.Join(c.stock, lib+".pretty"); sbIsDir(d) {
+			if fileExists(filepath.Join(d, name+".kicad_mod")) {
+				return sbFPExtOK, ""
+			}
+			return sbFPExtNoFP, d
+		}
 	}
-	if c.global[lib] {
-		return true, true
+	if c.tables != nil {
+		ref, err := c.tables.Resolve(lib + ":" + name)
+		if err == nil && ref.Scope == "global" {
+			return sbFPExtOK, ""
+		}
+		var fe *kicad.FPLibError
+		if errors.As(err, &fe) && fe.Code == kicad.ErrFPNotFound {
+			return sbFPExtNoFP, filepath.Dir(fe.Path)
+		}
 	}
-	return false, c.stock != "" || (c.checked && len(c.global) > 0)
+	if !c.inspects {
+		return sbFPExtUnverified, ""
+	}
+	return sbFPExtNoLib, ""
 }
 
 func sbIsDir(p string) bool {
@@ -927,11 +961,16 @@ func sbResolveFootprintLibs(parts []*sbRPart, dirs []string, st *sbResolveStats)
 			p.FPFile = f
 			continue
 		}
-		found, known := ext.external(lib)
-		if found {
+		res, where := ext.external(lib, name)
+		if res == sbFPExtOK {
 			continue
 		}
-		if !known {
+		if res == sbFPExtNoFP {
+			diags = append(diags, sbDiag{Code: "FOOTPRINT_NOT_FOUND", Message: fmt.Sprintf("%s: footprint %s: library %s has no %s.kicad_mod", p.Ref, p.Footprint, where, name),
+				Fix: "fix the footprint name, or add the .kicad_mod to the library"})
+			continue
+		}
+		if res == sbFPExtUnverified {
 			if !noted[lib] {
 				noted[lib] = true
 				st.Notes = append(st.Notes, fmt.Sprintf("footprint library %q (%s …) is not under the project dir or libDirs, and no KiCad install / global fp-lib-table could be read to check it", lib, p.Ref))
