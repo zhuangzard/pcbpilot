@@ -1045,3 +1045,49 @@ pcbnew.SaveBoard(sys.argv[1], b)
 		t.Fatalf("the copper shape stayed on the old net: %v", got)
 	}
 }
+
+// TestPcbSyncLiveSlashSheetName: a sheet whose name holds '/' (sch-build's
+// own page split titles "… (1/2)", or a page titled "I/O"). kicad-cli's XML
+// netlist writes its path unescaped; v0.12.0 put that on the pads while
+// KiCad's parity check wants "/I{slash}O (1{slash}2)/…", so every local
+// net of the sheet was a net_conflict and nothing was written. Built from
+// a synthetic spec with sch-build, then a --create sync: every gate passes
+// and the pads carry KiCad's escaped name.
+func TestPcbSyncLiveSlashSheetName(t *testing.T) {
+	kt := pcbSyncLive(t)
+	sbNeedKicad(t)
+	out := filepath.Join(t.TempDir(), "sl")
+	spec := &sbSpec{Name: "sl", Pages: []sbPage{{ID: "pa", Title: "Power"}, {ID: "pb", Title: "I/O conn (1/2)"}},
+		Zones: []sbZone{{ID: "za", Page: "pa"}, {ID: "zb", Page: "pb"}},
+		Parts: []sbPart{
+			{Ref: "R1", Value: "10k", Symbol: "Device:R", Footprint: "Resistor_SMD:R_0603_1608Metric", Zone: "za"},
+			{Ref: "R2", Value: "10k", Symbol: "Device:R", Footprint: "Resistor_SMD:R_0603_1608Metric", Zone: "zb"},
+			{Ref: "R3", Value: "1k", Symbol: "Device:R", Footprint: "Resistor_SMD:R_0603_1608Metric", Zone: "zb"},
+		},
+		Nets: []sbNet{
+			{Name: "+3V3", Pins: []string{"R1:1", "R2:1"}},
+			{Name: "GND", Pins: []string{"R1:2", "R3:2"}},
+			{Name: "MID", Pins: []string{"R2:2", "R3:1"}},
+		}}
+	if res, err := runSchBuild(spec, sbOptions{OutDir: out, NoIntent: true, Jobs: 2, PlannerBudget: 20000}, nil); err != nil || !res.OK {
+		t.Fatalf("build: %v %+v", err, res)
+	}
+	o := syncOpts(filepath.Join(out, "sl.kicad_sch"), filepath.Join(out, "sl.kicad_pcb"))
+	o.inPlace, o.create = true, true
+	rep, code := runSync(t, o)
+	if code != 0 || !rep.Committed {
+		t.Fatalf("exit %d gates %+v errors %+v", code, rep.Gates, rep.Errors)
+	}
+	wantGates(t, rep, map[string]gate.Status{"pad-net": gate.Pass, "schematic-parity": gate.Pass, "idempotent": gate.Pass})
+	fps, _ := footprintsByRef(t, kt, o.pcb)
+	const want = "/I{slash}O conn (1{slash}2)/MID"
+	for _, ref := range []string{"R2", "R3"} {
+		hit := false
+		for _, p := range fps[ref].Pads {
+			hit = hit || p.Net == want
+		}
+		if !hit {
+			t.Errorf("%s pads %+v: none on %q", ref, fps[ref].Pads, want)
+		}
+	}
+}
