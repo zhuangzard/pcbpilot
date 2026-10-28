@@ -350,6 +350,25 @@ func (t *Tools) DRC(pcb, out string) (*DRCReport, error) { return t.DRCSeverity(
 
 // DRCSeverity is DRC with a kicad-cli severity: error | warning | all.
 func (t *Tools) DRCSeverity(pcb, out, severity string) (*DRCReport, error) {
+	return t.DRCEnv(pcb, out, severity, nil)
+}
+
+// DRCNoLibraries is DRC (errors) with a private, empty KiCad configuration
+// (KICAD_CONFIG_HOME = a fresh directory next to out): no global footprint /
+// symbol library tables are loaded. Only for boards without footprints
+// (kicad rules' probe boards): loading the full KiCad library table costs
+// ~100 s per kicad-cli run on a stock install and a board without
+// footprints never reads it.
+func (t *Tools) DRCNoLibraries(pcb, out string) (*DRCReport, error) {
+	cfg := strings.TrimSuffix(out, filepath.Ext(out)) + "-kicad-config"
+	if err := os.MkdirAll(cfg, 0o755); err != nil {
+		return nil, err
+	}
+	return t.DRCEnv(pcb, out, "error", []string{"KICAD_CONFIG_HOME=" + cfg})
+}
+
+// DRCEnv is DRCSeverity with extra environment variables for kicad-cli.
+func (t *Tools) DRCEnv(pcb, out, severity string, env []string) (*DRCReport, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), BridgeTimeout)
 	defer cancel()
 	// A report left by an earlier run must never be read as this run's.
@@ -357,6 +376,9 @@ func (t *Tools) DRCSeverity(pcb, out, severity string) (*DRCReport, error) {
 		return nil, fmt.Errorf("%w: cannot remove the previous report: %v", ErrDRCReport, err)
 	}
 	cmd := exec.CommandContext(ctx, t.CLI, "pcb", "drc", "--format", "json", "--severity-"+severity, "-o", out, pcb)
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	var buf bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &buf, &buf
 	err := cmd.Run()

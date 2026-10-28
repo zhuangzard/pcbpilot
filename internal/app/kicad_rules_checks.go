@@ -95,16 +95,22 @@ type rulesSnap struct {
 	} `json:"outline"`
 	Components []struct {
 		Designator string     `json:"designator"`
+		Footprint  string     `json:"footprint"`
 		Side       string     `json:"side"`
 		BBox       *rulesRect `json:"bbox"`
 		Courtyard  *rulesRect `json:"courtyard"`
-		Pads       []struct {
-			Net   string  `json:"net"`
-			Layer int     `json:"layer"`
-			X     float64 `json:"x"`
-			Y     float64 `json:"y"`
-			W     float64 `json:"width"`
-			H     float64 `json:"height"`
+		// LocalClearance: the footprint's clearance override (mil).
+		LocalClearance *float64 `json:"localClearance"`
+		Pads           []struct {
+			Number string  `json:"padNumber"`
+			Net    string  `json:"net"`
+			Layer  int     `json:"layer"`
+			X      float64 `json:"x"`
+			Y      float64 `json:"y"`
+			W      float64 `json:"width"`
+			H      float64 `json:"height"`
+			// LocalClearance: the pad's clearance override (mil).
+			LocalClearance *float64 `json:"localClearance"`
 		} `json:"pads"`
 	} `json:"components"`
 	Copper *struct {
@@ -228,16 +234,58 @@ func (r *rulesRun) planNets() {
 	rep.check(cov)
 }
 
-// planIsolation lists the insulation pair rules.
+// planIsolation lists the insulation pair rules and the isolation-coverage
+// check: every pair needs board nets on both sides. A domain that resolves
+// to no board net makes its pair rule cover nothing — cannot-check, never
+// a pass with "0 pairs".
 func (r *rulesRun) planIsolation() {
+	cov := rulesCheck{Name: "isolation-coverage", Status: gate.Pass}
+	raw := r.in.domainNets()
 	for _, p := range r.in.Pairs {
 		if p.ClearanceMm <= 0 && p.CreepageMm <= 0 {
 			continue
 		}
-		r.rep.Isolation = append(r.rep.Isolation, rulesIsoPlan{A: p.A, B: p.B, ClassA: domainClass(p.A), ClassB: domainClass(p.B),
-			ClearanceMm: p.ClearanceMm, CreepageMm: p.CreepageMm, Bridges: p.Bridges,
-			Note: "domain classes + a .kicad_dru clearance/creepage rule between them; the pair clearance is also each pair net's class clearance (route's behaviour: an over-constraint against nets outside the pair)"})
+		ip := rulesIsoPlan{A: p.A, B: p.B, ClassA: domainClass(p.A), ClassB: domainClass(p.B),
+			ClearanceMm: p.ClearanceMm, CreepageMm: p.CreepageMm, ClearanceSource: p.ClearanceSource, CreepageSource: p.CreepageSource, Bridges: p.Bridges,
+			BoardNetsA: len(r.full.Domains[strings.TrimPrefix(domainClass(p.A), "PPD_")]), BoardNetsB: len(r.full.Domains[strings.TrimPrefix(domainClass(p.B), "PPD_")])}
+		if len(raw[p.A])+len(raw[p.B]) > 0 {
+			ip.Note = "domain classes + a .kicad_dru clearance/creepage rule between them; the pair clearance is also each pair net's class clearance (route's behaviour: an over-constraint against nets outside the pair)"
+		} else {
+			ip.Note = "domain classes + a .kicad_dru clearance/creepage rule between them (KiCad's DRC checks the pair); the nets' own class clearance is not raised to the pair distance"
+		}
+		if ip.ClearanceSource == "declared" || ip.CreepageSource == "declared" {
+			cov.Info = append(cov.Info, fmt.Sprintf("pair %s|%s: declared distance (intent spec) above the derived one: clearance %g mm (%s), creepage %g mm (%s)", p.A, p.B, ip.ClearanceMm, ip.ClearanceSource, ip.CreepageMm, ip.CreepageSource))
+		}
+		for _, side := range []struct {
+			end string
+			n   int
+		}{{p.A, ip.BoardNetsA}, {p.B, ip.BoardNetsB}} {
+			if side.n == 0 {
+				cov.Items = append(cov.Items, fmt.Sprintf("pair %s|%s: domain %s has %d intent net(s), none on the board: the pair rule covers nothing", p.A, p.B, intentDomainID(side.end), len(raw[intentDomainID(side.end)])))
+			}
+		}
+		r.rep.Isolation = append(r.rep.Isolation, ip)
 	}
+	switch {
+	case len(r.rep.Isolation) == 0:
+		cov.Detail = "no insulation pair in the intent"
+	case len(cov.Items) > 0:
+		cov.Status = gate.CannotCheck
+		cov.Detail = fmt.Sprintf("%d of %d insulation pair(s) have a domain with no net on the board: their isolation is not checked (fix: name the domain nets by the board's net names, e.g. re-derive the intent from kicad netlist output)", countPairs(cov.Items), len(r.rep.Isolation))
+	default:
+		cov.Detail = fmt.Sprintf("%d insulation pair(s): both domains of each have nets on the board", len(r.rep.Isolation))
+	}
+	r.rep.check(cov)
+}
+
+// countPairs counts the distinct "pair A|B:" prefixes of items.
+func countPairs(items []string) int {
+	seen := map[string]bool{}
+	for _, it := range items {
+		k, _, _ := strings.Cut(it, ": ")
+		seen[k] = true
+	}
+	return len(seen)
 }
 
 // planFloor is the plan's track_width minimum for net e on a layer kind,
@@ -999,12 +1047,16 @@ func (r *rulesRun) probeCheck(board, what string) rulesCheck {
 	var tracks []kicad.ProbeTrack
 	var exps []rulesProbeExp
 	row := 0.0
+	// A clearance probe row spans one clearance (its two tracks); the next
+	// row must be another clearance beyond it, or a track of one row
+	// violates against the next row's — and KiCad reports one clearance
+	// error per track, so the probe's own pair may go unreported.
 	step := 400.0
 	for _, p := range r.rep.Isolation {
-		step = math.Max(step, p.ClearanceMm/0.0254+200)
+		step = math.Max(step, 2*p.ClearanceMm/0.0254+200)
 	}
 	for _, c := range r.full.ClassesNM {
-		step = math.Max(step, float64(c.NM.Clearance)/nmPerMil+200)
+		step = math.Max(step, 2*float64(c.NM.Clearance)/nmPerMil+200)
 	}
 	seen := map[string]bool{}
 	for _, e := range r.rep.Nets {
@@ -1545,10 +1597,13 @@ func (r *rulesRun) placementProxy() {
 		r.rep.check(chk)
 		return
 	}
+	// Board net → domain class, from the domain classes bridge netclasses
+	// put the board nets in (the membership the pair rules use); the pair
+	// ends ("domain:<id>") are keyed the same way (ClassA / ClassB).
 	domOf := map[string]string{}
-	for _, d := range r.in.Domains {
-		for _, n := range d.Nets {
-			domOf[n] = d.ID
+	for dom, nets := range r.full.Domains {
+		for _, n := range nets {
+			domOf[n] = "PPD_" + dom
 		}
 	}
 	type part struct {
@@ -1580,21 +1635,27 @@ func (r *rulesRun) placementProxy() {
 		dy := math.Max(0, math.Max(a.MinY-b.MaxY, b.MinY-a.MaxY))
 		return math.Hypot(dx, dy)
 	}
-	checked := 0
+	checked, empty := 0, 0
 	for _, pr := range r.rep.Isolation {
+		if pr.BoardNetsA == 0 || pr.BoardNetsB == 0 {
+			empty++
+			chk.Items = append(chk.Items, fmt.Sprintf("pair %s|%s: a domain has no net on the board — not checked (isolation-coverage)", pr.A, pr.B))
+			continue
+		}
 		need := pr.ClearanceMm / 0.0254
+		pa, pb := pr.ClassA, pr.ClassB
 		for i, a := range parts {
-			if a.doms[pr.A] && a.doms[pr.B] {
+			if a.doms[pa] && a.doms[pb] {
 				if !rulesHasStr(pr.Bridges, a.ref) {
 					chk.Items = append(chk.Items, fmt.Sprintf("%s spans %s and %s but is not declared as a bridge (intent pairs[].bridges)", a.ref, pr.A, pr.B))
 				}
 				continue
 			}
 			for _, b := range parts[i+1:] {
-				if a.side != b.side || b.doms[pr.A] && b.doms[pr.B] {
+				if a.side != b.side || b.doms[pa] && b.doms[pb] {
 					continue
 				}
-				if !(a.doms[pr.A] && b.doms[pr.B] || a.doms[pr.B] && b.doms[pr.A]) {
+				if !(a.doms[pa] && b.doms[pb] || a.doms[pb] && b.doms[pa]) {
 					continue
 				}
 				checked++
@@ -1612,7 +1673,13 @@ func (r *rulesRun) placementProxy() {
 	if len(chk.Items) > 0 {
 		chk.Status = gate.Warn
 	}
-	chk.Detail = fmt.Sprintf("placement proxy, not copper clearance (DRC with the pair rules covers copper): %d same-side footprint pair(s) across insulation domains, %d closer than the pair clearance or undeclared bridges", checked, len(chk.Items))
+	chk.Detail = fmt.Sprintf("placement proxy, not copper clearance (DRC with the pair rules covers copper): %d same-side footprint pair(s) across insulation domains, %d closer than the pair clearance or undeclared bridges", checked, len(chk.Items)-empty)
+	if empty > 0 {
+		// A pair whose domain resolves to no board net was not looked at:
+		// never a pass (and not merely advisory).
+		chk.Status, chk.Advisory = gate.CannotCheck, false
+		chk.Detail += fmt.Sprintf("; %d pair(s) not checked: a domain has no net on the board", empty)
+	}
 	r.rep.check(chk)
 }
 

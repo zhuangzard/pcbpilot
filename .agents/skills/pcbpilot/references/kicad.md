@@ -307,8 +307,25 @@ pcbpilot kicad rules … --check [--stage placed|routed] [--report r.json]  # �
   fail，两层都不抬高，不静默取大。
 - **下限**：与 v0.10.2 route 相同——线宽、间距、过孔不低于板自身最小值（最小线宽、最小间距、最小孔、最小过孔直径、
   孔 + 2×最小环宽），也不低于网原有网络类（用户类更宽时保留，`warnings` 列出 “width kept at …”）。
-- **绝缘对**：`PPD_<域>` 类 + `.kicad_dru` 的 clearance / creepage 规则；与 route 一样把对的电气间隙写到两侧每个网的
-  类间距上（**已知过约束**：这些网对对外的所有网也用了这个间距，保留只为与 route 一致）。
+- **绝缘对**：`PPD_<域>` 类 + `.kicad_dru` 的 clearance / creepage 规则。`intent derive` 写的对端是 `domain:<id>`，按域 id
+  解析出该域的网，再逐网解析成板上的（层次）网名（`/页/网`）——v0.12.0 曾按原文 `domain:<id>` 去找域，域类一个网都没有，
+  探针报 “nothing to probe”、`isolation-placement` 报 0 对通过，是**空过**。现在每个对在 `isolation[]` 里记
+  `boardNetsA/B`；任一侧在板上 0 个网 → `isolation-coverage` **cannot-check**（`--apply` 拒绝、`isolation-placement`
+  也 cannot-check），绝不当 pass。间隙/爬电取意图里的值 = max(标准推导, spec 声明)，来源记在
+  `isolation[].clearanceSource / creepageSource`（`derived` / `declared`，见 design-intent.md 的 `spec.isolation`）。
+  只有**手写的裸域 id** 对端才像 route 那样把对的电气间隙写到两侧每个网的类间距上（**已知过约束**，保留只为与 route 一致）；
+  `domain:<id>` 对端不抬（实板一个域就有几百个网，抬了等于全板 6 mm 间距），只靠 `.kicad_dru` 对规则，由 KiCad DRC 判。
+- **封装焊盘间隙**（`footprint-pad-clearance`，advisory）：同一封装里不同网的两个焊盘，KiCad 要求的间距 = 两焊盘各自间距的
+  较大者（焊盘局部覆盖 → 封装局部覆盖 → 网的有效类间距），与封装焊盘边到边间隙比；不够的按封装列出（最小间隙、所在焊盘、
+  类、位号）。0.5 mm 间距的 VSSOP/TSSOP 焊盘间隙 0.15 mm，0.2 mm 的类间距在每个实例上都是 DRC clearance 错误，布局改不掉。
+  修法：给这些封装设局部间距覆盖（≤ 间隙），或降低该类间距 / 写针对该封装的 `.kicad_dru` 规则——**pcbpilot 不会静默降低**。
+  自定义 `.kicad_dru` 间距规则这里不解析，最终以 DRC 为准。
+- **工艺契约**（`--contract order-contract.json`，与 `kicad fab --preflight --contract` 同一文件、同一校验）：板的最小线宽、
+  最小间距、最小通孔、最小过孔环宽低于契约 `limits` 的，在暂存副本的 `.kicad_pro` 里**抬到**契约值（只抬不降；有孔径和环宽时
+  最小过孔直径 ≥ 孔 + 2×环宽；允许微孔时微孔孔径同样），再做推导——所以过孔也按契约环宽取下限，`--apply` 一起写进
+  `.kicad_pro`。`fab-contract` 检查列出抬了什么，以及仍低于契约的来源（用户 `.kicad_dru` 规则、用户网络类：pcbpilot 不改，
+  advisory warn，preflight 会判 fail，要自己改，绝不降契约）。`--check --contract` 按板现状判，低于契约 = fail。
+  契约文件进 `inputs`（role `contract`），变了 revision 就变。
 - **最小线宽是 DRC 规则**：网络类线宽只是布线默认值，不是下限。`.kicad_dru` 里加 `# pcbpilot-rules:begin … end`
   块，放在**最后**（用户规则 → route 块 `# pcbpilot:begin` → 本块）：KiCad 取最后匹配的规则，route 块的 inner 规则在
   意图没写 `min` 时只带板最小线宽，排在后面会把下限削弱到板最小值；route 重跑把自己的块追加到末尾后，`kicad route`
@@ -353,6 +370,8 @@ clearance 会替换类间距，也会被对规则替换）；有绝缘对时 cre
 
 **验证**（R1：各自三态、分开报告；pass 只证明这些检查，不等于可投板）：
 - `plan-coverage`：每网线宽依据是否完整（上面的 pass / cannot-check / fail）。
+- `isolation-coverage`：每个绝缘对两侧在板上都有网（否则 cannot-check，`--apply` 拒绝）。
+- `footprint-pad-clearance`（advisory）、`fab-contract`（有 `--contract` 时）：见上。
 - `staged-readback`：在暂存副本上 bridge `rules-read`（pcbnew 自己算出的**有效**网络类与 nm 尺寸）逐网等于计划，绝缘域网
   解析到 `PPD_<域>`，预设尺寸都在，每类外/内层解析出的最小线宽不低于下限；再用 **kicad-cli DRC 探针**：每类在外层（及内层）
   放一根比下限窄 2 µm 的探针线、每个绝缘对放两根间距比对间隙小 5 µm 的线（都在板外）。KiCad 读不懂 `.kicad_dru` 时
@@ -378,7 +397,11 @@ clearance 会替换类间距，也会被对规则替换）；有绝缘对时 cre
   （route 的过孔电流门禁，但喂给它的是本次推导解析出的每网电流——sim 最坏值、声明的峰值 / RMS 比意图大时用大的，
   焊盘电流按比例放大——和计划所用的温升，不是意图文件里的原值）、`isolation-placement`（**advisory**：同面封装 courtyard 边到边距离 < 对的电气间隙
   → warn；跨两域且未在意图 `pairs[].bridges` 声明的器件 → warn。这是**布局代理检查，不是铜间距**，铜由带绝缘规则的
-  DRC 判）。`--stage placed`：未布线阶段不做铜检查（标 not applicable）。
+  DRC 判；对的某侧在板上没有网 → 该检查 cannot-check、不再 advisory）。`--stage placed`：未布线阶段不做铜检查（标 not applicable）。
+
+**探针板只留规则**（v0.12.1）：bridge `rules-probe` 在加探针前删掉封装、走线、过孔与铜皮（规则区域、板框保留；探针网靠探针线
+本身留在板上），三次 DRC 都跑在这块小板上。只读探针自己的违规，结果与整板相同；1443 件的板上每次 DRC 从约 150 s 降到秒级。
+stderr 末行 `kicad rules: timing: …` 给出每类 KiCad 调用的次数与耗时。
 
 **所有权按位置**：`.kicad_dru` 按块标记切成有序片段分别解析，规则属于哪个块只看它在哪个片段里；块外的规则即使与
 自有规则同名也是用户的（用了 pcbpilot 名字 → `dru-name` 冲突，拒绝）。**输入只读一次**：requirements、意图、sim、

@@ -509,6 +509,12 @@ func LoadFabContract(path string) (*FabContract, error) {
 	if err != nil {
 		return nil, err
 	}
+	return ParseFabContract(b, path)
+}
+
+// ParseFabContract is LoadFabContract on bytes already read (path names
+// them in errors).
+func ParseFabContract(b []byte, path string) (*FabContract, error) {
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()
 	var c FabContract

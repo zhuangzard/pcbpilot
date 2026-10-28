@@ -65,7 +65,11 @@ post-layout 仿真 → 签核 → 保存（复制回工程）。板框、层叠�
    ```
    先看计划：每网 `basis`（电流 × IPC 还是意图下限）、`floors`（被板最小值/原有类抬高）、`conflicts`（用户类/规则冲突，
    只按名 `--replace <名>` 放行，Agent 不替用户决定）。`plan-coverage` 为 cannot-check（缺 sim/声明电流）时 `--apply` 拒绝，
-   补证据再来；`staged-readback` / `readback` 是 KiCad 自己回读 + DRC 探针，失败即回滚。细则见
+   补证据再来；`isolation-coverage` 为 cannot-check（某绝缘域在板上一个网都没有）同样拒绝——修意图的网名，不要绕过；
+   `footprint-pad-clearance` warn = 某封装焊盘间隙小于类间距（DRC 必报、布局改不掉），把列出的封装/类告诉用户，按用户决定
+   设封装局部间距或降类间距，Agent 不替用户降；要下单时加 `--contract fab/order-contract.json`（与 `kicad fab --preflight`
+   同一契约）把板最小值（含最小环宽）抬到契约，`fab-contract` 列出仍低于契约的用户规则。
+   `staged-readback` / `readback` 是 KiCad 自己回读 + DRC 探针，失败即回滚。细则见
    [kicad.md 设计规则一节](../pcbpilot/references/kicad.md#设计规则kicad-rules意图--仿真--kicad-规则可验证)。
 3. **布局**（可选；已有满意布局就跳过）：
    ```bash

@@ -270,16 +270,14 @@ func checkRuleFloors(r kicad.Rules, f kicadRuleFloors) error {
 // kicadIsolation turns the intent's insulation pairs into the bridge's
 // domain classes and clearance / creepage rules.
 func kicadIsolation(in *designIntent) []map[string]any {
-	nets := map[string][]string{}
-	for _, d := range in.Domains {
-		nets[d.ID] = d.Nets
-	}
+	nets := in.domainNets()
 	var out []map[string]any
 	for _, p := range in.Pairs {
 		if p.ClearanceMm <= 0 && p.CreepageMm <= 0 {
 			continue
 		}
-		out = append(out, map[string]any{"a": p.A, "b": p.B, "aNets": nets[p.A], "bNets": nets[p.B],
+		// The pair ends are "domain:<id>": the nets are the domain's.
+		out = append(out, map[string]any{"a": p.A, "b": p.B, "aNets": nets[intentDomainID(p.A)], "bNets": nets[intentDomainID(p.B)],
 			"clearanceMm": p.ClearanceMm, "creepageMm": p.CreepageMm})
 	}
 	return out
@@ -303,10 +301,14 @@ func kicadRequirements(in *designIntent) map[string]kicad.NetRequirement {
 		reqs[net] = kicad.NetRequirement{OuterMil: r.OuterMil, InnerMil: r.InnerMil, MinMil: r.MinMil, ClearanceMil: r.ClearanceMil,
 			ViaDiaMil: viaDia[net], ViaDrillMil: viaDrill[net]}
 	}
-	nets := map[string][]string{}
-	for _, d := range in.Domains {
-		nets[d.ID] = d.Nets
-	}
+	// The per-net raise looks the pair ends up as written: a bare domain id
+	// (hand-written intents) raises every net of the pair; a pkg/intent
+	// pair end "domain:<id>" never did and still does not — on a real board
+	// one domain holds hundreds of nets, and their class clearance against
+	// every other net would be the pair distance. Those pairs are enforced
+	// by the pair rule alone (kicadIsolation: PPD_ domain classes + the
+	// .kicad_dru clearance / creepage rule, which KiCad's DRC checks).
+	nets := in.domainNets()
 	for _, p := range in.Pairs {
 		clr := p.ClearanceMm / 0.0254
 		if clr <= 0 {
