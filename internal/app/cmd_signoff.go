@@ -381,11 +381,22 @@ func runSignoff(o signoffOpts, waivers []gateWaiver, stderr io.Writer) (*signoff
 		}
 		g.Detail = strings.Join(details, " | ")
 		if name == "signoff-copper" {
-			if why := boardCopperMissing(snap); why != "" {
-				// Nothing below the width or via floor is no evidence on a
-				// board with nothing routed: cannot check, never a pass.
+			if why, nets := boardCopperMissing(snap); why != "" {
+				// Nothing below the width or via floor is no evidence for a
+				// net with nothing routed: cannot check, never a pass.
 				g.Pass = false
-				g.Items = append([]string{"cannot check: " + why}, g.Items...)
+				var items []string
+				for i, n := range nets {
+					if i == 30 {
+						items = append(items, fmt.Sprintf("cannot check: … %d more unrouted net(s)", len(nets)-30))
+						break
+					}
+					items = append(items, "cannot check: "+n)
+				}
+				if len(nets) == 0 {
+					items = []string{"cannot check: " + why}
+				}
+				g.Items = append(items, g.Items...)
 				g.Detail = "cannot check: " + why + " | " + g.Detail
 			}
 		}
@@ -648,33 +659,63 @@ func signoffMarkdown(r *signoffResult) string {
 	return b.String()
 }
 
-// boardCopperMissing says why the board has no copper to judge: nets that
-// join two or more pads but not one track, arc, via or filled pour. ""
-// when there is copper, or nothing to connect.
-func boardCopperMissing(snap *boardSnapshot) string {
+// boardCopperMissing names the nets signoff-copper cannot judge: every net
+// that joins pads of two or more parts but has no track, arc, via or filled
+// copper of its own. Copper on other nets (a GND pour, one stray track) is
+// no evidence for an unrouted VCC or signal net. "" when every such net has
+// copper. A net whose pads all sit on one part (tied pads, a shield pair) is
+// not judged.
+func boardCopperMissing(snap *boardSnapshot) (string, []string) {
 	c := snap.Copper
 	if a := c.Availability["routing"]; a != "" && a != "available" && len(c.Lines)+len(c.Arcs) == 0 {
-		return "the board snapshot carries no routing (copper availability " + a + "): take it with the copper included"
+		return "the board snapshot carries no routing (copper availability " + a + "): take it with the copper included", nil
 	}
-	if len(c.Lines)+len(c.Arcs)+len(c.Vias)+len(c.Poured)+len(c.Fills) > 0 {
-		return ""
-	}
-	pads := map[string]int{}
-	for _, comp := range snap.Components {
-		for _, p := range comp.Pads {
-			if p.Net != "" {
-				pads[p.Net]++
+	nk := netCaseKey(snap.kicadNames())
+	copper := map[string]bool{}
+	for _, list := range [][]any{c.Lines, c.Arcs, c.Vias, c.Poured, c.Fills} {
+		for _, it := range list {
+			if m, ok := it.(map[string]any); ok {
+				if n, _ := m["net"].(string); n != "" {
+					copper[nk(n)] = true
+				}
 			}
 		}
 	}
-	n := 0
-	for _, k := range pads {
-		if k >= 2 {
-			n++
+	type netPads struct {
+		name  string
+		pads  int
+		parts map[string]bool
+	}
+	nets := map[string]*netPads{}
+	for _, comp := range snap.Components {
+		for _, p := range comp.Pads {
+			if p.Net == "" {
+				continue
+			}
+			k := nk(p.Net)
+			np := nets[k]
+			if np == nil {
+				np = &netPads{name: p.Net, parts: map[string]bool{}}
+				nets[k] = np
+			}
+			np.pads++
+			np.parts[comp.Designator] = true
 		}
 	}
-	if n == 0 {
-		return ""
+	var missing []string
+	judged := 0
+	for k, np := range nets {
+		if np.pads < 2 || len(np.parts) < 2 {
+			continue
+		}
+		judged++
+		if !copper[k] {
+			missing = append(missing, fmt.Sprintf("%s: %d pads on %d parts, no track, via or filled copper", np.name, np.pads, len(np.parts)))
+		}
 	}
-	return fmt.Sprintf("the board has no copper (0 tracks, arcs, vias and filled pours) for %d multi-pad net(s): route it before sign-off", n)
+	if len(missing) == 0 {
+		return "", nil
+	}
+	sort.Strings(missing)
+	return fmt.Sprintf("%d of %d multi-part net(s) have no copper on the board: route them before sign-off", len(missing), judged), missing
 }

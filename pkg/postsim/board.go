@@ -136,9 +136,8 @@ func (p *Pad) OnLayer(id int) bool { return p.Layer == LayerMulti || p.Layer == 
 type Part struct {
 	Ref    string
 	Device string
-	// Value is the footprint's value field when the dump carries one (a
-	// KiCad snapshot, whose device is that same value); an EasyEDA dump's
-	// device is the part's manufacturer id and it has no value.
+	// Value is the dump's value field when it carries one (a KiCad
+	// snapshot, whose device is that same value).
 	Value string
 	Side   int // 1 top, 2 bottom
 	BBox   Rect
@@ -207,6 +206,11 @@ type Board struct {
 	Notes     []string // parse-time assumptions
 	Semantic  string   // semanticSha256 of the dump
 	Project   string
+	// KiCad: the dump is a `kicad snapshot` (top-level "source": "kicad",
+	// written by every KiCad snapshot): component device and value are the
+	// footprint value. Otherwise an EasyEDA dump, whose device is the
+	// manufacturer id.
+	KiCad bool
 	spokes    int
 	byRefPin  map[string]*Pad
 	layerHas  map[int]int // copper objects per layer
@@ -244,6 +248,7 @@ func LayerName(id int) string {
 }
 
 type dumpDoc struct {
+	Source     string `json:"source"`
 	Components []struct {
 		ID         string         `json:"primitiveId"`
 		Designator string         `json:"designator"`
@@ -305,7 +310,7 @@ func ParseBoard(raw []byte) (*Board, error) {
 		return nil, fmt.Errorf("board dump: %w", err)
 	}
 	b := &Board{byRefPin: map[string]*Pad{}, layerHas: map[int]int{}, netLayers: map[string]map[int]bool{},
-		Semantic: d.SemanticSHA256, Project: d.Project}
+		Semantic: d.SemanticSHA256, Project: d.Project, KiCad: d.Source == "kicad"}
 	b.Rules = Rules{ClearanceMil: 6, CopperToEdgeMil: 10, ViaDrillMil: 12, ViaDiameterMil: 24}
 	if d.Rules != nil {
 		if d.Rules.ClearanceMil > 0 {

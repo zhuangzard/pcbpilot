@@ -146,10 +146,11 @@ func runSessionNotice(ctx context.Context, d noticeDeps, stderr io.Writer) bool 
 	for _, line := range lines {
 		fmt.Fprintln(stderr, line)
 	}
-	if len(lines) > 0 {
-		// The update outcome ("a → b updated … restart your AI client") is
-		// news once; without this every session for 24 h repeated it.
-		_ = selfupdate.MarkUpdateNoticed(d.now())
+	// The update outcome ("a → b updated … restart your AI client") is news
+	// once: acknowledge exactly the outcome health announced, and only when
+	// its line was relayed (other notices acknowledge nothing).
+	if u := parseHealthUpdates(p.Raw); u != nil && u.Outcome != nil && len(u.Notices) > 0 {
+		_ = selfupdate.AckUpdateOutcome(*u.Outcome)
 	}
 	return len(lines) > 0
 }
