@@ -319,6 +319,14 @@ pcbpilot kicad rules … --check [--stage placed|routed] [--report r.json]  # �
   匹配，或其后任何一个可能匹配，取其中最低的——可能匹配的更强规则不会抹掉更弱的结果；确定匹配低于下限 = fail，可能匹配
   低于下限或值无法比较 = cannot-check。块头记 `request-sha256`
   （推导指纹）与 `sizes-owned`。
+- **用户最大线宽不丢**：KiCad 的最后匹配会替换**整个** track_width 约束，自有规则只写 min/opt 会把用户规则的
+  `(max …)`（如阻抗网的 `(min 0.15mm) (max 0.25mm)`）抹掉。所以凡是可能管到某个 PP 类的网、带 max 的用户规则：计划线宽
+  与下限都不超过该 max → 把最严的那个 max 带进该类该层组的自有规则（`min = 下限, opt = 线宽, max = 用户 max`，报告
+  `druTrackRules[].maxNm/maxFrom`）；计划超过 max → 以该用户规则名报 `dru-weakened` 冲突（不相容要求），只能
+  `--replace <名>`（删掉那条用户规则）；该网在意图里声明了阻抗 / 差分 → 按 R8 是网自身的不相容要求，`plan-coverage` fail。
+  `kicad route` 用同样的规则与每网身份重算这些 max 后再做逐字节校验。`--check`：可能管到该网的用户 max 必须仍然有效
+  （按确定 / 可能匹配解析出的最宽 max 不超过它，否则 fail / cannot-check）；布好的线段宽于有效 max 即失败（max 来自可能
+  匹配的规则时 cannot-check）。
 - **预设尺寸**：把各类的外/内层线宽与过孔写进 Board Setup → Pre-defined Sizes（GUI 便利，**从不算作规则**）；只增删
   自己上次加的（`sizes-owned`），用户原有的保留。
 - **所有权**：`PPn_W…` / `PPD_…` / `PPF_…` 类、`pcbpilot-rules …` / `pcbpilot …` 规则名与块标记属于 pcbpilot；重跑幂等

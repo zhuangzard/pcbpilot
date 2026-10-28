@@ -324,6 +324,10 @@ type rulesRun struct {
 	druRule []kicad.DRURule // staged result's custom rules
 	// rbStaged: pcbnew's readback of the verified stage.
 	rbStaged *kicad.RulesReadback
+	// maxes / maxConflicts: carried user track_width maximums
+	// (trackMaxCarry).
+	maxes        trackMaxes
+	maxConflicts []maxConflict
 	// intentCopy: the captured intent bytes in the stage (for readers that
 	// take a path).
 	intentCopy string
@@ -704,7 +708,38 @@ func (r *rulesRun) derive() int {
 	for _, f := range full.ViaFloored {
 		rep.Assumptions = append(rep.Assumptions, "board minimum floor: "+f)
 	}
-	r.block = rulesBlockRules(full.ClassesNM, r.rb0.CopperLayers)
+	// User track_width maximums that may govern a planned class: carried
+	// into the owned rule (KiCad's last match replaces the whole
+	// constraint), or a conflict when the plan does not fit under them.
+	var userRules []kicad.DRURule
+	if b, err := os.ReadFile(boardSibling(r.stIn, ".kicad_dru")); err == nil {
+		if userRules, err = kicad.ParseDRU(string(b)); err != nil {
+			return r.fail(errRulesInput, r.dru, err.Error(), "", 1)
+		}
+	}
+	replaced := map[string]bool{}
+	for _, n := range o.replace {
+		replaced[n] = true
+	}
+	r.maxes, r.maxConflicts = trackMaxCarry(userRules, full.ClassesNM, r.rb0.CopperLayers, func(n string) map[string]bool { return r.identity(n, nil) }, replaced)
+	// R8: a maximum below an impedance-controlled or paired net's width is
+	// an incompatible requirement of the net itself (not resolved by
+	// --replace, which only removes the rule).
+	for _, mc := range r.maxConflicts {
+		for _, n := range mc.Nets {
+			nn := r.in.Nets[n]
+			if nn == nil || !(nn.ImpedanceOhm > 0 || nn.DiffPair != "" || nn.Role == "diff" || nn.Role == "rf" || nn.Role == "hs") {
+				continue
+			}
+			for i := range r.bases {
+				if r.bases[i].Net == n {
+					r.bases[i].Status = "fail"
+					r.bases[i].Detail = "incompatible requirements: " + mc.Detail
+				}
+			}
+		}
+	}
+	r.block = rulesBlockRules(full.ClassesNM, r.rb0.CopperLayers, r.maxes)
 	rep.DRURules = r.block
 	r.planNets()
 	r.planIsolation()

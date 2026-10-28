@@ -382,6 +382,9 @@ func (r *rulesRun) conflicts() {
 			add("class-override", c.Name, "pcbpilot's classes outrank this user netclass on: "+strings.Join(hit, "; "))
 		}
 	}
+	for _, mc := range r.maxConflicts {
+		add("dru-weakened", mc.Rule, mc.Detail)
+	}
 	text := string(r.data[r.dru])
 	if text == "" {
 		return
@@ -883,7 +886,8 @@ func (r *rulesRun) compareToPlan(rb *kicad.RulesReadback) []string {
 		for _, l := range copperLayerNames(rb.CopperLayers) {
 			want := r.planFloor(e, layerGroup(l))
 			fail, cannot := floorProblem(r.resolvedFloor(r.druRule, c.Name, l, r.netNamesIn(rb, e)), want, e.Net, l)
-			for _, p := range []string{fail, cannot} {
+			mf, mc := r.userMaxProblem(r.druRule, c.Name, l, r.netNamesIn(rb, e), e.Net)
+			for _, p := range []string{fail, cannot, mf, mc} {
 				if p != "" {
 					bad = append(bad, "staged rules: "+p)
 				}
@@ -1295,6 +1299,15 @@ func (r *rulesRun) effectiveRules() {
 			if cannot != "" {
 				floorCannot = append(floorCannot, cannot)
 			}
+			// A user maximum that may govern the net must stay in effect:
+			// KiCad's last match replaces the whole constraint.
+			fail, cannot = r.userMaxProblem(rules, firstClass(eff.Class), l, r.netNamesIn(rb, e), e.Net)
+			if fail != "" {
+				chk.Items = append(chk.Items, fail)
+			}
+			if cannot != "" {
+				floorCannot = append(floorCannot, cannot)
+			}
 		}
 	}
 	for _, p := range r.rep.Isolation {
@@ -1344,6 +1357,10 @@ func (r *rulesRun) copperWidths() {
 		return
 	}
 	segs := append(append([]rulesSeg{}, r.snap.Copper.Lines...), r.snap.Copper.Arcs...)
+	var boardRules []kicad.DRURule
+	if t := string(r.data[r.dru]); t != "" {
+		boardRules, _ = kicad.ParseDRU(t)
+	}
 	poured := pouredLookupKeyed(func(s string) string { return s }, r.snap.Copper.Poured)
 	byNet := map[string][]rulesSeg{}
 	for _, s := range segs {
@@ -1392,6 +1409,19 @@ func (r *rulesRun) copperWidths() {
 			}
 			if floor <= 0 || floor > req {
 				floor = req
+			}
+			// Never wider than the effective maximum (a carried user max).
+			cuName := copperLayerName(s.Layer)
+			if mx := rulesTrackMaxResolve(boardRules, firstClass(r.rb0.Nets[e.Net].Class), cuName, r.netNames(e)); mx.Strict > 0 && s.Width > milOfNm(mx.Strict)+rulesTolMil {
+				msg := fmt.Sprintf("%s seg %s on %s %.2f mil is wider than the track_width max %s (rule %q)", e.Net, short12(s.ID), cuName, s.Width, kicad.MmOfNm(mx.Strict), mx.StrictRule)
+				if mx.StrictPossible {
+					cc++
+					chk.Items = append(chk.Items, msg+" (the rule may or may not match: cannot-check)")
+				} else {
+					fails++
+					chk.Items = append(chk.Items, msg)
+				}
+				continue
 			}
 			if s.Width+rulesTolMil >= req {
 				continue
@@ -1771,4 +1801,50 @@ func stripOwnedProject(b []byte) ([]byte, error) {
 		ns["netclass_patterns"] = keep
 	}
 	return json.MarshalIndent(m, "", "  ")
+}
+
+// copperLayerName is a pcbpilot copper layer id's KiCad name.
+func copperLayerName(id int) string {
+	switch {
+	case id == 2:
+		return "B.Cu"
+	case id >= 15:
+		return fmt.Sprintf("In%d.Cu", id-14)
+	}
+	return "F.Cu"
+}
+
+// userMaxProblem: every user track_width maximum that may govern the net on
+// layer must be in effect — the loosest max KiCad may apply there is not
+// above the strictest such user max. Fail when that comes from a definite
+// match, cannot-check when from a possible one.
+func (r *rulesRun) userMaxProblem(rules []kicad.DRURule, cls, layer string, names map[string]bool, net string) (fail, cannot string) {
+	var userMax int64
+	from := ""
+	for _, u := range rules {
+		if u.Block != "" || !ruleOnLayer(u.Layer, layer) || druDisjoint(u.Condition, names) {
+			continue
+		}
+		for _, c := range u.Constraints {
+			if c.Type == "track_width" && c.Max != nil && (userMax == 0 || *c.Max < userMax) {
+				userMax, from = *c.Max, u.Name
+			}
+		}
+	}
+	if userMax == 0 {
+		return "", ""
+	}
+	res := rulesTrackMaxResolve(rules, cls, layer, names)
+	if res.Weak > 0 && res.Weak <= userMax {
+		return "", ""
+	}
+	what := "no maximum"
+	if res.Weak > 0 {
+		what = "max " + kicad.MmOfNm(res.Weak)
+	}
+	msg := fmt.Sprintf("%s: the user track_width max %s (rule %q) on %s is not in effect: rule %q leaves %s (KiCad's last match replaces the whole constraint)", net, kicad.MmOfNm(userMax), from, layer, res.WeakRule, what)
+	if res.WeakPossible {
+		return "", msg
+	}
+	return msg, ""
 }
