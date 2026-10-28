@@ -56,6 +56,7 @@ goes to --out-dir.`,
 		newKicadSchCheckCmd(stdout, stderr),
 		newKicadRenderCmd(stdout),
 		newKicadPcbSyncCmd(stdout, stderr),
+		newKicadRulesCmd(stdout, stderr),
 	)
 	return c
 }

@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/zhuangzard/pcbpilot/internal/daemon"
+	"github.com/zhuangzard/pcbpilot/internal/kicad"
 	"github.com/zhuangzard/pcbpilot/internal/selfupdate"
 	"github.com/zhuangzard/pcbpilot/pkg/simtools"
 )
@@ -54,8 +55,38 @@ func TestMain(m *testing.M) {
 	}
 	os.Setenv("HOME", home)
 	os.Setenv("USERPROFILE", home)
+	// KiCad (kicad-cli, pcbnew) with USERPROFILE moved to the temp HOME
+	// cannot resolve its per-user folders and writes them to a relative
+	// "KiCad/10.0" in the working directory — the package source dir (found
+	// 2026-10-28 after the kicad rules live tests; 10.0.6: the cache folder
+	// lands there even with KICAD_CONFIG_HOME set). Every KiCad child of
+	// this process gets isolated cache, documents and config homes; the
+	// config has empty global symbol tables like the one kicadenv uses for
+	// schematic runs (no slow stock-table load); the footprint table is
+	// seeded by KiCad from its template as before.
+	for env, sub := range map[string]string{"KICAD_CACHE_HOME": "kicad-cache", "KICAD_DOCUMENTS_HOME": "kicad-documents"} {
+		if os.Getenv(env) == "" {
+			os.Setenv(env, filepath.Join(home, sub))
+		}
+	}
+	if os.Getenv("KICAD_CONFIG_HOME") == "" {
+		cfg := filepath.Join(home, "kicad-config")
+		for _, sub := range []string{"", "7.0", "8.0", "9.0", "10.0", "11.0"} {
+			_ = os.MkdirAll(filepath.Join(cfg, sub), 0o755)
+			_ = os.WriteFile(filepath.Join(cfg, sub, "sym-lib-table"), []byte(kicad.LibTableText("sym_lib_table", nil)), 0o644)
+		}
+		os.Setenv("KICAD_CONFIG_HOME", cfg)
+	}
+	_, kicadDirBefore := os.Stat("KiCad")
 	code := m.Run()
 	os.RemoveAll(home)
+	// Guard: no test may leave a KiCad settings directory in the package.
+	if _, err := os.Stat("KiCad"); err == nil && kicadDirBefore != nil {
+		fmt.Fprintln(os.Stderr, "FAIL: a test ran KiCad without an isolated KICAD_CONFIG_HOME: it wrote internal/app/KiCad (remove it and fix the test)")
+		if code == 0 {
+			code = 1
+		}
+	}
 	os.Exit(code)
 }
 

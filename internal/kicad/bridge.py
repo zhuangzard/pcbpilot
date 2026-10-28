@@ -31,6 +31,8 @@
 #   sync-read PCB                   pcb-sync inventory (mm, KiCad y-down)
 #   fp-info SPEC.json               library footprints: pads + courtyard box
 #   sync-apply PCB|- PLAN.json OUT  apply a pcb-sync plan; OUT in $PCBPILOT_STAGE_DIR
+#   rules-read PCB                  effective netclass + sizes per net (nm), classes, sizes
+#   rules-probe PCB SPEC.json OUT   add exact-width probe tracks (kicad rules verification)
 #
 # Writes are all or nothing: edit and pours check every net, layer, item id
 # and footprint first; an unknown net, a missing id or a designator on more
@@ -614,7 +616,7 @@ def validate_netclasses(reqs):
     {"pcbpilotReqs": 2, "nets", "isolation", "edges"}."""
     bad, isolation, edges = [], [], []
     if isinstance(reqs, dict) and reqs.get("pcbpilotReqs") == 2:
-        lists, bad = op_lists("netclasses", {k: v for k, v in reqs.items() if k not in ("pcbpilotReqs", "nets")},
+        lists, bad = op_lists("netclasses", {k: v for k, v in reqs.items() if k not in ("pcbpilotReqs", "nets", "predefinedSizes")},
                               ("isolation", "edges"))
         isolation, edges = lists["isolation"], lists["edges"]
         reqs = reqs.get("nets")
@@ -801,7 +803,9 @@ def check_effective(ds, ns, names, classes):
 def netclasses(pcb, reqs_path, out):
     with open(reqs_path, encoding="utf-8") as f:
         reqs = json.load(f)
+    sizes_req = reqs.get("predefinedSizes") if isinstance(reqs, dict) and reqs.get("pcbpilotReqs") == 2 else None
     bad, reqs, isolation, edges = validate_netclasses(reqs)
+    bad += validate_sizes(sizes_req)
     if bad:
         return reject("netclasses", bad)
     try:
@@ -906,7 +910,7 @@ def netclasses(pcb, reqs_path, out):
     text = re.sub(re.escape(DRU_BEGIN) + r".*?" + re.escape(DRU_END) + r"\n?", "", text, flags=re.S)
     rules = []
     for cl in classes:
-        q = cl.pop("nm")
+        q = cl["nm"]
         if q["min"] > 0:
             rules.append('(rule "pcbpilot %s min"\n  (condition "A.hasNetclass(\'%s\')")\n  (constraint track_width (min %smm)))'
                          % (cl["name"], cl["name"], mm_of_nm(q["min"])))
@@ -942,9 +946,142 @@ def netclasses(pcb, reqs_path, out):
             f.write(text)
     elif os.path.exists(out_dru) and os.path.abspath(out_dru) != os.path.abspath(src_dru):
         os.remove(out_dru)
+    sizes = None
+    if sizes_req is not None:
+        sizes = set_predefined_sizes(ds, classes, sizes_req)
     save_board(board, pcb, out)
-    return {"ok": True, "out": out, "classes": classes, "missingNets": missing, "missingDomainNets": sorted(dom_missing), "kept": raised,
+    res = {"ok": True, "out": out, "classes": classes, "missingNets": missing, "missingDomainNets": sorted(dom_missing), "kept": raised,
             "viaFloored": floored, "mismatched": mismatched, "domains": {k: sorted(v) for k, v in domains.items()}, "dru": out_dru if text.strip() else "", "druRules": len(rules)}
+    if sizes is not None:
+        res["sizes"] = sizes
+    return res
+
+
+def validate_sizes(req):
+    """Problems with a predefinedSizes request: {"owned": {"tracks": [nm],
+    "vias": [[diameter nm, drill nm]]}} (owned = what an earlier kicad rules
+    run added; null = none)."""
+    if req is None:
+        return []
+    if not isinstance(req, dict):
+        return ["predefinedSizes: not an object"]
+    bad = ["predefinedSizes: unknown field %r" % k for k in sorted(req, key=str) if k != "owned"]
+    owned = req.get("owned") or {}
+    if not isinstance(owned, dict):
+        return bad + ["predefinedSizes.owned: not an object"]
+    bad += ["predefinedSizes.owned: unknown field %r" % k for k in sorted(owned, key=str) if k not in ("tracks", "vias")]
+    for v in owned.get("tracks") or []:
+        if not is_int(v) or v <= 0:
+            bad.append("predefinedSizes.owned.tracks: %r is not a positive nm integer" % (v,))
+    for v in owned.get("vias") or []:
+        if not (isinstance(v, list) and len(v) == 2 and all(is_int(x) and x > 0 for x in v)):
+            bad.append("predefinedSizes.owned.vias: %r is not [diameter nm, drill nm]" % (v,))
+    return bad
+
+
+def set_predefined_sizes(ds, classes, req):
+    """KiCad's pre-defined track widths and via sizes (Board Setup >
+    Pre-defined Sizes: a GUI convenience, never a rule): drop the sizes an
+    earlier run added (req.owned) and add every pcbpilot class's outer and
+    inner width and its via. Entry 0 of each list is KiCad's own netclass
+    slot and is kept. Returns the full lists (without entry 0) and the sizes
+    this run owns (added because the board did not have them)."""
+    owned = req.get("owned") or {}
+    old_t = {int(v) for v in owned.get("tracks") or []}
+    old_v = {(int(a), int(b)) for a, b in owned.get("vias") or []}
+    tl = ds.m_TrackWidthList
+    vl = ds.m_ViasDimensionsList
+    head_t = [int(tl[0])] if len(tl) else [0]
+    head_v = [(int(vl[0].m_Diameter), int(vl[0].m_Drill))] if len(vl) else [(0, 0)]
+    keep_t = [int(v) for v in list(tl)[1:] if int(v) not in old_t]
+    keep_v = [(int(v.m_Diameter), int(v.m_Drill)) for v in list(vl)[1:] if (int(v.m_Diameter), int(v.m_Drill)) not in old_v]
+    want_t, want_v = set(), set()
+    for cl in classes:
+        q = cl["nm"]
+        want_t.update(w for w in (q["track"], q["inner"]) if w > 0)
+        if q["viaDiameter"] > 0 and q["viaDrill"] > 0:
+            want_v.add((q["viaDiameter"], q["viaDrill"]))
+    add_t = sorted(want_t - set(keep_t))
+    add_v = sorted(want_v - set(keep_v))
+    all_t = sorted(set(keep_t) | set(add_t))
+    all_v = sorted(set(keep_v) | set(add_v))
+    while len(tl):
+        tl.pop_back()
+    for v in head_t + all_t:
+        tl.append(v)
+    while len(vl):
+        vl.pop_back()
+    for d, dr in head_v + all_v:
+        vl.append(pcbnew.VIA_DIMENSION(d, dr))
+    return {"tracks": all_t, "vias": [list(v) for v in all_v], "owned": {"tracks": add_t, "vias": [list(v) for v in add_v]}}
+
+
+# -- kicad rules: readback and probes -------------------------------------------
+
+def rules_read(pcb):
+    """What KiCad resolves for every net of PCB (its project next to it): the
+    effective netclass (KiCad's composite name) and sizes in nm, every class
+    with its own values, the pattern assignments, the board minimums and the
+    pre-defined sizes. Read only."""
+    board = pcbnew.LoadBoard(pcb)
+    ds = board.GetDesignSettings()
+    ns = ds.m_NetSettings
+    dn = ns.GetDefaultNetclass()
+    classes = []
+    for name, nc in ns.GetNetclasses().items():
+        c = {"name": str(name), "description": nc.GetDescription()}
+        try:
+            c["priority"] = int(nc.GetPriority())
+        except (AttributeError, TypeError):
+            pass
+        for f, k in (("TrackWidth", "track"), ("Clearance", "clearance"), ("ViaDiameter", "viaDiameter"), ("ViaDrill", "viaDrill")):
+            if getattr(nc, "Has" + f)():
+                c[k] = int(getattr(nc, "Get" + f)())
+        classes.append(c)
+    nets = {}
+    for name in sorted(str(n) for n in board.GetNetsByName().keys()):
+        if not name:
+            continue
+        eff, track, clr, dia, drill = effective_sizes(ns, name)
+        nets[name] = {"class": eff.GetName(), "track": track, "clearance": clr, "viaDiameter": dia, "viaDrill": drill}
+    tl = [int(v) for v in ds.m_TrackWidthList]
+    vl = [[int(v.m_Diameter), int(v.m_Drill)] for v in ds.m_ViasDimensionsList]
+    return {"ok": True, "kicadVersion": pcbnew.Version(), "copperLayers": board.GetCopperLayerCount(),
+            "minimums": {"track": int(ds.m_TrackMinWidth), "clearance": int(ds.m_MinClearance), "viaDiameter": int(ds.m_ViasMinSize),
+                         "viaDrill": int(ds.m_MinThroughDrill), "viaAnnular": int(ds.m_ViasMinAnnularWidth), "edge": int(ds.m_CopperEdgeClearance)},
+            "default": {"track": int(dn.GetTrackWidth()), "clearance": int(dn.GetClearance()), "viaDiameter": int(dn.GetViaDiameter()),
+                        "viaDrill": int(dn.GetViaDrill())},
+            "classes": sorted(classes, key=lambda c: c["name"]), "patterns": [list(p) for p in list_patterns(pcb)], "nets": nets,
+            "sizes": {"tracks": tl[1:], "vias": vl[1:]}}
+
+
+def rules_probe(pcb, spec_path, out):
+    """Probe tracks for kicad rules (on a scratch copy only): {"tracks": [{net,
+    layer (pcbpilot id), startX, startY, endX, endY (mil, y-up), widthNm}]}.
+    Exact nm widths, no zone fill; OUT is saved and the new tracks' uuids are
+    returned in order."""
+    with open(spec_path, encoding="utf-8") as f:
+        spec = json.load(f)
+    L, bad = op_lists("rules-probe", spec, ("tracks",))
+    bad += check_fields("tracks", L["tracks"], need=("startX", "startY", "endX", "endY", "widthNm"), positive=("widthNm",))
+    board = pcbnew.LoadBoard(pcb)
+    obj = [op for op in L["tracks"] if isinstance(op, dict)]
+    bad += check_nets(board, [op.get("net") for op in obj])
+    bad += check_layers(board, [op.get("layer") for op in obj])
+    if bad:
+        return reject("rules-probe", bad)
+    ids = []
+    for op in obj:
+        t = pcbnew.PCB_TRACK(board)
+        t.SetStart(pcbnew.VECTOR2I(nm(op["startX"]), -nm(op["startY"])))
+        t.SetEnd(pcbnew.VECTOR2I(nm(op["endX"]), -nm(op["endY"])))
+        t.SetWidth(int(op["widthNm"]))
+        t.SetLayer(kicad_layer(op["layer"]))
+        t.SetNet(board.FindNet(op["net"]))
+        board.Add(t)
+        ids.append(t.m_Uuid.AsString())
+    save_board(board, pcb, out)
+    return {"ok": True, "out": out, "ids": ids}
 
 
 def list_patterns(pcb):
@@ -2043,12 +2180,13 @@ def sync_apply(pcb, plan_path, out):
 
 def main(argv):
     usage = ("usage: bridge.py snapshot PCB | netclasses PCB REQS OUT | ripup PCB OUT | dsn PCB OUT | ses PCB SES OUT | fill PCB"
-             " | rules PCB RULES OUT | pours PCB SPEC OUT | edit PCB OPS OUT | sync-read PCB | fp-info SPEC | sync-apply PCB|- PLAN OUT")
+             " | rules PCB RULES OUT | pours PCB SPEC OUT | edit PCB OPS OUT | sync-read PCB | fp-info SPEC | sync-apply PCB|- PLAN OUT"
+             " | rules-read PCB | rules-probe PCB SPEC OUT")
     if len(argv) < 2:
         emit({"ok": False, "error": usage}, 2)
     cmd, args = argv[1], argv[2:]
     want = {"snapshot": 1, "netclasses": 3, "ripup": 2, "dsn": 2, "ses": 3, "fill": 1, "rules": 3, "pours": 3, "edit": 3,
-            "sync-read": 1, "fp-info": 1, "sync-apply": 3}
+            "sync-read": 1, "fp-info": 1, "sync-apply": 3, "rules-read": 1, "rules-probe": 3}
     if cmd not in want or len(args) != want[cmd]:
         emit({"ok": False, "error": usage}, 2)
     try:
@@ -2075,6 +2213,10 @@ def main(argv):
             res = fp_info(*args)
         elif cmd == "sync-apply":
             res = sync_apply(*args)
+        elif cmd == "rules-read":
+            res = rules_read(*args)
+        elif cmd == "rules-probe":
+            res = rules_probe(*args)
         else:
             res = fill(*args)
     except Exception as e:  # report, never a bare traceback on stdout

@@ -22,7 +22,7 @@ KiCad 板级工作（`.kicad_pcb`）：从已同步的板子到布好、过门�
 
 ## 硬规则
 
-1. 不文本编辑 `.kicad_*`，不做 GUI 自动化。读用 `kicad snapshot`，写只经 `kicad board` / `kicad pcb-sync` / `kicad place` / `kicad route`
+1. 不文本编辑 `.kicad_*`，不做 GUI 自动化。读用 `kicad snapshot`，写只经 `kicad board` / `kicad pcb-sync` / `kicad rules` / `kicad place` / `kicad route`
    （默认写到新文件，输入板不动；`kicad board --in-place` 走锁检查 + 哈希比对，pcb-sync `--in-place` 走事务、门禁不过不写）。没有 typed 命令的修改交给用户在 KiCad 里做，记 `UNSUPPORTED`。细则见
    [kicad-file-safety.md](../pcbpilot/references/kicad-file-safety.md)。
 2. 写之前请用户在 KiCad 中**关闭**该板；目录里有 `~<文件>.lck` 锁文件 → `BLOCKED`，不自己删锁。用户在 KiCad 里改过 →
@@ -41,7 +41,9 @@ KiCad 板级工作（`.kicad_pcb`）：从已同步的板子到布好、过门�
 
 ## 工作顺序
 
-板框 → 原理图同步（`kicad pcb-sync`，不点 GUI 的 Update PCB）→ 封装刷新 → 布局 → 布线 → 铺铜 → DRC/门禁 → 保存（复制回工程）。板框、层叠、安装孔、禁布区、
+板框 → 原理图同步（`kicad pcb-sync`，不点 GUI 的 Update PCB）→ 封装刷新 → **设计规则（`kicad rules --apply`）** → 布局 →
+**规则复查（`kicad rules --check --stage placed`，绝缘布局代理）** → 布线（`kicad route` 复用并核对这些规则）→ 铺铜 → DRC/门禁 →
+post-layout 仿真 → 签核 → 保存（复制回工程）。板框、层叠、安装孔、禁布区、
 铺铜、板上文字用 `kicad board`（[board-setup.md](references/board-setup.md)，单位 mm）；封装刷新由用户在 KiCad 完成；
 任何一步回退（例如布局时发现缺件），从那一步重新往后走，旧的布线结果作废。
 
@@ -56,6 +58,15 @@ KiCad 板级工作（`.kicad_pcb`）：从已同步的板子到布好、过门�
 2. **设计意图与仿真**（布线必需）：`pcbpilot intent derive --connectivity work/conn.json --out work/intent.json
    --sim-out work/sim.json --report work/intent.md`。先看 `intent.md` 的 findings，电源轨电流/电压不对就用 `--spec`
    声明，不要带着错的意图去布线（[design-intent.md](../pcbpilot/references/design-intent.md)）。
+2a. **设计规则**（布局前写入，GUI 里摆件/手动走线的人也看到正确线宽与绝缘规则）：
+   ```bash
+   pcbpilot kicad rules --pcb work/sync/board.kicad_pcb --intent work/intent.json --sim work/sim.json --plan --plan-out work/rules.plan.json
+   pcbpilot kicad rules --pcb work/sync/board.kicad_pcb --intent work/intent.json --sim work/sim.json --apply-plan work/rules.plan.json --revision <rev>
+   ```
+   先看计划：每网 `basis`（电流 × IPC 还是意图下限）、`floors`（被板最小值/原有类抬高）、`conflicts`（用户类/规则冲突，
+   只按名 `--replace <名>` 放行，Agent 不替用户决定）。`plan-coverage` 为 cannot-check（缺 sim/声明电流）时 `--apply` 拒绝，
+   补证据再来；`staged-readback` / `readback` 是 KiCad 自己回读 + DRC 探针，失败即回滚。细则见
+   [kicad.md 设计规则一节](../pcbpilot/references/kicad.md#设计规则kicad-rules意图--仿真--kicad-规则可验证)。
 3. **布局**（可选；已有满意布局就跳过）：
    ```bash
    pcbpilot kicad place --pcb board.kicad_pcb --out work/place/board.kicad_pcb \
@@ -63,6 +74,8 @@ KiCad 板级工作（`.kicad_pcb`）：从已同步的板子到布好、过门�
    ```
    输出最佳种子 + `board.seed-N.kicad_pcb` 备选 + `board.report.json`；**输出板的走线/过孔被清除、铺铜未灌**，后面必须
    重新布线。`mech.json` 的写法见 [mech-spec.md](../pcbpilot/references/recipes/mech-spec.md)。
+3a. **规则复查**：`pcbpilot kicad rules … --check --stage placed`：`effective-rules` 必须 pass；`isolation-placement` 是
+   advisory 的布局代理（courtyard 边到边 < 绝缘间隙、未声明的跨域器件），不是铜间距，按提示回到布局。
 4. **布线 + 门禁**（一条命令）：
    ```bash
    pcbpilot kicad route --pcb work/place/board.kicad_pcb --intent work/intent.json --sim work/sim.json \
@@ -147,3 +160,6 @@ KiCad 板级工作（`.kicad_pcb`）：从已同步的板子到布好、过门�
 | 写入失败或结果被覆盖 | 文件仍在 KiCad 中打开 | 请用户关闭后重跑；记 `BLOCKED` |
 | 布线后 `drill_out_of_range` / `via_diameter`（过孔小于 Board Setup 的最小孔/最小过孔） | 已有 `.kicad_pro` 时过孔尺寸没跟板约束对齐（KiCad 演示板实测） | 对照板约束与快照 `rules.viaDrillMil` / `viaDiameterMil`，显式给 `--via-dia-mil` / `--via-drill-mil` 重跑；不降低板约束 |
 | `netclasses.kept` 里很多 “width kept at …” | 用户类（含 Default）比意图更宽，保留用户值 | 预期；报告写明这些网的线宽来自用户类而非意图 |
+| `kicad route` 报 `RULES_STALE` | 板上的 `kicad rules` 规则与 route 的意图/sim/requirements 推导不一致 | 用同样的输入重跑 `kicad rules --apply`，再布线；不要删 `.kicad_dru` 块绕过 |
+| `kicad rules --apply` 退出 6、`E_USER_RULE_CONFLICT` | 用户类/规则会被覆盖或削弱 | 把 `conflicts[]` 原样给用户；用户同意后按名 `--replace <名>`，或改意图 |
+| `kicad rules` 退出 5、`plan-coverage` cannot-check | 电源网缺电流证据 | 给 `--sim`（或在意图 / requirements JSON 声明 `peakA` / `rmsA`）后重跑；不猜 |
