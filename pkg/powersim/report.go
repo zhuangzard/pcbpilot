@@ -103,6 +103,10 @@ func WriteReport(w io.Writer, out *Output) error {
 		fmt.Fprintf(&b, "\n## ngspice cross-check (%s)\n\n", sc.Scenario)
 		if sc.Ran {
 			fmt.Fprintf(&b, "%d nodes, max |ΔV| = %.3g V (%s), tolerance %.3g V → pass=%v\n", sc.Nodes, sc.MaxDiffV, sc.WorstNet, sc.TolV, sc.Pass)
+			for _, net := range sortedKeys(sc.HighZ) {
+				h := sc.HighZ[net]
+				fmt.Fprintf(&b, "- warning: %s |ΔV| = %.3g V on a high-impedance node (%.3g Ω ≥ %.3g Ω, ΔI %.3g A): a leakage-set voltage, not a failure\n", net, h.DiffV, h.ZOhm, sc.HighZOhm, h.DiffA)
+			}
 		} else {
 			fmt.Fprintf(&b, "skipped: %s\n", sc.Skipped)
 		}

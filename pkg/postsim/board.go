@@ -136,6 +136,10 @@ func (p *Pad) OnLayer(id int) bool { return p.Layer == LayerMulti || p.Layer == 
 type Part struct {
 	Ref    string
 	Device string
+	// Value is the footprint's value field when the dump carries one (a
+	// KiCad snapshot, whose device is that same value); an EasyEDA dump's
+	// device is the part's manufacturer id and it has no value.
+	Value string
 	Side   int // 1 top, 2 bottom
 	BBox   Rect
 	Pads   []*Pad
@@ -244,6 +248,7 @@ type dumpDoc struct {
 		ID         string         `json:"primitiveId"`
 		Designator string         `json:"designator"`
 		Device     string         `json:"device"`
+		Value      string         `json:"value"`
 		Layer      int            `json:"layer"`
 		BBox       map[string]any `json:"bbox"`
 		Pads       []struct {
@@ -324,7 +329,7 @@ func ParseBoard(raw []byte) (*Board, error) {
 	b.Layers = StackLayers(n)
 	tht := 0
 	for _, c := range d.Components {
-		p := &Part{Ref: c.Designator, Device: c.Device, Side: LayerTop, BBox: emptyRect()}
+		p := &Part{Ref: c.Designator, Device: c.Device, Value: c.Value, Side: LayerTop, BBox: emptyRect()}
 		if c.Layer == LayerBottom {
 			p.Side = LayerBottom
 		}

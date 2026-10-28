@@ -27,7 +27,7 @@ pcbpilot --project <工程> sim power --pages P1,P2 --out sim.json --report sim.
 
 常用参数：`--scenario peak,worst` 只算部分场景；`--switch SW3=closed` 强制开关状态；
 `--models my-models.json` 追加/覆盖器件模型；`--spice sim.cir --spice-check` 导出线性化网表并在
-`ngspice` 存在时比对节点电压（默认容差 1 mV，不存在则 `spiceCheck.skipped`；安装与状态见 `pcbpilot sim tools check`，[environment-setup](environment-setup.md#仿真工具ngspice--elmer-fem)）。完整说明见
+`ngspice` 存在时比对节点电压（默认容差 1 mV；超差节点的工作点驱动点电阻 ≥ 1 MΩ（只靠漏电/gmin 定压的高阻节点：关断的开关管集电极、反偏二极管、出板的线圈端）时记入 `spiceCheck.highZ` 作警告、不判失败，其余超差记入 `diffs` 并退出码 1；不存在则 `spiceCheck.skipped`；安装与状态见 `pcbpilot sim tools check`，[environment-setup](environment-setup.md#仿真工具ngspice--elmer-fem)）。完整说明见
 `pcbpilot sim power --help`。
 
 `--values` 接受 `sch list` 原样响应，或 `{"parts":{"R1":{"value":"10k","mpn":"…","lcsc":"C…"}}}`。
@@ -117,5 +117,10 @@ RMS 0.53 A（L1 额定 0.77 A）；ngspice 比对 16 个节点最大差 0.4 µV�
 
 - 不是瞬态：不算浪涌、上电冲击、电容充电、ESD 事件；TVS 只计漏电。
 - MOSFET、运放、比较器、电池充电器等未建模器件按 open 或假设负载处理，warning 会列出。
+  电源路径上的 MOSFET（防反接 P-FET、过压保护/负载开关 N-FET）写 `"kind":"mosfet"` 模型即按开关建模：
+  漏–源为 `ronOhm`（缺省 `switchRonOhm` 并记假设），默认导通；`"on": false` 关断，`--switch Q1=open|closed` 覆盖。
+  引脚按名 D/S 识别，或在 `pins.drain` / `pins.source` 写脚号。不必再用代理件。
+- 模型可按位号绑定：`"match":{"refs":["Q7"]}`，同一文件内位号优先于 LCSC、MPN、nameRegex，
+  同型号的两个件可以各用一个模型（一个导通、一个关断）。旧模型文件不受影响。
 - 多个地网被当成同一参考点（报告里可能合并）；多轨负载需在模型中写 `rails[]`。
 - 结果质量取决于模型数据：`assumed` 的数字要回到数据手册核实。

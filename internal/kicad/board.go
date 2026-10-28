@@ -1473,8 +1473,8 @@ func ParseStats(data []byte) (*BoardStats, error) {
 	var err error
 	for k, dst := range map[string]*float64{"width": &s.Width, "height": &s.Height, "board_thickness": &s.Thickness} {
 		v, ok := raw.Board[k]
-		if !ok {
-			continue // a board without an outline has no size
+		if !ok || v == nil {
+			continue // a board without an outline has no size (KiCad 10 writes null)
 		}
 		if *dst, err = num(v); err != nil {
 			return nil, fmt.Errorf("stats report board.%s: %w", k, err)

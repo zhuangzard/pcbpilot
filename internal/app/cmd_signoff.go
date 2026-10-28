@@ -380,6 +380,15 @@ func runSignoff(o signoffOpts, waivers []gateWaiver, stderr io.Writer) (*signoff
 			g.Info = append(g.Info, x.Info...)
 		}
 		g.Detail = strings.Join(details, " | ")
+		if name == "signoff-copper" {
+			if why := boardCopperMissing(snap); why != "" {
+				// Nothing below the width or via floor is no evidence on a
+				// board with nothing routed: cannot check, never a pass.
+				g.Pass = false
+				g.Items = append([]string{"cannot check: " + why}, g.Items...)
+				g.Detail = "cannot check: " + why + " | " + g.Detail
+			}
+		}
 		add(g)
 	}
 	combine("signoff-safety", "isolation", "copper-to-edge")
@@ -637,4 +646,35 @@ func signoffMarkdown(r *signoffResult) string {
 		}
 	}
 	return b.String()
+}
+
+// boardCopperMissing says why the board has no copper to judge: nets that
+// join two or more pads but not one track, arc, via or filled pour. ""
+// when there is copper, or nothing to connect.
+func boardCopperMissing(snap *boardSnapshot) string {
+	c := snap.Copper
+	if a := c.Availability["routing"]; a != "" && a != "available" && len(c.Lines)+len(c.Arcs) == 0 {
+		return "the board snapshot carries no routing (copper availability " + a + "): take it with the copper included"
+	}
+	if len(c.Lines)+len(c.Arcs)+len(c.Vias)+len(c.Poured)+len(c.Fills) > 0 {
+		return ""
+	}
+	pads := map[string]int{}
+	for _, comp := range snap.Components {
+		for _, p := range comp.Pads {
+			if p.Net != "" {
+				pads[p.Net]++
+			}
+		}
+	}
+	n := 0
+	for _, k := range pads {
+		if k >= 2 {
+			n++
+		}
+	}
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf("the board has no copper (0 tracks, arcs, vias and filled pours) for %d multi-pad net(s): route it before sign-off", n)
 }

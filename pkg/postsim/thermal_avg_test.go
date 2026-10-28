@@ -190,3 +190,61 @@ func TestSimBoardValueChangeWarns(t *testing.T) {
 		t.Fatalf("no sim-board-bom warning: %+v", r.Findings)
 	}
 }
+
+// A KiCad board carries footprint values (its device is that value) while
+// the sim names parts by MPN: the cross-check compares the sim's schematic
+// Value with the board value, never an MPN with a value.
+func TestSimBoardComparesValueWithValue(t *testing.T) {
+	var sim powersim.Output
+	if err := json.Unmarshal(simFrom(t, "../../internal/app/testdata/esp32-v05"), &sim); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile("testdata/esp32mini/board.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var board map[string]any
+	if err := json.Unmarshal(raw, &board); err != nil {
+		t.Fatal(err)
+	}
+	values := map[string]string{}
+	for _, c := range board["components"].([]any) {
+		m := c.(map[string]any)
+		ref, _ := m["designator"].(string)
+		values[ref] = "VAL-" + ref
+		m["device"], m["value"] = values[ref], values[ref]
+	}
+	run := func() *Result {
+		t.Helper()
+		b, _ := json.Marshal(board)
+		s, _ := json.Marshal(sim)
+		r, err := Run(b, s, DefaultOptions())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	for i := range sim.Results {
+		for ref, p := range sim.Results[i].Parts {
+			p.Value = values[ref] // MPN stays the sim's own, unlike the value
+		}
+	}
+	for _, f := range run().Findings {
+		if f.Kind == "sim-board-bom" || f.Kind == "sim-board-mismatch" && strings.Contains(f.Message, ": sim ") {
+			t.Fatalf("MPN compared with the board value: %s", f.Message)
+		}
+	}
+	// A real value change still warns.
+	for i := range sim.Results {
+		if p := sim.Results[i].Parts["R7"]; p != nil {
+			p.Value = "330"
+		}
+	}
+	warn := false
+	for _, f := range run().Findings {
+		warn = warn || f.Kind == "sim-board-bom" && strings.Contains(f.Message, "R7: sim 330, board VAL-R7")
+	}
+	if !warn {
+		t.Fatal("no sim-board-bom warning for a value change")
+	}
+}

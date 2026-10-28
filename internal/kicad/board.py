@@ -346,6 +346,15 @@ def rnd(p):
 
 # ── board outline ───────────────────────────────────────────────────────────
 
+# Items removed from the board. pcbnew's Remove hands the item's ownership to
+# its Python proxy; when that proxy is collected while the run goes on (here:
+# when op_outline returns), the freed item corrupts SWIG's type data and the
+# next LoadBoard returns a bare SwigPyObject (seen on 10.0.6 after removing an
+# outline with arcs). Keep every removed item referenced until the process
+# exits; it is short-lived.
+DETACHED = []
+
+
 def edge_drawings(board):
     """Board-level drawings on Edge.Cuts (footprint edge cuts are the footprint's own)."""
     return [d for d in board.GetDrawings() if d.GetLayer() == pcbnew.Edge_Cuts]
@@ -512,6 +521,7 @@ def op_outline(board, spec, P):
         for d in existing:
             removed.append({"kind": "edge", "uuid": uuid_of(d)})
             board.Remove(d)
+            DETACHED.append(d)
     created, want = [], {}
     w = spec.get("lineWidth") or 0.05
     for shp in ([outer] if outer else []) + cutouts:

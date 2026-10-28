@@ -710,8 +710,8 @@ func crossCheck(b *Board, scen []*powersim.Result) []Finding {
 				}
 				continue
 			}
-			if pr.MPN != "" && bp.Device != "" && !sameDevice(pr.MPN, bp.Device) {
-				msg := fmt.Sprintf("%s: sim %s, board %s", ref, pr.MPN, bp.Device)
+			if simID, boardID := simBoardIdentity(pr, bp); simID != "" && boardID != "" && !sameDevice(simID, boardID) {
+				msg := fmt.Sprintf("%s: sim %s, board %s", ref, simID, boardID)
 				if fits(ref) {
 					unsync[ref] = msg
 				} else {
@@ -776,6 +776,18 @@ func crossCheck(b *Board, scen []*powersim.Result) []Finding {
 			Message: "dissipating sim part(s) missing from the board — their heat would be left out of the thermal solve: " + strings.Join(msgs, ", ")})
 	}
 	return out
+}
+
+// simBoardIdentity picks what to compare for one part, like with like: a
+// board that carries footprint values (KiCad) is compared on the value, with
+// the sim's schematic Value (nothing to compare when an older sim.json has
+// none: its MPN is not the board's value); otherwise the board device is
+// the manufacturer id (EasyEDA) and is compared with the sim MPN.
+func simBoardIdentity(pr *powersim.PartResult, bp *Part) (sim, board string) {
+	if bp.Value != "" {
+		return pr.Value, bp.Value
+	}
+	return pr.MPN, bp.Device
 }
 
 // sameDevice compares a sim MPN with a board device name, ignoring case,

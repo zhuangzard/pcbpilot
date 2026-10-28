@@ -225,6 +225,31 @@ func TestParseSchBOM(t *testing.T) {
 	}
 }
 
+// kicad-cli writes a reference with a letter suffix as "J18A?" (KiCad reads
+// it as unannotated); the board footprint is "J18A", and MergeParts must
+// find it instead of warning that the board part is not in the BOM.
+func TestParseSchBOMLetterSuffix(t *testing.T) {
+	csv := `"Reference","Value","Footprint","DNP","EXCLUDE_FROM_BOM","LCSC"` + "\n" +
+		`"J9A?","CONN","C:C_1","","","C1"` + "\n" +
+		`"J9B?,R?","CONN","C:C_1","","","C1"` + "\n"
+	got, err := ParseSchBOM([]byte(csv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var refs []string
+	for _, p := range got {
+		refs = append(refs, p.Ref)
+	}
+	if strings.Join(refs, " ") != "J9A J9B R?" {
+		t.Fatalf("refs %v", refs)
+	}
+	bd := &Board{Footprints: []Footprint{{Ref: "J9A", LibID: "C:C_1"}, {Ref: "J9B", LibID: "C:C_1"}}}
+	parts, warns := MergeParts(bd, got, true)
+	if len(warns) != 0 || len(parts) != 2 || parts[0].LCSC != "C1" || parts[1].LCSC != "C1" {
+		t.Fatalf("parts %+v warns %v", parts, warns)
+	}
+}
+
 func TestParseAssignments(t *testing.T) {
 	m, err := ParseAssignments([]string{"R1=c25744", "C1=C1525,C2=C1525"})
 	if err != nil || m["R1"] != "C25744" || m["C2"] != "C1525" || len(m) != 3 {

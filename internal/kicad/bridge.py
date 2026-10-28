@@ -1120,7 +1120,7 @@ def ripup(pcb, out):
     before = counts(board)
     dead = [t for t in board.GetTracks() if not t.IsLocked()]
     for t in dead:
-        board.Remove(t)
+        detach(board, t)
     save_board(board, pcb, out)
     return {"ok": True, "out": out, "before": before, "after": counts(board), "removed": len(dead)}
 
@@ -1210,7 +1210,7 @@ def pours(pcb, spec_path, out):
         return reject("pours", bad)
     for z in list(board.Zones()):
         if z.GetZoneName().startswith(POUR_PREFIX):
-            board.Remove(z)
+            detach(board, z)
     ps = pcbnew.SHAPE_POLY_SET()
     try:
         ok = board.GetBoardPolygonOutlines(ps, False)

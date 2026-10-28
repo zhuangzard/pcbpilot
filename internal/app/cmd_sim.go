@@ -111,7 +111,10 @@ sch list, then restores the original page. Live reads only; nothing is written.
 
 CROSS-CHECK. --spice writes the linearised netlist (.op) of --spice-scenario;
 --spice-check runs ngspice when on PATH and compares node voltages
-(--spice-tol, default 1 mV), otherwise records "skipped".`,
+(--spice-tol, default 1 mV), otherwise records "skipped". A node over the
+tolerance whose driving-point resistance at the operating point is >= 1 MOhm
+(held only by leakage: an off transistor, a reverse-biased diode) is a
+warning in spiceCheck.highZ, not a failure.`,
 		Example: `  # offline replay of exported pages
   pcbpilot sim power --connectivity sch-p1.json --connectivity sch-p2.json \
       --values sch-list.json --out sim.json --report sim.md
@@ -240,6 +243,12 @@ CROSS-CHECK. --spice writes the linearised netlist (.op) of --spice-scenario;
 				}
 			}
 			printSimSummary(stderr, out)
+			if sc := out.SpiceCheck; sc != nil {
+				for _, net := range sortedKeysOf(sc.HighZ) {
+					h := sc.HighZ[net]
+					fmt.Fprintf(stderr, "warning: ngspice cross-check: %s differs by %.3g V on a high-impedance node (%.3g Ω, ΔI %.3g A) — leakage-set, not a failure\n", net, h.DiffV, h.ZOhm, h.DiffA)
+				}
+			}
 			if out.SpiceCheck != nil && out.SpiceCheck.Ran && !out.SpiceCheck.Pass {
 				return fmt.Errorf("ngspice cross-check failed: max |ΔV| %.3g V at %s", out.SpiceCheck.MaxDiffV, out.SpiceCheck.WorstNet)
 			}
