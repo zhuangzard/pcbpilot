@@ -107,6 +107,9 @@ type PartResult struct {
 	ModelID    string `json:"modelId,omitempty"`
 	Confidence string `json:"confidence,omitempty"`
 	MPN        string `json:"mpn,omitempty"`
+	// Value is the schematic Value field (what a KiCad board's footprint
+	// carries as its value), compared like with like by sim post-layout.
+	Value string `json:"value,omitempty"`
 	// OffBoard: the power this part draws is dissipated by an external load
 	// behind it (Model.OffBoard); it is excluded from board heat.
 	OffBoard bool    `json:"offBoard,omitempty"`
@@ -241,7 +244,7 @@ func (e *Engine) result(r *run) *Result {
 		if b.kind == KindIgnore {
 			continue
 		}
-		pr := &PartResult{Model: b.kind, ModelID: b.model.ID, Confidence: b.confidence, MPN: b.part.MPN, OffBoard: e.offBoard(b)}
+		pr := &PartResult{Model: b.kind, ModelID: b.model.ID, Confidence: b.confidence, MPN: b.part.MPN, Value: b.part.Value, OffBoard: e.offBoard(b)}
 		pw := 0.0
 		for _, pin := range b.part.Pins {
 			v, _ := r.voltage(pin.Net, e)
