@@ -97,6 +97,7 @@ func Derive(in Input) (*Intent, error) {
 		Stackup: c.stackName, MinTrackMil: c.rules.TrackWidth, ClearanceMil: c.rules.Clearance, ViaDrillMil: c.rules.ViaDrill, ViaDiaMil: c.rules.ViaDia,
 		ViaPlatingMil: c.viaQ(0, 0).PlatingMil, ViaMarginPct: pcbauto.ViaMarginOr(c.viaQ(0, 0).MarginPct)}
 	c.out.Simulation = c.simInfo()
+	c.out.Review = c.spec.Review
 	c.out.Definitions = &Definitions{
 		Voltage:   "V over the solved DC scenarios: nom = typical, min/max = envelope, peak = highest instantaneous (switch node swings to Vin; AC = √2·Vrms)",
 		CurrentA:  "sizing current (A): simulated worst-case DC net current, switch-node ripple RMS, or a declared/heuristic budget (currentSource)",

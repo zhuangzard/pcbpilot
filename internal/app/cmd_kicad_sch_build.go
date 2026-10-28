@@ -1164,6 +1164,7 @@ type sbOptions struct {
 	NoReview, Render               bool
 	DiscardExternal                bool
 	ReviewTimeout                  time.Duration
+	SchReview                      string // off | advisory | strict
 }
 
 // sbFlags registers the options sch-build and sch-edit share.
@@ -1184,6 +1185,7 @@ func sbFlags(c *cobra.Command, o *sbOptions) {
 	f.StringVar(&o.Reviewers, "review", "codex,kimi,claude", "design-review reviewer CLIs (all must pass); runs when --requirements is given")
 	f.BoolVar(&o.NoReview, "no-review", false, "skip the design review despite --requirements; needs a signed waiver {\"gate\":\"design-review\",\"match\":\"--no-review\"} in --waivers")
 	f.StringVar(&o.Waivers, "waivers", "", "JSON list of signed waivers [{gate,match,reason,by}]")
+	f.StringVar(&o.SchReview, "sch-review", "advisory", "design review of the staged project (kicad sch-check --review): off | advisory (reported, not blocking) | strict (an error or cannot-check fails the build, nothing written); report in sch-review.json")
 	f.DurationVar(&o.ReviewTimeout, "review-timeout", 20*time.Minute, "per-reviewer time limit")
 	f.BoolVar(&o.DiscardExternal, "discard-external-edits", false, "overwrite edits made in --out outside pcbpilot since its last build (refused by default: EXTERNAL_EDIT); the current files are checkpointed first")
 	f.BoolVar(&o.Render, "render", false, "also export one normalised SVG per sheet to <out>/render (the kicad render plotter; diff two with kicad render --compare)")

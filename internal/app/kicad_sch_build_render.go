@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zhuangzard/pcbpilot/internal/gate"
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
 )
 
@@ -346,6 +347,9 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 	if err != nil {
 		return rep, err
 	}
+	if _, err := reviewMode(o.SchReview); err != nil {
+		return rep, err
+	}
 	if len(o.Requirements) > 0 && o.NoReview && !hasWaiver(waivers, "design-review", noReviewMatch) {
 		rep.OK = false
 		rep.Error = &sbFailure{Code: "REVIEW_WAIVER_REQUIRED", Message: "--no-review with --requirements skips the schematic design review",
@@ -642,6 +646,23 @@ func runSchBuild(spec *sbSpec, o sbOptions, ec *sbEditCtx) (*sbReport, error) {
 	// stage too: one publication list goes through the guard and the commit
 	reports := sbStageReports(stage, out, name, nl, d, o, rep)
 	tm.mark("connectivity+intent")
+	// the design review runs on the staged files and its report is
+	// committed with them; --sch-review strict makes it blocking
+	if rel, blocked := sbSchReviewGate(stage, out, name, nl, erc, o, rep, waivers); blocked {
+		failed := filepath.Join(sbMetaDir(out), "failed")
+		_ = os.RemoveAll(failed)
+		if err := copySbFiles(stage, failed, append(files, sbExisting(stage, "erc.json", "sch-review.json")...)); err == nil {
+			rep.Outputs["failedBuild"] = failed
+		}
+		rep.OK = false
+		rep.Timings, rep.TotalMs = tm.Steps, tm.total()
+		rep.Error = &sbFailure{Code: "SCH_REVIEW_FAILED", Message: "sch-review: " + sbGateDetail(rep, schReviewGate),
+			Fix: "nothing was written; fix the findings in the spec (or accept a reviewed finding with a signed waiver {\"gate\":\"sch-review\",\"match\":<fingerprint>,…}) and rebuild — the failed project and sch-review.json are in " + failed}
+		return rep, nil
+	} else if rel != "" {
+		reports = append(reports, rel)
+	}
+	tm.mark("sch-review")
 
 	// compare-and-swap: nothing in --out changed while we built (KiCad does
 	// not honour sbLock), and nothing this commit replaces was edited
@@ -1628,7 +1649,7 @@ func sbMakePlan(d *sbDesign, zis []*sbZoneIn, layouts map[string]*sbZoneLayout, 
 			p.Files = append(p.Files, sbSheetFile(pg.ID))
 		}
 	}
-	p.Files = append(p.Files, "sym-lib-table", "fp-lib-table", "*.kicad_sym", "lcsc.pretty/", "connectivity.json", "values.json", "intent-spec.json", "intent.json", "erc.json")
+	p.Files = append(p.Files, "sym-lib-table", "fp-lib-table", "*.kicad_sym", "lcsc.pretty/", "connectivity.json", "values.json", "intent-spec.json", "intent.json", "erc.json", "sch-review.json")
 	return p
 }
 
@@ -1911,4 +1932,87 @@ func sbRelocate(path, stage, out string) {
 	if t != string(b) {
 		_ = os.WriteFile(path, []byte(t), 0o644)
 	}
+}
+
+// sbSchReviewGate runs the design review (kicad.Review) on the staged
+// project: --sch-review advisory (default) reports it as gate sch-review
+// (warn when it fails or cannot check), strict makes a fail or a
+// cannot-check blocking, off skips it. The report goes to sch-review.json
+// in the stage (rel, published with the build).
+func sbSchReviewGate(stage, out, name string, nl *kicad.SchNetlist, erc *kicad.ERCReport, o sbOptions, rep *sbReport, waivers []gateWaiver) (rel string, blocked bool) {
+	mode, _ := reviewMode(o.SchReview)
+	p := filepath.Join(stage, "sch-review.json")
+	if mode == "off" {
+		// an older report must not stay beside the new schematic
+		if err := sbWriteReviewReport(p, map[string]any{"schema": kicad.SchReviewSchema, "status": "skip", "verdict": "skipped", "detail": "--sch-review off"}); err != nil {
+			rep.gate(schReviewGate, "fail", "sch-review.json not written: "+sbClip(err.Error(), 300), nil)
+			return "", true
+		}
+		rep.gate(schReviewGate, "skip", "--sch-review off", nil)
+		return "sch-review.json", false
+	}
+	if sbTestBeforeReview != nil {
+		sbTestBeforeReview(stage)
+	}
+	ip := filepath.Join(stage, "intent.json")
+	if !fileExists(ip) {
+		ip = ""
+	}
+	rv, err := runSchReview(schReviewOpts{root: filepath.Join(stage, name+".kicad_sch"), nl: nl, erc: erc, intentPath: ip, waivers: waivers})
+	if err != nil {
+		// a tool / input error is not a finding: in every mode nothing is
+		// published, so no old report stays beside a new schematic
+		rep.gate(schReviewGate, "fail", "sch-review could not run (tool/input error): "+sbClip(err.Error(), 300), nil)
+		return "", true
+	}
+	// the report is published with the project or not at all: a failed
+	// write blocks the build in every mode
+	if err := sbWriteReviewReport(p, rv); err != nil {
+		rep.gate(schReviewGate, "fail", "sch-review.json not written: "+sbClip(err.Error(), 300), nil)
+		return "", true
+	}
+	sbRelocate(p, stage, out)
+	rel = "sch-review.json"
+	rep.Outputs["schReview"] = filepath.Join(out, rel)
+	// strict blocks proven errors and cannot-check only; likely warnings
+	// (pass-with-warnings) are reported as warn in every mode
+	status := "pass"
+	switch {
+	case rv.Status != gate.Pass && mode == "strict":
+		status = "fail"
+	case rv.Status != gate.Pass || rv.Verdict == "pass-with-warnings":
+		status = "warn"
+	}
+	// grouped: every error and cannot-check item, then one line per group
+	// of warnings / info (every finding stays in sch-review.json)
+	rep.gate(schReviewGate, status, mode+": "+rv.SummaryLine(), map[string]any{"verdict": rv.Verdict, "summary": rv.Lines(), "cannotCheck": rv.Undecided,
+		"findings": rv.Summary.Findings})
+	return rel, status == "fail"
+}
+
+// sbTestBeforeReview runs on the stage just before the review (a test seam).
+var sbTestBeforeReview func(stage string)
+
+// sbWriteReviewReport writes sch-review.json into the stage (a test seam).
+var sbWriteReviewReport = func(path string, v any) error { return writeJSONFile(path, v) }
+
+// sbGateDetail is the detail of the named gate.
+func sbGateDetail(rep *sbReport, name string) string {
+	for _, g := range rep.Gates {
+		if g.Name == name {
+			return g.Detail
+		}
+	}
+	return ""
+}
+
+// sbExisting are the names of files that exist in dir.
+func sbExisting(dir string, names ...string) []string {
+	var out []string
+	for _, n := range names {
+		if fileExists(filepath.Join(dir, n)) {
+			out = append(out, n)
+		}
+	}
+	return out
 }

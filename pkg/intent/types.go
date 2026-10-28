@@ -39,6 +39,8 @@ type Intent struct {
 	// distance to the edge and metal mounting holes (accessible surfaces).
 	Edge   *Edge       `json:"edge,omitempty"`
 	Analog *AnalogInfo `json:"analog,omitempty"` // sim analog summary (analog.go)
+	// Review are the design-review roles declared in spec.review (additive).
+	Review *ReviewNotes `json:"review,omitempty"`
 }
 
 // Edge is intent.json "edge" — the same type pcb auto reads
