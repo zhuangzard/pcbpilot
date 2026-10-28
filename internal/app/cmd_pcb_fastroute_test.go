@@ -460,6 +460,28 @@ func TestRunFastrouteCrashRetry(t *testing.T) {
 	}
 }
 
+// A run that reaches its timeout is asked to stop the way fastroute
+// documents (SIGINT on Unix, Ctrl+Break on Windows — never a kill first), so
+// it writes its best board and the round is a usable best-so-far result,
+// well before the 30 s WaitDelay kill.
+func TestRunFastrouteTimeoutStopsGracefully(t *testing.T) {
+	dir := t.TempDir()
+	bin := fakeRouterBin(t, "fastroute")
+	t.Setenv(envFakeFRMode, "wait-stop")
+	var log strings.Builder
+	start := time.Now()
+	ses, runs, err := runFastroute(fastrouteOpts{bin: bin, timeout: 2 * time.Second}, "b.dsn", filepath.Join(dir, "b"), &log)
+	if strings.Contains(log.String(), "cannot send Ctrl+Break") {
+		t.Skipf("no console to deliver Ctrl+Break in (detached test run): %s", log.String())
+	}
+	if err != nil || len(runs) == 0 || runs[0].Status != "ok" || runs[0].Unrouted != 0 || ses != runs[0].Session {
+		t.Fatalf("timed-out run did not stop gracefully: %+v err %v\n%s", runs, err, log.String())
+	}
+	if d := time.Since(start); d > 15*time.Second {
+		t.Fatalf("graceful stop took %s (killed after WaitDelay?)", d)
+	}
+}
+
 // LVDS-style constraints from the intent reach fastroute: pairs with their
 // gap, a skew group per pair, and the declared length groups.
 func TestIntentPairsAndTune(t *testing.T) {
