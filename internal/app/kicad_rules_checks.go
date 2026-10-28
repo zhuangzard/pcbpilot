@@ -18,6 +18,7 @@ import (
 	"github.com/zhuangzard/pcbpilot/internal/gate"
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
 	"github.com/zhuangzard/pcbpilot/internal/pcb/specctra"
+	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
 )
 
 const (
@@ -1524,7 +1525,7 @@ func (r *rulesRun) viaSize() {
 func (r *rulesRun) viaCurrent() {
 	rep := &pcbCheckReport{}
 	chk := rulesCheck{Name: "via-current"}
-	if err := addViaCurrentFindings(rep, r.snapRaw, r.intentCopy); err != nil {
+	if err := addViaCurrentFindingsIntent(rep, r.snapRaw, r.viaIntent()); err != nil {
 		chk.Status, chk.Detail = gate.CannotCheck, err.Error()
 		r.rep.check(chk)
 		return
@@ -1847,4 +1848,50 @@ func (r *rulesRun) userMaxProblem(rules []kicad.DRURule, cls, layer string, name
 		return "", msg
 	}
 	return msg, ""
+}
+
+// viaIntent is the intent the via-current gate rates against, carrying the
+// rules derivation's resolved current basis: a net's currentA is raised to
+// the current the plan sized it for (sim worst case, declared peak / RMS),
+// its pin currents scaled with it, and the copper temperature rise is the
+// one the plan used. The net is also entered under its board name.
+func (r *rulesRun) viaIntent() *pcbauto.Intent {
+	in, err := pcbauto.ParseIntent(r.data[r.o.intent])
+	if err != nil || in == nil {
+		return in
+	}
+	if in.Copper == nil {
+		in.Copper = &pcbauto.IntentCopper{}
+	}
+	if r.rep.Copper != nil {
+		in.Copper.TempRiseC = r.rep.Copper.TempRiseC
+	}
+	for _, b := range r.bases {
+		if b.Current == nil || b.Current.A <= 0 {
+			continue
+		}
+		key := b.Net
+		if k, ok := r.intentName[b.Net]; ok {
+			key = k
+		}
+		n := in.Nets[key]
+		if n == nil {
+			continue
+		}
+		if b.Current.A > n.CurrentA {
+			if n.CurrentA > 0 {
+				f := b.Current.A / n.CurrentA
+				for i := range n.Pins {
+					n.Pins[i].CurrentA *= f
+				}
+			} else {
+				n.Pins = nil // no per-pin basis for the new current: rate by the net current
+			}
+			n.CurrentA = b.Current.A
+		}
+		if key != b.Net {
+			in.Nets[b.Net] = n
+		}
+	}
+	return in
 }

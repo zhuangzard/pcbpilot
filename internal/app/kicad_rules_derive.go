@@ -261,58 +261,107 @@ type rulesNetBasis struct {
 	Detail string `json:"detail,omitempty"`
 }
 
-// simEvidence lists the nets a sim power file gives a current for: an
-// entry with a numeric currentA, or a pin with a numeric currentA, in the
-// "worst" result when there is one, else in any result. An empty entry
-// ("VCC": {}) or a non-number is no evidence.
-func simEvidence(raw []byte) map[string]bool {
+// jsonNumber decodes a raw JSON value that must be an actual number (not
+// null, not a string): ok=false otherwise. Negative / non-finite values
+// are not currents.
+func jsonNumber(m json.RawMessage) (float64, bool) {
+	var v *float64
+	if len(m) == 0 || json.Unmarshal(m, &v) != nil || v == nil || math.IsNaN(*v) || math.IsInf(*v, 0) || *v < 0 {
+		return 0, false
+	}
+	return *v, true
+}
+
+// simNetCurrent is one net's current from a sim power file.
+type simNetCurrent struct {
+	A        float64
+	Scenario string
+}
+
+// simCurrents is the per-net WORST CASE over every result of a sim power
+// file (the "worst" result included): a result counts for a net only with
+// an actual JSON number — its currentA, else Σsource / Σsink of its pins'
+// numeric currents. Evidence and value come from the same pass, so an
+// empty entry ("VCC": {}) or a null never makes an evidenced zero while
+// another scenario carries 2 A. Nets without any number are absent.
+func simCurrents(raw []byte) map[string]simNetCurrent {
 	var f struct {
 		Results []struct {
 			Scenario string                                `json:"scenario"`
 			Nets     map[string]map[string]json.RawMessage `json:"nets"`
 		} `json:"results"`
 	}
-	out := map[string]bool{}
+	out := map[string]simNetCurrent{}
 	if json.Unmarshal(raw, &f) != nil {
 		return out
 	}
-	isNum := func(m json.RawMessage) bool {
-		var v float64
-		return len(m) > 0 && json.Unmarshal(m, &v) == nil && !math.IsNaN(v) && !math.IsInf(v, 0) && v >= 0
-	}
-	worst := -1
-	for i, r := range f.Results {
-		if strings.EqualFold(r.Scenario, "worst") {
-			worst = i
-		}
-	}
-	for i, r := range f.Results {
-		if worst >= 0 && i != worst {
-			continue
-		}
+	for _, r := range f.Results {
 		for net, fields := range r.Nets {
-			if isNum(fields["currentA"]) {
-				out[net] = true
-				continue
-			}
-			var pins []map[string]json.RawMessage
-			if json.Unmarshal(fields["pins"], &pins) == nil {
-				for _, p := range pins {
-					if isNum(p["currentA"]) {
-						out[net] = true
-						break
+			a, ok := jsonNumber(fields["currentA"])
+			if !ok || a == 0 {
+				var pins []map[string]json.RawMessage
+				if json.Unmarshal(fields["pins"], &pins) == nil {
+					src, snk, any := 0.0, 0.0, false
+					for _, p := range pins {
+						v, vok := jsonNumber(p["currentA"])
+						if !vok {
+							continue
+						}
+						any = true
+						var dir string
+						_ = json.Unmarshal(p["dir"], &dir)
+						switch dir {
+						case "source":
+							src += v
+						case "sink":
+							snk += v
+						}
+					}
+					if any {
+						a, ok = math.Max(math.Max(src, snk), a), true
 					}
 				}
+			}
+			if !ok {
+				continue
+			}
+			if cur, seen := out[net]; !seen || a > cur.A {
+				out[net] = simNetCurrent{A: a, Scenario: r.Scenario}
 			}
 		}
 	}
 	return out
 }
 
-// rulesSimNet is the resolved sim current of one net.
-func rulesSimCurrent(sp *pcbauto.SimPower, net string) (rulesCurrent, bool) {
+// simEvidence lists the nets simCurrents gives a current for.
+func simEvidence(raw []byte) map[string]bool {
+	out := map[string]bool{}
+	for n := range simCurrents(raw) {
+		out[n] = true
+	}
+	return out
+}
+
+// rulesSimNet is the resolved sim current of one net: with cur (from
+// simCurrents on the raw file) its worst case over every result, else the
+// result pcbauto.ParseSim selected (tests); a switch node's ripple RMS
+// governs when larger.
+func rulesSimCurrent(sp *pcbauto.SimPower, net string, cur ...map[string]simNetCurrent) (rulesCurrent, bool) {
 	if sp == nil {
 		return rulesCurrent{}, false
+	}
+	if len(cur) > 0 && cur[0] != nil {
+		c, ok := cur[0][net]
+		if !ok {
+			return rulesCurrent{}, false
+		}
+		a := c.A
+		why := fmt.Sprintf("sim worst case over all results DC %.3f A (%s)", a, c.Scenario)
+		if r, ok := sp.Ripple[net]; ok && r.IRmsA > a {
+			a = r.IRmsA
+			why += fmt.Sprintf(", ripple RMS %.3f A governs", r.IRmsA)
+		}
+		return rulesCurrent{A: a, Source: "sim", Scenario: c.Scenario, Why: why}, true
 	}
 	sn := sp.Nets[net]
 	if sn == nil {
@@ -357,7 +406,11 @@ func rulesSimCurrent(sp *pcbauto.SimPower, net string) (rulesCurrent, bool) {
 // simHas (from simEvidence on the raw sim file) says which nets the sim
 // actually gives a current for; without it every net of sp counts (tests).
 // An entry without a number ("VCC": {}) is no evidence, never a zero.
-func planRulesWidths(in *designIntent, sp *pcbauto.SimPower, decl declaredCurrents, cu rulesCopper, simHas ...map[string]bool) (map[string]rulesWidth, []rulesNetBasis) {
+func planRulesWidths(in *designIntent, sp *pcbauto.SimPower, decl declaredCurrents, cu rulesCopper, simCur ...map[string]simNetCurrent) (map[string]rulesWidth, []rulesNetBasis) {
+	var sc map[string]simNetCurrent
+	if len(simCur) > 0 {
+		sc = simCur[0]
+	}
 	widths := map[string]rulesWidth{}
 	var out []rulesNetBasis
 	for _, name := range in.sortedNetNames() {
@@ -378,7 +431,7 @@ func planRulesWidths(in *designIntent, sp *pcbauto.SimPower, decl declaredCurren
 		b.NeedsCurrent = powerish
 		var cur *rulesCurrent
 		evidencedZero := false
-		if c, ok := rulesSimCurrent(sp, name); ok && (len(simHas) == 0 || simHas[0][name]) {
+		if c, ok := rulesSimCurrent(sp, name, sc); ok {
 			cur = &c
 			evidencedZero = c.A <= 0
 		}
@@ -410,9 +463,10 @@ func planRulesWidths(in *designIntent, sp *pcbauto.SimPower, decl declaredCurren
 		if cur != nil && cur.A > 0 {
 			b.Current = cur
 			cw := rulesWidth{OuterMil: metricCeilMil(pcbauto.TraceWidthForCurrent(cur.A, cu.TempRiseC, cu.OuterOz, false)),
-				InnerMil: metricCeilMil(pcbauto.TraceWidthForCurrent(cur.A, cu.TempRiseC, cu.InnerOz, false))}
+				// Inner layers: IPC-2221's internal-conductor constant.
+				InnerMil: metricCeilMil(pcbauto.TraceWidthForCurrent(cur.A, cu.TempRiseC, cu.InnerOz, true))}
 			b.CurrentWidth = &cw
-			b.Basis = append(b.Basis, fmt.Sprintf("%s × IPC-2221/2152 ΔT %g °C → %g mil outer (%g oz), %g mil inner (%g oz), 0.05 mm grid", cur.Why, cu.TempRiseC, cw.OuterMil, cu.OuterOz, cw.InnerMil, cu.InnerOz))
+			b.Basis = append(b.Basis, fmt.Sprintf("%s × IPC-2221 ΔT %g °C → %g mil outer (external, %g oz), %g mil inner (internal, %g oz), 0.05 mm grid", cur.Why, cu.TempRiseC, cw.OuterMil, cu.OuterOz, cw.InnerMil, cu.InnerOz))
 			controlled := n.ImpedanceOhm > 0 || n.DiffPair != "" || n.Role == "diff" || n.Role == "rf" || n.Role == "hs"
 			switch {
 			case controlled && (cw.OuterMil > b.Intent.Outer+reqEpsMil || cw.InnerMil > b.Intent.Inner+reqEpsMil):
