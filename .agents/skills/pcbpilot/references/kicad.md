@@ -563,7 +563,7 @@ pcbpilot signoff --run-dir route/ --intent intent.json --sim sim.json --connecti
 | `signoff-review` | 设计阶段 Codex + Kimi + Claude 评审通过（review.json，stage=design） |
 | `signoff-parts` | 每个 BOM 器件都有合法 LCSC C 号（原理图 supplierId / `--values` / 板上 LCSC 字段；安装孔、Mark、测试点、Logo 跳过） |
 | `signoff-safety` | 绝缘对电气间隙 / 爬电（开槽计入）+ 铜到板边（pkg/safety：IEC 60664-1、62368-1、60601-1 MOOP/MOPP、61010-1） |
-| `signoff-copper` | 按每段仿真电流的线宽、不低于 `widthMil.min`（禁止颈缩处）、过孔组载流 |
+| `signoff-copper` | 按每段仿真电流的线宽、不低于 `widthMil.min`（禁止颈缩处）、过孔组载流；板上多焊盘网络没有任何走线/过孔/已灌铺铜（未布线）时判 cannot check 并失败，不会空过 |
 | `signoff-ir` | 设计后仿真结论 pass/warn（IR 压降、开路、过孔电流、温升） |
 | `signoff-continuity` | 原理图 pin→net 划分 == 板上焊盘网络（`ComparePinNets`） |
 | `signoff-trace` | 每条意图规则可追溯到原理图网络、器件和板上焊盘；表格写在 `signoff.md` |

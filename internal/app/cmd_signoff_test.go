@@ -145,3 +145,53 @@ func TestSignoffHierarchicalNetIdentity(t *testing.T) {
 		}
 	}
 }
+
+// An unrouted board has nothing below the width or via floor, which is no
+// evidence: signoff-copper says it cannot check and fails.
+func TestSignoffCopperUnroutedCannotCheck(t *testing.T) {
+	dir := t.TempDir()
+	raw, err := os.ReadFile(filepath.Join("..", "kicad", "testdata", "snapshot.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snap map[string]any
+	if err := json.Unmarshal(raw, &snap); err != nil {
+		t.Fatal(err)
+	}
+	cu := snap["copper"].(map[string]any)
+	for _, k := range []string{"lines", "arcs", "vias", "pours", "poured", "fills"} {
+		cu[k] = []any{}
+	}
+	board := filepath.Join(dir, "unrouted.json")
+	b, _ := json.Marshal(snap)
+	if err := os.WriteFile(board, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	intent := filepath.Join(dir, "intent.json")
+	if err := os.WriteFile(intent, []byte(`{"nets":{"VCC":{"role":"power","currentA":0.5,"widthMil":{"outer":10,"inner":10,"min":8}}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	copperGate := func(board string) gateResult {
+		t.Helper()
+		var stderr bytes.Buffer
+		res, err := runSignoff(signoffOpts{board: board, intent: intent, outDir: filepath.Join(dir, "so")}, nil, &stderr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, g := range res.Gates {
+			if g.Gate == "signoff-copper" {
+				return g
+			}
+		}
+		t.Fatal("no signoff-copper gate")
+		return gateResult{}
+	}
+	g := copperGate(board)
+	if g.Pass || len(g.Items) == 0 || !strings.HasPrefix(g.Items[0], "cannot check: the board has no copper") || !strings.HasPrefix(g.Detail, "cannot check") {
+		t.Fatalf("unrouted board: %+v", g)
+	}
+	// The routed fixture is judged on its copper, not called uncheckable.
+	if g := copperGate(filepath.Join("..", "kicad", "testdata", "snapshot.json")); strings.Contains(g.Detail, "cannot check") {
+		t.Fatalf("routed board: %+v", g)
+	}
+}
