@@ -66,6 +66,23 @@ type intentNet struct {
 	LengthTolMil float64 `json:"lengthTolMil,omitempty"`
 	MaxSkewMil   float64 `json:"maxSkewMil,omitempty"`
 	MaxVias      int     `json:"maxVias,omitempty"`
+	// Additive current-evidence fields (kicad rules width basis).
+	CurrentSource string  `json:"currentSource,omitempty"` // simulated | declared | heuristic
+	PeakA         float64 `json:"peakA,omitempty"`
+	RmsA          float64 `json:"rmsA,omitempty"`
+	// Pulsed: the net carries pulsed / inrush current (declare peakA or
+	// rmsA, else its copper adequacy cannot be checked).
+	Pulsed bool `json:"pulsed,omitempty"`
+	// Neckdown: explicit exceptions to the net's width on copper (kicad rules
+	// --check): a segment touching a pad of one of Refs, at most MaxLengthMil
+	// long and at least MinWidthMil wide, may be narrower than the net width.
+	Neckdown []intentNeckdown `json:"neckdown,omitempty"`
+}
+
+type intentNeckdown struct {
+	Refs         []string `json:"refs"`
+	MaxLengthMil float64  `json:"maxLengthMil"`
+	MinWidthMil  float64  `json:"minWidthMil"`
 }
 
 type intentVoltage struct {
@@ -97,6 +114,9 @@ type intentPair struct {
 	CreepageMm   float64  `json:"creepageMm"`
 	SlotRequired bool     `json:"slotRequired"`
 	Why          []string `json:"why"`
+	// Bridges: parts that span the barrier on purpose (optocouplers,
+	// transformers, Y capacitors).
+	Bridges []string `json:"bridges,omitempty"`
 }
 
 type intentNetClass struct {
@@ -197,8 +217,16 @@ func (in *designIntent) validate() error {
 		if !intentRoles[n.Role] {
 			return fmt.Errorf("intent: net %s has unknown role %q", name, n.Role)
 		}
-		if err := nonNeg("net "+name, n.CurrentA, n.WidthMil.Outer, n.WidthMil.Inner, n.WidthMil.Min, n.ClearanceMil, n.ImpedanceOhm, n.PairGapMil, n.LengthTolMil, n.MaxSkewMil, float64(n.MaxVias)); err != nil {
+		if err := nonNeg("net "+name, n.CurrentA, n.WidthMil.Outer, n.WidthMil.Inner, n.WidthMil.Min, n.ClearanceMil, n.ImpedanceOhm, n.PairGapMil, n.LengthTolMil, n.MaxSkewMil, float64(n.MaxVias), n.PeakA, n.RmsA); err != nil {
 			return err
+		}
+		for i, nd := range n.Neckdown {
+			if err := nonNeg(fmt.Sprintf("net %s neckdown[%d]", name, i), nd.MaxLengthMil, nd.MinWidthMil); err != nil {
+				return err
+			}
+			if len(nd.Refs) == 0 || nd.MaxLengthMil <= 0 || nd.MinWidthMil <= 0 {
+				return fmt.Errorf("intent: net %s neckdown[%d] needs refs, maxLengthMil > 0 and minWidthMil > 0", name, i)
+			}
 		}
 		if v := n.Via; v != nil {
 			if err := nonNeg("net "+name+" via", v.DrillMil, v.DiaMil, v.AmpacityA, float64(v.CountPerTransition)); err != nil {
