@@ -187,6 +187,21 @@ func (e *Engine) switchClosed(b *binding, sc scenario) (bool, string) {
 	return false, "momentary switch released in " + sc.name
 }
 
+// mosfetOn is a mosfet model's state: --switch REF=closed|open, else the
+// model's "on" (default on: the model declares a conducting pass element).
+func (e *Engine) mosfetOn(b *binding) (bool, string) {
+	if v, ok := e.opt.Switches[b.part.Ref]; ok {
+		return v, "--switch override"
+	}
+	if b.model.On != nil && !*b.model.On {
+		return false, "model " + b.model.ID + " declares it off"
+	}
+	if b.model.On != nil {
+		return true, "model " + b.model.ID + " declares it on"
+	}
+	return true, "mosfet model " + b.model.ID + " is on by default (set \"on\": false or --switch " + b.part.Ref + "=open)"
+}
+
 func (e *Engine) loadKnee(net string) float64 {
 	k := e.def.LoadKneeV
 	if v := pcbauto.InferVoltage(net); v > 0 && 0.6*v < k {
@@ -283,6 +298,30 @@ func (e *Engine) build(sc scenario) *run {
 				ron = e.def.SwitchRonOhm
 			}
 			add(b, &resistor{t: [2]Terminal{t0, t1}, r: ron}, p.Ref+" closed")
+		case KindMOSFET:
+			on, why := e.mosfetOn(b)
+			if !on {
+				r.assumef("%s off: %s", p.Ref, why)
+				continue
+			}
+			d := p.pinsNamed(roleNames(m, "drain", defDrain...))
+			src := p.pinsNamed(roleNames(m, "source", defSource...))
+			td, okd := e.term(c, p.Ref, d)
+			ts, oks := e.term(c, p.Ref, src)
+			if !okd || !oks {
+				r.warnf("%s: mosfet model %s needs drain and source pins on one net each (pins.drain / pins.source) — treated as open", p.Ref, m.ID)
+				continue
+			}
+			if td.Node == ts.Node {
+				continue
+			}
+			ron := m.RonOhm
+			if ron == 0 {
+				ron = e.def.SwitchRonOhm
+				e.assumef("%s: MOSFET Rds(on) %.3g Ω assumed (no ronOhm in model %s)", p.Ref, ron, m.ID)
+			}
+			r.assumef("%s on: %s", p.Ref, why)
+			add(b, &resistor{t: [2]Terminal{td, ts}, r: ron}, p.Ref+" on")
 		case KindDiode, KindLED:
 			an := p.pinsNamed(roleNames(m, "anode", defAnode...))
 			ca := p.pinsNamed(roleNames(m, "cathode", defCathode...))

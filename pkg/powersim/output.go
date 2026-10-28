@@ -665,7 +665,7 @@ func attachThermal(res, avg *Result) {
 			a = ap.PowerW
 		}
 		switch pr.Model {
-		case KindResistor, KindInductor, KindFerrite, KindFuse, KindDiode, KindBJT, KindESD, KindBridge, KindOpen, KindCapacitor:
+		case KindResistor, KindInductor, KindFerrite, KindFuse, KindDiode, KindBJT, KindESD, KindBridge, KindOpen, KindCapacitor, KindMOSFET:
 			pr.ThermalW = round(boundedRMS(a, pr.PowerW), 6)
 		default:
 			pr.ThermalW = a
