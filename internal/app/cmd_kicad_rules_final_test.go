@@ -97,3 +97,31 @@ func TestKicadRulesViaCurrentUsesResolvedCurrent(t *testing.T) {
 		t.Fatalf("5 A: %+v", v)
 	}
 }
+
+// Recheck: ripple RMS is taken per result in the same pass and the worst
+// case over results kept: typical 1 A DC + 10 A RMS, worst 2 A DC + 3 A
+// RMS → a 10 A basis, also for the via-current gate.
+func TestSimCurrentsRippleWorstOverScenarios(t *testing.T) {
+	raw := []byte(`{"schemaVersion":1,"results":[
+	 {"scenario":"typical","nets":{"SW":{"currentA":1,"role":"switch"}},"ripple":{"SW":{"iRmsA":10}}},
+	 {"scenario":"worst","nets":{"SW":{"currentA":2,"role":"switch"}},"ripple":{"SW":{"iRmsA":3}}}]}`)
+	sc := simCurrents(raw)
+	if c := sc["SW"]; c.A != 10 || !c.Ripple || c.Scenario != "typical" || c.DC != 1 {
+		t.Fatalf("%+v", c)
+	}
+	sp, err := pcbauto.ParseSim(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := testIntent(t, `{"nets":{"SW":{"role":"switch","widthMil":{"outer":20,"inner":20,"min":20}}}}`)
+	_, bs := planRulesWidths(in, sp, nil, rulesCopper{OuterOz: 1, InnerOz: 1, TempRiseC: 10}, sc)
+	if b := basisOf(bs, "SW"); b.Current == nil || b.Current.A != 10 || !strings.Contains(b.Current.Why, "ripple RMS 10.000 A") {
+		t.Fatalf("%+v", b.Current)
+	}
+	// The via-current gate gets the same basis (viaIntent raises the net).
+	r := &rulesRun{bases: bs, data: map[string][]byte{"i.json": []byte(`{"nets":{"SW":{"role":"switch","currentA":1,"widthMil":{"outer":20}}}}`)},
+		o: kicadRulesOpts{intent: "i.json"}, rep: &rulesReport{Copper: &rulesCopper{TempRiseC: 10}}}
+	if vi := r.viaIntent(); vi.Nets["SW"].CurrentA != 10 {
+		t.Fatalf("via intent: %+v", vi.Nets["SW"])
+	}
+}

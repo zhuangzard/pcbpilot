@@ -276,19 +276,28 @@ func jsonNumber(m json.RawMessage) (float64, bool) {
 type simNetCurrent struct {
 	A        float64
 	Scenario string
+	// DC is that result's DC / pin current; A is above it when the result's
+	// ripple RMS for the net (a switch node) governs.
+	DC     float64
+	Ripple bool
 }
 
 // simCurrents is the per-net WORST CASE over every result of a sim power
 // file (the "worst" result included): a result counts for a net only with
 // an actual JSON number — its currentA, else Σsource / Σsink of its pins'
-// numeric currents. Evidence and value come from the same pass, so an
-// empty entry ("VCC": {}) or a null never makes an evidenced zero while
-// another scenario carries 2 A. Nets without any number are absent.
+// numeric currents — and that result's current for the net is that DC
+// value, or its ripple RMS for the net when larger (a switch node: the
+// single-result rule). Evidence, DC and ripple come from the same pass, so
+// an empty entry ("VCC": {}) or a null never makes an evidenced zero while
+// another scenario carries 2 A, and a 10 A ripple RMS in one scenario is
+// never lost to another scenario's larger DC. Nets without any number are
+// absent.
 func simCurrents(raw []byte) map[string]simNetCurrent {
 	var f struct {
 		Results []struct {
 			Scenario string                                `json:"scenario"`
 			Nets     map[string]map[string]json.RawMessage `json:"nets"`
+			Ripple   map[string]map[string]json.RawMessage `json:"ripple"`
 		} `json:"results"`
 	}
 	out := map[string]simNetCurrent{}
@@ -325,8 +334,12 @@ func simCurrents(raw []byte) map[string]simNetCurrent {
 			if !ok {
 				continue
 			}
-			if cur, seen := out[net]; !seen || a > cur.A {
-				out[net] = simNetCurrent{A: a, Scenario: r.Scenario}
+			c := simNetCurrent{A: a, DC: a, Scenario: r.Scenario}
+			if rms, rok := jsonNumber(r.Ripple[net]["iRmsA"]); rok && rms > a {
+				c.A, c.Ripple = rms, true
+			}
+			if cur, seen := out[net]; !seen || c.A > cur.A {
+				out[net] = c
 			}
 		}
 	}
@@ -355,13 +368,11 @@ func rulesSimCurrent(sp *pcbauto.SimPower, net string, cur ...map[string]simNetC
 		if !ok {
 			return rulesCurrent{}, false
 		}
-		a := c.A
-		why := fmt.Sprintf("sim worst case over all results DC %.3f A (%s)", a, c.Scenario)
-		if r, ok := sp.Ripple[net]; ok && r.IRmsA > a {
-			a = r.IRmsA
-			why += fmt.Sprintf(", ripple RMS %.3f A governs", r.IRmsA)
+		why := fmt.Sprintf("sim worst case over all results: DC %.3f A (%s)", c.DC, c.Scenario)
+		if c.Ripple {
+			why = fmt.Sprintf("sim worst case over all results: ripple RMS %.3f A (%s; DC %.3f A)", c.A, c.Scenario, c.DC)
 		}
-		return rulesCurrent{A: a, Source: "sim", Scenario: c.Scenario, Why: why}, true
+		return rulesCurrent{A: c.A, Source: "sim", Scenario: c.Scenario, Why: why}, true
 	}
 	sn := sp.Nets[net]
 	if sn == nil {

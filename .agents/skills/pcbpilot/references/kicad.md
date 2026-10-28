@@ -287,7 +287,8 @@ pcbpilot kicad rules … --check [--stage placed|routed] [--report r.json]  # �
 `kicad rules` 只在其上叠加电流线宽、逐层最小线宽规则与预设尺寸：
 
 - **线宽依据**（每网写进 `nets[].basis`）：电流 = max(`--sim` 的 DC 电流——取 sim 文件**所有结果（含 worst）里该网的最大值**，
-  只认真正的 JSON 数字（`currentA`，否则焊盘数值电流的 Σsource / Σsink），`null`、空条目都不算；开关节点取纹波 RMS——、声明的峰值/RMS
+  只认真正的 JSON 数字（`currentA`，否则焊盘数值电流的 Σsource / Σsink），`null`、空条目都不算；每个结果里开关节点的纹波 RMS
+  更大时取 RMS，再在所有结果里取最大——、声明的峰值/RMS
   （意图 `peakA` / `rmsA`，或 `--requirements` 的 JSON `{"nets":{NET:{"peakA","rmsA"}}}`）)；都没有时用意图自己的
   `currentA`（仅当 `currentSource` 是 simulated / declared）。线宽 = max(意图 `widthMil`, IPC-2221 在该电流下的线宽，
   0.05 mm 网格向上取；外层用外部导体常数，**内层用内部导体常数**——同铜厚同电流内层更宽。注意 `intent derive` 按 IPC-2152
