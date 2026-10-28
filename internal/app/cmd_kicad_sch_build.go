@@ -795,7 +795,139 @@ func resolveSymbols(parts []*sbRPart, opts sbResolveOpts, libDirs []string) (st 
 			p.Footprint = kicad.LibSymbolProperty(text, "Footprint")
 		}
 	}
+	diags = append(diags, sbResolveFootprintLibs(parts, dirs, &st)...)
 	return st, nil
+}
+
+// sbFPLibCheck answers whether a footprint library nickname is one KiCad
+// finds without the project: a stock library or a row of the user's global
+// fp-lib-table. known=false when neither can be checked (no KiCad install
+// found, global table unreadable): the caller then only notes it.
+type sbFPLibCheck struct {
+	once    bool
+	stock   string
+	global  map[string]bool
+	checked bool
+}
+
+func (c *sbFPLibCheck) external(lib string) (found, known bool) {
+	if !c.once {
+		c.once = true
+		c.stock = kicad.StockFootprintDir()
+		c.global = map[string]bool{}
+		// The project directory given is a fresh temp one: only global rows
+		// count (an old <out>/fp-lib-table is rewritten by this build).
+		if tmp, err := os.MkdirTemp("", "pcbpilot-fplib-"); err == nil {
+			if t, err := kicad.LoadFPLibTables(tmp); err == nil {
+				c.checked = true
+				for _, l := range t.Libs {
+					if l.Scope == "global" && !l.Disabled && !l.Blocked && l.Err == nil {
+						c.global[l.Nickname] = true
+					}
+				}
+			}
+			os.RemoveAll(tmp)
+		}
+	}
+	if c.stock != "" && sbIsDir(filepath.Join(c.stock, lib+".pretty")) {
+		return true, true
+	}
+	if c.global[lib] {
+		return true, true
+	}
+	return false, c.stock != "" || (c.checked && len(c.global) > 0)
+}
+
+func sbIsDir(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && st.IsDir()
+}
+
+// sbResolveFootprintLibs gives every part whose footprint names a library
+// found under the project dir or the spec's libDirs (<dir>/<lib>.pretty, or
+// a libDirs entry that is itself <lib>.pretty) the footprint file to copy
+// into the project — whatever its symbol came from (stock, LCSC, generated,
+// local). The build then ships <lib>.pretty and registers it in the
+// project fp-lib-table as ${KIPRJMOD}/<lib>.pretty, like the symbol libs.
+// A library found nowhere — not there, not KiCad's stock footprints, not
+// the user's global fp-lib-table — is a spec error (FOOTPRINT_LIB_NOT_FOUND):
+// before v0.12.1 such a footprint was left out silently and `kicad pcb-sync`
+// failed later with E_FP_LIB_UNRESOLVED.
+func sbResolveFootprintLibs(parts []*sbRPart, dirs []string, st *sbResolveStats) []sbDiag {
+	var diags []sbDiag
+	var ext sbFPLibCheck
+	libDir := map[string]string{} // nickname → <lib>.pretty found ("" = not under dirs)
+	findLib := func(lib string) string {
+		if d, ok := libDir[lib]; ok {
+			return d
+		}
+		d := ""
+		for _, dir := range dirs {
+			if dir == "" {
+				continue
+			}
+			if c := filepath.Join(dir, lib+".pretty"); sbIsDir(c) {
+				d = c
+				break
+			}
+			if filepath.Base(filepath.Clean(dir)) == lib+".pretty" && sbIsDir(dir) {
+				d = dir
+				break
+			}
+		}
+		libDir[lib] = d
+		return d
+	}
+	noted := map[string]bool{}
+	missing := map[string][]string{}
+	var order []string
+	for _, p := range parts {
+		lib, name, ok := strings.Cut(p.Footprint, ":")
+		if !ok || lib == "" || name == "" || p.FPFile != "" || lib == "lcsc" {
+			continue
+		}
+		if d := findLib(lib); d != "" {
+			f := filepath.Join(d, name+".kicad_mod")
+			if !fileExists(f) {
+				diags = append(diags, sbDiag{Code: "FOOTPRINT_NOT_FOUND", Message: fmt.Sprintf("%s: footprint %s: library %s has no %s.kicad_mod", p.Ref, p.Footprint, d, name),
+					Fix: "fix the footprint name, or add the .kicad_mod to the library"})
+				continue
+			}
+			p.FPFile = f
+			continue
+		}
+		found, known := ext.external(lib)
+		if found {
+			continue
+		}
+		if !known {
+			if !noted[lib] {
+				noted[lib] = true
+				st.Notes = append(st.Notes, fmt.Sprintf("footprint library %q (%s …) is not under the project dir or libDirs, and no KiCad install / global fp-lib-table could be read to check it", lib, p.Ref))
+			}
+			continue
+		}
+		if missing[lib] == nil {
+			order = append(order, lib)
+		}
+		missing[lib] = append(missing[lib], p.Ref)
+	}
+	var where []string
+	for _, dir := range dirs {
+		if dir != "" {
+			where = append(where, dir)
+		}
+	}
+	for _, lib := range order {
+		refs := missing[lib]
+		if len(refs) > 8 {
+			refs = append(refs[:8:8], fmt.Sprintf("… %d more", len(missing[lib])-8))
+		}
+		diags = append(diags, sbDiag{Code: "FOOTPRINT_LIB_NOT_FOUND",
+			Message: fmt.Sprintf("%s: footprint library %q is in no libDirs entry (looked for %s.pretty in %s), not a KiCad stock library and not in the global fp-lib-table", strings.Join(refs, ", "), lib, lib, strings.Join(where, ", ")),
+			Fix:     fmt.Sprintf("add the directory holding %s.pretty to the spec's \"libDirs\" (the build copies it into the project and registers ${KIPRJMOD}/%s.pretty), or fix the footprint", lib, lib)})
+	}
+	return diags
 }
 
 // sbPassiveRefs are designator classes whose pins are electrically passive.

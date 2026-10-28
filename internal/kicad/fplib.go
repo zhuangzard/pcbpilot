@@ -390,7 +390,7 @@ func (t *FPLibTables) Resolve(id string) (FPRef, error) {
 	}
 	if lib == nil {
 		detail := fmt.Sprintf("library %q is in neither the project nor the global fp-lib-table", nick)
-		fix := "add the library in KiCad Preferences > Manage Footprint Libraries, or fix the Footprint field"
+		fix := "add the library in KiCad Preferences > Manage Footprint Libraries, or fix the Footprint field (a `kicad sch-build` project: list the folder holding " + nick + ".pretty in the spec's libDirs and rebuild — the build ships it and registers it in the project fp-lib-table)"
 		if disabled {
 			detail = fmt.Sprintf("library %q is disabled in every fp-lib-table that lists it", nick)
 			fix = "enable the library in KiCad Preferences > Manage Footprint Libraries"
