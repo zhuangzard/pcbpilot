@@ -186,10 +186,22 @@ func TestSchBuildShipsSpecFootprintLibs(t *testing.T) {
 	bad.Parts = append([]sbPart{}, spec.Parts...)
 	bad.Parts[1].Footprint = "nolib_xyz:FP_A"
 	bad.Parts[2].Footprint = "plib2:FP_MISSING"
-	_, err = runSchBuild(&bad, sbOptions{OutDir: filepath.Join(t.TempDir(), "bad"), NoIntent: true, Jobs: 2}, nil)
+	badOut := filepath.Join(t.TempDir(), "bad")
+	_, err = runSchBuild(&bad, sbOptions{OutDir: badOut, NoIntent: true, Jobs: 2}, nil)
 	if err == nil || !strings.Contains(err.Error(), "FOOTPRINT_LIB_NOT_FOUND") || !strings.Contains(err.Error(), `"nolib_xyz"`) ||
 		!strings.Contains(err.Error(), "FOOTPRINT_NOT_FOUND") {
 		t.Errorf("unknown footprint library / missing footprint not reported: %v", err)
+	}
+	if fileExists(filepath.Join(badOut, "fl.kicad_sch")) {
+		t.Error("a failed footprint check still wrote the project")
+	}
+	// a stock library (KiCad's own) with a footprint it does not hold
+	stockBad := *spec
+	stockBad.Parts = append([]sbPart{}, spec.Parts...)
+	stockBad.Parts[1].Footprint = "Resistor_SMD:NO_SUCH_FOOTPRINT"
+	if _, err := runSchBuild(&stockBad, sbOptions{OutDir: filepath.Join(t.TempDir(), "sb"), NoIntent: true, Jobs: 2}, nil); err == nil ||
+		!strings.Contains(err.Error(), "FOOTPRINT_NOT_FOUND") || !strings.Contains(err.Error(), "Resistor_SMD:NO_SUCH_FOOTPRINT") {
+		t.Errorf("a missing footprint in a stock library must fail the build: %v", err)
 	}
 }
 
@@ -266,6 +278,51 @@ func TestSbFootprintLibsExternal(t *testing.T) {
 	st = sbResolveStats{}
 	if got := sbFPDiagCodes(parts("nolib:X"), &st); !strings.Contains(got["FOOTPRINT_LIB_NOT_FOUND"], `"nolib"`) || len(st.Notes) != 0 {
 		t.Errorf("empty global table, no stock: want FOOTPRINT_LIB_NOT_FOUND, got %v notes %v", got, st.Notes)
+	}
+
+	// Same nickname in the global table and the stock install: the table
+	// decides. A row pointing elsewhere is that library (its footprints, not
+	// the stock folder's); a disabled row is a library KiCad cannot load.
+	sbFakeFootprintLib(t, stock, "Stock2", "R2")
+	sbFakeFootprintLib(t, glib, "Stock_SMD", "G_ONLY")
+	sbFakeExternalFP(t, stock, `(fp_lib_table (version 7)
+  (lib (name "Stock_SMD") (type "KiCad") (uri "${PCBPILOT_TEST_GLIB}/Stock_SMD.pretty") (options "") (descr ""))
+  (lib (name "Stock2") (type "KiCad") (uri "${PCBPILOT_TEST_GLIB}/nowhere.pretty") (options "") (descr "") (disabled))
+)`)
+	st = sbResolveStats{}
+	got = sbFPDiagCodes(parts("Stock_SMD:G_ONLY", "Stock_SMD:R_0603", "Stock2:R2"), &st)
+	if strings.Contains(got["FOOTPRINT_NOT_FOUND"]+got["FOOTPRINT_LIB_NOT_FOUND"], "G_ONLY") {
+		t.Errorf("the global row's own footprint rejected: %v", got)
+	}
+	if !strings.Contains(got["FOOTPRINT_NOT_FOUND"], "Stock_SMD:R_0603") {
+		t.Errorf("a stock-folder footprint accepted although the global row points elsewhere: %v", got)
+	}
+	if !strings.Contains(got["FOOTPRINT_LIB_NOT_FOUND"], `"Stock2"`) {
+		t.Errorf("a stock nickname disabled in the global table must be FOOTPRINT_LIB_NOT_FOUND: %v", got)
+	}
+	// No global row for a stock nickname: the stock folder answers.
+	sbFakeExternalFP(t, stock, "(fp_lib_table (version 7))")
+	st = sbResolveStats{}
+	if got := sbFPDiagCodes(parts("Stock_SMD:R_0603", "Stock_SMD:NOPE"), &st); got["FOOTPRINT_LIB_NOT_FOUND"] != "" || !strings.Contains(got["FOOTPRINT_NOT_FOUND"], "Stock_SMD:NOPE") || strings.Contains(got["FOOTPRINT_NOT_FOUND"], "R_0603") {
+		t.Errorf("stock fallback: %v", got)
+	}
+
+	// An unreadable global table is no proof of absence, stock install or
+	// not: a global-only library is unverified (a note), never an error;
+	// a stock one is still checked in the stock folder.
+	sbFakeExternalFP(t, stock, "")
+	sbLoadFPLibTables = func(string) (*kicad.FPLibTables, error) { return nil, fmt.Errorf("unreadable") }
+	st = sbResolveStats{}
+	if got := sbFPDiagCodes(parts("myglobal:X", "Stock_SMD:R_0603"), &st); len(got) != 0 || len(st.Notes) != 1 {
+		t.Errorf("unreadable global table with a stock install: want one note, got %v notes %v", got, st.Notes)
+	}
+	// A nested table that cannot be read leaves the global table partial.
+	sbFakeExternalFP(t, stock, `(fp_lib_table (version 7)
+  (lib (name "nested") (type "Table") (uri "${PCBPILOT_TEST_GLIB}/missing-table") (options "") (descr ""))
+)`)
+	st = sbResolveStats{}
+	if got := sbFPDiagCodes(parts("myglobal:X"), &st); len(got) != 0 || len(st.Notes) != 1 {
+		t.Errorf("partial global table: want one note, got %v notes %v", got, st.Notes)
 	}
 
 	// nothing to inspect (the tables cannot be loaded, no stock): a note
