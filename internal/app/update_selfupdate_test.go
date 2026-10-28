@@ -508,45 +508,76 @@ func TestSelfUpdaterAlignInstallsMCPAndConnectorForOwnVersion(t *testing.T) {
 
 // The outcome of an apply ("0.11.0 → 0.12.0 updated … restart your AI
 // client") is relayed by the first CLI session and then no longer repeated
-// by health; a new apply announces itself again.
+// by health; a new apply announces itself again. The ack names the outcome
+// health announced: one that lands between health and the ack is still
+// announced, and a session that relayed only other notices acks nothing.
 func TestUpdateOutcomeNoticeRelayedOnce(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	now := time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)
-	write := func(to string) {
+	write := func(to string, at time.Time) {
 		t.Helper()
-		st := selfupdate.UpdateState{Phase: selfupdate.PhaseDone, From: "0.6.0", To: to, At: now.Add(-time.Hour),
+		st := selfupdate.UpdateState{Phase: selfupdate.PhaseDone, From: "0.6.0", To: to, At: at,
 			Summary: "pcbpilot 0.6.0 → " + to + " updated: cli"}
-		if err := os.MkdirAll(filepath.Dir(selfupdate.UpdateStatePath()), 0o755); err != nil {
-			t.Fatal(err)
-		}
 		if err := selfupdate.WriteJSON(selfupdate.UpdateStatePath(), st); err != nil {
 			t.Fatal(err)
 		}
 	}
-	u := &selfUpdater{deps: updateDeps{now: func() time.Time { return now }}, version: "v" + "0.6.1"}
+	u := &selfUpdater{deps: updateDeps{now: func() time.Time { return now }}, version: "v0.6.1"}
 	health := func() json.RawMessage {
 		h, _ := u.Health(nil)
 		raw, _ := json.Marshal(map[string]any{"version": "v0.6.1", "updates": h})
 		return raw
 	}
+	var between func() // runs after health was built, before the CLI acks
 	d := noticeDeps{now: func() time.Time { return now }, version: "v0.6.1",
-		probe: func(context.Context) daemonProbe { return daemonProbe{Running: true, Version: "v0.6.1", Raw: health()} }}
+		probe: func(context.Context) daemonProbe {
+			raw := health()
+			if between != nil {
+				between()
+			}
+			return daemonProbe{Running: true, Version: "v0.6.1", Raw: raw}
+		}}
 	session := func() string {
 		var out bytes.Buffer
 		runSessionNotice(context.Background(), d, &out)
 		return out.String()
 	}
-	write("0.6.1")
+	write("0.6.1", now.Add(-time.Hour))
 	if s := session(); !strings.Contains(s, "0.6.0 → 0.6.1 updated") {
 		t.Fatalf("first session must relay the update: %q", s)
 	}
 	if s := session(); strings.Contains(s, "updated") {
 		t.Fatalf("the update notice repeated in a later session: %q", s)
 	}
-	write("0.6.2")
+	// A new outcome arrives while a session relays the old state: the
+	// session shows (and acks) nothing new; the next one announces 0.6.2.
+	write("0.6.1b", now.Add(-50*time.Minute))
+	between = func() { write("0.6.2", now.Add(-40*time.Minute)) }
+	if s := session(); !strings.Contains(s, "0.6.0 → 0.6.1b updated") {
+		t.Fatalf("session must relay the outcome it read: %q", s)
+	}
+	between = nil
 	if s := session(); !strings.Contains(s, "0.6.0 → 0.6.2 updated") {
-		t.Fatalf("a new apply must be announced: %q", s)
+		t.Fatalf("an outcome that landed before the ack was swallowed: %q", s)
+	}
+	if s := session(); strings.Contains(s, "updated") {
+		t.Fatalf("0.6.2 repeated: %q", s)
+	}
+	// Only an unrelated notice (offline check): no ack is written.
+	ack := selfupdate.ReadNoticedOutcome()
+	write("0.6.3", now.Add(-30*time.Minute))
+	d.probe = func(context.Context) daemonProbe {
+		return daemonProbe{Running: true, Version: "v0.6.1", Raw: healthRaw(t, "v0.6.1", "pcbpilot update check offline — retrying quietly in the background")}
+	}
+	if s := session(); !strings.Contains(s, "offline") {
+		t.Fatalf("unrelated notice not relayed: %q", s)
+	}
+	if !selfupdate.ReadNoticedOutcome().Same(ack) {
+		t.Fatalf("an unrelated notice acknowledged an update outcome: %+v", selfupdate.ReadNoticedOutcome())
+	}
+	if h, _ := u.Health(nil); h.(healthUpdates).Outcome == nil {
+		t.Fatal("the unseen 0.6.3 outcome must still be announced")
 	}
 }

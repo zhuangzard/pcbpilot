@@ -536,6 +536,9 @@ type healthUpdates struct {
 	LastUpdate  *selfupdate.UpdateState `json:"lastUpdate,omitempty"`
 	Connector   *connectorAlignment     `json:"connector,omitempty"`
 	Notices     []string                `json:"notices,omitempty"`
+	// Outcome identifies the apply outcome one of Notices announces; the
+	// CLI acknowledges exactly this after relaying it (set only then).
+	Outcome *selfupdate.OutcomeID `json:"outcome,omitempty"`
 }
 
 type connectorAlignment struct {
@@ -580,8 +583,13 @@ func (u *selfUpdater) Health(windows []daemon.Window) (any, any) {
 	if st := selfupdate.ReadUpdateState(); st.Phase != "" {
 		stc := st
 		h.LastUpdate = &stc
-		// Announced once: a CLI session that relayed it marks it noticed.
-		recent := u.now().Sub(st.At) < 24*time.Hour && st.NoticedAt.IsZero()
+		// Announced once: a CLI session that relayed this very outcome
+		// acknowledged it (update-noticed.json).
+		id := st.Outcome()
+		recent := u.now().Sub(st.At) < 24*time.Hour && !id.Zero() && !selfupdate.ReadNoticedOutcome().Same(id)
+		if recent {
+			h.Outcome = &id
+		}
 		switch {
 		case st.Phase == selfupdate.PhaseDone && recent:
 			notices = append(notices, st.Summary+" — restart your AI client to load the new Skill/MCP")
