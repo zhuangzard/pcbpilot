@@ -43,3 +43,39 @@ func TestSameFileSlotCase(t *testing.T) {
 		t.Fatalf("Out.json vs out.json: same slot %v, want %v (case folding)", got, folds)
 	}
 }
+
+// Paths whose parents do not exist yet still alias through a linked
+// ancestor: <dir>/new/report.json and <link to dir>/new/report.json are one
+// file once a writer creates "new" (a symlink on Unix, a junction on
+// unprivileged Windows).
+func TestSameFileSlotThroughLinkedAncestor(t *testing.T) {
+	dir := t.TempDir()
+	link := filepath.Join(t.TempDir(), "J")
+	dirLinkForTest(t, dir, link)
+	if !sameFileSlot(filepath.Join(dir, "new", "report.json"), filepath.Join(link, "new", "report.json")) {
+		t.Fatal("not-yet-created subdir through a linked ancestor accepted as distinct")
+	}
+	if !sameFileSlot(filepath.Join(dir, "a", "b", "r.json"), filepath.Join(link, "a", "b", "r.json")) {
+		t.Fatal("two missing levels through a linked ancestor accepted as distinct")
+	}
+	for _, pair := range [][2]string{
+		{filepath.Join(dir, "new", "a.json"), filepath.Join(link, "new", "b.json")},
+		{filepath.Join(dir, "new", "r.json"), filepath.Join(link, "other", "r.json")},
+		{filepath.Join(dir, "new", "r.json"), filepath.Join(link, "r.json")},
+	} {
+		if sameFileSlot(pair[0], pair[1]) {
+			t.Errorf("distinct paths treated as one: %s vs %s", pair[0], pair[1])
+		}
+	}
+	// The command paths reject it before writing.
+	if err := schDesignatorsDistinctFiles(filepath.Join(dir, "new", "out.json"), filepath.Join(link, "new", "out.json")); err == nil {
+		t.Error("sch designators accepted a future output alias under a linked ancestor")
+	}
+	from := filepath.Join(dir, "source.json")
+	if err := os.WriteFile(from, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := schLayoutReportPaths(from, filepath.Join(dir, "new", "layout.json"), filepath.Join(link, "new", "layout.json")); err == nil {
+		t.Error("sch layout-plan accepted a future --out/--report alias under a linked ancestor")
+	}
+}

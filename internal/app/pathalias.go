@@ -23,13 +23,46 @@ func sameFileSlot(a, b string) bool {
 	if errA == nil && errB == nil {
 		return os.SameFile(fa, fb)
 	}
-	ba, bb := filepath.Base(a), filepath.Base(b)
-	if ba != bb && !(strings.EqualFold(ba, bb) && caseFoldingDir(filepath.Dir(a))) {
+	// Not both existing: compare from the nearest existing ancestor of each
+	// (a writer may still create the missing directories in between, e.g.
+	// <dir>/new/report.json vs <junction to dir>/new/report.json).
+	ancA, restA := existingAncestor(a)
+	ancB, restB := existingAncestor(b)
+	if len(restA) != len(restB) {
 		return false
 	}
-	da, errA := os.Stat(filepath.Dir(a))
-	db, errB := os.Stat(filepath.Dir(b))
+	fold := len(restA) > 0 && caseFoldingDir(ancA)
+	for i := range restA {
+		if restA[i] != restB[i] && !(fold && strings.EqualFold(restA[i], restB[i])) {
+			return false
+		}
+	}
+	da, errA := os.Stat(ancA)
+	db, errB := os.Stat(ancB)
 	return errA == nil && errB == nil && os.SameFile(da, db)
+}
+
+// existingAncestor splits p into its nearest existing ancestor (followed
+// through links by os.Stat) and the path elements below it that do not
+// exist yet, top-down.
+func existingAncestor(p string) (string, []string) {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		abs = filepath.Clean(p)
+	}
+	var rest []string
+	for {
+		if _, err := os.Stat(abs); err == nil {
+			break
+		}
+		parent := filepath.Dir(abs)
+		if parent == abs {
+			break
+		}
+		rest = append([]string{filepath.Base(abs)}, rest...)
+		abs = parent
+	}
+	return abs, rest
 }
 
 // caseFoldingDir reports whether names in dir are looked up without regard
