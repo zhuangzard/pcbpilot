@@ -322,7 +322,8 @@ type rulesRun struct {
 	block   []rulesBlockRule
 	druRule []kicad.DRURule // staged result's custom rules
 	// rbStaged: pcbnew's readback of the verified stage.
-	rbStaged *kicad.RulesReadback
+	rbStaged  *kicad.RulesReadback
+	probeRuns int
 }
 
 func runKicadRules(o kicadRulesOpts, stdout, stderr io.Writer) error {

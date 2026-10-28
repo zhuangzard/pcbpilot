@@ -3,10 +3,11 @@ package app
 // kicad_rules_block.go — the .kicad_dru block `kicad rules` owns, and the
 // check `kicad route` makes against it.
 //
-// The block sits directly before the block bridge netclasses writes (the
-// "route block"), so a later route run — which strips and re-appends its
-// block at the end of the file — leaves the order, and so which rule KiCad
-// applies (the last matching one), unchanged. It carries:
+// The block sits after the block bridge netclasses writes (the "route
+// block"): KiCad applies the last matching rule, so the route block (whose
+// inner rule may only carry the board minimum) can never weaken these
+// floors. A route run re-appends its block at the end; kicad route then
+// moves this block back behind it (rulesStamp matched). It carries:
 //
 //	# request-sha256 <hex>    the shared derivation it was made from
 //	# sizes-owned tracks=<nm,…> vias=<dia:drill,…>
@@ -143,8 +144,8 @@ func rulesBlockText(rules []rulesBlockRule, requestSHA string, owned kicad.SizeS
 }
 
 // placeRulesBlock puts block into a .kicad_dru text: the old rules block is
-// removed, and the new one goes right before the route block (at the end
-// when there is none). user is the user part (outside both blocks).
+// removed and the new one goes last, after the user part and the route
+// block (the last matching rule wins in KiCad).
 func placeRulesBlock(dru, block string) (string, error) {
 	// LF only: KiCad's Python writes the route block in text mode (CRLF on
 	// Windows); the same rules must give the same bytes on every platform.
@@ -160,28 +161,67 @@ func placeRulesBlock(dru, block string) (string, error) {
 	if !strings.Contains(text, "(version") {
 		text = "(version 1)\n" + text
 	}
-	return text + block + route, nil
+	return text + route + block, nil
 }
 
 // rulesTrackFloor resolves the track_width minimum KiCad applies to class
-// cls on a layer kind (outer | inner) from the pcbpilot-owned rules of a
-// parsed .kicad_dru: the last owned rule for that class and layer (KiCad
-// applies the last matching rule). 0 = none.
-func rulesTrackFloor(rules []kicad.DRURule, cls, layer string) (int64, string) {
+// cls on a layer kind (outer | inner) from a parsed .kicad_dru: the last
+// matching rule wins — a pcbpilot-owned rule whose condition is exactly
+// A.hasNetclass('cls'), or any user rule not provably disjoint from names
+// (cls, its nets: druDisjoint); a user rule without a comparable minimum
+// resolves to 0 (unknown). 0 = none.
+func rulesTrackFloor(rules []kicad.DRURule, cls, layer string, names ...map[string]bool) (int64, string) {
 	cond := "A.hasNetclass('" + cls + "')"
+	nm := map[string]bool{cls: true}
+	for _, m := range names {
+		for k := range m {
+			nm[k] = true
+		}
+	}
 	var mn int64
 	name := ""
 	for _, r := range rules {
-		if r.Block == "" || r.Condition != cond || (r.Layer != "" && r.Layer != layer) {
+		if r.Layer != "" && r.Layer != layer {
+			continue
+		}
+		if r.Block != "" && r.Condition != cond {
+			continue
+		}
+		if r.Block == "" && (len(names) == 0 || druDisjoint(r.Condition, nm)) {
 			continue
 		}
 		for _, c := range r.Constraints {
-			if c.Type == "track_width" && c.Min != nil {
+			if c.Type != "track_width" {
+				continue
+			}
+			switch {
+			case c.Min != nil:
 				mn, name = *c.Min, r.Name
+			case r.Block == "":
+				mn, name = 0, r.Name // a user rule without a comparable minimum
 			}
 		}
 	}
 	return mn, name
+}
+
+// moveRulesBlockLast re-places the rules block of the .kicad_dru next to
+// pcb behind the route block (kicad route after its netclasses step).
+func moveRulesBlockLast(pcb string) error {
+	path := strings.TrimSuffix(pcb, ".kicad_pcb") + ".kicad_dru"
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	_, blk, _, err := kicad.SplitDRU(strings.ReplaceAll(string(b), "\r\n", "\n"))
+	if err != nil || blk == "" {
+		return err
+	}
+	text, err := placeRulesBlock(string(b), blk)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(text), 0o644)
 }
 
 // rulesStampCheck is kicad route's check of rules applied by kicad rules:
@@ -244,4 +284,19 @@ func sortedInt64(v []int64) []int64 {
 	out := append([]int64(nil), v...)
 	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	return out
+}
+
+// expectedFloor is the track_width minimum a class must resolve to on a
+// layer kind, from its values alone (never from the generated rules): the
+// intent minimum (the neck-down limit) when below the layer width, else
+// the layer width.
+func expectedFloor(q kicad.ClassNM, layer string) int64 {
+	w := q.Track
+	if layer == "inner" && q.Inner > 0 {
+		w = q.Inner
+	}
+	if q.Min > 0 && q.Min < w {
+		return q.Min
+	}
+	return w
 }

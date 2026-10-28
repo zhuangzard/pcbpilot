@@ -103,8 +103,19 @@ func TestCopperBasis(t *testing.T) {
 		t.Fatalf("stackup: %+v", c)
 	}
 	c = copperBasis([]kicad.StackupCopper{{Layer: "F.Cu", ThicknessMm: 0}, {Layer: "B.Cu", ThicknessMm: 0}}, in)
-	if c.Source != "intent" || c.OuterOz != 2 || c.InnerOz != 1 || len(c.Assumptions) != 1 {
-		t.Fatalf("intent fallback: %+v", c)
+	if c.Source != "intent" || c.OuterOz != 2 || c.InnerOz != 2 || len(c.Assumptions) != 2 {
+		t.Fatalf("intent fallback (2 layers, no inner layer): %+v", c)
+	}
+	// Partially specified: known thicknesses stay, only the missing layers
+	// fall back. A known 0.5 oz inner layer is never replaced by 1 oz.
+	c = copperBasis([]kicad.StackupCopper{{Layer: "F.Cu", ThicknessMm: 0.035}, {Layer: "In1.Cu"}, {Layer: "In2.Cu", ThicknessMm: 0.0175}, {Layer: "B.Cu", ThicknessMm: 0.035}}, in)
+	if c.Source != "stackup+intent" || c.OuterOz != 1 || c.InnerOz != 0.5 || len(c.Assumptions) != 1 {
+		t.Fatalf("partial stackup + intent: %+v", c)
+	}
+	c = copperBasis([]kicad.StackupCopper{{Layer: "F.Cu", ThicknessMm: 0.07}, {Layer: "In1.Cu", ThicknessMm: 0.0175}, {Layer: "In2.Cu"}, {Layer: "B.Cu"}},
+		testIntent(t, `{"nets":{"A":{"widthMil":{"outer":6}}}}`))
+	if c.Source != "stackup+kicad-default" || c.OuterOz != 1 || c.InnerOz != 0.5 || len(c.Assumptions) != 3 {
+		t.Fatalf("partial stackup + KiCad default: %+v", c)
 	}
 	c = copperBasis(nil, testIntent(t, `{"nets":{"A":{"widthMil":{"outer":6}}}}`))
 	if c.Source != "kicad-default" || c.OuterOz != 1 || c.TempRiseC != 10 || len(c.Assumptions) != 2 {
@@ -167,8 +178,8 @@ func TestRulesBlockPlacementAndFloors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Index(text, "mine") > strings.Index(text, kicad.DRURulesBegin) || strings.Index(text, kicad.DRURulesBegin) > strings.Index(text, kicad.DRURouteBegin) {
-		t.Fatalf("order user → rules block → route block:\n%s", text)
+	if strings.Index(text, "mine") > strings.Index(text, kicad.DRURouteBegin) || strings.Index(text, kicad.DRURouteBegin) > strings.Index(text, kicad.DRURulesBegin) {
+		t.Fatalf("order user → route block → rules block:\n%s", text)
 	}
 	// Idempotent: placing the same block again changes nothing.
 	again, _ := placeRulesBlock(text, block)
@@ -187,10 +198,24 @@ func TestRulesBlockPlacementAndFloors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// KiCad applies the last matching rule: the route block's inner rule
-	// (0.15 mm) wins over the rules block's (0.6 mm).
-	if v, name := rulesTrackFloor(parsed, "PP2_W20", "inner"); v != 150000 || !strings.HasPrefix(name, "pcbpilot PP2") {
-		t.Fatalf("inner floor %d from %s", v, name)
+	// KiCad applies the last matching rule: the route block's weaker inner
+	// rule (0.15 mm) must never override the class's floor (0.6 mm).
+	if v, name := rulesTrackFloor(parsed, "PP2_W20", "inner"); v != expectedFloor(classes[1].NM, "inner") || !strings.HasPrefix(name, kicad.DRURulesPrefix) {
+		t.Fatalf("inner floor %d from %s, want %d from the rules block", v, name, expectedFloor(classes[1].NM, "inner"))
+	}
+	// A route run re-appends its block at the end; moving the rules block
+	// back restores the order.
+	dir := t.TempDir()
+	pcb := filepath.Join(dir, "b.kicad_pcb")
+	swapped := strings.Replace(text, route, "", 1) + route
+	if err := os.WriteFile(boardSibling(pcb, ".kicad_dru"), []byte(strings.ReplaceAll(swapped, "\n", "\r\n")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := moveRulesBlockLast(pcb); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(boardSibling(pcb, ".kicad_dru")); string(b) != text {
+		t.Fatalf("moveRulesBlockLast:\n%s", b)
 	}
 	if v, _ := rulesTrackFloor(parsed, "PP1_W10", "outer"); v != 152400 {
 		t.Fatalf("outer floor %d", v)
@@ -343,7 +368,8 @@ func TestKicadRulesPlan(t *testing.T) {
 	if rulesFileSHA(t, boardSibling(f.o.pcb, ".kicad_pro")) != before || fileExists(boardSibling(f.o.pcb, ".kicad_dru")) {
 		t.Fatal("--plan wrote the project")
 	}
-	if c := checkOf(rep, "staged-readback"); c.Status != gate.Pass || f.fake.drcCalls != 1 {
+	// Two DRC runs: the probes with the rules, and the negative control.
+	if c := checkOf(rep, "staged-readback"); c.Status != gate.Pass || f.fake.drcCalls != 2 {
 		t.Fatalf("staged readback: %+v (DRC runs %d)", c, f.fake.drcCalls)
 	}
 	var pf rulesPlanFile

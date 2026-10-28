@@ -240,10 +240,16 @@ func (r *rulesRun) planIsolation() {
 }
 
 // planFloor is the plan's track_width minimum for net e on a layer kind,
-// resolved from the staged rules (the last pcbpilot-owned rule wins).
+// from the class values alone (expectedFloor), never from the generated
+// rules text: the resolved rules must reach it (compareToPlan).
 func (r *rulesRun) planFloor(e rulesNetPlan, layer string) int64 {
-	v, _ := rulesTrackFloor(r.druRule, e.Class, layer)
-	return v
+	c, _ := r.classOf(e.Net)
+	return expectedFloor(c.NM, layer)
+}
+
+// resolvedFloor is what the staged rules resolve for e's class.
+func (r *rulesRun) resolvedFloor(rules []kicad.DRURule, cls string, layer string) (int64, string) {
+	return rulesTrackFloor(rules, cls, layer, r.ownedNames())
 }
 
 // ── conflicts ───────────────────────────────────────────────────────────────
@@ -300,6 +306,7 @@ func (r *rulesRun) conflicts() {
 	}
 	text := string(r.data[r.dru])
 	if text == "" {
+		sort.SliceStable(rep.Conflicts, func(i, j int) bool { return rep.Conflicts[i].Name < rep.Conflicts[j].Name })
 		return
 	}
 	rules, err := kicad.ParseDRU(text)
@@ -307,21 +314,15 @@ func (r *rulesRun) conflicts() {
 		add("dru-unreadable", filepath.Base(r.dru), err.Error())
 		return
 	}
-	classes := map[string]bool{}
+	ours := r.ownedNames()
+	var maxClr int64
+	minFloor := int64(-1)
 	for _, e := range rep.Nets {
-		for _, c := range strings.Split(r.rb0.Nets[e.Net].Class, ",") {
-			classes[c] = true
-		}
-	}
-	isoNets := map[string]bool{}
-	for _, p := range r.in.Pairs {
-		for _, d := range r.in.Domains {
-			if d.ID == p.A || d.ID == p.B {
-				for _, n := range d.Nets {
-					isoNets[n] = true
-				}
-			}
-			classes[domainClass(p.A)], classes[domainClass(p.B)] = true, true
+		cls, _ := r.classOf(e.Net)
+		maxClr = max(maxClr, cls.NM.Clearance)
+		f := expectedFloor(cls.NM, "outer")
+		if minFloor < 0 || f < minFloor {
+			minFloor = f
 		}
 	}
 	for _, u := range rules {
@@ -332,63 +333,167 @@ func (r *rulesRun) conflicts() {
 			add("dru-name", u.Name, "a user rule outside pcbpilot's blocks carries a pcbpilot rule name")
 			continue
 		}
-		mentions := func(names map[string]bool) bool {
-			if strings.TrimSpace(u.Condition) == "" {
-				return true
-			}
-			for n := range names {
-				if strings.Contains(u.Condition, "'"+n+"'") || strings.Contains(u.Condition, "\""+n+"\"") {
-					return true
-				}
-			}
-			return false
-		}
-		netSet := map[string]bool{}
-		for _, e := range rep.Nets {
-			netSet[e.Net] = true
+		// Overlapping unless its condition provably names only other nets /
+		// classes: property, wildcard and empty conditions overlap.
+		if druDisjoint(u.Condition, ours) {
+			continue
 		}
 		for _, c := range u.Constraints {
+			why := ""
 			switch c.Type {
 			case "track_width":
-				if !(mentions(netSet) || mentions(classes)) {
-					continue
+				switch {
+				case c.Unparsed:
+					why = "a user track_width rule that may cover pcbpilot nets has a value pcbpilot cannot compare"
+				case c.Min != nil && *c.Min > minFloor:
+					why = fmt.Sprintf("the user rule asks track_width min %s; pcbpilot's later rules allow %s", kicad.MmOfNm(*c.Min), kicad.MmOfNm(minFloor))
 				}
-				if c.Unparsed {
-					add("dru-weakened", u.Name, "a user track_width rule that may cover pcbpilot nets has a value pcbpilot cannot compare; pcbpilot's later rule would override it")
-					continue
+			case "clearance":
+				// A custom clearance replaces the netclass clearance pcbpilot
+				// planned, and a pair rule replaces it: only a value at least
+				// every planned clearance, with no pair rule, is harmless.
+				if c.Unparsed || c.Min == nil || *c.Min < maxClr || len(rep.Isolation) > 0 {
+					why = "a user clearance rule that may cover pcbpilot nets: it would replace their planned class clearance or be replaced by a pair rule"
 				}
-				for _, e := range rep.Nets {
-					cls, _ := r.classOf(e.Net)
-					floor := cls.NM.Min
-					if floor <= 0 {
-						floor = cls.NM.Track
-					}
-					if c.Min != nil && *c.Min > floor && (strings.TrimSpace(u.Condition) == "" || strings.Contains(u.Condition, e.Net) || mentions(map[string]bool{firstClass(r.rb0.Nets[e.Net].Class): true})) {
-						add("dru-weakened", u.Name, fmt.Sprintf("the user rule asks track_width min %s; pcbpilot's later rule for %s allows %s", kicad.MmOfNm(*c.Min), e.Net, kicad.MmOfNm(floor)))
-						break
-					}
+			case "creepage":
+				if len(rep.Isolation) > 0 {
+					why = "a user creepage rule that may cover pcbpilot's insulation pair nets (the later rule wins)"
 				}
-			case "clearance", "creepage":
-				if len(r.rep.Isolation) == 0 || !(mentions(isoNets) || mentions(classes)) {
-					continue
+			case "edge_clearance":
+				if len(r.ri.Edges) > 0 {
+					why = "a user edge_clearance rule that may cover pcbpilot's domain edge rules (the later rule wins)"
 				}
-				for _, p := range r.rep.Isolation {
-					want := p.ClearanceMm
-					if c.Type == "creepage" {
-						want = p.CreepageMm
-					}
-					if want <= 0 {
-						continue
-					}
-					if c.Unparsed || (c.Min != nil && *c.Min > int64(math.Round(want*1e6))) {
-						add("dru-weakened", u.Name, fmt.Sprintf("the user %s rule may ask more than pcbpilot's pair rule %s|%s (%g mm), which KiCad would apply instead (the later rule wins)", c.Type, p.A, p.B, want))
-						break
-					}
-				}
+			}
+			if why != "" {
+				add("dru-weakened", u.Name, why+" (condition "+strconvQuote(u.Condition)+")")
+				break
 			}
 		}
 	}
 	sort.SliceStable(rep.Conflicts, func(i, j int) bool { return rep.Conflicts[i].Name < rep.Conflicts[j].Name })
+}
+
+func strconvQuote(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return "none: every item"
+	}
+	return "\"" + s + "\""
+}
+
+// ownedNames are the nets and netclasses a pcbpilot rule can apply to: the
+// planned nets, every class in their effective composite, the classes
+// pcbpilot writes, the insulation domains' nets and classes.
+func (r *rulesRun) ownedNames() map[string]bool {
+	m := map[string]bool{}
+	for _, e := range r.rep.Nets {
+		m[e.Net] = true
+		m[e.Class] = true
+		for _, c := range strings.Split(r.rb0.Nets[e.Net].Class, ",") {
+			m[c] = true
+		}
+	}
+	for _, c := range r.full.Classes {
+		m[c.Name] = true
+	}
+	for dom, nets := range r.full.Domains {
+		m["PPD_"+dom] = true
+		for _, n := range nets {
+			m[n] = true
+			for _, c := range strings.Split(r.rb0.Nets[n].Class, ",") {
+				m[c] = true
+			}
+		}
+	}
+	return m
+}
+
+var reDisjointTerm = regexp.MustCompile(`^(?:[AB]\.(?:NetName|NetClass)\s*==\s*'([^']*)'|[AB]\.hasNetclass\('([^']*)'\)|[AB]\.(?:NetName|NetClass)\s*==\s*"([^"]*)")$`)
+
+// druDisjoint: the condition provably matches none of names — every
+// '||' alternative has an '&&' term comparing a net name or netclass with
+// a literal (no wildcard) outside names. Anything else (empty, property
+// tests such as A.Type == 'Track', wildcards, functions) may overlap.
+func druDisjoint(cond string, names map[string]bool) bool {
+	cond = strings.TrimSpace(cond)
+	if cond == "" {
+		return false
+	}
+	trim := func(s string) string {
+		s = strings.TrimSpace(s)
+		for strings.HasPrefix(s, "(") && strings.HasSuffix(s, ")") && balanced(s[1:len(s)-1]) {
+			s = strings.TrimSpace(s[1 : len(s)-1])
+		}
+		return s
+	}
+	for _, alt := range splitTop(trim(cond), "||") {
+		ok := false
+		for _, term := range splitTop(trim(alt), "&&") {
+			m := reDisjointTerm.FindStringSubmatch(trim(term))
+			if m == nil {
+				continue
+			}
+			lit := m[1] + m[2] + m[3]
+			if lit != "" && !strings.ContainsAny(lit, "*?") && !names[lit] {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// splitTop splits s on op outside parentheses and quotes.
+func splitTop(s, op string) []string {
+	var out []string
+	depth, start := 0, 0
+	var quote byte
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		switch {
+		case quote != 0:
+			if ch == quote {
+				quote = 0
+			}
+		case ch == '\'' || ch == '"':
+			quote = ch
+		case ch == '(':
+			depth++
+		case ch == ')':
+			depth--
+		case depth == 0 && strings.HasPrefix(s[i:], op):
+			out = append(out, s[start:i])
+			i += len(op) - 1
+			start = i + 1
+		}
+	}
+	return append(out, s[start:])
+}
+
+func balanced(s string) bool {
+	d := 0
+	var quote byte
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		switch {
+		case quote != 0:
+			if ch == quote {
+				quote = 0
+			}
+		case ch == '\'' || ch == '"':
+			quote = ch
+		case ch == '(':
+			d++
+		case ch == ')':
+			d--
+			if d < 0 {
+				return false
+			}
+		}
+	}
+	return d == 0
 }
 
 // removeUserDRURules drops the named rules outside pcbpilot's blocks.
@@ -502,8 +607,12 @@ func (r *rulesRun) verifyStaged() {
 	if !r.o.check {
 		probe = r.probeCheck(r.staged, "the staged project")
 	}
-	chk.Items = append(chk.Items, probe.Items...)
-	chk.Info = probe.Info
+	chk.Info = append(chk.Info, probe.Info...)
+	if probe.Status == gate.Fail {
+		chk.Items = append(chk.Items, probe.Items...)
+	} else {
+		chk.Info = append(chk.Info, probe.Items...) // cannot-check: why, not a failure
+	}
 	switch {
 	case len(chk.Items) > 0:
 		chk.Status = gate.Fail
@@ -531,11 +640,15 @@ func (r *rulesRun) compareToPlan(rb *kicad.RulesReadback) []string {
 				kicad.MmOfNm(eff.Track), kicad.MmOfNm(eff.Clearance), kicad.MmOfNm(eff.ViaDiameter), kicad.MmOfNm(eff.ViaDrill),
 				c.Name, kicad.MmOfNm(c.NM.Track), kicad.MmOfNm(c.NM.Clearance), kicad.MmOfNm(c.NM.ViaDiameter), kicad.MmOfNm(c.NM.ViaDrill)))
 		}
-		if r.planFloor(e, "outer") <= 0 {
-			bad = append(bad, e.Net+": no track_width minimum on the outer layers")
-		}
-		if rb.CopperLayers > 2 && r.planFloor(e, "inner") <= 0 {
-			bad = append(bad, e.Net+": no track_width minimum on the inner layers")
+		for _, l := range []string{"outer", "inner"} {
+			if l == "inner" && rb.CopperLayers <= 2 {
+				continue
+			}
+			want := r.planFloor(e, l)
+			have, by := r.resolvedFloor(r.druRule, c.Name, l)
+			if have < want {
+				bad = append(bad, fmt.Sprintf("%s: the staged rules resolve track_width min %s on %s layers (rule %q), plan %s", e.Net, kicad.MmOfNm(have), l, by, kicad.MmOfNm(want)))
+			}
 		}
 	}
 	for dom, nets := range r.full.Domains {
@@ -601,8 +714,12 @@ func (r *rulesRun) readbackPublished() rulesCheck {
 		return chk
 	}
 	probe := r.probeCheck(pub, "the written project")
-	chk.Items = append(chk.Items, probe.Items...)
-	chk.Info = probe.Info
+	chk.Info = append(chk.Info, probe.Info...)
+	if probe.Status == gate.Fail {
+		chk.Items = append(chk.Items, probe.Items...)
+	} else {
+		chk.Info = append(chk.Info, probe.Items...) // cannot-check: why, not a failure
+	}
 	switch {
 	case len(chk.Items) > 0:
 		chk.Status = gate.Fail
@@ -696,74 +813,104 @@ func (r *rulesRun) probeCheck(board, what string) rulesCheck {
 		chk.Detail = "no probe needed"
 		return chk
 	}
-	dir := filepath.Join(r.stage, "probe-"+fmt.Sprint(len(r.rep.Checks)))
-	_ = os.MkdirAll(dir, 0o755)
-	src := filepath.Join(dir, "src.kicad_pcb")
-	if _, err := copyKicadBoard(board, src); err != nil {
-		chk.Status, chk.Detail = gate.CannotCheck, "probe copy: "+err.Error()
-		return chk
-	}
-	out := filepath.Join(dir, "probe.kicad_pcb")
-	ids, err := r.t.RulesProbe(src, tracks, out)
-	if err != nil {
-		chk.Status, chk.Detail = gate.CannotCheck, "probe tracks: "+err.Error()
-		return chk
-	}
-	// The probe board must carry exactly the project and rules under test.
-	for _, ext := range []string{".kicad_pro", ".kicad_dru"} {
-		if b, err := os.ReadFile(boardSibling(board, ext)); err == nil {
-			_ = os.WriteFile(boardSibling(out, ext), b, 0o644)
-		} else {
-			_ = os.Remove(boardSibling(out, ext))
+	r.probeRuns++
+	dir := filepath.Join(r.stage, fmt.Sprintf("probe-%d", r.probeRuns))
+	// Two DRC runs on the same probes: with the rules under test, and a
+	// negative control with pcbpilot's .kicad_dru blocks removed (the user
+	// part kept). A probe proves a pcbpilot rule only when the verdicts
+	// differ; one flagged in both runs is enforced by something else (the
+	// board minimum, a class clearance) and proves nothing about the rules.
+	user := ""
+	if b, err := os.ReadFile(boardSibling(board, ".kicad_dru")); err == nil {
+		u, _, _, err := kicad.SplitDRU(strings.ReplaceAll(string(b), "\r\n", "\n"))
+		if err != nil {
+			chk.Status, chk.Detail = gate.CannotCheck, "probe control: "+err.Error()
+			return chk
 		}
+		user = u
 	}
-	drc, err := r.t.DRC(out, filepath.Join(dir, "probe-drc.json"))
+	run := func(sub string, dru *string) (*kicad.DRCReport, []string, error) {
+		d := filepath.Join(dir, sub)
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			return nil, nil, err
+		}
+		src := filepath.Join(d, "src.kicad_pcb")
+		if _, err := copyKicadBoard(board, src); err != nil {
+			return nil, nil, err
+		}
+		out := filepath.Join(d, "probe.kicad_pcb")
+		ids, err := r.t.RulesProbe(src, tracks, out)
+		if err != nil {
+			return nil, nil, err
+		}
+		// The probe board carries exactly the project and rules under test.
+		if b, err := os.ReadFile(boardSibling(board, ".kicad_pro")); err == nil {
+			_ = os.WriteFile(boardSibling(out, ".kicad_pro"), b, 0o644)
+		} else {
+			_ = os.Remove(boardSibling(out, ".kicad_pro"))
+		}
+		_ = os.Remove(boardSibling(out, ".kicad_dru"))
+		if dru != nil && strings.TrimSpace(*dru) != "" {
+			_ = os.WriteFile(boardSibling(out, ".kicad_dru"), []byte(*dru), 0o644)
+		} else if dru == nil {
+			if b, err := os.ReadFile(boardSibling(board, ".kicad_dru")); err == nil {
+				_ = os.WriteFile(boardSibling(out, ".kicad_dru"), b, 0o644)
+			}
+		}
+		rep, err := r.t.DRC(out, filepath.Join(d, "probe-drc.json"))
+		return rep, ids, err
+	}
+	drc, ids, err := run("rules", nil)
 	if err != nil {
 		chk.Status, chk.Detail = gate.CannotCheck, "kicad-cli DRC on the probes: "+err.Error()
 		return chk
 	}
-	hits := map[string]map[string]bool{} // rule → uuid set per violation key
-	for _, v := range drc.Violations {
-		for _, o := range v.Objs {
-			if hits[v.Rule] == nil {
-				hits[v.Rule] = map[string]bool{}
-			}
-			hits[v.Rule][o] = true
-		}
+	ctl, cids, err := run("control", &user)
+	if err != nil {
+		chk.Status, chk.Detail = gate.CannotCheck, "kicad-cli DRC on the control probes: "+err.Error()
+		return chk
 	}
-	pairHit := func(a, b string) bool {
-		for _, v := range drc.Violations {
-			if v.Rule != "clearance" {
+	flagged := func(rep *kicad.DRCReport, ids []string, e rulesProbeExp) bool {
+		for _, v := range rep.Violations {
+			if v.Rule != e.kind {
 				continue
 			}
-			ha, hb := false, false
-			for _, o := range v.Objs {
-				ha, hb = ha || o == a, hb || o == b
+			hit := 0
+			for _, want := range e.ids {
+				for _, o := range v.Objs {
+					if o == ids[want] {
+						hit++
+						break
+					}
+				}
 			}
-			if ha && hb {
+			if hit == len(e.ids) {
 				return true
 			}
 		}
 		return false
 	}
-	ok := 0
+	attributed, failed := 0, 0
 	for _, e := range exps {
-		var got bool
-		if e.kind == "track_width" {
-			got = hits["track_width"][ids[e.ids[0]]]
-		} else {
-			got = pairHit(ids[e.ids[0]], ids[e.ids[1]])
+		withRules, without := flagged(drc, ids, e), flagged(ctl, cids, e)
+		switch {
+		case !withRules:
+			failed++
+			chk.Items = append(chk.Items, fmt.Sprintf("DRC probe on %s: %s raised no %s violation (%s does not resolve; is the .kicad_dru readable by KiCad?)", what, e.what, e.kind, e.why))
+		case without:
+			chk.Info = append(chk.Info, fmt.Sprintf("probe %s: also flagged without pcbpilot's rules (the board minimum or a class enforces it): not attributable to the .kicad_dru", e.what))
+		default:
+			attributed++
 		}
-		if got {
-			ok++
-			continue
-		}
-		chk.Items = append(chk.Items, fmt.Sprintf("DRC probe on %s: %s raised no %s violation (%s does not resolve; is the .kicad_dru readable by KiCad?)", what, e.what, e.kind, e.why))
 	}
-	if len(chk.Items) > 0 {
+	switch {
+	case len(chk.Items) > 0:
 		chk.Status = gate.Fail
+	case attributed == 0:
+		chk.Status = gate.CannotCheck
+		chk.Items = append(chk.Items, "no DRC probe is attributable to pcbpilot's .kicad_dru rules (every probe is also flagged without them): that KiCad loads and applies the rules is not proven")
 	}
-	chk.Detail = fmt.Sprintf("kicad-cli DRC flags %d of %d probe(s) on %s", ok, len(exps), what)
+	chk.Detail = fmt.Sprintf("kicad-cli DRC on %s: %d of %d probe(s) attributable to pcbpilot's rules (flagged with them, not in the control without them), %d failed", what, attributed, len(exps), failed)
 	return chk
 }
 
@@ -819,7 +966,7 @@ func (r *rulesRun) effectiveRules() {
 				continue
 			}
 			want := r.planFloor(e, l)
-			have, _ := rulesTrackFloor(rules, firstClass(eff.Class), l)
+			have, _ := r.resolvedFloor(rules, firstClass(eff.Class), l)
 			if have < want {
 				what := "no track_width minimum rule"
 				if have > 0 {
@@ -830,26 +977,7 @@ func (r *rulesRun) effectiveRules() {
 		}
 	}
 	for _, p := range r.rep.Isolation {
-		name := "pcbpilot isolation " + p.ClassA + "|" + p.ClassB
-		var found *kicad.DRURule
-		for i := range rules {
-			if rules[i].Name == name {
-				found = &rules[i]
-			}
-		}
-		if found == nil {
-			chk.Items = append(chk.Items, fmt.Sprintf("pair %s|%s: no isolation rule %q in the .kicad_dru", p.A, p.B, name))
-			continue
-		}
-		for _, c := range found.Constraints {
-			want := p.ClearanceMm
-			if c.Type == "creepage" {
-				want = p.CreepageMm
-			}
-			if (c.Type == "clearance" || c.Type == "creepage") && want > 0 && (c.Min == nil || *c.Min < int64(math.Round(want*1e6))) {
-				chk.Items = append(chk.Items, fmt.Sprintf("pair %s|%s: %s rule below %g mm", p.A, p.B, c.Type, want))
-			}
-		}
+		chk.Items = append(chk.Items, r.isolationRuleProblems(rules, p)...)
 	}
 	for dom, nets := range r.full.Domains {
 		for _, n := range nets {
@@ -859,8 +987,12 @@ func (r *rulesRun) effectiveRules() {
 		}
 	}
 	probe := r.probeCheck(r.stIn, "the board")
-	chk.Items = append(chk.Items, probe.Items...)
-	chk.Info = probe.Info
+	chk.Info = append(chk.Info, probe.Info...)
+	if probe.Status == gate.Fail {
+		chk.Items = append(chk.Items, probe.Items...)
+	} else {
+		chk.Info = append(chk.Info, probe.Items...) // cannot-check: why, not a failure
+	}
 	switch {
 	case len(chk.Items) > 0:
 		chk.Status = gate.Fail
@@ -906,7 +1038,13 @@ func (r *rulesRun) copperWidths() {
 	for _, e := range r.rep.Nets {
 		ss := byNet[e.Net]
 		if len(ss) == 0 {
-			if pads[e.Net] >= 2 && !pouredNet[e.Net] {
+			switch {
+			case pouredNet[e.Net]:
+				// Copper only in pours (or a pour island): neither the pour's
+				// neck widths nor that it joins the pads is judged here.
+				cc++
+				chk.Items = append(chk.Items, fmt.Sprintf("%s: zone-only (%d pad(s), no track, copper only in pours): pour widths and connectivity are not verified here (post-layout sim / DRC unconnected judge them): cannot-check", e.Net, pads[e.Net]))
+			case pads[e.Net] >= 2:
 				cc++
 				chk.Items = append(chk.Items, fmt.Sprintf("%s: not-routed (%d pads, no copper): copper adequacy cannot be checked", e.Net, pads[e.Net]))
 			}
@@ -1123,4 +1261,74 @@ func (r *rulesRun) placementProxy() {
 // specctra2 is a rulesSeg as the shared pour lookup's track.
 func specctra2(s rulesSeg) specctra.Track {
 	return specctra.Track{ID: s.ID, Net: s.Net, Layer: s.Layer, X1: s.X1, Y1: s.Y1, X2: s.X2, Y2: s.Y2, Width: s.Width}
+}
+
+// isoCondition is the exact condition bridge netclasses writes for a pair.
+func isoCondition(a, b string) string {
+	return fmt.Sprintf("(A.hasNetclass('%s') && B.hasNetclass('%s')) || (A.hasNetclass('%s') && B.hasNetclass('%s'))", a, b, b, a)
+}
+
+// isolationRuleProblems: the pair's rule exists with exactly the pair
+// condition, on every layer, carries every requested constraint at its
+// value (clearance; creepage when the pair has one), and no later rule
+// that may match the pair's items sets clearance or creepage again (KiCad
+// applies the last matching rule).
+func (r *rulesRun) isolationRuleProblems(rules []kicad.DRURule, p rulesIsoPlan) []string {
+	var bad []string
+	name := "pcbpilot isolation " + p.ClassA + "|" + p.ClassB
+	cond := isoCondition(p.ClassA, p.ClassB)
+	at := -1
+	for i, u := range rules {
+		if u.Name == name {
+			at = i
+		}
+	}
+	if at < 0 {
+		return []string{fmt.Sprintf("pair %s|%s: no isolation rule %q in the .kicad_dru", p.A, p.B, name)}
+	}
+	u := rules[at]
+	if u.Condition != cond {
+		bad = append(bad, fmt.Sprintf("pair %s|%s: rule %q has condition %q, not the pair condition %q", p.A, p.B, name, u.Condition, cond))
+	}
+	if u.Layer != "" {
+		bad = append(bad, fmt.Sprintf("pair %s|%s: rule %q is limited to layer %s", p.A, p.B, name, u.Layer))
+	}
+	for _, want := range []struct {
+		typ string
+		mm  float64
+	}{{"clearance", p.ClearanceMm}, {"creepage", p.CreepageMm}} {
+		if want.mm <= 0 {
+			continue
+		}
+		ok := false
+		for _, c := range u.Constraints {
+			if c.Type == want.typ && c.Min != nil && *c.Min >= int64(math.Round(want.mm*1e6)) {
+				ok = true
+			}
+		}
+		if !ok {
+			bad = append(bad, fmt.Sprintf("pair %s|%s: rule %q has no %s min ≥ %g mm", p.A, p.B, name, want.typ, want.mm))
+		}
+	}
+	names := map[string]bool{p.ClassA: true, p.ClassB: true}
+	for _, dom := range []string{strings.TrimPrefix(p.ClassA, "PPD_"), strings.TrimPrefix(p.ClassB, "PPD_")} {
+		for _, n := range r.full.Domains[dom] {
+			names[n] = true
+			for _, c := range strings.Split(r.rb0.Nets[n].Class, ",") {
+				names[c] = true
+			}
+		}
+	}
+	for _, later := range rules[at+1:] {
+		if druDisjoint(later.Condition, names) {
+			continue
+		}
+		for _, c := range later.Constraints {
+			if c.Type == "clearance" || c.Type == "creepage" {
+				bad = append(bad, fmt.Sprintf("pair %s|%s: the later rule %q may set %s for the pair's items and would win over %q", p.A, p.B, later.Name, c.Type, name))
+				break
+			}
+		}
+	}
+	return bad
 }

@@ -118,38 +118,60 @@ const kicadDefaultCopperMm = 0.035
 func copperBasis(stack []kicad.StackupCopper, in *designIntent) rulesCopper {
 	c := rulesCopper{Stackup: stack}
 	oz := func(mm float64) float64 { return math.Round(mm/kicadDefaultCopperMm*1000) / 1000 }
-	outer, inner := 0.0, 0.0
-	complete := len(stack) >= 2
-	for i, l := range stack {
-		if l.ThicknessMm <= 0 {
-			complete = false
-			continue
+	// Per-layer fallback for a layer the stackup gives no thickness: the
+	// intent copper block (outer / inner weight), else KiCad's 35 µm.
+	fbOuter, fbInner, fbSrc := 1.0, 1.0, "kicad-default"
+	if in != nil && in.Copper != nil && in.Copper.OuterOz > 0 {
+		fbOuter, fbInner, fbSrc = in.Copper.OuterOz, in.Copper.InnerOz, "intent"
+		if fbInner <= 0 {
+			fbInner = fbOuter
 		}
-		if i == 0 || i == len(stack)-1 {
-			if outer == 0 || l.ThicknessMm < outer {
-				outer = l.ThicknessMm
+	}
+	fbWhy := map[string]string{"intent": "the intent copper block", "kicad-default": "KiCad's default 0.035 mm (1 oz)"}[fbSrc]
+	// Every layer is resolved on its own: known thicknesses stay, only the
+	// missing ones fall back; then outer = the thinner outer layer, inner =
+	// the thinnest inner layer.
+	outer, inner := 0.0, 0.0
+	known, missing := 0, 0
+	for i, l := range stack {
+		isOuter := i == 0 || i == len(stack)-1
+		w := oz(l.ThicknessMm)
+		if l.ThicknessMm <= 0 {
+			missing++
+			w = fbInner
+			if isOuter {
+				w = fbOuter
 			}
-		} else if inner == 0 || l.ThicknessMm < inner {
-			inner = l.ThicknessMm
+			c.Assumptions = append(c.Assumptions, fmt.Sprintf("stackup layer %s has no copper thickness: %g oz from %s", l.Layer, w, fbWhy))
+		} else {
+			known++
+		}
+		if isOuter {
+			if outer == 0 || w < outer {
+				outer = w
+			}
+		} else if inner == 0 || w < inner {
+			inner = w
 		}
 	}
 	switch {
-	case complete:
-		c.Source, c.OuterOz = "stackup", oz(outer)
-		c.InnerOz = c.OuterOz
-		if inner > 0 {
-			c.InnerOz = oz(inner)
-		}
-	case in != nil && in.Copper != nil && in.Copper.OuterOz > 0:
-		c.Source, c.OuterOz, c.InnerOz = "intent", in.Copper.OuterOz, in.Copper.InnerOz
-		if c.InnerOz <= 0 {
-			c.InnerOz = c.OuterOz
-		}
-		c.Assumptions = append(c.Assumptions, fmt.Sprintf("the board stackup gives no copper thickness: copper weight from the intent copper block (outer %g oz, inner %g oz)", c.OuterOz, c.InnerOz))
+	case len(stack) == 0:
+		c.Source, outer, inner = fbSrc, fbOuter, fbInner
+		c.Assumptions = append(c.Assumptions, "the board has no stackup: copper weight from "+fbWhy)
+	case missing == 0:
+		c.Source = "stackup"
+	case known == 0:
+		c.Source = fbSrc
 	default:
-		c.Source, c.OuterOz, c.InnerOz = "kicad-default", 1, 1
-		c.Assumptions = append(c.Assumptions, "neither the board stackup nor the intent gives a copper thickness: KiCad's default 0.035 mm (1 oz) on every layer")
+		c.Source = "stackup+" + fbSrc
 	}
+	if inner == 0 {
+		inner = outer
+		if len(stack) == 0 {
+			inner = fbInner
+		}
+	}
+	c.OuterOz, c.InnerOz = outer, inner
 	c.TempRiseC = 10
 	if in != nil && in.Copper != nil && in.Copper.TempRiseC > 0 {
 		c.TempRiseC = in.Copper.TempRiseC
@@ -292,23 +314,37 @@ func planRulesWidths(in *designIntent, sp *pcbauto.SimPower, decl declaredCurren
 		b.Width = rulesWidth{OuterMil: b.Intent.Outer, InnerMil: b.Intent.Inner}
 		b.Basis = append(b.Basis, fmt.Sprintf("intent widthMil outer %g / inner %g / min %g mil (floor)", b.Intent.Outer, b.Intent.Inner, n.WidthMil.Min))
 		powerish := n.Role == "power" || n.Role == "ground" || n.Role == "switch"
-		b.NeedsCurrent = powerish && (n.CurrentA > 0 || n.Pulsed)
+		// Every power / ground / switch net's width depends on its current:
+		// it needs evidence, and an evidenced zero (a sim result, a
+		// simulated / declared currentA of 0) is not a missing value.
+		b.NeedsCurrent = powerish
 		var cur *rulesCurrent
+		evidencedZero := false
 		if c, ok := rulesSimCurrent(sp, name); ok {
 			cur = &c
+			evidencedZero = c.A <= 0
 		}
 		dp, dr := math.Max(n.PeakA, decl[name].PeakA), math.Max(n.RmsA, decl[name].RmsA)
 		if d := math.Max(dp, dr); d > 0 && (cur == nil || d > cur.A) {
 			cur = &rulesCurrent{A: d, Source: "declared", Why: fmt.Sprintf("declared peak %.3f A / RMS %.3f A", dp, dr)}
 		}
-		if cur == nil && n.CurrentA > 0 && (n.CurrentSource == "simulated" || n.CurrentSource == "declared") {
-			cur = &rulesCurrent{A: n.CurrentA, Source: "intent", Why: fmt.Sprintf("intent currentA %.3f A (%s; no --sim given)", n.CurrentA, n.CurrentSource)}
+		if (cur == nil || cur.A <= 0) && (n.CurrentSource == "simulated" || n.CurrentSource == "declared") {
+			if n.CurrentA > 0 {
+				cur = &rulesCurrent{A: n.CurrentA, Source: "intent", Why: fmt.Sprintf("intent currentA %.3f A (%s; no --sim given)", n.CurrentA, n.CurrentSource)}
+			} else {
+				evidencedZero = true
+			}
+		}
+		if cur != nil && cur.A > 0 {
+			evidencedZero = false
 		}
 		switch {
 		case n.Pulsed && dp <= 0 && dr <= 0:
 			b.Status, b.Detail = "cannot-check", "pulsed / inrush net without a declared peakA or rmsA: copper adequacy cannot be judged (the intent floor still applies)"
-		case cur == nil && b.NeedsCurrent:
-			b.Status, b.Detail = "cannot-check", fmt.Sprintf("%s net with current %.3f A (%s) but no simulation (--sim) and no declared current: the width is not verified (the intent floor still applies)", n.Role, n.CurrentA, firstNonEmptyStr(n.CurrentSource, "source unknown"))
+		case b.NeedsCurrent && (cur == nil || cur.A <= 0) && !evidencedZero:
+			b.Status, b.Detail = "cannot-check", fmt.Sprintf("%s net without current evidence (currentA %g, source %s; no --sim result, no declared current): the width is not verified (the intent floor still applies)", n.Role, n.CurrentA, firstNonEmptyStr(n.CurrentSource, "unknown"))
+		case b.NeedsCurrent && evidencedZero:
+			b.Basis = append(b.Basis, "evidenced zero current (simulation / declared): the intent width governs")
 		}
 		if cur != nil && cur.A > 0 {
 			b.Current = cur
@@ -318,9 +354,10 @@ func planRulesWidths(in *designIntent, sp *pcbauto.SimPower, decl declaredCurren
 			b.Basis = append(b.Basis, fmt.Sprintf("%s × IPC-2221/2152 ΔT %g °C → %g mil outer (%g oz), %g mil inner (%g oz), 0.05 mm grid", cur.Why, cu.TempRiseC, cw.OuterMil, cu.OuterOz, cw.InnerMil, cu.InnerOz))
 			controlled := n.ImpedanceOhm > 0 || n.DiffPair != "" || n.Role == "diff" || n.Role == "rf" || n.Role == "hs"
 			switch {
-			case controlled && cw.OuterMil > b.Intent.Outer+reqEpsMil:
+			case controlled && (cw.OuterMil > b.Intent.Outer+reqEpsMil || cw.InnerMil > b.Intent.Inner+reqEpsMil):
+				// Either layer group: nothing is raised on any layer.
 				b.Status = "fail"
-				b.Detail = fmt.Sprintf("incompatible requirements: the current needs %g mil outer, the impedance / pair width is %g mil", cw.OuterMil, b.Intent.Outer)
+				b.Detail = fmt.Sprintf("incompatible requirements: the current needs %g mil outer / %g mil inner, the impedance / pair width is %g / %g mil", cw.OuterMil, cw.InnerMil, b.Intent.Outer, b.Intent.Inner)
 			default:
 				if cw.OuterMil > b.Width.OuterMil+reqEpsMil {
 					b.Width.OuterMil = cw.OuterMil
@@ -335,6 +372,10 @@ func planRulesWidths(in *designIntent, sp *pcbauto.SimPower, decl declaredCurren
 			}
 		} else if !b.NeedsCurrent {
 			b.Basis = append(b.Basis, "no current to size for: the intent width governs")
+		}
+		if b.Status == "fail" {
+			out = append(out, b)
+			continue
 		}
 		if b.Width.OuterMil > b.Intent.Outer+reqEpsMil || b.Width.InnerMil > b.Intent.Inner+reqEpsMil {
 			widths[name] = b.Width

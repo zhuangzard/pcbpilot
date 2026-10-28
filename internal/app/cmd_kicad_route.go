@@ -489,6 +489,13 @@ func (r *kicadRun) run() error {
 	if err != nil {
 		return fmt.Errorf("pre-route gate: %w", err)
 	}
+	// kicad rules' block must stay behind the route block bridge just
+	// re-appended (the last matching rule wins; see kicad_rules_block.go).
+	if kr, _ := r.summary["kicadRules"].(map[string]any); kr != nil {
+		if err := moveRulesBlockLast(classed); err != nil {
+			return fmt.Errorf("pre-route gate: kicad rules block: %w", err)
+		}
+	}
 	if len(ncRes.MissingNets) > 0 {
 		fmt.Fprintf(r.stderr, "warning: %d intent net(s) not on the board (ignored): %s\n", len(ncRes.MissingNets), strings.Join(ncRes.MissingNets, ", "))
 	}
