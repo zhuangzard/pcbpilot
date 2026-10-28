@@ -74,7 +74,76 @@ func Candidates(name string, sheets []string) []string {
 
 // Join is the identity of an XML (unescaped) net name read with sheet path
 // prefix ("" for a name without one): the prefix, then the rest escaped.
+// The prefix is used as given: a sheet path whose sheet names hold '/'
+// must be escaped first (EscapedSheetPaths, JoinEscaped).
 func Join(prefix, name string) string { return prefix + Escape(name[len(prefix):]) }
+
+// JoinEscaped is Join with the sheet path prefix written as escPrefix,
+// its escaped form ("/I{slash}O/" for the XML path "/I/O/").
+func JoinEscaped(prefix, escPrefix, name string) string {
+	return escPrefix + Escape(name[len(prefix):])
+}
+
+// Sheet is one sheet of a kicadxml netlist: its path as written there
+// (unescaped, "/I/O (1/2)/") and its UUID path ("/u1/").
+type Sheet struct{ Name, Tstamps string }
+
+// EscapedSheetPaths maps each sheet path as kicad-cli's XML writes it to
+// KiCad's escaped form, the one the board's net names carry: every '/'
+// inside a sheet name is "{slash}" ("/I/O (1/2)/" → "/I{slash}O
+// (1{slash}2)/"; KiCad 10.0.6, also what its kicadsexpr netlist writes).
+// Where one sheet name ends is told by the UUID path, never guessed: a
+// sheet's parent is the sheet whose UUID path drops the last UUID, so its
+// own name is the rest of its path. A sheet whose parent is not listed
+// keeps its path as written. A path that two sheets write identically but
+// escape differently maps to "" (ambiguous).
+func EscapedSheetPaths(sheets []Sheet) map[string]string {
+	byTs := map[string]string{"/": "/"}
+	for _, s := range sheets {
+		if s.Tstamps != "" {
+			byTs[s.Tstamps] = s.Name
+		}
+	}
+	memo := map[string]string{"/": "/"}
+	var esc func(ts string, depth int) (string, bool)
+	esc = func(ts string, depth int) (string, bool) {
+		if e, ok := memo[ts]; ok {
+			return e, true
+		}
+		name, ok := byTs[ts]
+		if !ok || depth > 64 || !strings.HasPrefix(ts, "/") || !strings.HasSuffix(ts, "/") || !strings.HasSuffix(name, "/") {
+			return "", false
+		}
+		trim := strings.TrimSuffix(ts, "/")
+		pts := trim[:strings.LastIndex(trim, "/")+1]
+		pname, ok := byTs[pts]
+		if !ok || !strings.HasPrefix(name, pname) || len(name) <= len(pname)+1 {
+			return "", false
+		}
+		pesc, ok := esc(pts, depth+1)
+		if !ok {
+			return "", false
+		}
+		e := pesc + Escape(name[len(pname):len(name)-1]) + "/"
+		memo[ts] = e
+		return e, true
+	}
+	out := map[string]string{"/": "/"}
+	for _, s := range sheets {
+		if s.Name == "" || s.Name == "/" {
+			continue
+		}
+		e, ok := esc(s.Tstamps, 0)
+		if !ok {
+			e = s.Name
+		}
+		if prev, seen := out[s.Name]; seen && prev != e {
+			e = ""
+		}
+		out[s.Name] = e
+	}
+	return out
+}
 
 // SheetPath is the sheet path of an identity ("" for a global name).
 func SheetPath(id string) string {

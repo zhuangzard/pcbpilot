@@ -68,8 +68,9 @@ type SchNetNode struct{ Ref, Pin, Function, Type string }
 type schNetXML struct {
 	Source string `xml:"design>source"` // the root sheet file
 	Sheets []struct {
-		Name   string `xml:"name,attr"`
-		Source string `xml:"title_block>source"` // relative to the root's directory
+		Name    string `xml:"name,attr"`
+		Tstamps string `xml:"tstamps,attr"`
+		Source  string `xml:"title_block>source"` // relative to the root's directory
 	} `xml:"design>sheet"`
 	Comps []struct {
 		Ref       string `xml:"ref,attr"`
@@ -138,8 +139,10 @@ func parseSchNetlist(data []byte, rootDir string) (*SchNetlist, error) {
 		rootDir = filepath.Dir(x.Source)
 	}
 	files := map[string]string{}
+	var sheets []netname.Sheet
 	for _, s := range x.Sheets {
 		addSheet(s.Name)
+		sheets = append(sheets, netname.Sheet{Name: s.Name, Tstamps: s.Tstamps})
 		if s.Source != "" && rootDir != "" {
 			files[s.Name] = filepath.Join(rootDir, s.Source)
 		}
@@ -162,7 +165,7 @@ func parseSchNetlist(data []byte, rootDir string) (*SchNetlist, error) {
 		}
 		nl.Nets = append(nl.Nets, sn)
 	}
-	if err := nl.netIdentities(files); err != nil {
+	if err := nl.netIdentities(files, netname.EscapedSheetPaths(sheets)); err != nil {
 		return nil, err
 	}
 	return nl, nil

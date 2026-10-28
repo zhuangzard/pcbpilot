@@ -100,3 +100,30 @@ func TestDisplayNeverShadowsAnotherNet(t *testing.T) {
 		}
 	}
 }
+
+func TestEscapedSheetPaths(t *testing.T) {
+	got := EscapedSheetPaths([]Sheet{
+		{"/", "/"},
+		{"/Power/", "/p/"},
+		{"/I/O (1/2)/", "/a/"},
+		{"/I/O (1/2)/A/B/", "/a/b/"},
+		{"/Orphan/x/", "/q/r/"}, // parent not listed: kept as written
+		{"/S/T/", "/s/"},        // root sheet "S/T" …
+		{"/S/T/", "/t/u/"},      // … and (parent missing) another one written alike
+	})
+	for in, want := range map[string]string{
+		"/":               "/",
+		"/Power/":         "/Power/",
+		"/I/O (1/2)/":     "/I{slash}O (1{slash}2)/",
+		"/I/O (1/2)/A/B/": "/I{slash}O (1{slash}2)/A{slash}B/",
+		"/Orphan/x/":      "/Orphan/x/",
+		"/S/T/":           "", // ambiguous
+	} {
+		if got[in] != want {
+			t.Errorf("EscapedSheetPaths[%q] = %q, want %q", in, got[in], want)
+		}
+	}
+	if id := JoinEscaped("/I/O (1/2)/", got["/I/O (1/2)/"], "/I/O (1/2)/a/b"); id != "/I{slash}O (1{slash}2)/a{slash}b" {
+		t.Errorf("JoinEscaped = %q", id)
+	}
+}
