@@ -137,6 +137,12 @@ func want(t *testing.T, r *SchReview, id, status string, sev ...string) ReviewCh
 
 func intentHints() ReviewHints { return ReviewHints{Intent: "intent.json"} }
 
+// completeHints: intent that declares its internal-pull list complete —
+// the explicit evidence an unlisted pin has no internal pull.
+func completeHints() ReviewHints {
+	return ReviewHints{Intent: "intent.json", PullsComplete: "intent review.internalPullsComplete"}
+}
+
 // base: a decoupled 3.3 V rail, so the power checks stay quiet.
 func rvBase() *rvT {
 	b := newRvT()
@@ -196,8 +202,17 @@ func TestReviewOpenDrain(t *testing.T) {
 	if len(c.Unverified) != 1 || r.Status != gate.CannotCheck || r.Status.ExitCode() != 5 {
 		t.Fatalf("%+v %s", c, r.Status)
 	}
-	// intent without a declared pull-up → proven error
-	want(t, odDesign().review(t, intentHints()), RvOpenDrain, "fail", "error")
+	// an intent.json is no evidence about internal pulls: legacy (no
+	// review{}) and unrelated review notes stay cannot-check
+	want(t, odDesign().review(t, intentHints()), RvOpenDrain, "cannot-check")
+	unrelated := intentHints()
+	unrelated.PullUp = map[string]string{"U9.1": "intent review.internalPullups"}
+	want(t, odDesign().review(t, unrelated), RvOpenDrain, "cannot-check")
+	// explicit evidence: the pull list is complete, or the pins have none
+	want(t, odDesign().review(t, completeHints()), RvOpenDrain, "fail", "error")
+	none := intentHints()
+	none.PullNone = map[string]string{"U1.3": "intent review.noInternalPulls", "U2.3": "intent review.noInternalPulls"}
+	want(t, odDesign().review(t, none), RvOpenDrain, "fail", "error")
 	// internal pull-up declared in intent → exempt, source named
 	h := intentHints()
 	h.PullUp = map[string]string{"U2.PA0": "intent review.internalPullups"}
@@ -212,7 +227,17 @@ func TestReviewOpenDrain(t *testing.T) {
 	}
 	// external pull-up → pass
 	want(t, odDesign().res("R1", "10k", "/SENSOR_INT", "+3V3").review(t, ReviewHints{}), RvOpenDrain, "pass")
-	// a push-pull capable driver on the net → not flagged
+	// an open-drain interrupt into an MCU GPIO: its direction is unknown —
+	// not a push-pull driver; cannot-check, an error with pull evidence,
+	// exempt only when intent declares the GPIO push-pull
+	g := rvBase().ic("U1", "+3V3", "3:~{INT}:open_collector").ic("U2", "+3V3", "3:PB3:bidirectional").cap("C1", "10u", "+3V3", "GND")
+	g.net("/ALERT", "U1.3", "U2.3")
+	want(t, g.review(t, intentHints()), RvOpenDrain, "cannot-check")
+	want(t, g.review(t, completeHints()), RvOpenDrain, "fail", "error")
+	pp := completeHints()
+	pp.PushPull = map[string]string{"U2.PB3": "intent review.pushPullOutputs"}
+	want(t, g.review(t, pp), RvOpenDrain, "pass")
+	// a push-pull output on the net → not flagged
 	b := odDesign()
 	b.part("U3", "Synth:SUP", "SYN-SUP", "1:RST:output")
 	b.addNode("/SENSOR_INT", "U3.1")
@@ -226,7 +251,13 @@ func TestReviewOpenDrain(t *testing.T) {
 	b.addNode("/SENSOR_INT", "D1.1")
 	b.res("R5", "1k", "/LA", "+3V3")
 	b.addNode("/LA", "D1.2")
-	want(t, b.review(t, intentHints()), RvOpenDrain, "pass")
+	want(t, b.review(t, completeHints()), RvOpenDrain, "pass")
+	// a diode whose far end goes to ground is no pull-up
+	b = odDesign()
+	b.part("D2", "Device:D", "1N4148", "1:K:passive", "2:A:passive")
+	b.addNode("/SENSOR_INT", "D2.1")
+	b.addNode("GND", "D2.2")
+	want(t, b.review(t, completeHints()), RvOpenDrain, "fail", "error")
 	// unknown jumper on the path → cannot-check
 	b = odDesign()
 	b.part("JP1", "Jumper:Jumper_2_Open", "", "1:A:passive", "2:B:passive")
@@ -261,10 +292,26 @@ func TestReviewPullupVoltage(t *testing.T) {
 		return b
 	}
 	h := ReviewHints{Intent: "i", NetVoltage: map[string]float64{"+3V3": 3.3, "+5V": 5}, VoltageSource: map[string]string{"+5V": "intent i"}}
-	c := want(t, mk().review(t, h), RvPullupVoltage, "fail", "error")
-	if !strings.Contains(c.Findings[0].Message, "U1") {
+	// the pin's abs-max unknown → likely (warning), not proven
+	c := want(t, mk().review(t, h), RvPullupVoltage, "pass", "warning")
+	if !strings.Contains(c.Findings[0].Message, "U1") || c.Findings[0].Certainty != "likely" {
 		t.Fatal(c.Findings[0])
 	}
+	// a declared maximum makes it proven
+	h.PinMaxV = map[string]float64{"U1.SDA": 3.6}
+	want(t, mk().review(t, h), RvPullupVoltage, "fail", "error")
+	h.PinMaxV = nil
+	// a multi-rail part: the pin's domain must be declared
+	m := mk()
+	m.part("U3", "Synth:MCU", "", "1:VDD:power_in", "2:VIO:power_in", "3:GND:power_in", "4:SDA:bidirectional")
+	m.addNode("+3V3", "U3.1")
+	m.addNode("+5V", "U3.2")
+	m.addNode("GND", "U3.3")
+	m.addNode("/SDA", "U3.4")
+	want(t, m.review(t, h), RvPullupVoltage, "cannot-check", "warning")
+	hd := h
+	hd.PinDomain = map[string]string{"U3.4": "+5V"}
+	want(t, m.review(t, hd), RvPullupVoltage, "pass", "warning")
 	h.Tolerant = map[string]string{"U1.3": "intent review.tolerantPins"}
 	want(t, mk().review(t, h), RvPullupVoltage, "pass")
 	// no voltages → cannot-check
@@ -315,6 +362,34 @@ func TestReviewLED(t *testing.T) {
 	b = rvFed()
 	led(b, "D1", "+3V3", "GND")
 	want(t, b.review(t, ReviewHints{}), RvLEDLimiter, "fail", "error")
+	// straight across the rail with an unrelated bleeder and pull-up on it:
+	// they are not in the LED's path
+	b = rvFed().res("R7", "10k", "+3V3", "GND").res("R8", "4k7", "+3V3", "/SOME_PU")
+	led(b, "D1", "+3V3", "GND")
+	want(t, b.review(t, ReviewHints{}), RvLEDLimiter, "fail", "error")
+	// a bleeder on the LED's own node: the node branches → ambiguous
+	b = rvFed().res("R1", "1k", "+3V3", "/LA").res("R9", "100k", "/LA", "GND")
+	led(b, "D1", "/LA", "GND")
+	want(t, b.review(t, ReviewHints{}), RvLEDLimiter, "cannot-check")
+	// parallel branches: D1 has its resistor, D2 sits straight across the
+	// rail and does not inherit it
+	b = rvFed().res("R1", "1k", "+3V3", "/LA")
+	led(b, "D1", "/LA", "GND")
+	led(b, "D2", "+3V3", "GND")
+	c := want(t, b.review(t, ReviewHints{}), RvLEDLimiter, "fail", "error")
+	if c.Findings[0].Refs[0] != "D2" {
+		t.Fatal(c.Findings[0])
+	}
+	// two LEDs sharing one resistor: the shared node branches → ambiguous
+	b = rvFed().res("R1", "330", "+3V3", "/LA")
+	led(b, "D1", "/LA", "GND")
+	led(b, "D2", "/LA", "GND")
+	want(t, b.review(t, ReviewHints{}), RvLEDLimiter, "cannot-check")
+	// an LED driven straight from a GPIO pin → error
+	b = rvFed().ic("U1", "+3V3", "3:PA5:bidirectional").cap("C1", "10u", "+3V3", "GND")
+	b.net("/LED", "U1.3")
+	led(b, "D1", "/LED", "GND")
+	want(t, b.review(t, ReviewHints{}), RvLEDLimiter, "fail", "error")
 }
 
 func TestReviewFloatingInput(t *testing.T) {
@@ -323,23 +398,39 @@ func TestReviewFloatingInput(t *testing.T) {
 		b.net("/EN", "U1.3", "U2.3")
 		return b
 	}
+	// no intent, legacy intent: internal pulls unknown → cannot-check
 	want(t, mk().review(t, ReviewHints{}), RvFloatingInput, "cannot-check")
-	want(t, mk().review(t, intentHints()), RvFloatingInput, "fail", "error")
-	h := intentHints()
+	want(t, mk().review(t, intentHints()), RvFloatingInput, "cannot-check")
+	want(t, mk().review(t, completeHints()), RvFloatingInput, "fail", "error")
+	h := completeHints()
 	h.PullDown = map[string]string{"U1.EN": "intent review.internalPulldowns"}
 	want(t, mk().review(t, h), RvFloatingInput, "pass")
-	// a resistor (passive) drives it → not a candidate
-	want(t, mk().res("R1", "10k", "/EN", "+3V3").review(t, intentHints()), RvFloatingInput, "not-applicable")
+	// a resistor to a rail drives it
+	want(t, mk().res("R1", "10k", "/EN", "+3V3").review(t, completeHints()), RvFloatingInput, "pass")
+	// passives that do not drive: a dangling resistor, a capacitor to ground
+	want(t, mk().res("R1", "10k", "/EN", "/NOWHERE").review(t, completeHints()), RvFloatingInput, "fail", "error")
+	want(t, mk().cap("C7", "100n", "/EN", "GND").review(t, completeHints()), RvFloatingInput, "fail", "error")
+	// a 0 Ω link between two inputs joins them; still nothing drives them
+	z := rvBase().ic("U1", "+3V3", "3:EN:input").ic("U2", "+3V3", "3:CE:input").cap("C1", "10u", "+3V3", "GND")
+	z.net("/EN_A", "U1.3").net("/EN_B", "U2.3").res("R0", "0", "/EN_A", "/EN_B")
+	c := want(t, z.review(t, completeHints()), RvFloatingInput, "fail", "error")
+	if len(c.Findings[0].Pins) != 2 {
+		t.Fatal(c.Findings[0])
+	}
 }
 
 func TestReviewOutputConflict(t *testing.T) {
 	b := rvBase().ic("U1", "+3V3", "3:Y:output").ic("U2", "+3V3", "3:Y:output", "4:Y2:output").cap("C1", "10u", "+3V3", "GND")
 	b.net("/CLK", "U1.3", "U2.3")
 	want(t, b.review(t, ReviewHints{}), RvOutputConflict, "fail", "error")
-	// two outputs of one part (stacked) are one driver
+	// stacked pins (one electrical pin drawn twice: same name) are one driver
 	b = rvBase().ic("U1", "+3V3", "3:Y:output", "4:Y:output").cap("C1", "10u", "+3V3", "GND")
 	b.net("/CLK", "U1.3", "U1.4")
 	want(t, b.review(t, ReviewHints{}), RvOutputConflict, "pass")
+	// two independent outputs of one package (1Y, 2Y of a buffer) contend
+	b = rvBase().ic("U1", "+3V3", "3:1Y:output", "4:2Y:output").cap("C1", "10u", "+3V3", "GND")
+	b.net("/CLK", "U1.3", "U1.4")
+	want(t, b.review(t, ReviewHints{}), RvOutputConflict, "fail", "error")
 	// PWR_FLAG on a regulator output is virtual: no contention
 	b = rvBase().cap("C1", "10u", "+3V3", "GND").cap("C2", "10u", "/VIN", "GND")
 	b.part("U5", "Regulator_Linear:SYN-LDO", "SYN-LDO", "1:GND:power_in", "2:VO:power_out", "3:VI:power_in")
@@ -364,6 +455,18 @@ func TestReviewICPowerGround(t *testing.T) {
 		t.Fatal(c.Findings)
 	}
 	want(t, rvBase().ic("U1", "+3V3").cap("C1", "10u", "+3V3", "GND").review(t, ReviewHints{}), RvICPowerGround, "pass")
+	// a ground pin typed input in its library is still the ground pin
+	g := rvBase().cap("C1", "10u", "+3V3", "GND")
+	g.part("U2", "Synth:REG", "", "5:Vin:power_in", "7:GND:input")
+	g.addNode("+3V3", "U2.5")
+	g.addNode("GND", "U2.7")
+	want(t, g.review(t, ReviewHints{}), RvICPowerGround, "pass")
+	// a TVS whose library name merely contains "led" (Filled) is no LED
+	tv := rvFed()
+	tv.part("D9", "Synth:D_TVS_Filled", "5V", "1:A1:passive", "2:A2:passive")
+	tv.addNode("+3V3", "D9.1")
+	tv.addNode("GND", "D9.2")
+	want(t, tv.review(t, ReviewHints{}), RvLEDLimiter, "not-applicable")
 }
 
 func TestReviewDecoupling(t *testing.T) {
@@ -452,9 +555,19 @@ func TestReviewMergedNets(t *testing.T) {
 		Items:       []ERCItem{{Description: "Label 'VDD_A'"}, {Description: "Power symbol '+3V3'"}}}}}
 	b := rvBase().ic("U1", "+3V3").cap("C1", "10u", "+3V3", "GND")
 	c := want(t, b.review(t, ReviewHints{}, func(in *ReviewInput) { in.ERC = erc }), RvMergedNets, "fail", "error")
-	if c.Findings[0].Sheet != "/Power/" || !strings.HasPrefix(c.Findings[0].Fingerprint, RvMergedNets+"|") {
+	if c.Findings[0].Sheet != "/Power/" || !strings.HasPrefix(c.Findings[0].Fingerprint, "sr2:"+RvMergedNets+":") {
 		t.Fatal(c.Findings[0])
 	}
+	// two violations on one sheet with different items differ
+	erc2 := &ERCReport{Violations: append(append([]ERCViolation{}, erc.Violations...), ERCViolation{Sheet: "/Power/", Type: "multiple_net_names", Severity: "warning",
+		Description: "Both 'A' and 'B' are attached", Items: []ERCItem{{Description: "Label 'A'", UUID: "u1"}, {Description: "Label 'B'", UUID: "u2"}}})}
+	c = want(t, b.review(t, ReviewHints{}, func(in *ReviewInput) { in.ERC = erc2 }), RvMergedNets, "fail", "error", "error")
+	if c.Findings[0].Fingerprint == c.Findings[1].Fingerprint {
+		t.Fatal("same fingerprint")
+	}
+	// items that do not name two labels: unverified, never matched to an alias
+	bad := &ERCReport{Violations: []ERCViolation{{Sheet: "/", Type: "multiple_net_names", Description: "names conflict", Items: []ERCItem{{Description: "Wire"}}}}}
+	want(t, b.review(t, ReviewHints{Aliases: [][]string{{"X", "Y"}}}, func(in *ReviewInput) { in.ERC = bad }), RvMergedNets, "cannot-check")
 	// intentional alias
 	want(t, b.review(t, ReviewHints{Aliases: [][]string{{"+3V3", "VDD_A"}}}, func(in *ReviewInput) { in.ERC = erc }), RvMergedNets, "pass")
 	// no ERC, or the rule ignored → cannot-check
@@ -547,7 +660,7 @@ func TestReviewWaivers(t *testing.T) {
 	r := rvFed().ic("U1", "+3V3").review(t, ReviewHints{})
 	c := want(t, r, RvDecoupling, "fail", "error")
 	fp := c.Findings[0].Fingerprint
-	if fp != "decoupling|U1|U1.1|+3V3" {
+	if fp != ReviewFingerprint(RvDecoupling, []string{"U1"}, []string{"U1.1"}, []string{"+3V3"}) || !strings.HasPrefix(fp, "sr2:decoupling:") {
 		t.Fatalf("fingerprint %q", fp)
 	}
 	r.Judge(func(s string) (string, bool) { return "waived: reviewed (test)", s == fp })
@@ -600,8 +713,8 @@ func TestReviewCleanDesign(t *testing.T) {
 }
 
 // TestReviewLargeGenerated: counts and runtime on a generated 400-IC
-// board (every IC decoupled, I2C pulled up): no findings, well under a
-// second.
+// board (every IC decoupled, I2C pulled up): no errors, only the shared
+// decoupling warnings, well under a second.
 func TestReviewLargeGenerated(t *testing.T) {
 	b := rvBase()
 	b.cap("C0", "22u", "+3V3", "GND")
@@ -623,19 +736,48 @@ func TestReviewLargeGenerated(t *testing.T) {
 	}
 	b.res("R401", "10k", "/SIG400", "GND")
 	t0 := time.Now()
-	r := b.review(t, intentHints())
+	h := completeHints()
+	h.NetVoltage, h.VoltageSource = map[string]float64{"+3V3": 3.3}, map[string]string{"+3V3": "intent"}
+	r := b.review(t, h)
 	el := time.Since(t0)
 	t.Logf("400 ICs, %d nets: %s in %v", len(b.nl.Nets), r.Summary(), el)
-	if r.Errors != 0 || r.Warnings != 0 {
-		t.Fatalf("%s: %v", r.Summary(), r.Items())
+	// one rail for 400 ICs: every IC's decoupling set is shared (warning)
+	if r.Errors != 0 || r.Status != gate.Pass || rvCheckOf(t, r, RvDecoupling).Coverage.Findings != r.Warnings || r.Warnings != 400 {
+		t.Fatalf("%s: %v", r.Summary(), r.Items()[:3])
 	}
 	if !testing.Short() && el > 5*time.Second {
 		t.Fatalf("too slow: %v", el)
 	}
 }
 
-// TestReviewDualSupplyAndAltI2C: a dual-supply op-amp has no ground pin by
-// design; an alternate-function SDA pin only suggests I2C.
+// TestReviewFingerprintCanonical: names are never joined unescaped, and a
+// floating-input waiver names its receivers.
+func TestReviewFingerprintCanonical(t *testing.T) {
+	if ReviewFingerprint("r", nil, nil, []string{"A,B", "C"}) == ReviewFingerprint("r", nil, nil, []string{"A", "B,C"}) {
+		t.Fatal("comma collision")
+	}
+	if ReviewFingerprint("r", []string{"A|B"}, nil, nil) == ReviewFingerprint("r", []string{"A"}, []string{"B"}, nil) {
+		t.Fatal("pipe collision")
+	}
+	if ReviewFingerprint("r", nil, nil, []string{"B", "A"}) != ReviewFingerprint("r", nil, nil, []string{"A", "B"}) {
+		t.Fatal("order matters")
+	}
+	mk := func(rx string) *rvT {
+		b := rvBase().ic("U1", "+3V3", "3:EN:input").ic(rx, "+3V3", "3:CE:input").cap("C1", "10u", "+3V3", "GND")
+		b.net("/EN", "U1.3", rx+".3")
+		return b
+	}
+	fp := func(b *rvT) string {
+		return rvCheckOf(t, b.review(t, completeHints()), RvFloatingInput).Findings[0].Fingerprint
+	}
+	if fp(mk("U2")) == fp(mk("U7")) {
+		t.Fatal("replacing the receiver keeps the waiver")
+	}
+}
+
+// TestReviewDualSupplyAndAltI2C: a bipolar-supply op-amp has no ground pin
+// by design (proven only with rail voltages); an alternate-function SDA pin
+// only suggests I2C.
 func TestReviewDualSupplyAndAltI2C(t *testing.T) {
 	b := rvFed()
 	b.net("-5V")
@@ -644,9 +786,27 @@ func TestReviewDualSupplyAndAltI2C(t *testing.T) {
 	b.addNode("-5V", "U1.2")
 	b.cap("C1", "10u", "+3V3", "GND").cap("C2", "10u", "-5V", "GND")
 	b.net("/O", "U1.3", "U1.4")
-	c := want(t, b.review(t, ReviewHints{}), RvICPowerGround, "pass")
+	want(t, b.review(t, ReviewHints{}), RvICPowerGround, "cannot-check")
+	hv := ReviewHints{NetVoltage: map[string]float64{"+3V3": 3.3, "-5V": -5}, VoltageSource: map[string]string{"+3V3": "sim s", "-5V": "sim s"}}
+	c := want(t, b.review(t, hv), RvICPowerGround, "pass")
 	if len(c.Exempt) != 1 {
 		t.Fatal(c.Exempt)
+	}
+	// two positive rails are no bipolar supply
+	hv.NetVoltage["-5V"] = 5
+	want(t, b.review(t, hv), RvICPowerGround, "fail", "error")
+	// an MCU with VDD and VIO whose GND pin is left on its own net, a
+	// signal pin tied to ground: no ground
+	m := rvFed().cap("C1", "10u", "+3V3", "GND")
+	m.net("+1V8")
+	m.part("U1", "Synth:MCU", "", "1:VDD:power_in", "2:VIO:power_in", "3:GND:power_in", "4:MODE:input")
+	m.addNode("+3V3", "U1.1")
+	m.addNode("+1V8", "U1.2")
+	m.net("/SPARE_G", "U1.3")
+	m.addNode("GND", "U1.4")
+	c = want(t, m.review(t, ReviewHints{}), RvICPowerGround, "fail", "error")
+	if !strings.Contains(c.Findings[0].Message, "U1.3") {
+		t.Fatal(c.Findings[0])
 	}
 	b = rvFed().ic("U1", "+3V3", "3:RB4/SDA:bidirectional").ic("U2", "+3V3", "3:IO:bidirectional").cap("C1", "10u", "+3V3", "GND").cap("C2", "1u", "+3V3", "GND")
 	b.net("Net-(U1-RB4{slash}SDA)", "U1.3", "U2.3")
@@ -659,10 +819,25 @@ func TestReviewDualSupplyAndAltI2C(t *testing.T) {
 	b.net("/CANRX", "U1.3", "U2.3")
 	want(t, b.review(t, ReviewHints{}), RvI2CPullup, "not-applicable")
 	// a charge-pump output capacitor to another rail is its AC return
-	b = rvFed().ic("U3", "+3V3", "4:V+:power_out").cap("C1", "10u", "+3V3", "GND")
+	b = rvFed().ic("U3", "+3V3", "4:V+:power_out", "5:C1+:passive", "6:C1-:passive").cap("C1", "10u", "+3V3", "GND")
 	b.cap("C5", "100n", "/VP", "+3V3")
 	b.addNode("/VP", "U3.4")
-	want(t, b.review(t, ReviewHints{}), RvRegOutputCap, "pass")
+	b.cap("C6", "100n", "/CF1", "/CF2")
+	b.addNode("/CF1", "U3.5")
+	b.addNode("/CF2", "U3.6")
+	c = want(t, b.review(t, ReviewHints{}), RvRegOutputCap, "pass")
+	if len(c.Exempt) != 1 || !strings.Contains(c.Exempt[0].Source, "flying") {
+		t.Fatal(c.Exempt)
+	}
+	// an LDO whose only output cap goes to its input rail is not exempt
+	l := rvFed().cap("C1", "10u", "+3V3", "GND")
+	l.net("+1V8")
+	l.part("U5", "Regulator_Linear:SYN-LDO", "SYN-LDO", "1:GND:power_in", "2:VO:power_out", "3:VI:power_in")
+	l.addNode("GND", "U5.1")
+	l.addNode("+1V8", "U5.2")
+	l.addNode("+3V3", "U5.3")
+	l.cap("C9", "1u", "+1V8", "+3V3")
+	want(t, l.review(t, ReviewHints{}), RvRegOutputCap, "fail", "error")
 	// a resistor between two rails is not a pull-up
 	b = rvFed().ic("U1", "+3V3").cap("C1", "10u", "+3V3", "GND")
 	b.net("+3V3_OUT")

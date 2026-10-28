@@ -74,6 +74,22 @@ type ReviewNotes struct {
 	CaplessRegulators []string `json:"caplessRegulators,omitempty"`
 	// Aliases: groups of names intentionally on one net.
 	Aliases [][]string `json:"aliases,omitempty"`
+	// NoInternalPulls: pins known to have no internal pull;
+	// InternalPullsComplete: the internal pull lists above name every
+	// internal pull the design relies on, so an unlisted pin has none. An
+	// open-drain line or undriven input is an error only with one of them
+	// (otherwise the review cannot tell).
+	NoInternalPulls       []string `json:"noInternalPulls,omitempty"`
+	InternalPullsComplete bool     `json:"internalPullsComplete,omitempty"`
+	// PushPullOutputs: bidirectional / tri-state pins configured as
+	// push-pull outputs (they then drive an open-drain line).
+	PushPullOutputs []string `json:"pushPullOutputs,omitempty"`
+	// PinDomains: pin → the supply net of its I/O domain (a part with
+	// several rails); PinMaxV: a pin's maximum voltage (abs-max/tolerance).
+	PinDomains map[string]string  `json:"pinDomains,omitempty"`
+	PinMaxV    map[string]float64 `json:"pinMaxV,omitempty"`
+	// ChargePumps: parts whose output capacitor returns to another rail.
+	ChargePumps []string `json:"chargePumps,omitempty"`
 }
 
 // SpecEdge is spec.json "edge".

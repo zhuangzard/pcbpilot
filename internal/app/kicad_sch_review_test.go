@@ -78,6 +78,27 @@ func TestLoadReviewHints(t *testing.T) {
 	if _, _, err := loadReviewHints(p, "", ids, nl); err == nil {
 		t.Fatal("non-intent accepted")
 	}
+	// a power net without voltage.nom has no voltage (never 0 V)
+	_ = os.WriteFile(p, []byte(`{"schemaVersion":1,"nets":{"+3V3":{"role":"power","voltage":{}},"GND":{"role":"ground","voltage":{"nom":0}}}}`), 0o644)
+	if h, _, err = loadReviewHints(p, "", ids, nl); err != nil {
+		t.Fatal(err)
+	}
+	if _, has := h.NetVoltage["+3V3"]; has {
+		t.Fatalf("missing nom read as %v V", h.NetVoltage["+3V3"])
+	}
+	if v, has := h.NetVoltage["GND"]; !has || v != 0 {
+		t.Fatal("declared 0 V lost")
+	}
+	// the explicit internal-pull evidence and pin roles load
+	_ = os.WriteFile(p, []byte(`{"schemaVersion":1,"nets":{"+3V3":{"role":"power","voltage":{"nom":3.3}}},
+	  "review":{"internalPullsComplete":true,"noInternalPulls":["U1.3"],"pushPullOutputs":["U2.INT"],
+	            "pinDomains":{"U2.3":"+3V3"},"pinMaxV":{"U2.3":3.6},"chargePumps":["U1"]}}`), 0o644)
+	if h, _, err = loadReviewHints(p, "", ids, nl); err != nil {
+		t.Fatal(err)
+	}
+	if h.PullsComplete == "" || h.PullNone["U1.3"] == "" || h.PushPull["U2.INT"] == "" || h.PinDomain["U2.3"] != "+3V3" || h.PinMaxV["U2.3"] != 3.6 || h.ChargePump["U1"] == "" {
+		t.Fatalf("%+v", h)
+	}
 	// sim voltages fill what intent does not give
 	sp := filepath.Join(dir, "sim.json")
 	_ = os.WriteFile(sp, []byte(`{"results":[{"scenario":"worst","nets":{"+3V3":{"voltage":3.29}}}]}`), 0o644)
@@ -91,7 +112,7 @@ func TestLoadReviewHints(t *testing.T) {
 // fingerprint exactly; other gates' waivers and text matches do not apply.
 func TestSchReviewWaiverFile(t *testing.T) {
 	nl := rvTestNetlist()
-	r, err := kicad.Review(kicad.ReviewInput{Netlist: nl, ERC: &kicad.ERCReport{}, HierRan: true, Hints: kicad.ReviewHints{Intent: "i"}})
+	r, err := kicad.Review(kicad.ReviewInput{Netlist: nl, ERC: &kicad.ERCReport{}, HierRan: true, Hints: kicad.ReviewHints{Intent: "i", PullsComplete: "intent review.internalPullsComplete"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,5 +194,67 @@ func TestSchReviewGateLive(t *testing.T) {
 	}
 	if res.OK || res.Error == nil || res.Error.Code != "SCH_REVIEW_FAILED" || fileExists(filepath.Join(strictOut, "rvldo.kicad_sch")) {
 		t.Fatalf("strict: ok=%v err=%+v", res.OK, res.Error)
+	}
+}
+
+// TestRunSchReviewHierarchy: the sheet-pin / hierarchical-label mismatches
+// of the sheet files reach the report of the sch-check --review path.
+func TestRunSchReviewHierarchy(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "top.kicad_sch")
+	_ = os.WriteFile(root, []byte(`(kicad_sch (version 20250114) (uuid "11111111-1111-1111-1111-111111111111")
+  (sheet (at 10 10) (size 20 20) (uuid "22222222-2222-2222-2222-222222222222")
+    (property "Sheetname" "Sub" (at 0 0 0)) (property "Sheetfile" "sub.kicad_sch" (at 0 0 0))
+    (pin "DATA" input (at 10 12 180) (uuid "33333333-3333-3333-3333-333333333333"))
+    (pin "EN" input (at 10 14 180) (uuid "44444444-4444-4444-4444-444444444444"))))`), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "sub.kicad_sch"), []byte(`(kicad_sch (version 20250114) (uuid "99999999-9999-9999-9999-999999999999")
+  (hierarchical_label "DATA" (shape input) (at 0 0 0)))`), 0o644)
+	rv, err := runSchReview(schReviewOpts{root: root, nl: rvTestNetlist(), erc: &kicad.ERCReport{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := rvCheck(t, rv, kicad.RvHierMismatch)
+	if c.Status != "fail" || len(c.Findings) != 1 || c.Coverage.Candidates != 1 || !strings.Contains(c.Findings[0].Message, `"EN"`) {
+		t.Fatalf("%+v", c)
+	}
+	if len(rv.Inputs) != 2 {
+		t.Fatalf("inputs %+v", rv.Inputs)
+	}
+}
+
+// TestSchReviewReportWriteFailureLive: a sch-review.json that cannot be
+// written blocks publication (advisory too); the previous project and
+// report stay as they were.
+func TestSchReviewReportWriteFailureLive(t *testing.T) {
+	sbNeedKicad(t)
+	if testing.Short() {
+		t.Skip("live KiCad build")
+	}
+	t.Setenv(kicad.EnvCacheDir, t.TempDir())
+	out := filepath.Join(t.TempDir(), "p")
+	spec := &sbSpec{Name: "rvw", Title: sbTitle{Title: "Review write", Date: "2026-10-28", Rev: "1", Company: "Synthetic"},
+		Parts: []sbPart{{Ref: "J1", Value: "IN", Symbol: "Connector:Conn_01x02_Pin"}, {Ref: "R1", Value: "1k", Symbol: "Device:R"}},
+		Nets:  []sbNet{{Name: "+5V", Kind: "power", Pins: []string{"J1:1", "R1:1"}}, {Name: "GND", Kind: "ground", Pins: []string{"J1:2", "R1:2"}}}}
+	res, err := runSchBuild(spec, sbOptions{OutDir: out, NoIntent: true, Offline: true, PlannerBudget: 20000}, nil)
+	if err != nil || !fileExists(filepath.Join(out, "sch-review.json")) {
+		t.Fatalf("first build: %v %+v", err, res.Gates)
+	}
+	before, _ := os.ReadFile(filepath.Join(out, "sch-review.json"))
+	sheet, _ := os.ReadFile(filepath.Join(out, "rvw.kicad_sch"))
+	old := sbWriteReviewReport
+	sbWriteReviewReport = func(string, any) error { return os.ErrPermission }
+	defer func() { sbWriteReviewReport = old }()
+	spec.Parts[1].Value = "2k2"
+	res, err = runSchBuild(spec, sbOptions{OutDir: out, NoIntent: true, Offline: true, PlannerBudget: 20000}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OK || res.Error == nil || res.Error.Code != "SCH_REVIEW_FAILED" || sbGateStatus(res, schReviewGate) != "fail" {
+		t.Fatalf("ok=%v err=%+v", res.OK, res.Error)
+	}
+	after, _ := os.ReadFile(filepath.Join(out, "sch-review.json"))
+	sheet2, _ := os.ReadFile(filepath.Join(out, "rvw.kicad_sch"))
+	if !bytes.Equal(before, after) || !bytes.Equal(sheet, sheet2) {
+		t.Fatal("the previous project or report changed")
 	}
 }

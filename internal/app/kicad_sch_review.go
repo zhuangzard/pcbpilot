@@ -31,7 +31,7 @@ type reviewIntentDoc struct {
 	Nets map[string]struct {
 		Role    string `json:"role"`
 		Voltage struct {
-			Nom float64 `json:"nom"`
+			Nom *float64 `json:"nom"` // nil: no value (never read as 0 V)
 		} `json:"voltage"`
 		CurrentSource string `json:"currentSource"`
 	} `json:"nets"`
@@ -163,7 +163,9 @@ func loadReviewHints(intentPath, simPath string, ids []string, nl *kicad.SchNetl
 	h := kicad.ReviewHints{NetRole: map[string]string{}, NetVoltage: map[string]float64{}, VoltageSource: map[string]string{},
 		Regulators: map[string]string{}, PullUp: map[string]string{}, PullDown: map[string]string{}, Tolerant: map[string]string{},
 		PullUpNet: map[string]string{}, ReferenceRail: map[string]string{}, SinglePinNet: map[string]string{},
-		TestPoint: map[string]string{}, Module: map[string]string{}, Capless: map[string]string{}}
+		TestPoint: map[string]string{}, Module: map[string]string{}, Capless: map[string]string{},
+		PullNone: map[string]string{}, PushPull: map[string]string{}, PinDomain: map[string]string{}, PinMaxV: map[string]float64{},
+		ChargePump: map[string]string{}}
 	var notes []string
 	res := netname.NewResolver(ids)
 	net := func(name, what string) (string, bool) {
@@ -207,8 +209,8 @@ func loadReviewHints(intentPath, simPath string, ids []string, nl *kicad.SchNetl
 			}
 			np := doc.Nets[n]
 			h.NetRole[id] = np.Role
-			if np.Voltage.Nom != 0 || np.Role == "power" {
-				h.NetVoltage[id] = np.Voltage.Nom
+			if np.Voltage.Nom != nil {
+				h.NetVoltage[id] = *np.Voltage.Nom
 				h.VoltageSource[id] = "intent " + filepath.Base(intentPath)
 			}
 		}
@@ -222,20 +224,42 @@ func loadReviewHints(intentPath, simPath string, ids []string, nl *kicad.SchNetl
 		}
 		if r := doc.Review; r != nil {
 			src := func(f string) string { return "intent review." + f }
+			pinKeys := func(x, f string) []string {
+				ref, pin, ok := strings.Cut(strings.Replace(x, ":", ".", 1), ".")
+				if !ok || !refs[ref] {
+					notes = append(notes, fmt.Sprintf("intent review.%s: %q is not REF.PIN of a part in the schematic", f, x))
+					return nil
+				}
+				return []string{ref + "." + pin, ref + "." + strings.ToUpper(pin)}
+			}
 			pins := func(xs []string, m map[string]string, f string) {
 				for _, x := range xs {
-					ref, pin, ok := strings.Cut(strings.Replace(x, ":", ".", 1), ".")
-					if !ok || !refs[ref] {
-						notes = append(notes, fmt.Sprintf("intent review.%s: %q is not REF.PIN of a part in the schematic", f, x))
-						continue
+					for _, k := range pinKeys(x, f) {
+						m[k] = src(f)
 					}
-					m[ref+"."+pin] = src(f)
-					m[ref+"."+strings.ToUpper(pin)] = src(f)
 				}
 			}
 			pins(r.InternalPullups, h.PullUp, "internalPullups")
 			pins(r.InternalPulldowns, h.PullDown, "internalPulldowns")
 			pins(r.TolerantPins, h.Tolerant, "tolerantPins")
+			pins(r.NoInternalPulls, h.PullNone, "noInternalPulls")
+			pins(r.PushPullOutputs, h.PushPull, "pushPullOutputs")
+			if r.InternalPullsComplete {
+				h.PullsComplete = src("internalPullsComplete")
+			}
+			for x, n := range r.PinDomains {
+				ks := pinKeys(x, "pinDomains")
+				if id, ok := net(n, "intent review.pinDomains"); ok {
+					for _, k := range ks {
+						h.PinDomain[k] = id
+					}
+				}
+			}
+			for x, max := range r.PinMaxV {
+				for _, k := range pinKeys(x, "pinMaxV") {
+					h.PinMaxV[k] = max
+				}
+			}
 			nets := func(xs []string, m map[string]string, f string) {
 				for _, x := range xs {
 					if id, ok := net(x, "intent review."+f); ok {
@@ -258,6 +282,7 @@ func loadReviewHints(intentPath, simPath string, ids []string, nl *kicad.SchNetl
 			parts(r.TestPoints, h.TestPoint, "testPoints")
 			parts(r.Modules, h.Module, "modules")
 			parts(r.CaplessRegulators, h.Capless, "caplessRegulators")
+			parts(r.ChargePumps, h.ChargePump, "chargePumps")
 			h.Aliases = r.Aliases
 		}
 	}

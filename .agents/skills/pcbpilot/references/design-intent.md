@@ -59,12 +59,23 @@ pcbpilot intent derive --connectivity sch-p1.json --connectivity sch-p2.json \
 
 ```json
 "review":{"internalPullups":["U1.NRST","U3.7"],"internalPulldowns":["U2.BOOT0"],"pulledUpNets":["/I2C_EXT_SDA"],
-          "tolerantPins":["U4.SDA"],"testPoints":["TP3"],"singlePinNets":["/SPARE"],"referenceRails":["/VREF"],
-          "modules":["U8"],"caplessRegulators":["U5"],"aliases":[["+3V3","VDD_IO"]]}
+          "internalPullsComplete":true,"noInternalPulls":["U6.EN"],"pushPullOutputs":["U1.PB3"],
+          "tolerantPins":["U4.SDA"],"pinDomains":{"U1.PA9":"+1V8"},"pinMaxV":{"U4.SDA":3.6},
+          "testPoints":["TP3"],"singlePinNets":["/SPARE"],"referenceRails":["/VREF"],
+          "modules":["U8"],"caplessRegulators":["U5"],"chargePumps":["U9"],"aliases":[["+3V3","VDD_IO"]]}
 ```
 
 脚写 `REF.脚号` 或 `REF.脚名`；网写网名（显示名或全名，歧义/不存在的名字记入 `review.notes`，不猜）；件写位号。
 低电流不是豁免理由：参考/采样轨要显式写进 `referenceRails`。
+
+- 开漏线没上拉、输入没驱动要判 error，必须有“没有内部上下拉”的**明确证据**：`internalPullsComplete:true`（上面的
+  内部上下拉清单已列全，未列的脚就没有）或 `noInternalPulls` 点名该脚；只给 intent.json（旧的、或没有 review 段）
+  不算证据，这两项保持 cannot-check。
+- MCU GPIO（bidirectional/tri_state）方向未知，不算 push-pull 驱动；配成推挽输出的写 `pushPullOutputs`。
+- 上拉电压域：多电源器件的信号脚写 `pinDomains`（脚 → 所属电源网）；单电源器件取它唯一的电源轨。超出域电压 0.3 V
+  只是 likely（warning）；写了 `pinMaxV`（绝对最大值/耐压）才判 proven error；`tolerantPins` 豁免。
+- `chargePumps`：输出电容回到另一条电源轨的器件（带 C1+/C1− 等飞电容脚的会自动识别）；普通 LDO 的输出电容
+  接到输入轨不算输出电容。
 
 声明的轨电流**优先于仿真**（`currentSource: declared`）；声明低于仿真值会出 finding。只声明
 `voltage`/`rippleMvpp`/`peakV`（不写 `currentA`）的轨保留仿真/启发电流。`domains[].transient`

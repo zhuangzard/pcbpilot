@@ -1958,12 +1958,16 @@ func sbSchReviewGate(stage, out, name string, nl *kicad.SchNetlist, erc *kicad.E
 		rep.gate(schReviewGate, status, "sch-review could not run: "+sbClip(err.Error(), 300), nil)
 		return "", mode == "strict"
 	}
+	// the report is published with the project or not at all: a failed
+	// write blocks the build in every mode
 	p := filepath.Join(stage, "sch-review.json")
-	if err := writeJSONFile(p, rv); err == nil {
-		sbRelocate(p, stage, out)
-		rel = "sch-review.json"
-		rep.Outputs["schReview"] = filepath.Join(out, rel)
+	if err := sbWriteReviewReport(p, rv); err != nil {
+		rep.gate(schReviewGate, "fail", "sch-review.json not written: "+sbClip(err.Error(), 300), nil)
+		return "", true
 	}
+	sbRelocate(p, stage, out)
+	rel = "sch-review.json"
+	rep.Outputs["schReview"] = filepath.Join(out, rel)
 	status := "pass"
 	if rv.Status != gate.Pass {
 		status = "warn"
@@ -1978,6 +1982,9 @@ func sbSchReviewGate(stage, out, name string, nl *kicad.SchNetlist, erc *kicad.E
 	rep.gate(schReviewGate, status, mode+": "+rv.Summary(), map[string]any{"verdict": rv.Verdict, "items": items, "cannotCheck": rv.Undecided})
 	return rel, status == "fail"
 }
+
+// sbWriteReviewReport writes sch-review.json into the stage (a test seam).
+var sbWriteReviewReport = func(path string, v any) error { return writeJSONFile(path, v) }
 
 // sbGateDetail is the detail of the named gate.
 func sbGateDetail(rep *sbReport, name string) string {

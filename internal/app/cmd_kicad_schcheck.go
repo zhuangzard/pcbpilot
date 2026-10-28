@@ -90,7 +90,7 @@ Each check is pass | fail | cannot-check | not-applicable and names the
 evidence it needed and used; each finding has severity error|warning|info,
 certainty proven|likely|heuristic (only proven findings are errors), refs,
 pins, nets, sheet, a fix and its evidence. What the evidence cannot decide
-(e.g. an internal pull-up without intent) is unverified: cannot-check, never
+(e.g. an internal pull without explicit intent evidence: review.internalPullsComplete / noInternalPulls) is unverified: cannot-check, never
 a pass. Exemptions need an explicit role (intent review{}, a ReviewRole /
 InternalPullup component field, the part kind) and name their source; a low
 current alone exempts nothing. Connector pins are the off-board boundary

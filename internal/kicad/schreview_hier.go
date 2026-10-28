@@ -108,5 +108,6 @@ func SheetHierarchyMismatches(root string) ([]HierMismatch, int, error) {
 		}
 		return nil
 	}
-	return out, n, walk(root, "/", 0)
+	err := walk(root, "/", 0)
+	return out, n, err
 }
