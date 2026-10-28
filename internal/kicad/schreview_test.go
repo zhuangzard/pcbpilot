@@ -1546,3 +1546,34 @@ func TestReviewRound8(t *testing.T) {
 	m.res("R1", "1k", "/K", "+5V")
 	want(t, m.review(t, ReviewHints{}), RvLEDLimiter, "fail", "error")
 }
+
+// TestReviewSplitSupplyVSS: VSS on a negative rail is the negative supply
+// (no ground-pin error); unconnected it is an error; on GND with VDD on
+// +3V3 it is the single-supply ground.
+func TestReviewSplitSupplyVSS(t *testing.T) {
+	mk := func(vss string) *rvT {
+		b := newRvT()
+		b.net("GND")
+		b.part("J9", "Connector:Conn_01x03", "", "1:1:passive", "2:2:passive", "3:3:passive")
+		b.net("+2V5", "J9.1").net("-2V5", "J9.2")
+		b.addNode("GND", "J9.3")
+		b.cap("C1", "100n", "+2V5", "GND").cap("C2", "100n", "-2V5", "GND").cap("C3", "10u", "+2V5", "GND").cap("C4", "10u", "-2V5", "GND")
+		b.part("U1", "Synth:OPA", "", "1:VDD:power_in", "2:VSS:power_in", "3:OUT:output", "4:IN:input")
+		b.addNode("+2V5", "U1.1")
+		if vss != "" {
+			b.addNode(vss, "U1.2")
+		} else {
+			b.net("unconnected-(U1-VSS-Pad2)", "U1.2")
+		}
+		b.net("/O", "U1.3", "U1.4")
+		return b
+	}
+	want(t, mk("-2V5").review(t, ReviewHints{}), RvICPowerGround, "pass")
+	want(t, mk("").review(t, ReviewHints{}), RvICPowerGround, "fail", "error")
+	// single supply: VDD on +3V3, VSS on GND
+	s := rvFed().cap("C1", "10u", "+3V3", "GND")
+	s.part("U2", "Synth:IC", "", "1:VDD:power_in", "2:VSS:power_in")
+	s.addNode("+3V3", "U2.1")
+	s.addNode("GND", "U2.2")
+	want(t, s.review(t, ReviewHints{}), RvICPowerGround, "pass")
+}

@@ -2743,6 +2743,10 @@ func (v *rvView) supplyEvidence(n string) string {
 
 var rvGndPinRe = regexp.MustCompile(`(?i)^(\w*GND\w*|VSS\w*|EP|EPAD|PAD|THERMAL\w*|0V)$`)
 
+// rvVssRe: VSS-named pins — ground in a single-supply part, the negative
+// supply on a split one.
+var rvVssRe = regexp.MustCompile(`(?i)^VSS\w*$`)
+
 // rvNegSupRe: a negative-supply terminal (V−, VEE, −VS): on ground in a
 // single-supply design, on a negative rail in a split one.
 var rvNegSupRe = regexp.MustCompile(`(?i)^(V-|VEE\w*|-VS\w*|VS-|V_?NEG\w*)$`)
@@ -2776,6 +2780,15 @@ func (v *rvView) checkICPower() *rvCheck {
 		var gndPins, badGnd, badSup, onGnd, noSrc, negOnGnd []string
 		for _, p := range comp.pins {
 			key := p.Ref + "." + p.Num
+			// VSS on a negative rail is the negative supply of a split
+			// supply, not a ground pin (unconnected, NC or on a signal net
+			// it stays a ground pin that misses ground)
+			if rvVssRe.MatchString(p.Name) && !p.NC && !netname.IsUnconnected(p.Net) && !v.groupIsGround(p.Net) {
+				if x, known, sign := v.railLevel(p.Net); known && x < 0 || !known && sign < 0 {
+					rails[v.find(p.Net)] = p.Net
+					continue
+				}
+			}
 			if rvGndPinRe.MatchString(p.Name) && p.Type != "output" && p.Type != "power_out" {
 				if conn {
 					continue // a connector's ground pins are its own business
