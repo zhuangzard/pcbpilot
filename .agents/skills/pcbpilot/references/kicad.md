@@ -295,7 +295,8 @@ pcbpilot kicad rules … --check [--stage placed|routed] [--report r.json]  # �
   不会因别的层缺值被当成 1 oz。温升取意图 `copper.tempRiseC`（缺省 10 °C，同样记假设）。
   例：VCC 意图 20 mil、`--sim` worst 1.6 A、1 oz、ΔT 10 °C → IPC 23.62 mil，向上取到 0.6 mm（23.622 mil），外层与内层
   （0.5 oz 时更宽）都以电流线宽为准；`+5VUSB` 1.0 A 需 13.78 mil < 意图 20 mil → 意图线宽为准。
-- **cannot-check**：**每个** power / ground / switch 网都需要电流证据（`needsCurrent`）。没有任何电流数字（无 sim 结果、
+- **cannot-check**：**每个** power / ground / switch 网都需要电流证据（`needsCurrent`；只有**显式写出的** 0 才算零——意图里
+  `currentSource` 是 simulated 却没写 `currentA`、或 sim 条目是空的 `"VCC": {}`，都算缺证据）。没有任何电流数字（无 sim 结果、
   无声明、意图 `currentSource` 缺失或 heuristic，`currentA` 写不写都一样），或 `pulsed: true` 而没有 `peakA` / `rmsA` →
   该网 `cannot-check`，意图线宽仍作为下限写入；计划不完整，`--apply` 拒绝（退出 5，什么都不写）。**有证据的零电流**
   （sim 结果为 0，或 simulated / declared 的 `currentA: 0`）不算缺失，按意图线宽通过。
@@ -313,7 +314,10 @@ pcbpilot kicad rules … --check [--stage placed|routed] [--report r.json]  # �
   校验时对**每个启用的铜层**（F.Cu、In1.Cu…、B.Cu）分别按 KiCad 的“最后匹配”解析实际规则：不带 `(layer …)` 的、
   `outer` / `inner` 组规则、以及只写某一层名（如 `B.Cu`、`In2.Cu`）的规则都算，含条件可能与**该网**重叠的用户规则（按每个网
   自己的名字判：网名、它实际所在的类、本次计划给它的 PP 类和绝缘域类；点名别的计划网的规则不算它的）；任一层解析值
-  低于该层下限即失败（单层的削弱规则不靠探针，直接判失败）。块头记 `request-sha256`
+  低于该层下限即失败（单层的削弱规则不靠探针，直接判失败）。区分**确定匹配**（自有规则的精确条件、或只由指向该网
+  名字的字面量项组成的用户条件）与**可能匹配**（属性 / 通配等不能证明不相交也不能证明相交的条件）：有效值是最后一个确定
+  匹配，或其后任何一个可能匹配，取其中最低的——可能匹配的更强规则不会抹掉更弱的结果；确定匹配低于下限 = fail，可能匹配
+  低于下限或值无法比较 = cannot-check。块头记 `request-sha256`
   （推导指纹）与 `sizes-owned`。
 - **预设尺寸**：把各类的外/内层线宽与过孔写进 Board Setup → Pre-defined Sizes（GUI 便利，**从不算作规则**）；只增删
   自己上次加的（`sizes-owned`），用户原有的保留。
@@ -326,7 +330,8 @@ pcbpilot kicad rules … --check [--stage placed|routed] [--report r.json]  # �
 pcbpilot 生成的名字（`class-name`，重跑会删掉它）、用户 `.kicad_dru` 规则与 pcbpilot 的约束重叠（`dru-weakened`）、
 用户规则用了 pcbpilot 规则名（`dru-name`）。**条件默认视为重叠**，只有能证明不相交才放过：每个 `||` 分支里都有一个
 `A/B.NetName == '字面量'`、`A/B.NetClass == '字面量'` 或 `A/B.hasNetclass('字面量')` 项，且字面量不含通配符、不是计划内的
-网/类/域类（每个网的名字包括本次 apply 才新加给它的 PP 类与 `PPD_<域>` 类，板上还没有也算）；空条件、属性条件（`A.Type == 'Track'`）、通配（`'V*'`）、函数（`insideArea`）都算重叠。**两物体约束**
+网/类/域类（每个网的名字包括本次 apply 才新加给它的 PP 类与 `PPD_<域>` 类，板上还没有也算；冲突分析、绝缘对两侧、域边距、间距
+解析全用同一套每网身份：网名、现有类、计划 PP 类、计划 PPD 类）；空条件、属性条件（`A.Type == 'Track'`）、通配（`'V*'`）、函数（`insideArea`）都算重叠。**两物体约束**
 （clearance、creepage）KiCad 按 (A, B) 两种顺序判，`A.NetName == 'VCC' && B.NetName == 'OTHER'` 或单边的
 `A.NetName == 'OTHER'` 仍管着 VCC–OTHER 这一对：每个分支必须把 A 和 B **都**钉在计划外才算不相交。重叠时：track_width
 按规则能管的每个层组（`(layer …)` 为空 = 外层与内层，`outer` / `F.Cu` / `B.Cu`，`inner` / `InN.Cu`）分别与该层下限比较，

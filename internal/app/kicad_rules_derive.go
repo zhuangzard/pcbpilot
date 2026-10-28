@@ -261,6 +261,54 @@ type rulesNetBasis struct {
 	Detail string `json:"detail,omitempty"`
 }
 
+// simEvidence lists the nets a sim power file gives a current for: an
+// entry with a numeric currentA, or a pin with a numeric currentA, in the
+// "worst" result when there is one, else in any result. An empty entry
+// ("VCC": {}) or a non-number is no evidence.
+func simEvidence(raw []byte) map[string]bool {
+	var f struct {
+		Results []struct {
+			Scenario string                                `json:"scenario"`
+			Nets     map[string]map[string]json.RawMessage `json:"nets"`
+		} `json:"results"`
+	}
+	out := map[string]bool{}
+	if json.Unmarshal(raw, &f) != nil {
+		return out
+	}
+	isNum := func(m json.RawMessage) bool {
+		var v float64
+		return len(m) > 0 && json.Unmarshal(m, &v) == nil && !math.IsNaN(v) && !math.IsInf(v, 0) && v >= 0
+	}
+	worst := -1
+	for i, r := range f.Results {
+		if strings.EqualFold(r.Scenario, "worst") {
+			worst = i
+		}
+	}
+	for i, r := range f.Results {
+		if worst >= 0 && i != worst {
+			continue
+		}
+		for net, fields := range r.Nets {
+			if isNum(fields["currentA"]) {
+				out[net] = true
+				continue
+			}
+			var pins []map[string]json.RawMessage
+			if json.Unmarshal(fields["pins"], &pins) == nil {
+				for _, p := range pins {
+					if isNum(p["currentA"]) {
+						out[net] = true
+						break
+					}
+				}
+			}
+		}
+	}
+	return out
+}
+
 // rulesSimNet is the resolved sim current of one net.
 func rulesSimCurrent(sp *pcbauto.SimPower, net string) (rulesCurrent, bool) {
 	if sp == nil {
@@ -305,7 +353,11 @@ func rulesSimCurrent(sp *pcbauto.SimPower, net string) (rulesCurrent, bool) {
 // is cannot-check; its intent width (the floor) still applies. A current
 // width above an impedance-controlled or paired net's width is a failure:
 // the two requirements are incompatible, never silently maxed.
-func planRulesWidths(in *designIntent, sp *pcbauto.SimPower, decl declaredCurrents, cu rulesCopper) (map[string]rulesWidth, []rulesNetBasis) {
+//
+// simHas (from simEvidence on the raw sim file) says which nets the sim
+// actually gives a current for; without it every net of sp counts (tests).
+// An entry without a number ("VCC": {}) is no evidence, never a zero.
+func planRulesWidths(in *designIntent, sp *pcbauto.SimPower, decl declaredCurrents, cu rulesCopper, simHas ...map[string]bool) (map[string]rulesWidth, []rulesNetBasis) {
 	widths := map[string]rulesWidth{}
 	var out []rulesNetBasis
 	for _, name := range in.sortedNetNames() {
@@ -326,7 +378,7 @@ func planRulesWidths(in *designIntent, sp *pcbauto.SimPower, decl declaredCurren
 		b.NeedsCurrent = powerish
 		var cur *rulesCurrent
 		evidencedZero := false
-		if c, ok := rulesSimCurrent(sp, name); ok {
+		if c, ok := rulesSimCurrent(sp, name); ok && (len(simHas) == 0 || simHas[0][name]) {
 			cur = &c
 			evidencedZero = c.A <= 0
 		}
@@ -335,9 +387,12 @@ func planRulesWidths(in *designIntent, sp *pcbauto.SimPower, decl declaredCurren
 			cur = &rulesCurrent{A: d, Source: "declared", Why: fmt.Sprintf("declared peak %.3f A / RMS %.3f A", dp, dr)}
 		}
 		if (cur == nil || cur.A <= 0) && (n.CurrentSource == "simulated" || n.CurrentSource == "declared") {
-			if n.CurrentA > 0 {
+			switch {
+			case n.CurrentA > 0:
 				cur = &rulesCurrent{A: n.CurrentA, Source: "intent", Why: fmt.Sprintf("intent currentA %.3f A (%s; no --sim given)", n.CurrentA, n.CurrentSource)}
-			} else {
+			case n.currentAGiven:
+				// Only an explicit 0 is an evidenced zero; an absent
+				// currentA is missing evidence.
 				evidencedZero = true
 			}
 		}

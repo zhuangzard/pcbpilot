@@ -175,6 +175,31 @@ func placeRulesBlock(dru, block string) (string, error) {
 // (cls, its nets: druDisjoint); a user rule without a comparable minimum
 // resolves to 0 (unknown). 0 = none.
 func rulesTrackFloor(rules []kicad.DRURule, cls, layer string, names ...map[string]bool) (int64, string) {
+	f := rulesTrackResolve(rules, cls, layer, names...)
+	return f.Min, f.Rule
+}
+
+// trackFloor is a resolved track_width minimum.
+type trackFloor struct {
+	// Min / Rule: the worst (lowest) minimum KiCad may apply and the rule
+	// giving it; 0 = none.
+	Min  int64
+	Rule string
+	// Possible: Min comes from a rule that only possibly matches the net (a
+	// property or wildcard condition), not one that provably does.
+	Possible bool
+	// Unknown: a rule that may apply has no comparable minimum.
+	Unknown bool
+}
+
+// rulesTrackResolve is KiCad's last-match resolution with uncertainty: a
+// rule DEFINITELY matches the net (a pcbpilot-owned rule on exactly
+// A.hasNetclass('cls'), or a user rule whose condition is only literal
+// net / class terms all naming the net) or POSSIBLY matches it (any user
+// rule not provably disjoint). The effective minimum is the last definite
+// match, or any possible match after it — so the result is the lowest of
+// those: a possibly matching stronger rule never erases a weaker one.
+func rulesTrackResolve(rules []kicad.DRURule, cls, layer string, names ...map[string]bool) trackFloor {
 	cond := "A.hasNetclass('" + cls + "')"
 	nm := map[string]bool{cls: true}
 	for _, m := range names {
@@ -188,31 +213,101 @@ func rulesTrackFloor(rules []kicad.DRURule, cls, layer string, names ...map[stri
 	case "inner":
 		layer = "In1.Cu"
 	}
-	var mn int64
-	name := ""
+	type cand struct {
+		min      int64
+		rule     string
+		possible bool
+		unknown  bool
+	}
+	var cands []cand // since the last definite match, that match first
 	for _, r := range rules {
 		if !ruleOnLayer(r.Layer, layer) {
 			continue
 		}
-		if r.Block != "" && r.Condition != cond {
+		definite := false
+		switch {
+		case r.Block != "":
+			if r.Condition != cond {
+				continue
+			}
+			definite = true
+		case len(names) == 0 || druDisjoint(r.Condition, nm):
 			continue
-		}
-		if r.Block == "" && (len(names) == 0 || druDisjoint(r.Condition, nm)) {
-			continue
+		default:
+			definite = druDefinite(r.Condition, nm)
 		}
 		for _, c := range r.Constraints {
 			if c.Type != "track_width" {
 				continue
 			}
+			k := cand{rule: r.Name, possible: !definite}
 			switch {
 			case c.Min != nil:
-				mn, name = *c.Min, r.Name
+				k.min = *c.Min
 			case r.Block == "":
-				mn, name = 0, r.Name // a user rule without a comparable minimum
+				k.unknown = true // a user rule without a comparable minimum
+			default:
+				continue // an owned rule without a minimum sets none
+			}
+			if definite {
+				cands = []cand{k}
+			} else {
+				cands = append(cands, k)
 			}
 		}
 	}
-	return mn, name
+	var f trackFloor
+	for _, k := range cands {
+		if k.unknown {
+			f.Unknown = true
+			continue
+		}
+		if f.Rule == "" || k.min < f.Min {
+			f.Min, f.Rule, f.Possible = k.min, k.rule, k.possible
+		}
+	}
+	if f.Unknown && f.Rule == "" {
+		f.Rule = cands[len(cands)-1].rule
+	}
+	return f
+}
+
+var reDefiniteTerm = regexp.MustCompile(`^A\.(?:(?:NetName|NetClass)\s*==\s*'([^']*)'|hasNetclass\('([^']*)'\)|(?:NetName|NetClass)\s*==\s*"([^"]*)")$`)
+
+// druDefinite: a unary condition certainly matches an item named in names
+// — empty, or one '||' alternative made only of A literal net / class
+// terms (no wildcard) that all name it. Anything else is only possible.
+func druDefinite(cond string, names map[string]bool) bool {
+	cond = strings.TrimSpace(cond)
+	if cond == "" {
+		return true
+	}
+	trim := func(s string) string {
+		s = strings.TrimSpace(s)
+		for strings.HasPrefix(s, "(") && strings.HasSuffix(s, ")") && balanced(s[1:len(s)-1]) {
+			s = strings.TrimSpace(s[1 : len(s)-1])
+		}
+		return s
+	}
+	for _, alt := range splitTop(trim(cond), "||") {
+		ok := true
+		for _, term := range splitTop(trim(alt), "&&") {
+			m := reDefiniteTerm.FindStringSubmatch(trim(term))
+			if m == nil {
+				ok = false
+				break
+			}
+			lit := m[1] + m[2] + m[3]
+			if strings.ContainsAny(lit, "*?") || !names[lit] {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return true
+		}
+	}
+	return false
 }
 
 // ruleOnLayer: a rule's (layer …) covers the copper layer.
@@ -328,6 +423,7 @@ func (r *kicadRun) rulesStamp(ri kicadRulesInputs, inSnap *boardSnapshot) (kicad
 	}
 	stack, _ := kicad.ReadStackupCopper(board)
 	var sp *pcbauto.SimPower
+	var simHas map[string]bool
 	if r.o.sim != "" {
 		raw, err := os.ReadFile(r.o.sim)
 		if err != nil {
@@ -336,12 +432,13 @@ func (r *kicadRun) rulesStamp(ri kicadRulesInputs, inSnap *boardSnapshot) (kicad
 		if sp, err = pcbauto.ParseSim(raw); err != nil {
 			return ri, err
 		}
+		simHas = simEvidence(raw)
 	}
 	decl, _, err := loadDeclaredCurrents(r.o.requirements)
 	if err != nil {
 		return ri, err
 	}
-	widths, _ := planRulesWidths(r.in, sp, decl, copperBasis(stack, r.in))
+	widths, _ := planRulesWidths(r.in, sp, decl, copperBasis(stack, r.in), simHas)
 	ri2 := deriveKicadRules(r.in, r.o.intent, widths)
 	sum := map[string]any{"requestSha256": ri2.sha(), "appliedRequestSha256": st.RequestSHA}
 	r.summary["kicadRules"] = sum

@@ -676,7 +676,7 @@ func (r *rulesRun) derive() int {
 	cu := copperBasis(stack, ob)
 	rep.Copper = &cu
 	rep.Assumptions = append(rep.Assumptions, cu.Assumptions...)
-	widths, bases := planRulesWidths(ob, sp, decl, cu)
+	widths, bases := planRulesWidths(ob, sp, decl, cu, simEvidence(r.data[o.sim]))
 	r.bases = bases
 	r.ri = deriveKicadRules(ob, r.intentCopy, widths)
 	rep.RequestSHA = r.ri.sha()

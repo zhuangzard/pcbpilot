@@ -250,8 +250,27 @@ func (r *rulesRun) planFloor(e rulesNetPlan, layer string) int64 {
 // resolvedFloor is what rules resolve on layer for one net: its class cls
 // and the names of that net only (netNamesIn), so a rule naming another
 // planned net never counts for it.
-func (r *rulesRun) resolvedFloor(rules []kicad.DRURule, cls, layer string, names map[string]bool) (int64, string) {
-	return rulesTrackFloor(rules, cls, layer, names)
+func (r *rulesRun) resolvedFloor(rules []kicad.DRURule, cls, layer string, names map[string]bool) trackFloor {
+	return rulesTrackResolve(rules, cls, layer, names)
+}
+
+// floorProblem judges a resolved floor against want: a definite match
+// below it fails; a possible match below it, or a rule without a
+// comparable value, is cannot-check.
+func floorProblem(f trackFloor, want int64, net, layer string) (fail, cannot string) {
+	switch {
+	case f.Min < want && !f.Possible:
+		what := "no track_width minimum rule"
+		if f.Rule != "" {
+			what = fmt.Sprintf("track_width minimum %s (rule %q)", kicad.MmOfNm(f.Min), f.Rule)
+		}
+		return fmt.Sprintf("%s: %s on %s, plan %s (a netclass width is a routing default, not a minimum: run kicad rules --apply)", net, what, layer, kicad.MmOfNm(want)), ""
+	case f.Min < want:
+		return "", fmt.Sprintf("%s: the rule %q may lower track_width on %s to %s (its condition may or may not match; plan %s)", net, f.Rule, layer, kicad.MmOfNm(f.Min), kicad.MmOfNm(want))
+	case f.Unknown:
+		return "", fmt.Sprintf("%s: a rule that may apply on %s (%q) has no comparable track_width minimum", net, layer, f.Rule)
+	}
+	return "", ""
 }
 
 // ── conflicts ───────────────────────────────────────────────────────────────
@@ -379,13 +398,9 @@ func (r *rulesRun) conflicts() {
 		maxClr = max(maxClr, cls.NM.Clearance)
 	}
 	domNames := map[string]bool{}
-	for dom, nets := range r.full.Domains {
-		domNames["PPD_"+dom] = true
-		for _, n := range nets {
-			domNames[n] = true
-			for _, c := range strings.Split(r.rb0.Nets[n].Class, ",") {
-				domNames[c] = true
-			}
+	for dom := range r.full.Domains {
+		for k := range r.domainIdentity(dom) {
+			domNames[k] = true
 		}
 	}
 	for _, u := range rules {
@@ -470,24 +485,47 @@ func (r *rulesRun) netNames(e rulesNetPlan) map[string]bool {
 // netNamesIn is netNames with the composite read from rb (the staged or
 // the published readback) in addition to the plan's memberships.
 func (r *rulesRun) netNamesIn(rb *kicad.RulesReadback, e rulesNetPlan) map[string]bool {
-	m := map[string]bool{e.Net: true, e.Class: true}
-	for _, src := range []*kicad.RulesReadback{r.rb0, rb} {
+	return r.identity(e.Net, rb)
+}
+
+// identity is the complete name set of one board net, the one every
+// disjointness test uses: the net, the classes it is in now (the input
+// readback and rb), the PP class this plan assigns it and every PPD class
+// of an insulation / edge domain it joins (which may not exist yet).
+func (r *rulesRun) identity(net string, rb *kicad.RulesReadback) map[string]bool {
+	m := map[string]bool{net: true}
+	for _, src := range []*kicad.RulesReadback{r.rb0, rb, r.rbStaged} {
 		if src == nil {
 			continue
 		}
-		for _, c := range strings.Split(src.Nets[e.Net].Class, ",") {
+		for _, c := range strings.Split(src.Nets[net].Class, ",") {
 			if c != "" {
 				m[c] = true
 			}
 		}
 	}
 	if r.full != nil {
+		if c, ok := r.classOf(net); ok {
+			m[c.Name] = true
+		}
 		for dom, nets := range r.full.Domains {
 			for _, n := range nets {
-				if n == e.Net {
+				if n == net {
 					m["PPD_"+dom] = true
 				}
 			}
+		}
+	}
+	return m
+}
+
+// domainIdentity is the union of the identities of a domain's nets (and
+// the domain class).
+func (r *rulesRun) domainIdentity(dom string) map[string]bool {
+	m := map[string]bool{"PPD_" + dom: true}
+	for _, n := range r.full.Domains[dom] {
+		for k := range r.identity(n, nil) {
+			m[k] = true
 		}
 	}
 	return m
@@ -844,9 +882,11 @@ func (r *rulesRun) compareToPlan(rb *kicad.RulesReadback) []string {
 		// naming one layer, last match wins.
 		for _, l := range copperLayerNames(rb.CopperLayers) {
 			want := r.planFloor(e, layerGroup(l))
-			have, by := r.resolvedFloor(r.druRule, c.Name, l, r.netNamesIn(rb, e))
-			if have < want {
-				bad = append(bad, fmt.Sprintf("%s: the staged rules resolve track_width min %s on %s (rule %q), plan %s", e.Net, kicad.MmOfNm(have), l, by, kicad.MmOfNm(want)))
+			fail, cannot := floorProblem(r.resolvedFloor(r.druRule, c.Name, l, r.netNamesIn(rb, e)), want, e.Net, l)
+			for _, p := range []string{fail, cannot} {
+				if p != "" {
+					bad = append(bad, "staged rules: "+p)
+				}
 			}
 		}
 	}
@@ -1224,6 +1264,7 @@ func (rep *rulesReport) notApplicable(name string) {
 func (r *rulesRun) effectiveRules() {
 	chk := rulesCheck{Name: "effective-rules", Status: gate.Pass}
 	rb := r.rb0
+	var floorCannot []string
 	var rules []kicad.DRURule
 	if t := string(r.data[r.dru]); t != "" {
 		var err error
@@ -1247,13 +1288,12 @@ func (r *rulesRun) effectiveRules() {
 		// B.Cu or In2.Cu can weaken just that layer).
 		for _, l := range copperLayerNames(rb.CopperLayers) {
 			want := r.planFloor(e, layerGroup(l))
-			have, by := r.resolvedFloor(rules, firstClass(eff.Class), l, r.netNamesIn(rb, e))
-			if have < want {
-				what := "no track_width minimum rule"
-				if have > 0 || by != "" {
-					what = fmt.Sprintf("track_width minimum %s (rule %q)", kicad.MmOfNm(have), by)
-				}
-				chk.Items = append(chk.Items, fmt.Sprintf("%s: %s on %s for class %s, plan %s (a netclass width is a routing default, not a minimum: run kicad rules --apply)", e.Net, what, l, firstClass(eff.Class), kicad.MmOfNm(want)))
+			fail, cannot := floorProblem(r.resolvedFloor(rules, firstClass(eff.Class), l, r.netNamesIn(rb, e)), want, e.Net, l)
+			if fail != "" {
+				chk.Items = append(chk.Items, fail)
+			}
+			if cannot != "" {
+				floorCannot = append(floorCannot, cannot)
 			}
 		}
 	}
@@ -1262,8 +1302,7 @@ func (r *rulesRun) effectiveRules() {
 	}
 	bad, unknown := r.clearanceEdgeProblems(rules)
 	chk.Items = append(chk.Items, bad...)
-	var cannot []string
-	cannot = append(cannot, unknown...)
+	cannot := append(floorCannot, unknown...)
 	for dom, nets := range r.full.Domains {
 		for _, n := range nets {
 			if !hasClass(rb.Nets[n].Class, "PPD_"+dom) {
@@ -1598,17 +1637,7 @@ func (r *rulesRun) isolationRuleProblems(rules []kicad.DRURule, p rulesIsoPlan) 
 			bad = append(bad, fmt.Sprintf("pair %s|%s: rule %q has no %s min ≥ %g mm", p.A, p.B, name, want.typ, want.mm))
 		}
 	}
-	side := func(cls string) map[string]bool {
-		m := map[string]bool{cls: true}
-		for _, n := range r.full.Domains[strings.TrimPrefix(cls, "PPD_")] {
-			m[n] = true
-			for _, c := range strings.Split(r.rb0.Nets[n].Class, ",") {
-				m[c] = true
-			}
-		}
-		return m
-	}
-	sa, sb := side(p.ClassA), side(p.ClassB)
+	sa, sb := r.domainIdentity(strings.TrimPrefix(p.ClassA, "PPD_")), r.domainIdentity(strings.TrimPrefix(p.ClassB, "PPD_"))
 	for _, later := range rules[at+1:] {
 		if druDisjointPair(later.Condition, sa, sb) {
 			continue
@@ -1660,13 +1689,7 @@ func (r *rulesRun) clearanceEdgeProblems(rules []kicad.DRURule) (bad, unknown []
 		want := int64(math.Round(milv*0.0254*1e4) * 100) // the bridge writes 4-decimal mm
 		name := "pcbpilot edge " + cls
 		cond := "A.hasNetclass('" + cls + "')"
-		names := map[string]bool{cls: true}
-		for _, n := range r.full.Domains[dom] {
-			names[n] = true
-			for _, c := range strings.Split(r.rb0.Nets[n].Class, ",") {
-				names[c] = true
-			}
-		}
+		names := r.domainIdentity(dom)
 		at := -1
 		for i, u := range rules {
 			if u.Name == name && u.Block != "" {

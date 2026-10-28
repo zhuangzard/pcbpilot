@@ -77,6 +77,10 @@ type intentNet struct {
 	// --check): a segment touching a pad of one of Refs, at most MaxLengthMil
 	// long and at least MinWidthMil wide, may be narrower than the net width.
 	Neckdown []intentNeckdown `json:"neckdown,omitempty"`
+
+	// currentAGiven: the file has a numeric currentA for the net (an
+	// explicit 0 is evidence; an absent one is not).
+	currentAGiven bool
 }
 
 type intentNeckdown struct {
@@ -190,6 +194,17 @@ func parseDesignIntent(raw []byte) (*designIntent, error) {
 	}
 	sum := sha256.Sum256(raw)
 	in.sourceSHA = hex.EncodeToString(sum[:])
+	var present struct {
+		Nets map[string]map[string]json.RawMessage `json:"nets"`
+	}
+	if json.Unmarshal(raw, &present) == nil {
+		for name, fields := range present.Nets {
+			var v float64
+			if n := in.Nets[name]; n != nil && json.Unmarshal(fields["currentA"], &v) == nil {
+				n.currentAGiven = true
+			}
+		}
+	}
 	if err := in.validate(); err != nil {
 		return nil, err
 	}
