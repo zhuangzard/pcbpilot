@@ -1507,3 +1507,42 @@ func TestReviewRound7(t *testing.T) {
 	m.net("VCC", "U1.1").net("GND", "U1.2")
 	want(t, m.review(t, ReviewHints{}), RvSinglePinNet, "not-applicable")
 }
+
+// TestReviewRound8: two GPIOs with no resistor keep the missing-limiter
+// error beside the bias warning; the driver domain voltage is read from
+// the rail name.
+func TestReviewRound8(t *testing.T) {
+	led := func(b *rvT, ref, a, k string) {
+		b.part(ref, "Device:LED", "LED", "1:K:passive", "2:A:passive")
+		b.addNode(k, ref+".1")
+		b.addNode(a, ref+".2")
+	}
+	two := rvFed().ic("U1", "+3V3", "3:PA0:output", "4:PA1:output").cap("C1", "10u", "+3V3", "GND")
+	two.net("/IO", "U1.3").net("/IO2", "U1.4")
+	led(two, "D1", "/IO", "/IO2")
+	c := rvCheckOf(t, two.review(t, ReviewHints{}), RvLEDLimiter)
+	sev := map[string]bool{}
+	for _, f := range c.Findings {
+		sev[f.Severity] = true
+	}
+	if c.Status != "fail" || len(c.Findings) != 2 || !sev["error"] || !sev["warning"] || c.Findings[0].Fingerprint == c.Findings[1].Fingerprint {
+		t.Fatalf("%+v", c)
+	}
+	withR := rvFed().ic("U1", "+3V3", "3:PA0:output", "4:PA1:output").cap("C1", "10u", "+3V3", "GND")
+	withR.net("/IO", "U1.3").res("R1", "1k", "/IO", "/LA").net("/IO2", "U1.4")
+	led(withR, "D1", "/LA", "/IO2")
+	want(t, withR.review(t, ReviewHints{}), RvLEDLimiter, "pass", "warning")
+
+	// MCU on +3V3 drives the anode, cathode through R to +5V: names give
+	// 3.3 V < 5 V → reversed, proven without intent / sim
+	m := rvFed().cap("C1", "10u", "+3V3", "GND")
+	m.net("+5V")
+	m.ic("U9", "+5V").cap("C9", "10u", "+5V", "GND")
+	m.part("U1", "Synth:MCU", "", "1:VDD:power_in", "2:GND:power_in", "3:PA0:output")
+	m.addNode("+3V3", "U1.1")
+	m.addNode("GND", "U1.2")
+	m.net("/IO", "U1.3")
+	led(m, "D1", "/IO", "/K")
+	m.res("R1", "1k", "/K", "+5V")
+	want(t, m.review(t, ReviewHints{}), RvLEDLimiter, "fail", "error")
+}

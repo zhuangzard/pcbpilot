@@ -1939,14 +1939,16 @@ func (v *rvView) checkLEDs() *rvCheck {
 				label, name = "die "+d.Name+": ", "LED "+ref+" die "+d.Name
 			}
 			dwhy := fmt.Sprintf("%sanode %s: %s; cathode %s: %s", label, v.name(d.A.Net), wa, v.name(d.K.Net), wk)
-			biasWhy := ""
+			biasWhy, biasExtra := "", false
 			if st != "ambiguous" && st != "open" {
 				switch b, w := v.ledBias(endA, endK, pinA, pinK); b {
 				case "reversed":
 					st, biasWhy = "reversed", w
 				case "likely":
-					if st == "ok" || st == "none" {
+					if st == "ok" {
 						st = "bias?"
+					} else {
+						biasExtra = true // reported as its own warning beside the limiter result
 					}
 					biasWhy = w
 				}
@@ -1955,6 +1957,17 @@ func (v *rvView) checkLEDs() *rvCheck {
 				dwhy += "; bias: " + biasWhy
 			}
 			base := ReviewFinding{Refs: []string{ref}, Pins: []string{ref + "." + d.A.Num, ref + "." + d.K.Num}, netIDs: []string{d.A.Net, d.K.Net}, Evidence: []string{dwhy}}
+			if biasExtra {
+				f := base
+				f.Rule = RvLEDLimiter
+				f.Severity, f.Certainty = "warning", "likely"
+				f.Message = fmt.Sprintf("%s: forward bias not established (%s)", name, biasWhy)
+				f.Fix = "check the LED is forward-biased in operation; give rail voltages / driver domains (intent) to decide it"
+				f.Missing = []string{"endpoint levels (rail voltages, intent review.pinDomains)"}
+				c.add(f)
+				// distinct identity from the die's limiter finding
+				c.Findings[len(c.Findings)-1].Fingerprint = ReviewFingerprint(RvLEDLimiter, f.Refs, f.Pins, []string{d.A.Net, d.K.Net}, "bias")
+			}
 			switch st {
 			case "ambiguous":
 				c.unverified(fmt.Sprintf("%s: %s", name, dwhy))
@@ -2126,7 +2139,7 @@ func (v *rvView) ledBias(a, k string, pa, pk *rvPin) (string, string) {
 		}
 		if pa != nil {
 			if dom, _ := v.pinDomain(pa); dom != "" {
-				if dv, ok := v.voltage(dom); ok && kk {
+				if dv, ok, _ := v.railLevel(dom); ok && kk {
 					if dv > vk {
 						return "ok", ""
 					}
