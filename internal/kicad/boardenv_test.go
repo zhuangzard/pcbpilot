@@ -134,3 +134,25 @@ func TestBoardCLIEnvSameDRCLive(t *testing.T) {
 		t.Fatalf("only the changed R_0603 mismatches:\n%s", all)
 	}
 }
+
+// A disabled nested table contributes nothing: its libraries stay out of
+// the private table, as they are out of KiCad's.
+func TestBoardConfigDirDisabledNestedTable(t *testing.T) {
+	cfg := t.TempDir()
+	ver := filepath.Join(cfg, FPLibVersion)
+	_ = os.MkdirAll(ver, 0o755)
+	nested := filepath.Join(cfg, "nested-fp-lib-table")
+	_ = os.WriteFile(nested, []byte(`(fp_lib_table (version 7) (lib (name "Child")(type "KiCad")(uri "D:/c.pretty")(options "")(descr "")))`), 0o644)
+	_ = os.WriteFile(filepath.Join(ver, "fp-lib-table"), []byte(`(fp_lib_table (version 7)
+  (lib (name "Off")(type "Table")(uri "`+filepath.ToSlash(nested)+`")(options "")(descr "")(disabled)))`), 0o644)
+	t.Setenv("KICAD_CONFIG_HOME", cfg)
+	t.Setenv("PCBPILOT_CACHE_DIR", t.TempDir())
+	dir, err := boardConfigDir([]byte(`(footprint "Child:X")`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fp, _ := os.ReadFile(filepath.Join(dir, FPLibVersion, "fp-lib-table"))
+	if strings.Contains(string(fp), "Child") {
+		t.Fatalf("disabled table's child enabled: %s", fp)
+	}
+}

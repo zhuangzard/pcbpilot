@@ -111,3 +111,19 @@ func TestParseSpecIsolation(t *testing.T) {
 		}
 	}
 }
+
+// A spec.domains declaration whose domain is in no pair warns even when an
+// unrelated pair carries an equal or larger declared distance.
+func TestDeclaredIsolationUnmatchedDomainWarns(t *testing.T) {
+	it := mainsIntent(t, func(s *Spec) {
+		s.Isolation = []SpecIsolation{{A: "FIELD_24V", B: "+3V3", ClearanceMm: 12}}
+		s.Domains = append(s.Domains, SpecDomain{Kind: "SELV", Nets: []string{"NO_SUCH_NET"}, ClearanceMm: 5})
+	})
+	warned := false
+	for _, f := range it.Findings {
+		warned = warned || f.Kind == "declared-isolation-unmatched" && strings.Contains(f.Message, "spec.domains[")
+	}
+	if !warned {
+		t.Fatalf("no warning for the unmatched spec.domains declaration: %+v", it.Findings)
+	}
+}

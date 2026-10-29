@@ -108,6 +108,11 @@ func libTableEntries(path string, depth int, out map[string]string, order *[]str
 		}
 		name, typ, uri := get("name"), get("type"), get("uri")
 		if strings.EqualFold(typ, "Table") {
+			if lib.child("disabled") != nil {
+				// A disabled nested table disables every library in it:
+				// its children must not reach the private table.
+				continue
+			}
 			unresolved := ""
 			nested := reEnvRef.ReplaceAllStringFunc(uri, func(m string) string {
 				v := os.Getenv(reEnvRef.FindStringSubmatch(m)[1])
