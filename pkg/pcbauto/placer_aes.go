@@ -499,6 +499,10 @@ func aesWorse(before, after aesCost, allow float64, q aesCost) string {
 // the moved state, returns ""). Returns whether it was kept.
 func (pl *placer) aesTry(kind string, mv []aesMove, allow float64, veto func() string) bool {
 	st := pl.aes
+	if pl.overBudget() {
+		st.lastWhy = "time budget"
+		return false
+	}
 	seen := map[*Part]bool{}
 	var parts []*Part
 	changed := false
