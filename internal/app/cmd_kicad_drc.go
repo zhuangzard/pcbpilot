@@ -106,6 +106,7 @@ type kicadDRCReport struct {
 	PCBSha256       string                 `json:"pcbSha256,omitempty"`
 	KiCadVersion    string                 `json:"kicadVersion,omitempty"`
 	SchematicParity bool                   `json:"schematicParity"`
+	Schematic       string                 `json:"schematic,omitempty"` // --sch: the root compared with
 	Errors          int                    `json:"errors"`
 	Counts          map[string]int         `json:"counts"`
 	Warnings        int                    `json:"warnings"`
@@ -123,6 +124,7 @@ type kicadDRCReport struct {
 type kicadDRCOptions struct {
 	pcb, cli                  string
 	parity                    bool
+	sch                       string // root schematic for parity ("" = <board>.kicad_sch beside the board)
 	baselineJSON, baselinePCB string
 	waivers                   []gateWaiver
 	tolMm                     float64
@@ -137,7 +139,8 @@ func newKicadDRCCmd(stdout, stderr io.Writer) *cobra.Command {
 		Short: "KiCad DRC as a tri-state gate: owners per violation, project exclusions policy, new-vs-baseline (JSON, exit 0/6/5)",
 		Long: `Run kicad-cli pcb drc (JSON, all severities) on a temporary copy of --pcb and its
 .kicad_pro / .kicad_dru (with --schematic-parity also the project's root schematic
-<board>.kicad_sch and its sheets), with pcbpilot's isolated KiCad configuration (empty
+<board>.kicad_sch and its sheets; --sch ROOT.kicad_sch names another root, for a
+board written outside its project, e.g. kicad place --out, and implies parity), with pcbpilot's isolated KiCad configuration (empty
 global library tables; the project's own fp-lib-table / sym-lib-table still resolve).
 The user's files are never written, and nothing is left in the project directory.
 
@@ -181,6 +184,12 @@ kicad-cli report(s).`,
 			if o.baselineJSON != "" && o.baselinePCB != "" {
 				return fmt.Errorf("--baseline and --baseline-pcb are exclusive")
 			}
+			if o.sch != "" {
+				if !strings.HasSuffix(strings.ToLower(o.sch), ".kicad_sch") {
+					return fmt.Errorf("--sch %s is not a .kicad_sch", o.sch)
+				}
+				o.parity = true // --sch names what to compare with: parity is implied
+			}
 			if o.tolMm <= 0 {
 				return fmt.Errorf("--tolerance-mm must be positive")
 			}
@@ -217,7 +226,8 @@ kicad-cli report(s).`,
 	}
 	f := c.Flags()
 	f.StringVar(&o.pcb, "pcb", "", "board file (.kicad_pcb, required)")
-	f.BoolVar(&o.parity, "schematic-parity", false, "also compare with the project's schematic (<board>.kicad_sch next to the board)")
+	f.BoolVar(&o.parity, "schematic-parity", false, "also compare with the project's schematic (<board>.kicad_sch next to the board, or --sch)")
+	f.StringVar(&o.sch, "sch", "", "root schematic to compare with (implies --schematic-parity): for a board written outside its project directory")
 	f.StringVar(&o.baselineJSON, "baseline", "", "report only violations not in this report (a `kicad drc` report or a kicad-cli DRC JSON)")
 	f.StringVar(&o.baselinePCB, "baseline-pcb", "", "report only violations not on this older board (DRC runs on its copy too)")
 	f.StringVar(&waiverPath, "waivers", "", "signed waiver file (JSON list of {gate, match, reason, by})")
@@ -240,7 +250,7 @@ func printDRCSummary(w io.Writer, what string, v gate.Status, cs []drcCheck, b *
 // runKicadDRC runs the checks; a failure to run is a cannot-check verdict,
 // never an error.
 func runKicadDRC(o kicadDRCOptions) *kicadDRCReport {
-	rep := &kicadDRCReport{Kind: kicadDRCReportKind, Version: 1, PCB: o.pcb, SchematicParity: o.parity,
+	rep := &kicadDRCReport{Kind: kicadDRCReportKind, Version: 1, PCB: o.pcb, SchematicParity: o.parity, Schematic: o.sch,
 		Counts: map[string]int{}, WarningCounts: map[string]int{}, OwnerClasses: map[string]int{},
 		Violations: []kicad.OwnedViolation{}, Excluded: []kicad.OwnedViolation{}, Files: map[string]string{}}
 	// The raw report paths are fixed before the runs start: the two
@@ -260,13 +270,13 @@ func runKicadDRC(o kicadDRCOptions) *kicadDRCReport {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		cur, curErr = kicad.RunDRC(kicad.DRCRunOptions{PCB: o.pcb, SchematicParity: o.parity, CLI: o.cli, SaveRaw: curRaw})
+		cur, curErr = kicad.RunDRC(kicad.DRCRunOptions{PCB: o.pcb, SchematicParity: o.parity, Schematic: o.sch, CLI: o.cli, SaveRaw: curRaw})
 	}()
 	if o.baselinePCB != "" {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			old, oldErr = kicad.RunDRC(kicad.DRCRunOptions{PCB: o.baselinePCB, SchematicParity: o.parity, CLI: o.cli, SaveRaw: oldRaw})
+			old, oldErr = kicad.RunDRC(kicad.DRCRunOptions{PCB: o.baselinePCB, SchematicParity: o.parity, Schematic: o.sch, CLI: o.cli, SaveRaw: oldRaw})
 		}()
 	}
 	wg.Wait()

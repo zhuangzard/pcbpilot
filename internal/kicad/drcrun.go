@@ -24,6 +24,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -35,7 +36,11 @@ var DRCTimeout = 30 * time.Minute
 type DRCRunOptions struct {
 	PCB             string
 	SchematicParity bool
-	CLI             string // kicad-cli
+	// Schematic (with SchematicParity): the root schematic to compare with
+	// when it is not <board>.kicad_sch next to the board (a board written to
+	// another directory). Its hierarchy is staged as the board's root.
+	Schematic string
+	CLI       string // kicad-cli
 	// SaveRaw: copy kicad-cli's JSON report here ("" = keep nothing).
 	SaveRaw string
 }
@@ -109,7 +114,7 @@ func RunDRC(o DRCRunOptions) (*DRCRun, error) {
 		return nil, fmt.Errorf("%w: %v", ErrDRCStage, err)
 	}
 	defer os.RemoveAll(tmp)
-	if run.Staged, err = StageProject(pcb, tmp, o.SchematicParity); err != nil {
+	if run.Staged, err = StageProjectWith(pcb, tmp, o.SchematicParity, o.Schematic); err != nil {
 		return nil, err
 	}
 	staged := filepath.Join(tmp, filepath.Base(pcb))
@@ -160,6 +165,15 @@ func RunDRC(o DRCRunOptions) (*DRCRun, error) {
 // (same relative paths). It returns the copied paths relative to the
 // project directory.
 func StageProject(pcb, dst string, sheets bool) ([]string, error) {
+	return StageProjectWith(pcb, dst, sheets, "")
+}
+
+// StageProjectWith is StageProject comparing with the root schematic sch
+// ("" = <board>.kicad_sch next to the board): sch and every sheet of its
+// hierarchy are copied beside the staged board, sch itself as
+// <board>.kicad_sch — the name KiCad's parity check opens — and the sheets
+// at their paths relative to sch's directory.
+func StageProjectWith(pcb, dst string, sheets bool, sch string) ([]string, error) {
 	base := strings.TrimSuffix(filepath.Base(pcb), ".kicad_pcb")
 	s := &stager{dir: filepath.Dir(pcb), dst: dst}
 	if err := s.cp(base+".kicad_pcb", false); err != nil {
@@ -169,6 +183,12 @@ func StageProject(pcb, dst string, sheets bool) ([]string, error) {
 		return nil, err
 	}
 	if !sheets {
+		return s.copied, nil
+	}
+	if sch != "" {
+		if err := s.foreignSheets(sch, base+".kicad_sch"); err != nil {
+			return nil, err
+		}
 		return s.copied, nil
 	}
 	root := filepath.Join(s.dir, base+".kicad_sch")
@@ -237,6 +257,58 @@ func (s *stager) project(base string) error {
 		}
 	}
 	return nil
+}
+
+// foreignSheets copies the hierarchy of the root schematic sch (anywhere)
+// into dst: sch as rootName, every other sheet at its path relative to
+// sch's directory (which must hold them all).
+func (s *stager) foreignSheets(sch, rootName string) error {
+	root, err := filepath.Abs(sch)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrDRCStage, err)
+	}
+	if _, err := os.Stat(root); err != nil {
+		return fmt.Errorf("%w: --sch %s: %v", ErrDRCStage, sch, err)
+	}
+	files, err := SheetFiles(root)
+	if err != nil {
+		return fmt.Errorf("%w: schematic hierarchy of %s: %v", ErrDRCStage, root, err)
+	}
+	dir := filepath.Dir(root)
+	for _, f := range files {
+		rel := rootName
+		if !sameSheetPath(f, root) {
+			r, err := filepath.Rel(dir, f)
+			if err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) || filepath.IsAbs(r) {
+				return fmt.Errorf("%w: sheet %s lies outside the schematic's directory %s (fix: keep every sheet under the root schematic's directory)", ErrDRCStage, f, dir)
+			}
+			rel = r
+			if strings.EqualFold(filepath.ToSlash(rel), rootName) {
+				return fmt.Errorf("%w: sheet %s has the name the staged root needs (%s)", ErrDRCStage, f, rootName)
+			}
+		}
+		b, err := os.ReadFile(f)
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrDRCStage, err)
+		}
+		to := filepath.Join(s.dst, rel)
+		if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+			return fmt.Errorf("%w: %v", ErrDRCStage, err)
+		}
+		if err := os.WriteFile(to, b, 0o644); err != nil {
+			return fmt.Errorf("%w: %v", ErrDRCStage, err)
+		}
+		s.copied = append(s.copied, filepath.ToSlash(rel))
+	}
+	return nil
+}
+
+func sameSheetPath(a, b string) bool {
+	aa, bb := filepath.Clean(a), filepath.Clean(b)
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		return strings.EqualFold(aa, bb)
+	}
+	return aa == bb
 }
 
 // sheets copies root and every sheet of its hierarchy (all under dir).
