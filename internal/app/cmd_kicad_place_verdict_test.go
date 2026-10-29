@@ -3,6 +3,8 @@ package app
 import (
 	"bytes"
 	"encoding/json"
+	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -92,5 +94,77 @@ func TestKicadPlaceVerdictUsesTheNamedList(t *testing.T) {
 		if v, n := kicadPlaceVerdict(c.illegal, c.metric); v != c.want || n != c.n {
 			t.Errorf("%v / %d: verdict %q (%d), want %q (%d)", c.illegal, c.metric, v, n, c.want, c.n)
 		}
+	}
+}
+
+// The input's .kicad_dru (custom rules) and .kicad_pro travel to every
+// written board; a stale .kicad_dru at the output goes when the input has
+// none.
+func TestKicadPlaceCopiesTheRules(t *testing.T) {
+	dir := t.TempDir()
+	pcb := filepath.Join(dir, "in.kicad_pcb")
+	dru := "(version 1)\n(rule pcbpilot-iso (constraint clearance (min 2mm)))\n"
+	os.WriteFile(filepath.Join(dir, "in.kicad_pro"), []byte("{}"), 0o644)
+	os.WriteFile(filepath.Join(dir, "in.kicad_dru"), []byte(dru), 0o644)
+	out := filepath.Join(dir, "out", "b.kicad_pcb")
+	deps := kicadPlaceDeps{
+		snapshot: func(string) ([]byte, error) { return tinyKicadSnapshot(), nil },
+		place: func(string, map[string]kicad.Pose, string) (*kicad.PlaceResult, error) {
+			return &kicad.PlaceResult{}, nil
+		},
+	}
+	rep, err := runKicadPlace(kicadPlaceOpts{pcb: pcb, out: out, placeSeeds: 2, candidates: 2, seed: 1}, deps, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range rep.Seeds {
+		if s.File == "" {
+			continue
+		}
+		got, err := os.ReadFile(strings.TrimSuffix(s.File, ".kicad_pcb") + ".kicad_dru")
+		if err != nil || string(got) != dru {
+			t.Fatalf("%s: .kicad_dru %q (%v), want the input's rules", s.File, got, err)
+		}
+		if _, err := os.Stat(strings.TrimSuffix(s.File, ".kicad_pcb") + ".kicad_pro"); err != nil {
+			t.Fatalf("%s: no .kicad_pro", s.File)
+		}
+	}
+	os.Remove(filepath.Join(dir, "in.kicad_dru"))
+	if _, err := runKicadPlace(kicadPlaceOpts{pcb: pcb, out: out, placeSeeds: 1, candidates: 1, seed: 1}, deps, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "out", "b.kicad_dru")); !os.IsNotExist(err) {
+		t.Fatal("a stale .kicad_dru stayed beside the output")
+	}
+}
+
+// --mech coordinates are the KiCad board's: a spec of the board's size
+// keeps the outline and every pose lands on the board; another size is
+// refused, not moved to 0,0.
+func TestKicadPlaceMechKeepsTheKicadOutline(t *testing.T) {
+	dir := t.TempDir()
+	var poses map[string]kicad.Pose
+	deps := kicadPlaceDeps{
+		snapshot: func(string) ([]byte, error) { return tinyKicadSnapshot(), nil },
+		place: func(_ string, p map[string]kicad.Pose, _ string) (*kicad.PlaceResult, error) {
+			poses = p
+			return &kicad.PlaceResult{}, nil
+		},
+	}
+	mech := filepath.Join(dir, "mech.json")
+	os.WriteFile(mech, []byte(`{"units":"mil","board":{"width":2000,"height":1600}}`), 0o644)
+	o := kicadPlaceOpts{pcb: filepath.Join(dir, "in.kicad_pcb"), out: filepath.Join(dir, "out", "b.kicad_pcb"), mech: mech, placeSeeds: 1, candidates: 1, seed: 1}
+	if _, err := runKicadPlace(o, deps, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	for ref, p := range poses {
+		// tinyKicadSnapshot's board: x 0..2000, KiCad y 0..1600.
+		if p.XMil < 0 || p.XMil > 2000 || p.YMil < 0 || p.YMil > 1600 {
+			t.Fatalf("%s placed at %.0f,%.0f, off the KiCad board", ref, p.XMil, p.YMil)
+		}
+	}
+	os.WriteFile(mech, []byte(`{"units":"mil","board":{"width":2600,"height":1600}}`), 0o644)
+	if _, err := runKicadPlace(o, deps, io.Discard); err == nil || !strings.Contains(err.Error(), "replaceOutline") {
+		t.Fatalf("a mech board of another size was accepted: %v", err)
 	}
 }
