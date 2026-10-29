@@ -236,8 +236,9 @@ pcbpilot kicad pcb-sync ... --in-place --apply-plan plan.json --revision <rev>
   SaveBoard 重写的，非默认设置都保留；parity 也用它）；源没有 `.kicad_pro` 时目标已有的那份保持不动，只有目标也没有才写
   SaveBoard 生成的默认工程。`.kicad_dru` 同理：源有就发布源的（覆盖目标已有的，基哈希校验），源没有就保留目标的。改名检查、parity
   与提交都用**实际发布**的这份工程和规则，保留的目标文件提交前也再核对（被改 → 退出 4）。`--create`：`--pcb` 不存在时从空板起，并直接写到 `--pcb`（等同 `--in-place`，报告 `warnings`
-  写明；给 `--out` 则写到那里；`--pcb` 已存在时仍须 `--in-place` / `--out`）。没有板框时全部新件从原点起按行暂存，行宽
-  至少为这批件面积的平方根（大批量是紧凑方块，不是 100 mm 宽的长条；画板框前先 `kicad place` 或把板框画在别处）；没有源板可查版本，就核对 bridge 应用时的 pcbnew 版本，不是 10.x → cannot-check 退出 5。
+  写明；给 `--out` 则写到那里；`--pcb` 已存在时仍须 `--in-place` / `--out`）。新板（没有板框也没有封装）的暂存件排在原点左侧、
+  止于 x = −10 mm（v0.12.2；之后 `kicad board outline --origin 0,0` 不会压到它们），行宽至少为这批件面积的平方根
+  （大批量是紧凑方块，不是 100 mm 宽的长条）；没有源板可查版本，就核对 bridge 应用时的 pcbnew 版本，不是 10.x → cannot-check 退出 5。
 - **门禁**（`internal/gate`，没验证就不是 pass）：`pad-net`（暂存板上与符号挂钩的封装焊盘网 vs 网表引脚网，
   `ComparePinNets` / `padNetDiffGate`；NPTH 与无编号焊盘不算；同编号的焊盘必须同网，没有网的也算）、`schematic-parity`（暂存板 + 工程 + 全部 `.kicad_sch`
   复制到临时目录、板改名为根图名，`kicad-cli pcb drc --schematic-parity --severity-all`；任一 parity 项失败，只有被 flag 的
@@ -538,6 +539,7 @@ pcbpilot kicad route --pcb board-b-v5a.kicad_pcb --intent intent.json --sim sim.
 
 ```bash
 pcbpilot kicad drc --pcb board.kicad_pcb [--schematic-parity] [--out drc/]
+pcbpilot kicad drc --pcb place/board.kicad_pcb --sch sch/board.kicad_sch       # 板不在工程目录：指定根原理图
 pcbpilot kicad drc --pcb board.kicad_pcb --baseline-pcb ../revA/board.kicad_pcb     # 只报新增
 pcbpilot kicad drc --pcb board.kicad_pcb --baseline drc/drc-report.json --waivers w.json
 ```
@@ -546,6 +548,9 @@ pcbpilot kicad drc --pcb board.kicad_pcb --baseline drc/drc-report.json --waiver
   用 pcbpilot 的隔离 KiCad 配置（空的全局库表，kicadenv.go）运行 `kicad-cli pcb drc --format json --severity-all`；工程自己的
   `fp-lib-table` / `sym-lib-table` 随副本带上，`${KIPRJMOD}` 指回原目录，所以工程库照常解析，只在全局库里的封装出 `lib_footprint_*`
   环境类警告。工程目录不新增 `.kicad_prl`、锁文件或任何改动（演示板副本前后哈希一致）。子图在工程目录外 → cannot-check。
+- **`--sch ROOT.kicad_sch`**（v0.12.2，隐含 `--schematic-parity`）：板写到了别的目录（`kicad place --out place/…`）时，
+  把该根原理图及其层次复制到副本里板的旁边（根图改名为 `<板>.kicad_sch`），parity 照常比对；不给时只认板旁边的同名根图，
+  没有就是 cannot-check。
 - **归属**：每个违例按条目 uuid 在 `.kicad_pcb` S 表达式里找到所属顶层对象（焊盘、丝印、courtyard 都归它的封装；线/弧/过孔/铺铜带网名），
   给出 `owner.class`：`environment`（库表类规则）> `schematic-parity` > `board-outline`（涉及 Edge.Cuts）> `routing`（涉及线、过孔、铺铜）>
   `footprint`（只涉及一个封装自己的对象）> `placement`（两个以上封装）> `graphic` > `unresolved`；位置另给 KiCad 坐标 `xMm/yMm`（mm，y 向下）。
