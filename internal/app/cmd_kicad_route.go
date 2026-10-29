@@ -839,7 +839,10 @@ func (r *kicadRun) prepareRoute(classed string, reqs map[string]kicad.NetRequire
 	if !o.fo.aliases.empty() {
 		r.summary["fastrouteNetAliases"] = o.fo.aliases.toAlias
 	}
-	pairs, tune := intentPairsAndTune(r.in, o.fo.aliases)
+	pairs, tune, groupIDs := intentPairsTuneGroups(r.in, o.fo.aliases)
+	if len(groupIDs) > 0 {
+		r.summary["intentTuneGroups"] = groupIDs // tune-file group id → intent length group
+	}
 	if pairs != "" {
 		o.fo.pairsFile = base + "-pairs.txt"
 		if err := os.WriteFile(o.fo.pairsFile, []byte(pairs), 0o644); err != nil {

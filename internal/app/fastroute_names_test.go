@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -228,5 +229,64 @@ func TestFastrouteNetAliasesKiCadQuoting(t *testing.T) {
 				t.Fatalf("decoded %q is no real name", dsnDecode(at.raw))
 			}
 		}
+	}
+}
+
+// Length-group names that sanitise to the same token stay separate groups
+// with their own members and tolerances; an already-safe name keeps itself.
+func TestIntentTuneGroupIDsUnique(t *testing.T) {
+	in := &designIntent{Nets: map[string]*intentNet{
+		"N1": {LengthGroup: "USB A", LengthTolMil: 10}, "N2": {LengthGroup: "USB A", LengthTolMil: 10},
+		"N3": {LengthGroup: "USB_A", LengthTolMil: 20}, "N4": {LengthGroup: "USB_A", LengthTolMil: 20},
+		"N5": {LengthGroup: "USB*A", LengthTolMil: 30}, "N6": {LengthGroup: "USB*A", LengthTolMil: 30},
+		"N7": {LengthGroup: "A#B"}, "N8": {LengthGroup: "A#B"},
+		"N9": {LengthGroup: "A=B"}, "N10": {LengthGroup: "A=B"},
+	}}
+	_, tune, renamed := intentPairsTuneGroups(in, nil)
+	groups := map[string][]string{} // id → member lines
+	tols := map[string]string{}
+	cur := ""
+	for _, line := range strings.Split(strings.TrimSpace(tune), "\n") {
+		f := strings.Fields(line)
+		if f[0] == "group" {
+			cur = f[1]
+			if _, dup := groups[cur]; dup {
+				t.Fatalf("group %s twice:\n%s", cur, tune)
+			}
+			groups[cur] = nil
+			if len(f) > 2 {
+				tols[cur] = f[2]
+			}
+			continue
+		}
+		groups[cur] = append(groups[cur], f[0])
+	}
+	if len(groups) != 5 {
+		t.Fatalf("%d groups:\n%s", len(groups), tune)
+	}
+	if strings.Join(groups["USB_A"], ",") != "N3,N4" || tols["USB_A"] != "tolerance=0.508" {
+		t.Fatalf("the safe name lost its group:\n%s", tune)
+	}
+	members := map[string]string{"USB A": "N1,N2", "USB*A": "N5,N6", "A#B": "N7,N8", "A=B": "N10,N9"}
+	for id, name := range renamed {
+		got := append([]string(nil), groups[id]...)
+		sort.Strings(got)
+		if strings.Join(got, ",") != members[name] {
+			t.Fatalf("group %s (%s) members %v:\n%s", id, name, got, tune)
+		}
+	}
+	wantTol := map[string]string{"USB A": "tolerance=0.254", "USB*A": "tolerance=0.762"}
+	for id, name := range renamed {
+		if tols[id] != wantTol[name] {
+			t.Fatalf("group %s (%s) tolerance %q: %s", id, name, tols[id], tune)
+		}
+	}
+	if len(renamed) != 4 {
+		t.Fatalf("renamed %v", renamed)
+	}
+	// Deterministic.
+	_, again, _ := intentPairsTuneGroups(in, nil)
+	if again != tune {
+		t.Fatal("tune file not deterministic")
 	}
 }
