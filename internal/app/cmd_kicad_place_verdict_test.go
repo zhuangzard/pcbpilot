@@ -74,3 +74,23 @@ func TestKicadPlaceVerdictFailNamesTheOverlap(t *testing.T) {
 		t.Fatalf("stderr lacks the warning:\n%s", stderr)
 	}
 }
+
+// Any named illegal placement fails, also when the overlap metric is 0:
+// a part outside the board only, or outside its zone only.
+func TestKicadPlaceVerdictUsesTheNamedList(t *testing.T) {
+	for _, c := range []struct {
+		illegal []string
+		metric  int
+		want    gate.Status
+		n       int
+	}{
+		{[]string{"outside the board R3"}, 0, gate.Fail, 1},
+		{[]string{"outside its zone U2"}, 0, gate.Fail, 1},
+		{[]string{"overlap J1 J2 (40 mil²)", "outside its zone U2"}, 1, gate.Fail, 2},
+		{nil, 0, gate.Pass, 0},
+	} {
+		if v, n := kicadPlaceVerdict(c.illegal, c.metric); v != c.want || n != c.n {
+			t.Errorf("%v / %d: verdict %q (%d), want %q (%d)", c.illegal, c.metric, v, n, c.want, c.n)
+		}
+	}
+}

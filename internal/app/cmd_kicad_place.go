@@ -315,14 +315,14 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 			fmt.Fprintf(stderr, "placement: WARNING zone %s: %d illegal placement(s) although it has room (need %.0f of %.0f mm², fill %s)\n", z.Domain, z.Illegal, z.NeedMm2, z.OfferMm2, fill)
 		}
 	}
-	if best.Trial.Illegal > 0 {
-		rep.Verdict = gate.Fail
+	if v, n := kicadPlaceVerdict(rep.Illegal, best.Trial.Illegal); v == gate.Fail {
+		rep.Verdict = v
 		show := rep.Illegal
 		if len(show) > 12 {
 			show = append(append([]string(nil), show[:12]...), fmt.Sprintf("… %d more in the report", len(rep.Illegal)-12))
 		}
-		fmt.Fprintf(stderr, "placement: WARNING best seed %d has %d illegal placement(s): %s\n", best.Trial.Seed, best.Trial.Illegal, strings.Join(show, "; "))
-		rep.Notes = append(rep.Notes, fmt.Sprintf("verdict fail: the best seed has %d illegal placement(s) (see illegal, zoneFill); the boards are written for inspection, not for routing", best.Trial.Illegal))
+		fmt.Fprintf(stderr, "placement: WARNING best seed %d has %d illegal placement(s): %s\n", best.Trial.Seed, n, strings.Join(show, "; "))
+		rep.Notes = append(rep.Notes, fmt.Sprintf("verdict fail: the best seed has %d illegal placement(s) (see illegal, zoneFill); the boards are written for inspection, not for routing", n))
 	}
 	if rep.BudgetHit {
 		rep.Notes = append(rep.Notes, fmt.Sprintf("time budget %s reached: at least one seed returned its best placement so far (metrics.timeBudgetHit names the phase); raise --time-budget for a finished placement", o.timeBudget))
@@ -667,6 +667,16 @@ func copyKicadPro(pcb, out string) error {
 		return err
 	}
 	return os.WriteFile(strings.TrimSuffix(out, ".kicad_pcb")+".kicad_pro", raw, 0o644)
+}
+
+// kicadPlaceVerdict is the best seed's verdict and illegal count: the named
+// list decides (overlaps, outside the board or the zone, inside a
+// keep-out), the metrics' count is a backstop.
+func kicadPlaceVerdict(illegal []string, metricIllegal int) (gate.Status, int) {
+	if n := max(len(illegal), metricIllegal); n > 0 {
+		return gate.Fail, n
+	}
+	return gate.Pass, 0
 }
 
 // placeLargeBoard is the movable-part count above which kicad place lets
