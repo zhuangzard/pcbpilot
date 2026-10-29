@@ -85,6 +85,9 @@ func PlaceSeeds(b *Board, prep func(*Board) (*Analysis, *Circuit, error), m *Mec
 			o.Seed = opt.Seed + int64(i)
 			bc := b.Clone()
 			trials[i].Seed = o.Seed
+			if o.Progress != nil {
+				o.Progress(o.Seed, "analyse")
+			}
 			an, c, err := prep(bc)
 			var r *PlaceResult
 			if err == nil {
