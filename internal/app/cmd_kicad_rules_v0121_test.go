@@ -320,3 +320,19 @@ func TestKicadRulesPadClearanceShapes(t *testing.T) {
 		t.Fatalf("%+v", c)
 	}
 }
+
+// Touching pads of two nets are a short unless the footprint declares them
+// a net tie.
+func TestKicadRulesPadClearanceShortVsNetTie(t *testing.T) {
+	f := newRulesFixture(t)
+	pads := `{"padNumber":"1","net":"SIG","layer":1,"x":1600,"y":200,"width":20,"height":20,"shape":["RECT",20,20]},{"padNumber":"2","net":"AUX","layer":1,"x":1615,"y":200,"width":20,"height":20,"shape":["RECT",20,20]}`
+	snap := strings.Replace(rulesTestSnap, `{"designator":"R2"`, `{"designator":"U7","footprint":"Lib:SHORT","side":"top","pads":[`+pads+`]},{"designator":"NT1","footprint":"Lib:TIE","netTiePadGroups":[["1","2"]],"side":"top","pads":[`+pads+`]},
+  {"designator":"R2"`, 1)
+	f.fake.snap = []byte(snap)
+	f.o.plan = true
+	rep, _, _ := runRules(t, f.o)
+	items := strings.Join(checkOf(rep, "footprint-pad-clearance").Items, "\n")
+	if !strings.Contains(items, "Lib:SHORT: pads 1/2 of different nets touch (gap 0) on U7") || strings.Contains(items, "Lib:TIE") {
+		t.Fatalf("items:\n%s", items)
+	}
+}

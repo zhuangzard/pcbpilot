@@ -101,7 +101,10 @@ type rulesSnap struct {
 		Courtyard  *rulesRect `json:"courtyard"`
 		// LocalClearance: the footprint's clearance override (mil).
 		LocalClearance *float64 `json:"localClearance"`
-		Pads           []struct {
+		// NetTiePadGroups: a net-tie footprint's pad groups (pads of one
+		// group short different nets on purpose).
+		NetTiePadGroups [][]string `json:"netTiePadGroups"`
+		Pads            []struct {
 			Number string  `json:"padNumber"`
 			Net    string  `json:"net"`
 			Layer  int     `json:"layer"`

@@ -246,6 +246,7 @@ func (r *rulesRun) padClearance() {
 	}
 	thermal := map[[2]string]*thermalHit{}
 	unknown := map[[2]string][]string{} // footprint, pads → parts
+	shorted := map[[2]string][]string{} // footprint, pads → parts
 	pairs := 0
 	for _, c := range r.snap.Components {
 		for i := 0; i < len(c.Pads); i++ {
@@ -273,7 +274,20 @@ func (r *rulesRun) padClearance() {
 					// unless one has no net: an unnamed thermal via inside
 					// an exposed pad is a different "net" to KiCad and
 					// flagged on every instance.
-					if (a.Net == "") == (b.Net == "") {
+					if a.Net != "" && b.Net != "" {
+						// Two nets touching: a declared net tie is skipped;
+						// anything else is a short inside the footprint.
+						if netTied(c.NetTiePadGroups, a.Number, b.Number) {
+							continue
+						}
+						pairs++
+						id := [2]string{c.Footprint, padPair(a.Number, b.Number)}
+						if !rulesHasStr(shorted[id], c.Designator) {
+							shorted[id] = append(shorted[id], c.Designator)
+						}
+						continue
+					}
+					if a.Net == "" && b.Net == "" {
 						continue
 					}
 					pairs++
@@ -367,6 +381,24 @@ func (r *rulesRun) padClearance() {
 		chk.Items = append(chk.Items, fmt.Sprintf("%s: pad(s) without a net overlap pad %s (%s) — unnamed thermal vias in the exposed pad; KiCad reports them as clearance errors to the pad, on %s%s — fix: give the thermal-via pads the exposed pad's number (same net) in the footprint; pcbpilot does not change footprints",
 			emptyAs(id[0], "(no library id)"), emptyAs(g.ep, "(unnamed)"), g.net, strings.Join(refs, ", "), more))
 	}
+	sids := make([][2]string, 0, len(shorted))
+	for id := range shorted {
+		sids = append(sids, id)
+	}
+	sort.Slice(sids, func(i, j int) bool { return sids[i][0]+"|"+sids[i][1] < sids[j][0]+"|"+sids[j][1] })
+	for _, id := range sids {
+		refs := shorted[id]
+		sort.Strings(refs)
+		for _, ref := range refs {
+			parts[ref] = true
+		}
+		more := ""
+		if len(refs) > 8 {
+			more, refs = fmt.Sprintf(" (+%d more)", len(refs)-8), refs[:8]
+		}
+		chk.Items = append(chk.Items, fmt.Sprintf("%s: %s of different nets touch (gap 0) on %s%s — a short inside the footprint unless it is a net tie: declare the pads in the footprint's net-tie pad groups, or fix the footprint / the pad nets",
+			emptyAs(id[0], "(no library id)"), id[1], strings.Join(refs, ", "), more))
+	}
 	uids := make([][2]string, 0, len(unknown))
 	for id := range unknown {
 		uids = append(uids, id)
@@ -428,4 +460,14 @@ func emptyAs(s, alt string) string {
 // padPair names two pads ("pads 2/3"; an unnamed pad is "(unnamed)").
 func padPair(a, b string) string {
 	return "pads " + emptyAs(a, "(unnamed)") + "/" + emptyAs(b, "(unnamed)")
+}
+
+// netTied: pads a and b are in one net-tie pad group of the footprint.
+func netTied(groups [][]string, a, b string) bool {
+	for _, g := range groups {
+		if rulesHasStr(g, a) && rulesHasStr(g, b) {
+			return true
+		}
+	}
+	return false
 }

@@ -164,6 +164,26 @@ def local_clearance(item):
     return mil(v) if v > 0 else None
 
 
+def net_tie_groups(fp):
+    """A net-tie footprint's pad groups ([["1", "2"], ...]): pads in one
+    group may short different nets on purpose. [] when none. (The SWIG
+    binding returns GetNetTiePadGroups as an opaque vector; GetNetTiePads
+    gives each pad's group as a tuple.)"""
+    try:
+        if not fp.IsNetTie():
+            return []
+        fp.BuildNetTieCache()
+        seen, out = set(), []
+        for p in fp.Pads():
+            g = sorted({q.GetNumber() for q in fp.GetNetTiePads(p)} | {p.GetNumber()})
+            if len(g) > 1 and tuple(g) not in seen:
+                seen.add(tuple(g))
+                out.append(g)
+        return out
+    except Exception:
+        return []
+
+
 def pad_kind(shape):
     if not PAD_KIND:
         PAD_KIND.update({
@@ -310,6 +330,9 @@ def snapshot(board):
         lc = local_clearance(fp)
         if lc is not None:
             comp["localClearance"] = lc
+        ties = net_tie_groups(fp)
+        if ties:
+            comp["netTiePadGroups"] = ties
         if is_placeholder(ref):
             comp["placeholder"] = True
         lcsc = lcsc_of(fp)
