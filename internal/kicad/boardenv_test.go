@@ -6,7 +6,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestBoardFootprintLibs(t *testing.T) {
@@ -155,4 +157,42 @@ func TestBoardConfigDirDisabledNestedTable(t *testing.T) {
 	if strings.Contains(string(fp), "Child") {
 		t.Fatalf("disabled table's child enabled: %s", fp)
 	}
+}
+
+// A probe DRC (no footprints) runs with empty global tables that KiCad
+// leaves empty (no stock table seeded) and does not take the ~100 s the
+// stock library table costs.
+func TestDRCNoLibrariesLive(t *testing.T) {
+	tools := bridgeLiveTools(t)
+	t.Setenv(EnvCacheDir, t.TempDir())
+	isolatedOnce = sync.Once{}
+	isolatedDir = ""
+	dir := t.TempDir()
+	pcb := filepath.Join(dir, "probe.kicad_pcb")
+	_ = os.WriteFile(pcb, []byte(`(kicad_pcb (version 20241229) (generator "pcbnew") (general (thickness 1.6))
+  (layers (0 "F.Cu" signal) (2 "B.Cu" signal) (25 "Edge.Cuts" user))
+  (setup (pad_to_mask_clearance 0))
+  (segment (start 0 0) (end 2 0) (width 0.1) (layer "F.Cu") (net "A") (uuid "00000000-0000-4000-8000-000000000001"))
+  (segment (start 0 0.15) (end 2 0.15) (width 0.1) (layer "F.Cu") (net "B") (uuid "00000000-0000-4000-8000-000000000002")))
+`), 0o644)
+	start := time.Now()
+	rep, err := tools.DRCNoLibraries(pcb, filepath.Join(dir, "drc.json"))
+	took := time.Since(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Counts["clearance"] == 0 {
+		t.Fatalf("the probe clearance error is missing: %+v", rep.Counts)
+	}
+	empty := LibTableText("fp_lib_table", nil)
+	for _, v := range kicadSettingsVersions {
+		b, err := os.ReadFile(filepath.Join(isolatedDir, v, "fp-lib-table"))
+		if err != nil || string(b) != empty {
+			t.Fatalf("%s fp-lib-table after the run: %q %v", v, b, err)
+		}
+	}
+	if took > 45*time.Second {
+		t.Fatalf("probe DRC took %s: the stock library table was loaded?", took)
+	}
+	t.Logf("probe DRC %s", took)
 }

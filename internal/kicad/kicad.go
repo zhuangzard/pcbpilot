@@ -353,16 +353,16 @@ func (t *Tools) DRCSeverity(pcb, out, severity string) (*DRCReport, error) {
 	return t.DRCEnv(pcb, out, severity, nil)
 }
 
-// DRCNoLibraries is DRC (errors) with a private, empty KiCad configuration
-// (KICAD_CONFIG_HOME = a fresh directory next to out): no global footprint /
-// symbol library tables are loaded. Only for boards without footprints
-// (kicad rules' probe boards): loading the full KiCad library table costs
-// ~100 s per kicad-cli run on a stock install and a board without
+// DRCNoLibraries is DRC (errors) with the isolated KiCad configuration
+// (isolatedConfigDir: EMPTY global fp-lib-table and sym-lib-table in every
+// settings version directory, so KiCad never seeds the stock tables). Only
+// for boards without footprints (kicad rules' probe boards): loading the
+// stock library table costs ~100 s per kicad-cli run and a board without
 // footprints never reads it.
 func (t *Tools) DRCNoLibraries(pcb, out string) (*DRCReport, error) {
-	cfg := strings.TrimSuffix(out, filepath.Ext(out)) + "-kicad-config"
-	if err := os.MkdirAll(cfg, 0o755); err != nil {
-		return nil, err
+	cfg := isolatedConfigDir()
+	if cfg == "" {
+		return nil, fmt.Errorf("%w: cannot prepare the isolated KiCad configuration under %s", ErrDRCReport, CacheRoot())
 	}
 	return t.DRCEnv(pcb, out, "error", []string{"KICAD_CONFIG_HOME=" + cfg})
 }
