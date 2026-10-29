@@ -415,7 +415,7 @@ func TestRunDRCStagedCopy(t *testing.T) {
 	if err := json.Unmarshal(mustReadFile(t, log), &got); err != nil {
 		t.Fatal(err)
 	}
-	if !contains(got.Args, "--schematic-parity") || !contains(got.Args, "--severity-all") || got.ConfigHome == "" ||
+	if !contains(got.Args, "--schematic-parity") || !contains(got.Args, "--severity-all") || (got.ConfigHome != "") != run.Isolated ||
 		filepath.Dir(got.Args[len(got.Args)-1]) != got.Cwd || strings.HasPrefix(got.Cwd, proj) {
 		t.Fatalf("kicad-cli call: %+v", got)
 	}
