@@ -1433,7 +1433,10 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 		}
 		if intent != nil {
 			o.fo.aliases = newFastrouteNetAliases(intentRouterNets(intent), fixed)
-			pairs, tune := intentPairsAndTune(intent, o.fo.aliases)
+			pairs, tune, groupIDs := intentPairsTuneGroups(intent, o.fo.aliases)
+			if len(groupIDs) > 0 {
+				summary["intentTuneGroups"] = groupIDs
+			}
 			base := strings.TrimSuffix(dsnPath, ".dsn")
 			if pairs != "" {
 				o.fo.pairsFile = base + "-pairs.txt"
@@ -1588,6 +1591,14 @@ func intentRequirements(in *designIntent) map[string]specctra.NetRequirement {
 // maxSkewMil also becomes a length group of its two nets with that
 // tolerance. Empty strings when the intent has none.
 func intentPairsAndTune(in *designIntent, alias *fastrouteNetAliases) (pairs, tune string) {
+	pairs, tune, _ = intentPairsTuneGroups(in, alias)
+	return pairs, tune
+}
+
+// intentPairsTuneGroups is intentPairsAndTune plus the tune-file id of
+// every length group whose id is not its own name (id → intent name), for
+// the run summary.
+func intentPairsTuneGroups(in *designIntent, alias *fastrouteNetAliases) (pairs, tune string, renamed map[string]string) {
 	tok := alias.name
 	groupTok := func(g string) string {
 		return strings.Map(func(r rune) rune {
@@ -1640,11 +1651,21 @@ func intentPairsAndTune(in *designIntent, alias *fastrouteNetAliases) (pairs, tu
 		names = append(names, g)
 	}
 	sort.Strings(names)
+	var kept []string
 	for _, g := range names {
-		if len(groups[g]) < 2 {
-			continue
+		if len(groups[g]) >= 2 {
+			kept = append(kept, g)
 		}
-		fmt.Fprintf(&tb, "group %s", groupTok(g))
+	}
+	ids := fastrouteGroupIDs(kept, groupTok)
+	renamed = map[string]string{}
+	for g, id := range ids {
+		if id != g {
+			renamed[id] = g
+		}
+	}
+	for _, g := range kept {
+		fmt.Fprintf(&tb, "group %s", ids[g])
 		if tol[g] > 0 {
 			fmt.Fprintf(&tb, " tolerance=%s", mm(tol[g]))
 		}
@@ -1653,7 +1674,7 @@ func intentPairsAndTune(in *designIntent, alias *fastrouteNetAliases) (pairs, tu
 			fmt.Fprintf(&tb, "  %s\n", tok(n))
 		}
 	}
-	return pb.String(), tb.String()
+	return pb.String(), tb.String(), renamed
 }
 
 // prepareDSN applies the export fixes and, with requirements, raises the net
@@ -1887,4 +1908,34 @@ A summary JSON is printed to stdout; progress goes to stderr.
 	c.Flags().StringVar(&forceReason, "force", "", "deprecated compatibility option; workflow stages no longer gate routing")
 	c.Flags().StringVar(&forceUnsafeReason, "force-unsafe", "", "deprecated compatibility option; workflow stages no longer gate routing")
 	return c
+}
+
+// fastrouteGroupIDs gives every length group a distinct single-token id
+// for fastroute's tune file: a safe name keeps itself (reserved first);
+// an unsafe one is sanitised and, when that id is taken ("USB A", "USB_A",
+// "USB*A" all sanitise to USB_A), numbered _2, _3 … in sorted order.
+func fastrouteGroupIDs(names []string, sanitise func(string) string) map[string]string {
+	ids, taken := map[string]string{}, map[string]bool{}
+	sorted := append([]string(nil), names...)
+	sort.Strings(sorted)
+	for _, g := range sorted {
+		if fastrouteSafeName(g) {
+			ids[g], taken[g] = g, true
+		}
+	}
+	for _, g := range sorted {
+		if ids[g] != "" {
+			continue
+		}
+		base := sanitise(g)
+		if base == "" {
+			base = "group"
+		}
+		id := base
+		for k := 2; taken[id]; k++ {
+			id = fmt.Sprintf("%s_%d", base, k)
+		}
+		ids[g], taken[id] = id, true
+	}
+	return ids
 }
