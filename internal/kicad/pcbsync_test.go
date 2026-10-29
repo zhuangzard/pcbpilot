@@ -701,9 +701,17 @@ func TestSyncStagingDeterministic(t *testing.T) {
 	if fixed[0] != [2]float64{-45, -47} {
 		t.Fatalf("--staging: %v", fixed)
 	}
-	none := stagePositions(boxes[:1], &SyncInventory{}, SyncOptions{})
-	if none[0] != [2]float64{5, 3} {
-		t.Fatalf("no outline, no footprints: from the origin, got %v", none)
+	// A new board (no outline, no footprints): the batch lies left of the
+	// origin, clear of an outline drawn later from 0,0 (v0.12.1 staged it
+	// from 0,0, and `kicad board outline --origin 0,0` was refused).
+	none := stagePositions(boxes, &SyncInventory{}, SyncOptions{StagingGap: 2})
+	for i, p := range none {
+		if p[0]+5 > -10 || p[1]-3 < 0 {
+			t.Fatalf("new board: footprint %d at %v is not left of x = -10 mm from y = 0", i, p)
+		}
+	}
+	if none[0] != [2]float64{-105, 3} {
+		t.Fatalf("new board: first footprint at %v, want -105,3 (rows 100 mm wide ending at -10)", none[0])
 	}
 	// A large batch on a new board (no outline) is a compact block, not
 	// one 100 mm wide column (1500 mm tall): 1500 boxes of 10×6 mm with 2 mm
@@ -713,6 +721,11 @@ func TestSyncStagingDeterministic(t *testing.T) {
 		many = append(many, &SyncBox{-5, -3, 5, 3})
 	}
 	big := stagePositions(many, &SyncInventory{}, SyncOptions{StagingGap: 2})
+	for _, p := range big {
+		if p[0]+5 > -10 {
+			t.Fatalf("a large new-board batch crosses x = -10 mm: %v", p)
+		}
+	}
 	minX, minY, maxX, maxY := big[0][0], big[0][1], big[0][0], big[0][1]
 	for _, p := range big {
 		minX, minY, maxX, maxY = math.Min(minX, p[0]), math.Min(minY, p[1]), math.Max(maxX, p[0]), math.Max(maxY, p[1])

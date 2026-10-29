@@ -968,17 +968,33 @@ func sortSyncOps(ops []SyncOp) {
 
 // stagePositions shelf-packs new footprints (boxes at rotation 0, in the
 // given order) in rows starting 10 mm right of the board outline (right of
-// any footprint already parked there, too), or at --staging X,Y; the origin
-// when the board has neither outline nor footprints. Rows are as wide as
-// the outline, at least 100 mm, and at least the square root of the batch's
-// area (a large batch is a compact block, not one long column).
-// Deterministic: same input, same places.
+// any footprint already parked there, too), or at --staging X,Y. A board
+// with neither outline nor footprints (a new one, pcb-sync --create) gets
+// its batch left of the origin, ending 10 mm before x = 0, so an outline
+// drawn later from 0,0 (kicad board outline --origin 0,0) is clear of it.
+// Rows are as wide as the outline, at least 100 mm, at least the widest
+// footprint and at least the square root of the batch's area (a large batch
+// is a compact block, not one long column). Deterministic: same input,
+// same places.
 func stagePositions(boxes []*SyncBox, inv *SyncInventory, o SyncOptions) [][2]float64 {
 	gap := o.StagingGap
 	if gap <= 0 {
 		gap = 2
 	}
-	x0, y0, width := 0.0, 0.0, 100.0
+	// A large batch is packed about square: rows at least as wide as the
+	// root of the area it needs, not one 100 mm column (v0.12.0: a first
+	// sync of a large board without an outline was a strip ~0.8 m tall).
+	area, widest := 0.0, 0.0
+	for _, b := range boxes {
+		w, h := 1.0, 1.0
+		if b != nil {
+			w, h = b.MaxX-b.MinX, b.MaxY-b.MinY
+		}
+		area += (w + gap) * (h + gap)
+		widest = math.Max(widest, w)
+	}
+	x0, y0 := 0.0, 0.0
+	width := math.Max(100, math.Max(widest, math.Ceil(math.Sqrt(area))))
 	switch {
 	case o.Staging != nil:
 		x0, y0 = o.Staging[0], o.Staging[1]
@@ -1003,19 +1019,10 @@ func stagePositions(boxes []*SyncBox, inv *SyncInventory, o SyncOptions) [][2]fl
 				have = true
 			}
 		}
-	}
-	// A large batch is packed about square: rows at least as wide as the
-	// root of the area it needs, not one 100 mm column (v0.12.0: a first
-	// sync of a large board without an outline was a strip ~0.8 m tall).
-	area := 0.0
-	for _, b := range boxes {
-		if b != nil {
-			area += (b.MaxX - b.MinX + gap) * (b.MaxY - b.MinY + gap)
-		} else {
-			area += (1 + gap) * (1 + gap)
+		if !have { // a new board: left of where its outline will start
+			x0 = -(width + 10)
 		}
 	}
-	width = math.Max(width, math.Ceil(math.Sqrt(area)))
 	out := make([][2]float64, len(boxes))
 	cx, cy, rowH := x0, y0, 0.0
 	for i, b := range boxes {

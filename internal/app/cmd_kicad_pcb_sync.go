@@ -131,8 +131,8 @@ Modes: --dry-run and --check (exit 3 on drift) only read; --plan-out writes the
 plan with its revision, --apply-plan P --revision R applies it only if the
 files still give that revision. --create starts a new board when --pcb does
 not exist and writes it there (as --in-place) unless --out names another
-target; without an outline the new footprints are staged in a compact block
-from the origin.
+target; on a new board (no outline) the new footprints are staged in a compact block
+left of the origin, so an outline drawn from 0,0 is clear of them.
 
 Exit: 0 pass, 1 error/refused, 2 usage, 3 drift (--check), 4 locked / changed /
 revision mismatch, 5 not verified (cannot-check, --no-parity), 6 verify failed.
