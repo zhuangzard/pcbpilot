@@ -498,7 +498,7 @@ pcbpilot kicad route --pcb board-b-v5a.kicad_pcb --intent intent.json --sim sim.
    **网名**：fastroute 的 `--pairs` / `--tune` 文件按空白切分、不认引号（0.1.14 实测 `"A B"`、`'A B'`、`A\ B` 都会拆开），
    tune 里 `*` 是通配。层次网名带空格（页标题、自动分页的 " (1/2)"）、引号、`=`、`#`、`*` 的差分对 / 长度组网，
    只在 fastroute 读的那份 DSN（`route.fastroute.dsn`）里改名为 `pcbpilot_net_N`，pairs / tune 写别名，fastroute 写回的
-   session 换回真名（`.names.ses`）再导入；报告里的未布通网名也换回真名。KiCad 板、`route.dsn` 和 TraceMaker（JSON 约束）不受影响。
+   session 里凡是网标识位置（`(net …)` 之后、`(class 名 网 网 …)` 里）、整个 token 等于别名的（带不带引号都算），换回 DSN 里该网**原样的 token**（KiCad 把名字里的 `"` 写成两个单引号、反斜杠不转义，导入时再还原）后存成 `.names.ses` 再导入；只按整 token 替换，`pcbpilot_net_1_x` 这类真网名不受影响，别名也不会与 DSN 里任何 token 重名；报告里的未布通网名也换回真名。KiCad 板、`route.dsn` 和 TraceMaker（JSON 约束）不受影响。
    一条 `runFastroute`（续跑、崩溃单线程重试）。`--multi-start`（默认 4）是 pcbpilot 设置：fastroute 自己
    并行重跑 N−1 个不同种子的第 1 轮网序、按（未布通、冲突、−分数）取最好，pcbpilot 不再叠第二层并行。同一 DSN + 同一参数
    结果逐字节相同（Board-A：3 次 `--multi-start=1`、2 次 `--multi-start=4` 的 SES 完全一致）。优化器默认关（`--optimizer`
