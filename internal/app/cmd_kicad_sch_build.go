@@ -545,6 +545,9 @@ type sbResolveOpts struct {
 	Offline   bool // never touch the network (cache / local symbols / generated only)
 	Jobs      int
 	PartsPath string
+	// NoFootprintCheck skips footprint file resolution and its diagnostics
+	// (sch-edit reading its stored base design; the rebuild checks).
+	NoFootprintCheck bool
 }
 
 type sbResolveStats struct {
@@ -830,6 +833,21 @@ func resolveSymbols(parts []*sbRPart, opts sbResolveOpts, libDirs []string) (st 
 	// Footprint problems fail the build like every other spec problem: the
 	// error is returned here explicitly (the deferred handler above only
 	// fills in an error when none is returned).
+	// "lcsc:FOO" on a part whose symbol is not from LCSC (stock, generated,
+	// local): the footprint an LCSC import of this build brought, if any;
+	// else the normal lookup below (libDirs, project dir) with its
+	// diagnostics — never skipped by nickname.
+	if opts.NoFootprintCheck {
+		if len(diags) > 0 {
+			return st, &sbDiagErr{diags}
+		}
+		return st, nil
+	}
+	for _, p := range parts {
+		if fl, ff, ok := strings.Cut(p.Footprint, ":"); ok && fl == "lcsc" && p.FPFile == "" {
+			p.FPFile = sbLCSCFootprintFile(ff, nil, cached, "")
+		}
+	}
 	diags = append(diags, sbResolveFootprintLibs(parts, dirs, &st)...)
 	if len(diags) > 0 {
 		return st, &sbDiagErr{diags}
@@ -975,7 +993,7 @@ func sbResolveFootprintLibs(parts []*sbRPart, dirs []string, st *sbResolveStats)
 	var order []string
 	for _, p := range parts {
 		lib, name, ok := strings.Cut(p.Footprint, ":")
-		if !ok || lib == "" || name == "" || p.FPFile != "" || lib == "lcsc" {
+		if !ok || lib == "" || name == "" || p.FPFile != "" {
 			continue
 		}
 		if d := findLib(lib); d != "" {

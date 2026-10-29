@@ -415,7 +415,10 @@ func runSchEdit(o sbOptions, ops []sbOp) (*sbReport, error) {
 		return nil, fmt.Errorf("%s has no sch-build state (.pcbpilot/sch-build); build it with kicad sch-build first", out)
 	}
 	cp := *spec
-	old, _, err := buildDesign(&cp, sbResolveOpts{OutDir: out, Offline: true, Jobs: o.Jobs, PartsPath: o.PartsPath})
+	// The stored design is only read here (the edit's base): its footprint
+	// files are not resolved — a footprint gone from the project must reach
+	// the external-edit check, and the rebuild below checks them.
+	old, _, err := buildDesign(&cp, sbResolveOpts{OutDir: out, Offline: true, Jobs: o.Jobs, PartsPath: o.PartsPath, NoFootprintCheck: true})
 	if err != nil {
 		return nil, fmt.Errorf("stored spec: %w", err)
 	}
