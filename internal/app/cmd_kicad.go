@@ -96,16 +96,26 @@ func copyKicadBoard(src, dst string) (hasPro bool, err error) {
 	if err := os.WriteFile(dst, data, 0o644); err != nil {
 		return false, err
 	}
-	return copyKicadSidecars(src, dst)
+	return copySidecars(src, dst, true)
 }
 
 // copyKicadSidecars copies the files beside board src that its rules live
 // in — the .kicad_pro (net classes, board setup) and the .kicad_dru
 // (custom rules: intent clearances, creepage, track floors) — next to dst
-// under dst's base name, and removes a stale one at dst when src has none.
-// Reports whether a .kicad_pro came along. For a board pcbnew wrote
-// elsewhere (kicad place --out), so the placed board keeps its rules.
+// under dst's base name, for a board pcbnew wrote elsewhere (kicad place
+// --out), so it keeps its rules. A stale .kicad_dru at dst goes when src
+// has none (its rules are not the board's); a .kicad_pro at dst stays (it
+// was kept before, and holds the destination project's own settings).
+// Reports whether dst has a .kicad_pro.
 func copyKicadSidecars(src, dst string) (hasPro bool, err error) {
+	return copySidecars(src, dst, false)
+}
+
+// copySidecars copies src's .kicad_pro / .kicad_dru to dst's base name. A
+// sidecar src lacks is removed at dst (the .kicad_pro only with
+// removePro); a removal that fails for any reason but absence is an error,
+// not a silent stale rules file.
+func copySidecars(src, dst string, removePro bool) (hasPro bool, err error) {
 	sb, db := strings.TrimSuffix(src, ".kicad_pcb"), strings.TrimSuffix(dst, ".kicad_pcb")
 	if sb == db {
 		_, err := os.Stat(sb + ".kicad_pro")
@@ -114,11 +124,18 @@ func copyKicadSidecars(src, dst string) (hasPro bool, err error) {
 	for _, ext := range kicadSiblings[1:] {
 		data, err := os.ReadFile(sb + ext)
 		if err != nil {
-			if os.IsNotExist(err) {
-				_ = os.Remove(db + ext)
+			if !os.IsNotExist(err) {
+				return false, fmt.Errorf("copy %s: %w", sb+ext, err)
+			}
+			if ext == ".kicad_pro" && !removePro {
+				_, err := os.Stat(db + ext)
+				hasPro = hasPro || err == nil
 				continue
 			}
-			return false, fmt.Errorf("copy %s: %w", sb+ext, err)
+			if err := os.Remove(db + ext); err != nil && !os.IsNotExist(err) {
+				return false, fmt.Errorf("remove the stale %s: %w", db+ext, err)
+			}
+			continue
 		}
 		if err := os.WriteFile(db+ext, data, 0o644); err != nil {
 			return false, err

@@ -168,3 +168,62 @@ func TestKicadPlaceMechKeepsTheKicadOutline(t *testing.T) {
 		t.Fatalf("a mech board of another size was accepted: %v", err)
 	}
 }
+
+// kicad place never replaces the outline it writes unchanged: a 50 x 50 mm
+// board with a 100 x 100 mm --mech is refused, with or without
+// replaceOutline, and points at kicad board outline.
+func TestKicadPlaceRefusesAnotherOutline(t *testing.T) {
+	var snap map[string]any
+	if err := json.Unmarshal(tinyKicadSnapshot(), &snap); err != nil {
+		t.Fatal(err)
+	}
+	s := 50 / 0.0254
+	snap["outline"] = map[string]any{"bbox": map[string]any{"minX": 0, "minY": -s, "maxX": s, "maxY": 0},
+		"points": [][2]float64{{0, 0}, {s, 0}, {s, -s}, {0, -s}}, "source": "polygon"}
+	raw, _ := json.Marshal(snap)
+	dir := t.TempDir()
+	deps := kicadPlaceDeps{
+		snapshot: func(string) ([]byte, error) { return raw, nil },
+		place: func(string, map[string]kicad.Pose, string) (*kicad.PlaceResult, error) {
+			t.Fatal("a board was written")
+			return nil, nil
+		},
+	}
+	mech := filepath.Join(dir, "mech.json")
+	for _, js := range []string{`{"board":{"width":100,"height":100}}`, `{"board":{"width":100,"height":100,"replaceOutline":true}}`} {
+		os.WriteFile(mech, []byte(js), 0o644)
+		_, err := runKicadPlace(kicadPlaceOpts{pcb: filepath.Join(dir, "in.kicad_pcb"), out: filepath.Join(dir, "out", "b.kicad_pcb"), mech: mech, placeSeeds: 1, candidates: 1, seed: 1}, deps, io.Discard)
+		if err == nil || !strings.Contains(err.Error(), "kicad board outline") {
+			t.Fatalf("%s: %v, want a refusal pointing at kicad board outline", js, err)
+		}
+	}
+}
+
+// A destination .kicad_pro stays when the source has none (only a stale
+// .kicad_dru goes), and a stale .kicad_dru that cannot be removed is an
+// error, not a silent leftover rule file.
+func TestCopyKicadSidecarsKeepsProAndReportsRemoval(t *testing.T) {
+	dir := t.TempDir()
+	src, dst := filepath.Join(dir, "a", "in.kicad_pcb"), filepath.Join(dir, "b", "out.kicad_pcb")
+	os.MkdirAll(filepath.Dir(src), 0o755)
+	os.MkdirAll(filepath.Dir(dst), 0o755)
+	os.WriteFile(filepath.Join(dir, "b", "out.kicad_pro"), []byte(`{"keep":1}`), 0o644)
+	os.WriteFile(filepath.Join(dir, "b", "out.kicad_dru"), []byte("(version 1)"), 0o644)
+	hasPro, err := copyKicadSidecars(src, dst)
+	if err != nil || !hasPro {
+		t.Fatalf("hasPro %v err %v", hasPro, err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "b", "out.kicad_pro")); string(got) != `{"keep":1}` {
+		t.Fatalf("destination .kicad_pro %q, want it kept", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "b", "out.kicad_dru")); !os.IsNotExist(err) {
+		t.Fatal("stale .kicad_dru kept")
+	}
+	// A stale "rules file" that cannot be removed (here a non-empty
+	// directory, on every OS) fails the copy.
+	stuck := filepath.Join(dir, "b", "out.kicad_dru")
+	os.MkdirAll(filepath.Join(stuck, "x"), 0o755)
+	if _, err := copyKicadSidecars(src, dst); err == nil || !strings.Contains(err.Error(), "stale") {
+		t.Fatalf("unremovable stale .kicad_dru: %v, want an error", err)
+	}
+}

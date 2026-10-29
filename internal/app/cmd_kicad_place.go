@@ -87,7 +87,8 @@ of --place-seeds seeds) and writes the poses back with pcbnew:
 --mech constrains the model only (fixed / edge parts, keep-outs, zones,
 holes, in mm from the KiCad outline's lower-left corner); the board outline
 and holes in the written file stay KiCad's. A --mech board size must match
-the KiCad outline (0.1 mm) unless board.replaceOutline is set.
+the KiCad outline (0.1 mm); board.replaceOutline is refused (change the
+outline with kicad board outline first).
 The input's .kicad_pro and .kicad_dru (net classes, custom rules) are
 copied beside every written board. Locked footprints and mounting holes stay put, and so do footprints whose
 designator is shared (two H1) or a placeholder (empty, REF**, G***, R?): they are
@@ -188,7 +189,16 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 		if pcbauto.NeedsAutoFrame(mech) {
 			return nil, fmt.Errorf("--mech autoSize: kicad place keeps the KiCad outline — give the board's size or drop autoSize")
 		}
+		if mech.Board.ReplaceOutline {
+			// The written board keeps its Edge.Cuts, and legality is judged
+			// on the model: a replaced model outline would pass parts that
+			// sit outside the delivered board.
+			return nil, fmt.Errorf("--mech board.replaceOutline: kicad place writes the KiCad outline unchanged — change the outline with `pcbpilot kicad board outline` first, then drop replaceOutline (a --mech board size must match the KiCad outline)")
+		}
 		if mc, err = pcbauto.ApplyMech(b, mech); err != nil {
+			if strings.Contains(err.Error(), "differs from the board's outline") {
+				return nil, fmt.Errorf("%w — kicad place keeps the KiCad outline: change it with `pcbpilot kicad board outline` first, or fix the --mech board size", err)
+			}
 			return nil, err
 		}
 		for ref := range mc.Fixed {
@@ -198,10 +208,7 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 		}
 		slices.Sort(rep.Fixed)
 		rep.Mechanics = mc
-		switch {
-		case (len(mech.Board.Outline) >= 3 || mech.Board.Width > 0) && mech.Board.ReplaceOutline:
-			rep.Notes = append(rep.Notes, "--mech board.replaceOutline: the model uses the --mech outline at the KiCad outline's lower-left corner; the written board keeps its KiCad Edge.Cuts")
-		case len(mech.Board.Outline) >= 3 || mech.Board.Width > 0:
+		if len(mech.Board.Outline) >= 3 || mech.Board.Width > 0 {
 			rep.Notes = append(rep.Notes, "--mech board matches the KiCad outline: kept; --mech coordinates count from its lower-left corner")
 		}
 	}

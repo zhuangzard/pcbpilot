@@ -44,7 +44,7 @@ typed action，符合“禁止手工操作 EDA 工程”准则。
 `kicad place` 用 KiCad 自带 Python 读板（板框、孔、keep-out rule area、courtyard、位号尺寸），并行跑
 `--place-seeds`（默认 6）个种子取最优，用 pcbnew 写回：`--out` 为最优解，其余 `--candidates`（默认共 3）写成
 `<out>.seed-N.kicad_pcb`，指标在 `<out>.report.json`。输入 `--pcb` 不被修改；`--mech` 只约束模型，输出文件的板框和孔
-仍是 KiCad 原值（`--mech` 的 board 尺寸须与 KiCad 板框一致，坐标从其左下角起算；尺寸不同时需 `board.replaceOutline`）；输入工程的 `.kicad_pro` 与 `.kicad_dru`（网络类、自定义规则）随每块输出板一起复制；锁定封装与安装孔不动。移动器件会使铜失效：输出里走线与过孔被删除、铺铜未填充，之后用 `kicad route`
+仍是 KiCad 原值（`--mech` 的 board 尺寸须与 KiCad 板框一致，坐标从其左下角起算；尺寸不同或设了 `board.replaceOutline` 都会被拒绝：先用 `kicad board outline` 改板框）；输入工程的 `.kicad_pro` 与 `.kicad_dru`（网络类、自定义规则）随每块输出板一起复制；锁定封装与安装孔不动。移动器件会使铜失效：输出里走线与过孔被删除、铺铜未填充，之后用 `kicad route`
 布线。KiCad 侧的整体流程见 [kicad.md](kicad.md)。
 `--time-budget`（默认 8m，0 = 不限）限定布局搜索的墙钟时间：所有种子并行共用同一截止时间，到点即交出当前最优解，
 报告里 `budgetHit: true`、每个种子的 `metrics.timeBudgetHit` 写明被截断的阶段（`aesthetics` = 电气布局已完成、只差美观整理），
