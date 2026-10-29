@@ -305,10 +305,14 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 	best := outs[0]
 	rep.Illegal, rep.ZoneFill, rep.Verdict = best.Result.Illegal, best.Result.ZoneFill, gate.Pass
 	for _, z := range rep.ZoneFill {
-		if z.Fill > 1 || z.Fill > pcbauto.ZoneTightFill && z.Illegal > 0 {
-			fmt.Fprintf(stderr, "placement: WARNING zone %s: parts need %.0f mm² (fixed parts %.0f), zone offers %.0f mm² (fill %.2f, %d illegal) — enlarge the zone or move parts out of it\n", z.Domain, z.NeedMm2, z.FixedMm2, z.OfferMm2, z.Fill, z.Illegal)
+		fill := "none usable"
+		if z.Fill != nil {
+			fill = fmt.Sprintf("%.2f", *z.Fill)
+		}
+		if z.OverFull || z.Tight && z.Illegal > 0 {
+			fmt.Fprintf(stderr, "placement: WARNING zone %s: parts need %.0f mm² (fixed parts %.0f), zone offers %.0f mm² (fill %s, %d illegal) — enlarge the zone or move parts out of it\n", z.Domain, z.NeedMm2, z.FixedMm2, z.OfferMm2, fill, z.Illegal)
 		} else if z.Illegal > 0 {
-			fmt.Fprintf(stderr, "placement: WARNING zone %s: %d illegal placement(s) although it has room (need %.0f of %.0f mm², fill %.2f)\n", z.Domain, z.Illegal, z.NeedMm2, z.OfferMm2, z.Fill)
+			fmt.Fprintf(stderr, "placement: WARNING zone %s: %d illegal placement(s) although it has room (need %.0f of %.0f mm², fill %s)\n", z.Domain, z.Illegal, z.NeedMm2, z.OfferMm2, fill)
 		}
 	}
 	if best.Trial.Illegal > 0 {
