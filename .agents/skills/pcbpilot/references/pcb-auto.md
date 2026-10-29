@@ -46,6 +46,9 @@ typed action，符合“禁止手工操作 EDA 工程”准则。
 `<out>.seed-N.kicad_pcb`，指标在 `<out>.report.json`。输入 `--pcb` 不被修改；`--mech` 只约束模型，输出文件的板框和孔
 仍是 KiCad 原值；锁定封装与安装孔不动。移动器件会使铜失效：输出里走线与过孔被删除、铺铜未填充，之后用 `kicad route`
 布线。KiCad 侧的整体流程见 [kicad.md](kicad.md)。
+`--time-budget`（默认 8m，0 = 不限）限定布局搜索的墙钟时间：所有种子并行共用同一截止时间，到点即交出当前最优解，
+报告里 `budgetHit: true`、每个种子的 `metrics.timeBudgetHit` 写明被截断的阶段（`aesthetics` = 电气布局已完成、只差美观整理），
+stderr 打 WARNING；进度（种子、阶段、已用时间）实时并每 30 s 打到 stderr。1500 件级的大板请先看进度，必要时加大预算。
 
 `pcb route-short`、`route-critical`、`layout-plan` 等既有命令仍适用于逐模块、逐网的精细控制；
 `pcb auto` 负责整板级决策。二者可组合：先 `pcb auto analyze` 取线宽/层数/域，再用既有命令

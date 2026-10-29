@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
@@ -24,6 +26,7 @@ type kicadPlaceOpts struct {
 	groups                   []string
 	placeSeeds, candidates   int
 	seed                     int64
+	timeBudget               time.Duration
 }
 
 // kicadPlaceSeed is one placement seed in the report.
@@ -44,7 +47,11 @@ type kicadPlaceReport struct {
 	Fixed     []string           `json:"fixed,omitempty"` // locked, mounting holes, --mech fixed/edge
 	Seeds     []kicadPlaceSeed   `json:"seeds"`
 	Mechanics *pcbauto.Mechanics `json:"mechanics,omitempty"`
-	Notes     []string           `json:"notes,omitempty"`
+	// TimeBudget is --time-budget; BudgetHit is set when any seed's
+	// placement was cut short by it (see each seed's metrics.timeBudgetHit).
+	TimeBudget string   `json:"timeBudget,omitempty"`
+	BudgetHit  bool     `json:"budgetHit,omitempty"`
+	Notes      []string `json:"notes,omitempty"`
 
 	path string // where the report was written
 }
@@ -75,7 +82,14 @@ holes); the board outline and holes in the written file stay KiCad's.
 Locked footprints and mounting holes stay put, and so do footprints whose
 designator is shared (two H1) or a placeholder (empty, REF**, G***, R?): they are
 fixed obstacles, listed in the report notes. Moving parts invalidates the
-copper: tracks and vias are removed and zones unfilled in the output.`,
+copper: tracks and vias are removed and zones unfilled in the output.
+
+--time-budget bounds the placement search in wall time (all seeds run in
+parallel against the same deadline; snapshot and board writing come on
+top). A seed the budget cuts short keeps its best placement so far, with
+metrics as measured; the report flags it (budgetHit, per seed
+metrics.timeBudgetHit) and stderr says so. Progress (seed, phase,
+elapsed) goes to stderr as it happens and every 30 s.`,
 		Example: `  pcbpilot kicad place --pcb board.kicad_pcb --out placed/board.kicad_pcb
   pcbpilot kicad place --pcb board.kicad_pcb --out placed/board.kicad_pcb --mech mech.json --intent intent.json --place-seeds 8`,
 		Args: cobra.NoArgs,
@@ -104,6 +118,7 @@ copper: tracks and vias are removed and zones unfilled in the output.`,
 	c.Flags().IntVar(&o.placeSeeds, "place-seeds", 6, "run this many seeds (from --seed) in parallel and keep the best")
 	c.Flags().IntVar(&o.candidates, "candidates", 3, "boards to write, best included (runners-up as <out>.seed-N.kicad_pcb)")
 	c.Flags().Int64Var(&o.seed, "seed", 1, "first placement seed")
+	c.Flags().DurationVar(&o.timeBudget, "time-budget", 8*time.Minute, "wall-time budget of the placement search (0 = none); a seed cut short returns its best so far, flagged in the report")
 	return c
 }
 
@@ -194,7 +209,19 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 		c, err := understand(bc, a)
 		return a, c, err
 	}
+	prog := newPlaceProgress(stderr, placeProgressEvery)
+	popt.Progress = prog.phase
+	if o.timeBudget > 0 {
+		// The anneal's own clock (90 s by default) cut a 1500-part board's
+		// anneal at a fraction of its moves; within the budget it may run to
+		// 65 % of it (it ends sooner when its moves are done, as on every
+		// small board).
+		popt.Timeout = max(90*time.Second, o.timeBudget*65/100)
+		popt.Deadline = time.Now().Add(o.timeBudget)
+		rep.TimeBudget = o.timeBudget.String()
+	}
 	outs, trials, err := pcbauto.PlaceSeeds(b, prep, mc, popt, o.placeSeeds)
+	prog.stop()
 	if err != nil {
 		return nil, err
 	}
@@ -224,6 +251,10 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 		}
 		fmt.Fprintf(stderr, "placement seed %d: wirelength %.1f in, critical excess %.0f mil, illegal %d, labels blocked %d, score %.1f\n",
 			t.Seed, t.Metrics.WirelengthIn, t.Metrics.CriticalExcessMil, t.Illegal, t.Metrics.LabelBlocked, t.Score)
+		if h := t.Metrics.TimeBudgetHit; h != "" {
+			rep.BudgetHit = true
+			fmt.Fprintf(stderr, "placement seed %d: WARNING time budget %s reached during %s: best placement so far, not a finished one\n", t.Seed, o.timeBudget, h)
+		}
 		i, ok := written[t.Seed]
 		if currents != nil {
 			// The trial's own board copy (only successful seeds have one).
@@ -247,6 +278,9 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 			}
 		}
 		rep.Seeds = append(rep.Seeds, s)
+	}
+	if rep.BudgetHit {
+		rep.Notes = append(rep.Notes, fmt.Sprintf("time budget %s reached: at least one seed returned its best placement so far (metrics.timeBudgetHit names the phase); raise --time-budget for a finished placement", o.timeBudget))
 	}
 	blob, _ := json.MarshalIndent(rep, "", "  ")
 	if err := os.WriteFile(o.report, append(blob, '\n'), 0o644); err != nil {
@@ -588,4 +622,71 @@ func copyKicadPro(pcb, out string) error {
 		return err
 	}
 	return os.WriteFile(strings.TrimSuffix(out, ".kicad_pcb")+".kicad_pro", raw, 0o644)
+}
+
+// placeProgressEvery is how often kicad place repeats every running seed's
+// phase on stderr while nothing else is printed.
+var placeProgressEvery = 30 * time.Second
+
+// placeProgress prints each seed's phase changes on stderr (with the time
+// since the placement started) and, every `every`, the phase every seed is
+// still in: a 1500-part board places for minutes.
+type placeProgress struct {
+	mu    sync.Mutex
+	w     io.Writer
+	start time.Time
+	cur   map[int64]string
+	since map[int64]time.Time
+	done  chan struct{}
+	wg    sync.WaitGroup
+}
+
+func newPlaceProgress(w io.Writer, every time.Duration) *placeProgress {
+	pp := &placeProgress{w: w, start: time.Now(), cur: map[int64]string{}, since: map[int64]time.Time{}, done: make(chan struct{})}
+	if every > 0 {
+		pp.wg.Add(1)
+		go func() {
+			defer pp.wg.Done()
+			t := time.NewTicker(every)
+			defer t.Stop()
+			for {
+				select {
+				case <-pp.done:
+					return
+				case <-t.C:
+					pp.tick()
+				}
+			}
+		}()
+	}
+	return pp
+}
+
+func (pp *placeProgress) elapsed() string {
+	return time.Since(pp.start).Round(time.Second).String()
+}
+
+// phase is PlaceOptions.Progress.
+func (pp *placeProgress) phase(seed int64, phase string) {
+	pp.mu.Lock()
+	defer pp.mu.Unlock()
+	pp.cur[seed], pp.since[seed] = phase, time.Now()
+	fmt.Fprintf(pp.w, "placement seed %d: %s (elapsed %s)\n", seed, phase, pp.elapsed())
+}
+
+func (pp *placeProgress) tick() {
+	pp.mu.Lock()
+	defer pp.mu.Unlock()
+	var parts []string
+	for _, s := range slices.Sorted(maps.Keys(pp.cur)) {
+		parts = append(parts, fmt.Sprintf("seed %d %s %s", s, pp.cur[s], time.Since(pp.since[s]).Round(time.Second)))
+	}
+	if len(parts) > 0 {
+		fmt.Fprintf(pp.w, "placement: elapsed %s; %s\n", pp.elapsed(), strings.Join(parts, ", "))
+	}
+}
+
+func (pp *placeProgress) stop() {
+	close(pp.done)
+	pp.wg.Wait()
 }
