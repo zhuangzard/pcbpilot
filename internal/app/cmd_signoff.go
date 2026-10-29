@@ -30,6 +30,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -686,11 +687,11 @@ func boardCopperMissing(snap *boardSnapshot) (string, []string) {
 	}
 	type netPads struct {
 		name  string
-		pads  map[string]bool // designator + "|" + pad number: one per internally connected group
+		pads  map[string]bool // footprint index + "|" + pad number: one per internally connected group
 		parts map[string]bool
 	}
 	nets := map[string]*netPads{}
-	for _, comp := range snap.Components {
+	for ci, comp := range snap.Components {
 		for _, p := range comp.Pads {
 			if p.Net == "" {
 				continue
@@ -701,8 +702,11 @@ func boardCopperMissing(snap *boardSnapshot) (string, []string) {
 				np = &netPads{name: p.Net, pads: map[string]bool{}, parts: map[string]bool{}}
 				nets[k] = np
 			}
-			np.pads[comp.Designator+"|"+p.Number] = true
-			np.parts[comp.Designator] = true
+			// Keyed by the footprint itself (its index in the snapshot), not
+			// its designator: two footprints both named R1 are two parts.
+			part := strconv.Itoa(ci)
+			np.pads[part+"|"+p.Number] = true
+			np.parts[part] = true
 		}
 	}
 	var missing []string
