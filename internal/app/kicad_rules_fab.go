@@ -245,6 +245,7 @@ func (r *rulesRun) padClearance() {
 		refs    []string
 	}
 	thermal := map[[2]string]*thermalHit{}
+	unknown := map[[2]string][]string{} // footprint, pads → parts
 	pairs := 0
 	for _, c := range r.snap.Components {
 		for i := 0; i < len(c.Pads); i++ {
@@ -256,7 +257,17 @@ func (r *rulesRun) padClearance() {
 				if b.Net == a.Net || !padLayersMeet(a.Layer, b.Layer) {
 					continue
 				}
-				gapMil := padGapMil(a.X, a.Y, a.W, a.H, b.X, b.Y, b.W, b.H)
+				gapMil, exact := padShapeGap(padShapeOf(a.X, a.Y, a.W, a.H, a.Rotation, a.Shape), padShapeOf(b.X, b.Y, b.W, b.H, b.Rotation, b.Shape))
+				if gapMil <= 0 && !exact {
+					// Bounding boxes overlap and a shape is not modelled
+					// (a custom pad): the gap is unknown — never a pass.
+					pairs++
+					id := [2]string{c.Footprint, padPair(a.Number, b.Number)}
+					if !rulesHasStr(unknown[id], c.Designator) {
+						unknown[id] = append(unknown[id], c.Designator)
+					}
+					continue
+				}
 				if gapMil <= 0 {
 					// Overlapping pads of two nets: a net tie (skipped) —
 					// unless one has no net: an unnamed thermal via inside
@@ -356,6 +367,24 @@ func (r *rulesRun) padClearance() {
 		chk.Items = append(chk.Items, fmt.Sprintf("%s: pad(s) without a net overlap pad %s (%s) — unnamed thermal vias in the exposed pad; KiCad reports them as clearance errors to the pad, on %s%s — fix: give the thermal-via pads the exposed pad's number (same net) in the footprint; pcbpilot does not change footprints",
 			emptyAs(id[0], "(no library id)"), emptyAs(g.ep, "(unnamed)"), g.net, strings.Join(refs, ", "), more))
 	}
+	uids := make([][2]string, 0, len(unknown))
+	for id := range unknown {
+		uids = append(uids, id)
+	}
+	sort.Slice(uids, func(i, j int) bool { return uids[i][0]+"|"+uids[i][1] < uids[j][0]+"|"+uids[j][1] })
+	for _, id := range uids {
+		refs := unknown[id]
+		sort.Strings(refs)
+		for _, ref := range refs {
+			parts[ref] = true
+		}
+		more := ""
+		if len(refs) > 8 {
+			more, refs = fmt.Sprintf(" (+%d more)", len(refs)-8), refs[:8]
+		}
+		chk.Items = append(chk.Items, fmt.Sprintf("%s: %s not judged — a custom pad shape whose bounding box overlaps the other pad, on %s%s: check the gap against the clearance in KiCad's DRC",
+			emptyAs(id[0], "(no library id)"), id[1], strings.Join(refs, ", "), more))
+	}
 	if len(chk.Items) > 0 {
 		chk.Status = gate.Warn
 		chk.Detail = fmt.Sprintf("%d footprint(s) / clearance(s) on %d part(s) have pads closer than the %s clearance between them: KiCad DRC reports each as a clearance error no placement can fix (custom .kicad_dru clearance rules are not evaluated here; DRC is the judge)", len(chk.Items), len(parts), what)
@@ -388,21 +417,6 @@ func (r *rulesRun) padNeed(rb *kicad.RulesReadback, fpLocal, padLocal *float64, 
 
 // padLayersMeet: two pads share a copper layer (1 F.Cu, 2 B.Cu, 12 through).
 func padLayersMeet(a, b int) bool { return a == b || a == 12 || b == 12 }
-
-// padGapMil is the edge-to-edge distance of two pad boxes (centre, size).
-func padGapMil(ax, ay, aw, ah, bx, by, bw, bh float64) float64 {
-	dx := math.Abs(ax-bx) - (aw+bw)/2
-	dy := math.Abs(ay-by) - (ah+bh)/2
-	switch {
-	case dx > 0 && dy > 0:
-		return math.Hypot(dx, dy)
-	case dx > 0:
-		return dx
-	case dy > 0:
-		return dy
-	}
-	return 0
-}
 
 func emptyAs(s, alt string) string {
 	if s == "" {

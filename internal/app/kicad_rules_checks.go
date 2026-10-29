@@ -109,6 +109,10 @@ type rulesSnap struct {
 			Y      float64 `json:"y"`
 			W      float64 `json:"width"`
 			H      float64 `json:"height"`
+			// Rotation (degrees) and Shape [kind, sizeX, sizeY] (mil): the
+			// pad's own geometry (padShapeOf).
+			Rotation float64 `json:"rotation"`
+			Shape    []any   `json:"shape"`
 			// LocalClearance: the pad's clearance override (mil).
 			LocalClearance *float64 `json:"localClearance"`
 		} `json:"pads"`
@@ -1047,17 +1051,25 @@ func (r *rulesRun) probeCheck(board, what string) rulesCheck {
 	var tracks []kicad.ProbeTrack
 	var exps []rulesProbeExp
 	row := 0.0
-	// A clearance probe row spans one clearance (its two tracks); the next
-	// row must be another clearance beyond it, or a track of one row
-	// violates against the next row's — and KiCad reports one clearance
-	// error per track, so the probe's own pair may go unreported.
-	step := 400.0
+	// Row spacing: a clearance probe row spans one clearance (its two
+	// tracks); the next row must be another clearance beyond its far edge,
+	// or a track of one row violates against the next row's — and KiCad
+	// reports one clearance error per track, so the probe's own pair may go
+	// unreported. The far edges add half of each row's track width: a
+	// width probe is as wide as its class floor (a 5 mm power track).
+	maxClr, maxW := 0.0, float64(max(r.rb0.Minimums.Track, 150000))/nmPerMil
 	for _, p := range r.rep.Isolation {
-		step = math.Max(step, 2*p.ClearanceMm/0.0254+200)
+		maxClr = math.Max(maxClr, p.ClearanceMm/0.0254)
 	}
 	for _, c := range r.full.ClassesNM {
-		step = math.Max(step, 2*float64(c.NM.Clearance)/nmPerMil+200)
+		maxClr = math.Max(maxClr, float64(c.NM.Clearance)/nmPerMil)
 	}
+	for _, e := range r.rep.Nets {
+		for _, l := range []string{"outer", "inner"} {
+			maxW = math.Max(maxW, float64(r.planFloor(e, l))/nmPerMil)
+		}
+	}
+	step := probeRowStep(maxClr, maxW)
 	seen := map[string]bool{}
 	for _, e := range r.rep.Nets {
 		if seen[e.Class] {
@@ -1294,6 +1306,14 @@ func (r *rulesRun) probeCheck(board, what string) rulesCheck {
 }
 
 // ── --check ─────────────────────────────────────────────────────────────────
+
+// probeRowStep is the distance between probe rows (mil) for the largest
+// clearance and track width: a row spans up to one clearance plus one
+// track width, the gap to the next row's nearest edge is another clearance
+// plus a margin, and the next row's track adds half its width.
+func probeRowStep(maxClrMil, maxWidthMil float64) float64 {
+	return math.Max(400, 2*maxClrMil+2*maxWidthMil+200)
+}
 
 // checkBoard gates the board as it is against the plan.
 func (r *rulesRun) checkBoard() {
