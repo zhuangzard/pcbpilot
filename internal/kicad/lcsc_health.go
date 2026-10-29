@@ -178,6 +178,8 @@ func RunHealth(in HealthInput) *HealthReport {
 		}
 		return r
 	}
+	// A catalog record without lossNumber has an unknown loss allowance, not a zero one:
+	// need is then only the lower bound placements × boards and a stock pass is not claimed.
 	need := map[string]int64{}
 	for _, code := range codes {
 		if r := look(code); r.Part != nil {
@@ -346,6 +348,12 @@ func checkStock(codes []string, look func(string) CatalogLookup, need map[string
 				code, r.Part.MPN, *r.Part.Stock, need[code], placements[code], boards))
 			continue
 		}
+		if r.Part.Loss == nil {
+			cannots++
+			c.Items = append(c.Items, fmt.Sprintf("%s %s: catalog stock %d covers placements × boards (%d) but the catalog gives no loss allowance (lossNumber): the real need is unknown",
+				code, r.Part.MPN, *r.Part.Stock, need[code]))
+			continue
+		}
 		ok++
 	}
 	c.Status = aggregateItems(fails, cannots)
@@ -370,16 +378,18 @@ func checkExtended(codes []string, look func(string) CatalogLookup) HealthCheck 
 		switch {
 		case !known:
 			unknown++
+			c.Items = append(c.Items, code+" "+r.Part.MPN+": library (basic / extended) not stated by the catalog")
 		case !b:
 			ext++
 			c.Items = append(c.Items, code+" "+r.Part.MPN+" ("+r.Part.Package+")")
 		}
 	}
+	// An unknown library hides possible setup fees: it outranks a warn (both stay in Items).
 	switch {
-	case ext > 0:
-		c.Status = gate.Warn
 	case unknown > 0:
 		c.Status = gate.CannotCheck
+	case ext > 0:
+		c.Status = gate.Warn
 	default:
 		c.Status = gate.Pass
 	}

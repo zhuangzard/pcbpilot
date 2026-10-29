@@ -119,7 +119,7 @@ func TestKiCadLcscAlternativesPlanAndStaleGuard(t *testing.T) {
 
 	// A plan that expects numbers the board does not carry is refused before anything is written.
 	plan := filepath.Join(t.TempDir(), "plan.json")
-	os.WriteFile(plan, []byte(`{"kind":"pcbpilot.lcsc-alternatives","assignments":{"R1":"C1525"},"expect":{"R1":"C99999"}}`), 0o644)
+	os.WriteFile(plan, []byte(`{"kind":"pcbpilot.lcsc-alternatives","boards":1,"fingerprint":"x","assignments":{"R1":"C1525"},"expect":{"R1":"C99999"}}`), 0o644)
 	_, _, err = runKiCadCmd(t, "lcsc", "--pcb", kicadFixBoard, "--set", "@"+plan)
 	if err == nil || !strings.Contains(err.Error(), "no longer matches plan") || !strings.Contains(err.Error(), "R1") {
 		t.Errorf("stale plan: %v", err)
@@ -149,5 +149,129 @@ func TestLiveScriptCatalogLookup(t *testing.T) {
 	}
 	if r := res["C99999999"]; r.Part != nil || r.Err != "" {
 		t.Errorf("an unknown number is 'not found', never another part: %+v", r)
+	}
+}
+
+// ── review round 2 ─────────────────────────────────────────────────────────
+
+type searchFakeCatalog struct {
+	appFakeCatalog
+	hits map[string][]kicad.CatalogPart
+}
+
+func (f searchFakeCatalog) Search(q string, _ int) ([]kicad.CatalogPart, error) {
+	return f.hits[q], nil
+}
+
+// Finding 7: --offline is honoured by --health / --alternatives (no catalog is built or asked).
+func TestKiCadLcscOfflineHealthAndAlternatives(t *testing.T) {
+	old := newLcscCatalog
+	newLcscCatalog = func(string) (kicad.Catalog, error) {
+		t.Error("--offline must not build or query the live catalog")
+		return nil, errors.New("must not be called")
+	}
+	t.Cleanup(func() { newLcscCatalog = old })
+	for _, mode := range []string{"--health", "--alternatives"} {
+		out, _, err := runKiCadCmd(t, "lcsc", "--pcb", kicadFixBoard, mode, "--offline")
+		var ec exitCodeError
+		if !errors.As(err, &ec) || (ec.code != 5 && ec.code != 6) {
+			t.Fatalf("%s --offline: want a gate exit, got %v", mode, err)
+		}
+		if mode == "--health" {
+			var rep kicad.HealthReport
+			if jerr := json.Unmarshal([]byte(out), &rep); jerr != nil {
+				t.Fatal(jerr)
+			}
+			for _, c := range rep.Checks {
+				if (c.Name == "stock" || c.Name == "availability" || c.Name == "catalog-found") && c.Status != "cannot-check" {
+					t.Errorf("offline %s = %s", c.Name, c.Status)
+				}
+			}
+			if rep.Verdict == "pass" {
+				t.Error("offline can never pass")
+			}
+		} else {
+			var rep kicad.AltReport
+			if jerr := json.Unmarshal([]byte(out), &rep); jerr != nil {
+				t.Fatal(jerr)
+			}
+			if len(rep.Assignments) != 0 {
+				t.Errorf("offline proposes nothing: %v", rep.Assignments)
+			}
+		}
+	}
+}
+
+// Finding 2 at command level: a plan is bound to the substitution-relevant data.
+func TestKiCadLcscPlanFingerprintGuard(t *testing.T) {
+	zero, stock, loss := int64(0), int64(1000000), int64(10)
+	attrs := map[string]string{"Resistance": "10kΩ", "Tolerance": "±1%", "Power(Watts)": "62.5mW", "Type": "Thick Film Resistor"}
+	cat := "Chip Resistor - Surface Mount"
+	good := kicad.CatalogPart{LCSC: "C777", MPN: "GOOD", Package: "0402", Base: tf(true), Stock: &stock, Loss: &loss, Buyable: tf(true), Category: cat, Attrs: attrs}
+	withCatalog(t, searchFakeCatalog{
+		appFakeCatalog: appFakeCatalog{parts: map[string]*kicad.CatalogPart{
+			"C25744": {LCSC: "C25744", MPN: "OLD", Package: "0402", Base: tf(true), Stock: &zero, Loss: &loss, Buyable: tf(true), Category: cat, Attrs: attrs},
+		}},
+		hits: map[string][]kicad.CatalogPart{"10kΩ 0402": {good}},
+	})
+	b, err := os.ReadFile(kicadFixBoard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := string(b)
+	dir := t.TempDir()
+	pcb := filepath.Join(dir, "b.kicad_pcb")
+	write := func(s string) {
+		if err := os.WriteFile(pcb, []byte(s), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(orig)
+	out, _, _ := runKiCadCmd(t, "lcsc", "--pcb", pcb, "--alternatives", "--qty", "3")
+	var rep kicad.AltReport
+	if jerr := json.Unmarshal([]byte(out), &rep); jerr != nil {
+		t.Fatalf("%v\n%s", jerr, out)
+	}
+	if rep.Assignments["R1"] != "C777" || rep.Assignments["R3"] != "C777" || rep.Fingerprint == "" || rep.Boards != 3 {
+		t.Fatalf("plan: %+v", rep)
+	}
+	planPath := filepath.Join(dir, "plan.json")
+	os.WriteFile(planPath, []byte(out), 0o644)
+
+	// The plan matches the unchanged design.
+	pl, err := kicad.LoadPlan(planPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyPlans(pcb, "", map[string]*kicad.Plan{planPath: pl}, 100, false); err != nil {
+		t.Fatalf("unchanged design must verify: %v", err)
+	}
+	if err := verifyPlans(pcb, "", map[string]*kicad.Plan{planPath: pl}, 3, true); err != nil {
+		t.Fatalf("--qty equal to the plan's boards: %v", err)
+	}
+
+	r3 := strings.Index(orig, `(property "Reference" "R3"`)
+	start := strings.LastIndex(orig[:r3], "(footprint ")
+	end := start + strings.Index(orig[start+1:], "\n\t(footprint ") + 1
+	r3Block := orig[start:end]
+	mutations := map[string]string{
+		"value":     strings.Replace(orig, `(property "Value" "10k"`, `(property "Value" "4k7"`, 1),
+		"footprint": strings.Replace(orig, `(footprint "Resistor_SMD:R_0402_1005Metric"`, `(footprint "Resistor_SMD:R_0603_1608Metric"`, 1),
+		"placement": orig[:end] + "\n\t" + strings.NewReplacer(`"R3"`, `"R9"`, `"C25744"`, `"C777"`).Replace(r3Block) + orig[end:],
+	}
+	for name, mut := range mutations {
+		if mut == orig {
+			t.Fatalf("%s: mutation did not apply", name)
+		}
+		write(mut)
+		_, _, err := runKiCadCmd(t, "lcsc", "--pcb", pcb, "--set", "@"+planPath)
+		if err == nil || !strings.Contains(err.Error(), "no longer matches plan") || !strings.Contains(err.Error(), "fingerprint") {
+			t.Errorf("%s: stale plan must be refused, got %v", name, err)
+		}
+	}
+	write(orig)
+	_, _, err = runKiCadCmd(t, "lcsc", "--pcb", pcb, "--set", "@"+planPath, "--qty", "7")
+	if err == nil || !strings.Contains(err.Error(), "differs from the 3 board") {
+		t.Errorf("--qty mismatch: %v", err)
 	}
 }

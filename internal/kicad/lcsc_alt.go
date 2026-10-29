@@ -88,8 +88,10 @@ type AltReport struct {
 	Lines       []AltLine         `json:"lines"`
 	Assignments map[string]string `json:"assignments"` // ref → proposed LCSC (what --set applies)
 	Expect      map[string]string `json:"expect"`      // ref → LCSC the design must still carry
-	Notes       []string          `json:"notes,omitempty"`
-	Warnings    []string          `json:"warnings,omitempty"`
+	// Fingerprint binds the plan to the substitution-relevant design data (see PlanFingerprint).
+	Fingerprint string   `json:"fingerprint,omitempty"`
+	Notes       []string `json:"notes,omitempty"`
+	Warnings    []string `json:"warnings,omitempty"`
 }
 
 // AltInput is everything Alternatives needs.
@@ -209,6 +211,10 @@ func lineReasons(r CatalogLookup, need int64) (reasons []string, blocking bool) 
 	if p.Buyable != nil && (!*p.Buyable || p.NoBuyReason != "" || p.MergedCode != "") {
 		reasons, blocking = append(reasons, "not-buyable"), true
 	}
+	if p.Loss == nil {
+		// No lossNumber is an unknown allowance, not a zero one.
+		reasons = append(reasons, "loss-unknown")
+	}
 	if p.Stock != nil {
 		switch {
 		case *p.Stock == 0:
@@ -295,6 +301,7 @@ func Alternatives(in AltInput) *AltReport {
 
 	// Stock already spoken for by lines that keep their number; candidates draw on the rest.
 	reserved := map[string]int64{}
+	uncertain := map[string]bool{} // retained number whose stock or loss allowance is unknown: the rest cannot be established
 	flagged := map[string]bool{}
 	for _, k := range order {
 		g := groups[k]
@@ -312,10 +319,18 @@ func Alternatives(in AltInput) *AltReport {
 			flagged[g.LCSC] = true
 		}
 	}
+	held := map[string]bool{}
 	for _, k := range order {
-		// Lines that keep their number, including extended-only ones that may find no basic replacement.
-		if g := groups[k]; !g.Blocking && !g.Unknown {
-			reserved[g.LCSC] += need[g.LCSC]
+		// Every line that keeps its number claims its demand (once per number), including
+		// extended-only lines that may find no basic replacement and lines whose buyability is unknown.
+		g := groups[k]
+		if g.Blocking || held[g.LCSC] {
+			continue
+		}
+		held[g.LCSC] = true
+		reserved[g.LCSC] += need[g.LCSC]
+		if g.Current == nil || g.Current.Stock == nil || g.Current.Loss == nil {
+			uncertain[g.LCSC] = true
 		}
 	}
 
@@ -323,7 +338,7 @@ func Alternatives(in AltInput) *AltReport {
 	for _, k := range order {
 		g := groups[k]
 		if len(g.Reasons) > 0 {
-			proposeFor(in, g, reserved, rep)
+			proposeFor(in, g, reserved, uncertain, rep)
 		}
 		if g.Blocking {
 			st := gate.Pass
@@ -337,6 +352,9 @@ func Alternatives(in AltInput) *AltReport {
 				}
 			}
 			verdicts = append(verdicts, gate.Result{Name: refList(g.Refs), Status: st})
+		} else if g.Error != "" && g.Proposal == nil {
+			// A search that failed on an extended-only line: we could not look, so no clean pass.
+			verdicts = append(verdicts, gate.Result{Name: refList(g.Refs), Status: gate.CannotCheck, Detail: g.Error})
 		}
 		if g.Unknown {
 			verdicts = append(verdicts, gate.Result{Name: refList(g.Refs), Status: gate.CannotCheck})
@@ -361,6 +379,9 @@ func Alternatives(in AltInput) *AltReport {
 	}
 	rep.Verdict = gate.Aggregate(verdicts...)
 	rep.ExitCode = rep.Verdict.ExitCode()
+	if len(rep.Assignments) > 0 {
+		rep.Fingerprint = PlanFingerprint(in.Parts, in.DesignMPN, in.Boards, PlanCodes(rep.Assignments, rep.Expect))
+	}
 	return rep
 }
 
@@ -374,10 +395,18 @@ func (g *AltLine) hasReason(r string) bool {
 }
 
 // proposeFor searches, filters, ranks and (maybe) proposes for one flagged line.
-func proposeFor(in AltInput, g *AltLine, reserved map[string]int64, rep *AltReport) {
+func proposeFor(in AltInput, g *AltLine, reserved map[string]int64, uncertain map[string]bool, rep *AltReport) {
 	cur := g.Current
-	if cur == nil { // unknown to the catalog or catalog unavailable: nothing to derive a query from
-		return
+	// A number the catalog does not know: the question is still searched, from the design's own
+	// MPN and value + footprint package, but with no catalog record to compare against no
+	// candidate can be verified, so none is ever eligible (insufficient evidence).
+	insufficient := cur == nil
+	if insufficient {
+		if g.Error != "" { // the catalog could not be asked at all
+			return
+		}
+		cur = &CatalogPart{LCSC: g.LCSC}
+		g.Reasons = append(g.Reasons, "insufficient-evidence")
 	}
 	needNew := func(c *CatalogPart) int64 {
 		var loss int64
@@ -399,6 +428,11 @@ func proposeFor(in AltInput, g *AltLine, reserved map[string]int64, rep *AltRepo
 	var queries []string
 	if mpn != "" {
 		queries = append(queries, mpn)
+	}
+	if insufficient && strings.TrimSpace(g.Value) != "" {
+		if fp, ok := footprintPackage(g.Footprint); ok && fp.chip != "" {
+			queries = append(queries, strings.TrimSpace(g.Value)+" "+fp.chip)
+		}
 	}
 	kps := keyParams(cur)
 	if kps != nil {
@@ -441,12 +475,20 @@ func proposeFor(in AltInput, g *AltLine, reserved map[string]int64, rep *AltRepo
 		}
 		c.SameMPN = NormMPN(h.MPN) != "" && NormMPN(h.MPN) == NormMPN(mpn)
 		c.Eligible = true
-		if c.SameMPN && NormMPN(cur.Brand) != "" && NormMPN(h.Brand) != NormMPN(cur.Brand) {
-			c.SameMPN = false // same type number from another manufacturer is not the same part
-		}
 		bad := func(why string) {
 			c.Eligible = false
 			c.Unverified = append(c.Unverified, why)
+		}
+		if c.SameMPN && (NormMPN(cur.Brand) == "" || NormMPN(h.Brand) != NormMPN(cur.Brand)) {
+			// The same type number from another maker is another part, and a missing
+			// brand on either side cannot show it is the same one.
+			c.SameMPN = false
+			if NormMPN(cur.Brand) == "" || NormMPN(h.Brand) == "" {
+				bad("same MPN but the manufacturer is not known on both sides (current " + quoteOrEmpty(cur.Brand) + ", candidate " + quoteOrEmpty(h.Brand) + "): not verified as the same part")
+			}
+		}
+		if insufficient {
+			bad("the current number has no catalog record: insufficient evidence to verify a replacement")
 		}
 		switch {
 		case h.Buyable == nil:
@@ -457,6 +499,10 @@ func proposeFor(in AltInput, g *AltLine, reserved map[string]int64, rep *AltRepo
 		switch {
 		case h.Stock == nil:
 			bad("catalog gives no stock figure")
+		case h.Loss == nil:
+			bad("catalog gives no loss allowance (lossNumber): the need cannot be established")
+		case uncertain[h.LCSC]:
+			bad("another line keeps this number and its stock or loss allowance is unknown: the remaining stock cannot be established")
 		case *h.Stock-reserved[h.LCSC] < needNew(h):
 			bad(fmt.Sprintf("catalog stock %d (%d already claimed) < need %d", *h.Stock, reserved[h.LCSC], needNew(h)))
 		}
@@ -482,8 +528,8 @@ func proposeFor(in AltInput, g *AltLine, reserved map[string]int64, rep *AltRepo
 				}
 			}
 		}
-		// A line kept only for the extended library needs a basic replacement to be worth proposing.
-		if !g.Blocking && !c.Base {
+		// A line in the extended library (whether or not it is also blocked) needs a basic replacement.
+		if g.hasReason("extended-library") && !c.Base {
 			bad("not a basic-library part")
 		}
 		// Hard failures (not buyable, params failing) are not worth listing as candidates at all.

@@ -123,7 +123,11 @@ func ParseQuantity(s string) (Quantity, bool) {
 	return Quantity{V: n * siScale[m[2]], Unit: unit}, true
 }
 
-// sameQty: equal within 0.1 % (decimal text round-off), same unit.
+// qtyRoundOff is the relative slack for float round-off only (4.7u vs 4700n
+// differ by about 1e-16); 10 kΩ vs 10.005 kΩ differ by 5e-4 and are distinct.
+const qtyRoundOff = 1e-9
+
+// sameQty: the same decimal quantity (float round-off aside), same unit.
 func sameQty(a, b Quantity) bool {
 	if a.Unit != b.Unit {
 		return false
@@ -131,7 +135,7 @@ func sameQty(a, b Quantity) bool {
 	if a.V == b.V {
 		return true
 	}
-	return math.Abs(a.V-b.V) <= 1e-3*math.Max(math.Abs(a.V), math.Abs(b.V))
+	return math.Abs(a.V-b.V) <= qtyRoundOff*math.Max(math.Abs(a.V), math.Abs(b.V))
 }
 
 // attr returns an attribute by case-insensitive name.

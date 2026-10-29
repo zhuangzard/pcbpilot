@@ -138,12 +138,31 @@ func designMPNs(bd *kicad.Board) map[string]string {
 	return m
 }
 
-func runLcscHealth(stdout, stderr io.Writer, pcb, sch, scriptPath string, boards int) error {
+// offlineCatalog is --offline for --health / --alternatives: no network, so
+// every catalog question is "could not ask" and the verdict is cannot-check.
+type offlineCatalog struct{}
+
+var errOfflineCatalog = errors.New("--offline: the catalog was not queried")
+
+func (offlineCatalog) Lookup([]string) (map[string]kicad.CatalogLookup, error) {
+	return nil, errOfflineCatalog
+}
+
+func (offlineCatalog) Search(string, int) ([]kicad.CatalogPart, error) { return nil, errOfflineCatalog }
+
+func lcscCatalogFor(scriptPath string, offline bool) (kicad.Catalog, error) {
+	if offline {
+		return offlineCatalog{}, nil
+	}
+	return newLcscCatalog(scriptPath)
+}
+
+func runLcscHealth(stdout, stderr io.Writer, pcb, sch, scriptPath string, boards int, offline bool) error {
 	bd, parts, warns, err := readLcscParts(pcb, sch)
 	if err != nil {
 		return err
 	}
-	cat, err := newLcscCatalog(scriptPath)
+	cat, err := lcscCatalogFor(scriptPath, offline)
 	if err != nil {
 		return err
 	}
@@ -165,12 +184,12 @@ func runLcscHealth(stdout, stderr io.Writer, pcb, sch, scriptPath string, boards
 	return nil
 }
 
-func runLcscAlternatives(stdout, stderr io.Writer, pcb, sch, scriptPath string, boards, limit int) error {
+func runLcscAlternatives(stdout, stderr io.Writer, pcb, sch, scriptPath string, boards, limit int, offline bool) error {
 	bd, parts, warns, err := readLcscParts(pcb, sch)
 	if err != nil {
 		return err
 	}
-	cat, err := newLcscCatalog(scriptPath)
+	cat, err := lcscCatalogFor(scriptPath, offline)
 	if err != nil {
 		return err
 	}
@@ -196,8 +215,9 @@ func runLcscAlternatives(stdout, stderr io.Writer, pcb, sch, scriptPath string, 
 }
 
 // resolveSetArgs turns the --set values into one assignment map. "@file" is an
-// --alternatives plan: it is merged, and checked against the design first.
-func resolveSetArgs(pcb, sch string, sets []string) (map[string]string, error) {
+// --alternatives plan: it is loaded and merged here, and returned so the caller
+// can check it against the design right before writing (verifyPlans).
+func resolveSetArgs(pcb string, sets []string) (map[string]string, map[string]*kicad.Plan, error) {
 	var plain, plans []string
 	for _, v := range sets {
 		if strings.HasPrefix(v, "@") && len(v) > 1 {
@@ -208,30 +228,55 @@ func resolveSetArgs(pcb, sch string, sets []string) (map[string]string, error) {
 	}
 	assign, err := kicad.ParseAssignments(plain)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	loaded := map[string]*kicad.Plan{}
 	for _, path := range plans {
-		pa, expect, err := kicad.LoadPlan(path)
+		pl, err := kicad.LoadPlan(path)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if pcb == "" {
-			return nil, fmt.Errorf("--set @%s needs --pcb: the plan is checked against the design's current LCSC numbers first", path)
+			return nil, nil, fmt.Errorf("--set @%s needs --pcb: the plan is checked against the design's current data first", path)
 		}
-		_, parts, _, err := readLcscParts(pcb, sch)
-		if err != nil {
-			return nil, err
-		}
-		if bad := kicad.VerifyExpect(parts, expect); len(bad) > 0 {
-			sort.Strings(bad)
-			return nil, fmt.Errorf("the design no longer matches plan %s (nothing was written; regenerate with --alternatives):\n  %s", path, strings.Join(bad, "\n  "))
-		}
-		for ref, v := range pa {
+		loaded[path] = pl
+		for ref, v := range pl.Assign {
 			if prev, dup := assign[ref]; dup && prev != v {
-				return nil, fmt.Errorf("%s is assigned both %s and %s", ref, prev, v)
+				return nil, nil, fmt.Errorf("%s is assigned both %s and %s", ref, prev, v)
 			}
 			assign[ref] = v
 		}
 	}
-	return assign, nil
+	return assign, loaded, nil
+}
+
+// verifyPlans re-reads the design and refuses when it no longer matches a plan
+// (LCSC numbers, and the fingerprint of value / footprint / MPN / placements),
+// or when --qty names a different board count than the plan was made for.
+// Called immediately before the write, after every other input is resolved.
+func verifyPlans(pcb, sch string, plans map[string]*kicad.Plan, qty int, qtySet bool) error {
+	if len(plans) == 0 {
+		return nil
+	}
+	bd, parts, _, err := readLcscParts(pcb, sch)
+	if err != nil {
+		return err
+	}
+	mpn := designMPNs(bd)
+	paths := make([]string, 0, len(plans))
+	for p := range plans {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		pl := plans[path]
+		if qtySet && qty != pl.Boards {
+			return fmt.Errorf("--qty %d differs from the %d board(s) plan %s was made for (nothing was written; regenerate with --alternatives --qty %d)", qty, pl.Boards, path, qty)
+		}
+		if bad := kicad.VerifyPlan(parts, mpn, pl); len(bad) > 0 {
+			sort.Strings(bad)
+			return fmt.Errorf("the design no longer matches plan %s (nothing was written; regenerate with --alternatives):\n  %s", path, strings.Join(bad, "\n  "))
+		}
+	}
+	return nil
 }

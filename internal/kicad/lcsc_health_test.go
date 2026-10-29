@@ -114,7 +114,8 @@ func TestHealthRisks(t *testing.T) {
 	}
 	want := map[string]gate.Status{
 		"lcsc-present": gate.Fail, "lcsc-valid": gate.Fail, "catalog-found": gate.Fail, "availability": gate.Fail,
-		"stock": gate.Fail, "extended-library": gate.Warn, "footprint-package": gate.Fail, "duplicate-mpn": gate.Warn,
+		"stock": gate.Fail, "extended-library": gate.CannotCheck, // C99 / C8 could not be looked up: unknown outranks the C4 warn
+		"footprint-package": gate.Fail, "duplicate-mpn": gate.Warn,
 	}
 	for name, st := range want {
 		if got := checkByName(t, rep, name); got.Status != st {
@@ -262,16 +263,18 @@ func TestLoadPlanAndVerify(t *testing.T) {
 		os.WriteFile(p, []byte(body), 0o644)
 		return p
 	}
-	a, e, err := LoadPlan(write("\xef\xbb\xbf" + `{"kind":"pcbpilot.lcsc-alternatives","assignments":{"R1":"c25744"},"expect":{"R1":"C99"}}`))
-	if err != nil || a["R1"] != "C25744" || e["R1"] != "C99" {
-		t.Fatalf("%v %v %v", a, e, err)
+	pl, err := LoadPlan(write("\xef\xbb\xbf" + `{"kind":"pcbpilot.lcsc-alternatives","boards":2,"fingerprint":"ab","assignments":{"R1":"c25744"},"expect":{"R1":"C99"}}`))
+	if err != nil || pl.Assign["R1"] != "C25744" || pl.Expect["R1"] != "C99" || pl.Boards != 2 {
+		t.Fatalf("%+v %v", pl, err)
 	}
 	for name, body := range map[string]string{
 		"no expect": `{"assignments":{"R1":"C1"}}`, "empty": `{"assignments":{},"expect":{}}`,
 		"bad value": `{"assignments":{"R1":"25744"},"expect":{"R1":""}}`, "kind": `{"kind":"x","assignments":{"R1":"C1"},"expect":{"R1":""}}`,
 		"missing ref expect": `{"assignments":{"R1":"C1"},"expect":{"R2":""}}`,
+		"no fingerprint":     `{"boards":1,"assignments":{"R1":"C1"},"expect":{"R1":""}}`,
+		"no boards":          `{"fingerprint":"x","assignments":{"R1":"C1"},"expect":{"R1":""}}`,
 	} {
-		if _, _, err := LoadPlan(write(body)); err == nil {
+		if _, err := LoadPlan(write(body)); err == nil {
 			t.Errorf("%s must be rejected", name)
 		}
 	}
@@ -282,5 +285,64 @@ func TestLoadPlanAndVerify(t *testing.T) {
 	bad := VerifyExpect(parts, map[string]string{"R1": "C1", "R9": "C5"})
 	if len(bad) != 2 {
 		t.Errorf("%v", bad)
+	}
+}
+
+// Finding 8: an unknown library outranks a warn; both evidences stay.
+func TestHealthExtendedUnknownOutranksWarn(t *testing.T) {
+	ext := resistor("C1", "EXT", "0402", "1kΩ", "±1%", "62.5mW", false, 1000)
+	unk := resistor("C2", "UNK", "0402", "2kΩ", "±1%", "62.5mW", true, 1000)
+	unk.Base = nil
+	cat := &fakeCatalog{byCode: map[string]*CatalogPart{"C1": ext, "C2": unk}}
+	rep := RunHealth(HealthInput{Parts: partsOf([4]string{"R1", "1k", r0402, "C1"}, [4]string{"R2", "2k", r0402, "C2"}), Boards: 1, Catalog: cat})
+	c := checkByName(t, rep, "extended-library")
+	if c.Status != gate.CannotCheck {
+		t.Fatalf("status %s", c.Status)
+	}
+	joined := strings.Join(c.Items, "\n")
+	if !strings.Contains(joined, "C1") || !strings.Contains(joined, "C2") || !strings.Contains(joined, "not stated") {
+		t.Errorf("both evidences expected: %v", c.Items)
+	}
+}
+
+// Finding 9: no lossNumber → the stock check cannot pass, even with stock = placements × boards.
+func TestHealthMissingLossIsNotAStockPass(t *testing.T) {
+	p := resistor("C1", "X", "0402", "1kΩ", "±1%", "62.5mW", true, 4)
+	p.Loss = nil
+	rep := RunHealth(HealthInput{Parts: partsOf([4]string{"R1", "1k", r0402, "C1"}), Boards: 4, Catalog: &fakeCatalog{byCode: map[string]*CatalogPart{"C1": p}}})
+	c := checkByName(t, rep, "stock")
+	if c.Status != gate.CannotCheck || !strings.Contains(strings.Join(c.Items, ""), "loss allowance") {
+		t.Errorf("%s %v", c.Status, c.Items)
+	}
+	p.Stock = i64(3) // short even of the lower bound: a fail is still a fail
+	rep = RunHealth(HealthInput{Parts: partsOf([4]string{"R1", "1k", r0402, "C1"}), Boards: 4, Catalog: &fakeCatalog{byCode: map[string]*CatalogPart{"C1": p}}})
+	if checkByName(t, rep, "stock").Status != gate.Fail {
+		t.Error("stock below placements × boards fails regardless of the loss figure")
+	}
+	p.Loss, p.Stock = i64(0), i64(4)
+	rep = RunHealth(HealthInput{Parts: partsOf([4]string{"R1", "1k", r0402, "C1"}), Boards: 4, Catalog: &fakeCatalog{byCode: map[string]*CatalogPart{"C1": p}}})
+	if checkByName(t, rep, "stock").Status != gate.Pass {
+		t.Error("an explicit loss of 0 is a stated allowance")
+	}
+}
+
+// Finding 10: only float round-off is tolerated.
+func TestSameQtyIsExact(t *testing.T) {
+	q := func(s string) Quantity {
+		v, ok := ParseQuantity(s)
+		if !ok {
+			t.Fatalf("%q", s)
+		}
+		return v
+	}
+	for _, c := range [][2]string{{"10kΩ", "10.005kΩ"}, {"100nF", "100.1nF"}, {"1kΩ", "1.001kΩ"}, {"10kΩ", "9.99kΩ"}} {
+		if sameQty(q(c[0]), q(c[1])) {
+			t.Errorf("%s and %s are distinct values", c[0], c[1])
+		}
+	}
+	for _, c := range [][2]string{{"4.7uF", "4700nF"}, {"0.1uF", "100nF"}, {"10kΩ", "10000Ω"}, {"2.2uF", "2200nF"}, {"1MΩ", "1000kΩ"}} {
+		if !sameQty(q(c[0]), q(c[1])) {
+			t.Errorf("%s and %s are the same value", c[0], c[1])
+		}
 	}
 }

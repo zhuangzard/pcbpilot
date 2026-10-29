@@ -119,12 +119,12 @@ func TestAlternativesReserveStockAcrossLines(t *testing.T) {
 }
 
 func TestAlternativesSameMPNOnlyForUnknownFamilies(t *testing.T) {
-	ic := &CatalogPart{LCSC: "C500", MPN: "LDO-33", Package: "SOT-23-5", Category: "Voltage Regulators - Linear", Base: bp(false),
-		Stock: i64(0), Buyable: bp(true), Attrs: map[string]string{"Output Voltage": "3.3V"}}
-	same := &CatalogPart{LCSC: "C501", MPN: "LDO-33", Package: "SOT-23-5", Category: "Voltage Regulators - Linear", Base: bp(false),
-		Stock: i64(50000), Buyable: bp(true)}
-	samePkgOther := &CatalogPart{LCSC: "C502", MPN: "LDO-33", Package: "SOT-89-5", Category: "Voltage Regulators - Linear", Base: bp(false),
-		Stock: i64(50000), Buyable: bp(true)}
+	ic := &CatalogPart{LCSC: "C500", MPN: "LDO-33", Brand: "ACME", Package: "SOT-23-5", Category: "Voltage Regulators - Linear", Base: bp(false),
+		Stock: i64(0), Buyable: bp(true), Loss: i64(0), Attrs: map[string]string{"Output Voltage": "3.3V"}}
+	same := &CatalogPart{LCSC: "C501", MPN: "LDO-33", Brand: "ACME", Package: "SOT-23-5", Category: "Voltage Regulators - Linear", Base: bp(true), // extended current line: a basic replacement
+		Stock: i64(50000), Buyable: bp(true), Loss: i64(0)}
+	samePkgOther := &CatalogPart{LCSC: "C502", MPN: "LDO-33", Brand: "ACME", Package: "SOT-89-5", Category: "Voltage Regulators - Linear", Base: bp(false),
+		Stock: i64(50000), Buyable: bp(true), Loss: i64(0)}
 	other := &CatalogPart{LCSC: "C503", MPN: "LDO-33B", Package: "SOT-23-5", Category: "Voltage Regulators - Linear", Base: bp(true),
 		Stock: i64(50000), Buyable: bp(true), Attrs: map[string]string{"Output Voltage": "3.3V"}}
 	cat := &fakeCatalog{byCode: map[string]*CatalogPart{"C500": ic}, search: map[string][]CatalogPart{"LDO-33": {*same, *samePkgOther, *other}}}
@@ -229,5 +229,227 @@ func TestAlternativesSameMPNOtherBrandIsNotSame(t *testing.T) {
 	rep := Alternatives(AltInput{Parts: partsOf([4]string{"U1", "op", "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm", "C500"}), Boards: 1, Catalog: cat})
 	if altLine(t, rep, "U1").Proposal != nil {
 		t.Error("another manufacturer's part must not be proposed as same-MPN")
+	}
+}
+
+// ── review round 2 ─────────────────────────────────────────────────────────
+
+func ldo(code, mpn, brand string, stock int64) *CatalogPart {
+	return &CatalogPart{LCSC: code, MPN: mpn, Brand: brand, Package: "SOP-8", Category: "Op Amps", Base: bp(true), Stock: i64(stock), Buyable: bp(true), Loss: i64(0)}
+}
+
+const sop8 = "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm"
+
+// Finding 1: same MPN needs a known, equal brand on both sides.
+func TestAlternativesSameMPNNeedsKnownBrandOnBothSides(t *testing.T) {
+	for name, brands := range map[string][2]string{"current missing": {"", "TI"}, "candidate missing": {"TI", ""}, "both missing": {"", ""}} {
+		cur := ldo("C500", "LM358", brands[0], 0)
+		cand := ldo("C501", "LM358", brands[1], 99999)
+		cat := &fakeCatalog{byCode: map[string]*CatalogPart{"C500": cur}, search: map[string][]CatalogPart{"LM358": {*cand}}}
+		rep := Alternatives(AltInput{Parts: partsOf([4]string{"U1", "op", sop8, "C500"}), Boards: 1, Catalog: cat})
+		l := altLine(t, rep, "U1")
+		if l.Proposal != nil || len(rep.Assignments) != 0 {
+			t.Errorf("%s: same MPN without a known matching brand must not be proposed: %+v", name, l.Proposal)
+		}
+		found := false
+		for _, c := range l.Candidates {
+			if c.LCSC == "C501" {
+				found = true
+				if c.Eligible || c.SameMPN || !strings.Contains(strings.Join(c.Unverified, ";"), "manufacturer") {
+					t.Errorf("%s: %+v", name, c)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("%s: the candidate should be listed as unverified", name)
+		}
+	}
+	cat := &fakeCatalog{byCode: map[string]*CatalogPart{"C500": ldo("C500", "LM358", "Ti", 0)}, search: map[string][]CatalogPart{"LM358": {*ldo("C501", "lm-358", "TI", 99999)}}}
+	rep := Alternatives(AltInput{Parts: partsOf([4]string{"U1", "op", sop8, "C500"}), Boards: 1, Catalog: cat})
+	if p := altLine(t, rep, "U1").Proposal; p == nil || p.LCSC != "C501" {
+		t.Errorf("equal normalised brands are the same maker: %+v", p)
+	}
+}
+
+// Finding 3: a line that is extended AND blocked still needs a basic replacement.
+func TestAlternativesExtendedAndOutOfStockNeedsBasic(t *testing.T) {
+	cur := resistor("C400", "EXT", "0402", "2kΩ", "±1%", "62.5mW", false, 0)
+	ext2 := resistor("C401", "EXT2", "0402", "2kΩ", "±1%", "62.5mW", false, 900000)
+	cat := &fakeCatalog{byCode: map[string]*CatalogPart{"C400": cur}, search: map[string][]CatalogPart{"2kΩ 0402": {*ext2}}}
+	rep := Alternatives(AltInput{Parts: partsOf([4]string{"R1", "2k", r0402, "C400"}), Boards: 1, Catalog: cat})
+	l := altLine(t, rep, "R1")
+	if !l.Blocking || l.Proposal != nil || rep.Verdict != gate.Fail {
+		t.Fatalf("an extended replacement for an extended line is not allowed: %+v", l)
+	}
+	basic := resistor("C402", "BASIC", "0402", "2kΩ", "±1%", "62.5mW", true, 900000)
+	cat.search["2kΩ 0402"] = []CatalogPart{*ext2, *basic}
+	rep = Alternatives(AltInput{Parts: partsOf([4]string{"R1", "2k", r0402, "C400"}), Boards: 1, Catalog: cat})
+	if p := altLine(t, rep, "R1").Proposal; p == nil || p.LCSC != "C402" {
+		t.Errorf("want the basic part, got %+v", p)
+	}
+	// A blocked line whose current part is basic may take an extended replacement.
+	curB := resistor("C410", "B", "0402", "2kΩ", "±1%", "62.5mW", true, 0)
+	cat = &fakeCatalog{byCode: map[string]*CatalogPart{"C410": curB}, search: map[string][]CatalogPart{"2kΩ 0402": {*ext2}}}
+	rep = Alternatives(AltInput{Parts: partsOf([4]string{"R1", "2k", r0402, "C410"}), Boards: 1, Catalog: cat})
+	if p := altLine(t, rep, "R1").Proposal; p == nil || p.LCSC != "C401" {
+		t.Errorf("basic → extended is allowed for a blocked line: %+v", p)
+	}
+}
+
+type searchErrCatalog struct{ *fakeCatalog }
+
+func (searchErrCatalog) Search(string, int) ([]CatalogPart, error) {
+	return nil, errString("search down")
+}
+
+// Finding 4: a failed search on an extended-only line is cannot-check, not a pass.
+func TestAlternativesSearchErrorOnExtendedOnlyLine(t *testing.T) {
+	cur := resistor("C400", "EXT", "0402", "2kΩ", "±1%", "62.5mW", false, 900000)
+	cat := searchErrCatalog{&fakeCatalog{byCode: map[string]*CatalogPart{"C400": cur}}}
+	rep := Alternatives(AltInput{Parts: partsOf([4]string{"R1", "2k", r0402, "C400"}), Boards: 1, Catalog: cat})
+	l := altLine(t, rep, "R1")
+	if l.Blocking || l.Error == "" {
+		t.Fatalf("%+v", l)
+	}
+	if rep.Verdict != gate.CannotCheck || rep.ExitCode != 5 {
+		t.Errorf("verdict %s", rep.Verdict)
+	}
+}
+
+// Finding 5: a number the catalog does not know is searched from the design's own data, strictly.
+func TestAlternativesNotInCatalogSearchesFromDesign(t *testing.T) {
+	cand := resistor("C25744", "RC0402FR-0710KL", "0402", "10kΩ", "±1%", "62.5mW", true, 1000000)
+	cand.Brand = "YAGEO"
+	cat := &fakeCatalog{search: map[string][]CatalogPart{"RC0402FR-0710KL": {*cand}, "10k 0402": {*cand}}}
+	parts := partsOf([4]string{"R1", "10k", r0402, "C999"})
+	rep := Alternatives(AltInput{Parts: parts, DesignMPN: map[string]string{"R1": "RC0402FR-0710KL"}, Boards: 1, Catalog: cat})
+	l := altLine(t, rep, "R1")
+	if len(cat.queries) != 2 {
+		t.Errorf("queries %v: MPN and value + package expected", cat.queries)
+	}
+	if l.Proposal != nil || len(rep.Assignments) != 0 || rep.Verdict != gate.Fail {
+		t.Fatalf("no record to compare against: nothing may be proposed: %+v", l)
+	}
+	if len(l.Candidates) != 1 || l.Candidates[0].Eligible || !strings.Contains(strings.Join(l.Candidates[0].Unverified, ";"), "insufficient evidence") {
+		t.Errorf("candidates %+v", l.Candidates)
+	}
+	if !l.hasReason("insufficient-evidence") {
+		t.Errorf("reasons %v", l.Reasons)
+	}
+	// The catalog being unreachable is not "not in catalog": no search, cannot-check.
+	cat2 := &fakeCatalog{lookErr: errString("offline")}
+	rep = Alternatives(AltInput{Parts: parts, DesignMPN: map[string]string{"R1": "X"}, Boards: 1, Catalog: cat2})
+	if len(cat2.queries) != 0 || rep.Verdict != gate.CannotCheck {
+		t.Errorf("queries %v verdict %s", cat2.queries, rep.Verdict)
+	}
+}
+
+// Finding 6: stock needed by retained lines — including unknown-buyability ones — is reserved.
+func TestAlternativesReservesRetainedUnknownLine(t *testing.T) {
+	// A (C1) keeps its number: buyable unknown, stock 15, loss 10 → its demand 1+10 = 11 is claimed.
+	a := resistor("C1", "KEEP", "0402", "1kΩ", "±1%", "62.5mW", true, 15)
+	a.Buyable = nil
+	b := resistor("C2", "OLD-B", "0402", "1kΩ", "±1%", "62.5mW", true, 0)
+	cand := *a
+	cand.Buyable = bp(true)
+	cat := &fakeCatalog{byCode: map[string]*CatalogPart{"C1": a, "C2": b}, search: map[string][]CatalogPart{"1kΩ 0402": {cand}}}
+	parts := partsOf([4]string{"R1", "1k", r0402, "C1"}, [4]string{"R2", "1k", r0402, "C2"})
+	rep := Alternatives(AltInput{Parts: parts, Boards: 1, Catalog: cat})
+	if altLine(t, rep, "R2").Proposal != nil || len(rep.Assignments) != 0 {
+		t.Errorf("C1's remaining stock (15-11=4) cannot cover R2 (need 11): %v", rep.Assignments)
+	}
+	// Known and ample: 100 - 11 = 89 ≥ 11 → fine.
+	a.Stock, cand.Stock = i64(100), i64(100)
+	cat.search["1kΩ 0402"] = []CatalogPart{cand}
+	rep = Alternatives(AltInput{Parts: parts, Boards: 1, Catalog: cat})
+	if p := altLine(t, rep, "R2").Proposal; p == nil || p.LCSC != "C1" {
+		t.Errorf("ample stock: %+v", p)
+	}
+	// Retained line with an unknown stock figure: the remainder cannot be established.
+	a.Stock = nil
+	cat.search["1kΩ 0402"] = []CatalogPart{cand}
+	rep = Alternatives(AltInput{Parts: parts, Boards: 1, Catalog: cat})
+	if altLine(t, rep, "R2").Proposal != nil {
+		t.Error("a number kept by a line with unknown stock cannot be handed to another line")
+	}
+}
+
+// Finding 9: a missing lossNumber is unknown, not zero.
+func TestAlternativesMissingLossIsUnverifiable(t *testing.T) {
+	p := resistor("C1", "X", "0402", "1kΩ", "±1%", "62.5mW", true, 5)
+	p.Loss = nil
+	rep := Alternatives(AltInput{Parts: partsOf([4]string{"R1", "1k", r0402, "C1"}), Boards: 5, Catalog: &fakeCatalog{byCode: map[string]*CatalogPart{"C1": p}}})
+	l := altLine(t, rep, "R1")
+	if !l.Unknown || !l.hasReason("loss-unknown") || rep.Verdict != gate.CannotCheck {
+		t.Errorf("stock exactly = placements × boards with no loss figure must not pass: %+v verdict %s", l, rep.Verdict)
+	}
+	// As a candidate: no loss figure → not eligible.
+	cur := resistor("C2", "OLD", "0402", "1kΩ", "±1%", "62.5mW", true, 0)
+	cand := resistor("C3", "NEW", "0402", "1kΩ", "±1%", "62.5mW", true, 1000)
+	cand.Loss = nil
+	cat := &fakeCatalog{byCode: map[string]*CatalogPart{"C2": cur}, search: map[string][]CatalogPart{"1kΩ 0402": {*cand}}}
+	rep = Alternatives(AltInput{Parts: partsOf([4]string{"R1", "1k", r0402, "C2"}), Boards: 1, Catalog: cat})
+	if altLine(t, rep, "R1").Proposal != nil {
+		t.Error("candidate without a loss allowance must not be proposed")
+	}
+}
+
+// Finding 2: the plan fingerprint follows the substitution-relevant data.
+func TestPlanFingerprintTracksRelevantFields(t *testing.T) {
+	base := partsOf([4]string{"R1", "10k", r0402, "C100"}, [4]string{"R2", "10k", r0402, "C100"}, [4]string{"R9", "1u", r0402, "C5"})
+	mpn := map[string]string{"R1": "MPN-A"}
+	codes := PlanCodes(map[string]string{"R1": "C200", "R2": "C200"}, map[string]string{"R1": "C100", "R2": "C100"})
+	fp := PlanFingerprint(base, mpn, 3, codes)
+	same := func(parts []Part, m map[string]string, boards int) bool {
+		return PlanFingerprint(parts, m, boards, codes) == fp
+	}
+	if !same(base, mpn, 3) {
+		t.Fatal("fingerprint must be stable")
+	}
+	mod := func(f func(ps []Part)) []Part {
+		ps := append([]Part(nil), base...)
+		f(ps)
+		return ps
+	}
+	cases := map[string]bool{
+		"value":       same(mod(func(ps []Part) { ps[0].Value = "4k7" }), mpn, 3),
+		"footprint":   same(mod(func(ps []Part) { ps[0].Footprint = "Resistor_SMD:R_0603_1608Metric" }), mpn, 3),
+		"mpn":         same(base, map[string]string{"R1": "MPN-B"}, 3),
+		"boards":      same(base, mpn, 4),
+		"placement":   same(append(append([]Part(nil), base...), Part{Ref: "R10", Value: "10k", Footprint: r0402, LCSC: "C200"}), mpn, 3),
+		"dnp":         same(mod(func(ps []Part) { ps[1].DNP = true }), mpn, 3),
+		"removed ref": same(base[:1], mpn, 3),
+	}
+	for name, unchanged := range cases {
+		if unchanged {
+			t.Errorf("%s change must change the fingerprint", name)
+		}
+	}
+	// Unrelated parts do not invalidate the plan.
+	if !same(mod(func(ps []Part) { ps[2].Value = "2u2" }), mpn, 3) {
+		t.Error("a part on an unrelated number must not change the fingerprint")
+	}
+}
+
+func TestAlternativesReportCarriesFingerprint(t *testing.T) {
+	cur := resistor("C100", "OLD", "0402", "10kΩ", "±1%", "62.5mW", true, 0)
+	good := resistor("C25744", "G", "0402", "10kΩ", "±1%", "62.5mW", true, 1000000)
+	cat := &fakeCatalog{byCode: map[string]*CatalogPart{"C100": cur}, search: map[string][]CatalogPart{"10kΩ 0402": {*good}}}
+	parts := partsOf([4]string{"R1", "10k", r0402, "C100"})
+	rep := Alternatives(AltInput{Parts: parts, Boards: 2, Catalog: cat})
+	if rep.Fingerprint == "" || rep.Fingerprint != PlanFingerprint(parts, nil, 2, PlanCodes(rep.Assignments, rep.Expect)) {
+		t.Errorf("fingerprint %q", rep.Fingerprint)
+	}
+	pl := &Plan{Assign: rep.Assignments, Expect: rep.Expect, Boards: rep.Boards, Fingerprint: rep.Fingerprint}
+	if bad := VerifyPlan(parts, nil, pl); len(bad) != 0 {
+		t.Errorf("unchanged design: %v", bad)
+	}
+	changed := partsOf([4]string{"R1", "4k7", r0402, "C100"})
+	if bad := VerifyPlan(changed, nil, pl); len(bad) != 1 || !strings.Contains(bad[0], "fingerprint") {
+		t.Errorf("changed value: %v", bad)
+	}
+	added := append(append([]Part(nil), parts...), Part{Ref: "R2", Value: "10k", Footprint: r0402, LCSC: "C25744"})
+	if bad := VerifyPlan(added, nil, pl); len(bad) != 1 {
+		t.Errorf("added placement on the replacement number: %v", bad)
 	}
 }

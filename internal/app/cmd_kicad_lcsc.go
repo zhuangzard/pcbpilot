@@ -63,7 +63,8 @@ func newKiCadLcscCmd(stdout, stderr io.Writer) *cobra.Command {
                      stock vs the order (--qty boards), extended-library count (setup fee),
                      footprint vs catalog package, one MPN under several LCSC numbers. Every
                      check is pass / fail / cannot-check with its evidence; JSON on stdout;
-                     exit 0 pass, 6 fail, 5 not verified (offline: cannot-check, never pass).
+                     exit 0 pass, 6 fail, 5 not verified (--offline: no catalog query, every
+                     catalog check is cannot-check, never pass).
   --alternatives     for BOM lines that are out of stock, short of the order, discontinued,
                      unknown to the catalog or extended-library, propose replacement LCSC
                      numbers (same package as the board footprint, key parameters verified,
@@ -105,13 +106,13 @@ func newKiCadLcscCmd(stdout, stderr io.Writer) *cobra.Command {
 			}
 			switch {
 			case health:
-				return runLcscHealth(stdout, stderr, pcb, sch, scriptPath, boards)
+				return runLcscHealth(stdout, stderr, pcb, sch, scriptPath, boards, offline)
 			case alternatives:
 				lim := 3
 				if cmd.Flags().Changed("limit") {
 					lim = limit
 				}
-				return runLcscAlternatives(stdout, stderr, pcb, sch, scriptPath, boards, lim)
+				return runLcscAlternatives(stdout, stderr, pcb, sch, scriptPath, boards, lim, offline)
 			case search != "":
 				return runLcscSearch(stdout, scriptPath, search, offline, qty, limit, asJSON)
 			case len(imports) > 0:
@@ -119,7 +120,7 @@ func newKiCadLcscCmd(stdout, stderr io.Writer) *cobra.Command {
 			case check:
 				return runLcscCheck(stdout, stderr, pcb, sch, asJSON)
 			default:
-				return runLcscSet(stdout, pcb, sch, sets, field)
+				return runLcscSet(stdout, pcb, sch, sets, field, qty, cmd.Flags().Changed("qty"))
 			}
 		},
 	}
@@ -135,7 +136,7 @@ func newKiCadLcscCmd(stdout, stderr io.Writer) *cobra.Command {
 	f.StringArrayVar(&imports, "import", nil, "LCSC number(s) to import as KiCad symbol+footprint")
 	f.StringVar(&libDir, "lib-dir", "", "--import: directory for the KiCad libraries (required)")
 	f.StringVar(&libName, "lib-name", "lcsc", "--import: library nickname / file stem")
-	f.BoolVar(&offline, "offline", false, "--search: only the curated standard-parts.json (no network)")
+	f.BoolVar(&offline, "offline", false, "--search: only the curated standard-parts.json (no network); --health / --alternatives: no catalog queries, every catalog check is cannot-check (exit 5)")
 	f.IntVar(&qty, "qty", 100, "--search: build quantity per part (default 100); --health / --alternatives: number of boards (default 1)")
 	f.IntVar(&limit, "limit", 10, "--search: rows to print (default 10); --alternatives: candidates per line (default 3)")
 	f.BoolVar(&asJSON, "json", false, "machine-readable output (--check, --search)")
@@ -185,12 +186,16 @@ func runLcscCheck(stdout, stderr io.Writer, pcb, sch string, asJSON bool) error 
 	return nil
 }
 
-func runLcscSet(stdout io.Writer, pcb, sch string, sets []string, field string) error {
+func runLcscSet(stdout io.Writer, pcb, sch string, sets []string, field string, qty int, qtySet bool) error {
 	if pcb == "" && sch == "" {
 		return fmt.Errorf("--set needs --pcb and/or --sch")
 	}
-	assign, err := resolveSetArgs(pcb, sch, sets)
+	assign, plans, err := resolveSetArgs(pcb, sets)
 	if err != nil {
+		return err
+	}
+	// Checked against a fresh read of the design right before the write.
+	if err := verifyPlans(pcb, sch, plans, qty, qtySet); err != nil {
 		return err
 	}
 	tools := kicad.FabTools{}
