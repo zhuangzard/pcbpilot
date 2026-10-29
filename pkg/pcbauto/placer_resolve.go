@@ -26,8 +26,8 @@ type ZoneFill struct {
 	Domain  string  `json:"domain"` // "board": parts without a domain zone
 	Parts   int     `json:"parts"`
 	NeedMm2 float64 `json:"needMm2"`
-	// FixedMm2 is the part of NeedMm2 that fixed parts and bridges inside
-	// the zone take (domain zones are sized by their movable parts only).
+	// FixedMm2 is the part of NeedMm2 that parts which do not move (fixed,
+	// mechanical) and bridges inside the zone take.
 	FixedMm2 float64 `json:"fixedMm2,omitempty"`
 	// OfferMm2 is the usable area; Fill = NeedMm2 / OfferMm2 (> 1: over-full,
 	// no placement can be legal; above ZoneTightFill packing rarely
@@ -251,6 +251,10 @@ func (pl *placer) zoneFill(res *PlaceResult, pairs [][2]*Part) []ZoneFill {
 	}
 	var zs []*zk
 	byRect := map[Rect]*zk{}
+	movable := map[*Part]bool{}
+	for _, p := range pl.movable {
+		movable[p] = true
+	}
 	name := func(r Rect) string {
 		if r == pl.region {
 			return "board"
@@ -295,8 +299,9 @@ func (pl *placer) zoneFill(res *PlaceResult, pairs [][2]*Part) []ZoneFill {
 			}
 		}
 		for _, q := range pl.b.Parts {
-			if !k.parts[q] && (q.Fixed || pl.c.IsBridge(q.Ref)) {
-				// Fixed parts and bridges take their room from the zone.
+			if !k.parts[q] && (!movable[q] || pl.c.IsBridge(q.Ref)) {
+				// Parts that do not move and bridges take their room from
+				// the zone (zoneOccupied counts them alike).
 				a := in.OverlapArea(q.Body().Expand(pl.spacing / 2))
 				k.need += a
 				k.fixed += a
