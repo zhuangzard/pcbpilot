@@ -85,6 +85,16 @@ func fakeRouterMain(router string, args []string) int {
 			case <-time.After(20 * time.Second):
 				return 9 // never asked to stop gracefully
 			}
+		case "checkpoint-hang": // writes a checkpoint session, never stops, never reports: killed
+			os.WriteFile(argAfter(args, "-do"), []byte(fakeSessionFor(args)), 0o644)
+			signal.Notify(make(chan os.Signal, 1), os.Interrupt)
+			fakeReady()
+			time.Sleep(60 * time.Second)
+			return 9
+		case "echo-pairs": // the session names every net of the pairs file
+			os.WriteFile(argAfter(args, "-do"), []byte(fakeSessionFor(args)), 0o644)
+			os.WriteFile(rep, []byte(report+"\n"), 0o644)
+			return 0
 		case "ignore-stop": // catches the stop request and keeps routing: must be killed
 			signal.Notify(make(chan os.Signal, 1), os.Interrupt)
 			fakeReady()
@@ -133,4 +143,24 @@ func fakeReady() {
 	if p := os.Getenv(envFakeFRReady); p != "" {
 		_ = os.WriteFile(p, []byte("ready\n"), 0o644)
 	}
+}
+
+// fakeSessionFor is a session naming each net token of --pairs as
+// fastroute writes it: (net TOKEN (wire ...)).
+func fakeSessionFor(args []string) string {
+	var b strings.Builder
+	b.WriteString("(session x (routes (network_out\n")
+	for _, a := range args {
+		if p, ok := strings.CutPrefix(a, "--pairs="); ok {
+			raw, _ := os.ReadFile(p)
+			for _, line := range strings.Split(string(raw), "\n") {
+				f := strings.Fields(line)
+				if len(f) >= 3 && f[0] == "pair" {
+					fmt.Fprintf(&b, "  (net %s (wire (path F.Cu 100 0 0 10 0)))\n  (net %s (wire (path F.Cu 100 0 5 10 5)))\n", f[1], f[2])
+				}
+			}
+		}
+	}
+	b.WriteString(")))\n")
+	return b.String()
 }

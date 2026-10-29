@@ -495,7 +495,7 @@ func TestIntentPairsAndTune(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pairs, tune := intentPairsAndTune(in)
+	pairs, tune := intentPairsAndTune(in, nil)
 	if pairs != "pair LVDS_CLK_N LVDS_CLK_P gap=0.127 skew=0.127\n" {
 		t.Fatalf("pairs = %q", pairs)
 	}

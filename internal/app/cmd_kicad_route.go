@@ -40,6 +40,9 @@ type kicadRouteOpts struct {
 	ripUp       bool
 	fo          fastrouteOpts
 	minTraceSet bool
+	// maxTimeSet / routerTimeoutSet: the flags were given (else the
+	// defaults scale with the board: fastrouteAutoMaxTime).
+	maxTimeSet, routerTimeoutSet bool
 	// padNeckFloor (mil, 0 = off): see kicad.PadNeckFloorMil.
 	padNeckFloor float64
 	// rules: explicit flags (0 = not given); ruleFlags = any was given.
@@ -117,6 +120,10 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 				return fmt.Errorf("--pcb and --intent are required: the intent is the pre-route gate for widths, clearances and neck-down")
 			}
 			o.minTraceSet = cmd.Flags().Changed("min-trace-um")
+			o.maxTimeSet, o.routerTimeoutSet = cmd.Flags().Changed("max-time"), cmd.Flags().Changed("router-timeout")
+			if o.maxTimeSet && o.fo.maxTime < 0 {
+				return fmt.Errorf("--max-time must be >= 0 (0 = no fastroute time limit)")
+			}
 			for _, n := range []string{"clearance-mil", "track-mil", "min-track-mil", "via-dia-mil", "via-drill-mil", "edge-mil"} {
 				o.ruleFlags = o.ruleFlags || cmd.Flags().Changed(n)
 			}
@@ -159,13 +166,13 @@ Exits non-zero when any gate fails; --waivers takes signed {gate,match,reason,by
 	f.StringVar(&o.tm.bin, "tracemaker-bin", "", "tracemaker executable (default: $TRACEMAKER_BIN, ~/.pcbpilot/tracemaker/current, PATH)")
 	f.DurationVar(&o.tm.timeout, "tracemaker-time", 300*time.Second, "tracemaker --time budget (it also sets the lattice pitch: ≥ 300 s gave 0.05 mm and a complete Board-A, 90–180 s gave 0.1 mm and 2 open connections)")
 	f.StringVar(&o.fastrouteBin, "fastroute-bin", "", "fastroute executable (default: $FASTROUTE_BIN, ~/.pcbpilot/fastroute/current, PATH)")
-	f.DurationVar(&o.fo.maxTime, "max-time", 0, "fastroute --max-time per run (0 = none)")
+	f.DurationVar(&o.fo.maxTime, "max-time", 0, "fastroute --max-time per run; default: scaled with the board (10 min + 0.3 s per connection, at most 40 min; summary.routerTime); 0 given explicitly = no limit. At the limit fastroute writes its best board; pcbpilot asks it to stop (Ctrl+Break / SIGINT) a grace later (max-time/10, 1–5 min), kills it 2 min after that and still imports its last checkpoint session — an incomplete result, never a pass")
 	f.IntVar(&o.fo.threads, "threads", 0, "fastroute autorouter/optimizer threads: 0 = min(cores-1, 8); 1 = single-threaded (reproducible across fastroute builds; a crashed multi-threaded run is retried single-threaded). Board-A: 3 runs with 8 threads gave byte-identical sessions")
 	f.IntVar(&o.fo.multiStart, "multi-start", 4, "fastroute --multi-start=N: N-1 differently seeded pass-1 orders rerun in parallel by fastroute when connections stay unrouted, best kept (1 = off)")
 	f.BoolVar(&o.optimizer, "optimizer", false, "run fastroute's optimizer (its budget equals the whole routing stage incl. multi-start, ≥ 60 s; Board-A --multi-start=4: 299 s with it, 134 s without, same 4 unrouted / 30 violations, 0.1 % shorter, 1 via fewer) — off by default")
 	f.Float64Var(&o.fo.optThreshold, "optimizer-threshold", 0, "fastroute --router.optimizer.optimization_improvement_threshold (percent per pass; 0 = fastroute's default)")
 	f.IntVar(&o.fo.rounds, "continue", 2, "fastroute continuation runs (--initial-session) while connections remain unrouted")
-	f.DurationVar(&o.fo.timeout, "router-timeout", 45*time.Minute, "hard limit per fastroute run")
+	f.DurationVar(&o.fo.timeout, "router-timeout", 45*time.Minute, "hard limit per fastroute run (raised to --max-time + the stop grace when that is later and the flag was not given)")
 	f.Float64Var(&o.fo.minTraceUm, "min-trace-um", 0, "fastroute --router.min_trace_width_um (default: max(board minimum track width, min(narrowest widthMil.min, narrowest class width)))")
 	f.Float64Var(&o.padNeckFloor, "pad-neck-floor-mil", 0, "let intent nets neck down at pads (off by default: every intent class is --no-neckdown-classes). Nets with widthMil.min <= max(this, narrowest min) leave that list and fastroute's neck floor becomes that value, so no neck goes below the net's own minimum; full width outside the pad zone is restored by widen-to-intent and enforced by the intent-widths gate (a failing run is not shipped). Also lets escape vias sit next to own-net SMD pads (fastroute allows it). Board-A: 10")
 	f.Float64Var(&o.rules.ClearanceMil, "clearance-mil", 0, "board minimum clearance + Default netclass clearance (default for a board without .kicad_pro: intent copper.clearanceMil)")
@@ -811,8 +818,28 @@ func (r *kicadRun) prepareRoute(classed string, reqs map[string]kicad.NetRequire
 			o.fo.minTraceUm = math.Ceil(floor*25.4*10) / 10
 		}
 	}
+	// fastroute's time budget: scaled with the board unless --max-time was
+	// given; the hard limit never cuts a run before its own stop.
+	conns := boardConnections(inSnap)
+	if !o.maxTimeSet {
+		o.fo.maxTime = fastrouteAutoMaxTime(conns)
+	}
+	if !o.routerTimeoutSet && o.fo.maxTime > 0 {
+		if need := o.fo.maxTime + fastrouteStopGrace(o.fo.maxTime) + fastrouteKillGrace; need > o.fo.timeout {
+			o.fo.timeout = need
+		}
+	}
+	r.summary["routerTime"] = map[string]any{"connections": conns, "maxTimeS": o.fo.maxTime.Seconds(), "maxTimeSource": map[bool]string{true: "--max-time", false: "auto (10 min + 0.3 s per connection, at most 40 min)"}[o.maxTimeSet],
+		"routerTimeoutS": o.fo.timeout.Seconds()}
+	fmt.Fprintf(r.stderr, "router time: %d connection(s), fastroute --max-time %s, hard limit %s\n", conns, o.fo.maxTime, o.fo.timeout)
 	base := strings.TrimSuffix(dsnPath, ".dsn")
-	pairs, tune := intentPairsAndTune(r.in)
+	// Nets fastroute's pairs / tune files cannot name (spaces in a
+	// hierarchical name): aliased in fastroute's copy of the DSN.
+	o.fo.aliases = newFastrouteNetAliases(intentRouterNets(r.in), prepared)
+	if !o.fo.aliases.empty() {
+		r.summary["fastrouteNetAliases"] = o.fo.aliases.toAlias
+	}
+	pairs, tune := intentPairsAndTune(r.in, o.fo.aliases)
 	if pairs != "" {
 		o.fo.pairsFile = base + "-pairs.txt"
 		if err := os.WriteFile(o.fo.pairsFile, []byte(pairs), 0o644); err != nil {
@@ -1761,4 +1788,35 @@ func defaultRouteThreads(cpus int, both bool) int {
 		return max((cpus-1)/2, 2)
 	}
 	return min(max(cpus-1, 1), 8)
+}
+
+// boardConnections counts the connections routing has to make: per net,
+// its pads minus one.
+func boardConnections(s *boardSnapshot) int {
+	if s == nil {
+		return 0
+	}
+	pads := map[string]int{}
+	for _, c := range s.Components {
+		for _, p := range c.Pads {
+			if p.Net != "" {
+				pads[p.Net]++
+			}
+		}
+	}
+	n := 0
+	for _, k := range pads {
+		if k > 1 {
+			n += k - 1
+		}
+	}
+	return n
+}
+
+// fastrouteAutoMaxTime is kicad route's default fastroute --max-time:
+// 10 min + 0.3 s per connection, at most 40 min (a 3202-connection board
+// gets 26 min; fastroute committed 678 of them in 30 min).
+func fastrouteAutoMaxTime(conns int) time.Duration {
+	d := 10*time.Minute + time.Duration(conns)*300*time.Millisecond
+	return min(d, 40*time.Minute).Round(time.Second)
 }
