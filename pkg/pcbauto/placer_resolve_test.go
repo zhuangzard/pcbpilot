@@ -106,3 +106,24 @@ func TestResolveCostNoTrades(t *testing.T) {
 		t.Fatal("a pose better on every term was rejected")
 	}
 }
+
+// illegalList names a part outside the board and one outside its zone
+// even with no courtyard overlap anywhere.
+func TestIllegalListNamesBoardAndZoneExits(t *testing.T) {
+	pl := testPlacer(t, "reference-4stage-compact.json")
+	pl.legalise()
+	if ps := pl.overlapPairs(); len(ps) != 0 {
+		t.Skipf("fixture legalises to %d overlaps", len(ps))
+	}
+	if len(pl.movable) < 2 || len(pl.b.Outline) < 3 {
+		t.Skip("fixture lacks movable parts or an outline")
+	}
+	out, zoned := pl.movable[0], pl.movable[1]
+	bb := pl.b.Bounds()
+	movePartCentre(out, Point{bb.MaxX + 2000, bb.MaxY + 2000}, out.Rotation)
+	pl.zoneOf[zoned] = Rect{bb.MaxX + 5000, bb.MaxY + 5000, bb.MaxX + 5100, bb.MaxY + 5100}
+	list := strings.Join(pl.illegalList(pl.overlapPairs()), ";")
+	if !strings.Contains(list, "outside the board "+out.Ref) || !strings.Contains(list, "outside its zone "+zoned.Ref) {
+		t.Fatalf("illegal %q, want %s off the board and %s off its zone", list, out.Ref, zoned.Ref)
+	}
+}

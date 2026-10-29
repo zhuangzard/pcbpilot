@@ -434,8 +434,8 @@ func (pl *placer) zoneFill(res *PlaceResult, pairs [][2]*Part) []ZoneFill {
 }
 
 // illegalList names every illegal placement of the final layout: the
-// overlapping courtyard pairs and the parts outside the board or their
-// zone, sorted.
+// overlapping courtyard pairs, the parts outside the board or their zone
+// and the parts inside a no-parts keep-out (metrics' counts), sorted.
 func (pl *placer) illegalList(pairs [][2]*Part) []string {
 	var out []string
 	for _, pr := range pairs {
@@ -460,6 +460,12 @@ func (pl *placer) illegalList(pairs [][2]*Part) []string {
 		}
 		if z, ok := pl.zoneOf[p]; ok && z != pl.region && !pl.c.IsBridge(p.Ref) && outside(bi, z) > 1 {
 			out = append(out, "outside its zone "+p.Ref)
+		}
+		for _, k := range pl.b.Keepouts {
+			if k.NoParts && k.Owner != p.Ref && bi.OverlapArea(PolyBounds(k.Poly)) > 1 {
+				out = append(out, "inside a keep-out "+p.Ref)
+				break
+			}
 		}
 	}
 	sort.Strings(out)
