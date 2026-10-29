@@ -260,6 +260,13 @@ func TestSignoffCopperUnroutedCannotCheck(t *testing.T) {
 		{"one-part-two-pads", func(snap, cu map[string]any) {
 			addPart(snap, "U8", [][2]string{{"1", "VDD_IC"}, {"4", "VDD_IC"}})
 		}, "VDD_IC"},
+		// Two footprints that share the designator R5 are still two parts:
+		// pad 1 of each on an unrouted net is judged.
+		{"duplicate-designator", func(snap, cu map[string]any) {
+			addPart(snap, "R5", [][2]string{{"1", "DUP_NET"}, {"2", "GND"}})
+			addPart(snap, "R5", [][2]string{{"1", "DUP_NET"}, {"2", "GND"}})
+			cu["poured"], cu["pours"] = []any{}, []any{}
+		}, "DUP_NET GND"},
 		// Same pad number twice in one footprint: KiCad connects them
 		// internally, one pad, nothing to route.
 		{"one-part-same-number", func(snap, cu map[string]any) {
