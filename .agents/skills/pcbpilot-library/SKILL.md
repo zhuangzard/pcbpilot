@@ -32,9 +32,9 @@ metadata:
    重复/机械/裸露焊盘的归属、建库后回读、一次性实例检查。手册有歧义就**拒绝**，结论 `INCOMPLETE`，列候选问用户。
 4. **工具的成功不是验收。** `lib device validate` 的 `pinMappingVerified:true` 只比较编号集合（改脚名、改类型照样通过）；
    `lib device build` 的 `verified:true` 只证明资产已创建；`kicad lcsc --import` 成功只说明 KiCad 转换器跑完。
-5. **KiCad 库文件不手改。** pcbpilot **不能**按几何参数生成 KiCad 封装（`.kicad_mod`），也不编辑 `.kicad_sym`。可用的来源只有：
-   KiCad 自带库、`kicad lcsc --import`、`kicad sch-build` 用 `pins[]` 生成的方框符号（只有符号）。其余的新封装/符号修改记
-   `UNSUPPORTED`，把验收记录交给用户在 KiCad 符号/封装编辑器里做，做完再按记录回读。文件规则见
+5. **KiCad 库文件不手改。** pcbpilot 可通过 typed 命令生成和编辑 KiCad 符号（`kicad lib-sym`）与封装（`kicad lib-fp`、`kicad lib-fp-edit`），
+   或用 `kicad lcsc --import` 导入、`kicad sch-build` 用 `pins[]` 生成方框符号。不直接文本编辑 `.kicad_sym` / `.kicad_mod` 文件。
+   生成后必须做引脚↔焊盘验收（`kicad pin-pad-check`）。文件规则见
    [kicad-file-safety.md](../pcbpilot/references/kicad-file-safety.md)。
 6. **库表用工程级 + `${KIPRJMOD}`。** 不改全局库表，不写绝对路径；细节见 [library-conventions.md](references/library-conventions.md#7-kicad-库表注册)。
 7. **参数核验保留原始单位**，不从料号数字猜值；规则在 [part-selection.md](../pcbpilot/references/part-selection.md)。
@@ -92,6 +92,30 @@ pcbpilot kicad lcsc --import C6186 --import C25744 --lib-dir ./lib   # 联网；
 - 没有现成符号时用 `pins[]`（`number` / `name` / `type`，KiCad 类型名）生成方框符号；封装仍须来自现有库。
 - 回读：`kicad-cli sym export svg` / `fp export svg --sp`、KiCad python 读焊盘（验收记录第 6 节），再在临时目录做一次性
   `kicad sch-build` → `kicad sch-read` 核对每个网落到的 `REF:脚号`（第 7 节）。
+
+### 3b. KiCad：按参数生成符号/封装
+
+当 KiCad 自带库和 LCSC 导入都不能满足需求时，可从 JSON spec 直接生成符号和封装。
+
+```bash
+# 从 JSON 引脚表生成符号（写入 .kicad_sym 库，合并已有符号）
+pcbpilot kicad lib-sym --spec symbol.json --out ./lib --lib-name mylib
+
+# 从 JSON 焊盘描述生成封装（写入 .pretty 库目录）
+pcbpilot kicad lib-fp --spec footprint.json --out ./lib --lib-name mylib
+
+# 编辑已有封装的焊盘（改编号/尺寸/形状/钻孔）
+pcbpilot kicad lib-fp-edit --footprint ./lib/mylib.pretty/X.kicad_mod --edits edits.json
+
+# 注册库到工程的 sym-lib-table / fp-lib-table（${KIPRJMOD} 相对路径）
+pcbpilot kicad lib-register --project ./myproj --sym mylib=lib/mylib.kicad_sym --fp mylib=lib/mylib.pretty
+
+# 引脚↔焊盘验收（必须通过才能使用）
+pcbpilot kicad pin-pad-check --symbol ./lib/mylib.kicad_sym --footprint ./lib/mylib.pretty/X.kicad_mod --json
+```
+
+JSON spec 格式见 `SymbolSpec`（`name`, `reference`, `pins[]` with `number/name/type/side/unit`）
+和 `FootprintSpec`（`name`, `pads[]` with `number/type/shape/at/size/drill/layers`）。
 
 ### 4. 把已放置的件刷新到库
 

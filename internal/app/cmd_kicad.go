@@ -57,6 +57,11 @@ goes to --out-dir.`,
 		newKicadRenderCmd(stdout),
 		newKicadPcbSyncCmd(stdout, stderr),
 		newKicadRulesCmd(stdout, stderr),
+		newKicadLibSymCmd(stdout),
+		newKicadLibFPCmd(stdout),
+		newKicadLibFPEditCmd(stdout),
+		newKicadLibRegisterCmd(stdout),
+		newKicadPinPadCheckCmd(stdout),
 	)
 	return c
 }
