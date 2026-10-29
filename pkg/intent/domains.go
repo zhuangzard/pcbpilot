@@ -422,6 +422,10 @@ func (c *ctx) declaredFor(a, b *Domain) (clr, creep float64, from []string) {
 			if has(a.Nets, n) || has(b.Nets, n) {
 				clr, creep = math.Max(clr, sd.ClearanceMm), math.Max(creep, sd.CreepageMm)
 				from = append(from, fmt.Sprintf("spec.domains[%d] (%s)", i, n))
+				if c.domUsed == nil {
+					c.domUsed = map[int]bool{}
+				}
+				c.domUsed[i] = true
 				break
 			}
 		}
@@ -480,11 +484,7 @@ func (c *ctx) findDeclaredIsolation() {
 		if sd.ClearanceMm <= 0 && sd.CreepageMm <= 0 {
 			continue
 		}
-		hit := false
-		for _, p := range c.out.Pairs {
-			hit = hit || p.DeclaredClearanceMm > 0 && p.DeclaredClearanceMm >= sd.ClearanceMm || p.DeclaredCreepageMm > 0 && p.DeclaredCreepageMm >= sd.CreepageMm
-		}
-		if !hit {
+		if !c.domUsed[i] {
 			c.add("warn", "declared-isolation-unmatched", fmt.Sprintf("spec.domains[%d] declares clearance %s / creepage %s mm but its domain is in no insulation pair: not applied", i, trimFloat(sd.ClearanceMm, 3), trimFloat(sd.CreepageMm, 3)), nil, sd.Nets,
 				"check that the domain's nets are on the barrier an isolation part bridges")
 		}

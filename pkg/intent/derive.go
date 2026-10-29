@@ -58,6 +58,7 @@ type ctx struct {
 	ddrPairs     [][2]string           // DDR strobe/clock pairs recognised from names
 	ddrGroup     map[string]string     // net → DDR byte-lane / address group
 	isoUsed      map[int]bool          // spec.isolation entries that matched a pair
+	domUsed      map[int]bool          // spec.domains distance declarations that matched a pair
 }
 
 type pinRef struct {
