@@ -77,7 +77,7 @@ post-layout 仿真 → 签核 → 保存（复制回工程）。板框、层叠�
        --intent work/intent.json [--mech mech.json] [--groups groups.json] [--place-seeds 6] [--candidates 3] [--time-budget 8m]
    ```
    输出最佳种子 + `board.seed-N.kicad_pcb` 备选 + `board.report.json`；**输出板的走线/过孔被清除、铺铜未灌**，后面必须
-   重新布线。`--time-budget` 到点交出当前最优并在报告标 `budgetHit`（进度在 stderr）。`mech.json` 的写法见 [mech-spec.md](../pcbpilot/references/recipes/mech-spec.md)。
+   重新布线。`--time-budget` 到点交出当前最优并在报告标 `budgetHit`（进度在 stderr）。最优种子有非法摆放则退出码 6、`verdict: fail`：看报告 `illegal` 与 `zoneFill`（域装不下就扩域/移件），不要直接布线。`mech.json` 的写法见 [mech-spec.md](../pcbpilot/references/recipes/mech-spec.md)。
 3a. **规则复查**：`pcbpilot kicad rules … --check --stage placed`：`effective-rules` 必须 pass；`isolation-placement` 是
    advisory 的布局代理（courtyard 边到边 < 绝缘间隙、未声明的跨域器件），不是铜间距，按提示回到布局。
 4. **布线 + 门禁**（一条命令）：

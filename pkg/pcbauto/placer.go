@@ -126,6 +126,11 @@ type PlaceResult struct {
 	Outline    []Point      `json:"outline,omitempty"` // set when auto-sized
 	Metrics    PlaceMetrics `json:"metrics"`
 	Notes      []string     `json:"notes,omitempty"`
+	// Illegal names every illegal placement left (overlapping courtyard
+	// pairs, parts outside the board or their zone); ZoneFill is each
+	// placement zone's room.
+	Illegal  []string   `json:"illegal,omitempty"`
+	ZoneFill []ZoneFill `json:"zoneFill,omitempty"`
 	// Aesthetics is what the aesthetics stage moved (nil when skipped).
 	Aesthetics *AesPlaceReport `json:"aesthetics,omitempty"`
 }
@@ -256,7 +261,11 @@ func Place(b *Board, an *Analysis, c *Circuit, m *Mechanics, opt PlaceOptions) (
 			pl.freezeMacros()
 		}
 		pl.phase("anneal")
-		pl.anneal(pl.annealDeadline(start))
+		d, short := pl.annealDeadline(start)
+		if pl.anneal(d) && short && pl.budgetHit == "" {
+			// It stopped on the budget's clock before its moves were done.
+			pl.budgetHit = "anneal"
+		}
 		if pl.wallClock {
 			res.Notes = append(res.Notes, "annealing ran past 80 % of its time budget: cooling followed the clock, so this placement depends on machine load (not reproducible move for move)")
 		}
@@ -270,6 +279,10 @@ func Place(b *Board, an *Analysis, c *Circuit, m *Mechanics, opt PlaceOptions) (
 		pl.rescueDecaps()
 		pl.phase("tidy")
 		pl.tidyV07()
+		pl.phase("resolve")
+		if n := pl.resolveOverlaps(); n > 0 {
+			res.Notes = append(res.Notes, sprintf("resolve: %d courtyard overlap(s) the legaliser left cleared by moving a part within its own zone (no isolation, keep-out or edge term worse)", n))
+		}
 	}
 	if !opt.NoAesthetics && pl.overBudget() {
 		pl.phase("aesthetics")
@@ -324,8 +337,29 @@ func Place(b *Board, an *Analysis, c *Circuit, m *Mechanics, opt PlaceOptions) (
 	if m.AutoSize {
 		res.Outline = pl.autosize()
 	}
+	if !opt.TidyOnly && !opt.NoAesthetics && len(pl.overlapPairs()) > 0 {
+		// The aesthetics stage's moves are judged on the legaliser's terms,
+		// which price a small courtyard overlap instead of forbidding it.
+		pl.phase("resolve-2")
+		if n := pl.resolveOverlaps(); n > 0 {
+			res.Notes = append(res.Notes, sprintf("resolve after aesthetics: %d courtyard overlap(s) cleared", n))
+		}
+	}
 	pl.phase("metrics")
 	pl.metrics(res)
+	pairs := pl.overlapPairs()
+	res.Illegal = pl.illegalList(pairs)
+	res.ZoneFill = pl.zoneFill(res, pairs)
+	for _, z := range res.ZoneFill {
+		switch {
+		case z.Fill > 1:
+			res.Notes = append(res.Notes, sprintf("zone %s is over-full: its parts need %.0f mm² (fixed parts %.0f), the zone offers %.0f mm² (%d illegal) — enlarge the zone or move parts out of it", z.Domain, z.NeedMm2, z.FixedMm2, z.OfferMm2, z.Illegal))
+		case z.Fill > ZoneTightFill && z.Illegal > 0:
+			res.Notes = append(res.Notes, sprintf("zone %s is practically full: its parts need %.0f mm² (fixed parts %.0f) of the %.0f mm² it offers (fill %.2f, %d illegal) — enlarge the zone or move parts out of it", z.Domain, z.NeedMm2, z.FixedMm2, z.OfferMm2, z.Fill, z.Illegal))
+		case z.Illegal > 0:
+			res.Notes = append(res.Notes, sprintf("zone %s: %d illegal placement(s) although it has room (parts need %.0f mm² of %.0f mm², fill %.2f): a local conflict (isolation, keep-out or a fixed part) the placer could not clear — see illegal", z.Domain, z.Illegal, z.NeedMm2, z.OfferMm2, z.Fill))
+		}
+	}
 	if pl.budgetHit != "" {
 		res.Metrics.TimeBudgetHit = pl.budgetHit
 		res.Notes = append(res.Notes, sprintf("time budget reached during %s: this is the best placement found by then, not a finished one (metrics as measured)", pl.budgetHit))
@@ -368,8 +402,8 @@ func (pl *placer) overBudget() bool {
 // already past — the anneal then had no clock at all and ran its full move
 // count, tens of minutes — so it gets a third of Timeout from now instead.
 // Either way it leaves a quarter of the time to PlaceOptions.Deadline for
-// the phases after it.
-func (pl *placer) annealDeadline(start time.Time) time.Time {
+// the phases after it; the flag says the budget shortened it.
+func (pl *placer) annealDeadline(start time.Time) (time.Time, bool) {
 	now := time.Now()
 	d := start.Add(pl.opt.Timeout)
 	if !d.After(now) {
@@ -377,13 +411,10 @@ func (pl *placer) annealDeadline(start time.Time) time.Time {
 	}
 	if dl := pl.opt.Deadline; !dl.IsZero() {
 		if last := dl.Add(-dl.Sub(now) / 4); last.Before(d) {
-			d = last
-			if pl.budgetHit == "" {
-				pl.budgetHit = "anneal"
-			}
+			return last, true
 		}
 	}
-	return d
+	return d, false
 }
 
 // ---- setup -------------------------------------------------------------------
@@ -663,7 +694,9 @@ func (pl *placer) zones(res *PlaceResult) {
 		for i, k := range ks {
 			ws[i], ds[i] = (pl.region.W()-pl.gapTotal())*k.area/total, k.d
 		}
-		pl.widenZones(ds, ws)
+		if note := pl.widenZones(ds, ws); note != "" {
+			res.Notes = append(res.Notes, note)
+		}
 		x := pl.region.MinX
 		for i, k := range ks {
 			gap := 0.0
@@ -714,8 +747,11 @@ func (pl *placer) zones(res *PlaceResult) {
 // part could never be legal and every legalisation pass searched its
 // whole spiral for nothing. The width comes from the other strips in
 // proportion to what they have beyond their own need; widths already wide
-// enough are left exactly as they were.
-func (pl *placer) widenZones(doms []*Domain, ws []float64) {
+// enough are left exactly as they were, and the widths' sum never changes.
+// When the others' slack cannot cover every shortfall, each short strip
+// gets its share of the slack and the returned note says the region is too
+// narrow ("" when every strip fits its widest part).
+func (pl *placer) widenZones(doms []*Domain, ws []float64) string {
 	need := make([]float64, len(doms))
 	short := false
 	for i, d := range doms {
@@ -730,7 +766,7 @@ func (pl *placer) widenZones(doms []*Domain, ws []float64) {
 		short = short || ws[i] < need[i]
 	}
 	if !short {
-		return
+		return ""
 	}
 	deficit, slack := 0.0, 0.0
 	for i := range ws {
@@ -740,17 +776,31 @@ func (pl *placer) widenZones(doms []*Domain, ws []float64) {
 			slack += ws[i] - need[i]
 		}
 	}
-	if slack <= 0 {
-		return // the region cannot hold every domain's widest part
+	// give: the share of each shortfall granted; take: the share of each
+	// slack given up. Both ≤ 1, and give·deficit = take·slack.
+	give, take := 1.0, 1.0
+	if deficit <= slack {
+		take = deficit / slack
+	} else {
+		give = slack / deficit // slack 0: nothing to give
 	}
-	f := math.Min(1, deficit/slack)
 	for i := range ws {
 		if ws[i] < need[i] {
-			ws[i] = need[i]
+			ws[i] += (need[i] - ws[i]) * give
 		} else {
-			ws[i] -= (ws[i] - need[i]) * f
+			ws[i] -= (ws[i] - need[i]) * take
 		}
 	}
+	if give >= 1 {
+		return ""
+	}
+	var short2 []string
+	for i, d := range doms {
+		if ws[i] < need[i]-1e-6 {
+			short2 = append(short2, sprintf("%s (%.0f of %.0f mil)", d.ID, ws[i], need[i]))
+		}
+	}
+	return sprintf("domain zones too narrow: the board's placement width cannot give every domain strip its widest part — %s; enlarge the board or move the wide parts to another domain", strings.Join(short2, ", "))
 }
 
 func (pl *placer) gapTotal() float64 {
@@ -910,6 +960,16 @@ func (pl *placer) overlapCostIn(p *Part, bx Rect, body *Rect, intimate map[*Part
 		return cost < lim
 	})
 	return cost
+}
+
+// boundRejects reports whether a pose whose hard cost is at least lb can be
+// skipped by a search that accepts only cost < lim. hardBound sums a subset
+// of partCost's non-negative terms in partCost's order, and rounding to
+// nearest is monotone, so lb ≤ cost exactly; the margin (relative 1e-9,
+// absolute 1e-9 mil-cost) only prunes less, never more — a pose within it
+// of the limit goes to the full evaluation the search always did.
+func boundRejects(lb, lim float64) bool {
+	return lb >= lim+1e-9*math.Abs(lim)+1e-9
 }
 
 // spiralCtx is what hardBound needs of the part a spiral moves, read once
@@ -1670,6 +1730,21 @@ func spiralRing(ring int) []Point {
 	return cs
 }
 
+// spiralCentre is where the spiral of a part centred at orig starts: orig,
+// unless its zone z lies beyond the spiral's reach (its last ring, radius
+// (spiralMaxRing-1)·step, a circle: the distance is Euclidean) — then the
+// zone's nearest point, since no ring around orig could enter the zone.
+func spiralCentre(orig Point, z Rect, step float64) Point {
+	if z.Empty() {
+		return orig
+	}
+	in := Point{clamp(orig.X, z.MinX, z.MaxX), clamp(orig.Y, z.MinY, z.MaxY)}
+	if in.Dist(orig) > float64(spiralMaxRing)*step {
+		return in
+	}
+	return orig
+}
+
 func (pl *placer) spiral(p *Part) bool {
 	orig, rot0 := p.Body().Center(), p.Rotation
 	best, bestRot, bestCost := orig, rot0, pl.hardCost(p)
@@ -1688,11 +1763,8 @@ func (pl *placer) spiral(p *Part) bool {
 	// there from its own spot, and every ring is a full search for nothing.
 	// Spiral around the nearest point of the zone instead.
 	centre := orig
-	if z, ok := pl.zoneOf[p]; ok && !z.Empty() {
-		in := Point{clamp(orig.X, z.MinX, z.MaxX), clamp(orig.Y, z.MinY, z.MaxY)}
-		if math.Abs(in.X-orig.X)+math.Abs(in.Y-orig.Y) > 400*step {
-			centre = in
-		}
+	if z, ok := pl.zoneOf[p]; ok {
+		centre = spiralCentre(orig, z, step)
 	}
 	for _, rot := range rots {
 		if pl.overBudget() {
@@ -1726,7 +1798,7 @@ func (pl *placer) spiral(p *Part) bool {
 					off := rel.Translate(p.Pos).Center().Sub(p.Pos)
 					pos := c.Sub(off)
 					body := rel.Translate(pos)
-					if pl.hardBound(sc, body.Expand(halo), body, lim) >= lim {
+					if boundRejects(pl.hardBound(sc, body.Expand(halo), body, lim), lim) {
 						// The pads lag behind until the next real move, which
 						// re-poses them from this anchor (movePartCentre's
 						// first MoveTo); nothing reads them in between.
@@ -1757,9 +1829,11 @@ func (pl *placer) spiral(p *Part) bool {
 
 // ---- annealing ----------------------------------------------------------------
 
-func (pl *placer) anneal(deadline time.Time) {
+// anneal reports whether it stopped on its deadline before every move was
+// tried.
+func (pl *placer) anneal(deadline time.Time) bool {
 	if len(pl.movable) == 0 {
-		return
+		return false
 	}
 	pl.rebuildBuckets()
 	if w := pl.opt.Congestion; w >= 0 {
@@ -1796,10 +1870,10 @@ func (pl *placer) anneal(deadline time.Time) {
 			if budget > 0 {
 				timeFrac = time.Since(start).Seconds() / budget
 			} else {
-				break // no time left at all (PlaceOptions.Deadline passed)
+				return true // no time left at all (PlaceOptions.Deadline passed)
 			}
 			if timeFrac >= 1 {
-				break
+				return true
 			}
 		}
 		// Cooling follows the move count, so a seed reproduces its layout
@@ -1823,6 +1897,7 @@ func (pl *placer) anneal(deadline time.Time) {
 			pl.rudy.done()
 		}
 	}
+	return false
 }
 
 type savedPose struct {
@@ -2720,19 +2795,24 @@ func (pl *placer) rescuePart(d *Part, rots []float64) {
 	// Ring by ring out to the distance the decap is at now: the first ring
 	// with a legal pose holds the nearest ones; the best of its poses wins.
 	maxRing := int(math.Min(rescueFarMil, pl.decapGap(d)) / step)
-	for ring := 0; ring <= maxRing && !found; ring++ {
+	for ring := 0; ring <= maxRing && !found && !pl.overBudget(); ring++ {
 		r := float64(ring) * step
 		n := max(8*ring, 1)
 		best := before
 		cs := spiralRing(ring)
 		for _, rot := range rs {
+			// Past the deadline: keep the best legal pose found (none: the
+			// decap goes back), buckets restored below either way.
+			if pl.overBudget() {
+				break
+			}
 			for k := 0; k < n; k++ {
 				c := pin.Add(Point{r * cs[k].X, r * cs[k].Y})
 				if rel, ok := d.relBody[normDeg(rot)]; ok && len(d.Pads) > 0 {
 					off := rel.Translate(d.Pos).Center().Sub(d.Pos)
 					pos := c.Sub(off)
 					body := rel.Translate(pos)
-					if pl.hardBound(sc, body.Expand(halo), body, 1e-6) >= 1e-6 {
+					if boundRejects(pl.hardBound(sc, body.Expand(halo), body, 1e-6), 1e-6) {
 						d.Pos, d.Rotation = pos, normDeg(rot)
 						continue
 					}

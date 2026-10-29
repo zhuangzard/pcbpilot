@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/zhuangzard/pcbpilot/internal/gate"
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
 	"github.com/zhuangzard/pcbpilot/pkg/pcbauto"
 )
@@ -49,9 +50,15 @@ type kicadPlaceReport struct {
 	Mechanics *pcbauto.Mechanics `json:"mechanics,omitempty"`
 	// TimeBudget is --time-budget; BudgetHit is set when any seed's
 	// placement was cut short by it (see each seed's metrics.timeBudgetHit).
-	TimeBudget string   `json:"timeBudget,omitempty"`
-	BudgetHit  bool     `json:"budgetHit,omitempty"`
-	Notes      []string `json:"notes,omitempty"`
+	TimeBudget string `json:"timeBudget,omitempty"`
+	BudgetHit  bool   `json:"budgetHit,omitempty"`
+	// Verdict is fail when the best seed has an illegal placement (exit 6,
+	// as kicad drc): Illegal names each one, ZoneFill shows whether its
+	// zone has the room (best seed).
+	Verdict  gate.Status        `json:"verdict"`
+	Illegal  []string           `json:"illegal,omitempty"`
+	ZoneFill []pcbauto.ZoneFill `json:"zoneFill,omitempty"`
+	Notes    []string           `json:"notes,omitempty"`
 
 	path string // where the report was written
 }
@@ -89,7 +96,13 @@ parallel against the same deadline; snapshot and board writing come on
 top). A seed the budget cuts short keeps its best placement so far, with
 metrics as measured; the report flags it (budgetHit, per seed
 metrics.timeBudgetHit) and stderr says so. Progress (seed, phase,
-elapsed) goes to stderr as it happens and every 30 s.`,
+elapsed) goes to stderr as it happens and every 30 s.
+
+An illegal placement in the best seed (courtyard overlap, outside the
+board or its zone) fails the run: the boards are still written, the
+report lists each one (illegal) and every zone's room (zoneFill: area
+its parts need vs. what it offers), stderr warns, and the exit code is
+6 like a failed kicad drc.`,
 		Example: `  pcbpilot kicad place --pcb board.kicad_pcb --out placed/board.kicad_pcb
   pcbpilot kicad place --pcb board.kicad_pcb --out placed/board.kicad_pcb --mech mech.json --intent intent.json --place-seeds 8`,
 		Args: cobra.NoArgs,
@@ -104,6 +117,11 @@ elapsed) goes to stderr as it happens and every 30 s.`,
 				}
 			}
 			fmt.Fprintf(stdout, "report: %s\n", rep.path)
+			if code := rep.Verdict.ExitCode(); code != 0 {
+				// The boards are written (to inspect or hand-fix), but an
+				// illegal placement is a failed gate, like kicad drc's.
+				return exitCodeError{code}
+			}
 			return nil
 		},
 	}
@@ -212,11 +230,16 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 	prog := newPlaceProgress(stderr, placeProgressEvery)
 	popt.Progress = prog.phase
 	if o.timeBudget > 0 {
-		// The anneal's own clock (90 s by default) cut a 1500-part board's
-		// anneal at a fraction of its moves; within the budget it may run to
-		// 65 % of it (it ends sooner when its moves are done, as on every
-		// small board).
-		popt.Timeout = max(90*time.Second, o.timeBudget*65/100)
+		// The anneal keeps its own 90 s clock, so a board that placed before
+		// places the same; the budget is only the outer cap. A board above
+		// placeLargeBoard movable parts is the exception: its anneal used
+		// to outlive that clock altogether (legalisation took longer than
+		// 90 s, which switched the clock off) and stops at 90 s now — far
+		// short of its moves on 1443 parts (decaps a mean 970 mil from their
+		// pins) — so it may run to 65 % of the budget instead.
+		if len(b.Parts)-len(rep.Fixed) > placeLargeBoard {
+			popt.Timeout = max(90*time.Second, o.timeBudget*65/100)
+		}
 		popt.Deadline = time.Now().Add(o.timeBudget)
 		rep.TimeBudget = o.timeBudget.String()
 	}
@@ -278,6 +301,24 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 			}
 		}
 		rep.Seeds = append(rep.Seeds, s)
+	}
+	best := outs[0]
+	rep.Illegal, rep.ZoneFill, rep.Verdict = best.Result.Illegal, best.Result.ZoneFill, gate.Pass
+	for _, z := range rep.ZoneFill {
+		if z.Fill > 1 || z.Fill > pcbauto.ZoneTightFill && z.Illegal > 0 {
+			fmt.Fprintf(stderr, "placement: WARNING zone %s: parts need %.0f mm² (fixed parts %.0f), zone offers %.0f mm² (fill %.2f, %d illegal) — enlarge the zone or move parts out of it\n", z.Domain, z.NeedMm2, z.FixedMm2, z.OfferMm2, z.Fill, z.Illegal)
+		} else if z.Illegal > 0 {
+			fmt.Fprintf(stderr, "placement: WARNING zone %s: %d illegal placement(s) although it has room (need %.0f of %.0f mm², fill %.2f)\n", z.Domain, z.Illegal, z.NeedMm2, z.OfferMm2, z.Fill)
+		}
+	}
+	if best.Trial.Illegal > 0 {
+		rep.Verdict = gate.Fail
+		show := rep.Illegal
+		if len(show) > 12 {
+			show = append(append([]string(nil), show[:12]...), fmt.Sprintf("… %d more in the report", len(rep.Illegal)-12))
+		}
+		fmt.Fprintf(stderr, "placement: WARNING best seed %d has %d illegal placement(s): %s\n", best.Trial.Seed, best.Trial.Illegal, strings.Join(show, "; "))
+		rep.Notes = append(rep.Notes, fmt.Sprintf("verdict fail: the best seed has %d illegal placement(s) (see illegal, zoneFill); the boards are written for inspection, not for routing", best.Trial.Illegal))
 	}
 	if rep.BudgetHit {
 		rep.Notes = append(rep.Notes, fmt.Sprintf("time budget %s reached: at least one seed returned its best placement so far (metrics.timeBudgetHit names the phase); raise --time-budget for a finished placement", o.timeBudget))
@@ -623,6 +664,10 @@ func copyKicadPro(pcb, out string) error {
 	}
 	return os.WriteFile(strings.TrimSuffix(out, ".kicad_pcb")+".kicad_pro", raw, 0o644)
 }
+
+// placeLargeBoard is the movable-part count above which kicad place lets
+// the anneal run past its 90 s clock, within --time-budget.
+const placeLargeBoard = 1000
 
 // placeProgressEvery is how often kicad place repeats every running seed's
 // phase on stderr while nothing else is printed.
