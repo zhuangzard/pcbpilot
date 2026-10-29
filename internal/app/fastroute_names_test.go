@@ -148,3 +148,85 @@ func TestFastrouteDeadlineAndAutoMaxTime(t *testing.T) {
 		t.Fatalf("auto %s %s %s", fastrouteAutoMaxTime(0), fastrouteAutoMaxTime(3202), fastrouteAutoMaxTime(100000))
 	}
 }
+
+// Whole tokens only: a real net named like an alias, or with an alias as a
+// prefix, is never rewritten, and the alias picked avoids it.
+func TestFastrouteNetAliasesTokenBoundaries(t *testing.T) {
+	dsn := `(pcb x (network (net pcbpilot_net_1 (pins U1-1)) (net pcbpilot_net_2_suffix (pins U1-2)) (net "pcbpilot_net_2_q" (pins U1-3))
+ (net "/A B" (pins U1-4)) (class c pcbpilot_net_1 "/A B" pcbpilot_net_2_suffix)))`
+	a := newFastrouteNetAliases([]string{"/A B"}, dsn)
+	al := a.name("/A B")
+	if al == "pcbpilot_net_1" || al != "pcbpilot_net_2" {
+		t.Fatalf("alias %q", al)
+	}
+	out, err := a.apply(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, keep := range []string{"(net pcbpilot_net_1 (pins", "(net pcbpilot_net_2_suffix (pins", `(net "pcbpilot_net_2_q" (pins`, "(class c pcbpilot_net_1 pcbpilot_net_2 pcbpilot_net_2_suffix)"} {
+		if !strings.Contains(out, keep) {
+			t.Fatalf("lacks %q:\n%s", keep, out)
+		}
+	}
+	dir := t.TempDir()
+	ses := filepath.Join(dir, "s.ses")
+	_ = os.WriteFile(ses, []byte(`(session (routes (network_out (net pcbpilot_net_2 (wire)) (net "pcbpilot_net_2" (wire)) (net pcbpilot_net_2_suffix (wire)) (net "pcbpilot_net_2_q" (wire)) (net pcbpilot_net_1 (wire)))))`), 0o644)
+	if err := a.unaliasSession(ses, ses+".r"); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(ses + ".r")
+	want := `(session (routes (network_out (net "/A B" (wire)) (net "/A B" (wire)) (net pcbpilot_net_2_suffix (wire)) (net "pcbpilot_net_2_q" (wire)) (net pcbpilot_net_1 (wire)))))`
+	if string(b) != want {
+		t.Fatalf("session\n got %s\nwant %s", b, want)
+	}
+	if got := a.realText("pcbpilot_net_2 / pcbpilot_net_2_suffix"); got != "/A B / pcbpilot_net_2_suffix" {
+		t.Fatalf("realText %q", got)
+	}
+}
+
+// KiCad's DSN spelling round-trips byte for byte: an embedded " written as
+// two apostrophes, single quotes, = # * ? and a literal backslash, bare or quoted.
+func TestFastrouteNetAliasesKiCadQuoting(t *testing.T) {
+	names := []string{`/He said "hi" \ x`, `/it's (1/2)/B`, `/E=mc#2`, `/A*?`}
+	dsn := `(pcb x (parser (string_quote ")) (network (net "/He said ''hi'' \ x" (pins U1-1)) (net "/it's (1/2)/B" (pins U1-2)) (net /E=mc#2 (pins U1-3)) (net /A*? (pins U1-4))
+ (class c "/He said ''hi'' \ x" /E=mc#2)) (wiring (wire (path F.Cu 1 0 0 1 0) (net "/it's (1/2)/B"))))`
+	a := newFastrouteNetAliases(names, dsn)
+	out, err := a.apply(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "said") || strings.Contains(out, "it's") || strings.Contains(out, "mc#2") || strings.Contains(out, "/A*?") {
+		t.Fatalf("aliased DSN keeps a name:\n%s", out)
+	}
+	if !strings.Contains(out, `(string_quote ")`) {
+		t.Fatal("string_quote damaged")
+	}
+	var ses strings.Builder
+	ses.WriteString("(session (routes (network_out")
+	for _, n := range names {
+		ses.WriteString(` (net "` + a.name(n) + `" (wire))`)
+	}
+	ses.WriteString(")))")
+	dir := t.TempDir()
+	p := filepath.Join(dir, "s.ses")
+	_ = os.WriteFile(p, []byte(ses.String()), 0o644)
+	if err := a.unaliasSession(p, p+".r"); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(p + ".r")
+	want := `(session (routes (network_out (net "/He said ''hi'' \ x" (wire)) (net "/it's (1/2)/B" (wire)) (net /E=mc#2 (wire)) (net /A*? (wire)))))`
+	if string(b) != want {
+		t.Fatalf("session\n got %s\nwant %s", b, want)
+	}
+	for _, at := range dsnAtoms(want) {
+		if at.netID && dsnDecode(at.raw) != "" {
+			found := false
+			for _, n := range names {
+				found = found || dsnDecode(at.raw) == n
+			}
+			if !found {
+				t.Fatalf("decoded %q is no real name", dsnDecode(at.raw))
+			}
+		}
+	}
+}
