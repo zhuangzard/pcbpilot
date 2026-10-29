@@ -4,7 +4,7 @@ description: "用 pcbpilot 离线绘制、修改与检查 KiCad 原理图：写�
 license: MIT
 metadata:
   author: "zhuangzard (pcbpilot); original easyeda-agent by zhoushoujianwork"
-  version: "0.12.1"
+  version: "0.12.2"
   homepage: "https://github.com/zhuangzard/pcbpilot"
 ---
 
