@@ -94,7 +94,9 @@ func TestSchEditKeepsLCSCFootprints(t *testing.T) {
 	has(cp, "sch-read → sch-build")
 
 	// the footprint gone from the cache and the project: the own library
-	// cannot resolve — the ERC gate fails and nothing is written
+	// cannot resolve — the build fails (since v0.12.1 already at the
+	// footprint check, FOOTPRINT_NOT_FOUND, before ERC would) and nothing
+	// is written
 	_ = os.Remove(filepath.Join(kicad.LCSCCacheDir("C99901"), mod))
 	_ = os.Remove(filepath.Join(out, mod))
 	before, _ := os.ReadFile(filepath.Join(out, "lc.kicad_sch"))
@@ -105,7 +107,8 @@ func TestSchEditKeepsLCSCFootprints(t *testing.T) {
 	}
 	opt.DiscardExternal = true
 	er, err = runSchEdit(opt, []sbOp{{Op: "set_value", Ref: "R1", Value: "3k3"}})
-	if er == nil || er.OK || sbGateStatus(er, "erc") != "fail" {
+	specErr := err != nil && strings.Contains(err.Error(), "FOOTPRINT_NOT_FOUND") && strings.Contains(err.Error(), "lcsc:TFP_0603")
+	if !specErr && (er == nil || er.OK || sbGateStatus(er, "erc") != "fail") {
 		t.Errorf("unresolvable own footprint library accepted: err=%v report=%+v", err, er)
 	}
 	if after, _ := os.ReadFile(filepath.Join(out, "lc.kicad_sch")); string(after) != string(before) {
@@ -331,5 +334,51 @@ func TestSbFootprintLibsExternal(t *testing.T) {
 	st = sbResolveStats{}
 	if got := sbFPDiagCodes(parts("nolib:X"), &st); len(got) != 0 || len(st.Notes) != 1 {
 		t.Errorf("uninspectable: want one note, got %v notes %v", got, st.Notes)
+	}
+}
+
+// TestSchBuildLCSCNicknameNotSkipped: "lcsc:FOO" is not exempt from the
+// footprint check by its nickname. On a part whose symbol is not from LCSC
+// the footprint comes from an LCSC import of this build (exactly that
+// footprint), else from lcsc.pretty under libDirs — shipped and registered
+// either way — and one found nowhere fails the build.
+func TestSchBuildLCSCNicknameNotSkipped(t *testing.T) {
+	sbNeedKicad(t)
+	t.Setenv(kicad.EnvCacheDir, t.TempDir())
+	sbFakeLCSCPart(t, "C99903", "TCAP3", "TFP_IMPORTED")
+	libs := t.TempDir()
+	sbFakeFootprintLib(t, libs, "lcsc", "TFP_LIBDIR")
+	spec := func(fpR1, fpR2 string) *sbSpec {
+		return &sbSpec{Name: "ln", LibDirs: []string{libs},
+			Parts: []sbPart{
+				{Ref: "C1", LCSC: "C99903", Value: "100nF"},
+				{Ref: "R1", Value: "1k", Symbol: "Device:R", Footprint: fpR1},
+				{Ref: "R2", Value: "1k", Symbol: "Device:R", Footprint: fpR2},
+			},
+			Nets: []sbNet{
+				{Name: "+3V3", Kind: "power", Pins: []string{"C1:1", "R1:1", "R2:1"}},
+				{Name: "GND", Kind: "ground", Pins: []string{"C1:2", "R1:2", "R2:2"}},
+			}}
+	}
+	out := filepath.Join(t.TempDir(), "ln")
+	res, err := runSchBuild(spec("lcsc:TFP_IMPORTED", "lcsc:TFP_LIBDIR"), sbOptions{OutDir: out, NoIntent: true, Jobs: 2, PlannerBudget: 20000}, nil)
+	if err != nil || !res.OK {
+		t.Fatalf("build: %v %+v", err, res)
+	}
+	for _, f := range []string{"lcsc.pretty/TFP_IMPORTED.kicad_mod", "lcsc.pretty/TFP_LIBDIR.kicad_mod"} {
+		if !fileExists(filepath.Join(out, filepath.FromSlash(f))) {
+			t.Errorf("%s not shipped", f)
+		}
+	}
+	if tbl, _ := os.ReadFile(filepath.Join(out, "fp-lib-table")); !strings.Contains(string(tbl), `"${KIPRJMOD}/lcsc.pretty"`) {
+		t.Errorf("lcsc not registered:\n%s", tbl)
+	}
+	bad := filepath.Join(t.TempDir(), "bad")
+	_, err = runSchBuild(spec("lcsc:TFP_IMPORTED", "lcsc:TFP_NOWHERE"), sbOptions{OutDir: bad, NoIntent: true, Jobs: 2}, nil)
+	if err == nil || !strings.Contains(err.Error(), "FOOTPRINT_NOT_FOUND") || !strings.Contains(err.Error(), "lcsc:TFP_NOWHERE") {
+		t.Errorf("an lcsc footprint found nowhere must fail the build: %v", err)
+	}
+	if fileExists(filepath.Join(bad, "ln.kicad_sch")) {
+		t.Error("the failed build wrote the project")
 	}
 }
