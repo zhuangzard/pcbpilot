@@ -33,7 +33,12 @@ type ZoneFill struct {
 	// no placement can be legal; above ZoneTightFill packing rarely
 	// succeeds).
 	OfferMm2 float64 `json:"offerMm2"`
-	Fill     float64 `json:"fill"`
+	// Fill is null when the zone offers no usable area at all.
+	Fill *float64 `json:"fill"`
+	// OverFull: the parts cannot fit (fill > 1, or parts but no usable
+	// area); Tight: fill above ZoneTightFill.
+	OverFull bool `json:"overFull,omitempty"`
+	Tight    bool `json:"tight,omitempty"`
 	// Illegal counts the illegal placements (overlaps, zone exits) of its
 	// parts in the final placement.
 	Illegal int `json:"illegal,omitempty"`
@@ -109,43 +114,136 @@ func (pl *placer) resolveOverlaps() int {
 	return cleared
 }
 
-// resolveCost is what resolvePart must not worsen: every hard term but the
-// neighbour overlap (it demands none at all), each on its own.
-type resolveCost struct{ contain, iso, hv float64 }
+// resolveCost is what resolvePart must not worsen, every hard term but the
+// neighbour overlap (it demands none at all) on its own: a candidate may
+// not buy one term with another (leave its zone to clear a keep-out, or
+// open a creepage shortfall to a new pad while closing an old one).
+type resolveCost struct {
+	board, band, zoneCentre, zoneBody float64
+	keepouts, holes, heights          []float64 // per keep-out / hole / height zone, in board order
+	// gaps is every pad pair short of its isolation (creepage) or HV
+	// clearance: mil short, per pair and kind.
+	gaps map[resolveGap]float64
+}
+
+type resolveGap struct {
+	a, c *Pad
+	hv   bool
+}
 
 func (pl *placer) resolveTerms(p *Part) resolveCost {
 	bx := pl.boxes[p]
-	var c resolveCost
+	c := resolveCost{gaps: map[resolveGap]float64{}}
 	if !p.Fixed {
-		c.contain += 20 * outside(bx, pl.region)
-		c.contain += 40 * padsOutside(pl.edgeBand[p])
+		c.board = 20 * outside(bx, pl.region)
+		c.band = 40 * padsOutside(pl.edgeBand[p])
 		z := pl.zoneOf[p]
 		cen := bx.Center()
 		dx := math.Max(0, math.Max(z.MinX-cen.X, cen.X-z.MaxX))
 		dy := math.Max(0, math.Max(z.MinY-cen.Y, cen.Y-z.MaxY))
-		c.contain += 30 * (dx + dy) * math.Max(bx.W(), bx.H())
+		c.zoneCentre = 30 * (dx + dy) * math.Max(bx.W(), bx.H())
 		if !pl.c.IsBridge(p.Ref) && z != pl.region {
-			c.contain += 20 * outside(bx, z)
+			c.zoneBody = 20 * outside(bx, z)
 		}
 	}
 	for _, k := range pl.b.Keepouts {
 		if (k.NoParts || k.NoCopper) && k.Owner != p.Ref && !(pl.c.IsBridge(p.Ref) && !k.NoParts) {
-			c.contain += 20 * bx.OverlapArea(PolyBounds(k.Poly))
+			c.keepouts = append(c.keepouts, 20*bx.OverlapArea(PolyBounds(k.Poly)))
 		}
 	}
 	for _, h := range pl.b.Holes {
 		if h.Owner != p.Ref {
-			c.contain += 20 * bx.OverlapArea(h.Bounds().Expand(h.Keep))
+			c.holes = append(c.holes, 20*bx.OverlapArea(h.Bounds().Expand(h.Keep)))
 		}
 	}
 	for _, hz := range pl.m.HeightZones {
 		if p.Height > hz.MaxHeight {
-			c.contain += 20 * bx.OverlapArea(hz.Rect)
+			c.heights = append(c.heights, 20*bx.OverlapArea(hz.Rect))
 		}
 	}
-	c.iso = pl.isoCost(p, bx)
-	c.hv = pl.hvPadCost(p, bx)
+	pl.padShortfalls(p, bx, c.gaps)
 	return c
+}
+
+// padShortfalls records every pad pair of p short of its isolation
+// creepage (isoCost's pairs) or HV clearance (hvPadCost's pairs), by how
+// many mil.
+func (pl *placer) padShortfalls(p *Part, bx Rect, out map[resolveGap]float64) {
+	if pl.an == nil {
+		return
+	}
+	if iso := pl.an.Iso; iso != nil && len(iso.Pairs) > 0 {
+		pl.forBucketsOnce(bx.Expand(iso.MaxClearanceMil()), func(q *Part) bool {
+			if q == p {
+				return true
+			}
+			for _, a := range p.Pads {
+				da := iso.NetDomain[a.Net]
+				if da == "" {
+					continue
+				}
+				for _, c := range q.Pads {
+					if ip := iso.Pair(da, iso.NetDomain[c.Net]); ip != nil {
+						if short := ip.CreepageMil - isoPadGap(a, c, ip.CreepageMil); short > 0 {
+							out[resolveGap{a, c, false}] = short
+						}
+					}
+				}
+			}
+			return true
+		})
+	}
+	if pl.hvReach > 0 {
+		base := pl.b.Rules.Clearance
+		pl.forBucketsOnce(bx.Expand(pl.hvReach), func(q *Part) bool {
+			if q == p {
+				return true
+			}
+			for _, a := range p.Pads {
+				if a.Net == "" {
+					continue
+				}
+				for _, c := range q.Pads {
+					if c.Net == "" || c.Net == a.Net {
+						continue
+					}
+					req := pl.an.PairClearanceMil(a.Net, c.Net, pl.b.Rules)
+					if req <= base+hvExcessMil {
+						continue
+					}
+					if short := req - isoPadGap(a, c, req); short > 0 {
+						out[resolveGap{a, c, true}] = short
+					}
+				}
+			}
+			return true
+		})
+	}
+}
+
+// noWorse reports whether every term of t is at most the same term of
+// before (1e-6 slack): the board, the edge band, the zone (a part inside
+// its zone stays inside), each keep-out, hole and height zone, and each
+// pad pair's isolation or HV shortfall — a pair short now must have been
+// short by as much before.
+func (t resolveCost) noWorse(before resolveCost) bool {
+	const eps = 1e-6
+	if t.board > before.board+eps || t.band > before.band+eps || t.zoneCentre > before.zoneCentre+eps || t.zoneBody > before.zoneBody+eps {
+		return false
+	}
+	for _, l := range [][2][]float64{{t.keepouts, before.keepouts}, {t.holes, before.holes}, {t.heights, before.heights}} {
+		for i, v := range l[0] {
+			if i >= len(l[1]) || v > l[1][i]+eps {
+				return false
+			}
+		}
+	}
+	for k, v := range t.gaps {
+		if v > before.gaps[k]+eps {
+			return false
+		}
+	}
+	return true
 }
 
 // courtyardClear reports whether body (grown by half the courtyard gap)
@@ -198,7 +296,7 @@ func (pl *placer) resolvePart(p *Part, stop time.Time) bool {
 					off := rel.Translate(p.Pos).Center().Sub(p.Pos)
 					pos := c.Sub(off)
 					body := rel.Translate(pos)
-					if !pl.courtyardClear(p, body) || pl.zoneBound(sc, body.Expand(halo)) > before.contain+1e-6 {
+					if !pl.courtyardClear(p, body) || !pl.zoneNoWorse(sc, body.Expand(halo), before) {
 						p.Pos, p.Rotation = pos, nrot
 						continue
 					}
@@ -208,8 +306,7 @@ func (pl *placer) resolvePart(p *Part, stop time.Time) bool {
 				if !pl.courtyardClear(p, p.Body()) {
 					continue
 				}
-				t := pl.resolveTerms(p)
-				if t.contain > before.contain+1e-6 || t.iso > before.iso+1e-6 || t.hv > before.hv+1e-6 {
+				if !pl.resolveTerms(p).noWorse(before) {
 					continue
 				}
 				if cost := pl.localCost(p, nil); cost < best {
@@ -228,15 +325,15 @@ func (pl *placer) resolvePart(p *Part, stop time.Time) bool {
 	return found
 }
 
-// zoneBound is the board and zone containment of the part were its box bx
-// (a lower bound of resolveTerms' contain: the pad band, keep-outs and
-// holes only add).
-func (pl *placer) zoneBound(sc *spiralCtx, bx Rect) float64 {
+// zoneNoWorse is resolveCost.noWorse's board and zone terms for a box bx
+// (no pads needed): the cheap first test of a candidate.
+func (pl *placer) zoneNoWorse(sc *spiralCtx, bx Rect, before resolveCost) bool {
 	if sc.p.Fixed {
-		return 0
+		return true
 	}
 	t1, t3, t4 := pl.zoneTerms(sc, bx)
-	return t1 + t3 + t4
+	const eps = 1e-6
+	return t1 <= before.board+eps && t3 <= before.zoneCentre+eps && t4 <= before.zoneBody+eps
 }
 
 // zoneFill measures every placement zone's room (ZoneFill) and counts the
@@ -312,7 +409,11 @@ func (pl *placer) zoneFill(res *PlaceResult, pairs [][2]*Part) []ZoneFill {
 		k.fill.OfferMm2 = math.Round(offer*mil2ToMm2*10) / 10
 		k.fill.FixedMm2 = math.Round(k.fixed*mil2ToMm2*10) / 10
 		if offer > 0 {
-			k.fill.Fill = math.Round(k.need/offer*100) / 100
+			f := math.Round(k.need/offer*100) / 100
+			k.fill.Fill = &f
+			k.fill.OverFull, k.fill.Tight = k.need > offer, f > ZoneTightFill
+		} else {
+			k.fill.OverFull = k.need > 0
 		}
 		for _, pr := range pairs {
 			if k.parts[pr[0]] || k.parts[pr[1]] {

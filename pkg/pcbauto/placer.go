@@ -352,12 +352,12 @@ func Place(b *Board, an *Analysis, c *Circuit, m *Mechanics, opt PlaceOptions) (
 	res.ZoneFill = pl.zoneFill(res, pairs)
 	for _, z := range res.ZoneFill {
 		switch {
-		case z.Fill > 1:
+		case z.OverFull:
 			res.Notes = append(res.Notes, sprintf("zone %s is over-full: its parts need %.0f mm² (fixed parts %.0f), the zone offers %.0f mm² (%d illegal) — enlarge the zone or move parts out of it", z.Domain, z.NeedMm2, z.FixedMm2, z.OfferMm2, z.Illegal))
-		case z.Fill > ZoneTightFill && z.Illegal > 0:
-			res.Notes = append(res.Notes, sprintf("zone %s is practically full: its parts need %.0f mm² (fixed parts %.0f) of the %.0f mm² it offers (fill %.2f, %d illegal) — enlarge the zone or move parts out of it", z.Domain, z.NeedMm2, z.FixedMm2, z.OfferMm2, z.Fill, z.Illegal))
-		case z.Illegal > 0:
-			res.Notes = append(res.Notes, sprintf("zone %s: %d illegal placement(s) although it has room (parts need %.0f mm² of %.0f mm², fill %.2f): a local conflict (isolation, keep-out or a fixed part) the placer could not clear — see illegal", z.Domain, z.Illegal, z.NeedMm2, z.OfferMm2, z.Fill))
+		case z.Tight && z.Illegal > 0:
+			res.Notes = append(res.Notes, sprintf("zone %s is practically full: its parts need %.0f mm² (fixed parts %.0f) of the %.0f mm² it offers (fill %.2f, %d illegal) — enlarge the zone or move parts out of it", z.Domain, z.NeedMm2, z.FixedMm2, z.OfferMm2, *z.Fill, z.Illegal))
+		case z.Illegal > 0 && z.Fill != nil:
+			res.Notes = append(res.Notes, sprintf("zone %s: %d illegal placement(s) although it has room (parts need %.0f mm² of %.0f mm², fill %.2f): a local conflict (isolation, keep-out or a fixed part) the placer could not clear — see illegal", z.Domain, z.Illegal, z.NeedMm2, z.OfferMm2, *z.Fill))
 		}
 	}
 	if pl.budgetHit != "" {
