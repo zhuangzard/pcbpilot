@@ -50,8 +50,11 @@ type sbSpec struct {
 	UnusedPins string `json:"unusedPins,omitempty"`
 	// ZoneOrder: "flow" (default: connectors → regulators → controller →
 	// peripherals) or "spec" (the zones list order).
-	ZoneOrder string   `json:"zoneOrder,omitempty"`
-	LibDirs   []string `json:"libDirs,omitempty"`
+	ZoneOrder string `json:"zoneOrder,omitempty"`
+	// LibDirs: symbol / footprint library directories. A relative entry is
+	// relative to the spec file's directory (loadSbSpec makes it absolute),
+	// not to the working directory.
+	LibDirs []string `json:"libDirs,omitempty"`
 	// Intent is passed to `intent derive --spec` (standard, layers, rules …);
 	// rails/net voltage+current from this spec are merged into its rails.
 	Intent json.RawMessage `json:"intent,omitempty"`
@@ -160,6 +163,15 @@ func loadSbSpec(path string) (*sbSpec, error) {
 	}
 	if s.Schema != "" && s.Schema != sbSchema {
 		return nil, fmt.Errorf("%s: schema %q, want %q", path, s.Schema, sbSchema)
+	}
+	specDir, err := filepath.Abs(filepath.Dir(path))
+	if err != nil {
+		return nil, err
+	}
+	for i, d := range s.LibDirs {
+		if d != "" && !filepath.IsAbs(d) {
+			s.LibDirs[i] = filepath.Join(specDir, d)
+		}
 	}
 	return &s, nil
 }

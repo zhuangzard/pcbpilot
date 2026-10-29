@@ -1380,3 +1380,29 @@ func TestSchBuildPlannerBudgetHonest(t *testing.T) {
 		t.Errorf("--no-planner build must not suggest --no-planner: %v %+v", err, rep.Error)
 	}
 }
+
+// A relative libDirs entry is relative to the spec file, not to the working
+// directory; an absolute one is kept.
+func TestLoadSbSpecLibDirsRelativeToSpec(t *testing.T) {
+	root := t.TempDir()
+	specDir := filepath.Join(root, "design", "specs")
+	abs := filepath.Join(root, "shared", "libs")
+	if err := os.MkdirAll(specDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	blob, _ := json.Marshal(map[string]any{"schema": sbSchema, "name": "t", "parts": []any{},
+		"libDirs": []string{"../lib", "mylib.pretty", abs}})
+	spec := filepath.Join(specDir, "board.json")
+	if err := os.WriteFile(spec, blob, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root) // a working directory that is not the spec's
+	s, err := loadSbSpec(filepath.Join("design", "specs", "board.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{filepath.Join(root, "design", "lib"), filepath.Join(specDir, "mylib.pretty"), abs}
+	if strings.Join(s.LibDirs, "|") != strings.Join(want, "|") {
+		t.Fatalf("libDirs %v, want %v", s.LibDirs, want)
+	}
+}

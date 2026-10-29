@@ -77,7 +77,7 @@ pcbpilot kicad sch-checkpoint list --project build/                     # 回退
 - **planner 预算**（v0.12.1）：`--planner-timeout` 是整个布局阶段的一个截止点（含分页重排），只阻止新的 planner 启动；
   已启动的跑完候选上限，所以大 spec 可能超时，`warnings` 会写明。大 spec（几百个区）质量/EG 门禁失败、`error.fix`
   提示 `--no-planner` 时，先用 `--no-planner` 重建一次（实测上千件的大板：planner 布局超时三倍且 EG-08 失败，网格几秒内通过）。
-- **项目封装库**（v0.12.1）：`"footprint": "mylib:FOO"` 的 `mylib.pretty` 放在 spec `libDirs` 列的目录下（或直接列
+- **项目封装库**（v0.12.1）：`"footprint": "mylib:FOO"` 的 `mylib.pretty` 放在 spec `libDirs` 列的目录下（相对路径相对 spec 文件所在目录，不是当前目录；绝对路径原样；或直接列
   `…/mylib.pretty`），不论符号来自 LCSC / 自带库 / pins，都会随工程复制并登记进 `fp-lib-table`（`${KIPRJMOD}`）。
   找不到 → `FOOTPRINT_LIB_NOT_FOUND`（构建失败，不再静默）。不要手改 `fp-lib-table`：每次 sch-build / sch-edit 都会重写它。
 
