@@ -89,11 +89,32 @@ var kicadSiblings = []string{".kicad_pcb", ".kicad_pro", ".kicad_dru"}
 // copyKicadBoard copies src (+ its .kicad_pro / .kicad_dru when present)
 // to dst (a .kicad_pcb path) and reports whether a .kicad_pro came along.
 func copyKicadBoard(src, dst string) (hasPro bool, err error) {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return false, fmt.Errorf("copy %s: %w", src, err)
+	}
+	if err := os.WriteFile(dst, data, 0o644); err != nil {
+		return false, err
+	}
+	return copyKicadSidecars(src, dst)
+}
+
+// copyKicadSidecars copies the files beside board src that its rules live
+// in — the .kicad_pro (net classes, board setup) and the .kicad_dru
+// (custom rules: intent clearances, creepage, track floors) — next to dst
+// under dst's base name, and removes a stale one at dst when src has none.
+// Reports whether a .kicad_pro came along. For a board pcbnew wrote
+// elsewhere (kicad place --out), so the placed board keeps its rules.
+func copyKicadSidecars(src, dst string) (hasPro bool, err error) {
 	sb, db := strings.TrimSuffix(src, ".kicad_pcb"), strings.TrimSuffix(dst, ".kicad_pcb")
-	for _, ext := range kicadSiblings {
+	if sb == db {
+		_, err := os.Stat(sb + ".kicad_pro")
+		return err == nil, nil
+	}
+	for _, ext := range kicadSiblings[1:] {
 		data, err := os.ReadFile(sb + ext)
 		if err != nil {
-			if ext != ".kicad_pcb" && os.IsNotExist(err) {
+			if os.IsNotExist(err) {
 				_ = os.Remove(db + ext)
 				continue
 			}

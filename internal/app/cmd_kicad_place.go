@@ -85,8 +85,11 @@ of --place-seeds seeds) and writes the poses back with pcbnew:
   Y.report.json                        metrics per seed, labelBlocked, loopIR
 
 --mech constrains the model only (fixed / edge parts, keep-outs, zones,
-holes); the board outline and holes in the written file stay KiCad's.
-Locked footprints and mounting holes stay put, and so do footprints whose
+holes, in mm from the KiCad outline's lower-left corner); the board outline
+and holes in the written file stay KiCad's. A --mech board size must match
+the KiCad outline (0.1 mm) unless board.replaceOutline is set.
+The input's .kicad_pro and .kicad_dru (net classes, custom rules) are
+copied beside every written board. Locked footprints and mounting holes stay put, and so do footprints whose
 designator is shared (two H1) or a placeholder (empty, REF**, G***, R?): they are
 fixed obstacles, listed in the report notes. Moving parts invalidates the
 copper: tracks and vias are removed and zones unfilled in the output.
@@ -195,8 +198,11 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 		}
 		slices.Sort(rep.Fixed)
 		rep.Mechanics = mc
-		if len(mech.Board.Outline) >= 3 || mech.Board.Width > 0 {
-			rep.Notes = append(rep.Notes, "--mech outline constrains the model only; the written board keeps its KiCad Edge.Cuts")
+		switch {
+		case (len(mech.Board.Outline) >= 3 || mech.Board.Width > 0) && mech.Board.ReplaceOutline:
+			rep.Notes = append(rep.Notes, "--mech board.replaceOutline: the model uses the --mech outline at the KiCad outline's lower-left corner; the written board keeps its KiCad Edge.Cuts")
+		case len(mech.Board.Outline) >= 3 || mech.Board.Width > 0:
+			rep.Notes = append(rep.Notes, "--mech board matches the KiCad outline: kept; --mech coordinates count from its lower-left corner")
 		}
 	}
 	understand := func(bc *pcbauto.Board, an *pcbauto.Analysis) (*pcbauto.Circuit, error) {
@@ -265,6 +271,9 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 	if err := os.MkdirAll(filepath.Dir(o.out), 0o755); err != nil {
 		return nil, err
 	}
+	if n := kicadPlaceLibNote(o.pcb, o.out); n != "" {
+		rep.Notes = append(rep.Notes, n)
+	}
 	for _, t := range trials {
 		s := kicadPlaceSeed{SeedTrial: t, LabelBlocked: t.Metrics.LabelBlocked}
 		if t.Err != "" {
@@ -296,7 +305,7 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 			if s.Write, err = deps.place(o.pcb, posesFromBoard(outs[i].Board, kept), s.File); err != nil {
 				return nil, err
 			}
-			if err := copyKicadPro(o.pcb, s.File); err != nil {
+			if _, err := copyKicadSidecars(o.pcb, s.File); err != nil {
 				return nil, err
 			}
 		}
@@ -655,18 +664,26 @@ func snapshotOfBoard(b *pcbauto.Board) *boardSnapshot {
 	return s
 }
 
-// copyKicadPro copies X.kicad_pro next to out (same base name): KiCad reads
-// the board's design rules and net classes from it.
-func copyKicadPro(pcb, out string) error {
-	src := strings.TrimSuffix(pcb, ".kicad_pcb") + ".kicad_pro"
-	raw, err := os.ReadFile(src)
-	if os.IsNotExist(err) {
-		return nil
+// kicadPlaceLibNote explains the project library tables a placed board in
+// another folder does without: they name ${KIPRJMOD} libraries that are
+// not there. The footprints are embedded in the board, so it opens, DRCs
+// and routes; updating footprints from the library needs the project
+// folder. "" when out shares pcb's folder or pcb has no table.
+func kicadPlaceLibNote(pcb, out string) string {
+	src, dst := filepath.Dir(mustAbs(pcb)), filepath.Dir(mustAbs(out))
+	if src == dst {
+		return ""
 	}
-	if err != nil {
-		return err
+	var have []string
+	for _, t := range []string{"fp-lib-table", "sym-lib-table"} {
+		if _, err := os.Stat(filepath.Join(src, t)); err == nil {
+			have = append(have, t)
+		}
 	}
-	return os.WriteFile(strings.TrimSuffix(out, ".kicad_pcb")+".kicad_pro", raw, 0o644)
+	if len(have) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("the placed board's folder has no %s (the project's tables point at ${KIPRJMOD} libraries in %s): footprints are embedded in the board, so DRC and routing work; to update footprints from the library, place with --out inside the project folder", strings.Join(have, " / "), src)
 }
 
 // kicadPlaceVerdict is the best seed's verdict and illegal count: the named
