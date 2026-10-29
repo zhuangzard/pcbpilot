@@ -192,23 +192,23 @@
 | 命令 | 说明 | 文档 |
 |---|---|---|
 | `kicad` | Design in KiCad: board setup (outline/stackup/holes/zones), placement, schematic sheets / import / netlist, snapshot, route + gates (fastroute), DRC gate, JLC fab output + preflight, LCSC parts | [design-flow.md](design-flow.md), [drc-triage.md](drc-triage.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad-jlc.md](kicad-jlc.md) +4 |
-| `kicad board` | Headless board setup: new board, outline/cutouts, stackup, mounting holes, keepouts, zones, text (mm) | [kicad.md](kicad.md) |
+| `kicad board` | Headless board setup: new board, outline/cutouts, stackup, mounting holes, keepouts, zones, text (mm) | [kicad-file-safety.md](kicad-file-safety.md), [kicad.md](kicad.md), [pcb-auto.md](pcb-auto.md), [recipes/mech-spec.md](recipes/mech-spec.md) |
 | `kicad board holes` | Add mounting holes (NPTH, or PTH with a pad and an optional net such as GND) | — |
 | `kicad board keepout` | Add a rule area (keepout): no tracks / vias / pads / pours / footprints on copper layers | — |
 | `kicad board new` | Create an empty board (2, 4 or 6 copper layers) and its project file | [kicad.md](kicad.md) |
-| `kicad board outline` | Draw the board outline on Edge.Cuts (rectangle with corner radius, polygon or circle) and cutouts / slots | — |
+| `kicad board outline` | Draw the board outline on Edge.Cuts (rectangle with corner radius, polygon or circle) and cutouts / slots | [kicad.md](kicad.md), [pcb-auto.md](pcb-auto.md), [recipes/mech-spec.md](recipes/mech-spec.md) |
 | `kicad board stackup` | Set copper layer count (2/4/6) and the physical stackup: copper/dielectric thickness, material, finish | — |
 | `kicad board text` | Add board text on a silkscreen or fab layer | — |
 | `kicad board zone` | Add a copper pour (net, layers, clearance, thermals, priority) and fill it with pcbnew | — |
-| `kicad drc` | KiCad DRC as a tri-state gate: owners per violation, project exclusions policy, new-vs-baseline (JSON, exit 0/6/5) | [kicad-file-safety.md](kicad-file-safety.md), [kicad-jlc.md](kicad-jlc.md), [kicad.md](kicad.md) |
+| `kicad drc` | KiCad DRC as a tri-state gate: owners per violation, project exclusions policy, new-vs-baseline (JSON, exit 0/6/5) | [kicad-file-safety.md](kicad-file-safety.md), [kicad-jlc.md](kicad-jlc.md), [kicad.md](kicad.md), [pcb-auto.md](pcb-auto.md) |
 | `kicad fab` | Export JLCPCB manufacturing files (Gerber+drill zip, BOM, CPL) with kicad-cli | [SKILL.md](../SKILL.md), [evidence-and-verdicts.md](evidence-and-verdicts.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad-jlc.md](kicad-jlc.md) +3 |
 | `kicad lcsc` | Check, write or search LCSC (JLC) part numbers on a KiCad design | [SKILL.md](../SKILL.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad-jlc.md](kicad-jlc.md), [kicad-sch-build.md](kicad-sch-build.md) +2 |
 | `kicad netlist` | Schematic connectivity JSON (the IR intent derive and pad-net-diff read) from a .kicad_sch | [SKILL.md](../SKILL.md), [evidence-and-verdicts.md](evidence-and-verdicts.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad.md](kicad.md) +2 |
 | `kicad pcb-sync` | Update PCB from Schematic, headless: add / swap / update / re-net footprints from the schematic, verified | [kicad-jlc.md](kicad-jlc.md), [kicad.md](kicad.md) |
-| `kicad place` | Place a KiCad board's footprints with the pcbauto placer (best of several seeds) | [SKILL.md](../SKILL.md), [drc-triage.md](drc-triage.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad.md](kicad.md) +2 |
+| `kicad place` | Place a KiCad board's footprints with the pcbauto placer (best of several seeds) | [SKILL.md](../SKILL.md), [drc-triage.md](drc-triage.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad.md](kicad.md) +3 |
 | `kicad render` | Deterministic SVG previews of a KiCad schematic / board, and a structural compare against a baseline render | [kicad-file-safety.md](kicad-file-safety.md), [kicad.md](kicad.md) |
-| `kicad route` | Route and gate a .kicad_pcb like pcb auto route: review → intent netclasses → fastroute → via arrays / widen / pours / silk → every gate → IR closure → report → release review | [SKILL.md](../SKILL.md), [board-manual.md](board-manual.md), [drc-triage.md](drc-triage.md), [evidence-and-verdicts.md](evidence-and-verdicts.md) +6 |
-| `kicad rules` | Design intent + simulation → KiCad netclasses, .kicad_dru rules and pre-defined sizes, verified with KiCad (plan / apply / check) | [kicad.md](kicad.md) |
+| `kicad route` | Route and gate a .kicad_pcb like pcb auto route: review → intent netclasses → fastroute → via arrays / widen / pours / silk → every gate → IR closure → report → release review | [SKILL.md](../SKILL.md), [board-manual.md](board-manual.md), [design-intent.md](design-intent.md), [drc-triage.md](drc-triage.md) +7 |
+| `kicad rules` | Design intent + simulation → KiCad netclasses, .kicad_dru rules and pre-defined sizes, verified with KiCad (plan / apply / check) | [design-intent.md](design-intent.md), [kicad-file-safety.md](kicad-file-safety.md), [kicad.md](kicad.md) |
 | `kicad sch-build` | Build a complete, gate-checked KiCad schematic project from one design spec (one call, seconds) | [SKILL.md](../SKILL.md), [design-flow.md](design-flow.md), [evidence-and-verdicts.md](evidence-and-verdicts.md), [kicad-file-safety.md](kicad-file-safety.md) +2 |
 | `kicad sch-check` | Schematic hard gate on KiCad: kicad-cli ERC + pcbpilot quality checks, --review design audit (JSON, non-zero on fail) | [SKILL.md](../SKILL.md), [design-intent.md](design-intent.md), [drc-triage.md](drc-triage.md), [evidence-and-verdicts.md](evidence-and-verdicts.md) +4 |
 | `kicad sch-checkpoint` | List or restore the checkpoints kicad sch-build / sch-edit saved | [kicad-file-safety.md](kicad-file-safety.md), [kicad-sch-build.md](kicad-sch-build.md) |
@@ -651,4 +651,4 @@
 | `workflow reset` | Clear deprecated checklist entries (or --all) | — |
 | `workflow status` | Show deprecated checklist state; --reconcile compares it with the live document | [pcb-layout.md](pcb-layout.md) |
 
-共 433 条命令，其中 94 条尚无参考提到。
+共 433 条命令，其中 93 条尚无参考提到。
