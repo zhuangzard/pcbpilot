@@ -489,7 +489,16 @@ pcbpilot kicad route --pcb board-b-v5a.kicad_pcb --intent intent.json --sim sim.
    （`no_neckdown`），显式差分对带间距/偏斜。`both`：两个后端同时跑，**先「完整 + 无新增 DRC 错误」的胜出并取消另一个**，胜出者仍要过
    本次运行的全部门禁；任一门禁失败就换下一个（被取消的会重跑），全都不过则按最少未布通/新增 DRC 的那个报告失败。
    `summary.routerCandidates` 记录每个后端的未布通数、用时、快检结果、是否过全量门禁。任何门禁、签核都不因后端而减少。
-3. **fastroute**：一条 `runFastroute`（续跑、崩溃单线程重试）。`--multi-start`（默认 4）是 pcbpilot 设置：fastroute 自己
+3. **fastroute 时限与部分结果**：`--max-time` 不给时按板子算（10 min + 每条连接 0.3 s，最多 40 min，写进
+   `summary.routerTime`）；显式 `--max-time 0` 才是不限时。到点 fastroute 自己写最好结果；再过一个宽限（max-time/10，
+   1–5 min）pcbpilot 发 Ctrl+Break（Unix 为 SIGINT），2 min 后仍不退出就杀掉；`--router-timeout` 没给时自动抬到
+   max-time + 两个宽限。被杀、没写报告但有 checkpoint `.ses` 的一轮记为 `partial`：照样导入这块部分布线的板，
+   `route-complete` 按板上铜的连通性数未布通，且**一定 fail**（不是 pass），其余门禁照常跑。
+   **网名**：fastroute 的 `--pairs` / `--tune` 文件按空白切分、不认引号（0.1.14 实测 `"A B"`、`'A B'`、`A\ B` 都会拆开），
+   tune 里 `*` 是通配。层次网名带空格（页标题、自动分页的 " (1/2)"）、引号、`=`、`#`、`*` 的差分对 / 长度组网，
+   只在 fastroute 读的那份 DSN（`route.fastroute.dsn`）里改名为 `pcbpilot_net_N`，pairs / tune 写别名，fastroute 写回的
+   session 换回真名（`.names.ses`）再导入；报告里的未布通网名也换回真名。KiCad 板、`route.dsn` 和 TraceMaker（JSON 约束）不受影响。
+   一条 `runFastroute`（续跑、崩溃单线程重试）。`--multi-start`（默认 4）是 pcbpilot 设置：fastroute 自己
    并行重跑 N−1 个不同种子的第 1 轮网序、按（未布通、冲突、−分数）取最好，pcbpilot 不再叠第二层并行。同一 DSN + 同一参数
    结果逐字节相同（Board-A：3 次 `--multi-start=1`、2 次 `--multi-start=4` 的 SES 完全一致）。优化器默认关（`--optimizer`
    打开，`--optimizer-threshold`）：它的预算等于整个布线阶段（含 multi-start，至少 60 s）——Board-A `--multi-start=4`

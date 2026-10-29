@@ -149,7 +149,7 @@ func (r *kicadRun) fastrouteCandidate(classed, dsnPath string) *routeCandidate {
 		if err != nil {
 			return nil, err
 		}
-		last := lastOK(runs)
+		last := lastUsable(runs)
 		if last == nil {
 			return nil, fmt.Errorf("fastroute produced no usable result")
 		}
@@ -162,7 +162,7 @@ func (r *kicadRun) fastrouteCandidate(classed, dsnPath string) *routeCandidate {
 	c.commit = func(res *routeResult) (string, error) {
 		r.summary["router"], r.summary["routerRuns"] = routerFastroute, runs
 		r.summary["routerSettings"] = map[string]any{"multiStart": o.fo.multiStart, "threads": o.fo.threads, "optimizer": !o.fo.noOptimizer, "optimizerThresholdPct": o.fo.optThreshold}
-		if last := lastOK(runs); last != nil {
+		if last := lastUsable(runs); last != nil {
 			r.summary["routeFinal"] = last
 			if last.Blocked > 0 {
 				r.summary["blockedConnections"] = last.BlockedList

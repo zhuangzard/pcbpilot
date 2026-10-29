@@ -828,6 +828,41 @@ type fastrouteOpts struct {
 	maxTime      time.Duration
 	rounds       int
 	timeout      time.Duration
+	// aliases: nets renamed for fastroute's files (fastroute_names.go);
+	// the session it returns is written back with the real names.
+	aliases *fastrouteNetAliases
+	// stopGrace: how long after its own --max-time fastroute may take to
+	// stop before pcbpilot asks it to (Ctrl+Break / SIGINT); killGrace how
+	// long it then gets to write its best board before it is killed. 0 =
+	// the defaults (fastrouteStopGrace, fastrouteKillGrace).
+	stopGrace, killGrace time.Duration
+}
+
+// fastroute's own --max-time stop can take long on a large board (a
+// 1443-part board was still "finishing" 15 min after it); pcbpilot asks
+// it to stop this long after --max-time, then kills it after the kill
+// grace. A killed run's last checkpoint session is still used (partial).
+var (
+	fastrouteStopGrace = func(maxTime time.Duration) time.Duration {
+		return min(max(maxTime/10, time.Minute), 5*time.Minute)
+	}
+	fastrouteKillGrace = 2 * time.Minute
+)
+
+// fastrouteDeadline is how long one run may take in all: the hard
+// --router-timeout, or --max-time + the stop grace when that is earlier.
+func fastrouteDeadline(o fastrouteOpts) time.Duration {
+	d := o.timeout
+	if o.maxTime > 0 {
+		g := o.stopGrace
+		if g <= 0 {
+			g = fastrouteStopGrace(o.maxTime)
+		}
+		if d <= 0 || o.maxTime+g < d {
+			d = o.maxTime + g
+		}
+	}
+	return d
 }
 
 // fastrouteArgs builds one fastroute invocation.
@@ -878,8 +913,11 @@ type fastrouteRun struct {
 	Seconds    float64 `json:"seconds"`
 	Unrouted   int     `json:"unrouted"`
 	Violations int     `json:"violations"`
-	// Status is ok | crashed | timeout. A run whose report could not be read
-	// has unknown counts (-1), never 0.
+	// Status is ok | crashed | timeout | partial. A run whose report could
+	// not be read has unknown counts (-1), never 0. partial: stopped or
+	// killed at its time limit without a report, but with a session (its
+	// last checkpoint) — usable, never complete; the board's own copper
+	// connectivity counts what is left unrouted.
 	Status string `json:"status"`
 	Error  string `json:"error,omitempty"`
 	// Retry marks the single-threaded rerun after a crash.
@@ -986,6 +1024,40 @@ func readFastrouteReport(path string, milPerUnit float64) (frReport, error) {
 // Board-B v9) is repeated once single-threaded; its counts are unknown
 // until a report exists. It returns the last good session.
 func runFastroute(o fastrouteOpts, dsn, base string, stderr io.Writer) (string, []fastrouteRun, error) {
+	if !o.aliases.empty() {
+		// fastroute reads a copy of the DSN with the aliased nets renamed;
+		// everything else keeps the real DSN.
+		b, err := os.ReadFile(dsn)
+		if err != nil {
+			return "", nil, err
+		}
+		text, err := o.aliases.apply(string(b))
+		if err != nil {
+			return "", nil, fmt.Errorf("fastroute net aliases: %w", err)
+		}
+		dsn = strings.TrimSuffix(dsn, ".dsn") + ".fastroute.dsn"
+		if err := os.WriteFile(dsn, []byte(text), 0o644); err != nil {
+			return "", nil, err
+		}
+	}
+	ses, runs, err := runFastrouteRounds(o, dsn, base, stderr)
+	if err != nil || ses == "" || o.aliases.empty() {
+		return ses, runs, err
+	}
+	// The session names the aliased nets by their aliases: the copy that is
+	// imported carries the real names.
+	real := strings.TrimSuffix(ses, ".ses") + ".names.ses"
+	if err := o.aliases.unaliasSession(ses, real); err != nil {
+		return "", runs, fmt.Errorf("fastroute session %s: restoring net names: %w", ses, err)
+	}
+	return real, runs, nil
+}
+
+// partialRun: a run that stopped at its time limit with a session but no
+// report (fastroute killed while finishing).
+func partialRun(r fastrouteRun) bool { return r.Status == "partial" }
+
+func runFastrouteRounds(o fastrouteOpts, dsn, base string, stderr io.Writer) (string, []fastrouteRun, error) {
 	var runs []fastrouteRun
 	initial := ""
 	for round := 0; round <= o.rounds; round++ {
@@ -1004,6 +1076,17 @@ func runFastroute(o fastrouteOpts, dsn, base string, stderr io.Writer) (string, 
 			run.Retry = true
 		}
 		runs = append(runs, run)
+		if partialRun(run) {
+			// Stopped at the time limit: no report, no counts. A previous
+			// complete round (known counts) wins; else the checkpoint is the
+			// result — imported, judged on the board, never complete.
+			if prev := lastOK(runs[:len(runs)-1]); prev != nil {
+				fmt.Fprintf(stderr, "fastroute round %d stopped at its time limit without a report (%s); using round %d\n", round, run.Error, prev.Round)
+				return prev.Session, runs, nil
+			}
+			fmt.Fprintf(stderr, "fastroute round %d stopped at its time limit without a report (%s); using its last checkpoint session %s (incomplete: the board's connectivity counts what is unrouted)\n", round, run.Error, run.Session)
+			return run.Session, runs, nil
+		}
 		if run.Status != "ok" {
 			// No trustworthy result from this round: fall back to the last
 			// good one, or fail when there is none.
@@ -1057,6 +1140,19 @@ func lastOK(runs []fastrouteRun) *fastrouteRun {
 	return nil
 }
 
+// lastUsable is lastOK, else the last partial run (a checkpoint session).
+func lastUsable(runs []fastrouteRun) *fastrouteRun {
+	if r := lastOK(runs); r != nil {
+		return r
+	}
+	for i := len(runs) - 1; i >= 0; i-- {
+		if partialRun(runs[i]) {
+			return &runs[i]
+		}
+	}
+	return nil
+}
+
 // fastrouteOnce runs fastroute once. Status ok needs a clean exit (or a
 // timeout that still wrote its report) plus a readable report and session.
 func fastrouteOnce(o fastrouteOpts, dsn, ses, report, initial string, round int, stderr io.Writer) fastrouteRun {
@@ -1067,21 +1163,28 @@ func fastrouteOnce(o fastrouteOpts, dsn, ses, report, initial string, round int,
 	if parent == nil {
 		parent = context.Background()
 	}
-	ctx, cancel := context.WithTimeout(parent, o.timeout)
+	deadline := fastrouteDeadline(o)
+	ctx, cancel := context.WithTimeout(parent, deadline)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, o.bin, args...)
 	cmd.Stdout, cmd.Stderr = stderr, stderr
 	// fastroute writes its best board when asked to stop (SIGINT on Unix,
-	// Ctrl+Break on Windows: fastroute_stop_*.go); give it time to.
+	// Ctrl+Break on Windows: fastroute_stop_*.go); give it time to, then
+	// kill it.
 	prepareFastrouteCmd(cmd, stderr)
-	cmd.WaitDelay = 30 * time.Second
+	cmd.WaitDelay = o.killGrace
+	if cmd.WaitDelay <= 0 {
+		cmd.WaitDelay = fastrouteKillGrace
+	}
 	start := time.Now()
 	err := runFastrouteCmd(cmd, stderr)
 	run := fastrouteRun{Round: round, Session: ses, Report: report, Seconds: time.Since(start).Round(time.Second).Seconds(),
 		Status: "ok", Unrouted: -1, Violations: -1, Fixable: -1}
 	switch {
+	case err != nil && ctx.Err() != nil && parent.Err() == nil:
+		run.Status, run.Error = "timeout", fmt.Sprintf("stopped by pcbpilot after %s (--max-time %s, --router-timeout %s)", deadline, o.maxTime, o.timeout)
 	case err != nil && ctx.Err() != nil:
-		run.Status, run.Error = "timeout", fmt.Sprintf("timed out after %s", o.timeout)
+		run.Status, run.Error = "timeout", "cancelled"
 	case err != nil:
 		run.Status, run.Error = "crashed", err.Error()
 	}
@@ -1090,6 +1193,18 @@ func fastrouteOnce(o fastrouteOpts, dsn, ses, report, initial string, round int,
 		rerr = fmt.Errorf("no session %s", ses)
 	}
 	if rerr != nil {
+		// Stopped at the time limit (by pcbpilot, or by fastroute's own
+		// --max-time ending without its report) with a session on disk:
+		// its last checkpoint is a usable, incomplete result.
+		if st, serr := os.Stat(ses); serr == nil && st.Size() > 0 && parent.Err() == nil &&
+			(run.Status == "timeout" || o.maxTime > 0 && time.Since(start) >= o.maxTime) {
+			run.Status = "partial"
+			if run.Error != "" {
+				run.Error += "; "
+			}
+			run.Error += "no report: " + rerr.Error()
+			return run
+		}
 		if run.Status == "ok" {
 			run.Status = "crashed"
 		}
@@ -1105,6 +1220,20 @@ func fastrouteOnce(o fastrouteOpts, dsn, ses, report, initial string, round int,
 	run.Unrouted, run.Violations, run.Fixable, run.FixableList = rep.Unrouted, rep.Violations, rep.Fixable, rep.FixableList
 	run.Blocked, run.BlockedList = rep.Blocked, rep.BlockedList
 	run.Version, run.UnroutedList, run.BlockedConns = rep.Version, rep.Conns, rep.BlockedC
+	if a := o.aliases; !a.empty() {
+		for i := range run.UnroutedList {
+			run.UnroutedList[i].Net = a.real(run.UnroutedList[i].Net)
+		}
+		for i := range run.BlockedConns {
+			run.BlockedConns[i].Net = a.real(run.BlockedConns[i].Net)
+		}
+		for i := range run.FixableList {
+			run.FixableList[i] = a.realText(run.FixableList[i])
+		}
+		for i := range run.BlockedList {
+			run.BlockedList[i] = a.realText(run.BlockedList[i])
+		}
+	}
 	return run
 }
 
@@ -1303,7 +1432,8 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 				rq.Nets, rq.Classes, rq.NewClasses, len(rq.NoNeckdown), rq.MinTraceMil)
 		}
 		if intent != nil {
-			pairs, tune := intentPairsAndTune(intent)
+			o.fo.aliases = newFastrouteNetAliases(intentRouterNets(intent), fixed)
+			pairs, tune := intentPairsAndTune(intent, o.fo.aliases)
 			base := strings.TrimSuffix(dsnPath, ".dsn")
 			if pairs != "" {
 				o.fo.pairsFile = base + "-pairs.txt"
@@ -1372,8 +1502,8 @@ func runAutorouteFlow(cfg *appConfig, window string, o autorouteOpts, summary ma
 		// The imported session's counts (after the multi-start retry): the
 		// route-complete gate of pcb auto route judges them through the
 		// router-agnostic routeResult (v18 B imported 1 unrouted silently).
-		summary["routeFinal"] = lastOK(runs)
-		rr := fastrouteResult(lastOK(runs), o.fo, dsnPath)
+		summary["routeFinal"] = lastUsable(runs)
+		rr := fastrouteResult(lastUsable(runs), o.fo, dsnPath)
 		if rr != nil && len(rr.Blocked) > 0 && escEnv != nil {
 			rr.PlacementHints = placementHints(rr.Blocked, escEnv, reqs)
 		}
@@ -1457,7 +1587,16 @@ func intentRequirements(in *designIntent) map[string]specctra.NetRequirement {
 // groups in fastroute's --pairs / --tune formats (mm). A pair with
 // maxSkewMil also becomes a length group of its two nets with that
 // tolerance. Empty strings when the intent has none.
-func intentPairsAndTune(in *designIntent) (pairs, tune string) {
+func intentPairsAndTune(in *designIntent, alias *fastrouteNetAliases) (pairs, tune string) {
+	tok := alias.name
+	groupTok := func(g string) string {
+		return strings.Map(func(r rune) rune {
+			if !fastrouteSafeName(string(r)) {
+				return '_'
+			}
+			return r
+		}, g)
+	}
 	mm := func(mil float64) string { return strconv.FormatFloat(math.Round(mil*0.0254*1000)/1000, 'f', -1, 64) }
 	var pb, tb strings.Builder
 	seen := map[string]bool{}
@@ -1472,7 +1611,7 @@ func intentPairsAndTune(in *designIntent) (pairs, tune string) {
 			}
 			if !seen[a+"|"+b] {
 				seen[a+"|"+b] = true
-				fmt.Fprintf(&pb, "pair %s %s", a, b)
+				fmt.Fprintf(&pb, "pair %s %s", tok(a), tok(b))
 				if n.PairGapMil > 0 {
 					fmt.Fprintf(&pb, " gap=%s", mm(n.PairGapMil))
 				}
@@ -1505,13 +1644,13 @@ func intentPairsAndTune(in *designIntent) (pairs, tune string) {
 		if len(groups[g]) < 2 {
 			continue
 		}
-		fmt.Fprintf(&tb, "group %s", g)
+		fmt.Fprintf(&tb, "group %s", groupTok(g))
 		if tol[g] > 0 {
 			fmt.Fprintf(&tb, " tolerance=%s", mm(tol[g]))
 		}
 		tb.WriteString("\n")
 		for _, n := range groups[g] {
-			fmt.Fprintf(&tb, "  %s\n", n)
+			fmt.Fprintf(&tb, "  %s\n", tok(n))
 		}
 	}
 	return pb.String(), tb.String()
