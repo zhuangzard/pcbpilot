@@ -247,3 +247,50 @@ func TestHardBoundNeverPrunesAnAcceptedPose(t *testing.T) {
 		t.Skip("no movable part")
 	}
 }
+
+// A fixed part inside a strip takes that strip's room: the strip widens,
+// the widths' sum stays, and both strips end at about the same fill.
+func TestSizeZonesCountsFixedPartsInside(t *testing.T) {
+	pl := testPlacer(t, "reference-4stage-compact.json")
+	var mov []*Part
+	for _, p := range pl.movable {
+		if !pl.c.IsBridge(p.Ref) {
+			mov = append(mov, p)
+		}
+	}
+	if len(mov) < 4 {
+		t.Skip("fixture lacks movable parts")
+	}
+	half := len(mov) / 2
+	da, db := &Domain{ID: "A"}, &Domain{ID: "B"}
+	for i, p := range mov {
+		if i < half {
+			da.Parts = append(da.Parts, p.Ref)
+		} else {
+			db.Parts = append(db.Parts, p.Ref)
+		}
+	}
+	// Equal split, then park one big fixed part in the left strip only.
+	ws := []float64{pl.region.W() / 2, pl.region.W() / 2}
+	big := mov[0]
+	big.Fixed = true
+	pl.movable = pl.movable[:0]
+	for _, p := range mov[1:] {
+		pl.movable = append(pl.movable, p)
+	}
+	movePartCentre(big, Point{pl.region.MinX + ws[0]/2, pl.region.Center().Y}, big.Rotation)
+	before := append([]float64(nil), ws...)
+	pl.sizeZonesByOccupancy([]*Domain{da, db}, ws)
+	if math.Abs(ws[0]+ws[1]-before[0]-before[1]) > 1e-6 {
+		t.Fatalf("widths %v changed the total %v", ws, before[0]+before[1])
+	}
+	movable := map[*Part]bool{}
+	for _, p := range pl.movable {
+		movable[p] = true
+	}
+	occA := pl.zoneOccupied(da, Rect{pl.region.MinX, pl.region.MinY, pl.region.MinX + ws[0], pl.region.MaxY}, movable)
+	occB := pl.zoneOccupied(db, Rect{pl.region.MinX + ws[0], pl.region.MinY, pl.region.MaxX, pl.region.MaxY}, movable)
+	if fa, fb := occA/ws[0], occB/ws[1]; math.Abs(fa-fb) > 0.05*math.Max(fa, fb) {
+		t.Fatalf("strips %v hold %.0f / %.0f mil² — fills per mil %.1f vs %.1f, want about equal", ws, occA, occB, fa, fb)
+	}
+}

@@ -694,6 +694,7 @@ func (pl *placer) zones(res *PlaceResult) {
 		for i, k := range ks {
 			ws[i], ds[i] = (pl.region.W()-pl.gapTotal())*k.area/total, k.d
 		}
+		pl.sizeZonesByOccupancy(ds, ws)
 		if note := pl.widenZones(ds, ws); note != "" {
 			res.Notes = append(res.Notes, note)
 		}
@@ -736,6 +737,91 @@ func (pl *placer) zones(res *PlaceResult) {
 				}
 			}
 			pl.zoneOf[p] = Rect{s.Center().X - 1, pl.region.MinY, s.Center().X + 1, pl.region.MaxY}
+		}
+	}
+}
+
+// zoneOccupied is the room a strip must hold (mil²): the courtyards plus
+// half the placement spacing of its domain's movable parts (bridges sit on
+// the isolation strip), and of every part that does not move (fixed,
+// mechanical) and every bridge — any domain — as far as it lies inside
+// the strip, plus the keep-outs and holes in it.
+// It is zoneFill's need plus the area zoneFill's offer leaves out, so a
+// strip sized by it reports the fill its neighbours report.
+func (pl *placer) zoneOccupied(d *Domain, strip Rect, movable map[*Part]bool) float64 {
+	occ := 0.0
+	for _, ref := range d.Parts {
+		if p := pl.b.Part(ref); p != nil && movable[p] && !pl.c.IsBridge(ref) {
+			occ += p.Body().Expand(pl.spacing / 2).Area()
+		}
+	}
+	r := pl.region
+	in := Rect{math.Max(strip.MinX, r.MinX), math.Max(strip.MinY, r.MinY), math.Min(strip.MaxX, r.MaxX), math.Min(strip.MaxY, r.MaxY)}
+	for _, q := range pl.b.Parts {
+		if !movable[q] || pl.c.IsBridge(q.Ref) {
+			occ += in.OverlapArea(q.Body().Expand(pl.spacing / 2))
+		}
+	}
+	for _, k := range pl.b.Keepouts {
+		if k.NoParts || k.NoCopper {
+			occ += in.OverlapArea(PolyBounds(k.Poly))
+		}
+	}
+	for _, h := range pl.b.Holes {
+		if h.Owner == "" {
+			occ += in.OverlapArea(h.Bounds().Expand(h.Keep))
+		}
+	}
+	return occ
+}
+
+// sizeZonesByOccupancy re-splits the strip widths ws (same total) in
+// proportion to what each strip must hold (zoneOccupied) instead of its
+// domain's part area alone: fixed mounting holes and mechanically placed
+// edge connectors take a strip's room without being its domain's parts —
+// on a 1443-part board one strip ended 96 % full with overlaps the
+// legaliser could not clear. Strip positions follow the widths, so the
+// split is refined a few times. A board with no fixed part, bridge,
+// keep-out or hole keeps its area-split widths unchanged.
+func (pl *placer) sizeZonesByOccupancy(doms []*Domain, ws []float64) {
+	movable := map[*Part]bool{}
+	for _, p := range pl.movable {
+		movable[p] = true
+	}
+	extra := false
+	for _, q := range pl.b.Parts {
+		if !movable[q] || pl.c.IsBridge(q.Ref) {
+			extra = true
+			break
+		}
+	}
+	extra = extra || len(pl.b.Holes) > 0
+	for _, k := range pl.b.Keepouts {
+		extra = extra || k.NoParts || k.NoCopper
+	}
+	if !extra {
+		return
+	}
+	total := 0.0
+	for _, w := range ws {
+		total += w
+	}
+	occ := make([]float64, len(ws))
+	for it := 0; it < 4; it++ {
+		x, sum := pl.region.MinX, 0.0
+		for i, d := range doms {
+			occ[i] = pl.zoneOccupied(d, Rect{x, pl.region.MinY, x + ws[i], pl.region.MaxY}, movable)
+			sum += occ[i]
+			x += ws[i]
+			if i+1 < len(doms) {
+				x += pl.barrierGap(d.ID, doms[i+1].ID)
+			}
+		}
+		if sum <= 0 {
+			return
+		}
+		for i := range ws {
+			ws[i] = total * occ[i] / sum
 		}
 	}
 }
