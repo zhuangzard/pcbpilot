@@ -117,6 +117,9 @@ type Model struct {
 	// Passives / switches / resistive parts.
 	RsOhm     float64 `json:"rsOhm,omitempty"`
 	DCROhm    float64 `json:"dcrOhm,omitempty"`
+	// Windings of a multi-winding inductor (common-mode choke): pin pairs,
+	// each a series DCR. A 4-pin inductor without it uses 1–4 / 2–3.
+	Windings [][2]string `json:"windings,omitempty"`
 	RonOhm    float64 `json:"ronOhm,omitempty"`
 	Momentary *bool   `json:"momentary,omitempty"`
 	// On is a mosfet model's state in every scenario (default true).
