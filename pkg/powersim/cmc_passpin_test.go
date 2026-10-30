@@ -72,3 +72,31 @@ func TestCMCReturnWindingBetweenGrounds(t *testing.T) {
 	near(t, "V(VIN_RAW)", res.Nets["VIN_RAW"].Voltage, 24-1.0*(0.05+0.03)-0.03, 0.01)
 	near(t, "I(L1.3)", pinCurrent(t, res, "GND_J", "L1", "3").CurrentA, 1.0, 0.01)
 }
+
+// Two chokes in a chain of grounds GND_J –L1– GND_M –L2– GND, the middle
+// one with the fewest pins: choosing a far ground per winding floated
+// GND_M twice and left GND_J and GND both on the reference, shorting the
+// chain. One reference per joined group (GND, the most pins): both
+// return windings carry the current and drop their DCR.
+func TestCMCChainedReturnWindings(t *testing.T) {
+	d := design(
+		part("J1", "", "DC24", "1:1:VIN_J", "2:2:GND_J"),
+		part("C9", "", "", "1:1:VIN_J", "2:2:GND_J"),
+		part("L1", "", "CMC", "1:1:VIN_M", "2:2:GND_M", "3:3:GND_J", "4:4:VIN_J"),
+		part("L2", "", "CMC", "1:1:VIN_RAW", "2:2:GND", "3:3:GND_M", "4:4:VIN_M"),
+		part("J2", "", "LOAD", "1:1:VIN_RAW", "2:2:GND"),
+		part("C1", "", "", "1:1:VIN_RAW", "2:2:GND"),
+		part("C2", "", "", "1:1:VIN_RAW", "2:2:GND"),
+	)
+	d.NetRole = map[string]string{"GND": "ground", "GND_J": "ground", "GND_M": "ground"}
+	out, _, err := Simulate(d, testLib(t, cmcLib), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := findResult(t, out, "typical")
+	assertKCL(t, res)
+	near(t, "V(GND_M)", res.Nets["GND_M"].Voltage, -0.03, 0.002)
+	near(t, "V(GND_J)", res.Nets["GND_J"].Voltage, -0.06, 0.002)
+	near(t, "I(L1.3)", pinCurrent(t, res, "GND_J", "L1", "3").CurrentA, 1.0, 0.01)
+	near(t, "I(L2.3)", pinCurrent(t, res, "GND_M", "L2", "3").CurrentA, 1.0, 0.01)
+}

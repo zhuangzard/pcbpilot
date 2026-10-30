@@ -1659,29 +1659,65 @@ func isoPartnerDist(b *Board, iso *IsoRules, rr *RouteResult, f *isoField, doms 
 // net's insulated domain like a planned plane (clipPlanesToIso): a pour of a
 // net with no insulation pair comes back unchanged. Each pour is returned as
 // the merged row rectangles of the kept area (mil, y-up); a pour that keeps
-// nothing is dropped. a field board: the patient GND pour on In1/F.Cu/B.Cu and the
+// nothing is returned in lost. a field board: the patient GND pour on In1/F.Cu/B.Cu and the
 // +3V3 pour on In2 covered the SELV strip — 0 mil from the 24 V inlet,
 // RS-232 and CAN pads, 1030 isolation errors.
 //
 // lost are the planned pours clipped to nothing (no region left in their
-// domain): never silently omitted — the caller must fail or flag them.
+// domain, or nothing to clip against): never silently omitted — the caller
+// must fail or flag them. Without a board outline a pour of an insulated
+// net is clipped within the parts' extent, never returned whole.
 func ClipPoursToIso(raw []byte, in *Intent, pours []PlaneRegion) (kept, lost []PlaneRegion, notes []string, err error) {
 	b, err := FromSnapshot(raw)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if len(b.Outline) < 3 {
-		return pours, nil, []string{"no board outline in the snapshot: pours not clipped"}, nil
-	}
 	an := Analyze(b, PowerSpec{Intent: in}, nil)
+	// A pour of a net with an insulation pair must be clipped, outline or
+	// not: never returned as the whole-board pour.
+	paired := map[string]bool{}
+	if an.Iso != nil {
+		for _, pr := range an.Iso.Pairs {
+			paired[pr.A], paired[pr.B] = true, true
+		}
+	}
+	needs := func(net string) bool {
+		d := ""
+		if an.Iso != nil {
+			d = an.Iso.NetDomain[net]
+		}
+		return d != "" && paired[d]
+	}
+	// The region a pour without its own polygons starts from: the board
+	// outline; without one, the extent of the parts (the domain territories
+	// are built over it) — only for pours that need clipping.
+	var region []Point
+	if len(b.Outline) >= 3 {
+		region = append([]Point(nil), b.Outline...)
+	} else if bb := b.Bounds(); bb.W() > 0 && bb.H() > 0 {
+		region = bb.Corners()
+		notes = append(notes, "no board outline in the snapshot: pours of insulated nets clipped within the parts' extent")
+	}
 	rr := &RouteResult{}
 	for _, p := range pours {
 		if len(p.Polys) == 0 {
-			p.Polys = [][]Point{append([]Point(nil), b.Outline...)}
+			switch {
+			case len(b.Outline) >= 3:
+				p.Polys = [][]Point{append([]Point(nil), region...)}
+			case !needs(p.Net):
+				kept = append(kept, p) // no pair: the bridge pours the outline as before
+				continue
+			case region != nil:
+				p.Polys = [][]Point{append([]Point(nil), region...)}
+			default:
+				notes = append(notes, sprintf("%s on layer %d: no board outline and no parts to clip it against its insulation domain — not poured", p.Net, p.Layer))
+				lost = append(lost, p)
+				continue
+			}
 		}
 		rr.Planes = append(rr.Planes, p)
 	}
-	notes = clipPlanesToIso(b, an, rr)
+	notes = append(notes, clipPlanesToIso(b, an, rr)...)
 	for _, p := range rr.Planes {
 		if len(p.Polys) > 0 {
 			kept = append(kept, p)
