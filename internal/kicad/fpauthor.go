@@ -95,8 +95,10 @@ func AuthorFootprint(spec FootprintSpec) (string, error) {
 		if p.Type == "smd" && p.Drill != nil {
 			return "", fmt.Errorf("pad %d (%s): smd pad cannot have a drill", i, p.Number)
 		}
-		if p.Drill != nil && p.Drill.Diameter <= 0 && p.Drill.Width <= 0 {
-			return "", fmt.Errorf("pad %d (%s): drill diameter must be positive", i, p.Number)
+		if p.Drill != nil {
+			if err := validateDrill(p.Drill, i, p.Number); err != nil {
+				return "", err
+			}
 		}
 		if len(p.Layers) == 0 {
 			return "", fmt.Errorf("pad %d (%s): layers is required", i, p.Number)
@@ -200,17 +202,9 @@ func AuthorFootprint(spec FootprintSpec) (string, error) {
 
 	// Fab outline (F.Fab) — body rectangle with pin-1 chamfer.
 	chamfer := math.Min(0.5, math.Min(fabMaxX-fabMinX, fabMaxY-fabMinY)/4)
-	// Pin 1 at top-left per KiCad KLC F5.2: chamfer the top-left corner.
-	fmt.Fprintf(&b, "\t(fp_line (start %s %s) (end %s %s) (stroke (width %s) (type default)) (layer \"F.Fab\"))\n",
-		F(fabMinX+chamfer), F(fabMinY), F(fabMaxX), F(fabMinY), F(fpFabStroke)) // top edge
-	fmt.Fprintf(&b, "\t(fp_line (start %s %s) (end %s %s) (stroke (width %s) (type default)) (layer \"F.Fab\"))\n",
-		F(fabMaxX), F(fabMinY), F(fabMaxX), F(fabMaxY), F(fpFabStroke)) // right edge
-	fmt.Fprintf(&b, "\t(fp_line (start %s %s) (end %s %s) (stroke (width %s) (type default)) (layer \"F.Fab\"))\n",
-		F(fabMaxX), F(fabMaxY), F(fabMinX), F(fabMaxY), F(fpFabStroke)) // bottom edge
-	fmt.Fprintf(&b, "\t(fp_line (start %s %s) (end %s %s) (stroke (width %s) (type default)) (layer \"F.Fab\"))\n",
-		F(fabMinX), F(fabMaxY), F(fabMinX), F(fabMinY+chamfer), F(fpFabStroke)) // left edge
-	fmt.Fprintf(&b, "\t(fp_line (start %s %s) (end %s %s) (stroke (width %s) (type default)) (layer \"F.Fab\"))\n",
-		F(fabMinX), F(fabMinY+chamfer), F(fabMinX+chamfer), F(fabMinY), F(fpFabStroke)) // chamfer
+	// Chamfer the corner nearest pad "1"; default to top-left.
+	chamCorner := fpChamferCorner(fpFindPad1(spec.Pads), fabMinX, fabMinY, fabMaxX, fabMaxY)
+	fpWriteFabOutline(&b, fabMinX, fabMinY, fabMaxX, fabMaxY, chamfer, chamCorner, fpFabStroke)
 
 	// Silk outline (F.SilkS) — rectangle (slightly inset from courtyard).
 	fmt.Fprintf(&b, "\t(fp_line (start %s %s) (end %s %s) (stroke (width %s) (type default)) (layer \"F.SilkS\"))\n",
@@ -222,12 +216,12 @@ func AuthorFootprint(spec FootprintSpec) (string, error) {
 	fmt.Fprintf(&b, "\t(fp_line (start %s %s) (end %s %s) (stroke (width %s) (type default)) (layer \"F.SilkS\"))\n",
 		F(silkMinX), F(silkMaxY), F(silkMinX), F(silkMinY), F(fpSilkStroke))
 
-	// Pin 1 dot on silk.
-	if len(spec.Pads) > 0 {
-		p1 := spec.Pads[0]
-		dotX := p1.At[0] - p1.Size[0]/2 - 0.3
+	// Pin 1 dot on silk — find the electrical pad numbered "1".
+	if p1 := fpFindPad1(spec.Pads); p1 != nil {
+		hw, _ := padRotatedExtent(p1.Size[0], p1.Size[1], p1.At[2])
+		dotX := p1.At[0] - hw - 0.3
 		dotY := p1.At[1]
-		fmt.Fprintf(&b, "\t(fp_circle (center %s %s) (end %s %s) (stroke (width %s) (type solid)) (fill (type solid)) (layer \"F.SilkS\"))\n",
+		fmt.Fprintf(&b, "\t(fp_circle (center %s %s) (end %s %s) (stroke (width %s) (type solid)) (fill solid) (layer \"F.SilkS\"))\n",
 			F(dotX), F(dotY), F(dotX+0.1), F(dotY), F(fpSilkStroke))
 	}
 
@@ -355,6 +349,14 @@ func EditFootprintPads(src string, edits []PadEdit) (string, error) {
 		}
 	}
 
+	// Build pad-number-to-count map for ambiguity detection.
+	padNumCount := map[string]int{}
+	for _, p := range pads {
+		if len(p.list) > 1 {
+			padNumCount[p.list[1].atom]++
+		}
+	}
+
 	// Apply edits.
 	for _, e := range edits {
 		var target *sexp
@@ -364,6 +366,9 @@ func EditFootprintPads(src string, edits []PadEdit) (string, error) {
 			}
 			target = pads[e.Index]
 		} else {
+			if padNumCount[e.Number] > 1 {
+				return "", fmt.Errorf("pad %q is ambiguous (%d pads share this number); use index or --all", e.Number, padNumCount[e.Number])
+			}
 			for _, p := range pads {
 				if len(p.list) > 1 && p.list[1].atom == e.Number {
 					target = p
@@ -378,18 +383,73 @@ func EditFootprintPads(src string, edits []PadEdit) (string, error) {
 		if e.NewNumber != nil {
 			if len(target.list) > 1 {
 				target.list[1].atom = *e.NewNumber
+				// Rebuild ambiguity map after rename so subsequent edits
+				// see the new pad numbers (Kimi R2 finding).
+				padNumCount = map[string]int{}
+				for _, p := range pads {
+					if len(p.list) > 1 {
+						padNumCount[p.list[1].atom]++
+					}
+				}
 			}
 		}
 		if e.Size != nil {
-			fpEditSexpChild(target, "size", fmt.Sprintf("(size %s %s)", F(e.Size[0]), F(e.Size[1])))
+			if e.Size[0] <= 0 || e.Size[1] <= 0 {
+				return "", fmt.Errorf("pad size must be positive")
+			}
+			if err := fpEditSexpChild(target, "size", fmt.Sprintf("(size %s %s)", F(e.Size[0]), F(e.Size[1]))); err != nil {
+				return "", err
+			}
 		}
 		if e.Shape != nil {
+			switch *e.Shape {
+			case "roundrect", "rect", "circle", "oval":
+			default:
+				return "", fmt.Errorf("unknown pad shape %q", *e.Shape)
+			}
 			// Shape is the 3rd atom in (pad "num" type shape ...)
 			if len(target.list) > 3 {
 				target.list[3].atom = *e.Shape
 			}
+			// Manage shape-specific fields.
+			if *e.Shape == "roundrect" {
+				// Ensure roundrect_rratio exists.
+				hasRR := false
+				for _, ch := range target.list {
+					if ch.head() == "roundrect_rratio" {
+						hasRR = true
+						break
+					}
+				}
+				if !hasRR {
+					if err := fpEditSexpChild(target, "roundrect_rratio", fmt.Sprintf("(roundrect_rratio %s)", F(fpDefaultRRatio))); err != nil {
+						return "", err
+					}
+				}
+			} else {
+				// Remove roundrect_rratio if changing away from roundrect.
+				var kept []*sexp
+				for _, ch := range target.list {
+					if ch.head() != "roundrect_rratio" {
+						kept = append(kept, ch)
+					}
+				}
+				target.list = kept
+			}
 		}
 		if e.Drill != nil {
+			// Validate the drill edit.
+			if err := validateDrill(e.Drill, 0, e.Number); err != nil {
+				return "", err
+			}
+			// Validate: THT/NPTH may have drill; SMD must not.
+			padType := ""
+			if len(target.list) > 2 {
+				padType = target.list[2].atom
+			}
+			if padType == "smd" {
+				return "", fmt.Errorf("cannot add drill to smd pad %q", e.Number)
+			}
 			d := e.Drill
 			var drillText string
 			if d.Width > 0 && d.Height > 0 && d.Width != d.Height {
@@ -401,7 +461,9 @@ func EditFootprintPads(src string, edits []PadEdit) (string, error) {
 				}
 				drillText = fmt.Sprintf("(drill %s)", F(dia))
 			}
-			fpEditSexpChild(target, "drill", drillText)
+			if err := fpEditSexpChild(target, "drill", drillText); err != nil {
+				return "", err
+			}
 		}
 	}
 
@@ -409,21 +471,24 @@ func EditFootprintPads(src string, edits []PadEdit) (string, error) {
 }
 
 // fpEditSexpChild replaces or adds a child node by name in a parent sexp.
-func fpEditSexpChild(parent *sexp, name, text string) {
+func fpEditSexpChild(parent *sexp, name, text string) error {
 	for i, ch := range parent.list {
 		if ch.head() == name {
 			n, err := parseSx(text)
-			if err == nil {
-				parent.list[i] = n
+			if err != nil {
+				return fmt.Errorf("parse %s replacement: %w", name, err)
 			}
-			return
+			parent.list[i] = n
+			return nil
 		}
 	}
 	// Not found; append.
 	n, err := parseSx(text)
-	if err == nil {
-		parent.list = append(parent.list, n)
+	if err != nil {
+		return fmt.Errorf("parse %s: %w", name, err)
 	}
+	parent.list = append(parent.list, n)
+	return nil
 }
 
 // SetFootprintProperty sets or adds a property value in a .kicad_mod text.
@@ -486,6 +551,95 @@ func sexpSerialize(n *sexp) string {
 	}
 	b.WriteByte(')')
 	return b.String()
+}
+
+// validateDrill checks a drill spec for validity. It requires either a
+// positive circular diameter OR two positive oval dimensions, rejects
+// negative/zero values, and rejects conflicting specs (diameter + oval dims).
+func validateDrill(d *DrillSpec, padIdx int, padNum string) error {
+	hasCircular := d.Diameter != 0
+	hasOval := d.Width != 0 || d.Height != 0
+	if hasCircular && hasOval {
+		return fmt.Errorf("pad %d (%s): drill must specify either diameter (circular) or width+height (oval), not both", padIdx, padNum)
+	}
+	if !hasCircular && !hasOval {
+		return fmt.Errorf("pad %d (%s): drill diameter must be positive", padIdx, padNum)
+	}
+	if hasCircular {
+		if d.Diameter < 0 {
+			return fmt.Errorf("pad %d (%s): drill diameter must be positive, got %s", padIdx, padNum, F(d.Diameter))
+		}
+	}
+	if hasOval {
+		if d.Width <= 0 || d.Height <= 0 {
+			return fmt.Errorf("pad %d (%s): oval drill requires positive width and height", padIdx, padNum)
+		}
+	}
+	return nil
+}
+
+// fpFindPad1 finds the first pad numbered "1" (the electrical pin-1 pad).
+// Returns nil when no pad "1" exists.
+func fpFindPad1(pads []PadSpec) *PadSpec {
+	for i := range pads {
+		if pads[i].Number == "1" {
+			return &pads[i]
+		}
+	}
+	return nil
+}
+
+// fpChamferCorner determines which corner of the fab outline to chamfer,
+// based on the position of the pin-1 pad. Returns "tl", "tr", "bl", "br".
+func fpChamferCorner(p1 *PadSpec, minX, minY, maxX, maxY float64) string {
+	if p1 == nil {
+		return "tl" // default
+	}
+	cx := (minX + maxX) / 2
+	cy := (minY + maxY) / 2
+	if p1.At[0] <= cx {
+		if p1.At[1] <= cy {
+			return "tl"
+		}
+		return "bl"
+	}
+	if p1.At[1] <= cy {
+		return "tr"
+	}
+	return "br"
+}
+
+// fpWriteFabOutline writes the F.Fab body rectangle with a chamfer at the
+// specified corner (tl/tr/bl/br).
+func fpWriteFabOutline(b *strings.Builder, minX, minY, maxX, maxY, chamfer float64, corner string, stroke float64) {
+	// Each corner has 2 segments (edge + chamfer). The non-chamfered corners
+	// just get straight edges. We emit lines clockwise from top-left.
+	switch corner {
+	case "tl":
+		fmt.Fprintf(b, "\t(fp_line (start %s %s) (end %s %s) (stroke (width %s) (type default)) (layer \"F.Fab\"))\n", F(minX+chamfer), F(minY), F(maxX), F(minY), F(stroke))
+		fmt.Fprintf(b, "\t(fp_line (start %s %s) (end %s %s) (stroke (width %s) (type default)) (layer \"F.Fab\"))\n", F(maxX), F(minY), F(maxX), F(maxY), F(stroke))
+		fmt.Fprintf(b, "\t(fp_line (start %s %s) (end %s %s) (stroke (width %s) (type default)) (layer \"F.Fab\"))\n", F(maxX), F(maxY), F(minX), F(maxY), F(stroke))
+		fmt.Fprintf(b, "\t(fp_line (start %s %s) (end %s %s) (stroke (width %s) (type default)) (layer \"F.Fab\"))\n", F(minX), F(maxY), F(minX), F(minY+chamfer), F(stroke))
+		fmt.Fprintf(b, "\t(fp_line (start %s %s) (end %s %s) (stroke (width %s) (type default)) (layer \"F.Fab\"))\n", F(minX), F(minY+chamfer), F(minX+chamfer), F(minY), F(stroke))
+	case "tr":
+		fmt.Fprintf(b, "\t(fp_line (start %s %s) (end %s %s) (stroke (width %s) (type default)) (layer \"F.Fab\"))\n", F(minX), F(minY), F(maxX-chamfer), F(minY), F(stroke))
+		fmt.Fprintf(b, "\t(fp_line (start %s %s) (end %s %s) (stroke (width %s) (type default)) (layer \"F.Fab\"))\n", F(maxX-chamfer), F(minY), F(maxX), F(minY+chamfer), F(stroke))
+		fmt.Fprintf(b, "\t(fp_line (start %s %s) (end %s %s) (stroke (width %s) (type default)) (layer \"F.Fab\"))\n", F(maxX), F(minY+chamfer), F(maxX), F(maxY), F(stroke))
+		fmt.Fprintf(b, "\t(fp_line (start %s %s) (end %s %s) (stroke (width %s) (type default)) (layer \"F.Fab\"))\n", F(maxX), F(maxY), F(minX), F(maxY), F(stroke))
+		fmt.Fprintf(b, "\t(fp_line (start %s %s) (end %s %s) (stroke (width %s) (type default)) (layer \"F.Fab\"))\n", F(minX), F(maxY), F(minX), F(minY), F(stroke))
+	case "bl":
+		fmt.Fprintf(b, "\t(fp_line (start %s %s) (end %s %s) (stroke (width %s) (type default)) (layer \"F.Fab\"))\n", F(minX), F(minY), F(maxX), F(minY), F(stroke))
+		fmt.Fprintf(b, "\t(fp_line (start %s %s) (end %s %s) (stroke (width %s) (type default)) (layer \"F.Fab\"))\n", F(maxX), F(minY), F(maxX), F(maxY), F(stroke))
+		fmt.Fprintf(b, "\t(fp_line (start %s %s) (end %s %s) (stroke (width %s) (type default)) (layer \"F.Fab\"))\n", F(maxX), F(maxY), F(minX+chamfer), F(maxY), F(stroke))
+		fmt.Fprintf(b, "\t(fp_line (start %s %s) (end %s %s) (stroke (width %s) (type default)) (layer \"F.Fab\"))\n", F(minX+chamfer), F(maxY), F(minX), F(maxY-chamfer), F(stroke))
+		fmt.Fprintf(b, "\t(fp_line (start %s %s) (end %s %s) (stroke (width %s) (type default)) (layer \"F.Fab\"))\n", F(minX), F(maxY-chamfer), F(minX), F(minY), F(stroke))
+	case "br":
+		fmt.Fprintf(b, "\t(fp_line (start %s %s) (end %s %s) (stroke (width %s) (type default)) (layer \"F.Fab\"))\n", F(minX), F(minY), F(maxX), F(minY), F(stroke))
+		fmt.Fprintf(b, "\t(fp_line (start %s %s) (end %s %s) (stroke (width %s) (type default)) (layer \"F.Fab\"))\n", F(maxX), F(minY), F(maxX), F(maxY-chamfer), F(stroke))
+		fmt.Fprintf(b, "\t(fp_line (start %s %s) (end %s %s) (stroke (width %s) (type default)) (layer \"F.Fab\"))\n", F(maxX), F(maxY-chamfer), F(maxX-chamfer), F(maxY), F(stroke))
+		fmt.Fprintf(b, "\t(fp_line (start %s %s) (end %s %s) (stroke (width %s) (type default)) (layer \"F.Fab\"))\n", F(maxX-chamfer), F(maxY), F(minX), F(maxY), F(stroke))
+		fmt.Fprintf(b, "\t(fp_line (start %s %s) (end %s %s) (stroke (width %s) (type default)) (layer \"F.Fab\"))\n", F(minX), F(maxY), F(minX), F(minY), F(stroke))
+	}
 }
 
 // FootprintPadNumbers extracts pad numbers from a .kicad_mod text.

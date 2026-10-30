@@ -236,3 +236,66 @@ func TestCheckPinPad_ErrorMessages(t *testing.T) {
 		t.Errorf("expected both pin and pad error messages, got: %v", result.Errors)
 	}
 }
+
+// Finding #7: np_thru_hole pads auto-excluded without explicit --exclude-pad.
+func TestCheckPinPad_NPTHAutoExcluded(t *testing.T) {
+	sym := testSymbol(
+		SymbolPin{Number: "1", Name: "A", Type: "passive", Side: "left"},
+	)
+	// Footprint has pad 1 + a numbered NPTH "MH" (mechanical hole).
+	fp := testFootprint(
+		smdPad("1", -1),
+		PadSpec{Number: "MH", Type: "np_thru_hole", Shape: "circle",
+			At: [3]float64{5, 5, 0}, Size: [2]float64{3, 3},
+			Drill: &DrillSpec{Diameter: 2.2}, Layers: []string{"*.Cu", "*.Mask"}},
+	)
+
+	// Without explicit exclusion, np_thru_hole pads should be auto-excluded.
+	result, err := CheckPinPad(sym, fp, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.OK {
+		t.Errorf("expected OK with auto-excluded NPTH pad, got errors: %v", result.Errors)
+	}
+}
+
+// Finding #6: multi-symbol library with --symbol-name CLI regression.
+func TestCheckPinPad_MultiSymbolLib(t *testing.T) {
+	// Build a two-symbol library.
+	sym1, _ := AuthorSymbol(SymbolSpec{
+		Name: "SymA",
+		Pins: []SymbolPin{
+			{Number: "1", Name: "A1", Type: "passive", Side: "left"},
+			{Number: "2", Name: "A2", Type: "passive", Side: "right"},
+		},
+	})
+	sym2, _ := AuthorSymbol(SymbolSpec{
+		Name: "SymB",
+		Pins: []SymbolPin{
+			{Number: "1", Name: "B1", Type: "passive", Side: "left"},
+			{Number: "2", Name: "B2", Type: "passive", Side: "right"},
+			{Number: "3", Name: "B3", Type: "passive", Side: "right"},
+		},
+	})
+
+	fp2 := testFootprint(smdPad("1", -1), smdPad("2", 0), smdPad("3", 1))
+
+	// Check against SymB specifically.
+	result, err := CheckPinPad(sym2, fp2, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.OK {
+		t.Errorf("SymB should match 3-pad footprint, got errors: %v", result.Errors)
+	}
+
+	// Check against SymA: should show unmatched pad 3.
+	result2, err := CheckPinPad(sym1, fp2, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result2.OK {
+		t.Error("SymA (2 pins) should NOT match 3-pad footprint")
+	}
+}

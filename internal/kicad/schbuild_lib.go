@@ -20,6 +20,11 @@ import (
 	"sync"
 )
 
+// SymLibVersion is the format version for generated .kicad_sym files.
+// KiCad 9 reads older versions; we use the widely-compatible KiCad 8 token
+// so both KiCad 9 and 10 can open our libraries.
+const SymLibVersion = "20231120"
+
 // EnvCacheDir overrides the pcbpilot cache root (default ~/.pcbpilot/cache).
 const EnvCacheDir = "PCBPILOT_CACHE_DIR"
 
@@ -267,7 +272,7 @@ func SymbolLibText(symbols map[string]string) string {
 	}
 	sort.Strings(names)
 	var b strings.Builder
-	b.WriteString("(kicad_symbol_lib\n\t(version 20251024)\n\t(generator \"pcbpilot\")\n")
+	b.WriteString("(kicad_symbol_lib\n\t(version " + SymLibVersion + ")\n\t(generator \"pcbpilot\")\n")
 	for _, n := range names {
 		b.WriteString("\t" + symbols[n] + "\n")
 	}
@@ -276,20 +281,71 @@ func SymbolLibText(symbols map[string]string) string {
 }
 
 // LibTableText renders a sym-lib-table / fp-lib-table with project libs
-// (name → ${KIPRJMOD}-relative uri).
+// (name → ${KIPRJMOD}-relative uri). Non-generated rows from an existing
+// table are preserved (merged after the generated entries).
 func LibTableText(kind string, libs map[string]string) string {
+	s, _ := LibTableTextMerge(kind, libs, "")
+	return s
+}
+
+// LibTableTextMerge renders a lib-table merging generated entries with
+// existing non-generated rows from existingPath (if it exists). Existing
+// entries whose nickname collides with a generated one are replaced;
+// others are preserved after the generated block.
+func LibTableTextMerge(kind string, libs map[string]string, existingPath string) (string, error) {
 	names := make([]string, 0, len(libs))
 	for n := range libs {
 		names = append(names, n)
 	}
 	sort.Strings(names)
+
+	genSet := make(map[string]bool)
+	for _, n := range names {
+		genSet[n] = true
+	}
+
 	var b strings.Builder
 	fmt.Fprintf(&b, "(%s\n\t(version 7)\n", kind)
 	for _, n := range names {
 		fmt.Fprintf(&b, "\t(lib (name %s) (type \"KiCad\") (uri %s) (options \"\") (descr \"pcbpilot sch-build\"))\n", Q(n), Q("${KIPRJMOD}/"+libs[n]))
 	}
+
+	// Merge existing non-generated entries.
+	if existingPath != "" {
+		data, err := os.ReadFile(existingPath)
+		if err != nil && !os.IsNotExist(err) {
+			return "", fmt.Errorf("read existing table %s: %w", existingPath, err)
+		}
+		if len(data) > 0 {
+			root, perr := parseSx(string(data))
+			if perr != nil {
+				return "", fmt.Errorf("parse existing table %s: %w", existingPath, perr)
+			}
+			// Validate root kind to avoid silently overwriting a wrong-kind table.
+			if root.head() != kind {
+				return "", fmt.Errorf("existing table %s has root %q, expected %q", existingPath, root.head(), kind)
+			}
+			for _, ch := range root.list {
+				if ch.head() != "lib" {
+					continue
+				}
+				nameNode := ch.child("name")
+				if nameNode == nil {
+					continue
+				}
+				nick := sxArg(nameNode, 0)
+				if genSet[nick] {
+					continue // replaced by generated entry
+				}
+				b.WriteString("\t")
+				b.WriteString(sexpSerialize(ch))
+				b.WriteString("\n")
+			}
+		}
+	}
+
 	b.WriteString(")\n")
-	return b.String()
+	return b.String(), nil
 }
 
 // PowerRefNext is the number the next power symbol reference (#PWRnnnn)

@@ -1201,7 +1201,11 @@ func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layou
 		}
 		symTable[n] = n + ".kicad_sym"
 	}
-	if err := write("sym-lib-table", []byte(kicad.LibTableText("sym_lib_table", symTable))); err != nil {
+	symTableText, err := kicad.LibTableTextMerge("sym_lib_table", symTable, filepath.Join(dir, "sym-lib-table"))
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := write("sym-lib-table", []byte(symTableText)); err != nil {
 		return nil, nil, err
 	}
 	fpTable := map[string]string{}
@@ -1227,7 +1231,11 @@ func writeSbProject(dir string, d *sbDesign, st *sbState, zis []*sbZoneIn, layou
 		fpTable[lib] = lib + ".pretty"
 	}
 	if len(fpTable) > 0 {
-		if err := write("fp-lib-table", []byte(kicad.LibTableText("fp_lib_table", fpTable))); err != nil {
+		fpTableText, err := kicad.LibTableTextMerge("fp_lib_table", fpTable, filepath.Join(dir, "fp-lib-table"))
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := write("fp-lib-table", []byte(fpTableText)); err != nil {
 			return nil, nil, err
 		}
 	}

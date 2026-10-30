@@ -7,7 +7,11 @@ package kicad
 import (
 	"fmt"
 	"os"
+	"path"
+	"path/filepath"
 	"strings"
+
+	"github.com/zhuangzard/pcbpilot/internal/kfile"
 )
 
 // sxArg returns the i-th atom argument of a sexp node (0 = first after head).
@@ -17,6 +21,56 @@ func sxArg(n *sexp, i int) string {
 		return ""
 	}
 	return n.list[idx].atom
+}
+
+// ValidateLibName rejects names that contain path separators, traversal
+// sequences, absolute/drive/UNC prefixes, or Windows-invalid filenames.
+func ValidateLibName(name string) error {
+	if name == "" {
+		return fmt.Errorf("library name is empty")
+	}
+	if strings.ContainsAny(name, "/\\") {
+		return fmt.Errorf("library name %q contains path separators", name)
+	}
+	if name == "." || name == ".." {
+		return fmt.Errorf("library name %q is a traversal component", name)
+	}
+	// Windows reserved names: CON, PRN, AUX, NUL, COM1-9, LPT1-9.
+	upper := strings.ToUpper(strings.TrimRight(name, ". "))
+	for _, r := range []string{"CON", "PRN", "AUX", "NUL"} {
+		if upper == r {
+			return fmt.Errorf("library name %q is a Windows reserved name", name)
+		}
+	}
+	for _, prefix := range []string{"COM", "LPT"} {
+		if len(upper) == 4 && strings.HasPrefix(upper, prefix) && upper[3] >= '1' && upper[3] <= '9' {
+			return fmt.Errorf("library name %q is a Windows reserved name", name)
+		}
+	}
+	return nil
+}
+
+// ValidateRelPath rejects relative paths that escape the project root.
+// It normalises forward slashes, rejects absolute/drive/UNC paths, and
+// checks that the cleaned path stays below root.
+func ValidateRelPath(relPath string) error {
+	if relPath == "" {
+		return fmt.Errorf("path is empty")
+	}
+	// Normalise backslashes to forward slashes platform-independently
+	// (on Unix filepath.Clean does not treat backslash as a separator).
+	norm := strings.ReplaceAll(relPath, `\`, "/")
+	// Reject absolute, drive-letter, and UNC paths.
+	if filepath.IsAbs(norm) || (len(norm) >= 2 && norm[1] == ':') ||
+		strings.HasPrefix(norm, "//") {
+		return fmt.Errorf("path %q is absolute; a project-relative path is required", relPath)
+	}
+	// Clean using forward-slash path logic and check for traversal.
+	cleaned := path.Clean(norm)
+	if strings.HasPrefix(cleaned, "../") || cleaned == ".." {
+		return fmt.Errorf("path %q escapes the project root", relPath)
+	}
+	return nil
 }
 
 // EnsureLibTableEntry ensures that a library nickname with the given URI
@@ -33,13 +87,18 @@ func EnsureLibTableEntry(tablePath, tableKind, nickname, relURI string) (bool, e
 	if relURI == "" {
 		return false, fmt.Errorf("relURI is required")
 	}
+	if err := ValidateRelPath(relURI); err != nil {
+		return false, fmt.Errorf("relURI: %w", err)
+	}
 	switch tableKind {
 	case "sym_lib_table", "fp_lib_table":
 	default:
 		return false, fmt.Errorf("tableKind must be sym_lib_table or fp_lib_table, got %q", tableKind)
 	}
 
-	uri := "${KIPRJMOD}/" + relURI
+	// Normalise the relURI to forward slashes platform-independently.
+	normURI := path.Clean(strings.ReplaceAll(relURI, `\`, "/"))
+	uri := "${KIPRJMOD}/" + normURI
 
 	// Read existing table if present.
 	data, err := os.ReadFile(tablePath)
@@ -51,7 +110,8 @@ func EnsureLibTableEntry(tablePath, tableKind, nickname, relURI string) (bool, e
 		// Create a new table with this single entry.
 		text := fmt.Sprintf("(%s\n\t(version 7)\n\t(lib (name %s) (type \"KiCad\") (uri %s) (options \"\") (descr \"pcbpilot\"))\n)\n",
 			tableKind, Q(nickname), Q(uri))
-		return true, os.WriteFile(tablePath, []byte(text), 0o644)
+		_, werr := kfile.WriteFile(tablePath, []byte(text), kfile.Opts{NoLockCheck: true})
+		return true, werr
 	}
 
 	// Parse existing.
@@ -85,7 +145,8 @@ func EnsureLibTableEntry(tablePath, tableKind, nickname, relURI string) (bool, e
 			uriNode.list[1] = &sexp{atom: uri, quoted: true}
 		}
 		out := sexpSerializeTable(root, tableKind)
-		return true, os.WriteFile(tablePath, []byte(out), 0o644)
+		_, werr := kfile.WriteFile(tablePath, []byte(out), kfile.Opts{NoLockCheck: true})
+		return true, werr
 	}
 
 	// Not found: append a new entry.
@@ -98,7 +159,8 @@ func EnsureLibTableEntry(tablePath, tableKind, nickname, relURI string) (bool, e
 
 	root.list = append(root.list, entryNode)
 	out := sexpSerializeTable(root, tableKind)
-	return true, os.WriteFile(tablePath, []byte(out), 0o644)
+	_, werr := kfile.WriteFile(tablePath, []byte(out), kfile.Opts{NoLockCheck: true})
+	return true, werr
 }
 
 // sexpSerializeTable renders a library table with canonical formatting.
@@ -153,5 +215,6 @@ func RemoveLibTableEntry(tablePath, tableKind, nickname string) (bool, error) {
 
 	root.list = kept
 	out := sexpSerializeTable(root, tableKind)
-	return true, os.WriteFile(tablePath, []byte(out), 0o644)
+	_, werr := kfile.WriteFile(tablePath, []byte(out), kfile.Opts{NoLockCheck: true})
+	return true, werr
 }

@@ -245,39 +245,25 @@ func AuthorSymbol(spec SymbolSpec) (string, error) {
 		unitPins[p.Unit] = append(unitPins[p.Unit], p)
 	}
 
-	// KiCad symbol convention:
-	// - (symbol "Name_0_1" ...) = common graphics (body outline for all units)
-	// - (symbol "Name_U_1" ...) = pins for unit U (1-based)
-	// For single-unit: _0_1 = body, _1_1 = pins (matches GenericSymbolText).
+	// KiCad symbol convention — one child per (unit, body-style) pair:
+	// - (symbol "Name_0_1" ...) = common graphics + common pins (unit 0)
+	// - (symbol "Name_U_1" ...) = body + pins for unit U (1-based)
+	// No _0_2 alternate body style; body and pins share a single child.
 
 	if units == 1 {
-		// Single-unit: _0_1 = body (rectangle only), _1_1 = all pins.
-		// No _0_2 — pins appear only once in _1_1.
-		body, _ := symBuildUnit(spec.Name, 0, spec.Pins, overallLayout)
-		fmt.Fprintf(&b, "\t\t%s\n", body)
-		_, pins := symBuildUnit(spec.Name, 1, spec.Pins, overallLayout)
-		fmt.Fprintf(&b, "\t\t%s\n", pins)
+		// Single-unit: _0_1 = body only, _1_1 = body + all pins.
+		fmt.Fprintf(&b, "\t\t%s\n", symBuildUnitChild(spec.Name, 0, nil, overallLayout))
+		fmt.Fprintf(&b, "\t\t%s\n", symBuildUnitChild(spec.Name, 1, spec.Pins, overallLayout))
 	} else {
-		// Multi-unit: _0_1 = common body, _0_2 = common pins (unit 0),
-		// then _U_1 = per-unit body+pins for each U in [1..units].
-		if commonPins := unitPins[0]; len(commonPins) > 0 {
-			body, pins := symBuildUnit(spec.Name, 0, commonPins, overallLayout)
-			fmt.Fprintf(&b, "\t\t%s\n", body)
-			if len(pins) > 0 {
-				fmt.Fprintf(&b, "\t\t%s\n", pins)
-			}
-		} else {
-			// No common pins; emit empty body sub-symbol.
-			fmt.Fprintf(&b, "\t\t(symbol %s\n\t\t)\n", Q(fmt.Sprintf("%s_0_1", spec.Name)))
-		}
+		// Multi-unit: _0_1 = common body + common pins, _U_1 = body + unit pins.
+		commonPins := unitPins[0]
+		fmt.Fprintf(&b, "\t\t%s\n", symBuildUnitChild(spec.Name, 0, commonPins, overallLayout))
 		for u := 1; u <= units; u++ {
 			uPins := unitPins[u]
 			if len(uPins) == 0 {
 				continue
 			}
-			body, pins := symBuildUnit(spec.Name, u, uPins, overallLayout)
-			fmt.Fprintf(&b, "\t\t%s\n", body)
-			fmt.Fprintf(&b, "\t\t%s\n", pins)
+			fmt.Fprintf(&b, "\t\t%s\n", symBuildUnitChild(spec.Name, u, uPins, overallLayout))
 		}
 	}
 
@@ -286,8 +272,11 @@ func AuthorSymbol(spec SymbolSpec) (string, error) {
 	return b.String(), nil
 }
 
-// symBuildUnit builds the body (_U_1) and pins sub-symbol text for one unit.
-func symBuildUnit(name string, unit int, pins []SymbolPin, layout symLayout) (body, pinsText string) {
+// symBuildUnitChild builds one child sub-symbol "(symbol Name_U_1 ...)" that
+// contains both the body rectangle and the pins. This is the correct KiCad
+// structure: one child per (unit, body-style) pair, never two siblings with
+// the same unit number.
+func symBuildUnitChild(name string, unit int, pins []SymbolPin, layout symLayout) string {
 	var left, right, top, bottom []SymbolPin
 	for _, p := range pins {
 		side := p.Side
@@ -306,38 +295,23 @@ func symBuildUnit(name string, unit int, pins []SymbolPin, layout symLayout) (bo
 		}
 	}
 
-	// Body sub-symbol.
-	var bb strings.Builder
-	fmt.Fprintf(&bb, "(symbol %s\n", Q(fmt.Sprintf("%s_%d_1", name, unit)))
+	var b strings.Builder
+	fmt.Fprintf(&b, "(symbol %s\n", Q(fmt.Sprintf("%s_%d_1", name, unit)))
+
+	// Body rectangle: always for unit 0, and for unit > 0 when it has pins.
 	if unit == 0 || len(pins) > 0 {
 		fill := "background"
-		fmt.Fprintf(&bb, "\t\t\t(rectangle (start %s %s) (end %s %s) (stroke (width %s) (type default)) (fill (type %s)))\n",
+		fmt.Fprintf(&b, "\t\t\t(rectangle (start %s %s) (end %s %s) (stroke (width %s) (type default)) (fill (type %s)))\n",
 			F(layout.left), F(layout.top), F(layout.right), F(layout.bottom), F(symStroke), fill)
 	}
-	fmt.Fprintf(&bb, "\t\t)")
-	body = bb.String()
 
-	// Pins sub-symbol.
-	var pb strings.Builder
-
-	if unit == 0 {
-		// Common pins in _0_2 sub-symbol.
-		if len(pins) > 0 {
-			fmt.Fprintf(&pb, "(symbol %s\n", Q(fmt.Sprintf("%s_0_2", name)))
-			symWritePins(&pb, left, right, top, bottom, layout)
-			fmt.Fprintf(&pb, "\t\t)")
-		}
-		pinsText = pb.String()
-		return
+	// Pins in the same child (not a separate sibling).
+	if len(pins) > 0 {
+		symWritePins(&b, left, right, top, bottom, layout)
 	}
 
-	// For unit > 0: pins in _U_1 sub-symbol (same as body name but with pins).
-	bb.Reset()
-	fmt.Fprintf(&bb, "(symbol %s\n", Q(fmt.Sprintf("%s_%d_1", name, unit)))
-	symWritePins(&bb, left, right, top, bottom, layout)
-	fmt.Fprintf(&bb, "\t\t)")
-	pinsText = bb.String()
-	return
+	fmt.Fprintf(&b, "\t\t)")
+	return b.String()
 }
 
 // symWritePins emits pin S-expressions for all four sides.

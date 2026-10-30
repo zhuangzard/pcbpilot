@@ -1142,7 +1142,7 @@ func ConvertEasyedaSchematic(eproPath string, opt EasyedaSchOptions) (*EasyedaSc
 		}
 	}
 	var lb strings.Builder
-	lb.WriteString("(kicad_symbol_lib\n\t(version 20251024)\n\t(generator \"pcbpilot\")\n")
+	lb.WriteString("(kicad_symbol_lib\n\t(version " + SymLibVersion + ")\n\t(generator \"pcbpilot\")\n")
 	var bares []string
 	for b := range libText {
 		bares = append(bares, b)
@@ -1156,7 +1156,7 @@ func ConvertEasyedaSchematic(eproPath string, opt EasyedaSchOptions) (*EasyedaSc
 		return nil, err
 	}
 	var pb strings.Builder
-	pb.WriteString("(kicad_symbol_lib\n\t(version 20251024)\n\t(generator \"pcbpilot\")\n")
+	pb.WriteString("(kicad_symbol_lib\n\t(version " + SymLibVersion + ")\n\t(generator \"pcbpilot\")\n")
 	var pnets []string
 	for n := range powerNets {
 		pnets = append(pnets, n)

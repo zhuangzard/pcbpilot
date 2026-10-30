@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/zhuangzard/pcbpilot/internal/kfile"
 	"github.com/zhuangzard/pcbpilot/internal/kicad"
 )
 
@@ -56,7 +57,19 @@ The spec describes pins (number, name, type, side, unit), properties
 			if name == "" {
 				name = "pcbpilot"
 			}
+			if err := kicad.ValidateLibName(name); err != nil {
+				return fmt.Errorf("--lib-name: %w", err)
+			}
+			if err := kicad.ValidateLibName(spec.Name); err != nil {
+				return fmt.Errorf("spec name: %w", err)
+			}
 			path := filepath.Join(outDir, name+".kicad_sym")
+			// Verify destination stays under outDir.
+			absOut, _ := filepath.Abs(outDir)
+			absPath, _ := filepath.Abs(path)
+			if !strings.HasPrefix(absPath, absOut+string(filepath.Separator)) && absPath != absOut {
+				return fmt.Errorf("destination %s escapes output root %s", path, outDir)
+			}
 			if err := os.MkdirAll(outDir, 0o755); err != nil {
 				return err
 			}
@@ -83,7 +96,7 @@ The spec describes pins (number, name, type, side, unit), properties
 			}
 
 			lib := kicad.AuthorSymbolLib(symbols)
-			if err := os.WriteFile(path, []byte(lib), 0o644); err != nil {
+			if _, err := kfile.WriteFile(path, []byte(lib), kfile.Opts{NoLockCheck: true}); err != nil {
 				return err
 			}
 			fmt.Fprintf(stdout, "wrote %s\n", path)
@@ -130,12 +143,24 @@ position, size, drill, layers), courtyard margin, and outline options.`,
 			if name == "" {
 				name = "pcbpilot"
 			}
+			if err := kicad.ValidateLibName(name); err != nil {
+				return fmt.Errorf("--lib-name: %w", err)
+			}
+			if err := kicad.ValidateLibName(spec.Name); err != nil {
+				return fmt.Errorf("spec name: %w", err)
+			}
 			prettyDir := filepath.Join(outDir, name+".pretty")
+			// Verify destination stays under outDir.
+			absOut, _ := filepath.Abs(outDir)
+			absPath, _ := filepath.Abs(filepath.Join(prettyDir, spec.Name+".kicad_mod"))
+			if !strings.HasPrefix(absPath, absOut+string(filepath.Separator)) {
+				return fmt.Errorf("destination %s escapes output root %s", absPath, outDir)
+			}
 			if err := os.MkdirAll(prettyDir, 0o755); err != nil {
 				return err
 			}
 			path := filepath.Join(prettyDir, spec.Name+".kicad_mod")
-			if err := os.WriteFile(path, []byte(fpText), 0o644); err != nil {
+			if _, err := kfile.WriteFile(path, []byte(fpText), kfile.Opts{NoLockCheck: true}); err != nil {
 				return err
 			}
 			fmt.Fprintf(stdout, "wrote %s\n", path)
@@ -178,7 +203,7 @@ func newKicadLibFPEditCmd(stdout io.Writer) *cobra.Command {
 				return err
 			}
 
-			if err := os.WriteFile(footprintPath, []byte(result), 0o644); err != nil {
+			if _, err := kfile.WriteFile(footprintPath, []byte(result), kfile.Opts{NoLockCheck: true}); err != nil {
 				return err
 			}
 			fmt.Fprintf(stdout, "edited %s\n", footprintPath)
@@ -255,14 +280,17 @@ Examples:
 // ---- pin-pad-check ----
 
 func newKicadPinPadCheckCmd(stdout io.Writer) *cobra.Command {
-	var symbolPath, footprintPath string
+	var symbolPath, footprintPath, symbolName string
 	var excludePads []string
 	var asJSON bool
 	c := &cobra.Command{
 		Use:   "pin-pad-check",
 		Short: "Check pin↔pad consistency between a symbol and footprint",
 		Long: `Verifies that every symbol pin number has a matching footprint pad and
-vice versa. Reports unmatched pins and pads. Exit code 1 if mismatches found.`,
+vice versa. Reports unmatched pins and pads. Exit code 1 if mismatches found.
+
+When --symbol is a .kicad_sym library with multiple symbols, --symbol-name
+selects which symbol to check (required in that case).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if symbolPath == "" || footprintPath == "" {
 				return fmt.Errorf("--symbol and --footprint are required")
@@ -277,7 +305,7 @@ vice versa. Reports unmatched pins and pads. Exit code 1 if mismatches found.`,
 				return fmt.Errorf("read footprint: %w", err)
 			}
 
-			// If the symbol file is a .kicad_sym library, extract the first symbol.
+			// If the symbol file is a .kicad_sym library, extract the named symbol.
 			symText := string(symData)
 			if strings.Contains(symText, "kicad_symbol_lib") {
 				names, err := kicad.LibSymbolNames(symbolPath)
@@ -287,9 +315,17 @@ vice versa. Reports unmatched pins and pads. Exit code 1 if mismatches found.`,
 				if len(names) == 0 {
 					return fmt.Errorf("no symbols in %s", symbolPath)
 				}
-				symText, err = kicad.LibSymbolCached(symbolPath, names[0])
+				target := symbolName
+				if target == "" {
+					if len(names) > 1 {
+						return fmt.Errorf("library %s contains %d symbols (%s); use --symbol-name to select one",
+							symbolPath, len(names), strings.Join(names, ", "))
+					}
+					target = names[0]
+				}
+				symText, err = kicad.LibSymbolCached(symbolPath, target)
 				if err != nil {
-					return fmt.Errorf("read symbol %q: %w", names[0], err)
+					return fmt.Errorf("read symbol %q: %w", target, err)
 				}
 			}
 
@@ -327,6 +363,7 @@ vice versa. Reports unmatched pins and pads. Exit code 1 if mismatches found.`,
 	}
 	c.Flags().StringVar(&symbolPath, "symbol", "", "path to .kicad_sym file")
 	c.Flags().StringVar(&footprintPath, "footprint", "", "path to .kicad_mod file")
+	c.Flags().StringVar(&symbolName, "symbol-name", "", "symbol name to check (required when library has multiple symbols)")
 	c.Flags().StringSliceVar(&excludePads, "exclude-pad", nil, "pad numbers to exclude from check (e.g. mechanical NPTH)")
 	c.Flags().BoolVar(&asJSON, "json", false, "output result as JSON")
 	return c

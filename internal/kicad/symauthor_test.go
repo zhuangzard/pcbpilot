@@ -70,11 +70,36 @@ func TestAuthorSymbol_MultiUnit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Must have common body _0_1, common pins _0_2, and per-unit _1_1, _2_1.
-	for _, sub := range []string{"DualOpAmp_0_1", "DualOpAmp_0_2", "DualOpAmp_1_1", "DualOpAmp_2_1"} {
+	// Must have _0_1 (common body+pins), _1_1, _2_1 — no _0_2 sibling.
+	for _, sub := range []string{"DualOpAmp_0_1", "DualOpAmp_1_1", "DualOpAmp_2_1"} {
 		if !strings.Contains(text, `"`+sub+`"`) {
 			t.Errorf("missing sub-symbol %q", sub)
 		}
+	}
+	if strings.Contains(text, `"DualOpAmp_0_2"`) {
+		t.Error("_0_2 should not exist (common pins belong in _0_1)")
+	}
+	// Common pins (VCC, GND) must be inside _0_1.
+	// Find the _0_1 block and verify it contains the common pin numbers.
+	idx01 := strings.Index(text, `"DualOpAmp_0_1"`)
+	if idx01 < 0 {
+		t.Fatal("_0_1 not found")
+	}
+	block01 := text[idx01:]
+	if !strings.Contains(block01, `(number "4"`) || !strings.Contains(block01, `(number "8"`) {
+		t.Error("common pins 4 (VCC) and 8 (GND) should be inside _0_1")
+	}
+	// Per-unit _1_1 should have body rectangle AND pins (not split into separate siblings).
+	idx11 := strings.Index(text, `"DualOpAmp_1_1"`)
+	if idx11 < 0 {
+		t.Fatal("_1_1 not found")
+	}
+	block11 := text[idx11:]
+	if !strings.Contains(block11, "rectangle") {
+		t.Error("_1_1 should contain a body rectangle")
+	}
+	if !strings.Contains(block11, `(number "1"`) {
+		t.Error("_1_1 should contain pins")
 	}
 }
 
@@ -159,7 +184,7 @@ func TestAuthorSymbolLib(t *testing.T) {
 	if !strings.Contains(lib, "kicad_symbol_lib") {
 		t.Error("missing kicad_symbol_lib wrapper")
 	}
-	if !strings.Contains(lib, `(version 20251024)`) {
+	if !strings.Contains(lib, "(version "+SymLibVersion+")") {
 		t.Error("missing version")
 	}
 	if !strings.Contains(lib, `(generator "pcbpilot")`) {
