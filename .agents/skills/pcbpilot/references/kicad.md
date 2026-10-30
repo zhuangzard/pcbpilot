@@ -392,7 +392,7 @@ clearance 会替换类间距，也会被对规则替换）；有绝缘对时 cre
   clearance / creepage；每个计划网的**普通间距**按 KiCad 语义解析（自定义规则替换类间距）：任何可能管到它的规则（两物体
   判定）把间距压到计划以下即失败，值无法比较即 cannot-check；每个域边距规则 `pcbpilot edge PPD_<域>` 必须在、条件正确、
   `edge_clearance` 不低于计划，其后可能重叠的规则压低或无法比较同样失败 / cannot-check；再跑探针）、
-  `copper-widths`（每段直线与圆弧、按层、容差 0.04 mil，对照要求线宽 `requiredWidthMil`（不低于板最小线宽）：低于计划下限失败；介于下限与线宽之间只有意图 `neckdown`
+  `copper-widths`（每段直线与圆弧、按层、容差 0.04 mil，对照要求线宽 `requiredWidthMil`（不低于板最小线宽）：低于计划下限失败；介于下限与线宽之间的段，属于 `kicad route` 自己的**焊盘逃逸**（与 route 的 intent-widths 门禁同一条规则 `padEscape`：整段在本网焊盘真实铜皮的逃逸距离内、且一端贴着焊盘——route 预布的 escape 短线和焊盘处颈缩）记为 info，其余只有意图 `neckdown`
   `{refs, maxLengthMil, minWidthMil}` 覆盖的段可以；在本网铺铜内的细段 = cannot-check（铺铜颈缩由 post-layout sim 判）；
   没有走线、只有铺铜的网（含铺铜孤岛）= `zone-only`（cannot-check：铺铜宽度与是否连上焊盘这里不判）；≥2 焊盘却无铜的网 =
   `not-routed`（cannot-check，绝不当通过））、`via-size`（每个过孔不小于计划过孔）、`via-current`
@@ -471,7 +471,10 @@ pcbpilot kicad route --pcb board-b-v5a.kicad_pcb --intent intent.json --sim sim.
      有 `widthMil.min` 的类再加全层 `track_width (min …)`。规则写在 `# pcbpilot:begin … # pcbpilot:end` 块里。
      KiCad 10 的 DRC **不**按网络类线宽报错，线宽只能靠这些规则 + `intent-widths` 门禁。
    - **安全（ISO / 医疗）**：意图的绝缘对（`pairs` + `domains`）→ 每个域一个 `PPD_<域>` 网络类，`.kicad_dru` 写
-     `(constraint clearance (min …))` 与 `(constraint creepage (min …))`（KiCad 10 支持 creepage，已实测会报 creepage 违规）；
+     `(constraint clearance (min …))` 与 `(constraint creepage (min …))`（KiCad 10 支持 creepage，已实测会报 creepage 违规）。
+     creepage **不大于** clearance 时不写 creepage 约束：沿表面的路径不会短于同两块铜之间的直线，clearance 已经蕴含它
+     （实测 1443 件板：85 条 creepage 违规每一条都同时报为同一对的 clearance 违规）；而 KiCad 的 creepage 检查占了大板 DRC
+     的大部分时间（同一块摆好的板 1227 s → 312 s，除那 85 条 creepage 外结果逐条相同）。creepage 大于 clearance 的对照写不误；
      绝缘对两侧每个网的 DSN 间距抬到该对的电气间隙（fastroute 每类只有一个间距）。危险域的板边距离
      （`EdgeFromIntent.ByDomain`）写成 `(constraint edge_clearance (min …))`。
    - DSN：原生 `ExportSpecctraDSN`（um），再：复合类名的逗号改 `+`（`--no-neckdown-classes` 用逗号分隔）、加内层 layer_rule、
@@ -490,7 +493,15 @@ pcbpilot kicad route --pcb board-b-v5a.kicad_pcb --intent intent.json --sim sim.
    （`no_neckdown`），显式差分对带间距/偏斜。`both`：两个后端同时跑，**先「完整 + 无新增 DRC 错误」的胜出并取消另一个**，胜出者仍要过
    本次运行的全部门禁；任一门禁失败就换下一个（被取消的会重跑），全都不过则按最少未布通/新增 DRC 的那个报告失败。
    `summary.routerCandidates` 记录每个后端的未布通数、用时、快检结果、是否过全量门禁。任何门禁、签核都不因后端而减少。
-3. **fastroute 时限与部分结果**：`--max-time` 不给时按板子算（10 min + 每条连接 0.3 s，最多 40 min，写进
+3. **过孔尺寸**：fastroute（0.1.14）每次只用 DSN structure `(via …)` 列表里的第一个过孔，不认类的 `use_via`（实板 262 个
+   过孔全是 Default 的 0.6 mm，类要求 0.6096 / 0.7 mm，`kicad rules --check` 的 via-size 判失败）。所以列表按直径、孔径从大到小
+   排（`summary.dsnViaOrder`），导入后把每个布线器过孔**缩**到它所在网的有效类过孔（KiCad 回读；bridge edit `setVia`，
+   `summary.routerVias`）——只缩不放，fastroute 按大过孔留的间距都还在。
+   **DRC 时限**：kicad-cli DRC 的时限按板文件大小放大（15 min + 每 MB 2 min，最多 2 h；`PCBPILOT_KICAD_DRC_TIMEOUT` 覆盖），
+   超时报 `kicad-cli pcb drc on <板> timed out after <时限>`。铺铜后的 starved-thermal 修复、widen 的 DRC 回退是可选步骤：
+   它们的 DRC 没跑成（超时）时记一个 cannot-check 门禁（`starved-thermals` / `widen-drc`），照样写 routed 板、跑其余门禁，
+   不再中止整个 route。
+3b. **fastroute 时限与部分结果**：`--max-time` 不给时按板子算（10 min + 每条连接 0.3 s，最多 40 min，写进
    `summary.routerTime`）；显式 `--max-time 0` 才是不限时。到点 fastroute 自己写最好结果；再过一个宽限（max-time/10，
    1–5 min）pcbpilot 发 Ctrl+Break（Unix 为 SIGINT），2 min 后仍不退出就杀掉；`--router-timeout` 没给时自动抬到
    max-time + 两个宽限。被杀、没写报告但有 checkpoint `.ses` 的一轮记为 `partial`：照样导入这块部分布线的板，

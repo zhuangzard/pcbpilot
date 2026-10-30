@@ -6,6 +6,7 @@ package app
 // the advisory isolation-placement proxy; user-rule conflicts.
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -1454,6 +1455,16 @@ func (r *rulesRun) copperWidths() {
 			pads[p.Net]++
 		}
 	}
+	// Pad escapes: kicad route's intent-widths rule (padEscape: the whole
+	// segment within reach of an own-net pad's real copper, one end at the
+	// pad) — route's planned escape stubs and pad-zone neck-downs, never
+	// below the floor. Same rule, same pads: rules and route agree.
+	var escPads []boardPad
+	if bs, err := loadBoardSnapshotFile(bytes.NewReader(r.snapRaw)); err == nil {
+		for _, c := range bs.Components {
+			escPads = append(escPads, c.Pads...)
+		}
+	}
 	var cc, fails, nets int
 	for _, e := range r.rep.Nets {
 		ss := byNet[e.Net]
@@ -1510,6 +1521,10 @@ func (r *rulesRun) copperWidths() {
 			}
 			if nd := r.neckdownFor(n, s); nd != "" {
 				chk.Info = append(chk.Info, where+": intent neck-down "+nd)
+				continue
+			}
+			if padEscape(specctra2(s), req, escPads) {
+				chk.Info = append(chk.Info, where+fmt.Sprintf(": pad escape (within %.1f mil of its own pad; kicad route's intent-widths rule), above the floor %g mil", padEscapeReachMil(req), floor))
 				continue
 			}
 			if poured(specctra2(s)) {
@@ -1748,6 +1763,11 @@ func (r *rulesRun) isolationRuleProblems(rules []kicad.DRURule, p rulesIsoPlan) 
 		if want.mm <= 0 {
 			continue
 		}
+		// bridge netclasses writes creepage only above the clearance (a
+		// smaller or equal one is implied by the clearance constraint).
+		if want.typ == "creepage" && !isoCreepageWritten(p.ClearanceMm, p.CreepageMm) {
+			continue
+		}
 		ok := false
 		for _, c := range u.Constraints {
 			if c.Type == want.typ && c.Min != nil && *c.Min >= int64(math.Round(want.mm*1e6)) {
@@ -1984,4 +2004,11 @@ func (r *rulesRun) viaIntent() *pcbauto.Intent {
 		}
 	}
 	return in
+}
+
+// isoCreepageWritten: an insulation pair's creepage becomes its own DRC
+// constraint only when it exceeds the pair clearance (bridge netclasses);
+// otherwise the clearance constraint implies it.
+func isoCreepageWritten(clearanceMm, creepageMm float64) bool {
+	return creepageMm > clearanceMm+1e-6
 }

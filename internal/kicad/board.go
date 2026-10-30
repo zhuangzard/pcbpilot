@@ -1496,7 +1496,8 @@ func ParseStats(data []byte) (*BoardStats, error) {
 // that differ only by the op's objects, so the library checks (warnings)
 // do not take part.
 func (t *Tools) BoardDRC(pcb, out string) (*DRCReport, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), BridgeTimeout)
+	limit := DRCTimeoutFor(pcb, BridgeTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
 	if err := os.Remove(out); err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("%w: cannot remove the previous report: %v", ErrDRCReport, err)
@@ -1515,10 +1516,13 @@ func (t *Tools) BoardDRC(pcb, out string) (*DRCReport, error) {
 	err := cmd.Run()
 	data, rerr := os.ReadFile(out)
 	if err != nil || rerr != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, drcTimeoutError(pcb, limit)
+		}
 		if err == nil {
 			err = rerr
 		}
-		return nil, fmt.Errorf("%w: kicad-cli pcb drc: %v: %s", ErrDRCReport, err, strings.TrimSpace(buf.String()))
+		return nil, fmt.Errorf("%w: kicad-cli pcb drc on %s: %v: %s", ErrDRCReport, pcb, err, strings.TrimSpace(buf.String()))
 	}
 	return ParseDRC(data)
 }
