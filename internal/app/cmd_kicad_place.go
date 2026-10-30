@@ -249,7 +249,9 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 		// to outlive that clock altogether (legalisation took longer than
 		// 90 s, which switched the clock off) and stops at 90 s now — far
 		// short of its moves on 1443 parts (decaps a mean 970 mil from their
-		// pins) — so it may run to 65 % of the budget instead.
+		// pins) — so it may run to 65 % of the budget instead. 75 % was
+		// tried: on a loaded machine legalise-2 and polish then ran into the
+		// deadline (decaps a mean 1355 mil out in one seed).
 		if len(b.Parts)-len(rep.Fixed) > placeLargeBoard {
 			popt.Timeout = max(90*time.Second, o.timeBudget*65/100)
 		}
