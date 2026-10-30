@@ -494,7 +494,7 @@ pcbpilot kicad route --pcb board-b-v5a.kicad_pcb --intent intent.json --sim sim.
    `summary.routerTime`）；显式 `--max-time 0` 才是不限时。到点 fastroute 自己写最好结果；再过一个宽限（max-time/10，
    1–5 min）pcbpilot 发 Ctrl+Break（Unix 为 SIGINT），2 min 后仍不退出就杀掉；`--router-timeout` 没给时自动抬到
    max-time + 两个宽限。被杀、没写报告但有 checkpoint `.ses` 的一轮记为 `partial`：照样导入这块部分布线的板，
-   `route-complete` 按板上铜的连通性数未布通，且**一定 fail**（不是 pass），其余门禁照常跑。
+   `route-complete` 按板上铜的连通性数未布通，且**一定 fail**（不是 pass），其余门禁照常跑。fastroute 打印 “routing finished” 并 `saved` 了最终 `.ses` 却不退出、不写报告时（0.1.14 大板实测），pcbpilot 30 s 后就发停止（不等到点），把这份 ses 记为 `partial` + `finalSession: true`，未布通/违规数取 fastroute 日志里最后一行 “best board so far” 的数（`countsFrom: "log"`）。
    **网名**：fastroute 的 `--pairs` / `--tune` 文件按空白切分、不认引号（0.1.14 实测 `"A B"`、`'A B'`、`A\ B` 都会拆开），
    tune 里 `*` 是通配。层次网名带空格（页标题、自动分页的 " (1/2)"）、引号、`=`、`#`、`*` 的差分对 / 长度组网，
    只在 fastroute 读的那份 DSN（`route.fastroute.dsn`）里改名为 `pcbpilot_net_N`，pairs / tune 写别名，fastroute 写回的

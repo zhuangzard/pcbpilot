@@ -769,3 +769,60 @@ func TestResolveRouterSymlinkedReleaseDir(t *testing.T) {
 		}
 	}
 }
+
+// N15: fastroute saved its final session after "routing finished" but then
+// neither exited nor wrote its report. pcbpilot sees the saved line, asks
+// it to stop fastrouteSavedLinger later (not at the deadline), and uses
+// that session as the final, incomplete result with the counts it logged.
+func TestFastrouteFinalSessionWithoutExit(t *testing.T) {
+	dir := t.TempDir()
+	bin := fakeRouterBin(t, "fastroute")
+	t.Setenv(envFakeFRMode, "finished-hang")
+	old := fastrouteSavedLinger
+	fastrouteSavedLinger = 300 * time.Millisecond
+	t.Cleanup(func() { fastrouteSavedLinger = old })
+	var log strings.Builder
+	start := time.Now()
+	ses, runs, err := runFastroute(fastrouteOpts{bin: bin, timeout: 2 * time.Minute, killGrace: 3 * time.Second}, "b.dsn", filepath.Join(dir, "b"), &log)
+	if err != nil || len(runs) != 1 || ses != runs[0].Session {
+		t.Fatalf("runs %+v err %v\n%s", runs, err, log.String())
+	}
+	r := runs[0]
+	if r.Status != "partial" || !r.Final || r.CountsFrom != "log" || r.Unrouted != 5 || r.Violations != 2 {
+		t.Fatalf("run %+v\n%s", r, log.String())
+	}
+	if d := time.Since(start); d > 30*time.Second {
+		t.Fatalf("took %s: not stopped after the final session was saved", d)
+	}
+	for _, want := range []string{"asking it to stop", "using its final session", "5 unrouted / 2 violation(s) by its log"} {
+		if !strings.Contains(log.String(), want) {
+			t.Fatalf("log lacks %q:\n%s", want, log.String())
+		}
+	}
+}
+
+// The watch reads fastroute's own lines: counts from the last "best board
+// so far", the final session only when saved after "routing finished".
+func TestFastrouteLogWatch(t *testing.T) {
+	var sink strings.Builder
+	w := newFastrouteLogWatch(&sink, filepath.Join("route", "route.r0.ses"))
+	io.WriteString(w, "  1.0 INFO  saved 'route\\route.r0.ses' (1 bytes)\n")
+	if w.finalSaved() {
+		t.Fatal("a save before routing finished is a checkpoint, not the final session")
+	}
+	io.WriteString(w, "  2.0 INFO  checkpoint: best board so far (12 unrouted, 1 violations) written to 'route\\route.r0.ses'\n  3.0 INFO  routing fin")
+	io.WriteString(w, "ished in 3 s\n  3.1 INFO  saved 'route\\other.ses' (1 bytes)\n")
+	if w.finalSaved() {
+		t.Fatal("another file's save is not this run's session")
+	}
+	io.WriteString(w, "  3.2 INFO  saved 'route\\route.r0.ses' (9 bytes)\n")
+	if !w.finalSaved() {
+		t.Fatal("final session not seen")
+	}
+	if u, v, ok := w.lastCounts(); !ok || u != 12 || v != 1 {
+		t.Fatalf("counts %d %d %v", u, v, ok)
+	}
+	if !strings.Contains(sink.String(), "routing finished") {
+		t.Fatal("output not passed through")
+	}
+}

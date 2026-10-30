@@ -95,6 +95,22 @@ func fakeRouterMain(router string, args []string) int {
 			os.WriteFile(argAfter(args, "-do"), []byte(fakeSessionFor(args)), 0o644)
 			os.WriteFile(rep, []byte(report+"\n"), 0o644)
 			return 0
+		case "finished-hang": // fastroute 0.1.14 on a large board: logs its counts, "routing finished", saves the session, then neither exits nor reports until stopped
+			ses := argAfter(args, "-do")
+			sig := make(chan os.Signal, 1)
+			signal.Notify(sig, os.Interrupt)
+			fmt.Fprintf(os.Stderr, "  510.869 INFO  checkpoint: best board so far (7 unrouted, 3 violations) written to '%s'\n", ses)
+			fmt.Fprintf(os.Stderr, "  1665.799 INFO  checkpoint: best board so far (5 unrouted, 2 violations) written to '%s'\n", ses)
+			fmt.Fprintln(os.Stderr, "  1667.754 INFO  routing finished in 1640.48 s")
+			os.WriteFile(ses, []byte("(session x)\n"), 0o644)
+			fmt.Fprintf(os.Stderr, "  1667.847 INFO  saved '%s' (12 bytes)\n", strings.ReplaceAll(ses, "/", "\\"))
+			fakeReady()
+			select {
+			case <-sig:
+				return 0 // stops, still without a report
+			case <-time.After(60 * time.Second):
+				return 9
+			}
 		case "ignore-stop": // catches the stop request and keeps routing: must be killed
 			signal.Notify(make(chan os.Signal, 1), os.Interrupt)
 			fakeReady()
