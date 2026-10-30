@@ -203,6 +203,10 @@ type placer struct {
 	// curPhase is the phase running now; budgetHit the first one the
 	// PlaceOptions.Deadline cut short.
 	curPhase, budgetHit string
+	// clock replaces time.Now in rescueOver (tests); rescueEvals counts the
+	// rescue's candidate poses.
+	clock       func() time.Time
+	rescueEvals int
 }
 
 // intimateGap is the courtyard gap kept between parts that connect directly
@@ -2990,7 +2994,11 @@ const rescueGrace = 15 * time.Second
 // rescueGrace (it records the phase cut then).
 func (pl *placer) rescueOver() bool {
 	dl := pl.opt.Deadline
-	if dl.IsZero() || time.Now().Before(dl.Add(rescueGrace)) {
+	now := time.Now
+	if pl.clock != nil {
+		now = pl.clock
+	}
+	if dl.IsZero() || now().Before(dl.Add(rescueGrace)) {
 		return false
 	}
 	pl.overBudget()
@@ -3033,6 +3041,12 @@ func (pl *placer) rescuePart(d *Part, rots []float64) {
 				break
 			}
 			for k := 0; k < n; k++ {
+				// An outer ring is thousands of poses: check the stop every
+				// 64, keeping the best legal pose found so far.
+				pl.rescueEvals++
+				if k&63 == 63 && pl.rescueOver() {
+					break
+				}
 				c := pin.Add(Point{r * cs[k].X, r * cs[k].Y})
 				if rel, ok := d.relBody[normDeg(rot)]; ok && len(d.Pads) > 0 {
 					off := rel.Translate(d.Pos).Center().Sub(d.Pos)
