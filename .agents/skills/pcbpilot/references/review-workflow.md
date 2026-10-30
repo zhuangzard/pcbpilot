@@ -59,6 +59,10 @@
 | 铜上仿真（已布线） | `pcbpilot sim post-layout --board board.json --sim sim.json --intent intent.json --out post.json --report post.md` | 同左 |
 | 独立评审 | `pcbpilot review-panel --stage design --requirements <需求.md> --evidence intent.json --evidence conn.json --evidence sim.json --out-dir review/design` | 同左 |
 
+评审项全部看完后才写签名豁免时，不必重跑三位评审：`review-panel … --out-dir review/design --waivers w.json --reapply-waivers`
+用已有的 `review.json` 重算门禁（需求与证据必须与评审时逐字节相同，按 prompt SHA-256 核对；评审意见原样保留，
+只有每一项都被签名豁免覆盖才 pass）。
+
 full 档另做的审计（人工，引用上面命令的输出）：去耦（每个电源脚的电容、距离）、电源轨（电压/电流/压降与 `sim.json` 对照）、
 接口电平与上拉、复位/启动脚状态、连接器脚序 vs 需求文档。
 

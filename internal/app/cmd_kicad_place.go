@@ -28,6 +28,7 @@ type kicadPlaceOpts struct {
 	placeSeeds, candidates   int
 	seed                     int64
 	timeBudget               time.Duration
+	haloMil, haloICMil       float64
 }
 
 // kicadPlaceSeed is one placement seed in the report.
@@ -141,6 +142,8 @@ its parts need vs. what it offers), stderr warns, and the exit code is
 	c.Flags().IntVar(&o.candidates, "candidates", 3, "boards to write, best included (runners-up as <out>.seed-N.kicad_pcb)")
 	c.Flags().Int64Var(&o.seed, "seed", 1, "first placement seed")
 	c.Flags().DurationVar(&o.timeBudget, "time-budget", 8*time.Minute, "wall-time budget of the placement search (0 = none); a seed cut short returns its best so far, flagged in the report")
+	c.Flags().Float64Var(&o.haloMil, "halo-mil", 0, "extra keep-clear around every movable part (mil per side): routing room on dense boards (the placer otherwise packs for wirelength only)")
+	c.Flags().Float64Var(&o.haloICMil, "halo-ic-mil", 0, "keep-clear for parts with 6 or more pads (mil per side; replaces --halo-mil for them): room for the fan-out via ring")
 	return c
 }
 
@@ -229,6 +232,10 @@ func runKicadPlace(o kicadPlaceOpts, deps kicadPlaceDeps, stderr io.Writer) (*ki
 	}
 	// The same options as `pcb auto run --place --no-route`.
 	popt := pcbauto.PlaceOptions{Seed: o.seed}
+	if o.haloMil > 0 || o.haloICMil > 0 {
+		popt.Halo = kicadPlaceHalo(b, o.haloMil, o.haloICMil)
+		rep.Notes = append(rep.Notes, fmt.Sprintf("halo: %.1f mil per side on every part, %.1f mil on parts with 6+ pads", o.haloMil, o.haloICMil))
+	}
 	if ls := kicadLabelSpec(raw); ls != nil {
 		popt.Labels, rep.Labels = ls, ls
 		fmt.Fprintf(stderr, "placement: keeping room for each designator (%.1f mil high, %.1f mil per character)\n", ls.Height, ls.CharW)
@@ -772,4 +779,22 @@ func (pp *placeProgress) tick() {
 func (pp *placeProgress) stop() {
 	close(pp.done)
 	pp.wg.Wait()
+}
+
+// kicadPlaceHalo is the uniform routing-room keep-clear of --halo-mil /
+// --halo-ic-mil. a field board (353 parts, 4 layers): packed for wirelength only, the
+// patient side left 140 SMD pins without a fan-out and 131 connections
+// unrouted while a third of the board stayed empty.
+func kicadPlaceHalo(b *pcbauto.Board, all, ic float64) map[string]float64 {
+	h := map[string]float64{}
+	for _, p := range b.Parts {
+		v := all
+		if ic > 0 && len(p.Pads) >= 6 {
+			v = ic
+		}
+		if v > 0 {
+			h[p.Ref] = v
+		}
+	}
+	return h
 }

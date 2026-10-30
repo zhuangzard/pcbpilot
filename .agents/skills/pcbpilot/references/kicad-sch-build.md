@@ -97,6 +97,9 @@ pcbpilot kicad sch-checkpoint list --project build/                     # 回退
   不是设计数据：被改过或旧工程没记录过时不拒绝，先存进 checkpoint，报告 `warnings` 里 `WARNING: report(s) …`
   点名并给出 checkpoint 目录，再重新生成。要找回就从那个目录手工拷回（不要整体 restore 那个 checkpoint）。
 
+别的工具画的 KiCad 工程也能过同一套工程级门禁：`pcbpilot kicad sch-check --sch root.kicad_sch --engineer-grade --spec design.json`
+（spec 提供网类型、区、页、标题栏；EG-06 按区找 IC 电源脚）。
+
 delta 例子（只写意图，脚名即可）：
 
 ```json

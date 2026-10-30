@@ -798,3 +798,36 @@ func anyList(v any) []any {
 	l, _ := v.([]any)
 	return l
 }
+
+// A pour clipped to its insulation domain arrives as polygons (mil, y-up):
+// they become ONE zone (separate touching zones are KiCad zones_intersect
+// errors), built in the zone's own outline (ZONE.SetOutline of a Python
+// SHAPE_POLY_SET crashed pcbnew on a large board). Bad polygons are
+// rejected before any change.
+func TestBridgePoursClippedPolysLive(t *testing.T) {
+	tools := bridgeLiveTools(t)
+	dir := t.TempDir()
+	pcb := sharedTiny(t, dir)
+	out := filepath.Join(dir, "poured.kicad_pcb")
+	polys := [][][2]float64{
+		{{0, 0}, {400, 0}, {400, -400}, {0, -400}},
+		{{400, 0}, {800, 0}, {800, -400}, {400, -400}}, // touches the first
+	}
+	if _, err := tools.Pours(pcb, []Pour{{Net: "GND", Layer: 2, Polys: polys}}, out); err != nil {
+		t.Fatalf("clipped pour: %v", err)
+	}
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(b), `(name "pcbpilot pour GND L2")`); n != 1 {
+		t.Fatalf("%d zones named for the clipped GND pour, want one merged zone", n)
+	}
+	bad := filepath.Join(dir, "bad.kicad_pcb")
+	if _, err := tools.Pours(pcb, []Pour{{Net: "GND", Layer: 2, Polys: [][][2]float64{{{0, 0}, {1, 1}}}}}, bad); err == nil || !strings.Contains(err.Error(), "polys") {
+		t.Fatalf("a two-point polygon accepted: %v", err)
+	}
+	if _, serr := os.Stat(bad); serr == nil {
+		t.Fatal("rejected pours wrote the output board")
+	}
+}
