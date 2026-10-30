@@ -369,7 +369,8 @@ func (t *Tools) DRCNoLibraries(pcb, out string) (*DRCReport, error) {
 
 // DRCEnv is DRCSeverity with extra environment variables for kicad-cli.
 func (t *Tools) DRCEnv(pcb, out, severity string, env []string) (*DRCReport, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), BridgeTimeout)
+	limit := DRCTimeoutFor(pcb, BridgeTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
 	// A report left by an earlier run must never be read as this run's.
 	if err := os.Remove(out); err != nil && !os.IsNotExist(err) {
@@ -389,10 +390,13 @@ func (t *Tools) DRCEnv(pcb, out, severity string, env []string) (*DRCReport, err
 	// Without --exit-code-violations a non-zero exit is kicad-cli failing
 	// (board load, crash, timeout), so whatever it left in out is not a result.
 	if err != nil || rerr != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, drcTimeoutError(pcb, limit)
+		}
 		if err == nil {
 			err = rerr
 		}
-		return nil, fmt.Errorf("%w: kicad-cli pcb drc: %v: %s", ErrDRCReport, err, strings.TrimSpace(buf.String()))
+		return nil, fmt.Errorf("%w: kicad-cli pcb drc on %s: %v: %s", ErrDRCReport, pcb, err, strings.TrimSpace(buf.String()))
 	}
 	rep, err := ParseDRC(data)
 	if err != nil {
@@ -435,6 +439,9 @@ type Pour struct {
 	Net          string  `json:"net"`
 	Layer        int     `json:"layer"`
 	ClearanceMil float64 `json:"clearanceMil,omitempty"`
+	// Polys (mil, y-up) replace the board outline, merged into one zone
+	// (a pour clipped to its insulation domain).
+	Polys [][][2]float64 `json:"polys,omitempty"`
 }
 
 // Pours replaces pcbpilot's pours on pcb with ps, fills and saves out.

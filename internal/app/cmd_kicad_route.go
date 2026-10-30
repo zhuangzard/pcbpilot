@@ -205,19 +205,22 @@ const noReviewMatch = "--no-review"
 
 // kicadRun is one kicad route execution.
 type kicadRun struct {
-	o       kicadRouteOpts
-	kt      *kicad.Tools
-	in      *designIntent
-	waivers []gateWaiver
-	summary map[string]any
-	gates   []gateResult
-	work    string
-	step    int
-	classes []kicad.NetClass
-	route   *routeResult
-	conn    string // schematic connectivity JSON (with --sch)
-	netlist *kicad.SchNetlist
-	stderr  io.Writer
+	// stepGates: cannot-check gates from post-route steps whose own check
+	// did not run (postRoute resets them, qualityGates reports them).
+	stepGates []gateResult
+	o         kicadRouteOpts
+	kt        *kicad.Tools
+	in        *designIntent
+	waivers   []gateWaiver
+	summary   map[string]any
+	gates     []gateResult
+	work      string
+	step      int
+	classes   []kicad.NetClass
+	route     *routeResult
+	conn      string // schematic connectivity JSON (with --sch)
+	netlist   *kicad.SchNetlist
+	stderr    io.Writer
 	// inputDRC: the input board's own DRC errors (rule|message), to mark
 	// what routing did not cause.
 	inputDRC map[string]bool
@@ -661,6 +664,7 @@ func (r *kicadRun) run() error {
 func (r *kicadRun) postRoute(board string, inSnap *boardSnapshot) (string, bool, error) {
 	o := r.o
 	var err error
+	r.stepGates = nil
 	// 4. Post-route copper: via arrays, widen to intent, pours, widen nets, silk.
 	if board, err = r.viaArrays(board); err != nil {
 		return board, false, err
@@ -677,16 +681,21 @@ func (r *kicadRun) postRoute(board string, inSnap *boardSnapshot) (string, bool,
 	board = nb
 	r.lap("widen to intent (+ DRC step-back)")
 	if ps := kicadPourPlan(o, inSnap); len(ps) > 0 {
-		out := r.next("pours")
-		res, err := r.kt.Pours(board, ps, out)
-		r.summary["pours"] = map[string]any{"plan": ps, "result": res}
-		if err != nil {
+		if ps, err = r.clipPoursToIso(board, ps); err != nil {
 			return board, false, err
 		}
-		board = out
-		fmt.Fprintf(r.stderr, "pours: %d zone(s) added and filled\n", len(ps))
-		if board, err = r.starvedThermals(board); err != nil {
-			return board, false, err
+		if len(ps) > 0 { // none left: every pour clipped away, the pour-clip gate failed
+			out := r.next("pours")
+			res, err := r.kt.Pours(board, ps, out)
+			r.summary["pours"] = map[string]any{"plan": ps, "result": res}
+			if err != nil {
+				return board, false, err
+			}
+			board = out
+			fmt.Fprintf(r.stderr, "pours: %d zone(s) added and filled\n", len(ps))
+			if board, err = r.starvedThermals(board); err != nil {
+				return board, false, err
+			}
 		}
 	}
 	r.lap("pours + zone fill + thermals")
@@ -788,6 +797,16 @@ func (r *kicadRun) prepareRoute(classed string, reqs map[string]kicad.NetRequire
 	// a fine-pitch pad (every intent class is no-neck-down).
 	if prepared, err = r.planEscapes(inSnap, prepared); err != nil {
 		return "", 0, fmt.Errorf("pre-route gate: escapes: %w", err)
+	}
+	// fastroute takes the first via of the list for every net: largest
+	// first, shrunk to each net's class via after the import
+	// (kicad_route_vias.go).
+	var viaOrder []string
+	var routerVia *dsnVia
+	prepared, viaOrder, routerVia = dsnRouterVia(prepared)
+	r.summary["dsnViaOrder"] = viaOrder
+	if routerVia != nil {
+		r.summary["routerViaPadstack"] = map[string]any{"name": routerVia.name, "diameterUm": routerVia.dia, "drillUm": routerVia.drill}
 	}
 	dsnPath = filepath.Join(o.outDir, "route.dsn")
 	if err := os.WriteFile(dsnPath, []byte(prepared), 0o644); err != nil {
@@ -982,7 +1001,12 @@ func (r *kicadRun) widen(board, what string, plan func([]specctra.Track, []widen
 	for round := 0; round < 2; round++ {
 		rep, err := r.kt.DRC(out, filepath.Join(r.work, fmt.Sprintf("%02d-widen-drc%d.json", r.step, round)))
 		if err != nil {
-			return ops, out, err
+			// The widened tracks were planned clear of their neighbours; the
+			// KiCad step-back check did not run: kept, and said so (the
+			// routed board's own DRC gate judges the copper).
+			fmt.Fprintf(r.stderr, "widen: cannot check the widened tracks with KiCad DRC (%v); kept as planned\n", err)
+			r.stepGates = append(r.stepGates, gateResult{Gate: "widen-drc", Detail: fmt.Sprintf("cannot check: the KiCad DRC step-back of %s did not run: %v", what, err)})
+			return ops, out, nil
 		}
 		bad := map[string]bool{}
 		for _, v := range rep.Violations {
@@ -1112,6 +1136,12 @@ func (r *kicadRun) qualityGates(board string) (bool, error) {
 		if g.Gate == "design-review" {
 			keep = append(keep, g)
 		}
+	}
+	// Post-route steps whose own check could not run (a DRC that timed out):
+	// cannot-check gates of this board.
+	keep = append(keep, r.stepGates...)
+	if r.route != nil {
+		keep = append(keep, r.route.Gates...)
 	}
 	r.gates = keep
 	routed := filepath.Join(o.outDir, "routed.kicad_pcb")
@@ -1320,7 +1350,7 @@ func designReviewGate(stage string, o reviewRunOpts, evidence []string, waivers 
 	if sha, err := reviewInputSHA(stage, o.requirements, evidence, reviewMaxBytes); err == nil {
 		var old reviewRecord
 		if b, err := os.ReadFile(filepath.Join(dir, "review.json")); err == nil && json.Unmarshal(b, &old) == nil &&
-			old.Stage == stage && old.InputSHA256 == sha && old.Gate.Pass {
+			old.Stage == stage && old.InputSHA256 == sha && old.Gate.Pass && reviewFilesChanged(&old, o.requirements, evidence) == "" {
 			g := old.Gate
 			g.Detail = "reused " + filepath.Join(dir, "review.json") + " (same inputs): " + g.Detail
 			summary["review-"+stage] = filepath.Join(dir, "review.json")
@@ -1417,7 +1447,14 @@ var reStarvedPad = regexp.MustCompile(`[Pp]ad (\S+) \[[^\]]*\] of (\S+)`)
 func (r *kicadRun) starvedThermals(board string) (string, error) {
 	rep, err := r.kt.DRC(board, filepath.Join(r.work, fmt.Sprintf("%02d-pours-drc.json", r.step)))
 	if err != nil {
-		return board, err
+		// An optional repair step: its DRC not running (a timeout on a
+		// large board) never stops the route — the pours stay, the gate
+		// says the check did not happen, the routed board and every other
+		// gate still come.
+		fmt.Fprintf(r.stderr, "thermals: cannot check starved thermals (%v); pours kept as filled\n", err)
+		r.summary["starvedThermals"] = map[string]any{"error": err.Error()}
+		r.stepGates = append(r.stepGates, gateResult{Gate: "starved-thermals", Detail: "cannot check: the DRC that finds starved thermal pads did not run: " + err.Error()})
+		return board, nil
 	}
 	seen := map[string]bool{}
 	var ops []map[string]any
@@ -1822,4 +1859,78 @@ func boardConnections(s *boardSnapshot) int {
 func fastrouteAutoMaxTime(conns int) time.Duration {
 	d := 10*time.Minute + time.Duration(conns)*300*time.Millisecond
 	return min(d, 40*time.Minute).Round(time.Second)
+}
+
+// clipPoursToIso trims the board-outline pours to their net's insulation
+// domain (pcbauto.ClipPoursToIso). Without it the patient GND / +3V3 pours of
+// a field board covered the SELV strip: 1030 isolation errors on a 2 x MOPP
+// board. A planned pour clipped to nothing is never dropped silently: the
+// pour-clip gate fails and names it (the plane it stood for is missing).
+func (r *kicadRun) clipPoursToIso(board string, ps []kicad.Pour) ([]kicad.Pour, error) {
+	if r.o.intent == "" {
+		return ps, nil
+	}
+	iraw, err := os.ReadFile(r.o.intent)
+	if err != nil {
+		return ps, err
+	}
+	in, err := pcbauto.ParseIntent(iraw)
+	if err != nil {
+		return ps, fmt.Errorf("pours: --intent %s: %w", r.o.intent, err)
+	}
+	if len(in.Pairs) == 0 {
+		return ps, nil
+	}
+	_, raw, err := r.snapshot(board)
+	if err != nil {
+		return ps, err
+	}
+	planes := make([]pcbauto.PlaneRegion, len(ps))
+	for i, p := range ps {
+		planes[i] = pcbauto.PlaneRegion{Net: p.Net, Layer: p.Layer}
+	}
+	clipped, lost, notes, err := pcbauto.ClipPoursToIso(raw, in, planes)
+	if err != nil {
+		return ps, err
+	}
+	var out []kicad.Pour
+	for _, pl := range clipped {
+		var src kicad.Pour
+		for _, p := range ps {
+			if p.Net == pl.Net && p.Layer == pl.Layer {
+				src = p
+			}
+		}
+		for _, poly := range pl.Polys {
+			var pts [][2]float64
+			for _, pt := range poly {
+				pts = append(pts, [2]float64{pt.X, pt.Y})
+			}
+			src.Polys = append(src.Polys, pts)
+		}
+		out = append(out, src)
+	}
+	for _, n := range notes {
+		fmt.Fprintln(r.stderr, "pours: "+n)
+	}
+	r.summary["pourClip"] = notes
+	r.add(pourClipGate(len(ps), lost, notes))
+	return out, nil
+}
+
+// pourClipGate: every planned pour keeps some area in its insulation
+// domain. A pour clipped to nothing fails the gate with its net and layer
+// (the plane it stood for — a return path, a shield — is missing; fix the
+// domain territory or the pour plan), it is never silently omitted.
+func pourClipGate(planned int, lost []pcbauto.PlaneRegion, notes []string) gateResult {
+	g := gateResult{Gate: "pour-clip", Pass: len(lost) == 0}
+	for _, p := range lost {
+		g.Items = append(g.Items, fmt.Sprintf("%s on layer %d: clipped to nothing in its insulation domain — no pour written", p.Net, p.Layer))
+	}
+	if g.Pass {
+		g.Detail = fmt.Sprintf("%d planned pour(s) kept in their insulation domain (%d clipped)", planned, len(notes))
+	} else {
+		g.Detail = fmt.Sprintf("%d of %d planned pour(s) clipped to nothing in their insulation domain", len(lost), planned)
+	}
+	return g
 }

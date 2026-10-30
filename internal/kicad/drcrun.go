@@ -124,7 +124,8 @@ func RunDRC(o DRCRunOptions) (*DRCRun, error) {
 		args = append(args, "--schematic-parity")
 	}
 	args = append(args, "-o", out, staged)
-	ctx, cancel := context.WithTimeout(context.Background(), DRCTimeout)
+	limit := DRCTimeoutFor(pcb, DRCTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, o.CLI, args...)
 	cmd.Dir = tmp
@@ -139,7 +140,7 @@ func RunDRC(o DRCRunOptions) (*DRCRun, error) {
 	// Without --exit-code-violations a non-zero exit is kicad-cli failing.
 	if err != nil || rerr != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			err = fmt.Errorf("timed out after %s", DRCTimeout)
+			return nil, drcTimeoutError(pcb, limit)
 		} else if err == nil {
 			err = rerr
 		}

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/zhuangzard/pcbpilot/internal/kicad"
 )
 
 func TestSignoffOffline(t *testing.T) {
@@ -288,5 +290,17 @@ func TestSignoffCopperUnroutedCannotCheck(t *testing.T) {
 	// The routed fixture is judged on its copper, not called uncheckable.
 	if g := copperGate(filepath.Join("..", "kicad", "testdata", "snapshot.json")); strings.Contains(g.Detail, "cannot check") {
 		t.Fatalf("routed board: %+v", g)
+	}
+}
+
+// kicad lcsc --check names why footprints are not assembled, so its count
+// can be read against signoff-parts (which applies no exclusions).
+func TestLcscAssemblySummary(t *testing.T) {
+	got := lcscAssemblySummary([]kicad.Part{{Ref: "R1"}, {Ref: "C9", DNP: true}, {Ref: "H1", ExcludeBOM: true, ExcludePos: true}, {Ref: "TP1", ExcludePos: true}})
+	if got != "4 footprints, 1 assembled (3 not assembled: 1 DNP, 1 excluded from BOM, 1 excluded from the position file)" {
+		t.Fatalf("%q", got)
+	}
+	if got := lcscAssemblySummary([]kicad.Part{{Ref: "R1"}}); got != "1 footprints, 1 assembled" {
+		t.Fatalf("%q", got)
 	}
 }

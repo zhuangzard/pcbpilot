@@ -147,6 +147,13 @@ type Component struct {
 	Placement *Placement `json:"placement,omitempty"`
 	PageID    string     `json:"pageId,omitempty"`
 	PageName  string     `json:"pageName,omitempty"`
+	// DNP marks a part that is not fitted (KiCad "Do not populate"): it
+	// stays in the netlist but carries no current and is not on the BOM.
+	DNP bool `json:"dnp,omitempty"`
+	// DNPField is a symbol field named "DNP" set while the DNP flag is off:
+	// the part is fitted (the flag decides, pkg/population) and consumers
+	// warn that the note disagrees.
+	DNPField string `json:"dnpField,omitempty"`
 }
 type Placement struct {
 	// X/Y and orientation are part of the authored 1.4 placement plan. BBox is

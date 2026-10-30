@@ -922,6 +922,12 @@ type fastrouteRun struct {
 	Error  string `json:"error,omitempty"`
 	// Retry marks the single-threaded rerun after a crash.
 	Retry bool `json:"singleThreadRetry,omitempty"`
+	// Final: a partial run whose session is the one fastroute saved after
+	// "routing finished" (not just a checkpoint). CountsFrom "log": with no
+	// report, Unrouted / Violations are the last counts fastroute logged
+	// (its "best board so far" line), not a report's.
+	Final      bool   `json:"finalSession,omitempty"`
+	CountsFrom string `json:"countsFrom,omitempty"`
 	// Fixable are the clearance violations the router itself marks fixable
 	// (pre-existing pin-pin overlaps are unfixable); they reach native DRC.
 	Fixable     int      `json:"fixableViolations"`
@@ -1084,7 +1090,15 @@ func runFastrouteRounds(o fastrouteOpts, dsn, base string, stderr io.Writer) (st
 				fmt.Fprintf(stderr, "fastroute round %d stopped at its time limit without a report (%s); using round %d\n", round, run.Error, prev.Round)
 				return prev.Session, runs, nil
 			}
-			fmt.Fprintf(stderr, "fastroute round %d stopped at its time limit without a report (%s); using its last checkpoint session %s (incomplete: the board's connectivity counts what is unrouted)\n", round, run.Error, run.Session)
+			what := "its last checkpoint session"
+			if run.Final {
+				what = "its final session"
+			}
+			counts := ""
+			if run.CountsFrom == "log" {
+				counts = fmt.Sprintf(", %d unrouted / %d violation(s) by its log", run.Unrouted, run.Violations)
+			}
+			fmt.Fprintf(stderr, "fastroute round %d stopped without a report (%s); using %s %s (incomplete%s: the board's connectivity counts what is unrouted)\n", round, run.Error, what, run.Session, counts)
 			return run.Session, runs, nil
 		}
 		if run.Status != "ok" {
@@ -1167,7 +1181,12 @@ func fastrouteOnce(o fastrouteOpts, dsn, ses, report, initial string, round int,
 	ctx, cancel := context.WithTimeout(parent, deadline)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, o.bin, args...)
-	cmd.Stdout, cmd.Stderr = stderr, stderr
+	// Watch its log: a run that saved its final session after "routing
+	// finished" but neither exits nor writes its report (fastroute 0.1.14
+	// on a large board) is asked to stop after fastrouteSavedLinger instead
+	// of idling until the deadline.
+	watch := newFastrouteLogWatch(stderr, ses)
+	cmd.Stdout, cmd.Stderr = watch, watch
 	// fastroute writes its best board when asked to stop (SIGINT on Unix,
 	// Ctrl+Break on Windows: fastroute_stop_*.go); give it time to, then
 	// kill it.
@@ -1177,10 +1196,37 @@ func fastrouteOnce(o fastrouteOpts, dsn, ses, report, initial string, round int,
 		cmd.WaitDelay = fastrouteKillGrace
 	}
 	start := time.Now()
+	done := make(chan struct{})
+	lingerStop := make(chan struct{})
+	go func() {
+		select {
+		case <-done:
+			return
+		case <-watch.saved:
+		}
+		t := time.NewTimer(fastrouteSavedLinger)
+		defer t.Stop()
+		select {
+		case <-done:
+		case <-t.C:
+			fmt.Fprintf(stderr, "fastroute saved its final session %s but has not exited %s later; asking it to stop\n", ses, fastrouteSavedLinger)
+			close(lingerStop)
+			cancel() // the graceful stop (prepareFastrouteCmd), then the kill after WaitDelay
+		}
+	}()
 	err := runFastrouteCmd(cmd, stderr)
+	close(done)
+	lingered := false
+	select {
+	case <-lingerStop:
+		lingered = true
+	default:
+	}
 	run := fastrouteRun{Round: round, Session: ses, Report: report, Seconds: time.Since(start).Round(time.Second).Seconds(),
 		Status: "ok", Unrouted: -1, Violations: -1, Fixable: -1}
 	switch {
+	case lingered:
+		run.Status, run.Error = "timeout", fmt.Sprintf("routing finished and its final session was saved, but it did not exit within %s; stopped by pcbpilot", fastrouteSavedLinger)
 	case err != nil && ctx.Err() != nil && parent.Err() == nil:
 		run.Status, run.Error = "timeout", fmt.Sprintf("stopped by pcbpilot after %s (--max-time %s, --router-timeout %s)", deadline, o.maxTime, o.timeout)
 	case err != nil && ctx.Err() != nil:
@@ -1197,12 +1243,18 @@ func fastrouteOnce(o fastrouteOpts, dsn, ses, report, initial string, round int,
 		// --max-time ending without its report) with a session on disk:
 		// its last checkpoint is a usable, incomplete result.
 		if st, serr := os.Stat(ses); serr == nil && st.Size() > 0 && parent.Err() == nil &&
-			(run.Status == "timeout" || o.maxTime > 0 && time.Since(start) >= o.maxTime) {
+			(run.Status == "timeout" || o.maxTime > 0 && time.Since(start) >= o.maxTime || watch.finalSaved()) {
 			run.Status = "partial"
 			if run.Error != "" {
 				run.Error += "; "
 			}
 			run.Error += "no report: " + rerr.Error()
+			// The session is the router's final board when it said so;
+			// its counts are the last ones it logged (no report to read).
+			run.Final = watch.finalSaved()
+			if u, v, ok := watch.lastCounts(); ok {
+				run.Unrouted, run.Violations, run.CountsFrom = u, v, "log"
+			}
 			return run
 		}
 		if run.Status == "ok" {

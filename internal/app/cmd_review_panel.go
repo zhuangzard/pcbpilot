@@ -46,9 +46,13 @@ type reviewRequirement struct {
 
 // reviewRecord is what the gate stores (review.json).
 type reviewRecord struct {
-	Stage       string          `json:"stage"`
-	InputSHA256 string          `json:"inputSha256"`
-	Inputs      []string        `json:"inputs"`
+	Stage       string   `json:"stage"`
+	InputSHA256 string   `json:"inputSha256"`
+	Inputs      []string `json:"inputs"`
+	// FilesSHA256 is the SHA-256 of every complete input file, in Inputs
+	// order. InputSHA256 hashes the prompt, which --max-bytes may cut: a
+	// change past the cut keeps the prompt hash, never these.
+	FilesSHA256 []string        `json:"filesSha256,omitempty"`
 	Reviewers   []reviewVerdict `json:"reviewers"`
 	Gate        gateResult      `json:"gate"`
 	At          string          `json:"at"`
@@ -291,25 +295,12 @@ func hasNotMet(v reviewVerdict) bool {
 // runReviewPanel runs the reviewers in parallel and writes outDir/review.json
 // and one raw transcript per reviewer.
 func runReviewPanel(stage string, reqFiles, evFiles, reviewers []string, outDir string, timeout time.Duration, limit int, waivers []gateWaiver, stderr io.Writer) (*reviewRecord, error) {
-	read := func(files []string) (map[string]string, error) {
-		m := map[string]string{}
-		for _, f := range files {
-			b, err := os.ReadFile(f)
-			if err != nil {
-				return nil, err
-			}
-			m[filepath.Base(f)] = string(b)
-		}
-		return m, nil
-	}
 	if len(reqFiles) == 0 {
 		return nil, fmt.Errorf("--requirements is required: the review judges the design against the project's own requirements")
 	}
-	reqs, err := read(reqFiles)
-	if err != nil {
-		return nil, err
-	}
-	ev, err := read(evFiles)
+	// Each input is read once: the prompt and the full-file hashes come
+	// from the same bytes, before any reviewer starts.
+	reqs, ev, files, err := readReviewInputs(reqFiles, evFiles)
 	if err != nil {
 		return nil, err
 	}
@@ -360,16 +351,96 @@ func runReviewPanel(stage string, reqFiles, evFiles, reviewers []string, outDir 
 	g := reviewGate(vs, reviewers)
 	applyWaivers(&g, waivers)
 	rec := &reviewRecord{Stage: stage, InputSHA256: fmt.Sprintf("%x", sum), Inputs: append(append([]string{}, reqFiles...), evFiles...),
-		Reviewers: vs, Gate: g, At: time.Now().UTC().Format(time.RFC3339)}
+		FilesSHA256: files, Reviewers: vs, Gate: g, At: time.Now().UTC().Format(time.RFC3339)}
+	// The verdicts belong to the bytes they were given: an input that
+	// changed while the reviewers ran (also past the prompt's cut) is not
+	// recorded as reviewed.
+	if why := reviewFilesChanged(rec, reqFiles, evFiles); why != "" {
+		return nil, fmt.Errorf("an input changed during the review (%s); review.json not written - run the review again", why)
+	}
 	blob, _ := json.MarshalIndent(rec, "", "  ")
 	return rec, os.WriteFile(filepath.Join(outDir, "review.json"), append(blob, '\n'), 0o644)
 }
+
+// readReviewInputs reads every requirement and evidence file once and
+// returns their contents by base name (the prompt's input) and the SHA-256
+// of each complete file in requirements-then-evidence order.
+func readReviewInputs(reqFiles, evFiles []string) (reqs, ev map[string]string, files []string, err error) {
+	read := func(paths []string) (map[string]string, error) {
+		m := map[string]string{}
+		for _, f := range paths {
+			b, err := os.ReadFile(f)
+			if err != nil {
+				return nil, err
+			}
+			m[filepath.Base(f)] = string(b)
+			files = append(files, fmt.Sprintf("%x", sha256.Sum256(b)))
+		}
+		return m, nil
+	}
+	if reqs, err = read(reqFiles); err != nil {
+		return nil, nil, nil, err
+	}
+	if ev, err = read(evFiles); err != nil {
+		return nil, nil, nil, err
+	}
+	return reqs, ev, files, nil
+}
+
+// reapplyReviewWaivers recomputes the gate of an existing review.json with a new
+// waiver set, without running the reviewers again. The requirement and evidence
+// files must produce exactly the prompt that was reviewed (same input SHA-256);
+// the reviewers' verdicts are taken as recorded, never edited.
+func reapplyReviewWaivers(stage string, reqFiles, evFiles []string, outDir string, limit int, waivers []gateWaiver) (*reviewRecord, error) {
+	path := filepath.Join(outDir, "review.json")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("--reapply-waivers: %w", err)
+	}
+	var rec reviewRecord
+	if err := json.Unmarshal(b, &rec); err != nil {
+		return nil, fmt.Errorf("--reapply-waivers: %s: %w", path, err)
+	}
+	// Each input is read once: the prompt hash and the full-file hashes
+	// are both checked against these bytes.
+	reqs, ev, files, err := readReviewInputs(reqFiles, evFiles)
+	if err != nil {
+		return nil, err
+	}
+	sum := fmt.Sprintf("%x", sha256.Sum256([]byte(reviewPrompt(stage, reqs, ev, limit))))
+	if rec.Stage != stage || rec.InputSHA256 != sum {
+		return nil, fmt.Errorf("--reapply-waivers: the requirements/evidence differ from the reviewed input (sha256 %s, review.json %s) - run the review again", sum, rec.InputSHA256)
+	}
+	paths := append(append([]string{}, reqFiles...), evFiles...)
+	if why := reviewHashesDiffer(rec.FilesSHA256, files, paths); why != "" {
+		return nil, fmt.Errorf("--reapply-waivers: %s - run the review again", why)
+	}
+	var names []string
+	for _, v := range rec.Reviewers {
+		names = append(names, v.Reviewer)
+	}
+	g := reviewGate(rec.Reviewers, names)
+	applyWaivers(&g, waivers)
+	rec.Gate = g
+	reviewBeforeWrite()
+	// The files must still be the ones checked above.
+	if why := reviewFilesChanged(&rec, reqFiles, evFiles); why != "" {
+		return nil, fmt.Errorf("--reapply-waivers: an input changed while the gate was recomputed (%s); review.json not written - run again", why)
+	}
+	blob, _ := json.MarshalIndent(&rec, "", "  ")
+	return &rec, os.WriteFile(path, append(blob, '\n'), 0o644)
+}
+
+// reviewBeforeWrite runs just before reapplyReviewWaivers re-checks the
+// inputs and writes review.json (a test seam for a change in between).
+var reviewBeforeWrite = func() {}
 
 func newReviewPanelCmd(stdout, stderr io.Writer) *cobra.Command {
 	var reqFiles, evFiles []string
 	var reviewersCSV, outDir, stage, waiverPath string
 	var timeout time.Duration
 	var limit int
+	var reapply bool
 	c := &cobra.Command{
 		Use:   "review-panel",
 		Short: "Hard gate: Codex, Kimi and Claude Code review the design against the project requirements",
@@ -382,7 +453,12 @@ Each returns a JSON verdict per requirement ID. The gate PASSES only when all
 reviewers answered and none reports a not_met requirement or a blocking
 finding; a missing, timed-out or unparsable reviewer FAILS it. Results:
 --out-dir/{review.json, prompt.md, reviewer_<name>.md}. Signed waivers
-({gate:"design-review", match, reason, by}) are the only override.`,
+({gate:"design-review", match, reason, by}) are the only override.
+
+--reapply-waivers recomputes the gate of --out-dir/review.json with --waivers
+without running the reviewers again; the requirements and evidence must be
+byte-identical to the reviewed input (the prompt SHA-256 and the SHA-256 of
+every complete input file are checked, so a change past --max-bytes counts).`,
 		Args: cobra.NoArgs,
 		Example: `  pcbpilot review-panel --stage design \
     --requirements 03_Requirement/REQUIREMENTS.md --requirements 03_Requirement/CONNECTOR_PINOUT.md \
@@ -399,7 +475,12 @@ finding; a missing, timed-out or unparsable reviewer FAILS it. Results:
 					reviewers = append(reviewers, r)
 				}
 			}
-			rec, err := runReviewPanel(stage, reqFiles, evFiles, reviewers, outDir, timeout, limit, waivers, stderr)
+			var rec *reviewRecord
+			if reapply {
+				rec, err = reapplyReviewWaivers(stage, reqFiles, evFiles, outDir, limit, waivers)
+			} else {
+				rec, err = runReviewPanel(stage, reqFiles, evFiles, reviewers, outDir, timeout, limit, waivers, stderr)
+			}
 			if err != nil {
 				return err
 			}
@@ -420,8 +501,54 @@ finding; a missing, timed-out or unparsable reviewer FAILS it. Results:
 	c.Flags().DurationVar(&timeout, "timeout", 20*time.Minute, "per-reviewer time limit")
 	c.Flags().IntVar(&limit, "max-bytes", 120000, "per-file byte limit in the prompt (truncation is stated in the prompt)")
 	c.Flags().StringVar(&waiverPath, "waivers", "", "signed waivers JSON")
+	c.Flags().BoolVar(&reapply, "reapply-waivers", false, "recompute the gate of --out-dir/review.json with --waivers (same input, reviewers not run again)")
 	return c
 }
 
 // reviewerRawFile is the file a reviewer's raw reply is saved to.
 func reviewerRawFile(name string) string { return "reviewer_" + name + ".md" }
+
+// reviewFilesSHA hashes every complete input file (requirements, then
+// evidence), independent of the prompt and its --max-bytes cut.
+func reviewFilesSHA(reqFiles, evFiles []string) ([]string, error) {
+	var out []string
+	for _, f := range append(append([]string{}, reqFiles...), evFiles...) {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, fmt.Sprintf("%x", sha256.Sum256(b)))
+	}
+	return out, nil
+}
+
+// reviewFilesChanged says why rec's verdicts do not belong to these files:
+// a file differs from the reviewed one (also past the prompt's cut), the
+// file list differs, or rec predates the per-file hashes. "" = unchanged.
+func reviewFilesChanged(rec *reviewRecord, reqFiles, evFiles []string) string {
+	if len(rec.FilesSHA256) == 0 {
+		return reviewHashesDiffer(nil, nil, nil)
+	}
+	got, err := reviewFilesSHA(reqFiles, evFiles)
+	if err != nil {
+		return err.Error()
+	}
+	return reviewHashesDiffer(rec.FilesSHA256, got, append(append([]string{}, reqFiles...), evFiles...))
+}
+
+// reviewHashesDiffer compares recorded full-file hashes with the hashes of
+// the files at paths; "" when every one matches.
+func reviewHashesDiffer(recorded, got, paths []string) string {
+	if len(recorded) == 0 {
+		return "review.json has no per-file hashes (an older review), so a change past the prompt's --max-bytes cut cannot be ruled out"
+	}
+	if len(got) != len(recorded) {
+		return fmt.Sprintf("%d input file(s), the review had %d", len(got), len(recorded))
+	}
+	for i := range got {
+		if got[i] != recorded[i] {
+			return fmt.Sprintf("%s differs from the reviewed file (sha256 %s, review.json %s)", paths[i], got[i], recorded[i])
+		}
+	}
+	return ""
+}

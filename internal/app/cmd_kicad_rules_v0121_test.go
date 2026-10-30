@@ -336,3 +336,58 @@ func TestKicadRulesPadClearanceShortVsNetTie(t *testing.T) {
 		t.Fatalf("items:\n%s", items)
 	}
 }
+
+// A pair whose creepage equals its clearance gets no creepage constraint
+// (implied by the clearance), and the rule still verifies.
+func TestKicadRulesCreepageImpliedByClearance(t *testing.T) {
+	f := newRulesFixture(t)
+	in := strings.Replace(rulesTestIntent, `"clearanceMm":2,"creepageMm":3`, `"clearanceMm":2,"creepageMm":2`, 1)
+	if err := os.WriteFile(f.o.intent, []byte(in), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.o.apply = true
+	rep, code, stderr := runRules(t, f.o)
+	if code != 0 {
+		t.Fatalf("apply exit %d %+v\n%s", code, rep.Checks, stderr)
+	}
+	dru, _ := os.ReadFile(boardSibling(f.o.pcb, ".kicad_dru"))
+	if strings.Contains(string(dru), "creepage") || !strings.Contains(string(dru), "(constraint clearance (min 2mm))") {
+		t.Fatalf("dru:\n%s", dru)
+	}
+	c := f.o
+	c.apply, c.check, c.stage = false, true, "placed"
+	rep, _, _ = runRules(t, c)
+	if g := checkOf(rep, "effective-rules"); g.Status != gate.Pass {
+		t.Fatalf("effective-rules %+v", g)
+	}
+	if !isoCreepageWritten(2, 3) || isoCreepageWritten(2, 2) || isoCreepageWritten(3, 2) {
+		t.Fatal("isoCreepageWritten")
+	}
+}
+
+// copper-widths accepts kicad route's pad escapes (its intent-widths rule):
+// a narrow stub from a pad above the floor is info, the same stub far from
+// any pad still fails.
+func TestKicadRulesCopperWidthsPadEscape(t *testing.T) {
+	f := newRulesFixture(t)
+	a := f.o
+	a.apply = true
+	if _, code, _ := runRules(t, a); code != 0 {
+		t.Fatal(code)
+	}
+	// VCC: J1 pad at (200,200) 60×60; a 9 mil, 20 mil long stub from the pad
+	// edge (above the 8 mil floor, below the 21.65 mil width).
+	stub := `{"primitiveId":"t-esc","net":"VCC","layer":1,"startX":230,"startY":200,"endX":250,"endY":200,"lineWidth":9},`
+	far := `{"primitiveId":"t-far","net":"VCC","layer":1,"startX":600,"startY":600,"endX":620,"endY":600,"lineWidth":9},`
+	snap := strings.Replace(rulesTestSnap, `"lines":[`, `"lines":[`+stub+far, 1)
+	snap = strings.Replace(snap, `{"net":"VCC","x":200,"y":200,"width":60,"height":60}`, `{"net":"VCC","layer":1,"x":200,"y":200,"width":60,"height":60,"shape":["RECT",60,60]}`, 1)
+	f.fake.snap = []byte(snap)
+	c := f.o
+	c.check = true
+	rep, _, _ := runRules(t, c)
+	g := checkOf(rep, "copper-widths")
+	items, info := strings.Join(g.Items, "\n"), strings.Join(g.Info, "\n")
+	if strings.Contains(items, "t-esc") || !strings.Contains(info, "pad escape") || !strings.Contains(items, "t-far") {
+		t.Fatalf("items:\n%s\ninfo:\n%s", items, info)
+	}
+}

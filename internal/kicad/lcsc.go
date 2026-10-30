@@ -19,6 +19,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/zhuangzard/pcbpilot/pkg/population"
 )
 
 // LCSCFieldNames are the symbol/footprint field names accepted as the LCSC
@@ -69,6 +71,10 @@ type SchPart struct {
 	Ref, Value, Footprint string
 	DNP, ExcludeBOM       bool
 	LCSC, LCSCField       string
+	// DNPText is a symbol field named "DNP" (a note such as "backup
+	// footprint"). It is not the flag: DNP is KiCad's own flag
+	// (pkg/population); a set field with the flag off is warned about.
+	DNPText string
 }
 
 // schBOMFields are passed to `kicad-cli sch export bom --fields`.
@@ -111,7 +117,16 @@ func ParseSchBOM(b []byte) ([]SchPart, error) {
 			}
 		}
 		sp := SchPart{Value: fields["Value"], Footprint: fields["Footprint"],
-			DNP: fields["DNP"] != "", ExcludeBOM: fields["EXCLUDE_FROM_BOM"] != ""}
+			ExcludeBOM: fields["EXCLUDE_FROM_BOM"] != ""}
+		// The ${DNP} column is KiCad's flag rendered as "DNP" — unless a
+		// symbol field named DNP shadows it with its own text. Without the
+		// netlist (ReadSchematicParts reads the flag from it) only KiCad's
+		// rendering counts as the flag.
+		if v := strings.TrimSpace(fields["DNP"]); strings.EqualFold(v, "DNP") {
+			sp.DNP = true
+		} else {
+			sp.DNPText = v
+		}
 		sp.LCSC, sp.LCSCField = LookupLCSC(fields)
 		// Grouped rows ("R1,R2") are split defensively even though --group-by ""
 		// already yields one row per reference.
@@ -158,12 +173,58 @@ func ReadSchematicParts(cli, sch string) ([]SchPart, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ParseSchBOM(b)
+	rows, err := ParseSchBOM(b)
+	if err != nil {
+		return nil, err
+	}
+	// KiCad's DNP flag itself: the BOM's ${DNP} column can be shadowed by a
+	// symbol field of that name; the netlist carries the flag apart.
+	nl, err := exportSchNetlistWith(cli, sch)
+	if err != nil {
+		return nil, fmt.Errorf("reading the DNP flags: %w", err)
+	}
+	return ApplyNetlistPopulation(rows, nl), nil
+}
+
+// ApplyNetlistPopulation takes each row's DNP from KiCad's flag in the
+// netlist and its "DNP" field text from the symbol (pkg/population).
+//
+// Every netlist component is kept, also one the BOM export omits (kicad-cli
+// leaves excluded-from-BOM symbols out): it gets a row with its flag and
+// ExcludeBOM set, so a reference that exists in the schematic is always
+// judged by the schematic's flags, never by the board-only rule.
+func ApplyNetlistPopulation(rows []SchPart, nl *SchNetlist) []SchPart {
+	have := map[string]bool{}
+	byRef := map[string]SchNetComp{}
+	for _, c := range nl.Components {
+		byRef[c.Ref] = c
+	}
+	for i := range rows {
+		have[rows[i].Ref] = true
+		if c, ok := byRef[rows[i].Ref]; ok {
+			rows[i].DNP = c.DNP
+			rows[i].DNPText = population.Field(c.Fields)
+			rows[i].ExcludeBOM = rows[i].ExcludeBOM || c.ExcludeBOM
+		}
+	}
+	for _, c := range nl.Components {
+		if have[c.Ref] || strings.HasPrefix(c.Ref, "#") {
+			continue
+		}
+		have[c.Ref] = true
+		sp := SchPart{Ref: c.Ref, Value: c.Value, Footprint: c.Footprint, DNP: c.DNP, ExcludeBOM: true,
+			DNPText: population.Field(c.Fields)}
+		sp.LCSC, sp.LCSCField = LookupLCSC(c.Fields)
+		rows = append(rows, sp)
+	}
+	return rows
 }
 
 // MergeParts combines board footprints (the set of placed parts) with the
 // schematic rows. The schematic's LCSC field wins when both have one (the
-// schematic is the source the board is updated from); DNP / exclude flags are
+// schematic is the source the board is updated from). DNP is the
+// schematic's flag (pkg/population); a board footprint whose DNP attribute
+// differs is reported, not OR-ed in. Exclude-from-BOM / position flags are
 // OR-ed. A board footprint the schematic BOM does not list keeps the board's
 // own fields and flags (so it is still gated) and is reported as a warning:
 // kicad-cli omits excluded-from-BOM symbols, so an out-of-sync board must be
@@ -175,6 +236,7 @@ func MergeParts(bd *Board, sch []SchPart, haveSch bool) ([]Part, []string) {
 	}
 	var parts []Part
 	var warns []string
+	var dnpField []string
 	for _, f := range bd.Footprints {
 		if f.Ref == "" {
 			continue
@@ -191,7 +253,15 @@ func MergeParts(bd *Board, sch []SchPart, haveSch bool) ([]Part, []string) {
 					warns = append(warns, fmt.Sprintf("%s (%s) is on the board but not in the schematic BOM (board-only part, or excluded from BOM only in the schematic) — using the board's fields; run Update PCB from Schematic if out of sync", f.Ref, f.LibID))
 				}
 			} else {
-				p.DNP = p.DNP || s.DNP
+				// The schematic's DNP flag decides (pkg/population): a board
+				// footprint whose DNP attribute differs is stale, and said so.
+				if w := population.BoardConflict(f.Ref, p.DNP, s.DNP); w != "" {
+					dnpField = append(dnpField, w)
+				}
+				if w := population.Conflict(f.Ref, s.DNPText, s.DNP); w != "" {
+					dnpField = append(dnpField, w)
+				}
+				p.DNP = s.DNP
 				p.ExcludeBOM = p.ExcludeBOM || s.ExcludeBOM
 				if s.LCSC != "" {
 					if p.LCSC != "" && p.LCSC != s.LCSC {
@@ -207,6 +277,8 @@ func MergeParts(bd *Board, sch []SchPart, haveSch bool) ([]Part, []string) {
 		parts = append(parts, p)
 	}
 	sort.SliceStable(parts, func(a, b int) bool { return refLess(parts[a].Ref, parts[b].Ref) })
+	sort.Slice(dnpField, func(a, b int) bool { return refLess(dnpField[a], dnpField[b]) })
+	warns = append(warns, dnpField...)
 	return parts, warns
 }
 

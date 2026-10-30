@@ -203,6 +203,10 @@ type placer struct {
 	// curPhase is the phase running now; budgetHit the first one the
 	// PlaceOptions.Deadline cut short.
 	curPhase, budgetHit string
+	// clock replaces time.Now in rescueOver (tests); rescueEvals counts the
+	// rescue's candidate poses.
+	clock       func() time.Time
+	rescueEvals int
 }
 
 // intimateGap is the courtyard gap kept between parts that connect directly
@@ -2754,7 +2758,9 @@ func (pl *placer) polish() {
 		}
 		return items[i].p.Ref < items[j].p.Ref
 	})
-	const maxPolish = 400
+	// 400 parts, or half the movable ones on a board above 800: a
+	// 1443-part board has 600-odd decaps, filters and clock parts.
+	maxPolish := max(400, len(pl.movable)/2)
 	if len(items) > maxPolish {
 		items = items[:maxPolish]
 	}
@@ -2814,9 +2820,14 @@ func (pl *placer) polishPart(p *Part, rots []float64, step, radius float64) {
 }
 
 // rescueFarMil is how far a decap may end from the pin it serves before
-// rescueDecaps looks for a legal spot near the pin: an inch, far beyond any
-// decap tether's slack — on the boards that place well no decap is there.
-const rescueFarMil = 1000.0
+// rescueDecaps looks for a legal spot near the pin: 0.4 in (10 mm), well
+// beyond any decap tether's slack. It was an inch; on the 1443-part board
+// the decaps the clock-cut anneal left between 0.4 and 1 in kept the mean
+// near 450 mil. rescueReachMil bounds the search around the pin.
+const (
+	rescueFarMil   = 400.0
+	rescueReachMil = 1000.0
+)
 
 // decapGap is d's distance from the pin it serves (its nearest pad on the
 // pin's net), +Inf when it serves none.
@@ -2856,17 +2867,154 @@ func (pl *placer) rescueDecaps() {
 		rots = nil
 	}
 	for _, d := range far {
-		if pl.overBudget() {
+		if pl.rescueOver() {
 			return
 		}
 		pl.rescuePart(d, rots)
 	}
 }
 
+// netLens is the weighted length of each of p's nets (each once, in index
+// order).
+func (pl *placer) netLens(p *Part) []float64 {
+	nets := append([]int(nil), pl.partNet[p]...)
+	sort.Ints(nets)
+	var out []float64
+	for k, i := range nets {
+		if k == 0 || i != nets[k-1] {
+			out = append(out, pl.netCost(i))
+		}
+	}
+	return out
+}
+
+// netsNoLonger reports whether no net got longer (1e-6 slack): the nets
+// are compared one by one, so shortening one cannot pay for another.
+func netsNoLonger(before, after []float64) bool {
+	if len(before) != len(after) {
+		return false
+	}
+	for i := range after {
+		if after[i] > before[i]+1e-6 {
+			return false
+		}
+	}
+	return true
+}
+
+// labelGuard holds what a rescue of d must not worsen: the blocked labels
+// of d and of every part near d's old pose, measured there.
+type labelGuard struct {
+	pl      *placer
+	on      bool
+	reach   float64
+	old     map[*Part]bool // part near the old pose → its label blocked there
+	blocked int
+}
+
+// labelReach is how far (mil) from a body another part's label slots can
+// reach: the longest label plus its gap and clearance.
+func (pl *placer) labelReach() float64 {
+	ls := pl.opt.Labels
+	n := 0
+	for _, p := range pl.b.Parts {
+		n = max(n, len([]rune(p.Ref)))
+	}
+	return ls.CharW*float64(n) + ls.Height + ls.Gap + ls.Clear + 1
+}
+
+// labelGuard measures the labels around d at its current pose (d in its
+// buckets).
+func (pl *placer) labelGuard(d *Part) *labelGuard {
+	g := &labelGuard{pl: pl, on: pl.opt.Labels != nil, old: map[*Part]bool{}}
+	if !g.on {
+		return g
+	}
+	g.reach = pl.labelReach()
+	pl.forBucketsOnce(d.Body().Expand(g.reach), func(q *Part) bool {
+		if q.Ref != "" && pl.c.Kinds[q.Ref] != KindMechanical {
+			g.old[q] = !pl.labelFree(q)
+		}
+		return true
+	})
+	if d.Ref != "" {
+		g.old[d] = !pl.labelFree(d)
+	}
+	for _, b := range g.old {
+		if b {
+			g.blocked++
+		}
+	}
+	return g
+}
+
+// ok reports whether d at its current pose (out of its buckets) blocks no
+// more labels than at its old one: d's own and its old and new
+// neighbours'. A new neighbour's label was free of d before.
+func (g *labelGuard) ok(d *Part) bool {
+	if !g.on {
+		return true
+	}
+	pl := g.pl
+	before, set := g.blocked, map[*Part]bool{}
+	for q := range g.old {
+		set[q] = true
+	}
+	pl.forBucketsOnce(d.Body().Expand(g.reach), func(q *Part) bool {
+		if q.Ref != "" && pl.c.Kinds[q.Ref] != KindMechanical && !set[q] {
+			set[q] = true
+			if !pl.labelFree(q) { // d is out of the buckets: its status without d
+				before++
+			}
+		}
+		return true
+	})
+	pl.bucketOp(d, true)
+	after := 0
+	for q := range set {
+		if !pl.labelFree(q) {
+			after++
+			if after > before {
+				break
+			}
+		}
+	}
+	pl.bucketOp(d, false)
+	return after <= before
+}
+
+// rescueGrace is how long past PlaceOptions.Deadline the decap rescue may
+// still run: on a loaded machine the deadline fell during polish and no
+// far decap came back (a 1443-part seed ended with decaps a mean 1355 mil
+// out). The stop is absolute — Deadline + rescueGrace — so a phase that
+// overran before it does not buy the rescue more time.
+const rescueGrace = 15 * time.Second
+
+// rescueOver reports whether the rescue must stop: past Deadline +
+// rescueGrace (it records the phase cut then).
+func (pl *placer) rescueOver() bool {
+	dl := pl.opt.Deadline
+	now := time.Now
+	if pl.clock != nil {
+		now = pl.clock
+	}
+	if dl.IsZero() || now().Before(dl.Add(rescueGrace)) {
+		return false
+	}
+	pl.overBudget()
+	return true
+}
+
 func (pl *placer) rescuePart(d *Part, rots []float64) {
 	pin := pl.decap[d].Box.C
 	pos0, rot0 := d.Pos, d.Rotation
 	before := pl.localCost(d, nil)
+	// A rescue must not lengthen any net or block a label: the local cost
+	// alone traded both for the decap's tether (szpi: 3 more blocked
+	// designators, rk3568: +0.1 in). Nets are d's (all the move changes),
+	// each on its own; labels are d's and its neighbours' at either pose.
+	wire0 := pl.netLens(d)
+	g := pl.labelGuard(d)
 	pl.bucketOp(d, false)
 	sc := pl.newSpiralCtx(d)
 	halo := pl.spacing/2 + pl.opt.Halo[d.Ref]
@@ -2880,8 +3028,8 @@ func (pl *placer) rescuePart(d *Part, rots []float64) {
 	var bestRot float64
 	// Ring by ring out to the distance the decap is at now: the first ring
 	// with a legal pose holds the nearest ones; the best of its poses wins.
-	maxRing := int(math.Min(rescueFarMil, pl.decapGap(d)) / step)
-	for ring := 0; ring <= maxRing && !found && !pl.overBudget(); ring++ {
+	maxRing := int(math.Min(rescueReachMil, pl.decapGap(d)) / step)
+	for ring := 0; ring <= maxRing && !found && !pl.rescueOver(); ring++ {
 		r := float64(ring) * step
 		n := max(8*ring, 1)
 		best := before
@@ -2889,10 +3037,16 @@ func (pl *placer) rescuePart(d *Part, rots []float64) {
 		for _, rot := range rs {
 			// Past the deadline: keep the best legal pose found (none: the
 			// decap goes back), buckets restored below either way.
-			if pl.overBudget() {
+			if pl.rescueOver() {
 				break
 			}
 			for k := 0; k < n; k++ {
+				// An outer ring is thousands of poses: check the stop every
+				// 64, keeping the best legal pose found so far.
+				pl.rescueEvals++
+				if k&63 == 63 && pl.rescueOver() {
+					break
+				}
 				c := pin.Add(Point{r * cs[k].X, r * cs[k].Y})
 				if rel, ok := d.relBody[normDeg(rot)]; ok && len(d.Pads) > 0 {
 					off := rel.Translate(d.Pos).Center().Sub(d.Pos)
@@ -2908,7 +3062,7 @@ func (pl *placer) rescuePart(d *Part, rots []float64) {
 				if pl.hardCostLim(d, 1e-6) >= 1e-6 {
 					continue
 				}
-				if cost := pl.localCost(d, nil); cost < best-1e-6 {
+				if cost := pl.localCost(d, nil); cost < best-1e-6 && netsNoLonger(wire0, pl.netLens(d)) && g.ok(d) {
 					best, bestPos, bestRot, found = cost, d.Pos, d.Rotation, true
 				}
 			}

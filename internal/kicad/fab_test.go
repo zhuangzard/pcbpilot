@@ -88,7 +88,7 @@ func TestMergeSchematicWins(t *testing.T) {
 		{Ref: "U1", Value: "LDO", LCSC: "C6186", LCSCField: "LCSC"},
 		{Ref: "Q1", Value: "AO3400", LCSC: "C20917", LCSCField: "LCSC"},
 		{Ref: "D1", Value: "RED", DNP: true},
-		{Ref: "R2", Value: "0R"},
+		{Ref: "R2", Value: "0R", DNP: true}, // DNP on the board too (in sync)
 		// J1 absent → excluded, warned
 	}
 	parts, warns := MergeParts(loadFix(t), sch, true)
@@ -519,5 +519,28 @@ func TestLiveImportLCSC(t *testing.T) {
 	mods, _ := filepath.Glob(filepath.Join(dir, "lcsc.pretty", "*.kicad_mod"))
 	if len(mods) != 1 {
 		t.Fatalf("footprints %v", mods)
+	}
+}
+
+// A symbol field named "DNP" shadows KiCad's DNP flag in the BOM's ${DNP}
+// column. Its note is not the flag (pkg/population): without the netlist
+// only KiCad's own "DNP" rendering counts; the note's part stays fitted and
+// MergeParts warns about it.
+func TestMergePartsWarnsDNPField(t *testing.T) {
+	csv := `"Reference","Value","Footprint","DNP","EXCLUDE_FROM_BOM","LCSC"` + "\n" +
+		`"C9","1n","C:C_0603","backup footprint","",""` + "\n" +
+		`"R9","10k","R:R_0603","DNP","",""` + "\n" +
+		`"R10","10k","R:R_0603","","","C25744"` + "\n"
+	rows, err := ParseSchBOM([]byte(csv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bd := &Board{Footprints: []Footprint{{Ref: "C9"}, {Ref: "R9", DNP: true}, {Ref: "R10"}}}
+	parts, warns := MergeParts(bd, rows, true)
+	if len(parts) != 3 || parts[0].DNP || !parts[1].DNP || parts[2].DNP {
+		t.Fatalf("parts %+v", parts)
+	}
+	if len(warns) != 1 || !strings.Contains(warns[0], `C9: symbol field "DNP" = "backup footprint" but KiCad's DNP flag is off`) {
+		t.Fatalf("warnings %v", warns)
 	}
 }

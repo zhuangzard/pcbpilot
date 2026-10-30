@@ -4,7 +4,7 @@ description: "pcbpilot 仿真与设计文档专项：电源直流仿真（每网
 license: MIT
 metadata:
   author: "zhuangzard (pcbpilot); original easyeda-agent by zhoushoujianwork"
-  version: "0.12.2"
+  version: "0.12.3"
   homepage: "https://github.com/zhuangzard/pcbpilot"
 ---
 
@@ -68,7 +68,9 @@ metadata:
 2. **电源仿真**：`pcbpilot sim power --connectivity sch-P1.json --connectivity sch-P2.json --values list-P1.json
    --values list-P2.json --out sim.json --report sim.md --spice sim.cir --spice-check`。
    - 先看 `sim.md` 的 Warnings/Assumptions：所有轨 0 V 或 “no power model” = 输入源或稳压器没匹配上，结果作废，
-     写 `--models project-models.json`（`connector-source` / `ldo` / `buck` / `load`，字段见库文件 `_doc`）后重跑。
+     写 `--models project-models.json`（`connector-source` / `ldo` / `buck` / `load`；电源路径上的 MOSFET 用
+     `mosfet`（默认导通，`"on": false` 关断），同型号分别建模用 `"match":{"refs":["Q7"]}`；字段见库文件 `_doc`，
+     示例见 [power-sim.md](../pcbpilot/references/power-sim.md) §6）后重跑，不用代理件顶替 MOSFET。
    - `spiceCheck.pass` 只证明线性化网表与 ngspice 一致，不证明模型对。
 3. **设计意图**：`pcbpilot intent derive --connectivity … --values … --sim sim.json [--spec spec.json] --out intent.json
    --report intent.md --analog-out analog.json`。`--strict` 让 error 级 finding 非零退出；只有板子没有原理图时用

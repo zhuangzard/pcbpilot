@@ -159,8 +159,9 @@ func testPlacer(t *testing.T, name string) *placer {
 	return pl
 }
 
-// Past the deadline the decap rescue gives up at once: the decap is back
-// where it was, filed in exactly its own buckets, the phase named.
+// Past the deadline and its grace the decap rescue gives up at once: the
+// decap is back where it was, filed in exactly its own buckets, the phase
+// named.
 func TestRescueStopsAtTheDeadline(t *testing.T) {
 	pl := testPlacer(t, "reference-4stage-compact.json")
 	var d *Part
@@ -177,7 +178,7 @@ func TestRescueStopsAtTheDeadline(t *testing.T) {
 	movePartCentre(d, Point{pin.X + 1500, pin.Y}, d.Rotation)
 	pl.rebuildBuckets()
 	pos, rot := d.Pos, d.Rotation
-	pl.opt.Deadline = time.Now().Add(-time.Second)
+	pl.opt.Deadline = time.Now().Add(-rescueGrace - time.Second)
 	pl.phase("rescue")
 	start := time.Now()
 	pl.rescuePart(d, []float64{0, 90, 180, 270})
@@ -292,5 +293,104 @@ func TestSizeZonesCountsFixedPartsInside(t *testing.T) {
 	occB := pl.zoneOccupied(db, Rect{pl.region.MinX + ws[0], pl.region.MinY, pl.region.MaxX, pl.region.MaxY}, movable)
 	if fa, fb := occA/ws[0], occB/ws[1]; math.Abs(fa-fb) > 0.05*math.Max(fa, fb) {
 		t.Fatalf("strips %v hold %.0f / %.0f mil² — fills per mil %.1f vs %.1f, want about equal", ws, occA, occB, fa, fb)
+	}
+}
+
+// Within the grace after the deadline the rescue still works; the grace
+// counts from the deadline, not from when the rescue starts.
+func TestRescueGraceIsAbsolute(t *testing.T) {
+	pl := testPlacer(t, "reference-4stage-compact.json")
+	pl.opt.Deadline = time.Now().Add(-time.Second)
+	if pl.rescueOver() {
+		t.Fatal("rescue stopped inside its grace")
+	}
+	pl.opt.Deadline = time.Now().Add(-rescueGrace + 50*time.Millisecond)
+	if pl.rescueOver() {
+		t.Fatal("rescue stopped before the grace ran out")
+	}
+	time.Sleep(80 * time.Millisecond)
+	if !pl.rescueOver() {
+		t.Fatal("rescue kept going past Deadline + grace")
+	}
+	pl.opt.Deadline = time.Time{}
+	if pl.rescueOver() {
+		t.Fatal("rescue stopped without a deadline")
+	}
+}
+
+// Nets are compared one by one: a shorter total that lengthens one net is
+// refused.
+func TestNetsNoLongerPerNet(t *testing.T) {
+	if netsNoLonger([]float64{10, 10}, []float64{15, 2}) {
+		t.Fatal("one net lengthened, accepted because the total dropped")
+	}
+	if !netsNoLonger([]float64{10, 10}, []float64{10, 9}) {
+		t.Fatal("no net lengthened, refused")
+	}
+}
+
+// A large outer ring entered just before Deadline + grace stops within 64
+// poses of the expiry, with the decap restored and filed in its buckets.
+func TestRescueStopsInsideALargeRing(t *testing.T) {
+	pl := testPlacer(t, "reference-4stage-compact.json")
+	var d *Part
+	for _, p := range pl.movable {
+		if pl.decap[p] != nil {
+			d = p
+			break
+		}
+	}
+	if d == nil {
+		t.Skip("fixture has no decap")
+	}
+	pin := pl.decap[d].Box.C
+	movePartCentre(d, Point{pin.X + 1500, pin.Y}, d.Rotation)
+	// No legal pose anywhere: the search runs ring after ring.
+	bb := pl.b.Bounds().Expand(5000)
+	pl.b.Keepouts = append(pl.b.Keepouts, &Keepout{Name: "all", Poly: bb.Corners(), NoParts: true})
+	pl.rebuildBuckets()
+	pos, rot := d.Pos, d.Rotation
+	// Expire the grace inside ring 20 (160 poses per turn), turn 1.
+	flip := 0
+	for r := 1; r < 20; r++ {
+		flip += 8 * r * 4
+	}
+	flip += 10
+	base := time.Now()
+	pl.opt.Deadline = base
+	after := -1
+	pl.clock = func() time.Time {
+		if pl.rescueEvals >= flip {
+			if after < 0 {
+				after = pl.rescueEvals
+			}
+			return base.Add(time.Hour)
+		}
+		return base
+	}
+	pl.phase("rescue")
+	pl.rescuePart(d, []float64{0, 90, 180, 270})
+	if after < 0 {
+		t.Fatalf("the search ended after %d poses, before ring 20", pl.rescueEvals)
+	}
+	if extra := pl.rescueEvals - flip; extra > 64 {
+		t.Fatalf("%d poses tried past the grace", extra)
+	}
+	if d.Pos != pos || d.Rotation != rot || pl.budgetHit != "rescue" {
+		t.Fatalf("decap at %v/%v (want %v/%v), budgetHit %q", d.Pos, d.Rotation, pos, rot, pl.budgetHit)
+	}
+	x0, y0, x1, y1 := bucketRange(pl.boxes[d])
+	got := 0
+	for x := x0 - 3; x <= x1+3; x++ {
+		for y := y0 - 3; y <= y1+3; y++ {
+			for _, e := range pl.bucket.at(x, y) {
+				if e.p == d {
+					got++
+				}
+			}
+		}
+	}
+	if want := (x1 - x0 + 1) * (y1 - y0 + 1); got != want || pl.boxes[d] != pl.box(d) {
+		t.Fatalf("decap in %d buckets, want %d", got, want)
 	}
 }

@@ -828,7 +828,7 @@ func sbReviewGate(rep *sbReport, o sbOptions, out string, waivers []gateWaiver) 
 	if sha, err := reviewInputSHA("schematic", o.Requirements, ev, reviewMaxBytes); err == nil {
 		var old reviewRecord
 		if b, err := os.ReadFile(filepath.Join(dir, "review.json")); err == nil && json.Unmarshal(b, &old) == nil &&
-			old.Stage == "schematic" && old.InputSHA256 == sha && old.Gate.Pass {
+			old.Stage == "schematic" && old.InputSHA256 == sha && old.Gate.Pass && reviewFilesChanged(&old, o.Requirements, ev) == "" {
 			rep.Outputs["review"] = filepath.Join(dir, "review.json")
 			rep.gate("design-review", "pass", "reused "+filepath.Join(dir, "review.json")+" (same inputs): "+old.Gate.Detail, nil)
 			return

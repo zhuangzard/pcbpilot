@@ -42,6 +42,9 @@ type kicadSchCheckReport struct {
 	Quality  []kicadSheetFindings `json:"quality"`
 	Findings int                  `json:"qualityFindings"`
 	Fixed    []kicadPwrFlagFix    `json:"pwrFlags,omitempty"`
+	// EngineerGrade: the engineer-grade gate of kicad sch-build, run on an
+	// existing project with --engineer-grade --spec.
+	EngineerGrade *sbGate `json:"engineerGrade,omitempty"`
 	// Review is the design review (--review); Status is then the overall
 	// verdict of ERC + quality + review.
 	Review *kicad.SchReview `json:"review,omitempty"`
@@ -50,7 +53,8 @@ type kicadSchCheckReport struct {
 
 func newKicadSchCheckCmd(stdout, stderr io.Writer) *cobra.Command {
 	var sch string
-	var fixPwr, review bool
+	var fixPwr, eg, review bool
+	var specPath string
 	var ignore []string
 	var intentPath, simPath, waiverPath string
 	c := &cobra.Command{
@@ -73,6 +77,14 @@ again afterwards.
 
 --ignore KIND (repeatable) drops a quality finding kind (e.g. off-grid on an
 imported sheet whose parts sit off the 1.27 mm grid).
+
+--engineer-grade --spec design.json: also run the engineer-grade gate of
+kicad sch-build (EG-01 hierarchy, EG-05 power/ground symbols upright, EG-06
+decoupling <= 25.4 mm from its IC supply pin in the same zone, EG-08 crossings,
+EG-09 four-way junctions, EG-13 dangling labels, EG-20 automatic net names,
+EG-22 title block) on a project drawn by any tool. The spec
+(pcbpilot.kicad.sch-build/1) supplies what a sheet cannot: net kinds, zones,
+pages and the title block; its symbols are resolved offline.
 
 --review adds the design review (read-only; JSON under "review"): schematic
 design mistakes proven from the KiCad netlist, the library pin electrical
@@ -181,6 +193,14 @@ error (unreadable intent, no kicad-cli) is an error exit of its own.`,
 				rep.Findings += len(fs)
 			}
 			rep.OK = erc.Errors == 0 && rep.Findings == 0
+			if eg {
+				g, err := kicadSchCheckEG(root, files, specPath)
+				if err != nil {
+					return err
+				}
+				rep.EngineerGrade = &g
+				rep.OK = rep.OK && g.Status == "pass"
+			}
 			if review {
 				rv, err := runSchReview(schReviewOpts{root: root, erc: erc, intentPath: intentPath, simPath: simPath, waivers: waivers})
 				if err != nil {
@@ -205,7 +225,11 @@ error (unreadable intent, no kicad-cli) is an error exit of its own.`,
 				return err
 			}
 			if !rep.OK {
-				return fmt.Errorf("sch-check: %d ERC error(s), %d warning(s), %d quality finding(s)", erc.Errors, erc.Warnings, rep.Findings)
+				egs := ""
+				if rep.EngineerGrade != nil && rep.EngineerGrade.Status != "pass" {
+					egs = "; engineer-grade: " + rep.EngineerGrade.Detail
+				}
+				return fmt.Errorf("sch-check: %d ERC error(s), %d warning(s), %d quality finding(s)%s", erc.Errors, erc.Warnings, rep.Findings, egs)
 			}
 			return nil
 		},
@@ -213,11 +237,53 @@ error (unreadable intent, no kicad-cli) is an error exit of its own.`,
 	c.Flags().StringVar(&sch, "sch", "", "a .kicad_sch of the design (its root sheet is found next to it)")
 	c.Flags().BoolVar(&fixPwr, "fix-pwr-flag", false, "wire a PWR_FLAG to every power net ERC reports as not driven")
 	c.Flags().StringArrayVar(&ignore, "ignore", nil, "quality finding kind to skip (repeatable)")
+	c.Flags().BoolVar(&eg, "engineer-grade", false, "also run the kicad sch-build engineer-grade gate (needs --spec)")
+	c.Flags().StringVar(&specPath, "spec", "", "design spec (pcbpilot.kicad.sch-build/1) for --engineer-grade: net kinds, zones, pages, title")
 	c.Flags().BoolVar(&review, "review", false, "also run the design review (read-only; exit 6 on an unwaived error, 5 on cannot-check)")
 	c.Flags().StringVar(&intentPath, "intent", "", "--review: intent.json from `pcbpilot intent derive` (net roles, rail voltages, review roles)")
 	c.Flags().StringVar(&simPath, "sim", "", "--review: `pcbpilot sim power` document (rail voltages)")
 	c.Flags().StringVar(&waiverPath, "waivers", "", "--review: signed waiver file (JSON list of {gate:\"sch-review\", match:<fingerprint>, reason, by})")
 	return c
+}
+
+// kicadSchCheckEG runs sbEngineerGrade on an existing project: the design
+// (net kinds, zones, pages, title) comes from the spec, the sheets from disk.
+func kicadSchCheckEG(root string, files []string, specPath string) (sbGate, error) {
+	if specPath == "" {
+		return sbGate{}, fmt.Errorf("--engineer-grade needs --spec (pcbpilot.kicad.sch-build/1)")
+	}
+	spec, err := loadSbSpec(specPath)
+	if err != nil {
+		return sbGate{}, err
+	}
+	tmp, err := os.MkdirTemp("", "pcbpilot-eg-")
+	if err != nil {
+		return sbGate{}, err
+	}
+	defer os.RemoveAll(tmp)
+	// the drawing is checked, not the footprints: NoFootprintCheck
+	d, _, err := buildDesign(spec, sbResolveOpts{OutDir: tmp, Offline: true, Jobs: 4, NoFootprintCheck: true})
+	if err != nil {
+		return sbGate{}, fmt.Errorf("--spec %s: %w", specPath, err)
+	}
+	// Every sheet of the hierarchy is judged: one the gate cannot read under
+	// the root's directory (elsewhere, another volume) is an error, never
+	// a sheet skipped into a pass.
+	dir := filepath.Dir(root)
+	var rel, outside []string
+	for _, f := range files {
+		r, err := filepath.Rel(dir, f)
+		if err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) || filepath.IsAbs(r) {
+			outside = append(outside, f)
+			continue
+		}
+		rel = append(rel, filepath.ToSlash(r))
+	}
+	if len(outside) > 0 {
+		return sbGate{}, fmt.Errorf("--engineer-grade: %d sheet(s) of the hierarchy lie outside the root schematic's directory %s (%s): the gate judges every sheet — move them under it", len(outside), dir, strings.Join(outside, ", "))
+	}
+	sort.Strings(rel)
+	return sbEngineerGrade(dir, rel, d), nil
 }
 
 // kicadFixPwrFlags places one PWR_FLAG per undriven power net, at the

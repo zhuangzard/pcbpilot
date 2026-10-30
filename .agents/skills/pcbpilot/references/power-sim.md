@@ -116,11 +116,25 @@ RMS 0.53 A（L1 额定 0.77 A）；ngspice 比对 16 个节点最大差 0.4 µV�
 ## 6. 边界
 
 - 不是瞬态：不算浪涌、上电冲击、电容充电、ESD 事件；TVS 只计漏电。
+- **不贴件（DNP）**：只认 KiCad 自己的 DNP 标志（网表 IR 的 `dnp`），不仿真。名为 `DNP` 的自定义字段只是文字：有字而标志没勾时照常仿真，并给出与 `kicad lcsc` / `kicad fab` 相同的警告（`symbol field "DNP" = … but KiCad's DNP flag is off`）。`--values` 文件里的 `"dnp": true` 也不能替代这个标志：与标志不一致时忽略（照常仿真）并警告 `the values file marks it "dnp" but KiCad's DNP flag is off`。
 - MOSFET、运放、比较器、电池充电器等未建模器件按 open 或假设负载处理，warning 会列出。
   电源路径上的 MOSFET（防反接 P-FET、过压保护/负载开关 N-FET）写 `"kind":"mosfet"` 模型即按开关建模：
   漏–源为 `ronOhm`（缺省 `switchRonOhm` 并记假设），默认导通；`"on": false` 关断，`--switch Q1=open|closed` 覆盖。
   引脚按名 D/S 识别，或在 `pins.drain` / `pins.source` 写脚号。不必再用代理件。
 - 模型可按位号绑定：`"match":{"refs":["Q7"]}`，同一文件内位号优先于 LCSC、MPN、nameRegex，
   同型号的两个件可以各用一个模型（一个导通、一个关断）。旧模型文件不受影响。
+  示例（`--models project-models.json`，数字是占位，按数据手册填并写 `source`）：
+
+  ```json
+  {"schemaVersion": 1, "models": [
+    {"id": "q1-rpp", "kind": "mosfet", "match": {"refs": ["Q1"]}, "ronOhm": 0.012,
+     "source": "datasheet Rds(on) @ Vgs=-10 V", "confidence": "datasheet"},
+    {"id": "q7-ovp", "kind": "mosfet", "match": {"refs": ["Q7"]},
+     "pins": {"drain": ["5", "6", "7", "8"], "source": ["1", "2", "3"]}, "ronOhm": 0.008,
+     "source": "datasheet", "confidence": "datasheet"},
+    {"id": "q8-off", "kind": "mosfet", "match": {"refs": ["Q8"]}, "on": false,
+     "source": "intent: load switch off in the standby scenario", "confidence": "assumed"}
+  ]}
+  ```
 - 多个地网被当成同一参考点（报告里可能合并）；多轨负载需在模型中写 `rails[]`。
 - 结果质量取决于模型数据：`assumed` 的数字要回到数据手册核实。

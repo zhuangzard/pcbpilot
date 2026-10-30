@@ -1,8 +1,10 @@
 package pcbauto
 
 import (
+	"fmt"
 	"math"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -208,7 +210,10 @@ type Circuit struct {
 	// Bridge marks parts spanning two insulated intent domains that are not
 	// an isolator kind (a Y capacitor, a sense resistor chain).
 	Bridge map[string]bool `json:"bridgeParts,omitempty"`
-	Notes  []string        `json:"notes,omitempty"`
+	// UnknownWindings are 4-pad inductors on two or more grounds whose
+	// windings are not declared: their grounds were not joined.
+	UnknownWindings []string `json:"unknownWindings,omitempty"`
+	Notes           []string `json:"notes,omitempty"`
 }
 
 var (
@@ -290,6 +295,39 @@ func (c *Circuit) buildDomains(b *Board, an *Analysis) {
 			a, bb := p.Pads[0].Net, p.Pads[1].Net
 			if a != bb && an.Plan(a, b.Rules).Role == RoleGround && an.Plan(bb, b.Rules).Role == RoleGround {
 				gparent[gfind(a)] = gfind(bb)
+			}
+		}
+		// A 4-pin common-mode choke carries the return line through one
+		// winding: the connector-side ground (GND_J) is then the same domain
+		// as the board ground (left apart, the inlet nets of a field board
+		// formed their own SELV domain with no insulation pair to the patient
+		// side). Only DECLARED windings join grounds: a choke wired 1–2 / 3–4
+		// or a dual inductor must not merge two separate grounds and so
+		// suppress their insulation pair. Undeclared, the grounds stay apart
+		// and the part is listed in UnknownWindings.
+		if k == KindInductor && len(p.Pads) == 4 {
+			byNum := map[string]string{}
+			var grounds []string
+			for _, pd := range p.Pads {
+				byNum[pd.Number] = pd.Net
+				if pd.Net != "" && an.Plan(pd.Net, b.Rules).Role == RoleGround && !slices.Contains(grounds, pd.Net) {
+					grounds = append(grounds, pd.Net)
+				}
+			}
+			ws := an.windings(p.Ref)
+			if ws == nil {
+				if len(grounds) >= 2 {
+					sort.Strings(grounds)
+					c.UnknownWindings = append(c.UnknownWindings, p.Ref)
+					c.Notes = append(c.Notes, fmt.Sprintf("%s: 4-pad inductor on grounds %s, windings not declared — its grounds are kept as separate domains (declare its windings, e.g. [[\"1\",\"4\"],[\"2\",\"3\"]], in the intent spec \"windings\" if it carries the return line)", p.Ref, strings.Join(grounds, ", ")))
+				}
+				continue
+			}
+			for _, w := range ws {
+				a, bb := byNum[w[0]], byNum[w[1]]
+				if a != "" && bb != "" && a != bb && an.Plan(a, b.Rules).Role == RoleGround && an.Plan(bb, b.Rules).Role == RoleGround {
+					gparent[gfind(a)] = gfind(bb)
+				}
 			}
 		}
 	}

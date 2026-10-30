@@ -340,7 +340,11 @@ func runSignoff(o signoffOpts, waivers []gateWaiver, stderr io.Writer) (*signoff
 		}
 	}
 	pg.Pass = len(pg.Items) == 0 && nBOM > 0
-	pg.Detail = fmt.Sprintf("%d BOM component(s), %d without a valid LCSC number", nBOM, len(pg.Items))
+	// Scope: every designator from the schematic and the board except holes,
+	// fiducials, test points and logos; DNP and BOM / position-file
+	// exclusions are not known here, so this can count more parts than
+	// `kicad lcsc --check` (assembled parts only).
+	pg.Detail = fmt.Sprintf("%d BOM component(s) checked (every schematic/board designator except H/MH/FID/TP/LOGO…; DNP and BOM/position-file exclusions not applied — `kicad lcsc --check` counts assembled parts only), %d without a valid LCSC number", nBOM, len(pg.Items))
 	add(pg)
 
 	// 3–4. Safety, copper, IR: the shared snapshot gates on the sim run.
