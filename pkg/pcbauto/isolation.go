@@ -1654,3 +1654,36 @@ func isoPartnerDist(b *Board, iso *IsoRules, rr *RouteResult, f *isoField, doms 
 	}
 	return edt(set, f.W, f.H)
 }
+
+// ClipPoursToIso trims board-outline pours (`kicad route` step 4) to their
+// net's insulated domain like a planned plane (clipPlanesToIso): a pour of a
+// net with no insulation pair comes back unchanged. Each pour is returned as
+// the merged row rectangles of the kept area (mil, y-up); a pour that keeps
+// nothing is dropped. a field board: the patient GND pour on In1/F.Cu/B.Cu and the
+// +3V3 pour on In2 covered the SELV strip — 0 mil from the 24 V inlet,
+// RS-232 and CAN pads, 1030 isolation errors.
+func ClipPoursToIso(raw []byte, in *Intent, pours []PlaneRegion) ([]PlaneRegion, []string, error) {
+	b, err := FromSnapshot(raw)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(b.Outline) < 3 {
+		return pours, []string{"no board outline in the snapshot: pours not clipped"}, nil
+	}
+	an := Analyze(b, PowerSpec{Intent: in}, nil)
+	rr := &RouteResult{}
+	for _, p := range pours {
+		if len(p.Polys) == 0 {
+			p.Polys = [][]Point{append([]Point(nil), b.Outline...)}
+		}
+		rr.Planes = append(rr.Planes, p)
+	}
+	notes := clipPlanesToIso(b, an, rr)
+	kept := rr.Planes[:0]
+	for _, p := range rr.Planes {
+		if len(p.Polys) > 0 {
+			kept = append(kept, p)
+		}
+	}
+	return kept, notes, nil
+}

@@ -1287,27 +1287,16 @@ def pours(pcb, spec_path, out):
     best = max(range(ps.OutlineCount()), key=lambda i: abs(ps.Outline(i).Area()))
     chain = ps.Outline(best)
     made = []
+    board_pts = [(chain.CPoint(i).x, chain.CPoint(i).y) for i in range(chain.PointCount())]
     for zs in spec.get("zones") or []:
         net = board.FindNet(zs["net"])
-        z = pcbnew.ZONE(board)
-        z.SetLayer(kicad_layer(zs["layer"]))
-        z.SetNetCode(net.GetNetCode())
-        name = "%s %s L%d" % (POUR_PREFIX, zs["net"], zs["layer"])
-        z.SetZoneName(name)
-        outline = z.Outline()
-        outline.NewOutline()
-        for i in range(chain.PointCount()):
-            p = chain.CPoint(i)
-            outline.Append(p.x, p.y)
-        if zs.get("clearanceMil"):
-            z.SetLocalClearance(nm(zs["clearanceMil"]))
-        if zs.get("minWidthMil"):
-            z.SetMinThickness(nm(zs["minWidthMil"]))
-        # SMD pads solid, through-hole pads thermal: a one-spoke SMD thermal
-        # is a KiCad starved_thermal error (Board-B V5 A: U8.115, C50.2).
-        z.SetPadConnection(pcbnew.ZONE_CONNECTION_THT_THERMAL)
-        board.Add(z)
-        made.append(name)
+        # A pour clipped to its insulation domain arrives as polygons (mil, y-up):
+        # one zone each; otherwise the board outline.
+        shapes = [[(nm(x), nm(-y)) for x, y in poly] for poly in zs.get("polys") or []] or [board_pts]
+        for k, pts in enumerate(shapes):
+            z = make_pour_zone(board, zs, net, pts, k if len(shapes) > 1 else None)
+            board.Add(z)
+            made.append(z.GetZoneName())
     zones = fill_zones(board)
     save_board(board, pcb, out)
     return {"ok": True, "out": out, "pours": made, "zonesFilled": zones}
@@ -1320,6 +1309,8 @@ def validate_pours(board, spec):
     zs = lists["zones"]
     bad += check_fields("zones", zs, opt=("clearanceMil", "minWidthMil"), positive=("clearanceMil", "minWidthMil"))
     zs = [z for z in zs if isinstance(z, dict)]
+    for i, z in enumerate(zs):
+        bad += check_polys("zones[%d].polys" % i, z.get("polys"))
     return bad + check_nets(board, [z.get("net") for z in zs]) + check_layers(board, [z.get("layer") for z in zs])
 
 
@@ -1451,6 +1442,48 @@ def reject(what, bad):
     return {"ok": False, "error": "%s rejected, board not saved: %d problem(s): %s" % (what, len(bad), "; ".join(bad[:20])
                                                                                        + ("; ..." if len(bad) > 20 else "")),
             "problems": bad}
+
+
+def check_polys(what, polys):
+    """Problems with optional pour polygons (mil, y-up): a list of polygons,
+    each at least 3 finite [x, y] points."""
+    if polys is None:
+        return []
+    if not isinstance(polys, list):
+        return ["%s: a %s, not a list" % (what, type(polys).__name__)]
+    bad = []
+    for j, poly in enumerate(polys):
+        if not isinstance(poly, list) or len(poly) < 3:
+            bad.append("%s[%d]: not a polygon of 3 or more points" % (what, j))
+            continue
+        for q in poly:
+            if not (isinstance(q, list) and len(q) == 2 and is_num(q[0]) and is_num(q[1])):
+                bad.append("%s[%d]: point %r is not [x, y]" % (what, j, q))
+                break
+    return bad
+
+
+def make_pour_zone(board, zs, net, pts, idx):
+    """One pcbpilot pour zone on pts (KiCad nm, y-down)."""
+    z = pcbnew.ZONE(board)
+    z.SetLayer(kicad_layer(zs["layer"]))
+    z.SetNetCode(net.GetNetCode())
+    name = "%s %s L%d" % (POUR_PREFIX, zs["net"], zs["layer"])
+    if idx is not None:
+        name += " #%d" % (idx + 1)
+    z.SetZoneName(name)
+    outline = z.Outline()
+    outline.NewOutline()
+    for x, y in pts:
+        outline.Append(x, y)
+    if zs.get("clearanceMil"):
+        z.SetLocalClearance(nm(zs["clearanceMil"]))
+    if zs.get("minWidthMil"):
+        z.SetMinThickness(nm(zs["minWidthMil"]))
+    # SMD pads solid, through-hole pads thermal: a one-spoke SMD thermal
+    # is a KiCad starved_thermal error (Board-B V5 A: U8.115, C50.2).
+    z.SetPadConnection(pcbnew.ZONE_CONNECTION_THT_THERMAL)
+    return z
 
 
 def set_via_width(v, w):
