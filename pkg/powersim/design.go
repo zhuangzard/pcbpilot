@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/zhuangzard/pcbpilot/pkg/population"
 )
 
 // Pin is one component pin and the net it lands on ("" = unconnected).
@@ -54,7 +56,9 @@ type ConnDoc struct {
 		Ref    string `json:"ref"`
 		PageID string `json:"pageId"`
 		DNP    bool   `json:"dnp"`
-		Device struct {
+		// DNPField: a "DNP" symbol field set while the flag is off.
+		DNPField string `json:"dnpField"`
+		Device   struct {
 			Name       string `json:"name"`
 			SupplierID string `json:"supplierId"`
 		} `json:"device"`
@@ -274,6 +278,9 @@ func BuildDesign(pages []*ConnDoc, values map[string]PartValues) (*Design, []str
 			if c.DNP || values[ref].DNP {
 				dnp[ref] = true
 				continue
+			}
+			if w := population.Conflict(ref, c.DNPField, false); w != "" {
+				warnings = append(warnings, w)
 			}
 			p := byRef[ref]
 			if p == nil {

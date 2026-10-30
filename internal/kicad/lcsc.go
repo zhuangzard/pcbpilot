@@ -19,6 +19,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/zhuangzard/pcbpilot/pkg/population"
 )
 
 // LCSCFieldNames are the symbol/footprint field names accepted as the LCSC
@@ -69,9 +71,9 @@ type SchPart struct {
 	Ref, Value, Footprint string
 	DNP, ExcludeBOM       bool
 	LCSC, LCSCField       string
-	// DNPText is the BOM's ${DNP} column as written. KiCad renders its own
-	// DNP flag as "DNP"; a symbol field named "DNP" shadows the flag and
-	// puts its own text there (a note such as "backup footprint").
+	// DNPText is a symbol field named "DNP" (a note such as "backup
+	// footprint"). It is not the flag: DNP is KiCad's own flag
+	// (pkg/population); a set field with the flag off is warned about.
 	DNPText string
 }
 
@@ -115,7 +117,16 @@ func ParseSchBOM(b []byte) ([]SchPart, error) {
 			}
 		}
 		sp := SchPart{Value: fields["Value"], Footprint: fields["Footprint"],
-			DNP: fields["DNP"] != "", ExcludeBOM: fields["EXCLUDE_FROM_BOM"] != "", DNPText: fields["DNP"]}
+			ExcludeBOM: fields["EXCLUDE_FROM_BOM"] != ""}
+		// The ${DNP} column is KiCad's flag rendered as "DNP" — unless a
+		// symbol field named DNP shadows it with its own text. Without the
+		// netlist (ReadSchematicParts reads the flag from it) only KiCad's
+		// rendering counts as the flag.
+		if v := strings.TrimSpace(fields["DNP"]); strings.EqualFold(v, "DNP") {
+			sp.DNP = true
+		} else {
+			sp.DNPText = v
+		}
 		sp.LCSC, sp.LCSCField = LookupLCSC(fields)
 		// Grouped rows ("R1,R2") are split defensively even though --group-by ""
 		// already yields one row per reference.
@@ -162,7 +173,33 @@ func ReadSchematicParts(cli, sch string) ([]SchPart, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ParseSchBOM(b)
+	rows, err := ParseSchBOM(b)
+	if err != nil {
+		return nil, err
+	}
+	// KiCad's DNP flag itself: the BOM's ${DNP} column can be shadowed by a
+	// symbol field of that name; the netlist carries the flag apart.
+	nl, err := exportSchNetlistWith(cli, sch)
+	if err != nil {
+		return nil, fmt.Errorf("reading the DNP flags: %w", err)
+	}
+	return ApplyNetlistPopulation(rows, nl), nil
+}
+
+// ApplyNetlistPopulation takes each row's DNP from KiCad's flag in the
+// netlist and its "DNP" field text from the symbol (pkg/population).
+func ApplyNetlistPopulation(rows []SchPart, nl *SchNetlist) []SchPart {
+	byRef := map[string]SchNetComp{}
+	for _, c := range nl.Components {
+		byRef[c.Ref] = c
+	}
+	for i := range rows {
+		if c, ok := byRef[rows[i].Ref]; ok {
+			rows[i].DNP = c.DNP
+			rows[i].DNPText = population.Field(c.Fields)
+		}
+	}
+	return rows
 }
 
 // MergeParts combines board footprints (the set of placed parts) with the
@@ -196,8 +233,8 @@ func MergeParts(bd *Board, sch []SchPart, haveSch bool) ([]Part, []string) {
 					warns = append(warns, fmt.Sprintf("%s (%s) is on the board but not in the schematic BOM (board-only part, or excluded from BOM only in the schematic) — using the board's fields; run Update PCB from Schematic if out of sync", f.Ref, f.LibID))
 				}
 			} else {
-				if s.DNP && !strings.EqualFold(strings.TrimSpace(s.DNPText), "DNP") {
-					dnpField = append(dnpField, fmt.Sprintf("%s %q", f.Ref, s.DNPText))
+				if w := population.Conflict(f.Ref, s.DNPText, s.DNP || p.DNP); w != "" {
+					dnpField = append(dnpField, w)
 				}
 				p.DNP = p.DNP || s.DNP
 				p.ExcludeBOM = p.ExcludeBOM || s.ExcludeBOM
@@ -215,10 +252,8 @@ func MergeParts(bd *Board, sch []SchPart, haveSch bool) ([]Part, []string) {
 		parts = append(parts, p)
 	}
 	sort.SliceStable(parts, func(a, b int) bool { return refLess(parts[a].Ref, parts[b].Ref) })
-	if len(dnpField) > 0 {
-		sort.Slice(dnpField, func(a, b int) bool { return refLess(dnpField[a], dnpField[b]) })
-		warns = append(warns, fmt.Sprintf("%d part(s) are DNP only through a schematic field named \"DNP\", whose text stands in for KiCad's DNP flag (%s): they are left out of assembly and the LCSC check; clear or rename that field for parts that are placed", len(dnpField), strings.Join(dnpField, "; ")))
-	}
+	sort.Slice(dnpField, func(a, b int) bool { return refLess(dnpField[a], dnpField[b]) })
+	warns = append(warns, dnpField...)
 	return parts, warns
 }
 

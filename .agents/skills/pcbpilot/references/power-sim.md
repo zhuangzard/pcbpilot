@@ -116,6 +116,7 @@ RMS 0.53 A（L1 额定 0.77 A）；ngspice 比对 16 个节点最大差 0.4 µV�
 ## 6. 边界
 
 - 不是瞬态：不算浪涌、上电冲击、电容充电、ESD 事件；TVS 只计漏电。
+- **不贴件（DNP）**：只认 KiCad 自己的 DNP 标志（网表 IR 的 `dnp`），不仿真。名为 `DNP` 的自定义字段只是文字：有字而标志没勾时照常仿真，并给出与 `kicad lcsc` / `kicad fab` 相同的警告（`symbol field "DNP" = … but KiCad's DNP flag is off`）。
 - MOSFET、运放、比较器、电池充电器等未建模器件按 open 或假设负载处理，warning 会列出。
   电源路径上的 MOSFET（防反接 P-FET、过压保护/负载开关 N-FET）写 `"kind":"mosfet"` 模型即按开关建模：
   漏–源为 `ronOhm`（缺省 `switchRonOhm` 并记假设），默认导通；`"on": false` 关断，`--switch Q1=open|closed` 覆盖。

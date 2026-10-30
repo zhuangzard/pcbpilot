@@ -100,8 +100,8 @@ v0.10.2 起的行为（细节见 [kicad-file-safety.md §6](../pcbpilot/referenc
 | 用户只要打样光板 / 自己焊 | `--no-assembly`；BOM/CPL 项记 `UNSUPPORTED（光板订单）`，不跳过 DRC 与契约 |
 | 缺号件很多（demo、未选型的板） | 先问是 PCBA 还是光板；PCBA 时按件补号，不批量猜 |
 | 件不该贴却被要求 C 号 | 请用户在 KiCad 勾 DNP 或排除 BOM + 坐标文件，再 `--check` |
-| 警告 `N part(s) are DNP only through a schematic field named "DNP"` | 符号里名为 `DNP` 的自定义字段（备注文字）顶替了 KiCad 自己的 DNP 标志，这些件被当成不贴：真不贴就保留；要贴就请用户清空或改名该字段，再 `--check` |
-| `--check` 件数和 `signoff-parts` 不一样 | `--check` 只数要贴的件，首行写明 DNP / 排除 BOM / 排除坐标文件各几件；`signoff-parts` 数除 H/MH/FID/TP/LOGO 外的所有位号、不认 DNP。下单以 `--check` 为准，signoff 多出的就是这些不贴件 |
+| 警告 `R2: symbol field "DNP" = "…" but KiCad's DNP flag is off — fitted …` | 贴不贴只认 KiCad 自己的 DNP 标志（网表 IR、sim power、lcsc、fab 同一条规则）；名为 `DNP` 的自定义字段只是文字。字段有字而标志没勾 → 这个件照常仿真、进 BOM 和坐标文件，各工具给同一条警告。真不贴：请用户在 KiCad 勾 DNP；要贴：清空或改名该字段 |
+| `--check` 件数和 `signoff-parts` 不一样 | `--check` 只数要贴的件（DNP 认 KiCad 标志），首行写明 DNP / 排除 BOM / 排除坐标文件各几件；`signoff-parts` 数除 H/MH/FID/TP/LOGO 外的所有位号、不认 DNP。下单以 `--check` 为准，signoff 多出的就是这些不贴件 |
 | 同目录再出一版 | 可以复用清单管理的目录；目录里有不是 pcbpilot 写的同名文件 → 换新目录 |
 | 板上有盲埋孔、微孔、盘中孔、半孔 | 契约必须写明工艺；否则 `FAIL`，交回 router 或请用户选服务 |
 | 阻抗控制网 | 叠层取自契约的厂商叠层编号，线宽/间距核对属 router 的布线任务；未核对 → `INCOMPLETE` |

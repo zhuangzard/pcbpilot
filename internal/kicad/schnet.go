@@ -18,6 +18,7 @@ import (
 
 	"github.com/zhuangzard/pcbpilot/internal/connectivity"
 	"github.com/zhuangzard/pcbpilot/pkg/netname"
+	"github.com/zhuangzard/pcbpilot/pkg/population"
 )
 
 // KicadCLI locates kicad-cli ($KICAD_CLI, PATH, the macOS bundle).
@@ -47,7 +48,7 @@ type SchNetlist struct {
 // SchNetComp is one component (all units merged by KiCad).
 type SchNetComp struct {
 	Ref, Value, Footprint, Lib, Part, Sheet string
-	DNP                                     bool // <property name="dnp"/>
+	DNP                                     bool // <property name="dnp"/>: KiCad's flag, the population rule (pkg/population)
 	Fields                                  map[string]string
 	Pins                                    []SchNetPin // library pins (libparts)
 }
@@ -186,6 +187,11 @@ func ExportSchNetlist(sch string) (*SchNetlist, error) {
 	if err != nil {
 		return nil, err
 	}
+	return exportSchNetlistWith(cli, sch)
+}
+
+// exportSchNetlistWith is ExportSchNetlist with the kicad-cli to use.
+func exportSchNetlistWith(cli, sch string) (*SchNetlist, error) {
 	dir, err := os.MkdirTemp("", "pcbpilot-net-")
 	if err != nil {
 		return nil, err
@@ -244,6 +250,9 @@ func (nl *SchNetlist) ToConnectivityDoc(projectID string) (*connectivity.Documen
 			}
 		}
 		comp := connectivity.Component{ID: "cmp-" + c.Ref, Ref: c.Ref, Device: dev, Footprint: c.Footprint, PageName: c.Sheet, DNP: c.DNP, Pins: []connectivity.Pin{}}
+		if f := population.Field(c.Fields); population.Conflict(c.Ref, f, c.DNP) != "" {
+			comp.DNPField = f // fitted; consumers warn (population.Conflict)
+		}
 		pinIdx[c.Ref] = map[string]int{}
 		for _, p := range c.Pins {
 			if _, dup := pinIdx[c.Ref][p.Number]; dup {
