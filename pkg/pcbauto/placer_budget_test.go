@@ -159,8 +159,9 @@ func testPlacer(t *testing.T, name string) *placer {
 	return pl
 }
 
-// Past the deadline the decap rescue gives up at once: the decap is back
-// where it was, filed in exactly its own buckets, the phase named.
+// Past the deadline and its grace the decap rescue gives up at once: the
+// decap is back where it was, filed in exactly its own buckets, the phase
+// named.
 func TestRescueStopsAtTheDeadline(t *testing.T) {
 	pl := testPlacer(t, "reference-4stage-compact.json")
 	var d *Part
@@ -177,7 +178,7 @@ func TestRescueStopsAtTheDeadline(t *testing.T) {
 	movePartCentre(d, Point{pin.X + 1500, pin.Y}, d.Rotation)
 	pl.rebuildBuckets()
 	pos, rot := d.Pos, d.Rotation
-	pl.opt.Deadline = time.Now().Add(-time.Second)
+	pl.opt.Deadline = time.Now().Add(-rescueGrace - time.Second)
 	pl.phase("rescue")
 	start := time.Now()
 	pl.rescuePart(d, []float64{0, 90, 180, 270})
@@ -292,5 +293,38 @@ func TestSizeZonesCountsFixedPartsInside(t *testing.T) {
 	occB := pl.zoneOccupied(db, Rect{pl.region.MinX + ws[0], pl.region.MinY, pl.region.MaxX, pl.region.MaxY}, movable)
 	if fa, fb := occA/ws[0], occB/ws[1]; math.Abs(fa-fb) > 0.05*math.Max(fa, fb) {
 		t.Fatalf("strips %v hold %.0f / %.0f mil² — fills per mil %.1f vs %.1f, want about equal", ws, occA, occB, fa, fb)
+	}
+}
+
+// Within the grace after the deadline the rescue still works; the grace
+// counts from the deadline, not from when the rescue starts.
+func TestRescueGraceIsAbsolute(t *testing.T) {
+	pl := testPlacer(t, "reference-4stage-compact.json")
+	pl.opt.Deadline = time.Now().Add(-time.Second)
+	if pl.rescueOver() {
+		t.Fatal("rescue stopped inside its grace")
+	}
+	pl.opt.Deadline = time.Now().Add(-rescueGrace + 50*time.Millisecond)
+	if pl.rescueOver() {
+		t.Fatal("rescue stopped before the grace ran out")
+	}
+	time.Sleep(80 * time.Millisecond)
+	if !pl.rescueOver() {
+		t.Fatal("rescue kept going past Deadline + grace")
+	}
+	pl.opt.Deadline = time.Time{}
+	if pl.rescueOver() {
+		t.Fatal("rescue stopped without a deadline")
+	}
+}
+
+// Nets are compared one by one: a shorter total that lengthens one net is
+// refused.
+func TestNetsNoLongerPerNet(t *testing.T) {
+	if netsNoLonger([]float64{10, 10}, []float64{15, 2}) {
+		t.Fatal("one net lengthened, accepted because the total dropped")
+	}
+	if !netsNoLonger([]float64{10, 10}, []float64{10, 9}) {
+		t.Fatal("no net lengthened, refused")
 	}
 }

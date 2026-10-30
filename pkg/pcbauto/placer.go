@@ -203,9 +203,6 @@ type placer struct {
 	// curPhase is the phase running now; budgetHit the first one the
 	// PlaceOptions.Deadline cut short.
 	curPhase, budgetHit string
-	// rescueStop is the decap rescue's own end past the deadline (zero:
-	// the deadline).
-	rescueStop time.Time
 }
 
 // intimateGap is the courtyard gap kept between parts that connect directly
@@ -2865,15 +2862,6 @@ func (pl *placer) rescueDecaps() {
 	if pl.opt.NoRotate {
 		rots = nil
 	}
-	// The rescue keeps a short grace past PlaceOptions.Deadline: on a
-	// loaded machine the deadline fell during polish and no far decap came
-	// back (a 1443-part seed ended with decaps a mean 1355 mil out). It is
-	// a handful of bounded searches, seconds on 1443 parts.
-	pl.rescueStop = time.Now().Add(rescueGrace)
-	if dl := pl.opt.Deadline; dl.IsZero() || dl.After(pl.rescueStop) {
-		pl.rescueStop = time.Time{} // the deadline itself is later: it rules
-	}
-	defer func() { pl.rescueStop = time.Time{} }()
 	for _, d := range far {
 		if pl.rescueOver() {
 			return
@@ -2882,17 +2870,32 @@ func (pl *placer) rescueDecaps() {
 	}
 }
 
-// netSum is the weighted length of p's nets (each once, in index order).
-func (pl *placer) netSum(p *Part) float64 {
+// netLens is the weighted length of each of p's nets (each once, in index
+// order).
+func (pl *placer) netLens(p *Part) []float64 {
 	nets := append([]int(nil), pl.partNet[p]...)
 	sort.Ints(nets)
-	s := 0.0
+	var out []float64
 	for k, i := range nets {
 		if k == 0 || i != nets[k-1] {
-			s += pl.netCost(i)
+			out = append(out, pl.netCost(i))
 		}
 	}
-	return s
+	return out
+}
+
+// netsNoLonger reports whether no net got longer (1e-6 slack): the nets
+// are compared one by one, so shortening one cannot pay for another.
+func netsNoLonger(before, after []float64) bool {
+	if len(before) != len(after) {
+		return false
+	}
+	for i := range after {
+		if after[i] > before[i]+1e-6 {
+			return false
+		}
+	}
+	return true
 }
 
 // labelGuard holds what a rescue of d must not worsen: the blocked labels
@@ -2976,18 +2979,21 @@ func (g *labelGuard) ok(d *Part) bool {
 	return after <= before
 }
 
-// rescueGrace is how long rescueDecaps may run past the deadline.
+// rescueGrace is how long past PlaceOptions.Deadline the decap rescue may
+// still run: on a loaded machine the deadline fell during polish and no
+// far decap came back (a 1443-part seed ended with decaps a mean 1355 mil
+// out). The stop is absolute — Deadline + rescueGrace — so a phase that
+// overran before it does not buy the rescue more time.
 const rescueGrace = 15 * time.Second
 
-// rescueOver is overBudget for the rescue: past its grace when one is set.
+// rescueOver reports whether the rescue must stop: past Deadline +
+// rescueGrace (it records the phase cut then).
 func (pl *placer) rescueOver() bool {
-	if pl.rescueStop.IsZero() {
-		return pl.overBudget()
-	}
-	if time.Now().Before(pl.rescueStop) {
+	dl := pl.opt.Deadline
+	if dl.IsZero() || time.Now().Before(dl.Add(rescueGrace)) {
 		return false
 	}
-	pl.overBudget() // records the phase cut
+	pl.overBudget()
 	return true
 }
 
@@ -2995,11 +3001,11 @@ func (pl *placer) rescuePart(d *Part, rots []float64) {
 	pin := pl.decap[d].Box.C
 	pos0, rot0 := d.Pos, d.Rotation
 	before := pl.localCost(d, nil)
-	// A rescue must not lengthen the board's wiring or block a label: the
-	// local cost alone traded both for the decap's tether (szpi: 3 more
-	// blocked designators, rk3568: +0.1 in). Wiring is d's nets (all the
-	// move changes); labels are d's and its neighbours' at either pose.
-	wire0 := pl.netSum(d)
+	// A rescue must not lengthen any net or block a label: the local cost
+	// alone traded both for the decap's tether (szpi: 3 more blocked
+	// designators, rk3568: +0.1 in). Nets are d's (all the move changes),
+	// each on its own; labels are d's and its neighbours' at either pose.
+	wire0 := pl.netLens(d)
 	g := pl.labelGuard(d)
 	pl.bucketOp(d, false)
 	sc := pl.newSpiralCtx(d)
@@ -3042,7 +3048,7 @@ func (pl *placer) rescuePart(d *Part, rots []float64) {
 				if pl.hardCostLim(d, 1e-6) >= 1e-6 {
 					continue
 				}
-				if cost := pl.localCost(d, nil); cost < best-1e-6 && pl.netSum(d) <= wire0+1e-6 && g.ok(d) {
+				if cost := pl.localCost(d, nil); cost < best-1e-6 && netsNoLonger(wire0, pl.netLens(d)) && g.ok(d) {
 					best, bestPos, bestRot, found = cost, d.Pos, d.Rotation, true
 				}
 			}
