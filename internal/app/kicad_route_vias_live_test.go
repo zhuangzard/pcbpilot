@@ -94,10 +94,6 @@ func TestRouterViaPadstackKiCadLive(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := &kicadRun{kt: kt, work: dir, summary: map[string]any{}, stderr: os.Stderr}
-	before, _, err := r.snapshot(pcb)
-	if err != nil {
-		t.Fatal(err)
-	}
 	after, _, err := r.snapshot(imported)
 	if err != nil {
 		t.Fatal(err)
@@ -119,9 +115,9 @@ func TestRouterViaPadstackKiCadLive(t *testing.T) {
 	if nets["A"] == 0 || nets["GND"] == 0 || len(nets) < 3 {
 		t.Fatalf("the routed test board needs vias on A, GND and a Default net: %v", nets)
 	}
-	out, gates, err := r.routerViasToClass(before, imported)
-	if err != nil || len(gates) != 0 || out == imported || r.summary["routerVias"].(map[string]any)["shrunkToClass"].(int) != nets["VCC"]+nets["B"]+nets["C"]+nets["D"] {
-		t.Fatalf("shrink: %v gates %+v", err, gates)
+	out, gates := r.routerViasToClass(pcb, imported)
+	if len(gates) != 0 || out == imported || r.summary["routerVias"].(map[string]any)["shrunkToClass"].(int) != nets["VCC"]+nets["B"]+nets["C"]+nets["D"] {
+		t.Fatalf("shrink: gates %+v summary %v", gates, r.summary["routerVias"])
 	}
 	final, raw, err := r.snapshot(out)
 	if err != nil {

@@ -1,9 +1,14 @@
 package app
 
 import (
+	"encoding/json"
+	"errors"
+	"io"
 	"math"
 	"strings"
 	"testing"
+
+	"github.com/zhuangzard/pcbpilot/internal/kicad"
 )
 
 const testViaDSN = `(pcb x (structure (layer F.Cu) (via "Via[0-5]_800:200_um" "Via[0-5]_700:400_um" "Via[0-5]_600:300_um")
@@ -95,5 +100,68 @@ func TestClassViaPlan(t *testing.T) {
 	}
 	if !strings.Contains(fail[0], "cannot be shrunk") || !strings.Contains(unknown[0], "NOCLASS") {
 		t.Fatalf("%v %v", fail, unknown)
+	}
+}
+
+// fakeViaTools answers sizeRouterVias' KiCad calls; failOn names the one
+// that fails ("snapshot-before", "snapshot-after", "rules-read", "edit").
+type fakeViaTools struct {
+	failOn string
+	edited map[string]any
+}
+
+func (f *fakeViaTools) Snapshot(pcb string) ([]byte, error) {
+	if pcb == "classed" && f.failOn == "snapshot-before" || pcb == "imported" && f.failOn == "snapshot-after" {
+		return nil, errors.New("pcbnew crashed")
+	}
+	if pcb == "classed" {
+		return []byte(`{"copper":{"vias":[]}}`), nil
+	}
+	return []byte(`{"copper":{"vias":[{"primitiveId":"v1","net":"A","diameter":31.4961,"holeDiameter":15.748}]}}`), nil // 0.8/0.4 mm
+}
+
+func (f *fakeViaTools) RulesRead(pcb string) (*kicad.RulesReadback, error) {
+	if f.failOn == "rules-read" {
+		return nil, errors.New("bridge rules-read failed")
+	}
+	return &kicad.RulesReadback{Nets: map[string]kicad.EffectiveNM{"A": {ViaDiameter: 800000, ViaDrill: 200000}}}, nil
+}
+
+func (f *fakeViaTools) Edit(pcb string, ops map[string]any, out string) (json.RawMessage, error) {
+	if f.failOn == "edit" {
+		return nil, errors.New("bridge edit rejected")
+	}
+	f.edited = ops
+	return json.RawMessage(`{}`), nil
+}
+
+// Every way the router vias can go unsized is a router-vias gate on the
+// result (cannot-check without data, failing when the vias are known
+// wrong); the board returned is never claimed resized.
+func TestSizeRouterViasErrorPaths(t *testing.T) {
+	next := func(string) string { return "resized" }
+	for _, c := range []struct {
+		failOn, wantBoard, wantDetail string
+	}{
+		{"snapshot-before", "imported", "cannot check: the board before the import"},
+		{"snapshot-after", "imported", "cannot check: the imported board"},
+		{"rules-read", "imported", "cannot check: KiCad's class readback"},
+		{"edit", "imported", "the resize could not be written"},
+		{"", "resized", ""},
+	} {
+		f := &fakeViaTools{failOn: c.failOn}
+		board, gates := sizeRouterVias(f, "classed", "imported", next, map[string]any{}, io.Discard)
+		if board != c.wantBoard {
+			t.Fatalf("%s: board %s", c.failOn, board)
+		}
+		if c.wantDetail == "" {
+			if len(gates) != 0 || f.edited == nil {
+				t.Fatalf("ok path: gates %+v edit %v", gates, f.edited)
+			}
+			continue
+		}
+		if len(gates) == 0 || gates[0].Gate != "router-vias" || gates[0].Pass || !strings.Contains(gates[0].Detail, c.wantDetail) {
+			t.Fatalf("%s: gates %+v", c.failOn, gates)
+		}
 	}
 }

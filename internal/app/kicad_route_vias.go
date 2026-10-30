@@ -21,11 +21,15 @@ package app
 // added padstack carries both numbers in its name.
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/zhuangzard/pcbpilot/internal/kicad"
 )
 
 var (
@@ -174,45 +178,83 @@ func classViaPlan(vias []routeVia, old map[string]bool, eff func(net string) (di
 	return ops, fail, unknown, n
 }
 
-// routerViasToClass shrinks the vias the router added (not on before) to
-// their net's effective class via, read back by KiCad on board; vias it
-// cannot size are reported as the router-vias gate.
-func (r *kicadRun) routerViasToClass(before *boardSnapshot, board string) (string, []gateResult, error) {
+// routerViaTools are the KiCad calls sizing the router vias needs
+// (*kicad.Tools).
+type routerViaTools interface {
+	Snapshot(pcb string) ([]byte, error)
+	RulesRead(pcb string) (*kicad.RulesReadback, error)
+	Edit(pcb string, ops map[string]any, out string) (json.RawMessage, error)
+}
+
+// sizeRouterVias shrinks the vias the router added on board (those not on
+// classed) to their net's effective class via, read back by KiCad. It
+// never fails silently: every reason the vias could not be sized is a
+// router-vias gate — cannot-check when the data to judge them is missing
+// (a snapshot, the class readback), failing when the vias are known to be
+// wrong (not reachable, the resize not written) — and the board it
+// returns is the one the gates describe.
+func sizeRouterVias(t routerViaTools, classed, board string, next func(string) string, summary map[string]any, stderr io.Writer) (string, []gateResult) {
+	gate := func(pass bool, detail string, items ...string) []gateResult {
+		return []gateResult{{Gate: "router-vias", Pass: pass, Detail: detail, Items: items}}
+	}
+	snap := func(pcb string) (*boardSnapshot, error) {
+		raw, err := t.Snapshot(pcb)
+		if err != nil {
+			return nil, err
+		}
+		var s boardSnapshot
+		if err := json.Unmarshal(raw, &s); err != nil {
+			return nil, fmt.Errorf("decode KiCad snapshot: %w", err)
+		}
+		return &s, nil
+	}
+	before, err := snap(classed)
+	if err != nil {
+		summary["routerVias"] = map[string]any{"error": err.Error()}
+		return board, gate(false, "cannot check: the board before the import could not be read, so the router vias are unknown: "+err.Error())
+	}
 	old := map[string]bool{}
 	for _, v := range snapshotVias(before) {
 		old[v.ID] = true
 	}
-	snap, _, err := r.snapshot(board)
+	after, err := snap(board)
 	if err != nil {
-		return board, nil, err
+		summary["routerVias"] = map[string]any{"error": err.Error()}
+		return board, gate(false, "cannot check: the imported board could not be read, so the router vias were not sized to their class: "+err.Error())
 	}
-	rb, err := r.kt.RulesRead(board)
+	rb, err := t.RulesRead(board)
 	if err != nil {
-		return board, nil, err
+		summary["routerVias"] = map[string]any{"error": err.Error()}
+		return board, gate(false, "cannot check: KiCad's class readback failed, so the router vias were not sized to their class: "+err.Error())
 	}
-	ops, fail, unknown, n := classViaPlan(snapshotVias(snap), old, func(net string) (int64, int64, bool) {
+	ops, fail, unknown, n := classViaPlan(snapshotVias(after), old, func(net string) (int64, int64, bool) {
 		e, ok := rb.Nets[net]
 		return e.ViaDiameter, e.ViaDrill, ok
 	})
-	r.summary["routerVias"] = map[string]any{"routerVias": n, "shrunkToClass": len(ops), "notReachable": len(fail), "noClassVia": len(unknown)}
+	summary["routerVias"] = map[string]any{"routerVias": n, "shrunkToClass": len(ops), "notReachable": len(fail), "noClassVia": len(unknown)}
 	var gates []gateResult
 	if len(fail)+len(unknown) > 0 {
-		g := gateResult{Gate: "router-vias", Items: append(append([]string{}, fail...), unknown...)}
-		switch {
-		case len(fail) > 0:
-			g.Detail = fmt.Sprintf("%d router via(s) cannot be shrunk to their class via, %d without a class via", len(fail), len(unknown))
-		default:
-			g.Detail = fmt.Sprintf("cannot check: %d router via(s) on nets without a class via", len(unknown))
+		items := append(append([]string{}, fail...), unknown...)
+		if len(fail) > 0 {
+			gates = gate(false, fmt.Sprintf("%d router via(s) cannot be shrunk to their class via, %d without a class via", len(fail), len(unknown)), items...)
+		} else {
+			gates = gate(false, fmt.Sprintf("cannot check: %d router via(s) on nets without a class via", len(unknown)), items...)
 		}
-		gates = append(gates, g)
 	}
 	if len(ops) == 0 {
-		return board, gates, nil
+		return board, gates
 	}
-	out := r.next("vias-to-class")
-	if _, err := r.kt.Edit(board, map[string]any{"setVia": ops}, out); err != nil {
-		return board, gates, err
+	out := next("vias-to-class")
+	if _, err := t.Edit(board, map[string]any{"setVia": ops}, out); err != nil {
+		summary["routerVias"].(map[string]any)["error"] = err.Error()
+		g := gate(false, fmt.Sprintf("%d router via(s) are larger than their class via and the resize could not be written: %v", len(ops), err))
+		return board, append(g, gates...)
 	}
-	fmt.Fprintf(r.stderr, "vias: %d of %d router via(s) shrunk to their net's class via\n", len(ops), n)
-	return out, gates, nil
+	fmt.Fprintf(stderr, "vias: %d of %d router via(s) shrunk to their net's class via\n", len(ops), n)
+	return out, gates
+}
+
+// routerViasToClass is sizeRouterVias on this run's board files.
+func (r *kicadRun) routerViasToClass(classed, board string) (string, []gateResult) {
+	return sizeRouterVias(r.kt, classed, board, r.next, r.summary, r.stderr)
 }
