@@ -680,16 +680,18 @@ func (r *kicadRun) postRoute(board string, inSnap *boardSnapshot) (string, bool,
 		if ps, err = r.clipPoursToIso(board, ps); err != nil {
 			return board, false, err
 		}
-		out := r.next("pours")
-		res, err := r.kt.Pours(board, ps, out)
-		r.summary["pours"] = map[string]any{"plan": ps, "result": res}
-		if err != nil {
-			return board, false, err
-		}
-		board = out
-		fmt.Fprintf(r.stderr, "pours: %d zone(s) added and filled\n", len(ps))
-		if board, err = r.starvedThermals(board); err != nil {
-			return board, false, err
+		if len(ps) > 0 { // none left: every pour clipped away, the pour-clip gate failed
+			out := r.next("pours")
+			res, err := r.kt.Pours(board, ps, out)
+			r.summary["pours"] = map[string]any{"plan": ps, "result": res}
+			if err != nil {
+				return board, false, err
+			}
+			board = out
+			fmt.Fprintf(r.stderr, "pours: %d zone(s) added and filled\n", len(ps))
+			if board, err = r.starvedThermals(board); err != nil {
+				return board, false, err
+			}
 		}
 	}
 	r.lap("pours + zone fill + thermals")
@@ -1829,7 +1831,9 @@ func fastrouteAutoMaxTime(conns int) time.Duration {
 
 // clipPoursToIso trims the board-outline pours to their net's insulation
 // domain (pcbauto.ClipPoursToIso). Without it the patient GND / +3V3 pours of
-// a field board covered the SELV strip: 1030 isolation errors on a 2 x MOPP board.
+// a field board covered the SELV strip: 1030 isolation errors on a 2 x MOPP
+// board. A planned pour clipped to nothing is never dropped silently: the
+// pour-clip gate fails and names it (the plane it stood for is missing).
 func (r *kicadRun) clipPoursToIso(board string, ps []kicad.Pour) ([]kicad.Pour, error) {
 	if r.o.intent == "" {
 		return ps, nil
@@ -1839,7 +1843,10 @@ func (r *kicadRun) clipPoursToIso(board string, ps []kicad.Pour) ([]kicad.Pour, 
 		return ps, err
 	}
 	in, err := pcbauto.ParseIntent(iraw)
-	if err != nil || len(in.Pairs) == 0 {
+	if err != nil {
+		return ps, fmt.Errorf("pours: --intent %s: %w", r.o.intent, err)
+	}
+	if len(in.Pairs) == 0 {
 		return ps, nil
 	}
 	_, raw, err := r.snapshot(board)
@@ -1850,7 +1857,7 @@ func (r *kicadRun) clipPoursToIso(board string, ps []kicad.Pour) ([]kicad.Pour, 
 	for i, p := range ps {
 		planes[i] = pcbauto.PlaneRegion{Net: p.Net, Layer: p.Layer}
 	}
-	clipped, notes, err := pcbauto.ClipPoursToIso(raw, in, planes)
+	clipped, lost, notes, err := pcbauto.ClipPoursToIso(raw, in, planes)
 	if err != nil {
 		return ps, err
 	}
@@ -1875,5 +1882,23 @@ func (r *kicadRun) clipPoursToIso(board string, ps []kicad.Pour) ([]kicad.Pour, 
 		fmt.Fprintln(r.stderr, "pours: "+n)
 	}
 	r.summary["pourClip"] = notes
+	r.add(pourClipGate(len(ps), lost, notes))
 	return out, nil
+}
+
+// pourClipGate: every planned pour keeps some area in its insulation
+// domain. A pour clipped to nothing fails the gate with its net and layer
+// (the plane it stood for — a return path, a shield — is missing; fix the
+// domain territory or the pour plan), it is never silently omitted.
+func pourClipGate(planned int, lost []pcbauto.PlaneRegion, notes []string) gateResult {
+	g := gateResult{Gate: "pour-clip", Pass: len(lost) == 0}
+	for _, p := range lost {
+		g.Items = append(g.Items, fmt.Sprintf("%s on layer %d: clipped to nothing in its insulation domain — no pour written", p.Net, p.Layer))
+	}
+	if g.Pass {
+		g.Detail = fmt.Sprintf("%d planned pour(s) kept in their insulation domain (%d clipped)", planned, len(notes))
+	} else {
+		g.Detail = fmt.Sprintf("%d of %d planned pour(s) clipped to nothing in their insulation domain", len(lost), planned)
+	}
+	return g
 }

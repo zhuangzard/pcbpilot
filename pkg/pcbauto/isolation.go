@@ -1662,13 +1662,16 @@ func isoPartnerDist(b *Board, iso *IsoRules, rr *RouteResult, f *isoField, doms 
 // nothing is dropped. a field board: the patient GND pour on In1/F.Cu/B.Cu and the
 // +3V3 pour on In2 covered the SELV strip — 0 mil from the 24 V inlet,
 // RS-232 and CAN pads, 1030 isolation errors.
-func ClipPoursToIso(raw []byte, in *Intent, pours []PlaneRegion) ([]PlaneRegion, []string, error) {
+//
+// lost are the planned pours clipped to nothing (no region left in their
+// domain): never silently omitted — the caller must fail or flag them.
+func ClipPoursToIso(raw []byte, in *Intent, pours []PlaneRegion) (kept, lost []PlaneRegion, notes []string, err error) {
 	b, err := FromSnapshot(raw)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if len(b.Outline) < 3 {
-		return pours, []string{"no board outline in the snapshot: pours not clipped"}, nil
+		return pours, nil, []string{"no board outline in the snapshot: pours not clipped"}, nil
 	}
 	an := Analyze(b, PowerSpec{Intent: in}, nil)
 	rr := &RouteResult{}
@@ -1678,12 +1681,13 @@ func ClipPoursToIso(raw []byte, in *Intent, pours []PlaneRegion) ([]PlaneRegion,
 		}
 		rr.Planes = append(rr.Planes, p)
 	}
-	notes := clipPlanesToIso(b, an, rr)
-	kept := rr.Planes[:0]
+	notes = clipPlanesToIso(b, an, rr)
 	for _, p := range rr.Planes {
 		if len(p.Polys) > 0 {
 			kept = append(kept, p)
+		} else {
+			lost = append(lost, p)
 		}
 	}
-	return kept, notes, nil
+	return kept, lost, notes, nil
 }
