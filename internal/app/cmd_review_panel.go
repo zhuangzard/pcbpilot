@@ -365,11 +365,60 @@ func runReviewPanel(stage string, reqFiles, evFiles, reviewers []string, outDir 
 	return rec, os.WriteFile(filepath.Join(outDir, "review.json"), append(blob, '\n'), 0o644)
 }
 
+// reapplyReviewWaivers recomputes the gate of an existing review.json with a new
+// waiver set, without running the reviewers again. The requirement and evidence
+// files must produce exactly the prompt that was reviewed (same input SHA-256);
+// the reviewers' verdicts are taken as recorded, never edited.
+func reapplyReviewWaivers(stage string, reqFiles, evFiles []string, outDir string, limit int, waivers []gateWaiver) (*reviewRecord, error) {
+	path := filepath.Join(outDir, "review.json")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("--reapply-waivers: %w", err)
+	}
+	var rec reviewRecord
+	if err := json.Unmarshal(b, &rec); err != nil {
+		return nil, fmt.Errorf("--reapply-waivers: %s: %w", path, err)
+	}
+	read := func(files []string) (map[string]string, error) {
+		m := map[string]string{}
+		for _, f := range files {
+			b, err := os.ReadFile(f)
+			if err != nil {
+				return nil, err
+			}
+			m[filepath.Base(f)] = string(b)
+		}
+		return m, nil
+	}
+	reqs, err := read(reqFiles)
+	if err != nil {
+		return nil, err
+	}
+	ev, err := read(evFiles)
+	if err != nil {
+		return nil, err
+	}
+	sum := fmt.Sprintf("%x", sha256.Sum256([]byte(reviewPrompt(stage, reqs, ev, limit))))
+	if rec.Stage != stage || rec.InputSHA256 != sum {
+		return nil, fmt.Errorf("--reapply-waivers: the requirements/evidence differ from the reviewed input (sha256 %s, review.json %s) - run the review again", sum, rec.InputSHA256)
+	}
+	var names []string
+	for _, v := range rec.Reviewers {
+		names = append(names, v.Reviewer)
+	}
+	g := reviewGate(rec.Reviewers, names)
+	applyWaivers(&g, waivers)
+	rec.Gate = g
+	blob, _ := json.MarshalIndent(&rec, "", "  ")
+	return &rec, os.WriteFile(path, append(blob, '\n'), 0o644)
+}
+
 func newReviewPanelCmd(stdout, stderr io.Writer) *cobra.Command {
 	var reqFiles, evFiles []string
 	var reviewersCSV, outDir, stage, waiverPath string
 	var timeout time.Duration
 	var limit int
+	var reapply bool
 	c := &cobra.Command{
 		Use:   "review-panel",
 		Short: "Hard gate: Codex, Kimi and Claude Code review the design against the project requirements",
@@ -382,7 +431,11 @@ Each returns a JSON verdict per requirement ID. The gate PASSES only when all
 reviewers answered and none reports a not_met requirement or a blocking
 finding; a missing, timed-out or unparsable reviewer FAILS it. Results:
 --out-dir/{review.json, prompt.md, reviewer_<name>.md}. Signed waivers
-({gate:"design-review", match, reason, by}) are the only override.`,
+({gate:"design-review", match, reason, by}) are the only override.
+
+--reapply-waivers recomputes the gate of --out-dir/review.json with --waivers
+without running the reviewers again; the requirements and evidence must be
+byte-identical to the reviewed input (the prompt SHA-256 is checked).`,
 		Args: cobra.NoArgs,
 		Example: `  pcbpilot review-panel --stage design \
     --requirements 03_Requirement/REQUIREMENTS.md --requirements 03_Requirement/CONNECTOR_PINOUT.md \
@@ -399,7 +452,12 @@ finding; a missing, timed-out or unparsable reviewer FAILS it. Results:
 					reviewers = append(reviewers, r)
 				}
 			}
-			rec, err := runReviewPanel(stage, reqFiles, evFiles, reviewers, outDir, timeout, limit, waivers, stderr)
+			var rec *reviewRecord
+			if reapply {
+				rec, err = reapplyReviewWaivers(stage, reqFiles, evFiles, outDir, limit, waivers)
+			} else {
+				rec, err = runReviewPanel(stage, reqFiles, evFiles, reviewers, outDir, timeout, limit, waivers, stderr)
+			}
 			if err != nil {
 				return err
 			}
@@ -420,6 +478,7 @@ finding; a missing, timed-out or unparsable reviewer FAILS it. Results:
 	c.Flags().DurationVar(&timeout, "timeout", 20*time.Minute, "per-reviewer time limit")
 	c.Flags().IntVar(&limit, "max-bytes", 120000, "per-file byte limit in the prompt (truncation is stated in the prompt)")
 	c.Flags().StringVar(&waiverPath, "waivers", "", "signed waivers JSON")
+	c.Flags().BoolVar(&reapply, "reapply-waivers", false, "recompute the gate of --out-dir/review.json with --waivers (same input, reviewers not run again)")
 	return c
 }
 
