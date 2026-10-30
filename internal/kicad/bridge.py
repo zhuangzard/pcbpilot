@@ -1290,13 +1290,23 @@ def pours(pcb, spec_path, out):
     board_pts = [(chain.CPoint(i).x, chain.CPoint(i).y) for i in range(chain.PointCount())]
     for zs in spec.get("zones") or []:
         net = board.FindNet(zs["net"])
-        # A pour clipped to its insulation domain arrives as polygons (mil, y-up):
-        # one zone each; otherwise the board outline.
-        shapes = [[(nm(x), nm(-y)) for x, y in poly] for poly in zs.get("polys") or []] or [board_pts]
-        for k, pts in enumerate(shapes):
-            z = make_pour_zone(board, zs, net, pts, k if len(shapes) > 1 else None)
-            board.Add(z)
-            made.append(z.GetZoneName())
+        # A pour clipped to its insulation domain arrives as polygons (mil, y-up),
+        # merged into ONE zone (separate touching zones are KiCad zones_intersect
+        # errors: 166 on a field board); otherwise the board outline.
+        z = make_pour_zone(board, zs, net, board_pts)
+        if zs.get("polys"):
+            merged = pcbnew.SHAPE_POLY_SET()
+            for poly in zs["polys"]:
+                merged.NewOutline()
+                for x, y in poly:
+                    merged.Append(nm(x), nm(-y))
+            try:
+                merged.Simplify()
+            except TypeError:
+                merged.Simplify(pcbnew.SHAPE_POLY_SET.PM_FAST)
+            z.SetOutline(merged)
+        board.Add(z)
+        made.append(z.GetZoneName())
     zones = fill_zones(board)
     save_board(board, pcb, out)
     return {"ok": True, "out": out, "pours": made, "zonesFilled": zones}
@@ -1463,15 +1473,12 @@ def check_polys(what, polys):
     return bad
 
 
-def make_pour_zone(board, zs, net, pts, idx):
+def make_pour_zone(board, zs, net, pts):
     """One pcbpilot pour zone on pts (KiCad nm, y-down)."""
     z = pcbnew.ZONE(board)
     z.SetLayer(kicad_layer(zs["layer"]))
     z.SetNetCode(net.GetNetCode())
-    name = "%s %s L%d" % (POUR_PREFIX, zs["net"], zs["layer"])
-    if idx is not None:
-        name += " #%d" % (idx + 1)
-    z.SetZoneName(name)
+    z.SetZoneName("%s %s L%d" % (POUR_PREFIX, zs["net"], zs["layer"]))
     outline = z.Outline()
     outline.NewOutline()
     for x, y in pts:

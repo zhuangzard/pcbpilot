@@ -303,14 +303,17 @@ func (c *ctx) buildNets() {
 			floor = math.Max(floor, 20)
 		}
 		np.WidthMil.Min = floor
-		if pp.Role == pcbauto.RoleGround && maxPin > 0 {
+		if (pp.Role == pcbauto.RoleGround || pp.Role == pcbauto.RolePower && pp.PadCount > 2) && maxPin > 0 {
 			// A ground is poured: its trunk current flows in the plane and each
 			// pad reaches it through a fan-out. Raising the minimum to the widest
 			// pin (a field board: PS1 −VOUT returns 2.4 A → 41 mil) forced that width on
 			// every fan-out of a 0.5 mm-pitch pad and blocked 124 escapes. The
 			// segment-basis intent-widths gate still holds each routed segment to
 			// its own simulated current.
-			np.Why = append(np.Why, fmt.Sprintf("ground (poured): minimum width stays %s mil; the widest pin (%s) is held by the segment-basis width gate", trimFloat(floor, 2), fmtA(maxPin)))
+			// A branched rail is the same (a field board: +12V_VM at 33 mil min could
+			// not reach the 0402 gate/divider resistors R57/R62/R76 that carry
+			// microamps; 17 connections stayed blocked).
+			np.Why = append(np.Why, fmt.Sprintf("%s: minimum width stays %s mil; the widest pin (%s) and every routed segment are held to their own simulated current by the segment-basis width gate", map[bool]string{true: "ground (poured)", false: "branched rail"}[pp.Role == pcbauto.RoleGround], trimFloat(floor, 2), fmtA(maxPin)))
 		} else if maxPin > 0 {
 			if w := pcbauto.TraceWidthForCurrent(maxPin, c.tempRise, c.outerOz, false); w > floor {
 				np.WidthMil.Min = metricRoundMil(w)
