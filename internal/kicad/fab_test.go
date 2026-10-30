@@ -521,3 +521,25 @@ func TestLiveImportLCSC(t *testing.T) {
 		t.Fatalf("footprints %v", mods)
 	}
 }
+
+// A symbol field named "DNP" shadows KiCad's DNP flag in the BOM's ${DNP}
+// column: its note text marks the part DNP. MergeParts says so (one
+// warning naming the parts); KiCad's own "DNP" rendering is not reported.
+func TestMergePartsWarnsDNPField(t *testing.T) {
+	csv := `"Reference","Value","Footprint","DNP","EXCLUDE_FROM_BOM","LCSC"` + "\n" +
+		`"C9","1n","C:C_0603","backup footprint","",""` + "\n" +
+		`"R9","10k","R:R_0603","DNP","",""` + "\n" +
+		`"R10","10k","R:R_0603","","","C25744"` + "\n"
+	rows, err := ParseSchBOM([]byte(csv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bd := &Board{Footprints: []Footprint{{Ref: "C9"}, {Ref: "R9"}, {Ref: "R10"}}}
+	parts, warns := MergeParts(bd, rows, true)
+	if len(parts) != 3 || !parts[0].DNP || !parts[1].DNP || parts[2].DNP {
+		t.Fatalf("parts %+v", parts)
+	}
+	if len(warns) != 1 || !strings.Contains(warns[0], `C9 "backup footprint"`) || strings.Contains(warns[0], "R9") {
+		t.Fatalf("warnings %v", warns)
+	}
+}

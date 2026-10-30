@@ -69,6 +69,10 @@ type SchPart struct {
 	Ref, Value, Footprint string
 	DNP, ExcludeBOM       bool
 	LCSC, LCSCField       string
+	// DNPText is the BOM's ${DNP} column as written. KiCad renders its own
+	// DNP flag as "DNP"; a symbol field named "DNP" shadows the flag and
+	// puts its own text there (a note such as "backup footprint").
+	DNPText string
 }
 
 // schBOMFields are passed to `kicad-cli sch export bom --fields`.
@@ -111,7 +115,7 @@ func ParseSchBOM(b []byte) ([]SchPart, error) {
 			}
 		}
 		sp := SchPart{Value: fields["Value"], Footprint: fields["Footprint"],
-			DNP: fields["DNP"] != "", ExcludeBOM: fields["EXCLUDE_FROM_BOM"] != ""}
+			DNP: fields["DNP"] != "", ExcludeBOM: fields["EXCLUDE_FROM_BOM"] != "", DNPText: fields["DNP"]}
 		sp.LCSC, sp.LCSCField = LookupLCSC(fields)
 		// Grouped rows ("R1,R2") are split defensively even though --group-by ""
 		// already yields one row per reference.
@@ -175,6 +179,7 @@ func MergeParts(bd *Board, sch []SchPart, haveSch bool) ([]Part, []string) {
 	}
 	var parts []Part
 	var warns []string
+	var dnpField []string
 	for _, f := range bd.Footprints {
 		if f.Ref == "" {
 			continue
@@ -191,6 +196,9 @@ func MergeParts(bd *Board, sch []SchPart, haveSch bool) ([]Part, []string) {
 					warns = append(warns, fmt.Sprintf("%s (%s) is on the board but not in the schematic BOM (board-only part, or excluded from BOM only in the schematic) — using the board's fields; run Update PCB from Schematic if out of sync", f.Ref, f.LibID))
 				}
 			} else {
+				if s.DNP && !strings.EqualFold(strings.TrimSpace(s.DNPText), "DNP") {
+					dnpField = append(dnpField, fmt.Sprintf("%s %q", f.Ref, s.DNPText))
+				}
 				p.DNP = p.DNP || s.DNP
 				p.ExcludeBOM = p.ExcludeBOM || s.ExcludeBOM
 				if s.LCSC != "" {
@@ -207,6 +215,10 @@ func MergeParts(bd *Board, sch []SchPart, haveSch bool) ([]Part, []string) {
 		parts = append(parts, p)
 	}
 	sort.SliceStable(parts, func(a, b int) bool { return refLess(parts[a].Ref, parts[b].Ref) })
+	if len(dnpField) > 0 {
+		sort.Slice(dnpField, func(a, b int) bool { return refLess(dnpField[a], dnpField[b]) })
+		warns = append(warns, fmt.Sprintf("%d part(s) are DNP only through a schematic field named \"DNP\", whose text stands in for KiCad's DNP flag (%s): they are left out of assembly and the LCSC check; clear or rename that field for parts that are placed", len(dnpField), strings.Join(dnpField, "; ")))
+	}
 	return parts, warns
 }
 
