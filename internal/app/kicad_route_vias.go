@@ -2,13 +2,14 @@ package app
 
 // kicad_route_vias.go — fastroute's vias at each net's own size.
 //
-// fastroute 0.1.14 puts one via padstack on every net: the first one of the
-// DSN's structure (via …) list, ignoring the classes' use_via (a 1443-part
+// fastroute 0.1.14 does not keep every via at its class's use_via: its
+// fanout takes a via from the DSN's structure (via …) list (a 1443-part
 // board got 262 Default 0.6 mm vias on nets whose class via is 0.6096 or
-// 0.7 mm; kicad rules --check failed them). So fastroute routes with one
-// padstack that is the componentwise maximum of every class via — the
-// largest diameter AND the largest drill (classes 0.8/0.2 and 0.7/0.4 give
-// 0.8/0.4) — added to the DSN when no class has it, first in the list.
+// 0.7 mm; kicad rules --check failed them; a small board got a 600/300 via
+// on a net whose class used another). So the list holds one padstack, the
+// componentwise maximum of every class via — the largest diameter AND the
+// largest drill (classes 0.8/0.2 and 0.7/0.4 give 0.8/0.4) — added to the
+// DSN when no class has it; the classes keep their own use_via.
 // After the import each router via is shrunk to its net's effective class
 // via: both dimensions only ever shrink, so every clearance fastroute
 // planned stands and each class via is reachable. A router via that cannot
@@ -99,13 +100,13 @@ func dsnRouterVia(dsn string) (string, []string, *dsnVia) {
 		dsn = dsn[:at] + ps + "\n    " + dsn[at:]
 		loc = reDSNViaList.FindStringSubmatchIndex(dsn)
 	}
+	// The list holds the router via alone: fastroute's autorouter still
+	// takes each class's use_via from the library (verified, 0.1.14), and
+	// every other via it makes (fanout) is the router via — never a smaller
+	// one it would pick from the list (a 600/300 via appeared on a net whose
+	// class used 800/400 while the list still held 600/300).
 	order := []string{top.name}
-	for _, v := range vs {
-		if v.name != top.name {
-			order = append(order, v.name)
-		}
-	}
-	return dsn[:loc[0]] + "(via " + strings.Join(order, " ") + ")" + dsn[loc[1]:], order, &top
+	return dsn[:loc[0]] + "(via " + top.name + ")" + dsn[loc[1]:], order, &top
 }
 
 // sexprEnd is the index just past the list that opens at dsn[at] ('(').

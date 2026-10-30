@@ -33,10 +33,10 @@ func TestDSNRouterViaComponentwiseMax(t *testing.T) {
 	if top == nil || top.dia != 800 || top.drill != 400 || top.name != `"Via[0-5]_800:400_um"` {
 		t.Fatalf("router via %+v", top)
 	}
-	if order[0] != top.name || len(order) != 4 {
+	if len(order) != 1 || order[0] != top.name {
 		t.Fatalf("order %v", order)
 	}
-	if !strings.Contains(out, `(via "Via[0-5]_800:400_um" "Via[0-5]_800:200_um" "Via[0-5]_700:400_um" "Via[0-5]_600:300_um")`) {
+	if !strings.Contains(out, `(via "Via[0-5]_800:400_um")`) || !strings.Contains(out, `(padstack "Via[0-5]_700:400_um"`) {
 		t.Fatalf("via list:\n%s", out)
 	}
 	at := strings.Index(out, `(padstack "Via[0-5]_800:400_um"`)
