@@ -53,7 +53,7 @@ func (l *fastrouteLogWatch) Write(p []byte) (int, error) {
 		l.buf = l.buf[i+1:]
 	}
 	if len(l.buf) > 1<<16 { // a line that never ends: keep the tail only
-		l.buf = l.buf[len(l.buf)-1<<12:]
+		l.buf = l.buf[len(l.buf)-(1<<12):]
 	}
 	return n, err
 }
